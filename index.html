@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>5秒動画メーカー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>5秒動画メーカー</h1>
+  <p class="sub">写真を選んで文字を入れて「動画を作成」。スマホだけで完結します。</p>
+</header>
+
+<main>
+  <!-- 写真選択 -->
+  <section class="card">
+    <label class="field-label">① 前景画像（写真）</label>
+    <label for="photo" class="photo-btn" id="photoBtn">📷 写真を選ぶ / 撮る</label>
+    <input id="photo" type="file" accept="image/*" hidden>
+    <div class="hint" id="photoName">未選択</div>
+  </section>
+
+  <!-- テキスト -->
+  <section class="card">
+    <label class="field-label">② 作者名（一番上）</label>
+    <input id="author" type="text" placeholder="作者様：◯◯" autocomplete="off">
+
+    <label class="field-label">③ 誘導文（2段目）</label>
+    <input id="detail" type="text" autocomplete="off">
+
+    <label class="field-label">④ コメント（3段目・大きく / ファイル名にもなる）</label>
+    <input id="top" type="text" placeholder="今回の画像に関するコメント" autocomplete="off">
+  </section>
+
+  <!-- プレビュー -->
+  <section class="card">
+    <div class="field-label">仕上がりプレビュー</div>
+    <div class="preview-wrap">
+      <canvas id="cv" width="720" height="1280"></canvas>
+    </div>
+    <button id="previewBtn" class="ghost">プレビュー更新</button>
+  </section>
+
+  <!-- 作成 -->
+  <section class="card">
+    <button id="makeBtn" class="primary">▶ 動画を作成</button>
+    <div class="status" id="status"></div>
+    <div id="resultArea" hidden>
+      <video id="result" controls playsinline></video>
+      <button id="saveBtn" class="primary">⬇ 保存 / 共有</button>
+      <a id="dl" class="ghost" download>ダウンロード</a>
+      <p class="hint">うまく保存できない時は、上の動画を長押し →「ビデオを保存」。</p>
+    </div>
+  </section>
+
+  <p class="notice">※ 画像は内容を判定しません。権利的に使用可・未成年の性的描写を含まない素材をご用意ください。</p>
+</main>
+
+<!-- 背景動画（非表示・合成のソース） -->
+<video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
+
+<script src="app.js"></script>
+</body>
+</html>
