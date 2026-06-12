@@ -141,13 +141,23 @@
     return y + th + pad;
   }
 
+  // 3段目コメントを「必ず1行」に。収まらない場合だけフォントを縮小する。
+  function fitOneLine(text, basePx, maxw, minPx) {
+    text = String(text).replace(/\n/g, " ").trim();
+    setFont(basePx, 700);
+    const w = ctx.measureText(text).width;
+    let px = basePx;
+    if (w > maxw && w > 0) px = Math.max(minPx || 14, Math.floor(basePx * (maxw / w) * 0.98));
+    return { px, text };
+  }
+
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
     const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048);
     let y = Math.round(H * 0.020);
     if (author) y = drawBlock(wrap(author, fA, maxw), y, fA, 11, 3, 130) + 2;
     if (detail) y = drawDetail(detail, y, fD, 11) + 4;
-    if (top) y = drawBlock(wrap(top, fT, maxw), y, fT, 16, 6, 150) + 4;
+    if (top) { const f = fitOneLine(top, fT, maxw); y = drawBlock([f.text], y, f.px, 16, 6, 150) + 4; }
   }
 
   // ---- 1フレーム描画 ----
