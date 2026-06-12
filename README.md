@@ -1,13 +1,15 @@
-# 5秒動画メーカー（スマホ単体版）
+# 5秒動画メーカー（スマホ単体版）＋ FANZAアフィリエイトリンク生成
 
 iPhone（やAndroid）の**ブラウザだけ**で、写真とテキストから5秒・縦型(9:16)の動画を作るツールです。
 **PCもサーバーも不要**。合成は端末内で行われ、写真や動画はどこにもアップロードされません。
 
-このフォルダ（`スマホ用/`）の中身を**そのままGitHub Pagesに公開**するだけで使えます。
+このフォルダ（`スマホ用改修完全版/`）の中身を**そのままGitHub Pagesに公開**するだけで使えます。
 
 ---
 
 ## A. iPhoneでの使い方（公開後）
+
+### 🎬 動画作成タブ
 
 1. Safariで公開URLを開く（ホーム画面に追加しておくとアプリのように使えます）。
 2. **「📷 写真を選ぶ / 撮る」** をタップ → フォトライブラリかカメラから画像を選ぶ。
@@ -19,6 +21,30 @@ iPhone（やAndroid）の**ブラウザだけ**で、写真とテキストから
 
 > 対応：iOS 15 以降の Safari 推奨。
 
+### 🔗 アフィリンクタブ
+
+1. 画面上部の **「🔗 アフィリンク」** タブをタップ。
+2. **「① あなたのアフィID」** 欄に FANZAのアフィリエイトIDを入力（一度入力すると次回以降は自動復元されます）。
+3. **「② 作品URL」** 欄に、FANZAの作品URLを貼り付ける（1行に1URL・複数行対応）。
+4. 入力と同時にリアルタイムで **作品ID（cid）** と **アフィリエイトリンク** が生成されます。
+5. **「IDコピー」** または **「リンクをコピー」** ボタンでクリップボードにコピー。
+
+#### アフィリンク機能の仕様
+
+- 作品URLから `cid=` パラメータを抽出して作品IDを取得します。
+- 計測パラメータ（`?dmmref=...` 等）は自動除去され、クリーンなリンクを生成します。
+- FANZA同人以外のカテゴリ（書籍・PCゲーム等）のURLでも動作します。
+- アフィIDは `localStorage` に保存されます（URLや外部には送信されません）。
+- アフィIDが未入力の場合は、`af_id=【アフィID】` で構造プレビューとして生成されます。
+
+#### エラーについて
+
+| 状況 | 表示 |
+|---|---|
+| URLに `cid=` が含まれない | 「cid が見つかりません」 |
+| `http(s)://` で始まらない | 「URLが不正です（http(s):// で始まる必要があります）」 |
+| 入力欄が空 | 何も表示しない |
+
 ---
 
 ## B. 公開方法（GitHub Pages・無料）
@@ -29,7 +55,7 @@ iPhone（やAndroid）の**ブラウザだけ**で、写真とテキストから
    - Repository name：**推測されにくい名前**にする（例：`go5-maker-7x9k`）。リンクを知る人だけが使えるようにするため。
    - **Public** を選ぶ（無料アカウントのPagesは公開リポジトリが必要）。「Create repository」。
 2. リポジトリ画面の **「uploading an existing file」** をクリック。
-3. この `スマホ用/` フォルダの中身（`index.html` / `app.js` / `style.css` / `assets/` フォルダ）を
+3. この `スマホ用改修完全版/` フォルダの中身（`index.html` / `app.js` / `affiliate-core.js` / `affiliate.js` / `style.css` / `assets/` フォルダ）を
    **まとめてドラッグ&ドロップ**してアップロード →「Commit changes」。
    - ※ フォルダ構造を保つため、`assets` フォルダごとドロップしてください。
 4. 上タブ **Settings → Pages** →「Build and deployment」の Source を **Deploy from a branch**、
@@ -40,8 +66,8 @@ iPhone（やAndroid）の**ブラウザだけ**で、写真とテキストから
 ### git に慣れている場合
 
 ```bash
-cd スマホ用
-git init && git add . && git commit -m "5秒動画メーカー スマホ版"
+cd スマホ用改修完全版
+git init && git add . && git commit -m "5秒動画メーカー スマホ版（アフィリンク機能追加）"
 git branch -M main
 git remote add origin https://github.com/<ユーザー名>/<リポジトリ名>.git
 git push -u origin main
@@ -54,11 +80,13 @@ git push -u origin main
 
 | ファイル | 役割 |
 |---|---|
-| `index.html` | 画面 |
-| `app.js` | 合成（Canvas）＋録画（MediaRecorder）＋保存 |
-| `style.css` | スマホ向けスタイル |
+| `index.html` | 画面（動画作成タブ＋アフィリンクタブ） |
+| `app.js` | 合成（Canvas）＋録画（MediaRecorder）＋保存（無変更） |
+| `affiliate-core.js` | アフィリエイトリンク生成ロジック（純粋関数・テスト可能） |
+| `affiliate.js` | アフィリンク画面のUI配線（入力・出力・コピー・永続化） |
+| `style.css` | スマホ向けスタイル（タブバー・アフィリンク画面を追記） |
 | `assets/bg_main.mp4` | 背景動画（Web軽量版・720×1280） |
-| `設計書_スマホ版.md` | 設計書 |
+| `tests/test_affiliate.js` | Node テスト（T-1〜T-4＋エッジケース） |
 
 ---
 
@@ -67,6 +95,8 @@ git push -u origin main
 - **背景を差し替える**：`assets/bg_main.mp4` を別の9:16動画に置き換え（Web用に軽くするのが◎）。
 - **仕上がり調整**：`app.js` 冒頭の定数（`REVEAL_START` / `FG_MAX_RATIO` / `FG_CENTER_Y` など）を変更。
   デスクトップ版（`composite.py` / `config/jobs.json`）と同じ値にしてあります。
+- **アフィリンクテンプレート変更**：FANZAのリンク仕様が変わった場合は `affiliate-core.js` の
+  `buildAffiliateLink()` 内のテンプレート文字列のみ修正してください。
 
 ---
 
@@ -74,3 +104,4 @@ git push -u origin main
 
 - 端末・ブラウザによっては出力が **webm** になることがあります（iOS Safari は mp4）。
 - 前景画像の内容判定はしません。**権利的に使用可・未成年の性的描写を含まない・配信先規約に適合**する素材をご用意ください。
+- アフィリエイトリンクの報酬紐づきの有効性は保証しません。URL構造を正しく組み立てるだけです。

@@ -34,3 +34,157 @@ button.ghost,a.ghost{display:block;text-align:center;background:transparent;bord
 #resultArea{margin-top:12px;}
 video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
 .notice{color:#b89b6b;font-size:11.5px;line-height:1.6;margin-top:18px;text-align:center;}
+
+/* ── タブバー ── */
+.tabbar{
+  display:flex;
+  max-width:520px;
+  margin:8px auto 0;
+  padding:0 14px;
+  gap:8px;
+}
+.tab{
+  flex:1;
+  font-family:inherit;
+  font-size:15px;
+  font-weight:700;
+  background:var(--card);
+  color:var(--sub);
+  border:1px solid var(--line);
+  border-radius:12px 12px 0 0;
+  padding:10px 8px;
+  cursor:pointer;
+  margin-top:0;
+  width:auto;
+  transition:color .15s, border-color .15s, background .15s;
+}
+.tab.active{
+  color:var(--ink);
+  background:var(--card);
+  border-bottom:2px solid var(--accent);
+  border-color:var(--line) var(--line) var(--accent) var(--line);
+}
+.tab:active{filter:brightness(.9);}
+
+/* ── textarea（input[type=text] と同スタイル＋resize:vertical） ── */
+textarea{
+  width:100%;
+  font-size:16px;
+  padding:11px 12px;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:#0e1422;
+  color:var(--ink);
+  outline:none;
+  font-family:inherit;
+  resize:vertical;
+  line-height:1.6;
+}
+textarea:focus{border-color:var(--accent);}
+
+/* ── アフィリンク結果カード ── */
+.affi-result{
+  background:#0e1422;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:12px;
+  margin-bottom:10px;
+}
+.affi-result:last-child{margin-bottom:0;}
+.affi-row{
+  display:flex;
+  align-items:flex-start;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-bottom:6px;
+}
+.affi-row:last-child{margin-bottom:0;}
+.affi-label{
+  font-size:12px;
+  color:var(--sub);
+  min-width:48px;
+  padding-top:2px;
+  flex-shrink:0;
+}
+.affi-cid{
+  font-family:monospace;
+  font-size:15px;
+  color:var(--accent);
+  background:transparent;
+  flex:1;
+  word-break:break-all;
+}
+/* リンク表示：等幅・折り返し */
+.affi-code{
+  display:block;
+  font-family:monospace;
+  font-size:13px;
+  color:var(--ink);
+  background:#0b1019;
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:8px 10px;
+  word-break:break-all;
+  width:100%;
+  margin-top:4px;
+  line-height:1.5;
+}
+.affi-link-row{
+  flex-direction:column;
+  align-items:stretch;
+}
+.affi-link-row .affi-label{padding-top:0;}
+
+/* 警告 */
+.affi-warn{
+  color:#b89b6b;
+  font-size:12px;
+  margin-top:6px;
+  line-height:1.6;
+}
+
+/* エラー */
+.affi-error{
+  color:var(--accent2);
+  font-size:13px;
+  font-weight:700;
+}
+.affi-url-hint{
+  color:var(--sub);
+  font-size:11px;
+  word-break:break-all;
+  margin-top:4px;
+}
+.affi-error-card{
+  border-color:var(--accent2);
+}
+
+/* コピーボタン — タップ領域 44px 以上 */
+.copy-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:44px;
+  padding:0 14px;
+  font-family:inherit;
+  font-size:13px;
+  font-weight:700;
+  background:transparent;
+  border:1px solid var(--line);
+  border-radius:8px;
+  color:var(--sub);
+  cursor:pointer;
+  width:auto;
+  margin-top:0;
+  white-space:nowrap;
+  flex-shrink:0;
+  transition:color .15s, border-color .15s;
+}
+.copy-btn:active{
+  color:var(--accent);
+  border-color:var(--accent);
+}
+.copy-btn-wide{
+  width:100%;
+  min-height:44px;
+}

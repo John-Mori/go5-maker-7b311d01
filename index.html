@@ -16,6 +16,13 @@
   <p class="sub">写真を選んで文字を入れて「動画を作成」。スマホだけで完結します。</p>
 </header>
 
+<nav class="tabbar">
+  <button id="tabMovie" class="tab active">🎬 動画作成</button>
+  <button id="tabAffi"  class="tab">🔗 アフィリンク</button>
+</nav>
+
+<!-- 動画作成画面 -->
+<section id="pageMovie">
 <main>
   <!-- 写真選択 -->
   <section class="card">
@@ -60,10 +67,37 @@
 
   <p class="notice">※ 画像は内容を判定しません。権利的に使用可・未成年の性的描写を含まない素材をご用意ください。</p>
 </main>
+</section>
+
+<!-- アフィリンク画面 -->
+<section id="pageAffi" hidden>
+<main>
+  <!-- アフィID -->
+  <section class="card">
+    <label class="field-label" for="afId">① あなたのアフィID</label>
+    <input id="afId" type="text" placeholder="例：yourname-001" autocomplete="off">
+    <div id="affiWarn" class="affi-warn" hidden>アフィIDが未入力です。リンクは構造プレビューとして生成されます（af_id=【アフィID】）。</div>
+  </section>
+
+  <!-- 作品URL -->
+  <section class="card">
+    <label class="field-label" for="affiUrls">② 作品URL（1行に1URL・複数可）</label>
+    <textarea id="affiUrls" rows="4" placeholder="https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/"></textarea>
+  </section>
+
+  <!-- 生成結果 -->
+  <section class="card">
+    <div class="field-label">生成結果</div>
+    <div id="affiResults"></div>
+  </section>
+</main>
+</section>
 
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
 <script src="app.js"></script>
+<script src="affiliate-core.js"></script>
+<script src="affiliate.js"></script>
 </body>
 </html>
