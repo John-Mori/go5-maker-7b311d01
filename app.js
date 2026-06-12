@@ -75,8 +75,9 @@
     for (const ln of lines) {
       const tw = ctx.measureText(ln).width;
       const x = (W - tw) / 2;
+      const mB = sw;  // 縁取り分だけ帯を広げ、文字が帯からはみ出ないようにする
       ctx.fillStyle = `rgba(0,0,0,${bandAlpha / 255})`;
-      roundRect(x - pad, y - pad * 0.45, tw + pad * 2, th + pad * 0.9, pad);
+      roundRect(x - pad - mB, y - pad * 0.45 - mB, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
       ctx.fill();
       ctx.lineJoin = "round";
       ctx.lineWidth = sw * 2;
@@ -126,8 +127,9 @@
     const widths = segs.map(([k, v]) => k === "text" ? ctx.measureText(v).width : (k === "kebab" ? kebabW : hamW) + 2 * iconPad);
     const total = widths.reduce((a, b) => a + b, 0);
     let x = (W - total) / 2;
-    ctx.fillStyle = `rgba(0,0,0,${130 / 255})`;
-    roundRect(x - pad, y - pad * 0.45, total + pad * 2, th + pad * 0.9, pad); ctx.fill();
+    const mB = sw;  // 縁取り分だけ帯を広げる
+    ctx.fillStyle = `rgba(0,0,0,${175 / 255})`;
+    roundRect(x - pad - mB, y - pad * 0.45 - mB, total + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5); ctx.fill();
     for (let k = 0; k < segs.length; k++) {
       const [kind, val] = segs[k], w = widths[k];
       if (kind === "text") {
@@ -155,9 +157,12 @@
     const maxw = W * 0.9;
     const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048);
     let y = Math.round(H * 0.020);
-    if (author) y = drawBlock(wrap(author, fA, maxw), y, fA, 11, 3, 130) + 2;
+    if (author) {
+      if (!/^作者/.test(author)) author = "作者：" + author;  // 「作者：」を常に表示（消えないように）
+      y = drawBlock(wrap(author, fA, maxw), y, fA, 11, 3, 175) + 2;
+    }
     if (detail) y = drawDetail(detail, y, fD, 11) + 4;
-    if (top) { const f = fitOneLine(top, fT, maxw); y = drawBlock([f.text], y, f.px, 16, 6, 150) + 4; }
+    if (top) { const f = fitOneLine(top, fT, maxw); y = drawBlock([f.text], y, f.px, 16, 6, 195) + 4; }
   }
 
   // ---- 1フレーム描画 ----
