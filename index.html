@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 <header>
@@ -50,10 +50,32 @@
     <div class="preview-wrap">
       <canvas id="cv" width="1080" height="1920"></canvas>
     </div>
-    <div class="slider-row">
-      <label for="voff">全体の縦位置（下へ）</label>
-      <input id="voff" type="range" min="0" max="0.05" step="0.0025" value="0.02">
-      <span id="voffVal" class="slider-val">2.0%</span>
+    <div class="slider-group slider-group-whole">
+      <div class="slider-group-title">全体の位置調整</div>
+      <div class="slider-row">
+        <label for="voff">全体（文字＋帯＋漫画）下へ</label>
+        <input id="voff" type="range" min="0" max="0.05" step="0.0025" value="0.02">
+        <span id="voffVal" class="slider-val">2.0%</span>
+      </div>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-group-title">文字の位置調整（段ごと・下＋／上−）</div>
+      <div class="slider-row">
+        <label for="textAuthor">①作者名の文字</label>
+        <input id="textAuthor" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
+        <span id="textAuthorVal" class="slider-val">+0.0%</span>
+      </div>
+      <div class="slider-row">
+        <label for="textDetail">②誘導文の文字</label>
+        <input id="textDetail" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
+        <span id="textDetailVal" class="slider-val">+0.0%</span>
+      </div>
+      <div class="slider-row">
+        <label for="textTitle">③大タイトルの文字</label>
+        <input id="textTitle" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
+        <span id="textTitleVal" class="slider-val">+0.0%</span>
+      </div>
     </div>
 
     <div class="slider-group">
@@ -125,8 +147,8 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=8"></script>
-<script src="affiliate-core.js?v=8"></script>
-<script src="affiliate.js?v=8"></script>
+<script src="app.js?v=9"></script>
+<script src="affiliate-core.js?v=9"></script>
+<script src="affiliate.js?v=9"></script>
 </body>
 </html>

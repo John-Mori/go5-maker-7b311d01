@@ -20,12 +20,16 @@
   // 構成全体（上部テキストブロック＋前景の漫画ページ）の縦位置オフセット。
   // 基準フレーム高さに対する比率（0〜VOFF_MAX）。テキスト開始Yと前景中心Yに同じだけ加算するため、
   // 両者の相対関係（中央揃え・行間）は崩れない。スライダーで微調整する。
-  const VOFF_DEFAULT = 0.02, VOFF_MAX = 0.05;   // 軸1：全体（文字＋帯＋漫画）を下へ
-  const BAND_MIN = -0.03, BAND_MAX = 0.03;      // 軸2：各段の黒帯だけ（上下双方向 ＋下／−上）
+  const VOFF_DEFAULT = 0.02, VOFF_MAX = 0.05;   // 全体（文字＋帯＋漫画）を下へ
+  const ROW_MIN = -0.03, ROW_MAX = 0.03;        // 段別（文字・帯とも）上下双方向（＋下／−上）
 
-  // 縦オフセット（すべて基準フレーム高さ比）。whole=全体、author/detail/title=各段の黒帯だけ。
-  // 帯オフセットは段ごとに独立（文字は動かさず、その段の帯Yだけを動かす）。
-  const OFF = { whole: VOFF_DEFAULT, author: 0, detail: 0, title: 0 };
+  // 縦オフセット（すべて基準フレーム高さ比）。段別は「文字」と「帯」を別個に持ち、互いに独立。
+  // 文字オフセットはその段の文字描画位置にのみ加算し、段の送り（次段Y）には影響させない＝他段は不動。
+  const OFF = {
+    whole: VOFF_DEFAULT,
+    textAuthor: 0, textDetail: 0, textTitle: 0,  // 各段の「文字」だけ
+    bandAuthor: 0, bandDetail: 0, bandTitle: 0,  // 各段の「黒帯」だけ
+  };
 
   const $ = (id) => document.getElementById(id);
   const cv = $("cv"), ctx = cv.getContext("2d");
@@ -36,6 +40,9 @@
     previewBtn: $("previewBtn"), makeBtn: $("makeBtn"), status: $("status"),
     resultArea: $("resultArea"), result: $("result"), saveBtn: $("saveBtn"), dl: $("dl"),
     voff: $("voff"), voffVal: $("voffVal"),
+    textAuthor: $("textAuthor"), textAuthorVal: $("textAuthorVal"),
+    textDetail: $("textDetail"), textDetailVal: $("textDetailVal"),
+    textTitle: $("textTitle"), textTitleVal: $("textTitleVal"),
     bandAuthor: $("bandAuthor"), bandAuthorVal: $("bandAuthorVal"),
     bandDetail: $("bandDetail"), bandDetailVal: $("bandDetailVal"),
     bandTitle: $("bandTitle"), bandTitleVal: $("bandTitleVal"),
@@ -87,27 +94,29 @@
     ctx.closePath();
   }
 
-  // 通常テキストブロック（中央寄せ・帯・白文字＋黒縁）。bandOff＝この段の帯だけの縦オフセット比。
-  function drawBlock(lines, y, px, pad, gap, bandAlpha, bandOff) {
+  // 通常テキストブロック（中央寄せ・帯・白文字＋黒縁）。
+  // bandOff＝この段の帯だけ／textOff＝この段の文字だけ の縦オフセット比（互いに独立）。
+  function drawBlock(lines, y, px, pad, gap, bandAlpha, bandOff, textOff) {
     setFont(px, 700);
     ctx.textBaseline = "top";
     const sw = Math.max(U(2), px / 12);
     const th = px * 1.04;
+    const bandY = H * (bandOff || 0);  // 帯だけの縦シフト
+    const txtY = H * (textOff || 0);   // 文字だけの縦シフト（送り y には反映しない）
     for (const ln of lines) {
       const tw = ctx.measureText(ln).width;
       const x = (W - tw) / 2;
       const mB = sw;  // 縁取り分だけ帯を広げ、文字が帯からはみ出ないようにする
-      const bandY = H * (bandOff || 0);  // 軸2：この段の帯だけを上下（文字は動かさない）
       ctx.fillStyle = `rgba(0,0,0,${bandAlpha / 255})`;
       roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
       ctx.fill();
       ctx.lineJoin = "round";
       ctx.lineWidth = sw * 2;
       ctx.strokeStyle = "rgba(0,0,0,1)";
-      ctx.strokeText(ln, x, y);
+      ctx.strokeText(ln, x, y + txtY);
       ctx.fillStyle = "#fff";
-      ctx.fillText(ln, x, y);
-      y += th + pad + gap;
+      ctx.fillText(ln, x, y + txtY);
+      y += th + pad + gap;  // 送りは基準位置のまま（文字オフセットの影響を受けない＝他段に波及しない）
     }
     return y;
   }
@@ -132,11 +141,12 @@
     for (const dy of [-sp, 0, sp]) hbar(xl, ym + dy, w, t, halo);
   }
 
-  // 2段目（誘導文）：「：」→⋮、「説明」→≡説明 をインライン描画。bandOff＝この段の帯だけの縦オフセット比。
-  function drawDetail(text, y, px, pad, bandOff) {
+  // 2段目（誘導文）：「：」→⋮、「説明」→≡説明 をインライン描画。
+  // bandOff＝この段の帯だけ／textOff＝この段の文字（アイコン含む）だけ の縦オフセット比。
+  function drawDetail(text, y, px, pad, bandOff, textOff) {
     setFont(px, 700);
     ctx.textBaseline = "middle";
-    const sw = Math.max(U(2), px / 12), th = px * 1.04, ym = y + th / 2;
+    const sw = Math.max(U(2), px / 12), th = px * 1.04, ym = y + th / 2 + H * (textOff || 0);
     const iconPad = px * 0.16, kebabW = px * 0.42, hamW = px * 0.80;
     // トークン分解
     const segs = []; let i = 0; const s = String(text);
@@ -182,10 +192,10 @@
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
     if (author) {
       if (!/^作者/.test(author)) author = "作者：" + author;  // 「作者：」を常に表示（消えないように）
-      y = drawBlock(wrap(author, fA, maxw), y, fA, U(11), U(3), 175, OFF.author) + U(2);
+      y = drawBlock(wrap(author, fA, maxw), y, fA, U(11), U(3), 175, OFF.bandAuthor, OFF.textAuthor) + U(2);
     }
-    if (detail) y = drawDetail(detail, y, fD, U(11), OFF.detail) + U(4);
-    if (top) { const f = fitOneLine(top, fT, maxw, U(14)); y = drawBlock([f.text], y, f.px, U(16), U(6), 195, OFF.title) + U(4); }
+    if (detail) y = drawDetail(detail, y, fD, U(11), OFF.bandDetail, OFF.textDetail) + U(4);
+    if (top) { const f = fitOneLine(top, fT, maxw, U(14)); y = drawBlock([f.text], y, f.px, U(16), U(6), 195, OFF.bandTitle, OFF.textTitle) + U(4); }
   }
 
   // ---- 1フレーム描画 ----
@@ -332,10 +342,13 @@
     setTimeout(() => { btn.textContent = btn.dataset.label; }, 1500);
   }
   const SLIDERS = [
-    { key: "whole",  el: els.voff,       lab: els.voffVal,       ls: "preview_offset_y", lsDef: "preview_offset_y_default", legacy: "v_offset",        def: VOFF_DEFAULT, min: 0,        max: VOFF_MAX, signed: false },
-    { key: "author", el: els.bandAuthor, lab: els.bandAuthorVal, ls: "preview_band_author", lsDef: "preview_band_author_default", legacy: "preview_band_y", def: 0,        min: BAND_MIN, max: BAND_MAX, signed: true },
-    { key: "detail", el: els.bandDetail, lab: els.bandDetailVal, ls: "preview_band_detail", lsDef: "preview_band_detail_default", legacy: "preview_band_y", def: 0,        min: BAND_MIN, max: BAND_MAX, signed: true },
-    { key: "title",  el: els.bandTitle,  lab: els.bandTitleVal,  ls: "preview_band_title",  lsDef: "preview_band_title_default",  legacy: "preview_band_y", def: 0,        min: BAND_MIN, max: BAND_MAX, signed: true },
+    { key: "whole",      el: els.voff,       lab: els.voffVal,       ls: "preview_offset_y",       lsDef: "preview_offset_y_default",       legacy: "v_offset", def: VOFF_DEFAULT, min: 0,       max: VOFF_MAX, signed: false },
+    { key: "textAuthor", el: els.textAuthor, lab: els.textAuthorVal, ls: "preview_text_author",    lsDef: "preview_text_author_default",    legacy: null,       def: 0,            min: ROW_MIN, max: ROW_MAX, signed: true },
+    { key: "textDetail", el: els.textDetail, lab: els.textDetailVal, ls: "preview_text_detail",    lsDef: "preview_text_detail_default",    legacy: null,       def: 0,            min: ROW_MIN, max: ROW_MAX, signed: true },
+    { key: "textTitle",  el: els.textTitle,  lab: els.textTitleVal,  ls: "preview_text_title",     lsDef: "preview_text_title_default",     legacy: null,       def: 0,            min: ROW_MIN, max: ROW_MAX, signed: true },
+    { key: "bandAuthor", el: els.bandAuthor, lab: els.bandAuthorVal, ls: "preview_band_author",    lsDef: "preview_band_author_default",    legacy: "preview_band_y", def: 0,      min: ROW_MIN, max: ROW_MAX, signed: true },
+    { key: "bandDetail", el: els.bandDetail, lab: els.bandDetailVal, ls: "preview_band_detail",    lsDef: "preview_band_detail_default",    legacy: "preview_band_y", def: 0,      min: ROW_MIN, max: ROW_MAX, signed: true },
+    { key: "bandTitle",  el: els.bandTitle,  lab: els.bandTitleVal,  ls: "preview_band_title",     lsDef: "preview_band_title_default",     legacy: "preview_band_y", def: 0,      min: ROW_MIN, max: ROW_MAX, signed: true },
   ];
   const clampS = (s, v) => Math.min(s.max, Math.max(s.min, isNaN(v) ? s.def : v));
   function setSliderLabel(s) {
