@@ -5,11 +5,17 @@
   "use strict";
 
   // ---- 仕上がり設定（composite.py / jobs.json と統一） ----
-  const W = 720, H = 1280;          // 内部解像度（9:16）
+  // 基準フレーム＝唯一の基準座標系（9:16）。位置・サイズ・余白・行間は全てこの値への比率で表現する。
+  // プレビューも書き出しも同じ Canvas(=この解像度) に描くため、画面幅に関係なく完全に一致する。
+  const W = 1080, H = 1920;         // 基準フレーム解像度（ここを変えれば出力解像度が変わる／レイアウトは比率維持）
   const DURATION = 5, FPS = 30;
   const REVEAL_START = 0.5, REVEAL_DUR = 2.0;
   const FG_MAX_RATIO = 0.92, FG_ZOOM = 0.04, FG_CENTER_Y = 0.55;
   const DEFAULT_DETAIL = "作品の詳細は右上の：から説明";
+
+  // 旧来 1280px フレーム基準で決めた絶対px定数（余白・行間・縁取り下限など）を、
+  // 現在の基準フレーム高さに合わせて比率換算する。基準解像度を変えてもレイアウトが崩れない。
+  const U = (v) => v * H / 1280;
 
   const $ = (id) => document.getElementById(id);
   const cv = $("cv"), ctx = cv.getContext("2d");
@@ -70,7 +76,7 @@
   function drawBlock(lines, y, px, pad, gap, bandAlpha) {
     setFont(px, 700);
     ctx.textBaseline = "top";
-    const sw = Math.max(2, px / 12);
+    const sw = Math.max(U(2), px / 12);
     const th = px * 1.04;
     for (const ln of lines) {
       const tw = ctx.measureText(ln).width;
@@ -114,7 +120,7 @@
   function drawDetail(text, y, px, pad) {
     setFont(px, 700);
     ctx.textBaseline = "middle";
-    const sw = Math.max(2, px / 12), th = px * 1.04, ym = y + th / 2;
+    const sw = Math.max(U(2), px / 12), th = px * 1.04, ym = y + th / 2;
     const iconPad = px * 0.16, kebabW = px * 0.42, hamW = px * 0.80;
     // トークン分解
     const segs = []; let i = 0; const s = String(text);
@@ -159,10 +165,10 @@
     let y = Math.round(H * 0.020);
     if (author) {
       if (!/^作者/.test(author)) author = "作者：" + author;  // 「作者：」を常に表示（消えないように）
-      y = drawBlock(wrap(author, fA, maxw), y, fA, 11, 3, 175) + 2;
+      y = drawBlock(wrap(author, fA, maxw), y, fA, U(11), U(3), 175) + U(2);
     }
-    if (detail) y = drawDetail(detail, y, fD, 11) + 4;
-    if (top) { const f = fitOneLine(top, fT, maxw); y = drawBlock([f.text], y, f.px, 16, 6, 195) + 4; }
+    if (detail) y = drawDetail(detail, y, fD, U(11)) + U(4);
+    if (top) { const f = fitOneLine(top, fT, maxw, U(14)); y = drawBlock([f.text], y, f.px, U(16), U(6), 195) + U(4); }
   }
 
   // ---- 1フレーム描画 ----
@@ -295,6 +301,11 @@
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
   ensureFont().then(preview);
+  // フォント確定後にもう一度描画（初回がフォールバックフォントの計測で描かれてしまうのを防ぐ＝
+  // プレビューと書き出しで measureText 由来の自動縮小・折返しがズレないようにする保険）。
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { fontReady = true; preview(); });
+  }
   // iOSはミュート自動再生が許可されるが、念のため初回操作でも再生を促す。
   bg.play().catch(() => {});
   const kick = () => { bg.play().catch(() => {}); document.removeEventListener("touchstart", kick); document.removeEventListener("click", kick); };
