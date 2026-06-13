@@ -17,6 +17,12 @@
   // 現在の基準フレーム高さに合わせて比率換算する。基準解像度を変えてもレイアウトが崩れない。
   const U = (v) => v * H / 1280;
 
+  // 構成全体（上部テキストブロック＋前景の漫画ページ）の縦位置オフセット。
+  // 基準フレーム高さに対する比率（0〜VOFF_MAX）。テキスト開始Yと前景中心Yに同じだけ加算するため、
+  // 両者の相対関係（中央揃え・行間）は崩れない。スライダーで微調整する。
+  const VOFF_DEFAULT = 0.02, VOFF_MAX = 0.05;
+  let vOffset = VOFF_DEFAULT;
+
   const $ = (id) => document.getElementById(id);
   const cv = $("cv"), ctx = cv.getContext("2d");
   const bg = $("bg");
@@ -25,6 +31,7 @@
     author: $("author"), detail: $("detail"), top: $("top"),
     previewBtn: $("previewBtn"), makeBtn: $("makeBtn"), status: $("status"),
     resultArea: $("resultArea"), result: $("result"), saveBtn: $("saveBtn"), dl: $("dl"),
+    voff: $("voff"), voffVal: $("voffVal"),
   };
   els.detail.value = DEFAULT_DETAIL;
 
@@ -162,7 +169,7 @@
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
     const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048);
-    let y = Math.round(H * 0.020);
+    let y = Math.round(H * (0.020 + vOffset));  // 構成全体の縦オフセットを加算
     if (author) {
       if (!/^作者/.test(author)) author = "作者：" + author;  // 「作者：」を常に表示（消えないように）
       y = drawBlock(wrap(author, fA, maxw), y, fA, U(11), U(3), 175) + U(2);
@@ -189,7 +196,7 @@
         const sc = (a < 1 && FG_ZOOM > 0) ? base * ((1 - FG_ZOOM) + FG_ZOOM * a) : base;
         const fw = fgImg.width * sc, fh = fgImg.height * sc;
         ctx.globalAlpha = a;
-        ctx.drawImage(fgImg, (W - fw) / 2, H * FG_CENTER_Y - fh / 2, fw, fh);
+        ctx.drawImage(fgImg, (W - fw) / 2, H * (FG_CENTER_Y + vOffset) - fh / 2, fw, fh);  // テキストと同じ縦オフセット
         ctx.globalAlpha = 1;
       }
     }
@@ -297,6 +304,28 @@
     }
     els.dl.click();
   });
+
+  // ---- 縦位置オフセット（スライダー） ----
+  function setVoffLabel() {
+    if (els.voffVal) els.voffVal.textContent = (vOffset * 100).toFixed(1) + "%";
+  }
+  if (els.voff) {
+    els.voff.min = "0"; els.voff.max = String(VOFF_MAX); els.voff.step = "0.0025";
+    // 復元（無ければ既定値）
+    let saved = null;
+    try { saved = localStorage.getItem("v_offset"); } catch (e) {}
+    if (saved !== null && saved !== "" && !isNaN(parseFloat(saved))) {
+      vOffset = Math.min(VOFF_MAX, Math.max(0, parseFloat(saved)));
+    }
+    els.voff.value = String(vOffset);
+    setVoffLabel();
+    els.voff.addEventListener("input", () => {
+      vOffset = Math.min(VOFF_MAX, Math.max(0, parseFloat(els.voff.value) || 0));
+      setVoffLabel();
+      try { localStorage.setItem("v_offset", String(vOffset)); } catch (e) {}
+      preview();
+    });
+  }
 
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);

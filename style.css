@@ -34,6 +34,10 @@ button.ghost,a.ghost{display:block;text-align:center;background:transparent;bord
 #resultArea{margin-top:12px;}
 video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
 .notice{color:#b89b6b;font-size:11.5px;line-height:1.6;margin-top:18px;text-align:center;}
+.slider-row{display:flex;align-items:center;gap:10px;margin-top:10px;}
+.slider-row label{font-size:13px;color:var(--accent);font-weight:700;white-space:nowrap;}
+.slider-row input[type=range]{flex:1;accent-color:var(--accent);height:28px;}
+.slider-val{font-size:13px;color:var(--sub);min-width:44px;text-align:right;font-variant-numeric:tabular-nums;}
 
 /* ── タブバー ── */
 .tabbar{
