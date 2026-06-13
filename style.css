@@ -40,6 +40,8 @@ video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
 .slider-row label{font-size:13px;color:var(--accent);font-weight:700;white-space:nowrap;}
 .slider-row input[type=range]{flex:1;accent-color:var(--accent);height:28px;}
 .slider-val{font-size:13px;color:var(--sub);min-width:44px;text-align:right;font-variant-numeric:tabular-nums;}
+.slider-actions{display:flex;gap:8px;}
+.slider-actions .ghost{flex:1;width:auto;font-size:13px;padding:10px 8px;}
 
 /* ── タブバー ── */
 .tabbar{

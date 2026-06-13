@@ -32,6 +32,7 @@
     previewBtn: $("previewBtn"), makeBtn: $("makeBtn"), status: $("status"),
     resultArea: $("resultArea"), result: $("result"), saveBtn: $("saveBtn"), dl: $("dl"),
     voff: $("voff"), voffVal: $("voffVal"),
+    voffSaveDefault: $("voffSaveDefault"), voffReset: $("voffReset"),
   };
   els.detail.value = DEFAULT_DETAIL;
 
@@ -305,25 +306,62 @@
     els.dl.click();
   });
 
-  // ---- 縦位置オフセット（スライダー） ----
+  // ---- 設定の保存・復元（localStorage 汎用ヘルパ：アフィID等 将来の設定値もこれで保存できる） ----
+  const Store = {
+    getNum(key) { try { const v = localStorage.getItem(key); const n = v === null ? NaN : parseFloat(v); return isNaN(n) ? null : n; } catch (e) { return null; } },
+    set(key, val) { try { localStorage.setItem(key, String(val)); } catch (e) {} },
+    remove(key) { try { localStorage.removeItem(key); } catch (e) {} },
+  };
+
+  // ---- 縦位置オフセット（スライダー＋「デフォルトとして保存」／「リセット」） ----
+  const K_OFFSET = "preview_offset_y";              // 現在値（スライダー操作で即保存）
+  const K_OFFSET_DEF = "preview_offset_y_default";  // ユーザー既定値（「デフォルトとして保存」で確定）
+  const K_OFFSET_LEGACY = "v_offset";               // 旧バージョンの保存キー（移行用）
+  const clampVoff = (v) => Math.min(VOFF_MAX, Math.max(0, isNaN(v) ? VOFF_DEFAULT : v));
+
   function setVoffLabel() {
     if (els.voffVal) els.voffVal.textContent = (vOffset * 100).toFixed(1) + "%";
   }
+  function flashBtn(btn, msg) {
+    if (!btn) return;
+    if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+    btn.textContent = msg;
+    setTimeout(() => { btn.textContent = btn.dataset.label; }, 1500);
+  }
+  function applyVoff(v, redraw) {
+    vOffset = clampVoff(v);
+    if (els.voff) els.voff.value = String(vOffset);
+    setVoffLabel();
+    if (redraw) preview();
+  }
+
   if (els.voff) {
     els.voff.min = "0"; els.voff.max = String(VOFF_MAX); els.voff.step = "0.0025";
-    // 復元（無ければ既定値）
-    let saved = null;
-    try { saved = localStorage.getItem("v_offset"); } catch (e) {}
-    if (saved !== null && saved !== "" && !isNaN(parseFloat(saved))) {
-      vOffset = Math.min(VOFF_MAX, Math.max(0, parseFloat(saved)));
-    }
-    els.voff.value = String(vOffset);
-    setVoffLabel();
+
+    // 復元の優先順位：現在値 → ユーザー既定値 → 旧キー → 工場既定(VOFF_DEFAULT)
+    const cur = Store.getNum(K_OFFSET);
+    const def = Store.getNum(K_OFFSET_DEF);
+    const legacy = Store.getNum(K_OFFSET_LEGACY);
+    applyVoff(cur != null ? cur : (def != null ? def : (legacy != null ? legacy : VOFF_DEFAULT)), false);
+
+    // スライダー操作で即保存（再読み込みしても保たれる）
     els.voff.addEventListener("input", () => {
-      vOffset = Math.min(VOFF_MAX, Math.max(0, parseFloat(els.voff.value) || 0));
-      setVoffLabel();
-      try { localStorage.setItem("v_offset", String(vOffset)); } catch (e) {}
-      preview();
+      applyVoff(parseFloat(els.voff.value), true);
+      Store.set(K_OFFSET, vOffset);
+    });
+
+    // 「デフォルトとして保存」：現在値を既定値として確定（次回はこの値で初期表示）
+    if (els.voffSaveDefault) els.voffSaveDefault.addEventListener("click", () => {
+      Store.set(K_OFFSET_DEF, vOffset);
+      Store.set(K_OFFSET, vOffset);
+      flashBtn(els.voffSaveDefault, "✓ 既定値に保存しました");
+    });
+
+    // 「リセット」：保存値をすべて消し、初期状態（工場既定）に戻す
+    if (els.voffReset) els.voffReset.addEventListener("click", () => {
+      Store.remove(K_OFFSET); Store.remove(K_OFFSET_DEF); Store.remove(K_OFFSET_LEGACY);
+      applyVoff(VOFF_DEFAULT, true);
+      flashBtn(els.voffReset, "✓ リセットしました");
     });
   }
 
