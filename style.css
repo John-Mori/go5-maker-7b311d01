@@ -42,6 +42,9 @@ video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
 .slider-val{font-size:13px;color:var(--sub);min-width:44px;text-align:right;font-variant-numeric:tabular-nums;}
 .slider-actions{display:flex;gap:8px;}
 .slider-actions .ghost{flex:1;width:auto;font-size:13px;padding:10px 8px;}
+.slider-group{margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;}
+.slider-group-title{font-size:12px;color:var(--accent);font-weight:700;margin-bottom:2px;}
+.slider-group .slider-row label{min-width:108px;color:var(--sub);font-weight:500;}
 
 /* ── タブバー ── */
 .tabbar{
