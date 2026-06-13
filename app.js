@@ -23,6 +23,11 @@
   const VOFF_DEFAULT = 0.02, VOFF_MAX = 0.05;
   let vOffset = VOFF_DEFAULT;
 
+  // 軸2：黒い背景帯だけの縦オフセット（文字は動かさず帯のYだけを上下）。基準フレーム高さ比。
+  // 中央寄せ微調整のため上下双方向（＋＝下／−＝上）。テキスト3段すべての帯に同じだけ適用。
+  const BAND_DEFAULT = 0.0, BAND_MIN = -0.03, BAND_MAX = 0.03;
+  let bandOffset = BAND_DEFAULT;
+
   const $ = (id) => document.getElementById(id);
   const cv = $("cv"), ctx = cv.getContext("2d");
   const bg = $("bg");
@@ -32,6 +37,7 @@
     previewBtn: $("previewBtn"), makeBtn: $("makeBtn"), status: $("status"),
     resultArea: $("resultArea"), result: $("result"), saveBtn: $("saveBtn"), dl: $("dl"),
     voff: $("voff"), voffVal: $("voffVal"),
+    bandoff: $("bandoff"), bandoffVal: $("bandoffVal"),
     voffSaveDefault: $("voffSaveDefault"), voffReset: $("voffReset"),
   };
   els.detail.value = DEFAULT_DETAIL;
@@ -90,8 +96,9 @@
       const tw = ctx.measureText(ln).width;
       const x = (W - tw) / 2;
       const mB = sw;  // 縁取り分だけ帯を広げ、文字が帯からはみ出ないようにする
+      const bandY = H * bandOffset;  // 軸2：帯だけを上下（文字は動かさない）
       ctx.fillStyle = `rgba(0,0,0,${bandAlpha / 255})`;
-      roundRect(x - pad - mB, y - pad * 0.45 - mB, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
+      roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
       ctx.fill();
       ctx.lineJoin = "round";
       ctx.lineWidth = sw * 2;
@@ -142,8 +149,9 @@
     const total = widths.reduce((a, b) => a + b, 0);
     let x = (W - total) / 2;
     const mB = sw;  // 縁取り分だけ帯を広げる
+    const bandY = H * bandOffset;  // 軸2：帯だけを上下（文字は動かさない）
     ctx.fillStyle = `rgba(0,0,0,${175 / 255})`;
-    roundRect(x - pad - mB, y - pad * 0.45 - mB, total + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5); ctx.fill();
+    roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, total + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5); ctx.fill();
     for (let k = 0; k < segs.length; k++) {
       const [kind, val] = segs[k], w = widths[k];
       if (kind === "text") {
@@ -313,57 +321,53 @@
     remove(key) { try { localStorage.removeItem(key); } catch (e) {} },
   };
 
-  // ---- 縦位置オフセット（スライダー＋「デフォルトとして保存」／「リセット」） ----
-  const K_OFFSET = "preview_offset_y";              // 現在値（スライダー操作で即保存）
-  const K_OFFSET_DEF = "preview_offset_y_default";  // ユーザー既定値（「デフォルトとして保存」で確定）
-  const K_OFFSET_LEGACY = "v_offset";               // 旧バージョンの保存キー（移行用）
+  // ---- 縦位置オフセット 2軸（スライダー＋「デフォルトとして保存」／「リセット」） ----
+  // 軸1：全体（文字＋帯＋漫画）/ 軸2：黒帯だけ。どちらも基準フレーム高さ比で保存し、互いに独立。
+  const K_OFFSET = "preview_offset_y", K_OFFSET_DEF = "preview_offset_y_default", K_OFFSET_LEGACY = "v_offset";
+  const K_BAND = "preview_band_y", K_BAND_DEF = "preview_band_y_default";
   const clampVoff = (v) => Math.min(VOFF_MAX, Math.max(0, isNaN(v) ? VOFF_DEFAULT : v));
+  const clampBand = (v) => Math.min(BAND_MAX, Math.max(BAND_MIN, isNaN(v) ? BAND_DEFAULT : v));
 
-  function setVoffLabel() {
-    if (els.voffVal) els.voffVal.textContent = (vOffset * 100).toFixed(1) + "%";
-  }
+  function setVoffLabel() { if (els.voffVal) els.voffVal.textContent = (vOffset * 100).toFixed(1) + "%"; }
+  function setBandLabel() { if (els.bandoffVal) els.bandoffVal.textContent = (bandOffset >= 0 ? "+" : "") + (bandOffset * 100).toFixed(1) + "%"; }
   function flashBtn(btn, msg) {
     if (!btn) return;
     if (!btn.dataset.label) btn.dataset.label = btn.textContent;
     btn.textContent = msg;
     setTimeout(() => { btn.textContent = btn.dataset.label; }, 1500);
   }
-  function applyVoff(v, redraw) {
-    vOffset = clampVoff(v);
-    if (els.voff) els.voff.value = String(vOffset);
-    setVoffLabel();
-    if (redraw) preview();
-  }
+  function applyVoff(v, redraw) { vOffset = clampVoff(v); if (els.voff) els.voff.value = String(vOffset); setVoffLabel(); if (redraw) preview(); }
+  function applyBand(v, redraw) { bandOffset = clampBand(v); if (els.bandoff) els.bandoff.value = String(bandOffset); setBandLabel(); if (redraw) preview(); }
 
+  // 軸1：全体オフセット
   if (els.voff) {
     els.voff.min = "0"; els.voff.max = String(VOFF_MAX); els.voff.step = "0.0025";
-
-    // 復元の優先順位：現在値 → ユーザー既定値 → 旧キー → 工場既定(VOFF_DEFAULT)
-    const cur = Store.getNum(K_OFFSET);
-    const def = Store.getNum(K_OFFSET_DEF);
-    const legacy = Store.getNum(K_OFFSET_LEGACY);
+    const cur = Store.getNum(K_OFFSET), def = Store.getNum(K_OFFSET_DEF), legacy = Store.getNum(K_OFFSET_LEGACY);
     applyVoff(cur != null ? cur : (def != null ? def : (legacy != null ? legacy : VOFF_DEFAULT)), false);
-
-    // スライダー操作で即保存（再読み込みしても保たれる）
-    els.voff.addEventListener("input", () => {
-      applyVoff(parseFloat(els.voff.value), true);
-      Store.set(K_OFFSET, vOffset);
-    });
-
-    // 「デフォルトとして保存」：現在値を既定値として確定（次回はこの値で初期表示）
-    if (els.voffSaveDefault) els.voffSaveDefault.addEventListener("click", () => {
-      Store.set(K_OFFSET_DEF, vOffset);
-      Store.set(K_OFFSET, vOffset);
-      flashBtn(els.voffSaveDefault, "✓ 既定値に保存しました");
-    });
-
-    // 「リセット」：保存値をすべて消し、初期状態（工場既定）に戻す
-    if (els.voffReset) els.voffReset.addEventListener("click", () => {
-      Store.remove(K_OFFSET); Store.remove(K_OFFSET_DEF); Store.remove(K_OFFSET_LEGACY);
-      applyVoff(VOFF_DEFAULT, true);
-      flashBtn(els.voffReset, "✓ リセットしました");
-    });
+    els.voff.addEventListener("input", () => { applyVoff(parseFloat(els.voff.value), true); Store.set(K_OFFSET, vOffset); });
   }
+
+  // 軸2：黒帯だけのオフセット
+  if (els.bandoff) {
+    els.bandoff.min = String(BAND_MIN); els.bandoff.max = String(BAND_MAX); els.bandoff.step = "0.0025";
+    const cur = Store.getNum(K_BAND), def = Store.getNum(K_BAND_DEF);
+    applyBand(cur != null ? cur : (def != null ? def : BAND_DEFAULT), false);
+    els.bandoff.addEventListener("input", () => { applyBand(parseFloat(els.bandoff.value), true); Store.set(K_BAND, bandOffset); });
+  }
+
+  // 「デフォルトとして保存」：両軸の現在値を既定値として確定（次回はこの値で初期表示）
+  if (els.voffSaveDefault) els.voffSaveDefault.addEventListener("click", () => {
+    Store.set(K_OFFSET_DEF, vOffset); Store.set(K_OFFSET, vOffset);
+    Store.set(K_BAND_DEF, bandOffset); Store.set(K_BAND, bandOffset);
+    flashBtn(els.voffSaveDefault, "✓ 既定値に保存しました");
+  });
+
+  // 「リセット」：両軸の保存値をすべて消し、初期状態（工場既定）に戻す
+  if (els.voffReset) els.voffReset.addEventListener("click", () => {
+    [K_OFFSET, K_OFFSET_DEF, K_OFFSET_LEGACY, K_BAND, K_BAND_DEF].forEach((k) => Store.remove(k));
+    applyVoff(VOFF_DEFAULT, false); applyBand(BAND_DEFAULT, true);
+    flashBtn(els.voffReset, "✓ リセットしました");
+  });
 
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
