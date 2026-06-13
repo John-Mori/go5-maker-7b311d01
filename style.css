@@ -21,7 +21,9 @@ input[type=text]:focus{border-color:var(--accent);}
 .photo-btn:active{background:#10203033;}
 .hint{color:var(--sub);font-size:12px;margin-top:6px;word-break:break-all;}
 .preview-wrap{display:flex;justify-content:center;margin:8px 0;}
-canvas#cv{width:auto;height:60vh;max-height:520px;max-width:100%;aspect-ratio:9/16;
+/* 幅・高さとも auto にして固有比(9:16)のまま max-width/max-height 内に収める。
+   どちらか片方だけを固定しないことで、縦長・狭幅端末でも 9:16 が崩れず横潰れしない。 */
+canvas#cv{width:auto;height:auto;max-width:100%;max-height:62vh;aspect-ratio:9/16;
   background:#000;border:1px solid var(--line);border-radius:10px;}
 button{font-family:inherit;font-size:16px;border:none;border-radius:12px;padding:13px 16px;
   font-weight:700;cursor:pointer;width:100%;margin-top:8px;}
