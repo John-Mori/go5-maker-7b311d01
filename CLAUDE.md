@@ -17,15 +17,17 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 
 ## 1. 現在の状態（最新）
 
-機能は完成済みで安定動作。プレビューの位置調整は **計7本のスライダー**構成：
+機能は完成済みで安定動作。プレビューの位置調整は **計9コントロール（＋/−ボタン式・プレビュー横で見ながら調整）**：
 
-| 種別 | スライダー | 動かす対象 |
+| 種別 | コントロール | 動かす対象 |
 |---|---|---|
 | 全体 | 全体の縦位置（下へ） | 文字＋帯＋漫画ページ をまとめて |
 | 文字（段別） | ①作者名 / ②誘導文 / ③大タイトル の文字 | その段の**文字だけ** |
 | 黒帯（段別） | ①作者名 / ②誘導文 / ③大タイトル の帯 | その段の**黒帯だけ** |
+| 黒帯の余白 | 全段共通の帯パディング（`OFF.bandPad`） | 帯の厚み（文字まわりの余白） |
+| 段の間隔 | 段どうしの追加スペース（`OFF.rowGap`） | 各段の縦の隙間 |
 
-- すべて基準フレーム高さ比（px/vh/vw 不使用）。`localStorage` 保存・復元、「デフォルトとして保存」「リセット」対応。
+- すべて基準フレーム高さ比（px/vh/vw 不使用）。`localStorage` 保存・復元、「既定値に保存」「リセット」対応。各コントロールは `app.js` の `CONTROLS` テーブルで駆動（＋/−ボタンが `OFF[key]` を step 単位で増減）。
 
 ### 変更履歴（開発の順番）
 1. FANZAアフィリンク生成機能を統合（タブ切替・純粋関数＋テスト）
@@ -38,6 +40,7 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 8. 文字も3段別に独立 ＝ 現在の7本構成
 9. **Bluesky 自動投稿**を追加（完全クライアントサイド）。動画作成後に確認ダイアログ→**挿入した元写真**＋固定文＋提携文＋**生のアフィリンク(無改変)** を投稿
 10. **投稿記録＆クリック集計**を追加。投稿後、共有URLを GAS Web App へ送信→Bitly短縮→Googleスプレッドシートに「題名(動画タイトル)/各URL/クリック数」を記録。クリック数＝**投稿短縮URLの開封数**（アフィリンクには介入しない設計）
+11. **UI再設計（v=11）**：①位置調整を**スライダー→＋/−ボタン**化し、プレビュー横（スマホは sticky）で見ながら微調整。②**黒帯の余白**(`OFF.bandPad`)と**段の間隔**(`OFF.rowGap`)を追加（計9コントロール）。③Bluesky投稿欄を**1つの自由テキスト本文(`bskyText`)に統合**（固定文/提携文/作品URL欄を廃止）。本文中の生アフィリンクは `detectFacets` で自動リンク化＝無改変。④アプリパスワード等は折りたたみ＝任意（未入力なら投稿スキップ）
 
 ---
 
@@ -76,13 +79,14 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 `preview_offset_y`（全体）／`preview_text_author|detail|title`／`preview_band_author|detail|title`、各 `*_default`（既定値）。旧キー `v_offset`・`preview_band_y` は自動移行。
 
 ### キャッシュ運用
-`index.html` のアセット参照は `app.js?v=N` の形。**中身を変えたら `N` を1つ上げる**とスマホで確実に最新が読まれる（現在 v=10）。
+`index.html` のアセット参照は `app.js?v=N` の形。**中身を変えたら `N` を1つ上げる**とスマホで確実に最新が読まれる（現在 v=11）。
 
 ### Bluesky 投稿（§9 機能）の要点
 - 完全クライアントサイド。`https://bsky.social` の XRPC を直接叩く（CORS対応・サーバー不要）。認証は**アプリパスワード**（通常PWではない／revoke 可能）。
 - フロー：`app.js` の `make()` 成功時に `video-created` を dispatch → `bluesky.js` が購読 → 確認ダイアログ → `#cv` の最終フレームを JPEG 圧縮（≤約950KB）→ `blueskyPostWithImage()`。
 - 画像 embed（`app.bsky.embed.images`）と外部リンクカードは併用不可のため、**作品URLは本文に richtext#link facet 付きで入れる**（facet の index は **UTF-8 バイトオフセット**）。
-- 設定の localStorage キー：`bsky_enable` / `bsky_handle` / `bsky_app_pw` / `bsky_words` / `bsky_disclosure` / `bsky_work_url` / `bsky_gas_url` / `bsky_gas_secret`。af_id は既存 `fanza_af_id` を流用。
+- 設定の localStorage キー：`bsky_enable` / `bsky_text`（本文1ボックス） / `bsky_handle` / `bsky_app_pw` / `bsky_gas_url` / `bsky_gas_secret`。位置調整は `preview_*`（`preview_band_pad`・`preview_row_gap` を追加）。
+- 投稿は `BlueskyCore.blueskyPostRaw({identifier,appPassword,text,imageBlob,alt})`＝本文そのまま投稿＋`detectFacets` で本文中URLを自動リンク化。旧 `buildBlueskyPost`/`blueskyPostWithImage` も残置（互換・テスト用）。
 - 秘匿情報（アプリパスワード・af_id・シークレット）は **console に出さない**（既存方針を踏襲）。
 
 ### 投稿記録＆クリック集計（§10 機能）の要点

@@ -23,8 +23,33 @@ input[type=text]:focus{border-color:var(--accent);}
 .preview-wrap{display:flex;justify-content:center;margin:8px 0;}
 /* 幅・高さとも auto にして固有比(9:16)のまま max-width/max-height 内に収める。
    どちらか片方だけを固定しないことで、縦長・狭幅端末でも 9:16 が崩れず横潰れしない。 */
-canvas#cv{width:auto;height:auto;max-width:100%;max-height:62vh;aspect-ratio:9/16;
+canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/16;
   background:#000;border:1px solid var(--line);border-radius:10px;}
+
+/* ── プレビュー＆位置調整（プレビュー横／見ながら＋−） ── */
+.editor{display:flex;gap:14px;align-items:flex-start;margin:8px 0;}
+.preview-col{flex:0 0 auto;position:sticky;top:8px;}
+.controls-col{flex:1 1 auto;min-width:0;}
+@media(max-width:560px){
+  .editor{flex-direction:column;}
+  .preview-col{align-self:center;z-index:5;background:var(--card);padding-bottom:6px;width:100%;text-align:center;}
+}
+.ctl-group{margin-top:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;}
+.ctl-group:first-child{margin-top:0;}
+.ctl-group-title{font-size:12px;color:var(--accent);font-weight:700;margin-bottom:2px;}
+.ctl-row{display:flex;align-items:center;gap:8px;margin-top:6px;}
+.ctl-label{flex:1;font-size:13px;color:var(--sub);min-width:78px;}
+.ctl-btn{width:42px;height:42px;flex-shrink:0;font-size:22px;font-weight:900;line-height:1;padding:0;margin-top:0;
+  background:#0e1422;border:1px solid var(--line);color:var(--accent);border-radius:10px;}
+.ctl-btn:active{background:#10203033;border-color:var(--accent);}
+.ctl-val{min-width:52px;text-align:center;font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;}
+.ctl-actions{display:flex;gap:8px;margin-top:10px;}
+.ctl-actions .ghost{flex:1;width:auto;font-size:13px;padding:9px 6px;margin-top:0;}
+
+/* ── Bluesky 詳細設定（折りたたみ） ── */
+.bsky-adv{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:4px 12px;background:#0e1422;}
+.bsky-adv summary{cursor:pointer;color:var(--sub);font-size:13px;font-weight:700;padding:8px 0;}
+.bsky-adv[open] summary{margin-bottom:4px;}
 button{font-family:inherit;font-size:16px;border:none;border-radius:12px;padding:13px 16px;
   font-weight:700;cursor:pointer;width:100%;margin-top:8px;}
 button.primary{background:var(--accent);color:#04222a;font-size:18px;padding:16px;}

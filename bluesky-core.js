@@ -164,10 +164,50 @@
     });
   }
 
+  // 自由テキストから URL を検出し、richtext#link facet を作る（index は UTF-8 バイトオフセット）。
+  function detectFacets(text) {
+    text = String(text || '');
+    var facets = [], re = /https?:\/\/[^\s]+/g, m;
+    while ((m = re.exec(text))) {
+      var url = m[0].replace(/[.,;:!?。、！？）)】」』]+$/, '');  // 末尾の句読点・閉じ括弧はリンクに含めない
+      var start = m.index, end = start + url.length;
+      facets.push({
+        index: { byteStart: byteLen(text.slice(0, start)), byteEnd: byteLen(text.slice(0, end)) },
+        features: [{ $type: 'app.bsky.richtext.facet#link', uri: url }]
+      });
+    }
+    return facets;
+  }
+
+  /**
+   * 1つの自由テキスト本文をそのまま投稿（改行も維持／本文中のURLは自動でリンク化）。
+   * @returns Promise<{ uri, cid, handle, rkey, postUrl }>
+   */
+  function blueskyPostRaw(o) {
+    o = o || {};
+    var service = o.service || DEFAULT_SERVICE;
+    var ident = String(o.identifier || '').trim().replace(/^@/, '');
+    var text = String(o.text || '');
+    var sess;
+    return createSession(service, ident, o.appPassword).then(function (s) {
+      sess = s;
+      if (o.imageBlob) return uploadBlob(service, sess.accessJwt, o.imageBlob);
+      return null;
+    }).then(function (up) {
+      return createPost(service, sess, { text: text, facets: detectFacets(text), imageRef: up ? up.blob : null, alt: o.alt });
+    }).then(function (res) {
+      var rkey = String(res.uri || '').split('/').pop();
+      var postUrl = (sess.handle && rkey) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey) : '';
+      return { uri: res.uri, cid: res.cid, handle: sess.handle, rkey: rkey, postUrl: postUrl };
+    });
+  }
+
   var api = {
     DEFAULT_SERVICE: DEFAULT_SERVICE,
     buildBlueskyPost: buildBlueskyPost,
-    blueskyPostWithImage: blueskyPostWithImage
+    blueskyPostWithImage: blueskyPostWithImage,
+    detectFacets: detectFacets,
+    blueskyPostRaw: blueskyPostRaw
   };
 
   if (typeof window !== 'undefined') {

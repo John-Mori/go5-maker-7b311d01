@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 <header>
@@ -44,62 +44,42 @@
     <input id="top" type="text" placeholder="今回の画像に関するコメント" autocomplete="off">
   </section>
 
-  <!-- プレビュー -->
+  <!-- プレビュー＆位置調整（プレビューを見ながら＋/−で調整） -->
   <section class="card">
-    <div class="field-label">仕上がりプレビュー</div>
-    <div class="preview-wrap">
-      <canvas id="cv" width="1080" height="1920"></canvas>
-    </div>
-    <div class="slider-group slider-group-whole">
-      <div class="slider-group-title">全体の位置調整</div>
-      <div class="slider-row">
-        <label for="voff">全体（文字＋帯＋漫画）下へ</label>
-        <input id="voff" type="range" min="0" max="0.05" step="0.0025" value="0.02">
-        <span id="voffVal" class="slider-val">2.0%</span>
+    <div class="field-label">仕上がりプレビュー（見ながら位置調整）</div>
+    <div class="editor">
+      <div class="preview-col">
+        <div class="preview-wrap">
+          <canvas id="cv" width="1080" height="1920"></canvas>
+        </div>
       </div>
-    </div>
-
-    <div class="slider-group">
-      <div class="slider-group-title">文字の位置調整（段ごと・下＋／上−）</div>
-      <div class="slider-row">
-        <label for="textAuthor">①作者名の文字</label>
-        <input id="textAuthor" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
-        <span id="textAuthorVal" class="slider-val">+0.0%</span>
+      <div class="controls-col">
+        <div class="ctl-group">
+          <div class="ctl-group-title">全体</div>
+          <div class="ctl-row"><span class="ctl-label">全体（下へ）</span><button class="ctl-btn" id="wholeMinus" aria-label="全体を上へ">−</button><span class="ctl-val" id="wholeVal">2.0%</span><button class="ctl-btn" id="wholePlus" aria-label="全体を下へ">＋</button></div>
+        </div>
+        <div class="ctl-group">
+          <div class="ctl-group-title">文字（段別・上−／下＋）</div>
+          <div class="ctl-row"><span class="ctl-label">①作者名</span><button class="ctl-btn" id="taMinus">−</button><span class="ctl-val" id="taVal">+0.0%</span><button class="ctl-btn" id="taPlus">＋</button></div>
+          <div class="ctl-row"><span class="ctl-label">②誘導文</span><button class="ctl-btn" id="tdMinus">−</button><span class="ctl-val" id="tdVal">+0.0%</span><button class="ctl-btn" id="tdPlus">＋</button></div>
+          <div class="ctl-row"><span class="ctl-label">③タイトル</span><button class="ctl-btn" id="ttMinus">−</button><span class="ctl-val" id="ttVal">+0.0%</span><button class="ctl-btn" id="ttPlus">＋</button></div>
+        </div>
+        <div class="ctl-group">
+          <div class="ctl-group-title">黒帯の位置（段別・上−／下＋）</div>
+          <div class="ctl-row"><span class="ctl-label">①作者名</span><button class="ctl-btn" id="baMinus">−</button><span class="ctl-val" id="baVal">+0.0%</span><button class="ctl-btn" id="baPlus">＋</button></div>
+          <div class="ctl-row"><span class="ctl-label">②誘導文</span><button class="ctl-btn" id="bdMinus">−</button><span class="ctl-val" id="bdVal">+0.0%</span><button class="ctl-btn" id="bdPlus">＋</button></div>
+          <div class="ctl-row"><span class="ctl-label">③タイトル</span><button class="ctl-btn" id="btMinus">−</button><span class="ctl-val" id="btVal">+0.0%</span><button class="ctl-btn" id="btPlus">＋</button></div>
+        </div>
+        <div class="ctl-group">
+          <div class="ctl-group-title">黒帯の余白・段の間隔</div>
+          <div class="ctl-row"><span class="ctl-label">黒帯の余白</span><button class="ctl-btn" id="bpMinus">−</button><span class="ctl-val" id="bpVal">0.0%</span><button class="ctl-btn" id="bpPlus">＋</button></div>
+          <div class="ctl-row"><span class="ctl-label">段の間隔</span><button class="ctl-btn" id="rgMinus">−</button><span class="ctl-val" id="rgVal">0.0%</span><button class="ctl-btn" id="rgPlus">＋</button></div>
+        </div>
+        <div class="ctl-actions">
+          <button id="voffSaveDefault" class="ghost">既定値に保存</button>
+          <button id="voffReset" class="ghost">リセット</button>
+        </div>
       </div>
-      <div class="slider-row">
-        <label for="textDetail">②誘導文の文字</label>
-        <input id="textDetail" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
-        <span id="textDetailVal" class="slider-val">+0.0%</span>
-      </div>
-      <div class="slider-row">
-        <label for="textTitle">③大タイトルの文字</label>
-        <input id="textTitle" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
-        <span id="textTitleVal" class="slider-val">+0.0%</span>
-      </div>
-    </div>
-
-    <div class="slider-group">
-      <div class="slider-group-title">黒帯の位置調整（段ごと・下＋／上−）</div>
-      <div class="slider-row">
-        <label for="bandAuthor">①作者名の帯</label>
-        <input id="bandAuthor" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
-        <span id="bandAuthorVal" class="slider-val">+0.0%</span>
-      </div>
-      <div class="slider-row">
-        <label for="bandDetail">②誘導文の帯</label>
-        <input id="bandDetail" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
-        <span id="bandDetailVal" class="slider-val">+0.0%</span>
-      </div>
-      <div class="slider-row">
-        <label for="bandTitle">③大タイトルの帯</label>
-        <input id="bandTitle" type="range" min="-0.03" max="0.03" step="0.0025" value="0">
-        <span id="bandTitleVal" class="slider-val">+0.0%</span>
-      </div>
-    </div>
-
-    <div class="slider-actions">
-      <button id="voffSaveDefault" class="ghost">デフォルトとして保存</button>
-      <button id="voffReset" class="ghost">リセット</button>
     </div>
     <button id="previewBtn" class="ghost">プレビュー更新</button>
   </section>
@@ -111,28 +91,23 @@
       <span>🦋 動画作成後に Bluesky へ投稿する</span>
     </label>
     <div id="bskySettings" hidden>
-      <label class="field-label" for="bskyHandle">ハンドル（例：yourname.bsky.social）</label>
-      <input id="bskyHandle" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="yourname.bsky.social">
+      <label class="field-label" for="bskyText">投稿本文（このまま投稿されます・改行もそのまま）</label>
+      <textarea id="bskyText" rows="8">おすすめ漫画見つけた💕
+↓詳細はこちらから🎀 #PR #漫画</textarea>
+      <div class="hint">1つの本文ボックスで完結。最下行に<b>アフィリンク（短縮しない生リンク）</b>を貼ってください。リンクは自動でクリック可能になります。アフィリンクは「🔗 アフィリンク」タブで生成→コピーできます。</div>
 
-      <label class="field-label" for="bskyAppPw">アプリパスワード（通常のパスワードではありません）</label>
-      <input id="bskyAppPw" type="password" autocomplete="new-password" placeholder="xxxx-xxxx-xxxx-xxxx">
-      <div class="hint">Bluesky 設定 →「プライバシーとセキュリティ」→「アプリパスワード」で発行。端末内にのみ保存され、いつでも失効できます。</div>
-
-      <label class="field-label" for="bskyWords">投稿の固定文（毎回入る文章）</label>
-      <textarea id="bskyWords" rows="3" placeholder="新作できました！ #FANZA"></textarea>
-
-      <label class="field-label" for="bskyDisclosure">提携文（アフィリエイト表記）</label>
-      <input id="bskyDisclosure" type="text" placeholder="※アフィリエイト広告を利用しています">
-
-      <label class="field-label" for="bskyWorkUrl">作品URL（投稿に入れるリンク）</label>
-      <input id="bskyWorkUrl" type="text" inputmode="url" placeholder="https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/">
-      <div class="hint">af_id は「🔗 アフィリンク」タブの設定を流用します。本文には【生のアフィリンク（無改変）】を貼るので af_id 計測は壊れません。</div>
-
-      <label class="field-label" for="bskyGasUrl">記録用URL（Google Apps Script・任意）</label>
-      <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/●●●/exec">
-      <label class="field-label" for="bskyGasSecret">共有シークレット（GASと同じ文字列・任意）</label>
-      <input id="bskyGasSecret" type="password" autocomplete="new-password" placeholder="任意の合言葉">
-      <div class="hint">設定すると、投稿の共有URLを Bitly で短縮し、Googleスプレッドシートに「題名（動画タイトル）／各URL／クリック数」を自動記録します（クリック数＝投稿短縮URLの開封数）。未設定なら投稿のみ。</div>
+      <details class="bsky-adv">
+        <summary>⚙ 投稿アカウント・記録設定（任意・あとで）</summary>
+        <label class="field-label" for="bskyHandle">ハンドル（例：yourname.bsky.social）</label>
+        <input id="bskyHandle" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="yourname.bsky.social">
+        <label class="field-label" for="bskyAppPw">アプリパスワード（未入力なら投稿はスキップ）</label>
+        <input id="bskyAppPw" type="password" autocomplete="new-password" placeholder="xxxx-xxxx-xxxx-xxxx">
+        <div class="hint">Bluesky 設定 →「プライバシーとセキュリティ」→「アプリパスワード」で発行。端末内にのみ保存、いつでも失効可能。</div>
+        <label class="field-label" for="bskyGasUrl">記録用URL（Google Apps Script・任意）</label>
+        <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/●●●/exec">
+        <label class="field-label" for="bskyGasSecret">共有シークレット（GASと同じ文字列・任意）</label>
+        <input id="bskyGasSecret" type="password" autocomplete="new-password" placeholder="任意の合言葉">
+      </details>
 
       <div class="status" id="bskyStatus"></div>
     </div>
@@ -181,10 +156,10 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=10"></script>
-<script src="affiliate-core.js?v=10"></script>
-<script src="affiliate.js?v=10"></script>
-<script src="bluesky-core.js?v=10"></script>
-<script src="bluesky.js?v=10"></script>
+<script src="app.js?v=11"></script>
+<script src="affiliate-core.js?v=11"></script>
+<script src="affiliate.js?v=11"></script>
+<script src="bluesky-core.js?v=11"></script>
+<script src="bluesky.js?v=11"></script>
 </body>
 </html>

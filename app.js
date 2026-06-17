@@ -22,6 +22,8 @@
   // 両者の相対関係（中央揃え・行間）は崩れない。スライダーで微調整する。
   const VOFF_DEFAULT = 0.02, VOFF_MAX = 0.05;   // 全体（文字＋帯＋漫画）を下へ
   const ROW_MIN = -0.03, ROW_MAX = 0.03;        // 段別（文字・帯とも）上下双方向（＋下／−上）
+  const BANDPAD_MAX = 0.02;                      // 黒帯の余白（厚み）を追加できる上限（基準フレーム高さ比）
+  const ROWGAP_MAX = 0.04;                       // 段と段の追加スペース上限（基準フレーム高さ比）
 
   // 縦オフセット（すべて基準フレーム高さ比）。段別は「文字」と「帯」を別個に持ち、互いに独立。
   // 文字オフセットはその段の文字描画位置にのみ加算し、段の送り（次段Y）には影響させない＝他段は不動。
@@ -29,6 +31,8 @@
     whole: VOFF_DEFAULT,
     textAuthor: 0, textDetail: 0, textTitle: 0,  // 各段の「文字」だけ
     bandAuthor: 0, bandDetail: 0, bandTitle: 0,  // 各段の「黒帯」だけ
+    bandPad: 0,                                  // 黒帯の余白（全段共通で厚みを足す）
+    rowGap: 0,                                   // 段と段の間に足す縦スペース
   };
 
   const $ = (id) => document.getElementById(id);
@@ -39,13 +43,6 @@
     author: $("author"), detail: $("detail"), top: $("top"),
     previewBtn: $("previewBtn"), makeBtn: $("makeBtn"), status: $("status"),
     resultArea: $("resultArea"), result: $("result"), saveBtn: $("saveBtn"), dl: $("dl"),
-    voff: $("voff"), voffVal: $("voffVal"),
-    textAuthor: $("textAuthor"), textAuthorVal: $("textAuthorVal"),
-    textDetail: $("textDetail"), textDetailVal: $("textDetailVal"),
-    textTitle: $("textTitle"), textTitleVal: $("textTitleVal"),
-    bandAuthor: $("bandAuthor"), bandAuthorVal: $("bandAuthorVal"),
-    bandDetail: $("bandDetail"), bandDetailVal: $("bandDetailVal"),
-    bandTitle: $("bandTitle"), bandTitleVal: $("bandTitleVal"),
     voffSaveDefault: $("voffSaveDefault"), voffReset: $("voffReset"),
   };
   els.detail.value = DEFAULT_DETAIL;
@@ -189,13 +186,15 @@
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
     const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048);
+    const padExtra = H * OFF.bandPad;   // 黒帯の余白（厚み）を全段に加算
+    const rowGap = H * OFF.rowGap;      // 段と段の間に足す縦スペース
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
     if (author) {
       if (!/^作者/.test(author)) author = "作者：" + author;  // 「作者：」を常に表示（消えないように）
-      y = drawBlock(wrap(author, fA, maxw), y, fA, U(11), U(3), 175, OFF.bandAuthor, OFF.textAuthor) + U(2);
+      y = drawBlock(wrap(author, fA, maxw), y, fA, U(11) + padExtra, U(3), 175, OFF.bandAuthor, OFF.textAuthor) + U(2) + rowGap;
     }
-    if (detail) y = drawDetail(detail, y, fD, U(11), OFF.bandDetail, OFF.textDetail) + U(4);
-    if (top) { const f = fitOneLine(top, fT, maxw, U(14)); y = drawBlock([f.text], y, f.px, U(16), U(6), 195, OFF.bandTitle, OFF.textTitle) + U(4); }
+    if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.bandDetail, OFF.textDetail) + U(4) + rowGap;
+    if (top) { const f = fitOneLine(top, fT, maxw, U(14)); y = drawBlock([f.text], y, f.px, U(16) + padExtra, U(6), 195, OFF.bandTitle, OFF.textTitle) + U(4); }
   }
 
   // ---- 1フレーム描画 ----
@@ -334,56 +333,62 @@
     remove(key) { try { localStorage.removeItem(key); } catch (e) {} },
   };
 
-  // ---- 縦位置オフセット 4スライダー（全体1本＋各段の黒帯3本）をテーブル駆動で管理 ----
-  // 各スライダーは独立。値は基準フレーム高さ比、localStorage に保存・自動復元する。
-  // legacy は旧バージョンの保存キー（移行用）。3段の帯は旧・単一帯キー "preview_band_y" を引き継ぐ。
+  // ---- 位置調整（＋/−ボタン式・プレビュー横）。各コントロールは独立。----
+  // 値は基準フレーム高さ比、localStorage に保存・自動復元。legacy は旧バージョンの保存キー（移行用）。
   function flashBtn(btn, msg) {
     if (!btn) return;
     if (!btn.dataset.label) btn.dataset.label = btn.textContent;
     btn.textContent = msg;
     setTimeout(() => { btn.textContent = btn.dataset.label; }, 1500);
   }
-  const SLIDERS = [
-    { key: "whole",      el: els.voff,       lab: els.voffVal,       ls: "preview_offset_y",       lsDef: "preview_offset_y_default",       legacy: "v_offset", def: VOFF_DEFAULT, min: 0,       max: VOFF_MAX, signed: false },
-    { key: "textAuthor", el: els.textAuthor, lab: els.textAuthorVal, ls: "preview_text_author",    lsDef: "preview_text_author_default",    legacy: null,       def: 0,            min: ROW_MIN, max: ROW_MAX, signed: true },
-    { key: "textDetail", el: els.textDetail, lab: els.textDetailVal, ls: "preview_text_detail",    lsDef: "preview_text_detail_default",    legacy: null,       def: 0,            min: ROW_MIN, max: ROW_MAX, signed: true },
-    { key: "textTitle",  el: els.textTitle,  lab: els.textTitleVal,  ls: "preview_text_title",     lsDef: "preview_text_title_default",     legacy: null,       def: 0,            min: ROW_MIN, max: ROW_MAX, signed: true },
-    { key: "bandAuthor", el: els.bandAuthor, lab: els.bandAuthorVal, ls: "preview_band_author",    lsDef: "preview_band_author_default",    legacy: "preview_band_y", def: 0,      min: ROW_MIN, max: ROW_MAX, signed: true },
-    { key: "bandDetail", el: els.bandDetail, lab: els.bandDetailVal, ls: "preview_band_detail",    lsDef: "preview_band_detail_default",    legacy: "preview_band_y", def: 0,      min: ROW_MIN, max: ROW_MAX, signed: true },
-    { key: "bandTitle",  el: els.bandTitle,  lab: els.bandTitleVal,  ls: "preview_band_title",     lsDef: "preview_band_title_default",     legacy: "preview_band_y", def: 0,      min: ROW_MIN, max: ROW_MAX, signed: true },
+  // m/p/v = マイナス／プラスボタン／値表示の要素id。step = 1タップの変化量。signed = ＋符号と±方向。
+  const CONTROLS = [
+    { key: "whole",      m: "wholeMinus", p: "wholePlus", v: "wholeVal", ls: "preview_offset_y",    lsDef: "preview_offset_y_default",    legacy: "v_offset",       def: VOFF_DEFAULT, min: 0,       max: VOFF_MAX,    step: 0.0025, signed: false },
+    { key: "textAuthor", m: "taMinus",    p: "taPlus",    v: "taVal",    ls: "preview_text_author", lsDef: "preview_text_author_default", legacy: null,             def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
+    { key: "textDetail", m: "tdMinus",    p: "tdPlus",    v: "tdVal",    ls: "preview_text_detail", lsDef: "preview_text_detail_default", legacy: null,             def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
+    { key: "textTitle",  m: "ttMinus",    p: "ttPlus",    v: "ttVal",    ls: "preview_text_title",  lsDef: "preview_text_title_default",  legacy: null,             def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
+    { key: "bandAuthor", m: "baMinus",    p: "baPlus",    v: "baVal",    ls: "preview_band_author", lsDef: "preview_band_author_default", legacy: "preview_band_y", def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
+    { key: "bandDetail", m: "bdMinus",    p: "bdPlus",    v: "bdVal",    ls: "preview_band_detail", lsDef: "preview_band_detail_default", legacy: "preview_band_y", def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
+    { key: "bandTitle",  m: "btMinus",    p: "btPlus",    v: "btVal",    ls: "preview_band_title",  lsDef: "preview_band_title_default",  legacy: "preview_band_y", def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
+    { key: "bandPad",    m: "bpMinus",    p: "bpPlus",    v: "bpVal",    ls: "preview_band_pad",    lsDef: "preview_band_pad_default",    legacy: null,             def: 0,            min: 0,       max: BANDPAD_MAX, step: 0.0025, signed: false },
+    { key: "rowGap",     m: "rgMinus",    p: "rgPlus",    v: "rgVal",    ls: "preview_row_gap",     lsDef: "preview_row_gap_default",     legacy: null,             def: 0,            min: 0,       max: ROWGAP_MAX,  step: 0.005,  signed: false },
   ];
-  const clampS = (s, v) => Math.min(s.max, Math.max(s.min, isNaN(v) ? s.def : v));
-  function setSliderLabel(s) {
-    if (!s.lab) return;
-    const sign = (s.signed && OFF[s.key] >= 0) ? "+" : "";
-    s.lab.textContent = sign + (OFF[s.key] * 100).toFixed(1) + "%";
+  function clampC(c, v) {
+    if (isNaN(v)) v = c.def;
+    v = Math.round(v / c.step) * c.step;          // step に丸めて浮動小数の誤差を防ぐ
+    v = Math.round(v * 100000) / 100000;
+    return Math.min(c.max, Math.max(c.min, v));
   }
-  function applyS(s, v, redraw) {
-    OFF[s.key] = clampS(s, v);
-    if (s.el) s.el.value = String(OFF[s.key]);
-    setSliderLabel(s);
+  function ctlLabel(c) {
+    const el = $(c.v); if (!el) return;
+    const sign = (c.signed && OFF[c.key] >= 0) ? "+" : "";
+    el.textContent = sign + (OFF[c.key] * 100).toFixed(1) + "%";
+  }
+  function applyC(c, v, redraw) {
+    OFF[c.key] = clampC(c, v);
+    ctlLabel(c);
     if (redraw) preview();
   }
 
-  SLIDERS.forEach((s) => {
-    if (!s.el) return;
-    s.el.min = String(s.min); s.el.max = String(s.max); s.el.step = "0.0025";
+  CONTROLS.forEach((c) => {
     // 復元の優先順位：現在値 → ユーザー既定値 → 旧キー → 工場既定
-    const cur = Store.getNum(s.ls), def = Store.getNum(s.lsDef), legacy = s.legacy ? Store.getNum(s.legacy) : null;
-    applyS(s, cur != null ? cur : (def != null ? def : (legacy != null ? legacy : s.def)), false);
-    s.el.addEventListener("input", () => { applyS(s, parseFloat(s.el.value), true); Store.set(s.ls, OFF[s.key]); });
+    const cur = Store.getNum(c.ls), def = Store.getNum(c.lsDef), legacy = c.legacy ? Store.getNum(c.legacy) : null;
+    applyC(c, cur != null ? cur : (def != null ? def : (legacy != null ? legacy : c.def)), false);
+    const mb = $(c.m), pb = $(c.p);
+    if (mb) mb.addEventListener("click", () => { applyC(c, OFF[c.key] - c.step, true); Store.set(c.ls, OFF[c.key]); });
+    if (pb) pb.addEventListener("click", () => { applyC(c, OFF[c.key] + c.step, true); Store.set(c.ls, OFF[c.key]); });
   });
 
-  // 「デフォルトとして保存」：全スライダーの現在値を既定値として確定（次回はこの値で初期表示）
+  // 「既定値に保存」：全コントロールの現在値を既定値として確定（次回はこの値で初期表示）
   if (els.voffSaveDefault) els.voffSaveDefault.addEventListener("click", () => {
-    SLIDERS.forEach((s) => { Store.set(s.lsDef, OFF[s.key]); Store.set(s.ls, OFF[s.key]); });
+    CONTROLS.forEach((c) => { Store.set(c.lsDef, OFF[c.key]); Store.set(c.ls, OFF[c.key]); });
     flashBtn(els.voffSaveDefault, "✓ 既定値に保存しました");
   });
 
-  // 「リセット」：全スライダーの保存値（旧キー含む）を消し、初期状態（工場既定）に戻す
+  // 「リセット」：全保存値（旧キー含む）を消し、初期状態（工場既定）に戻す
   if (els.voffReset) els.voffReset.addEventListener("click", () => {
-    SLIDERS.forEach((s) => { Store.remove(s.ls); Store.remove(s.lsDef); if (s.legacy) Store.remove(s.legacy); });
-    SLIDERS.forEach((s, i) => applyS(s, s.def, i === SLIDERS.length - 1));  // 最後の1回だけ再描画
+    CONTROLS.forEach((c) => { Store.remove(c.ls); Store.remove(c.lsDef); if (c.legacy) Store.remove(c.legacy); });
+    CONTROLS.forEach((c, i) => applyC(c, c.def, i === CONTROLS.length - 1));  // 最後の1回だけ再描画
     flashBtn(els.voffReset, "✓ リセットしました");
   });
 
