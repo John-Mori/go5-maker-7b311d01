@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>はじめての設定ガイド｜Bluesky投稿＆記録</title>
+<style>
+  :root{
+    --bg:#0f1420; --bg2:#0b0f18; --card:#1a2030; --card2:#151b29;
+    --ink:#eef2f7; --sub:#9fb0c3; --mut:#6b7d92;
+    --accent:#2bb3c0; --accent2:#dc465a; --gold:#b89b6b; --line:#2a3346;
+    --ok:#3ecf8e; --warn:#ffd34d; --bsky:#1185fe; --green:#3ecf8e;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  body{background:radial-gradient(1100px 560px at 50% -10%, #16314a 0%, var(--bg) 55%, var(--bg2) 100%);
+    color:var(--ink);font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+    line-height:1.8;min-height:100vh;padding:0 0 70px;}
+  .wrap{max-width:780px;margin:0 auto;padding:0 16px;}
+  header{text-align:center;padding:46px 16px 14px;}
+  .badge{display:inline-block;font-size:11px;letter-spacing:.16em;color:var(--accent);
+    border:1px solid var(--line);border-radius:999px;padding:6px 16px;margin-bottom:14px;background:#0e1422aa;}
+  h1{font-size:27px;font-weight:900;line-height:1.3;
+    background:linear-gradient(90deg,#fff 0%,#bfe9ef 60%,var(--accent) 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  header p{color:var(--sub);font-size:14px;margin-top:10px;}
+
+  /* 目次 */
+  .toc{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:20px;}
+  .toc a{text-decoration:none;font-size:13px;font-weight:700;color:var(--ink);background:#0e1422;
+    border:1px solid var(--line);border-radius:999px;padding:8px 14px;}
+  .toc a:hover{border-color:var(--accent);color:var(--accent);}
+
+  .sec{margin-top:40px;scroll-margin-top:16px;}
+  .sec-h{display:flex;align-items:center;gap:12px;margin-bottom:8px;}
+  .sec-h .chip{font-size:13px;font-weight:900;color:#042027;background:var(--accent);border-radius:8px;padding:3px 10px;}
+  .sec-h.b .chip{background:var(--bsky);color:#fff;}
+  .sec-h.g .chip{background:var(--green);color:#04231a;}
+  .sec-h h2{font-size:20px;font-weight:800;}
+  .sec-lead{color:var(--sub);font-size:14px;margin-bottom:14px;}
+
+  /* これで何ができる */
+  .out{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  @media(max-width:640px){.out{grid-template-columns:1fr;}}
+  .out .o{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center;}
+  .out .o .e{font-size:26px;} .out .o b{display:block;margin-top:6px;font-size:14px;}
+  .out .o p{color:var(--sub);font-size:12.5px;margin-top:4px;}
+
+  /* 必要なもの */
+  .needs{display:flex;gap:10px;flex-wrap:wrap;}
+  .need{flex:1;min-width:200px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;}
+  .need .h{font-weight:800;font-size:14.5px;display:flex;gap:8px;align-items:center;}
+  .need p{color:var(--sub);font-size:12.5px;margin-top:6px;}
+  .need .free{font-size:11px;color:var(--ok);font-weight:700;}
+
+  /* ステップ */
+  .steps{counter-reset:st;}
+  .step{position:relative;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:16px 18px 16px 56px;margin-bottom:12px;}
+  .step::before{counter-increment:st;content:counter(st);position:absolute;left:14px;top:16px;
+    width:30px;height:30px;border-radius:50%;background:var(--accent);color:#042027;font-weight:900;font-size:15px;
+    display:flex;align-items:center;justify-content:center;}
+  .step.bs::before{background:var(--bsky);color:#fff;}
+  .step.gs::before{background:var(--green);color:#04231a;}
+  .step h3{font-size:15.5px;font-weight:800;}
+  .step p{color:var(--sub);font-size:13.5px;margin-top:5px;}
+  .step .path{font-size:12.5px;color:var(--ink);background:#0b1019;border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;margin-top:9px;}
+  .step .path b{color:#bfe9ef;}
+  .tap{display:inline-block;background:#102530;border:1px solid #1c4a50;color:#bfe9ef;border-radius:6px;
+    padding:1px 8px;font-size:12.5px;font-weight:700;margin:0 2px;}
+
+  /* コピー行 */
+  .kv{display:flex;align-items:center;gap:8px;background:#0b1019;border:1px solid var(--line);
+    border-radius:8px;padding:7px 9px;margin-top:7px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;}
+  .kv code{color:#bfe9ef;flex:1;word-break:break-all;}
+  .kv button{background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:6px;
+    padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;font-family:inherit;}
+  .kv button:active{color:var(--accent);border-color:var(--accent);}
+
+  .callout{display:flex;gap:12px;align-items:flex-start;background:#161d2c;border:1px solid var(--line);
+    border-left:3px solid var(--gold);border-radius:12px;padding:14px 16px;margin-top:12px;}
+  .callout.warn{border-left-color:var(--warn);}
+  .callout.danger{border-left-color:var(--accent2);}
+  .callout p{color:var(--sub);font-size:13px;} .callout b{color:var(--ink);}
+
+  details.adv{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:6px 16px;margin-top:6px;}
+  details.adv summary{cursor:pointer;font-weight:800;font-size:15px;padding:12px 0;color:var(--ink);}
+  details.adv[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px;}
+
+  .ts{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 18px;}
+  .ts .q{padding:12px 0;border-bottom:1px solid var(--line);}
+  .ts .q:last-child{border-bottom:none;}
+  .ts .q b{color:var(--warn);} .ts .q p{color:var(--sub);font-size:13px;margin-top:3px;}
+
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:18px;}
+  .btn{display:inline-flex;align-items:center;gap:8px;text-decoration:none;font-weight:700;font-size:14.5px;
+    padding:12px 20px;border-radius:12px;}
+  .btn-main{background:var(--bsky);color:#fff;}
+  .btn-ghost{background:#0e1422;border:1px solid var(--line);color:var(--ink);}
+  footer{text-align:center;color:var(--mut);font-size:12.5px;margin-top:46px;}
+  footer a{color:var(--accent);text-decoration:none;}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:var(--ok);color:#04231a;font-weight:800;font-size:13px;padding:10px 18px;border-radius:999px;
+    transition:.25s;pointer-events:none;z-index:50;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<header>
+  <div class="badge">はじめての設定ガイド</div>
+  <h1>Bluesky 連携 ＆ 記録のはじめ方</h1>
+  <p>むずかしい言葉ぬきで、画面の順番どおりに進めるだけ。<br>まずは <b>STEP A（投稿）</b> だけでOK。記録は<b>あとから</b>でも足せます。</p>
+  <div class="toc">
+    <a href="#what">できること</a>
+    <a href="#need">必要なもの</a>
+    <a href="#a">STEP A 投稿の連携</a>
+    <a href="#c">STEP C 使ってみる</a>
+    <a href="#b">STEP B 記録（任意）</a>
+    <a href="#trouble">困ったとき</a>
+    <a href="#sec">安全のために</a>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- できること -->
+  <section class="sec" id="what">
+    <div class="sec-h"><span class="chip">?</span><h2>これで何ができる？</h2></div>
+    <div class="out">
+      <div class="o"><div class="e">🎬</div><b>動画を作る</b><p>写真＋文字で5秒の縦動画</p></div>
+      <div class="o"><div class="e">🦋</div><b>そのまま投稿</b><p>Blueskyに画像つきで自動投稿</p></div>
+      <div class="o"><div class="e">📊</div><b>記録する（任意）</b><p>クリック数をスプレッドシートに</p></div>
+    </div>
+  </section>
+
+  <!-- 必要なもの -->
+  <section class="sec" id="need">
+    <div class="sec-h"><span class="chip">0</span><h2>必要なもの</h2></div>
+    <p class="sec-lead">投稿だけなら ① だけでOK。記録までやるなら ②③ も用意します（あとからで大丈夫）。</p>
+    <div class="needs">
+      <div class="need"><div class="h">🦋 Bluesky アカウント</div><p>あなたの投稿用アカウント。<b>アプリパスワード</b>を1つ発行します。</p><span class="free">投稿に必須</span></div>
+      <div class="need"><div class="h">📊 Google アカウント</div><p>記録用のスプレッドシートと、無料の自動処理(GAS)に使います。</p><span class="free">記録に必要・無料</span></div>
+      <div class="need"><div class="h">🔗 Bitly アカウント</div><p>リンクを短くして「何回開かれたか」を数えます。</p><span class="free">記録に必要・無料</span></div>
+    </div>
+  </section>
+
+  <!-- STEP A -->
+  <section class="sec" id="a">
+    <div class="sec-h b"><span class="chip">A</span><h2>STEP A：Bluesky と連携する（投稿の準備）</h2></div>
+    <p class="sec-lead">アカウント本体のパスワードは入れません。代わりに「<b>アプリパスワード</b>」という<b>使い捨ての合言葉</b>を1つ作って入れます。漏れても、それだけ無効にすれば本体は安全です。</p>
+    <div class="steps">
+      <div class="step bs">
+        <h3>アプリパスワードを発行する</h3>
+        <p>Bluesky を開いて、設定からたどります。</p>
+        <div class="path">設定（Settings）→ <b>プライバシーとセキュリティ</b> → <b>アプリパスワード</b> → <span class="tap">アプリパスワードを追加</span> → 名前は何でもOK（例：go5）→ 作成</div>
+        <div class="callout warn"><div>⚠️</div><p>表示される <b>xxxx-xxxx-xxxx-xxxx</b> は<b>その場でコピー</b>してください（あとから見られません）。忘れたら作り直せばOK。</p></div>
+      </div>
+      <div class="step bs">
+        <h3>ツールを開いて「投稿する」をオンに</h3>
+        <p>動画メーカーの下のほうにある 🦋 のところです。</p>
+        <div class="path">🦋 <b>動画作成後に Bluesky へ投稿する</b> のチェックをオン → 下に設定欄が開きます</div>
+      </div>
+      <div class="step bs">
+        <h3>ハンドルとアプリパスワードを入れる</h3>
+        <p>設定欄の中の <span class="tap">⚙ 投稿アカウント・記録設定</span> を開いて入力します。</p>
+        <div class="path"><b>ハンドル</b>＝あなたの @ のあと（例：<b>book-matomeex7.bsky.social</b>）<br><b>アプリパスワード</b>＝さっきコピーした xxxx-xxxx-xxxx-xxxx を貼り付け</div>
+        <div class="callout"><div>✅</div><p>これで連携は完了。入力内容は<b>あなたの端末の中だけ</b>に保存され、次回から自動で入ります。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP C 使ってみる（投稿の流れ） -->
+  <section class="sec" id="c">
+    <div class="sec-h b"><span class="chip">C</span><h2>STEP C：使ってみる（投稿までの流れ）</h2></div>
+    <p class="sec-lead">連携できたら、実際の流れはこれだけ。</p>
+    <div class="steps">
+      <div class="step"><h3>写真を選ぶ</h3><p><span class="tap">📷 写真を選ぶ / 撮る</span> で、漫画ページなどの画像を選びます。</p></div>
+      <div class="step"><h3>文字を入れる</h3><p>作者名・誘導文・コメント（3段目＝動画タイトルにもなる）を入力。</p></div>
+      <div class="step"><h3>プレビューを見ながら位置調整</h3><p>プレビューの横の <span class="tap">−</span> <span class="tap">＋</span> ボタンで、文字・黒帯の位置や、<b>黒帯の余白</b>・<b>段の間隔</b>を微調整。</p></div>
+      <div class="step"><h3>投稿の本文を整える</h3><p>🦋 の本文ボックスには見本が入っています。自由に書き換えて、<b>最後の行にアフィリンク（短縮しない生リンク）を貼り付け</b>ます。</p>
+        <div class="path">アフィリンクは <b>🔗 アフィリンク</b> タブで、作品URL＋af_id から作って「リンクをコピー」→ 本文の最後に貼り付け</div>
+      </div>
+      <div class="step"><h3>動画を作成 → 確認 → 投稿</h3><p><span class="tap">▶ 動画を作成</span> を押すと、約5秒で完成。<b>確認ダイアログ</b>で本文を見て「OK」すると、画像つきでBlueskyに投稿されます。</p></div>
+    </div>
+    <div class="callout"><div>💡</div><p><b>本文の見本：</b><br>おすすめ漫画見つけた💕<br>↓詳細はこちらから🎀 #PR #漫画<br>（この下に、あなたのアフィリンクを貼る）</p></div>
+  </section>
+
+  <!-- STEP B 記録（任意・上級） -->
+  <section class="sec" id="b">
+    <div class="sec-h g"><span class="chip">B</span><h2>STEP B：記録を残す（任意・あとででOK）</h2></div>
+    <p class="sec-lead">「投稿の短縮URLが何回開かれたか」を Google スプレッドシートに自動で貯めるしくみです。少し手順が多いので、投稿に慣れてからで大丈夫。</p>
+    <details class="adv">
+      <summary>▶ 記録のセットアップ手順を開く</summary>
+
+      <div class="steps">
+        <div class="step gs">
+          <h3>Bitly のトークンを取る（無料）</h3>
+          <p>Bitly にログイン → <b>Settings → API</b> → トークンを発行してコピー。</p>
+          <div class="callout danger"><div>⛔</div><p>このトークンは<b>公開サイトには絶対に貼らない</b>。次の手順で Google 側にだけ預けます。</p></div>
+        </div>
+        <div class="step gs">
+          <h3>記録用スプレッドシートを作る</h3>
+          <p>Google ドライブで新規スプレッドシートを作成。URLの <code>/d/●●●/edit</code> の <b>●●●（ID）</b> を控えます。</p>
+        </div>
+        <div class="step gs">
+          <h3>Apps Script にコードを貼る</h3>
+          <p><b>script.google.com</b> → 新しいプロジェクト → 既定のコードを消して、フォルダ内の <b>gas/コード.gs</b> の中身を貼り付け→保存。</p>
+        </div>
+        <div class="step gs">
+          <h3>カギ（プロパティ）を登録する</h3>
+          <p>プロジェクトの設定（⚙）→ スクリプト プロパティに、次の名前で登録：</p>
+          <div class="kv"><code>BITLY_TOKEN</code><button data-copy="BITLY_TOKEN">コピー</button></div>
+          <div class="kv"><code>SHEET_ID</code><button data-copy="SHEET_ID">コピー</button></div>
+          <div class="kv"><code>SHARED_SECRET</code><button data-copy="SHARED_SECRET">コピー</button></div>
+          <p style="color:var(--sub);font-size:12.5px;margin-top:6px;">値：BITLY_TOKEN＝手順1のトークン／SHEET_ID＝手順2のID／SHARED_SECRET＝好きな合言葉（任意）</p>
+        </div>
+        <div class="step gs">
+          <h3>ウェブアプリとして公開（デプロイ）</h3>
+          <p>右上 <b>デプロイ → 新しいデプロイ → ウェブアプリ</b>。<br>「実行するユーザー：自分」「アクセス：全員」で<b>デプロイ</b>→初回は権限を許可→ <b>…/exec</b> のURLをコピー。</p>
+        </div>
+        <div class="step gs">
+          <h3>クリック数の自動更新をオン</h3>
+          <p>関数選択で <b>setupTrigger</b> を選び ▶ 実行（1回だけ）。以後1時間ごとにクリック数が更新されます。</p>
+        </div>
+        <div class="step gs">
+          <h3>ツールに記録用URLを入れる</h3>
+          <p>🦋 の <span class="tap">⚙ 投稿アカウント・記録設定</span> を開いて：</p>
+          <div class="path"><b>記録用URL（GAS）</b>＝手順5の …/exec URL<br><b>共有シークレット</b>＝手順4の SHARED_SECRET（設定した場合）</div>
+          <div class="callout"><div>✅</div><p>これで投稿のたびに、スプレッドシートへ<b>題名（動画タイトル）・各URL・クリック数</b>が1行ずつ貯まります。</p></div>
+        </div>
+      </div>
+      <div class="callout"><div>📄</div><p>文章だけの詳しい版は <b>gas/セットアップ手順.md</b>、仕組みの図解は <b>ガイド_自動投稿と記録の仕組み.html</b> にもあります。</p></div>
+    </details>
+  </section>
+
+  <!-- 困ったとき -->
+  <section class="sec" id="trouble">
+    <div class="sec-h"><span class="chip">?</span><h2>うまくいかないとき</h2></div>
+    <div class="ts">
+      <div class="q"><b>投稿されない</b><p>🦋のチェックはオン？ ⚙の中の<b>ハンドルとアプリパスワード</b>は入ってる？ 本文は空じゃない？（どれか欠けると投稿はスキップされます）</p></div>
+      <div class="q"><b>「ログインに失敗」と出る</b><p>入れたのは<b>アプリパスワード</b>ですか？（通常のログインパスワードはNG）。一度作り直して貼り直すと直ります。</p></div>
+      <div class="q"><b>画像が出ない／投稿に写真が無い</b><p>先に <b>写真を選んでから</b>「動画を作成」してください。</p></div>
+      <div class="q"><b>記録（スプレッドシート）に入らない</b><p>記録用URL（…/exec）は正しい？ デプロイのアクセスは<b>「全員」</b>？ 合言葉(SHARED_SECRET)はツールとGASで一致してる？</p></div>
+      <div class="q"><b>スマホで古い画面のまま</b><p>ページを<b>引っぱって再読み込み</b>すると最新になります。</p></div>
+    </div>
+  </section>
+
+  <!-- 安全のために -->
+  <section class="sec" id="sec">
+    <div class="sec-h"><span class="chip">🔒</span><h2>安全のために（だいじ）</h2></div>
+    <div class="ts">
+      <div class="q"><b>アプリパスワードは「使い捨て」</b><p>万一漏れても、Blueskyで<b>そのアプリパスワードだけ無効化</b>すればOK。本体パスワードは入れません。</p></div>
+      <div class="q"><b>共有・公共の端末では入力しない</b><p>設定はその端末に保存されます。他人も使う端末では入れない／使ったら消す。</p></div>
+      <div class="q"><b>カギを人に見せない・コードに直接書かない</b><p>Bitlyトークンやアプリパスワードは、スクショやチャットに貼らない。サイトのコードにも書かない（Google側にだけ預ける）。</p></div>
+      <div class="q"><b>アフィリンクは「そのまま」</b><p>本文に貼る生リンクは加工しません＝報酬の計測(af_id)は壊れません。安心して貼ってOK。</p></div>
+    </div>
+  </section>
+
+  <div class="btnrow">
+    <a class="btn btn-main" href="index.html">🎬 ツールを開く</a>
+    <a class="btn btn-ghost" href="post.html">🦋 投稿プレビュー</a>
+    <a class="btn btn-ghost" href="ガイド_自動投稿と記録の仕組み.html">📖 仕組みの図解</a>
+  </div>
+
+  <footer>
+    このページは外部依存なし＝オフラインでも開けます。<br>
+    本体：<a href="index.html">index.html</a>　／　記録の詳しい手順：gas/セットアップ手順.md
+  </footer>
+</div>
+
+<div class="toast" id="toast">コピーしました</div>
+<script>
+  (function(){
+    var toast=document.getElementById('toast');
+    function show(){toast.classList.add('show');setTimeout(function(){toast.classList.remove('show');},1300);}
+    document.querySelectorAll('[data-copy]').forEach(function(b){
+      b.addEventListener('click',function(){
+        var t=b.getAttribute('data-copy');
+        if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(show,show);}
+        else{var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);show();}
+      });
+    });
+  })();
+</script>
+</body>
+</html>

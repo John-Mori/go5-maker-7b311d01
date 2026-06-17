@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 <header>
@@ -18,6 +18,7 @@
 
 <nav class="tabbar">
   <button id="tabMovie" class="tab active">🎬 動画作成</button>
+  <button id="tabPost"  class="tab">🦋 投稿</button>
   <button id="tabAffi"  class="tab">🔗 アフィリンク</button>
 </nav>
 
@@ -84,33 +85,14 @@
     <button id="previewBtn" class="ghost">プレビュー更新</button>
   </section>
 
-  <!-- Bluesky 自動投稿設定 -->
+  <!-- Bluesky 自動投稿トグル（方法①：作成後に自動投稿） -->
   <section class="card">
     <label class="bsky-toggle">
       <input id="bskyEnable" type="checkbox">
-      <span>🦋 動画作成後に Bluesky へ投稿する</span>
+      <span>🦋 動画作成後に Bluesky へ自動投稿する</span>
     </label>
-    <div id="bskySettings" hidden>
-      <label class="field-label" for="bskyText">投稿本文（このまま投稿されます・改行もそのまま）</label>
-      <textarea id="bskyText" rows="8">おすすめ漫画見つけた💕
-↓詳細はこちらから🎀 #PR #漫画</textarea>
-      <div class="hint">1つの本文ボックスで完結。最下行に<b>アフィリンク（短縮しない生リンク）</b>を貼ってください。リンクは自動でクリック可能になります。アフィリンクは「🔗 アフィリンク」タブで生成→コピーできます。</div>
-
-      <details class="bsky-adv">
-        <summary>⚙ 投稿アカウント・記録設定（任意・あとで）</summary>
-        <label class="field-label" for="bskyHandle">ハンドル（例：yourname.bsky.social）</label>
-        <input id="bskyHandle" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="yourname.bsky.social">
-        <label class="field-label" for="bskyAppPw">アプリパスワード（未入力なら投稿はスキップ）</label>
-        <input id="bskyAppPw" type="password" autocomplete="new-password" placeholder="xxxx-xxxx-xxxx-xxxx">
-        <div class="hint">Bluesky 設定 →「プライバシーとセキュリティ」→「アプリパスワード」で発行。端末内にのみ保存、いつでも失効可能。</div>
-        <label class="field-label" for="bskyGasUrl">記録用URL（Google Apps Script・任意）</label>
-        <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/●●●/exec">
-        <label class="field-label" for="bskyGasSecret">共有シークレット（GASと同じ文字列・任意）</label>
-        <input id="bskyGasSecret" type="password" autocomplete="new-password" placeholder="任意の合言葉">
-      </details>
-
-      <div class="status" id="bskyStatus"></div>
-    </div>
+    <div class="hint">本文は「🦋 投稿」タブで編集した内容、画像は<b>この動画の元写真</b>を添付します。アカウント設定も「🦋 投稿」タブにあります。<br>単独で投稿したいときは「🦋 投稿」タブの「今すぐ投稿」をどうぞ。</div>
+    <div class="status" id="bskyStatus"></div>
   </section>
 
   <!-- 作成 -->
@@ -126,6 +108,70 @@
   </section>
 
   <p class="notice">※ 画像は内容を判定しません。権利的に使用可・未成年の性的描写を含まない素材をご用意ください。</p>
+</main>
+</section>
+
+<!-- 投稿画面（方法②：単独で投稿。本文・画像・アカウントはここで設定） -->
+<section id="pagePost" hidden>
+<main>
+  <!-- 本文 -->
+  <section class="card">
+    <label class="field-label" for="bskyText">投稿本文（このまま投稿されます・改行もそのまま）</label>
+    <textarea id="bskyText" rows="7">おすすめ漫画見つけた💕
+↓詳細はこちらから🎀 #PR #漫画</textarea>
+    <div class="counter" id="postCount">0 / 300</div>
+    <div class="hint">最下行に<b>アフィリンク（短縮しない生リンク）</b>を貼り付け。自動でクリック可能になります（「🔗 アフィリンク」タブで生成→コピー）。この本文は<b>自動投稿（方法①）でも共通</b>で使われます。</div>
+  </section>
+
+  <!-- 画像 -->
+  <section class="card">
+    <label class="field-label">添付画像（任意・1枚／単独投稿用）</label>
+    <label for="postImg" class="photo-btn" id="postImgBtn">📷 画像を選ぶ</label>
+    <input id="postImg" type="file" accept="image/*" hidden>
+    <div class="row" style="display:flex;gap:8px;margin-top:8px;">
+      <button class="ghost" id="postImgClear" style="display:none;">画像を外す</button>
+    </div>
+    <div class="hint" id="postImgName">未選択</div>
+  </section>
+
+  <!-- プレビュー -->
+  <section class="card">
+    <div class="field-label">プレビュー（このまま投稿されます）</div>
+    <div class="bsky-card">
+      <div class="bsky-head">
+        <div class="bsky-av">🦋</div>
+        <div>
+          <div class="bsky-name" id="pvName">あなた</div>
+          <div class="bsky-handle" id="pvHandle">@（ハンドル未設定）</div>
+        </div>
+      </div>
+      <div class="bsky-body" id="pvBody"><span class="ph">（ここに本文が表示されます）</span></div>
+      <div class="bsky-img" id="pvImgWrap"><img id="pvImg" alt=""></div>
+      <div class="bsky-foot"><span>💬 0</span><span>🔁 0</span><span>♡ 0</span></div>
+    </div>
+  </section>
+
+  <!-- アカウント・記録設定（自動投稿と共通） -->
+  <section class="card">
+    <details class="bsky-adv" id="bskyAccDetails">
+      <summary>⚙ 投稿アカウント・記録設定（自動投稿と共通）</summary>
+      <label class="field-label" for="bskyHandle">ハンドル（例：yourname.bsky.social）</label>
+      <input id="bskyHandle" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="yourname.bsky.social">
+      <label class="field-label" for="bskyAppPw">アプリパスワード（未入力なら投稿はスキップ）</label>
+      <input id="bskyAppPw" type="password" autocomplete="new-password" placeholder="xxxx-xxxx-xxxx-xxxx">
+      <div class="hint">Bluesky 設定 →「プライバシーとセキュリティ」→「アプリパスワード」で発行。端末内にのみ保存、いつでも失効可能。</div>
+      <label class="field-label" for="bskyGasUrl">記録用URL（Google Apps Script・任意）</label>
+      <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/●●●/exec">
+      <label class="field-label" for="bskyGasSecret">共有シークレット（GASと同じ文字列・任意）</label>
+      <input id="bskyGasSecret" type="password" autocomplete="new-password" placeholder="任意の合言葉">
+    </details>
+  </section>
+
+  <!-- 投稿ボタン -->
+  <section class="card">
+    <button id="postNowBtn" class="primary bsky-post-btn">🦋 今すぐ投稿する（単独）</button>
+    <div class="status" id="postStatus"></div>
+  </section>
 </main>
 </section>
 
@@ -156,10 +202,10 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=11"></script>
-<script src="affiliate-core.js?v=11"></script>
-<script src="affiliate.js?v=11"></script>
-<script src="bluesky-core.js?v=11"></script>
-<script src="bluesky.js?v=11"></script>
+<script src="app.js?v=12"></script>
+<script src="affiliate-core.js?v=12"></script>
+<script src="affiliate.js?v=12"></script>
+<script src="bluesky-core.js?v=12"></script>
+<script src="bluesky.js?v=12"></script>
 </body>
 </html>

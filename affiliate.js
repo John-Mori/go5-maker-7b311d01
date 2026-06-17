@@ -10,28 +10,25 @@
 (function () {
   'use strict';
 
-  /* ── タブ切替 ── */
-  const tabMovie = document.getElementById('tabMovie');
-  const tabAffi  = document.getElementById('tabAffi');
-  const pageMovie = document.getElementById('pageMovie');
-  const pageAffi  = document.getElementById('pageAffi');
-
-  function showTab(tab) {
-    if (tab === 'movie') {
-      pageMovie.hidden = false;
-      pageAffi.hidden  = true;
-      tabMovie.classList.add('active');
-      tabAffi.classList.remove('active');
-    } else {
-      pageMovie.hidden = true;
-      pageAffi.hidden  = false;
-      tabAffi.classList.add('active');
-      tabMovie.classList.remove('active');
-    }
+  /* ── タブ切替（動画作成／投稿／アフィリンクの3タブ） ── */
+  var TABS = [
+    { btn: 'tabMovie', page: 'pageMovie' },
+    { btn: 'tabPost',  page: 'pagePost'  },
+    { btn: 'tabAffi',  page: 'pageAffi'  }
+  ];
+  function showTab(activeBtnId) {
+    TABS.forEach(function (t) {
+      var b = document.getElementById(t.btn), p = document.getElementById(t.page);
+      if (!b || !p) return;
+      var on = (t.btn === activeBtnId);
+      p.hidden = !on;
+      b.classList.toggle('active', on);
+    });
   }
-
-  tabMovie.addEventListener('click', function () { showTab('movie'); });
-  tabAffi.addEventListener('click',  function () { showTab('affi'); });
+  TABS.forEach(function (t) {
+    var b = document.getElementById(t.btn);
+    if (b) b.addEventListener('click', function () { showTab(t.btn); });
+  });
 
   /* ── アフィID永続化 ── */
   const afIdEl = document.getElementById('afId');
