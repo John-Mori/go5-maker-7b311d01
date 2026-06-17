@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自動投稿と記録の仕組み｜やさしい図解ガイド</title>
+<style>
+  :root{
+    --bg:#0f1420; --bg2:#0b0f18; --card:#1a2030; --card2:#151b29;
+    --ink:#eef2f7; --sub:#9fb0c3; --mut:#6b7d92;
+    --accent:#2bb3c0; --accent2:#dc465a; --gold:#b89b6b; --line:#2a3346;
+    --ok:#3ecf8e; --warn:#ffd34d; --blue:#5aa7ff; --bsky:#1185fe;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    background:radial-gradient(1200px 600px at 50% -10%, #16314a 0%, var(--bg) 55%, var(--bg2) 100%);
+    color:var(--ink); font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+    line-height:1.75; min-height:100vh; padding:0 0 80px;
+  }
+  .wrap{max-width:940px;margin:0 auto;padding:0 18px;}
+  header{text-align:center;padding:52px 18px 22px;}
+  .badge{display:inline-block;font-size:12px;letter-spacing:.16em;color:var(--accent);
+    border:1px solid var(--line);border-radius:999px;padding:6px 16px;margin-bottom:18px;background:#0e1422aa;}
+  h1{font-size:31px;font-weight:900;line-height:1.3;
+    background:linear-gradient(90deg,#fff 0%,#bfe9ef 60%,var(--accent) 100%);
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  header p{color:var(--sub);font-size:15px;margin-top:12px;}
+
+  .sec{margin-top:44px;}
+  .sec-h{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .sec-h .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent);}
+  .sec-h h2{font-size:21px;font-weight:800;}
+  .lead{color:var(--sub);font-size:14.5px;margin-bottom:14px;}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;}
+  .card + .card{margin-top:14px;}
+
+  /* TL;DR */
+  .tldr{background:linear-gradient(135deg,#102530,#0e1422);border:1px solid #1c4a50;border-radius:16px;padding:22px 24px;}
+  .tldr b{color:var(--accent);}
+  .tldr .big{font-size:17px;font-weight:800;color:var(--ink);}
+
+  /* 図解の枠 */
+  .fig{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:14px;overflow-x:auto;}
+  .fig svg{display:block;width:100%;height:auto;min-width:600px;}
+  .figcap{color:var(--mut);font-size:12.5px;text-align:center;margin-top:8px;}
+
+  /* 信号（状態） */
+  .status-row{display:flex;gap:12px;flex-wrap:wrap;}
+  .st{flex:1;min-width:240px;border-radius:14px;padding:16px 18px;border:1px solid var(--line);background:var(--card);}
+  .st .h{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;}
+  .st .l{width:11px;height:11px;border-radius:50%;}
+  .st.live .l{background:var(--ok);box-shadow:0 0 10px var(--ok);}
+  .st.local .l{background:var(--warn);box-shadow:0 0 10px var(--warn);}
+  .st.todo .l{background:var(--mut);}
+  .st p{color:var(--sub);font-size:13px;margin-top:8px;}
+  .st code{background:#0b1019;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px;color:#bfe9ef;
+    font-family:ui-monospace,Menlo,monospace;word-break:break-all;}
+
+  /* チェックリスト */
+  .check{list-style:none;}
+  .check li{display:flex;gap:12px;align-items:flex-start;padding:13px 0;border-bottom:1px solid var(--line);}
+  .check li:last-child{border-bottom:none;}
+  .check .box{flex-shrink:0;width:22px;height:22px;border-radius:6px;border:2px solid var(--accent);
+    display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--accent);font-weight:900;}
+  .check .t{font-size:14.5px;} .check .t b{color:var(--ink);} .check .t span{color:var(--sub);font-size:13px;}
+
+  /* セキュリティ */
+  .sgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(max-width:640px){.sgrid{grid-template-columns:1fr;}.status-row{flex-direction:column;}}
+  .sitem{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;border-left:3px solid var(--ok);}
+  .sitem.warn{border-left-color:var(--warn);}
+  .sitem.danger{border-left-color:var(--accent2);}
+  .sitem .h{font-weight:800;font-size:14.5px;display:flex;gap:8px;align-items:center;}
+  .sitem p{color:var(--sub);font-size:13px;margin-top:7px;}
+
+  /* 改修提案 */
+  .propbanner{display:flex;gap:14px;align-items:center;background:#241d10;border:1px solid #4a4017;
+    border-radius:14px;padding:14px 18px;margin-bottom:16px;}
+  .propbanner b{color:var(--warn);} .propbanner p{color:var(--sub);font-size:13.5px;}
+  .prop{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:10px;}
+  .prop .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .prop h3{font-size:15px;font-weight:800;}
+  .prop .tag{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;}
+  .tag-easy{background:#0e2a1c;color:var(--ok);border:1px solid #1c4a38;}
+  .tag-mid{background:#2a2410;color:var(--warn);border:1px solid #4a4017;}
+  .tag-big{background:#2a1016;color:var(--accent2);border:1px solid #4a1c28;}
+  .prop p{color:var(--sub);font-size:13px;margin-top:7px;}
+
+  .callout{display:flex;gap:14px;align-items:flex-start;background:#161d2c;border:1px solid var(--line);
+    border-left:3px solid var(--gold);border-radius:12px;padding:16px 18px;margin-top:16px;}
+  .callout p{color:var(--sub);font-size:13px;} .callout b{color:var(--gold);}
+  footer{text-align:center;color:var(--mut);font-size:12.5px;margin-top:50px;}
+  footer a{color:var(--accent);text-decoration:none;}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;
+    background:#0e2a2e;color:var(--accent);border:1px solid #1c4a50;}
+</style>
+</head>
+<body>
+<header>
+  <div class="badge">やさしい図解ガイド</div>
+  <h1>自動投稿と記録の仕組み</h1>
+  <p>「動画を作成 → Bluesky に投稿 → クリック数をスプレッドシートに記録」。<br>
+     <b>いま何がどこで動いているか</b>を、専門用語なしで図にしました。</p>
+</header>
+
+<div class="wrap">
+
+  <!-- ひとことで -->
+  <section class="sec">
+    <div class="tldr">
+      <p class="big">🎬 ボタンひとつで「動画作成 → 写真つきで Bluesky に投稿 → 記録」まで自動。</p>
+      <p style="margin-top:10px;color:var(--sub);font-size:14px;">
+        投稿には <b>あなたが選んだ元写真</b> と <b>無改変のアフィリンク</b>（＝報酬がちゃんと計上される状態）が入ります。
+        投稿のあと、その投稿への短縮URLを <b>Bitly</b> で作り、<b>Googleスプレッドシート</b>に
+        「動画タイトル・各URL・クリック数」を1行ずつためていきます。
+      </p>
+    </div>
+  </section>
+
+  <!-- 登場人物の図 -->
+  <section class="sec">
+    <div class="sec-h"><span class="dot"></span><h2>① 登場人物（どこで何が動く？）</h2></div>
+    <p class="lead">あなたのスマホ／PCのブラウザを中心に、外の3つのサービスとやり取りします。動画づくり自体は <b>端末の中</b> で完結します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Noto Sans JP',sans-serif">
+        <defs>
+          <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#5aa7ff"/>
+          </marker>
+        </defs>
+        <!-- 中心：端末 -->
+        <rect x="330" y="140" width="220" height="86" rx="14" fill="#102530" stroke="#2bb3c0" stroke-width="2"/>
+        <text x="440" y="172" text-anchor="middle" fill="#eef2f7" font-size="16" font-weight="700">📱 あなたの端末</text>
+        <text x="440" y="195" text-anchor="middle" fill="#9fb0c3" font-size="12">ブラウザ＝動画メーカー本体</text>
+        <text x="440" y="213" text-anchor="middle" fill="#6b7d92" font-size="11">動画の合成はここで完結</text>
+
+        <!-- Bluesky -->
+        <rect x="40" y="30" width="200" height="74" rx="13" fill="#0c1a2e" stroke="#1185fe" stroke-width="1.6"/>
+        <text x="140" y="60" text-anchor="middle" fill="#eef2f7" font-size="15" font-weight="700">🦋 Bluesky</text>
+        <text x="140" y="82" text-anchor="middle" fill="#9fb0c3" font-size="11.5">画像つきで投稿される先</text>
+
+        <!-- Bitly -->
+        <rect x="640" y="30" width="200" height="74" rx="13" fill="#241d10" stroke="#ffd34d" stroke-width="1.4"/>
+        <text x="740" y="60" text-anchor="middle" fill="#eef2f7" font-size="15" font-weight="700">🔗 Bitly</text>
+        <text x="740" y="82" text-anchor="middle" fill="#9fb0c3" font-size="11.5">短縮URL＋クリック集計</text>
+
+        <!-- Google -->
+        <rect x="600" y="250" width="240" height="86" rx="13" fill="#13231a" stroke="#3ecf8e" stroke-width="1.6"/>
+        <text x="720" y="280" text-anchor="middle" fill="#eef2f7" font-size="15" font-weight="700">📊 Google（GAS＋シート）</text>
+        <text x="720" y="301" text-anchor="middle" fill="#9fb0c3" font-size="11.5">記録の保管庫（無料サーバー）</text>
+        <text x="720" y="319" text-anchor="middle" fill="#6b7d92" font-size="11">Bitlyのカギはここに隠す</text>
+
+        <!-- arrows -->
+        <line x1="330" y1="165" x2="245" y2="95" stroke="#5aa7ff" stroke-width="2" marker-end="url(#arw)"/>
+        <text x="250" y="135" fill="#5aa7ff" font-size="11.5">投稿する</text>
+
+        <line x1="550" y1="160" x2="630" y2="300" stroke="#5aa7ff" stroke-width="2" marker-end="url(#arw)"/>
+        <text x="556" y="232" fill="#5aa7ff" font-size="11.5">記録を送る</text>
+
+        <line x1="700" y1="250" x2="745" y2="108" stroke="#3ecf8e" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#arw)"/>
+        <text x="752" y="190" fill="#3ecf8e" font-size="11.5">短縮を依頼</text>
+      </svg>
+      <div class="figcap">実線＝あなたの端末から送る／破線＝Google側からBitlyへ（カギを端末に出さないため）</div>
+    </div>
+  </section>
+
+  <!-- 流れ -->
+  <section class="sec">
+    <div class="sec-h"><span class="dot"></span><h2>② ボタンを押してから記録されるまで</h2></div>
+    <div class="fig">
+      <svg viewBox="0 0 880 150" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Noto Sans JP',sans-serif">
+        <defs>
+          <marker id="arw2" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#2bb3c0"/>
+          </marker>
+        </defs>
+        <g>
+          <rect x="8"   y="45" width="150" height="60" rx="12" fill="#1a2030" stroke="#2bb3c0" stroke-width="1.5"/>
+          <text x="83"  y="72" text-anchor="middle" fill="#eef2f7" font-size="13" font-weight="700">▶ 動画を作成</text>
+          <text x="83"  y="91" text-anchor="middle" fill="#9fb0c3" font-size="11">5秒録画</text>
+
+          <rect x="186" y="45" width="150" height="60" rx="12" fill="#1a2030" stroke="#2bb3c0" stroke-width="1.5"/>
+          <text x="261" y="72" text-anchor="middle" fill="#eef2f7" font-size="13" font-weight="700">確認ダイアログ</text>
+          <text x="261" y="91" text-anchor="middle" fill="#9fb0c3" font-size="11">本文を見てOK</text>
+
+          <rect x="364" y="45" width="150" height="60" rx="12" fill="#0c1a2e" stroke="#1185fe" stroke-width="1.6"/>
+          <text x="439" y="72" text-anchor="middle" fill="#eef2f7" font-size="13" font-weight="700">Blueskyへ投稿</text>
+          <text x="439" y="91" text-anchor="middle" fill="#9fb0c3" font-size="11">元写真＋アフィリンク</text>
+
+          <rect x="542" y="45" width="150" height="60" rx="12" fill="#241d10" stroke="#ffd34d" stroke-width="1.4"/>
+          <text x="617" y="72" text-anchor="middle" fill="#eef2f7" font-size="13" font-weight="700">投稿URLを短縮</text>
+          <text x="617" y="91" text-anchor="middle" fill="#9fb0c3" font-size="11">Bitlyで作成</text>
+
+          <rect x="720" y="45" width="150" height="60" rx="12" fill="#13231a" stroke="#3ecf8e" stroke-width="1.6"/>
+          <text x="795" y="72" text-anchor="middle" fill="#eef2f7" font-size="13" font-weight="700">シートに記録</text>
+          <text x="795" y="91" text-anchor="middle" fill="#9fb0c3" font-size="11">1行ふえる</text>
+
+          <line x1="158" y1="75" x2="184" y2="75" stroke="#2bb3c0" stroke-width="2" marker-end="url(#arw2)"/>
+          <line x1="336" y1="75" x2="362" y2="75" stroke="#2bb3c0" stroke-width="2" marker-end="url(#arw2)"/>
+          <line x1="514" y1="75" x2="540" y2="75" stroke="#2bb3c0" stroke-width="2" marker-end="url(#arw2)"/>
+          <line x1="692" y1="75" x2="718" y2="75" stroke="#2bb3c0" stroke-width="2" marker-end="url(#arw2)"/>
+        </g>
+      </svg>
+    </div>
+  </section>
+
+  <!-- クリック数の正直な説明 -->
+  <section class="sec">
+    <div class="sec-h"><span class="dot"></span><h2>③ 「クリック数」は何を数えている？（重要）</h2></div>
+    <div class="card">
+      <p style="font-size:14.5px;">
+        数えているのは <b style="color:var(--warn)">「投稿の短縮URL（Bitly）が開かれた回数」</b> です。
+        ＝ 別の場所に貼ったその短縮リンクから、何人が投稿にアクセスしたか、の目安。
+      </p>
+      <div class="fig" style="margin-top:14px;">
+        <svg viewBox="0 0 880 130" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Noto Sans JP',sans-serif">
+          <defs><marker id="arw3" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#9fb0c3"/></marker></defs>
+          <rect x="8"   y="40" width="150" height="56" rx="11" fill="#1a2030" stroke="#ffd34d" stroke-width="1.6"/>
+          <text x="83"  y="64" text-anchor="middle" fill="#eef2f7" font-size="12.5" font-weight="700">短縮URLを</text>
+          <text x="83"  y="82" text-anchor="middle" fill="#eef2f7" font-size="12.5" font-weight="700">クリック</text>
+          <text x="83"  y="26" text-anchor="middle" fill="#ffd34d" font-size="11">★ここを数える</text>
+
+          <rect x="200" y="40" width="160" height="56" rx="11" fill="#241d10" stroke="#ffd34d" stroke-width="1.3"/>
+          <text x="280" y="73" text-anchor="middle" fill="#eef2f7" font-size="12.5" font-weight="700">Bitlyが +1</text>
+
+          <rect x="402" y="40" width="170" height="56" rx="11" fill="#0c1a2e" stroke="#1185fe" stroke-width="1.4"/>
+          <text x="487" y="65" text-anchor="middle" fill="#eef2f7" font-size="12.5" font-weight="700">Bluesky投稿が開く</text>
+          <text x="487" y="83" text-anchor="middle" fill="#9fb0c3" font-size="10.5">中に生アフィリンク</text>
+
+          <rect x="614" y="40" width="120" height="56" rx="11" fill="#1a2030" stroke="#2a3346" stroke-width="1.3"/>
+          <text x="674" y="73" text-anchor="middle" fill="#9fb0c3" font-size="12">人が押す？</text>
+
+          <rect x="772" y="40" width="100" height="56" rx="11" fill="#2a1016" stroke="#dc465a" stroke-width="1.4"/>
+          <text x="822" y="64" text-anchor="middle" fill="#eef2f7" font-size="12.5" font-weight="700">FANZA</text>
+          <text x="822" y="82" text-anchor="middle" fill="#dc465a" font-size="10">本当の数はここ</text>
+
+          <line x1="158" y1="68" x2="198" y2="68" stroke="#9fb0c3" stroke-width="1.6" marker-end="url(#arw3)"/>
+          <line x1="360" y1="68" x2="400" y2="68" stroke="#9fb0c3" stroke-width="1.6" marker-end="url(#arw3)"/>
+          <line x1="572" y1="68" x2="612" y2="68" stroke="#9fb0c3" stroke-width="1.6" marker-end="url(#arw3)"/>
+          <line x1="734" y1="68" x2="770" y2="68" stroke="#9fb0c3" stroke-width="1.6" marker-end="url(#arw3)"/>
+        </svg>
+      </div>
+      <div class="callout"><div>⚠️</div>
+        <p><b>正直なところ：</b>投稿に貼った「生のアフィリンク」が実際に何回押されたかは、こちらからは取得できません
+        （Blueskyにその仕組みがないため）。<b>アフィリンクの本当のクリック数は FANZA の管理画面が正</b>です。
+        スプレッドシートの数字は「どれだけ投稿に人が来たか」の目安、と捉えてください。
+        アフィリンクには一切手を加えないので、<b style="color:var(--ok)">報酬計測（af_id）は壊れません</b>。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 現状 -->
+  <section class="sec">
+    <div class="sec-h"><span class="dot"></span><h2>④ いまの状態（公開済み？まだ手元だけ？）</h2></div>
+    <div class="status-row">
+      <div class="st live">
+        <div class="h"><span class="l"></span>公開中（誰でも使える）</div>
+        <p>これまでの動画メーカー本体。スマホでもPCでも開けます。<br><code>john-mori.github.io/go5-maker-7b311d01/</code></p>
+      </div>
+      <div class="st local">
+        <div class="h"><span class="l"></span>手元だけ（まだ未公開）</div>
+        <p>今回作った <b>Bluesky自動投稿・記録機能</b>。いまはMacBookの中にだけあります。
+        公開URLに出すには <code>git push</code> が必要です。</p>
+      </div>
+      <div class="st todo">
+        <div class="h"><span class="l"></span>あなたの設定待ち</div>
+        <p>記録の保管庫（GAS）と Bitly。手順どおりに1回セットアップ＋アプリに2つのURLを入れたら稼働します。</p>
+      </div>
+    </div>
+    <div class="callout"><div>🗺️</div>
+      <p><b>登場するURLは3つ：</b>①ツール本体（公開サイト）／②<code>localhost:8000</code>（手元の確認用だけ）／
+      ③Googleの記録用URL（あなたがデプロイ後に発行）。混同しないように。</p>
+    </div>
+  </section>
+
+  <!-- 必要なもの -->
+  <section class="sec">
+    <div class="sec-h"><span class="dot"></span><h2>⑤ あなたが用意するもの（1回だけ）</h2></div>
+    <div class="card">
+      <ul class="check">
+        <li><span class="box">1</span><span class="t"><b>Bluesky の「アプリパスワード」</b><br><span>設定 → プライバシーとセキュリティ → アプリパスワード で発行。<u>通常のパスワードは使いません</u>。</span></span></li>
+        <li><span class="box">2</span><span class="t"><b>Bitly の無料トークン</b><br><span>Bitly → Settings → API で発行。これは公開サイトには載せず、Google側にだけ預けます。</span></span></li>
+        <li><span class="box">3</span><span class="t"><b>記録用のGoogleスプレッドシート</b><br><span>新規作成してIDを控えるだけ。表の見出しは自動で作られます。</span></span></li>
+        <li><span class="box">4</span><span class="t"><b>Google Apps Script をデプロイ</b><br><span>用意した <code>gas/コード.gs</code> を貼って「ウェブアプリ」として公開 → <code>…/exec</code> のURLを取得。</span></span></li>
+        <li><span class="box">5</span><span class="t"><b>アプリに入力</b><br><span>投稿設定カードに「記録用URL」と「共有シークレット」を入れて完了。</span></span></li>
+      </ul>
+      <div class="callout"><div>📄</div><p><b>くわしい手順書：</b>同じフォルダの <b>gas/セットアップ手順.md</b> に、画面どおりの順番で書いてあります。</p></div>
+    </div>
+  </section>
+
+  <!-- セキュリティ -->
+  <section class="sec">
+    <div class="sec-h"><span class="dot"></span><h2>⑥ セキュリティの考えどころ</h2></div>
+    <p class="lead">「公開サイト＝中身が誰でも見える」前提で設計しています。秘密の鍵をサイトのコードに書かないことが肝心です。</p>
+    <div class="sgrid">
+      <div class="sitem">
+        <div class="h">✅ 鍵は端末とGoogle側だけ</div>
+        <p>アプリパスワード等はあなたの端末（localStorage）に、BitlyトークンはGoogle側に保管。<b>公開サイトのコードには一切書きません</b>。</p>
+      </div>
+      <div class="sitem">
+        <div class="h">✅ アプリパスワードは使い捨て可能</div>
+        <p>万一漏れても、Bluesky側で<b>そのアプリパスワードだけ失効</b>すればOK。アカウント本体のパスワードは入力しない設計です。</p>
+      </div>
+      <div class="sitem">
+        <div class="h">✅ アフィリンクは無改変</div>
+        <p>リンクを書き換えたり間に挟んだりしないので、規約・報酬計測の面でも安全側です。</p>
+      </div>
+      <div class="sitem warn">
+        <div class="h">⚠️ 共有端末・公共PCは注意</div>
+        <p>設定は端末に保存されます。他人も使う端末では入力しない／使用後に「リセット」を。</p>
+      </div>
+      <div class="sitem warn">
+        <div class="h">⚠️ 記録用URLは「合言葉」で守る</div>
+        <p>GASのURLは知られると誰でも書き込めます。必ず <b>共有シークレット（SHARED_SECRET）を設定</b>して、他人の書き込みを弾いてください。</p>
+      </div>
+      <div class="sitem danger">
+        <div class="h">⛔ やってはいけないこと</div>
+        <p>トークンやアプリパスワードを <b>HTMLやJSに直書きしてpushしない</b>。スクショやチャットに貼らない。GitHubに秘密ファイルを上げない。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 改修提案 -->
+  <section class="sec">
+    <div class="sec-h"><span class="dot"></span><h2>⑦ 改修・改善の提案</h2></div>
+    <div class="propbanner"><div>🛑</div>
+      <p><b>これは「提案」です。</b>ご指示があるまで、ここの実装には着手しません。気になるものだけ選んでください。</p>
+    </div>
+
+    <div class="prop">
+      <div class="top"><h3>1. ちゃんとした投稿プレビュー画面</h3><span class="tag tag-easy">かんたん</span></div>
+      <p>いまは確認が簡易ダイアログ。本文・添付画像・リンクを大きく確認してから送れる画面にすると安心感が上がります。</p>
+    </div>
+    <div class="prop">
+      <div class="top"><h3>2. アプリ内に投稿履歴を表示</h3><span class="tag tag-easy">かんたん</span></div>
+      <p>スプレッドシートを開かなくても、直近の投稿・短縮URL・クリック数をアプリ内の一覧で見られるように。</p>
+    </div>
+    <div class="prop">
+      <div class="top"><h3>3. 添付画像を「元写真／合成プレビュー」で選べる</h3><span class="tag tag-easy">かんたん</span></div>
+      <p>今回は元写真に固定。トグル1つで切り替えられると用途に応じて使い分けできます。</p>
+    </div>
+    <div class="prop">
+      <div class="top"><h3>4. ハッシュタグ・定型文の管理</h3><span class="tag tag-mid">ふつう</span></div>
+      <p>固定文を複数テンプレ化して使い分け。曜日やジャンルで本文を出し分けるなど。</p>
+    </div>
+    <div class="prop">
+      <div class="top"><h3>5. 失敗時のリトライと分かりやすいエラー表示</h3><span class="tag tag-mid">ふつう</span></div>
+      <p>ネットワーク不調・画像が重い等を切り分けて表示し、ワンタップで再送できるように。</p>
+    </div>
+    <div class="prop">
+      <div class="top"><h3>6. セキュリティ強化（合言葉の必須化・鍵の定期更新）</h3><span class="tag tag-mid">ふつう</span></div>
+      <p>共有シークレット未設定だと記録できないように強制。アプリパスワード／トークンの定期更新の促しも。</p>
+    </div>
+    <div class="prop">
+      <div class="top"><h3>7. 予約投稿・複数作品まとめ投稿</h3><span class="tag tag-big">大きめ</span></div>
+      <p>時間指定の自動投稿や、複数URLを順番に投稿。GAS側のしくみを拡張する規模になります。</p>
+    </div>
+    <div class="prop">
+      <div class="top"><h3>8. X（旧Twitter）対応</h3><span class="tag tag-big">大きめ</span></div>
+      <p>Xへの自動投稿は別途サーバー＋OAuthが必須（このツール単体では不可）。やるなら専用の小さなサーバーを足す構成になります。</p>
+    </div>
+  </section>
+
+  <footer>
+    このページは外部依存なし＝<b>オフラインでもダブルクリックで開けます</b>。<br>
+    本体：<a href="index.html">スマホ版 index.html</a>　／　手順書：gas/セットアップ手順.md　／　全体地図：../00_プロジェクト概要.html
+  </footer>
+</div>
+</body>
+</html>

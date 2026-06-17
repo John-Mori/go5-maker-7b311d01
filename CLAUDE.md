@@ -36,6 +36,8 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 6. スライダーの保存・既定値・リセット（汎用 `Store` ヘルパ）
 7. 黒帯を3段別に独立制御
 8. 文字も3段別に独立 ＝ 現在の7本構成
+9. **Bluesky 自動投稿**を追加（完全クライアントサイド）。動画作成後に確認ダイアログ→**挿入した元写真**＋固定文＋提携文＋**生のアフィリンク(無改変)** を投稿
+10. **投稿記録＆クリック集計**を追加。投稿後、共有URLを GAS Web App へ送信→Bitly短縮→Googleスプレッドシートに「題名(動画タイトル)/各URL/クリック数」を記録。クリック数＝**投稿短縮URLの開封数**（アフィリンクには介入しない設計）
 
 ---
 
@@ -48,8 +50,13 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 | `style.css` | スマホ向けスタイル（ダークUI・タブ・スライダー群） | |
 | `affiliate-core.js` | アフィリンク生成の**純粋関数** `buildAffiliateLink()` | 仕様変更時のみ |
 | `affiliate.js` | アフィリンク画面のUI配線（入力・コピー・永続化） | |
+| `bluesky-core.js` | Bluesky 投稿コア。**純粋関数** `buildBlueskyPost()`（本文＋リンクfacet）＋ `blueskyPostWithImage()`（ログイン→画像アップロード→投稿） | 仕様変更時のみ |
+| `bluesky.js` | Bluesky 設定UIの配線・確認ダイアログ・**元写真**のJPEG圧縮（1MB制限対応）・投稿後に GAS へ記録送信。`video-created` イベントを購読 | |
+| `gas/コード.gs` | **サーバーレス（Google Apps Script）**。投稿URLを Bitly 短縮→スプレッドシート追記、`refreshClicks` で毎時クリック数更新。本体とは別デプロイ | 仕様変更時 |
+| `gas/セットアップ手順.md` | Bitlyトークン・Sheet・GASデプロイの手順書 | |
 | `assets/bg_main.mp4` | 背景動画 | 差し替え可 |
 | `tests/test_affiliate.js` | Node テスト（T-1〜T-4＋エッジ） | |
+| `tests/test_bluesky.js` | Node テスト（`buildBlueskyPost` の facet バイトオフセット検証） | |
 | `設計書_スマホ版.md` / `改修設計書_スマホ版完全版.md` | 設計・保守ドキュメント | |
 
 ---
@@ -69,7 +76,21 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 `preview_offset_y`（全体）／`preview_text_author|detail|title`／`preview_band_author|detail|title`、各 `*_default`（既定値）。旧キー `v_offset`・`preview_band_y` は自動移行。
 
 ### キャッシュ運用
-`index.html` のアセット参照は `app.js?v=N` の形。**中身を変えたら `N` を1つ上げる**とスマホで確実に最新が読まれる（現在 v=9）。
+`index.html` のアセット参照は `app.js?v=N` の形。**中身を変えたら `N` を1つ上げる**とスマホで確実に最新が読まれる（現在 v=10）。
+
+### Bluesky 投稿（§9 機能）の要点
+- 完全クライアントサイド。`https://bsky.social` の XRPC を直接叩く（CORS対応・サーバー不要）。認証は**アプリパスワード**（通常PWではない／revoke 可能）。
+- フロー：`app.js` の `make()` 成功時に `video-created` を dispatch → `bluesky.js` が購読 → 確認ダイアログ → `#cv` の最終フレームを JPEG 圧縮（≤約950KB）→ `blueskyPostWithImage()`。
+- 画像 embed（`app.bsky.embed.images`）と外部リンクカードは併用不可のため、**作品URLは本文に richtext#link facet 付きで入れる**（facet の index は **UTF-8 バイトオフセット**）。
+- 設定の localStorage キー：`bsky_enable` / `bsky_handle` / `bsky_app_pw` / `bsky_words` / `bsky_disclosure` / `bsky_work_url` / `bsky_gas_url` / `bsky_gas_secret`。af_id は既存 `fanza_af_id` を流用。
+- 秘匿情報（アプリパスワード・af_id・シークレット）は **console に出さない**（既存方針を踏襲）。
+
+### 投稿記録＆クリック集計（§10 機能）の要点
+- **クリック数＝投稿の短縮URL（Bitly）の開封数**。アフィリンクは本文に**生のまま（無改変）**貼るため af_id 計測は壊れない。生アフィリンクのクリック実数は取得不可（FANZA 管理画面が正）。
+- 投稿の共有URLは `at://…/<rkey>` から `https://bsky.app/profile/<handle>/post/<rkey>` を組み立て（`bluesky-core.js`）。
+- クライアントは GAS Web App へ `{secret,title,postUrl,affiliateUrl}` を **Content-Type無指定の POST**（＝simple request でプリフライト回避）。GAS が Bitly 短縮＋Sheet追記。
+- Bitly トークンは **GAS 側のスクリプトプロパティに隠蔽**（公開サイトには置かない）。トークン秘匿＋CORS回避のためにサーバーレスを1つ挟む構成。
+- X(旧Twitter)はこの構成では不可（OAuth＋サーバー必須・直投稿はCORS不可）。
 
 ---
 

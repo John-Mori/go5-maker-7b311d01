@@ -93,6 +93,27 @@ textarea{
 }
 textarea:focus{border-color:var(--accent);}
 
+/* ── Bluesky 自動投稿設定 ── */
+.bsky-toggle{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:15px;
+  font-weight:700;
+  color:var(--ink);
+  cursor:pointer;
+}
+.bsky-toggle input[type=checkbox]{
+  width:22px;height:22px;flex-shrink:0;
+  accent-color:var(--accent);
+}
+#bskySettings{margin-top:6px;}
+#bskyAppPw{
+  width:100%;font-size:16px;padding:11px 12px;border-radius:10px;
+  border:1px solid var(--line);background:#0e1422;color:var(--ink);outline:none;
+}
+#bskyAppPw:focus{border-color:var(--accent);}
+
 /* ── アフィリンク結果カード ── */
 .affi-result{
   background:#0e1422;

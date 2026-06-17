@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>投稿プレビュー｜Bluesky</title>
+<style>
+  :root{
+    --bg:#0f1420; --bg2:#0b0f18; --card:#1a2030; --card2:#151b29;
+    --ink:#eef2f7; --sub:#9fb0c3; --mut:#6b7d92;
+    --accent:#2bb3c0; --line:#2a3346; --ok:#3ecf8e; --warn:#ffd34d; --err:#dc465a;
+    --bsky:#1185fe; --bskycard:#1e2733; --bskyline:#2c3a47;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  body{background:radial-gradient(1100px 560px at 50% -10%, #16314a 0%, var(--bg) 55%, var(--bg2) 100%);
+    color:var(--ink);font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+    line-height:1.7;min-height:100vh;padding:0 0 60px;}
+  .wrap{max-width:560px;margin:0 auto;padding:0 14px;}
+  header{text-align:center;padding:30px 14px 10px;}
+  .badge{display:inline-block;font-size:11px;letter-spacing:.14em;color:var(--bsky);
+    border:1px solid var(--bskyline);border-radius:999px;padding:5px 14px;margin-bottom:12px;background:#0e1422aa;}
+  h1{font-size:24px;font-weight:900;}
+  header p{color:var(--sub);font-size:13px;margin-top:8px;}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0;}
+  .field-label{display:block;font-size:13px;color:var(--accent);font-weight:700;margin:10px 0 5px;}
+  .field-label:first-child{margin-top:0;}
+  input[type=text],input[type=password],textarea{width:100%;font-size:16px;padding:11px 12px;border-radius:10px;
+    border:1px solid var(--line);background:#0e1422;color:var(--ink);outline:none;font-family:inherit;}
+  input:focus,textarea:focus{border-color:var(--accent);}
+  textarea{resize:vertical;line-height:1.7;min-height:120px;white-space:pre-wrap;}
+  .hint{color:var(--sub);font-size:12px;margin-top:6px;word-break:break-all;}
+  .photo-btn{display:block;text-align:center;background:#0e1422;border:1.5px dashed var(--bsky);
+    color:var(--bsky);font-weight:700;padding:14px;border-radius:12px;font-size:15px;cursor:pointer;}
+  button{font-family:inherit;font-size:15px;border:none;border-radius:11px;padding:12px 14px;font-weight:700;cursor:pointer;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;}
+  .row > *{flex:1;}
+  .mini{background:#0e1422;border:1px solid var(--line);color:var(--sub);font-size:13px;padding:10px;border-radius:10px;}
+  .mini:active{border-color:var(--accent);color:var(--accent);}
+  .primary{width:100%;background:var(--bsky);color:#fff;font-size:17px;padding:15px;margin-top:6px;}
+  .primary:disabled{opacity:.5;}
+  .counter{font-size:12px;color:var(--mut);text-align:right;margin-top:6px;font-variant-numeric:tabular-nums;}
+  .counter.over{color:var(--err);font-weight:700;}
+  .status{margin-top:10px;font-size:13.5px;text-align:center;min-height:18px;color:var(--accent);word-break:break-all;}
+  .status.err{color:var(--err);} .status.ok{color:var(--ok);}
+  details{margin-top:8px;} summary{cursor:pointer;color:var(--sub);font-size:13px;font-weight:700;padding:4px 0;}
+  a{color:var(--bsky);}
+
+  /* ── Blueskyっぽいプレビューカード ── */
+  .sec-title{font-size:12px;color:var(--accent);font-weight:700;margin:4px 0 8px;display:flex;align-items:center;gap:8px;}
+  .sec-title::after{content:"";flex:1;height:1px;background:var(--line);}
+  .bsky-card{background:var(--bskycard);border:1px solid var(--bskyline);border-radius:14px;padding:14px 14px 12px;}
+  .bsky-head{display:flex;align-items:center;gap:10px;}
+  .bsky-av{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--bsky),#0a64c8);flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;font-size:20px;}
+  .bsky-name{font-weight:700;font-size:15px;color:#fff;line-height:1.2;}
+  .bsky-handle{color:#8a9bb0;font-size:13px;}
+  .bsky-body{color:#e7edf3;font-size:15.5px;line-height:1.6;margin-top:10px;white-space:pre-wrap;word-break:break-word;}
+  .bsky-body .lnk{color:var(--bsky);}
+  .bsky-body .ph{color:#5a6b7e;}
+  .bsky-img{margin-top:10px;border-radius:12px;overflow:hidden;border:1px solid var(--bskyline);display:none;}
+  .bsky-img img{display:block;width:100%;max-height:360px;object-fit:cover;}
+  .bsky-foot{display:flex;gap:26px;margin-top:12px;color:#7d8ea1;font-size:13px;}
+  .bsky-foot span{display:flex;align-items:center;gap:6px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="badge">🦋 BLUESKY ・ 投稿プレビュー</div>
+  <h1>投稿プレビュー & 投稿</h1>
+  <p>下のプレビュー＝<b>実際に投稿される見た目</b>です。改行もリンク位置もそのまま反映されます。</p>
+</header>
+
+<div class="wrap">
+
+  <!-- ① 本文を書く -->
+  <section class="card">
+    <label class="field-label" for="body">① 本文（Enterで改行＝そのまま投稿に反映）</label>
+    <textarea id="body" placeholder="例：&#10;新作公開しました🎬&#10;&#10;詳しくはこちら👇"></textarea>
+    <div class="counter" id="counter">0 / 300</div>
+    <div class="row" style="margin-top:8px;">
+      <button class="mini" id="insAffi">🔗 アフィリンクを挿入</button>
+      <button class="mini" id="insBreak">⏎ 空行を挿入</button>
+    </div>
+    <div class="hint">「アフィリンクを挿入」は、下の作品URL＋af_idから<b>無改変のアフィリンク</b>をカーソル位置に挿入します。</div>
+  </section>
+
+  <!-- ② 画像 -->
+  <section class="card">
+    <label class="field-label">② 添付画像（任意・1枚）</label>
+    <label for="img" class="photo-btn" id="imgBtn">📷 画像を選ぶ</label>
+    <input id="img" type="file" accept="image/*" hidden>
+    <div class="row" style="margin-top:8px;">
+      <button class="mini" id="imgClear" style="display:none;">画像を外す</button>
+    </div>
+    <div class="hint" id="imgName">未選択</div>
+  </section>
+
+  <!-- ③ リンク材料 -->
+  <section class="card">
+    <label class="field-label" for="workUrl">③ 作品URL（アフィリンクの元）</label>
+    <input id="workUrl" type="text" inputmode="url" placeholder="https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/">
+    <label class="field-label" for="afId">af_id（アフィID）</label>
+    <input id="afId" type="text" autocomplete="off" placeholder="例：yourname-001">
+    <div class="hint">既存ツールと同じ保存先を共有します（入力済みなら自動で入ります）。</div>
+  </section>
+
+  <!-- プレビュー -->
+  <section class="card">
+    <div class="sec-title">プレビュー（このまま投稿されます）</div>
+    <div class="bsky-card">
+      <div class="bsky-head">
+        <div class="bsky-av">🦋</div>
+        <div>
+          <div class="bsky-name" id="pvName">あなた</div>
+          <div class="bsky-handle" id="pvHandle">@（ハンドル未設定）</div>
+        </div>
+      </div>
+      <div class="bsky-body" id="pvBody"><span class="ph">（ここに本文が表示されます）</span></div>
+      <div class="bsky-img" id="pvImgWrap"><img id="pvImg" alt=""></div>
+      <div class="bsky-foot"><span>💬 0</span><span>🔁 0</span><span>♡ 0</span></div>
+    </div>
+  </section>
+
+  <!-- 投稿 -->
+  <section class="card">
+    <details>
+      <summary>⚙ 投稿アカウント設定（ハンドル・アプリパスワード）</summary>
+      <label class="field-label" for="handle">ハンドル（例：yourname.bsky.social）</label>
+      <input id="handle" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="yourname.bsky.social">
+      <label class="field-label" for="appPw">アプリパスワード（通常PWではありません）</label>
+      <input id="appPw" type="password" autocomplete="new-password" placeholder="xxxx-xxxx-xxxx-xxxx">
+      <div class="hint">端末内にのみ保存（既存ツールと共有）。共有端末では使わないでください。</div>
+    </details>
+    <button class="primary" id="postBtn">🦋 このプレビュー通りに投稿する</button>
+    <div class="status" id="status"></div>
+  </section>
+
+  <p class="hint" style="text-align:center;">このページは独立しています。動画メーカー本体（<a href="index.html">index.html</a>）には影響しません。</p>
+</div>
+
+<!-- アフィリンク生成のみ既存の純粋関数を読み取り利用（変更なし） -->
+<script src="affiliate-core.js?v=10"></script>
+<script>
+(function(){
+  "use strict";
+  var $=function(id){return document.getElementById(id);};
+  var ta=$("body"), counter=$("counter"), pvBody=$("pvBody");
+  var imgInput=$("img"), imgName=$("imgName"), imgClear=$("imgClear"), pvImgWrap=$("pvImgWrap"), pvImg=$("pvImg");
+  var workUrl=$("workUrl"), afId=$("afId"), handle=$("handle"), appPw=$("appPw");
+  var pvName=$("pvName"), pvHandle=$("pvHandle"), postBtn=$("postBtn"), statusEl=$("status");
+  var SERVICE="https://bsky.social";
+  var selectedFile=null;
+
+  // ---- localStorage（既存ツールとキー共有） ----
+  function load(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+  function save(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+  var BIND=[[workUrl,"bsky_work_url"],[afId,"fanza_af_id"],[handle,"bsky_handle"],[appPw,"bsky_app_pw"]];
+  BIND.forEach(function(p){var v=load(p[1]); if(v!=null) p[0].value=v;
+    p[0].addEventListener("input",function(){save(p[1],p[0].value); if(p[0]===handle) syncHandle();});});
+
+  function setStatus(msg,cls){statusEl.className="status"+(cls?(" "+cls):""); statusEl.textContent=msg||"";}
+
+  // ---- プレビュー描画（＝投稿内容そのもの） ----
+  function escapeHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function highlightLinks(html){return html.replace(/(https?:\/\/[^\s]+)/g,'<span class="lnk">$1</span>');}
+  function countGraphemes(s){
+    try{ if(typeof Intl!=="undefined"&&Intl.Segmenter){var seg=new Intl.Segmenter("ja",{granularity:"grapheme"});var n=0; for(var _ of seg.segment(s)) n++; return n;} }catch(e){}
+    return Array.from(s).length;
+  }
+  function renderPreview(){
+    var text=ta.value;
+    pvBody.innerHTML = text ? highlightLinks(escapeHtml(text)) : '<span class="ph">（ここに本文が表示されます）</span>';
+    var n=countGraphemes(text);
+    counter.textContent=n+" / 300";
+    counter.classList.toggle("over",n>300);
+  }
+  ta.addEventListener("input",renderPreview);
+
+  function syncHandle(){
+    var h=(handle.value||"").trim().replace(/^@/,"");
+    pvHandle.textContent= h ? ("@"+h) : "@（ハンドル未設定）";
+    pvName.textContent= h ? h.split(".")[0] : "あなた";
+  }
+  syncHandle();
+
+  // ---- カーソル位置に挿入 ----
+  function insertAtCursor(text){
+    var s=ta.selectionStart||0, e=ta.selectionEnd||0, v=ta.value;
+    ta.value=v.slice(0,s)+text+v.slice(e);
+    var pos=s+text.length; ta.focus(); ta.setSelectionRange(pos,pos);
+    renderPreview();
+  }
+  $("insAffi").addEventListener("click",function(){
+    var url=(workUrl.value||"").trim();
+    if(!url){setStatus("先に作品URLを入力してください。","err");return;}
+    var link=url;
+    if(typeof buildAffiliateLink==="function"){
+      var r=buildAffiliateLink(url,(afId.value||"").trim());
+      if(r&&r.ok) link=r.link;
+      else if(r&&r.error==="no_cid"){setStatus("URLに cid が見つかりません。","err");return;}
+    }
+    // 直前に改行が無ければ改行してから挿入（見栄え用。任意で消せます）
+    var v=ta.value, s=ta.selectionStart||v.length;
+    var prefix=(s>0 && v[s-1]!=="\n") ? "\n" : "";
+    insertAtCursor(prefix+link);
+    setStatus("アフィリンクを挿入しました（無改変＝af_id保持）。","ok");
+  });
+  $("insBreak").addEventListener("click",function(){insertAtCursor("\n\n");});
+
+  // ---- 画像選択＆プレビュー ----
+  imgInput.addEventListener("change",function(){
+    var f=imgInput.files[0]; if(!f) return;
+    selectedFile=f; imgName.textContent=f.name; imgClear.style.display="";
+    var url=URL.createObjectURL(f);
+    pvImg.src=url; pvImgWrap.style.display="block";
+  });
+  imgClear.addEventListener("click",function(){
+    selectedFile=null; imgInput.value=""; imgName.textContent="未選択";
+    imgClear.style.display="none"; pvImgWrap.style.display="none"; pvImg.removeAttribute("src");
+  });
+
+  // ---- 画像圧縮（Blueskyのblob上限≈976KBに収める） ----
+  var MAX_BYTES=950000;
+  function toBlob(c,q){return new Promise(function(res){c.toBlob(res,"image/jpeg",q);});}
+  function loadImage(src){return new Promise(function(res,rej){var i=new Image(); i.onload=function(){res(i);}; i.onerror=function(){rej(new Error("画像の読み込みに失敗"));}; i.src=src;});}
+  function compressFile(file){
+    var url=URL.createObjectURL(file);
+    return loadImage(url).then(function(img){
+      var maxSide=2048, scale=Math.min(1,maxSide/Math.max(img.width,img.height));
+      var c=document.createElement("canvas");
+      c.width=Math.max(1,Math.round(img.width*scale)); c.height=Math.max(1,Math.round(img.height*scale));
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(url);
+      var q=0.9;
+      function step(){return toBlob(c,q).then(function(b){
+        if(b&&b.size<=MAX_BYTES) return b;
+        q-=0.12; if(q>=0.3) return step();
+        return down(0.8);
+      });}
+      function down(sc){
+        var c2=document.createElement("canvas");
+        c2.width=Math.max(1,Math.round(c.width*sc)); c2.height=Math.max(1,Math.round(c.height*sc));
+        c2.getContext("2d").drawImage(c,0,0,c2.width,c2.height);
+        return toBlob(c2,0.8).then(function(b){ if(b&&b.size<=MAX_BYTES)return b; if(sc>0.35)return down(sc-0.15); return b;});
+      }
+      return step();
+    });
+  }
+
+  // ---- リンク facet（UTF-8バイトオフセット）を本文から自動検出 ----
+  function detectFacets(text){
+    var enc=new TextEncoder(), facets=[], re=/https?:\/\/[^\s]+/g, m;
+    while((m=re.exec(text))){
+      var url=m[0].replace(/[.,;:!?）)]+$/,"");
+      var start=m.index, end=start+url.length;
+      facets.push({index:{byteStart:enc.encode(text.slice(0,start)).length, byteEnd:enc.encode(text.slice(0,end)).length},
+        features:[{$type:"app.bsky.richtext.facet#link",uri:url}]});
+    }
+    return facets;
+  }
+
+  // ---- 投稿（このページ内で完結／既存ファイルは未使用） ----
+  function jpost(url,opts){return fetch(url,opts).then(function(r){
+    return r.json().catch(function(){return null;}).then(function(j){
+      if(!r.ok){var msg=(j&&j.message)?j.message:("HTTP "+r.status); throw new Error(msg);} return j;});});}
+
+  function postNow(text,imageBlob){
+    var ident=(handle.value||"").trim().replace(/^@/,"");
+    var session;
+    return jpost(SERVICE+"/xrpc/com.atproto.server.createSession",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({identifier:ident,password:(appPw.value||"").trim()})})
+    .then(function(s){session=s;
+      if(!imageBlob) return null;
+      return jpost(SERVICE+"/xrpc/com.atproto.repo.uploadBlob",{method:"POST",
+        headers:{"Authorization":"Bearer "+session.accessJwt,"Content-Type":imageBlob.type||"image/jpeg"},body:imageBlob});
+    }).then(function(up){
+      var record={ $type:"app.bsky.feed.post", text:text, createdAt:new Date().toISOString(), langs:["ja"] };
+      var facets=detectFacets(text); if(facets.length) record.facets=facets;
+      if(up&&up.blob) record.embed={ $type:"app.bsky.embed.images", images:[{ alt:(text.split("\n")[0]||""), image:up.blob }] };
+      return jpost(SERVICE+"/xrpc/com.atproto.repo.createRecord",{method:"POST",
+        headers:{"Authorization":"Bearer "+session.accessJwt,"Content-Type":"application/json"},
+        body:JSON.stringify({repo:session.did,collection:"app.bsky.feed.post",record:record})});
+    }).then(function(res){
+      var rkey=String(res.uri||"").split("/").pop();
+      return { postUrl:"https://bsky.app/profile/"+session.handle+"/post/"+rkey, handle:session.handle };
+    });
+  }
+
+  postBtn.addEventListener("click",function(){
+    var text=ta.value;
+    if(!text.trim()){setStatus("本文を入力してください。","err");return;}
+    if(countGraphemes(text)>300){setStatus("300文字を超えています。短くしてください。","err");return;}
+    if(!(handle.value||"").trim()||!(appPw.value||"").trim()){setStatus("⚙設定でハンドルとアプリパスワードを入力してください。","err");return;}
+    if(!window.confirm("プレビュー通りに Bluesky へ投稿します。よろしいですか？")) return;
+
+    postBtn.disabled=true; setStatus("投稿中…");
+    var prep = selectedFile ? compressFile(selectedFile) : Promise.resolve(null);
+    prep.then(function(blob){ return postNow(text,blob); })
+      .then(function(res){
+        statusEl.className="status ok";
+        statusEl.innerHTML="✅ 投稿しました → <a href=\""+res.postUrl+"\" target=\"_blank\" rel=\"noopener\">投稿を開く</a>";
+      })
+      .catch(function(e){ setStatus("⚠️ 投稿に失敗："+(e&&e.message?e.message:e),"err"); })
+      .finally(function(){ postBtn.disabled=false; });
+  });
+
+  renderPreview();
+})();
+</script>
+</body>
+</html>
