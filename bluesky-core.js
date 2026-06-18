@@ -164,18 +164,39 @@
     });
   }
 
-  // 自由テキストから URL を検出し、richtext#link facet を作る（index は UTF-8 バイトオフセット）。
+  // 自由テキストから URL（#link）とハッシュタグ（#tag）を検出して facets を作る。
+  // index は UTF-8 バイトオフセット。タグ範囲は「#」を含み、tag値は「#」を除く。半角#のみ検出。
   function detectFacets(text) {
     text = String(text || '');
-    var facets = [], re = /https?:\/\/[^\s]+/g, m;
-    while ((m = re.exec(text))) {
-      var url = m[0].replace(/[.,;:!?。、！？）)】」』]+$/, '');  // 末尾の句読点・閉じ括弧はリンクに含めない
-      var start = m.index, end = start + url.length;
+    var facets = [], used = [], m;
+
+    // URL → link facet
+    var ure = /https?:\/\/[^\s]+/g;
+    while ((m = ure.exec(text))) {
+      var url = m[0].replace(/[.,;:!?。、！？）)】」』]+$/, '');  // 末尾の句読点・閉じ括弧は含めない
+      var s = m.index, e = s + url.length;
+      used.push([s, e]);
       facets.push({
-        index: { byteStart: byteLen(text.slice(0, start)), byteEnd: byteLen(text.slice(0, end)) },
+        index: { byteStart: byteLen(text.slice(0, s)), byteEnd: byteLen(text.slice(0, e)) },
         features: [{ $type: 'app.bsky.richtext.facet#link', uri: url }]
       });
     }
+
+    // ハッシュタグ → tag facet（行頭 or 空白の直後の半角#のみ。URLと重なる分は除外）
+    var tre = /(^|\s)(#[^\s#]+)/g, t;
+    while ((t = tre.exec(text))) {
+      var hash = t[2].replace(/[.,;:!?。、！？）)】」』]+$/, '');  // 末尾の句読点はタグに含めない
+      if (hash.length < 2) continue;  // 「#」だけは除外
+      var ts = t.index + t[1].length, te = ts + hash.length;
+      var overlap = used.some(function (r) { return ts < r[1] && te > r[0]; });
+      if (overlap) continue;
+      facets.push({
+        index: { byteStart: byteLen(text.slice(0, ts)), byteEnd: byteLen(text.slice(0, te)) },
+        features: [{ $type: 'app.bsky.richtext.facet#tag', tag: hash.slice(1) }]
+      });
+    }
+
+    facets.sort(function (a, b) { return a.index.byteStart - b.index.byteStart; });  // byteStart昇順
     return facets;
   }
 

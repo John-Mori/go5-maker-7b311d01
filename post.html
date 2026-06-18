@@ -163,7 +163,7 @@
 
   // ---- プレビュー描画（＝投稿内容そのもの） ----
   function escapeHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
-  function highlightLinks(html){return html.replace(/(https?:\/\/[^\s]+)/g,'<span class="lnk">$1</span>');}
+  function highlightLinks(html){return html.replace(/(https?:\/\/[^\s]+)/g,'<span class="lnk">$1</span>').replace(/(^|\s)(#[^\s#<]+)/g,'$1<span class="lnk">$2</span>');}
   function countGraphemes(s){
     try{ if(typeof Intl!=="undefined"&&Intl.Segmenter){var seg=new Intl.Segmenter("ja",{granularity:"grapheme"});var n=0; for(var _ of seg.segment(s)) n++; return n;} }catch(e){}
     return Array.from(s).length;
@@ -250,13 +250,23 @@
 
   // ---- リンク facet（UTF-8バイトオフセット）を本文から自動検出 ----
   function detectFacets(text){
-    var enc=new TextEncoder(), facets=[], re=/https?:\/\/[^\s]+/g, m;
-    while((m=re.exec(text))){
-      var url=m[0].replace(/[.,;:!?）)]+$/,"");
-      var start=m.index, end=start+url.length;
-      facets.push({index:{byteStart:enc.encode(text.slice(0,start)).length, byteEnd:enc.encode(text.slice(0,end)).length},
+    text=String(text||""); var enc=new TextEncoder(), bl=function(s){return enc.encode(s).length;}, facets=[], used=[], m;
+    var ure=/https?:\/\/[^\s]+/g;
+    while((m=ure.exec(text))){
+      var url=m[0].replace(/[.,;:!?。、！？）)】」』]+$/,"");
+      var s=m.index, e=s+url.length; used.push([s,e]);
+      facets.push({index:{byteStart:bl(text.slice(0,s)), byteEnd:bl(text.slice(0,e))},
         features:[{$type:"app.bsky.richtext.facet#link",uri:url}]});
     }
+    var tre=/(^|\s)(#[^\s#]+)/g, t;
+    while((t=tre.exec(text))){
+      var hash=t[2].replace(/[.,;:!?。、！？）)】」』]+$/,""); if(hash.length<2) continue;
+      var ts=t.index+t[1].length, te=ts+hash.length;
+      if(used.some(function(r){return ts<r[1] && te>r[0];})) continue;
+      facets.push({index:{byteStart:bl(text.slice(0,ts)), byteEnd:bl(text.slice(0,te))},
+        features:[{$type:"app.bsky.richtext.facet#tag",tag:hash.slice(1)}]});
+    }
+    facets.sort(function(a,b){return a.index.byteStart-b.index.byteStart;});
     return facets;
   }
 

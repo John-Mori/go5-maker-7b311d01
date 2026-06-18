@@ -243,18 +243,37 @@ function bskyPost_(text, imageBlob) {
   return { uri: res.uri || '', postUrl: (s.handle && rkey) ? ('https://bsky.app/profile/' + s.handle + '/post/' + rkey) : '' };
 }
 
-// 本文中URLの richtext#link facet（index は UTF-8 バイトオフセット）
+// 本文中の URL（#link）とハッシュタグ（#tag）の facet（index は UTF-8 バイトオフセット）
 function byteLen_(s) { return Utilities.newBlob(String(s)).getBytes().length; }
 function detectFacets_(text) {
-  var facets = [], re = /https?:\/\/[^\s]+/g, m;
-  while ((m = re.exec(text))) {
+  text = String(text || '');
+  var facets = [], used = [], m;
+
+  var ure = /https?:\/\/[^\s]+/g;
+  while ((m = ure.exec(text))) {
     var url = m[0].replace(/[.,;:!?。、！？）)】」』]+$/, '');
-    var start = m.index, end = start + url.length;
+    var s = m.index, e = s + url.length;
+    used.push([s, e]);
     facets.push({
-      index: { byteStart: byteLen_(text.slice(0, start)), byteEnd: byteLen_(text.slice(0, end)) },
+      index: { byteStart: byteLen_(text.slice(0, s)), byteEnd: byteLen_(text.slice(0, e)) },
       features: [{ '$type': 'app.bsky.richtext.facet#link', uri: url }]
     });
   }
+
+  var tre = /(^|\s)(#[^\s#]+)/g, t;
+  while ((t = tre.exec(text))) {
+    var hash = t[2].replace(/[.,;:!?。、！？）)】」』]+$/, '');
+    if (hash.length < 2) continue;
+    var ts = t.index + t[1].length, te = ts + hash.length;
+    var overlap = used.some(function (r) { return ts < r[1] && te > r[0]; });
+    if (overlap) continue;
+    facets.push({
+      index: { byteStart: byteLen_(text.slice(0, ts)), byteEnd: byteLen_(text.slice(0, te)) },
+      features: [{ '$type': 'app.bsky.richtext.facet#tag', tag: hash.slice(1) }]
+    });
+  }
+
+  facets.sort(function (a, b) { return a.index.byteStart - b.index.byteStart; });
   return facets;
 }
 
