@@ -10,7 +10,7 @@
   var activeSlot = null;
 
   function fmtSlot(s) {
-    return (s.date || '') + ' ' + (s.time || '') + '　' + (s.role || '') + '／' + (s.genre || '');
+    return (s.date || '') + ' ' + (s.time || '') + '　' + (s.role || '');
   }
   function setBanner(text, done) {
     ['slotCtxMovie', 'slotCtxPost'].forEach(function (id) {

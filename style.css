@@ -132,21 +132,26 @@ video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
 /* ── タブバー ── */
 .tabbar{
   display:flex;
-  max-width:520px;
+  max-width:620px;
   margin:8px auto 0;
-  padding:0 14px;
-  gap:8px;
+  padding:0 10px;
+  gap:6px;
+  overflow-x:auto;                 /* 5タブが入り切らなければ横スクロール（折り返さない） */
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
 }
+.tabbar::-webkit-scrollbar{display:none;}
 .tab{
-  flex:1;
+  flex:0 0 auto;                    /* 各タブは1行・内容幅。潰れて改行しない */
+  white-space:nowrap;
   font-family:inherit;
-  font-size:15px;
+  font-size:14px;
   font-weight:700;
   background:var(--card);
   color:var(--sub);
   border:1px solid var(--line);
   border-radius:12px 12px 0 0;
-  padding:10px 8px;
+  padding:10px 14px;
   cursor:pointer;
   margin-top:0;
   width:auto;

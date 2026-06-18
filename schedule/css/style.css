@@ -176,3 +176,8 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
   background:#1185fe;color:#fff;font-weight:700;font-size:14px;cursor:pointer;}
 .integ-actions button:active{filter:brightness(.92);}
 .integ-actions .integ-hint{flex-basis:100%;font-size:11px;color:#8a9bb0;margin-top:2px;}
+
+/* ── 日付ボタンの説明（統合UI向け） ── */
+.ctrl-help{max-width:1100px;margin:6px auto 0;padding:8px 12px;font-size:12px;line-height:1.6;
+  color:#9fb0c3;background:#0e1422;border:1px solid #2a3346;border-radius:8px;}
+.ctrl-help b{color:#bfe9ef;}

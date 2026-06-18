@@ -128,11 +128,11 @@ window.SCH = window.SCH || {};
     const ctrl = document.createElement("div");
     ctrl.className = "day-ctrl";
     ctrl.innerHTML =
-      `<button data-act="off" title="休みにする">＋休</button>` +
-      `<button data-act="weekday" title="平日化（祝日でも可・警告）">平日</button>` +
-      `<button data-act="follow" title="自動判定に従う">自動</button>` +
-      `<button data-act="obon" title="お盆タグ">盆</button>` +
-      `<button data-act="newyear" title="年末年始タグ">正</button>`;
+      `<button data-act="off" title="この日を休みにする">休みにする</button>` +
+      `<button data-act="weekday" title="平日扱いにする（祝日でも可）">平日にする</button>` +
+      `<button data-act="follow" title="自動判定に戻す">自動に戻す</button>` +
+      `<button data-act="obon" title="お盆として扱う">お盆</button>` +
+      `<button data-act="newyear" title="年末年始として扱う">年末年始</button>`;
     ctrl.querySelectorAll("button").forEach((b) => {
       b.addEventListener("click", () => onDayAction(date, meta, b.dataset.act));
     });
@@ -218,7 +218,7 @@ window.SCH = window.SCH || {};
       ${inFrame ? `<div class="integ-actions">
         <button type="button" id="integ-make">🎬 この枠で動画を作る</button>
         <button type="button" id="integ-post">🦋 この枠を投稿する</button>
-        <div class="integ-hint">枠の日時・役割・ジャンルを「動画作成／投稿」へ引き継ぎます。</div>
+        <div class="integ-hint">枠の情報を「動画作成／投稿」へ引き継ぎます。</div>
       </div>` : ""}
       ${s.needs_review ? `<div class="warn">要確認：day-type変更でテンプレと差異あり。時刻は自動変更していません。</div>` : ""}
       ${s.verify_flag ? `<div class="info">検証対象枠。${s.alt_hypothesis ? "対立仮説: " + escapeHtml(s.alt_hypothesis) : ""}</div>` : ""}
@@ -228,9 +228,6 @@ window.SCH = window.SCH || {};
       <label>タイトル<input id="f-title" value="${escapeAttr(s.title)}"></label>
       <label>動画ID<input id="f-video" value="${escapeAttr(s.video_id)}"></label>
       <label>URL<input id="f-url" value="${escapeAttr(s.url)}"></label>
-      <label>ジャンル<input id="f-genre" value="${escapeAttr(s.genre)}"></label>
-      <label>概要欄リンク<input id="f-desc" value="${escapeAttr(s.desc_link)}"></label>
-      <label>SNS導線<input id="f-sns" value="${escapeAttr(s.sns_funnel)}"></label>
       <label>メモ<textarea id="f-notes">${escapeHtml(s.notes)}</textarea></label>
       <div class="muted">公開予定: ${s.scheduled_at}</div>
       ${renderVerificationSection(s)}
@@ -300,10 +297,8 @@ window.SCH = window.SCH || {};
     s.title = g("f-title");
     s.video_id = g("f-video");
     s.url = g("f-url");
-    s.genre = g("f-genre");
-    s.desc_link = g("f-desc");
-    s.sns_funnel = g("f-sns");
     s.notes = g("f-notes");
+    // ジャンル/概要欄リンク/SNS導線 はUIから削除（テンプレ値を保持・編集不可）
     s.needs_review = false; // ユーザー確認済み
     captureVerification(s);
     if (!s.created_at) s.created_at = new Date().toISOString();

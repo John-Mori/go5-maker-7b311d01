@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>投稿スケジュール カレンダー（5週ローリング）</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=17">
 </head>
 <body>
   <header class="app-header">
@@ -35,6 +35,8 @@
     <span class="lg lg-review">!=要確認</span>
   </div>
 
+  <div class="ctrl-help">日付の青ボタン：<b>休みにする</b>=この日を休みに ／ <b>平日にする</b>=平日扱い ／ <b>自動に戻す</b>=自動判定へ ／ <b>お盆・年末年始</b>=長期休暇として扱う。各<b>枠（時刻）をタップ</b>で編集・「動画を作る／投稿」へ。</div>
+
   <main id="calendar" class="calendar"></main>
 
   <!-- スロット編集モーダル -->
@@ -57,6 +59,6 @@
   <script src="js/daytype.js"></script>
   <script src="js/generator.js"></script>
   <script src="js/store.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/app.js?v=17"></script>
 </body>
 </html>
