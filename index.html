@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=19">
+<link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
 <header>
@@ -178,10 +178,10 @@
       <label class="field-label" for="bskyAppPw">アプリパスワード（未入力なら投稿はスキップ）</label>
       <input id="bskyAppPw" type="password" autocomplete="new-password" placeholder="xxxx-xxxx-xxxx-xxxx">
       <div class="hint">Bluesky 設定 →「プライバシーとセキュリティ」→「アプリパスワード」で発行。端末内にのみ保存、いつでも失効可能。</div>
-      <label class="field-label" for="bskyGasUrl">記録用URL（Google Apps Script・任意）</label>
+      <label class="field-label" for="bskyGasUrl">記録用URL（Google Apps Script）</label>
       <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/●●●/exec">
-      <label class="field-label" for="bskyGasSecret">共有シークレット（GASと同じ文字列・任意）</label>
-      <input id="bskyGasSecret" type="password" autocomplete="new-password" placeholder="任意の合言葉">
+      <div class="hint">これを入れると<b>すべての投稿を自動で記録</b>し、🧪検証タブで集計できます（クリック数も）。記録するなら必ず設定してください。</div>
+      <div id="gasStatus" class="gas-status"></div>
     </details>
   </section>
 
@@ -268,14 +268,14 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=19"></script>
-<script src="affiliate-core.js?v=19"></script>
-<script src="affiliate.js?v=19"></script>
-<script src="bluesky-core.js?v=19"></script>
-<script src="scheduler.js?v=19"></script>
-<script src="bluesky.js?v=19"></script>
-<script src="verify-core.js?v=19"></script>
-<script src="verify.js?v=19"></script>
-<script src="integration.js?v=19"></script>
+<script src="app.js?v=20"></script>
+<script src="affiliate-core.js?v=20"></script>
+<script src="affiliate.js?v=20"></script>
+<script src="bluesky-core.js?v=20"></script>
+<script src="scheduler.js?v=20"></script>
+<script src="bluesky.js?v=20"></script>
+<script src="verify-core.js?v=20"></script>
+<script src="verify.js?v=20"></script>
+<script src="integration.js?v=20"></script>
 </body>
 </html>

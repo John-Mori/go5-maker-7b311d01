@@ -43,7 +43,8 @@
           document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: {
             post_uri: res.uri || '', post_url: res.postUrl || '',
             affiliate: (it.text.match(firstUrlRe) || [''])[0],
-            posted_at: new Date().toISOString(), slotId: it.slotId || null
+            posted_at: new Date().toISOString(), slotId: it.slotId || null,
+            title: it.alt || (String(it.text).split('\n')[0] || '')
           } }));
         } catch (e) {}
       }).catch(function (e) {

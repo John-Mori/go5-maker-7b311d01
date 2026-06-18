@@ -181,3 +181,11 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 .ctrl-help{max-width:1100px;margin:6px auto 0;padding:8px 12px;font-size:12px;line-height:1.6;
   color:#9fb0c3;background:#0e1422;border:1px solid #2a3346;border-radius:8px;}
 .ctrl-help b{color:#bfe9ef;}
+
+/* ── 優先度1〜5表示・本命強調（v=20／role/検 表記は廃止） ── */
+.slot-pri { font-size: 10px; font-weight: 700; color: var(--muted); margin-left: auto; }
+.slot.pr-1 { border-left-color: var(--role-honmei); }
+.slot.pr-2 { border-left-color: var(--role-jun); }
+.slot.pr-3 { border-left-color: var(--role-normal); }
+.slot.is-top { border: 2px solid #ffd34d; background: linear-gradient(90deg, rgba(255,211,77,.16), transparent); }
+.slot.is-top .slot-time, .slot.is-top .slot-pri { color: #ffd34d; }

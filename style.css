@@ -46,6 +46,11 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .ctl-actions{display:flex;gap:8px;margin-top:10px;}
 .ctl-actions .ghost{flex:1;width:auto;font-size:13px;padding:9px 6px;margin-top:0;}
 
+/* ── 記録(GAS)の状態表示 ── */
+.gas-status{font-size:12px;margin-top:8px;font-weight:700;}
+.gas-status.on{color:var(--ok);}
+.gas-status.off{color:var(--gold);}
+
 /* ── Bluesky 詳細設定（折りたたみ） ── */
 .bsky-adv{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:4px 12px;background:#0e1422;}
 .bsky-adv summary{cursor:pointer;color:var(--sub);font-size:13px;font-weight:700;padding:8px 0;}

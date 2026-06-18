@@ -138,36 +138,40 @@ window.SCH = window.SCH || {};
     });
     cell.appendChild(ctrl);
 
-    // 6枠
+    // 6枠（その日の優先順位 1〜5 を算出して表示。本命＝優先度1のみ強調）
     const slotWrap = document.createElement("div");
     slotWrap.className = "slots";
+    const dayslots = [];
     for (let idx = 0; idx < config.slotsPerDay; idx++) {
       const s = slots[gen.slotId(date, idx)];
-      if (s) slotWrap.appendChild(renderSlot(s));
+      if (s) dayslots.push(s);
     }
+    assignPriorities(dayslots);
+    dayslots.forEach((s) => slotWrap.appendChild(renderSlot(s)));
     cell.appendChild(slotWrap);
     return cell;
   }
 
+  // その日の枠を重要度で並べ、優先度1〜5を割り当てる（表示順は時刻のまま／1＝その日の本命）
+  function assignPriorities(arr) {
+    const weight = { "本命": 6, "準本命": 5, "通常": 4, "テスト": 3, "昼補助": 2, "深夜補助": 1 };
+    const ranked = arr.slice().sort((a, b) => (weight[b.role] || 0) - (weight[a.role] || 0));
+    ranked.forEach((s, i) => { s._priority = Math.min(i + 1, 5); });
+  }
+
   function renderSlot(s) {
     const el = document.createElement("div");
-    el.className = `slot role-${s.role}`;
-    if (s.role === "本命") el.classList.add("is-peak");
+    const pri = s._priority || 5;
+    el.className = "slot pr-" + pri + " st-" + statusClass(s.status);
+    if (pri === 1) el.classList.add("is-top");        // その日の本命だけ強調
     if (s.needs_review) el.classList.add("needs-review");
-    if (s.verify_flag) el.classList.add("has-verify");
-    if (s.verification && s.verification.variant) el.classList.add("has-variant");
-    el.classList.add("st-" + statusClass(s.status));
 
-    const time = s.time; // "24:00" はそのまま表示（深夜枠＝翌日0時の意味）
-    const variant = s.verification && s.verification.variant;
     el.innerHTML =
-      `<div class="slot-row1"><span class="slot-time">${time}</span>` +
-      `<span class="slot-role">${s.role}</span>` +
-      (s.verify_flag ? `<span class="slot-verify" title="検証対象">検</span>` : "") +
-      (variant ? `<span class="slot-variant" title="検証の変種">${variant}</span>` : "") +
+      `<div class="slot-row1"><span class="slot-time">${s.time}</span>` +
+      `<span class="slot-pri">優先度${pri}${pri === 1 ? "・本命" : ""}</span>` +
       (s.needs_review ? `<span class="slot-review" title="要確認">!</span>` : "") +
       `</div>` +
-      `<div class="slot-row2">${s.title ? escapeHtml(s.title) : `<span class="muted">${escapeHtml(s.genre)}</span>`}</div>` +
+      (s.title ? `<div class="slot-row2">${escapeHtml(s.title)}</div>` : "") +
       `<div class="slot-row3"><span class="status-dot st-${statusClass(s.status)}"></span>${s.status}</div>`;
     el.addEventListener("click", () => openEditor(s));
     return el;

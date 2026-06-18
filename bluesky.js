@@ -11,7 +11,7 @@
 
   var els = {
     enable: $('bskyEnable'), text: $('bskyText'), count: $('postCount'), workUrl: $('bskyWorkUrl'),
-    handle: $('bskyHandle'), appPw: $('bskyAppPw'), gasUrl: $('bskyGasUrl'), gasSecret: $('bskyGasSecret'),
+    handle: $('bskyHandle'), appPw: $('bskyAppPw'), gasUrl: $('bskyGasUrl'), gasStatus: $('gasStatus'),
     bskyStatus: $('bskyStatus'), postStatus: $('postStatus'), postNow: $('postNowBtn'),
     schedAt: $('postSchedAt'), reserveBtn: $('postReserveBtn'), unattended: $('bskyUnattended'),
     postImg: $('postImg'), postImgName: $('postImgName'), postImgClear: $('postImgClear'),
@@ -27,11 +27,11 @@
   // ---- 永続化 ----
   var KEYS = {
     enable: 'bsky_enable', text: 'bsky_text', workUrl: 'bsky_work_url',
-    handle: 'bsky_handle', appPw: 'bsky_app_pw', gasUrl: 'bsky_gas_url', gasSecret: 'bsky_gas_secret'
+    handle: 'bsky_handle', appPw: 'bsky_app_pw', gasUrl: 'bsky_gas_url'
   };
   var FIELDS = [
     [els.text, KEYS.text], [els.workUrl, KEYS.workUrl], [els.handle, KEYS.handle],
-    [els.appPw, KEYS.appPw], [els.gasUrl, KEYS.gasUrl], [els.gasSecret, KEYS.gasSecret]
+    [els.appPw, KEYS.appPw], [els.gasUrl, KEYS.gasUrl]
   ];
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -50,7 +50,7 @@
   if (els.unattended) { els.unattended.checked = (load('bsky_unattended') === '1'); els.unattended.addEventListener('change', function () { save('bsky_unattended', els.unattended.checked ? '1' : '0'); }); }
   FIELDS.forEach(function (p) {
     if (!p[0]) return;
-    p[0].addEventListener('input', function () { save(p[1], p[0].value); renderPreview(); });
+    p[0].addEventListener('input', function () { save(p[1], p[0].value); renderPreview(); updateGasStatus(); });
   });
 
   function setBskyStatus(m) { if (els.bskyStatus) els.bskyStatus.textContent = m || ''; }
@@ -170,17 +170,28 @@
     });
   }
 
-  // ---- GAS 記録 ----
+  // ---- GAS 記録（共有シークレットは廃止） ----
   function recordToSheet(record) {
     var gasUrl = (els.gasUrl.value || '').trim(); if (!gasUrl) return Promise.resolve(null);
-    var payload = { secret: (els.gasSecret.value || '').trim(), title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '' };
+    var payload = { title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '' };
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
-
-  // 投稿成功通知（integration.js がスロットへ書き戻し）
-  function notifyPosted(res, text) {
-    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), posted_at: new Date().toISOString() } })); } catch (e) {}
+  function updateGasStatus() {
+    if (!els.gasStatus) return;
+    var on = !!(els.gasUrl.value || '').trim();
+    els.gasStatus.textContent = on ? '記録：ON（すべての投稿をこのGASに記録します）' : '記録：OFF（URL未設定。記録・検証するには設定してください）';
+    els.gasStatus.className = 'gas-status ' + (on ? 'on' : 'off');
   }
+
+  // 投稿成功通知（integration.js が書き戻し＋下のリスナが必ず記録）
+  function notifyPosted(res, text, alt) {
+    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || '') } })); } catch (e) {}
+  }
+  // すべての投稿を一元的に記録（即時・自動・予約のどれでも必ず記録される）
+  document.addEventListener('bluesky-posted', function (e) {
+    var d = (e && e.detail) || {};
+    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate });
+  });
 
   // ---- 編集できる確認モーダル（方法①自動投稿） ----
   function confirmEditable(text, note) {
@@ -209,7 +220,7 @@
       var alt = (text.split('\n')[0] || ''), f = selectedPostFile || photoFile();
       (f ? compressFile(f) : Promise.resolve(null))
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: text, imageBlob: blob, alt: alt }); })
-        .then(function (res) { setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true); notifyPosted(res, text); return recordToSheet({ title: alt, postUrl: res.postUrl, affiliate: firstUrl(text) }); })
+        .then(function (res) { setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true); notifyPosted(res, text, alt); })
         .catch(function (e) { setPostStatus('⚠️ 投稿に失敗：' + (e && e.message ? e.message : e)); })
         .then(function () { els.postNow.disabled = false; });
     });
@@ -219,7 +230,7 @@
   function reserveUnattended(text, blob, ms, slotId) {
     var gasUrl = (els.gasUrl.value || '').trim();
     if (!gasUrl) { setPostStatus('無人予約には⚙の「記録用URL（GAS）」設定が必要です。'); return; }
-    var payload = { type: 'reserve', secret: (els.gasSecret.value || '').trim(), scheduled_at: new Date(ms).toISOString(), text: text, slot_id: slotId || '' };
+    var payload = { type: 'reserve', scheduled_at: new Date(ms).toISOString(), text: text, slot_id: slotId || '' };
     function send() {
       setPostStatus('☁️ 無人予約を送信中…');
       fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) })
@@ -276,12 +287,12 @@
       var photo = photoFile();
       var prep = photo ? compressFile(photo) : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
       prep.then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
-        .then(function (res) { setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '。記録中…' : '')); notifyPosted(res, edited); return recordToSheet({ title: alt, postUrl: res.postUrl, affiliate: firstUrl(edited) }); })
-        .then(function (rec) { if (rec && rec.ok && rec.shortUrl) setBskyStatus('✅ 投稿＆記録完了。投稿の短縮URL：' + rec.shortUrl); else if (gasSet) setBskyStatus('✅ 投稿しました。記録を送信しました（スプレッドシートをご確認ください）。'); })
+        .then(function (res) { setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '・記録しました' : '')); notifyPosted(res, edited, alt); })
         .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：' + (e && e.message ? e.message : e)); });
     });
   }
   document.addEventListener('video-created', handleVideoCreated);
 
   renderPreview();
+  updateGasStatus();
 })();

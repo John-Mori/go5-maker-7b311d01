@@ -49,33 +49,29 @@ function doPost(e) {
     // Phase5：無人予約投稿の登録（type='reserve'）
     if (body.type === 'reserve') return handleReserve_(body);
 
-    var title = body.title || '';
-    var postUrl = body.postUrl || '';
-    var affiliateUrl = body.affiliateUrl || '';
-
-    var shortUrl = '', bitlyId = '';
-    if (postUrl) {
-      var r = bitlyShorten_(postUrl);
-      shortUrl = r.link;
-      bitlyId = r.id;
-    }
-
-    var sh = getSheet_();
-    var row = [];
-    row[COL.date - 1] = new Date();
-    row[COL.title - 1] = title;
-    row[COL.affiliate - 1] = affiliateUrl;
-    row[COL.postUrl - 1] = postUrl;
-    row[COL.shortUrl - 1] = shortUrl;
-    row[COL.bitlyId - 1] = bitlyId;
-    row[COL.clicks - 1] = 0;
-    row[COL.clicksAt - 1] = '';
-    sh.appendRow(row);
-
-    return jsonOut_({ ok: true, shortUrl: shortUrl, bitlyId: bitlyId });
+    var r = recordPost_(body.title || '', body.postUrl || '', body.affiliateUrl || '');
+    return jsonOut_({ ok: true, shortUrl: r.shortUrl, bitlyId: r.bitlyId });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   }
+}
+
+// 1投稿を「記録」シートに追記（Bitly短縮は失敗しても投稿記録は残す）。doPost・予約投稿の両方から使用。
+function recordPost_(title, postUrl, affiliateUrl) {
+  var shortUrl = '', bitlyId = '';
+  if (postUrl) { try { var r = bitlyShorten_(postUrl); shortUrl = r.link; bitlyId = r.id; } catch (e) {} }
+  var sh = getSheet_();
+  var row = [];
+  row[COL.date - 1] = new Date();
+  row[COL.title - 1] = title;
+  row[COL.affiliate - 1] = affiliateUrl;
+  row[COL.postUrl - 1] = postUrl;
+  row[COL.shortUrl - 1] = shortUrl;
+  row[COL.bitlyId - 1] = bitlyId;
+  row[COL.clicks - 1] = 0;
+  row[COL.clicksAt - 1] = '';
+  sh.appendRow(row);
+  return { shortUrl: shortUrl, bitlyId: bitlyId };
 }
 
 // ---- Bitly ----
@@ -197,11 +193,14 @@ function runReservations() {
     try {
       var imgId = rows[i][RCOL.img - 1];
       var blob = imgId ? DriveApp.getFileById(imgId).getBlob() : null;
-      var res = bskyPost_(rows[i][RCOL.text - 1], blob);
+      var text = rows[i][RCOL.text - 1];
+      var res = bskyPost_(text, blob);
       sh.getRange(i + 2, RCOL.status).setValue('posted');
       sh.getRange(i + 2, RCOL.uri).setValue(res.uri);
       sh.getRange(i + 2, RCOL.url).setValue(res.postUrl);
       sh.getRange(i + 2, RCOL.postedAt).setValue(new Date());
+      // 「記録」シートにも残す（必ず記録・検証できるように）
+      try { recordPost_((String(text).split('\n')[0] || ''), res.postUrl, (String(text).match(/https?:\/\/[^\s]+/) || [''])[0]); } catch (e) {}
       if (imgId) { try { DriveApp.getFileById(imgId).setTrashed(true); } catch (e) {} }
     } catch (err) {
       sh.getRange(i + 2, RCOL.status).setValue('error');
