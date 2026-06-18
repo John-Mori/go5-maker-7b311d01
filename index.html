@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=15">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 <header>
@@ -21,6 +21,7 @@
   <button id="tabCal"   class="tab">📅 カレンダー</button>
   <button id="tabPost"  class="tab">🦋 投稿</button>
   <button id="tabAffi"  class="tab">🔗 アフィリンク</button>
+  <button id="tabVerify" class="tab">🧪 検証</button>
 </nav>
 
 <!-- 動画作成画面 -->
@@ -219,15 +220,37 @@
 </main>
 </section>
 
+<!-- 検証画面（Phase4：Bluesky指標ダッシュボード） -->
+<section id="pageVerify" hidden>
+<main>
+  <section class="card">
+    <div class="field-label">🧪 検証ダッシュボード（Bluesky指標）</div>
+    <div class="hint">公開済み投稿の <b>いいね/リポスト/返信</b>（Bluesky公開APIから取得）＋<b>Bitlyクリック</b>＋<b>FANZA成約（手入力）</b>を day-type 別に集計。アフィリンクの実クリック数は FANZA 管理画面が正で、ここは到達/反応の代理指標です。</div>
+    <button id="verifyRefresh" class="ghost">🔄 エンゲージメント更新</button>
+    <div class="status" id="verifyStatus"></div>
+  </section>
+  <section class="card">
+    <div class="field-label">day-type 別サマリ</div>
+    <div id="verifySummary"></div>
+  </section>
+  <section class="card">
+    <div class="field-label">公開済み投稿</div>
+    <div id="verifyList"></div>
+  </section>
+</main>
+</section>
+
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=15"></script>
-<script src="affiliate-core.js?v=15"></script>
-<script src="affiliate.js?v=15"></script>
-<script src="bluesky-core.js?v=15"></script>
-<script src="scheduler.js?v=15"></script>
-<script src="bluesky.js?v=15"></script>
-<script src="integration.js?v=15"></script>
+<script src="app.js?v=16"></script>
+<script src="affiliate-core.js?v=16"></script>
+<script src="affiliate.js?v=16"></script>
+<script src="bluesky-core.js?v=16"></script>
+<script src="scheduler.js?v=16"></script>
+<script src="bluesky.js?v=16"></script>
+<script src="verify-core.js?v=16"></script>
+<script src="verify.js?v=16"></script>
+<script src="integration.js?v=16"></script>
 </body>
 </html>

@@ -10,17 +10,18 @@
 (function () {
   'use strict';
 
-  /* ── タブ切替（動画作成／カレンダー／投稿／アフィリンクの4タブ） ── */
+  /* ── タブ切替（動画作成／カレンダー／投稿／アフィリンク／検証の5タブ） ── */
   var TABS = [
-    { btn: 'tabMovie', page: 'pageMovie'    },
-    { btn: 'tabCal',   page: 'pageCalendar' },
-    { btn: 'tabPost',  page: 'pagePost'     },
-    { btn: 'tabAffi',  page: 'pageAffi'     }
+    { btn: 'tabMovie',  page: 'pageMovie'    },
+    { btn: 'tabCal',    page: 'pageCalendar' },
+    { btn: 'tabPost',   page: 'pagePost'     },
+    { btn: 'tabAffi',   page: 'pageAffi'     },
+    { btn: 'tabVerify', page: 'pageVerify'   }
   ];
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む（遅延ロード）。
   function lazyLoadCalendar() {
     var f = document.getElementById('calFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=15');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=16');
   }
   function showTab(activeBtnId) {
     TABS.forEach(function (t) {
