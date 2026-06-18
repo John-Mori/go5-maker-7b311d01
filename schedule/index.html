@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>投稿スケジュール カレンダー（5週ローリング）</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="title">
+      <strong>投稿スケジュール</strong>
+      <span class="sub">5週ローリング / day-type自動判定 / 祝日・長期休暇対応</span>
+    </div>
+    <div class="nav">
+      <button id="nav-prev">‹ 前週</button>
+      <button id="nav-today">今週</button>
+      <button id="nav-next">翌週 ›</button>
+      <button id="btn-verify" title="検証モード：割れ枠の変種タグ・KPI記録">🧪 検証</button>
+      <button id="btn-verify-csv" title="検証ログをCSVで書き出し">⤓ 検証CSV</button>
+      <button id="btn-export" title="バックアップJSONを書き出し">⤓ Export</button>
+    </div>
+  </header>
+
+  <div id="status-bar" class="status-bar"></div>
+
+  <div class="legend">
+    <span class="lg dt-weekday">平日型</span>
+    <span class="lg dt-eve">休前日型</span>
+    <span class="lg dt-runstart">連休初日型</span>
+    <span class="lg dt-runmid">連休中日型</span>
+    <span class="lg dt-last">最終日型</span>
+    <span class="lg lg-peak">本命(ピーク)</span>
+    <span class="lg lg-verify">検=検証対象</span>
+    <span class="lg lg-review">!=要確認</span>
+  </div>
+
+  <main id="calendar" class="calendar"></main>
+
+  <!-- スロット編集モーダル -->
+  <div id="modal" class="modal">
+    <div class="modal-card">
+      <div class="modal-body"></div>
+      <div class="modal-foot">
+        <button id="modal-save" class="primary">保存</button>
+        <button id="modal-close">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- データ（自動生成・window グローバル） -->
+  <script src="data/holidays.js"></script>
+  <script src="data/schedule_master.js"></script>
+  <script src="data/verification_plan.js"></script>
+  <!-- ロジック -->
+  <script src="js/config.js"></script>
+  <script src="js/daytype.js"></script>
+  <script src="js/generator.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
 <header>
@@ -18,6 +18,7 @@
 
 <nav class="tabbar">
   <button id="tabMovie" class="tab active">🎬 動画作成</button>
+  <button id="tabCal"   class="tab">📅 カレンダー</button>
   <button id="tabPost"  class="tab">🦋 投稿</button>
   <button id="tabAffi"  class="tab">🔗 アフィリンク</button>
 </nav>
@@ -111,6 +112,14 @@
 </main>
 </section>
 
+<!-- カレンダー画面（スケジュール最適化：iframe埋め込み＝CSS/JS分離・回帰ゼロ） -->
+<section id="pageCalendar" hidden>
+  <div class="cal-frame-wrap">
+    <iframe id="calFrame" class="cal-frame" title="投稿スケジュール カレンダー" loading="lazy"></iframe>
+  </div>
+  <p class="hint" style="text-align:center;max-width:520px;margin:8px auto 0;">📅 最適な投稿スロット（日時・枠・ジャンル）を管理。各枠を決めたら「🎬 動画作成」「🦋 投稿」へ。データはこの端末内で共有されます。</p>
+</section>
+
 <!-- 投稿画面（方法②：単独で投稿。本文・画像・アカウントはここで設定） -->
 <section id="pagePost" hidden>
 <main>
@@ -202,10 +211,10 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=12"></script>
-<script src="affiliate-core.js?v=12"></script>
-<script src="affiliate.js?v=12"></script>
-<script src="bluesky-core.js?v=12"></script>
-<script src="bluesky.js?v=12"></script>
+<script src="app.js?v=13"></script>
+<script src="affiliate-core.js?v=13"></script>
+<script src="affiliate.js?v=13"></script>
+<script src="bluesky-core.js?v=13"></script>
+<script src="bluesky.js?v=13"></script>
 </body>
 </html>
