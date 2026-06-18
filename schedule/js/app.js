@@ -195,12 +195,31 @@ window.SCH = window.SCH || {};
     await recomputeAndRender(); // 近傍連動カスケード（§7.5）
   }
 
+  // 統合アプリ（iframe）内で動いているか
+  const inFrame = (function () { try { return window.parent && window.parent !== window; } catch (e) { return false; } })();
+  // スロットを親（統合アプリ）へ渡すための最小ペイロード
+  function slotPayload(s) {
+    return {
+      id: s.id, date: s.date, slot_index: s.slot_index, day_type: s.day_type,
+      role: s.role, genre: s.genre, time: s.time, scheduled_at: s.scheduled_at,
+      title: s.title || "", url: s.url || "", status: s.status
+    };
+  }
+  function sendToParent(type, s) {
+    try { window.parent.postMessage({ source: "sch-calendar", type: type, slot: slotPayload(s) }, "*"); } catch (e) {}
+  }
+
   // ---- スロット編集モーダル ----
   function openEditor(s) {
     editingId = s.id;
     const m = document.getElementById("modal");
     m.querySelector(".modal-body").innerHTML = `
       <h3>${s.date}（${s.day_type}） ${s.time} / ${s.role}</h3>
+      ${inFrame ? `<div class="integ-actions">
+        <button type="button" id="integ-make">🎬 この枠で動画を作る</button>
+        <button type="button" id="integ-post">🦋 この枠を投稿する</button>
+        <div class="integ-hint">枠の日時・役割・ジャンルを「動画作成／投稿」へ引き継ぎます。</div>
+      </div>` : ""}
       ${s.needs_review ? `<div class="warn">要確認：day-type変更でテンプレと差異あり。時刻は自動変更していません。</div>` : ""}
       ${s.verify_flag ? `<div class="info">検証対象枠。${s.alt_hypothesis ? "対立仮説: " + escapeHtml(s.alt_hypothesis) : ""}</div>` : ""}
       <label>ステータス
@@ -217,6 +236,29 @@ window.SCH = window.SCH || {};
       ${renderVerificationSection(s)}
     `;
     m.classList.add("open");
+    if (inFrame) {
+      const mk = document.getElementById("integ-make");
+      const ps = document.getElementById("integ-post");
+      if (mk) mk.addEventListener("click", () => { sendToParent("slot-create", s); closeEditor(); });
+      if (ps) ps.addEventListener("click", () => { sendToParent("slot-post", s); closeEditor(); });
+    }
+  }
+
+  // 親（統合アプリ）からの書き戻し：投稿成功後に status/URL等を反映
+  function handleParentMessage(ev) {
+    const d = ev.data;
+    if (!d || d.target !== "sch-calendar" || d.type !== "slot-writeback") return;
+    const s = lastRender && lastRender.slots && lastRender.slots[d.id];
+    if (!s) return;
+    if (d.status) s.status = d.status;
+    if (d.url) s.url = d.url;
+    if (d.video_id) s.video_id = d.video_id;
+    if (d.post_uri) s.post_uri = d.post_uri;
+    if (d.post_url) s.post_url = d.post_url;
+    if (d.short_url) s.short_url = d.short_url;
+    if (d.posted_at) s.posted_at = d.posted_at;
+    s.needs_review = false;
+    store.upsertSlot(s).then(recomputeAndRender);
   }
 
   // 検証セクション（verify_flag枠 or 検証モード時に表示）
@@ -363,6 +405,7 @@ window.SCH = window.SCH || {};
     });
     document.getElementById("modal-save").addEventListener("click", saveEditor);
     document.getElementById("modal-close").addEventListener("click", closeEditor);
+    if (inFrame) window.addEventListener("message", handleParentMessage);
 
     await recomputeAndRender();
   }

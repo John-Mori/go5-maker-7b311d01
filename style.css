@@ -51,6 +51,13 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .bsky-adv summary{cursor:pointer;color:var(--sub);font-size:13px;font-weight:700;padding:8px 0;}
 .bsky-adv[open] summary{margin-bottom:4px;}
 
+/* ── スロット文脈バナー（カレンダー→動画作成/投稿の引き継ぎ表示） ── */
+.slot-ctx{max-width:520px;margin:0 auto 8px;background:#102530;border:1px solid #1c4a50;color:#bfe9ef;
+  border-radius:10px;padding:9px 12px;font-size:13px;text-align:center;line-height:1.5;}
+.slot-ctx b{color:#fff;}
+.slot-ctx .slot-ctx-clear{background:transparent;border:none;color:#9fb0c3;font-size:16px;font-weight:900;
+  width:auto;padding:0 4px;margin-left:6px;cursor:pointer;}
+
 /* ── カレンダータブ（スケジュール最適化：iframe埋め込み） ── */
 .cal-frame-wrap{max-width:1100px;margin:8px auto 0;padding:0 8px;}
 .cal-frame{width:100%;height:82vh;border:1px solid var(--line);border-radius:12px;background:#fff;display:block;}

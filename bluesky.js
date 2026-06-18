@@ -55,6 +55,15 @@
     p[0].addEventListener('input', function () { save(p[1], p[0].value); if (p[0] === els.text || p[0] === els.handle) renderPreview(); });
   });
 
+  // 投稿成功を通知（integration.js がスロットへ書き戻す）
+  function notifyPosted(res, text) {
+    try {
+      document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: {
+        post_uri: res.uri || '', post_url: res.postUrl || '',
+        affiliate: firstUrl(text), posted_at: new Date().toISOString()
+      } }));
+    } catch (e) {}
+  }
   function setBskyStatus(m) { if (els.bskyStatus) els.bskyStatus.textContent = m || ''; }
   function setPostStatus(m, html) {
     if (!els.postStatus) return;
@@ -183,6 +192,7 @@
         return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: text, imageBlob: blob, alt: alt });
       }).then(function (res) {
         setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true);
+        notifyPosted(res, text);
         return recordToSheet({ title: alt, postUrl: res.postUrl, affiliate: firstUrl(text) });
       }).catch(function (e) {
         setPostStatus('⚠️ 投稿に失敗：' + (e && e.message ? e.message : e));
@@ -212,6 +222,7 @@
       return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: text, imageBlob: blob, alt: alt });
     }).then(function (res) {
       setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '。記録中…' : ''));
+      notifyPosted(res, text);
       return recordToSheet({ title: alt, postUrl: res.postUrl, affiliate: firstUrl(text) });
     }).then(function (rec) {
       if (rec && rec.ok && rec.shortUrl) setBskyStatus('✅ 投稿＆記録完了。投稿の短縮URL：' + rec.shortUrl);

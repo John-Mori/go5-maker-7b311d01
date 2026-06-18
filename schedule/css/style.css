@@ -169,3 +169,10 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
   .week-grid { grid-template-columns: 1fr; }
   .day { min-height: auto; }
 }
+
+/* ── 統合アプリ連携ボタン（iframe内・スロット編集モーダル） ── */
+.integ-actions{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 12px;}
+.integ-actions button{flex:1;min-width:150px;padding:11px 10px;border-radius:8px;border:1px solid #1185fe;
+  background:#1185fe;color:#fff;font-weight:700;font-size:14px;cursor:pointer;}
+.integ-actions button:active{filter:brightness(.92);}
+.integ-actions .integ-hint{flex-basis:100%;font-size:11px;color:#8a9bb0;margin-top:2px;}
