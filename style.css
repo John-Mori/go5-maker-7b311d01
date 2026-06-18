@@ -51,6 +51,19 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .bsky-adv summary{cursor:pointer;color:var(--sub);font-size:13px;font-weight:700;padding:8px 0;}
 .bsky-adv[open] summary{margin-bottom:4px;}
 
+/* ── 予約投稿リスト（Phase3） ── */
+#postSchedAt{width:100%;font-size:16px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);
+  background:#0e1422;color:var(--ink);outline:none;}
+#postSchedAt:focus{border-color:var(--accent);}
+.rsv-list{margin-top:10px;}
+.rsv-title{font-size:12px;color:var(--accent);font-weight:700;margin-bottom:6px;}
+.rsv-row{display:flex;align-items:center;gap:8px;background:#0e1422;border:1px solid var(--line);
+  border-radius:8px;padding:8px 10px;margin-top:6px;font-size:13px;}
+.rsv-when{color:var(--warn);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.rsv-text{flex:1;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rsv-row button{background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:6px;
+  padding:5px 10px;font-size:12px;width:auto;margin-top:0;}
+
 /* ── スロット文脈バナー（カレンダー→動画作成/投稿の引き継ぎ表示） ── */
 .slot-ctx{max-width:520px;margin:0 auto 8px;background:#102530;border:1px solid #1c4a50;color:#bfe9ef;
   border-radius:10px;padding:9px 12px;font-size:13px;text-align:center;line-height:1.5;}

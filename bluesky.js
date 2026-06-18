@@ -24,6 +24,7 @@
     bskyStatus: $('bskyStatus'),     // 自動投稿（方法①）の状態（動画作成タブ）
     postStatus: $('postStatus'),     // 単独投稿（方法②）の状態（投稿タブ）
     postNow: $('postNowBtn'),
+    schedAt: $('postSchedAt'), reserveBtn: $('postReserveBtn'),
     postImg: $('postImg'), postImgName: $('postImgName'), postImgClear: $('postImgClear'),
     pvName: $('pvName'), pvHandle: $('pvHandle'), pvBody: $('pvBody'),
     pvImgWrap: $('pvImgWrap'), pvImg: $('pvImg')
@@ -197,6 +198,29 @@
       }).catch(function (e) {
         setPostStatus('⚠️ 投稿に失敗：' + (e && e.message ? e.message : e));
       }).then(function () { els.postNow.disabled = false; });
+    });
+  }
+
+  // ---- Phase3：予約投稿（このタブを開いている間に自動投稿） ----
+  if (els.reserveBtn) {
+    els.reserveBtn.addEventListener('click', function () {
+      var text = (els.text.value || '');
+      if (!text.trim()) { setPostStatus('本文を入力してください。'); return; }
+      var c = creds();
+      if (!c.handle || !c.appPw) { setPostStatus('⚙設定でハンドルとアプリパスワードを入れてください。'); return; }
+      if (!window.Scheduler) { setPostStatus('スケジューラが読み込まれていません。'); return; }
+      var v = els.schedAt && els.schedAt.value;
+      var ms = v ? new Date(v).getTime() : NaN;
+      if (isNaN(ms)) { setPostStatus('予約時刻を指定してください。'); return; }
+      if (ms <= Date.now()) { setPostStatus('未来の時刻を指定してください。'); return; }
+      var slotId = window.__activeSlot__ ? window.__activeSlot__.id : null;
+      var alt = (text.split('\n')[0] || '');
+      setPostStatus('予約を準備中…');
+      var prep = selectedPostFile ? compressFile(selectedPostFile) : Promise.resolve(null);
+      prep.then(function (blob) {
+        window.Scheduler.reserve({ slotId: slotId, text: text, imageBlob: blob, scheduledAtMs: ms, alt: alt, handle: c.handle, appPw: c.appPw });
+        setPostStatus('⏰ 予約しました：' + new Date(ms).toLocaleString('ja-JP') + '（このタブを開いている間に自動投稿）');
+      });
     });
   }
 

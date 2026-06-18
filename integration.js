@@ -27,6 +27,15 @@
   }
   function clearSlot() { activeSlot = null; window.__activeSlot__ = null; setBanner(''); }
 
+  // ISO/日時文字列 → <input type="datetime-local"> 用 "YYYY-MM-DDTHH:MM"
+  function toLocalInput(s) {
+    if (!s) return '';
+    var d = new Date(String(s).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return '';
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
   // iframe → 親
   window.addEventListener('message', function (ev) {
     var d = ev.data;
@@ -38,26 +47,32 @@
       var tabId = (d.type === 'slot-create') ? 'tabMovie' : 'tabPost';
       var b = $(tabId);
       if (b) b.click();                        // affiliate.js の showTab が発火
+      // 予約時刻に枠の予定時刻をプリフィル
+      var sa = $('postSchedAt');
+      if (sa && d.slot.scheduled_at) { var v = toLocalInput(d.slot.scheduled_at); if (v) sa.value = v; }
       try { window.scrollTo(0, 0); } catch (e) {}
     }
   });
 
-  // 投稿成功 → iframe のスロットへ書き戻し
+  // 投稿成功（即時/単独/予約）→ iframe のスロットへ書き戻し
   document.addEventListener('bluesky-posted', function (e) {
-    if (!activeSlot) return;
     var d = (e && e.detail) || {};
+    var slotId = d.slotId || (activeSlot && activeSlot.id);  // 予約はdetail.slotId、手動はactiveSlot
+    if (!slotId) return;
     var f = $('calFrame');
     if (f && f.contentWindow) {
       f.contentWindow.postMessage({
         target: 'sch-calendar', type: 'slot-writeback',
-        id: activeSlot.id, status: '公開済',
+        id: slotId, status: '公開済',
         post_uri: d.post_uri || '', post_url: d.post_url || '',
         short_url: d.short_url || '', url: d.affiliate || d.post_url || '',
         posted_at: d.posted_at || ''
       }, '*');
     }
-    setBanner((activeSlot.date || '') + ' を「公開済」に更新しました', true);
-    activeSlot = null; window.__activeSlot__ = null;
-    setTimeout(function () { setBanner(''); }, 5000);
+    if (activeSlot && activeSlot.id === slotId) {
+      setBanner((activeSlot.date || '') + ' を「公開済」に更新しました', true);
+      activeSlot = null; window.__activeSlot__ = null;
+      setTimeout(function () { setBanner(''); }, 5000);
+    }
   });
 })();

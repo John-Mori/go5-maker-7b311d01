@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 <header>
@@ -183,6 +183,15 @@
     <button id="postNowBtn" class="primary bsky-post-btn">🦋 今すぐ投稿する（単独）</button>
     <div class="status" id="postStatus"></div>
   </section>
+
+  <!-- 予約投稿（Phase3：このタブを開いている間に自動投稿＋通知） -->
+  <section class="card">
+    <label class="field-label" for="postSchedAt">⏰ 予約投稿</label>
+    <input id="postSchedAt" type="datetime-local">
+    <button id="postReserveBtn" class="ghost">⏰ この時刻に予約する</button>
+    <div class="hint">指定時刻に、上の<b>本文・画像・アカウント</b>で自動投稿します。📅カレンダーから来た場合は枠の予定時刻が入ります。<br>※<b>このタブを開いている間だけ</b>動作（閉じる/再読込で予約は消えます）。無人化は今後（サーバーレス）で対応。</div>
+    <div id="reserveList" class="rsv-list" hidden></div>
+  </section>
 </main>
 </section>
 
@@ -213,11 +222,12 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=14"></script>
-<script src="affiliate-core.js?v=14"></script>
-<script src="affiliate.js?v=14"></script>
-<script src="bluesky-core.js?v=14"></script>
-<script src="bluesky.js?v=14"></script>
-<script src="integration.js?v=14"></script>
+<script src="app.js?v=15"></script>
+<script src="affiliate-core.js?v=15"></script>
+<script src="affiliate.js?v=15"></script>
+<script src="bluesky-core.js?v=15"></script>
+<script src="scheduler.js?v=15"></script>
+<script src="bluesky.js?v=15"></script>
+<script src="integration.js?v=15"></script>
 </body>
 </html>
