@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=18">
+<link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
 <header>
@@ -195,8 +195,14 @@
   <section class="card">
     <label class="field-label" for="postSchedAt">⏰ 予約投稿</label>
     <input id="postSchedAt" type="datetime-local">
+    <label class="bsky-toggle" style="margin:8px 0;">
+      <input id="bskyUnattended" type="checkbox">
+      <span>☁️ 無人で予約する（タブを閉じてもOK／要GAS設定）</span>
+    </label>
     <button id="postReserveBtn" class="ghost">⏰ この時刻に予約する</button>
-    <div class="hint">指定時刻に、上の<b>本文・画像・アカウント</b>で自動投稿します。📅カレンダーから来た場合は枠の予定時刻が入ります。<br>※<b>このタブを開いている間だけ</b>動作（閉じる/再読込で予約は消えます）。無人化は今後（サーバーレス）で対応。</div>
+    <div class="hint">指定時刻に、上の<b>本文・画像</b>で自動投稿します。📅カレンダーから来た場合は枠の予定時刻が入ります。<br>
+      ・<b>無人OFF</b>＝このタブを開いている間だけ（端末のアカウント設定を使用）。<br>
+      ・<b>無人ON</b>＝GASに予約を送り、<b>タブを閉じても</b>時間トリガーが投稿（アカウントはGAS側の設定 BSKY_HANDLE/BSKY_APP_PW を使用）。</div>
     <div id="reserveList" class="rsv-list" hidden></div>
   </section>
 </main>
@@ -262,14 +268,14 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=18"></script>
-<script src="affiliate-core.js?v=18"></script>
-<script src="affiliate.js?v=18"></script>
-<script src="bluesky-core.js?v=18"></script>
-<script src="scheduler.js?v=18"></script>
-<script src="bluesky.js?v=18"></script>
-<script src="verify-core.js?v=18"></script>
-<script src="verify.js?v=18"></script>
-<script src="integration.js?v=18"></script>
+<script src="app.js?v=19"></script>
+<script src="affiliate-core.js?v=19"></script>
+<script src="affiliate.js?v=19"></script>
+<script src="bluesky-core.js?v=19"></script>
+<script src="scheduler.js?v=19"></script>
+<script src="bluesky.js?v=19"></script>
+<script src="verify-core.js?v=19"></script>
+<script src="verify.js?v=19"></script>
+<script src="integration.js?v=19"></script>
 </body>
 </html>

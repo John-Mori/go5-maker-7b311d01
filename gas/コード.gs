@@ -46,6 +46,9 @@ function doPost(e) {
     var need = prop_('SHARED_SECRET');
     if (need && body.secret !== need) return jsonOut_({ ok: false, error: 'bad_secret' });
 
+    // Phase5：無人予約投稿の登録（type='reserve'）
+    if (body.type === 'reserve') return handleReserve_(body);
+
     var title = body.title || '';
     var postUrl = body.postUrl || '';
     var affiliateUrl = body.affiliateUrl || '';
@@ -125,4 +128,141 @@ function setupTrigger() {
     if (t.getHandlerFunction() === 'refreshClicks') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
+}
+
+// ============================================================
+// Phase5：無人予約投稿（タブを閉じても、時間トリガーが自動投稿）
+//   追加プロパティ：BSKY_HANDLE（例 yourname.bsky.social）／BSKY_APP_PW（アプリパスワード）
+//   画像は base64 で受け取り Google ドライブに一時保存→投稿時に取得→投稿後にゴミ箱へ。
+// ============================================================
+var RES_SHEET = '予約';
+var RES_HEADERS = ['予約ID', '予約日時', '本文', '画像fileId', 'slot_id', 'ステータス', '結果URI', '結果URL', '投稿日時', 'エラー'];
+var RCOL = { id: 1, when: 2, text: 3, img: 4, slot: 5, status: 6, uri: 7, url: 8, postedAt: 9, error: 10 };
+
+function getResSheet_() {
+  var sheetId = prop_('SHEET_ID');
+  var ss = sheetId ? SpreadsheetApp.openById(sheetId) : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('スプレッドシートが見つかりません');
+  var sh = ss.getSheetByName(RES_SHEET) || ss.insertSheet(RES_SHEET);
+  if (sh.getLastRow() === 0) sh.appendRow(RES_HEADERS);
+  return sh;
+}
+
+function getDriveFolder_() {
+  var name = 'go5-reservations';
+  var it = DriveApp.getFoldersByName(name);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(name);
+}
+
+function dataUrlToBlob_(dataUrl) {
+  var m = String(dataUrl).match(/^data:([^;]+);base64,(.*)$/);
+  var type = m ? m[1] : 'image/jpeg';
+  var data = m ? m[2] : dataUrl;
+  return Utilities.newBlob(Utilities.base64Decode(data), type);
+}
+
+// 予約を登録（クライアントの「無人で予約」から呼ばれる）
+function handleReserve_(body) {
+  var sh = getResSheet_();
+  var imgId = '';
+  if (body.image) {
+    var blob = dataUrlToBlob_(body.image).setName('rsv_' + new Date().getTime() + '.jpg');
+    imgId = getDriveFolder_().createFile(blob).getId();
+  }
+  var id = Utilities.getUuid();
+  var row = [];
+  row[RCOL.id - 1] = id;
+  row[RCOL.when - 1] = body.scheduled_at || '';
+  row[RCOL.text - 1] = body.text || '';
+  row[RCOL.img - 1] = imgId;
+  row[RCOL.slot - 1] = body.slot_id || '';
+  row[RCOL.status - 1] = 'pending';
+  row[RCOL.uri - 1] = ''; row[RCOL.url - 1] = ''; row[RCOL.postedAt - 1] = ''; row[RCOL.error - 1] = '';
+  sh.appendRow(row);
+  return jsonOut_({ ok: true, id: id });
+}
+
+// 時間トリガーで実行：期限到来(pending かつ 予約日時<=now)を自動投稿
+function runReservations() {
+  var sh = getResSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return;
+  var rows = sh.getRange(2, 1, last - 1, RES_HEADERS.length).getValues();
+  var now = new Date();
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i][RCOL.status - 1] !== 'pending') continue;
+    var when = new Date(rows[i][RCOL.when - 1]);
+    if (isNaN(when.getTime()) || when > now) continue;
+    sh.getRange(i + 2, RCOL.status).setValue('posting'); SpreadsheetApp.flush(); // 二重投稿防止
+    try {
+      var imgId = rows[i][RCOL.img - 1];
+      var blob = imgId ? DriveApp.getFileById(imgId).getBlob() : null;
+      var res = bskyPost_(rows[i][RCOL.text - 1], blob);
+      sh.getRange(i + 2, RCOL.status).setValue('posted');
+      sh.getRange(i + 2, RCOL.uri).setValue(res.uri);
+      sh.getRange(i + 2, RCOL.url).setValue(res.postUrl);
+      sh.getRange(i + 2, RCOL.postedAt).setValue(new Date());
+      if (imgId) { try { DriveApp.getFileById(imgId).setTrashed(true); } catch (e) {} }
+    } catch (err) {
+      sh.getRange(i + 2, RCOL.status).setValue('error');
+      sh.getRange(i + 2, RCOL.error).setValue(String(err));
+    }
+    Utilities.sleep(300);
+  }
+}
+
+// Bluesky 投稿（サーバー側＝GASのアプリパスワードで投稿）
+function bskyPost_(text, imageBlob) {
+  var handle = prop_('BSKY_HANDLE'), pw = prop_('BSKY_APP_PW');
+  if (!handle || !pw) throw new Error('BSKY_HANDLE / BSKY_APP_PW 未設定');
+  var svc = 'https://bsky.social';
+  var s = JSON.parse(UrlFetchApp.fetch(svc + '/xrpc/com.atproto.server.createSession', {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ identifier: String(handle).replace(/^@/, ''), password: pw }), muteHttpExceptions: true
+  }).getContentText());
+  if (!s.accessJwt) throw new Error('Blueskyログイン失敗');
+
+  var embed = null;
+  if (imageBlob) {
+    var up = JSON.parse(UrlFetchApp.fetch(svc + '/xrpc/com.atproto.repo.uploadBlob', {
+      method: 'post', contentType: imageBlob.getContentType() || 'image/jpeg',
+      headers: { Authorization: 'Bearer ' + s.accessJwt }, payload: imageBlob.getBytes(), muteHttpExceptions: true
+    }).getContentText());
+    if (up.blob) embed = { '$type': 'app.bsky.embed.images', images: [{ alt: (String(text).split('\n')[0] || ''), image: up.blob }] };
+  }
+
+  var record = { '$type': 'app.bsky.feed.post', text: text, createdAt: new Date().toISOString(), langs: ['ja'] };
+  var facets = detectFacets_(text);
+  if (facets.length) record.facets = facets;
+  if (embed) record.embed = embed;
+
+  var res = JSON.parse(UrlFetchApp.fetch(svc + '/xrpc/com.atproto.repo.createRecord', {
+    method: 'post', contentType: 'application/json', headers: { Authorization: 'Bearer ' + s.accessJwt },
+    payload: JSON.stringify({ repo: s.did, collection: 'app.bsky.feed.post', record: record }), muteHttpExceptions: true
+  }).getContentText());
+  var rkey = String(res.uri || '').split('/').pop();
+  return { uri: res.uri || '', postUrl: (s.handle && rkey) ? ('https://bsky.app/profile/' + s.handle + '/post/' + rkey) : '' };
+}
+
+// 本文中URLの richtext#link facet（index は UTF-8 バイトオフセット）
+function byteLen_(s) { return Utilities.newBlob(String(s)).getBytes().length; }
+function detectFacets_(text) {
+  var facets = [], re = /https?:\/\/[^\s]+/g, m;
+  while ((m = re.exec(text))) {
+    var url = m[0].replace(/[.,;:!?。、！？）)】」』]+$/, '');
+    var start = m.index, end = start + url.length;
+    facets.push({
+      index: { byteStart: byteLen_(text.slice(0, start)), byteEnd: byteLen_(text.slice(0, end)) },
+      features: [{ '$type': 'app.bsky.richtext.facet#link', uri: url }]
+    });
+  }
+  return facets;
+}
+
+// 初回に1度だけ実行：予約を5分ごとに自動投稿するトリガーを登録
+function setupReservationTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runReservations') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('runReservations').timeBased().everyMinutes(5).create();
 }

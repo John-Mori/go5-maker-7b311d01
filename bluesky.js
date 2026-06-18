@@ -13,7 +13,7 @@
     enable: $('bskyEnable'), text: $('bskyText'), count: $('postCount'), workUrl: $('bskyWorkUrl'),
     handle: $('bskyHandle'), appPw: $('bskyAppPw'), gasUrl: $('bskyGasUrl'), gasSecret: $('bskyGasSecret'),
     bskyStatus: $('bskyStatus'), postStatus: $('postStatus'), postNow: $('postNowBtn'),
-    schedAt: $('postSchedAt'), reserveBtn: $('postReserveBtn'),
+    schedAt: $('postSchedAt'), reserveBtn: $('postReserveBtn'), unattended: $('bskyUnattended'),
     postImg: $('postImg'), postImgName: $('postImgName'), postImgClear: $('postImgClear'),
     pvName: $('pvName'), pvHandle: $('pvHandle'), pvBody: $('pvBody'),
     pvImgWrap: $('pvImgWrap'), pvImg: $('pvImg'), pvImgNote: $('pvImgNote'),
@@ -47,6 +47,7 @@
     }
   })();
   if (els.enable) els.enable.addEventListener('change', function () { save(KEYS.enable, els.enable.checked ? '1' : '0'); });
+  if (els.unattended) { els.unattended.checked = (load('bsky_unattended') === '1'); els.unattended.addEventListener('change', function () { save('bsky_unattended', els.unattended.checked ? '1' : '0'); }); }
   FIELDS.forEach(function (p) {
     if (!p[0]) return;
     p[0].addEventListener('input', function () { save(p[1], p[0].value); renderPreview(); });
@@ -214,19 +215,45 @@
     });
   }
 
-  // ---- 方法③：予約投稿（開いている間） ----
+  // ---- 無人予約（Phase5）：GASへ送信し、時間トリガーが投稿（タブを閉じてもOK） ----
+  function reserveUnattended(text, blob, ms, slotId) {
+    var gasUrl = (els.gasUrl.value || '').trim();
+    if (!gasUrl) { setPostStatus('無人予約には⚙の「記録用URL（GAS）」設定が必要です。'); return; }
+    var payload = { type: 'reserve', secret: (els.gasSecret.value || '').trim(), scheduled_at: new Date(ms).toISOString(), text: text, slot_id: slotId || '' };
+    function send() {
+      setPostStatus('☁️ 無人予約を送信中…');
+      fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j && j.ok) setPostStatus('☁️ 無人予約しました：' + new Date(ms).toLocaleString('ja-JP') + '（タブを閉じてもOK）');
+          else setPostStatus('予約に失敗：' + ((j && j.error) || '不明'));
+        })
+        .catch(function () { setPostStatus('予約送信に失敗（GAS URL・通信をご確認ください）。'); });
+    }
+    if (blob) { var fr = new FileReader(); fr.onload = function () { payload.image = fr.result; send(); }; fr.onerror = function () { send(); }; fr.readAsDataURL(blob); }
+    else send();
+  }
+
+  // ---- 方法③：予約投稿（無人＝GAS／開いている間＝端末タイマー） ----
   if (els.reserveBtn) {
     els.reserveBtn.addEventListener('click', function () {
       if (!els.text.value.trim()) { setPostStatus('本文を入力してください。'); return; }
-      var c = creds(); if (!c.handle || !c.appPw) { setPostStatus('⚙設定でハンドルとアプリパスワードを入れてください。'); return; }
-      if (!window.Scheduler) { setPostStatus('スケジューラ未読込。'); return; }
       var v = els.schedAt && els.schedAt.value, ms = v ? new Date(v).getTime() : NaN;
       if (isNaN(ms)) { setPostStatus('予約時刻を指定してください。'); return; }
       if (ms <= Date.now()) { setPostStatus('未来の時刻を指定してください。'); return; }
-      var text = composePostText(), alt = (text.split('\n')[0] || ''), f = selectedPostFile || photoFile();
+      var text = composePostText(), alt = (text.split('\n')[0] || '');
+      var slotId = window.__activeSlot__ ? window.__activeSlot__.id : null, f = selectedPostFile || photoFile();
+      var unattended = els.unattended && els.unattended.checked;
       setPostStatus('予約を準備中…');
+      if (unattended) {
+        (f ? compressFile(f) : Promise.resolve(null)).then(function (blob) { reserveUnattended(text, blob, ms, slotId); });
+        return;
+      }
+      var c = creds();
+      if (!c.handle || !c.appPw) { setPostStatus('⚙設定でハンドルとアプリパスワードを入れてください（無人予約ならGAS設定）。'); return; }
+      if (!window.Scheduler) { setPostStatus('スケジューラ未読込。'); return; }
       (f ? compressFile(f) : Promise.resolve(null)).then(function (blob) {
-        window.Scheduler.reserve({ slotId: window.__activeSlot__ ? window.__activeSlot__.id : null, text: text, imageBlob: blob, scheduledAtMs: ms, alt: alt, handle: c.handle, appPw: c.appPw });
+        window.Scheduler.reserve({ slotId: slotId, text: text, imageBlob: blob, scheduledAtMs: ms, alt: alt, handle: c.handle, appPw: c.appPw });
         setPostStatus('⏰ 予約しました：' + new Date(ms).toLocaleString('ja-JP') + '（このタブを開いている間に自動投稿）');
       });
     });
