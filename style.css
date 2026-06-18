@@ -108,6 +108,23 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .bsky-foot{display:flex;gap:26px;margin-top:12px;color:#7d8ea1;font-size:13px;}
 .bsky-post-btn{background:var(--bsky);color:#fff;}
 .bsky-post-btn:active{filter:brightness(.92);}
+.bsky-av{overflow:hidden;}
+.bsky-av img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;}
+.bsky-imgnote{margin-top:10px;font-size:12px;color:#5a6b7e;border:1px dashed var(--bskyline);
+  border-radius:10px;padding:12px;text-align:center;}
+
+/* ── 投稿前の編集できる確認モーダル ── */
+.pc-modal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
+.pc-modal[hidden]{display:none;}
+.pc-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;max-width:520px;width:100%;}
+.pc-title{font-weight:800;font-size:15px;margin-bottom:10px;}
+#pcText{width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
+  background:#0e1422;color:var(--ink);line-height:1.6;white-space:pre-wrap;font-family:inherit;resize:vertical;}
+#pcText:focus{border-color:var(--accent);outline:none;}
+.pc-note{color:var(--sub);font-size:12px;margin-top:8px;}
+.pc-actions{display:flex;gap:10px;margin-top:12px;align-items:center;}
+.pc-actions .ghost{flex:0 0 auto;width:auto;margin-top:0;padding:12px 18px;}
+.pc-actions .bsky-post-btn{flex:1;margin-top:0;}
 button{font-family:inherit;font-size:16px;border:none;border-radius:12px;padding:13px 16px;
   font-weight:700;cursor:pointer;width:100%;margin-top:8px;}
 button.primary{background:var(--accent);color:#04222a;font-size:18px;padding:16px;}
