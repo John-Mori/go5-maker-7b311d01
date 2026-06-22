@@ -7,6 +7,16 @@ window.SCH = window.SCH || {};
     return `${date}#${slotIndex}`;
   }
 
+  // アカウント別オフセットのヘルパ
+  function curAccount_() { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } }
+  function accOffsetMin_(config) { var m = (config && config.accountOffsetMin) || {}; var v = m[curAccount_()]; return (typeof v === 'number') ? v : 0; }
+  function shiftTime_(time, min) {
+    if (!min) return time;
+    var p = String(time).split(':'); var total = Number(p[0]) * 60 + Number(p[1]) + min;
+    var nh = Math.floor(total / 60), nm = ((total % 60) + 60) % 60;
+    return nh + ':' + String(nm).padStart(2, '0');
+  }
+
   // "HH:MM"（24:00=翌日0時を許容）→ +09:00 付き ISO 文字列
   function computeScheduledAt(date, time) {
     let [h, m] = time.split(":").map(Number);
@@ -29,10 +39,12 @@ window.SCH = window.SCH || {};
   }
 
   // テンプレ枠から「自動更新してよいフィールド」を作る
-  function templateFields(date, tslot, dayType) {
+  function templateFields(date, tslot, dayType, config) {
+    var off = accOffsetMin_(config);
+    var t = shiftTime_(tslot.time, off);
     return {
-      scheduled_at: computeScheduledAt(date, tslot.time),
-      time: tslot.time,
+      scheduled_at: computeScheduledAt(date, t),
+      time: t,
       day_type: dayType,
       role: tslot.role,
       genre: tslot.genre_hint,
@@ -54,7 +66,7 @@ window.SCH = window.SCH || {};
   //  - 予約登録済/公開済：時刻・role を変えず、テンプレと差異があれば needs_review=true
   function mergeSlot(date, tslot, dayType, existing, config) {
     const id = slotId(date, tslot.slot_index);
-    const tpl = templateFields(date, tslot, dayType);
+    const tpl = templateFields(date, tslot, dayType, config);
 
     if (!existing) {
       return applyAutoPublish({ id, date, slot_index: tslot.slot_index, ...tpl, ...emptyUserFields(),

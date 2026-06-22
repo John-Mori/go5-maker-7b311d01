@@ -21,7 +21,8 @@
     pvAvatar: $('pvAvatar'), pvAvFallback: $('pvAvFallback'),
     pcModal: $('postConfirmModal'), pcText: $('pcText'), pcNote: $('pcNote'), pcOk: $('pcOk'), pcCancel: $('pcCancel'),
     shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy'),
-    ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags')
+    ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags'),
+    discountSel: $('discountSel')
   };
   if (!els.text) return;
 
@@ -110,6 +111,20 @@
   if (els.appPw) els.appPw.addEventListener('input', function () { saveA('bsky_app_pw', els.appPw.value); renderPreview(); updateGasStatus(); });
   if (els.ytDesc) els.ytDesc.addEventListener('input', function () { saveA('yt_desc', els.ytDesc.value); });
   if (els.ytTags) els.ytTags.addEventListener('input', function () { saveA('yt_tags', els.ytTags.value); buildTitle(); });
+
+  // ---- 割引％ドロップダウン → 本文1行目の直下に割引文を挿入/差し替え ----
+  var DISCOUNT_MARK = 'オフのお得作品'; // この語を含む行＝割引行とみなす
+  function setDiscountLine(val) {
+    if (!els.text) return;
+    var lines = els.text.value.split('\n').filter(function (ln) { return ln.indexOf(DISCOUNT_MARK) < 0; });
+    var insert = null;
+    if (val === 'custom') insert = '%オフのお得作品';      // 数字はユーザーが先頭に入力
+    else if (val) insert = val + '%オフのお得作品';         // 例 "30%オフのお得作品"
+    if (insert != null) { if (lines.length >= 1) lines.splice(1, 0, insert); else lines = [insert]; }
+    els.text.value = lines.join('\n');
+    saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
+  }
+  if (els.discountSel) els.discountSel.addEventListener('change', function () { setDiscountLine(els.discountSel.value); });
 
   // ---- アカウント切替で再読込 ----
   document.addEventListener('account-changed', function () { applyAccount(); });

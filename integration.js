@@ -54,6 +54,12 @@
     }
   });
 
+  // アカウント切替 → iframe に再計算を要求
+  document.addEventListener('account-changed', function () {
+    var f = $('calFrame');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'recompute' }, '*');
+  });
+
   // 投稿成功（即時/単独/予約）→ iframe のスロットへ書き戻し
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};

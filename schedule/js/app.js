@@ -72,9 +72,13 @@ window.SCH = window.SCH || {};
 
     // ヘッダ情報
     const reviewCount = result.review.length;
+    const curAcc = (function () { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } })();
+    const offMin = (config.accountOffsetMin && typeof config.accountOffsetMin[curAcc] === 'number') ? config.accountOffsetMin[curAcc] : 0;
+    const accLabel = offMin > 0 ? `${curAcc} / 時刻オフセット +${offMin}分` : `${curAcc}`;
     document.getElementById("status-bar").innerHTML =
       `<span>表示: ${ds} 〜 ${dt.addDays(ds, config.displayWeeks * 7 - 1)}（${config.displayWeeks}週）</span>` +
       `<span class="muted">保存先: ${store.adapterName}</span>` +
+      `<span class="muted">現在: ${accLabel}</span>` +
       (verificationMode ? `<span class="badge-verify">🧪 検証モード（検枠でKPI記録可）</span>` : "") +
       (reviewCount ? `<span class="badge-review">要確認 ${reviewCount}</span>` : "");
 
@@ -248,7 +252,9 @@ window.SCH = window.SCH || {};
   // 親（統合アプリ）からの書き戻し：投稿成功後に status/URL等を反映
   function handleParentMessage(ev) {
     const d = ev.data;
-    if (!d || d.target !== "sch-calendar" || d.type !== "slot-writeback") return;
+    if (!d || d.target !== "sch-calendar") return;
+    if (d.type === "recompute") { recomputeAndRender(); return; }
+    if (d.type !== "slot-writeback") return;
     const s = lastRender && lastRender.slots && lastRender.slots[d.id];
     if (!s) return;
     if (d.status) s.status = d.status;
