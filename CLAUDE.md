@@ -99,7 +99,8 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 ### 投稿記録＆クリック集計（§10 機能）の要点
 - **クリック数＝投稿の短縮URL（Bitly）の開封数**。アフィリンクは本文に**生のまま（無改変）**貼るため af_id 計測は壊れない。生アフィリンクのクリック実数は取得不可（FANZA 管理画面が正）。
 - 投稿の共有URLは `at://…/<rkey>` から `https://bsky.app/profile/<handle>/post/<rkey>` を組み立て（`bluesky-core.js`）。
-- クライアントは GAS Web App へ `{secret,title,postUrl,affiliateUrl}` を **Content-Type無指定の POST**（＝simple request でプリフライト回避）。GAS が Bitly 短縮＋Sheet追記。
+- クライアントは GAS Web App へ `{channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri}` を **Content-Type無指定の POST**（＝simple request でプリフライト回避）。GAS が Bitly 短縮＋シート追記。
+- **記録は2チャンネル別シート**：GAS(`gas/コード.gs` v2)が `channel`(acc1/acc2)に応じて **`記録_ch1`/`記録_ch2`** へ**列名マッピング**で自動記入（記録先は「動画記録分析テンプレート.xlsx」を取り込んだスプレッドシート前提＝`設定`/`Holidays`/`集計` 含む）。`refreshClicks`(Bitly)＋`refreshEngagement`(Bluesky公開API いいね/リポスト/返信)を毎時更新。分析テンプレ＝プロジェクト直下 `記録分析テンプレート/`。
 - Bitly トークンは **GAS 側のスクリプトプロパティに隠蔽**（公開サイトには置かない）。トークン秘匿＋CORS回避のためにサーバーレスを1つ挟む構成。
 - X(旧Twitter)はこの構成では不可（OAuth＋サーバー必須・直投稿はCORS不可）。
 

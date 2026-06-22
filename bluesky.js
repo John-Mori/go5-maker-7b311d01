@@ -210,7 +210,12 @@
   // ---- GAS 記録（共有シークレットは廃止） ----
   function recordToSheet(record) {
     var gasUrl = (els.gasUrl.value || '').trim(); if (!gasUrl) return Promise.resolve(null);
-    var payload = { title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '' };
+    var payload = {
+      channel: (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'),
+      title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
+      workUrl: ((els.workUrl && els.workUrl.value) || '').trim(),
+      hashtags: record.hashtags || '', postUri: record.postUri || ''
+    };
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
   function updateGasStatus() {
@@ -222,12 +227,13 @@
 
   // 投稿成功通知（integration.js が書き戻し＋下のリスナが必ず記録）
   function notifyPosted(res, text, alt) {
-    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || '') } })); } catch (e) {}
+    var tags = (String(text).match(/#[^\s#]+/g) || []).join(' ');
+    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || '') } })); } catch (e) {}
   }
   // すべての投稿を一元的に記録（即時・自動・予約のどれでも必ず記録される）
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
-    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate })
+    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri })
       .then(function (resp) { setShareOutputs(resp && resp.shortUrl ? resp.shortUrl : '', d.post_url); });
   });
 
@@ -268,7 +274,7 @@
   function reserveUnattended(text, blob, ms, slotId) {
     var gasUrl = (els.gasUrl.value || '').trim();
     if (!gasUrl) { setPostStatus('無人予約には⚙の「記録用URL（GAS）」設定が必要です。'); return; }
-    var payload = { type: 'reserve', scheduled_at: new Date(ms).toISOString(), text: text, slot_id: slotId || '' };
+    var payload = { type: 'reserve', channel: (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'), scheduled_at: new Date(ms).toISOString(), text: text, slot_id: slotId || '' };
     function send() {
       setPostStatus('☁️ 無人予約を送信中…');
       fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) })
