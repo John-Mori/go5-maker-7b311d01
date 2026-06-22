@@ -1,9 +1,10 @@
 /**
- * bluesky.js — Bluesky 投稿のUI配線（統合版・v18）
+ * bluesky.js — Bluesky 投稿のUI配線（統合版・v19）
  *   本文＝固定文のみ（編集可）。アフィリンクは「作品URL」から投稿時に自動付与、画像も自動添付。
  *   プレビューは実アカウントのアイコンを取得して表示。投稿される見た目そのもの。
  *   投稿手段：①動画作成後の自動投稿（編集できる確認）②今すぐ投稿（単独）③予約投稿。
  *   秘匿情報（アプリパスワード・シークレット）は console に出さない。
+ *   v19: アカウント別（acc1/acc2）に設定を分離。gasUrl のみ共通。
  */
 (function () {
   'use strict';
@@ -26,38 +27,95 @@
 
   var selectedPostFile = null, lastImgUrl = null;
 
-  // ---- 永続化 ----
-  var KEYS = {
-    enable: 'bsky_enable', text: 'bsky_text', workUrl: 'bsky_work_url',
-    handle: 'bsky_handle', appPw: 'bsky_app_pw', gasUrl: 'bsky_gas_url'
-  };
-  var FIELDS = [
-    [els.text, KEYS.text], [els.workUrl, KEYS.workUrl], [els.handle, KEYS.handle],
-    [els.appPw, KEYS.appPw], [els.gasUrl, KEYS.gasUrl]
-  ];
+  // ---- 汎用永続化 ----
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-  (function restore() {
-    if (els.enable) els.enable.checked = (load(KEYS.enable) === '1');
-    FIELDS.forEach(function (p) { if (!p[0]) return; var v = load(p[1]); if (v != null) p[0].value = v; });
-    // 移行：旧本文に紛れ込んだ説明の括弧書き（自動付与の注記）を一度だけ除去
+
+  // ---- アカウント別永続化ヘルパ ----
+  function acctId() { return (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'); }
+  function pk(base) { return base + '__' + acctId(); }
+  function loadA(base) { try { return localStorage.getItem(pk(base)); } catch (e) { return null; } }
+  function saveA(base, v) { try { localStorage.setItem(pk(base), v); } catch (e) {} }
+
+  // ---- DOM初期値の保持（空アカウント時のデフォルト） ----
+  var DEF = {
+    text: (els.text ? els.text.value : ''),
+    ytDesc: (els.ytDesc ? els.ytDesc.value : ''),
+    ytTags: (els.ytTags ? els.ytTags.value : ''),
+    workUrl: '', handle: '', appPw: ''
+  };
+
+  // ---- 一度だけ移行（既存の共有値を現在のアカウント名前空間へコピー） ----
+  (function migrateOnce() {
+    if (load('acct_split_migrated') === '1') return;
+    var a = acctId();
+    ['bsky_enable', 'bsky_text', 'bsky_work_url', 'bsky_handle', 'bsky_app_pw', 'bsky_unattended', 'yt_desc', 'yt_tags'].forEach(function (base) {
+      var legacy = load(base);
+      if (legacy != null && load(base + '__' + a) == null) { try { localStorage.setItem(base + '__' + a, legacy); } catch (e) {} }
+    });
+    save('acct_split_migrated', '1');
+  })();
+
+  // ---- gasUrl（共有）の復元 ----
+  if (els.gasUrl) { var gv = load('bsky_gas_url'); if (gv != null) els.gasUrl.value = gv; }
+
+  // ---- 現在アカウントの設定を画面に反映 ----
+  function applyAccount() {
+    // enable / unattended
+    if (els.enable) els.enable.checked = (loadA('bsky_enable') === '1');
+    if (els.unattended) els.unattended.checked = (loadA('bsky_unattended') === '1');
+
+    // テキスト系（null なら DEF を使用）
+    var tv = loadA('bsky_text'); if (els.text) els.text.value = (tv != null ? tv : DEF.text);
+    var wv = loadA('bsky_work_url'); if (els.workUrl) els.workUrl.value = (wv != null ? wv : DEF.workUrl);
+    var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
+    var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
+    var dv = loadA('yt_desc'); if (els.ytDesc) els.ytDesc.value = (dv != null ? dv : DEF.ytDesc);
+    var tgv = loadA('yt_tags'); if (els.ytTags) els.ytTags.value = (tgv != null ? tgv : DEF.ytTags);
+
+    // 本文の括弧書き自動クリーンアップ（移行直後の旧注記を除去）
     if (els.text && els.text.value) {
       var cleaned = els.text.value.split('\n').filter(function (line) {
         return !/^\s*[（(].*(自動で追加|自動で添付|自動添付|自動で付).*[)）]\s*$/.test(line);
       }).join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
-      if (cleaned !== els.text.value) { els.text.value = cleaned; save(KEYS.text, cleaned); }
+      if (cleaned !== els.text.value) { els.text.value = cleaned; saveA('bsky_text', cleaned); }
     }
-  })();
-  if (els.ytDesc) {
-    var ytSaved = load('yt_desc'); if (ytSaved != null) els.ytDesc.value = ytSaved;
-    els.ytDesc.addEventListener('input', function () { save('yt_desc', els.ytDesc.value); });
+
+    // アバター再取得（ハンドル変更に追従）
+    var hHandle = (els.handle ? (els.handle.value || '').trim().replace(/^@/, '') : '');
+    avatarFor = null; // キャッシュを無効化して再取得を強制
+    ensureAvatar(hHandle);
+
+    // 依存UIを更新
+    renderPreview();
+    updateGasStatus();
+    buildTitle();
   }
-  if (els.enable) els.enable.addEventListener('change', function () { save(KEYS.enable, els.enable.checked ? '1' : '0'); });
-  if (els.unattended) { els.unattended.checked = (load('bsky_unattended') === '1'); els.unattended.addEventListener('change', function () { save('bsky_unattended', els.unattended.checked ? '1' : '0'); }); }
-  FIELDS.forEach(function (p) {
-    if (!p[0]) return;
-    p[0].addEventListener('input', function () { save(p[1], p[0].value); renderPreview(); updateGasStatus(); });
-  });
+
+  // ---- gasUrl の保存配線（共有） ----
+  if (els.gasUrl) {
+    els.gasUrl.addEventListener('input', function () {
+      save('bsky_gas_url', els.gasUrl.value);
+      renderPreview();
+      updateGasStatus();
+    });
+  }
+
+  // ---- アカウント別フィールドの保存配線 ----
+  if (els.enable) els.enable.addEventListener('change', function () { saveA('bsky_enable', els.enable.checked ? '1' : '0'); });
+  if (els.unattended) els.unattended.addEventListener('change', function () { saveA('bsky_unattended', els.unattended.checked ? '1' : '0'); });
+  if (els.text) els.text.addEventListener('input', function () { saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus(); });
+  if (els.workUrl) els.workUrl.addEventListener('input', function () { saveA('bsky_work_url', els.workUrl.value); renderPreview(); updateGasStatus(); });
+  if (els.handle) els.handle.addEventListener('input', function () { saveA('bsky_handle', els.handle.value); renderPreview(); updateGasStatus(); });
+  if (els.appPw) els.appPw.addEventListener('input', function () { saveA('bsky_app_pw', els.appPw.value); renderPreview(); updateGasStatus(); });
+  if (els.ytDesc) els.ytDesc.addEventListener('input', function () { saveA('yt_desc', els.ytDesc.value); });
+  if (els.ytTags) els.ytTags.addEventListener('input', function () { saveA('yt_tags', els.ytTags.value); buildTitle(); });
+
+  // ---- アカウント切替で再読込 ----
+  document.addEventListener('account-changed', function () { applyAccount(); });
+
+  // ---- 初期化（移行→applyAccount の順） ----
+  applyAccount();
 
   function setBskyStatus(m) { if (els.bskyStatus) els.bskyStatus.textContent = m || ''; }
   function setPostStatus(m, html) { if (!els.postStatus) return; if (html) els.postStatus.innerHTML = m; else els.postStatus.textContent = m || ''; }
@@ -199,7 +257,7 @@
     var f = (lines[0] || '').trim();
     if (f === PLACEHOLDER_URL || f === prevShortUrl || /^https?:\/\//.test(f)) lines[0] = url;
     else lines.unshift(url);
-    els.ytDesc.value = lines.join('\n'); save('yt_desc', els.ytDesc.value);
+    els.ytDesc.value = lines.join('\n'); saveA('yt_desc', els.ytDesc.value);
   }
   function setShareOutputs(shortUrl, fallbackUrl) {
     var url = shortUrl || fallbackUrl || '';
@@ -351,12 +409,8 @@
     lastTitle = title;
     els.ytTitle.textContent = title || '（「動画作成」タブのコメントを入れると題名が出ます）';
   }
-  if (els.ytTags) { var savedTags = load('yt_tags'); if (savedTags != null) els.ytTags.value = savedTags; els.ytTags.addEventListener('input', function () { save('yt_tags', els.ytTags.value); buildTitle(); }); }
   if (topEl) topEl.addEventListener('input', buildTitle);
   var tabPostBtn = document.getElementById('tabPost'); if (tabPostBtn) tabPostBtn.addEventListener('click', buildTitle);
   if (els.ytTitleCopy) els.ytTitleCopy.addEventListener('click', function () { if (lastTitle) copyText(lastTitle, els.ytTitleCopy); });
   buildTitle();
-
-  renderPreview();
-  updateGasStatus();
 })();
