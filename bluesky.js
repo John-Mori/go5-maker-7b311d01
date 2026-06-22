@@ -18,7 +18,8 @@
     pvName: $('pvName'), pvHandle: $('pvHandle'), pvBody: $('pvBody'),
     pvImgWrap: $('pvImgWrap'), pvImg: $('pvImg'), pvImgNote: $('pvImgNote'),
     pvAvatar: $('pvAvatar'), pvAvFallback: $('pvAvFallback'),
-    pcModal: $('postConfirmModal'), pcText: $('pcText'), pcNote: $('pcNote'), pcOk: $('pcOk'), pcCancel: $('pcCancel')
+    pcModal: $('postConfirmModal'), pcText: $('pcText'), pcNote: $('pcNote'), pcOk: $('pcOk'), pcCancel: $('pcCancel'),
+    shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy')
   };
   if (!els.text) return;
 
@@ -46,6 +47,10 @@
       if (cleaned !== els.text.value) { els.text.value = cleaned; save(KEYS.text, cleaned); }
     }
   })();
+  if (els.ytDesc) {
+    var ytSaved = load('yt_desc'); if (ytSaved != null) els.ytDesc.value = ytSaved;
+    els.ytDesc.addEventListener('input', function () { save('yt_desc', els.ytDesc.value); });
+  }
   if (els.enable) els.enable.addEventListener('change', function () { save(KEYS.enable, els.enable.checked ? '1' : '0'); });
   if (els.unattended) { els.unattended.checked = (load('bsky_unattended') === '1'); els.unattended.addEventListener('change', function () { save('bsky_unattended', els.unattended.checked ? '1' : '0'); }); }
   FIELDS.forEach(function (p) {
@@ -174,6 +179,31 @@
     });
   }
 
+  // ---- 短縮URL表示・コピー助関数 ----
+  var prevShortUrl = '', lastShortUrl = '';
+  function fallbackCopy(text, ok) {
+    var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand('copy'); ok && ok(); } catch (e) {} document.body.removeChild(ta);
+  }
+  function copyText(text, btn) {
+    function ok() { if (!btn) return; if (!btn.dataset.label) btn.dataset.label = btn.textContent; btn.textContent = '✓ コピーしました'; setTimeout(function () { btn.textContent = btn.dataset.label; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok).catch(function () { fallbackCopy(text, ok); });
+    else fallbackCopy(text, ok);
+  }
+  function setShareOutputs(shortUrl, fallbackUrl) {
+    var url = shortUrl || fallbackUrl || '';
+    if (els.shortUrlOut) els.shortUrlOut.textContent = url || '（短縮URLを取得できませんでした）';
+    if (url && els.ytDesc) {
+      var v = els.ytDesc.value;
+      if (prevShortUrl && v.indexOf(prevShortUrl) >= 0) v = v.split(prevShortUrl).join(url);
+      else if (v.indexOf(url) < 0) v = v.replace(/\s+$/, '') + '\n' + url;
+      els.ytDesc.value = v; save('yt_desc', v);
+    }
+    if (url) prevShortUrl = url;
+    lastShortUrl = url;
+  }
+
   // ---- GAS 記録（共有シークレットは廃止） ----
   function recordToSheet(record) {
     var gasUrl = (els.gasUrl.value || '').trim(); if (!gasUrl) return Promise.resolve(null);
@@ -194,7 +224,8 @@
   // すべての投稿を一元的に記録（即時・自動・予約のどれでも必ず記録される）
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
-    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate });
+    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate })
+      .then(function (resp) { setShareOutputs(resp && resp.shortUrl ? resp.shortUrl : '', d.post_url); });
   });
 
   // ---- 編集できる確認モーダル（方法①自動投稿） ----
@@ -296,6 +327,13 @@
     });
   }
   document.addEventListener('video-created', handleVideoCreated);
+
+  if (els.shortUrlCopy) els.shortUrlCopy.addEventListener('click', function () { if (lastShortUrl) copyText(lastShortUrl, els.shortUrlCopy); });
+  if (els.ytCopy) els.ytCopy.addEventListener('click', function () { if (els.ytDesc) copyText(els.ytDesc.value, els.ytCopy); });
+  if (els.ytInsert) els.ytInsert.addEventListener('click', function () {
+    if (!els.ytDesc || !lastShortUrl) return;
+    if (els.ytDesc.value.indexOf(lastShortUrl) < 0) { els.ytDesc.value = els.ytDesc.value.replace(/\s+$/, '') + '\n' + lastShortUrl; save('yt_desc', els.ytDesc.value); }
+  });
 
   renderPreview();
   updateGasStatus();

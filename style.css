@@ -338,3 +338,7 @@ textarea:focus{border-color:var(--accent);}
   border:1px solid var(--line);border-radius:999px;padding:8px 14px;min-height:36px;cursor:pointer;width:auto;margin:0;}
 .acct-btn.active{background:var(--accent);color:#04222a;border-color:var(--accent);}
 .acct-bar-note{font-size:11px;color:var(--sub);flex-basis:100%;}
+
+/* ── 短縮URL表示 ── */
+.short-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;}
+.short-url{flex:1;min-width:0;word-break:break-all;background:#0b1019;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--ink);}

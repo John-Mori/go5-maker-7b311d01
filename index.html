@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=22">
+<link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
 <header>
@@ -212,6 +212,27 @@
       ・<b>無人ON</b>＝GASに予約を送り、<b>タブを閉じても</b>時間トリガーが投稿（アカウントはGAS側の設定 BSKY_HANDLE/BSKY_APP_PW を使用）。</div>
     <div id="reserveList" class="rsv-list" hidden></div>
   </section>
+
+  <!-- 短縮URL表示 ＋ YouTube説明欄 -->
+  <section class="card">
+    <div class="field-label">🔗 最新の投稿（短縮URL）</div>
+    <div class="short-row">
+      <code id="shortUrlOut" class="short-url">（投稿するとここに短縮URLが表示されます）</code>
+      <button id="shortUrlCopy" class="copy-btn" type="button">URLをコピー</button>
+    </div>
+    <div class="hint">動画作成後の自動投稿／今すぐ投稿のあと、Bluesky投稿のURLを短縮して表示します（短縮には⚙の記録用GAS設定が必要）。</div>
+
+    <label class="field-label" for="ytDesc" style="margin-top:12px;">📺 YouTube説明欄（コピーして概要欄に貼り付け）</label>
+    <textarea id="ytDesc" rows="5">おすすめ漫画を紹介しています📚
+▼続き・詳細はこちら
+
+#漫画 #PR</textarea>
+    <div class="row" style="display:flex;gap:8px;margin-top:8px;">
+      <button id="ytInsert" class="ghost" type="button">短縮URLを挿入</button>
+      <button id="ytCopy" class="copy-btn" type="button">説明欄をコピー</button>
+    </div>
+    <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
+  </section>
 </main>
 </section>
 
@@ -275,14 +296,14 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=22"></script>
-<script src="affiliate-core.js?v=22"></script>
-<script src="affiliate.js?v=22"></script>
-<script src="bluesky-core.js?v=22"></script>
-<script src="scheduler.js?v=22"></script>
-<script src="bluesky.js?v=22"></script>
-<script src="verify-core.js?v=22"></script>
-<script src="verify.js?v=22"></script>
-<script src="integration.js?v=22"></script>
+<script src="app.js?v=23"></script>
+<script src="affiliate-core.js?v=23"></script>
+<script src="affiliate.js?v=23"></script>
+<script src="bluesky-core.js?v=23"></script>
+<script src="scheduler.js?v=23"></script>
+<script src="bluesky.js?v=23"></script>
+<script src="verify-core.js?v=23"></script>
+<script src="verify.js?v=23"></script>
+<script src="integration.js?v=23"></script>
 </body>
 </html>
