@@ -19,7 +19,8 @@
     pvImgWrap: $('pvImgWrap'), pvImg: $('pvImg'), pvImgNote: $('pvImgNote'),
     pvAvatar: $('pvAvatar'), pvAvFallback: $('pvAvFallback'),
     pcModal: $('postConfirmModal'), pcText: $('pcText'), pcNote: $('pcNote'), pcOk: $('pcOk'), pcCancel: $('pcCancel'),
-    shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy')
+    shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy'),
+    ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags')
   };
   if (!els.text) return;
 
@@ -181,6 +182,7 @@
 
   // ---- 短縮URL表示・コピー助関数 ----
   var prevShortUrl = '', lastShortUrl = '';
+  var PLACEHOLDER_URL = '（投稿するとここに短縮URLが入ります）';
   function fallbackCopy(text, ok) {
     var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.focus(); ta.select();
@@ -191,17 +193,18 @@
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok).catch(function () { fallbackCopy(text, ok); });
     else fallbackCopy(text, ok);
   }
+  function putUrlTop(url) {
+    if (!url || !els.ytDesc) return;
+    var lines = els.ytDesc.value.split('\n'); if (!lines.length) lines = [''];
+    var f = (lines[0] || '').trim();
+    if (f === PLACEHOLDER_URL || f === prevShortUrl || /^https?:\/\//.test(f)) lines[0] = url;
+    else lines.unshift(url);
+    els.ytDesc.value = lines.join('\n'); save('yt_desc', els.ytDesc.value);
+  }
   function setShareOutputs(shortUrl, fallbackUrl) {
     var url = shortUrl || fallbackUrl || '';
     if (els.shortUrlOut) els.shortUrlOut.textContent = url || '（短縮URLを取得できませんでした）';
-    if (url && els.ytDesc) {
-      var v = els.ytDesc.value;
-      if (prevShortUrl && v.indexOf(prevShortUrl) >= 0) v = v.split(prevShortUrl).join(url);
-      else if (v.indexOf(url) < 0) v = v.replace(/\s+$/, '') + '\n' + url;
-      els.ytDesc.value = v; save('yt_desc', v);
-    }
-    if (url) prevShortUrl = url;
-    lastShortUrl = url;
+    if (url) { putUrlTop(url); prevShortUrl = url; lastShortUrl = url; }
   }
 
   // ---- GAS 記録（共有シークレットは廃止） ----
@@ -330,10 +333,23 @@
 
   if (els.shortUrlCopy) els.shortUrlCopy.addEventListener('click', function () { if (lastShortUrl) copyText(lastShortUrl, els.shortUrlCopy); });
   if (els.ytCopy) els.ytCopy.addEventListener('click', function () { if (els.ytDesc) copyText(els.ytDesc.value, els.ytCopy); });
-  if (els.ytInsert) els.ytInsert.addEventListener('click', function () {
-    if (!els.ytDesc || !lastShortUrl) return;
-    if (els.ytDesc.value.indexOf(lastShortUrl) < 0) { els.ytDesc.value = els.ytDesc.value.replace(/\s+$/, '') + '\n' + lastShortUrl; save('yt_desc', els.ytDesc.value); }
-  });
+  if (els.ytInsert) els.ytInsert.addEventListener('click', function () { if (lastShortUrl) putUrlTop(lastShortUrl); });
+
+  var lastTitle = '';
+  var topEl = document.getElementById('top');
+  function buildTitle() {
+    if (!els.ytTitle) return;
+    var comment = (topEl && topEl.value ? topEl.value.trim() : '');
+    var tags = (els.ytTags && els.ytTags.value ? els.ytTags.value.trim() : '');
+    var title = comment + (comment && tags ? ' ' : '') + tags;
+    lastTitle = title;
+    els.ytTitle.textContent = title || '（「動画作成」タブのコメントを入れると題名が出ます）';
+  }
+  if (els.ytTags) { var savedTags = load('yt_tags'); if (savedTags != null) els.ytTags.value = savedTags; els.ytTags.addEventListener('input', function () { save('yt_tags', els.ytTags.value); buildTitle(); }); }
+  if (topEl) topEl.addEventListener('input', buildTitle);
+  var tabPostBtn = document.getElementById('tabPost'); if (tabPostBtn) tabPostBtn.addEventListener('click', buildTitle);
+  if (els.ytTitleCopy) els.ytTitleCopy.addEventListener('click', function () { if (lastTitle) copyText(lastTitle, els.ytTitleCopy); });
+  buildTitle();
 
   renderPreview();
   updateGasStatus();
