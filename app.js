@@ -38,12 +38,21 @@
   const $ = (id) => document.getElementById(id);
   const cv = $("cv"), ctx = cv.getContext("2d");
   const bg = $("bg");
+
+  // ---- アカウント定義（背景動画の切替。Bluesky/YouTube個別資格情報は保留＝acc1共有を流用）----
+  const ACCOUNTS = {
+    acc1: { label: "アカウント1", bg: "assets/bg_main.mp4" },
+    acc2: { label: "アカウント2", bg: "assets/bg_account2.mp4" },
+  };
+  let curAccount = "acc1";
+
   const els = {
     photo: $("photo"), photoName: $("photoName"), photoBtn: $("photoBtn"),
     author: $("author"), detail: $("detail"), top: $("top"),
     previewBtn: $("previewBtn"), makeBtn: $("makeBtn"), status: $("status"),
     resultArea: $("resultArea"), result: $("result"), saveBtn: $("saveBtn"), dl: $("dl"),
     voffSaveDefault: $("voffSaveDefault"), voffReset: $("voffReset"),
+    acctBtn1: $("acctBtn1"), acctBtn2: $("acctBtn2"),
   };
   els.detail.value = DEFAULT_DETAIL;
 
@@ -392,6 +401,22 @@
     flashBtn(els.voffReset, "✓ リセットしました");
   });
 
+  // ---- アカウント切替 ----
+  function setAccount(id) {
+    if (!ACCOUNTS[id]) id = "acc1";
+    curAccount = id;
+    try { localStorage.setItem("current_account", id); } catch (e) {}
+    if (els.acctBtn1) els.acctBtn1.classList.toggle("active", id === "acc1");
+    if (els.acctBtn2) els.acctBtn2.classList.toggle("active", id === "acc2");
+    const want = ACCOUNTS[id].bg;
+    const cur = bg.getAttribute("src") || "";
+    if (!cur.endsWith(want)) { bg.src = want; try { bg.load(); } catch (e) {} }
+    bg.play().catch(() => {});
+    preview();
+    document.dispatchEvent(new CustomEvent("account-changed", { detail: { id } }));
+  }
+  window.getCurrentAccount = () => curAccount;
+
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
   ensureFont().then(preview);
@@ -401,8 +426,14 @@
     document.fonts.ready.then(() => { fontReady = true; preview(); });
   }
   // iOSはミュート自動再生が許可されるが、念のため初回操作でも再生を促す。
-  bg.play().catch(() => {});
   const kick = () => { bg.play().catch(() => {}); document.removeEventListener("touchstart", kick); document.removeEventListener("click", kick); };
   document.addEventListener("touchstart", kick, { once: true, passive: true });
   document.addEventListener("click", kick, { once: true });
+
+  // ---- アカウント切替ボタン配線・起動時復元 ----
+  if (els.acctBtn1) els.acctBtn1.addEventListener("click", () => setAccount("acc1"));
+  if (els.acctBtn2) els.acctBtn2.addEventListener("click", () => setAccount("acc2"));
+  let savedAcct = "acc1";
+  try { savedAcct = localStorage.getItem("current_account") || "acc1"; } catch (e) {}
+  setAccount(savedAcct);
 })();
