@@ -180,21 +180,34 @@
   }
 
   // ---- アバター（実アカウントのアイコンを公開APIで取得） ----
-  var avatarFor = null, avatarUrl = null;
+  var avatarFor = null, avatarUrl = null, displayNameVal = null;
   function setAvatar(url) {
     if (!els.pvAvatar || !els.pvAvFallback) return;
     if (url) { els.pvAvatar.src = url; els.pvAvatar.hidden = false; els.pvAvFallback.style.display = 'none'; }
     else { els.pvAvatar.hidden = true; els.pvAvatar.removeAttribute('src'); els.pvAvFallback.style.display = ''; }
   }
+  // ハンドル上の表示名＝Blueskyの displayName（取得できなければハンドル先頭／未設定なら「あなた」）
+  function setPvName() {
+    if (!els.pvName) return;
+    var h = (els.handle.value || '').trim().replace(/^@/, '');
+    els.pvName.textContent = displayNameVal || (h ? h.split('.')[0] : 'あなた');
+  }
   function ensureAvatar(handle) {
-    if (!handle) { setAvatar(null); return; }
-    if (avatarFor === handle) { setAvatar(avatarUrl); return; }
-    avatarFor = handle;
-    var ck = 'bsky_avatar_' + handle;
+    if (!handle) { setAvatar(null); displayNameVal = null; setPvName(); return; }
+    if (avatarFor === handle) { setAvatar(avatarUrl); setPvName(); return; }
+    avatarFor = handle; displayNameVal = null;
+    var ck = 'bsky_avatar_' + handle, dk = 'bsky_dn_' + handle;
     try { var c = localStorage.getItem(ck); if (c) { avatarUrl = c; setAvatar(c); } } catch (e) {}
+    try { var dn = localStorage.getItem(dk); if (dn) { displayNameVal = dn; } } catch (e) {}
+    setPvName();
     fetch('https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=' + encodeURIComponent(handle))
       .then(function (r) { return r.json(); })
-      .then(function (j) { if (j && j.avatar) { avatarUrl = j.avatar; try { localStorage.setItem(ck, j.avatar); } catch (e) {} setAvatar(j.avatar); } })
+      .then(function (j) {
+        if (avatarFor !== handle) return; // ハンドルが変わっていたら古い結果は無視
+        if (j && j.avatar) { avatarUrl = j.avatar; try { localStorage.setItem(ck, j.avatar); } catch (e) {} setAvatar(j.avatar); }
+        if (j && j.displayName) { displayNameVal = j.displayName; try { localStorage.setItem(dk, j.displayName); } catch (e) {} }
+        setPvName();
+      })
       .catch(function () {});
   }
 
@@ -223,8 +236,7 @@
 
     var h = (els.handle.value || '').trim().replace(/^@/, '');
     if (els.pvHandle) els.pvHandle.textContent = h ? ('@' + h) : '@（ハンドル未設定）';
-    if (els.pvName) els.pvName.textContent = h ? h.split('.')[0] : 'あなた';
-    ensureAvatar(h);
+    ensureAvatar(h); // 表示名(displayName)とアバターを設定（pvName はここで反映）
 
     var f = selectedPostFile || photoFile();
     if (f) showPreviewImage(f); else hidePreviewImage();
