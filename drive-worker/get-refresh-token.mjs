@@ -42,7 +42,8 @@ function loadCreds() {
 function openBrowser(url) {
   const platform = process.platform;
   try {
-    if (platform === "win32") spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true });
+    // Windowsは cmd "start" だとURL内の & で途中で切れるため rundll32 で開く（URLをそのまま1引数で渡す）
+    if (platform === "win32") spawn("rundll32", ["url.dll,FileProtocolHandler", url], { stdio: "ignore", detached: true });
     else if (platform === "darwin") spawn("open", [url], { stdio: "ignore", detached: true });
     else spawn("xdg-open", [url], { stdio: "ignore", detached: true });
   } catch (e) { /* 自動起動に失敗してもURLは表示する */ }
@@ -118,6 +119,17 @@ const server = http.createServer(async (req, res) => {
     console.error("✗ トークン交換失敗:", e.message || e);
     server.close(); process.exit(1);
   }
+});
+
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    console.error("\n✗ ポート53682が使用中です。前回の実行がまだ残っています。");
+    console.error("  → 黒い画面（ターミナル）をすべて閉じて、開き直してから、もう一度 node get-refresh-token.mjs を実行してください。");
+    console.error("  （または PowerShell で:  Stop-Process -Name node -Force  を実行してから再実行）\n");
+  } else {
+    console.error("✗ 起動エラー:", e.message || e);
+  }
+  process.exit(1);
 });
 
 server.listen(PORT, () => {

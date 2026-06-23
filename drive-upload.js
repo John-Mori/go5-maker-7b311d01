@@ -16,8 +16,8 @@
 
   var CFG = {
     // ↓↓↓ デプロイ後にここを書き換える（SETUP.md 参照）↓↓↓
-    WORKER_URL: "PASTE_WORKER_URL_HERE",       // 例: https://go5-drive-saver.xxxx.workers.dev
-    SHARED_SECRET: "PASTE_SHARED_SECRET_HERE", // wrangler secret put SHARED_SECRET に入れた値と同一
+    WORKER_URL: "https://go5-drive-saver.trustsignalbot.workers.dev",
+    SHARED_SECRET: "daremogamewoubawareteikukimihakanpekidekyukyokunoidol", // Worker側 SHARED_SECRET と同一（公開可＝ソフト鍵）
   };
   // 端末ごとの上書き（任意）：repoに秘密を置きたくない場合
   try {

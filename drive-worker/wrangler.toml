@@ -7,8 +7,8 @@ compatibility_date = "2024-11-01"
 # フロント(GitHub Pages)のOriginだけ許可（ワイルドカード不可）
 ALLOWED_ORIGIN = "https://john-mori.github.io"
 # 保存先フォルダID（SETUP.md の手順で取得して貼る。空のままだと保存されずエラー）
-FOLDER_ID_ACC1 = ""   # 月詠み色恋劇場
-FOLDER_ID_ACC2 = ""   # 宵桜艶帖～Yoizakura Tsuyacho～
+FOLDER_ID_ACC1 = "1B8444oTjKfvEEx6Wcb3BTUqW5TcKn1M-"   # 月詠み色恋劇場
+FOLDER_ID_ACC2 = "12OnAu286z8Z0pCDz0bZb1khS3ydmmtwa"   # 宵桜艶帖～Yoizakura Tsuyacho～
 # 1日あたりのアップロード上限（レート制限）
 DAILY_LIMIT = "100"
 # 予備：ラベル一致用（任意。IDが主。未設定でも可）
@@ -18,7 +18,7 @@ LABEL_ACC2 = "宵桜艶帖～Yoizakura Tsuyacho～"
 # ── レート制限用 KV（SETUP.md でnamespaceを作成し id を貼る）──
 [[kv_namespaces]]
 binding = "RL"
-id = "PUT_KV_ID_HERE"
+id = "d6eef0267cdb425a9d692635cea618ba"
 
 # ── Secrets（コマンドで登録。ここには書かない）──
 #   wrangler secret put GOOGLE_CLIENT_ID
