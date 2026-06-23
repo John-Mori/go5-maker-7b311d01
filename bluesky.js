@@ -54,8 +54,8 @@
 
   // アカウント別の YouTube説明欄テンプレ既定（保存が空のときに使う）。1行目の短縮URLプレースホルダは投稿後に自動で実URLへ置換。
   var DEF_YTDESC = {
-    acc1: '（投稿するとここに短縮URLが入ります）\n\n↑ URLを長押し&リンクを開く ↑\nこちらからアクセスしてね💕\n\n\n\n\n',
-    acc2: '⬆️URLを長押し&リンクを開く\n続きはこちらからどうぞ💫\n\n\n\n\n📚ひとこと📚'
+    acc1: '↑ URLを長押し&リンクを開く ↑\nこちらからアクセスしてね💕\n\n\n\n\n【感想📖】',
+    acc2: '(短縮URLが入ります)\n\n⬆️URLを長押し&リンクを開く\n続きはこちらからどうぞ💫\n\n\n\n\n📚ひとこと📚'
   };
   function defYtDesc() { return DEF_YTDESC[acctId()] || DEF_YTDESC.acc1; }
 
@@ -184,6 +184,19 @@
       } catch (e) {}
     });
     save('feat_2026q2_migrated', '1');
+  })();
+
+  // ---- YouTube説明欄テンプレ更新の一回移行（v3）：旧/前テンプレ保存値を最新テンプレへ。独自文は保持。----
+  (function migrateYtDescV3() {
+    if (load('ytdesc_tpl_v3') === '1') return;
+    var sig = { acc1: 'こちらからアクセスしてね', acc2: '続きはこちらからどうぞ' };
+    ['acc1', 'acc2'].forEach(function (a) {
+      try {
+        var key = 'yt_desc__' + a, v = load(key);
+        if (v == null || v.indexOf(sig[a]) >= 0 || v.indexOf('【感想') >= 0 || v.indexOf('ひとこと') >= 0) save(key, DEF_YTDESC[a]);
+      } catch (e) {}
+    });
+    save('ytdesc_tpl_v3', '1');
   })();
 
   // ---- 初期化（移行→applyAccount の順） ----
@@ -339,7 +352,8 @@
     if (!url || !els.ytDesc) return;
     var lines = els.ytDesc.value.split('\n'); if (!lines.length) lines = [''];
     var f = (lines[0] || '').trim();
-    if (f === PLACEHOLDER_URL || f === prevShortUrl || /^https?:\/\//.test(f)) lines[0] = url;
+    // 1行目が「短縮URLプレースホルダ」or 前回URL or URL なら置換。それ以外（例：↑案内文）は上に差し込む。
+    if (f === PLACEHOLDER_URL || f === prevShortUrl || /^https?:\/\//.test(f) || /短縮URL/.test(f)) lines[0] = url;
     else lines.unshift(url);
     els.ytDesc.value = lines.join('\n'); saveA('yt_desc', els.ytDesc.value);
   }
