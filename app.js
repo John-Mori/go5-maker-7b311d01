@@ -65,12 +65,14 @@
       defaultDetail: "作品は右上の：から説明へ🌸",  // A：誘導文（：→⋮、≡なし、末尾🌸）
       detailMenu: false,                    // acc2は ≡ を出さない（「⋮から説明へ🌸」）
       textFill: "#FFF0F5",                  // C：温白（lavender blush）
-      stroke: "rgba(0,0,0,1)",              // glow時は未使用
+      stroke: "rgba(0,0,0,1)",              // glow時は未使用（黒縁は廃止）
       bandRGB: "26,14,22",                  // D：#1A0E16 ダークプラム（α＝既存踏襲）
-      glow: true,                           // B：黒縁→桜ピンクの2層グロー（にじみ）
-      glowOuter: "rgba(232,75,138,0.55)",   // #E84B8A 外側・大ぼかし
-      glowInner: "rgba(255,111,165,0.95)",  // #FF6FA5 内側・中ぼかし
-      iconFill: "#FFF0F5", iconHalo: "rgba(60,20,40,0.9)",  // アイコンは可読性優先で芯を温白＋濃プラムの縁
+      glow: true,                           // B：黒縁→桜ローズの発光影（にじみ・グロー）
+      glow1: "rgba(232,75,138,0.95)",       // #E84B8A 中心・小ぼかし（強）
+      glow2: "rgba(214,51,108,0.60)",       // #D6336C 中間・中ぼかし
+      glow3: "rgba(214,51,108,0.40)",       // #D6336C 外側・大ぼかし
+      contour: "rgba(140,30,70,0.9)",       // 最内の細い同系濃色の輪郭（可読性確保・黒は使わない）
+      iconFill: "#FFF0F5", iconHalo: "rgba(140,30,70,0.95)",  // アイコンも温白の芯＋同系濃色の輪郭で艶トーン統一
     },
   };
   const theme = () => THEME[curAccount] || THEME.acc1;
@@ -79,13 +81,17 @@
   function paintGlyph(ln, x, y, px, sw) {
     const t = theme();
     if (t.glow) {
+      // 桜ローズの発光影（外→内の3層グロー）。ぼかし量は文字サイズ比（CSSの6/14/22px相当）。
       ctx.save();
-      ctx.shadowColor = t.glowOuter; ctx.shadowBlur = px * 0.46;
-      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);
-      ctx.shadowColor = t.glowInner; ctx.shadowBlur = px * 0.26;
-      ctx.fillText(ln, x, y);
+      ctx.fillStyle = t.textFill;
+      ctx.shadowColor = t.glow3; ctx.shadowBlur = px * 0.55; ctx.fillText(ln, x, y);
+      ctx.shadowColor = t.glow2; ctx.shadowBlur = px * 0.35; ctx.fillText(ln, x, y);
+      ctx.shadowColor = t.glow1; ctx.shadowBlur = px * 0.18; ctx.fillText(ln, x, y);
       ctx.restore();
-      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // にじみの上に芯を重ねて可読性を確保
+      // 黒縁は使わず、最内に細い同系濃色の輪郭を1枚だけ重ねて滲みの中でも字形を保つ
+      ctx.lineJoin = "round"; ctx.lineWidth = Math.max(1, sw * 0.9);
+      ctx.strokeStyle = t.contour; ctx.strokeText(ln, x, y);
+      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // 温白の芯（影なし）
     } else {
       ctx.lineJoin = "round"; ctx.lineWidth = sw * 2;
       ctx.strokeStyle = t.stroke; ctx.strokeText(ln, x, y);
