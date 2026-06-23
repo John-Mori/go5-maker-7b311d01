@@ -46,6 +46,53 @@
   };
   let curAccount = "acc1";
 
+  // ---- アカウント別テンプレ・テーマ（派生プリセット）----
+  // 変えるのは「表示テキストと装飾色」のみ。レイアウト・座標・送り・生成フローは共通（§3座標規約は不変）。
+  // acc1＝従来値そのまま（見た目不変）。acc2＝桜ピンクの派生（温白文字＋桜グロー＋ダークプラム帯）。
+  const THEME = {
+    acc1: {
+      authorPrefix: "作者：",
+      defaultDetail: DEFAULT_DETAIL,        // "作品の詳細は右上の：から説明"（：→⋮、説明→≡説明）
+      detailMenu: true,                     // 誘導文の「説明」前に ≡（ハンバーガー）を出す
+      textFill: "#fff",                     // 白文字
+      stroke: "rgba(0,0,0,1)",              // シャープな黒縁
+      bandRGB: "0,0,0",                     // 黒帯
+      glow: false,
+      iconFill: "#fff", iconHalo: "rgba(0,0,0,1)",
+    },
+    acc2: {
+      authorPrefix: "引用：",               // A：作者：→引用：
+      defaultDetail: "作品は右上の：から説明へ🌸",  // A：誘導文（：→⋮、≡なし、末尾🌸）
+      detailMenu: false,                    // acc2は ≡ を出さない（「⋮から説明へ🌸」）
+      textFill: "#FFF0F5",                  // C：温白（lavender blush）
+      stroke: "rgba(0,0,0,1)",              // glow時は未使用
+      bandRGB: "26,14,22",                  // D：#1A0E16 ダークプラム（α＝既存踏襲）
+      glow: true,                           // B：黒縁→桜ピンクの2層グロー（にじみ）
+      glowOuter: "rgba(232,75,138,0.55)",   // #E84B8A 外側・大ぼかし
+      glowInner: "rgba(255,111,165,0.95)",  // #FF6FA5 内側・中ぼかし
+      iconFill: "#FFF0F5", iconHalo: "rgba(60,20,40,0.9)",  // アイコンは可読性優先で芯を温白＋濃プラムの縁
+    },
+  };
+  const theme = () => THEME[curAccount] || THEME.acc1;
+
+  // 文字本体の描画（テーマ依存）。acc1＝黒縁＋白、acc2＝桜ピンク2層グロー＋温白の芯。
+  function paintGlyph(ln, x, y, px, sw) {
+    const t = theme();
+    if (t.glow) {
+      ctx.save();
+      ctx.shadowColor = t.glowOuter; ctx.shadowBlur = px * 0.46;
+      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);
+      ctx.shadowColor = t.glowInner; ctx.shadowBlur = px * 0.26;
+      ctx.fillText(ln, x, y);
+      ctx.restore();
+      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // にじみの上に芯を重ねて可読性を確保
+    } else {
+      ctx.lineJoin = "round"; ctx.lineWidth = sw * 2;
+      ctx.strokeStyle = t.stroke; ctx.strokeText(ln, x, y);
+      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);
+    }
+  }
+
   const els = {
     photo: $("photo"), photoName: $("photoName"), photoBtn: $("photoBtn"),
     author: $("author"), detail: $("detail"), top: $("top"),
@@ -113,15 +160,10 @@
       const tw = ctx.measureText(ln).width;
       const x = (W - tw) / 2;
       const mB = sw;  // 縁取り分だけ帯を広げ、文字が帯からはみ出ないようにする
-      ctx.fillStyle = `rgba(0,0,0,${bandAlpha / 255})`;
+      ctx.fillStyle = `rgba(${theme().bandRGB},${bandAlpha / 255})`;
       roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
       ctx.fill();
-      ctx.lineJoin = "round";
-      ctx.lineWidth = sw * 2;
-      ctx.strokeStyle = "rgba(0,0,0,1)";
-      ctx.strokeText(ln, x, y + txtY);
-      ctx.fillStyle = "#fff";
-      ctx.fillText(ln, x, y + txtY);
+      paintGlyph(ln, x, y + txtY, px, sw);
       y += th + pad + gap;  // 送りは基準位置のまま（文字オフセットの影響を受けない＝他段に波及しない）
     }
     return y;
@@ -129,9 +171,10 @@
 
   // アイコン
   function dot(cx, cy, r, halo) {
-    ctx.fillStyle = "rgba(0,0,0,1)";
+    const t = theme();
+    ctx.fillStyle = t.iconHalo;
     ctx.beginPath(); ctx.arc(cx, cy, r + halo, 0, 7); ctx.fill();
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = t.iconFill;
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
   }
   function kebab(cx, ym, fs) {
@@ -139,8 +182,9 @@
     for (const dy of [-sp, 0, sp]) dot(cx, ym + dy, r, halo);
   }
   function hbar(xl, y0, w, t, halo) {
-    ctx.fillStyle = "rgba(0,0,0,1)"; roundRect(xl - halo, y0 - t / 2 - halo, w + 2 * halo, t + 2 * halo, (t + 2 * halo) / 2); ctx.fill();
-    ctx.fillStyle = "#fff"; roundRect(xl, y0 - t / 2, w, t, t / 2); ctx.fill();
+    const th = theme();
+    ctx.fillStyle = th.iconHalo; roundRect(xl - halo, y0 - t / 2 - halo, w + 2 * halo, t + 2 * halo, (t + 2 * halo) / 2); ctx.fill();
+    ctx.fillStyle = th.iconFill; roundRect(xl, y0 - t / 2, w, t, t / 2); ctx.fill();
   }
   function hamburger(xl, ym, fs) {
     const t = Math.max(2, fs * 0.12), sp = fs * 0.28, halo = Math.max(1, fs * 0.05), w = fs * 0.80;
@@ -159,7 +203,7 @@
     while (i < s.length) {
       const c = s[i];
       if (c === "：" || c === ":") { segs.push(["kebab"]); i++; }
-      else if (s.substr(i, 2) === "説明") { segs.push(["menu"]); segs.push(["text", "説明"]); i += 2; }
+      else if (s.substr(i, 2) === "説明") { if (theme().detailMenu) segs.push(["menu"]); segs.push(["text", "説明"]); i += 2; }
       else { let j = i, buf = ""; while (j < s.length && s[j] !== "：" && s[j] !== ":" && s.substr(j, 2) !== "説明") { buf += s[j]; j++; } segs.push(["text", buf]); i = j; }
     }
     const widths = segs.map(([k, v]) => k === "text" ? ctx.measureText(v).width : (k === "kebab" ? kebabW : hamW) + 2 * iconPad);
@@ -167,13 +211,12 @@
     let x = (W - total) / 2;
     const mB = sw;  // 縁取り分だけ帯を広げる
     const bandY = H * (bandOff || 0);  // 軸2：この段の帯だけを上下（文字は動かさない）
-    ctx.fillStyle = `rgba(0,0,0,${175 / 255})`;
+    ctx.fillStyle = `rgba(${theme().bandRGB},${175 / 255})`;
     roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, total + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5); ctx.fill();
     for (let k = 0; k < segs.length; k++) {
       const [kind, val] = segs[k], w = widths[k];
       if (kind === "text") {
-        ctx.lineJoin = "round"; ctx.lineWidth = sw * 2; ctx.strokeStyle = "rgba(0,0,0,1)"; ctx.strokeText(val, x, ym);
-        ctx.fillStyle = "#fff"; ctx.fillText(val, x, ym);
+        paintGlyph(val, x, ym, px, sw);
       } else if (kind === "kebab") kebab(x + w / 2, ym, px);
       else hamburger(x + iconPad, ym, px);
       x += w;
@@ -199,7 +242,8 @@
     const rowGap = H * OFF.rowGap;      // 段と段の間に足す縦スペース
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
     if (author) {
-      if (!/^作者/.test(author)) author = "作者：" + author;  // 「作者：」を常に表示（消えないように）
+      author = author.replace(/^(作者|引用)\s*[:：]\s*/, "");      // 既存プレフィックスを一旦除去
+      author = theme().authorPrefix + author;                      // テーマのプレフィックスを常に表示（acc1=作者：/acc2=引用：）
       y = drawBlock(wrap(author, fA, maxw), y, fA, U(11) + padExtra, U(3), 175, OFF.bandAuthor, OFF.textAuthor) + U(2) + rowGap;
     }
     if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.bandDetail, OFF.textDetail) + U(4) + rowGap;
@@ -229,7 +273,7 @@
       }
     }
     // テキスト
-    drawText(els.author.value.trim(), els.detail.value.trim() || DEFAULT_DETAIL, els.top.value.trim());
+    drawText(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, els.top.value.trim());
   }
 
   // ---- プレビュー（完全表示状態の1枚） ----
@@ -406,6 +450,12 @@
     if (!ACCOUNTS[id]) id = "acc1";
     curAccount = id;
     try { localStorage.setItem("current_account", id); } catch (e) {}
+    // 誘導文が未編集（空 or いずれかのテーマ既定文）なら、当該テーマの既定文へ追従。ユーザーが書き換えた文面は尊重して残す。
+    if (els.detail) {
+      const known = Object.keys(THEME).map((k) => THEME[k].defaultDetail).concat([DEFAULT_DETAIL]);
+      const cur = els.detail.value.trim();
+      if (cur === "" || known.indexOf(cur) >= 0) els.detail.value = theme().defaultDetail;
+    }
     if (els.acctBtn1) els.acctBtn1.classList.toggle("active", id === "acc1");
     if (els.acctBtn2) els.acctBtn2.classList.toggle("active", id === "acc2");
     const want = ACCOUNTS[id].bg;
