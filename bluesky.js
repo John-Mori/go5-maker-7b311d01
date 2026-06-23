@@ -391,10 +391,27 @@
   // すべての投稿を一元的に記録（即時・自動・予約のどれでも必ず記録される）
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
-    var channel = (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
-    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri })
-      .then(function (resp) { handleRecordResp(resp, d.post_url, d.post_uri, channel, d.title); });
+    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri }); // 分析シートへ記録（結果は使わない）
+    shortenAndShow(d.post_url, d.post_uri, d.title);  // 短縮URLはブラウザ側で生成（GAS/Bitly非依存）
   });
+
+  // ブラウザだけで短縮（TinyURL・CORS対応・トークン不要）。失敗時は空文字。
+  function shortenUrl(longUrl) {
+    if (!longUrl) return Promise.resolve('');
+    return fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl))
+      .then(function (r) { return r.ok ? r.text() : ''; })
+      .then(function (t) { t = String(t || '').trim(); return /^https?:\/\//.test(t) ? t : ''; })
+      .catch(function () { return ''; });
+  }
+  function shortenAndShow(longUrl, postUri, title) {
+    if (!longUrl) return;
+    if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを作成中…';
+    shortenUrl(longUrl).then(function (short) {
+      var url = short || longUrl;                      // 失敗時は長いURLで代替（リンクは有効）
+      setShareOutputs(url, longUrl);
+      histAdd({ title: title, shortUrl: url, postUrl: longUrl, postUri: postUri });
+    });
+  }
 
   // JSONP（CORS回避）でGASから値を取得。<script>はCORS対象外なのでPOST応答が読めない環境でも確実。
   function jsonpGet(url, cb) {
@@ -406,40 +423,6 @@
     s.onerror = function () { if (done) return; try { delete window[name]; } catch (e) {} if (s.parentNode) s.parentNode.removeChild(s); cb(null); };
     s.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + name;
     document.head.appendChild(s);
-  }
-
-  // 記録後の短縮URL表示。POST応答が読めればそれを、ダメならJSONPでpost_uriから取得（数回リトライ）。
-  function handleRecordResp(resp, longUrl, postUri, channel, title) {
-    if (resp && resp.ok === false) {
-      var er = String(resp.error || '不明');
-      var hint = er.indexOf('secret') >= 0 ? '（GASの SHARED_SECRET を削除してください）'
-        : er.indexOf('SHEET_ID') >= 0 ? '（GASに SHEET_ID を設定してください）' : '';
-      if (els.shortUrlOut) els.shortUrlOut.textContent = '記録エラー：' + er + hint;
-      return;
-    }
-    if (resp && resp.shortUrl) { setShareOutputs(resp.shortUrl, longUrl); histAdd({ title: title, shortUrl: resp.shortUrl, postUrl: longUrl, postUri: postUri }); return; }
-    fetchShortByUri(postUri, channel, longUrl, title);                               // POST応答が読めない場合はJSONPで取得
-  }
-
-  function fetchShortByUri(postUri, channel, longUrl, title) {
-    var gasUrl = (els.gasUrl && els.gasUrl.value || '').trim();
-    if (!gasUrl || !postUri) {
-      setShareOutputs('', longUrl);
-      if (els.shortUrlOut && !gasUrl) els.shortUrlOut.textContent = '（記録用URL未設定：🦋投稿タブ⚙で設定してください）';
-      return;
-    }
-    if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを取得中…';
-    var tries = 0;
-    (function attempt() {
-      tries++;
-      var url = gasUrl + '?action=short&channel=' + encodeURIComponent(channel) + '&postUri=' + encodeURIComponent(postUri);
-      jsonpGet(url, function (data) {
-        if (data && data.ok && data.shortUrl) { setShareOutputs(data.shortUrl, longUrl); histAdd({ title: title, shortUrl: data.shortUrl, postUrl: longUrl, postUri: postUri }); return; }
-        if (tries < 5) { setTimeout(attempt, 1500); return; }   // 行の反映待ちで数回リトライ
-        setShareOutputs('', longUrl);
-        if (els.shortUrlOut) els.shortUrlOut.textContent = (longUrl || '') + ' ／ 短縮URLの取得に時間がかかっています（記録は完了。少し待って🔄）';
-      });
-    })();
   }
 
   // ---- 過去の短縮URL履歴（端末内・アカウント別。GAS非依存で確実）----
