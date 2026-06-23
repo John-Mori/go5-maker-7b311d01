@@ -45,6 +45,12 @@
     ytTags: (els.ytTags ? els.ytTags.value : ''),
     workUrl: '', handle: '', appPw: ''
   };
+  // アカウント別の本文テンプレ既定（保存が空のときに使う）。〇 は割引％のプレースホルダ。
+  var DEF_TEXT = {
+    acc1: 'おすすめ漫画見つけた💕\n\n↓詳細はこちらから🎀 #PR #漫画',
+    acc2: '続きが気になっちゃう一冊、みつけた📚\nしかも今なら〇%オフ💕\n\n↓全部はこちらから🌙 #PR #漫画'
+  };
+  function defText() { return DEF_TEXT[acctId()] || DEF_TEXT.acc1; }
 
   // ---- 一度だけ移行（既存の共有値を現在のアカウント名前空間へコピー） ----
   (function migrateOnce() {
@@ -67,7 +73,8 @@
     if (els.unattended) els.unattended.checked = (loadA('bsky_unattended') === '1');
 
     // テキスト系（null なら DEF を使用）
-    var tv = loadA('bsky_text'); if (els.text) els.text.value = (tv != null ? tv : DEF.text);
+    var tv = loadA('bsky_text'); if (els.text) els.text.value = (tv != null && tv !== '') ? tv : defText();
+    if (els.discountSel) els.discountSel.value = '';
     var wv = loadA('bsky_work_url'); if (els.workUrl) els.workUrl.value = (wv != null ? wv : DEF.workUrl);
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
     var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
@@ -112,15 +119,26 @@
   if (els.ytDesc) els.ytDesc.addEventListener('input', function () { saveA('yt_desc', els.ytDesc.value); });
   if (els.ytTags) els.ytTags.addEventListener('input', function () { saveA('yt_tags', els.ytTags.value); buildTitle(); });
 
-  // ---- 割引％ドロップダウン → 本文1行目の直下に割引文を挿入/差し替え ----
-  var DISCOUNT_MARK = 'オフのお得作品'; // この語を含む行＝割引行とみなす
+  // ---- 割引％ドロップダウン（アカウント別の割引文テンプレ） ----
+  // acc1：本文1行目の直下に「N%オフのおトク作品！」を挿入／なしで削除。
+  // acc2：本文テンプレに含まれる「しかも今なら〇%オフ💕」の数字を差し替え／なしで〇に戻す。
+  var DISC = {
+    acc1: { build: function (n) { return n + '%オフのおトク作品！'; }, placeholder: '〇%オフのおトク作品！', mark: /オフのおトク作品/, persistent: false },
+    acc2: { build: function (n) { return 'しかも今なら' + n + '%オフ💕'; }, placeholder: 'しかも今なら〇%オフ💕', mark: /しかも今なら[^\n]*オフ/, persistent: true }
+  };
   function setDiscountLine(val) {
     if (!els.text) return;
-    var lines = els.text.value.split('\n').filter(function (ln) { return ln.indexOf(DISCOUNT_MARK) < 0; });
-    var insert = null;
-    if (val === 'custom') insert = '%オフのお得作品';      // 数字はユーザーが先頭に入力
-    else if (val) insert = val + '%オフのお得作品';         // 例 "30%オフのお得作品"
-    if (insert != null) { if (lines.length >= 1) lines.splice(1, 0, insert); else lines = [insert]; }
+    var cfg = DISC[acctId()] || DISC.acc1;
+    var lines = els.text.value.split('\n');
+    var idx = -1;
+    for (var i = 0; i < lines.length; i++) { if (cfg.mark.test(lines[i])) { idx = i; break; } }
+    if (val === '') {
+      if (cfg.persistent) { if (idx >= 0) lines[idx] = cfg.placeholder; else lines.splice(Math.min(1, lines.length), 0, cfg.placeholder); }
+      else if (idx >= 0) lines.splice(idx, 1);
+    } else {
+      var nl = cfg.build(val === 'custom' ? '' : val);  // custom は数字なし（ユーザーが入力）
+      if (idx >= 0) lines[idx] = nl; else lines.splice(Math.min(1, lines.length), 0, nl);
+    }
     els.text.value = lines.join('\n');
     saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
   }
