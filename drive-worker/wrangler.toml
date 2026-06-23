@@ -1,0 +1,27 @@
+name = "go5-drive-saver"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# ── 非秘密の設定（ここに秘密は書かない。秘密は wrangler secret put で登録）──
+[vars]
+# フロント(GitHub Pages)のOriginだけ許可（ワイルドカード不可）
+ALLOWED_ORIGIN = "https://john-mori.github.io"
+# 保存先フォルダID（SETUP.md の手順で取得して貼る。空のままだと保存されずエラー）
+FOLDER_ID_ACC1 = ""   # 月詠み色恋劇場
+FOLDER_ID_ACC2 = ""   # 宵桜艶帖～Yoizakura Tsuyacho～
+# 1日あたりのアップロード上限（レート制限）
+DAILY_LIMIT = "100"
+# 予備：ラベル一致用（任意。IDが主。未設定でも可）
+LABEL_ACC1 = "月詠み色恋劇場"
+LABEL_ACC2 = "宵桜艶帖～Yoizakura Tsuyacho～"
+
+# ── レート制限用 KV（SETUP.md でnamespaceを作成し id を貼る）──
+[[kv_namespaces]]
+binding = "RL"
+id = "PUT_KV_ID_HERE"
+
+# ── Secrets（コマンドで登録。ここには書かない）──
+#   wrangler secret put GOOGLE_CLIENT_ID
+#   wrangler secret put GOOGLE_CLIENT_SECRET
+#   wrangler secret put GOOGLE_REFRESH_TOKEN
+#   wrangler secret put SHARED_SECRET

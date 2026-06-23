@@ -1,0 +1,8 @@
+# 秘密情報・ローカル生成物は絶対にコミットしない
+client_secret*.json
+*.client_secret.json
+.dev.vars
+.wrangler/
+node_modules/
+refresh_token.txt
+*.local

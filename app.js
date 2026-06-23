@@ -364,7 +364,7 @@
       setStatus("✅ 完成しました：" + lastName + (ext === "webm" ? "（この端末ではwebm形式）" : ""));
       els.resultArea.scrollIntoView({ behavior: "smooth" });
       // 完成を通知（Bluesky自動投稿などが購読）。この時点で Canvas は最終フレームを保持している。
-      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: els.top.value.trim() } }));
+      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: els.top.value.trim(), blob: lastBlob, name: lastName } }));
     } catch (e) {
       setStatus("作成に失敗しました：" + e.message);
     } finally {
