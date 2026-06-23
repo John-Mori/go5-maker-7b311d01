@@ -60,7 +60,7 @@ export default {
     // ---- アクセストークン（refresh_token から都度取得。メモリのみ）----
     let token;
     try { token = await getAccessToken(env); }
-    catch (e) { return json({ ok: false, error: "auth_failed" }, 502, cors); }
+    catch (e) { return json({ ok: false, error: "auth_failed", reason: e.reason || "" }, 502, cors); }
 
     // ---- 親（チャンネル）フォルダの存在確認（read-only）。無ければ保存しない ----
     const parent = await getFolder(parentId, token);
@@ -124,9 +124,12 @@ async function getAccessToken(env) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  if (!r.ok) throw new Error("token");
-  const j = await r.json();
-  if (!j.access_token) throw new Error("token");
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) {
+    const e = new Error("token");
+    e.reason = j.error || ("http_" + r.status); // 例: invalid_grant / invalid_client（秘密ではない・診断用）
+    throw e;
+  }
   return j.access_token;
 }
 

@@ -22,7 +22,7 @@
     pcModal: $('postConfirmModal'), pcText: $('pcText'), pcNote: $('pcNote'), pcOk: $('pcOk'), pcCancel: $('pcCancel'),
     shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy'),
     ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags'),
-    discountSel: $('discountSel')
+    discountSel: $('discountSel'), discountSel2: $('discountSel2')
   };
   if (!els.text) return;
 
@@ -48,9 +48,16 @@
   // アカウント別の本文テンプレ既定（保存が空のときに使う）。〇 は割引％のプレースホルダ。
   var DEF_TEXT = {
     acc1: 'おすすめ漫画見つけた💕\n\n↓詳細はこちらから🎀 #PR #漫画',
-    acc2: '続きが気になっちゃう一冊、みつけた📚\nしかも今なら〇%オフ💕\n\n↓全部はこちらから🌙 #PR #漫画'
+    acc2: '続きが気になっちゃう一冊、みつけた📚\nしかも今なら〇%オフ💕\n\n↓続きはこちらから🌙 #PR #漫画'
   };
   function defText() { return DEF_TEXT[acctId()] || DEF_TEXT.acc1; }
+
+  // アカウント別の YouTube説明欄テンプレ既定（保存が空のときに使う）。1行目の短縮URLプレースホルダは投稿後に自動で実URLへ置換。
+  var DEF_YTDESC = {
+    acc1: '（投稿するとここに短縮URLが入ります）\n\n↑ URLを長押し&リンクを開く ↑\nこちらからアクセスしてね💕\n\n\n\n\n',
+    acc2: '⬆️URLを長押し&リンクを開く\n続きはこちらからどうぞ💫\n\n\n\n\n📚ひとこと📚'
+  };
+  function defYtDesc() { return DEF_YTDESC[acctId()] || DEF_YTDESC.acc1; }
 
   // ---- 一度だけ移行（既存の共有値を現在のアカウント名前空間へコピー） ----
   (function migrateOnce() {
@@ -75,10 +82,11 @@
     // テキスト系（null なら DEF を使用）
     var tv = loadA('bsky_text'); if (els.text) els.text.value = (tv != null && tv !== '') ? tv : defText();
     if (els.discountSel) els.discountSel.value = '';
+    if (els.discountSel2) els.discountSel2.value = '';
     var wv = loadA('bsky_work_url'); if (els.workUrl) els.workUrl.value = (wv != null ? wv : DEF.workUrl);
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
     var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
-    var dv = loadA('yt_desc'); if (els.ytDesc) els.ytDesc.value = (dv != null ? dv : DEF.ytDesc);
+    var dv = loadA('yt_desc'); if (els.ytDesc) els.ytDesc.value = (dv != null ? dv : defYtDesc());
     var tgv = loadA('yt_tags'); if (els.ytTags) els.ytTags.value = (tgv != null ? tgv : DEF.ytTags);
 
     // 本文の括弧書き自動クリーンアップ（移行直後の旧注記を除去）
@@ -142,10 +150,33 @@
     els.text.value = lines.join('\n');
     saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
   }
-  if (els.discountSel) els.discountSel.addEventListener('change', function () { setDiscountLine(els.discountSel.value); });
+  // 割引文：投稿タブ／動画作成タブ どちらのドロップダウンからでも共通の本文へ反映し、両方の表示を同期。
+  function applyDiscount(val) {
+    setDiscountLine(val);
+    if (els.discountSel) els.discountSel.value = val;
+    if (els.discountSel2) els.discountSel2.value = val;
+  }
+  if (els.discountSel) els.discountSel.addEventListener('change', function () { applyDiscount(els.discountSel.value); });
+  if (els.discountSel2) els.discountSel2.addEventListener('change', function () { applyDiscount(els.discountSel2.value); });
 
   // ---- アカウント切替で再読込 ----
   document.addEventListener('account-changed', function () { applyAccount(); });
+
+  // ---- テンプレ更新の一回限り移行（2026Q2）：旧テンプレ保存値を新テンプレへ。独自文（旧マーカー無し）は保持。----
+  (function migrateTemplates2026q2() {
+    if (load('feat_2026q2_migrated') === '1') return;
+    try {  // ② acc2本文：↓全部はこちらから → ↓続きはこちらから
+      var t2 = load('bsky_text__acc2');
+      if (t2 && t2.indexOf('↓全部はこちらから') >= 0) save('bsky_text__acc2', t2.replace('↓全部はこちらから', '↓続きはこちらから'));
+    } catch (e) {}
+    ['acc1', 'acc2'].forEach(function (a) {  // ③ YouTube説明欄：旧共有テンプレ（感想/アクセス文を含む）を新テンプレへ
+      try {
+        var key = 'yt_desc__' + a, v = load(key);
+        if (v == null || v.indexOf('【感想') >= 0 || v.indexOf('こちらからアクセスしてね') >= 0) save(key, DEF_YTDESC[a]);
+      } catch (e) {}
+    });
+    save('feat_2026q2_migrated', '1');
+  })();
 
   // ---- 初期化（移行→applyAccount の順） ----
   applyAccount();
@@ -337,8 +368,28 @@
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
     recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri })
-      .then(function (resp) { setShareOutputs(resp && resp.shortUrl ? resp.shortUrl : '', d.post_url); });
+      .then(function (resp) { handleRecordResp(resp, d.post_url); });
   });
+
+  // 短縮URLが出ない原因を可視化（黙って長URLにフォールバックして“壊れて見える”のを防ぐ）
+  function handleRecordResp(resp, longUrl) {
+    if (resp && resp.ok === false) {
+      var er = String(resp.error || '不明');
+      var hint = er.indexOf('secret') >= 0 ? '（GASのスクリプトプロパティ SHARED_SECRET を削除してください）'
+        : er.indexOf('SHEET_ID') >= 0 ? '（GASに SHEET_ID を設定してください）' : '';
+      if (els.shortUrlOut) els.shortUrlOut.textContent = '記録エラー：' + er + hint;
+      return;
+    }
+    var short = (resp && resp.shortUrl) ? resp.shortUrl : '';
+    if (short) { setShareOutputs(short, longUrl); return; }       // 正常：短縮URLを表示
+    // 短縮できなかった：長URLは活かしつつ理由を表示
+    setShareOutputs('', longUrl);
+    if (els.shortUrlOut) {
+      els.shortUrlOut.textContent = !resp
+        ? '（GAS応答を取得できませんでした：⚙の記録用URL未設定／未デプロイ／通信エラーを確認）'
+        : ((longUrl || '') + ' ／ 短縮できませんでした（GASの BITLY_TOKEN 未設定・無効の可能性）');
+    }
+  }
 
   // ---- 編集できる確認モーダル（方法①自動投稿） ----
   function confirmEditable(text, note) {
