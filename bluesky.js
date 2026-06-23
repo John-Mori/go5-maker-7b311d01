@@ -124,7 +124,7 @@
   // acc2：本文テンプレに含まれる「しかも今なら〇%オフ💕」の数字を差し替え／なしで〇に戻す。
   var DISC = {
     acc1: { build: function (n) { return n + '%オフのおトク作品！'; }, placeholder: '〇%オフのおトク作品！', mark: /オフのおトク作品/, persistent: false },
-    acc2: { build: function (n) { return 'しかも今なら' + n + '%オフ💕'; }, placeholder: 'しかも今なら〇%オフ💕', mark: /しかも今なら[^\n]*オフ/, persistent: true }
+    acc2: { build: function (n) { return 'しかも今なら' + n + '%オフ💕'; }, placeholder: 'しかも今なら〇%オフ💕', mark: /しかも今なら[^\n]*オフ/, persistent: false }
   };
   function setDiscountLine(val) {
     if (!els.text) return;

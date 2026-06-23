@@ -395,6 +395,13 @@ window.SCH = window.SCH || {};
     document.getElementById("nav-prev").addEventListener("click", () => { weekOffset--; recomputeAndRender(); });
     document.getElementById("nav-next").addEventListener("click", () => { weekOffset++; recomputeAndRender(); });
     document.getElementById("nav-today").addEventListener("click", () => { weekOffset = 0; recomputeAndRender(); });
+    var todayBtn = document.getElementById("nav-today-center");
+    if (todayBtn) todayBtn.addEventListener("click", async () => {
+      weekOffset = 0;
+      await recomputeAndRender();
+      var el = document.querySelector(".day.is-today");
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
     document.getElementById("btn-verify").addEventListener("click", (e) => {
       verificationMode = !verificationMode;
       e.target.classList.toggle("active", verificationMode);
