@@ -84,7 +84,7 @@
     var tv = loadA('bsky_text'); if (els.text) els.text.value = (tv != null && tv !== '') ? tv : defText();
     if (els.discountSel) els.discountSel.value = '';
     if (els.discountSel2) els.discountSel2.value = '';
-    if (els.histList) els.histList.innerHTML = '<p class="hint">「🔄 履歴を更新」で、このアカウントの投稿履歴を表示します。</p>';
+    if (els.histList) loadHistory();
     var wv = loadA('bsky_work_url'); if (els.workUrl) els.workUrl.value = (wv != null ? wv : DEF.workUrl);
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
     var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
@@ -393,7 +393,7 @@
     var d = (e && e.detail) || {};
     var channel = (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
     recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri })
-      .then(function (resp) { handleRecordResp(resp, d.post_url, d.post_uri, channel); });
+      .then(function (resp) { handleRecordResp(resp, d.post_url, d.post_uri, channel, d.title); });
   });
 
   // JSONP（CORS回避）でGASから値を取得。<script>はCORS対象外なのでPOST応答が読めない環境でも確実。
@@ -409,7 +409,7 @@
   }
 
   // 記録後の短縮URL表示。POST応答が読めればそれを、ダメならJSONPでpost_uriから取得（数回リトライ）。
-  function handleRecordResp(resp, longUrl, postUri, channel) {
+  function handleRecordResp(resp, longUrl, postUri, channel, title) {
     if (resp && resp.ok === false) {
       var er = String(resp.error || '不明');
       var hint = er.indexOf('secret') >= 0 ? '（GASの SHARED_SECRET を削除してください）'
@@ -417,11 +417,11 @@
       if (els.shortUrlOut) els.shortUrlOut.textContent = '記録エラー：' + er + hint;
       return;
     }
-    if (resp && resp.shortUrl) { setShareOutputs(resp.shortUrl, longUrl); return; } // POST応答が読めた場合
-    fetchShortByUri(postUri, channel, longUrl);                                     // 読めない場合はJSONPで取得
+    if (resp && resp.shortUrl) { setShareOutputs(resp.shortUrl, longUrl); histAdd({ title: title, shortUrl: resp.shortUrl, postUrl: longUrl, postUri: postUri }); return; }
+    fetchShortByUri(postUri, channel, longUrl, title);                               // POST応答が読めない場合はJSONPで取得
   }
 
-  function fetchShortByUri(postUri, channel, longUrl) {
+  function fetchShortByUri(postUri, channel, longUrl, title) {
     var gasUrl = (els.gasUrl && els.gasUrl.value || '').trim();
     if (!gasUrl || !postUri) {
       setShareOutputs('', longUrl);
@@ -434,7 +434,7 @@
       tries++;
       var url = gasUrl + '?action=short&channel=' + encodeURIComponent(channel) + '&postUri=' + encodeURIComponent(postUri);
       jsonpGet(url, function (data) {
-        if (data && data.ok && data.shortUrl) { setShareOutputs(data.shortUrl, longUrl); return; }
+        if (data && data.ok && data.shortUrl) { setShareOutputs(data.shortUrl, longUrl); histAdd({ title: title, shortUrl: data.shortUrl, postUrl: longUrl, postUri: postUri }); return; }
         if (tries < 5) { setTimeout(attempt, 1500); return; }   // 行の反映待ちで数回リトライ
         setShareOutputs('', longUrl);
         if (els.shortUrlOut) els.shortUrlOut.textContent = (longUrl || '') + ' ／ 短縮URLの取得に時間がかかっています（記録は完了。少し待って🔄）';
@@ -442,31 +442,32 @@
     })();
   }
 
-  // ---- 過去の短縮URL履歴（このチャンネルのみ・JSONP取得／重複は削除可）----
-  function loadHistory() {
-    if (!els.histList) return;
-    var gasUrl = (els.gasUrl && els.gasUrl.value || '').trim();
-    if (!gasUrl) { els.histList.innerHTML = '<p class="hint">記録用URL（🦋投稿タブ⚙）を設定すると履歴が表示されます。</p>'; return; }
-    var channel = acctId();
-    els.histList.innerHTML = '<p class="hint">読み込み中…</p>';
-    jsonpGet(gasUrl + '?action=history&channel=' + encodeURIComponent(channel), function (data) {
-      if (data && data.ok && data.items) renderHistory(data.items);
-      else els.histList.innerHTML = '<p class="hint">履歴を取得できませんでした（GASを最新コードで再デプロイ済みかご確認ください）。</p>';
-    });
+  // ---- 過去の短縮URL履歴（端末内・アカウント別。GAS非依存で確実）----
+  function histKey() { return 'short_hist__' + acctId(); }
+  function histLoad() { try { return JSON.parse(localStorage.getItem(histKey()) || '[]'); } catch (e) { return []; } }
+  function histSaveArr(a) { try { localStorage.setItem(histKey(), JSON.stringify(a.slice(0, 200))); } catch (e) {} }
+  function histAdd(rec) {
+    if (!rec || !rec.shortUrl) return; // 短縮URLが取れた投稿だけ記録
+    var a = histLoad().filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
+    a.unshift({ ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, postUrl: rec.postUrl || '', postUri: rec.postUri || '' });
+    histSaveArr(a);
+    if (els.histList) renderHistory(a);
   }
+  function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
+  function loadHistory() { if (els.histList) renderHistory(histLoad()); }
   function renderHistory(items) {
     if (!els.histList) return;
-    if (!items.length) { els.histList.innerHTML = '<p class="hint">このアカウントの履歴はまだありません。</p>'; return; }
+    if (!items.length) { els.histList.innerHTML = '<p class="hint">このアカウントの履歴はまだありません（投稿して短縮URLが出ると、ここに自動で貯まります）。</p>'; return; }
     els.histList.innerHTML = items.map(function (it) {
-      var short = it.shortUrl || '（短縮なし）';
+      var short = it.shortUrl || '';
       return '<div class="hist-row">' +
-        '<div class="hist-meta">' + escapeHtml(it.date || '') + '　' + escapeHtml(it.title || '(無題)') + '</div>' +
+        '<div class="hist-meta">' + escapeHtml(fmtTs(it.ts)) + '　' + escapeHtml(it.title || '(無題)') + '</div>' +
         '<div class="hist-act">' +
         '<code class="hist-url">' + escapeHtml(short) + '</code>' +
-        (it.shortUrl ? '<button class="copy-btn hist-copy" type="button" data-url="' + escapeHtml(it.shortUrl) + '">コピー</button>' : '') +
-        (it.shortUrl ? '<button class="ghost hist-ins" type="button" data-url="' + escapeHtml(it.shortUrl) + '">概要欄へ</button>' : '') +
+        '<button class="copy-btn hist-copy" type="button" data-url="' + escapeHtml(short) + '">コピー</button>' +
+        '<button class="ghost hist-ins" type="button" data-url="' + escapeHtml(short) + '">概要欄へ</button>' +
         (it.postUrl ? '<a class="ghost" href="' + escapeHtml(it.postUrl) + '" target="_blank" rel="noopener">投稿↗</a>' : '') +
-        '<button class="ghost hist-del" type="button" data-uri="' + escapeHtml(it.postUri || '') + '" data-short="' + escapeHtml(it.shortUrl || '') + '" data-title="' + escapeHtml(it.title || '') + '">🗑 削除</button>' +
+        '<button class="ghost hist-del" type="button" data-uri="' + escapeHtml(it.postUri || '') + '" data-short="' + escapeHtml(short) + '" data-title="' + escapeHtml(it.title || '') + '">🗑 削除</button>' +
         '</div></div>';
     }).join('');
     els.histList.querySelectorAll('.hist-copy').forEach(function (b) { b.addEventListener('click', function () { copyText(b.getAttribute('data-url'), b); }); });
@@ -474,18 +475,13 @@
     els.histList.querySelectorAll('.hist-del').forEach(function (b) { b.addEventListener('click', function () { deleteHistory(b.getAttribute('data-uri'), b.getAttribute('data-short'), b.getAttribute('data-title')); }); });
   }
   function deleteHistory(postUri, short, title) {
-    if (!window.confirm('「' + (title || 'この投稿') + '」の記録を削除しますか？\n（履歴・集計から外れます。取り消せません）')) return;
-    var gasUrl = (els.gasUrl && els.gasUrl.value || '').trim(); if (!gasUrl) return;
-    var url = gasUrl + '?action=delete&channel=' + encodeURIComponent(acctId()) +
-      (postUri ? '&postUri=' + encodeURIComponent(postUri) : '&short=' + encodeURIComponent(short || ''));
-    jsonpGet(url, function (data) {
-      if (data && data.ok && data.deleted) loadHistory();
-      else window.alert('削除できませんでした（' + ((data && data.error) || '対象が見つかりません') + '）。');
-    });
+    if (!window.confirm('「' + (title || 'この投稿') + '」を履歴から削除しますか？\n（取り消せません）')) return;
+    var a = histLoad().filter(function (x) { return postUri ? x.postUri !== postUri : x.shortUrl !== short; });
+    histSaveArr(a); renderHistory(a);
   }
   if (els.histRefresh) els.histRefresh.addEventListener('click', loadHistory);
   var ytTabBtn_ = document.getElementById('tabYT');
-  if (ytTabBtn_) ytTabBtn_.addEventListener('click', function () { setTimeout(loadHistory, 50); });
+  if (ytTabBtn_) ytTabBtn_.addEventListener('click', loadHistory);
 
   // ---- 編集できる確認モーダル（方法①自動投稿） ----
   function confirmEditable(text, note) {
