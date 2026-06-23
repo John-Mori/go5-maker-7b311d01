@@ -22,7 +22,8 @@
     pcModal: $('postConfirmModal'), pcText: $('pcText'), pcNote: $('pcNote'), pcOk: $('pcOk'), pcCancel: $('pcCancel'),
     shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy'),
     ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags'),
-    discountSel: $('discountSel'), discountSel2: $('discountSel2'), discountSelPc: $('discountSelPc')
+    discountSel: $('discountSel'), discountSel2: $('discountSel2'), discountSelPc: $('discountSelPc'),
+    histList: $('histList'), histRefresh: $('histRefresh')
   };
   if (!els.text) return;
 
@@ -83,6 +84,7 @@
     var tv = loadA('bsky_text'); if (els.text) els.text.value = (tv != null && tv !== '') ? tv : defText();
     if (els.discountSel) els.discountSel.value = '';
     if (els.discountSel2) els.discountSel2.value = '';
+    if (els.histList) els.histList.innerHTML = '<p class="hint">「🔄 履歴を更新」で、このアカウントの投稿履歴を表示します。</p>';
     var wv = loadA('bsky_work_url'); if (els.workUrl) els.workUrl.value = (wv != null ? wv : DEF.workUrl);
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
     var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
@@ -439,6 +441,51 @@
       });
     })();
   }
+
+  // ---- 過去の短縮URL履歴（このチャンネルのみ・JSONP取得／重複は削除可）----
+  function loadHistory() {
+    if (!els.histList) return;
+    var gasUrl = (els.gasUrl && els.gasUrl.value || '').trim();
+    if (!gasUrl) { els.histList.innerHTML = '<p class="hint">記録用URL（🦋投稿タブ⚙）を設定すると履歴が表示されます。</p>'; return; }
+    var channel = acctId();
+    els.histList.innerHTML = '<p class="hint">読み込み中…</p>';
+    jsonpGet(gasUrl + '?action=history&channel=' + encodeURIComponent(channel), function (data) {
+      if (data && data.ok && data.items) renderHistory(data.items);
+      else els.histList.innerHTML = '<p class="hint">履歴を取得できませんでした（GASを最新コードで再デプロイ済みかご確認ください）。</p>';
+    });
+  }
+  function renderHistory(items) {
+    if (!els.histList) return;
+    if (!items.length) { els.histList.innerHTML = '<p class="hint">このアカウントの履歴はまだありません。</p>'; return; }
+    els.histList.innerHTML = items.map(function (it) {
+      var short = it.shortUrl || '（短縮なし）';
+      return '<div class="hist-row">' +
+        '<div class="hist-meta">' + escapeHtml(it.date || '') + '　' + escapeHtml(it.title || '(無題)') + '</div>' +
+        '<div class="hist-act">' +
+        '<code class="hist-url">' + escapeHtml(short) + '</code>' +
+        (it.shortUrl ? '<button class="copy-btn hist-copy" type="button" data-url="' + escapeHtml(it.shortUrl) + '">コピー</button>' : '') +
+        (it.shortUrl ? '<button class="ghost hist-ins" type="button" data-url="' + escapeHtml(it.shortUrl) + '">概要欄へ</button>' : '') +
+        (it.postUrl ? '<a class="ghost" href="' + escapeHtml(it.postUrl) + '" target="_blank" rel="noopener">投稿↗</a>' : '') +
+        '<button class="ghost hist-del" type="button" data-uri="' + escapeHtml(it.postUri || '') + '" data-short="' + escapeHtml(it.shortUrl || '') + '" data-title="' + escapeHtml(it.title || '') + '">🗑 削除</button>' +
+        '</div></div>';
+    }).join('');
+    els.histList.querySelectorAll('.hist-copy').forEach(function (b) { b.addEventListener('click', function () { copyText(b.getAttribute('data-url'), b); }); });
+    els.histList.querySelectorAll('.hist-ins').forEach(function (b) { b.addEventListener('click', function () { setShareOutputs(b.getAttribute('data-url'), ''); b.textContent = '✓ 入れました'; setTimeout(function () { b.textContent = '概要欄へ'; }, 1500); }); });
+    els.histList.querySelectorAll('.hist-del').forEach(function (b) { b.addEventListener('click', function () { deleteHistory(b.getAttribute('data-uri'), b.getAttribute('data-short'), b.getAttribute('data-title')); }); });
+  }
+  function deleteHistory(postUri, short, title) {
+    if (!window.confirm('「' + (title || 'この投稿') + '」の記録を削除しますか？\n（履歴・集計から外れます。取り消せません）')) return;
+    var gasUrl = (els.gasUrl && els.gasUrl.value || '').trim(); if (!gasUrl) return;
+    var url = gasUrl + '?action=delete&channel=' + encodeURIComponent(acctId()) +
+      (postUri ? '&postUri=' + encodeURIComponent(postUri) : '&short=' + encodeURIComponent(short || ''));
+    jsonpGet(url, function (data) {
+      if (data && data.ok && data.deleted) loadHistory();
+      else window.alert('削除できませんでした（' + ((data && data.error) || '対象が見つかりません') + '）。');
+    });
+  }
+  if (els.histRefresh) els.histRefresh.addEventListener('click', loadHistory);
+  var ytTabBtn_ = document.getElementById('tabYT');
+  if (ytTabBtn_) ytTabBtn_.addEventListener('click', function () { setTimeout(loadHistory, 50); });
 
   // ---- 編集できる確認モーダル（方法①自動投稿） ----
   function confirmEditable(text, note) {

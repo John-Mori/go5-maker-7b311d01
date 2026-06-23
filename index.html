@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=42">
+<link rel="stylesheet" href="style.css?v=43">
 </head>
 <body>
 <header>
@@ -186,6 +186,14 @@
       <button id="ytCopy" class="copy-btn" type="button">説明欄をコピー</button>
     </div>
     <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
+  </section>
+
+  <!-- 過去の短縮URL履歴（このチャンネルのみ・重複は削除可） -->
+  <section class="card">
+    <div class="field-label">📜 過去の短縮URL履歴（このチャンネル）</div>
+    <button id="histRefresh" class="ghost" type="button">🔄 履歴を更新</button>
+    <div id="histList" class="hist-list"><p class="hint">「🔄 履歴を更新」で、このチャンネルで投稿した短縮URLの一覧を表示します（削除も可）。</p></div>
+    <div class="hint">表示中のアカウント（月読み／宵桜艶帖）の投稿だけを表示します。同じ作品を重複投稿したものは「🗑 削除」で記録から外せます（確認あり）。</div>
   </section>
 </main>
 </section>
@@ -366,15 +374,15 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=42"></script>
-<script src="affiliate-core.js?v=42"></script>
-<script src="affiliate.js?v=42"></script>
-<script src="bluesky-core.js?v=42"></script>
-<script src="scheduler.js?v=42"></script>
-<script src="bluesky.js?v=42"></script>
-<script src="drive-upload.js?v=42"></script>
-<script src="verify-core.js?v=42"></script>
-<script src="verify.js?v=42"></script>
-<script src="integration.js?v=42"></script>
+<script src="app.js?v=43"></script>
+<script src="affiliate-core.js?v=43"></script>
+<script src="affiliate.js?v=43"></script>
+<script src="bluesky-core.js?v=43"></script>
+<script src="scheduler.js?v=43"></script>
+<script src="bluesky.js?v=43"></script>
+<script src="drive-upload.js?v=43"></script>
+<script src="verify-core.js?v=43"></script>
+<script src="verify.js?v=43"></script>
+<script src="integration.js?v=43"></script>
 </body>
 </html>

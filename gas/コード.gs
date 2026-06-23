@@ -50,11 +50,15 @@ function headerMap_(sh) {
 
 function doGet(e) {
   var p = (e && e.parameter) || {};
-  // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、短縮URLは callback 付きGETで取得する。
+  // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
   if (p.callback) {
-    var out = { ok: true, shortUrl: '' };
-    try { if (p.postUri) out.shortUrl = lookupShortByUri_(p.channel || 'acc1', p.postUri); }
-    catch (err) { out = { ok: false, error: String(err) }; }
+    var out;
+    try {
+      var ch = p.channel || 'acc1';
+      if (p.action === 'history') out = { ok: true, items: historyItems_(ch, parseInt(p.limit || '40', 10)) };
+      else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.postUri || '', p.short || '') };
+      else out = { ok: true, shortUrl: p.postUri ? lookupShortByUri_(ch, p.postUri) : '' }; // 既定＝action=short
+    } catch (err) { out = { ok: false, error: String(err) }; }
     return ContentService.createTextOutput(p.callback + '(' + JSON.stringify(out) + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
@@ -70,6 +74,40 @@ function lookupShortByUri_(channel, postUri) {
     if (String(uris[i][0]) === String(postUri)) return String(sh.getRange(i + 2, sc).getValue() || '');
   }
   return '';
+}
+// チャンネル別の投稿履歴（新しい順・読み取りのみ）。
+function historyItems_(channel, limit) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var last = sh.getLastRow(); if (last < 2) return [];
+  var dCol = map['投稿日時'], tCol = map['題名(コメント)'], sCol = map['短縮URL'], pCol = map['Bluesky投稿URL'], uCol = map['post_uri'];
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+  var items = [];
+  for (var i = 0; i < vals.length; i++) {
+    var row = vals[i];
+    var d = dCol ? row[dCol - 1] : '', uri = uCol ? row[uCol - 1] : '', short = sCol ? row[sCol - 1] : '';
+    if (!d && !uri && !short) continue; // 空行スキップ
+    var ds = '';
+    try { if (d) ds = Utilities.formatDate(new Date(d), tz, 'MM/dd HH:mm'); } catch (e) {}
+    items.push({
+      postUri: String(uri || ''), title: String(tCol ? row[tCol - 1] : ''),
+      date: ds, shortUrl: String(short || ''), postUrl: String(pCol ? row[pCol - 1] : '')
+    });
+  }
+  items.reverse(); // 新しい順
+  return items.slice(0, limit > 0 ? limit : 40);
+}
+// 1件削除（行の内容をクリア＝再利用可。行は詰めない＝集計の整合を保つ）。post_uri優先、無ければ短縮URLで一致。
+function deleteRecord_(channel, postUri, short) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var last = sh.getLastRow(); if (last < 2) return 0;
+  var col = postUri ? map['post_uri'] : map['短縮URL'];
+  var want = postUri || short; if (!col || !want) return 0;
+  var vals = sh.getRange(2, col, last - 1, 1).getValues(), cleared = 0;
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === String(want)) { sh.getRange(i + 2, 1, 1, sh.getLastColumn()).clearContent(); cleared++; }
+  }
+  return cleared;
 }
 
 function doPost(e) {
