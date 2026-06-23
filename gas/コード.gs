@@ -48,7 +48,29 @@ function headerMap_(sh) {
   return m;
 }
 
-function doGet() { return jsonOut_({ ok: true, service: 'go5-maker recorder v2 (2ch)' }); }
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、短縮URLは callback 付きGETで取得する。
+  if (p.callback) {
+    var out = { ok: true, shortUrl: '' };
+    try { if (p.postUri) out.shortUrl = lookupShortByUri_(p.channel || 'acc1', p.postUri); }
+    catch (err) { out = { ok: false, error: String(err) }; }
+    return ContentService.createTextOutput(p.callback + '(' + JSON.stringify(out) + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return jsonOut_({ ok: true, service: 'go5-maker recorder v2 (2ch)' });
+}
+// 指定 post_uri の行から短縮URLを返す（読み取りのみ）。
+function lookupShortByUri_(channel, postUri) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var last = sh.getLastRow(); if (last < 2) return '';
+  var uc = map['post_uri'], sc = map['短縮URL']; if (!uc || !sc) return '';
+  var uris = sh.getRange(2, uc, last - 1, 1).getValues();
+  for (var i = uris.length - 1; i >= 0; i--) {  // 新しい順に探す
+    if (String(uris[i][0]) === String(postUri)) return String(sh.getRange(i + 2, sc).getValue() || '');
+  }
+  return '';
+}
 
 function doPost(e) {
   try {

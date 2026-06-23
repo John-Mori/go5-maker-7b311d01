@@ -389,28 +389,55 @@
   // すべての投稿を一元的に記録（即時・自動・予約のどれでも必ず記録される）
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
+    var channel = (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
     recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri })
-      .then(function (resp) { handleRecordResp(resp, d.post_url); });
+      .then(function (resp) { handleRecordResp(resp, d.post_url, d.post_uri, channel); });
   });
 
-  // 短縮URLが出ない原因を可視化（黙って長URLにフォールバックして“壊れて見える”のを防ぐ）
-  function handleRecordResp(resp, longUrl) {
+  // JSONP（CORS回避）でGASから値を取得。<script>はCORS対象外なのでPOST応答が読めない環境でも確実。
+  function jsonpGet(url, cb) {
+    var s = document.createElement('script');
+    jsonpGet._n = (jsonpGet._n || 0) + 1;
+    var name = '__gascb' + jsonpGet._n + '_' + (new Date().getTime());
+    var done = false;
+    window[name] = function (data) { done = true; try { cb(data); } finally { try { delete window[name]; } catch (e) {} if (s.parentNode) s.parentNode.removeChild(s); } };
+    s.onerror = function () { if (done) return; try { delete window[name]; } catch (e) {} if (s.parentNode) s.parentNode.removeChild(s); cb(null); };
+    s.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + name;
+    document.head.appendChild(s);
+  }
+
+  // 記録後の短縮URL表示。POST応答が読めればそれを、ダメならJSONPでpost_uriから取得（数回リトライ）。
+  function handleRecordResp(resp, longUrl, postUri, channel) {
     if (resp && resp.ok === false) {
       var er = String(resp.error || '不明');
-      var hint = er.indexOf('secret') >= 0 ? '（GASのスクリプトプロパティ SHARED_SECRET を削除してください）'
+      var hint = er.indexOf('secret') >= 0 ? '（GASの SHARED_SECRET を削除してください）'
         : er.indexOf('SHEET_ID') >= 0 ? '（GASに SHEET_ID を設定してください）' : '';
       if (els.shortUrlOut) els.shortUrlOut.textContent = '記録エラー：' + er + hint;
       return;
     }
-    var short = (resp && resp.shortUrl) ? resp.shortUrl : '';
-    if (short) { setShareOutputs(short, longUrl); return; }       // 正常：短縮URLを表示
-    // 短縮できなかった：長URLは活かしつつ理由を表示
-    setShareOutputs('', longUrl);
-    if (els.shortUrlOut) {
-      els.shortUrlOut.textContent = !resp
-        ? '（GAS応答を取得できませんでした：⚙の記録用URL未設定／未デプロイ／通信エラーを確認）'
-        : ((longUrl || '') + ' ／ 短縮できませんでした（GASの BITLY_TOKEN 未設定・無効の可能性）');
+    if (resp && resp.shortUrl) { setShareOutputs(resp.shortUrl, longUrl); return; } // POST応答が読めた場合
+    fetchShortByUri(postUri, channel, longUrl);                                     // 読めない場合はJSONPで取得
+  }
+
+  function fetchShortByUri(postUri, channel, longUrl) {
+    var gasUrl = (els.gasUrl && els.gasUrl.value || '').trim();
+    if (!gasUrl || !postUri) {
+      setShareOutputs('', longUrl);
+      if (els.shortUrlOut && !gasUrl) els.shortUrlOut.textContent = '（記録用URL未設定：🦋投稿タブ⚙で設定してください）';
+      return;
     }
+    if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを取得中…';
+    var tries = 0;
+    (function attempt() {
+      tries++;
+      var url = gasUrl + '?action=short&channel=' + encodeURIComponent(channel) + '&postUri=' + encodeURIComponent(postUri);
+      jsonpGet(url, function (data) {
+        if (data && data.ok && data.shortUrl) { setShareOutputs(data.shortUrl, longUrl); return; }
+        if (tries < 5) { setTimeout(attempt, 1500); return; }   // 行の反映待ちで数回リトライ
+        setShareOutputs('', longUrl);
+        if (els.shortUrlOut) els.shortUrlOut.textContent = (longUrl || '') + ' ／ 短縮URLの取得に時間がかかっています（記録は完了。少し待って🔄）';
+      });
+    })();
   }
 
   // ---- 編集できる確認モーダル（方法①自動投稿） ----
