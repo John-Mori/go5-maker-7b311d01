@@ -14,6 +14,7 @@
   var TABS = [
     { btn: 'tabMovie',  page: 'pageMovie'    },
     { btn: 'tabCal',    page: 'pageCalendar' },
+    { btn: 'tabYT',     page: 'pageYouTube'  },
     { btn: 'tabPost',   page: 'pagePost'     },
     { btn: 'tabAffi',   page: 'pageAffi'     },
     { btn: 'tabVerify', page: 'pageVerify'   }
@@ -21,7 +22,7 @@
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む（遅延ロード）。
   function lazyLoadCalendar() {
     var f = document.getElementById('calFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=22');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=23');
   }
   function showTab(activeBtnId) {
     TABS.forEach(function (t) {

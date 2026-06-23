@@ -151,8 +151,8 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 /* モーダル */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 50; }
 .modal.open { display: flex; }
-.modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(440px, 92vw); max-height: 88vh; overflow: auto; }
-.modal-body { padding: 16px; }
+.modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(440px, 92vw); max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+.modal-body { padding: 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .modal-body h3 { margin: 0 0 10px; font-size: 14px; }
 .modal-body label { display: block; margin: 8px 0; font-size: 12px; color: var(--muted); }
 .modal-body input, .modal-body select, .modal-body textarea {
@@ -160,7 +160,7 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
   border: 1px solid var(--line); border-radius: 5px; padding: 6px; font-size: 13px;
 }
 .modal-body textarea { min-height: 56px; resize: vertical; }
-.modal-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 16px; border-top: 1px solid var(--line); }
+.modal-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .modal-foot .primary { background: var(--accent); color: #08101f; font-weight: 700; border-color: var(--accent); }
 .warn { background: rgba(255,107,107,.15); color: var(--holiday); padding: 6px 8px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; }
 .info { background: rgba(110,168,254,.12); color: var(--accent); padding: 6px 8px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; }

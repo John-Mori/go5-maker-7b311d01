@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=40">
+<link rel="stylesheet" href="style.css?v=41">
 </head>
 <body>
 <header>
@@ -30,6 +30,7 @@
 <nav class="tabbar">
   <button id="tabMovie" class="tab active">🎬 動画作成</button>
   <button id="tabCal"   class="tab">📅 カレンダー</button>
+  <button id="tabYT"    class="tab"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
   <button id="tabPost"  class="tab">🦋 投稿</button>
   <button id="tabAffi"  class="tab">🔗 アフィリンク</button>
   <button id="tabVerify" class="tab">🧪 検証</button>
@@ -148,7 +149,48 @@
   <p class="hint" style="text-align:center;max-width:520px;margin:8px auto 0;">📅 最適な投稿スロット（日時・枠）を管理。各枠を決めたら「🎬 動画作成」「🦋 投稿」へ。データはこの端末内で共有されます。</p>
 </section>
 
-<!-- 投稿画面（方法②：単独で投稿。本文・画像・アカウントはここで設定） -->
+<!-- YouTube投稿画面：題名・タグ・短縮URL・概要欄（コピーして使う） -->
+<section id="pageYouTube" hidden>
+<main>
+  <!-- 題名コピペ欄（コメント＋タグ） -->
+  <section class="card">
+    <div class="field-label">📋 題名（コピーして貼り付け）</div>
+    <div class="short-row">
+      <code id="ytTitle" class="short-url">（「動画作成」タブのコメントを入れると題名が出ます）</code>
+      <button id="ytTitleCopy" class="copy-btn" type="button">題名をコピー</button>
+    </div>
+    <label class="field-label" for="ytTags" style="margin-top:10px;">タグ（半角スペース区切り）</label>
+    <input id="ytTags" type="text" value="#マンガ紹介 #漫画 #アニメ #anime" autocomplete="off">
+    <div class="hint">題名＝「動画作成」タブ④コメント＋タグ。コメント・タグを変えると自動更新されます。</div>
+  </section>
+
+  <!-- 短縮URL表示 ＋ YouTube説明欄 -->
+  <section class="card">
+    <div class="field-label">🔗 最新の投稿（短縮URL）</div>
+    <div class="short-row">
+      <code id="shortUrlOut" class="short-url">（投稿するとここに短縮URLが表示されます）</code>
+      <button id="shortUrlCopy" class="copy-btn" type="button">URLをコピー</button>
+    </div>
+    <div class="hint">動画作成後の自動投稿／今すぐ投稿のあと、Bluesky投稿のURLを短縮して表示します（短縮には🦋投稿タブ⚙の記録用GAS設定が必要）。</div>
+
+    <label class="field-label" for="ytDesc" style="margin-top:12px;">📺 YouTube説明欄（コピーして概要欄に貼り付け）</label>
+    <textarea id="ytDesc" rows="8">↑ URLを長押し&リンクを開く ↑
+こちらからアクセスしてね💕
+
+
+
+
+【感想📖】</textarea>
+    <div class="row" style="display:flex;gap:8px;margin-top:8px;">
+      <button id="ytInsert" class="ghost" type="button">短縮URLを挿入</button>
+      <button id="ytCopy" class="copy-btn" type="button">説明欄をコピー</button>
+    </div>
+    <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
+  </section>
+</main>
+</section>
+
+<!-- 投稿画面（Bluesky・方法②：単独で投稿。本文・画像・アカウントはここで設定） -->
 <section id="pagePost" hidden>
 <main>
   <div id="slotCtxPost" class="slot-ctx" hidden></div>
@@ -229,42 +271,6 @@
       ・<b>無人OFF</b>＝このタブを開いている間だけ（端末のアカウント設定を使用）。<br>
       ・<b>無人ON</b>＝GASに予約を送り、<b>タブを閉じても</b>時間トリガーが投稿（アカウントはGAS側の設定 BSKY_HANDLE/BSKY_APP_PW を使用）。</div>
     <div id="reserveList" class="rsv-list" hidden></div>
-  </section>
-
-  <!-- 題名コピペ欄（コメント＋タグ） -->
-  <section class="card">
-    <div class="field-label">📋 題名（コピーして貼り付け）</div>
-    <div class="short-row">
-      <code id="ytTitle" class="short-url">（「動画作成」タブのコメントを入れると題名が出ます）</code>
-      <button id="ytTitleCopy" class="copy-btn" type="button">題名をコピー</button>
-    </div>
-    <label class="field-label" for="ytTags" style="margin-top:10px;">タグ（半角スペース区切り）</label>
-    <input id="ytTags" type="text" value="#マンガ紹介 #漫画 #アニメ #anime" autocomplete="off">
-    <div class="hint">題名＝「動画作成」タブ④コメント＋タグ。コメント・タグを変えると自動更新されます。</div>
-  </section>
-
-  <!-- 短縮URL表示 ＋ YouTube説明欄 -->
-  <section class="card">
-    <div class="field-label">🔗 最新の投稿（短縮URL）</div>
-    <div class="short-row">
-      <code id="shortUrlOut" class="short-url">（投稿するとここに短縮URLが表示されます）</code>
-      <button id="shortUrlCopy" class="copy-btn" type="button">URLをコピー</button>
-    </div>
-    <div class="hint">動画作成後の自動投稿／今すぐ投稿のあと、Bluesky投稿のURLを短縮して表示します（短縮には⚙の記録用GAS設定が必要）。</div>
-
-    <label class="field-label" for="ytDesc" style="margin-top:12px;">📺 YouTube説明欄（コピーして概要欄に貼り付け）</label>
-    <textarea id="ytDesc" rows="8">↑ URLを長押し&リンクを開く ↑
-こちらからアクセスしてね💕
-
-
-
-
-【感想📖】</textarea>
-    <div class="row" style="display:flex;gap:8px;margin-top:8px;">
-      <button id="ytInsert" class="ghost" type="button">短縮URLを挿入</button>
-      <button id="ytCopy" class="copy-btn" type="button">説明欄をコピー</button>
-    </div>
-    <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
   </section>
 
   <!-- アカウント・記録設定（自動投稿と共通）：初期設定後はあまり触らないため最下段に配置 -->
@@ -360,15 +366,15 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=40"></script>
-<script src="affiliate-core.js?v=40"></script>
-<script src="affiliate.js?v=40"></script>
-<script src="bluesky-core.js?v=40"></script>
-<script src="scheduler.js?v=40"></script>
-<script src="bluesky.js?v=40"></script>
-<script src="drive-upload.js?v=40"></script>
-<script src="verify-core.js?v=40"></script>
-<script src="verify.js?v=40"></script>
-<script src="integration.js?v=40"></script>
+<script src="app.js?v=41"></script>
+<script src="affiliate-core.js?v=41"></script>
+<script src="affiliate.js?v=41"></script>
+<script src="bluesky-core.js?v=41"></script>
+<script src="scheduler.js?v=41"></script>
+<script src="bluesky.js?v=41"></script>
+<script src="drive-upload.js?v=41"></script>
+<script src="verify-core.js?v=41"></script>
+<script src="verify.js?v=41"></script>
+<script src="integration.js?v=41"></script>
 </body>
 </html>
