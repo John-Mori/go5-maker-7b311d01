@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=45">
+<link rel="stylesheet" href="style.css?v=46">
 </head>
 <body>
 <header>
@@ -186,6 +186,19 @@
       <button id="ytCopy" class="copy-btn" type="button">説明欄をコピー</button>
     </div>
     <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
+  </section>
+
+  <!-- 手動で短縮（アプリ外で単独投稿した分のURLを貼って短縮＋履歴追加） -->
+  <section class="card">
+    <div class="field-label">✂️ あとで単独投稿した分を短縮（手動）</div>
+    <div class="hint">アプリ外でBlueskyに投稿した分などは、その<b>投稿URL</b>をここに貼ると短縮URLを作り、下の履歴（このアカウント）に追加します。</div>
+    <input id="manualTitle" type="text" placeholder="作品名・メモ（任意・履歴の見出しになります）" autocomplete="off">
+    <input id="manualUrl" type="text" inputmode="url" placeholder="https://bsky.app/profile/.../post/...（短縮したいURL）" autocomplete="off" style="margin-top:6px;">
+    <button id="manualShortBtn" class="primary" type="button" style="margin-top:8px;">✂️ 短縮して履歴に追加</button>
+    <div id="manualResult" class="short-row" hidden style="margin-top:8px;">
+      <code id="manualOut" class="short-url"></code>
+      <button id="manualCopy" class="copy-btn" type="button">コピー</button>
+    </div>
   </section>
 
   <!-- 過去の短縮URL履歴（このチャンネルのみ・重複は削除可） -->
@@ -374,15 +387,15 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="app.js?v=45"></script>
-<script src="affiliate-core.js?v=45"></script>
-<script src="affiliate.js?v=45"></script>
-<script src="bluesky-core.js?v=45"></script>
-<script src="scheduler.js?v=45"></script>
-<script src="bluesky.js?v=45"></script>
-<script src="drive-upload.js?v=45"></script>
-<script src="verify-core.js?v=45"></script>
-<script src="verify.js?v=45"></script>
-<script src="integration.js?v=45"></script>
+<script src="app.js?v=46"></script>
+<script src="affiliate-core.js?v=46"></script>
+<script src="affiliate.js?v=46"></script>
+<script src="bluesky-core.js?v=46"></script>
+<script src="scheduler.js?v=46"></script>
+<script src="bluesky.js?v=46"></script>
+<script src="drive-upload.js?v=46"></script>
+<script src="verify-core.js?v=46"></script>
+<script src="verify.js?v=46"></script>
+<script src="integration.js?v=46"></script>
 </body>
 </html>

@@ -23,7 +23,9 @@
     shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy'),
     ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags'),
     discountSel: $('discountSel'), discountSel2: $('discountSel2'), discountSelPc: $('discountSelPc'),
-    histList: $('histList'), histRefresh: $('histRefresh')
+    histList: $('histList'), histRefresh: $('histRefresh'),
+    manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
+    manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy')
   };
   if (!els.text) return;
 
@@ -465,6 +467,28 @@
   if (els.histRefresh) els.histRefresh.addEventListener('click', loadHistory);
   var ytTabBtn_ = document.getElementById('tabYT');
   if (ytTabBtn_) ytTabBtn_.addEventListener('click', loadHistory);
+
+  // ---- 手動短縮（アプリ外で単独投稿した分のURLを貼って短縮＋履歴追加）----
+  if (els.manualShortBtn) els.manualShortBtn.addEventListener('click', function () {
+    var url = (els.manualUrl && els.manualUrl.value || '').trim();
+    if (!/^https?:\/\//.test(url)) {
+      if (els.manualOut) els.manualOut.textContent = 'URLは http:// か https:// で始めてください';
+      if (els.manualResult) els.manualResult.hidden = false;
+      return;
+    }
+    var btn = els.manualShortBtn, orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '短縮中…';
+    shortenUrl(url).then(function (short) {
+      var s = short || url;  // 失敗時は元URLで代替
+      if (els.manualOut) els.manualOut.textContent = s;
+      if (els.manualResult) els.manualResult.hidden = false;
+      histAdd({ title: (els.manualTitle && els.manualTitle.value || '').trim() || '(手動追加)', shortUrl: s, postUrl: url, postUri: '' });
+      btn.textContent = '✓ 履歴に追加しました'; setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
+      if (els.manualUrl) els.manualUrl.value = '';
+      if (els.manualTitle) els.manualTitle.value = '';
+    });
+  });
+  if (els.manualCopy) els.manualCopy.addEventListener('click', function () { copyText(els.manualOut.textContent, els.manualCopy); });
 
   // ---- 編集できる確認モーダル（方法①自動投稿） ----
   function confirmEditable(text, note) {
