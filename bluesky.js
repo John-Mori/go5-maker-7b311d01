@@ -22,7 +22,7 @@
     pcModal: $('postConfirmModal'), pcText: $('pcText'), pcNote: $('pcNote'), pcOk: $('pcOk'), pcCancel: $('pcCancel'),
     shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy'),
     ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags'),
-    discountSel: $('discountSel'), discountSel2: $('discountSel2')
+    discountSel: $('discountSel'), discountSel2: $('discountSel2'), discountSelPc: $('discountSelPc')
   };
   if (!els.text) return;
 
@@ -134,10 +134,10 @@
     acc1: { build: function (n) { return n + '%オフのおトク作品！'; }, placeholder: '〇%オフのおトク作品！', mark: /オフのおトク作品/, persistent: false },
     acc2: { build: function (n) { return 'しかも今なら' + n + '%オフ💕'; }, placeholder: 'しかも今なら〇%オフ💕', mark: /しかも今なら[^\n]*オフ/, persistent: false }
   };
-  function setDiscountLine(val) {
-    if (!els.text) return;
+  // 割引文の挿入/差し替え/削除を行う純粋関数（対象テキストを受け取り新テキストを返す）。
+  function discApply(text, val) {
     var cfg = DISC[acctId()] || DISC.acc1;
-    var lines = els.text.value.split('\n');
+    var lines = String(text == null ? '' : text).split('\n');
     var idx = -1;
     for (var i = 0; i < lines.length; i++) { if (cfg.mark.test(lines[i])) { idx = i; break; } }
     if (val === '') {
@@ -147,7 +147,11 @@
       var nl = cfg.build(val === 'custom' ? '' : val);  // custom は数字なし（ユーザーが入力）
       if (idx >= 0) lines[idx] = nl; else lines.splice(Math.min(1, lines.length), 0, nl);
     }
-    els.text.value = lines.join('\n');
+    return lines.join('\n');
+  }
+  function setDiscountLine(val) {
+    if (!els.text) return;
+    els.text.value = discApply(els.text.value, val);
     saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
   }
   // 割引文：投稿タブ／動画作成タブ どちらのドロップダウンからでも共通の本文へ反映し、両方の表示を同期。
@@ -158,6 +162,10 @@
   }
   if (els.discountSel) els.discountSel.addEventListener('change', function () { applyDiscount(els.discountSel.value); });
   if (els.discountSel2) els.discountSel2.addEventListener('change', function () { applyDiscount(els.discountSel2.value); });
+  // 投稿確認モーダル内：この投稿のテキスト(pcText)にだけ割引文を反映（保存はしない）。
+  if (els.discountSelPc) els.discountSelPc.addEventListener('change', function () {
+    if (els.pcText) els.pcText.value = discApply(els.pcText.value, els.discountSelPc.value);
+  });
 
   // ---- アカウント切替で再読込 ----
   document.addEventListener('account-changed', function () { applyAccount(); });
@@ -396,6 +404,7 @@
     return new Promise(function (resolve) {
       if (!els.pcModal) { resolve(window.confirm(text) ? text : null); return; }
       els.pcText.value = text;
+      if (els.discountSelPc) els.discountSelPc.value = '';
       if (els.pcNote) els.pcNote.textContent = note || '';
       els.pcModal.hidden = false;
       function cleanup() { els.pcModal.hidden = true; els.pcOk.removeEventListener('click', ok); els.pcCancel.removeEventListener('click', cancel); }
