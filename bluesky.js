@@ -397,13 +397,20 @@
     shortenAndShow(d.post_url, d.post_uri, d.title);  // 短縮URLはブラウザ側で生成（GAS/Bitly非依存）
   });
 
-  // ブラウザだけで短縮（TinyURL・CORS対応・トークン不要）。失敗時は空文字。
-  function shortenUrl(longUrl) {
-    if (!longUrl) return Promise.resolve('');
-    return fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl))
+  // ブラウザだけで短縮（CORS対応・トークン不要）。失敗時は空文字。
+  //   一次：da.gd（結果が x.gd 並みに短い「da.gd/xxxxx」。Access-Control-Allow-Origin:* で全ブラウザ確実）
+  //   二次：TinyURL（da.gd が落ちている時の保険。CORSは Origin 反射のため不安定なことがある）
+  function shortenVia(api, longUrl) {
+    return fetch(api + encodeURIComponent(longUrl))
       .then(function (r) { return r.ok ? r.text() : ''; })
       .then(function (t) { t = String(t || '').trim(); return /^https?:\/\//.test(t) ? t : ''; })
       .catch(function () { return ''; });
+  }
+  function shortenUrl(longUrl) {
+    if (!longUrl) return Promise.resolve('');
+    return shortenVia('https://da.gd/s?url=', longUrl).then(function (s) {
+      return s || shortenVia('https://tinyurl.com/api-create.php?url=', longUrl);
+    });
   }
   function shortenAndShow(longUrl, postUri, title) {
     if (!longUrl) return;
