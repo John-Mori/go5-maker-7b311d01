@@ -116,6 +116,8 @@
 1. ~~【短縮URL】短い独自ドメインを付けるか~~ → ✅ **決定（Chami 2026-06-25）：da.gd 継続**（独自ドメインは見送り）。link-worker は**デプロイ済のまま待機**（frontend未接続。将来クリック計測＋独自ドメインが要れば bluesky.js 1行で有効化）。**短縮URLの分裂は完全解消・これ以上の作業不要。**
 2. **現行GASの特定**：プロジェクト名／デプロイURL（`bsky_gas_url`の実値）／記録先スプレッドシートID。GAS再デプロイ前に確定必須。
 3. ~~link-worker の所在~~ → ✅ 解決（main に集約・デプロイ済・待機）。
+4. **`wizard.js` の所有（どのsessionが実装するか）**：PC側(main)とスマホ側branchの両方が「次＝wizard.js」を持つと再分裂する。**どちらか一方に固定**したい。背骨ID串刺し（§5末）は配線済なので、wizard はその上に被せるだけ。
+5. **記録コントラクト(§6)の実装単位**：(a)フロント payload を `op:'upsert'`/snake_case 化 と (b)GAS の upsert/testMode 化 は**同一作業として同時に**行う（片側だけ先行させない）。実施は §3-2 のGAS確定後。
 
 ---
 
@@ -126,6 +128,13 @@
 ## 5. 作業ログ
 - 2026-06-25：事前チェック(§2)を4サブエージェントで完了。決定事項4件をロック。Phase A 設計確定。短縮URL=da.gd化(v=47)・Bluesky接続テスト(v=48)は別件で実装済。
 - 2026-06-25：シートURL短縮の要望を設計反映（YouTube=videoId+短縮URL／アフィリンクは生のまま）。**`idgen.js` 実装＋`tests/test_idgen.js`（10 PASS）**。既存31ケース回帰なし＝合計41 PASS。`idgen.js` は未登録（公開無影響）。次＝記録コントラクト配線＋`wizard.js`。
+- 2026-06-25（スマホ別session・branch `claude/vigilant-mendel-wjbvg5`）：**背骨ID串刺しを配線（GAS非依存・後方互換の安全分のみ）**。
+  - `app.js`：動画作成時に `IdGen.makeVideoId(account)` を発番し `video-created` detail に `videoId/account` を載せて配布。
+  - `idgen.js` を `index.html` に登録（app.js より前）。`?v=48→49`。
+  - `drive-upload.js`：保存フォルダ/ファイル名を **`{ID}_{タイトル}`**（承認#3。Worker変更不要＝同名連番ロジックそのまま）。
+  - `bluesky.js`：記録 payload に `videoId` を追加（旧GASは無視＝**後方互換**／upsert化後に行キー `post_id` として活用）。`currentVideoId` を `video-created` で常時保持。
+  - 全テスト **41 PASS / 0 FAIL**（回帰なし）。
+  - **未実施（ゲート明示）**：(a) GAS の `op:'upsert'`/`testMode`＋作成時「未投稿」行 ＝ §6 の snake_case 契約は **GAS本体とセットで実装**（旧GASに `op:'upsert'` を送ると未投稿行が量産されるため。§0.3/§3.2 のGASプロジェクト・シート確認が前提）。(b) `wizard.js` ＝ PC側(main)と**二重実装＝再分裂の恐れ**のため所有確認待ち（§3-4）。
 
 ## 6. Phase A 記録コントラクト（フロント→GAS。配線/ウィザード実装の基準）
 動画作成〜投稿で、**同一 `videoId` を upsert キー**に2回送る。GASは `op:'upsert'` を `post_id` で突き合わせ、変更フィールドのみ更新。

@@ -105,6 +105,9 @@
     if (!blob) return; // 動画Blobが取れなければ何もしない
     var name = d.name || "video.mp4";
     var title = (d.title || "").trim() || name.replace(/\.[^.]+$/, "");
+    // 取り違え防止：安定動画ID（あれば）をフォルダ/ファイル名に前置 ＝ {ID}_{タイトル}（承認済 #3）。
+    var vid = (d.videoId || "").trim();
+    var folderTitle = vid ? (vid + "_" + title) : title;
 
     var channel = (typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "";
     if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
@@ -113,6 +116,6 @@
     var imageFile = (photo && photo.files && photo.files[0]) ? photo.files[0] : null;
 
     var videoFile = new File([blob], name, { type: blob.type || "video/mp4" });
-    send({ channel: channel, title: title, videoFile: videoFile, imageFile: imageFile });
+    send({ channel: channel, title: folderTitle, videoFile: videoFile, imageFile: imageFile });
   });
 })();

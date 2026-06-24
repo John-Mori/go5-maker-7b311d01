@@ -31,6 +31,8 @@
   if (!els.text) return;
 
   var selectedPostFile = null, lastImgUrl = null;
+  // 一本道の背骨：直近の動画作成で発番された安定動画ID。投稿記録に串刺しで持たせる。
+  var currentVideoId = '';
 
   // ---- 汎用永続化 ----
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -410,7 +412,8 @@
       channel: (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'),
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
       workUrl: ((els.workUrl && els.workUrl.value) || '').trim(),
-      hashtags: record.hashtags || '', postUri: record.postUri || ''
+      hashtags: record.hashtags || '', postUri: record.postUri || '',
+      videoId: (record.videoId || currentVideoId || '')  // 背骨ID（旧GASは無視＝無害／upsert化後は行キー post_id に使用）
     };
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
@@ -633,6 +636,11 @@
     });
   }
   document.addEventListener('video-created', handleVideoCreated);
+  // 自動投稿のON/OFFに関わらず、発番された安定動画IDは常に保持（投稿記録の背骨キー）。
+  document.addEventListener('video-created', function (e) {
+    var d = (e && e.detail) || {};
+    if (d.videoId) currentVideoId = d.videoId;
+  });
 
   if (els.shortUrlCopy) els.shortUrlCopy.addEventListener('click', function () { if (lastShortUrl) copyText(lastShortUrl, els.shortUrlCopy); });
   if (els.ytCopy) els.ytCopy.addEventListener('click', function () { if (els.ytDesc) copyText(els.ytDesc.value, els.ytCopy); });
