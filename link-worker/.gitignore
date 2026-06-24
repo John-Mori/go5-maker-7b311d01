@@ -1,0 +1,5 @@
+# 秘密情報・ローカル生成物は絶対にコミットしない
+.dev.vars
+.wrangler/
+node_modules/
+*.local

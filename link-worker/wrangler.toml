@@ -1,0 +1,22 @@
+name = "go5-short"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# ── 非秘密の設定（ここに秘密は書かない。秘密は wrangler secret put で登録）──
+[vars]
+# フロント(GitHub Pages)のOriginだけ許可（ワイルドカード不可）
+ALLOWED_ORIGIN = "https://john-mori.github.io"
+# 短縮を許可する宛先ホスト（カンマ区切り）。乗っ取られても踏み台にされないよう既定はBlueskyのみ。
+#   すべて許可 → "*" ／ FANZA等も短縮したい → "bsky.app,bsky.social,video.dmm.co.jp" のように足す
+ALLOWED_HOSTS = "bsky.app,bsky.social,youtube.com,youtu.be"
+# 1日あたりの発行上限（レート制限）
+DAILY_LIMIT = "500"
+
+# ── KV（コード→URL・クリック数・レート制限を1つにまとめる。SETUP.md で作成して id を貼る）──
+[[kv_namespaces]]
+binding = "LINKS"
+id = "276fd1cee28f4521923ac58b84cf3716"
+
+# ── Secrets（コマンドで登録。ここには書かない）──
+#   wrangler secret put SHARED_SECRET
+#   （drive-worker と同じ値でも、別の値でも可。フロント bluesky.js の SHARED_SECRET と一致させる）
