@@ -232,6 +232,47 @@ function daGdShorten_(longUrl) {
   } catch (e) { return ''; }
 }
 
+// ---- link-worker 開封数の取り込み（①計測の見える化） ----
+//   YT説明欄に貼る短縮URL（go5-short/<code>）の「開かれた回数」を /api/stats から取得し、
+//   テンプレ列「Bitlyクリック」（＝今後は link-worker の開封数の意味）に毎時反映する。
+//   ※列名はテンプレ互換のため変えない（意味だけ Bitly→開封数 に変更）。
+var SHORT_WORKER_URL = 'https://go5-short.trustsignalbot.workers.dev';
+function shortSecret_() { return prop_('SHORT_SHARED_SECRET') || 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'; }
+// go5-short のURLから末尾コードを抽出（別ホスト＝da.gd等なら ''）。
+function codeFromShort_(url) {
+  var m = String(url || '').match(/^https?:\/\/[^/]*go5-short[^/]*\/([0-9A-Za-z]+)/);
+  return m ? m[1] : '';
+}
+function workerClicks_(code) {
+  if (!code) return null;
+  try {
+    var u = SHORT_WORKER_URL.replace(/\/+$/, '') + '/api/stats?code=' + encodeURIComponent(code) + '&secret=' + encodeURIComponent(shortSecret_());
+    var res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
+    if (res.getResponseCode() >= 300) return null;
+    var d = JSON.parse(res.getContentText() || '{}');
+    return (d && d.ok && typeof d.clicks === 'number') ? d.clicks : null;
+  } catch (e) { return null; }
+}
+// 毎時：直近200行のうち短縮URLが go5-short のものだけ開封数を更新（軽量・クォータ安全）。
+function refreshClicks() {
+  CH_SHEETS.forEach(function (name) {
+    var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
+    var map = headerMap_(sh); var last = sh.getLastRow();
+    if (last < 2 || !map['短縮URL'] || !map['Bitlyクリック']) return;
+    var start = Math.max(2, last - 199), n = last - start + 1;
+    var urls = sh.getRange(start, map['短縮URL'], n, 1).getValues();
+    for (var i = 0; i < urls.length; i++) {
+      var code = codeFromShort_(urls[i][0]); if (!code) continue;
+      var c = workerClicks_(code);
+      if (c !== null) {
+        sh.getRange(start + i, map['Bitlyクリック']).setValue(c);
+        if (map['クリック更新日時']) sh.getRange(start + i, map['クリック更新日時']).setValue(new Date());
+      }
+      Utilities.sleep(100);
+    }
+  });
+}
+
 // ---- Bluesky反応(いいね/リポスト/返信)の定期更新（毎時トリガー）。公開API getPosts を25件ずつ ----
 function refreshEngagement() {
   CH_SHEETS.forEach(function (name) {
@@ -262,13 +303,16 @@ function refreshEngagement() {
   });
 }
 
-// 初回1回：Bluesky反応(いいね/リポスト/返信)を毎時更新するトリガーを登録。
-//   旧 refreshClicks（Bitly・全廃）トリガーが残っていれば一緒に削除する（再実行で掃除）。
+// 初回1回：毎時トリガーを登録。
+//   refreshClicks＝link-worker 開封数の取り込み（旧Bitly版とは別物・同名で再利用）。
+//   refreshEngagement＝Bluesky反応(いいね/リポスト/返信)。
+//   再実行で既存トリガーを掃除してから貼り直す（旧Bitly版 refreshClicks も消える）。
 function setupTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var f = t.getHandlerFunction();
     if (f === 'refreshClicks' || f === 'refreshEngagement') ScriptApp.deleteTrigger(t);
   });
+  ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('refreshEngagement').timeBased().everyHours(1).create();
 }
 

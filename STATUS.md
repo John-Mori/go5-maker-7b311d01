@@ -152,8 +152,11 @@
   - **②は却下（Chami判断）**：アフィリンクは**生のまま**（link-worker経由にすれば踏破数は取れるが、方針反転＋FANZA規約マスキング禁止の懸念）。→ 投稿単位の踏破数は測らない。
   - **①は実装**：`bluesky.js` の `shortenUrl` を **link-worker 一次**（→da.gd→TinyURL→長URL）へ。**YT説明欄用途でURL長は無問題**＝計測できる自前Workerを最優先。開封は go5-short のKVで自動カウント開始。`SHORT.WORKER_URL/SHARED_SECRET`（localStorage上書き可）。
   - 全テスト **47 PASS / 0 FAIL**。要確認：link-worker の `SHARED_SECRET` 実値がフロント既定（drive流用のソフト鍵）と一致しているか（不一致なら da.gd へ無害フォールバック＝計測されないだけ）。
-  - **次の follow-up（①の回収を“見える化”）**：シートの `短縮URL` 列が `go5-short/<code>` のものは、末尾 `<code>` を抜いて `/api/stats?code=&secret=` を叩き、開封数を `Bitlyクリック`（→「クリック」に意味変更）列へ定期反映。codeは短縮URLから導出可＝**スキーマ変更不要**。実装はGASの毎時 or フロント。
-  - 次＝**`wizard.js`（一本道UI）** に着手予定。
+  - **①の見える化＝実装済（GAS）**：`refreshClicks` を **link-worker版に作り直し**（同名で再利用）。`短縮URL`列が `go5-short/<code>` の行は `<code>` を抜いて `/api/stats?code=&secret=` を叩き、開封数を `Bitlyクリック`列（＝意味を「開封数」に変更・**列名はテンプレ互換のため不変**）へ毎時反映。直近200行・sleep100ms＝クォータ安全。secretは `prop_('SHORT_SHARED_SECRET')`（既定＝フロントと同じソフト鍵）。`setupTrigger` に `refreshClicks` 毎時を再登録。**スキーマ変更なし**。
+- 2026-06-25（同session・Chami「投稿再開は全部片付いてから・順番は任せる」）：**データ層を完成し、GAS変更を“再デプロイ1回”に集約**。
+  - これで GAS 側の Phase A 変更が全部入り：①upsert（重複行なし）②testMode ③Bitly全廃＋da.gdフォールバック ④link-worker開封数の取り込み（refreshClicks刷新）。**Chami の手作業は「GAS再デプロイ1回＋setupTrigger実行1回」だけ**。
+  - **正確な順番（合意）**：(1)データ層完成〔済〕→(2)Chamiが**GAS再デプロイ1回**＋実機で1本テスト確認→(3)検証済み土台の上で **`wizard.js`（一本道UI）**→(4)投稿再開。wizardは検証後に着手（未検証の土台に被せない）。
+  - 次＝(2)の再デプロイ待ち。完了後 **`wizard.js`** へ。
 
 ## 6. Phase A 記録コントラクト（フロント→GAS。配線/ウィザード実装の基準）
 動画作成〜投稿で、**同一 `videoId` を upsert キー**に2回送る。GASは `op:'upsert'` を `post_id` で突き合わせ、変更フィールドのみ更新。
