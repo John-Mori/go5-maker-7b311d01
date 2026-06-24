@@ -142,6 +142,12 @@
   - 新規 `tests/test_record_upsert.js`（6 PASS／`upsertRowOf_` のミラー）。全テスト **47 PASS / 0 FAIL**。
   - **後方互換が要**：旧GAS（未デプロイ）でも `op`/`videoId`/`testMode` を無視して従来通り1行追記＝壊れない。**GAS再デプロイは任意・好きな時**で、やると同ID行へ upsert（重複行が消える）。手順は応答に明記。
   - **まだ送っていない**：作成時「未投稿」行（旧GAS量産回避のため、GAS再デプロイ確認後にwizardで導入）。`status`列はテンプレに無く現状未書込（将来#4で列追加時に有効化）。
+- 2026-06-25（同session・Chami判断「Bitly撤去＋GASスリム化」）：**Bitly を全廃（無料枠オーバーの主因）・GASをスリム化**。
+  - **診断**：記録ごちゃごちゃの主因は **Bitly無料枠**（`bitlyShorten_`/`bitlyClicks_` が制限で失敗→短縮URL空・クリック未更新）。加えて `refreshClicks` が1行ずつUrlFetch+sleepで毎時最大500回＝消費者枠のトリガー90分/日に接近し黙って落ちる副因。Bitlyは既に冗長（共有はda.gd/link-worker・Bitlyリンクは誰も踏まず計測不能）。
+  - `gas/コード.gs`：`bitlyShorten_`/`bitlyClicks_`/`refreshClicks` を**削除**。`daGdShorten_`（da.gd・1投稿1回・トークン不要）に置換。`writeRecord_` は **フロント生成の `shortUrl` を優先**、無い経路（無人予約/旧クライアント）だけ da.gd 短縮。`Bitly_ID` 書込を停止。`setupTrigger` から `refreshClicks` トリガーを撤去（`refreshEngagement` のみ毎時）。テンプレ列 `Bitly_ID`/`Bitlyクリック` は温存（未使用・将来 link-worker クリックへ転用可）。`BITLY_TOKEN` プロパティ不要に。
+  - `bluesky.js`：投稿記録を「即時記録 → 短縮URL確定で同一行へ upsert 追記」に変更（`shortenAndShow` に `onShort` コールバック追加。`videoId` ある時のみ追記＝二重行なし）。payload に `shortUrl` 追加＝**シートの短縮URL列に“実際に共有するURL”が入る**ように。
+  - 全テスト **47 PASS / 0 FAIL**（回帰なし）。**GAS再デプロイは任意**（未デプロイでも記録は従来通り動く。デプロイで毎時Bitlyフェッチが消え安定＋短縮URLが正しく入る）。
+  - **クリック「回収」の follow-up**：da.gd はクリックAPI無し。本物のクリック計測が要るなら共有リンクを link-worker に切替（短さ妥協 or 独自ドメイン）→ `/api/stats` をGASかフロントで取り込み `Bitlyクリック` 列へ。これは §3-1 の保留（da.gd継続）と表裏。
   - 次＝**`wizard.js`（一本道UI）** に着手予定。
 
 ## 6. Phase A 記録コントラクト（フロント→GAS。配線/ウィザード実装の基準）

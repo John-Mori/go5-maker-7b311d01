@@ -2,17 +2,19 @@
  * コード.gs — 5秒動画メーカー：投稿記録＆クリック/反応集計（Google Apps Script Web App）
  *
  * 役割：
- *   1) クライアント(bluesky.js)から {channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri} を受け取る(doPost)
- *   2) Bitly で postUrl を短縮（=クリック集計対象。アフィリンクには触れない）
- *   3) チャンネル別シート「記録_ch1 / 記録_ch2」へ列名マッピングで1行自動記入
- *   4) refreshClicks()（毎時）で Bitly クリック数、refreshEngagement()（毎時）で Bluesky反応(いいね/リポスト/返信)を更新
- *   5) Phase5：無人予約投稿（runReservations / 5分トリガー）
+ *   1) クライアント(bluesky.js)から {op,videoId,channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri,shortUrl,testMode} を受け取る(doPost)
+ *   2) videoId(背骨ID)をキーに「記録_ch1 / 記録_ch2」へ upsert（重複行を作らない・列名マッピング）。
+ *      短縮URLはフロント生成(da.gd/link-worker)を優先、無い経路のみ GAS が da.gd で短縮。
+ *   3) refreshEngagement()（毎時）で Bluesky反応(いいね/リポスト/返信)を更新
+ *   4) Phase5：無人予約投稿（runReservations / 5分トリガー）
+ *   ※ Bitly は全廃（無料枠オーバーの主因かつ冗長＝共有されず計測不能）。クリック計測は link-worker(KV) に一本化する方針。
+ *      テンプレの 'Bitly_ID'/'Bitlyクリック' 列は当面温存（未使用。将来 link-worker クリックへ転用可）。
  *
  * 前提：記録先スプレッドシートは「動画記録分析テンプレート.xlsx」を取り込んだもの
  *   （記録_ch1 / 記録_ch2 / 集計 / 設定、名前付き範囲 Holidays を含む）。
  * スクリプトプロパティ：
- *   BITLY_TOKEN  （短縮URLを使うなら必須）／ SHEET_ID（記録先スプレッドシートID・必須）
- *   BSKY_HANDLE / BSKY_APP_PW（無人予約に使用）
+ *   SHEET_ID（記録先スプレッドシートID・必須）／ BSKY_HANDLE / BSKY_APP_PW（無人予約に使用）
+ *   ※ BITLY_TOKEN は不要（Bitly全廃）。設定が残っていても未使用。
  *   ※ SHARED_SECRET は設定しないこと（現クライアントは送らないため、設定すると弾かれる）
  */
 
@@ -123,7 +125,7 @@ function doPost(e) {
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || ''
     });
-    return jsonOut_({ ok: true, shortUrl: r.shortUrl, bitlyId: r.bitlyId, row: r.row });
+    return jsonOut_({ ok: true, shortUrl: r.shortUrl, row: r.row });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   }
@@ -164,12 +166,15 @@ function upsertRowOf_(postIdCol, videoId) {
   return 0;
 }
 
-// 1投稿を記録（Bitly短縮は失敗しても記録は残す）。doPost・無人予約の両方から使用。
+// 1投稿を記録（短縮失敗でも記録は残す）。doPost・無人予約の両方から使用。
 // videoId（背骨ID）があれば post_id をそれにし、同ID行へ upsert（重複行を作らない・変更フィールドのみ更新）。
 // videoId 無し＝完全に従来動作（後方互換）。
 function writeRecord_(channel, f) {
-  var shortUrl = '', bitlyId = '';
-  if (f.postUrl) { try { var b = bitlyShorten_(f.postUrl); shortUrl = b.link; bitlyId = b.id; } catch (e) {} }
+  // 短縮URL：フロントが生成済みなら優先（da.gd/link-worker＝実際に共有するURL）。
+  // 無い経路（無人予約・旧クライアント）だけ GAS が da.gd で短縮（1投稿1回・トークン不要・軽量）。
+  // ※Bitlyは無料枠オーバーの主因かつ冗長（共有されず計測不能）なため全廃。
+  var shortUrl = f.shortUrl || '';
+  if (!shortUrl && f.postUrl) shortUrl = daGdShorten_(f.postUrl);
   var sh = getChannelSheet_(channel);
   var map = headerMap_(sh);
   var dcol = map['投稿日時'] || 2;
@@ -209,53 +214,22 @@ function writeRecord_(channel, f) {
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
   putIf('Bluesky投稿URL', f.postUrl || '');
   putIf('短縮URL', shortUrl);
-  putIf('Bitly_ID', bitlyId);
   putIf('post_uri', f.postUri || '');
   // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
-  if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); put('Bitlyクリック', 0); }
-  return { shortUrl: shortUrl, bitlyId: bitlyId, row: target };
+  if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
+  return { shortUrl: shortUrl, row: target };
 }
 
-// ---- Bitly ----
-function bitlyShorten_(longUrl) {
-  var token = prop_('BITLY_TOKEN');
-  if (!token) throw new Error('BITLY_TOKEN が未設定です');
-  var res = UrlFetchApp.fetch('https://api-ssl.bitly.com/v4/shorten', {
-    method: 'post', contentType: 'application/json',
-    headers: { Authorization: 'Bearer ' + token },
-    payload: JSON.stringify({ long_url: longUrl }), muteHttpExceptions: true
-  });
-  var data = JSON.parse(res.getContentText() || '{}');
-  if (res.getResponseCode() >= 300) throw new Error('Bitly短縮に失敗: ' + (data.message || res.getResponseCode()));
-  return { link: data.link, id: data.id };
-}
-function bitlyClicks_(bitlinkId) {
-  var token = prop_('BITLY_TOKEN'); if (!token) return null;
-  var url = 'https://api-ssl.bitly.com/v4/bitlinks/' + encodeURIComponent(bitlinkId) + '/clicks/summary?unit=day&units=-1';
-  var res = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
-  if (res.getResponseCode() >= 300) return null;
-  var data = JSON.parse(res.getContentText() || '{}');
-  return (typeof data.total_clicks === 'number') ? data.total_clicks : null;
-}
-
-// ---- クリック数の定期更新（毎時トリガー）。直近250件のみ＝実行時間/レート対策（古い投稿はほぼ頭打ち） ----
-function refreshClicks() {
-  CH_SHEETS.forEach(function (name) {
-    var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
-    var map = headerMap_(sh); var last = sh.getLastRow();
-    if (last < 2 || !map['Bitly_ID'] || !map['Bitlyクリック']) return;
-    var start = Math.max(2, last - 249), n = last - start + 1;
-    var ids = sh.getRange(start, map['Bitly_ID'], n, 1).getValues();
-    for (var i = 0; i < ids.length; i++) {
-      var id = ids[i][0]; if (!id) continue;
-      var c = bitlyClicks_(id);
-      if (c !== null) {
-        sh.getRange(start + i, map['Bitlyクリック']).setValue(c);
-        if (map['クリック更新日時']) sh.getRange(start + i, map['クリック更新日時']).setValue(new Date());
-      }
-      Utilities.sleep(200);
-    }
-  });
+// ---- 短縮URL（da.gd・トークン不要・1投稿1回だけ。失敗時は空＝長いURLのまま記録） ----
+//   ※Bitlyは全廃（無料枠オーバーの主因かつ冗長）。クリック計測は link-worker(KV) 側に一本化する方針。
+function daGdShorten_(longUrl) {
+  if (!longUrl) return '';
+  try {
+    var res = UrlFetchApp.fetch('https://da.gd/s?url=' + encodeURIComponent(longUrl), { muteHttpExceptions: true });
+    if (res.getResponseCode() >= 300) return '';
+    var t = String(res.getContentText() || '').trim();
+    return /^https?:\/\//.test(t) ? t : '';
+  } catch (e) { return ''; }
 }
 
 // ---- Bluesky反応(いいね/リポスト/返信)の定期更新（毎時トリガー）。公開API getPosts を25件ずつ ----
@@ -288,13 +262,13 @@ function refreshEngagement() {
   });
 }
 
-// 初回1回：クリック/反応を毎時更新するトリガーを登録
+// 初回1回：Bluesky反応(いいね/リポスト/返信)を毎時更新するトリガーを登録。
+//   旧 refreshClicks（Bitly・全廃）トリガーが残っていれば一緒に削除する（再実行で掃除）。
 function setupTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var f = t.getHandlerFunction();
     if (f === 'refreshClicks' || f === 'refreshEngagement') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('refreshEngagement').timeBased().everyHours(1).create();
 }
 

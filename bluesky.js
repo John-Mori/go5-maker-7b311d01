@@ -415,6 +415,7 @@
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
       workUrl: ((els.workUrl && els.workUrl.value) || '').trim(),
       hashtags: record.hashtags || '', postUri: record.postUri || '',
+      shortUrl: record.shortUrl || '',                   // フロント生成の短縮URL(da.gd等)。空ならGAS側でda.gd短縮
       videoId: (record.videoId || currentVideoId || '')  // 背骨ID＝upsertキー（post_id 列に採用）
     };
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
@@ -434,8 +435,13 @@
   // すべての投稿を一元的に記録（即時・自動・予約のどれでも必ず記録される）
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
-    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri }); // 分析シートへ記録（結果は使わない）
-    shortenAndShow(d.post_url, d.post_uri, d.title);  // 短縮URLはブラウザ側で生成（GAS/Bitly非依存）
+    var vid = currentVideoId || '';
+    // まず即時記録（短縮URLが遅い/失敗しても投稿は確実に残す）。videoIdがあれば後追いで同一行へ追記。
+    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri, videoId: vid });
+    shortenAndShow(d.post_url, d.post_uri, d.title, function (short) {
+      // 短縮URL確定 → videoId があれば同一行へ upsert で短縮URLだけ追記（二重行は作らない）。
+      if (vid && short) recordToSheet({ postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: short });
+    });
   });
 
   // ブラウザだけで短縮（CORS対応・トークン不要）。失敗時は空文字。
@@ -453,13 +459,14 @@
       return s || shortenVia('https://tinyurl.com/api-create.php?url=', longUrl);
     });
   }
-  function shortenAndShow(longUrl, postUri, title) {
+  function shortenAndShow(longUrl, postUri, title, onShort) {
     if (!longUrl) return;
     if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを作成中…';
     shortenUrl(longUrl).then(function (short) {
       var url = short || longUrl;                      // 失敗時は長いURLで代替（リンクは有効）
       setShareOutputs(url, longUrl);
       histAdd({ title: title, shortUrl: url, postUrl: longUrl, postUri: postUri });
+      if (typeof onShort === 'function') onShort(short);  // 短縮成功時のみ（長いURL代替時は空）
     });
   }
 
