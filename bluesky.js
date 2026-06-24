@@ -13,6 +13,7 @@
   var els = {
     enable: $('bskyEnable'), text: $('bskyText'), count: $('postCount'), workUrl: $('bskyWorkUrl'),
     handle: $('bskyHandle'), appPw: $('bskyAppPw'), gasUrl: $('bskyGasUrl'), gasStatus: $('gasStatus'),
+    testBtn: $('bskyTestBtn'), testResult: $('bskyTestResult'),
     bskyStatus: $('bskyStatus'), postStatus: $('postStatus'), postNow: $('postNowBtn'),
     schedAt: $('postSchedAt'), reserveBtn: $('postReserveBtn'), unattended: $('bskyUnattended'),
     postImg: $('postImg'), postImgName: $('postImgName'), postImgClear: $('postImgClear'),
@@ -128,6 +129,41 @@
   if (els.workUrl) els.workUrl.addEventListener('input', function () { saveA('bsky_work_url', els.workUrl.value); renderPreview(); updateGasStatus(); });
   if (els.handle) els.handle.addEventListener('input', function () { saveA('bsky_handle', els.handle.value); renderPreview(); updateGasStatus(); });
   if (els.appPw) els.appPw.addEventListener('input', function () { saveA('bsky_app_pw', els.appPw.value); renderPreview(); updateGasStatus(); });
+
+  // ---- 🔌 接続テスト（ログインだけ試す・投稿しない）----
+  function setTestResult(msg, kind) {
+    if (!els.testResult) return;
+    els.testResult.hidden = false;
+    els.testResult.innerHTML = msg;
+    els.testResult.className = 'status ' + (kind || '');
+  }
+  // ログイン失敗の生メッセージを、原因の分かりやすい案内に変換
+  function friendlyLoginError(raw) {
+    var m = String(raw || '');
+    if (/Invalid identifier or password/i.test(m)) {
+      return 'ハンドルかアプリパスワードが違います。<br>' +
+        '・パスワードは Bluesky の<b>アプリパスワード</b>（<code>xxxx-xxxx-xxxx-xxxx</code>）です（通常のログインPWではありません）。<br>' +
+        '・失効している場合があるので<b>作り直して貼り直す</b>と確実です。<br>' +
+        '・ハンドルは <code>@</code> 抜き・ドメインまで（例 <code>yourname.bsky.social</code>）。';
+    }
+    if (/Rate Limit|429/i.test(m)) return '試行が多すぎます。少し時間をおいて再度お試しください。';
+    if (/Failed to fetch|NetworkError|load failed/i.test(m)) return '通信に失敗しました。ネット接続をご確認ください。';
+    return m;
+  }
+  if (els.testBtn) {
+    els.testBtn.addEventListener('click', function () {
+      var c = creds();
+      if (!c.handle || !c.appPw) { setTestResult('ハンドルとアプリパスワードを入力してから押してください。', 'off'); return; }
+      if (!window.BlueskyCore || !window.BlueskyCore.blueskyVerify) { setTestResult('投稿モジュール未読込（ページを再読み込みしてください）。', 'off'); return; }
+      var btn = els.testBtn, orig = btn.textContent;
+      btn.disabled = true; btn.textContent = '接続を確認中…';
+      setTestResult('接続を確認中…', '');
+      window.BlueskyCore.blueskyVerify({ identifier: c.handle, appPassword: c.appPw })
+        .then(function (r) { setTestResult('✅ ログイン成功（@' + (r.handle || c.handle) + '）。このアカウントで投稿できます。', 'on'); })
+        .catch(function (e) { setTestResult('⚠️ ログインできません：<br>' + friendlyLoginError(e && e.message ? e.message : e), 'off'); })
+        .then(function () { btn.disabled = false; btn.textContent = orig; });
+    });
+  }
   if (els.ytDesc) els.ytDesc.addEventListener('input', function () { saveA('yt_desc', els.ytDesc.value); });
   if (els.ytTags) els.ytTags.addEventListener('input', function () { saveA('yt_tags', els.ytTags.value); buildTitle(); });
 
@@ -206,7 +242,7 @@
   // ---- 初期化（移行→applyAccount の順） ----
   applyAccount();
 
-  function setBskyStatus(m) { if (els.bskyStatus) els.bskyStatus.textContent = m || ''; }
+  function setBskyStatus(m, html) { if (!els.bskyStatus) return; if (html) els.bskyStatus.innerHTML = m; else els.bskyStatus.textContent = m || ''; }
   function setPostStatus(m, html) { if (!els.postStatus) return; if (html) els.postStatus.innerHTML = m; else els.postStatus.textContent = m || ''; }
   function creds() { return { handle: (els.handle.value || '').trim(), appPw: (els.appPw.value || '').trim() }; }
   function firstUrl(t) { var m = String(t).match(/https?:\/\/[^\s]+/); return m ? m[0] : ''; }
@@ -526,7 +562,7 @@
       (f ? compressFile(f) : Promise.resolve(null))
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: text, imageBlob: blob, alt: alt }); })
         .then(function (res) { setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true); notifyPosted(res, text, alt); })
-        .catch(function (e) { setPostStatus('⚠️ 投稿に失敗：' + (e && e.message ? e.message : e)); })
+        .catch(function (e) { setPostStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); })
         .then(function () { els.postNow.disabled = false; });
     });
   }
@@ -593,7 +629,7 @@
       var prep = photo ? compressFile(photo) : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
       prep.then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
         .then(function (res) { setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '・記録しました' : '')); notifyPosted(res, edited, alt); })
-        .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：' + (e && e.message ? e.message : e)); });
+        .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); });
     });
   }
   document.addEventListener('video-created', handleVideoCreated);

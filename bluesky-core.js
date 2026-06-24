@@ -223,12 +223,26 @@
     });
   }
 
+  /**
+   * 資格情報の検証だけを行う（ログインを試すのみ・投稿はしない）。
+   * 成功時：{ ok:true, handle, did }、失敗時：reject(Error)。
+   */
+  function blueskyVerify(o) {
+    o = o || {};
+    var service = o.service || DEFAULT_SERVICE;
+    var ident = String(o.identifier || '').trim().replace(/^@/, '');
+    return createSession(service, ident, o.appPassword).then(function (s) {
+      return { ok: true, handle: s.handle, did: s.did };
+    });
+  }
+
   var api = {
     DEFAULT_SERVICE: DEFAULT_SERVICE,
     buildBlueskyPost: buildBlueskyPost,
     blueskyPostWithImage: blueskyPostWithImage,
     detectFacets: detectFacets,
-    blueskyPostRaw: blueskyPostRaw
+    blueskyPostRaw: blueskyPostRaw,
+    blueskyVerify: blueskyVerify
   };
 
   if (typeof window !== 'undefined') {
