@@ -116,11 +116,14 @@ function doPost(e) {
     var need = prop_('SHARED_SECRET');
     if (need && body.secret !== need) return jsonOut_({ ok: false, error: 'bad_secret' });
     if (body.type === 'reserve') return handleReserve_(body);
+    // テストモード：シートには一切書かない（Bluesky実投稿はフロント側で実施）。
+    if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
     var r = writeRecord_(body.channel || 'acc1', {
+      videoId: body.videoId || '',   // 背骨ID。あれば post_id に採用＋同ID行へ upsert（重複行を作らない）
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || ''
     });
-    return jsonOut_({ ok: true, shortUrl: r.shortUrl, bitlyId: r.bitlyId });
+    return jsonOut_({ ok: true, shortUrl: r.shortUrl, bitlyId: r.bitlyId, row: r.row });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   }
@@ -152,35 +155,65 @@ function setComputed_(sh, map, r) {
   set('RPM(¥/1000再生)', '=IFERROR(AC' + r + '/S' + r + '*1000,"")');
 }
 
+// 純粋関数：post_id 列の値配列(2行目以降)と videoId から upsert 先の行番号(2始まり)を返す。
+// 一致が無ければ 0。videoId 空なら 0（=従来の空行再利用/追記へ）。
+// ※ tests/test_record_upsert.js に同一ロジックのミラーあり（変更時は両方を揃える）。
+function upsertRowOf_(postIdCol, videoId) {
+  if (!videoId) return 0;
+  for (var j = 0; j < postIdCol.length; j++) { if (String(postIdCol[j]) === String(videoId)) return j + 2; }
+  return 0;
+}
+
 // 1投稿を記録（Bitly短縮は失敗しても記録は残す）。doPost・無人予約の両方から使用。
+// videoId（背骨ID）があれば post_id をそれにし、同ID行へ upsert（重複行を作らない・変更フィールドのみ更新）。
+// videoId 無し＝完全に従来動作（後方互換）。
 function writeRecord_(channel, f) {
   var shortUrl = '', bitlyId = '';
   if (f.postUrl) { try { var b = bitlyShorten_(f.postUrl); shortUrl = b.link; bitlyId = b.id; } catch (e) {} }
   var sh = getChannelSheet_(channel);
   var map = headerMap_(sh);
   var dcol = map['投稿日時'] || 2;
+  var pidc = map['post_id'] || 1;
   var last = sh.getLastRow();
-  var target = 0;
-  if (last >= 2) {
-    var vals = sh.getRange(2, dcol, last - 1, 1).getValues();
-    for (var i = 0; i < vals.length; i++) { if (vals[i][0] === '' || vals[i][0] === null) { target = i + 2; break; } }
-  }
-  if (!target) target = last + 1;
-  setComputed_(sh, map, target); // テンプレ既存行は同じ式で上書き＝無害。新規行にも式を付与。
   var now = new Date();
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+
+  // 行キー：videoId があればそれ、無ければ従来の時刻ベース。
+  var pid = f.videoId || (channel + '-' + Utilities.formatDate(now, tz, 'yyyyMMdd-HHmm'));
+
+  // upsert：同一 videoId の既存行を探す。
+  var target = 0;
+  if (f.videoId && last >= 2) {
+    target = upsertRowOf_(sh.getRange(2, pidc, last - 1, 1).getValues().map(function (r) { return r[0]; }), f.videoId);
+  }
+  var isNewRow = false;
+  if (!target) {
+    // 従来通り：空の投稿日時行を再利用、無ければ末尾に追加。
+    if (last >= 2) {
+      var vals = sh.getRange(2, dcol, last - 1, 1).getValues();
+      for (var i = 0; i < vals.length; i++) { if (vals[i][0] === '' || vals[i][0] === null) { target = i + 2; break; } }
+    }
+    if (!target) { target = last + 1; }
+    isNewRow = true;
+  }
+
+  setComputed_(sh, map, target); // テンプレ既存行は同じ式で上書き＝無害。新規行にも式を付与。
   function put(h, v) { if (map[h]) sh.getRange(target, map[h]).setValue(v); }
-  put('post_id', channel + '-' + Utilities.formatDate(now, tz, 'yyyyMMdd-HHmm'));
+  // upsert更新時に既存値を空で潰さないよう、値があるものだけ書く。
+  function putIf(h, v) { if (map[h] && v !== '' && v !== null && v !== undefined) sh.getRange(target, map[h]).setValue(v); }
+
+  put('post_id', pid);
   put('投稿日時', now);
-  put('題名(コメント)', f.title || '');
-  put('ハッシュタグ', f.hashtags || extractHashtags_(f.title));
-  put('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
-  put('Bluesky投稿URL', f.postUrl || '');
-  put('短縮URL', shortUrl);
-  put('いいね', 0); put('リポスト', 0); put('返信', 0); put('Bitlyクリック', 0);
-  put('Bitly_ID', bitlyId);
-  put('post_uri', f.postUri || '');
-  return { shortUrl: shortUrl, bitlyId: bitlyId };
+  putIf('題名(コメント)', f.title || '');
+  putIf('ハッシュタグ', f.hashtags || extractHashtags_(f.title));
+  putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
+  putIf('Bluesky投稿URL', f.postUrl || '');
+  putIf('短縮URL', shortUrl);
+  putIf('Bitly_ID', bitlyId);
+  putIf('post_uri', f.postUri || '');
+  // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
+  if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); put('Bitlyクリック', 0); }
+  return { shortUrl: shortUrl, bitlyId: bitlyId, row: target };
 }
 
 // ---- Bitly ----

@@ -114,7 +114,7 @@
 
 ## 3. 未解決・要確認
 1. ~~【短縮URL】短い独自ドメインを付けるか~~ → ✅ **決定（Chami 2026-06-25）：da.gd 継続**（独自ドメインは見送り）。link-worker は**デプロイ済のまま待機**（frontend未接続。将来クリック計測＋独自ドメインが要れば bluesky.js 1行で有効化）。**短縮URLの分裂は完全解消・これ以上の作業不要。**
-2. **現行GASの特定**：プロジェクト名／デプロイURL（`bsky_gas_url`の実値）／記録先スプレッドシートID。GAS再デプロイ前に確定必須。
+2. **現行GASの特定**：✅ **デプロイURL確定（Chami提供 2026-06-25）**＝`https://script.google.com/macros/s/AKfycbyQlrWuud5WfE3YMjoYzX2WhstTyWw_sOxVCaT8EfaFMXwi_WZzWIBKarHdtXVsY3Fj/exec`（フロント `bsky_gas_url` と同じはず）。残：プロジェクト名・記録先シートID（再デプロイ時に Apps Script 画面で確認。**新規プロジェクトは作らず「デプロイを管理→既存→新バージョン」**で更新＝別プロジェクト誤作成を回避）。
 3. ~~link-worker の所在~~ → ✅ 解決（main に集約・デプロイ済・待機）。
 4. **`wizard.js` の所有（どのsessionが実装するか）**：PC側(main)とスマホ側branchの両方が「次＝wizard.js」を持つと再分裂する。**どちらか一方に固定**したい。背骨ID串刺し（§5末）は配線済なので、wizard はその上に被せるだけ。
 5. **記録コントラクト(§6)の実装単位**：(a)フロント payload を `op:'upsert'`/snake_case 化 と (b)GAS の upsert/testMode 化 は**同一作業として同時に**行う（片側だけ先行させない）。実施は §3-2 のGAS確定後。
@@ -135,6 +135,14 @@
   - `bluesky.js`：記録 payload に `videoId` を追加（旧GASは無視＝**後方互換**／upsert化後に行キー `post_id` として活用）。`currentVideoId` を `video-created` で常時保持。
   - 全テスト **41 PASS / 0 FAIL**（回帰なし）。
   - **未実施（ゲート明示）**：(a) GAS の `op:'upsert'`/`testMode`＋作成時「未投稿」行 ＝ §6 の snake_case 契約は **GAS本体とセットで実装**（旧GASに `op:'upsert'` を送ると未投稿行が量産されるため。§0.3/§3.2 のGASプロジェクト・シート確認が前提）。(b) `wizard.js` ＝ PC側(main)と**二重実装＝再分裂の恐れ**のため所有確認待ち（§3-4）。
+- 2026-06-25（同session・「任せる」でPhase A所有を当sessionに確定）：**記録層(3)の本体＝GAS upsert を後方互換で実装**。
+  - **所有確定**：以後の Phase A（記録層→wizard）は当session（branch `claude/vigilant-mendel-wjbvg5`）で進める。PC側(main)は wizard/記録層に着手しないこと（再分裂防止）。
+  - `gas/コード.gs`：`doPost` に `testMode`（書かずok）＋ `videoId` を追加。`writeRecord_` を **upsert化**（`videoId` があれば `post_id` 列で同ID行を探し、無ければ従来の空行再利用/追記。更新は `putIf` で**空値クランプ無し**、カウンタ0初期化は新規行のみ）。純粋関数 `upsertRowOf_` に分離。
+  - `bluesky.js`：投稿記録 payload に `op:'upsert'`／`status:'公開済'` を追加（既存 `videoId` と併せ §6 を camelCase で実装＝**現行GASのフィールド名を壊さない選択**。§6のsnake_caseからは意図的に逸脱・要同期）。
+  - 新規 `tests/test_record_upsert.js`（6 PASS／`upsertRowOf_` のミラー）。全テスト **47 PASS / 0 FAIL**。
+  - **後方互換が要**：旧GAS（未デプロイ）でも `op`/`videoId`/`testMode` を無視して従来通り1行追記＝壊れない。**GAS再デプロイは任意・好きな時**で、やると同ID行へ upsert（重複行が消える）。手順は応答に明記。
+  - **まだ送っていない**：作成時「未投稿」行（旧GAS量産回避のため、GAS再デプロイ確認後にwizardで導入）。`status`列はテンプレに無く現状未書込（将来#4で列追加時に有効化）。
+  - 次＝**`wizard.js`（一本道UI）** に着手予定。
 
 ## 6. Phase A 記録コントラクト（フロント→GAS。配線/ウィザード実装の基準）
 動画作成〜投稿で、**同一 `videoId` を upsert キー**に2回送る。GASは `op:'upsert'` を `post_id` で突き合わせ、変更フィールドのみ更新。

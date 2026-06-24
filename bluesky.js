@@ -409,11 +409,13 @@
   function recordToSheet(record) {
     var gasUrl = (els.gasUrl.value || '').trim(); if (!gasUrl) return Promise.resolve(null);
     var payload = {
+      op: 'upsert',                                       // 新GAS：同一 videoId 行へ upsert（重複行なし）／旧GASは無視＝従来通り1行追記
+      status: '公開済',                                    // 将来 status 列を足したら反映（現テンプレに列が無ければ無害にスキップ）
       channel: (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'),
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
       workUrl: ((els.workUrl && els.workUrl.value) || '').trim(),
       hashtags: record.hashtags || '', postUri: record.postUri || '',
-      videoId: (record.videoId || currentVideoId || '')  // 背骨ID（旧GASは無視＝無害／upsert化後は行キー post_id に使用）
+      videoId: (record.videoId || currentVideoId || '')  // 背骨ID＝upsertキー（post_id 列に採用）
     };
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
