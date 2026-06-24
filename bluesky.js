@@ -444,9 +444,33 @@
     });
   });
 
-  // ブラウザだけで短縮（CORS対応・トークン不要）。失敗時は空文字。
-  //   一次：da.gd（結果が x.gd 並みに短い「da.gd/xxxxx」。Access-Control-Allow-Origin:* で全ブラウザ確実）
-  //   二次：TinyURL（da.gd が落ちている時の保険。CORSは Origin 反射のため不安定なことがある）
+  // 短縮URLの設定。一次＝自前 link-worker（302即リダイレクト＋KVで開封数を計測）。
+  //   ・YT説明欄に貼る用途なのでURL長は問題にならない＝計測できる link-worker を最優先。
+  //   ・WORKER_URL は go5-short の払い出しURL。SHARED_SECRET は Worker 側と同値（公開可＝ソフト鍵）。
+  //   ・端末ごとに localStorage short_worker_url / short_shared_secret で上書き可。
+  //   ・未設定/失敗時は da.gd→TinyURL→長いURL に安全フォールバック（計測できないだけで壊れない）。
+  var SHORT = {
+    WORKER_URL: 'https://go5-short.trustsignalbot.workers.dev',
+    SHARED_SECRET: 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'
+  };
+  try {
+    SHORT.WORKER_URL = localStorage.getItem('short_worker_url') || SHORT.WORKER_URL;
+    SHORT.SHARED_SECRET = localStorage.getItem('short_shared_secret') || SHORT.SHARED_SECRET;
+  } catch (e) {}
+  function shortWorkerReady() {
+    return /^https?:\/\//.test(SHORT.WORKER_URL) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
+  }
+  function shortenViaWorker(longUrl) {
+    if (!shortWorkerReady()) return Promise.resolve('');
+    return fetch(SHORT.WORKER_URL.replace(/\/+$/, '') + '/api/shorten', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Shared-Secret': SHORT.SHARED_SECRET },
+      body: 'url=' + encodeURIComponent(longUrl)
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { var s = (j && j.short) || ''; return /^https?:\/\//.test(s) ? s : ''; })
+      .catch(function () { return ''; });
+  }
+  // 外部サービス短縮（GET・テキスト返却）。da.gd → TinyURL の順で保険に使う。
   function shortenVia(api, longUrl) {
     return fetch(api + encodeURIComponent(longUrl))
       .then(function (r) { return r.ok ? r.text() : ''; })
@@ -455,9 +479,9 @@
   }
   function shortenUrl(longUrl) {
     if (!longUrl) return Promise.resolve('');
-    return shortenVia('https://da.gd/s?url=', longUrl).then(function (s) {
-      return s || shortenVia('https://tinyurl.com/api-create.php?url=', longUrl);
-    });
+    return shortenViaWorker(longUrl)                                          // 一次：自前link-worker（開封数を計測）
+      .then(function (s) { return s || shortenVia('https://da.gd/s?url=', longUrl); })          // 二次：da.gd
+      .then(function (s) { return s || shortenVia('https://tinyurl.com/api-create.php?url=', longUrl); }); // 三次：TinyURL
   }
   function shortenAndShow(longUrl, postUri, title, onShort) {
     if (!longUrl) return;

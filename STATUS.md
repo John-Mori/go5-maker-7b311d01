@@ -148,6 +148,11 @@
   - `bluesky.js`：投稿記録を「即時記録 → 短縮URL確定で同一行へ upsert 追記」に変更（`shortenAndShow` に `onShort` コールバック追加。`videoId` ある時のみ追記＝二重行なし）。payload に `shortUrl` 追加＝**シートの短縮URL列に“実際に共有するURL”が入る**ように。
   - 全テスト **47 PASS / 0 FAIL**（回帰なし）。**GAS再デプロイは任意**（未デプロイでも記録は従来通り動く。デプロイで毎時Bitlyフェッチが消え安定＋短縮URLが正しく入る）。
   - **クリック「回収」の follow-up**：da.gd はクリックAPI無し。本物のクリック計測が要るなら共有リンクを link-worker に切替（短さ妥協 or 独自ドメイン）→ `/api/stats` をGASかフロントで取り込み `Bitlyクリック` 列へ。これは §3-1 の保留（da.gd継続）と表裏。
+- 2026-06-25（同session・Chami目的確定＝**2段ファネルの計測**）：測りたいのは ①YT説明欄の短縮URLの**開封数**（YT→Bluesky）と ②投稿内**FANZAアフィリンクの踏破数**（Bluesky→FANZA）。いいね/リポストは「URL入口」ゆえ付かず指標外。成約はFANZA管理画面が正。
+  - **②は却下（Chami判断）**：アフィリンクは**生のまま**（link-worker経由にすれば踏破数は取れるが、方針反転＋FANZA規約マスキング禁止の懸念）。→ 投稿単位の踏破数は測らない。
+  - **①は実装**：`bluesky.js` の `shortenUrl` を **link-worker 一次**（→da.gd→TinyURL→長URL）へ。**YT説明欄用途でURL長は無問題**＝計測できる自前Workerを最優先。開封は go5-short のKVで自動カウント開始。`SHORT.WORKER_URL/SHARED_SECRET`（localStorage上書き可）。
+  - 全テスト **47 PASS / 0 FAIL**。要確認：link-worker の `SHARED_SECRET` 実値がフロント既定（drive流用のソフト鍵）と一致しているか（不一致なら da.gd へ無害フォールバック＝計測されないだけ）。
+  - **次の follow-up（①の回収を“見える化”）**：シートの `短縮URL` 列が `go5-short/<code>` のものは、末尾 `<code>` を抜いて `/api/stats?code=&secret=` を叩き、開封数を `Bitlyクリック`（→「クリック」に意味変更）列へ定期反映。codeは短縮URLから導出可＝**スキーマ変更不要**。実装はGASの毎時 or フロント。
   - 次＝**`wizard.js`（一本道UI）** に着手予定。
 
 ## 6. Phase A 記録コントラクト（フロント→GAS。配線/ウィザード実装の基準）
