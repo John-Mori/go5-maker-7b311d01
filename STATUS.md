@@ -104,9 +104,18 @@
 - #3：Driveフォルダ名＝**`{ID}_{タイトル}`**（取り違え防止。承認済）。
 - #4：シートに **`youtube_id`＋`youtube_short`** 列を足す（長いURLは持たない。承認済）。
 
-## 3. 未解決・要確認（GASステップ直前にChamiへ）
-1. **現行GASの特定**：プロジェクト名／デプロイURL（`bsky_gas_url`の実値）／記録先スプレッドシートID。再デプロイ前に確定必須。→ フロント側(1〜3)はこれ無しで着手可。
-2. **link-worker の所在**（不変条件3 `u:<code>`）：現リポジトリ内に未発見。別リポ/別Workerか？ 壊さないため場所を知りたい。
+### 2.9 短縮URLの統合方針（2セッション分裂を解消・2026-06-25）
+- **link-worker（自前短縮 `go5-short`）を main に集約＋Cloudflareへデプロイ済**：`https://go5-short.trustsignalbot.workers.dev`（302即リダイレクト・中間ページ無し・KVクリック計測・`u:<code>`不変＝不変条件3を満たす実体）。KV id は wrangler.toml にコミット済。`SHARED_SECRET` は Worker Secret（リポジトリには置かない・frontend接続時に同値を使用＝ソフト鍵）。`ALLOWED_HOSTS=bsky.app,bsky.social,youtube.com,youtu.be`（**dmm=アフィリンクは短縮しない＝生のまま**）。
+- **★核心の制約**：workers.dev ドメインだと短縮URLが**52字＝長い**（da.gd は19字）。Chami要望「x.gd並みに短く」を満たすには **link-worker に短い独自ドメインが必要**。
+- **当面の正＝da.gd**（短い・稼働中）。独自ドメインを付けたら bluesky.js の1行で link-worker を主に切替（→ 短い＋自前クリック計測）。
+- frontend shortenUrl 将来形：`link-worker(短ドメイン時)→da.gd→長URL`。is.gd/cleanuri は**CORS不可で不採用**。
+- branch `claude/vigilant-mendel-wjbvg5`：link-worker/と全体設計書を main へ取込済。**branchのbluesky.jsは不採用**（main v=48＝da.gd＋接続テストを維持）。branchは削除可。
+- **次のfrontend編集から `?v=49`**（branchが名乗ったv=48は破棄・番号衝突解消）。
+
+## 3. 未解決・要確認
+1. **【短縮URL】短い独自ドメインを link-worker に付けるか？**（付ければ「短い＋自前クリック計測」両立。費用＝ドメイン年額。付けないなら da.gd 継続）。Cloudflareログインを要する作業＝このPC環境からのみ可。
+2. **現行GASの特定**：プロジェクト名／デプロイURL（`bsky_gas_url`の実値）／記録先スプレッドシートID。GAS再デプロイ前に確定必須。
+3. ~~link-worker の所在~~ → ✅ 解決（main に集約・デプロイ済）。
 
 ---
 
