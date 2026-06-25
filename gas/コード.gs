@@ -27,6 +27,8 @@ var HEADERS40 = [
   'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','Bitly_ID','post_uri','クリック更新日時','反応更新日時'
 ];
 var CH_SHEETS = ['記録_ch1','記録_ch2'];
+// 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
+var GAS_VERSION = '2026-06-25-A（Bitly撤去・upsert・開封数取込）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -52,6 +54,12 @@ function headerMap_(sh) {
 
 function doGet(e) {
   var p = (e && e.parameter) || {};
+  // ★再デプロイ確認用：<exec URL>?ping=1 を開くと、今“動いている”コードのバージョンが見える。
+  //   再デプロイが成功していれば下の GAS_VERSION が返る。古い値や別物なら未反映。
+  if (p.ping) {
+    return jsonOut_({ ok: true, version: GAS_VERSION, now: new Date().toISOString(),
+      bitly: 'removed', features: ['upsert', 'testMode', 'da.gd', 'link-worker-clicks'] });
+  }
   // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
   if (p.callback) {
     var out;

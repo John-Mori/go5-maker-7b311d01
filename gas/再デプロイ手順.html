@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GAS 再デプロイ 完全ガイド（5秒動画メーカー）</title>
+<style>
+  :root{
+    --bg:#0e1116; --card:#171c24; --card2:#1f2630; --line:#2b3441;
+    --txt:#e7edf3; --mut:#9fb0c0; --accent:#5aa9ff; --accent2:#7ee0a8;
+    --warn:#ffd479; --danger:#ff8f7a; --ok:#9fe0a8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    line-height:1.75;font-size:16px;-webkit-text-size-adjust:100%;}
+  .wrap{max-width:760px;margin:0 auto;padding:20px 16px 80px;}
+  header{text-align:center;padding:18px 0 8px;}
+  header h1{font-size:1.5rem;margin:.2em 0;}
+  header p{color:var(--mut);margin:.2em 0;font-size:.95rem;}
+  .lead{background:linear-gradient(135deg,#1b2230,#161b22);border:1px solid var(--line);
+    border-radius:14px;padding:16px 18px;margin:18px 0;}
+  h2{font-size:1.18rem;margin:32px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+  .box{border-radius:12px;padding:14px 16px;margin:14px 0;border:1px solid var(--line);background:var(--card);}
+  .danger{background:rgba(255,80,60,.10);border-color:rgba(255,120,100,.5);}
+  .danger b{color:var(--danger);}
+  .warn{background:rgba(255,200,80,.10);border-color:rgba(255,212,121,.45);}
+  .warn b{color:var(--warn);}
+  .tip{background:rgba(90,169,255,.10);border-color:rgba(90,169,255,.45);}
+  .tip b{color:var(--accent);}
+  .ok{background:rgba(120,224,168,.10);border-color:rgba(126,224,168,.45);}
+  .ok b{color:var(--ok);}
+  .step{display:flex;gap:14px;align-items:flex-start;background:var(--card);
+    border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0;}
+  .num{flex:0 0 auto;width:40px;height:40px;border-radius:50%;
+    background:linear-gradient(135deg,var(--accent),#3f7fd0);color:#fff;font-weight:800;
+    display:flex;align-items:center;justify-content:center;font-size:1.15rem;box-shadow:0 2px 10px rgba(90,169,255,.4);}
+  .step .body{flex:1 1 auto;min-width:0;}
+  .step h3{margin:.1em 0 .4em;font-size:1.08rem;}
+  code,kbd{background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:1px 7px;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.9em;word-break:break-all;color:#cfe6ff;}
+  kbd{background:#222a35;color:#fff;border-color:#3a4654;box-shadow:0 1px 0 #000;}
+  .path{display:inline-block;background:#0b0f14;border:1px solid var(--line);border-radius:8px;
+    padding:6px 10px;margin:6px 0;font-family:monospace;font-size:.86rem;color:#cfe6ff;line-height:2;}
+  .path .sep{color:var(--mut);margin:0 4px;}
+  .seen{color:var(--mut);font-size:.9rem;margin-top:6px;border-left:3px solid var(--line);padding-left:10px;}
+  .seen b{color:var(--txt);}
+  a.btn{display:block;text-align:center;background:linear-gradient(135deg,var(--accent),#3f7fd0);
+    color:#fff;text-decoration:none;font-weight:700;padding:14px;border-radius:12px;margin:14px 0;
+    box-shadow:0 3px 14px rgba(90,169,255,.35);}
+  a.btn.green{background:linear-gradient(135deg,#3ec88a,#2a9e6a);box-shadow:0 3px 14px rgba(62,200,138,.35);}
+  a.linklike{color:var(--accent);word-break:break-all;}
+  ul{margin:.4em 0;padding-left:1.3em;} li{margin:.3em 0;}
+  .check li{list-style:none;position:relative;padding-left:30px;margin:.5em 0;}
+  .check li::before{content:"☐";position:absolute;left:0;color:var(--accent);font-size:1.2em;top:-2px;}
+  .big{font-size:1.06rem;}
+  .v{color:var(--ok);font-weight:700;}
+  hr{border:none;border-top:1px solid var(--line);margin:28px 0;}
+  .mini{color:var(--mut);font-size:.85rem;}
+  .emph{background:rgba(255,212,121,.18);padding:0 4px;border-radius:4px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>🛠️ GAS 再デプロイ 完全ガイド</h1>
+    <p>5秒動画メーカーの記録システム（Google Apps Script）</p>
+    <p class="mini">これを上から順にやればOK。所要 約5分・PC推奨</p>
+  </header>
+
+  <div class="lead big">
+    <b>このガイドのゴール：</b> 新しい <code>コード.gs</code> を貼って、<span class="emph">本当に反映（＝再デプロイ）できたか自分の目で確認する</span>まで。
+    最後の <b>STEP 5</b> で <code>?ping=1</code> を開いて <span class="v">バージョン</span>が出れば成功です。
+  </div>
+
+  <!-- なぜ今まで失敗していたか -->
+  <h2>🔴 まず：なぜ今までうまくいかなかったか</h2>
+  <div class="box danger big">
+    Apps Script の一番のワナは2つ。たぶんこれにハマっていました👇
+    <ul style="margin-top:10px">
+      <li><b>① コードを保存しても、Webアプリは古いまま。</b><br>
+        「💾保存」＝下書き保存なだけ。<u>「デプロイ」して新しいバージョンを発行</u>して初めて、実際に動くコードが入れ替わります。
+        <span class="mini">→ 「貼り替えて保存しただけ」だと、ずっと昔のコードが動き続けます。</span></li>
+      <li style="margin-top:8px"><b>② 「新規デプロイ」を作るとURLが変わる。</b><br>
+        新しく作り直すと <code>/exec</code> のURLが別物になり、アプリ側の設定とズレて記録が止まります。
+        <u>必ず「既存のデプロイ」を“編集（鉛筆）”して「新しいバージョン」にする</u>のが正解。</li>
+    </ul>
+  </div>
+  <div class="box tip">
+    <b>合言葉：</b>「貼る → 保存 → <span class="emph">既存デプロイを“新しいバージョン”に更新</span> → ping で確認」。この4つです。
+  </div>
+
+  <!-- 準備 -->
+  <h2>📋 準備するもの</h2>
+  <div class="box">
+    <ul>
+      <li>貼り替える新しいコード（チャットで送った <code>コード.gs</code> のファイル）。開いて全文コピーできる状態に。</li>
+      <li>Googleアカウント <code>john.mori8k@gmail.com</code> でログイン済みのブラウザ。</li>
+      <li><b>PC推奨</b>（スマホでもできますが、STEP 4 のボタンが小さく事故りやすいです）。</li>
+    </ul>
+  </div>
+
+  <!-- STEP 1 -->
+  <h2>手順</h2>
+
+  <div class="step">
+    <div class="num">1</div>
+    <div class="body">
+      <h3>エディタ（編集画面）を開く</h3>
+      <a class="btn" href="https://script.google.com/home" target="_blank" rel="noopener">script.google.com/home を開く</a>
+      <p>ログイン後、プロジェクト一覧から <b>記録用のプロジェクト</b>をタップ／クリック。</p>
+      <div class="box warn" style="margin-top:6px">
+        <b>注意：</b><code>…/exec</code> のURL（記録の送信先）は<u>編集画面ではありません</u>。あれは「実行用」。編集は必ず <code>script.google.com/home</code> から入ります。
+      </div>
+      <p class="seen"><b>こう見えるはず：</b> 左側にファイル一覧、中央に <code>コード.gs</code> の中身（プログラム）が表示される画面。</p>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <div class="num">2</div>
+    <div class="body">
+      <h3>コードを丸ごと貼り替えて保存</h3>
+      <ul>
+        <li>中央のコード部分をクリック → 全選択（<kbd>Ctrl</kbd>+<kbd>A</kbd> / Macは <kbd>⌘</kbd>+<kbd>A</kbd>）→ 削除。</li>
+        <li>送った <code>コード.gs</code> の中身を<b>全部ペースト</b>（<kbd>Ctrl</kbd>+<kbd>V</kbd> / <kbd>⌘</kbd>+<kbd>V</kbd>）。</li>
+        <li><b>💾保存</b>（<kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>⌘</kbd>+<kbd>S</kbd>、または上のフロッピーアイコン）。</li>
+      </ul>
+      <div class="box danger"><b>これだけでは反映されません。</b> 保存は下書き。必ず STEP 4 まで進めてください。</div>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <div class="num">3</div>
+    <div class="body">
+      <h3>setupTrigger を1回だけ実行（自動更新の掃除＆再設定）</h3>
+      <ul>
+        <li>上のツールバーの関数選択（プルダウン）で <code>setupTrigger</code> を選ぶ。</li>
+        <li><b>▶ 実行</b> を押す。</li>
+        <li>初回は<b>権限の確認</b>が出ます → アカウントを選び →「詳細」→「(安全でないページ)に移動」→「許可」。
+          <span class="mini">（自分が作ったスクリプトなので問題ありません）</span></li>
+      </ul>
+      <p class="seen"><b>役割：</b> 古い Bitly 用の自動更新を消し、新しい「Bluesky反応＋開封数」の毎時更新を入れ直します。</p>
+      <p class="seen"><b>こう見えるはず：</b> 下の「実行ログ」に赤いエラーが出ず、完了（白いログ）になればOK。</p>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step" style="border-color:rgba(255,212,121,.5);background:rgba(255,200,80,.06)">
+    <div class="num" style="background:linear-gradient(135deg,#ffb84d,#e0903a);box-shadow:0 2px 10px rgba(255,184,77,.4)">4</div>
+    <div class="body">
+      <h3>★ここが本番：デプロイ（既存を“新しいバージョン”に更新）</h3>
+      <p>右上の <kbd>デプロイ ▾</kbd> →</p>
+      <div class="path"><kbd>デプロイ ▾</kbd><span class="sep">→</span>デプロイを管理</div>
+      <p>開いた画面で、<b>すでにある行（アクティブなデプロイ）</b>の右にある <b>✏️鉛筆（編集）</b> を押す。</p>
+      <div class="path">デプロイを管理<span class="sep">→</span>既存の行の <b>✏️鉛筆</b></div>
+      <p>「バージョン」の欄を <b>「新しいバージョン」</b> に変更 → <kbd>デプロイ</kbd> を押す。</p>
+      <div class="path">バージョン：<b>新しいバージョン</b><span class="sep">→</span><kbd>デプロイ</kbd></div>
+
+      <div class="box danger" style="margin-top:12px">
+        <b>絶対にやらないこと：</b> 「<b>新しいデプロイ</b>」ボタンで作り直さない！
+        URLが変わってアプリと切れます。<u>必ず “既存” を鉛筆で編集して新バージョン</u>。
+      </div>
+      <div class="box ok" style="margin-top:8px">
+        <b>正しくできていれば：</b> 完了画面のウェブアプリURL（<code>…/exec</code>）が<u>前と同じ</u>ままのはずです。変わっていたら新規を作ってしまっています（STEP 4 をやり直し）。
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="step" style="border-color:rgba(126,224,168,.5);background:rgba(120,224,168,.06)">
+    <div class="num" style="background:linear-gradient(135deg,#3ec88a,#2a9e6a);box-shadow:0 2px 10px rgba(62,200,138,.4)">5</div>
+    <div class="body">
+      <h3>✅ 本当に反映できたか確認（これが一番大事）</h3>
+      <p>下のボタンを開いてください。新しいコードが動いていれば <b>バージョン</b>が表示されます。</p>
+      <a class="btn green" href="https://script.google.com/macros/s/AKfycbyQlrWuud5WfE3YMjoYzX2WhstTyWw_sOxVCaT8EfaFMXwi_WZzWIBKarHdtXVsY3Fj/exec?ping=1" target="_blank" rel="noopener">🔍 反映チェックを開く（?ping=1）</a>
+      <div class="box ok">
+        <b>成功の表示（こうなればOK）：</b><br>
+        <code>{"ok":true,"version":"2026-06-25-A（Bitly撤去・upsert・開封数取込）",…,"bitly":"removed",…}</code><br>
+        <span class="v">version</span> に「2026-06-25-A」、<b>bitly:"removed"</b> が出ていれば<b>反映成功</b>です🎉
+      </div>
+      <div class="box danger">
+        <b>失敗のサイン：</b>
+        <ul>
+          <li><code>version</code> が出ない／古い文言（例 <code>go5-maker recorder v2</code> だけ）→ <b>まだ古いコードが動いています</b>。STEP 4 をやり直し（新規デプロイにしていないか確認）。</li>
+          <li>「承認が必要」等のエラーページ → STEP 3 の権限承認をやり直す。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- チェックリスト -->
+  <h2>✅ 最終チェックリスト</h2>
+  <div class="box">
+    <ul class="check">
+      <li>新しい <code>コード.gs</code> を全文貼り替えて 💾保存した</li>
+      <li><code>setupTrigger</code> を1回実行した（権限も承認）</li>
+      <li><b>既存</b>デプロイを鉛筆で編集し「<b>新しいバージョン</b>」でデプロイした（新規は作っていない）</li>
+      <li><code>?ping=1</code> で <span class="v">version「2026-06-25-A」</span>・<b>bitly:"removed"</b> を確認した</li>
+    </ul>
+  </div>
+
+  <!-- これで効くこと -->
+  <h2>🎁 これで効くようになること</h2>
+  <div class="box">
+    <ul>
+      <li><b>重複行が消える</b>：同じ動画の記録は1行にまとまる（upsert）。</li>
+      <li><b>Bitlyの毎時エラーが止まる</b>：無料枠オーバーの発生源を撤去。短縮は da.gd / link-worker に一本化。</li>
+      <li><b>開封数がシートに出る</b>：YT説明欄の <code>go5-short</code> リンクが開かれた回数を「Bitlyクリック」列へ毎時反映。</li>
+    </ul>
+    <p class="mini">※ <code>BITLY_TOKEN</code> プロパティはもう不要（残っていても無害）。</p>
+  </div>
+
+  <!-- 困ったら -->
+  <h2>🆘 うまくいかない時</h2>
+  <div class="box warn">
+    <ul>
+      <li><b>どのプロジェクトか分からない</b> → 記録用スプレッドシートを開き、メニュー <kbd>拡張機能</kbd> → <kbd>Apps Script</kbd> から開くと確実（PCのブラウザで）。</li>
+      <li><b>「デプロイを管理」に行が無い</b> → まだ一度もWebアプリ公開していない可能性。<kbd>デプロイ ▾</kbd> →「新しいデプロイ」→ 種類「ウェブアプリ」→ アクセス「全員」で初回作成（この時だけ新規でOK。以後は更新）。<span class="mini">※この場合 <code>/exec</code> URLが新しくなるので、その値をチャットで教えてください（アプリ側に反映します）。</span></li>
+      <li><b>それでも version が変わらない</b> → ブラウザのキャッシュかも。<code>?ping=1</code> のURLを別タブ／プライベートタブで開き直す。</li>
+    </ul>
+  </div>
+  <p class="mini" style="text-align:center;margin-top:24px">詰まったら、どのSTEPで何が表示されたかをチャットで送ってください。1タップずつ一緒に進めます。</p>
+
+</div>
+</body>
+</html>
