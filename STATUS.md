@@ -166,6 +166,13 @@
   - これで「動画を作る場所で今日の作品を決める」→自動投稿が正しい作品を案内。確認モーダルの作品URL欄(前コミット)は最終安全網として併存。
   - 全テスト 47 PASS / 0 FAIL。GASのデータ層は本番反映済（?ping=1で 2026-06-25-A 確認済）。
   - 残：本格 `wizard.js`（多段ガイド）は任意（現状の前出し＋確認モーダルで取り違えは実用上ほぼ解消）。
+- 2026-06-25（同session・多段ウィザード実装＝Phase A 一本道(1)完了）：**`wizard.js` 新規（オブザーバ型・既存パイプライン非干渉）**。サブエージェント実装→メインがレビュー＋z-index修正。
+  - 起動：pageMovie 先頭に「🪄今から1本」ボタン（JSで動的挿入）。オーバーレイ5ステップ：①作品URL＆アカウント（`buildAffiliateLink`プレビュー・`#movieWorkUrl`同期）②動画作成（`video-created`購読で自動進行）③Bluesky投稿（`#bskyEnable`を一時ON・`bluesky-posted`購読＋`#shortUrlOut`ポーリング）④YouTube手動ゲート（`#ytTitle`/`#ytDesc`表示＋コピー、YT URL入力→`IdGen.youtubeId`→GASへ `op:upsert,youtube_url` 送信）⑤完了。
+  - **二重投稿しない**：自分で投稿せず既存自動投稿を観測するだけ。終了時 `#bskyEnable` を元に戻す。
+  - **z-index=50**（`.pc-modal`=100 より下）に修正＝ステップ3で確認ダイアログを上に出し操作可能に（サブエージェント初版9000を修正）。
+  - GAS：`writeRecord_` に `youtube_url`→「YouTube動画URL」列の後追いupsert＋`投稿日時`はYTのみupsertでは上書きしない様に。`GAS_VERSION`→`2026-06-25-B`。**後方互換**（旧GASは無視・要再デプロイで有効化）。`?v=50→51`。
+  - 全テスト 47 PASS / 0 FAIL。**Phase A（記録層→一本道）完了**。
+  - 追加の任意作業：GAS再デプロイ（YouTube URL記録を有効化。`?ping=1`が `2026-06-25-B` になればOK）。
 
 ## 6. Phase A 記録コントラクト（フロント→GAS。配線/ウィザード実装の基準）
 動画作成〜投稿で、**同一 `videoId` を upsert キー**に2回送る。GASは `op:'upsert'` を `post_id` で突き合わせ、変更フィールドのみ更新。

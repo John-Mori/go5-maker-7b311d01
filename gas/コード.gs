@@ -28,7 +28,7 @@ var HEADERS40 = [
 ];
 var CH_SHEETS = ['記録_ch1','記録_ch2'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-06-25-A（Bitly撤去・upsert・開封数取込）';
+var GAS_VERSION = '2026-06-25-B（+ウィザードYouTube URL記録）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -131,7 +131,8 @@ function doPost(e) {
     var r = writeRecord_(body.channel || 'acc1', {
       videoId: body.videoId || '',   // 背骨ID。あれば post_id に採用＋同ID行へ upsert（重複行を作らない）
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
-      workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || ''
+      workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
+      youtubeUrl: body.youtube_url || ''   // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
     });
     return jsonOut_({ ok: true, shortUrl: r.shortUrl, row: r.row });
   } catch (err) {
@@ -216,12 +217,14 @@ function writeRecord_(channel, f) {
   function putIf(h, v) { if (map[h] && v !== '' && v !== null && v !== undefined) sh.getRange(target, map[h]).setValue(v); }
 
   put('post_id', pid);
-  put('投稿日時', now);
+  // 投稿日時は「新規行」か「投稿URLを伴う記録」の時だけ。YouTube URLだけの後追いupsertでは上書きしない。
+  if (isNewRow || f.postUrl) put('投稿日時', now);
   putIf('題名(コメント)', f.title || '');
   putIf('ハッシュタグ', f.hashtags || extractHashtags_(f.title));
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
   putIf('Bluesky投稿URL', f.postUrl || '');
   putIf('短縮URL', shortUrl);
+  putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('post_uri', f.postUri || '');
   // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
   if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
