@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=49">
+<link rel="stylesheet" href="style.css?v=50">
 </head>
 <body>
 <header>
@@ -107,6 +107,11 @@
       <span>🦋 動画作成後に Bluesky へ自動投稿する</span>
     </label>
     <div class="hint">本文は「🦋 投稿」タブで編集した内容、画像は<b>この動画の元写真</b>を添付します。アカウント設定も「🦋 投稿」タブにあります。<br>単独で投稿したいときは「🦋 投稿」タブの「今すぐ投稿」をどうぞ。</div>
+    <div class="movie-work" style="margin-top:12px;">
+      <label for="movieWorkUrl" class="field-label" style="margin:0 0 4px;">📕 今回案内する作品URL（今日の作品を貼る・取り違え防止）</label>
+      <input id="movieWorkUrl" type="url" inputmode="url" placeholder="https://… 今日案内する作品ページのURL" style="width:100%;box-sizing:border-box;" autocomplete="off">
+      <div id="movieWorkWarn" style="font-size:.82rem;margin-top:4px;"></div>
+    </div>
     <div class="discount-row" style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;">
       <label for="discountSel2" class="field-label" style="margin:0;">割引文を挿入</label>
       <select id="discountSel2">
@@ -394,16 +399,16 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=49"></script>
-<script src="app.js?v=49"></script>
-<script src="affiliate-core.js?v=49"></script>
-<script src="affiliate.js?v=49"></script>
-<script src="bluesky-core.js?v=49"></script>
-<script src="scheduler.js?v=49"></script>
-<script src="bluesky.js?v=49"></script>
-<script src="drive-upload.js?v=49"></script>
-<script src="verify-core.js?v=49"></script>
-<script src="verify.js?v=49"></script>
-<script src="integration.js?v=49"></script>
+<script src="idgen.js?v=50"></script>
+<script src="app.js?v=50"></script>
+<script src="affiliate-core.js?v=50"></script>
+<script src="affiliate.js?v=50"></script>
+<script src="bluesky-core.js?v=50"></script>
+<script src="scheduler.js?v=50"></script>
+<script src="bluesky.js?v=50"></script>
+<script src="drive-upload.js?v=50"></script>
+<script src="verify-core.js?v=50"></script>
+<script src="verify.js?v=50"></script>
+<script src="integration.js?v=50"></script>
 </body>
 </html>

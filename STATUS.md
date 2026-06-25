@@ -160,6 +160,12 @@
 - 2026-06-25（同session・実投稿で発覚した取り違えバグを修正）：**自動投稿が🦋投稿タブの「作品URL」欄(`bsky_work_url`・localStorage保存)を使うため、欄が前日のままだと別作品を案内してしまう** footgun（main にも元から存在）。
   - 修正：自動投稿の確認モーダル(`confirmEditable`)に **「📕案内する作品URL」欄(`#pcWorkUrl`)** を追加。①現在値を明示 ②その場で差し替え→本文末尾アフィリンクを作り直し（**動画は作り直さない**）③前回投稿と同じURLなら⚠️警告／空なら⚠️警告 ④OKで `bsky_work_url` に保存＋`bsky_last_posted_work` 更新（記録・YT説明欄・プレビューの作品も揃う）。`index.html` にモーダル欄追加。
   - 全テスト 47 PASS / 0 FAIL。**注意：これは branch のみ。公開(main)未反映**（live=main は5コミット遅れ）。根治は wizard（作品URL→アフィ→動画→投稿を1本道で持ち回す）。
+- 2026-06-25（同session・取り違えの根治を一歩前進＝一本道lite）：**作品URLを「動画作成」タブに前出し**（取り違えの根本＝作品URLが投稿タブにあり動画作成と離れていた問題に対処）。
+  - `index.html`：自動投稿カードに「📕今回案内する作品URL」欄(`#movieWorkUrl`＋`#movieWorkWarn`)。`?v=49→50`。
+  - `bluesky.js`：`#movieWorkUrl` ⇔ `#bskyWorkUrl` ⇔ localStorage(`bsky_work_url`) を**双方向同期**（`syncWorkUrl`）。前回投稿と同じ/空なら**警告**（`workWarnInfo`/`paintWorkWarn`＝確認モーダルと共通化）。`applyAccount` でも反映。
+  - これで「動画を作る場所で今日の作品を決める」→自動投稿が正しい作品を案内。確認モーダルの作品URL欄(前コミット)は最終安全網として併存。
+  - 全テスト 47 PASS / 0 FAIL。GASのデータ層は本番反映済（?ping=1で 2026-06-25-A 確認済）。
+  - 残：本格 `wizard.js`（多段ガイド）は任意（現状の前出し＋確認モーダルで取り違えは実用上ほぼ解消）。
 
 ## 6. Phase A 記録コントラクト（フロント→GAS。配線/ウィザード実装の基準）
 動画作成〜投稿で、**同一 `videoId` を upsert キー**に2回送る。GASは `op:'upsert'` を `post_id` で突き合わせ、変更フィールドのみ更新。

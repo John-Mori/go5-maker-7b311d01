@@ -27,7 +27,8 @@
     discountSel: $('discountSel'), discountSel2: $('discountSel2'), discountSelPc: $('discountSelPc'),
     histList: $('histList'), histRefresh: $('histRefresh'),
     manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
-    manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy')
+    manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
+    movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn')
   };
   if (!els.text) return;
 
@@ -91,7 +92,10 @@
     if (els.discountSel) els.discountSel.value = '';
     if (els.discountSel2) els.discountSel2.value = '';
     if (els.histList) loadHistory();
-    var wv = loadA('bsky_work_url'); if (els.workUrl) els.workUrl.value = (wv != null ? wv : DEF.workUrl);
+    var wv = loadA('bsky_work_url'); var wval = (wv != null ? wv : DEF.workUrl);
+    if (els.workUrl) els.workUrl.value = wval;
+    if (els.movieWorkUrl) els.movieWorkUrl.value = wval;
+    paintWorkWarn(els.movieWorkWarn, wval);
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
     var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
     var dv = loadA('yt_desc'); if (els.ytDesc) els.ytDesc.value = (dv != null ? dv : defYtDesc());
@@ -129,7 +133,7 @@
   if (els.enable) els.enable.addEventListener('change', function () { saveA('bsky_enable', els.enable.checked ? '1' : '0'); });
   if (els.unattended) els.unattended.addEventListener('change', function () { saveA('bsky_unattended', els.unattended.checked ? '1' : '0'); });
   if (els.text) els.text.addEventListener('input', function () { saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus(); });
-  if (els.workUrl) els.workUrl.addEventListener('input', function () { saveA('bsky_work_url', els.workUrl.value); renderPreview(); updateGasStatus(); });
+  if (els.workUrl) els.workUrl.addEventListener('input', function () { syncWorkUrl(els.workUrl.value, false); });
   if (els.handle) els.handle.addEventListener('input', function () { saveA('bsky_handle', els.handle.value); renderPreview(); updateGasStatus(); });
   if (els.appPw) els.appPw.addEventListener('input', function () { saveA('bsky_app_pw', els.appPw.value); renderPreview(); updateGasStatus(); });
 
@@ -575,6 +579,25 @@
   function lastPostedWork() { return loadA('bsky_last_posted_work') || ''; }
   function setLastPostedWork(v) { saveA('bsky_last_posted_work', v); }
 
+  // 作品URLの取り違え警告（動画作成タブ・確認モーダルで共通利用）。
+  function workWarnInfo(url) {
+    var w = String(url || '').trim();
+    if (!w) return { msg: '⚠️ 作品URLが空です。アフィリンク無しで投稿されます。', color: '#ffb4a2' };
+    if (w === lastPostedWork()) return { msg: '⚠️ 前回の投稿と同じ作品URLです。今日の作品で合っていますか？', color: '#ffd479' };
+    return { msg: '📕 この作品を案内します。', color: '#9fd6a0' };
+  }
+  function paintWorkWarn(el, url) { if (!el) return; var i = workWarnInfo(url); el.textContent = i.msg; el.style.color = i.color; }
+
+  // 作品URLを一元的に更新（動画作成タブ⇔投稿タブ⇔localStorage を同期）。fromMovie=動画作成タブ起点。
+  function syncWorkUrl(v, fromMovie) {
+    saveA('bsky_work_url', v);
+    if (els.workUrl && fromMovie) els.workUrl.value = v;
+    if (els.movieWorkUrl && !fromMovie) els.movieWorkUrl.value = v;
+    paintWorkWarn(els.movieWorkWarn, v);
+    renderPreview(); updateGasStatus();
+  }
+  if (els.movieWorkUrl) els.movieWorkUrl.addEventListener('input', function () { syncWorkUrl(els.movieWorkUrl.value, true); });
+
   function confirmEditable(text, note) {
     return new Promise(function (resolve) {
       if (!els.pcModal) { resolve(window.confirm(text) ? text : null); return; }
@@ -582,14 +605,7 @@
       // 「案内する作品URL」を明示＆その場で差し替え可能に（動画は作り直さない）。
       // 変更したら本文末尾のアフィリンクを作り直す。取り違え（前回と同じ）は警告する。
       function curWork() { return (els.pcWorkUrl ? els.pcWorkUrl.value : (els.workUrl && els.workUrl.value) || '').trim(); }
-      function updateWorkWarn() {
-        if (!els.pcWorkWarn) return;
-        var w = curWork(), msg, color;
-        if (!w) { msg = '⚠️ 作品URLが空です。アフィリンク無しで投稿されます。'; color = '#ffb4a2'; }
-        else if (w === lastPostedWork()) { msg = '⚠️ 前回の投稿と同じ作品URLです。今日の作品で合っていますか？'; color = '#ffd479'; }
-        else { msg = '📕 この作品を案内します（本文末尾のリンク）。'; color = '#9fd6a0'; }
-        els.pcWorkWarn.textContent = msg; els.pcWorkWarn.style.color = color;
-      }
+      function updateWorkWarn() { paintWorkWarn(els.pcWorkWarn, curWork()); }
       function recompose() {
         // resolveAffLink は els.workUrl を見るので一時同期 → 本文を作り直し。
         if (els.pcWorkUrl && els.workUrl) els.workUrl.value = els.pcWorkUrl.value;
@@ -613,7 +629,7 @@
       }
       function ok() {
         // 確定した作品URLを保存＆反映（記録・YT説明欄・プレビューの作品も揃う）。
-        if (els.pcWorkUrl && els.workUrl) { var w = els.pcWorkUrl.value.trim(); els.workUrl.value = w; saveA('bsky_work_url', w); setLastPostedWork(w); }
+        if (els.pcWorkUrl && els.workUrl) { var w = els.pcWorkUrl.value.trim(); els.workUrl.value = w; if (els.movieWorkUrl) els.movieWorkUrl.value = w; saveA('bsky_work_url', w); setLastPostedWork(w); paintWorkWarn(els.movieWorkWarn, w); }
         var v = els.pcText.value; cleanup(); resolve(v);
       }
       function cancel() { cleanup(); resolve(null); }
