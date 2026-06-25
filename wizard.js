@@ -67,7 +67,6 @@
     /* --- オーバーレイ --- */
     var overlay = document.createElement('div');
     overlay.id = 'wizard';
-    overlay.hidden = true;
     overlay.style.cssText = [
       'position:fixed',
       'top:0',
@@ -76,7 +75,7 @@
       'bottom:0',
       'background:rgba(0,0,0,0.75)',
       'z-index:50',
-      'display:flex',
+      'display:none',
       'align-items:center',
       'justify-content:center',
       'padding:16px',
@@ -183,12 +182,12 @@
 
   function showOverlay() {
     var overlay = document.getElementById('wizard');
-    if (overlay) overlay.hidden = false;
+    if (overlay) overlay.style.display = 'flex';
   }
 
   function hideOverlay() {
     var overlay = document.getElementById('wizard');
-    if (overlay) overlay.hidden = true;
+    if (overlay) overlay.style.display = 'none';
   }
 
   /* =========================================================
