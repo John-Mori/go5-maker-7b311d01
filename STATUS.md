@@ -157,6 +157,9 @@
   - これで GAS 側の Phase A 変更が全部入り：①upsert（重複行なし）②testMode ③Bitly全廃＋da.gdフォールバック ④link-worker開封数の取り込み（refreshClicks刷新）。**Chami の手作業は「GAS再デプロイ1回＋setupTrigger実行1回」だけ**。
   - **正確な順番（合意）**：(1)データ層完成〔済〕→(2)Chamiが**GAS再デプロイ1回**＋実機で1本テスト確認→(3)検証済み土台の上で **`wizard.js`（一本道UI）**→(4)投稿再開。wizardは検証後に着手（未検証の土台に被せない）。
   - 次＝(2)の再デプロイ待ち。完了後 **`wizard.js`** へ。
+- 2026-06-25（同session・実投稿で発覚した取り違えバグを修正）：**自動投稿が🦋投稿タブの「作品URL」欄(`bsky_work_url`・localStorage保存)を使うため、欄が前日のままだと別作品を案内してしまう** footgun（main にも元から存在）。
+  - 修正：自動投稿の確認モーダル(`confirmEditable`)に **「📕案内する作品URL」欄(`#pcWorkUrl`)** を追加。①現在値を明示 ②その場で差し替え→本文末尾アフィリンクを作り直し（**動画は作り直さない**）③前回投稿と同じURLなら⚠️警告／空なら⚠️警告 ④OKで `bsky_work_url` に保存＋`bsky_last_posted_work` 更新（記録・YT説明欄・プレビューの作品も揃う）。`index.html` にモーダル欄追加。
+  - 全テスト 47 PASS / 0 FAIL。**注意：これは branch のみ。公開(main)未反映**（live=main は5コミット遅れ）。根治は wizard（作品URL→アフィ→動画→投稿を1本道で持ち回す）。
 
 ## 6. Phase A 記録コントラクト（フロント→GAS。配線/ウィザード実装の基準）
 動画作成〜投稿で、**同一 `videoId` を upsert キー**に2回送る。GASは `op:'upsert'` を `post_id` で突き合わせ、変更フィールドのみ更新。

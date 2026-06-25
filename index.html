@@ -362,6 +362,11 @@
 <div id="postConfirmModal" class="pc-modal" hidden>
   <div class="pc-card">
     <div class="pc-title">🦋 この内容で Bluesky に投稿します（編集できます）</div>
+    <div class="pc-work-row" style="margin-bottom:8px;">
+      <label for="pcWorkUrl" class="field-label" style="margin:0 0 4px;display:block;">📕 案内する作品URL（今日の作品か必ず確認）</label>
+      <input id="pcWorkUrl" type="url" inputmode="url" placeholder="https://… 今回案内する作品ページのURL" style="width:100%;box-sizing:border-box;" />
+      <div id="pcWorkWarn" style="font-size:.82rem;margin-top:4px;"></div>
+    </div>
     <textarea id="pcText" rows="8"></textarea>
     <div class="discount-row" style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
       <label for="discountSelPc" class="field-label" style="margin:0;">割引文を挿入</label>

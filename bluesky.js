@@ -21,6 +21,7 @@
     pvImgWrap: $('pvImgWrap'), pvImg: $('pvImg'), pvImgNote: $('pvImgNote'),
     pvAvatar: $('pvAvatar'), pvAvFallback: $('pvAvFallback'),
     pcModal: $('postConfirmModal'), pcText: $('pcText'), pcNote: $('pcNote'), pcOk: $('pcOk'), pcCancel: $('pcCancel'),
+    pcWorkUrl: $('pcWorkUrl'), pcWorkWarn: $('pcWorkWarn'),
     shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy'),
     ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags'),
     discountSel: $('discountSel'), discountSel2: $('discountSel2'), discountSelPc: $('discountSelPc'),
@@ -570,15 +571,51 @@
   if (els.manualCopy) els.manualCopy.addEventListener('click', function () { copyText(els.manualOut.textContent, els.manualCopy); });
 
   // ---- 編集できる確認モーダル（方法①自動投稿） ----
+  // 直近に“実際に投稿した”作品URL（取り違え＝前回のまま投稿、の検知用。アカウント別）。
+  function lastPostedWork() { return loadA('bsky_last_posted_work') || ''; }
+  function setLastPostedWork(v) { saveA('bsky_last_posted_work', v); }
+
   function confirmEditable(text, note) {
     return new Promise(function (resolve) {
       if (!els.pcModal) { resolve(window.confirm(text) ? text : null); return; }
+
+      // 「案内する作品URL」を明示＆その場で差し替え可能に（動画は作り直さない）。
+      // 変更したら本文末尾のアフィリンクを作り直す。取り違え（前回と同じ）は警告する。
+      function curWork() { return (els.pcWorkUrl ? els.pcWorkUrl.value : (els.workUrl && els.workUrl.value) || '').trim(); }
+      function updateWorkWarn() {
+        if (!els.pcWorkWarn) return;
+        var w = curWork(), msg, color;
+        if (!w) { msg = '⚠️ 作品URLが空です。アフィリンク無しで投稿されます。'; color = '#ffb4a2'; }
+        else if (w === lastPostedWork()) { msg = '⚠️ 前回の投稿と同じ作品URLです。今日の作品で合っていますか？'; color = '#ffd479'; }
+        else { msg = '📕 この作品を案内します（本文末尾のリンク）。'; color = '#9fd6a0'; }
+        els.pcWorkWarn.textContent = msg; els.pcWorkWarn.style.color = color;
+      }
+      function recompose() {
+        // resolveAffLink は els.workUrl を見るので一時同期 → 本文を作り直し。
+        if (els.pcWorkUrl && els.workUrl) els.workUrl.value = els.pcWorkUrl.value;
+        els.pcText.value = composePostText();
+        updateWorkWarn();
+      }
+
+      if (els.pcWorkUrl) els.pcWorkUrl.value = (els.workUrl && els.workUrl.value || '').trim();
       els.pcText.value = text;
       if (els.discountSelPc) els.discountSelPc.value = '';
       if (els.pcNote) els.pcNote.textContent = note || '';
+      updateWorkWarn();
       els.pcModal.hidden = false;
-      function cleanup() { els.pcModal.hidden = true; els.pcOk.removeEventListener('click', ok); els.pcCancel.removeEventListener('click', cancel); }
-      function ok() { var v = els.pcText.value; cleanup(); resolve(v); }
+
+      function onWork() { recompose(); }
+      if (els.pcWorkUrl) els.pcWorkUrl.addEventListener('input', onWork);
+      function cleanup() {
+        els.pcModal.hidden = true;
+        els.pcOk.removeEventListener('click', ok); els.pcCancel.removeEventListener('click', cancel);
+        if (els.pcWorkUrl) els.pcWorkUrl.removeEventListener('input', onWork);
+      }
+      function ok() {
+        // 確定した作品URLを保存＆反映（記録・YT説明欄・プレビューの作品も揃う）。
+        if (els.pcWorkUrl && els.workUrl) { var w = els.pcWorkUrl.value.trim(); els.workUrl.value = w; saveA('bsky_work_url', w); setLastPostedWork(w); }
+        var v = els.pcText.value; cleanup(); resolve(v);
+      }
       function cancel() { cleanup(); resolve(null); }
       els.pcOk.addEventListener('click', ok); els.pcCancel.addEventListener('click', cancel);
     });
