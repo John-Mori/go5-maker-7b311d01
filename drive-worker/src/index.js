@@ -47,7 +47,7 @@ export default {
     const channel = String(form.get("channel") || "").trim();
     const title = String(form.get("title") || "").trim();
     const video = form.get("video");
-    const image = form.get("image");
+    const images = form.getAll("image"); // 複数可（元写真＋仕上がりプレビュー など）
 
     // ---- チャンネル判定（曖昧なら保存しない＝取り違え事故より保存しないを優先）----
     const parentId = channelToFolderId(channel, env);
@@ -79,7 +79,8 @@ export default {
       const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
       uploaded.push(await uploadNew(folder.id, vname, video, token));
 
-      if (image && typeof image.arrayBuffer === "function") {
+      for (const image of images) {
+        if (!(image && typeof image.arrayBuffer === "function")) continue;
         const fallback = "image." + (extOf(image.type) || "jpg");
         const iname = await uniqueFileName(folder.id, safeName(image.name || fallback), token);
         uploaded.push(await uploadNew(folder.id, iname, image, token));
@@ -144,7 +145,7 @@ async function getFolder(id, token) {
 
 async function childFolderExists(parentId, name, token) {
   const q = "name='" + escQ(name) + "' and '" + parentId +
-    "' in parents and mimeType='application/vnd.google-apps.folder'";
+    "' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
   const url = DRIVE_API + "?q=" + encodeURIComponent(q) + "&fields=files(id)&pageSize=1";
   const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
   if (!r.ok) return false;
@@ -153,7 +154,7 @@ async function childFolderExists(parentId, name, token) {
 }
 
 async function childFileExists(parentId, name, token) {
-  const q = "name='" + escQ(name) + "' and '" + parentId + "' in parents";
+  const q = "name='" + escQ(name) + "' and '" + parentId + "' in parents and trashed=false";
   const url = DRIVE_API + "?q=" + encodeURIComponent(q) + "&fields=files(id)&pageSize=1";
   const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
   if (!r.ok) return false;

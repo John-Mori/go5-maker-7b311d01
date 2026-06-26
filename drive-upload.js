@@ -57,7 +57,7 @@
     fd.append("channel", payload.channel);
     fd.append("title", payload.title);
     fd.append("video", payload.videoFile, payload.videoFile.name);
-    if (payload.imageFile) fd.append("image", payload.imageFile, payload.imageFile.name);
+    (payload.images || []).forEach(function (img) { if (img) fd.append("image", img, img.name); });
 
     fetch(CFG.WORKER_URL, {
       method: "POST",
@@ -112,22 +112,40 @@
     if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
 
     var videoFile = new File([blob], name, { type: blob.type || "video/mp4" });
-    var pngName = name.replace(/\.[^.]+$/, "") + ".png"; // 動画名.png
 
-    function finish(imageFile) {
-      send({ channel: channel, title: title, videoFile: videoFile, imageFile: imageFile });
+    // 元写真（あれば）。形式はそのまま＝再エンコードせず原本を保持し、名前だけ「タイトル.元拡張子」に。
+    var origImage = null;
+    var photo = document.getElementById("photo");
+    var pf = (photo && photo.files && photo.files[0]) ? photo.files[0] : null;
+    if (pf) origImage = new File([pf], title + "." + imgExt(pf), { type: pf.type || "image/jpeg" });
+
+    function finish(previewImage) {
+      // プレビューを先頭に＝旧Worker（先頭1枚のみ保存）でも仕上がりプレビューは残る。新Workerは両方保存。
+      send({ channel: channel, title: title, videoFile: videoFile, images: [previewImage, origImage].filter(Boolean) });
     }
 
-    // 仕上がりプレビュー（合成済み Canvas #cv＝1080×1920）を PNG で一緒に保存（解像度重視）。
+    // 仕上がりプレビュー（合成済み Canvas #cv＝1080×1920）を PNG「タイトル_プレビュー.png」で保存（文字が鮮明）。
     var cv = document.getElementById("cv");
     if (cv && typeof cv.toBlob === "function") {
       try {
         cv.toBlob(function (pngBlob) {
-          finish(pngBlob ? new File([pngBlob], pngName, { type: "image/png" }) : null);
+          finish(pngBlob ? new File([pngBlob], title + "_プレビュー.png", { type: "image/png" }) : null);
         }, "image/png");
       } catch (err) { finish(null); }
     } else {
       finish(null);
     }
   });
+
+  // ファイルの拡張子を推定（MIME優先、無ければ元ファイル名から）。
+  function imgExt(file) {
+    var t = (file.type || "").toLowerCase();
+    if (t.indexOf("png") >= 0) return "png";
+    if (t.indexOf("jpeg") >= 0 || t.indexOf("jpg") >= 0) return "jpg";
+    if (t.indexOf("webp") >= 0) return "webp";
+    if (t.indexOf("heic") >= 0) return "heic";
+    if (t.indexOf("gif") >= 0) return "gif";
+    var m = String(file.name || "").match(/\.([A-Za-z0-9]{1,5})$/);
+    return m ? m[1].toLowerCase() : "jpg";
+  }
 })();
