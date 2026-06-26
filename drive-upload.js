@@ -105,17 +105,29 @@
     if (!blob) return; // 動画Blobが取れなければ何もしない
     var name = d.name || "video.mp4";
     var title = (d.title || "").trim() || name.replace(/\.[^.]+$/, "");
-    // 取り違え防止：安定動画ID（あれば）をフォルダ/ファイル名に前置 ＝ {ID}_{タイトル}（承認済 #3）。
-    var vid = (d.videoId || "").trim();
-    var folderTitle = vid ? (vid + "_" + title) : title;
+    // フォルダ/ファイル名は動画名（タイトル）そのまま。同名は Worker 側で _2,_3… に自動回避。
+    // ※安定動画IDは記録シートの post_id に使うのみ（Drive名には付けない）。
 
     var channel = (typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "";
     if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
 
-    var photo = document.getElementById("photo");
-    var imageFile = (photo && photo.files && photo.files[0]) ? photo.files[0] : null;
-
     var videoFile = new File([blob], name, { type: blob.type || "video/mp4" });
-    send({ channel: channel, title: folderTitle, videoFile: videoFile, imageFile: imageFile });
+    var pngName = name.replace(/\.[^.]+$/, "") + ".png"; // 動画名.png
+
+    function finish(imageFile) {
+      send({ channel: channel, title: title, videoFile: videoFile, imageFile: imageFile });
+    }
+
+    // 仕上がりプレビュー（合成済み Canvas #cv＝1080×1920）を PNG で一緒に保存（解像度重視）。
+    var cv = document.getElementById("cv");
+    if (cv && typeof cv.toBlob === "function") {
+      try {
+        cv.toBlob(function (pngBlob) {
+          finish(pngBlob ? new File([pngBlob], pngName, { type: "image/png" }) : null);
+        }, "image/png");
+      } catch (err) { finish(null); }
+    } else {
+      finish(null);
+    }
   });
 })();
