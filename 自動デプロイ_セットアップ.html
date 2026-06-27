@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自動デプロイ セットアップ（1回だけ・スマホでOK）</title>
+<style>
+  :root{--bg:#0e1116;--card:#171c24;--line:#2b3441;--txt:#e7edf3;--mut:#9fb0c0;--accent:#5aa9ff;--ok:#7ee0a8;--warn:#ffd479;--danger:#ff8f7a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;line-height:1.75;font-size:16px;}
+  .wrap{max-width:760px;margin:0 auto;padding:20px 16px 80px;}
+  header{text-align:center;padding:16px 0 4px;}
+  header h1{font-size:1.45rem;margin:.2em 0;}
+  header p{color:var(--mut);margin:.2em 0;font-size:.9rem;}
+  .lead{background:linear-gradient(135deg,#1b2230,#161b22);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:18px 0;}
+  h2{font-size:1.16rem;margin:30px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+  .box{border-radius:12px;padding:14px 16px;margin:14px 0;border:1px solid var(--line);background:var(--card);}
+  .tip{background:rgba(90,169,255,.10);border-color:rgba(90,169,255,.45);} .tip b{color:var(--accent);}
+  .ok{background:rgba(120,224,168,.10);border-color:rgba(126,224,168,.45);} .ok b{color:var(--ok);}
+  .warn{background:rgba(255,200,80,.10);border-color:rgba(255,212,121,.45);} .warn b{color:var(--warn);}
+  .step{display:flex;gap:14px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0;}
+  .num{flex:0 0 auto;width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#3f7fd0);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;}
+  .step h3{margin:.1em 0 .5em;font-size:1.05rem;}
+  code,kbd{background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.88em;word-break:break-all;color:#cfe6ff;}
+  kbd{background:#222a35;color:#fff;}
+  a.btn{display:block;text-align:center;background:linear-gradient(135deg,var(--accent),#3f7fd0);color:#fff;text-decoration:none;font-weight:700;padding:12px;border-radius:12px;margin:12px 0;}
+  ul{margin:.4em 0;padding-left:1.25em;} li{margin:.35em 0;}
+  .secret{background:#0b0f14;border:1px dashed #3a4654;border-radius:8px;padding:8px 10px;margin:6px 0;font-family:monospace;font-size:.85rem;color:#cfe6ff;}
+  .mini{color:var(--mut);font-size:.85rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>⚙️ 自動デプロイ セットアップ</h1>
+    <p>これ1回で、以後ずっと「PC不要・操作不要」でCloudflare自動デプロイ</p>
+    <p class="mini">所要 約5分・全部スマホのブラウザでOK</p>
+  </header>
+
+  <div class="lead">
+    <b>これをやると：</b> 私(Claude)がworkerのコードを直して <code>main</code> に push するだけで、
+    <b>GitHubが自動で Cloudflare にデプロイ</b>してくれます。外出先でも、あなたが何もしなくてもOK。
+    設定ファイル（GitHub Actions）はもう入れてあります。<b>あとは“鍵”を2つ登録するだけ。</b>
+  </div>
+
+  <h2>パートA：Cloudflareの鍵（APIトークン）を作る</h2>
+  <div class="step"><div class="num">1</div><div><h3>APIトークン作成画面へ</h3>
+    <a class="btn" href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Cloudflare APIトークン画面を開く</a>
+    <p class="mini">ログインを求められたらログイン。</p></div></div>
+  <div class="step"><div class="num">2</div><div><h3>テンプレートを使う</h3>
+    <ul>
+      <li><kbd>Create Token</kbd>（トークンを作成）を押す</li>
+      <li>テンプレ一覧から <b>「Edit Cloudflare Workers」</b> の <kbd>Use template</kbd></li>
+      <li>設定はそのままでOK（自分のアカウントが選ばれているか確認）→ 下の <kbd>Continue to summary</kbd> → <kbd>Create Token</kbd></li>
+    </ul></div></div>
+  <div class="step"><div class="num">3</div><div><h3>トークンをコピー</h3>
+    <p>表示された長い文字列を<b>コピー</b>。<span class="warn"></span></p>
+    <div class="box warn"><b>注意：</b>このトークンは<u>この画面でしか見られません</u>。コピーして、次のパートCで貼ります（メモアプリ等に一時保存可・使ったら消す）。</div></div></div>
+
+  <h2>パートB：Account ID を控える</h2>
+  <div class="step"><div class="num">4</div><div><h3>Account ID をコピー</h3>
+    <a class="btn" href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers & Pages を開く</a>
+    <p>その画面の右側（または下の方）に <b>「Account ID」</b> があります。コピー。
+    <span class="mini">（任意のドメインの「概要」右下にも出ます）</span></p></div></div>
+
+  <h2>パートC：GitHubに鍵を2つ登録</h2>
+  <div class="step"><div class="num">5</div><div><h3>GitHubのSecrets画面へ</h3>
+    <a class="btn" href="https://github.com/john-mori/go5-maker-7b311d01/settings/secrets/actions" target="_blank" rel="noopener">GitHub Secrets画面を開く</a>
+    <p class="mini">GitHubにログイン後、この画面（Settings → Secrets and variables → Actions）が開きます。</p></div></div>
+  <div class="step"><div class="num">6</div><div><h3>2つ登録する</h3>
+    <p><kbd>New repository secret</kbd> を押して、<b>名前は下の通り正確に</b>（コピペ推奨）：</p>
+    <p>① 1つ目：</p>
+    <div class="secret">Name: CLOUDFLARE_API_TOKEN</div>
+    <div class="secret">Secret: （パートAでコピーしたトークンを貼る）</div>
+    <p>→ <kbd>Add secret</kbd>。もう一度 <kbd>New repository secret</kbd> で ②：</p>
+    <div class="secret">Name: CLOUDFLARE_ACCOUNT_ID</div>
+    <div class="secret">Secret: （パートBのAccount IDを貼る）</div>
+    <p>→ <kbd>Add secret</kbd>。</p>
+    <div class="box ok"><b>完了！</b> 画面に <code>CLOUDFLARE_API_TOKEN</code> と <code>CLOUDFLARE_ACCOUNT_ID</code> の2つが並んでいればOK。</div></div></div>
+
+  <h2>これで何が起きるか</h2>
+  <div class="box tip">
+    <ul>
+      <li>今後、私がworkerを直して push するたび、<b>GitHubが自動でCloudflareへデプロイ</b>（あなたは何もしない）。</li>
+      <li>手動で動かしたい時：GitHubの <kbd>Actions</kbd> タブ → 対象のワークフロー → <kbd>Run workflow</kbd>（スマホでも押せます）。</li>
+      <li>鍵は<b>GitHubが暗号化保管</b>し、ログにも出ません。トークンは「Workers編集」だけの最小権限。</li>
+    </ul>
+  </div>
+
+  <div class="box warn">
+    <b>登録できたら、チャットで「secrets登録した」と教えてください。</b>
+    今回の drive-worker の変更（元写真＋プレビュー2枚保存／ゴミ箱の連番除外）を、私の方から<b>その場でデプロイ実行</b>します。以後は完全自動です。
+  </div>
+
+  <p class="mini" style="text-align:center;margin-top:20px">どこかで画面が違う／詰まったら、何が見えているかを送ってください。1タップずつ伴走します。</p>
+</div>
+</body>
+</html>

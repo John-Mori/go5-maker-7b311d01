@@ -1,0 +1,20 @@
+name: Deploy link-worker (Cloudflare)
+
+# main に link-worker/ が変わって push されたら自動デプロイ。手動実行も可。
+on:
+  push:
+    branches: [main]
+    paths: ['link-worker/**']
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: link-worker

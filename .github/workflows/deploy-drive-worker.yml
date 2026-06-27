@@ -1,0 +1,21 @@
+name: Deploy drive-worker (Cloudflare)
+
+# main に drive-worker/ が変わって push されたら自動デプロイ。
+# 手動実行(workflow_dispatch)もできる＝GitHubのActionsタブ／API/スマホからボタン1つで。
+on:
+  push:
+    branches: [main]
+    paths: ['drive-worker/**']
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: drive-worker
