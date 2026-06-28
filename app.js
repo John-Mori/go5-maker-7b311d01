@@ -59,14 +59,12 @@
       defaultDetail: DEFAULT_DETAIL,        // "作品の詳細は右上の：から説明"（：→⋮、説明→≡説明）
       detailMenu: true,                     // 誘導文の「説明」前に ≡（ハンバーガー）を出す
       textFill: "#F5E6B8",                  // 月光金（文字）
-      stroke: "rgba(0,0,0,1)",              // glow時は未使用
+      stroke: "rgba(0,0,0,1)",              // soft時は未使用
       bandRGB: "46,64,104",                 // #2E4068 宵藍の帯
       bandAlpha255: 204,                    // 不透明度80%（acc1のみ固定＝#2E4068CC相当）
-      glow: true,                           // 淡金の発光（グロー）
-      glow1: "rgba(245,230,184,0.55)",      // 淡金（中心・小ぼかし）
-      glow2: "rgba(245,230,184,0.55)",      // 淡金（中間・中ぼかし）
-      glow3: "rgba(245,230,184,0.55)",      // 淡金（外側・大ぼかし）
-      contour: "rgba(46,64,104,0.9)",       // #2E4068 同系の細い輪郭（影＝可読性確保）
+      soft: true,                           // 淡金のごく弱いグロー＋可読性用の暗い影（黒い太縁は使わない）
+      glowSoft: "rgba(245,230,184,0.15)",   // 淡金グロー（ほぼ無し・ぼかし6px相当）
+      darkShadow: "rgba(0,0,0,0.5)",        // 可読性用の暗い影（0 1px 2px 相当）
       iconFill: "#F5E6B8", iconHalo: "rgba(46,64,104,0.95)",  // アイコンも月光金＋宵藍で統一
     },
     acc2: {
@@ -89,7 +87,20 @@
   // 文字本体の描画（テーマ依存）。acc1＝黒縁＋白、acc2＝桜ピンク2層グロー＋温白の芯。
   function paintGlyph(ln, x, y, px, sw) {
     const t = theme();
-    if (t.glow) {
+    if (t.soft) {
+      // acc1：淡金のごく弱いグロー＋可読性用の暗い影（参考: 0 0 6px rgba(245,230,184,.15), 0 1px 2px rgba(0,0,0,.5)）。
+      // px固定値はU()で基準フレームへ換算（CSSの6/1/2px相当）。黒い太縁は使わない。
+      ctx.save();
+      ctx.fillStyle = t.textFill;
+      // 暗い影（0 1px 2px rgba(0,0,0,.5)）
+      ctx.shadowColor = t.darkShadow; ctx.shadowBlur = U(2); ctx.shadowOffsetX = 0; ctx.shadowOffsetY = U(1);
+      ctx.fillText(ln, x, y);
+      // 淡金のグロー（0 0 6px rgba(245,230,184,.15)）
+      ctx.shadowColor = t.glowSoft; ctx.shadowBlur = U(6); ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+      ctx.fillText(ln, x, y);
+      ctx.restore();
+      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // 影なしの芯（くっきり）
+    } else if (t.glow) {
       // 桜ローズの発光影（外→内の3層グロー）。ぼかし量は文字サイズ比（CSSの6/14/22px相当）。
       ctx.save();
       ctx.fillStyle = t.textFill;

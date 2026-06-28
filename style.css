@@ -191,6 +191,13 @@ video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
   border-color:var(--line) var(--line) var(--accent) var(--line);
 }
 .tab:active{filter:brightness(.9);}
+/* PC（マウス等の精密ポインタ）だけ：タブが入り切らない時に横スクロールバーを表示して操作可能に。
+   スマホ(coarse pointer)は対象外＝表示は一切変えない。 */
+@media (hover:hover) and (pointer:fine){
+  .tabbar{ scrollbar-width:thin; }
+  .tabbar::-webkit-scrollbar{ display:block; height:6px; }
+  .tabbar::-webkit-scrollbar-thumb{ background:var(--line); border-radius:3px; }
+}
 
 /* ── textarea（input[type=text] と同スタイル＋resize:vertical） ── */
 textarea{
