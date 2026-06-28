@@ -60,8 +60,13 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 
 /* ── 検証ダッシュボード（Phase4） ── */
 .vrow{background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;}
-.vrow-h{font-size:14px;color:var(--ink);}
+.vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
 .vrow-h .vrole{color:var(--accent);font-weight:700;}
+.vrow-h .vdate-pending{color:var(--sub);font-weight:400;}
+.vrow-h .vdate-unknown{color:var(--sub);font-weight:400;font-size:12px;}
+.vrow-h .vtag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:1px 6px;}
+.vrow-h .vdel{margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:8px;padding:3px 8px;font-size:13px;cursor:pointer;line-height:1;}
+.vrow-h .vdel:active{filter:brightness(.85);}
 .vrow-h .vgenre{color:var(--sub);font-size:12px;}
 .vmetrics{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:7px;font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;}
 .vmetrics .vfanza{display:flex;align-items:center;gap:6px;color:var(--gold);font-size:12px;}

@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=70">
-<link rel="apple-touch-icon" href="icon.svg?v=70">
-<link rel="icon" href="icon.svg?v=70" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest?v=71">
+<link rel="apple-touch-icon" href="icon.svg?v=71">
+<link rel="icon" href="icon.svg?v=71" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=70">
+<link rel="stylesheet" href="style.css?v=71">
 </head>
 <body>
 <header>
@@ -410,8 +410,11 @@
   <!-- 再生数・クリック数（投稿別・このアカウント） -->
   <section class="card">
     <div class="field-label">▶🔗 再生数・クリック数（投稿別・このアカウント）</div>
-    <div class="hint">投稿した<b>短縮URLのクリック数</b>と、説明欄に載せた<b>YouTube動画の再生数</b>を一覧します。各行の「YouTube URL」を入れると、その動画の再生数を取得します（再生数の取得には ⚙️詳細設定 のAPIキーが必要）。</div>
-    <button id="ytClickRefresh" class="ghost" type="button">🔄 再生数・クリック数を更新</button>
+    <div class="hint">投稿した<b>短縮URLのクリック数</b>と、説明欄に載せた<b>YouTube動画の再生数</b>を一覧します。各行の「YouTube URL」を入れると、その動画の<b>再生数</b>と<b>YouTube投稿日時</b>を取得します（取得には ⚙️詳細設定 のAPIキーが必要）。<br>日時は<b>YouTubeに投稿した時刻</b>を表示し、新しい順に並びます。URL未入力で投稿日時が不明なものは下にまとめます。</div>
+    <div class="vlist-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="ytClickRefresh" class="ghost" type="button">🔄 再生数・クリック数を更新</button>
+      <button id="ytAddManual" class="ghost" type="button">➕ YouTube動画を手動で追加</button>
+    </div>
     <div class="status" id="ytClickStatus"></div>
     <div id="ytClickList" class="vlist"></div>
   </section>
@@ -538,22 +541,22 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=70"></script>
-<script src="app.js?v=70"></script>
-<script src="affiliate-core.js?v=70"></script>
-<script src="affiliate.js?v=70"></script>
-<script src="bluesky-core.js?v=70"></script>
-<script src="scheduler.js?v=70"></script>
-<script src="bluesky.js?v=70"></script>
-<script src="drive-upload.js?v=70"></script>
-<script src="verify-core.js?v=70"></script>
-<script src="verify.js?v=70"></script>
-<script src="yt-clicks.js?v=70"></script>
-<script src="integration.js?v=70"></script>
-<script src="wizard.js?v=70"></script>
-<script src="settings-io.js?v=70"></script>
-<script src="theme-settings.js?v=70"></script>
-<script src="persist-fields.js?v=70"></script>
+<script src="idgen.js?v=71"></script>
+<script src="app.js?v=71"></script>
+<script src="affiliate-core.js?v=71"></script>
+<script src="affiliate.js?v=71"></script>
+<script src="bluesky-core.js?v=71"></script>
+<script src="scheduler.js?v=71"></script>
+<script src="bluesky.js?v=71"></script>
+<script src="drive-upload.js?v=71"></script>
+<script src="verify-core.js?v=71"></script>
+<script src="verify.js?v=71"></script>
+<script src="yt-clicks.js?v=71"></script>
+<script src="integration.js?v=71"></script>
+<script src="wizard.js?v=71"></script>
+<script src="settings-io.js?v=71"></script>
+<script src="theme-settings.js?v=71"></script>
+<script src="persist-fields.js?v=71"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */
