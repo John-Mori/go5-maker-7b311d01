@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube再生数 APIキー取得ガイド（スマホでOK・無料）</title>
+<style>
+  :root{--bg:#0e1116;--card:#171c24;--line:#2b3441;--txt:#e7edf3;--mut:#9fb0c0;--accent:#5aa9ff;--ok:#7ee0a8;--warn:#ffd479;--danger:#ff8f7a;--red:#ff0000;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;line-height:1.78;font-size:16px;}
+  .wrap{max-width:760px;margin:0 auto;padding:20px 16px 90px;}
+  header{text-align:center;padding:16px 0 4px;}
+  header h1{font-size:1.45rem;margin:.2em 0;}
+  header p{color:var(--mut);margin:.2em 0;font-size:.9rem;}
+  .lead{background:linear-gradient(135deg,#1b2230,#161b22);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:18px 0;}
+  h2{font-size:1.16rem;margin:32px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+  .box{border-radius:12px;padding:14px 16px;margin:14px 0;border:1px solid var(--line);background:var(--card);}
+  .tip{background:rgba(90,169,255,.10);border-color:rgba(90,169,255,.45);} .tip b{color:var(--accent);}
+  .ok{background:rgba(120,224,168,.10);border-color:rgba(126,224,168,.45);} .ok b{color:var(--ok);}
+  .warn{background:rgba(255,200,80,.10);border-color:rgba(255,212,121,.45);} .warn b{color:var(--warn);}
+  .danger{background:rgba(255,120,100,.10);border-color:rgba(255,143,122,.5);} .danger b{color:var(--danger);}
+  .step{display:flex;gap:14px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0;}
+  .num{flex:0 0 auto;width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#3f7fd0);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:1.05rem;}
+  .step h3{margin:.1em 0 .5em;font-size:1.06rem;}
+  .step .body{flex:1;min-width:0;}
+  code,kbd{background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.86em;word-break:break-all;color:#cfe6ff;}
+  kbd{background:#222a35;color:#fff;border-color:#3a4654;font-weight:700;}
+  a.btn{display:block;text-align:center;background:linear-gradient(135deg,var(--accent),#3f7fd0);color:#fff;text-decoration:none;font-weight:700;padding:13px;border-radius:12px;margin:12px 0;}
+  a.btn.red{background:linear-gradient(135deg,#ff5a5a,#d63333);}
+  a.btn.gray{background:#2b3441;}
+  ul,ol{margin:.4em 0;padding-left:1.3em;} li{margin:.4em 0;}
+  .secret{background:#0b0f14;border:1px dashed #3a4654;border-radius:8px;padding:8px 10px;margin:6px 0;font-family:monospace;font-size:.85rem;color:#cfe6ff;word-break:break-all;}
+  .mini{color:var(--mut);font-size:.85rem;}
+  .pill{display:inline-block;background:#222a35;border:1px solid var(--line);border-radius:999px;padding:1px 10px;font-size:.8rem;color:var(--mut);margin:2px 0;}
+  .tap{display:inline-block;background:#1d2530;border:1px solid #3a4654;border-radius:7px;padding:1px 8px;font-weight:700;color:#fff;font-size:.9em;white-space:nowrap;}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:.9rem;}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;}
+  th{background:#0e1422;color:var(--accent);}
+  details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 14px;margin:10px 0;}
+  summary{cursor:pointer;font-weight:700;padding:8px 0;}
+  hr{border:none;border-top:1px solid var(--line);margin:26px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span style="color:var(--red)">▶</span> YouTube再生数 APIキー取得ガイド</h1>
+    <p>「検証タブ」で再生数を自動表示するための準備（1回だけ）</p>
+    <p class="mini">所要 約10分・全部スマホのブラウザでOK・<b>無料</b></p>
+  </header>
+
+  <div class="lead">
+    <p style="margin:.2em 0;">YouTubeの再生数は、Googleの「<b>YouTube Data API</b>」という公式の窓口からしか自動で取れません。その窓口を使うための<b>カギ（APIキー）</b>を、Googleの管理画面で1回だけ作ります。</p>
+    <p style="margin:.6em 0 .2em;">難しそうに見えますが、やることは <b>① プロジェクトを作る → ② 窓口をオンにする → ③ カギを作る → ④ アプリに貼る</b> の4つだけ。下に画面そのままの順で書いてあります。迷ったら<b>そのまま上から</b>進めてください。</p>
+  </div>
+
+  <div class="box warn"><b>はじめに：ログインするGoogleアカウント</b><br>
+  最初に、ふだんYouTubeに動画を上げている <b>同じGoogleアカウント</b>でログインしておくと安心です（別のアカウントでも再生数は取れますが、揃えておくと分かりやすいです）。スマホで複数のGoogleにログインしている場合は、後の画面で<b>右上の丸いアイコン</b>からアカウントを切り替えられます。</div>
+
+  <h2>① プロジェクトを作る</h2>
+  <div class="step"><div class="num">1</div><div class="body">
+    <h3>Google Cloud コンソールを開く</h3>
+    <p>下のボタンを押すと、Googleの管理画面（Google Cloud コンソール）が開きます。</p>
+    <a class="btn" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">▶ プロジェクト作成ページを開く</a>
+    <ul>
+      <li><b>初めての場合</b>：利用規約の同意画面が出ることがあります。国＝<b>日本</b>を選び、規約に<span class="tap">チェック</span>→<span class="tap">同意して続行</span>を押します。</li>
+      <li>「無料トライアルを開始」「お支払い情報の登録」などが出ても、<b>登録は不要</b>です。今回使う機能は無料枠だけで足ります。閉じるか「スキップ」でOK。</li>
+    </ul>
+  </div></div>
+
+  <div class="step"><div class="num">2</div><div class="body">
+    <h3>プロジェクトの名前を入れて作成</h3>
+    <p>「新しいプロジェクト」の画面が開きます。</p>
+    <ul>
+      <li><b>プロジェクト名</b>に、自分が分かる名前を入れます（例：<code>go5-youtube</code>）。何でもOK。</li>
+      <li>「場所」「組織」は<b>そのまま</b>でOK。</li>
+      <li><span class="tap">作成</span> を押します。</li>
+      <li>右上に「プロジェクトを作成しています…」と少し出ます。<b>10〜20秒ほど待つ</b>と完成です。</li>
+    </ul>
+    <div class="box tip"><b>大事：</b>作成後、画面<b>上部の真ん中あたり</b>に出る「プロジェクト選択」が、いま作ったプロジェクト名になっているか確認してください。違っていたら、そこを押して今作ったものを選びます。（これ以降の作業が、このプロジェクトの中に保存されます）</div>
+  </div></div>
+
+  <h2>② 窓口（YouTube Data API）をオンにする</h2>
+  <div class="step"><div class="num">3</div><div class="body">
+    <h3>「YouTube Data API v3」を有効にする</h3>
+    <p>下のボタンで、YouTube再生数の窓口ページが直接開きます。</p>
+    <a class="btn red" href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">▶ YouTube Data API v3 を開く</a>
+    <ul>
+      <li>青い大きな <span class="tap">有効にする</span>（英語なら <span class="tap">ENABLE</span>）ボタンを押します。</li>
+      <li>数秒で「APIが有効になりました」という画面に変わればOK。</li>
+    </ul>
+    <div class="box warn"><b>もしボタンが「管理」になっていたら？</b><br>それは<b>すでに有効</b>という意味です。そのまま次へ進んでください。</div>
+    <div class="box warn"><b>「プロジェクトを選択してください」と出たら？</b><br>①で作ったプロジェクトを選んでから、もう一度このボタンを開いてください。</div>
+  </div></div>
+
+  <h2>③ カギ（APIキー）を作る</h2>
+  <div class="step"><div class="num">4</div><div class="body">
+    <h3>「認証情報」からAPIキーを作成</h3>
+    <p>下のボタンで「認証情報」ページが開きます。</p>
+    <a class="btn" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">▶ 認証情報ページを開く</a>
+    <ul>
+      <li>画面上の <span class="tap">＋ 認証情報を作成</span>（英語なら <span class="tap">+ CREATE CREDENTIALS</span>）を押します。</li>
+      <li>出てきたメニューから <span class="tap">APIキー</span> を選びます。</li>
+      <li>「APIキーを作成しました」と表示され、<code>AIzaSy…</code> で始まる長い文字列が出ます。<b>これがカギです。</b></li>
+      <li><span class="tap">コピー</span> を押して、いったんスマホのメモやLINEの自分宛などに貼り付けておくと安全です。</li>
+    </ul>
+    <div class="box ok"><b>カギの例（これはダミーです）</b>
+      <div class="secret">AIzaSyD-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</div>
+      <span class="mini">※あなたのカギは他人に見せないでください。下の④で「使えるサイトを制限」しておくと、万一見られても悪用されにくくなります。</span>
+    </div>
+  </div></div>
+
+  <h2>④ （推奨）カギに鍵をかける＝このサイト専用にする</h2>
+  <div class="step"><div class="num">5</div><div class="body">
+    <h3>制限をかけて安全にする（2分）</h3>
+    <p>作ったキーの行の右にある <span class="tap">⋮（または鉛筆✏️）</span> →「キーを編集」を開くか、作成直後のポップアップの「キーを制限」から設定します。</p>
+    <p><b>(A) アプリケーションの制限</b></p>
+    <ul>
+      <li><span class="tap">ウェブサイト</span>（HTTP リファラー）を選びます。</li>
+      <li>「ウェブサイトの制限」で <span class="tap">追加</span> を押し、次の2つを登録：</li>
+    </ul>
+    <div class="secret">https://john-mori.github.io/*</div>
+    <div class="secret">https://john-mori.github.io/go5-maker-7b311d01/*</div>
+    <p><b>(B) API の制限</b></p>
+    <ul>
+      <li><span class="tap">キーを制限</span> を選び、リストから <b>YouTube Data API v3</b> だけにチェックを入れます。</li>
+    </ul>
+    <ul><li>最後に <span class="tap">保存</span> を押します。</li></ul>
+    <div class="box tip"><b>なぜやるの？</b> こうすると、このキーは<b>あなたのサイトからしか</b>、しかも<b>YouTubeの再生数取得だけ</b>に使えなくなります。安心して使えます。<br><span class="mini">※保存後、反映に数分かかることがあります。すぐ動かない時は5分ほど待ってから試してください。</span></div>
+  </div></div>
+
+  <h2>⑤ アプリにカギを貼る</h2>
+  <div class="step"><div class="num">6</div><div class="body">
+    <h3>「⚙️詳細設定」タブに貼り付け</h3>
+    <ol>
+      <li>5秒動画メーカーを開く（下のボタン）。</li>
+      <li>上のタブの <span class="tap">⚙️ 詳細設定</span> を押す。</li>
+      <li>「<b>▶ YouTube再生数の取得（APIキー）</b>」の入力欄に、③でコピーしたカギ（<code>AIzaSy…</code>）を貼り付ける。</li>
+      <li>これで保存完了（自動保存・この端末内だけに保存されます）。</li>
+    </ol>
+    <a class="btn" href="https://john-mori.github.io/go5-maker-7b311d01/" target="_blank" rel="noopener">▶ 5秒動画メーカーを開く</a>
+  </div></div>
+
+  <div class="step"><div class="num">7</div><div class="body">
+    <h3>検証タブで再生数を表示</h3>
+    <ol>
+      <li><span class="tap">🧪 検証</span> タブを開く。</li>
+      <li>一番上の「<b>▶🔗 再生数・クリック数（投稿別）</b>」の各行にある「<b>YouTube URL</b>」欄に、その投稿に対応する動画のURL（<code>https://youtu.be/…</code> や <code>https://www.youtube.com/watch?v=…</code>）を貼る。</li>
+      <li><span class="tap">🔄 再生数・クリック数を更新</span> を押す。</li>
+      <li>▶ の横に<b>再生数</b>、🔗 の横に<b>短縮URLのクリック数</b>が出ます。</li>
+    </ol>
+    <div class="box ok"><b>ヒント：</b>ウィザード（🪄）でYouTube URLを記録した投稿は、URL欄が<b>自動で埋まります</b>。過去の投稿は手で貼ればOKです。</div>
+  </div></div>
+
+  <hr>
+
+  <h2>❓ うまくいかない時（よくある原因）</h2>
+  <table>
+    <tr><th>症状</th><th>原因と対処</th></tr>
+    <tr><td>再生数が「–」のまま</td><td>その行の「YouTube URL」がまだ空、またはURLの形式が違います。<code>youtu.be/動画ID</code> か <code>watch?v=動画ID</code> を貼ってください。</td></tr>
+    <tr><td>「API key not valid」</td><td>キーの貼り間違い（前後に空白が入った等）。もう一度コピーして貼り直してください。</td></tr>
+    <tr><td>「API has not been used / disabled」</td><td>②の「YouTube Data API v3 を有効にする」が済んでいません。手順③をやり直してください。</td></tr>
+    <tr><td>「referer / requests from referer ... are blocked」</td><td>④のサイト制限のURLが違います。<code>https://john-mori.github.io/*</code> を登録、または一旦「アプリケーションの制限＝なし」にして動作確認してください。</td></tr>
+    <tr><td>「quota exceeded」</td><td>1日の無料上限（後述）に達しました。翌日（太平洋時間の0時＝日本の夕方頃）にリセットされます。</td></tr>
+  </table>
+
+  <details>
+    <summary>💰 料金と上限について（読まなくてもOK）</summary>
+    <ul>
+      <li>YouTube Data API は<b>無料</b>で、1日あたり <b>10,000ユニット</b>使えます。</li>
+      <li>このアプリの再生数取得（videos.list）は<b>1回1ユニット</b>（しかも複数動画をまとめて1回で取得）。普通に使う分には上限にまず届きません。</li>
+      <li>クレジットカード登録は<b>不要</b>です。</li>
+    </ul>
+  </details>
+
+  <details>
+    <summary>🔒 セキュリティ（カギの扱い）</summary>
+    <ul>
+      <li>カギは<b>この端末のブラウザ内だけ</b>に保存されます。リポジトリやサーバーには置きません。</li>
+      <li>「⚙️詳細設定」→ 設定の書き出しで「<b>鍵を除いて書き出し</b>」を選べば、キーは書き出されません（共有・バックアップ時も安全）。</li>
+      <li>④の制限をかけておけば、万一キーが見られても他サイトから悪用できません。</li>
+      <li>もしキーを作り直したくなったら、③のページで古いキーを削除し、新しく作って貼り替えるだけです。</li>
+    </ul>
+  </details>
+
+  <div class="box tip" style="margin-top:24px;"><b>それでも分からない時は</b><br>「③のカギを作る」までできれば、あとはアプリに貼るだけです。どの画面で詰まったか（ボタン名や英語表示）を教えてくれれば、その場面に合わせて案内します。</div>
+
+  <p class="mini" style="text-align:center;margin-top:30px;">5秒動画メーカー / YouTube再生数 APIキー取得ガイド</p>
+</div>
+</body>
+</html>

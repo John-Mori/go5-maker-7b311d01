@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=67">
-<link rel="apple-touch-icon" href="icon.svg?v=67">
-<link rel="icon" href="icon.svg?v=67" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest?v=68">
+<link rel="apple-touch-icon" href="icon.svg?v=68">
+<link rel="icon" href="icon.svg?v=68" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=67">
+<link rel="stylesheet" href="style.css?v=68">
 </head>
 <body>
 <header>
@@ -494,7 +494,8 @@
     <div class="field-label">▶ YouTube再生数の取得（APIキー）</div>
     <div class="hint">🧪検証タブで再生数を自動取得するための <b>YouTube Data API v3</b> のキーを設定します。Google Cloud で<b>無料</b>発行できます。キーは<b>この端末内だけ</b>に保存します（リポジトリ・サーバーには置きません）。</div>
     <input id="ytApiKey" type="text" inputmode="text" placeholder="AIza…（YouTube Data API v3 のキー）" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <div class="hint">取得手順：①<a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> で新規プロジェクト作成 → ②「YouTube Data API v3」を有効化 → ③「認証情報」→「APIキーを作成」→ ④ここに貼り付け。<br>安全のため、作成後にキーの「アプリケーションの制限＝ウェブサイト」でこのサイトのURLに制限することを推奨します（漏れても他サイトから使えなくなります）。</div>
+    <a class="photo-btn" href="YouTube再生数_APIキー取得ガイド.html" target="_blank" rel="noopener" style="margin-top:8px;font-size:15px;padding:12px;">📘 APIキーの取り方を画面つきで見る（初めての人向け・無料）</a>
+    <div class="hint">↑のガイドに沿って進めれば10分ほどで取れます。取得後、上の欄に <code>AIza…</code> のキーを貼るだけ（この端末内のみ保存）。安全のため、ガイドの「④カギに鍵をかける」も行うと安心です。</div>
   </section>
 </main>
 </section>
@@ -537,21 +538,21 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=67"></script>
-<script src="app.js?v=67"></script>
-<script src="affiliate-core.js?v=67"></script>
-<script src="affiliate.js?v=67"></script>
-<script src="bluesky-core.js?v=67"></script>
-<script src="scheduler.js?v=67"></script>
-<script src="bluesky.js?v=67"></script>
-<script src="drive-upload.js?v=67"></script>
-<script src="verify-core.js?v=67"></script>
-<script src="verify.js?v=67"></script>
-<script src="yt-clicks.js?v=67"></script>
-<script src="integration.js?v=67"></script>
-<script src="wizard.js?v=67"></script>
-<script src="settings-io.js?v=67"></script>
-<script src="theme-settings.js?v=67"></script>
-<script src="persist-fields.js?v=67"></script>
+<script src="idgen.js?v=68"></script>
+<script src="app.js?v=68"></script>
+<script src="affiliate-core.js?v=68"></script>
+<script src="affiliate.js?v=68"></script>
+<script src="bluesky-core.js?v=68"></script>
+<script src="scheduler.js?v=68"></script>
+<script src="bluesky.js?v=68"></script>
+<script src="drive-upload.js?v=68"></script>
+<script src="verify-core.js?v=68"></script>
+<script src="verify.js?v=68"></script>
+<script src="yt-clicks.js?v=68"></script>
+<script src="integration.js?v=68"></script>
+<script src="wizard.js?v=68"></script>
+<script src="settings-io.js?v=68"></script>
+<script src="theme-settings.js?v=68"></script>
+<script src="persist-fields.js?v=68"></script>
 </body>
 </html>
