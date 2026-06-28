@@ -3,6 +3,12 @@
 //   - local（既定）：localStorage。開発用プレースホルダ。※正本にはしない方針。
 //   - supabase（スタブ）：クラウドDBを唯一の正本にする本番想定。鍵は直書きしない。
 // state の形： { overrides: {date->override}, slotData: {id->slot} }
+//
+// チャンネル分離（タスク7）：
+//   各スロットに exec: { acc1: {...}, acc2: {...} } を追加。
+//   実行記録（status / video_id / url / post_uri / post_url / short_url / posted_at）を
+//   チャンネル別に保持する。プラン情報（title / time / role 等）は共有のまま。
+//   旧形式（exec なし）は init() で自動移行（冪等）。
 window.SCH = window.SCH || {};
 (function (SCH) {
   const LS_KEY = "sch_state_v1";
@@ -154,6 +160,49 @@ window.SCH = window.SCH || {};
     return localAdapter;
   }
 
+  // ---- チャンネル分離ヘルパ ----
+  // 実行層フィールド（チャンネル別に保持する項目）
+  const EXEC_FIELDS = ["status", "video_id", "url", "post_uri", "post_url", "short_url", "posted_at"];
+
+  // slot の exec.{acc} を取得（なければ空オブジェクト）
+  function getExec(slot, acc) {
+    return (slot.exec && slot.exec[acc]) || {};
+  }
+
+  // slot の exec.{acc} を更新（他チャンネルは不変）
+  function setExec(slot, acc, patch) {
+    if (!slot.exec) slot.exec = {};
+    slot.exec[acc] = Object.assign({}, slot.exec[acc] || {}, patch);
+  }
+
+  // 旧形式スロット（exec なし）を新形式へ変換（冪等）。
+  // 旧形式のチャンネル別実行フィールドは acc1 に引き継ぐ（主な利用者が acc1 のため）。
+  function migrateSlot(slot) {
+    if (slot.exec) return slot; // 移行済み
+    const execAcc1 = {};
+    for (const f of EXEC_FIELDS) {
+      if (slot[f] !== undefined) execAcc1[f] = slot[f];
+    }
+    // status が無い場合のデフォルト
+    if (!execAcc1.status) execAcc1.status = slot.status || "未着手";
+    slot.exec = { acc1: execAcc1, acc2: { status: "未着手" } };
+    // 旧フラットの実行フィールドは body から除去（exec を唯一の正とする＝他chへ漏れない）。
+    for (const f of EXEC_FIELDS) delete slot[f];
+    return slot;
+  }
+
+  // slot をチャンネル別実行層と合成して「フラットなレンダリング用スロット」を返す。
+  // これはコピーなので元の slot.exec は変化しない。
+  // body には実行フィールドを残さない設計なので、acc に exec が無ければ実行値は空になる（他chの値が漏れない）。
+  function flattenForAccount(slot, acc) {
+    const exec = getExec(slot, acc);
+    const merged = Object.assign({}, slot, exec);
+    delete merged.exec; // レンダリング用フラットには exec 構造を含めない
+    // exec が status を持たない場合のデフォルト
+    if (!merged.status) merged.status = "未着手";
+    return merged;
+  }
+
   // ---- ストア本体 ----
   function createStore() {
     const adapter = pickAdapter();
@@ -165,10 +214,38 @@ window.SCH = window.SCH || {};
         state = await adapter.load();
         state.overrides = state.overrides || {};
         state.slotData = state.slotData || {};
+        // 旧形式スロットを新形式へ移行（冪等）
+        let migrated = false;
+        for (const id of Object.keys(state.slotData)) {
+          const before = state.slotData[id];
+          if (!before.exec) {
+            state.slotData[id] = migrateSlot(Object.assign({}, before));
+            migrated = true;
+          }
+        }
+        if (migrated) await adapter.save(state);
         return state;
       },
       getOverrides() { return state.overrides; },
       getSlotData() { return state.slotData; },
+
+      // 現在チャンネルで合成したフラットスロットマップを返す（レンダリング用）
+      getSlotDataForAccount(acc) {
+        const result = {};
+        for (const id of Object.keys(state.slotData)) {
+          result[id] = flattenForAccount(state.slotData[id], acc);
+        }
+        return result;
+      },
+
+      // チャンネル別実行フィールドを 1 枠だけ更新する
+      async upsertExec(slotId, acc, patch) {
+        const slot = state.slotData[slotId];
+        if (!slot) return; // 未保存のプリスティン枠は exec 更新不要（generateRange 経由で保存される）
+        setExec(slot, acc, patch);
+        slot.updated_at = new Date().toISOString();
+        await adapter.save(state);
+      },
 
       // day_overrides の upsert（§7.4）。patch=null でクリア。
       async setOverride(date, patch) {
@@ -181,25 +258,89 @@ window.SCH = window.SCH || {};
         await adapter.save(state);
       },
 
-      // 編集された slot の保存。空き＆未編集に戻ったものは保持しない（容量節約）。
-      async upsertSlot(slot) {
-        const pristine = slot.status === "未着手" && !slot.title && !slot.video_id &&
-          !slot.notes && !slot.url && !slot.desc_link && !slot.needs_review && !slot.verification;
-        if (pristine) {
+      // 編集された slot の保存。slot は「フラット形式（レンダリング用）」で渡される想定。
+      // exec が付いていればそのまま保存。付いていなければ既存の exec を引き継ぐ。
+      // 空き＆未編集に戻ったものは保持しない（容量節約）。
+      async upsertSlot(slot, acc) {
+        // フラットスロット → ストア用スロットへ変換
+        // acc が指定されている場合はそのチャンネルの exec を更新する
+        const existing = state.slotData[slot.id];
+        let stored;
+        if (slot.exec) {
+          // すでに exec 構造を持っている（store 内部の slot が直接渡された場合）
+          stored = { ...slot, updated_at: new Date().toISOString() };
+          // exec を持つなら移行済み前提だが念のため
+          if (!stored.exec) stored.exec = { acc1: { status: "未着手" }, acc2: { status: "未着手" } };
+        } else {
+          // フラット形式（app.js の saveEditor から来る）
+          if (existing) {
+            stored = { ...existing, updated_at: new Date().toISOString() };
+          } else {
+            // 新規（プリスティン枠を初めて保存）
+            stored = { ...slot, updated_at: new Date().toISOString() };
+            delete stored.exec;
+          }
+          // exec フィールドを確保
+          if (!stored.exec) stored.exec = { acc1: { status: "未着手" }, acc2: { status: "未着手" } };
+          // プラン側フィールドを上書き
+          const planKeys = Object.keys(slot).filter(k =>
+            !EXEC_FIELDS.includes(k) && k !== 'exec' && k !== 'id' && k !== 'updated_at'
+          );
+          for (const k of planKeys) stored[k] = slot[k];
+          // 実行フィールドを指定チャンネルの exec へ反映
+          const targetAcc = acc || 'acc1';
+          if (!stored.exec[targetAcc]) stored.exec[targetAcc] = {};
+          for (const f of EXEC_FIELDS) {
+            if (slot[f] !== undefined) stored.exec[targetAcc][f] = slot[f];
+          }
+          if (!stored.exec[targetAcc].status) stored.exec[targetAcc].status = "未着手";
+        }
+        // body に実行フィールドを残さない（exec を唯一の正とする＝他chへ漏れない）。
+        for (const f of EXEC_FIELDS) delete stored[f];
+        // プリスティン判定：両チャンネルとも未着手 & プランフィールドが空
+        const execAcc1 = stored.exec && stored.exec.acc1 ? stored.exec.acc1 : {};
+        const execAcc2 = stored.exec && stored.exec.acc2 ? stored.exec.acc2 : {};
+        const bothPristine =
+          (!execAcc1.status || execAcc1.status === "未着手") &&
+          !execAcc1.video_id && !execAcc1.url && !execAcc1.post_uri &&
+          (!execAcc2.status || execAcc2.status === "未着手") &&
+          !execAcc2.video_id && !execAcc2.url && !execAcc2.post_uri;
+        const planPristine = !stored.title &&
+          !stored.notes && !stored.desc_link && !stored.needs_review && !stored.verification;
+        if (bothPristine && planPristine) {
           delete state.slotData[slot.id];
         } else {
-          state.slotData[slot.id] = { ...slot, updated_at: new Date().toISOString() };
+          state.slotData[slot.id] = stored;
         }
         await adapter.save(state);
       },
 
-      // 自動公開などで一括変化した slots を保存
+      // 自動公開などで一括変化した slots を保存（generateRange 返り値のフラットスロット群）
+      // 自動公開はチャンネル共通のため両 exec の status を更新する
       async saveSlots(slotMap) {
         for (const id of Object.keys(slotMap)) {
           const s = slotMap[id];
-          const pristine = s.status === "未着手" && !s.title && !s.video_id &&
-            !s.notes && !s.url && !s.desc_link && !s.needs_review && !s.verification;
-          if (!pristine) state.slotData[id] = s;
+          const existing = state.slotData[id];
+          // 自動公開チェック：status が "予約登録済" → "公開済" に変わった場合のみ保存
+          const statusChanged = existing &&
+            existing.exec &&
+            s.status === "公開済" &&
+            (
+              (existing.exec.acc1 && existing.exec.acc1.status === "予約登録済") ||
+              (existing.exec.acc2 && existing.exec.acc2.status === "予約登録済")
+            );
+          if (statusChanged) {
+            // 自動公開：予約登録済の exec を公開済へ
+            if (existing.exec.acc1 && existing.exec.acc1.status === "予約登録済") {
+              existing.exec.acc1.status = "公開済";
+            }
+            if (existing.exec.acc2 && existing.exec.acc2.status === "予約登録済") {
+              existing.exec.acc2.status = "公開済";
+            }
+            existing.updated_at = new Date().toISOString();
+            state.slotData[id] = existing;
+          }
+          // プリスティンでない新規スロットは保存しない（既存データのみ更新）
         }
         await adapter.save(state);
       },

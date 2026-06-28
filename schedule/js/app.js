@@ -17,6 +17,11 @@ window.SCH = window.SCH || {};
   let lastRender = null;    // { slots, dayMetas }
   let editingId = null;
 
+  // 現在チャンネルを取得（localStorage から。acc1/acc2）
+  function curAcc() {
+    try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; }
+  }
+
   // ---- 日付（JST） ----
   function todayJST() {
     return new Intl.DateTimeFormat("en-CA", {
@@ -46,7 +51,9 @@ window.SCH = window.SCH || {};
   // ---- 中核：生成→保存→描画 ----
   async function recomputeAndRender() {
     const overrides = store.getOverrides();
-    const existing = store.getSlotData();
+    // 現在チャンネルの実行層を合成したフラットスロットを渡す
+    const acc = curAcc();
+    const existing = store.getSlotDataForAccount(acc);
     const { genStart, genEnd } = genWindow();
     const result = gen.generateRange(genStart, genEnd, master, config, overrides, existing);
     lastRender = result;
@@ -72,9 +79,9 @@ window.SCH = window.SCH || {};
 
     // ヘッダ情報
     const reviewCount = result.review.length;
-    const curAcc = (function () { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } })();
-    const offMin = (config.accountOffsetMin && typeof config.accountOffsetMin[curAcc] === 'number') ? config.accountOffsetMin[curAcc] : 0;
-    const accLabel = offMin > 0 ? `${curAcc} / 時刻オフセット +${offMin}分` : `${curAcc}`;
+    const acc = curAcc();
+    const offMin = (config.accountOffsetMin && typeof config.accountOffsetMin[acc] === 'number') ? config.accountOffsetMin[acc] : 0;
+    const accLabel = offMin > 0 ? `${acc} / 時刻オフセット +${offMin}分` : `${acc}`;
     document.getElementById("status-bar").innerHTML =
       `<span>表示: ${ds} 〜 ${dt.addDays(ds, config.displayWeeks * 7 - 1)}（${config.displayWeeks}週）</span>` +
       `<span class="muted">保存先: ${store.adapterName}</span>` +
@@ -220,9 +227,14 @@ window.SCH = window.SCH || {};
   // ---- スロット編集モーダル ----
   function openEditor(s) {
     editingId = s.id;
+    const acc = curAcc();
+    // s はフラット（現チャンネルの exec が合成済み）なのでそのまま使う
     const m = document.getElementById("modal");
+    const accNames = { acc1: "月詠み色恋劇場", acc2: "宵桜艶帖" };
+    const accDisplayName = accNames[acc] || acc;
     m.querySelector(".modal-body").innerHTML = `
       <h3>${s.date}（${s.day_type}） ${s.time} / ${s.role}</h3>
+      <div class="ch-badge">チャンネル: <strong>${accDisplayName}</strong>（${acc}）の実行記録を編集</div>
       ${inFrame ? `<div class="integ-actions">
         <button type="button" id="integ-make">🎬 この枠で動画を作る</button>
         <button type="button" id="integ-post">🦋 この枠を投稿する</button>
@@ -230,13 +242,13 @@ window.SCH = window.SCH || {};
       </div>` : ""}
       ${s.needs_review ? `<div class="warn">要確認：day-type変更でテンプレと差異あり。時刻は自動変更していません。</div>` : ""}
       ${s.verify_flag ? `<div class="info">検証対象枠。${s.alt_hypothesis ? "対立仮説: " + escapeHtml(s.alt_hypothesis) : ""}</div>` : ""}
-      <label>ステータス
+      <label>ステータス（${accDisplayName}）
         <select id="f-status">${config.statusEnum.map((x) => `<option ${x === s.status ? "selected" : ""}>${x}</option>`).join("")}</select>
       </label>
-      <label>タイトル<input id="f-title" value="${escapeAttr(s.title)}"></label>
-      <label>動画ID<input id="f-video" value="${escapeAttr(s.video_id)}"></label>
-      <label>URL<input id="f-url" value="${escapeAttr(s.url)}"></label>
-      <label>メモ<textarea id="f-notes">${escapeHtml(s.notes)}</textarea></label>
+      <label>タイトル（共通プラン）<input id="f-title" value="${escapeAttr(s.title)}"></label>
+      <label>動画ID（${accDisplayName}）<input id="f-video" value="${escapeAttr(s.video_id)}"></label>
+      <label>URL（${accDisplayName}）<input id="f-url" value="${escapeAttr(s.url)}"></label>
+      <label>メモ（共通プラン）<textarea id="f-notes">${escapeHtml(s.notes)}</textarea></label>
       <div class="muted">公開予定: ${s.scheduled_at}</div>
       ${renderVerificationSection(s)}
     `;
@@ -249,7 +261,7 @@ window.SCH = window.SCH || {};
     }
   }
 
-  // 親（統合アプリ）からの書き戻し：投稿成功後に status/URL等を反映
+  // 親（統合アプリ）からの書き戻し：投稿成功後に status/URL等を現在チャンネルの実行層のみ反映
   function handleParentMessage(ev) {
     const d = ev.data;
     if (!d || d.target !== "sch-calendar") return;
@@ -257,6 +269,8 @@ window.SCH = window.SCH || {};
     if (d.type !== "slot-writeback") return;
     const s = lastRender && lastRender.slots && lastRender.slots[d.id];
     if (!s) return;
+    const acc = curAcc();
+    // フラットスロット（s）は表示用コピーなので更新してから store へ渡す
     if (d.status) s.status = d.status;
     if (d.url) s.url = d.url;
     if (d.video_id) s.video_id = d.video_id;
@@ -265,7 +279,8 @@ window.SCH = window.SCH || {};
     if (d.short_url) s.short_url = d.short_url;
     if (d.posted_at) s.posted_at = d.posted_at;
     s.needs_review = false;
-    store.upsertSlot(s).then(recomputeAndRender);
+    // acc を指定して現チャンネルの実行層にのみ書き込む
+    store.upsertSlot(s, acc).then(recomputeAndRender);
   }
 
   // 検証セクション（verify_flag枠 or 検証モード時に表示）
@@ -302,17 +317,20 @@ window.SCH = window.SCH || {};
     if (!editingId) return;
     const s = lastRender.slots[editingId];
     if (!s) return;
+    const acc = curAcc();
     const g = (id) => document.getElementById(id).value;
-    s.status = g("f-status");
+    // プラン側フィールド（共通）
     s.title = g("f-title");
-    s.video_id = g("f-video");
-    s.url = g("f-url");
     s.notes = g("f-notes");
     // ジャンル/概要欄リンク/SNS導線 はUIから削除（テンプレ値を保持・編集不可）
     s.needs_review = false; // ユーザー確認済み
     captureVerification(s);
     if (!s.created_at) s.created_at = new Date().toISOString();
-    await store.upsertSlot(s);
+    // 実行側フィールド（チャンネル別）：フラットスロットに反映してから upsertSlot へ
+    s.status = g("f-status");
+    s.video_id = g("f-video");
+    s.url = g("f-url");
+    await store.upsertSlot(s, acc);
     closeEditor();
     await recomputeAndRender();
   }
