@@ -434,24 +434,57 @@
     if (redraw) preview();
   }
 
-  CONTROLS.forEach((c) => {
-    // 復元の優先順位：現在値 → ユーザー既定値 → 旧キー → 工場既定
-    const cur = Store.getNum(c.ls), def = Store.getNum(c.lsDef), legacy = c.legacy ? Store.getNum(c.legacy) : null;
-    applyC(c, cur != null ? cur : (def != null ? def : (legacy != null ? legacy : c.def)), false);
-    const mb = $(c.m), pb = $(c.p);
-    if (mb) mb.addEventListener("click", () => { applyC(c, OFF[c.key] - c.step, true); Store.set(c.ls, OFF[c.key]); });
-    if (pb) pb.addEventListener("click", () => { applyC(c, OFF[c.key] + c.step, true); Store.set(c.ls, OFF[c.key]); });
-  });
+  // ---- レイアウト設定をアカウント別に（Task 8d）----
+  // 位置調整値は preview_*__acc1 / preview_*__acc2 に保存し、アカウントごとに独立。
+  // 旧来の共通キー（preview_*）は一度だけ両アカウントへ複製して引き継ぐ（移行・冪等）。
+  function lsk(base) { return base + "__" + curAccount; }
+  (function migrateLayoutOnce() {
+    try { if (localStorage.getItem("layout_acct_split_migrated") === "1") return; } catch (e) { return; }
+    // 旧共通値（無ければ旧バージョンキー）を両アカウントの現在値へ、旧共通既定値を両既定値へ複製。
+    ["acc1", "acc2"].forEach((a) => {
+      CONTROLS.forEach((c) => {
+        const curKey = c.ls + "__" + a, defKey = c.lsDef + "__" + a;
+        const liveOld = Store.getNum(c.ls); const legacyOld = c.legacy ? Store.getNum(c.legacy) : null;
+        const live = liveOld != null ? liveOld : legacyOld;
+        if (Store.getNum(curKey) == null && live != null) Store.set(curKey, live);
+        const defOld = Store.getNum(c.lsDef);
+        if (Store.getNum(defKey) == null && defOld != null) Store.set(defKey, defOld);
+      });
+    });
+    // 旧共通キー・旧バージョンキーは退役（per-account リセット後に値が蘇らないように）。
+    CONTROLS.forEach((c) => { Store.remove(c.ls); Store.remove(c.lsDef); if (c.legacy) Store.remove(c.legacy); });
+    try { localStorage.setItem("layout_acct_split_migrated", "1"); } catch (e) {}
+  })();
 
-  // 「既定値に保存」：全コントロールの現在値を既定値として確定（次回はこの値で初期表示）
+  // 現在アカウントの保存値を OFF に反映。優先順位：当該acc現在値 → 当該acc既定値 →
+  // 共通(旧・通常は退役済) → 旧バージョンキー → 工場既定。
+  function loadOffsets(redraw) {
+    CONTROLS.forEach((c, i) => {
+      const cur = Store.getNum(lsk(c.ls)), def = Store.getNum(lsk(c.lsDef));
+      const sharedCur = Store.getNum(c.ls), sharedDef = Store.getNum(c.lsDef);
+      const legacy = c.legacy ? Store.getNum(c.legacy) : null;
+      const v = cur != null ? cur : (def != null ? def : (sharedCur != null ? sharedCur :
+        (sharedDef != null ? sharedDef : (legacy != null ? legacy : c.def))));
+      applyC(c, v, !!redraw && i === CONTROLS.length - 1);  // 最後の1回だけ再描画
+    });
+  }
+
+  CONTROLS.forEach((c) => {
+    const mb = $(c.m), pb = $(c.p);
+    if (mb) mb.addEventListener("click", () => { applyC(c, OFF[c.key] - c.step, true); Store.set(lsk(c.ls), OFF[c.key]); });
+    if (pb) pb.addEventListener("click", () => { applyC(c, OFF[c.key] + c.step, true); Store.set(lsk(c.ls), OFF[c.key]); });
+  });
+  loadOffsets(false); // 起動時の初期復元（このあとの setAccount でも再読込される）
+
+  // 「既定値に保存」：現アカウントの全コントロール現在値を既定値として確定
   if (els.voffSaveDefault) els.voffSaveDefault.addEventListener("click", () => {
-    CONTROLS.forEach((c) => { Store.set(c.lsDef, OFF[c.key]); Store.set(c.ls, OFF[c.key]); });
+    CONTROLS.forEach((c) => { Store.set(lsk(c.lsDef), OFF[c.key]); Store.set(lsk(c.ls), OFF[c.key]); });
     flashBtn(els.voffSaveDefault, "✓ 既定値に保存しました");
   });
 
-  // 「リセット」：全保存値（旧キー含む）を消し、初期状態（工場既定）に戻す
+  // 「リセット」：現アカウントの保存値だけ消し、工場既定に戻す（他アカウントには影響しない）
   if (els.voffReset) els.voffReset.addEventListener("click", () => {
-    CONTROLS.forEach((c) => { Store.remove(c.ls); Store.remove(c.lsDef); if (c.legacy) Store.remove(c.legacy); });
+    CONTROLS.forEach((c) => { Store.remove(lsk(c.ls)); Store.remove(lsk(c.lsDef)); });
     CONTROLS.forEach((c, i) => applyC(c, c.def, i === CONTROLS.length - 1));  // 最後の1回だけ再描画
     flashBtn(els.voffReset, "✓ リセットしました");
   });
@@ -473,6 +506,7 @@
     const cur = bg.getAttribute("src") || "";
     if (!cur.endsWith(want)) { bg.src = want; try { bg.load(); } catch (e) {} }
     bg.play().catch(() => {});
+    if (typeof loadOffsets === "function") loadOffsets(false); // このアカウントのレイアウト設定を反映
     preview();
     document.dispatchEvent(new CustomEvent("account-changed", { detail: { id } }));
   }
