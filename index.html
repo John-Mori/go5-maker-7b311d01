@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=58">
+<link rel="stylesheet" href="style.css?v=59">
 </head>
 <body>
 <header>
@@ -217,12 +217,15 @@
     </div>
   </section>
 
-  <!-- 過去の短縮URL履歴（このチャンネルのみ・重複は削除可） -->
+  <!-- 過去の短縮URL履歴（このチャンネルのみ・重複/破棄管理） -->
   <section class="card">
     <div class="field-label">📜 過去の短縮URL履歴（このチャンネル）</div>
-    <button id="histRefresh" class="ghost" type="button">🔄 履歴を更新</button>
-    <div id="histList" class="hist-list"><p class="hint">「🔄 履歴を更新」で、このチャンネルで投稿した短縮URLの一覧を表示します（削除も可）。</p></div>
-    <div class="hint">表示中のアカウント（月読み／宵桜艶帖）の投稿だけを表示します。同じ作品を重複投稿したものは「🗑 削除」で記録から外せます（確認あり）。</div>
+    <div class="row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <button id="histRefresh" class="ghost" type="button">🔄 履歴を更新</button>
+      <label class="bsky-toggle" style="margin:0;"><input id="histShowDiscarded" type="checkbox"><span>🗂 破棄も表示</span></label>
+    </div>
+    <div id="histList" class="hist-list"><p class="hint">「🔄 履歴を更新」で、このチャンネルで投稿した短縮URLの一覧を表示します。</p></div>
+    <div class="hint">同じ作品を重複投稿したものは <b>🚫破棄</b>（隠すだけ・<b>↩復元</b>可）。残す1本は <b>⭐本採用</b>。完全に消すときは <b>🗑物理削除</b>（取り消せません）。<b>重複</b>バッジは同じ題名が複数あるときの目印です。</div>
   </section>
 </main>
 </section>
@@ -417,17 +420,17 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=58"></script>
-<script src="app.js?v=58"></script>
-<script src="affiliate-core.js?v=58"></script>
-<script src="affiliate.js?v=58"></script>
-<script src="bluesky-core.js?v=58"></script>
-<script src="scheduler.js?v=58"></script>
-<script src="bluesky.js?v=58"></script>
-<script src="drive-upload.js?v=58"></script>
-<script src="verify-core.js?v=58"></script>
-<script src="verify.js?v=58"></script>
-<script src="integration.js?v=58"></script>
-<script src="wizard.js?v=58"></script>
+<script src="idgen.js?v=59"></script>
+<script src="app.js?v=59"></script>
+<script src="affiliate-core.js?v=59"></script>
+<script src="affiliate.js?v=59"></script>
+<script src="bluesky-core.js?v=59"></script>
+<script src="scheduler.js?v=59"></script>
+<script src="bluesky.js?v=59"></script>
+<script src="drive-upload.js?v=59"></script>
+<script src="verify-core.js?v=59"></script>
+<script src="verify.js?v=59"></script>
+<script src="integration.js?v=59"></script>
+<script src="wizard.js?v=59"></script>
 </body>
 </html>

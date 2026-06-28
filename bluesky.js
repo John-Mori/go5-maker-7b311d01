@@ -25,7 +25,7 @@
     shortUrlOut: $('shortUrlOut'), shortUrlCopy: $('shortUrlCopy'), ytDesc: $('ytDesc'), ytInsert: $('ytInsert'), ytCopy: $('ytCopy'),
     ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags'),
     discountSel: $('discountSel'), discountSel2: $('discountSel2'), discountSelPc: $('discountSelPc'),
-    histList: $('histList'), histRefresh: $('histRefresh'),
+    histList: $('histList'), histRefresh: $('histRefresh'), histShowDiscarded: $('histShowDiscarded'),
     manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
     manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
     movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn'),
@@ -587,31 +587,77 @@
   }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
   function loadHistory() { if (els.histList) renderHistory(histLoad()); }
+  // 履歴アイテムの同一性キー（破棄/採用フラグの付け外しに使う）。postUri 優先、無ければ shortUrl。
+  function histKeyOf(it) { return it && it.postUri ? 'u:' + it.postUri : 's:' + (it && it.shortUrl || ''); }
+  function histMatch(it, uri, short) { return uri ? it.postUri === uri : it.shortUrl === short; }
+  // 重複（同題名が2件以上）の判定マップを作る。破棄済みは除いて数える＝採用候補の重複だけ目立たせる。
+  function dupTitleSet(items) {
+    var cnt = {}, dup = {};
+    items.forEach(function (it) { if (it.discarded) return; var t = (it.title || '').trim(); if (!t) return; cnt[t] = (cnt[t] || 0) + 1; });
+    Object.keys(cnt).forEach(function (t) { if (cnt[t] >= 2) dup[t] = true; });
+    return dup;
+  }
   function renderHistory(items) {
     if (!els.histList) return;
+    var showDiscarded = !!(els.histShowDiscarded && els.histShowDiscarded.checked);
+    var dup = dupTitleSet(items);
+    var view = items.filter(function (it) { return showDiscarded || !it.discarded; });
     if (!items.length) { els.histList.innerHTML = '<p class="hint">このアカウントの履歴はまだありません（投稿して短縮URLが出ると、ここに自動で貯まります）。</p>'; return; }
-    els.histList.innerHTML = items.map(function (it) {
+    if (!view.length) { els.histList.innerHTML = '<p class="hint">表示できる履歴がありません（すべて破棄済み）。「🗂 破棄も表示」で確認できます。</p>'; return; }
+    els.histList.innerHTML = view.map(function (it) {
       var short = it.shortUrl || '';
-      return '<div class="hist-row">' +
-        '<div class="hist-meta">' + escapeHtml(fmtTs(it.ts)) + '　' + escapeHtml(it.title || '(無題)') + '</div>' +
+      var t = (it.title || '').trim();
+      var badges = (it.adopted ? '<span class="hist-badge adopt">⭐本採用</span>' : '') +
+        (dup[t] ? '<span class="hist-badge dup">重複</span>' : '') +
+        (it.discarded ? '<span class="hist-badge discarded">破棄</span>' : '');
+      var d = 'data-uri="' + escapeHtml(it.postUri || '') + '" data-short="' + escapeHtml(short) + '" data-title="' + escapeHtml(it.title || '') + '"';
+      return '<div class="hist-row' + (it.discarded ? ' is-discarded' : '') + '">' +
+        '<div class="hist-meta">' + escapeHtml(fmtTs(it.ts)) + '　' + escapeHtml(it.title || '(無題)') + ' ' + badges + '</div>' +
         '<div class="hist-act">' +
         '<code class="hist-url">' + escapeHtml(short) + '</code>' +
         '<button class="copy-btn hist-copy" type="button" data-url="' + escapeHtml(short) + '">コピー</button>' +
         '<button class="ghost hist-ins" type="button" data-url="' + escapeHtml(short) + '">概要欄へ</button>' +
         (it.postUrl ? '<a class="ghost" href="' + escapeHtml(it.postUrl) + '" target="_blank" rel="noopener">投稿↗</a>' : '') +
-        '<button class="ghost hist-del" type="button" data-uri="' + escapeHtml(it.postUri || '') + '" data-short="' + escapeHtml(short) + '" data-title="' + escapeHtml(it.title || '') + '">🗑 削除</button>' +
+        '<button class="ghost hist-adopt" type="button" ' + d + '>' + (it.adopted ? '⭐解除' : '⭐本採用') + '</button>' +
+        (it.discarded
+          ? '<button class="ghost hist-restore" type="button" ' + d + '>↩ 復元</button>'
+          : '<button class="ghost hist-discard" type="button" ' + d + '>🚫 破棄</button>') +
+        '<button class="ghost hist-del" type="button" ' + d + '>🗑 物理削除</button>' +
         '</div></div>';
     }).join('');
     els.histList.querySelectorAll('.hist-copy').forEach(function (b) { b.addEventListener('click', function () { copyText(b.getAttribute('data-url'), b); }); });
     els.histList.querySelectorAll('.hist-ins').forEach(function (b) { b.addEventListener('click', function () { setShareOutputs(b.getAttribute('data-url'), ''); b.textContent = '✓ 入れました'; setTimeout(function () { b.textContent = '概要欄へ'; }, 1500); }); });
+    els.histList.querySelectorAll('.hist-discard').forEach(function (b) { b.addEventListener('click', function () { setHistFlag(b.getAttribute('data-uri'), b.getAttribute('data-short'), { discarded: true }); }); });
+    els.histList.querySelectorAll('.hist-restore').forEach(function (b) { b.addEventListener('click', function () { setHistFlag(b.getAttribute('data-uri'), b.getAttribute('data-short'), { discarded: false }); }); });
+    els.histList.querySelectorAll('.hist-adopt').forEach(function (b) { b.addEventListener('click', function () { toggleAdopt(b.getAttribute('data-uri'), b.getAttribute('data-short')); }); });
     els.histList.querySelectorAll('.hist-del').forEach(function (b) { b.addEventListener('click', function () { deleteHistory(b.getAttribute('data-uri'), b.getAttribute('data-short'), b.getAttribute('data-title')); }); });
   }
+  // 破棄/復元（ソフト）。フラグを立てるだけで実体は残る＝復元可。
+  function setHistFlag(postUri, short, patch) {
+    var a = histLoad();
+    a.forEach(function (x) { if (histMatch(x, postUri, short)) { for (var k in patch) x[k] = patch[k]; } });
+    histSaveArr(a); renderHistory(a);
+  }
+  // 本採用トグル。同じ題名の他アイテムの本採用は自動で外す（1題名＝1本採用）。
+  function toggleAdopt(postUri, short) {
+    var a = histLoad();
+    var target = null;
+    a.forEach(function (x) { if (histMatch(x, postUri, short)) target = x; });
+    if (!target) return;
+    var willAdopt = !target.adopted;
+    var t = (target.title || '').trim();
+    a.forEach(function (x) { if (willAdopt && t && (x.title || '').trim() === t) x.adopted = false; });
+    target.adopted = willAdopt;
+    histSaveArr(a); renderHistory(a);
+  }
+  // 物理削除（ハード）。実体を消す＝取り消し不可。
   function deleteHistory(postUri, short, title) {
-    if (!window.confirm('「' + (title || 'この投稿') + '」を履歴から削除しますか？\n（取り消せません）')) return;
-    var a = histLoad().filter(function (x) { return postUri ? x.postUri !== postUri : x.shortUrl !== short; });
+    if (!window.confirm('「' + (title || 'この投稿') + '」を履歴から完全に削除しますか？\n（取り消せません。隠すだけなら「🚫 破棄」を使ってください）')) return;
+    var a = histLoad().filter(function (x) { return !histMatch(x, postUri, short); });
     histSaveArr(a); renderHistory(a);
   }
   if (els.histRefresh) els.histRefresh.addEventListener('click', loadHistory);
+  if (els.histShowDiscarded) els.histShowDiscarded.addEventListener('change', loadHistory);
   var ytTabBtn_ = document.getElementById('tabYT');
   if (ytTabBtn_) ytTabBtn_.addEventListener('click', loadHistory);
 

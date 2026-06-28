@@ -352,6 +352,11 @@ textarea:focus{border-color:var(--accent);}
 .hist-url{flex:1;min-width:120px;word-break:break-all;background:#070b12;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink);}
 .hist-act .copy-btn,.hist-act .ghost,.hist-act a.ghost{font-size:11px;padding:5px 9px;min-height:0;white-space:nowrap;}
 .hist-del{color:#ff8a8a;border-color:#5a2a2a;}
+.hist-row.is-discarded{opacity:.55;border-style:dashed;}
+.hist-badge{display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;margin-left:4px;vertical-align:middle;font-weight:700;}
+.hist-badge.adopt{background:rgba(80,220,160,.18);color:#50dca0;}
+.hist-badge.dup{background:rgba(255,196,0,.18);color:#ffc400;}
+.hist-badge.discarded{background:rgba(255,107,107,.16);color:#ff8a8a;}
 
 /* 8c: ±やボタンの素早い連打でダブルタップ拡大しない（ピンチズーム自体は生かす） */
 button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulation; }
