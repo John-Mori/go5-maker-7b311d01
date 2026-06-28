@@ -15,10 +15,14 @@ DAILY_LIMIT = "100"
 LABEL_ACC1 = "月詠み色恋劇場"
 LABEL_ACC2 = "宵桜艶帖～Yoizakura Tsuyacho～"
 
-# ── レート制限用 KV（SETUP.md でnamespaceを作成し id を貼る）──
-[[kv_namespaces]]
-binding = "RL"
-id = "d6eef0267cdb425a9d692635cea618ba"
+# ── レート制限用 KV（任意）──
+# ※ CI(GitHub Actions)デプロイ時、この namespace id がアカウントに見つからず失敗したため一旦無効化。
+#    Worker は RL バインディング不在でも安全に動作（rateLimited は env.RL 無しなら制限せず通す）。
+#    防御は Origin制限＋共有シークレット＋最小操作(create専用)で維持。
+#    日次上限を復活したい時は、Cloudflareで KV namespace を1つ作って下を有効化＋id を貼る。
+# [[kv_namespaces]]
+# binding = "RL"
+# id = "（CloudflareのKV namespace id）"
 
 # ── Secrets（コマンドで登録。ここには書かない）──
 #   wrangler secret put GOOGLE_CLIENT_ID
