@@ -219,6 +219,10 @@ textarea:focus{border-color:var(--accent);}
   width:22px;height:22px;flex-shrink:0;
   accent-color:var(--accent);
 }
+/* 割引ドロップダウンのすぐ右の「新作」チェック */
+.disc-new{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;white-space:nowrap;}
+.disc-new input[type=checkbox]{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent2);margin:0;}
+
 #bskySettings{margin-top:6px;}
 #bskyAppPw{
   width:100%;font-size:16px;padding:11px 12px;border-radius:10px;

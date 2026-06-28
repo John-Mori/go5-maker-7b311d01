@@ -24,8 +24,9 @@
     // bluesky.js（アカウント別に保存・テンプレ追従あり）
     bskyEnable: 1, testMode: 1, bskyUnattended: 1, movieWorkUrl: 1, bskyWorkUrl: 1,
     ytTags: 1, ytDesc: 1, bskyText: 1, bskyHandle: 1, bskyAppPw: 1, bskyGasUrl: 1,
-    // affiliate.js（afId は fanza_af_id で保存済み）／割引セレクト（アカウント切替でリセット運用）
+    // affiliate.js（afId は fanza_af_id で保存済み）／割引セレクト・新作チェック（アカウント切替でリセット運用）
     afId: 1, discountSel: 1, discountSel2: 1, discountSelPc: 1,
+    discountNew: 1, discountNew2: 1, discountNewPc: 1,
     // theme-settings.js（ボタン色）
     colorSave: 1, colorLoad: 1, colorReset: 1, colorUndo: 1,
     pickSave: 1, pickLoad: 1, pickReset: 1, pickUndo: 1,
