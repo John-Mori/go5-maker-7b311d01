@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=63">
-<link rel="apple-touch-icon" href="icon.svg?v=63">
-<link rel="icon" href="icon.svg?v=63" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest?v=64">
+<link rel="apple-touch-icon" href="icon.svg?v=64">
+<link rel="icon" href="icon.svg?v=64" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=63">
+<link rel="stylesheet" href="style.css?v=64">
 </head>
 <body>
 <header>
@@ -132,6 +132,7 @@
       <label for="discountSel2" class="field-label" style="margin:0;">割引文を挿入</label>
       <select id="discountSel2">
         <option value="">なし</option>
+        <option value="20">20%</option>
         <option value="30">30%</option>
         <option value="40">40%</option>
         <option value="50">50%</option>
@@ -211,7 +212,10 @@
         <button id="ytQSave" class="qbtn qbtn-save" type="button">Qセーブ</button>
         <button id="ytQLoad" class="qbtn qbtn-load" type="button">Qロード</button>
         <button id="ytReset" class="qbtn qbtn-reset" type="button">リセット</button>
-        <button id="ytUndo" class="qbtn qbtn-undo" type="button">元に戻す</button>
+        <div class="qbtn-pair">
+          <button id="ytUndo" class="qbtn qbtn-undo" type="button" aria-label="元に戻す" title="元に戻す">↶ 戻す</button>
+          <button id="ytRedo" class="qbtn qbtn-redo" type="button" aria-label="やり直す" title="やり直す">やり直す ↷</button>
+        </div>
       </div>
       <span id="ytQInfo" class="hint" style="margin:6px 0 0;display:block;"></span>
     </div>
@@ -258,6 +262,7 @@
       <label for="discountSel" class="field-label" style="margin:0;">割引文を挿入</label>
       <select id="discountSel">
         <option value="">なし</option>
+        <option value="20">20%</option>
         <option value="30">30%</option>
         <option value="40">40%</option>
         <option value="50">50%</option>
@@ -274,7 +279,10 @@
         <button id="bskyQSave" class="qbtn qbtn-save" type="button">Qセーブ</button>
         <button id="bskyQLoad" class="qbtn qbtn-load" type="button">Qロード</button>
         <button id="bskyReset" class="qbtn qbtn-reset" type="button">リセット</button>
-        <button id="bskyUndo" class="qbtn qbtn-undo" type="button">元に戻す</button>
+        <div class="qbtn-pair">
+          <button id="bskyUndo" class="qbtn qbtn-undo" type="button" aria-label="元に戻す" title="元に戻す">↶ 戻す</button>
+          <button id="bskyRedo" class="qbtn qbtn-redo" type="button" aria-label="やり直す" title="やり直す">やり直す ↷</button>
+        </div>
       </div>
       <span id="bskyQInfo" class="hint" style="margin:6px 0 0;display:block;"></span>
     </div>
@@ -419,7 +427,7 @@
 <main>
   <section class="card">
     <div class="field-label">🎨 編集ボタンの色（Qセーブ等）</div>
-    <div class="hint">説明欄・本文の編集ボタン（Qセーブ／Qロード／リセット／元に戻す）の色を、<b>色コード</b>で自由に変えられます。「反映」を押すと、このアプリのどの画面で表示されるボタンにも反映されます（端末内に保存）。</div>
+    <div class="hint">説明欄・本文の編集ボタン（Qセーブ／Qロード／リセット／元に戻す／やり直す）の色を、<b>色コード</b>で自由に変えられます。「反映」を押すと、このアプリのどの画面で表示されるボタンにも反映されます（端末内に保存）。</div>
     <div class="color-settings">
       <div class="color-row">
         <span class="color-name">Qセーブ</span>
@@ -445,13 +453,22 @@
         <input id="colorUndo" type="text" inputmode="text" placeholder="#7c3aed" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
         <input id="pickUndo" type="color" class="color-pick" aria-label="元に戻すの色を選ぶ">
       </div>
+      <div class="color-row">
+        <span class="color-name">やり直す</span>
+        <span class="color-swatch" id="swRedo"></span>
+        <input id="colorRedo" type="text" inputmode="text" placeholder="#0891b2" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <input id="pickRedo" type="color" class="color-pick" aria-label="やり直すの色を選ぶ">
+      </div>
     </div>
     <div class="field-label" style="margin-top:12px;">プレビュー</div>
     <div class="qedit-grid" style="max-width:320px;">
       <button class="qbtn qbtn-save" type="button">Qセーブ</button>
       <button class="qbtn qbtn-load" type="button">Qロード</button>
       <button class="qbtn qbtn-reset" type="button">リセット</button>
-      <button class="qbtn qbtn-undo" type="button">元に戻す</button>
+      <div class="qbtn-pair">
+        <button class="qbtn qbtn-undo" type="button">↶ 戻す</button>
+        <button class="qbtn qbtn-redo" type="button">やり直す ↷</button>
+      </div>
     </div>
     <div class="row" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
       <button id="colorApply" class="primary" type="button">✅ 反映する</button>
@@ -477,6 +494,7 @@
       <label for="discountSelPc" class="field-label" style="margin:0;">割引文を挿入</label>
       <select id="discountSelPc">
         <option value="">なし</option>
+        <option value="20">20%</option>
         <option value="30">30%</option>
         <option value="40">40%</option>
         <option value="50">50%</option>
@@ -499,20 +517,20 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=63"></script>
-<script src="app.js?v=63"></script>
-<script src="affiliate-core.js?v=63"></script>
-<script src="affiliate.js?v=63"></script>
-<script src="bluesky-core.js?v=63"></script>
-<script src="scheduler.js?v=63"></script>
-<script src="bluesky.js?v=63"></script>
-<script src="drive-upload.js?v=63"></script>
-<script src="verify-core.js?v=63"></script>
-<script src="verify.js?v=63"></script>
-<script src="integration.js?v=63"></script>
-<script src="wizard.js?v=63"></script>
-<script src="settings-io.js?v=63"></script>
-<script src="theme-settings.js?v=63"></script>
-<script src="persist-fields.js?v=63"></script>
+<script src="idgen.js?v=64"></script>
+<script src="app.js?v=64"></script>
+<script src="affiliate-core.js?v=64"></script>
+<script src="affiliate.js?v=64"></script>
+<script src="bluesky-core.js?v=64"></script>
+<script src="scheduler.js?v=64"></script>
+<script src="bluesky.js?v=64"></script>
+<script src="drive-upload.js?v=64"></script>
+<script src="verify-core.js?v=64"></script>
+<script src="verify.js?v=64"></script>
+<script src="integration.js?v=64"></script>
+<script src="wizard.js?v=64"></script>
+<script src="settings-io.js?v=64"></script>
+<script src="theme-settings.js?v=64"></script>
+<script src="persist-fields.js?v=64"></script>
 </body>
 </html>

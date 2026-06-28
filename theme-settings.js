@@ -15,6 +15,7 @@
     { key: "load",  varName: "--qbtn-load",  ls: "btn_color_load",  def: "#16a34a", text: "colorLoad",  pick: "pickLoad",  sw: "swLoad"  },
     { key: "reset", varName: "--qbtn-reset", ls: "btn_color_reset", def: "#d97706", text: "colorReset", pick: "pickReset", sw: "swReset" },
     { key: "undo",  varName: "--qbtn-undo",  ls: "btn_color_undo",  def: "#7c3aed", text: "colorUndo",  pick: "pickUndo",  sw: "swUndo"  },
+    { key: "redo",  varName: "--qbtn-redo",  ls: "btn_color_redo",  def: "#0891b2", text: "colorRedo",  pick: "pickRedo",  sw: "swRedo"  },
   ];
 
   function $(id) { return document.getElementById(id); }

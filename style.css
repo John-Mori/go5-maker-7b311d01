@@ -2,7 +2,7 @@
   --bg:#0f1420; --card:#1a2030; --ink:#eef2f7; --sub:#9fb0c3;
   --accent:#2bb3c0; --accent2:#dc465a; --line:#2a3346;
   /* 編集ボタン（Qセーブ等）の色。詳細設定タブで上書き保存される（theme-settings.js が :root に設定）。 */
-  --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#7c3aed;
+  --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#7c3aed; --qbtn-redo:#0891b2;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
@@ -373,6 +373,10 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 .qbtn-load{background:var(--qbtn-load);border-color:var(--qbtn-load);}
 .qbtn-reset{background:var(--qbtn-reset);border-color:var(--qbtn-reset);}
 .qbtn-undo{background:var(--qbtn-undo);border-color:var(--qbtn-undo);}
+.qbtn-redo{background:var(--qbtn-redo);border-color:var(--qbtn-redo);}
+/* 「元に戻す↶／やり直す↷」をエクセル風に1セル内へ2つ並べる（Qボタン1個分の領域） */
+.qbtn-pair{display:flex;gap:4px;}
+.qbtn-pair .qbtn{flex:1;padding:10px 2px;font-size:12px;min-width:0;}
 
 /* 詳細設定タブ：色コード入力の行 */
 .color-settings{display:flex;flex-direction:column;gap:8px;margin-top:8px;}

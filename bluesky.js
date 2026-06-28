@@ -29,8 +29,8 @@
     manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
     manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
     movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn'),
-    ytQSave: $('ytQSave'), ytQLoad: $('ytQLoad'), ytReset: $('ytReset'), ytUndo: $('ytUndo'), ytQInfo: $('ytQInfo'),
-    bskyQSave: $('bskyQSave'), bskyQLoad: $('bskyQLoad'), bskyReset: $('bskyReset'), bskyUndo: $('bskyUndo'), bskyQInfo: $('bskyQInfo')
+    ytQSave: $('ytQSave'), ytQLoad: $('ytQLoad'), ytReset: $('ytReset'), ytUndo: $('ytUndo'), ytRedo: $('ytRedo'), ytQInfo: $('ytQInfo'),
+    bskyQSave: $('bskyQSave'), bskyQLoad: $('bskyQLoad'), bskyReset: $('bskyReset'), bskyUndo: $('bskyUndo'), bskyRedo: $('bskyRedo'), bskyQInfo: $('bskyQInfo')
   };
   if (!els.text) return;
 
@@ -177,12 +177,13 @@
   if (els.ytDesc) els.ytDesc.addEventListener('input', function () { saveA('yt_desc', els.ytDesc.value); });
   if (els.ytTags) els.ytTags.addEventListener('input', function () { saveA('yt_tags', els.ytTags.value); buildTitle(); });
 
-  // ---- 説明欄／本文の編集補助：Qセーブ／Qロード／リセット／元に戻す（アカウント別・確認なし・再読込耐性あり） ----
+  // ---- 説明欄／本文の編集補助：Qセーブ／Qロード／リセット／元に戻す↶／やり直す↷（アカウント別・確認なし・再読込耐性あり） ----
   // ・Qセーブ＝今の文面を「お気に入りの下書き」として localStorage に退避（アカウント別）。
-  // ・Qロード＝退避した下書きを復元（直前の文面は「元に戻す」で戻せる）。
-  // ・リセット＝アカウント別の既定テンプレに戻す（同上、元に戻せる）。
-  // ・元に戻す＝直前の文面と現在の文面を入れ替え（押すたびにトグル＝可逆）。
+  // ・Qロード＝退避した下書きを復元。・リセット＝アカウント別の既定テンプレ文「のみ」に戻す。
+  // ・元に戻す↶／やり直す↷＝Excel風の取り消し/やり直し。手入力・Qロード・リセットを履歴に積み、双方向に移動できる。
+  //   履歴は localStorage（アカウント別）に保存＝再読込しても残る。
   var quickList = [];
+  var STACK_MAX = 50;
   function fmtAt(ms) {
     if (!ms) return '';
     var d = new Date(Number(ms));
@@ -197,15 +198,21 @@
     });
   }
   function setupQuickEdit(cfg) {
-    // cfg: { ta, base, defFn, qSave, qLoad, reset, undo, info }
+    // cfg: { ta, base, defFn, qSave, qLoad, reset, undo, redo, info }
     if (!cfg.ta) return;
+    var UNDO = cfg.base + '_undostack', REDO = cfg.base + '_redostack';
+    function loadStack(k) { try { var a = JSON.parse(loadA(k) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+    function saveStack(k, a) { saveA(k, JSON.stringify(a.slice(-STACK_MAX))); }
     function setVal(v) {
       cfg.ta.value = (v == null ? '' : v);
       saveA(cfg.base, cfg.ta.value);
       // 既存の input リスナ（保存＋プレビュー同期）を確実に走らせる。
       try { cfg.ta.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
     }
-    function pushUndo(v) { saveA(cfg.base + '_undo', v == null ? '' : v); }
+    // 変更前の文面を undo に積み、redo を捨てる（新しい編集が入ったら やり直し は無効）。
+    function pushHistory(prevVal) {
+      var u = loadStack(UNDO); u.push(prevVal == null ? '' : prevVal); saveStack(UNDO, u); saveStack(REDO, []);
+    }
     if (cfg.qSave) cfg.qSave.addEventListener('click', function () {
       saveA(cfg.base + '_quick', cfg.ta.value);
       saveA(cfg.base + '_quick_at', String(Date.now()));
@@ -214,24 +221,37 @@
     if (cfg.qLoad) cfg.qLoad.addEventListener('click', function () {
       var q = loadA(cfg.base + '_quick');
       if (q == null) { if (cfg.info) cfg.info.textContent = 'Q未保存（先にQセーブ）'; return; }
-      pushUndo(cfg.ta.value);
+      pushHistory(cfg.ta.value);
       setVal(q);
     });
     if (cfg.reset) cfg.reset.addEventListener('click', function () {
-      pushUndo(cfg.ta.value);
-      setVal(cfg.defFn());
+      pushHistory(cfg.ta.value);
+      setVal(cfg.defFn()); // 既定テンプレ文「のみ」に戻す（割引文など差し込み分も消える）
     });
     if (cfg.undo) cfg.undo.addEventListener('click', function () {
-      var u = loadA(cfg.base + '_undo');
-      if (u == null) { if (cfg.info) cfg.info.textContent = '戻す履歴なし'; return; }
-      var cur = cfg.ta.value;
-      setVal(u);
-      pushUndo(cur); // もう一度押すと戻る＝可逆トグル
+      var u = loadStack(UNDO);
+      if (!u.length) { if (cfg.info) cfg.info.textContent = '元に戻す履歴がありません'; return; }
+      var r = loadStack(REDO); r.push(cfg.ta.value); saveStack(REDO, r);
+      var v = u.pop(); saveStack(UNDO, u);
+      setVal(v);
+    });
+    if (cfg.redo) cfg.redo.addEventListener('click', function () {
+      var r = loadStack(REDO);
+      if (!r.length) { if (cfg.info) cfg.info.textContent = 'やり直す履歴がありません'; return; }
+      var u = loadStack(UNDO); u.push(cfg.ta.value); saveStack(UNDO, u);
+      var v = r.pop(); saveStack(REDO, r);
+      setVal(v);
+    });
+    // 手入力は「編集セッション単位」で履歴化：フォーカス時の値を覚え、変化があれば確定時(blur/change)に1回だけ積む。
+    var sessionStart = null;
+    cfg.ta.addEventListener('focus', function () { sessionStart = cfg.ta.value; });
+    cfg.ta.addEventListener('change', function () {
+      if (sessionStart != null && cfg.ta.value !== sessionStart) { pushHistory(sessionStart); sessionStart = cfg.ta.value; }
     });
     quickList.push({ base: cfg.base, info: cfg.info });
   }
-  setupQuickEdit({ ta: els.ytDesc, base: 'yt_desc', defFn: defYtDesc, qSave: els.ytQSave, qLoad: els.ytQLoad, reset: els.ytReset, undo: els.ytUndo, info: els.ytQInfo });
-  setupQuickEdit({ ta: els.text, base: 'bsky_text', defFn: defText, qSave: els.bskyQSave, qLoad: els.bskyQLoad, reset: els.bskyReset, undo: els.bskyUndo, info: els.bskyQInfo });
+  setupQuickEdit({ ta: els.ytDesc, base: 'yt_desc', defFn: defYtDesc, qSave: els.ytQSave, qLoad: els.ytQLoad, reset: els.ytReset, undo: els.ytUndo, redo: els.ytRedo, info: els.ytQInfo });
+  setupQuickEdit({ ta: els.text, base: 'bsky_text', defFn: defText, qSave: els.bskyQSave, qLoad: els.bskyQLoad, reset: els.bskyReset, undo: els.bskyUndo, redo: els.bskyRedo, info: els.bskyQInfo });
   refreshQuickInfo();
 
   // ---- 割引％ドロップダウン（アカウント別の割引文テンプレ） ----
