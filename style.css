@@ -1,6 +1,8 @@
 :root{
   --bg:#0f1420; --card:#1a2030; --ink:#eef2f7; --sub:#9fb0c3;
   --accent:#2bb3c0; --accent2:#dc465a; --line:#2a3346;
+  /* 編集ボタン（Qセーブ等）の色。詳細設定タブで上書き保存される（theme-settings.js が :root に設定）。 */
+  --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#7c3aed;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
@@ -360,3 +362,23 @@ textarea:focus{border-color:var(--accent);}
 
 /* 8c: ±やボタンの素早い連打でダブルタップ拡大しない（ピンチズーム自体は生かす） */
 button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulation; }
+
+/* 編集ボタン（Qセーブ／Qロード／リセット／元に戻す）＝2×2の色分けグリッド */
+.qedit{margin-top:8px;}
+.qedit-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-width:340px;}
+.qbtn{font-size:13px;font-weight:700;color:#fff;padding:10px 6px;border-radius:9px;
+  border:1px solid transparent;cursor:pointer;text-align:center;line-height:1.2;}
+.qbtn:active{filter:brightness(.9);}
+.qbtn-save{background:var(--qbtn-save);border-color:var(--qbtn-save);}
+.qbtn-load{background:var(--qbtn-load);border-color:var(--qbtn-load);}
+.qbtn-reset{background:var(--qbtn-reset);border-color:var(--qbtn-reset);}
+.qbtn-undo{background:var(--qbtn-undo);border-color:var(--qbtn-undo);}
+
+/* 詳細設定タブ：色コード入力の行 */
+.color-settings{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
+.color-row{display:flex;align-items:center;gap:8px;}
+.color-name{flex:0 0 64px;font-size:13px;font-weight:700;color:var(--ink);}
+.color-swatch{flex:0 0 22px;width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:#000;}
+.color-row input[type=text]{flex:1;min-width:0;font-family:ui-monospace,Menlo,monospace;}
+.color-pick{flex:0 0 40px;width:40px;height:38px;padding:0;border:1px solid var(--line);
+  border-radius:8px;background:#0e1422;cursor:pointer;}

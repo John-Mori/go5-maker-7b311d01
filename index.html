@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=61">
-<link rel="apple-touch-icon" href="icon.svg?v=61">
-<link rel="icon" href="icon.svg?v=61" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest?v=62">
+<link rel="apple-touch-icon" href="icon.svg?v=62">
+<link rel="icon" href="icon.svg?v=62" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=61">
+<link rel="stylesheet" href="style.css?v=62">
 </head>
 <body>
 <header>
@@ -40,6 +40,7 @@
   <button id="tabPost"  class="tab">🦋 投稿</button>
   <button id="tabAffi"  class="tab">🔗 アフィリンク</button>
   <button id="tabVerify" class="tab">🧪 検証</button>
+  <button id="tabSettings" class="tab">⚙️ 詳細設定</button>
 </nav>
 
 <!-- 動画作成画面 -->
@@ -205,12 +206,14 @@
       <button id="ytInsert" class="ghost" type="button">短縮URLを挿入</button>
       <button id="ytCopy" class="copy-btn" type="button">説明欄をコピー</button>
     </div>
-    <div class="row" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center;">
-      <button id="ytQSave" class="ghost" type="button">Qセーブ</button>
-      <button id="ytQLoad" class="ghost" type="button">Qロード</button>
-      <button id="ytReset" class="ghost" type="button">リセット</button>
-      <button id="ytUndo" class="ghost" type="button">元に戻す</button>
-      <span id="ytQInfo" class="hint" style="margin:0;"></span>
+    <div class="qedit">
+      <div class="qedit-grid">
+        <button id="ytQSave" class="qbtn qbtn-save" type="button">Qセーブ</button>
+        <button id="ytQLoad" class="qbtn qbtn-load" type="button">Qロード</button>
+        <button id="ytReset" class="qbtn qbtn-reset" type="button">リセット</button>
+        <button id="ytUndo" class="qbtn qbtn-undo" type="button">元に戻す</button>
+      </div>
+      <span id="ytQInfo" class="hint" style="margin:6px 0 0;display:block;"></span>
     </div>
     <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
   </section>
@@ -266,12 +269,14 @@
       </select>
       <span class="hint" style="margin:0;">選ぶと本文1行目の下に「○%オフのお得作品」を自動挿入。「カスタム」は数字だけ自分で入力。</span>
     </div>
-    <div class="row" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center;">
-      <button id="bskyQSave" class="ghost" type="button">Qセーブ</button>
-      <button id="bskyQLoad" class="ghost" type="button">Qロード</button>
-      <button id="bskyReset" class="ghost" type="button">リセット</button>
-      <button id="bskyUndo" class="ghost" type="button">元に戻す</button>
-      <span id="bskyQInfo" class="hint" style="margin:0;"></span>
+    <div class="qedit">
+      <div class="qedit-grid">
+        <button id="bskyQSave" class="qbtn qbtn-save" type="button">Qセーブ</button>
+        <button id="bskyQLoad" class="qbtn qbtn-load" type="button">Qロード</button>
+        <button id="bskyReset" class="qbtn qbtn-reset" type="button">リセット</button>
+        <button id="bskyUndo" class="qbtn qbtn-undo" type="button">元に戻す</button>
+      </div>
+      <span id="bskyQInfo" class="hint" style="margin:6px 0 0;display:block;"></span>
     </div>
     <div class="counter" id="postCount">0 / 300</div>
     <div class="hint">ここは<b>固定文だけ</b>。アフィリンクと画像は<b>投稿時に自動で付きます</b>（説明の括弧書きは本文に入れないでください）。</div>
@@ -409,6 +414,55 @@
 </main>
 </section>
 
+<!-- 詳細設定画面（ボタン色のカスタマイズ・色コードで指定／反映で全画面へ） -->
+<section id="pageSettings" hidden>
+<main>
+  <section class="card">
+    <div class="field-label">🎨 編集ボタンの色（Qセーブ等）</div>
+    <div class="hint">説明欄・本文の編集ボタン（Qセーブ／Qロード／リセット／元に戻す）の色を、<b>色コード</b>で自由に変えられます。「反映」を押すと、このアプリのどの画面で表示されるボタンにも反映されます（端末内に保存）。</div>
+    <div class="color-settings">
+      <div class="color-row">
+        <span class="color-name">Qセーブ</span>
+        <span class="color-swatch" id="swSave"></span>
+        <input id="colorSave" type="text" inputmode="text" placeholder="#2563eb" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <input id="pickSave" type="color" class="color-pick" aria-label="Qセーブの色を選ぶ">
+      </div>
+      <div class="color-row">
+        <span class="color-name">Qロード</span>
+        <span class="color-swatch" id="swLoad"></span>
+        <input id="colorLoad" type="text" inputmode="text" placeholder="#16a34a" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <input id="pickLoad" type="color" class="color-pick" aria-label="Qロードの色を選ぶ">
+      </div>
+      <div class="color-row">
+        <span class="color-name">リセット</span>
+        <span class="color-swatch" id="swReset"></span>
+        <input id="colorReset" type="text" inputmode="text" placeholder="#d97706" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <input id="pickReset" type="color" class="color-pick" aria-label="リセットの色を選ぶ">
+      </div>
+      <div class="color-row">
+        <span class="color-name">元に戻す</span>
+        <span class="color-swatch" id="swUndo"></span>
+        <input id="colorUndo" type="text" inputmode="text" placeholder="#7c3aed" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <input id="pickUndo" type="color" class="color-pick" aria-label="元に戻すの色を選ぶ">
+      </div>
+    </div>
+    <div class="field-label" style="margin-top:12px;">プレビュー</div>
+    <div class="qedit-grid" style="max-width:320px;">
+      <button class="qbtn qbtn-save" type="button">Qセーブ</button>
+      <button class="qbtn qbtn-load" type="button">Qロード</button>
+      <button class="qbtn qbtn-reset" type="button">リセット</button>
+      <button class="qbtn qbtn-undo" type="button">元に戻す</button>
+    </div>
+    <div class="row" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+      <button id="colorApply" class="primary" type="button">✅ 反映する</button>
+      <button id="colorResetDefault" class="ghost" type="button">既定の色に戻す</button>
+    </div>
+    <div class="hint">色コードは <code>#2563eb</code> のような16進や <code>red</code> などのCSS色名が使えます。入力中はこの画面で仮表示し、「反映」で確定保存します。</div>
+    <div id="colorStatus" class="hint"></div>
+  </section>
+</main>
+</section>
+
 <!-- 投稿前の編集できる確認（方法①自動投稿で使用） -->
 <div id="postConfirmModal" class="pc-modal" hidden>
   <div class="pc-card">
@@ -445,18 +499,19 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=61"></script>
-<script src="app.js?v=61"></script>
-<script src="affiliate-core.js?v=61"></script>
-<script src="affiliate.js?v=61"></script>
-<script src="bluesky-core.js?v=61"></script>
-<script src="scheduler.js?v=61"></script>
-<script src="bluesky.js?v=61"></script>
-<script src="drive-upload.js?v=61"></script>
-<script src="verify-core.js?v=61"></script>
-<script src="verify.js?v=61"></script>
-<script src="integration.js?v=61"></script>
-<script src="wizard.js?v=61"></script>
-<script src="settings-io.js?v=61"></script>
+<script src="idgen.js?v=62"></script>
+<script src="app.js?v=62"></script>
+<script src="affiliate-core.js?v=62"></script>
+<script src="affiliate.js?v=62"></script>
+<script src="bluesky-core.js?v=62"></script>
+<script src="scheduler.js?v=62"></script>
+<script src="bluesky.js?v=62"></script>
+<script src="drive-upload.js?v=62"></script>
+<script src="verify-core.js?v=62"></script>
+<script src="verify.js?v=62"></script>
+<script src="integration.js?v=62"></script>
+<script src="wizard.js?v=62"></script>
+<script src="settings-io.js?v=62"></script>
+<script src="theme-settings.js?v=62"></script>
 </body>
 </html>

@@ -17,7 +17,8 @@
     { btn: 'tabYT',     page: 'pageYouTube'  },
     { btn: 'tabPost',   page: 'pagePost'     },
     { btn: 'tabAffi',   page: 'pageAffi'     },
-    { btn: 'tabVerify', page: 'pageVerify'   }
+    { btn: 'tabVerify', page: 'pageVerify'   },
+    { btn: 'tabSettings', page: 'pageSettings' }
   ];
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む（遅延ロード）。
   function lazyLoadCalendar() {
