@@ -66,7 +66,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vmetrics{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:7px;font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;}
 .vmetrics .vfanza{display:flex;align-items:center;gap:6px;color:var(--gold);font-size:12px;}
 .vmetrics .vfanza input{width:64px;font-size:14px;padding:5px 7px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
-.vmetrics .vlink{margin-left:auto;color:var(--bsky);font-size:12px;text-decoration:none;white-space:nowrap;}
+.vmetrics .vlink{color:var(--bsky);font-size:12px;text-decoration:none;white-space:nowrap;}
+.vmetrics .vlink:first-of-type{margin-left:auto;}
+.vyt{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:12px;color:var(--sub);}
+.vyt input{flex:1;min-width:0;font-size:14px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
 .vsum{width:100%;border-collapse:collapse;font-size:13px;}
 .vsum th,.vsum td{border:1px solid var(--line);padding:6px 8px;text-align:center;font-variant-numeric:tabular-nums;}
 .vsum th{color:var(--accent);background:#0e1422;font-weight:700;}

@@ -119,14 +119,17 @@ async function handleRedirect(code, env, ctx) {
 
 /* ====================== クリック数取得 ====================== */
 async function handleStats(url, env) {
+  // 読み取り専用＋共有シークレット必須なので、検証タブ（ブラウザ）から読めるよう ACAO:* を付ける。
+  // クリック数は機微情報ではなく、ソフト鍵は元々クライアントにある前提（公開可）。
+  const cors = { "Access-Control-Allow-Origin": "*" };
   const secret = url.searchParams.get("secret") || "";
-  if (!env.SHARED_SECRET || secret !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, {});
+  if (!env.SHARED_SECRET || secret !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors);
   const code = (url.searchParams.get("code") || "").trim();
-  if (!code) return json({ ok: false, error: "missing_code" }, 400, {});
-  if (!env.LINKS) return json({ ok: false, error: "kv_unbound" }, 500, {});
+  if (!code) return json({ ok: false, error: "missing_code" }, 400, cors);
+  if (!env.LINKS) return json({ ok: false, error: "kv_unbound" }, 500, cors);
   const urlStr = await env.LINKS.get("u:" + code);
   const clicks = parseInt((await env.LINKS.get("c:" + code)) || "0", 10);
-  return json({ ok: true, code, exists: !!urlStr, clicks }, 200, {});
+  return json({ ok: true, code, exists: !!urlStr, clicks }, 200, cors);
 }
 
 /* ====================== ヘルパ ====================== */

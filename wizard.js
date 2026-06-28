@@ -457,6 +457,16 @@
       W.ytId = (url && typeof window.IdGen !== 'undefined' && typeof window.IdGen.youtubeId === 'function')
         ? (window.IdGen.youtubeId(url) || '')
         : '';
+      // 検証タブ（yt-clicks.js）が再生数を出せるよう、この投稿の動画URLを保存（itemKey と同形式）。
+      try {
+        if (url) {
+          var acc = W.account || 'acc1';
+          var mk = 'verify_yt__' + acc;
+          var m = JSON.parse(localStorage.getItem(mk) || '{}') || {};
+          m[W.postUri ? ('u:' + W.postUri) : ('s:' + (W.shortUrl || ''))] = url;
+          localStorage.setItem(mk, JSON.stringify(m));
+        }
+      } catch (e) {}
       recordToGas();
       _currentStep = 5;
       renderStep(5);

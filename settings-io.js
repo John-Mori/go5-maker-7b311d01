@@ -16,7 +16,7 @@
 
   // 秘密とみなすキー（アプリパスワード・各種シークレット/トークン）。「鍵を除いて」書き出しで除外。
   function isSecretKey(k) {
-    return /(app_pw|_pw__|password|secret|token|refresh)/i.test(String(k));
+    return /(app_pw|_pw__|password|secret|token|refresh|api_key)/i.test(String(k));
   }
 
   function $(id) { return document.getElementById(id); }

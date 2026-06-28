@@ -568,6 +568,8 @@
     SHORT.WORKER_URL = localStorage.getItem('short_worker_url') || SHORT.WORKER_URL;
     SHORT.SHARED_SECRET = localStorage.getItem('short_shared_secret') || SHORT.SHARED_SECRET;
   } catch (e) {}
+  // 検証タブ（yt-clicks.js）が短縮URLのクリック数を /api/stats から読むために公開（ソフト鍵＝公開可）。
+  try { window.Go5Short = { WORKER_URL: SHORT.WORKER_URL, SHARED_SECRET: SHORT.SHARED_SECRET }; } catch (e) {}
   function shortWorkerReady() {
     return /^https?:\/\//.test(SHORT.WORKER_URL) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
   }
