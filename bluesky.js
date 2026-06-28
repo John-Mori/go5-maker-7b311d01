@@ -413,8 +413,11 @@
   // ---- GAS 記録（共有シークレットは廃止） ----
   function recordToSheet(record) {
     var gasUrl = (els.gasUrl.value || '').trim(); if (!gasUrl) return Promise.resolve(null);
+    var vid = (record.videoId || currentVideoId || '');
+    var isTest = (window.IdGen && window.IdGen.isTestId) ? window.IdGen.isTestId(vid) : /^test-/.test(vid);
     var payload = {
       op: 'upsert',                                       // 新GAS：同一 videoId 行へ upsert（重複行なし）／旧GASは無視＝従来通り1行追記
+      testMode: isTest,                                   // テストモード＝GASはシートに書かない（実投稿はする）
       status: '公開済',                                    // 将来 status 列を足したら反映（現テンプレに列が無ければ無害にスキップ）
       channel: (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'),
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',

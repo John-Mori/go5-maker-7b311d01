@@ -366,8 +366,10 @@
       // 完成を通知（Bluesky自動投稿などが購読）。この時点で Canvas は最終フレームを保持している。
       // 一本道運用の背骨＝安定動画IDを“作成時（投稿前）”に発番し、購読側（Drive保存・記録）へ串刺しで渡す。
       var account = (typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "acc1";
-      var videoId = (window.IdGen && window.IdGen.makeVideoId) ? window.IdGen.makeVideoId(account, new Date()) : "";
-      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: els.top.value.trim(), blob: lastBlob, name: lastName, videoId: videoId, account: account } }));
+      var testEl = document.getElementById("testMode");
+      var isTest = !!(testEl && testEl.checked);   // テストモード＝記録しない（IDに test- 接頭辞）
+      var videoId = (window.IdGen && window.IdGen.makeVideoId) ? window.IdGen.makeVideoId(account, new Date(), { test: isTest }) : "";
+      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: els.top.value.trim(), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest } }));
     } catch (e) {
       setStatus("作成に失敗しました：" + e.message);
     } finally {

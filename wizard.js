@@ -548,6 +548,7 @@
         method: 'POST',
         body: JSON.stringify({
           op: 'upsert',
+          testMode: /^test-/.test(W.videoId || ''),  // テストモードはシートに残さない
           videoId: W.videoId,
           channel: W.account,
           youtube_url: W.ytUrl,

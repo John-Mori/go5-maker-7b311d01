@@ -189,3 +189,10 @@
   - **8c**：`touch-action: manipulation` を button/select/.ctl-btn/.tab/.acct-btn/.photo-btn に付与（±連打でダブルタップ拡大しない・ピンチズームは維持）。style.css。
   - **8e**：保護の無いURL/テキスト入力（bskyWorkUrl/bskyGasUrl/pcWorkUrl）に autocomplete/autocorrect/autocapitalize/spellcheck=off 追加。
   - `?v=54→55`。次の残：4(testMode UI)・6(Qセーブ等)・8d(レイアウトacc別)・8a/8b(座標系・要注意)・5(破棄管理)・8f(PWA/設定IO)・7(カレンダーch分離・大)。
+
+- 2026-06-28（回収②）：**Task4 テストモードのUI完成**（GAS側は既存対応済）。
+  - index.html：動画作成カードに「🧪 テストモード」チェック。
+  - app.js：testMode時に `makeVideoId(...,{test:true})`＝`test-`接頭辞のID発番＋`video-created` detail に `test`。
+  - bluesky.js：記録payloadに `testMode`（IDが test- なら true）→GASはシート未記録（実投稿はする）。
+  - drive-upload.js：test時はDrive名に `test_` 前置。wizard.jsのYT記録にも testMode 反映。
+  - 全テスト47 PASS。`?v=55→56`。残：6(Qセーブ)・8d(レイアウトacc別)・5(破棄管理)・8a/8b(座標系)・8f(PWA/設定IO)・7(カレンダーch分離)。
