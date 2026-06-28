@@ -28,7 +28,9 @@
     histList: $('histList'), histRefresh: $('histRefresh'),
     manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
     manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
-    movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn')
+    movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn'),
+    ytQSave: $('ytQSave'), ytQLoad: $('ytQLoad'), ytReset: $('ytReset'), ytUndo: $('ytUndo'), ytQInfo: $('ytQInfo'),
+    bskyQSave: $('bskyQSave'), bskyQLoad: $('bskyQLoad'), bskyReset: $('bskyReset'), bskyUndo: $('bskyUndo'), bskyQInfo: $('bskyQInfo')
   };
   if (!els.text) return;
 
@@ -118,6 +120,7 @@
     renderPreview();
     updateGasStatus();
     buildTitle();
+    if (typeof refreshQuickInfo === 'function') refreshQuickInfo();
   }
 
   // ---- gasUrl の保存配線（共有） ----
@@ -173,6 +176,63 @@
   }
   if (els.ytDesc) els.ytDesc.addEventListener('input', function () { saveA('yt_desc', els.ytDesc.value); });
   if (els.ytTags) els.ytTags.addEventListener('input', function () { saveA('yt_tags', els.ytTags.value); buildTitle(); });
+
+  // ---- 説明欄／本文の編集補助：Qセーブ／Qロード／リセット／元に戻す（アカウント別・確認なし・再読込耐性あり） ----
+  // ・Qセーブ＝今の文面を「お気に入りの下書き」として localStorage に退避（アカウント別）。
+  // ・Qロード＝退避した下書きを復元（直前の文面は「元に戻す」で戻せる）。
+  // ・リセット＝アカウント別の既定テンプレに戻す（同上、元に戻せる）。
+  // ・元に戻す＝直前の文面と現在の文面を入れ替え（押すたびにトグル＝可逆）。
+  var quickList = [];
+  function fmtAt(ms) {
+    if (!ms) return '';
+    var d = new Date(Number(ms));
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function refreshQuickInfo() {
+    quickList.forEach(function (q) {
+      if (!q.info) return;
+      var at = loadA(q.base + '_quick_at');
+      q.info.textContent = at ? ('Q保存: ' + fmtAt(at)) : 'Q未保存';
+    });
+  }
+  function setupQuickEdit(cfg) {
+    // cfg: { ta, base, defFn, qSave, qLoad, reset, undo, info }
+    if (!cfg.ta) return;
+    function setVal(v) {
+      cfg.ta.value = (v == null ? '' : v);
+      saveA(cfg.base, cfg.ta.value);
+      // 既存の input リスナ（保存＋プレビュー同期）を確実に走らせる。
+      try { cfg.ta.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+    }
+    function pushUndo(v) { saveA(cfg.base + '_undo', v == null ? '' : v); }
+    if (cfg.qSave) cfg.qSave.addEventListener('click', function () {
+      saveA(cfg.base + '_quick', cfg.ta.value);
+      saveA(cfg.base + '_quick_at', String(Date.now()));
+      refreshQuickInfo();
+    });
+    if (cfg.qLoad) cfg.qLoad.addEventListener('click', function () {
+      var q = loadA(cfg.base + '_quick');
+      if (q == null) { if (cfg.info) cfg.info.textContent = 'Q未保存（先にQセーブ）'; return; }
+      pushUndo(cfg.ta.value);
+      setVal(q);
+    });
+    if (cfg.reset) cfg.reset.addEventListener('click', function () {
+      pushUndo(cfg.ta.value);
+      setVal(cfg.defFn());
+    });
+    if (cfg.undo) cfg.undo.addEventListener('click', function () {
+      var u = loadA(cfg.base + '_undo');
+      if (u == null) { if (cfg.info) cfg.info.textContent = '戻す履歴なし'; return; }
+      var cur = cfg.ta.value;
+      setVal(u);
+      pushUndo(cur); // もう一度押すと戻る＝可逆トグル
+    });
+    quickList.push({ base: cfg.base, info: cfg.info });
+  }
+  setupQuickEdit({ ta: els.ytDesc, base: 'yt_desc', defFn: defYtDesc, qSave: els.ytQSave, qLoad: els.ytQLoad, reset: els.ytReset, undo: els.ytUndo, info: els.ytQInfo });
+  setupQuickEdit({ ta: els.text, base: 'bsky_text', defFn: defText, qSave: els.bskyQSave, qLoad: els.bskyQLoad, reset: els.bskyReset, undo: els.bskyUndo, info: els.bskyQInfo });
+  refreshQuickInfo();
 
   // ---- 割引％ドロップダウン（アカウント別の割引文テンプレ） ----
   // acc1：本文1行目の直下に「N%オフのおトク作品！」を挿入／なしで削除。

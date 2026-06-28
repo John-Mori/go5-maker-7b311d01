@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=56">
+<link rel="stylesheet" href="style.css?v=57">
 </head>
 <body>
 <header>
@@ -194,6 +194,13 @@
       <button id="ytInsert" class="ghost" type="button">短縮URLを挿入</button>
       <button id="ytCopy" class="copy-btn" type="button">説明欄をコピー</button>
     </div>
+    <div class="row" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center;">
+      <button id="ytQSave" class="ghost" type="button">Qセーブ</button>
+      <button id="ytQLoad" class="ghost" type="button">Qロード</button>
+      <button id="ytReset" class="ghost" type="button">リセット</button>
+      <button id="ytUndo" class="ghost" type="button">元に戻す</button>
+      <span id="ytQInfo" class="hint" style="margin:0;"></span>
+    </div>
     <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
   </section>
 
@@ -244,6 +251,13 @@
         <option value="custom">カスタム</option>
       </select>
       <span class="hint" style="margin:0;">選ぶと本文1行目の下に「○%オフのお得作品」を自動挿入。「カスタム」は数字だけ自分で入力。</span>
+    </div>
+    <div class="row" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center;">
+      <button id="bskyQSave" class="ghost" type="button">Qセーブ</button>
+      <button id="bskyQLoad" class="ghost" type="button">Qロード</button>
+      <button id="bskyReset" class="ghost" type="button">リセット</button>
+      <button id="bskyUndo" class="ghost" type="button">元に戻す</button>
+      <span id="bskyQInfo" class="hint" style="margin:0;"></span>
     </div>
     <div class="counter" id="postCount">0 / 300</div>
     <div class="hint">ここは<b>固定文だけ</b>。アフィリンクと画像は<b>投稿時に自動で付きます</b>（説明の括弧書きは本文に入れないでください）。</div>
@@ -403,17 +417,17 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=56"></script>
-<script src="app.js?v=56"></script>
-<script src="affiliate-core.js?v=56"></script>
-<script src="affiliate.js?v=56"></script>
-<script src="bluesky-core.js?v=56"></script>
-<script src="scheduler.js?v=56"></script>
-<script src="bluesky.js?v=56"></script>
-<script src="drive-upload.js?v=56"></script>
-<script src="verify-core.js?v=56"></script>
-<script src="verify.js?v=56"></script>
-<script src="integration.js?v=56"></script>
-<script src="wizard.js?v=56"></script>
+<script src="idgen.js?v=57"></script>
+<script src="app.js?v=57"></script>
+<script src="affiliate-core.js?v=57"></script>
+<script src="affiliate.js?v=57"></script>
+<script src="bluesky-core.js?v=57"></script>
+<script src="scheduler.js?v=57"></script>
+<script src="bluesky.js?v=57"></script>
+<script src="drive-upload.js?v=57"></script>
+<script src="verify-core.js?v=57"></script>
+<script src="verify.js?v=57"></script>
+<script src="integration.js?v=57"></script>
+<script src="wizard.js?v=57"></script>
 </body>
 </html>
