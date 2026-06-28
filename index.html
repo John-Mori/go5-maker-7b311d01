@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=54">
+<link rel="stylesheet" href="style.css?v=55">
 </head>
 <body>
 <header>
@@ -245,7 +245,7 @@
     <div class="hint">ここは<b>固定文だけ</b>。アフィリンクと画像は<b>投稿時に自動で付きます</b>（説明の括弧書きは本文に入れないでください）。</div>
 
     <label class="field-label" for="bskyWorkUrl">作品URL（投稿時にアフィリンクを自動追加）</label>
-    <input id="bskyWorkUrl" type="text" inputmode="url" placeholder="https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/">
+    <input id="bskyWorkUrl" type="text" inputmode="url" placeholder="https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     <div class="hint">af_id は「🔗 アフィリンク」タブの設定を流用。空欄なら本文だけ投稿します。この本文＋作品URLは<b>自動投稿（方法①）でも共通</b>。</div>
   </section>
 
@@ -311,7 +311,7 @@
       <button type="button" id="bskyTestBtn" class="ghost" style="margin:6px 0;">🔌 接続テスト（ログインだけ試す・投稿しません）</button>
       <div class="status" id="bskyTestResult" hidden></div>
       <label class="field-label" for="bskyGasUrl">記録用URL（Google Apps Script）</label>
-      <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/●●●/exec">
+      <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/●●●/exec" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
       <div class="hint">これを入れると<b>すべての投稿を自動で記録</b>し、🧪検証タブで集計できます（クリック数も）。記録するなら必ず設定してください。</div>
       <div id="gasStatus" class="gas-status"></div>
     </details>
@@ -369,7 +369,7 @@
     <div class="pc-title">🦋 この内容で Bluesky に投稿します（編集できます）</div>
     <div class="pc-work-row" style="margin-bottom:8px;">
       <label for="pcWorkUrl" class="field-label" style="margin:0 0 4px;display:block;">📕 案内する作品URL（今日の作品か必ず確認）</label>
-      <input id="pcWorkUrl" type="url" inputmode="url" placeholder="https://… 今回案内する作品ページのURL" style="width:100%;box-sizing:border-box;" />
+      <input id="pcWorkUrl" type="url" inputmode="url" placeholder="https://… 今回案内する作品ページのURL" style="width:100%;box-sizing:border-box;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
       <div id="pcWorkWarn" style="font-size:.82rem;margin-top:4px;"></div>
     </div>
     <textarea id="pcText" rows="8"></textarea>
@@ -399,17 +399,17 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=54"></script>
-<script src="app.js?v=54"></script>
-<script src="affiliate-core.js?v=54"></script>
-<script src="affiliate.js?v=54"></script>
-<script src="bluesky-core.js?v=54"></script>
-<script src="scheduler.js?v=54"></script>
-<script src="bluesky.js?v=54"></script>
-<script src="drive-upload.js?v=54"></script>
-<script src="verify-core.js?v=54"></script>
-<script src="verify.js?v=54"></script>
-<script src="integration.js?v=54"></script>
-<script src="wizard.js?v=54"></script>
+<script src="idgen.js?v=55"></script>
+<script src="app.js?v=55"></script>
+<script src="affiliate-core.js?v=55"></script>
+<script src="affiliate.js?v=55"></script>
+<script src="bluesky-core.js?v=55"></script>
+<script src="scheduler.js?v=55"></script>
+<script src="bluesky.js?v=55"></script>
+<script src="drive-upload.js?v=55"></script>
+<script src="verify-core.js?v=55"></script>
+<script src="verify.js?v=55"></script>
+<script src="integration.js?v=55"></script>
+<script src="wizard.js?v=55"></script>
 </body>
 </html>

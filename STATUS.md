@@ -184,3 +184,8 @@
 - アフィリンクは payload に**生のまま**（短縮しない）。
 
 - 2026-06-26（Drive保存の調整）：(1)フォルダ/動画ファイル名の `{ID}_` 前置を**撤去**＝動画名(タイトル)のみに（取り違え防止IDは記録シートの post_id のみで使用・Drive名には付けない。同名は Worker が _2,_3 で回避）。(2)**仕上がりプレビュー(合成Canvas #cv・1080×1920)を PNG で `動画名.png` として一緒に保存**（従来の元写真保存を合成プレビューに置換）。`drive-upload.js` のみ・Worker再デプロイ不要。`?v=52→53`。
+
+- 2026-06-28（改修書の残タスク回収 開始）：仕分け＝完了(1,3)／見送り(2 YouTube再生数・Supabase)／未着手(4UI,5,6,7,8a-8f)。安全な小粒から着手：
+  - **8c**：`touch-action: manipulation` を button/select/.ctl-btn/.tab/.acct-btn/.photo-btn に付与（±連打でダブルタップ拡大しない・ピンチズームは維持）。style.css。
+  - **8e**：保護の無いURL/テキスト入力（bskyWorkUrl/bskyGasUrl/pcWorkUrl）に autocomplete/autocorrect/autocapitalize/spellcheck=off 追加。
+  - `?v=54→55`。次の残：4(testMode UI)・6(Qセーブ等)・8d(レイアウトacc別)・8a/8b(座標系・要注意)・5(破棄管理)・8f(PWA/設定IO)・7(カレンダーch分離・大)。
