@@ -263,7 +263,7 @@
   // build(n, isNew)：isNew=新作チェック時の文面。mark は通常版／新作版の両方にマッチする（切替時に同じ行を差し替えるため）。
   var DISC = {
     acc1: {
-      build: function (n, isNew) { return isNew ? ('今なら' + n + '%オフのおトク作品！✨') : (n + '%オフのおトク作品！'); },
+      build: function (n, isNew) { return isNew ? ('今なら' + n + '%オフのおトク作品！✨') : (n + '%オフのおトク作品！✨'); },
       placeholder: '〇%オフのおトク作品！', mark: /オフのおトク作品/, persistent: false
     },
     acc2: {
