@@ -58,11 +58,16 @@
       authorPrefix: "作者：",
       defaultDetail: DEFAULT_DETAIL,        // "作品の詳細は右上の：から説明"（：→⋮、説明→≡説明）
       detailMenu: true,                     // 誘導文の「説明」前に ≡（ハンバーガー）を出す
-      textFill: "#fff",                     // 白文字
-      stroke: "rgba(0,0,0,1)",              // シャープな黒縁
-      bandRGB: "0,0,0",                     // 黒帯
-      glow: false,
-      iconFill: "#fff", iconHalo: "rgba(0,0,0,1)",
+      textFill: "#F5E6B8",                  // 月光金（文字）
+      stroke: "rgba(0,0,0,1)",              // glow時は未使用
+      bandRGB: "46,64,104",                 // #2E4068 宵藍の帯
+      bandAlpha255: 204,                    // 不透明度80%（acc1のみ固定＝#2E4068CC相当）
+      glow: true,                           // 淡金の発光（グロー）
+      glow1: "rgba(245,230,184,0.55)",      // 淡金（中心・小ぼかし）
+      glow2: "rgba(245,230,184,0.55)",      // 淡金（中間・中ぼかし）
+      glow3: "rgba(245,230,184,0.55)",      // 淡金（外側・大ぼかし）
+      contour: "rgba(46,64,104,0.9)",       // #2E4068 同系の細い輪郭（影＝可読性確保）
+      iconFill: "#F5E6B8", iconHalo: "rgba(46,64,104,0.95)",  // アイコンも月光金＋宵藍で統一
     },
     acc2: {
       authorPrefix: "引用：",               // A：作者：→引用：
@@ -170,7 +175,8 @@
       const tw = ctx.measureText(ln).width;
       const x = (W - tw) / 2;
       const mB = sw;  // 縁取り分だけ帯を広げ、文字が帯からはみ出ないようにする
-      ctx.fillStyle = `rgba(${theme().bandRGB},${bandAlpha / 255})`;
+      const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : bandAlpha;  // テーマで固定不透明度があれば優先
+      ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
       roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
       ctx.fill();
       paintGlyph(ln, x, y + txtY, px, sw);
@@ -221,7 +227,8 @@
     let x = (W - total) / 2;
     const mB = sw;  // 縁取り分だけ帯を広げる
     const bandY = H * (bandOff || 0);  // 軸2：この段の帯だけを上下（文字は動かさない）
-    ctx.fillStyle = `rgba(${theme().bandRGB},${175 / 255})`;
+    const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : 175;  // テーマで固定不透明度があれば優先
+    ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
     roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, total + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5); ctx.fill();
     for (let k = 0; k < segs.length; k++) {
       const [kind, val] = segs[k], w = widths[k];
