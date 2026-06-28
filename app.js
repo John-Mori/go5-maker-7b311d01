@@ -24,6 +24,8 @@
   const ROW_MIN = -0.03, ROW_MAX = 0.03;        // 段別（文字・帯とも）上下双方向（＋下／−上）
   const BANDPAD_MAX = 0.02;                      // 黒帯の余白（厚み）を追加できる上限（基準フレーム高さ比）
   const ROWGAP_MAX = 0.04;                       // 段と段の追加スペース上限（基準フレーム高さ比）
+  const TSCALE_MIN = 0.7, TSCALE_MAX = 1.5;      // 大タイトルの拡大率（1.0＝従来。影・帯は文字サイズ比なので連動）
+  const IMG_MIN = -0.15, IMG_MAX = 0.15;         // 前景画像だけの上下オフセット（基準フレーム高さ比・文字とは独立）
 
   // 縦オフセット（すべて基準フレーム高さ比）。段別は「文字」と「帯」を別個に持ち、互いに独立。
   // 文字オフセットはその段の文字描画位置にのみ加算し、段の送り（次段Y）には影響させない＝他段は不動。
@@ -33,6 +35,8 @@
     bandAuthor: 0, bandDetail: 0, bandTitle: 0,  // 各段の「黒帯」だけ
     bandPad: 0,                                  // 黒帯の余白（全段共通で厚みを足す）
     rowGap: 0,                                   // 段と段の間に足す縦スペース
+    titleScale: 1,                               // 大タイトルの拡大率（1.0＝従来。影・帯は px 比で自動連動）
+    imgY: 0,                                      // 前景画像だけの上下オフセット（文字・帯は不動）
   };
 
   const $ = (id) => document.getElementById(id);
@@ -243,7 +247,7 @@
 
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
-    const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048);
+    const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048 * (OFF.titleScale || 1));
     const padExtra = H * OFF.bandPad;   // 黒帯の余白（厚み）を全段に加算
     const rowGap = H * OFF.rowGap;      // 段と段の間に足す縦スペース
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
@@ -274,7 +278,7 @@
         const sc = (a < 1 && FG_ZOOM > 0) ? base * ((1 - FG_ZOOM) + FG_ZOOM * a) : base;
         const fw = fgImg.width * sc, fh = fgImg.height * sc;
         ctx.globalAlpha = a;
-        ctx.drawImage(fgImg, (W - fw) / 2, H * (FG_CENTER_Y + OFF.whole) - fh / 2, fw, fh);  // 軸1：テキストと同じ全体オフセット
+        ctx.drawImage(fgImg, (W - fw) / 2, H * (FG_CENTER_Y + OFF.whole + (OFF.imgY || 0)) - fh / 2, fw, fh);  // 軸1：全体オフセット＋画像だけの個別オフセット(OFF.imgY)
         ctx.globalAlpha = 1;
       }
     }
@@ -416,6 +420,8 @@
     { key: "bandTitle",  m: "btMinus",    p: "btPlus",    v: "btVal",    ls: "preview_band_title",  lsDef: "preview_band_title_default",  legacy: "preview_band_y", def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
     { key: "bandPad",    m: "bpMinus",    p: "bpPlus",    v: "bpVal",    ls: "preview_band_pad",    lsDef: "preview_band_pad_default",    legacy: null,             def: 0,            min: 0,       max: BANDPAD_MAX, step: 0.0025, signed: false },
     { key: "rowGap",     m: "rgMinus",    p: "rgPlus",    v: "rgVal",    ls: "preview_row_gap",     lsDef: "preview_row_gap_default",     legacy: null,             def: 0,            min: 0,       max: ROWGAP_MAX,  step: 0.005,  signed: false },
+    { key: "titleScale", m: "tsMinus",    p: "tsPlus",    v: "tsVal",    ls: "preview_title_scale", lsDef: "preview_title_scale_default", legacy: null,             def: 1,            min: TSCALE_MIN, max: TSCALE_MAX, step: 0.05,   signed: false },
+    { key: "imgY",       m: "iyMinus",    p: "iyPlus",    v: "iyVal",    ls: "preview_img_y",       lsDef: "preview_img_y_default",       legacy: null,             def: 0,            min: IMG_MIN, max: IMG_MAX,     step: 0.0025, signed: true  },
   ];
   function clampC(c, v) {
     if (isNaN(v)) v = c.def;
