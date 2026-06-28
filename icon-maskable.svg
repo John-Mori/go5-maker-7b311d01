@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0b0f17"/>
+  <rect x="176" y="120" width="160" height="272" rx="22" fill="#161d2b" stroke="#6ea8fe" stroke-width="7"/>
+  <polygon points="244,214 244,298 312,256" fill="#6ea8fe"/>
+  <text x="256" y="372" font-family="sans-serif" font-size="46" font-weight="700" fill="#ffffff" text-anchor="middle">5秒</text>
+</svg>
