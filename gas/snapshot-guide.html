@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>再生数スナップショット セットアップガイド</title>
+<style>
+  :root {
+    --step1: #FF6B6B;
+    --step2: #FF9F43;
+    --step3: #FECA57;
+    --step4: #48DBFB;
+    --step5: #A29BFE;
+    --warn: #FF6B6B;
+    --ok:   #26de81;
+    --bg:   #f0f4ff;
+    --card: #ffffff;
+    --text: #2d3436;
+    --sub:  #636e72;
+    --code-bg: #2d3436;
+    --code-fg: #dfe6e9;
+    --border: #dfe6e9;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, 'Helvetica Neue', 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px 16px 60px;
+    line-height: 1.65;
+  }
+  .hero {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    border-radius: 20px;
+    padding: 32px 28px;
+    margin-bottom: 32px;
+    box-shadow: 0 8px 32px rgba(102,126,234,.35);
+  }
+  .hero h1 { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+  .hero p  { font-size: 14px; opacity: .88; }
+  .hero .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .badge {
+    background: rgba(255,255,255,.22);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .step-card {
+    background: var(--card);
+    border-radius: 16px;
+    margin-bottom: 20px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,.07);
+  }
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    cursor: pointer;
+  }
+  .step-num {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 900;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .step-title { flex: 1; }
+  .step-title h2 { font-size: 16px; font-weight: 700; }
+  .step-title .sub { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  .step-arrow { font-size: 18px; color: var(--sub); transition: transform .2s; }
+  .step-body { padding: 0 20px 20px; border-top: 1px solid var(--border); }
+
+  /* step colors */
+  .s1 .step-num { background: var(--step1); box-shadow: 0 4px 12px rgba(255,107,107,.4); }
+  .s2 .step-num { background: var(--step2); box-shadow: 0 4px 12px rgba(255,159,67,.4); }
+  .s3 .step-num { background: #20bf6b;       box-shadow: 0 4px 12px rgba(32,191,107,.4); }
+  .s4 .step-num { background: var(--step4); box-shadow: 0 4px 12px rgba(72,219,251,.4); }
+  .s5 .step-num { background: var(--step5); box-shadow: 0 4px 12px rgba(162,155,254,.4); }
+  .s1 .step-header { border-left: 4px solid var(--step1); }
+  .s2 .step-header { border-left: 4px solid var(--step2); }
+  .s3 .step-header { border-left: 4px solid #20bf6b; }
+  .s4 .step-header { border-left: 4px solid var(--step4); }
+  .s5 .step-header { border-left: 4px solid var(--step5); }
+
+  .substep {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .substep-num {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: #f1f3f5;
+    color: var(--sub);
+    font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .substep-content { flex: 1; font-size: 14px; }
+  .substep-content b { color: var(--text); }
+
+  .warn-box {
+    background: #fff5f5;
+    border: 2px solid #ff6b6b44;
+    border-left: 4px solid var(--warn);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-top: 14px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .warn-box .icon { font-size: 18px; flex-shrink: 0; }
+  .warn-box .msg  { flex: 1; }
+
+  .ok-box {
+    background: #f0fff6;
+    border: 2px solid #26de8133;
+    border-left: 4px solid var(--ok);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-top: 14px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .ok-box .icon { font-size: 18px; flex-shrink: 0; }
+
+  .info-box {
+    background: #eef2ff;
+    border: 2px solid #667eea33;
+    border-left: 4px solid #667eea;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-top: 14px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .info-box .icon { font-size: 18px; flex-shrink: 0; }
+
+  .code-block {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: 'SF Mono', 'Fira Mono', monospace;
+    font-size: 13px;
+    margin-top: 10px;
+    overflow-x: auto;
+    position: relative;
+  }
+  .code-block .key   { color: #ffeaa7; }
+  .code-block .val   { color: #55efc4; }
+  .code-block .cmt   { color: #636e72; font-style: italic; }
+
+  .copy-btn {
+    position: absolute;
+    top: 10px; right: 10px;
+    background: rgba(255,255,255,.15);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .copy-btn:hover { background: rgba(255,255,255,.28); }
+  .copy-btn.copied { background: #26de81; color: #000; }
+
+  .setting-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 10px;
+    font-size: 14px;
+    flex-wrap: wrap;
+  }
+  .setting-key {
+    background: #fff3cd;
+    border: 1px solid #ffd43b;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-family: monospace;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .setting-arrow { color: var(--sub); align-self: center; }
+  .setting-val {
+    background: #d3f9d8;
+    border: 1px solid #40c057;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-family: monospace;
+    font-size: 13px;
+    flex: 1;
+  }
+
+  .tier-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 16px;
+    font-size: 13px;
+  }
+  .tier-table th {
+    background: #667eea;
+    color: #fff;
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 700;
+  }
+  .tier-table th:first-child { border-radius: 8px 0 0 0; }
+  .tier-table th:last-child  { border-radius: 0 8px 0 0; }
+  .tier-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tier-table tr:nth-child(even) td { background: #f8f9ff; }
+  .tier-table .done-row td { color: var(--sub); background: #f5f5f5; }
+  .tier-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  .checklist {
+    list-style: none;
+    margin-top: 14px;
+  }
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .checklist li:last-child { border: none; }
+  .checklist .check {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #f1f3f5;
+    border: 2px solid var(--border);
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    margin-top: 1px;
+  }
+
+  img.screen { width: 100%; border-radius: 10px; margin-top: 10px; border: 1px solid var(--border); }
+
+  .progress-bar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 28px;
+    align-items: center;
+  }
+  .pb-step {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+  }
+
+  @media (max-width: 480px) {
+    .hero h1 { font-size: 18px; }
+    .step-title h2 { font-size: 15px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>📊 再生数スナップショット<br>セットアップガイド</h1>
+  <p>YouTubeショートの再生数を投稿直後から時間ごとに自動記録するシステムです。<br>
+     このページを見ながら、上から順番に作業してください。</p>
+  <div class="badges">
+    <span class="badge">⏱ 所要時間：約10分</span>
+    <span class="badge">🔑 GAS Script Properties に設定</span>
+    <span class="badge">📋 手順5つ</span>
+  </div>
+</div>
+
+<!-- Progress -->
+<div class="progress-bar">
+  <div class="pb-step" style="background:var(--step1)"></div>
+  <div class="pb-step" style="background:var(--step2)"></div>
+  <div class="pb-step" style="background:#20bf6b"></div>
+  <div class="pb-step" style="background:var(--step4)"></div>
+  <div class="pb-step" style="background:var(--step5)"></div>
+</div>
+
+<!-- ===== STEP 1 ===== -->
+<div class="step-card s1">
+  <div class="step-header">
+    <div class="step-num">1</div>
+    <div class="step-title">
+      <h2>🔑 YouTube API キーを発行する</h2>
+      <div class="sub">GAS 専用・コード.gs のキーとは別に作る</div>
+    </div>
+  </div>
+  <div class="step-body">
+
+    <div class="warn-box">
+      <span class="icon">⚠️</span>
+      <div class="msg">
+        <b>フロント用のキーと別に作る理由</b><br>
+        GAS から YouTube API を叩くとき、リクエストにリファラーが付きません。
+        「john-mori.github.io 限定」の制限があるキーを使うと <b>403 Forbidden</b> になります。
+        GAS 専用キーは「リファラー制限なし」で作ってください。
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">①</div>
+      <div class="substep-content">
+        <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#667eea;font-weight:700;">
+          Google Cloud Console → 認証情報 ↗
+        </a> を開き、
+        <b>「認証情報を作成」→「API キー」</b> をクリック
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">②</div>
+      <div class="substep-content">
+        作成されたキーの <b>「キーを制限」</b> をクリック
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">③</div>
+      <div class="substep-content">
+        下記の通り設定する
+        <div class="setting-row">
+          <span class="setting-key">アプリケーションの制限</span>
+          <span class="setting-arrow">→</span>
+          <span class="setting-val">🚫 なし</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-key">API の制限</span>
+          <span class="setting-arrow">→</span>
+          <span class="setting-val">✅ YouTube Data API v3 のみ</span>
+        </div>
+        <div class="ok-box" style="margin-top:10px;">
+          <span class="icon">✅</span>
+          <div>「保存」してキーをコピーしておく（次の手順で使う）</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== STEP 2 ===== -->
+<div class="step-card s2">
+  <div class="step-header">
+    <div class="step-num">2</div>
+    <div class="step-title">
+      <h2>🗝️ GAS に YOUTUBE_API_KEY を追加</h2>
+      <div class="sub">Script Properties に保存する（コードには書かない）</div>
+    </div>
+  </div>
+  <div class="step-body">
+
+    <div class="substep">
+      <div class="substep-num">①</div>
+      <div class="substep-content">
+        <b>GAS エディタ</b>（コード.gs のプロジェクト）を開く
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">②</div>
+      <div class="substep-content">
+        左サイドバーの <b>「⚙️ プロジェクトの設定」</b> をクリック
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">③</div>
+      <div class="substep-content">
+        下にスクロール → <b>「スクリプト プロパティ」→「プロパティを追加」</b>
+        <div class="code-block" style="margin-top:10px;">
+          <span class="key">プロパティ名：</span> <span class="val">YOUTUBE_API_KEY</span><br>
+          <span class="key">値　　　　　：</span> <span class="val">AIza〜〜〜〜〜 （手順①でコピーしたキー）</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">④</div>
+      <div class="substep-content">
+        <b>「スクリプト プロパティを保存」</b> をクリック
+      </div>
+    </div>
+
+    <div class="warn-box">
+      <span class="icon">🚫</span>
+      <div class="msg">
+        API キーの値はここ（Script Properties）だけに置く。<br>
+        <b>スクリプトのコード・リポジトリ・チャットには絶対に書かない。</b>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== STEP 3 ===== -->
+<div class="step-card s3">
+  <div class="step-header">
+    <div class="step-num">3</div>
+    <div class="step-title">
+      <h2>📄 snapshot.gs を GAS に追加する</h2>
+      <div class="sub">リポジトリの gas/snapshot.gs をコピペするだけ</div>
+    </div>
+  </div>
+  <div class="step-body">
+
+    <div class="substep">
+      <div class="substep-num">①</div>
+      <div class="substep-content">
+        GAS エディタのサイドバー「ファイル」横の <b>「＋」→「スクリプト」</b> をクリック
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">②</div>
+      <div class="substep-content">
+        ファイル名を <b>snapshot</b> と入力（<code>.gs</code> は自動で付く）して Enter
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">③</div>
+      <div class="substep-content">
+        リポジトリの <b><code>gas/snapshot.gs</code></b> の内容を<b>全選択してコピー</b>し、
+        GAS の snapshot.gs に<b>まるごと貼り付ける</b>
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">④</div>
+      <div class="substep-content">
+        <b>Ctrl+S（または ⌘+S）</b> で保存
+      </div>
+    </div>
+
+    <div class="ok-box">
+      <span class="icon">✅</span>
+      <div>エラーが出なければ OK。ファイルタブに <b>snapshot</b> が増えていれば成功。</div>
+    </div>
+
+    <div class="info-box">
+      <span class="icon">💡</span>
+      <div>
+        <b>コード.gs との関係</b>：<code>openSS_</code> / <code>prop_</code> / <code>headerMap_</code> / <code>CH_SHEETS</code>
+        などの関数は同一プロジェクト内で共用されます。別ファイルに定義されていても問題ありません。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== STEP 4 ===== -->
+<div class="step-card s4">
+  <div class="step-header">
+    <div class="step-num">4</div>
+    <div class="step-title">
+      <h2>⏰ 30分トリガーを登録する</h2>
+      <div class="sub">setupSnapshotTrigger を一度だけ実行する</div>
+    </div>
+  </div>
+  <div class="step-body">
+
+    <div class="substep">
+      <div class="substep-num">①</div>
+      <div class="substep-content">
+        GAS エディタ上部の <b>「実行する関数」ドロップダウン</b> で
+        <div class="code-block" style="margin-top:8px;position:relative;">
+          <button class="copy-btn" onclick="copyText(this,'setupSnapshotTrigger')">コピー</button>
+          <span class="val">setupSnapshotTrigger</span>
+        </div>
+        を選択（ファイルは <b>snapshot</b>）
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">②</div>
+      <div class="substep-content">
+        <b>「▶ 実行」</b> をクリック
+        <br><small style="color:var(--sub);">※ 権限の確認ダイアログが出たら「許可」を選ぶ</small>
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">③</div>
+      <div class="substep-content">
+        実行ログに下記が表示されれば成功
+        <div class="code-block" style="margin-top:8px;">
+          <span class="val">snapshotViews トリガーを 30分ごとに登録しました。</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">④</div>
+      <div class="substep-content">
+        左サイドの <b>「🕐 トリガー」</b> アイコンをクリックして確認
+        <div class="ok-box" style="margin-top:8px;">
+          <span class="icon">✅</span>
+          <div>
+            <b>snapshotViews</b> — 時間ベース — <b>30分ごと</b><br>
+            が表示されていれば登録完了
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== STEP 5 ===== -->
+<div class="step-card s5">
+  <div class="step-header">
+    <div class="step-num">5</div>
+    <div class="step-title">
+      <h2>🧪 動作確認（手動テスト）</h2>
+      <div class="sub">snapshotViews を手動で実行して確認する</div>
+    </div>
+  </div>
+  <div class="step-body">
+
+    <div class="substep">
+      <div class="substep-num">①</div>
+      <div class="substep-content">
+        「実行する関数」を
+        <div class="code-block" style="margin-top:8px;position:relative;">
+          <button class="copy-btn" onclick="copyText(this,'snapshotViews')">コピー</button>
+          <span class="val">snapshotViews</span>
+        </div>
+        に切り替えて <b>「▶ 実行」</b>
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">②</div>
+      <div class="substep-content">
+        スプレッドシートを開いて、以下の <b>2枚の新シート</b> が自動作成されているか確認する
+        <div class="ok-box" style="margin-top:8px;">
+          <span class="icon">📋</span>
+          <div>
+            <b>再生数_管理</b> — 動画ごとの追跡状態<br>
+            <b>再生数_スナップショット</b> — 時刻別の再生数記録
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">③</div>
+      <div class="substep-content">
+        GAS の実行ログを確認する
+        <div class="code-block" style="margin-top:8px;">
+          <span class="cmt">// 例：YouTube URL 入りの行が3件あったとき</span><br>
+          <span class="val">seedNewVideos_: 3 件を再生数_管理へ追加。</span><br>
+          <span class="val">snapshotViews: 3 件スナップショット完了。</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="substep">
+      <div class="substep-num">④</div>
+      <div class="substep-content">
+        <b>再生数_スナップショット</b> シートに行が追記されていれば完成！
+      </div>
+    </div>
+
+    <div class="warn-box">
+      <span class="icon">📝</span>
+      <div class="msg">
+        <b>「再生数_管理」に動画が登録されない場合</b><br>
+        記録_ch1 / 記録_ch2 の「YouTube動画URL」列に URL が入っている行が必要です。
+        ウィザードで動画 URL を入力してから投稿した行に自動で入ります。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== TIER TABLE ===== -->
+<div class="step-card" style="border-left: 4px solid #667eea;">
+  <div class="step-header" style="border-left:none;">
+    <div class="step-num" style="background:linear-gradient(135deg,#667eea,#764ba2);box-shadow:0 4px 12px rgba(102,126,234,.4);">📊</div>
+    <div class="step-title">
+      <h2>自動記録のタイミング（ティア定義）</h2>
+      <div class="sub">動画の経過時間で間隔が自動で変わる</div>
+    </div>
+  </div>
+  <div class="step-body">
+    <table class="tier-table">
+      <tr>
+        <th>YouTube 投稿からの経過時間</th>
+        <th>記録間隔</th>
+        <th>理由</th>
+      </tr>
+      <tr>
+        <td><span class="tier-dot" style="background:#ff6b6b;"></span><b>0〜6時間</b></td>
+        <td>⚡ <b>30分ごと</b></td>
+        <td>公開直後の急成長フェーズ</td>
+      </tr>
+      <tr>
+        <td><span class="tier-dot" style="background:#ff9f43;"></span><b>6〜24時間</b></td>
+        <td>🕐 <b>2時間ごと</b></td>
+        <td>当日の伸びを把握</td>
+      </tr>
+      <tr>
+        <td><span class="tier-dot" style="background:#feca57;"></span><b>1〜7日</b></td>
+        <td>⏳ <b>6時間ごと</b></td>
+        <td>週内の継続的な伸び</td>
+      </tr>
+      <tr>
+        <td><span class="tier-dot" style="background:#a29bfe;"></span><b>7〜28日</b></td>
+        <td>📅 <b>24時間ごと</b></td>
+        <td>長期テール期</td>
+      </tr>
+      <tr class="done-row">
+        <td><span class="tier-dot" style="background:#b2bec3;"></span>28日超</td>
+        <td>🏁 記録終了</td>
+        <td>status が <code>done</code> になる</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<!-- ===== CHECKLIST ===== -->
+<div class="step-card" style="border-left:4px solid #20bf6b;">
+  <div class="step-header" style="border-left:none;">
+    <div class="step-num" style="background:#20bf6b;box-shadow:0 4px 12px rgba(32,191,107,.4);">✓</div>
+    <div class="step-title">
+      <h2>最終チェックリスト</h2>
+      <div class="sub">全部できたか確認する</div>
+    </div>
+  </div>
+  <div class="step-body">
+    <ul class="checklist">
+      <li>
+        <div class="check">1</div>
+        <div>YouTube Data API キー（GAS専用・リファラー制限なし）を発行した</div>
+      </li>
+      <li>
+        <div class="check">2</div>
+        <div>GAS Script Properties に <b>YOUTUBE_API_KEY</b> を追加して保存した</div>
+      </li>
+      <li>
+        <div class="check">3</div>
+        <div><b>gas/snapshot.gs</b> の内容を GAS の新規ファイル「snapshot」に貼り付けて保存した</div>
+      </li>
+      <li>
+        <div class="check">4</div>
+        <div><b>setupSnapshotTrigger</b> を実行して 30分トリガーを登録した</div>
+      </li>
+      <li>
+        <div class="check">5</div>
+        <div><b>snapshotViews</b> を手動実行し、スプレッドシートに 2枚の新シートが作られた</div>
+      </li>
+      <li>
+        <div class="check">🎉</div>
+        <div><b>完成！</b> 以降は 30分ごとに GAS が自動で再生数を記録し続けます</div>
+      </li>
+    </ul>
+  </div>
+</div>
+
+<!-- ===== TROUBLE ===== -->
+<div class="step-card" style="border-left:4px solid #fd9644;">
+  <div class="step-header" style="border-left:none;">
+    <div class="step-num" style="background:#fd9644;box-shadow:0 4px 12px rgba(253,150,68,.4);">🔧</div>
+    <div class="step-title">
+      <h2>トラブルシューティング</h2>
+      <div class="sub">うまくいかないときはここを見る</div>
+    </div>
+  </div>
+  <div class="step-body">
+
+    <div class="warn-box" style="margin-top:14px;">
+      <span class="icon">❌</span>
+      <div class="msg">
+        <b>ログに「YOUTUBE_API_KEY が未設定」と出る</b><br>
+        → Script Properties の設定を再確認。プロパティ名のスペルを確認（大文字・アンダースコア）
+      </div>
+    </div>
+
+    <div class="warn-box" style="margin-top:8px;">
+      <span class="icon">❌</span>
+      <div class="msg">
+        <b>YouTube API から 403 Forbidden が返る</b><br>
+        → API キーの「アプリケーションの制限」が「なし」になっているか確認
+      </div>
+    </div>
+
+    <div class="warn-box" style="margin-top:8px;">
+      <span class="icon">❌</span>
+      <div class="msg">
+        <b>「再生数_管理」が空のまま</b><br>
+        → 記録_ch1 / 記録_ch2 シートの「YouTube動画URL」列に URL を入力してから再度 snapshotViews を実行
+      </div>
+    </div>
+
+    <div class="ok-box" style="margin-top:8px;">
+      <span class="icon">🛑</span>
+      <div>
+        <b>追跡を止めたいとき</b>：<code>deleteSnapshotTrigger</code> を実行するか、
+        GAS のトリガー画面から <b>snapshotViews</b> を削除する
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function copyText(btn, text) {
+  navigator.clipboard.writeText(text).then(function() {
+    btn.textContent = '✓ コピー済';
+    btn.classList.add('copied');
+    setTimeout(function() {
+      btn.textContent = 'コピー';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+</script>
+</body>
+</html>
