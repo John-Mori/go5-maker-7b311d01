@@ -602,7 +602,7 @@
     shortenUrl(longUrl).then(function (short) {
       var url = short || longUrl;                      // 失敗時は長いURLで代替（リンクは有効）
       setShareOutputs(url, longUrl);
-      histAdd({ title: title, shortUrl: url, postUrl: longUrl, postUri: postUri });
+      histAdd({ title: title, shortUrl: url, postUrl: longUrl, postUri: postUri, videoId: currentVideoId || '' });
       if (typeof onShort === 'function') onShort(short);  // 短縮成功時のみ（長いURL代替時は空）
     });
   }
@@ -626,7 +626,7 @@
   function histAdd(rec) {
     if (!rec || !rec.shortUrl) return; // 短縮URLが取れた投稿だけ記録
     var a = histLoad().filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
-    a.unshift({ ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, postUrl: rec.postUrl || '', postUri: rec.postUri || '' });
+    a.unshift({ ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || '' });
     histSaveArr(a);
     if (els.histList) renderHistory(a);
   }

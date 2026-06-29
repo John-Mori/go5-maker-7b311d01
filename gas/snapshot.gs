@@ -120,6 +120,31 @@ function fetchYtVideos_(ids, key) {
   }
 }
 
+// ---- 記録シートの「投稿日時」をYouTube公開日時で補完 ----
+
+// ytDataMap = { [youtubeId]: { views: number, published: ms } }
+// YouTube動画URLが一致し、かつ「投稿日時」が空の行にのみ書き込む（上書きしない）。
+function updateSrcPublishedAt_(ss, ytDataMap) {
+  if (!ss || !ytDataMap) return;
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name); if (!sh) return;
+    var map = headerMap_(sh);
+    var ytCol = map['YouTube動画URL'], dtCol = map['投稿日時'];
+    if (!ytCol || !dtCol) return;
+    var last = sh.getLastRow(); if (last < 2) return;
+    var rows = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      var ytUrl = String(rows[i][ytCol - 1] || '').trim();
+      if (!ytUrl) continue;
+      var vid = youtubeIdFromUrl_(ytUrl);
+      if (!vid || !ytDataMap[vid] || !ytDataMap[vid].published) continue;
+      var existing = rows[i][dtCol - 1];
+      if (existing !== '' && existing !== null && existing !== undefined) continue;
+      sh.getRange(i + 2, dtCol).setValue(new Date(ytDataMap[vid].published));
+    }
+  });
+}
+
 // ---- シード：記録シートの新動画を管理シートへ登録 ----
 
 function seedNewVideos_() {
@@ -237,6 +262,9 @@ function snapshotViews() {
     Object.keys(data).forEach(function (id) { ytData[id] = data[id]; });
     if (b + 50 < uniqIds.length) Utilities.sleep(200);
   }
+
+  // YouTube公開日時が取れた動画について、記録シートの「投稿日時」列を補完（空の場合のみ）。
+  updateSrcPublishedAt_(ss, ytData);
 
   // スナップショット行を組み立て、管理シートを更新。
   var snapRows = [];
