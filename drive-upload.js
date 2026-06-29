@@ -103,10 +103,10 @@
     var d = (e && e.detail) || {};
     var blob = d.blob;
     if (!blob) return; // 動画Blobが取れなければ何もしない
+    if (d.test) return; // テストモード時は Drive 保存をスキップ
     var name = d.name || "video.mp4";
     var rawTitle = (d.title || "").trim() || name.replace(/\.[^.]+$/, "");
-    // テストモードは Drive 名に test_ を前置（本番の記録/保存と混ざらないように）。
-    var title = d.test ? ("test_" + rawTitle) : rawTitle;
+    var title = rawTitle;
     // フォルダ/ファイル名は動画名（タイトル）そのまま。同名は Worker 側で _2,_3… に自動回避。
     // ※安定動画IDは記録シートの post_id に使うのみ（Drive名には付けない）。
 
