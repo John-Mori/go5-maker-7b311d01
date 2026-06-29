@@ -8,6 +8,5 @@ compatibility_date = "2024-11-01"
 ALLOWED_ORIGIN = "https://john-mori.github.io"
 
 # ── Secrets（コマンドで登録。ここには書かない）──
-#   wrangler secret put SHARED_SECRET      ← フロント接続キー（drive-worker等と同作法）
-#   wrangler secret put FANZA_API_ID       ← DMM API ID
-#   wrangler secret put FANZA_AF_ID        ← DMM アフィリエイト ID
+#   wrangler secret put SHARED_SECRET      ← フロント接続キー（これだけでOK）
+#   ※ スクレイピング方式に変更したため FANZA_API_ID / FANZA_AF_ID は不要

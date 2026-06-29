@@ -1,22 +1,25 @@
 /**
- * fanza-worker — FANZA商品情報API プロキシ（go5-maker 専用）
+ * fanza-worker — FANZA商品情報スクレイパー（go5-maker 専用）
  *
- * フロント(GitHub Pages)から cid を受け取り、FANZA Affiliate API v3 を叩いて
- * 商品情報（タイトル・価格・レビュー等）を返す。
- * API ID / affiliate ID は Worker Secret にのみ保持し、レスポンス・ログに出さない。
+ * フロント(GitHub Pages)から cid を受け取り、FANZA同人商品ページをスクレイピングして
+ * タイトル・価格情報を返す。API キー不要（DMM公開ページの JSON-LD + HTML パース）。
  *
  * ルート:
  *   POST /api/fanza-item  { cid: "d_784440" } → { ok, item }
  *   GET  /                → ヘルスチェック
  *
- * 安全（drive-worker / link-worker と同方針）:
- *   - Origin 制限（env.ALLOWED_ORIGIN 単一 Origin のみ）
- *   - 共有シークレット（X-Shared-Secret ヘッダ＋env.SHARED_SECRET）
- *   - 秘密の本体（FANZA_API_ID / FANZA_AF_ID / SHARED_SECRET）は Worker Secrets のみ
- *   - レスポンス・console にキーを出さない
+ * 取得データ:
+ *   - タイトル・サークル名: JSON-LD <script type="application/ld+json">
+ *   - 現在価格: JSON-LD offers.price
+ *   - 元値(定価): .priceList__sub--big
+ *   - レビュー: JS 動的ロードのため取得不可 → null を返す
+ *
+ * 安全:
+ *   - Origin 制限（ALLOWED_ORIGIN 単一 Origin のみ）
+ *   - 共有シークレット（X-Shared-Secret ヘッダ＋SHARED_SECRET Secret）
  */
 
-const FANZA_API = "https://api.dmm.com/affiliate/v3/ItemList";
+const DMM_DOUJIN_BASE = "https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=";
 
 export default {
   async fetch(request, env) {
@@ -31,13 +34,11 @@ export default {
       if (!cors) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
       if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
 
-      // 共有シークレット
       const secret = request.headers.get("X-Shared-Secret") || "";
       if (!env.SHARED_SECRET || secret !== env.SHARED_SECRET) {
         return json({ ok: false, error: "bad_secret" }, 401, cors);
       }
 
-      // リクエストボディ解析
       let body;
       try { body = await request.json(); }
       catch (e) { return json({ ok: false, error: "bad_json" }, 400, cors); }
@@ -45,46 +46,12 @@ export default {
       const cid = String(body.cid || "").trim();
       if (!cid) return json({ ok: false, error: "missing_cid" }, 400, cors);
 
-      // API ID / affiliate ID の存在確認（ログに値は出さない）
-      if (!env.FANZA_API_ID || !env.FANZA_AF_ID) {
-        return json({ ok: false, error: "worker_not_configured" }, 503, cors);
-      }
+      const item = await scrapeFanzaItem(cid);
+      if (!item) return json({ ok: false, error: "not_found", cid }, 404, cors);
 
-      // FANZA Affiliate API v3 呼び出し
-      const params = new URLSearchParams({
-        api_id: env.FANZA_API_ID,
-        affiliate_id: env.FANZA_AF_ID,
-        site: "FANZA",
-        hits: "1",
-        cid: cid,
-        output: "json"
-      });
-      let apiRes;
-      try {
-        apiRes = await fetch(FANZA_API + "?" + params.toString());
-      } catch (e) {
-        return json({ ok: false, error: "upstream_fetch_failed" }, 502, cors);
-      }
-
-      if (!apiRes.ok) {
-        return json({ ok: false, error: "upstream_error", status: apiRes.status }, 502, cors);
-      }
-
-      let data;
-      try { data = await apiRes.json(); }
-      catch (e) { return json({ ok: false, error: "upstream_parse_failed" }, 502, cors); }
-
-      const result = data && data.result;
-      const items = result && result.items;
-      if (!items || !items.length) {
-        return json({ ok: false, error: "not_found", cid }, 404, cors);
-      }
-
-      // 安全のため、レスポンスには items[0] のみ返す（API ID 等は result に含まれない）
-      return json({ ok: true, item: items[0] }, 200, cors);
+      return json({ ok: true, item }, 200, cors);
     }
 
-    // ヘルスチェック
     if (path === "/" || path === "") {
       return text("go5-fanza-proxy ok", 200);
     }
@@ -93,7 +60,68 @@ export default {
   }
 };
 
-// ── CORS ヘルパ（drive-worker / link-worker と同パターン）──
+/**
+ * FANZA同人商品ページをスクレイピングして item オブジェクトを返す。
+ * fanza-core.js の parseFanzaItem() が期待する構造に合わせる。
+ */
+async function scrapeFanzaItem(cid) {
+  const pageUrl = DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/";
+  let res;
+  try {
+    res = await fetch(pageUrl, {
+      headers: {
+        "Cookie": "age_check_done=1",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+      }
+    });
+  } catch (e) {
+    return null;
+  }
+
+  if (!res.ok) return null;
+  const html = await res.text();
+
+  // 年齢確認ページが返ってきた場合
+  if (!html.includes("priceList") && html.includes("age_check")) return null;
+
+  // JSON-LD から Product 情報を取得
+  let jsonLd = null;
+  const ldRe = /<script\s+type="application\/ld\+json">([\s\S]*?)<\/script>/g;
+  let ldM;
+  while ((ldM = ldRe.exec(html)) !== null) {
+    try {
+      const obj = JSON.parse(ldM[1]);
+      if (obj["@type"] === "Product") { jsonLd = obj; break; }
+    } catch (e) {}
+  }
+  if (!jsonLd) return null;
+
+  const title = jsonLd.name || "";
+  const circleName = (jsonLd.brand && jsonLd.brand.name) ? String(jsonLd.brand.name) : "";
+  const currentPriceStr = (jsonLd.offers && jsonLd.offers.price != null)
+    ? String(jsonLd.offers.price) : null;
+
+  // 元値: .priceList__sub--big に「550円」形式で入っている
+  let listPriceStr = null;
+  const lpM = html.match(/priceList__sub--big[^>]*>[\s\S]{0,60}?([\d,]+)円/);
+  if (lpM) listPriceStr = lpM[1].replace(/,/g, "");
+
+  // parseFanzaItem() が期待する item 構造を組み立てる
+  return {
+    content_id: cid,
+    title: title,
+    iteminfo: { author: circleName ? [{ name: circleName }] : [] },
+    prices: {
+      list_price: listPriceStr,   // 元値（割引なし商品は null）
+      price: currentPriceStr      // 現在価格
+    },
+    review: { count: null, average: null }  // JS動的ロードのため取得不可
+  };
+}
+
+// ── CORS ヘルパ ──
 
 function corsHeaders(origin, allowed) {
   if (!allowed) return null;
