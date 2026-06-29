@@ -230,3 +230,5 @@
   - 全テスト 34 PASS / 0 FAIL（回帰なし）。
   - **Chami の手作業**：①GAS再デプロイ → ②`?action=migrate_headers` を一度呼ぶ（既存シートに6列追加）→ ③`fanza-worker` を `wrangler deploy` またはGitHub Actions でデプロイ → ④localStorage に `fanza_worker_url` / `fanza_shared_secret` を設定。
   - **キー秘匿確認**：フロントJSに API ID 記載なし。Worker レスポンス・ログにキー不出力（URLSearchParams は Worker 内部のみ）。SHARED_SECRET 未送信のまま（不変条件4維持）。
+
+- 2026-06-30（アカウント別背景色）：`theme-settings.js` に `account-changed` 連動 IIFE 追加（acc1→`#2E4068` 宵藍・acc2→`#3D1830` 葡萄梅）。`style.css` の `html,body` 背景を `var(--app-bg,var(--bg))` + `transition:.25s` に変更。`?v=86→87`。

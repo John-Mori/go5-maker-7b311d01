@@ -136,3 +136,17 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", setupUI);
   else setupUI();
 })();
+
+// ---- アカウント別背景色（account-changed CustomEvent 連動）----
+(function () {
+  var ACCOUNT_BG = { acc1: '#2E4068', acc2: '#3D1830' };
+  function applyAccountBg(id) {
+    document.documentElement.style.setProperty('--app-bg', ACCOUNT_BG[id] || ACCOUNT_BG.acc1);
+  }
+  document.addEventListener('account-changed', function (e) {
+    applyAccountBg(e.detail && e.detail.id);
+  });
+  var initId = 'acc1';
+  try { initId = localStorage.getItem('current_account') || 'acc1'; } catch (e) {}
+  applyAccountBg(initId);
+}());

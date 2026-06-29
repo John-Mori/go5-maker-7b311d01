@@ -5,8 +5,8 @@
   --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#7c3aed; --qbtn-redo:#0891b2;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
-  font-family:"Noto Sans JP",system-ui,sans-serif;}
+html,body{margin:0;padding:0;background:var(--app-bg,var(--bg));color:var(--ink);
+  font-family:"Noto Sans JP",system-ui,sans-serif;transition:background-color .25s ease;}
 header{padding:18px 16px 6px;text-align:center;}
 h1{margin:0;font-size:22px;font-weight:900;letter-spacing:.02em;}
 .sub{margin:4px 0 0;color:var(--sub);font-size:13px;}
