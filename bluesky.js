@@ -62,7 +62,7 @@
   // アカウント別の本文テンプレ既定（保存が空のときに使う）。〇 は割引％のプレースホルダ。
   var DEF_TEXT = {
     acc1: 'おすすめ漫画見つけた💕\n\n↓詳細はこちらから🎀 #PR #漫画',
-    acc2: '続きが気になっちゃう一冊、みつけた📚\nしかも今なら〇%オフ💕\n\n↓続きはこちらから🌙 #PR #漫画'
+    acc2: '続きが気になっちゃう一冊、みつけた📚\nなんと今なら〇%オフのおトク作品！✨\n\n↓続きはこちらから🌙 #PR #漫画'
   };
   function defText() { return DEF_TEXT[acctId()] || DEF_TEXT.acc1; }
 
@@ -103,6 +103,7 @@
     var wv = loadA('bsky_work_url'); var wval = (wv != null ? wv : DEF.workUrl);
     if (els.workUrl) els.workUrl.value = wval;
     if (els.movieWorkUrl) els.movieWorkUrl.value = wval;
+    updateMovieWorkLink(wval);
     paintWorkWarn(els.movieWorkWarn, wval);
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
     var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
@@ -270,8 +271,8 @@
       placeholder: '〇%オフのおトク作品！', mark: /オフのおトク作品/, persistent: false
     },
     acc2: {
-      build: function (n, isNew) { return isNew ? ('しかも今なら' + n + '%オフの新作💕') : ('しかも今なら' + n + '%オフ💕'); },
-      placeholder: 'しかも今なら〇%オフ💕', mark: /しかも今なら[^\n]*オフ/, persistent: false
+      build: function (n, isNew) { return isNew ? ('なんと今なら' + n + '%オフの新作&おトク作品！✨') : ('なんと今なら' + n + '%オフのおトク作品！✨'); },
+      placeholder: 'なんと今なら〇%オフのおトク作品！✨', mark: /(?:しかも|なんと)今なら[^\n]*オフ/, persistent: false
     }
   };
   // 割引文の挿入/差し替え/削除を行う純粋関数（対象テキストを受け取り新テキストを返す）。isNew=新作用の文面。
@@ -765,12 +766,19 @@
     return { msg: '📕 この作品を案内します。', color: '#9fd6a0' };
   }
   function paintWorkWarn(el, url) { if (!el) return; var i = workWarnInfo(url); el.textContent = i.msg; el.style.color = i.color; }
+  function updateMovieWorkLink(url) {
+    var el = document.getElementById('movieWorkLink');
+    if (!el) return;
+    if (url) { el.href = url; el.textContent = url; }
+    else { el.href = '#'; el.textContent = '（URLを入力してください）'; }
+  }
 
   // 作品URLを一元的に更新（動画作成タブ⇔投稿タブ⇔localStorage を同期）。fromMovie=動画作成タブ起点。
   function syncWorkUrl(v, fromMovie) {
     saveA('bsky_work_url', v);
     if (els.workUrl && fromMovie) els.workUrl.value = v;
     if (els.movieWorkUrl && !fromMovie) els.movieWorkUrl.value = v;
+    updateMovieWorkLink(v);
     paintWorkWarn(els.movieWorkWarn, v);
     renderPreview(); updateGasStatus();
   }
@@ -812,7 +820,7 @@
       }
       function ok() {
         // 確定した作品URLを保存＆反映（記録・YT説明欄・プレビューの作品も揃う）。
-        if (els.pcWorkUrl && els.workUrl) { var w = els.pcWorkUrl.value.trim(); els.workUrl.value = w; if (els.movieWorkUrl) els.movieWorkUrl.value = w; saveA('bsky_work_url', w); setLastPostedWork(w); paintWorkWarn(els.movieWorkWarn, w); }
+        if (els.pcWorkUrl && els.workUrl) { var w = els.pcWorkUrl.value.trim(); els.workUrl.value = w; if (els.movieWorkUrl) els.movieWorkUrl.value = w; saveA('bsky_work_url', w); setLastPostedWork(w); paintWorkWarn(els.movieWorkWarn, w); updateMovieWorkLink(w); }
         var v = els.pcText.value; cleanup(); resolve(v);
       }
       function cancel() { cleanup(); resolve(null); }
