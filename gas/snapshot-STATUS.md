@@ -24,7 +24,7 @@
 ### データの流れ
 
 ```
-記録_ch1 / 記録_ch2
+月詠み / 宵桜艶帖
   └─ YouTube動画URL 列
        └─ youtubeIdFromUrl_() で 11文字ID を抽出
             └─ 再生数_管理 (active) に登録
