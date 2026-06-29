@@ -129,7 +129,7 @@
         '<div class="vmetrics">' +
         '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
         '<span title="Bsky投稿クリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
-        (it.shortUrl ? '<a class="vlink" href="' + esc(it.shortUrl) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
+        (it.shortUrl || it.postUrl ? '<a class="vlink" href="' + esc(it.shortUrl || it.postUrl) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
         (yt ? '<a class="vlink" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
         '</div>' +
         '<div class="vrow-foot">' +
@@ -169,18 +169,31 @@
     refresh();
   }
 
-  // YouTube動画を手動で追加（URLを貼るだけ。タイトル・再生数・投稿日時はAPIで取得）。
+  // YouTube動画を手動で追加（YouTube URL必須・Bluesky投稿URL任意）。
   function addManual() {
-    var url = window.prompt('追加するYouTube動画のURLを貼り付けてください\n（例：https://youtu.be/XXXXXXXXXXX）');
-    if (url == null) return;
-    url = url.trim(); if (!url) return;
-    var vid = ytIdOf(url);
+    var ytUrl = window.prompt('① YouTube動画のURLを貼り付けてください\n（例：https://youtu.be/XXXXXXXXXXX）');
+    if (ytUrl == null) return;
+    ytUrl = ytUrl.trim(); if (!ytUrl) return;
+    var vid = ytIdOf(ytUrl);
     if (!vid) { window.alert('YouTubeのURLを認識できませんでした。\nhttps://youtu.be/… か https://www.youtube.com/watch?v=… 形式を貼ってください。'); return; }
+
+    var bskyUrl = window.prompt('② 紐付けるBluesky投稿URLを貼り付けてください（省略OK→そのままキャンセルまたは空白でOK）\n（例：https://bsky.app/profile/handle/post/xxxxx　または短縮URL）');
+    bskyUrl = (bskyUrl || '').trim();
+
     var id = 'm:' + new Date().getTime();
+    var entry = { manual: true, id: id, ts: 0 };
+    if (bskyUrl) {
+      var w = (window.Go5Short && window.Go5Short.WORKER_URL) ? window.Go5Short.WORKER_URL.replace(/\/+$/, '') : '';
+      if (w && bskyUrl.indexOf(w) === 0) {
+        entry.shortUrl = bskyUrl; // go5-short短縮URL→クリック数も取得可
+      } else {
+        entry.postUrl = bskyUrl;  // bsky.app URLなどはリンクのみ
+      }
+    }
     var manual = loadManual();
-    manual.push({ manual: true, id: id, ts: 0 });
+    manual.push(entry);
     saveArr(manualKey(), manual);
-    var m = loadYtMap(); m[id] = url; saveYtMap(m);
+    var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
     refresh();
   }
 
