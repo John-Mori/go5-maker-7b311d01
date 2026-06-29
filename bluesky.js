@@ -16,7 +16,8 @@
     testBtn: $('bskyTestBtn'), testResult: $('bskyTestResult'),
     bskyStatus: $('bskyStatus'), postStatus: $('postStatus'), postNow: $('postNowBtn'),
     schedAt: $('postSchedAt'), reserveBtn: $('postReserveBtn'), unattended: $('bskyUnattended'),
-    postImg: $('postImg'), postImgName: $('postImgName'), postImgClear: $('postImgClear'),
+    postImg: $('postImg'), postImgName: $('postImgName'), postImgClear: $('postImgClear'), postImgPreview: $('postImgPreview'),
+    pcImg: $('pcImg'), pcImgClear: $('pcImgClear'), pcImgPreview: $('pcImgPreview'), pcImgName: $('pcImgName'),
     pvName: $('pvName'), pvHandle: $('pvHandle'), pvBody: $('pvBody'),
     pvImgWrap: $('pvImgWrap'), pvImg: $('pvImg'), pvImgNote: $('pvImgNote'),
     pvAvatar: $('pvAvatar'), pvAvFallback: $('pvAvFallback'),
@@ -35,7 +36,7 @@
   };
   if (!els.text) return;
 
-  var selectedPostFile = null, lastImgUrl = null;
+  var selectedPostFile = null, pcSelectedFile = null, lastImgUrl = null;
   // drive-upload.js と scheduler.js が動画作成フロー時に参照するため公開（ソフト参照）
   try { window.BskyExtra = { getFile: function () { return selectedPostFile; } }; } catch (e) {}
   // 一本道の背骨：直近の動画作成で発番された安定動画ID。投稿記録に串刺しで持たせる。
@@ -456,14 +457,35 @@
       selectedPostFile = f;
       if (els.postImgName) els.postImgName.textContent = f.name;
       if (els.postImgClear) els.postImgClear.style.display = '';
+      if (els.postImgPreview) { els.postImgPreview.src = URL.createObjectURL(f); els.postImgPreview.style.display = ''; }
       renderPreview();
     });
   }
   if (els.postImgClear) {
     els.postImgClear.addEventListener('click', function () {
+      if (els.postImgPreview && els.postImgPreview.src) { URL.revokeObjectURL(els.postImgPreview.src); els.postImgPreview.src = ''; els.postImgPreview.style.display = 'none'; }
       selectedPostFile = null; if (els.postImg) els.postImg.value = '';
       if (els.postImgName) els.postImgName.textContent = '未選択';
       els.postImgClear.style.display = 'none'; renderPreview();
+    });
+  }
+
+  // ---- 確認モーダルの画像選択（動画フロー専用・selectedPostFile とは独立） ----
+  if (els.pcImg) {
+    els.pcImg.addEventListener('change', function () {
+      var f = els.pcImg.files[0]; if (!f) return;
+      pcSelectedFile = f;
+      if (els.pcImgName) els.pcImgName.textContent = f.name;
+      if (els.pcImgClear) els.pcImgClear.style.display = '';
+      if (els.pcImgPreview) { els.pcImgPreview.src = URL.createObjectURL(f); els.pcImgPreview.style.display = ''; }
+    });
+  }
+  if (els.pcImgClear) {
+    els.pcImgClear.addEventListener('click', function () {
+      if (els.pcImgPreview && els.pcImgPreview.src) { URL.revokeObjectURL(els.pcImgPreview.src); els.pcImgPreview.src = ''; els.pcImgPreview.style.display = 'none'; }
+      pcSelectedFile = null; if (els.pcImg) els.pcImg.value = '';
+      if (els.pcImgName) els.pcImgName.textContent = '未選択（画像なしで投稿）';
+      els.pcImgClear.style.display = 'none';
     });
   }
 
@@ -772,7 +794,12 @@
       if (els.pcWorkUrl) els.pcWorkUrl.value = (els.workUrl && els.workUrl.value || '').trim();
       els.pcText.value = text;
       if (els.discountSelPc) els.discountSelPc.value = '';
-      if (els.pcNote) els.pcNote.textContent = note || '';
+      // 画像選択をリセット（モーダルを開くたびに白紙から選択させる）
+      pcSelectedFile = null;
+      if (els.pcImg) els.pcImg.value = '';
+      if (els.pcImgName) els.pcImgName.textContent = '未選択（画像なしで投稿）';
+      if (els.pcImgClear) els.pcImgClear.style.display = 'none';
+      if (els.pcImgPreview) { els.pcImgPreview.src = ''; els.pcImgPreview.style.display = 'none'; }
       updateWorkWarn();
       els.pcModal.hidden = false;
 
@@ -865,17 +892,14 @@
     var composed = composePostText();
     if (!composed.trim()) { setBskyStatus('投稿本文が空です（「🦋 投稿」タブで入力）。'); return; }
     var alt = (ev && ev.detail && ev.detail.title) ? String(ev.detail.title) : (composed.split('\n')[0] || '');
-    confirmEditable(composed, selectedPostFile ? 'この動画の元写真＋追加画像を自動で添付します' : 'この動画の元写真を1枚自動で添付します').then(function (edited) {
+    confirmEditable(composed, null).then(function (edited) {
       if (edited == null) { setBskyStatus('自動投稿をキャンセルしました。'); return; }
       if (!edited.trim()) { setBskyStatus('本文が空のため中止しました。'); return; }
       var gasSet = !!(els.gasUrl.value || '').trim();
       setBskyStatus('Bluesky に投稿中…');
-      var photo = photoFile();
-      var extra = selectedPostFile;
-      var basePrep = photo ? compressFile(photo) : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
-      var extraPrep = extra ? compressFile(extra) : Promise.resolve(null);
-      Promise.all([basePrep, extraPrep])
-        .then(function (blobArr) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlobs: blobArr.filter(Boolean), alt: alt }); })
+      var imgPrep = pcSelectedFile ? compressFile(pcSelectedFile) : Promise.resolve(null);
+      imgPrep
+        .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
         .then(function (res) { setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '・記録しました' : '')); notifyPosted(res, edited, alt); })
         .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); });
     });

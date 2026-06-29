@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=82">
-<link rel="apple-touch-icon" href="icon.svg?v=82">
-<link rel="icon" href="icon.svg?v=82" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest?v=83">
+<link rel="apple-touch-icon" href="icon.svg?v=83">
+<link rel="icon" href="icon.svg?v=83" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=82">
+<link rel="stylesheet" href="style.css?v=83">
 </head>
 <body>
 <header>
@@ -305,6 +305,7 @@
       <button class="ghost" id="postImgClear" style="display:none;">画像を外す</button>
     </div>
     <div class="hint" id="postImgName">未選択</div>
+    <img id="postImgPreview" alt="" style="max-width:100%;max-height:120px;border-radius:6px;margin-top:6px;display:none;">
   </section>
 
   <!-- プレビュー -->
@@ -530,7 +531,13 @@
       <label class="disc-new"><input id="discountNewPc" type="checkbox"><span>新作</span></label>
       <span class="hint" style="margin:0;">この投稿だけに割引文を挿入（上の本文に反映）。「新作」で新作用の文面。</span>
     </div>
-    <div class="pc-note" id="pcNote">画像：この動画の元写真を自動で添付します</div>
+    <div class="pc-img-row" style="margin-top:10px;">
+      <label for="pcImg" class="photo-btn" id="pcImgBtn">📷 添付画像を選ぶ（任意）</label>
+      <input id="pcImg" type="file" accept="image/*" hidden autocomplete="off">
+      <button id="pcImgClear" type="button" class="ghost" style="display:none;margin-left:6px;margin-top:6px;">外す</button>
+      <div class="hint" id="pcImgName" style="margin-top:4px;">未選択（画像なしで投稿）</div>
+      <img id="pcImgPreview" alt="" style="max-width:100%;max-height:120px;border-radius:6px;margin-top:6px;display:none;">
+    </div>
     <div class="pc-actions">
       <button id="pcCancel" class="ghost">キャンセル</button>
       <button id="pcOk" class="primary bsky-post-btn">投稿する</button>
@@ -541,22 +548,22 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=82"></script>
-<script src="app.js?v=82"></script>
-<script src="affiliate-core.js?v=82"></script>
-<script src="affiliate.js?v=82"></script>
-<script src="bluesky-core.js?v=82"></script>
-<script src="scheduler.js?v=82"></script>
-<script src="bluesky.js?v=82"></script>
-<script src="drive-upload.js?v=82"></script>
-<script src="verify-core.js?v=82"></script>
-<script src="verify.js?v=82"></script>
-<script src="yt-clicks.js?v=82"></script>
-<script src="integration.js?v=82"></script>
-<script src="wizard.js?v=82"></script>
-<script src="settings-io.js?v=82"></script>
-<script src="theme-settings.js?v=82"></script>
-<script src="persist-fields.js?v=82"></script>
+<script src="idgen.js?v=83"></script>
+<script src="app.js?v=83"></script>
+<script src="affiliate-core.js?v=83"></script>
+<script src="affiliate.js?v=83"></script>
+<script src="bluesky-core.js?v=83"></script>
+<script src="scheduler.js?v=83"></script>
+<script src="bluesky.js?v=83"></script>
+<script src="drive-upload.js?v=83"></script>
+<script src="verify-core.js?v=83"></script>
+<script src="verify.js?v=83"></script>
+<script src="yt-clicks.js?v=83"></script>
+<script src="integration.js?v=83"></script>
+<script src="wizard.js?v=83"></script>
+<script src="settings-io.js?v=83"></script>
+<script src="theme-settings.js?v=83"></script>
+<script src="persist-fields.js?v=83"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */

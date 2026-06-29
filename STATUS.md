@@ -200,3 +200,10 @@
   - bluesky.js：記録payloadに `testMode`（IDが test- なら true）→GASはシート未記録（実投稿はする）。
   - drive-upload.js：test時はDrive名に `test_` 前置。wizard.jsのYT記録にも testMode 反映。
   - 全テスト47 PASS。`?v=55→56`。残：6(Qセーブ)・8d(レイアウトacc別)・5(破棄管理)・8a/8b(座標系)・8f(PWA/設定IO)・7(カレンダーch分離)。
+
+- 2026-06-30（命令書B：Bluesky投稿画像の差し替え）：
+  - **要件確定（Chami確認済）**：動画フロー投稿時は「元写真は添付しない」「確認モーダルで選んだ画像のみ添付（未選択なら画像なし）」。🦋タブ単独投稿の `#postImg` は現状維持。
+  - **index.html**：確認モーダル(`#postConfirmModal`)に `#pcImg` ピッカー＋サムネイル(`#pcImgPreview`)＋「外す」ボタン追加。`#postImg` 欄にもサムネイル(`#postImgPreview`)追加。旧 `pcNote`（固定テキスト）を除去し画像選択UIへ置換。
+  - **bluesky.js**：`pcSelectedFile` 変数追加。モーダル開封時に毎回リセット。`#pcImg` change / `#pcImgClear` click ハンドラ追加。動画フロー（`handleVideoCreated`）は `pcSelectedFile` のみで `imageBlob` を送信（旧：`photoFile()＋selectedPostFile` で `imageBlobs[]`）。🦋タブ `#postImg` にサムネイル表示・クリア処理を追加。
+  - Drive保存（`drive-upload.js`）の `BskyExtra.getFile` は `selectedPostFile` のまま（タイミング上モーダル選択が間に合わないため変更なし）。
+  - `?v=82→83`。不変条件全て維持。iOS実機確認：Chamiに依頼。
