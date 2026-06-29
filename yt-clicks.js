@@ -125,14 +125,17 @@
         '<div class="vrow-h">' + dateHtml + ' ' + esc(title) +
         (it.videoId ? ' <span class="vtag vtag-id">' + esc(it.videoId) + '</span>' : '') +
         (it.manual ? ' <span class="vtag">手動</span>' : '') +
-        ' <button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button></div>' +
+        '</div>' +
         '<div class="vmetrics">' +
         '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
-        '<span title="短縮URLクリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
-        (it.shortUrl ? '<a class="vlink" href="' + esc(it.shortUrl) + '" target="_blank" rel="noopener">短縮URL↗</a>' : '') +
-        (yt ? '<a class="vlink" href="' + esc(yt) + '" target="_blank" rel="noopener">動画↗</a>' : '') +
+        '<span title="Bsky投稿クリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
+        (it.shortUrl ? '<a class="vlink" href="' + esc(it.shortUrl) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
+        (yt ? '<a class="vlink" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
         '</div>' +
+        '<div class="vrow-foot">' +
         '<label class="vyt">YouTube URL <input type="url" inputmode="url" placeholder="https://youtu.be/… を貼ると再生数・投稿日時を取得" data-k="' + esc(k) + '" value="' + esc(yt) + '"></label>' +
+        '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
+        '</div>' +
         '</div>';
     }).join('');
     list.querySelectorAll('input[data-k]').forEach(function (inp) {
