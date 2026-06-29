@@ -83,13 +83,14 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-foot .vdel:active{opacity:1;}
 /* ── URL編集モーダル ── */
 .vedit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;box-sizing:border-box;}
+.vedit-overlay[hidden]{display:none !important;}
 .vedit-modal{background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:20px 18px;width:100%;max-width:480px;box-sizing:border-box;}
 .vedit-title{font-size:15px;font-weight:700;color:var(--ink);margin:0 0 14px;}
 .vedit-error{font-size:12px;color:#ff7b7b;margin:0 0 12px;line-height:1.5;white-space:pre-line;}
 .vedit-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--sub);margin-bottom:12px;}
 .vedit-field input{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);width:100%;box-sizing:border-box;}
 .vedit-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px;}
-.vedit-actions button{font-size:14px;padding:8px 18px;border-radius:8px;cursor:pointer;border:1px solid var(--line);}
+.vedit-actions button{font-size:14px;padding:8px 18px;border-radius:8px;cursor:pointer;border:1px solid var(--line);width:auto;margin-top:0;}
 #veditCancel{background:transparent;color:var(--sub);}
 #veditSave{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;}
 .vsum{width:100%;border-collapse:collapse;font-size:13px;}
