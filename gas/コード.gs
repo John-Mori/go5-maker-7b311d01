@@ -26,9 +26,15 @@ var HEADERS40 = [
   'FANZA発生成約','FANZA確定成約','発生報酬¥','確定報酬¥','承認率%','リンククリック率%','CVR発生%','CVR確定%',
   'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','post_uri','クリック更新日時','反応更新日時'
 ];
+// FANZA投稿時スナップショット列（記録シート末尾追加。既存40列は不変）。
+// レビュー件数は販売部数の代理指標（実際の売上本数は取得不可）。
+var FANZA_HEADERS = [
+  '元値list_price','割引後price','割引率pct','FANZA取得日時',
+  'レビュー件数(代理指標)','レビュー平均'
+];
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-06-29B（シート名変更: 記録_ch1→月詠み / 記録_ch2→宵桜艶帖）';
+var GAS_VERSION = '2026-06-30A（FANZA価格スナップショット列追加）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -58,7 +64,11 @@ function doGet(e) {
   //   再デプロイが成功していれば下の GAS_VERSION が返る。古い値や別物なら未反映。
   if (p.ping) {
     return jsonOut_({ ok: true, version: GAS_VERSION, now: new Date().toISOString(),
-      bitly: 'removed', features: ['upsert', 'testMode', 'da.gd', 'link-worker-clicks'] });
+      bitly: 'removed', features: ['upsert', 'testMode', 'da.gd', 'link-worker-clicks', 'fanza-snapshot'] });
+  }
+  // 一回限りのヘッダ移行: <exec URL>?action=migrate_headers で既存シートに FANZA 列を追加する。
+  if (p.action === 'migrate_headers') {
+    return jsonOut_(migrateHeaders_());
   }
   // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
   if (p.callback) {
@@ -120,6 +130,27 @@ function deleteRecord_(channel, postUri, short) {
   return cleared;
 }
 
+// 既存シートに FANZA_HEADERS を末尾追加する一回限りの移行関数。
+// <exec URL>?action=migrate_headers で呼ぶ。既に存在する列は追加しない（冪等）。
+function migrateHeaders_() {
+  var result = [];
+  var ss = openSS_();
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { result.push({ sheet: name, status: 'not_found' }); return; }
+    var lastCol = sh.getLastColumn();
+    if (lastCol < 1) { result.push({ sheet: name, status: 'empty' }); return; }
+    var existing = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    var missing = FANZA_HEADERS.filter(function (h) { return existing.indexOf(h) === -1; });
+    if (missing.length === 0) { result.push({ sheet: name, added: [], status: 'already_up_to_date' }); return; }
+    missing.forEach(function (h) {
+      sh.getRange(1, sh.getLastColumn() + 1).setValue(h);
+    });
+    result.push({ sheet: name, added: missing, status: 'ok' });
+  });
+  return { ok: true, result: result };
+}
+
 function doPost(e) {
   try {
     var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
@@ -132,7 +163,10 @@ function doPost(e) {
       videoId: body.videoId || '',   // 背骨ID。あれば post_id に採用＋同ID行へ upsert（重複行を作らない）
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
-      youtubeUrl: body.youtube_url || ''   // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
+      youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
+      fanza_list_price: body.fanza_list_price, fanza_price: body.fanza_price,
+      fanza_discount_pct: body.fanza_discount_pct, fanza_fetched_at: body.fanza_fetched_at || '',
+      fanza_review_count: body.fanza_review_count, fanza_review_avg: body.fanza_review_avg
     });
     return jsonOut_({ ok: true, shortUrl: r.shortUrl, row: r.row });
   } catch (err) {
@@ -238,6 +272,13 @@ function writeRecord_(channel, f) {
   putIf('短縮URL', shortUrl);
   putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('post_uri', f.postUri || '');
+  // FANZA 価格スナップショット（投稿時1回のみ。null は書かない＝既存値を保護）。
+  putIf('元値list_price', f.fanza_list_price !== undefined && f.fanza_list_price !== null ? f.fanza_list_price : '');
+  putIf('割引後price', f.fanza_price !== undefined && f.fanza_price !== null ? f.fanza_price : '');
+  putIf('割引率pct', f.fanza_discount_pct !== undefined && f.fanza_discount_pct !== null ? f.fanza_discount_pct : '');
+  putIf('FANZA取得日時', f.fanza_fetched_at || '');
+  putIf('レビュー件数(代理指標)', f.fanza_review_count !== undefined && f.fanza_review_count !== null ? f.fanza_review_count : '');
+  putIf('レビュー平均', f.fanza_review_avg !== undefined && f.fanza_review_avg !== null ? f.fanza_review_avg : '');
   // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
   if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
   return { shortUrl: shortUrl, row: target };

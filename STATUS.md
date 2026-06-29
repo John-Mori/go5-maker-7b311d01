@@ -207,3 +207,26 @@
   - **bluesky.js**：`pcSelectedFile` 変数追加。モーダル開封時に毎回リセット。`#pcImg` change / `#pcImgClear` click ハンドラ追加。動画フロー（`handleVideoCreated`）は `pcSelectedFile` のみで `imageBlob` を送信（旧：`photoFile()＋selectedPostFile` で `imageBlobs[]`）。🦋タブ `#postImg` にサムネイル表示・クリア処理を追加。
   - Drive保存（`drive-upload.js`）の `BskyExtra.getFile` は `selectedPostFile` のまま（タイミング上モーダル選択が間に合わないため変更なし）。
   - `?v=82→83`。不変条件全て維持。iOS実機確認：Chamiに依頼。
+
+- 2026-06-30（命令書B 続：画像フォールバック修正＋Drive テストモード除外）：
+  - **bluesky.js**：`handleVideoCreated` の画像選択を「差し替え」方式に修正。優先順：モーダル選択画像 → `photoFile()`（動画元写真）→ Canvas 合成結果。旧実装は `pcSelectedFile` のみで未選択時に画像なし投稿になるバグを修正（Chami報告）。
+  - **drive-upload.js**：テストモード（`d.test === true`）時は Drive 保存を完全スキップ（旧：`test_` 前置でアップロードしていた）。
+  - `?v=83→84`。全テスト 34 PASS / 0 FAIL。
+
+- 2026-06-30（改修書_FANZA解析スナップショット記録 §2事前チェック）：
+  - §2-1：API フィールド名確定 → `prices.list_price` / `prices.price` / `iteminfo.author[0].name` / `review.count` / `review.average`（公式 Go SDK より確認）。
+  - §2-2：同人 URL（`www.dmm.co.jp/dc/doujin/`）はサンプル3件とも既存 regex `/cid=([^/?&\s]+)/` で抽出OK。FANZA Books（`book.dmm.co.jp/product/`）は `cid=` なし → `buildAffiliateLink` が `no_cid` → ステップ1でエラー → 今回スコープ外。
+  - §2-3：`setComputed_()` は `headerMap_()` でヘッダ名引きのため列追加は安全。既存シートへの移行は一回限り `migrateHeaders_()` 関数（`?action=migrate_headers`）で対応（Option B・Chami選択）。
+  - §2-4：新規 `fanza-worker`（責務分離）に確定（link-worker 非汚染）。
+
+- 2026-06-30（FANZA スナップショット機能 実装完了）：
+  - **新規 `fanza-worker/`**：Cloudflare Worker プロキシ。`POST /api/fanza-item { cid }` → FANZA API → `{ ok, item }` 返却。Secret: `SHARED_SECRET` / `FANZA_API_ID` / `FANZA_AF_ID`（Worker Secrets）。Origin 制限 + X-Shared-Secret 認証（drive-worker 同パターン）。フロント接続先は `localStorage.fanza_worker_url` / `fanza_shared_secret` で上書き可。
+  - **新規 `.github/workflows/deploy-fanza-worker.yml`**：push 時 CI デプロイ（drive-worker yml と同構成）。
+  - **新規 `fanza-core.js`**：`parseFanzaItem(item)` 純粋関数（割引率計算・null安全）＋`fetchFanzaInfo(cid, url, secret)` → Promise。ブラウザ & Node.js 両対応。
+  - **新規 `tests/test_fanza.js`**：7 ケース（割引率50%・list_price欠落・review欠落・null・author空・全欠落・異常値）全 PASS。
+  - **`wizard.js` 改修**：`W` に `cid`/`fanzaInfo` 追加。ステップ1で `W.cid = result.cid` 保存。ステップ4「記録して次へ」で `fetchFanzaForRecord()` → `recordToGas()` → ステップ5 の順（失敗してもフロー継続）。`recordToGas()` payload に `fanza_*` 6フィールド追加（`W.fanzaInfo` がある時のみ）。テストモードはスキップ。
+  - **`gas/コード.gs` 改修**：`FANZA_HEADERS` 6列定義。`GAS_VERSION` → `2026-06-30A`。`doGet` に `?action=migrate_headers` 追加（`migrateHeaders_()` 関数）。`doPost` に `fanza_*` フィールドを `writeRecord_` へ通す。`writeRecord_` に `putIf` 6件追加（既存値を空で潰さない）。
+  - **`index.html`**：`<script src="fanza-core.js?v=85">` を `affiliate-core.js` の直後に挿入。`?v=84→85`。
+  - 全テスト 34 PASS / 0 FAIL（回帰なし）。
+  - **Chami の手作業**：①GAS再デプロイ → ②`?action=migrate_headers` を一度呼ぶ（既存シートに6列追加）→ ③`fanza-worker` を `wrangler deploy` またはGitHub Actions でデプロイ → ④localStorage に `fanza_worker_url` / `fanza_shared_secret` を設定。
+  - **キー秘匿確認**：フロントJSに API ID 記載なし。Worker レスポンス・ログにキー不出力（URLSearchParams は Worker 内部のみ）。SHARED_SECRET 未送信のまま（不変条件4維持）。

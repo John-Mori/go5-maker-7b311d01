@@ -1,0 +1,13 @@
+name = "go5-fanza-proxy"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# ── 非秘密の設定（ここに秘密は書かない。秘密は wrangler secret put で登録）──
+[vars]
+# フロント(GitHub Pages)のOriginだけ許可（ワイルドカード不可）
+ALLOWED_ORIGIN = "https://john-mori.github.io"
+
+# ── Secrets（コマンドで登録。ここには書かない）──
+#   wrangler secret put SHARED_SECRET      ← フロント接続キー（drive-worker等と同作法）
+#   wrangler secret put FANZA_API_ID       ← DMM API ID
+#   wrangler secret put FANZA_AF_ID        ← DMM アフィリエイト ID

@@ -1,0 +1,21 @@
+name: Deploy fanza-worker (Cloudflare)
+
+# main に fanza-worker/ が変わって push されたら自動デプロイ。
+# 手動実行(workflow_dispatch)もできる＝GitHubのActionsタブ／API/スマホからボタン1つで。
+on:
+  push:
+    branches: [main]
+    paths: ['fanza-worker/**']
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: fanza-worker

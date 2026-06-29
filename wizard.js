@@ -11,13 +11,15 @@
     account: '',
     workUrl: '',
     affLink: '',
+    cid: '',
     videoId: '',
     title: '',
     postUrl: '',
     postUri: '',
     shortUrl: '',
     ytUrl: '',
-    ytId: ''
+    ytId: '',
+    fanzaInfo: null
   };
 
   /* bskyEnable の元の値を保持 */
@@ -162,7 +164,7 @@
     }
 
     /* 状態リセット */
-    W = { account: '', workUrl: '', affLink: '', videoId: '', title: '', postUrl: '', postUri: '', shortUrl: '', ytUrl: '', ytId: '' };
+    W = { account: '', workUrl: '', affLink: '', cid: '', videoId: '', title: '', postUrl: '', postUri: '', shortUrl: '', ytUrl: '', ytId: '', fanzaInfo: null };
     _currentStep = 1;
 
     showOverlay();
@@ -314,6 +316,7 @@
       var result = (typeof buildAffiliateLink === 'function') ? buildAffiliateLink(url, afId) : { ok: false, link: '' };
       if (result && result.ok) {
         W.affLink = result.link;
+        W.cid = result.cid || '';
         affResult.style.color = '#7fe87f';
         affResult.textContent = '✅ アフィリンク生成OK: ' + result.link.slice(0, 60) + (result.link.length > 60 ? '…' : '');
         btnNext.disabled = false;
@@ -467,9 +470,13 @@
           localStorage.setItem(mk, JSON.stringify(m));
         }
       } catch (e) {}
-      recordToGas();
-      _currentStep = 5;
-      renderStep(5);
+      recordBtn.disabled = true;
+      recordBtn.textContent = '記録中…';
+      fetchFanzaForRecord(function () {
+        recordToGas();
+        _currentStep = 5;
+        renderStep(5);
+      });
     });
     body.appendChild(recordBtn);
 
@@ -554,18 +561,44 @@
     try { gasUrl = localStorage.getItem('bsky_gas_url') || ''; } catch (e) { /* ignore */ }
     if (!gasUrl) return;
     try {
+      var payload = {
+        op: 'upsert',
+        testMode: /^test-/.test(W.videoId || ''),
+        videoId: W.videoId,
+        channel: W.account,
+        youtube_url: W.ytUrl,
+        youtube_id: W.ytId
+      };
+      if (W.fanzaInfo) {
+        payload.fanza_list_price = W.fanzaInfo.listPrice;
+        payload.fanza_price = W.fanzaInfo.price;
+        payload.fanza_discount_pct = W.fanzaInfo.discountPct;
+        payload.fanza_fetched_at = W.fanzaInfo.fetchedAt;
+        payload.fanza_review_count = W.fanzaInfo.reviewCount;
+        payload.fanza_review_avg = W.fanzaInfo.reviewAvg;
+      }
       fetch(gasUrl, {
         method: 'POST',
-        body: JSON.stringify({
-          op: 'upsert',
-          testMode: /^test-/.test(W.videoId || ''),  // テストモードはシートに残さない
-          videoId: W.videoId,
-          channel: W.account,
-          youtube_url: W.ytUrl,
-          youtube_id: W.ytId
-        })
+        body: JSON.stringify(payload)
       }).catch(function () { /* 失敗は無視 */ });
     } catch (e) { /* ignore */ }
+  }
+
+  // FANZA 商品情報を取得して W.fanzaInfo に格納してから done() を呼ぶ。
+  // cid なし・テストモード・Worker 未設定・失敗はいずれも done() を呼ぶだけ（記録フローを止めない）。
+  function fetchFanzaForRecord(done) {
+    var isTest = /^test-/.test(W.videoId || '');
+    var cid = W.cid;
+    if (!cid || isTest) { done(); return; }
+    var workerUrl = '';
+    var sharedSecret = '';
+    try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
+    try { sharedSecret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
+    if (!workerUrl || typeof window.FanzaCore === 'undefined') { done(); return; }
+    window.FanzaCore.fetchFanzaInfo(cid, workerUrl, sharedSecret).then(function (info) {
+      W.fanzaInfo = info;
+      done();
+    }).catch(function () { done(); });
   }
 
   /* =========================================================
