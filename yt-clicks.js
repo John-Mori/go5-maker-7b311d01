@@ -112,6 +112,7 @@
     d.innerHTML =
       '<div class="vedit-modal">' +
         '<p class="vedit-title" id="veditTitle">URL を編集</p>' +
+        '<p class="vedit-error" id="veditError" hidden></p>' +
         '<label class="vedit-field">YouTube URL' +
           '<input id="veditYt" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…（省略可）">' +
         '</label>' +
@@ -127,14 +128,16 @@
     $('veditCancel').addEventListener('click', closeModal_);
     d.addEventListener('click', function (e) { if (e.target === d) closeModal_(); });
     $('veditSave').addEventListener('click', function () {
-      if (typeof _saveCb === 'function') {
-        var cb = _saveCb;
-        _saveCb = null; // 連打で二重保存しないよう先にクリア
-        cb(
-          ($('veditYt').value || '').trim(),
-          ($('veditBsky').value || '').trim()
-        );
-      }
+      if (typeof _saveCb !== 'function') return;
+      var cb = _saveCb;
+      _saveCb = null; // 連打で二重保存しないよう先にクリア
+      cb(
+        ($('veditYt').value || '').trim(),
+        ($('veditBsky').value || '').trim()
+      );
+      // バリデーション失敗でモーダルが開いたままなら _saveCb を復元（再試行できるように）
+      var o = $('veditOverlay');
+      if (o && !o.hidden) _saveCb = cb;
     });
   }
 
@@ -148,9 +151,15 @@
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
     $('veditBsky').value = bskyVal || '';
+    var errEl = $('veditError'); if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
     $('veditOverlay').hidden = false;
     setTimeout(function () { var el = $('veditYt'); if (el) el.focus(); }, 50);
     _saveCb = onSave;
+  }
+
+  function showModalErr_(msg) {
+    var el = $('veditError'); if (!el) return;
+    el.textContent = msg; el.hidden = false;
   }
 
   // Bluesky URLをアイテムに保存（go5-short → shortUrl、その他 → postUrl）。
@@ -290,10 +299,10 @@
   // YouTube動画を手動で追加（モーダルで YouTube URL + Bluesky URL を一括入力）。
   function addManual() {
     openModal_('YouTube動画を追加', '', '', function (ytUrl, bskyUrl) {
-      if (!ytUrl) { window.alert('YouTube URLを入力してください。'); return; }
+      if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
-        window.alert('YouTubeのURLを認識できませんでした。\nhttps://youtu.be/… か https://www.youtube.com/watch?v=… 形式を貼ってください。');
+        showModalErr_('YouTubeのURLを認識できませんでした。\nhttps://youtu.be/… か https://www.youtube.com/watch?v=… 形式を貼ってください。');
         return;
       }
       closeModal_();
