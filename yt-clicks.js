@@ -228,7 +228,8 @@
           (yt ? '<a class="vlink" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
         '</div>' +
         '<div class="vrow-foot">' +
-          '<label class="vyt">YouTube URL <input type="url" inputmode="url" placeholder="https://youtu.be/… を貼ると再生数・投稿日時を取得" data-k="' + esc(k) + '" value="' + esc(yt) + '"></label>' +
+          '<span class="vyt-lbl">YouTube<br>URL</span>' +
+          '<input class="vyt-inp" type="url" inputmode="url" placeholder="https://youtu.be/…" data-k="' + esc(k) + '" value="' + esc(yt) + '">' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
         '</div>';

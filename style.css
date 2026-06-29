@@ -67,17 +67,15 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-h .vtag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:1px 6px;}
 .vrow-h .vtag-id{color:var(--accent);border-color:var(--accent);}
 .vrow-h .vgenre{color:var(--sub);font-size:12px;}
-.vmetrics{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:7px;font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;}
+.vmetrics{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin-top:7px;font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;}
 .vmetrics .vfanza{display:flex;align-items:center;gap:6px;color:var(--gold);font-size:12px;}
 .vmetrics .vfanza input{width:64px;font-size:14px;padding:5px 7px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
 .vmetrics .vlink{color:var(--bsky);font-size:12px;text-decoration:none;white-space:nowrap;}
-.vmetrics .vlink:first-of-type{margin-left:auto;}
-.vmetrics .vedit-btn{background:transparent;border:none;color:var(--bsky);font-size:12px;cursor:pointer;padding:0;line-height:1;white-space:nowrap;flex-shrink:0;}
+.vmetrics .vedit-btn{margin-left:auto;background:transparent;border:none;color:var(--bsky);font-size:12px;cursor:pointer;padding:0;line-height:1;white-space:nowrap;flex-shrink:0;}
 .vmetrics .vedit-btn:active{opacity:.65;}
 .vrow-foot{display:flex;align-items:center;gap:8px;margin-top:7px;}
-.vrow-foot .vyt{flex:1 1 0%;min-width:0;margin-top:0;}
-.vyt{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:12px;color:var(--sub);}
-.vyt input{flex:1;min-width:0;font-size:14px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
+.vyt-lbl{flex:0 0 auto;font-size:11px;color:var(--sub);line-height:1.4;}
+.vyt-inp{flex:1;min-width:0;font-size:14px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
 .vrow-foot .vdel{flex:0 0 auto;background:transparent;border:none;color:var(--sub);font-size:16px;cursor:pointer;padding:0;line-height:1;opacity:0.4;}
 .vrow-foot .vdel:active{opacity:1;}
 /* ── URL編集モーダル ── */
