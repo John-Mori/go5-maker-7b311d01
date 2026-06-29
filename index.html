@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=85">
-<link rel="apple-touch-icon" href="icon.svg?v=85">
+<link rel="manifest" href="manifest.webmanifest?v=86">
+<link rel="apple-touch-icon" href="icon.svg?v=86">
 <link rel="icon" href="icon.svg?v=84" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=85">
+<link rel="stylesheet" href="style.css?v=86">
 </head>
 <body>
 <header>
@@ -501,6 +501,15 @@
     <a class="photo-btn" href="YouTube再生数_APIキー取得ガイド.html" target="_blank" rel="noopener" style="margin-top:8px;font-size:15px;padding:12px;">📘 APIキーの取り方を画面つきで見る（初めての人向け・無料）</a>
     <div class="hint">↑のガイドに沿って進めれば10分ほどで取れます。取得後、上の欄に <code>AIza…</code> のキーを貼るだけ（この端末内のみ保存）。安全のため、ガイドの「④カギに鍵をかける」も行うと安心です。</div>
   </section>
+
+  <section class="card">
+    <div class="field-label">🔌 FANZA Worker（価格スナップショット）</div>
+    <div class="hint">記録ステップで FANZA の価格を自動取得するための接続設定です。Cloudflare Worker をデプロイ後、ここで設定してください（コンソール不要・この端末内にのみ保存）。</div>
+    <div class="hint" style="margin-top:4px">Worker URL（<code>wrangler deploy</code> 後に表示される <code>workers.dev</code> の URL）</div>
+    <input id="fanzaWorkerUrl" type="url" inputmode="url" placeholder="https://go5-fanza-proxy.xxx.workers.dev" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <div class="hint" style="margin-top:8px">共有シークレット（<code>wrangler secret put SHARED_SECRET</code> で設定した文字列）</div>
+    <input id="fanzaSharedSecret" type="password" placeholder="SHARED_SECRET の値" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+  </section>
 </main>
 </section>
 
@@ -548,23 +557,23 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=85"></script>
-<script src="app.js?v=85"></script>
-<script src="affiliate-core.js?v=85"></script>
-<script src="fanza-core.js?v=85"></script>
-<script src="affiliate.js?v=85"></script>
-<script src="bluesky-core.js?v=85"></script>
-<script src="scheduler.js?v=85"></script>
-<script src="bluesky.js?v=85"></script>
-<script src="drive-upload.js?v=85"></script>
-<script src="verify-core.js?v=85"></script>
-<script src="verify.js?v=85"></script>
-<script src="yt-clicks.js?v=85"></script>
-<script src="integration.js?v=85"></script>
-<script src="wizard.js?v=85"></script>
-<script src="settings-io.js?v=85"></script>
-<script src="theme-settings.js?v=85"></script>
-<script src="persist-fields.js?v=85"></script>
+<script src="idgen.js?v=86"></script>
+<script src="app.js?v=86"></script>
+<script src="affiliate-core.js?v=86"></script>
+<script src="fanza-core.js?v=86"></script>
+<script src="affiliate.js?v=86"></script>
+<script src="bluesky-core.js?v=86"></script>
+<script src="scheduler.js?v=86"></script>
+<script src="bluesky.js?v=86"></script>
+<script src="drive-upload.js?v=86"></script>
+<script src="verify-core.js?v=86"></script>
+<script src="verify.js?v=86"></script>
+<script src="yt-clicks.js?v=86"></script>
+<script src="integration.js?v=86"></script>
+<script src="wizard.js?v=86"></script>
+<script src="settings-io.js?v=86"></script>
+<script src="theme-settings.js?v=86"></script>
+<script src="persist-fields.js?v=86"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */

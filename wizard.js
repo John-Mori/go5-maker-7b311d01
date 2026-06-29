@@ -686,13 +686,34 @@
   }
 
   /* =========================================================
+   * 詳細設定タブ：FANZA Worker 接続設定の保存／復元
+   * ========================================================= */
+  function initFanzaSettings() {
+    var urlEl = document.getElementById('fanzaWorkerUrl');
+    var secEl = document.getElementById('fanzaSharedSecret');
+    if (urlEl) {
+      try { urlEl.value = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
+      urlEl.addEventListener('input', function () {
+        try { localStorage.setItem('fanza_worker_url', urlEl.value.trim()); } catch (e) {}
+      });
+    }
+    if (secEl) {
+      try { secEl.value = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
+      secEl.addEventListener('input', function () {
+        try { localStorage.setItem('fanza_shared_secret', secEl.value.trim()); } catch (e) {}
+      });
+    }
+  }
+
+  /* =========================================================
    * 初期化
    * ========================================================= */
   function init() {
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', buildDOM);
+      document.addEventListener('DOMContentLoaded', function () { buildDOM(); initFanzaSettings(); });
     } else {
       buildDOM();
+      initFanzaSettings();
     }
   }
 

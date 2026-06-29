@@ -32,6 +32,8 @@
     pickSave: 1, pickLoad: 1, pickReset: 1, pickUndo: 1,
     // yt-clicks.js（YouTube APIキー＝秘密。独自に保存）
     ytApiKey: 1,
+    // wizard.js（FANZA Worker 接続設定。独自に保存）
+    fanzaWorkerUrl: 1, fanzaSharedSecret: 1,
     // 一時的（送信後クリア）・モーダル・予約日時・フィルタ
     manualTitle: 1, manualUrl: 1, pcWorkUrl: 1, pcText: 1, postSchedAt: 1, histShowDiscarded: 1
   };
