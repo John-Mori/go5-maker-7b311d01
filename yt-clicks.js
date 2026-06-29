@@ -88,25 +88,119 @@
       var vid = ytIdOf(yt);
       var hasUrl = !!vid;
       var pub = (vid && (vid in publishedCache)) ? publishedCache[vid] : null;
-      // group0=YouTube URLあり（新しい順）／group1=URL無し＝投稿日時不明（末尾）
       var group = hasUrl ? 0 : 1;
-      // 既知のYouTube投稿日時を最優先。未取得（URLはある）の間は元ts、URL無しも元tsで暫定整列。
       var t = (pub != null) ? pub : (it.ts || 0);
       return { it: it, i: i, group: group, t: t };
     });
     arr.sort(function (a, b) {
       if (a.group !== b.group) return a.group - b.group;
-      if (b.t !== a.t) return b.t - a.t;       // 日時の新しい順
-      return a.i - b.i;                         // 同値は元の順序で安定化
+      if (b.t !== a.t) return b.t - a.t;
+      return a.i - b.i;
     });
     return arr.map(function (x) { return x.it; });
   }
 
+  // ── モーダル ──────────────────────────────────────────────────────────────
+  var _saveCb = null;
+
+  function injectModal_() {
+    if ($('veditOverlay')) return;
+    var d = document.createElement('div');
+    d.id = 'veditOverlay';
+    d.className = 'vedit-overlay';
+    d.hidden = true;
+    d.innerHTML =
+      '<div class="vedit-modal">' +
+        '<p class="vedit-title" id="veditTitle">URL を編集</p>' +
+        '<label class="vedit-field">YouTube URL' +
+          '<input id="veditYt" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…（省略可）">' +
+        '</label>' +
+        '<label class="vedit-field">Bluesky 投稿URL' +
+          '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL（省略可）">' +
+        '</label>' +
+        '<div class="vedit-actions">' +
+          '<button id="veditCancel" type="button">キャンセル</button>' +
+          '<button id="veditSave" type="button">保存</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(d);
+    $('veditCancel').addEventListener('click', closeModal_);
+    d.addEventListener('click', function (e) { if (e.target === d) closeModal_(); });
+    $('veditSave').addEventListener('click', function () {
+      if (typeof _saveCb === 'function') {
+        _saveCb(
+          ($('veditYt').value || '').trim(),
+          ($('veditBsky').value || '').trim()
+        );
+      }
+    });
+  }
+
+  function closeModal_() {
+    var o = $('veditOverlay'); if (o) o.hidden = true;
+    _saveCb = null;
+  }
+
+  function openModal_(title, ytVal, bskyVal, onSave) {
+    injectModal_();
+    $('veditTitle').textContent = title;
+    $('veditYt').value = ytVal || '';
+    $('veditBsky').value = bskyVal || '';
+    $('veditOverlay').hidden = false;
+    setTimeout(function () { var el = $('veditYt'); if (el) el.focus(); }, 50);
+    _saveCb = onSave;
+  }
+
+  // Bluesky URLをアイテムに保存（go5-short → shortUrl、その他 → postUrl）。
+  function saveBskyToItem_(item, bskyUrl) {
+    var w = (window.Go5Short && window.Go5Short.WORKER_URL) ? window.Go5Short.WORKER_URL.replace(/\/+$/, '') : '';
+    var isGo5 = w && bskyUrl && bskyUrl.indexOf(w) === 0;
+    if (bskyUrl) {
+      if (isGo5) { item.shortUrl = bskyUrl; delete item.postUrl; }
+      else { item.postUrl = bskyUrl; }
+    } else {
+      // 空白のとき：手動アイテムは両方消す、履歴アイテムは postUrl だけ消す（shortUrl はクリック計測に必要）
+      if (item.manual) delete item.shortUrl;
+      delete item.postUrl;
+    }
+  }
+
+  // 編集保存：YouTube URL（ytMap）と Bluesky URL（アイテム）を一括更新。
+  function saveEdit_(k, it, ytUrl, bskyUrl) {
+    // YouTube URL
+    var ymap = loadYtMap();
+    if (ytUrl) ymap[k] = ytUrl; else delete ymap[k];
+    saveYtMap(ymap);
+    // Bluesky URL（アイテムを直接書き換え）
+    if (it.manual) {
+      var manual = loadManual();
+      for (var i = 0; i < manual.length; i++) {
+        if (itemKey(manual[i]) !== k) continue;
+        saveBskyToItem_(manual[i], bskyUrl);
+        break;
+      }
+      saveArr(manualKey(), manual);
+    } else {
+      var hist = loadHist();
+      for (var j = 0; j < hist.length; j++) {
+        if (itemKey(hist[j]) !== k) continue;
+        saveBskyToItem_(hist[j], bskyUrl);
+        break;
+      }
+      saveArr(histKey(), hist);
+    }
+    refresh();
+  }
+
+  // ── render ──────────────────────────────────────────────────────────────
   function render() {
     var list = $('ytClickList');
     var rawItems = allItems();
     var ymap = loadYtMap();
-    if (!rawItems.length) { list.innerHTML = '<p class="hint">まだ投稿の記録がありません（投稿して短縮URLが出ると、ここに集まります）。「➕ 手動で追加」からYouTube動画を直接登録もできます。表示中アカウント：' + esc(acct()) + '</p>'; return; }
+    if (!rawItems.length) {
+      list.innerHTML = '<p class="hint">まだ投稿の記録がありません（投稿して短縮URLが出ると、ここに集まります）。「➕ 手動で追加」からYouTube動画を直接登録もできます。表示中アカウント：' + esc(acct()) + '</p>';
+      return;
+    }
     var items = sortItems(rawItems, ymap);
     list.innerHTML = items.map(function (it) {
       var k = itemKey(it);
@@ -116,25 +210,32 @@
       var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
-      // 見出し日時＝YouTube投稿時刻。未取得はプレースホルダ表示。
       var dateHtml = pub != null
         ? '<b>' + esc(fmtTs(pub)) + '</b>'
         : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>');
       var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
+      var bskyHref = it.shortUrl || it.postUrl || '';
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + esc(title) +
-        (it.videoId ? ' <span class="vtag vtag-id">' + esc(it.videoId) + '</span>' : '') +
-        (it.manual ? ' <span class="vtag">手動</span>' : '') +
-        ' <button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button></div>' +
-        '<div class="vmetrics">' +
-        '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
-        '<span title="短縮URLクリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
-        (it.shortUrl ? '<a class="vlink" href="' + esc(it.shortUrl) + '" target="_blank" rel="noopener">短縮URL↗</a>' : '') +
-        (yt ? '<a class="vlink" href="' + esc(yt) + '" target="_blank" rel="noopener">動画↗</a>' : '') +
+          (it.videoId ? ' <span class="vtag vtag-id">' + esc(it.videoId) + '</span>' : '') +
+          (it.manual ? ' <span class="vtag">手動</span>' : '') +
         '</div>' +
-        '<label class="vyt">YouTube URL <input type="url" inputmode="url" placeholder="https://youtu.be/… を貼ると再生数・投稿日時を取得" data-k="' + esc(k) + '" value="' + esc(yt) + '"></label>' +
+        '<div class="vmetrics">' +
+          '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
+          '<span title="Bsky投稿クリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
+          '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">編集🛠️</button>' +
+          (bskyHref ? '<a class="vlink" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
+          (yt ? '<a class="vlink" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
+        '</div>' +
+        '<div class="vrow-foot">' +
+          '<span class="vyt-lbl">YouTube<br>URL</span>' +
+          '<input class="vyt-inp" type="url" inputmode="url" placeholder="https://youtu.be/…" data-k="' + esc(k) + '" value="' + esc(yt) + '">' +
+          '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
+        '</div>' +
         '</div>';
     }).join('');
+
+    // YouTube URL 直接入力
     list.querySelectorAll('input[data-k]').forEach(function (inp) {
       inp.addEventListener('change', function () {
         var m = loadYtMap(); var v = inp.value.trim();
@@ -142,12 +243,31 @@
         saveYtMap(m); refresh();
       });
     });
+
+    // 削除
     list.querySelectorAll('.vdel').forEach(function (b) {
       b.addEventListener('click', function () { deleteItem(b.getAttribute('data-k')); });
     });
+
+    // 編集モーダル
+    list.querySelectorAll('.vedit-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var k = b.getAttribute('data-k');
+        var rawItems = allItems(), ymap = loadYtMap();
+        var it = null;
+        for (var i = 0; i < rawItems.length; i++) { if (itemKey(rawItems[i]) === k) { it = rawItems[i]; break; } }
+        if (!it) return;
+        var ytCur = ymap[k] || it.ytUrl || '';
+        var bskyCur = it.postUrl || (it.manual ? it.shortUrl : '') || '';
+        openModal_('URL を編集', ytCur, bskyCur, function (ytUrl, bskyUrl) {
+          closeModal_();
+          saveEdit_(k, it, ytUrl, bskyUrl);
+        });
+      });
+    });
   }
 
-  // 1件削除（念のため確認ダイアログ）。手動追加分は verify_manual から、投稿履歴は short_hist から除去。
+  // 1件削除（確認ダイアログ）。手動追加分は verify_manual から、投稿履歴は short_hist から除去。
   function deleteItem(k) {
     var rawItems = allItems(), ymap = loadYtMap();
     var target = null;
@@ -161,28 +281,31 @@
     } else {
       saveArr(histKey(), loadHist().filter(function (x) { return itemKey(x) !== k; }));
     }
-    // 紐づくYouTube URLマッピングも掃除。
     if (ymap[k] != null) { delete ymap[k]; saveYtMap(ymap); }
     refresh();
   }
 
-  // YouTube動画を手動で追加（URLを貼るだけ。タイトル・再生数・投稿日時はAPIで取得）。
+  // YouTube動画を手動で追加（モーダルで YouTube URL + Bluesky URL を一括入力）。
   function addManual() {
-    var url = window.prompt('追加するYouTube動画のURLを貼り付けてください\n（例：https://youtu.be/XXXXXXXXXXX）');
-    if (url == null) return;
-    url = url.trim(); if (!url) return;
-    var vid = ytIdOf(url);
-    if (!vid) { window.alert('YouTubeのURLを認識できませんでした。\nhttps://youtu.be/… か https://www.youtube.com/watch?v=… 形式を貼ってください。'); return; }
-    var id = 'm:' + new Date().getTime();
-    var manual = loadManual();
-    manual.push({ manual: true, id: id, ts: 0 });
-    saveArr(manualKey(), manual);
-    var m = loadYtMap(); m[id] = url; saveYtMap(m);
-    refresh();
+    openModal_('YouTube動画を追加', '', '', function (ytUrl, bskyUrl) {
+      if (!ytUrl) { window.alert('YouTube URLを入力してください。'); return; }
+      var vid = ytIdOf(ytUrl);
+      if (!vid) {
+        window.alert('YouTubeのURLを認識できませんでした。\nhttps://youtu.be/… か https://www.youtube.com/watch?v=… 形式を貼ってください。');
+        return;
+      }
+      closeModal_();
+      var id = 'm:' + new Date().getTime();
+      var entry = { manual: true, id: id, ts: 0 };
+      saveBskyToItem_(entry, bskyUrl);
+      saveArr(manualKey(), loadManual().concat([entry]));
+      var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
+      refresh();
+    });
   }
 
   function refresh() {
-    render(); // まずキャッシュ反映で即描画
+    render();
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
@@ -201,7 +324,7 @@
     }));
     Promise.all(jobs).then(function () {
       setStatus(lastErr ? ('⚠️ ' + lastErr) : (!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : ''));
-      render(); // 投稿日時が取れたので並び替えも反映
+      render();
     });
   }
 
