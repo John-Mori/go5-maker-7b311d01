@@ -121,9 +121,13 @@
     var pf = (photo && photo.files && photo.files[0]) ? photo.files[0] : null;
     if (pf) origImage = new File([pf], title + "." + imgExt(pf), { type: pf.type || "image/jpeg" });
 
+    // 🦋タブで追加画像が選ばれていれば、Drive にも「タイトル_Bsky.拡張子」として保存。
+    var bskyExtraFile = window.BskyExtra && window.BskyExtra.getFile && window.BskyExtra.getFile();
+    var bskyImage = bskyExtraFile ? new File([bskyExtraFile], title + '_Bsky.' + imgExt(bskyExtraFile), { type: bskyExtraFile.type || 'image/jpeg' }) : null;
+
     function finish(previewImage) {
       // プレビューを先頭に＝旧Worker（先頭1枚のみ保存）でも仕上がりプレビューは残る。新Workerは両方保存。
-      send({ channel: channel, title: title, videoFile: videoFile, images: [previewImage, origImage].filter(Boolean) });
+      send({ channel: channel, title: title, videoFile: videoFile, images: [previewImage, origImage, bskyImage].filter(Boolean) });
     }
 
     // 仕上がりプレビュー（合成済み Canvas #cv＝1080×1920）を PNG「タイトル_プレビュー.png」で保存（文字が鮮明）。

@@ -128,7 +128,9 @@
     d.addEventListener('click', function (e) { if (e.target === d) closeModal_(); });
     $('veditSave').addEventListener('click', function () {
       if (typeof _saveCb === 'function') {
-        _saveCb(
+        var cb = _saveCb;
+        _saveCb = null; // 連打で二重保存しないよう先にクリア
+        cb(
           ($('veditYt').value || '').trim(),
           ($('veditBsky').value || '').trim()
         );
@@ -258,7 +260,7 @@
         for (var i = 0; i < rawItems.length; i++) { if (itemKey(rawItems[i]) === k) { it = rawItems[i]; break; } }
         if (!it) return;
         var ytCur = ymap[k] || it.ytUrl || '';
-        var bskyCur = it.postUrl || (it.manual ? it.shortUrl : '') || '';
+        var bskyCur = it.shortUrl || it.postUrl || '';
         openModal_('URL を編集', ytCur, bskyCur, function (ytUrl, bskyUrl) {
           closeModal_();
           saveEdit_(k, it, ytUrl, bskyUrl);

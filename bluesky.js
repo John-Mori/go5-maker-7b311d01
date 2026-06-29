@@ -36,6 +36,8 @@
   if (!els.text) return;
 
   var selectedPostFile = null, lastImgUrl = null;
+  // drive-upload.js と scheduler.js が動画作成フロー時に参照するため公開（ソフト参照）
+  try { window.BskyExtra = { getFile: function () { return selectedPostFile; } }; } catch (e) {}
   // 一本道の背骨：直近の動画作成で発番された安定動画ID。投稿記録に串刺しで持たせる。
   var currentVideoId = '';
 
@@ -863,14 +865,17 @@
     var composed = composePostText();
     if (!composed.trim()) { setBskyStatus('投稿本文が空です（「🦋 投稿」タブで入力）。'); return; }
     var alt = (ev && ev.detail && ev.detail.title) ? String(ev.detail.title) : (composed.split('\n')[0] || '');
-    confirmEditable(composed, 'この動画の元写真を1枚自動で添付します').then(function (edited) {
+    confirmEditable(composed, selectedPostFile ? 'この動画の元写真＋追加画像を自動で添付します' : 'この動画の元写真を1枚自動で添付します').then(function (edited) {
       if (edited == null) { setBskyStatus('自動投稿をキャンセルしました。'); return; }
       if (!edited.trim()) { setBskyStatus('本文が空のため中止しました。'); return; }
       var gasSet = !!(els.gasUrl.value || '').trim();
       setBskyStatus('Bluesky に投稿中…');
       var photo = photoFile();
-      var prep = photo ? compressFile(photo) : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
-      prep.then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
+      var extra = selectedPostFile;
+      var basePrep = photo ? compressFile(photo) : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
+      var extraPrep = extra ? compressFile(extra) : Promise.resolve(null);
+      Promise.all([basePrep, extraPrep])
+        .then(function (blobArr) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlobs: blobArr.filter(Boolean), alt: alt }); })
         .then(function (res) { setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '・記録しました' : '')); notifyPosted(res, edited, alt); })
         .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); });
     });
