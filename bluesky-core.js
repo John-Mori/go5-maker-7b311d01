@@ -105,10 +105,11 @@
       langs: ['ja']
     };
     if (payload.facets && payload.facets.length) record.facets = payload.facets;
-    if (payload.imageRef) {
+    var imageRefs = payload.imageRefs || (payload.imageRef ? [payload.imageRef] : []);
+    if (imageRefs.length) {
       record.embed = {
         $type: 'app.bsky.embed.images',
-        images: [{ alt: payload.alt || '', image: payload.imageRef }]
+        images: imageRefs.slice(0, 4).map(function (ref, i) { return { alt: (i === 0 ? payload.alt : '') || '', image: ref }; })
       };
     }
     return fetch(service + '/xrpc/com.atproto.repo.createRecord', {
@@ -210,12 +211,14 @@
     var ident = String(o.identifier || '').trim().replace(/^@/, '');
     var text = String(o.text || '');
     var sess;
+    var blobs = (o.imageBlobs || []).concat(o.imageBlob ? [o.imageBlob] : []).filter(Boolean);
     return createSession(service, ident, o.appPassword).then(function (s) {
       sess = s;
-      if (o.imageBlob) return uploadBlob(service, sess.accessJwt, o.imageBlob);
-      return null;
-    }).then(function (up) {
-      return createPost(service, sess, { text: text, facets: detectFacets(text), imageRef: up ? up.blob : null, alt: o.alt });
+      if (!blobs.length) return [];
+      return Promise.all(blobs.slice(0, 4).map(function (b) { return uploadBlob(service, sess.accessJwt, b); }));
+    }).then(function (ups) {
+      var imageRefs = Array.isArray(ups) ? ups.map(function (u) { return u && u.blob; }).filter(Boolean) : [];
+      return createPost(service, sess, { text: text, facets: detectFacets(text), imageRefs: imageRefs, alt: o.alt });
     }).then(function (res) {
       var rkey = String(res.uri || '').split('/').pop();
       var postUrl = (sess.handle && rkey) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey) : '';
