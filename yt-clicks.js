@@ -123,6 +123,7 @@
       var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + esc(title) +
+        (it.videoId ? ' <span class="vtag vtag-id">' + esc(it.videoId) + '</span>' : '') +
         (it.manual ? ' <span class="vtag">手動</span>' : '') +
         ' <button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button></div>' +
         '<div class="vmetrics">' +

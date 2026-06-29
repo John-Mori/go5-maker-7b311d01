@@ -20,15 +20,15 @@
 
 // 記録シートの列ヘッダー（テンプレートと完全一致・この順序）。新規作成時のヘッダーにも使う。
 var HEADERS40 = [
-  'post_id','投稿日時','曜日','day-type','時間帯スロット','特別期間(手動)','ジャンル','題名(コメント)','ハッシュタグ',
-  'サムネ/フック種別(A/B)','CTA・リンク提示方法','Blueskyラベル','作品cid','YouTube動画URL','Bluesky投稿URL','短縮URL',
-  'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','返信','フォロー増','Bitlyクリック',
+  'post_id','投稿日時','曜日','day-type','時間帯スロット','特別期間(手動)','ジャンル','題名(コメント)',
+  'サムネ/フック種別(A/B)','CTA・リンク提示方法','Blueskyラベル','作品cid','YouTube動画URL','短縮URL',
+  'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','返信','フォロー増','開封数',
   'FANZA発生成約','FANZA確定成約','発生報酬¥','確定報酬¥','承認率%','リンククリック率%','CVR発生%','CVR確定%',
-  'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','Bitly_ID','post_uri','クリック更新日時','反応更新日時'
+  'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','post_uri','クリック更新日時','反応更新日時'
 ];
 var CH_SHEETS = ['記録_ch1','記録_ch2'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-06-25-B（+ウィザードYouTube URL記録）';
+var GAS_VERSION = '2026-06-29（-ハッシュタグ/Bluesky投稿URL/Bitly_ID・Bitlyクリック→開封数）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -89,7 +89,7 @@ function lookupShortByUri_(channel, postUri) {
 function historyItems_(channel, limit) {
   var sh = getChannelSheet_(channel), map = headerMap_(sh);
   var last = sh.getLastRow(); if (last < 2) return [];
-  var dCol = map['投稿日時'], tCol = map['題名(コメント)'], sCol = map['短縮URL'], pCol = map['Bluesky投稿URL'], uCol = map['post_uri'];
+  var dCol = map['投稿日時'], tCol = map['題名(コメント)'], sCol = map['短縮URL'], uCol = map['post_uri'];
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
   var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   var items = [];
@@ -101,7 +101,7 @@ function historyItems_(channel, limit) {
     try { if (d) ds = Utilities.formatDate(new Date(d), tz, 'MM/dd HH:mm'); } catch (e) {}
     items.push({
       postUri: String(uri || ''), title: String(tCol ? row[tCol - 1] : ''),
-      date: ds, shortUrl: String(short || ''), postUrl: String(pCol ? row[pCol - 1] : '')
+      date: ds, shortUrl: String(short || ''), postUrl: ''
     });
   }
   items.reverse(); // 新しい順
@@ -151,19 +151,33 @@ function extractCid_(url) {
 }
 function extractHashtags_(t) { var m = String(t || '').match(/#[^\s#]+/g); return m ? m.join(' ') : ''; }
 
-// 計算列の数式（テンプレートと同一・行番号 r に合わせる）。固定の列文字は HEADERS40 の順序前提。
+// 1始まり列番号 → Excel列文字（A/B/.../Z/AA/AB/...）。動的に列参照を組み立てるために使う。
+function columnLetter_(n) {
+  if (!n || n < 1) return '';
+  var s = '';
+  while (n > 0) { n--; s = String.fromCharCode(65 + n % 26) + s; n = Math.floor(n / 26); }
+  return s;
+}
+
+// 計算列の数式（行番号 r に合わせる）。列文字は headerMap_ から動的に取得するため列の増減に強い。
 function setComputed_(sh, map, r) {
   function set(h, f) { if (map[h]) sh.getRange(r, map[h]).setFormula(f); }
   set('曜日', '=IF($B' + r + '="","",CHOOSE(WEEKDAY($B' + r + '),"日","月","火","水","木","金","土"))');
   set('day-type', '=IF($B' + r + '="","",IF(OR(WEEKDAY($B' + r + ',2)>=6,COUNTIF(Holidays,INT($B' + r + '))>0),"土日祝",IF(OR(WEEKDAY($B' + r + '+1,2)>=6,COUNTIF(Holidays,INT($B' + r + ')+1)>0),"休前日","平日")))');
   set('時間帯スロット', '=IF($B' + r + '="","",IF(HOUR($B' + r + ')<5,"深夜",IF(HOUR($B' + r + ')<11,"朝",IF(HOUR($B' + r + ')<15,"昼",IF(HOUR($B' + r + ')<19,"夕","夜")))))');
-  set('承認率%', '=IFERROR(AA' + r + '/Z' + r + ',"")');
-  set('リンククリック率%', '=IFERROR(Y' + r + '/S' + r + ',"")');
-  set('CVR発生%', '=IFERROR(Z' + r + '/Y' + r + ',"")');
-  set('CVR確定%', '=IFERROR(AA' + r + '/Y' + r + ',"")');
-  set('EPC発生¥', '=IFERROR(AB' + r + '/Y' + r + ',"")');
-  set('EPC確定¥', '=IFERROR(AC' + r + '/Y' + r + ',"")');
-  set('RPM(¥/1000再生)', '=IFERROR(AC' + r + '/S' + r + '*1000,"")');
+  var cClick  = columnLetter_(map['開封数'] || map['Bitlyクリック']); // 開封数（旧称Bitlyクリック）
+  var cViews  = columnLetter_(map['視聴回数']);
+  var cFhap   = columnLetter_(map['FANZA発生成約']);
+  var cFok    = columnLetter_(map['FANZA確定成約']);
+  var cRhap   = columnLetter_(map['発生報酬¥']);
+  var cRok    = columnLetter_(map['確定報酬¥']);
+  if (cFok && cFhap)    set('承認率%',        '=IFERROR(' + cFok   + r + '/' + cFhap  + r + ',"")');
+  if (cClick && cViews) set('リンククリック率%','=IFERROR(' + cClick + r + '/' + cViews + r + ',"")');
+  if (cFhap && cClick)  set('CVR発生%',        '=IFERROR(' + cFhap  + r + '/' + cClick + r + ',"")');
+  if (cFok && cClick)   set('CVR確定%',        '=IFERROR(' + cFok   + r + '/' + cClick + r + ',"")');
+  if (cRhap && cClick)  set('EPC発生¥',        '=IFERROR(' + cRhap  + r + '/' + cClick + r + ',"")');
+  if (cRok && cClick)   set('EPC確定¥',        '=IFERROR(' + cRok   + r + '/' + cClick + r + ',"")');
+  if (cRok && cViews)   set('RPM(¥/1000再生)', '=IFERROR(' + cRok   + r + '/' + cViews + r + '*1000,"")');
 }
 
 // 純粋関数：post_id 列の値配列(2行目以降)と videoId から upsert 先の行番号(2始まり)を返す。
@@ -220,9 +234,7 @@ function writeRecord_(channel, f) {
   // 投稿日時は「新規行」か「投稿URLを伴う記録」の時だけ。YouTube URLだけの後追いupsertでは上書きしない。
   if (isNewRow || f.postUrl) put('投稿日時', now);
   putIf('題名(コメント)', f.title || '');
-  putIf('ハッシュタグ', f.hashtags || extractHashtags_(f.title));
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
-  putIf('Bluesky投稿URL', f.postUrl || '');
   putIf('短縮URL', shortUrl);
   putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('post_uri', f.postUri || '');
@@ -269,14 +281,15 @@ function refreshClicks() {
   CH_SHEETS.forEach(function (name) {
     var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
     var map = headerMap_(sh); var last = sh.getLastRow();
-    if (last < 2 || !map['短縮URL'] || !map['Bitlyクリック']) return;
+    var clickCol = map['開封数'] || map['Bitlyクリック']; // 新列名「開封数」、既存シートは旧名で互換
+    if (last < 2 || !map['短縮URL'] || !clickCol) return;
     var start = Math.max(2, last - 199), n = last - start + 1;
     var urls = sh.getRange(start, map['短縮URL'], n, 1).getValues();
     for (var i = 0; i < urls.length; i++) {
       var code = codeFromShort_(urls[i][0]); if (!code) continue;
       var c = workerClicks_(code);
       if (c !== null) {
-        sh.getRange(start + i, map['Bitlyクリック']).setValue(c);
+        sh.getRange(start + i, clickCol).setValue(c);
         if (map['クリック更新日時']) sh.getRange(start + i, map['クリック更新日時']).setValue(new Date());
       }
       Utilities.sleep(100);
