@@ -26,9 +26,9 @@ var HEADERS40 = [
   'FANZA発生成約','FANZA確定成約','発生報酬¥','確定報酬¥','承認率%','リンククリック率%','CVR発生%','CVR確定%',
   'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','post_uri','クリック更新日時','反応更新日時'
 ];
-var CH_SHEETS = ['記録_ch1','記録_ch2'];
+var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-06-29（-ハッシュタグ/Bluesky投稿URL/Bitly_ID・Bitlyクリック→開封数）';
+var GAS_VERSION = '2026-06-29B（シート名変更: 記録_ch1→月詠み / 記録_ch2→宵桜艶帖）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -38,7 +38,7 @@ function openSS_() {
   if (!ss) throw new Error('スプレッドシートが見つかりません（SHEET_ID を設定してください）');
   return ss;
 }
-function sheetName_(channel) { return (channel === 'acc2') ? '記録_ch2' : '記録_ch1'; }
+function sheetName_(channel) { return (channel === 'acc2') ? '宵桜艶帖' : '月詠み'; }
 function getChannelSheet_(channel) {
   var ss = openSS_(); var name = sheetName_(channel);
   var sh = ss.getSheetByName(name);

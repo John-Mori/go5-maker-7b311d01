@@ -163,7 +163,7 @@ function seedNewVideos_() {
   }
 
   var newRows = [];
-  // CH_SHEETS = ['記録_ch1','記録_ch2']（コード.gs で定義）
+  // CH_SHEETS = ['月詠み','宵桜艶帖']（コード.gs で定義）
   CH_SHEETS.forEach(function (name) {
     var sh = ss.getSheetByName(name); if (!sh) return;
     var map = headerMap_(sh), last = sh.getLastRow();
@@ -171,7 +171,7 @@ function seedNewVideos_() {
     var ytCol = map['YouTube動画URL'], pidCol = map['post_id'];
     if (!ytCol || !pidCol) return;
     var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
-    var ch = (name === '記録_ch2') ? 'acc2' : 'acc1';
+    var ch = (name === '宵桜艶帖') ? 'acc2' : 'acc1';
     vals.forEach(function (row) {
       var ytUrl = String(row[ytCol - 1] || '').trim();
       var pid   = String(row[pidCol - 1] || '').trim();
