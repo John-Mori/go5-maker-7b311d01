@@ -484,7 +484,7 @@
     els.pcImgClear.addEventListener('click', function () {
       if (els.pcImgPreview && els.pcImgPreview.src) { URL.revokeObjectURL(els.pcImgPreview.src); els.pcImgPreview.src = ''; els.pcImgPreview.style.display = 'none'; }
       pcSelectedFile = null; if (els.pcImg) els.pcImg.value = '';
-      if (els.pcImgName) els.pcImgName.textContent = '未選択（画像なしで投稿）';
+      if (els.pcImgName) els.pcImgName.textContent = '未選択（動画の元写真を添付）';
       els.pcImgClear.style.display = 'none';
     });
   }
@@ -797,7 +797,7 @@
       // 画像選択をリセット（モーダルを開くたびに白紙から選択させる）
       pcSelectedFile = null;
       if (els.pcImg) els.pcImg.value = '';
-      if (els.pcImgName) els.pcImgName.textContent = '未選択（画像なしで投稿）';
+      if (els.pcImgName) els.pcImgName.textContent = '未選択（動画の元写真を添付）';
       if (els.pcImgClear) els.pcImgClear.style.display = 'none';
       if (els.pcImgPreview) { els.pcImgPreview.src = ''; els.pcImgPreview.style.display = 'none'; }
       updateWorkWarn();
@@ -897,7 +897,11 @@
       if (!edited.trim()) { setBskyStatus('本文が空のため中止しました。'); return; }
       var gasSet = !!(els.gasUrl.value || '').trim();
       setBskyStatus('Bluesky に投稿中…');
-      var imgPrep = pcSelectedFile ? compressFile(pcSelectedFile) : Promise.resolve(null);
+      // モーダル選択画像を優先。未選択なら動画の元写真→Canvas の順にフォールバック
+      var imgFile = pcSelectedFile || photoFile();
+      var imgPrep = imgFile
+        ? compressFile(imgFile)
+        : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
       imgPrep
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
         .then(function (res) { setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '・記録しました' : '')); notifyPosted(res, edited, alt); })
