@@ -703,6 +703,50 @@
         try { localStorage.setItem('fanza_shared_secret', secEl.value.trim()); } catch (e) {}
       });
     }
+
+    var testBtn = document.getElementById('fanzaTestBtn');
+    var testResult = document.getElementById('fanzaTestResult');
+    if (testBtn && testResult) {
+      testBtn.addEventListener('click', function () {
+        var url = '';
+        var secret = '';
+        try { url = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
+        try { secret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
+        if (!url) {
+          testResult.textContent = '⚠️ Worker URL が未入力です';
+          testResult.style.color = '#f0b429';
+          return;
+        }
+        testResult.textContent = '接続テスト中…';
+        testResult.style.color = '#aaa';
+        var endpoint = url.replace(/\/$/, '') + '/api/fanza-item';
+        fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': secret },
+          body: JSON.stringify({ cid: '__diag__' })
+        }).then(function (r) {
+          return r.json().then(function (d) { return { status: r.status, data: d }; });
+        }).then(function (res) {
+          var d = res.data || {};
+          if (d.error === 'bad_secret') {
+            testResult.textContent = '❌ シークレット不一致（bad_secret）— wrangler secret put SHARED_SECRET で設定した値と合っているか確認してください';
+            testResult.style.color = '#f88';
+          } else if (d.error === 'origin_not_allowed') {
+            testResult.textContent = '❌ Origin拒否 — Workerの ALLOWED_ORIGIN 設定を確認してください';
+            testResult.style.color = '#f88';
+          } else if (d.error === 'not_found' || res.status === 404) {
+            testResult.textContent = '✅ 接続OK・認証成功（Worker は正常に応答しています）';
+            testResult.style.color = '#7fe87f';
+          } else {
+            testResult.textContent = '✅ 接続OK（status=' + res.status + ' / ' + JSON.stringify(d).slice(0, 60) + ')';
+            testResult.style.color = '#7fe87f';
+          }
+        }).catch(function (e) {
+          testResult.textContent = '❌ 接続失敗 — URL が間違っているか Worker が未デプロイです（' + (e && e.message ? e.message : 'network error') + '）';
+          testResult.style.color = '#f88';
+        });
+      });
+    }
   }
 
   /* =========================================================
