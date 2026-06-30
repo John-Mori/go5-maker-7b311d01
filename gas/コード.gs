@@ -52,7 +52,7 @@ var EXTRA_HEADERS = ['キャラ', 'YouTube題名'];
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-01E（クリック数列を「短縮URLクリック数」に改名・存在保証）';
+var GAS_VERSION = '2026-07-01F（診断 diagnose 追加：どのタブに何が入っているか可視化）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -95,6 +95,10 @@ function doGet(e) {
   // 不要列の削除: <exec URL>?action=cleanup_columns で CLEANUP_COLUMNS の列を各シートから削除（冪等）。
   if (p.action === 'cleanup_columns') {
     return jsonOut_(cleanupColumns_());
+  }
+  // 診断: <exec URL>?action=diagnose でスプレッドシート名・全タブ名・各記録タブの中身を返す（読み取りのみ）。
+  if (p.action === 'diagnose') {
+    return jsonOut_(diagnose_());
   }
   // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
   if (p.callback) {
@@ -203,6 +207,39 @@ function cleanupColumns_() {
     result.push({ sheet: name, removed: removed, status: removed.length ? 'ok' : 'already_clean' });
   });
   return { ok: true, result: result };
+}
+
+// 診断（読み取りのみ）：どのスプレッドシートのどのタブに、何が入っているかを可視化する。
+// 「データがどこに書かれているか分からない」「クリック数/題名が空」の原因切り分けに使う。
+function diagnose_() {
+  var ss = openSS_();
+  var allTabs = ss.getSheets().map(function (s) { return s.getName(); });
+  var channels = {};
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { channels[name] = { exists: false, note: 'このタブは存在しません（GASは書き込み時に自動作成します）' }; return; }
+    var map = headerMap_(sh);
+    var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+    var last = sh.getLastRow();
+    var info = { exists: true, lastRow: last, clickCol: clickColName_(map), headers: headers };
+    function countNonEmpty(col) {
+      if (!col || last < 2) return 0;
+      var vals = sh.getRange(2, col, last - 1, 1).getValues(), n = 0;
+      for (var i = 0; i < vals.length; i++) { if (vals[i][0] !== '' && vals[i][0] !== null) n++; }
+      return n;
+    }
+    info.dataRows = countNonEmpty(map['post_id']);
+    info.filled = {
+      短縮URL: countNonEmpty(map['短縮URL']),
+      短縮URLクリック数: countNonEmpty(map[clickColName_(map)]),
+      題名コメント: countNonEmpty(map['題名(コメント)']),
+      YouTube題名: countNonEmpty(map['YouTube題名']),
+      キャラ: countNonEmpty(map['キャラ']),
+      post_uri: countNonEmpty(map['post_uri'])
+    };
+    channels[name] = info;
+  });
+  return { ok: true, version: GAS_VERSION, spreadsheet: ss.getName(), allTabs: allTabs, channels: channels };
 }
 
 function doPost(e) {
