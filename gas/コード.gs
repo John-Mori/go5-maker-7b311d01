@@ -18,14 +18,18 @@
  *   ※ SHARED_SECRET は設定しないこと（現クライアントは送らないため、設定すると弾かれる）
  */
 
-// 記録シートの列ヘッダー（テンプレートと完全一致・この順序）。新規作成時のヘッダーにも使う。
+// 記録シートの列ヘッダー（新規シート作成時のヘッダーにも使う）。
+// ※不要な手動ラベル列（特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル）は削除済み。
 var HEADERS40 = [
-  'post_id','投稿日時','曜日','day-type','時間帯スロット','特別期間(手動)','ジャンル','題名(コメント)',
-  'サムネ/フック種別(A/B)','CTA・リンク提示方法','Blueskyラベル','作品cid','YouTube動画URL','短縮URL',
+  'post_id','投稿日時','曜日','day-type','時間帯スロット','ジャンル','題名(コメント)',
+  '作品cid','YouTube動画URL','短縮URL',
   'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','返信','フォロー増','開封数',
   'FANZA発生成約','FANZA確定成約','発生報酬¥','確定報酬¥','承認率%','リンククリック率%','CVR発生%','CVR確定%',
   'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','post_uri','クリック更新日時','反応更新日時'
 ];
+// ?action=cleanup_columns で既存シートから削除する列（コードが唯一の正・ClaudeCodeから増減）。
+// ※分析数式(承認率/CVR/EPC/RPM)の計算元(FANZA成約・報酬系)やpost_uri(反応自動更新に必須)は含めない。
+var CLEANUP_COLUMNS = ['特別期間(手動)', 'サムネ/フック種別(A/B)', 'CTA・リンク提示方法', 'Blueskyラベル'];
 // FANZA投稿時スナップショット列（記録シート末尾追加。既存40列は不変）。
 // レビュー件数は販売部数の代理指標（実際の売上本数は取得不可）。
 var FANZA_HEADERS = [
@@ -42,13 +46,13 @@ var EXTRA_HEADERS = ['キャラ', 'YouTube題名'];
 //     開封数 / post_uri / クリック更新日時 / 反応更新日時 / キャラ /
 //     元値list_price / 割引後price / 割引率pct / FANZA取得日時 / レビュー件数(代理指標) / レビュー平均 /
 //     承認率% / リンククリック率% / CVR発生% / CVR確定% / EPC発生¥ / EPC確定¥ / RPM（←数式・自動計算）
-//   【手動入力のみ＝APIで自動取得不可】特別期間(手動) / ジャンル / サムネ・フック種別(A/B) /
-//     CTA・リンク提示方法 / Blueskyラベル / インプレッション / インプCTR% / 平均視聴維持率% / フォロー増 /
-//     FANZA発生成約 / FANZA確定成約 / 発生報酬¥ / 確定報酬¥
+//   【手動入力のみ＝APIで自動取得不可】ジャンル / インプレッション / インプCTR% /
+//     平均視聴維持率% / フォロー増 / FANZA発生成約 / FANZA確定成約 / 発生報酬¥ / 確定報酬¥
 //   ※FANZA成約・報酬の手動4列は、承認率%/CVR/EPC/RPM の計算元。消すと分析数式が無価値になる点に注意。
+//   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-01C（YouTube題名列・視聴回数/開封数の同期反映を追加）';
+var GAS_VERSION = '2026-07-01D（不要ラベル4列の削除 cleanup_columns 追加）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -83,6 +87,10 @@ function doGet(e) {
   // 一回限りのヘッダ移行: <exec URL>?action=migrate_headers で既存シートに FANZA 列を追加する。
   if (p.action === 'migrate_headers') {
     return jsonOut_(migrateHeaders_());
+  }
+  // 不要列の削除: <exec URL>?action=cleanup_columns で CLEANUP_COLUMNS の列を各シートから削除（冪等）。
+  if (p.action === 'cleanup_columns') {
+    return jsonOut_(cleanupColumns_());
   }
   // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
   if (p.callback) {
@@ -162,6 +170,26 @@ function migrateHeaders_() {
       sh.getRange(1, sh.getLastColumn() + 1).setValue(h);
     });
     result.push({ sheet: name, added: missing, status: 'ok' });
+  });
+  return { ok: true, result: result };
+}
+
+// CLEANUP_COLUMNS の列を各記録シートから削除する（冪等：存在する列だけ・右から削除して索引ズレ回避）。
+// 列削除時、Googleスプレッドシートは他セルの数式参照を自動補正するため分析数式は壊れない。
+function cleanupColumns_() {
+  var result = [];
+  var ss = openSS_();
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { result.push({ sheet: name, status: 'not_found' }); return; }
+    var lastCol = sh.getLastColumn();
+    if (lastCol < 1) { result.push({ sheet: name, status: 'empty' }); return; }
+    var header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    var removed = [], idxs = [];
+    CLEANUP_COLUMNS.forEach(function (n) { var i = header.indexOf(n); if (i >= 0) { idxs.push(i + 1); removed.push(n); } });
+    idxs.sort(function (a, b) { return b - a; });          // 右の列から削除（索引ズレ防止）
+    idxs.forEach(function (c) { sh.deleteColumn(c); });
+    result.push({ sheet: name, removed: removed, status: removed.length ? 'ok' : 'already_clean' });
   });
   return { ok: true, result: result };
 }
