@@ -112,7 +112,10 @@ function doGet(e) {
     return ContentService.createTextOutput(p.callback + '(' + JSON.stringify(out) + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
-  return jsonOut_({ ok: true, service: 'go5-maker recorder v2 (2ch)' });
+  // 該当アクション無し。どのバージョンが live か常に分かるよう version と対応アクションを返す。
+  return jsonOut_({ ok: true, service: 'go5-maker recorder v2 (2ch)', version: GAS_VERSION,
+    actions: ['ping', 'migrate_headers', 'cleanup_columns', 'diagnose'],
+    note: 'diagnose が service応答になる場合は diagnose 追加版(2026-07-01F以降)が未デプロイ' });
 }
 // 指定 post_uri の行から短縮URLを返す（読み取りのみ）。
 function lookupShortByUri_(channel, postUri) {
