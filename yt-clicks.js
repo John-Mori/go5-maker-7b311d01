@@ -485,10 +485,32 @@
       .then(function () { if (btn) btn.disabled = false; });
   }
 
+  // この投稿履歴に無い post_id の行を、記録シート(GAS)から消去する（このアカウントのタブのみ）。
+  function pruneSheet() {
+    var gasUrl = '';
+    try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
+    if (!gasUrl) { setStatus('⚠️ 記録用GASのURLが未設定です（⚙️詳細設定で設定してください）'); return; }
+    ensureIds();
+    var keepIds = allItems().map(function (it) { return it.videoId; }).filter(Boolean);
+    if (!keepIds.length) { setStatus('掃除の基準になる履歴がありません（先に同期してください）'); return; }
+    if (!window.confirm('この投稿履歴に無い行を、スプレッドシートの「' + acct() + '」タブから消去します。\n（記録シートをこの履歴に合わせます。よろしいですか？）')) return;
+    var btn = $('ytPruneSheet'); if (btn) btn.disabled = true;
+    setStatus('履歴に無い行を掃除中…');
+    fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'prune_history', channel: acct(), keepIds: keepIds }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && j.ok) setStatus('🧹 掃除しました（' + (j.cleared != null ? j.cleared : '?') + '行を消去）');
+        else setStatus('⚠️ 掃除に失敗しました' + (j && j.error ? '：' + j.error : ''));
+      })
+      .catch(function () { setStatus('🧹 掃除リクエストを送信しました。数秒後にスプレッドシートをご確認ください。'); })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
+
   var tab = $('tabVerify'); if (tab) tab.addEventListener('click', refresh);
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', refresh);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
+  var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
   document.addEventListener('account-changed', function () { render(); });
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。

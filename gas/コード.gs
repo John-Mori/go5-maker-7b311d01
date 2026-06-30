@@ -36,13 +36,13 @@ var FANZA_HEADERS = [
   '元値list_price','割引後price','割引率pct','FANZA取得日時',
   'レビュー件数(代理指標)','レビュー平均'
 ];
-// 追加属性列（記録シート末尾追加・移行で付与）。
-//   キャラ＝実在キャラの二次創作作品に○。YouTube題名＝YouTube動画の実題名（題名(コメント)とは別）。
-var EXTRA_HEADERS = ['キャラ', 'YouTube題名'];
+// 追加属性列（記録シート末尾追加・移行で付与）。キャラ＝実在キャラの二次創作作品に○。
+// ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
+var EXTRA_HEADERS = ['キャラ'];
 //
 // ── 列の自動取得マップ（保守用メモ：ClaudeCodeはここを基準に列を増減する）──
 //   【自動で埋まる】post_id / 投稿日時 / 曜日 / day-type / 時間帯スロット / 題名(コメント) /
-//     作品cid / YouTube動画URL / YouTube題名 / 短縮URL / 視聴回数 / いいね / リポスト / 返信 /
+//     作品cid / YouTube動画URL / 短縮URL / 視聴回数 / いいね / リポスト / 返信 /
 //     短縮URLクリック数 / post_uri / クリック更新日時 / 反応更新日時 / キャラ /
 //     元値list_price / 割引後price / 割引率pct / FANZA取得日時 / レビュー件数(代理指標) / レビュー平均 /
 //     承認率% / リンククリック率% / CVR発生% / CVR確定% / EPC発生¥ / EPC確定¥ / RPM（←数式・自動計算）
@@ -52,7 +52,7 @@ var EXTRA_HEADERS = ['キャラ', 'YouTube題名'];
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-01F（診断 diagnose 追加：どのタブに何が入っているか可視化）';
+var GAS_VERSION = '2026-07-01G（題名集約 consolidate_title・履歴掃除 prune_history 追加）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -99,6 +99,10 @@ function doGet(e) {
   // 診断: <exec URL>?action=diagnose でスプレッドシート名・全タブ名・各記録タブの中身を返す（読み取りのみ）。
   if (p.action === 'diagnose') {
     return jsonOut_(diagnose_());
+  }
+  // 題名集約: <exec URL>?action=consolidate_title で「YouTube題名」を「題名(コメント)」へ移し、列を削除。
+  if (p.action === 'consolidate_title') {
+    return jsonOut_(consolidateTitle_());
   }
   // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
   if (p.callback) {
@@ -212,6 +216,31 @@ function cleanupColumns_() {
   return { ok: true, result: result };
 }
 
+// 「YouTube題名」列の値を「題名(コメント)」列へ移し（値があるものは上書き）、YouTube題名列を削除する。
+// 題名を1列（題名(コメント)）に集約するための一回限りの移行（冪等：YouTube題名列が無ければ何もしない）。
+function consolidateTitle_() {
+  var result = [];
+  var ss = openSS_();
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { result.push({ sheet: name, status: 'not_found' }); return; }
+    var map = headerMap_(sh);
+    var gCol = map['題名(コメント)'], yCol = map['YouTube題名'];
+    if (!yCol) { result.push({ sheet: name, moved: 0, removed: false, status: 'no_youtube_title_col' }); return; }
+    var last = sh.getLastRow(), moved = 0;
+    if (gCol && last >= 2) {
+      var yVals = sh.getRange(2, yCol, last - 1, 1).getValues();
+      for (var i = 0; i < yVals.length; i++) {
+        var v = yVals[i][0];
+        if (v !== '' && v !== null) { sh.getRange(i + 2, gCol).setValue(v); moved++; } // 値があれば題名(コメント)へ上書き
+      }
+    }
+    sh.deleteColumn(yCol); // YouTube題名 列を削除
+    result.push({ sheet: name, moved: moved, removed: true, status: 'ok' });
+  });
+  return { ok: true, result: result };
+}
+
 // 診断（読み取りのみ）：どのスプレッドシートのどのタブに、何が入っているかを可視化する。
 // 「データがどこに書かれているか分からない」「クリック数/題名が空」の原因切り分けに使う。
 function diagnose_() {
@@ -253,6 +282,8 @@ function doPost(e) {
     if (body.type === 'reserve') return handleReserve_(body);
     // 投稿履歴の一括同期（フロントの投稿履歴を正とし、ID・投稿日時・キャラ等をまとめて upsert）。
     if (body.op === 'sync_history') return syncHistory_(body.channel || 'acc1', body.items || []);
+    // 投稿履歴の掃除（keepIds に無い post_id の行をクリア＝アプリの履歴を正にシートを揃える）。
+    if (body.op === 'prune_history') return pruneHistory_(body.channel || 'acc1', body.keepIds || []);
     // テストモード：シートには一切書かない（Bluesky実投稿はフロント側で実施）。
     if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
     var r = writeRecord_(body.channel || 'acc1', {
@@ -368,11 +399,10 @@ function writeRecord_(channel, f) {
   if (f.postedAt) { var pd = new Date(f.postedAt); if (!isNaN(pd.getTime())) postedDate = pd; }
   if (postedDate) put('投稿日時', postedDate);
   else if (isNewRow || f.postUrl) put('投稿日時', now);
-  putIf('題名(コメント)', f.title || '');
+  putIf('題名(コメント)', f.ytTitle || f.title || '');         // YouTube題名を優先して題名(コメント)へ集約
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
   putIf('短縮URL', shortUrl);
   putIf('YouTube動画URL', f.youtubeUrl || '');
-  putIf('YouTube題名', f.ytTitle || '');                       // YouTube動画の実題名（アプリのtitleCacheから）
   putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
   putIf(clickColName_(map), (f.clicks !== undefined && f.clicks !== null && f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
   putIf('post_uri', f.postUri || '');
@@ -418,6 +448,25 @@ function syncHistory_(channel, items) {
   var sh = getChannelSheet_(channel), map = headerMap_(sh);
   sortByDate_(sh, map['投稿日時'] || 2);
   return jsonOut_({ ok: true, synced: n });
+}
+
+// 投稿履歴の掃除：keepIds（アプリの全post_id）に含まれない行をクリアする（行は詰めず内容クリア＝再利用可）。
+// アプリの投稿履歴を「正」とし、履歴から消した投稿をシートからも消す用途。指定チャンネルのタブのみ対象。
+function pruneHistory_(channel, keepIds) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var pidc = map['post_id']; var last = sh.getLastRow();
+  if (!pidc || last < 2) return jsonOut_({ ok: true, cleared: 0 });
+  var keep = {};
+  for (var i = 0; i < keepIds.length; i++) { if (keepIds[i]) keep[String(keepIds[i])] = true; }
+  var pids = sh.getRange(2, pidc, last - 1, 1).getValues();
+  var cleared = 0;
+  for (var r = 0; r < pids.length; r++) {
+    var pid = String(pids[r][0] || '');
+    if (!pid) continue;                  // 既に空の行はスキップ
+    if (!keep[pid]) { sh.getRange(r + 2, 1, 1, sh.getLastColumn()).clearContent(); cleared++; }
+  }
+  sortByDate_(sh, map['投稿日時'] || 2); // 空行は末尾へ
+  return jsonOut_({ ok: true, cleared: cleared });
 }
 
 // 記録シートを「投稿日時」降順で並べ替える（ヘッダ行は固定、2行目以降が対象）。
