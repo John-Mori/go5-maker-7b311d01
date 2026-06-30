@@ -382,4 +382,96 @@
     try { keyEl.value = localStorage.getItem('yt_api_key') || ''; } catch (e) {}
     keyEl.addEventListener('input', function () { try { localStorage.setItem('yt_api_key', keyEl.value.trim()); } catch (e) {} });
   }
+
+  // ── ランキングタブ（両アカウント合算・再生数順）──────────────────────────────
+  function renderRank() {
+    var el = $('pageRank');
+    if (!el) return;
+
+    // 両アカウントからアイテムとYouTube URLを収集
+    var combined = [];
+    ['acc1', 'acc2'].forEach(function (a) {
+      var ymap;
+      try { ymap = JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { ymap = {}; }
+      var items = loadArr('short_hist__' + a).concat(loadArr('verify_manual__' + a));
+      items.forEach(function (it) {
+        var k = itemKey(it);
+        var yt = ymap[k] || it.ytUrl || '';
+        var vid = ytIdOf(yt);
+        if (!vid) return;
+        combined.push({ it: it, vid: vid, yt: yt });
+      });
+    });
+
+    // vid で重複排除（同じ動画が両アカウントに存在する場合、先に出た方のみ）
+    var seen = {};
+    var uniq = combined.filter(function (x) {
+      if (seen[x.vid]) return false;
+      seen[x.vid] = true;
+      return true;
+    });
+
+    if (!uniq.length) {
+      el.innerHTML = '<p class="hint">YouTube URLが設定された動画がありません。<br>🧪 検証タブで各行にYouTube URLを入力すると表示されます。</p>';
+      return;
+    }
+
+    function doRender() {
+      var rows = uniq.map(function (x) {
+        return {
+          vid: x.vid,
+          yt: x.yt,
+          title: titleCache[x.vid] || x.it.title || (x.it.manual ? '(手動追加)' : '(無題)'),
+          views: (x.vid in viewsCache) ? viewsCache[x.vid] : null
+        };
+      });
+      rows.sort(function (a, b) {
+        if (a.views === null && b.views === null) return 0;
+        if (a.views === null) return 1;
+        if (b.views === null) return -1;
+        return b.views - a.views;
+      });
+      el.innerHTML = '<div class="rank-list">' +
+        rows.map(function (r, i) {
+          var rank = i + 1;
+          var topCls = rank <= 3 ? ' rank-top' + rank : '';
+          var dispTitle = esc(stripCommonTags(r.title));
+          return '<div class="rank-row' + topCls + '">' +
+            '<span class="rank-num">' + rank + '</span>' +
+            '<div class="rank-info">' +
+              '<div class="rank-title">' +
+                (r.yt ? '<a class="rank-title-link" href="' + esc(r.yt) + '" target="_blank" rel="noopener">' + dispTitle + ' ↗</a>' : dispTitle) +
+              '</div>' +
+              '<div class="rank-views">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+    }
+
+    // キャッシュにない vid だけ API フェッチ（最大 50 件ずつ）
+    var missing = uniq.map(function (x) { return x.vid; }).filter(function (v) { return !(v in viewsCache); });
+    if (missing.length) {
+      el.innerHTML = '<p style="color:var(--sub);font-size:13px;padding:8px 14px;">再生数を取得中…</p>';
+      // 50件ずつバッチに分割して並列フェッチ
+      var batches = [];
+      for (var i = 0; i < missing.length; i += 50) { batches.push(missing.slice(i, i + 50)); }
+      Promise.all(batches.map(function (b) { return fetchVideos(b); })).then(function (results) {
+        results.forEach(function (m) {
+          var err = m.__error || ''; delete m.__error;
+          if (err && !lastErr) lastErr = err;
+          Object.keys(m).forEach(function (id) {
+            var rec = m[id] || {};
+            if (rec.views != null) viewsCache[id] = rec.views;
+            if (rec.published != null) publishedCache[id] = rec.published;
+            if (rec.title) titleCache[id] = rec.title;
+          });
+        });
+        doRender();
+      });
+    } else {
+      doRender();
+    }
+  }
+  try { window.YtRank = { renderRank: renderRank }; } catch (e) {}
 })();
