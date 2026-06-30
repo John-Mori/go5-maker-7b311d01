@@ -36,7 +36,7 @@ var FANZA_HEADERS = [
 var EXTRA_HEADERS = ['キャラ'];
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-01A（キャラ列・投稿日時降順ソート追加）';
+var GAS_VERSION = '2026-07-01B（投稿履歴の一括同期 sync_history 追加）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -160,6 +160,8 @@ function doPost(e) {
     var need = prop_('SHARED_SECRET');
     if (need && body.secret !== need) return jsonOut_({ ok: false, error: 'bad_secret' });
     if (body.type === 'reserve') return handleReserve_(body);
+    // 投稿履歴の一括同期（フロントの投稿履歴を正とし、ID・投稿日時・キャラ等をまとめて upsert）。
+    if (body.op === 'sync_history') return syncHistory_(body.channel || 'acc1', body.items || []);
     // テストモード：シートには一切書かない（Bluesky実投稿はフロント側で実施）。
     if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
     var r = writeRecord_(body.channel || 'acc1', {
@@ -235,7 +237,7 @@ function writeRecord_(channel, f) {
   // 無い経路（無人予約・旧クライアント）だけ GAS が da.gd で短縮（1投稿1回・トークン不要・軽量）。
   // ※Bitlyは無料枠オーバーの主因かつ冗長（共有されず計測不能）なため全廃。
   var shortUrl = f.shortUrl || '';
-  if (!shortUrl && f.postUrl) shortUrl = daGdShorten_(f.postUrl);
+  if (!shortUrl && f.postUrl && !f.noShorten) shortUrl = daGdShorten_(f.postUrl);
   var sh = getChannelSheet_(channel);
   var map = headerMap_(sh);
   var dcol = map['投稿日時'] || 2;
@@ -269,8 +271,12 @@ function writeRecord_(channel, f) {
   function putIf(h, v) { if (map[h] && v !== '' && v !== null && v !== undefined) sh.getRange(target, map[h]).setValue(v); }
 
   put('post_id', pid);
-  // 投稿日時は「新規行」か「投稿URLを伴う記録」の時だけ。YouTube URLだけの後追いupsertでは上書きしない。
-  if (isNewRow || f.postUrl) put('投稿日時', now);
+  // 投稿日時：履歴の実投稿時刻(postedAt)があれば最優先。無ければ新規行/投稿URL記録時のみ now。
+  // （YouTube URLだけの後追いupsertでは上書きしない＝既存の投稿日時を保護）
+  var postedDate = null;
+  if (f.postedAt) { var pd = new Date(f.postedAt); if (!isNaN(pd.getTime())) postedDate = pd; }
+  if (postedDate) put('投稿日時', postedDate);
+  else if (isNewRow || f.postUrl) put('投稿日時', now);
   putIf('題名(コメント)', f.title || '');
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
   putIf('短縮URL', shortUrl);
@@ -290,8 +296,32 @@ function writeRecord_(channel, f) {
   // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
   if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
   // 投稿履歴を正とし、投稿日時の新しい順にシートを並べ替える（空日時は末尾へ）。
-  sortByDate_(sh, dcol);
+  // 一括同期(sync_history)では noSort で抑止し、最後に1回だけ並べ替える。
+  if (!f.noSort) sortByDate_(sh, dcol);
   return { shortUrl: shortUrl, row: target };
+}
+
+// 投稿履歴の一括同期：各アイテムを post_id(背骨ID)キーで upsert し、最後に1回だけ日付降順ソート。
+// 投稿履歴を「正」とするため ID・投稿日時(postedAt)・キャラ属性も反映する（冪等：再実行しても重複しない）。
+function syncHistory_(channel, items) {
+  if (!items || !items.length) return jsonOut_({ ok: true, synced: 0 });
+  var n = 0;
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i] || {};
+    if (!it.videoId) continue;
+    try {
+      writeRecord_(channel, {
+        videoId: it.videoId, title: it.title || '', postUrl: it.postUrl || '',
+        workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '',
+        youtubeUrl: it.youtubeUrl || '', chara: it.chara, postedAt: it.postedAt || '',
+        noShorten: true, noSort: true   // 同期は短縮API呼ばず・並べ替えは最後にまとめて
+      });
+      n++;
+    } catch (e) {}
+  }
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  sortByDate_(sh, map['投稿日時'] || 2);
+  return jsonOut_({ ok: true, synced: n });
 }
 
 // 記録シートを「投稿日時」降順で並べ替える（ヘッダ行は固定、2行目以降が対象）。

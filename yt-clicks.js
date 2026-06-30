@@ -425,9 +425,48 @@
     });
   }
 
+  // この投稿履歴を正として、全アイテムを記録シート(GAS)へ一括 upsert 同期する。
+  // ID・投稿日時(ts)・キャラ属性も送り、シート側で post_id 一致行を更新＋日付降順ソート。
+  function syncSheet() {
+    var gasUrl = '';
+    try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
+    if (!gasUrl) { setStatus('⚠️ 記録用GASのURLが未設定です（⚙️詳細設定で設定してください）'); return; }
+    ensureIds();
+    var ymap = loadYtMap();
+    var items = allItems().map(function (it) {
+      var k = itemKey(it);
+      return {
+        videoId: it.videoId || '',
+        title: it.title || '',
+        postUri: it.postUri || '',
+        postUrl: it.postUrl || '',
+        shortUrl: it.shortUrl || '',
+        workUrl: it.workUrl || '',
+        youtubeUrl: ymap[k] || it.ytUrl || '',
+        chara: !!it.chara,
+        postedAt: (it.ts && it.ts > 0) ? new Date(it.ts).toISOString() : ''
+      };
+    }).filter(function (r) { return r.videoId; });
+    if (!items.length) { setStatus('同期する履歴がありません'); return; }
+    var btn = $('ytSyncSheet'); if (btn) btn.disabled = true;
+    setStatus('スプレッドシートへ同期中… (' + items.length + '件)');
+    fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'sync_history', channel: acct(), items: items }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && j.ok) setStatus('✅ スプレッドシートへ同期しました（' + (j.synced != null ? j.synced : items.length) + '件）');
+        else setStatus('⚠️ 同期に失敗しました' + (j && j.error ? '：' + j.error : ''));
+      })
+      .catch(function () {
+        // GASのCORS応答は読めないことがあるが、送信自体は届いている（記録は実行される）。
+        setStatus('📤 同期リクエストを送信しました（' + items.length + '件）。数秒後にスプレッドシートをご確認ください。');
+      })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
+
   var tab = $('tabVerify'); if (tab) tab.addEventListener('click', refresh);
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', refresh);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
+  var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   document.addEventListener('account-changed', function () { render(); });
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。
