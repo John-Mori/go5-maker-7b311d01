@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=102">
-<link rel="apple-touch-icon" href="icon.svg?v=102">
+<link rel="manifest" href="manifest.webmanifest?v=103">
+<link rel="apple-touch-icon" href="icon.svg?v=103">
 <link rel="icon" href="icon.svg?v=84" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=102">
+<link rel="stylesheet" href="style.css?v=103">
 </head>
 <body>
 <header>
@@ -179,9 +179,9 @@
       <button id="makeBtn" class="primary" style="flex:1;">▶ 今すぐ作成・投稿</button>
       <button id="makeReserveBtn" type="button" class="ghost" style="flex:1;">⏰ 予約して投稿</button>
     </div>
-    <div id="movieSchedRow" style="display:none;margin-top:8px;">
-      <input id="movieSchedAt" type="datetime-local" style="width:100%;margin-bottom:6px;">
-      <button id="makeReserveConfirmBtn" type="button" class="primary" style="width:100%;">✅ この時刻に予約して作成</button>
+    <div id="movieSchedRow" style="display:none;margin-top:8px;font-size:.88rem;">
+      <input id="movieSchedAt" type="datetime-local" style="width:100%;box-sizing:border-box;margin-bottom:6px;font-size:.88rem;">
+      <button id="makeReserveConfirmBtn" type="button" class="primary" style="width:100%;font-size:.88rem;padding:7px 10px;">✅ この時刻に予約して作成</button>
     </div>
     <div class="status" id="status"></div>
     <div id="resultArea" hidden>
@@ -325,7 +325,8 @@
     <div class="hint">ここは<b>固定文だけ</b>。アフィリンクと画像は<b>投稿時に自動で付きます</b>（説明の括弧書きは本文に入れないでください）。</div>
 
     <label class="field-label" for="bskyWorkUrl">作品URL（投稿時にアフィリンクを自動追加）</label>
-    <input id="bskyWorkUrl" type="url" inputmode="url" placeholder="https://…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <a id="bskyWorkLink" href="#" target="_blank" rel="noopener" style="display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--sub);font-size:.85rem;min-height:1.4em;margin-bottom:4px;">（URLを入力してください）</a>
+    <input id="bskyWorkUrl" type="url" inputmode="url" placeholder="https://…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <div id="bskyWorkAffiPreview" style="margin-top:4px;font-size:.82rem;word-break:break-all;"></div>
     <div class="hint">af_id は「🔗 アフィリンク」タブの設定を流用。空欄なら本文だけ投稿します。この本文＋作品URLは<b>自動投稿（方法①）でも共通</b>。</div>
   </section>
@@ -361,12 +362,12 @@
   </section>
 
   <!-- 投稿ボタン（今すぐ投稿・予約投稿を並列配置） -->
-  <section class="card">
+  <section class="card" style="font-size:.88rem;">
     <label class="field-label" for="postSchedAt" style="font-size:.8rem;margin:0 0 4px;">⏰ 予約時刻（今すぐ投稿なら空欄のまま）</label>
-    <input id="postSchedAt" type="datetime-local" style="margin-bottom:10px;width:100%;">
+    <input id="postSchedAt" type="datetime-local" style="margin-bottom:10px;width:100%;box-sizing:border-box;font-size:.88rem;">
     <div style="display:flex;gap:8px;">
-      <button id="postNowBtn" class="primary bsky-post-btn" style="flex:1;">🦋 今すぐ投稿</button>
-      <button id="postReserveBtn" class="ghost" style="flex:1;">⏰ 予約して投稿</button>
+      <button id="postNowBtn" class="primary bsky-post-btn" style="flex:1;font-size:.88rem;padding:7px 10px;">🦋 今すぐ投稿</button>
+      <button id="postReserveBtn" class="ghost" style="flex:1;font-size:.88rem;padding:7px 10px;">⏰ 予約して投稿</button>
     </div>
     <div class="status" id="postStatus"></div>
     <details style="margin-top:10px;">
@@ -607,23 +608,23 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=102"></script>
-<script src="app.js?v=102"></script>
-<script src="affiliate-core.js?v=102"></script>
-<script src="fanza-core.js?v=102"></script>
-<script src="affiliate.js?v=102"></script>
-<script src="bluesky-core.js?v=102"></script>
-<script src="scheduler.js?v=102"></script>
-<script src="bluesky.js?v=102"></script>
-<script src="drive-upload.js?v=102"></script>
-<script src="verify-core.js?v=102"></script>
-<script src="verify.js?v=102"></script>
-<script src="yt-clicks.js?v=102"></script>
-<script src="integration.js?v=102"></script>
-<script src="wizard.js?v=102"></script>
-<script src="settings-io.js?v=102"></script>
-<script src="theme-settings.js?v=102"></script>
-<script src="persist-fields.js?v=102"></script>
+<script src="idgen.js?v=103"></script>
+<script src="app.js?v=103"></script>
+<script src="affiliate-core.js?v=103"></script>
+<script src="fanza-core.js?v=103"></script>
+<script src="affiliate.js?v=103"></script>
+<script src="bluesky-core.js?v=103"></script>
+<script src="scheduler.js?v=103"></script>
+<script src="bluesky.js?v=103"></script>
+<script src="drive-upload.js?v=103"></script>
+<script src="verify-core.js?v=103"></script>
+<script src="verify.js?v=103"></script>
+<script src="yt-clicks.js?v=103"></script>
+<script src="integration.js?v=103"></script>
+<script src="wizard.js?v=103"></script>
+<script src="settings-io.js?v=103"></script>
+<script src="theme-settings.js?v=103"></script>
+<script src="persist-fields.js?v=103"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */

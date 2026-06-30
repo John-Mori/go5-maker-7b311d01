@@ -788,6 +788,12 @@
     if (url) { el.href = url; el.textContent = url; }
     else { el.href = '#'; el.textContent = '（URLを入力してください）'; }
   }
+  function updateBskyWorkLink(url) {
+    var el = document.getElementById('bskyWorkLink');
+    if (!el) return;
+    if (url) { el.href = url; el.textContent = url; el.style.color = 'var(--accent)'; }
+    else { el.href = '#'; el.textContent = '（URLを入力してください）'; el.style.color = 'var(--sub)'; }
+  }
   function updateBskyWorkAffiPreview(url) {
     var el = document.getElementById('bskyWorkAffiPreview');
     if (!el) return;
@@ -810,6 +816,7 @@
     if (els.workUrl && fromMovie) els.workUrl.value = v;
     if (els.movieWorkUrl && !fromMovie) els.movieWorkUrl.value = v;
     updateMovieWorkLink(v);
+    updateBskyWorkLink(v);
     updateBskyWorkAffiPreview(v);
     paintWorkWarn(els.movieWorkWarn, v);
     renderPreview(); updateGasStatus();
