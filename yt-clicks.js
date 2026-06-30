@@ -239,7 +239,7 @@
         : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>');
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
-      var tagWarn = !it.manual && it.title && missingCommonTags(it.title);
+      var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
       var titleHtml = tagWarn
         ? '<span style="color:#dc465a;font-weight:700;">' + dispTitle + ' #タグ忘れ</span>'
         : dispTitle;
