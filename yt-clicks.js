@@ -386,17 +386,39 @@
   }
 
   // ── FANZA 商品名 キャッシュ＆DOM埋め込み ────────────────────────────────────
+  // FANZA同人ページは未ログインだとログイン/年齢確認ページが返り、その og:title が
+  // 「ログイン - FANZA」等になる。これを商品名として表示しないための判定。
+  function isBadFanzaTitle(t) {
+    var s = String(t || '').trim();
+    if (!s) return true;
+    if (s.indexOf('ログイン') >= 0) return true;
+    if (s.toLowerCase().indexOf('login') >= 0) return true;
+    if (s.indexOf('年齢確認') >= 0) return true;
+    if (s.indexOf('エラー') >= 0) return true;
+    if (s === 'FANZA' || s === 'DMM') return true;
+    return false;
+  }
   function fanzaNameCacheLoad() {
     try { return JSON.parse(localStorage.getItem('fanza_title_cache') || '{}'); } catch (e) { return {}; }
   }
   function fanzaNameCacheSave(c) {
     try { localStorage.setItem('fanza_title_cache', JSON.stringify(c)); } catch (e) {}
   }
+  // 既存キャッシュから不正タイトル（ログイン/エラーページ等）を一掃する。変更があれば保存。
+  function purgeBadFanzaCache() {
+    var c = fanzaNameCacheLoad();
+    var changed = false;
+    Object.keys(c).forEach(function (url) {
+      if (!c[url] || isBadFanzaTitle(c[url].title)) { delete c[url]; changed = true; }
+    });
+    if (changed) fanzaNameCacheSave(c);
+  }
   // data-fanza-url が一致する現在の DOM 要素を全て更新（DOM 再描画後も正しく反映される）
   function setFanzaEls(fanzaUrl, title) {
+    var ok = title && !isBadFanzaTitle(title);
     document.querySelectorAll('[data-fanza-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-url') !== fanzaUrl) return;
-      if (title) { el.textContent = title; el.style.display = ''; }
+      if (ok) { el.textContent = title; el.style.display = ''; }
       else { el.textContent = ''; el.style.display = 'none'; }
     });
   }
@@ -410,6 +432,7 @@
     try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
     try { sharedSecret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
     if (!workerUrl) return;
+    purgeBadFanzaCache(); // 旧版で混入したログイン/エラータイトルを先に掃除
     var cache = fanzaNameCacheLoad();
     var now = new Date().getTime();
     var DAY = 86400000;
@@ -419,7 +442,7 @@
       var url = nameEl.getAttribute('data-fanza-url');
       if (!url) return;
       var cached = cache[url];
-      if (cached && cached.title && (now - (cached.fetchedAt || 0)) < DAY) {
+      if (cached && cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY) {
         nameEl.textContent = cached.title;
         nameEl.style.display = '';
         return;
@@ -433,7 +456,8 @@
       nameEl.style.display = '';
       var capturedUrl = url;
       window.FanzaCore.fetchFanzaInfo(res.cid, workerUrl, sharedSecret).then(function (info) {
-        if (!info || !info.title) { setFanzaEls(capturedUrl, ''); return; }
+        // タイトル無し・ログイン/エラーページのタイトルは商品名として扱わない（キャッシュもしない）
+        if (!info || !info.title || isBadFanzaTitle(info.title)) { setFanzaEls(capturedUrl, ''); return; }
         var c = fanzaNameCacheLoad();
         c[capturedUrl] = { title: info.title, fetchedAt: now };
         fanzaNameCacheSave(c);
