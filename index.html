@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=94">
-<link rel="apple-touch-icon" href="icon.svg?v=94">
+<link rel="manifest" href="manifest.webmanifest?v=95">
+<link rel="apple-touch-icon" href="icon.svg?v=95">
 <link rel="icon" href="icon.svg?v=84" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=94">
+<link rel="stylesheet" href="style.css?v=95">
 </head>
 <body>
 <header>
@@ -159,6 +159,7 @@
         <option value="50">50%</option>
         <option value="60">60%</option>
         <option value="70">70%</option>
+        <option value="75">75%</option>
         <option value="80">80%</option>
         <option value="90">90%</option>
         <option value="custom">カスタム</option>
@@ -294,6 +295,7 @@
         <option value="50">50%</option>
         <option value="60">60%</option>
         <option value="70">70%</option>
+        <option value="75">75%</option>
         <option value="80">80%</option>
         <option value="90">90%</option>
         <option value="custom">カスタム</option>
@@ -317,7 +319,11 @@
     <div class="hint">ここは<b>固定文だけ</b>。アフィリンクと画像は<b>投稿時に自動で付きます</b>（説明の括弧書きは本文に入れないでください）。</div>
 
     <label class="field-label" for="bskyWorkUrl">作品URL（投稿時にアフィリンクを自動追加）</label>
-    <input id="bskyWorkUrl" type="text" inputmode="url" placeholder="https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <input id="bskyWorkUrl" type="url" hidden autocomplete="off">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+      <a id="bskyWorkLink" href="#" target="_blank" rel="noopener" style="flex:1;word-break:break-all;color:var(--sub);font-size:.85rem;min-height:1.4em;">（URLを入力してください）</a>
+      <button id="bskyWorkEdit" type="button" class="ghost" style="flex-shrink:0;font-size:12px;padding:3px 8px;">✏ 変更</button>
+    </div>
     <div class="hint">af_id は「🔗 アフィリンク」タブの設定を流用。空欄なら本文だけ投稿します。この本文＋作品URLは<b>自動投稿（方法①）でも共通</b>。</div>
   </section>
 
@@ -351,24 +357,23 @@
     </div>
   </section>
 
-  <!-- 投稿ボタン -->
+  <!-- 投稿ボタン（今すぐ投稿・予約投稿を並列配置） -->
   <section class="card">
-    <button id="postNowBtn" class="primary bsky-post-btn">🦋 今すぐ投稿する（単独）</button>
+    <label class="field-label" for="postSchedAt" style="font-size:.8rem;margin:0 0 4px;">⏰ 予約時刻（今すぐ投稿なら空欄のまま）</label>
+    <input id="postSchedAt" type="datetime-local" style="margin-bottom:10px;width:100%;">
+    <div style="display:flex;gap:8px;">
+      <button id="postNowBtn" class="primary bsky-post-btn" style="flex:1;">🦋 今すぐ投稿</button>
+      <button id="postReserveBtn" class="ghost" style="flex:1;">⏰ 予約して投稿</button>
+    </div>
     <div class="status" id="postStatus"></div>
-  </section>
-
-  <!-- 予約投稿（Phase3：このタブを開いている間に自動投稿＋通知） -->
-  <section class="card">
-    <label class="field-label" for="postSchedAt">⏰ 予約投稿</label>
-    <input id="postSchedAt" type="datetime-local">
-    <label class="bsky-toggle" style="margin:8px 0;">
-      <input id="bskyUnattended" type="checkbox">
-      <span>☁️ 無人で予約する（タブを閉じてもOK／要GAS設定）</span>
-    </label>
-    <button id="postReserveBtn" class="ghost">⏰ この時刻に予約する</button>
-    <div class="hint">指定時刻に、上の<b>本文・画像</b>で自動投稿します。📅カレンダーから来た場合は枠の予定時刻が入ります。<br>
-      ・<b>無人OFF</b>＝このタブを開いている間だけ（端末のアカウント設定を使用）。<br>
-      ・<b>無人ON</b>＝GASに予約を送り、<b>タブを閉じても</b>時間トリガーが投稿（アカウントはGAS側の設定 BSKY_HANDLE/BSKY_APP_PW を使用）。</div>
+    <details style="margin-top:10px;">
+      <summary style="cursor:pointer;color:var(--sub);font-size:13px;">⚙ 無人予約設定</summary>
+      <label class="bsky-toggle" style="margin:8px 0;">
+        <input id="bskyUnattended" type="checkbox">
+        <span>☁️ 無人で予約する（タブを閉じてもOK／要GAS設定）</span>
+      </label>
+      <div class="hint">・<b>無人OFF</b>＝このタブを開いている間だけ（端末のアカウント設定を使用）。・<b>無人ON</b>＝GASに予約を送り、<b>タブを閉じても</b>時間トリガーが投稿（アカウントはGAS側の設定 BSKY_HANDLE/BSKY_APP_PW を使用）。</div>
+    </details>
     <div id="reserveList" class="rsv-list" hidden></div>
   </section>
 
@@ -558,6 +563,7 @@
         <option value="50">50%</option>
         <option value="60">60%</option>
         <option value="70">70%</option>
+        <option value="75">75%</option>
         <option value="80">80%</option>
         <option value="90">90%</option>
         <option value="custom">カスタム</option>
@@ -582,23 +588,23 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=94"></script>
-<script src="app.js?v=94"></script>
-<script src="affiliate-core.js?v=94"></script>
-<script src="fanza-core.js?v=94"></script>
-<script src="affiliate.js?v=94"></script>
-<script src="bluesky-core.js?v=94"></script>
-<script src="scheduler.js?v=94"></script>
-<script src="bluesky.js?v=94"></script>
-<script src="drive-upload.js?v=94"></script>
-<script src="verify-core.js?v=94"></script>
-<script src="verify.js?v=94"></script>
-<script src="yt-clicks.js?v=94"></script>
-<script src="integration.js?v=94"></script>
-<script src="wizard.js?v=94"></script>
-<script src="settings-io.js?v=94"></script>
-<script src="theme-settings.js?v=94"></script>
-<script src="persist-fields.js?v=94"></script>
+<script src="idgen.js?v=95"></script>
+<script src="app.js?v=95"></script>
+<script src="affiliate-core.js?v=95"></script>
+<script src="fanza-core.js?v=95"></script>
+<script src="affiliate.js?v=95"></script>
+<script src="bluesky-core.js?v=95"></script>
+<script src="scheduler.js?v=95"></script>
+<script src="bluesky.js?v=95"></script>
+<script src="drive-upload.js?v=95"></script>
+<script src="verify-core.js?v=95"></script>
+<script src="verify.js?v=95"></script>
+<script src="yt-clicks.js?v=95"></script>
+<script src="integration.js?v=95"></script>
+<script src="wizard.js?v=95"></script>
+<script src="settings-io.js?v=95"></script>
+<script src="theme-settings.js?v=95"></script>
+<script src="persist-fields.js?v=95"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */

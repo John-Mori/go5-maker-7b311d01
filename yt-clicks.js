@@ -399,7 +399,7 @@
         var yt = ymap[k] || it.ytUrl || '';
         var vid = ytIdOf(yt);
         if (!vid) return;
-        combined.push({ it: it, vid: vid, yt: yt });
+        combined.push({ it: it, vid: vid, yt: yt, acct: a });
       });
     });
 
@@ -416,13 +416,27 @@
       return;
     }
 
+    var ACCT_NAME = { acc1: '月詠み', acc2: '宵桜' };
+    function fmtTsFull(ts) {
+      if (!ts) return '';
+      try {
+        var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; };
+        return d.getFullYear() + '/' + p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+      } catch (e) { return ''; }
+    }
+
     function doRender() {
       var rows = uniq.map(function (x) {
+        var it = x.it;
         return {
           vid: x.vid,
           yt: x.yt,
-          title: titleCache[x.vid] || x.it.title || (x.it.manual ? '(手動追加)' : '(無題)'),
-          views: (x.vid in viewsCache) ? viewsCache[x.vid] : null
+          acct: x.acct,
+          title: titleCache[x.vid] || it.title || (it.manual ? '(手動追加)' : '(無題)'),
+          views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
+          ts: it.ts || (publishedCache[x.vid] || 0),
+          bskyHref: it.shortUrl || it.postUrl || '',
+          workUrl: it.workUrl || ''
         };
       });
       rows.sort(function (a, b) {
@@ -436,13 +450,23 @@
           var rank = i + 1;
           var topCls = rank <= 3 ? ' rank-top' + rank : '';
           var dispTitle = esc(stripCommonTags(r.title));
+          var dateStr = fmtTsFull(r.ts);
+          var acctLabel = ACCT_NAME[r.acct] || r.acct;
           return '<div class="rank-row' + topCls + '">' +
             '<span class="rank-num">' + rank + '</span>' +
             '<div class="rank-info">' +
-              '<div class="rank-title">' +
-                (r.yt ? '<a class="rank-title-link" href="' + esc(r.yt) + '" target="_blank" rel="noopener">' + dispTitle + ' ↗</a>' : dispTitle) +
+              (dateStr ? '<div class="rank-date">' + esc(dateStr) + '</div>' : '') +
+              '<div class="rank-title-row">' +
+                '<span class="rank-acct rank-acct-' + esc(r.acct) + '">' + esc(acctLabel) + '</span>' +
+                '<div class="rank-title">' +
+                  (r.yt ? '<a class="rank-title-link" href="' + esc(r.yt) + '" target="_blank" rel="noopener">' + dispTitle + ' ↗</a>' : dispTitle) +
+                '</div>' +
               '</div>' +
-              '<div class="rank-views">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</div>' +
+              '<div class="rank-metrics">' +
+                '<span>▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>' +
+                (r.bskyHref ? '<a class="vlink" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
+                (r.workUrl ? '<a class="vlink vlink-work" href="' + esc(r.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+              '</div>' +
             '</div>' +
           '</div>';
         }).join('') +

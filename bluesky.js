@@ -104,6 +104,7 @@
     if (els.workUrl) els.workUrl.value = wval;
     if (els.movieWorkUrl) els.movieWorkUrl.value = wval;
     updateMovieWorkLink(wval);
+    updateBskyWorkLink(wval);
     paintWorkWarn(els.movieWorkWarn, wval);
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
     var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
@@ -144,6 +145,17 @@
   if (els.unattended) els.unattended.addEventListener('change', function () { saveA('bsky_unattended', els.unattended.checked ? '1' : '0'); });
   if (els.text) els.text.addEventListener('input', function () { saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus(); });
   if (els.workUrl) els.workUrl.addEventListener('input', function () { syncWorkUrl(els.workUrl.value, false); });
+  var bskyWorkEditBtn = document.getElementById('bskyWorkEdit');
+  if (bskyWorkEditBtn && els.workUrl) {
+    bskyWorkEditBtn.addEventListener('click', function () {
+      var cur = els.workUrl.value || '';
+      var val = window.prompt('作品URLを入力してください', cur);
+      if (val === null) return;
+      var trimmed = val.trim();
+      els.workUrl.value = trimmed;
+      syncWorkUrl(trimmed, false);
+    });
+  }
   if (els.handle) els.handle.addEventListener('input', function () { saveA('bsky_handle', els.handle.value); renderPreview(); updateGasStatus(); });
   if (els.appPw) els.appPw.addEventListener('input', function () { saveA('bsky_app_pw', els.appPw.value); renderPreview(); updateGasStatus(); });
 
@@ -782,6 +794,12 @@
     if (url) { el.href = url; el.textContent = url; }
     else { el.href = '#'; el.textContent = '（URLを入力してください）'; }
   }
+  function updateBskyWorkLink(url) {
+    var el = document.getElementById('bskyWorkLink');
+    if (!el) return;
+    if (url) { el.href = url; el.textContent = url; el.style.color = 'var(--accent)'; }
+    else { el.href = '#'; el.textContent = '（URLを入力してください）'; el.style.color = 'var(--sub)'; }
+  }
 
   // 作品URLを一元的に更新（動画作成タブ⇔投稿タブ⇔localStorage を同期）。fromMovie=動画作成タブ起点。
   function syncWorkUrl(v, fromMovie) {
@@ -789,6 +807,7 @@
     if (els.workUrl && fromMovie) els.workUrl.value = v;
     if (els.movieWorkUrl && !fromMovie) els.movieWorkUrl.value = v;
     updateMovieWorkLink(v);
+    updateBskyWorkLink(v);
     paintWorkWarn(els.movieWorkWarn, v);
     renderPreview(); updateGasStatus();
   }
@@ -830,7 +849,7 @@
       }
       function ok() {
         // 確定した作品URLを保存＆反映（記録・YT説明欄・プレビューの作品も揃う）。
-        if (els.pcWorkUrl && els.workUrl) { var w = els.pcWorkUrl.value.trim(); els.workUrl.value = w; if (els.movieWorkUrl) els.movieWorkUrl.value = w; saveA('bsky_work_url', w); setLastPostedWork(w); paintWorkWarn(els.movieWorkWarn, w); updateMovieWorkLink(w); }
+        if (els.pcWorkUrl && els.workUrl) { var w = els.pcWorkUrl.value.trim(); els.workUrl.value = w; if (els.movieWorkUrl) els.movieWorkUrl.value = w; saveA('bsky_work_url', w); setLastPostedWork(w); paintWorkWarn(els.movieWorkWarn, w); updateMovieWorkLink(w); updateBskyWorkLink(w); }
         var v = els.pcText.value; cleanup(); resolve(v);
       }
       function cancel() { cleanup(); resolve(null); }
@@ -944,6 +963,18 @@
   document.addEventListener('video-created', function (e) {
     var d = (e && e.detail) || {};
     if (d.videoId) currentVideoId = d.videoId;
+  });
+  // Bsky添付画像を動画と同じ場所に「タイトル_Bsky.拡張子」で自動ダウンロード。
+  document.addEventListener('video-created', function (e) {
+    if (!selectedPostFile) return;
+    var d = (e && e.detail) || {};
+    var base = (d.title || lastTitle || '').replace(/[\\/:*?"<>|]/g, '').trim() || 'image';
+    var ext = (selectedPostFile.name.split('.').pop() || 'jpg').toLowerCase();
+    var url = URL.createObjectURL(selectedPostFile);
+    var a = document.createElement('a');
+    a.href = url; a.download = base + '_Bsky.' + ext;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
   });
 
   if (els.shortUrlCopy) els.shortUrlCopy.addEventListener('click', function () { if (lastShortUrl) copyText(lastShortUrl, els.shortUrlCopy); });
