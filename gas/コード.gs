@@ -36,14 +36,33 @@ var FANZA_HEADERS = [
   '元値list_price','割引後price','割引率pct','FANZA取得日時',
   'レビュー件数(代理指標)','レビュー平均'
 ];
-// 追加属性列（記録シート末尾追加・移行で付与）。キャラ＝実在キャラの二次創作作品に○。
+// 追加属性列（記録シート末尾追加・移行で付与）。
+// カテゴリ＝作品属性を名前で明記（キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄）。
+// ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
-var EXTRA_HEADERS = ['キャラ'];
+var EXTRA_HEADERS = ['カテゴリ'];
+// 作品属性の定義（順序＝カテゴリ列での並び）。フラグ名→表示名。
+var ATTR_DEFS = [
+  { key: 'chara', label: 'キャラ' },
+  { key: 'jk', label: 'JK' },
+  { key: 'gyaru', label: 'ギャル' },
+  { key: 'isekai', label: '異世界' }
+];
+function attrTrue_(v) { return v === true || v === 'true' || v === '○' || v === 1 || v === '1'; }
+function attrProvided_(f) {
+  for (var i = 0; i < ATTR_DEFS.length; i++) { if (f[ATTR_DEFS[i].key] !== undefined) return true; }
+  return false;
+}
+function categoryOf_(f) {
+  var cats = [];
+  ATTR_DEFS.forEach(function (a) { if (attrTrue_(f[a.key])) cats.push(a.label); });
+  return cats.join(', ');
+}
 //
 // ── 列の自動取得マップ（保守用メモ：ClaudeCodeはここを基準に列を増減する）──
 //   【自動で埋まる】post_id / 投稿日時 / 曜日 / day-type / 時間帯スロット / 題名(コメント) /
 //     作品cid / YouTube動画URL / 短縮URL / 視聴回数 / いいね / リポスト / 返信 /
-//     短縮URLクリック数 / post_uri / クリック更新日時 / 反応更新日時 / キャラ /
+//     短縮URLクリック数 / post_uri / クリック更新日時 / 反応更新日時 / カテゴリ /
 //     元値list_price / 割引後price / 割引率pct / FANZA取得日時 / レビュー件数(代理指標) / レビュー平均 /
 //     承認率% / リンククリック率% / CVR発生% / CVR確定% / EPC発生¥ / EPC確定¥ / RPM（←数式・自動計算）
 //   【手動入力のみ＝APIで自動取得不可】ジャンル / インプレッション / インプCTR% /
@@ -52,7 +71,7 @@ var EXTRA_HEADERS = ['キャラ'];
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-01H（短縮ワーカーを r2 に改名・コード5文字化に対応）';
+var GAS_VERSION = '2026-07-02A（カテゴリ列：キャラ/JK/ギャル/異世界を複数明記・キャラ○方式は廃止）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -184,14 +203,20 @@ function migrateHeaders_() {
       var ai = existing.indexOf('開封数'); if (ai === -1) ai = existing.indexOf('Bitlyクリック');
       if (ai >= 0) { sh.getRange(1, ai + 1).setValue('短縮URLクリック数'); existing[ai] = '短縮URLクリック数'; renamed = '短縮URLクリック数'; }
     }
+    // 「キャラ」列を「カテゴリ」へ改名（旧○方式→属性名明記方式。データ保持のまま）。
+    var renamedCat = '';
+    if (existing.indexOf('カテゴリ') === -1 && existing.indexOf('キャラ') >= 0) {
+      var ci = existing.indexOf('キャラ');
+      sh.getRange(1, ci + 1).setValue('カテゴリ'); existing[ci] = 'カテゴリ'; renamedCat = 'カテゴリ';
+    }
     // 不足列を末尾に追加（短縮URLクリック数が旧名も無く欠けていればここで新設）。
     var wantHeaders = FANZA_HEADERS.concat(EXTRA_HEADERS).concat(['短縮URLクリック数']);
     var missing = wantHeaders.filter(function (h) { return existing.indexOf(h) === -1; });
-    if (missing.length === 0 && !renamed) { result.push({ sheet: name, added: [], renamedClick: '', status: 'already_up_to_date' }); return; }
+    if (missing.length === 0 && !renamed && !renamedCat) { result.push({ sheet: name, added: [], renamedClick: '', renamedCategory: '', status: 'already_up_to_date' }); return; }
     missing.forEach(function (h) {
       sh.getRange(1, sh.getLastColumn() + 1).setValue(h);
     });
-    result.push({ sheet: name, added: missing, renamedClick: renamed, status: 'ok' });
+    result.push({ sheet: name, added: missing, renamedClick: renamed, renamedCategory: renamedCat, status: 'ok' });
   });
   return { ok: true, result: result };
 }
@@ -266,7 +291,7 @@ function diagnose_() {
       短縮URLクリック数: countNonEmpty(map[clickColName_(map)]),
       題名コメント: countNonEmpty(map['題名(コメント)']),
       YouTube題名: countNonEmpty(map['YouTube題名']),
-      キャラ: countNonEmpty(map['キャラ']),
+      カテゴリ: countNonEmpty(map['カテゴリ']),
       post_uri: countNonEmpty(map['post_uri'])
     };
     channels[name] = info;
@@ -291,7 +316,7 @@ function doPost(e) {
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
-      chara: body.chara,                   // キャラ属性（true/false/undefined）。投稿履歴の編集から後追い更新可
+      chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, // カテゴリ属性（複数可）
       fanza_list_price: body.fanza_list_price, fanza_price: body.fanza_price,
       fanza_discount_pct: body.fanza_discount_pct, fanza_fetched_at: body.fanza_fetched_at || '',
       fanza_review_count: body.fanza_review_count, fanza_review_avg: body.fanza_review_avg
@@ -413,9 +438,10 @@ function writeRecord_(channel, f) {
   putIf('FANZA取得日時', f.fanza_fetched_at || '');
   putIf('レビュー件数(代理指標)', f.fanza_review_count !== undefined && f.fanza_review_count !== null ? f.fanza_review_count : '');
   putIf('レビュー平均', f.fanza_review_avg !== undefined && f.fanza_review_avg !== null ? f.fanza_review_avg : '');
-  // キャラ属性：payload に chara が含まれるときだけ ○/空 を明示セット（未指定なら既存値を保護）。
-  if (f.chara !== undefined && f.chara !== null && map['キャラ']) {
-    sh.getRange(target, map['キャラ']).setValue((f.chara === true || f.chara === 'true' || f.chara === '○') ? '○' : '');
+  // カテゴリ：payload に属性フラグ(chara/jk/gyaru/isekai)が含まれるときだけ明示セット（未指定なら既存値を保護）。
+  // キャラ無し＝オリジナルは空欄。複数属性はカンマ区切りで列挙。
+  if (attrProvided_(f) && map['カテゴリ']) {
+    sh.getRange(target, map['カテゴリ']).setValue(categoryOf_(f));
   }
   // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
   if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
@@ -439,7 +465,8 @@ function syncHistory_(channel, items) {
         workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '',
         youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '',
         views: it.views, clicks: it.clicks,
-        chara: it.chara, postedAt: it.postedAt || '',
+        chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, // カテゴリ属性（複数可）
+        postedAt: it.postedAt || '',
         noShorten: true, noSort: true   // 同期は短縮API呼ばず・並べ替えは最後にまとめて
       });
       n++;

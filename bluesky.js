@@ -48,6 +48,14 @@
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
+  // 動画作成タブの「カテゴリ」チェック状態を読む（キャラ/JK/ギャル/異世界・複数可・キャラ無し＝オリジナル）。
+  var MOVIE_ATTRS = [['chara', 'movieAttrChara'], ['jk', 'movieAttrJk'], ['gyaru', 'movieAttrGyaru'], ['isekai', 'movieAttrIsekai']];
+  function readMovieAttrs() {
+    var o = {};
+    MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); o[p[0]] = !!(el && el.checked); });
+    return o;
+  }
+
   // ---- アカウント別永続化ヘルパ ----
   function acctId() { return (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'); }
   function pk(base) { return base + '__' + acctId(); }
@@ -558,6 +566,7 @@
       shortUrl: record.shortUrl || '',                   // フロント生成の短縮URL(da.gd等)。空ならGAS側でda.gd短縮
       videoId: (record.videoId || currentVideoId || '')  // 背骨ID＝upsertキー（post_id 列に採用）
     };
+    var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = ma[p[0]]; }); // カテゴリ属性（複数可）
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
   function updateGasStatus() {
@@ -667,6 +676,8 @@
     var a = histLoad().filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
     var entry = { ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || '' };
     if (workUrl) entry.workUrl = workUrl;
+    // 動画作成タブのカテゴリ属性を引き継ぐ（manualOnly=手動短縮のときは付けない）
+    if (!rec.manualOnly) { var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { if (ma[p[0]]) entry[p[0]] = true; }); }
     a.unshift(entry);
     histSaveArr(a);
     if (els.histList) renderHistory(a);
@@ -823,14 +834,22 @@
   }
   if (els.movieWorkUrl) els.movieWorkUrl.addEventListener('input', function () { syncWorkUrl(els.movieWorkUrl.value, true); });
 
-  // 動画作成タブ 作品URL 変更ボタン
-  var movieWorkEditBtn = $('movieWorkEditBtn');
-  if (movieWorkEditBtn) {
-    movieWorkEditBtn.addEventListener('click', function () {
-      var cur = loadA('bsky_work_url') || '';
-      var v = window.prompt('作品URLを入力してください', cur);
-      if (v === null) return;
-      syncWorkUrl(v.trim(), true);
+  // 動画作成タブ 作品URL クリア／戻す（クリアで空に、戻すで直前値を復元）
+  var movieWorkCleared = '';
+  var movieWorkClearBtn = $('movieWorkClear');
+  if (movieWorkClearBtn) {
+    movieWorkClearBtn.addEventListener('click', function () {
+      var cur = (els.movieWorkUrl && els.movieWorkUrl.value) || loadA('bsky_work_url') || '';
+      if (cur) movieWorkCleared = cur; // 戻す用に退避
+      syncWorkUrl('', true);
+    });
+  }
+  var movieWorkUndoBtn = $('movieWorkUndo');
+  if (movieWorkUndoBtn) {
+    movieWorkUndoBtn.addEventListener('click', function () {
+      if (!movieWorkCleared) return;
+      syncWorkUrl(movieWorkCleared, true);
+      movieWorkCleared = '';
     });
   }
 

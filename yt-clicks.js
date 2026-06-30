@@ -21,6 +21,13 @@
 
   function acct() { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  // 作品属性（複数可）。キャラ=実在キャラの二次創作 / JK / ギャル / 異世界。キャラ無し＝オリジナル(非表示)。
+  var ATTR_DEFS = [
+    { key: 'chara', label: 'キャラ' },
+    { key: 'jk', label: 'JK' },
+    { key: 'gyaru', label: 'ギャル' },
+    { key: 'isekai', label: '異世界' }
+  ];
   var COMMON_TAGS = ['#マンガ紹介', '#漫画', '#アニメ', '#anime'];
   function stripCommonTags(t) {
     var r = String(t || '');
@@ -148,10 +155,12 @@
         '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
           '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
         '</label>' +
-        '<label class="vedit-chara">' +
-          '<input id="veditChara" type="checkbox">' +
-          '<span>キャラ（アニメ・ゲーム等の実在キャラの二次創作）</span>' +
-        '</label>' +
+        '<div class="vedit-attrs">' +
+          '<div class="vedit-attrs-title">カテゴリ（複数選択可・キャラ無し＝オリジナル）</div>' +
+          ATTR_DEFS.map(function (a) {
+            return '<label class="vedit-attr"><input id="veditAttr_' + a.key + '" type="checkbox"><span class="vatt vatt-' + a.key + '">' + a.label + '</span></label>';
+          }).join('') +
+        '</div>' +
         '<div class="vedit-actions">' +
           '<button id="veditCancel" type="button">キャンセル</button>' +
           '<button id="veditSave" type="button">保存</button>' +
@@ -164,11 +173,13 @@
       if (typeof _saveCb !== 'function') return;
       var cb = _saveCb;
       _saveCb = null;
+      var attrs = {};
+      ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); attrs[a.key] = !!(el && el.checked); });
       cb(
         ($('veditYt').value || '').trim(),
         ($('veditBsky').value || '').trim(),
         ($('veditWork').value || '').trim(),
-        !!($('veditChara') && $('veditChara').checked)
+        attrs
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -180,13 +191,14 @@
     _saveCb = null;
   }
 
-  function openModal_(title, ytVal, bskyVal, workVal, charaVal, onSave) {
+  function openModal_(title, ytVal, bskyVal, workVal, attrs, onSave) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
     $('veditBsky').value = bskyVal || '';
     $('veditWork').value = workVal || '';
-    if ($('veditChara')) $('veditChara').checked = !!charaVal;
+    attrs = attrs || {};
+    ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
     var errEl = $('veditError'); if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
     $('veditOverlay').hidden = false;
     setTimeout(function () { var el = $('veditYt'); if (el) el.focus(); }, 50);
@@ -212,21 +224,25 @@
     }
   }
 
-  // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL・キャラ属性（アイテム）を一括更新。
-  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, chara) {
+  // アイテムへ属性フラグを反映（true は立て、false は削除）。
+  function applyAttrs_(item, attrs) {
+    ATTR_DEFS.forEach(function (a) { if (attrs && attrs[a.key]) item[a.key] = true; else delete item[a.key]; });
+  }
+  // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL・カテゴリ属性（アイテム）を一括更新。
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs) {
     // YouTube URL
     var ymap = loadYtMap();
     if (ytUrl) ymap[k] = ytUrl; else delete ymap[k];
     saveYtMap(ymap);
     var saved = null;
-    // Bluesky URL と 作品URL・キャラ（アイテムを直接書き換え）
+    // Bluesky URL と 作品URL・カテゴリ（アイテムを直接書き換え）
     if (it.manual) {
       var manual = loadManual();
       for (var i = 0; i < manual.length; i++) {
         if (itemKey(manual[i]) !== k) continue;
         saveBskyToItem_(manual[i], bskyUrl);
         if (workUrl) manual[i].workUrl = workUrl; else delete manual[i].workUrl;
-        if (chara) manual[i].chara = true; else delete manual[i].chara;
+        applyAttrs_(manual[i], attrs);
         saved = manual[i];
         break;
       }
@@ -237,19 +253,19 @@
         if (itemKey(hist[j]) !== k) continue;
         saveBskyToItem_(hist[j], bskyUrl);
         if (workUrl) hist[j].workUrl = workUrl; else delete hist[j].workUrl;
-        if (chara) hist[j].chara = true; else delete hist[j].chara;
+        applyAttrs_(hist[j], attrs);
         saved = hist[j];
         break;
       }
       saveArr(histKey(), hist);
     }
-    if (saved) pushItemToGas_(saved, !!chara); // スプレッドシートのキャラ列等へ反映（GAS設定時のみ）
+    if (saved) pushItemToGas_(saved); // スプレッドシートのカテゴリ列等へ反映（GAS設定時のみ）
     refresh();
   }
 
   // 履歴アイテム1件をスプレッドシート（GAS）へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
-  // 投稿日時を上書きしないよう postUrl は送らない（既存行のキャラ列だけ更新する用途）。
-  function pushItemToGas_(it, chara) {
+  // 投稿日時を上書きしないよう postUrl は送らない（既存行のカテゴリ列だけ更新する用途）。
+  function pushItemToGas_(it) {
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
     if (!gasUrl || !it || !it.videoId) return;
@@ -260,9 +276,9 @@
       title: it.title || '',
       postUri: it.postUri || '',
       workUrl: it.workUrl || '',
-      shortUrl: it.shortUrl || '',
-      chara: !!chara                  // キャラ列：○ / 空
+      shortUrl: it.shortUrl || ''
     };
+    ATTR_DEFS.forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
 
@@ -296,8 +312,7 @@
       var bskyHref = it.shortUrl || it.postUrl || '';
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml +
-          (it.videoId ? ' <span class="vtag vtag-id">' + esc(it.videoId) + '</span>' : '') +
-          (it.chara ? ' <span class="vtag vtag-chara">キャラ</span>' : '') +
+          ATTR_DEFS.map(function (a) { return it[a.key] ? ' <span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('') +
         '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         '<div class="vmetrics">' +
@@ -342,9 +357,10 @@
         var ytCur = ymap[k] || it.ytUrl || '';
         var bskyCur = it.shortUrl || it.postUrl || '';
         var workCur = it.workUrl || '';
-        openModal_('URL を編集', ytCur, bskyCur, workCur, !!it.chara, function (ytUrl, bskyUrl, workUrl, chara) {
+        var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
+        openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, function (ytUrl, bskyUrl, workUrl, attrs) {
           closeModal_();
-          saveEdit_(k, it, ytUrl, bskyUrl, workUrl, chara);
+          saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs);
         });
       });
     });
@@ -381,7 +397,7 @@
         autoWorkUrl = localStorage.getItem('bsky_work_url__' + acctId) || '';
       }
     } catch (e) {}
-    openModal_('YouTube動画を追加', '', '', autoWorkUrl, false, function (ytUrl, bskyUrl, workUrl, chara) {
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, function (ytUrl, bskyUrl, workUrl, attrs) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -393,7 +409,7 @@
       var entry = { manual: true, id: id, ts: 0 };
       saveBskyToItem_(entry, bskyUrl);
       if (workUrl) entry.workUrl = workUrl;
-      if (chara) entry.chara = true;
+      applyAttrs_(entry, attrs);
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       refresh();
@@ -455,7 +471,7 @@
       // 投稿日時：実投稿時刻(ts)を最優先。無ければYouTube公開日時を使う（→朝ばかり/今日になる問題を解消）。
       var pubMs = (vid && publishedCache[vid] != null) ? publishedCache[vid] : null;
       var postedMs = (it.ts && it.ts > 0) ? it.ts : pubMs;
-      return {
+      var rec = {
         videoId: it.videoId || '',
         title: it.title || '',                                          // 題名(コメント)＝アプリの④コメント
         ytTitle: (vid && titleCache[vid]) || '',                        // YouTube動画の実題名（取得済みのみ）
@@ -466,9 +482,10 @@
         shortUrl: it.shortUrl || '',
         workUrl: it.workUrl || '',
         youtubeUrl: yt,
-        chara: !!it.chara,
         postedAt: postedMs ? new Date(postedMs).toISOString() : ''
       };
+      ATTR_DEFS.forEach(function (a) { rec[a.key] = !!it[a.key]; }); // カテゴリ属性
+      return rec;
     }).filter(function (r) { return r.videoId; });
     if (!items.length) { setStatus('同期する履歴がありません'); if (btn) btn.disabled = false; return; }
     setStatus('スプレッドシートへ同期中… (' + items.length + '件)');

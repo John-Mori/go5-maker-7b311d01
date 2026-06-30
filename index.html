@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=113">
-<link rel="apple-touch-icon" href="icon.svg?v=113">
+<link rel="manifest" href="manifest.webmanifest?v=114">
+<link rel="apple-touch-icon" href="icon.svg?v=114">
 <link rel="icon" href="icon.svg?v=84" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=113">
+<link rel="stylesheet" href="style.css?v=114">
 </head>
 <body>
 <header>
@@ -70,9 +70,18 @@
   <!-- 写真選択 -->
   <section class="card">
     <label class="field-label">① 前景画像（写真）</label>
-    <label for="photo" class="photo-btn" id="photoBtn">📷 写真を選ぶ / 撮る</label>
+    <label for="photo" class="photo-btn photo-btn-sm" id="photoBtn">📷 写真を選ぶ / 撮る</label>
     <input id="photo" type="file" accept="image/*" hidden>
     <div class="hint" id="photoName">未選択</div>
+    <div class="movie-attrs">
+      <div class="field-label" style="margin:10px 0 4px;font-size:.8rem;">この動画のカテゴリ（複数選択可・キャラ無し＝オリジナル）</div>
+      <div class="movie-attr-row">
+        <label class="movie-attr"><input id="movieAttrChara" type="checkbox"><span class="vatt vatt-chara">キャラ</span></label>
+        <label class="movie-attr"><input id="movieAttrJk" type="checkbox"><span class="vatt vatt-jk">JK</span></label>
+        <label class="movie-attr"><input id="movieAttrGyaru" type="checkbox"><span class="vatt vatt-gyaru">ギャル</span></label>
+        <label class="movie-attr"><input id="movieAttrIsekai" type="checkbox"><span class="vatt vatt-isekai">異世界</span></label>
+      </div>
+    </div>
   </section>
 
   <!-- テキスト -->
@@ -144,11 +153,12 @@
     </label>
     <div class="hint">本文は「🦋 投稿」タブで編集した内容、画像は<b>この動画の元写真</b>を添付します。アカウント設定も「🦋 投稿」タブにあります。<br>単独で投稿したいときは「🦋 投稿」タブの「今すぐ投稿」をどうぞ。</div>
     <div class="movie-work" style="margin-top:12px;">
-      <label class="field-label" style="margin:0 0 4px;font-size:.8rem;">📕 今回案内する作品URL（今日の作品を貼る・取り違え防止）</label>
-      <input id="movieWorkUrl" type="url" autocomplete="off" style="display:none;">
-      <div style="display:flex;align-items:flex-start;gap:6px;">
-        <a id="movieWorkLink" href="#" target="_blank" rel="noopener noreferrer" style="flex:1;display:block;word-break:break-all;color:var(--accent);font-size:.85rem;padding:4px 0;min-height:1.4em;">（URLを入力してください）</a>
-        <button id="movieWorkEditBtn" type="button" class="ghost" style="flex-shrink:0;font-size:12px;padding:3px 8px;">✏ 変更</button>
+      <label class="field-label" for="movieWorkUrl" style="margin:0 0 4px;font-size:.8rem;">📕 今回案内する作品URL（今日の作品を貼る・取り違え防止）</label>
+      <a id="movieWorkLink" href="#" target="_blank" rel="noopener noreferrer" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--accent);font-size:.85rem;min-height:1.4em;margin-bottom:4px;">（URLを入力してください）</a>
+      <input id="movieWorkUrl" type="url" inputmode="url" placeholder="https://… 作品ページのURLを貼る" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button id="movieWorkClear" type="button" class="ghost" style="font-size:12px;padding:4px 12px;">クリア</button>
+        <button id="movieWorkUndo" type="button" class="ghost" style="font-size:12px;padding:4px 12px;">↩ 戻す</button>
       </div>
       <div id="movieWorkWarn" style="font-size:.82rem;margin-top:4px;"></div>
     </div>
@@ -610,23 +620,23 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=113"></script>
-<script src="app.js?v=113"></script>
-<script src="affiliate-core.js?v=113"></script>
-<script src="fanza-core.js?v=113"></script>
-<script src="affiliate.js?v=113"></script>
-<script src="bluesky-core.js?v=113"></script>
-<script src="scheduler.js?v=113"></script>
-<script src="bluesky.js?v=113"></script>
-<script src="drive-upload.js?v=113"></script>
-<script src="verify-core.js?v=113"></script>
-<script src="verify.js?v=113"></script>
-<script src="yt-clicks.js?v=113"></script>
-<script src="integration.js?v=113"></script>
-<script src="wizard.js?v=113"></script>
-<script src="settings-io.js?v=113"></script>
-<script src="theme-settings.js?v=113"></script>
-<script src="persist-fields.js?v=113"></script>
+<script src="idgen.js?v=114"></script>
+<script src="app.js?v=114"></script>
+<script src="affiliate-core.js?v=114"></script>
+<script src="fanza-core.js?v=114"></script>
+<script src="affiliate.js?v=114"></script>
+<script src="bluesky-core.js?v=114"></script>
+<script src="scheduler.js?v=114"></script>
+<script src="bluesky.js?v=114"></script>
+<script src="drive-upload.js?v=114"></script>
+<script src="verify-core.js?v=114"></script>
+<script src="verify.js?v=114"></script>
+<script src="yt-clicks.js?v=114"></script>
+<script src="integration.js?v=114"></script>
+<script src="wizard.js?v=114"></script>
+<script src="settings-io.js?v=114"></script>
+<script src="theme-settings.js?v=114"></script>
+<script src="persist-fields.js?v=114"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */

@@ -71,7 +71,24 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-h .vdate-unknown{color:var(--sub);font-weight:400;font-size:12px;}
 .vrow-h .vtag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:1px 6px;}
 .vrow-h .vtag-id{color:var(--accent);border-color:var(--accent);}
-.vrow-h .vtag-chara{color:#ff79b0;border-color:#ff79b0;font-weight:700;}
+/* カテゴリ属性バッジ（上品な配色）。キャラ=赤 / JK=ピンク / ギャル=金 / 異世界=幻想的な紫 */
+.vrow-h .vtag-chara{color:#d0566a;border-color:#d0566a;font-weight:700;}
+.vrow-h .vtag-jk{color:#e89bc4;border-color:#e89bc4;font-weight:700;}
+.vrow-h .vtag-gyaru{color:#cba94e;border-color:#cba94e;font-weight:700;}
+.vrow-h .vtag-isekai{color:#9b7ed1;border-color:#9b7ed1;font-weight:700;}
+/* 小さめ写真ボタン（動画作成タブ） */
+.photo-btn-sm{padding:10px !important;font-size:14px !important;}
+/* カテゴリのチェック用カラーチップ（モーダル・動画作成タブ共通） */
+.vatt{font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:6px;padding:2px 8px;}
+.vatt-chara{color:#d0566a;border-color:#d0566a;}
+.vatt-jk{color:#e89bc4;border-color:#e89bc4;}
+.vatt-gyaru{color:#cba94e;border-color:#cba94e;}
+.vatt-isekai{color:#9b7ed1;border-color:#9b7ed1;}
+.vedit-attrs{margin:0 0 14px;}
+.vedit-attrs-title{font-size:12px;color:var(--sub);margin-bottom:7px;}
+.vedit-attr,.movie-attr{display:inline-flex;align-items:center;gap:6px;margin:0 12px 8px 0;cursor:pointer;}
+.vedit-attr input,.movie-attr input{width:20px;height:20px;flex-shrink:0;margin:0;accent-color:var(--accent);}
+.movie-attr-row{display:flex;flex-wrap:wrap;gap:2px 4px;}
 .vrow-h .vgenre{color:var(--sub);font-size:12px;}
 .vmetrics{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin-top:7px;font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;}
 .vmetrics > span{white-space:nowrap;flex-shrink:0;}
