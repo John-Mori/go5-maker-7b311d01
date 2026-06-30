@@ -23,7 +23,7 @@
 var HEADERS40 = [
   'post_id','投稿日時','曜日','day-type','時間帯スロット','ジャンル','題名(コメント)',
   '作品cid','YouTube動画URL','短縮URL',
-  'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','返信','フォロー増','開封数',
+  'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','返信','フォロー増','短縮URLクリック数',
   'FANZA発生成約','FANZA確定成約','発生報酬¥','確定報酬¥','承認率%','リンククリック率%','CVR発生%','CVR確定%',
   'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','post_uri','クリック更新日時','反応更新日時'
 ];
@@ -43,7 +43,7 @@ var EXTRA_HEADERS = ['キャラ', 'YouTube題名'];
 // ── 列の自動取得マップ（保守用メモ：ClaudeCodeはここを基準に列を増減する）──
 //   【自動で埋まる】post_id / 投稿日時 / 曜日 / day-type / 時間帯スロット / 題名(コメント) /
 //     作品cid / YouTube動画URL / YouTube題名 / 短縮URL / 視聴回数 / いいね / リポスト / 返信 /
-//     開封数 / post_uri / クリック更新日時 / 反応更新日時 / キャラ /
+//     短縮URLクリック数 / post_uri / クリック更新日時 / 反応更新日時 / キャラ /
 //     元値list_price / 割引後price / 割引率pct / FANZA取得日時 / レビュー件数(代理指標) / レビュー平均 /
 //     承認率% / リンククリック率% / CVR発生% / CVR確定% / EPC発生¥ / EPC確定¥ / RPM（←数式・自動計算）
 //   【手動入力のみ＝APIで自動取得不可】ジャンル / インプレッション / インプCTR% /
@@ -52,7 +52,7 @@ var EXTRA_HEADERS = ['キャラ', 'YouTube題名'];
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-01D（不要ラベル4列の削除 cleanup_columns 追加）';
+var GAS_VERSION = '2026-07-01E（クリック数列を「短縮URLクリック数」に改名・存在保証）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -74,6 +74,10 @@ function headerMap_(sh) {
   var h = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0], m = {};
   for (var i = 0; i < h.length; i++) { if (h[i] !== '' && h[i] != null) m[h[i]] = i + 1; }
   return m;
+}
+// 短縮URLクリック数の列見出しを解決（新名→旧名「開封数」→さらに旧名「Bitlyクリック」。どれも無ければ新名）。
+function clickColName_(map) {
+  return map['短縮URLクリック数'] ? '短縮URLクリック数' : (map['開封数'] ? '開封数' : (map['Bitlyクリック'] ? 'Bitlyクリック' : '短縮URLクリック数'));
 }
 
 function doGet(e) {
@@ -163,13 +167,20 @@ function migrateHeaders_() {
     var lastCol = sh.getLastColumn();
     if (lastCol < 1) { result.push({ sheet: name, status: 'empty' }); return; }
     var existing = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
-    var wantHeaders = FANZA_HEADERS.concat(EXTRA_HEADERS);
+    // クリック数列の見出しを「短縮URLクリック数」に統一（旧名 開封数/Bitlyクリック はデータ保持のまま改名）。
+    var renamed = '';
+    if (existing.indexOf('短縮URLクリック数') === -1) {
+      var ai = existing.indexOf('開封数'); if (ai === -1) ai = existing.indexOf('Bitlyクリック');
+      if (ai >= 0) { sh.getRange(1, ai + 1).setValue('短縮URLクリック数'); existing[ai] = '短縮URLクリック数'; renamed = '短縮URLクリック数'; }
+    }
+    // 不足列を末尾に追加（短縮URLクリック数が旧名も無く欠けていればここで新設）。
+    var wantHeaders = FANZA_HEADERS.concat(EXTRA_HEADERS).concat(['短縮URLクリック数']);
     var missing = wantHeaders.filter(function (h) { return existing.indexOf(h) === -1; });
-    if (missing.length === 0) { result.push({ sheet: name, added: [], status: 'already_up_to_date' }); return; }
+    if (missing.length === 0 && !renamed) { result.push({ sheet: name, added: [], renamedClick: '', status: 'already_up_to_date' }); return; }
     missing.forEach(function (h) {
       sh.getRange(1, sh.getLastColumn() + 1).setValue(h);
     });
-    result.push({ sheet: name, added: missing, status: 'ok' });
+    result.push({ sheet: name, added: missing, renamedClick: renamed, status: 'ok' });
   });
   return { ok: true, result: result };
 }
@@ -245,7 +256,7 @@ function setComputed_(sh, map, r) {
   set('曜日', '=IF($B' + r + '="","",CHOOSE(WEEKDAY($B' + r + '),"日","月","火","水","木","金","土"))');
   set('day-type', '=IF($B' + r + '="","",IF(OR(WEEKDAY($B' + r + ',2)>=6,COUNTIF(Holidays,INT($B' + r + '))>0),"土日祝",IF(OR(WEEKDAY($B' + r + '+1,2)>=6,COUNTIF(Holidays,INT($B' + r + ')+1)>0),"休前日","平日")))');
   set('時間帯スロット', '=IF($B' + r + '="","",IF(HOUR($B' + r + ')<5,"深夜",IF(HOUR($B' + r + ')<11,"朝",IF(HOUR($B' + r + ')<15,"昼",IF(HOUR($B' + r + ')<19,"夕","夜")))))');
-  var cClick  = columnLetter_(map['開封数'] || map['Bitlyクリック']); // 開封数（旧称Bitlyクリック）
+  var cClick  = columnLetter_(map[clickColName_(map)]); // 短縮URLクリック数（旧称：開封数/Bitlyクリック）
   var cViews  = columnLetter_(map['視聴回数']);
   var cFhap   = columnLetter_(map['FANZA発生成約']);
   var cFok    = columnLetter_(map['FANZA確定成約']);
@@ -323,7 +334,7 @@ function writeRecord_(channel, f) {
   putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('YouTube題名', f.ytTitle || '');                       // YouTube動画の実題名（アプリのtitleCacheから）
   putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
-  putIf('開封数', (f.clicks !== undefined && f.clicks !== null && f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
+  putIf(clickColName_(map), (f.clicks !== undefined && f.clicks !== null && f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
   putIf('post_uri', f.postUri || '');
   // FANZA 価格スナップショット（投稿時1回のみ。null は書かない＝既存値を保護）。
   putIf('元値list_price', f.fanza_list_price !== undefined && f.fanza_list_price !== null ? f.fanza_list_price : '');
@@ -415,7 +426,7 @@ function refreshClicks() {
   CH_SHEETS.forEach(function (name) {
     var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
     var map = headerMap_(sh); var last = sh.getLastRow();
-    var clickCol = map['開封数'] || map['Bitlyクリック']; // 新列名「開封数」、既存シートは旧名で互換
+    var clickCol = map[clickColName_(map)]; // 短縮URLクリック数（旧名 開封数/Bitlyクリック も互換）
     if (last < 2 || !map['短縮URL'] || !clickCol) return;
     var start = Math.max(2, last - 199), n = last - start + 1;
     var urls = sh.getRange(start, map['短縮URL'], n, 1).getValues();
