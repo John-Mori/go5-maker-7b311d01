@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ファイル地図ガイド｜5秒動画メーカー</title>
+<style>
+  :root{
+    --paper:#F5EEDD;        /* 全体の背景・クリーム */
+    --card:#FFFCF4;         /* カード */
+    --card2:#FBF3E2;        /* 薄いカード */
+    --ink:#4E4232;          /* 本文・温かい焦げ茶 */
+    --ink-soft:#8C7C64;     /* 補足の文字 */
+    --terracotta:#C26A47;   /* テラコッタ */
+    --olive:#788649;        /* オリーブ */
+    --gold:#C0962F;         /* マスタード金 */
+    --plum:#9A5B6E;         /* くすみ梅 */
+    --line:#E7D9BE;         /* 罫線 */
+    --line-soft:#F0E6D2;
+    --code-bg:#43392B;      /* コードブロック背景 */
+    --code-ink:#F3E9D4;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(circle at 12% 8%, #FBF5E6 0%, rgba(251,245,230,0) 38%),
+      radial-gradient(circle at 88% 4%, #F7EFDC 0%, rgba(247,239,220,0) 32%),
+      var(--paper);
+    color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Meiryo",system-ui,sans-serif;
+    line-height:1.85;
+    font-size:16px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:32px 20px 80px;}
+
+  /* ── 見出し ── */
+  h1,h2,h3{font-family:"Yu Mincho","Hiragino Mincho ProN","Hiragino Mincho Pro",serif;font-weight:700;letter-spacing:.02em;}
+  header.hero{
+    text-align:center;
+    padding:38px 24px 30px;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:22px;
+    box-shadow:0 10px 30px rgba(150,115,55,.10);
+    position:relative;
+    overflow:hidden;
+  }
+  header.hero::before{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(120deg, rgba(194,106,71,.06), rgba(120,134,73,.06));
+    pointer-events:none;
+  }
+  header.hero .tag{
+    display:inline-block;font-size:12px;font-weight:700;color:var(--terracotta);
+    background:#F6E4D8;border:1px solid #ECCDBD;border-radius:999px;padding:4px 14px;margin-bottom:14px;letter-spacing:.08em;
+  }
+  header.hero h1{font-size:27px;margin:6px 0 10px;color:var(--ink);}
+  header.hero p{margin:0;color:var(--ink-soft);font-size:14.5px;}
+  .pen{font-size:30px;display:block;margin-bottom:4px;}
+
+  /* ── セクション ── */
+  section{margin-top:34px;}
+  h2{
+    font-size:20px;margin:0 0 16px;color:var(--ink);
+    padding-bottom:10px;border-bottom:2px dotted var(--line);
+    display:flex;align-items:center;gap:10px;
+  }
+  h2 .ic{font-size:22px;}
+  h3{font-size:16.5px;margin:22px 0 8px;color:var(--terracotta);}
+
+  p{margin:0 0 14px;}
+  .lead{color:var(--ink-soft);font-size:14.5px;}
+  strong{color:var(--terracotta);font-weight:700;}
+  em{font-style:normal;background:linear-gradient(transparent 62%, #F5E0A8 62%);font-weight:700;color:var(--ink);padding:0 1px;}
+
+  /* ── カード ── */
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:18px 20px;margin:14px 0;box-shadow:0 4px 14px rgba(150,115,55,.07);
+  }
+  .note{
+    background:var(--card2);border-left:5px solid var(--gold);
+    border-radius:10px;padding:14px 18px;margin:16px 0;font-size:14.5px;
+  }
+  .note.warn{border-left-color:var(--terracotta);background:#FBEDE4;}
+  .note.tip{border-left-color:var(--olive);background:#F2F0E0;}
+  .note b{color:var(--ink);}
+
+  /* ── ツリー ── */
+  .tree{
+    background:var(--code-bg);color:var(--code-ink);border-radius:14px;
+    padding:20px 22px;font-family:"SFMono-Regular",Consolas,"Courier New",monospace;
+    font-size:13.5px;line-height:1.95;overflow-x:auto;margin:16px 0;
+    box-shadow:inset 0 2px 8px rgba(0,0,0,.18);
+  }
+  .tree .dir{color:#E8B36B;font-weight:700;}
+  .tree .file{color:#F3E9D4;}
+  .tree .hi{color:#9AD08C;font-weight:700;}
+  .tree .cmt{color:#A89274;}
+  .tree .bar{color:#6E6051;}
+
+  /* ── ファイル一覧テーブル ── */
+  .files{display:flex;flex-direction:column;gap:10px;margin:14px 0;}
+  .frow{
+    display:grid;grid-template-columns:auto 1fr;gap:4px 14px;
+    background:var(--card);border:1px solid var(--line);border-radius:13px;
+    padding:13px 16px;align-items:start;
+  }
+  .frow .fname{
+    font-family:"SFMono-Regular",Consolas,monospace;font-size:13.5px;font-weight:700;
+    color:var(--ink);grid-column:1/2;display:flex;align-items:center;gap:8px;white-space:nowrap;
+  }
+  .frow .fdesc{grid-column:2/3;font-size:14px;color:var(--ink-soft);line-height:1.7;}
+  .frow .fdesc b{color:var(--ink);font-weight:700;}
+  @media(max-width:560px){
+    .frow{grid-template-columns:1fr;gap:6px;}
+    .frow .fdesc{grid-column:1/2;}
+  }
+
+  /* 安全度バッジ */
+  .lv{display:inline-block;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;white-space:nowrap;line-height:1.5;}
+  .lv-green{background:#E5EFD6;color:#5C6B33;border:1px solid #CADBA8;}
+  .lv-yellow{background:#FAEFCF;color:#9A7A1E;border:1px solid #EAD79A;}
+  .lv-red{background:#F6DED4;color:#A8482C;border:1px solid #E8C0AC;}
+  .lv-cloud{background:#E2E8EC;color:#4F636F;border:1px solid #C4D2DA;}
+
+  /* 凡例 */
+  .legend{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 4px;}
+  .legend span{font-size:13px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px;}
+
+  /* 手順リスト */
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:14px 0;}
+  ol.steps li{
+    position:relative;padding:12px 16px 12px 52px;margin:10px 0;
+    background:var(--card);border:1px solid var(--line);border-radius:13px;font-size:14.5px;
+  }
+  ol.steps li::before{
+    counter-increment:s;content:counter(s);
+    position:absolute;left:14px;top:12px;width:26px;height:26px;border-radius:50%;
+    background:var(--terracotta);color:#fff;font-weight:700;font-size:14px;
+    display:flex;align-items:center;justify-content:center;font-family:serif;
+  }
+  ol.steps li b{color:var(--ink);}
+  code.kbd{background:#EFE6D2;border:1px solid var(--line);border-radius:5px;padding:1px 7px;font-size:13px;font-family:Consolas,monospace;color:var(--ink);}
+
+  .anchor-nav{
+    display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:22px 0 4px;
+  }
+  .anchor-nav a{
+    font-size:13px;color:var(--ink);text-decoration:none;background:var(--card);
+    border:1px solid var(--line);border-radius:999px;padding:6px 15px;transition:.15s;
+  }
+  .anchor-nav a:hover{background:var(--gold);color:#fff;border-color:var(--gold);}
+
+  footer{margin-top:50px;text-align:center;color:var(--ink-soft);font-size:13px;}
+  .divider{height:1px;background:repeating-linear-gradient(90deg,var(--line) 0 8px,transparent 8px 16px);margin:30px 0;border:0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="pen">🗺️🖋️</span>
+    <span class="tag">ファイルの地図ガイド</span>
+    <h1>どのファイルを直せば、どこが変わる？</h1>
+    <p>「5秒動画メーカー」の中身を、やさしく案内します。<br>文字や見た目を自分で直したいあなたへ。</p>
+  </header>
+
+  <nav class="anchor-nav">
+    <a href="#flow">①反映のしくみ</a>
+    <a href="#map">②全体の地図</a>
+    <a href="#edit">③文字を直す場所</a>
+    <a href="#list">④ファイル早見表</a>
+    <a href="#tips">⑤直すときのコツ</a>
+  </nav>
+
+  <!-- ───────────────────────────── ① ───────────────────────────── -->
+  <section id="flow">
+    <h2><span class="ic">🔄</span>① まず大事な「反映のしくみ」</h2>
+    <p class="lead">ファイルを直す前に、これだけ知っておくと安心です。</p>
+    <div class="card">
+      <p>このアプリは <strong>GitHub Pages</strong> という仕組みで動いています。あなたのスマホで見えている画面は、
+      GitHub に置いてある <b>ファイルそのもの</b>です。だから――</p>
+      <p style="margin:0;text-align:center;font-size:15px;color:var(--ink);">
+        📝 ファイルを直す → 💾 GitHub に保存(push) → ⏱ 数十秒〜数分 → 📱 スマホに反映
+      </p>
+    </div>
+    <div class="note warn">
+      <b>⚠️ いちばんの注意：バージョン番号</b><br>
+      <code class="kbd">index.html</code> の中に <code class="kbd">?v=104</code> のような番号があちこちに付いています。
+      これは「スマホに古い画面を表示させないためのおまじない」です。
+      見た目や文字を直したら、この番号を <b>v=104 → v=105</b> のように <em>1つ増やす</em>と、確実に新しい画面が届きます。
+      <br>（クロードコードに頼むときは、この番号上げも自動でやります）
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── ② ───────────────────────────── -->
+  <section id="map">
+    <h2><span class="ic">🧭</span>② 全体の地図（フォルダ構造）</h2>
+    <p class="lead">いちばん上の階層に、よく使うファイルが並んでいます。色つきが「文字・見た目に関係するファイル」です。</p>
+
+    <div class="tree">
+<span class="dir">go5-maker/</span>  <span class="cmt"># アプリ本体のいちばん上のフォルダ</span>
+<span class="bar">│</span>
+<span class="bar">├─</span> <span class="hi">index.html</span>        <span class="cmt"># ★主役。画面の文字・ボタン・タブの大もと</span>
+<span class="bar">├─</span> <span class="hi">style.css</span>         <span class="cmt"># ★見た目（色・大きさ・余白・角丸）</span>
+<span class="bar">│</span>
+<span class="bar">├─</span> <span class="file">app.js</span>            <span class="cmt"># 動画を作る心臓部（写真＋文字を合成）</span>
+<span class="bar">├─</span> <span class="file">bluesky.js</span>        <span class="cmt"># 🦋投稿タブの動き</span>
+<span class="bar">├─</span> <span class="file">affiliate.js</span>      <span class="cmt"># 🔗アフィリンクタブの動き</span>
+<span class="bar">├─</span> <span class="file">scheduler.js</span>      <span class="cmt"># ⏰予約投稿のしくみ</span>
+<span class="bar">├─</span> <span class="file">yt-clicks.js</span>      <span class="cmt"># 📋投稿履歴・再生数/クリック数</span>
+<span class="bar">├─</span> <span class="file">wizard.js</span>         <span class="cmt"># 案内ウィザード</span>
+<span class="bar">├─</span> <span class="file">…ほか .js</span>         <span class="cmt"># 細かい部品（早見表で解説）</span>
+<span class="bar">│</span>
+<span class="bar">├─</span> <span class="dir">schedule/</span>         <span class="cmt"># 📅カレンダー画面（中に別の小さなアプリ）</span>
+<span class="bar">│</span>   <span class="bar">├─</span> <span class="hi">index.html</span>    <span class="cmt"># カレンダーの画面・文字</span>
+<span class="bar">│</span>   <span class="bar">├─</span> <span class="dir">css/</span><span class="file">style.css</span> <span class="cmt"># カレンダーの見た目</span>
+<span class="bar">│</span>   <span class="bar">└─</span> <span class="dir">js/ data/</span>     <span class="cmt"># カレンダーの中身・祝日データ等</span>
+<span class="bar">│</span>
+<span class="bar">├─</span> <span class="dir">assets/</span>          <span class="cmt"># 背景動画 (bg_main.mp4 など)</span>
+<span class="bar">├─</span> <span class="file">icon.svg</span> <span class="file">manifest.webmanifest</span> <span class="cmt"># アプリのアイコン・名前</span>
+<span class="bar">│</span>
+<span class="bar">├─</span> <span class="dir">fanza-worker/</span>     <span class="cmt"># ☁️サーバー側（FANZA情報の取得）</span>
+<span class="bar">├─</span> <span class="dir">link-worker/</span>      <span class="cmt"># ☁️サーバー側（URL短縮）</span>
+<span class="bar">├─</span> <span class="dir">drive-worker/</span>     <span class="cmt"># ☁️サーバー側（Google Drive保存）</span>
+<span class="bar">└─</span> <span class="dir">gas/</span>              <span class="cmt"># Googleスプレッドシート記録用</span>
+    </div>
+
+    <div class="note tip">
+      <b>💡 ざっくり覚え方</b><br>
+      ・<b>文字を変えたい</b> → ほぼ <code class="kbd">index.html</code><br>
+      ・<b>色や大きさを変えたい</b> → <code class="kbd">style.css</code><br>
+      ・<b>.js（ジェイエス）</b>＝動きの部品。文字も少し入っているけど、まずは触らなくてOK<br>
+      ・<b>☁️ worker フォルダ</b>＝裏方のサーバー。普段はまったく触りません
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── ③ ───────────────────────────── -->
+  <section id="edit">
+    <h2><span class="ic">🖋️</span>③ 文字・見た目を直したい人へ（ここが本題）</h2>
+
+    <h3>● 画面に出る文字のほとんどは <code class="kbd">index.html</code> の中</h3>
+    <p>タブの名前（🎬動画作成・🦋投稿…）、ボタンの文字、入力欄の上の説明、注意書き――
+    画面で読める文字の大半は、この1ファイルに書かれています。</p>
+    <div class="card">
+      <p style="margin:0 0 8px;color:var(--ink-soft);font-size:13.5px;">たとえば、こんな感じで書かれています👇</p>
+      <div class="tree" style="margin:0;">
+<span class="cmt">&lt;!-- タブの名前 --&gt;</span>
+<span class="file">&lt;button id="tabPost"  class="tab"&gt;</span><span class="hi">🦋 投稿</span><span class="file">&lt;/button&gt;</span>
+<span class="file">&lt;button id="tabVerify" class="tab"&gt;</span><span class="hi">📋 投稿履歴</span><span class="file">&lt;/button&gt;</span>
+
+<span class="cmt">&lt;!-- ボタンや説明文 --&gt;</span>
+<span class="file">&lt;button id="postNowBtn"&gt;</span><span class="hi">🦋 今すぐ投稿</span><span class="file">&lt;/button&gt;</span>
+<span class="file">&lt;div class="hint"&gt;</span><span class="hi">af_id は「🔗 アフィリンク」タブの設定を流用…</span><span class="file">&lt;/div&gt;</span>
+      </div>
+      <p style="margin:8px 0 0;font-size:14px;">
+        <b>&gt;</b> と <b>&lt;</b> で挟まれた部分（上の緑の文字）が、画面に出る文字です。
+        ここだけ書き換えれば、表示が変わります。<b>&lt;…&gt; の記号や id="…" は触らない</b>のがコツ。</p>
+    </div>
+
+    <h3>● 色・大きさ・余白を変えたいなら <code class="kbd">style.css</code></h3>
+    <p>「文字をもう少し大きく」「この色を変えたい」というのは <code class="kbd">style.css</code> の担当です。
+    ファイルの先頭に色の一覧（<code class="kbd">--accent</code> など）があり、ここを変えると全体の色味が一度に変わります。</p>
+
+    <div class="note">
+      <b>🔎 文字が見つからないとき（中級）</b><br>
+      一部の文字は <code class="kbd">.js</code> ファイルの中から自動で表示されています
+      （例：投稿本文のひな型は <code class="kbd">bluesky.js</code>、YouTube説明欄のひな型もそこ）。
+      まずは <code class="kbd">index.html</code> をエディタの <em>検索（Ctrl+F / ⌘+F）</em> で直接さがし、
+      見つからなければ <code class="kbd">.js</code> を探す――の順がおすすめです。
+    </div>
+
+    <div class="note warn">
+      <b>⚠️ 文字化けに注意</b><br>
+      保存するときは必ず <b>文字コード「UTF-8」</b>で。別の形式で保存すると、日本語が「縺ゅⅰ」のように化けます。
+      スマホで化けて見えたら、たいていこれが原因です。
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── ④ ───────────────────────────── -->
+  <section id="list">
+    <h2><span class="ic">📑</span>④ ファイル早見表（役割つき）</h2>
+    <div class="legend">
+      <span><span class="lv lv-green">気軽に</span> 文字・見た目。直して大丈夫</span>
+      <span><span class="lv lv-yellow">注意</span> 中に文字もあるが仕組みも担う</span>
+      <span><span class="lv lv-red">核</span> 動きの心臓部。基本さわらない</span>
+      <span><span class="lv lv-cloud">裏方</span> サーバー側。触らない</span>
+    </div>
+
+    <h3>🎨 画面・見た目</h3>
+    <div class="files">
+      <div class="frow"><div class="fname"><span class="lv lv-green">気軽に</span>index.html</div><div class="fdesc"><b>主役のファイル。</b>全タブの画面・文字・ボタン・入力欄がここに。文字を直すなら基本ここ。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-green">気軽に</span>style.css</div><div class="fdesc"><b>見た目すべて。</b>色・文字サイズ・余白・角丸・タブの形など。先頭に色の一覧あり。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-cloud">裏方</span>icon.svg<br>manifest.webmanifest</div><div class="fdesc">アプリのアイコンと名前（ホーム画面に追加したときの表示）。</div></div>
+    </div>
+
+    <h3>🎬 動画づくり</h3>
+    <div class="files">
+      <div class="frow"><div class="fname"><span class="lv lv-red">核</span>app.js</div><div class="fdesc"><b>動画の心臓部。</b>写真＋文字3段を合成し、録画して動画化。位置やサイズの計算もここ。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-red">核</span>idgen.js</div><div class="fdesc">動画ごとの「背番号(ID)」を発番。Drive保存・投稿記録を同じIDで束ねる縁の下の力持ち。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>drive-upload.js</div><div class="fdesc">作った動画と元写真を Google Drive へ自動保存。エラー文言などの文字あり。</div></div>
+    </div>
+
+    <h3>🦋 投稿（Bluesky / YouTube）</h3>
+    <div class="files">
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>bluesky.js</div><div class="fdesc"><b>🦋投稿タブの動き。</b>本文ひな型・作品URL・自動投稿・予約の入口。文言も多く含む。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-red">核</span>bluesky-core.js</div><div class="fdesc">実際に Bluesky へ投稿する通信エンジン（純粋なロジック）。さわらない。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>yt-clicks.js</div><div class="fdesc"><b>📋投稿履歴タブ。</b>再生数・クリック数の一覧と取得。並び順や表示文言を担当。</div></div>
+    </div>
+
+    <h3>🔗 アフィリンク</h3>
+    <div class="files">
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>affiliate.js</div><div class="fdesc"><b>🔗アフィリンクタブの動き。</b>URLを入れるとリンクを生成・コピー。Qセーブ等の配線。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-red">核</span>affiliate-core.js</div><div class="fdesc">URL → アフィリンクの<b>変換ロジック</b>（同人・動画・Books対応）。計算の本体。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-red">核</span>fanza-core.js</div><div class="fdesc">FANZAの商品情報（タイトル等）を読み取って整える解析ロジック。</div></div>
+    </div>
+
+    <h3>⏰ 予約・カレンダー</h3>
+    <div class="files">
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>scheduler.js</div><div class="fdesc"><b>⏰予約タブ。</b>指定時刻に自動投稿。予約一覧の表示文言もここ。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>integration.js</div><div class="fdesc">📅カレンダー（下の schedule/）と本体をつなぐ連携役。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-green">気軽に</span>schedule/index.html</div><div class="fdesc"><b>カレンダー画面の文字。</b>カレンダーの中の表示を直すならここ。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-green">気軽に</span>schedule/css/style.css</div><div class="fdesc">カレンダー画面の見た目（本体とは別の独立したCSS）。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-red">核</span>schedule/js/・data/</div><div class="fdesc">カレンダーの中身・祝日・スケジュール表のデータと計算。</div></div>
+    </div>
+
+    <h3>🧪 記録・その他の部品</h3>
+    <div class="files">
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>verify.js</div><div class="fdesc">検証ダッシュボード（いいね/リポスト等の集計表示）の配線。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-red">核</span>verify-core.js</div><div class="fdesc">エンゲージメント集計の計算ロジック。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>wizard.js</div><div class="fdesc">手順を案内するウィザード。案内文言を含む。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-red">核</span>persist-fields.js</div><div class="fdesc">入力した内容を自動で覚えて、次回も同じ状態で開けるようにする保存役。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>theme-settings.js</div><div class="fdesc">⚙️詳細設定タブ：編集ボタン(Qセーブ等)の色を変えるしくみ。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-yellow">注意</span>settings-io.js</div><div class="fdesc">設定の書き出し／読み込み（別の端末への引っ越し用）。</div></div>
+    </div>
+
+    <h3>☁️ サーバー側（普段は触らない）</h3>
+    <div class="files">
+      <div class="frow"><div class="fname"><span class="lv lv-cloud">裏方</span>fanza-worker/</div><div class="fdesc">FANZAの商品情報を代わりに取りに行く裏方サーバー。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-cloud">裏方</span>link-worker/</div><div class="fdesc">長いURLを短くする裏方サーバー。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-cloud">裏方</span>drive-worker/</div><div class="fdesc">Google Drive に動画を保存する裏方サーバー。</div></div>
+      <div class="frow"><div class="fname"><span class="lv lv-cloud">裏方</span>gas/</div><div class="fdesc">Googleスプレッドシートに投稿を記録するスクリプト。</div></div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── ⑤ ───────────────────────────── -->
+  <section id="tips">
+    <h2><span class="ic">🌱</span>⑤ 自分で直すときの安全な手順とコツ</h2>
+    <ol class="steps">
+      <li><b>直す前にコピーを取る。</b>うまくいかなくても元に戻せるよう、ファイルを複製してから作業すると安心。</li>
+      <li><b>文字だけ書き換える。</b><code class="kbd">&lt;…&gt;</code> の記号、<code class="kbd">id="…"</code>、<code class="kbd">class="…"</code> は触らない。日本語の文だけを直す。</li>
+      <li><b>UTF-8 で保存する。</b>文字化け防止のいちばん大事なポイント。</li>
+      <li><b>バージョン番号を1つ増やす。</b><code class="kbd">index.html</code> の <code class="kbd">v=104</code> → <code class="kbd">v=105</code> に。これでスマホに新しい画面が届く。</li>
+      <li><b>GitHub に保存(push)する。</b>数十秒〜数分でスマホに反映。反映が遅いときは、スマホ側でページを再読み込み。</li>
+    </ol>
+
+    <div class="note tip">
+      <b>💡 迷ったら、まずここ</b><br>
+      「あの文字どこ？」と思ったら、<code class="kbd">index.html</code> を開いて <em>検索（Ctrl+F / ⌘+F）</em> で
+      その文字をそのまま打ち込んでみてください。たいてい一発で見つかります。
+    </div>
+    <div class="note warn">
+      <b>⚠️ 仕組み（.js の核）は無理に触らない</b><br>
+      赤い<span class="lv lv-red">核</span>のファイルは、動きの心臓部です。文字直しの範囲を超える変更は、
+      クロードコードに「この文字をこう変えたい」と伝えるのがいちばん安全で早いです。
+    </div>
+  </section>
+
+  <hr class="divider">
+  <footer>
+    🖋️ このガイドは「5秒動画メーカー」のファイル構成の道しるべです。<br>
+    分からなくなったら、いつでもクロードコードに聞いてくださいね。
+  </footer>
+
+</div>
+</body>
+</html>
