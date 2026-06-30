@@ -35,7 +35,7 @@
     // wizard.js（FANZA Worker 接続設定。独自に保存）
     fanzaWorkerUrl: 1, fanzaSharedSecret: 1,
     // 一時的（送信後クリア）・モーダル・予約日時・フィルタ
-    manualTitle: 1, manualUrl: 1, pcWorkUrl: 1, pcText: 1, postSchedAt: 1, histShowDiscarded: 1
+    manualTitle: 1, manualUrl: 1, pcWorkUrl: 1, pcText: 1, postSchedAt: 1, movieSchedAt: 1, histShowDiscarded: 1
   };
 
   var PREFIX = "field_";

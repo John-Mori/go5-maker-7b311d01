@@ -108,6 +108,24 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .rsv-text{flex:1;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .rsv-row button{background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:6px;
   padding:5px 10px;font-size:12px;width:auto;margin-top:0;}
+/* 予約一覧タブ */
+.rsv-tab-row{display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+.rsv-tab-row:last-child{border-bottom:none;}
+.rsv-badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:.72rem;font-weight:700;white-space:nowrap;flex-shrink:0;}
+.rsv-badge-acc1{background:#2E4068;color:#c8d8ff;}
+.rsv-badge-acc2{background:#3D1830;color:#f0c8d8;}
+.rsv-tab-when{font-size:.82rem;color:var(--sub);white-space:nowrap;flex-shrink:0;}
+.rsv-tab-text{font-size:.82rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--ink);}
+.rsv-tab-btns{display:flex;gap:4px;flex-shrink:0;}
+.rsv-sm-btn{font-size:.72rem!important;padding:3px 8px!important;min-height:0!important;height:auto!important;line-height:1.4!important;}
+.rsv-sm-cancel{color:var(--accent2)!important;border-color:var(--accent2)!important;}
+/* 時刻変更ダイアログ */
+#rsvTimeDlg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:200;align-items:center;justify-content:center;}
+.rsv-dlg-inner{background:var(--card);border:1px solid var(--line);padding:20px 18px;border-radius:12px;min-width:260px;max-width:88vw;}
+.rsv-dlg-inner .field-label{margin:0 0 8px;}
+#rsvTimePicker{width:100%;margin-bottom:12px;}
+.rsv-dlg-btns{display:flex;gap:8px;}
+.rsv-dlg-btns button{flex:1;}
 
 /* ── スロット文脈バナー（カレンダー→動画作成/投稿の引き継ぎ表示） ── */
 .slot-ctx{max-width:520px;margin:0 auto 8px;background:#102530;border:1px solid #1c4a50;color:#bfe9ef;

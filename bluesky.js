@@ -62,7 +62,7 @@
   // アカウント別の本文テンプレ既定（保存が空のときに使う）。〇 は割引％のプレースホルダ。
   var DEF_TEXT = {
     acc1: 'おすすめ漫画見つけた💕\n\n↓詳細はこちらから🎀 #PR #漫画',
-    acc2: '続きが気になっちゃう一冊、みつけた📚\nなんと今なら〇%オフのおトク作品！✨\n\n↓続きはこちらから🌙 #PR #漫画'
+    acc2: '続きが気になっちゃう一冊、みつけた📚\nしかも今なら〇%オフ💕\n\n↓続きはこちらから🌙 #PR #漫画'
   };
   function defText() { return DEF_TEXT[acctId()] || DEF_TEXT.acc1; }
 
@@ -267,12 +267,12 @@
   // build(n, isNew)：isNew=新作チェック時の文面。mark は通常版／新作版の両方にマッチする（切替時に同じ行を差し替えるため）。
   var DISC = {
     acc1: {
-      build: function (n, isNew) { return isNew ? ('今なら' + n + '%オフのおトク作品！✨') : (n + '%オフのおトク作品！✨'); },
-      placeholder: '〇%オフのおトク作品！', mark: /オフのおトク作品/, persistent: false
-    },
-    acc2: {
       build: function (n, isNew) { return isNew ? ('なんと今なら' + n + '%オフの新作&おトク作品！✨') : ('なんと今なら' + n + '%オフのおトク作品！✨'); },
       placeholder: 'なんと今なら〇%オフのおトク作品！✨', mark: /(?:しかも|なんと)今なら[^\n]*オフ/, persistent: false
+    },
+    acc2: {
+      build: function (n, isNew) { return isNew ? ('しかも今なら' + n + '%オフの新作💕') : ('しかも今なら' + n + '%オフ💕'); },
+      placeholder: 'しかも今なら〇%オフ💕', mark: /(?:しかも|なんと)今なら[^\n]*オフ/, persistent: false
     }
   };
   // 割引文の挿入/差し替え/削除を行う純粋関数（対象テキストを受け取り新テキストを返す）。isNew=新作用の文面。
@@ -885,7 +885,7 @@
       if (!c.handle || !c.appPw) { setPostStatus('⚙設定でハンドルとアプリパスワードを入れてください（無人予約ならGAS設定）。'); return; }
       if (!window.Scheduler) { setPostStatus('スケジューラ未読込。'); return; }
       (f ? compressFile(f) : Promise.resolve(null)).then(function (blob) {
-        window.Scheduler.reserve({ slotId: slotId, text: text, imageBlob: blob, scheduledAtMs: ms, alt: alt, handle: c.handle, appPw: c.appPw });
+        window.Scheduler.reserve({ slotId: slotId, text: text, imageBlob: blob, scheduledAtMs: ms, alt: alt, handle: c.handle, appPw: c.appPw, account: acctId() });
         setPostStatus('⏰ 予約しました：' + new Date(ms).toLocaleString('ja-JP') + '（このタブを開いている間に自動投稿）');
       });
     });
@@ -903,6 +903,19 @@
     confirmEditable(composed, null).then(function (edited) {
       if (edited == null) { setBskyStatus('自動投稿をキャンセルしました。'); return; }
       if (!edited.trim()) { setBskyStatus('本文が空のため中止しました。'); return; }
+      // 予約時刻チェック（movieSchedAt に値があれば即時投稿せず予約）
+      var msEl = $('movieSchedAt'), schedMs = msEl && msEl.value ? new Date(msEl.value).getTime() : NaN;
+      if (!isNaN(schedMs) && schedMs > Date.now()) {
+        if (!window.Scheduler) { setBskyStatus('スケジューラ未読込。'); return; }
+        var imgF = pcSelectedFile || photoFile();
+        var imgP = imgF ? compressFile(imgF) : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
+        imgP.then(function (blob) {
+          window.Scheduler.reserve({ account: acctId(), slotId: window.__activeSlot__ ? window.__activeSlot__.id : null, text: edited, imageBlob: blob, scheduledAtMs: schedMs, alt: alt, handle: c.handle, appPw: c.appPw });
+          setBskyStatus('⏰ 予約しました：' + new Date(schedMs).toLocaleString('ja-JP'));
+          if (msEl) msEl.value = '';
+        });
+        return;
+      }
       var gasSet = !!(els.gasUrl.value || '').trim();
       setBskyStatus('Bluesky に投稿中…');
       // モーダル選択画像を優先。未選択なら動画の元写真→Canvas の順にフォールバック
