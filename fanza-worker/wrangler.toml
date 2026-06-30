@@ -8,5 +8,10 @@ compatibility_date = "2024-11-01"
 ALLOWED_ORIGIN = "https://john-mori.github.io"
 
 # ── Secrets（コマンドで登録。ここには書かない）──
-#   wrangler secret put SHARED_SECRET      ← フロント接続キー（これだけでOK）
-#   ※ スクレイピング方式に変更したため FANZA_API_ID / FANZA_AF_ID は不要
+#   wrangler secret put SHARED_SECRET         ← フロント認証キー（必須）
+#   wrangler secret put FANZA_API_ID          ← DMM API ID（任意・推奨）
+#   wrangler secret put FANZA_AFFILIATE_ID    ← FANZAアフィリエイトID（任意・推奨）
+#
+# FANZA_API_ID / FANZA_AFFILIATE_ID を設定すると DMM公式API優先になり安定します。
+# 未設定の場合はスクレイピング（og:title）にフォールバックします。
+# DMM API 登録: https://affiliate.dmm.com/api/
