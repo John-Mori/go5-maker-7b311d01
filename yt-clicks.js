@@ -400,14 +400,11 @@
     });
   }
 
-  function refresh() {
-    ensureIds(); // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
-    render();
-    var items = allItems(); var ymap = loadYtMap();
+  // クリック数(開封数)・YouTube視聴回数/投稿日時/題名をAPIから取得しキャッシュへ。Promiseを返す。
+  function fetchData_(items, ymap) {
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
-    if (!codes.length && !vids.length) { setStatus(apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます'); return; }
-    setStatus('取得中…');
+    if (!codes.length && !vids.length) return Promise.resolve(false);
     var jobs = [];
     codes.forEach(function (code) { jobs.push(fetchClicks(code).then(function (c) { if (c != null) clicksCache[code] = c; })); });
     if (vids.length) jobs.push(fetchVideos(vids).then(function (m) {
@@ -419,7 +416,18 @@
         if (rec.title) titleCache[id] = rec.title;
       });
     }));
-    Promise.all(jobs).then(function () {
+    return Promise.all(jobs).then(function () { return true; });
+  }
+
+  function refresh() {
+    ensureIds(); // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
+    render();
+    var items = allItems(); var ymap = loadYtMap();
+    var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
+    var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
+    if (!codes.length && !vids.length) { setStatus(apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます'); return; }
+    setStatus('取得中…');
+    fetchData_(items, ymap).then(function () {
       setStatus(lastErr ? ('⚠️ ' + lastErr) : (!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : ''));
       render();
     });
@@ -432,23 +440,34 @@
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
     if (!gasUrl) { setStatus('⚠️ 記録用GASのURLが未設定です（⚙️詳細設定で設定してください）'); return; }
     ensureIds();
+    var btn = $('ytSyncSheet'); if (btn) btn.disabled = true;
+    setStatus('最新の再生数・クリック数を取得中…');
+    // まずYouTube題名・視聴回数・開封数を最新取得してから送る（取れたぶんだけ反映）。
+    fetchData_(allItems(), loadYtMap()).then(function () { sendSync_(gasUrl, btn); });
+  }
+  function sendSync_(gasUrl, btn) {
     var ymap = loadYtMap();
     var items = allItems().map(function (it) {
       var k = itemKey(it);
+      var yt = ymap[k] || it.ytUrl || '';
+      var vid = ytIdOf(yt);
+      var code = codeOf(it.shortUrl || '');
       return {
         videoId: it.videoId || '',
-        title: it.title || '',
+        title: it.title || '',                                          // 題名(コメント)＝アプリの④コメント
+        ytTitle: (vid && titleCache[vid]) || '',                        // YouTube動画の実題名（取得済みのみ）
+        views: (vid && viewsCache[vid] != null) ? viewsCache[vid] : '', // YouTube視聴回数（取得済みのみ）
+        clicks: (code && clicksCache[code] != null) ? clicksCache[code] : '', // 短縮URL開封数（取得済みのみ）
         postUri: it.postUri || '',
         postUrl: it.postUrl || '',
         shortUrl: it.shortUrl || '',
         workUrl: it.workUrl || '',
-        youtubeUrl: ymap[k] || it.ytUrl || '',
+        youtubeUrl: yt,
         chara: !!it.chara,
         postedAt: (it.ts && it.ts > 0) ? new Date(it.ts).toISOString() : ''
       };
     }).filter(function (r) { return r.videoId; });
-    if (!items.length) { setStatus('同期する履歴がありません'); return; }
-    var btn = $('ytSyncSheet'); if (btn) btn.disabled = true;
+    if (!items.length) { setStatus('同期する履歴がありません'); if (btn) btn.disabled = false; return; }
     setStatus('スプレッドシートへ同期中… (' + items.length + '件)');
     fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'sync_history', channel: acct(), items: items }) })
       .then(function (r) { return r.json(); })

@@ -32,11 +32,23 @@ var FANZA_HEADERS = [
   '元値list_price','割引後price','割引率pct','FANZA取得日時',
   'レビュー件数(代理指標)','レビュー平均'
 ];
-// 追加属性列（記録シート末尾追加・移行で付与）。キャラ＝実在キャラの二次創作作品に○。
-var EXTRA_HEADERS = ['キャラ'];
+// 追加属性列（記録シート末尾追加・移行で付与）。
+//   キャラ＝実在キャラの二次創作作品に○。YouTube題名＝YouTube動画の実題名（題名(コメント)とは別）。
+var EXTRA_HEADERS = ['キャラ', 'YouTube題名'];
+//
+// ── 列の自動取得マップ（保守用メモ：ClaudeCodeはここを基準に列を増減する）──
+//   【自動で埋まる】post_id / 投稿日時 / 曜日 / day-type / 時間帯スロット / 題名(コメント) /
+//     作品cid / YouTube動画URL / YouTube題名 / 短縮URL / 視聴回数 / いいね / リポスト / 返信 /
+//     開封数 / post_uri / クリック更新日時 / 反応更新日時 / キャラ /
+//     元値list_price / 割引後price / 割引率pct / FANZA取得日時 / レビュー件数(代理指標) / レビュー平均 /
+//     承認率% / リンククリック率% / CVR発生% / CVR確定% / EPC発生¥ / EPC確定¥ / RPM（←数式・自動計算）
+//   【手動入力のみ＝APIで自動取得不可】特別期間(手動) / ジャンル / サムネ・フック種別(A/B) /
+//     CTA・リンク提示方法 / Blueskyラベル / インプレッション / インプCTR% / 平均視聴維持率% / フォロー増 /
+//     FANZA発生成約 / FANZA確定成約 / 発生報酬¥ / 確定報酬¥
+//   ※FANZA成約・報酬の手動4列は、承認率%/CVR/EPC/RPM の計算元。消すと分析数式が無価値になる点に注意。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-01B（投稿履歴の一括同期 sync_history 追加）';
+var GAS_VERSION = '2026-07-01C（YouTube題名列・視聴回数/開封数の同期反映を追加）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -281,6 +293,9 @@ function writeRecord_(channel, f) {
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
   putIf('短縮URL', shortUrl);
   putIf('YouTube動画URL', f.youtubeUrl || '');
+  putIf('YouTube題名', f.ytTitle || '');                       // YouTube動画の実題名（アプリのtitleCacheから）
+  putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
+  putIf('開封数', (f.clicks !== undefined && f.clicks !== null && f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
   putIf('post_uri', f.postUri || '');
   // FANZA 価格スナップショット（投稿時1回のみ。null は書かない＝既存値を保護）。
   putIf('元値list_price', f.fanza_list_price !== undefined && f.fanza_list_price !== null ? f.fanza_list_price : '');
@@ -313,7 +328,9 @@ function syncHistory_(channel, items) {
       writeRecord_(channel, {
         videoId: it.videoId, title: it.title || '', postUrl: it.postUrl || '',
         workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '',
-        youtubeUrl: it.youtubeUrl || '', chara: it.chara, postedAt: it.postedAt || '',
+        youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '',
+        views: it.views, clicks: it.clicks,
+        chara: it.chara, postedAt: it.postedAt || '',
         noShorten: true, noSort: true   // 同期は短縮API呼ばず・並べ替えは最後にまとめて
       });
       n++;
