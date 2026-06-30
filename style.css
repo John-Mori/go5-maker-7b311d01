@@ -18,6 +18,11 @@ main{max-width:520px;margin:0 auto;padding:8px 14px 40px;}
 input[type=text]{width:100%;font-size:16px;padding:11px 12px;border-radius:10px;
   border:1px solid var(--line);background:#0e1422;color:var(--ink);outline:none;}
 input[type=text]:focus{border-color:var(--accent);}
+/* datetime-local：iOS Safari は固有のmin-widthを持つため min-width:0 で枠内に収める。少し小さめに。 */
+input[type=datetime-local]{width:100%;min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;
+  font-size:14px;padding:8px 10px;border-radius:10px;
+  border:1px solid var(--line);background:#0e1422;color:var(--ink);outline:none;}
+input[type=datetime-local]:focus{border-color:var(--accent);}
 .photo-btn{display:block;text-align:center;background:#0e1422;border:1.5px dashed var(--accent);
   color:var(--accent);font-weight:700;padding:18px;border-radius:12px;font-size:16px;cursor:pointer;}
 .photo-btn:active{background:#10203033;}
