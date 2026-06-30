@@ -130,7 +130,7 @@
       if (!result.ok) {
         if (result.error === 'empty') return; // 空は無視
         var msg = result.error === 'no_cid'
-          ? 'cid が見つかりません'
+          ? '作品IDが見つかりません'
           : 'URLが不正です（http(s):// で始まる必要があります）';
         html += '<div class="affi-result affi-error-card">'
           + '<span class="affi-error">' + escHtml(msg) + '</span>'

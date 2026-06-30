@@ -128,6 +128,31 @@ test('Edge: 計測パラメータ付きURL → ?以降除去して処理', funct
 });
 
 // ────────────────────────────────────────────────────────────
+// T-5 / T-6  FANZA Books
+// ────────────────────────────────────────────────────────────
+test('T-5: Books URL → 商品ID抽出・リンク生成', function () {
+  const url = 'https://book.dmm.co.jp/product/4148691/';
+  const result = buildAffiliateLink(url, 'test-001');
+
+  assert.strictEqual(result.ok, true, 'ok should be true');
+  assert.strictEqual(result.cid, '4148691', 'cid mismatch');
+
+  const expectedLink = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fbook.dmm.co.jp%2Fproduct%2F4148691%2F&af_id=test-001&ch=toolbar&ch_id=link';
+  assert.strictEqual(result.link, expectedLink, 'link mismatch\n  got:      ' + result.link + '\n  expected: ' + expectedLink);
+});
+
+test('T-6: Books URL パラメータ付き → ?以降除去してリンク生成', function () {
+  const url = 'https://book.dmm.co.jp/product/4148691/?dmmref=something';
+  const result = buildAffiliateLink(url, 'test-001');
+
+  assert.strictEqual(result.ok, true, 'ok should be true');
+  assert.strictEqual(result.cid, '4148691', 'cid mismatch');
+
+  const expectedLink = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fbook.dmm.co.jp%2Fproduct%2F4148691%2F&af_id=test-001&ch=toolbar&ch_id=link';
+  assert.strictEqual(result.link, expectedLink, 'link mismatch\n  got:      ' + result.link + '\n  expected: ' + expectedLink);
+});
+
+// ────────────────────────────────────────────────────────────
 // 結果集計
 // ────────────────────────────────────────────────────────────
 console.log('');

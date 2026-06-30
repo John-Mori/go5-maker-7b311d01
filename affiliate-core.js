@@ -13,9 +13,21 @@
 function buildAffiliateLink(rawUrl, afId) {
   const raw = (rawUrl || '').trim();
   if (!raw) return { ok: false, error: 'empty' };
-  const m = raw.match(/cid=([^/?&\s]+)/);
-  if (!m) return { ok: false, error: 'no_cid' };
-  const cid = m[1];
+
+  let cid = null;
+
+  // FANZA Books: book.dmm.co.jp/product/【商品ID】/
+  const booksM = raw.match(/book\.dmm\.co\.jp\/product\/([^/?&#\s]+)/);
+  if (booksM && booksM[1]) cid = booksM[1];
+
+  // FANZA 同人・動画: cid= パラメータ
+  if (!cid) {
+    const m = raw.match(/cid=([^/?&\s]+)/);
+    if (m) cid = m[1];
+  }
+
+  if (!cid) return { ok: false, error: 'no_cid' };
+
   let clean = raw.split('?')[0].trim();
   if (!/^https?:\/\//i.test(clean)) return { ok: false, error: 'bad_url' };
   if (!clean.endsWith('/')) clean += '/';

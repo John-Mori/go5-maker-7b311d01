@@ -1,95 +1,95 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<!-- HTMLを毎回再検証＝更新が確実にスマホへ届く（GitHub Pagesは max-age=600 のため旧版が残りやすい対策） -->
+<!-- HTML繧呈ｯ主屓蜀肴､懆ｨｼ・晄峩譁ｰ縺檎｢ｺ螳溘↓繧ｹ繝槭・縺ｸ螻翫￥・・itHub Pages縺ｯ max-age=600 縺ｮ縺溘ａ譌ｧ迚医′谿九ｊ繧・☆縺・ｯｾ遲厄ｼ・-->
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="5秒動画">
+<meta name="apple-mobile-web-app-title" content="5遘貞虚逕ｻ">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=98">
-<link rel="apple-touch-icon" href="icon.svg?v=98">
+<link rel="manifest" href="manifest.webmanifest?v=99">
+<link rel="apple-touch-icon" href="icon.svg?v=99">
 <link rel="icon" href="icon.svg?v=84" type="image/svg+xml">
-<title>5秒動画メーカー</title>
+<title>5遘貞虚逕ｻ繝｡繝ｼ繧ｫ繝ｼ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=98">
+<link rel="stylesheet" href="style.css?v=99">
 </head>
 <body>
 <header>
-  <h1>5秒動画メーカー</h1>
-  <p class="sub">写真を選んで文字を入れて「動画を作成」。スマホだけで完結します。</p>
+  <h1>5遘貞虚逕ｻ繝｡繝ｼ繧ｫ繝ｼ</h1>
+  <p class="sub">蜀咏悄繧帝∈繧薙〒譁・ｭ励ｒ蜈･繧後※縲悟虚逕ｻ繧剃ｽ懈・縲阪ゅせ繝槭・縺縺代〒螳檎ｵ舌＠縺ｾ縺吶・/p>
 </header>
 
 <div class="acct-bar">
-  <span class="acct-bar-label">アカウント</span>
-  <button id="acctBtn1" class="acct-btn active" type="button">月読み色恋劇場</button>
-  <button id="acctBtn2" class="acct-btn" type="button">宵桜艶帖～Yoizakura Tsuyacho～</button>
-  <span class="acct-bar-note">アカウントごとに背景・Bluesky設定（ハンドル/アプリPW/本文/YouTube説明欄等）が切替わります。記録用GASは共通。</span>
+  <span class="acct-bar-label">繧｢繧ｫ繧ｦ繝ｳ繝・/span>
+  <button id="acctBtn1" class="acct-btn active" type="button">譛郁ｪｭ縺ｿ濶ｲ諱句括蝣ｴ</button>
+  <button id="acctBtn2" class="acct-btn" type="button">螳ｵ譯懆恩蟶厄ｽ杠oizakura Tsuyacho・・/button>
+  <span class="acct-bar-note">繧｢繧ｫ繧ｦ繝ｳ繝医＃縺ｨ縺ｫ閭梧勹繝ｻBluesky險ｭ螳夲ｼ医ワ繝ｳ繝峨Ν/繧｢繝励ΜPW/譛ｬ譁・YouTube隱ｬ譏取ｬ・ｭ会ｼ峨′蛻・崛繧上ｊ縺ｾ縺吶りｨ倬鹸逕ｨGAS縺ｯ蜈ｱ騾壹・/span>
 </div>
 
 <nav class="tabbar">
-  <button id="tabRank"    class="tab">🏆 ランキング</button>
-  <button id="tabReserve" class="tab">⏰ 予約</button>
-  <button id="tabMovie" class="tab active">🎬 動画作成</button>
-  <button id="tabCal"   class="tab">📅 カレンダー</button>
-  <button id="tabYT"    class="tab"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
-  <button id="tabPost"  class="tab">🦋 投稿</button>
-  <button id="tabAffi"  class="tab">🔗 アフィリンク</button>
-  <button id="tabVerify" class="tab">🧪 検証</button>
-  <button id="tabSettings" class="tab">⚙️ 詳細設定</button>
+  <button id="tabRank"    class="tab">醇 繝ｩ繝ｳ繧ｭ繝ｳ繧ｰ</button>
+  <button id="tabReserve" class="tab">竢ｰ 莠育ｴ・/button>
+  <button id="tabMovie" class="tab active">汐 蜍慕判菴懈・</button>
+  <button id="tabCal"   class="tab">套 繧ｫ繝ｬ繝ｳ繝繝ｼ</button>
+  <button id="tabYT"    class="tab"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 謚慕ｨｿ</button>
+  <button id="tabPost"  class="tab">ｦ・謚慕ｨｿ</button>
+  <button id="tabAffi"  class="tab">迫 繧｢繝輔ぅ繝ｪ繝ｳ繧ｯ</button>
+  <button id="tabVerify" class="tab">ｧｪ 讀懆ｨｼ</button>
+  <button id="tabSettings" class="tab">笞呻ｸ・隧ｳ邏ｰ險ｭ螳・/button>
 </nav>
 
-<!-- ランキング画面（両アカウント合算・再生数順。yt-clicks.js が描画） -->
+<!-- 繝ｩ繝ｳ繧ｭ繝ｳ繧ｰ逕ｻ髱｢・井ｸ｡繧｢繧ｫ繧ｦ繝ｳ繝亥粋邂励・蜀咲函謨ｰ鬆・Ｚt-clicks.js 縺梧緒逕ｻ・・-->
 <section id="pageRank" hidden></section>
 
-<!-- 予約一覧画面（両アカウント共通。scheduler.js が描画） -->
+<!-- 莠育ｴ・ｸ隕ｧ逕ｻ髱｢・井ｸ｡繧｢繧ｫ繧ｦ繝ｳ繝亥・騾壹Ｔcheduler.js 縺梧緒逕ｻ・・-->
 <section id="pageReserve" hidden></section>
 
-<!-- 時刻変更ダイアログ（position:fixed、どのタブからでも使用） -->
+<!-- 譎ょ綾螟画峩繝繧､繧｢繝ｭ繧ｰ・・osition:fixed縲√←縺ｮ繧ｿ繝悶°繧峨〒繧ゆｽｿ逕ｨ・・-->
 <div id="rsvTimeDlg">
   <div class="rsv-dlg-inner">
-    <div class="field-label">新しい予約時刻を選択</div>
+    <div class="field-label">譁ｰ縺励＞莠育ｴ・凾蛻ｻ繧帝∈謚・/div>
     <input type="datetime-local" id="rsvTimePicker">
     <div class="rsv-dlg-btns">
-      <button id="rsvTimeDlgOk" class="primary">変更する</button>
-      <button id="rsvTimeDlgCancel" class="ghost">キャンセル</button>
+      <button id="rsvTimeDlgOk" class="primary">螟画峩縺吶ｋ</button>
+      <button id="rsvTimeDlgCancel" class="ghost">繧ｭ繝｣繝ｳ繧ｻ繝ｫ</button>
     </div>
   </div>
 </div>
 
-<!-- 動画作成画面 -->
+<!-- 蜍慕判菴懈・逕ｻ髱｢ -->
 <section id="pageMovie">
 <main>
   <div id="slotCtxMovie" class="slot-ctx" hidden></div>
-  <!-- 写真選択 -->
+  <!-- 蜀咏悄驕ｸ謚・-->
   <section class="card">
-    <label class="field-label">① 前景画像（写真）</label>
-    <label for="photo" class="photo-btn" id="photoBtn">📷 写真を選ぶ / 撮る</label>
+    <label class="field-label">竭 蜑肴勹逕ｻ蜒擾ｼ亥・逵滂ｼ・/label>
+    <label for="photo" class="photo-btn" id="photoBtn">胴 蜀咏悄繧帝∈縺ｶ / 謦ｮ繧・/label>
     <input id="photo" type="file" accept="image/*" hidden>
-    <div class="hint" id="photoName">未選択</div>
+    <div class="hint" id="photoName">譛ｪ驕ｸ謚・/div>
   </section>
 
-  <!-- テキスト -->
+  <!-- 繝・く繧ｹ繝・-->
   <section class="card">
-    <label class="field-label">② 作者名（一番上）</label>
-    <input id="author" type="text" placeholder="作者様：◯◯" autocomplete="off">
+    <label class="field-label">竭｡ 菴懆・錐・井ｸ逡ｪ荳奇ｼ・/label>
+    <input id="author" type="text" placeholder="菴懆・ｧ假ｼ壺留笳ｯ" autocomplete="off">
 
-    <label class="field-label">③ 誘導文（2段目）</label>
+    <label class="field-label">竭｢ 隱伜ｰ取枚・・谿ｵ逶ｮ・・/label>
     <input id="detail" type="text" autocomplete="off">
 
-    <label class="field-label">④ コメント（3段目・大きく / ファイル名にもなる）</label>
-    <input id="top" type="text" placeholder="今回の画像に関するコメント" autocomplete="off">
+    <label class="field-label">竭｣ 繧ｳ繝｡繝ｳ繝茨ｼ・谿ｵ逶ｮ繝ｻ螟ｧ縺阪￥ / 繝輔ぃ繧､繝ｫ蜷阪↓繧ゅ↑繧具ｼ・/label>
+    <input id="top" type="text" placeholder="莉雁屓縺ｮ逕ｻ蜒上↓髢｢縺吶ｋ繧ｳ繝｡繝ｳ繝・ autocomplete="off">
   </section>
 
-  <!-- プレビュー＆位置調整（プレビューを見ながら＋/−で調整） -->
+  <!-- 繝励Ξ繝薙Η繝ｼ・・ｽ咲ｽｮ隱ｿ謨ｴ・医・繝ｬ繝薙Η繝ｼ繧定ｦ九↑縺後ｉ・・竏偵〒隱ｿ謨ｴ・・-->
   <section class="card">
-    <div class="field-label">仕上がりプレビュー（見ながら位置調整）</div>
+    <div class="field-label">莉穂ｸ翫′繧翫・繝ｬ繝薙Η繝ｼ・郁ｦ九↑縺後ｉ菴咲ｽｮ隱ｿ謨ｴ・・/div>
     <div class="editor">
       <div class="preview-col">
         <div class="preview-wrap">
@@ -98,61 +98,61 @@
       </div>
       <div class="controls-col">
         <div class="ctl-group">
-          <div class="ctl-group-title">全体</div>
-          <div class="ctl-row"><span class="ctl-label">全体（下へ）</span><button class="ctl-btn" id="wholeMinus" aria-label="全体を上へ">−</button><span class="ctl-val" id="wholeVal">2.0%</span><button class="ctl-btn" id="wholePlus" aria-label="全体を下へ">＋</button></div>
+          <div class="ctl-group-title">蜈ｨ菴・/div>
+          <div class="ctl-row"><span class="ctl-label">蜈ｨ菴難ｼ井ｸ九∈・・/span><button class="ctl-btn" id="wholeMinus" aria-label="蜈ｨ菴薙ｒ荳翫∈">竏・/button><span class="ctl-val" id="wholeVal">2.0%</span><button class="ctl-btn" id="wholePlus" aria-label="蜈ｨ菴薙ｒ荳九∈">・・/button></div>
         </div>
         <div class="ctl-group">
-          <div class="ctl-group-title">文字（段別・上−／下＋）</div>
-          <div class="ctl-row"><span class="ctl-label">①作者名</span><button class="ctl-btn" id="taMinus">−</button><span class="ctl-val" id="taVal">+0.0%</span><button class="ctl-btn" id="taPlus">＋</button></div>
-          <div class="ctl-row"><span class="ctl-label">②誘導文</span><button class="ctl-btn" id="tdMinus">−</button><span class="ctl-val" id="tdVal">+0.0%</span><button class="ctl-btn" id="tdPlus">＋</button></div>
-          <div class="ctl-row"><span class="ctl-label">③タイトル</span><button class="ctl-btn" id="ttMinus">−</button><span class="ctl-val" id="ttVal">+0.0%</span><button class="ctl-btn" id="ttPlus">＋</button></div>
+          <div class="ctl-group-title">譁・ｭ暦ｼ域ｮｵ蛻･繝ｻ荳岩・・丈ｸ具ｼ具ｼ・/div>
+          <div class="ctl-row"><span class="ctl-label">竭菴懆・錐</span><button class="ctl-btn" id="taMinus">竏・/button><span class="ctl-val" id="taVal">+0.0%</span><button class="ctl-btn" id="taPlus">・・/button></div>
+          <div class="ctl-row"><span class="ctl-label">竭｡隱伜ｰ取枚</span><button class="ctl-btn" id="tdMinus">竏・/button><span class="ctl-val" id="tdVal">+0.0%</span><button class="ctl-btn" id="tdPlus">・・/button></div>
+          <div class="ctl-row"><span class="ctl-label">竭｢繧ｿ繧､繝医Ν</span><button class="ctl-btn" id="ttMinus">竏・/button><span class="ctl-val" id="ttVal">+0.0%</span><button class="ctl-btn" id="ttPlus">・・/button></div>
         </div>
         <div class="ctl-group">
-          <div class="ctl-group-title">黒帯の位置（段別・上−／下＋）</div>
-          <div class="ctl-row"><span class="ctl-label">①作者名</span><button class="ctl-btn" id="baMinus">−</button><span class="ctl-val" id="baVal">+0.0%</span><button class="ctl-btn" id="baPlus">＋</button></div>
-          <div class="ctl-row"><span class="ctl-label">②誘導文</span><button class="ctl-btn" id="bdMinus">−</button><span class="ctl-val" id="bdVal">+0.0%</span><button class="ctl-btn" id="bdPlus">＋</button></div>
-          <div class="ctl-row"><span class="ctl-label">③タイトル</span><button class="ctl-btn" id="btMinus">−</button><span class="ctl-val" id="btVal">+0.0%</span><button class="ctl-btn" id="btPlus">＋</button></div>
+          <div class="ctl-group-title">鮟貞ｸｯ縺ｮ菴咲ｽｮ・域ｮｵ蛻･繝ｻ荳岩・・丈ｸ具ｼ具ｼ・/div>
+          <div class="ctl-row"><span class="ctl-label">竭菴懆・錐</span><button class="ctl-btn" id="baMinus">竏・/button><span class="ctl-val" id="baVal">+0.0%</span><button class="ctl-btn" id="baPlus">・・/button></div>
+          <div class="ctl-row"><span class="ctl-label">竭｡隱伜ｰ取枚</span><button class="ctl-btn" id="bdMinus">竏・/button><span class="ctl-val" id="bdVal">+0.0%</span><button class="ctl-btn" id="bdPlus">・・/button></div>
+          <div class="ctl-row"><span class="ctl-label">竭｢繧ｿ繧､繝医Ν</span><button class="ctl-btn" id="btMinus">竏・/button><span class="ctl-val" id="btVal">+0.0%</span><button class="ctl-btn" id="btPlus">・・/button></div>
         </div>
         <div class="ctl-group">
-          <div class="ctl-group-title">黒帯の余白・段の間隔</div>
-          <div class="ctl-row"><span class="ctl-label">黒帯の余白</span><button class="ctl-btn" id="bpMinus">−</button><span class="ctl-val" id="bpVal">0.0%</span><button class="ctl-btn" id="bpPlus">＋</button></div>
-          <div class="ctl-row"><span class="ctl-label">段の間隔</span><button class="ctl-btn" id="rgMinus">−</button><span class="ctl-val" id="rgVal">0.0%</span><button class="ctl-btn" id="rgPlus">＋</button></div>
+          <div class="ctl-group-title">鮟貞ｸｯ縺ｮ菴咏區繝ｻ谿ｵ縺ｮ髢馴囈</div>
+          <div class="ctl-row"><span class="ctl-label">鮟貞ｸｯ縺ｮ菴咏區</span><button class="ctl-btn" id="bpMinus">竏・/button><span class="ctl-val" id="bpVal">0.0%</span><button class="ctl-btn" id="bpPlus">・・/button></div>
+          <div class="ctl-row"><span class="ctl-label">谿ｵ縺ｮ髢馴囈</span><button class="ctl-btn" id="rgMinus">竏・/button><span class="ctl-val" id="rgVal">0.0%</span><button class="ctl-btn" id="rgPlus">・・/button></div>
         </div>
         <div class="ctl-group">
-          <div class="ctl-group-title">大タイトル拡大・画像位置</div>
-          <div class="ctl-row"><span class="ctl-label">大タイトル拡大</span><button class="ctl-btn" id="tsMinus" aria-label="タイトルを小さく">−</button><span class="ctl-val" id="tsVal">100.0%</span><button class="ctl-btn" id="tsPlus" aria-label="タイトルを大きく">＋</button></div>
-          <div class="ctl-row"><span class="ctl-label">画像 上下（上−／下＋）</span><button class="ctl-btn" id="iyMinus" aria-label="画像を上へ">−</button><span class="ctl-val" id="iyVal">+0.0%</span><button class="ctl-btn" id="iyPlus" aria-label="画像を下へ">＋</button></div>
+          <div class="ctl-group-title">螟ｧ繧ｿ繧､繝医Ν諡｡螟ｧ繝ｻ逕ｻ蜒丈ｽ咲ｽｮ</div>
+          <div class="ctl-row"><span class="ctl-label">螟ｧ繧ｿ繧､繝医Ν諡｡螟ｧ</span><button class="ctl-btn" id="tsMinus" aria-label="繧ｿ繧､繝医Ν繧貞ｰ上＆縺・>竏・/button><span class="ctl-val" id="tsVal">100.0%</span><button class="ctl-btn" id="tsPlus" aria-label="繧ｿ繧､繝医Ν繧貞､ｧ縺阪￥">・・/button></div>
+          <div class="ctl-row"><span class="ctl-label">逕ｻ蜒・荳贋ｸ具ｼ井ｸ岩・・丈ｸ具ｼ具ｼ・/span><button class="ctl-btn" id="iyMinus" aria-label="逕ｻ蜒上ｒ荳翫∈">竏・/button><span class="ctl-val" id="iyVal">+0.0%</span><button class="ctl-btn" id="iyPlus" aria-label="逕ｻ蜒上ｒ荳九∈">・・/button></div>
         </div>
         <div class="ctl-actions">
-          <button id="voffSaveDefault" class="ghost">既定値に保存</button>
-          <button id="voffReset" class="ghost">リセット</button>
+          <button id="voffSaveDefault" class="ghost">譌｢螳壼､縺ｫ菫晏ｭ・/button>
+          <button id="voffReset" class="ghost">繝ｪ繧ｻ繝・ヨ</button>
         </div>
       </div>
     </div>
-    <button id="previewBtn" class="ghost">プレビュー更新</button>
+    <button id="previewBtn" class="ghost">繝励Ξ繝薙Η繝ｼ譖ｴ譁ｰ</button>
   </section>
 
-  <!-- Bluesky 自動投稿トグル（方法①：作成後に自動投稿） -->
+  <!-- Bluesky 閾ｪ蜍墓兜遞ｿ繝医げ繝ｫ・域婿豕補蔵・壻ｽ懈・蠕後↓閾ｪ蜍墓兜遞ｿ・・-->
   <section class="card">
     <label class="bsky-toggle">
       <input id="bskyEnable" type="checkbox">
-      <span>🦋 動画作成後に Bluesky へ自動投稿する</span>
+      <span>ｦ・蜍慕判菴懈・蠕後↓ Bluesky 縺ｸ閾ｪ蜍墓兜遞ｿ縺吶ｋ</span>
     </label>
     <label class="bsky-toggle" style="margin-top:8px;">
       <input id="testMode" type="checkbox">
-      <span>🧪 テストモード（Blueskyへは実際に投稿するが、記録シートには残さない）</span>
+      <span>ｧｪ 繝・せ繝医Δ繝ｼ繝会ｼ・luesky縺ｸ縺ｯ螳滄圀縺ｫ謚慕ｨｿ縺吶ｋ縺後∬ｨ倬鹸繧ｷ繝ｼ繝医↓縺ｯ谿九＆縺ｪ縺・ｼ・/span>
     </label>
-    <div class="hint">本文は「🦋 投稿」タブで編集した内容、画像は<b>この動画の元写真</b>を添付します。アカウント設定も「🦋 投稿」タブにあります。<br>単独で投稿したいときは「🦋 投稿」タブの「今すぐ投稿」をどうぞ。</div>
+    <div class="hint">譛ｬ譁・・縲交洶・謚慕ｨｿ縲阪ち繝悶〒邱ｨ髮・＠縺溷・螳ｹ縲∫判蜒上・<b>縺薙・蜍慕判縺ｮ蜈・・逵・/b>繧呈ｷｻ莉倥＠縺ｾ縺吶ゅい繧ｫ繧ｦ繝ｳ繝郁ｨｭ螳壹ｂ縲交洶・謚慕ｨｿ縲阪ち繝悶↓縺ゅｊ縺ｾ縺吶・br>蜊倡峡縺ｧ謚慕ｨｿ縺励◆縺・→縺阪・縲交洶・謚慕ｨｿ縲阪ち繝悶・縲御ｻ翫☆縺先兜遞ｿ縲阪ｒ縺ｩ縺・◇縲・/div>
     <div class="movie-work" style="margin-top:12px;">
-      <label for="movieWorkUrl" class="field-label" style="margin:0 0 4px;font-size:.8rem;">📕 今回案内する作品URL（今日の作品を貼る・取り違え防止）</label>
+      <label for="movieWorkUrl" class="field-label" style="margin:0 0 4px;font-size:.8rem;">燈 莉雁屓譯亥・縺吶ｋ菴懷刀URL・井ｻ頑律縺ｮ菴懷刀繧定ｲｼ繧九・蜿悶ｊ驕輔∴髦ｲ豁｢・・/label>
       <input id="movieWorkUrl" type="url" autocomplete="off" style="display:none;">
-      <a id="movieWorkLink" href="#" target="_blank" rel="noopener noreferrer" style="display:block;word-break:break-all;color:var(--accent);font-size:.85rem;padding:4px 0;min-height:1.4em;">（URLを入力してください）</a>
+      <a id="movieWorkLink" href="#" target="_blank" rel="noopener noreferrer" style="display:block;word-break:break-all;color:var(--accent);font-size:.85rem;padding:4px 0;min-height:1.4em;">・・RL繧貞・蜉帙＠縺ｦ縺上□縺輔＞・・/a>
       <div id="movieWorkWarn" style="font-size:.82rem;margin-top:4px;"></div>
     </div>
     <div class="discount-row" style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;">
-      <label for="discountSel2" class="field-label" style="margin:0;">割引文を挿入</label>
+      <label for="discountSel2" class="field-label" style="margin:0;">蜑ｲ蠑墓枚繧呈諺蜈･</label>
       <select id="discountSel2">
-        <option value="">なし</option>
+        <option value="">縺ｪ縺・/option>
         <option value="20">20%</option>
         <option value="30">30%</option>
         <option value="40">40%</option>
@@ -162,133 +162,133 @@
         <option value="75">75%</option>
         <option value="80">80%</option>
         <option value="90">90%</option>
-        <option value="custom">カスタム</option>
+        <option value="custom">繧ｫ繧ｹ繧ｿ繝</option>
       </select>
-      <label class="disc-new"><input id="discountNew2" type="checkbox"><span>新作</span></label>
-      <span class="hint" style="margin:0;">投稿本文（自動投稿・今すぐ投稿で共通）に割引文を挿入します。「🦋投稿」タブの本文に反映されます。「新作」にチェックすると新作用の文面になります。</span>
+      <label class="disc-new"><input id="discountNew2" type="checkbox"><span>譁ｰ菴・/span></label>
+      <span class="hint" style="margin:0;">謚慕ｨｿ譛ｬ譁・ｼ郁・蜍墓兜遞ｿ繝ｻ莉翫☆縺先兜遞ｿ縺ｧ蜈ｱ騾夲ｼ峨↓蜑ｲ蠑墓枚繧呈諺蜈･縺励∪縺吶ゅ交洶区兜遞ｿ縲阪ち繝悶・譛ｬ譁・↓蜿肴丐縺輔ｌ縺ｾ縺吶ゅ梧眠菴懊阪↓繝√ぉ繝・け縺吶ｋ縺ｨ譁ｰ菴懃畑縺ｮ譁・擇縺ｫ縺ｪ繧翫∪縺吶・/span>
     </div>
     <div style="margin-top:8px;">
-      <label class="field-label" for="movieSchedAt" style="font-size:.8rem;margin:0 0 4px;">⏰ 予約投稿時刻（空欄なら動画作成後すぐ投稿）</label>
+      <label class="field-label" for="movieSchedAt" style="font-size:.8rem;margin:0 0 4px;">竢ｰ 莠育ｴ・兜遞ｿ譎ょ綾・育ｩｺ谺・↑繧牙虚逕ｻ菴懈・蠕後☆縺先兜遞ｿ・・/label>
       <input id="movieSchedAt" type="datetime-local" style="width:100%;">
     </div>
     <div class="status" id="bskyStatus"></div>
   </section>
 
-  <!-- 作成 -->
+  <!-- 菴懈・ -->
   <section class="card">
-    <button id="makeBtn" class="primary">▶ 動画を作成</button>
+    <button id="makeBtn" class="primary">笆ｶ 蜍慕判繧剃ｽ懈・</button>
     <div class="status" id="status"></div>
     <div id="resultArea" hidden>
       <video id="result" controls playsinline></video>
-      <button id="saveBtn" class="primary">⬇ 保存 / 共有</button>
-      <a id="dl" class="ghost" download>ダウンロード</a>
-      <p class="hint">うまく保存できない時は、上の動画を長押し →「ビデオを保存」。</p>
+      <button id="saveBtn" class="primary">筮・菫晏ｭ・/ 蜈ｱ譛・/button>
+      <a id="dl" class="ghost" download>繝繧ｦ繝ｳ繝ｭ繝ｼ繝・/a>
+      <p class="hint">縺・∪縺丈ｿ晏ｭ倥〒縺阪↑縺・凾縺ｯ縲∽ｸ翫・蜍慕判繧帝聞謚ｼ縺・竊偵後ン繝・が繧剃ｿ晏ｭ倥阪・/p>
     </div>
   </section>
 
-  <p class="notice">※ 画像は内容を判定しません。権利的に使用可・未成年の性的描写を含まない素材をご用意ください。</p>
+  <p class="notice">窶ｻ 逕ｻ蜒上・蜀・ｮｹ繧貞愛螳壹＠縺ｾ縺帙ｓ縲よｨｩ蛻ｩ逧・↓菴ｿ逕ｨ蜿ｯ繝ｻ譛ｪ謌仙ｹｴ縺ｮ諤ｧ逧・緒蜀吶ｒ蜷ｫ縺ｾ縺ｪ縺・ｴ譚舌ｒ縺皮畑諢上￥縺縺輔＞縲・/p>
 </main>
 </section>
 
-<!-- カレンダー画面（スケジュール最適化：iframe埋め込み＝CSS/JS分離・回帰ゼロ） -->
+<!-- 繧ｫ繝ｬ繝ｳ繝繝ｼ逕ｻ髱｢・医せ繧ｱ繧ｸ繝･繝ｼ繝ｫ譛驕ｩ蛹厄ｼ喨frame蝓九ａ霎ｼ縺ｿ・戮SS/JS蛻・屬繝ｻ蝗槫ｸｰ繧ｼ繝ｭ・・-->
 <section id="pageCalendar" hidden>
   <div class="cal-frame-wrap">
-    <iframe id="calFrame" class="cal-frame" title="投稿スケジュール カレンダー" loading="lazy"></iframe>
+    <iframe id="calFrame" class="cal-frame" title="謚慕ｨｿ繧ｹ繧ｱ繧ｸ繝･繝ｼ繝ｫ 繧ｫ繝ｬ繝ｳ繝繝ｼ" loading="lazy"></iframe>
   </div>
-  <p class="hint" style="text-align:center;max-width:520px;margin:8px auto 0;">📅 最適な投稿スロット（日時・枠）を管理。各枠を決めたら「🎬 動画作成」「🦋 投稿」へ。データはこの端末内で共有されます。</p>
+  <p class="hint" style="text-align:center;max-width:520px;margin:8px auto 0;">套 譛驕ｩ縺ｪ謚慕ｨｿ繧ｹ繝ｭ繝・ヨ・域律譎ゅ・譫・峨ｒ邂｡逅・ょ推譫繧呈ｱｺ繧√◆繧峨交沁ｬ 蜍慕判菴懈・縲阪交洶・謚慕ｨｿ縲阪∈縲ゅョ繝ｼ繧ｿ縺ｯ縺薙・遶ｯ譛ｫ蜀・〒蜈ｱ譛峨＆繧後∪縺吶・/p>
 </section>
 
-<!-- YouTube投稿画面：題名・タグ・短縮URL・概要欄（コピーして使う） -->
+<!-- YouTube謚慕ｨｿ逕ｻ髱｢・夐｡悟錐繝ｻ繧ｿ繧ｰ繝ｻ遏ｭ邵ｮURL繝ｻ讎りｦ∵ｬ・ｼ医さ繝斐・縺励※菴ｿ縺・ｼ・-->
 <section id="pageYouTube" hidden>
 <main>
-  <!-- 題名コピペ欄（コメント＋タグ） -->
+  <!-- 鬘悟錐繧ｳ繝斐・谺・ｼ医さ繝｡繝ｳ繝茨ｼ九ち繧ｰ・・-->
   <section class="card">
-    <div class="field-label">📋 題名（コピーして貼り付け）</div>
+    <div class="field-label">搭 鬘悟錐・医さ繝斐・縺励※雋ｼ繧贋ｻ倥￠・・/div>
     <div class="short-row">
-      <code id="ytTitle" class="short-url">（「動画作成」タブのコメントを入れると題名が出ます）</code>
-      <button id="ytTitleCopy" class="copy-btn" type="button">題名をコピー</button>
+      <code id="ytTitle" class="short-url">・医悟虚逕ｻ菴懈・縲阪ち繝悶・繧ｳ繝｡繝ｳ繝医ｒ蜈･繧後ｋ縺ｨ鬘悟錐縺悟・縺ｾ縺呻ｼ・/code>
+      <button id="ytTitleCopy" class="copy-btn" type="button">鬘悟錐繧偵さ繝斐・</button>
     </div>
-    <label class="field-label" for="ytTags" style="margin-top:10px;">タグ（半角スペース区切り）</label>
-    <input id="ytTags" type="text" value="#マンガ紹介 #漫画 #アニメ #anime" autocomplete="off">
-    <div class="hint">題名＝「動画作成」タブ④コメント＋タグ。コメント・タグを変えると自動更新されます。</div>
+    <label class="field-label" for="ytTags" style="margin-top:10px;">繧ｿ繧ｰ・亥濠隗偵せ繝壹・繧ｹ蛹ｺ蛻・ｊ・・/label>
+    <input id="ytTags" type="text" value="#繝槭Φ繧ｬ邏ｹ莉・#貍ｫ逕ｻ #繧｢繝九Γ #anime" autocomplete="off">
+    <div class="hint">鬘悟錐・昴悟虚逕ｻ菴懈・縲阪ち繝問促繧ｳ繝｡繝ｳ繝茨ｼ九ち繧ｰ縲ゅさ繝｡繝ｳ繝医・繧ｿ繧ｰ繧貞､峨∴繧九→閾ｪ蜍墓峩譁ｰ縺輔ｌ縺ｾ縺吶・/div>
   </section>
 
-  <!-- 短縮URL表示 ＋ YouTube説明欄 -->
+  <!-- 遏ｭ邵ｮURL陦ｨ遉ｺ ・・YouTube隱ｬ譏取ｬ・-->
   <section class="card">
-    <div class="field-label">🔗 最新の投稿（短縮URL）</div>
+    <div class="field-label">迫 譛譁ｰ縺ｮ謚慕ｨｿ・育洒邵ｮURL・・/div>
     <div class="short-row">
-      <code id="shortUrlOut" class="short-url">（投稿するとここに短縮URLが表示されます）</code>
-      <button id="shortUrlCopy" class="copy-btn" type="button">URLをコピー</button>
+      <code id="shortUrlOut" class="short-url">・域兜遞ｿ縺吶ｋ縺ｨ縺薙％縺ｫ遏ｭ邵ｮURL縺瑚｡ｨ遉ｺ縺輔ｌ縺ｾ縺呻ｼ・/code>
+      <button id="shortUrlCopy" class="copy-btn" type="button">URL繧偵さ繝斐・</button>
     </div>
-    <div class="hint">動画作成後の自動投稿／今すぐ投稿のあと、Bluesky投稿のURLを短縮して表示します（短縮には🦋投稿タブ⚙の記録用GAS設定が必要）。</div>
+    <div class="hint">蜍慕判菴懈・蠕後・閾ｪ蜍墓兜遞ｿ・丈ｻ翫☆縺先兜遞ｿ縺ｮ縺ゅ→縲。luesky謚慕ｨｿ縺ｮURL繧堤洒邵ｮ縺励※陦ｨ遉ｺ縺励∪縺呻ｼ育洒邵ｮ縺ｫ縺ｯｦ区兜遞ｿ繧ｿ繝問囮縺ｮ險倬鹸逕ｨGAS險ｭ螳壹′蠢・ｦ・ｼ峨・/div>
 
-    <label class="field-label" for="ytDesc" style="margin-top:12px;">📺 YouTube説明欄（コピーして概要欄に貼り付け）</label>
-    <textarea id="ytDesc" rows="8">↑ URLを長押し&リンクを開く ↑
-こちらからアクセスしてね💕
-
-
+    <label class="field-label" for="ytDesc" style="margin-top:12px;">銅 YouTube隱ｬ譏取ｬ・ｼ医さ繝斐・縺励※讎りｦ∵ｬ・↓雋ｼ繧贋ｻ倥￠・・/label>
+    <textarea id="ytDesc" rows="8">竊・URL繧帝聞謚ｼ縺・繝ｪ繝ｳ繧ｯ繧帝幕縺・竊・
+縺薙■繧峨°繧峨い繧ｯ繧ｻ繧ｹ縺励※縺ｭ瀦
 
 
-【感想📖】</textarea>
+
+
+縲先─諠ｳ当縲・/textarea>
     <div class="row" style="display:flex;gap:8px;margin-top:8px;">
-      <button id="ytInsert" class="ghost" type="button">短縮URLを挿入</button>
-      <button id="ytCopy" class="copy-btn" type="button">説明欄をコピー</button>
+      <button id="ytInsert" class="ghost" type="button">遏ｭ邵ｮURL繧呈諺蜈･</button>
+      <button id="ytCopy" class="copy-btn" type="button">隱ｬ譏取ｬ・ｒ繧ｳ繝斐・</button>
     </div>
     <div class="qedit">
       <div class="qedit-grid">
-        <button id="ytQSave" class="qbtn qbtn-save" type="button">Qセーブ</button>
-        <button id="ytQLoad" class="qbtn qbtn-load" type="button">Qロード</button>
-        <button id="ytReset" class="qbtn qbtn-reset" type="button">リセット</button>
+        <button id="ytQSave" class="qbtn qbtn-save" type="button">Q繧ｻ繝ｼ繝・/button>
+        <button id="ytQLoad" class="qbtn qbtn-load" type="button">Q繝ｭ繝ｼ繝・/button>
+        <button id="ytReset" class="qbtn qbtn-reset" type="button">繝ｪ繧ｻ繝・ヨ</button>
         <div class="qbtn-pair">
-          <button id="ytUndo" class="qbtn qbtn-undo" type="button" aria-label="元に戻す" title="元に戻す">↶ 戻す</button>
-          <button id="ytRedo" class="qbtn qbtn-redo" type="button" aria-label="やり直す" title="やり直す">やり直す ↷</button>
+          <button id="ytUndo" class="qbtn qbtn-undo" type="button" aria-label="蜈・↓謌ｻ縺・ title="蜈・↓謌ｻ縺・>竊ｶ 謌ｻ縺・/button>
+          <button id="ytRedo" class="qbtn qbtn-redo" type="button" aria-label="繧・ｊ逶ｴ縺・ title="繧・ｊ逶ｴ縺・>繧・ｊ逶ｴ縺・竊ｷ</button>
         </div>
       </div>
       <span id="ytQInfo" class="hint" style="margin:6px 0 0;display:block;"></span>
     </div>
-    <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
+    <div class="hint">謚慕ｨｿ縺吶ｋ縺ｨ遏ｭ邵ｮURL縺後％縺ｮ隱ｬ譏取ｬ・↓閾ｪ蜍輔〒蜈･繧翫∪縺呻ｼ域怙譁ｰ1莉ｶ縺ｫ蜷梧悄・峨・ouTube縺ｮ讎りｦ∵ｬ・↓縺昴・縺ｾ縺ｾ雋ｼ繧贋ｻ倥￠縺ｦ縺上□縺輔＞縲・/div>
   </section>
 
-  <!-- 手動で短縮（アプリ外で単独投稿した分のURLを貼って短縮＋履歴追加） -->
+  <!-- 謇句虚縺ｧ遏ｭ邵ｮ・医い繝励Μ螟悶〒蜊倡峡謚慕ｨｿ縺励◆蛻・・URL繧定ｲｼ縺｣縺ｦ遏ｭ邵ｮ・句ｱ･豁ｴ霑ｽ蜉・・-->
   <section class="card">
-    <div class="field-label">✂️ あとで単独投稿した分を短縮（手動）</div>
-    <div class="hint">アプリ外でBlueskyに投稿した分などは、その<b>投稿URL</b>をここに貼ると短縮URLを作り、下の履歴（このアカウント）に追加します。</div>
-    <input id="manualTitle" type="text" placeholder="作品名・メモ（任意・履歴の見出しになります）" autocomplete="off">
-    <input id="manualUrl" type="text" inputmode="url" placeholder="https://bsky.app/profile/.../post/...（短縮したいURL）" autocomplete="off" style="margin-top:6px;">
-    <button id="manualShortBtn" class="primary" type="button" style="margin-top:8px;">✂️ 短縮して履歴に追加</button>
+    <div class="field-label">笨ゑｸ・縺ゅ→縺ｧ蜊倡峡謚慕ｨｿ縺励◆蛻・ｒ遏ｭ邵ｮ・域焔蜍包ｼ・/div>
+    <div class="hint">繧｢繝励Μ螟悶〒Bluesky縺ｫ謚慕ｨｿ縺励◆蛻・↑縺ｩ縺ｯ縲√◎縺ｮ<b>謚慕ｨｿURL</b>繧偵％縺薙↓雋ｼ繧九→遏ｭ邵ｮURL繧剃ｽ懊ｊ縲∽ｸ九・螻･豁ｴ・医％縺ｮ繧｢繧ｫ繧ｦ繝ｳ繝茨ｼ峨↓霑ｽ蜉縺励∪縺吶・/div>
+    <input id="manualTitle" type="text" placeholder="菴懷刀蜷阪・繝｡繝｢・井ｻｻ諢上・螻･豁ｴ縺ｮ隕句・縺励↓縺ｪ繧翫∪縺呻ｼ・ autocomplete="off">
+    <input id="manualUrl" type="text" inputmode="url" placeholder="https://bsky.app/profile/.../post/...・育洒邵ｮ縺励◆縺ФRL・・ autocomplete="off" style="margin-top:6px;">
+    <button id="manualShortBtn" class="primary" type="button" style="margin-top:8px;">笨ゑｸ・遏ｭ邵ｮ縺励※螻･豁ｴ縺ｫ霑ｽ蜉</button>
     <div id="manualResult" class="short-row" hidden style="margin-top:8px;">
       <code id="manualOut" class="short-url"></code>
-      <button id="manualCopy" class="copy-btn" type="button">コピー</button>
+      <button id="manualCopy" class="copy-btn" type="button">繧ｳ繝斐・</button>
     </div>
   </section>
 
-  <!-- 過去の短縮URL履歴（このチャンネルのみ・重複/破棄管理） -->
+  <!-- 驕主悉縺ｮ遏ｭ邵ｮURL螻･豁ｴ・医％縺ｮ繝√Ε繝ｳ繝阪Ν縺ｮ縺ｿ繝ｻ驥崎､・遐ｴ譽・ｮ｡逅・ｼ・-->
   <section class="card">
-    <div class="field-label">📜 過去の短縮URL履歴（このチャンネル）</div>
+    <div class="field-label">糖 驕主悉縺ｮ遏ｭ邵ｮURL螻･豁ｴ・医％縺ｮ繝√Ε繝ｳ繝阪Ν・・/div>
     <div class="row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <button id="histRefresh" class="ghost" type="button">🔄 履歴を更新</button>
-      <label class="bsky-toggle" style="margin:0;"><input id="histShowDiscarded" type="checkbox"><span>🗂 破棄も表示</span></label>
+      <button id="histRefresh" class="ghost" type="button">売 螻･豁ｴ繧呈峩譁ｰ</button>
+      <label class="bsky-toggle" style="margin:0;"><input id="histShowDiscarded" type="checkbox"><span>翌 遐ｴ譽・ｂ陦ｨ遉ｺ</span></label>
     </div>
-    <div id="histList" class="hist-list"><p class="hint">「🔄 履歴を更新」で、このチャンネルで投稿した短縮URLの一覧を表示します。</p></div>
-    <div class="hint">同じ作品を重複投稿したものは <b>🚫破棄</b>（隠すだけ・<b>↩復元</b>可）。残す1本は <b>⭐本採用</b>。完全に消すときは <b>🗑物理削除</b>（取り消せません）。<b>重複</b>バッジは同じ題名が複数あるときの目印です。</div>
+    <div id="histList" class="hist-list"><p class="hint">縲交沐・螻･豁ｴ繧呈峩譁ｰ縲阪〒縲√％縺ｮ繝√Ε繝ｳ繝阪Ν縺ｧ謚慕ｨｿ縺励◆遏ｭ邵ｮURL縺ｮ荳隕ｧ繧定｡ｨ遉ｺ縺励∪縺吶・/p></div>
+    <div class="hint">蜷後§菴懷刀繧帝㍾隍・兜遞ｿ縺励◆繧ゅ・縺ｯ <b>圻遐ｴ譽・/b>・磯國縺吶□縺代・<b>竊ｩ蠕ｩ蜈・/b>蜿ｯ・峨よｮ九☆1譛ｬ縺ｯ <b>箝先悽謗｡逕ｨ</b>縲ょｮ悟・縺ｫ豸医☆縺ｨ縺阪・ <b>卵迚ｩ逅・炎髯､</b>・亥叙繧頑ｶ医○縺ｾ縺帙ｓ・峨・b>驥崎､・/b>繝舌ャ繧ｸ縺ｯ蜷後§鬘悟錐縺瑚､・焚縺ゅｋ縺ｨ縺阪・逶ｮ蜊ｰ縺ｧ縺吶・/div>
   </section>
 </main>
 </section>
 
-<!-- 投稿画面（Bluesky・方法②：単独で投稿。本文・画像・アカウントはここで設定） -->
+<!-- 謚慕ｨｿ逕ｻ髱｢・・luesky繝ｻ譁ｹ豕補贈・壼腰迢ｬ縺ｧ謚慕ｨｿ縲よ悽譁・・逕ｻ蜒上・繧｢繧ｫ繧ｦ繝ｳ繝医・縺薙％縺ｧ險ｭ螳夲ｼ・-->
 <section id="pagePost" hidden>
 <main>
   <div id="slotCtxPost" class="slot-ctx" hidden></div>
-  <!-- 本文 -->
+  <!-- 譛ｬ譁・-->
   <section class="card">
-    <label class="field-label" for="bskyText">投稿本文（固定文・編集可）</label>
-    <textarea id="bskyText" rows="5" style="font-size:.8rem;">おすすめ漫画見つけた💕
+    <label class="field-label" for="bskyText">謚慕ｨｿ譛ｬ譁・ｼ亥崋螳壽枚繝ｻ邱ｨ髮・庄・・/label>
+    <textarea id="bskyText" rows="5" style="font-size:.8rem;">縺翫☆縺吶ａ貍ｫ逕ｻ隕九▽縺代◆瀦
 
-↓詳細はこちらから🎀 #PR #漫画</textarea>
+竊楢ｩｳ邏ｰ縺ｯ縺薙■繧峨°繧解沁 #PR #貍ｫ逕ｻ</textarea>
     <div class="discount-row" style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
-      <label for="discountSel" class="field-label" style="margin:0;">割引文を挿入</label>
+      <label for="discountSel" class="field-label" style="margin:0;">蜑ｲ蠑墓枚繧呈諺蜈･</label>
       <select id="discountSel">
-        <option value="">なし</option>
+        <option value="">縺ｪ縺・/option>
         <option value="20">20%</option>
         <option value="30">30%</option>
         <option value="40">40%</option>
@@ -298,269 +298,269 @@
         <option value="75">75%</option>
         <option value="80">80%</option>
         <option value="90">90%</option>
-        <option value="custom">カスタム</option>
+        <option value="custom">繧ｫ繧ｹ繧ｿ繝</option>
       </select>
-      <label class="disc-new"><input id="discountNew" type="checkbox"><span>新作</span></label>
-      <span class="hint" style="margin:0;">選ぶと本文1行目の下に「○%オフのお得作品」を自動挿入。「カスタム」は数字だけ自分で入力。「新作」にチェックすると新作用の文面になります。</span>
+      <label class="disc-new"><input id="discountNew" type="checkbox"><span>譁ｰ菴・/span></label>
+      <span class="hint" style="margin:0;">驕ｸ縺ｶ縺ｨ譛ｬ譁・陦檎岼縺ｮ荳九↓縲娯雷%繧ｪ繝輔・縺雁ｾ嶺ｽ懷刀縲阪ｒ閾ｪ蜍墓諺蜈･縲ゅ後き繧ｹ繧ｿ繝縲阪・謨ｰ蟄励□縺題・蛻・〒蜈･蜉帙ゅ梧眠菴懊阪↓繝√ぉ繝・け縺吶ｋ縺ｨ譁ｰ菴懃畑縺ｮ譁・擇縺ｫ縺ｪ繧翫∪縺吶・/span>
     </div>
     <div class="qedit">
       <div class="qedit-grid">
-        <button id="bskyQSave" class="qbtn qbtn-save" type="button">Qセーブ</button>
-        <button id="bskyQLoad" class="qbtn qbtn-load" type="button">Qロード</button>
-        <button id="bskyReset" class="qbtn qbtn-reset" type="button">リセット</button>
+        <button id="bskyQSave" class="qbtn qbtn-save" type="button">Q繧ｻ繝ｼ繝・/button>
+        <button id="bskyQLoad" class="qbtn qbtn-load" type="button">Q繝ｭ繝ｼ繝・/button>
+        <button id="bskyReset" class="qbtn qbtn-reset" type="button">繝ｪ繧ｻ繝・ヨ</button>
         <div class="qbtn-pair">
-          <button id="bskyUndo" class="qbtn qbtn-undo" type="button" aria-label="元に戻す" title="元に戻す">↶ 戻す</button>
-          <button id="bskyRedo" class="qbtn qbtn-redo" type="button" aria-label="やり直す" title="やり直す">やり直す ↷</button>
+          <button id="bskyUndo" class="qbtn qbtn-undo" type="button" aria-label="蜈・↓謌ｻ縺・ title="蜈・↓謌ｻ縺・>竊ｶ 謌ｻ縺・/button>
+          <button id="bskyRedo" class="qbtn qbtn-redo" type="button" aria-label="繧・ｊ逶ｴ縺・ title="繧・ｊ逶ｴ縺・>繧・ｊ逶ｴ縺・竊ｷ</button>
         </div>
       </div>
       <span id="bskyQInfo" class="hint" style="margin:6px 0 0;display:block;"></span>
     </div>
     <div class="counter" id="postCount">0 / 300</div>
-    <div class="hint">ここは<b>固定文だけ</b>。アフィリンクと画像は<b>投稿時に自動で付きます</b>（説明の括弧書きは本文に入れないでください）。</div>
+    <div class="hint">縺薙％縺ｯ<b>蝗ｺ螳壽枚縺縺・/b>縲ゅい繝輔ぅ繝ｪ繝ｳ繧ｯ縺ｨ逕ｻ蜒上・<b>謚慕ｨｿ譎ゅ↓閾ｪ蜍輔〒莉倥″縺ｾ縺・/b>・郁ｪｬ譏弱・諡ｬ蠑ｧ譖ｸ縺阪・譛ｬ譁・↓蜈･繧後↑縺・〒縺上□縺輔＞・峨・/div>
 
-    <label class="field-label" for="bskyWorkUrl">作品URL（投稿時にアフィリンクを自動追加）</label>
+    <label class="field-label" for="bskyWorkUrl">菴懷刀URL・域兜遞ｿ譎ゅ↓繧｢繝輔ぅ繝ｪ繝ｳ繧ｯ繧定・蜍戊ｿｽ蜉・・/label>
     <input id="bskyWorkUrl" type="url" hidden autocomplete="off">
     <div style="margin-bottom:4px;">
-      <a id="bskyWorkLink" href="#" target="_blank" rel="noopener" style="display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--sub);font-size:.85rem;min-height:1.4em;margin-bottom:4px;">（URLを入力してください）</a>
-      <button id="bskyWorkEdit" type="button" class="ghost" style="font-size:12px;padding:3px 8px;">✏ 変更</button>
+      <a id="bskyWorkLink" href="#" target="_blank" rel="noopener" style="display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--sub);font-size:.85rem;min-height:1.4em;margin-bottom:4px;">・・RL繧貞・蜉帙＠縺ｦ縺上□縺輔＞・・/a>
+      <button id="bskyWorkEdit" type="button" class="ghost" style="font-size:12px;padding:3px 8px;">笨・螟画峩</button>
     </div>
-    <div class="hint">af_id は「🔗 アフィリンク」タブの設定を流用。空欄なら本文だけ投稿します。この本文＋作品URLは<b>自動投稿（方法①）でも共通</b>。</div>
+    <div class="hint">af_id 縺ｯ縲交沐・繧｢繝輔ぅ繝ｪ繝ｳ繧ｯ縲阪ち繝悶・險ｭ螳壹ｒ豬∫畑縲らｩｺ谺・↑繧画悽譁・□縺第兜遞ｿ縺励∪縺吶ゅ％縺ｮ譛ｬ譁・ｼ倶ｽ懷刀URL縺ｯ<b>閾ｪ蜍墓兜遞ｿ・域婿豕補蔵・峨〒繧ょ・騾・/b>縲・/div>
   </section>
 
-  <!-- 画像 -->
+  <!-- 逕ｻ蜒・-->
   <section class="card">
-    <label class="field-label">添付画像（任意・動画投稿時も自動で添付）</label>
-    <label for="postImg" class="photo-btn" id="postImgBtn">📷 画像を選ぶ</label>
+    <label class="field-label">豺ｻ莉倡判蜒擾ｼ井ｻｻ諢上・蜍慕判謚慕ｨｿ譎ゅｂ閾ｪ蜍輔〒豺ｻ莉假ｼ・/label>
+    <label for="postImg" class="photo-btn" id="postImgBtn">胴 逕ｻ蜒上ｒ驕ｸ縺ｶ</label>
     <input id="postImg" type="file" accept="image/*" hidden>
     <div class="row" style="display:flex;gap:8px;margin-top:8px;">
-      <button class="ghost" id="postImgClear" style="display:none;">画像を外す</button>
+      <button class="ghost" id="postImgClear" style="display:none;">逕ｻ蜒上ｒ螟悶☆</button>
     </div>
-    <div class="hint" id="postImgName">未選択</div>
+    <div class="hint" id="postImgName">譛ｪ驕ｸ謚・/div>
     <img id="postImgPreview" alt="" style="max-width:100%;max-height:120px;border-radius:6px;margin-top:6px;display:none;">
   </section>
 
-  <!-- プレビュー -->
+  <!-- 繝励Ξ繝薙Η繝ｼ -->
   <section class="card">
-    <div class="field-label">プレビュー（このまま投稿されます）</div>
+    <div class="field-label">繝励Ξ繝薙Η繝ｼ・医％縺ｮ縺ｾ縺ｾ謚慕ｨｿ縺輔ｌ縺ｾ縺呻ｼ・/div>
     <div class="bsky-card">
       <div class="bsky-head">
-        <div class="bsky-av"><img id="pvAvatar" alt="" hidden><span id="pvAvFallback">🦋</span></div>
+        <div class="bsky-av"><img id="pvAvatar" alt="" hidden><span id="pvAvFallback">ｦ・/span></div>
         <div>
-          <div class="bsky-name" id="pvName">あなた</div>
-          <div class="bsky-handle" id="pvHandle">@（ハンドル未設定）</div>
+          <div class="bsky-name" id="pvName">縺ゅ↑縺・/div>
+          <div class="bsky-handle" id="pvHandle">@・医ワ繝ｳ繝峨Ν譛ｪ險ｭ螳夲ｼ・/div>
         </div>
       </div>
-      <div class="bsky-body" id="pvBody"><span class="ph">（ここに本文が表示されます）</span></div>
+      <div class="bsky-body" id="pvBody"><span class="ph">・医％縺薙↓譛ｬ譁・′陦ｨ遉ｺ縺輔ｌ縺ｾ縺呻ｼ・/span></div>
       <div class="bsky-img" id="pvImgWrap"><img id="pvImg" alt=""></div>
-      <div class="bsky-imgnote" id="pvImgNote">（投稿時に画像を自動で添付します）</div>
-      <div class="bsky-foot"><span>💬 0</span><span>🔁 0</span><span>♡ 0</span></div>
+      <div class="bsky-imgnote" id="pvImgNote">・域兜遞ｿ譎ゅ↓逕ｻ蜒上ｒ閾ｪ蜍輔〒豺ｻ莉倥＠縺ｾ縺呻ｼ・/div>
+      <div class="bsky-foot"><span>町 0</span><span>煤 0</span><span>笙｡ 0</span></div>
     </div>
   </section>
 
-  <!-- 投稿ボタン（今すぐ投稿・予約投稿を並列配置） -->
+  <!-- 謚慕ｨｿ繝懊ち繝ｳ・井ｻ翫☆縺先兜遞ｿ繝ｻ莠育ｴ・兜遞ｿ繧剃ｸｦ蛻鈴・鄂ｮ・・-->
   <section class="card">
-    <label class="field-label" for="postSchedAt" style="font-size:.8rem;margin:0 0 4px;">⏰ 予約時刻（今すぐ投稿なら空欄のまま）</label>
+    <label class="field-label" for="postSchedAt" style="font-size:.8rem;margin:0 0 4px;">竢ｰ 莠育ｴ・凾蛻ｻ・井ｻ翫☆縺先兜遞ｿ縺ｪ繧臥ｩｺ谺・・縺ｾ縺ｾ・・/label>
     <input id="postSchedAt" type="datetime-local" style="margin-bottom:10px;width:100%;">
     <div style="display:flex;gap:8px;">
-      <button id="postNowBtn" class="primary bsky-post-btn" style="flex:1;">🦋 今すぐ投稿</button>
-      <button id="postReserveBtn" class="ghost" style="flex:1;">⏰ 予約して投稿</button>
+      <button id="postNowBtn" class="primary bsky-post-btn" style="flex:1;">ｦ・莉翫☆縺先兜遞ｿ</button>
+      <button id="postReserveBtn" class="ghost" style="flex:1;">竢ｰ 莠育ｴ・＠縺ｦ謚慕ｨｿ</button>
     </div>
     <div class="status" id="postStatus"></div>
     <details style="margin-top:10px;">
-      <summary style="cursor:pointer;color:var(--sub);font-size:13px;">⚙ 無人予約設定</summary>
+      <summary style="cursor:pointer;color:var(--sub);font-size:13px;">笞・辟｡莠ｺ莠育ｴ・ｨｭ螳・/summary>
       <label class="bsky-toggle" style="margin:8px 0;">
         <input id="bskyUnattended" type="checkbox">
-        <span>☁️ 無人で予約する（タブを閉じてもOK／要GAS設定）</span>
+        <span>笘・ｸ・辟｡莠ｺ縺ｧ莠育ｴ・☆繧具ｼ医ち繝悶ｒ髢峨§縺ｦ繧０K・剰ｦ；AS險ｭ螳夲ｼ・/span>
       </label>
-      <div class="hint">・<b>無人OFF</b>＝このタブを開いている間だけ（端末のアカウント設定を使用）。・<b>無人ON</b>＝GASに予約を送り、<b>タブを閉じても</b>時間トリガーが投稿（アカウントはGAS側の設定 BSKY_HANDLE/BSKY_APP_PW を使用）。</div>
+      <div class="hint">繝ｻ<b>辟｡莠ｺOFF</b>・昴％縺ｮ繧ｿ繝悶ｒ髢九＞縺ｦ縺・ｋ髢薙□縺托ｼ育ｫｯ譛ｫ縺ｮ繧｢繧ｫ繧ｦ繝ｳ繝郁ｨｭ螳壹ｒ菴ｿ逕ｨ・峨ゅ・<b>辟｡莠ｺON</b>・扁AS縺ｫ莠育ｴ・ｒ騾√ｊ縲・b>繧ｿ繝悶ｒ髢峨§縺ｦ繧・/b>譎る俣繝医Μ繧ｬ繝ｼ縺梧兜遞ｿ・医い繧ｫ繧ｦ繝ｳ繝医・GAS蛛ｴ縺ｮ險ｭ螳・BSKY_HANDLE/BSKY_APP_PW 繧剃ｽｿ逕ｨ・峨・/div>
     </details>
     <div id="reserveList" class="rsv-list" hidden></div>
   </section>
 
-  <!-- アカウント・記録設定（自動投稿と共通）：初期設定後はあまり触らないため最下段に配置 -->
+  <!-- 繧｢繧ｫ繧ｦ繝ｳ繝医・險倬鹸險ｭ螳夲ｼ郁・蜍墓兜遞ｿ縺ｨ蜈ｱ騾夲ｼ会ｼ壼・譛溯ｨｭ螳壼ｾ後・縺ゅ∪繧願ｧｦ繧峨↑縺・◆繧∵怙荳区ｮｵ縺ｫ驟咲ｽｮ -->
   <section class="card">
     <details class="bsky-adv" id="bskyAccDetails">
-      <summary>⚙ 投稿アカウント・記録設定（自動投稿と共通）</summary>
-      <label class="field-label" for="bskyHandle">ハンドル（例：yourname.bsky.social）</label>
+      <summary>笞・謚慕ｨｿ繧｢繧ｫ繧ｦ繝ｳ繝医・險倬鹸險ｭ螳夲ｼ郁・蜍墓兜遞ｿ縺ｨ蜈ｱ騾夲ｼ・/summary>
+      <label class="field-label" for="bskyHandle">繝上Φ繝峨Ν・井ｾ具ｼ噐ourname.bsky.social・・/label>
       <input id="bskyHandle" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="yourname.bsky.social">
-      <label class="field-label" for="bskyAppPw">アプリパスワード（未入力なら投稿はスキップ）</label>
+      <label class="field-label" for="bskyAppPw">繧｢繝励Μ繝代せ繝ｯ繝ｼ繝会ｼ域悴蜈･蜉帙↑繧画兜遞ｿ縺ｯ繧ｹ繧ｭ繝・・・・/label>
       <input id="bskyAppPw" type="password" autocomplete="new-password" placeholder="xxxx-xxxx-xxxx-xxxx">
-      <div class="hint">Bluesky 設定 →「プライバシーとセキュリティ」→「アプリパスワード」で発行。端末内にのみ保存、いつでも失効可能。</div>
-      <button type="button" id="bskyTestBtn" class="ghost" style="margin:6px 0;">🔌 接続テスト（ログインだけ試す・投稿しません）</button>
+      <div class="hint">Bluesky 險ｭ螳・竊偵後・繝ｩ繧､繝舌す繝ｼ縺ｨ繧ｻ繧ｭ繝･繝ｪ繝・ぅ縲坂・縲後い繝励Μ繝代せ繝ｯ繝ｼ繝峨阪〒逋ｺ陦後らｫｯ譛ｫ蜀・↓縺ｮ縺ｿ菫晏ｭ倥√＞縺､縺ｧ繧ょ､ｱ蜉ｹ蜿ｯ閭ｽ縲・/div>
+      <button type="button" id="bskyTestBtn" class="ghost" style="margin:6px 0;">伯 謗･邯壹ユ繧ｹ繝茨ｼ医Ο繧ｰ繧､繝ｳ縺縺題ｩｦ縺吶・謚慕ｨｿ縺励∪縺帙ｓ・・/button>
       <div class="status" id="bskyTestResult" hidden></div>
-      <label class="field-label" for="bskyGasUrl">記録用URL（Google Apps Script）</label>
-      <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/●●●/exec" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-      <div class="hint">これを入れると<b>すべての投稿を自動で記録</b>し、🧪検証タブで集計できます（クリック数も）。記録するなら必ず設定してください。</div>
+      <label class="field-label" for="bskyGasUrl">險倬鹸逕ｨURL・・oogle Apps Script・・/label>
+      <input id="bskyGasUrl" type="text" inputmode="url" placeholder="https://script.google.com/macros/s/笳鞘酪笳・exec" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <div class="hint">縺薙ｌ繧貞・繧後ｋ縺ｨ<b>縺吶∋縺ｦ縺ｮ謚慕ｨｿ繧定・蜍輔〒險倬鹸</b>縺励Å洫ｪ讀懆ｨｼ繧ｿ繝悶〒髮・ｨ医〒縺阪∪縺呻ｼ医け繝ｪ繝・け謨ｰ繧ゑｼ峨りｨ倬鹸縺吶ｋ縺ｪ繧牙ｿ・★險ｭ螳壹＠縺ｦ縺上□縺輔＞縲・/div>
       <div id="gasStatus" class="gas-status"></div>
     </details>
   </section>
 
-  <!-- 設定の引っ越し（エクスポート / インポート）＝Task 8f -->
+  <!-- 險ｭ螳壹・蠑輔▲雜翫＠・医お繧ｯ繧ｹ繝昴・繝・/ 繧､繝ｳ繝昴・繝茨ｼ会ｼ抖ask 8f -->
   <section class="card">
-    <div class="field-label">⚙️ 設定の引っ越し（書き出し / 読み込み）</div>
-    <div class="hint">機種変更や別端末で使うときに、レイアウト微調整・本文・YouTube説明欄・短縮URL履歴などの設定をまとめて移せます。完全に端末内で完結します。</div>
+    <div class="field-label">笞呻ｸ・險ｭ螳壹・蠑輔▲雜翫＠・域嶌縺榊・縺・/ 隱ｭ縺ｿ霎ｼ縺ｿ・・/div>
+    <div class="hint">讖溽ｨｮ螟画峩繧・挨遶ｯ譛ｫ縺ｧ菴ｿ縺・→縺阪↓縲√Ξ繧､繧｢繧ｦ繝亥ｾｮ隱ｿ謨ｴ繝ｻ譛ｬ譁・・YouTube隱ｬ譏取ｬ・・遏ｭ邵ｮURL螻･豁ｴ縺ｪ縺ｩ縺ｮ險ｭ螳壹ｒ縺ｾ縺ｨ繧√※遘ｻ縺帙∪縺吶ょｮ悟・縺ｫ遶ｯ譛ｫ蜀・〒螳檎ｵ舌＠縺ｾ縺吶・/div>
     <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-      <button id="cfgExportSafe" class="ghost" type="button">📤 鍵を除いて書き出し</button>
-      <button id="cfgExportAll" class="ghost" type="button">📤 全部書き出し（鍵込み）</button>
-      <button id="cfgImportBtn" class="ghost" type="button">📥 読み込み（復元）</button>
+      <button id="cfgExportSafe" class="ghost" type="button">豆 骰ｵ繧帝勁縺・※譖ｸ縺榊・縺・/button>
+      <button id="cfgExportAll" class="ghost" type="button">豆 蜈ｨ驛ｨ譖ｸ縺榊・縺暦ｼ磯嵯霎ｼ縺ｿ・・/button>
+      <button id="cfgImportBtn" class="ghost" type="button">踏 隱ｭ縺ｿ霎ｼ縺ｿ・亥ｾｩ蜈・ｼ・/button>
       <input id="cfgImportFile" type="file" accept="application/json,.json" hidden>
     </div>
-    <div class="hint" style="margin-top:6px;">「鍵を除いて」＝アプリパスワード等の秘密を<b>含めずに</b>書き出し（共有・バックアップ向けで安全）。「全部」＝秘密も含めて書き出し（<b>自分の別端末への移行用</b>・取り扱い注意）。読み込むと今の設定に上書きし、ページを再読み込みします。</div>
+    <div class="hint" style="margin-top:6px;">縲碁嵯繧帝勁縺・※縲搾ｼ昴い繝励Μ繝代せ繝ｯ繝ｼ繝臥ｭ峨・遘伜ｯ・ｒ<b>蜷ｫ繧√★縺ｫ</b>譖ｸ縺榊・縺暦ｼ亥・譛峨・繝舌ャ繧ｯ繧｢繝・・蜷代￠縺ｧ螳牙・・峨ゅ悟・驛ｨ縲搾ｼ晉ｧ伜ｯ・ｂ蜷ｫ繧√※譖ｸ縺榊・縺暦ｼ・b>閾ｪ蛻・・蛻･遶ｯ譛ｫ縺ｸ縺ｮ遘ｻ陦檎畑</b>繝ｻ蜿悶ｊ謇ｱ縺・ｳｨ諢擾ｼ峨りｪｭ縺ｿ霎ｼ繧縺ｨ莉翫・險ｭ螳壹↓荳頑嶌縺阪＠縲√・繝ｼ繧ｸ繧貞・隱ｭ縺ｿ霎ｼ縺ｿ縺励∪縺吶・/div>
     <div id="cfgIoStatus" class="hint"></div>
   </section>
 </main>
 </section>
 
-<!-- アフィリンク画面 -->
+<!-- 繧｢繝輔ぅ繝ｪ繝ｳ繧ｯ逕ｻ髱｢ -->
 <section id="pageAffi" hidden>
 <main>
-  <!-- アフィID -->
+  <!-- 繧｢繝輔ぅID -->
   <section class="card">
-    <label class="field-label" for="afId">① あなたのアフィID</label>
-    <input id="afId" type="text" placeholder="例：yourname-001" autocomplete="off">
-    <div id="affiWarn" class="affi-warn" hidden>アフィIDが未入力です。リンクは構造プレビューとして生成されます（af_id=【アフィID】）。</div>
+    <label class="field-label" for="afId">竭 縺ゅ↑縺溘・繧｢繝輔ぅID</label>
+    <input id="afId" type="text" placeholder="萓具ｼ噐ourname-001" autocomplete="off">
+    <div id="affiWarn" class="affi-warn" hidden>繧｢繝輔ぅID縺梧悴蜈･蜉帙〒縺吶ゅΜ繝ｳ繧ｯ縺ｯ讒矩繝励Ξ繝薙Η繝ｼ縺ｨ縺励※逕滓・縺輔ｌ縺ｾ縺呻ｼ・f_id=縲舌い繝輔ぅID縲托ｼ峨・/div>
   </section>
 
-  <!-- 作品URL -->
+  <!-- 菴懷刀URL -->
   <section class="card">
-    <label class="field-label" for="affiUrls">② 作品URL（1行に1URL・複数可）</label>
+    <label class="field-label" for="affiUrls">竭｡ 菴懷刀URL・・陦後↓1URL繝ｻ隍・焚蜿ｯ・・/label>
     <textarea id="affiUrls" rows="4" placeholder="https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/"></textarea>
   </section>
 
-  <!-- 生成結果 -->
+  <!-- 逕滓・邨先棡 -->
   <section class="card">
-    <div class="field-label">生成結果</div>
+    <div class="field-label">逕滓・邨先棡</div>
     <div id="affiResults"></div>
   </section>
 </main>
 </section>
 
-<!-- 検証画面（Phase4：Bluesky指標ダッシュボード） -->
+<!-- 讀懆ｨｼ逕ｻ髱｢・・hase4・咤luesky謖・ｨ吶ム繝・す繝･繝懊・繝会ｼ・-->
 <section id="pageVerify" hidden>
 <main>
-  <!-- 再生数・クリック数（投稿別・このアカウント） -->
+  <!-- 蜀咲函謨ｰ繝ｻ繧ｯ繝ｪ繝・け謨ｰ・域兜遞ｿ蛻･繝ｻ縺薙・繧｢繧ｫ繧ｦ繝ｳ繝茨ｼ・-->
   <section class="card">
-    <div class="field-label">▶🔗 再生数・クリック数（投稿別・このアカウント）</div>
-    <div class="hint">投稿した<b>短縮URLのクリック数</b>と、説明欄に載せた<b>YouTube動画の再生数</b>を一覧します。各行の「YouTube URL」を入れると、その動画の<b>再生数</b>と<b>YouTube投稿日時</b>を取得します（取得には ⚙️詳細設定 のAPIキーが必要）。<br>日時は<b>YouTubeに投稿した時刻</b>を表示し、新しい順に並びます。URL未入力で投稿日時が不明なものは下にまとめます。</div>
+    <div class="field-label">笆ｶ迫 蜀咲函謨ｰ繝ｻ繧ｯ繝ｪ繝・け謨ｰ・域兜遞ｿ蛻･繝ｻ縺薙・繧｢繧ｫ繧ｦ繝ｳ繝茨ｼ・/div>
+    <div class="hint">謚慕ｨｿ縺励◆<b>遏ｭ邵ｮURL縺ｮ繧ｯ繝ｪ繝・け謨ｰ</b>縺ｨ縲∬ｪｬ譏取ｬ・↓霈峨○縺・b>YouTube蜍慕判縺ｮ蜀咲函謨ｰ</b>繧剃ｸ隕ｧ縺励∪縺吶ょ推陦後・縲刑ouTube URL縲阪ｒ蜈･繧後ｋ縺ｨ縲√◎縺ｮ蜍慕判縺ｮ<b>蜀咲函謨ｰ</b>縺ｨ<b>YouTube謚慕ｨｿ譌･譎・/b>繧貞叙蠕励＠縺ｾ縺呻ｼ亥叙蠕励↓縺ｯ 笞呻ｸ剰ｩｳ邏ｰ險ｭ螳・縺ｮAPI繧ｭ繝ｼ縺悟ｿ・ｦ・ｼ峨・br>譌･譎ゅ・<b>YouTube縺ｫ謚慕ｨｿ縺励◆譎ょ綾</b>繧定｡ｨ遉ｺ縺励∵眠縺励＞鬆・↓荳ｦ縺ｳ縺ｾ縺吶６RL譛ｪ蜈･蜉帙〒謚慕ｨｿ譌･譎ゅ′荳肴・縺ｪ繧ゅ・縺ｯ荳九↓縺ｾ縺ｨ繧√∪縺吶・/div>
     <div class="vlist-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button id="ytClickRefresh" class="ghost" type="button">🔄 再生数・クリック数を更新</button>
-      <button id="ytAddManual" class="ghost" type="button">➕ YouTube動画を手動で追加</button>
+      <button id="ytClickRefresh" class="ghost" type="button">売 蜀咲函謨ｰ繝ｻ繧ｯ繝ｪ繝・け謨ｰ繧呈峩譁ｰ</button>
+      <button id="ytAddManual" class="ghost" type="button">筐・YouTube蜍慕判繧呈焔蜍輔〒霑ｽ蜉</button>
     </div>
     <div class="status" id="ytClickStatus"></div>
     <div id="ytClickList" class="vlist"></div>
   </section>
 
   <section class="card">
-    <div class="field-label">🧪 検証ダッシュボード（Bluesky指標）</div>
-    <div class="hint">公開済み投稿の <b>いいね/リポスト/返信</b>（Bluesky公開APIから取得）＋<b>Bitlyクリック</b>＋<b>FANZA成約（手入力）</b>を day-type 別に集計。アフィリンクの実クリック数は FANZA 管理画面が正で、ここは到達/反応の代理指標です。</div>
-    <button id="verifyRefresh" class="ghost">🔄 エンゲージメント更新</button>
+    <div class="field-label">ｧｪ 讀懆ｨｼ繝繝・す繝･繝懊・繝会ｼ・luesky謖・ｨ呻ｼ・/div>
+    <div class="hint">蜈ｬ髢区ｸ医∩謚慕ｨｿ縺ｮ <b>縺・＞縺ｭ/繝ｪ繝昴せ繝・霑比ｿ｡</b>・・luesky蜈ｬ髢帰PI縺九ｉ蜿門ｾ暦ｼ会ｼ・b>Bitly繧ｯ繝ｪ繝・け</b>・・b>FANZA謌千ｴ・ｼ域焔蜈･蜉幢ｼ・/b>繧・day-type 蛻･縺ｫ髮・ｨ医ゅい繝輔ぅ繝ｪ繝ｳ繧ｯ縺ｮ螳溘け繝ｪ繝・け謨ｰ縺ｯ FANZA 邂｡逅・判髱｢縺梧ｭ｣縺ｧ縲√％縺薙・蛻ｰ驕・蜿榊ｿ懊・莉｣逅・欠讓吶〒縺吶・/div>
+    <button id="verifyRefresh" class="ghost">売 繧ｨ繝ｳ繧ｲ繝ｼ繧ｸ繝｡繝ｳ繝域峩譁ｰ</button>
     <div class="status" id="verifyStatus"></div>
   </section>
   <section class="card">
-    <div class="field-label">day-type 別サマリ</div>
+    <div class="field-label">day-type 蛻･繧ｵ繝槭Μ</div>
     <div id="verifySummary"></div>
   </section>
   <section class="card">
-    <div class="field-label">公開済み投稿</div>
+    <div class="field-label">蜈ｬ髢区ｸ医∩謚慕ｨｿ</div>
     <div id="verifyList"></div>
   </section>
 </main>
 </section>
 
-<!-- 詳細設定画面（ボタン色のカスタマイズ・色コードで指定／反映で全画面へ） -->
+<!-- 隧ｳ邏ｰ險ｭ螳夂判髱｢・医・繧ｿ繝ｳ濶ｲ縺ｮ繧ｫ繧ｹ繧ｿ繝槭う繧ｺ繝ｻ濶ｲ繧ｳ繝ｼ繝峨〒謖・ｮ夲ｼ丞渚譏縺ｧ蜈ｨ逕ｻ髱｢縺ｸ・・-->
 <section id="pageSettings" hidden>
 <main>
   <section class="card">
-    <div class="field-label">🎨 編集ボタンの色（Qセーブ等）</div>
-    <div class="hint">説明欄・本文の編集ボタン（Qセーブ／Qロード／リセット／元に戻す／やり直す）の色を、<b>色コード</b>で自由に変えられます。「反映」を押すと、このアプリのどの画面で表示されるボタンにも反映されます（端末内に保存）。</div>
+    <div class="field-label">耳 邱ｨ髮・・繧ｿ繝ｳ縺ｮ濶ｲ・・繧ｻ繝ｼ繝也ｭ会ｼ・/div>
+    <div class="hint">隱ｬ譏取ｬ・・譛ｬ譁・・邱ｨ髮・・繧ｿ繝ｳ・・繧ｻ繝ｼ繝厄ｼ讐繝ｭ繝ｼ繝会ｼ上Μ繧ｻ繝・ヨ・丞・縺ｫ謌ｻ縺呻ｼ上ｄ繧顔峩縺呻ｼ峨・濶ｲ繧偵・b>濶ｲ繧ｳ繝ｼ繝・/b>縺ｧ閾ｪ逕ｱ縺ｫ螟峨∴繧峨ｌ縺ｾ縺吶ゅ悟渚譏縲阪ｒ謚ｼ縺吶→縲√％縺ｮ繧｢繝励Μ縺ｮ縺ｩ縺ｮ逕ｻ髱｢縺ｧ陦ｨ遉ｺ縺輔ｌ繧九・繧ｿ繝ｳ縺ｫ繧ょ渚譏縺輔ｌ縺ｾ縺呻ｼ育ｫｯ譛ｫ蜀・↓菫晏ｭ假ｼ峨・/div>
     <div class="color-settings">
       <div class="color-row">
-        <span class="color-name">Qセーブ</span>
+        <span class="color-name">Q繧ｻ繝ｼ繝・/span>
         <span class="color-swatch" id="swSave"></span>
         <input id="colorSave" type="text" inputmode="text" placeholder="#2563eb" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-        <input id="pickSave" type="color" class="color-pick" aria-label="Qセーブの色を選ぶ">
+        <input id="pickSave" type="color" class="color-pick" aria-label="Q繧ｻ繝ｼ繝悶・濶ｲ繧帝∈縺ｶ">
       </div>
       <div class="color-row">
-        <span class="color-name">Qロード</span>
+        <span class="color-name">Q繝ｭ繝ｼ繝・/span>
         <span class="color-swatch" id="swLoad"></span>
         <input id="colorLoad" type="text" inputmode="text" placeholder="#16a34a" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-        <input id="pickLoad" type="color" class="color-pick" aria-label="Qロードの色を選ぶ">
+        <input id="pickLoad" type="color" class="color-pick" aria-label="Q繝ｭ繝ｼ繝峨・濶ｲ繧帝∈縺ｶ">
       </div>
       <div class="color-row">
-        <span class="color-name">リセット</span>
+        <span class="color-name">繝ｪ繧ｻ繝・ヨ</span>
         <span class="color-swatch" id="swReset"></span>
         <input id="colorReset" type="text" inputmode="text" placeholder="#d97706" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-        <input id="pickReset" type="color" class="color-pick" aria-label="リセットの色を選ぶ">
+        <input id="pickReset" type="color" class="color-pick" aria-label="繝ｪ繧ｻ繝・ヨ縺ｮ濶ｲ繧帝∈縺ｶ">
       </div>
       <div class="color-row">
-        <span class="color-name">元に戻す</span>
+        <span class="color-name">蜈・↓謌ｻ縺・/span>
         <span class="color-swatch" id="swUndo"></span>
         <input id="colorUndo" type="text" inputmode="text" placeholder="#7c3aed" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-        <input id="pickUndo" type="color" class="color-pick" aria-label="元に戻すの色を選ぶ">
+        <input id="pickUndo" type="color" class="color-pick" aria-label="蜈・↓謌ｻ縺吶・濶ｲ繧帝∈縺ｶ">
       </div>
       <div class="color-row">
-        <span class="color-name">やり直す</span>
+        <span class="color-name">繧・ｊ逶ｴ縺・/span>
         <span class="color-swatch" id="swRedo"></span>
         <input id="colorRedo" type="text" inputmode="text" placeholder="#0891b2" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-        <input id="pickRedo" type="color" class="color-pick" aria-label="やり直すの色を選ぶ">
+        <input id="pickRedo" type="color" class="color-pick" aria-label="繧・ｊ逶ｴ縺吶・濶ｲ繧帝∈縺ｶ">
       </div>
     </div>
-    <div class="field-label" style="margin-top:12px;">プレビュー</div>
+    <div class="field-label" style="margin-top:12px;">繝励Ξ繝薙Η繝ｼ</div>
     <div class="qedit-grid" style="max-width:320px;">
-      <button class="qbtn qbtn-save" type="button">Qセーブ</button>
-      <button class="qbtn qbtn-load" type="button">Qロード</button>
-      <button class="qbtn qbtn-reset" type="button">リセット</button>
+      <button class="qbtn qbtn-save" type="button">Q繧ｻ繝ｼ繝・/button>
+      <button class="qbtn qbtn-load" type="button">Q繝ｭ繝ｼ繝・/button>
+      <button class="qbtn qbtn-reset" type="button">繝ｪ繧ｻ繝・ヨ</button>
       <div class="qbtn-pair">
-        <button class="qbtn qbtn-undo" type="button">↶ 戻す</button>
-        <button class="qbtn qbtn-redo" type="button">やり直す ↷</button>
+        <button class="qbtn qbtn-undo" type="button">竊ｶ 謌ｻ縺・/button>
+        <button class="qbtn qbtn-redo" type="button">繧・ｊ逶ｴ縺・竊ｷ</button>
       </div>
     </div>
     <div class="row" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-      <button id="colorApply" class="primary" type="button">✅ 反映する</button>
-      <button id="colorResetDefault" class="ghost" type="button">既定の色に戻す</button>
+      <button id="colorApply" class="primary" type="button">笨・蜿肴丐縺吶ｋ</button>
+      <button id="colorResetDefault" class="ghost" type="button">譌｢螳壹・濶ｲ縺ｫ謌ｻ縺・/button>
     </div>
-    <div class="hint">色コードは <code>#2563eb</code> のような16進や <code>red</code> などのCSS色名が使えます。入力中はこの画面で仮表示し、「反映」で確定保存します。</div>
+    <div class="hint">濶ｲ繧ｳ繝ｼ繝峨・ <code>#2563eb</code> 縺ｮ繧医≧縺ｪ16騾ｲ繧・<code>red</code> 縺ｪ縺ｩ縺ｮCSS濶ｲ蜷阪′菴ｿ縺医∪縺吶ょ・蜉帑ｸｭ縺ｯ縺薙・逕ｻ髱｢縺ｧ莉ｮ陦ｨ遉ｺ縺励√悟渚譏縲阪〒遒ｺ螳壻ｿ晏ｭ倥＠縺ｾ縺吶・/div>
     <div id="colorStatus" class="hint"></div>
   </section>
 
-  <!-- YouTube再生数の取得（APIキー）＝検証タブの再生数表示に使用 -->
+  <!-- YouTube蜀咲函謨ｰ縺ｮ蜿門ｾ暦ｼ・PI繧ｭ繝ｼ・会ｼ晄､懆ｨｼ繧ｿ繝悶・蜀咲函謨ｰ陦ｨ遉ｺ縺ｫ菴ｿ逕ｨ -->
   <section class="card">
-    <div class="field-label">▶ YouTube再生数の取得（APIキー）</div>
-    <div class="hint">🧪検証タブで再生数を自動取得するための <b>YouTube Data API v3</b> のキーを設定します。Google Cloud で<b>無料</b>発行できます。キーは<b>この端末内だけ</b>に保存します（リポジトリ・サーバーには置きません）。</div>
-    <input id="ytApiKey" type="text" inputmode="text" placeholder="AIza…（YouTube Data API v3 のキー）" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <a class="photo-btn" href="YouTube再生数_APIキー取得ガイド.html" target="_blank" rel="noopener" style="margin-top:8px;font-size:15px;padding:12px;">📘 APIキーの取り方を画面つきで見る（初めての人向け・無料）</a>
-    <div class="hint">↑のガイドに沿って進めれば10分ほどで取れます。取得後、上の欄に <code>AIza…</code> のキーを貼るだけ（この端末内のみ保存）。安全のため、ガイドの「④カギに鍵をかける」も行うと安心です。</div>
+    <div class="field-label">笆ｶ YouTube蜀咲函謨ｰ縺ｮ蜿門ｾ暦ｼ・PI繧ｭ繝ｼ・・/div>
+    <div class="hint">ｧｪ讀懆ｨｼ繧ｿ繝悶〒蜀咲函謨ｰ繧定・蜍募叙蠕励☆繧九◆繧√・ <b>YouTube Data API v3</b> 縺ｮ繧ｭ繝ｼ繧定ｨｭ螳壹＠縺ｾ縺吶・oogle Cloud 縺ｧ<b>辟｡譁・/b>逋ｺ陦後〒縺阪∪縺吶ゅく繝ｼ縺ｯ<b>縺薙・遶ｯ譛ｫ蜀・□縺・/b>縺ｫ菫晏ｭ倥＠縺ｾ縺呻ｼ医Μ繝昴ず繝医Μ繝ｻ繧ｵ繝ｼ繝舌・縺ｫ縺ｯ鄂ｮ縺阪∪縺帙ｓ・峨・/div>
+    <input id="ytApiKey" type="text" inputmode="text" placeholder="AIza窶ｦ・・ouTube Data API v3 縺ｮ繧ｭ繝ｼ・・ autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <a class="photo-btn" href="YouTube蜀咲函謨ｰ_API繧ｭ繝ｼ蜿門ｾ励ぎ繧､繝・html" target="_blank" rel="noopener" style="margin-top:8px;font-size:15px;padding:12px;">祷 API繧ｭ繝ｼ縺ｮ蜿悶ｊ譁ｹ繧堤判髱｢縺､縺阪〒隕九ｋ・亥・繧√※縺ｮ莠ｺ蜷代￠繝ｻ辟｡譁呻ｼ・/a>
+    <div class="hint">竊代・繧ｬ繧､繝峨↓豐ｿ縺｣縺ｦ騾ｲ繧√ｌ縺ｰ10蛻・⊇縺ｩ縺ｧ蜿悶ｌ縺ｾ縺吶ょ叙蠕怜ｾ後∽ｸ翫・谺・↓ <code>AIza窶ｦ</code> 縺ｮ繧ｭ繝ｼ繧定ｲｼ繧九□縺托ｼ医％縺ｮ遶ｯ譛ｫ蜀・・縺ｿ菫晏ｭ假ｼ峨ょｮ牙・縺ｮ縺溘ａ縲√ぎ繧､繝峨・縲娯促繧ｫ繧ｮ縺ｫ骰ｵ繧偵°縺代ｋ縲阪ｂ陦後≧縺ｨ螳牙ｿ・〒縺吶・/div>
   </section>
 
   <section class="card">
-    <div class="field-label">🔌 FANZA Worker（価格スナップショット）</div>
-    <div class="hint">記録ステップで FANZA の価格を自動取得するための接続設定です。Cloudflare Worker をデプロイ後、ここで設定してください（コンソール不要・この端末内にのみ保存）。</div>
-    <div class="hint" style="margin-top:4px">Worker URL（<code>wrangler deploy</code> 後に表示される <code>workers.dev</code> の URL）</div>
+    <div class="field-label">伯 FANZA Worker・井ｾ｡譬ｼ繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ・・/div>
+    <div class="hint">險倬鹸繧ｹ繝・ャ繝励〒 FANZA 縺ｮ萓｡譬ｼ繧定・蜍募叙蠕励☆繧九◆繧√・謗･邯夊ｨｭ螳壹〒縺吶・loudflare Worker 繧偵ョ繝励Ο繧､蠕後√％縺薙〒險ｭ螳壹＠縺ｦ縺上□縺輔＞・医さ繝ｳ繧ｽ繝ｼ繝ｫ荳崎ｦ√・縺薙・遶ｯ譛ｫ蜀・↓縺ｮ縺ｿ菫晏ｭ假ｼ峨・/div>
+    <div class="hint" style="margin-top:4px">Worker URL・・code>wrangler deploy</code> 蠕後↓陦ｨ遉ｺ縺輔ｌ繧・<code>workers.dev</code> 縺ｮ URL・・/div>
     <input id="fanzaWorkerUrl" type="url" inputmode="url" placeholder="https://go5-fanza-proxy.xxx.workers.dev" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <div class="hint" style="margin-top:8px">共有シークレット（<code>wrangler secret put SHARED_SECRET</code> で設定した文字列）</div>
-    <input id="fanzaSharedSecret" type="password" placeholder="SHARED_SECRET の値" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <div class="hint" style="margin-top:8px">商品スクレイピングテスト用CID（例: <code>d_784975</code>）※空欄なら認証確認のみ</div>
+    <div class="hint" style="margin-top:8px">蜈ｱ譛峨す繝ｼ繧ｯ繝ｬ繝・ヨ・・code>wrangler secret put SHARED_SECRET</code> 縺ｧ險ｭ螳壹＠縺滓枚蟄怜・・・/div>
+    <input id="fanzaSharedSecret" type="password" placeholder="SHARED_SECRET 縺ｮ蛟､" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <div class="hint" style="margin-top:8px">蝠・刀繧ｹ繧ｯ繝ｬ繧､繝斐Φ繧ｰ繝・せ繝育畑CID・井ｾ・ <code>d_784975</code>・俄ｻ遨ｺ谺・↑繧芽ｪ崎ｨｼ遒ｺ隱阪・縺ｿ</div>
     <input id="fanzaTestCid" type="text" placeholder="d_XXXXXX" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <button id="fanzaTestBtn" type="button" class="ghost" style="margin-top:10px;font-size:.85rem;">🔌 接続テスト</button>
+    <button id="fanzaTestBtn" type="button" class="ghost" style="margin-top:10px;font-size:.85rem;">伯 謗･邯壹ユ繧ｹ繝・/button>
     <div id="fanzaTestResult" style="font-size:.8rem;margin-top:6px;min-height:1.4em;word-break:break-all;"></div>
   </section>
 </main>
 </section>
 
-<!-- 投稿前の編集できる確認（方法①自動投稿で使用） -->
+<!-- 謚慕ｨｿ蜑阪・邱ｨ髮・〒縺阪ｋ遒ｺ隱搾ｼ域婿豕補蔵閾ｪ蜍墓兜遞ｿ縺ｧ菴ｿ逕ｨ・・-->
 <div id="postConfirmModal" class="pc-modal" hidden>
   <div class="pc-card">
-    <div class="pc-title">🦋 この内容で Bluesky に投稿します（編集できます）</div>
+    <div class="pc-title">ｦ・縺薙・蜀・ｮｹ縺ｧ Bluesky 縺ｫ謚慕ｨｿ縺励∪縺呻ｼ育ｷｨ髮・〒縺阪∪縺呻ｼ・/div>
     <div class="pc-work-row" style="margin-bottom:8px;">
-      <label for="pcWorkUrl" class="field-label" style="margin:0 0 4px;display:block;">📕 案内する作品URL（今日の作品か必ず確認）</label>
-      <input id="pcWorkUrl" type="url" inputmode="url" placeholder="https://… 今回案内する作品ページのURL" style="width:100%;box-sizing:border-box;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+      <label for="pcWorkUrl" class="field-label" style="margin:0 0 4px;display:block;">燈 譯亥・縺吶ｋ菴懷刀URL・井ｻ頑律縺ｮ菴懷刀縺句ｿ・★遒ｺ隱搾ｼ・/label>
+      <input id="pcWorkUrl" type="url" inputmode="url" placeholder="https://窶ｦ 莉雁屓譯亥・縺吶ｋ菴懷刀繝壹・繧ｸ縺ｮURL" style="width:100%;box-sizing:border-box;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
       <div id="pcWorkWarn" style="font-size:.82rem;margin-top:4px;"></div>
     </div>
     <textarea id="pcText" rows="8"></textarea>
     <div class="discount-row" style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
-      <label for="discountSelPc" class="field-label" style="margin:0;">割引文を挿入</label>
+      <label for="discountSelPc" class="field-label" style="margin:0;">蜑ｲ蠑墓枚繧呈諺蜈･</label>
       <select id="discountSelPc">
-        <option value="">なし</option>
+        <option value="">縺ｪ縺・/option>
         <option value="20">20%</option>
         <option value="30">30%</option>
         <option value="40">40%</option>
@@ -570,48 +570,48 @@
         <option value="75">75%</option>
         <option value="80">80%</option>
         <option value="90">90%</option>
-        <option value="custom">カスタム</option>
+        <option value="custom">繧ｫ繧ｹ繧ｿ繝</option>
       </select>
-      <label class="disc-new"><input id="discountNewPc" type="checkbox"><span>新作</span></label>
-      <span class="hint" style="margin:0;">この投稿だけに割引文を挿入（上の本文に反映）。「新作」で新作用の文面。</span>
+      <label class="disc-new"><input id="discountNewPc" type="checkbox"><span>譁ｰ菴・/span></label>
+      <span class="hint" style="margin:0;">縺薙・謚慕ｨｿ縺縺代↓蜑ｲ蠑墓枚繧呈諺蜈･・井ｸ翫・譛ｬ譁・↓蜿肴丐・峨ゅ梧眠菴懊阪〒譁ｰ菴懃畑縺ｮ譁・擇縲・/span>
     </div>
     <div class="pc-img-row" style="margin-top:10px;">
-      <label for="pcImg" class="photo-btn" id="pcImgBtn">📷 添付画像を選ぶ（任意）</label>
+      <label for="pcImg" class="photo-btn" id="pcImgBtn">胴 豺ｻ莉倡判蜒上ｒ驕ｸ縺ｶ・井ｻｻ諢擾ｼ・/label>
       <input id="pcImg" type="file" accept="image/*" hidden autocomplete="off">
-      <button id="pcImgClear" type="button" class="ghost" style="display:none;margin-left:6px;margin-top:6px;">外す</button>
-      <div class="hint" id="pcImgName" style="margin-top:4px;">未選択（動画の元写真を添付）</div>
+      <button id="pcImgClear" type="button" class="ghost" style="display:none;margin-left:6px;margin-top:6px;">螟悶☆</button>
+      <div class="hint" id="pcImgName" style="margin-top:4px;">譛ｪ驕ｸ謚橸ｼ亥虚逕ｻ縺ｮ蜈・・逵溘ｒ豺ｻ莉假ｼ・/div>
       <img id="pcImgPreview" alt="" style="max-width:100%;max-height:120px;border-radius:6px;margin-top:6px;display:none;">
     </div>
     <div class="pc-actions">
-      <button id="pcCancel" class="ghost">キャンセル</button>
-      <button id="pcOk" class="primary bsky-post-btn">投稿する</button>
+      <button id="pcCancel" class="ghost">繧ｭ繝｣繝ｳ繧ｻ繝ｫ</button>
+      <button id="pcOk" class="primary bsky-post-btn">謚慕ｨｿ縺吶ｋ</button>
     </div>
   </div>
 </div>
 
-<!-- 背景動画（非表示・合成のソース） -->
+<!-- 閭梧勹蜍慕判・磯撼陦ｨ遉ｺ繝ｻ蜷域・縺ｮ繧ｽ繝ｼ繧ｹ・・-->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=98"></script>
-<script src="app.js?v=98"></script>
-<script src="affiliate-core.js?v=98"></script>
-<script src="fanza-core.js?v=98"></script>
-<script src="affiliate.js?v=98"></script>
-<script src="bluesky-core.js?v=98"></script>
-<script src="scheduler.js?v=98"></script>
-<script src="bluesky.js?v=98"></script>
-<script src="drive-upload.js?v=98"></script>
-<script src="verify-core.js?v=98"></script>
-<script src="verify.js?v=98"></script>
-<script src="yt-clicks.js?v=98"></script>
-<script src="integration.js?v=98"></script>
-<script src="wizard.js?v=98"></script>
-<script src="settings-io.js?v=98"></script>
-<script src="theme-settings.js?v=98"></script>
-<script src="persist-fields.js?v=98"></script>
+<script src="idgen.js?v=99"></script>
+<script src="app.js?v=99"></script>
+<script src="affiliate-core.js?v=99"></script>
+<script src="fanza-core.js?v=99"></script>
+<script src="affiliate.js?v=99"></script>
+<script src="bluesky-core.js?v=99"></script>
+<script src="scheduler.js?v=99"></script>
+<script src="bluesky.js?v=99"></script>
+<script src="drive-upload.js?v=99"></script>
+<script src="verify-core.js?v=99"></script>
+<script src="verify.js?v=99"></script>
+<script src="yt-clicks.js?v=99"></script>
+<script src="integration.js?v=99"></script>
+<script src="wizard.js?v=99"></script>
+<script src="settings-io.js?v=99"></script>
+<script src="theme-settings.js?v=99"></script>
+<script src="persist-fields.js?v=99"></script>
 <script>
-/* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
-   スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */
+/* PC・育ｲｾ蟇・・繧､繝ｳ繧ｿ・峨□縺托ｼ壹ち繝悶ヰ繝ｼ荳翫・邵ｦ繝帙う繝ｼ繝ｫ繧呈ｨｪ繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ縺ｸ螟画鋤縺励√せ繝槭・縺ｮ繧医≧縺ｫ讓ｪ遘ｻ蜍輔〒縺阪ｋ繧医≧縺ｫ縺吶ｋ縲・
+   繧ｹ繝槭・(coarse pointer)縺ｯ縺薙・繝ｪ繧ｹ繝翫・繧剃ｻ倥￠縺ｪ縺・ｼ晏ｾ捺擂縺ｮ繧ｿ繝・メ讓ｪ繧ｹ繝ｯ繧､繝励・縺ｾ縺ｾ繝ｻ陦ｨ遉ｺ繧よ嫌蜍輔ｂ荳榊､峨・*/
 (function(){
   if(!window.matchMedia || !window.matchMedia('(pointer: fine)').matches) return;
   var bars = document.querySelectorAll('.tabbar');
@@ -619,7 +619,7 @@
     (function(bar){
       bar.addEventListener('wheel', function(e){
         if(!e.deltaY) return;
-        if(bar.scrollWidth <= bar.clientWidth) return; // 入り切っていれば何もしない
+        if(bar.scrollWidth <= bar.clientWidth) return; // 蜈･繧雁・縺｣縺ｦ縺・ｌ縺ｰ菴輔ｂ縺励↑縺・
         bar.scrollLeft += e.deltaY;
         e.preventDefault();
       }, {passive:false});
