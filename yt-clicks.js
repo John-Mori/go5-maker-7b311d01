@@ -21,6 +21,13 @@
 
   function acct() { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  var COMMON_TAGS = ['#マンガ紹介', '#漫画', '#アニメ', '#anime'];
+  function stripCommonTags(t) {
+    var r = String(t || '');
+    COMMON_TAGS.forEach(function (tag) { r = r.split(tag).join(''); });
+    return r.replace(/\s+/g, ' ').trim();
+  }
+  function missingCommonTags(t) { return COMMON_TAGS.some(function (tag) { return String(t || '').indexOf(tag) < 0; }); }
   function histKey() { return 'short_hist__' + acct(); }
   function manualKey() { return 'verify_manual__' + acct(); }
   function ytMapKey() { return 'verify_yt__' + acct(); }
@@ -224,10 +231,15 @@
       var dateHtml = pub != null
         ? '<b>' + esc(fmtTs(pub)) + '</b>'
         : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>');
-      var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
+      var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
+      var dispTitle = esc(stripCommonTags(rawTitle));
+      var tagWarn = !it.manual && it.title && missingCommonTags(it.title);
+      var titleHtml = tagWarn
+        ? '<span style="color:#dc465a;font-weight:700;">' + dispTitle + ' #タグ忘れ</span>'
+        : dispTitle;
       var bskyHref = it.shortUrl || it.postUrl || '';
       return '<div class="vrow">' +
-        '<div class="vrow-h">' + dateHtml + ' ' + esc(title) +
+        '<div class="vrow-h">' + dateHtml + ' ' + titleHtml +
           (it.videoId ? ' <span class="vtag vtag-id">' + esc(it.videoId) + '</span>' : '') +
           (it.manual ? ' <span class="vtag">手動</span>' : '') +
         '</div>' +
