@@ -708,7 +708,7 @@
         (it.discarded
           ? '<button class="ghost hist-restore" type="button" ' + d + '>↩ 復元</button>'
           : '<button class="ghost hist-discard" type="button" ' + d + '>🚫 破棄</button>') +
-        '<button class="ghost hist-del" type="button" ' + d + '>🗑 物理削除</button>' +
+        '<button class="ghost hist-del" type="button" ' + d + '>🗑 削除</button>' +
         '</div></div>';
     }).join('');
     els.histList.querySelectorAll('.hist-copy').forEach(function (b) { b.addEventListener('click', function () { copyText(b.getAttribute('data-url'), b); }); });
@@ -744,8 +744,9 @@
   }
   if (els.histRefresh) els.histRefresh.addEventListener('click', loadHistory);
   if (els.histShowDiscarded) els.histShowDiscarded.addEventListener('change', loadHistory);
-  var ytTabBtn_ = document.getElementById('tabYT');
-  if (ytTabBtn_) ytTabBtn_.addEventListener('click', loadHistory);
+  // 過去の短縮URL履歴はAFIリンクタブに移設。タブを開いたら最新を描画。
+  var affiTabBtn_ = document.getElementById('tabAffi');
+  if (affiTabBtn_) affiTabBtn_.addEventListener('click', loadHistory);
 
   // ---- 手動短縮（アプリ外で単独投稿した分のURLを貼って短縮＋履歴追加）----
   if (els.manualShortBtn) els.manualShortBtn.addEventListener('click', function () {
