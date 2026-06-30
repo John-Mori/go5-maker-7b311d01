@@ -44,8 +44,8 @@
   function setStatus(m) { var e = $('ytClickStatus'); if (e) e.textContent = m || ''; }
   function ytIdOf(url) { return (url && window.IdGen && window.IdGen.youtubeId) ? (window.IdGen.youtubeId(url) || '') : ''; }
 
-  // 表示する全アイテム（履歴＋手動追加）を結合。
-  function allItems() { return loadHist().concat(loadManual()); }
+  // 表示する全アイテム（履歴＋手動追加）を結合。manualOnly=true の手動短縮URL履歴は除外。
+  function allItems() { return loadHist().filter(function (it) { return !it.manualOnly; }).concat(loadManual()); }
 
   // 短縮URLから go5-short のコードを抽出（自前ワーカーの払い出しURLのみ対象）。
   function codeOf(shortUrl) {

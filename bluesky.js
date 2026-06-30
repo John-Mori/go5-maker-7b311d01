@@ -32,7 +32,9 @@
     manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
     movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn'),
     ytQSave: $('ytQSave'), ytQLoad: $('ytQLoad'), ytReset: $('ytReset'), ytUndo: $('ytUndo'), ytRedo: $('ytRedo'), ytQInfo: $('ytQInfo'),
-    bskyQSave: $('bskyQSave'), bskyQLoad: $('bskyQLoad'), bskyReset: $('bskyReset'), bskyUndo: $('bskyUndo'), bskyRedo: $('bskyRedo'), bskyQInfo: $('bskyQInfo')
+    bskyQSave: $('bskyQSave'), bskyQLoad: $('bskyQLoad'), bskyReset: $('bskyReset'), bskyUndo: $('bskyUndo'), bskyRedo: $('bskyRedo'), bskyQInfo: $('bskyQInfo'),
+    affiUrls: $('affiUrls'),
+    affiUrlsQSave: $('affiUrlsQSave'), affiUrlsQLoad: $('affiUrlsQLoad'), affiUrlsReset: $('affiUrlsReset'), affiUrlsUndo: $('affiUrlsUndo'), affiUrlsRedo: $('affiUrlsRedo'), affiUrlsQInfo: $('affiUrlsQInfo')
   };
   if (!els.text) return;
 
@@ -271,6 +273,7 @@
   }
   setupQuickEdit({ ta: els.ytDesc, base: 'yt_desc', defFn: defYtDesc, qSave: els.ytQSave, qLoad: els.ytQLoad, reset: els.ytReset, undo: els.ytUndo, redo: els.ytRedo, info: els.ytQInfo });
   setupQuickEdit({ ta: els.text, base: 'bsky_text', defFn: defText, qSave: els.bskyQSave, qLoad: els.bskyQLoad, reset: els.bskyReset, undo: els.bskyUndo, redo: els.bskyRedo, info: els.bskyQInfo });
+  setupQuickEdit({ ta: els.affiUrls, base: 'affi_urls', defFn: function () { return ''; }, qSave: els.affiUrlsQSave, qLoad: els.affiUrlsQLoad, reset: els.affiUrlsReset, undo: els.affiUrlsUndo, redo: els.affiUrlsRedo, info: els.affiUrlsQInfo });
   refreshQuickInfo();
 
   // ---- 割引％ドロップダウン（アカウント別の割引文テンプレ） ----
@@ -769,7 +772,7 @@
       var s = short || url;  // 失敗時は元URLで代替
       if (els.manualOut) els.manualOut.textContent = s;
       if (els.manualResult) els.manualResult.hidden = false;
-      histAdd({ title: (els.manualTitle && els.manualTitle.value || '').trim() || '(手動追加)', shortUrl: s, postUrl: url, postUri: '' });
+      histAdd({ title: (els.manualTitle && els.manualTitle.value || '').trim() || '(手動追加)', shortUrl: s, postUrl: url, postUri: '', manualOnly: true });
       btn.textContent = '✓ 履歴に追加しました'; setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
       if (els.manualUrl) els.manualUrl.value = '';
       if (els.manualTitle) els.manualTitle.value = '';
