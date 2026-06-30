@@ -249,6 +249,7 @@
           (it.videoId ? ' <span class="vtag vtag-id">' + esc(it.videoId) + '</span>' : '') +
           (it.manual ? ' <span class="vtag">手動</span>' : '') +
         '</div>' +
+        (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
           '<span title="Bsky投稿クリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
@@ -264,6 +265,7 @@
         '</div>' +
         '</div>';
     }).join('');
+    fillFanzaNames();
 
     // YouTube URL 直接入力
     list.querySelectorAll('input[data-k]').forEach(function (inp) {
@@ -383,6 +385,48 @@
     keyEl.addEventListener('input', function () { try { localStorage.setItem('yt_api_key', keyEl.value.trim()); } catch (e) {} });
   }
 
+  // ── FANZA 商品名 キャッシュ＆DOM埋め込み ────────────────────────────────────
+  function fanzaNameCacheLoad() {
+    try { return JSON.parse(localStorage.getItem('fanza_title_cache') || '{}'); } catch (e) { return {}; }
+  }
+  function fanzaNameCacheSave(c) {
+    try { localStorage.setItem('fanza_title_cache', JSON.stringify(c)); } catch (e) {}
+  }
+  function fillFanzaNames() {
+    var targets = document.querySelectorAll('[data-fanza-url]');
+    if (!targets.length) return;
+    if (typeof window.FanzaCore === 'undefined' || typeof window.buildAffiliateLink === 'undefined') return;
+    var workerUrl = '';
+    var sharedSecret = '';
+    try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
+    try { sharedSecret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
+    if (!workerUrl) return;
+    var cache = fanzaNameCacheLoad();
+    var now = new Date().getTime();
+    var DAY = 86400000;
+    targets.forEach(function (nameEl) {
+      var url = nameEl.getAttribute('data-fanza-url');
+      if (!url) return;
+      var cached = cache[url];
+      if (cached && cached.title && (now - (cached.fetchedAt || 0)) < DAY) {
+        nameEl.textContent = cached.title;
+        nameEl.style.display = '';
+        return;
+      }
+      var res = window.buildAffiliateLink(url, '');
+      if (!res || !res.ok || !res.cid) return;
+      var cid = res.cid;
+      window.FanzaCore.fetchFanzaInfo(cid, workerUrl, sharedSecret).then(function (info) {
+        if (!info || !info.title) return;
+        var c = fanzaNameCacheLoad();
+        c[url] = { title: info.title, fetchedAt: now };
+        fanzaNameCacheSave(c);
+        nameEl.textContent = info.title;
+        nameEl.style.display = '';
+      }).catch(function () {});
+    });
+  }
+
   // ── ランキングタブ（両アカウント合算・再生数順）──────────────────────────────
   function renderRank() {
     var el = $('pageRank');
@@ -462,6 +506,7 @@
                   (r.yt ? '<a class="rank-title-link" href="' + esc(r.yt) + '" target="_blank" rel="noopener">' + dispTitle + ' ↗</a>' : dispTitle) +
                 '</div>' +
               '</div>' +
+              (r.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(r.workUrl) + '" style="display:none;"></div>' : '') +
               '<div class="rank-metrics">' +
                 '<span>▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>' +
                 (r.bskyHref ? '<a class="vlink" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
@@ -471,6 +516,7 @@
           '</div>';
         }).join('') +
       '</div>';
+      fillFanzaNames();
     }
 
     // キャッシュにない vid だけ API フェッチ（最大 50 件ずつ）

@@ -662,13 +662,15 @@
   function histSaveArr(a) { try { localStorage.setItem(histKey(), JSON.stringify(a.slice(0, 200))); } catch (e) {} }
   function histAdd(rec) {
     if (!rec || !rec.shortUrl) return; // 短縮URLが取れた投稿だけ記録
-    // 作品URLをアフィリンクタブ②から自動取得（なければ bsky_work_url を使用）
+    // 作品URL取得（✏変更/ウィザード入力値優先、なければアフィリンクタブ②から）
     var workUrl = '';
     try {
-      var afEl = document.getElementById('affiUrls');
-      var afRaw = afEl ? afEl.value : (localStorage.getItem('field_affiUrls') || '');
-      workUrl = afRaw.trim().split('\n').map(function (l) { return l.trim(); }).filter(Boolean)[0] || '';
-      if (!workUrl) workUrl = loadA('bsky_work_url') || '';
+      workUrl = loadA('bsky_work_url') || '';
+      if (!workUrl) {
+        var afEl = document.getElementById('affiUrls');
+        var afRaw = afEl ? afEl.value : (localStorage.getItem('field_affiUrls') || '');
+        workUrl = afRaw.trim().split('\n').map(function (l) { return l.trim(); }).filter(Boolean)[0] || '';
+      }
     } catch (e) {}
     var a = histLoad().filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
     var entry = { ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || '' };
