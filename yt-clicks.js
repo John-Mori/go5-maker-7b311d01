@@ -95,7 +95,7 @@
       var vid = ytIdOf(yt);
       var hasUrl = !!vid;
       var pub = (vid && (vid in publishedCache)) ? publishedCache[vid] : null;
-      var group = hasUrl ? 0 : 1;
+      var group = hasUrl ? 1 : 0;
       var t = (pub != null) ? pub : (it.ts || 0);
       return { it: it, i: i, group: group, t: t };
     });
