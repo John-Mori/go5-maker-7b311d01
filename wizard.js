@@ -706,43 +706,54 @@
 
     var testBtn = document.getElementById('fanzaTestBtn');
     var testResult = document.getElementById('fanzaTestResult');
+    var testCidEl = document.getElementById('fanzaTestCid');
     if (testBtn && testResult) {
       testBtn.addEventListener('click', function () {
-        var url = '';
+        var workerUrl = '';
         var secret = '';
-        try { url = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
+        try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
         try { secret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
-        if (!url) {
+        if (!workerUrl) {
           testResult.textContent = '⚠️ Worker URL が未入力です';
           testResult.style.color = '#f0b429';
           return;
         }
-        testResult.textContent = '接続テスト中…';
+        var cid = (testCidEl ? testCidEl.value.trim() : '') || '__diag__';
+        var isReal = cid !== '__diag__';
+        testResult.textContent = isReal ? ('商品「' + cid + '」を取得中…') : '接続テスト中…';
         testResult.style.color = '#aaa';
-        var endpoint = url.replace(/\/$/, '') + '/api/fanza-item';
+        var endpoint = workerUrl.replace(/\/$/, '') + '/api/fanza-item';
         fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': secret },
-          body: JSON.stringify({ cid: '__diag__' })
+          body: JSON.stringify({ cid: cid })
         }).then(function (r) {
           return r.json().then(function (d) { return { status: r.status, data: d }; });
         }).then(function (res) {
           var d = res.data || {};
           if (d.error === 'bad_secret') {
-            testResult.textContent = '❌ シークレット不一致（bad_secret）— wrangler secret put SHARED_SECRET で設定した値と合っているか確認してください';
+            testResult.textContent = '❌ シークレット不一致 — wrangler secret put SHARED_SECRET の値と一致しているか確認してください';
             testResult.style.color = '#f88';
           } else if (d.error === 'origin_not_allowed') {
-            testResult.textContent = '❌ Origin拒否 — Workerの ALLOWED_ORIGIN 設定を確認してください';
+            testResult.textContent = '❌ Origin拒否 — Worker の ALLOWED_ORIGIN 設定を確認してください';
             testResult.style.color = '#f88';
+          } else if (d.ok && d.item && d.item.title) {
+            testResult.textContent = '✅ 取得成功！ 商品名: 「' + d.item.title + '」';
+            testResult.style.color = '#7fe87f';
           } else if (d.error === 'not_found' || res.status === 404) {
-            testResult.textContent = '✅ 接続OK・認証成功（Worker は正常に応答しています）';
-            testResult.style.color = '#7fe87f';
+            if (isReal) {
+              testResult.textContent = '⚠️ 認証OK・商品が見つからず — FANZAページのスクレイピングに失敗しました（CID: ' + cid + '）。ページ構造が変わった可能性があります';
+              testResult.style.color = '#f0b429';
+            } else {
+              testResult.textContent = '✅ 接続OK・認証成功。CIDを入力して再テストすると商品取得も確認できます';
+              testResult.style.color = '#7fe87f';
+            }
           } else {
-            testResult.textContent = '✅ 接続OK（status=' + res.status + ' / ' + JSON.stringify(d).slice(0, 60) + ')';
-            testResult.style.color = '#7fe87f';
+            testResult.textContent = '⚠️ 想定外の応答: ' + JSON.stringify(d).slice(0, 80);
+            testResult.style.color = '#f0b429';
           }
         }).catch(function (e) {
-          testResult.textContent = '❌ 接続失敗 — URL が間違っているか Worker が未デプロイです（' + (e && e.message ? e.message : 'network error') + '）';
+          testResult.textContent = '❌ 接続失敗 — URL が違うか Worker 未デプロイです（' + (e && e.message ? e.message : 'network error') + '）';
           testResult.style.color = '#f88';
         });
       });

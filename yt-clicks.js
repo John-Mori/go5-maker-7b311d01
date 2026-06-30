@@ -392,6 +392,15 @@
   function fanzaNameCacheSave(c) {
     try { localStorage.setItem('fanza_title_cache', JSON.stringify(c)); } catch (e) {}
   }
+  // data-fanza-url が一致する現在の DOM 要素を全て更新（DOM 再描画後も正しく反映される）
+  function setFanzaEls(fanzaUrl, title) {
+    document.querySelectorAll('[data-fanza-url]').forEach(function (el) {
+      if (el.getAttribute('data-fanza-url') !== fanzaUrl) return;
+      if (title) { el.textContent = title; el.style.display = ''; }
+      else { el.textContent = ''; el.style.display = 'none'; }
+    });
+  }
+
   function fillFanzaNames() {
     var targets = document.querySelectorAll('[data-fanza-url]');
     if (!targets.length) return;
@@ -404,6 +413,8 @@
     var cache = fanzaNameCacheLoad();
     var now = new Date().getTime();
     var DAY = 86400000;
+    // 同一 URL の重複フェッチを防ぐ
+    var fetching = {};
     targets.forEach(function (nameEl) {
       var url = nameEl.getAttribute('data-fanza-url');
       if (!url) return;
@@ -413,17 +424,21 @@
         nameEl.style.display = '';
         return;
       }
+      if (fetching[url]) return;
       var res = window.buildAffiliateLink(url, '');
       if (!res || !res.ok || !res.cid) return;
-      var cid = res.cid;
-      window.FanzaCore.fetchFanzaInfo(cid, workerUrl, sharedSecret).then(function (info) {
-        if (!info || !info.title) return;
+      fetching[url] = true;
+      // 取得中インジケータ表示（DOM 再描画で消えても再描画後に上書きされるので問題なし）
+      nameEl.textContent = '…';
+      nameEl.style.display = '';
+      var capturedUrl = url;
+      window.FanzaCore.fetchFanzaInfo(res.cid, workerUrl, sharedSecret).then(function (info) {
+        if (!info || !info.title) { setFanzaEls(capturedUrl, ''); return; }
         var c = fanzaNameCacheLoad();
-        c[url] = { title: info.title, fetchedAt: now };
+        c[capturedUrl] = { title: info.title, fetchedAt: now };
         fanzaNameCacheSave(c);
-        nameEl.textContent = info.title;
-        nameEl.style.display = '';
-      }).catch(function () {});
+        setFanzaEls(capturedUrl, info.title);
+      }).catch(function () { setFanzaEls(capturedUrl, ''); });
     });
   }
 
