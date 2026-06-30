@@ -147,17 +147,6 @@
   if (els.unattended) els.unattended.addEventListener('change', function () { saveA('bsky_unattended', els.unattended.checked ? '1' : '0'); });
   if (els.text) els.text.addEventListener('input', function () { saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus(); });
   if (els.workUrl) els.workUrl.addEventListener('input', function () { syncWorkUrl(els.workUrl.value, false); });
-  var bskyWorkEditBtn = document.getElementById('bskyWorkEdit');
-  if (bskyWorkEditBtn && els.workUrl) {
-    bskyWorkEditBtn.addEventListener('click', function () {
-      var cur = els.workUrl.value || '';
-      var val = window.prompt('作品URLを入力してください', cur);
-      if (val === null) return;
-      var trimmed = val.trim();
-      els.workUrl.value = trimmed;
-      syncWorkUrl(trimmed, false);
-    });
-  }
   if (els.handle) els.handle.addEventListener('input', function () { saveA('bsky_handle', els.handle.value); renderPreview(); updateGasStatus(); });
   if (els.appPw) els.appPw.addEventListener('input', function () { saveA('bsky_app_pw', els.appPw.value); renderPreview(); updateGasStatus(); });
 
@@ -799,11 +788,20 @@
     if (url) { el.href = url; el.textContent = url; }
     else { el.href = '#'; el.textContent = '（URLを入力してください）'; }
   }
-  function updateBskyWorkLink(url) {
-    var el = document.getElementById('bskyWorkLink');
+  function updateBskyWorkAffiPreview(url) {
+    var el = document.getElementById('bskyWorkAffiPreview');
     if (!el) return;
-    if (url) { el.href = url; el.textContent = url; el.style.color = 'var(--accent)'; }
-    else { el.href = '#'; el.textContent = '（URLを入力してください）'; el.style.color = 'var(--sub)'; }
+    if (!url || !url.trim()) { el.textContent = ''; return; }
+    var afId = '';
+    try { afId = (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) {}
+    var r = window.buildAffiliateLink ? window.buildAffiliateLink(url, afId) : null;
+    if (r && r.ok) {
+      el.style.color = 'var(--accent)';
+      el.innerHTML = '🔗 ' + escapeHtml(r.link);
+    } else {
+      el.style.color = 'var(--warn, #e53)';
+      el.textContent = r ? (r.error === 'no_cid' ? '⚠ 作品IDが見つかりません' : '⚠ URLが不正です') : '';
+    }
   }
 
   // 作品URLを一元的に更新（動画作成タブ⇔投稿タブ⇔localStorage を同期）。fromMovie=動画作成タブ起点。
@@ -812,7 +810,7 @@
     if (els.workUrl && fromMovie) els.workUrl.value = v;
     if (els.movieWorkUrl && !fromMovie) els.movieWorkUrl.value = v;
     updateMovieWorkLink(v);
-    updateBskyWorkLink(v);
+    updateBskyWorkAffiPreview(v);
     paintWorkWarn(els.movieWorkWarn, v);
     renderPreview(); updateGasStatus();
   }
