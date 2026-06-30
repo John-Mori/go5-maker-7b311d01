@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=105">
-<link rel="apple-touch-icon" href="icon.svg?v=105">
+<link rel="manifest" href="manifest.webmanifest?v=106">
+<link rel="apple-touch-icon" href="icon.svg?v=106">
 <link rel="icon" href="icon.svg?v=84" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=105">
+<link rel="stylesheet" href="style.css?v=106">
 </head>
 <body>
 <header>
@@ -40,7 +40,7 @@
   <button id="tabCal"   class="tab">📅 カレンダー</button>
   <button id="tabYT"    class="tab"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
   <button id="tabPost"  class="tab">🦋 投稿</button>
-  <button id="tabAffi"  class="tab">🔗 アフィリンク</button>
+  <button id="tabAffi"  class="tab">🔗 AFIリンク</button>
   <button id="tabVerify" class="tab">📋 投稿履歴</button>
   <button id="tabSettings" class="tab">⚙️ 詳細設定</button>
 </nav>
@@ -255,18 +255,6 @@
     <div class="hint">投稿すると短縮URLがこの説明欄に自動で入ります（最新1件に同期）。YouTubeの概要欄にそのまま貼り付けてください。</div>
   </section>
 
-  <!-- 手動で短縮（アプリ外で単独投稿した分のURLを貼って短縮＋履歴追加） -->
-  <section class="card">
-    <div class="field-label">✂️ あとで単独投稿した分を短縮（手動）</div>
-    <div class="hint">アプリ外でBlueskyに投稿した分などは、その<b>投稿URL</b>をここに貼ると短縮URLを作り、下の履歴（このアカウント）に追加します。</div>
-    <input id="manualTitle" type="text" placeholder="作品名・メモ（任意・履歴の見出しになります）" autocomplete="off">
-    <input id="manualUrl" type="text" inputmode="url" placeholder="https://bsky.app/profile/.../post/...（短縮したいURL）" autocomplete="off" style="margin-top:6px;">
-    <button id="manualShortBtn" class="primary" type="button" style="margin-top:8px;">✂️ 短縮して履歴に追加</button>
-    <div id="manualResult" class="short-row" hidden style="margin-top:8px;">
-      <code id="manualOut" class="short-url"></code>
-      <button id="manualCopy" class="copy-btn" type="button">コピー</button>
-    </div>
-  </section>
 
   <!-- 過去の短縮URL履歴（このチャンネルのみ・重複/破棄管理） -->
   <section class="card">
@@ -448,6 +436,18 @@
     <div class="field-label">生成結果</div>
     <div id="affiResults"></div>
   </section>
+
+  <!-- 手動で短縮（アプリ外で単独投稿した分のURLを貼って短縮するだけ） -->
+  <section class="card">
+    <div class="field-label">✂️ 単独投稿した分のURLを短縮（手動）</div>
+    <div class="hint">アプリ外でBlueskyに投稿した分などは、その<b>投稿URL</b>をここに貼ると短縮URLを作れます（履歴には追加しません）。</div>
+    <input id="manualUrl" type="text" inputmode="url" placeholder="https://bsky.app/profile/.../post/...（短縮したいURL）" autocomplete="off">
+    <button id="manualShortBtn" class="primary" type="button" style="margin-top:8px;width:auto;padding:8px 22px;font-size:14px;">✂️ 短 縮 ✂️</button>
+    <div id="manualResult" class="short-row" hidden style="margin-top:8px;">
+      <code id="manualOut" class="short-url"></code>
+      <button id="manualCopy" class="copy-btn" type="button">コピー</button>
+    </div>
+  </section>
 </main>
 </section>
 
@@ -608,23 +608,23 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=105"></script>
-<script src="app.js?v=105"></script>
-<script src="affiliate-core.js?v=105"></script>
-<script src="fanza-core.js?v=105"></script>
-<script src="affiliate.js?v=105"></script>
-<script src="bluesky-core.js?v=105"></script>
-<script src="scheduler.js?v=105"></script>
-<script src="bluesky.js?v=105"></script>
-<script src="drive-upload.js?v=105"></script>
-<script src="verify-core.js?v=105"></script>
-<script src="verify.js?v=105"></script>
-<script src="yt-clicks.js?v=105"></script>
-<script src="integration.js?v=105"></script>
-<script src="wizard.js?v=105"></script>
-<script src="settings-io.js?v=105"></script>
-<script src="theme-settings.js?v=105"></script>
-<script src="persist-fields.js?v=105"></script>
+<script src="idgen.js?v=106"></script>
+<script src="app.js?v=106"></script>
+<script src="affiliate-core.js?v=106"></script>
+<script src="fanza-core.js?v=106"></script>
+<script src="affiliate.js?v=106"></script>
+<script src="bluesky-core.js?v=106"></script>
+<script src="scheduler.js?v=106"></script>
+<script src="bluesky.js?v=106"></script>
+<script src="drive-upload.js?v=106"></script>
+<script src="verify-core.js?v=106"></script>
+<script src="verify.js?v=106"></script>
+<script src="yt-clicks.js?v=106"></script>
+<script src="integration.js?v=106"></script>
+<script src="wizard.js?v=106"></script>
+<script src="settings-io.js?v=106"></script>
+<script src="theme-settings.js?v=106"></script>
+<script src="persist-fields.js?v=106"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */

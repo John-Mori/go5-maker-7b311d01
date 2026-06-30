@@ -761,10 +761,9 @@
       var s = short || url;  // 失敗時は元URLで代替
       if (els.manualOut) els.manualOut.textContent = s;
       if (els.manualResult) els.manualResult.hidden = false;
-      histAdd({ title: (els.manualTitle && els.manualTitle.value || '').trim() || '(手動追加)', shortUrl: s, postUrl: url, postUri: '', manualOnly: true });
-      btn.textContent = '✓ 履歴に追加しました'; setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
+      // 履歴（投稿履歴タブ）には追加しない。短縮URLを表示するだけ。
+      btn.textContent = '✓ 短縮しました'; setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
       if (els.manualUrl) els.manualUrl.value = '';
-      if (els.manualTitle) els.manualTitle.value = '';
     });
   });
   if (els.manualCopy) els.manualCopy.addEventListener('click', function () { copyText(els.manualOut.textContent, els.manualCopy); });
