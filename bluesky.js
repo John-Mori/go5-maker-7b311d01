@@ -815,6 +815,17 @@
   }
   if (els.movieWorkUrl) els.movieWorkUrl.addEventListener('input', function () { syncWorkUrl(els.movieWorkUrl.value, true); });
 
+  // 動画作成タブ 作品URL 変更ボタン
+  var movieWorkEditBtn = $('movieWorkEditBtn');
+  if (movieWorkEditBtn) {
+    movieWorkEditBtn.addEventListener('click', function () {
+      var cur = loadA('bsky_work_url') || '';
+      var v = window.prompt('作品URLを入力してください', cur);
+      if (v === null) return;
+      syncWorkUrl(v.trim(), true);
+    });
+  }
+
   function confirmEditable(text, note) {
     return new Promise(function (resolve) {
       if (!els.pcModal) { resolve(window.confirm(text) ? text : null); return; }
@@ -967,12 +978,14 @@
     if (d.videoId) currentVideoId = d.videoId;
   });
   // Bsky添付画像を動画と同じ場所に「タイトル_Bsky.拡張子」で自動ダウンロード。
+  // 投稿タブで画像選択あり → そのファイル。なければ自動投稿ON時の元写真を使う。
   document.addEventListener('video-created', function (e) {
-    if (!selectedPostFile) return;
+    var imgFile = selectedPostFile || ((els.enable && els.enable.checked) ? photoFile() : null);
+    if (!imgFile) return;
     var d = (e && e.detail) || {};
     var base = (d.title || lastTitle || '').replace(/[\\/:*?"<>|]/g, '').trim() || 'image';
-    var ext = (selectedPostFile.name.split('.').pop() || 'jpg').toLowerCase();
-    var url = URL.createObjectURL(selectedPostFile);
+    var ext = (imgFile.name.split('.').pop() || 'jpg').toLowerCase();
+    var url = URL.createObjectURL(imgFile);
     var a = document.createElement('a');
     a.href = url; a.download = base + '_Bsky.' + ext;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -997,4 +1010,29 @@
   var tabPostBtn = document.getElementById('tabPost'); if (tabPostBtn) tabPostBtn.addEventListener('click', buildTitle);
   if (els.ytTitleCopy) els.ytTitleCopy.addEventListener('click', function () { if (lastTitle) copyText(lastTitle, els.ytTitleCopy); });
   buildTitle();
+
+  // ---- ⏰ 予約して投稿（動画作成タブ） ----
+  var movieSchedRow = $('movieSchedRow');
+  var makeReserveBtn = $('makeReserveBtn');
+  var makeReserveConfirmBtn = $('makeReserveConfirmBtn');
+
+  if (makeReserveBtn && movieSchedRow) {
+    makeReserveBtn.addEventListener('click', function () {
+      var showing = movieSchedRow.style.display !== 'none';
+      movieSchedRow.style.display = showing ? 'none' : '';
+    });
+  }
+
+  if (makeReserveConfirmBtn) {
+    makeReserveConfirmBtn.addEventListener('click', function () {
+      var schedAtEl = $('movieSchedAt');
+      if (!schedAtEl || !schedAtEl.value) { alert('予約時刻を選択してください。'); return; }
+      var ms = new Date(schedAtEl.value).getTime();
+      if (isNaN(ms) || ms <= Date.now()) { alert('未来の時刻を選択してください。'); return; }
+      // 予約モードなので Bsky 投稿を確実に有効化してから動画作成を実行
+      if (els.enable) els.enable.checked = true;
+      var makeBtnEl = $('makeBtn');
+      if (makeBtnEl) makeBtnEl.click();
+    });
+  }
 })();

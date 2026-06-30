@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=99">
-<link rel="apple-touch-icon" href="icon.svg?v=99">
+<link rel="manifest" href="manifest.webmanifest?v=100">
+<link rel="apple-touch-icon" href="icon.svg?v=100">
 <link rel="icon" href="icon.svg?v=84" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=99">
+<link rel="stylesheet" href="style.css?v=100">
 </head>
 <body>
 <header>
@@ -144,9 +144,12 @@
     </label>
     <div class="hint">本文は「🦋 投稿」タブで編集した内容、画像は<b>この動画の元写真</b>を添付します。アカウント設定も「🦋 投稿」タブにあります。<br>単独で投稿したいときは「🦋 投稿」タブの「今すぐ投稿」をどうぞ。</div>
     <div class="movie-work" style="margin-top:12px;">
-      <label for="movieWorkUrl" class="field-label" style="margin:0 0 4px;font-size:.8rem;">📕 今回案内する作品URL（今日の作品を貼る・取り違え防止）</label>
+      <label class="field-label" style="margin:0 0 4px;font-size:.8rem;">📕 今回案内する作品URL（今日の作品を貼る・取り違え防止）</label>
       <input id="movieWorkUrl" type="url" autocomplete="off" style="display:none;">
-      <a id="movieWorkLink" href="#" target="_blank" rel="noopener noreferrer" style="display:block;word-break:break-all;color:var(--accent);font-size:.85rem;padding:4px 0;min-height:1.4em;">（URLを入力してください）</a>
+      <div style="display:flex;align-items:flex-start;gap:6px;">
+        <a id="movieWorkLink" href="#" target="_blank" rel="noopener noreferrer" style="flex:1;display:block;word-break:break-all;color:var(--accent);font-size:.85rem;padding:4px 0;min-height:1.4em;">（URLを入力してください）</a>
+        <button id="movieWorkEditBtn" type="button" class="ghost" style="flex-shrink:0;font-size:12px;padding:3px 8px;">✏ 変更</button>
+      </div>
       <div id="movieWorkWarn" style="font-size:.82rem;margin-top:4px;"></div>
     </div>
     <div class="discount-row" style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;">
@@ -167,16 +170,19 @@
       <label class="disc-new"><input id="discountNew2" type="checkbox"><span>新作</span></label>
       <span class="hint" style="margin:0;">投稿本文（自動投稿・今すぐ投稿で共通）に割引文を挿入します。「🦋投稿」タブの本文に反映されます。「新作」にチェックすると新作用の文面になります。</span>
     </div>
-    <div style="margin-top:8px;">
-      <label class="field-label" for="movieSchedAt" style="font-size:.8rem;margin:0 0 4px;">⏰ 予約投稿時刻（空欄なら動画作成後すぐ投稿）</label>
-      <input id="movieSchedAt" type="datetime-local" style="width:100%;">
-    </div>
     <div class="status" id="bskyStatus"></div>
   </section>
 
   <!-- 作成 -->
   <section class="card">
-    <button id="makeBtn" class="primary">▶ 動画を作成</button>
+    <div style="display:flex;gap:8px;">
+      <button id="makeBtn" class="primary" style="flex:1;">▶ 今すぐ作成・投稿</button>
+      <button id="makeReserveBtn" type="button" class="ghost" style="flex:1;">⏰ 予約して投稿</button>
+    </div>
+    <div id="movieSchedRow" style="display:none;margin-top:8px;">
+      <input id="movieSchedAt" type="datetime-local" style="width:100%;margin-bottom:6px;">
+      <button id="makeReserveConfirmBtn" type="button" class="primary" style="width:100%;">✅ この時刻に予約して作成</button>
+    </div>
     <div class="status" id="status"></div>
     <div id="resultArea" hidden>
       <video id="result" controls playsinline></video>
@@ -592,23 +598,23 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=99"></script>
-<script src="app.js?v=99"></script>
-<script src="affiliate-core.js?v=99"></script>
-<script src="fanza-core.js?v=99"></script>
-<script src="affiliate.js?v=99"></script>
-<script src="bluesky-core.js?v=99"></script>
-<script src="scheduler.js?v=99"></script>
-<script src="bluesky.js?v=99"></script>
-<script src="drive-upload.js?v=99"></script>
-<script src="verify-core.js?v=99"></script>
-<script src="verify.js?v=99"></script>
-<script src="yt-clicks.js?v=99"></script>
-<script src="integration.js?v=99"></script>
-<script src="wizard.js?v=99"></script>
-<script src="settings-io.js?v=99"></script>
-<script src="theme-settings.js?v=99"></script>
-<script src="persist-fields.js?v=99"></script>
+<script src="idgen.js?v=100"></script>
+<script src="app.js?v=100"></script>
+<script src="affiliate-core.js?v=100"></script>
+<script src="fanza-core.js?v=100"></script>
+<script src="affiliate.js?v=100"></script>
+<script src="bluesky-core.js?v=100"></script>
+<script src="scheduler.js?v=100"></script>
+<script src="bluesky.js?v=100"></script>
+<script src="drive-upload.js?v=100"></script>
+<script src="verify-core.js?v=100"></script>
+<script src="verify.js?v=100"></script>
+<script src="yt-clicks.js?v=100"></script>
+<script src="integration.js?v=100"></script>
+<script src="wizard.js?v=100"></script>
+<script src="settings-io.js?v=100"></script>
+<script src="theme-settings.js?v=100"></script>
+<script src="persist-fields.js?v=100"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */
