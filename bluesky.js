@@ -590,7 +590,7 @@
   //   ・端末ごとに localStorage short_worker_url / short_shared_secret で上書き可。
   //   ・未設定/失敗時は da.gd→TinyURL→長いURL に安全フォールバック（計測できないだけで壊れない）。
   var SHORT = {
-    WORKER_URL: 'https://go5-short.trustsignalbot.workers.dev',
+    WORKER_URL: 'https://r2.trustsignalbot.workers.dev',
     SHARED_SECRET: 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'
   };
   try {

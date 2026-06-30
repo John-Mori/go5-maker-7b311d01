@@ -52,7 +52,7 @@ var EXTRA_HEADERS = ['キャラ'];
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-01G（題名集約 consolidate_title・履歴掃除 prune_history 追加）';
+var GAS_VERSION = '2026-07-01H（短縮ワーカーを r2 に改名・コード5文字化に対応）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -493,12 +493,21 @@ function daGdShorten_(longUrl) {
 //   YT説明欄に貼る短縮URL（go5-short/<code>）の「開かれた回数」を /api/stats から取得し、
 //   テンプレ列「Bitlyクリック」（＝今後は link-worker の開封数の意味）に毎時反映する。
 //   ※列名はテンプレ互換のため変えない（意味だけ Bitly→開封数 に変更）。
-var SHORT_WORKER_URL = 'https://go5-short.trustsignalbot.workers.dev';
+var SHORT_WORKER_URL = 'https://r2.trustsignalbot.workers.dev';
+// 旧名(go5-short)で発行済みの短縮URLも計測できるよう、旧ホストも候補に残す。
+var SHORT_WORKER_HOSTS = ['https://r2.trustsignalbot.workers.dev', 'https://go5-short.trustsignalbot.workers.dev'];
 function shortSecret_() { return prop_('SHORT_SHARED_SECRET') || 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'; }
-// go5-short のURLから末尾コードを抽出（別ホスト＝da.gd等なら ''）。
+// 自前ワーカー(r2/旧go5-short)のURLから末尾コードを抽出（da.gd等の別ホストは ''）。
 function codeFromShort_(url) {
-  var m = String(url || '').match(/^https?:\/\/[^/]*go5-short[^/]*\/([0-9A-Za-z]+)/);
-  return m ? m[1] : '';
+  var s = String(url || '');
+  for (var i = 0; i < SHORT_WORKER_HOSTS.length; i++) {
+    var base = SHORT_WORKER_HOSTS[i].replace(/\/+$/, '');
+    if (s.indexOf(base + '/') === 0) {
+      var rest = s.slice(base.length + 1).split(/[/?#]/)[0];
+      if (/^[0-9A-Za-z]+$/.test(rest)) return rest;
+    }
+  }
+  return '';
 }
 function workerClicks_(code) {
   if (!code) return null;

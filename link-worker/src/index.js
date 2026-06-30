@@ -26,7 +26,7 @@
  */
 
 const BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const CODE_MIN = 7;   // 既定のコード長（62^7 ≈ 3.5兆通り。個人運用には十分）
+const CODE_MIN = 5;   // 既定のコード長（62^5 ≈ 9.2億通り。個人運用には十分・URLを短く）
 const CODE_MAX = 12;  // 万一の衝突時はここまで伸ばして再試行
 
 export default {
@@ -53,7 +53,7 @@ export default {
 
     // ---- ヘルスチェック ----
     if (path === "/" || path === "") {
-      return text("go5-short ok", 200);
+      return text("ok", 200);
     }
 
     // ---- それ以外は短縮コードとして 302 リダイレクト（中間ページなし）----
