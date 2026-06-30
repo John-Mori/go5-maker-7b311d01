@@ -126,6 +126,9 @@
         '<label class="vedit-field">Bluesky 投稿URL' +
           '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL（省略可）">' +
         '</label>' +
+        '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
+          '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
+        '</label>' +
         '<div class="vedit-actions">' +
           '<button id="veditCancel" type="button">キャンセル</button>' +
           '<button id="veditSave" type="button">保存</button>' +
@@ -137,12 +140,12 @@
     $('veditSave').addEventListener('click', function () {
       if (typeof _saveCb !== 'function') return;
       var cb = _saveCb;
-      _saveCb = null; // 連打で二重保存しないよう先にクリア
+      _saveCb = null;
       cb(
         ($('veditYt').value || '').trim(),
-        ($('veditBsky').value || '').trim()
+        ($('veditBsky').value || '').trim(),
+        ($('veditWork').value || '').trim()
       );
-      // バリデーション失敗でモーダルが開いたままなら _saveCb を復元（再試行できるように）
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
     });
@@ -153,11 +156,12 @@
     _saveCb = null;
   }
 
-  function openModal_(title, ytVal, bskyVal, onSave) {
+  function openModal_(title, ytVal, bskyVal, workVal, onSave) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
     $('veditBsky').value = bskyVal || '';
+    $('veditWork').value = workVal || '';
     var errEl = $('veditError'); if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
     $('veditOverlay').hidden = false;
     setTimeout(function () { var el = $('veditYt'); if (el) el.focus(); }, 50);
@@ -183,18 +187,19 @@
     }
   }
 
-  // 編集保存：YouTube URL（ytMap）と Bluesky URL（アイテム）を一括更新。
-  function saveEdit_(k, it, ytUrl, bskyUrl) {
+  // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL（アイテム）を一括更新。
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl) {
     // YouTube URL
     var ymap = loadYtMap();
     if (ytUrl) ymap[k] = ytUrl; else delete ymap[k];
     saveYtMap(ymap);
-    // Bluesky URL（アイテムを直接書き換え）
+    // Bluesky URL と 作品URL（アイテムを直接書き換え）
     if (it.manual) {
       var manual = loadManual();
       for (var i = 0; i < manual.length; i++) {
         if (itemKey(manual[i]) !== k) continue;
         saveBskyToItem_(manual[i], bskyUrl);
+        if (workUrl) manual[i].workUrl = workUrl; else delete manual[i].workUrl;
         break;
       }
       saveArr(manualKey(), manual);
@@ -203,6 +208,7 @@
       for (var j = 0; j < hist.length; j++) {
         if (itemKey(hist[j]) !== k) continue;
         saveBskyToItem_(hist[j], bskyUrl);
+        if (workUrl) hist[j].workUrl = workUrl; else delete hist[j].workUrl;
         break;
       }
       saveArr(histKey(), hist);
@@ -249,6 +255,7 @@
           '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">編集🛠️</button>' +
           (bskyHref ? '<a class="vlink" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
           (yt ? '<a class="vlink" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
+          (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
         '</div>' +
         '<div class="vrow-foot">' +
           '<span class="vyt-lbl">YouTube<br>URL</span>' +
@@ -282,9 +289,10 @@
         if (!it) return;
         var ytCur = ymap[k] || it.ytUrl || '';
         var bskyCur = it.shortUrl || it.postUrl || '';
-        openModal_('URL を編集', ytCur, bskyCur, function (ytUrl, bskyUrl) {
+        var workCur = it.workUrl || '';
+        openModal_('URL を編集', ytCur, bskyCur, workCur, function (ytUrl, bskyUrl, workUrl) {
           closeModal_();
-          saveEdit_(k, it, ytUrl, bskyUrl);
+          saveEdit_(k, it, ytUrl, bskyUrl, workUrl);
         });
       });
     });
@@ -308,9 +316,20 @@
     refresh();
   }
 
-  // YouTube動画を手動で追加（モーダルで YouTube URL + Bluesky URL を一括入力）。
+  // YouTube動画を手動で追加（モーダルで YouTube URL + Bluesky URL + 作品URL を一括入力）。
   function addManual() {
-    openModal_('YouTube動画を追加', '', '', function (ytUrl, bskyUrl) {
+    // 作品URLをアフィリンクタブの②から自動取得（なければ bsky_work_url を使用）
+    var autoWorkUrl = '';
+    try {
+      var afEl = document.getElementById('affiUrls');
+      var afRaw = afEl ? afEl.value : (localStorage.getItem('field_affiUrls') || '');
+      autoWorkUrl = afRaw.trim().split('\n').map(function (l) { return l.trim(); }).filter(Boolean)[0] || '';
+      if (!autoWorkUrl) {
+        var acctId = (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
+        autoWorkUrl = localStorage.getItem('bsky_work_url__' + acctId) || '';
+      }
+    } catch (e) {}
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, function (ytUrl, bskyUrl, workUrl) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -321,6 +340,7 @@
       var id = 'm:' + new Date().getTime();
       var entry = { manual: true, id: id, ts: 0 };
       saveBskyToItem_(entry, bskyUrl);
+      if (workUrl) entry.workUrl = workUrl;
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       refresh();
