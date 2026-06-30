@@ -452,19 +452,22 @@
       var yt = ymap[k] || it.ytUrl || '';
       var vid = ytIdOf(yt);
       var code = codeOf(it.shortUrl || '');
+      // 投稿日時：実投稿時刻(ts)を最優先。無ければYouTube公開日時を使う（→朝ばかり/今日になる問題を解消）。
+      var pubMs = (vid && publishedCache[vid] != null) ? publishedCache[vid] : null;
+      var postedMs = (it.ts && it.ts > 0) ? it.ts : pubMs;
       return {
         videoId: it.videoId || '',
         title: it.title || '',                                          // 題名(コメント)＝アプリの④コメント
         ytTitle: (vid && titleCache[vid]) || '',                        // YouTube動画の実題名（取得済みのみ）
         views: (vid && viewsCache[vid] != null) ? viewsCache[vid] : '', // YouTube視聴回数（取得済みのみ）
-        clicks: (code && clicksCache[code] != null) ? clicksCache[code] : '', // 短縮URL開封数（取得済みのみ）
+        clicks: (code && clicksCache[code] != null) ? clicksCache[code] : '', // 短縮URLクリック数（取得済みのみ）
         postUri: it.postUri || '',
         postUrl: it.postUrl || '',
         shortUrl: it.shortUrl || '',
         workUrl: it.workUrl || '',
         youtubeUrl: yt,
         chara: !!it.chara,
-        postedAt: (it.ts && it.ts > 0) ? new Date(it.ts).toISOString() : ''
+        postedAt: postedMs ? new Date(postedMs).toISOString() : ''
       };
     }).filter(function (r) { return r.videoId; });
     if (!items.length) { setStatus('同期する履歴がありません'); if (btn) btn.disabled = false; return; }
