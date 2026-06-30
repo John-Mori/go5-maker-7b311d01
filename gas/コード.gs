@@ -32,9 +32,11 @@ var FANZA_HEADERS = [
   '元値list_price','割引後price','割引率pct','FANZA取得日時',
   'レビュー件数(代理指標)','レビュー平均'
 ];
+// 追加属性列（記録シート末尾追加・移行で付与）。キャラ＝実在キャラの二次創作作品に○。
+var EXTRA_HEADERS = ['キャラ'];
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-06-30A（FANZA価格スナップショット列追加）';
+var GAS_VERSION = '2026-07-01A（キャラ列・投稿日時降順ソート追加）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -141,7 +143,8 @@ function migrateHeaders_() {
     var lastCol = sh.getLastColumn();
     if (lastCol < 1) { result.push({ sheet: name, status: 'empty' }); return; }
     var existing = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
-    var missing = FANZA_HEADERS.filter(function (h) { return existing.indexOf(h) === -1; });
+    var wantHeaders = FANZA_HEADERS.concat(EXTRA_HEADERS);
+    var missing = wantHeaders.filter(function (h) { return existing.indexOf(h) === -1; });
     if (missing.length === 0) { result.push({ sheet: name, added: [], status: 'already_up_to_date' }); return; }
     missing.forEach(function (h) {
       sh.getRange(1, sh.getLastColumn() + 1).setValue(h);
@@ -164,6 +167,7 @@ function doPost(e) {
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
+      chara: body.chara,                   // キャラ属性（true/false/undefined）。投稿履歴の編集から後追い更新可
       fanza_list_price: body.fanza_list_price, fanza_price: body.fanza_price,
       fanza_discount_pct: body.fanza_discount_pct, fanza_fetched_at: body.fanza_fetched_at || '',
       fanza_review_count: body.fanza_review_count, fanza_review_avg: body.fanza_review_avg
@@ -279,9 +283,23 @@ function writeRecord_(channel, f) {
   putIf('FANZA取得日時', f.fanza_fetched_at || '');
   putIf('レビュー件数(代理指標)', f.fanza_review_count !== undefined && f.fanza_review_count !== null ? f.fanza_review_count : '');
   putIf('レビュー平均', f.fanza_review_avg !== undefined && f.fanza_review_avg !== null ? f.fanza_review_avg : '');
+  // キャラ属性：payload に chara が含まれるときだけ ○/空 を明示セット（未指定なら既存値を保護）。
+  if (f.chara !== undefined && f.chara !== null && map['キャラ']) {
+    sh.getRange(target, map['キャラ']).setValue((f.chara === true || f.chara === 'true' || f.chara === '○') ? '○' : '');
+  }
   // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
   if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
+  // 投稿履歴を正とし、投稿日時の新しい順にシートを並べ替える（空日時は末尾へ）。
+  sortByDate_(sh, dcol);
   return { shortUrl: shortUrl, row: target };
+}
+
+// 記録シートを「投稿日時」降順で並べ替える（ヘッダ行は固定、2行目以降が対象）。
+// 計算列の数式は行相対参照（$B<row>）のため、並べ替えでも各行が自分の日時を正しく参照する。
+function sortByDate_(sh, dcol) {
+  var last = sh.getLastRow();
+  if (last < 3) return; // データ行が0〜1件なら並べ替え不要
+  sh.getRange(2, 1, last - 1, sh.getLastColumn()).sort({ column: dcol, ascending: false });
 }
 
 // ---- 短縮URL（da.gd・トークン不要・1投稿1回だけ。失敗時は空＝長いURLのまま記録） ----

@@ -71,6 +71,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-h .vdate-unknown{color:var(--sub);font-weight:400;font-size:12px;}
 .vrow-h .vtag{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:1px 6px;}
 .vrow-h .vtag-id{color:var(--accent);border-color:var(--accent);}
+.vrow-h .vtag-chara{color:#ff79b0;border-color:#ff79b0;font-weight:700;}
 .vrow-h .vgenre{color:var(--sub);font-size:12px;}
 .vmetrics{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin-top:7px;font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;}
 .vmetrics > span{white-space:nowrap;flex-shrink:0;}
@@ -96,6 +97,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vedit-error{font-size:12px;color:#ff7b7b;margin:0 0 12px;line-height:1.5;white-space:pre-line;}
 .vedit-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--sub);margin-bottom:12px;}
 .vedit-field input{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);width:100%;box-sizing:border-box;}
+.vedit-chara{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);margin:0 0 14px;cursor:pointer;}
+.vedit-chara input{width:20px;height:20px;flex-shrink:0;accent-color:#ff79b0;margin:0;}
 .vedit-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px;}
 .vedit-actions button{font-size:14px;padding:8px 18px;border-radius:8px;cursor:pointer;border:1px solid var(--line);width:auto;margin-top:0;}
 #veditCancel{background:transparent;color:var(--sub);}

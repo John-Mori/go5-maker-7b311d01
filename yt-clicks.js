@@ -47,6 +47,25 @@
   // 表示する全アイテム（履歴＋手動追加）を結合。manualOnly=true の手動短縮URL履歴は除外。
   function allItems() { return loadHist().filter(function (it) { return !it.manualOnly; }).concat(loadManual()); }
 
+  // 投稿時刻(ts)等から背骨ID(videoId)を生成。idgen があれば流用、無ければ同形式で自前生成。
+  function genVideoId(ts) {
+    var d = (ts && ts > 0) ? new Date(ts) : new Date();
+    if (window.IdGen && window.IdGen.makeVideoId) { try { return window.IdGen.makeVideoId(acct(), d); } catch (e) {} }
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    var stamp = '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes());
+    var r = ''; for (var i = 0; i < 4; i++) r += Math.floor(Math.random() * 36).toString(36);
+    return acct() + '-' + stamp + '-' + r;
+  }
+  // この履歴を正とし、IDが未付与のアイテムへ背骨IDを付与・永続化（投稿履歴=スプレッドシートの行キー）。
+  function ensureIds() {
+    var hist = loadHist(), c1 = false;
+    hist.forEach(function (it) { if (!it.videoId) { it.videoId = genVideoId(it.ts); c1 = true; } });
+    if (c1) saveArr(histKey(), hist);
+    var man = loadManual(), c2 = false;
+    man.forEach(function (it) { if (!it.videoId) { it.videoId = genVideoId(it.ts); c2 = true; } });
+    if (c2) saveArr(manualKey(), man);
+  }
+
   // 短縮URLから go5-short のコードを抽出（自前ワーカーの払い出しURLのみ対象）。
   function codeOf(shortUrl) {
     var w = (window.Go5Short && window.Go5Short.WORKER_URL) || '';
@@ -129,6 +148,10 @@
         '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
           '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
         '</label>' +
+        '<label class="vedit-chara">' +
+          '<input id="veditChara" type="checkbox">' +
+          '<span>キャラ（アニメ・ゲーム等の実在キャラの二次創作）</span>' +
+        '</label>' +
         '<div class="vedit-actions">' +
           '<button id="veditCancel" type="button">キャンセル</button>' +
           '<button id="veditSave" type="button">保存</button>' +
@@ -144,7 +167,8 @@
       cb(
         ($('veditYt').value || '').trim(),
         ($('veditBsky').value || '').trim(),
-        ($('veditWork').value || '').trim()
+        ($('veditWork').value || '').trim(),
+        !!($('veditChara') && $('veditChara').checked)
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -156,12 +180,13 @@
     _saveCb = null;
   }
 
-  function openModal_(title, ytVal, bskyVal, workVal, onSave) {
+  function openModal_(title, ytVal, bskyVal, workVal, charaVal, onSave) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
     $('veditBsky').value = bskyVal || '';
     $('veditWork').value = workVal || '';
+    if ($('veditChara')) $('veditChara').checked = !!charaVal;
     var errEl = $('veditError'); if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
     $('veditOverlay').hidden = false;
     setTimeout(function () { var el = $('veditYt'); if (el) el.focus(); }, 50);
@@ -187,19 +212,22 @@
     }
   }
 
-  // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL（アイテム）を一括更新。
-  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl) {
+  // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL・キャラ属性（アイテム）を一括更新。
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, chara) {
     // YouTube URL
     var ymap = loadYtMap();
     if (ytUrl) ymap[k] = ytUrl; else delete ymap[k];
     saveYtMap(ymap);
-    // Bluesky URL と 作品URL（アイテムを直接書き換え）
+    var saved = null;
+    // Bluesky URL と 作品URL・キャラ（アイテムを直接書き換え）
     if (it.manual) {
       var manual = loadManual();
       for (var i = 0; i < manual.length; i++) {
         if (itemKey(manual[i]) !== k) continue;
         saveBskyToItem_(manual[i], bskyUrl);
         if (workUrl) manual[i].workUrl = workUrl; else delete manual[i].workUrl;
+        if (chara) manual[i].chara = true; else delete manual[i].chara;
+        saved = manual[i];
         break;
       }
       saveArr(manualKey(), manual);
@@ -209,11 +237,33 @@
         if (itemKey(hist[j]) !== k) continue;
         saveBskyToItem_(hist[j], bskyUrl);
         if (workUrl) hist[j].workUrl = workUrl; else delete hist[j].workUrl;
+        if (chara) hist[j].chara = true; else delete hist[j].chara;
+        saved = hist[j];
         break;
       }
       saveArr(histKey(), hist);
     }
+    if (saved) pushItemToGas_(saved, !!chara); // スプレッドシートのキャラ列等へ反映（GAS設定時のみ）
     refresh();
+  }
+
+  // 履歴アイテム1件をスプレッドシート（GAS）へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
+  // 投稿日時を上書きしないよう postUrl は送らない（既存行のキャラ列だけ更新する用途）。
+  function pushItemToGas_(it, chara) {
+    var gasUrl = '';
+    try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
+    if (!gasUrl || !it || !it.videoId) return;
+    var payload = {
+      op: 'upsert',
+      channel: acct(),
+      videoId: it.videoId,           // post_id（upsertキー）
+      title: it.title || '',
+      postUri: it.postUri || '',
+      workUrl: it.workUrl || '',
+      shortUrl: it.shortUrl || '',
+      chara: !!chara                  // キャラ列：○ / 空
+    };
+    try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
 
   // ── render ──────────────────────────────────────────────────────────────
@@ -247,7 +297,7 @@
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml +
           (it.videoId ? ' <span class="vtag vtag-id">' + esc(it.videoId) + '</span>' : '') +
-          (it.manual ? ' <span class="vtag">手動</span>' : '') +
+          (it.chara ? ' <span class="vtag vtag-chara">キャラ</span>' : '') +
         '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         '<div class="vmetrics">' +
@@ -292,9 +342,9 @@
         var ytCur = ymap[k] || it.ytUrl || '';
         var bskyCur = it.shortUrl || it.postUrl || '';
         var workCur = it.workUrl || '';
-        openModal_('URL を編集', ytCur, bskyCur, workCur, function (ytUrl, bskyUrl, workUrl) {
+        openModal_('URL を編集', ytCur, bskyCur, workCur, !!it.chara, function (ytUrl, bskyUrl, workUrl, chara) {
           closeModal_();
-          saveEdit_(k, it, ytUrl, bskyUrl, workUrl);
+          saveEdit_(k, it, ytUrl, bskyUrl, workUrl, chara);
         });
       });
     });
@@ -331,7 +381,7 @@
         autoWorkUrl = localStorage.getItem('bsky_work_url__' + acctId) || '';
       }
     } catch (e) {}
-    openModal_('YouTube動画を追加', '', '', autoWorkUrl, function (ytUrl, bskyUrl, workUrl) {
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, false, function (ytUrl, bskyUrl, workUrl, chara) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -343,6 +393,7 @@
       var entry = { manual: true, id: id, ts: 0 };
       saveBskyToItem_(entry, bskyUrl);
       if (workUrl) entry.workUrl = workUrl;
+      if (chara) entry.chara = true;
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       refresh();
@@ -350,6 +401,7 @@
   }
 
   function refresh() {
+    ensureIds(); // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
     render();
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
