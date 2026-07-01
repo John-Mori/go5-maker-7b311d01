@@ -624,21 +624,24 @@
       .then(function () { if (btn) btn.disabled = false; });
   }
 
-  // 過去投稿に計測用の短縮リンク(r2+da.gd)を一括生成する。
-  // 対象＝shortUrlがr2でない or shareUrl無しの履歴。各投稿URL→(必要ならworkerで解決)→r2短縮→da.gd短縮。
-  function bulkGenTracking() {
+  // 過去投稿に計測用の短縮リンク(r2+da.gd)を生成する。silent=true で自動実行（確認・完了ダイアログ無し）。
+  //   対象＝shortUrlがr2でない or shareUrl無しの履歴。各投稿URL→(必要ならworkerで解決)→r2短縮→da.gd短縮。
+  //   1件ごとに保存＝途中で閉じても進んだぶんは残る（冪等：既にr2済みは対象外）。
+  var _bulkBusy = false;
+  function runBulkGen(silent) {
+    if (_bulkBusy) return;
     var go5 = window.Go5Short || {};
     var workerUrl = (go5.WORKER_URL || '').replace(/\/+$/, '');
     var secret = go5.SHARED_SECRET || '';
-    if (typeof window.Go5MakeShort !== 'function' || !workerUrl) { setStatus('⚠️ 短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
+    if (typeof window.Go5MakeShort !== 'function' || !workerUrl) { if (!silent) setStatus('⚠️ 短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
     var handle = ''; try { handle = localStorage.getItem('bsky_handle__' + acct()) || ''; } catch (e) {}
     ensureIds();
     function isR2(u) { return !!u && u.indexOf(workerUrl + '/') === 0; }
     var hist = loadHist(), manual = loadManual(), targets = [];
     hist.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
     manual.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
-    if (!targets.length) { setStatus('未生成の項目はありません（すべて計測リンク済み）'); return; }
-    if (!window.confirm(targets.length + '件の投稿に計測用の短縮リンクを一括生成します。\n少し時間がかかります（1件ずつ順に処理）。よろしいですか？')) return;
+    if (!targets.length) { if (!silent) setStatus('未生成の項目はありません（すべて計測リンク済み）'); return; }
+    _bulkBusy = true;
     var btn = $('ytBulkGen'); if (btn) btn.disabled = true;
     var i = 0, done = 0, fail = 0;
     function resolveTarget(it) {
@@ -654,31 +657,37 @@
     function step() {
       if (i >= targets.length) {
         saveArr(histKey(), hist); saveArr(manualKey(), manual);
-        if (btn) btn.disabled = false;
-        setStatus('✅ 一括生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「📋短縮」でコピーしてYouTube概要欄に貼り替えてください。');
+        _bulkBusy = false; if (btn) btn.disabled = false;
+        setStatus('✅ 計測リンク生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「Bsky投稿↗」が計測用の短縮URLです（長押しでコピー→YouTube概要欄に貼り替え）。');
         render();
         return;
       }
       var it = targets[i++];
-      setStatus('計測リンク生成中… (' + i + '/' + targets.length + ')');
+      setStatus('計測リンクを生成中… (' + i + '/' + targets.length + ')');
       resolveTarget(it).then(function (target) {
         if (!target) { fail++; return null; }
         return window.Go5MakeShort(target).then(function (res) {
-          if (res && res.shortUrl) { it.shortUrl = res.shortUrl; it.shareUrl = res.shareUrl || res.shortUrl; done++; }
-          else fail++;
+          if (res && res.shortUrl) {
+            it.shortUrl = res.shortUrl; it.shareUrl = res.shareUrl || res.shortUrl; done++;
+            saveArr(histKey(), hist); saveArr(manualKey(), manual); // 逐次保存（途中終了に強い）
+          } else fail++;
         });
       }).catch(function () { fail++; }).then(function () { setTimeout(step, 800); });
     }
     step();
   }
+  // 投稿履歴を開いたら、未生成の項目があれば自動で計測リンクを生成する（ボタン任せにしない）。
+  function maybeAutoGen() { if (!_bulkBusy) runBulkGen(true); }
 
-  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', refresh);
+  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); });
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', refresh);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
-  var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', bulkGenTracking);
+  var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
   document.addEventListener('account-changed', function () { render(); });
+  // 読み込み時点で既に投稿履歴タブを開いている場合も自動生成（短縮機能の読込を待って一度だけ）。
+  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) maybeAutoGen(); }, 2500);
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。
   var keyEl = $('ytApiKey');
