@@ -69,6 +69,9 @@
     } catch (e) { return ''; }
   }
   function setStatus(m, html) { var e = $('ytClickStatus'); if (!e) return; if (html) e.innerHTML = m || ''; else e.textContent = m || ''; }
+  // DMM作品情報の処理メッセージ専用ゾーン（クリック数/再生数の更新メッセージと別枠で消し合わない・常に先頭にFANZAのFアイコン）。
+  var FICON = '<img class="emico fico" src="assets/icons/ic-fanza.png" alt="F"> ';
+  function setDmmStatus(m) { var e = $('ytDmmStatus'); if (!e) return; e.innerHTML = m ? (FICON + m) : ''; }
   function ytIdOf(url) { return (url && window.IdGen && window.IdGen.youtubeId) ? (window.IdGen.youtubeId(url) || '') : ''; }
 
   // 表示する全アイテム（履歴＋手動追加）を結合。manualOnly=true の手動短縮URL履歴は除外。
@@ -1060,13 +1063,13 @@
   // manual=true（DMM作品情報取得ボタン）のときは進捗と完了/失敗をステータスへ表示する。
   function fillFanzaNames(manual) {
     var targets = document.querySelectorAll('[data-fanza-url]');
-    if (!targets.length) { if (manual) setStatus('作品URLのある投稿がありません。'); return; }
-    if (typeof window.FanzaCore === 'undefined' || typeof window.buildAffiliateLink === 'undefined') { if (manual) setStatus('⚠️ FANZAモジュール未読込。少し待って再度お試しください。'); return; }
+    if (!targets.length) { if (manual) setDmmStatus('作品URLのある投稿がありません。'); return; }
+    if (typeof window.FanzaCore === 'undefined' || typeof window.buildAffiliateLink === 'undefined') { if (manual) setDmmStatus('⚠️ FANZAモジュール未読込。少し待って再度お試しください。'); return; }
     var workerUrl = '';
     var sharedSecret = '';
     try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
     try { sharedSecret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
-    if (!workerUrl) { if (manual) setStatus('⚠️ FANZAワーカーURLが未設定です（⚙️詳細設定で設定してください）。'); return; }
+    if (!workerUrl) { if (manual) setDmmStatus('⚠️ FANZAワーカーURLが未設定です（⚙️詳細設定で設定してください）。'); return; }
     purgeBadFanzaCache(); // 旧版で混入したログイン/エラータイトルを先に掃除
     var cache = fanzaNameCacheLoad();
     var now = new Date().getTime();
@@ -1094,13 +1097,16 @@
       jobs.push({ url: url, cid: res.cid, el: nameEl, title: titleByUrl[url] || '' });
       nameEl.textContent = '…'; nameEl.style.display = '';
     });
-    if (_fanzaBusy) { if (manual) setStatus('作品情報を取得中です。少しお待ちください…'); return; }
-    if (!jobs.length) { if (manual) setStatus('✅ 作品情報は取得済みです（再取得の必要はありません）。'); return; }
+    if (_fanzaBusy) { if (manual) setDmmStatus('作品情報を取得中です。少しお待ちください…'); return; }
+    if (!jobs.length) { if (manual) setDmmStatus('✅ 作品情報は取得済みです（再取得の必要はありません）。'); return; }
     // ★DMM APIのレート制限回避：一斉に叩かず 1件ずつ間隔をあけて順次取得する。
-    // ★不安定対策：1件につき最大3回リトライ（瞬断/一時的な失敗を吸収）。それでもダメなら30分だけ空キャッシュ。
+    // ★不安定対策：一時的な失敗のみ最大3回リトライ（瞬断を吸収）。恒久的失敗は1回で確定。
     _fanzaBusy = true;
     var GAP = 1000, i = 0, done = 0, fail = 0, total = jobs.length, fails = [];
-    if (manual) setStatus('🎬 DMMから作品情報を取得中…（0/' + total + '）');
+    // カウントダウン：初期見積り1件≈1.6秒。各件完了ごとに実測平均で補正しつつ、毎秒1つずつ減らす。
+    var startT = new Date().getTime(), etaSec = Math.max(1, Math.ceil(total * 1.6)), ticker = null;
+    function dmmProgress() { if (manual) setDmmStatus('DMMから作品情報を取得中… （' + i + '/' + total + '）・<b>終了まであと約 ' + Math.max(etaSec, 0) + ' 秒</b>'); }
+    if (manual) { dmmProgress(); ticker = setInterval(function () { if (etaSec > 0) etaSec--; dmmProgress(); }, 1000); }
     function fetchWithRetry(job, tries) {
       return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
         if (info && info.title && !isBadFanzaTitle(info.title)) return info; // 成功
@@ -1116,17 +1122,18 @@
     function step() {
       if (i >= jobs.length) {
         _fanzaBusy = false;
+        if (ticker) { clearInterval(ticker); ticker = null; }
         if (manual) {
-          if (!fails.length) setStatus('✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。');
+          if (!fails.length) setDmmStatus('✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。');
           else {
             var lines = fails.map(function (f) { return '・「' + esc(f.title || '(無題)') + '」<br>　└ ' + esc(f.reason); }).join('<br>');
-            setStatus('DMM作品情報：成功 ' + done + ' / <b>失敗 ' + fail + '</b><br><b>取得に失敗した投稿と原因：</b><br>' + lines, true);
+            setDmmStatus('DMM作品情報：成功 ' + done + ' / <b>失敗 ' + fail + '</b><br><b>取得に失敗した投稿と原因：</b><br>' + lines);
           }
         }
         return;
       }
       var job = jobs[i++];
-      if (manual) setStatus('🎬 DMMから作品情報を取得中…（' + i + '/' + total + '）');
+      dmmProgress();
       fetchWithRetry(job, 2).then(function (info) {
         var c = fanzaNameCacheLoad();
         if (info && info.title && !isBadFanzaTitle(info.title)) {
@@ -1140,6 +1147,8 @@
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;
           if (manual) fails.push({ title: job.title, reason: (info && info.__error && info.reason) ? info.reason : '作品が見つかりません' });
         }
+        // 実測平均でカウントダウンを補正（残り件数 × 1件あたり平均秒）。
+        if (manual && i > 0) { var avg = (new Date().getTime() - startT) / i; etaSec = Math.ceil(avg * (total - i) / 1000); }
       }).catch(function () { setFanzaEls(job.url, ''); fail++; if (manual) fails.push({ title: job.title, reason: '通信エラー' }); })
         .then(function () { setTimeout(step, GAP); }); // 次を間隔をあけて実行
     }
@@ -1148,7 +1157,7 @@
 
   // 「DMM 作品情報を取得」ボタン：表示中アイテムのFANZAキャッシュを消して、DMM APIから強制再取得。
   function refetchFanza_() {
-    if (_fanzaBusy) { setStatus('作品情報を取得中です。少しお待ちください…'); return; }
+    if (_fanzaBusy) { setDmmStatus('作品情報を取得中です。少しお待ちください…'); return; }
     var urls = {};
     document.querySelectorAll('[data-fanza-url]').forEach(function (el) { var u = el.getAttribute('data-fanza-url'); if (u) urls[u] = 1; });
     var c = fanzaNameCacheLoad(), changed = false;
