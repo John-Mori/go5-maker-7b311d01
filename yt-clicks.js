@@ -725,10 +725,84 @@
   // 投稿履歴を開いたら、未生成の項目があれば自動で計測リンクを生成する（ボタン任せにしない）。
   function maybeAutoGen() { if (!_bulkBusy) runBulkGen(true); }
 
+  // Bluesky本文から「新作」「◯%オフ」を検出（半角/全角%・オフ/OFF/割引・半額に対応）。
+  function parseBskyPromo_(text) {
+    var t = String(text || '').replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+    var isNew = /新作/.test(t);
+    var pct = null;
+    if (/半額/.test(t)) pct = 50;
+    var m = t.match(/(\d{1,3})\s*[%％]\s*(?:オフ|off|OFF|割引)/i) || t.match(/(?:オフ|off|OFF)\s*(\d{1,3})\s*[%％]/i);
+    if (m) { var n = parseInt(m[1], 10); if (n > 0 && n < 100) pct = n; }
+    return { isNew: isNew, pct: pct };
+  }
+  // 【1回限り想定】両chの投稿本文をBluesky公開APIで取得し、明記された当時の割引率/新作を当時スナップへ反映。
+  var _restoreBusy = false;
+  function restorePctFromBsky_() {
+    if (_restoreBusy) return;
+    var keys = ['short_hist__acc1', 'verify_manual__acc1', 'short_hist__acc2', 'verify_manual__acc2'];
+    var store = {}, jobs = [];
+    keys.forEach(function (k) {
+      var arr; try { arr = JSON.parse(localStorage.getItem(k) || '[]') || []; } catch (e) { arr = []; }
+      store[k] = arr;
+      arr.forEach(function (it, idx) { if (it && it.postUri) jobs.push({ key: k, idx: idx, uri: String(it.postUri) }); });
+    });
+    if (!jobs.length) { setStatus('Bluesky投稿URL(postUri)を持つ投稿がありません。'); return; }
+    _restoreBusy = true;
+    var btn = $('ytRestorePct'); if (btn) btn.disabled = true;
+    var fzCache = fanzaNameCacheLoad();
+    var updated = 0, skipped = 0, i = 0, BATCH = 25;
+    function listPriceOf(it) {
+      if (it.fanzaSnap && it.fanzaSnap.listPrice != null) return it.fanzaSnap.listPrice;
+      var c = it.workUrl ? fzCache[it.workUrl] : null;
+      if (c && c.priceInfo && c.priceInfo.listPrice != null) return c.priceInfo.listPrice;
+      return null;
+    }
+    function applyToItem(it, promo) {
+      var did = false;
+      if (promo.isNew && it.workState !== '新作') { it.workState = '新作'; did = true; }
+      if (promo.pct != null) {
+        var lp = listPriceOf(it), snap = it.fanzaSnap || {};
+        snap.discountPct = promo.pct;
+        if (lp != null) { snap.listPrice = lp; snap.price = Math.round(lp * (1 - promo.pct / 100)); }
+        snap.fromBsky = true; snap.at = snap.at || new Date().toISOString();
+        it.fanzaSnap = snap; did = true;
+      }
+      return did;
+    }
+    function step() {
+      if (i >= jobs.length) {
+        keys.forEach(function (k) { try { localStorage.setItem(k, JSON.stringify(store[k])); } catch (e) {} });
+        _restoreBusy = false; if (btn) btn.disabled = false;
+        setStatus('✅ 投稿文から当時の割引/新作を反映：' + updated + '件（明確な記載なしでスルー ' + skipped + '件・両ch）。');
+        render(); return;
+      }
+      var slice = jobs.slice(i, i + BATCH);
+      var q = slice.map(function (j) { return 'uris=' + encodeURIComponent(j.uri); }).join('&');
+      setStatus('Blueskyの投稿本文を確認中…（' + Math.min(i, jobs.length) + '/' + jobs.length + '）');
+      fetch('https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?' + q)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var byUri = {};
+          ((data && data.posts) || []).forEach(function (p) { byUri[p.uri] = (p.record && p.record.text) || ''; });
+          slice.forEach(function (j) {
+            var text = byUri[j.uri];
+            if (text == null) { skipped++; return; }
+            var promo = parseBskyPromo_(text);
+            if (!promo.isNew && promo.pct == null) { skipped++; return; }
+            if (applyToItem(store[j.key][j.idx], promo)) updated++; else skipped++;
+          });
+        })
+        .catch(function () {})
+        .then(function () { i += BATCH; setTimeout(step, 300); });
+    }
+    step();
+  }
+
   var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); });
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', refresh);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
+  var rpb = $('ytRestorePct'); if (rpb) rpb.addEventListener('click', restorePctFromBsky_);
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
   document.addEventListener('account-changed', function () { render(); });
