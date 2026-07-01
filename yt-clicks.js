@@ -1059,9 +1059,21 @@
     }
   }
 
-  var _fanzaBusy = false; // 二重起動防止（順次取得中の再入を防ぐ）
+  // ── FANZA取得の実行管理（世代トークン方式）──────────────────────────────
+  // 旧実装は「実行中フラグ(_fanzaBusy)が立っている間、手動ボタンは一言出して黙って戻る」だった。
+  // タブを開いた直後は“無表示の自動取得”が数十秒動いているため、その間にボタンを押すと
+  // 表示が一向に変わらない＝根本原因。さらに処理チェーンが例外で死ぬとフラグが立ったまま永久停止。
+  // 対策：
+  //   ・手動実行は進行中の実行を「乗っ取る」（世代番号++。旧実行は次stepで世代不一致を見て静かに停止）
+  //   ・自動実行だけ進行中なら遠慮する（ただし60秒進捗が無い実行は死んだとみなして開始＝スタック自動復帰）
+  //   ・ボタンは絶対に無視されない：押せば必ず進捗表示つきで最初から取得が始まる
+  var _fanzaGen = 0;        // 現在有効な実行の世代（新実行開始で++）
+  var _fanzaActive = false; // 実行中フラグ（自動実行の遠慮判定用）
+  var _fanzaTick = 0;       // 最終進捗時刻（watchdog：古いままなら実行は死んでいる）
+  var _fanzaManual = false; // 現行世代が手動実行か（自動が手動を引き継ぐとき進捗表示も引き継ぐ）
   // manual=true（DMM作品情報取得ボタン）のときは進捗と完了/失敗をステータスへ表示する。
-  function fillFanzaNames(manual) {
+  // sweepDepth: 完了後の追い掛けスイープの深さ（1段まで。キャッシュ保存不能な環境での無限ループ防止）。
+  function fillFanzaNames(manual, sweepDepth) {
     var targets = document.querySelectorAll('[data-fanza-url]');
     if (!targets.length) { if (manual) setDmmStatus('作品URLのある投稿がありません。'); return; }
     if (typeof window.FanzaCore === 'undefined' || typeof window.buildAffiliateLink === 'undefined') { if (manual) setDmmStatus('⚠️ FANZAモジュール未読込。少し待って再度お試しください。'); return; }
@@ -1097,31 +1109,48 @@
       jobs.push({ url: url, cid: res.cid, el: nameEl, title: titleByUrl[url] || '' });
       nameEl.textContent = '…'; nameEl.style.display = '';
     });
-    if (_fanzaBusy) { if (manual) setDmmStatus('作品情報を取得中です。少しお待ちください…'); return; }
     if (!jobs.length) { if (manual) setDmmStatus('✅ 作品情報は取得済みです（再取得の必要はありません）。'); return; }
+    // 自動実行は、生きている実行が進行中なら遠慮（重複取得を避ける）。60秒進捗が無ければ死亡とみなし開始。
+    // 手動実行はここを素通り＝進行中でも乗っ取って必ず開始する（ボタンが無視されることは無い）。
+    if (!manual && _fanzaActive && (new Date().getTime() - _fanzaTick) < 60000) return;
+    // 手動実行を（停止とみなして）自動が引き継ぐ場合は進捗表示も引き継ぐ＝「取得中…」表示が凍結しない。
+    if (!manual && _fanzaActive && _fanzaManual) manual = true;
     // ★DMM APIのレート制限回避：一斉に叩かず 1件ずつ間隔をあけて順次取得する。
     // ★不安定対策：一時的な失敗のみ最大3回リトライ（瞬断を吸収）。恒久的失敗は1回で確定。
-    _fanzaBusy = true;
+    var gen = ++_fanzaGen;  // 旧実行を無効化し、この実行が主導権を取る
+    _fanzaActive = true; _fanzaTick = new Date().getTime(); _fanzaManual = !!manual;
     var GAP = 1000, i = 0, done = 0, fail = 0, total = jobs.length, fails = [];
     // カウントダウン：初期見積り1件≈1.6秒。各件完了ごとに実測平均で補正しつつ、毎秒1つずつ減らす。
     var startT = new Date().getTime(), etaSec = Math.max(1, Math.ceil(total * 1.6)), ticker = null;
     function dmmProgress() { if (manual) setDmmStatus('DMMから作品情報を取得中… （' + i + '/' + total + '）・<b>終了まであと約 ' + Math.max(etaSec, 0) + ' 秒</b>'); }
-    if (manual) { dmmProgress(); ticker = setInterval(function () { if (etaSec > 0) etaSec--; dmmProgress(); }, 1000); }
+    if (manual) {
+      dmmProgress();
+      ticker = setInterval(function () {
+        if (gen !== _fanzaGen) { clearInterval(ticker); return; } // 乗っ取られた旧実行のカウントダウンは停止
+        if (etaSec > 0) etaSec--;
+        dmmProgress();
+      }, 1000);
+    }
     function fetchWithRetry(job, tries) {
+      if (gen === _fanzaGen) _fanzaTick = new Date().getTime(); // 試行開始＝生存を刻む（長い1件でwatchdogに誤殺されない）
       return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
+        if (gen !== _fanzaGen) return null; // 乗っ取り後の旧実行はリトライも継続もしない（静かに中止）
         if (info && info.title && !isBadFanzaTitle(info.title)) return info; // 成功
         // 恒久的失敗（作品が見つからない等）はリトライしない＝無駄な待ち時間を作らない。一時的失敗のみ再試行。
         var canRetry = info && info.__error ? !!info.retryable : true;
-        if (tries > 0 && canRetry) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return fetchWithRetry(job, tries - 1); });
+        if (tries > 0 && canRetry) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return (gen === _fanzaGen) ? fetchWithRetry(job, tries - 1) : null; });
         return info || null;
       }).catch(function () {
-        if (tries > 0) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return fetchWithRetry(job, tries - 1); });
+        if (gen !== _fanzaGen) return null;
+        if (tries > 0) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return (gen === _fanzaGen) ? fetchWithRetry(job, tries - 1) : null; });
         return null;
       });
     }
     function step() {
+      if (gen !== _fanzaGen) { if (ticker) clearInterval(ticker); return; } // 新しい実行に乗っ取られた→静かに終了
+      _fanzaTick = new Date().getTime(); // watchdog：生存を刻む
       if (i >= jobs.length) {
-        _fanzaBusy = false;
+        _fanzaActive = false;
         if (ticker) { clearInterval(ticker); ticker = null; }
         if (manual) {
           if (!fails.length) setDmmStatus('✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。');
@@ -1130,11 +1159,14 @@
             setDmmStatus('DMM作品情報：成功 ' + done + ' / <b>失敗 ' + fail + '</b><br><b>取得に失敗した投稿と原因：</b><br>' + lines);
           }
         }
+        // 実行中に描画が変わって取り漏れた分を1段だけ追い掛け（深さ制限＝キャッシュ保存不能環境でも無限ループしない）。
+        if ((sweepDepth || 0) < 1) setTimeout(function () { if (gen === _fanzaGen) fillFanzaNames(false, (sweepDepth || 0) + 1); }, 100);
         return;
       }
       var job = jobs[i++];
       dmmProgress();
       fetchWithRetry(job, 2).then(function (info) {
+        if (gen !== _fanzaGen) return; // 乗っ取り後の旧実行はキャッシュ・DOM・集計へ一切書かない
         var c = fanzaNameCacheLoad();
         if (info && info.title && !isBadFanzaTitle(info.title)) {
           var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0, releaseDate: info.releaseDate || '' };
@@ -1149,21 +1181,29 @@
         }
         // 実測平均でカウントダウンを補正（残り件数 × 1件あたり平均秒）。
         if (manual && i > 0) { var avg = (new Date().getTime() - startT) / i; etaSec = Math.ceil(avg * (total - i) / 1000); }
-      }).catch(function () { setFanzaEls(job.url, ''); fail++; if (manual) fails.push({ title: job.title, reason: '通信エラー' }); })
-        .then(function () { setTimeout(step, GAP); }); // 次を間隔をあけて実行
+      }).catch(function () {
+        if (gen !== _fanzaGen) return;
+        // 失敗パスと同じ後始末（ネガティブキャッシュを書かないと追い掛けスイープが同URLを再実行してしまう）。
+        var c2 = fanzaNameCacheLoad();
+        c2[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() };
+        fanzaNameCacheSave(c2);
+        setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;
+        if (manual) fails.push({ title: job.title, reason: '通信エラー' });
+      }).then(function () { if (gen === _fanzaGen) setTimeout(step, GAP); }); // 次を間隔をあけて実行
     }
     step();
   }
 
   // 「DMM 作品情報を取得」ボタン：表示中アイテムのFANZAキャッシュを消して、DMM APIから強制再取得。
+  // ※実行中でも「取得中です…」で無視せず、進行中の実行を乗っ取って必ず最初から取得する（世代トークン方式）。
   function refetchFanza_() {
-    if (_fanzaBusy) { setDmmStatus('作品情報を取得中です。少しお待ちください…'); return; }
     var urls = {};
     document.querySelectorAll('[data-fanza-url]').forEach(function (el) { var u = el.getAttribute('data-fanza-url'); if (u) urls[u] = 1; });
+    if (!Object.keys(urls).length) { setDmmStatus('作品URLのある投稿がありません。'); return; }
     var c = fanzaNameCacheLoad(), changed = false;
     Object.keys(urls).forEach(function (u) { if (c[u]) { delete c[u]; changed = true; } }); // キャッシュ削除＝強制再取得
     if (changed) fanzaNameCacheSave(c);
-    fillFanzaNames(true);   // 進捗・完了を表示しつつ取得（キャッシュ削除済みなので全件取り直す）
+    fillFanzaNames(true);   // 進捗・完了を表示しつつ取得（進行中の自動取得があっても乗っ取る）
   }
 
   // ── ランキングタブ（両アカウント合算・再生数順）──────────────────────────────
