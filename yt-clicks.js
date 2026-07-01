@@ -890,13 +890,13 @@
     }
     return '現在定価:<span class="fp-cur">' + yen_(p.price) + '</span>';
   }
-  // 投稿時（当時）価格のHTML。現在価格と同じ書式だが「(投稿時)」を付け、全体を作品名と同じ淡色で表示。
+  // 投稿時（当時）価格のHTML。全体を作品名と同じ淡色で表示。%offは現在と同様に枠で囲む。
   function fmtSnapPriceHtml(p) {
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
-      return '(投稿時)定価:' + yen_(p.listPrice) + ' セール価格:' + yen_(p.price) + ' ' + p.discountPct + '%off';
+      return '定価:' + yen_(p.listPrice) + ' セール価格:' + yen_(p.price) + ' <span class="fp-snap-off">' + p.discountPct + '%off</span>';
     }
-    return '(投稿時)定価:' + yen_(p.price);
+    return '定価:' + yen_(p.price);
   }
   // data-fanza-snap-url が一致する当時価格の要素へ反映。
   function setFanzaSnapEls(fanzaUrl, html) {
