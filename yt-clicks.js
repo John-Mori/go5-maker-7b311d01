@@ -178,6 +178,7 @@
   // ── モーダル ──────────────────────────────────────────────────────────────
   var _saveCb = null;
   var _pendingShare = ''; // 生成した計測用リンクの共有URL(da.gd)。保存時に item.shareUrl へ付与
+  var _pendingShort = ''; // 生成した計測用リンクのr2 URL。保存時に item.shortUrl へ付与（計測キー）
   var _curSrcUrl = '';    // 生成の元にする投稿URL（編集中アイテムのpostUrl等）
 
   function injectModal_() {
@@ -193,10 +194,10 @@
         '<label class="vedit-field">YouTube URL' +
           '<input id="veditYt" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…（省略可）">' +
         '</label>' +
-        '<label class="vedit-field">Bluesky 投稿URL' +
+        '<label class="vedit-field">Bluesky 投稿URL（計測用の短縮URL）' +
           '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL（省略可）">' +
         '</label>' +
-        '<button id="veditGenShort" type="button" class="vedit-gen">🔗 この投稿URLから計測用の短縮リンクを生成</button>' +
+        '<button id="veditGenShort" type="button" class="vedit-gen">🔗 この投稿URLから計測用の短縮リンクを生成（やり直し用）</button>' +
         '<div id="veditGenResult" class="vedit-gen-result" hidden></div>' +
         '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
           '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
@@ -250,8 +251,9 @@
       window.Go5MakeShort(src).then(function (res) {
         var r2 = (res && res.shortUrl) || '', share = (res && res.shareUrl) || r2;
         if (!r2) { showModalErr_('短縮に失敗しました（r2ワーカーに接続できませんでした）。'); return; }
-        $('veditBsky').value = r2;   // 保存時に shortUrl=r2 になり計測対象化
-        _pendingShare = share;       // 保存時に shareUrl=da.gd を付与
+        $('veditBsky').value = share; // 欄には短い計測URL(da.gd)を表示
+        _pendingShort = r2;          // 保存時に shortUrl=r2（クリック計測のキー）
+        _pendingShare = share;       // 保存時に shareUrl=da.gd（表示・概要欄用）
         var gr = $('veditGenResult');
         if (gr) {
           gr.hidden = false;
@@ -283,7 +285,7 @@
     attrs = attrs || {};
     ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
     if ($('veditWorkState')) $('veditWorkState').value = workState || '旧作';
-    _pendingShare = ''; // 生成状態をリセット
+    _pendingShare = ''; _pendingShort = ''; // 生成状態をリセット
     var gr = $('veditGenResult'); if (gr) { gr.hidden = true; gr.innerHTML = ''; }
     var errEl = $('veditError'); if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
     $('veditOverlay').hidden = false;
@@ -330,7 +332,8 @@
         if (workUrl) manual[i].workUrl = workUrl; else delete manual[i].workUrl;
         applyAttrs_(manual[i], attrs);
         manual[i].workState = workState || '旧作';
-        if (_pendingShare) manual[i].shareUrl = _pendingShare; // 生成した計測用リンクの共有URL
+        if (_pendingShort) { manual[i].shortUrl = _pendingShort; delete manual[i].postUrl; } // 計測キー(r2)
+        if (_pendingShare) manual[i].shareUrl = _pendingShare; // 表示用(da.gd)
         saved = manual[i];
         break;
       }
@@ -343,7 +346,8 @@
         if (workUrl) hist[j].workUrl = workUrl; else delete hist[j].workUrl;
         applyAttrs_(hist[j], attrs);
         hist[j].workState = workState || '旧作';
-        if (_pendingShare) hist[j].shareUrl = _pendingShare; // 生成した計測用リンクの共有URL
+        if (_pendingShort) { hist[j].shortUrl = _pendingShort; delete hist[j].postUrl; } // 計測キー(r2)
+        if (_pendingShare) hist[j].shareUrl = _pendingShare; // 表示用(da.gd)
         saved = hist[j];
         break;
       }
@@ -449,7 +453,7 @@
         for (var i = 0; i < rawItems.length; i++) { if (itemKey(rawItems[i]) === k) { it = rawItems[i]; break; } }
         if (!it) return;
         var ytCur = ymap[k] || it.ytUrl || '';
-        var bskyCur = it.shortUrl || it.postUrl || '';
+        var bskyCur = it.shareUrl || it.shortUrl || it.postUrl || ''; // 短い計測URL(da.gd)を優先表示
         var workCur = it.workUrl || '';
         var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
         _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
@@ -507,7 +511,8 @@
       if (workUrl) entry.workUrl = workUrl;
       applyAttrs_(entry, attrs);
       if (workState && workState !== '旧作') entry.workState = workState; else entry.workState = '旧作';
-      if (_pendingShare) entry.shareUrl = _pendingShare; // 生成した計測用リンクの共有URL
+      if (_pendingShort) { entry.shortUrl = _pendingShort; delete entry.postUrl; } // 計測キー(r2)
+      if (_pendingShare) entry.shareUrl = _pendingShare; // 表示用(da.gd)
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       refresh();
