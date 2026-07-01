@@ -438,6 +438,11 @@
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
+        (it.workUrl ?
+          '<div class="fanza-snap-row">' + esc(it.workState || '旧作') + ' ' +
+            '<span class="fanza-snap-price" data-fanza-snap-url="' + esc(it.workUrl) + '">' + (it.fanzaSnap ? fmtSnapPriceHtml(it.fanzaSnap) : '') + '</span>' +
+          '</div>'
+        : '') +
         '<div class="fanza-price-row">' +
           '<span class="fp-state-slot"' + (it.workUrl ? ' data-fanza-state-url="' + esc(it.workUrl) + '"' : '') + '>' + stateBadgeHtml_(it.workState) + '</span>' +
           (it.workUrl ? '<span class="fanza-price" data-fanza-price-url="' + esc(it.workUrl) + '" style="display:none;"></span>' : '') +
@@ -784,16 +789,45 @@
     var cls = s === '新作' ? 'fp-state-new' : (s === '準新作' ? 'fp-state-semi' : 'fp-state-old');
     return '<span class="fp-state ' + cls + '">' + esc(s) + '</span>';
   }
-  // 価格表示のHTMLを組み立て（セール時は「定価/セール価格/○%off」、通常は「現在価格」）。
+  function yen_(n) { return '¥' + Number(n).toLocaleString('ja-JP'); }
+  // 現在価格のHTML。セール時は「現在定価/セール価格/○%off」、セール無しは「現在定価」を通常色で。
   function fmtFanzaPriceHtml(p) {
     if (!p || p.price == null) return '';
-    function yen(n) { return '¥' + Number(n).toLocaleString('ja-JP'); }
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
-      return '現在定価:<span class="fp-list">' + yen(p.listPrice) + '</span>' +
-             ' <span class="fp-sale-lbl">セール価格:</span><span class="fp-sale">' + yen(p.price) + '</span>' +
+      return '現在定価:<span class="fp-list">' + yen_(p.listPrice) + '</span>' +
+             ' <span class="fp-sale-lbl">セール価格:</span><span class="fp-sale">' + yen_(p.price) + '</span>' +
              ' <span class="fp-off">' + p.discountPct + '%off</span>';
     }
-    return '現在価格:<span class="fp-cur">' + yen(p.price) + '</span>';
+    return '現在定価:<span class="fp-cur">' + yen_(p.price) + '</span>';
+  }
+  // 投稿時（当時）価格のHTML。現在価格と同じ書式だが「(投稿時)」を付け、全体を作品名と同じ淡色で表示。
+  function fmtSnapPriceHtml(p) {
+    if (!p || p.price == null) return '';
+    if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
+      return '(投稿時)定価:' + yen_(p.listPrice) + ' セール価格:' + yen_(p.price) + ' ' + p.discountPct + '%off';
+    }
+    return '(投稿時)定価:' + yen_(p.price);
+  }
+  // data-fanza-snap-url が一致する当時価格の要素へ反映。
+  function setFanzaSnapEls(fanzaUrl, html) {
+    document.querySelectorAll('[data-fanza-snap-url]').forEach(function (el) {
+      if (el.getAttribute('data-fanza-snap-url') !== fanzaUrl) return;
+      el.innerHTML = html || '';
+    });
+  }
+  // 投稿履歴/手動アイテムのうち、この作品URLで当時スナップ未保存のものに現在価格を当時として固定保存。
+  function backfillSnap_(workUrl, pinfo) {
+    if (!workUrl || !pinfo || pinfo.price == null) return;
+    var snap = { price: pinfo.price, listPrice: pinfo.listPrice, discountPct: pinfo.discountPct || 0, at: new Date().toISOString(), backfilled: true };
+    function apply(arr, key) {
+      var did = false;
+      arr.forEach(function (it) { if (it.workUrl === workUrl && !it.fanzaSnap) { it.fanzaSnap = snap; did = true; } });
+      if (did) saveArr(key, arr);
+      return did;
+    }
+    var d1 = apply(loadHist(), histKey());
+    var d2 = apply(loadManual(), manualKey());
+    if (d1 || d2) setFanzaSnapEls(workUrl, fmtSnapPriceHtml(snap));
   }
   // data-fanza-price-url が一致するDOM要素へ価格を反映＋発売日から現在の作品状態バッジを更新。
   function setFanzaPriceEls(fanzaUrl, priceInfo) {
@@ -836,7 +870,7 @@
         // 有効な題名キャッシュ（旧スキーマ=価格/発売日未保存なら再取得して埋める）
         if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo)) {
           nameEl.textContent = cached.title; nameEl.style.display = '';
-          setFanzaPriceEls(url, cached.priceInfo); return;
+          setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo); return;
         }
         if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) return; // 直近「未取得」→再取得しない（連打防止）
       }
@@ -858,7 +892,7 @@
         if (info && info.title && !isBadFanzaTitle(info.title)) {
           var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0, releaseDate: info.releaseDate || '' };
           c[job.url] = { title: info.title, priceInfo: pinfo, fetchedAt: new Date().getTime() };
-          fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo);
+          fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
         } else {
           c[job.url] = { title: '', priceInfo: null, fetchedAt: new Date().getTime() }; // 未取得を短期キャッシュ（再ハンマー防止）
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null);

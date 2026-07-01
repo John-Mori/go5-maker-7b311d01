@@ -723,7 +723,16 @@
     } catch (e) {}
     var a = histLoad().filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
     var entry = { ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || '' };
-    if (workUrl) entry.workUrl = workUrl;
+    if (workUrl) {
+      entry.workUrl = workUrl;
+      // 投稿時のFANZA価格スナップショット（キャッシュ済みの現在価格を「当時」として固定保存）。
+      try {
+        var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[workUrl];
+        if (fc && fc.priceInfo && fc.priceInfo.price != null) {
+          entry.fanzaSnap = { price: fc.priceInfo.price, listPrice: fc.priceInfo.listPrice, discountPct: fc.priceInfo.discountPct || 0, at: new Date().toISOString() };
+        }
+      } catch (e) {}
+    }
     // 動画作成タブのカテゴリ属性・作品状態を引き継ぐ（manualOnly=手動短縮のときは付けない）
     if (!rec.manualOnly) {
       var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { if (ma[p[0]]) entry[p[0]] = true; });
