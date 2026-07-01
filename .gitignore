@@ -2,3 +2,7 @@
 .DS_Store
 Thumbs.db
 *.swp
+
+# wrangler ローカルキャッシュ（各worker配下）
+.wrangler/
+**/.wrangler/
