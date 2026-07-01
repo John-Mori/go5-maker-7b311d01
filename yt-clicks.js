@@ -866,6 +866,26 @@
     });
     if (changed) fanzaNameCacheSave(c);
   }
+  // ── 手動入力の作品情報（API未収録作品用）────────────────────────────────
+  // 作品URL→{title,listPrice,price,releaseDate,genres[],updatedAt}。自動取得より常に優先。
+  // 秘密キーではないので端末間クラウド同期(settings-io)にも自動で乗る。
+  function fanzaManualLoad() { try { return JSON.parse(localStorage.getItem('fanza_manual_info') || '{}') || {}; } catch (e) { return {}; } }
+  function fanzaManualSaveAll(m) { try { localStorage.setItem('fanza_manual_info', JSON.stringify(m)); } catch (e) {} }
+  function fanzaManualOf_(url) { var m = fanzaManualLoad(); return (url && m[url]) || null; }
+  // 手動価格を priceInfo 形式にマージ（手動値があれば上書き。割引率は自動計算）。
+  function mergeManualPrice_(url, priceInfo) {
+    var man = fanzaManualOf_(url);
+    if (!man) return priceInfo;
+    var base = priceInfo || { price: null, listPrice: null, discountPct: 0, releaseDate: '' };
+    var out = { price: base.price, listPrice: base.listPrice, discountPct: base.discountPct || 0, releaseDate: man.releaseDate || base.releaseDate || '' };
+    if (man.price != null || man.listPrice != null) {
+      out.listPrice = man.listPrice != null ? man.listPrice : null;
+      out.price = man.price != null ? man.price : out.listPrice;
+      out.discountPct = (out.listPrice && out.price && out.price < out.listPrice) ? Math.round((1 - out.price / out.listPrice) * 100) : 0;
+    }
+    return out;
+  }
+
   // 「未取得(空)」のネガティブキャッシュを消す＝手動更新で失敗分を即・強制再取得できるようにする。
   function purgeNegativeFanzaCache() {
     var c = fanzaNameCacheLoad();
@@ -877,6 +897,8 @@
   }
   // data-fanza-url が一致する現在の DOM 要素を全て更新（DOM 再描画後も正しく反映される）
   function setFanzaEls(fanzaUrl, title) {
+    var man = fanzaManualOf_(fanzaUrl);
+    if (man && man.title) title = man.title; // 手動入力の作品名が最優先
     var ok = title && !isBadFanzaTitle(title);
     document.querySelectorAll('[data-fanza-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-url') !== fanzaUrl) return;
@@ -953,14 +975,14 @@
   // 作品詳細モーダル（サムネクリックで開く）。キャッシュから作品名/画像/ジャンル/発売日/サービスを表示。
   function openFanzaModal_(fanzaUrl) {
     var cache = fanzaNameCacheLoad();
-    var c = cache[fanzaUrl];
-    if (!c) return;
+    var c = cache[fanzaUrl] || {};
+    var man = fanzaManualOf_(fanzaUrl) || {};
     var media = c.media || {}, pinfo = c.priceInfo || {};
-    var title = c.title || (c.partial ? '(作品名を取得できません・アフィリエイトAPI未収録の作品)' : '(無題)');
+    var title = man.title || c.title || (c.partial ? '(作品名を取得できません・アフィリエイトAPI未収録の作品)' : '(無題)');
     var big = media.thumb || media.thumbSmall || '';
     var samples = media.samples || [];
-    var genres = media.genres || [];
-    var date = pinfo.releaseDate || '';
+    var genres = (man.genres && man.genres.length) ? man.genres : (media.genres || []);
+    var date = man.releaseDate || pinfo.releaseDate || '';
     var svc = [media.service, media.floor].filter(Boolean).join(' / ');
 
     var ov = $('fzOverlay');
@@ -989,13 +1011,79 @@
         '<div class="fz-meta"><span class="fz-lbl">発売日</span>' + esc(date ? String(date).slice(0, 10) : '—') + '</div>' +
         '<div class="fz-meta"><span class="fz-lbl">サービス/フロア</span>' + esc(svc || '—') + '</div>' +
       '</div>' +
-      '<div class="fz-foot"><a class="fz-open" href="' + esc(fanzaUrl) + '" target="_blank" rel="noopener">作品ページを開く ↗</a></div>';
+      '<div class="fz-foot"><button type="button" class="fz-edit-btn">✏️ 作品情報を手動入力</button><a class="fz-open" href="' + esc(fanzaUrl) + '" target="_blank" rel="noopener">作品ページを開く ↗</a></div>';
     body.querySelectorAll('.fz-zoomable').forEach(function (im) {
       im.addEventListener('click', function () { openZoom_(_fzGallery, parseInt(im.getAttribute('data-zoom'), 10) || 0); });
     });
+    var eb = body.querySelector('.fz-edit-btn');
+    if (eb) eb.addEventListener('click', function () { openFanzaEdit_(fanzaUrl); });
     ov.hidden = false;
   }
   function closeFanzaModal_() { var ov = $('fzOverlay'); if (ov) ov.hidden = true; }
+
+  // ── 作品情報の手動入力モーダル（詳細モーダルからさらに開く）────────────────
+  // API未収録・取得不能な作品でも、作品名/定価/セール価格/発売日/ジャンルを手入力して表示できる。
+  function openFanzaEdit_(fanzaUrl) {
+    var ov = $('fzEditOverlay');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'fzEditOverlay';
+      ov.className = 'fz-overlay';
+      ov.hidden = true;
+      ov.innerHTML =
+        '<div class="fz-modal">' +
+          '<button class="fz-close" type="button" aria-label="閉じる">✕</button>' +
+          '<div class="fz-title">✏️ 作品情報を手動入力</div>' +
+          '<div class="hint" style="margin:0 0 10px;">自動取得できない作品(API未収録等)向け。入力した値は<b>自動取得より優先</b>して表示されます。<br>全て空にして保存すると手動入力を解除(自動取得に戻る)。</div>' +
+          '<label class="vedit-field">作品名<input id="fzeTitle" type="text" autocomplete="off" placeholder="作品の正式タイトル"></label>' +
+          '<div style="display:flex;gap:10px;">' +
+            '<label class="vedit-field" style="flex:1;">定価(円)<input id="fzeList" type="text" inputmode="numeric" autocomplete="off" placeholder="1320"></label>' +
+            '<label class="vedit-field" style="flex:1;">セール価格(円・無ければ空)<input id="fzePrice" type="text" inputmode="numeric" autocomplete="off" placeholder="924"></label>' +
+          '</div>' +
+          '<label class="vedit-field">発売日(作品状態の自動判定に使用)<input id="fzeDate" type="date"></label>' +
+          '<label class="vedit-field">ジャンル(カンマ区切り・任意)<input id="fzeGenres" type="text" autocomplete="off" placeholder="巨乳, 中出し, 学園もの"></label>' +
+          '<div class="vedit-actions"><div class="vedit-actions-main">' +
+            '<button id="fzeCancel" type="button">キャンセル</button>' +
+            '<button id="fzeSave" type="button">保存</button>' +
+          '</div></div>' +
+        '</div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) closeFanzaEdit_(); });
+      ov.querySelector('.fz-close').addEventListener('click', closeFanzaEdit_);
+      $('fzeCancel').addEventListener('click', closeFanzaEdit_);
+      $('fzeSave').addEventListener('click', function () {
+        var url = ov.getAttribute('data-url');
+        if (!url) { closeFanzaEdit_(); return; }
+        var t = ($('fzeTitle').value || '').trim();
+        var lp = parseInt(($('fzeList').value || '').replace(/[^\d]/g, ''), 10); if (isNaN(lp)) lp = null;
+        var pr = parseInt(($('fzePrice').value || '').replace(/[^\d]/g, ''), 10); if (isNaN(pr)) pr = null;
+        var rd = ($('fzeDate').value || '').trim();
+        var gs = ($('fzeGenres').value || '').split(/[、,]/).map(function (s) { return s.trim(); }).filter(Boolean);
+        var all = fanzaManualLoad();
+        if (!t && lp == null && pr == null && !rd && !gs.length) delete all[url]; // 全空＝解除
+        else all[url] = { title: t, listPrice: lp, price: pr, releaseDate: rd, genres: gs, updatedAt: new Date().toISOString() };
+        fanzaManualSaveAll(all);
+        // 当時スナップが未保存の投稿には、この価格を当時として固定（一覧の当時行にも出る）。
+        var lp2 = lp != null ? lp : pr, pr2 = pr != null ? pr : lp;
+        if (pr2 != null) backfillSnap_(url, { price: pr2, listPrice: lp2, discountPct: (lp2 && pr2 && pr2 < lp2) ? Math.round((1 - pr2 / lp2) * 100) : 0 });
+        closeFanzaEdit_(); closeFanzaModal_();
+        render(); // 一覧へ即反映
+        setDmmStatus(t ? '✏️ 手動の作品情報を保存しました：「' + esc(t) + '」' : '✏️ 手動の作品情報を更新しました。');
+      });
+    }
+    // 毎回、既存の手動値→無ければ自動取得値で埋める
+    var man = fanzaManualOf_(fanzaUrl) || {};
+    var cache = fanzaNameCacheLoad(); var c = cache[fanzaUrl] || {}; var pinfo = c.priceInfo || {};
+    $('fzeTitle').value = man.title || c.title || '';
+    $('fzeList').value = man.listPrice != null ? man.listPrice : (pinfo.listPrice != null ? pinfo.listPrice : '');
+    $('fzePrice').value = man.price != null ? man.price : (pinfo.price != null && pinfo.price !== pinfo.listPrice ? pinfo.price : '');
+    $('fzeDate').value = String(man.releaseDate || pinfo.releaseDate || '').slice(0, 10);
+    $('fzeGenres').value = (man.genres || []).join(', ');
+    ov.setAttribute('data-url', fanzaUrl);
+    ov.hidden = false;
+    setTimeout(function () { var el = $('fzeTitle'); if (el) el.focus(); }, 50);
+  }
+  function closeFanzaEdit_() { var ov = $('fzEditOverlay'); if (ov) ov.hidden = true; }
 
   // 画像ズームビューア（作品画像＋サンプルを1つのギャラリーとして、左右スワイプで切替。矢印ボタンなし）。
   var _fzGallery = [], _zoomImgs = [], _zoomIdx = 0;
@@ -1042,7 +1130,9 @@
   function closeZoom_() { var z = $('fzZoom'); if (z) z.hidden = true; }
 
   // data-fanza-price-url が一致するDOM要素へ価格を反映＋発売日から現在の作品状態バッジを更新。
+  // 手動入力の価格・発売日があれば自動取得より優先して表示する。
   function setFanzaPriceEls(fanzaUrl, priceInfo) {
+    priceInfo = mergeManualPrice_(fanzaUrl, priceInfo);
     var html = fmtFanzaPriceHtml(priceInfo);
     document.querySelectorAll('[data-fanza-price-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-price-url') !== fanzaUrl) return;
@@ -1106,16 +1196,16 @@
       if (cached) {
         // 有効な題名キャッシュ（旧スキーマ=価格/発売日/画像未保存なら再取得して埋める）
         if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media) {
-          nameEl.textContent = cached.title; nameEl.style.display = '';
+          setFanzaEls(url, cached.title);
           setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo);
           setFanzaThumbEls(url, cached.media.thumbSmall || cached.media.thumb); return;
         }
-        // 画像のみの部分情報（API未収録作品）：サムネだけ表示（※negative判定より先に見ること）
+        // 画像のみの部分情報（API未収録作品）：サムネ＋手動入力の作品名/価格を表示（※negative判定より先）
         if (cached.partial && cached.media && (now - (cached.fetchedAt || 0)) < DAY) {
-          nameEl.textContent = ''; nameEl.style.display = 'none';
+          setFanzaEls(url, ''); setFanzaPriceEls(url, null);
           setFanzaThumbEls(url, cached.media.thumbSmall || cached.media.thumb); return;
         }
-        if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) return; // 直近「未取得」→再取得しない（連打防止）
+        if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) { setFanzaEls(url, ''); setFanzaPriceEls(url, null); return; } // 直近「未取得」→再取得しない（手動入力があれば表示）
       }
       var res = window.buildAffiliateLink(url, '');
       if (!res || !res.ok || !res.cid) return;

@@ -149,8 +149,13 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .fz-genre{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:1px 7px;}
 .fz-meta-row{display:flex;gap:14px;flex-wrap:wrap;}
 .fz-meta{font-size:13px;color:var(--ink);}
-.fz-foot{margin-top:12px;text-align:right;}
+.fz-foot{margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .fz-open{color:var(--accent);font-size:13px;font-weight:700;text-decoration:none;}
+.fz-edit-btn{width:auto;margin:0;font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
+/* 手動入力モーダル（詳細モーダルの上に重ねる） */
+#fzEditOverlay{z-index:10002;}
+#fzEditOverlay input{width:100%;font-size:16px;padding:9px 11px;border-radius:10px;border:1px solid var(--line);background:#0e1422;color:var(--ink);outline:none;box-sizing:border-box;}
+#fzEditOverlay input:focus{border-color:var(--accent);}
 .fanza-price-row .fp-list{color:var(--ink);text-decoration:line-through;}
 .fanza-price-row .fp-sale-lbl{color:#ff6b8a;}
 .fanza-price-row .fp-sale{color:#ff6b8a;font-weight:700;}
