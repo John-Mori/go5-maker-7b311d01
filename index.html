@@ -11,14 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=123">
-<link rel="apple-touch-icon" href="icon.svg?v=123">
+<link rel="manifest" href="manifest.webmanifest?v=124">
+<link rel="apple-touch-icon" href="icon.svg?v=124">
 <link rel="icon" href="icon.svg?v=84" type="image/svg+xml">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=123">
+<link rel="stylesheet" href="style.css?v=124">
 </head>
 <body>
 <header>
@@ -386,10 +386,23 @@
     </details>
   </section>
 
+  <!-- 端末間クラウド同期（記録用GAS経由・鍵は同期しない） -->
+  <section class="card">
+    <div class="field-label">☁️ 端末間で設定を共有（クラウド同期）</div>
+    <div class="hint">記録用GAS（下の「記録用URL」）を使って、<b>鍵（アプリPW・APIキー・シークレット）以外</b>の設定・投稿履歴を端末間で共有します。例：PCで「保存」→スマホで「取得」。鍵は各端末で一度だけ入力してください（クラウドには保存しません）。</div>
+    <input id="cfgSyncDevice" type="text" autocomplete="off" placeholder="この端末の名前（例：PC / スマホ）" style="margin-top:6px;">
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+      <button id="cfgSyncPush" class="ghost" type="button">☁️⬆️ この端末の設定をクラウドに保存</button>
+      <button id="cfgSyncPull" class="ghost" type="button">☁️⬇️ クラウドから設定を取得</button>
+    </div>
+    <div id="cfgSyncCloud" class="hint" style="margin-top:6px;"></div>
+    <div id="cfgSyncStatus" class="hint"></div>
+  </section>
+
   <!-- 設定の引っ越し（エクスポート / インポート）＝Task 8f -->
   <section class="card">
     <div class="field-label">⚙️ 設定の引っ越し（書き出し / 読み込み）</div>
-    <div class="hint">機種変更や別端末で使うときに、レイアウト微調整・本文・YouTube説明欄・短縮URL履歴などの設定をまとめて移せます。完全に端末内で完結します。</div>
+    <div class="hint">機種変更や別端末で使うときに、レイアウト微調整・本文・YouTube説明欄・短縮URL履歴などの設定をまとめて移せます。完全に端末内で完結します（クラウドを使わずファイルで移したい場合）。</div>
     <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
       <button id="cfgExportSafe" class="ghost" type="button">📤 鍵を除いて書き出し</button>
       <button id="cfgExportAll" class="ghost" type="button">📤 全部書き出し（鍵込み）</button>
@@ -623,24 +636,24 @@
 <!-- 背景動画（非表示・合成のソース） -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=123"></script>
-<script src="app.js?v=123"></script>
-<script src="affiliate-core.js?v=123"></script>
-<script src="fanza-core.js?v=123"></script>
-<script src="affiliate.js?v=123"></script>
-<script src="bluesky-core.js?v=123"></script>
-<script src="scheduler.js?v=123"></script>
-<script src="bluesky.js?v=123"></script>
-<script src="drive-upload.js?v=123"></script>
-<script src="verify-core.js?v=123"></script>
-<script src="verify.js?v=123"></script>
-<script src="schedule/data/holidays.js?v=123"></script>
-<script src="yt-clicks.js?v=123"></script>
-<script src="integration.js?v=123"></script>
-<script src="wizard.js?v=123"></script>
-<script src="settings-io.js?v=123"></script>
-<script src="theme-settings.js?v=123"></script>
-<script src="persist-fields.js?v=123"></script>
+<script src="idgen.js?v=124"></script>
+<script src="app.js?v=124"></script>
+<script src="affiliate-core.js?v=124"></script>
+<script src="fanza-core.js?v=124"></script>
+<script src="affiliate.js?v=124"></script>
+<script src="bluesky-core.js?v=124"></script>
+<script src="scheduler.js?v=124"></script>
+<script src="bluesky.js?v=124"></script>
+<script src="drive-upload.js?v=124"></script>
+<script src="verify-core.js?v=124"></script>
+<script src="verify.js?v=124"></script>
+<script src="schedule/data/holidays.js?v=124"></script>
+<script src="yt-clicks.js?v=124"></script>
+<script src="integration.js?v=124"></script>
+<script src="wizard.js?v=124"></script>
+<script src="settings-io.js?v=124"></script>
+<script src="theme-settings.js?v=124"></script>
+<script src="persist-fields.js?v=124"></script>
 <script>
 /* PC（精密ポインタ）だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */

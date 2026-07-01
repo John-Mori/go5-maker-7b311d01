@@ -71,7 +71,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-02C（案A: 共有URL列を追加＝da.gdチェーンの短い共有URLを記録）';
+var GAS_VERSION = '2026-07-02D（端末間 設定同期 settings_push/pull/meta を追加＝鍵以外を端末間共有）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -130,6 +130,8 @@ function doGet(e) {
       var ch = p.channel || 'acc1';
       if (p.action === 'history') out = { ok: true, items: historyItems_(ch, parseInt(p.limit || '40', 10)) };
       else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.postUri || '', p.short || '') };
+      else if (p.action === 'settings_pull') out = settingsPull_();   // 端末間同期：非秘密設定の取得
+      else if (p.action === 'settings_meta') out = settingsMeta_();   // 端末間同期：最終保存メタのみ（状態表示）
       else out = { ok: true, shortUrl: p.postUri ? lookupShortByUri_(ch, p.postUri) : '' }; // 既定＝action=short
     } catch (err) { out = { ok: false, error: String(err) }; }
     return ContentService.createTextOutput(p.callback + '(' + JSON.stringify(out) + ')')
@@ -309,6 +311,8 @@ function doPost(e) {
     if (body.op === 'sync_history') return syncHistory_(body.channel || 'acc1', body.items || []);
     // 投稿履歴の掃除（keepIds に無い post_id の行をクリア＝アプリの履歴を正にシートを揃える）。
     if (body.op === 'prune_history') return pruneHistory_(body.channel || 'acc1', body.keepIds || []);
+    // 端末間 設定同期：非秘密設定の保存（クラウドへ push）。
+    if (body.op === 'settings_push') return settingsPush_(body.blob || '', body.updatedAt || '', body.device || '');
     // テストモード：シートには一切書かない（Bluesky実投稿はフロント側で実施）。
     if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
     var r = writeRecord_(body.channel || 'acc1', {
@@ -500,6 +504,49 @@ function pruneHistory_(channel, keepIds) {
   }
   sortByDate_(sh, map['投稿日時'] || 2); // 空行は末尾へ
   return jsonOut_({ ok: true, cleared: cleared });
+}
+
+// ============================================================
+// 端末間 設定同期（鍵＝秘密以外の設定・投稿履歴を端末間で共有）
+//   クライアントは非秘密の localStorage を JSON 化(blob)して push、別端末で pull→上書き→再読込。
+//   秘密(app_pw/secret/api_key)はクライアント側で除外済み＝クラウドには保存しない。
+//   保存先：非表示シート '_sync'。A1=メタJSON、A2以降=blobチャンク（1セル約5万字上限を回避）。
+// ============================================================
+function syncSheet_() {
+  var ss = openSS_();
+  var sh = ss.getSheetByName('_sync');
+  if (!sh) { sh = ss.insertSheet('_sync'); try { sh.hideSheet(); } catch (e) {} }
+  return sh;
+}
+// 非秘密設定 blob を保存（POST）。既存内容は毎回全消去してから書き直す（＝最新スナップショットのみ保持）。
+function settingsPush_(blob, updatedAt, device) {
+  var sh = syncSheet_();
+  sh.clearContents();
+  blob = String(blob || '');
+  var CH = 45000, chunks = [];
+  for (var i = 0; i < blob.length; i += CH) chunks.push([blob.slice(i, i + CH)]);
+  var meta = { updatedAt: updatedAt || new Date().toISOString(), device: String(device || ''), chunks: chunks.length, len: blob.length };
+  sh.getRange(1, 1).setValue(JSON.stringify(meta));
+  if (chunks.length) sh.getRange(2, 1, chunks.length, 1).setValues(chunks);
+  return jsonOut_({ ok: true, len: blob.length, chunks: chunks.length, updatedAt: meta.updatedAt });
+}
+// メタのみ返す（軽量・状態表示用。JSONP GET）。
+function settingsMeta_() {
+  var sh = syncSheet_();
+  var v = sh.getRange(1, 1).getValue();
+  if (!v) return { ok: true, empty: true };
+  var meta = {}; try { meta = JSON.parse(v); } catch (e) { return { ok: true, empty: true }; }
+  return { ok: true, empty: false, updatedAt: meta.updatedAt || '', device: meta.device || '', len: meta.len || 0 };
+}
+// blob 全体を返す（JSONP GET）。チャンクを結合して復元。
+function settingsPull_() {
+  var sh = syncSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) return { ok: true, empty: true };
+  var meta = {}; try { meta = JSON.parse(sh.getRange(1, 1).getValue() || '{}'); } catch (e) {}
+  var vals = sh.getRange(2, 1, last - 1, 1).getValues();
+  var blob = ''; for (var i = 0; i < vals.length; i++) blob += (vals[i][0] || '');
+  return { ok: true, empty: false, blob: blob, updatedAt: meta.updatedAt || '', device: meta.device || '', len: blob.length };
 }
 
 // 記録シートを「投稿日時」降順で並べ替える（ヘッダ行は固定、2行目以降が対象）。
