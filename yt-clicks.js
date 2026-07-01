@@ -440,7 +440,9 @@
       var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
       return '<div class="vrow">' +
         (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
-        '<div class="vrow-h">' + dateHtml + ' ' + titleHtml + '</div>' +
+        // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名（改行して統一）
+        '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
+        '<div class="vrow-title">' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         (it.workUrl ?
           '<div class="fanza-snap-row"><span class="fp-state fp-state-snap">' + esc(it.workState || '旧作') + '</span> ' +
@@ -466,6 +468,7 @@
         '</div>' +
         '</div>';
     }).join('');
+    applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示（フェッチ待ちで遅れない）
     fillFanzaNames();
 
     // YouTube URL 直接入力
@@ -962,6 +965,26 @@
     var d2 = apply(loadManual(), manualKey());
     if (d1 || d2) setFanzaSnapEls(workUrl, fmtSnapPriceHtml(snap));
   }
+  // data-fanza-author-url が一致する要素へサークル名(作者名)を反映。手動入力が最優先。
+  function setFanzaAuthorEls(fanzaUrl, author) {
+    var man = fanzaManualOf_(fanzaUrl);
+    if (man && man.author) author = man.author;
+    document.querySelectorAll('[data-fanza-author-url]').forEach(function (el) {
+      if (el.getAttribute('data-fanza-author-url') !== fanzaUrl) return;
+      el.textContent = author || '';
+    });
+  }
+
+  // 手動入力済みの作品情報を、描画直後に即時反映する（フェッチ完了を待たず表示が遅れない）。
+  function applyManualInfoNow_() {
+    var m = fanzaManualLoad();
+    Object.keys(m).forEach(function (u) {
+      setFanzaEls(u, '');        // 手動タイトルがあれば表示
+      setFanzaPriceEls(u, null); // 手動価格/発売日があれば表示
+      setFanzaAuthorEls(u, '');  // 手動サークル名があれば表示
+    });
+  }
+
   // data-fanza-thumb-url が一致するサムネ<img>へ画像を設定して表示。
   // src＝メイン画像（モーダルと同じ・存在確認済みの大きい方）。altSrc＝読込失敗時の代替。両方ダメなら非表示。
   function setFanzaThumbEls(fanzaUrl, src, altSrc) {
@@ -1014,6 +1037,7 @@
       (samples.length ? '<div class="fz-samples">' + samples.map(function (s, si) { return '<img class="fz-zoomable" data-zoom="' + (sBase + si) + '" src="' + esc(s) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '') +
       (genres.length ? '<div class="fz-sec"><span class="fz-lbl">ジャンル</span><div class="fz-genres">' + genres.map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div></div>' : '') +
       '<div class="fz-sec fz-meta-row">' +
+        '<div class="fz-meta"><span class="fz-lbl">サークル</span>' + esc((man.author || c.author || '') || '—') + '</div>' +
         '<div class="fz-meta"><span class="fz-lbl">発売日</span>' + esc(date ? String(date).slice(0, 10) : '—') + '</div>' +
         '<div class="fz-meta"><span class="fz-lbl">サービス/フロア</span>' + esc(svc || '—') + '</div>' +
       '</div>' +
@@ -1042,6 +1066,7 @@
           '<div class="fz-title">✏️ 作品情報を手動入力</div>' +
           '<div class="hint" style="margin:0 0 10px;">自動取得できない作品(API未収録等)向け。入力した値は<b>自動取得より優先</b>して表示されます。<br>全て空にして保存すると手動入力を解除(自動取得に戻る)。</div>' +
           '<label class="vedit-field">作品名<input id="fzeTitle" type="text" autocomplete="off" placeholder="作品の正式タイトル"></label>' +
+          '<label class="vedit-field">サークル名(作者名)<input id="fzeAuthor" type="text" autocomplete="off" placeholder="サークル名"></label>' +
           '<div style="display:flex;gap:10px;">' +
             '<label class="vedit-field" style="flex:1;">定価(円)<input id="fzeList" type="text" inputmode="numeric" autocomplete="off" placeholder="1320"></label>' +
             '<label class="vedit-field" style="flex:1;">セール価格(円・無ければ空)<input id="fzePrice" type="text" inputmode="numeric" autocomplete="off" placeholder="924"></label>' +
@@ -1061,13 +1086,14 @@
         var url = ov.getAttribute('data-url');
         if (!url) { closeFanzaEdit_(); return; }
         var t = ($('fzeTitle').value || '').trim();
+        var au = ($('fzeAuthor').value || '').trim();
         var lp = parseInt(($('fzeList').value || '').replace(/[^\d]/g, ''), 10); if (isNaN(lp)) lp = null;
         var pr = parseInt(($('fzePrice').value || '').replace(/[^\d]/g, ''), 10); if (isNaN(pr)) pr = null;
         var rd = ($('fzeDate').value || '').trim();
         var gs = ($('fzeGenres').value || '').split(/[、,]/).map(function (s) { return s.trim(); }).filter(Boolean);
         var all = fanzaManualLoad();
-        if (!t && lp == null && pr == null && !rd && !gs.length) delete all[url]; // 全空＝解除
-        else all[url] = { title: t, listPrice: lp, price: pr, releaseDate: rd, genres: gs, updatedAt: new Date().toISOString() };
+        if (!t && !au && lp == null && pr == null && !rd && !gs.length) delete all[url]; // 全空＝解除
+        else all[url] = { title: t, author: au, listPrice: lp, price: pr, releaseDate: rd, genres: gs, updatedAt: new Date().toISOString() };
         fanzaManualSaveAll(all);
         // 当時スナップが未保存の投稿には、この価格を当時として固定（一覧の当時行にも出る）。
         var lp2 = lp != null ? lp : pr, pr2 = pr != null ? pr : lp;
@@ -1081,6 +1107,7 @@
     var man = fanzaManualOf_(fanzaUrl) || {};
     var cache = fanzaNameCacheLoad(); var c = cache[fanzaUrl] || {}; var pinfo = c.priceInfo || {};
     $('fzeTitle').value = man.title || c.title || '';
+    $('fzeAuthor').value = man.author || c.author || '';
     $('fzeList').value = man.listPrice != null ? man.listPrice : (pinfo.listPrice != null ? pinfo.listPrice : '');
     $('fzePrice').value = man.price != null ? man.price : (pinfo.price != null && pinfo.price !== pinfo.listPrice ? pinfo.price : '');
     $('fzeDate').value = String(man.releaseDate || pinfo.releaseDate || '').slice(0, 10);
@@ -1200,24 +1227,27 @@
       if (!url) return;
       var cached = cache[url];
       if (cached) {
-        // 有効な題名キャッシュ（旧スキーマ=価格/発売日/画像未保存なら再取得して埋める）
-        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media) {
-          setFanzaEls(url, cached.title);
+        // 有効な題名キャッシュ（旧スキーマ=価格/発売日/画像/サークル名未保存なら再取得して埋める）
+        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media && ('author' in cached)) {
+          setFanzaEls(url, cached.title); setFanzaAuthorEls(url, cached.author || '');
           setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo);
           setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall); return;
         }
         // 画像のみの部分情報（API未収録作品）：サムネ＋手動入力の作品名/価格を表示（※negative判定より先）
-        if (cached.partial && cached.media && (now - (cached.fetchedAt || 0)) < DAY) {
-          setFanzaEls(url, ''); setFanzaPriceEls(url, null);
+        if (cached.partial && cached.media && ('author' in cached) && (now - (cached.fetchedAt || 0)) < DAY) {
+          setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, cached.author || '');
           setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall); return;
         }
-        if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) { setFanzaEls(url, ''); setFanzaPriceEls(url, null); return; } // 直近「未取得」→再取得しない（手動入力があれば表示）
+        if (!cached.title && !cached.partial && (now - (cached.fetchedAt || 0)) < NEG) { setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, ''); return; } // 直近「未取得」→再取得しない（手動入力があれば表示）
       }
       var res = window.buildAffiliateLink(url, '');
       if (!res || !res.ok || !res.cid) return;
       if (seen[url]) return; seen[url] = true;
       jobs.push({ url: url, cid: res.cid, el: nameEl, title: titleByUrl[url] || '' });
-      nameEl.textContent = '…'; nameEl.style.display = '';
+      // 手動タイトルがある場合は「…」で潰さない（手動情報の表示が遅れる原因になっていた）
+      var manJ = fanzaManualOf_(url);
+      if (manJ && manJ.title) { nameEl.textContent = manJ.title; nameEl.style.display = ''; }
+      else { nameEl.textContent = '…'; nameEl.style.display = ''; }
     });
     if (!jobs.length) { if (manual) setDmmStatus('✅ 作品情報は取得済みです（再取得の必要はありません）。'); return; }
     // 自動実行は、生きている実行が進行中なら遠慮（重複取得を避ける）。60秒進捗が無ければ死亡とみなし開始。
@@ -1291,14 +1321,14 @@
         if (info && info.title && !isBadFanzaTitle(info.title)) {
           var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0, releaseDate: info.releaseDate || '' };
           var media = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: info.genres || [], service: info.service || '', floor: info.floor || '' };
-          c[job.url] = { title: info.title, priceInfo: pinfo, media: media, fetchedAt: new Date().getTime() };
-          fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
+          c[job.url] = { title: info.title, author: info.author || '', priceInfo: pinfo, media: media, fetchedAt: new Date().getTime() };
+          fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaAuthorEls(job.url, info.author || ''); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
           setFanzaThumbEls(job.url, media.thumb || media.thumbSmall, media.thumbSmall); done++;
         } else if (info && info.partial && (info.thumb || info.thumbSmall)) {
           // 画像のみの部分情報（API未収録＋ページ取得不能の作品）：サムネ・サンプルだけ保存/表示。
           var mediaP = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: [], service: info.service || '', floor: info.floor || '' };
-          c[job.url] = { title: '', partial: true, priceInfo: null, media: mediaP, fetchedAt: new Date().getTime() };
-          fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null);
+          c[job.url] = { title: '', author: '', partial: true, priceInfo: null, media: mediaP, fetchedAt: new Date().getTime() };
+          fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); setFanzaAuthorEls(job.url, '');
           setFanzaThumbEls(job.url, mediaP.thumb || mediaP.thumbSmall, mediaP.thumbSmall); partial++;
           if (manual) partials.push({ title: job.title });
         } else {
@@ -1427,6 +1457,7 @@
           '</div>';
         }).join('') +
       '</div>';
+      applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示
       fillFanzaNames();
     }
 

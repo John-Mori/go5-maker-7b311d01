@@ -274,18 +274,29 @@ async function scrapeFanzaItem(cid) {
 // doujin-assets.dmm.co.jp は認証・地域制限なし。URLは決定的パターン：
 //   digital/{type}/{cid}/{cid}pl.jpg（大）/ pt.jpg（小）/ jp-001.jpg…（サンプル）
 const DOUJIN_ASSET_TYPES = ["comic", "game", "voice", "cg"];
+async function headInfo_(u) {
+  try {
+    const r = await fetch(u, { method: "HEAD" });
+    return r.ok ? { ok: true, len: r.headers.get("content-length") || "", etag: r.headers.get("etag") || "" } : { ok: false };
+  } catch (e) { return { ok: false }; }
+}
 async function cdnFallbackItem(cid) {
   for (const t of DOUJIN_ASSET_TYPES) {
     const base = "https://doujin-assets.dmm.co.jp/digital/" + t + "/" + cid + "/" + cid;
-    let ok = false;
-    try { const r = await fetch(base + "pl.jpg", { method: "HEAD" }); ok = r.ok; } catch (e) {}
-    if (!ok) continue;
+    const pl = await headInfo_(base + "pl.jpg");
+    if (!pl.ok) continue;
+    // ★CDNは存在しない画像でも404ではなく「200＋NOW PRINTINGプレースホルダ」を返す。
+    //   確実に存在しない番号(jp-999)の指紋(ETag/サイズ)を基準に、一致する画像を除外する。
+    const ref = await headInfo_(base + "jp-999.jpg");
+    const isPh = (h) => ref.ok && h.ok && ((ref.etag && h.etag) ? ref.etag === h.etag : (ref.len !== "" && h.len === ref.len));
+    if (isPh(pl)) continue; // 表紙自体がプレースホルダ＝このtypeに画像なし
+    const pt = await headInfo_(base + "pt.jpg");
+    const listUrl = (pt.ok && !isPh(pt)) ? base + "pt.jpg" : base + "pl.jpg";
     const samples = [];
     for (let n = 1; n <= 8; n++) {
       const u = base + "jp-" + String(n).padStart(3, "0") + ".jpg";
-      let sok = false;
-      try { const r = await fetch(u, { method: "HEAD" }); sok = r.ok; } catch (e) {}
-      if (!sok) break;
+      const h = await headInfo_(u);
+      if (!h.ok || isPh(h)) break; // 実在しない番号＝プレースホルダを検知したら打ち切り
       samples.push(u);
     }
     return {
@@ -295,7 +306,7 @@ async function cdnFallbackItem(cid) {
       date: "",
       service_name: "同人",
       floor_name:   "同人",
-      imageURL: { list: base + "pt.jpg", large: base + "pl.jpg" },
+      imageURL: { list: listUrl, large: base + "pl.jpg" },
       sampleImageURL: samples.length ? { sample_l: { image: samples } } : null,
       iteminfo: { author: [], genre: [] },
       prices: { list_price: null, price: null },
