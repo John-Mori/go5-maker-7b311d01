@@ -12,7 +12,10 @@
 | 種類 | 用途 | 形式の例 | 投入場所 | 現状 |
 |---|---|---|---|---|
 | **① アフィID（af_id）** | 投稿に貼る**アフィリエイトリンク**の識別子。`al.fanza.co.jp/?...&af_id=◯◯&...` | `yourname-001` 等 | アプリ「🔗 AFIリンク」タブ「① あなたのアフィID」欄 | 構造完成・**値の入力待ち** |
-| **② DMM API資格情報** | FANZAの**商品情報(題名/価格/レビュー)を自動取得**するDMM公式API。fanza-workerが使用 | API_ID＝英数長い / AFFILIATE_ID＝`xxxx-990`等 | Cloudflare fanza-worker の**Secret** | 構造完成・**未設定**（`SHARED_SECRET`のみ設定済） |
+| **② DMM API資格情報** | FANZAの**商品情報(題名/価格/レビュー)を自動取得**するDMM公式API。fanza-workerが使用 | API_ID＝英数長い / AFFILIATE_ID＝`xxxx-990`等 | Cloudflare fanza-worker の**Secret** | ✅**有効化済み(2026-07-02)**：`FANZA_API_ID`＋`FANZA_AFFILIATE_ID`(末尾990番台)設定済・DMM API実測200。 |
+
+> **重要な学び（floorコード）**：DMM APIのFANZA同人は `service=doujin / floor=digital_doujin`（旧コード `service=digital / floor=doujin` は `floor: Invalid Request Error`）。他フロアも FloorList API の正コード必須（videoc/anime=service:digital、コミック=service:ebook/floor:comic 等）。fanza-worker はこの正コードに修正済み。
+> **affiliate_id の形式**：DMM API用は末尾 **990〜999**（API用サイトID）。リンク用af_idの `-001` 等は API では `affiliate_id: Invalid Request Error` になる（別物）。
 
 > 見分け方：`al.fanza.co.jp` のリンクに入れる短い識別子＝①。DMMの開発者API用（api_id と対）＝②。
 > ②は **API_ID と AFFILIATE_ID の2つで1組**。もし片方（AFFILIATE_IDだけ）なら、API_IDもコンサルに要求が必要。

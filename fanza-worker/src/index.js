@@ -73,14 +73,19 @@ export default {
 // https://affiliate.dmm.com/api/  で API ID を取得後に有効になる。
 // doujin フロアで見つからない場合は複数フロアを試みる（CID プレフィックスで判定）。
 async function fetchViaApi(cid, apiId, affiliateId) {
-  // CID プレフィックスからフロアを推定（d_ = doujin、それ以外はフロア指定なしで全体検索）
+  // CID プレフィックスからフロアを推定。※FANZAの正しい service/floor コード（FloorList APIで確認済み）。
+  //   同人＝service:doujin / floor:digital_doujin（旧コード service:digital,floor:doujin は無効）。
   const floors = cid.startsWith("d_")
-    ? [{ service: "digital", floor: "doujin" }]
+    ? [
+        { service: "doujin", floor: "digital_doujin"    }, // 同人（通常）
+        { service: "doujin", floor: "digital_doujin_bl" }, // 同人BL
+        { service: "doujin", floor: "digital_doujin_tl" }, // 同人TL
+      ]
     : [
-        { service: "digital", floor: "anime"   },
-        { service: "digital", floor: "videoc"  },
-        { service: "digital", floor: "doujin"  },
-        { service: "digital", floor: "ebook"   },
+        { service: "digital", floor: "videoc" }, // 素人・アダルト動画
+        { service: "digital", floor: "anime"  }, // アニメ動画
+        { service: "ebook",   floor: "comic"  }, // 電子コミック
+        { service: "ebook",   floor: "novel"  }, // 電子小説
       ];
 
   for (const { service, floor } of floors) {
