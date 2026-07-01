@@ -112,6 +112,7 @@ async function fetchViaApi(cid, apiId, affiliateId) {
       return {
         content_id: cid,
         title:      it.title || "",
+        date:       it.date  || "",   // 発売日（作品状態=新作/準新作/旧作 の判定に使用）
         iteminfo:   { author: authorArr },
         prices: {
           list_price: prices.list_price  || null,
@@ -196,9 +197,18 @@ async function scrapeFanzaItem(cid) {
   const lpM = html.match(/priceList__sub--big[^>]*>[\s\S]{0,80}?([\d,]+)円/);
   const listPriceStr = lpM ? lpM[1].replace(/,/g, "") : null;
 
+  // 発売日（JSON-LD releaseDate / 商品情報の「YYYY-MM-DD」表記から拾えれば）。取れなければ空。
+  var dateStr = "";
+  var rdM = html.match(/["']releaseDate["']\s*:\s*["'](\d{4}-\d{2}-\d{2})/)
+    || html.match(/(?:発売日|配信開始日)[^0-9]{0,12}(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+  if (rdM) {
+    dateStr = rdM.length >= 4 && rdM[2] ? (rdM[1] + "-" + ("0" + rdM[2]).slice(-2) + "-" + ("0" + rdM[3]).slice(-2)) : rdM[1];
+  }
+
   return {
     content_id: cid,
     title:      title,
+    date:       dateStr,
     iteminfo:   { author: circleName ? [{ name: circleName }] : [] },
     prices: {
       list_price: listPriceStr,

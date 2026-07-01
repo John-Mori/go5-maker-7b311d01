@@ -212,9 +212,9 @@
         '</div>' +
         '<label class="vedit-field">作品状態（投稿当時の状態・後から変更可）' +
           '<select id="veditWorkState">' +
-            '<option value="旧作">旧作</option>' +
-            '<option value="準新作">準新作</option>' +
             '<option value="新作">新作</option>' +
+            '<option value="準新作">準新作</option>' +
+            '<option value="旧作">旧作</option>' +
           '</select>' +
         '</label>' +
         '<div class="vedit-actions">' +
@@ -433,13 +433,15 @@
         ? '<span style="color:#dc465a;font-weight:700;">' + dispTitle + ' #タグ忘れ</span>'
         : dispTitle;
       var bskyHref = it.shareUrl || it.shortUrl || it.postUrl || ''; // 表示リンクは共有(da.gd)優先。計測は下のcode(=r2)で行う
-      // 属性・作品状態バッジ（作品名の下に改行して表示）
-      var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('') +
-        (it.workState === '新作' ? '<span class="vtag vtag-shinsaku">新作</span>' : (it.workState === '準新作' ? '<span class="vtag vtag-junshinsaku">準新作</span>' : ''));
+      // 属性バッジ（作品名の下に改行して表示。作品状態は価格行の左に別途表示）
+      var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
-        (it.workUrl ? '<div class="fanza-price-row" data-fanza-price-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
+        '<div class="fanza-price-row">' +
+          '<span class="fp-state-slot"' + (it.workUrl ? ' data-fanza-state-url="' + esc(it.workUrl) + '"' : '') + '>' + stateBadgeHtml_(it.workState) + '</span>' +
+          (it.workUrl ? '<span class="fanza-price" data-fanza-price-url="' + esc(it.workUrl) + '" style="display:none;"></span>' : '') +
+        '</div>' +
         (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
@@ -766,6 +768,22 @@
       else { el.textContent = ''; el.style.display = 'none'; }
     });
   }
+  // 発売日(YYYY-MM-DD…)→現在の作品状態。新作=30日以内 / 準新作=90日以内 / それ以降=旧作。取得不可は''。
+  function deriveWorkState_(dateStr) {
+    if (!dateStr) return '';
+    var t = Date.parse(String(dateStr).replace(' ', 'T'));
+    if (isNaN(t)) return '';
+    var days = (new Date().getTime() - t) / 86400000;
+    if (days <= 30) return '新作';
+    if (days <= 90) return '準新作';
+    return '旧作';
+  }
+  // 作品状態バッジのHTML（新作=緑 / 準新作=青緑 / 旧作=セピア）。空/未指定は旧作扱い。
+  function stateBadgeHtml_(ws) {
+    var s = ws || '旧作';
+    var cls = s === '新作' ? 'fp-state-new' : (s === '準新作' ? 'fp-state-semi' : 'fp-state-old');
+    return '<span class="fp-state ' + cls + '">' + esc(s) + '</span>';
+  }
   // 価格表示のHTMLを組み立て（セール時は「定価/セール価格/○%off」、通常は「現在価格」）。
   function fmtFanzaPriceHtml(p) {
     if (!p || p.price == null) return '';
@@ -777,7 +795,7 @@
     }
     return '現在価格:<span class="fp-cur">' + yen(p.price) + '</span>';
   }
-  // data-fanza-price-url が一致するDOM要素へ価格を反映。
+  // data-fanza-price-url が一致するDOM要素へ価格を反映＋発売日から現在の作品状態バッジを更新。
   function setFanzaPriceEls(fanzaUrl, priceInfo) {
     var html = fmtFanzaPriceHtml(priceInfo);
     document.querySelectorAll('[data-fanza-price-url]').forEach(function (el) {
@@ -785,6 +803,14 @@
       if (html) { el.innerHTML = html; el.style.display = ''; }
       else { el.innerHTML = ''; el.style.display = 'none'; }
     });
+    // 発売日→現在の作品状態（APIで取得できたときだけ上書き。取れなければ手動値のまま）。
+    var apiState = priceInfo && deriveWorkState_(priceInfo.releaseDate);
+    if (apiState) {
+      document.querySelectorAll('[data-fanza-state-url]').forEach(function (el) {
+        if (el.getAttribute('data-fanza-state-url') !== fanzaUrl) return;
+        el.innerHTML = stateBadgeHtml_(apiState);
+      });
+    }
   }
 
   var _fanzaBusy = false; // 二重起動防止（順次取得中の再入を防ぐ）
@@ -807,8 +833,8 @@
       if (!url) return;
       var cached = cache[url];
       if (cached) {
-        // 有効な題名キャッシュ（旧スキーマ=価格未保存なら再取得して価格も埋める）
-        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo !== undefined) {
+        // 有効な題名キャッシュ（旧スキーマ=価格/発売日未保存なら再取得して埋める）
+        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo)) {
           nameEl.textContent = cached.title; nameEl.style.display = '';
           setFanzaPriceEls(url, cached.priceInfo); return;
         }
@@ -830,7 +856,7 @@
       window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
         var c = fanzaNameCacheLoad();
         if (info && info.title && !isBadFanzaTitle(info.title)) {
-          var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0 };
+          var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0, releaseDate: info.releaseDate || '' };
           c[job.url] = { title: info.title, priceInfo: pinfo, fetchedAt: new Date().getTime() };
           fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo);
         } else {
@@ -896,7 +922,8 @@
           views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
           ts: it.ts || (publishedCache[x.vid] || 0),
           bskyHref: it.shortUrl || it.postUrl || '',
-          workUrl: it.workUrl || ''
+          workUrl: it.workUrl || '',
+          workState: it.workState || '旧作'
         };
       });
       rows.sort(function (a, b) {
@@ -923,7 +950,10 @@
                 '</div>' +
               '</div>' +
               (r.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(r.workUrl) + '" style="display:none;"></div>' : '') +
-              (r.workUrl ? '<div class="fanza-price-row" data-fanza-price-url="' + esc(r.workUrl) + '" style="display:none;"></div>' : '') +
+              '<div class="fanza-price-row">' +
+                '<span class="fp-state-slot"' + (r.workUrl ? ' data-fanza-state-url="' + esc(r.workUrl) + '"' : '') + '>' + stateBadgeHtml_(r.workState) + '</span>' +
+                (r.workUrl ? '<span class="fanza-price" data-fanza-price-url="' + esc(r.workUrl) + '" style="display:none;"></span>' : '') +
+              '</div>' +
               '<div class="rank-metrics">' +
                 '<span>▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>' +
                 (r.bskyHref ? '<a class="vlink" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +

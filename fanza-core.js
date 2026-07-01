@@ -35,6 +35,7 @@ function parseFanzaItem(item) {
     listPrice: listPrice,
     price: price,
     discountPct: discountPct,
+    releaseDate: item.date || '',   // 発売日（作品状態=新作/準新作/旧作 の判定に使用）
     reviewCount: (review.count !== undefined && review.count !== null) ? review.count : null,
     reviewAvg: (review.average !== undefined && review.average !== null) ? review.average : null,
     fetchedAt: new Date().toISOString()

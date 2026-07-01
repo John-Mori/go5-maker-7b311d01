@@ -115,6 +115,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-tags .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;}
 .fanza-name-row{font-size:.78rem;color:var(--sub);padding:1px 0 2px 2px;}
 .fanza-price-row{font-size:.74rem;color:var(--sub);padding:0 0 2px 2px;font-variant-numeric:tabular-nums;}
+.fp-state{font-size:.68rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 6px;margin-right:6px;white-space:nowrap;}
+.fp-state-new{color:#2fa96e;border-color:#2fa96e;}
+.fp-state-semi{color:#5bb8ae;border-color:#5bb8ae;}
+.fp-state-old{color:#b08968;border-color:#b08968;background:rgba(176,137,104,.12);}
 .fanza-price-row .fp-cur{color:#e7c46a;font-weight:700;}
 .fanza-price-row .fp-list{color:var(--sub);text-decoration:line-through;}
 .fanza-price-row .fp-sale-lbl{color:#ff6b8a;}
