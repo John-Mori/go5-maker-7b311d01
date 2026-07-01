@@ -64,8 +64,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .bsky-adv[open] summary{margin-bottom:4px;}
 
 /* ── 検証ダッシュボード（Phase4） ── */
-.vrow{background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;}
-.vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.vrow{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;}
+.vrow-thumb{position:absolute;top:8px;right:10px;width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;}
+.vrow-thumb:active{opacity:.7;}
+.vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding-right:54px;}
 .vrow-h .vrole{color:var(--accent);font-weight:700;}
 .vrow-h .vdate-pending{color:var(--sub);font-weight:400;}
 .vrow-h .vdate-unknown{color:var(--sub);font-weight:400;font-size:12px;}
@@ -121,6 +123,24 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .fp-state-old{color:#b08968;border-color:#b08968;background:rgba(176,137,104,.12);}
 .fanza-price-row .fp-cur{color:var(--ink);font-weight:700;}
 .fanza-snap-row{font-size:.74rem;color:var(--sub);padding:0 0 1px 2px;font-variant-numeric:tabular-nums;}
+/* 作品詳細モーダル */
+.fz-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;box-sizing:border-box;overflow:auto;}
+.fz-overlay[hidden]{display:none;}
+.fz-modal{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:16px;width:100%;max-width:520px;box-sizing:border-box;margin:auto;}
+.fz-close{position:absolute;top:8px;right:10px;background:transparent;border:none;color:var(--sub);font-size:20px;cursor:pointer;line-height:1;width:auto;padding:2px 6px;}
+.fz-title{font-size:15px;font-weight:700;color:var(--ink);margin:2px 30px 10px 0;word-break:break-word;}
+.fz-hero{text-align:center;margin-bottom:10px;}
+.fz-hero img{max-width:100%;max-height:44vh;border-radius:8px;border:1px solid var(--line);}
+.fz-samples{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;}
+.fz-samples img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid var(--line);}
+.fz-sec{margin:10px 0;}
+.fz-lbl{display:block;font-size:11px;color:var(--accent);font-weight:700;margin-bottom:4px;}
+.fz-genres{display:flex;flex-wrap:wrap;gap:5px;}
+.fz-genre{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:1px 7px;}
+.fz-meta-row{display:flex;gap:14px;flex-wrap:wrap;}
+.fz-meta{font-size:13px;color:var(--ink);}
+.fz-foot{margin-top:12px;text-align:right;}
+.fz-open{color:var(--accent);font-size:13px;font-weight:700;text-decoration:none;}
 .fanza-price-row .fp-list{color:var(--sub);text-decoration:line-through;}
 .fanza-price-row .fp-sale-lbl{color:#ff6b8a;}
 .fanza-price-row .fp-sale{color:#ff6b8a;font-weight:700;}

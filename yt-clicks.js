@@ -436,6 +436,7 @@
       // 属性バッジ（作品名の下に改行して表示。作品状態は価格行の左に別途表示）
       var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
       return '<div class="vrow">' +
+        (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" style="display:none;">' : '') +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         (it.workUrl ?
@@ -477,6 +478,11 @@
     // 削除
     list.querySelectorAll('.vdel').forEach(function (b) {
       b.addEventListener('click', function () { deleteItem(b.getAttribute('data-k')); });
+    });
+
+    // サムネ → 作品詳細モーダル
+    list.querySelectorAll('.vrow-thumb').forEach(function (im) {
+      im.addEventListener('click', function () { openFanzaModal_(im.getAttribute('data-fanza-thumb-url')); });
     });
 
     // 編集モーダル
@@ -829,6 +835,55 @@
     var d2 = apply(loadManual(), manualKey());
     if (d1 || d2) setFanzaSnapEls(workUrl, fmtSnapPriceHtml(snap));
   }
+  // data-fanza-thumb-url が一致するサムネ<img>へ画像を設定して表示。
+  function setFanzaThumbEls(fanzaUrl, src) {
+    if (!src) return;
+    document.querySelectorAll('img[data-fanza-thumb-url]').forEach(function (el) {
+      if (el.getAttribute('data-fanza-thumb-url') !== fanzaUrl) return;
+      if (el.getAttribute('src') !== src) el.setAttribute('src', src);
+      el.style.display = '';
+    });
+  }
+
+  // 作品詳細モーダル（サムネクリックで開く）。キャッシュから作品名/画像/ジャンル/発売日/サービスを表示。
+  function openFanzaModal_(fanzaUrl) {
+    var cache = fanzaNameCacheLoad();
+    var c = cache[fanzaUrl];
+    if (!c) return;
+    var media = c.media || {}, pinfo = c.priceInfo || {};
+    var title = c.title || '(無題)';
+    var big = media.thumb || media.thumbSmall || '';
+    var samples = media.samples || [];
+    var genres = media.genres || [];
+    var date = pinfo.releaseDate || '';
+    var svc = [media.service, media.floor].filter(Boolean).join(' / ');
+
+    var ov = $('fzOverlay');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'fzOverlay';
+      ov.className = 'fz-overlay';
+      ov.hidden = true;
+      ov.innerHTML = '<div class="fz-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) closeFanzaModal_(); });
+      ov.querySelector('.fz-close').addEventListener('click', closeFanzaModal_);
+    }
+    var body = ov.querySelector('.fz-body');
+    body.innerHTML =
+      '<div class="fz-title">' + esc(title) + '</div>' +
+      (big ? '<div class="fz-hero"><a href="' + esc(fanzaUrl) + '" target="_blank" rel="noopener"><img src="' + esc(big) + '" alt=""></a></div>' : '') +
+      (samples.length ? '<div class="fz-samples">' + samples.map(function (s) { return '<a href="' + esc(s) + '" target="_blank" rel="noopener"><img src="' + esc(s) + '" alt="" loading="lazy"></a>'; }).join('') + '</div>' : '') +
+      (genres.length ? '<div class="fz-sec"><span class="fz-lbl">ジャンル</span><div class="fz-genres">' + genres.map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div></div>' : '') +
+      '<div class="fz-sec fz-meta-row">' +
+        '<div class="fz-meta"><span class="fz-lbl">発売日</span>' + esc(date ? String(date).slice(0, 10) : '—') + '</div>' +
+        '<div class="fz-meta"><span class="fz-lbl">サービス/フロア</span>' + esc(svc || '—') + '</div>' +
+      '</div>' +
+      '<div class="fz-foot"><a class="fz-open" href="' + esc(fanzaUrl) + '" target="_blank" rel="noopener">作品ページを開く ↗</a></div>';
+    ov.hidden = false;
+  }
+  function closeFanzaModal_() { var ov = $('fzOverlay'); if (ov) ov.hidden = true; }
+
   // data-fanza-price-url が一致するDOM要素へ価格を反映＋発売日から現在の作品状態バッジを更新。
   function setFanzaPriceEls(fanzaUrl, priceInfo) {
     var html = fmtFanzaPriceHtml(priceInfo);
@@ -867,10 +922,11 @@
       if (!url) return;
       var cached = cache[url];
       if (cached) {
-        // 有効な題名キャッシュ（旧スキーマ=価格/発売日未保存なら再取得して埋める）
-        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo)) {
+        // 有効な題名キャッシュ（旧スキーマ=価格/発売日/画像未保存なら再取得して埋める）
+        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media) {
           nameEl.textContent = cached.title; nameEl.style.display = '';
-          setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo); return;
+          setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo);
+          setFanzaThumbEls(url, cached.media.thumbSmall || cached.media.thumb); return;
         }
         if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) return; // 直近「未取得」→再取得しない（連打防止）
       }
@@ -891,10 +947,12 @@
         var c = fanzaNameCacheLoad();
         if (info && info.title && !isBadFanzaTitle(info.title)) {
           var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0, releaseDate: info.releaseDate || '' };
-          c[job.url] = { title: info.title, priceInfo: pinfo, fetchedAt: new Date().getTime() };
+          var media = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: info.genres || [], service: info.service || '', floor: info.floor || '' };
+          c[job.url] = { title: info.title, priceInfo: pinfo, media: media, fetchedAt: new Date().getTime() };
           fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
+          setFanzaThumbEls(job.url, media.thumbSmall);
         } else {
-          c[job.url] = { title: '', priceInfo: null, fetchedAt: new Date().getTime() }; // 未取得を短期キャッシュ（再ハンマー防止）
+          c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得を短期キャッシュ（再ハンマー防止）
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null);
         }
       }).catch(function () { setFanzaEls(job.url, ''); })

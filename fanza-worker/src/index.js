@@ -109,11 +109,16 @@ async function fetchViaApi(cid, apiId, affiliateId) {
       const it = items[0];
       const prices = it.prices || {};
       const authorArr = (it.iteminfo && Array.isArray(it.iteminfo.author)) ? it.iteminfo.author : [];
+      var genreArr = (it.iteminfo && Array.isArray(it.iteminfo.genre)) ? it.iteminfo.genre : [];
       return {
-        content_id: cid,
-        title:      it.title || "",
-        date:       it.date  || "",   // 発売日（作品状態=新作/準新作/旧作 の判定に使用）
-        iteminfo:   { author: authorArr },
+        content_id:   cid,
+        title:        it.title || "",
+        date:         it.date  || "",   // 発売日（作品状態=新作/準新作/旧作 の判定に使用）
+        service_name: it.service_name || "",
+        floor_name:   it.floor_name   || "",
+        imageURL:       it.imageURL       || null,   // {list, large}
+        sampleImageURL: it.sampleImageURL || null,   // {sample_s:{image:[]}, sample_l:{image:[]}}
+        iteminfo:   { author: authorArr, genre: genreArr },
         prices: {
           list_price: prices.list_price  || null,
           price:      prices.price       || null,
@@ -205,11 +210,20 @@ async function scrapeFanzaItem(cid) {
     dateStr = rdM.length >= 4 && rdM[2] ? (rdM[1] + "-" + ("0" + rdM[2]).slice(-2) + "-" + ("0" + rdM[3]).slice(-2)) : rdM[1];
   }
 
+  // サムネ（og:image）。サンプル画像はスクレイプでは安定取得できないため空。
+  var ogImgM = html.match(/<meta\s+[^>]*property=["']og:image["']\s+content=["']([^"']+)["']/i)
+    || html.match(/<meta\s+[^>]*content=["']([^"']+)["']\s+property=["']og:image["']/i);
+  var ogImg = ogImgM && ogImgM[1] ? ogImgM[1].trim() : "";
+
   return {
     content_id: cid,
     title:      title,
     date:       dateStr,
-    iteminfo:   { author: circleName ? [{ name: circleName }] : [] },
+    service_name: "同人",
+    floor_name:   "同人",
+    imageURL:       ogImg ? { list: ogImg, large: ogImg } : null,
+    sampleImageURL: null,
+    iteminfo:   { author: circleName ? [{ name: circleName }] : [], genre: [] },
     prices: {
       list_price: listPriceStr,
       price:      currentPriceStr,

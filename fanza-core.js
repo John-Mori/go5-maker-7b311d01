@@ -28,6 +28,17 @@ function parseFanzaItem(item) {
   var authorArr = (item.iteminfo && Array.isArray(item.iteminfo.author)) ? item.iteminfo.author : [];
   var author = authorArr.length > 0 ? String(authorArr[0].name || '') : '';
 
+  // サムネ・サンプル画像・ジャンル（詳細モーダル用）。
+  var img = item.imageURL || {};
+  var thumb = String(img.large || img.list || '');
+  var thumbSmall = String(img.list || img.large || '');
+  var sImg = item.sampleImageURL || {};
+  var samples = [];
+  if (sImg.sample_l && Array.isArray(sImg.sample_l.image)) samples = sImg.sample_l.image.slice();
+  else if (sImg.sample_s && Array.isArray(sImg.sample_s.image)) samples = sImg.sample_s.image.slice();
+  var genreArr = (item.iteminfo && Array.isArray(item.iteminfo.genre)) ? item.iteminfo.genre : [];
+  var genres = genreArr.map(function (g) { return String((g && g.name) || ''); }).filter(Boolean);
+
   return {
     cid: item.content_id || '',
     title: item.title || '',
@@ -36,6 +47,12 @@ function parseFanzaItem(item) {
     price: price,
     discountPct: discountPct,
     releaseDate: item.date || '',   // 発売日（作品状態=新作/準新作/旧作 の判定に使用）
+    service: String(item.service_name || ''),
+    floor: String(item.floor_name || ''),
+    thumb: thumb,
+    thumbSmall: thumbSmall,
+    samples: samples,
+    genres: genres,
     reviewCount: (review.count !== undefined && review.count !== null) ? review.count : null,
     reviewAvg: (review.average !== undefined && review.average !== null) ? review.average : null,
     fetchedAt: new Date().toISOString()
