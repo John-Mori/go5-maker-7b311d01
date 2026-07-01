@@ -569,7 +569,8 @@
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
       workUrl: ((els.workUrl && els.workUrl.value) || '').trim(),
       hashtags: record.hashtags || '', postUri: record.postUri || '',
-      shortUrl: record.shortUrl || '',                   // フロント生成の短縮URL(da.gd等)。空ならGAS側でda.gd短縮
+      shortUrl: record.shortUrl || '',                   // r2短縮URL＝計測用（短縮URL列・codeFromShort_対象）
+      shareUrl: record.shareUrl || '',                   // da.gd短縮URL＝共有用（共有URL列）
       videoId: (record.videoId || currentVideoId || '')  // 背骨ID＝upsertキー（post_id 列に採用）
     };
     var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = ma[p[0]]; }); // カテゴリ属性（複数可）
@@ -594,9 +595,10 @@
     var vid = currentVideoId || '';
     // まず即時記録（短縮URLが遅い/失敗しても投稿は確実に残す）。videoIdがあれば後追いで同一行へ追記。
     recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri, videoId: vid });
-    shortenAndShow(d.post_url, d.post_uri, d.title, function (short) {
-      // 短縮URL確定 → videoId があれば同一行へ upsert で短縮URLだけ追記（二重行は作らない）。
-      if (vid && short) recordToSheet({ postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: short });
+    shortenAndShow(d.post_url, d.post_uri, d.title, function (res) {
+      // 短縮URL確定 → videoId があれば同一行へ upsert（shortUrl=r2計測用 / shareUrl=da.gd表示用）。
+      var short = res && (res.shortUrl || res.shareUrl);
+      if (vid && short) recordToSheet({ postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: (res.shortUrl || res.shareUrl), shareUrl: res.shareUrl || '' });
     });
   });
 
@@ -635,20 +637,40 @@
       .then(function (t) { t = String(t || '').trim(); return /^https?:\/\//.test(t) ? t : ''; })
       .catch(function () { return ''; });
   }
+  // 案A（da.gdチェーン）：true でr2短縮を da.gd でさらに短縮して“表示用の短いURL”にする。
+  //   false にすると従来どおり r2URL をそのまま表示（＝ワンフラグで即ロールバック）。
+  var USE_DAGD_CHAIN = true;
+  // 最終URL → { shortUrl(r2・計測用), shareUrl(da.gd・表示用) } を返す。
+  //   r2成功時：shortUrl=r2、shareUrl=da.gd(r2URLをさらに短縮)。計測は常にr2の shortUrl 側で行う。
+  //   r2失敗時：従来フォールバック(da.gd→TinyURL→長いURL)。この場合は計測不可で shortUrl=shareUrl。
+  function makeShortAndShare(longUrl) {
+    if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '' });
+    return shortenViaWorker(longUrl).then(function (r2) {
+      if (r2) {
+        if (!USE_DAGD_CHAIN) return { shortUrl: r2, shareUrl: r2 };
+        return shortenVia('https://da.gd/s?url=', r2).then(function (dg) {
+          return { shortUrl: r2, shareUrl: (dg || r2) }; // da.gd失敗時はr2URLを表示にフォールバック
+        });
+      }
+      return shortenVia('https://da.gd/s?url=', longUrl)
+        .then(function (s) { return s || shortenVia('https://tinyurl.com/api-create.php?url=', longUrl); })
+        .then(function (s) { var u = s || longUrl; return { shortUrl: u, shareUrl: u }; });
+    });
+  }
+  // 後方互換：表示用（da.gd優先）の1本を返す薄いラッパ（手動短縮などで使用）。
   function shortenUrl(longUrl) {
     if (!longUrl) return Promise.resolve('');
-    return shortenViaWorker(longUrl)                                          // 一次：自前link-worker（開封数を計測）
-      .then(function (s) { return s || shortenVia('https://da.gd/s?url=', longUrl); })          // 二次：da.gd
-      .then(function (s) { return s || shortenVia('https://tinyurl.com/api-create.php?url=', longUrl); }); // 三次：TinyURL
+    return makeShortAndShare(longUrl).then(function (r) { return r.shareUrl || r.shortUrl || ''; });
   }
   function shortenAndShow(longUrl, postUri, title, onShort) {
     if (!longUrl) return;
     if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを作成中…';
-    shortenUrl(longUrl).then(function (short) {
-      var url = short || longUrl;                      // 失敗時は長いURLで代替（リンクは有効）
-      setShareOutputs(url, longUrl);
-      histAdd({ title: title, shortUrl: url, postUrl: longUrl, postUri: postUri, videoId: currentVideoId || '' });
-      if (typeof onShort === 'function') onShort(short);  // 短縮成功時のみ（長いURL代替時は空）
+    makeShortAndShare(longUrl).then(function (res) {
+      var short = res.shortUrl || '';                  // r2（計測用）
+      var share = res.shareUrl || short || longUrl;    // da.gd（表示・概要欄・コピー用）
+      setShareOutputs(share, longUrl);                 // 概要欄・表示・コピーは短い共有URL(da.gd)
+      histAdd({ title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: currentVideoId || '' });
+      if (typeof onShort === 'function') onShort({ shortUrl: short, shareUrl: share });
     });
   }
 
@@ -681,7 +703,7 @@
       }
     } catch (e) {}
     var a = histLoad().filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
-    var entry = { ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || '' };
+    var entry = { ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || '' };
     if (workUrl) entry.workUrl = workUrl;
     // 動画作成タブのカテゴリ属性・作品状態を引き継ぐ（manualOnly=手動短縮のときは付けない）
     if (!rec.manualOnly) {
@@ -712,7 +734,7 @@
     if (!items.length) { els.histList.innerHTML = '<p class="hint">このアカウントの履歴はまだありません（投稿して短縮URLが出ると、ここに自動で貯まります）。</p>'; return; }
     if (!view.length) { els.histList.innerHTML = '<p class="hint">表示できる履歴がありません（すべて破棄済み）。「🗂 破棄も表示」で確認できます。</p>'; return; }
     els.histList.innerHTML = view.map(function (it) {
-      var short = it.shortUrl || '';
+      var short = it.shareUrl || it.shortUrl || ''; // コピー・概要欄へは短い共有URL(da.gd)を優先
       var t = (it.title || '').trim();
       var badges = (it.adopted ? '<span class="hist-badge adopt">⭐本採用</span>' : '') +
         (dup[t] ? '<span class="hist-badge dup">重複</span>' : '') +

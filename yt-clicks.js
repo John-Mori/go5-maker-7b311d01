@@ -288,7 +288,8 @@
       title: it.title || '',
       postUri: it.postUri || '',
       workUrl: it.workUrl || '',
-      shortUrl: it.shortUrl || ''
+      shortUrl: it.shortUrl || '',
+      shareUrl: it.shareUrl || ''
     };
     ATTR_DEFS.forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
     payload.workState = it.workState || '旧作'; // 作品状態列
@@ -322,7 +323,7 @@
       var titleHtml = tagWarn
         ? '<span style="color:#dc465a;font-weight:700;">' + dispTitle + ' #タグ忘れ</span>'
         : dispTitle;
-      var bskyHref = it.shortUrl || it.postUrl || '';
+      var bskyHref = it.shareUrl || it.shortUrl || it.postUrl || ''; // 表示リンクは共有(da.gd)優先。計測は下のcode(=r2)で行う
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml +
           ATTR_DEFS.map(function (a) { return it[a.key] ? ' <span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('') +
@@ -495,6 +496,7 @@
         postUri: it.postUri || '',
         postUrl: it.postUrl || '',
         shortUrl: it.shortUrl || '',
+        shareUrl: it.shareUrl || '',
         workUrl: it.workUrl || '',
         youtubeUrl: yt,
         postedAt: postedMs ? new Date(postedMs).toISOString() : ''

@@ -40,7 +40,7 @@ var FANZA_HEADERS = [
 // カテゴリ＝作品属性を名前で明記（キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄）。
 // ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
-var EXTRA_HEADERS = ['カテゴリ', '作品状態'];
+var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL'];
 // 作品属性の定義（順序＝カテゴリ列での並び）。フラグ名→表示名。
 var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
@@ -71,7 +71,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-02B（作品状態列を追加：新作/準新作/旧作）';
+var GAS_VERSION = '2026-07-02C（案A: 共有URL列を追加＝da.gdチェーンの短い共有URLを記録）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -315,6 +315,7 @@ function doPost(e) {
       videoId: body.videoId || '',   // 背骨ID。あれば post_id に採用＋同ID行へ upsert（重複行を作らない）
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
+      shareUrl: body.shareUrl || '',       // da.gd共有URL（共有URL列）
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
       chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, // カテゴリ属性（複数可）
       workState: body.workState,           // 作品状態（新作/準新作/旧作）
@@ -427,7 +428,8 @@ function writeRecord_(channel, f) {
   else if (isNewRow || f.postUrl) put('投稿日時', now);
   putIf('題名(コメント)', f.ytTitle || f.title || '');         // YouTube題名を優先して題名(コメント)へ集約
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
-  putIf('短縮URL', shortUrl);
+  putIf('短縮URL', shortUrl);                                   // r2＝計測用（codeFromShort_対象）
+  putIf('共有URL', f.shareUrl || '');                           // da.gd＝実際に概要欄へ貼る短いURL
   putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
   putIf(clickColName_(map), (f.clicks !== undefined && f.clicks !== null && f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
@@ -465,7 +467,7 @@ function syncHistory_(channel, items) {
     try {
       writeRecord_(channel, {
         videoId: it.videoId, title: it.title || '', postUrl: it.postUrl || '',
-        workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '',
+        workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '', shareUrl: it.shareUrl || '',
         youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '',
         views: it.views, clicks: it.clicks,
         chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, // カテゴリ属性（複数可）
