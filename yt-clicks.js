@@ -130,7 +130,10 @@
     }).catch(function () { return {}; });
   }
 
-  var clicksCache = {};    // code -> clicks
+  // クリック数キャッシュは localStorage に永続化（リロード直後や取得失敗時に「…」のままに
+  // ならず、前回値を即表示→取得成功で最新化。再生数等の yt_meta_cache と同方針）。
+  var clicksCache = (function () { try { return JSON.parse(localStorage.getItem('clicks_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> clicks
+  function clicksPersist_() { try { localStorage.setItem('clicks_cache', JSON.stringify(clicksCache)); } catch (e) {} }
   var viewsCache = {};     // videoId -> views
   var publishedCache = {}; // videoId -> publishedAt(ms)
   var titleCache = {};     // videoId -> YouTubeタイトル
@@ -572,7 +575,8 @@
     if (!codes.length && !vids.length) return Promise.resolve(false);
     var jobs = [];
     codes.forEach(function (code) { jobs.push(fetchClicks(code).then(function (c) { if (c != null) clicksCache[code] = c; })); });
-    if (vids.length) jobs.push(fetchVideos(vids).then(function (m) {
+    // YouTube側の通信エラーで全体(クリック数の反映含む)を巻き込まないよう、このジョブ単体でcatchする。
+    if (vids.length) jobs.push(fetchVideos(vids).catch(function () { return { __error: 'YouTube APIに接続できませんでした（通信エラー）' }; }).then(function (m) {
       lastErr = m.__error || ''; delete m.__error;
       Object.keys(m).forEach(function (id) {
         var rec = m[id] || {};
@@ -582,7 +586,7 @@
       });
       ytMetaPersist(m); // 永続化（リロードで消えない）
     }));
-    return Promise.all(jobs).then(function () { return true; });
+    return Promise.all(jobs).then(function () { clicksPersist_(); return true; });
   }
 
   // announce=true（手動更新ボタン）のときは、完了時に成功/失敗を明確に表示する。
@@ -718,7 +722,7 @@
         saveArr(histKey(), hist); saveArr(manualKey(), manual);
         _bulkBusy = false; if (btn) btn.disabled = false;
         setStatus('✅ 計測リンク生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「Bsky投稿↗」が計測用の短縮URLです（長押しでコピー→YouTube概要欄に貼り替え）。');
-        render();
+        refresh(); // 新しく発行したコードのクリック数も取得（renderだけだと「…」のままになる）
         return;
       }
       var it = targets[i++];
@@ -830,9 +834,10 @@
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
-  document.addEventListener('account-changed', function () { render(); });
-  // 読み込み時点で既に投稿履歴タブを開いている場合も自動生成＋当時割引の復元（各1回）。
-  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { maybeAutoGen(); maybeRestorePromo_(); } }, 2500);
+  // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得（renderだけだと「…」のままになる）。
+  document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) refresh(); else render(); });
+  // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引の復元（各1回）。
+  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); } }, 2500);
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。
   var keyEl = $('ytApiKey');
