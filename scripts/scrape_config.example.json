@@ -1,0 +1,5 @@
+{
+  "_comment": "これを scrape_config.json という名前でコピーし、値を記入する（scrape_config.json はgitに入れない）",
+  "workerUrl": "https://go5-fanza-proxy.XXXXX.workers.dev",
+  "adminSecret": "ワーカーの ADMIN_SECRET と同値（wrangler secret put ADMIN_SECRET で登録した配布しない管理鍵）"
+}

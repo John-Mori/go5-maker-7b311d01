@@ -7,8 +7,16 @@ compatibility_date = "2024-11-01"
 # フロント(GitHub Pages)のOriginだけ許可（ワイルドカード不可）
 ALLOWED_ORIGIN = "https://john-mori.github.io"
 
+# ── KV：API未収録作品の上書き情報(ov:<cid>)と取得依頼キュー(req:<cid>) ──
+#   PC側スクリプト(scripts/fetch_missing_works.mjs)が日本IPでスクレイプした
+#   フル情報を ov: に保存し、以後 /api/fanza-item がそれを優先して返す。
+[[kv_namespaces]]
+binding = "FANZA_KV"
+id = "2e310c3f2fe44c7b814dfc2f1027ade6"
+
 # ── Secrets（コマンドで登録。ここには書かない）──
-#   wrangler secret put SHARED_SECRET         ← フロント認証キー（必須）
+#   wrangler secret put SHARED_SECRET         ← フロント認証キー（必須・公開可のソフト鍵）
+#   wrangler secret put ADMIN_SECRET          ← 管理鍵（override/queue用・PCバッチのみ保持・配布禁止）
 #   wrangler secret put FANZA_API_ID          ← DMM API ID（任意・推奨）
 #   wrangler secret put FANZA_AFFILIATE_ID    ← FANZAアフィリエイトID（任意・推奨）
 #

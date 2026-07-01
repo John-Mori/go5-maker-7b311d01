@@ -6,3 +6,6 @@ Thumbs.db
 # wrangler ローカルキャッシュ（各worker配下）
 .wrangler/
 **/.wrangler/
+
+# PCスクレイプ用のローカル設定（共有シークレットを含むためコミットしない）
+scripts/scrape_config.json

@@ -46,11 +46,30 @@ export default {
 
       const cid = String(body.cid || "").trim();
       if (!cid) return json({ ok: false, error: "missing_cid" }, 400, cors);
+      // KVキーに使うため形式を厳格に検証（req:キュー汚染・ゴミキー増殖の防止）
+      if (!/^[0-9A-Za-z_-]{1,64}$/.test(cid)) return json({ ok: false, error: "bad_cid" }, 400, cors);
 
       // ① DMM 公式 API（APIキーが設定されていれば優先）
       let item = null;
       if (env.FANZA_API_ID && env.FANZA_AFFILIATE_ID) {
         item = await fetchViaApi(cid, env.FANZA_API_ID, env.FANZA_AFFILIATE_ID);
+      }
+
+      // ①′ KV上書き：PC側バッチ(scripts/fetch_missing_works.mjs)が日本IPでスクレイプした
+      //    フル情報。API未収録の作品はここで解決する。
+      //    30日以上前のスクレイプは価格だけ無効化（旧セール価格の配信防止）し、再取得を依頼キューへ。
+      if (!item && env.FANZA_KV) {
+        try {
+          const ov = await env.FANZA_KV.get("ov:" + cid, "json");
+          if (ov && ov.title) {
+            const age = Date.now() - (Date.parse(ov.scrapedAt || "") || 0);
+            if (age > 30 * 86400000) {
+              ov.prices = { list_price: null, price: null };
+              try { await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString(), reason: "stale_override" }), { expirationTtl: 604800 }); } catch (e) {}
+            }
+            item = ov;
+          }
+        } catch (e) {}
       }
 
       // ② スクレイピング（API なし or API で見つからなかった場合）
@@ -61,8 +80,46 @@ export default {
       //    地域制限なしで取れる。サムネ＋サンプル画像だけの「部分情報」(partial)を返す。
       if (!item) item = await cdnFallbackItem(cid);
 
+      // フル情報が取れなかった作品は「PC取得依頼キュー」へ記録（PCのバッチが拾ってスクレイプ→ov:へ保存）。
+      if (env.FANZA_KV && (!item || item.partial)) {
+        try { await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 604800 }); } catch (e) {}
+      }
+
       if (!item) return json({ ok: false, error: "not_found", cid }, 404, cors);
       return json({ ok: true, item }, 200, cors);
+    }
+
+    // ── PC取得依頼キュー：フル情報が取れなかったcid一覧＋登録済み上書き一覧（PCバッチが読む）──
+    //    ※認証は「配布しない管理鍵(ADMIN_SECRET)」。公開ソフト鍵(SHARED_SECRET)では読めない。
+    if (path === "/api/fanza-queue") {
+      if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, null);
+      if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
+      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
+      return json({
+        ok: true,
+        queued: await listAll(env.FANZA_KV, "req:"),      // 取得依頼中のcid
+        overridden: await listAll(env.FANZA_KV, "ov:"),   // 上書き登録済みのcid（価格更新のため再取得対象）
+      }, 200, null);
+    }
+
+    // ── 上書き情報の登録：PCスクレイプ結果(フル情報)を保存。以後 /api/fanza-item が優先返却 ──
+    //    ※認証は管理鍵。保存前に許可フィールドのみ再構築（任意JSONの持ち込み・画像URLすり替え防止）。
+    if (path === "/api/fanza-override") {
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, null);
+      if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
+      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
+      let body;
+      try { body = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, null); }
+      const items = Array.isArray(body.items) ? body.items.slice(0, 100) : []; // KV操作上限対策で1回100件まで
+      let saved = 0;
+      for (const raw of items) {
+        const it = sanitizeOverride(raw);
+        if (!it) continue;
+        await env.FANZA_KV.put("ov:" + it.content_id, JSON.stringify(it));
+        try { await env.FANZA_KV.delete("req:" + it.content_id); } catch (e) {}
+        saved++;
+      }
+      return json({ ok: true, saved }, 200, null);
     }
 
     if (path === "/" || path === "") {
@@ -267,6 +324,52 @@ async function scrapeFanzaItem(cid) {
       price:      currentPriceStr,
     },
     review: { count: null, average: null },
+  };
+}
+
+// ── 管理エンドポイント用ヘルパ ─────────────────────────────────────────────────
+// 管理鍵（配布しない・PCバッチのみ保持）。公開ソフト鍵とは別物＝書き込み/列挙を第三者から守る。
+function adminOk(request, env) {
+  const s = request.headers.get("X-Admin-Secret") || "";
+  return !!(env.ADMIN_SECRET && s === env.ADMIN_SECRET);
+}
+// KV list はデフォルト1000件で打ち切られるため、cursor で全件たどる。
+async function listAll(kv, prefix) {
+  const out = [];
+  let cursor;
+  do {
+    const r = await kv.list(cursor ? { prefix, cursor } : { prefix });
+    r.keys.forEach((k) => out.push(k.name.slice(prefix.length)));
+    cursor = r.list_complete ? null : r.cursor;
+  } while (cursor);
+  return out;
+}
+// override の入力検証：許可フィールドのみ再構築。画像URLはDMM公式CDNドメイン限定。
+const IMG_OK = /^https:\/\/(doujin-assets\.dmm\.co\.jp|pics\.dmm\.co\.jp)\//;
+function sanitizeOverride(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const cid = String(raw.content_id || "").trim();
+  const title = String(raw.title || "").slice(0, 300);
+  if (!/^[0-9A-Za-z_-]{1,64}$/.test(cid) || !title) return null;
+  const numStr = (v) => (v != null && /^\d{1,9}$/.test(String(v))) ? String(v) : null;
+  const img = (u) => (typeof u === "string" && IMG_OK.test(u) && u.length < 300) ? u : null;
+  const names = (arr, max) => (Array.isArray(arr) ? arr : []).slice(0, max)
+    .map((x) => ({ name: String((x && x.name) || "").slice(0, 64) })).filter((x) => x.name);
+  const imageURL = raw.imageURL ? { list: img(raw.imageURL.list), large: img(raw.imageURL.large) } : null;
+  const sImgs = (raw.sampleImageURL && raw.sampleImageURL.sample_l && Array.isArray(raw.sampleImageURL.sample_l.image))
+    ? raw.sampleImageURL.sample_l.image.slice(0, 20).map(img).filter(Boolean) : [];
+  return {
+    content_id: cid,
+    title,
+    date: String(raw.date || "").slice(0, 32),
+    service_name: String(raw.service_name || "同人").slice(0, 32),
+    floor_name: String(raw.floor_name || "同人").slice(0, 32),
+    imageURL: (imageURL && (imageURL.list || imageURL.large)) ? imageURL : null,
+    sampleImageURL: sImgs.length ? { sample_l: { image: sImgs } } : null,
+    iteminfo: { author: names(raw.iteminfo && raw.iteminfo.author, 3), genre: names(raw.iteminfo && raw.iteminfo.genre, 32) },
+    prices: { list_price: numStr(raw.prices && raw.prices.list_price), price: numStr(raw.prices && raw.prices.price) },
+    review: { count: null, average: null },
+    scrapedAt: String(raw.scrapedAt || "").slice(0, 32),
   };
 }
 
