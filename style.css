@@ -101,6 +101,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vmetrics .vlink-bsky{color:#4dabf7;}      /* Bluesky イメージの水色 */
 .vmetrics .vlink-yt{color:#ff4d4d;}        /* YouTube イメージの赤 */
 .vmetrics .vlink-work{color:#ff79b0;}      /* 作品＝ピンク */
+.vmetrics .vcopy-short{background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:6px;font-size:11px;padding:2px 7px;cursor:pointer;white-space:nowrap;flex-shrink:0;font-weight:700;line-height:1.5;width:auto;margin-top:0;}
+.vmetrics .vcopy-short:active{background:#10203033;}
 .fanza-name-row{font-size:.78rem;color:var(--sub);padding:1px 0 2px 2px;}
 .vmetrics .vedit-btn{background:transparent;border:none;color:var(--bsky);font-size:12px;cursor:pointer;padding:0;line-height:1;white-space:nowrap;flex-shrink:0;width:auto;margin-top:0;}
 .vmetrics .vedit-btn:active{opacity:.65;}

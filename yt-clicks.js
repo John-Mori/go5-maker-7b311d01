@@ -370,6 +370,7 @@
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
           '<span title="Bsky投稿クリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
           '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
+          (bskyHref ? '<button class="vlink vcopy-short" type="button" data-u="' + esc(bskyHref) + '" title="この短縮URLをコピー（YouTube概要欄に貼り替え用）">📋短縮</button>' : '') +
           (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
           (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
           (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
@@ -382,6 +383,14 @@
         '</div>';
     }).join('');
     fillFanzaNames();
+
+    // 「📋短縮」＝共有短縮URLをコピー（YouTube概要欄への貼り替え用）
+    list.querySelectorAll('.vcopy-short').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var u = b.getAttribute('data-u') || '';
+        try { navigator.clipboard.writeText(u); b.textContent = '✓コピー'; setTimeout(function () { b.textContent = '📋短縮'; }, 1500); } catch (e) {}
+      });
+    });
 
     // YouTube URL 直接入力
     list.querySelectorAll('input[data-k]').forEach(function (inp) {
@@ -580,9 +589,58 @@
       .then(function () { if (btn) btn.disabled = false; });
   }
 
+  // 過去投稿に計測用の短縮リンク(r2+da.gd)を一括生成する。
+  // 対象＝shortUrlがr2でない or shareUrl無しの履歴。各投稿URL→(必要ならworkerで解決)→r2短縮→da.gd短縮。
+  function bulkGenTracking() {
+    var go5 = window.Go5Short || {};
+    var workerUrl = (go5.WORKER_URL || '').replace(/\/+$/, '');
+    var secret = go5.SHARED_SECRET || '';
+    if (typeof window.Go5MakeShort !== 'function' || !workerUrl) { setStatus('⚠️ 短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
+    var handle = ''; try { handle = localStorage.getItem('bsky_handle__' + acct()) || ''; } catch (e) {}
+    ensureIds();
+    function isR2(u) { return !!u && u.indexOf(workerUrl + '/') === 0; }
+    var hist = loadHist(), manual = loadManual(), targets = [];
+    hist.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
+    manual.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
+    if (!targets.length) { setStatus('未生成の項目はありません（すべて計測リンク済み）'); return; }
+    if (!window.confirm(targets.length + '件の投稿に計測用の短縮リンクを一括生成します。\n少し時間がかかります（1件ずつ順に処理）。よろしいですか？')) return;
+    var btn = $('ytBulkGen'); if (btn) btn.disabled = true;
+    var i = 0, done = 0, fail = 0;
+    function resolveTarget(it) {
+      if (it.postUri && handle) { var rk = String(it.postUri).split('/').pop(); return Promise.resolve('https://bsky.app/profile/' + handle + '/post/' + rk); }
+      var src = it.postUrl || '';
+      if (/^https?:\/\/[^/]*bsky\.app\//.test(src)) return Promise.resolve(src);      // 既にbsky.app
+      if (!/^https?:\/\//.test(src)) return Promise.resolve('');
+      return fetch(workerUrl + '/api/resolve?url=' + encodeURIComponent(src) + '&secret=' + encodeURIComponent(secret))
+        .then(function (r) { return r.json(); })
+        .then(function (j) { return (j && j.ok && /bsky\.app/.test(j.final || '')) ? j.final : ''; })
+        .catch(function () { return ''; });
+    }
+    function step() {
+      if (i >= targets.length) {
+        saveArr(histKey(), hist); saveArr(manualKey(), manual);
+        if (btn) btn.disabled = false;
+        setStatus('✅ 一括生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「📋短縮」でコピーしてYouTube概要欄に貼り替えてください。');
+        render();
+        return;
+      }
+      var it = targets[i++];
+      setStatus('計測リンク生成中… (' + i + '/' + targets.length + ')');
+      resolveTarget(it).then(function (target) {
+        if (!target) { fail++; return null; }
+        return window.Go5MakeShort(target).then(function (res) {
+          if (res && res.shortUrl) { it.shortUrl = res.shortUrl; it.shareUrl = res.shareUrl || res.shortUrl; done++; }
+          else fail++;
+        });
+      }).catch(function () { fail++; }).then(function () { setTimeout(step, 800); });
+    }
+    step();
+  }
+
   var tab = $('tabVerify'); if (tab) tab.addEventListener('click', refresh);
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', refresh);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
+  var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', bulkGenTracking);
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
   document.addEventListener('account-changed', function () { render(); });

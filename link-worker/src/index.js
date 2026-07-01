@@ -51,6 +51,23 @@ export default {
       return handleStats(url, env);
     }
 
+    // ---- 短縮URL(x.gd/da.gd/bit.ly等)の最終遷移先を解決（過去投稿の計測リンク一括生成用）----
+    //   ブラウザからは他社短縮のリダイレクト先をCORSで読めないため、Worker側で追って final を返す。
+    if (path === "/api/resolve") {
+      const cors = { "Access-Control-Allow-Origin": "*" };
+      if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+      const secret = url.searchParams.get("secret") || "";
+      if (!env.SHARED_SECRET || secret !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors);
+      const target = (url.searchParams.get("url") || "").trim();
+      if (!/^https?:\/\//.test(target)) return json({ ok: false, error: "bad_url" }, 400, cors);
+      try {
+        const r = await fetch(target, { redirect: "follow", headers: { "User-Agent": "Mozilla/5.0 (resolve)" } });
+        return json({ ok: true, final: r.url || target }, 200, cors);
+      } catch (e) {
+        return json({ ok: false, error: "fetch_failed" }, 200, cors);
+      }
+    }
+
     // ---- ヘルスチェック ----
     if (path === "/" || path === "") {
       return text("ok", 200);
