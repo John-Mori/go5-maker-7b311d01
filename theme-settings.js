@@ -14,7 +14,7 @@
     { key: "save",  varName: "--qbtn-save",  ls: "btn_color_save",  def: "#2563eb", text: "colorSave",  pick: "pickSave",  sw: "swSave"  },
     { key: "load",  varName: "--qbtn-load",  ls: "btn_color_load",  def: "#16a34a", text: "colorLoad",  pick: "pickLoad",  sw: "swLoad"  },
     { key: "reset", varName: "--qbtn-reset", ls: "btn_color_reset", def: "#d97706", text: "colorReset", pick: "pickReset", sw: "swReset" },
-    { key: "undo",  varName: "--qbtn-undo",  ls: "btn_color_undo",  def: "#7c3aed", text: "colorUndo",  pick: "pickUndo",  sw: "swUndo"  },
+    { key: "undo",  varName: "--qbtn-undo",  ls: "btn_color_undo",  def: "#546e7a", text: "colorUndo",  pick: "pickUndo",  sw: "swUndo"  },
     { key: "redo",  varName: "--qbtn-redo",  ls: "btn_color_redo",  def: "#0891b2", text: "colorRedo",  pick: "pickRedo",  sw: "swRedo"  },
   ];
 
@@ -139,7 +139,7 @@
 
 // ---- アカウント別背景色（account-changed CustomEvent 連動）----
 (function () {
-  var ACCOUNT_BG = { acc1: '#2E4068', acc2: '#3D1830' };
+  var ACCOUNT_BG = { acc1: '#3B2E5C', acc2: '#3D1830' }; // acc1=月詠み＝上品な紫 / acc2=宵桜＝ワイン
   function applyAccountBg(id) {
     document.documentElement.style.setProperty('--app-bg', ACCOUNT_BG[id] || ACCOUNT_BG.acc1);
   }

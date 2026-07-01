@@ -40,7 +40,7 @@ var FANZA_HEADERS = [
 // カテゴリ＝作品属性を名前で明記（キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄）。
 // ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
-var EXTRA_HEADERS = ['カテゴリ'];
+var EXTRA_HEADERS = ['カテゴリ', '作品状態'];
 // 作品属性の定義（順序＝カテゴリ列での並び）。フラグ名→表示名。
 var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
@@ -71,7 +71,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-02A（カテゴリ列：キャラ/JK/ギャル/異世界を複数明記・キャラ○方式は廃止）';
+var GAS_VERSION = '2026-07-02B（作品状態列を追加：新作/準新作/旧作）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -317,6 +317,7 @@ function doPost(e) {
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
       chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, // カテゴリ属性（複数可）
+      workState: body.workState,           // 作品状態（新作/準新作/旧作）
       fanza_list_price: body.fanza_list_price, fanza_price: body.fanza_price,
       fanza_discount_pct: body.fanza_discount_pct, fanza_fetched_at: body.fanza_fetched_at || '',
       fanza_review_count: body.fanza_review_count, fanza_review_avg: body.fanza_review_avg
@@ -443,6 +444,8 @@ function writeRecord_(channel, f) {
   if (attrProvided_(f) && map['カテゴリ']) {
     sh.getRange(target, map['カテゴリ']).setValue(categoryOf_(f));
   }
+  // 作品状態：投稿当時の状態（新作/準新作/旧作）。payload に含まれるときだけセット。
+  putIf('作品状態', f.workState || '');
   // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
   if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
   // 投稿履歴を正とし、投稿日時の新しい順にシートを並べ替える（空日時は末尾へ）。
@@ -466,6 +469,7 @@ function syncHistory_(channel, items) {
         youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '',
         views: it.views, clicks: it.clicks,
         chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, // カテゴリ属性（複数可）
+        workState: it.workState,           // 作品状態（新作/準新作/旧作）
         postedAt: it.postedAt || '',
         noShorten: true, noSort: true   // 同期は短縮API呼ばず・並べ替えは最後にまとめて
       });

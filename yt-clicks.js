@@ -161,6 +161,13 @@
             return '<label class="vedit-attr"><input id="veditAttr_' + a.key + '" type="checkbox"><span class="vatt vatt-' + a.key + '">' + a.label + '</span></label>';
           }).join('') +
         '</div>' +
+        '<label class="vedit-field">作品状態（投稿当時の状態・後から変更可）' +
+          '<select id="veditWorkState">' +
+            '<option value="旧作">旧作</option>' +
+            '<option value="準新作">準新作</option>' +
+            '<option value="新作">新作</option>' +
+          '</select>' +
+        '</label>' +
         '<div class="vedit-actions">' +
           '<button id="veditCancel" type="button">キャンセル</button>' +
           '<button id="veditSave" type="button">保存</button>' +
@@ -175,11 +182,13 @@
       _saveCb = null;
       var attrs = {};
       ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); attrs[a.key] = !!(el && el.checked); });
+      var wsEl = $('veditWorkState');
       cb(
         ($('veditYt').value || '').trim(),
         ($('veditBsky').value || '').trim(),
         ($('veditWork').value || '').trim(),
-        attrs
+        attrs,
+        (wsEl && wsEl.value) || '旧作'
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -191,7 +200,7 @@
     _saveCb = null;
   }
 
-  function openModal_(title, ytVal, bskyVal, workVal, attrs, onSave) {
+  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
@@ -199,6 +208,7 @@
     $('veditWork').value = workVal || '';
     attrs = attrs || {};
     ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
+    if ($('veditWorkState')) $('veditWorkState').value = workState || '旧作';
     var errEl = $('veditError'); if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
     $('veditOverlay').hidden = false;
     setTimeout(function () { var el = $('veditYt'); if (el) el.focus(); }, 50);
@@ -228,14 +238,14 @@
   function applyAttrs_(item, attrs) {
     ATTR_DEFS.forEach(function (a) { if (attrs && attrs[a.key]) item[a.key] = true; else delete item[a.key]; });
   }
-  // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL・カテゴリ属性（アイテム）を一括更新。
-  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs) {
+  // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL・カテゴリ属性・作品状態（アイテム）を一括更新。
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState) {
     // YouTube URL
     var ymap = loadYtMap();
     if (ytUrl) ymap[k] = ytUrl; else delete ymap[k];
     saveYtMap(ymap);
     var saved = null;
-    // Bluesky URL と 作品URL・カテゴリ（アイテムを直接書き換え）
+    // Bluesky URL と 作品URL・カテゴリ・作品状態（アイテムを直接書き換え）
     if (it.manual) {
       var manual = loadManual();
       for (var i = 0; i < manual.length; i++) {
@@ -243,6 +253,7 @@
         saveBskyToItem_(manual[i], bskyUrl);
         if (workUrl) manual[i].workUrl = workUrl; else delete manual[i].workUrl;
         applyAttrs_(manual[i], attrs);
+        manual[i].workState = workState || '旧作';
         saved = manual[i];
         break;
       }
@@ -254,6 +265,7 @@
         saveBskyToItem_(hist[j], bskyUrl);
         if (workUrl) hist[j].workUrl = workUrl; else delete hist[j].workUrl;
         applyAttrs_(hist[j], attrs);
+        hist[j].workState = workState || '旧作';
         saved = hist[j];
         break;
       }
@@ -279,6 +291,7 @@
       shortUrl: it.shortUrl || ''
     };
     ATTR_DEFS.forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
+    payload.workState = it.workState || '旧作'; // 作品状態列
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
 
@@ -313,6 +326,7 @@
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml +
           ATTR_DEFS.map(function (a) { return it[a.key] ? ' <span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('') +
+          (it.workState === '新作' ? ' <span class="vtag vtag-shinsaku">新作</span>' : (it.workState === '準新作' ? ' <span class="vtag vtag-junshinsaku">準新作</span>' : '')) +
         '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         '<div class="vmetrics">' +
@@ -358,9 +372,9 @@
         var bskyCur = it.shortUrl || it.postUrl || '';
         var workCur = it.workUrl || '';
         var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
-        openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, function (ytUrl, bskyUrl, workUrl, attrs) {
+        openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState) {
           closeModal_();
-          saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs);
+          saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState);
         });
       });
     });
@@ -397,7 +411,7 @@
         autoWorkUrl = localStorage.getItem('bsky_work_url__' + acctId) || '';
       }
     } catch (e) {}
-    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, function (ytUrl, bskyUrl, workUrl, attrs) {
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -410,6 +424,7 @@
       saveBskyToItem_(entry, bskyUrl);
       if (workUrl) entry.workUrl = workUrl;
       applyAttrs_(entry, attrs);
+      if (workState && workState !== '旧作') entry.workState = workState; else entry.workState = '旧作';
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       refresh();
@@ -485,6 +500,7 @@
         postedAt: postedMs ? new Date(postedMs).toISOString() : ''
       };
       ATTR_DEFS.forEach(function (a) { rec[a.key] = !!it[a.key]; }); // カテゴリ属性
+      rec.workState = it.workState || '旧作'; // 作品状態
       return rec;
     }).filter(function (r) { return r.videoId; });
     if (!items.length) { setStatus('同期する履歴がありません'); if (btn) btn.disabled = false; return; }

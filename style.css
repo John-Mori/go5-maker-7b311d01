@@ -2,7 +2,7 @@
   --bg:#0f1420; --card:#1a2030; --ink:#eef2f7; --sub:#9fb0c3;
   --accent:#2bb3c0; --accent2:#dc465a; --line:#2a3346;
   /* 編集ボタン（Qセーブ等）の色。詳細設定タブで上書き保存される（theme-settings.js が :root に設定）。 */
-  --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#7c3aed; --qbtn-redo:#0891b2;
+  --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#546e7a; --qbtn-redo:#0891b2;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:var(--app-bg,var(--bg));color:var(--ink);
@@ -76,6 +76,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-h .vtag-jk{color:#e89bc4;border-color:#e89bc4;font-weight:700;}
 .vrow-h .vtag-gyaru{color:#cba94e;border-color:#cba94e;font-weight:700;}
 .vrow-h .vtag-isekai{color:#9b7ed1;border-color:#9b7ed1;font-weight:700;}
+/* 作品状態バッジ。新作=フレッシュな緑 / 準新作=ティール（旧作は非表示） */
+.vrow-h .vtag-shinsaku{color:#2fa96e;border-color:#2fa96e;font-weight:700;}
+.vrow-h .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;font-weight:700;}
 /* 小さめ写真ボタン（動画作成タブ） */
 .photo-btn-sm{padding:10px !important;font-size:14px !important;}
 /* カテゴリのチェック用カラーチップ（モーダル・動画作成タブ共通） */
@@ -113,7 +116,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vedit-title{font-size:15px;font-weight:700;color:var(--ink);margin:0 0 14px;}
 .vedit-error{font-size:12px;color:#ff7b7b;margin:0 0 12px;line-height:1.5;white-space:pre-line;}
 .vedit-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--sub);margin-bottom:12px;}
-.vedit-field input{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);width:100%;box-sizing:border-box;}
+.vedit-field input,.vedit-field select{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);width:100%;box-sizing:border-box;}
 .vedit-chara{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);margin:0 0 14px;cursor:pointer;}
 .vedit-chara input{width:20px;height:20px;flex-shrink:0;accent-color:#ff79b0;margin:0;}
 .vedit-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px;}
@@ -150,8 +153,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .rank-date{font-size:11px;color:var(--sub);margin-bottom:2px;}
 .rank-title-row{display:flex;align-items:baseline;gap:6px;flex-wrap:nowrap;min-width:0;}
 .rank-acct{font-size:11px;font-weight:700;padding:1px 5px;border-radius:4px;flex-shrink:0;white-space:nowrap;}
-.rank-acct-acc1{background:#2E4068;color:#b8cef0;}
-.rank-acct-acc2{background:#3D1830;color:#f0b8d0;}
+/* 背景（月詠み=紫/宵桜=ワイン）に埋もれないよう明るめの上品な色に */
+.rank-acct-acc1{background:#5A72B8;color:#f2f6ff;}
+.rank-acct-acc2{background:#B25C86;color:#fff0f7;}
 .rank-title{font-size:14px;font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .rank-title-link{color:var(--ink);text-decoration:none;}
 .rank-title-link:hover{text-decoration:underline;}
@@ -159,8 +163,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .rsv-tab-row{display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;}
 .rsv-tab-row:last-child{border-bottom:none;}
 .rsv-badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:.72rem;font-weight:700;white-space:nowrap;flex-shrink:0;}
-.rsv-badge-acc1{background:#2E4068;color:#c8d8ff;}
-.rsv-badge-acc2{background:#3D1830;color:#f0c8d8;}
+.rsv-badge-acc1{background:#5A72B8;color:#f2f6ff;}
+.rsv-badge-acc2{background:#B25C86;color:#fff0f7;}
 .rsv-tab-when{font-size:.82rem;color:var(--sub);white-space:nowrap;flex-shrink:0;}
 .rsv-tab-text{font-size:.82rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--ink);}
 .rsv-tab-btns{display:flex;gap:4px;flex-shrink:0;}

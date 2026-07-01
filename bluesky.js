@@ -55,6 +55,12 @@
     MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); o[p[0]] = !!(el && el.checked); });
     return o;
   }
+  // 投稿時の作品状態を判定：新作(discountNew2) > 準新作(movieJunshinsaku) > 旧作(どちらも無し)。
+  function readWorkState() {
+    var shin = $('discountNew2') && $('discountNew2').checked;
+    var jun = $('movieJunshinsaku') && $('movieJunshinsaku').checked;
+    return shin ? '新作' : (jun ? '準新作' : '旧作');
+  }
 
   // ---- アカウント別永続化ヘルパ ----
   function acctId() { return (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'); }
@@ -567,6 +573,7 @@
       videoId: (record.videoId || currentVideoId || '')  // 背骨ID＝upsertキー（post_id 列に採用）
     };
     var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = ma[p[0]]; }); // カテゴリ属性（複数可）
+    payload.workState = readWorkState(); // 作品状態（新作/準新作/旧作）
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
   function updateGasStatus() {
@@ -676,8 +683,11 @@
     var a = histLoad().filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
     var entry = { ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || '' };
     if (workUrl) entry.workUrl = workUrl;
-    // 動画作成タブのカテゴリ属性を引き継ぐ（manualOnly=手動短縮のときは付けない）
-    if (!rec.manualOnly) { var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { if (ma[p[0]]) entry[p[0]] = true; }); }
+    // 動画作成タブのカテゴリ属性・作品状態を引き継ぐ（manualOnly=手動短縮のときは付けない）
+    if (!rec.manualOnly) {
+      var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { if (ma[p[0]]) entry[p[0]] = true; });
+      entry.workState = readWorkState(); // 投稿時の作品状態（新作/準新作/旧作）を固定記録
+    }
     a.unshift(entry);
     histSaveArr(a);
     if (els.histList) renderHistory(a);
