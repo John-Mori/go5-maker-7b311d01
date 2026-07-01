@@ -579,18 +579,26 @@
     return Promise.all(jobs).then(function () { return true; });
   }
 
-  function refresh() {
+  // announce=true（手動更新ボタン）のときは、完了時に成功/失敗を明確に表示する。
+  function refresh(announce) {
     ensureIds(); // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
     render();
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
-    if (!codes.length && !vids.length) { setStatus(apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます'); return; }
-    setStatus('取得中…');
-    fetchData_(items, ymap).then(function () {
-      setStatus(lastErr ? ('⚠️ ' + lastErr) : (!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : ''));
+    if (!codes.length && !vids.length) {
+      if (announce) setStatus('更新対象がありません（各行にYouTube URLを入れる／⚙️詳細設定でAPIキー設定が必要です）');
+      else setStatus(apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます');
+      return Promise.resolve(false);
+    }
+    setStatus('🔄 更新中…（再生数・クリック数）');
+    return fetchData_(items, ymap).then(function () {
+      if (lastErr) setStatus('⚠️ 更新に失敗しました：' + lastErr);
+      else if (announce) setStatus('✅ 更新しました（再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + '）');
+      else setStatus(!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : '');
       render();
-    });
+      return true;
+    }).catch(function () { setStatus('⚠️ 更新に失敗しました（通信エラー）'); return false; });
   }
 
   // この投稿履歴を正として、全アイテムを記録シート(GAS)へ一括 upsert 同期する。
@@ -810,7 +818,7 @@
   }
 
   var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); });
-  var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(); });
+  var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); });
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);

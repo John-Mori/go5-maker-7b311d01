@@ -352,6 +352,11 @@ video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
 img.emico{height:1.05em;width:auto;vertical-align:-0.16em;object-fit:contain;border-radius:3px;}
 .tab img.emico{height:1.3em;vertical-align:-0.28em;margin-right:1px;border-radius:4px;}
 .bsky-av .emico{width:100%;height:100%;object-fit:cover;border-radius:50%;vertical-align:middle;}
+/* 押下フィードバック：全ボタン共通。タップ/クリックで縮んで「入った」のが分かる（今の配色に馴染む範囲で）。 */
+button, .tab, .acct-btn, .photo-btn, label.photo-btn, .copy-btn{transition:transform .06s ease, background-color .1s ease, filter .1s ease;}
+button:active:not(:disabled), .tab:active, .acct-btn:active, .photo-btn:active, label.photo-btn:active{transform:scale(.955);}
+.ghost:active:not(:disabled){background:rgba(43,179,192,.16);border-color:var(--accent);}
+button:disabled{opacity:.5;cursor:default;filter:saturate(.6);}
 /* PC（マウス等の精密ポインタ）だけ：タブが入り切らない時に横スクロールバーを表示して操作可能に。
    スマホ(coarse pointer)は対象外＝表示は一切変えない。 */
 @media (hover:hover) and (pointer:fine){
