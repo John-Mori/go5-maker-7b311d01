@@ -197,7 +197,6 @@
         '<label class="vedit-field">Bluesky 投稿URL（計測用の短縮URL）' +
           '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL（省略可）">' +
         '</label>' +
-        '<button id="veditGenShort" type="button" class="vedit-gen">🔗 この投稿URLから計測用の短縮リンクを生成（やり直し用）</button>' +
         '<div id="veditGenResult" class="vedit-gen-result" hidden></div>' +
         '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
           '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
@@ -216,8 +215,11 @@
           '</select>' +
         '</label>' +
         '<div class="vedit-actions">' +
-          '<button id="veditCancel" type="button">キャンセル</button>' +
-          '<button id="veditSave" type="button">保存</button>' +
+          '<button id="veditGenShort" type="button" class="vedit-gen">短縮リンク<br>再生成</button>' +
+          '<div class="vedit-actions-main">' +
+            '<button id="veditCancel" type="button">キャンセル</button>' +
+            '<button id="veditSave" type="button">保存</button>' +
+          '</div>' +
         '</div>' +
       '</div>';
     document.body.appendChild(d);
@@ -412,6 +414,7 @@
       return '<div class="vrow">' +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
+        (it.workUrl ? '<div class="fanza-price-row" data-fanza-price-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
@@ -738,6 +741,26 @@
       else { el.textContent = ''; el.style.display = 'none'; }
     });
   }
+  // 価格表示のHTMLを組み立て（セール時は「定価/セール価格/○%off」、通常は「現在価格」）。
+  function fmtFanzaPriceHtml(p) {
+    if (!p || p.price == null) return '';
+    function yen(n) { return '¥' + Number(n).toLocaleString('ja-JP'); }
+    if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
+      return '現在定価:<span class="fp-list">' + yen(p.listPrice) + '</span>' +
+             ' <span class="fp-sale-lbl">セール価格:</span><span class="fp-sale">' + yen(p.price) + '</span>' +
+             ' <span class="fp-off">' + p.discountPct + '%off</span>';
+    }
+    return '現在価格:<span class="fp-cur">' + yen(p.price) + '</span>';
+  }
+  // data-fanza-price-url が一致するDOM要素へ価格を反映。
+  function setFanzaPriceEls(fanzaUrl, priceInfo) {
+    var html = fmtFanzaPriceHtml(priceInfo);
+    document.querySelectorAll('[data-fanza-price-url]').forEach(function (el) {
+      if (el.getAttribute('data-fanza-price-url') !== fanzaUrl) return;
+      if (html) { el.innerHTML = html; el.style.display = ''; }
+      else { el.innerHTML = ''; el.style.display = 'none'; }
+    });
+  }
 
   var _fanzaBusy = false; // 二重起動防止（順次取得中の再入を防ぐ）
   function fillFanzaNames() {
@@ -759,8 +782,10 @@
       if (!url) return;
       var cached = cache[url];
       if (cached) {
-        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY) {
-          nameEl.textContent = cached.title; nameEl.style.display = ''; return; // 有効な題名キャッシュ
+        // 有効な題名キャッシュ（旧スキーマ=価格未保存なら再取得して価格も埋める）
+        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo !== undefined) {
+          nameEl.textContent = cached.title; nameEl.style.display = '';
+          setFanzaPriceEls(url, cached.priceInfo); return;
         }
         if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) return; // 直近「未取得」→再取得しない（連打防止）
       }
@@ -780,11 +805,12 @@
       window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
         var c = fanzaNameCacheLoad();
         if (info && info.title && !isBadFanzaTitle(info.title)) {
-          c[job.url] = { title: info.title, fetchedAt: new Date().getTime() };
-          fanzaNameCacheSave(c); setFanzaEls(job.url, info.title);
+          var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0 };
+          c[job.url] = { title: info.title, priceInfo: pinfo, fetchedAt: new Date().getTime() };
+          fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo);
         } else {
-          c[job.url] = { title: '', fetchedAt: new Date().getTime() }; // 未取得を短期キャッシュ（再ハンマー防止）
-          fanzaNameCacheSave(c); setFanzaEls(job.url, '');
+          c[job.url] = { title: '', priceInfo: null, fetchedAt: new Date().getTime() }; // 未取得を短期キャッシュ（再ハンマー防止）
+          fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null);
         }
       }).catch(function () { setFanzaEls(job.url, ''); })
         .then(function () { setTimeout(step, GAP); }); // 次を間隔をあけて実行
@@ -872,6 +898,7 @@
                 '</div>' +
               '</div>' +
               (r.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(r.workUrl) + '" style="display:none;"></div>' : '') +
+              (r.workUrl ? '<div class="fanza-price-row" data-fanza-price-url="' + esc(r.workUrl) + '" style="display:none;"></div>' : '') +
               '<div class="rank-metrics">' +
                 '<span>▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>' +
                 (r.bskyHref ? '<a class="vlink" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
