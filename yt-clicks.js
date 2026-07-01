@@ -135,6 +135,8 @@
 
   // ── モーダル ──────────────────────────────────────────────────────────────
   var _saveCb = null;
+  var _pendingShare = ''; // 生成した計測用リンクの共有URL(da.gd)。保存時に item.shareUrl へ付与
+  var _curSrcUrl = '';    // 生成の元にする投稿URL（編集中アイテムのpostUrl等）
 
   function injectModal_() {
     if ($('veditOverlay')) return;
@@ -152,6 +154,8 @@
         '<label class="vedit-field">Bluesky 投稿URL' +
           '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL（省略可）">' +
         '</label>' +
+        '<button id="veditGenShort" type="button" class="vedit-gen">🔗 この投稿URLから計測用の短縮リンクを生成</button>' +
+        '<div id="veditGenResult" class="vedit-gen-result" hidden></div>' +
         '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
           '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
         '</label>' +
@@ -193,6 +197,34 @@
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
     });
+    // 計測用の短縮リンクを生成（過去のBluesky投稿URL→r2短縮(計測)＋da.gd短縮(表示)）
+    $('veditGenShort').addEventListener('click', function () {
+      var btn = this;
+      var src = _curSrcUrl || ($('veditBsky').value || '').trim();
+      if (!/^https?:\/\//.test(src)) { showModalErr_('先に「Bluesky投稿URL」を入れてください（https://bsky.app/… ）'); return; }
+      if (typeof window.Go5MakeShort !== 'function') { showModalErr_('短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
+      var errEl = $('veditError'); if (errEl) errEl.hidden = true;
+      var orig = btn.textContent; btn.disabled = true; btn.textContent = '生成中…';
+      window.Go5MakeShort(src).then(function (res) {
+        var r2 = (res && res.shortUrl) || '', share = (res && res.shareUrl) || r2;
+        if (!r2) { showModalErr_('短縮に失敗しました（r2ワーカーに接続できませんでした）。'); return; }
+        $('veditBsky').value = r2;   // 保存時に shortUrl=r2 になり計測対象化
+        _pendingShare = share;       // 保存時に shareUrl=da.gd を付与
+        var gr = $('veditGenResult');
+        if (gr) {
+          gr.hidden = false;
+          gr.innerHTML = '✅ 計測用リンクを生成しました。<b>この短縮URLをYouTube概要欄に貼り替えてください</b>：<br>' +
+            '<code class="vgen-url">' + esc(share) + '</code> ' +
+            '<button type="button" class="vgen-copy">コピー</button>' +
+            '<div class="vgen-note">「保存」を押すと確定。以後このリンクのクリックが計測されます。</div>';
+          var cp = gr.querySelector('.vgen-copy');
+          if (cp) cp.addEventListener('click', function () {
+            try { navigator.clipboard.writeText(share); cp.textContent = '✓ コピー'; } catch (e) {}
+          });
+        }
+      }).catch(function () { showModalErr_('短縮に失敗しました。'); })
+        .then(function () { btn.disabled = false; btn.textContent = orig; });
+    });
   }
 
   function closeModal_() {
@@ -209,6 +241,8 @@
     attrs = attrs || {};
     ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
     if ($('veditWorkState')) $('veditWorkState').value = workState || '旧作';
+    _pendingShare = ''; // 生成状態をリセット
+    var gr = $('veditGenResult'); if (gr) { gr.hidden = true; gr.innerHTML = ''; }
     var errEl = $('veditError'); if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
     $('veditOverlay').hidden = false;
     setTimeout(function () { var el = $('veditYt'); if (el) el.focus(); }, 50);
@@ -254,6 +288,7 @@
         if (workUrl) manual[i].workUrl = workUrl; else delete manual[i].workUrl;
         applyAttrs_(manual[i], attrs);
         manual[i].workState = workState || '旧作';
+        if (_pendingShare) manual[i].shareUrl = _pendingShare; // 生成した計測用リンクの共有URL
         saved = manual[i];
         break;
       }
@@ -266,6 +301,7 @@
         if (workUrl) hist[j].workUrl = workUrl; else delete hist[j].workUrl;
         applyAttrs_(hist[j], attrs);
         hist[j].workState = workState || '旧作';
+        if (_pendingShare) hist[j].shareUrl = _pendingShare; // 生成した計測用リンクの共有URL
         saved = hist[j];
         break;
       }
@@ -373,6 +409,7 @@
         var bskyCur = it.shortUrl || it.postUrl || '';
         var workCur = it.workUrl || '';
         var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
+        _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
         openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState) {
           closeModal_();
           saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState);
@@ -412,6 +449,7 @@
         autoWorkUrl = localStorage.getItem('bsky_work_url__' + acctId) || '';
       }
     } catch (e) {}
+    _curSrcUrl = ''; // 新規追加：生成元はveditBskyの入力値を使う
     openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
@@ -426,6 +464,7 @@
       if (workUrl) entry.workUrl = workUrl;
       applyAttrs_(entry, attrs);
       if (workState && workState !== '旧作') entry.workState = workState; else entry.workState = '旧作';
+      if (_pendingShare) entry.shareUrl = _pendingShare; // 生成した計測用リンクの共有URL
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       refresh();
@@ -593,6 +632,7 @@
     });
   }
 
+  var _fanzaBusy = false; // 二重起動防止（順次取得中の再入を防ぐ）
   function fillFanzaNames() {
     var targets = document.querySelectorAll('[data-fanza-url]');
     if (!targets.length) return;
@@ -605,35 +645,44 @@
     purgeBadFanzaCache(); // 旧版で混入したログイン/エラータイトルを先に掃除
     var cache = fanzaNameCacheLoad();
     var now = new Date().getTime();
-    var DAY = 86400000;
-    // 同一 URL の重複フェッチを防ぐ
-    var fetching = {};
+    var DAY = 86400000, NEG = 6 * 3600000; // 題名キャッシュ=1日 / 「未取得(空)」キャッシュ=6時間
+    var jobs = [], seen = {};
     targets.forEach(function (nameEl) {
       var url = nameEl.getAttribute('data-fanza-url');
       if (!url) return;
       var cached = cache[url];
-      if (cached && cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY) {
-        nameEl.textContent = cached.title;
-        nameEl.style.display = '';
-        return;
+      if (cached) {
+        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY) {
+          nameEl.textContent = cached.title; nameEl.style.display = ''; return; // 有効な題名キャッシュ
+        }
+        if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) return; // 直近「未取得」→再取得しない（連打防止）
       }
-      if (fetching[url]) return;
       var res = window.buildAffiliateLink(url, '');
       if (!res || !res.ok || !res.cid) return;
-      fetching[url] = true;
-      // 取得中インジケータ表示（DOM 再描画で消えても再描画後に上書きされるので問題なし）
-      nameEl.textContent = '…';
-      nameEl.style.display = '';
-      var capturedUrl = url;
-      window.FanzaCore.fetchFanzaInfo(res.cid, workerUrl, sharedSecret).then(function (info) {
-        // タイトル無し・ログイン/エラーページのタイトルは商品名として扱わない（キャッシュもしない）
-        if (!info || !info.title || isBadFanzaTitle(info.title)) { setFanzaEls(capturedUrl, ''); return; }
-        var c = fanzaNameCacheLoad();
-        c[capturedUrl] = { title: info.title, fetchedAt: now };
-        fanzaNameCacheSave(c);
-        setFanzaEls(capturedUrl, info.title);
-      }).catch(function () { setFanzaEls(capturedUrl, ''); });
+      if (seen[url]) return; seen[url] = true;
+      jobs.push({ url: url, cid: res.cid, el: nameEl });
+      nameEl.textContent = '…'; nameEl.style.display = '';
     });
+    if (!jobs.length || _fanzaBusy) return;
+    // ★DMM APIのレート制限回避：一斉に叩かず 1件ずつ間隔をあけて順次取得する。
+    _fanzaBusy = true;
+    var GAP = 800, i = 0;
+    function step() {
+      if (i >= jobs.length) { _fanzaBusy = false; return; }
+      var job = jobs[i++];
+      window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
+        var c = fanzaNameCacheLoad();
+        if (info && info.title && !isBadFanzaTitle(info.title)) {
+          c[job.url] = { title: info.title, fetchedAt: new Date().getTime() };
+          fanzaNameCacheSave(c); setFanzaEls(job.url, info.title);
+        } else {
+          c[job.url] = { title: '', fetchedAt: new Date().getTime() }; // 未取得を短期キャッシュ（再ハンマー防止）
+          fanzaNameCacheSave(c); setFanzaEls(job.url, '');
+        }
+      }).catch(function () { setFanzaEls(job.url, ''); })
+        .then(function () { setTimeout(step, GAP); }); // 次を間隔をあけて実行
+    }
+    step();
   }
 
   // ── ランキングタブ（両アカウント合算・再生数順）──────────────────────────────

@@ -679,6 +679,8 @@
     if (!longUrl) return Promise.resolve('');
     return makeShortAndShare(longUrl).then(function (r) { return r.shareUrl || r.shortUrl || ''; });
   }
+  // 投稿履歴タブ(yt-clicks.js)から、過去投稿URLの計測用短縮リンク(r2+da.gd)を生成するために公開。
+  try { window.Go5MakeShort = makeShortAndShare; } catch (e) {}
   function shortenAndShow(longUrl, postUri, title, onShort) {
     if (!longUrl) return;
     if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを作成中…';
