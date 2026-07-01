@@ -357,6 +357,12 @@ button, .tab, .acct-btn, .photo-btn, label.photo-btn, .copy-btn{transition:trans
 button:active:not(:disabled), .tab:active, .acct-btn:active, .photo-btn:active, label.photo-btn:active{transform:scale(.955);}
 .ghost:active:not(:disabled){background:rgba(43,179,192,.16);border-color:var(--accent);}
 button:disabled{opacity:.5;cursor:default;filter:saturate(.6);}
+/* 「DMM作品情報を取得」と「更新」の2ボタン：同じ列・同サイズの2段組。 */
+.yt-updrow{display:flex;gap:8px;margin-bottom:8px;}
+.yt-updbtn{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;line-height:1.2;padding:9px 6px;height:auto;margin-top:0;}
+.yt-updbtn .ub-l1{font-weight:700;font-size:.92rem;display:flex;align-items:center;justify-content:center;gap:4px;}
+.yt-updbtn .ub-l2{font-size:.82rem;opacity:.95;}
+.yt-updbtn .emico{height:1.15em;border-radius:3px;}
 /* PC（マウス等の精密ポインタ）だけ：タブが入り切らない時に横スクロールバーを表示して操作可能に。
    スマホ(coarse pointer)は対象外＝表示は一切変えない。 */
 @media (hover:hover) and (pointer:fine){

@@ -819,6 +819,7 @@
 
   var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); });
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); });
+  var fd = $('ytFetchDmm'); if (fd) fd.addEventListener('click', refetchFanza_);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
@@ -1056,15 +1057,16 @@
   }
 
   var _fanzaBusy = false; // 二重起動防止（順次取得中の再入を防ぐ）
-  function fillFanzaNames() {
+  // manual=true（DMM作品情報取得ボタン）のときは進捗と完了/失敗をステータスへ表示する。
+  function fillFanzaNames(manual) {
     var targets = document.querySelectorAll('[data-fanza-url]');
-    if (!targets.length) return;
-    if (typeof window.FanzaCore === 'undefined' || typeof window.buildAffiliateLink === 'undefined') return;
+    if (!targets.length) { if (manual) setStatus('作品URLのある投稿がありません。'); return; }
+    if (typeof window.FanzaCore === 'undefined' || typeof window.buildAffiliateLink === 'undefined') { if (manual) setStatus('⚠️ FANZAモジュール未読込。少し待って再度お試しください。'); return; }
     var workerUrl = '';
     var sharedSecret = '';
     try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
     try { sharedSecret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
-    if (!workerUrl) return;
+    if (!workerUrl) { if (manual) setStatus('⚠️ FANZAワーカーURLが未設定です（⚙️詳細設定で設定してください）。'); return; }
     purgeBadFanzaCache(); // 旧版で混入したログイン/エラータイトルを先に掃除
     var cache = fanzaNameCacheLoad();
     var now = new Date().getTime();
@@ -1089,11 +1091,13 @@
       jobs.push({ url: url, cid: res.cid, el: nameEl });
       nameEl.textContent = '…'; nameEl.style.display = '';
     });
-    if (!jobs.length || _fanzaBusy) return;
+    if (_fanzaBusy) { if (manual) setStatus('作品情報を取得中です。少しお待ちください…'); return; }
+    if (!jobs.length) { if (manual) setStatus('✅ 作品情報は取得済みです（再取得の必要はありません）。'); return; }
     // ★DMM APIのレート制限回避：一斉に叩かず 1件ずつ間隔をあけて順次取得する。
     // ★不安定対策：1件につき最大3回リトライ（瞬断/一時的な失敗を吸収）。それでもダメなら30分だけ空キャッシュ。
     _fanzaBusy = true;
-    var GAP = 1000, i = 0;
+    var GAP = 1000, i = 0, done = 0, fail = 0, total = jobs.length;
+    if (manual) setStatus('🎬 DMMから作品情報を取得中…（0/' + total + '）');
     function fetchWithRetry(job, tries) {
       return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
         if (info && info.title && !isBadFanzaTitle(info.title)) return info; // 成功
@@ -1105,8 +1109,13 @@
       });
     }
     function step() {
-      if (i >= jobs.length) { _fanzaBusy = false; return; }
+      if (i >= jobs.length) {
+        _fanzaBusy = false;
+        if (manual) setStatus('✅ DMM作品情報を取得しました（成功 ' + done + ' / 失敗 ' + fail + '）。');
+        return;
+      }
       var job = jobs[i++];
+      if (manual) setStatus('🎬 DMMから作品情報を取得中…（' + i + '/' + total + '）');
       fetchWithRetry(job, 2).then(function (info) {
         var c = fanzaNameCacheLoad();
         if (info && info.title && !isBadFanzaTitle(info.title)) {
@@ -1114,15 +1123,26 @@
           var media = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: info.genres || [], service: info.service || '', floor: info.floor || '' };
           c[job.url] = { title: info.title, priceInfo: pinfo, media: media, fetchedAt: new Date().getTime() };
           fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
-          setFanzaThumbEls(job.url, media.thumbSmall);
+          setFanzaThumbEls(job.url, media.thumbSmall); done++;
         } else {
           c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得は30分だけキャッシュ（再ハンマー防止＆早期復帰）
-          fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null);
+          fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;
         }
-      }).catch(function () { setFanzaEls(job.url, ''); })
+      }).catch(function () { setFanzaEls(job.url, ''); fail++; })
         .then(function () { setTimeout(step, GAP); }); // 次を間隔をあけて実行
     }
     step();
+  }
+
+  // 「DMM 作品情報を取得」ボタン：表示中アイテムのFANZAキャッシュを消して、DMM APIから強制再取得。
+  function refetchFanza_() {
+    if (_fanzaBusy) { setStatus('作品情報を取得中です。少しお待ちください…'); return; }
+    var urls = {};
+    document.querySelectorAll('[data-fanza-url]').forEach(function (el) { var u = el.getAttribute('data-fanza-url'); if (u) urls[u] = 1; });
+    var c = fanzaNameCacheLoad(), changed = false;
+    Object.keys(urls).forEach(function (u) { if (c[u]) { delete c[u]; changed = true; } }); // キャッシュ削除＝強制再取得
+    if (changed) fanzaNameCacheSave(c);
+    fillFanzaNames(true);   // 進捗・完了を表示しつつ取得（キャッシュ削除済みなので全件取り直す）
   }
 
   // ── ランキングタブ（両アカウント合算・再生数順）──────────────────────────────
