@@ -439,7 +439,7 @@
       // 属性バッジ（作品名の下に改行して表示。作品状態は価格行の左に別途表示）
       var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
       return '<div class="vrow">' +
-        (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" style="display:none;">' : '') +
+        (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         (it.workUrl ?
@@ -963,10 +963,16 @@
     if (d1 || d2) setFanzaSnapEls(workUrl, fmtSnapPriceHtml(snap));
   }
   // data-fanza-thumb-url が一致するサムネ<img>へ画像を設定して表示。
-  function setFanzaThumbEls(fanzaUrl, src) {
+  // src＝メイン画像（モーダルと同じ・存在確認済みの大きい方）。altSrc＝読込失敗時の代替。両方ダメなら非表示。
+  function setFanzaThumbEls(fanzaUrl, src, altSrc) {
+    if (!src && altSrc) { src = altSrc; altSrc = ''; }
     if (!src) return;
     document.querySelectorAll('img[data-fanza-thumb-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-thumb-url') !== fanzaUrl) return;
+      el.onerror = function () {
+        if (altSrc && el.getAttribute('src') !== altSrc) el.setAttribute('src', altSrc);
+        else el.style.display = 'none';
+      };
       if (el.getAttribute('src') !== src) el.setAttribute('src', src);
       el.style.display = '';
     });
@@ -1198,12 +1204,12 @@
         if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media) {
           setFanzaEls(url, cached.title);
           setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo);
-          setFanzaThumbEls(url, cached.media.thumbSmall || cached.media.thumb); return;
+          setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall); return;
         }
         // 画像のみの部分情報（API未収録作品）：サムネ＋手動入力の作品名/価格を表示（※negative判定より先）
         if (cached.partial && cached.media && (now - (cached.fetchedAt || 0)) < DAY) {
           setFanzaEls(url, ''); setFanzaPriceEls(url, null);
-          setFanzaThumbEls(url, cached.media.thumbSmall || cached.media.thumb); return;
+          setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall); return;
         }
         if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) { setFanzaEls(url, ''); setFanzaPriceEls(url, null); return; } // 直近「未取得」→再取得しない（手動入力があれば表示）
       }
@@ -1287,13 +1293,13 @@
           var media = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: info.genres || [], service: info.service || '', floor: info.floor || '' };
           c[job.url] = { title: info.title, priceInfo: pinfo, media: media, fetchedAt: new Date().getTime() };
           fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
-          setFanzaThumbEls(job.url, media.thumbSmall); done++;
+          setFanzaThumbEls(job.url, media.thumb || media.thumbSmall, media.thumbSmall); done++;
         } else if (info && info.partial && (info.thumb || info.thumbSmall)) {
           // 画像のみの部分情報（API未収録＋ページ取得不能の作品）：サムネ・サンプルだけ保存/表示。
           var mediaP = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: [], service: info.service || '', floor: info.floor || '' };
           c[job.url] = { title: '', partial: true, priceInfo: null, media: mediaP, fetchedAt: new Date().getTime() };
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null);
-          setFanzaThumbEls(job.url, mediaP.thumbSmall); partial++;
+          setFanzaThumbEls(job.url, mediaP.thumb || mediaP.thumbSmall, mediaP.thumbSmall); partial++;
           if (manual) partials.push({ title: job.title });
         } else {
           c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得は30分だけキャッシュ（再ハンマー防止＆早期復帰）
