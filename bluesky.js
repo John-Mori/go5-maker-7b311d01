@@ -640,21 +640,38 @@
   // 案A（da.gdチェーン）：true でr2短縮を da.gd でさらに短縮して“表示用の短いURL”にする。
   //   false にすると従来どおり r2URL をそのまま表示（＝ワンフラグで即ロールバック）。
   var USE_DAGD_CHAIN = true;
-  // 最終URL → { shortUrl(r2・計測用), shareUrl(da.gd・表示用) } を返す。
-  //   r2成功時：shortUrl=r2、shareUrl=da.gd(r2URLをさらに短縮)。計測は常にr2の shortUrl 側で行う。
-  //   r2失敗時：従来フォールバック(da.gd→TinyURL→長いURL)。この場合は計測不可で shortUrl=shareUrl。
+  // ── 表示用の短縮プロバイダ（da.gd代替策）──────────────────────────────
+  //   上から順に試し、最初に成功した短縮URLを「共有URL」に採用する。
+  //   ★da.gd が消えた/不調になったら、この配列を並べ替える or 差し替えるだけで置換できる。
+  //   ブラウザからのCORS確認済み：da.gd(Access-Control-Allow-Origin:*)・tinyurl(OK)。
+  //   予備候補（復活・CORS確認後に配列へ追加可）：is.gd '/create.php?format=simple&url=' / cleanuri 等。
+  //   将来の本命：独自ドメインを r2 に Custom Domain 割当（docs/設計・調査 参照）＝この配列に依存しない。
+  var SHARE_SHORTENERS = [
+    function (u) { return shortenVia('https://da.gd/s?url=', u); },                    // 1) da.gd（最短・16字前後）
+    function (u) { return shortenVia('https://tinyurl.com/api-create.php?url=', u); }  // 2) tinyurl（保険）
+  ];
+  function shortenShare(u) {
+    var i = 0;
+    function next() {
+      if (i >= SHARE_SHORTENERS.length) return Promise.resolve('');
+      var fn = SHARE_SHORTENERS[i++];
+      return Promise.resolve().then(function () { return fn(u); })
+        .then(function (s) { return /^https?:\/\//.test(s || '') ? s : next(); })
+        .catch(function () { return next(); });
+    }
+    return next();
+  }
+  // 最終URL → { shortUrl(r2・計測用), shareUrl(短い共有・表示用) } を返す。
+  //   r2成功時：shortUrl=r2、shareUrl=プロバイダで短縮したr2URL。計測は常にr2側で行う。
+  //   全プロバイダ失敗時：shareUrl=r2（長いが有効）。r2失敗時：従来フォールバックで計測不可(shortUrl=shareUrl)。
   function makeShortAndShare(longUrl) {
     if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '' });
     return shortenViaWorker(longUrl).then(function (r2) {
       if (r2) {
         if (!USE_DAGD_CHAIN) return { shortUrl: r2, shareUrl: r2 };
-        return shortenVia('https://da.gd/s?url=', r2).then(function (dg) {
-          return { shortUrl: r2, shareUrl: (dg || r2) }; // da.gd失敗時はr2URLを表示にフォールバック
-        });
+        return shortenShare(r2).then(function (sh) { return { shortUrl: r2, shareUrl: (sh || r2) }; });
       }
-      return shortenVia('https://da.gd/s?url=', longUrl)
-        .then(function (s) { return s || shortenVia('https://tinyurl.com/api-create.php?url=', longUrl); })
-        .then(function (s) { var u = s || longUrl; return { shortUrl: u, shareUrl: u }; });
+      return shortenShare(longUrl).then(function (s) { var u = s || longUrl; return { shortUrl: u, shareUrl: u }; });
     });
   }
   // 後方互換：表示用（da.gd優先）の1本を返す薄いラッパ（手動短縮などで使用）。

@@ -174,6 +174,16 @@ async function scrapeFanzaItem(cid) {
 
   if (!title) return null;
 
+  // ログイン・年齢確認・ブロックページは商品タイトルでない → null 扱い
+  if (
+    title.includes('ログイン') ||
+    title.toLowerCase().includes('login') ||
+    title.includes('年齢確認') ||
+    title.includes('エラー') ||
+    title === 'FANZA' ||
+    title === 'DMM'
+  ) return null;
+
   // 価格情報（取れれば付ける）
   const currentPriceM = html.match(/["']offers["']\s*:\s*\{[^}]*["']price["']\s*:\s*["']?(\d+)/);
   const currentPriceStr = currentPriceM ? currentPriceM[1] : null;
