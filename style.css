@@ -65,9 +65,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 
 /* ── 検証ダッシュボード（Phase4） ── */
 .vrow{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;}
-.vrow-thumb{position:absolute;top:8px;right:10px;width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;}
+.vrow-thumb{position:absolute;top:8px;right:10px;width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;z-index:1;}
 .vrow-thumb:active{opacity:.7;}
-.vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding-right:54px;}
+.vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding-right:64px;}
 .vrow-h .vrole{color:var(--accent);font-weight:700;}
 .vrow-h .vdate-pending{color:var(--sub);font-weight:400;}
 .vrow-h .vdate-unknown{color:var(--sub);font-weight:400;font-size:12px;}
@@ -115,12 +115,13 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-tags .vtag-isekai{color:#9b7ed1;border-color:#9b7ed1;}
 .vrow-tags .vtag-shinsaku{color:#2fa96e;border-color:#2fa96e;}
 .vrow-tags .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;}
-.fanza-name-row{font-size:.78rem;color:var(--sub);padding:1px 0 2px 2px;}
-.fanza-price-row{font-size:.74rem;color:var(--sub);padding:0 0 2px 2px;font-variant-numeric:tabular-nums;}
+.fanza-name-row{font-size:.78rem;color:#cbd5e1;padding:1px 56px 2px 2px;}
+.fanza-price-row{font-size:.74rem;color:var(--ink);padding:0 0 2px 2px;font-variant-numeric:tabular-nums;}
 .fp-state{font-size:.68rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 6px;margin-right:6px;white-space:nowrap;}
 .fp-state-new{color:#2fa96e;border-color:#2fa96e;}
 .fp-state-semi{color:#5bb8ae;border-color:#5bb8ae;}
 .fp-state-old{color:#b08968;border-color:#b08968;background:rgba(176,137,104,.12);}
+.fp-state-snap{color:var(--sub);border-color:var(--line);background:transparent;}
 .fanza-price-row .fp-cur{color:var(--ink);font-weight:700;}
 .fanza-snap-row{font-size:.74rem;color:var(--sub);padding:0 0 1px 2px;font-variant-numeric:tabular-nums;}
 /* 作品詳細モーダル */
@@ -133,6 +134,14 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .fz-hero img{max-width:100%;max-height:44vh;border-radius:8px;border:1px solid var(--line);}
 .fz-samples{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;}
 .fz-samples img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid var(--line);}
+.fz-zoomable{cursor:zoom-in;}
+.fz-zoomable:active{opacity:.8;}
+/* 画像ズームビューア（スワイプ切替・矢印なし） */
+.fz-zoom{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:10001;display:flex;align-items:center;justify-content:center;touch-action:pan-y;}
+.fz-zoom[hidden]{display:none;}
+.fz-zoom-img{max-width:96vw;max-height:88vh;object-fit:contain;border-radius:6px;-webkit-user-drag:none;user-select:none;}
+.fz-zoom-close{position:absolute;top:12px;right:14px;background:rgba(0,0,0,.45);border:none;color:#fff;font-size:20px;width:40px;height:40px;border-radius:50%;cursor:pointer;line-height:1;}
+.fz-zoom-count{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#fff;font-size:12px;opacity:.85;pointer-events:none;}
 .fz-sec{margin:10px 0;}
 .fz-lbl{display:block;font-size:11px;color:var(--accent);font-weight:700;margin-bottom:4px;}
 .fz-genres{display:flex;flex-wrap:wrap;gap:5px;}
@@ -141,13 +150,14 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .fz-meta{font-size:13px;color:var(--ink);}
 .fz-foot{margin-top:12px;text-align:right;}
 .fz-open{color:var(--accent);font-size:13px;font-weight:700;text-decoration:none;}
-.fanza-price-row .fp-list{color:var(--sub);text-decoration:line-through;}
+.fanza-price-row .fp-list{color:var(--ink);text-decoration:line-through;}
 .fanza-price-row .fp-sale-lbl{color:#ff6b8a;}
 .fanza-price-row .fp-sale{color:#ff6b8a;font-weight:700;}
 .fanza-price-row .fp-off{color:#04222a;background:#ff6b8a;border-radius:4px;padding:0 5px;font-weight:700;font-size:.68rem;}
 .vmetrics .vedit-btn{background:transparent;border:none;color:var(--bsky);font-size:12px;cursor:pointer;padding:0;line-height:1;white-space:nowrap;flex-shrink:0;width:auto;margin-top:0;}
 .vmetrics .vedit-btn:active{opacity:.65;}
 .vrow-foot{display:flex;align-items:center;gap:8px;margin-top:7px;}
+.vrow-foot-gap{flex:1;min-height:1.6em;}
 .vyt-lbl{flex:0 0 auto;font-size:11px;color:var(--sub);line-height:1.4;}
 .vyt-inp{flex:1;min-width:0;font-size:14px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
 .vrow-foot .vdel{flex:0 0 auto;background:transparent;border:none;color:var(--sub);font-size:16px;cursor:pointer;padding:0;line-height:1;opacity:0.4;width:auto;margin-top:0;}

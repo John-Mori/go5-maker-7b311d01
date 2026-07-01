@@ -440,7 +440,7 @@
         '<div class="vrow-h">' + dateHtml + ' ' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         (it.workUrl ?
-          '<div class="fanza-snap-row">' + esc(it.workState || '旧作') + ' ' +
+          '<div class="fanza-snap-row"><span class="fp-state fp-state-snap">' + esc(it.workState || '旧作') + '</span> ' +
             '<span class="fanza-snap-price" data-fanza-snap-url="' + esc(it.workUrl) + '">' + (it.fanzaSnap ? fmtSnapPriceHtml(it.fanzaSnap) : '') + '</span>' +
           '</div>'
         : '') +
@@ -458,8 +458,7 @@
           (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
         '</div>' +
         '<div class="vrow-foot">' +
-          '<span class="vyt-lbl">YouTube<br>URL</span>' +
-          '<input class="vyt-inp" type="url" inputmode="url" placeholder="https://youtu.be/…" data-k="' + esc(k) + '" value="' + esc(yt) + '">' +
+          '<span class="vrow-foot-gap"></span>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
         '</div>';
@@ -954,20 +953,72 @@
       ov.addEventListener('click', function (e) { if (e.target === ov) closeFanzaModal_(); });
       ov.querySelector('.fz-close').addEventListener('click', closeFanzaModal_);
     }
+    // 画像ギャラリー：作品画像（先頭）＋サンプル画像。クリックでズームビューア（スワイプ切替）。
+    _fzGallery = [];
+    if (big) _fzGallery.push(big);
+    samples.forEach(function (s) { _fzGallery.push(s); });
+    var sBase = big ? 1 : 0;
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
       '<div class="fz-title">' + esc(title) + '</div>' +
-      (big ? '<div class="fz-hero"><a href="' + esc(fanzaUrl) + '" target="_blank" rel="noopener"><img src="' + esc(big) + '" alt=""></a></div>' : '') +
-      (samples.length ? '<div class="fz-samples">' + samples.map(function (s) { return '<a href="' + esc(s) + '" target="_blank" rel="noopener"><img src="' + esc(s) + '" alt="" loading="lazy"></a>'; }).join('') + '</div>' : '') +
+      (big ? '<div class="fz-hero"><img class="fz-zoomable" data-zoom="0" src="' + esc(big) + '" alt="タップで拡大"></div>' : '') +
+      (samples.length ? '<div class="fz-samples">' + samples.map(function (s, si) { return '<img class="fz-zoomable" data-zoom="' + (sBase + si) + '" src="' + esc(s) + '" alt="" loading="lazy">'; }).join('') + '</div>' : '') +
       (genres.length ? '<div class="fz-sec"><span class="fz-lbl">ジャンル</span><div class="fz-genres">' + genres.map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div></div>' : '') +
       '<div class="fz-sec fz-meta-row">' +
         '<div class="fz-meta"><span class="fz-lbl">発売日</span>' + esc(date ? String(date).slice(0, 10) : '—') + '</div>' +
         '<div class="fz-meta"><span class="fz-lbl">サービス/フロア</span>' + esc(svc || '—') + '</div>' +
       '</div>' +
       '<div class="fz-foot"><a class="fz-open" href="' + esc(fanzaUrl) + '" target="_blank" rel="noopener">作品ページを開く ↗</a></div>';
+    body.querySelectorAll('.fz-zoomable').forEach(function (im) {
+      im.addEventListener('click', function () { openZoom_(_fzGallery, parseInt(im.getAttribute('data-zoom'), 10) || 0); });
+    });
     ov.hidden = false;
   }
   function closeFanzaModal_() { var ov = $('fzOverlay'); if (ov) ov.hidden = true; }
+
+  // 画像ズームビューア（作品画像＋サンプルを1つのギャラリーとして、左右スワイプで切替。矢印ボタンなし）。
+  var _fzGallery = [], _zoomImgs = [], _zoomIdx = 0;
+  function openZoom_(images, idx) {
+    if (!images || !images.length) return;
+    var z = $('fzZoom');
+    if (!z) {
+      z = document.createElement('div');
+      z.id = 'fzZoom'; z.className = 'fz-zoom'; z.hidden = true;
+      z.innerHTML = '<button class="fz-zoom-close" type="button" aria-label="閉じる">✕</button><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div>';
+      document.body.appendChild(z);
+      z.addEventListener('click', function (e) { if (e.target === z) closeZoom_(); });
+      z.querySelector('.fz-zoom-close').addEventListener('click', closeZoom_);
+      var sx = null, sy = null;
+      z.addEventListener('touchstart', function (e) { var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
+      z.addEventListener('touchend', function (e) {
+        if (sx == null) return; var t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+        if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) zoomGo_(dx < 0 ? 1 : -1);
+        sx = sy = null;
+      }, { passive: true });
+      var px = null;
+      z.addEventListener('pointerdown', function (e) { if (e.pointerType === 'touch') return; px = e.clientX; });
+      z.addEventListener('pointerup', function (e) { if (e.pointerType === 'touch' || px == null) return; var dx = e.clientX - px; if (Math.abs(dx) > 40) zoomGo_(dx < 0 ? 1 : -1); px = null; });
+      document.addEventListener('keydown', function (e) {
+        var zz = $('fzZoom'); if (!zz || zz.hidden) return;
+        if (e.key === 'ArrowRight') zoomGo_(1); else if (e.key === 'ArrowLeft') zoomGo_(-1); else if (e.key === 'Escape') closeZoom_();
+      });
+    }
+    _zoomImgs = images.slice(); _zoomIdx = idx || 0;
+    renderZoom_();
+    z.hidden = false;
+  }
+  function renderZoom_() {
+    var z = $('fzZoom'); if (!z) return;
+    var im = z.querySelector('.fz-zoom-img'), cnt = z.querySelector('.fz-zoom-count');
+    if (im) im.src = _zoomImgs[_zoomIdx] || '';
+    if (cnt) cnt.textContent = _zoomImgs.length > 1 ? (_zoomIdx + 1) + ' / ' + _zoomImgs.length + '（左右スワイプ）' : '';
+  }
+  function zoomGo_(dir) {
+    if (_zoomImgs.length < 2) return;
+    _zoomIdx = (_zoomIdx + dir + _zoomImgs.length) % _zoomImgs.length;
+    renderZoom_();
+  }
+  function closeZoom_() { var z = $('fzZoom'); if (z) z.hidden = true; }
 
   // data-fanza-price-url が一致するDOM要素へ価格を反映＋発売日から現在の作品状態バッジを更新。
   function setFanzaPriceEls(fanzaUrl, priceInfo) {
