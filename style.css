@@ -298,7 +298,8 @@ button.primary:active{filter:brightness(.92);}
 button.primary:disabled{opacity:.5;}
 button.ghost,a.ghost{display:block;text-align:center;background:transparent;border:1px solid var(--line);
   color:var(--sub);text-decoration:none;font-size:14px;padding:10px;border-radius:10px;margin-top:8px;}
-.status{margin-top:10px;color:var(--accent);font-size:14px;min-height:18px;text-align:center;}
+.status{margin-top:10px;color:var(--accent);font-size:14px;min-height:18px;text-align:center;line-height:1.5;}
+.status .tr-acct{display:inline-block;white-space:nowrap;font-size:.82em;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;}
 #resultArea{margin-top:12px;}
 video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
 .notice{color:#b89b6b;font-size:11.5px;line-height:1.6;margin-top:18px;text-align:center;}

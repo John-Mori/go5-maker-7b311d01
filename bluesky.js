@@ -188,12 +188,12 @@
     els.testBtn.addEventListener('click', function () {
       var c = creds();
       if (!c.handle || !c.appPw) { setTestResult('ハンドルとアプリパスワードを入力してから押してください。', 'off'); return; }
-      if (!window.BlueskyCore || !window.BlueskyCore.blueskyVerify) { setTestResult('投稿モジュール未読込（ページを再読み込みしてください）。', 'off'); return; }
+      if (!window.BlueskyCore || !window.BlueskyCore.blueskyVerify) { setTestResult('投稿モジュール未読込(ページを再読み込みしてください)。', 'off'); return; }
       var btn = els.testBtn, orig = btn.textContent;
       btn.disabled = true; btn.textContent = '接続を確認中…';
       setTestResult('接続を確認中…', '');
       window.BlueskyCore.blueskyVerify({ identifier: c.handle, appPassword: c.appPw })
-        .then(function (r) { setTestResult('✅ ログイン成功（@' + (r.handle || c.handle) + '）。このアカウントで投稿できます。', 'on'); })
+        .then(function (r) { setTestResult('✅ ログイン成功<br><span class="tr-acct">アカウント: @' + (r.handle || c.handle) + '</span><br>このアカウントで投稿できます。', 'on'); })
         .catch(function (e) { setTestResult('⚠️ ログインできません：<br>' + friendlyLoginError(e && e.message ? e.message : e), 'off'); })
         .then(function () { btn.disabled = false; btn.textContent = orig; });
     });
