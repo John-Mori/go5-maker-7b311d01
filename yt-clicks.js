@@ -195,7 +195,10 @@
           '<input id="veditYt" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…（省略可）">' +
         '</label>' +
         '<label class="vedit-field">Bluesky 投稿URL（計測用の短縮URL）' +
-          '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL（省略可）">' +
+          '<div class="vedit-bsky-row">' +
+            '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL（省略可）">' +
+            '<button id="veditBskyCopy" type="button" class="vedit-copy">Copy</button>' +
+          '</div>' +
         '</label>' +
         '<div id="veditGenResult" class="vedit-gen-result" hidden></div>' +
         '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
@@ -225,6 +228,19 @@
     document.body.appendChild(d);
     $('veditCancel').addEventListener('click', closeModal_);
     d.addEventListener('click', function (e) { if (e.target === d) closeModal_(); });
+    // Bluesky投稿URLのコピー（clipboard API＋execCommandフォールバック）。
+    $('veditBskyCopy').addEventListener('click', function () {
+      var inp = $('veditBsky'); if (!inp) return;
+      var v = (inp.value || '').trim();
+      if (!v) { return; }
+      var btn = this, orig = btn.textContent;
+      function ok() { btn.textContent = '✓'; setTimeout(function () { btn.textContent = orig; }, 1200); }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(v).then(ok, function () { copyFallback_(inp, ok); });
+        } else { copyFallback_(inp, ok); }
+      } catch (e) { copyFallback_(inp, ok); }
+    });
     $('veditSave').addEventListener('click', function () {
       if (typeof _saveCb !== 'function') return;
       var cb = _saveCb;
@@ -298,6 +314,15 @@
   function showModalErr_(msg) {
     var el = $('veditError'); if (!el) return;
     el.textContent = msg; el.hidden = false;
+  }
+
+  // clipboard API 不可の環境向けフォールバック（テキスト選択→execCommand('copy')）。
+  function copyFallback_(inp, ok) {
+    try {
+      inp.focus(); inp.select();
+      if (inp.setSelectionRange) inp.setSelectionRange(0, 99999);
+      if (document.execCommand('copy') && ok) ok();
+    } catch (e) {}
   }
 
   // Bluesky URLをアイテムに保存（go5-short → shortUrl、その他 → postUrl）。
