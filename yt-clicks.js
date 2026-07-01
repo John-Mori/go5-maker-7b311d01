@@ -725,6 +725,16 @@
   // 投稿履歴を開いたら、未生成の項目があれば自動で計測リンクを生成する（ボタン任せにしない）。
   function maybeAutoGen() { if (!_bulkBusy) runBulkGen(true); }
 
+  // 投稿本文からの当時割引/新作の復元を「1回だけ」自動実行（フラグ管理・ボタン不要で確実に）。
+  function maybeRestorePromo_() {
+    var FLAG = 'bsky_promo_restored_v1';
+    try { if (localStorage.getItem(FLAG)) return; } catch (e) {}
+    // 価格(定価)キャッシュが載ってから走らせたいので少し待つ。完了時のみフラグを立てる（対象0件では立てない）。
+    setTimeout(function () {
+      restorePctFromBsky_(function () { try { localStorage.setItem(FLAG, '1'); } catch (e) {} });
+    }, 3500);
+  }
+
   // Bluesky本文から「新作」「◯%オフ」を検出（半角/全角%・オフ/OFF/割引・半額に対応）。
   function parseBskyPromo_(text) {
     var t = String(text || '').replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
@@ -735,9 +745,10 @@
     if (m) { var n = parseInt(m[1], 10); if (n > 0 && n < 100) pct = n; }
     return { isNew: isNew, pct: pct };
   }
-  // 【1回限り想定】両chの投稿本文をBluesky公開APIで取得し、明記された当時の割引率/新作を当時スナップへ反映。
+  // 【1回限り】両chの投稿本文をBluesky公開APIで取得し、明記された当時の割引率/新作を当時スナップへ反映。
+  // onDone は実際に処理を走らせたときだけ完了後に呼ぶ（対象0件のときは呼ばない＝フラグを立てず後で再試行可能に）。
   var _restoreBusy = false;
-  function restorePctFromBsky_() {
+  function restorePctFromBsky_(onDone) {
     if (_restoreBusy) return;
     var keys = ['short_hist__acc1', 'verify_manual__acc1', 'short_hist__acc2', 'verify_manual__acc2'];
     var store = {}, jobs = [];
@@ -746,9 +757,8 @@
       store[k] = arr;
       arr.forEach(function (it, idx) { if (it && it.postUri) jobs.push({ key: k, idx: idx, uri: String(it.postUri) }); });
     });
-    if (!jobs.length) { setStatus('Bluesky投稿URL(postUri)を持つ投稿がありません。'); return; }
+    if (!jobs.length) return;
     _restoreBusy = true;
-    var btn = $('ytRestorePct'); if (btn) btn.disabled = true;
     var fzCache = fanzaNameCacheLoad();
     var updated = 0, skipped = 0, i = 0, BATCH = 25;
     function listPriceOf(it) {
@@ -772,9 +782,11 @@
     function step() {
       if (i >= jobs.length) {
         keys.forEach(function (k) { try { localStorage.setItem(k, JSON.stringify(store[k])); } catch (e) {} });
-        _restoreBusy = false; if (btn) btn.disabled = false;
-        setStatus('✅ 投稿文から当時の割引/新作を反映：' + updated + '件（明確な記載なしでスルー ' + skipped + '件・両ch）。');
-        render(); return;
+        _restoreBusy = false;
+        if (updated) setStatus('✅ 投稿文から当時の割引/新作を反映：' + updated + '件（記載なし ' + skipped + '件・両ch）。');
+        render();
+        if (typeof onDone === 'function') onDone();
+        return;
       }
       var slice = jobs.slice(i, i + BATCH);
       var q = slice.map(function (j) { return 'uris=' + encodeURIComponent(j.uri); }).join('&');
@@ -798,16 +810,15 @@
     step();
   }
 
-  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); });
+  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); });
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', refresh);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
-  var rpb = $('ytRestorePct'); if (rpb) rpb.addEventListener('click', restorePctFromBsky_);
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
   document.addEventListener('account-changed', function () { render(); });
-  // 読み込み時点で既に投稿履歴タブを開いている場合も自動生成（短縮機能の読込を待って一度だけ）。
-  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) maybeAutoGen(); }, 2500);
+  // 読み込み時点で既に投稿履歴タブを開いている場合も自動生成＋当時割引の復元（各1回）。
+  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { maybeAutoGen(); maybeRestorePromo_(); } }, 2500);
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。
   var keyEl = $('ytApiKey');
