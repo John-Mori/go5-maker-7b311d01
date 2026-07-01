@@ -79,6 +79,15 @@ function fanzaReason_(status, data) {
   if (status && status >= 400) return 'リクエストエラー（HTTP ' + status + '）';
   return code ? ('エラー: ' + code) : '不明なエラー';
 }
+// リトライして意味があるか（一時的失敗=true / 恒久的失敗=false）。
+// 「見つからない」「認証」「リクエスト不正」は何度やっても同じ＝リトライしない（無駄な待ち時間を作らない）。
+function fanzaRetryable_(status, data) {
+  var code = (data && data.error) ? String(data.error) : '';
+  if (code === 'not_found' || code === 'bad_secret' || code === 'origin_not_allowed' || code === 'missing_cid' || code === 'bad_json') return false;
+  if (status && status >= 500) return true;   // サーバー一時エラーは再試行の価値あり
+  if (status && status >= 400) return false;  // その他4xxは恒久的
+  return !!code === false;                    // コード不明（想定外）＝一応リトライ
+}
 
 // 成功時は parseFanzaItem の結果（title を持つ）を返す。失敗時は { __error:true, reason } を返す。
 // ※呼び出し側は「info && info.title」で成功判定できる（従来どおり）。reason で失敗内容が分かる。
@@ -98,12 +107,12 @@ function fetchFanzaInfo(cid, workerUrl, sharedSecret) {
     return r.json().catch(function () { return null; }).then(function (data) {
       if (timer) clearTimeout(timer);
       if (r.ok && data && data.ok && data.item) return parseFanzaItem(data.item);
-      return { __error: true, reason: fanzaReason_(r.status, data) };
+      return { __error: true, reason: fanzaReason_(r.status, data), retryable: fanzaRetryable_(r.status, data) };
     });
   })
   .catch(function () {
     if (timer) clearTimeout(timer);
-    return { __error: true, reason: timedOut ? '通信タイムアウト（9秒）' : '通信エラー（オフライン/接続失敗）' };
+    return { __error: true, reason: timedOut ? '通信タイムアウト（9秒）' : '通信エラー（オフライン/接続失敗）', retryable: true };
   });
 }
 

@@ -1104,7 +1104,9 @@
     function fetchWithRetry(job, tries) {
       return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
         if (info && info.title && !isBadFanzaTitle(info.title)) return info; // 成功
-        if (tries > 0) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return fetchWithRetry(job, tries - 1); });
+        // 恒久的失敗（作品が見つからない等）はリトライしない＝無駄な待ち時間を作らない。一時的失敗のみ再試行。
+        var canRetry = info && info.__error ? !!info.retryable : true;
+        if (tries > 0 && canRetry) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return fetchWithRetry(job, tries - 1); });
         return info || null;
       }).catch(function () {
         if (tries > 0) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return fetchWithRetry(job, tries - 1); });
