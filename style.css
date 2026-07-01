@@ -65,9 +65,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 
 /* ── 検証ダッシュボード（Phase4） ── */
 .vrow{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;}
-.vrow-thumb{position:absolute;top:8px;right:10px;width:55px;height:55px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;z-index:1;}
+.vrow-thumb{position:absolute;top:8px;right:10px;width:66px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;z-index:1;}
 .vrow-thumb:active{opacity:.7;}
-.vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding-right:74px;}
+.vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding-right:84px;}
 .vrow-h .vrole{color:var(--accent);font-weight:700;}
 .vrow-h .vdate-pending{color:var(--sub);font-weight:400;}
 .vrow-h .vdate-unknown{color:var(--sub);font-weight:400;font-size:12px;}
@@ -115,8 +115,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-tags .vtag-isekai{color:#9b7ed1;border-color:#9b7ed1;}
 .vrow-tags .vtag-shinsaku{color:#2fa96e;border-color:#2fa96e;}
 .vrow-tags .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;}
-.fanza-name-row{font-size:.78rem;color:#cbd5e1;padding:1px 66px 2px 2px;}
-.fanza-price-row{font-size:.74rem;color:var(--ink);padding:0 0 2px 2px;font-variant-numeric:tabular-nums;}
+.fanza-name-row{font-size:.78rem;color:#cbd5e1;padding:1px 78px 2px 2px;}
+.fanza-price-row{font-size:.74rem;color:var(--ink);padding:0 0 2px 2px;margin-top:4px;font-variant-numeric:tabular-nums;}
 .fp-state{font-size:.68rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 6px;margin-right:6px;white-space:nowrap;}
 .fp-state-new{color:#2fa96e;border-color:#2fa96e;}
 .fp-state-semi{color:#5bb8ae;border-color:#5bb8ae;}
