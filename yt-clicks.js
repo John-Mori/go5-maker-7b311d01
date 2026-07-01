@@ -68,7 +68,7 @@
       return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + dowHtml + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     } catch (e) { return ''; }
   }
-  function setStatus(m) { var e = $('ytClickStatus'); if (e) e.textContent = m || ''; }
+  function setStatus(m, html) { var e = $('ytClickStatus'); if (!e) return; if (html) e.innerHTML = m || ''; else e.textContent = m || ''; }
   function ytIdOf(url) { return (url && window.IdGen && window.IdGen.youtubeId) ? (window.IdGen.youtubeId(url) || '') : ''; }
 
   // 表示する全アイテム（履歴＋手動追加）を結合。manualOnly=true の手動短縮URL履歴は除外。
@@ -1072,6 +1072,9 @@
     var now = new Date().getTime();
     var DAY = 86400000, NEG = 30 * 60000; // 題名キャッシュ=1日 / 「未取得(空)」キャッシュ=30分(瞬断からの復帰を速く)
     var jobs = [], seen = {};
+    // 失敗表示用：作品URL→投稿(YouTube)の題名。どの投稿の取得が失敗したか明示するのに使う。
+    var titleByUrl = {};
+    try { allItems().forEach(function (it) { if (it.workUrl && !titleByUrl[it.workUrl]) titleByUrl[it.workUrl] = it.title || ''; }); } catch (e) {}
     targets.forEach(function (nameEl) {
       var url = nameEl.getAttribute('data-fanza-url');
       if (!url) return;
@@ -1088,7 +1091,7 @@
       var res = window.buildAffiliateLink(url, '');
       if (!res || !res.ok || !res.cid) return;
       if (seen[url]) return; seen[url] = true;
-      jobs.push({ url: url, cid: res.cid, el: nameEl });
+      jobs.push({ url: url, cid: res.cid, el: nameEl, title: titleByUrl[url] || '' });
       nameEl.textContent = '…'; nameEl.style.display = '';
     });
     if (_fanzaBusy) { if (manual) setStatus('作品情報を取得中です。少しお待ちください…'); return; }
@@ -1096,7 +1099,7 @@
     // ★DMM APIのレート制限回避：一斉に叩かず 1件ずつ間隔をあけて順次取得する。
     // ★不安定対策：1件につき最大3回リトライ（瞬断/一時的な失敗を吸収）。それでもダメなら30分だけ空キャッシュ。
     _fanzaBusy = true;
-    var GAP = 1000, i = 0, done = 0, fail = 0, total = jobs.length;
+    var GAP = 1000, i = 0, done = 0, fail = 0, total = jobs.length, fails = [];
     if (manual) setStatus('🎬 DMMから作品情報を取得中…（0/' + total + '）');
     function fetchWithRetry(job, tries) {
       return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
@@ -1111,7 +1114,13 @@
     function step() {
       if (i >= jobs.length) {
         _fanzaBusy = false;
-        if (manual) setStatus('✅ DMM作品情報を取得しました（成功 ' + done + ' / 失敗 ' + fail + '）。');
+        if (manual) {
+          if (!fails.length) setStatus('✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。');
+          else {
+            var lines = fails.map(function (f) { return '・「' + esc(f.title || '(無題)') + '」<br>　└ ' + esc(f.reason); }).join('<br>');
+            setStatus('DMM作品情報：成功 ' + done + ' / <b>失敗 ' + fail + '</b><br><b>取得に失敗した投稿と原因：</b><br>' + lines, true);
+          }
+        }
         return;
       }
       var job = jobs[i++];
@@ -1127,8 +1136,9 @@
         } else {
           c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得は30分だけキャッシュ（再ハンマー防止＆早期復帰）
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;
+          if (manual) fails.push({ title: job.title, reason: (info && info.__error && info.reason) ? info.reason : '作品が見つかりません' });
         }
-      }).catch(function () { setFanzaEls(job.url, ''); fail++; })
+      }).catch(function () { setFanzaEls(job.url, ''); fail++; if (manual) fails.push({ title: job.title, reason: '通信エラー' }); })
         .then(function () { setTimeout(step, GAP); }); // 次を間隔をあけて実行
     }
     step();

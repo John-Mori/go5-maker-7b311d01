@@ -68,11 +68,25 @@ function parseFanzaItem(item) {
  * @param {string} sharedSecret - localStorage の fanza_shared_secret
  * @returns {Promise<ReturnType<parseFanzaItem>|null>}
  */
+// 失敗時のエラーコード/HTTPから、人が読める失敗理由を作る。
+function fanzaReason_(status, data) {
+  var code = (data && data.error) ? String(data.error) : '';
+  if (code === 'not_found') return '作品が見つかりません（cid違い・配信終了・対象フロア外の可能性）';
+  if (code === 'bad_secret') return '認証エラー（共有シークレット不一致。⚙️詳細設定を確認）';
+  if (code === 'origin_not_allowed') return 'Origin不許可（ワーカー設定）';
+  if (code === 'missing_cid' || code === 'bad_json') return 'リクエスト不正（' + code + '）';
+  if (status && status >= 500) return 'サーバーエラー（HTTP ' + status + '）';
+  if (status && status >= 400) return 'リクエストエラー（HTTP ' + status + '）';
+  return code ? ('エラー: ' + code) : '不明なエラー';
+}
+
+// 成功時は parseFanzaItem の結果（title を持つ）を返す。失敗時は { __error:true, reason } を返す。
+// ※呼び出し側は「info && info.title」で成功判定できる（従来どおり）。reason で失敗内容が分かる。
 function fetchFanzaInfo(cid, workerUrl, sharedSecret) {
-  if (!cid || !workerUrl) return Promise.resolve(null);
+  if (!cid || !workerUrl) return Promise.resolve({ __error: true, reason: '作品URL/ワーカーURLが未設定' });
   // タイムアウト（スマホ回線での無限待ちを防ぎ、呼び出し側のリトライを効かせる）。
-  var ctrl = null, timer = null;
-  try { ctrl = new AbortController(); timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 9000); } catch (e) { ctrl = null; }
+  var ctrl = null, timer = null, timedOut = false;
+  try { ctrl = new AbortController(); timer = setTimeout(function () { timedOut = true; try { ctrl.abort(); } catch (e) {} }, 9000); } catch (e) { ctrl = null; }
   var opts = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': sharedSecret || '' },
@@ -81,15 +95,16 @@ function fetchFanzaInfo(cid, workerUrl, sharedSecret) {
   if (ctrl) opts.signal = ctrl.signal;
   return fetch(workerUrl + '/api/fanza-item', opts)
   .then(function (r) {
-    if (!r.ok) throw new Error('http_' + r.status); // リトライ対象にするため例外化
-    return r.json();
+    return r.json().catch(function () { return null; }).then(function (data) {
+      if (timer) clearTimeout(timer);
+      if (r.ok && data && data.ok && data.item) return parseFanzaItem(data.item);
+      return { __error: true, reason: fanzaReason_(r.status, data) };
+    });
   })
-  .then(function (data) {
+  .catch(function () {
     if (timer) clearTimeout(timer);
-    if (!data || !data.ok || !data.item) return null;
-    return parseFanzaItem(data.item);
-  })
-  .catch(function () { if (timer) clearTimeout(timer); return null; });
+    return { __error: true, reason: timedOut ? '通信タイムアウト（9秒）' : '通信エラー（オフライン/接続失敗）' };
+  });
 }
 
 // ブラウザ環境向けグローバル公開
