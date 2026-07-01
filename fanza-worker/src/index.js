@@ -69,6 +69,18 @@ export default {
   }
 };
 
+// DMM APIのGET（一時的な失敗はshort backoffでリトライ）。成功時のみJSONを返す。
+async function fetchDmmJson(url, tries) {
+  for (let t = 0; t < tries; t++) {
+    try {
+      const res = await fetch(url, { headers: { "Accept": "application/json" } });
+      if (res.ok) return await res.json();
+    } catch (e) { /* リトライ */ }
+    if (t < tries - 1) await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
 // ── DMM 公式 API ─────────────────────────────────────────────────────────────
 // https://affiliate.dmm.com/api/  で API ID を取得後に有効になる。
 // doujin フロアで見つからない場合は複数フロアを試みる（CID プレフィックスで判定）。
@@ -99,11 +111,9 @@ async function fetchViaApi(cid, apiId, affiliateId) {
         cid:          cid,
         output:       "json",
       });
-      const res = await fetch(DMM_API_BASE + "?" + params.toString(), {
-        headers: { "Accept": "application/json" }
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
+      // 一時的な失敗（ネットワーク/レート）を吸収するため最大2回リトライしてからJSONを得る。
+      const data = await fetchDmmJson(DMM_API_BASE + "?" + params.toString(), 2);
+      if (!data) continue;
       const items = (data.result && Array.isArray(data.result.items)) ? data.result.items : [];
       if (!items.length) continue;
       const it = items[0];

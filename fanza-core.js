@@ -70,23 +70,26 @@ function parseFanzaItem(item) {
  */
 function fetchFanzaInfo(cid, workerUrl, sharedSecret) {
   if (!cid || !workerUrl) return Promise.resolve(null);
-  return fetch(workerUrl + '/api/fanza-item', {
+  // タイムアウト（スマホ回線での無限待ちを防ぎ、呼び出し側のリトライを効かせる）。
+  var ctrl = null, timer = null;
+  try { ctrl = new AbortController(); timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 9000); } catch (e) { ctrl = null; }
+  var opts = {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shared-Secret': sharedSecret || ''
-    },
+    headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': sharedSecret || '' },
     body: JSON.stringify({ cid: cid })
-  })
+  };
+  if (ctrl) opts.signal = ctrl.signal;
+  return fetch(workerUrl + '/api/fanza-item', opts)
   .then(function (r) {
-    if (!r.ok) return null;
+    if (!r.ok) throw new Error('http_' + r.status); // リトライ対象にするため例外化
     return r.json();
   })
   .then(function (data) {
+    if (timer) clearTimeout(timer);
     if (!data || !data.ok || !data.item) return null;
     return parseFanzaItem(data.item);
   })
-  .catch(function () { return null; });
+  .catch(function () { if (timer) clearTimeout(timer); return null; });
 }
 
 // ブラウザ環境向けグローバル公開

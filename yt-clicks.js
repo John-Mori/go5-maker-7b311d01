@@ -810,7 +810,7 @@
   }
 
   var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); });
-  var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', refresh);
+  var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(); });
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
@@ -851,6 +851,15 @@
     var changed = false;
     Object.keys(c).forEach(function (url) {
       if (!c[url] || isBadFanzaTitle(c[url].title)) { delete c[url]; changed = true; }
+    });
+    if (changed) fanzaNameCacheSave(c);
+  }
+  // 「未取得(空)」のネガティブキャッシュを消す＝手動更新で失敗分を即・強制再取得できるようにする。
+  function purgeNegativeFanzaCache() {
+    var c = fanzaNameCacheLoad();
+    var changed = false;
+    Object.keys(c).forEach(function (url) {
+      if (c[url] && !c[url].title) { delete c[url]; changed = true; }
     });
     if (changed) fanzaNameCacheSave(c);
   }
@@ -1051,7 +1060,7 @@
     purgeBadFanzaCache(); // 旧版で混入したログイン/エラータイトルを先に掃除
     var cache = fanzaNameCacheLoad();
     var now = new Date().getTime();
-    var DAY = 86400000, NEG = 6 * 3600000; // 題名キャッシュ=1日 / 「未取得(空)」キャッシュ=6時間
+    var DAY = 86400000, NEG = 30 * 60000; // 題名キャッシュ=1日 / 「未取得(空)」キャッシュ=30分(瞬断からの復帰を速く)
     var jobs = [], seen = {};
     targets.forEach(function (nameEl) {
       var url = nameEl.getAttribute('data-fanza-url');
@@ -1074,12 +1083,23 @@
     });
     if (!jobs.length || _fanzaBusy) return;
     // ★DMM APIのレート制限回避：一斉に叩かず 1件ずつ間隔をあけて順次取得する。
+    // ★不安定対策：1件につき最大3回リトライ（瞬断/一時的な失敗を吸収）。それでもダメなら30分だけ空キャッシュ。
     _fanzaBusy = true;
-    var GAP = 800, i = 0;
+    var GAP = 1000, i = 0;
+    function fetchWithRetry(job, tries) {
+      return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
+        if (info && info.title && !isBadFanzaTitle(info.title)) return info; // 成功
+        if (tries > 0) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return fetchWithRetry(job, tries - 1); });
+        return info || null;
+      }).catch(function () {
+        if (tries > 0) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return fetchWithRetry(job, tries - 1); });
+        return null;
+      });
+    }
     function step() {
       if (i >= jobs.length) { _fanzaBusy = false; return; }
       var job = jobs[i++];
-      window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
+      fetchWithRetry(job, 2).then(function (info) {
         var c = fanzaNameCacheLoad();
         if (info && info.title && !isBadFanzaTitle(info.title)) {
           var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0, releaseDate: info.releaseDate || '' };
@@ -1088,7 +1108,7 @@
           fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
           setFanzaThumbEls(job.url, media.thumbSmall);
         } else {
-          c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得を短期キャッシュ（再ハンマー防止）
+          c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得は30分だけキャッシュ（再ハンマー防止＆早期復帰）
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null);
         }
       }).catch(function () { setFanzaEls(job.url, ''); })
