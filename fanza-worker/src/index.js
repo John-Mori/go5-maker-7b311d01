@@ -56,6 +56,11 @@ export default {
       // ② スクレイピング（API なし or API で見つからなかった場合）
       if (!item) item = await scrapeFanzaItem(cid);
 
+      // ③ 画像CDNフォールバック：アフィリエイトAPI未収録（サークル設定等）かつ商品ページが
+      //    ログイン壁（Cloudflare=海外/DC IP扱い）の作品でも、画像CDN(doujin-assets)は認証・
+      //    地域制限なしで取れる。サムネ＋サンプル画像だけの「部分情報」(partial)を返す。
+      if (!item) item = await cdnFallbackItem(cid);
+
       if (!item) return json({ ok: false, error: "not_found", cid }, 404, cors);
       return json({ ok: true, item }, 200, cors);
     }
@@ -142,22 +147,45 @@ async function fetchViaApi(cid, apiId, affiliateId) {
 
 // ── HTML スクレイピング ───────────────────────────────────────────────────────
 // og:title → JSON-LD Product → <title> の順でタイトルを取得する。
+// ★CloudflareのIPは海外扱いされ、DMMが /en/age_check/?rurl=… へ302で飛ばす（API未収録作品が
+//   スクレイプでも取れなかった根本原因）。redirect:manual で追い、age_check へ飛ばされたら
+//   rurl を取り出して年齢クッキー付きで直接再訪問して突破する。
+const SCRAPE_HEADERS = {
+  "Cookie":          "age_check_done=1; ckcy=1; cklg=ja",
+  "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+  "Referer":         "https://www.dmm.co.jp/",
+};
+async function fetchDmmPage(url, trace) {
+  let cur = url;
+  for (let hop = 0; hop < 6; hop++) {
+    const res = await fetch(cur, { headers: SCRAPE_HEADERS, redirect: "manual" });
+    if (trace) trace.push({ hop, url: cur, status: res.status, loc: res.headers.get("location") || "" });
+    if (res.status >= 300 && res.status < 400) {
+      let loc = res.headers.get("location") || "";
+      if (!loc) return res;
+      try { loc = new URL(loc, cur).href; } catch (e) { return res; }
+      // 年齢確認ページへ飛ばされた → rurl（本来の行き先）を取り出して直接再訪問。
+      const m = loc.match(/[?&]rurl=([^&]+)/);
+      if (/age_check/.test(loc) && m) {
+        try { loc = decodeURIComponent(m[1]); } catch (e) {}
+        // /en/ 版へ差し替えられている場合は日本版URLへ戻す
+        loc = loc.replace("://www.dmm.co.jp/en/", "://www.dmm.co.jp/");
+      }
+      if (loc === cur) return res; // 同一URLへのループ＝突破不能
+      cur = loc;
+      continue;
+    }
+    return res;
+  }
+  return null;
+}
 async function scrapeFanzaItem(cid) {
   const pageUrl = DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/";
   let res;
-  try {
-    res = await fetch(pageUrl, {
-      headers: {
-        "Cookie":          "age_check_done=1",
-        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
-        "Referer":         "https://www.dmm.co.jp/",
-      }
-    });
-  } catch (e) { return null; }
-
-  if (!res.ok) return null;
+  try { res = await fetchDmmPage(pageUrl); } catch (e) { return null; }
+  if (!res || !res.ok) return null;
   const html = await res.text();
 
   // ブロック・年齢確認ページ検出
@@ -240,6 +268,41 @@ async function scrapeFanzaItem(cid) {
     },
     review: { count: null, average: null },
   };
+}
+
+// ── 画像CDNフォールバック ─────────────────────────────────────────────────────
+// doujin-assets.dmm.co.jp は認証・地域制限なし。URLは決定的パターン：
+//   digital/{type}/{cid}/{cid}pl.jpg（大）/ pt.jpg（小）/ jp-001.jpg…（サンプル）
+const DOUJIN_ASSET_TYPES = ["comic", "game", "voice", "cg"];
+async function cdnFallbackItem(cid) {
+  for (const t of DOUJIN_ASSET_TYPES) {
+    const base = "https://doujin-assets.dmm.co.jp/digital/" + t + "/" + cid + "/" + cid;
+    let ok = false;
+    try { const r = await fetch(base + "pl.jpg", { method: "HEAD" }); ok = r.ok; } catch (e) {}
+    if (!ok) continue;
+    const samples = [];
+    for (let n = 1; n <= 8; n++) {
+      const u = base + "jp-" + String(n).padStart(3, "0") + ".jpg";
+      let sok = false;
+      try { const r = await fetch(u, { method: "HEAD" }); sok = r.ok; } catch (e) {}
+      if (!sok) break;
+      samples.push(u);
+    }
+    return {
+      content_id: cid,
+      title:   "",          // タイトルは取得不可（API未収録＋ページはログイン壁）
+      partial: true,        // 画像のみの部分情報
+      date: "",
+      service_name: "同人",
+      floor_name:   "同人",
+      imageURL: { list: base + "pt.jpg", large: base + "pl.jpg" },
+      sampleImageURL: samples.length ? { sample_l: { image: samples } } : null,
+      iteminfo: { author: [], genre: [] },
+      prices: { list_price: null, price: null },
+      review: { count: null, average: null },
+    };
+  }
+  return null;
 }
 
 // ── CORS ヘルパ ──────────────────────────────────────────────────────────────

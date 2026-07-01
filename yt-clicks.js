@@ -956,7 +956,7 @@
     var c = cache[fanzaUrl];
     if (!c) return;
     var media = c.media || {}, pinfo = c.priceInfo || {};
-    var title = c.title || '(無題)';
+    var title = c.title || (c.partial ? '(作品名を取得できません・アフィリエイトAPI未収録の作品)' : '(無題)');
     var big = media.thumb || media.thumbSmall || '';
     var samples = media.samples || [];
     var genres = media.genres || [];
@@ -1088,8 +1088,17 @@
     var DAY = 86400000, NEG = 30 * 60000; // 題名キャッシュ=1日 / 「未取得(空)」キャッシュ=30分(瞬断からの復帰を速く)
     var jobs = [], seen = {};
     // 失敗表示用：作品URL→投稿(YouTube)の題名。どの投稿の取得が失敗したか明示するのに使う。
+    // 手動追加アイテムは it.title が空のことがあるため、YouTube実題名(titleCache)でフォールバック。
     var titleByUrl = {};
-    try { allItems().forEach(function (it) { if (it.workUrl && !titleByUrl[it.workUrl]) titleByUrl[it.workUrl] = it.title || ''; }); } catch (e) {}
+    try {
+      var ymapT = loadYtMap();
+      allItems().forEach(function (it) {
+        if (!it.workUrl) return;
+        var t = it.title || '';
+        if (!t) { var vid = ytIdOf(ymapT[itemKey(it)] || it.ytUrl || ''); t = (vid && titleCache[vid]) || ''; }
+        if (!titleByUrl[it.workUrl] && t) titleByUrl[it.workUrl] = t;
+      });
+    } catch (e) {}
     targets.forEach(function (nameEl) {
       var url = nameEl.getAttribute('data-fanza-url');
       if (!url) return;
@@ -1099,6 +1108,11 @@
         if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media) {
           nameEl.textContent = cached.title; nameEl.style.display = '';
           setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo);
+          setFanzaThumbEls(url, cached.media.thumbSmall || cached.media.thumb); return;
+        }
+        // 画像のみの部分情報（API未収録作品）：サムネだけ表示（※negative判定より先に見ること）
+        if (cached.partial && cached.media && (now - (cached.fetchedAt || 0)) < DAY) {
+          nameEl.textContent = ''; nameEl.style.display = 'none';
           setFanzaThumbEls(url, cached.media.thumbSmall || cached.media.thumb); return;
         }
         if (!cached.title && (now - (cached.fetchedAt || 0)) < NEG) return; // 直近「未取得」→再取得しない（連打防止）
@@ -1119,7 +1133,7 @@
     // ★不安定対策：一時的な失敗のみ最大3回リトライ（瞬断を吸収）。恒久的失敗は1回で確定。
     var gen = ++_fanzaGen;  // 旧実行を無効化し、この実行が主導権を取る
     _fanzaActive = true; _fanzaTick = new Date().getTime(); _fanzaManual = !!manual;
-    var GAP = 1000, i = 0, done = 0, fail = 0, total = jobs.length, fails = [];
+    var GAP = 1000, i = 0, done = 0, fail = 0, partial = 0, total = jobs.length, fails = [], partials = [];
     // カウントダウン：初期見積り1件≈1.6秒。各件完了ごとに実測平均で補正しつつ、毎秒1つずつ減らす。
     var startT = new Date().getTime(), etaSec = Math.max(1, Math.ceil(total * 1.6)), ticker = null;
     function dmmProgress() { if (manual) setDmmStatus('DMMから作品情報を取得中… （' + i + '/' + total + '）・<b>終了まであと約 ' + Math.max(etaSec, 0) + ' 秒</b>'); }
@@ -1153,11 +1167,21 @@
         _fanzaActive = false;
         if (ticker) { clearInterval(ticker); ticker = null; }
         if (manual) {
-          if (!fails.length) setDmmStatus('✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。');
+          var msg = '';
+          if (!fails.length && !partials.length) msg = '✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。';
           else {
-            var lines = fails.map(function (f) { return '・「' + esc(f.title || '(無題)') + '」<br>　└ ' + esc(f.reason); }).join('<br>');
-            setDmmStatus('DMM作品情報：成功 ' + done + ' / <b>失敗 ' + fail + '</b><br><b>取得に失敗した投稿と原因：</b><br>' + lines);
+            msg = 'DMM作品情報：成功 ' + done + (partial ? ' / 画像のみ ' + partial : '') + (fail ? ' / <b>失敗 ' + fail + '</b>' : '');
+            if (partials.length) {
+              msg += '<br><b>画像のみ取得（API未収録作品）：</b><br>' +
+                partials.map(function (p) { return '・「' + esc(p.title || '(無題)') + '」'; }).join('<br>') +
+                '<br>　└ サークル設定等でアフィリエイトAPIに収録されておらず、作品名・価格は取得できません（サムネ/サンプル画像は表示します）。';
+            }
+            if (fails.length) {
+              msg += '<br><b>取得に失敗した投稿と原因：</b><br>' +
+                fails.map(function (f) { return '・「' + esc(f.title || '(無題)') + '」<br>　└ ' + esc(f.reason); }).join('<br>');
+            }
           }
+          setDmmStatus(msg);
         }
         // 実行中に描画が変わって取り漏れた分を1段だけ追い掛け（深さ制限＝キャッシュ保存不能環境でも無限ループしない）。
         if ((sweepDepth || 0) < 1) setTimeout(function () { if (gen === _fanzaGen) fillFanzaNames(false, (sweepDepth || 0) + 1); }, 100);
@@ -1174,6 +1198,13 @@
           c[job.url] = { title: info.title, priceInfo: pinfo, media: media, fetchedAt: new Date().getTime() };
           fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
           setFanzaThumbEls(job.url, media.thumbSmall); done++;
+        } else if (info && info.partial && (info.thumb || info.thumbSmall)) {
+          // 画像のみの部分情報（API未収録＋ページ取得不能の作品）：サムネ・サンプルだけ保存/表示。
+          var mediaP = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: [], service: info.service || '', floor: info.floor || '' };
+          c[job.url] = { title: '', partial: true, priceInfo: null, media: mediaP, fetchedAt: new Date().getTime() };
+          fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null);
+          setFanzaThumbEls(job.url, mediaP.thumbSmall); partial++;
+          if (manual) partials.push({ title: job.title });
         } else {
           c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得は30分だけキャッシュ（再ハンマー防止＆早期復帰）
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;

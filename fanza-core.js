@@ -42,6 +42,7 @@ function parseFanzaItem(item) {
   return {
     cid: item.content_id || '',
     title: item.title || '',
+    partial: !!item.partial,   // 画像のみの部分情報（API未収録＋ページ取得不能の作品）
     author: author,
     listPrice: listPrice,
     price: price,
