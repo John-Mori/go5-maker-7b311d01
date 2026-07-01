@@ -48,6 +48,26 @@
   function itemKey(it) { if (it.manual) return it.id; return it.postUri ? ('u:' + it.postUri) : ('s:' + (it.shortUrl || '')); }
   function num(n) { try { return Number(n).toLocaleString(); } catch (e) { return String(n); } }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
+  // 祝日セット（内閣府データ window.__HOLIDAYS__）。土=青/日祝=赤 の判定に使う。
+  var _holSet = null;
+  function holSet() {
+    if (_holSet) return _holSet;
+    _holSet = {};
+    try { var h = (window.__HOLIDAYS__ && window.__HOLIDAYS__.holidays) || []; for (var i = 0; i < h.length; i++) if (h[i] && h[i].date) _holSet[h[i].date] = 1; } catch (e) {}
+    return _holSet;
+  }
+  var DOW = ['日', '月', '火', '水', '木', '金', '土'];
+  // 「6/18 (土) 20:00」形式。曜日だけ色付け（土=青/日祝=赤）。戻り値はHTML（自前データのみ・エスケープ不要）。
+  function fmtPostDate(ms) {
+    try {
+      var d = new Date(ms), p = function (n) { return (n < 10 ? '0' : '') + n; };
+      var ymd = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+      var dw = d.getDay(), hol = !!holSet()[ymd];
+      var cls = (dw === 6) ? 'dow-sat' : ((dw === 0 || hol) ? 'dow-sun' : '');
+      var dowHtml = cls ? '<span class="' + cls + '">(' + DOW[dw] + ')</span>' : '(' + DOW[dw] + ')';
+      return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + dowHtml + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    } catch (e) { return ''; }
+  }
   function setStatus(m) { var e = $('ytClickStatus'); if (e) e.textContent = m || ''; }
   function ytIdOf(url) { return (url && window.IdGen && window.IdGen.youtubeId) ? (window.IdGen.youtubeId(url) || '') : ''; }
 
@@ -112,6 +132,28 @@
   var publishedCache = {}; // videoId -> publishedAt(ms)
   var titleCache = {};     // videoId -> YouTubeタイトル
   var lastErr = '';
+
+  // ── YouTubeメタ（題名/投稿日時/視聴回数）を localStorage に永続化 ──────────────
+  //   在メモリだけだとリロードのたびに再取得＝取得失敗時に題名が消えて不安定。
+  //   永続化して起動時に即表示し、refresh で上書き更新する（題名/投稿日時は不変・視聴回数は最新化）。
+  function ytMetaLoad() { try { return JSON.parse(localStorage.getItem('yt_meta_cache') || '{}') || {}; } catch (e) { return {}; } }
+  function ytMetaSave(m) { try { localStorage.setItem('yt_meta_cache', JSON.stringify(m)); } catch (e) {} }
+  (function () { // 起動時：永続キャッシュ→在メモリへ
+    var m = ytMetaLoad();
+    Object.keys(m).forEach(function (id) { var r = m[id] || {}; if (r.title) titleCache[id] = r.title; if (r.published != null) publishedCache[id] = r.published; if (r.views != null) viewsCache[id] = r.views; });
+  })();
+  function ytMetaPersist(fetched) { // fetched: id -> {views,published,title}
+    var m = ytMetaLoad(), now = new Date().getTime();
+    Object.keys(fetched).forEach(function (id) {
+      var rec = fetched[id] || {}; if (id === '__error') return;
+      m[id] = m[id] || {};
+      if (rec.title) m[id].title = rec.title;
+      if (rec.published != null) m[id].published = rec.published;
+      if (rec.views != null) m[id].views = rec.views;
+      m[id].fetchedAt = now;
+    });
+    ytMetaSave(m);
+  }
 
   // 並び替え用：YouTube投稿日時(known)があればそれ、無ければ末尾グループへ。
   function sortItems(items, ymap) {
@@ -351,7 +393,7 @@
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var dateHtml = pub != null
-        ? '<b>' + esc(fmtTs(pub)) + '</b>'
+        ? '<b>' + fmtPostDate(pub) + '</b>'
         : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>');
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
@@ -360,17 +402,17 @@
         ? '<span style="color:#dc465a;font-weight:700;">' + dispTitle + ' #タグ忘れ</span>'
         : dispTitle;
       var bskyHref = it.shareUrl || it.shortUrl || it.postUrl || ''; // 表示リンクは共有(da.gd)優先。計測は下のcode(=r2)で行う
+      // 属性・作品状態バッジ（作品名の下に改行して表示）
+      var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('') +
+        (it.workState === '新作' ? '<span class="vtag vtag-shinsaku">新作</span>' : (it.workState === '準新作' ? '<span class="vtag vtag-junshinsaku">準新作</span>' : ''));
       return '<div class="vrow">' +
-        '<div class="vrow-h">' + dateHtml + ' ' + titleHtml +
-          ATTR_DEFS.map(function (a) { return it[a.key] ? ' <span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('') +
-          (it.workState === '新作' ? ' <span class="vtag vtag-shinsaku">新作</span>' : (it.workState === '準新作' ? ' <span class="vtag vtag-junshinsaku">準新作</span>' : '')) +
-        '</div>' +
+        '<div class="vrow-h">' + dateHtml + ' ' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
+        (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
           '<span title="Bsky投稿クリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
           '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
-          (bskyHref ? '<button class="vlink vcopy-short" type="button" data-u="' + esc(bskyHref) + '" title="この短縮URLをコピー（YouTube概要欄に貼り替え用）">📋短縮</button>' : '') +
           (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
           (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
           (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
@@ -383,14 +425,6 @@
         '</div>';
     }).join('');
     fillFanzaNames();
-
-    // 「📋短縮」＝共有短縮URLをコピー（YouTube概要欄への貼り替え用）
-    list.querySelectorAll('.vcopy-short').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var u = b.getAttribute('data-u') || '';
-        try { navigator.clipboard.writeText(u); b.textContent = '✓コピー'; setTimeout(function () { b.textContent = '📋短縮'; }, 1500); } catch (e) {}
-      });
-    });
 
     // YouTube URL 直接入力
     list.querySelectorAll('input[data-k]').forEach(function (inp) {
@@ -495,6 +529,7 @@
         if (rec.published != null) publishedCache[id] = rec.published;
         if (rec.title) titleCache[id] = rec.title;
       });
+      ytMetaPersist(m); // 永続化（リロードで消えない）
     }));
     return Promise.all(jobs).then(function () { return true; });
   }
@@ -852,6 +887,7 @@
             if (rec.published != null) publishedCache[id] = rec.published;
             if (rec.title) titleCache[id] = rec.title;
           });
+          ytMetaPersist(m); // 永続化（リロードで消えない）
         });
         doRender();
       });
