@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GAS 自動記録セットアップ・ガイド</title>
+<style>
+:root{
+  --bg:#f5edd7; --paper:#fffdf5; --ink:#4b3f2c; --sub:#8a7a5c; --line:#e6d6ad;
+  --accent:#c26a3f; --accent2:#7a9a54; --badge:#c26a3f; --code-bg:#fbf4e0; --code-ink:#5a4a2e; --warn:#b5533a;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;line-height:1.75;padding:18px;}
+.wrap{max-width:760px;margin:0 auto;}
+header{text-align:center;margin:6px 0 18px;}
+header h1{font-size:22px;margin:0 0 6px;color:var(--accent);}
+header p{margin:0;color:var(--sub);font-size:14px;}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:0 0 16px;
+  box-shadow:0 4px 14px rgba(150,115,55,.08);}
+.lead{font-size:14.5px;}
+.lead b{color:var(--accent);}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:center;margin:14px 0 4px;}
+.flow .node{background:#fbf4e0;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px;font-weight:700;color:var(--ink);text-align:center;}
+.flow .arw{color:var(--accent);font-weight:900;}
+.step{display:flex;gap:12px;align-items:flex-start;margin-top:6px;}
+.step-no{flex:0 0 34px;height:34px;border-radius:50%;background:var(--badge);color:#fff;font-weight:800;
+  display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 6px rgba(194,106,63,.35);}
+.step-body{flex:1;min-width:0;}
+.step-body h2{font-size:16.5px;margin:4px 0 8px;color:var(--ink);}
+.step-body ol,.step-body ul{margin:6px 0;padding-left:20px;}
+.step-body li{margin:4px 0;}
+.k{background:#f0e7cf;border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:.9em;color:var(--accent);white-space:nowrap;}
+.path{background:#f0e7cf;border-radius:6px;padding:1px 8px;font-weight:700;font-size:.92em;}
+/* コピー用ブロック（URL・値） */
+.cb{display:flex;align-items:stretch;gap:0;margin:8px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--code-bg);}
+.cb-t{margin:0;flex:1;min-width:0;overflow-x:auto;white-space:nowrap;padding:10px 12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--code-ink);}
+.cbtn{flex:0 0 auto;border:none;background:var(--accent);color:#fff;font-weight:700;font-size:12.5px;padding:0 14px;cursor:pointer;}
+.cbtn:active{opacity:.8}
+.cbtn.done{background:var(--accent2);}
+.note{background:#fbf4e0;border-left:4px solid var(--accent2);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;color:#5a4a2e;}
+.warn{background:#fdeee6;border-left:4px solid var(--warn);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;color:#7a3b2a;}
+.warn b{color:var(--warn);}
+details.code{margin:10px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--code-bg);}
+details.code>summary{cursor:pointer;padding:10px 12px;font-weight:700;color:var(--accent);list-style:none;}
+details.code>summary::-webkit-details-marker{display:none}
+details.code>summary::before{content:"▶ ";}
+details.code[open]>summary::before{content:"▼ ";}
+.code-head{display:flex;justify-content:flex-end;padding:6px 8px 0;}
+.codebox{margin:0;max-height:340px;overflow:auto;padding:10px 12px;font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:11px;line-height:1.5;color:var(--code-ink);white-space:pre;}
+.check{background:#eef3e2;border:1px solid #cdd9b0;border-radius:12px;padding:14px 16px;}
+.check h2{margin:0 0 8px;font-size:16px;color:var(--accent2);}
+.small{color:var(--sub);font-size:12.5px;}
+.tag{display:inline-block;background:var(--accent);color:#fff;border-radius:6px;font-size:11px;padding:1px 7px;font-weight:700;margin-right:4px;}
+.ok{color:var(--accent2);font-weight:700;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>⚙️ GAS 自動記録セットアップ・ガイド</h1>
+  <p>再生数・クリック数を「アプリを開かなくても」自動で記録するための初期設定（1回だけ・約5〜10分）</p>
+</header>
+
+<div class="card">
+  <p class="lead">この設定を終えると、以下が<b>サーバー側（GAS）で自動的に</b>貯まります：</p>
+  <ul>
+    <li>各投稿の<b>今日 / 昨日 / 直近1週間</b>の再生数・クリック数の増加（ゴミ箱の左に表示）</li>
+    <li>ランキングの<b>30分 / 1時間 / 2時間 / 6時間 / 24時間</b>バケット</li>
+    <li><b>最大瞬間風速ランキング</b>（一番伸びた時間帯とその伸び率）＝スプレッドシートに永久保存</li>
+  </ul>
+  <div class="flow">
+    <span class="node">毎時トリガー</span><span class="arw">→</span>
+    <span class="node">GASが再生数＋<br>クリック数を取得</span><span class="arw">→</span>
+    <span class="node">スプレッドシートに記録</span><span class="arw">→</span>
+    <span class="node">アプリに表示</span>
+  </div>
+  <p class="small">※アプリ（スマホ）は表示するだけ。記録はGoogleのサーバーが淡々と続けます。</p>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">1</div>
+    <div class="step-body">
+      <h2>コードを最新版に貼り替える</h2>
+      <ol>
+        <li>スプレッドシートを開く（下のURLをコピーしてブラウザで開く）
+          <div class="cb"><pre class="cb-t">https://docs.google.com/spreadsheets/d/1DcOXq9nVZOf6n9ILTxRuuN3P-jxsh3bYVmoEZ0JkE44/edit</pre><button class="cbtn" type="button" onclick="cp(this)">コピー</button></div>
+        </li>
+        <li>上メニュー <span class="path">拡張機能</span> → <span class="path">Apps Script</span> をクリック（エディタが開きます）。<br>
+          <span class="small">開けない場合はこちら（Apps Scriptのホーム）からプロジェクトを開く：</span>
+          <div class="cb"><pre class="cb-t">https://script.google.com/home</pre><button class="cbtn" type="button" onclick="cp(this)">コピー</button></div>
+        </li>
+        <li>エディタ左の <span class="path">コード.gs</span> を選び、<b>中の文字を全部消して</b>（Windowsは <span class="k">Ctrl+A</span> → <span class="k">Delete</span>）、下の「最新コード」を<b>まるごと貼り付け</b>。</li>
+        <li><span class="k">Ctrl+S</span>（または 💾 保存）で保存。</li>
+      </ol>
+      <details class="code">
+        <summary>最新コード（コード.gs）を開く／コピー</summary>
+        <div class="code-head"><button class="cbtn" type="button" onclick="cpCode(this)">全部コピー</button></div>
+        <pre class="codebox" id="gascode">/**
+ * コード.gs — 5秒動画メーカー：投稿記録＆クリック/反応集計（Google Apps Script Web App）
+ *
+ * 役割：
+ *   1) クライアント(bluesky.js)から {op,videoId,channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri,shortUrl,testMode} を受け取る(doPost)
+ *   2) videoId(背骨ID)をキーに「記録_ch1 / 記録_ch2」へ upsert（重複行を作らない・列名マッピング）。
+ *      短縮URLはフロント生成(da.gd/link-worker)を優先、無い経路のみ GAS が da.gd で短縮。
+ *   3) refreshEngagement()（毎時）で Bluesky反応(いいね/リポスト/返信)を更新
+ *   4) Phase5：無人予約投稿（runReservations / 5分トリガー）
+ *   ※ Bitly は全廃（無料枠オーバーの主因かつ冗長＝共有されず計測不能）。クリック計測は link-worker(KV) に一本化する方針。
+ *      テンプレの 'Bitly_ID'/'Bitlyクリック' 列は当面温存（未使用。将来 link-worker クリックへ転用可）。
+ *
+ * 前提：記録先スプレッドシートは「動画記録分析テンプレート.xlsx」を取り込んだもの
+ *   （記録_ch1 / 記録_ch2 / 集計 / 設定、名前付き範囲 Holidays を含む）。
+ * スクリプトプロパティ：
+ *   SHEET_ID（記録先スプレッドシートID・必須）／ BSKY_HANDLE / BSKY_APP_PW（無人予約に使用）
+ *   ※ BITLY_TOKEN は不要（Bitly全廃）。設定が残っていても未使用。
+ *   ※ SHARED_SECRET は設定しないこと（現クライアントは送らないため、設定すると弾かれる）
+ */
+
+// 記録シートの列ヘッダー（新規シート作成時のヘッダーにも使う）。
+// ※不要な手動ラベル列（特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル）は削除済み。
+var HEADERS40 = [
+  'post_id','投稿日時','曜日','day-type','時間帯スロット','ジャンル','題名(コメント)',
+  '作品cid','YouTube動画URL','短縮URL',
+  'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','返信','フォロー増','短縮URLクリック数',
+  'FANZA発生成約','FANZA確定成約','発生報酬¥','確定報酬¥','承認率%','リンククリック率%','CVR発生%','CVR確定%',
+  'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','post_uri','クリック更新日時','反応更新日時'
+];
+// ?action=cleanup_columns で既存シートから削除する列（コードが唯一の正・ClaudeCodeから増減）。
+// ※分析数式(承認率/CVR/EPC/RPM)の計算元(FANZA成約・報酬系)やpost_uri(反応自動更新に必須)は含めない。
+var CLEANUP_COLUMNS = ['特別期間(手動)', 'サムネ/フック種別(A/B)', 'CTA・リンク提示方法', 'Blueskyラベル'];
+// FANZA投稿時スナップショット列（記録シート末尾追加。既存40列は不変）。
+// レビュー件数は販売部数の代理指標（実際の売上本数は取得不可）。
+var FANZA_HEADERS = [
+  '元値list_price','割引後price','割引率pct','FANZA取得日時',
+  'レビュー件数(代理指標)','レビュー平均'
+];
+// 追加属性列（記録シート末尾追加・移行で付与）。
+// カテゴリ＝作品属性を名前で明記（キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄）。
+// ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
+// ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
+var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL'];
+// 作品属性の定義（順序＝カテゴリ列での並び）。フラグ名→表示名。
+var ATTR_DEFS = [
+  { key: 'chara', label: 'キャラ' },
+  { key: 'jk', label: 'JK' },
+  { key: 'gyaru', label: 'ギャル' },
+  { key: 'isekai', label: '異世界' },
+  { key: 'ai', label: 'AI' },
+  { key: 'ol', label: 'OL' },
+  { key: 'soshu', label: '総集編' }
+];
+function attrTrue_(v) { return v === true || v === 'true' || v === '○' || v === 1 || v === '1'; }
+function attrProvided_(f) {
+  for (var i = 0; i &lt; ATTR_DEFS.length; i++) { if (f[ATTR_DEFS[i].key] !== undefined) return true; }
+  return false;
+}
+function categoryOf_(f) {
+  var cats = [];
+  ATTR_DEFS.forEach(function (a) { if (attrTrue_(f[a.key])) cats.push(a.label); });
+  return cats.join(', ');
+}
+//
+// ── 列の自動取得マップ（保守用メモ：ClaudeCodeはここを基準に列を増減する）──
+//   【自動で埋まる】post_id / 投稿日時 / 曜日 / day-type / 時間帯スロット / 題名(コメント) /
+//     作品cid / YouTube動画URL / 短縮URL / 視聴回数 / いいね / リポスト / 返信 /
+//     短縮URLクリック数 / post_uri / クリック更新日時 / 反応更新日時 / カテゴリ /
+//     元値list_price / 割引後price / 割引率pct / FANZA取得日時 / レビュー件数(代理指標) / レビュー平均 /
+//     承認率% / リンククリック率% / CVR発生% / CVR確定% / EPC発生¥ / EPC確定¥ / RPM（←数式・自動計算）
+//   【手動入力のみ＝APIで自動取得不可】ジャンル / インプレッション / インプCTR% /
+//     平均視聴維持率% / フォロー増 / FANZA発生成約 / FANZA確定成約 / 発生報酬¥ / 確定報酬¥
+//   ※FANZA成約・報酬の手動4列は、承認率%/CVR/EPC/RPM の計算元。消すと分析数式が無価値になる点に注意。
+//   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
+var CH_SHEETS = ['月詠み','宵桜艶帖'];
+// 再デプロイ確認用バージョン（中身を変えたら上げる）。&lt;exec URL&gt;?ping=1 で確認できる。
+var GAS_VERSION = '2026-07-02G（最大瞬間風速ランキング=一番伸びた時間帯と伸び率をピーク記録シートに永続保存）';
+
+function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
+function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
+function openSS_() {
+  var id = prop_('SHEET_ID');
+  var ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('スプレッドシートが見つかりません（SHEET_ID を設定してください）');
+  return ss;
+}
+function sheetName_(channel) { return (channel === 'acc2') ? '宵桜艶帖' : '月詠み'; }
+function getChannelSheet_(channel) {
+  var ss = openSS_(); var name = sheetName_(channel);
+  var sh = ss.getSheetByName(name);
+  if (!sh) { sh = ss.insertSheet(name); sh.appendRow(HEADERS40); }
+  else if (sh.getLastRow() === 0) { sh.appendRow(HEADERS40); }
+  return sh;
+}
+function headerMap_(sh) {
+  var h = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0], m = {};
+  for (var i = 0; i &lt; h.length; i++) { if (h[i] !== '' &amp;&amp; h[i] != null) m[h[i]] = i + 1; }
+  return m;
+}
+// 短縮URLクリック数の列見出しを解決（新名→旧名「開封数」→さらに旧名「Bitlyクリック」。どれも無ければ新名）。
+function clickColName_(map) {
+  return map['短縮URLクリック数'] ? '短縮URLクリック数' : (map['開封数'] ? '開封数' : (map['Bitlyクリック'] ? 'Bitlyクリック' : '短縮URLクリック数'));
+}
+
+function doGet(e) {
+  var p = (e &amp;&amp; e.parameter) || {};
+  // ★再デプロイ確認用：&lt;exec URL&gt;?ping=1 を開くと、今“動いている”コードのバージョンが見える。
+  //   再デプロイが成功していれば下の GAS_VERSION が返る。古い値や別物なら未反映。
+  if (p.ping) {
+    return jsonOut_({ ok: true, version: GAS_VERSION, now: new Date().toISOString(),
+      bitly: 'removed', features: ['upsert', 'testMode', 'da.gd', 'link-worker-clicks', 'fanza-snapshot'] });
+  }
+  // 一回限りのヘッダ移行: &lt;exec URL&gt;?action=migrate_headers で既存シートに FANZA 列を追加する。
+  if (p.action === 'migrate_headers') {
+    return jsonOut_(migrateHeaders_());
+  }
+  // 不要列の削除: &lt;exec URL&gt;?action=cleanup_columns で CLEANUP_COLUMNS の列を各シートから削除（冪等）。
+  if (p.action === 'cleanup_columns') {
+    return jsonOut_(cleanupColumns_());
+  }
+  // 診断: &lt;exec URL&gt;?action=diagnose でスプレッドシート名・全タブ名・各記録タブの中身を返す（読み取りのみ）。
+  if (p.action === 'diagnose') {
+    return jsonOut_(diagnose_());
+  }
+  // 題名集約: &lt;exec URL&gt;?action=consolidate_title で「YouTube題名」を「題名(コメント)」へ移し、列を削除。
+  if (p.action === 'consolidate_title') {
+    return jsonOut_(consolidateTitle_());
+  }
+  // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
+  if (p.callback) {
+    var out;
+    try {
+      var ch = p.channel || 'acc1';
+      if (p.action === 'history') out = { ok: true, items: historyItems_(ch, parseInt(p.limit || '40', 10)) };
+      else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.postUri || '', p.short || '') };
+      else if (p.action === 'settings_pull') out = settingsPull_();   // 端末間同期：非秘密設定の取得
+      else if (p.action === 'settings_meta') out = settingsMeta_();   // 端末間同期：最終保存メタのみ（状態表示）
+      else if (p.action === 'deltas') out = { ok: true, deltas: computeDeltas_(), peaks: computePeaks_() }; // 今日/昨日/週の増加＋最大瞬間風速
+      else if (p.action === 'snapshot_now') { snapshotStats(); out = { ok: true, snapped: true }; } // 手動で即スナップ
+      else out = { ok: true, shortUrl: p.postUri ? lookupShortByUri_(ch, p.postUri) : '' }; // 既定＝action=short
+    } catch (err) { out = { ok: false, error: String(err) }; }
+    return ContentService.createTextOutput(p.callback + '(' + JSON.stringify(out) + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  // 該当アクション無し。どのバージョンが live か常に分かるよう version と対応アクションを返す。
+  return jsonOut_({ ok: true, service: 'go5-maker recorder v2 (2ch)', version: GAS_VERSION,
+    actions: ['ping', 'migrate_headers', 'cleanup_columns', 'diagnose'],
+    note: 'diagnose が service応答になる場合は diagnose 追加版(2026-07-01F以降)が未デプロイ' });
+}
+// 指定 post_uri の行から短縮URLを返す（読み取りのみ）。
+function lookupShortByUri_(channel, postUri) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var last = sh.getLastRow(); if (last &lt; 2) return '';
+  var uc = map['post_uri'], sc = map['短縮URL']; if (!uc || !sc) return '';
+  var uris = sh.getRange(2, uc, last - 1, 1).getValues();
+  for (var i = uris.length - 1; i &gt;= 0; i--) {  // 新しい順に探す
+    if (String(uris[i][0]) === String(postUri)) return String(sh.getRange(i + 2, sc).getValue() || '');
+  }
+  return '';
+}
+// チャンネル別の投稿履歴（新しい順・読み取りのみ）。
+function historyItems_(channel, limit) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var last = sh.getLastRow(); if (last &lt; 2) return [];
+  var dCol = map['投稿日時'], tCol = map['題名(コメント)'], sCol = map['短縮URL'], uCol = map['post_uri'];
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+  var items = [];
+  for (var i = 0; i &lt; vals.length; i++) {
+    var row = vals[i];
+    var d = dCol ? row[dCol - 1] : '', uri = uCol ? row[uCol - 1] : '', short = sCol ? row[sCol - 1] : '';
+    if (!d &amp;&amp; !uri &amp;&amp; !short) continue; // 空行スキップ
+    var ds = '';
+    try { if (d) ds = Utilities.formatDate(new Date(d), tz, 'MM/dd HH:mm'); } catch (e) {}
+    items.push({
+      postUri: String(uri || ''), title: String(tCol ? row[tCol - 1] : ''),
+      date: ds, shortUrl: String(short || ''), postUrl: ''
+    });
+  }
+  items.reverse(); // 新しい順
+  return items.slice(0, limit &gt; 0 ? limit : 40);
+}
+// 1件削除（行の内容をクリア＝再利用可。行は詰めない＝集計の整合を保つ）。post_uri優先、無ければ短縮URLで一致。
+function deleteRecord_(channel, postUri, short) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var last = sh.getLastRow(); if (last &lt; 2) return 0;
+  var col = postUri ? map['post_uri'] : map['短縮URL'];
+  var want = postUri || short; if (!col || !want) return 0;
+  var vals = sh.getRange(2, col, last - 1, 1).getValues(), cleared = 0;
+  for (var i = 0; i &lt; vals.length; i++) {
+    if (String(vals[i][0]) === String(want)) { sh.getRange(i + 2, 1, 1, sh.getLastColumn()).clearContent(); cleared++; }
+  }
+  return cleared;
+}
+
+// 既存シートに FANZA_HEADERS を末尾追加する一回限りの移行関数。
+// &lt;exec URL&gt;?action=migrate_headers で呼ぶ。既に存在する列は追加しない（冪等）。
+function migrateHeaders_() {
+  var result = [];
+  var ss = openSS_();
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { result.push({ sheet: name, status: 'not_found' }); return; }
+    var lastCol = sh.getLastColumn();
+    if (lastCol &lt; 1) { result.push({ sheet: name, status: 'empty' }); return; }
+    var existing = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    // クリック数列の見出しを「短縮URLクリック数」に統一（旧名 開封数/Bitlyクリック はデータ保持のまま改名）。
+    var renamed = '';
+    if (existing.indexOf('短縮URLクリック数') === -1) {
+      var ai = existing.indexOf('開封数'); if (ai === -1) ai = existing.indexOf('Bitlyクリック');
+      if (ai &gt;= 0) { sh.getRange(1, ai + 1).setValue('短縮URLクリック数'); existing[ai] = '短縮URLクリック数'; renamed = '短縮URLクリック数'; }
+    }
+    // 「キャラ」列を「カテゴリ」へ改名（旧○方式→属性名明記方式。データ保持のまま）。
+    var renamedCat = '';
+    if (existing.indexOf('カテゴリ') === -1 &amp;&amp; existing.indexOf('キャラ') &gt;= 0) {
+      var ci = existing.indexOf('キャラ');
+      sh.getRange(1, ci + 1).setValue('カテゴリ'); existing[ci] = 'カテゴリ'; renamedCat = 'カテゴリ';
+    }
+    // 不足列を末尾に追加（短縮URLクリック数が旧名も無く欠けていればここで新設）。
+    var wantHeaders = FANZA_HEADERS.concat(EXTRA_HEADERS).concat(['短縮URLクリック数']);
+    var missing = wantHeaders.filter(function (h) { return existing.indexOf(h) === -1; });
+    if (missing.length === 0 &amp;&amp; !renamed &amp;&amp; !renamedCat) { result.push({ sheet: name, added: [], renamedClick: '', renamedCategory: '', status: 'already_up_to_date' }); return; }
+    missing.forEach(function (h) {
+      sh.getRange(1, sh.getLastColumn() + 1).setValue(h);
+    });
+    result.push({ sheet: name, added: missing, renamedClick: renamed, renamedCategory: renamedCat, status: 'ok' });
+  });
+  return { ok: true, result: result };
+}
+
+// CLEANUP_COLUMNS の列を各記録シートから削除する（冪等：存在する列だけ・右から削除して索引ズレ回避）。
+// 列削除時、Googleスプレッドシートは他セルの数式参照を自動補正するため分析数式は壊れない。
+function cleanupColumns_() {
+  var result = [];
+  var ss = openSS_();
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { result.push({ sheet: name, status: 'not_found' }); return; }
+    var lastCol = sh.getLastColumn();
+    if (lastCol &lt; 1) { result.push({ sheet: name, status: 'empty' }); return; }
+    var header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+    var removed = [], idxs = [];
+    CLEANUP_COLUMNS.forEach(function (n) { var i = header.indexOf(n); if (i &gt;= 0) { idxs.push(i + 1); removed.push(n); } });
+    idxs.sort(function (a, b) { return b - a; });          // 右の列から削除（索引ズレ防止）
+    idxs.forEach(function (c) { sh.deleteColumn(c); });
+    result.push({ sheet: name, removed: removed, status: removed.length ? 'ok' : 'already_clean' });
+  });
+  return { ok: true, result: result };
+}
+
+// 「YouTube題名」列の値を「題名(コメント)」列へ移し（値があるものは上書き）、YouTube題名列を削除する。
+// 題名を1列（題名(コメント)）に集約するための一回限りの移行（冪等：YouTube題名列が無ければ何もしない）。
+function consolidateTitle_() {
+  var result = [];
+  var ss = openSS_();
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { result.push({ sheet: name, status: 'not_found' }); return; }
+    var map = headerMap_(sh);
+    var gCol = map['題名(コメント)'], yCol = map['YouTube題名'];
+    if (!yCol) { result.push({ sheet: name, moved: 0, removed: false, status: 'no_youtube_title_col' }); return; }
+    var last = sh.getLastRow(), moved = 0;
+    if (gCol &amp;&amp; last &gt;= 2) {
+      var yVals = sh.getRange(2, yCol, last - 1, 1).getValues();
+      for (var i = 0; i &lt; yVals.length; i++) {
+        var v = yVals[i][0];
+        if (v !== '' &amp;&amp; v !== null) { sh.getRange(i + 2, gCol).setValue(v); moved++; } // 値があれば題名(コメント)へ上書き
+      }
+    }
+    sh.deleteColumn(yCol); // YouTube題名 列を削除
+    result.push({ sheet: name, moved: moved, removed: true, status: 'ok' });
+  });
+  return { ok: true, result: result };
+}
+
+// 診断（読み取りのみ）：どのスプレッドシートのどのタブに、何が入っているかを可視化する。
+// 「データがどこに書かれているか分からない」「クリック数/題名が空」の原因切り分けに使う。
+function diagnose_() {
+  var ss = openSS_();
+  var allTabs = ss.getSheets().map(function (s) { return s.getName(); });
+  var channels = {};
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { channels[name] = { exists: false, note: 'このタブは存在しません（GASは書き込み時に自動作成します）' }; return; }
+    var map = headerMap_(sh);
+    var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+    var last = sh.getLastRow();
+    var info = { exists: true, lastRow: last, clickCol: clickColName_(map), headers: headers };
+    function countNonEmpty(col) {
+      if (!col || last &lt; 2) return 0;
+      var vals = sh.getRange(2, col, last - 1, 1).getValues(), n = 0;
+      for (var i = 0; i &lt; vals.length; i++) { if (vals[i][0] !== '' &amp;&amp; vals[i][0] !== null) n++; }
+      return n;
+    }
+    info.dataRows = countNonEmpty(map['post_id']);
+    info.filled = {
+      短縮URL: countNonEmpty(map['短縮URL']),
+      短縮URLクリック数: countNonEmpty(map[clickColName_(map)]),
+      題名コメント: countNonEmpty(map['題名(コメント)']),
+      YouTube題名: countNonEmpty(map['YouTube題名']),
+      カテゴリ: countNonEmpty(map['カテゴリ']),
+      post_uri: countNonEmpty(map['post_uri'])
+    };
+    channels[name] = info;
+  });
+  return { ok: true, version: GAS_VERSION, spreadsheet: ss.getName(), allTabs: allTabs, channels: channels };
+}
+
+function doPost(e) {
+  try {
+    var body = JSON.parse((e &amp;&amp; e.postData &amp;&amp; e.postData.contents) || '{}');
+    var need = prop_('SHARED_SECRET');
+    if (need &amp;&amp; body.secret !== need) return jsonOut_({ ok: false, error: 'bad_secret' });
+    if (body.type === 'reserve') return handleReserve_(body);
+    // 投稿履歴の一括同期（フロントの投稿履歴を正とし、ID・投稿日時・キャラ等をまとめて upsert）。
+    if (body.op === 'sync_history') return syncHistory_(body.channel || 'acc1', body.items || []);
+    // 投稿履歴の掃除（keepIds に無い post_id の行をクリア＝アプリの履歴を正にシートを揃える）。
+    if (body.op === 'prune_history') return pruneHistory_(body.channel || 'acc1', body.keepIds || []);
+    // 端末間 設定同期：非秘密設定の保存（クラウドへ push）。
+    if (body.op === 'settings_push') return settingsPush_(body.blob || '', body.updatedAt || '', body.device || '');
+    // テストモード：シートには一切書かない（Bluesky実投稿はフロント側で実施）。
+    if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
+    var r = writeRecord_(body.channel || 'acc1', {
+      videoId: body.videoId || '',   // 背骨ID。あれば post_id に採用＋同ID行へ upsert（重複行を作らない）
+      title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
+      workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
+      shareUrl: body.shareUrl || '',       // da.gd共有URL（共有URL列）
+      youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
+      chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性（複数可）
+      workState: body.workState,           // 作品状態（新作/準新作/旧作）
+      fanza_list_price: body.fanza_list_price, fanza_price: body.fanza_price,
+      fanza_discount_pct: body.fanza_discount_pct, fanza_fetched_at: body.fanza_fetched_at || '',
+      fanza_review_count: body.fanza_review_count, fanza_review_avg: body.fanza_review_avg
+    });
+    return jsonOut_({ ok: true, shortUrl: r.shortUrl, row: r.row });
+  } catch (err) {
+    return jsonOut_({ ok: false, error: String(err) });
+  }
+}
+
+// cid 抽出（作品URL の cid= か、アフィリンクの lurl をデコードして cid=）
+function extractCid_(url) {
+  if (!url) return '';
+  var m = String(url).match(/cid=([^/?&amp;\s]+)/);
+  if (m) return m[1];
+  var lm = String(url).match(/[?&amp;]lurl=([^&amp;]+)/);
+  if (lm) { try { var c = decodeURIComponent(lm[1]).match(/cid=([^/?&amp;\s]+)/); if (c) return c[1]; } catch (e) {} }
+  return '';
+}
+function extractHashtags_(t) { var m = String(t || '').match(/#[^\s#]+/g); return m ? m.join(' ') : ''; }
+
+// 1始まり列番号 → Excel列文字（A/B/.../Z/AA/AB/...）。動的に列参照を組み立てるために使う。
+function columnLetter_(n) {
+  if (!n || n &lt; 1) return '';
+  var s = '';
+  while (n &gt; 0) { n--; s = String.fromCharCode(65 + n % 26) + s; n = Math.floor(n / 26); }
+  return s;
+}
+
+// 計算列の数式（行番号 r に合わせる）。列文字は headerMap_ から動的に取得するため列の増減に強い。
+function setComputed_(sh, map, r) {
+  function set(h, f) { if (map[h]) sh.getRange(r, map[h]).setFormula(f); }
+  set('曜日', '=IF($B' + r + '="","",CHOOSE(WEEKDAY($B' + r + '),"日","月","火","水","木","金","土"))');
+  set('day-type', '=IF($B' + r + '="","",IF(OR(WEEKDAY($B' + r + ',2)&gt;=6,COUNTIF(Holidays,INT($B' + r + '))&gt;0),"土日祝",IF(OR(WEEKDAY($B' + r + '+1,2)&gt;=6,COUNTIF(Holidays,INT($B' + r + ')+1)&gt;0),"休前日","平日")))');
+  set('時間帯スロット', '=IF($B' + r + '="","",IF(HOUR($B' + r + ')&lt;5,"深夜",IF(HOUR($B' + r + ')&lt;11,"朝",IF(HOUR($B' + r + ')&lt;15,"昼",IF(HOUR($B' + r + ')&lt;19,"夕","夜")))))');
+  var cClick  = columnLetter_(map[clickColName_(map)]); // 短縮URLクリック数（旧称：開封数/Bitlyクリック）
+  var cViews  = columnLetter_(map['視聴回数']);
+  var cFhap   = columnLetter_(map['FANZA発生成約']);
+  var cFok    = columnLetter_(map['FANZA確定成約']);
+  var cRhap   = columnLetter_(map['発生報酬¥']);
+  var cRok    = columnLetter_(map['確定報酬¥']);
+  if (cFok &amp;&amp; cFhap)    set('承認率%',        '=IFERROR(' + cFok   + r + '/' + cFhap  + r + ',"")');
+  if (cClick &amp;&amp; cViews) set('リンククリック率%','=IFERROR(' + cClick + r + '/' + cViews + r + ',"")');
+  if (cFhap &amp;&amp; cClick)  set('CVR発生%',        '=IFERROR(' + cFhap  + r + '/' + cClick + r + ',"")');
+  if (cFok &amp;&amp; cClick)   set('CVR確定%',        '=IFERROR(' + cFok   + r + '/' + cClick + r + ',"")');
+  if (cRhap &amp;&amp; cClick)  set('EPC発生¥',        '=IFERROR(' + cRhap  + r + '/' + cClick + r + ',"")');
+  if (cRok &amp;&amp; cClick)   set('EPC確定¥',        '=IFERROR(' + cRok   + r + '/' + cClick + r + ',"")');
+  if (cRok &amp;&amp; cViews)   set('RPM(¥/1000再生)', '=IFERROR(' + cRok   + r + '/' + cViews + r + '*1000,"")');
+}
+
+// 純粋関数：post_id 列の値配列(2行目以降)と videoId から upsert 先の行番号(2始まり)を返す。
+// 一致が無ければ 0。videoId 空なら 0（=従来の空行再利用/追記へ）。
+// ※ tests/test_record_upsert.js に同一ロジックのミラーあり（変更時は両方を揃える）。
+function upsertRowOf_(postIdCol, videoId) {
+  if (!videoId) return 0;
+  for (var j = 0; j &lt; postIdCol.length; j++) { if (String(postIdCol[j]) === String(videoId)) return j + 2; }
+  return 0;
+}
+
+// 1投稿を記録（短縮失敗でも記録は残す）。doPost・無人予約の両方から使用。
+// videoId（背骨ID）があれば post_id をそれにし、同ID行へ upsert（重複行を作らない・変更フィールドのみ更新）。
+// videoId 無し＝完全に従来動作（後方互換）。
+function writeRecord_(channel, f) {
+  // 短縮URL：フロントが生成済みなら優先（da.gd/link-worker＝実際に共有するURL）。
+  // 無い経路（無人予約・旧クライアント）だけ GAS が da.gd で短縮（1投稿1回・トークン不要・軽量）。
+  // ※Bitlyは無料枠オーバーの主因かつ冗長（共有されず計測不能）なため全廃。
+  var shortUrl = f.shortUrl || '';
+  if (!shortUrl &amp;&amp; f.postUrl &amp;&amp; !f.noShorten) shortUrl = daGdShorten_(f.postUrl);
+  var sh = getChannelSheet_(channel);
+  var map = headerMap_(sh);
+  var dcol = map['投稿日時'] || 2;
+  var pidc = map['post_id'] || 1;
+  var last = sh.getLastRow();
+  var now = new Date();
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+
+  // 行キー：videoId があればそれ、無ければ従来の時刻ベース。
+  var pid = f.videoId || (channel + '-' + Utilities.formatDate(now, tz, 'yyyyMMdd-HHmm'));
+
+  // upsert：同一 videoId の既存行を探す。
+  var target = 0;
+  if (f.videoId &amp;&amp; last &gt;= 2) {
+    target = upsertRowOf_(sh.getRange(2, pidc, last - 1, 1).getValues().map(function (r) { return r[0]; }), f.videoId);
+  }
+  var isNewRow = false;
+  if (!target) {
+    // 従来通り：空の投稿日時行を再利用、無ければ末尾に追加。
+    if (last &gt;= 2) {
+      var vals = sh.getRange(2, dcol, last - 1, 1).getValues();
+      for (var i = 0; i &lt; vals.length; i++) { if (vals[i][0] === '' || vals[i][0] === null) { target = i + 2; break; } }
+    }
+    if (!target) { target = last + 1; }
+    isNewRow = true;
+  }
+
+  setComputed_(sh, map, target); // テンプレ既存行は同じ式で上書き＝無害。新規行にも式を付与。
+  function put(h, v) { if (map[h]) sh.getRange(target, map[h]).setValue(v); }
+  // upsert更新時に既存値を空で潰さないよう、値があるものだけ書く。
+  function putIf(h, v) { if (map[h] &amp;&amp; v !== '' &amp;&amp; v !== null &amp;&amp; v !== undefined) sh.getRange(target, map[h]).setValue(v); }
+
+  put('post_id', pid);
+  // 投稿日時：履歴の実投稿時刻(postedAt)があれば最優先。無ければ新規行/投稿URL記録時のみ now。
+  // （YouTube URLだけの後追いupsertでは上書きしない＝既存の投稿日時を保護）
+  var postedDate = null;
+  if (f.postedAt) { var pd = new Date(f.postedAt); if (!isNaN(pd.getTime())) postedDate = pd; }
+  if (postedDate) put('投稿日時', postedDate);
+  else if (isNewRow || f.postUrl) put('投稿日時', now);
+  putIf('題名(コメント)', f.ytTitle || f.title || '');         // YouTube題名を優先して題名(コメント)へ集約
+  putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
+  putIf('短縮URL', shortUrl);                                   // r2＝計測用（codeFromShort_対象）
+  putIf('共有URL', f.shareUrl || '');                           // da.gd＝実際に概要欄へ貼る短いURL
+  putIf('YouTube動画URL', f.youtubeUrl || '');
+  putIf('視聴回数', (f.views !== undefined &amp;&amp; f.views !== null &amp;&amp; f.views !== '') ? f.views : '');   // YouTube再生数
+  putIf(clickColName_(map), (f.clicks !== undefined &amp;&amp; f.clicks !== null &amp;&amp; f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
+  putIf('post_uri', f.postUri || '');
+  // FANZA 価格スナップショット（投稿時1回のみ。null は書かない＝既存値を保護）。
+  putIf('元値list_price', f.fanza_list_price !== undefined &amp;&amp; f.fanza_list_price !== null ? f.fanza_list_price : '');
+  putIf('割引後price', f.fanza_price !== undefined &amp;&amp; f.fanza_price !== null ? f.fanza_price : '');
+  putIf('割引率pct', f.fanza_discount_pct !== undefined &amp;&amp; f.fanza_discount_pct !== null ? f.fanza_discount_pct : '');
+  putIf('FANZA取得日時', f.fanza_fetched_at || '');
+  putIf('レビュー件数(代理指標)', f.fanza_review_count !== undefined &amp;&amp; f.fanza_review_count !== null ? f.fanza_review_count : '');
+  putIf('レビュー平均', f.fanza_review_avg !== undefined &amp;&amp; f.fanza_review_avg !== null ? f.fanza_review_avg : '');
+  // カテゴリ：payload に属性フラグ(chara/jk/gyaru/isekai)が含まれるときだけ明示セット（未指定なら既存値を保護）。
+  // キャラ無し＝オリジナルは空欄。複数属性はカンマ区切りで列挙。
+  if (attrProvided_(f) &amp;&amp; map['カテゴリ']) {
+    sh.getRange(target, map['カテゴリ']).setValue(categoryOf_(f));
+  }
+  // 作品状態：投稿当時の状態（新作/準新作/旧作）。payload に含まれるときだけセット。
+  putIf('作品状態', f.workState || '');
+  // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
+  if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
+  // 投稿履歴を正とし、投稿日時の新しい順にシートを並べ替える（空日時は末尾へ）。
+  // 一括同期(sync_history)では noSort で抑止し、最後に1回だけ並べ替える。
+  if (!f.noSort) sortByDate_(sh, dcol);
+  return { shortUrl: shortUrl, row: target };
+}
+
+// 投稿履歴の一括同期：各アイテムを post_id(背骨ID)キーで upsert し、最後に1回だけ日付降順ソート。
+// 投稿履歴を「正」とするため ID・投稿日時(postedAt)・キャラ属性も反映する（冪等：再実行しても重複しない）。
+function syncHistory_(channel, items) {
+  if (!items || !items.length) return jsonOut_({ ok: true, synced: 0 });
+  var n = 0;
+  for (var i = 0; i &lt; items.length; i++) {
+    var it = items[i] || {};
+    if (!it.videoId) continue;
+    try {
+      writeRecord_(channel, {
+        videoId: it.videoId, title: it.title || '', postUrl: it.postUrl || '',
+        workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '', shareUrl: it.shareUrl || '',
+        youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '',
+        views: it.views, clicks: it.clicks,
+        chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, ai: it.ai, ol: it.ol, soshu: it.soshu, // カテゴリ属性（複数可）
+        workState: it.workState,           // 作品状態（新作/準新作/旧作）
+        postedAt: it.postedAt || '',
+        noShorten: true, noSort: true   // 同期は短縮API呼ばず・並べ替えは最後にまとめて
+      });
+      n++;
+    } catch (e) {}
+  }
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  sortByDate_(sh, map['投稿日時'] || 2);
+  return jsonOut_({ ok: true, synced: n });
+}
+
+// 投稿履歴の掃除：keepIds（アプリの全post_id）に含まれない行をクリアする（行は詰めず内容クリア＝再利用可）。
+// アプリの投稿履歴を「正」とし、履歴から消した投稿をシートからも消す用途。指定チャンネルのタブのみ対象。
+function pruneHistory_(channel, keepIds) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var pidc = map['post_id']; var last = sh.getLastRow();
+  if (!pidc || last &lt; 2) return jsonOut_({ ok: true, cleared: 0 });
+  var keep = {};
+  for (var i = 0; i &lt; keepIds.length; i++) { if (keepIds[i]) keep[String(keepIds[i])] = true; }
+  var pids = sh.getRange(2, pidc, last - 1, 1).getValues();
+  var cleared = 0;
+  for (var r = 0; r &lt; pids.length; r++) {
+    var pid = String(pids[r][0] || '');
+    if (!pid) continue;                  // 既に空の行はスキップ
+    if (!keep[pid]) { sh.getRange(r + 2, 1, 1, sh.getLastColumn()).clearContent(); cleared++; }
+  }
+  sortByDate_(sh, map['投稿日時'] || 2); // 空行は末尾へ
+  return jsonOut_({ ok: true, cleared: cleared });
+}
+
+// ============================================================
+// 端末間 設定同期（鍵＝秘密以外の設定・投稿履歴を端末間で共有）
+//   クライアントは非秘密の localStorage を JSON 化(blob)して push、別端末で pull→上書き→再読込。
+//   秘密(app_pw/secret/api_key)はクライアント側で除外済み＝クラウドには保存しない。
+//   保存先：非表示シート '_sync'。A1=メタJSON、A2以降=blobチャンク（1セル約5万字上限を回避）。
+// ============================================================
+function syncSheet_() {
+  var ss = openSS_();
+  var sh = ss.getSheetByName('_sync');
+  if (!sh) { sh = ss.insertSheet('_sync'); try { sh.hideSheet(); } catch (e) {} }
+  return sh;
+}
+// 非秘密設定 blob を保存（POST）。既存内容は毎回全消去してから書き直す（＝最新スナップショットのみ保持）。
+function settingsPush_(blob, updatedAt, device) {
+  var sh = syncSheet_();
+  sh.clearContents();
+  blob = String(blob || '');
+  var CH = 45000, chunks = [];
+  for (var i = 0; i &lt; blob.length; i += CH) chunks.push([blob.slice(i, i + CH)]);
+  var meta = { updatedAt: updatedAt || new Date().toISOString(), device: String(device || ''), chunks: chunks.length, len: blob.length };
+  sh.getRange(1, 1).setValue(JSON.stringify(meta));
+  if (chunks.length) sh.getRange(2, 1, chunks.length, 1).setValues(chunks);
+  return jsonOut_({ ok: true, len: blob.length, chunks: chunks.length, updatedAt: meta.updatedAt });
+}
+// メタのみ返す（軽量・状態表示用。JSONP GET）。
+function settingsMeta_() {
+  var sh = syncSheet_();
+  var v = sh.getRange(1, 1).getValue();
+  if (!v) return { ok: true, empty: true };
+  var meta = {}; try { meta = JSON.parse(v); } catch (e) { return { ok: true, empty: true }; }
+  return { ok: true, empty: false, updatedAt: meta.updatedAt || '', device: meta.device || '', len: meta.len || 0 };
+}
+// blob 全体を返す（JSONP GET）。チャンクを結合して復元。
+function settingsPull_() {
+  var sh = syncSheet_();
+  var last = sh.getLastRow();
+  if (last &lt; 2) return { ok: true, empty: true };
+  var meta = {}; try { meta = JSON.parse(sh.getRange(1, 1).getValue() || '{}'); } catch (e) {}
+  var vals = sh.getRange(2, 1, last - 1, 1).getValues();
+  var blob = ''; for (var i = 0; i &lt; vals.length; i++) blob += (vals[i][0] || '');
+  return { ok: true, empty: false, blob: blob, updatedAt: meta.updatedAt || '', device: meta.device || '', len: blob.length };
+}
+
+// 記録シートを「投稿日時」降順で並べ替える（ヘッダ行は固定、2行目以降が対象）。
+// 計算列の数式は行相対参照（$B&lt;row&gt;）のため、並べ替えでも各行が自分の日時を正しく参照する。
+function sortByDate_(sh, dcol) {
+  var last = sh.getLastRow();
+  if (last &lt; 3) return; // データ行が0〜1件なら並べ替え不要
+  sh.getRange(2, 1, last - 1, sh.getLastColumn()).sort({ column: dcol, ascending: false });
+}
+
+// ---- 短縮URL（da.gd・トークン不要・1投稿1回だけ。失敗時は空＝長いURLのまま記録） ----
+//   ※Bitlyは全廃（無料枠オーバーの主因かつ冗長）。クリック計測は link-worker(KV) 側に一本化する方針。
+function daGdShorten_(longUrl) {
+  if (!longUrl) return '';
+  try {
+    var res = UrlFetchApp.fetch('https://da.gd/s?url=' + encodeURIComponent(longUrl), { muteHttpExceptions: true });
+    if (res.getResponseCode() &gt;= 300) return '';
+    var t = String(res.getContentText() || '').trim();
+    return /^https?:\/\//.test(t) ? t : '';
+  } catch (e) { return ''; }
+}
+
+// ---- link-worker 開封数の取り込み（①計測の見える化） ----
+//   YT説明欄に貼る短縮URL（go5-short/&lt;code&gt;）の「開かれた回数」を /api/stats から取得し、
+//   テンプレ列「Bitlyクリック」（＝今後は link-worker の開封数の意味）に毎時反映する。
+//   ※列名はテンプレ互換のため変えない（意味だけ Bitly→開封数 に変更）。
+var SHORT_WORKER_URL = 'https://r2.trustsignalbot.workers.dev';
+// 旧名(go5-short)で発行済みの短縮URLも計測できるよう、旧ホストも候補に残す。
+var SHORT_WORKER_HOSTS = ['https://r2.trustsignalbot.workers.dev', 'https://go5-short.trustsignalbot.workers.dev'];
+function shortSecret_() { return prop_('SHORT_SHARED_SECRET') || 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'; }
+// 自前ワーカー(r2/旧go5-short)のURLから末尾コードを抽出（da.gd等の別ホストは ''）。
+function codeFromShort_(url) {
+  var s = String(url || '');
+  for (var i = 0; i &lt; SHORT_WORKER_HOSTS.length; i++) {
+    var base = SHORT_WORKER_HOSTS[i].replace(/\/+$/, '');
+    if (s.indexOf(base + '/') === 0) {
+      var rest = s.slice(base.length + 1).split(/[/?#]/)[0];
+      if (/^[0-9A-Za-z]+$/.test(rest)) return rest;
+    }
+  }
+  return '';
+}
+function workerClicks_(code) {
+  if (!code) return null;
+  try {
+    var u = SHORT_WORKER_URL.replace(/\/+$/, '') + '/api/stats?code=' + encodeURIComponent(code) + '&amp;secret=' + encodeURIComponent(shortSecret_());
+    var res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
+    if (res.getResponseCode() &gt;= 300) return null;
+    var d = JSON.parse(res.getContentText() || '{}');
+    return (d &amp;&amp; d.ok &amp;&amp; typeof d.clicks === 'number') ? d.clicks : null;
+  } catch (e) { return null; }
+}
+// 毎時：直近200行のうち短縮URLが go5-short のものだけ開封数を更新（軽量・クォータ安全）。
+function refreshClicks() {
+  CH_SHEETS.forEach(function (name) {
+    var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
+    var map = headerMap_(sh); var last = sh.getLastRow();
+    var clickCol = map[clickColName_(map)]; // 短縮URLクリック数（旧名 開封数/Bitlyクリック も互換）
+    if (last &lt; 2 || !map['短縮URL'] || !clickCol) return;
+    var start = Math.max(2, last - 199), n = last - start + 1;
+    var urls = sh.getRange(start, map['短縮URL'], n, 1).getValues();
+    for (var i = 0; i &lt; urls.length; i++) {
+      var code = codeFromShort_(urls[i][0]); if (!code) continue;
+      var c = workerClicks_(code);
+      if (c !== null) {
+        sh.getRange(start + i, clickCol).setValue(c);
+        if (map['クリック更新日時']) sh.getRange(start + i, map['クリック更新日時']).setValue(new Date());
+      }
+      Utilities.sleep(100);
+    }
+  });
+}
+
+// ---- Bluesky反応(いいね/リポスト/返信)の定期更新（毎時トリガー）。公開API getPosts を25件ずつ ----
+function refreshEngagement() {
+  CH_SHEETS.forEach(function (name) {
+    var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
+    var map = headerMap_(sh); var last = sh.getLastRow();
+    if (last &lt; 2 || !map['post_uri']) return;
+    var uris = sh.getRange(2, map['post_uri'], last - 1, 1).getValues();
+    var pending = [];
+    for (var i = 0; i &lt; uris.length; i++) { var u = uris[i][0]; if (u) pending.push({ row: i + 2, uri: String(u) }); }
+    for (var b = 0; b &lt; pending.length; b += 25) {
+      var slice = pending.slice(b, b + 25);
+      var q = slice.map(function (x) { return 'uris=' + encodeURIComponent(x.uri); }).join('&amp;');
+      try {
+        var res = UrlFetchApp.fetch('https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?' + q, { muteHttpExceptions: true });
+        if (res.getResponseCode() &gt;= 300) continue;
+        var data = JSON.parse(res.getContentText() || '{}'); var byUri = {};
+        (data.posts || []).forEach(function (p) { byUri[p.uri] = p; });
+        slice.forEach(function (x) {
+          var p = byUri[x.uri]; if (!p) return;
+          if (map['いいね']) sh.getRange(x.row, map['いいね']).setValue(p.likeCount || 0);
+          if (map['リポスト']) sh.getRange(x.row, map['リポスト']).setValue(p.repostCount || 0);
+          if (map['返信']) sh.getRange(x.row, map['返信']).setValue(p.replyCount || 0);
+          if (map['反応更新日時']) sh.getRange(x.row, map['反応更新日時']).setValue(new Date());
+        });
+      } catch (e) {}
+      Utilities.sleep(200);
+    }
+  });
+}
+
+// ============================================================
+// 再生数・クリック数の自動スナップショット（毎時トリガー）＝アプリ未起動でも記録される。
+//   視聴履歴シートに (日付, videoId) 単位で「その日の最新の累計」を upsert。
+//   これを差分計算(computeDeltas_)して 今日/昨日/直近1週間 の増加を出す。
+//   ※再生数取得には Script Property `YT_API_KEY`（アプリ⚙のYouTube APIキーと同値）が必要。
+// ============================================================
+var STATS_SHEET = '視聴履歴';
+var STATS_HEADERS = ['記録日時', '日付', 'channel', 'post_id', 'videoId', '再生数', '短縮URLクリック数'];
+function statsSheet_() {
+  var ss = openSS_();
+  var sh = ss.getSheetByName(STATS_SHEET) || ss.insertSheet(STATS_SHEET);
+  if (sh.getLastRow() === 0) sh.appendRow(STATS_HEADERS);
+  return sh;
+}
+// 最大瞬間風速（一番伸びた区間の伸び率と時間帯）を作品ごとに永続保存するシート。
+var PEAK_SHEET = 'ピーク記録';
+var PEAK_HEADERS = ['videoId', '再生ピーク(件/時)', '再生ピーク時間帯', 'クリックピーク(件/時)', 'クリックピーク時間帯', '更新日時'];
+function peakSheet_() {
+  var ss = openSS_();
+  var sh = ss.getSheetByName(PEAK_SHEET) || ss.insertSheet(PEAK_SHEET);
+  if (sh.getLastRow() === 0) sh.appendRow(PEAK_HEADERS);
+  return sh;
+}
+// ピーク記録シート → videoIdごとの {vRate,vWin,cRate,cWin}。
+function computePeaks_() {
+  var sh = peakSheet_(); var last = sh.getLastRow(); if (last &lt; 2) return {};
+  var d = sh.getRange(2, 1, last - 1, PEAK_HEADERS.length).getValues(); var out = {};
+  d.forEach(function (r) { if (!r[0]) return; out[r[0]] = { vRate: r[1] === '' ? null : Number(r[1]), vWin: r[2] || '', cRate: r[3] === '' ? null : Number(r[3]), cWin: r[4] || '' }; });
+  return out;
+}
+function ytApiKey_() { return prop_('YT_API_KEY') || ''; }
+function ytIdFromUrl_(u) {
+  u = String(u || '');
+  var m = u.match(/[?&amp;]v=([0-9A-Za-z_-]{6,})/) || u.match(/youtu\.be\/([0-9A-Za-z_-]{6,})/) || u.match(/shorts\/([0-9A-Za-z_-]{6,})/);
+  return m ? m[1] : '';
+}
+function ytViews_(ids) {
+  var key = ytApiKey_(), out = {};
+  if (!key || !ids.length) return out;
+  for (var i = 0; i &lt; ids.length; i += 50) {
+    var batch = ids.slice(i, i + 50);
+    try {
+      var u = 'https://www.googleapis.com/youtube/v3/videos?part=statistics&amp;id=' + batch.join(',') + '&amp;key=' + encodeURIComponent(key);
+      var res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
+      if (res.getResponseCode() &gt;= 300) continue;
+      var d = JSON.parse(res.getContentText() || '{}');
+      (d.items || []).forEach(function (it) { if (it &amp;&amp; it.id &amp;&amp; it.statistics &amp;&amp; it.statistics.viewCount != null) out[it.id] = parseInt(it.statistics.viewCount, 10); });
+    } catch (e) {}
+    Utilities.sleep(120);
+  }
+  return out;
+}
+function snapshotStats() {
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var nowStr = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
+  var recs = [];
+  CH_SHEETS.forEach(function (name) {
+    var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
+    var map = headerMap_(sh); var last = sh.getLastRow(); if (last &lt; 2) return;
+    var pidc = map['post_id'], ytc = map['YouTube動画URL'], sc = map['短縮URL'];
+    var chKey = (name === '宵桜艶帖') ? 'acc2' : 'acc1';
+    var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+    vals.forEach(function (row) {
+      var vid = ytc ? ytIdFromUrl_(row[ytc - 1]) : ''; if (!vid) return;
+      var code = sc ? codeFromShort_(row[sc - 1]) : '';
+      recs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code });
+    });
+  });
+  if (!recs.length) return;
+  // 同一videoId(同じ動画を複数投稿・両ch)で重複行を作らないよう vid で1件に正規化（最初の1件＝コード保持）。
+  var seenVid = {}, urecs = [];
+  recs.forEach(function (r) { if (r.vid &amp;&amp; !seenVid[r.vid]) { seenVid[r.vid] = 1; urecs.push(r); } });
+  recs = urecs;
+  var vids = recs.map(function (r) { return r.vid; });
+  var views = ytViews_(vids);
+  var clickByCode = {};
+  recs.forEach(function (r) { if (r.code &amp;&amp; clickByCode[r.code] === undefined) { clickByCode[r.code] = workerClicks_(r.code); Utilities.sleep(80); } });
+  var sh = statsSheet_(); var last = sh.getLastRow();
+  var data = last &gt;= 2 ? sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues() : [];
+  var idx = {}; for (var i = 0; i &lt; data.length; i++) idx[data[i][1] + '|' + data[i][4]] = i + 2;
+  // 前回スナップ(vidごとの最新の累計と時刻)＝最大瞬間風速(区間の伸び率)算出用。
+  var prevByVid = {};
+  for (var j = 0; j &lt; data.length; j++) {
+    var pv = data[j][4]; if (!pv) continue;
+    var tstr = String(data[j][0] || ''), tms = Date.parse(tstr.replace(' ', 'T')) || 0;
+    var pp = prevByVid[pv];
+    if (!pp || tms &gt; pp.tms) prevByVid[pv] = { tms: tms, tstr: tstr, views: data[j][5] === '' ? null : Number(data[j][5]), clicks: data[j][6] === '' ? null : Number(data[j][6]) };
+  }
+  var nowMs = new Date().getTime();
+  // ピーク記録シートを読み込み（vidごとの現ピーク）。今runの更新はpeakUpdatesへ。
+  var psh = peakSheet_(); var plast = psh.getLastRow();
+  var pdata = plast &gt;= 2 ? psh.getRange(2, 1, plast - 1, PEAK_HEADERS.length).getValues() : [];
+  var pidx = {}; for (var pk = 0; pk &lt; pdata.length; pk++) pidx[pdata[pk][0]] = pk + 2;
+  var peakUpdates = {};
+  function curPeak_(vid, kind) {
+    if (peakUpdates[vid] &amp;&amp; peakUpdates[vid][kind + 'Rate'] != null) return peakUpdates[vid][kind + 'Rate'];
+    var rn = pidx[vid]; if (rn) { var col = kind === 'v' ? 1 : 3; var val = pdata[rn - 2][col]; return val === '' ? null : Number(val); }
+    return null;
+  }
+  function considerPeak_(vid, kind, rate, win) {
+    if (rate == null || !(rate &gt; 0)) return; // 増加区間のみ
+    var cur = curPeak_(vid, kind);
+    if (cur == null || rate &gt; cur) { var u = peakUpdates[vid] || (peakUpdates[vid] = {}); u[kind + 'Rate'] = Math.round(rate * 10) / 10; u[kind + 'Win'] = win; }
+  }
+  var appends = [];
+  recs.forEach(function (r) {
+    var v = views[r.vid]; var c = r.code ? clickByCode[r.code] : null;
+    if (v == null &amp;&amp; c == null) return;
+    var key = today + '|' + r.vid, rowN = idx[key];
+    if (rowN &amp;&amp; rowN &gt; 0) {
+      sh.getRange(rowN, 1).setValue(nowStr);
+      if (v != null) sh.getRange(rowN, 6).setValue(v);
+      if (c != null) sh.getRange(rowN, 7).setValue(c);
+    } else {
+      appends.push([nowStr, today, r.channel, r.post_id, r.vid, v == null ? '' : v, c == null ? '' : c]);
+      idx[key] = -1;
+    }
+    // 最大瞬間風速：前回スナップからの伸び率(件/時)。妥当な間隔(0.2〜6h)のみ採用。
+    var prev = prevByVid[r.vid];
+    if (prev &amp;&amp; prev.tms) {
+      var hrs = (nowMs - prev.tms) / 3600000;
+      if (hrs &gt;= 0.2 &amp;&amp; hrs &lt;= 6) {
+        var win = String(prev.tstr).slice(5) + '〜' + nowStr.slice(11); // MM-dd HH:mm〜HH:mm
+        if (v != null &amp;&amp; prev.views != null) considerPeak_(r.vid, 'v', (v - prev.views) / hrs, win);
+        if (c != null &amp;&amp; prev.clicks != null) considerPeak_(r.vid, 'c', (c - prev.clicks) / hrs, win);
+      }
+    }
+  });
+  if (appends.length) sh.getRange(sh.getLastRow() + 1, 1, appends.length, STATS_HEADERS.length).setValues(appends);
+  // ピーク更新を永続化（vidごとにupsert。既存より大きい時だけ更新済み）。
+  Object.keys(peakUpdates).forEach(function (vid) {
+    var u = peakUpdates[vid], rn = pidx[vid];
+    if (rn) {
+      if (u.vRate != null) { psh.getRange(rn, 2).setValue(u.vRate); psh.getRange(rn, 3).setValue(u.vWin); }
+      if (u.cRate != null) { psh.getRange(rn, 4).setValue(u.cRate); psh.getRange(rn, 5).setValue(u.cWin); }
+      psh.getRange(rn, 6).setValue(nowStr);
+    } else {
+      psh.appendRow([vid, u.vRate == null ? '' : u.vRate, u.vWin || '', u.cRate == null ? '' : u.cRate, u.cWin || '', nowStr]);
+      pidx[vid] = psh.getLastRow();
+    }
+  });
+  pruneStats_(sh, 12);
+}
+// 12日より古い履歴行を掃除（週次差分に必要なぶんだけ保持）。
+function pruneStats_(sh, keepDays) {
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var cut = new Date(); cut.setDate(cut.getDate() - keepDays);
+  var cutStr = Utilities.formatDate(cut, tz, 'yyyy-MM-dd');
+  var last = sh.getLastRow(); if (last &lt; 2) return;
+  var dates = sh.getRange(2, 2, last - 1, 1).getValues();
+  for (var i = dates.length - 1; i &gt;= 0; i--) { if (String(dates[i][0]) &lt; cutStr) sh.deleteRow(i + 2); }
+}
+// 視聴履歴から videoId ごとの 今日/昨日/直近1週間 の増加(再生数・クリック数)を算出。
+function computeDeltas_() {
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var sh = statsSheet_(); var last = sh.getLastRow(); if (last &lt; 2) return {};
+  var data = sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues();
+  var byVid = {};
+  data.forEach(function (row) {
+    var date = row[1], vid = row[4]; if (!vid || !date) return;
+    (byVid[vid] || (byVid[vid] = {}))[date] = { v: row[5] === '' ? null : Number(row[5]), c: row[6] === '' ? null : Number(row[6]) };
+  });
+  function dstr(off) { var d = new Date(); d.setDate(d.getDate() + off); return Utilities.formatDate(d, tz, 'yyyy-MM-dd'); }
+  var today = dstr(0), yest = dstr(-1), wk = dstr(-7);
+  var out = {};
+  Object.keys(byVid).forEach(function (vid) {
+    var m = byVid[vid], dates = Object.keys(m).sort();
+    function leOf(ds) { var b = null; for (var i = 0; i &lt; dates.length; i++) if (dates[i] &lt;= ds) b = dates[i]; return b ? m[b] : null; }
+    function ltOf(ds) { var b = null; for (var i = 0; i &lt; dates.length; i++) if (dates[i] &lt; ds) b = dates[i]; return b ? m[b] : null; }
+    var cur = m[today] || m[dates[dates.length - 1]];
+    var st = ltOf(today), sy = ltOf(yest), w7 = leOf(wk);
+    function df(a, b, k) { return (a &amp;&amp; b &amp;&amp; a[k] != null &amp;&amp; b[k] != null) ? (a[k] - b[k]) : null; }
+    out[vid] = {
+      tv: df(cur, st, 'v'), yv: df(st, sy, 'v'), wv: df(cur, w7, 'v'),
+      tc: df(cur, st, 'c'), yc: df(st, sy, 'c'), wc: df(cur, w7, 'c')
+    };
+  });
+  return out;
+}
+
+// 初回1回：毎時トリガーを登録。
+//   refreshClicks＝link-worker 開封数の取り込み／refreshEngagement＝Bluesky反応／
+//   snapshotStats＝再生数・クリック数の日次スナップショット（今日/昨日/週の増加算出用）。
+//   再実行で既存トリガーを掃除してから貼り直す。
+function setupTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var f = t.getHandlerFunction();
+    if (f === 'refreshClicks' || f === 'refreshEngagement' || f === 'snapshotStats') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
+  ScriptApp.newTrigger('refreshEngagement').timeBased().everyHours(1).create();
+  ScriptApp.newTrigger('snapshotStats').timeBased().everyHours(1).create();
+}
+
+// ============================================================
+// Phase5：無人予約投稿（タブを閉じても、時間トリガーが自動投稿）
+//   追加プロパティ：BSKY_HANDLE / BSKY_APP_PW。画像は base64→ドライブ一時保存→投稿後ゴミ箱。
+// ============================================================
+var RES_SHEET = '予約';
+var RES_HEADERS = ['予約ID', '予約日時', '本文', '画像fileId', 'slot_id', 'ステータス', '結果URI', '結果URL', '投稿日時', 'エラー', 'channel'];
+var RCOL = { id: 1, when: 2, text: 3, img: 4, slot: 5, status: 6, uri: 7, url: 8, postedAt: 9, error: 10, channel: 11 };
+
+function getResSheet_() {
+  var ss = openSS_();
+  var sh = ss.getSheetByName(RES_SHEET) || ss.insertSheet(RES_SHEET);
+  if (sh.getLastRow() === 0) sh.appendRow(RES_HEADERS);
+  return sh;
+}
+function getDriveFolder_() {
+  var name = 'go5-reservations';
+  var it = DriveApp.getFoldersByName(name);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(name);
+}
+function dataUrlToBlob_(dataUrl) {
+  var m = String(dataUrl).match(/^data:([^;]+);base64,(.*)$/);
+  var type = m ? m[1] : 'image/jpeg', data = m ? m[2] : dataUrl;
+  return Utilities.newBlob(Utilities.base64Decode(data), type);
+}
+function handleReserve_(body) {
+  var sh = getResSheet_(); var imgId = '';
+  if (body.image) {
+    var blob = dataUrlToBlob_(body.image).setName('rsv_' + new Date().getTime() + '.jpg');
+    imgId = getDriveFolder_().createFile(blob).getId();
+  }
+  var id = Utilities.getUuid(), row = [];
+  row[RCOL.id - 1] = id; row[RCOL.when - 1] = body.scheduled_at || ''; row[RCOL.text - 1] = body.text || '';
+  row[RCOL.img - 1] = imgId; row[RCOL.slot - 1] = body.slot_id || ''; row[RCOL.status - 1] = 'pending';
+  row[RCOL.uri - 1] = ''; row[RCOL.url - 1] = ''; row[RCOL.postedAt - 1] = ''; row[RCOL.error - 1] = '';
+  row[RCOL.channel - 1] = body.channel || 'acc1';
+  sh.appendRow(row);
+  return jsonOut_({ ok: true, id: id });
+}
+function runReservations() {
+  var sh = getResSheet_(); var last = sh.getLastRow(); if (last &lt; 2) return;
+  var rows = sh.getRange(2, 1, last - 1, RES_HEADERS.length).getValues();
+  var now = new Date();
+  for (var i = 0; i &lt; rows.length; i++) {
+    if (rows[i][RCOL.status - 1] !== 'pending') continue;
+    var when = new Date(rows[i][RCOL.when - 1]);
+    if (isNaN(when.getTime()) || when &gt; now) continue;
+    sh.getRange(i + 2, RCOL.status).setValue('posting'); SpreadsheetApp.flush();
+    try {
+      var imgId = rows[i][RCOL.img - 1];
+      var blob = imgId ? DriveApp.getFileById(imgId).getBlob() : null;
+      var text = rows[i][RCOL.text - 1];
+      var ch = rows[i][RCOL.channel - 1] || 'acc1';
+      var res = bskyPost_(text, blob);
+      sh.getRange(i + 2, RCOL.status).setValue('posted');
+      sh.getRange(i + 2, RCOL.uri).setValue(res.uri);
+      sh.getRange(i + 2, RCOL.url).setValue(res.postUrl);
+      sh.getRange(i + 2, RCOL.postedAt).setValue(new Date());
+      try {
+        writeRecord_(ch, {
+          title: (String(text).split('\n')[0] || ''), postUrl: res.postUrl,
+          affiliateUrl: (String(text).match(/https?:\/\/[^\s]+/) || [''])[0],
+          workUrl: '', hashtags: extractHashtags_(text), postUri: res.uri
+        });
+      } catch (e) {}
+      if (imgId) { try { DriveApp.getFileById(imgId).setTrashed(true); } catch (e) {} }
+    } catch (err) {
+      sh.getRange(i + 2, RCOL.status).setValue('error');
+      sh.getRange(i + 2, RCOL.error).setValue(String(err));
+    }
+    Utilities.sleep(300);
+  }
+}
+
+// Bluesky 投稿（サーバー側＝GASのアプリパスワードで投稿）
+function bskyPost_(text, imageBlob) {
+  var handle = prop_('BSKY_HANDLE'), pw = prop_('BSKY_APP_PW');
+  if (!handle || !pw) throw new Error('BSKY_HANDLE / BSKY_APP_PW 未設定');
+  var svc = 'https://bsky.social';
+  var s = JSON.parse(UrlFetchApp.fetch(svc + '/xrpc/com.atproto.server.createSession', {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ identifier: String(handle).replace(/^@/, ''), password: pw }), muteHttpExceptions: true
+  }).getContentText());
+  if (!s.accessJwt) throw new Error('Blueskyログイン失敗');
+  var embed = null;
+  if (imageBlob) {
+    var up = JSON.parse(UrlFetchApp.fetch(svc + '/xrpc/com.atproto.repo.uploadBlob', {
+      method: 'post', contentType: imageBlob.getContentType() || 'image/jpeg',
+      headers: { Authorization: 'Bearer ' + s.accessJwt }, payload: imageBlob.getBytes(), muteHttpExceptions: true
+    }).getContentText());
+    if (up.blob) embed = { '$type': 'app.bsky.embed.images', images: [{ alt: (String(text).split('\n')[0] || ''), image: up.blob }] };
+  }
+  var record = { '$type': 'app.bsky.feed.post', text: text, createdAt: new Date().toISOString(), langs: ['ja'] };
+  var facets = detectFacets_(text);
+  if (facets.length) record.facets = facets;
+  if (embed) record.embed = embed;
+  var res = JSON.parse(UrlFetchApp.fetch(svc + '/xrpc/com.atproto.repo.createRecord', {
+    method: 'post', contentType: 'application/json', headers: { Authorization: 'Bearer ' + s.accessJwt },
+    payload: JSON.stringify({ repo: s.did, collection: 'app.bsky.feed.post', record: record }), muteHttpExceptions: true
+  }).getContentText());
+  var rkey = String(res.uri || '').split('/').pop();
+  return { uri: res.uri || '', postUrl: (s.handle &amp;&amp; rkey) ? ('https://bsky.app/profile/' + s.handle + '/post/' + rkey) : '' };
+}
+
+// 本文中の URL(#link) とハッシュタグ(#tag) の facet（index は UTF-8 バイトオフセット）
+function byteLen_(s) { return Utilities.newBlob(String(s)).getBytes().length; }
+function detectFacets_(text) {
+  text = String(text || ''); var facets = [], used = [], m;
+  var ure = /https?:\/\/[^\s]+/g;
+  while ((m = ure.exec(text))) {
+    var url = m[0].replace(/[.,;:!?。、！？）)】」』]+$/, '');
+    var s = m.index, e = s + url.length; used.push([s, e]);
+    facets.push({ index: { byteStart: byteLen_(text.slice(0, s)), byteEnd: byteLen_(text.slice(0, e)) },
+      features: [{ '$type': 'app.bsky.richtext.facet#link', uri: url }] });
+  }
+  var tre = /(^|\s)(#[^\s#]+)/g, t;
+  while ((t = tre.exec(text))) {
+    var hash = t[2].replace(/[.,;:!?。、！？）)】」』]+$/, '');
+    if (hash.length &lt; 2) continue;
+    var ts = t.index + t[1].length, te = ts + hash.length;
+    if (used.some(function (r) { return ts &lt; r[1] &amp;&amp; te &gt; r[0]; })) continue;
+    facets.push({ index: { byteStart: byteLen_(text.slice(0, ts)), byteEnd: byteLen_(text.slice(0, te)) },
+      features: [{ '$type': 'app.bsky.richtext.facet#tag', tag: hash.slice(1) }] });
+  }
+  facets.sort(function (a, b) { return a.index.byteStart - b.index.byteStart; });
+  return facets;
+}
+
+// 初回1回：予約を5分ごとに自動投稿するトリガーを登録
+function setupReservationTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runReservations') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('runReservations').timeBased().everyMinutes(5).create();
+}
+</pre>
+      </details>
+      <div class="note">貼り替えは「今回追加した機能（自動記録・ランキング・カテゴリAI/OL/総集編 など）」を動かすために必須です。既存の設定・記録は消えません。</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">2</div>
+    <div class="step-body">
+      <h2>YouTube APIキーを登録（スクリプトプロパティ）</h2>
+      <p>再生数の自動取得にはキーが必要です。<b>アプリの ⚙詳細設定 に入れているYouTube APIキーと同じ値</b>を使います。</p>
+      <ol>
+        <li>エディタ左下の <span class="path">⚙ プロジェクトの設定</span> をクリック。</li>
+        <li>下へスクロールし <span class="path">スクリプト プロパティ</span> → <span class="path">スクリプト プロパティを追加</span>。</li>
+        <li><b>プロパティ（名前）</b>に、これを貼り付け：
+          <div class="cb"><pre class="cb-t">YT_API_KEY</pre><button class="cbtn" type="button" onclick="cp(this)">コピー</button></div>
+        </li>
+        <li><b>値</b>に、アプリのYouTube APIキーを貼り付け（例：<span class="k">AIza…</span> で始まる文字列）。</li>
+        <li><span class="path">スクリプト プロパティを保存</span> をクリック。</li>
+      </ol>
+      <div class="warn"><b>注意：</b>このキーは他人に渡さないでください。ここ（自分のGASの設定）にだけ入れます。</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">3</div>
+    <div class="step-body">
+      <h2>新しいバージョンで再デプロイ</h2>
+      <p>コードの変更を「公開版」に反映します。<b>ここを忘れると変更が効きません</b>（毎回ここでつまずきがち）。</p>
+      <ol>
+        <li>エディタ右上 <span class="path">デプロイ</span> → <span class="path">デプロイを管理</span>。</li>
+        <li>今あるデプロイの右の <b>鉛筆✏️（編集）</b> をクリック。</li>
+        <li><span class="path">バージョン</span> のプルダウンで <b>「新バージョン」</b> を選ぶ。</li>
+        <li><span class="path">デプロイ</span> をクリックして完了。</li>
+      </ol>
+      <p><b>反映チェック：</b>下のURLを開いて、<span class="ok">2026-07-02G</span>（またはそれ以降）と表示されればOK。</p>
+      <div class="cb"><pre class="cb-t">https://script.google.com/macros/s/AKfycbyQlrWuud5WfE3YMjoYzX2WhstTyWw_sOxVCaT8EfaFMXwi_WZzWIBKarHdtXVsY3Fj/exec?ping=1</pre><button class="cbtn" type="button" onclick="cp(this)">コピー</button></div>
+      <div class="note">「<span class="k">version</span>」が古い日付のままなら、まだ新バージョンになっていません。もう一度「デプロイ → デプロイを管理 → ✏️ → 新バージョン」を試してください。</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">4</div>
+    <div class="step-body">
+      <h2>自動記録をオンにする（トリガー設定）</h2>
+      <ol>
+        <li>エディタ上部の関数プルダウンで <span class="k">setupTrigger</span> を選ぶ。</li>
+        <li><span class="path">▶ 実行</span> をクリック。</li>
+        <li>初回は<b>権限の承認</b>ダイアログが出ます → 自分のGoogleアカウントを選択 → 「詳細」→「（安全ではないページ）に移動」→「許可」。<br>
+          <span class="small">※自分で作った自分用スクリプトなので許可して問題ありません。</span></li>
+        <li>これで<b>毎時、自動で記録</b>されるようになります。</li>
+      </ol>
+      <div class="note">すぐ1回記録したいときは、関数プルダウンで <span class="k">snapshotStats</span> を選んで <span class="path">▶ 実行</span>。今の再生数・クリック数がすぐ記録されます。</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">5</div>
+    <div class="step-body">
+      <h2>（まだなら）スプレッドシートの列を追加</h2>
+      <p>「カテゴリ／作品状態／共有URL」列がまだ無い場合だけ。下のURLを1回開くと自動で列が追加されます（何度開いても安全）。</p>
+      <div class="cb"><pre class="cb-t">https://script.google.com/macros/s/AKfycbyQlrWuud5WfE3YMjoYzX2WhstTyWw_sOxVCaT8EfaFMXwi_WZzWIBKarHdtXVsY3Fj/exec?action=migrate_headers</pre><button class="cbtn" type="button" onclick="cp(this)">コピー</button></div>
+      <p class="small">開くと <span class="k">{"ok":true,...}</span> のような文字が表示されればOK（閉じて大丈夫）。</p>
+    </div>
+  </div>
+</div>
+
+<div class="card check">
+  <h2>✅ 仕上がりチェック</h2>
+  <ul>
+    <li><span class="tag">確認1</span> STEP3のURLで <span class="ok">2026-07-02G</span> 以降が出る</li>
+    <li><span class="tag">確認2</span> アプリの📋投稿履歴で、ゴミ箱の左に「今日 / 昨日 / 週」が出る（<b>数字は貯まるまで数日</b>かかります）</li>
+    <li><span class="tag">確認3</span> 🏆ランキングに「再生ピーク」「クリックピーク」「30分〜24時間」タブが増えている</li>
+  </ul>
+  <div class="note">
+    <b>数字がすぐ出ない理由（正常です）：</b><br>
+    ・「今日の増加」は<b>2日分たまってから</b>意味を持ちます（初日は基準づくり）。<br>
+    ・「最大瞬間風速」「バケット」は<b>2回目以降の記録</b>から差分が出ます。<br>
+    毎時トリガーが回れば自動で貯まります。急ぐときはSTEP4の <span class="k">snapshotStats</span> を時間をあけて2回手動実行してください。
+  </div>
+</div>
+
+<p class="small" style="text-align:center;margin:18px 0 6px;">うまくいかないときは、STEP3の <span class="k">?ping=1</span> の表示（バージョン）を教えてください。どこで止まっているかすぐ分かります。</p>
+</div>
+
+<script>
+function flash(btn){ var t=btn.textContent; btn.textContent='✓ コピー'; btn.classList.add('done'); setTimeout(function(){ btn.textContent=t; btn.classList.remove('done'); },1400); }
+function copyText(text,btn){
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(function(){flash(btn);}).catch(function(){fallback(text,btn);}); }
+  else fallback(text,btn);
+}
+function fallback(text,btn){ var ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');flash(btn);}catch(e){} document.body.removeChild(ta); }
+function cp(btn){ var pre=btn.previousElementSibling; copyText(pre.textContent,btn); }
+function cpCode(btn){ copyText(document.getElementById('gascode').textContent,btn); }
+</script>
+</body>
+</html>
