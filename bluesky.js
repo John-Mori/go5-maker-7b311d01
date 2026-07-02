@@ -51,6 +51,8 @@
 
   // 動画作成タブの「カテゴリ」チェック状態を読む（キャラ/JK/ギャル/異世界・複数可・キャラ無し＝オリジナル）。
   var MOVIE_ATTRS = [['chara', 'movieAttrChara'], ['jk', 'movieAttrJk'], ['gyaru', 'movieAttrGyaru'], ['isekai', 'movieAttrIsekai'], ['ai', 'movieAttrAi'], ['ol', 'movieAttrOl'], ['soshu', 'movieAttrSoshu']];
+  // 動画作成タブの「リビルド(作り直し)」チェック状態。ONなら「同じ作品を作り直した動画」として記録。
+  function readRebuild() { var el = $('movieRebuild'); return !!(el && el.checked); }
   function readMovieAttrs() {
     var o = {};
     MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); o[p[0]] = !!(el && el.checked); });
@@ -578,6 +580,7 @@
     };
     var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = ma[p[0]]; }); // カテゴリ属性（複数可）
     payload.workState = readWorkState(); // 作品状態（新作/準新作/旧作）
+    payload.rebuild = (record.rebuild != null) ? record.rebuild : readRebuild(); // リビルド（作り直し版）フラグ
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
   function updateGasStatus() {
@@ -740,6 +743,8 @@
     if (!rec.manualOnly) {
       var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { if (ma[p[0]]) entry[p[0]] = true; });
       entry.workState = readWorkState(); // 投稿時の作品状態（新作/準新作/旧作）を固定記録
+      if (readRebuild()) entry.rebuild = true;       // この投稿はリビルド（作り直し版）
+      var rbEl = $('movieRebuild'); if (rbEl) rbEl.checked = false; // 一度きりのフラグ＝投稿後は自動でOFF
     }
     a.unshift(entry);
     histSaveArr(a);

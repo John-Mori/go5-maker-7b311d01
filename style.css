@@ -103,6 +103,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 /* 作品状態バッジ。新作=フレッシュな緑 / 準新作=ティール（旧作は非表示） */
 .vrow-h .vtag-shinsaku{color:#2fa96e;border-color:#2fa96e;font-weight:700;}
 .vrow-h .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;font-weight:700;}
+.vtag-rebuild{color:#3fb6a8;border-color:#3fb6a8;font-weight:700;}
+.vtag-remade{color:#c98a3a;border-color:#c98a3a;font-weight:700;}
 /* 小さめ写真ボタン（動画作成タブ） */
 .photo-btn-sm{padding:10px !important;font-size:14px !important;}
 /* カテゴリのチェック用カラーチップ（モーダル・動画作成タブ共通） */
@@ -114,6 +116,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vatt-ai{color:#4d9fff;border-color:#4d9fff;}
 .vatt-ol{color:#b56db0;border-color:#b56db0;}
 .vatt-soshu{color:#e0863c;border-color:#e0863c;}
+.vatt-rebuild{color:#3fb6a8;border-color:#3fb6a8;}
 .vedit-attrs{margin:0 0 14px;}
 .vedit-attrs-title{font-size:12px;color:var(--sub);margin-bottom:7px;}
 .vedit-attr,.movie-attr{display:inline-flex;align-items:center;gap:6px;margin:0 12px 8px 0;cursor:pointer;}
@@ -206,6 +209,12 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .vyt-inp{flex:1;min-width:0;font-size:14px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
 .vrow-foot .vdel{flex:0 0 auto;background:transparent;border:none;color:var(--sub);font-size:16px;cursor:pointer;padding:0;line-height:1;opacity:0.4;width:auto;margin-top:0;}
 .vrow-foot .vdel:active{opacity:1;}
+/* 作り直し（削除の代わりの印）ボタン */
+.vrow-foot .vremake{flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--sub);font-size:11px;cursor:pointer;padding:3px 8px;line-height:1;border-radius:7px;width:auto;margin-top:0;white-space:nowrap;}
+.vrow-foot .vremake:active{opacity:.7;}
+.vrow-foot .vremake.on{color:#c98a3a;border-color:#c98a3a;font-weight:700;}
+/* 作り直し済みの行は「置き換え済み」であることが分かるよう淡く表示 */
+.vrow-remade{opacity:.62;border-style:dashed;}
 /* ── URL編集モーダル ── */
 .vedit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;box-sizing:border-box;}
 .vedit-overlay[hidden]{display:none !important;}

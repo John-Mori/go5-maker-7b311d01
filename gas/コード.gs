@@ -40,7 +40,7 @@ var FANZA_HEADERS = [
 // カテゴリ＝作品属性を名前で明記（キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄）。
 // ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
-var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL'];
+var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し'];
 // 作品属性の定義（順序＝カテゴリ列での並び）。フラグ名→表示名。
 var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-02H（admin_setup追加＝GAS自動反映対応：デプロイ後にトリガー再設定＋ヘッダ移行を自動実行）';
+var GAS_VERSION = '2026-07-03I（作り直し列を追加＝リビルド版/作り直し済を記録シートへ反映）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -339,6 +339,8 @@ function doPost(e) {
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
       chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性（複数可）
       workState: body.workState,           // 作品状態（新作/準新作/旧作）
+      rebuild: body.rebuild,               // この動画自体が作り直し版（動画作成タブのリビルド）
+      remade: body.remade,                 // この動画は作り直されて置き換え済み（投稿履歴の作り直し印）
       fanza_list_price: body.fanza_list_price, fanza_price: body.fanza_price,
       fanza_discount_pct: body.fanza_discount_pct, fanza_fetched_at: body.fanza_fetched_at || '',
       fanza_review_count: body.fanza_review_count, fanza_review_avg: body.fanza_review_avg
@@ -468,6 +470,14 @@ function writeRecord_(channel, f) {
   }
   // 作品状態：投稿当時の状態（新作/準新作/旧作）。payload に含まれるときだけセット。
   putIf('作品状態', f.workState || '');
+  // 作り直し列：明示指定があるときだけセット/解除（未指定=既存値を保護）。
+  //   remade=true → 作り直し済（この動画を消して作り直した）／remade=false → 解除
+  //   rebuild=true → リビルド版（この動画自体が作り直し版）
+  if (map['作り直し']) {
+    if (f.remade === true || f.remade === 'true') put('作り直し', '作り直し済');
+    else if (f.remade === false || f.remade === 'false') put('作り直し', '');
+    else if (f.rebuild === true || f.rebuild === 'true') put('作り直し', 'リビルド版');
+  }
   // カウンタは新規行のみ0初期化（upsert更新で既存のいいね数等を0で潰さない）。
   if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
   // 投稿履歴を正とし、投稿日時の新しい順にシートを並べ替える（空日時は末尾へ）。
@@ -492,6 +502,7 @@ function syncHistory_(channel, items) {
         views: it.views, clicks: it.clicks,
         chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, ai: it.ai, ol: it.ol, soshu: it.soshu, // カテゴリ属性（複数可）
         workState: it.workState,           // 作品状態（新作/準新作/旧作）
+        rebuild: it.rebuild, remade: it.remade, // 作り直し（リビルド版/作り直し済）
         postedAt: it.postedAt || '',
         noShorten: true, noSort: true   // 同期は短縮API呼ばず・並べ替えは最後にまとめて
       });

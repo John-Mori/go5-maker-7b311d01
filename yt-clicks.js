@@ -489,7 +489,10 @@
       var bskyHref = it.shareUrl || it.shortUrl || it.postUrl || ''; // 表示リンクは共有(da.gd)優先。計測は下のcode(=r2)で行う
       // 属性バッジ（作品名の下に改行して表示。作品状態は価格行の左に別途表示）
       var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
-      return '<div class="vrow">' +
+      // 作り直し系バッジ：rebuild=この動画自体が作り直し版 / remade=この動画は作り直されて置き換え済み
+      if (it.rebuild) tagsHtml += '<span class="vtag vtag-rebuild">🔁リビルド版</span>';
+      if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁作り直し済</span>';
+      return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
         (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名（改行して統一）
         '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
@@ -515,6 +518,7 @@
         '</div>' +
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + '>' + (vid ? fmtDelta_(deltaCache[vid]) : '') + '</span>' +
+          '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この動画を消して作り直した印を付ける（削除ではなく作り直しとして記録）">' + (it.remade ? '↩ 作り直しを取消' : '🔁 作り直し') + '</button>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
         '</div>';
@@ -534,6 +538,11 @@
     // 削除
     list.querySelectorAll('.vdel').forEach(function (b) {
       b.addEventListener('click', function () { deleteItem(b.getAttribute('data-k')); });
+    });
+
+    // 作り直し（削除の代わりに「作り直し済」の印を付ける／取り消す）
+    list.querySelectorAll('.vremake').forEach(function (b) {
+      b.addEventListener('click', function () { toggleRemade(b.getAttribute('data-k')); });
     });
 
     // サムネ → 作品詳細モーダル
@@ -578,6 +587,33 @@
     }
     if (ymap[k] != null) { delete ymap[k]; saveYtMap(ymap); }
     refresh();
+  }
+
+  // 作り直し印のトグル（削除はしない）。ONで「この動画を消して作り直した」印を付け、記録シートにも反映。
+  function toggleRemade(k) {
+    var arrKey, arr;
+    // 対象が手動追加(verify_manual)か投稿履歴(short_hist)かを判定して、その配列内のフラグを反転。
+    var manual = loadManual(), hist = loadHist();
+    var inManual = manual.some(function (x) { return itemKey(x) === k; });
+    if (inManual) { arrKey = manualKey(); arr = manual; } else { arrKey = histKey(); arr = hist; }
+    var target = null, next = false;
+    arr.forEach(function (x) { if (itemKey(x) === k) { x.remade = !x.remade; target = x; next = !!x.remade; } });
+    if (!target) return;
+    saveArr(arrKey, arr);
+    // 記録シート（GAS）にも反映：videoId 行の「作り直し」列を 作り直し済/解除 に。テストIDと未設定は送らない。
+    pushRemadeToGas_(target.videoId || '', next);
+    refresh();
+  }
+  function pushRemadeToGas_(videoId, remade) {
+    if (!videoId) return;
+    var isTest = (window.IdGen && window.IdGen.isTestId) ? window.IdGen.isTestId(videoId) : /^test-/.test(videoId);
+    if (isTest) return;
+    var gasUrl = ''; try { gasUrl = localStorage.getItem('bsky_gas_url') || ''; } catch (e) {}
+    if (!gasUrl) return;
+    var channel = (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
+    try {
+      fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'upsert', channel: channel, videoId: videoId, remade: !!remade }) }).catch(function () {});
+    } catch (e) {}
   }
 
   // YouTube動画を手動で追加（モーダルで YouTube URL + Bluesky URL + 作品URL を一括入力）。
