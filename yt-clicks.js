@@ -859,6 +859,9 @@
     if (s === 'FANZA' || s === 'DMM') return true;
     return false;
   }
+  // キャッシュのスキーマ版。取得内容の意味が変わったら上げる＝旧キャッシュを一度だけ強制再取得。
+  //   sv=2: サークル名(author)を iteminfo.maker から取るよう修正（旧版はauthor空のまま固定されるため）
+  var FZ_SV = 2;
   function fanzaNameCacheLoad() {
     try { return JSON.parse(localStorage.getItem('fanza_title_cache') || '{}'); } catch (e) { return {}; }
   }
@@ -1233,13 +1236,13 @@
       var cached = cache[url];
       if (cached) {
         // 有効な題名キャッシュ（旧スキーマ=価格/発売日/画像/サークル名未保存なら再取得して埋める）
-        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media && ('author' in cached)) {
+        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media && cached.sv === FZ_SV) {
           setFanzaEls(url, cached.title); setFanzaAuthorEls(url, cached.author || '');
           setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo);
           setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall); return;
         }
         // 画像のみの部分情報（API未収録作品）：サムネ＋手動入力の作品名/価格を表示（※negative判定より先）
-        if (cached.partial && cached.media && ('author' in cached) && (now - (cached.fetchedAt || 0)) < DAY) {
+        if (cached.partial && cached.media && cached.sv === FZ_SV && (now - (cached.fetchedAt || 0)) < DAY) {
           setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, cached.author || '');
           setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall); return;
         }
@@ -1326,13 +1329,13 @@
         if (info && info.title && !isBadFanzaTitle(info.title)) {
           var pinfo = { price: info.price, listPrice: info.listPrice, discountPct: info.discountPct || 0, releaseDate: info.releaseDate || '' };
           var media = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: info.genres || [], service: info.service || '', floor: info.floor || '' };
-          c[job.url] = { title: info.title, author: info.author || '', priceInfo: pinfo, media: media, fetchedAt: new Date().getTime() };
+          c[job.url] = { title: info.title, author: info.author || '', priceInfo: pinfo, media: media, sv: FZ_SV, fetchedAt: new Date().getTime() };
           fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaAuthorEls(job.url, info.author || ''); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
           setFanzaThumbEls(job.url, media.thumb || media.thumbSmall, media.thumbSmall); done++;
         } else if (info && info.partial && (info.thumb || info.thumbSmall)) {
           // 画像のみの部分情報（API未収録＋ページ取得不能の作品）：サムネ・サンプルだけ保存/表示。
           var mediaP = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: [], service: info.service || '', floor: info.floor || '' };
-          c[job.url] = { title: '', author: '', partial: true, priceInfo: null, media: mediaP, fetchedAt: new Date().getTime() };
+          c[job.url] = { title: '', author: '', partial: true, priceInfo: null, media: mediaP, sv: FZ_SV, fetchedAt: new Date().getTime() };
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); setFanzaAuthorEls(job.url, '');
           setFanzaThumbEls(job.url, mediaP.thumb || mediaP.thumbSmall, mediaP.thumbSmall); partial++;
           if (manual) partials.push({ title: job.title });
@@ -1441,7 +1444,7 @@
           return '<div class="rank-row' + topCls + '">' +
             '<span class="rank-num">' + rank + '</span>' +
             '<div class="rank-info">' +
-              (dateStr ? '<div class="rank-date">' + esc(dateStr) + '</div>' : '') +
+              (dateStr || r.workUrl ? '<div class="rank-date">' + esc(dateStr) + (r.workUrl ? '<span class="rank-author" data-fanza-author-url="' + esc(r.workUrl) + '"></span>' : '') + '</div>' : '') +
               '<div class="rank-title-row">' +
                 '<span class="rank-acct rank-acct-' + esc(r.acct) + '">' + esc(acctLabel) + '</span>' +
                 '<div class="rank-title">' +

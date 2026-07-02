@@ -180,8 +180,12 @@ async function fetchViaApi(cid, apiId, affiliateId) {
       if (!items.length) continue;
       const it = items[0];
       const prices = it.prices || {};
-      const authorArr = (it.iteminfo && Array.isArray(it.iteminfo.author)) ? it.iteminfo.author : [];
-      var genreArr = (it.iteminfo && Array.isArray(it.iteminfo.genre)) ? it.iteminfo.genre : [];
+      // 同人はサークル名が iteminfo.maker に入る（author は空）。maker優先→author→circleでフォールバック。
+      const info = it.iteminfo || {};
+      const makerArr = Array.isArray(info.maker) ? info.maker : [];
+      const circleArr = Array.isArray(info.circle) ? info.circle : [];
+      const authorArr = makerArr.length ? makerArr : (Array.isArray(info.author) && info.author.length ? info.author : circleArr);
+      var genreArr = Array.isArray(info.genre) ? info.genre : [];
       return {
         content_id:   cid,
         title:        it.title || "",
