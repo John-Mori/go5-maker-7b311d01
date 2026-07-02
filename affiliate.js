@@ -14,12 +14,12 @@
   var TABS = [
     { btn: 'tabRank',    page: 'pageRank'    },
     { btn: 'tabReserve', page: 'pageReserve' },
+    { btn: 'tabVerify', page: 'pageVerify'   },
     { btn: 'tabMovie',  page: 'pageMovie'    },
     { btn: 'tabCal',    page: 'pageCalendar' },
     { btn: 'tabYT',     page: 'pageYouTube'  },
     { btn: 'tabPost',   page: 'pagePost'     },
     { btn: 'tabAffi',   page: 'pageAffi'     },
-    { btn: 'tabVerify', page: 'pageVerify'   },
     { btn: 'tabSettings', page: 'pageSettings' }
   ];
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む（遅延ロード）。
@@ -35,6 +35,8 @@
       p.hidden = !on;
       b.classList.toggle('active', on);
     });
+    // 現在タブをCSSへ通知（ランキングタブだけクリーム背景＋金文字にするフック）。
+    document.documentElement.setAttribute('data-tab', activeBtnId);
     if (activeBtnId === 'tabCal') lazyLoadCalendar();
     if (activeBtnId === 'tabRank'    && window.YtRank)   window.YtRank.renderRank();
     if (activeBtnId === 'tabReserve' && window.Scheduler) window.Scheduler._renderTab();
@@ -43,6 +45,11 @@
     var b = document.getElementById(t.btn);
     if (b) b.addEventListener('click', function () { showTab(t.btn); });
   });
+  // 初期表示中のタブ（HTMLで active になっているもの／既定は動画作成）をCSSへ反映。
+  (function () {
+    var active = TABS.filter(function (t) { var b = document.getElementById(t.btn); return b && b.classList.contains('active'); })[0];
+    document.documentElement.setAttribute('data-tab', active ? active.btn : 'tabMovie');
+  }());
 
   /* ── アフィID永続化 ── */
   const afIdEl = document.getElementById('afId');

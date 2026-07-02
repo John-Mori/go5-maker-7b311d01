@@ -137,18 +137,18 @@
   else setupUI();
 })();
 
-// ---- アカウント別背景色（account-changed CustomEvent 連動）----
+// ---- アカウント別テーマ（account-changed CustomEvent 連動）----
+// 実際の配色は style.css の html[data-account="accX"] 側で定義（背景・アクセント・文字を
+// 各タブ/文字/ボタンへCSS変数で一括反映）。ここでは data-account 属性の付け替えだけ行う。
+// ※インラインで --app-bg を設定しない＝ランキングタブ(html[data-tab])のクリーム上書きが効くようにする。
 (function () {
-  var ACCOUNT_BG = { acc1: '#3B2E5C', acc2: '#3D1830' }; // acc1=月詠み＝上品な紫 / acc2=宵桜＝ワイン
-  function applyAccountBg(id) {
-    document.documentElement.style.setProperty('--app-bg', ACCOUNT_BG[id] || ACCOUNT_BG.acc1);
-    // アカウント別のボタン配色などをCSSで出し分けるためのフック。
+  function applyAccount(id) {
     document.documentElement.setAttribute('data-account', (id === 'acc2') ? 'acc2' : 'acc1');
   }
   document.addEventListener('account-changed', function (e) {
-    applyAccountBg(e.detail && e.detail.id);
+    applyAccount(e.detail && e.detail.id);
   });
   var initId = 'acc1';
   try { initId = localStorage.getItem('current_account') || 'acc1'; } catch (e) {}
-  applyAccountBg(initId);
+  applyAccount(initId);
 }());

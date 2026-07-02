@@ -4,6 +4,21 @@
   /* 編集ボタン（Qセーブ等）の色。詳細設定タブで上書き保存される（theme-settings.js が :root に設定）。 */
   --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#546e7a; --qbtn-redo:#0891b2;
 }
+/* ── アカウント別テーマ（data-account は theme-settings.js が html に付与）。
+   背景・アクセント・文字色を CSS 変数で定義し、各タブ/文字/ボタンへ一括反映する。 ── */
+html[data-account="acc1"]{           /* 月詠み色恋劇場：深い紫 × 金 */
+  --app-bg:#241a3d; --card:#2c2148; --line:#463864;
+  --accent:#ecc86a; --accent2:#d98fb0; --ink:#f2edfb; --sub:#b9abd4;
+}
+html[data-account="acc2"]{           /* 宵桜艶帖：ワイン × 桜ピンク */
+  --app-bg:#2e1224; --card:#381630; --line:#57294a;
+  --accent:#ff85ac; --accent2:#ffce9a; --ink:#fbeef4; --sub:#d6abc0;
+}
+/* ── ランキングタブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
+html[data-tab="tabRank"]{
+  --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
+  --accent:#b8860b; --accent2:#a86b1f; --ink:#4b3f2c; --sub:#8a7a5c;
+}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:var(--app-bg,var(--bg));color:var(--ink);
   font-family:"Noto Sans JP",system-ui,sans-serif;transition:background-color .25s ease;}
@@ -268,6 +283,16 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .rank-title{font-size:14px;font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .rank-title-link{color:var(--ink);text-decoration:none;}
 .rank-title-link:hover{text-decoration:underline;}
+/* ランキングの文字（順位・作品名）は金色で光沢感のある色に固定＝アカウントに依存しない。 */
+#pageRank .rank-num,
+#pageRank .rank-title,
+#pageRank .rank-title-link{
+  background:linear-gradient(180deg,#fff6cf 0%,#f7db83 34%,#c9971f 52%,#f2d474 66%,#fff3c4 100%);
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  filter:drop-shadow(0 1px 0 rgba(120,80,10,.28));
+}
+#pageRank .rank-title-link:hover{filter:drop-shadow(0 1px 0 rgba(120,80,10,.28)) brightness(1.08);}
 .rank-metrics{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--sub);margin-top:3px;flex-wrap:wrap;}
 .rsv-tab-row{display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;}
 .rsv-tab-row:last-child{border-bottom:none;}
