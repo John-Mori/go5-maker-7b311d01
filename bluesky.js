@@ -859,14 +859,15 @@
   function updateMovieWorkLink(url) {
     var el = document.getElementById('movieWorkLink');
     if (!el) return;
-    if (url) { el.href = url; el.textContent = url; }
-    else { el.href = '#'; el.textContent = '（URLを入力してください）'; }
+    // 空のときは href を外して「ただのテキスト」にする（# へのページ移動を防ぐ＝リンクとして見せない）。
+    if (url) { el.href = url; el.textContent = url; el.style.color = 'var(--accent)'; }
+    else { el.removeAttribute('href'); el.textContent = '（URLを入力してください）'; el.style.color = 'var(--sub)'; }
   }
   function updateBskyWorkLink(url) {
     var el = document.getElementById('bskyWorkLink');
     if (!el) return;
     if (url) { el.href = url; el.textContent = url; el.style.color = 'var(--accent)'; }
-    else { el.href = '#'; el.textContent = '（URLを入力してください）'; el.style.color = 'var(--sub)'; }
+    else { el.removeAttribute('href'); el.textContent = '（URLを入力してください）'; el.style.color = 'var(--sub)'; }
   }
   function updateBskyWorkAffiPreview(url) {
     var el = document.getElementById('bskyWorkAffiPreview');

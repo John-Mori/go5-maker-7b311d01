@@ -1001,7 +1001,7 @@
   function fmtSnapPriceHtml(p) {
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
-      return '定価:' + yen_(p.listPrice) + ' セール価格:' + yen_(p.price) + ' <span class="fp-snap-off">' + p.discountPct + '%off</span>';
+      return '定価:<span class="fp-snap-list">' + yen_(p.listPrice) + '</span> セール価格:' + yen_(p.price) + ' <span class="fp-snap-off">' + p.discountPct + '%off</span>';
     }
     return '定価:' + yen_(p.price);
   }

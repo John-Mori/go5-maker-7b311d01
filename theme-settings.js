@@ -142,6 +142,8 @@
   var ACCOUNT_BG = { acc1: '#3B2E5C', acc2: '#3D1830' }; // acc1=月詠み＝上品な紫 / acc2=宵桜＝ワイン
   function applyAccountBg(id) {
     document.documentElement.style.setProperty('--app-bg', ACCOUNT_BG[id] || ACCOUNT_BG.acc1);
+    // アカウント別のボタン配色などをCSSで出し分けるためのフック。
+    document.documentElement.setAttribute('data-account', (id === 'acc2') ? 'acc2' : 'acc1');
   }
   document.addEventListener('account-changed', function (e) {
     applyAccountBg(e.detail && e.detail.id);
