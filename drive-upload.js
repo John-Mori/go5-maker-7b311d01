@@ -115,16 +115,16 @@
       });
   }
 
-  // Bluesky投稿成功時：実際に添付した画像を同じ動画フォルダへ保存（bluesky.jsが発火）。
+  // Bluesky投稿成功時：実際に添付した画像を同じ動画フォルダへ「動画名_Bsky投稿.拡張子」で保存（bluesky.jsが発火）。
+  // ※元写真と同一でも必ず保存する（ユーザー要望：投稿した画像そのものを _Bsky投稿 名で残す）。
   document.addEventListener("bsky-image-posted", function (e) {
     if (!configured()) return;
     var d = (e && e.detail) || {};
     var f = d.file;
-    if (!f || !d.videoId || d.videoId !== lastCtx.videoId) return;
-    // 元写真そのもの（同じFileオブジェクト）なら video-created 時に「タイトル.拡張子」で保存済み＝重複保存しない。
-    var photo = document.getElementById("photo");
-    if (photo && photo.files && photo.files[0] === f) return;
-    var named = new File([f], lastCtx.title + "_Bsky." + imgExt(f), { type: f.type || "image/jpeg" });
+    if (!f) return;
+    // videoId が分かるならフォルダ取り違え防止に照合。空同士でも動く（従来通り）。
+    if (d.videoId && lastCtx.videoId && d.videoId !== lastCtx.videoId) return;
+    var named = new File([f], lastCtx.title + "_Bsky投稿." + imgExt(f), { type: f.type || "image/jpeg" });
     if (lastCtx.folderId) sendAppend(named, 0);
     else lastCtx.queuedImage = named; // 動画アップロード完了(フォルダ確定)待ち → 完了時に自動送信
   });
@@ -175,13 +175,12 @@
     var pf = (photo && photo.files && photo.files[0]) ? photo.files[0] : null;
     if (pf) origImage = new File([pf], title + "." + imgExt(pf), { type: pf.type || "image/jpeg" });
 
-    // 🦋タブで追加画像が選ばれていれば、Drive にも「タイトル_Bsky.拡張子」として保存。
-    var bskyExtraFile = window.BskyExtra && window.BskyExtra.getFile && window.BskyExtra.getFile();
-    var bskyImage = bskyExtraFile ? new File([bskyExtraFile], title + '_Bsky.' + imgExt(bskyExtraFile), { type: bskyExtraFile.type || 'image/jpeg' }) : null;
+    // ※Bsky添付画像は「実際に投稿した画像」を投稿成功時に bsky-image-posted で後追い保存する
+    //   （動画名_Bsky投稿.拡張子）。ここでは動画・プレビュー・元写真のみ保存する。
 
     function finish(previewImage) {
       // プレビューを先頭に＝旧Worker（先頭1枚のみ保存）でも仕上がりプレビューは残る。新Workerは両方保存。
-      send({ channel: channel, title: title, videoId: d.videoId || "", videoFile: videoFile, images: [previewImage, origImage, bskyImage].filter(Boolean) });
+      send({ channel: channel, title: title, videoId: d.videoId || "", videoFile: videoFile, images: [previewImage, origImage].filter(Boolean) });
     }
 
     // 仕上がりプレビュー（合成済み Canvas #cv＝1080×1920）を PNG「タイトル_プレビュー.png」で保存（文字が鮮明）。
