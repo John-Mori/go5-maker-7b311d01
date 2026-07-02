@@ -48,12 +48,17 @@ export default {
     const title = String(form.get("title") || "").trim();
     const video = form.get("video");
     const images = form.getAll("image"); // 複数可（元写真＋仕上がりプレビュー など）
+    // 追記モード：既存の[動画名]フォルダへ画像だけ後追い保存（Bsky添付画像用）。
+    const appendFolderId = String(form.get("folderId") || "").trim();
 
     // ---- チャンネル判定（曖昧なら保存しない＝取り違え事故より保存しないを優先）----
     const parentId = channelToFolderId(channel, env);
     if (!parentId) return json({ ok: false, error: "channel_unresolved", channel }, 400, cors);
     if (!title) return json({ ok: false, error: "missing_title" }, 400, cors);
-    if (!(video && typeof video.arrayBuffer === "function")) {
+    if (appendFolderId && !/^[A-Za-z0-9_-]{10,80}$/.test(appendFolderId)) {
+      return json({ ok: false, error: "bad_folder_id" }, 400, cors);
+    }
+    if (!appendFolderId && !(video && typeof video.arrayBuffer === "function")) {
       return json({ ok: false, error: "missing_video" }, 400, cors);
     }
 
@@ -65,6 +70,27 @@ export default {
     // ---- 親（チャンネル）フォルダの存在確認（read-only）。無ければ保存しない ----
     const parent = await getFolder(parentId, token);
     if (!parent) return json({ ok: false, error: "parent_folder_not_found", parentId }, 400, cors);
+
+    // ---- 追記モード：指定フォルダが「このチャンネル親の直下」であることを検証してから画像を追加 ----
+    if (appendFolderId) {
+      const child = await getFolderMeta(appendFolderId, token);
+      if (!child || child.trashed || !(child.parents || []).includes(parentId)) {
+        return json({ ok: false, error: "folder_not_found" }, 400, cors);
+      }
+      const added = [];
+      try {
+        for (const image of images) {
+          if (!(image && typeof image.arrayBuffer === "function")) continue;
+          const fallback = "image." + (extOf(image.type) || "jpg");
+          const iname = await uniqueFileName(appendFolderId, safeName(image.name || fallback), token);
+          added.push(await uploadNew(appendFolderId, iname, image, token));
+        }
+      } catch (e) {
+        return json({ ok: false, error: "upload_failed", folderId: appendFolderId }, 502, cors);
+      }
+      if (!added.length) return json({ ok: false, error: "missing_image" }, 400, cors);
+      return json({ ok: true, appended: true, folderId: appendFolderId, files: added.map((f) => ({ id: f.id, name: f.name })) }, 200, cors);
+    }
 
     // ---- [動画名]フォルダを衝突回避で新規作成（既存には触れない）----
     const baseName = safeName(title);
@@ -141,6 +167,15 @@ async function getFolder(id, token) {
   if (!r.ok) return null;
   const j = await r.json();
   return j && j.id ? j : null;
+}
+
+// 追記モード用：フォルダのメタ（親・ゴミ箱状態つき）。存在しなければ null。
+async function getFolderMeta(id, token) {
+  const url = DRIVE_API + "/" + encodeURIComponent(id) + "?fields=id,name,mimeType,parents,trashed&supportsAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) return null;
+  const j = await r.json();
+  return (j && j.id && j.mimeType === "application/vnd.google-apps.folder") ? j : null;
 }
 
 async function childFolderExists(parentId, name, token) {

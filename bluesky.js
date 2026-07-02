@@ -938,6 +938,9 @@
       if (els.pcImgClear) els.pcImgClear.style.display = 'none';
       if (els.pcImgPreview) { els.pcImgPreview.src = ''; els.pcImgPreview.style.display = 'none'; }
       updateWorkWarn();
+      // 背後の入力欄のフォーカスを外してから表示（iOSでカーソル(キャレット)がモーダル上に
+      // 浮いて見える・変な位置で点滅する問題の対策）。
+      try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
       els.pcModal.hidden = false;
 
       function onWork() { recompose(); }
@@ -1054,7 +1057,14 @@
         : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
       imgPrep
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
-        .then(function (res) { setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '・記録しました' : '')); notifyPosted(res, edited, alt); })
+        .then(function (res) {
+          setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '・記録しました' : ''));
+          notifyPosted(res, edited, alt);
+          // 実際に添付した画像を Drive の同じ動画フォルダへ後追い保存（drive-upload.js が購読）。
+          try {
+            if (imgFile) document.dispatchEvent(new CustomEvent('bsky-image-posted', { detail: { file: imgFile, title: (ev && ev.detail && ev.detail.title) || '', videoId: (ev && ev.detail && ev.detail.videoId) || '' } }));
+          } catch (e2) {}
+        })
         .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); });
     });
   }
@@ -1064,20 +1074,8 @@
     var d = (e && e.detail) || {};
     if (d.videoId) currentVideoId = d.videoId;
   });
-  // Bsky添付画像を動画と同じ場所に「タイトル_Bsky.拡張子」で自動ダウンロード。
-  // 投稿タブで画像選択あり → そのファイル。なければ自動投稿ON時の元写真を使う。
-  document.addEventListener('video-created', function (e) {
-    var imgFile = selectedPostFile || ((els.enable && els.enable.checked) ? photoFile() : null);
-    if (!imgFile) return;
-    var d = (e && e.detail) || {};
-    var base = (d.title || lastTitle || '').replace(/[\\/:*?"<>|]/g, '').trim() || 'image';
-    var ext = (imgFile.name.split('.').pop() || 'jpg').toLowerCase();
-    var url = URL.createObjectURL(imgFile);
-    var a = document.createElement('a');
-    a.href = url; a.download = base + '_Bsky.' + ext;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
-  });
+  // ※旧「Bsky添付画像を自動ダウンロード」は廃止（iPhoneで毎回『ダウンロードしますか？』が
+  //   出て邪魔＆Drive保存と干渉するため）。添付画像は投稿成功時に Drive へ保存する（drive-upload.js）。
 
   if (els.shortUrlCopy) els.shortUrlCopy.addEventListener('click', function () { if (lastShortUrl) copyText(lastShortUrl, els.shortUrlCopy); });
   if (els.ytCopy) els.ytCopy.addEventListener('click', function () { if (els.ytDesc) copyText(els.ytDesc.value, els.ytCopy); });

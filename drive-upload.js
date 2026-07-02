@@ -47,11 +47,17 @@
     return id === "acc1" ? "月詠み色恋劇場" : id === "acc2" ? "宵桜艶帖" : "";
   }
 
-  var lastPayload = null; // リトライ用（メモリのみ）
+  var lastPayload = null; // 手動リトライ用（メモリのみ）
+  // 直近アップロードの文脈：Bsky添付画像を「同じ動画フォルダ」へ後追い保存するために保持。
+  var lastCtx = { videoId: "", title: "", channel: "", folderId: "", queuedImage: null };
 
-  function send(payload) {
+  // 一時的な失敗(通信・アップロード失敗)は自動でリトライ（2.5秒→6秒の2回）。
+  // 設定系エラー(認証・チャンネル不明・上限)はリトライしても無駄なので即エラー表示。
+  var RETRYABLE = { network: 1, upload_failed: 1, folder_create_failed: 1, auth_failed: 1 };
+  function send(payload, attempt) {
+    attempt = attempt || 0;
     lastPayload = payload;
-    setStatus("☁️ Driveへ保存中…（" + channelLabel(payload.channel) + "）");
+    setStatus("☁️ Driveへ保存中…（" + channelLabel(payload.channel) + "）" + (attempt ? "（再試行 " + attempt + "/2）" : ""));
 
     var fd = new FormData();
     fd.append("channel", payload.channel);
@@ -70,13 +76,58 @@
           var link = res.j.folderLink || "#";
           setStatus('✅ Driveに保存しました（' + channelLabel(payload.channel) + '） ' +
             '<a href="' + link + '" target="_blank" rel="noopener">フォルダを開く</a>');
+          // フォルダIDを控える＝Bsky添付画像の後追い保存先。待ち画像があれば今すぐ送る。
+          if (payload.videoId && payload.videoId === lastCtx.videoId) {
+            lastCtx.folderId = res.j.folderId || "";
+            if (lastCtx.queuedImage && lastCtx.folderId) { var q = lastCtx.queuedImage; lastCtx.queuedImage = null; sendAppend(q, 0); }
+          }
         } else {
-          var code = (res.j && res.j.error) || ("http_" + (res.j ? "" : "error"));
-          showError(code);
+          var code = (res.j && res.j.error) || "network";
+          if (RETRYABLE[code] && attempt < 2) setTimeout(function () { send(payload, attempt + 1); }, attempt === 0 ? 2500 : 6000);
+          else showError(code);
         }
       })
-      .catch(function () { showError("network"); });
+      .catch(function () {
+        if (attempt < 2) setTimeout(function () { send(payload, attempt + 1); }, attempt === 0 ? 2500 : 6000);
+        else showError("network");
+      });
   }
+
+  // Bsky添付画像を「既存の動画フォルダ」へ追記保存（folderId指定）。こちらも自動リトライ。
+  function sendAppend(img, attempt) {
+    attempt = attempt || 0;
+    if (!lastCtx.folderId) return;
+    var fd = new FormData();
+    fd.append("channel", lastCtx.channel);
+    fd.append("title", lastCtx.title);
+    fd.append("folderId", lastCtx.folderId);
+    fd.append("image", img, img.name);
+    fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (res.ok && res.j && res.j.ok) setStatus('✅ Bsky添付画像もDriveの同フォルダへ保存しました。');
+        else if (attempt < 2) setTimeout(function () { sendAppend(img, attempt + 1); }, 2500);
+        else setStatus('⚠️ Bsky添付画像のDrive保存に失敗しました（動画は保存済み）。');
+      })
+      .catch(function () {
+        if (attempt < 2) setTimeout(function () { sendAppend(img, attempt + 1); }, 2500);
+        else setStatus('⚠️ Bsky添付画像のDrive保存に失敗しました（動画は保存済み）。');
+      });
+  }
+
+  // Bluesky投稿成功時：実際に添付した画像を同じ動画フォルダへ保存（bluesky.jsが発火）。
+  document.addEventListener("bsky-image-posted", function (e) {
+    if (!configured()) return;
+    var d = (e && e.detail) || {};
+    var f = d.file;
+    if (!f || !d.videoId || d.videoId !== lastCtx.videoId) return;
+    // 元写真そのもの（同じFileオブジェクト）なら video-created 時に「タイトル.拡張子」で保存済み＝重複保存しない。
+    var photo = document.getElementById("photo");
+    if (photo && photo.files && photo.files[0] === f) return;
+    var named = new File([f], lastCtx.title + "_Bsky." + imgExt(f), { type: f.type || "image/jpeg" });
+    if (lastCtx.folderId) sendAppend(named, 0);
+    else lastCtx.queuedImage = named; // 動画アップロード完了(フォルダ確定)待ち → 完了時に自動送信
+  });
 
   function showError(code) {
     var msg = {
@@ -113,6 +164,9 @@
     var channel = (typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "";
     if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
 
+    // Bsky添付画像の後追い保存用に、この動画の文脈を控える（フォルダIDは保存成功時に確定）。
+    lastCtx = { videoId: d.videoId || "", title: title, channel: channel, folderId: "", queuedImage: null };
+
     var videoFile = new File([blob], name, { type: blob.type || "video/mp4" });
 
     // 元写真（あれば）。形式はそのまま＝再エンコードせず原本を保持し、名前だけ「タイトル.元拡張子」に。
@@ -127,7 +181,7 @@
 
     function finish(previewImage) {
       // プレビューを先頭に＝旧Worker（先頭1枚のみ保存）でも仕上がりプレビューは残る。新Workerは両方保存。
-      send({ channel: channel, title: title, videoFile: videoFile, images: [previewImage, origImage, bskyImage].filter(Boolean) });
+      send({ channel: channel, title: title, videoId: d.videoId || "", videoFile: videoFile, images: [previewImage, origImage, bskyImage].filter(Boolean) });
     }
 
     // 仕上がりプレビュー（合成済み Canvas #cv＝1080×1920）を PNG「タイトル_プレビュー.png」で保存（文字が鮮明）。
