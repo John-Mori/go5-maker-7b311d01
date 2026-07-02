@@ -26,7 +26,10 @@
     { key: 'chara', label: 'キャラ' },
     { key: 'jk', label: 'JK' },
     { key: 'gyaru', label: 'ギャル' },
-    { key: 'isekai', label: '異世界' }
+    { key: 'isekai', label: '異世界' },
+    { key: 'ai', label: 'AI' },
+    { key: 'ol', label: 'OL' },
+    { key: 'soshu', label: '総集編' }
   ];
   var COMMON_TAGS = ['#マンガ紹介', '#漫画', '#アニメ', '#anime'];
   function stripCommonTags(t) {
@@ -459,7 +462,7 @@
         (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
-          '<span title="Bsky投稿クリック数">🔗 ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
+          '<span title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
           '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
           (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
           (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
@@ -1410,7 +1413,26 @@
     fillFanzaNames(true);   // 進捗・完了を表示しつつ取得（進行中の自動取得があっても乗っ取る）
   }
 
-  // ── ランキングタブ（両アカウント合算・再生数順）──────────────────────────────
+  // ランキングの表示モード（総合再生数 / クリック数 / 投稿約2時間の再生数）。
+  var _rankMode = (function () { try { return localStorage.getItem('rank_mode') || 'views'; } catch (e) { return 'views'; } })();
+  // 「投稿からおよそ2時間時点の再生数」＝早期の伸び。過去分は記録が無いので取得できたぶんだけ
+  //   going-forwardで自動記録（age>=2hで初観測した再生数を固定保存）。vid -> {v, ageH}
+  var early2hCache = (function () { try { return JSON.parse(localStorage.getItem('early2h_cache') || '{}') || {}; } catch (e) { return {}; } })();
+  function early2hPersist_() { try { localStorage.setItem('early2h_cache', JSON.stringify(early2hCache)); } catch (e) {} }
+  function captureEarly2h_() {
+    var now = new Date().getTime(), changed = false;
+    Object.keys(viewsCache).forEach(function (vid) {
+      var pub = publishedCache[vid];
+      if (!pub || viewsCache[vid] == null || early2hCache[vid]) return;
+      var ageH = (now - pub) / 3600000;
+      // 2〜4hの窓で初観測できたものだけを「約2時間の再生数」として記録。
+      // 過去投稿(初観測が既に4h超)は誤記録になるので対象外＝「未記録」のまま（指標の意味を守る）。
+      if (ageH >= 2 && ageH <= 4) { early2hCache[vid] = { v: viewsCache[vid], ageH: Math.round(ageH * 10) / 10 }; changed = true; }
+    });
+    if (changed) early2hPersist_();
+  }
+
+  // ── ランキングタブ（両アカウント合算・3モード切替）──────────────────────────────
   function renderRank() {
     var el = $('pageRank');
     if (!el) return;
@@ -1452,34 +1474,53 @@
       } catch (e) { return ''; }
     }
 
+    var RANK_MODES = [
+      { key: 'views', label: '総合(再生数)' },
+      { key: 'clicks', label: 'クリック数' },
+      { key: 'early', label: '2時間再生数' }
+    ];
+
     function doRender() {
+      captureEarly2h_();
       var rows = uniq.map(function (x) {
         var it = x.it;
+        var code = codeOf(it.shortUrl || '');
+        var e2 = early2hCache[x.vid];
+        var cats = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
         return {
-          vid: x.vid,
-          yt: x.yt,
-          acct: x.acct,
+          vid: x.vid, yt: x.yt, acct: x.acct,
           title: titleCache[x.vid] || it.title || (it.manual ? '(手動追加)' : '(無題)'),
           views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
+          clicks: (code && code in clicksCache) ? clicksCache[code] : null,
+          code: code,
+          early: e2 ? e2.v : null, earlyAge: e2 ? e2.ageH : null,
           ts: it.ts || (publishedCache[x.vid] || 0),
-          bskyHref: it.shortUrl || it.postUrl || '',
-          workUrl: it.workUrl || '',
-          workState: it.workState || '旧作'
+          bskyHref: it.shareUrl || it.shortUrl || it.postUrl || '',
+          workUrl: it.workUrl || '', workState: it.workState || '旧作', cats: cats
         };
       });
+      var metric = _rankMode === 'clicks' ? 'clicks' : (_rankMode === 'early' ? 'early' : 'views');
       rows.sort(function (a, b) {
-        if (a.views === null && b.views === null) return 0;
-        if (a.views === null) return 1;
-        if (b.views === null) return -1;
-        return b.views - a.views;
+        var av = a[metric], bv = b[metric];
+        if (av == null && bv == null) return (b.views || 0) - (a.views || 0); // 値なし同士は再生数で
+        if (av == null) return 1; if (bv == null) return -1;
+        return bv - av;
       });
-      el.innerHTML = '<div class="rank-list">' +
+      var tabsHtml = '<div class="rank-tabs">' + RANK_MODES.map(function (m) {
+        return '<button class="rank-tab' + (m.key === _rankMode ? ' active' : '') + '" data-mode="' + m.key + '" type="button">' + m.label + '</button>';
+      }).join('') + '</div>';
+      var noteHtml = _rankMode === 'early' ? '<div class="rank-note">投稿からおよそ2時間時点の再生数（自動記録・この機能導入後の投稿が対象。「(◯h時点)」は実記録時刻）。</div>' : '';
+      el.innerHTML = tabsHtml + noteHtml + '<div class="rank-list">' +
         rows.map(function (r, i) {
           var rank = i + 1;
           var topCls = rank <= 3 ? ' rank-top' + rank : '';
           var dispTitle = esc(stripCommonTags(r.title));
           var dateStr = fmtTsFull(r.ts);
           var acctLabel = ACCT_NAME[r.acct] || r.acct;
+          // 指標スパン（並びの中でソート対象を rank-main で強調。views/clicksは常時、earlyはearlyモード時のみ）
+          var mViews = '<span class="' + (metric === 'views' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
+          var mClicks = '<span class="' + (metric === 'clicks' ? 'rank-main' : '') + '" title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
+          var mEarly = metric === 'early' ? '<span class="rank-main" title="投稿約2時間の再生数">⏱ ' + (r.early != null ? num(r.early) + (r.earlyAge != null ? '<span class="rank-sub">(' + r.earlyAge + 'h時点)</span>' : '') : '未記録') + '</span>' : '';
           return '<div class="rank-row' + topCls + '">' +
             '<span class="rank-num">' + rank + '</span>' +
             '<div class="rank-info">' +
@@ -1495,40 +1536,51 @@
                 '<span class="fp-state-slot"' + (r.workUrl ? ' data-fanza-state-url="' + esc(r.workUrl) + '"' : '') + '>' + stateBadgeHtml_(r.workState) + '</span>' +
                 (r.workUrl ? '<span class="fanza-price" data-fanza-price-url="' + esc(r.workUrl) + '" style="display:none;"></span>' : '') +
               '</div>' +
-              '<div class="rank-metrics">' +
-                '<span>▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>' +
-                (r.bskyHref ? '<a class="vlink" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
+              (r.cats ? '<div class="vrow-tags">' + r.cats + '</div>' : '') +
+              '<div class="vmetrics">' +
+                mEarly + mViews + mClicks +
+                (r.bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
+                (r.yt ? '<a class="vlink vlink-yt" href="' + esc(r.yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
                 (r.workUrl ? '<a class="vlink vlink-work" href="' + esc(r.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
               '</div>' +
             '</div>' +
           '</div>';
         }).join('') +
       '</div>';
+      // サブタブ配線
+      el.querySelectorAll('.rank-tab').forEach(function (b) {
+        b.addEventListener('click', function () {
+          _rankMode = b.getAttribute('data-mode');
+          try { localStorage.setItem('rank_mode', _rankMode); } catch (e) {}
+          doRender();
+        });
+      });
       applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示
       fillFanzaNames();
     }
 
-    // キャッシュにない vid だけ API フェッチ（最大 50 件ずつ）
-    var missing = uniq.map(function (x) { return x.vid; }).filter(function (v) { return !(v in viewsCache); });
-    if (missing.length) {
-      el.innerHTML = '<p style="color:var(--sub);font-size:13px;padding:8px 14px;">再生数を取得中…</p>';
-      // 50件ずつバッチに分割して並列フェッチ
-      var batches = [];
-      for (var i = 0; i < missing.length; i += 50) { batches.push(missing.slice(i, i + 50)); }
-      Promise.all(batches.map(function (b) { return fetchVideos(b); })).then(function (results) {
-        results.forEach(function (m) {
-          var err = m.__error || ''; delete m.__error;
-          if (err && !lastErr) lastErr = err;
+    // 再生数・クリック数のうちキャッシュに無いものを取得してから描画。
+    var missingV = uniq.map(function (x) { return x.vid; }).filter(function (v) { return !(v in viewsCache); });
+    var missingC = uniq.map(function (x) { return codeOf(x.it.shortUrl || ''); }).filter(function (c) { return c && !(c in clicksCache); });
+    if (missingV.length || missingC.length) {
+      el.innerHTML = '<p style="color:var(--sub);font-size:13px;padding:8px 14px;">再生数・クリック数を取得中…</p>';
+      var jobs = [];
+      var vbatches = [];
+      for (var i = 0; i < missingV.length; i += 50) { vbatches.push(missingV.slice(i, i + 50)); }
+      vbatches.forEach(function (b) {
+        jobs.push(fetchVideos(b).then(function (m) {
+          var err = m.__error || ''; delete m.__error; if (err && !lastErr) lastErr = err;
           Object.keys(m).forEach(function (id) {
             var rec = m[id] || {};
             if (rec.views != null) viewsCache[id] = rec.views;
             if (rec.published != null) publishedCache[id] = rec.published;
             if (rec.title) titleCache[id] = rec.title;
           });
-          ytMetaPersist(m); // 永続化（リロードで消えない）
-        });
-        doRender();
+          ytMetaPersist(m);
+        }));
       });
+      missingC.forEach(function (code) { jobs.push(fetchClicks(code).then(function (c) { if (c != null) clicksCache[code] = c; })); });
+      Promise.all(jobs).then(function () { clicksPersist_(); doRender(); });
     } else {
       doRender();
     }

@@ -46,7 +46,10 @@ var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
   { key: 'jk', label: 'JK' },
   { key: 'gyaru', label: 'ギャル' },
-  { key: 'isekai', label: '異世界' }
+  { key: 'isekai', label: '異世界' },
+  { key: 'ai', label: 'AI' },
+  { key: 'ol', label: 'OL' },
+  { key: 'soshu', label: '総集編' }
 ];
 function attrTrue_(v) { return v === true || v === 'true' || v === '○' || v === 1 || v === '1'; }
 function attrProvided_(f) {
@@ -71,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-02D（端末間 設定同期 settings_push/pull/meta を追加＝鍵以外を端末間共有）';
+var GAS_VERSION = '2026-07-02E（カテゴリ属性に AI/OL/総集編 を追加）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -321,7 +324,7 @@ function doPost(e) {
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
       shareUrl: body.shareUrl || '',       // da.gd共有URL（共有URL列）
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
-      chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, // カテゴリ属性（複数可）
+      chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性（複数可）
       workState: body.workState,           // 作品状態（新作/準新作/旧作）
       fanza_list_price: body.fanza_list_price, fanza_price: body.fanza_price,
       fanza_discount_pct: body.fanza_discount_pct, fanza_fetched_at: body.fanza_fetched_at || '',
@@ -474,7 +477,7 @@ function syncHistory_(channel, items) {
         workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '', shareUrl: it.shareUrl || '',
         youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '',
         views: it.views, clicks: it.clicks,
-        chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, // カテゴリ属性（複数可）
+        chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, ai: it.ai, ol: it.ol, soshu: it.soshu, // カテゴリ属性（複数可）
         workState: it.workState,           // 作品状態（新作/準新作/旧作）
         postedAt: it.postedAt || '',
         noShorten: true, noSort: true   // 同期は短縮API呼ばず・並べ替えは最後にまとめて

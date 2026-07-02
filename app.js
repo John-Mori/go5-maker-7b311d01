@@ -85,18 +85,19 @@
   const theme = () => THEME[curAccount] || THEME.acc1;
 
   // 文字本体の描画（テーマ依存）。acc1＝黒縁＋白、acc2＝桜ピンク2層グロー＋温白の芯。
-  function paintGlyph(ln, x, y, px, sw) {
+  function paintGlyph(ln, x, y, px, sw, shadowScale) {
     const t = theme();
+    var ss = shadowScale || 1;  // 影のスケール（大タイトル拡大に連動。既定=1）
     if (t.soft) {
       // acc1：淡金のごく弱いグロー＋可読性用の暗い影（参考: 0 0 6px rgba(245,230,184,.15), 0 1px 2px rgba(0,0,0,.5)）。
       // px固定値はU()で基準フレームへ換算（CSSの6/1/2px相当）。黒い太縁は使わない。
       ctx.save();
       ctx.fillStyle = t.textFill;
-      // 暗い影（0 1px 2px rgba(0,0,0,.5)）
-      ctx.shadowColor = t.darkShadow; ctx.shadowBlur = U(2); ctx.shadowOffsetX = 0; ctx.shadowOffsetY = U(1);
+      // 暗い影（0 1px 2px rgba(0,0,0,.5)）※大タイトル拡大時は同率で拡大
+      ctx.shadowColor = t.darkShadow; ctx.shadowBlur = U(2) * ss; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = U(1) * ss;
       ctx.fillText(ln, x, y);
-      // 淡金のグロー（0 0 6px rgba(245,230,184,.15)）
-      ctx.shadowColor = t.glowSoft; ctx.shadowBlur = U(6); ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+      // 淡金のグロー（0 0 6px rgba(245,230,184,.15)）※同率で拡大
+      ctx.shadowColor = t.glowSoft; ctx.shadowBlur = U(6) * ss; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
       ctx.fillText(ln, x, y);
       ctx.restore();
       ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // 影なしの芯（くっきり）
@@ -175,7 +176,7 @@
 
   // 通常テキストブロック（中央寄せ・帯・白文字＋黒縁）。
   // bandOff＝この段の帯だけ／textOff＝この段の文字だけ の縦オフセット比（互いに独立）。
-  function drawBlock(lines, y, px, pad, gap, bandAlpha, bandOff, textOff) {
+  function drawBlock(lines, y, px, pad, gap, bandAlpha, bandOff, textOff, shadowScale) {
     setFont(px, 700);
     ctx.textBaseline = "top";
     const sw = Math.max(U(2), px / 12);
@@ -190,7 +191,7 @@
       ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
       roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
       ctx.fill();
-      paintGlyph(ln, x, y + txtY, px, sw);
+      paintGlyph(ln, x, y + txtY, px, sw, shadowScale);
       y += th + pad + gap;  // 送りは基準位置のまま（文字オフセットの影響を受けない＝他段に波及しない）
     }
     return y;
@@ -265,7 +266,7 @@
 
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
-    const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048 * (OFF.titleScale || 1));
+    const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048);
     const padExtra = H * OFF.bandPad;   // 黒帯の余白（厚み）を全段に加算
     const rowGap = H * OFF.rowGap;      // 段と段の間に足す縦スペース
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
@@ -275,7 +276,14 @@
       y = drawBlock(wrap(author, fA, maxw), y, fA, U(11) + padExtra, U(3), 175, OFF.bandAuthor, OFF.textAuthor) + U(2) + rowGap;
     }
     if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.bandDetail, OFF.textDetail) + U(4) + rowGap;
-    if (top) { const f = fitOneLine(top, fT, maxw, U(14)); y = drawBlock([f.text], y, f.px, U(16) + padExtra, U(6), 195, OFF.bandTitle, OFF.textTitle) + U(4); }
+    if (top) {
+      // まず幅に収まる基準サイズを求め、その上に「大タイトル拡大」を掛ける＝拡大が幅上限で打ち消されない。
+      // 影も同じ倍率(ss)で拡大（drawBlock→paintGlyphへ伝播）。
+      var tScale = OFF.titleScale || 1;
+      var f = fitOneLine(top, fT, maxw, U(14));
+      var tpx = Math.max(1, Math.round(f.px * tScale));
+      y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.bandTitle, OFF.textTitle, tScale) + U(4);
+    }
   }
 
   // ---- 1フレーム描画 ----

@@ -49,7 +49,7 @@
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
   // 動画作成タブの「カテゴリ」チェック状態を読む（キャラ/JK/ギャル/異世界・複数可・キャラ無し＝オリジナル）。
-  var MOVIE_ATTRS = [['chara', 'movieAttrChara'], ['jk', 'movieAttrJk'], ['gyaru', 'movieAttrGyaru'], ['isekai', 'movieAttrIsekai']];
+  var MOVIE_ATTRS = [['chara', 'movieAttrChara'], ['jk', 'movieAttrJk'], ['gyaru', 'movieAttrGyaru'], ['isekai', 'movieAttrIsekai'], ['ai', 'movieAttrAi'], ['ol', 'movieAttrOl'], ['soshu', 'movieAttrSoshu']];
   function readMovieAttrs() {
     var o = {};
     MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); o[p[0]] = !!(el && el.checked); });
@@ -874,7 +874,7 @@
     var r = window.buildAffiliateLink ? window.buildAffiliateLink(url, afId) : null;
     if (r && r.ok) {
       el.style.color = 'var(--accent)';
-      el.innerHTML = '🔗 ' + escapeHtml(r.link);
+      el.innerHTML = '<img class="emico" src="assets/icons/ic-link.png" alt=""> ' + escapeHtml(r.link);
     } else {
       el.style.color = 'var(--warn, #e53)';
       el.textContent = r ? (r.error === 'no_cid' ? '⚠ 作品IDが見つかりません' : '⚠ URLが不正です') : '';
