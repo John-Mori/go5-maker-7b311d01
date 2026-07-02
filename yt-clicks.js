@@ -133,6 +133,48 @@
     }).catch(function () { return {}; });
   }
 
+  // ── 今日/昨日/直近1週間の再生・クリック増加（GASが毎時サーバー側で記録した差分）──
+  // localStorageに前回値を保持し、開いた瞬間に即表示→GAS取得で最新化。
+  var deltaCache = (function () { try { return JSON.parse(localStorage.getItem('delta_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {tv,yv,wv,tc,yc,wc}
+  var _deltaFetched = false;
+  function gasUrl_() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
+  // JSONP（GASのGETをCORS回避で読む。キャッシュバスターcb付き）。
+  function jsonp_(base, params, cb) {
+    if (!base) { cb(null); return; }
+    var name = '__go5d_' + new Date().getTime() + '_' + Math.floor(Math.random() * 1e6);
+    var s = document.createElement('script'), done = false;
+    function clean() { try { delete window[name]; } catch (e) { window[name] = undefined; } if (s.parentNode) s.parentNode.removeChild(s); }
+    var timer = setTimeout(function () { if (done) return; done = true; clean(); cb(null); }, 20000);
+    window[name] = function (d) { if (done) return; done = true; clearTimeout(timer); clean(); cb(d); };
+    var q = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+    s.src = base + (base.indexOf('?') >= 0 ? '&' : '?') + q + '&cb=' + new Date().getTime() + '&callback=' + name;
+    s.onerror = function () { if (done) return; done = true; clearTimeout(timer); clean(); cb(null); };
+    document.body.appendChild(s);
+  }
+  function fmtDelta_(d) {
+    if (!d) return '';
+    var CI = '<img class="emico" src="assets/icons/ic-link.png" alt="">';
+    function seg(lbl, v, c) { return '<span class="dl-seg"><b>' + lbl + '</b> ▶' + (v == null ? '–' : num(v)) + ' ' + CI + (c == null ? '–' : num(c)) + '</span>'; }
+    return seg('今日', d.tv, d.tc) + seg('昨日', d.yv, d.yc) + seg('週', d.wv, d.wc);
+  }
+  function applyDeltas_() {
+    document.querySelectorAll('[data-delta-vid]').forEach(function (el) {
+      var vid = el.getAttribute('data-delta-vid');
+      el.innerHTML = fmtDelta_(vid && deltaCache[vid]);
+    });
+  }
+  function fetchDeltas_(force) {
+    if (_deltaFetched && !force) { applyDeltas_(); return; }
+    var url = gasUrl_(); if (!url) { applyDeltas_(); return; }
+    jsonp_(url, { action: 'deltas' }, function (res) {
+      if (res && res.ok && res.deltas) {
+        deltaCache = res.deltas; _deltaFetched = true;
+        try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); } catch (e) {}
+      }
+      applyDeltas_();
+    });
+  }
+
   // クリック数キャッシュは localStorage に永続化（リロード直後や取得失敗時に「…」のままに
   // ならず、前回値を即表示→取得成功で最新化。再生数等の yt_meta_cache と同方針）。
   var clicksCache = (function () { try { return JSON.parse(localStorage.getItem('clicks_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> clicks
@@ -469,7 +511,7 @@
           (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
         '</div>' +
         '<div class="vrow-foot">' +
-          '<span class="vrow-foot-gap"></span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + '>' + (vid ? fmtDelta_(deltaCache[vid]) : '') + '</span>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
         '</div>';
@@ -830,8 +872,8 @@
     step();
   }
 
-  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); });
-  var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); });
+  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); fetchDeltas_(); });
+  var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); fetchDeltas_(true); });
   var fd = $('ytFetchDmm'); if (fd) fd.addEventListener('click', refetchFanza_);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
@@ -840,7 +882,7 @@
   // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得（renderだけだと「…」のままになる）。
   document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) refresh(); else render(); });
   // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引の復元（各1回）。
-  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); } }, 2500);
+  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); fetchDeltas_(); } }, 2500);
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。
   var keyEl = $('ytApiKey');

@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-02E（カテゴリ属性に AI/OL/総集編 を追加）';
+var GAS_VERSION = '2026-07-02F（再生数/クリック数の自動スナップショット＝今日/昨日/週の増加。要 setupTrigger 再実行＋YT_API_KEY設定）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -135,6 +135,8 @@ function doGet(e) {
       else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.postUri || '', p.short || '') };
       else if (p.action === 'settings_pull') out = settingsPull_();   // 端末間同期：非秘密設定の取得
       else if (p.action === 'settings_meta') out = settingsMeta_();   // 端末間同期：最終保存メタのみ（状態表示）
+      else if (p.action === 'deltas') out = { ok: true, deltas: computeDeltas_() }; // 今日/昨日/週の再生・クリック増加
+      else if (p.action === 'snapshot_now') { snapshotStats(); out = { ok: true, snapped: true }; } // 手動で即スナップ
       else out = { ok: true, shortUrl: p.postUri ? lookupShortByUri_(ch, p.postUri) : '' }; // 既定＝action=short
     } catch (err) { out = { ok: false, error: String(err) }; }
     return ContentService.createTextOutput(p.callback + '(' + JSON.stringify(out) + ')')
@@ -653,17 +655,137 @@ function refreshEngagement() {
   });
 }
 
+// ============================================================
+// 再生数・クリック数の自動スナップショット（毎時トリガー）＝アプリ未起動でも記録される。
+//   視聴履歴シートに (日付, videoId) 単位で「その日の最新の累計」を upsert。
+//   これを差分計算(computeDeltas_)して 今日/昨日/直近1週間 の増加を出す。
+//   ※再生数取得には Script Property `YT_API_KEY`（アプリ⚙のYouTube APIキーと同値）が必要。
+// ============================================================
+var STATS_SHEET = '視聴履歴';
+var STATS_HEADERS = ['記録日時', '日付', 'channel', 'post_id', 'videoId', '再生数', '短縮URLクリック数'];
+function statsSheet_() {
+  var ss = openSS_();
+  var sh = ss.getSheetByName(STATS_SHEET) || ss.insertSheet(STATS_SHEET);
+  if (sh.getLastRow() === 0) sh.appendRow(STATS_HEADERS);
+  return sh;
+}
+function ytApiKey_() { return prop_('YT_API_KEY') || ''; }
+function ytIdFromUrl_(u) {
+  u = String(u || '');
+  var m = u.match(/[?&]v=([0-9A-Za-z_-]{6,})/) || u.match(/youtu\.be\/([0-9A-Za-z_-]{6,})/) || u.match(/shorts\/([0-9A-Za-z_-]{6,})/);
+  return m ? m[1] : '';
+}
+function ytViews_(ids) {
+  var key = ytApiKey_(), out = {};
+  if (!key || !ids.length) return out;
+  for (var i = 0; i < ids.length; i += 50) {
+    var batch = ids.slice(i, i + 50);
+    try {
+      var u = 'https://www.googleapis.com/youtube/v3/videos?part=statistics&id=' + batch.join(',') + '&key=' + encodeURIComponent(key);
+      var res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
+      if (res.getResponseCode() >= 300) continue;
+      var d = JSON.parse(res.getContentText() || '{}');
+      (d.items || []).forEach(function (it) { if (it && it.id && it.statistics && it.statistics.viewCount != null) out[it.id] = parseInt(it.statistics.viewCount, 10); });
+    } catch (e) {}
+    Utilities.sleep(120);
+  }
+  return out;
+}
+function snapshotStats() {
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var nowStr = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
+  var recs = [];
+  CH_SHEETS.forEach(function (name) {
+    var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
+    var map = headerMap_(sh); var last = sh.getLastRow(); if (last < 2) return;
+    var pidc = map['post_id'], ytc = map['YouTube動画URL'], sc = map['短縮URL'];
+    var chKey = (name === '宵桜艶帖') ? 'acc2' : 'acc1';
+    var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+    vals.forEach(function (row) {
+      var vid = ytc ? ytIdFromUrl_(row[ytc - 1]) : ''; if (!vid) return;
+      var code = sc ? codeFromShort_(row[sc - 1]) : '';
+      recs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code });
+    });
+  });
+  if (!recs.length) return;
+  // 同一videoId(同じ動画を複数投稿・両ch)で重複行を作らないよう vid で1件に正規化（最初の1件＝コード保持）。
+  var seenVid = {}, urecs = [];
+  recs.forEach(function (r) { if (r.vid && !seenVid[r.vid]) { seenVid[r.vid] = 1; urecs.push(r); } });
+  recs = urecs;
+  var vids = recs.map(function (r) { return r.vid; });
+  var views = ytViews_(vids);
+  var clickByCode = {};
+  recs.forEach(function (r) { if (r.code && clickByCode[r.code] === undefined) { clickByCode[r.code] = workerClicks_(r.code); Utilities.sleep(80); } });
+  var sh = statsSheet_(); var last = sh.getLastRow();
+  var data = last >= 2 ? sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues() : [];
+  var idx = {}; for (var i = 0; i < data.length; i++) idx[data[i][1] + '|' + data[i][4]] = i + 2;
+  var appends = [];
+  recs.forEach(function (r) {
+    var v = views[r.vid]; var c = r.code ? clickByCode[r.code] : null;
+    if (v == null && c == null) return;
+    var key = today + '|' + r.vid, rowN = idx[key];
+    if (rowN && rowN > 0) {
+      sh.getRange(rowN, 1).setValue(nowStr);
+      if (v != null) sh.getRange(rowN, 6).setValue(v);
+      if (c != null) sh.getRange(rowN, 7).setValue(c);
+    } else {
+      appends.push([nowStr, today, r.channel, r.post_id, r.vid, v == null ? '' : v, c == null ? '' : c]);
+      idx[key] = -1;
+    }
+  });
+  if (appends.length) sh.getRange(sh.getLastRow() + 1, 1, appends.length, STATS_HEADERS.length).setValues(appends);
+  pruneStats_(sh, 12);
+}
+// 12日より古い履歴行を掃除（週次差分に必要なぶんだけ保持）。
+function pruneStats_(sh, keepDays) {
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var cut = new Date(); cut.setDate(cut.getDate() - keepDays);
+  var cutStr = Utilities.formatDate(cut, tz, 'yyyy-MM-dd');
+  var last = sh.getLastRow(); if (last < 2) return;
+  var dates = sh.getRange(2, 2, last - 1, 1).getValues();
+  for (var i = dates.length - 1; i >= 0; i--) { if (String(dates[i][0]) < cutStr) sh.deleteRow(i + 2); }
+}
+// 視聴履歴から videoId ごとの 今日/昨日/直近1週間 の増加(再生数・クリック数)を算出。
+function computeDeltas_() {
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var sh = statsSheet_(); var last = sh.getLastRow(); if (last < 2) return {};
+  var data = sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues();
+  var byVid = {};
+  data.forEach(function (row) {
+    var date = row[1], vid = row[4]; if (!vid || !date) return;
+    (byVid[vid] || (byVid[vid] = {}))[date] = { v: row[5] === '' ? null : Number(row[5]), c: row[6] === '' ? null : Number(row[6]) };
+  });
+  function dstr(off) { var d = new Date(); d.setDate(d.getDate() + off); return Utilities.formatDate(d, tz, 'yyyy-MM-dd'); }
+  var today = dstr(0), yest = dstr(-1), wk = dstr(-7);
+  var out = {};
+  Object.keys(byVid).forEach(function (vid) {
+    var m = byVid[vid], dates = Object.keys(m).sort();
+    function leOf(ds) { var b = null; for (var i = 0; i < dates.length; i++) if (dates[i] <= ds) b = dates[i]; return b ? m[b] : null; }
+    function ltOf(ds) { var b = null; for (var i = 0; i < dates.length; i++) if (dates[i] < ds) b = dates[i]; return b ? m[b] : null; }
+    var cur = m[today] || m[dates[dates.length - 1]];
+    var st = ltOf(today), sy = ltOf(yest), w7 = leOf(wk);
+    function df(a, b, k) { return (a && b && a[k] != null && b[k] != null) ? (a[k] - b[k]) : null; }
+    out[vid] = {
+      tv: df(cur, st, 'v'), yv: df(st, sy, 'v'), wv: df(cur, w7, 'v'),
+      tc: df(cur, st, 'c'), yc: df(st, sy, 'c'), wc: df(cur, w7, 'c')
+    };
+  });
+  return out;
+}
+
 // 初回1回：毎時トリガーを登録。
-//   refreshClicks＝link-worker 開封数の取り込み（旧Bitly版とは別物・同名で再利用）。
-//   refreshEngagement＝Bluesky反応(いいね/リポスト/返信)。
-//   再実行で既存トリガーを掃除してから貼り直す（旧Bitly版 refreshClicks も消える）。
+//   refreshClicks＝link-worker 開封数の取り込み／refreshEngagement＝Bluesky反応／
+//   snapshotStats＝再生数・クリック数の日次スナップショット（今日/昨日/週の増加算出用）。
+//   再実行で既存トリガーを掃除してから貼り直す。
 function setupTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var f = t.getHandlerFunction();
-    if (f === 'refreshClicks' || f === 'refreshEngagement') ScriptApp.deleteTrigger(t);
+    if (f === 'refreshClicks' || f === 'refreshEngagement' || f === 'snapshotStats') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('refreshEngagement').timeBased().everyHours(1).create();
+  ScriptApp.newTrigger('snapshotStats').timeBased().everyHours(1).create();
 }
 
 // ============================================================
