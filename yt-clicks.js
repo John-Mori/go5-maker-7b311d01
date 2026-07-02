@@ -868,12 +868,17 @@
   function fanzaNameCacheSave(c) {
     try { localStorage.setItem('fanza_title_cache', JSON.stringify(c)); } catch (e) {}
   }
-  // 既存キャッシュから不正タイトル（ログイン/エラーページ等）を一掃する。変更があれば保存。
+  // 既存キャッシュから「ログイン/エラーページ等の“中身のある不正タイトル”」だけを一掃する。
+  // ★空タイトル('')は消さない：negativeキャッシュ(30分)とpartial(画像のみ・1日)は正規の
+  //   キャッシュ。以前ここで空も消していたため、失敗/画像のみ作品はタブを開くたび全件再取得
+  //   になり「速くならない」原因になっていた（isBadFanzaTitle('')===true の巻き添え）。
   function purgeBadFanzaCache() {
     var c = fanzaNameCacheLoad();
     var changed = false;
     Object.keys(c).forEach(function (url) {
-      if (!c[url] || isBadFanzaTitle(c[url].title)) { delete c[url]; changed = true; }
+      if (!c[url]) { delete c[url]; changed = true; return; }
+      var t = c[url].title;
+      if (t && isBadFanzaTitle(t)) { delete c[url]; changed = true; } // 中身のある不正タイトルのみ削除
     });
     if (changed) fanzaNameCacheSave(c);
   }
@@ -1234,28 +1239,38 @@
       var url = nameEl.getAttribute('data-fanza-url');
       if (!url) return;
       var cached = cache[url];
+      var displayed = false; // 既に何か表示したか（「…」で潰さない判定）
       if (cached) {
-        // 有効な題名キャッシュ（旧スキーマ=価格/発売日/画像/サークル名未保存なら再取得して埋める）
-        if (cached.title && !isBadFanzaTitle(cached.title) && (now - (cached.fetchedAt || 0)) < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media && cached.sv === FZ_SV) {
+        var age = now - (cached.fetchedAt || 0);
+        var freshFull = cached.title && !isBadFanzaTitle(cached.title) && age < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media && cached.sv === FZ_SV;
+        var freshPartial = cached.partial && cached.media && cached.sv === FZ_SV && age < DAY;
+        // ★stale-while-revalidate：古い/旧スキーマのキャッシュでも「まず即表示」して待たせない。
+        //   新鮮ならここで確定。古ければ表示は残したまま下のjobsに積んで裏で静かに最新化する。
+        if (cached.title && !isBadFanzaTitle(cached.title)) {
           setFanzaEls(url, cached.title); setFanzaAuthorEls(url, cached.author || '');
-          setFanzaPriceEls(url, cached.priceInfo); backfillSnap_(url, cached.priceInfo);
-          setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall); return;
-        }
-        // 画像のみの部分情報（API未収録作品）：サムネ＋手動入力の作品名/価格を表示（※negative判定より先）
-        if (cached.partial && cached.media && cached.sv === FZ_SV && (now - (cached.fetchedAt || 0)) < DAY) {
+          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo); if (freshFull) backfillSnap_(url, cached.priceInfo); } // 当時価格の固定は新鮮な価格のときだけ（古い価格を投稿時価格にしない）
+          if (cached.media) setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall);
+          displayed = true;
+          if (freshFull) return;
+        } else if (cached.partial && cached.media) {
+          // 画像のみの部分情報（API未収録作品）：サムネ＋手動入力の作品名/価格を表示
           setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, cached.author || '');
-          setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall); return;
+          setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall);
+          displayed = true;
+          if (freshPartial) return;
+        } else if (!cached.title && !cached.partial && age < NEG) {
+          setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, ''); return; // 直近「未取得」→再取得しない（手動入力があれば表示）
         }
-        if (!cached.title && !cached.partial && (now - (cached.fetchedAt || 0)) < NEG) { setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, ''); return; } // 直近「未取得」→再取得しない（手動入力があれば表示）
       }
       var res = window.buildAffiliateLink(url, '');
       if (!res || !res.ok || !res.cid) return;
       if (seen[url]) return; seen[url] = true;
-      jobs.push({ url: url, cid: res.cid, el: nameEl, title: titleByUrl[url] || '' });
-      // 手動タイトルがある場合は「…」で潰さない（手動情報の表示が遅れる原因になっていた）
+      // prev＝表示中の旧キャッシュ。裏取得が失敗/降格しても旧内容を消さないための保険（SWR）。
+      jobs.push({ url: url, cid: res.cid, el: nameEl, title: titleByUrl[url] || '', prev: cached || null });
+      // 手動タイトル/旧キャッシュ表示がある場合は「…」で潰さない（見た目は即・裏で最新化）
       var manJ = fanzaManualOf_(url);
       if (manJ && manJ.title) { nameEl.textContent = manJ.title; nameEl.style.display = ''; }
-      else { nameEl.textContent = '…'; nameEl.style.display = ''; }
+      else if (!displayed) { nameEl.textContent = '…'; nameEl.style.display = ''; }
     });
     if (!jobs.length) { if (manual) setDmmStatus('✅ 作品情報は取得済みです（再取得の必要はありません）。'); return; }
     // 自動実行は、生きている実行が進行中なら遠慮（重複取得を避ける）。60秒進捗が無ければ死亡とみなし開始。
@@ -1263,14 +1278,15 @@
     if (!manual && _fanzaActive && (new Date().getTime() - _fanzaTick) < 60000) return;
     // 手動実行を（停止とみなして）自動が引き継ぐ場合は進捗表示も引き継ぐ＝「取得中…」表示が凍結しない。
     if (!manual && _fanzaActive && _fanzaManual) manual = true;
-    // ★DMM APIのレート制限回避：一斉に叩かず 1件ずつ間隔をあけて順次取得する。
-    // ★不安定対策：一時的な失敗のみ最大3回リトライ（瞬断を吸収）。恒久的失敗は1回で確定。
+    // ★取得は3本並列（各系列は350ms間隔）＝直列1本より約3倍速。DMMは実測で30並列でも安定
+    //   だが、安全域として3本に抑える。一時的な失敗のみ最大3回リトライ。恒久的失敗は1回で確定。
     var gen = ++_fanzaGen;  // 旧実行を無効化し、この実行が主導権を取る
     _fanzaActive = true; _fanzaTick = new Date().getTime(); _fanzaManual = !!manual;
-    var GAP = 1000, i = 0, done = 0, fail = 0, partial = 0, total = jobs.length, fails = [], partials = [];
-    // カウントダウン：初期見積り1件≈1.6秒。各件完了ごとに実測平均で補正しつつ、毎秒1つずつ減らす。
-    var startT = new Date().getTime(), etaSec = Math.max(1, Math.ceil(total * 1.6)), ticker = null;
-    function dmmProgress() { if (manual) setDmmStatus('DMMから作品情報を取得中… （' + i + '/' + total + '）・<b>終了まであと約 ' + Math.max(etaSec, 0) + ' 秒</b>'); }
+    var GAP = 350, CONC = 3, next = 0, running = 0, processed = 0;
+    var done = 0, fail = 0, partial = 0, total = jobs.length, fails = [], partials = [];
+    // カウントダウン：初期見積り＝1件≈0.7秒(3本並列)。各件完了ごとに実測平均で補正しつつ毎秒-1。
+    var startT = new Date().getTime(), etaSec = Math.max(1, Math.ceil(total * 0.7)), ticker = null;
+    function dmmProgress() { if (manual) setDmmStatus('DMMから作品情報を取得中… （' + processed + '/' + total + '）・<b>終了まであと約 ' + Math.max(etaSec, 0) + ' 秒</b>'); }
     if (manual) {
       dmmProgress();
       ticker = setInterval(function () {
@@ -1294,34 +1310,38 @@
         return null;
       });
     }
-    function step() {
+    function finish() {
+      _fanzaActive = false;
+      if (ticker) { clearInterval(ticker); ticker = null; }
+      if (manual) {
+        var msg = '';
+        if (!fails.length && !partials.length) msg = '✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。';
+        else {
+          msg = 'DMM作品情報：成功 ' + done + (partial ? ' / 画像のみ ' + partial : '') + (fail ? ' / <b>失敗 ' + fail + '</b>' : '');
+          if (partials.length) {
+            msg += '<br><b>画像のみ取得（API未収録作品）：</b><br>' +
+              partials.map(function (p) { return '・「' + esc(p.title || '(無題)') + '」'; }).join('<br>') +
+              '<br>　└ サークル設定等でアフィリエイトAPIに収録されておらず、作品名・価格は取得できません（サムネ/サンプル画像は表示します）。';
+          }
+          if (fails.length) {
+            msg += '<br><b>取得に失敗した投稿と原因：</b><br>' +
+              fails.map(function (f) { return '・「' + esc(f.title || '(無題)') + '」<br>　└ ' + esc(f.reason); }).join('<br>');
+          }
+        }
+        setDmmStatus(msg);
+      }
+      // 実行中に描画が変わって取り漏れた分を1段だけ追い掛け（深さ制限＝キャッシュ保存不能環境でも無限ループしない）。
+      if ((sweepDepth || 0) < 1) setTimeout(function () { if (gen === _fanzaGen) fillFanzaNames(false, (sweepDepth || 0) + 1); }, 100);
+    }
+    function pump() {
       if (gen !== _fanzaGen) { if (ticker) clearInterval(ticker); return; } // 新しい実行に乗っ取られた→静かに終了
       _fanzaTick = new Date().getTime(); // watchdog：生存を刻む
-      if (i >= jobs.length) {
-        _fanzaActive = false;
-        if (ticker) { clearInterval(ticker); ticker = null; }
-        if (manual) {
-          var msg = '';
-          if (!fails.length && !partials.length) msg = '✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。';
-          else {
-            msg = 'DMM作品情報：成功 ' + done + (partial ? ' / 画像のみ ' + partial : '') + (fail ? ' / <b>失敗 ' + fail + '</b>' : '');
-            if (partials.length) {
-              msg += '<br><b>画像のみ取得（API未収録作品）：</b><br>' +
-                partials.map(function (p) { return '・「' + esc(p.title || '(無題)') + '」'; }).join('<br>') +
-                '<br>　└ サークル設定等でアフィリエイトAPIに収録されておらず、作品名・価格は取得できません（サムネ/サンプル画像は表示します）。';
-            }
-            if (fails.length) {
-              msg += '<br><b>取得に失敗した投稿と原因：</b><br>' +
-                fails.map(function (f) { return '・「' + esc(f.title || '(無題)') + '」<br>　└ ' + esc(f.reason); }).join('<br>');
-            }
-          }
-          setDmmStatus(msg);
-        }
-        // 実行中に描画が変わって取り漏れた分を1段だけ追い掛け（深さ制限＝キャッシュ保存不能環境でも無限ループしない）。
-        if ((sweepDepth || 0) < 1) setTimeout(function () { if (gen === _fanzaGen) fillFanzaNames(false, (sweepDepth || 0) + 1); }, 100);
+      if (next >= jobs.length) {
+        running--;
+        if (running === 0) finish(); // 全系列が仕事を終えた時だけ完了処理（in-flight分の集計を待つ）
         return;
       }
-      var job = jobs[i++];
+      var job = jobs[next++];
       dmmProgress();
       fetchWithRetry(job, 2).then(function (info) {
         if (gen !== _fanzaGen) return; // 乗っ取り後の旧実行はキャッシュ・DOM・集計へ一切書かない
@@ -1333,30 +1353,49 @@
           fanzaNameCacheSave(c); setFanzaEls(job.url, info.title); setFanzaAuthorEls(job.url, info.author || ''); setFanzaPriceEls(job.url, pinfo); backfillSnap_(job.url, pinfo);
           setFanzaThumbEls(job.url, media.thumb || media.thumbSmall, media.thumbSmall); done++;
         } else if (info && info.partial && (info.thumb || info.thumbSmall)) {
-          // 画像のみの部分情報（API未収録＋ページ取得不能の作品）：サムネ・サンプルだけ保存/表示。
-          var mediaP = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: [], service: info.service || '', floor: info.floor || '' };
-          c[job.url] = { title: '', author: '', partial: true, priceInfo: null, media: mediaP, sv: FZ_SV, fetchedAt: new Date().getTime() };
-          fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); setFanzaAuthorEls(job.url, '');
-          setFanzaThumbEls(job.url, mediaP.thumb || mediaP.thumbSmall, mediaP.thumbSmall); partial++;
-          if (manual) partials.push({ title: job.title });
+          // 旧キャッシュにフル作品名があるのに今回partialに降格＝APIから一時的に外れただけ。
+          // 旧フル情報を維持（表示・キャッシュとも触らない）＝作品名が無言で消えるのを防ぐ。
+          if (job.prev && job.prev.title && !isBadFanzaTitle(job.prev.title)) { done++; }
+          else {
+            // 画像のみの部分情報（API未収録＋ページ取得不能の作品）：サムネ・サンプルだけ保存/表示。
+            var mediaP = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: [], service: info.service || '', floor: info.floor || '' };
+            c[job.url] = { title: '', author: '', partial: true, priceInfo: null, media: mediaP, sv: FZ_SV, fetchedAt: new Date().getTime() };
+            fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); setFanzaAuthorEls(job.url, '');
+            setFanzaThumbEls(job.url, mediaP.thumb || mediaP.thumbSmall, mediaP.thumbSmall); partial++;
+            if (manual) partials.push({ title: job.title });
+          }
+        } else if (job.prev && (job.prev.title || job.prev.partial)) {
+          // 取得失敗だが表示中の旧データがある＝旧内容を維持（SWR：失敗時はstale保持）。DOM/キャッシュとも触らない。
+          done++;
         } else {
           c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得は30分だけキャッシュ（再ハンマー防止＆早期復帰）
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;
           if (manual) fails.push({ title: job.title, reason: (info && info.__error && info.reason) ? info.reason : '作品が見つかりません' });
         }
-        // 実測平均でカウントダウンを補正（残り件数 × 1件あたり平均秒）。
-        if (manual && i > 0) { var avg = (new Date().getTime() - startT) / i; etaSec = Math.ceil(avg * (total - i) / 1000); }
       }).catch(function () {
         if (gen !== _fanzaGen) return;
-        // 失敗パスと同じ後始末（ネガティブキャッシュを書かないと追い掛けスイープが同URLを再実行してしまう）。
+        // 表示中の旧データがあれば維持（通信エラーで作品名を消さない）。
+        if (job.prev && (job.prev.title || job.prev.partial)) { done++; return; }
+        // 旧データが無い場合のみネガティブキャッシュを書く（追い掛けスイープの再実行を止めるため）。
         var c2 = fanzaNameCacheLoad();
         c2[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() };
         fanzaNameCacheSave(c2);
         setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;
         if (manual) fails.push({ title: job.title, reason: '通信エラー' });
-      }).then(function () { if (gen === _fanzaGen) setTimeout(step, GAP); }); // 次を間隔をあけて実行
+      }).then(laneNext, laneNext); // 成功/例外どちらでも系列を必ず継続（拒否ハンドラ欠落による系列死を防止）
     }
-    step();
+    // 1件処理後の共通後処理＝この系列の次へ。gen不一致時は何もしない（乗っ取られた系列を止める）。
+    function laneNext() {
+      if (gen !== _fanzaGen) return;
+      processed++;
+      if (manual && processed > 0) { var avg = (new Date().getTime() - startT) / processed; etaSec = Math.ceil(avg * (total - processed) / 1000); }
+      dmmProgress();
+      setTimeout(pump, GAP); // この系列の次の1件へ（間隔をあけて）
+    }
+    // 3本の取得系列を150msずつずらして起動（同時バーストを避ける）
+    var starters = Math.min(CONC, jobs.length);
+    running = starters;
+    for (var w = 0; w < starters; w++) setTimeout(pump, w * 150);
   }
 
   // 「DMM 作品情報を取得」ボタン：表示中アイテムのFANZAキャッシュを消して、DMM APIから強制再取得。
