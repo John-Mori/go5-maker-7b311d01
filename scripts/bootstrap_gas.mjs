@@ -87,14 +87,23 @@ async function main() {
   copyFileSync(join(tmp, 'appsscript.json'), join(GAS_DIR, 'appsscript.json'));
   ok('gas/appsscript.json をクラウドの実物で用意しました。');
 
-  // クラウドに在ってローカルgas/に無い .gs を取り込む（push で消さないため）。コード.gs はローカルを正とする。
+  // clasp はサーバースクリプトを .js で取得するが、本リポジトリのソースは .gs。
+  // クラウドの各スクリプト（.js/.gs）について、同名の gas/<base>.gs があればそれを正として whitelist し、
+  // クラウドの .js は取り込まない（stale な二重ファイル＝コード.gs を隠す .js を作らない）。
+  // repo に .gs が無いクラウド専用スクリプトのみ、そのまま取り込んで維持（push のミラーで誤削除しないため）。
   const whitelist = new Set(['appsscript.json']);
   for (const f of gsFiles) {
-    whitelist.add(f);
-    const localPath = join(GAS_DIR, f);
-    if (f === 'コード.gs') { info('コード.gs はローカルを正として保持（クラウド版は取り込まない）。'); continue; }
-    if (!existsSync(localPath)) { copyFileSync(join(tmp, f), localPath); info('取り込み: gas/' + f + '（クラウドのみに存在したため）'); }
-    else info('保持: gas/' + f + '（両方に存在・ローカルを使用）');
+    const base = f.replace(/\.(gs|js)$/, '');
+    const repoGs = base + '.gs';
+    if (existsSync(join(GAS_DIR, repoGs))) {
+      whitelist.add(repoGs);
+      info('採用: gas/' + repoGs + '（リポジトリを正とする。クラウドの ' + f + ' は取り込まない）');
+    } else {
+      const localPath = join(GAS_DIR, f);
+      if (!existsSync(localPath)) copyFileSync(join(tmp, f), localPath);
+      whitelist.add(f);
+      info('取り込み(クラウド専用): gas/' + f);
+    }
   }
   // クラウドに HTML があれば parity 維持のため取り込み＆whitelist（recorderでは通常無い）。
   for (const f of htmlFiles) {
