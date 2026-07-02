@@ -231,11 +231,14 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
   padding:5px 10px;font-size:12px;width:auto;margin-top:0;}
 /* 予約一覧タブ */
 /* ランキングタブ */
-/* ランキングのサブタブ（総合/クリック/各時間バケット）。枠線で1つ1つ分かりやすく。 */
-.rank-tabs{display:flex;gap:7px;padding:10px 12px 6px;flex-wrap:wrap;}
-.rank-tab{flex:0 0 auto;font-size:12.5px;padding:7px 12px;border-radius:8px;border:1.5px solid var(--line);background:#0e1422;color:var(--sub);cursor:pointer;white-space:nowrap;transition:background-color .1s,border-color .1s,color .1s;}
-.rank-tab:active{transform:scale(.96);}
-.rank-tab.active{background:rgba(43,179,192,.16);color:var(--ink);border-color:var(--accent);font-weight:700;box-shadow:0 0 0 1px var(--accent) inset;}
+/* ランキングのサブタブ（総合/クリック/各時間バケット）。上部の大分類タブ（ランキング/予約/動画作成）と同じ見た目。
+   横幅は文字数に合わせた内容幅・折り返さず横スクロール。 */
+.rank-tabs{display:flex;gap:6px;padding:10px 12px 0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;border-bottom:1px solid var(--line);}
+.rank-tabs::-webkit-scrollbar{display:none;}
+.rank-tab{flex:0 0 auto;width:auto;white-space:nowrap;font-family:inherit;font-size:14px;font-weight:700;background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:12px 12px 0 0;padding:10px 14px;cursor:pointer;transition:color .15s,border-color .15s,background .15s;}
+.rank-tab:active{filter:brightness(.9);}
+.rank-tab.active{color:var(--ink);background:var(--card);border-color:var(--line) var(--line) var(--accent) var(--line);border-bottom:2px solid var(--accent);}
+.rank-tab img.emico{height:1.15em;vertical-align:-0.22em;margin-right:1px;}
 .rank-note{padding:2px 14px 6px;font-size:11px;color:var(--sub);}
 .rank-info .vmetrics{flex-wrap:wrap;}
 .rank-main{font-weight:700;color:var(--ink);}

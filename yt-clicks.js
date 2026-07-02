@@ -1534,8 +1534,8 @@
     var RANK_MODES = [
       { key: 'views', label: '総合(再生数)' },
       { key: 'clicks', label: 'クリック数' },
-      { key: 'pv', label: '再生ピーク' },   // 最大瞬間風速（一番伸びた区間の再生/時）
-      { key: 'pc', label: 'クリックピーク' } // 同（クリック/時）
+      { key: 'pv', label: '▶ピーク' },   // 再生の最大瞬間風速（▶＝再生数の絵文字。一番伸びた区間の再生/時）
+      { key: 'pc', label: '<img class="emico" src="assets/icons/ic-link.png" alt="クリック">ピーク' } // クリックの最大瞬間風速（クリック絵文字＝ic-link）
     ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/24時間
     // 旧モード名(early)は廃止。保存済みなら b120(2時間)へ読み替え。
     if (_rankMode === 'early') _rankMode = 'b120';
