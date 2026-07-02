@@ -133,14 +133,25 @@
         var ord = { acc1: 0, acc2: 1 };
         return (ord[a.account] !== undefined ? ord[a.account] : 9) - (ord[b.account] !== undefined ? ord[b.account] : 9);
       });
-      if (!pend.length) {
-        el.innerHTML = '<div style="padding:32px 16px;text-align:center;color:var(--sub);">予約中の投稿はありません</div>';
+      // YouTube 公開待ち（投稿履歴のYouTube URLのうち、まだ公開されていない＝非公開/予約公開中の作品）。
+      var ytList = (global.YtSchedule && global.YtSchedule.list) ? (global.YtSchedule.list() || []) : [];
+      ytList.sort(function (a, b) {
+        var pa = a.publishAt || Infinity, pb = b.publishAt || Infinity; // 公開予定時刻の早い順、時刻不明は後ろ
+        if (pa !== pb) return pa - pb;
+        return (b.ts || 0) - (a.ts || 0);
+      });
+
+      if (!pend.length && !ytList.length) {
+        el.innerHTML = '<div style="padding:32px 16px;text-align:center;color:var(--sub);">予約中の投稿・公開待ちの作品はありません</div>';
         return;
       }
-      el.innerHTML = '<div style="padding:12px"><div class="card">' +
-        '<div class="field-label" style="margin-bottom:4px;">⏰ 予約済み投稿一覧</div>' +
+
+      var html = '<div style="padding:12px">';
+      // ① Bluesky 予約投稿
+      html += '<div class="card">' +
+        '<div class="field-label" style="margin-bottom:4px;">⏰ 予約済み投稿一覧（Bluesky）</div>' +
         '<div class="hint" style="margin-bottom:12px;">両アカウント共通・予約時刻の早い順。このタブを閉じると予約は消えます。</div>' +
-        pend.map(function (it) {
+        (pend.length ? pend.map(function (it) {
           var label = it.account === 'acc2' ? '宵桜艶帖' : '月詠み';
           var cls = it.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
           return '<div class="rsv-tab-row">' +
@@ -152,8 +163,28 @@
             '<button type="button" class="ghost rsv-sm-btn" data-tnow="' + it.id + '">今すぐ投稿</button>' +
             '<button type="button" class="ghost rsv-sm-btn rsv-sm-cancel" data-tcancel="' + it.id + '">取消</button>' +
             '</div></div>';
-        }).join('') +
-        '</div></div>';
+        }).join('') : '<div class="hint">Blueskyの予約はありません。</div>') +
+        '</div>';
+      // ② YouTube 公開待ち
+      if (ytList.length) {
+        html += '<div class="card">' +
+          '<div class="field-label" style="margin-bottom:4px;">🎬 YouTube 公開待ち（非公開/予約公開）</div>' +
+          '<div class="hint" style="margin-bottom:12px;">投稿履歴のYouTube URLのうち、まだ公開されていない作品です（投稿履歴を更新すると最新化・公開されると自動で消えます）。予約公開の正確な時刻はYouTube側の仕様で取得できないため「公開待ち」と表示します。</div>' +
+          ytList.map(function (y) {
+            var label = y.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+            var cls = y.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
+            return '<div class="rsv-tab-row">' +
+              '<span class="rsv-badge ' + cls + '">' + label + '</span>' +
+              '<span class="rsv-tab-when">' + (y.publishAt ? fmt(y.publishAt) : '公開待ち') + '</span>' +
+              '<span class="rsv-tab-text">' + esc((y.title || '(無題)').slice(0, 28)) + '</span>' +
+              '<div class="rsv-tab-btns">' +
+              (y.ytUrl ? '<a class="ghost rsv-sm-btn" href="' + esc(y.ytUrl) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
+              '</div></div>';
+          }).join('') +
+          '</div>';
+      }
+      html += '</div>';
+      el.innerHTML = html;
       el.querySelectorAll('[data-tcancel]').forEach(function (b) {
         b.addEventListener('click', function () {
           if (window.confirm('この予約を取り消しますか？')) cancel(b.getAttribute('data-tcancel'));

@@ -118,7 +118,7 @@
     var key = apiKey();
     var uniq = ids.filter(function (v, i, a) { return v && a.indexOf(v) === i; });
     if (!key || !uniq.length) return Promise.resolve({});
-    var url = 'https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=' + uniq.slice(0, 50).join(',') + '&key=' + encodeURIComponent(key);
+    var url = 'https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,status&id=' + uniq.slice(0, 50).join(',') + '&key=' + encodeURIComponent(key);
     return fetch(url).then(function (r) { return r.json(); }).then(function (j) {
       var out = {};
       ((j && j.items) || []).forEach(function (it) {
@@ -126,8 +126,14 @@
         var rec = {};
         if (it.statistics) rec.views = parseInt(it.statistics.viewCount || '0', 10);
         if (it.snippet) { rec.title = it.snippet.title || ''; var t = Date.parse(it.snippet.publishedAt || ''); if (!isNaN(t)) rec.published = t; }
+        if (it.status) {
+          rec.privacy = it.status.privacyStatus || '';
+          var pa = Date.parse(it.status.publishAt || ''); if (!isNaN(pa)) rec.publishAt = pa; // 予約公開時刻（オーナー認証時のみ返る）
+        }
         out[it.id] = rec;
       });
+      // 照会したID一覧（応答に含まれないID＝非公開/予約公開の判定に使う）。
+      out.__queried = uniq.slice(0, 50);
       if (j && j.error) out.__error = (j.error.message || 'YouTube APIエラー');
       return out;
     }).catch(function () { return {}; });
@@ -662,6 +668,7 @@
     // YouTube側の通信エラーで全体(クリック数の反映含む)を巻き込まないよう、このジョブ単体でcatchする。
     if (vids.length) jobs.push(fetchVideos(vids).catch(function () { return { __error: 'YouTube APIに接続できませんでした（通信エラー）' }; }).then(function (m) {
       lastErr = m.__error || ''; delete m.__error;
+      var queried = m.__queried || []; delete m.__queried;
       Object.keys(m).forEach(function (id) {
         var rec = m[id] || {};
         if (rec.views != null) viewsCache[id] = rec.views;
@@ -669,9 +676,39 @@
         if (rec.title) titleCache[id] = rec.title;
       });
       ytMetaPersist(m); // 永続化（リロードで消えない）
+      updateYtScheduled_(items, ymap, m, queried); // 公開前(非公開/予約公開)の作品を予約タブ用に抽出
     }));
     return Promise.all(jobs).then(function () { clicksPersist_(); try { captureSnaps_(); } catch (e) {} return true; });
   }
+
+  // ── 公開前(非公開/予約公開)のYouTube作品を抽出し、予約タブ用に保存する ──
+  //   APIキーでは予約公開中の動画は videos.list に返らない。よって「照会したのに応答に無い」
+  //   かつ「一度も公開として観測していない(publishedCache に無い)」＝公開前 と判定する。
+  function ytSchedKey_(acc) { return 'yt_scheduled__' + acc; }
+  function loadYtSched_(acc) { try { return JSON.parse(localStorage.getItem(ytSchedKey_(acc)) || '[]') || []; } catch (e) { return []; } }
+  function updateYtScheduled_(items, ymap, m, queried) {
+    if (!apiKey() || lastErr) return; // キー無し/APIエラー時は誤検知するので更新しない
+    var acc = (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
+    var qset = {}; (queried || []).forEach(function (id) { qset[id] = true; });
+    var seen = {}; var out = [];
+    items.forEach(function (it) {
+      var k = itemKey(it); var url = ymap[k] || it.ytUrl || ''; var vid = ytIdOf(url);
+      if (!vid || !qset[vid] || seen[vid]) return; // 照会していないID(>50件時)は判定対象外＝誤検知防止
+      var rec = m[vid];
+      var returned = !!rec;
+      var futureMs = (rec && rec.publishAt && rec.publishAt > Date.now()) ? rec.publishAt
+                   : (rec && rec.published && rec.published > Date.now()) ? rec.published : null;
+      // 公開前＝(応答に無い かつ 過去に公開として観測していない) もしくは (公開予定時刻が未来)
+      var pre = (!returned && !(vid in publishedCache)) || !!futureMs;
+      if (!pre) return;
+      seen[vid] = true;
+      out.push({ vid: vid, ytUrl: url, account: acc, title: (titleCache[vid] || it.title || '(無題)'), publishAt: futureMs, ts: it.ts || 0 });
+    });
+    try { localStorage.setItem(ytSchedKey_(acc), JSON.stringify(out)); } catch (e) {}
+    if (window.Scheduler && window.Scheduler._renderTab) { try { window.Scheduler._renderTab(); } catch (e) {} }
+  }
+  // 予約タブ(scheduler.js)から参照：両アカウントの公開前YouTube作品をまとめて返す。
+  try { window.YtSchedule = { list: function () { return loadYtSched_('acc1').concat(loadYtSched_('acc2')); } }; } catch (e) {}
 
   // announce=true（手動更新ボタン）のときは、完了時に成功/失敗を明確に表示する。
   function refresh(announce) {
