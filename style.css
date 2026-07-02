@@ -14,8 +14,9 @@ html[data-account="acc2"]{           /* 宵桜艶帖：ワイン × 桜ピンク
   --app-bg:#2e1224; --card:#381630; --line:#57294a;
   --accent:#ff85ac; --accent2:#ffce9a; --ink:#fbeef4; --sub:#d6abc0;
 }
-/* ── ランキングタブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
-html[data-tab="tabRank"]{
+/* ── ランキング・予約タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
+html[data-tab="tabRank"],
+html[data-tab="tabReserve"]{
   --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
   --accent:#b8860b; --accent2:#a86b1f; --ink:#4b3f2c; --sub:#8a7a5c;
 }
@@ -292,16 +293,17 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .rank-title{font-size:14px;font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .rank-title-link{color:var(--ink);text-decoration:none;}
 .rank-title-link:hover{text-decoration:underline;}
-/* ランキングの文字（順位・作品名）は金色で光沢感のある色に固定＝アカウントに依存しない。 */
-#pageRank .rank-num,
-#pageRank .rank-title,
-#pageRank .rank-title-link{
-  background:linear-gradient(180deg,#fff6cf 0%,#f7db83 34%,#c9971f 52%,#f2d474 66%,#fff3c4 100%);
-  -webkit-background-clip:text;background-clip:text;
-  -webkit-text-fill-color:transparent;color:transparent;
-  filter:drop-shadow(0 1px 0 rgba(120,80,10,.28));
-}
-#pageRank .rank-title-link:hover{filter:drop-shadow(0 1px 0 rgba(120,80,10,.28)) brightness(1.08);}
+/* ランキング（クリーム背景）：順位は 1〜3位=金/銀/銅・4位以降=白(縁取りで視認性確保)。 */
+#pageRank .rank-num{color:#ffffff;text-shadow:0 0 2px rgba(70,50,15,.9),0 1px 1px rgba(70,50,15,.75);}
+#pageRank .rank-top1 .rank-num{color:#e8b31f;text-shadow:0 1px 1px rgba(90,60,0,.5);}   /* 金 */
+#pageRank .rank-top2 .rank-num{color:#9198a1;text-shadow:0 1px 1px rgba(55,55,65,.5);}   /* 銀 */
+#pageRank .rank-top3 .rank-num{color:#c1712f;text-shadow:0 1px 1px rgba(80,45,10,.45);}  /* 銅 */
+/* 動画の題名はアカウントのイメージカラー（クリーム背景で読める濃色）。 */
+#pageRank .rank-title{color:var(--ink);font-weight:800;}
+#pageRank .rank-title-acc1{color:#34478f;}   /* 月詠み＝藍 */
+#pageRank .rank-title-acc2{color:#a8306e;}   /* 宵桜艶帖＝濃桜 */
+/* 作品名（FANZA作品名）はクリーム背景で読めるよう濃色に。 */
+#pageRank .fanza-name-row{color:#5a4a2e;font-weight:600;}
 .rank-metrics{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--sub);margin-top:3px;flex-wrap:wrap;}
 .rsv-tab-row{display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;}
 .rsv-tab-row:last-child{border-bottom:none;}

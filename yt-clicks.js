@@ -1683,8 +1683,8 @@
               (dateStr || r.workUrl ? '<div class="rank-date">' + esc(dateStr) + (r.workUrl ? '<span class="rank-author" data-fanza-author-url="' + esc(r.workUrl) + '"></span>' : '') + '</div>' : '') +
               '<div class="rank-title-row">' +
                 '<span class="rank-acct rank-acct-' + esc(r.acct) + '">' + esc(acctLabel) + '</span>' +
-                '<div class="rank-title">' +
-                  (r.yt ? '<a class="rank-title-link" href="' + esc(r.yt) + '" target="_blank" rel="noopener">' + dispTitle + ' ↗</a>' : dispTitle) +
+                '<div class="rank-title rank-title-' + esc(r.acct) + '">' +
+                  dispTitle + // 作品↗/YouTube↗が下にあるため、題名はリンク化せず普通のテキストで表示
                 '</div>' +
               '</div>' +
               (r.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(r.workUrl) + '" style="display:none;"></div>' : '') +
