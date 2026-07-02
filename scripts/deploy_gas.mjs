@@ -70,8 +70,13 @@ async function fetchPing() {
 
 // ---- clasp 実行ヘルパ ----
 function clasp(args, opts = {}) {
-  const r = spawnSync('npx', ['--yes', '@google/clasp', ...args], {
-    cwd: ROOT, stdio: opts.capture ? 'pipe' : 'inherit', encoding: 'utf8', shell: process.platform === 'win32'
+  // shell:true 経由だとスペースを含む引数がシェルで再分割される。空白/特殊文字を含む引数は二重引用符で囲む。
+  const useShell = process.platform === 'win32';
+  const safe = useShell
+    ? args.map((a) => (/[\s"'()（）&|<>^]/.test(a) ? '"' + String(a).replace(/"/g, '\\"') + '"' : a))
+    : args;
+  const r = spawnSync('npx', ['--yes', '@google/clasp', ...safe], {
+    cwd: ROOT, stdio: opts.capture ? 'pipe' : 'inherit', encoding: 'utf8', shell: useShell
   });
   if (r.error) die('clasp の起動に失敗しました: ' + r.error.message);
   return r;
@@ -111,7 +116,8 @@ async function main() {
   console.log('\n📤 コードを転送中（clasp push）…');
   if (clasp(['push', '-f']).status !== 0) die('clasp push に失敗しました（上のログを確認）。');
 
-  const desc = 'auto ' + new Date().toISOString().slice(0, 10) + ' ' + localVer.slice(0, 16);
+  // 説明文はスペース・非ASCIIを含めない（shell:true 経由でシェルが引数を誤分割するのを防ぐ）。
+  const desc = 'auto-' + new Date().toISOString().slice(0, 10);
   console.log('\n🚀 既存デプロイに新バージョンを反映中（clasp deploy -i）…');
   if (clasp(['deploy', '-i', cfg.deploymentId, '-d', desc]).status !== 0) {
     die('clasp deploy に失敗しました。デプロイIDが正しいか（exec URLの AKfycb… トークン）確認してください。');
