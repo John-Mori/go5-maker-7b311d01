@@ -589,7 +589,7 @@
       });
       ytMetaPersist(m); // 永続化（リロードで消えない）
     }));
-    return Promise.all(jobs).then(function () { clicksPersist_(); return true; });
+    return Promise.all(jobs).then(function () { clicksPersist_(); try { captureSnaps_(); } catch (e) {} return true; });
   }
 
   // announce=true（手動更新ボタン）のときは、完了時に成功/失敗を明確に表示する。
@@ -1413,24 +1413,36 @@
     fillFanzaNames(true);   // 進捗・完了を表示しつつ取得（進行中の自動取得があっても乗っ取る）
   }
 
-  // ランキングの表示モード（総合再生数 / クリック数 / 投稿約2時間の再生数）。
   var _rankMode = (function () { try { return localStorage.getItem('rank_mode') || 'views'; } catch (e) { return 'views'; } })();
-  // 「投稿からおよそ2時間時点の再生数」＝早期の伸び。過去分は記録が無いので取得できたぶんだけ
-  //   going-forwardで自動記録（age>=2hで初観測した再生数を固定保存）。vid -> {v, ageH}
-  var early2hCache = (function () { try { return JSON.parse(localStorage.getItem('early2h_cache') || '{}') || {}; } catch (e) { return {}; } })();
-  function early2hPersist_() { try { localStorage.setItem('early2h_cache', JSON.stringify(early2hCache)); } catch (e) {} }
-  function captureEarly2h_() {
+  // 投稿(YouTube公開)からの経過時間バケットごとに再生数スナップショットを自動記録。
+  //   ※アプリが再生数を取得した時にだけ観測できる＝そのバケットの許容窓内に開いた投稿だけ記録される。
+  //   各バケットは「基準時刻〜基準+許容(基準の50%)」で初観測した再生数を固定。過去投稿は対象外＝未記録。
+  var SNAP_BUCKETS = [
+    { key: 'b30', min: 30, label: '30分' },
+    { key: 'b60', min: 60, label: '1時間' },
+    { key: 'b120', min: 120, label: '2時間' },
+    { key: 'b360', min: 360, label: '6時間' },
+    { key: 'b1440', min: 1440, label: '24時間' }
+  ];
+  var snapCache = (function () { try { return JSON.parse(localStorage.getItem('view_snaps') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,ageMin},...}
+  function snapPersist_() { try { localStorage.setItem('view_snaps', JSON.stringify(snapCache)); } catch (e) {} }
+  function captureSnaps_() {
     var now = new Date().getTime(), changed = false;
     Object.keys(viewsCache).forEach(function (vid) {
       var pub = publishedCache[vid];
-      if (!pub || viewsCache[vid] == null || early2hCache[vid]) return;
-      var ageH = (now - pub) / 3600000;
-      // 2〜4hの窓で初観測できたものだけを「約2時間の再生数」として記録。
-      // 過去投稿(初観測が既に4h超)は誤記録になるので対象外＝「未記録」のまま（指標の意味を守る）。
-      if (ageH >= 2 && ageH <= 4) { early2hCache[vid] = { v: viewsCache[vid], ageH: Math.round(ageH * 10) / 10 }; changed = true; }
+      if (!pub || viewsCache[vid] == null) return;
+      var ageMin = (now - pub) / 60000;
+      var rec = snapCache[vid] || {};
+      SNAP_BUCKETS.forEach(function (b) {
+        if (rec[b.key]) return;
+        var tol = Math.max(15, b.min * 0.5);
+        if (ageMin >= b.min && ageMin <= b.min + tol) { rec[b.key] = { v: viewsCache[vid], ageMin: Math.round(ageMin) }; changed = true; }
+      });
+      if (Object.keys(rec).length) snapCache[vid] = rec;
     });
-    if (changed) early2hPersist_();
+    if (changed) snapPersist_();
   }
+  function fmtAge_(min) { return min == null ? '' : (min < 90 ? min + '分後' : (Math.round(min / 6) / 10) + 'h後'); }
 
   // ── ランキングタブ（両アカウント合算・3モード切替）──────────────────────────────
   function renderRank() {
@@ -1476,16 +1488,19 @@
 
     var RANK_MODES = [
       { key: 'views', label: '総合(再生数)' },
-      { key: 'clicks', label: 'クリック数' },
-      { key: 'early', label: '2時間再生数' }
-    ];
+      { key: 'clicks', label: 'クリック数' }
+    ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/24時間
+    // 旧モード名(early)は廃止。保存済みなら b120(2時間)へ読み替え。
+    if (_rankMode === 'early') _rankMode = 'b120';
 
     function doRender() {
-      captureEarly2h_();
+      captureSnaps_();
+      var isBucket = _rankMode.charAt(0) === 'b';
+      var bucketDef = isBucket ? SNAP_BUCKETS.filter(function (b) { return b.key === _rankMode; })[0] : null;
       var rows = uniq.map(function (x) {
         var it = x.it;
         var code = codeOf(it.shortUrl || '');
-        var e2 = early2hCache[x.vid];
+        var snap = (isBucket && snapCache[x.vid]) ? snapCache[x.vid][_rankMode] : null;
         var cats = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
         return {
           vid: x.vid, yt: x.yt, acct: x.acct,
@@ -1493,34 +1508,40 @@
           views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
           clicks: (code && code in clicksCache) ? clicksCache[code] : null,
           code: code,
-          early: e2 ? e2.v : null, earlyAge: e2 ? e2.ageH : null,
+          snapV: snap ? snap.v : null, snapAge: snap ? snap.ageMin : null,
           ts: it.ts || (publishedCache[x.vid] || 0),
           bskyHref: it.shareUrl || it.shortUrl || it.postUrl || '',
           workUrl: it.workUrl || '', workState: it.workState || '旧作', cats: cats
         };
       });
-      var metric = _rankMode === 'clicks' ? 'clicks' : (_rankMode === 'early' ? 'early' : 'views');
+      // ソート対象の値。views=再生数 / clicks=クリック数 / bXX=そのバケットのスナップ値
+      function metricVal(r) { return _rankMode === 'clicks' ? r.clicks : (isBucket ? r.snapV : r.views); }
+      // 未記録(値なし)は除外（総合=再生数モードは一覧の基本なので除外しない）。
+      if (_rankMode !== 'views') rows = rows.filter(function (r) { return metricVal(r) != null; });
       rows.sort(function (a, b) {
-        var av = a[metric], bv = b[metric];
-        if (av == null && bv == null) return (b.views || 0) - (a.views || 0); // 値なし同士は再生数で
+        var av = metricVal(a), bv = metricVal(b);
+        if (av == null && bv == null) return (b.views || 0) - (a.views || 0);
         if (av == null) return 1; if (bv == null) return -1;
         return bv - av;
       });
       var tabsHtml = '<div class="rank-tabs">' + RANK_MODES.map(function (m) {
         return '<button class="rank-tab' + (m.key === _rankMode ? ' active' : '') + '" data-mode="' + m.key + '" type="button">' + m.label + '</button>';
       }).join('') + '</div>';
-      var noteHtml = _rankMode === 'early' ? '<div class="rank-note">投稿からおよそ2時間時点の再生数（自動記録・この機能導入後の投稿が対象。「(◯h時点)」は実記録時刻）。</div>' : '';
-      el.innerHTML = tabsHtml + noteHtml + '<div class="rank-list">' +
+      var noteHtml = isBucket
+        ? '<div class="rank-note">投稿から約' + bucketDef.label + '時点の再生数ランキング（自動記録・この機能導入後の投稿が対象。「(◯後)」は実記録時刻。未記録は非表示）。</div>'
+        : (_rankMode === 'clicks' ? '<div class="rank-note">短縮URLのクリック数ランキング（クリックURLの無い投稿は非表示）。</div>' : '');
+      var emptyHtml = rows.length ? '' : '<p class="hint" style="padding:10px 14px;">このランキングに表示できる記録がまだありません。</p>';
+      el.innerHTML = tabsHtml + noteHtml + emptyHtml + '<div class="rank-list">' +
         rows.map(function (r, i) {
           var rank = i + 1;
           var topCls = rank <= 3 ? ' rank-top' + rank : '';
           var dispTitle = esc(stripCommonTags(r.title));
           var dateStr = fmtTsFull(r.ts);
           var acctLabel = ACCT_NAME[r.acct] || r.acct;
-          // 指標スパン（並びの中でソート対象を rank-main で強調。views/clicksは常時、earlyはearlyモード時のみ）
-          var mViews = '<span class="' + (metric === 'views' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
-          var mClicks = '<span class="' + (metric === 'clicks' ? 'rank-main' : '') + '" title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
-          var mEarly = metric === 'early' ? '<span class="rank-main" title="投稿約2時間の再生数">⏱ ' + (r.early != null ? num(r.early) + (r.earlyAge != null ? '<span class="rank-sub">(' + r.earlyAge + 'h時点)</span>' : '') : '未記録') + '</span>' : '';
+          // 指標スパン（並びの中でソート対象を rank-main で強調）。バケットモードのみ先頭にスナップ値。
+          var mViews = '<span class="' + (_rankMode === 'views' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
+          var mClicks = '<span class="' + (_rankMode === 'clicks' ? 'rank-main' : '') + '" title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
+          var mBucket = isBucket ? '<span class="rank-main" title="投稿から約' + bucketDef.label + 'の再生数">⏱ ' + num(r.snapV) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + ')</span></span>' : '';
           return '<div class="rank-row' + topCls + '">' +
             '<span class="rank-num">' + rank + '</span>' +
             '<div class="rank-info">' +
@@ -1538,7 +1559,7 @@
               '</div>' +
               (r.cats ? '<div class="vrow-tags">' + r.cats + '</div>' : '') +
               '<div class="vmetrics">' +
-                mEarly + mViews + mClicks +
+                mBucket + mViews + mClicks +
                 (r.bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
                 (r.yt ? '<a class="vlink vlink-yt" href="' + esc(r.yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
                 (r.workUrl ? '<a class="vlink vlink-work" href="' + esc(r.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +

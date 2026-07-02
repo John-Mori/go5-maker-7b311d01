@@ -226,10 +226,11 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
   padding:5px 10px;font-size:12px;width:auto;margin-top:0;}
 /* 予約一覧タブ */
 /* ランキングタブ */
-/* ランキングのサブタブ（総合/クリック/2時間） */
-.rank-tabs{display:flex;gap:6px;padding:10px 12px 4px;flex-wrap:wrap;}
-.rank-tab{flex:1 1 0;min-width:0;font-size:13px;padding:8px 6px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;}
-.rank-tab.active{background:var(--card);color:var(--ink);border-color:var(--accent);font-weight:700;}
+/* ランキングのサブタブ（総合/クリック/各時間バケット）。枠線で1つ1つ分かりやすく。 */
+.rank-tabs{display:flex;gap:7px;padding:10px 12px 6px;flex-wrap:wrap;}
+.rank-tab{flex:0 0 auto;font-size:12.5px;padding:7px 12px;border-radius:8px;border:1.5px solid var(--line);background:#0e1422;color:var(--sub);cursor:pointer;white-space:nowrap;transition:background-color .1s,border-color .1s,color .1s;}
+.rank-tab:active{transform:scale(.96);}
+.rank-tab.active{background:rgba(43,179,192,.16);color:var(--ink);border-color:var(--accent);font-weight:700;box-shadow:0 0 0 1px var(--accent) inset;}
 .rank-note{padding:2px 14px 6px;font-size:11px;color:var(--sub);}
 .rank-info .vmetrics{flex-wrap:wrap;}
 .rank-main{font-weight:700;color:var(--ink);}
