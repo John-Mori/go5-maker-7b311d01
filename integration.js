@@ -60,6 +60,19 @@
     if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'recompute' }, '*');
   });
 
+  // 予約作成（枠から）→ カレンダー枠を「予約登録済」に書き戻し（双方向連携）
+  document.addEventListener('bluesky-reserved', function (e) {
+    var d = (e && e.detail) || {}; if (!d.slotId) return;
+    var f = $('calFrame');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'slot-writeback', id: d.slotId, status: '予約登録済' }, '*');
+  });
+  // 予約取消 → カレンダー枠を「制作済・未予約」へ戻す
+  document.addEventListener('bluesky-reservation-cancelled', function (e) {
+    var d = (e && e.detail) || {}; if (!d.slotId) return;
+    var f = $('calFrame');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'slot-writeback', id: d.slotId, status: '制作済・未予約' }, '*');
+  });
+
   // 投稿成功（即時/単独/予約）→ iframe のスロットへ書き戻し
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};

@@ -66,7 +66,12 @@
       if (due.length) renderAll();
     }
 
-    function cancel(id) { queue = queue.filter(function (it) { return String(it.id) !== String(id); }); renderAll(); }
+    function cancel(id) {
+      var it = findById(id);
+      queue = queue.filter(function (x) { return String(x.id) !== String(id); }); renderAll();
+      // カレンダー連携：枠から予約していたら、その枠の「予約登録済」を解除して戻す。
+      if (it && it.slotId) { try { document.dispatchEvent(new CustomEvent('bluesky-reservation-cancelled', { detail: { slotId: it.slotId, account: it.account } })); } catch (e) {} }
+    }
 
     function update(id, newMs) {
       var it = findById(id);
@@ -156,7 +161,7 @@
           var cls = it.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
           return '<div class="rsv-tab-row">' +
             '<span class="rsv-badge ' + cls + '">' + label + '</span>' +
-            '<span class="rsv-tab-when">' + fmt(it.scheduledAtMs) + '</span>' +
+            '<span class="rsv-tab-when">' + fmt(it.scheduledAtMs) + (it.slotId ? ' <span title="カレンダーの枠と連携">📅</span>' : '') + '</span>' +
             '<span class="rsv-tab-text">' + esc((it.text || '').split('\n')[0].slice(0, 28)) + '</span>' +
             '<div class="rsv-tab-btns">' +
             '<button type="button" class="ghost rsv-sm-btn" data-tchange="' + it.id + '">時刻変更</button>' +
@@ -216,6 +221,8 @@
         item.id = ++seq; item.status = 'pending';
         queue.push(item); reqPerm(); renderAll();
         notify('予約しました', fmt(item.scheduledAtMs));
+        // カレンダー連携：枠から予約したら、その枠を「予約登録済」に書き戻す。
+        if (item.slotId) { try { document.dispatchEvent(new CustomEvent('bluesky-reserved', { detail: { slotId: item.slotId, scheduledAtMs: item.scheduledAtMs, account: item.account } })); } catch (e) {} }
         return item.id;
       },
       list: function () { return queue.slice(); },
