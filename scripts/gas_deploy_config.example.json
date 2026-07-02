@@ -1,0 +1,7 @@
+{
+  "_comment": "このファイルをコピーして scripts/gas_deploy_config.json を作る（実体はコミットされない）。通常は GAS初期設定.bat（bootstrap_gas.mjs）が自動生成する。",
+  "scriptId": "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_ここにスクリプトID",
+  "deploymentId": "AKfycbxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "execUrl": "https://script.google.com/macros/s/AKfycbxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/exec",
+  "adminSecret": "ADMIN_SECRET を設定した場合はその値。未設定なら空でよい（GAS側がソフト鍵にフォールバック）"
+}

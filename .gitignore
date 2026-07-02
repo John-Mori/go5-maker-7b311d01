@@ -9,3 +9,7 @@ Thumbs.db
 
 # PCスクレイプ用のローカル設定（共有シークレットを含むためコミットしない）
 scripts/scrape_config.json
+
+# GAS自動反映のローカル設定（scriptId・デプロイID・adminSecret を含むためコミットしない）
+.clasp.json
+scripts/gas_deploy_config.json

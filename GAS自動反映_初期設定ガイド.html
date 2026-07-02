@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GAS 自動反映・初期設定ガイド</title>
+<style>
+:root{
+  --bg:#f5edd7; --paper:#fffdf5; --ink:#4b3f2c; --sub:#8a7a5c; --line:#e6d6ad;
+  --accent:#c26a3f; --accent2:#7a9a54; --badge:#c26a3f; --code-bg:#fbf4e0; --code-ink:#5a4a2e; --warn:#b5533a;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;line-height:1.75;padding:18px;}
+.wrap{max-width:760px;margin:0 auto;}
+header{text-align:center;margin:6px 0 18px;}
+header h1{font-size:22px;margin:0 0 6px;color:var(--accent);}
+header p{margin:0;color:var(--sub);font-size:14px;}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:0 0 16px;
+  box-shadow:0 4px 14px rgba(150,115,55,.08);}
+.lead{font-size:14.5px;}
+.lead b{color:var(--accent);}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:center;margin:14px 0 4px;}
+.flow .node{background:#fbf4e0;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px;font-weight:700;color:var(--ink);text-align:center;}
+.flow .arw{color:var(--accent);font-weight:900;}
+.step{display:flex;gap:12px;align-items:flex-start;margin-top:6px;}
+.step-no{flex:0 0 34px;height:34px;border-radius:50%;background:var(--badge);color:#fff;font-weight:800;
+  display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 6px rgba(194,106,63,.35);}
+.step-body{flex:1;min-width:0;}
+.step-body h2{font-size:16.5px;margin:4px 0 8px;color:var(--ink);}
+.step-body ol,.step-body ul{margin:6px 0;padding-left:20px;}
+.step-body li{margin:4px 0;}
+.k{background:#f0e7cf;border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:.9em;color:var(--accent);white-space:nowrap;}
+.path{background:#f0e7cf;border-radius:6px;padding:1px 8px;font-weight:700;font-size:.92em;}
+.cb{display:flex;align-items:stretch;gap:0;margin:8px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--code-bg);}
+.cb-t{margin:0;flex:1;min-width:0;overflow-x:auto;white-space:nowrap;padding:10px 12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--code-ink);}
+.cbtn{flex:0 0 auto;border:none;background:var(--accent);color:#fff;font-weight:700;font-size:12.5px;padding:0 14px;cursor:pointer;}
+.cbtn:active{opacity:.8}
+.cbtn.done{background:var(--accent2);}
+.note{background:#fbf4e0;border-left:4px solid var(--accent2);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;color:#5a4a2e;}
+.warn{background:#fdeee6;border-left:4px solid var(--warn);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;color:#7a3b2a;}
+.warn b{color:var(--warn);}
+.check{background:#eef3e2;border:1px solid #cdd9b0;border-radius:12px;padding:14px 16px;}
+.check h2{margin:0 0 8px;font-size:16px;color:var(--accent2);}
+.small{color:var(--sub);font-size:12.5px;}
+.tag{display:inline-block;background:var(--accent);color:#fff;border-radius:6px;font-size:11px;padding:1px 7px;font-weight:700;margin-right:4px;}
+.ok{color:var(--accent2);font-weight:700;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>🔁 GAS 自動反映・初期設定ガイド</h1>
+  <p>この設定は「1回だけ」。以後は <b>GASを反映.bat</b> を押すだけでクラウドに反映されます。</p>
+</header>
+
+<div class="card">
+  <p class="lead">これまで「コードをコピペ → 再デプロイ → トリガー設定」と<b>手作業</b>だったGASの反映を、<b>PCでバッチを1回押すだけ</b>に変えます。<b>公開URL（exec URL）は変わりません</b>ので、アプリ側の設定変更は不要です。</p>
+  <div class="flow">
+    <div class="node">コードを編集</div><div class="arw">→</div>
+    <div class="node">GASを反映.bat</div><div class="arw">→</div>
+    <div class="node">クラウドへ自動反映</div><div class="arw">→</div>
+    <div class="node">トリガー再設定も自動</div>
+  </div>
+  <div class="note">この初期設定は <b>PC</b> で行います（iPhoneではできません）。所要 5〜10分・1回だけ。</div>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">1</div>
+    <div class="step-body">
+      <h2>Apps Script API をオンにする（アカウントで1回だけ）</h2>
+      <p>下のURLを開いて、<b>「Google Apps Script API」を オン</b> にします。</p>
+      <div class="cb"><pre class="cb-t">https://script.google.com/home/usersettings</pre><button class="cbtn" onclick="cp(this)">コピー</button></div>
+      <div class="small">※ すでにオンなら、そのままでOKです。</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">2</div>
+    <div class="step-body">
+      <h2>スクリプトID を確認してコピー</h2>
+      <ol>
+        <li>下のURLを開き、記録用の GAS プロジェクト（recorder）を開く</li>
+        <li>左メニューの <span class="k">⚙️ プロジェクトの設定</span> を開く</li>
+        <li><b>「スクリプト ID」</b>の値をコピー（あとで貼ります）</li>
+      </ol>
+      <div class="cb"><pre class="cb-t">https://script.google.com/home</pre><button class="cbtn" onclick="cp(this)">コピー</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">3</div>
+    <div class="step-body">
+      <h2>PC で「GAS初期設定.bat」を実行</h2>
+      <p>リポジトリ直下の <span class="path">GAS初期設定.bat</span> をダブルクリック。順番に次が起きます。</p>
+      <ol>
+        <li><b>ブラウザが開く</b> → <span class="k">john.mori8k@gmail.com</span> で承認（clasp のログイン）</li>
+        <li>黒い画面が <b>スクリプトID</b> を聞く → 手順2でコピーした値を貼って Enter</li>
+        <li>次に <b>exec URL</b> を聞く → 下をコピーして貼る（今のURL）</li>
+      </ol>
+      <div class="cb"><pre class="cb-t">https://script.google.com/macros/s/AKfycbyQlrWuud5WfE3YMjoYzX2WhstTyWw_sOxVCaT8EfaFMXwi_WZzWIBKarHdtXVsY3Fj/exec</pre><button class="cbtn" onclick="cp(this)">コピー</button></div>
+      <ol start="4">
+        <li><b>ADMIN_SECRET</b> を聞かれる → 設定していなければ何も入れず Enter（空でOK）</li>
+      </ol>
+      <div class="note">これで <span class="path">scripts/gas_deploy_config.json</span> が自動作成され、初期設定は完了です（この設定ファイルは共有・公開されません）。</div>
+      <div class="warn"><b>注意：</b>途中で「clasp login に失敗」等が出たら、手順1のAPIオンを確認してからやり直してください。</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="step">
+    <div class="step-no">4</div>
+    <div class="step-body">
+      <h2>（任意・推奨）ADMIN_SECRET を設定して門番を強くする</h2>
+      <p>反映後の自動処理（トリガー再設定）を「知っている人だけ」呼べるようにする設定です。省略しても動きます。</p>
+      <ol>
+        <li>GAS プロジェクト → <span class="k">⚙️ プロジェクトの設定</span> → <b>スクリプト プロパティ</b></li>
+        <li><b>プロパティ名</b>に <span class="k">ADMIN_SECRET</span>、<b>値</b>に好きな文字列を入れて保存</li>
+        <li>手順3の <span class="path">gas_deploy_config.json</span> の <span class="k">adminSecret</span> に同じ値を入れる（設定し直す場合は初期設定batをやり直し）</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<div class="card check">
+  <h2>✅ 完了！ これ以降の反映のしかた</h2>
+  <p>コード（コード.gs）が更新されたら、PCで <span class="path">GASを反映.bat</span> を押すだけ。</p>
+  <ul>
+    <li><span class="tag">自動</span>コード転送 → 既存デプロイに新バージョン反映（<b>URLは不変</b>）</li>
+    <li><span class="tag">自動</span><span class="k">?ping=1</span> でバージョン一致を確認</li>
+    <li><span class="tag">自動</span>トリガー再設定＋シートのヘッダ移行</li>
+  </ul>
+  <p class="small">反映せずに「今クラウドが最新かどうか」だけ見たいときは、コマンドで <span class="k">node scripts/deploy_gas.mjs --check</span> を実行します。</p>
+  <div class="note">うまく反映されているかは、下のURLを開いて <span class="k">version</span> が新しくなっているかで分かります。</div>
+  <div class="cb"><pre class="cb-t">https://script.google.com/macros/s/AKfycbyQlrWuud5WfE3YMjoYzX2WhstTyWw_sOxVCaT8EfaFMXwi_WZzWIBKarHdtXVsY3Fj/exec?ping=1</pre><button class="cbtn" onclick="cp(this)">コピー</button></div>
+</div>
+
+<p class="small" style="text-align:center;margin:18px 0;">従来の手動手順（コピペで反映）も予備として残してあります：<span class="path">gas/再デプロイ手順.html</span></p>
+</div>
+
+<script>
+function flash(btn){ var t=btn.textContent; btn.textContent='✓ コピー'; btn.classList.add('done'); setTimeout(function(){ btn.textContent=t; btn.classList.remove('done'); },1400); }
+function copyText(text,btn){
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(function(){flash(btn);}).catch(function(){fallback(text,btn);}); }
+  else fallback(text,btn);
+}
+function fallback(text,btn){ var ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');flash(btn);}catch(e){} document.body.removeChild(ta); }
+function cp(btn){ var pre=btn.previousElementSibling; copyText(pre.textContent,btn); }
+</script>
+</body>
+</html>

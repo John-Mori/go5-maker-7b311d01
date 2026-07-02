@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-02G（最大瞬間風速ランキング=一番伸びた時間帯と伸び率をピーク記録シートに永続保存）';
+var GAS_VERSION = '2026-07-02H（admin_setup追加＝GAS自動反映対応：デプロイ後にトリガー再設定＋ヘッダ移行を自動実行）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -126,6 +126,16 @@ function doGet(e) {
   if (p.action === 'consolidate_title') {
     return jsonOut_(consolidateTitle_());
   }
+  // デプロイ後の自動後処理: トリガー再設定＋ヘッダ移行を一括冪等実行（scripts/deploy_gas.mjs が反映確認後に呼ぶ）。
+  //   secret はスクリプトプロパティ ADMIN_SECRET（未設定なら既存のソフト鍵にフォールバック）と照合。
+  if (p.action === 'admin_setup') {
+    var adminWant = prop_('ADMIN_SECRET') || shortSecret_();
+    if (String(p.secret || '') !== adminWant) return jsonOut_({ ok: false, error: 'bad_secret' });
+    var mig = migrateHeaders_();
+    setupTrigger();
+    var handlers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+    return jsonOut_({ ok: true, version: GAS_VERSION, migrated: mig, triggers: handlers });
+  }
   // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
   if (p.callback) {
     var out;
@@ -144,7 +154,7 @@ function doGet(e) {
   }
   // 該当アクション無し。どのバージョンが live か常に分かるよう version と対応アクションを返す。
   return jsonOut_({ ok: true, service: 'go5-maker recorder v2 (2ch)', version: GAS_VERSION,
-    actions: ['ping', 'migrate_headers', 'cleanup_columns', 'diagnose'],
+    actions: ['ping', 'migrate_headers', 'cleanup_columns', 'diagnose', 'admin_setup'],
     note: 'diagnose が service応答になる場合は diagnose 追加版(2026-07-01F以降)が未デプロイ' });
 }
 // 指定 post_uri の行から短縮URLを返す（読み取りのみ）。
