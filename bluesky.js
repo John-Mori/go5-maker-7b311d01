@@ -31,6 +31,7 @@
     manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
     manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
     movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn'),
+    movieWorkAffi: $('movieWorkAffi'), movieWorkAffiCopy: $('movieWorkAffiCopy'), movieWorkInfo: $('movieWorkInfo'),
     ytQSave: $('ytQSave'), ytQLoad: $('ytQLoad'), ytReset: $('ytReset'), ytUndo: $('ytUndo'), ytRedo: $('ytRedo'), ytQInfo: $('ytQInfo'),
     bskyQSave: $('bskyQSave'), bskyQLoad: $('bskyQLoad'), bskyReset: $('bskyReset'), bskyUndo: $('bskyUndo'), bskyRedo: $('bskyRedo'), bskyQInfo: $('bskyQInfo'),
     affiUrls: $('affiUrls'),
@@ -120,6 +121,8 @@
     if (els.workUrl) els.workUrl.value = wval;
     if (els.movieWorkUrl) els.movieWorkUrl.value = wval;
     updateMovieWorkLink(wval);
+    updateMovieWorkAffi(wval);
+    scheduleMovieWorkInfo(wval);
     updateBskyWorkLink(wval);
     paintWorkWarn(els.movieWorkWarn, wval);
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
@@ -881,12 +884,96 @@
     }
   }
 
+  // ---- 動画作成タブ：投稿バージョンURL(アフィリンク)＋作品情報(FANZA) ----
+  // 動画作成タブの作品URL欄に、あなたのアフィIDを入れた「投稿バージョンURL」を自動生成して表示。
+  function updateMovieWorkAffi(url) {
+    var el = els.movieWorkAffi;
+    if (!el) return;
+    if (!url || !url.trim()) { el.value = ''; return; }
+    var afId = '';
+    try { afId = (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) {}
+    var r = window.buildAffiliateLink ? window.buildAffiliateLink(url, afId) : null;
+    el.value = (r && r.ok) ? r.link : '';
+  }
+
+  // #author（作者名）へサークル名を自動入力。手動で書き換えた値は尊重（自前で入れた値だけ上書き）。
+  var movieAuthorAutofilled = '';
+  function autofillAuthor(circle) {
+    if (!circle) return;
+    var a = document.getElementById('author');
+    if (!a) return;
+    var cur = (a.value || '').trim();
+    if (cur && cur !== movieAuthorAutofilled) return; // ユーザーが手入力済み＝触らない
+    a.value = circle;
+    movieAuthorAutofilled = circle;
+    try { a.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+    renderPreview();
+  }
+
+  // 作品情報表示（作品名・サークル名・定価・セール）。cid→FanzaCore で取得。結果は簡易キャッシュ。
+  var movieInfoCache = {}; // cid -> info（{__error} も入れて再取得を抑制）
+  var movieInfoSeq = 0;    // 競合防止（URL連続変更時に古い結果で上書きしない）
+  function renderMovieInfoLoading() {
+    if (els.movieWorkInfo) { els.movieWorkInfo.style.color = 'var(--sub)'; els.movieWorkInfo.textContent = '⏳ 作品情報を取得中…'; }
+  }
+  function renderMovieInfo(info) {
+    var el = els.movieWorkInfo;
+    if (!el) return;
+    if (!info || !info.title) { el.style.color = 'var(--sub)'; el.textContent = ''; return; }
+    var yen = function (n) { return (n != null && !isNaN(n)) ? '¥' + Number(n).toLocaleString('ja-JP') : '—'; };
+    var lines = [];
+    lines.push('<div><b>作品名</b>：' + escapeHtml(info.title) + '</div>');
+    lines.push('<div><b>サークル名</b>：' + (info.author ? escapeHtml(info.author) : '—') + '</div>');
+    lines.push('<div><b>定価</b>：' + yen(info.listPrice) + '</div>');
+    var onSale = info.listPrice && info.price && info.discountPct > 0 && info.price < info.listPrice;
+    if (onSale) {
+      lines.push('<div style="color:#e0554e;font-weight:700;"><b>セール中</b>：' + yen(info.price) + '（' + info.discountPct + '%OFF）</div>');
+    } else {
+      lines.push('<div style="color:var(--sub);">セールなし</div>');
+    }
+    el.style.color = 'var(--ink)';
+    el.innerHTML = lines.join('');
+  }
+  function fetchMovieWorkInfo(url) {
+    var el = els.movieWorkInfo;
+    if (!url || !url.trim()) { if (el) { el.textContent = ''; } return; }
+    var r = window.buildAffiliateLink ? window.buildAffiliateLink(url, '') : null;
+    var cid = (r && r.ok) ? r.cid : '';
+    if (!cid) { if (el) { el.style.color = 'var(--sub)'; el.textContent = ''; } return; }
+    var workerUrl = '', secret = '';
+    try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
+    try { secret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
+    if (!workerUrl || typeof window.FanzaCore === 'undefined') { if (el) { el.style.color = 'var(--sub)'; el.textContent = ''; } return; }
+    // キャッシュヒット（成功情報）はそのまま反映。
+    if (movieInfoCache[cid] && movieInfoCache[cid].title) { renderMovieInfo(movieInfoCache[cid]); autofillAuthor(movieInfoCache[cid].author); return; }
+    var seq = ++movieInfoSeq;
+    renderMovieInfoLoading();
+    window.FanzaCore.fetchFanzaInfo(cid, workerUrl, secret).then(function (info) {
+      if (seq !== movieInfoSeq) return; // 途中でURLが変わった＝破棄
+      if (info && info.title) {
+        movieInfoCache[cid] = info;
+        renderMovieInfo(info);
+        autofillAuthor(info.author);
+      } else {
+        if (el) { el.style.color = 'var(--sub)'; el.textContent = '（作品情報を取得できませんでした' + (info && info.reason ? '：' + info.reason : '') + '）'; }
+      }
+    }).catch(function () { if (seq === movieInfoSeq && el) { el.style.color = 'var(--sub)'; el.textContent = ''; } });
+  }
+  // 連続入力での過剰なFANZA取得を抑える（デバウンス）。
+  var movieInfoTimer = null;
+  function scheduleMovieWorkInfo(url) {
+    if (movieInfoTimer) clearTimeout(movieInfoTimer);
+    movieInfoTimer = setTimeout(function () { fetchMovieWorkInfo(url); }, 500);
+  }
+
   // 作品URLを一元的に更新（動画作成タブ⇔投稿タブ⇔localStorage を同期）。fromMovie=動画作成タブ起点。
   function syncWorkUrl(v, fromMovie) {
     saveA('bsky_work_url', v);
     if (els.workUrl && fromMovie) els.workUrl.value = v;
     if (els.movieWorkUrl && !fromMovie) els.movieWorkUrl.value = v;
     updateMovieWorkLink(v);
+    updateMovieWorkAffi(v);
+    scheduleMovieWorkInfo(v);
     updateBskyWorkLink(v);
     updateBskyWorkAffiPreview(v);
     paintWorkWarn(els.movieWorkWarn, v);
@@ -901,7 +988,19 @@
     movieWorkClearBtn.addEventListener('click', function () {
       var cur = (els.movieWorkUrl && els.movieWorkUrl.value) || loadA('bsky_work_url') || '';
       if (cur) movieWorkCleared = cur; // 戻す用に退避
+      // ★テキストボックス本体も消す（syncWorkUrl は fromMovie=true 時に movieWorkUrl を触らないため明示クリア）
+      if (els.movieWorkUrl) els.movieWorkUrl.value = '';
       syncWorkUrl('', true);
+      // 生成表示（投稿バージョンURL・作品情報）も消す
+      if (els.movieWorkAffi) els.movieWorkAffi.value = '';
+      if (els.movieWorkInfo) els.movieWorkInfo.textContent = '';
+    });
+  }
+  // 投稿バージョンURL コピー
+  if (els.movieWorkAffiCopy) {
+    els.movieWorkAffiCopy.addEventListener('click', function () {
+      var v = els.movieWorkAffi ? els.movieWorkAffi.value : '';
+      if (v) copyText(v, els.movieWorkAffiCopy);
     });
   }
   var movieWorkUndoBtn = $('movieWorkUndo');
