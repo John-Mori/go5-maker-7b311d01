@@ -136,6 +136,7 @@
   // ── 今日/昨日/直近1週間の再生・クリック増加（GASが毎時サーバー側で記録した差分）──
   // localStorageに前回値を保持し、開いた瞬間に即表示→GAS取得で最新化。
   var deltaCache = (function () { try { return JSON.parse(localStorage.getItem('delta_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {tv,yv,wv,tc,yc,wc}
+  var peakCache = (function () { try { return JSON.parse(localStorage.getItem('peak_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {vRate,vWin,cRate,cWin}
   var _deltaFetched = false;
   function gasUrl_() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
   // JSONP（GASのGETをCORS回避で読む。キャッシュバスターcb付き）。
@@ -163,15 +164,17 @@
       el.innerHTML = fmtDelta_(vid && deltaCache[vid]);
     });
   }
-  function fetchDeltas_(force) {
-    if (_deltaFetched && !force) { applyDeltas_(); return; }
-    var url = gasUrl_(); if (!url) { applyDeltas_(); return; }
+  function fetchDeltas_(force, cb) {
+    if (_deltaFetched && !force) { applyDeltas_(); if (cb) cb(); return; }
+    var url = gasUrl_(); if (!url) { applyDeltas_(); if (cb) cb(); return; }
     jsonp_(url, { action: 'deltas' }, function (res) {
       if (res && res.ok && res.deltas) {
         deltaCache = res.deltas; _deltaFetched = true;
         try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); } catch (e) {}
+        if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
       }
       applyDeltas_();
+      if (cb) cb();
     });
   }
 
@@ -1530,7 +1533,9 @@
 
     var RANK_MODES = [
       { key: 'views', label: '総合(再生数)' },
-      { key: 'clicks', label: 'クリック数' }
+      { key: 'clicks', label: 'クリック数' },
+      { key: 'pv', label: '再生ピーク' },   // 最大瞬間風速（一番伸びた区間の再生/時）
+      { key: 'pc', label: 'クリックピーク' } // 同（クリック/時）
     ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/24時間
     // 旧モード名(early)は廃止。保存済みなら b120(2時間)へ読み替え。
     if (_rankMode === 'early') _rankMode = 'b120';
@@ -1539,10 +1544,12 @@
       captureSnaps_();
       var isBucket = _rankMode.charAt(0) === 'b';
       var bucketDef = isBucket ? SNAP_BUCKETS.filter(function (b) { return b.key === _rankMode; })[0] : null;
+      var pk0 = peakCache || {};
       var rows = uniq.map(function (x) {
         var it = x.it;
         var code = codeOf(it.shortUrl || '');
         var snap = (isBucket && snapCache[x.vid]) ? snapCache[x.vid][_rankMode] : null;
+        var pk = pk0[x.vid] || {};
         var cats = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
         return {
           vid: x.vid, yt: x.yt, acct: x.acct,
@@ -1551,13 +1558,21 @@
           clicks: (code && code in clicksCache) ? clicksCache[code] : null,
           code: code,
           snapV: snap ? snap.v : null, snapAge: snap ? snap.ageMin : null,
+          peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
+          peakC: pk.cRate != null ? pk.cRate : null, peakCWin: pk.cWin || '',
           ts: it.ts || (publishedCache[x.vid] || 0),
           bskyHref: it.shareUrl || it.shortUrl || it.postUrl || '',
           workUrl: it.workUrl || '', workState: it.workState || '旧作', cats: cats
         };
       });
-      // ソート対象の値。views=再生数 / clicks=クリック数 / bXX=そのバケットのスナップ値
-      function metricVal(r) { return _rankMode === 'clicks' ? r.clicks : (isBucket ? r.snapV : r.views); }
+      // ソート対象の値。views/clicks/bXX(バケット)/pv・pc(最大瞬間風速)
+      function metricVal(r) {
+        if (_rankMode === 'clicks') return r.clicks;
+        if (_rankMode === 'pv') return r.peakV;
+        if (_rankMode === 'pc') return r.peakC;
+        if (isBucket) return r.snapV;
+        return r.views;
+      }
       // 未記録(値なし)は除外（総合=再生数モードは一覧の基本なので除外しない）。
       if (_rankMode !== 'views') rows = rows.filter(function (r) { return metricVal(r) != null; });
       rows.sort(function (a, b) {
@@ -1571,7 +1586,9 @@
       }).join('') + '</div>';
       var noteHtml = isBucket
         ? '<div class="rank-note">投稿から約' + bucketDef.label + '時点の再生数ランキング（自動記録・この機能導入後の投稿が対象。「(◯後)」は実記録時刻。未記録は非表示）。</div>'
-        : (_rankMode === 'clicks' ? '<div class="rank-note">短縮URLのクリック数ランキング（クリックURLの無い投稿は非表示）。</div>' : '');
+        : (_rankMode === 'clicks' ? '<div class="rank-note">短縮URLのクリック数ランキング（クリックURLの無い投稿は非表示）。</div>'
+          : (_rankMode === 'pv' ? '<div class="rank-note">再生数の最大瞬間風速ランキング（一番伸びた時間帯の1時間あたり再生数。GASが自動記録・スプレッドシート保存。未記録は非表示）。</div>'
+            : (_rankMode === 'pc' ? '<div class="rank-note">クリック数の最大瞬間風速ランキング（一番伸びた時間帯の1時間あたりクリック数。GASが自動記録・保存。未記録は非表示）。</div>' : '')));
       var emptyHtml = rows.length ? '' : '<p class="hint" style="padding:10px 14px;">このランキングに表示できる記録がまだありません。</p>';
       el.innerHTML = tabsHtml + noteHtml + emptyHtml + '<div class="rank-list">' +
         rows.map(function (r, i) {
@@ -1584,6 +1601,9 @@
           var mViews = '<span class="' + (_rankMode === 'views' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
           var mClicks = '<span class="' + (_rankMode === 'clicks' ? 'rank-main' : '') + '" title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
           var mBucket = isBucket ? '<span class="rank-main" title="投稿から約' + bucketDef.label + 'の再生数">⏱ ' + num(r.snapV) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + ')</span></span>' : '';
+          var mPeak = (_rankMode === 'pv' || _rankMode === 'pc')
+            ? '<span class="rank-main" title="最大瞬間風速">🌀 ' + num(_rankMode === 'pv' ? r.peakV : r.peakC) + '/時<span class="rank-sub">(' + esc(_rankMode === 'pv' ? r.peakVWin : r.peakCWin) + ')</span></span>'
+            : '';
           return '<div class="rank-row' + topCls + '">' +
             '<span class="rank-num">' + rank + '</span>' +
             '<div class="rank-info">' +
@@ -1601,7 +1621,7 @@
               '</div>' +
               (r.cats ? '<div class="vrow-tags">' + r.cats + '</div>' : '') +
               '<div class="vmetrics">' +
-                mBucket + mViews + mClicks +
+                mPeak + mBucket + mViews + mClicks +
                 (r.bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
                 (r.yt ? '<a class="vlink vlink-yt" href="' + esc(r.yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
                 (r.workUrl ? '<a class="vlink vlink-work" href="' + esc(r.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
@@ -1647,6 +1667,8 @@
     } else {
       doRender();
     }
+    // ピーク/差分（GAS）を取得したら再描画（ピーク2モードに反映）。
+    fetchDeltas_(false, doRender);
   }
   try { window.YtRank = { renderRank: renderRank }; } catch (e) {}
 })();

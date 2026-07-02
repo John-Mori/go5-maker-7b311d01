@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-02F（再生数/クリック数の自動スナップショット＝今日/昨日/週の増加。要 setupTrigger 再実行＋YT_API_KEY設定）';
+var GAS_VERSION = '2026-07-02G（最大瞬間風速ランキング=一番伸びた時間帯と伸び率をピーク記録シートに永続保存）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -135,7 +135,7 @@ function doGet(e) {
       else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.postUri || '', p.short || '') };
       else if (p.action === 'settings_pull') out = settingsPull_();   // 端末間同期：非秘密設定の取得
       else if (p.action === 'settings_meta') out = settingsMeta_();   // 端末間同期：最終保存メタのみ（状態表示）
-      else if (p.action === 'deltas') out = { ok: true, deltas: computeDeltas_() }; // 今日/昨日/週の再生・クリック増加
+      else if (p.action === 'deltas') out = { ok: true, deltas: computeDeltas_(), peaks: computePeaks_() }; // 今日/昨日/週の増加＋最大瞬間風速
       else if (p.action === 'snapshot_now') { snapshotStats(); out = { ok: true, snapped: true }; } // 手動で即スナップ
       else out = { ok: true, shortUrl: p.postUri ? lookupShortByUri_(ch, p.postUri) : '' }; // 既定＝action=short
     } catch (err) { out = { ok: false, error: String(err) }; }
@@ -669,6 +669,22 @@ function statsSheet_() {
   if (sh.getLastRow() === 0) sh.appendRow(STATS_HEADERS);
   return sh;
 }
+// 最大瞬間風速（一番伸びた区間の伸び率と時間帯）を作品ごとに永続保存するシート。
+var PEAK_SHEET = 'ピーク記録';
+var PEAK_HEADERS = ['videoId', '再生ピーク(件/時)', '再生ピーク時間帯', 'クリックピーク(件/時)', 'クリックピーク時間帯', '更新日時'];
+function peakSheet_() {
+  var ss = openSS_();
+  var sh = ss.getSheetByName(PEAK_SHEET) || ss.insertSheet(PEAK_SHEET);
+  if (sh.getLastRow() === 0) sh.appendRow(PEAK_HEADERS);
+  return sh;
+}
+// ピーク記録シート → videoIdごとの {vRate,vWin,cRate,cWin}。
+function computePeaks_() {
+  var sh = peakSheet_(); var last = sh.getLastRow(); if (last < 2) return {};
+  var d = sh.getRange(2, 1, last - 1, PEAK_HEADERS.length).getValues(); var out = {};
+  d.forEach(function (r) { if (!r[0]) return; out[r[0]] = { vRate: r[1] === '' ? null : Number(r[1]), vWin: r[2] || '', cRate: r[3] === '' ? null : Number(r[3]), cWin: r[4] || '' }; });
+  return out;
+}
 function ytApiKey_() { return prop_('YT_API_KEY') || ''; }
 function ytIdFromUrl_(u) {
   u = String(u || '');
@@ -720,6 +736,30 @@ function snapshotStats() {
   var sh = statsSheet_(); var last = sh.getLastRow();
   var data = last >= 2 ? sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues() : [];
   var idx = {}; for (var i = 0; i < data.length; i++) idx[data[i][1] + '|' + data[i][4]] = i + 2;
+  // 前回スナップ(vidごとの最新の累計と時刻)＝最大瞬間風速(区間の伸び率)算出用。
+  var prevByVid = {};
+  for (var j = 0; j < data.length; j++) {
+    var pv = data[j][4]; if (!pv) continue;
+    var tstr = String(data[j][0] || ''), tms = Date.parse(tstr.replace(' ', 'T')) || 0;
+    var pp = prevByVid[pv];
+    if (!pp || tms > pp.tms) prevByVid[pv] = { tms: tms, tstr: tstr, views: data[j][5] === '' ? null : Number(data[j][5]), clicks: data[j][6] === '' ? null : Number(data[j][6]) };
+  }
+  var nowMs = new Date().getTime();
+  // ピーク記録シートを読み込み（vidごとの現ピーク）。今runの更新はpeakUpdatesへ。
+  var psh = peakSheet_(); var plast = psh.getLastRow();
+  var pdata = plast >= 2 ? psh.getRange(2, 1, plast - 1, PEAK_HEADERS.length).getValues() : [];
+  var pidx = {}; for (var pk = 0; pk < pdata.length; pk++) pidx[pdata[pk][0]] = pk + 2;
+  var peakUpdates = {};
+  function curPeak_(vid, kind) {
+    if (peakUpdates[vid] && peakUpdates[vid][kind + 'Rate'] != null) return peakUpdates[vid][kind + 'Rate'];
+    var rn = pidx[vid]; if (rn) { var col = kind === 'v' ? 1 : 3; var val = pdata[rn - 2][col]; return val === '' ? null : Number(val); }
+    return null;
+  }
+  function considerPeak_(vid, kind, rate, win) {
+    if (rate == null || !(rate > 0)) return; // 増加区間のみ
+    var cur = curPeak_(vid, kind);
+    if (cur == null || rate > cur) { var u = peakUpdates[vid] || (peakUpdates[vid] = {}); u[kind + 'Rate'] = Math.round(rate * 10) / 10; u[kind + 'Win'] = win; }
+  }
   var appends = [];
   recs.forEach(function (r) {
     var v = views[r.vid]; var c = r.code ? clickByCode[r.code] : null;
@@ -733,8 +773,30 @@ function snapshotStats() {
       appends.push([nowStr, today, r.channel, r.post_id, r.vid, v == null ? '' : v, c == null ? '' : c]);
       idx[key] = -1;
     }
+    // 最大瞬間風速：前回スナップからの伸び率(件/時)。妥当な間隔(0.2〜6h)のみ採用。
+    var prev = prevByVid[r.vid];
+    if (prev && prev.tms) {
+      var hrs = (nowMs - prev.tms) / 3600000;
+      if (hrs >= 0.2 && hrs <= 6) {
+        var win = String(prev.tstr).slice(5) + '〜' + nowStr.slice(11); // MM-dd HH:mm〜HH:mm
+        if (v != null && prev.views != null) considerPeak_(r.vid, 'v', (v - prev.views) / hrs, win);
+        if (c != null && prev.clicks != null) considerPeak_(r.vid, 'c', (c - prev.clicks) / hrs, win);
+      }
+    }
   });
   if (appends.length) sh.getRange(sh.getLastRow() + 1, 1, appends.length, STATS_HEADERS.length).setValues(appends);
+  // ピーク更新を永続化（vidごとにupsert。既存より大きい時だけ更新済み）。
+  Object.keys(peakUpdates).forEach(function (vid) {
+    var u = peakUpdates[vid], rn = pidx[vid];
+    if (rn) {
+      if (u.vRate != null) { psh.getRange(rn, 2).setValue(u.vRate); psh.getRange(rn, 3).setValue(u.vWin); }
+      if (u.cRate != null) { psh.getRange(rn, 4).setValue(u.cRate); psh.getRange(rn, 5).setValue(u.cWin); }
+      psh.getRange(rn, 6).setValue(nowStr);
+    } else {
+      psh.appendRow([vid, u.vRate == null ? '' : u.vRate, u.vWin || '', u.cRate == null ? '' : u.cRate, u.cWin || '', nowStr]);
+      pidx[vid] = psh.getLastRow();
+    }
+  });
   pruneStats_(sh, 12);
 }
 // 12日より古い履歴行を掃除（週次差分に必要なぶんだけ保持）。
