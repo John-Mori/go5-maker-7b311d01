@@ -37,7 +37,10 @@ catch (e) { die('gas_deploy_config.json が壊れています: ' + e.message); }
 for (const k of ['scriptId', 'deploymentId', 'execUrl']) {
   if (!cfg[k]) die('gas_deploy_config.json に "' + k + '" がありません。GAS初期設定.bat をやり直してください。');
 }
-const adminSecret = cfg.adminSecret || '';
+// ADMIN_SECRET 未設定時は GAS 側のソフト鍵（shortSecret_ の既定値）にフォールバック。
+// これを送らないと admin_setup が bad_secret で弾かれ、トリガー再設定が実行されない。
+const SOFT_ADMIN_SECRET = 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol';
+const adminSecret = cfg.adminSecret || SOFT_ADMIN_SECRET;
 
 // ---- ローカル GAS_VERSION をパース ----
 if (!existsSync(CODE_PATH)) die('gas/コード.gs が見つかりません。');

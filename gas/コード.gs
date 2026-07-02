@@ -127,9 +127,10 @@ function doGet(e) {
     return jsonOut_(consolidateTitle_());
   }
   // デプロイ後の自動後処理: トリガー再設定＋ヘッダ移行を一括冪等実行（scripts/deploy_gas.mjs が反映確認後に呼ぶ）。
-  //   secret はスクリプトプロパティ ADMIN_SECRET（未設定なら既存のソフト鍵にフォールバック）と照合。
+  //   secret はスクリプトプロパティ ADMIN_SECRET（未設定なら固定のソフト鍵にフォールバック）と照合。
+  //   ※ソフト鍵は deploy_gas.mjs の SOFT_ADMIN_SECRET と一致させる（短縮URL用 shortSecret_ とは独立）。
   if (p.action === 'admin_setup') {
-    var adminWant = prop_('ADMIN_SECRET') || shortSecret_();
+    var adminWant = prop_('ADMIN_SECRET') || 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol';
     if (String(p.secret || '') !== adminWant) return jsonOut_({ ok: false, error: 'bad_secret' });
     var mig = migrateHeaders_();
     setupTrigger();
