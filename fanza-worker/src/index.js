@@ -425,6 +425,16 @@ async function scrapeFanzaItem(cid, srcUrl) {
   var makerId = "";
   var bestCount = 0;
   for (var mid in makerCounts) { if (makerCounts[mid] > bestCount) { bestCount = makerCounts[mid]; makerId = mid; } }
+  // サークル名：採用した makerId のリンクのアンカーテキスト（表示名）から拾う（JSON-LDで取れない時の保険）。
+  if (makerId && !circleName) {
+    var anchorRe = new RegExp("article=maker\\/id=" + makerId + "\\/[^>]*>\\s*([^<]{1,60}?)\\s*<", "i");
+    var anchorM = html.match(anchorRe);
+    if (anchorM && anchorM[1]) {
+      var nm = anchorM[1].replace(/&amp;/g, "&").trim();
+      // 「もっと見る」等のUI文言や空は除外
+      if (nm && !/^(もっと見る|一覧|>|＞|»)$/.test(nm)) circleName = nm;
+    }
+  }
   var authorArr = makerId
     ? [{ id: makerId, name: circleName || "" }]
     : (circleName ? [{ name: circleName }] : []);

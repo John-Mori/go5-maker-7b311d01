@@ -61,18 +61,46 @@
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
 
   var SORTS = [
+    { key: 'price_asc', label: '現在価格が安い順' },
     { key: 'date_desc', label: '発売日が新しい順' },
     { key: 'date_asc', label: '発売日が古い順' },
     { key: 'rank', label: '売上(人気)が多い順' },
     { key: 'rank7d', label: '直近1週間で売れてる順' },
     { key: 'discount_desc', label: '値引き率が高い順' }
   ];
-  // 「直近1週間で売れてる順」の注記：DMM APIに「過去N日間の売上」という指標は無いため、
-  // 発売日で絞り込む実装は「直近1週間に発売された新作」限定になり、対象が無いサークルは
-  // 常に0件を返していた(バグ)。sort=rank自体が直近の売れ行きを反映する動的な人気順のため、
-  // 発売日フィルタは廃止し「売上(人気)」と同じ人気順データを使う（＝空にならない・正しい近似）。
-  var RANK7D_NOTE = '※「直近1週間で売れてる順」はDMMの人気(売れ行き)ランキング順です(発売日での絞り込みはしていないため常に結果が出ます)。';
+  // 「直近1週間で売れてる順」の注記。
+  var RANK7D_NOTE = '※「直近1週間で売れてる順」は、各作品のレビュー件数を定期的に記録しておき「今の件数−約1週間前の件数」の伸びが大きい順です(レビューは購入者が書くため売れ行きの近似)。記録が溜まるまで(初回〜数日)は差分が出ず、その間はDMM人気順で表示します。';
   var SALES_NOTE = '※DMMは実売本数を公開していないため、各作品の「売れ行きの目安」には販売数と相関するレビュー件数を表示しています(実数ではなく目安)。';
+
+  // ── レビュー件数スナップショット（「直近1週間で売れてる順」の差分計算用）──
+  //   cid毎に {at,c} を最大8件・45日以内で保持。12時間に1回だけ記録して肥大化を防ぐ。
+  var K_RVSNAP = 'cand_rvsnap';
+  function recordReviewSnapshots(items) {
+    var snap = lsGet(K_RVSNAP, '{}'), now = new Date().getTime(), changed = false, cutoff = now - 45 * 86400000;
+    (items || []).forEach(function (it) {
+      if (!it || it.cid == null || it.reviewCount == null) return;
+      var arr = snap[it.cid] || [];
+      var last = arr[arr.length - 1];
+      if (!last || (now - last.at) > 12 * 3600 * 1000) {
+        arr.push({ at: now, c: it.reviewCount });
+        snap[it.cid] = arr.filter(function (s) { return s.at >= cutoff; }).slice(-8);
+        changed = true;
+      }
+    });
+    if (changed) lsSet(K_RVSNAP, snap);
+  }
+  // 約1週間前のスナップとの差分（＝直近1週間で増えたレビュー数≒売れた数の近似）。基準が新しすぎ/無ければ null。
+  function weekReviewDelta(cid, currentCount) {
+    if (currentCount == null) return null;
+    var snap = lsGet(K_RVSNAP, '{}'), arr = snap[cid];
+    if (!arr || !arr.length) return null;
+    var target = new Date().getTime() - 7 * 86400000, best = null;
+    arr.forEach(function (s) { if (!best || Math.abs(s.at - target) < Math.abs(best.at - target)) best = s; });
+    if (!best) return null;
+    var ageDays = (new Date().getTime() - best.at) / 86400000;
+    if (ageDays < 3) return null; // 基準が新しすぎ＝まだ1週間分の差分が測れない
+    return Math.max(0, currentCount - best.c);
+  }
 
   // ── サークル作品の取得（全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ） ──
   //   force=true でキャッシュを無視して取り直す（🔁リロードボタン用）。
@@ -93,16 +121,27 @@
       if (!d || !d.ok) { cb(null, (d && d.error) === 'bad_secret' ? '共有シークレット不一致(⚙️詳細設定)' : ('取得エラー: ' + ((d && d.error) || '不明'))); return; }
       var items = d.items || [];
       // 空データはキャッシュしない（一時失敗やサークル未収録を固定化しない）。
-      if (items.length) lsSet(ck, { at: new Date().getTime(), items: items });
+      if (items.length) { lsSet(ck, { at: new Date().getTime(), items: items }); recordReviewSnapshots(items); }
       cb(items, null);
     }).catch(function () { cb(null, '通信エラー'); });
   }
+  function priceOf(it) { return (it.price != null) ? it.price : (it.listPrice != null ? it.listPrice : Infinity); }
   function sortItems(items, mode) {
     var a = items.slice();
-    if (mode === 'date_asc') a.sort(function (x, y) { return String(x.date).localeCompare(String(y.date)); });
+    if (mode === 'price_asc') a.sort(function (x, y) { return priceOf(x) - priceOf(y) || String(y.date).localeCompare(String(x.date)); });
+    else if (mode === 'date_asc') a.sort(function (x, y) { return String(x.date).localeCompare(String(y.date)); });
     else if (mode === 'date_desc') a.sort(function (x, y) { return String(y.date).localeCompare(String(x.date)); });
     else if (mode === 'discount_desc') a.sort(function (x, y) { return (y.discountPct || 0) - (x.discountPct || 0) || String(y.date).localeCompare(String(x.date)); });
-    // rank / rank7d はAPIの並びをそのまま使う
+    else if (mode === 'rank7d') {
+      // 直近1週間のレビュー増(≒売れ行き)が大きい順。差分が測れない作品はレビュー総数で後ろに並べる。
+      a.sort(function (x, y) {
+        var dx = weekReviewDelta(x.cid, x.reviewCount), dy = weekReviewDelta(y.cid, y.reviewCount);
+        if (dx != null && dy != null) return dy - dx || (y.reviewCount || 0) - (x.reviewCount || 0);
+        if (dx != null) return -1; if (dy != null) return 1;
+        return (y.reviewCount || 0) - (x.reviewCount || 0); // 差分未計測どうしは総レビュー数(人気の近似)
+      });
+    }
+    // rank はAPIの並び(人気順)をそのまま使う
     return a;
   }
 
@@ -364,7 +403,7 @@
     body.innerHTML = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
       '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
-      '<button id="candReload" type="button" class="ghost" title="全件を取り直す(キャッシュを無視)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">🔁 リロード</button>' +
+      '<button id="candReload" type="button" class="ghost" title="全件を取り直す(キャッシュを無視)" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '<button id="candEditTab" type="button" class="ghost" title="タブ名・サークルを編集" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
       '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
       '</div>' +
@@ -381,6 +420,13 @@
       var el = $('candMakerList');
       if (!el || _activeTab !== tabId) return;
       if (err) { el.innerHTML = '<p class="hint" style="padding:8px;">⚠️ ' + esc(err) + '</p>'; return; }
+      // タブ名が自動生成の「サークルNNN」のままで、一覧からサークル名が取れたら本名へ自動修正。
+      if (items && items.length && items[0].makerName && /^サークル\d+$/.test(tab.name || '')) {
+        var tabs2 = lsGet(K_TABS, '[]');
+        tabs2.forEach(function (t) { if (t.id === tabId) { t.name = items[0].makerName; t.makerName = items[0].makerName; } });
+        lsSet(K_TABS, tabs2);
+        render(); return; // タブバーを本名で再描画（この後の描画は再入で行われる）
+      }
       var hidden = lsGet(hiddenKey(tabId), '[]');
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
       var arr = sortItems(items, _sort).filter(function (it) { return _showHidden ? hset[it.cid] : !hset[it.cid]; });
@@ -473,12 +519,15 @@
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';
     // 売れ行きの数値：DMM APIは実売本数を公開しないため、レビュー件数を「売れ行きの代理指標」として表示。
-    //   人気順/直近1週間で売れてる順のときは目立たせる。他の並び順でも件数があれば小さく表示。
+    //   直近1週間で売れてる順は「約1週間の伸び(差分)」があればそれを、無ければ総件数(計測中)を表示。
     var rc = it.reviewCount;
-    var isPop = (_sort === 'rank' || _sort === 'rank7d');
     var avg = (it.reviewAvg != null && it.reviewAvg !== '') ? (' ★' + it.reviewAvg) : '';
     var salesHtml = '';
-    if (rc != null && isPop) {
+    if (_sort === 'rank7d') {
+      var wd = weekReviewDelta(it.cid, rc);
+      if (wd != null) salesHtml = '<div class="cand-sales">🔥 直近1週間の伸び：<b>レビュー +' + Number(wd).toLocaleString('ja-JP') + '件</b>' + (rc != null ? '（累計' + Number(rc).toLocaleString('ja-JP') + '件）' : '') + '</div>';
+      else if (rc != null) salesHtml = '<div class="cand-sales">🔥 売れ行きの目安：<b>レビュー ' + Number(rc).toLocaleString('ja-JP') + '件</b>' + avg + '<span style="font-weight:400;color:var(--sub);">（差分は記録が溜まり次第）</span></div>';
+    } else if (_sort === 'rank' && rc != null) {
       salesHtml = '<div class="cand-sales">🔥 売れ行きの目安：<b>レビュー ' + Number(rc).toLocaleString('ja-JP') + '件</b>' + avg + '</div>';
     } else if (rc != null && rc > 0) {
       salesHtml = '<div class="cand-sub">レビュー ' + Number(rc).toLocaleString('ja-JP') + '件' + avg + '</div>';
@@ -494,6 +543,7 @@
         '<div class="cand-price">' + priceHtml + '</div>' +
         '<div class="cand-actions">' +
           (it.url ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+          '<span style="flex:1 1 auto;"></span>' + // 非表示/再表示/削除ボタンを右端へ寄せる
           actionHtml +
         '</div>' +
       '</div></div>';

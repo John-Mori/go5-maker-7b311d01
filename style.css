@@ -133,7 +133,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-list-price{text-decoration:line-through;color:var(--sub);}
 .cand-sale{color:#c0392b;}
 .cand-off{background:#c0392b;color:#fff8ee;border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;}
-.cand-actions{display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap;}
+.cand-actions{display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:nowrap;}
 .cand-hide-btn{width:auto;margin:0;flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
 #pageCand main{padding-top:2px;}
 #pageCand input[type=text]{width:100%;box-sizing:border-box;background:#fffef9;color:var(--ink);border:1px solid var(--line);}
