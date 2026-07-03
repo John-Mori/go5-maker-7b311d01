@@ -569,6 +569,8 @@
     var cid = (r && r.ok) ? r.cid : '';
     return (cid && movieInfoCache[cid] && movieInfoCache[cid].title) ? movieInfoCache[cid] : null;
   }
+  // drafts.js（下書きの作品名/作者表示）などから参照できるよう公開（読み取りのみ）。
+  try { window.Go5WorkInfo = function (url) { return fanzaInfoForWorkUrl_(url); }; } catch (e) {}
   function recordToSheet(record) {
     var gasUrl = (els.gasUrl.value || '').trim(); if (!gasUrl) return Promise.resolve(null);
     var vid = (record.videoId || currentVideoId || '');

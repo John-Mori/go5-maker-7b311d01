@@ -85,10 +85,17 @@
     var pf = (photoInput && photoInput.files && photoInput.files[0]) ? photoInput.files[0] : null;
 
     function finish(photoDataUrl, photoName) {
+      // 作品URLからDMM作品情報（作品名/作者）をスナップショット（取得済みキャッシュのみ・通信しない）。
+      var wTitle = '', wAuthor = '';
+      try {
+        var wi = (workUrl && window.Go5WorkInfo) ? window.Go5WorkInfo(workUrl) : null;
+        if (wi) { wTitle = wi.title || ''; wAuthor = wi.author || ''; }
+      } catch (e) {}
       var draft = {
         id: 'd' + new Date().getTime(), ts: new Date().getTime(),
         photo: photoDataUrl || null, photoName: photoName || '',
         author: author, detail: detail, top: top, workUrl: workUrl,
+        workTitle: wTitle, workAuthor: wAuthor,
         attrs: attrs, rebuild: rebuild,
         label: makeLabel_(top, author)
       };
@@ -184,14 +191,22 @@
       return;
     }
     list.innerHTML = arr.map(function (d, i) {
-      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #333;">' +
-        (d.photo ? '<img src="' + d.photo + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:0 0 auto;">' : '<div style="width:44px;height:44px;border-radius:6px;background:#2a2a3e;flex:0 0 auto;"></div>') +
-        '<div style="flex:1;min-width:0;">' +
-          '<div style="font-size:.88rem;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(d.label) + '</div>' +
-          '<div style="font-size:.75rem;color:#888;">' + esc(fmtTs(d.ts)) + '</div>' +
+      // 題名部分：作品URLのDMM作品名＋作者（保存時スナップ）＋保存日時。無ければ従来のコメントラベル。
+      var line1 = d.workTitle || d.label;
+      var line2 = d.workAuthor ? ('🏷 ' + d.workAuthor) : (d.workTitle ? d.label : '');
+      // 幅が足りない時は flex-wrap でボタン行が下段へ落ちる（スマホはみ出し対策）。
+      // ※ボタンは width:auto 明示＝グローバル button{width:100%} の波及ではみ出す事故(INC-47系)の再発防止。
+      return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #2a3346;">' +
+        (d.photo ? '<img src="' + d.photo + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:0 0 auto;">' : '<div style="width:44px;height:44px;border-radius:6px;background:#0e1422;flex:0 0 auto;"></div>') +
+        '<div style="flex:1 1 160px;min-width:0;">' +
+          '<div style="font-size:.88rem;color:#eef2f7;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(line1) + '</div>' +
+          (line2 ? '<div style="font-size:.76rem;color:#9fb0c3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(line2) + '</div>' : '') +
+          '<div style="font-size:.72rem;color:#8a93a3;">保存: ' + esc(fmtTs(d.ts)) + '</div>' +
         '</div>' +
-        '<button type="button" data-recall="' + i + '" style="flex:0 0 auto;padding:7px 12px;border-radius:8px;border:none;background:#2bb3c0;color:#04222a;font-size:.82rem;font-weight:700;cursor:pointer;">呼び出す</button>' +
-        '<button type="button" data-del="' + i + '" style="flex:0 0 auto;padding:7px 9px;border-radius:8px;border:1px solid #555;background:transparent;color:#999;font-size:.82rem;cursor:pointer;">🗑</button>' +
+        '<div style="display:flex;gap:6px;flex:0 0 auto;margin-left:auto;">' +
+          '<button type="button" data-recall="' + i + '" style="width:auto;margin:0;flex:0 0 auto;padding:7px 12px;border-radius:8px;border:none;background:#2bb3c0;color:#04222a;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap;">呼び出す</button>' +
+          '<button type="button" data-del="' + i + '" style="width:auto;margin:0;flex:0 0 auto;padding:7px 10px;border-radius:8px;border:1px solid #555;background:transparent;color:#999;font-size:.82rem;cursor:pointer;">🗑</button>' +
+        '</div>' +
       '</div>';
     }).join('');
     list.querySelectorAll('[data-recall]').forEach(function (b) {

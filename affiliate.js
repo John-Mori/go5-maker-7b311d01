@@ -13,6 +13,7 @@
   /* ── タブ切替（動画作成／カレンダー／投稿／アフィリンク／検証の5タブ） ── */
   var TABS = [
     { btn: 'tabRank',    page: 'pageRank'    },
+    { btn: 'tabCand',    page: 'pageCand'    },
     { btn: 'tabReserve', page: 'pageReserve' },
     { btn: 'tabVerify', page: 'pageVerify'   },
     { btn: 'tabMovie',  page: 'pageMovie'    },
@@ -39,6 +40,7 @@
     document.documentElement.setAttribute('data-tab', activeBtnId);
     if (activeBtnId === 'tabCal') lazyLoadCalendar();
     if (activeBtnId === 'tabRank'    && window.YtRank)   window.YtRank.renderRank();
+    if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
     if (activeBtnId === 'tabReserve' && window.Scheduler) window.Scheduler._renderTab();
   }
   TABS.forEach(function (t) {

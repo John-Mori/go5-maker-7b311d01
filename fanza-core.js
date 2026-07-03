@@ -27,6 +27,7 @@ function parseFanzaItem(item) {
 
   var authorArr = (item.iteminfo && Array.isArray(item.iteminfo.author)) ? item.iteminfo.author : [];
   var author = authorArr.length > 0 ? String(authorArr[0].name || '') : '';
+  var authorId = authorArr.length > 0 && authorArr[0].id != null ? String(authorArr[0].id) : ''; // サークル/作者ID（候補タブのサークル一覧取得に使用）
 
   // サムネ・サンプル画像・ジャンル（詳細モーダル用）。
   var img = item.imageURL || {};
@@ -44,6 +45,7 @@ function parseFanzaItem(item) {
     title: item.title || '',
     partial: !!item.partial,   // 画像のみの部分情報（API未収録＋ページ取得不能の作品）
     author: author,
+    authorId: authorId,
     listPrice: listPrice,
     price: price,
     discountPct: discountPct,

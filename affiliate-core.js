@@ -39,12 +39,30 @@ function buildAffiliateLink(rawUrl, afId) {
   return { ok: true, cid, link };
 }
 
+/**
+ * アフィリンク付きURL・計測パラメータ付きURLを「素の作品URL」に正規化する。
+ * - al.fanza.co.jp/?lurl=… → lurl をデコードして取り出す
+ * - ?以降・#以降の計測パラメータを除去（dmm系は cid= がパス側にあるため安全）
+ * @param {string} rawUrl
+ * @returns {string} 正規化済みURL（不正なら ''）
+ */
+function normalizeWorkUrl(rawUrl) {
+  let u = (rawUrl || '').trim();
+  if (!u) return '';
+  const m = u.match(/[?&]lurl=([^&]+)/i);
+  if (m) { try { u = decodeURIComponent(m[1]); } catch (e) { /* デコード不能なら原文のまま */ } }
+  u = u.split('#')[0].split('?')[0].trim();
+  if (!/^https?:\/\//i.test(u)) return '';
+  return u;
+}
+
 // ブラウザ環境向けグローバル公開
 if (typeof window !== 'undefined') {
   window.buildAffiliateLink = buildAffiliateLink;
+  window.normalizeWorkUrl = normalizeWorkUrl;
 }
 
 // Node.js（CommonJS）向けエクスポート
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildAffiliateLink };
+  module.exports = { buildAffiliateLink, normalizeWorkUrl };
 }

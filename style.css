@@ -14,8 +14,9 @@ html[data-account="acc2"]{           /* 宵桜艶帖：ワイン × 桜ピンク
   --app-bg:#2e1224; --card:#381630; --line:#57294a;
   --accent:#ff85ac; --accent2:#ffce9a; --ink:#fbeef4; --sub:#d6abc0;
 }
-/* ── ランキング・予約タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
+/* ── ランキング・候補・予約タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
 html[data-tab="tabRank"],
+html[data-tab="tabCand"],
 html[data-tab="tabReserve"]{
   --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
   --accent:#b8860b; --accent2:#a86b1f; --ink:#4b3f2c; --sub:#8a7a5c;
@@ -111,6 +112,28 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vtag-rebuild{color:#3fb6a8;border-color:#3fb6a8;font-weight:700;}
 .vtag-remade{color:#c98a3a;border-color:#c98a3a;font-weight:700;}
 .vrow-h .vtag-scheduled,.vtag-scheduled{color:#e8b31f;border-color:#e8b31f;font-weight:700;}  /* YouTube予約公開の「投稿予定」 */
+
+/* ── 💡候補タブ（クリーム面・作品候補メモ＋サークル作品一覧） ── */
+.cand-tabs{display:flex;gap:6px;padding:10px 2px 0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;border-bottom:1px solid var(--line);}
+.cand-tabs::-webkit-scrollbar{display:none;}
+.cand-tab{flex:0 0 auto;width:auto;white-space:nowrap;font-family:inherit;font-size:13.5px;font-weight:700;background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:12px 12px 0 0;padding:9px 13px;cursor:pointer;margin-top:0;}
+.cand-tab.active{color:var(--ink);border-color:var(--line) var(--line) var(--accent) var(--line);border-bottom:2px solid var(--accent);}
+.cand-tab-add{color:var(--accent);border-style:dashed;}
+.cand-card{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:8px;align-items:flex-start;}
+.cand-thumb{width:72px;height:72px;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#eee2c5;border:1px solid var(--line);}
+.cand-thumb-ph{display:block;}
+.cand-info{flex:1;min-width:0;}
+.cand-title{font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.cand-sub{font-size:11px;color:var(--sub);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cand-price{font-size:13px;color:var(--ink);margin-top:3px;}
+.cand-list-price{text-decoration:line-through;color:var(--sub);}
+.cand-sale{color:#c0392b;}
+.cand-off{background:#c0392b;color:#fff8ee;border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;}
+.cand-actions{display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap;}
+.cand-hide-btn{width:auto;margin:0;flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
+#pageCand main{padding-top:2px;}
+#pageCand input[type=text]{width:100%;box-sizing:border-box;background:#fffef9;color:var(--ink);border:1px solid var(--line);}
+#pageCand select{width:auto;font-size:13px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#fffef9;color:var(--ink);}
 /* 小さめ写真ボタン（動画作成タブ） */
 .photo-btn-sm{padding:10px !important;font-size:14px !important;}
 /* カテゴリのチェック用カラーチップ（モーダル・動画作成タブ共通） */

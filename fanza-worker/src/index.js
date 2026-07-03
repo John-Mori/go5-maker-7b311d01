@@ -94,6 +94,58 @@ export default {
       return json({ ok: true, item }, 200, cors);
     }
 
+    // ── サークル（maker）の作品一覧：候補タブの「サークルタブ」用 ──────────────────
+    //   POST /api/fanza-maker-list { makerId, sort?, offset?, gteDays? }
+    //   sort: "date"(既定・発売日新しい順) | "rank"(人気=実売の近似) | "review"
+    //   gteDays: 指定日数以内に発売された作品に絞る（例 7 = 直近1週間×rank で「今売れてる」）
+    //   同人フロア(digital_doujin)固定。1回最大100件・offsetでページング。
+    if (path === "/api/fanza-maker-list") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      const cors2 = corsHeaders(origin, allowed);
+      if (!cors2) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors2);
+      const sec2 = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || sec2 !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors2);
+      if (!env.FANZA_API_ID || !env.FANZA_AFFILIATE_ID) return json({ ok: false, error: "api_not_configured" }, 500, cors2);
+      let mbody;
+      try { mbody = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, cors2); }
+      const makerId = String(mbody.makerId || "").trim();
+      if (!/^\d{1,10}$/.test(makerId)) return json({ ok: false, error: "bad_maker_id" }, 400, cors2);
+      const sort = ({ date: "date", rank: "rank", review: "review" })[String(mbody.sort || "date")] || "date";
+      const offset = Math.min(Math.max(parseInt(mbody.offset || "1", 10) || 1, 1), 901);
+      const params = new URLSearchParams({
+        api_id: env.FANZA_API_ID, affiliate_id: env.FANZA_AFFILIATE_ID,
+        site: "FANZA", service: "doujin", floor: "digital_doujin",
+        article: "maker", article_id: makerId,
+        hits: "100", offset: String(offset), sort: sort, output: "json",
+      });
+      const gteDays = parseInt(mbody.gteDays || "0", 10) || 0;
+      if (gteDays > 0) {
+        const d = new Date(Date.now() - gteDays * 86400000);
+        const p = (n) => (n < 10 ? "0" : "") + n;
+        params.set("gte_date", d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T00:00:00");
+      }
+      const data = await fetchDmmJson(DMM_API_BASE + "?" + params.toString(), 2);
+      if (!data || !data.result) return json({ ok: false, error: "api_error" }, 502, cors2);
+      const items = (Array.isArray(data.result.items) ? data.result.items : []).map((it) => {
+        const prices = it.prices || {};
+        const lp = prices.list_price != null && prices.list_price !== "" ? parseInt(prices.list_price, 10) : null;
+        const pr = prices.price != null && prices.price !== "" ? parseInt(prices.price, 10) : null;
+        const disc = (lp && pr && lp > 0 && pr < lp) ? Math.round((1 - pr / lp) * 100) : 0;
+        const img = it.imageURL || {};
+        const rv = it.review || {};
+        const mk = (it.iteminfo && Array.isArray(it.iteminfo.maker) && it.iteminfo.maker[0]) ? it.iteminfo.maker[0] : null;
+        return {
+          cid: it.content_id || "", title: it.title || "", url: (it.URL || "").split("?")[0],
+          date: it.date || "", listPrice: lp, price: pr, discountPct: disc,
+          reviewCount: rv.count != null ? rv.count : null, reviewAvg: rv.average != null ? rv.average : null,
+          thumb: String(img.list || img.small || img.large || ""),
+          makerName: mk ? String(mk.name || "") : "",
+        };
+      });
+      return json({ ok: true, total: data.result.total_count || items.length, offset: offset, items }, 200, cors2);
+    }
+
     // ── PC取得依頼キュー：フル情報が取れなかったcid一覧＋登録済み上書き一覧（PCバッチが読む）──
     //    ※認証は「配布しない管理鍵(ADMIN_SECRET)」。公開ソフト鍵(SHARED_SECRET)では読めない。
     if (path === "/api/fanza-queue") {

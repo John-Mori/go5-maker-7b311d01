@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildAffiliateLink } = require('../affiliate-core.js');
+const { buildAffiliateLink, normalizeWorkUrl } = require('../affiliate-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -169,6 +169,26 @@ test('T-8: Books 2階層+パラメータ付き → cid=content_id・?以降除�
   assert.strictEqual(r1.ok, true);
   assert.strictEqual(r1.cid, 'b915awnmg04393');
   assert.strictEqual(r1.link, r2.link, 'link with params should equal link without params');
+});
+
+// ────────────────────────────────────────────────────────────
+// N-1〜N-4  normalizeWorkUrl（アフィリンク→素の作品URL）
+// ────────────────────────────────────────────────────────────
+test('N-1: al.fanza アフィリンク → lurl の素URLへ正規化', function () {
+  const aff = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fwww.dmm.co.jp%2Fdc%2Fdoujin%2F-%2Fdetail%2F%3D%2Fcid%3Dd_748504%2F&af_id=test-001&ch=toolbar&ch_id=link';
+  assert.strictEqual(normalizeWorkUrl(aff), 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_748504/');
+});
+test('N-2: Booksアフィリンク → 素URLへ正規化', function () {
+  const aff = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fbook.dmm.co.jp%2Fproduct%2F6277990%2Fb915awnmg04393%2F&af_id=x&ch=toolbar&ch_id=link';
+  assert.strictEqual(normalizeWorkUrl(aff), 'https://book.dmm.co.jp/product/6277990/b915awnmg04393/');
+});
+test('N-3: 計測パラメータ付き素URL → ?以降除去', function () {
+  assert.strictEqual(normalizeWorkUrl('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_748504/?dmmref=x#top'),
+    'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_748504/');
+});
+test('N-4: 空/非URL → 空文字', function () {
+  assert.strictEqual(normalizeWorkUrl(''), '');
+  assert.strictEqual(normalizeWorkUrl('d_748504'), '');
 });
 
 // ────────────────────────────────────────────────────────────
