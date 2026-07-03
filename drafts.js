@@ -150,9 +150,9 @@
       'align-items:center', 'justify-content:center', 'padding:16px', 'box-sizing:border-box'
     ].join(';');
     var card = document.createElement('div');
-    card.style.cssText = 'background:#1a1a2e;border-radius:14px;padding:18px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;color:#eee;box-sizing:border-box;';
+    card.style.cssText = 'background:#141a26;border-radius:14px;padding:18px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;color:#eee;box-sizing:border-box;';
     var title = document.createElement('div');
-    title.style.cssText = 'font-size:1.05rem;font-weight:700;margin-bottom:10px;color:#d4b3ff;';
+    title.style.cssText = 'font-size:1.05rem;font-weight:700;margin-bottom:10px;color:#2bb3c0;';
     title.textContent = '📝 下書きから呼び出し';
     var list = document.createElement('div');
     list.id = 'draftPickerList';
@@ -171,7 +171,18 @@
     var list = $('draftPickerList');
     if (!list) return;
     var arr = loadDrafts();
-    if (!arr.length) { list.innerHTML = '<p style="color:#999;font-size:.88rem;">保存済みの下書きはまだありません。「📝 下書き保存」で今の内容を保存できます。</p>'; return; }
+    if (!arr.length) {
+      // 別アカウントに下書きがある場合はそれも案内（アカウント別保存のため「消えた?」を防ぐ）。
+      var other = (acctId() === 'acc2') ? 'acc1' : 'acc2';
+      var otherName = (other === 'acc2') ? '宵桜艶帖' : '月詠み';
+      var otherN = 0;
+      try { otherN = (JSON.parse(localStorage.getItem('movie_drafts__' + other) || '[]') || []).length; } catch (e) {}
+      list.innerHTML = '<p style="color:var(--sub);font-size:.88rem;line-height:1.7;">' +
+        'このアカウントの下書きはまだありません。<br>プレビュー欄の「📝 下書き保存」で今の内容を保存できます。' +
+        (otherN ? '<br><b style="color:var(--accent);">' + otherName + '</b>アカウントに ' + otherN + '件 あります（上部でアカウントを切り替えてください）。' : '') +
+        '</p>';
+      return;
+    }
     list.innerHTML = arr.map(function (d, i) {
       return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #333;">' +
         (d.photo ? '<img src="' + d.photo + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:0 0 auto;">' : '<div style="width:44px;height:44px;border-radius:6px;background:#2a2a3e;flex:0 0 auto;"></div>') +
@@ -179,7 +190,7 @@
           '<div style="font-size:.88rem;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(d.label) + '</div>' +
           '<div style="font-size:.75rem;color:#888;">' + esc(fmtTs(d.ts)) + '</div>' +
         '</div>' +
-        '<button type="button" data-recall="' + i + '" style="flex:0 0 auto;padding:7px 12px;border-radius:8px;border:none;background:#5b3f8e;color:#fff;font-size:.82rem;font-weight:700;cursor:pointer;">呼び出す</button>' +
+        '<button type="button" data-recall="' + i + '" style="flex:0 0 auto;padding:7px 12px;border-radius:8px;border:none;background:#2bb3c0;color:#04222a;font-size:.82rem;font-weight:700;cursor:pointer;">呼び出す</button>' +
         '<button type="button" data-del="' + i + '" style="flex:0 0 auto;padding:7px 9px;border-radius:8px;border:1px solid #555;background:transparent;color:#999;font-size:.82rem;cursor:pointer;">🗑</button>' +
       '</div>';
     }).join('');

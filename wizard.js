@@ -115,7 +115,7 @@
     var card = document.createElement('div');
     card.className = 'pc-card';
     card.style.cssText = [
-      'background:#1a1a2e',
+      'background:#141a26',
       'border-radius:14px',
       'padding:20px',
       'width:100%',
@@ -135,7 +135,7 @@
     var heading = document.createElement('div');
     heading.id = 'wizHeading';
     heading.className = 'pc-title';
-    heading.style.cssText = 'font-size:1.1rem;font-weight:700;margin-bottom:12px;color:#d4b3ff;';
+    heading.style.cssText = 'font-size:1.1rem;font-weight:700;margin-bottom:12px;color:#2bb3c0;';
 
     /* 本文コンテナ */
     var body = document.createElement('div');
@@ -158,7 +158,7 @@
     btnNext.id = 'wizNext';
     btnNext.type = 'button';
     btnNext.textContent = '次へ ▶';
-    btnNext.style.cssText = 'padding:8px 16px;border-radius:8px;border:none;background:#5b3f8e;color:#fff;cursor:pointer;font-size:.9rem;font-weight:700;';
+    btnNext.style.cssText = 'padding:8px 16px;border-radius:8px;border:none;background:#2bb3c0;color:#04222a;cursor:pointer;font-size:.9rem;font-weight:700;';
     btnNext.addEventListener('click', goNext);
 
     var btnClose = document.createElement('button');
@@ -279,14 +279,14 @@
     /* アカウント表示 */
     var acctLabel = el('div', { style: 'margin-bottom:10px;' });
     acctLabel.appendChild(el('span', { style: 'color:#aaa;font-size:.85rem;' }, 'アカウント: '));
-    var acctName = el('strong', { id: 'wizAcctName', style: 'color:#d4b3ff;' }, accountLabel(currentAccount));
+    var acctName = el('strong', { id: 'wizAcctName', style: 'color:#2bb3c0;' }, accountLabel(currentAccount));
     acctLabel.appendChild(acctName);
     body.appendChild(acctLabel);
 
     /* 切替ボタン */
     var acctRow = el('div', { style: 'display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;' });
-    var btn1 = el('button', { type: 'button', style: 'padding:6px 12px;border-radius:8px;border:1px solid #5b3f8e;background:#2a1a4e;color:#d4b3ff;cursor:pointer;font-size:.85rem;' }, '月読み色恋劇場 (acc1)');
-    var btn2 = el('button', { type: 'button', style: 'padding:6px 12px;border-radius:8px;border:1px solid #5b3f8e;background:#2a1a4e;color:#d4b3ff;cursor:pointer;font-size:.85rem;' }, '宵桜艶帖 (acc2)');
+    var btn1 = el('button', { type: 'button', style: 'padding:6px 12px;border-radius:8px;border:1px solid #2bb3c0;background:#0e1422;color:#2bb3c0;cursor:pointer;font-size:.85rem;' }, '月読み色恋劇場 (acc1)');
+    var btn2 = el('button', { type: 'button', style: 'padding:6px 12px;border-radius:8px;border:1px solid #2bb3c0;background:#0e1422;color:#2bb3c0;cursor:pointer;font-size:.85rem;' }, '宵桜艶帖 (acc2)');
     btn1.addEventListener('click', function () {
       var b = document.getElementById('acctBtn1');
       if (b) b.click();
@@ -405,7 +405,7 @@
     body.appendChild(el('p', {}, 'Bluesky投稿の確認ダイアログが出ます。作品URLを確認して投稿してください。'));
     body.appendChild(el('p', { style: 'font-size:.85rem;color:#aaa;' }, '投稿が完了すると自動で次のステップへ進みます。投稿しない場合は「次へ（スキップ）」を押してください。'));
 
-    var waiting = el('div', { id: 'wizWaitPost', style: 'margin-top:10px;font-size:.85rem;color:#d4b3ff;' }, '⏳ 投稿完了を待っています…');
+    var waiting = el('div', { id: 'wizWaitPost', style: 'margin-top:10px;font-size:.85rem;color:#2bb3c0;' }, '⏳ 投稿完了を待っています…');
     body.appendChild(waiting);
 
     /* bluesky-posted を購読 */
@@ -480,7 +480,7 @@
     /* 記録して次へ */
     var recordBtn = el('button', {
       type: 'button',
-      style: 'display:block;width:100%;margin-top:12px;padding:10px;border-radius:8px;border:none;background:#5b3f8e;color:#fff;cursor:pointer;font-size:.95rem;font-weight:700;'
+      style: 'display:block;width:100%;margin-top:12px;padding:10px;border-radius:8px;border:none;background:#2bb3c0;color:#04222a;cursor:pointer;font-size:.95rem;font-weight:700;'
     }, '記録して次へ ▶');
     recordBtn.addEventListener('click', function () {
       var url = ytUrlInput.value.trim();
@@ -540,7 +540,7 @@
       if (!row[1]) return;
       var d = el('div', { style: 'margin-top:8px;' });
       d.appendChild(el('span', { style: 'font-size:.8rem;color:#aaa;' }, row[0] + ': '));
-      var a = el('a', { href: row[1], target: '_blank', rel: 'noopener', style: 'color:#c4a0ff;font-size:.85rem;word-break:break-all;' }, row[1].slice(0, 70) + (row[1].length > 70 ? '…' : ''));
+      var a = el('a', { href: row[1], target: '_blank', rel: 'noopener', style: 'color:#2bb3c0;font-size:.85rem;word-break:break-all;' }, row[1].slice(0, 70) + (row[1].length > 70 ? '…' : ''));
       d.appendChild(a);
       body.appendChild(d);
     });
