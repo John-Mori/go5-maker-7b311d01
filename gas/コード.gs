@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-03I（作り直し列を追加＝リビルド版/作り直し済を記録シートへ反映）';
+var GAS_VERSION = '2026-07-03J（stats_tail診断を追加＝視聴履歴スナップの生存確認用）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -121,6 +121,16 @@ function doGet(e) {
   // 診断: <exec URL>?action=diagnose でスプレッドシート名・全タブ名・各記録タブの中身を返す（読み取りのみ）。
   if (p.action === 'diagnose') {
     return jsonOut_(diagnose_());
+  }
+  // 診断: 視聴履歴(スナップショット)の末尾N行を返す（読み取りのみ）。
+  //   YT_API_KEY が効いて views が記録できているか等、サーバー自動記録の生存確認用。
+  if (p.action === 'stats_tail') {
+    try {
+      var ssh = statsSheet_(); var slast = ssh.getLastRow();
+      var n = Math.min(Math.max(parseInt(p.n || '5', 10) || 5, 1), 20);
+      var rows = slast >= 2 ? ssh.getRange(Math.max(2, slast - n + 1), 1, Math.min(n, slast - 1), STATS_HEADERS.length).getValues() : [];
+      return jsonOut_({ ok: true, headers: STATS_HEADERS, totalRows: Math.max(0, slast - 1), tail: rows });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 題名集約: <exec URL>?action=consolidate_title で「YouTube題名」を「題名(コメント)」へ移し、列を削除。
   if (p.action === 'consolidate_title') {
