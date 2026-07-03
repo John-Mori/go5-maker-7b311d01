@@ -208,12 +208,38 @@ export default {
       return json({ ok: true, saved }, 200, null);
     }
 
-    // ── 販売数の取得依頼キュー（PCバッチが読む）。認証は管理鍵。──
+    // ── 販売数の追跡サークル登録：候補タブでサークルタブを追加/削除した時にフロントが呼ぶ。──
+    //   POST /api/fanza-sales-track { makerId, name } / 解除は { makerId, remove:true }
+    //   登録済みサークルはPCバッチが「表示しなくても」全作品の販売数を自動取得する。
+    if (path === "/api/fanza-sales-track") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      const cors4 = corsHeaders(origin, allowed);
+      if (!cors4) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors4);
+      const sec4 = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || sec4 !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors4);
+      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, cors4);
+      let tbody;
+      try { tbody = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, cors4); }
+      const mkId = String(tbody.makerId || "").trim();
+      if (!/^\d{1,10}$/.test(mkId)) return json({ ok: false, error: "bad_maker_id" }, 400, cors4);
+      if (tbody.remove) { try { await env.FANZA_KV.delete("salestrack:" + mkId); } catch (e) {} return json({ ok: true, removed: mkId }, 200, cors4); }
+      const mkName = String(tbody.name || "").slice(0, 100);
+      await env.FANZA_KV.put("salestrack:" + mkId, JSON.stringify({ name: mkName, at: new Date().toISOString() }));
+      return json({ ok: true, tracked: mkId }, 200, cors4);
+    }
+
+    // ── 販売数の取得依頼キュー＋追跡サークル一覧（PCバッチが読む）。認証は管理鍵。──
     if (path === "/api/fanza-sales-queue") {
       if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, null);
       if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
       if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
-      return json({ ok: true, queued: await listAll(env.FANZA_KV, "salesreq:") }, 200, null);
+      const trackIds = await listAll(env.FANZA_KV, "salestrack:");
+      const trackedMakers = await Promise.all(trackIds.map(async (mid) => {
+        const v = await env.FANZA_KV.get("salestrack:" + mid, "json").catch(() => null);
+        return { makerId: mid, name: (v && v.name) || "" };
+      }));
+      return json({ ok: true, queued: await listAll(env.FANZA_KV, "salesreq:"), trackedMakers }, 200, null);
     }
 
     if (path === "/" || path === "") {

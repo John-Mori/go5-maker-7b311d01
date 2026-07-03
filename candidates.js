@@ -154,6 +154,24 @@
     });
   }
   function missingCount(cids) { var c = salesCache(); var n = 0; cids.forEach(function (cid) { if (!c[cid] || c[cid].n == null) n++; }); return n; }
+  // サークルを販売数の「追跡対象」としてworkerへ登録/解除。登録済みサークルは
+  // PCバッチ(販売数を取得.bat)が「タブを表示しなくても」全作品の販売数を自動取得する。
+  function trackMaker(makerId, makerName, remove) {
+    if (!makerId) return;
+    var flagKey = 'cand_tracked__' + makerId;
+    if (!remove && localStorage.getItem(flagKey)) return; // 登録済みなら送らない（解除は常に送る）
+    var cfg = workerCfg(); if (!cfg.url) return;
+    fetch(cfg.url + '/api/fanza-sales-track', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
+      body: JSON.stringify(remove ? { makerId: makerId, remove: true } : { makerId: makerId, name: makerName || '' })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.ok) { if (remove) localStorage.removeItem(flagKey); else localStorage.setItem(flagKey, '1'); }
+    }).catch(function () {}); // 失敗しても次の機会(ensureTrackedAll)に再送される
+  }
+  // 既存タブの移行用: 全サークルタブを追跡登録（登録済みはローカルフラグでスキップ＝実質1回だけ）。
+  function ensureTrackedAll() {
+    lsGet(K_TABS, '[]').forEach(function (t) { if (t.makerId) trackMaker(t.makerId, t.makerName || t.name || ''); });
+  }
 
   // ── サークル作品の取得（全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ） ──
   //   force=true でキャッシュを無視して取り直す（🔁リロードボタン用）。
@@ -375,6 +393,7 @@
         var tabs = lsGet(K_TABS, '[]');
         var tab = { id: 'ct' + new Date().getTime(), name: name || makerName || ('サークル' + makerId), makerId: makerId, makerName: makerName || '' };
         tabs.push(tab); lsSet(K_TABS, tabs);
+        trackMaker(makerId, makerName || tab.name); // 登録した時点でPCバッチの販売数自動取得の対象にする
         _activeTab = tab.id; render();
       }
       if (_resolved && _resolved.src === src) { addTab(_resolved.makerId, _resolved.makerName); return; }
@@ -536,8 +555,11 @@
     $('candEditCancel').addEventListener('click', function () { f.innerHTML = ''; });
     $('candEditDel').addEventListener('click', function () {
       if (!window.confirm('タブ「' + tab.name + '」を削除しますか？(非表示リストも消えます)')) return;
-      lsSet(K_TABS, lsGet(K_TABS, '[]').filter(function (t) { return t.id !== tab.id; }));
+      var rest = lsGet(K_TABS, '[]').filter(function (t) { return t.id !== tab.id; });
+      lsSet(K_TABS, rest);
       try { localStorage.removeItem(hiddenKey(tab.id)); } catch (e) {}
+      // 他タブが同じサークルを使っていなければ、PCバッチの追跡対象から外す
+      if (tab.makerId && !rest.some(function (t) { return t.makerId === tab.makerId; })) trackMaker(tab.makerId, '', true);
       _activeTab = 'main'; render();
     });
     $('candEditSave').addEventListener('click', function () {
@@ -546,12 +568,18 @@
       var msg = $('candEditMsg');
       function applyTab(makerId, makerName) {
         var tabs = lsGet(K_TABS, '[]');
+        var oldMakerId = tab.makerId;
         tabs.forEach(function (t) {
           if (t.id !== tab.id) return;
           t.name = name || makerName || t.name;
           if (makerId) { t.makerId = makerId; if (makerName) t.makerName = makerName; }
         });
         lsSet(K_TABS, tabs);
+        // サークル貼り替え時: 新サークルを追跡登録し、旧サークルは他タブが使っていなければ解除
+        if (makerId && makerId !== oldMakerId) {
+          trackMaker(makerId, makerName);
+          if (oldMakerId && !tabs.some(function (t) { return t.makerId === oldMakerId; })) trackMaker(oldMakerId, '', true);
+        }
         render(); // タブバー再描画＋一覧再取得
       }
       if (src) {
@@ -625,4 +653,6 @@
   }
 
   try { window.Go5Cand = { render: render }; } catch (e) {}
+  // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ（登録済みはフラグでスキップ＝通信は初回のみ）
+  ensureTrackedAll();
 }());

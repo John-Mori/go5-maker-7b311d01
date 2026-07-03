@@ -13,3 +13,5 @@ scripts/scrape_config.json
 # GAS自動反映のローカル設定（scriptId・デプロイID・adminSecret を含むためコミットしない）
 .clasp.json
 scripts/gas_deploy_config.json
+# 販売数スクレイプの前回実行時刻（このPC専用のローカル状態）
+scripts/sales_state.json

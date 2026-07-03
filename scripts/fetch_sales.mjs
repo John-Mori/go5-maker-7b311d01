@@ -5,10 +5,12 @@
  * サーバー(worker)からは販売数が取れない。日本の家庭用IP（このPC）からは普通に読める。
  *
  * 動き（AI不要・ワンクリック）:
- *   1. ワーカーの /api/fanza-sales-queue から「販売数の取得依頼中のcid」を取得
- *      （候補タブでサークル作品を表示すると、未取得cidが自動でこのキューに積まれる）
- *   2. 各cidの作品ページをスクレイプして販売数(numberOfSales__txt / detailInfo-sales)を抽出
- *   3. /api/fanza-sales-save へ保存 → 以後スマホの候補タブで「販売数(実売)」が表示される
+ *   1. ワーカーの /api/fanza-sales-queue から「取得依頼中のcid」＋「追跡サークル一覧」を取得
+ *      （候補タブでサークルタブを登録した時点で追跡対象になる＝タブを表示しなくてもよい）
+ *   2. 追跡サークルは全作品のcidを /api/fanza-maker-list から取得し、まとめてスクレイプ対象へ
+ *      （前回の全件取得から18時間以内のサークルはスキップ。状態は scripts/sales_state.json）
+ *   3. 各cidの作品ページをスクレイプして販売数(numberOfSales__txt / detailInfo-sales)を抽出
+ *   4. /api/fanza-sales-save へ保存 → 以後スマホの候補タブで「販売数(実売)」が表示される
  *
  * 使い方:
  *   node scripts/fetch_sales.mjs                 … キューを処理
@@ -64,8 +66,27 @@ async function getQueue() {
   const res = await fetch(WORKER + "/api/fanza-sales-queue", { headers: { "X-Admin-Secret": ADMIN } });
   const j = await res.json().catch(() => null);
   if (!j || !j.ok) die("キュー取得に失敗: " + (j && j.error ? j.error : ("HTTP " + res.status)));
-  return Array.isArray(j.queued) ? j.queued : [];
+  return { queued: Array.isArray(j.queued) ? j.queued : [], trackedMakers: Array.isArray(j.trackedMakers) ? j.trackedMakers : [] };
 }
+
+// 追跡サークルの全作品cidを取得（worker側で全ページ＋全同人フロア巡回済み）。
+// ※このAPIは公開ソフト鍵＋Originチェックなので、本番サイトのOriginを付けて呼ぶ。
+async function getMakerCids(makerId) {
+  const res = await fetch(WORKER + "/api/fanza-maker-list", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Shared-Secret": String(CFG.sharedSecret || ""), "Origin": String(CFG.siteOrigin || "https://john-mori.github.io") },
+    body: JSON.stringify({ makerId, sort: "rank" }),
+  });
+  const j = await res.json().catch(() => null);
+  if (!j || !j.ok) { console.error("  ⚠️ サークル" + makerId + " の作品一覧取得に失敗: " + (j && j.error ? j.error : ("HTTP " + res.status))); return null; }
+  return (j.items || []).map((it) => it.cid).filter(Boolean);
+}
+
+// サークルごとの前回全件取得時刻（ローカル状態・このPC専用なのでファイルでよい）。
+const STATE_PATH = path.join(__dirname, "sales_state.json");
+const FULL_SCRAPE_INTERVAL_MS = 18 * 3600 * 1000; // 18時間: 1日1回のbat実行で必ず更新される間隔
+function loadState() { try { return JSON.parse(fs.readFileSync(STATE_PATH, "utf8")); } catch (e) { return {}; } }
+function saveState(s) { fs.writeFileSync(STATE_PATH, JSON.stringify(s, null, 2)); }
 async function saveBatch(items) {
   const res = await fetch(WORKER + "/api/fanza-sales-save", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": ADMIN }, body: JSON.stringify({ items }) });
   const j = await res.json().catch(() => null);
@@ -75,9 +96,29 @@ async function saveBatch(items) {
 
 async function main() {
   const args = process.argv.slice(2).map(toCid).filter(Boolean);
-  let cids = args.length ? args : await getQueue();
+  let cids = [];
+  const ranMakers = []; // 今回全件取得を実施したサークル（完走後に時刻を記録）
+  if (args.length) {
+    cids = args; // cid/URL直接指定モード
+  } else {
+    const q = await getQueue();
+    cids = q.queued;
+    // 追跡サークル（候補タブに登録済みのサークル）: 全作品を取得対象に追加。
+    // 18時間以内に全件取得済みのサークルはスキップ（DMMへの負荷と実行時間を抑える）。
+    const state = loadState();
+    for (const mk of q.trackedMakers) {
+      const last = state[mk.makerId] || 0;
+      const label = (mk.name || ("サークル" + mk.makerId));
+      if (Date.now() - last < FULL_SCRAPE_INTERVAL_MS) { console.log("⏭️ " + label + ": 前回取得から18時間未満のためスキップ"); continue; }
+      const mcids = await getMakerCids(mk.makerId);
+      if (!mcids) continue; // 一覧取得失敗（次回リトライ）
+      console.log("📚 " + label + ": 全" + mcids.length + "作品を取得対象に追加");
+      cids.push(...mcids);
+      ranMakers.push(mk.makerId); // 完走したら最後に時刻を記録（途中中断なら次回やり直し）
+    }
+  }
   cids = [...new Set(cids)];
-  if (!cids.length) { console.log("✅ 取得依頼中の販売数はありません。候補タブでサークルを表示すると、ここに溜まります。"); return; }
+  if (!cids.length) { console.log("✅ 取得するものはありません。候補タブでサークルタブを登録すると、そのサークルの全作品がここで取得されます。"); return; }
   console.log("📊 販売数を取得します: " + cids.length + "件（日本IPのこのPCで実行中）\n");
 
   const results = [];
@@ -92,6 +133,8 @@ async function main() {
     await sleep(700); // DMMへの負荷を避ける
   }
   if (results.length) { const s = await saveBatch(results); console.log("   → 保存 " + s + "件"); }
+  // 全件スクレイプを完走したサークルの時刻を記録（次回は18時間スキップが効く）
+  if (ranMakers.length) { const st = loadState(); ranMakers.forEach((mid) => { st[mid] = Date.now(); }); saveState(st); }
   console.log(`\n✅ 完了: 成功 ${ok}件 / 取得できず ${ng}件。スマホの候補タブをリロードすると販売数が反映されます。`);
 }
 main().catch((e) => die(String(e && e.stack ? e.stack : e)));
