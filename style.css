@@ -127,8 +127,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-info{flex:1;min-width:0;}
 .cand-title{font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
 .cand-sub{font-size:11px;color:var(--sub);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.cand-sales{font-size:12.5px;color:#c0392b;margin-top:4px;font-weight:600;}
-.cand-sales b{font-size:13.5px;}
+.cand-sales{font-size:12.5px;color:var(--ink);margin-top:3px;font-weight:400;}
 .cand-price{font-size:13px;color:var(--ink);margin-top:3px;}
 .cand-list-price{text-decoration:line-through;color:var(--sub);}
 .cand-sale{color:#c0392b;}
@@ -138,12 +137,15 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-thumb-click{cursor:zoom-in;}
 .cand-thumb-click:active{opacity:.85;}
 /* 投稿画像ボタン（作品リンクの右）。保存済みは強調。 */
-.cand-refimg-btn{width:auto;margin:0;flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
+.cand-refimg-btn,.cand-bsky-btn{width:auto;margin:0;flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
 .cand-refimg-btn.has-img{border-color:#c0392b;color:#c0392b;font-weight:700;}
+.cand-bsky-btn{padding:4px 9px;}
+.cand-bsky-btn.has-img{border-color:#1185fe;color:#1185fe;font-weight:700;}
+.paste-btn{font-size:12px;border-radius:8px;border:1px solid var(--line);background:#fffef9;color:var(--sub);cursor:pointer;}
 /* 投稿画像モーダル内（.fz-modal＝ダーク）の入力要素 */
 .cand-refimg-preview{text-align:center;}
 .cand-refimg-pick{display:inline-block;padding:9px 10px;border-radius:8px;border:1px solid #2f3a52;background:#16203a;color:#e8edf5;cursor:pointer;font-size:13px;}
-.cand-refimg-memo{width:100%;box-sizing:border-box;background:#0b1120;color:#e8edf5;border:1px solid #2f3a52;border-radius:8px;padding:8px;font:inherit;resize:vertical;}
+.cand-refimg-line{width:100%;box-sizing:border-box;background:#0b1120;color:#e8edf5;border:1px solid #2f3a52;border-radius:8px;padding:9px;font:inherit;}
 #pageCand main{padding-top:2px;}
 #pageCand input[type=text]{width:100%;box-sizing:border-box;background:#fffef9;color:var(--ink);border:1px solid var(--line);}
 #pageCand select{width:auto;font-size:13px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#fffef9;color:var(--ink);}
