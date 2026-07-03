@@ -918,8 +918,10 @@
     el.value = (r && r.ok) ? r.link : '';
   }
 
-  // #author（作者名）へサークル名を自動入力。手動で書き換えた値は尊重（自前で入れた値だけ上書き）。
-  var movieAuthorAutofilled = '';
+  // #author（作者名）へサークル名/作者名を自動入力。手動で書き換えた値は尊重（自動で入れた値だけ上書き）。
+  // 「前回自動入力した値」は localStorage に永続化＝リロード後や翌日でも、残っている前回の
+  // 自動入力値を新しい作品のサークル名で正しく上書きできる（ウィザード①今から1本の経路もここを通る）。
+  var movieAuthorAutofilled = load('author_autofill_last') || '';
   function autofillAuthor(circle) {
     if (!circle) return;
     var a = document.getElementById('author');
@@ -928,6 +930,7 @@
     if (cur && cur !== movieAuthorAutofilled) return; // ユーザーが手入力済み＝触らない
     a.value = circle;
     movieAuthorAutofilled = circle;
+    save('author_autofill_last', circle);
     try { a.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
     renderPreview();
   }
@@ -978,7 +981,7 @@
     if (movieInfoCache[cid] && movieInfoCache[cid].title) { renderMovieInfo(movieInfoCache[cid]); autofillAuthor(movieInfoCache[cid].author); return; }
     var seq = ++movieInfoSeq;
     renderMovieInfoLoading();
-    window.FanzaCore.fetchFanzaInfo(cid, workerUrl, secret).then(function (info) {
+    window.FanzaCore.fetchFanzaInfo(cid, workerUrl, secret, url).then(function (info) {
       if (seq !== movieInfoSeq) return; // 途中でURLが変わった＝破棄
       if (info && info.title) {
         movieInfoCache[cid] = info;

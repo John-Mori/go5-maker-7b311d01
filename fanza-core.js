@@ -92,7 +92,8 @@ function fanzaRetryable_(status, data) {
 
 // 成功時は parseFanzaItem の結果（title を持つ）を返す。失敗時は { __error:true, reason } を返す。
 // ※呼び出し側は「info && info.title」で成功判定できる（従来どおり）。reason で失敗内容が分かる。
-function fetchFanzaInfo(cid, workerUrl, sharedSecret) {
+// srcUrl（任意・第4引数）: 作品ページの元URL。FANZA Books等、同人以外のスクレイプフォールバック先として worker が使う。
+function fetchFanzaInfo(cid, workerUrl, sharedSecret, srcUrl) {
   if (!cid || !workerUrl) return Promise.resolve({ __error: true, reason: '作品URL/ワーカーURLが未設定' });
   // タイムアウト（スマホ回線での無限待ちを防ぎ、呼び出し側のリトライを効かせる）。
   var ctrl = null, timer = null, timedOut = false;
@@ -100,7 +101,7 @@ function fetchFanzaInfo(cid, workerUrl, sharedSecret) {
   var opts = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': sharedSecret || '' },
-    body: JSON.stringify({ cid: cid })
+    body: JSON.stringify(srcUrl ? { cid: cid, url: srcUrl } : { cid: cid })
   };
   if (ctrl) opts.signal = ctrl.signal;
   return fetch(workerUrl + '/api/fanza-item', opts)

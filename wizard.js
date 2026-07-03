@@ -623,7 +623,7 @@
     try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
     try { sharedSecret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
     if (!workerUrl || typeof window.FanzaCore === 'undefined') { done(); return; }
-    window.FanzaCore.fetchFanzaInfo(cid, workerUrl, sharedSecret).then(function (info) {
+    window.FanzaCore.fetchFanzaInfo(cid, workerUrl, sharedSecret, W.workUrl || '').then(function (info) {
       W.fanzaInfo = (info && info.title) ? info : null; // 失敗（{__error}）は情報なし扱い
       done();
     }).catch(function () { done(); });

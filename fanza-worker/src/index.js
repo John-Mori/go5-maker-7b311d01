@@ -48,6 +48,10 @@ export default {
       if (!cid) return json({ ok: false, error: "missing_cid" }, 400, cors);
       // KVキーに使うため形式を厳格に検証（req:キュー汚染・ゴミキー増殖の防止）
       if (!/^[0-9A-Za-z_-]{1,64}$/.test(cid)) return json({ ok: false, error: "bad_cid" }, 400, cors);
+      // 作品ページURL（任意）：FANZA Books等、同人以外のスクレイプフォールバック先として使用。
+      // SSRF防止のためFANZA配下のみ許可（それ以外は無視して従来動作）。
+      let srcUrl = String(body.url || "").trim();
+      if (!/^https:\/\/(book\.dmm\.co\.jp|www\.dmm\.co\.jp)\//.test(srcUrl)) srcUrl = "";
 
       // ① DMM 公式 API（APIキーが設定されていれば優先）
       let item = null;
@@ -72,8 +76,9 @@ export default {
         } catch (e) {}
       }
 
-      // ② スクレイピング（API なし or API で見つからなかった場合）
-      if (!item) item = await scrapeFanzaItem(cid);
+      // ② スクレイピング（API なし or API で見つからなかった場合）。
+      //    srcUrl があればそのページ（FANZA Books等）を、無ければ従来どおり同人ページを見る。
+      if (!item) item = await scrapeFanzaItem(cid, srcUrl);
 
       // ③ 画像CDNフォールバック：アフィリエイトAPI未収録（サークル設定等）かつ商品ページが
       //    ログイン壁（Cloudflare=海外/DC IP扱い）の作品でも、画像CDN(doujin-assets)は認証・
@@ -149,18 +154,28 @@ async function fetchDmmJson(url, tries) {
 async function fetchViaApi(cid, apiId, affiliateId) {
   // CID プレフィックスからフロアを推定。※FANZAの正しい service/floor コード（FloorList APIで確認済み）。
   //   同人＝service:doujin / floor:digital_doujin（旧コード service:digital,floor:doujin は無効）。
-  const floors = cid.startsWith("d_")
-    ? [
-        { service: "doujin", floor: "digital_doujin"    }, // 同人（通常）
-        { service: "doujin", floor: "digital_doujin_bl" }, // 同人BL
-        { service: "doujin", floor: "digital_doujin_tl" }, // 同人TL
-      ]
-    : [
-        { service: "digital", floor: "videoc" }, // 素人・アダルト動画
-        { service: "digital", floor: "anime"  }, // アニメ動画
-        { service: "ebook",   floor: "comic"  }, // 電子コミック
-        { service: "ebook",   floor: "novel"  }, // 電子小説
-      ];
+  //   FANZA Books＝service:ebook（comic/novel/photo/bl/tl の5フロア）。cid は b915… 形式または
+  //   URL1階層目の数字ID（どちらでも cid= 照会が通ることを実測確認済み）。
+  const DOUJIN_FLOORS = [
+    { service: "doujin", floor: "digital_doujin"    }, // 同人（通常）
+    { service: "doujin", floor: "digital_doujin_bl" }, // 同人BL
+    { service: "doujin", floor: "digital_doujin_tl" }, // 同人TL
+  ];
+  const EBOOK_FLOORS = [
+    { service: "ebook", floor: "comic" }, // 電子コミック
+    { service: "ebook", floor: "novel" }, // 美少女ノベル・官能小説
+    { service: "ebook", floor: "photo" }, // アダルト写真集・雑誌
+    { service: "ebook", floor: "bl"    }, // BL
+    { service: "ebook", floor: "tl"    }, // TL
+  ];
+  const VIDEO_FLOORS = [
+    { service: "digital", floor: "videoc" }, // 素人・アダルト動画
+    { service: "digital", floor: "anime"  }, // アニメ動画
+  ];
+  let floors;
+  if (cid.startsWith("d_")) floors = DOUJIN_FLOORS;
+  else if (/^(?:b\d|\d+$)/.test(cid)) floors = EBOOK_FLOORS.concat(VIDEO_FLOORS); // Books系はebook優先
+  else floors = VIDEO_FLOORS.concat(EBOOK_FLOORS);
 
   for (const { service, floor } of floors) {
     try {
@@ -242,8 +257,9 @@ async function fetchDmmPage(url, trace) {
   }
   return null;
 }
-async function scrapeFanzaItem(cid) {
-  const pageUrl = DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/";
+async function scrapeFanzaItem(cid, srcUrl) {
+  // srcUrl（FANZA Books等の実ページURL・呼び出し元で許可ドメイン検証済み）があればそちらを優先。
+  const pageUrl = srcUrl || (DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/");
   let res;
   try { res = await fetchDmmPage(pageUrl); } catch (e) { return null; }
   if (!res || !res.ok) return null;

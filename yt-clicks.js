@@ -1418,7 +1418,7 @@
     }
     function fetchWithRetry(job, tries) {
       if (gen === _fanzaGen) _fanzaTick = new Date().getTime(); // 試行開始＝生存を刻む（長い1件でwatchdogに誤殺されない）
-      return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret).then(function (info) {
+      return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret, job.url || '').then(function (info) {
         if (gen !== _fanzaGen) return null; // 乗っ取り後の旧実行はリトライも継続もしない（静かに中止）
         if (info && info.title && !isBadFanzaTitle(info.title)) return info; // 成功
         // 恒久的失敗（作品が見つからない等）はリトライしない＝無駄な待ち時間を作らない。一時的失敗のみ再試行。
