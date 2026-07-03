@@ -11,6 +11,8 @@
  *    表示」で再表示可。サークルの特定に必要な入力: サークルID(数字) / サークルページURL
  *    (…article=maker/id=数字…) / そのサークルの作品URL1つ(→APIでサークルIDを自動解決) のどれか1つ。
  *    タブはPC=ドラッグ、スマホ=長押し→ドラッグで並べ替え可（固定の候補/＋タブを除く）。
+ *    🔁リロード=キャッシュ無視で全件取り直し／✏️編集=タブ名変更・サークル貼り替え・削除。
+ *    ＋タブ追加で作品URLを入れるとサークル名が自動でタブ名に入る。
  *
  * 依存: window.normalizeWorkUrl / buildAffiliateLink (affiliate-core.js),
  *       window.FanzaCore.fetchFanzaInfo (fanza-core.js), fanza-worker /api/fanza-maker-list。
@@ -48,7 +50,9 @@
   var K_ITEMS = 'cand_items';   // 候補リスト(共通): [{url,cid,title,author,thumb,listPrice,price,discountPct,addedAt}]
   var K_TABS = 'cand_tabs';    // サークルタブ: [{id,name,makerId,makerName}]
   function hiddenKey(tabId) { return 'cand_hidden__' + tabId; }
-  function cacheKey(makerId, mode) { return 'cand_mk__' + makerId + '__' + mode; }
+  // ★キャッシュ版数(v2)：v170前の「最大400件しか取れていない不完全キャッシュ」を確実に無効化する。
+  //   これを上げると全ユーザーの旧キャッシュが読まれなくなり、次回表示で全件を取り直す。
+  function cacheKey(makerId, mode) { return 'cand_mk2__' + makerId + '__' + mode; }
   var CACHE_TTL = 3 * 3600 * 1000;
 
   var _activeTab = 'main'; // 'main' | サークルタブid
@@ -70,12 +74,15 @@
   var RANK7D_NOTE = '※「直近1週間で売れてる順」はDMMの人気(売れ行き)ランキングを使用します(発売日での絞り込みはしていないため常に結果が出ます)。';
 
   // ── サークル作品の取得（全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ） ──
-  function fetchMakerItems(makerId, mode, cb) {
+  //   force=true でキャッシュを無視して取り直す（🔁リロードボタン用）。
+  function fetchMakerItems(makerId, mode, cb, force) {
     // date/discountは sort=date、rank・rank7dは同一データ(sort=rank)を使用。
     var apiMode = (mode === 'rank' || mode === 'rank7d') ? 'rank' : 'date';
     var ck = cacheKey(makerId, apiMode);
-    var c = lsGet(ck, 'null');
-    if (c && c.at && (new Date().getTime() - c.at) < CACHE_TTL && Array.isArray(c.items) && c.items.length) { cb(c.items, null); return; }
+    if (!force) {
+      var c = lsGet(ck, 'null');
+      if (c && c.at && (new Date().getTime() - c.at) < CACHE_TTL && Array.isArray(c.items) && c.items.length) { cb(c.items, null); return; }
+    }
     var cfg = workerCfg();
     if (!cfg.url) { cb(null, 'FANZA Workerが未設定です(⚙️詳細設定)'); return; }
     fetch(cfg.url + '/api/fanza-maker-list', {
@@ -234,26 +241,50 @@
     f.style.display = '';
     f.innerHTML = '<div class="card" style="margin:10px 0;">' +
       '<div class="field-label" style="margin-top:0;">サークルタブを追加</div>' +
-      '<div class="hint">必要な情報はどれか1つ: ①サークルID(数字) ②サークルページURL(…article=maker/id=数字…) ③そのサークルの作品URL1つ(自動でサークルを特定)</div>' +
-      '<input id="candTabName" type="text" placeholder="タブの名前(例: だぶるクリっく)" autocomplete="off" style="margin-top:8px;">' +
-      '<input id="candTabSrc" type="text" inputmode="url" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="margin-top:8px;">' +
-      '<div style="display:flex;gap:8px;">' +
+      '<div class="hint">必要な情報はどれか1つ: ①そのサークルの作品URL1つ(サークル名を自動判定) ②サークルID(数字) ③サークルページURL(…article=maker/id=数字…)</div>' +
+      '<input id="candTabSrc" type="text" inputmode="url" placeholder="作品URL / サークルID / サークルURL" autocomplete="off" style="margin-top:8px;">' +
+      '<label class="hint" style="display:block;margin:8px 0 2px;">タブ名（作品URLなら自動で入ります・後から編集可）</label>' +
+      '<input id="candTabName" type="text" placeholder="タブの名前" autocomplete="off">' +
+      '<div style="display:flex;gap:8px;margin-top:8px;">' +
       '<button id="candTabOk" type="button" class="primary" style="flex:1;font-size:.9rem;padding:10px;">決定</button>' +
       '<button id="candTabCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">やめる</button>' +
       '</div><div id="candTabMsg" class="hint" style="min-height:1.3em;"></div></div>';
+    var _nameAuto = true; // ユーザーが手入力するまでは自動反映を許可
+    var _resolved = null; // {src, makerId, makerName} 自動判定の結果を決定時に再利用（二重解決回避）
+    $('candTabName').addEventListener('input', function () { _nameAuto = false; });
+    // 作品URL等を入れたら、サークル名を自動でタブ名へ反映（手入力済みなら尊重）。
+    function autoFillName() {
+      var src = ($('candTabSrc').value || '').trim();
+      if (!src || (_resolved && _resolved.src === src)) return;
+      var msg = $('candTabMsg');
+      msg.textContent = '⏳ サークル名を取得中…';
+      resolveMakerId(src, function (makerId, makerName, err) {
+        if (!$('candTabSrc') || ($('candTabSrc').value || '').trim() !== src) return; // 入力が変わっていたら破棄
+        if (!makerId) { _resolved = null; msg.textContent = '⚠️ ' + err; return; }
+        _resolved = { src: src, makerId: makerId, makerName: makerName || '' };
+        msg.textContent = '✅ サークルを特定しました' + (makerName ? '：' + makerName : '（ID ' + makerId + '）');
+        if (_nameAuto && makerName) { $('candTabName').value = makerName; }
+      });
+    }
+    $('candTabSrc').addEventListener('change', autoFillName);
+    $('candTabSrc').addEventListener('blur', autoFillName);
     $('candTabCancel').addEventListener('click', function () { f.style.display = 'none'; f.innerHTML = ''; });
     $('candTabOk').addEventListener('click', function () {
       var name = ($('candTabName').value || '').trim();
       var src = ($('candTabSrc').value || '').trim();
       var msg = $('candTabMsg');
       if (!src) { msg.textContent = '⚠️ サークルの特定情報を入れてください'; return; }
-      msg.textContent = '⏳ サークルを特定中…';
-      resolveMakerId(src, function (makerId, makerName, err) {
-        if (!makerId) { msg.textContent = '⚠️ ' + err; return; }
+      function addTab(makerId, makerName) {
         var tabs = lsGet(K_TABS, '[]');
         var tab = { id: 'ct' + new Date().getTime(), name: name || makerName || ('サークル' + makerId), makerId: makerId, makerName: makerName || '' };
         tabs.push(tab); lsSet(K_TABS, tabs);
         _activeTab = tab.id; render();
+      }
+      if (_resolved && _resolved.src === src) { addTab(_resolved.makerId, _resolved.makerName); return; }
+      msg.textContent = '⏳ サークルを特定中…';
+      resolveMakerId(src, function (makerId, makerName, err) {
+        if (!makerId) { msg.textContent = '⚠️ ' + err; return; }
+        addTab(makerId, makerName);
       });
     });
   }
@@ -323,7 +354,7 @@
   }
 
   // ── サークルタブ ──
-  function renderMaker(tabId) {
+  function renderMaker(tabId, force) {
     var tabs = lsGet(K_TABS, '[]');
     var tab = null; tabs.forEach(function (t) { if (t.id === tabId) tab = t; });
     var body = $('candBody');
@@ -331,21 +362,19 @@
     var sortOpts = SORTS.map(function (s) { return '<option value="' + s.key + '"' + (s.key === _sort ? ' selected' : '') + '>' + s.label + '</option>'; }).join('');
     body.innerHTML = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-      '<select id="candSort" style="flex:1;min-width:150px;">' + sortOpts + '</select>' +
+      '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
+      '<button id="candReload" type="button" class="ghost" title="全件を取り直す(キャッシュを無視)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">🔁 リロード</button>' +
+      '<button id="candEditTab" type="button" class="ghost" title="タブ名・サークルを編集" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
       '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
-      '<button id="candDelTab" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">タブ削除</button>' +
       '</div>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
       '</div>' +
-      '<div id="candMakerList"><p class="hint" style="padding:8px;">⏳ サークルの作品を取得中…</p></div>';
+      '<div id="candEditForm"></div>' +
+      '<div id="candMakerList"><p class="hint" style="padding:8px;">' + (force ? '🔁 全件を取り直しています…' : '⏳ サークルの作品を取得中…') + '</p></div>';
     $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
-    $('candDelTab').addEventListener('click', function () {
-      if (!window.confirm('タブ「' + tab.name + '」を削除しますか？(非表示リストも消えます)')) return;
-      lsSet(K_TABS, tabs.filter(function (t) { return t.id !== tabId; }));
-      try { localStorage.removeItem(hiddenKey(tabId)); } catch (e) {}
-      _activeTab = 'main'; render();
-    });
+    $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
+    $('candEditTab').addEventListener('click', function () { showEditTabForm(tab); });
     fetchMakerItems(tab.makerId, _sort, function (items, err) {
       var el = $('candMakerList');
       if (!el || _activeTab !== tabId) return;
@@ -354,7 +383,7 @@
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
       var arr = sortItems(items, _sort).filter(function (it) { return _showHidden ? hset[it.cid] : !hset[it.cid]; });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる作品がありません。') + '</p>'; return; }
-      var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件') + '</p>';
+      var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') + '</p>';
       el.innerHTML = head + arr.map(function (it) {
         var btn = _showHidden
           ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button>'
@@ -374,6 +403,55 @@
           renderMaker(tabId);
         });
       });
+    }, force);
+  }
+
+  // ── タブ編集モーダル（タブ名の変更・サークルの貼り替え・削除） ──
+  function showEditTabForm(tab) {
+    var f = $('candEditForm');
+    if (!f) return;
+    f.innerHTML = '<div class="card" style="margin:8px 0;">' +
+      '<div class="field-label" style="margin-top:0;">✏️ タブを編集</div>' +
+      '<label class="hint" style="display:block;margin-bottom:2px;">タブ名（長い場合は短く編集できます）</label>' +
+      '<input id="candEditName" type="text" autocomplete="off" value="' + esc(tab.name) + '">' +
+      '<label class="hint" style="display:block;margin:8px 0 2px;">サークルを貼り替える（任意：ID/サークルURL/作品URL）</label>' +
+      '<input id="candEditSrc" type="text" inputmode="url" autocomplete="off" placeholder="変更しないなら空のまま">' +
+      '<div style="display:flex;gap:8px;margin-top:8px;">' +
+      '<button id="candEditSave" type="button" class="primary" style="flex:1;font-size:.9rem;padding:10px;">保存</button>' +
+      '<button id="candEditDel" type="button" class="ghost" style="flex:0 0 auto;width:auto;color:#c0392b;border-color:#c0392b;">タブ削除</button>' +
+      '<button id="candEditCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">やめる</button>' +
+      '</div><div id="candEditMsg" class="hint" style="min-height:1.3em;"></div></div>';
+    $('candEditCancel').addEventListener('click', function () { f.innerHTML = ''; });
+    $('candEditDel').addEventListener('click', function () {
+      if (!window.confirm('タブ「' + tab.name + '」を削除しますか？(非表示リストも消えます)')) return;
+      lsSet(K_TABS, lsGet(K_TABS, '[]').filter(function (t) { return t.id !== tab.id; }));
+      try { localStorage.removeItem(hiddenKey(tab.id)); } catch (e) {}
+      _activeTab = 'main'; render();
+    });
+    $('candEditSave').addEventListener('click', function () {
+      var name = ($('candEditName').value || '').trim();
+      var src = ($('candEditSrc').value || '').trim();
+      var msg = $('candEditMsg');
+      function applyTab(makerId, makerName) {
+        var tabs = lsGet(K_TABS, '[]');
+        tabs.forEach(function (t) {
+          if (t.id !== tab.id) return;
+          t.name = name || makerName || t.name;
+          if (makerId) { t.makerId = makerId; if (makerName) t.makerName = makerName; }
+        });
+        lsSet(K_TABS, tabs);
+        render(); // タブバー再描画＋一覧再取得
+      }
+      if (src) {
+        msg.textContent = '⏳ サークルを特定中…';
+        resolveMakerId(src, function (makerId, makerName, err) {
+          if (!makerId) { msg.textContent = '⚠️ ' + err; return; }
+          applyTab(makerId, makerName);
+        });
+      } else {
+        if (!name) { msg.textContent = '⚠️ タブ名を入れてください'; return; }
+        applyTab(null, '');
+      }
     });
   }
 
