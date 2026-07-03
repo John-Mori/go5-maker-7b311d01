@@ -544,6 +544,20 @@
   }
   window.getCurrentAccount = () => curAccount;
 
+  // 下書き機能（drafts.js）向け：Fileを #photo の実際のFileListにセットし、通常の写真選択と
+  // 同じ経路（changeイベント）で反映する。こうすることで、以後のBluesky添付/Drive保存等が
+  // 参照する photo.files[0] も正しく更新される（プレビューだけを書き換えるより確実）。
+  window.Go5SetForegroundFile = (file) => {
+    if (!file || !els.photo) return false;
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      els.photo.files = dt.files;
+      els.photo.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    } catch (e) { return false; }
+  };
+
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
   ensureFont().then(preview);

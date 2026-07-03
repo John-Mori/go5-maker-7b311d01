@@ -152,25 +152,7 @@
       }
 
       var html = '<div style="padding:12px">';
-      // ① Bluesky 予約投稿
-      html += '<div class="card">' +
-        '<div class="field-label" style="margin-bottom:4px;">⏰ 予約済み投稿一覧（Bluesky）</div>' +
-        '<div class="hint" style="margin-bottom:12px;">両アカウント共通・予約時刻の早い順。このタブを閉じると予約は消えます。</div>' +
-        (pend.length ? pend.map(function (it) {
-          var label = it.account === 'acc2' ? '宵桜艶帖' : '月詠み';
-          var cls = it.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
-          return '<div class="rsv-tab-row">' +
-            '<span class="rsv-badge ' + cls + '">' + label + '</span>' +
-            '<span class="rsv-tab-when">' + fmt(it.scheduledAtMs) + (it.slotId ? ' <span title="カレンダーの枠と連携">📅</span>' : '') + '</span>' +
-            '<span class="rsv-tab-text">' + esc((it.text || '').split('\n')[0].slice(0, 28)) + '</span>' +
-            '<div class="rsv-tab-btns">' +
-            '<button type="button" class="ghost rsv-sm-btn" data-tchange="' + it.id + '">時刻変更</button>' +
-            '<button type="button" class="ghost rsv-sm-btn" data-tnow="' + it.id + '">今すぐ投稿</button>' +
-            '<button type="button" class="ghost rsv-sm-btn rsv-sm-cancel" data-tcancel="' + it.id + '">取消</button>' +
-            '</div></div>';
-        }).join('') : '<div class="hint">Blueskyの予約はありません。</div>') +
-        '</div>';
-      // ② YouTube 公開待ち
+      // ① YouTube 公開待ち
       if (ytList.length) {
         html += '<div class="card">' +
           '<div class="field-label" style="margin-bottom:4px;">🎬 YouTube 公開待ち（非公開/予約公開）</div>' +
@@ -188,6 +170,23 @@
           }).join('') +
           '</div>';
       }
+      // ② Bluesky 予約投稿
+      html += '<div class="card">' +
+        '<div class="field-label" style="margin-bottom:8px;">⏰ 予約済み投稿一覧（Bluesky）</div>' +
+        (pend.length ? pend.map(function (it) {
+          var label = it.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+          var cls = it.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
+          return '<div class="rsv-tab-row">' +
+            '<span class="rsv-badge ' + cls + '">' + label + '</span>' +
+            '<span class="rsv-tab-when">' + fmt(it.scheduledAtMs) + (it.slotId ? ' <span title="カレンダーの枠と連携">📅</span>' : '') + '</span>' +
+            '<span class="rsv-tab-text">' + esc((it.text || '').split('\n')[0].slice(0, 28)) + '</span>' +
+            '<div class="rsv-tab-btns">' +
+            '<button type="button" class="ghost rsv-sm-btn" data-tchange="' + it.id + '">時刻変更</button>' +
+            '<button type="button" class="ghost rsv-sm-btn" data-tnow="' + it.id + '">今すぐ投稿</button>' +
+            '<button type="button" class="ghost rsv-sm-btn rsv-sm-cancel" data-tcancel="' + it.id + '">取消</button>' +
+            '</div></div>';
+        }).join('') : '<div class="hint">Blueskyの予約はありません。</div>') +
+        '</div>';
       html += '</div>';
       el.innerHTML = html;
       el.querySelectorAll('[data-tcancel]').forEach(function (b) {

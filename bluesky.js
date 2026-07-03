@@ -562,6 +562,13 @@
   }
 
   // ---- GAS 記録（共有シークレットは廃止） ----
+  // workUrl（cid）に対応するFANZA取得済み情報（movieInfoCacheのキャッシュ）を返す。無ければ null。
+  function fanzaInfoForWorkUrl_(url) {
+    if (!url || !window.buildAffiliateLink) return null;
+    var r = window.buildAffiliateLink(url, '');
+    var cid = (r && r.ok) ? r.cid : '';
+    return (cid && movieInfoCache[cid] && movieInfoCache[cid].title) ? movieInfoCache[cid] : null;
+  }
   function recordToSheet(record) {
     var gasUrl = (els.gasUrl.value || '').trim(); if (!gasUrl) return Promise.resolve(null);
     var vid = (record.videoId || currentVideoId || '');
@@ -581,6 +588,15 @@
     var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = ma[p[0]]; }); // カテゴリ属性（複数可）
     payload.workState = readWorkState(); // 作品状態（新作/準新作/旧作）
     payload.rebuild = (record.rebuild != null) ? record.rebuild : readRebuild(); // リビルド（作り直し版）フラグ
+    var mi = fanzaInfoForWorkUrl_(payload.workUrl); // 作品URLから取得済みのFANZA価格情報（あれば記録に反映）
+    if (mi) {
+      payload.fanza_list_price = mi.listPrice;
+      payload.fanza_price = mi.price;
+      payload.fanza_discount_pct = mi.discountPct;
+      payload.fanza_fetched_at = mi.fetchedAt;
+      payload.fanza_review_count = mi.reviewCount;
+      payload.fanza_review_avg = mi.reviewAvg;
+    }
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
   function updateGasStatus() {
@@ -939,6 +955,14 @@
     }
     el.style.color = 'var(--ink)';
     el.innerHTML = lines.join('');
+    autoApplyDiscountFromInfo_(info); // 現在の割引率を投稿文へ自動反映（取得できない時だけ手動ドロップダウンが効く）
+  }
+  // 作品URLから取得できた「現在の割引率」を投稿文へ自動反映する。取得できなかった/セール無しの
+  // ときは何もしない（＝割引文ドロップダウンでの手動指定がそのまま使える・補助的フォールバック）。
+  function autoApplyDiscountFromInfo_(info) {
+    if (!info || !info.title) return; // 取得失敗＝手動フォールバックのため触らない
+    var onSale = info.listPrice && info.price && info.discountPct > 0 && info.price < info.listPrice;
+    applyDiscount(onSale ? String(info.discountPct) : '');
   }
   function fetchMovieWorkInfo(url) {
     var el = els.movieWorkInfo;
@@ -1163,7 +1187,7 @@
       imgPrep
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
         .then(function (res) {
-          setBskyStatus('✅ Bluesky に投稿しました（@' + (res.handle || c.handle) + '）' + (gasSet ? '・記録しました' : ''));
+          setBskyStatus('✅ Bluesky に投稿しました<br>@' + (res.handle || c.handle) + (gasSet ? '  ✏️記録しました' : ''), true);
           notifyPosted(res, edited, alt);
           // 実際に添付した画像を Drive の同じ動画フォルダへ後追い保存（drive-upload.js が購読）。
           try {

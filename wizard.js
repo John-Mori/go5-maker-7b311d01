@@ -39,31 +39,59 @@
    * DOM 構築
    * ========================================================= */
   function buildDOM() {
-    /* --- 起動ボタン --- */
+    /* --- 起動ボタン行（今から1本／下書きから呼び出し・半々） --- */
+    var startRow = document.createElement('div');
+    startRow.style.cssText = 'display:flex;gap:8px;margin:12px 0;';
+
     var startBtn = document.createElement('button');
     startBtn.id = 'wizStartBtn';
     startBtn.type = 'button';
-    startBtn.textContent = '🪄 今から1本（ウィザードで順番に）';
+    startBtn.innerHTML = '🪄 今から1本<br><span style="font-size:.72em;font-weight:500;opacity:.85;">(ウィザードで順番に)</span>';
     startBtn.style.cssText = [
-      'display:block',
-      'width:100%',
-      'margin:12px 0',
-      'padding:12px 16px',
+      'flex:1',
+      'min-width:0',
+      'padding:10px 6px',
       'background:#5b3f8e',
       'color:#fff',
       'border:none',
       'border-radius:10px',
-      'font-size:1rem',
+      'font-size:.92rem',
       'font-weight:700',
+      'line-height:1.5',
       'cursor:pointer',
       'text-align:center'
     ].join(';');
     startBtn.addEventListener('click', startWizard);
 
+    var draftBtn = document.createElement('button');
+    draftBtn.id = 'wizDraftBtn';
+    draftBtn.type = 'button';
+    draftBtn.innerHTML = '下書きから<br>呼び出し';
+    draftBtn.style.cssText = [
+      'flex:1',
+      'min-width:0',
+      'padding:10px 6px',
+      'background:transparent',
+      'color:#5b3f8e',
+      'border:1.5px solid #5b3f8e',
+      'border-radius:10px',
+      'font-size:.92rem',
+      'font-weight:700',
+      'line-height:1.5',
+      'cursor:pointer',
+      'text-align:center'
+    ].join(';');
+    draftBtn.addEventListener('click', function () {
+      if (window.Go5Drafts && window.Go5Drafts.openPicker) window.Go5Drafts.openPicker();
+    });
+
+    startRow.appendChild(startBtn);
+    startRow.appendChild(draftBtn);
+
     /* slotCtxMovie の直後に挿入 */
     var slotCtx = document.getElementById('slotCtxMovie');
     if (slotCtx && slotCtx.parentNode) {
-      slotCtx.parentNode.insertBefore(startBtn, slotCtx.nextSibling);
+      slotCtx.parentNode.insertBefore(startRow, slotCtx.nextSibling);
     }
 
     /* --- オーバーレイ --- */
