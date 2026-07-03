@@ -877,6 +877,41 @@
   // 投稿履歴を開いたら、未生成の項目があれば自動で計測リンクを生成する（ボタン任せにしない）。
   function maybeAutoGen() { if (!_bulkBusy) runBulkGen(true); }
 
+  // ── YouTube URL をシート(記録)から復元 ─────────────────────────────────────
+  //   YouTube URLは端末内の verify_yt__<acct> にのみ表示元がある。iOSのストレージ消去等で
+  //   これが消えると履歴からYT URLが消える。ただし sync_history でシートの「YouTube動画URL」列に
+  //   常にバックアップされているため、そこから読み戻してローカルへ補完する（手動編集は上書きしない）。
+  var _ytRestored = {}, _ytRestoreBusy = false;
+  function restoreYtFromSheet_(onDone) {
+    if (_ytRestoreBusy) { if (onDone) onDone(0); return; }
+    var gasUrl = gasUrl_();
+    if (!gasUrl) { if (onDone) onDone(0); return; }
+    _ytRestoreBusy = true;
+    jsonp_(gasUrl, { action: 'history', channel: acct(), limit: 300 }, function (res) {
+      _ytRestoreBusy = false;
+      if (!res || !res.ok || !Array.isArray(res.items)) { if (onDone) onDone(0); return; }
+      var m = loadYtMap(), restored = 0;
+      res.items.forEach(function (it) {
+        var yt = String((it && it.youtubeUrl) || '').trim(); if (!yt) return;
+        // ローカル項目のキー付けは postUri 優先だが、シート行は postUri か短縮URLの
+        // どちらかしか無いことがある。取り違えを防ぐため両方のキーに補完する（上書きはしない）。
+        var did = false;
+        if (it.postUri) { var ku = 'u:' + it.postUri; if (!m[ku]) { m[ku] = yt; did = true; } }
+        if (it.shortUrl) { var ks = 's:' + it.shortUrl; if (!m[ks]) { m[ks] = yt; did = true; } }
+        if (did) restored++;
+      });
+      if (restored) { saveYtMap(m); if (typeof render === 'function') render(); }
+      if (onDone) onDone(restored);
+    });
+  }
+  // 履歴を開いたとき各アカウント1回だけ自動復元（端末のYT URLが消えていても静かに戻る）。
+  function maybeRestoreYt_() {
+    var a = acct(); if (_ytRestored[a]) return; _ytRestored[a] = true;
+    setTimeout(function () {
+      restoreYtFromSheet_(function (n) { if (n > 0) setStatus('☁️ シートからYouTube URLを ' + n + '件 復元しました。'); });
+    }, 1200);
+  }
+
   // 投稿本文からの当時割引/新作の復元を「1回だけ」自動実行（フラグ管理・ボタン不要で確実に）。
   function maybeRestorePromo_() {
     var FLAG = 'bsky_promo_restored_v1';
@@ -962,7 +997,7 @@
     step();
   }
 
-  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); fetchDeltas_(); });
+  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); maybeRestoreYt_(); fetchDeltas_(); });
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); fetchDeltas_(true); });
   var fd = $('ytFetchDmm'); if (fd) fd.addEventListener('click', refetchFanza_);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
@@ -970,9 +1005,9 @@
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
   // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得（renderだけだと「…」のままになる）。
-  document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) refresh(); else render(); });
-  // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引の復元（各1回）。
-  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); fetchDeltas_(); } }, 2500);
+  document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeRestoreYt_(); } else render(); });
+  // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元（各1回）。
+  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); fetchDeltas_(); } }, 2500);
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。
   var keyEl = $('ytApiKey');

@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-03J（stats_tail診断を追加＝視聴履歴スナップの生存確認用）';
+var GAS_VERSION = '2026-07-05A（history応答にYouTube動画URLを追加＝端末のYT URL消失時にシートから復元可能に）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -184,6 +184,7 @@ function historyItems_(channel, limit) {
   var sh = getChannelSheet_(channel), map = headerMap_(sh);
   var last = sh.getLastRow(); if (last < 2) return [];
   var dCol = map['投稿日時'], tCol = map['題名(コメント)'], sCol = map['短縮URL'], uCol = map['post_uri'];
+  var yCol = map['YouTube動画URL']; // 端末のverify_yt消失時にここから復元できるよう返す
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
   var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   var items = [];
@@ -195,7 +196,8 @@ function historyItems_(channel, limit) {
     try { if (d) ds = Utilities.formatDate(new Date(d), tz, 'MM/dd HH:mm'); } catch (e) {}
     items.push({
       postUri: String(uri || ''), title: String(tCol ? row[tCol - 1] : ''),
-      date: ds, shortUrl: String(short || ''), postUrl: ''
+      date: ds, shortUrl: String(short || ''), postUrl: '',
+      youtubeUrl: String(yCol ? (row[yCol - 1] || '') : '')
     });
   }
   items.reverse(); // 新しい順
