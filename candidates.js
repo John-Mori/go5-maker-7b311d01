@@ -154,6 +154,201 @@
     });
   }
   function missingCount(cids) { var c = salesCache(); var n = 0; cids.forEach(function (cid) { if (!c[cid] || c[cid].n == null) n++; }); return n; }
+  // 指定cidの販売数キャッシュを無効化（🔁リロードで最新を取り直すため）。
+  function invalidateSales_(cids) { var c = salesCache(); (cids || []).forEach(function (cid) { delete c[cid]; }); lsSet(K_SALES, c); }
+
+  // ── 現在描画中カードの cid→item 索引（サムネ/投稿画像モーダルが item を引くため）──
+  var _cardIndex = {};
+  function itemByCid_(cid) { return _cardIndex[cid] || null; }
+
+  // ── 作品ごとの「投稿画像」(生成用の元画像)＋メモ。cid単位でキー分離して端末に保存。──
+  function refImgKey(cid) { return 'cand_refimg__' + cid; }
+  function refImgOf(cid) { try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; } }
+  function refImgHas(cid) { var r = refImgOf(cid); return !!(r && (r.img || r.comment)); }
+  function refImgSave(cid, data) {
+    try {
+      if (!data || (!data.img && !data.comment)) { localStorage.removeItem(refImgKey(cid)); return true; }
+      localStorage.setItem(refImgKey(cid), JSON.stringify({ img: data.img || '', comment: data.comment || '', at: new Date().getTime() }));
+      return true;
+    } catch (e) { return false; } // 容量超過など
+  }
+  // 画像ファイル→縮小dataURL(長辺1280px・JPEG)。localStorage肥大とQuota超過を防ぐ。
+  function fileToScaledDataUrl(file, cb) {
+    if (!file || !/^image\//.test(file.type || '')) { cb(null, '画像ファイルを選んでください'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      var im = new Image();
+      im.onload = function () {
+        var max = 1280, w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+        if (w > max || h > max) { var s = max / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+        try {
+          var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(im, 0, 0, w, h);
+          cb(cv.toDataURL('image/jpeg', 0.85), null);
+        } catch (e) { cb(fr.result, null); }
+      };
+      im.onerror = function () { cb(null, '画像を読み込めませんでした'); };
+      im.src = fr.result;
+    };
+    fr.onerror = function () { cb(null, 'ファイルを読み込めませんでした'); };
+    fr.readAsDataURL(file);
+  }
+
+  // ── サンプル画像キャッシュ（サムネモーダル用。cid毎にサンプルURL配列を保持）──
+  var K_SAMPLES = 'cand_samples';
+  function samplesCacheGet(cid) { var c = lsGet(K_SAMPLES, '{}')[cid]; return (c && Array.isArray(c.imgs)) ? c : null; }
+  function samplesCacheSet(cid, imgs, thumb) { var all = lsGet(K_SAMPLES, '{}'); all[cid] = { imgs: imgs || [], thumb: thumb || '', at: new Date().getTime() }; lsSet(K_SAMPLES, all); }
+
+  // ── サムネ/サンプル画像モーダル（投稿履歴の詳細ビューと同じ .fz-* を流用したライトボックス）──
+  var _imgOverlay = null;
+  function ensureImgOverlay_() {
+    if (_imgOverlay) return _imgOverlay;
+    var ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
+    ov.innerHTML = '<div class="fz-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
+    ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
+    _imgOverlay = ov; return ov;
+  }
+  function renderImgModal_(title, big, samples, note) {
+    var ov = ensureImgOverlay_();
+    var gallery = []; if (big) gallery.push(big); (samples || []).forEach(function (s) { gallery.push(s); });
+    var sBase = big ? 1 : 0;
+    ov.querySelector('.fz-body').innerHTML =
+      '<div class="fz-title">' + esc(title || '(無題)') + '</div>' +
+      (big ? '<div class="fz-hero"><img class="fz-zoomable" data-z="0" src="' + esc(big) + '" alt="タップで拡大"></div>' : '') +
+      (samples && samples.length
+        ? '<div class="fz-samples">' + samples.map(function (s, i) { return '<img class="fz-zoomable" data-z="' + (sBase + i) + '" src="' + esc(s) + '" alt="" loading="lazy">'; }).join('') + '</div>'
+        : (note ? '<div class="hint" style="text-align:center;padding:6px 0 2px;">' + esc(note) + '</div>' : ''));
+    ov.querySelectorAll('.fz-zoomable').forEach(function (im) { im.addEventListener('click', function () { openImgZoom_(gallery, parseInt(im.getAttribute('data-z'), 10) || 0); }); });
+    ov.hidden = false;
+  }
+  function openThumbModal_(it) {
+    if (!it) return;
+    var big = it.thumb || '';
+    if (it.samples && it.samples.length) { renderImgModal_(it.title, big, it.samples); return; }
+    var cached = samplesCacheGet(it.cid);
+    if (cached && cached.imgs.length) { renderImgModal_(it.title, cached.thumb || big, cached.imgs); return; }
+    renderImgModal_(it.title, big, null, '⏳ サンプル画像を取得中…');
+    var cfg = workerCfg();
+    if (window.FanzaCore && cfg.url && it.cid) {
+      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url).then(function (info) {
+        if (_imgOverlay && _imgOverlay.hidden) return; // 閉じられていたら反映しない
+        if (info && info.samples && info.samples.length) {
+          samplesCacheSet(it.cid, info.samples, info.thumb || big);
+          renderImgModal_(it.title, info.thumb || big, info.samples);
+        } else { renderImgModal_(it.title, big, null, 'この作品にはサンプル画像がありません。'); }
+      }).catch(function () { if (_imgOverlay && !_imgOverlay.hidden) renderImgModal_(it.title, big, null, 'サンプル画像を取得できませんでした。'); });
+    } else { renderImgModal_(it.title, big, null, 'サンプル画像の取得にはFANZA Workerの設定が必要です。'); }
+  }
+  // 画像ズーム（左右スワイプで切替）。.fz-zoom を流用。
+  var _zoom = null, _zoomList = [], _zi = 0;
+  function ensureZoom_() {
+    if (_zoom) return _zoom;
+    var z = document.createElement('div'); z.className = 'fz-zoom'; z.hidden = true;
+    z.innerHTML = '<button class="fz-zoom-close" type="button" aria-label="閉じる">✕</button><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div>';
+    document.body.appendChild(z);
+    z.addEventListener('click', function (e) { if (e.target === z) z.hidden = true; });
+    z.querySelector('.fz-zoom-close').addEventListener('click', function () { z.hidden = true; });
+    var sx = null, sy = null;
+    z.addEventListener('touchstart', function (e) { var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
+    z.addEventListener('touchend', function (e) {
+      if (sx == null) return; var t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) zoomGo_(dx < 0 ? 1 : -1);
+      sx = sy = null;
+    }, { passive: true });
+    _zoom = z; return z;
+  }
+  function zoomShow_() {
+    var z = ensureZoom_();
+    z.querySelector('.fz-zoom-img').src = _zoomList[_zi] || '';
+    z.querySelector('.fz-zoom-count').textContent = _zoomList.length > 1 ? (_zi + 1) + ' / ' + _zoomList.length : '';
+    z.hidden = false;
+  }
+  function zoomGo_(d) { if (!_zoomList.length) return; _zi = (_zi + d + _zoomList.length) % _zoomList.length; zoomShow_(); }
+  function openImgZoom_(images, idx) { if (!images || !images.length) return; _zoomList = images.slice(); _zi = Math.min(Math.max(0, idx || 0), _zoomList.length - 1); zoomShow_(); }
+
+  // ── 投稿画像モーダル（1枚の元画像＋メモを保存）──
+  var _refOverlay = null;
+  function openRefImgModal_(it, onSaved) {
+    if (!it) return;
+    var ov = _refOverlay;
+    if (!ov) {
+      ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
+      ov.innerHTML = '<div class="fz-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
+      ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
+      _refOverlay = ov;
+    }
+    var cur = refImgOf(it.cid) || {};
+    var pending = { img: cur.img || '', comment: cur.comment || '' };
+    var body = ov.querySelector('.fz-body');
+    body.innerHTML =
+      '<div class="fz-title">🖼 投稿画像 ／ ' + esc(it.title || it.cid) + '</div>' +
+      '<div class="hint" style="margin-bottom:8px;">この作品に関連する画像を<b>1枚</b>保存できます。作品用の画像を生成するときの<b>元画像</b>として使えます。</div>' +
+      '<div id="refImgPreview" class="cand-refimg-preview"></div>' +
+      '<div style="display:flex;gap:8px;margin:8px 0;">' +
+        '<label class="ghost cand-refimg-pick" style="flex:1;text-align:center;margin:0;">🖼 画像を選ぶ<input id="refImgFile" type="file" accept="image/*" style="display:none;"></label>' +
+        '<button id="refImgClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;">画像を消す</button>' +
+      '</div>' +
+      '<label class="hint" style="display:block;margin-bottom:2px;">メモ（コメント）</label>' +
+      '<textarea id="refImgComment" rows="3" class="cand-refimg-memo" placeholder="生成時の指示・覚え書きなど"></textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;">' +
+        '<button id="refImgSave" type="button" class="primary" style="flex:1;">保存</button>' +
+        '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
+      '</div><div id="refImgMsg" class="hint" style="min-height:1.2em;"></div>';
+    var previewEl = body.querySelector('#refImgPreview');
+    function drawPreview() { previewEl.innerHTML = pending.img ? '<img src="' + pending.img + '" alt="" class="fz-zoomable" style="max-width:100%;max-height:40vh;border-radius:8px;border:1px solid var(--line);">' : '<div class="hint" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">画像は未保存です</div>'; if (pending.img) { var z = previewEl.querySelector('img'); z.addEventListener('click', function () { openImgZoom_([pending.img], 0); }); } }
+    drawPreview();
+    body.querySelector('#refImgComment').value = pending.comment;
+    body.querySelector('#refImgFile').addEventListener('change', function () {
+      var f = this.files && this.files[0]; if (!f) return;
+      body.querySelector('#refImgMsg').textContent = '⏳ 画像を処理中…';
+      fileToScaledDataUrl(f, function (durl, err) {
+        if (err) { body.querySelector('#refImgMsg').textContent = '⚠️ ' + err; return; }
+        pending.img = durl; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を差し替えました（保存で確定）';
+      });
+    });
+    body.querySelector('#refImgClear').addEventListener('click', function () { pending.img = ''; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を消しました（保存で確定）'; });
+    body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
+    body.querySelector('#refImgSave').addEventListener('click', function () {
+      pending.comment = body.querySelector('#refImgComment').value || '';
+      if (!refImgSave(it.cid, pending)) { body.querySelector('#refImgMsg').textContent = '⚠️ 保存できません（端末の保存容量が不足。画像を消すか小さくしてください）'; return; }
+      body.querySelector('#refImgMsg').textContent = '✅ 保存しました';
+      if (onSaved) onSaved();
+      setTimeout(function () { ov.hidden = true; }, 600);
+    });
+    ov.hidden = false;
+  }
+
+  // カード共通の配線：サムネのタップで画像モーダル／🖼投稿画像ボタン。
+  function wireCardCommon_(el) {
+    el.querySelectorAll('[data-thumbcid]').forEach(function (im) {
+      im.addEventListener('click', function () { openThumbModal_(itemByCid_(im.getAttribute('data-thumbcid'))); });
+    });
+    el.querySelectorAll('[data-refimg]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var cid = b.getAttribute('data-refimg'), it = itemByCid_(cid); if (!it) return;
+        openRefImgModal_(it, function () {
+          var has = refImgHas(cid);
+          b.classList.toggle('has-img', has);
+          b.innerHTML = has ? '🖼 投稿画像✓' : '🖼 投稿画像';
+        });
+      });
+    });
+  }
+  // 「▶今すぐ取得」ボタンの共通配線（notceParentId=通知メッセージを差し込む要素id）。
+  function bindPcRun_(btn, noticeParentId) {
+    btn.addEventListener('click', function () {
+      var b = this; b.disabled = true; var t0 = b.textContent; b.textContent = '⏳ 要求中…';
+      requestPcRun(function (ok, err) {
+        b.textContent = ok ? '✅ 要求しました' : '⚠️ ' + (err || '失敗');
+        if (ok) { var el = $(noticeParentId); if (el) { var p = document.createElement('p'); p.className = 'hint'; p.style.padding = '4px 6px'; p.style.color = '#c0392b'; p.textContent = '▶ PCへ取得を要求しました。PCの電源が入っていれば数分以内に取得→🔁で反映されます。'; el.insertBefore(p, el.firstChild); } }
+        setTimeout(function () { b.textContent = t0; b.disabled = false; }, 4000);
+      });
+    });
+  }
   // サークルを販売数の「追跡対象」としてworkerへ登録/解除。登録済みサークルは
   // PCバッチ(販売数を取得.bat)が「タブを表示しなくても」全作品の販売数を自動取得する。
   function trackMaker(makerId, makerName, remove) {
@@ -430,22 +625,43 @@
   }
 
   // ── 候補リスト（既定の💡候補 と 独立した候補タブ で共用。tabIdごとに保存先が独立） ──
+  //   サークルタブと同じヘッダ（並び替え／🔁／▶今すぐ取得／✏️編集／🙈非表示）を持つ。
   function renderMain(tabId) {
     tabId = tabId || 'main';
     var body = $('candBody');
     var isMain = (tabId === 'main');
-    var editBar = isMain ? '' :
-      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:8px;">' +
-      '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
+    var sortOpts = SORTS.map(function (s) { return '<option value="' + s.key + '"' + (s.key === _sort ? ' selected' : '') + '>' + s.label + '</option>'; }).join('');
+    var header = '<div class="card" style="padding:10px 12px;">' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+      '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
+      '<button id="candReload" type="button" class="ghost" title="価格・販売数を取り直す" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
+      '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
+      (isMain ? '' : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
+      '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
+      '</div>' +
+      (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
+      ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
       '</div>';
-    body.innerHTML = editBar + '<div id="candEditForm"></div>' + '<div class="card">' +
+    var addCard = '<div class="card">' +
       '<div class="field-label" style="margin-top:0;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
-      '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>このタブは💡候補とは別に、独立して表示・保存されます。') + '</div>' +
+      '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>💡候補とは別に、このタブに独立して保存されます。') + '</div>' +
       '<input id="candUrl" type="text" inputmode="url" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="margin-top:6px;">' +
       '<button id="candAdd" type="button" class="primary" style="margin-top:8px;font-size:.9rem;padding:10px;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button>' +
       '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
-      '</div><div id="candList"></div>';
+      '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
+        '<div class="hint">サークルの作品を<b>まとめて</b>' + (isMain ? '候補' : 'このタブ') + 'に追加できます（サークルID / サークルURL / 作品URLのどれか）。タブ名は変わりません。</div>' +
+        '<input id="candBulkSrc" type="text" inputmode="url" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="margin-top:6px;">' +
+        '<button id="candBulkAdd" type="button" class="ghost" style="margin-top:8px;width:auto;">🏭 サークルの作品を全部追加</button>' +
+        '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
+      '</div>' +
+      '</div>';
+    body.innerHTML = header + '<div id="candEditForm"></div>' + addCard + '<div id="candList"></div>';
+    $('candSort').addEventListener('change', function () { _sort = this.value; renderCandList(tabId); });
+    $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderCandList(tabId); });
+    $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
+    bindPcRun_($('candPcRun'), 'candList');
     $('candAdd').addEventListener('click', function () { addCandidate(tabId); });
+    $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
     if (!isMain) {
       var tab = null; lsGet(K_TABS, '[]').forEach(function (t) { if (t.id === tabId) tab = t; });
       var eb = $('candEditTab'); if (eb && tab) eb.addEventListener('click', function () { showEditTabForm(tab); });
@@ -465,17 +681,21 @@
     msg.textContent = '⏳ 作品情報を取得中…';
     var cfg = workerCfg();
     var put = function (info) {
-      items.unshift({
+      var it = {
         url: url, cid: r.cid,
         title: (info && info.title) || '(タイトル未取得)',
         author: (info && info.author) || '',
-        thumb: (info && (info.thumbSmall || info.thumb)) || '',
+        thumb: (info && (info.thumb || info.thumbSmall)) || '',
         listPrice: info ? info.listPrice : null, price: info ? info.price : null,
         discountPct: info ? (info.discountPct || 0) : 0,
         date: (info && info.releaseDate) || '',
         genres: (info && info.genres) || [],
+        reviewCount: info ? info.reviewCount : null,
+        reviewAvg: info ? info.reviewAvg : null,
         addedAt: new Date().getTime()
-      });
+      };
+      if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
+      items.unshift(it);
       lsSet(key, items);
       inp.value = ''; msg.textContent = '✅ 追加しました';
       renderCandList(tabId);
@@ -486,26 +706,108 @@
       }).catch(function () { put(null); });
     } else put(null);
   }
+  // サークルの全作品を、指定タブ(候補/独立タブ)へまとめて追加（重複cidは除外・タブ名は不変）。
+  function bulkAddCircle(tabId) {
+    var src = ($('candBulkSrc').value || '').trim(), msg = $('candBulkMsg');
+    if (!src) { msg.textContent = '⚠️ サークル情報を入れてください'; return; }
+    msg.textContent = '⏳ サークルを特定中…';
+    resolveMakerId(src, function (makerId, makerName, err) {
+      if (!makerId) { msg.textContent = '⚠️ ' + err; return; }
+      msg.textContent = '⏳ 作品一覧を取得中…（多いと時間がかかります）';
+      fetchMakerItems(makerId, 'date', function (works, err2) {
+        if (err2) { msg.textContent = '⚠️ ' + err2; return; }
+        var res = appendWorks_(itemsKey(tabId), works || []);
+        msg.textContent = '✅ ' + res.added + '件を追加しました' + (res.dup ? '（重複' + res.dup + '件は除外）' : '');
+        $('candBulkSrc').value = '';
+        renderCandList(tabId);
+      }, true); // force=キャッシュ無視で最新の全件
+    });
+  }
+  // サークルモードから: 表示中サークルの全作品を「💡候補」へ追加（重複除外・確認あり）。
+  function addWorksToMain_(works, btn, circleName) {
+    if (!works || !works.length) return;
+    if (!window.confirm('「' + (circleName || 'このサークル') + '」の全' + works.length + '作品を「💡候補」に追加しますか？')) return;
+    var res = appendWorks_(K_ITEMS, works);
+    if (btn) { btn.textContent = '✅ ' + res.added + '件を候補へ' + (res.dup ? '（重複' + res.dup + '件除外）' : ''); setTimeout(function () { btn.textContent = '💡 全作品を候補に追加'; }, 3500); }
+  }
+  // 作品配列を保存キーへ追記（cid重複は除外）。追加数・重複数を返す。
+  function appendWorks_(key, works) {
+    var items = lsGet(key, '[]'), have = {}; items.forEach(function (x) { have[x.cid] = true; });
+    var added = 0, dup = 0;
+    works.forEach(function (w) {
+      if (!w || !w.cid) return;
+      if (have[w.cid]) { dup++; return; }
+      items.push({ url: w.url, cid: w.cid, title: w.title, author: w.makerName || w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], reviewCount: w.reviewCount, reviewAvg: w.reviewAvg, addedAt: new Date().getTime() });
+      have[w.cid] = true; added++;
+    });
+    lsSet(key, items); recordReviewSnapshots(items);
+    return { added: added, dup: dup };
+  }
+  // 🔁: このタブの各作品の価格・販売数を最新化（FANZA再取得＋販売数キャッシュ無効化）。
+  function refreshCandItems(tabId) {
+    var key = itemsKey(tabId), items = lsGet(key, '[]');
+    if (!items.length) { renderCandList(tabId); return; }
+    var cids = items.map(function (it) { return it.cid; });
+    var msgEl = $('candMsg');
+    var cfg = workerCfg();
+    var done = function () { lsSet(key, items); recordReviewSnapshots(items); if (msgEl) msgEl.textContent = ''; invalidateSales_(cids); renderCandList(tabId); };
+    if (!window.FanzaCore || !cfg.url) { done(); return; }
+    if (msgEl) msgEl.textContent = '⏳ 価格・情報を更新中…';
+    var pending = items.length;
+    items.forEach(function (it) {
+      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url).then(function (info) {
+        if (info && info.title) {
+          it.title = info.title; if (info.author) it.author = info.author;
+          it.listPrice = info.listPrice; it.price = info.price; it.discountPct = info.discountPct || 0;
+          if (info.releaseDate) it.date = info.releaseDate;
+          if (info.genres && info.genres.length) it.genres = info.genres;
+          if (info.thumb || info.thumbSmall) it.thumb = info.thumb || info.thumbSmall;
+          if (info.samples && info.samples.length) it.samples = info.samples;
+          if (info.reviewCount != null) it.reviewCount = info.reviewCount;
+          if (info.reviewAvg != null) it.reviewAvg = info.reviewAvg;
+        }
+        if (--pending === 0) done();
+      }).catch(function () { if (--pending === 0) done(); });
+    });
+  }
   function renderCandList(tabId) {
     tabId = tabId || 'main';
     var key = itemsKey(tabId);
     var el = $('candList');
-    var items = lsGet(key, '[]');
-    if (!items.length) { el.innerHTML = '<p class="hint" style="padding:4px 6px;">まだ候補がありません。上の欄に作品URLを入れて追加してください。</p>'; return; }
-    el.innerHTML = items.map(function (it, i) {
-      return candCard(it, '<button type="button" class="cand-hide-btn" data-del="' + i + '">🗑 削除</button>');
+    var all = lsGet(key, '[]');
+    if (!all.length) { el.innerHTML = '<p class="hint" style="padding:4px 6px;">まだ候補がありません。上の欄に作品URLを入れて追加してください。</p>'; return; }
+    var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
+    var arr = sortItems(all, _sort).filter(function (it) { return _showHidden ? hset[it.cid] : !hset[it.cid]; });
+    _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
+    if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる候補がありません。') + '</p>'; return; }
+    var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
+    var salesMiss = missingCount(topCids);
+    var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中 ' : '') + arr.length + '件' + (_showHidden ? '（「再表示」で戻せます）' : ' / 非表示 ' + hidden.length + '件') +
+      (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます(PCの電源が必要)。' : '') + '</p>';
+    el.innerHTML = head + arr.map(function (it) {
+      var act = _showHidden
+        ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn" data-delcid="' + esc(it.cid) + '">🗑 削除</button>'
+        : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(it.cid) + '">🙈 非表示</button> <button type="button" class="cand-hide-btn" data-delcid="' + esc(it.cid) + '">🗑 削除</button>';
+      return candCard(it, act);
     }).join('');
-    el.querySelectorAll('[data-del]').forEach(function (b) {
+    wireCardCommon_(el);
+    el.querySelectorAll('[data-hidecid]').forEach(function (b) {
+      b.addEventListener('click', function () { var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); renderCandList(tabId); });
+    });
+    el.querySelectorAll('[data-unhide]').forEach(function (b) {
+      b.addEventListener('click', function () { var c = b.getAttribute('data-unhide'); lsSet(hiddenKey(tabId), lsGet(hiddenKey(tabId), '[]').filter(function (x) { return x !== c; })); renderCandList(tabId); });
+    });
+    el.querySelectorAll('[data-delcid]').forEach(function (b) {
       b.addEventListener('click', function () {
-        var items2 = lsGet(key, '[]');
-        var it = items2[parseInt(b.getAttribute('data-del'), 10)];
-        if (!it || !window.confirm('「' + (it.title || it.cid) + '」をこのタブから削除しますか？')) return;
-        items2.splice(parseInt(b.getAttribute('data-del'), 10), 1);
-        lsSet(key, items2); renderCandList(tabId);
+        var c = b.getAttribute('data-delcid'), items2 = lsGet(key, '[]');
+        var it = items2.filter(function (x) { return x.cid === c; })[0];
+        if (!it || !window.confirm('「' + (it.title || c) + '」をこのタブから削除しますか？')) return;
+        lsSet(key, items2.filter(function (x) { return x.cid !== c; }));
+        renderCandList(tabId);
       });
     });
     // 候補作品の実売本数を取得（未取得はPC取得キューへ）。反映されたら再描画。
-    fetchSalesFor(items.map(function (it) { return it.cid; }), function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
+    fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
   }
 
   // ── サークルタブ ──
@@ -531,14 +833,7 @@
     $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
     $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
-    $('candPcRun').addEventListener('click', function () {
-      var b = this; b.disabled = true; var t0 = b.textContent; b.textContent = '⏳ 要求中…';
-      requestPcRun(function (ok, err) {
-        b.textContent = ok ? '✅ 要求しました' : '⚠️ ' + (err || '失敗');
-        if (ok) { var el = $('candMakerList'); if (el) { var p = document.createElement('p'); p.className = 'hint'; p.style.padding = '4px 6px'; p.style.color = '#c0392b'; p.textContent = '▶ PCへ取得を要求しました。PCの電源が入っていれば数分以内に取得→🔁で反映されます。'; el.insertBefore(p, el.firstChild); } }
-        setTimeout(function () { b.textContent = t0; b.disabled = false; }, 4000);
-      });
-    });
+    bindPcRun_($('candPcRun'), 'candMakerList');
     $('candEditTab').addEventListener('click', function () { showEditTabForm(tab); });
     fetchMakerItems(tab.makerId, _sort, function (items, err) {
       var el = $('candMakerList');
@@ -555,10 +850,13 @@
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
       var arr = sortItems(items, _sort).filter(function (it) { return _showHidden ? hset[it.cid] : !hset[it.cid]; });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる作品がありません。') + '</p>'; return; }
+      _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
       // 実売本数(販売数)を先頭60件ぶん取得（未取得はPC取得キューへ自動登録）。反映されたら再描画。
       var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
       var salesMiss = missingCount(topCids);
-      var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
+      var head = '<div style="display:flex;justify-content:flex-end;padding:2px 6px 6px;">' +
+        '<button id="candBulkToCand" type="button" class="ghost" style="width:auto;margin:0;font-size:12.5px;padding:6px 10px;">💡 全作品を候補に追加</button></div>' +
+        '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
         (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます(PCの電源が必要)。' : '') + '</p>';
       el.innerHTML = head + arr.map(function (it) {
         var btn = _showHidden
@@ -566,6 +864,9 @@
           : '<button type="button" class="cand-hide-btn" data-hide="' + esc(it.cid) + '">🙈 非表示</button>';
         return candCard(it, btn);
       }).join('');
+      wireCardCommon_(el);
+      var bulkBtn = $('candBulkToCand');
+      if (bulkBtn) bulkBtn.addEventListener('click', function () { addWorksToMain_(items, bulkBtn, tab.name); });
       if (!_showHidden && !force) fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === tabId) renderMaker(tabId); });
       el.querySelectorAll('[data-hide]').forEach(function (b) {
         b.addEventListener('click', function () {
@@ -685,8 +986,9 @@
     } else if (rc != null && rc > 0) {
       salesHtml = '<div class="cand-sub">レビュー ' + num(rc) + '件' + avg + '</div>';
     }
+    var hasRef = refImgHas(it.cid);
     return '<div class="cand-card">' +
-      (it.thumb ? '<img class="cand-thumb" src="' + esc(it.thumb) + '" loading="lazy" alt="">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
+      (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
       '<div class="cand-info">' +
         (badgesHtml ? '<div style="margin-bottom:3px;">' + badgesHtml + '</div>' : '') +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
@@ -696,6 +998,7 @@
         '<div class="cand-price">' + priceHtml + '</div>' +
         '<div class="cand-actions">' +
           (it.url ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+          '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿画像' + (hasRef ? '✓' : '') + '</button>' +
           '<span style="flex:1 1 auto;"></span>' + // 非表示/再表示/削除ボタンを右端へ寄せる
           actionHtml +
         '</div>' +
