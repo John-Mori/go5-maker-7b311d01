@@ -71,7 +71,8 @@
   // 発売日で絞り込む実装は「直近1週間に発売された新作」限定になり、対象が無いサークルは
   // 常に0件を返していた(バグ)。sort=rank自体が直近の売れ行きを反映する動的な人気順のため、
   // 発売日フィルタは廃止し「売上(人気)」と同じ人気順データを使う（＝空にならない・正しい近似）。
-  var RANK7D_NOTE = '※「直近1週間で売れてる順」はDMMの人気(売れ行き)ランキングを使用します(発売日での絞り込みはしていないため常に結果が出ます)。';
+  var RANK7D_NOTE = '※「直近1週間で売れてる順」はDMMの人気(売れ行き)ランキング順です(発売日での絞り込みはしていないため常に結果が出ます)。';
+  var SALES_NOTE = '※DMMは実売本数を公開していないため、各作品の「売れ行きの目安」には販売数と相関するレビュー件数を表示しています(実数ではなく目安)。';
 
   // ── サークル作品の取得（全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ） ──
   //   force=true でキャッシュを無視して取り直す（🔁リロードボタン用）。
@@ -368,6 +369,7 @@
       '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
       '</div>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
+      ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
       '</div>' +
       '<div id="candEditForm"></div>' +
       '<div id="candMakerList"><p class="hint" style="padding:8px;">' + (force ? '🔁 全件を取り直しています…' : '⏳ サークルの作品を取得中…') + '</p></div>';
@@ -470,6 +472,17 @@
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';
+    // 売れ行きの数値：DMM APIは実売本数を公開しないため、レビュー件数を「売れ行きの代理指標」として表示。
+    //   人気順/直近1週間で売れてる順のときは目立たせる。他の並び順でも件数があれば小さく表示。
+    var rc = it.reviewCount;
+    var isPop = (_sort === 'rank' || _sort === 'rank7d');
+    var avg = (it.reviewAvg != null && it.reviewAvg !== '') ? (' ★' + it.reviewAvg) : '';
+    var salesHtml = '';
+    if (rc != null && isPop) {
+      salesHtml = '<div class="cand-sales">🔥 売れ行きの目安：<b>レビュー ' + Number(rc).toLocaleString('ja-JP') + '件</b>' + avg + '</div>';
+    } else if (rc != null && rc > 0) {
+      salesHtml = '<div class="cand-sub">レビュー ' + Number(rc).toLocaleString('ja-JP') + '件' + avg + '</div>';
+    }
     return '<div class="cand-card">' +
       (it.thumb ? '<img class="cand-thumb" src="' + esc(it.thumb) + '" loading="lazy" alt="">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
       '<div class="cand-info">' +
@@ -477,6 +490,7 @@
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
+        salesHtml +
         '<div class="cand-price">' + priceHtml + '</div>' +
         '<div class="cand-actions">' +
           (it.url ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
