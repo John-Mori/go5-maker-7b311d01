@@ -95,9 +95,13 @@ export default {
     }
 
     // ── サークル（maker）の作品一覧：候補タブの「サークルタブ」用 ──────────────────
-    //   POST /api/fanza-maker-list { makerId, sort?, offset?, gteDays? }
-    //   sort: "date"(既定・発売日新しい順) | "rank"(人気=実売の近似) | "review"
-    //   gteDays: 指定日数以内に発売された作品に絞る（例 7 = 直近1週間×rank で「今売れてる」）
+    //   POST /api/fanza-maker-list { makerId, sort?, offset? }
+    //   sort: "date"(既定・発売日新しい順) | "rank"(人気=直近の売れ行きに近い動的ランキング) | "review"
+    //   ※以前は sort=rank に gte_date(発売日絞り込み)を重ねて「直近1週間の人気」を狙っていたが、
+    //     "直近1週間に発売された新作限定"になってしまい、対象が無いサークルは常に0件だった
+    //     （発売日フィルタと人気の対象期間は別物）。DMM APIに「過去N日の売上」という指標は無く、
+    //     sort=rank 自体が直近の売れ行きをよく反映する動的ランキングのため、発売日での絞り込みは廃止。
+    //     フロントの「直近1週間で売れてる順」は sort=rank（全期間対象の人気順）にマップする。
     //   同人フロア(digital_doujin)固定。1回最大100件・offsetでページング。
     if (path === "/api/fanza-maker-list") {
       if (request.method === "OPTIONS") return preflight(origin, allowed);
@@ -119,12 +123,6 @@ export default {
         article: "maker", article_id: makerId,
         hits: "100", offset: String(offset), sort: sort, output: "json",
       });
-      const gteDays = parseInt(mbody.gteDays || "0", 10) || 0;
-      if (gteDays > 0) {
-        const d = new Date(Date.now() - gteDays * 86400000);
-        const p = (n) => (n < 10 ? "0" : "") + n;
-        params.set("gte_date", d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T00:00:00");
-      }
       const data = await fetchDmmJson(DMM_API_BASE + "?" + params.toString(), 2);
       if (!data || !data.result) return json({ ok: false, error: "api_error" }, 502, cors2);
       const items = (Array.isArray(data.result.items) ? data.result.items : []).map((it) => {
@@ -134,13 +132,16 @@ export default {
         const disc = (lp && pr && lp > 0 && pr < lp) ? Math.round((1 - pr / lp) * 100) : 0;
         const img = it.imageURL || {};
         const rv = it.review || {};
-        const mk = (it.iteminfo && Array.isArray(it.iteminfo.maker) && it.iteminfo.maker[0]) ? it.iteminfo.maker[0] : null;
+        const info = it.iteminfo || {};
+        const mk = (Array.isArray(info.maker) && info.maker[0]) ? info.maker[0] : null;
+        const genres = (Array.isArray(info.genre) ? info.genre : []).map((g) => String((g && g.name) || "")).filter(Boolean);
         return {
           cid: it.content_id || "", title: it.title || "", url: (it.URL || "").split("?")[0],
           date: it.date || "", listPrice: lp, price: pr, discountPct: disc,
           reviewCount: rv.count != null ? rv.count : null, reviewAvg: rv.average != null ? rv.average : null,
           thumb: String(img.list || img.small || img.large || ""),
           makerName: mk ? String(mk.name || "") : "",
+          genres: genres,
         };
       });
       return json({ ok: true, total: data.result.total_count || items.length, offset: offset, items }, 200, cors2);

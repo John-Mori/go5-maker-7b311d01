@@ -119,6 +119,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-tab{flex:0 0 auto;width:auto;white-space:nowrap;font-family:inherit;font-size:13.5px;font-weight:700;background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:12px 12px 0 0;padding:9px 13px;cursor:pointer;margin-top:0;}
 .cand-tab.active{color:var(--ink);border-color:var(--line) var(--line) var(--accent) var(--line);border-bottom:2px solid var(--accent);}
 .cand-tab-add{color:var(--accent);border-style:dashed;}
+.cand-tab-dragging{opacity:.55;box-shadow:0 2px 8px rgba(0,0,0,.25);}
+.cand-tab[data-ct]:not([data-ct="main"]){touch-action:pan-x;} /* 横スクロールは許可しつつ長押しドラッグも取れるように */
 .cand-card{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:8px;align-items:flex-start;}
 .cand-thumb{width:72px;height:72px;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#eee2c5;border:1px solid var(--line);}
 .cand-thumb-ph{display:block;}

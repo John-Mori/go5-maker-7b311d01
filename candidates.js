@@ -7,9 +7,10 @@
  *    複数記録・削除可。データは両アカウント共通(localStorage: cand_items)。
  * ② サークルタブ（＋タブを追加で生成）:
  *    特定サークルの全作品を縦一覧表示。並び替え(発売日新/古・売上(人気)・直近1週間で売れてる・値引き率)。
- *    各作品に「非表示」、上部「非表示リストを表示」で再表示可。
- *    サークルの特定に必要な入力: サークルID(数字) / サークルページURL(…article=maker/id=数字…) /
- *    そのサークルの作品URL1つ(→APIでサークルIDを自動解決) のどれか1つ。
+ *    ジャンル・作品状態(新作/準新作/旧作)バッジも表示。各作品に「非表示」、上部「非表示リストを
+ *    表示」で再表示可。サークルの特定に必要な入力: サークルID(数字) / サークルページURL
+ *    (…article=maker/id=数字…) / そのサークルの作品URL1つ(→APIでサークルIDを自動解決) のどれか1つ。
+ *    タブはPC=ドラッグ、スマホ=長押し→ドラッグで並べ替え可（固定の候補/＋タブを除く）。
  *
  * 依存: window.normalizeWorkUrl / buildAffiliateLink (affiliate-core.js),
  *       window.FanzaCore.fetchFanzaInfo (fanza-core.js), fanza-worker /api/fanza-maker-list。
@@ -28,6 +29,20 @@
   function yen(n) { return (n != null && !isNaN(n)) ? '¥' + Number(n).toLocaleString('ja-JP') : '—'; }
   function fmtDate(s) { return String(s || '').slice(0, 10); }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
+  // 発売日→作品状態（新作=30日以内/準新作=90日以内/旧作=それ以降）。yt-clicks.jsのderiveWorkState_と同ロジック。
+  function deriveWorkState_(dateStr) {
+    if (!dateStr) return '';
+    var t = Date.parse(String(dateStr).replace(' ', 'T'));
+    if (isNaN(t)) return '';
+    var days = (new Date().getTime() - t) / 86400000;
+    if (days <= 30) return '新作';
+    if (days <= 90) return '準新作';
+    return '旧作';
+  }
+  function stateBadgeHtml_(ws) {
+    var cls = ws === '新作' ? 'fp-state-new' : (ws === '準新作' ? 'fp-state-semi' : 'fp-state-old');
+    return '<span class="fp-state ' + cls + '">' + esc(ws) + '</span>';
+  }
 
   // ── 保存キー ──
   var K_ITEMS = 'cand_items';   // 候補リスト(共通): [{url,cid,title,author,thumb,listPrice,price,discountPct,addedAt}]
@@ -39,6 +54,7 @@
   var _activeTab = 'main'; // 'main' | サークルタブid
   var _sort = 'date_desc';
   var _showHidden = false;
+  var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
 
   var SORTS = [
     { key: 'date_desc', label: '発売日が新しい順' },
@@ -47,11 +63,16 @@
     { key: 'rank7d', label: '直近1週間で売れてる順' },
     { key: 'discount_desc', label: '値引き率が高い順' }
   ];
+  // 「直近1週間で売れてる順」の注記：DMM APIに「過去N日間の売上」という指標は無いため、
+  // 発売日で絞り込む実装は「直近1週間に発売された新作」限定になり、対象が無いサークルは
+  // 常に0件を返していた(バグ)。sort=rank自体が直近の売れ行きを反映する動的な人気順のため、
+  // 発売日フィルタは廃止し「売上(人気)」と同じ人気順データを使う（＝空にならない・正しい近似）。
+  var RANK7D_NOTE = '※「直近1週間で売れてる順」はDMMの人気(売れ行き)ランキングを使用します(発売日での絞り込みはしていないため常に結果が出ます)。';
 
   // ── サークル作品の取得（APIモード別にページング＋キャッシュ） ──
   function fetchMakerItems(makerId, mode, cb) {
-    // mode → APIパラメータ: date系/discountは sort=date、rankは sort=rank、rank7dは sort=rank+gteDays7
-    var apiMode = (mode === 'rank') ? 'rank' : (mode === 'rank7d') ? 'rank7d' : 'date';
+    // mode → APIパラメータ: date/discountは sort=date、rank・rank7dは同一データ(sort=rank)を使用。
+    var apiMode = (mode === 'rank' || mode === 'rank7d') ? 'rank' : 'date';
     var ck = cacheKey(makerId, apiMode);
     var c = lsGet(ck, 'null');
     if (c && c.at && (new Date().getTime() - c.at) < CACHE_TTL && Array.isArray(c.items)) { cb(c.items, null); return; }
@@ -59,8 +80,7 @@
     if (!cfg.url) { cb(null, 'FANZA Workerが未設定です(⚙️詳細設定)'); return; }
     var all = [], offset = 1;
     function page() {
-      var body = { makerId: makerId, sort: apiMode === 'date' ? 'date' : 'rank', offset: offset };
-      if (apiMode === 'rank7d') body.gteDays = 7;
+      var body = { makerId: makerId, sort: apiMode, offset: offset };
       fetch(cfg.url + '/api/fanza-maker-list', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
         body: JSON.stringify(body)
@@ -119,13 +139,98 @@
     page.innerHTML = html;
 
     page.querySelectorAll('.cand-tab[data-ct]').forEach(function (b) {
-      b.addEventListener('click', function () { _activeTab = b.getAttribute('data-ct'); _showHidden = false; render(); });
+      b.addEventListener('click', function () {
+        if (_suppressNextClick) { _suppressNextClick = false; return; } // 直前の並べ替え操作の後続クリックは無視
+        _activeTab = b.getAttribute('data-ct'); _showHidden = false; render();
+      });
     });
     var addBtn = $('candAddTab');
     if (addBtn) addBtn.addEventListener('click', showAddTabForm);
+    wireTabDrag_();
 
     if (_activeTab === 'main') renderMain();
     else renderMaker(_activeTab);
+  }
+
+  // ── タブの並べ替え：PC=ドラッグ、スマホ=長押し→ドラッグ（Pointer Eventsでマウス/タッチ統一） ──
+  //   固定の「💡候補」「＋タブを追加」は並べ替え対象外。サークルタブ同士のみ入れ替え可能。
+  function wireTabDrag_() {
+    var bar = document.querySelector('.cand-tabs');
+    if (!bar) return;
+    var LONG_PRESS_MS = 350, MOVE_THRESHOLD = 6;
+    var longPressTimer = null, startX = 0, startY = 0;
+    var dragging = false, dragEl = null, dragMoved = false;
+
+    function reorderable() {
+      return [].slice.call(bar.querySelectorAll('.cand-tab[data-ct]')).filter(function (b) { return b.getAttribute('data-ct') !== 'main'; });
+    }
+    function beginDrag(btn) {
+      dragging = true; dragEl = btn; dragMoved = false;
+      btn.classList.add('cand-tab-dragging');
+      document.addEventListener('pointermove', onDragMove);
+      document.addEventListener('pointerup', onDragEnd);
+      document.addEventListener('pointercancel', onDragEnd);
+    }
+    function onDragMove(e) {
+      if (!dragging || !dragEl) return;
+      dragMoved = true;
+      var list = reorderable();
+      for (var i = 0; i < list.length; i++) {
+        var sib = list[i];
+        if (sib === dragEl) continue;
+        var r = sib.getBoundingClientRect();
+        if (e.clientX < r.left + r.width / 2) { bar.insertBefore(dragEl, sib); return; }
+        if (i === list.length - 1) { var addBtn = $('candAddTab'); if (addBtn) bar.insertBefore(dragEl, addBtn); }
+      }
+    }
+    function onDragEnd() {
+      document.removeEventListener('pointermove', onDragMove);
+      document.removeEventListener('pointerup', onDragEnd);
+      document.removeEventListener('pointercancel', onDragEnd);
+      if (dragEl) dragEl.classList.remove('cand-tab-dragging');
+      var moved = dragMoved;
+      dragging = false; dragEl = null; dragMoved = false;
+      if (moved) { _suppressNextClick = true; setTimeout(function () { _suppressNextClick = false; }, 300); commitTabOrder_(); }
+    }
+
+    bar.querySelectorAll('.cand-tab[data-ct]').forEach(function (btn) {
+      if (btn.getAttribute('data-ct') === 'main') return; // 固定タブは並べ替え起点にしない
+      btn.addEventListener('pointerdown', function (e) {
+        startX = e.clientX; startY = e.clientY;
+        if (e.pointerType === 'touch') {
+          longPressTimer = setTimeout(function () { longPressTimer = null; beginDrag(btn); }, LONG_PRESS_MS);
+        } else {
+          // マウス/ペン：微小な移動でドラッグ開始（クリックと区別）
+          var onMove = function (me) {
+            if (Math.abs(me.clientX - startX) > MOVE_THRESHOLD || Math.abs(me.clientY - startY) > MOVE_THRESHOLD) {
+              document.removeEventListener('pointermove', onMove);
+              document.removeEventListener('pointerup', onUp);
+              beginDrag(btn);
+            }
+          };
+          var onUp = function () { document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); };
+          document.addEventListener('pointermove', onMove);
+          document.addEventListener('pointerup', onUp);
+        }
+      });
+      btn.addEventListener('pointermove', function (e) {
+        if (longPressTimer && (Math.abs(e.clientX - startX) > MOVE_THRESHOLD || Math.abs(e.clientY - startY) > MOVE_THRESHOLD)) {
+          clearTimeout(longPressTimer); longPressTimer = null; // 通常のスクロール/タップとして扱う
+        }
+      });
+      btn.addEventListener('pointerup', function () { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
+      btn.addEventListener('pointercancel', function () { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
+    });
+  }
+  function commitTabOrder_() {
+    var bar = document.querySelector('.cand-tabs');
+    if (!bar) return;
+    var order = [].slice.call(bar.querySelectorAll('.cand-tab[data-ct]')).map(function (b) { return b.getAttribute('data-ct'); }).filter(function (id) { return id !== 'main'; });
+    var tabs = lsGet(K_TABS, '[]');
+    var byId = {}; tabs.forEach(function (t) { byId[t.id] = t; });
+    var newTabs = order.map(function (id) { return byId[id]; }).filter(Boolean);
+    lsSet(K_TABS, newTabs);
+    render();
   }
 
   // ── ＋タブを追加（名前＋サークル特定情報→決定） ──
@@ -191,6 +296,8 @@
         thumb: (info && (info.thumbSmall || info.thumb)) || '',
         listPrice: info ? info.listPrice : null, price: info ? info.price : null,
         discountPct: info ? (info.discountPct || 0) : 0,
+        date: (info && info.releaseDate) || '',
+        genres: (info && info.genres) || [],
         addedAt: new Date().getTime()
       });
       lsSet(K_ITEMS, items);
@@ -233,7 +340,9 @@
       '<select id="candSort" style="flex:1;min-width:150px;">' + sortOpts + '</select>' +
       '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
       '<button id="candDelTab" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">タブ削除</button>' +
-      '</div></div>' +
+      '</div>' +
+      (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
+      '</div>' +
       '<div id="candMakerList"><p class="hint" style="padding:8px;">⏳ サークルの作品を取得中…</p></div>';
     $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
@@ -284,11 +393,18 @@
     if (it.author || it.makerName) sub.push('🏷 ' + esc(it.author || it.makerName));
     if (it.date) sub.push('発売 ' + esc(fmtDate(it.date)));
     if (it.addedAt) sub.push('追加 ' + esc(fmtTs(it.addedAt)));
+    var ws = deriveWorkState_(it.date);
+    var badgesHtml = ws ? stateBadgeHtml_(ws) : '';
+    var genresHtml = (it.genres && it.genres.length)
+      ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
+      : '';
     return '<div class="cand-card">' +
       (it.thumb ? '<img class="cand-thumb" src="' + esc(it.thumb) + '" loading="lazy" alt="">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
       '<div class="cand-info">' +
+        (badgesHtml ? '<div style="margin-bottom:3px;">' + badgesHtml + '</div>' : '') +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
+        genresHtml +
         '<div class="cand-price">' + priceHtml + '</div>' +
         '<div class="cand-actions">' +
           (it.url ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
