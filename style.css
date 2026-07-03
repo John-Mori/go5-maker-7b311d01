@@ -22,7 +22,11 @@ html[data-tab="tabReserve"]{
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:var(--app-bg,var(--bg));color:var(--ink);
-  font-family:"Noto Sans JP",system-ui,sans-serif;transition:background-color .25s ease;}
+  font-family:"Noto Sans JP",system-ui,sans-serif;
+  /* タブ切替(ランキング/予約=クリーム⇔チャンネル色)で、パッと切り替わらず“ぬるっと”フェードする */
+  transition:background-color .8s cubic-bezier(.4,0,.2,1),color .8s cubic-bezier(.4,0,.2,1);}
+/* 見出し・タブバーの文字/枠もゆっくり追従（押下フィードバックのtransform等は既存定義が優先） */
+header h1,.sub,.acct-bar-note,.acct-bar-label{transition:color .8s cubic-bezier(.4,0,.2,1);}
 header{padding:18px 16px 6px;text-align:center;}
 h1{margin:0;font-size:22px;font-weight:900;letter-spacing:.02em;}
 .sub{margin:4px 0 0;color:var(--sub);font-size:13px;}
@@ -106,6 +110,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-h .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;font-weight:700;}
 .vtag-rebuild{color:#3fb6a8;border-color:#3fb6a8;font-weight:700;}
 .vtag-remade{color:#c98a3a;border-color:#c98a3a;font-weight:700;}
+.vrow-h .vtag-scheduled,.vtag-scheduled{color:#e8b31f;border-color:#e8b31f;font-weight:700;}  /* YouTube予約公開の「投稿予定」 */
 /* 小さめ写真ボタン（動画作成タブ） */
 .photo-btn-sm{padding:10px !important;font-size:14px !important;}
 /* カテゴリのチェック用カラーチップ（モーダル・動画作成タブ共通） */

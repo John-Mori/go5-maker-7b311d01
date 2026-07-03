@@ -962,8 +962,14 @@
   }
   // 作品URLから取得できた「現在の割引率」を投稿文へ自動反映する。取得できなかった/セール無しの
   // ときは何もしない（＝割引文ドロップダウンでの手動指定がそのまま使える・補助的フォールバック）。
+  // ※同じ作品(cid)には1回だけ自動適用する。再描画・キャッシュヒットのたびに発火すると、
+  //   ユーザーが手で選び直した割引％を毎回上書きしてしまうため（v164のリグレッション対策）。
+  var _autoDiscDoneCid = '';
   function autoApplyDiscountFromInfo_(info) {
     if (!info || !info.title) return; // 取得失敗＝手動フォールバックのため触らない
+    var cid = info.cid || info.title; // cid欠落時はタイトルで代用
+    if (cid === _autoDiscDoneCid) return; // この作品には適用済み＝手動変更を尊重
+    _autoDiscDoneCid = cid;
     var onSale = info.listPrice && info.price && info.discountPct > 0 && info.price < info.listPrice;
     applyDiscount(onSale ? String(info.discountPct) : '');
   }

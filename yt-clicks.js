@@ -202,10 +202,18 @@
     var m = ytMetaLoad();
     Object.keys(m).forEach(function (id) { var r = m[id] || {}; if (r.title) titleCache[id] = r.title; if (r.published != null) publishedCache[id] = r.published; if (r.views != null) viewsCache[id] = r.views; });
   })();
+  // 既存キャッシュのゴミ掃除（過去バージョンで __queried 等のメタキーが混入した分を1回で除去）。
+  (function () {
+    try {
+      var m = ytMetaLoad(), dirty = false;
+      Object.keys(m).forEach(function (id) { if (id.indexOf('__') === 0) { delete m[id]; dirty = true; } });
+      if (dirty) ytMetaSave(m);
+    } catch (e) {}
+  })();
   function ytMetaPersist(fetched) { // fetched: id -> {views,published,title}
     var m = ytMetaLoad(), now = new Date().getTime();
     Object.keys(fetched).forEach(function (id) {
-      var rec = fetched[id] || {}; if (id === '__error') return;
+      var rec = fetched[id] || {}; if (id === '__error' || id.indexOf('__') === 0) return; // __系メタキーは保存しない
       m[id] = m[id] || {};
       if (rec.title) m[id].title = rec.title;
       if (rec.published != null) m[id].published = rec.published;
@@ -475,6 +483,9 @@
       return;
     }
     var items = sortItems(rawItems, ymap);
+    // YouTube公開前(非公開/予約公開)の動画一覧 → vidで引けるマップに（「投稿予定」バッジ表示用）
+    var schedMap = {};
+    try { loadYtSched_(acct()).forEach(function (y) { if (y && y.vid) schedMap[y.vid] = y; }); } catch (e) {}
     list.innerHTML = items.map(function (it) {
       var k = itemKey(it);
       var yt = ymap[k] || it.ytUrl || '';
@@ -483,9 +494,12 @@
       var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
-      var dateHtml = pub != null
-        ? '<b>' + fmtPostDate(pub) + '</b>'
-        : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>');
+      var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
+      var dateHtml = sched
+        ? ((sched.publishAt ? '<b>' + fmtPostDate(sched.publishAt) + '</b> ' : '') + '<span class="vtag vtag-scheduled">投稿予定</span>')
+        : (pub != null
+          ? '<b>' + fmtPostDate(pub) + '</b>'
+          : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>'));
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
       var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
@@ -1726,6 +1740,7 @@
       vbatches.forEach(function (b) {
         jobs.push(fetchVideos(b).then(function (m) {
           var err = m.__error || ''; delete m.__error; if (err && !lastErr) lastErr = err;
+          delete m.__queried; // メタキーを消してからキャッシュ反映（yt_meta_cacheへのゴミ混入防止）
           Object.keys(m).forEach(function (id) {
             var rec = m[id] || {};
             if (rec.views != null) viewsCache[id] = rec.views;

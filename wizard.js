@@ -51,7 +51,7 @@
       'flex:1',
       'min-width:0',
       'padding:10px 6px',
-      'background:#5b3f8e',
+      'background:#2563eb',   /* Qセーブの既定色を参照した固定値（連動はしない） */
       'color:#fff',
       'border:none',
       'border-radius:10px',
@@ -71,9 +71,9 @@
       'flex:1',
       'min-width:0',
       'padding:10px 6px',
-      'background:transparent',
-      'color:#5b3f8e',
-      'border:1.5px solid #5b3f8e',
+      'background:#16a34a',   /* Qロードの既定色を参照した固定値（連動はしない） */
+      'color:#fff',
+      'border:none',
       'border-radius:10px',
       'font-size:.92rem',
       'font-weight:700',
