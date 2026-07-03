@@ -49,9 +49,9 @@ export default {
       // KVキーに使うため形式を厳格に検証（req:キュー汚染・ゴミキー増殖の防止）
       if (!/^[0-9A-Za-z_-]{1,64}$/.test(cid)) return json({ ok: false, error: "bad_cid" }, 400, cors);
       // 作品ページURL（任意）：FANZA Books等、同人以外のスクレイプフォールバック先として使用。
-      // SSRF防止のためFANZA配下のみ許可（それ以外は無視して従来動作）。
+      // SSRF防止のためFANZA配下のみ許可（それ以外は無視して従来動作）。book.dmm.com=現行のFANZAブックス。
       let srcUrl = String(body.url || "").trim();
-      if (!/^https:\/\/(book\.dmm\.co\.jp|www\.dmm\.co\.jp)\//.test(srcUrl)) srcUrl = "";
+      if (!/^https:\/\/(book\.dmm\.com|book\.dmm\.co\.jp|www\.dmm\.co\.jp)\//.test(srcUrl)) srcUrl = "";
 
       // ① DMM 公式 API（APIキーが設定されていれば優先）
       let item = null;
@@ -86,8 +86,9 @@ export default {
       if (!item) item = await cdnFallbackItem(cid);
 
       // フル情報が取れなかった作品は「PC取得依頼キュー」へ記録（PCのバッチが拾ってスクレイプ→ov:へ保存）。
+      //   book等のsrcUrlがあれば一緒に保存し、PC側がそのURL（同人以外）を正しくスクレイプできるようにする。
       if (env.FANZA_KV && (!item || item.partial)) {
-        try { await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 604800 }); } catch (e) {}
+        try { await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString(), url: srcUrl || "" }), { expirationTtl: 604800 }); } catch (e) {}
       }
 
       if (!item) return json({ ok: false, error: "not_found", cid }, 404, cors);
@@ -128,9 +129,16 @@ export default {
       if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, null);
       if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
       if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
+      const reqCids = await listAll(env.FANZA_KV, "req:"); // 取得依頼中のcid
+      // book等の非同人はスクレイプ先URLが必要なので、req:値からcid→urlを添える。
+      const queuedUrls = {};
+      await Promise.all(reqCids.map(async (c) => {
+        try { const v = await env.FANZA_KV.get("req:" + c, "json"); if (v && v.url) queuedUrls[c] = v.url; } catch (e) {}
+      }));
       return json({
         ok: true,
-        queued: await listAll(env.FANZA_KV, "req:"),      // 取得依頼中のcid
+        queued: reqCids,
+        queuedUrls: queuedUrls,
         overridden: await listAll(env.FANZA_KV, "ov:"),   // 上書き登録済みのcid（価格更新のため再取得対象）
       }, 200, null);
     }
@@ -586,7 +594,7 @@ async function listAll(kv, prefix) {
   return out;
 }
 // override の入力検証：許可フィールドのみ再構築。画像URLはDMM公式CDNドメイン限定。
-const IMG_OK = /^https:\/\/(doujin-assets\.dmm\.co\.jp|pics\.dmm\.co\.jp)\//;
+const IMG_OK = /^https:\/\/(doujin-assets\.dmm\.co\.jp|pics\.dmm\.co\.jp|ebook-assets\.dmm\.com)\//;
 function sanitizeOverride(raw) {
   if (!raw || typeof raw !== "object") return null;
   const cid = String(raw.content_id || "").trim();

@@ -15,3 +15,5 @@ scripts/scrape_config.json
 scripts/gas_deploy_config.json
 # 販売数スクレイプの前回実行時刻（このPC専用のローカル状態）
 scripts/sales_state.json
+# 未収録作品スクレイプの前回override更新時刻（このPC専用のローカル状態）
+scripts/missing_state.json
