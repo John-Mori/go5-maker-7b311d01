@@ -155,6 +155,67 @@ export default {
       return json({ ok: true, saved }, 200, null);
     }
 
+    // ── 実売本数（販売数）：作品詳細ページの「販売数」を返す（APIには無い数値）。──
+    //   POST /api/fanza-sales { cid } or { cids:[...最大30] } → { ok, sales:{cid:number}, missing:[...] }
+    //   ★販売数はDMM詳細ページHTMLにのみ存在し、そのページは海外IP(Cloudflare)だとログインへ飛ばされ
+    //     取得不能。そのためPC(日本IP)のバッチがスクレイプして KV(sales:<cid>) へ保存したものを返す。
+    //     KVに無いcidは missing に入れて返す（フロントはPC取得を促す/レビュー代理表示にフォールバック）。
+    if (path === "/api/fanza-sales") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      const cors3 = corsHeaders(origin, allowed);
+      if (!cors3) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors3);
+      const sec3 = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || sec3 !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors3);
+      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, cors3);
+      let sbody;
+      try { sbody = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, cors3); }
+      let cids = Array.isArray(sbody.cids) ? sbody.cids : (sbody.cid ? [sbody.cid] : []);
+      cids = cids.map((c) => String(c || "").trim()).filter((c) => /^[0-9A-Za-z_]{1,64}$/.test(c)).slice(0, 30);
+      if (!cids.length) return json({ ok: false, error: "missing_cid" }, 400, cors3);
+      const sales = {}; const missing = [];
+      await Promise.all(cids.map(async (cid) => {
+        try {
+          const v = await env.FANZA_KV.get("sales:" + cid, "json");
+          if (v && v.n != null) sales[cid] = v.n; else missing.push(cid);
+        } catch (e) { missing.push(cid); }
+      }));
+      // 未取得cidは「PC取得依頼キュー(販売数)」へ記録（PCバッチが拾って日本IPでスクレイプ→保存）。
+      await Promise.all(missing.map(async (cid) => {
+        try { await env.FANZA_KV.put("salesreq:" + cid, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 1209600 }); } catch (e) {}
+      }));
+      return json({ ok: true, sales, missing }, 200, cors3);
+    }
+
+    // ── 販売数の登録（PCバッチが日本IPでスクレイプした販売数を保存）。認証は管理鍵。──
+    //   POST /api/fanza-sales-save { items:[{cid,n}] }
+    if (path === "/api/fanza-sales-save") {
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, null);
+      if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
+      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
+      let body;
+      try { body = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, null); }
+      const items = Array.isArray(body.items) ? body.items.slice(0, 200) : [];
+      let saved = 0;
+      for (const raw of items) {
+        const cid = String((raw && raw.cid) || "").trim();
+        const n = raw && raw.n != null ? parseInt(raw.n, 10) : NaN;
+        if (!/^[0-9A-Za-z_]{1,64}$/.test(cid) || isNaN(n)) continue;
+        await env.FANZA_KV.put("sales:" + cid, JSON.stringify({ n, at: new Date().toISOString() }));
+        try { await env.FANZA_KV.delete("salesreq:" + cid); } catch (e) {}
+        saved++;
+      }
+      return json({ ok: true, saved }, 200, null);
+    }
+
+    // ── 販売数の取得依頼キュー（PCバッチが読む）。認証は管理鍵。──
+    if (path === "/api/fanza-sales-queue") {
+      if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, null);
+      if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
+      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
+      return json({ ok: true, queued: await listAll(env.FANZA_KV, "salesreq:") }, 200, null);
+    }
+
     if (path === "/" || path === "") {
       const mode = (env.FANZA_API_ID) ? "api+scrape" : "scrape-only";
       return text("go5-fanza-proxy ok (mode=" + mode + ")", 200);

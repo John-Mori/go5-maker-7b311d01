@@ -69,8 +69,8 @@
     { key: 'discount_desc', label: '値引き率が高い順' }
   ];
   // 「直近1週間で売れてる順」の注記。
-  var RANK7D_NOTE = '※「直近1週間で売れてる順」は、各作品のレビュー件数を定期的に記録しておき「今の件数−約1週間前の件数」の伸びが大きい順です(レビューは購入者が書くため売れ行きの近似)。記録が溜まるまで(初回〜数日)は差分が出ず、その間はDMM人気順で表示します。';
-  var SALES_NOTE = '※DMMは実売本数を公開していないため、各作品の「売れ行きの目安」には販売数と相関するレビュー件数を表示しています(実数ではなく目安)。';
+  var RANK7D_NOTE = '※「直近1週間で売れてる順」は、実売本数(販売数)の週次差分があればそれで、無ければレビュー件数の伸びで並べます。差分は記録が溜まる数日後から出ます。';
+  var SALES_NOTE = '※DMMの販売数(実売本数)は日本IPの詳細ページにのみ有り、サーバー(海外IP)からは取得不可のため、PCで「販売数を取得.bat」を実行して取り込みます(未取得の間はレビュー件数を代理表示)。';
 
   // ── レビュー件数スナップショット（「直近1週間で売れてる順」の差分計算用）──
   //   cid毎に {at,c} を最大8件・45日以内で保持。12時間に1回だけ記録して肥大化を防ぐ。
@@ -101,6 +101,59 @@
     if (ageDays < 3) return null; // 基準が新しすぎ＝まだ1週間分の差分が測れない
     return Math.max(0, currentCount - best.c);
   }
+
+  // ── 実売本数（販売数）：worker/api/fanza-sales(=PC取得→KV)から取得。端末に24hキャッシュ。──
+  //   販売数はDMM詳細ページにのみ有り、海外IP(worker)は取れない→PC(日本IP)がスクレイプ保存したものを読む。
+  var K_SALES = 'cand_sales';       // {cid:{n:(number|null), at}}
+  var K_SALESSNAP = 'cand_salessnap'; // {cid:[{at,n}]}  週次差分用
+  var SALES_TTL = 24 * 3600 * 1000, SALES_MISS_TTL = 15 * 60 * 1000;
+  function salesCache() { return lsGet(K_SALES, '{}'); }
+  function salesOf(cid) { // number=実売 / null=未取得(PC待ち) / undefined=キャッシュ切れ
+    var c = salesCache()[cid]; if (!c) return undefined;
+    var ttl = (c.n == null ? SALES_MISS_TTL : SALES_TTL);
+    return (new Date().getTime() - c.at < ttl) ? c.n : undefined;
+  }
+  function recordSalesSnapshots(salesMap) {
+    var snap = lsGet(K_SALESSNAP, '{}'), now = new Date().getTime(), changed = false, cutoff = now - 45 * 86400000;
+    Object.keys(salesMap || {}).forEach(function (cid) {
+      var n = salesMap[cid]; if (n == null) return;
+      var arr = snap[cid] || [], last = arr[arr.length - 1];
+      if (!last || (now - last.at) > 12 * 3600 * 1000) {
+        arr.push({ at: now, n: n }); snap[cid] = arr.filter(function (s) { return s.at >= cutoff; }).slice(-8); changed = true;
+      }
+    });
+    if (changed) lsSet(K_SALESSNAP, snap);
+  }
+  function weekSalesDelta(cid, currentN) {
+    if (currentN == null) return null;
+    var arr = lsGet(K_SALESSNAP, '{}')[cid]; if (!arr || !arr.length) return null;
+    var target = new Date().getTime() - 7 * 86400000, best = null;
+    arr.forEach(function (s) { if (!best || Math.abs(s.at - target) < Math.abs(best.at - target)) best = s; });
+    if (!best || (new Date().getTime() - best.at) / 86400000 < 3) return null;
+    return Math.max(0, currentN - best.n);
+  }
+  // 未取得cidを worker へ問い合わせ（＝未取得はPC取得キューへ自動登録）。取得できたら cb(changed,missingCount)。
+  function fetchSalesFor(cids, cb) {
+    var cache = salesCache(), need = [], now = new Date().getTime();
+    cids.forEach(function (cid) { var c = cache[cid]; var ttl = (c && c.n == null ? SALES_MISS_TTL : SALES_TTL); if (!c || (now - c.at) >= ttl) need.push(cid); });
+    need = need.filter(function (v, i, a) { return a.indexOf(v) === i; });
+    if (!need.length) { cb(false, missingCount(cids)); return; }
+    var cfg = workerCfg(); if (!cfg.url) { cb(false, 0); return; }
+    var chunks = []; for (var i = 0; i < need.length; i += 30) chunks.push(need.slice(i, i + 30));
+    var pending = chunks.length, changed = false;
+    chunks.forEach(function (ch) {
+      fetch(cfg.url + '/api/fanza-sales', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret }, body: JSON.stringify({ cids: ch }) })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          if (d && d.ok) {
+            var c = salesCache(), t = new Date().getTime(), s = d.sales || {};
+            ch.forEach(function (cid) { if (s[cid] != null) { c[cid] = { n: s[cid], at: t }; changed = true; } else { c[cid] = { n: null, at: t }; } });
+            lsSet(K_SALES, c); recordSalesSnapshots(s);
+          }
+          if (--pending === 0) cb(changed, missingCount(cids));
+        }).catch(function () { if (--pending === 0) cb(changed, missingCount(cids)); });
+    });
+  }
+  function missingCount(cids) { var c = salesCache(); var n = 0; cids.forEach(function (cid) { if (!c[cid] || c[cid].n == null) n++; }); return n; }
 
   // ── サークル作品の取得（全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ） ──
   //   force=true でキャッシュを無視して取り直す（🔁リロードボタン用）。
@@ -133,13 +186,17 @@
     else if (mode === 'date_desc') a.sort(function (x, y) { return String(y.date).localeCompare(String(x.date)); });
     else if (mode === 'discount_desc') a.sort(function (x, y) { return (y.discountPct || 0) - (x.discountPct || 0) || String(y.date).localeCompare(String(x.date)); });
     else if (mode === 'rank7d') {
-      // 直近1週間のレビュー増(≒売れ行き)が大きい順。差分が測れない作品はレビュー総数で後ろに並べる。
-      a.sort(function (x, y) {
-        var dx = weekReviewDelta(x.cid, x.reviewCount), dy = weekReviewDelta(y.cid, y.reviewCount);
-        if (dx != null && dy != null) return dy - dx || (y.reviewCount || 0) - (x.reviewCount || 0);
-        if (dx != null) return -1; if (dy != null) return 1;
-        return (y.reviewCount || 0) - (x.reviewCount || 0); // 差分未計測どうしは総レビュー数(人気の近似)
-      });
+      // 直近1週間の伸びが大きい順。実売本数の差分が取れればそれを最優先、無ければレビュー増、
+      // どちらも無ければ販売数(実売)総数→レビュー総数(人気の近似)で並べる。
+      var score = function (it) {
+        var sd = weekSalesDelta(it.cid, salesOf(it.cid));
+        if (sd != null) return [3, sd];
+        var rd = weekReviewDelta(it.cid, it.reviewCount);
+        if (rd != null) return [2, rd];
+        var sv = salesOf(it.cid); if (typeof sv === 'number') return [1, sv];
+        return [0, it.reviewCount || 0];
+      };
+      a.sort(function (x, y) { var sx = score(x), sy = score(y); return sy[0] - sx[0] || sy[1] - sx[1]; });
     }
     // rank はAPIの並び(人気順)をそのまま使う
     return a;
@@ -391,6 +448,8 @@
         lsSet(K_ITEMS, items2); renderCandList();
       });
     });
+    // 候補作品の実売本数を取得（未取得はPC取得キューへ）。反映されたら再描画。
+    fetchSalesFor(items.map(function (it) { return it.cid; }), function (changed) { if (changed && _activeTab === 'main') renderCandList(); });
   }
 
   // ── サークルタブ ──
@@ -431,13 +490,18 @@
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
       var arr = sortItems(items, _sort).filter(function (it) { return _showHidden ? hset[it.cid] : !hset[it.cid]; });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる作品がありません。') + '</p>'; return; }
-      var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') + '</p>';
+      // 実売本数(販売数)を先頭60件ぶん取得（未取得はPC取得キューへ自動登録）。反映されたら再描画。
+      var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
+      var salesMiss = missingCount(topCids);
+      var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
+        (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。PCで「販売数を取得.bat」を実行→🔁で反映されます。' : '') + '</p>';
       el.innerHTML = head + arr.map(function (it) {
         var btn = _showHidden
           ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button>'
           : '<button type="button" class="cand-hide-btn" data-hide="' + esc(it.cid) + '">🙈 非表示</button>';
         return candCard(it, btn);
       }).join('');
+      if (!_showHidden && !force) fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === tabId) renderMaker(tabId); });
       el.querySelectorAll('[data-hide]').forEach(function (b) {
         b.addEventListener('click', function () {
           var h = lsGet(hiddenKey(tabId), '[]'); var c = b.getAttribute('data-hide');
@@ -518,19 +582,30 @@
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';
-    // 売れ行きの数値：DMM APIは実売本数を公開しないため、レビュー件数を「売れ行きの代理指標」として表示。
-    //   直近1週間で売れてる順は「約1週間の伸び(差分)」があればそれを、無ければ総件数(計測中)を表示。
+    // 売れ行きの数値。実売本数(販売数)がPC取得済みなら実数を最優先。無ければレビュー件数(代理指標)。
     var rc = it.reviewCount;
     var avg = (it.reviewAvg != null && it.reviewAvg !== '') ? (' ★' + it.reviewAvg) : '';
+    var num = function (n) { return Number(n).toLocaleString('ja-JP'); };
+    var sales = salesOf(it.cid); // number=実売 / null=PC未取得 / undefined=未問い合わせ
     var salesHtml = '';
-    if (_sort === 'rank7d') {
+    if (typeof sales === 'number') {
+      // 実売本数あり（最優先）
+      if (_sort === 'rank7d') {
+        var sd = weekSalesDelta(it.cid, sales);
+        salesHtml = (sd != null)
+          ? '<div class="cand-sales">🔥 直近1週間の販売：<b>+' + num(sd) + '本</b>（累計 ' + num(sales) + '本・実売）</div>'
+          : '<div class="cand-sales">💰 販売数：<b>' + num(sales) + '本</b>（実売）<span style="font-weight:400;color:var(--sub);">・週差分は記録が溜まり次第</span></div>';
+      } else {
+        salesHtml = '<div class="cand-sales">💰 販売数：<b>' + num(sales) + '本</b>（実売）</div>';
+      }
+    } else if (_sort === 'rank7d') {
       var wd = weekReviewDelta(it.cid, rc);
-      if (wd != null) salesHtml = '<div class="cand-sales">🔥 直近1週間の伸び：<b>レビュー +' + Number(wd).toLocaleString('ja-JP') + '件</b>' + (rc != null ? '（累計' + Number(rc).toLocaleString('ja-JP') + '件）' : '') + '</div>';
-      else if (rc != null) salesHtml = '<div class="cand-sales">🔥 売れ行きの目安：<b>レビュー ' + Number(rc).toLocaleString('ja-JP') + '件</b>' + avg + '<span style="font-weight:400;color:var(--sub);">（差分は記録が溜まり次第）</span></div>';
+      if (wd != null) salesHtml = '<div class="cand-sales">🔥 直近1週間の伸び：<b>レビュー +' + num(wd) + '件</b>' + (rc != null ? '（累計' + num(rc) + '件）' : '') + '</div>';
+      else if (rc != null) salesHtml = '<div class="cand-sales">🔥 売れ行きの目安：<b>レビュー ' + num(rc) + '件</b>' + avg + '<span style="font-weight:400;color:var(--sub);">（販売数はPC取得待ち）</span></div>';
     } else if (_sort === 'rank' && rc != null) {
-      salesHtml = '<div class="cand-sales">🔥 売れ行きの目安：<b>レビュー ' + Number(rc).toLocaleString('ja-JP') + '件</b>' + avg + '</div>';
+      salesHtml = '<div class="cand-sales">🔥 売れ行きの目安：<b>レビュー ' + num(rc) + '件</b>' + avg + '</div>';
     } else if (rc != null && rc > 0) {
-      salesHtml = '<div class="cand-sub">レビュー ' + Number(rc).toLocaleString('ja-JP') + '件' + avg + '</div>';
+      salesHtml = '<div class="cand-sub">レビュー ' + num(rc) + '件' + avg + '</div>';
     }
     return '<div class="cand-card">' +
       (it.thumb ? '<img class="cand-thumb" src="' + esc(it.thumb) + '" loading="lazy" alt="">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
