@@ -69,31 +69,25 @@
   // 発売日フィルタは廃止し「売上(人気)」と同じ人気順データを使う（＝空にならない・正しい近似）。
   var RANK7D_NOTE = '※「直近1週間で売れてる順」はDMMの人気(売れ行き)ランキングを使用します(発売日での絞り込みはしていないため常に結果が出ます)。';
 
-  // ── サークル作品の取得（APIモード別にページング＋キャッシュ） ──
+  // ── サークル作品の取得（全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ） ──
   function fetchMakerItems(makerId, mode, cb) {
-    // mode → APIパラメータ: date/discountは sort=date、rank・rank7dは同一データ(sort=rank)を使用。
+    // date/discountは sort=date、rank・rank7dは同一データ(sort=rank)を使用。
     var apiMode = (mode === 'rank' || mode === 'rank7d') ? 'rank' : 'date';
     var ck = cacheKey(makerId, apiMode);
     var c = lsGet(ck, 'null');
-    if (c && c.at && (new Date().getTime() - c.at) < CACHE_TTL && Array.isArray(c.items)) { cb(c.items, null); return; }
+    if (c && c.at && (new Date().getTime() - c.at) < CACHE_TTL && Array.isArray(c.items) && c.items.length) { cb(c.items, null); return; }
     var cfg = workerCfg();
     if (!cfg.url) { cb(null, 'FANZA Workerが未設定です(⚙️詳細設定)'); return; }
-    var all = [], offset = 1;
-    function page() {
-      var body = { makerId: makerId, sort: apiMode, offset: offset };
-      fetch(cfg.url + '/api/fanza-maker-list', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
-        body: JSON.stringify(body)
-      }).then(function (r) { return r.json(); }).then(function (d) {
-        if (!d || !d.ok) { cb(null, (d && d.error) === 'bad_secret' ? '共有シークレット不一致(⚙️詳細設定)' : ('取得エラー: ' + ((d && d.error) || '不明'))); return; }
-        all = all.concat(d.items || []);
-        var total = d.total || all.length;
-        if (all.length < total && offset < 300 && (d.items || []).length > 0) { offset += 100; page(); return; }
-        lsSet(ck, { at: new Date().getTime(), items: all });
-        cb(all, null);
-      }).catch(function () { cb(null, '通信エラー'); });
-    }
-    page();
+    fetch(cfg.url + '/api/fanza-maker-list', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
+      body: JSON.stringify({ makerId: makerId, sort: apiMode })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok) { cb(null, (d && d.error) === 'bad_secret' ? '共有シークレット不一致(⚙️詳細設定)' : ('取得エラー: ' + ((d && d.error) || '不明'))); return; }
+      var items = d.items || [];
+      // 空データはキャッシュしない（一時失敗やサークル未収録を固定化しない）。
+      if (items.length) lsSet(ck, { at: new Date().getTime(), items: items });
+      cb(items, null);
+    }).catch(function () { cb(null, '通信エラー'); });
   }
   function sortItems(items, mode) {
     var a = items.slice();

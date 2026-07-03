@@ -95,14 +95,12 @@ export default {
     }
 
     // ── サークル（maker）の作品一覧：候補タブの「サークルタブ」用 ──────────────────
-    //   POST /api/fanza-maker-list { makerId, sort?, offset? }
+    //   POST /api/fanza-maker-list { makerId, sort? }
     //   sort: "date"(既定・発売日新しい順) | "rank"(人気=直近の売れ行きに近い動的ランキング) | "review"
-    //   ※以前は sort=rank に gte_date(発売日絞り込み)を重ねて「直近1週間の人気」を狙っていたが、
-    //     "直近1週間に発売された新作限定"になってしまい、対象が無いサークルは常に0件だった
-    //     （発売日フィルタと人気の対象期間は別物）。DMM APIに「過去N日の売上」という指標は無く、
-    //     sort=rank 自体が直近の売れ行きをよく反映する動的ランキングのため、発売日での絞り込みは廃止。
-    //     フロントの「直近1週間で売れてる順」は sort=rank（全期間対象の人気順）にマップする。
-    //   同人フロア(digital_doujin)固定。1回最大100件・offsetでページング。
+    //   ★worker側で「全ページ＋全同人フロア(通常/BL/TL)」を巡回して全作品を返す（フロントは1回呼ぶだけ）。
+    //     以前はフロントが offset<300 で最大400件に頭打ちし、大規模サークルの作品が欠けていた(取得漏れ)。
+    //   ※sort=rank に gte_date(発売日)を重ねると"直近1週間に発売された新作限定"になり対象0件事故が
+    //     起きたため発売日フィルタは廃止済み。フロントの「直近1週間で売れてる順」は sort=rank にマップ。
     if (path === "/api/fanza-maker-list") {
       if (request.method === "OPTIONS") return preflight(origin, allowed);
       const cors2 = corsHeaders(origin, allowed);
@@ -116,35 +114,12 @@ export default {
       const makerId = String(mbody.makerId || "").trim();
       if (!/^\d{1,10}$/.test(makerId)) return json({ ok: false, error: "bad_maker_id" }, 400, cors2);
       const sort = ({ date: "date", rank: "rank", review: "review" })[String(mbody.sort || "date")] || "date";
-      const offset = Math.min(Math.max(parseInt(mbody.offset || "1", 10) || 1, 1), 901);
-      const params = new URLSearchParams({
-        api_id: env.FANZA_API_ID, affiliate_id: env.FANZA_AFFILIATE_ID,
-        site: "FANZA", service: "doujin", floor: "digital_doujin",
-        article: "maker", article_id: makerId,
-        hits: "100", offset: String(offset), sort: sort, output: "json",
-      });
-      const data = await fetchDmmJson(DMM_API_BASE + "?" + params.toString(), 2);
-      if (!data || !data.result) return json({ ok: false, error: "api_error" }, 502, cors2);
-      const items = (Array.isArray(data.result.items) ? data.result.items : []).map((it) => {
-        const prices = it.prices || {};
-        const lp = prices.list_price != null && prices.list_price !== "" ? parseInt(prices.list_price, 10) : null;
-        const pr = prices.price != null && prices.price !== "" ? parseInt(prices.price, 10) : null;
-        const disc = (lp && pr && lp > 0 && pr < lp) ? Math.round((1 - pr / lp) * 100) : 0;
-        const img = it.imageURL || {};
-        const rv = it.review || {};
-        const info = it.iteminfo || {};
-        const mk = (Array.isArray(info.maker) && info.maker[0]) ? info.maker[0] : null;
-        const genres = (Array.isArray(info.genre) ? info.genre : []).map((g) => String((g && g.name) || "")).filter(Boolean);
-        return {
-          cid: it.content_id || "", title: it.title || "", url: (it.URL || "").split("?")[0],
-          date: it.date || "", listPrice: lp, price: pr, discountPct: disc,
-          reviewCount: rv.count != null ? rv.count : null, reviewAvg: rv.average != null ? rv.average : null,
-          thumb: String(img.list || img.small || img.large || ""),
-          makerName: mk ? String(mk.name || "") : "",
-          genres: genres,
-        };
-      });
-      return json({ ok: true, total: data.result.total_count || items.length, offset: offset, items }, 200, cors2);
+      try {
+        const result = await fetchAllMakerItems(env, makerId, sort);
+        return json({ ok: true, total: result.items.length, floors: result.floors, items: result.items }, 200, cors2);
+      } catch (e) {
+        return json({ ok: false, error: "api_error", reason: String(e && e.message || e) }, 502, cors2);
+      }
     }
 
     // ── PC取得依頼キュー：フル情報が取れなかったcid一覧＋登録済み上書き一覧（PCバッチが読む）──
@@ -188,6 +163,61 @@ export default {
     return json({ ok: false, error: "not_found" }, 404, null);
   }
 };
+
+// DMM ItemList の item を候補タブ用の軽量オブジェクトへ整形。
+function mapMakerItem(it) {
+  const prices = it.prices || {};
+  const lp = prices.list_price != null && prices.list_price !== "" ? parseInt(prices.list_price, 10) : null;
+  const pr = prices.price != null && prices.price !== "" ? parseInt(prices.price, 10) : null;
+  const disc = (lp && pr && lp > 0 && pr < lp) ? Math.round((1 - pr / lp) * 100) : 0;
+  const img = it.imageURL || {};
+  const rv = it.review || {};
+  const info = it.iteminfo || {};
+  const mk = (Array.isArray(info.maker) && info.maker[0]) ? info.maker[0] : null;
+  const genres = (Array.isArray(info.genre) ? info.genre : []).map((g) => String((g && g.name) || "")).filter(Boolean);
+  return {
+    cid: it.content_id || "", title: it.title || "", url: (it.URL || "").split("?")[0],
+    date: it.date || "", listPrice: lp, price: pr, discountPct: disc,
+    reviewCount: rv.count != null ? rv.count : null, reviewAvg: rv.average != null ? rv.average : null,
+    thumb: String(img.list || img.small || img.large || ""),
+    makerName: mk ? String(mk.name || "") : "",
+    genres: genres,
+  };
+}
+
+// 指定サークル(maker)の作品を「全ページ×全同人フロア(通常/BL/TL)」で巡回取得し、cidで重複排除して返す。
+// フロント側での取りこぼし(offset頭打ち)・フロア分割による欠落を根本から防ぐ。
+async function fetchAllMakerItems(env, makerId, sort) {
+  const FLOORS = ["digital_doujin", "digital_doujin_bl", "digital_doujin_tl"];
+  const seen = new Set();
+  const items = [];
+  const floorsHit = [];
+  for (const floor of FLOORS) {
+    let offset = 1, floorTotal = 0;
+    for (let guard = 0; guard < 30; guard++) { // 30×100=3000件/フロアの安全上限
+      const params = new URLSearchParams({
+        api_id: env.FANZA_API_ID, affiliate_id: env.FANZA_AFFILIATE_ID,
+        site: "FANZA", service: "doujin", floor: floor,
+        article: "maker", article_id: makerId,
+        hits: "100", offset: String(offset), sort: sort, output: "json",
+      });
+      const data = await fetchDmmJson(DMM_API_BASE + "?" + params.toString(), 2);
+      if (!data || !data.result) break;
+      const pageItems = Array.isArray(data.result.items) ? data.result.items : [];
+      floorTotal = parseInt(data.result.total_count, 10) || 0;
+      for (const it of pageItems) {
+        const cid = it.content_id || "";
+        if (!cid || seen.has(cid)) continue;
+        seen.add(cid); items.push(mapMakerItem(it));
+      }
+      // 次ページの有無：このフロアの total に達したか、100件未満で終端。
+      if (pageItems.length < 100 || offset + 100 > floorTotal) break;
+      offset += 100;
+    }
+    if (floorTotal > 0) floorsHit.push({ floor: floor, total: floorTotal }); // 診断用（作品のあるフロアのみ・1回）
+  }
+  return { items: items, floors: floorsHit };
+}
 
 // DMM APIのGET（一時的な失敗はshort backoffでリトライ）。成功時のみJSONを返す。
 async function fetchDmmJson(url, tries) {
