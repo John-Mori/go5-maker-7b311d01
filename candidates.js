@@ -172,6 +172,14 @@
   function ensureTrackedAll() {
     lsGet(K_TABS, '[]').forEach(function (t) { if (t.makerId) trackMaker(t.makerId, t.makerName || t.name || ''); });
   }
+  // 「▶今すぐ取得」: どの端末のWebアプリからでもPCへ実行要求を送る（PC常駐タスクが数分以内に拾う）。
+  // 実スクレイプは日本IPのPCでしか動かないので、これは実行予約のみ。
+  function requestPcRun(cb) {
+    var cfg = workerCfg(); if (!cfg.url) { cb && cb(false, 'FANZA Workerが未設定です(⚙️詳細設定)'); return; }
+    fetch(cfg.url + '/api/fanza-sales-run', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret }, body: '{}' })
+      .then(function (r) { return r.json(); }).then(function (d) { cb && cb(!!(d && d.ok), (d && d.error) || ''); })
+      .catch(function () { cb && cb(false, '通信エラー'); });
+  }
 
   // ── サークル作品の取得（全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ） ──
   //   force=true でキャッシュを無視して取り直す（🔁リロードボタン用）。
@@ -482,6 +490,7 @@
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
       '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
       '<button id="candReload" type="button" class="ghost" title="全件を取り直す(キャッシュを無視)" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
+      '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
       '<button id="candEditTab" type="button" class="ghost" title="タブ名・サークルを編集" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
       '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
       '</div>' +
@@ -493,6 +502,14 @@
     $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
     $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
+    $('candPcRun').addEventListener('click', function () {
+      var b = this; b.disabled = true; var t0 = b.textContent; b.textContent = '⏳ 要求中…';
+      requestPcRun(function (ok, err) {
+        b.textContent = ok ? '✅ 要求しました' : '⚠️ ' + (err || '失敗');
+        if (ok) { var el = $('candMakerList'); if (el) { var p = document.createElement('p'); p.className = 'hint'; p.style.padding = '4px 6px'; p.style.color = '#c0392b'; p.textContent = '▶ PCへ取得を要求しました。PCの電源が入っていれば数分以内に取得→🔁で反映されます。'; el.insertBefore(p, el.firstChild); } }
+        setTimeout(function () { b.textContent = t0; b.disabled = false; }, 4000);
+      });
+    });
     $('candEditTab').addEventListener('click', function () { showEditTabForm(tab); });
     fetchMakerItems(tab.makerId, _sort, function (items, err) {
       var el = $('candMakerList');
@@ -513,7 +530,7 @@
       var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
       var salesMiss = missingCount(topCids);
       var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
-        (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。PCで「販売数を取得.bat」を実行→🔁で反映されます。' : '') + '</p>';
+        (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます(PCの電源が必要)。' : '') + '</p>';
       el.innerHTML = head + arr.map(function (it) {
         var btn = _showHidden
           ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button>'

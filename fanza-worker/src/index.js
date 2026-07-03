@@ -208,6 +208,31 @@ export default {
       return json({ ok: true, saved }, 200, null);
     }
 
+    // ── 販売数の「今すぐ取得」リモート要求：どの端末のWebアプリからでも押せる。──
+    //   POST（公開ソフト鍵＋Origin）= スマホ等が「今すぐPCで取得して」とフラグを立てる
+    //   GET （管理鍵）              = PC常駐タスク(--poll)がフラグを読んで消費する
+    //   ★実際のスクレイプはPC(日本IP)でしか動かないので、これは「実行の予約」だけを担う。
+    if (path === "/api/fanza-sales-run") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      if (request.method === "GET") {
+        if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
+        if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
+        const v = await env.FANZA_KV.get("salesrun:req", "json").catch(() => null);
+        // 既定は peek（消さない）。?consume=1 の時だけ消費。
+        // ※実行を確約した後にだけ消費することで、直近ガードで見送った要求を取りこぼさない。
+        if (v && url.searchParams.get("consume") === "1") { try { await env.FANZA_KV.delete("salesrun:req"); } catch (e) {} }
+        return json({ ok: true, pending: !!v, at: (v && v.at) || null }, 200, null);
+      }
+      const corsR = corsHeaders(origin, allowed);
+      if (!corsR) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, corsR);
+      const secR = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || secR !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsR);
+      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, corsR);
+      await env.FANZA_KV.put("salesrun:req", JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 86400 });
+      return json({ ok: true, requested: true }, 200, corsR);
+    }
+
     // ── 販売数の追跡サークル登録：候補タブでサークルタブを追加/削除した時にフロントが呼ぶ。──
     //   POST /api/fanza-sales-track { makerId, name } / 解除は { makerId, remove:true }
     //   登録済みサークルはPCバッチが「表示しなくても」全作品の販売数を自動取得する。

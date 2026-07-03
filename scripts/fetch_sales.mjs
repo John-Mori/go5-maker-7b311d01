@@ -13,12 +13,20 @@
  *   4. /api/fanza-sales-save へ保存 → 以後スマホの候補タブで「販売数(実売)」が表示される
  *
  * 使い方:
- *   node scripts/fetch_sales.mjs                 … キューを処理
+ *   node scripts/fetch_sales.mjs                 … キュー＋追跡サークルを処理
  *   node scripts/fetch_sales.mjs d_724627 d_...  … cid/作品URLを直接指定も可
- *   （リポジトリ直下の「販売数を取得.bat」をダブルクリックでもOK）
+ *   node scripts/fetch_sales.mjs --poll          … 常駐タスク用: リモート要求か更新期限が来た時だけ動く
+ *   node scripts/fetch_sales.mjs --force         … 18時間スキップを無視して今すぐ全件取得
+ *   （リポジトリ直下の「販売数を取得.bat」をダブルクリックでもOK。
+ *    「販売数-自動取得を設定.bat」で15分ごとの--poll常駐を登録すると手動実行が不要になる）
+ *
+ * --poll モード（スマホ/どの端末からでも「▶今すぐ取得」を押すとPCが数分以内に拾って動く）:
+ *   worker /api/fanza-sales-run のリモート要求フラグをGETで消費し、要求があれば強制実行。
+ *   要求が無くても、更新期限(18h)が来た追跡サークルや取得依頼キューがあれば実行。
+ *   何も無ければ即終了（DMMに一切アクセスしない）＝15分ごとに回しても普段は無害。
  *
  * 設定: scripts/scrape_config.json（gitに入れない）
- *   { "workerUrl": "https://go5-fanza-proxy.....workers.dev", "adminSecret": "..." }
+ *   { "workerUrl": "https://go5-fanza-proxy.....workers.dev", "adminSecret": "...", "sharedSecret": "...", "siteOrigin": "https://..." }
  */
 import fs from "fs";
 import path from "path";
@@ -69,6 +77,19 @@ async function getQueue() {
   return { queued: Array.isArray(j.queued) ? j.queued : [], trackedMakers: Array.isArray(j.trackedMakers) ? j.trackedMakers : [] };
 }
 
+// リモート「▶今すぐ取得」要求フラグを覗く（消さない）。要求があれば true。
+async function peekRunFlag() {
+  try {
+    const res = await fetch(WORKER + "/api/fanza-sales-run", { headers: { "X-Admin-Secret": ADMIN } });
+    const j = await res.json().catch(() => null);
+    return !!(j && j.ok && j.pending);
+  } catch (e) { return false; }
+}
+// 実行を確約した後にフラグを消費（?consume=1）。見送り時は呼ばない＝要求は次回に持ち越す。
+async function clearRunFlag() {
+  try { await fetch(WORKER + "/api/fanza-sales-run?consume=1", { headers: { "X-Admin-Secret": ADMIN } }); } catch (e) {}
+}
+
 // 追跡サークルの全作品cidを取得（worker側で全ページ＋全同人フロア巡回済み）。
 // ※このAPIは公開ソフト鍵＋Originチェックなので、本番サイトのOriginを付けて呼ぶ。
 async function getMakerCids(makerId) {
@@ -84,7 +105,8 @@ async function getMakerCids(makerId) {
 
 // サークルごとの前回全件取得時刻（ローカル状態・このPC専用なのでファイルでよい）。
 const STATE_PATH = path.join(__dirname, "sales_state.json");
-const FULL_SCRAPE_INTERVAL_MS = 18 * 3600 * 1000; // 18時間: 1日1回のbat実行で必ず更新される間隔
+const FULL_SCRAPE_INTERVAL_MS = 18 * 3600 * 1000; // 18時間: 1日1回の実行で必ず更新される間隔
+const FORCED_FLOOR_MS = 30 * 60 * 1000; // 強制実行でも直近30分以内に走っていれば見送る（連打・悪用でDMMを叩きすぎない下限）
 function loadState() { try { return JSON.parse(fs.readFileSync(STATE_PATH, "utf8")); } catch (e) { return {}; } }
 function saveState(s) { fs.writeFileSync(STATE_PATH, JSON.stringify(s, null, 2)); }
 async function saveBatch(items) {
@@ -95,21 +117,47 @@ async function saveBatch(items) {
 }
 
 async function main() {
-  const args = process.argv.slice(2).map(toCid).filter(Boolean);
+  const rawArgs = process.argv.slice(2);
+  const isPoll = rawArgs.includes("--poll");
+  let force = rawArgs.includes("--force");
+  const cidArgs = rawArgs.filter((a) => a[0] !== "-").map(toCid).filter(Boolean);
+  const stamp = () => new Date().toISOString().replace("T", " ").slice(0, 19);
+
   let cids = [];
   const ranMakers = []; // 今回全件取得を実施したサークル（完走後に時刻を記録）
-  if (args.length) {
-    cids = args; // cid/URL直接指定モード
+  let flagPending = false; // リモート「▶今すぐ取得」要求が実行の起点かどうか
+
+  if (cidArgs.length) {
+    cids = cidArgs; // cid/URL直接指定モード（--pollとは併用しない）
   } else {
+    // --poll: リモート「▶今すぐ取得」要求フラグを覗く（まだ消さない）。要求があれば強制実行。
+    if (isPoll) {
+      flagPending = await peekRunFlag();
+      if (flagPending) { force = true; console.log("[" + stamp() + "] ▶ リモート取得要求を受信 → 強制実行"); }
+    }
+    // 強制実行の乱発ガード: 直近FORCED_FLOOR分以内に走っていれば見送る。
+    // 見送り時はフラグを消費しない＝要求は次のtickへ持ち越し（取りこぼさない）。
+    if (force) {
+      const st = loadState();
+      const lastAny = Math.max(0, ...Object.values(st).filter((v) => typeof v === "number"));
+      if (Date.now() - lastAny < FORCED_FLOOR_MS) {
+        console.log("[" + stamp() + "] 直近に取得済みのため強制実行を見送り(" + Math.round((Date.now() - lastAny) / 60000) + "分前・要求は持ち越し)");
+        if (isPoll) return; // フラグは残したまま終了
+        force = false;      // 手動 --force は通常モードで続行
+      }
+    }
+    // ここまで来たら実行を確約。フラグ由来ならこの時点で消費する。
+    if (flagPending) await clearRunFlag();
+
     const q = await getQueue();
-    cids = q.queued;
+    cids = q.queued.slice();
     // 追跡サークル（候補タブに登録済みのサークル）: 全作品を取得対象に追加。
-    // 18時間以内に全件取得済みのサークルはスキップ（DMMへの負荷と実行時間を抑える）。
+    // 強制時は期限を無視、通常は18時間以内に全件取得済みのサークルをスキップ。
     const state = loadState();
     for (const mk of q.trackedMakers) {
       const last = state[mk.makerId] || 0;
       const label = (mk.name || ("サークル" + mk.makerId));
-      if (Date.now() - last < FULL_SCRAPE_INTERVAL_MS) { console.log("⏭️ " + label + ": 前回取得から18時間未満のためスキップ"); continue; }
+      if (!force && Date.now() - last < FULL_SCRAPE_INTERVAL_MS) { if (!isPoll) console.log("⏭️ " + label + ": 前回取得から18時間未満のためスキップ"); continue; }
       const mcids = await getMakerCids(mk.makerId);
       if (!mcids) continue; // 一覧取得失敗（次回リトライ）
       console.log("📚 " + label + ": 全" + mcids.length + "作品を取得対象に追加");
@@ -118,8 +166,12 @@ async function main() {
     }
   }
   cids = [...new Set(cids)];
-  if (!cids.length) { console.log("✅ 取得するものはありません。候補タブでサークルタブを登録すると、そのサークルの全作品がここで取得されます。"); return; }
-  console.log("📊 販売数を取得します: " + cids.length + "件（日本IPのこのPCで実行中）\n");
+  if (!cids.length) {
+    // --poll の平常時（要求なし・期限内・キュー空）はDMMに一切触れず静かに終了。
+    if (!isPoll) console.log("✅ 取得するものはありません。候補タブでサークルタブを登録すると、そのサークルの全作品がここで取得されます。");
+    return;
+  }
+  console.log("[" + stamp() + "] 📊 販売数を取得します: " + cids.length + "件（日本IPのこのPCで実行中）\n");
 
   const results = [];
   let ok = 0, ng = 0;
