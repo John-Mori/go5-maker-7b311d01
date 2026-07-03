@@ -413,6 +413,22 @@ async function scrapeFanzaItem(cid, srcUrl) {
     || html.match(/<meta\s+[^>]*content=["']([^"']+)["']\s+property=["']og:image["']/i);
   var ogImg = ogImgM && ogImgM[1] ? ogImgM[1].trim() : "";
 
+  // サークルID：ページ内のサークル一覧リンク（…/article=maker/id=数字/…）から抽出。
+  //   ★これで API未収録作品でも「作品URL→サークルID→全作品」の導線が繋がる（候補タブ用）。
+  //   注意: ページには「関連サークルのおすすめ」リンク(…/id=NNN/sort=date/…)も混じる。作品自身の
+  //   サークルはパンくず・サークル名・「このサークルの他の作品」等で何度も出るため、
+  //   「sort= を含まない素のリンク(/id=NNN/ の直後が sort= でない)」の最頻値を採用する。
+  var makerCounts = {};
+  var mkRe = /article=maker\/id=(\d+)\/(?!sort=)/g;
+  var mkm;
+  while ((mkm = mkRe.exec(html)) !== null) { makerCounts[mkm[1]] = (makerCounts[mkm[1]] || 0) + 1; }
+  var makerId = "";
+  var bestCount = 0;
+  for (var mid in makerCounts) { if (makerCounts[mid] > bestCount) { bestCount = makerCounts[mid]; makerId = mid; } }
+  var authorArr = makerId
+    ? [{ id: makerId, name: circleName || "" }]
+    : (circleName ? [{ name: circleName }] : []);
+
   return {
     content_id: cid,
     title:      title,
@@ -421,7 +437,7 @@ async function scrapeFanzaItem(cid, srcUrl) {
     floor_name:   "同人",
     imageURL:       ogImg ? { list: ogImg, large: ogImg } : null,
     sampleImageURL: null,
-    iteminfo:   { author: circleName ? [{ name: circleName }] : [], genre: [] },
+    iteminfo:   { author: authorArr, genre: [] },
     prices: {
       list_price: listPriceStr,
       price:      currentPriceStr,
