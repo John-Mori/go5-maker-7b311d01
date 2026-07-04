@@ -788,6 +788,68 @@
     var idLine = '判定基準: 月詠み=@' + led.h1 + (led.dn1 ? '(' + led.dn1 + ')' : '') + ' / 宵桜=@' + led.h2 + (led.dn2 ? '(' + led.dn2 + ')' : '');
     return idLine + '\n\n' + lines.join('\n');
   }
+  // ── シート(記録)から、現在アカウントの投稿履歴をローカルへ復元（非破壊）──
+  //   記録シートを正本として、①別アカウントへ誤って入ったアイテムを現アカウントへ戻す
+  //   ②ローカルに無い投稿はシートから薄いアイテムとして復活。既存ローカルは尊重（消さない）。
+  function restoreHistoryFromSheet_(cb) {
+    var gas = gasUrl_(); if (!gas) { if (cb) cb({ ok: false, reason: '記録用GAS（⚙記録用URL）が未設定です' }); return; }
+    var to = acct();
+    jsonp_(gas, { action: 'history', channel: to, limit: 300 }, function (res) {
+      if (!res || !res.ok || !Array.isArray(res.items)) { if (cb) cb({ ok: false, reason: 'シートの投稿履歴を取得できませんでした' }); return; }
+      var arrs = {};
+      function arrOf(base, a) { var kk = base + '__' + a; if (!arrs[kk]) arrs[kk] = loadArrFor_(base, a); return arrs[kk]; }
+      // 1アイテムを表す全キー（postUri/短縮URL/videoId/題名+YT）。安定キーが無い行も題名+YTで重複判定。
+      function keysFor(o, yt) {
+        var ks = [];
+        if (o.postUri) ks.push('u:' + o.postUri);
+        if (o.shortUrl) ks.push('s:' + o.shortUrl);
+        if (o.videoId) ks.push('v:' + o.videoId);
+        var y = yt || o.ytUrl || '';
+        if ((o.title || y)) ks.push('t:' + (o.title || '') + '|' + y);
+        return ks;
+      }
+      // ローカル全体を索引（両アカウント×short_hist/verify_manual）。各アイテムの全キーを登録。
+      var idx = {};
+      ['acc1', 'acc2'].forEach(function (a) {
+        ['short_hist', 'verify_manual'].forEach(function (base) {
+          var ym = loadYtMapFor_(a);
+          arrOf(base, a).forEach(function (it) { var kk = itemKey(it); var loc = { a: a, base: base, key: kk }; keysFor(it, ym[kk]).forEach(function (kx) { if (!idx[kx]) idx[kx] = loc; }); });
+        });
+      });
+      var added = 0, movedBack = 0, skipped = 0;
+      var ytTo = loadYtMapFor_(to);
+      res.items.forEach(function (si) {
+        var sheetKeys = keysFor(si, si.youtubeUrl);
+        if (!sheetKeys.length) { skipped++; return; } // 識別子が全く無い空行はスキップ
+        var loc = null; for (var i = 0; i < sheetKeys.length && !loc; i++) loc = idx[sheetKeys[i]] || null;
+        if (loc) {
+          if (loc.a !== to) { // 誤って別アカウントに入っている→現アカウントへ戻す（ローカルのみ・シートは触らない）
+            var srcArr = arrOf(loc.base, loc.a), mv = null;
+            var na = srcArr.filter(function (x) { if (itemKey(x) === loc.key) { mv = x; return false; } return true; });
+            arrs[loc.base + '__' + loc.a] = na; saveArrFor_(loc.base, loc.a, na);
+            var dstBase = (mv && mv.manual) ? 'verify_manual' : 'short_hist';
+            var dstArr = arrOf(dstBase, to).filter(function (x) { return itemKey(x) !== loc.key; });
+            dstArr.unshift(mv || {}); arrs[dstBase + '__' + to] = dstArr; saveArrFor_(dstBase, to, dstArr);
+            var fm = loadYtMapFor_(loc.a); if (fm[loc.key]) { ytTo[loc.key] = fm[loc.key]; delete fm[loc.key]; saveYtMapFor_(loc.a, fm); }
+            loc.a = to; loc.base = dstBase; // 索引も現在地へ更新（同一runでの二重処理防止）
+            movedBack++;
+          }
+          // 既に to にある：何もしない
+        } else { // ローカルに無い→シートから薄い履歴アイテムを復活
+          var item = { account: to, title: si.title || '', shortUrl: si.shortUrl || '', shareUrl: si.shareUrl || si.shortUrl || '', postUrl: si.postUrl || '', postUri: si.postUri || '', videoId: si.videoId || '', ts: si.postedAt ? Date.parse(si.postedAt) || 0 : 0 };
+          if (si.workState) item.workState = si.workState;
+          var dstArr2 = arrOf('short_hist', to); dstArr2.unshift(item); arrs['short_hist__' + to] = dstArr2; saveArrFor_('short_hist', to, dstArr2);
+          var k = itemKey(item); if (si.youtubeUrl) ytTo[k] = si.youtubeUrl;
+          // 追加分も索引へ（同一run内の重複シート行を二重追加しない）
+          var newLoc = { a: to, base: 'short_hist', key: k }; keysFor(item, si.youtubeUrl).forEach(function (kx) { if (!idx[kx]) idx[kx] = newLoc; });
+          added++;
+        }
+      });
+      saveYtMapFor_(to, ytTo);
+      if (cb) cb({ ok: true, added: added, movedBack: movedBack, skipped: skipped, total: res.items.length });
+    });
+  }
+
   // 編集モーダルへ「→ 別アカウントへ移動」ボタンを差し込む。
   function addMoveButtonsToModal_(k, it) {
     var ov = document.getElementById('veditOverlay'); if (!ov) return;
@@ -1194,6 +1256,17 @@
       setStatus('✅ ' + n + '件を移動しました。<button type="button" id="ytUndoMoves" class="ghost" style="width:auto;margin-left:8px;font-size:12px;padding:3px 10px;">↩️ 元に戻す</button>', true);
       var ub = $('ytUndoMoves'); if (ub) ub.addEventListener('click', undoLastMoves_);
       render(); maybeRestoreYt_();
+    });
+  });
+  // 📥 シートから投稿履歴を復元（非破壊）。誤って別アカウントへ入った分は現アカウントへ戻す。
+  var rh = $('ytRestoreHist');
+  if (rh) rh.addEventListener('click', function () {
+    if (!window.confirm(acctName_(acct()) + ' の投稿履歴を、記録スプレッドシートから復元します。\n・別アカウントへ誤って入った投稿を ' + acctName_(acct()) + ' へ戻します\n・端末に無い投稿はシートから復活します\n（既にある投稿は消しません）\nよろしいですか？')) return;
+    setStatus('📥 シートから投稿履歴を復元中…');
+    restoreHistoryFromSheet_(function (r) {
+      if (!r || !r.ok) { setStatus('⚠️ 復元できません：' + ((r && r.reason) || '不明')); return; }
+      if (r.added || r.movedBack) { setStatus('✅ 復元しました：戻した投稿 ' + r.movedBack + '件／シートから復活 ' + r.added + '件（シート ' + r.total + '件を照合）。'); render(); maybeRestoreYt_(); }
+      else setStatus('✅ ' + acctName_(acct()) + ' の投稿履歴は既にシートと一致しています（復元不要）。');
     });
   });
   // 履歴を開いたときは「検出のみ」（自動移動は廃止＝INC-64の教訓）。候補があれば件数を知らせる。

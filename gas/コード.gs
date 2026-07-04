@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-05E（無人予約をchannel別資格情報で投稿＝誤アカウント投稿防止／move_row）';
+var GAS_VERSION = '2026-07-05F（history応答にvideoId/投稿時刻/共有URL/作品状態を追加＝端末の投稿履歴をシートから復元可能に）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -185,6 +185,7 @@ function historyItems_(channel, limit) {
   var last = sh.getLastRow(); if (last < 2) return [];
   var dCol = map['投稿日時'], tCol = map['題名(コメント)'], sCol = map['短縮URL'], uCol = map['post_uri'];
   var yCol = map['YouTube動画URL']; // 端末のverify_yt消失時にここから復元できるよう返す
+  var pidCol = map['post_id'], shareCol = map['共有URL'], wsCol = map['作品状態']; // 端末の投稿履歴復元用
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
   var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   var items = [];
@@ -192,11 +193,13 @@ function historyItems_(channel, limit) {
     var row = vals[i];
     var d = dCol ? row[dCol - 1] : '', uri = uCol ? row[uCol - 1] : '', short = sCol ? row[sCol - 1] : '';
     if (!d && !uri && !short) continue; // 空行スキップ
-    var ds = '';
-    try { if (d) ds = Utilities.formatDate(new Date(d), tz, 'MM/dd HH:mm'); } catch (e) {}
+    var ds = '', iso = '';
+    try { if (d) { var dd = new Date(d); ds = Utilities.formatDate(dd, tz, 'MM/dd HH:mm'); iso = dd.toISOString(); } } catch (e) {}
     items.push({
       postUri: String(uri || ''), title: String(tCol ? row[tCol - 1] : ''),
-      date: ds, shortUrl: String(short || ''), postUrl: '',
+      date: ds, postedAt: iso, shortUrl: String(short || ''), shareUrl: String(shareCol ? (row[shareCol - 1] || '') : ''), postUrl: '',
+      videoId: String(pidCol ? (row[pidCol - 1] || '') : ''),
+      workState: String(wsCol ? (row[wsCol - 1] || '') : ''),
       youtubeUrl: String(yCol ? (row[yCol - 1] || '') : '')
     });
   }
