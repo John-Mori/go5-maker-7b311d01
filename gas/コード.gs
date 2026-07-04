@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-05B（upsertでpostedAtを受理＝アカウント矯正で当時の投稿日時を保持）';
+var GAS_VERSION = '2026-07-05C（日付列のDate/文字列取り違えを修正＝今日/昨日/週の増加が計算されない不具合を解消）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -770,7 +770,10 @@ function snapshotStats() {
   recs.forEach(function (r) { if (r.code && clickByCode[r.code] === undefined) { clickByCode[r.code] = workerClicks_(r.code); Utilities.sleep(80); } });
   var sh = statsSheet_(); var last = sh.getLastRow();
   var data = last >= 2 ? sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues() : [];
-  var idx = {}; for (var i = 0; i < data.length; i++) idx[data[i][1] + '|' + data[i][4]] = i + 2;
+  // ★日付列はSheetが 'yyyy-MM-dd' 文字列を Date に自動変換して返すことがある。キーは必ず
+  //   同一TZの 'yyyy-MM-dd' 文字列に正規化する（Dateのまま比較すると today 文字列と一致せず、
+  //   同日行の upsert が効かず重複追記＆deltas全null になる）。
+  var idx = {}; for (var i = 0; i < data.length; i++) idx[ymd_(data[i][1], tz) + '|' + data[i][4]] = i + 2;
   // 前回スナップ(vidごとの最新の累計と時刻)＝最大瞬間風速(区間の伸び率)算出用。
   var prevByVid = {};
   for (var j = 0; j < data.length; j++) {
@@ -841,7 +844,15 @@ function pruneStats_(sh, keepDays) {
   var cutStr = Utilities.formatDate(cut, tz, 'yyyy-MM-dd');
   var last = sh.getLastRow(); if (last < 2) return;
   var dates = sh.getRange(2, 2, last - 1, 1).getValues();
-  for (var i = dates.length - 1; i >= 0; i--) { if (String(dates[i][0]) < cutStr) sh.deleteRow(i + 2); }
+  for (var i = dates.length - 1; i >= 0; i--) { if (ymd_(dates[i][0], tz) < cutStr) sh.deleteRow(i + 2); } // ★Date/文字列を正規化して比較
+}
+// 日付セルを 'yyyy-MM-dd' 文字列に正規化（Date/文字列どちらで返っても同一TZの日付キーにする）。
+function ymd_(v, tz) {
+  tz = tz || Session.getScriptTimeZone() || 'Asia/Tokyo';
+  if (v instanceof Date) return Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+  var s = String(v || '');
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return m[0];
+  var d = new Date(s); return isNaN(d.getTime()) ? s : Utilities.formatDate(d, tz, 'yyyy-MM-dd');
 }
 // 視聴履歴から videoId ごとの 今日/昨日/直近1週間 の増加(再生数・クリック数)を算出。
 function computeDeltas_() {
@@ -850,7 +861,7 @@ function computeDeltas_() {
   var data = sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues();
   var byVid = {};
   data.forEach(function (row) {
-    var date = row[1], vid = row[4]; if (!vid || !date) return;
+    var date = ymd_(row[1], tz), vid = row[4]; if (!vid || !date) return; // ★日付は文字列キーに正規化
     (byVid[vid] || (byVid[vid] = {}))[date] = { v: row[5] === '' ? null : Number(row[5]), c: row[6] === '' ? null : Number(row[6]) };
   });
   function dstr(off) { var d = new Date(); d.setDate(d.getDate() + off); return Utilities.formatDate(d, tz, 'yyyy-MM-dd'); }
