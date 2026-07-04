@@ -51,7 +51,9 @@
             post_uri: res.uri || '', post_url: res.postUrl || '',
             affiliate: (it.text.match(firstUrlRe) || [''])[0],
             posted_at: new Date().toISOString(), slotId: it.slotId || null,
-            title: it.alt || (String(it.text).split('\n')[0] || '')
+            title: it.alt || (String(it.text).split('\n')[0] || ''),
+            account: it.account || null,   // ★予約時に凍結した所属アカウント（発火時のUIに依存しない）
+            meta: it.meta || null          // ★予約時に凍結した投稿メタ（作品URL/カテゴリ/作品状態/当時価格）
           } }));
         } catch (e) {}
       }).catch(function (e) {

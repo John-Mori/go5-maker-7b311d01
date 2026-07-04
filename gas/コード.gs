@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-05A（history応答にYouTube動画URLを追加＝端末のYT URL消失時にシートから復元可能に）';
+var GAS_VERSION = '2026-07-05B（upsertでpostedAtを受理＝アカウント矯正で当時の投稿日時を保持）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -345,6 +345,7 @@ function doPost(e) {
     if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
     var r = writeRecord_(body.channel || 'acc1', {
       videoId: body.videoId || '',   // 背骨ID。あれば post_id に採用＋同ID行へ upsert（重複行を作らない）
+      postedAt: body.postedAt || '', // 過去データ矯正時に当時の投稿日時を保持（無ければGASがnow）
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
       shareUrl: body.shareUrl || '',       // da.gd共有URL（共有URL列）

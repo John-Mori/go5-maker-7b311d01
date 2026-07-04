@@ -1030,6 +1030,17 @@
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
+  // 🩺 アカウント検証・修復：post_uri の DID で「別アカウントに紛れ込んだ履歴/シート行」を正しい側へ移す。
+  var rp = $('ytRepairAcct');
+  if (rp) rp.addEventListener('click', function () {
+    if (!window.Go5AccountRepair || typeof window.Go5AccountRepair.run !== 'function') { setStatus('修復モジュール未読込です。🦋投稿タブを一度開いてから再度お試しください。'); return; }
+    setStatus('🩺 投稿の所属アカウントを検証中…');
+    window.Go5AccountRepair.run(function (r) {
+      if (!r || !r.ok) { setStatus('⚠️ 修復できません：' + ((r && r.reason) || '不明') + '（⚙設定で両アカウントのハンドルを確認してください）'); return; }
+      if (r.moved > 0) { setStatus('✅ ' + r.moved + '件を正しいアカウントへ移動しました' + (r.toSheet ? '（シートも矯正）' : '') + '。'); render(); maybeRestoreYt_(); }
+      else setStatus('✅ 全ての投稿が正しいアカウントに記録されています（移動なし）。');
+    });
+  });
   // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得（renderだけだと「…」のままになる）。
   document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeRestoreYt_(); } else render(); });
   // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元（各1回）。

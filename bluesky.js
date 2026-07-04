@@ -68,6 +68,29 @@
   // ---- アカウント別永続化ヘルパ ----
   function acctId() { return (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'); }
   function pk(base) { return base + '__' + acctId(); }
+
+  // ---- アカウント同定（DID）：投稿の所属を「今のUI」ではなくpost_uriのDIDで確定する ----
+  // 現在のUIに依存せず特定アカウントのハンドル/DIDを読むための直接キー。
+  function handleOfAcct_(a) { try { return (localStorage.getItem('bsky_handle__' + a) || '').trim().replace(/^@/, ''); } catch (e) { return ''; } }
+  function acctDid_(a) { try { return (localStorage.getItem('bsky_did__' + a) || '').trim(); } catch (e) { return ''; } }
+  function setAcctDid_(a, did) { if (a && /^did:/.test(did || '')) { try { localStorage.setItem('bsky_did__' + a, did); } catch (e) {} } }
+  // at://did:plc:XXXX/app.bsky.feed.post/… から DID を取り出す（実際に投稿したアカウントの正体）。
+  function didFromUri_(uri) { var m = String(uri || '').match(/^at:\/\/(did:[^/]+)/); return m ? m[1] : ''; }
+  // 既知DID → acctId（未キャッシュなら空）。
+  function acctOfDid_(did) { if (!did) return ''; if (acctDid_('acc1') === did) return 'acc1'; if (acctDid_('acc2') === did) return 'acc2'; return ''; }
+  // 両アカウントのDIDを（未取得なら）ハンドルから公開APIで解決してキャッシュ。cb() は必ず1回呼ぶ。
+  function ensureAcctDids_(cb) {
+    var need = ['acc1', 'acc2'].filter(function (a) { return !acctDid_(a) && handleOfAcct_(a); });
+    if (!need.length) { if (cb) cb(); return; }
+    var pend = need.length;
+    need.forEach(function (a) {
+      fetch('https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=' + encodeURIComponent(handleOfAcct_(a)))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) { if (j && j.did) setAcctDid_(a, j.did); })
+        .catch(function () {})
+        .then(function () { if (--pend === 0 && cb) cb(); });
+    });
+  }
   function loadA(base) { try { return localStorage.getItem(pk(base)); } catch (e) { return null; } }
   function saveA(base, v) { try { localStorage.setItem(pk(base), v); } catch (e) {} }
 
@@ -571,26 +594,72 @@
   }
   // drafts.js（下書きの作品名/作者表示）などから参照できるよう公開（読み取りのみ）。
   try { window.Go5WorkInfo = function (url) { return fanzaInfoForWorkUrl_(url); }; } catch (e) {}
+  // ---- 投稿メタの「凍結」：予約時・即時投稿時に今のUIから採取し、以後の記録はこれだけを使う ----
+  // これにより「記録する瞬間に別アカウントのタブを開いていた」等でUI状態が混ざる事故を無くす。
+  function captureWorkUrl_() {
+    var workUrl = '';
+    try {
+      workUrl = ((els.workUrl && els.workUrl.value) || '').trim() || loadA('bsky_work_url') || '';
+      if (!workUrl) {
+        var afEl = document.getElementById('affiUrls');
+        var afRaw = afEl ? afEl.value : (localStorage.getItem('field_affiUrls') || '');
+        workUrl = (afRaw || '').trim().split('\n').map(function (l) { return l.trim(); }).filter(Boolean)[0] || '';
+      }
+    } catch (e) {}
+    return workUrl;
+  }
+  function fanzaSnapForWorkUrl_(workUrl) {
+    try {
+      var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[workUrl];
+      if (fc && fc.priceInfo && fc.priceInfo.price != null) {
+        return { price: fc.priceInfo.price, listPrice: fc.priceInfo.listPrice, discountPct: fc.priceInfo.discountPct || 0, at: new Date().toISOString() };
+      }
+    } catch (e) {}
+    return null;
+  }
+  function captureMeta_() {
+    var workUrl = captureWorkUrl_();
+    return {
+      videoId: currentVideoId || '',
+      workUrl: workUrl,
+      attrs: readMovieAttrs(),
+      workState: readWorkState(),
+      rebuild: readRebuild(),
+      fanzaSnap: fanzaSnapForWorkUrl_(workUrl),   // 履歴カード用（当時価格）
+      fanzaInfo: fanzaInfoForWorkUrl_(workUrl) || null  // シート記録用（価格/レビュー）
+    };
+  }
+  // 履歴アイテムから meta を復元（過去データのアカウント矯正で使う）。
+  function metaFromHistItem_(it) {
+    var attrs = {}; MOVIE_ATTRS.forEach(function (p) { attrs[p[0]] = !!it[p[0]]; });
+    return { videoId: it.videoId || '', workUrl: it.workUrl || '', attrs: attrs, workState: it.workState || '', rebuild: !!it.rebuild, fanzaSnap: it.fanzaSnap || null, fanzaInfo: null };
+  }
+
+  // record.account でチャンネルを決め、record.meta（凍結済み）優先で記録する。
+  // meta が無い旧経路のみ、記録先が現在UIと同じ時に限りUI状態を読む（他アカウントの混入を防ぐ）。
   function recordToSheet(record) {
     var gasUrl = (els.gasUrl.value || '').trim(); if (!gasUrl) return Promise.resolve(null);
-    var vid = (record.videoId || currentVideoId || '');
+    var account = record.account || acctId();
+    var meta = record.meta || null;
+    var uiSame = (account === acctId());
+    var vid = record.videoId || (meta ? meta.videoId : '') || (uiSame ? currentVideoId : '') || '';
     var isTest = (window.IdGen && window.IdGen.isTestId) ? window.IdGen.isTestId(vid) : /^test-/.test(vid);
+    var workUrl = record.workUrl || (meta ? meta.workUrl : '') || (uiSame ? captureWorkUrl_() : '');
+    var attrs = meta ? meta.attrs : (uiSame ? readMovieAttrs() : {});
+    var workState = record.workState || (meta ? meta.workState : (uiSame ? readWorkState() : ''));
+    var rebuild = (record.rebuild != null) ? record.rebuild : (meta ? meta.rebuild : (uiSame ? readRebuild() : false));
     var payload = {
-      op: 'upsert',                                       // 新GAS：同一 videoId 行へ upsert（重複行なし）／旧GASは無視＝従来通り1行追記
-      testMode: isTest,                                   // テストモード＝GASはシートに書かない（実投稿はする）
-      status: '公開済',                                    // 将来 status 列を足したら反映（現テンプレに列が無ければ無害にスキップ）
-      channel: (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'),
+      op: 'upsert', testMode: isTest, status: '公開済',
+      channel: account,                                   // ★所属アカウント＝post_uriのDIDで確定した正しいチャンネル
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
-      workUrl: ((els.workUrl && els.workUrl.value) || '').trim(),
-      hashtags: record.hashtags || '', postUri: record.postUri || '',
-      shortUrl: record.shortUrl || '',                   // r2短縮URL＝計測用（短縮URL列・codeFromShort_対象）
-      shareUrl: record.shareUrl || '',                   // da.gd短縮URL＝共有用（共有URL列）
-      videoId: (record.videoId || currentVideoId || '')  // 背骨ID＝upsertキー（post_id 列に採用）
+      workUrl: workUrl, hashtags: record.hashtags || '', postUri: record.postUri || '',
+      shortUrl: record.shortUrl || '', shareUrl: record.shareUrl || '', videoId: vid
     };
-    var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = ma[p[0]]; }); // カテゴリ属性（複数可）
-    payload.workState = readWorkState(); // 作品状態（新作/準新作/旧作）
-    payload.rebuild = (record.rebuild != null) ? record.rebuild : readRebuild(); // リビルド（作り直し版）フラグ
-    var mi = fanzaInfoForWorkUrl_(payload.workUrl); // 作品URLから取得済みのFANZA価格情報（あれば記録に反映）
+    if (record.postedAt) payload.postedAt = record.postedAt; // 過去データ矯正時は当時の投稿時刻を保持
+    MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = !!attrs[p[0]]; });
+    payload.workState = workState;
+    payload.rebuild = rebuild;
+    var mi = meta ? meta.fanzaInfo : (uiSame ? fanzaInfoForWorkUrl_(workUrl) : null);
     if (mi) {
       payload.fanza_list_price = mi.listPrice;
       payload.fanza_price = mi.price;
@@ -609,22 +678,78 @@
   }
 
   // 投稿成功通知（integration.js が書き戻し＋下のリスナが必ず記録）
-  function notifyPosted(res, text, alt) {
+  // account/meta＝投稿を実行した瞬間のアカウントと凍結メタ（即時投稿は呼び出し時に確定）。
+  function notifyPosted(res, text, alt, account, meta) {
     var tags = (String(text).match(/#[^\s#]+/g) || []).join(' ');
-    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || '') } })); } catch (e) {}
+    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || ''), account: account || acctId(), meta: meta || null } })); } catch (e) {}
   }
   // すべての投稿を一元的に記録（即時・自動・予約のどれでも必ず記録される）
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
-    var vid = currentVideoId || '';
+    var meta = d.meta || null;
+    // 所属アカウントの確定：①イベントに載った account（予約/即時で凍結） → ②post_uriのDID照合で矯正。
+    var account = d.account || acctId();
+    var did = didFromUri_(d.post_uri);
+    if (did) {
+      setAcctDid_(account, did);                 // 記録先のDIDを学習（以後の検証・修復に使う）
+      var byDid = acctOfDid_(did);
+      if (byDid && byDid !== account) account = byDid; // UIの取り違えをDIDで矯正
+    }
+    var uiSame = (account === acctId());
+    var vid = (meta && meta.videoId) || (uiSame ? currentVideoId : '') || '';
     // まず即時記録（短縮URLが遅い/失敗しても投稿は確実に残す）。videoIdがあれば後追いで同一行へ追記。
-    recordToSheet({ title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri, videoId: vid });
+    recordToSheet({ account: account, meta: meta, title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri, videoId: vid });
     shortenAndShow(d.post_url, d.post_uri, d.title, function (res) {
       // 短縮URL確定 → videoId があれば同一行へ upsert（shortUrl=r2計測用 / shareUrl=da.gd表示用）。
       var short = res && (res.shortUrl || res.shareUrl);
-      if (vid && short) recordToSheet({ postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: (res.shortUrl || res.shareUrl), shareUrl: res.shareUrl || '' });
-    });
+      if (vid && short) recordToSheet({ account: account, meta: meta, postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: (res.shortUrl || res.shareUrl), shareUrl: res.shareUrl || '' });
+    }, account, meta);
   });
+
+  // ---- 過去データのアカウント矯正（DID照合）：short_hist と シート行を正しいアカウントへ移す ----
+  // post_uri の DID は「実際に投稿したアカウント」の確定情報。これで誤って別アカウントに入った
+  // 履歴/シート行を正しい側へ移す。以後の投稿はDID検証(bluesky-posted)で常に正しく記録される。
+  var _acctRepairBusy = false;
+  function repairAccountsByDid_(cb) {
+    if (_acctRepairBusy) { if (cb) cb({ ok: false, reason: 'busy' }); return; }
+    _acctRepairBusy = true;
+    ensureAcctDids_(function () {
+      var d1 = acctDid_('acc1'), d2 = acctDid_('acc2');
+      if (!d1 || !d2) { _acctRepairBusy = false; if (cb) cb({ ok: false, reason: 'DID未解決（両アカウントの⚙ハンドル設定が必要）' }); return; }
+      var moved = [];
+      ['acc1', 'acc2'].forEach(function (a) {
+        var arr = histLoadFor_(a), keep = [];
+        arr.forEach(function (it) {
+          var correct = acctOfDid_(didFromUri_(it.postUri));
+          if (correct && correct !== a) moved.push({ item: it, from: a, to: correct });
+          else keep.push(it);
+        });
+        if (keep.length !== arr.length) histSaveFor_(a, keep);
+      });
+      moved.forEach(function (mv) {
+        var arr = histLoadFor_(mv.to).filter(function (x) { return mv.item.postUri ? x.postUri !== mv.item.postUri : x.shortUrl !== mv.item.shortUrl; });
+        arr.unshift(mv.item); histSaveFor_(mv.to, arr);
+      });
+      // シートも矯正：正チャンネルへ再upsert（当時の投稿日時を保持）＋誤チャンネルの行を削除。
+      var gasUrl = (els.gasUrl.value || '').trim();
+      if (gasUrl) {
+        moved.forEach(function (mv) {
+          var it = mv.item;
+          recordToSheet({ account: mv.to, meta: metaFromHistItem_(it), title: it.title, postUrl: it.postUrl, postUri: it.postUri, videoId: it.videoId, shortUrl: it.shortUrl, shareUrl: it.shareUrl, workUrl: it.workUrl, workState: it.workState, rebuild: it.rebuild, postedAt: it.ts ? new Date(it.ts).toISOString() : '' });
+          if (it.postUri) jsonpGet(gasUrl + '?action=delete&channel=' + encodeURIComponent(mv.from) + '&postUri=' + encodeURIComponent(it.postUri), function () {});
+        });
+      }
+      _acctRepairBusy = false;
+      if (cb) cb({ ok: true, moved: moved.length, toSheet: !!gasUrl });
+    });
+  }
+  // 起動時に一度だけ自動矯正（過去の取り違えを黙って直す）。成功時のみフラグを立てる。
+  function maybeRepairAccountsOnce_() {
+    try { if (localStorage.getItem('acct_did_repair_v1') === '1') return; } catch (e) {}
+    setTimeout(function () { repairAccountsByDid_(function (r) { if (r && r.ok) { try { localStorage.setItem('acct_did_repair_v1', '1'); } catch (e) {} } }); }, 4000);
+  }
+  try { window.Go5AccountRepair = { run: repairAccountsByDid_, ensureDids: ensureAcctDids_ }; } catch (e) {}
+  maybeRepairAccountsOnce_();
 
   // 短縮URLの設定。一次＝自前 link-worker（302即リダイレクト＋KVで開封数を計測）。
   //   ・YT説明欄に貼る用途なのでURL長は問題にならない＝計測できる link-worker を最優先。
@@ -705,14 +830,15 @@
   }
   // 投稿履歴タブ(yt-clicks.js)から、過去投稿URLの計測用短縮リンク(r2+da.gd)を生成するために公開。
   try { window.Go5MakeShort = makeShortAndShare; } catch (e) {}
-  function shortenAndShow(longUrl, postUri, title, onShort) {
+  function shortenAndShow(longUrl, postUri, title, onShort, account, meta) {
     if (!longUrl) return;
     if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを作成中…';
     makeShortAndShare(longUrl).then(function (res) {
       var short = res.shortUrl || '';                  // r2（計測用）
       var share = res.shareUrl || short || longUrl;    // da.gd（表示・概要欄・コピー用）
-      setShareOutputs(share, longUrl);                 // 概要欄・表示・コピーは短い共有URL(da.gd)
-      histAdd({ title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: currentVideoId || '' });
+      // 表示・概要欄への反映は「今のUIと同じアカウントの投稿」のときだけ（別アカウントの記録でUIを書き換えない）。
+      if (!account || account === acctId()) setShareOutputs(share, longUrl);
+      histAdd({ account: account, meta: meta, title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: (meta && meta.videoId) || (!account || account === acctId() ? currentVideoId : '') || '' });
       if (typeof onShort === 'function') onShort({ shortUrl: short, shareUrl: share });
     });
   }
@@ -730,43 +856,39 @@
   }
 
   // ---- 過去の短縮URL履歴（端末内・アカウント別。GAS非依存で確実）----
-  function histKey() { return 'short_hist__' + acctId(); }
-  function histLoad() { try { return JSON.parse(localStorage.getItem(histKey()) || '[]'); } catch (e) { return []; } }
-  function histSaveArr(a) { try { localStorage.setItem(histKey(), JSON.stringify(a.slice(0, 200))); } catch (e) {} }
+  function histKeyFor_(a) { return 'short_hist__' + (a || acctId()); }
+  function histLoadFor_(a) { try { return JSON.parse(localStorage.getItem(histKeyFor_(a)) || '[]'); } catch (e) { return []; } }
+  function histSaveFor_(a, arr) { try { localStorage.setItem(histKeyFor_(a), JSON.stringify(arr.slice(0, 200))); } catch (e) {} }
+  function histKey() { return histKeyFor_(acctId()); }
+  function histLoad() { return histLoadFor_(acctId()); }
+  function histSaveArr(a) { histSaveFor_(acctId(), a); }
+  // rec.account＝所属アカウント（未指定は現在UI）。rec.meta＝凍結済み投稿メタ（あれば優先）。
   function histAdd(rec) {
     if (!rec || !rec.shortUrl) return; // 短縮URLが取れた投稿だけ記録
-    // 作品URL取得（✏変更/ウィザード入力値優先、なければアフィリンクタブ②から）
-    var workUrl = '';
-    try {
-      workUrl = loadA('bsky_work_url') || '';
-      if (!workUrl) {
-        var afEl = document.getElementById('affiUrls');
-        var afRaw = afEl ? afEl.value : (localStorage.getItem('field_affiUrls') || '');
-        workUrl = afRaw.trim().split('\n').map(function (l) { return l.trim(); }).filter(Boolean)[0] || '';
-      }
-    } catch (e) {}
-    var a = histLoad().filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
-    var entry = { ts: new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || '' };
+    var account = rec.account || acctId();
+    var meta = rec.meta || null;
+    var uiSame = (account === acctId());
+    // 作品URL：metaがあればそれ、無ければ（現在UIと同じ時だけ）UIから採取。
+    var workUrl = meta ? meta.workUrl : (uiSame ? captureWorkUrl_() : '');
+    var a = histLoadFor_(account).filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
+    var entry = { ts: rec.ts || new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '' };
     if (workUrl) {
       entry.workUrl = workUrl;
-      // 投稿時のFANZA価格スナップショット（キャッシュ済みの現在価格を「当時」として固定保存）。
-      try {
-        var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[workUrl];
-        if (fc && fc.priceInfo && fc.priceInfo.price != null) {
-          entry.fanzaSnap = { price: fc.priceInfo.price, listPrice: fc.priceInfo.listPrice, discountPct: fc.priceInfo.discountPct || 0, at: new Date().toISOString() };
-        }
-      } catch (e) {}
+      // 投稿時のFANZA価格スナップショット（当時価格）。metaがあればそれを、無ければUIキャッシュから。
+      var snap = meta ? meta.fanzaSnap : (uiSame ? fanzaSnapForWorkUrl_(workUrl) : null);
+      if (snap) entry.fanzaSnap = snap;
     }
     // 動画作成タブのカテゴリ属性・作品状態を引き継ぐ（manualOnly=手動短縮のときは付けない）
     if (!rec.manualOnly) {
-      var ma = readMovieAttrs(); MOVIE_ATTRS.forEach(function (p) { if (ma[p[0]]) entry[p[0]] = true; });
-      entry.workState = readWorkState(); // 投稿時の作品状態（新作/準新作/旧作）を固定記録
-      if (readRebuild()) entry.rebuild = true;       // この投稿はリビルド（作り直し版）
-      var rbEl = $('movieRebuild'); if (rbEl) rbEl.checked = false; // 一度きりのフラグ＝投稿後は自動でOFF
+      var attrs = meta ? meta.attrs : (uiSame ? readMovieAttrs() : {});
+      MOVIE_ATTRS.forEach(function (p) { if (attrs[p[0]]) entry[p[0]] = true; });
+      entry.workState = meta ? meta.workState : (uiSame ? readWorkState() : '旧作'); // 投稿時の作品状態
+      var rb = meta ? meta.rebuild : (uiSame ? readRebuild() : false); if (rb) entry.rebuild = true;
+      if (uiSame) { var rbEl = $('movieRebuild'); if (rbEl) rbEl.checked = false; } // UIと同じ時だけ一度きりフラグをOFF
     }
     a.unshift(entry);
-    histSaveArr(a);
-    if (els.histList) renderHistory(a);
+    histSaveFor_(account, a);
+    if (uiSame && els.histList) renderHistory(a); // 現在UIの履歴だけ即描画（他アカウントは切替時に反映）
   }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
   function loadHistory() { if (els.histList) renderHistory(histLoad()); }
@@ -1111,9 +1233,10 @@
       if (!window.confirm('プレビュー通りに Bluesky へ投稿します。よろしいですか？')) return;
       els.postNow.disabled = true; setPostStatus('投稿中…');
       var alt = (text.split('\n')[0] || ''), f = selectedPostFile || photoFile();
+      var postAcct = acctId(), postMeta = captureMeta_(); // 投稿を押した瞬間のアカウント・メタを凍結
       (f ? compressFile(f) : Promise.resolve(null))
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: text, imageBlob: blob, alt: alt }); })
-        .then(function (res) { setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true); notifyPosted(res, text, alt); })
+        .then(function (res) { setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true); notifyPosted(res, text, alt, postAcct, postMeta); })
         .catch(function (e) { setPostStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); })
         .then(function () { els.postNow.disabled = false; });
     });
@@ -1156,8 +1279,9 @@
       var c = creds();
       if (!c.handle || !c.appPw) { setPostStatus('⚙設定でハンドルとアプリパスワードを入れてください（無人予約ならGAS設定）。'); return; }
       if (!window.Scheduler) { setPostStatus('スケジューラ未読込。'); return; }
+      var _mMeta = captureMeta_(); // 予約時のアカウント・メタを凍結（発火時のUI状態に依存させない）
       (f ? compressFile(f) : Promise.resolve(null)).then(function (blob) {
-        window.Scheduler.reserve({ slotId: slotId, text: text, imageBlob: blob, scheduledAtMs: ms, alt: alt, handle: c.handle, appPw: c.appPw, account: acctId() });
+        window.Scheduler.reserve({ slotId: slotId, text: text, imageBlob: blob, scheduledAtMs: ms, alt: alt, handle: c.handle, appPw: c.appPw, account: acctId(), meta: _mMeta });
         setPostStatus('⏰ 予約しました：' + new Date(ms).toLocaleString('ja-JP') + '（このタブを開いている間に自動投稿）');
       });
     });
@@ -1181,8 +1305,9 @@
         if (!window.Scheduler) { setBskyStatus('スケジューラ未読込。'); return; }
         var imgF = pcSelectedFile || photoFile();
         var imgP = imgF ? compressFile(imgF) : (function () { var cv = $('cv'); return cv ? compressCanvas(cv) : Promise.resolve(null); })();
+        var _acMeta = captureMeta_(); // 予約時にメタ凍結
         imgP.then(function (blob) {
-          window.Scheduler.reserve({ account: acctId(), slotId: window.__activeSlot__ ? window.__activeSlot__.id : null, text: edited, imageBlob: blob, scheduledAtMs: schedMs, alt: alt, handle: c.handle, appPw: c.appPw });
+          window.Scheduler.reserve({ account: acctId(), meta: _acMeta, slotId: window.__activeSlot__ ? window.__activeSlot__.id : null, text: edited, imageBlob: blob, scheduledAtMs: schedMs, alt: alt, handle: c.handle, appPw: c.appPw });
           setBskyStatus('⏰ 予約しました：' + new Date(schedMs).toLocaleString('ja-JP'));
           if (msEl) msEl.value = '';
         });
@@ -1190,6 +1315,7 @@
       }
       var gasSet = !!(els.gasUrl.value || '').trim();
       setBskyStatus('Bluesky に投稿中…');
+      var _postAcct = acctId(), _postMeta = captureMeta_(); // 投稿実行時のアカウント・メタを凍結
       // モーダル選択画像を優先。未選択なら動画の元写真→Canvas の順にフォールバック
       var imgFile = pcSelectedFile || photoFile();
       var imgPrep = imgFile
@@ -1199,7 +1325,7 @@
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
         .then(function (res) {
           setBskyStatus('✅ Bluesky に投稿しました<br>@' + (res.handle || c.handle) + (gasSet ? '  ✏️記録しました' : ''), true);
-          notifyPosted(res, edited, alt);
+          notifyPosted(res, edited, alt, _postAcct, _postMeta);
           // 実際に添付した画像を Drive の同じ動画フォルダへ後追い保存（drive-upload.js が購読）。
           try {
             if (imgFile) document.dispatchEvent(new CustomEvent('bsky-image-posted', { detail: { file: imgFile, title: (ev && ev.detail && ev.detail.title) || '', videoId: (ev && ev.detail && ev.detail.videoId) || '' } }));
