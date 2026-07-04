@@ -712,17 +712,19 @@
     });
   }
 
-  // ── アカウント自動分類・修復（DID/ハンドル→YouTubeチャンネル→videoId接頭辞）──
-  //   高信頼(post/channel)は自動で正アカウントへ移動、判定不能は件数のみ通知（各✏️で手動移動）。
+  // ── アカウント分類の「検出」（DID/ハンドル→YouTubeチャンネル→videoId接頭辞）──
+  //   ★移動はしない。移動候補リストを返すだけ（適用は applyMoves_ でユーザー確認後）。
+  //   安全ゲート: ①DID台帳をverifyLedgerで毎回検証（force解決・両DID相異・失敗時中止）
+  //              ②channel地図は「片方のアカウントの票しか無いチャンネル」だけ採用（排他）
   var _smartRepairBusy = false;
-  function repairAccountsSmart_(opts, cb) {
-    opts = opts || {}; if (_smartRepairBusy) { if (cb) cb({ ok: false, reason: 'busy' }); return; }
+  function detectAccountMoves_(cb) {
+    if (_smartRepairBusy) { cb({ ok: false, reason: 'busy' }); return; }
     _smartRepairBusy = true;
     var R = window.Go5AccountRepair;
-    var ensure = (R && R.ensureDids) ? R.ensureDids : function (f) { f(); };
-    ensure(function () {
-      var classifyByPost = (R && R.classifyByPost) ? R.classifyByPost : function () { return ''; };
-      // 1) 全バケツ収集
+    if (!R || typeof R.verifyLedger !== 'function') { _smartRepairBusy = false; cb({ ok: false, reason: '修復モジュール未読込（🦋投稿タブを一度開いてください）' }); return; }
+    R.verifyLedger(function (led) {
+      if (!led.ok) { _smartRepairBusy = false; cb({ ok: false, reason: led.reason, ledger: led }); return; }
+      var classifyByPost = R.classifyByPost;
       var buckets = [];
       ['acc1', 'acc2'].forEach(function (a) {
         loadArrFor_('short_hist', a).forEach(function (it) { buckets.push({ a: a, base: 'short_hist', it: it }); });
@@ -730,35 +732,61 @@
       });
       var ymapBy = { acc1: loadYtMapFor_('acc1'), acc2: loadYtMapFor_('acc2') };
       function vidOf(b) { return ytIdOf(ymapBy[b.a][itemKey(b.it)] || b.it.ytUrl || ''); }
-      var allVids = buckets.map(vidOf).filter(Boolean);
-      fetchChannelIds_(allVids, function (vidChan) {
-        // 2) 確実に所属が分かるアイテムから channelId→account の地図を作る（グラウンドトゥルース）
+      fetchChannelIds_(buckets.map(vidOf).filter(Boolean), function (vidChan) {
+        // channel→account 地図（排他票のみ。両アカウントの票が入ったチャンネルは判定に使わない）
         var tally = {};
         buckets.forEach(function (b) {
           var byPost = classifyByPost(b.it); var vid = vidOf(b); var ch = vid ? vidChan[vid] : '';
           if (byPost && ch) { (tally[ch] || (tally[ch] = { acc1: 0, acc2: 0 }))[byPost]++; }
         });
         var chanToAcct = {};
-        Object.keys(tally).forEach(function (ch) { var t = tally[ch]; if (t.acc1 > t.acc2) chanToAcct[ch] = 'acc1'; else if (t.acc2 > t.acc1) chanToAcct[ch] = 'acc2'; });
-        // 3) 各アイテムを分類
-        var moves = [], byCount = { post: 0, channel: 0, videoId: 0 }, unknown = 0;
+        Object.keys(tally).forEach(function (ch) {
+          var t = tally[ch];
+          if (t.acc1 > 0 && t.acc2 === 0) chanToAcct[ch] = 'acc1';
+          else if (t.acc2 > 0 && t.acc1 === 0) chanToAcct[ch] = 'acc2';
+          // 両方の票があるチャンネルは曖昧＝不採用（誤った多数決で全量誤移動しない）
+        });
+        var moves = [], unknown = 0;
         buckets.forEach(function (b) {
           var target = classifyByPost(b.it), by = target ? 'post' : '';
           if (!target) { var vid = vidOf(b); var ch = vid ? vidChan[vid] : ''; if (ch && chanToAcct[ch]) { target = chanToAcct[ch]; by = 'channel'; } }
           if (!target) { var m = String(b.it.videoId || '').match(/^(acc[12])-/); if (m) { target = m[1]; by = 'videoId'; } }
           if (!target) { unknown++; return; }
-          if (target !== b.a) moves.push({ b: b, to: target, by: by });
-        });
-        // 4) 高信頼(post/channel)は自動移動。videoId のみは opts.includeWeak の時だけ。
-        var applied = 0;
-        moves.forEach(function (mv) {
-          var high = (mv.by === 'post' || mv.by === 'channel');
-          if (high || opts.includeWeak) { moveOne_(mv.base = mv.b.base, mv.b.it, mv.b.a, mv.to); byCount[mv.by]++; applied++; }
+          if (target !== b.a) moves.push({ base: b.base, it: b.it, from: b.a, to: target, by: by });
         });
         _smartRepairBusy = false;
-        if (cb) cb({ ok: true, moved: applied, by: byCount, unknown: unknown, weakPending: moves.filter(function (m) { return m.by === 'videoId'; }).length, hadChannelMap: Object.keys(chanToAcct).length > 0 });
+        cb({ ok: true, moves: moves, unknown: unknown, total: buckets.length, ledger: led });
       });
     });
+  }
+  // 検出結果を適用（移動ログを保存し「元に戻す」を可能にする）。高信頼(post/channel)のみ。
+  function applyMoves_(moves) {
+    var log = [];
+    moves.forEach(function (mv) {
+      if (mv.by !== 'post' && mv.by !== 'channel') return; // videoId接頭辞のみは弱シグナル＝適用しない
+      moveOne_(mv.base, mv.it, mv.from, mv.to);
+      log.push({ base: mv.base, item: mv.it, from: mv.from, to: mv.to, by: mv.by, at: new Date().getTime() });
+    });
+    if (log.length) { try { localStorage.setItem('acct_move_log_last', JSON.stringify(log)); } catch (e) {} }
+    return log.length;
+  }
+  // 直前の一括移動を元に戻す（ログから逆適用。シート行も move_row で戻る）。
+  function undoLastMoves_() {
+    var log = []; try { log = JSON.parse(localStorage.getItem('acct_move_log_last') || '[]') || []; } catch (e) {}
+    if (!log.length) { setStatus('元に戻せる移動履歴がありません。'); return; }
+    log.reverse().forEach(function (mv) { moveOne_(mv.base, mv.item, mv.to, mv.from); });
+    try { localStorage.removeItem('acct_move_log_last'); } catch (e) {}
+    setStatus('↩️ ' + log.length + '件の移動を元に戻しました。');
+    render();
+  }
+  // 確認ダイアログ用の移動一覧テキスト（最大12件表示）。
+  function movesSummary_(moves, led) {
+    var lines = moves.slice(0, 12).map(function (mv) {
+      return '・「' + String(mv.it.title || itemKey(mv.it)).slice(0, 24) + '」 ' + acctName_(mv.from) + ' → ' + acctName_(mv.to) + '（' + (mv.by === 'post' ? 'Bluesky投稿者' : 'YouTubeチャンネル') + '判定）';
+    });
+    if (moves.length > 12) lines.push('…ほか ' + (moves.length - 12) + '件');
+    var idLine = '判定基準: 月詠み=@' + led.h1 + (led.dn1 ? '(' + led.dn1 + ')' : '') + ' / 宵桜=@' + led.h2 + (led.dn2 ? '(' + led.dn2 + ')' : '');
+    return idLine + '\n\n' + lines.join('\n');
   }
   // 編集モーダルへ「→ 別アカウントへ移動」ボタンを差し込む。
   function addMoveButtonsToModal_(k, it) {
@@ -1148,30 +1176,35 @@
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
   // 🩺 アカウント検証・修復：post_uri の DID で「別アカウントに紛れ込んだ履歴/シート行」を正しい側へ移す。
+  // 🩺 検出→一覧を見せて確認→適用（自動では動かさない）。適用後は「元に戻す」可能。
   var rp = $('ytRepairAcct');
   if (rp) rp.addEventListener('click', function () {
-    setStatus('🩺 投稿の所属アカウントを検証中…（DID・ハンドル・YouTubeチャンネルで判定）');
-    repairAccountsSmart_({}, function (r) {
-      if (!r || !r.ok) { setStatus('⚠️ 検証できません：' + ((r && r.reason) || '不明') + '（⚙設定で両アカウントのハンドルを確認してください）'); return; }
-      var by = r.by || {};
-      if (r.moved > 0) {
-        setStatus('✅ ' + r.moved + '件を正しいアカウントへ移動しました（DID:' + (by.post || 0) + ' / YouTube:' + (by.channel || 0) + '）。'
-          + (r.unknown ? ' 判定できず ' + r.unknown + '件（各✏️編集の「→…へ移動」で手動可）。' : ''));
-        render(); maybeRestoreYt_();
-      } else {
-        setStatus('✅ 全て正しいアカウントに記録されています（移動なし）。'
-          + (r.unknown ? ' ※判定材料が無い ' + r.unknown + '件は各✏️編集で手動移動できます。' : '')
-          + (!r.hadChannelMap ? '（YouTube判定の基準が作れず＝DID付き投稿が少ない可能性）' : ''));
+    setStatus('🩺 投稿の所属アカウントを検証中…（Bluesky投稿者・YouTubeチャンネルで判定）');
+    detectAccountMoves_(function (r) {
+      if (!r || !r.ok) { setStatus('⚠️ 検証できません：' + ((r && r.reason) || '不明')); return; }
+      var strong = r.moves.filter(function (m) { return m.by === 'post' || m.by === 'channel'; });
+      if (!strong.length) {
+        setStatus('✅ 全て正しいアカウントに記録されています（移動候補なし）。'
+          + (r.unknown ? ' ※判定材料が無い ' + r.unknown + '件は各✏️編集で手動移動できます。' : ''));
+        return;
       }
+      var msg = strong.length + '件が「別アカウントの投稿」と判定されました。移動しますか？\n\n' + movesSummary_(strong, r.ledger) + '\n\n（移動後も「元に戻す」ができます）';
+      if (!window.confirm(msg)) { setStatus('移動を中止しました（内容は変わっていません）。'); return; }
+      var n = applyMoves_(strong);
+      setStatus('✅ ' + n + '件を移動しました。<button type="button" id="ytUndoMoves" class="ghost" style="width:auto;margin-left:8px;font-size:12px;padding:3px 10px;">↩️ 元に戻す</button>', true);
+      var ub = $('ytUndoMoves'); if (ub) ub.addEventListener('click', undoLastMoves_);
+      render(); maybeRestoreYt_();
     });
   });
-  // 履歴を開いたら各アカウント1回、高信頼(DID/ハンドル/YouTube)だけ静かに自動修復。
+  // 履歴を開いたときは「検出のみ」（自動移動は廃止＝INC-64の教訓）。候補があれば件数を知らせる。
   var _smartAutoDone = false;
   function maybeSmartRepair_() {
     if (_smartAutoDone) return; _smartAutoDone = true;
     setTimeout(function () {
-      repairAccountsSmart_({}, function (r) {
-        if (r && r.ok && r.moved > 0) { setStatus('🩺 ' + r.moved + '件を正しいアカウントへ自動整理しました（DID:' + ((r.by && r.by.post) || 0) + ' / YouTube:' + ((r.by && r.by.channel) || 0) + '）。'); render(); }
+      detectAccountMoves_(function (r) {
+        if (!r || !r.ok) return; // 検出できない時は黙る（🩺を押せば理由が出る）
+        var strong = r.moves.filter(function (m) { return m.by === 'post' || m.by === 'channel'; });
+        if (strong.length) setStatus('⚠️ ' + strong.length + '件が別アカウントの投稿の可能性があります。「🩺 アカウント検証・修復」で内容を確認してください（自動では動かしません）。');
       });
     }, 2000);
   }

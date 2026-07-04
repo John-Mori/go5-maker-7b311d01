@@ -771,11 +771,34 @@
     }
     return '';
   }
+  // DID台帳の妥当性を毎回検証（force解決＋両DIDの相異＋表示名取得）。分類・移動の前提ゲート。
+  //   台帳が壊れている（片方未解決・同一DID）状態で分類すると全量誤移動になり得るため、必ずここを通す。
+  function verifyLedger_(cb) {
+    ensureAcctDids_(function () {
+      var h1 = handleOfAcct_('acc1'), h2 = handleOfAcct_('acc2');
+      var d1 = acctDid_('acc1'), d2 = acctDid_('acc2');
+      var res = { h1: h1, h2: h2, d1: d1, d2: d2, dn1: '', dn2: '', ok: false, reason: '' };
+      if (!h1 || !h2) { res.reason = '両アカウントのハンドルが未設定です（⚙で設定）'; cb(res); return; }
+      if (!d1 || !d2) { res.reason = 'DID解決に失敗（ハンドルの綴り・通信を確認。メール形式は不可）'; cb(res); return; }
+      if (d1 === d2) { res.reason = '両アカウントのハンドルが同一アカウントを指しています（⚙のハンドル設定を確認）'; cb(res); return; }
+      // 表示名（レポートでユーザーが取り違いを目視確認できるように）。失敗しても続行。
+      var pend = 2;
+      function done() { if (--pend === 0) { res.ok = true; cb(res); } }
+      [['dn1', h1], ['dn2', h2]].forEach(function (p) {
+        fetch('https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=' + encodeURIComponent(p[1]))
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) { if (j && j.displayName) res[p[0]] = j.displayName; })
+          .catch(function () {})
+          .then(done);
+      });
+    }, true); // force=キャッシュ済み台帳を信じず毎回解決し直す
+  }
   try {
     window.Go5AccountRepair = {
       run: repairAccountsByDid_, ensureDids: ensureAcctDids_,
+      verifyLedger: verifyLedger_,               // 分類・移動の前提ゲート（force解決＋相異検証＋表示名）
       classifyByPost: classifyByPost_,           // DID/ハンドルで確定できる所属（yt-clicksの自動分類の土台）
-      didReady: function () { return !!(acctDid_('acc1') && acctDid_('acc2')); },
+      didReady: function () { return !!(acctDid_('acc1') && acctDid_('acc2') && acctDid_('acc1') !== acctDid_('acc2')); },
       sheetMove: null                            // （将来用フック）
     };
   } catch (e) {}
