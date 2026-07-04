@@ -740,6 +740,8 @@
       '<div class="field-label" style="margin-top:0;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
       '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>💡候補とは別に、このタブに独立して保存されます。') + '</div>' +
       '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" type="text" inputmode="url" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;">', 'candUrl') + '</div>' +
+      '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter(X)のURL（任意）— <b>これだけでも追加できます</b></label>' +
+      '<div>' + pasteRow_('<input id="candTwitter" type="text" inputmode="url" placeholder="https://x.com/…/status/… を貼り付け" autocomplete="off" style="flex:1;">', 'candTwitter') + '</div>' +
       '<button id="candAdd" type="button" class="primary" style="margin-top:8px;font-size:.9rem;padding:10px;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button>' +
       '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
       '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
@@ -763,43 +765,73 @@
     wirePaste_(body);
     renderCandList(tabId);
   }
+  // Twitter(X)のURLを判定・正規化。status付き→cid=tw_<id>、それ以外のx/twitterURLも許容。
+  function parseTwitterUrl_(raw) {
+    var s = String(raw || '').trim(); if (!s) return { ok: false };
+    var m = s.match(/https?:\/\/(?:www\.|mobile\.)?(?:twitter\.com|x\.com)\/([^\/?#]+)\/status\/(\d+)/i);
+    if (m) return { ok: true, user: m[1], id: m[2], url: 'https://x.com/' + m[1] + '/status/' + m[2], cid: 'tw_' + m[2] };
+    var m2 = s.match(/https?:\/\/(?:www\.|mobile\.)?(?:twitter\.com|x\.com)\/[^\s]+/i);
+    if (m2) { var u = m2[0].split('?')[0]; return { ok: true, user: '', id: '', url: u, cid: 'tw_' + u.replace(/[^0-9A-Za-z_]/g, '').slice(-40) }; }
+    return { ok: false };
+  }
+  function addTwitterCandidate_(tabId, tw, inp, twInp, msg) {
+    var key = itemsKey(tabId), items = lsGet(key, '[]');
+    if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) { msg.textContent = 'ℹ️ すでにこのタブにあります'; return; }
+    items.unshift({ url: tw.url, cid: tw.cid, twitterUrl: tw.url, isTwitter: true, title: tw.user ? ('🐦 @' + tw.user + ' のポスト') : '🐦 X(Twitter)のポスト', addedAt: new Date().getTime() });
+    lsSet(key, items);
+    if (inp) inp.value = ''; if (twInp) twInp.value = '';
+    msg.textContent = '✅ Twitter(X)のURLを追加しました';
+    renderCandList(tabId);
+  }
   function addCandidate(tabId) {
     tabId = tabId || 'main';
     var key = itemsKey(tabId);
-    var inp = $('candUrl'), msg = $('candMsg');
-    var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(inp.value) : (inp.value || '').trim();
-    if (!url) { msg.textContent = '⚠️ URLを認識できませんでした'; return; }
-    var r = window.buildAffiliateLink ? window.buildAffiliateLink(url, '') : null;
-    if (!r || !r.ok) { msg.textContent = '⚠️ FANZAの作品URLではないようです'; return; }
-    var items = lsGet(key, '[]');
-    if (items.some(function (x) { return x.cid === r.cid; })) { msg.textContent = 'ℹ️ すでにこのタブにあります'; return; }
-    msg.textContent = '⏳ 作品情報を取得中…';
-    var cfg = workerCfg();
-    var put = function (info) {
-      var it = {
-        url: url, cid: r.cid,
-        title: (info && info.title) || '(タイトル未取得)',
-        author: (info && info.author) || '',
-        thumb: (info && (info.thumb || info.thumbSmall)) || '',
-        listPrice: info ? info.listPrice : null, price: info ? info.price : null,
-        discountPct: info ? (info.discountPct || 0) : 0,
-        date: (info && info.releaseDate) || '',
-        genres: (info && info.genres) || [],
-        reviewCount: info ? info.reviewCount : null,
-        reviewAvg: info ? info.reviewAvg : null,
-        addedAt: new Date().getTime()
+    var inp = $('candUrl'), twInp = $('candTwitter'), msg = $('candMsg');
+    var raw = (inp && inp.value || '').trim();
+    var twRaw = (twInp && twInp.value || '').trim();
+    var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(raw) : raw;
+    var r = (raw && url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
+    // ①作品URLがFANZA作品として有効 → 従来のFANZA候補（Twitter URLがあれば紐づけて保存）
+    if (raw && r && r.ok) {
+      var twForWork = parseTwitterUrl_(twRaw);
+      var items0 = lsGet(key, '[]');
+      if (items0.some(function (x) { return x.cid === r.cid; })) { msg.textContent = 'ℹ️ すでにこのタブにあります'; return; }
+      msg.textContent = '⏳ 作品情報を取得中…';
+      var cfg = workerCfg();
+      var put = function (info) {
+        var items = lsGet(key, '[]');
+        var it = {
+          url: url, cid: r.cid,
+          title: (info && info.title) || '(タイトル未取得)',
+          author: (info && info.author) || '',
+          thumb: (info && (info.thumb || info.thumbSmall)) || '',
+          listPrice: info ? info.listPrice : null, price: info ? info.price : null,
+          discountPct: info ? (info.discountPct || 0) : 0,
+          date: (info && info.releaseDate) || '',
+          genres: (info && info.genres) || [],
+          reviewCount: info ? info.reviewCount : null,
+          reviewAvg: info ? info.reviewAvg : null,
+          addedAt: new Date().getTime()
+        };
+        if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
+        if (twForWork.ok) it.twitterUrl = twForWork.url; // Twitter URLも一緒に保存
+        items.unshift(it);
+        lsSet(key, items);
+        inp.value = ''; if (twInp) twInp.value = ''; msg.textContent = '✅ 追加しました';
+        renderCandList(tabId);
       };
-      if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
-      items.unshift(it);
-      lsSet(key, items);
-      inp.value = ''; msg.textContent = '✅ 追加しました';
-      renderCandList(tabId);
-    };
-    if (window.FanzaCore && cfg.url) {
-      window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) {
-        put(info && info.title ? info : null);
-      }).catch(function () { put(null); });
-    } else put(null);
+      if (window.FanzaCore && cfg.url) {
+        window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) {
+          put(info && info.title ? info : null);
+        }).catch(function () { put(null); });
+      } else put(null);
+      return;
+    }
+    // ②作品URLが無い/FANZA以外 → Twitter(X)のURLだけで追加（Twitter欄優先、無ければ作品欄に貼られたX URLも可）
+    var tw = parseTwitterUrl_(twRaw) ; if (!tw.ok) tw = parseTwitterUrl_(raw);
+    if (tw.ok) { addTwitterCandidate_(tabId, tw, inp, twInp, msg); return; }
+    // ③どちらでもない
+    msg.textContent = (raw || twRaw) ? '⚠️ FANZAの作品URL か Twitter(X)のURLを入れてください' : '⚠️ URLを入力してください';
   }
   // サークルの全作品を、指定タブ(候補/独立タブ)へまとめて追加（重複cidは除外・タブ名は不変）。
   function bulkAddCircle(tabId) {
@@ -1091,10 +1123,11 @@
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
-        '<div class="cand-price">' + priceHtml + '</div>' +
+        ((it.price != null || it.listPrice != null) ? '<div class="cand-price">' + priceHtml + '</div>' : '') +
         salesHtml +
         '<div class="cand-actions">' +
-          (it.url ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+          ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+          (it.twitterUrl ? '<a class="vlink" href="' + esc(it.twitterUrl) + '" target="_blank" rel="noopener" style="color:#1d9bf0;">🐦 X↗</a>' : '') +
           '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿画像' + (hasRef ? '✓' : '') + '</button>' +
           '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
           '<span style="flex:1 1 auto;"></span>' + // 非表示/再表示/削除ボタンを右端へ寄せる
