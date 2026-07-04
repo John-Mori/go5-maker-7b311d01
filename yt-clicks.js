@@ -791,6 +791,13 @@
   // ── シート(記録)から、現在アカウントの投稿履歴をローカルへ復元（非破壊）──
   //   記録シートを正本として、①別アカウントへ誤って入ったアイテムを現アカウントへ戻す
   //   ②ローカルに無い投稿はシートから薄いアイテムとして復活。既存ローカルは尊重（消さない）。
+  // シートの作品cid → 作品URL を再構成（同人=d_… / ブックス=数字ID）。復元時に作品URLを取り戻す。
+  function workUrlFromCid_(cid) {
+    cid = String(cid || '').trim(); if (!cid) return '';
+    if (/^d_/.test(cid)) return 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/';
+    if (/^\d+$/.test(cid)) return 'https://book.dmm.com/product/' + cid + '/';
+    return ''; // それ以外（動画等）はドメイン推定が難しいので空（手動編集で補完可）
+  }
   function restoreHistoryFromSheet_(cb) {
     var gas = gasUrl_(); if (!gas) { if (cb) cb({ ok: false, reason: '記録用GAS（⚙記録用URL）が未設定です' }); return; }
     var to = acct();
@@ -837,6 +844,7 @@
           // 既に to にある：何もしない
         } else { // ローカルに無い→シートから薄い履歴アイテムを復活
           var item = { account: to, title: si.title || '', shortUrl: si.shortUrl || '', shareUrl: si.shareUrl || si.shortUrl || '', postUrl: si.postUrl || '', postUri: si.postUri || '', videoId: si.videoId || '', ts: si.postedAt ? Date.parse(si.postedAt) || 0 : 0 };
+          var wu = si.workUrl || workUrlFromCid_(si.cid); if (wu) item.workUrl = wu; // 作品URLをcidから復元（サムネ・価格・作品状態が戻る）
           if (si.workState) item.workState = si.workState;
           var dstArr2 = arrOf('short_hist', to); dstArr2.unshift(item); arrs['short_hist__' + to] = dstArr2; saveArrFor_('short_hist', to, dstArr2);
           var k = itemKey(item); if (si.youtubeUrl) ytTo[k] = si.youtubeUrl;
@@ -1643,14 +1651,34 @@
       if (html) { el.innerHTML = html; el.style.display = ''; }
       else { el.innerHTML = ''; el.style.display = 'none'; }
     });
-    // 発売日→現在の作品状態（APIで取得できたときだけ上書き。取れなければ手動値のまま）。
+    // 発売日→現在の作品状態。投稿時より「新しい」ときだけ引き上げる（格下げはしない）。
+    //   例: 投稿時=旧作/準新作 でも 現在=新作 なら 新作 に合わせる（準新作も同様）。両アカウント共通ロジック。
     var apiState = priceInfo && deriveWorkState_(priceInfo.releaseDate);
     if (apiState) {
+      var cr = wsRank_(apiState);
       document.querySelectorAll('[data-fanza-state-url]').forEach(function (el) {
         if (el.getAttribute('data-fanza-state-url') !== fanzaUrl) return;
-        el.innerHTML = stateBadgeHtml_(apiState);
+        if (cr > wsRank_((el.textContent || '').trim())) el.innerHTML = stateBadgeHtml_(apiState); // 引き上げのみ
       });
+      reconcileWorkStateUp_(fanzaUrl, apiState); // 保存＋GAS反映（表示中アカウントの該当アイテム）
     }
+  }
+  // 作品状態の新しさ順位（新作>準新作>旧作>未設定）。
+  function wsRank_(s) { return s === '新作' ? 3 : (s === '準新作' ? 2 : (s === '旧作' ? 1 : 0)); }
+  // 現在の作品状態が投稿時より新しい該当アイテムの workState を引き上げて保存＋GAS反映。変更があれば再描画。
+  var _wsRenderPending = false;
+  function reconcileWorkStateUp_(fanzaUrl, currentState) {
+    var cr = wsRank_(currentState); if (cr < 1) return;
+    var changed = false;
+    [['verify_manual', manualKey()], ['short_hist', histKey()]].forEach(function (p) {
+      var arr = loadArr(p[1]), mod = false;
+      arr.forEach(function (it) {
+        if (it.workUrl !== fanzaUrl) return;
+        if (wsRank_(it.workState || '旧作') < cr) { it.workState = currentState; mod = true; changed = true; if (it.videoId) pushItemToGas_(it); }
+      });
+      if (mod) saveArr(p[1], arr);
+    });
+    if (changed && !_wsRenderPending) { _wsRenderPending = true; setTimeout(function () { _wsRenderPending = false; render(); }, 1500); }
   }
 
   // ── FANZA取得の実行管理（世代トークン方式）──────────────────────────────

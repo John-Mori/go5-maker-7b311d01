@@ -11,16 +11,16 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=189">
-<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=189">
-<link rel="icon" type="image/png" sizes="192x192" href="assets/icons/app-192.png?v=189">
-<link rel="icon" type="image/png" sizes="512x512" href="assets/icons/app-512.png?v=189">
-<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=189">
+<link rel="manifest" href="manifest.webmanifest?v=190">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=190">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icons/app-192.png?v=190">
+<link rel="icon" type="image/png" sizes="512x512" href="assets/icons/app-512.png?v=190">
+<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=190">
 <title>5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=189">
+<link rel="stylesheet" href="style.css?v=190">
 </head>
 <body>
 <header>
@@ -40,11 +40,11 @@
   <button id="tabCand"    class="tab">💡 候補</button>
   <button id="tabReserve" class="tab">⏰ 予約</button>
   <button id="tabVerify" class="tab">📋 投稿履歴</button>
-  <button id="tabMovie" class="tab active"><img class="emico" src="assets/icons/ic-movie.png?v=189" alt=""> 動画作成</button>
+  <button id="tabMovie" class="tab active"><img class="emico" src="assets/icons/ic-movie.png?v=190" alt=""> 動画作成</button>
   <button id="tabCal"   class="tab">📅 カレンダー</button>
   <button id="tabYT"    class="tab"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
-  <button id="tabPost"  class="tab"><img class="emico" src="assets/icons/ic-bsky.png?v=189" alt=""> 投稿</button>
-  <button id="tabAffi"  class="tab"><img class="emico" src="assets/icons/ic-link.png?v=189" alt=""> AFIリンク</button>
+  <button id="tabPost"  class="tab"><img class="emico" src="assets/icons/ic-bsky.png?v=190" alt=""> 投稿</button>
+  <button id="tabAffi"  class="tab"><img class="emico" src="assets/icons/ic-link.png?v=190" alt=""> AFIリンク</button>
   <button id="tabSettings" class="tab">⚙️ 詳細設定</button>
 </nav>
 
@@ -161,13 +161,13 @@
   <section class="card">
     <label class="bsky-toggle">
       <input id="bskyEnable" type="checkbox">
-      <span><img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky"> 動画作成後に Bluesky へ自動投稿する</span>
+      <span><img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky"> 動画作成後に Bluesky へ自動投稿する</span>
     </label>
     <label class="bsky-toggle" style="margin-top:8px;">
       <input id="testMode" type="checkbox">
       <span>🧪 テストモード(Blueskyへは実際に投稿するが、記録シートには残さない)</span>
     </label>
-    <div class="hint">本文は「<img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky"> 投稿」タブで編集した内容、画像は<b>この動画の元写真</b>を添付します。アカウント設定も「<img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky"> 投稿」タブにあります。<br>単独で投稿したいときは「<img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky"> 投稿」タブの「今すぐ投稿」をどうぞ。</div>
+    <div class="hint">本文は「<img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky"> 投稿」タブで編集した内容、画像は<b>この動画の元写真</b>を添付します。アカウント設定も「<img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky"> 投稿」タブにあります。<br>単独で投稿したいときは「<img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky"> 投稿」タブの「今すぐ投稿」をどうぞ。</div>
     <div class="movie-work" style="margin-top:12px;">
       <label class="field-label" for="movieWorkUrl" style="margin:0 0 4px;font-size:.8rem;">📕 今回案内する作品URL(今日の作品を貼る・取り違え防止)</label>
       <a id="movieWorkLink" href="#" target="_blank" rel="noopener noreferrer" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--accent);font-size:.85rem;min-height:1.4em;margin-bottom:4px;">(URLを入力してください)</a>
@@ -204,7 +204,7 @@
       </select>
       <label class="disc-new"><input id="discountNew2" type="checkbox"><span>新作</span></label>
       <label class="disc-new"><input id="movieJunshinsaku" type="checkbox"><span>準新作</span></label>
-      <span class="hint" style="margin:0;">投稿本文(自動投稿・今すぐ投稿で共通)に割引文を挿入します。「<img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky">投稿」タブの本文に反映されます。「新作」にチェックすると新作用の文面になります。<br>「準新作」は本文に影響しませんが、投稿時の<b>作品状態</b>として記録します(新作・準新作いずれも無し＝旧作)。</span>
+      <span class="hint" style="margin:0;">投稿本文(自動投稿・今すぐ投稿で共通)に割引文を挿入します。「<img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky">投稿」タブの本文に反映されます。「新作」にチェックすると新作用の文面になります。<br>「準新作」は本文に影響しませんが、投稿時の<b>作品状態</b>として記録します(新作・準新作いずれも無し＝旧作)。</span>
     </div>
     <div class="status" id="bskyStatus"></div>
   </section>
@@ -237,7 +237,7 @@
   <div class="cal-frame-wrap">
     <iframe id="calFrame" class="cal-frame" title="投稿スケジュール カレンダー" loading="lazy"></iframe>
   </div>
-  <p class="hint" style="text-align:center;max-width:520px;margin:8px auto 0;">📅 最適な投稿スロット(日時・枠)を管理。各枠を決めたら「<img class="emico" src="assets/icons/ic-movie.png?v=189" alt=""> 動画作成」「<img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky"> 投稿」へ。データはこの端末内で共有されます。</p>
+  <p class="hint" style="text-align:center;max-width:520px;margin:8px auto 0;">📅 最適な投稿スロット(日時・枠)を管理。各枠を決めたら「<img class="emico" src="assets/icons/ic-movie.png?v=190" alt=""> 動画作成」「<img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky"> 投稿」へ。データはこの端末内で共有されます。</p>
 </section>
 
 <!-- YouTube投稿画面：題名・タグ・短縮URL・概要欄(コピーして使う) -->
@@ -257,12 +257,12 @@
 
   <!-- 短縮URL表示 ＋ YouTube説明欄 -->
   <section class="card">
-    <div class="field-label"><img class="emico" src="assets/icons/ic-link.png?v=189" alt="リンク"> 最新の投稿(短縮URL)</div>
+    <div class="field-label"><img class="emico" src="assets/icons/ic-link.png?v=190" alt="リンク"> 最新の投稿(短縮URL)</div>
     <div class="short-row">
       <code id="shortUrlOut" class="short-url">(投稿するとここに短縮URLが表示されます)</code>
       <button id="shortUrlCopy" class="copy-btn" type="button">URLをコピー</button>
     </div>
-    <div class="hint">動画作成後の自動投稿／今すぐ投稿のあと、Bluesky投稿のURLを短縮して表示します(短縮には<img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky">投稿タブ⚙の記録用GAS設定が必要)。</div>
+    <div class="hint">動画作成後の自動投稿／今すぐ投稿のあと、Bluesky投稿のURLを短縮して表示します(短縮には<img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky">投稿タブ⚙の記録用GAS設定が必要)。</div>
 
     <label class="field-label" for="ytDesc" style="margin-top:12px;">📺 YouTube説明欄(コピーして概要欄に貼り付け)</label>
     <textarea id="ytDesc" rows="8">↑ URLを長押し&リンクを開く ↑
@@ -341,7 +341,7 @@
     <a id="bskyWorkLink" href="#" target="_blank" rel="noopener" style="display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--sub);font-size:.85rem;min-height:1.4em;margin-bottom:4px;">(URLを入力してください)</a>
     <input id="bskyWorkUrl" type="url" inputmode="url" placeholder="https://…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <div id="bskyWorkAffiPreview" style="margin-top:4px;font-size:.82rem;word-break:break-all;"></div>
-    <div class="hint">af_id は「<img class="emico" src="assets/icons/ic-link.png?v=189" alt="リンク"> アフィリンク」タブの設定を流用。空欄なら本文だけ投稿します。この本文＋作品URLは<b>自動投稿(方法①)でも共通</b>。</div>
+    <div class="hint">af_id は「<img class="emico" src="assets/icons/ic-link.png?v=190" alt="リンク"> アフィリンク」タブの設定を流用。空欄なら本文だけ投稿します。この本文＋作品URLは<b>自動投稿(方法①)でも共通</b>。</div>
   </section>
 
   <!-- 画像 -->
@@ -361,7 +361,7 @@
     <div class="field-label">プレビュー(このまま投稿されます)</div>
     <div class="bsky-card">
       <div class="bsky-head">
-        <div class="bsky-av"><img id="pvAvatar" alt="" hidden><span id="pvAvFallback"><img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky"></span></div>
+        <div class="bsky-av"><img id="pvAvatar" alt="" hidden><span id="pvAvFallback"><img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky"></span></div>
         <div>
           <div class="bsky-name" id="pvName">あなた</div>
           <div class="bsky-handle" id="pvHandle">@(ハンドル未設定)</div>
@@ -379,7 +379,7 @@
     <label class="field-label" for="postSchedAt" style="font-size:.8rem;margin:0 0 4px;">⏰ 予約時刻(今すぐ投稿なら空欄のまま)</label>
     <input id="postSchedAt" type="datetime-local" style="margin-bottom:10px;width:100%;box-sizing:border-box;font-size:.88rem;">
     <div style="display:flex;gap:8px;">
-      <button id="postNowBtn" class="primary bsky-post-btn" style="flex:1;font-size:.88rem;padding:7px 10px;"><img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky"> 今すぐ投稿</button>
+      <button id="postNowBtn" class="primary bsky-post-btn" style="flex:1;font-size:.88rem;padding:7px 10px;"><img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky"> 今すぐ投稿</button>
       <button id="postReserveBtn" class="ghost" style="flex:1;font-size:.88rem;padding:7px 10px;">⏰ 予約して投稿</button>
     </div>
     <div class="status" id="postStatus"></div>
@@ -505,11 +505,11 @@
 <main>
   <!-- 再生数・クリック数(投稿別・このアカウント) -->
   <section class="card">
-    <div class="field-label">▶<img class="emico" src="assets/icons/ic-link.png?v=189" alt="リンク"> 再生数・クリック数(投稿別・このアカウント)</div>
+    <div class="field-label">▶<img class="emico" src="assets/icons/ic-link.png?v=190" alt="リンク"> 再生数・クリック数(投稿別・このアカウント)</div>
     <div class="hint">投稿した<b>短縮URLのクリック数</b>と、説明欄に載せた<b>YouTube動画の再生数</b>を一覧します。各行の「YouTube URL」を入れると、その動画の<b>再生数</b>と<b>YouTube投稿日時</b>を取得します(取得には ⚙️詳細設定 のAPIキーが必要)。<br>日時は<b>YouTubeに投稿した時刻</b>を表示し、新しい順に並びます。URL未入力で投稿日時が不明なものは下にまとめます。</div>
     <div class="yt-updrow">
-      <button id="ytFetchDmm" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico fico" src="assets/icons/ic-fanza.png?v=189" alt="F"> DMM</span><span class="ub-l2">作品情報を取得</span></button>
-      <button id="ytClickRefresh" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico" src="assets/icons/ic-link.png?v=189" alt=""> &amp; 🔄</span><span class="ub-l2">更新</span></button>
+      <button id="ytFetchDmm" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico fico" src="assets/icons/ic-fanza.png?v=190" alt="F"> DMM</span><span class="ub-l2">作品情報を取得</span></button>
+      <button id="ytClickRefresh" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico" src="assets/icons/ic-link.png?v=190" alt=""> &amp; 🔄</span><span class="ub-l2">更新</span></button>
     </div>
     <div class="status" id="ytDmmStatus" style="text-align:left;margin-top:6px;"></div>
     <div class="status" id="ytClickStatus" style="text-align:left;margin-top:6px;"></div>
@@ -519,9 +519,9 @@
       <button id="ytPruneSheet" class="ghost" type="button">🧹 履歴に無い行を掃除</button>
       <button id="ytRepairAcct" class="ghost" type="button">🩺 アカウント検証・修復</button>
       <button id="ytRestoreHist" class="ghost" type="button">📥 シートから投稿履歴を復元</button>
-      <button id="ytBulkGen" class="ghost" type="button" style="font-size:11px;padding:4px 8px;opacity:.7;"><img class="emico" src="assets/icons/ic-link.png?v=189" alt="リンク"> 計測リンク再生成</button>
+      <button id="ytBulkGen" class="ghost" type="button" style="font-size:11px;padding:4px 8px;opacity:.7;"><img class="emico" src="assets/icons/ic-link.png?v=190" alt="リンク"> 計測リンク再生成</button>
     </div>
-    <div class="hint">投稿履歴を開くと、未生成の投稿に<b>計測用の短縮リンクが自動生成</b>されます(各行の「Bsky投稿↗」が計測用URL。長押しでコピー→YouTube概要欄に貼り替え)。「<img class="emico" src="assets/icons/ic-link.png?v=189" alt="リンク"> 計測リンク再生成」は手動でやり直したいときだけ使います。</div>
+    <div class="hint">投稿履歴を開くと、未生成の投稿に<b>計測用の短縮リンクが自動生成</b>されます(各行の「Bsky投稿↗」が計測用URL。長押しでコピー→YouTube概要欄に貼り替え)。「<img class="emico" src="assets/icons/ic-link.png?v=190" alt="リンク"> 計測リンク再生成」は手動でやり直したいときだけ使います。</div>
     <div class="hint">「📤 スプレッドシートへ同期」＝この投稿履歴を正として、ID・投稿日時・題名・視聴回数・短縮URL・クリック数・作品cid・キャラ属性を記録シートへまとめて反映します(押すと最新の再生数等を取得してから送信。記録用GAS設定時のみ)。<br>「🧹 履歴に無い行を掃除」＝この投稿履歴に無い行を記録シートから消去します(このアカウントのタブのみ)。</div>
     <div id="ytClickList" class="vlist"></div>
   </section>
@@ -633,7 +633,7 @@
 <!-- 投稿前の編集できる確認(方法①自動投稿で使用) -->
 <div id="postConfirmModal" class="pc-modal" hidden>
   <div class="pc-card">
-    <div class="pc-title"><img class="emico" src="assets/icons/ic-bsky.png?v=189" alt="Bluesky"> この内容で Bluesky に投稿します(編集できます)</div>
+    <div class="pc-title"><img class="emico" src="assets/icons/ic-bsky.png?v=190" alt="Bluesky"> この内容で Bluesky に投稿します(編集できます)</div>
     <div class="pc-work-row" style="margin-bottom:8px;">
       <label for="pcWorkUrl" class="field-label" style="margin:0 0 4px;display:block;">📕 案内する作品URL(今日の作品か必ず確認)</label>
       <input id="pcWorkUrl" type="url" inputmode="url" placeholder="https://… 今回案内する作品ページのURL" style="width:100%;box-sizing:border-box;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
@@ -676,27 +676,27 @@
 <!-- 背景動画(非表示・合成のソース) -->
 <video id="bg" src="assets/bg_main.mp4" muted loop playsinline preload="auto" hidden></video>
 
-<script src="idgen.js?v=189"></script>
-<script src="app.js?v=189"></script>
-<script src="affiliate-core.js?v=189"></script>
-<script src="fanza-core.js?v=189"></script>
-<script src="affiliate.js?v=189"></script>
-<script src="bluesky-core.js?v=189"></script>
-<script src="scheduler.js?v=189"></script>
-<script src="bluesky.js?v=189"></script>
-<script src="drive-upload.js?v=189"></script>
-<script src="verify-core.js?v=189"></script>
-<script src="verify.js?v=189"></script>
-<script src="schedule/data/holidays.js?v=189"></script>
-<script src="yt-clicks.js?v=189"></script>
-<script src="integration.js?v=189"></script>
-<script src="wizard.js?v=189"></script>
-<script src="drafts.js?v=189"></script>
-<script src="candidates.js?v=189"></script>
-<script src="api-diag.js?v=189"></script>
-<script src="settings-io.js?v=189"></script>
-<script src="theme-settings.js?v=189"></script>
-<script src="persist-fields.js?v=189"></script>
+<script src="idgen.js?v=190"></script>
+<script src="app.js?v=190"></script>
+<script src="affiliate-core.js?v=190"></script>
+<script src="fanza-core.js?v=190"></script>
+<script src="affiliate.js?v=190"></script>
+<script src="bluesky-core.js?v=190"></script>
+<script src="scheduler.js?v=190"></script>
+<script src="bluesky.js?v=190"></script>
+<script src="drive-upload.js?v=190"></script>
+<script src="verify-core.js?v=190"></script>
+<script src="verify.js?v=190"></script>
+<script src="schedule/data/holidays.js?v=190"></script>
+<script src="yt-clicks.js?v=190"></script>
+<script src="integration.js?v=190"></script>
+<script src="wizard.js?v=190"></script>
+<script src="drafts.js?v=190"></script>
+<script src="candidates.js?v=190"></script>
+<script src="api-diag.js?v=190"></script>
+<script src="settings-io.js?v=190"></script>
+<script src="theme-settings.js?v=190"></script>
+<script src="persist-fields.js?v=190"></script>
 <script>
 /* PC(精密ポインタ)だけ：タブバー上の縦ホイールを横スクロールへ変換し、スマホのように横移動できるようにする。
    スマホ(coarse pointer)はこのリスナーを付けない＝従来のタッチ横スワイプのまま・表示も挙動も不変。 */
