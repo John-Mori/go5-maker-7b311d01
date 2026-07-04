@@ -683,9 +683,17 @@
   //   window.Go5History として外部（bluesky.js/index.html）から使う。
   //   listForRebuildPicker: 現在アカウントの投稿履歴を新しい順で返す（既に被リビルド済みは対象から除外）。
   function listForRebuildPicker_() {
+    ensureIds(); // 履歴を正としてID未付与のアイテムへ背骨IDを付与＝ピッカーに全件を確実に出す（履歴一覧との不一致を防ぐ）
+    var ymap = loadYtMap();
     return allItems()
       .filter(function (it) { return it.videoId && !it.remade; })
-      .map(function (it) { return { videoId: it.videoId, title: it.title || (it.manual ? '(手動追加)' : '(無題)'), ts: it.ts || 0 }; })
+      .map(function (it) {
+        // 題名は投稿履歴一覧と同じ解決順（YouTubeタイトルがあれば優先→なければ記録タイトル）。#タグは除去。
+        var k = itemKey(it);
+        var vid = ytIdOf(ymap[k] || it.ytUrl || '');
+        var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
+        return { videoId: it.videoId, title: stripCommonTags(title), ts: it.ts || 0, workUrl: it.workUrl || '', workState: it.workState || '' };
+      })
       .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
   }
   // videoIdを指定して「被リビルド」フラグ(remade)をONにする。account省略時は現在UIのアカウント。

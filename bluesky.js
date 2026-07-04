@@ -56,21 +56,45 @@
   // リビルド対象として選んだ投稿履歴のvideoId（未選択なら空）。投稿履歴のGo5History.markRebuiltで「被リビルド」に自動反映する。
   function readRebuildTarget() { var el = $('movieRebuildTarget'); return (el && el.value) || ''; }
   // 「🔁リビルド」チェック時に、どの投稿をリビルドするか投稿履歴から選ぶピッカーを表示・選択肢を最新化する。
+  var _rebuildList = []; // 現在ピッカーに出している投稿履歴（videoId→作品データ引き当て用）
   function refreshRebuildPicker_() {
     var row = $('movieRebuildTargetRow'), sel = $('movieRebuildTarget'), cb = $('movieRebuild');
     if (!row || !sel || !cb) return;
     if (!cb.checked) { row.hidden = true; return; }
     var list = (window.Go5History && window.Go5History.listForRebuildPicker) ? window.Go5History.listForRebuildPicker() : [];
+    _rebuildList = list;
     var cur = sel.value;
     sel.innerHTML = '<option value="">(選択してください)</option>' + list.map(function (it) {
-      return '<option value="' + it.videoId + '">' + (it.title || '(無題)').replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }) + '</option>';
+      var d = it.ts ? new Date(it.ts) : null;
+      var dstr = d ? ((d.getMonth() + 1) + '/' + d.getDate() + ' ') : ''; // 投稿履歴と見比べやすいよう日付を先頭に
+      return '<option value="' + it.videoId + '">' + escapeHtml(dstr + (it.title || '(無題)')) + '</option>';
     }).join('');
     if (cur && list.some(function (it) { return it.videoId === cur; })) sel.value = cur;
     row.hidden = false;
   }
+  // リビルド対象を選んだら、その作品データ（作品URL→作者名/アフィリンク/割引/作品情報、作品状態）を自動反映。
+  function onRebuildTargetChange_() {
+    var sel = $('movieRebuildTarget'); if (!sel || !sel.value) return;
+    var vid = sel.value, item = null;
+    _rebuildList.forEach(function (x) { if (x.videoId === vid) item = x; });
+    if (!item) return;
+    if (item.workUrl) {
+      if (els.movieWorkUrl) els.movieWorkUrl.value = item.workUrl;
+      syncWorkUrl(item.workUrl, true); // 作者名(サークル名)/投稿バージョンURL(アフィID入り)/割引/FANZA作品情報を自動反映
+    }
+    applyWorkStateToUi_(item.workState); // 新作/準新作の作品状態を反映
+  }
+  // 作品状態(新作/準新作/旧作)を動画作成タブのチェックへ反映。新作は本文にも波及させる。
+  function applyWorkStateToUi_(ws) {
+    var shin = $('discountNew2'), jun = $('movieJunshinsaku');
+    if (jun) jun.checked = (ws === '準新作');
+    if (shin) { shin.checked = (ws === '新作'); try { shin.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
+    renderPreview();
+  }
   (function wireRebuildPicker_() {
     var cb = $('movieRebuild'); if (!cb) return;
     cb.addEventListener('change', refreshRebuildPicker_);
+    var sel = $('movieRebuildTarget'); if (sel) sel.addEventListener('change', onRebuildTargetChange_);
     document.addEventListener('account-changed', function () { if (cb.checked) refreshRebuildPicker_(); });
   })();
   function readMovieAttrs() {
