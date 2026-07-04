@@ -59,6 +59,8 @@
   var _sort = 'date_desc';
   var _showHidden = false;
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
+  // 並べ替え対象外の固定タブ（🦋バズ・💡候補）。左端の2つは動かさない。
+  function isFixedCandTab_(id) { return id === 'main' || id === 'buzz'; }
 
   var SORTS = [
     { key: 'price_asc', label: '現在価格が安い順' },
@@ -629,7 +631,8 @@
     var page = $('pageCand');
     if (!page) return;
     var tabs = lsGet(K_TABS, '[]');
-    var tabBtns = '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 候補</button>' +
+    var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 バズ</button>' +
+      '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 候補</button>' +
       tabs.map(function (t) {
         return '<button class="cand-tab' + (_activeTab === t.id ? ' active' : '') + '" data-ct="' + esc(t.id) + '" type="button">' + esc(t.name) + '</button>';
       }).join('') +
@@ -648,7 +651,8 @@
     if (addBtn) addBtn.addEventListener('click', showAddTabForm);
     wireTabDrag_();
 
-    if (_activeTab === 'main') renderMain('main');
+    if (_activeTab === 'buzz') renderBuzz();
+    else if (_activeTab === 'main') renderMain('main');
     else {
       var tab = null; tabs.forEach(function (t) { if (t.id === _activeTab) tab = t; });
       if (!tab) { _activeTab = 'main'; renderMain('main'); }
@@ -669,7 +673,7 @@
     var dragging = false, dragEl = null, dragMoved = false;
 
     function reorderable() {
-      return [].slice.call(bar.querySelectorAll('.cand-tab[data-ct]')).filter(function (b) { return b.getAttribute('data-ct') !== 'main'; });
+      return [].slice.call(bar.querySelectorAll('.cand-tab[data-ct]')).filter(function (b) { return !isFixedCandTab_(b.getAttribute('data-ct')); });
     }
     function beginDrag(btn) {
       dragging = true; dragEl = btn; dragMoved = false;
@@ -701,7 +705,7 @@
     }
 
     bar.querySelectorAll('.cand-tab[data-ct]').forEach(function (btn) {
-      if (btn.getAttribute('data-ct') === 'main') return; // 固定タブは並べ替え起点にしない
+      if (isFixedCandTab_(btn.getAttribute('data-ct'))) return; // 固定タブ(🦋バズ/💡候補)は並べ替え起点にしない
       btn.addEventListener('pointerdown', function (e) {
         startX = e.clientX; startY = e.clientY;
         if (e.pointerType === 'touch') {
@@ -732,7 +736,7 @@
   function commitTabOrder_() {
     var bar = document.querySelector('.cand-tabs');
     if (!bar) return;
-    var order = [].slice.call(bar.querySelectorAll('.cand-tab[data-ct]')).map(function (b) { return b.getAttribute('data-ct'); }).filter(function (id) { return id !== 'main'; });
+    var order = [].slice.call(bar.querySelectorAll('.cand-tab[data-ct]')).map(function (b) { return b.getAttribute('data-ct'); }).filter(function (id) { return !isFixedCandTab_(id); });
     var tabs = lsGet(K_TABS, '[]');
     var byId = {}; tabs.forEach(function (t) { byId[t.id] = t; });
     var newTabs = order.map(function (id) { return byId[id]; }).filter(Boolean);
@@ -804,6 +808,220 @@
         addTab(makerId, makerName);
       });
     });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  🦋 バズタブ：月詠み(acc1)/宵桜(acc2)がフォローしているBlueskyアカウントの
+  //  最近の投稿を、エンゲージメント(いいね+リポスト+返信+引用)の多い順に並べる。
+  //  Bluesky公開API(public.api.bsky.app・未認証・CORS可)のみ使用。
+  //  ※Blueskyは表示回数(インプレッション)を公開しないため、エンゲージメントが唯一の勢い指標。
+  //  API量を抑えるため：フォロー取得ページ数・叩くフィード数・並列数・キャッシュに上限を設ける。
+  // ══════════════════════════════════════════════════════════════════
+  var BSKY_PUB = 'https://public.api.bsky.app/xrpc/';
+  var K_BUZZ = 'cand_buzz_cache';       // {at, accKey, posts:[...]}（アカウント別ではなく対象集合キーで判定）
+  var BUZZ_TTL = 30 * 60 * 1000;        // 30分キャッシュ（🔁で強制更新）
+  var BUZZ_FOLLOW_PAGES = 3;            // 各アカのフォロー取得ページ数上限（×100件）
+  var BUZZ_MAX_FEEDS = 120;             // getAuthorFeed を叩く最大フォロー先数（API量の上限）
+  var BUZZ_FEED_LIMIT = 15;             // 1フォロー先あたり取得する投稿数
+  var BUZZ_CONCURRENCY = 5;             // 同時fetch数（フォロー数×フィードで膨らむのを抑える）
+  var BUZZ_RECENT_DAYS = 14;            // これより古い投稿は対象外
+  var BUZZ_SHOW = 60;                   // 表示件数
+  var _buzzLoading = false;
+
+  // ハンドルとDIDのどちらかがあるアカウントのみ対象（🦋投稿タブ⚙設定で保存済み）。
+  function buzzAccounts_() {
+    return ['acc1', 'acc2'].map(function (a) {
+      var h = '', d = '';
+      try { h = (localStorage.getItem('bsky_handle__' + a) || '').trim().replace(/^@/, ''); } catch (e) {}
+      try { d = (localStorage.getItem('bsky_did__' + a) || '').trim(); } catch (e) {}
+      return { acc: a, handle: h, did: d };
+    }).filter(function (o) { return o.handle || o.did; });
+  }
+  function buzzAccKey_(accs) { return accs.map(function (o) { return o.acc + ':' + (o.did || o.handle); }).join('|'); }
+
+  function bskyGet_(method, params) {
+    var q = Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+    return fetch(BSKY_PUB + method + '?' + q).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+  }
+  // ハンドル→DID（未キャッシュ時のみ解決し bsky_did__ に保存）。
+  function resolveBuzzDid_(o) {
+    if (o.did && /^did:/.test(o.did)) return Promise.resolve(o.did);
+    if (!o.handle) return Promise.resolve('');
+    return bskyGet_('com.atproto.identity.resolveHandle', { handle: o.handle }).then(function (j) {
+      var did = j && j.did ? j.did : '';
+      if (did) { try { localStorage.setItem('bsky_did__' + o.acc, did); } catch (e) {} }
+      return did;
+    });
+  }
+  // 1アカウントの全フォロー先を取得（ページング・BUZZ_FOLLOW_PAGES上限）。
+  function fetchFollows_(did) {
+    var out = [], cursor = '';
+    function step(page) {
+      if (page >= BUZZ_FOLLOW_PAGES) return Promise.resolve(out);
+      var p = { actor: did, limit: 100 }; if (cursor) p.cursor = cursor;
+      return bskyGet_('app.bsky.graph.getFollows', p).then(function (j) {
+        if (!j || !j.follows) return out;
+        j.follows.forEach(function (f) { if (f && f.did) out.push({ did: f.did, handle: f.handle, name: f.displayName || '', avatar: f.avatar || '' }); });
+        cursor = j.cursor || '';
+        if (!cursor) return out;
+        return step(page + 1);
+      });
+    }
+    return step(0);
+  }
+  // 並列プール（同時active数を conc に制限）。worker(item,idx)→Promise。結果を index順に返す。
+  function buzzPool_(items, worker, conc) {
+    return new Promise(function (resolve) {
+      var i = 0, active = 0, results = [];
+      function next() {
+        if (i >= items.length && active === 0) { resolve(results); return; }
+        while (active < conc && i < items.length) {
+          (function (item, idx) {
+            active++;
+            Promise.resolve(worker(item, idx)).then(function (r) { results[idx] = r; }, function () { results[idx] = null; }).then(function () { active--; next(); });
+          })(items[i], i); i++;
+        }
+      }
+      next();
+    });
+  }
+  function buzzPostUrl_(uri, handle) {
+    var m = String(uri || '').match(/\/app\.bsky\.feed\.post\/([^/]+)$/);
+    var rkey = m ? m[1] : '';
+    return (handle && rkey) ? ('https://bsky.app/profile/' + handle + '/post/' + rkey) : '';
+  }
+  function buzzThumb_(embed) {
+    var e = embed || {};
+    if (e.images && e.images[0]) return e.images[0].thumb || '';
+    if (e.media && e.media.images && e.media.images[0]) return e.media.images[0].thumb || ''; // recordWithMedia
+    return '';
+  }
+
+  // 取得本体：キャッシュ→DID解決→フォロー統合(DIDでunion)→フィード取得→エンゲージメント順。
+  function loadBuzz_(force, onDone) {
+    var accs = buzzAccounts_();
+    if (!accs.length) { onDone({ error: 'noacct' }); return; }
+    var accKey = buzzAccKey_(accs);
+    if (!force) {
+      var cached = lsGet(K_BUZZ, 'null');
+      if (cached && cached.accKey === accKey && (new Date().getTime() - cached.at) < BUZZ_TTL) {
+        onDone({ posts: cached.posts, at: cached.at, cached: true }); return;
+      }
+    }
+    _buzzLoading = true;
+    Promise.all(accs.map(resolveBuzzDid_)).then(function (dids) {
+      var valid = dids.filter(function (d) { return d; });
+      if (!valid.length) { _buzzLoading = false; onDone({ error: 'nodid' }); return; }
+      return Promise.all(valid.map(fetchFollows_)).then(function (lists) {
+        // 両アカが同じ人をフォローしていても1回だけ＝DIDでunion＋重複削除。
+        var byDid = {};
+        lists.forEach(function (arr) { (arr || []).forEach(function (f) { if (f && f.did && !byDid[f.did]) byDid[f.did] = f; }); });
+        valid.forEach(function (d) { delete byDid[d]; }); // 自分自身は除外
+        var follows = Object.keys(byDid).map(function (d) { return byDid[d]; });
+        var targets = follows.slice(0, BUZZ_MAX_FEEDS);
+        var truncated = follows.length > targets.length;
+        var cutoff = new Date().getTime() - BUZZ_RECENT_DAYS * 86400000;
+        return buzzPool_(targets, function (f) {
+          return bskyGet_('app.bsky.feed.getAuthorFeed', { actor: f.did, limit: BUZZ_FEED_LIMIT, filter: 'posts_no_replies' }).then(function (j) {
+            if (!j || !j.feed) return [];
+            var arr = [];
+            j.feed.forEach(function (it) {
+              if (it.reason) return; // リポスト(reason付き)は本人の投稿ではないので除外
+              var p = it.post; if (!p || !p.record) return;
+              var whenStr = p.indexedAt || p.record.createdAt || '';
+              var when = Date.parse(whenStr);
+              if (!isNaN(when) && when < cutoff) return;
+              arr.push({
+                uri: p.uri,
+                handle: (p.author && p.author.handle) || f.handle,
+                name: (p.author && p.author.displayName) || f.name || '',
+                avatar: (p.author && p.author.avatar) || f.avatar || '',
+                text: p.record.text || '',
+                like: p.likeCount || 0, repost: p.repostCount || 0, reply: p.replyCount || 0, quote: p.quoteCount || 0,
+                at: whenStr,
+                thumb: buzzThumb_(p.embed)
+              });
+            });
+            return arr;
+          });
+        }, BUZZ_CONCURRENCY).then(function (chunks) {
+          var all = [];
+          (chunks || []).forEach(function (c) { if (c) all = all.concat(c); });
+          all.forEach(function (p) { p.eng = p.like + p.repost + p.reply + p.quote; });
+          all.sort(function (a, b) { return b.eng - a.eng || (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0); });
+          var posts = all.slice(0, BUZZ_SHOW);
+          lsSet(K_BUZZ, { at: new Date().getTime(), accKey: accKey, posts: posts });
+          _buzzLoading = false;
+          onDone({ posts: posts, at: new Date().getTime(), followCount: follows.length, truncated: truncated });
+        });
+      });
+    }).catch(function () { _buzzLoading = false; onDone({ error: 'fetch' }); });
+  }
+
+  // ── バズタブDOM ──
+  function renderBuzz() {
+    var body = $('candBody');
+    if (!body) return;
+    var accs = buzzAccounts_();
+    var head = '<div class="card" style="padding:10px 12px;">' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+      '<div style="flex:1;font-weight:700;color:var(--accent);">🦋 フォロー中のバズ投稿</div>' +
+      '<button id="buzzReload" type="button" class="ghost" title="最新を取り直す" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
+      '</div>' +
+      '<div class="hint" style="margin-top:6px;">フォローしている人の直近' + BUZZ_RECENT_DAYS + '日の投稿を、<b>反応の多い順</b>に並べます。' +
+      'Blueskyは表示回数(インプレッション)を公開していないため、<b>エンゲージメント（❤️いいね+🔁リポスト+💬返信+❝引用）</b>が唯一の勢いの指標です。</div>' +
+      '</div>';
+    if (!accs.length) {
+      body.innerHTML = head + '<div class="card"><div class="hint">⚠️ Blueskyのハンドルが未設定です。🦋投稿タブの⚙設定でハンドル(@…)を保存すると、そのアカウントのフォローが対象になります。</div></div>';
+      wireBuzzReload_();
+      return;
+    }
+    var namesLabel = accs.map(function (o) { return '@' + (o.handle || o.did.slice(0, 14) + '…'); }).join(' / ');
+    body.innerHTML = head +
+      '<div class="hint" style="margin:6px 2px;">対象アカウント：' + esc(namesLabel) + '</div>' +
+      '<div id="buzzList"><div class="card"><div class="hint">⏳ フォローと投稿を集計中…（初回・更新直後は少し時間がかかります）</div></div></div>';
+    wireBuzzReload_();
+    renderBuzzList_(false);
+  }
+  function wireBuzzReload_() {
+    var b = $('buzzReload');
+    if (b) b.addEventListener('click', function () { if (_buzzLoading) return; renderBuzzList_(true); });
+  }
+  function renderBuzzList_(force) {
+    var list = $('buzzList');
+    if (list && force) list.innerHTML = '<div class="card"><div class="hint">⏳ 最新を取得中…</div></div>';
+    loadBuzz_(force, function (res) {
+      var el = $('buzzList');
+      if (!el) return; // タブが切り替わっていたら破棄
+      if (res.error === 'noacct' || res.error === 'nodid') { el.innerHTML = '<div class="card"><div class="hint">⚠️ フォロー情報を取得できませんでした。🦋投稿タブの⚙設定でハンドルをご確認ください。</div></div>'; return; }
+      if (res.error) { el.innerHTML = '<div class="card"><div class="hint">⚠️ 取得に失敗しました。時間をおいて🔁で再試行してください。</div></div>'; return; }
+      var posts = res.posts || [];
+      if (!posts.length) { el.innerHTML = '<div class="card"><div class="hint">直近' + BUZZ_RECENT_DAYS + '日でフォロー先の投稿が見つかりませんでした。</div></div>'; return; }
+      var meta = '<div class="hint" style="margin:2px 2px 4px;">' +
+        (res.cached ? '🕘 ' + fmtTs(res.at) + ' 時点のキャッシュ（🔁で更新）' : '✅ ' + fmtTs(res.at) + ' に更新') +
+        (res.truncated ? '　※フォローが多いため上位' + BUZZ_MAX_FEEDS + '人ぶんを対象にしています' : '') +
+        '</div>';
+      el.innerHTML = meta + posts.map(buzzCardHtml_).join('');
+    });
+  }
+  function buzzCardHtml_(p) {
+    var url = buzzPostUrl_(p.uri, p.handle);
+    var av = p.avatar ? '<img class="buzz-av" src="' + esc(p.avatar) + '" loading="lazy" alt="">' : '<div class="buzz-av buzz-av-ph"></div>';
+    var txt = esc(p.text || '').replace(/\n/g, '<br>');
+    var thumb = p.thumb ? '<img class="buzz-thumb" src="' + esc(p.thumb) + '" loading="lazy" alt="">' : '';
+    var when = p.at ? fmtTs(Date.parse(p.at)) : '';
+    return '<div class="cand-card buzz-card">' +
+      av +
+      '<div class="cand-info">' +
+        '<div class="buzz-head"><span class="buzz-name">' + esc(p.name || p.handle) + '</span> <span class="buzz-handle">@' + esc(p.handle) + '</span>' + (when ? '<span class="buzz-time">・' + esc(when) + '</span>' : '') + '</div>' +
+        (txt ? '<div class="buzz-text">' + txt + '</div>' : '') +
+        thumb +
+        '<div class="buzz-stats">' +
+          '<span class="buzz-eng">🔥 ' + p.eng + '</span>' +
+          '<span>❤️ ' + p.like + '</span><span>🔁 ' + p.repost + '</span><span>💬 ' + p.reply + '</span><span>❝ ' + p.quote + '</span>' +
+          (url ? '<a class="vlink" href="' + esc(url) + '" target="_blank" rel="noopener" style="margin-left:auto;">開く↗</a>' : '') +
+        '</div>' +
+      '</div></div>';
   }
 
   // ── 候補リスト（既定の💡候補 と 独立した候補タブ で共用。tabIdごとに保存先が独立） ──
