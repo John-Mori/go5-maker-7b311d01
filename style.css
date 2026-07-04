@@ -146,6 +146,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-refimg-preview{text-align:center;}
 .cand-refimg-pick{display:inline-block;padding:9px 10px;border-radius:8px;border:1px solid #2f3a52;background:#16203a;color:#e8edf5;cursor:pointer;font-size:13px;}
 .cand-refimg-line{width:100%;box-sizing:border-box;background:#0b1120;color:#e8edf5;border:1px solid #2f3a52;border-radius:8px;padding:9px;font:inherit;}
+/* 画像操作の分割ボタン行（選ぶ／貼り付け／消す） */
+.cand-img-btnrow{display:flex;gap:8px;margin:8px 0;align-items:stretch;}
+.cand-img-btnrow .cand-refimg-pick,.cand-img-btnrow #refImgPaste,.cand-img-btnrow #bskyImgPaste{flex:1 1 0;text-align:center;margin:0;}
+.cand-img-btnrow .cand-img-clear{flex:0 0 auto;width:auto;margin:0;}
 #pageCand main{padding-top:2px;}
 #pageCand input[type=text]{width:100%;box-sizing:border-box;background:#fffef9;color:var(--ink);border:1px solid var(--line);}
 #pageCand select{width:auto;font-size:13px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#fffef9;color:var(--ink);}

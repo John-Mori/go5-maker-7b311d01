@@ -222,6 +222,17 @@
     fr.onerror = function () { cb(null, 'ファイルを読み込めませんでした'); };
     fr.readAsDataURL(file);
   }
+  // クリップボードにコピーされた画像を取り出して縮小dataURLで返す。cb(dataUrl, err)。
+  function pasteImageFromClipboard_(cb) {
+    if (!(navigator.clipboard && navigator.clipboard.read)) { cb(null, 'この端末では画像の貼り付けに未対応です（「画像を選ぶ」をお使いください）'); return; }
+    navigator.clipboard.read().then(function (items) {
+      for (var i = 0; i < items.length; i++) {
+        var t = (items[i].types || []).filter(function (x) { return /^image\//.test(x); })[0];
+        if (t) { items[i].getType(t).then(function (blob) { fileToScaledDataUrl(blob, cb); }).catch(function () { cb(null, '画像を取り出せませんでした'); }); return; }
+      }
+      cb(null, 'クリップボードに画像がありません（先に画像をコピーしてください）');
+    }).catch(function () { cb(null, 'クリップボードを読み取れませんでした（貼り付けの許可が必要です）'); });
+  }
 
   // ── サンプル画像キャッシュ（サムネモーダル用。cid毎にサンプルURL配列を保持）──
   var K_SAMPLES = 'cand_samples';
@@ -312,19 +323,30 @@
     }
     var cur = refImgOf(it.cid) || {};
     var pending = { img: cur.img || '', comment: cur.comment || '', twitterUrl: cur.twitterUrl || '' };
+    var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補（埋め込みポストURLあり）
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
       '<div class="fz-title">🖼 投稿画像 ／ ' + esc(it.title || it.cid) + '</div>' +
       '<div class="hint" style="margin-bottom:8px;">この作品に関連する画像を<b>1枚</b>保存できます。作品用の画像を生成するときの<b>元画像</b>として使えます。</div>' +
       '<div id="refImgPreview" class="cand-refimg-preview"></div>' +
-      '<div style="display:flex;gap:8px;margin:8px 0;">' +
-        '<label class="ghost cand-refimg-pick" style="flex:1;text-align:center;margin:0;">🖼 画像を選ぶ<input id="refImgFile" type="file" accept="image/*" style="display:none;"></label>' +
-        '<button id="refImgClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;">画像を消す</button>' +
+      '<div class="cand-img-btnrow">' +
+        '<label class="ghost cand-refimg-pick">🖼 画像を選ぶ<input id="refImgFile" type="file" accept="image/*" style="display:none;"></label>' +
+        '<button id="refImgPaste" type="button" class="ghost">📋 画像を貼り付け</button>' +
+        '<button id="refImgClear" type="button" class="ghost cand-img-clear">消す</button>' +
       '</div>' +
       '<label class="hint" style="display:block;margin-bottom:2px;">コメント</label>' +
       '<input id="refImgComment" type="text" class="cand-refimg-line" autocomplete="off" placeholder="コメント">' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter URL</label>' +
-      pasteRow_('<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… を貼り付け" style="flex:1;">', 'refImgTwitter') +
+      '<div style="display:flex;gap:6px;align-items:stretch;">' +
+        '<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;">' +
+        '<div style="display:flex;flex-direction:column;gap:4px;flex:0 0 auto;">' +
+          (isTw ? '<button id="refImgTwMigrate" type="button" class="ghost" style="margin:0;font-size:11px;padding:3px 9px;white-space:nowrap;">埋め込みポストURLを移管</button>' : '') +
+          '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;font-size:11px;padding:3px 9px;white-space:nowrap;">貼り付け</button>' +
+        '</div>' +
+      '</div>' +
+      (isTw ?
+        '<label class="hint" style="display:block;margin:10px 0 2px;">この候補を<b>作品に変換</b>（作品URLを貼ると、Twitter URLはここに残して作品候補になります）</label>' +
+        pasteRow_('<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URL / アフィリンクを貼り付け" style="flex:1;">', 'refImgWorkUrl') : '') +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button id="refImgSave" type="button" class="primary" style="flex:1;">保存</button>' +
         '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
@@ -342,11 +364,38 @@
         pending.img = durl; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を差し替えました（保存で確定）';
       });
     });
+    body.querySelector('#refImgPaste').addEventListener('click', function () {
+      body.querySelector('#refImgMsg').textContent = '⏳ 画像を貼り付け中…';
+      pasteImageFromClipboard_(function (durl, err) {
+        if (err) { body.querySelector('#refImgMsg').textContent = '⚠️ ' + err; return; }
+        pending.img = durl; drawPreview(); body.querySelector('#refImgMsg').textContent = 'コピー画像を貼り付けました（保存で確定）';
+      });
+    });
+    var twMig = body.querySelector('#refImgTwMigrate');
+    if (twMig) twMig.addEventListener('click', function () {
+      var post = it.twitterUrl || (it.isTwitter ? it.url : ''); // この候補に埋め込まれたポストURL
+      if (!post) { body.querySelector('#refImgMsg').textContent = '⚠️ 移管できるポストURLがありません'; return; }
+      body.querySelector('#refImgTwitter').value = post;
+      body.querySelector('#refImgMsg').textContent = '🔗 ポストURLを移管しました。作品URLを貼れば作品候補に変換できます（保存で確定）';
+    });
     body.querySelector('#refImgClear').addEventListener('click', function () { pending.img = ''; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を消しました（保存で確定）'; });
     body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
     body.querySelector('#refImgSave').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
+      var workRaw = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
+      // 作品URLが入っていれば、Twitterのみ候補を作品候補へ変換（Twitter URL・画像・メモは引き継ぐ）。
+      if (isTw && workRaw) {
+        body.querySelector('#refImgMsg').textContent = '⏳ 作品候補に変換中…';
+        convertTwitterToWork_(it, workRaw, pending, function (ok, err) {
+          if (!ok) { body.querySelector('#refImgMsg').textContent = '⚠️ ' + (err || '変換できません'); return; }
+          body.querySelector('#refImgMsg').textContent = '✅ 作品候補に変換しました';
+          if (onSaved) onSaved();
+          if (_activeTab) render();
+          setTimeout(function () { ov.hidden = true; }, 700);
+        });
+        return;
+      }
       if (!refImgSave(it.cid, pending)) { body.querySelector('#refImgMsg').textContent = '⚠️ 保存できません（端末の保存容量が不足。画像を消すか小さくしてください）'; return; }
       body.querySelector('#refImgMsg').textContent = '✅ 保存しました';
       if (onSaved) onSaved();
@@ -354,6 +403,37 @@
     });
     wirePaste_(body);
     ov.hidden = false;
+  }
+  // Twitterのみ候補 → 作品候補へ変換（Twitter URL・画像・メモを新cidへ引き継ぎ、旧tw_項目を置換）。
+  function convertTwitterToWork_(oldItem, workUrlRaw, refData, cb) {
+    var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(workUrlRaw) : (workUrlRaw || '').trim();
+    var r = (url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
+    if (!r || !r.ok) { cb(false, 'FANZAの作品URLではないようです'); return; }
+    var tabId = _activeTab, key = itemsKey(tabId), items = lsGet(key, '[]'), oldCid = oldItem.cid;
+    if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'その作品は既にこのタブにあります'); return; }
+    // 画像・メモ・Twitter URL を新cidへ移す
+    refImgSave(r.cid, { img: refData.img || '', comment: refData.comment || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '' });
+    var bimg = (bskyImgOf(oldCid) || {}).img; if (bimg) bskyImgSave(r.cid, bimg);
+    if (oldCid !== r.cid) { try { localStorage.removeItem(refImgKey(oldCid)); localStorage.removeItem(bskyImgKey(oldCid)); } catch (e) {} }
+    var newItem = { url: url, cid: r.cid, twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '', title: '(タイトル未取得)', addedAt: new Date().getTime() };
+    var idx = -1; items.forEach(function (x, i) { if (x.cid === oldCid) idx = i; });
+    if (idx >= 0) items[idx] = newItem; else items.unshift(newItem);
+    lsSet(key, items);
+    var cfg = workerCfg();
+    var finish = function (info) {
+      var arr = lsGet(key, '[]');
+      arr.forEach(function (x) {
+        if (x.cid !== r.cid || !info || !info.title) return;
+        x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
+        x.listPrice = info.listPrice; x.price = info.price; x.discountPct = info.discountPct || 0;
+        x.date = info.releaseDate || ''; x.genres = info.genres || [];
+        x.reviewCount = info.reviewCount; x.reviewAvg = info.reviewAvg;
+        if (info.samples && info.samples.length) x.samples = info.samples;
+      });
+      lsSet(key, arr); recordReviewSnapshots(arr); cb(true);
+    };
+    if (window.FanzaCore && cfg.url) window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) { finish(info && info.title ? info : null); }).catch(function () { finish(null); });
+    else finish(null);
   }
 
   // ── Bluesky添付画像モーダル（1枚を保存。投稿画像とは別枠）──
@@ -375,9 +455,10 @@
       '<div class="fz-title">🦋 Bluesky添付画像 ／ ' + esc(it.title || it.cid) + '</div>' +
       '<div class="hint" style="margin-bottom:8px;">Bluesky投稿時に<b>添付する画像</b>を1枚保存できます。</div>' +
       '<div id="bskyImgPreview" class="cand-refimg-preview"></div>' +
-      '<div style="display:flex;gap:8px;margin:8px 0;">' +
-        '<label class="ghost cand-refimg-pick" style="flex:1;text-align:center;margin:0;">🖼 画像を選ぶ<input id="bskyImgFile" type="file" accept="image/*" style="display:none;"></label>' +
-        '<button id="bskyImgClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;">画像を消す</button>' +
+      '<div class="cand-img-btnrow">' +
+        '<label class="ghost cand-refimg-pick">🖼 画像を選ぶ<input id="bskyImgFile" type="file" accept="image/*" style="display:none;"></label>' +
+        '<button id="bskyImgPaste" type="button" class="ghost">📋 画像を貼り付け</button>' +
+        '<button id="bskyImgClear" type="button" class="ghost cand-img-clear">消す</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button id="bskyImgSave" type="button" class="primary" style="flex:1;">保存</button>' +
@@ -392,6 +473,13 @@
       fileToScaledDataUrl(f, function (durl, err) {
         if (err) { body.querySelector('#bskyImgMsg').textContent = '⚠️ ' + err; return; }
         pending.img = durl; drawPreview(); body.querySelector('#bskyImgMsg').textContent = '画像を差し替えました（保存で確定）';
+      });
+    });
+    body.querySelector('#bskyImgPaste').addEventListener('click', function () {
+      body.querySelector('#bskyImgMsg').textContent = '⏳ 画像を貼り付け中…';
+      pasteImageFromClipboard_(function (durl, err) {
+        if (err) { body.querySelector('#bskyImgMsg').textContent = '⚠️ ' + err; return; }
+        pending.img = durl; drawPreview(); body.querySelector('#bskyImgMsg').textContent = 'コピー画像を貼り付けました（保存で確定）';
       });
     });
     body.querySelector('#bskyImgClear').addEventListener('click', function () { pending.img = ''; drawPreview(); body.querySelector('#bskyImgMsg').textContent = '画像を消しました（保存で確定）'; });
