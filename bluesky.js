@@ -751,8 +751,37 @@
     try { if (localStorage.getItem('acct_did_repair_v1') === '1') return; } catch (e) {}
     setTimeout(function () { repairAccountsByDid_(function (r) { if (r && r.ok) { try { localStorage.setItem('acct_did_repair_v1', '1'); } catch (e) {} } }); }, 4000);
   }
-  try { window.Go5AccountRepair = { run: repairAccountsByDid_, ensureDids: ensureAcctDids_ }; } catch (e) {}
-  maybeRepairAccountsOnce_();
+  // ハンドル→acctId（⚙設定のハンドルと照合）。postUrlのprofile部がハンドルの時に使う。
+  function acctOfHandle_(h) {
+    h = String(h || '').toLowerCase().replace(/^@/, ''); if (!h) return '';
+    if (handleOfAcct_('acc1').toLowerCase() === h) return 'acc1';
+    if (handleOfAcct_('acc2').toLowerCase() === h) return 'acc2';
+    return '';
+  }
+  // bsky.app/profile/<did or handle>/post/… の profile 部を取り出す。
+  function profileFromPostUrl_(u) { var m = String(u || '').match(/bsky\.app\/profile\/([^/?#]+)/i); return m ? m[1] : ''; }
+  // 投稿の「確実な所属」を postUri(DID) → postUrlのprofile(DID/handle) で判定。分からなければ ''。
+  function classifyByPost_(item) {
+    if (!item) return '';
+    var byDid = acctOfDid_(didFromUri_(item.postUri)); if (byDid) return byDid;
+    var prof = profileFromPostUrl_(item.postUrl || item.shareUrl || '');
+    if (prof) {
+      if (/^did:/.test(prof)) { var d = acctOfDid_(prof); if (d) return d; }
+      else { var h = acctOfHandle_(prof); if (h) return h; }
+    }
+    return '';
+  }
+  try {
+    window.Go5AccountRepair = {
+      run: repairAccountsByDid_, ensureDids: ensureAcctDids_,
+      classifyByPost: classifyByPost_,           // DID/ハンドルで確定できる所属（yt-clicksの自動分類の土台）
+      didReady: function () { return !!(acctDid_('acc1') && acctDid_('acc2')); },
+      sheetMove: null                            // （将来用フック）
+    };
+  } catch (e) {}
+  // 自動修復は yt-clicks の多段分類(DID/ハンドル/YouTubeチャンネル)へ一本化したのでここでは呼ばない。
+  //   （repairAccountsByDid_ は Go5AccountRepair.run として手動フォールバック用に残す）
+  void maybeRepairAccountsOnce_;
 
   // 短縮URLの設定。一次＝自前 link-worker（302即リダイレクト＋KVで開封数を計測）。
   //   ・YT説明欄に貼る用途なのでURL長は問題にならない＝計測できる link-worker を最優先。
@@ -874,7 +903,7 @@
     // 作品URL：metaがあればそれ、無ければ（現在UIと同じ時だけ）UIから採取。
     var workUrl = meta ? meta.workUrl : (uiSame ? captureWorkUrl_() : '');
     var a = histLoadFor_(account).filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
-    var entry = { ts: rec.ts || new Date().getTime(), title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '' };
+    var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '' };
     if (workUrl) {
       entry.workUrl = workUrl;
       // 投稿時のFANZA価格スナップショット（当時価格）。metaがあればそれを、無ければUIキャッシュから。

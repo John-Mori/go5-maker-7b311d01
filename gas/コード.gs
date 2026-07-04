@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-05D（move_rowでアカウント間の行移動を追加＝誤記録の矯正用）';
+var GAS_VERSION = '2026-07-05E（無人予約をchannel別資格情報で投稿＝誤アカウント投稿防止／move_row）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -992,7 +992,7 @@ function runReservations() {
       var blob = imgId ? DriveApp.getFileById(imgId).getBlob() : null;
       var text = rows[i][RCOL.text - 1];
       var ch = rows[i][RCOL.channel - 1] || 'acc1';
-      var res = bskyPost_(text, blob);
+      var res = bskyPost_(text, blob, ch); // ★予約行のchannelの資格情報で投稿（誤アカウント防止）
       sh.getRange(i + 2, RCOL.status).setValue('posted');
       sh.getRange(i + 2, RCOL.uri).setValue(res.uri);
       sh.getRange(i + 2, RCOL.url).setValue(res.postUrl);
@@ -1013,9 +1013,24 @@ function runReservations() {
   }
 }
 
-// Bluesky 投稿（サーバー側＝GASのアプリパスワードで投稿）
-function bskyPost_(text, imageBlob) {
-  var handle = prop_('BSKY_HANDLE'), pw = prop_('BSKY_APP_PW');
+// Bluesky 投稿（サーバー側＝GASのアプリパスワードで投稿）。
+// ★channel別の資格情報（BSKY_HANDLE_ACC1/_ACC2 等）を優先。無ければ従来のBSKY_HANDLE/PWにフォールバック。
+//   これで無人予約が「予約したアカウントとは別のアカウントで実投稿される」取り違えを防ぐ。
+function bskyCreds_(channel) {
+  var suf = channel === 'acc2' ? '_ACC2' : '_ACC1';
+  var h = prop_('BSKY_HANDLE' + suf), p = prop_('BSKY_APP_PW' + suf);
+  if (h && p) return { handle: h, pw: p, scoped: true };
+  var otherSuf = channel === 'acc2' ? '_ACC1' : '_ACC2';
+  var otherScopedSet = !!(prop_('BSKY_HANDLE' + otherSuf) && prop_('BSKY_APP_PW' + otherSuf));
+  return { handle: prop_('BSKY_HANDLE'), pw: prop_('BSKY_APP_PW'), scoped: false, otherScopedSet: otherScopedSet };
+}
+function bskyPost_(text, imageBlob, channel) {
+  channel = channel || 'acc1';
+  var cr = bskyCreds_(channel);
+  var handle = cr.handle, pw = cr.pw;
+  // 片方だけ per-account 資格が設定済み＝移行中。要求chの資格が無ければ誤アカウント投稿を避けて中止。
+  //   （per-account 資格が全く無い純レガシーは従来通り共有BSKY_HANDLE/PWで投稿＝後方互換）
+  if (!cr.scoped && cr.otherScopedSet) throw new Error(channel + ' の資格情報（BSKY_HANDLE_' + (channel === 'acc2' ? 'ACC2' : 'ACC1') + ' / BSKY_APP_PW_' + (channel === 'acc2' ? 'ACC2' : 'ACC1') + '）が未設定のため中止（誤アカウント投稿防止）');
   if (!handle || !pw) throw new Error('BSKY_HANDLE / BSKY_APP_PW 未設定');
   var svc = 'https://bsky.social';
   var s = JSON.parse(UrlFetchApp.fetch(svc + '/xrpc/com.atproto.server.createSession', {

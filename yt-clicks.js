@@ -125,7 +125,7 @@
         if (!it || !it.id) return;
         var rec = {};
         if (it.statistics) rec.views = parseInt(it.statistics.viewCount || '0', 10);
-        if (it.snippet) { rec.title = it.snippet.title || ''; var t = Date.parse(it.snippet.publishedAt || ''); if (!isNaN(t)) rec.published = t; }
+        if (it.snippet) { rec.title = it.snippet.title || ''; rec.channelId = it.snippet.channelId || ''; var t = Date.parse(it.snippet.publishedAt || ''); if (!isNaN(t)) rec.published = t; } // channelId＝アカウント判定の鍵
         if (it.status) {
           rec.privacy = it.status.privacyStatus || '';
           var pa = Date.parse(it.status.publishAt || ''); if (!isNaN(pa)) rec.publishAt = pa; // 予約公開時刻（オーナー認証時のみ返る）
@@ -669,28 +669,96 @@
   function saveArrFor_(base, a, arr) { try { localStorage.setItem(base + '__' + a, JSON.stringify(arr.slice(0, 200))); } catch (e) {} }
   function loadYtMapFor_(a) { try { return JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { return {}; } }
   function saveYtMapFor_(a, m) { try { localStorage.setItem('verify_yt__' + a, JSON.stringify(m)); } catch (e) {} }
-  function moveItemAccount_(k, it, to) {
-    var from = acct(); if (from === to) return;
-    var base = it.manual ? 'verify_manual' : 'short_hist';
-    // 元アカウントから取り出す
+  // 1件をアカウント間で移動（ローカルの base 配列＋verify_yt＋シート行）。表示更新はしない。
+  function moveOne_(base, it, from, to) {
+    if (from === to || !it) return;
+    var k = itemKey(it);
     var srcArr = loadArrFor_(base, from), moved = null;
     srcArr = srcArr.filter(function (x) { if (itemKey(x) === k) { moved = x; return false; } return true; });
     if (!moved) moved = it;
     saveArrFor_(base, from, srcArr);
-    // 先アカウントへ（同キー重複を除いて先頭へ）
     var dstArr = loadArrFor_(base, to).filter(function (x) { return itemKey(x) !== k; });
     dstArr.unshift(moved); saveArrFor_(base, to, dstArr);
-    // YouTube URL 対応（verify_yt）も一緒に移す
     var fm = loadYtMapFor_(from), yUrl = fm[k];
     if (yUrl) { delete fm[k]; saveYtMapFor_(from, fm); var tm = loadYtMapFor_(to); tm[k] = yUrl; saveYtMapFor_(to, tm); }
-    // スプレッドシートの行も移す（videoId/postUri/短縮URL で特定。GAS設定時のみ・best-effort）
     var gas = gasUrl_();
     if (gas && (moved.videoId || moved.postUri || moved.shortUrl)) {
       fetch(gas, { method: 'POST', body: JSON.stringify({ op: 'move_row', from: from, to: to, videoId: moved.videoId || '', postUri: moved.postUri || '', short: moved.shortUrl || '' }) })
         .then(function (r) { return r.json(); }).catch(function () { return null; });
     }
-    setStatus('✅ 「' + (moved.title || k) + '」を ' + acctName_(to) + ' へ移動しました。' + (gas ? '' : '（シートは⚙記録用URL設定時に反映）'));
+  }
+  function moveItemAccount_(k, it, to) {
+    var from = acct(); if (from === to) return;
+    moveOne_(it.manual ? 'verify_manual' : 'short_hist', it, from, to);
+    setStatus('✅ 「' + (it.title || k) + '」を ' + acctName_(to) + ' へ移動しました。' + (gasUrl_() ? '' : '（シートは⚙記録用URL設定時に反映）'));
     render();
+  }
+
+  // ── YouTube channelId 取得（fetchVideos を流用・yt_meta_cache にキャッシュ）──
+  function fetchChannelIds_(vids, cb) {
+    var meta = ytMetaLoad(), need = [], out = {};
+    (vids || []).forEach(function (v) { if (!v) return; if (meta[v] && meta[v].channelId) out[v] = meta[v].channelId; else need.push(v); });
+    need = need.filter(function (v, i, a) { return a.indexOf(v) === i; });
+    if (!need.length) { cb(out); return; }
+    var chunks = []; for (var i = 0; i < need.length; i += 50) chunks.push(need.slice(i, i + 50));
+    var pend = chunks.length;
+    chunks.forEach(function (ch) {
+      fetchVideos(ch).then(function (m) {
+        var mm = ytMetaLoad();
+        ch.forEach(function (v) { var r = m[v]; if (r && r.channelId) { out[v] = r.channelId; mm[v] = mm[v] || {}; mm[v].channelId = r.channelId; if (r.title) mm[v].title = r.title; } });
+        ytMetaSave(mm);
+        if (--pend === 0) cb(out);
+      }).catch(function () { if (--pend === 0) cb(out); });
+    });
+  }
+
+  // ── アカウント自動分類・修復（DID/ハンドル→YouTubeチャンネル→videoId接頭辞）──
+  //   高信頼(post/channel)は自動で正アカウントへ移動、判定不能は件数のみ通知（各✏️で手動移動）。
+  var _smartRepairBusy = false;
+  function repairAccountsSmart_(opts, cb) {
+    opts = opts || {}; if (_smartRepairBusy) { if (cb) cb({ ok: false, reason: 'busy' }); return; }
+    _smartRepairBusy = true;
+    var R = window.Go5AccountRepair;
+    var ensure = (R && R.ensureDids) ? R.ensureDids : function (f) { f(); };
+    ensure(function () {
+      var classifyByPost = (R && R.classifyByPost) ? R.classifyByPost : function () { return ''; };
+      // 1) 全バケツ収集
+      var buckets = [];
+      ['acc1', 'acc2'].forEach(function (a) {
+        loadArrFor_('short_hist', a).forEach(function (it) { buckets.push({ a: a, base: 'short_hist', it: it }); });
+        loadArrFor_('verify_manual', a).forEach(function (it) { buckets.push({ a: a, base: 'verify_manual', it: it }); });
+      });
+      var ymapBy = { acc1: loadYtMapFor_('acc1'), acc2: loadYtMapFor_('acc2') };
+      function vidOf(b) { return ytIdOf(ymapBy[b.a][itemKey(b.it)] || b.it.ytUrl || ''); }
+      var allVids = buckets.map(vidOf).filter(Boolean);
+      fetchChannelIds_(allVids, function (vidChan) {
+        // 2) 確実に所属が分かるアイテムから channelId→account の地図を作る（グラウンドトゥルース）
+        var tally = {};
+        buckets.forEach(function (b) {
+          var byPost = classifyByPost(b.it); var vid = vidOf(b); var ch = vid ? vidChan[vid] : '';
+          if (byPost && ch) { (tally[ch] || (tally[ch] = { acc1: 0, acc2: 0 }))[byPost]++; }
+        });
+        var chanToAcct = {};
+        Object.keys(tally).forEach(function (ch) { var t = tally[ch]; if (t.acc1 > t.acc2) chanToAcct[ch] = 'acc1'; else if (t.acc2 > t.acc1) chanToAcct[ch] = 'acc2'; });
+        // 3) 各アイテムを分類
+        var moves = [], byCount = { post: 0, channel: 0, videoId: 0 }, unknown = 0;
+        buckets.forEach(function (b) {
+          var target = classifyByPost(b.it), by = target ? 'post' : '';
+          if (!target) { var vid = vidOf(b); var ch = vid ? vidChan[vid] : ''; if (ch && chanToAcct[ch]) { target = chanToAcct[ch]; by = 'channel'; } }
+          if (!target) { var m = String(b.it.videoId || '').match(/^(acc[12])-/); if (m) { target = m[1]; by = 'videoId'; } }
+          if (!target) { unknown++; return; }
+          if (target !== b.a) moves.push({ b: b, to: target, by: by });
+        });
+        // 4) 高信頼(post/channel)は自動移動。videoId のみは opts.includeWeak の時だけ。
+        var applied = 0;
+        moves.forEach(function (mv) {
+          var high = (mv.by === 'post' || mv.by === 'channel');
+          if (high || opts.includeWeak) { moveOne_(mv.base = mv.b.base, mv.b.it, mv.b.a, mv.to); byCount[mv.by]++; applied++; }
+        });
+        _smartRepairBusy = false;
+        if (cb) cb({ ok: true, moved: applied, by: byCount, unknown: unknown, weakPending: moves.filter(function (m) { return m.by === 'videoId'; }).length, hadChannelMap: Object.keys(chanToAcct).length > 0 });
+      });
+    });
   }
   // 編集モーダルへ「→ 別アカウントへ移動」ボタンを差し込む。
   function addMoveButtonsToModal_(k, it) {
@@ -1072,7 +1140,7 @@
     step();
   }
 
-  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); maybeRestoreYt_(); fetchDeltas_(); });
+  var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); });
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); fetchDeltas_(true); });
   var fd = $('ytFetchDmm'); if (fd) fd.addEventListener('click', refetchFanza_);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
@@ -1082,18 +1150,35 @@
   // 🩺 アカウント検証・修復：post_uri の DID で「別アカウントに紛れ込んだ履歴/シート行」を正しい側へ移す。
   var rp = $('ytRepairAcct');
   if (rp) rp.addEventListener('click', function () {
-    if (!window.Go5AccountRepair || typeof window.Go5AccountRepair.run !== 'function') { setStatus('修復モジュール未読込です。🦋投稿タブを一度開いてから再度お試しください。'); return; }
-    setStatus('🩺 投稿の所属アカウントを検証中…');
-    window.Go5AccountRepair.run(function (r) {
-      if (!r || !r.ok) { setStatus('⚠️ 修復できません：' + ((r && r.reason) || '不明') + '（⚙設定で両アカウントのハンドルを確認してください）'); return; }
-      if (r.moved > 0) { setStatus('✅ ' + r.moved + '件を正しいアカウントへ移動しました' + (r.toSheet ? '（シートも矯正）' : '') + '。'); render(); maybeRestoreYt_(); }
-      else setStatus('✅ 全ての投稿が正しいアカウントに記録されています（移動なし）。');
+    setStatus('🩺 投稿の所属アカウントを検証中…（DID・ハンドル・YouTubeチャンネルで判定）');
+    repairAccountsSmart_({}, function (r) {
+      if (!r || !r.ok) { setStatus('⚠️ 検証できません：' + ((r && r.reason) || '不明') + '（⚙設定で両アカウントのハンドルを確認してください）'); return; }
+      var by = r.by || {};
+      if (r.moved > 0) {
+        setStatus('✅ ' + r.moved + '件を正しいアカウントへ移動しました（DID:' + (by.post || 0) + ' / YouTube:' + (by.channel || 0) + '）。'
+          + (r.unknown ? ' 判定できず ' + r.unknown + '件（各✏️編集の「→…へ移動」で手動可）。' : ''));
+        render(); maybeRestoreYt_();
+      } else {
+        setStatus('✅ 全て正しいアカウントに記録されています（移動なし）。'
+          + (r.unknown ? ' ※判定材料が無い ' + r.unknown + '件は各✏️編集で手動移動できます。' : '')
+          + (!r.hadChannelMap ? '（YouTube判定の基準が作れず＝DID付き投稿が少ない可能性）' : ''));
+      }
     });
   });
+  // 履歴を開いたら各アカウント1回、高信頼(DID/ハンドル/YouTube)だけ静かに自動修復。
+  var _smartAutoDone = false;
+  function maybeSmartRepair_() {
+    if (_smartAutoDone) return; _smartAutoDone = true;
+    setTimeout(function () {
+      repairAccountsSmart_({}, function (r) {
+        if (r && r.ok && r.moved > 0) { setStatus('🩺 ' + r.moved + '件を正しいアカウントへ自動整理しました（DID:' + ((r.by && r.by.post) || 0) + ' / YouTube:' + ((r.by && r.by.channel) || 0) + '）。'); render(); }
+      });
+    }, 2000);
+  }
   // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得（renderだけだと「…」のままになる）。
   document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeRestoreYt_(); } else render(); });
-  // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元（各1回）。
-  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); fetchDeltas_(); } }, 2500);
+  // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理（各1回）。
+  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。
   var keyEl = $('ytApiKey');
