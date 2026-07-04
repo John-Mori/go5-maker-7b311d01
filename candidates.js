@@ -56,13 +56,14 @@
   var CACHE_TTL = 3 * 3600 * 1000;
 
   var _activeTab = 'main'; // 'main' | サークルタブid
-  var _sort = 'date_desc';
+  var _sort = 'added_desc';
   var _showHidden = false;
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
   // 並べ替え対象外の固定タブ（🦋バズ・💡候補）。左端の2つは動かさない。
   function isFixedCandTab_(id) { return id === 'main' || id === 'buzz'; }
 
   var SORTS = [
+    { key: 'added_desc', label: '追加日が新しい順' },
     { key: 'price_asc', label: '現在価格が安い順' },
     { key: 'date_desc', label: '発売日が新しい順' },
     { key: 'date_asc', label: '発売日が古い順' },
@@ -326,9 +327,10 @@
     var cur = refImgOf(it.cid) || {};
     var pending = { img: cur.img || '', comment: cur.comment || '', twitterUrl: cur.twitterUrl || '' };
     var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補（埋め込みポストURLあり）
+    var workUrlPrefill = isTw ? '' : (it.url || ''); // DMM起点は現行の正式作品URLをプレフィル（Twitter起点はit.urlがポストURLなので空欄）
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
-      '<div class="fz-title">🖼 投稿画像 ／ ' + esc(it.title || it.cid) + '</div>' +
+      '<div class="fz-title">🖼 ' + esc(it.title || it.cid) + '</div>' +
       '<div class="hint" style="margin-bottom:8px;">この作品に関連する画像を<b>1枚</b>保存できます。作品用の画像を生成するときの<b>元画像</b>として使えます。</div>' +
       '<div id="refImgPreview" class="cand-refimg-preview"></div>' +
       '<div class="cand-img-btnrow">' +
@@ -341,14 +343,13 @@
       '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter URL</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;">' +
-        '<div style="display:flex;flex-direction:column;gap:4px;flex:0 0 auto;">' +
-          (isTw ? '<button id="refImgTwMigrate" type="button" class="ghost" style="margin:0;font-size:11px;padding:3px 9px;white-space:nowrap;">埋め込みポストURLを移管</button>' : '') +
-          '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;font-size:11px;padding:3px 9px;white-space:nowrap;">貼り付け</button>' +
-        '</div>' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;font-size:11px;padding:3px 9px;white-space:nowrap;flex:0 0 auto;">貼り付け</button>' +
       '</div>' +
-      (isTw ?
-        '<label class="hint" style="display:block;margin:10px 0 2px;">この候補を<b>作品に変換</b>（作品URLを貼ると、Twitter URLはここに残して作品候補になります）</label>' +
-        pasteRow_('<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URL / アフィリンクを貼り付け" style="flex:1;">', 'refImgWorkUrl') : '') +
+      '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;">作品URLもしくはアフィリンク付き作品URLを貼ると、正式な作品URLに自動変換されます</label>' +
+      '<div style="display:flex;gap:6px;align-items:stretch;">' +
+        '<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;">' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;font-size:10px;padding:0 9px;white-space:nowrap;flex:0 0 auto;">📋 貼り付け</button>' +
+      '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button id="refImgSave" type="button" class="primary" style="flex:1;">保存</button>' +
         '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
@@ -373,25 +374,18 @@
         pending.img = durl; drawPreview(); body.querySelector('#refImgMsg').textContent = 'コピー画像を貼り付けました（保存で確定）';
       });
     });
-    var twMig = body.querySelector('#refImgTwMigrate');
-    if (twMig) twMig.addEventListener('click', function () {
-      var post = it.twitterUrl || (it.isTwitter ? it.url : ''); // この候補に埋め込まれたポストURL
-      if (!post) { body.querySelector('#refImgMsg').textContent = '⚠️ 移管できるポストURLがありません'; return; }
-      body.querySelector('#refImgTwitter').value = post;
-      body.querySelector('#refImgMsg').textContent = '🔗 ポストURLを移管しました。作品URLを貼れば作品候補に変換できます（保存で確定）';
-    });
     body.querySelector('#refImgClear').addEventListener('click', function () { pending.img = ''; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を消しました（保存で確定）'; });
     body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
     body.querySelector('#refImgSave').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
       var workRaw = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
-      // 作品URLが入っていれば、Twitterのみ候補を作品候補へ変換（Twitter URL・画像・メモは引き継ぐ）。
-      if (isTw && workRaw) {
-        body.querySelector('#refImgMsg').textContent = '⏳ 作品候補に変換中…';
-        convertTwitterToWork_(it, workRaw, pending, function (ok, err) {
+      // 作品URL欄が空、またはプレフィル値から変更が無ければ何もしない（無駄なAPI呼び出し/意図しないaddedAtリセットを防止）。
+      if (workRaw && workRaw !== workUrlPrefill) {
+        body.querySelector('#refImgMsg').textContent = isTw ? '⏳ 作品候補に変換中…' : '⏳ 作品URLを更新中…';
+        applyWorkUrl_(it, workRaw, pending, function (ok, err) {
           if (!ok) { body.querySelector('#refImgMsg').textContent = '⚠️ ' + (err || '変換できません'); return; }
-          body.querySelector('#refImgMsg').textContent = '✅ 作品候補に変換しました';
+          body.querySelector('#refImgMsg').textContent = isTw ? '✅ 作品候補に変換しました' : '✅ 作品URLを更新しました';
           if (onSaved) onSaved();
           if (_activeTab) render();
           setTimeout(function () { ov.hidden = true; }, 700);
@@ -406,8 +400,8 @@
     wirePaste_(body);
     ov.hidden = false;
   }
-  // Twitterのみ候補 → 作品候補へ変換（Twitter URL・画像・メモを新cidへ引き継ぎ、旧tw_項目を置換）。
-  function convertTwitterToWork_(oldItem, workUrlRaw, refData, cb) {
+  // 候補（Twitter起点/DMM起点どちらも）に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ（旧項目を置換）。
+  function applyWorkUrl_(oldItem, workUrlRaw, refData, cb) {
     var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(workUrlRaw) : (workUrlRaw || '').trim();
     var r = (url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
     if (!r || !r.ok) { cb(false, 'FANZAの作品URLではないようです'); return; }
@@ -417,7 +411,7 @@
     refImgSave(r.cid, { img: refData.img || '', comment: refData.comment || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '' });
     var bimg = (bskyImgOf(oldCid) || {}).img; if (bimg) bskyImgSave(r.cid, bimg);
     if (oldCid !== r.cid) { try { localStorage.removeItem(refImgKey(oldCid)); localStorage.removeItem(bskyImgKey(oldCid)); } catch (e) {} }
-    var newItem = { url: url, cid: r.cid, twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '', title: '(タイトル未取得)', addedAt: new Date().getTime() };
+    var newItem = { url: url, cid: r.cid, twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '', title: '(タイトル未取得)', addedAt: oldItem.addedAt || new Date().getTime() };
     var idx = -1; items.forEach(function (x, i) { if (x.cid === oldCid) idx = i; });
     if (idx >= 0) items[idx] = newItem; else items.unshift(newItem);
     lsSet(key, items);
@@ -506,7 +500,7 @@
         openRefImgModal_(it, function () {
           var has = refImgHas(cid);
           b.classList.toggle('has-img', has);
-          b.innerHTML = has ? '🖼 投稿画像✓' : '🖼 投稿画像';
+          b.innerHTML = has ? '🖼 投稿編集✓' : '🖼 投稿編集';
         });
       });
     });
@@ -585,7 +579,8 @@
   function priceOf(it) { return (it.price != null) ? it.price : (it.listPrice != null ? it.listPrice : Infinity); }
   function sortItems(items, mode) {
     var a = items.slice();
-    if (mode === 'price_asc') a.sort(function (x, y) { return priceOf(x) - priceOf(y) || String(y.date).localeCompare(String(x.date)); });
+    if (mode === 'added_desc') a.sort(function (x, y) { return (y.addedAt || 0) - (x.addedAt || 0); });
+    else if (mode === 'price_asc') a.sort(function (x, y) { return priceOf(x) - priceOf(y) || String(y.date).localeCompare(String(x.date)); });
     else if (mode === 'date_asc') a.sort(function (x, y) { return String(x.date).localeCompare(String(y.date)); });
     else if (mode === 'date_desc') a.sort(function (x, y) { return String(y.date).localeCompare(String(x.date)); });
     else if (mode === 'discount_desc') a.sort(function (x, y) { return (y.discountPct || 0) - (x.discountPct || 0) || String(y.date).localeCompare(String(x.date)); });
@@ -1434,7 +1429,7 @@
         '<div class="cand-actions">' +
           ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
           (it.twitterUrl ? '<a class="vlink" href="' + esc(it.twitterUrl) + '" target="_blank" rel="noopener" style="color:#1d9bf0;">🐦 X↗</a>' : '') +
-          '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿画像' + (hasRef ? '✓' : '') + '</button>' +
+          '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿編集' + (hasRef ? '✓' : '') + '</button>' +
           '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
           '<span style="flex:1 1 auto;"></span>' + // 非表示/再表示/削除ボタンを右端へ寄せる
           actionHtml +
