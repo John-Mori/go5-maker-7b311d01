@@ -18,6 +18,15 @@
   function isSecretKey(k) {
     return /(app_pw|_pw__|password|secret|token|refresh|api_key)/i.test(String(k));
   }
+  // クラウド同期しないキー：投稿履歴・手動追加・YT URL対応・各種キャッシュ・アカウント修復関連。
+  //   これらは「設定」ではなく端末の記録データ。blob経由で丸ごと巻き戻すと、アカウント修復が
+  //   取り消される再汚染ループになる（記録の正本はスプレッドシート＋各端末ローカル）。(設計P0/INC-62)
+  function isNoSyncKey(k) {
+    k = String(k);
+    return /^(short_hist__|verify_manual__|verify_yt__|bsky_did__|cand_)/.test(k)
+      || /^(delta_cache|peak_cache|clicks_cache|yt_meta_cache|fanza_title_cache)$/.test(k)
+      || /^acct_did_repair/.test(k);
+  }
 
   function $(id) { return document.getElementById(id); }
   function setStatus(msg, ok) {
@@ -75,11 +84,12 @@
   }
 
   // data オブジェクトを localStorage へ反映して再読込。skipSecrets=true で秘密キーを無視（クラウド取得用の多層防御）。
-  function applyData(data, skipSecrets, label) {
+  function applyData(data, skipSecrets, label, skipHistory) {
     var keys = Object.keys(data);
     var n = 0;
     keys.forEach(function (k) {
       if (skipSecrets && isSecretKey(k)) return;   // クラウド取得では秘密は絶対に上書きしない
+      if (skipHistory && isNoSyncKey(k)) return;   // クラウド取得では記録データ(履歴等)を上書きしない＝修復の巻き戻し防止
       try { localStorage.setItem(k, String(data[k])); n++; } catch (e) {}
     });
     setStatus("📥 " + n + "件を反映しました" + (label ? "（" + label + "）" : "") + "。ページを再読み込みします…", true);
@@ -158,7 +168,7 @@
     var dev = deviceName();
     try { if (dev) localStorage.setItem("sync_device_name", dev); } catch (e) {}
     var data = dumpStorage(false); // 秘密キー除外
-    Object.keys(data).forEach(function (k) { if (isDeviceLocalKey(k)) delete data[k]; }); // 端末固有キーは送らない
+    Object.keys(data).forEach(function (k) { if (isDeviceLocalKey(k) || isNoSyncKey(k)) delete data[k]; }); // 端末固有キー・記録データは送らない
     var blob = JSON.stringify(data);
     var n = Object.keys(data).length;
     setStatus("☁️⬆️ クラウドへ保存中…（" + n + "件 / " + blob.length + "文字）", null);
@@ -188,7 +198,7 @@
         "※アプリパスワード等の鍵はこの端末のまま維持されます（クラウドには保存されていません）。\n" +
         "よろしいですか？（取り込み後に再読み込みします）";
       if (!window.confirm(msg)) { setStatus("取得を中止しました。", null); return; }
-      applyData(data, true, "クラウド取得"); // skipSecrets=true：鍵は絶対に上書きしない
+      applyData(data, true, "クラウド取得", true); // skipSecrets=true / skipHistory=true：鍵と記録データは上書きしない
     });
   }
 

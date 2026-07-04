@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-05C（日付列のDate/文字列取り違えを修正＝今日/昨日/週の増加が計算されない不具合を解消）';
+var GAS_VERSION = '2026-07-05D（move_rowでアカウント間の行移動を追加＝誤記録の矯正用）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -216,6 +216,48 @@ function deleteRecord_(channel, postUri, short) {
   return cleared;
 }
 
+// 行をチャンネル間で移動：videoId(post_id)→post_uri→短縮URL の順で元行を特定し、目的チャンネルへ
+// 全列コピー（計算式列は式を貼り直し）＋元行をクリア。アカウント誤記録の矯正に使う。
+function moveRow_(from, to, videoId, postUri, short) {
+  if (!from || !to || from === to) return { ok: false, error: 'bad_channel' };
+  var src = getChannelSheet_(from), smap = headerMap_(src); var slast = src.getLastRow(); if (slast < 2) return { ok: false, error: 'empty_src' };
+  var keyDefs = [];
+  if (videoId && smap['post_id']) keyDefs.push([smap['post_id'], videoId]);
+  if (postUri && smap['post_uri']) keyDefs.push([smap['post_uri'], postUri]);
+  if (short && smap['短縮URL']) keyDefs.push([smap['短縮URL'], short]);
+  if (!keyDefs.length) return { ok: false, error: 'no_key' };
+  var srow = 0;
+  for (var ki = 0; ki < keyDefs.length && !srow; ki++) {
+    var col = keyDefs[ki][0], want = String(keyDefs[ki][1]);
+    var kv = src.getRange(2, col, slast - 1, 1).getValues();
+    for (var i = 0; i < kv.length; i++) { if (String(kv[i][0]) === want) { srow = i + 2; break; } }
+  }
+  if (!srow) return { ok: false, error: 'src_not_found' };
+  var headers = src.getRange(1, 1, 1, src.getLastColumn()).getValues()[0].map(String);
+  var srcVals = src.getRange(srow, 1, 1, src.getLastColumn()).getValues()[0];
+  var dst = getChannelSheet_(to), dmap = headerMap_(dst); var dlast = dst.getLastRow();
+  var vid2 = videoId || (smap['post_id'] ? srcVals[smap['post_id'] - 1] : '');
+  var target = 0;
+  if (vid2 && dmap['post_id'] && dlast >= 2) {
+    var pv = dst.getRange(2, dmap['post_id'], dlast - 1, 1).getValues();
+    for (var j = 0; j < pv.length; j++) { if (String(pv[j][0]) === String(vid2)) { target = j + 2; break; } }
+  }
+  if (!target) {
+    var ddc = dmap['投稿日時'] || 2;
+    if (dlast >= 2) { var dv = dst.getRange(2, ddc, dlast - 1, 1).getValues(); for (var k = 0; k < dv.length; k++) { if (dv[k][0] === '' || dv[k][0] === null) { target = k + 2; break; } } }
+    if (!target) target = dlast + 1;
+  }
+  setComputed_(dst, dmap, target); // 計算式列は式を貼る（値上書きしない）
+  var COMPUTED = { '曜日': 1, 'day-type': 1, '時間帯スロット': 1, '承認率%': 1, 'リンククリック率%': 1, 'CVR発生%': 1, 'CVR確定%': 1 };
+  headers.forEach(function (h, ci) {
+    if (COMPUTED[h]) return;             // 計算式列は上書きしない
+    var dc = dmap[h]; if (!dc) return;   // 目的地に無い列はスキップ
+    dst.getRange(target, dc).setValue(srcVals[ci]); // 空も含め忠実にコピー
+  });
+  src.getRange(srow, 1, 1, src.getLastColumn()).clearContent(); // 元行クリア（行は詰めない＝集計整合）
+  return { ok: true, moved: 1, from: from, to: to };
+}
+
 // 既存シートに FANZA_HEADERS を末尾追加する一回限りの移行関数。
 // <exec URL>?action=migrate_headers で呼ぶ。既に存在する列は追加しない（冪等）。
 function migrateHeaders_() {
@@ -339,6 +381,8 @@ function doPost(e) {
     if (body.op === 'sync_history') return syncHistory_(body.channel || 'acc1', body.items || []);
     // 投稿履歴の掃除（keepIds に無い post_id の行をクリア＝アプリの履歴を正にシートを揃える）。
     if (body.op === 'prune_history') return pruneHistory_(body.channel || 'acc1', body.keepIds || []);
+    // 行のアカウント間移動（誤記録の矯正）：videoId/post_uri/短縮URL で元行を特定し正チャンネルへ移す。
+    if (body.op === 'move_row') return jsonOut_(moveRow_(body.from || '', body.to || '', body.videoId || '', body.postUri || '', body.short || ''));
     // 端末間 設定同期：非秘密設定の保存（クラウドへ push）。
     if (body.op === 'settings_push') return settingsPush_(body.blob || '', body.updatedAt || '', body.device || '');
     // テストモード：シートには一切書かない（Bluesky実投稿はフロント側で実施）。

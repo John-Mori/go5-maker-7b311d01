@@ -78,17 +78,20 @@
   function didFromUri_(uri) { var m = String(uri || '').match(/^at:\/\/(did:[^/]+)/); return m ? m[1] : ''; }
   // 既知DID → acctId（未キャッシュなら空）。
   function acctOfDid_(did) { if (!did) return ''; if (acctDid_('acc1') === did) return 'acc1'; if (acctDid_('acc2') === did) return 'acc2'; return ''; }
-  // 両アカウントのDIDを（未取得なら）ハンドルから公開APIで解決してキャッシュ。cb() は必ず1回呼ぶ。
-  function ensureAcctDids_(cb) {
-    var need = ['acc1', 'acc2'].filter(function (a) { return !acctDid_(a) && handleOfAcct_(a); });
-    if (!need.length) { if (cb) cb(); return; }
+  // 両アカウントのDIDを「ハンドル(⚙設定)→resolveHandle」を正として解決・上書きする（1セッション1回）。
+  //   ハンドル解決を権威にすることで、過去にイベント由来で誤学習した bsky_did__ の汚染も治す。
+  var _didsResolved = false;
+  function ensureAcctDids_(cb, force) {
+    if (_didsResolved && !force) { if (cb) cb(); return; }
+    var need = ['acc1', 'acc2'].filter(function (a) { return handleOfAcct_(a); });
+    if (!need.length) { _didsResolved = true; if (cb) cb(); return; }
     var pend = need.length;
     need.forEach(function (a) {
       fetch('https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=' + encodeURIComponent(handleOfAcct_(a)))
         .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (j) { if (j && j.did) setAcctDid_(a, j.did); })
+        .then(function (j) { if (j && j.did) setAcctDid_(a, j.did); }) // ハンドル解決を正として上書き（汚染治癒）
         .catch(function () {})
-        .then(function () { if (--pend === 0 && cb) cb(); });
+        .then(function () { if (--pend === 0) { _didsResolved = true; if (cb) cb(); } });
     });
   }
   function loadA(base) { try { return localStorage.getItem(pk(base)); } catch (e) { return null; } }
@@ -691,9 +694,9 @@
     var account = d.account || acctId();
     var did = didFromUri_(d.post_uri);
     if (did) {
-      setAcctDid_(account, did);                 // 記録先のDIDを学習（以後の検証・修復に使う）
+      if (!acctDid_(account)) setAcctDid_(account, did); // 台帳が空の時だけ学習（権威はハンドル解決＝ensureAcctDids_）
       var byDid = acctOfDid_(did);
-      if (byDid && byDid !== account) account = byDid; // UIの取り違えをDIDで矯正
+      if (byDid && byDid !== account) account = byDid;   // UIの取り違えをDIDで矯正
     }
     var uiSame = (account === acctId());
     var vid = (meta && meta.videoId) || (uiSame ? currentVideoId : '') || '';

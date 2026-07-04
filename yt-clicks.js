@@ -613,6 +613,7 @@
           closeModal_();
           saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState);
         });
+        addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
       });
     });
   }
@@ -660,6 +661,54 @@
     try {
       fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'upsert', channel: channel, videoId: videoId, remade: !!remade }) }).catch(function () {});
     } catch (e) {}
+  }
+
+  // ── アイテムのアカウント間移動（誤って別アカウントに入った履歴/手動追加を正しい側へ）──
+  function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }
+  function loadArrFor_(base, a) { try { var x = JSON.parse(localStorage.getItem(base + '__' + a) || '[]'); return Array.isArray(x) ? x : []; } catch (e) { return []; } }
+  function saveArrFor_(base, a, arr) { try { localStorage.setItem(base + '__' + a, JSON.stringify(arr.slice(0, 200))); } catch (e) {} }
+  function loadYtMapFor_(a) { try { return JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { return {}; } }
+  function saveYtMapFor_(a, m) { try { localStorage.setItem('verify_yt__' + a, JSON.stringify(m)); } catch (e) {} }
+  function moveItemAccount_(k, it, to) {
+    var from = acct(); if (from === to) return;
+    var base = it.manual ? 'verify_manual' : 'short_hist';
+    // 元アカウントから取り出す
+    var srcArr = loadArrFor_(base, from), moved = null;
+    srcArr = srcArr.filter(function (x) { if (itemKey(x) === k) { moved = x; return false; } return true; });
+    if (!moved) moved = it;
+    saveArrFor_(base, from, srcArr);
+    // 先アカウントへ（同キー重複を除いて先頭へ）
+    var dstArr = loadArrFor_(base, to).filter(function (x) { return itemKey(x) !== k; });
+    dstArr.unshift(moved); saveArrFor_(base, to, dstArr);
+    // YouTube URL 対応（verify_yt）も一緒に移す
+    var fm = loadYtMapFor_(from), yUrl = fm[k];
+    if (yUrl) { delete fm[k]; saveYtMapFor_(from, fm); var tm = loadYtMapFor_(to); tm[k] = yUrl; saveYtMapFor_(to, tm); }
+    // スプレッドシートの行も移す（videoId/postUri/短縮URL で特定。GAS設定時のみ・best-effort）
+    var gas = gasUrl_();
+    if (gas && (moved.videoId || moved.postUri || moved.shortUrl)) {
+      fetch(gas, { method: 'POST', body: JSON.stringify({ op: 'move_row', from: from, to: to, videoId: moved.videoId || '', postUri: moved.postUri || '', short: moved.shortUrl || '' }) })
+        .then(function (r) { return r.json(); }).catch(function () { return null; });
+    }
+    setStatus('✅ 「' + (moved.title || k) + '」を ' + acctName_(to) + ' へ移動しました。' + (gas ? '' : '（シートは⚙記録用URL設定時に反映）'));
+    render();
+  }
+  // 編集モーダルへ「→ 別アカウントへ移動」ボタンを差し込む。
+  function addMoveButtonsToModal_(k, it) {
+    var ov = document.getElementById('veditOverlay'); if (!ov) return;
+    var modal = ov.querySelector('.vedit-modal'); if (!modal) return;
+    var old = modal.querySelector('.vedit-move'); if (old) old.parentNode.removeChild(old);
+    var to = acct() === 'acc1' ? 'acc2' : 'acc1';
+    var div = document.createElement('div'); div.className = 'vedit-move';
+    div.style.cssText = 'margin:8px 0 2px;padding-top:10px;border-top:1px solid var(--line);';
+    div.innerHTML = '<div class="hint" style="margin-bottom:6px;">この投稿が<b>' + acctName_(acct()) + '以外</b>のものなら、正しいアカウントの投稿履歴へ移せます。</div>' +
+      '<button type="button" class="ghost vedit-move-btn" style="width:auto;">→ ' + acctName_(to) + ' へ移動</button>';
+    var actions = modal.querySelector('.vedit-actions');
+    if (actions) modal.insertBefore(div, actions); else modal.appendChild(div);
+    div.querySelector('.vedit-move-btn').addEventListener('click', function () {
+      if (!window.confirm('「' + (it.title || k) + '」を ' + acctName_(to) + ' の投稿履歴へ移動します。\n（この端末とスプレッドシートの両方を移します）よろしいですか？')) return;
+      closeModal_();
+      moveItemAccount_(k, it, to);
+    });
   }
 
   // YouTube動画を手動で追加（モーダルで YouTube URL + Bluesky URL + 作品URL を一括入力）。
