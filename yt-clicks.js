@@ -512,7 +512,11 @@
     // YouTube公開前(非公開/予約公開)の動画一覧 → vidで引けるマップに（「投稿予定」バッジ表示用）
     var schedMap = {};
     try { loadYtSched_(acct()).forEach(function (y) { if (y && y.vid) schedMap[y.vid] = y; }); } catch (e) {}
-    list.innerHTML = items.map(function (it) {
+    // 被リビルド作品の非表示トグル（最新の投稿カードにボタンを設置。ONで被リビルド済みを一覧から除外）。
+    var hideRemadeKey = 'verify_hide_remade__' + acct();
+    var hideRemade = false; try { hideRemade = localStorage.getItem(hideRemadeKey) === '1'; } catch (e) {}
+    var visibleItems = hideRemade ? items.filter(function (it) { return !it.remade; }) : items;
+    list.innerHTML = visibleItems.map(function (it, idx) {
       var k = itemKey(it);
       var yt = ymap[k] || it.ytUrl || '';
       var vid = ytIdOf(yt);
@@ -535,10 +539,14 @@
       var bskyHref = it.shareUrl || it.shortUrl || it.postUrl || ''; // 表示リンクは共有(da.gd)優先。計測は下のcode(=r2)で行う
       // 属性バッジ（作品名の下に改行して表示。作品状態は価格行の左に別途表示）
       var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
-      // 作り直し系バッジ：rebuild=この動画自体が作り直し版 / remade=この動画は作り直されて置き換え済み
+      // 作り直し系バッジ：rebuild=この動画自体がリビルド版 / remade=この投稿は被リビルド(=リビルド版に取って代わられた)
       if (it.rebuild) tagsHtml += '<span class="vtag vtag-rebuild">🔁リビルド版</span>';
-      if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁作り直し済</span>';
+      if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
+      var hideToggleHtml = idx === 0
+        ? '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '🙈 被リビルドを非表示') + '</button>'
+        : '';
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
+        hideToggleHtml +
         (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名（改行して統一）
         '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
@@ -564,7 +572,7 @@
         '</div>' +
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + '>' + (vid ? fmtDelta_(deltaCache[vid]) : '') + '</span>' +
-          '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この動画を消して作り直した印を付ける（削除ではなく作り直しとして記録）">' + (it.remade ? '↩ 作り直しを取消' : '🔁 作り直し') + '</button>' +
+          '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける（削除ではなく記録として残す）">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
         '</div>';
@@ -586,9 +594,16 @@
       b.addEventListener('click', function () { deleteItem(b.getAttribute('data-k')); });
     });
 
-    // 作り直し（削除の代わりに「作り直し済」の印を付ける／取り消す）
+    // 作り直し（削除の代わりに「被リビルド」の印を付ける／取り消す）
     list.querySelectorAll('.vremake').forEach(function (b) {
       b.addEventListener('click', function () { toggleRemade(b.getAttribute('data-k')); });
+    });
+
+    // 被リビルド作品の非表示トグル（最新の投稿カードのみに設置）
+    var hideBtn = $('hideRemadeBtn');
+    if (hideBtn) hideBtn.addEventListener('click', function () {
+      try { localStorage.setItem(hideRemadeKey, hideRemade ? '0' : '1'); } catch (e) {}
+      refresh();
     });
 
     // サムネ → 作品詳細モーダル
@@ -651,17 +666,47 @@
     pushRemadeToGas_(target.videoId || '', next);
     refresh();
   }
-  function pushRemadeToGas_(videoId, remade) {
+  // channel省略時は現在UIのアカウント（既存の呼び出し=ボタン操作は常にUIと同じアカウントを見ているため安全）。
+  function pushRemadeToGas_(videoId, remade, channel) {
     if (!videoId) return;
     var isTest = (window.IdGen && window.IdGen.isTestId) ? window.IdGen.isTestId(videoId) : /^test-/.test(videoId);
     if (isTest) return;
     var gasUrl = ''; try { gasUrl = localStorage.getItem('bsky_gas_url') || ''; } catch (e) {}
     if (!gasUrl) return;
-    var channel = (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
+    var ch = channel || (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
     try {
-      fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'upsert', channel: channel, videoId: videoId, remade: !!remade }) }).catch(function () {});
+      fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'upsert', channel: ch, videoId: videoId, remade: !!remade }) }).catch(function () {});
     } catch (e) {}
   }
+
+  // ── 🔁リビルド連携：動画作成タブの「どの作品をリビルドするか」ピッカー・被リビルド自動反映 ──
+  //   window.Go5History として外部（bluesky.js/index.html）から使う。
+  //   listForRebuildPicker: 現在アカウントの投稿履歴を新しい順で返す（既に被リビルド済みは対象から除外）。
+  function listForRebuildPicker_() {
+    return allItems()
+      .filter(function (it) { return it.videoId && !it.remade; })
+      .map(function (it) { return { videoId: it.videoId, title: it.title || (it.manual ? '(手動追加)' : '(無題)'), ts: it.ts || 0 }; })
+      .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+  }
+  // videoIdを指定して「被リビルド」フラグ(remade)をONにする。account省略時は現在UIのアカウント。
+  //   新しい動画作成時の自動リンク付け（bluesky.js）から呼ばれるため、投稿先アカウントを明示できるようにしている。
+  function markRebuilt_(videoId, account) {
+    if (!videoId) return;
+    var a = account || acct();
+    var bases = ['short_hist', 'verify_manual'];
+    for (var i = 0; i < bases.length; i++) {
+      var arr = loadArrFor_(bases[i], a);
+      var found = false;
+      arr.forEach(function (x) { if (x.videoId === videoId) { x.remade = true; found = true; } });
+      if (found) {
+        saveArrFor_(bases[i], a, arr);
+        pushRemadeToGas_(videoId, true, a);
+        if (a === acct()) refresh();
+        return;
+      }
+    }
+  }
+  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_ }; } catch (e) {}
 
   // ── アイテムのアカウント間移動（誤って別アカウントに入った履歴/手動追加を正しい側へ）──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }

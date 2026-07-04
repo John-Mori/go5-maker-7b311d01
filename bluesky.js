@@ -53,6 +53,26 @@
   var MOVIE_ATTRS = [['chara', 'movieAttrChara'], ['jk', 'movieAttrJk'], ['gyaru', 'movieAttrGyaru'], ['isekai', 'movieAttrIsekai'], ['ai', 'movieAttrAi'], ['ol', 'movieAttrOl'], ['soshu', 'movieAttrSoshu']];
   // 動画作成タブの「リビルド(作り直し)」チェック状態。ONなら「同じ作品を作り直した動画」として記録。
   function readRebuild() { var el = $('movieRebuild'); return !!(el && el.checked); }
+  // リビルド対象として選んだ投稿履歴のvideoId（未選択なら空）。投稿履歴のGo5History.markRebuiltで「被リビルド」に自動反映する。
+  function readRebuildTarget() { var el = $('movieRebuildTarget'); return (el && el.value) || ''; }
+  // 「🔁リビルド」チェック時に、どの投稿をリビルドするか投稿履歴から選ぶピッカーを表示・選択肢を最新化する。
+  function refreshRebuildPicker_() {
+    var row = $('movieRebuildTargetRow'), sel = $('movieRebuildTarget'), cb = $('movieRebuild');
+    if (!row || !sel || !cb) return;
+    if (!cb.checked) { row.hidden = true; return; }
+    var list = (window.Go5History && window.Go5History.listForRebuildPicker) ? window.Go5History.listForRebuildPicker() : [];
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">(選択してください)</option>' + list.map(function (it) {
+      return '<option value="' + it.videoId + '">' + (it.title || '(無題)').replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }) + '</option>';
+    }).join('');
+    if (cur && list.some(function (it) { return it.videoId === cur; })) sel.value = cur;
+    row.hidden = false;
+  }
+  (function wireRebuildPicker_() {
+    var cb = $('movieRebuild'); if (!cb) return;
+    cb.addEventListener('change', refreshRebuildPicker_);
+    document.addEventListener('account-changed', function () { if (cb.checked) refreshRebuildPicker_(); });
+  })();
   function readMovieAttrs() {
     var o = {};
     MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); o[p[0]] = !!(el && el.checked); });
@@ -628,6 +648,7 @@
       attrs: readMovieAttrs(),
       workState: readWorkState(),
       rebuild: readRebuild(),
+      rebuildOf: readRebuildTarget(),              // リビルド対象として選んだ投稿履歴のvideoId
       fanzaSnap: fanzaSnapForWorkUrl_(workUrl),   // 履歴カード用（当時価格）
       fanzaInfo: fanzaInfoForWorkUrl_(workUrl) || null  // シート記録用（価格/レビュー）
     };
@@ -635,7 +656,7 @@
   // 履歴アイテムから meta を復元（過去データのアカウント矯正で使う）。
   function metaFromHistItem_(it) {
     var attrs = {}; MOVIE_ATTRS.forEach(function (p) { attrs[p[0]] = !!it[p[0]]; });
-    return { videoId: it.videoId || '', workUrl: it.workUrl || '', attrs: attrs, workState: it.workState || '', rebuild: !!it.rebuild, fanzaSnap: it.fanzaSnap || null, fanzaInfo: null };
+    return { videoId: it.videoId || '', workUrl: it.workUrl || '', attrs: attrs, workState: it.workState || '', rebuild: !!it.rebuild, rebuildOf: it.rebuildOf || '', fanzaSnap: it.fanzaSnap || null, fanzaInfo: null };
   }
 
   // record.account でチャンネルを決め、record.meta（凍結済み）優先で記録する。
@@ -651,6 +672,7 @@
     var attrs = meta ? meta.attrs : (uiSame ? readMovieAttrs() : {});
     var workState = record.workState || (meta ? meta.workState : (uiSame ? readWorkState() : ''));
     var rebuild = (record.rebuild != null) ? record.rebuild : (meta ? meta.rebuild : (uiSame ? readRebuild() : false));
+    var rebuildOf = (record.rebuildOf != null) ? record.rebuildOf : (meta ? meta.rebuildOf : (uiSame ? readRebuildTarget() : ''));
     var payload = {
       op: 'upsert', testMode: isTest, status: '公開済',
       channel: account,                                   // ★所属アカウント＝post_uriのDIDで確定した正しいチャンネル
@@ -662,6 +684,7 @@
     MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = !!attrs[p[0]]; });
     payload.workState = workState;
     payload.rebuild = rebuild;
+    if (rebuildOf) payload.rebuildOf = rebuildOf;
     var mi = meta ? meta.fanzaInfo : (uiSame ? fanzaInfoForWorkUrl_(workUrl) : null);
     if (mi) {
       payload.fanza_list_price = mi.listPrice;
@@ -939,11 +962,19 @@
       MOVIE_ATTRS.forEach(function (p) { if (attrs[p[0]]) entry[p[0]] = true; });
       entry.workState = meta ? meta.workState : (uiSame ? readWorkState() : '旧作'); // 投稿時の作品状態
       var rb = meta ? meta.rebuild : (uiSame ? readRebuild() : false); if (rb) entry.rebuild = true;
-      if (uiSame) { var rbEl = $('movieRebuild'); if (rbEl) rbEl.checked = false; } // UIと同じ時だけ一度きりフラグをOFF
+      var rbOf = meta ? meta.rebuildOf : (uiSame ? readRebuildTarget() : ''); if (rb && rbOf) entry.rebuildOf = rbOf;
+      if (uiSame) {
+        var rbEl = $('movieRebuild'); if (rbEl) rbEl.checked = false; // UIと同じ時だけ一度きりフラグをOFF
+        var rbRow = $('movieRebuildTargetRow'), rbSel = $('movieRebuildTarget');
+        if (rbSel) rbSel.value = ''; if (rbRow) rbRow.hidden = true;
+      }
     }
     a.unshift(entry);
     histSaveFor_(account, a);
     if (uiSame && els.histList) renderHistory(a); // 現在UIの履歴だけ即描画（他アカウントは切替時に反映）
+    // リビルド対象を選んでいたら、その投稿履歴に「被リビルド」の印を自動で付ける。
+    //   ★上のhistSaveFor_の後に呼ぶこと＝先に呼ぶと、その変更が上書き保存(a=更新前のスナップショット)で消える。
+    if (!rec.manualOnly && rb && rbOf) { try { window.Go5History && window.Go5History.markRebuilt(rbOf, account); } catch (e) {} }
   }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
   function loadHistory() { if (els.histList) renderHistory(histLoad()); }

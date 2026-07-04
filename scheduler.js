@@ -90,7 +90,7 @@
     function renderList() {
       var el = document.getElementById('reserveList');
       if (!el) return;
-      var pend = queue.filter(function (it) { return it.status === 'pending'; });
+      var pend = queue.filter(function (it) { return it.status === 'pending' && it.scheduledAtMs > Date.now(); }); // 予約時刻を過ぎたら表示から消す
       if (!pend.length) { el.hidden = true; el.innerHTML = ''; return; }
       el.hidden = false;
       el.innerHTML = '<div class="rsv-title">⏰ 予約中（このタブを開いている間に自動投稿）</div>' +
@@ -133,7 +133,7 @@
     function renderTab() {
       var el = document.getElementById('pageReserve');
       if (!el) return;
-      var pend = queue.filter(function (it) { return it.status === 'pending'; });
+      var pend = queue.filter(function (it) { return it.status === 'pending' && it.scheduledAtMs > Date.now(); }); // 予約時刻を過ぎたら表示から消す
       // 予約時刻の早い順。同時刻は acc1（月詠み）が先
       pend.sort(function (a, b) {
         if (a.scheduledAtMs !== b.scheduledAtMs) return a.scheduledAtMs - b.scheduledAtMs;

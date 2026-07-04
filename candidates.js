@@ -45,6 +45,14 @@
     var cls = ws === '新作' ? 'fp-state-new' : (ws === '準新作' ? 'fp-state-semi' : 'fp-state-old');
     return '<span class="fp-state ' + cls + '">' + esc(ws) + '</span>';
   }
+  // 作品URLのホストで判定：book.dmm.(com|co.jp) = FANZA Books、それ以外(dmm.co.jp同人等) = 同人(コミックス)。
+  function workKindOf_(url) { return /book\.dmm\.(com|co\.jp)/i.test(url || '') ? 'Books' : '同人'; }
+  function workKindBadgeHtml_(url) {
+    var kind = workKindOf_(url);
+    return '<span class="fp-kind ' + (kind === 'Books' ? 'fp-kind-books' : 'fp-kind-doujin') + '">' + kind + '</span>';
+  }
+  // ジャンルタグに「AI」を含むものがあれば AI 作品とみなす（わかる範囲のベストエフォート判定）。
+  function isAiWork_(genres) { return (genres || []).some(function (g) { return /AI/i.test(String(g || '')); }); }
 
   // ── 保存キー ──
   var K_ITEMS = 'cand_items';   // 候補リスト(共通): [{url,cid,title,author,thumb,listPrice,price,discountPct,addedAt}]
@@ -58,6 +66,7 @@
   var _activeTab = 'main'; // 'main' | サークルタブid
   var _sort = 'added_desc';
   var _showHidden = false;
+  var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
   // 並べ替え対象外の固定タブ（🦋バズ・💡候補）。左端の2つは動かさない。
   function isFixedCandTab_(id) { return id === 'main' || id === 'buzz'; }
@@ -614,6 +623,7 @@
     }).catch(function () { cb(null, '通信エラー'); });
   }
   function priceOf(it) { return (it.price != null) ? it.price : (it.listPrice != null ? it.listPrice : Infinity); }
+  function isOnSale_(it) { return !!(it && it.listPrice && it.price && it.discountPct > 0 && it.price < it.listPrice); }
   function sortItems(items, mode) {
     var a = items.slice();
     if (mode === 'added_desc') a.sort(function (x, y) { return (y.addedAt || 0) - (x.addedAt || 0); });
@@ -949,7 +959,8 @@
         var byDid = {};
         lists.forEach(function (arr) { (arr || []).forEach(function (f) { if (f && f.did && !byDid[f.did]) byDid[f.did] = f; }); });
         valid.forEach(function (d) { delete byDid[d]; }); // 自分自身は除外
-        var follows = Object.keys(byDid).map(function (d) { return byDid[d]; });
+        var BUZZ_EXCLUDE_HANDLES = { 'bsky.app': true, 'jp.bsky.app': true }; // Bluesky公式アカウントは対象外
+        var follows = Object.keys(byDid).map(function (d) { return byDid[d]; }).filter(function (f) { return !BUZZ_EXCLUDE_HANDLES[f.handle]; });
         var targets = follows.slice(0, BUZZ_MAX_FEEDS);
         var truncated = follows.length > targets.length;
         var cutoff = new Date().getTime() - BUZZ_RECENT_DAYS * 86400000;
@@ -1071,6 +1082,7 @@
       (isMain ? '' : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
       '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
       '</div>' +
+      '<label class="cand-filter-sale"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中の作品のみ表示</span></label>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
       ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
       '</div>';
@@ -1092,6 +1104,7 @@
     body.innerHTML = header + '<div id="candEditForm"></div>' + addCard + '<div id="candList"></div>';
     $('candSort').addEventListener('change', function () { _sort = this.value; renderCandList(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderCandList(tabId); });
+    $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderCandList(tabId); });
     $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
     bindPcRun_($('candPcRun'), 'candList');
     $('candAdd').addEventListener('click', function () { addCandidate(tabId); });
@@ -1242,7 +1255,7 @@
     var all = lsGet(key, '[]');
     if (!all.length) { el.innerHTML = '<p class="hint" style="padding:4px 6px;">まだ候補がありません。上の欄に作品URLを入れて追加してください。</p>'; return; }
     var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
-    var arr = sortItems(all, _sort).filter(function (it) { return _showHidden ? hset[it.cid] : !hset[it.cid]; });
+    var arr = sortItems(all, _sort).filter(function (it) { return (_showHidden ? hset[it.cid] : !hset[it.cid]) && (!_filterSale || isOnSale_(it)); });
     _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
     if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる候補がありません。') + '</p>'; return; }
     var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
@@ -1290,6 +1303,7 @@
       '<button id="candEditTab" type="button" class="ghost" title="タブ名・サークルを編集" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
       '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
       '</div>' +
+      '<label class="cand-filter-sale"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中の作品のみ表示</span></label>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
       ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
       '</div>' +
@@ -1297,6 +1311,7 @@
       '<div id="candMakerList"><p class="hint" style="padding:8px;">' + (force ? '🔁 全件を取り直しています…' : '⏳ サークルの作品を取得中…') + '</p></div>';
     $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
+    $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderMaker(tabId); });
     $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
     bindPcRun_($('candPcRun'), 'candMakerList');
     $('candEditTab').addEventListener('click', function () { showEditTabForm(tab); });
@@ -1313,7 +1328,7 @@
       }
       var hidden = lsGet(hiddenKey(tabId), '[]');
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
-      var arr = sortItems(items, _sort).filter(function (it) { return _showHidden ? hset[it.cid] : !hset[it.cid]; });
+      var arr = sortItems(items, _sort).filter(function (it) { return (_showHidden ? hset[it.cid] : !hset[it.cid]) && (!_filterSale || isOnSale_(it)); });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる作品がありません。') + '</p>'; return; }
       _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
       // 実売本数(販売数)を先頭60件ぶん取得（未取得はPC取得キューへ自動登録）。反映されたら再描画。
@@ -1414,7 +1429,7 @@
 
   // 作品カード（候補/サークル共通・縦並び）。actionHtml=右下のボタン(削除/非表示/再表示)。
   function candCard(it, actionHtml) {
-    var sale = it.listPrice && it.price && it.discountPct > 0 && it.price < it.listPrice;
+    var sale = isOnSale_(it);
     var priceHtml = sale
       ? '<span class="cand-list-price">' + yen(it.listPrice) + '</span> <b class="cand-sale">' + yen(it.price) + '</b> <span class="cand-off">' + it.discountPct + '%off</span>'
       : '<b>' + yen(it.price != null ? it.price : it.listPrice) + '</b>';
@@ -1423,7 +1438,7 @@
     if (it.date) sub.push('発売 ' + esc(fmtDate(it.date)));
     if (it.addedAt) sub.push('追加 ' + esc(fmtTs(it.addedAt)));
     var ws = deriveWorkState_(it.date);
-    var badgesHtml = ws ? stateBadgeHtml_(ws) : '';
+    var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '');
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';

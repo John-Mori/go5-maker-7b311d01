@@ -87,6 +87,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 /* ── 検証ダッシュボード（Phase4） ── */
 .vrow{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;}
 .vrow-thumb{position:absolute;top:8px;right:10px;width:66px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;z-index:1;}
+.vhide-remade-btn{position:absolute;top:4px;right:4px;z-index:2;width:auto;margin:0;font-size:9.5px;font-weight:700;line-height:1;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:#0e1422;color:var(--sub);cursor:pointer;white-space:nowrap;}
+.vhide-remade-btn:active{opacity:.7;}
 .vrow-thumb:active{opacity:.7;}
 .vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:baseline;flex-wrap:nowrap;gap:6px;padding-right:84px;min-width:0;}
 .vrow-author{margin-left:2ch;font-size:.78rem;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;}
@@ -114,6 +116,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-h .vtag-scheduled,.vtag-scheduled{color:#e8b31f;border-color:#e8b31f;font-weight:700;}  /* YouTube予約公開の「投稿予定」 */
 
 /* ── 💡候補タブ（クリーム面・作品候補メモ＋サークル作品一覧） ── */
+.cand-filter-sale{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;color:var(--sub);cursor:pointer;}
+.cand-filter-sale input{width:18px;height:18px;flex-shrink:0;margin:0;accent-color:var(--accent);}
 .cand-tabs{display:flex;gap:6px;padding:10px 2px 0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;border-bottom:1px solid var(--line);}
 .cand-tabs::-webkit-scrollbar{display:none;}
 .cand-tab{flex:0 0 auto;width:auto;white-space:nowrap;font-family:inherit;font-size:13.5px;font-weight:700;background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:12px 12px 0 0;padding:9px 13px;cursor:pointer;margin-top:0;}
@@ -215,6 +219,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .fp-state-semi{color:#5bb8ae;border-color:#5bb8ae;}
 .fp-state-old{color:#b08968;border-color:#b08968;background:rgba(176,137,104,.12);}
 .fp-state-snap{color:var(--sub);border-color:var(--line);background:transparent;}
+.fp-kind{font-size:.68rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 6px;margin-right:6px;white-space:nowrap;}
+.fp-kind-books{color:#5b8fd6;border-color:#5b8fd6;}
+.fp-kind-doujin{color:#b56db0;border-color:#b56db0;}
+.fp-kind-ai{color:#4d9fff;border-color:#4d9fff;}
 .fanza-price-row .fp-cur{color:var(--ink);font-weight:700;}
 .fanza-snap-row{font-size:.74rem;color:var(--sub);padding:0 0 1px 2px;font-variant-numeric:tabular-nums;}
 .fanza-snap-row .fp-snap-off{border:1px solid currentColor;border-radius:4px;padding:0 5px;font-weight:700;font-size:.66rem;white-space:nowrap;}
