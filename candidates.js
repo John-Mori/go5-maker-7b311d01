@@ -345,13 +345,13 @@
       '<input id="refImgComment" type="text" class="cand-refimg-line" autocomplete="off" placeholder="コメント">' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter URL</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
-        '<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#111;font-size:11px;padding:2px 6px;white-space:nowrap;flex:0 0 auto;">貼り付け</button>' +
+        '<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;min-width:0;">' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#111;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
-      '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;">作品URLもしくはアフィリンク付き作品URLを貼ると、正式な作品URLに自動変換されます</label>' +
+      '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;white-space:nowrap;">アフィリンク付き作品URLを貼ると、正式な作品URLに自動変換</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
-        '<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#111;font-size:11px;padding:2px 6px;white-space:nowrap;flex:0 0 auto;">貼り付け</button>' +
+        '<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;min-width:0;">' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#111;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button id="refImgSave" type="button" class="primary" style="flex:1;">保存</button>' +
