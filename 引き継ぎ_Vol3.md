@@ -12,10 +12,10 @@
 
 | 項目 | 状態 |
 |---|---|
-| 公開バージョン(live) | **`?v=192`**（`https://john-mori.github.io/go5-maker-7b311d01/`） |
+| 公開バージョン(live) | **`?v=193`**（`https://john-mori.github.io/go5-maker-7b311d01/`） |
 | GAS_VERSION | **`2026-07-05G`**（`?ping=1` で照合可） |
 | ブランチ / 作業ツリー | `main` / **クリーン（未コミットなし）** |
-| 直近コミット | `8b48279 投稿画像/Bluesky画像: 画像貼り付け＋Twitter候補の作品変換 (v192)` |
+| 直近コミット | `39715fe 🦋バズタブ: フォロー中Blueskyのバズ投稿をエンゲージメント順に表示 (v193)` |
 | デプロイ | GitHub Pages（`.nojekyll` でJekyll無効化済＝INC-66）。反映確認は `curl .../index.html?cb=<ts> \| grep 'candidates.js?v='` |
 
 **機密ファイル（絶対にコミットしない）**：`scripts/scrape_config.json` / `scripts/gas_deploy_config.json`（adminSecret/sharedSecret/execUrl）は `.gitignore` 済。追跡されているのは `*.example.json` のみ。
@@ -42,16 +42,17 @@
 
 ## 2. Vol.3 への持ち越しタスク（未着手）
 
-### 2-1. 🦋 バズタブ（このセッションで巻き戻し済＝要再実装）
-親候補タブの左端に「🦋 バズ」タブを設け、**月詠み/宵桜がフォローしているBlueskyアカウントの投稿をエンゲージメント順に並べる**機能。Vol.2末に着手したが未完成（`renderBuzz()`未実装＝押すとJSエラー）のため **巻き戻し済（v192＝クリーン）**。Vol.3で腰を据えて実装する。
+### 2-1. 🦋 バズタブ ✅ 実装済（v193 / commit 39715fe）
+親候補タブの左端に固定「🦋 バズ」タブを新設し、**月詠み/宵桜がフォローしているBlueskyアカウントの投稿をエンゲージメント順に並べる**機能を再実装・公開済。ブラウザ実機で resolveHandle→getFollows→getAuthorFeed→60件をエンゲージメント降順で描画・リンク動作・JSエラー無しを確認済。
 
-実装メモ（Bluesky公開API・認証不要・CORS可 `public.api.bsky.app/xrpc/`）：
-- `resolveHandle` で acc1/acc2 のDID取得（`bsky_did__acc1/acc2` に既存）。
-- `app.bsky.graph.getFollows?actor=<did>&limit=100&cursor=` をページング取得 → **DIDでunion＋重複削除**（両方がフォローするアカウントの二重表示を防ぐ）。
-- 各フォロー先の `app.bsky.feed.getAuthorFeed?actor=<did>` で最近の投稿取得。
-- **エンゲージメント = likes+reposts+replies+quotes** の降順で並べる。※**Blueskyはインプレッション(表示回数)を公開していない**ため、エンゲージメントが唯一の代理指標。UIでもその旨を明示する。
-- TTLキャッシュ＋🔁更新。**API呼び出し数に上限・並列数制限**を必ず入れる（フォロー数×フィードで膨らむ）。
-- 触るのは `candidates.js`（タブボタン `data-ct="buzz"`、render dispatch、`reorderable()` からbuzz除外、`renderBuzz()`本体）＋ `style.css`。巻き戻したので**タブボタン等も再度追加が必要**。
+実装内容（`candidates.js` §🦋バズタブ ＋ `style.css` `.buzz-*`）：
+- Bluesky公開API（未認証・CORS可 `public.api.bsky.app/xrpc/`）のみ。`bsky_handle__acc1/acc2`／`bsky_did__acc1/acc2` を直読み。DID欠落時のみ `resolveHandle` で解決・保存。
+- `getFollows` をページング（`BUZZ_FOLLOW_PAGES=3`＝最大300/アカ）→ **DIDでunion＋重複削除**、自分自身も除外。
+- 各フォロー先 `getAuthorFeed`（`filter=posts_no_replies`・`limit=15`）。リポスト(reason付き)は除外＝本人投稿のみ。直近`BUZZ_RECENT_DAYS=14`日で絞る。
+- **エンゲージメント = like+repost+reply+quote** の降順。**インプレッション非公開**の旨をUIヘッダに明示。
+- API量の上限：`BUZZ_MAX_FEEDS=120`（超過時は「上位120人」注記）／並列プール `BUZZ_CONCURRENCY=5`／`BUZZ_TTL=30分`キャッシュ（`cand_buzz_cache`・対象集合キーで判定）＋🔁で強制更新。表示`BUZZ_SHOW=60`。
+- 固定タブ判定は `isFixedCandTab_(id)`（`main`/`buzz`）で `reorderable()`・ドラッグ・`commitTabOrder_` から除外。
+- 調整余地（将来）：日数/件数/並列の各定数はファイル冒頭にまとめてある。画像embedはサムネのみ表示（モーダルは未配線）。
 
 ### 2-2. アプリ外Bluesky投稿の自動取り込み（要否をChamiに確認してから）
 「各アカウントがBlueskyに投稿したらURLを取得・登録しクリック監視」について：
