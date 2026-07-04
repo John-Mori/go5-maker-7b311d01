@@ -260,7 +260,10 @@
         '<p class="vedit-title" id="veditTitle">URL を編集</p>' +
         '<p class="vedit-error" id="veditError" hidden></p>' +
         '<label class="vedit-field">YouTube URL' +
-          '<input id="veditYt" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…（省略可）">' +
+          '<div class="vedit-bsky-row">' +
+            '<input id="veditYt" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…（省略可）">' +
+            '<button id="veditYtPaste" type="button" class="vedit-copy">貼り付け</button>' +
+          '</div>' +
         '</label>' +
         '<label class="vedit-field">Bluesky 投稿URL（計測用の短縮URL）' +
           '<div class="vedit-bsky-row">' +
@@ -270,7 +273,10 @@
         '</label>' +
         '<div id="veditGenResult" class="vedit-gen-result" hidden></div>' +
         '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
-          '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
+          '<div class="vedit-bsky-row">' +
+            '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
+            '<button id="veditWorkCopy" type="button" class="vedit-copy">コピー</button>' +
+          '</div>' +
         '</label>' +
         '<div class="vedit-attrs">' +
           '<div class="vedit-attrs-title">カテゴリ（複数選択可・キャラ無し＝オリジナル）</div>' +
@@ -308,6 +314,26 @@
           navigator.clipboard.writeText(v).then(ok, function () { copyFallback_(inp, ok); });
         } else { copyFallback_(inp, ok); }
       } catch (e) { copyFallback_(inp, ok); }
+    });
+    // 作品URLのコピー（Blueskyのコピーと同じ挙動）。
+    $('veditWorkCopy').addEventListener('click', function () {
+      var inp = $('veditWork'); if (!inp) return;
+      var v = (inp.value || '').trim(); if (!v) return;
+      var btn = this, orig = btn.textContent;
+      function ok() { btn.textContent = '✓'; setTimeout(function () { btn.textContent = orig; }, 1200); }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(v).then(ok, function () { copyFallback_(inp, ok); });
+        } else { copyFallback_(inp, ok); }
+      } catch (e) { copyFallback_(inp, ok); }
+    });
+    // YouTube URLの貼り付け（クリップボードの文字列を入れる）。
+    $('veditYtPaste').addEventListener('click', function () {
+      var inp = $('veditYt'); if (!inp) return;
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function (t) { inp.value = (t || '').trim(); inp.focus(); })
+          .catch(function () { inp.focus(); alert('クリップボードを読み取れませんでした。入力欄を長押しして貼り付けてください。'); });
+      } else { inp.focus(); alert('この環境ではボタン貼り付けに未対応です。入力欄を長押しして貼り付けてください。'); }
     });
     $('veditSave').addEventListener('click', function () {
       if (typeof _saveCb !== 'function') return;

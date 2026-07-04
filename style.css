@@ -268,7 +268,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .vedit-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--sub);margin-bottom:12px;}
 .vedit-field input,.vedit-field select{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);width:100%;box-sizing:border-box;}
 .vedit-bsky-row{display:flex;gap:8px;align-items:stretch;}
-.vedit-bsky-row #veditBsky{flex:3 1 0;min-width:0;}
+.vedit-bsky-row #veditBsky,.vedit-bsky-row #veditYt,.vedit-bsky-row #veditWork{flex:3 1 0;min-width:0;}
 .vedit-copy{flex:1 1 0;font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-weight:700;cursor:pointer;white-space:nowrap;width:auto;margin-top:0;}
 .vedit-copy:active{opacity:.7;}
 .vedit-chara{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);margin:0 0 14px;cursor:pointer;}
