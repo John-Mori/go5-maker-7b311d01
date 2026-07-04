@@ -540,6 +540,10 @@
     el.querySelectorAll('[data-thumbcid]').forEach(function (im) {
       im.addEventListener('click', function () { openThumbModal_(itemByCid_(im.getAttribute('data-thumbcid'))); });
     });
+    // 保存済みの動画生成用画像（サムネ下の縦長画像）：タップで拡大プレビュー。
+    el.querySelectorAll('[data-refimgview]').forEach(function (im) {
+      im.addEventListener('click', function () { var r = refImgOf(im.getAttribute('data-refimgview')); if (r && r.img) openImgZoom_([r.img], 0); });
+    });
     el.querySelectorAll('[data-refimg]').forEach(function (b) {
       b.addEventListener('click', function () {
         var cid = b.getAttribute('data-refimg'), it = itemByCid_(cid); if (!it) return;
@@ -1469,8 +1473,13 @@
     }
     var hasRef = refImgHas(it.cid);
     var hasBsky = bskyImgHas(it.cid);
+    var refData = refImgOf(it.cid);
+    var refImgSrc = (refData && refData.img) ? refData.img : ''; // 動画生成用に保存した画像（縦長）
     return '<div class="cand-card">' +
-      (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
+      '<div class="cand-thumbcol">' +
+        (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
+        (refImgSrc ? '<img class="cand-refimg-thumb" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大）">' : '') +
+      '</div>' +
       '<div class="cand-info">' +
         (badgesHtml ? '<div style="margin-bottom:3px;">' + badgesHtml + '</div>' : '') +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
