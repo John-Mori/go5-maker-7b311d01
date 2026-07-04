@@ -330,25 +330,28 @@
     var workUrlPrefill = isTw ? '' : (it.url || ''); // DMM起点は現行の正式作品URLをプレフィル（Twitter起点はit.urlがポストURLなので空欄）
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
-      '<div class="fz-title">🖼 ' + esc(it.title || it.cid) + '</div>' +
-      '<div class="hint" style="margin-bottom:8px;">この作品に関連する画像を<b>1枚</b>保存できます。作品用の画像を生成するときの<b>元画像</b>として使えます。</div>' +
+      '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">' + esc(it.title || it.cid) + '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+        '<span class="hint" style="margin:0;flex:1;">動画生成用の画像</span>' +
+        '<button id="refImgToMovie" type="button" class="primary" style="width:auto;margin:0;flex:0 0 auto;font-size:13px;padding:8px 14px;">動画生成へ</button>' +
+      '</div>' +
       '<div id="refImgPreview" class="cand-refimg-preview"></div>' +
       '<div class="cand-img-btnrow">' +
-        '<label class="ghost cand-refimg-pick">🖼 画像を選ぶ<input id="refImgFile" type="file" accept="image/*" style="display:none;"></label>' +
-        '<button id="refImgPaste" type="button" class="ghost">📋 画像を貼り付け</button>' +
-        '<button id="refImgClear" type="button" class="ghost cand-img-clear">消す</button>' +
+        '<label class="ghost cand-refimg-pick">画像を選ぶ<input id="refImgFile" type="file" accept="image/*" style="display:none;"></label>' +
+        '<button id="refImgPaste" type="button" class="ghost" style="background:#fffef9;color:#111;border-color:#d8d2bf;">画像を貼り付け</button>' +
+        '<button id="refImgClear" type="button" class="ghost cand-img-clear" style="background:#fffef9;color:#111;border-color:#d8d2bf;">消す</button>' +
       '</div>' +
       '<label class="hint" style="display:block;margin-bottom:2px;">コメント</label>' +
       '<input id="refImgComment" type="text" class="cand-refimg-line" autocomplete="off" placeholder="コメント">' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter URL</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;font-size:11px;padding:3px 9px;white-space:nowrap;flex:0 0 auto;">貼り付け</button>' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#111;font-size:11px;padding:2px 6px;white-space:nowrap;flex:0 0 auto;">貼り付け</button>' +
       '</div>' +
       '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;">作品URLもしくはアフィリンク付き作品URLを貼ると、正式な作品URLに自動変換されます</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;font-size:10px;padding:0 9px;white-space:nowrap;flex:0 0 auto;">📋 貼り付け</button>' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#111;font-size:11px;padding:2px 6px;white-space:nowrap;flex:0 0 auto;">貼り付け</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button id="refImgSave" type="button" class="primary" style="flex:1;">保存</button>' +
@@ -361,20 +364,35 @@
     body.querySelector('#refImgTwitter').value = pending.twitterUrl;
     body.querySelector('#refImgFile').addEventListener('change', function () {
       var f = this.files && this.files[0]; if (!f) return;
-      body.querySelector('#refImgMsg').textContent = '⏳ 画像を処理中…';
+      body.querySelector('#refImgMsg').textContent = '画像を処理中…';
       fileToScaledDataUrl(f, function (durl, err) {
-        if (err) { body.querySelector('#refImgMsg').textContent = '⚠️ ' + err; return; }
+        if (err) { body.querySelector('#refImgMsg').textContent = err; return; }
         pending.img = durl; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を差し替えました（保存で確定）';
       });
     });
     body.querySelector('#refImgPaste').addEventListener('click', function () {
-      body.querySelector('#refImgMsg').textContent = '⏳ 画像を貼り付け中…';
+      body.querySelector('#refImgMsg').textContent = '画像を貼り付け中…';
       pasteImageFromClipboard_(function (durl, err) {
-        if (err) { body.querySelector('#refImgMsg').textContent = '⚠️ ' + err; return; }
+        if (err) { body.querySelector('#refImgMsg').textContent = err; return; }
         pending.img = durl; drawPreview(); body.querySelector('#refImgMsg').textContent = 'コピー画像を貼り付けました（保存で確定）';
       });
     });
-    body.querySelector('#refImgClear').addEventListener('click', function () { pending.img = ''; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を消しました（保存で確定）'; });
+    body.querySelector('#refImgClear').addEventListener('click', function () {
+      if (!pending.img) { pending.img = ''; drawPreview(); return; }
+      if (!window.confirm('本当に画像を削除しますか？')) return;
+      pending.img = ''; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を消しました（保存で確定）';
+    });
+    // 動画生成へ：このモーダルの作品データを動画作成タブへ引き継いで移動する。
+    body.querySelector('#refImgToMovie').addEventListener('click', function () {
+      pending.comment = body.querySelector('#refImgComment').value || '';
+      pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
+      var workVal = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
+      var workUrl = workVal ? (window.normalizeWorkUrl ? window.normalizeWorkUrl(workVal) : workVal) : '';
+      refImgSave(it.cid, pending); // 画像・コメントを失わないよう保存（best-effort）
+      transferToMovie_(it, pending.img, pending.comment, workUrl);
+      if (onSaved) onSaved();
+      ov.hidden = true;
+    });
     body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
     body.querySelector('#refImgSave').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
@@ -382,23 +400,42 @@
       var workRaw = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
       // 作品URL欄が空、またはプレフィル値から変更が無ければ何もしない（無駄なAPI呼び出し/意図しないaddedAtリセットを防止）。
       if (workRaw && workRaw !== workUrlPrefill) {
-        body.querySelector('#refImgMsg').textContent = isTw ? '⏳ 作品候補に変換中…' : '⏳ 作品URLを更新中…';
+        body.querySelector('#refImgMsg').textContent = isTw ? '作品候補に変換中…' : '作品URLを更新中…';
         applyWorkUrl_(it, workRaw, pending, function (ok, err) {
-          if (!ok) { body.querySelector('#refImgMsg').textContent = '⚠️ ' + (err || '変換できません'); return; }
-          body.querySelector('#refImgMsg').textContent = isTw ? '✅ 作品候補に変換しました' : '✅ 作品URLを更新しました';
+          if (!ok) { body.querySelector('#refImgMsg').textContent = (err || '変換できません'); return; }
+          body.querySelector('#refImgMsg').textContent = isTw ? '作品候補に変換しました' : '作品URLを更新しました';
           if (onSaved) onSaved();
           if (_activeTab) render();
           setTimeout(function () { ov.hidden = true; }, 700);
         });
         return;
       }
-      if (!refImgSave(it.cid, pending)) { body.querySelector('#refImgMsg').textContent = '⚠️ 保存できません（端末の保存容量が不足。画像を消すか小さくしてください）'; return; }
-      body.querySelector('#refImgMsg').textContent = '✅ 保存しました';
+      if (!refImgSave(it.cid, pending)) { body.querySelector('#refImgMsg').textContent = '保存できません（端末の保存容量が不足。画像を消すか小さくしてください）'; return; }
+      body.querySelector('#refImgMsg').textContent = '保存しました';
       if (onSaved) onSaved();
       setTimeout(function () { ov.hidden = true; }, 600);
     });
     wirePaste_(body);
     ov.hidden = false;
+  }
+  // 動画作成タブへ切替え、候補の作品データ（前景画像/作者/コメント/作品URL）を各入力欄へ埋め込む。
+  //   ※drafts.js の applyDraft_ と同じ手法：#author/#top/#movieWorkUrl を値+イベントで設定、
+  //     前景画像は data-URL→File にして window.Go5SetForegroundFile() で #photo に反映。
+  function transferToMovie_(it, imgDataUrl, comment, workUrl) {
+    var mv = document.getElementById('tabMovie'); if (mv) mv.click(); // affiliate.js の showTab へ委譲
+    function setVal(id, val, evt) {
+      var el = document.getElementById(id);
+      if (el && val != null) { el.value = val; el.dispatchEvent(new Event(evt || 'change', { bubbles: true })); }
+    }
+    setVal('author', it.author || '', 'change');   // 作者＝サークル名
+    setVal('top', comment || '', 'change');         // コメント（無ければ空＝作品名は入れない）
+    if (workUrl) setVal('movieWorkUrl', workUrl, 'input'); // 作品URL（正規化済み）
+    if (imgDataUrl && window.Go5SetForegroundFile) {
+      fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
+        window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }));
+      }).catch(function () {});
+    }
+    try { window.scrollTo(0, 0); } catch (e) {}
   }
   // 候補（Twitter起点/DMM起点どちらも）に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ（旧項目を置換）。
   function applyWorkUrl_(oldItem, workUrlRaw, refData, cb) {
