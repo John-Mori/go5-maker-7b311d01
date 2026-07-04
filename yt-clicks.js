@@ -1259,7 +1259,18 @@
     });
   });
   // 📥 シートから投稿履歴を復元（非破壊）。誤って別アカウントへ入った分は現アカウントへ戻す。
+  // ★静的HTMLは ?v= でキャッシュ破棄できず、端末に古いHTMLが残るとボタンが出ないことがある。
+  //   そのためJS(=?v=で更新される)側で、ボタンが無ければツールバーへ動的生成して確実に出す。
   var rh = $('ytRestoreHist');
+  if (!rh) {
+    var _bar = document.querySelector('.vlist-actions');
+    if (_bar) {
+      rh = document.createElement('button');
+      rh.id = 'ytRestoreHist'; rh.type = 'button'; rh.className = 'ghost'; rh.textContent = '📥 シートから投稿履歴を復元';
+      var _anchor = $('ytRepairAcct');
+      if (_anchor && _anchor.parentNode === _bar) _bar.insertBefore(rh, _anchor.nextSibling); else _bar.appendChild(rh);
+    }
+  }
   if (rh) rh.addEventListener('click', function () {
     if (!window.confirm(acctName_(acct()) + ' の投稿履歴を、記録スプレッドシートから復元します。\n・別アカウントへ誤って入った投稿を ' + acctName_(acct()) + ' へ戻します\n・端末に無い投稿はシートから復活します\n（既にある投稿は消しません）\nよろしいですか？')) return;
     setStatus('📥 シートから投稿履歴を復元中…');
