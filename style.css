@@ -443,26 +443,29 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* U-2 一気に作成：候補から流し込み後、作成ボタンを一時的に強調（残り1タップの誘導） */
 .cta-ready-pulse{animation:ctaReadyPulse 0.8s ease-in-out 3;}
 @keyframes ctaReadyPulse{0%,100%{box-shadow:0 0 0 0 rgba(43,179,192,0);}50%{box-shadow:0 0 0 5px rgba(43,179,192,.55);}}
-/* バッジ行：新作/同人バッジ＋チャンネル表記を同じ行に並べる（省スペース） */
+/* バッジ行：新作/同人バッジ（左）＋チャンネル表記（右寄せ）を同じ行に（省スペース） */
 .cand-badges-row{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-bottom:3px;}
-/* チャンネル表記のpill（fp-kind/fp-stateと同サイズ）。月詠み(acc1)=紫×金 / 宵桜艶帖(acc2)=ワイン×桜 */
+.cand-acct-group{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:5px;}
+/* チャンネル表記のpill（fp-kind/fp-stateと同サイズ）。月詠み(acc1)=紫 / 宵桜艶帖(acc2)=ワイン */
 .cand-acct-pill{font-size:.68rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 6px;white-space:nowrap;line-height:1.7;display:inline-flex;align-items:center;gap:3px;}
 .cand-acct-pill.cand-acct-acc1{color:#8a6fb8;border-color:#8a6fb8;}
 .cand-acct-pill.cand-acct-acc2{color:#c76b93;border-color:#c76b93;}
 /* 未投稿：淡色・ボタン化しない（クリック無効） */
 .cand-acct-pill.notposted{opacity:.5;background:transparent;cursor:default;}
-/* 投稿済み：テーマ色で塗り＋✔・タップ可（詳細モーダルを開く） */
+/* 投稿済み：文字色に合った“薄い”背景（月詠み=淡い紫 / 宵桜艶帖=淡いワインレッド）＋✔・タップ可 */
 .cand-acct-pill.posted{cursor:pointer;}
-.cand-acct-pill.posted.cand-acct-acc1{background:#2c2148;border-color:#463864;color:#ecc86a;}
-.cand-acct-pill.posted.cand-acct-acc2{background:#381630;border-color:#57294a;color:#ff85ac;}
+.cand-acct-pill.posted.cand-acct-acc1{background:rgba(138,111,184,.18);border-color:#a98fd0;color:#7a5aa8;}
+.cand-acct-pill.posted.cand-acct-acc2{background:rgba(176,64,95,.16);border-color:#cf6f8f;color:#b0405f;}
 .cand-acct-pill.posted:active{transform:scale(.95);}
 .cand-acct-pill.posted b{font-size:.62rem;}
-/* 投稿詳細モーダル */
-.pd-row{display:flex;gap:8px;padding:3px 0;font-size:13px;border-bottom:1px solid var(--line);}
-.pd-k{flex:0 0 74px;color:var(--sub);}
-.pd-v{flex:1 1 auto;color:var(--ink);word-break:break-all;}
+/* 投稿詳細モーダル（.fz-modalはダーク背景＝文字は明るく） */
+.pd-row{display:flex;gap:8px;padding:3px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.12);}
+.pd-k{flex:0 0 74px;color:#9fb0c3;}
+.pd-v{flex:1 1 auto;color:#f2f5f8;word-break:break-all;}
+.pd-imgs-label{color:#c8cdd4;}
 .pd-imgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
-.pd-img{max-width:46%;max-height:38vh;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;}
+.pd-imgs .hint{color:#9fb0c3;}
+.pd-img{max-width:46%;max-height:38vh;border-radius:8px;border:1px solid rgba(255,255,255,.18);cursor:zoom-in;}
 /* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
 .cand-manage-row{display:flex;align-items:center;gap:6px;margin-top:6px;}
 .cand-manage-spacer{flex:1 1 auto;}

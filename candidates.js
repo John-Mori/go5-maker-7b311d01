@@ -447,7 +447,9 @@
     var rows = '';
     function row(k, v) { return v ? '<div class="pd-row"><span class="pd-k">' + k + '</span><span class="pd-v">' + v + '</span></div>' : ''; }
     rows += row('投稿日時', esc(when));
-    rows += row('題名', esc(it.title || ''));
+    // 題名末尾のハッシュタグ(#マンガ紹介 等のYTタグ)は投稿詳細では省略して見やすく。
+    var cleanTitle = String(it.title || '').replace(/(\s*#[^\s#]+)+\s*$/, '').trim();
+    rows += row('題名', esc(cleanTitle));
     if (it.goal) rows += row('狙い', esc(it.goal));
     if (it.cmtType) rows += row('コメント型', esc(it.cmtType));
     if (it.workState) rows += row('作品状態', esc(it.workState));
@@ -1769,8 +1771,8 @@
         (refImgs.length > 1 ? '<span class="cand-refimg-multi">🖼 複数あり ×' + refImgs.length + '</span>' : '') +
       '</div>' +
       '<div class="cand-info">' +
-        // 新作/同人バッジと同じ行にチャンネル表記を並べる（投稿済み＝pillボタン／未投稿＝淡色表記）
-        '<div class="cand-badges-row">' + badgesHtml + acctBadgesHtml_(it.cid) + '</div>' +
+        // 新作/同人バッジと同じ行にチャンネル表記を並べる（バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記）
+        '<div class="cand-badges-row">' + badgesHtml + '<span class="cand-acct-group">' + acctBadgesHtml_(it.cid) + '</span></div>' +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
