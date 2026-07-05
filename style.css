@@ -443,17 +443,26 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* U-2 一気に作成：候補から流し込み後、作成ボタンを一時的に強調（残り1タップの誘導） */
 .cta-ready-pulse{animation:ctaReadyPulse 0.8s ease-in-out 3;}
 @keyframes ctaReadyPulse{0%,100%{box-shadow:0 0 0 0 rgba(43,179,192,0);}50%{box-shadow:0 0 0 5px rgba(43,179,192,.55);}}
-/* 候補カード右上：チャンネル別ボタン（そのchで投稿済みなら色が変わる＝重複投稿=P0-3の抑止） */
-.cand-acct-row{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;margin:0 0 5px 0;}
-.cand-acct-btn{background:var(--card,#fffdf6);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;line-height:1.1;}
-/* アカウントのテーマ色：月詠み(acc1)=深い紫×金 / 宵桜艶帖(acc2)=ワイン×桜。非アクティブは色枠、アクティブは地色で塗る */
-.cand-acct-acc1{border-color:#8a6fb8;color:#6a4d99;}
-.cand-acct-acc1.active{background:#2c2148;border-color:#463864;color:#ecc86a;}
-.cand-acct-acc2{border-color:#cf6f97;color:#a8446e;}
-.cand-acct-acc2.active{background:#381630;border-color:#57294a;color:#ff85ac;}
-/* 投稿済み：アンバーのリング＋「✔済」でひと目で分かる（アカウント色は保持） */
-.cand-acct-btn.posted{box-shadow:0 0 0 1.5px #e6a14e inset;}
-.cand-acct-posted{color:#e6a14e;font-weight:800;font-size:9.5px;}
+/* バッジ行：新作/同人バッジ＋チャンネル表記を同じ行に並べる（省スペース） */
+.cand-badges-row{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-bottom:3px;}
+/* チャンネル表記のpill（fp-kind/fp-stateと同サイズ）。月詠み(acc1)=紫×金 / 宵桜艶帖(acc2)=ワイン×桜 */
+.cand-acct-pill{font-size:.68rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 6px;white-space:nowrap;line-height:1.7;display:inline-flex;align-items:center;gap:3px;}
+.cand-acct-pill.cand-acct-acc1{color:#8a6fb8;border-color:#8a6fb8;}
+.cand-acct-pill.cand-acct-acc2{color:#c76b93;border-color:#c76b93;}
+/* 未投稿：淡色・ボタン化しない（クリック無効） */
+.cand-acct-pill.notposted{opacity:.5;background:transparent;cursor:default;}
+/* 投稿済み：テーマ色で塗り＋✔・タップ可（詳細モーダルを開く） */
+.cand-acct-pill.posted{cursor:pointer;}
+.cand-acct-pill.posted.cand-acct-acc1{background:#2c2148;border-color:#463864;color:#ecc86a;}
+.cand-acct-pill.posted.cand-acct-acc2{background:#381630;border-color:#57294a;color:#ff85ac;}
+.cand-acct-pill.posted:active{transform:scale(.95);}
+.cand-acct-pill.posted b{font-size:.62rem;}
+/* 投稿詳細モーダル */
+.pd-row{display:flex;gap:8px;padding:3px 0;font-size:13px;border-bottom:1px solid var(--line);}
+.pd-k{flex:0 0 74px;color:var(--sub);}
+.pd-v{flex:1 1 auto;color:var(--ink);word-break:break-all;}
+.pd-imgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+.pd-img{max-width:46%;max-height:38vh;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;}
 /* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
 .cand-manage-row{display:flex;align-items:center;gap:6px;margin-top:6px;}
 .cand-manage-spacer{flex:1 1 auto;}

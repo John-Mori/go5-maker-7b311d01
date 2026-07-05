@@ -394,42 +394,87 @@
   function zoomGo_(d) { if (!_zoomList.length) return; _zi = (_zi + d + _zoomList.length) % _zoomList.length; zoomShow_(); }
   function openImgZoom_(images, idx) { if (!images || !images.length) return; _zoomList = images.slice(); _zi = Math.min(Math.max(0, idx || 0), _zoomList.length - 1); zoomShow_(); }
 
-  // この作品(cid)が各チャンネルで投稿済みか（投稿履歴の workUrl→cid 照合）。{acc1,acc2} を返す。
   var _ACCTS = [['acc1', '月詠み'], ['acc2', '宵桜艶帖']];
-  function postedChannelsForCid_(cid) {
-    var out = { acc1: false, acc2: false };
-    if (!cid || typeof window.Go5PostedWorkUrls !== 'function') return out;
-    _ACCTS.forEach(function (a) {
-      var urls = window.Go5PostedWorkUrls(a[0]) || [];
-      out[a[0]] = urls.some(function (u) {
-        var r = window.buildAffiliateLink ? window.buildAffiliateLink(u, '') : null;
-        return r && r.ok && r.cid === cid;
-      });
+  // この作品(cid)を、指定チャンネルで投稿した投稿履歴アイテムを返す（workUrl→cid 照合・無ければ null）。
+  function postedItemForCid_(cid, account) {
+    if (!cid || typeof window.Go5PostedItems !== 'function') return null;
+    var items = window.Go5PostedItems(account) || [];
+    for (var i = 0; i < items.length; i++) {
+      var u = items[i] && items[i].workUrl; if (!u) continue;
+      var r = window.buildAffiliateLink ? window.buildAffiliateLink(u, '') : null;
+      if (r && r.ok && r.cid === cid) return items[i];
+    }
+    return null;
+  }
+  // バッジ行に並べるチャンネル表記。投稿済み＝ボタン化(クリックで投稿詳細)＋テーマ色。未投稿＝ボタン化せず淡色表記。
+  function acctBadgesHtml_(cid) {
+    return _ACCTS.map(function (a) {
+      var posted = !!postedItemForCid_(cid, a[0]);
+      if (posted) {
+        return '<span class="cand-acct-pill cand-acct-' + a[0] + ' posted" role="button" tabindex="0" ' +
+          'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(cid) + '" title="' + esc(a[1]) + 'で投稿済み（タップで投稿内容）">' +
+          esc(a[1]) + ' <b>✔</b></span>';
+      }
+      return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" title="' + esc(a[1]) + '（未投稿）">' + esc(a[1]) + '</span>';
+    }).join('');
+  }
+  // Bluesky公開APIから、その投稿に添付された画像URL配列を取得（未認証・CORS）。cb(images[]|null)。
+  function fetchPostImages_(postUri, cb) {
+    if (!postUri) { cb(null); return; }
+    fetch('https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?uris=' + encodeURIComponent(postUri))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var post = j && j.posts && j.posts[0];
+        var emb = post && post.embed;
+        var imgs = (emb && emb.images) ? emb.images.map(function (im) { return im.fullsize || im.thumb; }).filter(Boolean) : [];
+        cb(imgs);
+      }).catch(function () { cb(null); });
+  }
+  // 投稿詳細モーダル：投稿済みチャンネルのpillをタップ→いつ/何で投稿したか（履歴内容＋実際の投稿画像）を表示。
+  var _postedOverlay = null;
+  function openPostedDetailModal_(cid, account, label) {
+    var it = postedItemForCid_(cid, account); if (!it) return;
+    var ov = _postedOverlay;
+    if (!ov) {
+      ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
+      ov.innerHTML = '<div class="fz-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
+      ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
+      _postedOverlay = ov;
+    }
+    var when = it.ts ? fmtTs(it.ts) : '(日時不明)';
+    var rows = '';
+    function row(k, v) { return v ? '<div class="pd-row"><span class="pd-k">' + k + '</span><span class="pd-v">' + v + '</span></div>' : ''; }
+    rows += row('投稿日時', esc(when));
+    rows += row('題名', esc(it.title || ''));
+    if (it.goal) rows += row('狙い', esc(it.goal));
+    if (it.cmtType) rows += row('コメント型', esc(it.cmtType));
+    if (it.workState) rows += row('作品状態', esc(it.workState));
+    var link = it.postUrl || it.shareUrl || it.shortUrl || '';
+    if (link) rows += row('投稿', '<a href="' + esc(link) + '" target="_blank" rel="noopener" style="color:#1d9bf0;">Blueskyで開く↗</a>');
+    var body = ov.querySelector('.fz-body');
+    body.innerHTML =
+      '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">' + esc(label) + ' で投稿済み</div>' +
+      rows +
+      '<div class="pd-imgs-label hint" style="margin-top:8px;">投稿した画像</div>' +
+      '<div id="pdImgs" class="pd-imgs"><div class="hint">⏳ 画像を取得中…</div></div>';
+    ov.hidden = false;
+    // 実際の投稿画像を取得（無ければ候補に保存済みの画像でフォールバック）。
+    fetchPostImages_(it.postUri, function (imgs) {
+      var box = ov.querySelector('#pdImgs'); if (!box) return;
+      var list = (imgs && imgs.length) ? imgs : refImgsOf_(cid);
+      if (!list || !list.length) { box.innerHTML = '<div class="hint">画像を取得できませんでした。</div>'; return; }
+      box.innerHTML = list.map(function (src) { return '<img class="pd-img fz-zoomable" src="' + esc(src) + '" loading="lazy" alt="投稿画像">'; }).join('');
+      box.querySelectorAll('.pd-img').forEach(function (im, i) { im.addEventListener('click', function () { openImgZoom_(list.slice(), i); }); });
     });
-    return out;
   }
-  function curAccount_() { try { return window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'; } catch (e) { return 'acc1'; } }
-  // モーダル右上のアカウント切替ボタン列（該当chで投稿済みなら「投稿済」表示＝重複投稿の抑止）。
-  function acctRowHtml_(cid) {
-    var posted = postedChannelsForCid_(cid), cur = curAccount_();
-    return '<div class="cand-acct-row">' + _ACCTS.map(function (a) {
-      var p = posted[a[0]];
-      return '<button type="button" class="cand-acct-btn cand-acct-' + a[0] + (a[0] === cur ? ' active' : '') + (p ? ' posted' : '') + '" data-acct="' + a[0] + '" title="' + (p ? 'このチャンネルで投稿済み' : 'このチャンネルに切替') + '">' +
-        esc(a[1]) + (p ? '<span class="cand-acct-posted">✔済</span>' : '') + '</button>';
-    }).join('') + '</div>';
-  }
-  // カード右上のチャンネルボタンの配線：クリックで現在アカウントを切替し、全カードのactive表示を更新。
-  //   （投稿済み判定は作品×チャンネルで不変なので、切替時に一覧を再描画する必要はない）
+  // カードの「投稿済みpill」の配線：タップで投稿詳細モーダル（未投稿pillは data-posted-acct を持たない＝無反応）。
   function wireAcctRow_(root) {
-    root.querySelectorAll('[data-acct]').forEach(function (b) {
-      b.addEventListener('click', function (e) {
-        e.stopPropagation();
-        var a = b.getAttribute('data-acct');
-        var hdr = document.getElementById(a === 'acc2' ? 'acctBtn2' : 'acctBtn1');
-        if (hdr) hdr.click(); // アプリの現在アカウントを切替（テーマ/背景/設定も追従）
-        var all = document.querySelectorAll('.cand-acct-btn');
-        for (var i = 0; i < all.length; i++) all[i].classList.toggle('active', all[i].getAttribute('data-acct') === a);
-      });
+    root.querySelectorAll('[data-posted-acct]').forEach(function (b) {
+      var handler = function (e) { e.stopPropagation(); var a = b.getAttribute('data-posted-acct'), c = b.getAttribute('data-posted-cid'); var lbl = (a === 'acc2') ? '宵桜艶帖' : '月詠み'; openPostedDetailModal_(c, a, lbl); };
+      b.addEventListener('click', handler);
+      b.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(e); } });
     });
   }
 
@@ -1724,9 +1769,8 @@
         (refImgs.length > 1 ? '<span class="cand-refimg-multi">🖼 複数あり ×' + refImgs.length + '</span>' : '') +
       '</div>' +
       '<div class="cand-info">' +
-        // 右上：チャンネル別ボタン（このchで投稿済みなら「✓投稿済」で色が変わる＝重複投稿の抑止・P0-3）
-        acctRowHtml_(it.cid) +
-        (badgesHtml ? '<div style="margin-bottom:3px;">' + badgesHtml + '</div>' : '') +
+        // 新作/同人バッジと同じ行にチャンネル表記を並べる（投稿済み＝pillボタン／未投稿＝淡色表記）
+        '<div class="cand-badges-row">' + badgesHtml + acctBadgesHtml_(it.cid) + '</div>' +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
