@@ -398,7 +398,9 @@
     var cur = refImgOf(it.cid) || {};
     var pending = { img: cur.img || '', comment: cur.comment || '', twitterUrl: cur.twitterUrl || '' };
     var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補（埋め込みポストURLあり）
-    var workUrlPrefill = isTw ? '' : (it.url || ''); // DMM起点は現行の正式作品URLをプレフィル（Twitter起点はit.urlがポストURLなので空欄）
+    // 作品URLのプレフィル：候補が実際に作品URLを持つ（!isTwitter かつ it.url がDMM/book等）なら、
+    //   twitterUrl の有無に関わらずそのまま欄に表示（＝カードの「作品↗」と同じ判定）。X起点(it.url=ポストURL)は空。
+    var workUrlPrefill = (!it.isTwitter && it.url) ? it.url : '';
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
       '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">' + esc(it.title || it.cid) + '</div>' +
@@ -417,12 +419,12 @@
       '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter URL</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;min-width:0;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#111;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;white-space:nowrap;">アフィリンク付き作品URLを貼ると、正式な作品URLに自動変換</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;min-width:0;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#111;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button id="refImgSave" type="button" class="primary" style="flex:1;">保存</button>' +
@@ -458,6 +460,7 @@
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
       var workVal = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
+      if (!workVal && !it.isTwitter && it.url) workVal = it.url; // 欄が空でも候補が作品URLを持つなら使う（動画側へ確実に反映）
       var workUrl = workVal ? (window.normalizeWorkUrl ? window.normalizeWorkUrl(workVal) : workVal) : '';
       refImgSave(it.cid, pending); // 画像・コメントを失わないよう保存（best-effort）
       transferToMovie_(it, pending.img, pending.comment, workUrl);
@@ -519,6 +522,28 @@
       mk.classList.add('cta-ready-pulse');
       setTimeout(function () { mk.classList.remove('cta-ready-pulse'); }, 2400);
     }, 260); // タブ切替の描画が終わってから
+  }
+  // 保存直後に、その候補カードの「動画生成用サムネ」を即時反映（一覧を全再描画せず＝スクロール位置を保つ）。
+  function updateCardRefThumb_(cardEl, cid) {
+    if (!cardEl) return;
+    var col = cardEl.querySelector('.cand-thumbcol'); if (!col) return;
+    var r = refImgOf(cid), src = (r && r.img) ? r.img : '';
+    var thumb = col.querySelector('.cand-refimg-thumb');
+    if (src) {
+      if (!thumb) {
+        thumb = document.createElement('img');
+        thumb.className = 'cand-refimg-thumb';
+        thumb.setAttribute('data-refimgview', cid);
+        thumb.setAttribute('loading', 'lazy');
+        thumb.alt = '動画生成用の画像（タップで拡大）';
+        thumb.title = '動画生成用の画像（タップで拡大）';
+        thumb.addEventListener('click', function () { var rr = refImgOf(cid); if (rr && rr.img) openImgZoom_([rr.img], 0); });
+        col.appendChild(thumb);
+      }
+      thumb.src = src;
+    } else if (thumb && thumb.parentNode) {
+      thumb.parentNode.removeChild(thumb);
+    }
   }
   // 候補（Twitter起点/DMM起点どちらも）に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ（旧項目を置換）。
   function applyWorkUrl_(oldItem, workUrlRaw, refData, cb) {
@@ -625,6 +650,7 @@
           var has = refImgHas(cid);
           b.classList.toggle('has-img', has);
           b.innerHTML = has ? '🖼 投稿編集✓' : '🖼 投稿編集';
+          updateCardRefThumb_(b.closest ? b.closest('.cand-card') : null, cid); // 保存直後に一覧のサムネへ反映（リロード不要）
         });
       });
     });
