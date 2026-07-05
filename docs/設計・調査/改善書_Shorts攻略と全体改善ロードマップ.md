@@ -1,0 +1,259 @@
+# 改善書 — YouTube Shorts攻略と全体改善ロードマップ
+
+作成: 2026-07-05（Vol.3）／基準コード: v200（commit `631be4b`）／行番号はすべてこの時点のもの
+調査手法: 並列調査4本（ファイル構成・データ基盤・作成UX・Shorts攻略Web調査）＋相互批評1本の統合
+
+> **この文書の使い方**: 実装は Opus / Sonnet のセッションが1タスクずつ行う。各タスクは §8 のロードマップ表に「触るファイル・受け入れ条件・推奨モデル・依存」つきで定義してある。着手前に §1 の裁定事項を Chami に確認すること。**§3(P0) は最優先で、他の全施策より先に完了させる。**
+
+## 目標（4本柱）
+
+| # | 目標 | 対応節 |
+|---|---|---|
+| ① | 5秒動画をより作りやすく | §5 |
+| ② | データ分析ができるように | §6 |
+| ③ | メンテナンス性の向上 | §7 |
+| ④ | **YouTube Shortsのフィードに乗せて再生数を稼ぐ（最重要）** | §3・§4・§9 |
+
+---
+
+## 1. 最初に裁定が必要な4項目（Chamiの決定待ち）
+
+実装を始める前に決める。決まるまで着手できないタスクには §8 で「裁定待ち」と明記した。
+
+1. **KPIの定義**: 「再生数を稼ぐ」の正体をどれにするか。
+   - `views`（2025/3以降ループ毎に+1＝稼ぎやすいが収益に直結しない）
+   - `engagedViews`（YPP収益化判定のベース・実質的な「見られた」数）
+   - **推奨: engagedViews を主KPI、views/クリック数/FANZA報酬を副KPIにする**。5秒ループはviewsを膨らませるがengagedと報酬には弱い、という構造を直視するため。
+2. **尺の方針**: 10.8万本分析では中央値ビュー最大は**11〜20秒帯**であり「5秒だから有利」という2025-26年のデータは見当たらない（§11出典）。選択肢:
+   - (a) 5秒維持（現行のまま・ループ数で勝負）
+   - (b) **5秒版と11〜20秒版（紙芝居化＝1ページを2〜3コマに割ってパン/ズーム）のABテスト** ← 推奨
+   - (c) 全面尺拡張
+   ※(b)(c)はFANZA側の画像利用許諾（複数コマ利用の可否）確認が前提（§3-3）。
+3. **YouTube Data API 監査申請を出すか**: クォータは2025/12改定で1本≒100ユニット→2026/6から専用バケット（1日100本相当）となり**量的制約は消滅**。残る唯一の壁は「未監査プロジェクトからのアップロードは全てprivateロック（Studioで公開変更も異議申立も不可）」。申請は無料だが審査は数週間〜数ヶ月。**推奨: 早めに申請だけ出し、承認までは §5-4 の共有シート最適化で運用**。
+4. **リファクタ（§7）を先にやるか並走するか**: §7-1（共通コア3ファイル）は他タスクの事故率を下げる土台。**推奨: Phase 1 に §7-1 だけ先行実施**、大分割（§7-2）は機能改修の合間に段階実施。
+
+---
+
+## 2. 現状分析の要点（事実・v200時点）
+
+### 2-1. Shorts視点で今の動画に足りないもの（重大順）
+1. **完全無音**: `app.js:365` `cv.captureStream(FPS)` は映像トラックのみ。Shortsフィードは音声ON自動再生が基本で、無音は異物感からスワイプ離脱を誘発する。
+2. **t=0で前景（マンガ）が透明**: `app.js:12` `REVEAL_START=0.5, REVEAL_DUR=2.0` のフェードインで、**最初のフレームに商品が写っていない**。スワイプ判断は冒頭0.5〜1秒で下されるため、フック構造として最悪に近い。
+3. **ループが切れる**: 同フェードのため最終フレーム≠先頭フレーム。ループ再生は2025/3以降 view+1 かつ推薦シグナルであり、この投資対効果は高い。
+4. **同型量産リスク**: 全動画が同一テンプレ（同一背景・同一構図・同一文言パターン）。2025/7施行の「inauthentic content」ポリシーの典型例に該当し得る（収益化剥奪リスク）。シード配信テストでも同型は伸びない。
+5. **投稿手数の6〜7割がYouTube側**: 1本あたり合計27〜40タップのうち、カメラロール保存→YouTubeアプリ→題名/説明コピペ→URL戻しで約20タップ・アプリ切替3回。
+
+### 2-2. リンク構造（規約防衛の現状）
+- YouTube説明欄には**FANZAリンクは入らない**。入るのは短縮URL（r2/da.gd）のみで、遷移先は**Bluesky投稿**（`bluesky.js:159-162` DEF_YTDESC・`putUrlTop` :619）。
+- 生のFANZAアフィリンクがあるのはBluesky投稿本文のみ。つまり現行は `YouTube → 短縮URL → Bluesky投稿（クッション）→ FANZA` の2段構造で、**外部リンクポリシー（ポルノ直リンク禁止）に対して既に守りの形になっている**。
+- 残余リスク: (a) クッションであるBluesky投稿自体に成人向け寄り画像＋生リンクがある、(b) 動画の1コマ目/内容が性的示唆と判定されると**年齢制限→フィード配信が実質ゼロ**（2025/8からAI年齢推定も稼働）。
+
+### 2-3. データ基盤の現状
+- 記録タブ（`月詠み`/`宵桜艶帖`・gas/コード.gs:75）には33+6+4列があり、**曜日/day-type/時間帯スロットはシート数式で自動**、視聴回数/クリック/いいね等は毎時トリガーで自動。**分析軸は列としてはかなり揃っている**。
+- **取りこぼし（送っているのに捨てている）**: `hashtags` は doPost が受信するのに writeRecord_ が書かない（コード.gs:398 vs :467-548）。`rebuildOf` は bluesky.js:711 が送るのに doPost が読まない＝リビルド系譜が復元不能。予約経由投稿は videoId/カテゴリ/状態なしの薄い行になる（:1005-1009）。
+- **実売数（fetch_sales.mjs→KV `sales:<cid>`）はシートに入らない**＝候補タブ表示専用。投稿→クリック→実売のファネルが繋がっていない。
+- 手動でしか入らない列: インプレッション/CTR/**平均視聴維持率**/フォロー増/FANZA成約・報酬。維持率は **YouTube Analytics API（OAuth・無料）で自動化可能**（`averageViewPercentage`、engagedViews は2025/4からAPI提供）。Studio限定なのは「フィード表示回数」「Viewed vs swiped率」のみ。
+- ランキングの経過時間バケット（30分/1h/…）は端末localStorage `view_snaps` 依存で「開いた時だけ観測」。一方サーバー側 `snapshot.gs` はティア別間隔で28日分の精密スナップを既に蓄積しているのに**UI未接続**。
+
+### 2-4. 保守性の現状
+- 神ファイル3本: yt-clicks.js 2166行（責務≒11）/ candidates.js 1504行（≒12）/ bluesky.js 1499行（≒15）。全部IIFE closure共有で部分修正の影響範囲が読めない。
+- ヘルパ重複: `$`×10ファイル、`esc`×9（**`"`をエスケープしない危険な系統が bluesky.js:456/scheduler.js:35/api-diag.js:10 に混在**）、lsGet/lsSet系×6、fmtTs×4（仕様差あり）、JSONP×3、アカウント取得3方式（closure正本/window経由/**localStorage直読み**）。
+- **クラウド同期がブロックリスト方式**（settings-io.js:24-29）: リストに無い新キーは自動的に同期対象＝ INC-62（アカウント混在）の恒久対策が新キーに効かない。現に `yt_scheduled__` `movie_drafts__`（画像dataURL入り）`sch_state_v1` `view_snaps` 等が漏れて同期対象になっている。
+- **実バグ（確認済み）**: wizard.js:395,427 は `window.addEventListener('video-created'/'bluesky-posted')` だが、発火側（app.js:402・bluesky.js:734）は `document` に bubbles 無しで dispatch → **windowには届かない＝ウィザードの自動進行が機能していない**。
+- テストは抽出済み純関数のみ7本。アカウント矯正・sync判定・GAS upsert 本体（ミラーのみで乖離検出不能）など、最も危険なコードが未テスト。
+
+---
+
+## 3. P0: 規約防衛（チャンネル喪失＝全施策無意味、を防ぐ）
+
+> すべての再生数施策より先。運用ルールはコード変更ゼロで今日から効く。
+
+- **P0-1. リンク構造の維持ルール明文化**: YouTube説明欄・固定コメントにFANZA直リンクを**絶対に貼らない**（現状の 短縮URL→Bluesky投稿 の2段構造を正とする）。「YouTubeでは見せられない続きは…」型の煽り文言も外部リンクポリシーで名指しの違反パターンなので禁止。
+- **P0-2. 1コマ目・全コマの露出基準**: 性的示唆（挑発ポーズ・下着相当露出）は年齢制限→フィード除外と同義。**「電車内で見られて困らないコマだけ使う」**を作成時ルールにし、確認モーダルにチェック観点として一文入れる（実装は §8 S-6）。
+- **P0-3. 2チャンネルへの同一動画コピー投稿の禁止**: inauthentic/スパム判定の火種。acc1/acc2では作品・コマ・文言を必ず変える。
+- **P0-4. BGMの権利ルール**: 市販曲・トレンド音源の**焼き込みは違法**（Shorts音楽ライセンスはアプリ内エディタ限定）。同梱するのは **CC0（または再配布可の買切り）音源のみ**。YouTube Audio Library には「YouTube内利用限定」条件の曲があり、**Bluesky同時投稿がある本アプリでは不適格な曲が混ざる**ため採用しない。
+- **P0-5. FANZA側規約の確認（未調査・Chami宿題）**: マンガのコマ画像の二次利用許諾範囲、複数コマ利用（紙芝居化＝§1-2(b)）の可否。アフィリエイト規約とパッケージ画像利用規定を確認してから尺拡張ABに着手する。
+
+---
+
+## 4. P1: Shortsフィード攻略施策
+
+### S-1. 冒頭フック強化＋完全ループ化（同一タスクで実装・効果/工数比最良）
+- **内容**: 「🔁ループ動画（フェード無し）」を既定動作にする。`REVEAL_START=0`・alpha=1固定（または既定値変更＋従来動作トグル）で、**フレーム0から前景＋テキスト完全表示**＝先頭≒末尾となりループも繋がる。
+- 根拠: スワイプ離脱率30%未満のShortsは50%超の約4倍配信（二次統計・方向性根拠）。フェード廃止はコード上 `app.js:12-13, 299-310` の定数/分岐レベル。
+- 併せて: 背景素材を**ちょうど5.0秒のシームレスループ版**に差し替え（PC側 `loopify.py` で作成可能。bg_main.mp4 自体がこの手法の産物）。
+- 受け入れ条件: 生成動画の frame0 に前景が完全表示／目視でループ境界に「消えて浮かび上がる」動きがない／従来動画と同一の座標系・プレビュー一致を維持。
+
+### S-2. BGM追加（無音をやめる）
+- **方式**: `AudioContext`+`decodeAudioData`（同梱CC0音源）→`GainNode`（末尾0.5sフェードアウト）→`MediaStreamAudioDestinationNode`。`make()`（app.js:365付近）で `new MediaStream([...videoTracks, ...audioTracks])` を MediaRecorder へ。mime判定（`pickMime` app.js:346-350）はそのままで mp4(AAC)/webm(Opus) に乗る。
+- **iOS制約**: AudioContext はユーザー操作起点の resume が必要 → make() はクリックハンドラ内なのでOK。**音声トラック追加に失敗したら無音で続行するフォールバック必須**（既存エラー方針 app.js:403 と整合）。録画中のモニタ再生はしない。
+- アカウント別BGMは THEME 構造（app.js:56-84）に `bgm:` を足す形で自然に載る。記録シートに「BGM」列を先行追加（§6 D-1）しAB可能にする。
+- 受け入れ条件: iPhone実機で音付きmp4が生成される／音源なし・decode失敗時は従来と同じ無音動画が生成される／Bluesky投稿にも音付きで添付される／CC0であることをREADME等に出典記録。
+
+### S-3. メタデータ・運用整備（コード小・運用中心）
+- ハッシュタグは**3〜5個**（#shorts＋ジャンル語＋作品固有）。15個超は全無効。YT題名生成（`buildTitle` bluesky.js:1460-1473）とYT説明欄テンプレに反映。
+- タイトルに検索されうるジャンル語（例:「異世界」「OL」等、既存カテゴリと連動）を含める。
+- 投稿時間: 視聴者ローカルの夕方〜夜・金曜厚め（Buffer 180万本分析）。scheduleタブのテンプレに反映（day-type別テンプレは既存 schedule_master.js）。
+- 1コマ目・テキスト・題名は作品ごとに明確に変える（P0-3と同根・同型量産脱却）。
+- 受け入れ条件: buildTitle/説明欄テンプレがタグ3〜5個で生成される／2アカウントのテンプレ文言が別物である。
+
+### S-4. 尺11〜20秒版のABテスト（裁定§1-2・P0-5クリア後）
+- 1ページを2〜3コマに分割し、コマごとにパン/ズーム（Ken Burns）で見せる「紙芝居モード」。5秒版と同一作品・同一時刻帯で成績比較（判定設計は§9）。
+- 実装は現行 make() の拡張（DURATION可変化＋コマ配列＋タイムライン）だが、リアルタイム録画のままでは20秒拘束が痛いため、**この時点で WebCodecs オフラインレンダリング（§5-5）への移行判断を併せて行う**。
+
+### S-5. 計測の自動化（§6 D-4/D-5 と同一。Shorts改善ループの燃料）
+- Analytics API で views / engagedViews / averageViewPercentage を日次取得→シートupsert。`engagedViews ÷ views` を「引き込み率」としてカード/ランキングに表示。Studio限定の「フィード表示回数」「swiped率」は週1で目視棚卸し（§9のベースライン計測を兼ねる）。
+
+### S-6. 確認モーダルに規約チェック観点を表示（P0-2の実装）
+- 投稿確認モーダル（bluesky.js:1288-1333）に「1コマ目は全年齢で大丈夫？」の一行注意書きを追加。タップ増なし。
+
+---
+
+## 5. P2: 作りやすさ（タップ削減・自動化）
+
+- **U-1. カテゴリ・リビルドの作成後自動リセット**: persist-fields が `movieAttr*` を復元するため前作のチェックが残り**誤記録の温床**（現バグに近い挙動）。`bluesky-posted` 後に movieAttr* 全OFF＋`field_movieAttr*` クリア（リビルドは実装済み bluesky.js:990-994 と同型に）。
+- **U-2. 「候補から一気に作成」**: `transferToMovie_`（candidates.js:433-448）は既に写真/作者/コメント/URLを注入済み。候補カードに「⚡一気に作成」ボタンを追加し、転送→タブ切替→「▶作成」フォーカス（または自動実行前カウントダウン）まで詰める。手動経路の入力ほぼゼロ化。
+- **U-3. 確認モーダルの「N秒後に自動投稿（キャンセル可）」トグル**: URL確定済み経路（候補転送/リビルド）限定でカウントダウン投稿。安全性（目視機会）は残しタップを削減。
+- **U-4. YouTube投稿の短縮（短期・API不要）**: (a)「YouTubeへ共有」ボタン＝`navigator.share` に動画Fileを渡して共有シートから直接YouTubeアプリへ（カメラロール中継の削減）、(b) 共有直前に題名を自動でクリップボードへコピー、(c) 説明欄は既に短縮URL自動挿入済みなのでコピー1回に集約。目標: YouTube側 約20タップ→約12タップ。
+- **U-5. WebCodecs オフラインレンダリング（中期・裁定§1-2と連動）**: `VideoEncoder`+mp4-muxer で150フレームを決定論的に描画・符号化。(i) リアルタイム5秒拘束が消える (ii) フレーム精度の完全ループ (iii) バッチ生成の基盤。iOS Safari 16.4+。背景videoのseek同期が主リスク＝背景を「5.0sシームレス素材の事前デコード」または数式生成に寄せる。
+- **U-6. バッチ生成（下書きキュー）**: 既存下書き（最大20件・drafts.js）を「選んだ順に連続生成」。バッチ中は bskyEnable OFF→生成物を予約キューへ。U-5導入後は1本数秒×N本の真のバッチになる。
+- **U-7. wizardイベント不達バグ修正**: wizard.js:395,427 の `window.addEventListener` → `document` に変更（§2-4の確認済みバグ。§7 M-4 イベント規約の先行適用）。
+
+---
+
+## 6. P3: データ分析基盤
+
+- **D-1. 取りこぼし回収パック（GAS数行＋クライアント小改修・即効）**
+  1. 「ハッシュタグ」列追加＋ `writeRecord_` に putIf 1行（migrate_headers の冪等列追加導線あり コード.gs:267-298）
+  2. 「リビルド元ID」列追加＋ doPost で `body.rebuildOf` を拾う → リビルド前後の再生数比較がシートで可能に
+  3. 予約経由投稿へ videoId/カテゴリ/workState を中継（予約シートにJSONメタ列を1列追加→runReservations→writeRecord_）
+  4. 「BGM」列を空で先行追加（S-2導入日からABが即開始できる）
+  5. 「タイトル文字数」は setComputed_ に数式1本（過去行にも効く）
+  - GAS_VERSION バンプ＋`deploy_gas.mjs`＋`?ping=1` 照合。受け入れ条件: 新規投稿の行に hashtags/rebuildOf が入る／既存行が壊れない。
+- **D-2. 実売数のシート合流**: 列「実売数/実売数前日差/実売数更新日時」追加。GASに毎時 `refreshSales()` を新設し、記録タブのcidを集めて fanza-worker `/api/fanza-sales`（POST・最大30件/回）でupsert。**投稿→クリック→実売の3段ファネルが1行で見える**。PCバッチ・worker側は無改修。
+- **D-3. 集計の自動化（0円）**: (a) Looker Studio（無料）をシート直結——両チャンネルタブをUNIONする中間シート（`={QUERY(月詠み!…);QUERY(宵桜艶帖!…)}`＋channel列）を1枚追加し、成長曲線・曜日×時間帯ヒートマップをノーコード化。(b) GAS週次レポート（月曜トリガー・MailApp）: 先週Top5/カテゴリ別平均/手動列未入力リマインド。
+- **D-4. バケットスナップのサーバー移行**: 端末依存 `view_snaps` を廃し、既に28日分蓄積済みの「再生数_スナップショット」（snapshot.gs）から `action=bucket_snaps` JSONP で30分/1h/2h/6h/24h値を返す。機種変・キャッシュ消去に強くなり、過去分も遡及可能。
+- **D-5. YouTube Analytics API（維持率・engagedViews の自動化）**: GASの「高度なサービス」で YouTube Analytics を有効化（チャンネル所有Googleアカウントで実行・OAuth）。日次で `views, engagedViews, averageViewDuration, averageViewPercentage` を videoId 別に取得し「平均視聴維持率%」ほかへ自動upsert。前提確認: acc1/acc2 のチャンネルが同一Googleアカウント管理か（別なら各自のGASまたは片方手動継続）。
+
+---
+
+## 7. P4: 保守性（ビルド無し制約のまま）
+
+方針: 実績ある「IIFE＋`window.名前空間`＋module.exports併記（*-core.js方式）」を共通規約に昇格し、`<script>` を数本増やすだけで分割する。
+
+- **M-1. 共通コア3ファイル（最優先・他タスクの土台）**
+  - `core/util.js` → `window.Go5Util`: `$`／`esc`（**`"`を必ずエスケープする1系統に統一**）／`fmtTs`／`yen`／`num`／`lsGet/lsSet`／`jsonp`（settings-io.js:126版採用）／`copyText`。Node併記でテスト可。
+  - `core/account.js` → `window.Go5Acct`: `current()`（app.js:525-545の正本を移設）／`key(base, acc?)`（pk/lsk/インライン連結を統合）／`handleOf/didOf/setDid`／`onChange(cb)`。**規約: `localStorage('current_account')` 直読み禁止・'acc1'フォールバックはここ1箇所のみ**。
+  - `core/storage-keys.js` → `window.Go5Keys`: 全キーを `{base, scope:'account'|'global'|'cid'|'tab', sync, secret}` の登録制レジストリに。settings-io の isSecretKey/isNoSyncKey をレジストリ参照化し、**クラウド同期を許可リスト方式へ反転**（§2-4の構造問題の恒久解）。tests/test_storage_keys.js で「記録系キーがsync:trueでないか」を表明検査。
+  - 移行時の回帰防止: 反転直後は「旧ブロックリストで同期されていたキー一覧」と「新許可リスト」の差分をログ出力し、意図しない同期停止/開始がないか1度目視（INC-62逆パターン予防）。
+- **M-2. 神ファイル分割（段階実施・機能改修と混ぜない）**
+  - yt-clicks.js → verify-data / verify-render / verify-account-move / verify-sheet-sync / fanza-info（candidatesと共用）/ yt-rank の6分割
+  - bluesky.js → bsky-settings / bsky-compose / bsky-record / bsky-repair / bsky-short-hist / bsky-flows の6分割
+  - candidates.js → cand-store / cand-images / cand-buzz / cand-tabs / cand-render の5分割
+  - 各分割は「1PR=1ファイル切り出し・挙動不変・?v=バンプ・実機スモーク」を受け入れ条件とする。
+- **M-3. GAS分割＋ミラー乖離検出**: コード.gs → schema/api/record/settings-sync/stats/reserve/short の複数.gs（claspは複数ファイル対応・deploy_gas.mjs無改修）。`upsertRowOf_` は本体コピーの `gas/upsert-mirror.js` を正本ミラーとし、scripts/check_mirror.mjs で「関数本文テキスト一致」を検査（現状の test_record_upsert.js は再実装ミラーで乖離検出不能）。
+- **M-4. イベント契約の明文化**: `core/events.js` に `window.Go5Events = {VIDEO_CREATED:'video-created', …}` と detail スキーマのJSDocを集約。**発火・購読は document に統一**（U-7がその先行修正）。
+- **M-5. ファイルヘッダ規約**: 冒頭に「公開API(window.*)／発火・購読イベント／読み書きlocalStorageキー」を必須記載（drafts.js様式を全ファイルへ）。index.html の script 読み込みを「core群→*-core群→機能群」に層別コメント化。
+- **M-6. テスト追加の優先順**: ①Go5Keys(sync/secret判定) ②detectAccountMoves_ の分類純関数化＋テスト ③yt-clicks sortItems ④parseBskyPromo_ ⑤upsertミラー一致チェック。
+- **M-7. ハードコードされたソフト鍵の整理**: `daremogame...`（bluesky.js:863・コード.gs:667,144付近）と無認証 `settings_pull` JSONP（コード.gs:157）。少なくとも settings_pull にソフト鍵必須化（下書き画像等の設定blobが取得可能なため）。
+
+---
+
+## 8. 実装ロードマップ（タスク表）
+
+> モデル欄は CLAUDE.md §5.1 準拠（見た目/単純=Sonnet、基盤・非同期・複数ファイル・データモデル=Opus）。
+> 共通受け入れ条件: `node --check` 全対象／`node tests/test_*.js` 全PASS／実機スモーク／`?v=` バンプ（フロント変更時）／GAS変更時は GAS_VERSION バンプ＋deploy＋ping照合／commit＆push＋live照合。
+
+### Phase 0 — 規約防衛と土台（最初の1〜2セッション）
+| ID | タスク | 触るファイル | 主な受け入れ条件 | モデル | 依存 |
+|---|---|---|---|---|---|
+| P0-1〜3 | 運用ルールの明文化（CLAUDE.md §6 に追記） | CLAUDE.md | ルール3項が「やってはいけない」に載る | Sonnet | なし |
+| S-6 | 確認モーダルに1コマ目チェック文言 | bluesky.js | モーダルに注意書き表示・タップ増なし | Sonnet | なし |
+| U-7 | wizardイベント不達バグ修正 | wizard.js | ウィザード②が動画作成後に自動で③へ進む（実機） | Sonnet | なし |
+| M-1 | 共通コア3ファイル＋sync許可リスト反転 | core/util.js, core/account.js, core/storage-keys.js, settings-io.js ほか置換 | 重複ヘルパ置換後に全機能回帰なし／test_storage_keys.js PASS／同期差分ログ目視 | **Opus** | なし |
+
+### Phase 1 — Shorts即効打（次の2〜3セッション）
+| ID | タスク | 触るファイル | 主な受け入れ条件 | モデル | 依存 |
+|---|---|---|---|---|---|
+| S-1 | フック強化＋完全ループ化＋5.0s背景 | app.js, assets/, index.html | frame0前景表示・ループ境界目視OK・座標系不変 | **Opus** | なし |
+| S-2 | BGM追加（CC0・失敗時無音） | app.js, assets/bgm/, theme | iPhone実機で音付きmp4・フォールバック動作 | **Opus** | S-1推奨 |
+| D-1 | 記録の取りこぼし回収パック | gas/コード.gs, bluesky.js | hashtags/rebuildOf/予約メタ/BGM列が記録される | **Opus** | なし |
+| S-3 | メタデータ整備（タグ3〜5・題名・テンプレ） | bluesky.js, schedule/ | 生成タグ数3〜5・2ch別文言 | Sonnet | なし |
+| ベースライン | Studio目視の初回棚卸し（swipe率・フィード表示・年齢制限有無を記録） | （運用） | §9のベースライン表が埋まる | （Chami） | なし |
+
+### Phase 2 — 計測とタップ削減
+| ID | タスク | 触るファイル | 主な受け入れ条件 | モデル | 依存 |
+|---|---|---|---|---|---|
+| D-5 | Analytics API 維持率/engagedViews 自動化 | gas/（高度なサービス） | 日次で維持率列が自動更新 | **Opus** | 前提確認(§6 D-5) |
+| D-2 | 実売数のシート合流 refreshSales() | gas/コード.gs | 実売3列が毎時更新・worker無改修 | **Opus** | D-1 |
+| U-1 | カテゴリ自動リセット | bluesky.js, persist-fields.js | 投稿後に movieAttr* 全OFF | Sonnet | なし |
+| U-2 | 候補から一気に作成 | candidates.js | 候補→作成まで残り1タップ | Sonnet | なし |
+| U-4 | YouTube共有ボタン＋題名自動コピー | app.js, index.html | YT側タップ約12まで削減（実測） | Sonnet | なし |
+| U-3 | カウントダウン自動投稿トグル | bluesky.js | 確定済み経路のみ・キャンセル可 | Sonnet | U-2 |
+| D-3 | Looker Studio 中間シート＋週次レポート | gas/, シート | ヒートマップ表示・月曜メール到達 | Sonnet | D-1 |
+| D-4 | bucket_snaps サーバー移行 | gas/コード.gs, yt-clicks.js | 機種変相当（localStorage消去）後もランキング維持 | **Opus** | なし |
+
+### Phase 3 — 裁定後の大物
+| ID | タスク | 触るファイル | 主な受け入れ条件 | モデル | 依存 |
+|---|---|---|---|---|---|
+| S-4 | 尺11〜20秒 紙芝居モード＋AB開始 | app.js（またはU-5基盤） | 同一作品5秒版との比較データが§9設計で取れる | **Opus/Fable設計→Opus実装** | 裁定§1-2・P0-5 |
+| U-5 | WebCodecs オフラインレンダリング | app.js→新 render-core | フレーム厳密ループ・生成が実時間の1/3以下 | **Fable設計→Opus実装** | S-4と同時判断 |
+| U-6 | 下書きキューのバッチ生成 | drafts.js, app.js, scheduler.js | 5本連続生成・失敗分離・Drive保存並行 | **Opus** | U-5推奨 |
+| API監査 | Data API 監査申請→承認後 upload 自動化 | scripts/upload_yt.mjs（新規） | private→予約公開の全自動化 | **Opus** | 裁定§1-3・承認 |
+
+### Phase 4 — 保守性の本丸（機能の谷間に随時）
+| ID | タスク | モデル | 備考 |
+|---|---|---|---|
+| M-2 | 神ファイル分割（11PR・1PR=1切り出し） | Sonnet（切り出し）＋Opus（レビュー） | 挙動不変が受け入れ条件 |
+| M-3 | GAS分割＋ミラー乖離検出 | **Opus** | deploy_gas.mjs 無改修で通ること |
+| M-4/M-5 | イベント契約・ヘッダ規約 | Sonnet | |
+| M-6 | テスト5本追加 | Sonnet | |
+| M-7 | settings_pull ソフト鍵必須化 | **Opus** | 既存端末の互換に注意 |
+
+---
+
+## 9. 効果測定の設計（ABテスト判定）
+
+- **ベースライン（施策前に必ず取る）**: 直近30本の views / engagedViews / 引き込み率(engaged÷views) / Studio目視のswipe率・フィード表示回数 / 年齢制限の有無。これが無いと全施策の効果が語れない。
+- **AB判定の標準形**: 1条件あたり**最低10本×7日間**、同一アカウント・同一時間帯スロットで交互投稿。主指標=engagedViews中央値、副指標=引き込み率・クリック数。**中央値で+30%以上**を採用ライン（Shortsは分散が大きいため平均でなく中央値）。
+- **施策別の見る指標**: S-1（フック/ループ）→swipe率(週1目視)と引き込み率／S-2（BGM）→BGM列でグループ比較／S-4（尺）→engagedViews絶対値と視聴維持率／S-3（タグ・時刻）→フィード表示回数(目視)。
+- 二次統計由来の閾値（swipe30%・+21%等）は**方向性の根拠であり合格ラインには使わない**。
+
+---
+
+## 10. 不変条件・リスク
+
+**既存の不変条件（維持）**: 比率座標系 W=1080/H=1920・プレビュー=書き出し同一Canvas／完全クライアントサイド・ビルド無し／drive-worker非破壊／link-worker `u:<code>` 不変／秘密はSecrets/Propertiesのみ／紫UI禁止／`?v=`一括バンプ／GASはdeploy_gas.mjs経由のみ。
+
+**新規リスクと手当**:
+| リスク | 手当 |
+|---|---|
+| S-1でフェード廃止→既存の見た目が変わる | 既定変更＋「従来演出」トグル残置。acc別テーマで差し替え可に |
+| S-2音声でiOS機種差・録画失敗 | 無音フォールバック必須＋インシデント.md記録 |
+| M-1 sync反転で同期漏れ/過剰同期 | 差分ログの目視確認をタスク受け入れ条件に含める（INC-62逆パターン予防） |
+| 尺拡張でFANZA画像規約に抵触 | P0-5の確認完了をS-4の着手条件にする |
+| API自動アップでprivateロック | 監査承認前は絶対に本番アップロードに使わない |
+| 分割リファクタで回帰 | 1PR=1切り出し・挙動不変・実機スモークを厳守。機能改修と混ぜない |
+
+---
+
+## 11. 主要出典（Shorts攻略・2025〜2026）
+
+公式一次情報:
+- videos.insert（privateロック明記）: https://developers.google.com/youtube/v3/docs/videos/insert
+- private lock ヘルプ（公開変更・異議申立不可）: https://support.google.com/youtube/answer/7300965
+- Data API Revision History（2025/12クォータ改定・2026/6専用バケット）: https://developers.google.com/youtube/v3/revision_history
+- Quota Calculator: https://developers.google.com/youtube/v3/determine_quota_cost
+- Analytics API Metrics（engagedViews 2025/4〜）: https://developers.google.com/youtube/analytics/metrics
+- 外部リンクポリシー（ポルノリンク禁止・煽り文言例）: https://support.google.com/youtube/answer/9054257
+- 年齢制限: https://support.google.com/youtube/answer/2802167
+- オーディオライブラリ利用条件: https://support.google.com/youtube/answer/3376882
+- Shorts音楽ライセンス（アプリ内エディタ限定）: https://support.google.com/youtube/answer/13486873
+- 収益化ポリシー（inauthentic content 2025/7）: https://support.google.com/youtube/answer/1311392
+
+二次情報（方向性の根拠として扱う）:
+- vidIQ Shorts algorithm 2026: https://vidiq.com/blog/post/youtube-shorts-algorithm/
+- Shortimize（swipe率分析）: https://www.shortimize.com/blog/how-does-youtube-shorts-algorithm-work
+- quso.ai 尺別分析（11〜20秒帯）: https://quso.ai/research/youtube-shorts-length
+- Buffer 投稿時間180万本分析: https://buffer.com/resources/best-time-to-post-on-youtube/
+- Social Media Today（inauthenticポリシー解説）: https://www.socialmediatoday.com/news/youtube-clarifies-monetization-update-inauthentic-repeated-content/752892/
