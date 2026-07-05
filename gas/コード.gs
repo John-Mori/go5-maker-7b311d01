@@ -40,7 +40,7 @@ var FANZA_HEADERS = [
 // カテゴリ＝作品属性を名前で明記（キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄）。
 // ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
-var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し'];
+var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数'];
 // 作品属性の定義（順序＝カテゴリ列での並び）。フラグ名→表示名。
 var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-05G（history応答に作品cidを追加＝復元時に作品URLをcidから再構成できるように）';
+var GAS_VERSION = '2026-07-05H（D-1: hashtags/リビルド元ID/タイトル文字数を記録・予約経由投稿へ動画メタ中継。記録取りこぼし回収）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -252,7 +252,7 @@ function moveRow_(from, to, videoId, postUri, short) {
     if (!target) target = dlast + 1;
   }
   setComputed_(dst, dmap, target); // 計算式列は式を貼る（値上書きしない）
-  var COMPUTED = { '曜日': 1, 'day-type': 1, '時間帯スロット': 1, '承認率%': 1, 'リンククリック率%': 1, 'CVR発生%': 1, 'CVR確定%': 1 };
+  var COMPUTED = { '曜日': 1, 'day-type': 1, '時間帯スロット': 1, '承認率%': 1, 'リンククリック率%': 1, 'CVR発生%': 1, 'CVR確定%': 1, 'タイトル文字数': 1 };
   headers.forEach(function (h, ci) {
     if (COMPUTED[h]) return;             // 計算式列は上書きしない
     var dc = dmap[h]; if (!dc) return;   // 目的地に無い列はスキップ
@@ -396,6 +396,7 @@ function doPost(e) {
       postedAt: body.postedAt || '', // 過去データ矯正時に当時の投稿日時を保持（無ければGASがnow）
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
+      rebuildOf: body.rebuildOf || '',     // リビルド元の投稿videoId（送っているのに未記録だった取りこぼしを回収・D-1）
       shareUrl: body.shareUrl || '',       // da.gd共有URL（共有URL列）
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
       chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性（複数可）
@@ -437,6 +438,8 @@ function setComputed_(sh, map, r) {
   set('曜日', '=IF($B' + r + '="","",CHOOSE(WEEKDAY($B' + r + '),"日","月","火","水","木","金","土"))');
   set('day-type', '=IF($B' + r + '="","",IF(OR(WEEKDAY($B' + r + ',2)>=6,COUNTIF(Holidays,INT($B' + r + '))>0),"土日祝",IF(OR(WEEKDAY($B' + r + '+1,2)>=6,COUNTIF(Holidays,INT($B' + r + ')+1)>0),"休前日","平日")))');
   set('時間帯スロット', '=IF($B' + r + '="","",IF(HOUR($B' + r + ')<5,"深夜",IF(HOUR($B' + r + ')<11,"朝",IF(HOUR($B' + r + ')<15,"昼",IF(HOUR($B' + r + ')<19,"夕","夜")))))');
+  var cTitle = map['題名(コメント)'] ? columnLetter_(map['題名(コメント)']) : ''; // タイトル文字数（伸びる題名の傾向分析用・D-1）
+  if (cTitle) set('タイトル文字数', '=IF(' + cTitle + r + '="","",LEN(' + cTitle + r + '))');
   var cClick  = columnLetter_(map[clickColName_(map)]); // 短縮URLクリック数（旧称：開封数/Bitlyクリック）
   var cViews  = columnLetter_(map['視聴回数']);
   var cFhap   = columnLetter_(map['FANZA発生成約']);
@@ -517,6 +520,8 @@ function writeRecord_(channel, f) {
   putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
   putIf(clickColName_(map), (f.clicks !== undefined && f.clicks !== null && f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
   putIf('post_uri', f.postUri || '');
+  putIf('ハッシュタグ', f.hashtags || '');       // 受信していたのに書いていなかった取りこぼしを回収（D-1）
+  putIf('リビルド元ID', f.rebuildOf || '');       // リビルド前後の再生数比較をシートで可能に（D-1）
   // FANZA 価格スナップショット（投稿時1回のみ。null は書かない＝既存値を保護）。
   putIf('元値list_price', f.fanza_list_price !== undefined && f.fanza_list_price !== null ? f.fanza_list_price : '');
   putIf('割引後price', f.fanza_price !== undefined && f.fanza_price !== null ? f.fanza_price : '');
@@ -949,13 +954,18 @@ function setupTrigger() {
 //   追加プロパティ：BSKY_HANDLE / BSKY_APP_PW。画像は base64→ドライブ一時保存→投稿後ゴミ箱。
 // ============================================================
 var RES_SHEET = '予約';
-var RES_HEADERS = ['予約ID', '予約日時', '本文', '画像fileId', 'slot_id', 'ステータス', '結果URI', '結果URL', '投稿日時', 'エラー', 'channel'];
-var RCOL = { id: 1, when: 2, text: 3, img: 4, slot: 5, status: 6, uri: 7, url: 8, postedAt: 9, error: 10, channel: 11 };
+var RES_HEADERS = ['予約ID', '予約日時', '本文', '画像fileId', 'slot_id', 'ステータス', '結果URI', '結果URL', '投稿日時', 'エラー', 'channel', 'meta'];
+var RCOL = { id: 1, when: 2, text: 3, img: 4, slot: 5, status: 6, uri: 7, url: 8, postedAt: 9, error: 10, channel: 11, meta: 12 };
 
 function getResSheet_() {
   var ss = openSS_();
   var sh = ss.getSheetByName(RES_SHEET) || ss.insertSheet(RES_SHEET);
-  if (sh.getLastRow() === 0) sh.appendRow(RES_HEADERS);
+  if (sh.getLastRow() === 0) { sh.appendRow(RES_HEADERS); return sh; }
+  // 既存シートに meta 列が無ければ末尾に追加（冪等・D-1で追加）。
+  if (sh.getLastColumn() < RES_HEADERS.length) {
+    var hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+    if (hdr.indexOf('meta') === -1) sh.getRange(1, RCOL.meta).setValue('meta');
+  }
   return sh;
 }
 function getDriveFolder_() {
@@ -979,6 +989,8 @@ function handleReserve_(body) {
   row[RCOL.img - 1] = imgId; row[RCOL.slot - 1] = body.slot_id || ''; row[RCOL.status - 1] = 'pending';
   row[RCOL.uri - 1] = ''; row[RCOL.url - 1] = ''; row[RCOL.postedAt - 1] = ''; row[RCOL.error - 1] = '';
   row[RCOL.channel - 1] = body.channel || 'acc1';
+  // 動画メタ（videoId/カテゴリ/作品状態/リビルド元）をJSONで保持→投稿時に記録へ中継（D-1・薄い行の解消）。
+  row[RCOL.meta - 1] = body.meta ? (typeof body.meta === 'string' ? body.meta : JSON.stringify(body.meta)) : '';
   sh.appendRow(row);
   return jsonOut_({ ok: true, id: id });
 }
@@ -1002,10 +1014,17 @@ function runReservations() {
       sh.getRange(i + 2, RCOL.url).setValue(res.postUrl);
       sh.getRange(i + 2, RCOL.postedAt).setValue(new Date());
       try {
+        // 予約時に凍結した動画メタ（videoId/カテゴリ/作品状態/リビルド元）を記録へ中継（D-1）。
+        var meta = {};
+        try { var mj = rows[i][RCOL.meta - 1]; if (mj) meta = JSON.parse(mj) || {}; } catch (e) { meta = {}; }
+        var attrs = meta.attrs || {};
         writeRecord_(ch, {
+          videoId: meta.videoId || '',
           title: (String(text).split('\n')[0] || ''), postUrl: res.postUrl,
           affiliateUrl: (String(text).match(/https?:\/\/[^\s]+/) || [''])[0],
-          workUrl: '', hashtags: extractHashtags_(text), postUri: res.uri
+          workUrl: meta.workUrl || '', hashtags: extractHashtags_(text), postUri: res.uri,
+          workState: meta.workState, rebuild: meta.rebuild, rebuildOf: meta.rebuildOf || '',
+          chara: attrs.chara, jk: attrs.jk, gyaru: attrs.gyaru, isekai: attrs.isekai, ai: attrs.ai, ol: attrs.ol, soshu: attrs.soshu
         });
       } catch (e) {}
       if (imgId) { try { DriveApp.getFileById(imgId).setTrashed(true); } catch (e) {} }

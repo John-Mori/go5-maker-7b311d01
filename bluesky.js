@@ -1353,10 +1353,11 @@
   }
 
   // ---- 無人予約（Phase5）：GASへ送信し、時間トリガーが投稿（タブを閉じてもOK） ----
-  function reserveUnattended(text, blob, ms, slotId) {
+  function reserveUnattended(text, blob, ms, slotId, meta) {
     var gasUrl = (els.gasUrl.value || '').trim();
     if (!gasUrl) { setPostStatus('無人予約には⚙の「記録用URL（GAS）」設定が必要です。'); return; }
     var payload = { type: 'reserve', channel: (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'), scheduled_at: new Date(ms).toISOString(), text: text, slot_id: slotId || '' };
+    if (meta) payload.meta = meta; // 動画メタを中継＝GAS無人投稿でも videoId/カテゴリ/作品状態/リビルド元が記録される（D-1）
     function send() {
       setPostStatus('☁️ 無人予約を送信中…');
       fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) })
@@ -1383,7 +1384,8 @@
       var unattended = els.unattended && els.unattended.checked;
       setPostStatus('予約を準備中…');
       if (unattended) {
-        (f ? compressFile(f) : Promise.resolve(null)).then(function (blob) { reserveUnattended(text, blob, ms, slotId); });
+        var _uMeta = captureMeta_(); // 予約時に動画メタを凍結（発火時UIに依存させない・D-1）
+        (f ? compressFile(f) : Promise.resolve(null)).then(function (blob) { reserveUnattended(text, blob, ms, slotId, _uMeta); });
         return;
       }
       var c = creds();
@@ -1459,6 +1461,23 @@
 
   var lastTitle = '';
   var topEl = document.getElementById('top');
+  var ytTagWarnEl = document.getElementById('ytTagWarn');
+  // S-3: タグは3〜5個（#Shorts＋ジャンル語＋作品固有）が目安。15個超はYouTubeが全て無効化する。
+  //   ※非破壊：ユーザーのタグは書き換えず、過不足だけ注意表示する。
+  function updateTagWarn(tags) {
+    if (!ytTagWarnEl) return;
+    var list = (tags.match(/#[^\s#]+/g) || []);
+    var n = list.length;
+    var hasShorts = list.some(function (t) { return /^#shorts$/i.test(t); });
+    var msg = '', col = 'var(--sub)';
+    if (n > 15) { msg = '⚠ タグが' + n + '個＝15個超はYouTubeが全タグを無効化します。3〜5個に絞ってください。'; col = '#e6a14e'; }
+    else if (n === 0) { msg = 'ℹ タグ未設定。#Shorts＋ジャンル語で3〜5個入れるとフィードで有利です。'; col = 'var(--sub)'; }
+    else if (n < 3) { msg = 'ℹ タグ' + n + '個。#Shorts＋ジャンル語＋作品固有で3〜5個が目安です。'; col = 'var(--sub)'; }
+    else if (n > 5) { msg = 'ℹ タグ' + n + '個。3〜5個に絞ると1本ずつの評価が集中します。' + (hasShorts ? '' : ' #Shorts も入れると◎。'); col = 'var(--sub)'; }
+    else { msg = '✓ タグ' + n + '個（3〜5個）' + (hasShorts ? '' : '・#Shorts を足すと◎'); col = hasShorts ? '#7fb98a' : 'var(--sub)'; }
+    ytTagWarnEl.textContent = msg;
+    ytTagWarnEl.style.color = col;
+  }
   function buildTitle() {
     if (!els.ytTitle) return;
     var comment = (topEl && topEl.value ? topEl.value.trim() : '');
@@ -1466,7 +1485,9 @@
     var title = comment + (comment && tags ? ' ' : '') + tags;
     lastTitle = title;
     els.ytTitle.textContent = title || '（「動画作成」タブのコメントを入れると題名が出ます）';
+    updateTagWarn(tags);
   }
+  if (els.ytTags) els.ytTags.addEventListener('input', buildTitle);
   if (topEl) topEl.addEventListener('input', buildTitle);
   var tabPostBtn = document.getElementById('tabPost'); if (tabPostBtn) tabPostBtn.addEventListener('click', buildTitle);
   if (els.ytTitleCopy) els.ytTitleCopy.addEventListener('click', function () { if (lastTitle) copyText(lastTitle, els.ytTitleCopy); });

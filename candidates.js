@@ -444,7 +444,19 @@
         window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }));
       }).catch(function () {});
     }
-    try { window.scrollTo(0, 0); } catch (e) {}
+    // U-2「一気に作成」：作品データを流し込んだら、作成ボタンまで運んで光らせる＝残り1タップ（行動量支援）。
+    focusMakeButton_();
+  }
+  // 作成ボタン(#makeBtn)を画面内へスクロール＋一時ハイライト＋フォーカス。無ければ先頭へ。
+  function focusMakeButton_() {
+    setTimeout(function () {
+      var mk = document.getElementById('makeBtn');
+      if (!mk) { try { window.scrollTo(0, 0); } catch (e) {} return; }
+      try { mk.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { try { window.scrollTo(0, 0); } catch (e2) {} }
+      try { mk.focus({ preventScroll: true }); } catch (e) {}
+      mk.classList.add('cta-ready-pulse');
+      setTimeout(function () { mk.classList.remove('cta-ready-pulse'); }, 2400);
+    }, 260); // タブ切替の描画が終わってから
   }
   // 候補（Twitter起点/DMM起点どちらも）に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ（旧項目を置換）。
   function applyWorkUrl_(oldItem, workUrlRaw, refData, cb) {

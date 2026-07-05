@@ -46,7 +46,7 @@
   // ---- アカウント定義（背景動画の切替。Bluesky/YouTube個別資格情報は保留＝acc1共有を流用）----
   const ACCOUNTS = {
     acc1: { label: "月読み色恋劇場", bg: "assets/bg_main.mp4" },
-    acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4" },
+    acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え(継ぎ目21.2→27.0dB)。?vはキャッシュ更新用
   };
   let curAccount = "acc1";
 
