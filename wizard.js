@@ -392,7 +392,7 @@
       _currentStep = 3;
       renderStep(3);
     };
-    window.addEventListener('video-created', _onVideoCreated);
+    document.addEventListener('video-created', _onVideoCreated);
   }
 
   /* ---- ステップ3: Bluesky投稿（自動） ---- */
@@ -424,7 +424,7 @@
         renderStep(4);
       });
     };
-    window.addEventListener('bluesky-posted', _onBskyPosted);
+    document.addEventListener('bluesky-posted', _onBskyPosted);
   }
 
   /* ---- ステップ4: YouTubeに上げる ---- */
@@ -634,11 +634,11 @@
    * ========================================================= */
   function removeListeners() {
     if (_onVideoCreated) {
-      window.removeEventListener('video-created', _onVideoCreated);
+      document.removeEventListener('video-created', _onVideoCreated);
       _onVideoCreated = null;
     }
     if (_onBskyPosted) {
-      window.removeEventListener('bluesky-posted', _onBskyPosted);
+      document.removeEventListener('bluesky-posted', _onBskyPosted);
       _onBskyPosted = null;
     }
   }
