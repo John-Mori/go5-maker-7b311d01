@@ -285,7 +285,7 @@
   // input要素のHTMLに「📋貼り付け」ボタンを横付けした行を返す（inputはflex:1で伸びる）。
   function pasteRow_(inputHtml, inputId) {
     return '<div style="display:flex;gap:6px;align-items:stretch;">' + inputHtml +
-      '<button type="button" class="ghost paste-btn" data-paste="' + inputId + '" title="コピー中の文字を貼り付け" style="flex:0 0 auto;width:auto;margin:0;white-space:nowrap;padding:0 12px;">📋 貼り付け</button></div>';
+      '<button type="button" class="ghost paste-btn" data-paste="' + inputId + '" title="コピー中の文字を貼り付け" style="flex:0 0 auto;width:auto;margin:0;white-space:nowrap;padding:0 12px;">貼り付け</button></div>';
   }
   // 画像ファイル→縮小dataURL(長辺1280px・JPEG)。localStorage肥大とQuota超過を防ぐ。
   function fileToScaledDataUrl(file, cb) {
@@ -550,7 +550,7 @@
       '</div>' +
       '<label class="hint" style="display:block;margin-bottom:2px;">コメント</label>' +
       '<input id="refImgComment" type="text" class="cand-refimg-line" autocomplete="off" placeholder="コメント">' +
-      '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter URL</label>' +
+      '<label class="hint" style="display:block;margin:8px 0 2px;">X / Bluesky URL</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
@@ -1365,22 +1365,69 @@
 
   // ── 候補リスト（既定の💡候補 と 独立した候補タブ で共用。tabIdごとに保存先が独立） ──
   //   サークルタブと同じヘッダ（並び替え／🔁／▶今すぐ取得／✏️編集／🙈非表示）を持つ。
-  // 作品URL追加フォーム（モーダル化＝恒常表示をやめて省スペース）。
+  // 作品URL追加フォーム（モーダル化＝恒常表示をやめて省スペース）。入力はダーク面用の白字(.cand-refimg-line)。
   function addFormHtml_(isMain) {
+    var slots = '';
+    for (var si = 0; si < 4; si++) slots += '<button type="button" class="cand-add-imgslot" data-slot="' + si + '"><span class="cand-add-slot-hint">＋<br>画像<br>貼り付け</span></button>';
     return '' +
       '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
       '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>💡候補とは別に、このタブに独立して保存されます。') + '</div>' +
-      '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" type="text" inputmode="url" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;min-width:0;">', 'candUrl') + '</div>' +
-      '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter(X)のURL（任意）— <b>これだけでも追加できます</b></label>' +
-      '<div>' + pasteRow_('<input id="candTwitter" type="text" inputmode="url" placeholder="https://x.com/…/status/… を貼り付け" autocomplete="off" style="flex:1;min-width:0;">', 'candTwitter') + '</div>' +
-      '<button id="candAdd" type="button" class="primary" style="margin-top:8px;font-size:.9rem;padding:10px 18px;width:auto;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button>' +
+      '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;min-width:0;">', 'candUrl') + '</div>' +
+      '<label class="hint" style="display:block;margin:8px 0 2px;">X / Bluesky の投稿URL（任意）— <b>これだけでも追加できます</b></label>' +
+      '<div>' + pasteRow_('<input id="candTwitter" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://x.com/…/status/… か https://bsky.app/profile/…/post/…" autocomplete="off" style="flex:1;min-width:0;">', 'candTwitter') + '</div>' +
+      '<label class="hint" style="display:block;margin:10px 0 2px;">動画生成用の画像（任意・最大4枚）— ボタンを押すとコピー中の画像が左から入ります</label>' +
+      '<div class="cand-add-imgrow">' + slots + '</div>' +
+      '<div style="display:flex;margin-top:8px;"><span style="flex:1 1 auto;"></span>' +
+        '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.9rem;padding:10px 18px;width:auto;flex:0 0 auto;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button></div>' +
       '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
       '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
         '<div class="hint">サークルの作品を<b>まとめて</b>' + (isMain ? '候補' : 'このタブ') + 'に追加できます（サークルID / サークルURL / 作品URLのどれか）。タブ名は変わりません。</div>' +
-        '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" type="text" inputmode="url" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;min-width:0;">', 'candBulkSrc') + '</div>' +
+        '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" type="text" inputmode="url" class="cand-refimg-line" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;min-width:0;">', 'candBulkSrc') + '</div>' +
         '<button id="candBulkAdd" type="button" class="ghost" style="margin-top:8px;width:auto;">🏭 サークルの作品を全部追加</button>' +
         '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
       '</div>';
+  }
+  // 追加モーダルの画像スロット（最大4・左詰め）。候補追加時に「動画生成用の画像」として一緒に保存される。
+  var _addModalImgs = [];
+  function renderAddSlots_() {
+    if (!_addOverlay) return;
+    var btns = _addOverlay.querySelectorAll('.cand-add-imgslot');
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i], src = _addModalImgs[i] || '';
+      if (src) {
+        b.className = 'cand-add-imgslot filled';
+        b.innerHTML = '<img src="' + esc(src) + '" alt=""><span class="cand-add-slot-x" data-clearslot="' + i + '">✕</span>';
+      } else {
+        b.className = 'cand-add-imgslot';
+        b.innerHTML = '<span class="cand-add-slot-hint">＋<br>画像<br>貼り付け</span>';
+      }
+    }
+  }
+  function wireAddSlots_(body) {
+    body.querySelectorAll('.cand-add-imgslot').forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        // ✕（削除）：そのスロットを消して左詰め
+        var x = e.target && e.target.getAttribute && e.target.getAttribute('data-clearslot');
+        if (x != null && x !== '') { _addModalImgs.splice(parseInt(x, 10), 1); renderAddSlots_(); return; }
+        var slot = parseInt(b.getAttribute('data-slot'), 10);
+        var msg = $('candMsg'); if (msg) msg.textContent = '画像を貼り付け中…';
+        pasteImageFromClipboard_(function (durl, err) {
+          if (err) { if (msg) msg.textContent = err; return; }
+          if (_addModalImgs[slot]) _addModalImgs[slot] = durl;      // 充填済みスロット＝差し替え
+          else { _addModalImgs.push(durl); if (_addModalImgs.length > 4) _addModalImgs.length = 4; } // 空き＝左から詰める
+          renderAddSlots_();
+          if (msg) msg.textContent = '画像を貼り付けました（' + _addModalImgs.filter(Boolean).length + '/4枚・追加ボタンで確定）';
+        });
+      });
+    });
+  }
+  // 追加確定時に呼ぶ：スロット画像を候補の動画生成用画像として保存し、スロットを空にする。
+  function attachAddImgs_(cid) {
+    var imgs = _addModalImgs.filter(Boolean);
+    if (!cid || !imgs.length) return;
+    refImgSave(cid, { imgs: imgs, comment: '', twitterUrl: '' });
+    _addModalImgs = [];
+    renderAddSlots_();
   }
   var _addOverlay = null;
   function openAddModal_(tabId, isMain) {
@@ -1394,10 +1441,12 @@
       _addOverlay = ov;
     }
     var body = ov.querySelector('.fz-body');
+    _addModalImgs = []; // 開くたびにスロットを白紙に
     body.innerHTML = addFormHtml_(isMain);
     $('candAdd').addEventListener('click', function () { addCandidate(tabId); });
     $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
     wirePaste_(body);
+    wireAddSlots_(body);
     ov.hidden = false;
   }
 
@@ -1446,13 +1495,29 @@
     if (m2) { var u = m2[0].split('?')[0]; return { ok: true, user: '', id: '', url: u, cid: 'tw_' + u.replace(/[^0-9A-Za-z_]/g, '').slice(-40) }; }
     return { ok: false };
   }
+  // Bluesky の投稿URL（https://bsky.app/profile/<handle>/post/<rkey>）を判定・正規化。
+  function parseBskyUrl_(raw) {
+    var s = String(raw || '').trim(); if (!s) return { ok: false };
+    var m = s.match(/https?:\/\/(?:www\.)?bsky\.app\/profile\/([^\/?#]+)\/post\/([0-9a-z]+)/i);
+    if (m) return { ok: true, user: m[1], id: m[2], url: 'https://bsky.app/profile/' + m[1] + '/post/' + m[2], cid: 'bs_' + m[2], kind: 'bsky' };
+    return { ok: false };
+  }
+  // X(Twitter) / Bluesky どちらの投稿URLも受け付ける（kind='x'|'bsky'）。
+  function parseSnsUrl_(raw) {
+    var t = parseTwitterUrl_(raw); if (t.ok) { t.kind = 'x'; return t; }
+    return parseBskyUrl_(raw);
+  }
   function addTwitterCandidate_(tabId, tw, inp, twInp, msg) {
     var key = itemsKey(tabId), items = lsGet(key, '[]');
-    if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) { msg.textContent = 'ℹ️ すでにこのタブにあります'; return; }
-    items.unshift({ url: tw.url, cid: tw.cid, twitterUrl: tw.url, isTwitter: true, title: tw.user ? ('🐦 @' + tw.user + ' のポスト') : '🐦 X(Twitter)のポスト', addedAt: new Date().getTime() });
+    if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) { msg.textContent = 'ℹ️ この投稿は既に追加されています（重複追加しません）'; return; }
+    var isB = tw.kind === 'bsky';
+    var title = isB ? (tw.user ? ('🦋 @' + tw.user + ' のポスト') : '🦋 Blueskyのポスト')
+                    : (tw.user ? ('🐦 @' + tw.user + ' のポスト') : '🐦 X(Twitter)のポスト');
+    items.unshift({ url: tw.url, cid: tw.cid, twitterUrl: tw.url, isTwitter: true, title: title, addedAt: new Date().getTime() });
     lsSet(key, items);
+    attachAddImgs_(tw.cid); // 追加モーダルの画像スロットも一緒に保存（動画生成用）
     if (inp) inp.value = ''; if (twInp) twInp.value = '';
-    msg.textContent = '✅ Twitter(X)のURLを追加しました';
+    msg.textContent = isB ? '✅ Blueskyの投稿URLを追加しました' : '✅ Twitter(X)のURLを追加しました';
     renderCandList(tabId);
   }
   function addCandidate(tabId) {
@@ -1465,7 +1530,7 @@
     var r = (raw && url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
     // ①作品URLがFANZA作品として有効 → 従来のFANZA候補（Twitter URLがあれば紐づけて保存）
     if (raw && r && r.ok) {
-      var twForWork = parseTwitterUrl_(twRaw);
+      var twForWork = parseSnsUrl_(twRaw); // X / Bluesky どちらの投稿URLでも紐づけ可
       var items0 = lsGet(key, '[]');
       if (items0.some(function (x) { return x.cid === r.cid; })) { msg.textContent = 'ℹ️ この作品は既に追加されています（重複追加しません）'; return; }
       msg.textContent = '⏳ 作品情報を取得中…';
@@ -1486,9 +1551,10 @@
           addedAt: new Date().getTime()
         };
         if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
-        if (twForWork.ok) it.twitterUrl = twForWork.url; // Twitter URLも一緒に保存
+        if (twForWork.ok) it.twitterUrl = twForWork.url; // X / Bluesky の投稿URLも一緒に保存
         items.unshift(it);
         lsSet(key, items);
+        attachAddImgs_(r.cid); // 追加モーダルの画像スロットも一緒に保存（動画生成用・左から順）
         inp.value = ''; if (twInp) twInp.value = ''; msg.textContent = '✅ 追加しました';
         renderCandList(tabId);
       };
@@ -1500,10 +1566,10 @@
       return;
     }
     // ②作品URLが無い/FANZA以外 → Twitter(X)のURLだけで追加（Twitter欄優先、無ければ作品欄に貼られたX URLも可）
-    var tw = parseTwitterUrl_(twRaw) ; if (!tw.ok) tw = parseTwitterUrl_(raw);
+    var tw = parseSnsUrl_(twRaw); if (!tw.ok) tw = parseSnsUrl_(raw); // X / Bluesky どちらでも単独追加可
     if (tw.ok) { addTwitterCandidate_(tabId, tw, inp, twInp, msg); return; }
     // ③どちらでもない
-    msg.textContent = (raw || twRaw) ? '⚠️ FANZAの作品URL か Twitter(X)のURLを入れてください' : '⚠️ URLを入力してください';
+    msg.textContent = (raw || twRaw) ? '⚠️ FANZAの作品URL か X / Bluesky の投稿URLを入れてください' : '⚠️ URLを入力してください';
   }
   // サークルの全作品を、指定タブ(候補/独立タブ)へまとめて追加（重複cidは除外・タブ名は不変）。
   function bulkAddCircle(tabId) {
@@ -1815,7 +1881,7 @@
         // 作品／投稿編集の行（管理ボタンは同じ行に置かない）
         '<div class="cand-actions">' +
           ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
-          (it.twitterUrl ? '<a class="vlink" href="' + esc(it.twitterUrl) + '" target="_blank" rel="noopener" style="color:#1d9bf0;">🐦 X↗</a>' : '') +
+          (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? '🦋 Bsky↗' : '🐦 X↗') + '</a>'; })(it.twitterUrl) : '') +
           '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿編集' + (hasRef ? '✓' : '') + '</button>' +
           '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
         '</div>' +
