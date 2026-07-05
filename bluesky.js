@@ -630,6 +630,21 @@
     if (els.shortUrlOut) els.shortUrlOut.textContent = url || '（短縮URLを取得できませんでした）';
     if (url) { putUrlTop(url); prevShortUrl = url; lastShortUrl = url; }
   }
+  // ★前作の短縮リンクを説明欄に残さない（INC-70）：新しい動画を作ったら、1行目の短縮リンク行をプレースホルダに戻す。
+  //   この作品を Bluesky に投稿すると shortenAndShow→putUrlTop が今回の短縮URLへ置換する。
+  //   これをしないと、候補から別作品を作った直後にYT説明欄をコピーすると「前作のBluesky投稿」への案内が混入する。
+  function resetYtDescShortLink_() {
+    prevShortUrl = ''; lastShortUrl = '';
+    if (els.shortUrlOut) els.shortUrlOut.textContent = PLACEHOLDER_URL;
+    if (!els.ytDesc) return;
+    var lines = els.ytDesc.value.split('\n'); if (!lines.length) return;
+    var f = (lines[0] || '').trim();
+    // 1行目が短縮URL(前作リンク)/プレースホルダ/「短縮URL」表記ならプレースホルダへ戻す（案内文などはそのまま）
+    if (/^https?:\/\//.test(f) || f === PLACEHOLDER_URL || /短縮URL/.test(f)) {
+      lines[0] = PLACEHOLDER_URL;
+      els.ytDesc.value = lines.join('\n'); saveA('yt_desc', els.ytDesc.value);
+    }
+  }
 
   // ---- GAS 記録（共有シークレットは廃止） ----
   // workUrl（cid）に対応するFANZA取得済み情報（movieInfoCacheのキャッシュ）を返す。無ければ null。
@@ -1472,6 +1487,7 @@
   document.addEventListener('video-created', function (e) {
     var d = (e && e.detail) || {};
     if (d.videoId) currentVideoId = d.videoId;
+    resetYtDescShortLink_(); // 新作の動画＝前作の短縮リンクを説明欄から消す（この作品を投稿すると新リンクが入る・INC-70）
   });
   // ※旧「Bsky添付画像を自動ダウンロード」は廃止（iPhoneで毎回『ダウンロードしますか？』が
   //   出て邪魔＆Drive保存と干渉するため）。添付画像は投稿成功時に Drive へ保存する（drive-upload.js）。
