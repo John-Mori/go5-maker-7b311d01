@@ -971,6 +971,8 @@
   // ---- 過去の短縮URL履歴（端末内・アカウント別。GAS非依存で確実）----
   function histKeyFor_(a) { return 'short_hist__' + (a || acctId()); }
   function histLoadFor_(a) { try { return JSON.parse(localStorage.getItem(histKeyFor_(a)) || '[]'); } catch (e) { return []; } }
+  // 指定アカウントで投稿済みの作品URL一覧（候補タブの「投稿済み」判定用・重複投稿=P0-3の防止に使う）。
+  try { window.Go5PostedWorkUrls = function (a) { try { return histLoadFor_(a || acctId()).map(function (h) { return (h && h.workUrl) || ''; }).filter(Boolean); } catch (e) { return []; } }; } catch (e) {}
   function histSaveFor_(a, arr) { try { localStorage.setItem(histKeyFor_(a), JSON.stringify(arr.slice(0, 200))); } catch (e) {} }
   function histKey() { return histKeyFor_(acctId()); }
   function histLoad() { return histLoadFor_(acctId()); }

@@ -382,6 +382,41 @@
   function zoomGo_(d) { if (!_zoomList.length) return; _zi = (_zi + d + _zoomList.length) % _zoomList.length; zoomShow_(); }
   function openImgZoom_(images, idx) { if (!images || !images.length) return; _zoomList = images.slice(); _zi = Math.min(Math.max(0, idx || 0), _zoomList.length - 1); zoomShow_(); }
 
+  // この作品(cid)が各チャンネルで投稿済みか（投稿履歴の workUrl→cid 照合）。{acc1,acc2} を返す。
+  var _ACCTS = [['acc1', '月詠み'], ['acc2', '宵桜艶帖']];
+  function postedChannelsForCid_(cid) {
+    var out = { acc1: false, acc2: false };
+    if (!cid || typeof window.Go5PostedWorkUrls !== 'function') return out;
+    _ACCTS.forEach(function (a) {
+      var urls = window.Go5PostedWorkUrls(a[0]) || [];
+      out[a[0]] = urls.some(function (u) {
+        var r = window.buildAffiliateLink ? window.buildAffiliateLink(u, '') : null;
+        return r && r.ok && r.cid === cid;
+      });
+    });
+    return out;
+  }
+  function curAccount_() { try { return window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'; } catch (e) { return 'acc1'; } }
+  // モーダル右上のアカウント切替ボタン列（該当chで投稿済みなら「投稿済」表示＝重複投稿の抑止）。
+  function acctRowHtml_(cid) {
+    var posted = postedChannelsForCid_(cid), cur = curAccount_();
+    return '<div class="cand-acct-row">' + _ACCTS.map(function (a) {
+      var p = posted[a[0]];
+      return '<button type="button" class="cand-acct-btn cand-acct-' + a[0] + (a[0] === cur ? ' active' : '') + (p ? ' posted' : '') + '" data-acct="' + a[0] + '" title="' + (p ? 'このチャンネルで投稿済み' : 'このチャンネルに切替') + '">' +
+        esc(a[1]) + (p ? '<span class="cand-acct-posted">✓投稿済</span>' : '') + '</button>';
+    }).join('') + '</div>';
+  }
+  function wireAcctRow_(body) {
+    body.querySelectorAll('[data-acct]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var a = b.getAttribute('data-acct');
+        var hdr = document.getElementById(a === 'acc2' ? 'acctBtn2' : 'acctBtn1');
+        if (hdr) hdr.click(); // アプリの現在アカウントを切替（テーマ/背景/設定も追従）
+        body.querySelectorAll('[data-acct]').forEach(function (x) { x.classList.toggle('active', x.getAttribute('data-acct') === a); });
+      });
+    });
+  }
+
   // ── 投稿画像モーダル（1枚の元画像＋メモを保存）──
   var _refOverlay = null;
   function openRefImgModal_(it, onSaved) {
@@ -403,6 +438,7 @@
     var workUrlPrefill = (!it.isTwitter && it.url) ? it.url : '';
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
+      acctRowHtml_(it.cid) +
       '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">' + esc(it.title || it.cid) + '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
         '<span class="hint" style="margin:0;flex:1;">動画生成用の画像</span>' +
@@ -490,6 +526,7 @@
       setTimeout(function () { ov.hidden = true; }, 600);
     });
     wirePaste_(body);
+    wireAcctRow_(body);
     ov.hidden = false;
   }
   // 動画作成タブへ切替え、候補の作品データ（前景画像/作者/コメント/作品URL）を各入力欄へ埋め込む。
@@ -551,7 +588,7 @@
     var r = (url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
     if (!r || !r.ok) { cb(false, 'FANZAの作品URLではないようです'); return; }
     var tabId = _activeTab, key = itemsKey(tabId), items = lsGet(key, '[]'), oldCid = oldItem.cid;
-    if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'その作品は既にこのタブにあります'); return; }
+    if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'この作品は既に追加されています（重複追加しません）'); return; }
     // 画像・メモ・Twitter URL を新cidへ移す
     refImgSave(r.cid, { img: refData.img || '', comment: refData.comment || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '' });
     var bimg = (bskyImgOf(oldCid) || {}).img; if (bimg) bskyImgSave(r.cid, bimg);
@@ -1250,7 +1287,7 @@
     if (raw && r && r.ok) {
       var twForWork = parseTwitterUrl_(twRaw);
       var items0 = lsGet(key, '[]');
-      if (items0.some(function (x) { return x.cid === r.cid; })) { msg.textContent = 'ℹ️ すでにこのタブにあります'; return; }
+      if (items0.some(function (x) { return x.cid === r.cid; })) { msg.textContent = 'ℹ️ この作品は既に追加されています（重複追加しません）'; return; }
       msg.textContent = '⏳ 作品情報を取得中…';
       var cfg = workerCfg();
       var put = function (info) {
@@ -1368,8 +1405,8 @@
       (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます(PCの電源が必要)。' : '') + '</p>';
     el.innerHTML = head + arr.map(function (it) {
       var act = _showHidden
-        ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn" data-delcid="' + esc(it.cid) + '">🗑 削除</button>'
-        : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(it.cid) + '">🙈 非表示</button> <button type="button" class="cand-hide-btn" data-delcid="' + esc(it.cid) + '">🗑 削除</button>';
+        ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>'
+        : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(it.cid) + '">🙈 非表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>';
       return candCard(it, act);
     }).join('');
     wireCardCommon_(el);
