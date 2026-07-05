@@ -1286,6 +1286,42 @@
 
   // ── 候補リスト（既定の💡候補 と 独立した候補タブ で共用。tabIdごとに保存先が独立） ──
   //   サークルタブと同じヘッダ（並び替え／🔁／▶今すぐ取得／✏️編集／🙈非表示）を持つ。
+  // 作品URL追加フォーム（モーダル化＝恒常表示をやめて省スペース）。
+  function addFormHtml_(isMain) {
+    return '' +
+      '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
+      '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>💡候補とは別に、このタブに独立して保存されます。') + '</div>' +
+      '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" type="text" inputmode="url" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;min-width:0;">', 'candUrl') + '</div>' +
+      '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter(X)のURL（任意）— <b>これだけでも追加できます</b></label>' +
+      '<div>' + pasteRow_('<input id="candTwitter" type="text" inputmode="url" placeholder="https://x.com/…/status/… を貼り付け" autocomplete="off" style="flex:1;min-width:0;">', 'candTwitter') + '</div>' +
+      '<button id="candAdd" type="button" class="primary" style="margin-top:8px;font-size:.9rem;padding:10px;width:100%;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button>' +
+      '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
+      '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
+        '<div class="hint">サークルの作品を<b>まとめて</b>' + (isMain ? '候補' : 'このタブ') + 'に追加できます（サークルID / サークルURL / 作品URLのどれか）。タブ名は変わりません。</div>' +
+        '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" type="text" inputmode="url" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;min-width:0;">', 'candBulkSrc') + '</div>' +
+        '<button id="candBulkAdd" type="button" class="ghost" style="margin-top:8px;width:auto;">🏭 サークルの作品を全部追加</button>' +
+        '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
+      '</div>';
+  }
+  var _addOverlay = null;
+  function openAddModal_(tabId, isMain) {
+    var ov = _addOverlay;
+    if (!ov) {
+      ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
+      ov.innerHTML = '<div class="fz-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
+      ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
+      _addOverlay = ov;
+    }
+    var body = ov.querySelector('.fz-body');
+    body.innerHTML = addFormHtml_(isMain);
+    $('candAdd').addEventListener('click', function () { addCandidate(tabId); });
+    $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
+    wirePaste_(body);
+    ov.hidden = false;
+  }
+
   function renderMain(tabId) {
     tabId = tabId || 'main';
     var body = $('candBody');
@@ -1297,35 +1333,24 @@
       '<button id="candReload" type="button" class="ghost" title="価格・販売数を取り直す" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
       (isMain ? '' : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
-      '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
+      '<button id="candAddOpen" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ ' + (isMain ? '追加' : 'このタブに追加') + '</button>' +
       '</div>' +
-      '<label class="cand-filter-sale"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中の作品のみ表示</span></label>' +
+      // 省スペース行：セール絞込（左）＋非表示トグル（右端・状態で色と文言が変化）
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">' +
+        '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
+        '<span style="flex:1 1 auto;"></span>' +
+        '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リスト') + '</button>' +
+      '</div>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
       ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
       '</div>';
-    var addCard = '<div class="card">' +
-      '<div class="field-label" style="margin-top:0;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
-      '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>💡候補とは別に、このタブに独立して保存されます。') + '</div>' +
-      '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" type="text" inputmode="url" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;">', 'candUrl') + '</div>' +
-      '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter(X)のURL（任意）— <b>これだけでも追加できます</b></label>' +
-      '<div>' + pasteRow_('<input id="candTwitter" type="text" inputmode="url" placeholder="https://x.com/…/status/… を貼り付け" autocomplete="off" style="flex:1;">', 'candTwitter') + '</div>' +
-      '<button id="candAdd" type="button" class="primary" style="margin-top:8px;font-size:.9rem;padding:10px;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button>' +
-      '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
-      '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
-        '<div class="hint">サークルの作品を<b>まとめて</b>' + (isMain ? '候補' : 'このタブ') + 'に追加できます（サークルID / サークルURL / 作品URLのどれか）。タブ名は変わりません。</div>' +
-        '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" type="text" inputmode="url" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;">', 'candBulkSrc') + '</div>' +
-        '<button id="candBulkAdd" type="button" class="ghost" style="margin-top:8px;width:auto;">🏭 サークルの作品を全部追加</button>' +
-        '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
-      '</div>' +
-      '</div>';
-    body.innerHTML = header + '<div id="candEditForm"></div>' + addCard + '<div id="candList"></div>';
+    body.innerHTML = header + '<div id="candEditForm"></div>' + '<div id="candList"></div>';
     $('candSort').addEventListener('change', function () { _sort = this.value; renderCandList(tabId); });
-    $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderCandList(tabId); });
+    $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; this.classList.toggle('active', _showHidden); this.textContent = _showHidden ? '👁 通常表示に戻す' : '🙈 非表示リスト'; renderCandList(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderCandList(tabId); });
     $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
     bindPcRun_($('candPcRun'), 'candList');
-    $('candAdd').addEventListener('click', function () { addCandidate(tabId); });
-    $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
+    $('candAddOpen').addEventListener('click', function () { openAddModal_(tabId, isMain); });
     if (!isMain) {
       var tab = null; lsGet(K_TABS, '[]').forEach(function (t) { if (t.id === tabId) tab = t; });
       var eb = $('candEditTab'); if (eb && tab) eb.addEventListener('click', function () { showEditTabForm(tab); });
@@ -1518,9 +1543,13 @@
       '<button id="candReload" type="button" class="ghost" title="全件を取り直す(キャッシュを無視)" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
       '<button id="candEditTab" type="button" class="ghost" title="タブ名・サークルを編集" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
-      '<button id="candShowHidden" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 10px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リストを表示') + '</button>' +
       '</div>' +
-      '<label class="cand-filter-sale"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中の作品のみ表示</span></label>' +
+      // 省スペース行：セール絞込（左）＋非表示トグル（右端・状態で色と文言が変化）
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">' +
+        '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
+        '<span style="flex:1 1 auto;"></span>' +
+        '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リスト') + '</button>' +
+      '</div>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
       ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
       '</div>' +
