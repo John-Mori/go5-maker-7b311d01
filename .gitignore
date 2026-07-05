@@ -17,3 +17,6 @@ scripts/gas_deploy_config.json
 scripts/sales_state.json
 # 未収録作品スクレイプの前回override更新時刻（このPC専用のローカル状態）
 scripts/missing_state.json
+
+# コンサルコミュニティ由来の資料・戦略メモ（外部共有禁止のためコミットしない）
+raw/

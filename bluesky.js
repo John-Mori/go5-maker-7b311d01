@@ -1462,18 +1462,19 @@
   var lastTitle = '';
   var topEl = document.getElementById('top');
   var ytTagWarnEl = document.getElementById('ytTagWarn');
-  // S-3: タグは3〜5個（#Shorts＋ジャンル語＋作品固有）が目安。15個超はYouTubeが全て無効化する。
-  //   ※非破壊：ユーザーのタグは書き換えず、過不足だけ注意表示する。
+  // S-3: タグは3〜5個（#Shorts＋ジャンル語＋作品固有）が目安。タイトル上に表示されるのは上位3個のみ。
+  //   公式仕様: 60個超で全タグ無視（「15個で無効」は二次ブログ由来の誤情報と判明・2026-07-05裏取り済
+  //   https://support.google.com/youtube/answer/6390658）。※非破壊：ユーザーのタグは書き換えず注意表示のみ。
   function updateTagWarn(tags) {
     if (!ytTagWarnEl) return;
     var list = (tags.match(/#[^\s#]+/g) || []);
     var n = list.length;
     var hasShorts = list.some(function (t) { return /^#shorts$/i.test(t); });
     var msg = '', col = 'var(--sub)';
-    if (n > 15) { msg = '⚠ タグが' + n + '個＝15個超はYouTubeが全タグを無効化します。3〜5個に絞ってください。'; col = '#e6a14e'; }
+    if (n > 60) { msg = '⚠ タグが' + n + '個＝60個超はYouTubeが全タグを無視します（公式仕様）。3〜5個に絞ってください。'; col = '#e6a14e'; }
     else if (n === 0) { msg = 'ℹ タグ未設定。#Shorts＋ジャンル語で3〜5個入れるとフィードで有利です。'; col = 'var(--sub)'; }
     else if (n < 3) { msg = 'ℹ タグ' + n + '個。#Shorts＋ジャンル語＋作品固有で3〜5個が目安です。'; col = 'var(--sub)'; }
-    else if (n > 5) { msg = 'ℹ タグ' + n + '個。3〜5個に絞ると1本ずつの評価が集中します。' + (hasShorts ? '' : ' #Shorts も入れると◎。'); col = 'var(--sub)'; }
+    else if (n > 5) { msg = 'ℹ タグ' + n + '個。表示されるのは上位3個だけ＝3〜5個に絞ると評価が集中します。' + (hasShorts ? '' : ' #Shorts も入れると◎。'); col = 'var(--sub)'; }
     else { msg = '✓ タグ' + n + '個（3〜5個）' + (hasShorts ? '' : '・#Shorts を足すと◎'); col = hasShorts ? '#7fb98a' : 'var(--sub)'; }
     ytTagWarnEl.textContent = msg;
     ytTagWarnEl.style.color = col;
