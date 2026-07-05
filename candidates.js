@@ -188,10 +188,22 @@
     if (_idbOk) return _imgMem.ref[cid] || null;
     try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
   }
-  function refImgHas(cid) { var r = refImgOf(cid); return !!(r && (r.img || r.comment || r.twitterUrl)); }
+  // 保存画像を常に配列で返す（旧形式 {img:単発} → [img] に正規化・新形式は {imgs:[...]}. 37ページ級の複数コマ保持に対応）。
+  function refImgsOf_(cid) {
+    var r = refImgOf(cid); if (!r) return [];
+    if (Array.isArray(r.imgs)) return r.imgs.filter(Boolean);
+    return r.img ? [r.img] : [];
+  }
+  function refImgHas(cid) {
+    var r = refImgOf(cid); if (!r) return false; // 1回の読みで判定（フォールバック時の多重JSON.parse回避）
+    var has = Array.isArray(r.imgs) ? r.imgs.some(Boolean) : !!r.img;
+    return !!(has || r.comment || r.twitterUrl);
+  }
   function refImgSave(cid, data) {
-    var empty = !data || (!data.img && !data.comment && !data.twitterUrl);
-    var rec = empty ? null : { img: data.img || '', comment: data.comment || '', twitterUrl: data.twitterUrl || '', at: new Date().getTime() };
+    // data.imgs（配列・新）または data.img（単発・旧）を受け付け、{imgs, img:先頭} で保存（img は旧読み手互換用）。
+    var imgs = data ? (Array.isArray(data.imgs) ? data.imgs.filter(Boolean) : (data.img ? [data.img] : [])) : [];
+    var empty = !data || (!imgs.length && !data.comment && !data.twitterUrl);
+    var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', twitterUrl: data.twitterUrl || '', at: new Date().getTime() };
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
       (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
@@ -417,10 +429,12 @@
     });
   }
 
-  // ── 投稿画像モーダル（1枚の元画像＋メモを保存）──
+  // ── 投稿画像モーダル（複数画像＋メモを保存）──
   var _refOverlay = null;
+  var _refOpenSeq = 0; // モーダルを開くたびに増える通し番号（遅い非同期処理が古いpendingへ書き込むのを防ぐ）
   function openRefImgModal_(it, onSaved) {
     if (!it) return;
+    var mySeq = ++_refOpenSeq;
     var ov = _refOverlay;
     if (!ov) {
       ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
@@ -431,7 +445,9 @@
       _refOverlay = ov;
     }
     var cur = refImgOf(it.cid) || {};
-    var pending = { img: cur.img || '', comment: cur.comment || '', twitterUrl: cur.twitterUrl || '' };
+    var curImgs = Array.isArray(cur.imgs) ? cur.imgs.filter(Boolean) : (cur.img ? [cur.img] : []);
+    // pending.imgs=保存候補の画像列（複数可・37ページ級の連続貼り付けOK）・idx=表示中（「動画生成へ」で採用される1枚）
+    var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || '' };
     var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補（埋め込みポストURLあり）
     // 作品URLのプレフィル：候補が実際に作品URLを持つ（!isTwitter かつ it.url がDMM/book等）なら、
     //   twitterUrl の有無に関わらずそのまま欄に表示（＝カードの「作品↗」と同じ判定）。X起点(it.url=ポストURL)は空。
@@ -446,7 +462,7 @@
       '</div>' +
       '<div id="refImgPreview" class="cand-refimg-preview"></div>' +
       '<div class="cand-img-btnrow">' +
-        '<label class="ghost cand-refimg-pick">画像を選ぶ<input id="refImgFile" type="file" accept="image/*" style="display:none;"></label>' +
+        '<label class="ghost cand-refimg-pick">画像を選ぶ<input id="refImgFile" type="file" accept="image/*" multiple style="display:none;"></label>' +
         '<button id="refImgPaste" type="button" class="ghost" style="background:#fffef9;color:#111;border-color:#d8d2bf;">画像を貼り付け</button>' +
         '<button id="refImgClear" type="button" class="ghost cand-img-clear" style="background:#fffef9;color:#111;border-color:#d8d2bf;">消す</button>' +
       '</div>' +
@@ -467,29 +483,76 @@
         '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
       '</div><div id="refImgMsg" class="hint" style="min-height:1.2em;"></div>';
     var previewEl = body.querySelector('#refImgPreview');
-    function drawPreview() { previewEl.innerHTML = pending.img ? '<img src="' + pending.img + '" alt="" class="fz-zoomable" style="max-width:100%;max-height:40vh;border-radius:8px;border:1px solid var(--line);">' : '<div class="hint" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">画像は未保存です</div>'; if (pending.img) { var z = previewEl.querySelector('img'); z.addEventListener('click', function () { openImgZoom_([pending.img], 0); }); } }
+    function navTo(i) { var n = pending.imgs.length; if (!n) return; pending.idx = (i + n) % n; drawPreview(); }
+    function drawPreview() {
+      var n = pending.imgs.length;
+      if (pending.idx >= n) pending.idx = Math.max(0, n - 1);
+      if (!n) { previewEl.innerHTML = '<div class="hint" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">画像は未保存です（貼り付けで追加・複数枚OK）</div>'; return; }
+      previewEl.innerHTML =
+        '<div class="cand-refimg-stage">' +
+          '<img src="' + esc(pending.imgs[pending.idx]) + '" alt="" class="fz-zoomable" style="max-width:100%;max-height:40vh;border-radius:8px;border:1px solid var(--line);display:block;margin:0 auto;">' +
+          (n > 1 ? '<button type="button" class="cand-refimg-nav prev" aria-label="前へ">‹</button><button type="button" class="cand-refimg-nav next" aria-label="次へ">›</button>' : '') +
+        '</div>' +
+        '<div class="hint" style="text-align:center;margin-top:3px;">' +
+          (n > 1 ? '🖼 複数あり ' + (pending.idx + 1) + ' / ' + n + '（スワイプで切替・<b>表示中の画像が「動画生成へ」で使われます</b>）' : '画像 1枚') +
+        '</div>';
+      previewEl.querySelector('img').addEventListener('click', function () { openImgZoom_(pending.imgs.slice(), pending.idx); });
+      var pv = previewEl.querySelector('.prev'), nx = previewEl.querySelector('.next');
+      if (pv) pv.addEventListener('click', function (e) { e.stopPropagation(); navTo(pending.idx - 1); });
+      if (nx) nx.addEventListener('click', function (e) { e.stopPropagation(); navTo(pending.idx + 1); });
+    }
+    // プレビュー上の左右スワイプで切替（ズーム(fz-zoom)側は既存実装でスワイプ対応済み）。
+    var _tsx = null, _tsy = null;
+    previewEl.addEventListener('touchstart', function (e) { var t = e.changedTouches[0]; _tsx = t.clientX; _tsy = t.clientY; }, { passive: true });
+    previewEl.addEventListener('touchend', function (e) {
+      if (_tsx == null) return; var t = e.changedTouches[0], dx = t.clientX - _tsx, dy = t.clientY - _tsy; _tsx = _tsy = null;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) navTo(pending.idx + (dx < 0 ? 1 : -1));
+    }, { passive: true });
     drawPreview();
     body.querySelector('#refImgComment').value = pending.comment;
     body.querySelector('#refImgTwitter').value = pending.twitterUrl;
     body.querySelector('#refImgFile').addEventListener('change', function () {
-      var f = this.files && this.files[0]; if (!f) return;
-      body.querySelector('#refImgMsg').textContent = '画像を処理中…';
-      fileToScaledDataUrl(f, function (durl, err) {
-        if (err) { body.querySelector('#refImgMsg').textContent = err; return; }
-        pending.img = durl; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を差し替えました（保存で確定）';
-      });
+      var files = [], fl = this.files || [], fi;
+      for (fi = 0; fi < fl.length; fi++) files.push(fl[fi]);
+      this.value = '';
+      if (!files.length) return;
+      body.querySelector('#refImgMsg').textContent = '画像を処理中…（' + files.length + '枚）';
+      // 1枚ずつ順に処理（大量選択時のメモリ圧迫を防ぐ・選択順も保たれる）。
+      var added = 0, failed = 0;
+      (function step(i) {
+        if (mySeq !== _refOpenSeq) return; // モーダルが開き直された＝この処理結果は破棄
+        if (i >= files.length) {
+          if (added) pending.idx = pending.imgs.length - 1;
+          drawPreview();
+          body.querySelector('#refImgMsg').textContent = added
+            ? (added + '枚を追加しました' + (failed ? '（' + failed + '枚は読み込めず）' : '') + '（計' + pending.imgs.length + '枚・保存で確定）')
+            : '画像を読み込めませんでした';
+          return;
+        }
+        fileToScaledDataUrl(files[i], function (durl) {
+          if (mySeq !== _refOpenSeq) return;
+          if (durl) { pending.imgs.push(durl); added++; } else failed++;
+          step(i + 1);
+        });
+      })(0);
     });
     body.querySelector('#refImgPaste').addEventListener('click', function () {
       body.querySelector('#refImgMsg').textContent = '画像を貼り付け中…';
       pasteImageFromClipboard_(function (durl, err) {
+        if (mySeq !== _refOpenSeq) return; // モーダルが開き直された＝破棄
         if (err) { body.querySelector('#refImgMsg').textContent = err; return; }
-        pending.img = durl; drawPreview(); body.querySelector('#refImgMsg').textContent = 'コピー画像を貼り付けました（保存で確定）';
+        pending.imgs.push(durl); pending.idx = pending.imgs.length - 1; drawPreview(); // 既存があっても置換せず追加（複数枚OK）
+        body.querySelector('#refImgMsg').textContent = '貼り付けました（' + pending.imgs.length + '枚目）。続けて貼り付けできます（保存で確定）';
       });
     });
     body.querySelector('#refImgClear').addEventListener('click', function () {
-      if (!pending.img) { pending.img = ''; drawPreview(); return; }
-      if (!window.confirm('本当に画像を削除しますか？')) return;
-      pending.img = ''; drawPreview(); body.querySelector('#refImgMsg').textContent = '画像を消しました（保存で確定）';
+      var n = pending.imgs.length;
+      if (!n) { drawPreview(); return; }
+      if (!window.confirm(n > 1 ? ('表示中の画像（' + (pending.idx + 1) + '/' + n + '）を削除しますか？') : '本当に画像を削除しますか？')) return;
+      pending.imgs.splice(pending.idx, 1);
+      if (pending.idx >= pending.imgs.length) pending.idx = Math.max(0, pending.imgs.length - 1);
+      drawPreview();
+      body.querySelector('#refImgMsg').textContent = '画像を削除しました（保存で確定・残り' + pending.imgs.length + '枚）';
     });
     // 動画生成へ：このモーダルの作品データを動画作成タブへ引き継いで移動する。
     body.querySelector('#refImgToMovie').addEventListener('click', function () {
@@ -499,7 +562,7 @@
       if (!workVal && !it.isTwitter && it.url) workVal = it.url; // 欄が空でも候補が作品URLを持つなら使う（動画側へ確実に反映）
       var workUrl = workVal ? (window.normalizeWorkUrl ? window.normalizeWorkUrl(workVal) : workVal) : '';
       refImgSave(it.cid, pending); // 画像・コメントを失わないよう保存（best-effort）
-      transferToMovie_(it, pending.img, pending.comment, workUrl);
+      transferToMovie_(it, pending.imgs[pending.idx] || '', pending.comment, workUrl); // ★表示中の画像を採用
       if (onSaved) onSaved();
       ov.hidden = true;
     });
@@ -564,8 +627,9 @@
   function updateCardRefThumb_(cardEl, cid) {
     if (!cardEl) return;
     var col = cardEl.querySelector('.cand-thumbcol'); if (!col) return;
-    var r = refImgOf(cid), src = (r && r.img) ? r.img : '';
+    var imgs = refImgsOf_(cid), src = imgs[0] || '';
     var thumb = col.querySelector('.cand-refimg-thumb');
+    var badge = col.querySelector('.cand-refimg-multi');
     if (src) {
       if (!thumb) {
         thumb = document.createElement('img');
@@ -574,12 +638,19 @@
         thumb.setAttribute('loading', 'lazy');
         thumb.alt = '動画生成用の画像（タップで拡大）';
         thumb.title = '動画生成用の画像（タップで拡大）';
-        thumb.addEventListener('click', function () { var rr = refImgOf(cid); if (rr && rr.img) openImgZoom_([rr.img], 0); });
+        thumb.addEventListener('click', function () { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0); });
         col.appendChild(thumb);
       }
       thumb.src = src;
-    } else if (thumb && thumb.parentNode) {
-      thumb.parentNode.removeChild(thumb);
+      if (imgs.length > 1) {
+        if (!badge) { badge = document.createElement('span'); badge.className = 'cand-refimg-multi'; col.appendChild(badge); }
+        badge.textContent = '🖼 複数あり ×' + imgs.length;
+      } else if (badge && badge.parentNode) {
+        badge.parentNode.removeChild(badge);
+      }
+    } else {
+      if (thumb && thumb.parentNode) thumb.parentNode.removeChild(thumb);
+      if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
     }
   }
   // 候補（Twitter起点/DMM起点どちらも）に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ（旧項目を置換）。
@@ -590,9 +661,11 @@
     var tabId = _activeTab, key = itemsKey(tabId), items = lsGet(key, '[]'), oldCid = oldItem.cid;
     if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'この作品は既に追加されています（重複追加しません）'); return; }
     // 画像・メモ・Twitter URL を新cidへ移す
-    refImgSave(r.cid, { img: refData.img || '', comment: refData.comment || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '' });
-    var bimg = (bskyImgOf(oldCid) || {}).img; if (bimg) bskyImgSave(r.cid, bimg);
-    if (oldCid !== r.cid) { refImgSave(oldCid, null); bskyImgSave(oldCid, null); } // 旧cidの画像を削除（IDB/localStorage両対応）
+    var okRef = refImgSave(r.cid, { imgs: Array.isArray(refData.imgs) ? refData.imgs : (refData.img ? [refData.img] : []), comment: refData.comment || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '' });
+    var bimg = (bskyImgOf(oldCid) || {}).img;
+    var okB = bimg ? bskyImgSave(r.cid, bimg) : true;
+    // 新cidへの保存が成功した時だけ旧cidを消す（localStorageフォールバック時の容量超過で唯一のコピーを失わない）
+    if (oldCid !== r.cid && okRef && okB) { refImgSave(oldCid, null); bskyImgSave(oldCid, null); }
     var newItem = { url: url, cid: r.cid, twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '', title: '(タイトル未取得)', addedAt: oldItem.addedAt || new Date().getTime() };
     var idx = -1; items.forEach(function (x, i) { if (x.cid === oldCid) idx = i; });
     if (idx >= 0) items[idx] = newItem; else items.unshift(newItem);
@@ -678,7 +751,7 @@
     });
     // 保存済みの動画生成用画像（サムネ下の縦長画像）：タップで拡大プレビュー。
     el.querySelectorAll('[data-refimgview]').forEach(function (im) {
-      im.addEventListener('click', function () { var r = refImgOf(im.getAttribute('data-refimgview')); if (r && r.img) openImgZoom_([r.img], 0); });
+      im.addEventListener('click', function () { var imgs = refImgsOf_(im.getAttribute('data-refimgview')); if (imgs.length) openImgZoom_(imgs, 0); }); // 複数あれば全部スワイプで見られる
     });
     el.querySelectorAll('[data-refimg]').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -1610,12 +1683,13 @@
     }
     var hasRef = refImgHas(it.cid);
     var hasBsky = bskyImgHas(it.cid);
-    var refData = refImgOf(it.cid);
-    var refImgSrc = (refData && refData.img) ? refData.img : ''; // 動画生成用に保存した画像（縦長）
+    var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像（複数可）
+    var refImgSrc = refImgs[0] || '';
     return '<div class="cand-card">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
         (refImgSrc ? '<img class="cand-refimg-thumb" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大）">' : '') +
+        (refImgs.length > 1 ? '<span class="cand-refimg-multi">🖼 複数あり ×' + refImgs.length + '</span>' : '') +
       '</div>' +
       '<div class="cand-info">' +
         (badgesHtml ? '<div style="margin-bottom:3px;">' + badgesHtml + '</div>' : '') +
