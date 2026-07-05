@@ -445,9 +445,14 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 @keyframes ctaReadyPulse{0%,100%{box-shadow:0 0 0 0 rgba(43,179,192,0);}50%{box-shadow:0 0 0 5px rgba(43,179,192,.55);}}
 /* 候補カード右上：チャンネル別ボタン（そのchで投稿済みなら色が変わる＝重複投稿=P0-3の抑止） */
 .cand-acct-row{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;margin:0 0 5px 0;}
-.cand-acct-btn{background:#0e1422;color:var(--ink,#e7edf3);border:1px solid var(--line);border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;line-height:1.1;}
-.cand-acct-btn.active{border-color:var(--accent,#2bb3c0);box-shadow:0 0 0 1px var(--accent,#2bb3c0) inset;}
-.cand-acct-btn.posted{border-color:#e6a14e;background:rgba(230,161,78,.12);}
+.cand-acct-btn{background:var(--card,#fffdf6);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;line-height:1.1;}
+/* アカウントのテーマ色：月詠み(acc1)=深い紫×金 / 宵桜艶帖(acc2)=ワイン×桜。非アクティブは色枠、アクティブは地色で塗る */
+.cand-acct-acc1{border-color:#8a6fb8;color:#6a4d99;}
+.cand-acct-acc1.active{background:#2c2148;border-color:#463864;color:#ecc86a;}
+.cand-acct-acc2{border-color:#cf6f97;color:#a8446e;}
+.cand-acct-acc2.active{background:#381630;border-color:#57294a;color:#ff85ac;}
+/* 投稿済み：アンバーのリング＋「✔済」でひと目で分かる（アカウント色は保持） */
+.cand-acct-btn.posted{box-shadow:0 0 0 1.5px #e6a14e inset;}
 .cand-acct-posted{color:#e6a14e;font-weight:800;font-size:9.5px;}
 /* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
 .cand-manage-row{display:flex;align-items:center;gap:6px;margin-top:6px;}

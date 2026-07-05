@@ -415,7 +415,7 @@
     return '<div class="cand-acct-row">' + _ACCTS.map(function (a) {
       var p = posted[a[0]];
       return '<button type="button" class="cand-acct-btn cand-acct-' + a[0] + (a[0] === cur ? ' active' : '') + (p ? ' posted' : '') + '" data-acct="' + a[0] + '" title="' + (p ? 'このチャンネルで投稿済み' : 'このチャンネルに切替') + '">' +
-        esc(a[1]) + (p ? '<span class="cand-acct-posted">✓投稿済</span>' : '') + '</button>';
+        esc(a[1]) + (p ? '<span class="cand-acct-posted">✔済</span>' : '') + '</button>';
     }).join('') + '</div>';
   }
   // カード右上のチャンネルボタンの配線：クリックで現在アカウントを切替し、全カードのactive表示を更新。
@@ -1294,7 +1294,7 @@
       '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" type="text" inputmode="url" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;min-width:0;">', 'candUrl') + '</div>' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">Twitter(X)のURL（任意）— <b>これだけでも追加できます</b></label>' +
       '<div>' + pasteRow_('<input id="candTwitter" type="text" inputmode="url" placeholder="https://x.com/…/status/… を貼り付け" autocomplete="off" style="flex:1;min-width:0;">', 'candTwitter') + '</div>' +
-      '<button id="candAdd" type="button" class="primary" style="margin-top:8px;font-size:.9rem;padding:10px;width:100%;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button>' +
+      '<button id="candAdd" type="button" class="primary" style="margin-top:8px;font-size:.9rem;padding:10px 18px;width:auto;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button>' +
       '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
       '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
         '<div class="hint">サークルの作品を<b>まとめて</b>' + (isMain ? '候補' : 'このタブ') + 'に追加できます（サークルID / サークルURL / 作品URLのどれか）。タブ名は変わりません。</div>' +
