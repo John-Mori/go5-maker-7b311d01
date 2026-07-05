@@ -443,12 +443,15 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* U-2 一気に作成：候補から流し込み後、作成ボタンを一時的に強調（残り1タップの誘導） */
 .cta-ready-pulse{animation:ctaReadyPulse 0.8s ease-in-out 3;}
 @keyframes ctaReadyPulse{0%,100%{box-shadow:0 0 0 0 rgba(43,179,192,0);}50%{box-shadow:0 0 0 5px rgba(43,179,192,.55);}}
-/* 投稿編集モーダル右上：チャンネル切替＋投稿済み表示（重複投稿=P0-3の抑止） */
-.cand-acct-row{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;margin:0 34px 8px 0;}
-.cand-acct-btn{background:#0e1422;color:var(--ink,#e7edf3);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:5px;line-height:1;}
+/* 候補カード右上：チャンネル別ボタン（そのchで投稿済みなら色が変わる＝重複投稿=P0-3の抑止） */
+.cand-acct-row{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;margin:0 0 5px 0;}
+.cand-acct-btn{background:#0e1422;color:var(--ink,#e7edf3);border:1px solid var(--line);border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;line-height:1.1;}
 .cand-acct-btn.active{border-color:var(--accent,#2bb3c0);box-shadow:0 0 0 1px var(--accent,#2bb3c0) inset;}
-.cand-acct-btn.posted{border-color:#e6a14e;}
-.cand-acct-posted{color:#e6a14e;font-weight:800;font-size:10px;}
+.cand-acct-btn.posted{border-color:#e6a14e;background:rgba(230,161,78,.12);}
+.cand-acct-posted{color:#e6a14e;font-weight:800;font-size:9.5px;}
+/* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
+.cand-manage-row{display:flex;align-items:center;gap:6px;margin-top:6px;}
+.cand-manage-spacer{flex:1 1 auto;}
 /* 削除ボタン：🗑️のみで枠節約 */
 .cand-del-btn{padding-left:8px;padding-right:8px;}
 /* 投稿編集モーダル：複数画像のプレビュー切替（‹›ボタン＋スワイプ）と「複数あり」表示 */

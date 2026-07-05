@@ -418,13 +418,17 @@
         esc(a[1]) + (p ? '<span class="cand-acct-posted">✓投稿済</span>' : '') + '</button>';
     }).join('') + '</div>';
   }
-  function wireAcctRow_(body) {
-    body.querySelectorAll('[data-acct]').forEach(function (b) {
-      b.addEventListener('click', function () {
+  // カード右上のチャンネルボタンの配線：クリックで現在アカウントを切替し、全カードのactive表示を更新。
+  //   （投稿済み判定は作品×チャンネルで不変なので、切替時に一覧を再描画する必要はない）
+  function wireAcctRow_(root) {
+    root.querySelectorAll('[data-acct]').forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
         var a = b.getAttribute('data-acct');
         var hdr = document.getElementById(a === 'acc2' ? 'acctBtn2' : 'acctBtn1');
         if (hdr) hdr.click(); // アプリの現在アカウントを切替（テーマ/背景/設定も追従）
-        body.querySelectorAll('[data-acct]').forEach(function (x) { x.classList.toggle('active', x.getAttribute('data-acct') === a); });
+        var all = document.querySelectorAll('.cand-acct-btn');
+        for (var i = 0; i < all.length; i++) all[i].classList.toggle('active', all[i].getAttribute('data-acct') === a);
       });
     });
   }
@@ -454,7 +458,6 @@
     var workUrlPrefill = (!it.isTwitter && it.url) ? it.url : '';
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
-      acctRowHtml_(it.cid) +
       '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">' + esc(it.title || it.cid) + '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
         '<span class="hint" style="margin:0;flex:1;">動画生成用の画像</span>' +
@@ -589,7 +592,6 @@
       setTimeout(function () { ov.hidden = true; }, 600);
     });
     wirePaste_(body);
-    wireAcctRow_(body);
     ov.hidden = false;
   }
   // 動画作成タブへ切替え、候補の作品データ（前景画像/作者/コメント/作品URL）を各入力欄へ埋め込む。
@@ -746,6 +748,7 @@
 
   // カード共通の配線：サムネのタップで画像モーダル／🖼投稿画像ボタン。
   function wireCardCommon_(el) {
+    wireAcctRow_(el); // カード右上のチャンネル切替＋投稿済み表示
     el.querySelectorAll('[data-thumbcid]').forEach(function (im) {
       im.addEventListener('click', function () { openThumbModal_(itemByCid_(im.getAttribute('data-thumbcid'))); });
     });
@@ -1692,20 +1695,23 @@
         (refImgs.length > 1 ? '<span class="cand-refimg-multi">🖼 複数あり ×' + refImgs.length + '</span>' : '') +
       '</div>' +
       '<div class="cand-info">' +
+        // 右上：チャンネル別ボタン（このchで投稿済みなら「✓投稿済」で色が変わる＝重複投稿の抑止・P0-3）
+        acctRowHtml_(it.cid) +
         (badgesHtml ? '<div style="margin-bottom:3px;">' + badgesHtml + '</div>' : '') +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
         ((it.price != null || it.listPrice != null) ? '<div class="cand-price">' + priceHtml + '</div>' : '') +
         salesHtml +
+        // 作品／投稿編集の行（管理ボタンは同じ行に置かない）
         '<div class="cand-actions">' +
           ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
           (it.twitterUrl ? '<a class="vlink" href="' + esc(it.twitterUrl) + '" target="_blank" rel="noopener" style="color:#1d9bf0;">🐦 X↗</a>' : '') +
           '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿編集' + (hasRef ? '✓' : '') + '</button>' +
           '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
-          '<span style="flex:1 1 auto;"></span>' + // 非表示/再表示/削除ボタンを右端へ寄せる
-          actionHtml +
         '</div>' +
+        // 右下の独立行：非表示／削除（🗑️のみ・作品/投稿編集とは別行）
+        '<div class="cand-manage-row"><span class="cand-manage-spacer"></span>' + actionHtml + '</div>' +
       '</div></div>';
   }
 
