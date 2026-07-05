@@ -97,6 +97,22 @@
     var sel = $('movieRebuildTarget'); if (sel) sel.addEventListener('change', onRebuildTargetChange_);
     document.addEventListener('account-changed', function () { if (cb.checked) refreshRebuildPicker_(); });
   })();
+  // 投稿履歴タブの「🔁リビルドで作る」から呼ぶ：動画作成タブへ移動し、リビルドON＋対象を選択済みにして
+  // 作品データ（作品URL/作者/割引/作品状態）を自動反映→作成ボタンへ誘導（残り1タップ）。
+  try { window.Go5Rebuild = { startFromHistory: function (videoId) {
+    if (!videoId) return;
+    var tab = document.getElementById('tabMovie'); if (tab) tab.click();
+    var cb = $('movieRebuild'); if (cb && !cb.checked) cb.checked = true;
+    refreshRebuildPicker_();
+    var sel = $('movieRebuildTarget');
+    if (sel) { sel.value = videoId; onRebuildTargetChange_(); }
+    setTimeout(function () {
+      var mk = $('makeBtn'); if (!mk) return;
+      try { mk.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+      mk.classList.add('cta-ready-pulse');
+      setTimeout(function () { mk.classList.remove('cta-ready-pulse'); }, 2400);
+    }, 300);
+  } }; } catch (e) {}
   function readMovieAttrs() {
     var o = {};
     MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); o[p[0]] = !!(el && el.checked); });
@@ -1011,6 +1027,7 @@
     var workUrl = meta ? meta.workUrl : (uiSame ? captureWorkUrl_() : '');
     var a = histLoadFor_(account).filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
     var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '' };
+    if (rec.rebuildBaseClicks != null) entry.rebuildBaseClicks = rec.rebuildBaseClicks; // リビルド前の動画までのクリック数（投稿履歴の括弧表示用）
     if (workUrl) {
       entry.workUrl = workUrl;
       // 作品cidも串刺しで保存（候補タブの「投稿済み」判定を確実にする）。workUrlはアフィリンク付き/
@@ -1452,7 +1469,50 @@
   }
 
   // ---- 方法①：動画作成後の自動投稿（編集できる確認） ----
+  // ── 🔁リビルドの「Bluesky投稿引き継ぎ」 ──────────────────────────────
+  // リビルド元と同じ作品なら、Blueskyへ再投稿せず前回の投稿（postUri/短縮URL/クリック計測）を
+  // 新しい動画に引き継ぐ。短縮URLが同一なのでクリック数は自然に「新旧の総合値」になる。
+  function sameWorkCid_(u1, u2) {
+    try {
+      if (!u1 || !u2 || !window.buildAffiliateLink) return false;
+      var n1 = window.normalizeWorkUrl ? window.normalizeWorkUrl(u1) : u1;
+      var n2 = window.normalizeWorkUrl ? window.normalizeWorkUrl(u2) : u2;
+      var r1 = n1 ? window.buildAffiliateLink(n1, '') : null;
+      var r2 = n2 ? window.buildAffiliateLink(n2, '') : null;
+      return !!(r1 && r2 && r1.ok && r2.ok && r1.cid === r2.cid);
+    } catch (e) { return false; }
+  }
+  // 引き継ぎ実行（履歴は「置き換え」＝旧アイテムはローカル履歴から消え、新アイテムがURL群を引き継ぐ。
+  //   旧動画のクリック実績は rebuildBaseClicks として新アイテムに保存＝投稿履歴で「総合値(旧値)」表示。
+  //   記録シートは videoId 別行なので旧行は残る＝分析はシートで可能・新行はリビルド元IDで系譜が追える）。
+  function inheritRebuildPost_(old, ev) {
+    var account = acctId(), meta = captureMeta_();
+    var newVid = (ev && ev.detail && ev.detail.videoId) || currentVideoId || '';
+    var title = (ev && ev.detail && ev.detail.title) || old.title || '';
+    var baseClicks = null; // リビルド時点までのクリック数（括弧表示のスナップショット）
+    try { if (window.Go5Clicks && old.shortUrl) baseClicks = window.Go5Clicks.of(old.shortUrl); } catch (e) {}
+    histAdd({ account: account, meta: meta, title: title, shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || old.shortUrl || '', postUrl: old.postUrl || '', postUri: old.postUri || '', videoId: newVid, rebuildBaseClicks: baseClicks });
+    recordToSheet({ account: account, meta: meta, title: title, postUrl: old.postUrl || '', postUri: old.postUri || '', shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || '', videoId: newVid });
+    _skipNextYtReset = true; // 直後に走る video-created の説明欄リセット(INC-70)を1回スキップ（旧短縮URLを残す）
+    setShareOutputs(old.shareUrl || old.shortUrl || '', old.postUrl || ''); // YT説明欄へも旧短縮URLを反映
+    setBskyStatus('🔁 リビルド：Blueskyへは再投稿せず、前回の投稿を引き継ぎました（短縮URL・クリック計測は継続）。');
+  }
+  // 引き継ぎ条件を満たせば確認のうえ実行して true（自動投稿ON/OFFに関わらず video-created 直後に判定）。
+  function maybeInheritRebuild_(ev) {
+    try {
+      if (!readRebuild()) return false;
+      var rbVid = readRebuildTarget(); if (!rbVid) return false;
+      var old = null; histLoad().forEach(function (x) { if (x.videoId === rbVid) old = x; });
+      if (!old || (!old.postUri && !old.shortUrl)) return false; // 引き継げる投稿が無い
+      if (!sameWorkCid_(old.workUrl, captureWorkUrl_())) return false; // 別作品なら通常フロー（新規投稿）
+      if (!window.confirm('リビルド元と同じ作品です。\nBlueskyへは再投稿せず、前回の投稿（短縮URL・クリック計測）をこの動画に引き継ぎます。よろしいですか？\n\n（キャンセル＝通常どおりBlueskyへ新規投稿します）')) return false;
+      inheritRebuildPost_(old, ev);
+      return true;
+    } catch (e) { return false; }
+  }
+
   function handleVideoCreated(ev) {
+    if (maybeInheritRebuild_(ev)) return; // 🔁同一作品のリビルド＝前回のBluesky投稿を引き継ぎ（再投稿しない）
     if (!els.enable || !els.enable.checked) return;
     var c = creds();
     if (!c.handle || !c.appPw) { setBskyStatus('「🦋 投稿」タブの⚙でハンドルとアプリパスワードを入れると自動投稿します（今回はスキップ）。'); return; }
@@ -1500,9 +1560,11 @@
   }
   document.addEventListener('video-created', handleVideoCreated);
   // 自動投稿のON/OFFに関わらず、発番された安定動画IDは常に保持（投稿記録の背骨キー）。
+  var _skipNextYtReset = false; // リビルド引き継ぎ時は説明欄の旧短縮URLを保持する（リセットを1回スキップ）
   document.addEventListener('video-created', function (e) {
     var d = (e && e.detail) || {};
     if (d.videoId) currentVideoId = d.videoId;
+    if (_skipNextYtReset) { _skipNextYtReset = false; return; } // 引き継ぎ済み＝旧短縮URLが正
     resetYtDescShortLink_(); // 新作の動画＝前作の短縮リンクを説明欄から消す（この作品を投稿すると新リンクが入る・INC-70）
   });
   // ※旧「Bsky添付画像を自動ダウンロード」は廃止（iPhoneで毎回『ダウンロードしますか？』が

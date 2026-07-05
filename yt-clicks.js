@@ -564,7 +564,8 @@
         (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
-          '<span title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) + '</span>' +
+          '<span title="Bsky投稿クリック数' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) +
+            (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
           '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
           (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
           (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
@@ -572,6 +573,7 @@
         '</div>' +
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + '>' + (vid ? fmtDelta_(deltaCache[vid]) : '') + '</span>' +
+          (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ（同一作品ならBluesky投稿を引き継ぎ）">🔁 リビルドで作る</button>' : '') +
           '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける（削除ではなく記録として残す）">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
@@ -597,6 +599,13 @@
     // 作り直し（削除の代わりに「被リビルド」の印を付ける／取り消す）
     list.querySelectorAll('.vremake').forEach(function (b) {
       b.addEventListener('click', function () { toggleRemade(b.getAttribute('data-k')); });
+    });
+
+    // 🔁リビルドで作る：この投稿をリビルド元にして動画作成タブへ（bluesky.jsのGo5Rebuildが対象選択＋作品データ反映まで実施）
+    list.querySelectorAll('.vrebuild-from').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (window.Go5Rebuild && window.Go5Rebuild.startFromHistory) window.Go5Rebuild.startFromHistory(b.getAttribute('data-rbvid'));
+      });
     });
 
     // 被リビルド作品の非表示トグル（最新の投稿カードのみに設置）
@@ -1995,6 +2004,7 @@
       try { ymap = JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { ymap = {}; }
       var items = loadArr('short_hist__' + a).concat(loadArr('verify_manual__' + a));
       items.forEach(function (it) {
+        if (it.remade) return; // 被リビルド（リビルド版に置き換え済み）はランキングに出さない＝新しい方だけ載る
         var k = itemKey(it);
         var yt = ymap[k] || it.ytUrl || '';
         var vid = ytIdOf(yt);
@@ -2185,4 +2195,6 @@
     fetchDeltas_(false, doRender);
   }
   try { window.YtRank = { renderRank: renderRank }; } catch (e) {}
+  // 短縮URL→現在のクリック数（bluesky.jsのリビルド引き継ぎが「リビルド前スナップショット」取得に使う）。
+  try { window.Go5Clicks = { of: function (shortUrl) { var c = codeOf(shortUrl || ''); return (c && (c in clicksCache)) ? clicksCache[c] : null; } }; } catch (e) {}
 })();
