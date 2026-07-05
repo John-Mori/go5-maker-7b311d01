@@ -14,19 +14,37 @@
 (function () {
   "use strict";
 
+  // キー分類は core/storage-keys.js（Go5Keys）に一元化。未読込時のフォールバックも用意（防御的）。
+  var K = (typeof window !== "undefined" && window.Go5Keys) ? window.Go5Keys : null;
+
   // 秘密とみなすキー（アプリパスワード・各種シークレット/トークン）。「鍵を除いて」書き出しで除外。
   function isSecretKey(k) {
+    if (K) return K.isSecret(k);
     return /(app_pw|_pw__|password|secret|token|refresh|api_key)/i.test(String(k));
   }
-  // クラウド同期しないキー：投稿履歴・手動追加・YT URL対応・各種キャッシュ・アカウント修復関連。
-  //   これらは「設定」ではなく端末の記録データ。blob経由で丸ごと巻き戻すと、アカウント修復が
-  //   取り消される再汚染ループになる（記録の正本はスプレッドシート＋各端末ローカル）。(設計P0/INC-62)
-  function isNoSyncKey(k) {
+  // クラウド同期してよいキー（＝本物の設定）。許可リスト方式（Go5Keys.syncAllowed）。
+  //   ここに載らない新キーは既定で同期されない＝INC-62 型の再汚染を新キーにも作らせない（改善書 §2-4）。
+  function isSyncKey(k) {
+    if (K) return K.syncAllowed(k);
+    // フォールバック：旧ブロックリスト相当（Go5Keys 未読込という異常時のみ）。
     k = String(k);
-    return /^(short_hist__|verify_manual__|verify_yt__|bsky_did__|cand_)/.test(k)
-      || /^(delta_cache|peak_cache|clicks_cache|yt_meta_cache|fanza_title_cache)$/.test(k)
-      || /^acct_did_repair/.test(k);
+    if (isSecretKey(k)) return false;
+    if (/^(short_hist__|verify_manual__|verify_yt__|bsky_did__|cand_)/.test(k)) return false;
+    if (/^(delta_cache|peak_cache|clicks_cache|yt_meta_cache|fanza_title_cache)$/.test(k)) return false;
+    if (/^acct_did_repair/.test(k) || k === "sync_device_name") return false;
+    return true;
   }
+  // 旧ブロックリスト時代に「同期されていたか」（反転の差分ログ＝目視用）。
+  function wasLegacySynced(k) {
+    if (K) return K.legacySynced(k);
+    k = String(k);
+    return !isSecretKey(k)
+      && !/^(short_hist__|verify_manual__|verify_yt__|bsky_did__|cand_)/.test(k)
+      && !/^(delta_cache|peak_cache|clicks_cache|yt_meta_cache|fanza_title_cache)$/.test(k)
+      && !/^acct_did_repair/.test(k) && k !== "sync_device_name";
+  }
+  // 同期でこの端末へ「取り込んでよい」キー（＝設定のみ・秘密は不可）。pull の多層防御。
+  function isSyncApplicable(k) { return isSyncKey(k) && !isSecretKey(k); }
 
   function $(id) { return document.getElementById(id); }
   function setStatus(msg, ok) {
@@ -89,7 +107,7 @@
     var n = 0;
     keys.forEach(function (k) {
       if (skipSecrets && isSecretKey(k)) return;   // クラウド取得では秘密は絶対に上書きしない
-      if (skipHistory && isNoSyncKey(k)) return;   // クラウド取得では記録データ(履歴等)を上書きしない＝修復の巻き戻し防止
+      if (skipHistory && !isSyncKey(k)) return;    // クラウド取得は「設定（許可リスト）」だけ反映＝記録/履歴/下書き等は上書きしない（修復の巻き戻し防止・INC-62）
       try { localStorage.setItem(k, String(data[k])); n++; } catch (e) {}
     });
     setStatus("📥 " + n + "件を反映しました" + (label ? "（" + label + "）" : "") + "。ページを再読み込みします…", true);
@@ -119,8 +137,7 @@
     if (!v) { try { v = (localStorage.getItem("sync_device_name") || "").trim(); } catch (e) {} }
     return v;
   }
-  // 端末固有・同期しないキー（他端末に混ぜたくないもの）。
-  function isDeviceLocalKey(k) { return k === "sync_device_name"; }
+  // （旧 isDeviceLocalKey は許可リスト方式へ反転し不要になった＝sync_device_name は isSyncKey が false を返す）
 
   // JSONP：GASのPOST応答はCORSで読めないため、callback付きGETで取得（キャッシュバスター cb 付き）。
   function jsonp(baseUrl, params, cb) {
@@ -161,6 +178,26 @@
   }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
 
+  // 同期の「ブロックリスト→許可リスト」反転の差分をコンソールに1度だけ出す（改善書 M-1 受け入れ条件「同期差分ログ目視」）。
+  //   excluded = 旧方式では同期されていたが、新方式（許可リスト）では同期されなくなるキー。
+  //   ＝改善書 §2-4 が問題視した漏洩キー（movie_drafts__/sch_state_v1/view_snaps/yt_scheduled__/current_account/
+  //     field_*/verify_*/移行フラグ/各種cache 等）が並ぶのが正常。想定外のキー（本物の設定）が混じっていないか目視する。
+  var _diffLogged = false;
+  function logSyncReversalDiff(data) {
+    if (_diffLogged) return; _diffLogged = true;
+    try {
+      var excluded = [], added = [];
+      Object.keys(data).forEach(function (k) {
+        var was = wasLegacySynced(k), now = isSyncKey(k);
+        if (was && !now) excluded.push(k);
+        if (!was && now) added.push(k);   // 通常は空（許可リストは旧同期集合の部分集合の想定）
+      });
+      excluded.sort(); added.sort();
+      console.log("[go5 sync反転] 許可リスト方式に反転。今回この端末で『同期されなくなる』キー（想定＝記録/下書き/キャッシュ/移行フラグ・改善書§2-4）: " + excluded.length + "件", excluded);
+      if (added.length) console.warn("[go5 sync反転] 旧方式では同期されず新方式で同期されるキー（要確認）: ", added);
+    } catch (e) {}
+  }
+
   // この端末の非秘密設定をクラウドへ保存（POST）。
   function syncPush() {
     var url = gasUrl();
@@ -168,7 +205,9 @@
     var dev = deviceName();
     try { if (dev) localStorage.setItem("sync_device_name", dev); } catch (e) {}
     var data = dumpStorage(false); // 秘密キー除外
-    Object.keys(data).forEach(function (k) { if (isDeviceLocalKey(k) || isNoSyncKey(k)) delete data[k]; }); // 端末固有キー・記録データは送らない
+    // 許可リスト方式：本物の「設定」(isSyncKey)だけ送る。未登録の新キーは送らない＝INC-62 型の再汚染を新キーに作らせない。
+    logSyncReversalDiff(data);     // 反転の差分（旧は同期→新は非同期になったキー）をコンソールに1度出す＝改善書 M-1「同期差分ログ目視」
+    Object.keys(data).forEach(function (k) { if (!isSyncKey(k)) delete data[k]; });
     var blob = JSON.stringify(data);
     var n = Object.keys(data).length;
     setStatus("☁️⬆️ クラウドへ保存中…（" + n + "件 / " + blob.length + "文字）", null);

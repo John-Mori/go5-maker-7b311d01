@@ -59,7 +59,10 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 
 | ファイル | 役割 | 触ってよいか |
 |---|---|---|
-| `index.html` | 画面（動画作成タブ＋アフィリンクタブ＋7スライダー） | UI追加時 |
+| `core/util.js` | **共通土台（Go5Util）**：`$`/`esc`(必ず`"`をエスケープ)/`fmtTs`/`fmtWhen`/`yen`/`num`/`lsGet`/`lsSet`/`jsonp`/`copyText`。window＋module.exports両対応 | 共通ヘルパ統一時 |
+| `core/account.js` | **アカウント解決（Go5Acct）**：`current()`/`key(base,acc)`/`handleOf`/`didOf`/`setDid`/`onChange`。**`current_account`直読み・`acc1`フォールバックはここ1箇所だけ** | アカウント解決の変更時 |
+| `core/storage-keys.js` | **localStorageキーの登録制レジストリ（Go5Keys）**：`isSecret`/`syncAllowed`(許可リスト)/`classify`/`legacySynced`。**クラウド同期は許可リスト方式**（新キーは既定で同期しない＝INC-62恒久対策・改善書§2-4） | 新キー追加時は分類を登録 |
+| `index.html` | 画面（動画作成タブ＋アフィリンクタブ＋7スライダー）。script読み込みは **core層→機能層** の順 | UI追加時 |
 | `app.js` | ★中核：Canvas合成・テキスト描画・録画・スライダー配線 | 描画/座標の変更はここ |
 | `style.css` | スマホ向けスタイル（ダークUI・タブ・スライダー群） | |
 | `affiliate-core.js` | アフィリンク生成の**純粋関数** `buildAffiliateLink()` | 仕様変更時のみ |

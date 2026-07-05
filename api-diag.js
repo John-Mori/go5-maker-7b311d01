@@ -7,7 +7,7 @@
 (function () {
   'use strict';
   function $(id) { return document.getElementById(id); }
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function ls(k) { try { return (localStorage.getItem(k) || '').trim(); } catch (e) { return ''; } }
 
   // 診断用の既知公開動画（YouTube公式のグローバル定番・削除リスク極小）

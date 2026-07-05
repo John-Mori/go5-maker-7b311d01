@@ -32,7 +32,7 @@
     }
     function pad(n) { return (n < 10 ? '0' : '') + n; }
     function fmt(ms) { var d = new Date(ms); return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
-    function esc(s) { return String(s || '').replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+    function esc(s) { return String(s || '').replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
     function findById(id) {
       for (var i = 0; i < queue.length; i++) { if (String(queue[i].id) === String(id)) return queue[i]; }
       return null;

@@ -12,10 +12,18 @@
 
 | 項目 | 状態 |
 |---|---|
-| 公開バージョン(live) | **`?v=200`**（`https://john-mori.github.io/go5-maker-7b311d01/`） |
-| GAS_VERSION | **`2026-07-05G`**（`?ping=1` で照合可・Vol.3では未変更） |
-| ブランチ / 作業ツリー | `main` / **クリーン（未コミットなし）** |
-| 直近コミット | `f9b9043 改善書: S-1b恒久不採用・S-2'不採用` |
+| 公開バージョン(live) | **`?v=202`**（`https://john-mori.github.io/go5-maker-7b311d01/`）※Phase 0 で v200→201→202 |
+| GAS_VERSION | **`2026-07-05G`**（`?ping=1` で照合可・Phase 0 では GAS 未変更） |
+| ブランチ / 作業ツリー | `main` |
+| 直近コミット | Phase 0（P0/S-6/U-7=v201・M-1=v202） |
+
+### ✅ Phase 0 完了（2026-07-05・改善書 §8 Phase 0）
+- **P0（規約防衛の明文化）**：`CLAUDE.md §6.1` に FANZA直リンク禁止／煽り文言禁止／1コマ目露出基準／2ch同一動画禁止／BGM焼込禁止／FANZA規約確認(宿題) を記載。
+- **S-6**：投稿確認モーダルに「1コマ目・サムネは全年齢で大丈夫？」注意書き（`index.html`/`style.css` の `.pc-agecheck`・アンバー・タップ増なし）。
+- **U-7**：`wizard.js` の `video-created`/`bluesky-posted` 購読を `window`→`document` に修正（発火が document・bubbles無しで届いておらずウィザード自動進行が不達だった）。
+- **M-1（共通コア3ファイル＋sync許可リスト反転）**：`core/util.js`(Go5Util)／`core/account.js`(Go5Acct)／`core/storage-keys.js`(Go5Keys) を新設。**クラウド同期をブロックリスト→許可リスト方式へ反転**（`settings-io.js`）＝未登録の新キーは既定で同期されない（INC-62恒久対策）。危険な `esc`（`"`非エスケープ）3系統を安全版に統一（`bluesky.js`/`scheduler.js`/`api-diag.js`）。`tests/test_storage_keys.js`(9 PASS)＋既存62テスト回帰なし。
+  - **⚠ 残りの受け入れ確認（Chami・目視）**：詳細設定→「クラウドに保存」を押すと**コンソールに『同期されなくなるキー一覧』**が1度出る（`[go5 sync反転]`）。想定＝`movie_drafts__`/`sch_state_v1`/`view_snaps`/`yt_scheduled__`/`current_account`/`verify_fanza`/`field_*`/`rank_mode`/移行フラグ 等（＝改善書§2-4の漏洩キー）。**本物の設定が混じっていなければOK**（検証済みの想定リストと一致）。
+  - **M-1の残タスク（M-2送り）**：各ファイルの `$`/`esc`/`lsGet`/`fmtTs`/アカウント直読みの**呼び出し側**を core へ寄せる機械的置換は、神ファイル分割(M-2)で1ファイルずつ実施（§7準拠・今回は土台作成と最重要配線＝sync反転・esc安全化に限定）。
 | 現行ソースの場所 | **`D:\SougouStartFolder\go5-maker`**（旧 Desktop\go5-maker から移設済み。D:ドライブの `スマホ版` フォルダは無関係な古いコピー） |
 | デプロイ | GitHub Pages（`.nojekyll`＝INC-66）。反映確認は `curl .../index.html?cb=<ts> \| grep 'candidates.js?v='` |
 
