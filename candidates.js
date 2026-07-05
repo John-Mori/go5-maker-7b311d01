@@ -395,16 +395,48 @@
   function openImgZoom_(images, idx) { if (!images || !images.length) return; _zoomList = images.slice(); _zi = Math.min(Math.max(0, idx || 0), _zoomList.length - 1); zoomShow_(); }
 
   var _ACCTS = [['acc1', '月詠み'], ['acc2', '宵桜艶帖']];
-  // この作品(cid)を、指定チャンネルで投稿した投稿履歴アイテムを返す（workUrl→cid 照合・無ければ null）。
-  function postedItemForCid_(cid, account) {
-    if (!cid || typeof window.Go5PostedItems !== 'function') return null;
-    var items = window.Go5PostedItems(account) || [];
-    for (var i = 0; i < items.length; i++) {
-      var u = items[i] && items[i].workUrl; if (!u) continue;
-      var r = window.buildAffiliateLink ? window.buildAffiliateLink(u, '') : null;
-      if (r && r.ok && r.cid === cid) return items[i];
+  // ── 投稿履歴の cid→item 索引（チャンネル別・メモ化） ──
+  //   候補cidは buildAffiliateLink(normalizeWorkUrl(raw)) の出力。履歴側も同じ正規化→解析で
+  //   cidを求めないと、アフィリンク付きURL(al.fanza.co.jp/?lurl=…)や計測パラメータ付きURLが
+  //   silentに紐付かない（投稿済みpillが光らない）不具合になる。索引は履歴配列の「件数＋先頭ts」
+  //   を鍵にメモ化し、新規投稿が入れば自動で作り直す（フルリロード不要）。
+  var _postedIdxCache = {}; // { account: { sig: string, map: {cid:item} } }
+  // 履歴アイテムから作品cidを求める（複数経路）。順に: 明示cidフィールド → workUrlを正規化+解析 → cid形状の推定。
+  function cidOfHistItem_(it) {
+    if (!it) return '';
+    // ① 明示的な cid フィールド（将来の復元でシートの作品cidを串刺しで持たせた場合）。
+    var direct = it.cid || it.workCid || '';
+    if (direct) return String(direct);
+    // ② 作品URL → normalizeWorkUrl（lurl展開・計測パラメータ除去）→ buildAffiliateLink で候補と同じcidを得る。
+    var u = it.workUrl || '';
+    if (u && window.buildAffiliateLink) {
+      var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(u) : u;
+      var r = url ? window.buildAffiliateLink(url, '') : null;
+      if (r && r.ok && r.cid) return r.cid;
     }
-    return null;
+    return '';
+  }
+  // チャンネルの cid→item 索引を（必要なら作り直して）返す。
+  function postedIndexFor_(account) {
+    if (typeof window.Go5PostedItems !== 'function') return {};
+    var items = window.Go5PostedItems(account) || [];
+    var sig = items.length + ':' + ((items[0] && items[0].ts) || '') + ':' + ((items[items.length - 1] && items[items.length - 1].ts) || '');
+    var cached = _postedIdxCache[account];
+    if (cached && cached.sig === sig) return cached.map;
+    var map = {};
+    for (var i = 0; i < items.length; i++) {
+      var cid = cidOfHistItem_(items[i]);
+      if (cid && !map[cid]) map[cid] = items[i]; // 先頭＝新しい順なので最新の投稿を優先
+    }
+    _postedIdxCache[account] = { sig: sig, map: map };
+    return map;
+  }
+  // 索引を明示的に無効化（一覧描画の起点で呼び、確実に新規投稿を拾う）。
+  function invalidatePostedIndex_() { _postedIdxCache = {}; }
+  // この作品(cid)を、指定チャンネルで投稿した投稿履歴アイテムを返す（cid照合・無ければ null）。
+  function postedItemForCid_(cid, account) {
+    if (!cid) return null;
+    return postedIndexFor_(account)[cid] || null;
   }
   // バッジ行に並べるチャンネル表記。投稿済み＝ボタン化(クリックで投稿詳細)＋テーマ色。未投稿＝ボタン化せず淡色表記。
   function acctBadgesHtml_(cid) {
@@ -1539,6 +1571,7 @@
   }
   function renderCandList(tabId) {
     tabId = tabId || 'main';
+    invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す（前回描画以降の新規投稿を確実に反映）
     var key = itemsKey(tabId);
     var el = $('candList');
     var all = lsGet(key, '[]');
@@ -1579,6 +1612,7 @@
 
   // ── サークルタブ ──
   function renderMaker(tabId, force) {
+    invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す（前回描画以降の新規投稿を確実に反映）
     var tabs = lsGet(K_TABS, '[]');
     var tab = null; tabs.forEach(function (t) { if (t.id === tabId) tab = t; });
     var body = $('candBody');

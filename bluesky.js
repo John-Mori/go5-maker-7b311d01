@@ -1006,6 +1006,15 @@
     var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '' };
     if (workUrl) {
       entry.workUrl = workUrl;
+      // 作品cidも串刺しで保存（候補タブの「投稿済み」判定を確実にする）。workUrlはアフィリンク付き/
+      //   計測パラメータ付きでも来るので、候補側と同じ normalizeWorkUrl→buildAffiliateLink で正規化して求める。
+      try {
+        if (window.buildAffiliateLink) {
+          var nu = window.normalizeWorkUrl ? window.normalizeWorkUrl(workUrl) : workUrl;
+          var cr = nu ? window.buildAffiliateLink(nu, '') : null;
+          if (cr && cr.ok && cr.cid) entry.cid = cr.cid;
+        }
+      } catch (e) {}
       // 投稿時のFANZA価格スナップショット（当時価格）。metaがあればそれを、無ければUIキャッシュから。
       var snap = meta ? meta.fanzaSnap : (uiSame ? fanzaSnapForWorkUrl_(workUrl) : null);
       if (snap) entry.fanzaSnap = snap;

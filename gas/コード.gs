@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-05I（目的(成約/集客)・コメント型(①〜⑧)列を追加＝狙い×型の勝ちパターン集計を自動化）';
+var GAS_VERSION = '2026-07-06J（extractCid_をBooks/アフィリンク対応＝Books投稿の作品cid欠落を修正・INC-71）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -414,13 +414,22 @@ function doPost(e) {
   }
 }
 
-// cid 抽出（作品URL の cid= か、アフィリンクの lurl をデコードして cid=）
+// cid 抽出（作品URL の cid= か、アフィリンクの lurl をデコードして cid=）。
+//   ・FANZA Books(book.dmm.(com|co.jp)/product/…)は cid= を持たずパスにIDがあるため、
+//     フロント(affiliate-core.js buildAffiliateLink)と同じ規則で内部cidを取り出す。
+//     これをしないと Books 作品の「作品cid」列が空になり、復元時に作品URL/投稿済み判定が戻らない。
 function extractCid_(url) {
   if (!url) return '';
-  var m = String(url).match(/cid=([^/?&\s]+)/);
+  var s = String(url);
+  // アフィリンク(al.fanza.co.jp/?lurl=…)なら中身のURLをデコードして同じ規則で解析。
+  var lm = s.match(/[?&]lurl=([^&]+)/);
+  if (lm) { try { var dec = decodeURIComponent(lm[1]); if (dec) { var inner = extractCid_(dec); if (inner) return inner; } } catch (e) {} }
+  // FANZA Books：/product/【数字ID】/【コード】/。co.jp は content_id(2階層目)優先、com は数字ID(1階層目)。
+  var booksM = s.match(/book\.dmm\.(com|co\.jp)\/product\/([^/?&#\s]+)(?:\/([^/?&#\s]+))?/);
+  if (booksM) return (booksM[1] === 'co.jp') ? (booksM[3] || booksM[2]) : booksM[2];
+  // 同人・動画：cid= パラメータ。
+  var m = s.match(/cid=([^/?&\s]+)/);
   if (m) return m[1];
-  var lm = String(url).match(/[?&]lurl=([^&]+)/);
-  if (lm) { try { var c = decodeURIComponent(lm[1]).match(/cid=([^/?&\s]+)/); if (c) return c[1]; } catch (e) {} }
   return '';
 }
 function extractHashtags_(t) { var m = String(t || '').match(/#[^\s#]+/g); return m ? m.join(' ') : ''; }
