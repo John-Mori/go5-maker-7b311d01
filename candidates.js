@@ -530,7 +530,9 @@
     var cur = refImgOf(it.cid) || {};
     var curImgs = Array.isArray(cur.imgs) ? cur.imgs.filter(Boolean) : (cur.img ? [cur.img] : []);
     // pending.imgs=保存候補の画像列（複数可・37ページ級の連続貼り付けOK）・idx=表示中（「動画生成へ」で採用される1枚）
-    var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || '' };
+    // X/Bluesky URL は refimg 側に無ければ候補アイテム側(it.twitterUrl=カードのXリンクの出所)からフォールバック
+    //   （カードにXリンクが出ているのにモーダルの欄が空になる不一致を防ぐ）。
+    var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || it.twitterUrl || '' };
     var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補（埋め込みポストURLあり）
     // 作品URLのプレフィル：候補が実際に作品URLを持つ（!isTwitter かつ it.url がDMM/book等）なら、
     //   twitterUrl の有無に関わらずそのまま欄に表示（＝カードの「作品↗」と同じ判定）。X起点(it.url=ポストURL)は空。
