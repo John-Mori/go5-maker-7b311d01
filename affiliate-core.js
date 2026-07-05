@@ -16,13 +16,13 @@ function buildAffiliateLink(rawUrl, afId) {
 
   let cid = null;
 
-  // FANZA Books: book.dmm.(com|co.jp)/product/【数字ID】/【コード】/ の2階層（実URL）。
-  //  ・旧 book.dmm.co.jp は2階層目が API 照会可能な content_id(b915…形式)なので優先抽出。
-  //  ・現行 book.dmm.com は2階層目がショップ/シリーズ码で API 照会不可のため、安定した
-  //    数字の商品ID(1階層目)を内部cidに使う（情報はPCスクレイプ→override経由で解決）。
-  //  ・「/product/【商品ID】/」1階層だけのURLでも動く。
+  // FANZA Books: book.dmm.(com|co.jp)/product/【数字ID】/【content_id】/ の2階層（実URL）。
+  //  ・2階層目（b062…/b915…形式の content_id）があれば .com/.co.jp を問わずそれを優先。
+  //    ※旧実装は「.com は1階層目の数字ID」を cid にしていたが、数字IDは DMM API の content_id
+  //      照会に使えず『タイトル未取得』の原因になっていた（例: /product/4163193/b062aftwk01392/）。
+  //  ・「/product/【商品ID】/」1階層だけのURLでは商品IDを内部cidに使う（PCスクレイプ→override経由で解決）。
   const booksM = raw.match(/book\.dmm\.(com|co\.jp)\/product\/([^/?&#\s]+)(?:\/([^/?&#\s]+))?/);
-  if (booksM) cid = (booksM[1] === 'co.jp') ? (booksM[3] || booksM[2]) : booksM[2];
+  if (booksM) cid = booksM[3] || booksM[2];
 
   // FANZA 同人・動画: cid= パラメータ
   if (!cid) {

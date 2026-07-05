@@ -191,6 +191,17 @@ test('N-4: 空/非URL → 空文字', function () {
   assert.strictEqual(normalizeWorkUrl('d_748504'), '');
 });
 
+test('T-9: Books .com 2階層URL → cid=content_id（旧仕様は数字ID＝API照会不可でタイトル未取得の原因）', function () {
+  // ユーザー報告の実URL形（2026-07-06）: book.dmm.com でも2階層目に content_id が来る
+  const r = buildAffiliateLink('https://book.dmm.com/product/4163193/b062aftwk01392/', 'test-001');
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.cid, 'b062aftwk01392', '.com 2階層でも content_id(2階層目) を cid にする');
+  // 1階層だけの .com URL は従来どおり1階層目を cid に（後方互換）
+  const r1 = buildAffiliateLink('https://book.dmm.com/product/4163193/', 'test-001');
+  assert.strictEqual(r1.ok, true);
+  assert.strictEqual(r1.cid, '4163193');
+});
+
 // ────────────────────────────────────────────────────────────
 // 結果集計
 // ────────────────────────────────────────────────────────────

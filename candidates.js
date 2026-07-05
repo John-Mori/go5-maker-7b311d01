@@ -275,9 +275,25 @@
       if (b._wired) return; b._wired = true;
       b.addEventListener('click', function () {
         var inp = document.getElementById(b.getAttribute('data-paste')); if (!inp) return;
+        var orig = b.textContent;
+        function restore(label) { b.textContent = label || orig; if (label) setTimeout(function () { b.textContent = orig; }, 1600); }
         if (navigator.clipboard && navigator.clipboard.readText) {
-          navigator.clipboard.readText().then(function (t) { inp.value = (t || '').trim(); inp.focus(); inp.dispatchEvent(new Event('change')); })
-            .catch(function () { inp.focus(); alert('クリップボードを読み取れませんでした。入力欄を長押しして貼り付けてください。'); });
+          b.textContent = '読み取り中…'; // 即時の視覚反応（「押しても無反応」を無くす）
+          var settled = false;
+          // iOSは画面に出る「ペースト」許可をタップしないと readText が返らないことがある→タイムアウトで案内
+          var timer = setTimeout(function () { if (settled) return; settled = true; restore(); inp.focus(); alert('クリップボードを読み取れませんでした。iOSでは表示される「ペースト」の吹き出しをタップしてください。入力欄の長押し貼り付けも使えます。'); }, 8000);
+          navigator.clipboard.readText().then(function (t) {
+            if (settled) return; settled = true; clearTimeout(timer);
+            t = (t || '').trim();
+            if (!t) { restore(); inp.focus(); alert('クリップボードが空か、読み取りが許可されませんでした。入力欄を長押しして貼り付けてください。'); return; }
+            inp.value = t; inp.focus();
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            restore('✓ 貼り付け');
+          }).catch(function () {
+            if (settled) return; settled = true; clearTimeout(timer);
+            restore(); inp.focus(); alert('クリップボードを読み取れませんでした。入力欄を長押しして貼り付けてください。');
+          });
         } else { inp.focus(); alert('この環境ではボタン貼り付けに未対応です。入力欄を長押しして貼り付けてください。'); }
       });
     });
@@ -285,7 +301,7 @@
   // input要素のHTMLに「📋貼り付け」ボタンを横付けした行を返す（inputはflex:1で伸びる）。
   function pasteRow_(inputHtml, inputId) {
     return '<div style="display:flex;gap:6px;align-items:stretch;">' + inputHtml +
-      '<button type="button" class="ghost paste-btn" data-paste="' + inputId + '" title="コピー中の文字を貼り付け" style="flex:0 0 auto;width:auto;margin:0;white-space:nowrap;padding:0 12px;">貼り付け</button></div>';
+      '<button type="button" class="ghost paste-btn" data-paste="' + inputId + '" title="コピー中の文字を貼り付け" style="flex:0 0 auto;width:max-content;margin:0;white-space:nowrap;padding:0 12px;">貼り付け</button></div>';
   }
   // 画像ファイル→縮小dataURL(長辺1280px・JPEG)。localStorage肥大とQuota超過を防ぐ。
   function fileToScaledDataUrl(file, cb) {
@@ -1379,13 +1395,16 @@
       '<div>' + pasteRow_('<input id="candTwitter" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://x.com/…/status/… か https://bsky.app/profile/…/post/…" autocomplete="off" style="flex:1;min-width:0;">', 'candTwitter') + '</div>' +
       '<label class="hint" style="display:block;margin:10px 0 2px;">動画生成用の画像（任意・最大4枚）— ボタンを押すとコピー中の画像が左から入ります</label>' +
       '<div class="cand-add-imgrow">' + slots + '</div>' +
+      '<div style="margin-top:6px;display:flex;">' +
+        '<label class="ghost cand-refimg-pick" style="width:auto;flex:0 0 auto;margin:0;">画像を選ぶ<input id="candAddImgFile" type="file" accept="image/*" multiple style="display:none;"></label>' +
+      '</div>' +
       '<div style="display:flex;margin-top:8px;"><span style="flex:1 1 auto;"></span>' +
-        '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.9rem;padding:10px 18px;width:auto;flex:0 0 auto;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button></div>' +
+        '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.9rem;padding:10px 18px;width:max-content;flex:0 0 auto;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button></div>' +
       '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
       '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
         '<div class="hint">サークルの作品を<b>まとめて</b>' + (isMain ? '候補' : 'このタブ') + 'に追加できます（サークルID / サークルURL / 作品URLのどれか）。タブ名は変わりません。</div>' +
         '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" type="text" inputmode="url" class="cand-refimg-line" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;min-width:0;">', 'candBulkSrc') + '</div>' +
-        '<button id="candBulkAdd" type="button" class="ghost" style="margin-top:8px;width:auto;">🏭 サークルの作品を全部追加</button>' +
+        '<button id="candBulkAdd" type="button" class="ghost" style="margin-top:8px;width:max-content;">🏭 サークルの作品を全部追加</button>' +
         '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
       '</div>';
   }
@@ -1447,6 +1466,27 @@
     body.innerHTML = addFormHtml_(isMain);
     $('candAdd').addEventListener('click', function () { addCandidate(tabId); });
     $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
+    // 「画像を選ぶ」(複数可): ファイルからもスロットへ左詰めで追加（1枚ずつ順に処理=メモリ圧迫回避）。
+    var addFile = $('candAddImgFile');
+    if (addFile) addFile.addEventListener('change', function () {
+      var files = [], fl = this.files || [], fi;
+      for (fi = 0; fi < fl.length; fi++) files.push(fl[fi]);
+      this.value = '';
+      if (!files.length) return;
+      var msg = $('candMsg'); if (msg) msg.textContent = '画像を処理中…（' + files.length + '枚）';
+      var added = 0, failed = 0;
+      (function step(i) {
+        if (i >= files.length) {
+          renderAddSlots_();
+          if (msg) msg.textContent = added ? ('画像を追加しました（' + _addModalImgs.filter(Boolean).length + '/4枚' + (failed ? '・' + failed + '枚は読み込めず' : '') + '・追加ボタンで確定）') : '画像を読み込めませんでした';
+          return;
+        }
+        fileToScaledDataUrl(files[i], function (durl) {
+          if (durl && _addModalImgs.length < 4) { _addModalImgs.push(durl); added++; } else if (!durl) failed++;
+          step(i + 1);
+        });
+      })(0);
+    });
     wirePaste_(body);
     wireAddSlots_(body);
     ov.hidden = false;

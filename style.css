@@ -234,6 +234,9 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;box-sizing:border-box;overflow:auto;}
 .fz-overlay[hidden]{display:none;}
 .fz-modal{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:16px;width:100%;max-width:520px;box-sizing:border-box;margin:auto;}
+/* モーダル内のボタンは原則テキスト幅（グローバル button{width:100%} の打ち消し・幅はテキスト長に自動追従）。
+   flex:1 指定のボタン（保存など）は従来どおり flex で伸びる。 */
+.fz-modal button{width:max-content;max-width:100%;white-space:nowrap;}
 .fz-close{position:absolute;top:8px;right:10px;background:transparent;border:none;color:var(--sub);font-size:20px;cursor:pointer;line-height:1;width:auto;padding:2px 6px;}
 .fz-title{font-size:15px;font-weight:700;color:var(--ink);margin:2px 30px 10px 0;word-break:break-word;}
 .fz-hero{text-align:center;margin-bottom:10px;}

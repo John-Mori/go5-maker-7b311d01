@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-06J（extractCid_をBooks/アフィリンク対応＝Books投稿の作品cid欠落を修正・INC-71）';
+var GAS_VERSION = '2026-07-06K（Books cid規則統一: .comの2階層URLもcontent_id優先＝タイトル未取得の根治）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -424,9 +424,10 @@ function extractCid_(url) {
   // アフィリンク(al.fanza.co.jp/?lurl=…)なら中身のURLをデコードして同じ規則で解析。
   var lm = s.match(/[?&]lurl=([^&]+)/);
   if (lm) { try { var dec = decodeURIComponent(lm[1]); if (dec) { var inner = extractCid_(dec); if (inner) return inner; } } catch (e) {} }
-  // FANZA Books：/product/【数字ID】/【コード】/。co.jp は content_id(2階層目)優先、com は数字ID(1階層目)。
+  // FANZA Books：/product/【数字ID】/【content_id】/。2階層目があれば .com/.co.jp を問わず優先
+  //   （数字IDはDMM APIのcontent_id照会に使えないため。フロント affiliate-core.js と同一規則）。
   var booksM = s.match(/book\.dmm\.(com|co\.jp)\/product\/([^/?&#\s]+)(?:\/([^/?&#\s]+))?/);
-  if (booksM) return (booksM[1] === 'co.jp') ? (booksM[3] || booksM[2]) : booksM[2];
+  if (booksM) return booksM[3] || booksM[2];
   // 同人・動画：cid= パラメータ。
   var m = s.match(/cid=([^/?&\s]+)/);
   if (m) return m[1];
