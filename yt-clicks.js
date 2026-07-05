@@ -1078,6 +1078,8 @@
       };
       ATTR_DEFS.forEach(function (a) { rec[a.key] = !!it[a.key]; }); // カテゴリ属性
       rec.workState = it.workState || '旧作'; // 作品状態
+      if (it.goal) rec.goal = it.goal;          // 狙い（成約/集客）
+      if (it.cmtType) rec.cmtType = it.cmtType; // コメント型（①〜⑧）
       return rec;
     }).filter(function (r) { return r.videoId; });
     if (!items.length) { setStatus('同期する履歴がありません'); if (btn) btn.disabled = false; return; }

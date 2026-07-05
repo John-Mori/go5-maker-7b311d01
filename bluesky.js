@@ -664,6 +664,10 @@
     } catch (e) {}
     return null;
   }
+  // 戦略ラベル（raw/戦略_画像選びとコメント.md §4）: 狙い(成約/集客)とコメント型(①〜⑧)。
+  // 動画ごとのラベルなので投稿後に未設定へ戻す（前作の値が残ると分析を汚す）。
+  function readGoal() { var el = $('movieGoal'); return el ? (el.value || '') : ''; }
+  function readCmtType() { var el = $('movieCmtType'); return el ? (el.value || '') : ''; }
   function captureMeta_() {
     var workUrl = captureWorkUrl_();
     return {
@@ -673,6 +677,8 @@
       workState: readWorkState(),
       rebuild: readRebuild(),
       rebuildOf: readRebuildTarget(),              // リビルド対象として選んだ投稿履歴のvideoId
+      goal: readGoal(),                            // 狙い（成約/集客）
+      cmtType: readCmtType(),                      // コメント型（①〜⑧）
       fanzaSnap: fanzaSnapForWorkUrl_(workUrl),   // 履歴カード用（当時価格）
       fanzaInfo: fanzaInfoForWorkUrl_(workUrl) || null  // シート記録用（価格/レビュー）
     };
@@ -680,7 +686,7 @@
   // 履歴アイテムから meta を復元（過去データのアカウント矯正で使う）。
   function metaFromHistItem_(it) {
     var attrs = {}; MOVIE_ATTRS.forEach(function (p) { attrs[p[0]] = !!it[p[0]]; });
-    return { videoId: it.videoId || '', workUrl: it.workUrl || '', attrs: attrs, workState: it.workState || '', rebuild: !!it.rebuild, rebuildOf: it.rebuildOf || '', fanzaSnap: it.fanzaSnap || null, fanzaInfo: null };
+    return { videoId: it.videoId || '', workUrl: it.workUrl || '', attrs: attrs, workState: it.workState || '', rebuild: !!it.rebuild, rebuildOf: it.rebuildOf || '', goal: it.goal || '', cmtType: it.cmtType || '', fanzaSnap: it.fanzaSnap || null, fanzaInfo: null };
   }
 
   // record.account でチャンネルを決め、record.meta（凍結済み）優先で記録する。
@@ -709,6 +715,11 @@
     payload.workState = workState;
     payload.rebuild = rebuild;
     if (rebuildOf) payload.rebuildOf = rebuildOf;
+    // 狙い×コメント型（あるときだけ送る＝旧GASは未知フィールドを無視するので後方互換）
+    var goal = record.goal || (meta ? meta.goal : (uiSame ? readGoal() : ''));
+    var cmtType = record.cmtType || (meta ? meta.cmtType : (uiSame ? readCmtType() : ''));
+    if (goal) payload.goal = goal;
+    if (cmtType) payload.cmtType = cmtType;
     var mi = meta ? meta.fanzaInfo : (uiSame ? fanzaInfoForWorkUrl_(workUrl) : null);
     if (mi) {
       payload.fanza_list_price = mi.listPrice;
@@ -987,10 +998,16 @@
       entry.workState = meta ? meta.workState : (uiSame ? readWorkState() : '旧作'); // 投稿時の作品状態
       var rb = meta ? meta.rebuild : (uiSame ? readRebuild() : false); if (rb) entry.rebuild = true;
       var rbOf = meta ? meta.rebuildOf : (uiSame ? readRebuildTarget() : ''); if (rb && rbOf) entry.rebuildOf = rbOf;
+      var gl = meta ? meta.goal : (uiSame ? readGoal() : ''); if (gl) entry.goal = gl;               // 狙い（成約/集客）
+      var ct = meta ? meta.cmtType : (uiSame ? readCmtType() : ''); if (ct) entry.cmtType = ct;      // コメント型（①〜⑧）
       if (uiSame) {
         var rbEl = $('movieRebuild'); if (rbEl) rbEl.checked = false; // UIと同じ時だけ一度きりフラグをOFF
         var rbRow = $('movieRebuildTargetRow'), rbSel = $('movieRebuildTarget');
         if (rbSel) rbSel.value = ''; if (rbRow) rbRow.hidden = true;
+        // 狙い/コメント型は動画ごとのラベル＝前作の値が残ると分析を汚すため未設定へ戻す（field_も消す）
+        var gEl = $('movieGoal'); if (gEl) gEl.value = '';
+        var ctEl = $('movieCmtType'); if (ctEl) ctEl.value = '';
+        try { localStorage.removeItem('field_movieGoal'); localStorage.removeItem('field_movieCmtType'); } catch (e) {}
       }
     }
     a.unshift(entry);

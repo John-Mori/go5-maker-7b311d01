@@ -40,7 +40,7 @@ var FANZA_HEADERS = [
 // カテゴリ＝作品属性を名前で明記（キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄）。
 // ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
-var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数'];
+var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数', '目的', 'コメント型'];
 // 作品属性の定義（順序＝カテゴリ列での並び）。フラグ名→表示名。
 var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-05H（D-1: hashtags/リビルド元ID/タイトル文字数を記録・予約経由投稿へ動画メタ中継。記録取りこぼし回収）';
+var GAS_VERSION = '2026-07-05I（目的(成約/集客)・コメント型(①〜⑧)列を追加＝狙い×型の勝ちパターン集計を自動化）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -397,6 +397,7 @@ function doPost(e) {
       title: body.title || '', postUrl: body.postUrl || '', affiliateUrl: body.affiliateUrl || '',
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
       rebuildOf: body.rebuildOf || '',     // リビルド元の投稿videoId（送っているのに未記録だった取りこぼしを回収・D-1）
+      goal: body.goal || '', cmtType: body.cmtType || '', // 狙い(成約/集客)・コメント型(①〜⑧)＝勝ちパターン集計用
       shareUrl: body.shareUrl || '',       // da.gd共有URL（共有URL列）
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから（同IDの行へ後追いupsert）
       chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性（複数可）
@@ -522,6 +523,8 @@ function writeRecord_(channel, f) {
   putIf('post_uri', f.postUri || '');
   putIf('ハッシュタグ', f.hashtags || '');       // 受信していたのに書いていなかった取りこぼしを回収（D-1）
   putIf('リビルド元ID', f.rebuildOf || '');       // リビルド前後の再生数比較をシートで可能に（D-1）
+  putIf('目的', f.goal || '');                    // 狙い（成約/集客）＝維持率とクリック数の二系統検証用
+  putIf('コメント型', f.cmtType || '');           // コメント型（①〜⑧）＝勝ちパターン集計用
   // FANZA 価格スナップショット（投稿時1回のみ。null は書かない＝既存値を保護）。
   putIf('元値list_price', f.fanza_list_price !== undefined && f.fanza_list_price !== null ? f.fanza_list_price : '');
   putIf('割引後price', f.fanza_price !== undefined && f.fanza_price !== null ? f.fanza_price : '');
@@ -569,6 +572,7 @@ function syncHistory_(channel, items) {
         chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, ai: it.ai, ol: it.ol, soshu: it.soshu, // カテゴリ属性（複数可）
         workState: it.workState,           // 作品状態（新作/準新作/旧作）
         rebuild: it.rebuild, remade: it.remade, // 作り直し（リビルド版/作り直し済）
+        goal: it.goal, cmtType: it.cmtType, // 狙い・コメント型（履歴にあれば同期）
         postedAt: it.postedAt || '',
         noShorten: true, noSort: true   // 同期は短縮API呼ばず・並べ替えは最後にまとめて
       });
@@ -1024,6 +1028,7 @@ function runReservations() {
           affiliateUrl: (String(text).match(/https?:\/\/[^\s]+/) || [''])[0],
           workUrl: meta.workUrl || '', hashtags: extractHashtags_(text), postUri: res.uri,
           workState: meta.workState, rebuild: meta.rebuild, rebuildOf: meta.rebuildOf || '',
+          goal: meta.goal || '', cmtType: meta.cmtType || '',
           chara: attrs.chara, jk: attrs.jk, gyaru: attrs.gyaru, isekai: attrs.isekai, ai: attrs.ai, ol: attrs.ol, soshu: attrs.soshu
         });
       } catch (e) {}
