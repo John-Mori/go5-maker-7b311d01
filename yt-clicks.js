@@ -2089,6 +2089,17 @@
           var rank = i + 1;
           var topCls = rank <= 3 ? ' rank-top' + rank : '';
           var dispTitle = esc(stripCommonTags(r.title));
+          // 右端の画像列: 作品サムネ(タップで作品詳細=サンプル一覧) + 動画生成に使った保存画像(タップで拡大)
+          var rcid = '';
+          try { if (r.workUrl && window.buildAffiliateLink) { var _nu = window.normalizeWorkUrl ? window.normalizeWorkUrl(r.workUrl) : r.workUrl; var _rr = _nu ? window.buildAffiliateLink(_nu, '') : null; if (_rr && _rr.ok) rcid = _rr.cid; } } catch (e) {}
+          var refSrc = '';
+          try { if (rcid && window.Go5Cand && window.Go5Cand.refImgs) { var _ri = window.Go5Cand.refImgs(rcid); refSrc = (_ri && _ri[0]) || ''; } } catch (e) {}
+          var thumbColHtml = (r.workUrl || refSrc)
+            ? '<div class="rank-thumbcol">' +
+                (r.workUrl ? '<img class="rank-thumb" data-fanza-thumb-url="' + esc(r.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細（サンプル画像）" loading="lazy" style="display:none;">' : '') +
+                (refSrc ? '<img class="rank-refimg" data-rank-refimg="' + esc(rcid) + '" src="' + esc(refSrc) + '" alt="動画で使った画像（タップで拡大）" title="動画で使った画像（タップで拡大）" loading="lazy">' : '') +
+              '</div>'
+            : '';
           var dateStr = fmtTsFull(r.ts);
           var acctLabel = ACCT_NAME[r.acct] || r.acct;
           // 指標スパン（並びの中でソート対象を rank-main で強調）。バケットモードのみ先頭にスナップ値。
@@ -2121,6 +2132,7 @@
                 (r.workUrl ? '<a class="vlink vlink-work" href="' + esc(r.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
               '</div>' +
             '</div>' +
+            thumbColHtml +
           '</div>';
         }).join('') +
       '</div>';
@@ -2131,6 +2143,13 @@
           try { localStorage.setItem('rank_mode', _rankMode); } catch (e) {}
           doRender();
         });
+      });
+      // 右端の画像列: 作品サムネ→作品詳細（サンプル一覧）モーダル / 動画生成に使った画像→ズーム（スワイプ）
+      el.querySelectorAll('img.rank-thumb').forEach(function (im) {
+        im.addEventListener('click', function () { openFanzaModal_(im.getAttribute('data-fanza-thumb-url')); });
+      });
+      el.querySelectorAll('[data-rank-refimg]').forEach(function (im) {
+        im.addEventListener('click', function () { if (window.Go5Cand && window.Go5Cand.zoomRefImgs) window.Go5Cand.zoomRefImgs(im.getAttribute('data-rank-refimg')); });
       });
       applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示
       fillFanzaNames();

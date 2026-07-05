@@ -1892,7 +1892,12 @@
       '</div></div>';
   }
 
-  try { window.Go5Cand = { render: render }; } catch (e) {}
+  // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
+  try { window.Go5Cand = {
+    render: render,
+    refImgs: refImgsOf_,                                        // cid → 保存画像の配列（無ければ[]）
+    zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0); } // タップで全画像ズーム(スワイプ)
+  }; } catch (e) {}
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行（5MB枠を解放）
   // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ（登録済みはフラグでスキップ＝通信は初回のみ）
   ensureTrackedAll();
