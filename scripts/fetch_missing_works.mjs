@@ -94,6 +94,17 @@ async function scrapeBookPage(url) {
   const lm = html.match(/(?:定価|通常価格|参考価格)[^0-9]{0,16}([\d,]+)\s*円/);
   if (lm) listPrice = parseInt(lm[1].replace(/,/g, ""), 10);
   if (listPrice == null) listPrice = price;
+  // セール割引バッジ（例: >100%OFF< / >30％OFF<）。ブックスのJSON-LD offers.price は
+  // セール中でも定価のままのことがある（値引きはカート側適用）ため、バッジの割引率から
+  // 割引後価格を導出する（ヘッダ汎促の「◯％以上ポイント還元」は OFF を含まないため誤検出しない）。
+  const offM = html.match(/>\s*(\d{1,3})\s*[%％]\s*OFF\s*</i);
+  if (offM && price != null) {
+    const pct = parseInt(offM[1], 10);
+    if (pct > 0 && pct <= 100) {
+      if (listPrice == null || listPrice < price) listPrice = price;   // 定価＝JSON-LDの価格
+      price = Math.round(listPrice * (100 - pct) / 100);               // 割引後（100%OFFなら0円）
+    }
+  }
   return { title, author: author || brand, price, listPrice, releaseDate, genres: category ? [category] : [], cover };
 }
 
