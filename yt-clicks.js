@@ -482,13 +482,17 @@
 
   // 履歴アイテム1件をスプレッドシート（GAS）へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
   // 投稿日時を上書きしないよう postUrl は送らない（既存行のカテゴリ列だけ更新する用途）。
+  // T5: シートへ送るchannelは背骨ID(videoId)接頭辞を優先（現UIではなく作品の所属）。
+  //   混入アイテムを現アカウントのタブへ薄行として転写する『感染プリンタ』を止める。
+  function chOfVid_(videoId, fallback) { var m = String(videoId || '').match(/^(acc[12])-/); return m ? m[1] : (fallback || acct()); }
+  function chForItem_(it) { return chOfVid_(it && it.videoId, acct()); }
   function pushItemToGas_(it) {
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
     if (!gasUrl || !it || !it.videoId) return;
     var payload = {
       op: 'upsert',
-      channel: acct(),
+      channel: chForItem_(it),       // 接頭辞優先で誤タブ書き込みを防ぐ
       videoId: it.videoId,           // post_id（upsertキー）
       title: it.title || '',
       postUri: it.postUri || '',
@@ -809,7 +813,8 @@
     if (isTest) return;
     var gasUrl = ''; try { gasUrl = localStorage.getItem('bsky_gas_url') || ''; } catch (e) {}
     if (!gasUrl) return;
-    var ch = channel || (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
+    // T5: 明示channel＞背骨ID接頭辞＞現UI。remade単独payloadが誤タブに薄行を作る事故を防ぐ。
+    var ch = channel || chOfVid_(videoId, (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'));
     try {
       fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'upsert', channel: ch, videoId: videoId, remade: !!remade }) }).catch(function () {});
     } catch (e) {}
@@ -872,12 +877,35 @@
     if (yUrl) { delete fm[k]; saveYtMapFor_(from, fm); var tm = loadYtMapFor_(to); tm[k] = yUrl; saveYtMapFor_(to, tm); }
     var gas = gasUrl_();
     if (gas && (moved.videoId || moved.postUri || moved.shortUrl)) {
-      fetch(gas, { method: 'POST', body: JSON.stringify({ op: 'move_row', from: from, to: to, videoId: moved.videoId || '', postUri: moved.postUri || '', short: moved.shortUrl || '' }) })
-        .then(function (r) { return r.json(); }).catch(function () { return null; });
+      var mvpay = { from: from, to: to, videoId: moved.videoId || '', postUri: moved.postUri || '', short: moved.shortUrl || '' };
+      // T2: 応答を検証し、失敗（通信断/GASエラー/ok:false）は再送キューへ積む＝ローカルとシートの無通知乖離を防ぐ。
+      fetch(gas, { method: 'POST', body: JSON.stringify({ op: 'move_row', videoId: mvpay.videoId, postUri: mvpay.postUri, short: mvpay.short, from: from, to: to }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (!j || !j.ok) throw new Error((j && j.error) || 'move_row_failed'); })
+        .catch(function () { queueSheetMove_(mvpay); });
     }
+  }
+  // T2: シート行移動の失敗を貯めて次回更新時に自動再送（ローカルだけ動いてシートが取り残される事故の恒久対策）。
+  function queueSheetMove_(mv) {
+    try { var q = JSON.parse(localStorage.getItem('sheet_move_pending') || '[]') || []; q.push(mv); localStorage.setItem('sheet_move_pending', JSON.stringify(q)); } catch (e) {}
+  }
+  function flushSheetMovePending_() {
+    var gas = gasUrl_(); if (!gas) return;
+    var q; try { q = JSON.parse(localStorage.getItem('sheet_move_pending') || '[]') || []; } catch (e) { q = []; }
+    if (!q.length) return;
+    var mv = q[0]; // 1回のrefreshで1件ずつ（軽量・順序保存）
+    fetch(gas, { method: 'POST', body: JSON.stringify({ op: 'move_row', videoId: mv.videoId, postUri: mv.postUri, short: mv.short, from: mv.from, to: mv.to }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j && j.ok) { var qq; try { qq = JSON.parse(localStorage.getItem('sheet_move_pending') || '[]') || []; } catch (e) { qq = []; } qq.shift(); try { localStorage.setItem('sheet_move_pending', JSON.stringify(qq)); } catch (e) {} } })
+      .catch(function () {});
   }
   function moveItemAccount_(k, it, to) {
     var from = acct(); if (from === to) return;
+    // T2: 本人投稿の誤移動ブロック。DID台帳が健全で「この投稿は現アカウント本人のもの」と確定できるなら強警告。
+    var R = window.Go5AccountRepair;
+    if (R && R.classifyByPost && R.ledgerFresh && R.ledgerFresh() && R.classifyByPost(it) === from) {
+      if (!window.confirm('⚠️ この投稿は「' + acctName_(from) + '」本人のアカウント（投稿者DID）で投稿されています。\nそれでも ' + acctName_(to) + ' へ移動しますか？（通常は不要です）')) return;
+    }
     moveOne_(it.manual ? 'verify_manual' : 'short_hist', it, from, to);
     setStatus('✅ 「' + (it.title || k) + '」を ' + acctName_(to) + ' へ移動しました。' + (gasUrl_() ? '' : '（シートは⚙記録用URL設定時に反映）'));
     render();
@@ -1021,11 +1049,15 @@
         //   シート側の誤タブ行（例: 宵桜タブに紛れた acc1-… の行）を復元経由でローカルへ「再感染」させない。
         var pm = String(si.videoId || '').match(/^(acc[12])-/);
         if (pm && pm[1] !== to) { skipped++; return; }
-        var loc = null; for (var i = 0; i < sheetKeys.length && !loc; i++) loc = idx[sheetKeys[i]] || null;
+        var loc = null, matchedKey = ''; for (var i = 0; i < sheetKeys.length && !loc; i++) { if (idx[sheetKeys[i]]) { loc = idx[sheetKeys[i]]; matchedKey = sheetKeys[i]; } }
         if (loc) {
           if (loc.a !== to) { // 誤って別アカウントに入っている→現アカウントへ戻す（ローカルのみ・シートは触らない）
+            // T3: 弱キー(t:題名|YT)一致での横断移動は禁止（別作品/両垢同題名の誤吸引＝再感染を防ぐ。取り込まず据え置き）。
+            if (matchedKey.charAt(0) === 't') { skipped++; return; }
             var srcArr = arrOf(loc.base, loc.a), mv = null;
             var na = srcArr.filter(function (x) { if (itemKey(x) === loc.key) { mv = x; return false; } return true; });
+            // T3: ローカル品の所属(投稿者DID／背骨ID接頭辞)が現アカウントと矛盾するなら移動しない（naは未保存＝副作用なし）。
+            if (mv) { var ow = ownerOf_(mv); if (ow && ow !== to) { skipped++; return; } }
             arrs[loc.base + '__' + loc.a] = na; saveArrFor_(loc.base, loc.a, na);
             var dstBase = (mv && mv.manual) ? 'verify_manual' : 'short_hist';
             var dstArr = arrOf(dstBase, to).filter(function (x) { return itemKey(x) !== loc.key; });
@@ -1178,25 +1210,37 @@
 
   // announce=true（手動更新ボタン）のときは、完了時に成功/失敗を明確に表示する。
   function refresh(announce) {
+    var fixed = sanitizeOwnership_(); // ★誤アカウント混入を正へ帰還（ensureIdsより前＝偽の接頭辞を刻む前に所属確定）
+    flushSheetMovePending_(); // 前回失敗したシート行移動を自動再送（T2）
     ensureIds(); // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
     reconnectStrandedYt_(); // 取り残されたYT URLマップを正しいアカウントへ自己再接続（冪等）
     render();
+    // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ（postUriアイテムのDID確定分＝混入投稿を自動帰還）。冪等。
+    (function () {
+      var R = window.Go5AccountRepair;
+      if (R && R.ensureDids && !(R.ledgerFresh && R.ledgerFresh())) {
+        R.ensureDids(function () { var more = sanitizeOwnership_(); if (more) { render(); notifySanitized_(more); } });
+      }
+    })();
+    var note = sanitizeNoteHtml_(fixed); // 更新完了メッセージに付記（サニタイズ通知が上書きで消えない）
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
     if (!codes.length && !vids.length) {
-      if (announce) setStatus('更新対象がありません（各行にYouTube URLを入れる／⚙️詳細設定でAPIキー設定が必要です）');
-      else setStatus(apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます');
+      if (announce) setStatus('更新対象がありません（各行にYouTube URLを入れる／⚙️詳細設定でAPIキー設定が必要です）' + note, !!note);
+      else setStatus((apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます') + note, !!note);
+      if (fixed) wireSanUndo_();
       return Promise.resolve(false);
     }
     setStatus('🔄 更新中…（再生数・クリック数）');
     return fetchData_(items, ymap).then(function () {
-      if (lastErr) setStatus('⚠️ 更新に失敗しました：' + lastErr);
-      else if (announce) setStatus('✅ 更新しました（再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + '）');
-      else setStatus(!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : '');
+      if (lastErr) setStatus('⚠️ 更新に失敗しました：' + lastErr + note, !!note);
+      else if (announce) setStatus('✅ 更新しました（再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + '）' + note, !!note);
+      else setStatus((!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : '') + note, !!note);
       render();
+      if (fixed) wireSanUndo_();
       return true;
-    }).catch(function () { setStatus('⚠️ 更新に失敗しました（通信エラー）'); return false; });
+    }).catch(function () { setStatus('⚠️ 更新に失敗しました（通信エラー）', false); return false; });
   }
 
   // この投稿履歴を正として、全アイテムを記録シート(GAS)へ一括 upsert 同期する。
@@ -1241,8 +1285,12 @@
       if (it.cmtType) rec.cmtType = it.cmtType; // コメント型（①〜⑧）
       return rec;
     }).filter(function (r) { return r.videoId; });
-    if (!items.length) { setStatus('同期する履歴がありません'); if (btn) btn.disabled = false; return; }
-    setStatus('スプレッドシートへ同期中… (' + items.length + '件)');
+    // T5: 接頭辞が現アカウントと矛盾するアイテム（混入品）は現タブへ同期しない＝シートを汚さない。
+    var total0 = items.length;
+    items = items.filter(function (r) { var m = String(r.videoId).match(/^(acc[12])-/); return !m || m[1] === acct(); });
+    var excluded = total0 - items.length;
+    if (!items.length) { setStatus('同期する履歴がありません' + (excluded ? '（別アカウント所属の' + excluded + '件は除外）' : '')); if (btn) btn.disabled = false; return; }
+    setStatus('スプレッドシートへ同期中… (' + items.length + '件' + (excluded ? '・別アカウント所属の' + excluded + '件は除外' : '') + ')');
     fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'sync_history', channel: acct(), items: items }) })
       .then(function (r) { return r.json(); })
       .then(function (j) {
@@ -1424,6 +1472,94 @@
       if (changed.acc2) saveYtMapFor_('acc2', mapByAcc.acc2);
       return moved;
     } catch (e) { return 0; }
+  }
+  // ── T1: 所有権サニタイザ（誤アカウントに混入した投稿を、正しいアカウントへ自動帰還）──────
+  //   所属判定 ownerOf_: (a) postUriあり かつ DID台帳がこのセッションで解決済み(権威) なら投稿者DIDで確定。
+  //     postUriがあるのに台帳未解決なら“動かさない”（次のrefreshで台帳解決後に判定＝正当な手動移動を誤って戻さない）。
+  //     どちらのDIDでもない場合も動かさない。 (b) postUri無し＝DID判定不能なら背骨ID接頭辞(acc1-/acc2-)。
+  //   移動は「削除でなく別ストアへ移送＋到着先で強キー重複統合＋verify_yt随伴移送」。冪等・ローカルのみ（シートは🩺/手動の役割）。
+  function ownerOf_(it) {
+    if (!it) return '';
+    if (it._ownerPin === 'acc1' || it._ownerPin === 'acc2') return it._ownerPin; // ユーザーが↩️で固定した所属を最優先（自動判定より人の指示が上）
+    var R = window.Go5AccountRepair;
+    var ledgerOK = !!(R && R.ledgerFresh && R.ledgerFresh() && R.didReady && R.didReady());
+    if (it.postUri) {
+      if (ledgerOK && R.classifyByPost) return R.classifyByPost(it) || ''; // DIDで確定 or 不明('')
+      return ''; // 台帳未解決の postUri アイテムは触らない（安全側）
+    }
+    var m = String(it.videoId || '').match(/^(acc[12])-/);
+    return m ? m[1] : '';
+  }
+  // 到着先の重複検出：強キー(postUri>videoId)優先。shortUrl はリビルド引継ぎで新旧2件が正当共有するため、
+  //   postUri/videoId 両方が無い“薄い”アイテムに限定して照合する。
+  function findDup_(arr, it) {
+    var i;
+    for (i = 0; i < arr.length; i++) {
+      if (it.postUri && arr[i].postUri && arr[i].postUri === it.postUri) return i;
+      if (it.videoId && arr[i].videoId && arr[i].videoId === it.videoId) return i;
+    }
+    if (!it.postUri && !it.videoId && it.shortUrl) { for (i = 0; i < arr.length; i++) { if (arr[i].shortUrl === it.shortUrl) return i; } }
+    return -1;
+  }
+  function sanitizeOwnership_() { // 冪等・O(n)・ローカルのみ
+    try {
+      var accs = ['acc1', 'acc2'], bases = ['short_hist', 'verify_manual'];
+      var store = {}, ymaps = {}, dirty = {}, ydirty = {}, moved = [];
+      accs.forEach(function (a) { bases.forEach(function (b) { store[b + '__' + a] = loadArrFor_(b, a); }); ymaps[a] = loadYtMapFor_(a); });
+      accs.forEach(function (from) {
+        bases.forEach(function (base) {
+          var src = store[base + '__' + from], keep = [];
+          src.forEach(function (it) {
+            var owner = ownerOf_(it);
+            if (!owner || owner === from) { keep.push(it); return; }
+            // リビルド系譜の分断防止：リビルド相手が同ストアに居て所有者不明ならペアごと保留（🩺へ委譲）
+            if (it.rebuildOf && src.some(function (x) { return x.videoId === it.rebuildOf && !ownerOf_(x); })) { keep.push(it); return; }
+            var dstBase = it.manual ? 'verify_manual' : base;
+            var dst = store[dstBase + '__' + owner];
+            var di = findDup_(dst, it);
+            if (di >= 0) { // 既存を正とし欠損フィールドのみ補完（薄い復元行×実データの統合）
+              var x = dst[di], fs = ['title', 'shortUrl', 'shareUrl', 'postUrl', 'postUri', 'videoId', 'workUrl', 'cid', 'workState', 'ytUrl'];
+              for (var fi = 0; fi < fs.length; fi++) { if (!x[fs[fi]] && it[fs[fi]]) x[fs[fi]] = it[fs[fi]]; }
+              if ((!x.ts || x.ts === 0) && it.ts) x.ts = it.ts;
+            } else { dst.unshift(it); }
+            dirty[dstBase + '__' + owner] = true; dirty[base + '__' + from] = true;
+            var k = itemKey(it); // verify_yt 随伴移送（itemKeyは移動不変）
+            if (ymaps[from][k] != null) { if (ymaps[owner][k] == null) ymaps[owner][k] = ymaps[from][k]; delete ymaps[from][k]; ydirty[from] = true; ydirty[owner] = true; }
+            moved.push({ base: base, dstBase: dstBase, item: it, from: from, to: owner, by: (it.postUri ? 'post' : 'videoId'), at: new Date().getTime() });
+          });
+          if (keep.length !== src.length) store[base + '__' + from] = keep;
+        });
+      });
+      Object.keys(dirty).forEach(function (kk) { var i = kk.lastIndexOf('__'); saveArrFor_(kk.slice(0, i), kk.slice(i + 2), store[kk]); });
+      accs.forEach(function (a) { if (ydirty[a]) saveYtMapFor_(a, ymaps[a]); });
+      if (moved.length) { try { localStorage.setItem('sanitize_move_log', JSON.stringify(moved)); } catch (e) {} }
+      return moved.length;
+    } catch (e) { return 0; }
+  }
+  // サニタイザの取り消し（ローカルのみ逆適用。undoLastMoves_はシートへmove_rowを送るため共用しない）。
+  function undoSanitize_() {
+    var log = []; try { log = JSON.parse(localStorage.getItem('sanitize_move_log') || '[]') || []; } catch (e) {}
+    if (!log.length) { setStatus('元に戻せる自動移動がありません。'); return; }
+    log.slice().reverse().forEach(function (mv) {
+      var k = itemKey(mv.item);
+      var dst = loadArrFor_(mv.dstBase, mv.to).filter(function (x) { return itemKey(x) !== k; });
+      saveArrFor_(mv.dstBase, mv.to, dst);
+      var src = loadArrFor_(mv.base, mv.from).filter(function (x) { return itemKey(x) !== k; });
+      mv.item._ownerPin = mv.from; // ユーザーの意思＝この所属に固定。以後サニタイザは動かさない
+      src.unshift(mv.item); saveArrFor_(mv.base, mv.from, src);
+      var ym = loadYtMapFor_(mv.to); if (ym[k] != null) { var yf = loadYtMapFor_(mv.from); if (yf[k] == null) yf[k] = ym[k]; delete ym[k]; saveYtMapFor_(mv.to, ym); saveYtMapFor_(mv.from, yf); }
+    });
+    try { localStorage.removeItem('sanitize_move_log'); } catch (e) {}
+    setStatus('↩️ 自動移動を元に戻しました。'); refresh();
+  }
+  // サニタイズ結果の通知HTML（更新完了メッセージに付記して上書き消失を防ぐ）＋↩️ボタン配線。
+  function sanitizeNoteHtml_(n) {
+    return n ? '<br>⚠️ ' + n + '件を正しいアカウントへ移動しました（投稿者DID／背骨IDで判定）。 <button type="button" id="ytSanUndo" class="ghost" style="width:auto;font-size:12px;padding:4px 10px;">↩️ 元に戻す</button>' : '';
+  }
+  function wireSanUndo_() { var ub = $('ytSanUndo'); if (ub) ub.addEventListener('click', undoSanitize_); }
+  function notifySanitized_(n) { // 単独通知（DID解決後の後追いサニタイズ用）
+    if (!n) return;
+    setStatus(sanitizeNoteHtml_(n).replace(/^<br>/, ''), true); wireSanUndo_();
   }
   // ── P1: YouTube実データ（題名・投稿時刻）で迷子のYT URLを行へつなぎ直す ─────────
   //   識別子(postUri/短縮URL/videoId)が何世代ずれていても成立する最後の照合手段。

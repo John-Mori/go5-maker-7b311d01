@@ -779,23 +779,27 @@
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
     var meta = d.meta || null;
-    // 所属アカウントの確定：①イベントに載った account（予約/即時で凍結） → ②post_uriのDID照合で矯正。
-    var account = d.account || acctId();
-    var did = didFromUri_(d.post_uri);
-    if (did) {
-      if (!acctDid_(account)) setAcctDid_(account, did); // 台帳が空の時だけ学習（権威はハンドル解決＝ensureAcctDids_）
-      var byDid = acctOfDid_(did);
-      if (byDid && byDid !== account) account = byDid;   // UIの取り違えをDIDで矯正
-    }
-    var uiSame = (account === acctId());
-    var vid = (meta && meta.videoId) || (uiSame ? currentVideoId : '') || '';
-    // まず即時記録（短縮URLが遅い/失敗しても投稿は確実に残す）。videoIdがあれば後追いで同一行へ追記。
-    recordToSheet({ account: account, meta: meta, title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri, videoId: vid });
-    shortenAndShow(d.post_url, d.post_uri, d.title, function (res) {
-      // 短縮URL確定 → videoId があれば同一行へ upsert（shortUrl=r2計測用 / shareUrl=da.gd表示用）。
-      var short = res && (res.shortUrl || res.shareUrl);
-      if (vid && short) recordToSheet({ account: account, meta: meta, postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: (res.shortUrl || res.shareUrl), shareUrl: res.shareUrl || '' });
-    }, account, meta);
+    // 所属アカウントの確定：まずハンドル解決でDID台帳を権威に整えてから、post_uriのDIDで矯正する（T4）。
+    //   旧実装は「台帳が空なら学習」で誤DIDを永続学習し得た（learn-poisoning）。学習を廃し、
+    //   『両アカウントのDIDが解決済み・相異』の時だけDIDを権威にする＝汚染台帳での逆流ラベリングを防ぐ。
+    ensureAcctDids_(function () {
+      var account = d.account || acctId();
+      var did = didFromUri_(d.post_uri);
+      if (did) {
+        var d1 = acctDid_('acc1'), d2 = acctDid_('acc2');
+        var byDid = (d1 && d2 && d1 !== d2) ? acctOfDid_(did) : '';
+        if (byDid && byDid !== account) account = byDid;   // UIの取り違えをDIDで矯正（台帳が健全な時だけ）
+      }
+      var uiSame = (account === acctId());
+      var vid = (meta && meta.videoId) || (uiSame ? currentVideoId : '') || '';
+      // まず即時記録（短縮URLが遅い/失敗しても投稿は確実に残す）。videoIdがあれば後追いで同一行へ追記。
+      recordToSheet({ account: account, meta: meta, title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri, videoId: vid });
+      shortenAndShow(d.post_url, d.post_uri, d.title, function (res) {
+        // 短縮URL確定 → videoId があれば同一行へ upsert（shortUrl=r2計測用 / shareUrl=da.gd表示用）。
+        var short = res && (res.shortUrl || res.shareUrl);
+        if (vid && short) recordToSheet({ account: account, meta: meta, postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: (res.shortUrl || res.shareUrl), shareUrl: res.shareUrl || '' });
+      }, account, meta);
+    });
   });
 
   // ---- 過去データのアカウント矯正（DID照合）：short_hist と シート行を正しいアカウントへ移す ----
@@ -901,6 +905,7 @@
       verifyLedger: verifyLedger_,               // 分類・移動の前提ゲート（force解決＋相異検証＋表示名）
       classifyByPost: classifyByPost_,           // DID/ハンドルで確定できる所属（yt-clicksの自動分類の土台）
       didReady: function () { return !!(acctDid_('acc1') && acctDid_('acc2') && acctDid_('acc1') !== acctDid_('acc2')); },
+      ledgerFresh: function () { return _didsResolved; }, // このセッションでハンドル解決済み＝台帳を権威にしてよい（サニタイザが使用）
       sheetMove: null                            // （将来用フック）
     };
   } catch (e) {}
