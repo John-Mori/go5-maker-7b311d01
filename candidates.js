@@ -530,6 +530,16 @@
       return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" title="' + esc(a[1]) + '（未投稿）">' + esc(a[1]) + '</span>';
     }).join('');
   }
+  // 投稿済み作品：Books等のバッジとチャンネルpillの間に、投稿日(YYYY/M/D)+✔ をチャンネルテーマ色で表示。
+  function postedDatesHtml_(cid) {
+    return _ACCTS.map(function (a) {
+      var it = postedItemForCid_(cid, a[0]);
+      if (!it || !it.ts) return '';
+      var d = new Date(it.ts);
+      var ds = d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+      return '<span class="cand-posted-date cand-acct-' + a[0] + '" title="' + esc(a[1]) + 'で ' + esc(ds) + ' に投稿済み">' + esc(ds) + ' ✔</span>';
+    }).join('');
+  }
   // Bluesky公開APIから、その投稿に添付された画像URL配列を取得（未認証・CORS）。cb(images[]|null)。
   function fetchPostImages_(postUri, cb) {
     if (!postUri) { cb(null); return; }
@@ -2009,22 +2019,21 @@
     var hasBsky = bskyImgHas(it.cid);
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像（複数可）
     var refImgSrc = refImgs[0] || '';
-    var refCmt = (refImgOf(it.cid) || {}).comment || ''; // 保存済みコメント（サムネ下に黒字で表示）
-    // 動画の「投稿予定プレビュー」：作品サムネの下ではなく、カード下段に横並びで（画像を少し大きく＝縦にスペース、
-    // コメントは画像の右に一行）。画像・コメントが無ければ出さない。
-    var previewHtml = (refImgSrc || refCmt)
-      ? '<div class="cand-preview">' +
-          (refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '') +
-          (refCmt ? '<span class="cand-refimg-comment">' + esc(refCmt) + '</span>' : '') +
-        '</div>'
-      : '';
+    var refCmt = (refImgOf(it.cid) || {}).comment || ''; // 保存済みコメント（動画生成用画像の真下に全文表示）
+    // 動画生成用の画像＋コメントは作品サムネの真下（左の画像列）に少し余白を開けて縦に積む。
+    //   画像の真下にコメントを全文表示（省略しない）。点線の区切りは廃止。
+    var refColHtml =
+      (refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '') +
+      (refCmt ? '<div class="cand-refimg-comment">' + esc(refCmt) + '</div>' : '');
     return '<div class="cand-card">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
+        refColHtml +
       '</div>' +
       '<div class="cand-info">' +
         // 新作/同人バッジと同じ行にチャンネル表記を並べる（バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記）
-        '<div class="cand-badges-row">' + badgesHtml + '<span class="cand-acct-group">' + acctBadgesHtml_(it.cid) + '</span></div>' +
+        //   投稿済みなら Books 等と pill の間に「投稿日 ✔」をチャンネルテーマ色で表示。
+        '<div class="cand-badges-row">' + badgesHtml + '<span class="cand-acct-group">' + postedDatesHtml_(it.cid) + acctBadgesHtml_(it.cid) + '</span></div>' +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
@@ -2039,7 +2048,7 @@
         '</div>' +
         // 右下の独立行：非表示／削除（🗑️のみ・作品/投稿編集とは別行）
         '<div class="cand-manage-row"><span class="cand-manage-spacer"></span>' + actionHtml + '</div>' +
-      '</div>' + previewHtml + '</div>';
+      '</div>' + '</div>';
   }
 
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。

@@ -149,12 +149,12 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .buzz-stats{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;color:var(--sub);}
 .buzz-eng{font-weight:700;color:var(--accent);}
 .cand-card{display:flex;flex-wrap:wrap;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:8px;align-items:flex-start;}
-.cand-thumbcol{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;width:72px;}
-.cand-thumb{width:72px;height:72px;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#eee2c5;border:1px solid var(--line);}
+.cand-thumbcol{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;width:84px;}
+.cand-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#eee2c5;border:1px solid var(--line);}
 .cand-thumb-ph{display:block;}
 /* 投稿予定プレビュー：カード下段に全幅で。動画生成用の画像を少し大きく（縦にスペース）＋右に一行コメント。 */
-.cand-preview{flex-basis:100%;width:100%;display:flex;gap:10px;align-items:center;margin-top:2px;padding-top:8px;border-top:1px dashed var(--line);}
-.cand-refimg-thumb{height:104px;width:auto;max-width:46%;border-radius:8px;border:1px solid var(--line);background:#0b1019;cursor:zoom-in;display:block;flex:0 0 auto;}
+/* 動画生成用の画像＝作品サムネの真下（左の画像列）に少し余白を開けて配置。コメントはその真下に全文表示。点線区切りは廃止。 */
+.cand-refimg-thumb{width:100%;height:auto;border-radius:8px;border:1px solid var(--line);background:#0b1019;cursor:zoom-in;display:block;flex:0 0 auto;margin-top:2px;}
 .cand-refimg-thumb:active{opacity:.85;}
 .cand-info{flex:1;min-width:0;}
 .cand-title{font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
@@ -492,6 +492,10 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-acct-pill.posted.cand-acct-acc2{background:rgba(176,64,95,.16);border-color:#cf6f8f;color:#b0405f;}
 .cand-acct-pill.posted:active{transform:scale(.95);}
 .cand-acct-pill.posted b{font-size:.62rem;}
+/* 投稿済みの投稿日 ✔（Booksとpillの間・チャンネルテーマ色）。pillより軽い枠なし表記。 */
+.cand-posted-date{font-size:.66rem;font-weight:700;white-space:nowrap;line-height:1.7;padding:0 3px;font-variant-numeric:tabular-nums;}
+.cand-posted-date.cand-acct-acc1{color:#7a5aa8;}
+.cand-posted-date.cand-acct-acc2{color:#b0405f;}
 /* 投稿詳細モーダル（.fz-modalはダーク背景＝文字は明るく） */
 .pd-row{display:flex;gap:8px;padding:3px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.12);}
 .pd-k{flex:0 0 74px;color:#9fb0c3;}
@@ -537,7 +541,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* 複数画像あり＝サムネをアンバー枠で表現（旧「🖼複数あり×N」バッジは廃止） */
 .cand-refimg-thumb.multi{border:2px solid #e6c14e !important;}
 /* 保存済みコメント（プレビュー画像の右に一行・黒字。長い場合は…で省略） */
-.cand-refimg-comment{flex:1;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cand-refimg-comment{font-size:12px;color:#111;font-weight:700;line-height:1.35;white-space:normal;word-break:break-word;} /* 動画生成用画像の真下・全文表示（省略しない） */
 #pcText{width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
   background:#0e1422;color:var(--ink);line-height:1.6;white-space:pre-wrap;font-family:inherit;resize:vertical;}
 #pcText:focus{border-color:var(--accent);outline:none;}
