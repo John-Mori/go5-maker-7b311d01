@@ -1165,6 +1165,7 @@
   // announce=true（手動更新ボタン）のときは、完了時に成功/失敗を明確に表示する。
   function refresh(announce) {
     ensureIds(); // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
+    reconnectStrandedYt_(); // 取り残されたYT URLマップを正しいアカウントへ自己再接続（冪等）
     render();
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
@@ -1351,6 +1352,48 @@
       restoreYtFromSheet_(function (n) { if (n > 0) setStatus('☁️ シートからYouTube URLを ' + n + '件 復元しました。'); });
     }, 1200);
   }
+  // ── YT URLマップの取り残しを再接続（自己修復）──────────────────────────────
+  //   DID矯正等でアイテムだけ別アカウントへ移り、YT URLマップ(verify_yt)が元アカウントに
+  //   取り残されると、移動先で再生数/投稿日時/題名が出なくなる（宵桜艶帖だけ欠落する主因の一つ）。
+  //   あるアカウントのマップにあるキーの item が実際には別アカウントに居るなら、その別アカウントへ移す。
+  //   安全: 「itemが自分側に無く・相手側にあり・相手側マップが未設定」のときだけ移す（誤上書きしない）。冪等。
+  function reconnectStrandedYt_() {
+    try {
+      var accs = ['acc1', 'acc2'];
+      var keysByAcc = {}, mapByAcc = {};
+      accs.forEach(function (a) {
+        var set = {};
+        loadArrFor_('short_hist', a).concat(loadArrFor_('verify_manual', a)).forEach(function (it) { set[itemKey(it)] = true; });
+        keysByAcc[a] = set; mapByAcc[a] = loadYtMapFor_(a);
+      });
+      var changed = { acc1: false, acc2: false }, moved = 0;
+      accs.forEach(function (a) {
+        var other = a === 'acc1' ? 'acc2' : 'acc1';
+        Object.keys(mapByAcc[a]).forEach(function (k) {
+          if (!keysByAcc[a][k] && keysByAcc[other][k] && mapByAcc[other][k] == null) {
+            mapByAcc[other][k] = mapByAcc[a][k]; delete mapByAcc[a][k];
+            changed[a] = true; changed[other] = true; moved++;
+          }
+        });
+      });
+      if (changed.acc1) saveYtMapFor_('acc1', mapByAcc.acc1);
+      if (changed.acc2) saveYtMapFor_('acc2', mapByAcc.acc2);
+      return moved;
+    } catch (e) { return 0; }
+  }
+  // 現状を人が読める形にまとめる（iPhoneでも状況が分かる診断表示用）。
+  function diagnoseYt_() {
+    var lines = [];
+    ['acc1', 'acc2'].forEach(function (a) {
+      var items = loadArrFor_('short_hist', a).concat(loadArrFor_('verify_manual', a));
+      var map = loadYtMapFor_(a), withYt = 0, vids = {}, keys = {};
+      items.forEach(function (it) { var k = itemKey(it); keys[k] = 1; var v = ytIdOf(map[k] || it.ytUrl || ''); if (v) { withYt++; vids[v] = 1; } });
+      var orphan = Object.keys(map).filter(function (k) { return !keys[k]; }).length;
+      lines.push(acctName_(a) + '：履歴' + items.length + '件／YT URL付き' + withYt + '件／動画ID' + Object.keys(vids).length + '種／マップ孤児' + orphan + '件');
+    });
+    lines.push('APIキー：' + (apiKey() ? '設定済' : '未設定') + '／記録GAS：' + (gasUrl_() ? '設定済' : '未設定'));
+    return lines.join('<br>');
+  }
 
   // 投稿本文からの当時割引/新作の復元を「1回だけ」自動実行（フラグ管理・ボタン不要で確実に）。
   function maybeRestorePromo_() {
@@ -1444,6 +1487,21 @@
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
+  // 🔧 YT情報を診断・修復：取り残しYT URLマップの再接続＋シートからのYT URL復元＋再取得を一括で行い、
+  //   人が読める診断（各アカウントの履歴数/YT URL付き数/動画ID数/孤児数）を表示する（iPhoneでも状況が分かる）。
+  var yrl = $('ytRepairLinks');
+  if (yrl) yrl.addEventListener('click', function () {
+    var moved = reconnectStrandedYt_();
+    setStatus('🔧 YT情報を診断・修復中…（マップ再接続 ' + moved + '件／シートから復元中…）');
+    restoreYtFromSheet_(function (restored) {
+      // refresh完了後に診断を表示（announce=trueだとrefreshの「✅更新しました」が診断を上書きしてしまう）。
+      refresh().then(function () {
+        setStatus('🔧 YT情報 診断・修復<br>取り残しマップ再接続：<b>' + moved + '</b>件／シートからYT URL復元：<b>' + restored + '</b>件<br>'
+          + diagnoseYt_()
+          + '<br><span style="color:var(--sub);font-size:.9em;">※「YT URL付き」が0や極端に少ない＝端末にもシートにもYouTube URLが無い状態です。各行にYouTube URLを入れ直すと再生数・題名が戻ります。「マップ孤児」が多い＝短縮URL再生成等でキーがずれた分（別途対応）。</span>', true);
+      });
+    });
+  });
   // 🩺 アカウント検証・修復：post_uri の DID で「別アカウントに紛れ込んだ履歴/シート行」を正しい側へ移す。
   // 🩺 検出→一覧を見せて確認→適用（自動では動かさない）。適用後は「元に戻す」可能。
   var rp = $('ytRepairAcct');
