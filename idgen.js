@@ -46,6 +46,17 @@
     return m ? m[1] : '';
   }
 
+  // 安定動画ID（acc-YYYYMMDD-HHMM-rand）から作成日時(ms)を復元。抽出不能なら 0。
+  //   投稿日は作成直後なので、投稿履歴の ts が欠けた時（シート復元でpostedAt空・手動移動等）の
+  //   フォールバックとして「投稿日」に十分使える。＝月詠み✔なのに投稿日が出ないバグの再発防止。
+  function tsOfId(id) {
+    var m = String(id || '').match(/-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(?:-|$)/);
+    if (!m) return 0;
+    var d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+    var t = d.getTime();
+    return isFinite(t) ? t : 0;
+  }
+
   // YouTube の watch/shorts/youtu.be/embed/live URL から 11文字 videoId を抽出。
   // 既に 11文字IDならそのまま返す。抽出不能なら ''（da.gd等の短縮URLはここでは解決不可＝
   // 貼り付け時＝短縮前の生URLから抽出する運用）。
@@ -67,6 +78,7 @@
     makeVideoId: makeVideoId,
     isTestId: isTestId,
     accOfId: accOfId,
+    tsOfId: tsOfId,
     youtubeId: youtubeId,
     youtubeWatchUrl: youtubeWatchUrl
   };

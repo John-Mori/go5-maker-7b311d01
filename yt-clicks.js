@@ -1094,7 +1094,11 @@
           }
           // 既に to にある：何もしない
         } else { // ローカルに無い→シートから薄い履歴アイテムを復活
-          var item = { account: to, title: si.title || '', shortUrl: si.shortUrl || '', shareUrl: si.shareUrl || si.shortUrl || '', postUrl: si.postUrl || '', postUri: si.postUri || '', videoId: si.videoId || '', ts: si.postedAt ? Date.parse(si.postedAt) || 0 : 0 };
+          // ts＝postedAt優先。空なら背骨ID(videoId=acc-YYYYMMDD-HHMM-)から作成日時を復元＝投稿日が0のまま
+          //   復元される「月詠み✔なのに投稿日が出ない」再発を防止（次回のシート記録にも正しいpostedAtが乗る）。
+          var _svid = si.videoId || '';
+          var _sts = (si.postedAt ? (Date.parse(si.postedAt) || 0) : 0) || (window.IdGen && window.IdGen.tsOfId ? window.IdGen.tsOfId(_svid) : 0);
+          var item = { account: to, title: si.title || '', shortUrl: si.shortUrl || '', shareUrl: si.shareUrl || si.shortUrl || '', postUrl: si.postUrl || '', postUri: si.postUri || '', videoId: _svid, ts: _sts };
           var wu = si.workUrl || workUrlFromCid_(si.cid); if (wu) item.workUrl = wu; // 作品URLをcidから復元（サムネ・価格・作品状態が戻る）
           if (si.cid) item.cid = String(si.cid); // 作品cidも串刺しで保持（候補タブの「投稿済み」判定を確実にする）
           if (si.workState) item.workState = si.workState;

@@ -254,6 +254,7 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
    flex-basis が優先されるため従来どおり flex で伸びる。 */
 .fz-modal button,.vedit-modal button{width:max-content;max-width:100%;white-space:nowrap;}
 .fz-close{position:absolute;top:8px;right:10px;background:transparent;border:none;color:var(--sub);font-size:20px;cursor:pointer;line-height:1;width:auto;padding:2px 6px;}
+.add-modal .fz-close{font-size:30px;color:#fff;} /* 候補追加モーダルの×は1.5倍(20→30px)・白 */
 .fz-title{font-size:15px;font-weight:700;color:var(--ink);margin:2px 30px 10px 0;word-break:break-word;}
 .fz-hero{text-align:center;margin-bottom:10px;}
 .fz-hero img{max-width:100%;max-height:44vh;border-radius:8px;border:1px solid var(--line);}

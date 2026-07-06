@@ -554,12 +554,24 @@
       return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" title="' + esc(a[1]) + '（未投稿）">' + esc(a[1]) + '</span>';
     }).join('');
   }
+  // 投稿履歴アイテムから投稿日時(ms)を頑健に取り出す。ts欠落時も背骨ID(videoId=acc-YYYYMMDD-HHMM-)から復元
+  //   ＝「月詠み✔なのに投稿日が出ない」バグの根治（シート復元でpostedAt空・手動移動でtsが0/欠落でも日付が出る）。
+  function postedTsOf_(it) {
+    if (!it) return 0;
+    if (it.ts && it.ts > 0) return it.ts;
+    var cand = it.postedAt || it.posted_at || it.at;
+    if (cand) { var p = (typeof cand === 'number') ? cand : Date.parse(cand); if (p) return p; }
+    if (window.IdGen && window.IdGen.tsOfId) { var t = window.IdGen.tsOfId(it.videoId); if (t) return t; }
+    return 0;
+  }
   // 投稿済み作品：Books等のバッジとチャンネルpillの間に、投稿日(YYYY/M/D)+✔ をチャンネルテーマ色で表示。
   function postedDatesHtml_(cid) {
     return _ACCTS.map(function (a) {
       var it = postedItemForCid_(cid, a[0]);
-      if (!it || !it.ts) return '';
-      var d = new Date(it.ts);
+      if (!it) return '';
+      var ts = postedTsOf_(it);
+      if (!ts) return ''; // 日時が全経路で取れない稀ケースのみ非表示
+      var d = new Date(ts);
       var ds = d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
       return '<span class="cand-posted-date cand-acct-' + a[0] + '" title="' + esc(a[1]) + 'で ' + esc(ds) + ' に投稿済み">' + esc(ds) + ' ✔</span>';
     }).join('');
@@ -1566,7 +1578,7 @@
     var slots = '';
     for (var si = 0; si < 4; si++) slots += '<button type="button" class="cand-add-imgslot" data-slot="' + si + '"><span class="cand-add-slot-hint">＋<br>画像<br>貼り付け</span></button>';
     return '' +
-      '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
+      '<div class="fz-title" style="background:none;color:#fff;padding:0 46px 0 0;margin:0 0 6px;font-weight:700;line-height:1.3;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
       '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>💡候補とは別に、このタブに独立して保存されます。') + '</div>' +
       '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;min-width:0;">', 'candUrl') + '</div>' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">X / Bluesky の投稿URL（任意）— <b>これだけでも追加できます</b></label>' +
@@ -1576,8 +1588,12 @@
       '<div style="margin-top:6px;display:flex;">' +
         '<label class="ghost cand-refimg-pick" style="width:auto;flex:0 0 auto;margin:0;">画像を選ぶ<input id="candAddImgFile" type="file" accept="image/*" multiple style="display:none;"></label>' +
       '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:8px;align-items:stretch;">' +
+        '<input id="candMemo" type="text" class="cand-refimg-line" placeholder="メモ（任意・候補のメモに保存）" autocomplete="off" style="flex:1;min-width:0;">' +
+        '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.8rem;padding:8px 12px;width:max-content;flex:0 0 auto;white-space:nowrap;">➕ ' + (isMain ? '候補に追加して続ける' : 'このタブに追加して続ける') + '</button>' +
+      '</div>' +
       '<div style="display:flex;margin-top:8px;"><span style="flex:1 1 auto;"></span>' +
-        '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.9rem;padding:10px 18px;width:max-content;flex:0 0 auto;">➕ ' + (isMain ? '候補に追加' : 'このタブに追加') + '</button></div>' +
+        '<button id="candAddClose" type="button" class="primary" style="margin:0;font-size:.8rem;padding:8px 12px;width:max-content;flex:0 0 auto;white-space:nowrap;">✅ ' + (isMain ? '候補に追加して閉じる' : 'このタブに追加して閉じる') + '</button></div>' +
       '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
       '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
         '<div class="hint">サークルの作品を<b>まとめて</b>' + (isMain ? '候補' : 'このタブ') + 'に追加できます（サークルID / サークルURL / 作品URLのどれか）。タブ名は変わりません。</div>' +
@@ -1623,8 +1639,14 @@
   // 追加確定時に呼ぶ：スロット画像を候補の動画生成用画像として保存し、スロットを空にする。
   function attachAddImgs_(cid) {
     var imgs = _addModalImgs.filter(Boolean);
-    if (!cid || !imgs.length) return;
-    refImgSave(cid, { imgs: imgs, comment: '', twitterUrl: '' });
+    var memoEl = $('candMemo');
+    var memo = (memoEl && memoEl.value || '').trim(); // メモ欄に入力があれば候補のメモへ保存
+    if (!cid) return;
+    if (imgs.length || memo) {
+      var cur = refImgOf(cid) || {};
+      refImgSave(cid, { imgs: imgs.length ? imgs : (cur.imgs || []), comment: cur.comment || '', memo: memo || cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' });
+    }
+    if (memoEl) memoEl.value = ''; // 追加後はメモ欄をクリア（続ける時に持ち越さない）
     _addModalImgs = [];
     renderAddSlots_();
   }
@@ -1633,7 +1655,7 @@
     var ov = _addOverlay;
     if (!ov) {
       ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
-      ov.innerHTML = '<div class="fz-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+      ov.innerHTML = '<div class="fz-modal add-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
       document.body.appendChild(ov);
       ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
       ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
@@ -1642,7 +1664,8 @@
     var body = ov.querySelector('.fz-body');
     _addModalImgs = []; // 開くたびにスロットを白紙に
     body.innerHTML = addFormHtml_(isMain);
-    $('candAdd').addEventListener('click', function () { addCandidate(tabId); });
+    $('candAdd').addEventListener('click', function () { addCandidate(tabId); }); // 追加して続ける（開いたまま）
+    $('candAddClose').addEventListener('click', function () { addCandidate(tabId, function () { ov.hidden = true; }); }); // 追加して閉じる
     $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
     // 「画像を選ぶ」(複数可): ファイルからもスロットへ左詰めで追加（1枚ずつ順に処理=メモリ圧迫回避）。
     var addFile = $('candAddImgFile');
@@ -1730,7 +1753,7 @@
     var t = parseTwitterUrl_(raw); if (t.ok) { t.kind = 'x'; return t; }
     return parseBskyUrl_(raw);
   }
-  function addTwitterCandidate_(tabId, tw, inp, twInp, msg) {
+  function addTwitterCandidate_(tabId, tw, inp, twInp, msg, onDone) {
     var key = itemsKey(tabId), items = lsGet(key, '[]');
     if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) { msg.textContent = 'ℹ️ この投稿は既に追加されています（重複追加しません）'; return; }
     var isB = tw.kind === 'bsky';
@@ -1742,8 +1765,9 @@
     if (inp) inp.value = ''; if (twInp) twInp.value = '';
     msg.textContent = isB ? '✅ Blueskyの投稿URLを追加しました' : '✅ Twitter(X)のURLを追加しました';
     renderCandList(tabId);
+    if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
   }
-  function addCandidate(tabId) {
+  function addCandidate(tabId, onDone) {
     tabId = tabId || 'main';
     var key = itemsKey(tabId);
     var inp = $('candUrl'), twInp = $('candTwitter'), msg = $('candMsg');
@@ -1780,6 +1804,7 @@
         attachAddImgs_(r.cid); // 追加モーダルの画像スロットも一緒に保存（動画生成用・左から順）
         inp.value = ''; if (twInp) twInp.value = ''; msg.textContent = '✅ 追加しました';
         renderCandList(tabId);
+        if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
       };
       if (window.FanzaCore && cfg.url) {
         window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) {
@@ -1790,7 +1815,7 @@
     }
     // ②作品URLが無い/FANZA以外 → Twitter(X)のURLだけで追加（Twitter欄優先、無ければ作品欄に貼られたX URLも可）
     var tw = parseSnsUrl_(twRaw); if (!tw.ok) tw = parseSnsUrl_(raw); // X / Bluesky どちらでも単独追加可
-    if (tw.ok) { addTwitterCandidate_(tabId, tw, inp, twInp, msg); return; }
+    if (tw.ok) { addTwitterCandidate_(tabId, tw, inp, twInp, msg, onDone); return; }
     // ③どちらでもない
     msg.textContent = (raw || twRaw) ? '⚠️ FANZAの作品URL か X / Bluesky の投稿URLを入れてください' : '⚠️ URLを入力してください';
   }
