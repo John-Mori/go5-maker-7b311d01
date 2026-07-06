@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-06K（Books cid規則統一: .comの2階層URLもcontent_id優先＝タイトル未取得の根治）';
+var GAS_VERSION = '2026-07-07A（T11 LockService＝重複行根絶／T10 channel×videoId接頭辞ガード＝誤タブ薄行の最終防壁）';
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -376,6 +376,9 @@ function diagnose_() {
 }
 
 function doPost(e) {
+  // T11: 書き込みは全て直列化（同一videoIdの近接2リクエストが両方upsertをすり抜けて重複行を作る事故を根絶）。
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (le) { return jsonOut_({ ok: false, error: 'busy（同時書き込み中。数秒後に再試行してください）' }); }
   try {
     var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     var need = prop_('SHARED_SECRET');
@@ -411,6 +414,8 @@ function doPost(e) {
     return jsonOut_({ ok: true, shortUrl: r.shortUrl, row: r.row });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
   }
 }
 
@@ -479,6 +484,11 @@ function upsertRowOf_(postIdCol, videoId) {
 // videoId（背骨ID）があれば post_id をそれにし、同ID行へ upsert（重複行を作らない・変更フィールドのみ更新）。
 // videoId 無し＝完全に従来動作（後方互換）。
 function writeRecord_(channel, f) {
+  // T10: 背骨ID(videoId)接頭辞が channel と矛盾するなら、正しいチャンネルへリダイレクト（拒否でなく＝データ喪失なし）。
+  //   クライアント側にバグ/旧キャッシュがあっても、宵桜タブに acc1-… の誤行を作らせない最終防壁。
+  //   move_row は writeRecord_ を通らないため影響なし。test- 接頭辞も考慮。
+  var _pm = String(f.videoId || '').match(/^(?:test-)?(acc[12])-/);
+  if (_pm && _pm[1] !== channel) channel = _pm[1];
   // 短縮URL：フロントが生成済みなら優先（da.gd/link-worker＝実際に共有するURL）。
   // 無い経路（無人予約・旧クライアント）だけ GAS が da.gd で短縮（1投稿1回・トークン不要・軽量）。
   // ※Bitlyは無料枠オーバーの主因かつ冗長（共有されず計測不能）なため全廃。
