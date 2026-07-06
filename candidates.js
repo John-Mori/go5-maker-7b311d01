@@ -1984,7 +1984,7 @@
     var sub = [];
     if (it.author || it.makerName) sub.push('🏷 ' + esc(it.author || it.makerName));
     if (it.date) sub.push('発売 ' + esc(fmtDate(it.date)));
-    if (it.addedAt) sub.push('追加 ' + esc(fmtTs(it.addedAt)));
+    if (it.addedAt) sub.push('<span class="cand-added">追加 ' + esc(fmtTs(it.addedAt)) + '</span>');
     var ws = deriveWorkState_(it.date);
     var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '');
     var genresHtml = (it.genres && it.genres.length)

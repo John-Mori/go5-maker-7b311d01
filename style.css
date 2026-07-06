@@ -149,16 +149,17 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .buzz-stats{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;color:var(--sub);}
 .buzz-eng{font-weight:700;color:var(--accent);}
 .cand-card{display:flex;flex-wrap:wrap;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:8px;align-items:flex-start;}
-.cand-thumbcol{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;width:84px;}
+.cand-thumbcol{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;width:74px;} /* 本文列を広げてバッジ行が1行に収まるよう画像列は控えめに */
 .cand-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#eee2c5;border:1px solid var(--line);}
 .cand-thumb-ph{display:block;}
 /* 投稿予定プレビュー：カード下段に全幅で。動画生成用の画像を少し大きく（縦にスペース）＋右に一行コメント。 */
 /* 動画生成用の画像＝作品サムネの真下（左の画像列）に少し余白を開けて配置。コメントはその真下に全文表示。点線区切りは廃止。 */
-.cand-refimg-thumb{width:100%;height:auto;border-radius:8px;border:1px solid var(--line);background:#0b1019;cursor:zoom-in;display:block;flex:0 0 auto;margin-top:2px;}
+.cand-refimg-thumb{width:100%;height:auto;border-radius:8px;border:none;background:#0b1019;cursor:zoom-in;display:block;flex:0 0 auto;margin-top:2px;} /* 1枚のみ＝枠線なし */
 .cand-refimg-thumb:active{opacity:.85;}
 .cand-info{flex:1;min-width:0;}
 .cand-title{font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
 .cand-sub{font-size:11px;color:var(--sub);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cand-added{color:#1c9bd6;font-weight:700;} /* 追加日＝水色・太字 */
 .cand-sales{font-size:12.5px;color:var(--ink);margin-top:3px;font-weight:400;}
 .cand-price{font-size:13px;color:var(--ink);margin-top:3px;}
 .cand-price-lbl{color:var(--sub);font-weight:400;} /* 価格の前の「現価格:」ラベル */
@@ -479,10 +480,12 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cta-ready-pulse{animation:ctaReadyPulse 0.8s ease-in-out 3;}
 @keyframes ctaReadyPulse{0%,100%{box-shadow:0 0 0 0 rgba(43,179,192,0);}50%{box-shadow:0 0 0 5px rgba(43,179,192,.55);}}
 /* バッジ行：新作/同人バッジ（左）＋チャンネル表記（右寄せ）を同じ行に（省スペース） */
-.cand-badges-row{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin-bottom:3px;min-width:0;} /* 投稿日チップを足しても1行を維持（折り返さない） */
+.cand-badges-row{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-bottom:3px;min-width:0;} /* 投稿日チップを足しても1行を維持（折り返さない） */
+/* 属性バッジ(新作/同人/AI等)の余白を詰める＝宵桜艶帖が枠からはみ出ないように（gapで間隔は担保） */
+.cand-badges-row .fp-state,.cand-badges-row .fp-kind{margin-right:0;padding:0 4px;}
 .cand-acct-group{margin-left:auto;display:inline-flex;flex-wrap:nowrap;flex-shrink:0;gap:4px;}
 /* チャンネル表記のpill（fp-kind/fp-stateと同サイズ）。月詠み(acc1)=紫 / 宵桜艶帖(acc2)=ワイン */
-.cand-acct-pill{font-size:.64rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 5px;white-space:nowrap;line-height:1.7;display:inline-flex;align-items:center;gap:2px;} /* 投稿日チップと同居しても1行に収まるよう少しコンパクトに */
+.cand-acct-pill{font-size:.64rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 4px;white-space:nowrap;line-height:1.7;display:inline-flex;align-items:center;gap:2px;} /* 投稿日チップと同居しても1行に収まるよう少しコンパクトに */
 .cand-acct-pill.cand-acct-acc1{color:#8a6fb8;border-color:#8a6fb8;}
 .cand-acct-pill.cand-acct-acc2{color:#c76b93;border-color:#c76b93;}
 /* 未投稿：淡色・ボタン化しない（クリック無効） */
@@ -494,7 +497,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-acct-pill.posted:active{transform:scale(.95);}
 .cand-acct-pill.posted b{font-size:.62rem;}
 /* 投稿済みの投稿日 ✔（Booksとpillの間・チャンネルテーマ色）。pillより軽い枠なし表記。 */
-.cand-posted-date{font-size:.64rem;font-weight:700;white-space:nowrap;line-height:1.7;padding:0 2px;font-variant-numeric:tabular-nums;flex-shrink:0;}
+.cand-posted-date{font-size:.6rem;font-weight:700;white-space:nowrap;line-height:1.7;padding:0 1px;font-variant-numeric:tabular-nums;flex-shrink:0;}
 .cand-posted-date.cand-acct-acc1{color:#7a5aa8;}
 .cand-posted-date.cand-acct-acc2{color:#b0405f;}
 /* 投稿詳細モーダル（.fz-modalはダーク背景＝文字は明るく） */
@@ -540,7 +543,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-refimg-nav.prev{left:6px;}
 .cand-refimg-nav.next{right:6px;}
 /* 複数画像あり＝サムネをアンバー枠で表現（旧「🖼複数あり×N」バッジは廃止） */
-.cand-refimg-thumb.multi{border:2px solid #e6c14e !important;}
+.cand-refimg-thumb.multi{border:1.5px solid #e6c14e !important;} /* 複数枚＝枠線を1.5倍(1px→1.5px)で明示 */
 /* 保存済みコメント（プレビュー画像の右に一行・黒字。長い場合は…で省略） */
 .cand-refimg-comment{flex-basis:100%;width:100%;min-width:0;margin-top:6px;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} /* カード最下段の全幅行・1行（改行しない）＝作品↗等と重ならない */
 #pcText{width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
