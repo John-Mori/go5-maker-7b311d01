@@ -577,13 +577,19 @@
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
           '<span title="Bsky投稿クリック数' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
-          '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
-          '<span class="vrow-links">' + // Bsky↗/YouTube↗/作品↗ を1グループに＝作品↗だけ改行される事故を防ぐ
+          '<span class="vrow-links">' + // 🛠️編集/Bsky↗/YouTube↗/作品↗ を1グループに＝編集もBskyと同じ段に表示・作品↗だけ改行される事故を防ぐ
+            '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
             (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
             (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
             (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
           '</span>' +
         '</div>' +
+        '</div>' + // .vrow-body
+        ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
+          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
+          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" src="' + esc(refThumb) + '" alt="動画で使った画像（タップで拡大）" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
+        '</div>' : '') +
+        // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右（画像の真下）まで届く
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + '>' + (vid ? fmtDelta_(deltaCache[vid]) : '') + '</span>' +
           '<div class="vrow-actcol">' +
@@ -592,11 +598,6 @@
           '</div>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
-        '</div>' + // .vrow-body
-        ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
-          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
-          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" src="' + esc(refThumb) + '" alt="動画で使った画像（タップで拡大）" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
-        '</div>' : '') +
         '</div>';
     }).join('');
     applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示（フェッチ待ちで遅れない）

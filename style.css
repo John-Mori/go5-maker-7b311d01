@@ -85,7 +85,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .bsky-adv[open] summary{margin-bottom:4px;}
 
 /* ── 検証ダッシュボード（Phase4） ── */
-.vrow{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;display:flex;gap:10px;align-items:flex-start;}
+.vrow{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;}/* wrap＝footを全幅の独立行に落とす */
 .vrow-body{flex:1;min-width:0;} /* 本文列（フレックス）。画像列と重ならない＝オーバーラップ事故なし */
 .vrow-body .vmetrics{flex-wrap:wrap;} /* 本文が狭くなるので指標・リンク行は折り返す（nowrapでの見切れ防止） */
 .vrow-thumbcol{flex:0 0 auto;width:66px;display:flex;flex-direction:column;gap:6px;} /* 右の画像列：作品サムネの下に動画で使った画像 */
@@ -286,7 +286,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .fanza-price-row .fp-off{color:#04222a;background:#ff6b8a;border-radius:4px;padding:0 5px;font-weight:700;font-size:.68rem;}
 .vmetrics .vedit-btn{background:transparent;border:none;color:var(--bsky);font-size:12px;cursor:pointer;padding:0;line-height:1;white-space:nowrap;flex-shrink:0;width:auto;margin-top:0;}
 .vmetrics .vedit-btn:active{opacity:.65;}
-.vrow-foot{display:flex;align-items:center;gap:8px;margin-top:7px;}
+.vrow-foot{flex:0 0 100%;width:100%;display:flex;align-items:center;gap:8px;margin-top:0;}/* カード全幅の独立行＝🗑がカードの一番右まで届く */
 .vrow-foot-gap{flex:1;min-height:1.6em;}
 /* リビルド操作は縦積み：「リビルドで作成」を「被リビルドにする」の上に置く */
 .vrow-actcol{flex:0 0 auto;display:flex;flex-direction:column;gap:4px;align-items:flex-end;}/* ボタンは右寄せ（ゴミ箱の左にまとめる） */
