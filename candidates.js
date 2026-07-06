@@ -219,13 +219,13 @@
   function refImgHas(cid) {
     var r = refImgOf(cid); if (!r) return false; // 1回の読みで判定（フォールバック時の多重JSON.parse回避）
     var has = Array.isArray(r.imgs) ? r.imgs.some(Boolean) : !!r.img;
-    return !!(has || r.comment || r.memo || r.twitterUrl);
+    return !!(has || r.comment || r.memo || r.twitterUrl || r.twitterUrl2);
   }
   function refImgSave(cid, data) {
     // data.imgs（配列・新）または data.img（単発・旧）を受け付け、{imgs, img:先頭} で保存（img は旧読み手互換用）。
     var imgs = data ? (Array.isArray(data.imgs) ? data.imgs.filter(Boolean) : (data.img ? [data.img] : [])) : [];
-    var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl);
-    var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', at: new Date().getTime() };
+    var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl && !data.twitterUrl2);
+    var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: data.twitterUrl2 || '', at: new Date().getTime() };
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
       (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
@@ -632,7 +632,7 @@
     // pending.imgs=保存候補の画像列（複数可・37ページ級の連続貼り付けOK）・idx=表示中（「動画生成へ」で採用される1枚）
     // X/Bluesky URL は refimg 側に無ければ候補アイテム側(it.twitterUrl=カードのXリンクの出所)からフォールバック
     //   （カードにXリンクが出ているのにモーダルの欄が空になる不一致を防ぐ）。
-    var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || it.twitterUrl || '' };
+    var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || it.twitterUrl || '', memo: cur.memo || '', twitterUrl2: cur.twitterUrl2 || '' };
     var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補（埋め込みポストURLあり）
     // 作品URLのプレフィル：候補が実際に作品URLを持つ（!isTwitter かつ it.url がDMM/book等）なら、
     //   twitterUrl の有無に関わらずそのまま欄に表示（＝カードの「作品↗」と同じ判定）。X起点(it.url=ポストURL)は空。
@@ -784,7 +784,8 @@
   }
 
   // ── メモ＋X/Bluesky URL 追加モーダル（投稿編集モーダルから開く小モーダル・縦は内容に応じて短め）──
-  //   メモはコメントが無い時にカードへ水色で表示。URLは親モーダルの X/Bluesky 欄と同じ twitterUrl を編集。
+  //   メモはコメントが無い時にカードへ水色で表示。URLは「2つ目のURL」(twitterUrl2)＝親の1つ目とは別枠。
+  //   記録するとカードで1つ目リンクの横に X2↗ / B2↗（Blueskyは B）が出る。既存URLはここには入れない（空欄）。
   var _memoOverlay = null;
   function openMemoUrlModal_(cid, pending, mainBody, onSaved) {
     var ov = _memoOverlay;
@@ -801,9 +802,9 @@
       '<div class="fz-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 10px;font-weight:700;">メモ・URLを追加</div>' +
       '<label class="hint" style="display:block;margin-bottom:2px;">メモ</label>' +
       '<input id="memoText" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ（コメントが無い時にカードへ水色で表示）">' +
-      '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL</label>' +
+      '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL（2つ目・カードに X2↗ / B2↗ で表示）</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
-        '<input id="memoUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… または https://bsky.app/…" style="flex:1;min-width:0;">' +
+        '<input id="memoUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="memoUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:14px;">' +
@@ -811,13 +812,12 @@
         '<button id="memoClose" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
       '</div><div id="memoMsg" class="hint" style="min-height:1.2em;"></div>';
     body.querySelector('#memoText').value = pending.memo || '';
-    body.querySelector('#memoUrl').value = pending.twitterUrl || '';
+    body.querySelector('#memoUrl').value = pending.twitterUrl2 || ''; // ★2つ目のURL＝既存(1つ目)は入れず空欄で開始
     wirePaste_(body);
     body.querySelector('#memoClose').addEventListener('click', function () { ov.hidden = true; });
     body.querySelector('#memoSave').addEventListener('click', function () {
       pending.memo = body.querySelector('#memoText').value || '';
-      pending.twitterUrl = (body.querySelector('#memoUrl').value || '').trim();
-      if (mainBody) { var t = mainBody.querySelector('#refImgTwitter'); if (t) t.value = pending.twitterUrl; } // 親のX/Bluesky欄へ反映
+      pending.twitterUrl2 = (body.querySelector('#memoUrl').value || '').trim(); // 2つ目のURLとして保存（親の1つ目には触れない）
       if (!refImgSave(cid, pending)) { body.querySelector('#memoMsg').textContent = '保存できません（保存枠不足）'; return; }
       body.querySelector('#memoMsg').textContent = '保存しました';
       if (onSaved) onSaved();
@@ -2098,6 +2098,8 @@
         '<div class="cand-actions">' +
           ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
           (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? '🦋 Bsky↗' : '🐦 X↗') + '</a>'; })(it.twitterUrl) : '') +
+          // 2つ目のURL（メモ・URL追加モーダルで登録）＝1つ目リンクの横に X2↗ / B2↗（Blueskyは B）で表示。
+          (_refRec.twitterUrl2 ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B2↗' : 'X2↗') + '</a>'; })(_refRec.twitterUrl2) : '') +
           '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿編集' + (hasRef ? '✓' : '') + '</button>' +
           '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
         '</div>' +

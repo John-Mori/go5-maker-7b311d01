@@ -550,7 +550,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* 投稿編集モーダルの「メモ・URL 追加」ボタン（水色・黒字。メモ/URLを縦積み、追加を中央に） */
 .cand-memo-addbtn{display:flex;align-items:center;justify-content:center;gap:5px;background:#5ec6e8;color:#000;border:none;border-radius:8px;padding:4px 8px;font-weight:700;cursor:pointer;line-height:1.1;}
 .cand-memo-addbtn:active{opacity:.8;}
-.cand-memo-addbtn .cma-stack{display:flex;flex-direction:column;font-size:10px;line-height:1.15;}
+.cand-memo-addbtn .cma-stack{display:flex;flex-direction:column;font-size:12.5px;line-height:1.15;}
 .cand-memo-addbtn .cma-add{font-size:13px;font-weight:700;}
 /* メモ・URL追加の小モーダル（投稿編集モーダルの上に重ねる・内容に応じて短め） */
 .memo-overlay{z-index:10001;}
