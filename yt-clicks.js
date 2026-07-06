@@ -1587,15 +1587,15 @@
     return '<span class="fp-state ' + cls + '">' + esc(s) + '</span>';
   }
   function yen_(n) { return '¥' + Number(n).toLocaleString('ja-JP'); }
-  // 現在価格のHTML。セール時は「現在定価/セール価格/○%off」、セール無しは「現在定価」を通常色で。
+  // 現在価格のHTML。セール時は「現定価/セール価格/○%off」、セール無しは「現定価」を通常色で。
   function fmtFanzaPriceHtml(p) {
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
-      return '現価格:<span class="fp-list">' + yen_(p.listPrice) + '</span>' +
+      return '現定価:<span class="fp-list">' + yen_(p.listPrice) + '</span>' +
              ' <span class="fp-sale-lbl">セール価格:</span><span class="fp-sale">' + yen_(p.price) + '</span>' +
              ' <span class="fp-off">' + p.discountPct + '%off</span>';
     }
-    return '現価格:<span class="fp-cur">' + yen_(p.price) + '</span>';
+    return '現定価:<span class="fp-cur">' + yen_(p.price) + '</span>';
   }
   // 投稿時（当時）価格のHTML。全体を作品名と同じ淡色で表示。%offは現在と同様に枠で囲む。
   function fmtSnapPriceHtml(p) {
