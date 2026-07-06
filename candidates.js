@@ -1978,9 +1978,9 @@
   // 作品カード（候補/サークル共通・縦並び）。actionHtml=右下のボタン(削除/非表示/再表示)。
   function candCard(it, actionHtml) {
     var sale = isOnSale_(it);
-    var priceHtml = sale
+    var priceHtml = '<span class="cand-price-lbl">現価格:</span> ' + (sale
       ? '<span class="cand-list-price">' + yen(it.listPrice) + '</span> <b class="cand-sale">' + yen(it.price) + '</b> <span class="cand-off">' + it.discountPct + '%off</span>'
-      : '<b>' + yen(it.price != null ? it.price : it.listPrice) + '</b>';
+      : '<b>' + yen(it.price != null ? it.price : it.listPrice) + '</b>');
     var sub = [];
     if (it.author || it.makerName) sub.push('🏷 ' + esc(it.author || it.makerName));
     if (it.date) sub.push('発売 ' + esc(fmtDate(it.date)));
@@ -2020,15 +2020,14 @@
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像（複数可）
     var refImgSrc = refImgs[0] || '';
     var refCmt = (refImgOf(it.cid) || {}).comment || ''; // 保存済みコメント（動画生成用画像の真下に全文表示）
-    // 動画生成用の画像＋コメントは作品サムネの真下（左の画像列）に少し余白を開けて縦に積む。
-    //   画像の真下にコメントを全文表示（省略しない）。点線の区切りは廃止。
-    var refColHtml =
-      (refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '') +
-      (refCmt ? '<div class="cand-refimg-comment">' + esc(refCmt) + '</div>' : '');
+    // 動画生成用の画像は作品サムネの真下（左の画像列）に少し余白を開けて縦積み。点線の区切りは廃止。
+    var refImgHtml = refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '';
+    // コメントは改行せず1行で、カード最下段の全幅行に表示＝作品↗リンク等と重ならない。
+    var refCmtHtml = refCmt ? '<div class="cand-refimg-comment">' + esc(refCmt) + '</div>' : '';
     return '<div class="cand-card">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
-        refColHtml +
+        refImgHtml +
       '</div>' +
       '<div class="cand-info">' +
         // 新作/同人バッジと同じ行にチャンネル表記を並べる（バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記）
@@ -2048,7 +2047,7 @@
         '</div>' +
         // 右下の独立行：非表示／削除（🗑️のみ・作品/投稿編集とは別行）
         '<div class="cand-manage-row"><span class="cand-manage-spacer"></span>' + actionHtml + '</div>' +
-      '</div>' + '</div>';
+      '</div>' + refCmtHtml + '</div>';
   }
 
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
