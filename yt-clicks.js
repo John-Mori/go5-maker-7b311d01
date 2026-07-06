@@ -522,6 +522,8 @@
       var vid = ytIdOf(yt);
       var code = codeOf(it.shortUrl || '');
       var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
+      // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に（別短縮URLのため加算）。
+      var clicksTotal = (it.rebuildMerged && clicks != null && it.rebuildBaseClicks != null) ? (clicks + it.rebuildBaseClicks) : clicks;
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
@@ -564,7 +566,7 @@
         (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
-          '<span title="Bsky投稿クリック数' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicks != null ? num(clicks) : (code ? '…' : '–')) +
+          '<span title="Bsky投稿クリック数' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
           '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
           (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
@@ -638,8 +640,99 @@
           saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState);
         });
         addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
+        addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
       });
     });
+  }
+
+  // ── 🔁リビルド結合：この投稿を、別の投稿（＝リビルド前の動画）のリビルド版として結合する ──
+  // 選んだ側が「被リビルド」（ランキング除外）になり、この投稿がランキングに残る。この投稿のクリックは
+  // 「この投稿＋リビルド前」の総合値表示になり、括弧内にリビルド前分（結合時点のクリック数）を出す。
+  function addRebuildMergeButtonToModal_(k, it) {
+    var actions = $('veditOverlay') && $('veditOverlay').querySelector('.vedit-actions');
+    if (!actions) return;
+    var old = actions.parentNode.querySelector('#veditRebuildMergeRow');
+    if (old) old.parentNode.removeChild(old);
+    var row = document.createElement('div');
+    row.id = 'veditRebuildMergeRow';
+    row.style.cssText = 'margin:8px 0 0;';
+    var cur = (it.rebuildOf && it.rebuildMerged) ? ('（現在：' + esc(rebuildTargetTitle_(it.rebuildOf) || '結合済み') + '）') : '';
+    row.innerHTML = '<button id="veditRebuildMerge" type="button" class="vedit-gen" style="width:100%;">🔁 リビルド結合' + (cur ? '<span class="vgen-note" style="display:block;">' + cur + '</span>' : '') + '</button>';
+    actions.parentNode.insertBefore(row, actions); // 保存を含む actions の直前＝「保存の上」
+    row.querySelector('#veditRebuildMerge').addEventListener('click', function () { openRebuildMergePicker_(k, it); });
+  }
+  function rebuildTargetTitle_(videoId) {
+    var all = allItems();
+    for (var i = 0; i < all.length; i++) { if (all[i].videoId === videoId) return all[i].title || '(無題)'; }
+    return '';
+  }
+  // 履歴アイテムの作品cid（候補タブと同じ normalize+buildAffiliateLink）。
+  function workCidOf_(u) {
+    try {
+      if (!u || !window.buildAffiliateLink) return '';
+      var n = window.normalizeWorkUrl ? window.normalizeWorkUrl(u) : u;
+      var r = n ? window.buildAffiliateLink(n, '') : null;
+      return (r && r.ok) ? r.cid : '';
+    } catch (e) { return ''; }
+  }
+  var _rebuildPickerOv = null;
+  function openRebuildMergePicker_(thisKey, thisItem) {
+    var ov = _rebuildPickerOv;
+    if (!ov) {
+      ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true; ov.style.zIndex = '10001';
+      ov.innerHTML = '<div class="fz-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
+      ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
+      _rebuildPickerOv = ov;
+    }
+    var myCid = workCidOf_(thisItem.workUrl);
+    // 現アカウントの全投稿を新しい順に。自分自身と、既に被リビルド済みは対象外。
+    var all = allItems().filter(function (x) { return itemKey(x) !== thisKey && x.videoId; })
+      .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    var matched = myCid ? all.filter(function (x) { return workCidOf_(x.workUrl) === myCid; }) : [];
+    function rowHtml(x) {
+      var d = x.ts ? new Date(x.ts) : null, ds = d ? ((d.getMonth() + 1) + '/' + d.getDate() + ' ') : '';
+      var mark = x.remade ? ' <span style="color:#b08968;">🔁被リビルド</span>' : '';
+      return '<button type="button" class="rbm-item" data-rbvid="' + esc(x.videoId) + '">' + esc(ds + (x.title || '(無題)')) + mark + '</button>';
+    }
+    var body = ov.querySelector('.fz-body');
+    body.innerHTML =
+      '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">🔁 リビルド結合する動画を選ぶ</div>' +
+      '<div class="hint" style="color:#c8cdd4;">選んだ動画が「被リビルド」になり（ランキングから外れます）、この投稿がリビルド版として残ります。クリック数は合算されます。</div>' +
+      '<div class="rbm-sec-label">作品URLが一致する投稿</div>' +
+      (matched.length ? '<div class="rbm-list">' + matched.map(rowHtml).join('') + '</div>'
+        : '<div class="hint" style="padding:4px 0;">一致する投稿はありません' + (myCid ? '' : '（この投稿に作品URLが無いため照合できません）') + '。下の一覧から選べます。</div>') +
+      '<div class="rbm-sec-label">すべての投稿（新しい順）</div>' +
+      (all.length ? '<div class="rbm-list">' + all.map(rowHtml).join('') + '</div>' : '<div class="hint">他に投稿がありません。</div>');
+    ov.hidden = false;
+    body.querySelectorAll('.rbm-item').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var vid = b.getAttribute('data-rbvid');
+        var target = null; all.forEach(function (x) { if (x.videoId === vid) target = x; });
+        if (!target) return;
+        if (!window.confirm('「' + (target.title || '(無題)') + '」をリビルド前の動画として結合します。\nこの投稿がリビルド版になり、選んだ動画はランキングから外れます。よろしいですか？')) return;
+        mergeRebuild_(thisKey, thisItem, target);
+        ov.hidden = true; closeModal_();
+      });
+    });
+  }
+  // リビルド結合の適用：この投稿=リビルド版（rebuild/rebuildOf/結合スナップショット）、選んだ動画=被リビルド。
+  function mergeRebuild_(thisKey, thisItem, target) {
+    var baseClicks = null;
+    try { var tcode = codeOf(target.shortUrl || ''); if (tcode && (tcode in clicksCache)) baseClicks = clicksCache[tcode]; } catch (e) {}
+    function applyIn(arrKey, arr) {
+      var changed = false;
+      arr.forEach(function (x) {
+        if (itemKey(x) === thisKey) { x.rebuild = true; x.rebuildOf = target.videoId || ''; x.rebuildMerged = true; if (baseClicks != null) x.rebuildBaseClicks = baseClicks; changed = true; }
+        if (x.videoId && target.videoId && x.videoId === target.videoId) { x.remade = true; changed = true; }
+      });
+      if (changed) saveArr(arrKey, arr);
+    }
+    applyIn(manualKey(), loadManual());
+    applyIn(histKey(), loadHist());
+    try { pushRemadeToGas_(target.videoId || '', true); } catch (e) {} // 記録シートにも被リビルドを反映
+    refresh();
   }
 
   // 1件削除（確認ダイアログ）。手動追加分は verify_manual から、投稿履歴は short_hist から除去。
@@ -2059,7 +2152,7 @@
           vid: x.vid, yt: x.yt, acct: x.acct,
           title: titleCache[x.vid] || it.title || (it.manual ? '(手動追加)' : '(無題)'),
           views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
-          clicks: (code && code in clicksCache) ? clicksCache[code] : null,
+          clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && c != null && it.rebuildBaseClicks != null) ? (c + it.rebuildBaseClicks) : c; })(), // 結合は総合値（この投稿＋リビルド前）
           code: code,
           snapV: snap ? snap.v : null, snapAge: snap ? snap.ageMin : null,
           peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
