@@ -263,12 +263,17 @@
     if (w > maxw && w > 0) px = Math.max(minPx || 14, Math.floor(basePx * (maxw / w) * 0.98));
     return { px, text };
   }
-  // 3段目コメントの「2行モード」：最大2行に収まる最大フォントを求める（超過分はフォント縮小）。
+  // 3段目コメントの「2行モード」：★ユーザーの改行(\n)で分割（1行目=改行前 / 2行目=改行後）。
+  //   改行が無ければ1行。各行が幅に収まる最大フォントを求める（広い行に合わせて縮小）。
   function fitTwoLines(text, basePx, maxw, minPx) {
-    text = String(text).replace(/\n/g, " ").trim();
-    var px = basePx, lines = wrap(text, px, maxw);
-    while (lines.length > 2 && px > (minPx || 14)) { px = Math.floor(px * 0.96); lines = wrap(text, px, maxw); }
-    if (lines.length > 2) lines = [lines[0], lines.slice(1).join("")]; // 念のため2行に丸める（最小フォント到達時）
+    var parts = String(text).split("\n");
+    var lines = [(parts[0] || "").trim()];
+    if (parts.length >= 2) { var rest = parts.slice(1).join(" ").trim(); if (rest) lines.push(rest); }
+    setFont(basePx, 700);
+    var widest = 0;
+    for (var i = 0; i < lines.length; i++) { var wdt = ctx.measureText(lines[i]).width; if (wdt > widest) widest = wdt; }
+    var px = basePx;
+    if (widest > maxw && widest > 0) px = Math.max(minPx || 14, Math.floor(basePx * (maxw / widest) * 0.98));
     return { px: px, lines: lines.length ? lines : [""] };
   }
   // 2行モードの大タイトル：帯は「両行をひとまとめに囲う1枚」。影の位置分離はせず、帯と文字は同じ
@@ -350,7 +355,7 @@
       }
     }
     // テキスト
-    drawText(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, titleForBurn(els.top.value));
+    drawText(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, titleForDraw(els.top.value));
   }
 
   // ---- プレビュー（完全表示状態の1枚） ----
@@ -382,21 +387,34 @@
   const twoLineEl = document.getElementById("topTwoLine");
   if (twoLineEl) {
     try { twoLineEl.checked = localStorage.getItem("movie_two_line") === "1"; } catch (e) {}
+    const syncTopRows = () => { if (els.top && els.top.tagName === "TEXTAREA") els.top.rows = twoLineEl.checked ? 2 : 1; };
+    syncTopRows(); // 保存状態に応じて①行/②行のテキストボックスに
     twoLineEl.addEventListener("change", () => {
       try { localStorage.setItem("movie_two_line", twoLineEl.checked ? "1" : "0"); } catch (e) {}
+      syncTopRows();
       preview();
     });
   }
+  // ④コメントは textarea 化＝入力中(改行含む)も即プレビュー反映（2行モードの改行が2行目に出るのを確認しやすく）。
+  els.top.addEventListener("input", preview);
 
   function setStatus(m) { els.status.textContent = m; }
   function sanitize(t) {
     t = (t || "").trim().replace(/[\\/:*?"<>|\r\n\t]/g, "").replace(/^\.+|\.+$/g, "");
     return (t.slice(0, 60) || "video");
   }
-  // 動画に焼く題名テキスト・保存ファイル名では定型投稿タグ(#マンガ紹介 等)を非表示にする（YouTube題名には残す）。
+  // 保存ファイル名用：定型投稿タグを非表示にし、★改行は無視して連続した文字列にする（2行モードでも1つの名前に）。
   function titleForBurn(s) {
-    var t = String(s == null ? "" : s).trim();
+    var t = String(s == null ? "" : s).replace(/\n+/g, "").trim();
     return (typeof Go5Util !== "undefined" && Go5Util.stripPostTags) ? Go5Util.stripPostTags(t) : t;
+  }
+  // 動画へ焼く描画用：定型投稿タグを除去しつつ改行(\n)は保持（2行モードの行分割に使う）。
+  function titleForDraw(s) {
+    var t = String(s == null ? "" : s);
+    if (typeof Go5Util !== "undefined" && Go5Util.stripPostTags) {
+      return t.split("\n").map(function (line) { return Go5Util.stripPostTags(line); }).join("\n");
+    }
+    return t;
   }
   function pickMime() {
     const c = ["video/mp4;codecs=avc1.42E01E", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
