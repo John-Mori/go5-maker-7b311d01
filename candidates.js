@@ -67,6 +67,28 @@
   var _sort = 'added_desc';
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
+  // アカウント別「投稿済みを非表示」トグル（両方同時ONで、いずれかで投稿済みの作品を隠せる）。localStorageで永続。
+  var _hidePosted = (function () { try { return JSON.parse(localStorage.getItem('cand_hide_posted') || '{}') || {}; } catch (e) { return {}; } })();
+  function saveHidePosted_() { try { localStorage.setItem('cand_hide_posted', JSON.stringify(_hidePosted)); } catch (e) {} }
+  function isHiddenByPosted_(cid) {
+    if (!cid) return false;
+    if (_hidePosted.acc1 && postedItemForCid_(cid, 'acc1')) return true;
+    if (_hidePosted.acc2 && postedItemForCid_(cid, 'acc2')) return true;
+    return false;
+  }
+  // 「◯◯✔非表示」トグル2つ（非表示リストの上段・右寄せ）のHTML。_ACCTS は描画時に定義済み。
+  function candHidePostedRowHtml_() {
+    return '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;justify-content:flex-end;">' +
+      '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="' + esc(_ACCTS[0][1]) + 'で投稿済みの作品を一覧から隠す">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
+      '<button id="candHidePosted2" type="button" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="' + esc(_ACCTS[1][1]) + 'で投稿済みの作品を一覧から隠す">' + esc(_ACCTS[1][1]) + '✔非表示</button>' +
+    '</div>';
+  }
+  // 上記トグルの配線。両方独立にON/OFFでき、いずれかで投稿済みなら非表示（isHiddenByPosted_）。
+  function wireHidePostedButtons_(rerender) {
+    var b1 = $('candHidePosted1'), b2 = $('candHidePosted2');
+    if (b1) b1.addEventListener('click', function () { _hidePosted.acc1 = !_hidePosted.acc1; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc1); rerender(); });
+    if (b2) b2.addEventListener('click', function () { _hidePosted.acc2 = !_hidePosted.acc2; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc2); rerender(); });
+  }
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
   // 並べ替え対象外の固定タブ（🦋バズ・💡候補）。左端の2つは動かさない。
   function isFixedCandTab_(id) { return id === 'main' || id === 'buzz'; }
@@ -1512,19 +1534,22 @@
       (isMain ? '' : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
       '<button id="candAddOpen" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ ' + (isMain ? '追加' : 'このタブに追加') + '</button>' +
       '</div>' +
+      // アカウント別「投稿済みを非表示」トグル（非表示リストの上段・右寄せ）。両方同時ON可。
+      candHidePostedRowHtml_() +
       // 省スペース行：セール絞込（左）＋非表示トグル（右端・状態で色と文言が変化）
       '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
         '<span style="flex:1 1 auto;"></span>' +
-        '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リスト') + '</button>' +
+        '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '非表示リスト') + '</button>' +
       '</div>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
       ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
       '</div>';
     body.innerHTML = header + '<div id="candEditForm"></div>' + '<div id="candList"></div>';
     $('candSort').addEventListener('change', function () { _sort = this.value; renderCandList(tabId); });
-    $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; this.classList.toggle('active', _showHidden); this.textContent = _showHidden ? '👁 通常表示に戻す' : '🙈 非表示リスト'; renderCandList(tabId); });
+    $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; this.classList.toggle('active', _showHidden); this.textContent = _showHidden ? '👁 通常表示に戻す' : '非表示リスト'; renderCandList(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderCandList(tabId); });
+    wireHidePostedButtons_(function () { renderCandList(tabId); });
     $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
     bindPcRun_($('candPcRun'), 'candList');
     $('candAddOpen').addEventListener('click', function () { openAddModal_(tabId, isMain); });
@@ -1692,7 +1717,12 @@
     var all = lsGet(key, '[]');
     if (!all.length) { el.innerHTML = '<p class="hint" style="padding:4px 6px;">まだ候補がありません。上の欄に作品URLを入れて追加してください。</p>'; return; }
     var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
-    var arr = sortItems(all, _sort).filter(function (it) { return (_showHidden ? hset[it.cid] : !hset[it.cid]) && (!_filterSale || isOnSale_(it)); });
+    var arr = sortItems(all, _sort).filter(function (it) {
+      if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
+      if (_filterSale && !isOnSale_(it)) return false;
+      if (!_showHidden && isHiddenByPosted_(it.cid)) return false; // アカウント別「投稿済みを非表示」
+      return true;
+    });
     _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
     if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる候補がありません。') + '</p>'; return; }
     var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
@@ -1740,11 +1770,13 @@
       '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
       '<button id="candEditTab" type="button" class="ghost" title="タブ名・サークルを編集" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
       '</div>' +
+      // アカウント別「投稿済みを非表示」トグル（非表示リストの上段・右寄せ）。両方同時ON可。
+      candHidePostedRowHtml_() +
       // 省スペース行：セール絞込（左）＋非表示トグル（右端・状態で色と文言が変化）
       '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
         '<span style="flex:1 1 auto;"></span>' +
-        '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '🙈 非表示リスト') + '</button>' +
+        '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '非表示リスト') + '</button>' +
       '</div>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
       ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
@@ -1754,6 +1786,7 @@
     $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderMaker(tabId); });
+    wireHidePostedButtons_(function () { renderMaker(tabId); });
     $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
     bindPcRun_($('candPcRun'), 'candMakerList');
     $('candEditTab').addEventListener('click', function () { showEditTabForm(tab); });
@@ -1770,7 +1803,12 @@
       }
       var hidden = lsGet(hiddenKey(tabId), '[]');
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
-      var arr = sortItems(items, _sort).filter(function (it) { return (_showHidden ? hset[it.cid] : !hset[it.cid]) && (!_filterSale || isOnSale_(it)); });
+      var arr = sortItems(items, _sort).filter(function (it) {
+        if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
+        if (_filterSale && !isOnSale_(it)) return false;
+        if (!_showHidden && isHiddenByPosted_(it.cid)) return false; // アカウント別「投稿済みを非表示」
+        return true;
+      });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる作品がありません。') + '</p>'; return; }
       _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
       // 実売本数(販売数)を先頭60件ぶん取得（未取得はPC取得キューへ自動登録）。反映されたら再描画。
