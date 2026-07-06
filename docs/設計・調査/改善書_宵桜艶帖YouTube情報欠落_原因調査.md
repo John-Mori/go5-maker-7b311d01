@@ -1,0 +1,208 @@
+# 改善書：宵桜艶帖の YouTube 情報が取れなくなる問題 — 原因調査
+
+作成: 2026-07-06（コード精査による机上調査。実装・構築は行っていない）
+対象: 投稿履歴タブ（yt-clicks.js）の再生数・投稿日時・題名の取得系
+関連事象: 「Books作品が月詠みで投稿したのに宵桜艶帖でも投稿済み判定になる」（同日報告・§6で関連づけ）
+
+---
+
+## 1. 事象
+
+- 宵桜艶帖（acc2）の投稿履歴タブで、YouTube の情報（再生数・投稿日時・題名）が取れなくなった。
+- 月詠み（acc1）では従来どおり取れており、**片方のアカウントだけ**壊れているように見える。
+
+## 2. 結論（要旨）
+
+**「宵桜艶帖だけを狙って壊すコード」は存在しない。** YouTube 情報の取得系は
+アカウントごとに**独立したデータ（配列・マップ）と独立した閾値**で動いており、
+以下の**構造上の欠陥が、条件を先に満たした側のアカウントから順に発火する**設計になっている。
+宵桜艶帖が先に条件を満たしただけで、放置すれば月詠みも同じ道を辿る（時限爆弾型）。
+
+確定した欠陥は5つ（すべてコード行で特定済み・§4）。もっとも疑わしい主犯は
+**D1「検証タブの YouTube 照会が50件で silent 打ち切り（バッチ分割なし）」**、
+次点が **D4「DID矯正がYT URLマップを移し忘れる」**。どちらが実際に発火しているかは
+端末データを見ないと確定できないため、§7 の非破壊診断手順で切り分ける。
+
+## 3. 仕組みの整理（データフロー）
+
+```
+[アカウント別ストア]                         [取得]                    [キャッシュ(共有)]
+short_hist__acc2   ─┐                                                viewsCache / titleCache /
+verify_manual__acc2 ├─ allItems() ─ vids ─→ fetchVideos(videos.list) ─→ publishedCache
+verify_yt__acc2    ─┘   (YT URL解決)         ※最大50件/回・1回のみ      (yt_meta_cache に永続化)
+```
+
+- 投稿履歴タブは **表示中アカウントの** `short_hist__<acc>`（新しい順）＋ `verify_manual__<acc>`（末尾に連結）から
+  YouTube 動画IDを集め、`fetchVideos` で一括照会する。
+- 各行の YouTube URL は次の優先で解決される:
+  `verify_yt__<acc>[itemKey]`（手動入力のマップ）→ `item.ytUrl`（アイテム自身）。
+- `itemKey` は `'u:'+postUri`、無ければ `'s:'+shortUrl`（yt-clicks.js:51）。**postUri/shortUrl が変わるとキーも変わる。**
+
+## 4. 確定した構造上の欠陥（コード行つき）
+
+### D1【最有力】検証タブの YouTube 照会は50件で silent 打ち切り・バッチ分割なし
+
+- `fetchVideos` は YouTube Data API の仕様（videos.list は最大50 ID/回）に合わせて
+  **`uniq.slice(0, 50)` で切り捨てる**（yt-clicks.js:121）。切り捨ては黙って行われる。
+- 呼び出し側 `fetchData_` は **全アイテムの動画IDを1回の `fetchVideos` に渡すだけ**で、
+  分割ループが無い（yt-clicks.js:1104）。
+- 一方 **ランキングタブは50件ずつ分割済み**（yt-clicks.js:2293-2306）。検証タブだけ未対応。
+
+**帰結（アカウント単位で発火）:**
+- そのアカウントの「YouTube URL 付きアイテム」が **51件を超えた瞬間、51件目以降は二度と照会されない。**
+- 配列は新しい順なので、**古い投稿から順に更新が止まる**（過去に取得済みなら古い値のまま固まる。
+  一度も取得していなければ「…」「投稿日時不明」のまま）。
+- **手動追加分（verify_manual）は配列の末尾に連結される**（yt-clicks.js:81）ため、
+  履歴が50件に達すると**手動追加の動画から真っ先に全滅する**。手動追加は
+  「YouTube統計を見るためだけに登録した動画」なので、体感の被害が最も大きい。
+
+### D2 通信失敗の握りつぶし — 失敗したのに「✅ 更新しました」と表示される
+
+- `fetchVideos` は通信エラーを `catch` して **空オブジェクト `{}` を返す**（yt-clicks.js:139）。
+  `__error` も `__queried` も付かない。
+- その結果 `fetchData_` 側で `lastErr = m.__error || ''` → **エラーが消され**、
+  手動更新なら「✅ 更新しました」と成功表示になる（yt-clicks.js:1105, 1162-1163）。
+- ユーザーからは「エラーは出ないのに情報が取れない」＝今回の見え方と一致する。
+
+### D3 verify_yt マップのキーが不安定（postUri/shortUrl 由来）
+
+- 手動入力した YouTube URL は `verify_yt__<acc>` に `itemKey`（`'u:'+postUri` / `'s:'+shortUrl`）で保存。
+- **「計測リンク再生成」等で shortUrl が変わると、postUri を持たない行のキーが変わり、
+  マップのエントリが孤児化**（旧キーに残る）→ その行の YouTube URL が見えなくなる。
+- 安定キーであるはずの背骨ID `videoId` がマップのキーに使われていない。
+
+### D4 DID矯正（repairAccountsByDid_）が verify_yt を移し忘れる
+
+- 手動移動 `moveOne_` は履歴アイテムと一緒に **verify_yt のエントリも移す**（yt-clicks.js:861-862）。正しい。
+- しかし **Bluesky DID による自動矯正 `repairAccountsByDid_` は short_hist の配列とシート行だけ移し、
+  `verify_yt__` マップを移さない**（bluesky.js:812-833）。
+- **帰結:** 矯正で acc1→acc2 へ移動した行は、YouTube URL のマップエントリが acc1 側に取り残され、
+  **宵桜艶帖側では YouTube URL 無し扱い**＝再生数・日時・題名が出ない。ランキングからも消える。
+  過去の INC-71 対応期にアカウント間移動が多発しており、**移動の方向が非対称**（acc2へ多く移した）なら
+  「宵桜艶帖だけ壊れた」ように見える。
+
+### D5【関連バグ・Books二重判定の有力経路】シート復元がシートのタブ所属を正として上書き移動する
+
+- 「📥 シートから投稿履歴を復元」`restoreHistoryFromSheet_` は、**シートの記録タブ（月詠み/宵桜艶帖）の
+  所属を正**として、ローカルの一致アイテムを**現アカウントへ移動**または**薄い複製を作成**する
+  （yt-clicks.js:1012-1034）。
+- つまり**シート側に誤タブ行が1つでも残っていると（例: DID矯正の削除失敗・過去の誤記録）、
+  復元を実行するたびにローカルへ誤所属が“再感染”する**。
+- 今回の「Books作品が宵桜艶帖でも投稿済み判定」は、宵桜艶帖の
+  `short_hist__acc2`／`verify_manual__acc2` に同 cid のエントリが実在することが原因
+  （判定コード自体はアカウント別ストアを cid 照合しており正しい）。エントリの侵入経路として
+  この D5（復元）と D4（矯正）の相互作用が最有力。
+
+## 5. なぜ「宵桜艶帖だけ」に見えるのか
+
+| 欠陥 | アカウント単位で独立している理由 | acc2 が先に発火する条件 |
+|---|---|---|
+| D1 50件打ち切り | 配列が `short_hist__acc1` / `__acc2` で別。閾値51件も別カウント | acc2 の YT付きアイテムが先に51件を超えた／手動追加が acc2 に多い |
+| D2 エラー握りつぶし | 表示中アカウントの fetch だけ走る | acc2 表示中の通信失敗は acc2 にしか見えない |
+| D3 キー孤児化 | マップが `verify_yt__acc1` / `__acc2` で別 | 計測リンク再生成を acc2 側で多く実行した |
+| D4 矯正の移し忘れ | 移動は「誤→正」の片方向 | 矯正で acc2 へ移された行が多い |
+| D5 復元の再感染 | 復元は「現アカウントのシートタブ」単位 | acc2 表示中に復元を実行した |
+
+共通構造: **データもフローも per-account なので、欠陥は必ず「片方のアカウントの不具合」として現れる。**
+「宵桜だけおかしい」は特別扱いの証拠ではなく、**閾値・操作履歴の非対称**の現れ。
+
+## 6. Books 二重投稿済み判定との関係
+
+- 判定ロジック（candidates.js `postedItemForCid_`）は正しい。**`short_hist__acc2` か `verify_manual__acc2` に
+  当該 cid のアイテムが実在する**ことが直接原因。
+- 侵入経路の候補（可能性順）:
+  1. **D5**: シートの宵桜艶帖タブに誤って行が存在 → acc2 で復元 → ローカル acc2 に複製。
+  2. **D4 の変種**: DID矯正・チャンネル判定矯正で誤移動（Books は投稿直後で判定材料が薄い）。
+  3. 過去の手動追加・手動移動の誤操作。
+- なお、当日追加済みの応急導線（投稿詳細モーダルの「🚫 このアカウントでは投稿していない」ボタン）で
+  誤エントリの**除去**は可能になっているが、**侵入経路（シート側の誤行）が残っていれば復元で再発**する。
+  恒久対策はシート側の突合クリーニング（§8-P3）が必要。
+
+## 7. 端末での確定診断（非破壊・コピペ1回）
+
+iPhone の Safari（Mac 接続のWebインスペクタ）または PC ブラウザで本番を開き、
+コンソールに貼るだけ。**何も書き換えない読み取り専用**。
+
+```js
+(function(){
+  function load(k){ try{return JSON.parse(localStorage.getItem(k)||'[]')||[]}catch(e){return[]} }
+  function ymap(a){ try{return JSON.parse(localStorage.getItem('verify_yt__'+a)||'{}')||{}}catch(e){return{}} }
+  function ytid(u){ u=String(u||'');var m=u.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);return m?m[1]:(/^[A-Za-z0-9_-]{11}$/.test(u)?u:'');}
+  ['acc1','acc2'].forEach(function(a){
+    var hist=load('short_hist__'+a), man=load('verify_manual__'+a), ym=ymap(a);
+    var items=hist.concat(man);
+    function key(it){ return it.manual?it.id:(it.postUri?('u:'+it.postUri):('s:'+(it.shortUrl||''))); }
+    var withYt=0, vids=[], orphanKeys=0;
+    items.forEach(function(it){ var v=ytid(ym[key(it)]||it.ytUrl||''); if(v){withYt++; vids.push(v);} });
+    var uniq=vids.filter(function(v,i,arr){return arr.indexOf(v)===i;});
+    var itemKeys={}; items.forEach(function(it){ itemKeys[key(it)]=1; });
+    Object.keys(ym).forEach(function(k){ if(!itemKeys[k]) orphanKeys++; });
+    console.log('==== '+a+' ====');
+    console.log('hist:'+hist.length+' / manual:'+man.length+' / YT付き:'+withYt+' / uniq動画ID:'+uniq.length);
+    console.log('★D1判定: uniq>'+50+' ? → '+(uniq.length>50?'発火中（'+(uniq.length-50)+'本が照会されない）':'未発火'));
+    console.log('★D3/D4判定: verify_ytの孤児キー数 = '+orphanKeys+(orphanKeys?'（YT URLが行に紐づかず消えている）':''));
+  });
+  // Books二重判定の実体確認（cidを合わせて実行）
+  var cid='b062aftwk01392';
+  ['acc1','acc2'].forEach(function(a){
+    var hit=load('short_hist__'+a).concat(load('verify_manual__'+a)).filter(function(it){
+      return String(it.cid||'')===cid || String(it.workUrl||'').indexOf(cid)>=0; });
+    console.log('Books('+cid+') in '+a+': '+hit.length+'件', hit.map(function(h){return {title:h.title, ts:h.ts&&new Date(h.ts).toLocaleString(), postUri:h.postUri, videoId:h.videoId, manual:!!h.manual};}));
+  });
+})();
+```
+
+読み方:
+- `uniq動画ID > 50` が acc2 だけ true → **D1 が主犯**（§8-P1で恒久修正）。
+- `孤児キー数` が acc2 だけ多い → **D3/D4 が主犯**（§8-P2で恒久修正）。
+- Books の hit が acc2 に出る → その `postUri`/`videoId`/`manual` を見れば侵入経路（復元=薄い行・矯正=本物の行の移動・手動）を特定できる。
+
+## 8. 改善提案（優先度順・本書では実装しない）
+
+### P1: 検証タブの照会を50件ずつバッチ分割（D1の恒久修正）
+- `fetchData_` をランキングタブと同じ分割方式（yt-clicks.js:2293 と同型）に揃える。
+- 効果: 件数が増えても全行の再生数・日時・題名が取れる。**今回の主症状の根治見込みが最も高い。**
+- 注意: `__queried` の統合（予約公開判定 `updateYtScheduled_` は「照会したのに応答に無い」を使うため、
+  全バッチの queried を合算して渡す）。API消費は videos.list=1ユニット/回なので50件×Nバッチでも無視できる。
+
+### P1: fetchVideos の失敗を隠さない（D2の恒久修正）
+- 通信 catch で `{ __error: '通信エラー' }` を返す（現在は `{}`）。
+- `lastErr` が立てば既存の「⚠️ 更新に失敗しました」表示・予約判定スキップがそのまま機能する。
+
+### P2: verify_yt マップのキーを videoId（背骨ID）へ移行（D3の恒久修正）
+- 新規保存は `videoId` キー、読み出しは `videoId → 旧itemKey` の順でフォールバック。
+- 既存の孤児エントリは「同じ動画IDを持つ行」への再接続マイグレーションを1回実行。
+
+### P2: repairAccountsByDid_ に verify_yt の移送を追加（D4の恒久修正）
+- `moveOne_`（yt-clicks.js:861-862）と同じ処理を bluesky.js の矯正ループに足すだけ。
+
+### P3: シート側の誤タブ行クリーニング（D5・Books二重判定の恒久対策）
+- 両タブを postUri で突合し、同一 postUri が両タブに居たら DID（実際の投稿者）側だけ残す
+  一括メンテ（GAS か PC スクリプト）。ローカル側は既存の「🚫 判定を消す」で除去可能。
+- 復元処理に「シート行の channel と postUri の DID が矛盾したら移動せず警告」ガードを追加。
+
+### P4: 「未照会」の可視化
+- 50件打ち切りが起きている間、対象行の再生数を「…」でなく「未照会（50件超）」と表示すれば、
+  今回のような **silent 劣化を最初の1件で発見できる**。
+
+## 9. 再発防止の教訓
+
+1. **per-account なデータ構造の欠陥は必ず「片方のアカウントだけ壊れた」ように見える。**
+   片側だけの不具合報告が来たら、まず「アカウント単位の閾値・操作履歴の非対称」を疑う。
+2. **上限つき API の呼び出しは必ず分割し、切り捨てを silent にしない**（ランキング側は対応済みだった。
+   同じ関数を使う別経路の未対応が残った＝共通化漏れ）。
+3. **エラーを catch して空値を返す実装は、成功表示と組み合わさると「エラーが出ないのに動かない」
+   という最も調査コストの高い故障モードを生む。**
+4. **キーの安定性**: 変わりうる値（shortUrl）をキーにしたマップは、再生成系の機能を足した時点で孤児化する。
+   背骨ID（videoId）が既にあるのだから、紐づけはすべてそこへ寄せる。
+
+## 10. 実装状況（2026-07-06）
+
+| 項目 | 状態 | 内容・検証 |
+|---|---|---|
+| **D1** 50件バッチ分割 | ✅実装・検証済 | `fetchData_` を50件ずつ分割＋`__queried`全バッチ合算。プレビューで120件→[50,50,20]の3バッチで全120件取得・重複なし・最古の120本目も取得を確認。 |
+| **D2** 失敗を隠さない | ✅実装・検証済 | `fetchVideos` の通信catchを`{__error}`に。失敗時「⚠️ 更新に失敗しました：通信エラー」を表示（偽の✅を出さない）ことを確認。 |
+| **D4** 矯正でverify_yt移送 | ✅実装（コードレビュー担保） | `repairAccountsByDid_` の移動時に verify_yt エントリも移送（`moveOne_`と同型）。DID台帳依存のため実機/preview再現は重く、追加ロジックはレビューで担保。 |
+| **D3** verify_ytをvideoIdキー化 | ⏸未実装（後続） | 読み出し15箇所に触れる広域リファクタで、対象は「postUriを持たない短縮のみ行」の狭ケース。テストを伴う別変更として分離。 |
+| **D5/P3** 復元の再感染防止＋シート突合 | ⏸未実装（後続） | 復元ガードはDID解決（Go5AccountRepair）依存、シート突合はGAS改修（デプロイ承認要）。応急として投稿詳細モーダルに「🚫 このアカウントでは投稿していない（判定を消す）」を実装済（誤エントリ除去は可能）。 |
+| **P4** 「未照会」可視化 | — 不要化 | D1で50件打ち切り自体が解消されたため対象事象が消滅。 |

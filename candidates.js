@@ -471,6 +471,23 @@
   }
   // 索引を明示的に無効化（一覧描画の起点で呼び、確実に新規投稿を拾う）。
   function invalidatePostedIndex_() { _postedIdxCache = {}; }
+  // 指定アカウントの投稿履歴(short_hist)＋手動追加(verify_manual)から、この作品(cid)のエントリを全て外す。
+  //   「このアカウントでは投稿していないのに投稿済み判定になる」誤検出を、内容を確認した上で解消する用途。
+  function removePostedForAcct_(cid, account) {
+    if (!cid || !account) return 0;
+    var removed = 0;
+    ['short_hist__', 'verify_manual__'].forEach(function (pre) {
+      var key = pre + account, arr;
+      try { arr = JSON.parse(localStorage.getItem(key) || '[]') || []; } catch (e) { arr = []; }
+      var kept = arr.filter(function (x) { return cidOfHistItem_(x) !== cid; });
+      if (kept.length !== arr.length) {
+        removed += (arr.length - kept.length);
+        try { localStorage.setItem(key, JSON.stringify(kept)); } catch (e) {}
+      }
+    });
+    invalidatePostedIndex_();
+    return removed;
+  }
   // この作品(cid)を、指定チャンネルで投稿した投稿履歴アイテムを返す（cid照合・無ければ null）。
   function postedItemForCid_(cid, account) {
     if (!cid) return null;
@@ -530,8 +547,18 @@
       '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">' + esc(label) + ' で投稿済み</div>' +
       rows +
       '<div class="pd-imgs-label hint" style="margin-top:8px;">投稿した画像</div>' +
-      '<div id="pdImgs" class="pd-imgs"><div class="hint">⏳ 画像を取得中…</div></div>';
+      '<div id="pdImgs" class="pd-imgs"><div class="hint">⏳ 画像を取得中…</div></div>' +
+      // 誤検出の解消：このアカウントで実際には投稿していない場合、この作品の判定（履歴）を外す。
+      '<button id="pdRemove" type="button" class="ghost" style="width:max-content;margin-top:14px;font-size:12.5px;color:#c0392b;border-color:#c0392b;">🚫 ' + esc(label) + 'では投稿していない（この判定を消す）</button>' +
+      '<div class="hint" style="margin-top:4px;">この作品を「' + esc(label) + '」の投稿履歴から外します（誤検出の解消用）。実際の投稿記録が消えるので、投稿済みが正しい場合は押さないでください。</div>';
     ov.hidden = false;
+    var rmBtn = ov.querySelector('#pdRemove');
+    if (rmBtn) rmBtn.addEventListener('click', function () {
+      if (!window.confirm('「' + cleanTitle + '」を ' + label + ' の投稿履歴から外します。\nランキングや投稿履歴タブからも消えます。よろしいですか？')) return;
+      var n = removePostedForAcct_(cid, account);
+      ov.hidden = true;
+      try { render(); } catch (e) {} // 候補一覧を再描画＝pillが「未投稿」表示に戻る
+    });
     // 実際の投稿画像を取得（無ければ候補に保存済みの画像でフォールバック）。
     fetchPostImages_(it.postUri, function (imgs) {
       var box = ov.querySelector('#pdImgs'); if (!box) return;

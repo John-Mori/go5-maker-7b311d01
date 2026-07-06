@@ -821,6 +821,19 @@
       moved.forEach(function (mv) {
         var arr = histLoadFor_(mv.to).filter(function (x) { return mv.item.postUri ? x.postUri !== mv.item.postUri : x.shortUrl !== mv.item.shortUrl; });
         arr.unshift(mv.item); histSaveFor_(mv.to, arr);
+        // D4: YouTube URLマップ(verify_yt)も一緒に移す。移し忘れると移動先で再生数/投稿日時/題名が出ない
+        //   （検証タブは verify_yt__<acc>[itemKey] からYT URLを引くため）。itemKey は 'u:'+postUri / 's:'+shortUrl。
+        try {
+          var mk = mv.item.postUri ? ('u:' + mv.item.postUri) : ('s:' + (mv.item.shortUrl || ''));
+          var fk = 'verify_yt__' + mv.from, tk = 'verify_yt__' + mv.to;
+          var fmap = JSON.parse(localStorage.getItem(fk) || '{}') || {};
+          if (fmap[mk]) {
+            var tmap = JSON.parse(localStorage.getItem(tk) || '{}') || {};
+            tmap[mk] = fmap[mk]; delete fmap[mk];
+            localStorage.setItem(fk, JSON.stringify(fmap));
+            localStorage.setItem(tk, JSON.stringify(tmap));
+          }
+        } catch (e) {}
       });
       // シートも矯正：正チャンネルへ再upsert（当時の投稿日時を保持）＋誤チャンネルの行を削除。
       var gasUrl = (els.gasUrl.value || '').trim();

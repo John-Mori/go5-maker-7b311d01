@@ -136,7 +136,7 @@
       out.__queried = uniq.slice(0, 50);
       if (j && j.error) out.__error = (j.error.message || 'YouTube APIエラー');
       return out;
-    }).catch(function () { return {}; });
+    }).catch(function () { return { __error: '通信エラー（YouTubeに接続できませんでした）' }; }); // D2: 失敗を{}で握りつぶさない＝「成功表示なのに取れない」を防ぐ
   }
 
   // ── 今日/昨日/直近1週間の再生・クリック増加（GASが毎時サーバー側で記録した差分）──
@@ -1097,23 +1097,40 @@
   function fetchData_(items, ymap) {
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
-    if (!codes.length && !vids.length) return Promise.resolve(false);
+    var uniqVids = vids.filter(function (v, i, a) { return a.indexOf(v) === i; }); // 重複動画IDは1回だけ照会
+    if (!codes.length && !uniqVids.length) return Promise.resolve(false);
     var jobs = [];
     codes.forEach(function (code) { jobs.push(fetchClicks(code).then(function (c) { if (c != null) clicksCache[code] = c; })); });
-    // YouTube側の通信エラーで全体(クリック数の反映含む)を巻き込まないよう、このジョブ単体でcatchする。
-    if (vids.length) jobs.push(fetchVideos(vids).catch(function () { return { __error: 'YouTube APIに接続できませんでした（通信エラー）' }; }).then(function (m) {
-      lastErr = m.__error || ''; delete m.__error;
-      var queried = m.__queried || []; delete m.__queried;
-      Object.keys(m).forEach(function (id) {
-        var rec = m[id] || {};
-        if (rec.views != null) viewsCache[id] = rec.views;
-        if (rec.published != null) publishedCache[id] = rec.published;
-        if (rec.title) titleCache[id] = rec.title;
-      });
-      ytMetaPersist(m); // 永続化（リロードで消えない）
-      updateYtScheduled_(items, ymap, m, queried); // 公開前(非公開/予約公開)の作品を予約タブ用に抽出
-    }));
-    return Promise.all(jobs).then(function () { clicksPersist_(); try { captureSnaps_(); } catch (e) {} return true; });
+    // D1: YouTube照会は videos.list の上限(50件/回)に合わせて50件ずつ分割。件数が増えても全行を取得する
+    //   （旧実装は先頭50件で silent 打ち切り＝古い投稿/末尾の手動追加から更新が止まっていた）。
+    //   予約公開判定は「照会したのに応答に無い」を用いるため、queried は全バッチ合算してから一度だけ判定する。
+    var merged = {}, allQueried = [], firstErr = '';
+    for (var bi = 0; bi < uniqVids.length; bi += 50) {
+      (function (batch) {
+        jobs.push(fetchVideos(batch).catch(function () { return { __error: 'YouTube APIに接続できませんでした（通信エラー）' }; }).then(function (m) {
+          if (m.__error && !firstErr) firstErr = m.__error;
+          if (m.__queried) allQueried = allQueried.concat(m.__queried);
+          Object.keys(m).forEach(function (id) {
+            if (id.indexOf('__') === 0) return; // __error/__queried 等のメタキーは除外
+            var rec = m[id] || {};
+            if (rec.views != null) viewsCache[id] = rec.views;
+            if (rec.published != null) publishedCache[id] = rec.published;
+            if (rec.title) titleCache[id] = rec.title;
+            merged[id] = rec;
+          });
+        }));
+      })(uniqVids.slice(bi, bi + 50));
+    }
+    return Promise.all(jobs).then(function () {
+      if (uniqVids.length) {
+        lastErr = firstErr;
+        ytMetaPersist(merged); // 永続化（リロードで消えない）
+        updateYtScheduled_(items, ymap, merged, allQueried); // 公開前(非公開/予約公開)の作品を予約タブ用に抽出
+      }
+      clicksPersist_();
+      try { captureSnaps_(); } catch (e) {}
+      return true;
+    });
   }
 
   // ── 公開前(非公開/予約公開)のYouTube作品を抽出し、予約タブ用に保存する ──
@@ -2087,7 +2104,8 @@
     { key: 'b60', min: 60, label: '1時間' },
     { key: 'b120', min: 120, label: '2時間' },
     { key: 'b360', min: 360, label: '6時間' },
-    { key: 'b1440', min: 1440, label: '24時間' }
+    { key: 'b1440', min: 1440, label: '24時間' },
+    { key: 'b4320', min: 4320, label: '72時間' }
   ];
   var snapCache = (function () { try { return JSON.parse(localStorage.getItem('view_snaps') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,ageMin},...}
   function snapPersist_() { try { localStorage.setItem('view_snaps', JSON.stringify(snapCache)); } catch (e) {} }
@@ -2157,7 +2175,7 @@
       { key: 'clicks', label: 'クリック数' },
       { key: 'pv', label: '▶ピーク' },   // 再生の最大瞬間風速（▶＝再生数の絵文字。一番伸びた区間の再生/時）
       { key: 'pc', label: '<img class="emico" src="assets/icons/ic-link.png" alt="クリック">ピーク' } // クリックの最大瞬間風速（クリック絵文字＝ic-link）
-    ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/24時間
+    ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/24時間/72時間
     // 旧モード名(early)は廃止。保存済みなら b120(2時間)へ読み替え。
     if (_rankMode === 'early') _rankMode = 'b120';
 
