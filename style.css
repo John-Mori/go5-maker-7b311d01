@@ -92,7 +92,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-thumb{width:66px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;display:block;}
 .vrow-refimg{width:66px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;background:#0b1019;display:block;}
 .vrow-refimg:active{opacity:.7;}
-.vhide-remade-btn{position:absolute;top:4px;right:4px;z-index:2;width:auto;margin:0;font-size:9.5px;font-weight:700;line-height:1;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:#0e1422;color:var(--sub);cursor:pointer;white-space:nowrap;}
+/* 被リビルドの非表示トグル：行の枠外（リスト最上部の独立バー・右寄せ）に置く＝先頭カードに重ならない。 */
+.vhide-remade-bar{display:flex;justify-content:flex-end;margin:0 0 6px;}
+.vhide-remade-btn{width:auto;margin:0;font-size:11px;font-weight:700;line-height:1.1;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:#0e1422;color:var(--sub);cursor:pointer;white-space:nowrap;} /* 縦幅を約1.5倍・横幅はテキスト長に自動追従 */
 .vhide-remade-btn:active{opacity:.7;}
 .vrow-thumb:active{opacity:.7;}
 .vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:baseline;flex-wrap:nowrap;gap:6px;min-width:0;}
@@ -204,6 +206,8 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .vmetrics .vfanza{display:flex;align-items:center;gap:6px;color:var(--gold);font-size:12px;}
 .vmetrics .vfanza input{width:64px;font-size:14px;padding:5px 7px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
 .vmetrics .vlink{color:var(--bsky);font-size:12px;text-decoration:none;white-space:nowrap;flex-shrink:0;}
+/* Bsky↗/YouTube↗/作品↗ を1グループに＝作品↗だけが改行される事故を防ぐ（狭いときは3つまとめて次行へ） */
+.vmetrics .vrow-links{display:inline-flex;align-items:baseline;gap:8px;flex-wrap:nowrap;flex-shrink:0;}
 .vmetrics .vlink-bsky{color:#4dabf7;}      /* Bluesky イメージの水色 */
 .vmetrics .vlink-yt{color:#ff4d4d;}        /* YouTube イメージの赤 */
 .vmetrics .vlink-work{color:#ff79b0;}      /* 作品＝ピンク */
@@ -296,11 +300,13 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .vrow-foot .vdel{flex:0 0 auto;background:transparent;border:none;color:var(--sub);font-size:16px;cursor:pointer;padding:0;line-height:1;opacity:0.4;width:auto;margin-top:0;}
 .vrow-foot .vdel:active{opacity:1;}
 /* 作り直し（削除の代わりの印）ボタン */
-.vrow-foot .vremake{flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--sub);font-size:11px;cursor:pointer;padding:3px 8px;line-height:1;border-radius:7px;width:auto;margin-top:0;white-space:nowrap;}
+.vrow-foot .vremake{flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--sub);font-size:12px;cursor:pointer;padding:4px 9px;line-height:1.3;border-radius:7px;width:auto;margin-top:0;white-space:nowrap;} /* 縦幅を「リビルドで作成」と同じに（font/padding/line-height一致） */
 .vrow-foot .vremake:active{opacity:.7;}
 .vrow-foot .vremake.on{color:#c98a3a;border-color:#c98a3a;font-weight:700;}
 /* 作り直し済みの行は「置き換え済み」であることが分かるよう淡く表示 */
 .vrow-remade{opacity:.62;border-style:dashed;}
+/* 🗑を押したとき、削除される範囲(この行)を赤枠で明示（確認ダイアログ中も見える） */
+.vrow-deleting{outline:2px solid #dc465a;outline-offset:1px;}
 /* ── URL編集モーダル ── */
 .vedit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;box-sizing:border-box;}
 .vedit-overlay[hidden]{display:none !important;}
@@ -502,7 +508,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .rbm-list .rbm-item{display:block;width:100%;max-width:100%;text-align:left;background:#16203a;color:#e8edf5;border:1px solid #2f3a52;border-radius:8px;padding:9px 11px;font-size:13px;cursor:pointer;white-space:normal;line-height:1.35;margin:0;}
 .rbm-list .rbm-item:active{background:#1e2b4a;}
 /* 投稿履歴：「🔁リビルドで作る」ボタン（編集ボタンと同系の小型） */
-.vrebuild-from{font-size:12px;padding:4px 9px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--accent);width:auto;margin:0;cursor:pointer;white-space:nowrap;}
+.vrebuild-from{font-size:12px;padding:4px 9px;line-height:1.3;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--accent);width:auto;margin:0;cursor:pointer;white-space:nowrap;}
 /* 非表示リストのトグル：押していない状態と押した状態で色・文言が変わる（右端配置） */
 .cand-hidden-toggle{background:#e8892b;color:#111;border:1px solid #e8892b;border-radius:8px;font-weight:700;cursor:pointer;line-height:1.1;} /* オレンジ背景・黒文字 */
 .cand-hidden-toggle.active{background:#c86f16;border-color:#c86f16;color:#111;box-shadow:none;} /* 非表示リスト閲覧中は濃いオレンジ */

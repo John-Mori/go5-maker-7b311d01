@@ -522,7 +522,9 @@
     var hideRemadeKey = 'verify_hide_remade__' + acct();
     var hideRemade = false; try { hideRemade = localStorage.getItem(hideRemadeKey) === '1'; } catch (e) {}
     var visibleItems = hideRemade ? items.filter(function (it) { return !it.remade; }) : items;
-    list.innerHTML = visibleItems.map(function (it, idx) {
+    // 非表示トグルは行の枠外（リスト最上部の独立バー）に置く＝先頭カードに重ならない。
+    var hideBarHtml = '<div class="vhide-remade-bar"><button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
+    list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
       var k = itemKey(it);
       var yt = ymap[k] || it.ytUrl || '';
       var vid = ytIdOf(yt);
@@ -555,11 +557,7 @@
       // 作り直し系バッジ：rebuild=この動画自体がリビルド版 / remade=この投稿は被リビルド(=リビルド版に取って代わられた)
       if (it.rebuild) tagsHtml += '<span class="vtag vtag-rebuild">🔁リビルド版</span>';
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
-      var hideToggleHtml = idx === 0
-        ? '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '🙈 被リビルドを非表示') + '</button>'
-        : '';
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
-        hideToggleHtml +
         '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名（改行して統一）
         '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
@@ -580,9 +578,11 @@
           '<span title="Bsky投稿クリック数' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
           '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
-          (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
-          (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
-          (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+          '<span class="vrow-links">' + // Bsky↗/YouTube↗/作品↗ を1グループに＝作品↗だけ改行される事故を防ぐ
+            (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
+            (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
+            (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+          '</span>' +
         '</div>' +
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + '>' + (vid ? fmtDelta_(deltaCache[vid]) : '') + '</span>' +
@@ -621,7 +621,12 @@
 
     // 削除
     list.querySelectorAll('.vdel').forEach(function (b) {
-      b.addEventListener('click', function () { deleteItem(b.getAttribute('data-k')); });
+      b.addEventListener('click', function () {
+        var row = b.parentNode; while (row && !(row.classList && row.classList.contains('vrow'))) row = row.parentNode; // "vrow-foot"等の部分一致を避け、正確に .vrow を探す
+        if (row) row.classList.add('vrow-deleting'); // 削除範囲(この行)を枠線で明示
+        var k = b.getAttribute('data-k');
+        setTimeout(function () { deleteItem(k, row); }, 60); // 枠線を描画してから確認ダイアログ
+      });
     });
 
     // 作り直し（削除の代わりに「被リビルド」の印を付ける／取り消す）
@@ -774,14 +779,15 @@
   }
 
   // 1件削除（確認ダイアログ）。手動追加分は verify_manual から、投稿履歴は short_hist から除去。
-  function deleteItem(k) {
+  function deleteItem(k, row) {
+    function clearMark() { if (row && row.classList) row.classList.remove('vrow-deleting'); }
     var rawItems = allItems(), ymap = loadYtMap();
     var target = null;
     for (var i = 0; i < rawItems.length; i++) { if (itemKey(rawItems[i]) === k) { target = rawItems[i]; break; } }
-    if (!target) return;
+    if (!target) { clearMark(); return; }
     var vid = ytIdOf(ymap[k] || target.ytUrl || '');
     var title = (vid && titleCache[vid]) || target.title || (target.manual ? '(手動追加)' : '(無題)');
-    if (!window.confirm('「' + title + '」を本当に消去しますか？\n（この記録を一覧から削除します。取り消せません）')) return;
+    if (!window.confirm('「' + title + '」を本当に消去しますか？\n（この記録を一覧から削除します。取り消せません）')) { clearMark(); return; }
     if (target.manual) {
       saveArr(manualKey(), loadManual().filter(function (x) { return itemKey(x) !== k; }));
     } else {
