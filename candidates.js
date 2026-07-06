@@ -741,15 +741,22 @@
         col.appendChild(thumb);
       }
       thumb.src = src;
-      if (imgs.length > 1) {
-        if (!badge) { badge = document.createElement('span'); badge.className = 'cand-refimg-multi'; col.appendChild(badge); }
-        badge.textContent = '🖼 複数あり ×' + imgs.length;
-      } else if (badge && badge.parentNode) {
-        badge.parentNode.removeChild(badge);
+      thumb.classList.toggle('multi', imgs.length > 1); // 複数あり＝アンバー枠で表現（バッジ表記は廃止）
+      if (badge && badge.parentNode) badge.parentNode.removeChild(badge); // 旧バッジの掃除
+      // コメント（黒字・サムネ下）
+      var rr = refImgOf(cid), cmt = (rr && rr.comment) || '';
+      var cEl = col.querySelector('.cand-refimg-comment');
+      if (cmt) {
+        if (!cEl) { cEl = document.createElement('span'); cEl.className = 'cand-refimg-comment'; col.appendChild(cEl); }
+        cEl.textContent = cmt;
+      } else if (cEl && cEl.parentNode) {
+        cEl.parentNode.removeChild(cEl);
       }
     } else {
       if (thumb && thumb.parentNode) thumb.parentNode.removeChild(thumb);
       if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
+      var cEl2 = col.querySelector('.cand-refimg-comment');
+      if (cEl2 && cEl2.parentNode) cEl2.parentNode.removeChild(cEl2);
     }
   }
   // 候補（Twitter起点/DMM起点どちらも）に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ（旧項目を置換）。
@@ -937,7 +944,7 @@
     }).catch(function () { cb(null, '通信エラー'); });
   }
   function priceOf(it) { return (it.price != null) ? it.price : (it.listPrice != null ? it.listPrice : Infinity); }
-  function isOnSale_(it) { return !!(it && it.listPrice && it.price && it.discountPct > 0 && it.price < it.listPrice); }
+  function isOnSale_(it) { return !!(it && it.listPrice != null && it.price != null && it.discountPct > 0 && it.price < it.listPrice); } // price=0(100%OFF)もセール扱い
   function sortItems(items, mode) {
     var a = items.slice();
     if (mode === 'added_desc') a.sort(function (x, y) { return (y.addedAt || 0) - (x.addedAt || 0); });
@@ -1906,11 +1913,12 @@
     var hasBsky = bskyImgHas(it.cid);
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像（複数可）
     var refImgSrc = refImgs[0] || '';
+    var refCmt = (refImgOf(it.cid) || {}).comment || ''; // 保存済みコメント（サムネ下に黒字で表示）
     return '<div class="cand-card">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
-        (refImgSrc ? '<img class="cand-refimg-thumb" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大）">' : '') +
-        (refImgs.length > 1 ? '<span class="cand-refimg-multi">🖼 複数あり ×' + refImgs.length + '</span>' : '') +
+        (refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '') +
+        (refCmt ? '<span class="cand-refimg-comment">' + esc(refCmt) + '</span>' : '') +
       '</div>' +
       '<div class="cand-info">' +
         // 新作/同人バッジと同じ行にチャンネル表記を並べる（バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記）
