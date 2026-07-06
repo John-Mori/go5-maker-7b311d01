@@ -73,7 +73,7 @@
 
   var SORTS = [
     { key: 'added_desc', label: '追加日が新しい順' },
-    { key: 'price_asc', label: '現在価格が安い順' },
+    { key: 'price_asc', label: '現価格が安い順' },
     { key: 'date_desc', label: '発売日が新しい順' },
     { key: 'date_asc', label: '発売日が古い順' },
     { key: 'rank', label: '売上(人気)が多い順' },
@@ -1943,7 +1943,9 @@
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
   try { window.Go5Cand = {
     render: render,
-    refImgs: refImgsOf_,                                        // cid → 保存画像の配列（無ければ[]）
+    refImgs: refImgsOf_,                                        // cid → 動画生成用の保存画像の配列（無ければ[]）
+    bskyImg: function (cid) { var r = bskyImgOf(cid); return (r && r.img) || ''; }, // cid → Bluesky添付画像（無ければ''）
+    zoomImages: function (images, idx) { openImgZoom_((images || []).filter(Boolean), idx || 0); }, // 任意の画像配列をズーム(スワイプ)
     zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0); } // タップで全画像ズーム(スワイプ)
   }; } catch (e) {}
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行（5MB枠を解放）

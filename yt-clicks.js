@@ -523,7 +523,12 @@
       var code = codeOf(it.shortUrl || '');
       var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
       // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に（別短縮URLのため加算）。
-      var clicksTotal = (it.rebuildMerged && clicks != null && it.rebuildBaseClicks != null) ? (clicks + it.rebuildBaseClicks) : clicks;
+      // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する（例：0+5=5(5)）。
+      var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
+      // 作品の動画で使った画像（＋Bluesky添付画像）。作品cid経由で候補タブの保存画像を引く。
+      var rImgCid = it.workUrl ? workCidOf_(it.workUrl) : '';
+      var rImgArr = (rImgCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(rImgCid) || []) : [];
+      var refThumb = rImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || '';
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
@@ -549,7 +554,7 @@
         : '';
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
         hideToggleHtml +
-        (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
+        '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名（改行して統一）
         '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
         '<div class="vrow-title">' + titleHtml + '</div>' +
@@ -569,16 +574,23 @@
           '<span title="Bsky投稿クリック数' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
           '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
-          (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
+          (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
           (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
           (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
         '</div>' +
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + '>' + (vid ? fmtDelta_(deltaCache[vid]) : '') + '</span>' +
-          (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ（同一作品ならBluesky投稿を引き継ぎ）">🔁 リビルドで作る</button>' : '') +
-          '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける（削除ではなく記録として残す）">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
+          '<div class="vrow-actcol">' +
+            (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ（同一作品ならBluesky投稿を引き継ぎ）">🔁 リビルドで作成</button>' : '') +
+            '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける（削除ではなく記録として残す）">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
+          '</div>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
+        '</div>' + // .vrow-body
+        ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
+          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
+          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" src="' + esc(refThumb) + '" alt="動画で使った画像（タップで拡大）" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
+        '</div>' : '') +
         '</div>';
     }).join('');
     applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示（フェッチ待ちで遅れない）
@@ -620,6 +632,18 @@
     // サムネ → 作品詳細モーダル
     list.querySelectorAll('.vrow-thumb').forEach(function (im) {
       im.addEventListener('click', function () { openFanzaModal_(im.getAttribute('data-fanza-thumb-url')); });
+    });
+
+    // 動画で使った画像 → 拡大ズーム。Bluesky投稿画像が動画画像と異なれば左右フリックで両方見られるよう並べる。
+    list.querySelectorAll('.vrow-refimg').forEach(function (im) {
+      im.addEventListener('click', function () {
+        var cid = im.getAttribute('data-refcid');
+        var imgs = (cid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(cid) || []).slice() : [];
+        var b = (cid && window.Go5Cand && window.Go5Cand.bskyImg) ? window.Go5Cand.bskyImg(cid) : '';
+        if (b && imgs.indexOf(b) < 0) imgs.push(b); // 動画画像と違うBluesky投稿画像は末尾に追加（フリックで確認）
+        if (!imgs.length && im.getAttribute('src')) imgs = [im.getAttribute('src')];
+        if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0);
+      });
     });
 
     // 編集モーダル
@@ -1255,7 +1279,7 @@
       if (i >= targets.length) {
         saveArr(histKey(), hist); saveArr(manualKey(), manual);
         _bulkBusy = false; if (btn) btn.disabled = false;
-        setStatus('✅ 計測リンク生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「Bsky投稿↗」が計測用の短縮URLです（長押しでコピー→YouTube概要欄に貼り替え）。');
+        setStatus('✅ 計測リンク生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「Bsky↗」が計測用の短縮URLです（長押しでコピー→YouTube概要欄に貼り替え）。');
         refresh(); // 新しく発行したコードのクリック数も取得（renderだけだと「…」のままになる）
         return;
       }
@@ -1567,11 +1591,11 @@
   function fmtFanzaPriceHtml(p) {
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
-      return '現在定価:<span class="fp-list">' + yen_(p.listPrice) + '</span>' +
+      return '現価格:<span class="fp-list">' + yen_(p.listPrice) + '</span>' +
              ' <span class="fp-sale-lbl">セール価格:</span><span class="fp-sale">' + yen_(p.price) + '</span>' +
              ' <span class="fp-off">' + p.discountPct + '%off</span>';
     }
-    return '現在定価:<span class="fp-cur">' + yen_(p.price) + '</span>';
+    return '現価格:<span class="fp-cur">' + yen_(p.price) + '</span>';
   }
   // 投稿時（当時）価格のHTML。全体を作品名と同じ淡色で表示。%offは現在と同様に枠で囲む。
   function fmtSnapPriceHtml(p) {
@@ -2152,7 +2176,7 @@
           vid: x.vid, yt: x.yt, acct: x.acct,
           title: titleCache[x.vid] || it.title || (it.manual ? '(手動追加)' : '(無題)'),
           views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
-          clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && c != null && it.rebuildBaseClicks != null) ? (c + it.rebuildBaseClicks) : c; })(), // 結合は総合値（この投稿＋リビルド前）
+          clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((c != null ? c : 0) + it.rebuildBaseClicks) : c; })(), // 結合は総合値（この投稿＋リビルド前。自分が0/未取得でも被リビルド分は加算）
           code: code,
           snapV: snap ? snap.v : null, snapAge: snap ? snap.ageMin : null,
           peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
@@ -2230,7 +2254,7 @@
               (r.cats ? '<div class="vrow-tags">' + r.cats + '</div>' : '') +
               '<div class="vmetrics">' +
                 mPeak + mBucket + mViews + mClicks +
-                (r.bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky投稿↗</a>' : '') +
+                (r.bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
                 (r.yt ? '<a class="vlink vlink-yt" href="' + esc(r.yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
                 (r.workUrl ? '<a class="vlink vlink-work" href="' + esc(r.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
               '</div>' +
