@@ -1332,15 +1332,43 @@
       _ytRestoreBusy = false;
       if (!res || !res.ok || !Array.isArray(res.items)) { if (onDone) onDone(0); return; }
       var m = loadYtMap(), restored = 0;
+      // 背骨ID(videoId)で現アイテムを引けるように。短縮URL再生成などで postUri/shortUrl 由来の
+      // キーがずれても、videoId は不変＝シート行と現アイテムを確実に対応づけられる。
+      var hist = loadHist(), man = loadManual();
+      var byVid = {};
+      hist.concat(man).forEach(function (x) { if (x.videoId && !byVid[x.videoId]) byVid[x.videoId] = x; });
+      var histDirty = false, manDirty = false;
       res.items.forEach(function (it) {
-        var yt = String((it && it.youtubeUrl) || '').trim(); if (!yt) return;
+        // この行のYT URL候補: ①シートの youtubeUrl ②無ければ端末に残る「迷子のYT URL」
+        //   （旧識別子キーで verify_yt に残った分）をシート行の旧識別子から回収する。
+        var yt = String((it && it.youtubeUrl) || '').trim();
+        var strayKey = ''; // 回収に使った迷子キー（回収成功時に掃除して件数を減らす）
+        if (!yt) {
+          if (it.postUri && m['u:' + it.postUri]) { yt = m['u:' + it.postUri]; strayKey = 'u:' + it.postUri; }
+          else if (it.shortUrl && m['s:' + it.shortUrl]) { yt = m['s:' + it.shortUrl]; strayKey = 's:' + it.shortUrl; }
+        }
+        if (!yt) return;
         // ローカル項目のキー付けは postUri 優先だが、シート行は postUri か短縮URLの
         // どちらかしか無いことがある。取り違えを防ぐため両方のキーに補完する（上書きはしない）。
         var did = false;
         if (it.postUri) { var ku = 'u:' + it.postUri; if (!m[ku]) { m[ku] = yt; did = true; } }
         if (it.shortUrl) { var ks = 's:' + it.shortUrl; if (!m[ks]) { m[ks] = yt; did = true; } }
+        // ★背骨IDで現アイテムへ直結：アイテム自身の ytUrl に書き戻す（ymap[k] || it.ytUrl の第2経路）。
+        //   これで今後キーがずれても表示が消えない。既にYT URLが引ける行には書かない（手動編集を尊重）。
+        var loc = it.videoId ? byVid[it.videoId] : null;
+        if (loc) {
+          var curKey = itemKey(loc);
+          var curHas = !!ytIdOf(m[curKey] || loc.ytUrl || '');
+          if (!curHas) {
+            loc.ytUrl = yt; if (loc.manual) manDirty = true; else histDirty = true; did = true;
+            // 迷子キーから回収できた場合は掃除（現行キーと同一なら生きているので消さない）
+            if (strayKey && strayKey !== curKey && m[strayKey]) delete m[strayKey];
+          }
+        }
         if (did) restored++;
       });
+      if (histDirty) saveArr(histKey(), hist);
+      if (manDirty) saveArr(manualKey(), man);
       if (restored) { saveYtMap(m); if (typeof render === 'function') render(); }
       if (onDone) onDone(restored);
     });
@@ -1389,7 +1417,7 @@
       var map = loadYtMapFor_(a), withYt = 0, vids = {}, keys = {};
       items.forEach(function (it) { var k = itemKey(it); keys[k] = 1; var v = ytIdOf(map[k] || it.ytUrl || ''); if (v) { withYt++; vids[v] = 1; } });
       var orphan = Object.keys(map).filter(function (k) { return !keys[k]; }).length;
-      lines.push(acctName_(a) + '：履歴' + items.length + '件／YT URL付き' + withYt + '件／動画ID' + Object.keys(vids).length + '種／マップ孤児' + orphan + '件');
+      lines.push(acctName_(a) + '：履歴' + items.length + '件／YT URL付き' + withYt + '件／動画ID' + Object.keys(vids).length + '種／迷子のYT URL ' + orphan + '件');
     });
     lines.push('APIキー：' + (apiKey() ? '設定済' : '未設定') + '／記録GAS：' + (gasUrl_() ? '設定済' : '未設定'));
     return lines.join('<br>');
@@ -1496,9 +1524,9 @@
     restoreYtFromSheet_(function (restored) {
       // refresh完了後に診断を表示（announce=trueだとrefreshの「✅更新しました」が診断を上書きしてしまう）。
       refresh().then(function () {
-        setStatus('🔧 YT情報 診断・修復<br>取り残しマップ再接続：<b>' + moved + '</b>件／シートからYT URL復元：<b>' + restored + '</b>件<br>'
+        setStatus('🔧 YT情報 診断・修復<br>取り残しマップ再接続：<b>' + moved + '</b>件／YT URLの復元・つなぎ直し：<b>' + restored + '</b>件<br>'
           + diagnoseYt_()
-          + '<br><span style="color:var(--sub);font-size:.9em;">※「YT URL付き」が0や極端に少ない＝端末にもシートにもYouTube URLが無い状態です。各行にYouTube URLを入れ直すと再生数・題名が戻ります。「マップ孤児」が多い＝短縮URL再生成等でキーがずれた分（別途対応）。</span>', true);
+          + '<br><span style="color:var(--sub);font-size:.9em;">※<b>迷子のYT URL</b>＝過去に保存したYouTube URLのうち、投稿の目印（短縮URLなど）が変わって行から外れてしまったもの。このボタンが記録シートの背骨IDを使って自動でつなぎ直します。それでも「YT URL付き」が増えない行は、シートにもURLが無い状態なので、各行の🛠️編集からYouTube URLを入れると確実に戻ります。</span>', true);
       });
     });
   });
