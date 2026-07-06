@@ -263,6 +263,40 @@
     if (w > maxw && w > 0) px = Math.max(minPx || 14, Math.floor(basePx * (maxw / w) * 0.98));
     return { px, text };
   }
+  // 3段目コメントの「2行モード」：最大2行に収まる最大フォントを求める（超過分はフォント縮小）。
+  function fitTwoLines(text, basePx, maxw, minPx) {
+    text = String(text).replace(/\n/g, " ").trim();
+    var px = basePx, lines = wrap(text, px, maxw);
+    while (lines.length > 2 && px > (minPx || 14)) { px = Math.floor(px * 0.96); lines = wrap(text, px, maxw); }
+    if (lines.length > 2) lines = [lines[0], lines.slice(1).join("")]; // 念のため2行に丸める（最小フォント到達時）
+    return { px: px, lines: lines.length ? lines : [""] };
+  }
+  // 2行モードの大タイトル：帯は「両行をひとまとめに囲う1枚」。影の位置分離はせず、帯と文字は同じ
+  //   blockOff（＝文字オフセット）で一緒に動く＝拡大/移動しても影が同量ずれる。文字は帯の中央に来る。
+  function drawTitleBlockUnified(lines, y, px, pad, gap, shadowScale, blockOff) {
+    setFont(px, 700);
+    ctx.textBaseline = "top";
+    const sw = Math.max(U(2), px / 12);
+    const th = px * 1.04, mB = sw;
+    const offY = H * (blockOff || 0);       // 帯・文字を一緒に動かす（分離しない）
+    let maxTw = 0;
+    for (let i = 0; i < lines.length; i++) { const tw = ctx.measureText(lines[i]).width; if (tw > maxTw) maxTw = tw; }
+    const blockH = lines.length * th + (lines.length - 1) * gap;
+    const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : 195;
+    ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
+    // 文字全体を中央で囲う1枚の帯（サイズを文字に合わせる＝文字が中央に来る）
+    roundRect((W - maxTw) / 2 - pad - mB, y - pad * 0.45 - mB + offY, maxTw + (pad + mB) * 2, blockH + pad * 0.9 + mB * 2, pad + mB * 0.5);
+    ctx.fill();
+    let ly = y + offY;
+    for (let j = 0; j < lines.length; j++) {
+      const tw = ctx.measureText(lines[j]).width, x = (W - tw) / 2;
+      paintGlyph(lines[j], x, ly, px, sw, shadowScale);
+      ly += th + gap;
+    }
+    return y + blockH + pad;
+  }
+  // 3段目コメントを「2行モード」で描くか（④コメント横のチェックボックス）。
+  function isTwoLineMode() { var c = document.getElementById("topTwoLine"); return !!(c && c.checked); }
 
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
@@ -280,9 +314,16 @@
       // まず幅に収まる基準サイズを求め、その上に「大タイトル拡大」を掛ける＝拡大が幅上限で打ち消されない。
       // 影も同じ倍率(ss)で拡大（drawBlock→paintGlyphへ伝播）。
       var tScale = OFF.titleScale || 1;
-      var f = fitOneLine(top, fT, maxw, U(14));
-      var tpx = Math.max(1, Math.round(f.px * tScale));
-      y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.bandTitle, OFF.textTitle, tScale) + U(4);
+      if (isTwoLineMode()) {
+        // 2行モード：最大2行・中央揃え。帯は両行を1枚で囲い、帯と文字は同じオフセット(textTitle)で一緒に動く。
+        var f2 = fitTwoLines(top, fT, maxw, U(14));
+        var tpx2 = Math.max(1, Math.round(f2.px * tScale));
+        y = drawTitleBlockUnified(f2.lines, y, tpx2, U(16) + padExtra, U(6), tScale, OFF.textTitle) + U(4);
+      } else {
+        var f = fitOneLine(top, fT, maxw, U(14));
+        var tpx = Math.max(1, Math.round(f.px * tScale));
+        y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.bandTitle, OFF.textTitle, tScale) + U(4);
+      }
     }
   }
 
@@ -336,6 +377,15 @@
   for (const el of [els.author, els.detail, els.top]) {
     el.addEventListener("change", preview);
     el.addEventListener("blur", preview);
+  }
+  // ④コメントの「2行モード」チェックボックス：保存値を復元し、切替でプレビュー再描画。
+  const twoLineEl = document.getElementById("topTwoLine");
+  if (twoLineEl) {
+    try { twoLineEl.checked = localStorage.getItem("movie_two_line") === "1"; } catch (e) {}
+    twoLineEl.addEventListener("change", () => {
+      try { localStorage.setItem("movie_two_line", twoLineEl.checked ? "1" : "0"); } catch (e) {}
+      preview();
+    });
   }
 
   function setStatus(m) { els.status.textContent = m; }
