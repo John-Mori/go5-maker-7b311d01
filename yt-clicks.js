@@ -32,7 +32,10 @@
     { key: 'soshu', label: '総集編' }
   ];
   var COMMON_TAGS = ['#マンガ紹介', '#漫画', '#アニメ', '#anime'];
+  // 題名表示から定型投稿タグを除去。トークン単位の正版(Go5Util.stripPostTags)へ委譲＝
+  //   '#anime' が '#animeedit' を割って 'edit' が残る旧バグを解消。COMMON_TAGS は下の #タグ忘れ判定でのみ使用。
   function stripCommonTags(t) {
+    if (typeof Go5Util !== 'undefined' && Go5Util.stripPostTags) return Go5Util.stripPostTags(t);
     var r = String(t || '');
     COMMON_TAGS.forEach(function (tag) { r = r.split(tag).join(''); });
     return r.replace(/\s+/g, ' ').trim();

@@ -46,6 +46,20 @@
   // 数値のロケール整形（失敗時は素の文字列）。
   function num(n) { try { return Number(n).toLocaleString(); } catch (e) { return String(n); } }
 
+  // 投稿タグ（YouTube題名の末尾に付ける定型ハッシュタグ）。動画に焼く題名テキスト・保存ファイル名・
+  // 投稿履歴カードの題名表示では非表示にする（YouTube題名にはそのまま残す＝タグ本来の目的）。
+  var POST_TAGS = ['#マンガ紹介', '#漫画', '#アニメ', '#anime', '#animeedit', '#shorts'];
+  // 定型タグを題名から除去。★トークン単位で消す＝'#anime' が '#animeedit' の一部を誤って割って
+  //   'edit' が残る旧バグ（substring置換）を根絶。ハッシュタグ境界(前=行頭/空白, 後=空白/行末/別の#)で判定。
+  function stripPostTags(t) {
+    var r = String(t == null ? '' : t);
+    POST_TAGS.slice().sort(function (a, b) { return b.length - a.length; }).forEach(function (tag) {
+      var e = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      r = r.replace(new RegExp('(^|\\s)' + e + '(?=\\s|$|#)', 'g'), '$1');
+    });
+    return r.replace(/\s+/g, ' ').trim();
+  }
+
   // localStorage（JSON）読み書き。def は「JSON文字列」を渡す既存 candidates.js 仕様を踏襲。
   function lsGet(k, def) {
     try { return JSON.parse((hasLS ? localStorage.getItem(k) : null) || def); }
@@ -104,7 +118,7 @@
     return fallback();
   }
 
-  var API = { $: $, esc: esc, fmtTs: fmtTs, fmtWhen: fmtWhen, yen: yen, num: num, lsGet: lsGet, lsSet: lsSet, jsonp: jsonp, copyText: copyText };
+  var API = { $: $, esc: esc, fmtTs: fmtTs, fmtWhen: fmtWhen, yen: yen, num: num, lsGet: lsGet, lsSet: lsSet, jsonp: jsonp, copyText: copyText, POST_TAGS: POST_TAGS, stripPostTags: stripPostTags };
 
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Util = API;

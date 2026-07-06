@@ -309,7 +309,7 @@
       }
     }
     // テキスト
-    drawText(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, els.top.value.trim());
+    drawText(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, titleForBurn(els.top.value));
   }
 
   // ---- プレビュー（完全表示状態の1枚） ----
@@ -342,6 +342,11 @@
   function sanitize(t) {
     t = (t || "").trim().replace(/[\\/:*?"<>|\r\n\t]/g, "").replace(/^\.+|\.+$/g, "");
     return (t.slice(0, 60) || "video");
+  }
+  // 動画に焼く題名テキスト・保存ファイル名では定型投稿タグ(#マンガ紹介 等)を非表示にする（YouTube題名には残す）。
+  function titleForBurn(s) {
+    var t = String(s == null ? "" : s).trim();
+    return (typeof Go5Util !== "undefined" && Go5Util.stripPostTags) ? Go5Util.stripPostTags(t) : t;
   }
   function pickMime() {
     const c = ["video/mp4;codecs=avc1.42E01E", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
@@ -385,7 +390,7 @@
       const type = mime || "video/webm";
       lastBlob = new Blob(chunks, { type });
       const ext = type.includes("mp4") ? "mp4" : "webm";
-      lastName = sanitize(els.top.value) + "." + ext;
+      lastName = sanitize(titleForBurn(els.top.value)) + "." + ext;
 
       const url = URL.createObjectURL(lastBlob);
       els.result.src = url;

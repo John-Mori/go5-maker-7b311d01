@@ -88,9 +88,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;}/* wrap＝footを全幅の独立行に落とす */
 .vrow-body{flex:1;min-width:0;} /* 本文列（フレックス）。画像列と重ならない＝オーバーラップ事故なし */
 .vrow-body .vmetrics{flex-wrap:wrap;} /* 本文が狭くなるので指標・リンク行は折り返す（nowrapでの見切れ防止） */
-.vrow-thumbcol{flex:0 0 auto;width:66px;display:flex;flex-direction:column;gap:6px;} /* 右の画像列：作品サムネの下に動画で使った画像 */
-.vrow-thumb{width:66px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;display:block;}
-.vrow-refimg{width:66px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;background:#0b1019;display:block;}
+.vrow-thumbcol{flex:0 1 auto;width:clamp(46px,15vw,66px);display:flex;flex-direction:column;gap:6px;} /* 右の画像列：文字優先で可変（狭い端末では縮小）。作品サムネの下に動画で使った画像 */
+.vrow-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;display:block;}
+.vrow-refimg{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;background:#0b1019;display:block;}
 .vrow-refimg:active{opacity:.7;}
 /* 被リビルドの非表示トグル：行の枠外（リスト最上部の独立バー・右寄せ）に置く＝先頭カードに重ならない。 */
 .vhide-remade-bar{display:flex;justify-content:flex-end;margin:0 0 6px;}
@@ -100,7 +100,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:baseline;flex-wrap:nowrap;gap:6px;min-width:0;}
 .vrow-author{margin-left:2ch;font-size:.78rem;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;}
 .vrow-author:not(:empty)::before{content:"🏷 ";}
-.vrow-title{font-size:14px;color:var(--ink);padding:2px 84px 0 0;word-break:break-word;}
+.vrow-title{font-size:14px;color:var(--ink);padding:2px 6px 0 0;word-break:break-word;}/* 右予約84px→6px＝画像列の手前(ギリギリ)まで文字を使い、無駄な早期改行をしない。画像とは別列なので重ならない */
 .vrow-h .vrole{color:var(--accent);font-weight:700;}
 .vrow-h .vdate-pending{color:var(--sub);font-weight:400;}
 .vrow-h .vdate-unknown{color:var(--sub);font-weight:400;font-size:12px;}
@@ -227,7 +227,7 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .vrow-tags .vtag-shinsaku{color:#2fa96e;border-color:#2fa96e;}
 .vrow-tags .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;}
 .fanza-name-row{font-size:.78rem;color:#cbd5e1;padding:1px 78px 2px 2px;}
-.fanza-price-row{font-size:.74rem;color:var(--ink);padding:0 0 2px 2px;margin-top:4px;font-variant-numeric:tabular-nums;}
+.fanza-price-row{font-size:.74rem;color:var(--ink);padding:0 0 2px 2px;margin-top:4px;font-variant-numeric:tabular-nums;white-space:nowrap;}/* 価格行は改行しない＝◯%offが単独で次行に落ちない */
 .fp-state{font-size:.68rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 6px;margin-right:6px;white-space:nowrap;}
 .fp-state-new{color:#2fa96e;border-color:#2fa96e;}
 .fp-state-semi{color:#5bb8ae;border-color:#5bb8ae;}
@@ -238,7 +238,7 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fp-kind-doujin{color:#b56db0;border-color:#b56db0;}
 .fp-kind-ai{color:#4d9fff;border-color:#4d9fff;}
 .fanza-price-row .fp-cur{color:var(--ink);font-weight:700;}
-.fanza-snap-row{font-size:.74rem;color:var(--sub);padding:0 0 1px 2px;font-variant-numeric:tabular-nums;}
+.fanza-snap-row{font-size:.74rem;color:var(--sub);padding:0 0 1px 2px;font-variant-numeric:tabular-nums;white-space:nowrap;}/* 当時価格行も改行しない */
 .fanza-snap-row .fp-snap-off{border:1px solid currentColor;border-radius:4px;padding:0 5px;font-weight:700;font-size:.66rem;white-space:nowrap;}
 /* 作品詳細モーダル */
 .fz-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;box-sizing:border-box;overflow:auto;}
@@ -283,7 +283,7 @@ html[data-account="acc1"] .acct-cta{background:#2C4C8F;color:#FFD65C;border-colo
 html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-color:#4A2A6B;}
 .fanza-price-row .fp-sale-lbl{color:#ff6b8a;}
 .fanza-price-row .fp-sale{color:#ff6b8a;font-weight:700;}
-.fanza-price-row .fp-off{color:#04222a;background:#ff6b8a;border-radius:4px;padding:0 5px;font-weight:700;font-size:.68rem;}
+.fanza-price-row .fp-off{color:#04222a;background:#ff6b8a;border-radius:4px;padding:0 5px;font-weight:700;font-size:.68rem;white-space:nowrap;}
 .vmetrics .vedit-btn{background:transparent;border:none;color:var(--bsky);font-size:12px;cursor:pointer;padding:0;line-height:1;white-space:nowrap;flex-shrink:0;width:auto;margin-top:0;}
 .vmetrics .vedit-btn:active{opacity:.65;}
 .vrow-foot{flex:0 0 100%;width:100%;display:flex;align-items:center;gap:8px;margin-top:0;}/* カード全幅の独立行＝🗑がカードの一番右まで届く */
