@@ -1550,9 +1550,10 @@
         .then(function (res) {
           setBskyStatus('✅ Bluesky に投稿しました<br>@' + (res.handle || c.handle) + (gasSet ? '  ✏️記録しました' : ''), true);
           notifyPosted(res, edited, alt, _postAcct, _postMeta);
-          // 実際に添付した画像を Drive の同じ動画フォルダへ後追い保存（drive-upload.js が購読）。
+          // Bluesky独自の画像を添付したときだけ、その画像を Drive の同じ動画フォルダへ後追い保存（drive-upload.js が購読）。
+          // 未添付（pcSelectedFile が無い＝動画の元写真をそのまま投稿）なら動画の画像と同一なので重複保存しない。
           try {
-            if (imgFile) document.dispatchEvent(new CustomEvent('bsky-image-posted', { detail: { file: imgFile, title: (ev && ev.detail && ev.detail.title) || '', videoId: (ev && ev.detail && ev.detail.videoId) || '' } }));
+            if (pcSelectedFile) document.dispatchEvent(new CustomEvent('bsky-image-posted', { detail: { file: pcSelectedFile, title: (ev && ev.detail && ev.detail.title) || '', videoId: (ev && ev.detail && ev.detail.videoId) || '' } }));
           } catch (e2) {}
         })
         .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); });
@@ -1604,8 +1605,9 @@
     updateTagWarn(tags);
   }
   if (els.ytTags) els.ytTags.addEventListener('input', buildTitle);
-  if (topEl) topEl.addEventListener('input', buildTitle);
+  if (topEl) { topEl.addEventListener('input', buildTitle); topEl.addEventListener('change', buildTitle); } // change＝候補からの転記(setVal)でも題名を更新
   var tabPostBtn = document.getElementById('tabPost'); if (tabPostBtn) tabPostBtn.addEventListener('click', buildTitle);
+  var tabYtBtn = document.getElementById('tabYT'); if (tabYtBtn) tabYtBtn.addEventListener('click', buildTitle); // 題名表示はYouTubeタブ内＝開くたび最新のコメントで再構築
   if (els.ytTitleCopy) els.ytTitleCopy.addEventListener('click', function () { if (lastTitle) copyText(lastTitle, els.ytTitleCopy); });
   buildTitle();
 

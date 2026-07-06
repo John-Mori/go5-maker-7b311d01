@@ -718,13 +718,19 @@
   //     前景画像は data-URL→File にして window.Go5SetForegroundFile() で #photo に反映。
   function transferToMovie_(it, imgDataUrl, comment, workUrl) {
     var mv = document.getElementById('tabMovie'); if (mv) mv.click(); // affiliate.js の showTab へ委譲
-    function setVal(id, val, evt) {
+    // input と change の両方を発火：キャンバス再描画は change を、YouTube題名(ytTitle)の再構築は input を聴くため、
+    // 片方だけだと題名が前作のまま更新されない（コメント→題名の反映漏れ）。両方投げて確実に上書きする。
+    function setVal(id, val) {
       var el = document.getElementById(id);
-      if (el && val != null) { el.value = val; el.dispatchEvent(new Event(evt || 'change', { bubbles: true })); }
+      if (el && val != null) {
+        el.value = val;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     }
-    setVal('author', it.author || '', 'change');   // 作者＝サークル名
-    setVal('top', comment || '', 'change');         // コメント（無ければ空＝作品名は入れない）
-    if (workUrl) setVal('movieWorkUrl', workUrl, 'input'); // 作品URL（正規化済み）
+    setVal('author', it.author || '');   // 作者＝サークル名
+    setVal('top', comment || '');         // コメント（＝YouTube題名の素。無ければ空で上書き＝前作の題名を残さない）
+    if (workUrl) setVal('movieWorkUrl', workUrl); // 作品URL（正規化済み）
     if (imgDataUrl && window.Go5SetForegroundFile) {
       fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
         window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }));
@@ -1952,11 +1958,17 @@
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像（複数可）
     var refImgSrc = refImgs[0] || '';
     var refCmt = (refImgOf(it.cid) || {}).comment || ''; // 保存済みコメント（サムネ下に黒字で表示）
+    // 動画の「投稿予定プレビュー」：作品サムネの下ではなく、カード下段に横並びで（画像を少し大きく＝縦にスペース、
+    // コメントは画像の右に一行）。画像・コメントが無ければ出さない。
+    var previewHtml = (refImgSrc || refCmt)
+      ? '<div class="cand-preview">' +
+          (refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '') +
+          (refCmt ? '<span class="cand-refimg-comment">' + esc(refCmt) + '</span>' : '') +
+        '</div>'
+      : '';
     return '<div class="cand-card">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
-        (refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '') +
-        (refCmt ? '<span class="cand-refimg-comment">' + esc(refCmt) + '</span>' : '') +
       '</div>' +
       '<div class="cand-info">' +
         // 新作/同人バッジと同じ行にチャンネル表記を並べる（バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記）
@@ -1975,7 +1987,7 @@
         '</div>' +
         // 右下の独立行：非表示／削除（🗑️のみ・作品/投稿編集とは別行）
         '<div class="cand-manage-row"><span class="cand-manage-spacer"></span>' + actionHtml + '</div>' +
-      '</div></div>';
+      '</div>' + previewHtml + '</div>';
   }
 
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。

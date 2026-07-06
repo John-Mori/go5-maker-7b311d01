@@ -115,8 +115,8 @@
       });
   }
 
-  // Bluesky投稿成功時：実際に添付した画像を同じ動画フォルダへ「動画名_Bsky投稿.拡張子」で保存（bluesky.jsが発火）。
-  // ※元写真と同一でも必ず保存する（ユーザー要望：投稿した画像そのものを _Bsky投稿 名で残す）。
+  // Bluesky投稿成功時：Bluesky独自に添付した画像を同じ動画フォルダへ「動画名_Bsky投稿.拡張子」で保存（bluesky.jsが発火）。
+  // ※独自画像を添付しなかった場合は動画の画像と同一なので発火しない＝重複保存しない（ユーザー要望2026-07）。
   document.addEventListener("bsky-image-posted", function (e) {
     if (!configured()) return;
     var d = (e && e.detail) || {};
