@@ -540,6 +540,10 @@
       var rImgCid = it.workUrl ? workCidOf_(it.workUrl) : '';
       var rImgArr = (rImgCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(rImgCid) || []) : [];
       var refThumb = rImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || '';
+      // 🛠️編集で後付け添付した投稿画像（履歴アイテム単位）。1枚目をカードに表示し、タップで全枚数をズーム。
+      var pKey = it.videoId || k;
+      var postImgArr = (window.Go5Cand && window.Go5Cand.postImgs) ? (window.Go5Cand.postImgs(pKey) || []) : [];
+      var postThumb = postImgArr[0] || '';
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
@@ -588,9 +592,10 @@
           '</span>' +
         '</div>' +
         '</div>' + // .vrow-body
-        ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
+        ((it.workUrl || refThumb || postThumb) ? '<div class="vrow-thumbcol">' +
           (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
           (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" src="' + esc(refThumb) + '" alt="動画で使った画像（タップで拡大）" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
+          (postThumb ? '<img class="vrow-postimg" data-postkey="' + esc(pKey) + '" src="' + esc(postThumb) + '" alt="投稿画像（タップで拡大）" title="🛠️編集で添付した投稿画像。タップで拡大・左右で全枚数" loading="lazy">' : '') +
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右（画像の真下）まで届く
         '<div class="vrow-foot">' +
@@ -669,6 +674,16 @@
       });
     });
 
+    // 🛠️編集で添付した投稿画像 → 拡大ズーム（左右で全枚数・下に「現在 / 総ページ数」）。
+    list.querySelectorAll('.vrow-postimg').forEach(function (im) {
+      im.addEventListener('click', function () {
+        var key = im.getAttribute('data-postkey');
+        var imgs = (key && window.Go5Cand && window.Go5Cand.postImgs) ? (window.Go5Cand.postImgs(key) || []).slice() : [];
+        if (!imgs.length && im.getAttribute('src')) imgs = [im.getAttribute('src')];
+        if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0);
+      });
+    });
+
     // 編集モーダル
     list.querySelectorAll('.vedit-btn').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -688,6 +703,7 @@
         });
         addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
         addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
+        addPostImagesToModal_(k, it); // 「投稿画像を添付（複数可）」を差し込む
       });
     });
   }
@@ -1111,6 +1127,58 @@
       closeModal_();
       moveItemAccount_(k, it, to);
     });
+  }
+
+  // 編集モーダルへ「投稿画像を添付（複数可）」セクションを差し込む。1枚目が投稿履歴カードに表示され、
+  //   タップで作品画像と同様に拡大（左右で全枚数・下に「現在 / 総ページ数」）。保存はwrite-through（追加/削除で即反映）。
+  function addPostImagesToModal_(k, it) {
+    var ov = document.getElementById('veditOverlay'); if (!ov) return;
+    var modal = ov.querySelector('.vedit-modal'); if (!modal) return;
+    var old = modal.querySelector('.vedit-postimg'); if (old) old.parentNode.removeChild(old);
+    var api = window.Go5Cand || {};
+    if (!api.postImgs || !api.postImgSave) return; // 画像ストア未対応環境では出さない
+    var pKey = it.videoId || k;
+    var imgs = (api.postImgs(pKey) || []).slice(); // 作業コピー
+    var wrap = document.createElement('div'); wrap.className = 'vedit-field vedit-postimg';
+    wrap.innerHTML =
+      '<div class="vedit-postimg-lbl">投稿画像（複数可・1枚目が投稿履歴に表示）</div>' +
+      '<div class="vedit-postimg-grid"></div>' +
+      '<label class="vedit-postimg-add">＋ 画像を追加<input type="file" accept="image/*" multiple hidden></label>';
+    var actions = modal.querySelector('.vedit-actions');
+    if (actions) modal.insertBefore(wrap, actions); else modal.appendChild(wrap);
+    var grid = wrap.querySelector('.vedit-postimg-grid');
+    var fileInp = wrap.querySelector('input[type=file]');
+    function persist() { api.postImgSave(pKey, imgs); try { refresh(); } catch (e) {} } // 即保存＋カード再描画
+    function draw() {
+      grid.innerHTML = '';
+      if (!imgs.length) { grid.innerHTML = '<div class="hint" style="padding:6px 2px;">まだありません。「＋ 画像を追加」から選択してください。</div>'; return; }
+      imgs.forEach(function (src, i) {
+        var cell = document.createElement('div'); cell.className = 'vedit-postimg-cell';
+        cell.innerHTML = '<img src="' + esc(src) + '" alt="投稿画像' + (i + 1) + '" loading="lazy">' +
+          (i === 0 ? '<span class="vedit-postimg-first">1枚目</span>' : '') +
+          '<button type="button" class="vedit-postimg-del" title="この画像を削除">✕</button>';
+        grid.appendChild(cell);
+        cell.querySelector('img').addEventListener('click', function () { if (api.zoomImages) api.zoomImages(imgs, i); });
+        cell.querySelector('.vedit-postimg-del').addEventListener('click', function () { imgs.splice(i, 1); persist(); draw(); });
+      });
+    }
+    fileInp.addEventListener('change', function () {
+      var files = Array.prototype.slice.call(fileInp.files || []);
+      if (!files.length) return;
+      Promise.all(files.map(function (f) {
+        return new Promise(function (res) {
+          var r = new FileReader();
+          r.onload = function () { res(String(r.result || '')); };
+          r.onerror = function () { res(''); };
+          r.readAsDataURL(f);
+        });
+      })).then(function (urls) {
+        urls.filter(Boolean).forEach(function (u) { imgs.push(u); });
+        fileInp.value = ''; // 同じ画像を続けて選べるようにクリア
+        persist(); draw();
+      });
+    });
+    draw();
   }
 
   // YouTube動画を手動で追加（モーダルで YouTube URL + Bluesky URL + 作品URL を一括入力）。

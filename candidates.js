@@ -199,7 +199,7 @@
   //   保存先は IndexedDB（容量は端末の空きに応じて数百MB〜＝iOS Safariの localStorage 約5MB壁を回避）。
   //   読みは同期のままにしたいので、起動時に全画像をメモリ(_imgMem)へハイドレートし以後は同期参照。
   //   書きは _imgMem を即更新＋IDBへ非同期反映（write-through）。IDB非対応時は localStorage フォールバック。
-  var _imgMem = { ref: {}, bsky: {} };
+  var _imgMem = { ref: {}, bsky: {}, post: {} };
   var _idbOk = !!(window.Go5Idb && window.Go5Idb.available());
   function refImgKey(cid) { return 'cand_refimg__' + cid; }   // localStorage互換キー（フォールバック/移行用）
   function bskyImgKey(cid) { return 'cand_bskyimg__' + cid; }
@@ -257,6 +257,30 @@
     } catch (e) { return false; }
   }
 
+  // ── 投稿画像（🛠️編集で後付け添付・履歴アイテム単位＝videoId/itemKey をキーに複数枚保存）──
+  //   作品cid単位の refimg（動画の元画像）とは別系統。1枚目が投稿履歴カードに表示され、タップで全枚数をズーム。
+  function postImgsOf_(key) {
+    if (!key) return [];
+    var r = _idbOk ? _imgMem.post[key] : (function () { try { return JSON.parse(localStorage.getItem('hist_postimg__' + key) || 'null'); } catch (e) { return null; } })();
+    return (r && Array.isArray(r.imgs)) ? r.imgs.filter(Boolean) : [];
+  }
+  function postImgSave_(key, imgs) {
+    if (!key) return false;
+    imgs = (imgs || []).filter(Boolean);
+    var rec = imgs.length ? { imgs: imgs, at: new Date().getTime() } : null;
+    if (_idbOk) {
+      if (rec) _imgMem.post[key] = rec; else delete _imgMem.post[key];
+      (rec ? window.Go5Idb.set(idbKey('post', key), rec) : window.Go5Idb.del(idbKey('post', key))).catch(idbFail_);
+      return true;
+    }
+    try {
+      var lk = 'hist_postimg__' + key;
+      if (!rec) { localStorage.removeItem(lk); return true; }
+      localStorage.setItem(lk, JSON.stringify(rec));
+      return true;
+    } catch (e) { return false; } // 容量超過など
+  }
+
   // 起動時：IDBから全画像をメモリへ + localStorageの旧画像をIDBへ移行して5MB枠を解放。
   function hydrateImages_() {
     if (!_idbOk) return;
@@ -265,6 +289,7 @@
         var v = all[k];
         if (k.indexOf('ref:') === 0) _imgMem.ref[k.slice(4)] = v;
         else if (k.indexOf('bsky:') === 0) _imgMem.bsky[k.slice(5)] = v;
+        else if (k.indexOf('post:') === 0) _imgMem.post[k.slice(5)] = v;
       });
       return migrateLocalImages_();
     }).then(function () {
@@ -426,7 +451,7 @@
   function zoomShow_() {
     var z = ensureZoom_();
     z.querySelector('.fz-zoom-img').src = _zoomList[_zi] || '';
-    z.querySelector('.fz-zoom-count').textContent = _zoomList.length > 1 ? (_zi + 1) + ' / ' + _zoomList.length : '';
+    z.querySelector('.fz-zoom-count').textContent = _zoomList.length ? (_zi + 1) + ' / ' + _zoomList.length : ''; // 画像の下に「現在 / 総ページ数」を白字で常時表示
     z.hidden = false;
   }
   function zoomGo_(d) { if (!_zoomList.length) return; _zi = (_zi + d + _zoomList.length) % _zoomList.length; zoomShow_(); }
@@ -2023,7 +2048,10 @@
     refImgs: refImgsOf_,                                        // cid → 動画生成用の保存画像の配列（無ければ[]）
     bskyImg: function (cid) { var r = bskyImgOf(cid); return (r && r.img) || ''; }, // cid → Bluesky添付画像（無ければ''）
     zoomImages: function (images, idx) { openImgZoom_((images || []).filter(Boolean), idx || 0); }, // 任意の画像配列をズーム(スワイプ)
-    zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0); } // タップで全画像ズーム(スワイプ)
+    zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0); }, // タップで全画像ズーム(スワイプ)
+    postImgs: postImgsOf_,                                      // 履歴キー → 🛠️編集で添付した投稿画像の配列（無ければ[]）
+    postImgHas: function (key) { return postImgsOf_(key).length > 0; },
+    postImgSave: postImgSave_                                   // 履歴キー + 画像配列 を保存（write-through）
   }; } catch (e) {}
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行（5MB枠を解放）
   // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ（登録済みはフラグでスキップ＝通信は初回のみ）
