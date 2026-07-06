@@ -2075,11 +2075,7 @@
     var refMemo = _refRec.memo || '';   // メモ（コメントが無い時にカードへ水色で代替表示）
     // 動画生成用の画像は作品サムネの真下（左の画像列）に少し余白を開けて縦積み。点線の区切りは廃止。
     var refImgHtml = refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '';
-    // コメントは改行せず1行で、カード最下段の全幅行に表示＝作品↗リンク等と重ならない。
-    //   コメントが無ければメモを代わりに水色で表示（cand-refimg-memo）。
-    var refCmtHtml = refCmt
-      ? '<div class="cand-refimg-comment">' + esc(refCmt) + '</div>'
-      : (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '');
+    // メモ（コメントの上・水色）とコメント（🙈/🗑と同じ管理行の左）は下の return 内で直接組み立てる。
     return '<div class="cand-card">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
@@ -2097,15 +2093,17 @@
         // 作品／投稿編集の行（管理ボタンは同じ行に置かない）
         '<div class="cand-actions">' +
           ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
-          (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? '🦋 Bsky↗' : '🐦 X↗') + '</a>'; })(it.twitterUrl) : '') +
+          (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? '🦋 Bsky↗' : 'X↗') + '</a>'; })(it.twitterUrl) : '') +
           // 2つ目のURL（メモ・URL追加モーダルで登録）＝1つ目リンクの横に X2↗ / B2↗（Blueskyは B）で表示。
           (_refRec.twitterUrl2 ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B2↗' : 'X2↗') + '</a>'; })(_refRec.twitterUrl2) : '') +
           '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿編集' + (hasRef ? '✓' : '') + '</button>' +
           '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
         '</div>' +
-        // 右下の独立行：非表示／削除（🗑️のみ・作品/投稿編集とは別行）
-        '<div class="cand-manage-row"><span class="cand-manage-spacer"></span>' + actionHtml + '</div>' +
-      '</div>' + refCmtHtml + '</div>';
+        // メモ＝コメントの上に水色で表示（今の余白に収める）。
+        (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '') +
+        // 管理行：コメント（左）＋ 🙈非表示／🗑削除（右）を同じ列に。
+        '<div class="cand-manage-row"><span class="cand-manage-comment">' + (refCmt ? esc(refCmt) : '') + '</span>' + actionHtml + '</div>' +
+      '</div>' + '</div>';
   }
 
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。

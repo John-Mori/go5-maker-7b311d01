@@ -166,12 +166,13 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-list-price{text-decoration:line-through;color:var(--sub);}
 .cand-sale{color:#c0392b;}
 .cand-off{background:#c0392b;color:#fff8ee;border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;}
-.cand-actions{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;}
+.cand-actions{display:flex;gap:5px;align-items:center;margin-top:6px;flex-wrap:nowrap;min-width:0;} /* 作品↗/X↗/X2↗/投稿編集/🦋 を1列で（改行しない） */
+.cand-actions .vlink{white-space:nowrap;flex:0 0 auto;font-size:12px;}
 .cand-hide-btn{width:auto;margin:0;flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
 .cand-thumb-click{cursor:zoom-in;}
 .cand-thumb-click:active{opacity:.85;}
 /* 投稿画像ボタン（作品リンクの右）。保存済みは強調。 */
-.cand-refimg-btn,.cand-bsky-btn{width:auto;margin:0;flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
+.cand-refimg-btn,.cand-bsky-btn{width:auto;margin:0;flex:0 0 auto;font-size:11px;padding:4px 8px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;}
 .cand-refimg-btn.has-img{border-color:#c0392b;color:#c0392b;font-weight:700;}
 .cand-bsky-btn{padding:4px 9px;}
 .cand-bsky-btn.has-img{border-color:#1185fe;color:#1185fe;font-weight:700;}
@@ -511,6 +512,8 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
 .cand-manage-row{display:flex;align-items:center;gap:6px;margin-top:6px;}
 .cand-manage-spacer{flex:1 1 auto;}
+/* コメントを 🙈非表示／🗑 と同じ行に（左＝コメント・右＝ボタン）。1行・省略しない（短文運用）。 */
+.cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;overflow:visible;}
 /* 削除ボタン：🗑️のみで枠節約 */
 .cand-del-btn{padding-left:8px;padding-right:8px;}
 /* 追加モーダルの画像スロット（縦長×4・左から詰める）。押すとコピー中の画像が入る */
