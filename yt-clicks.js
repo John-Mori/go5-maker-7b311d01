@@ -449,6 +449,7 @@
       var manual = loadManual();
       for (var i = 0; i < manual.length; i++) {
         if (itemKey(manual[i]) !== k) continue;
+        if (ytUrl) manual[i].ytUrl = ytUrl; else delete manual[i].ytUrl; // P2: 本体にも保存＝キーが変わっても迷子にならない
         saveBskyToItem_(manual[i], bskyUrl);
         if (workUrl) manual[i].workUrl = workUrl; else delete manual[i].workUrl;
         applyAttrs_(manual[i], attrs);
@@ -463,6 +464,7 @@
       var hist = loadHist();
       for (var j = 0; j < hist.length; j++) {
         if (itemKey(hist[j]) !== k) continue;
+        if (ytUrl) hist[j].ytUrl = ytUrl; else delete hist[j].ytUrl; // P2: 本体にも保存＝キーが変わっても迷子にならない
         saveBskyToItem_(hist[j], bskyUrl);
         if (workUrl) hist[j].workUrl = workUrl; else delete hist[j].workUrl;
         applyAttrs_(hist[j], attrs);
@@ -599,9 +601,17 @@
     // YouTube URL 直接入力
     list.querySelectorAll('input[data-k]').forEach(function (inp) {
       inp.addEventListener('change', function () {
+        var k = inp.getAttribute('data-k');
         var m = loadYtMap(); var v = inp.value.trim();
-        if (v) m[inp.getAttribute('data-k')] = v; else delete m[inp.getAttribute('data-k')];
-        saveYtMap(m); refresh();
+        if (v) m[k] = v; else delete m[k];
+        saveYtMap(m);
+        // P2: アイテム本体(ytUrl)にも保存。短縮URL再生成等でキーが変わっても迷子にならない恒久形。
+        [[histKey(), loadHist()], [manualKey(), loadManual()]].forEach(function (p) {
+          var dirty = false;
+          p[1].forEach(function (it) { if (itemKey(it) === k) { if (v) it.ytUrl = v; else delete it.ytUrl; dirty = true; } });
+          if (dirty) saveArr(p[0], p[1]);
+        });
+        refresh();
       });
     });
 
@@ -1007,6 +1017,10 @@
       res.items.forEach(function (si) {
         var sheetKeys = keysFor(si, si.youtubeUrl);
         if (!sheetKeys.length) { skipped++; return; } // 識別子が全く無い空行はスキップ
+        // P4: 背骨IDの接頭辞が現アカウントと矛盾する行は取り込まない。
+        //   シート側の誤タブ行（例: 宵桜タブに紛れた acc1-… の行）を復元経由でローカルへ「再感染」させない。
+        var pm = String(si.videoId || '').match(/^(acc[12])-/);
+        if (pm && pm[1] !== to) { skipped++; return; }
         var loc = null; for (var i = 0; i < sheetKeys.length && !loc; i++) loc = idx[sheetKeys[i]] || null;
         if (loc) {
           if (loc.a !== to) { // 誤って別アカウントに入っている→現アカウントへ戻す（ローカルのみ・シートは触らない）
@@ -1323,6 +1337,7 @@
   //   これが消えると履歴からYT URLが消える。ただし sync_history でシートの「YouTube動画URL」列に
   //   常にバックアップされているため、そこから読み戻してローカルへ補完する（手動編集は上書きしない）。
   var _ytRestored = {}, _ytRestoreBusy = false;
+  var _sheetYtCandidates = []; // 直近のシート照会で得たYT URL（P1: 題名照合の候補に加える）
   function restoreYtFromSheet_(onDone) {
     if (_ytRestoreBusy) { if (onDone) onDone(0); return; }
     var gasUrl = gasUrl_();
@@ -1331,6 +1346,7 @@
     jsonp_(gasUrl, { action: 'history', channel: acct(), limit: 300 }, function (res) {
       _ytRestoreBusy = false;
       if (!res || !res.ok || !Array.isArray(res.items)) { if (onDone) onDone(0); return; }
+      _sheetYtCandidates = res.items.map(function (x) { return String((x && x.youtubeUrl) || '').trim(); }).filter(Boolean); // P1候補
       var m = loadYtMap(), restored = 0;
       // 背骨ID(videoId)で現アイテムを引けるように。短縮URL再生成などで postUri/shortUrl 由来の
       // キーがずれても、videoId は不変＝シート行と現アイテムを確実に対応づけられる。
@@ -1409,6 +1425,62 @@
       return moved;
     } catch (e) { return 0; }
   }
+  // ── P1: YouTube実データ（題名・投稿時刻）で迷子のYT URLを行へつなぎ直す ─────────
+  //   識別子(postUri/短縮URL/videoId)が何世代ずれていても成立する最後の照合手段。
+  //   投稿題名とYouTube題名は「コメント+タグ」で同一生成されるため、正規化題名の一致で対応づく。
+  //   同名投稿が複数ある場合は |YouTube公開時刻 − 投稿時刻| が最小(72h以内)のものを採用。
+  //   確定分はアイテム本体の ytUrl へ書き戻す（キー回転の影響を受けない恒久形）。
+  function restoreByYtData_(cb) {
+    if (!apiKey()) { cb({ matched: 0, ambiguous: 0, candidates: 0, reason: 'APIキー未設定' }); return; }
+    var m = loadYtMap();
+    var hist = loadHist(), man = loadManual();
+    var all = hist.concat(man);
+    var keyset = {}; all.forEach(function (it) { keyset[itemKey(it)] = 1; });
+    // 既にYT URLが引けている動画IDは候補・対象の両方から除外
+    var usedVids = {}; all.forEach(function (it) { var v = ytIdOf(m[itemKey(it)] || it.ytUrl || ''); if (v) usedVids[v] = 1; });
+    // 候補URL: 現アカウントの迷子マップ ＋ 直近シート照会のYT URL
+    var vidToUrl = {};
+    function addCand(u) { var v = ytIdOf(u); if (v && !usedVids[v] && !vidToUrl[v]) vidToUrl[v] = u; }
+    Object.keys(m).forEach(function (k) { if (!keyset[k]) addCand(m[k]); });
+    _sheetYtCandidates.forEach(addCand);
+    var vids = Object.keys(vidToUrl);
+    if (!vids.length) { cb({ matched: 0, ambiguous: 0, candidates: 0 }); return; }
+    // YouTube照会（50件ずつ）→ 題名・公開時刻で照合
+    var meta = {}, jobs = [];
+    for (var bi = 0; bi < vids.length; bi += 50) {
+      (function (batch) {
+        jobs.push(fetchVideos(batch).then(function (r) {
+          Object.keys(r).forEach(function (id) { if (id.indexOf('__') !== 0) meta[id] = r[id]; });
+        }));
+      })(vids.slice(bi, bi + 50));
+    }
+    Promise.all(jobs).then(function () {
+      function norm(t) { return stripCommonTags(String(t || '')).replace(/\s+/g, '').trim(); }
+      var matched = 0, ambiguous = 0, histDirty = false, manDirty = false;
+      // 新しい順で処理（同名投稿が複数ある場合、各行が時刻の近い動画から順に取る）
+      all.slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); }).forEach(function (it) {
+        if (ytIdOf(m[itemKey(it)] || it.ytUrl || '')) return; // 解決済み
+        var nt = norm(it.title); if (!nt) return;
+        var hits = vids.filter(function (v) { return !usedVids[v] && meta[v] && meta[v].title && norm(meta[v].title) === nt; });
+        if (!hits.length) return;
+        if (hits.length > 1) {
+          hits.sort(function (a, b) { return Math.abs((meta[a].published || 0) - (it.ts || 0)) - Math.abs((meta[b].published || 0) - (it.ts || 0)); });
+          var d = Math.abs((meta[hits[0]].published || 0) - (it.ts || 0));
+          if (!it.ts || d > 72 * 3600 * 1000) { ambiguous++; return; } // 時刻で確定できない同名は誤接続しない
+          hits = [hits[0]];
+        }
+        var v = hits[0];
+        it.ytUrl = vidToUrl[v] || ('https://www.youtube.com/shorts/' + v);
+        usedVids[v] = 1;
+        if (it.manual) manDirty = true; else histDirty = true;
+        matched++;
+      });
+      if (histDirty) saveArr(histKey(), hist);
+      if (manDirty) saveArr(manualKey(), man);
+      cb({ matched: matched, ambiguous: ambiguous, candidates: vids.length });
+    });
+  }
+
   // 現状を人が読める形にまとめる（iPhoneでも状況が分かる診断表示用）。
   function diagnoseYt_() {
     var lines = [];
@@ -1416,7 +1488,8 @@
       var items = loadArrFor_('short_hist', a).concat(loadArrFor_('verify_manual', a));
       var map = loadYtMapFor_(a), withYt = 0, vids = {}, keys = {};
       items.forEach(function (it) { var k = itemKey(it); keys[k] = 1; var v = ytIdOf(map[k] || it.ytUrl || ''); if (v) { withYt++; vids[v] = 1; } });
-      var orphan = Object.keys(map).filter(function (k) { return !keys[k]; }).length;
+      // 迷子＝マップにあるがitemに紐づかず、かつその動画がどの行にも表示されていないURL（復元済みは数えない）。
+      var orphan = Object.keys(map).filter(function (k) { return !keys[k] && !vids[ytIdOf(map[k] || '')]; }).length;
       lines.push(acctName_(a) + '：履歴' + items.length + '件／YT URL付き' + withYt + '件／動画ID' + Object.keys(vids).length + '種／迷子のYT URL ' + orphan + '件');
     });
     lines.push('APIキー：' + (apiKey() ? '設定済' : '未設定') + '／記録GAS：' + (gasUrl_() ? '設定済' : '未設定'));
@@ -1520,13 +1593,17 @@
   var yrl = $('ytRepairLinks');
   if (yrl) yrl.addEventListener('click', function () {
     var moved = reconnectStrandedYt_();
-    setStatus('🔧 YT情報を診断・修復中…（マップ再接続 ' + moved + '件／シートから復元中…）');
+    setStatus('🔧 YT情報を診断・修復中…（シート照合→YouTube題名照合の順で復元します）');
     restoreYtFromSheet_(function (restored) {
-      // refresh完了後に診断を表示（announce=trueだとrefreshの「✅更新しました」が診断を上書きしてしまう）。
-      refresh().then(function () {
-        setStatus('🔧 YT情報 診断・修復<br>取り残しマップ再接続：<b>' + moved + '</b>件／YT URLの復元・つなぎ直し：<b>' + restored + '</b>件<br>'
-          + diagnoseYt_()
-          + '<br><span style="color:var(--sub);font-size:.9em;">※<b>迷子のYT URL</b>＝過去に保存したYouTube URLのうち、投稿の目印（短縮URLなど）が変わって行から外れてしまったもの。このボタンが記録シートの背骨IDを使って自動でつなぎ直します。それでも「YT URL付き」が増えない行は、シートにもURLが無い状態なので、各行の🛠️編集からYouTube URLを入れると確実に戻ります。</span>', true);
+      // P1: 識別子で繋がらなかった分を、YouTube実データ（題名・投稿時刻）で照合して行へ書き戻す。
+      restoreByYtData_(function (r2) {
+        // refresh完了後に診断を表示（announce=trueだとrefreshの「✅更新しました」が診断を上書きしてしまう）。
+        refresh().then(function () {
+          setStatus('🔧 YT情報 診断・修復<br>取り残しマップ再接続：<b>' + moved + '</b>件／シート照合で復元：<b>' + restored + '</b>件／YouTube題名照合で復元：<b>' + r2.matched + '</b>件'
+            + (r2.ambiguous ? '（同名で確定できず ' + r2.ambiguous + '件）' : '') + (r2.reason ? '（' + r2.reason + '）' : '') + '<br>'
+            + diagnoseYt_()
+            + '<br><span style="color:var(--sub);font-size:.9em;">※<b>迷子のYT URL</b>＝過去に保存したYouTube URLのうち、投稿の目印（短縮URLなど）が変わって行から外れてしまったもの。シートの背骨ID照合→YouTubeの題名・投稿時刻照合の順で自動でつなぎ直します。それでも残った行は、各行の🛠️編集からYouTube URLを入れると確実に戻ります（今後は行本体に保存されるので迷子になりません）。</span>', true);
+        });
       });
     });
   });
