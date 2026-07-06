@@ -38,6 +38,8 @@
     });
     // 現在タブをCSSへ通知（ランキングタブだけクリーム背景＋金文字にするフック）。
     document.documentElement.setAttribute('data-tab', activeBtnId);
+    // リロード/再アクセス時に前回のタブを復元するため保存。
+    try { localStorage.setItem('go5_active_tab', activeBtnId); } catch (e) {}
     if (activeBtnId === 'tabCal') lazyLoadCalendar();
     if (activeBtnId === 'tabRank'    && window.YtRank)   window.YtRank.renderRank();
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
@@ -47,11 +49,20 @@
     var b = document.getElementById(t.btn);
     if (b) b.addEventListener('click', function () { showTab(t.btn); });
   });
-  // 初期表示中のタブ（HTMLで active になっているもの／既定は動画作成）をCSSへ反映。
-  (function () {
+  // 前回表示していたタブを復元（リロード/再アクセスで動画作成に強制的に戻らないように）。
+  //   全モジュール(YtRank/Go5Cand/Scheduler等)が定義された後に実行したいので DOMContentLoaded を待つ
+  //   （このスクリプトより後に読まれる candidates.js 等の render を確実に呼ぶため）。
+  function restoreActiveTab_() {
+    var saved = '';
+    try { saved = localStorage.getItem('go5_active_tab') || ''; } catch (e) {}
+    var ok = saved && TABS.some(function (t) { return t.btn === saved; }) && document.getElementById(saved);
+    if (ok && saved !== 'tabMovie') { showTab(saved); return; } // 保存タブへ復元（既定=動画作成なら何もしない）
+    // 保存が無い/不正＝HTMLの active（既定=動画作成）をCSSへ反映するだけ。
     var active = TABS.filter(function (t) { var b = document.getElementById(t.btn); return b && b.classList.contains('active'); })[0];
     document.documentElement.setAttribute('data-tab', active ? active.btn : 'tabMovie');
-  }());
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreActiveTab_);
+  else restoreActiveTab_();
 
   /* ── アフィID永続化 ── */
   const afIdEl = document.getElementById('afId');
