@@ -234,9 +234,10 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;box-sizing:border-box;overflow:auto;}
 .fz-overlay[hidden]{display:none;}
 .fz-modal{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:16px;width:100%;max-width:520px;box-sizing:border-box;margin:auto;}
-/* モーダル内のボタンは原則テキスト幅（グローバル button{width:100%} の打ち消し・幅はテキスト長に自動追従）。
-   flex:1 指定のボタン（保存など）は従来どおり flex で伸びる。 */
-.fz-modal button{width:max-content;max-width:100%;white-space:nowrap;}
+/* 【恒久ルール】ボタンの横幅はテキスト長に自動追従（固定値・全幅にしない）。全幅は主要CTA(button.primary等)のみ。
+   モーダル内はグローバル button{width:100%} を打ち消してテキスト幅に。flex:1 指定のボタン（保存/コピー等）は
+   flex-basis が優先されるため従来どおり flex で伸びる。 */
+.fz-modal button,.vedit-modal button{width:max-content;max-width:100%;white-space:nowrap;}
 .fz-close{position:absolute;top:8px;right:10px;background:transparent;border:none;color:var(--sub);font-size:20px;cursor:pointer;line-height:1;width:auto;padding:2px 6px;}
 .fz-title{font-size:15px;font-weight:700;color:var(--ink);margin:2px 30px 10px 0;word-break:break-word;}
 .fz-hero{text-align:center;margin-bottom:10px;}
@@ -489,8 +490,9 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* リビルド結合ピッカー */
 .rbm-sec-label{color:#c8cdd4;font-size:12px;font-weight:700;margin:10px 0 4px;}
 .rbm-list{display:flex;flex-direction:column;gap:5px;max-height:34vh;overflow:auto;}
-.rbm-item{display:block;width:100%;text-align:left;background:#16203a;color:#e8edf5;border:1px solid #2f3a52;border-radius:8px;padding:9px 11px;font-size:13px;cursor:pointer;white-space:normal;line-height:1.35;margin:0;}
-.rbm-item:active{background:#1e2b4a;}
+/* リスト行は選択肢＝全幅タップ行（.fz-modal button の max-content/nowrap に勝つよう2クラスで指定）。題名は折り返す。 */
+.rbm-list .rbm-item{display:block;width:100%;max-width:100%;text-align:left;background:#16203a;color:#e8edf5;border:1px solid #2f3a52;border-radius:8px;padding:9px 11px;font-size:13px;cursor:pointer;white-space:normal;line-height:1.35;margin:0;}
+.rbm-list .rbm-item:active{background:#1e2b4a;}
 /* 投稿履歴：「🔁リビルドで作る」ボタン（編集ボタンと同系の小型） */
 .vrebuild-from{font-size:12px;padding:4px 9px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--accent);width:auto;margin:0;cursor:pointer;white-space:nowrap;}
 /* 非表示リストのトグル：押していない状態と押した状態で色・文言が変わる（右端配置） */

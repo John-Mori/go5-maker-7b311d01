@@ -657,7 +657,7 @@
     row.id = 'veditRebuildMergeRow';
     row.style.cssText = 'margin:8px 0 0;';
     var cur = (it.rebuildOf && it.rebuildMerged) ? ('（現在：' + esc(rebuildTargetTitle_(it.rebuildOf) || '結合済み') + '）') : '';
-    row.innerHTML = '<button id="veditRebuildMerge" type="button" class="vedit-gen" style="width:100%;">🔁 リビルド結合' + (cur ? '<span class="vgen-note" style="display:block;">' + cur + '</span>' : '') + '</button>';
+    row.innerHTML = '<button id="veditRebuildMerge" type="button" class="vedit-gen">🔁 リビルド結合' + (cur ? '<span class="vgen-note" style="display:block;">' + cur + '</span>' : '') + '</button>';
     actions.parentNode.insertBefore(row, actions); // 保存を含む actions の直前＝「保存の上」
     row.querySelector('#veditRebuildMerge').addEventListener('click', function () { openRebuildMergePicker_(k, it); });
   }
