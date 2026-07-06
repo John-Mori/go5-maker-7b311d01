@@ -21,7 +21,7 @@ function parseFanzaItem(item) {
   var price = (priceStr != null && priceStr !== '') ? parseInt(priceStr, 10) : null;
 
   var discountPct = 0;
-  if (listPrice && price && listPrice > 0 && price < listPrice) {
+  if (listPrice != null && price != null && listPrice > 0 && price < listPrice) { // price=0(100%OFF)も割引計算する
     discountPct = Math.round((1 - price / listPrice) * 100);
   }
 

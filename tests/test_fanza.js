@@ -139,6 +139,20 @@ test('T-7: price > list_price → discountPct=0', function () {
   assert.strictEqual(r.discountPct, 0);
 });
 
+test('F-8: 100%OFF（price=0）でも割引計算される（0円はfalsyだがセール扱い・実バグ2026-07-06）', function () {
+  var item = {
+    content_id: 'b062aftwk01392',
+    title: '100%OFFテスト',
+    prices: { list_price: '935', price: '0' },
+    iteminfo: {},
+    review: {}
+  };
+  var r = parseFanzaItem(item);
+  assert.strictEqual(r.listPrice, 935);
+  assert.strictEqual(r.price, 0);
+  assert.strictEqual(r.discountPct, 100);
+});
+
 // ────────────────────────────────────────────────────────────
 // 結果集計
 // ────────────────────────────────────────────────────────────

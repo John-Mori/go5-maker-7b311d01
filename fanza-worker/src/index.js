@@ -289,7 +289,7 @@ function mapMakerItem(it) {
   const prices = it.prices || {};
   const lp = prices.list_price != null && prices.list_price !== "" ? parseInt(prices.list_price, 10) : null;
   const pr = prices.price != null && prices.price !== "" ? parseInt(prices.price, 10) : null;
-  const disc = (lp && pr && lp > 0 && pr < lp) ? Math.round((1 - pr / lp) * 100) : 0;
+  const disc = (lp != null && pr != null && lp > 0 && pr < lp) ? Math.round((1 - pr / lp) * 100) : 0; // pr=0(100%OFF)も割引計算する
   const img = it.imageURL || {};
   const rv = it.review || {};
   const info = it.iteminfo || {};
