@@ -219,13 +219,13 @@
   function refImgHas(cid) {
     var r = refImgOf(cid); if (!r) return false; // 1回の読みで判定（フォールバック時の多重JSON.parse回避）
     var has = Array.isArray(r.imgs) ? r.imgs.some(Boolean) : !!r.img;
-    return !!(has || r.comment || r.twitterUrl);
+    return !!(has || r.comment || r.memo || r.twitterUrl);
   }
   function refImgSave(cid, data) {
     // data.imgs（配列・新）または data.img（単発・旧）を受け付け、{imgs, img:先頭} で保存（img は旧読み手互換用）。
     var imgs = data ? (Array.isArray(data.imgs) ? data.imgs.filter(Boolean) : (data.img ? [data.img] : [])) : [];
-    var empty = !data || (!imgs.length && !data.comment && !data.twitterUrl);
-    var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', twitterUrl: data.twitterUrl || '', at: new Date().getTime() };
+    var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl);
+    var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', at: new Date().getTime() };
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
       (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
@@ -639,7 +639,7 @@
     var workUrlPrefill = (!it.isTwitter && it.url) ? it.url : '';
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
-      '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">' + esc(it.title || it.cid) + '</div>' +
+      '<div class="fz-title refimg-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 6px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + esc(it.title || it.cid) + '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
         '<span class="hint" style="margin:0;flex:1;">動画生成用の画像</span>' +
         '<button id="refImgToMovie" type="button" class="primary" style="width:auto;margin:0;flex:0 0 auto;font-size:13px;padding:8px 14px;">動画生成へ</button>' +
@@ -662,8 +662,9 @@
         '<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
-      '<div style="display:flex;gap:8px;margin-top:10px;">' +
-        '<button id="refImgSave" type="button" class="primary" style="flex:1;">保存</button>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;align-items:stretch;">' +
+        '<button id="refImgSave" type="button" class="primary" style="flex:2;">保存</button>' +
+        '<button id="refMemoAdd" type="button" class="cand-memo-addbtn" style="flex:1;" title="メモとX/Bluesky URLを追加"><span class="cma-stack"><span>メモ</span><span>URL</span></span><span class="cma-add">追加</span></button>' +
         '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
       '</div><div id="refImgMsg" class="hint" style="min-height:1.2em;"></div>';
     var previewEl = body.querySelector('#refImgPreview');
@@ -751,6 +752,12 @@
       ov.hidden = true;
     });
     body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
+    // メモ・URL追加：親の入力を pending に取り込んでから小モーダルを開く（親の未保存入力を失わない）。
+    body.querySelector('#refMemoAdd').addEventListener('click', function () {
+      pending.comment = body.querySelector('#refImgComment').value || '';
+      pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
+      openMemoUrlModal_(it.cid, pending, body, onSaved);
+    });
     body.querySelector('#refImgSave').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
@@ -773,6 +780,50 @@
       setTimeout(function () { ov.hidden = true; }, 600);
     });
     wirePaste_(body);
+    ov.hidden = false;
+  }
+
+  // ── メモ＋X/Bluesky URL 追加モーダル（投稿編集モーダルから開く小モーダル・縦は内容に応じて短め）──
+  //   メモはコメントが無い時にカードへ水色で表示。URLは親モーダルの X/Bluesky 欄と同じ twitterUrl を編集。
+  var _memoOverlay = null;
+  function openMemoUrlModal_(cid, pending, mainBody, onSaved) {
+    var ov = _memoOverlay;
+    if (!ov) {
+      ov = document.createElement('div'); ov.className = 'fz-overlay memo-overlay'; ov.hidden = true;
+      ov.innerHTML = '<div class="fz-modal memo-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
+      ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
+      _memoOverlay = ov;
+    }
+    var body = ov.querySelector('.fz-body');
+    body.innerHTML =
+      '<div class="fz-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 10px;font-weight:700;">メモ・URLを追加</div>' +
+      '<label class="hint" style="display:block;margin-bottom:2px;">メモ</label>' +
+      '<input id="memoText" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ（コメントが無い時にカードへ水色で表示）">' +
+      '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL</label>' +
+      '<div style="display:flex;gap:6px;align-items:stretch;">' +
+        '<input id="memoUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… または https://bsky.app/…" style="flex:1;min-width:0;">' +
+        '<button type="button" class="ghost paste-btn" data-paste="memoUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        '<button id="memoSave" type="button" class="primary" style="flex:1;">保存</button>' +
+        '<button id="memoClose" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
+      '</div><div id="memoMsg" class="hint" style="min-height:1.2em;"></div>';
+    body.querySelector('#memoText').value = pending.memo || '';
+    body.querySelector('#memoUrl').value = pending.twitterUrl || '';
+    wirePaste_(body);
+    body.querySelector('#memoClose').addEventListener('click', function () { ov.hidden = true; });
+    body.querySelector('#memoSave').addEventListener('click', function () {
+      pending.memo = body.querySelector('#memoText').value || '';
+      pending.twitterUrl = (body.querySelector('#memoUrl').value || '').trim();
+      if (mainBody) { var t = mainBody.querySelector('#refImgTwitter'); if (t) t.value = pending.twitterUrl; } // 親のX/Bluesky欄へ反映
+      if (!refImgSave(cid, pending)) { body.querySelector('#memoMsg').textContent = '保存できません（保存枠不足）'; return; }
+      body.querySelector('#memoMsg').textContent = '保存しました';
+      if (onSaved) onSaved();
+      try { if (_activeTab) render(); } catch (e) {}
+      setTimeout(function () { ov.hidden = true; }, 600);
+    });
     ov.hidden = false;
   }
   // 動画作成タブへ切替え、候補の作品データ（前景画像/作者/コメント/作品URL）を各入力欄へ埋め込む。
@@ -2019,11 +2070,16 @@
     var hasBsky = bskyImgHas(it.cid);
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像（複数可）
     var refImgSrc = refImgs[0] || '';
-    var refCmt = (refImgOf(it.cid) || {}).comment || ''; // 保存済みコメント（動画生成用画像の真下に全文表示）
+    var _refRec = refImgOf(it.cid) || {};
+    var refCmt = _refRec.comment || ''; // 保存済みコメント（動画生成用画像の真下に全文表示）
+    var refMemo = _refRec.memo || '';   // メモ（コメントが無い時にカードへ水色で代替表示）
     // 動画生成用の画像は作品サムネの真下（左の画像列）に少し余白を開けて縦積み。点線の区切りは廃止。
     var refImgHtml = refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '';
     // コメントは改行せず1行で、カード最下段の全幅行に表示＝作品↗リンク等と重ならない。
-    var refCmtHtml = refCmt ? '<div class="cand-refimg-comment">' + esc(refCmt) + '</div>' : '';
+    //   コメントが無ければメモを代わりに水色で表示（cand-refimg-memo）。
+    var refCmtHtml = refCmt
+      ? '<div class="cand-refimg-comment">' + esc(refCmt) + '</div>'
+      : (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '');
     return '<div class="cand-card">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +

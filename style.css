@@ -546,6 +546,15 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-refimg-thumb.multi{border:1.5px solid #e6c14e !important;} /* 複数枚＝枠線を1.5倍(1px→1.5px)で明示 */
 /* 保存済みコメント（プレビュー画像の右に一行・黒字。長い場合は…で省略） */
 .cand-refimg-comment{flex-basis:100%;width:100%;margin-top:6px;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;overflow:visible;} /* カード最下段の全幅行・1行（改行しない）・絶対に省略しない（末尾…を出さず全文表示） */
+.cand-refimg-comment.cand-refimg-memo{color:#1c9bd6;} /* コメントが無い時に代替表示するメモ＝水色 */
+/* 投稿編集モーダルの「メモ・URL 追加」ボタン（水色・黒字。メモ/URLを縦積み、追加を中央に） */
+.cand-memo-addbtn{display:flex;align-items:center;justify-content:center;gap:5px;background:#5ec6e8;color:#000;border:none;border-radius:8px;padding:4px 8px;font-weight:700;cursor:pointer;line-height:1.1;}
+.cand-memo-addbtn:active{opacity:.8;}
+.cand-memo-addbtn .cma-stack{display:flex;flex-direction:column;font-size:10px;line-height:1.15;}
+.cand-memo-addbtn .cma-add{font-size:13px;font-weight:700;}
+/* メモ・URL追加の小モーダル（投稿編集モーダルの上に重ねる・内容に応じて短め） */
+.memo-overlay{z-index:10001;}
+.memo-modal{max-width:440px;}
 #pcText{width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
   background:#0e1422;color:var(--ink);line-height:1.6;white-space:pre-wrap;font-family:inherit;resize:vertical;}
 #pcText:focus{border-color:var(--accent);outline:none;}
