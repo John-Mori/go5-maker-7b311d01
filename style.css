@@ -531,10 +531,10 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .pd-imgs .hint{color:#9fb0c3;}
 .pd-img{max-width:46%;max-height:38vh;border-radius:8px;border:1px solid rgba(255,255,255,.18);cursor:zoom-in;}
 /* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
-.cand-manage-row{flex-basis:100%;width:100%;display:flex;align-items:flex-start;gap:6px;margin-top:4px;} /* カード全幅の行＝コメントが画像の下(左端)から広く使えて1行に収まる */
+.cand-manage-row{flex-basis:100%;width:100%;display:flex;align-items:center;gap:6px;margin-top:2px;} /* カード全幅の行＝コメントが画像の下(左端)から広く使えて1行に収まる。余白は詰める */
 .cand-manage-spacer{flex:1 1 auto;}
 /* コメントを 非表示／🗑 と同じ行に（左＝コメント・右＝ボタン）。左寄せ・省略しない（長ければ折り返して全文表示）。 */
-.cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:normal;word-break:break-word;text-align:left;overflow:visible;padding-top:5px;} /* 左寄せ・省略しない（折り返し可）・ボタンと縦位置を合わせる */
+.cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;text-align:left;overflow:hidden;} /* 必ず1行（折り返さない）・左寄せ。長い時はJSでフォント可変縮小（省略しない） */
 /* 削除ボタン：🗑️のみで枠節約 */
 .cand-del-btn{padding-left:8px;padding-right:8px;}
 /* 追加モーダルの画像スロット（縦長×4・左から詰める）。押すとコピー中の画像が入る */
@@ -570,7 +570,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-refimg-thumb.multi{border:1.5px solid #e6c14e !important;} /* 複数枚＝枠線を1.5倍(1px→1.5px)で明示 */
 /* 保存済みコメント（プレビュー画像の右に一行・黒字。長い場合は…で省略） */
 .cand-refimg-comment{flex-basis:100%;width:100%;margin-top:6px;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:normal;word-break:break-word;text-align:left;overflow:visible;} /* 動画生成用画像の真下・全幅・左寄せ・絶対に省略しない（字の大きさは変えない） */
-.cand-refimg-comment.cand-refimg-memo{color:#1c9bd6;} /* コメントが無い時に代替表示するメモ＝水色 */
+.cand-refimg-comment.cand-refimg-memo{color:#1c9bd6;white-space:nowrap;overflow:hidden;word-break:normal;margin-top:3px;} /* メモ＝水色・必ず1行（折り返さない）・長い時はJSでフォント可変縮小・余白は詰める */
 /* 投稿編集モーダルの「メモ・URL 追加」ボタン（水色・黒字。メモ/URLを縦積み、追加を中央に） */
 .cand-memo-addbtn{display:flex;align-items:center;justify-content:center;gap:5px;background:#5ec6e8;color:#000;border:none;border-radius:8px;padding:4px 8px;font-weight:700;cursor:pointer;line-height:1.1;}
 .cand-memo-addbtn:active{opacity:.8;}

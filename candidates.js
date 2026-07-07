@@ -1065,9 +1065,26 @@
     ov.hidden = false;
   }
 
+  // コメント/メモを必ず1行に収める（可変フォント）。幅に収まらない時だけ実測しながらフォントを縮小＝折り返さない・極力省略しない。
+  function fitOneLineTexts_(root) {
+    var els = (root || document).querySelectorAll('.cand-manage-comment, .cand-refimg-memo');
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      el.style.fontSize = ''; // 既定(13px)へ戻して測る
+      var cw = el.clientWidth; if (!cw) continue;
+      if (el.scrollWidth <= cw + 1) continue; // 既に1行に収まっている
+      var base = parseFloat(getComputedStyle(el).fontSize) || 13;
+      // 幅比で初期見積り→実測で微調整（収まるまで1pxずつ下げる。下限7px）。
+      var px = Math.max(7, Math.floor(base * (cw / el.scrollWidth)));
+      el.style.fontSize = px + 'px';
+      var guard = 0;
+      while (el.scrollWidth > cw + 1 && px > 7 && guard < 12) { px -= 1; el.style.fontSize = px + 'px'; guard++; }
+    }
+  }
   // カード共通の配線：サムネのタップで画像モーダル／🖼投稿画像ボタン。
   function wireCardCommon_(el) {
     wireAcctRow_(el); // カード右上のチャンネル切替＋投稿済み表示
+    fitOneLineTexts_(el); // コメント/メモを1行に収める（可変フォント）
     el.querySelectorAll('[data-thumbcid]').forEach(function (im) {
       im.addEventListener('click', function () { openThumbModal_(itemByCid_(im.getAttribute('data-thumbcid'))); });
     });
