@@ -175,6 +175,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-off{background:#c0392b;color:#fff8ee;border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;}
 .cand-actions{display:flex;gap:5px;align-items:center;margin-top:6px;flex-wrap:nowrap;min-width:0;} /* 作品↗/X↗/X2↗/投稿編集/🦋 を1列で（改行しない） */
 .cand-actions .vlink{white-space:nowrap;flex:0 0 auto;font-size:12px;}
+.cand-actions-mspacer{flex:1 1 auto;min-width:4px;} /* 無コメント時：作品リンク行の右端へ非表示/🗑を寄せる伸縮スペーサ */
+.cand-actions .cand-hide-btn{flex:0 0 auto;}
+.cand-actions.cand-actions-full{flex-basis:100%;width:100%;margin-top:0;} /* 無コメント時：作品リンク群＋非表示/🗑をカード全幅の1行に（画像の下まで使えて収まる） */
 .cand-actions .vlink-work{color:#ff79b0;} /* 作品↗＝投稿履歴の作品リンク(.vmetrics .vlink-work)と同じピンクに同期 */
 .cand-hide-btn{width:auto;margin:0;flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
 .cand-thumb-click{cursor:zoom-in;}

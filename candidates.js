@@ -2187,7 +2187,15 @@
     // 投稿済み作品はカード大枠をチャンネルのイメージカラーで太線囲み。両channel投稿は月詠み(外)＋宵桜(内)の二重。
     var _pAcc1 = !!postedItemForCid_(it.cid, 'acc1'), _pAcc2 = !!postedItemForCid_(it.cid, 'acc2');
     var _postCls = (_pAcc1 && _pAcc2) ? ' cand-posted-both' : (_pAcc1 ? ' cand-posted-acc1' : (_pAcc2 ? ' cand-posted-acc2' : ''));
-    if (!refCmt && !refMemo) _postCls += ' cand-nocomment'; // コメント/メモ無し＝管理行を詰めて下部余白を最小化
+    var _noComment = !refCmt && !refMemo; // コメント/メモ無し＝非表示/🗑を作品リンク行に統合し余白を縮小
+    if (_noComment) _postCls += ' cand-nocomment';
+    // 作品リンク群（作品↗ / X↗ / X2↗ / 投稿編集 / 🦋）。無コメント時は全幅行で非表示/🗑と同列に置くため変数化。
+    var _actionsInner =
+      ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+      (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? '🦋 Bsky↗' : 'X↗') + '</a>'; })(it.twitterUrl) : '') +
+      (_refRec.twitterUrl2 ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B2↗' : 'X2↗') + '</a>'; })(_refRec.twitterUrl2) : '') +
+      '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">投稿編集</button>' +
+      '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>';
     return '<div class="cand-card' + _postCls + '">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
@@ -2202,20 +2210,15 @@
         genresHtml +
         ((it.price != null || it.listPrice != null) ? '<div class="cand-price">' + priceHtml + '</div>' : '') +
         salesHtml +
-        // 作品／投稿編集の行（管理ボタンは同じ行に置かない）
-        '<div class="cand-actions">' +
-          ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
-          (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? '🦋 Bsky↗' : 'X↗') + '</a>'; })(it.twitterUrl) : '') +
-          // 2つ目のURL（メモ・URL追加モーダルで登録）＝1つ目リンクの横に X2↗ / B2↗（Blueskyは B）で表示。
-          (_refRec.twitterUrl2 ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B2↗' : 'X2↗') + '</a>'; })(_refRec.twitterUrl2) : '') +
-          '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿編集' + (hasRef ? '✓' : '') + '</button>' +
-          '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
-        '</div>' +
+        // 作品リンク行：コメント/メモ有り時のみ cand-info 内に置く（無し時は下の全幅行へ）。
+        (_noComment ? '' : '<div class="cand-actions">' + _actionsInner + '</div>') +
       '</div>' +
-      // メモ(水色)＝コメントの上。次の管理行はカード全幅（画像の下まで）＝コメントが左端(画像の下)から広く使え1行に収まる。
+      // メモ(水色)＝コメントの上。
       (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '') +
-      // 管理行：コメント（左・左寄せ・省略しない）＋ 非表示／🗑（右）。カード全幅なので文字/画像の大きさを変えず広く表示できる。
-      '<div class="cand-manage-row">' + (refCmt ? '<span class="cand-manage-comment">' + esc(refCmt) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>' +
+      // コメント/メモ無し＝作品リンク群＋非表示/🗑 を全幅の1行に統合（別行を作らず余白最小）。有り＝管理行(コメント左＋非表示/🗑右)。
+      (_noComment
+        ? '<div class="cand-actions cand-actions-full">' + _actionsInner + '<span class="cand-actions-mspacer"></span>' + actionHtml + '</div>'
+        : '<div class="cand-manage-row">' + (refCmt ? '<span class="cand-manage-comment">' + esc(refCmt) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>') +
       '</div>';
   }
 
