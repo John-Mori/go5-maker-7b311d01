@@ -2192,7 +2192,7 @@
     // 作品リンク群（作品↗ / X↗ / X2↗ / 投稿編集 / 🦋）。無コメント時は全幅行で非表示/🗑と同列に置くため変数化。
     var _actionsInner =
       ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
-      (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? '🦋 Bsky↗' : 'X↗') + '</a>'; })(it.twitterUrl) : '') +
+      (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B↗' : 'X↗') + '</a>'; })(it.twitterUrl) : '') +
       (_refRec.twitterUrl2 ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B2↗' : 'X2↗') + '</a>'; })(_refRec.twitterUrl2) : '') +
       '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">投稿編集</button>' +
       '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>';
@@ -2210,15 +2210,13 @@
         genresHtml +
         ((it.price != null || it.listPrice != null) ? '<div class="cand-price">' + priceHtml + '</div>' : '') +
         salesHtml +
-        // 作品リンク行：コメント/メモ有り時のみ cand-info 内に置く（無し時は下の全幅行へ）。
-        (_noComment ? '' : '<div class="cand-actions">' + _actionsInner + '</div>') +
+        // 作品リンク行（cand-info内＝画像の右の定位置）。コメント/メモ無し時は同じ行の右端に 非表示/🗑 を統合。
+        '<div class="cand-actions">' + _actionsInner + (_noComment ? '<span class="cand-actions-mspacer"></span>' + actionHtml : '') + '</div>' +
       '</div>' +
-      // メモ(水色)＝コメントの上。
+      // メモ(水色)＝コメントの上。※コメント/メモ無し時は上の作品リンク行に統合済みなので管理行は出さない。
       (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '') +
-      // コメント/メモ無し＝作品リンク群＋非表示/🗑 を全幅の1行に統合（別行を作らず余白最小）。有り＝管理行(コメント左＋非表示/🗑右)。
-      (_noComment
-        ? '<div class="cand-actions cand-actions-full">' + _actionsInner + '<span class="cand-actions-mspacer"></span>' + actionHtml + '</div>'
-        : '<div class="cand-manage-row">' + (refCmt ? '<span class="cand-manage-comment">' + esc(refCmt) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>') +
+      (_noComment ? '' :
+        '<div class="cand-manage-row">' + (refCmt ? '<span class="cand-manage-comment">' + esc(refCmt) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>') +
       '</div>';
   }
 
