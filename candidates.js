@@ -1588,17 +1588,20 @@
       '<div style="margin-top:6px;display:flex;">' +
         '<label class="ghost cand-refimg-pick" style="width:auto;flex:0 0 auto;margin:0;">画像を選ぶ<input id="candAddImgFile" type="file" accept="image/*" multiple style="display:none;"></label>' +
       '</div>' +
+      // ボタン幅は固定せず内容(テキスト)に追従(width:max-content)。続行ボタンは小さめ＝メモ欄を広く。
       '<div style="display:flex;gap:8px;margin-top:8px;align-items:stretch;">' +
         '<input id="candMemo" type="text" class="cand-refimg-line" placeholder="メモ（任意・候補のメモに保存）" autocomplete="off" style="flex:1;min-width:0;">' +
-        '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.8rem;padding:8px 12px;width:max-content;flex:0 0 auto;white-space:nowrap;">➕ ' + (isMain ? '候補に追加して続ける' : 'このタブに追加して続ける') + '</button>' +
+        '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.78rem;padding:8px 10px;width:max-content;flex:0 0 auto;white-space:nowrap;">' + (isMain ? '候補に追加 / 続行' : 'このタブに追加 / 続行') + '</button>' +
       '</div>' +
-      '<div style="display:flex;margin-top:8px;"><span style="flex:1 1 auto;"></span>' +
-        '<button id="candAddClose" type="button" class="primary" style="margin:0;font-size:.8rem;padding:8px 12px;width:max-content;flex:0 0 auto;white-space:nowrap;">✅ ' + (isMain ? '候補に追加して閉じる' : 'このタブに追加して閉じる') + '</button></div>' +
       '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
       '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
         '<div class="hint">サークルの作品を<b>まとめて</b>' + (isMain ? '候補' : 'このタブ') + 'に追加できます（サークルID / サークルURL / 作品URLのどれか）。タブ名は変わりません。</div>' +
         '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" type="text" inputmode="url" class="cand-refimg-line" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;min-width:0;">', 'candBulkSrc') + '</div>' +
-        '<button id="candBulkAdd" type="button" class="ghost" style="margin-top:8px;width:max-content;">🏭 サークルの作品を全部追加</button>' +
+        // サークル作品を全て追加 と 候補に追加/閉じる を並列（どちらも幅は内容に追従・狭い端末でも1行に収まるよう小さめ）。
+        '<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap;">' +
+          '<button id="candBulkAdd" type="button" class="ghost" style="margin:0;width:max-content;white-space:nowrap;font-size:.72rem;padding:7px 9px;">サークル作品を全て追加</button>' +
+          '<button id="candAddClose" type="button" class="primary" style="margin:0;width:max-content;white-space:nowrap;font-size:.72rem;padding:7px 9px;">' + (isMain ? '候補に追加 / 閉じる' : 'このタブに追加 / 閉じる') + '</button>' +
+        '</div>' +
         '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
       '</div>';
   }
