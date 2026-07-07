@@ -68,15 +68,26 @@ export default {
       }
     }
 
-    // ---- ヘルスチェック ----
+    // ---- ヘルスチェック / 「この端末を計測から除外」 ----
     if (path === "/" || path === "") {
+      // ?nc=1 で自分の端末をクリック計測から除外＝Cookie(go5nc)を立てる。以後この端末(同ブラウザ)のクリックは数えない。
+      if (url.searchParams.get("nc") === "1") {
+        return new Response("この端末をクリック計測の対象から外しました。今後この端末（同じブラウザ）からのクリックはカウントされません。", {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Set-Cookie": "go5nc=1; Max-Age=63072000; Path=/; Secure; SameSite=Lax",
+            "Cache-Control": "no-store",
+          },
+        });
+      }
       return text("ok", 200);
     }
 
     // ---- それ以外は短縮コードとして 302 リダイレクト（中間ページなし）----
     if (request.method === "GET" || request.method === "HEAD") {
       const code = path.slice(1).split("/")[0];
-      if (/^[0-9A-Za-z]+$/.test(code)) return handleRedirect(code, env, ctx);
+      if (/^[0-9A-Za-z]+$/.test(code)) return handleRedirect(code, env, ctx, request);
     }
     return text("Not found", 404);
   },
@@ -124,14 +135,24 @@ async function handleShorten(request, env, cors) {
 }
 
 /* ====================== リダイレクト ====================== */
-async function handleRedirect(code, env, ctx) {
+async function handleRedirect(code, env, ctx, request) {
   if (!env.LINKS) return text("Not found", 404);
   const urlStr = await env.LINKS.get("u:" + code);
   if (!urlStr) return text("Not found", 404);
-  // クリックを概算カウント（リダイレクトはブロックしない）
-  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(bumpClick(env, code));
+  // 自分のクリックは数えない：Cookie(go5nc=1) があるか、?nc=1 が付いていれば計測をスキップ。
+  //   ?nc=1 の時は以後もこの端末を除外できるよう Cookie を付与（2年）。
+  const reqUrl = new URL(request.url);
+  const cookie = request.headers.get("Cookie") || "";
+  const optedOut = /(?:^|;\s*)go5nc=1(?:;|$)/.test(cookie);
+  const markSelf = reqUrl.searchParams.get("nc") === "1";
+  const headers = { Location: urlStr, "Cache-Control": "no-store" };
+  if (markSelf) headers["Set-Cookie"] = "go5nc=1; Max-Age=63072000; Path=/; Secure; SameSite=Lax";
+  if (!optedOut && !markSelf) {
+    // クリックを概算カウント（リダイレクトはブロックしない）。自分(除外対象)なら数えない。
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(bumpClick(env, code));
+  }
   // 302（恒久キャッシュでカウントが漏れないよう一時リダイレクト）
-  return new Response(null, { status: 302, headers: { Location: urlStr, "Cache-Control": "no-store" } });
+  return new Response(null, { status: 302, headers });
 }
 
 /* ====================== クリック数取得 ====================== */

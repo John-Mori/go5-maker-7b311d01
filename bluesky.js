@@ -928,6 +928,18 @@
   } catch (e) {}
   // 検証タブ（yt-clicks.js）が短縮URLのクリック数を /api/stats から読むために公開（ソフト鍵＝公開可）。
   try { window.Go5Short = { WORKER_URL: SHORT.WORKER_URL, SHARED_SECRET: SHORT.SHARED_SECRET }; } catch (e) {}
+  // 「自分のクリックを計測から除外」：この端末(同ブラウザ)を対象外にする。worker が Cookie(go5nc) を立て、以後この端末の
+  //   短縮URLアクセスは数えない（アプリからのクリックも、Bluesky内蔵ブラウザからのクリックもCookie共有で除外＝iOS Safari）。
+  try {
+    var _excBtn = document.getElementById('clickExcludeSelf');
+    if (_excBtn) _excBtn.addEventListener('click', function () {
+      var base = (SHORT.WORKER_URL || '').replace(/\/+$/, '');
+      if (!base) { window.alert('短縮URLワーカーが未設定です'); return; }
+      window.open(base + '/?nc=1', '_blank'); // トップレベル遷移で一次Cookieを確実にセット
+      _excBtn.textContent = '✅ 除外しました（開いたページで確認）';
+      setTimeout(function () { _excBtn.textContent = '🚫 自分のクリックを計測から除外(この端末)'; }, 4000);
+    });
+  } catch (e) {}
   function shortWorkerReady() {
     return /^https?:\/\//.test(SHORT.WORKER_URL) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
   }
