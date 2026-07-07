@@ -546,6 +546,10 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-manage-spacer{flex:1 1 auto;}
 /* コメントを 非表示／🗑 と同じ行に（左＝コメント・右＝ボタン）。左寄せ・省略しない（長ければ折り返して全文表示）。 */
 .cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;text-align:left;overflow:hidden;} /* 必ず1行（折り返さない）・左寄せ。長い時はJSでフォント可変縮小（省略しない） */
+/* コメント（黒）は独立行で全幅・必ず1行（可変縮小）。行間はrow-gapで詰める */
+.cand-comment-row{display:flex;width:100%;flex-basis:100%;margin-top:6px;}
+/* メモ（水色）＝非表示/🗑と同じ行の左側・必ず1行（可変縮小）＝余白節約 */
+.cand-manage-memo{flex:1 1 auto;min-width:0;font-size:13px;color:#1c9bd6;font-weight:700;line-height:1.35;white-space:nowrap;text-align:left;overflow:hidden;}
 /* 削除ボタン：🗑️のみで枠節約 */
 .cand-del-btn{padding-left:8px;padding-right:8px;}
 /* 追加モーダルの画像スロット（縦長×4・左から詰める）。押すとコピー中の画像が入る */

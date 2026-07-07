@@ -944,42 +944,67 @@
       setTimeout(function () { mk.classList.remove('cta-ready-pulse'); }, 2400);
     }, 260); // タブ切替の描画が終わってから
   }
-  // 保存直後に、その候補カードの「動画生成用サムネ」を即時反映（一覧を全再描画せず＝スクロール位置を保つ）。
+  // 保存直後に、その候補カードのサムネ＋コメント/メモを即時反映（一覧を全再描画せず＝スクロール位置を保つ）。
+  //   ★コメント/メモは candCard と同一構造(cand-comment-row / cand-manage-row)で組み直し fitOneLineTexts_ で
+  //     1行化する＝「保存直後に改行、リロードで直る」不整合を解消（INC）。
   function updateCardRefThumb_(cardEl, cid) {
     if (!cardEl) return;
-    var col = cardEl.querySelector('.cand-thumbcol'); if (!col) return;
-    var imgs = refImgsOf_(cid), src = imgs[0] || '';
-    var thumb = col.querySelector('.cand-refimg-thumb');
-    var badge = col.querySelector('.cand-refimg-multi');
-    if (src) {
-      if (!thumb) {
-        thumb = document.createElement('img');
-        thumb.className = 'cand-refimg-thumb';
-        thumb.setAttribute('data-refimgview', cid);
-        thumb.setAttribute('loading', 'lazy');
-        thumb.alt = '動画生成用の画像（タップで拡大）';
-        thumb.title = '動画生成用の画像（タップで拡大）';
-        thumb.addEventListener('click', function () { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); });
-        col.appendChild(thumb);
+    var col = cardEl.querySelector('.cand-thumbcol');
+    if (col) {
+      var imgs = refImgsOf_(cid), src = imgs[0] || '';
+      var thumb = col.querySelector('.cand-refimg-thumb');
+      var badge = col.querySelector('.cand-refimg-multi');
+      if (src) {
+        if (!thumb) {
+          thumb = document.createElement('img');
+          thumb.className = 'cand-refimg-thumb';
+          thumb.setAttribute('data-refimgview', cid);
+          thumb.setAttribute('loading', 'lazy');
+          thumb.alt = '動画生成用の画像（タップで拡大）';
+          thumb.title = '動画生成用の画像（タップで拡大）';
+          thumb.addEventListener('click', function () { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); });
+          col.appendChild(thumb);
+        }
+        thumb.src = src;
+        thumb.classList.toggle('multi', imgs.length > 1); // 複数あり＝アンバー枠で表現（バッジ表記は廃止）
+        if (badge && badge.parentNode) badge.parentNode.removeChild(badge); // 旧バッジの掃除
+      } else {
+        if (thumb && thumb.parentNode) thumb.parentNode.removeChild(thumb);
+        if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
       }
-      thumb.src = src;
-      thumb.classList.toggle('multi', imgs.length > 1); // 複数あり＝アンバー枠で表現（バッジ表記は廃止）
-      if (badge && badge.parentNode) badge.parentNode.removeChild(badge); // 旧バッジの掃除
-      // コメント（黒字・サムネ下）
-      var rr = refImgOf(cid), cmt = (rr && rr.comment) || '';
-      var cEl = col.querySelector('.cand-refimg-comment');
-      if (cmt) {
-        if (!cEl) { cEl = document.createElement('span'); cEl.className = 'cand-refimg-comment'; col.appendChild(cEl); }
-        cEl.textContent = cmt;
-      } else if (cEl && cEl.parentNode) {
-        cEl.parentNode.removeChild(cEl);
-      }
-    } else {
-      if (thumb && thumb.parentNode) thumb.parentNode.removeChild(thumb);
-      if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
-      var cEl2 = col.querySelector('.cand-refimg-comment');
-      if (cEl2 && cEl2.parentNode) cEl2.parentNode.removeChild(cEl2);
+      var stray = col.querySelector('.cand-refimg-comment'); // 旧構造（サムネ列に折り返すコメント）の名残を掃除
+      if (stray && stray.parentNode) stray.parentNode.removeChild(stray);
     }
+    syncCardLower_(cardEl, cid);
+  }
+  // カード下部（コメント行＋メモ/非表示・🗑行）を candCard と同一構造で組み直す。
+  //   非表示/🗑ボタンはノードごと移動してリスナーを温存。最後に fitOneLineTexts_ で必ず1行化。
+  function syncCardLower_(cardEl, cid) {
+    var info = cardEl.querySelector('.cand-info'), actions = cardEl.querySelector('.cand-actions');
+    if (!info || !actions) return;
+    var rr = refImgOf(cid) || {}, cmt = rr.comment || '', memo = rr.memo || '';
+    var noComment = !cmt && !memo;
+    var actionBtns = [].slice.call(cardEl.querySelectorAll('.cand-hide-btn')); // 非表示/再表示/🗑（リスナー保持のため移動）
+    // 旧: コメント行/管理行/旧メモdiv/作品リンク行内のスペーサを撤去（ボタンは上で確保済み）
+    [].slice.call(cardEl.querySelectorAll('.cand-comment-row, .cand-manage-row, .cand-refimg-memo, .cand-actions-mspacer'))
+      .forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
+    cardEl.classList.toggle('cand-nocomment', noComment);
+    if (noComment) {
+      var sp = document.createElement('span'); sp.className = 'cand-actions-mspacer'; actions.appendChild(sp);
+      actionBtns.forEach(function (b) { actions.appendChild(b); }); // 作品リンク行の右端へ統合
+    } else {
+      if (cmt) {
+        var crow = document.createElement('div'); crow.className = 'cand-comment-row';
+        var cspan = document.createElement('span'); cspan.className = 'cand-manage-comment'; cspan.textContent = cmt;
+        crow.appendChild(cspan); cardEl.appendChild(crow);
+      }
+      var mrow = document.createElement('div'); mrow.className = 'cand-manage-row';
+      if (memo) { var mspan = document.createElement('span'); mspan.className = 'cand-manage-memo'; mspan.textContent = memo; mrow.appendChild(mspan); }
+      else { var msp = document.createElement('span'); msp.className = 'cand-manage-spacer'; mrow.appendChild(msp); }
+      actionBtns.forEach(function (b) { mrow.appendChild(b); });
+      cardEl.appendChild(mrow);
+    }
+    fitOneLineTexts_(cardEl);
   }
   // 候補（Twitter起点/DMM起点どちらも）に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ（旧項目を置換）。
   function applyWorkUrl_(oldItem, workUrlRaw, refData, cb) {
@@ -1074,7 +1099,7 @@
 
   // コメント/メモを必ず1行に収める（可変フォント）。幅に収まらない時だけ実測しながらフォントを縮小＝折り返さない・極力省略しない。
   function fitOneLineTexts_(root) {
-    var els = (root || document).querySelectorAll('.cand-manage-comment, .cand-refimg-memo');
+    var els = (root || document).querySelectorAll('.cand-manage-comment, .cand-manage-memo, .cand-refimg-memo');
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       el.style.fontSize = ''; // 既定(13px)へ戻して測る
@@ -2298,10 +2323,11 @@
         // 作品リンク行（cand-info内＝画像の右の定位置）。コメント/メモ無し時は同じ行の右端に 非表示/🗑 を統合。
         '<div class="cand-actions">' + _actionsInner + (_noComment ? '<span class="cand-actions-mspacer"></span>' + actionHtml : '') + '</div>' +
       '</div>' +
-      // メモ(水色)＝コメントの上。※コメント/メモ無し時は上の作品リンク行に統合済みなので管理行は出さない。
-      (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '') +
+      // コメント(黒・全幅・必ず1行＝可変縮小)＝独立行。
+      (refCmt ? '<div class="cand-comment-row"><span class="cand-manage-comment">' + esc(refCmt) + '</span></div>' : '') +
+      // メモ(水色・左・必ず1行)＋ 非表示/🗑(右)を同じ行に統合＝余白節約。コメント/メモ無し時は作品リンク行に統合済み。
       (_noComment ? '' :
-        '<div class="cand-manage-row">' + (refCmt ? '<span class="cand-manage-comment">' + esc(refCmt) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>') +
+        '<div class="cand-manage-row">' + (refMemo ? '<span class="cand-manage-memo">' + esc(refMemo) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>') +
       '</div>';
   }
 
