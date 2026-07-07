@@ -174,8 +174,21 @@
   }
 
   // 通常テキストブロック（中央寄せ・帯・白文字＋黒縁）。
+  // 実際の字形インクの上端/下端（canvas座標）を返す。帯を「行ボックス」でなく「見えている文字」に
+  //   合わせて上下対称の余白で囲うために使う。drawY＝テキスト描画Y（baselineは呼び出し側の設定に一致）。
+  //   actualBoundingBox が使えない/退化時はフォント比の近似にフォールバック。
+  function inkExtent(sampleText, drawY, px) {
+    const m = ctx.measureText(sampleText);
+    const aBA = m.actualBoundingBoxAscent, aBD = m.actualBoundingBoxDescent;
+    if (typeof aBA === "number" && typeof aBD === "number" && (aBA + aBD) > px * 0.3) {
+      return { top: drawY - aBA, bot: drawY + aBD };
+    }
+    return { top: drawY + px * 0.06, bot: drawY + px * 0.94 };
+  }
+
   // off＝この段の縦オフセット比。帯と文字を一体で動かす（帯は常に文字を包む＝各段に統合）。
   //   送りy（次段位置）には反映しない＝この段を動かしても他段は不動。
+  //   帯は「行ボックス」ではなく実際の字形インクに対称な余白(vpad)で囲う＝文字の上下と帯の余白が等しい。
   function drawBlock(lines, y, px, pad, gap, bandAlpha, off, shadowScale) {
     setFont(px, 700);
     ctx.textBaseline = "top";
@@ -186,11 +199,14 @@
       const tw = ctx.measureText(ln).width;
       const x = (W - tw) / 2;
       const mB = sw;  // 縁取り分だけ帯を広げ、文字が帯からはみ出ないようにする
+      const drawY = y + offY;
+      const vpad = pad * 0.45 + mB;                 // 文字インクの上下に付ける対称な余白
+      const ie = inkExtent(ln, drawY, px);
       const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : bandAlpha;  // テーマで固定不透明度があれば優先
       ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
-      roundRect(x - pad - mB, y - pad * 0.45 - mB + offY, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
+      roundRect(x - pad - mB, ie.top - vpad, tw + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5);
       ctx.fill();
-      paintGlyph(ln, x, y + offY, px, sw, shadowScale);
+      paintGlyph(ln, x, drawY, px, sw, shadowScale);
       y += th + pad + gap;  // 送りは基準位置のまま（オフセットの影響を受けない＝他段に波及しない）
     }
     return y;
@@ -237,10 +253,11 @@
     const total = widths.reduce((a, b) => a + b, 0);
     let x = (W - total) / 2;
     const mB = sw;  // 縁取り分だけ帯を広げる
-    const bandY = H * (off || 0);  // 帯も文字と同じオフセットで一緒に動く（各段に統合）
+    const vpad = pad * 0.45 + mB;                 // 文字インクの上下に付ける対称な余白
+    const ie = inkExtent(s, ym, px);              // baseline "middle" のまま実インクを計測（ymはオフセット込み）
     const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : 175;  // テーマで固定不透明度があれば優先
     ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
-    roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, total + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5); ctx.fill();
+    roundRect(x - pad - mB, ie.top - vpad, total + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5); ctx.fill();
     for (let k = 0; k < segs.length; k++) {
       const [kind, val] = segs[k], w = widths[k];
       if (kind === "text") {
@@ -286,10 +303,14 @@
     let maxTw = 0;
     for (let i = 0; i < lines.length; i++) { const tw = ctx.measureText(lines[i]).width; if (tw > maxTw) maxTw = tw; }
     const blockH = lines.length * th + (lines.length - 1) * gap;
+    // 帯は「行ボックス」でなく実際の字形インク（1行目の上端〜最終行の下端）を上下対称の余白(vpad)で囲う
+    //   ＝文字の上下と帯の余白が等しくなる。
+    const line1Y = y + offY, lineNY = y + offY + (lines.length - 1) * (th + gap);
+    const ie1 = inkExtent(lines[0], line1Y, px), ieN = inkExtent(lines[lines.length - 1], lineNY, px);
+    const inkTop = ie1.top, inkBot = ieN.bot, vpad = pad * 0.45 + mB;
     const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : (bandAlpha || 195);
     ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
-    // 文字全体を中央で囲う1枚の帯（サイズを文字に合わせる＝文字が中央に来る）
-    roundRect((W - maxTw) / 2 - pad - mB, y - pad * 0.45 - mB + offY, maxTw + (pad + mB) * 2, blockH + pad * 0.9 + mB * 2, pad + mB * 0.5);
+    roundRect((W - maxTw) / 2 - pad - mB, inkTop - vpad, maxTw + (pad + mB) * 2, (inkBot - inkTop) + vpad * 2, pad + mB * 0.5);
     ctx.fill();
     let ly = y + offY;
     for (let j = 0; j < lines.length; j++) {
