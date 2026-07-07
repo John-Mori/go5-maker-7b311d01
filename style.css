@@ -148,7 +148,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .buzz-thumb{margin-top:6px;max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--line);object-fit:cover;}
 .buzz-stats{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;color:var(--sub);}
 .buzz-eng{font-weight:700;color:var(--accent);}
-.cand-card{display:flex;flex-wrap:wrap;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:8px;align-items:flex-start;}
+.cand-card{display:flex;flex-wrap:wrap;gap:3px 10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 10px 7px;margin-top:8px;align-items:flex-start;} /* 行間(row-gap)を詰め下部余白を圧縮＝枠を狭く。列間(画像↔本文)は10px維持 */
+.cand-card.cand-nocomment{padding-bottom:5px;} /* コメント/メモ無し＝下部余白を最小化 */
+.cand-card.cand-nocomment .cand-manage-row{margin-top:-1px;} /* 非表示/🗑列を上に詰める */
 /* 投稿済み作品＝カード大枠をチャンネルのイメージカラーで太線囲み（月詠み=紫 / 宵桜艶帖=葡萄）。
    両channel投稿は border=宵桜(内側)＋box-shadowリング=月詠み(外側)の二重。 */
 .cand-card.cand-posted-acc1{border:3px solid #8a6fb8;}
@@ -531,7 +533,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .pd-imgs .hint{color:#9fb0c3;}
 .pd-img{max-width:46%;max-height:38vh;border-radius:8px;border:1px solid rgba(255,255,255,.18);cursor:zoom-in;}
 /* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
-.cand-manage-row{flex-basis:100%;width:100%;display:flex;align-items:center;gap:6px;margin-top:2px;} /* カード全幅の行＝コメントが画像の下(左端)から広く使えて1行に収まる。余白は詰める */
+.cand-manage-row{flex-basis:100%;width:100%;display:flex;align-items:center;gap:6px;margin-top:0;} /* カード全幅の行＝コメントが画像の下(左端)から広く使えて1行に収まる。行間はrow-gapで詰める */
 .cand-manage-spacer{flex:1 1 auto;}
 /* コメントを 非表示／🗑 と同じ行に（左＝コメント・右＝ボタン）。左寄せ・省略しない（長ければ折り返して全文表示）。 */
 .cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;text-align:left;overflow:hidden;} /* 必ず1行（折り返さない）・左寄せ。長い時はJSでフォント可変縮小（省略しない） */
@@ -570,7 +572,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-refimg-thumb.multi{border:1.5px solid #e6c14e !important;} /* 複数枚＝枠線を1.5倍(1px→1.5px)で明示 */
 /* 保存済みコメント（プレビュー画像の右に一行・黒字。長い場合は…で省略） */
 .cand-refimg-comment{flex-basis:100%;width:100%;margin-top:6px;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:normal;word-break:break-word;text-align:left;overflow:visible;} /* 動画生成用画像の真下・全幅・左寄せ・絶対に省略しない（字の大きさは変えない） */
-.cand-refimg-comment.cand-refimg-memo{color:#1c9bd6;white-space:nowrap;overflow:hidden;word-break:normal;margin-top:3px;} /* メモ＝水色・必ず1行（折り返さない）・長い時はJSでフォント可変縮小・余白は詰める */
+.cand-refimg-comment.cand-refimg-memo{color:#1c9bd6;white-space:nowrap;overflow:hidden;word-break:normal;margin-top:0;} /* メモ＝水色・必ず1行（折り返さない）・長い時はJSでフォント可変縮小・行間はrow-gapで詰める */
 /* 投稿編集モーダルの「メモ・URL 追加」ボタン（水色・黒字。メモ/URLを縦積み、追加を中央に） */
 .cand-memo-addbtn{display:flex;align-items:center;justify-content:center;gap:5px;background:#5ec6e8;color:#000;border:none;border-radius:8px;padding:4px 8px;font-weight:700;cursor:pointer;line-height:1.1;}
 .cand-memo-addbtn:active{opacity:.8;}

@@ -2187,6 +2187,7 @@
     // 投稿済み作品はカード大枠をチャンネルのイメージカラーで太線囲み。両channel投稿は月詠み(外)＋宵桜(内)の二重。
     var _pAcc1 = !!postedItemForCid_(it.cid, 'acc1'), _pAcc2 = !!postedItemForCid_(it.cid, 'acc2');
     var _postCls = (_pAcc1 && _pAcc2) ? ' cand-posted-both' : (_pAcc1 ? ' cand-posted-acc1' : (_pAcc2 ? ' cand-posted-acc2' : ''));
+    if (!refCmt && !refMemo) _postCls += ' cand-nocomment'; // コメント/メモ無し＝管理行を詰めて下部余白を最小化
     return '<div class="cand-card' + _postCls + '">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
