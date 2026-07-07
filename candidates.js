@@ -431,13 +431,14 @@
     } else { renderImgModal_(it.title, big, null, 'サンプル画像の取得にはFANZA Workerの設定が必要です。'); }
   }
   // 画像ズーム（左右スワイプで切替）。.fz-zoom を流用。
-  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null;
+  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null;
   function ensureZoom_() {
     if (_zoom) return _zoom;
     var z = document.createElement('div'); z.className = 'fz-zoom'; z.hidden = true;
     z.innerHTML = '<button class="fz-zoom-close" type="button" aria-label="閉じる">✕</button>' +
       '<button class="fz-zoom-tofirst" type="button" hidden>この画像を1ページ目にする</button>' +
-      '<img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div>';
+      '<button class="fz-zoom-add" type="button" hidden>＋ 画像を貼り付けて新規追加</button>' +
+      '<img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div><div class="fz-zoom-msg"></div>';
     document.body.appendChild(z);
     z.addEventListener('click', function (e) { if (e.target === z) z.hidden = true; });
     z.querySelector('.fz-zoom-close').addEventListener('click', function () { z.hidden = true; });
@@ -446,6 +447,15 @@
       if (!_zoomReorder || _zi <= 0) return;
       var nl = _zoomReorder(_zi);
       if (nl && nl.length) { _zoomList = nl.slice(); _zi = 0; zoomShow_(); }
+    });
+    // 「画像を貼り付けて新規追加」＝クリップボードの画像を挿入・保存し、1ページ目に表示（投稿編集と同じ保存先に同期）。
+    z.querySelector('.fz-zoom-add').addEventListener('click', function () {
+      if (!_zoomAdd) return;
+      var msg = z.querySelector('.fz-zoom-msg'); if (msg) msg.textContent = '貼り付け中…';
+      _zoomAdd(function (nl, err) {
+        if (nl && nl.length) { _zoomList = nl.slice(); _zi = 0; zoomShow_(); if (msg) msg.textContent = '1ページ目に追加しました'; setTimeout(function () { if (msg) msg.textContent = ''; }, 1400); }
+        else if (msg) { msg.textContent = err || '画像を貼り付けできませんでした'; setTimeout(function () { if (msg) msg.textContent = ''; }, 2200); }
+      });
     });
     var sx = null, sy = null;
     z.addEventListener('touchstart', function (e) { var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
@@ -461,15 +471,28 @@
     z.querySelector('.fz-zoom-img').src = _zoomList[_zi] || '';
     z.querySelector('.fz-zoom-count').textContent = _zoomList.length ? (_zi + 1) + ' / ' + _zoomList.length : ''; // 画像の下に「現在 / 総ページ数」を白字で常時表示
     var tf = z.querySelector('.fz-zoom-tofirst'); if (tf) tf.hidden = !(_zoomReorder && _zi > 0); // 2ページ目以降だけ表示
+    var ab = z.querySelector('.fz-zoom-add'); if (ab) ab.hidden = !_zoomAdd; // 貼り付け追加が可能な文脈でのみ表示
     z.hidden = false;
   }
   function zoomGo_(d) { if (!_zoomList.length) return; _zi = (_zi + d + _zoomList.length) % _zoomList.length; zoomShow_(); }
-  // opts.onReorder(currentIdx) が渡されると、2ページ目以降で「1ページ目にする」ボタンを出す。
-  //   コールバックは並べ替え後の画像配列を返す（先頭が新しい1ページ目）。
+  // opts.onReorder(currentIdx) で「1ページ目にする」ボタン、opts.onPasteAdd(done) で「貼り付けて新規追加」ボタンを出す。
+  //   onPasteAdd はクリップボード画像を先頭へ追加・保存し done(新画像配列, err) を呼ぶ（先頭＝新しい1ページ目）。
   function openImgZoom_(images, idx, opts) {
     if (!images || !images.length) return;
     _zoomReorder = (opts && typeof opts.onReorder === 'function') ? opts.onReorder : null;
+    _zoomAdd = (opts && typeof opts.onPasteAdd === 'function') ? opts.onPasteAdd : null;
     _zoomList = images.slice(); _zi = Math.min(Math.max(0, idx || 0), _zoomList.length - 1); zoomShow_();
+  }
+  // 「画像を貼り付けて新規追加」：クリップボード画像を cid の refimg 先頭へ追加・保存し一覧再描画（投稿編集と同じ保存先に同期）。
+  function pasteAddRefImgToFirst_(cid, done) {
+    pasteImageFromClipboard_(function (durl, err) {
+      if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
+      var cur = refImgOf(cid) || {}, imgs = refImgsOf_(cid);
+      imgs.unshift(durl); // 先頭＝1ページ目
+      refImgSave(cid, { imgs: imgs, comment: cur.comment, memo: cur.memo, twitterUrl: cur.twitterUrl, twitterUrl2: cur.twitterUrl2 });
+      try { if (_activeTab) render(); } catch (e) {}
+      done(imgs.slice(), null);
+    });
   }
   // refimg(投稿編集の保存画像)の並べ替え：cidの画像配列で i 番目を先頭へ移動＋保存＋一覧再描画。返り値＝新配列。
   function reorderRefImgToFirst_(cid, i) {
@@ -718,11 +741,20 @@
           (n > 1 ? '🖼 複数あり ' + (pending.idx + 1) + ' / ' + n + '（スワイプで切替・<b>表示中の画像が「動画生成へ」で使われます</b>）' : '画像 1枚') +
         '</div>';
       previewEl.querySelector('img').addEventListener('click', function () {
-        openImgZoom_(pending.imgs.slice(), pending.idx, { onReorder: function (i) {
-          if (i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
-          var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; drawPreview(); // 旧1枚目は2枚目へずれる（保存で確定）
-          return pending.imgs.slice();
-        } });
+        openImgZoom_(pending.imgs.slice(), pending.idx, {
+          onReorder: function (i) {
+            if (i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
+            var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; drawPreview(); // 旧1枚目は2枚目へずれる（保存で確定）
+            return pending.imgs.slice();
+          },
+          onPasteAdd: function (done) {
+            pasteImageFromClipboard_(function (durl, err) {
+              if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
+              pending.imgs.unshift(durl); pending.idx = 0; drawPreview(); // 先頭＝1ページ目（保存で確定）
+              done(pending.imgs.slice(), null);
+            });
+          }
+        });
       });
       var pv = previewEl.querySelector('.prev'), nx = previewEl.querySelector('.next');
       if (pv) pv.addEventListener('click', function (e) { e.stopPropagation(); navTo(pending.idx - 1); });
@@ -920,7 +952,7 @@
         thumb.setAttribute('loading', 'lazy');
         thumb.alt = '動画生成用の画像（タップで拡大）';
         thumb.title = '動画生成用の画像（タップで拡大）';
-        thumb.addEventListener('click', function () { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); } }); });
+        thumb.addEventListener('click', function () { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); });
         col.appendChild(thumb);
       }
       thumb.src = src;
@@ -1041,7 +1073,7 @@
     });
     // 保存済みの動画生成用画像（サムネ下の縦長画像）：タップで拡大プレビュー。
     el.querySelectorAll('[data-refimgview]').forEach(function (im) {
-      im.addEventListener('click', function () { var rc = im.getAttribute('data-refimgview'); var imgs = refImgsOf_(rc); if (imgs.length) openImgZoom_(imgs, 0, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); } }); }); // 複数あれば全部スワイプで見られる＋1ページ目にする操作可
+      im.addEventListener('click', function () { var rc = im.getAttribute('data-refimgview'); var imgs = refImgsOf_(rc); if (imgs.length) openImgZoom_(imgs, 0, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } }); }); // 複数あればスワイプ＋1ページ目にする＋貼り付け新規追加
     });
     el.querySelectorAll('[data-refimg]').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -1600,7 +1632,7 @@
         // サークル作品を全て追加 と 候補に追加/閉じる を並列（どちらも幅は内容に追従・狭い端末でも1行に収まるよう小さめ）。
         '<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap;">' +
           '<button id="candBulkAdd" type="button" class="ghost" style="margin:0;width:max-content;white-space:nowrap;font-size:.72rem;padding:7px 9px;">サークル作品を全て追加</button>' +
-          '<button id="candAddClose" type="button" class="primary" style="margin:0;width:max-content;white-space:nowrap;font-size:.72rem;padding:7px 9px;">' + (isMain ? '候補に追加 / 閉じる' : 'このタブに追加 / 閉じる') + '</button>' +
+          '<button id="candAddClose" type="button" class="primary" style="margin:0 0 0 auto;width:max-content;white-space:nowrap;font-size:.72rem;padding:7px 9px;">' + (isMain ? '候補に追加 / 閉じる' : 'このタブに追加 / 閉じる') + '</button>' +
         '</div>' +
         '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
       '</div>';
@@ -2176,7 +2208,7 @@
     refImgs: refImgsOf_,                                        // cid → 動画生成用の保存画像の配列（無ければ[]）
     bskyImg: function (cid) { var r = bskyImgOf(cid); return (r && r.img) || ''; }, // cid → Bluesky添付画像（無ければ''）
     zoomImages: function (images, idx) { openImgZoom_((images || []).filter(Boolean), idx || 0); }, // 任意の画像配列をズーム(スワイプ)
-    zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); } }); }, // タップで全画像ズーム(スワイプ)＋1ページ目にする操作可
+    zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); }, // タップで全画像ズーム＋1ページ目にする＋貼り付け新規追加
     postImgs: postImgsOf_,                                      // 履歴キー → 🛠️編集で添付した投稿画像の配列（無ければ[]）
     postImgHas: function (key) { return postImgsOf_(key).length > 0; },
     postImgSave: postImgSave_                                   // 履歴キー + 画像配列 を保存（write-through）

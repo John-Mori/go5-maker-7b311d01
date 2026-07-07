@@ -278,6 +278,11 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-zoom-tofirst{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:2;background:#5ec6e8;color:#000;border:none;border-radius:8px;padding:9px 16px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;width:auto;max-width:74vw;box-shadow:0 2px 10px rgba(0,0,0,.45);}
 .fz-zoom-tofirst[hidden]{display:none;}
 .fz-zoom-tofirst:active{opacity:.8;}
+/* 画像ズーム：左下「＋ 画像を貼り付けて新規追加」（クリップボード画像を1ページ目に挿入・保存＝投稿編集と同期） */
+.fz-zoom-add{position:absolute;bottom:14px;left:14px;z-index:2;background:#5ec6e8;color:#000;border:none;border-radius:8px;padding:9px 13px;font-weight:700;font-size:12.5px;cursor:pointer;white-space:nowrap;width:auto;max-width:60vw;box-shadow:0 2px 10px rgba(0,0,0,.45);}
+.fz-zoom-add[hidden]{display:none;}
+.fz-zoom-add:active{opacity:.8;}
+.fz-zoom-msg{position:absolute;bottom:56px;left:0;right:0;text-align:center;color:#fff;font-size:12px;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.75);}
 .fz-sec{margin:10px 0;}
 .fz-lbl{display:block;font-size:11px;color:var(--accent);font-weight:700;margin-bottom:4px;}
 .fz-genres{display:flex;flex-wrap:wrap;gap:5px;}
