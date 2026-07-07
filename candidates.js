@@ -1906,12 +1906,12 @@
     el.innerHTML = head + arr.map(function (it) {
       var act = _showHidden
         ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>'
-        : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(it.cid) + '">🙈 非表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>';
+        : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(it.cid) + '">非表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>';
       return candCard(it, act);
     }).join('');
     wireCardCommon_(el);
     el.querySelectorAll('[data-hidecid]').forEach(function (b) {
-      b.addEventListener('click', function () { var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); renderCandList(tabId); });
+      b.addEventListener('click', function () { if (!window.confirm('非表示にしますか？')) return; var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); renderCandList(tabId); });
     });
     el.querySelectorAll('[data-unhide]').forEach(function (b) {
       b.addEventListener('click', function () { var c = b.getAttribute('data-unhide'); lsSet(hiddenKey(tabId), lsGet(hiddenKey(tabId), '[]').filter(function (x) { return x !== c; })); renderCandList(tabId); });
@@ -1995,7 +1995,7 @@
       el.innerHTML = head + arr.map(function (it) {
         var btn = _showHidden
           ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button>'
-          : '<button type="button" class="cand-hide-btn" data-hide="' + esc(it.cid) + '">🙈 非表示</button>';
+          : '<button type="button" class="cand-hide-btn" data-hide="' + esc(it.cid) + '">非表示</button>';
         return candCard(it, btn);
       }).join('');
       wireCardCommon_(el);
@@ -2004,6 +2004,7 @@
       if (!_showHidden && !force) fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === tabId) renderMaker(tabId); });
       el.querySelectorAll('[data-hide]').forEach(function (b) {
         b.addEventListener('click', function () {
+          if (!window.confirm('非表示にしますか？')) return;
           var h = lsGet(hiddenKey(tabId), '[]'); var c = b.getAttribute('data-hide');
           if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); renderMaker(tabId);
         });
@@ -2131,7 +2132,10 @@
     // 動画生成用の画像は作品サムネの真下（左の画像列）に少し余白を開けて縦積み。点線の区切りは廃止。
     var refImgHtml = refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '';
     // メモ（コメントの上・水色）とコメント（🙈/🗑と同じ管理行の左）は下の return 内で直接組み立てる。
-    return '<div class="cand-card">' +
+    // 投稿済み作品はカード大枠をチャンネルのイメージカラーで太線囲み。両channel投稿は月詠み(外)＋宵桜(内)の二重。
+    var _pAcc1 = !!postedItemForCid_(it.cid, 'acc1'), _pAcc2 = !!postedItemForCid_(it.cid, 'acc2');
+    var _postCls = (_pAcc1 && _pAcc2) ? ' cand-posted-both' : (_pAcc1 ? ' cand-posted-acc1' : (_pAcc2 ? ' cand-posted-acc2' : ''));
+    return '<div class="cand-card' + _postCls + '">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
         refImgHtml +

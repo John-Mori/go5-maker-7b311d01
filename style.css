@@ -149,6 +149,11 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .buzz-stats{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;color:var(--sub);}
 .buzz-eng{font-weight:700;color:var(--accent);}
 .cand-card{display:flex;flex-wrap:wrap;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:8px;align-items:flex-start;}
+/* 投稿済み作品＝カード大枠をチャンネルのイメージカラーで太線囲み（月詠み=紫 / 宵桜艶帖=葡萄）。
+   両channel投稿は border=宵桜(内側)＋box-shadowリング=月詠み(外側)の二重。 */
+.cand-card.cand-posted-acc1{border:3px solid #8a6fb8;}
+.cand-card.cand-posted-acc2{border:3px solid #c76b93;}
+.cand-card.cand-posted-both{border:3px solid #c76b93;box-shadow:0 0 0 3px #8a6fb8;}
 .cand-thumbcol{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;width:74px;} /* 本文列を広げてバッジ行が1行に収まるよう画像列は控えめに */
 .cand-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#eee2c5;border:1px solid var(--line);}
 .cand-thumb-ph{display:block;}
@@ -518,7 +523,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-manage-row{display:flex;align-items:center;gap:6px;margin-top:6px;}
 .cand-manage-spacer{flex:1 1 auto;}
 /* コメントを 🙈非表示／🗑 と同じ行に（左＝コメント・右＝ボタン）。1行・省略しない（短文運用）。 */
-.cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;overflow:visible;}
+.cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;} /* 左寄せ・改行しない・非表示/🗑ボタンと被らないよう溢れは省略 */
 /* 削除ボタン：🗑️のみで枠節約 */
 .cand-del-btn{padding-left:8px;padding-right:8px;}
 /* 追加モーダルの画像スロット（縦長×4・左から詰める）。押すとコピー中の画像が入る */
