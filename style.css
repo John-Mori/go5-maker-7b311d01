@@ -173,6 +173,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-off{background:#c0392b;color:#fff8ee;border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;}
 .cand-actions{display:flex;gap:5px;align-items:center;margin-top:6px;flex-wrap:nowrap;min-width:0;} /* 作品↗/X↗/X2↗/投稿編集/🦋 を1列で（改行しない） */
 .cand-actions .vlink{white-space:nowrap;flex:0 0 auto;font-size:12px;}
+.cand-actions .vlink-work{color:#ff79b0;} /* 作品↗＝投稿履歴の作品リンク(.vmetrics .vlink-work)と同じピンクに同期 */
 .cand-hide-btn{width:auto;margin:0;flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;}
 .cand-thumb-click{cursor:zoom-in;}
 .cand-thumb-click:active{opacity:.85;}
@@ -491,12 +492,12 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cta-ready-pulse{animation:ctaReadyPulse 0.8s ease-in-out 3;}
 @keyframes ctaReadyPulse{0%,100%{box-shadow:0 0 0 0 rgba(43,179,192,0);}50%{box-shadow:0 0 0 5px rgba(43,179,192,.55);}}
 /* バッジ行：新作/同人バッジ（左）＋チャンネル表記（右寄せ）を同じ行に（省スペース） */
-.cand-badges-row{display:flex;flex-wrap:nowrap;align-items:center;gap:3px;margin-bottom:3px;min-width:0;} /* 投稿日チップを足しても1行を維持（折り返さない） */
+.cand-badges-row{display:flex;flex-wrap:nowrap;align-items:center;gap:2px;margin-bottom:3px;min-width:0;} /* 投稿日チップを足しても1行を維持（折り返さない） */
 /* 属性バッジ(新作/同人/AI等)の余白を詰める＝宵桜艶帖が枠からはみ出ないように（gapで間隔は担保） */
-.cand-badges-row .fp-state,.cand-badges-row .fp-kind{margin-right:0;padding:0 4px;}
-.cand-acct-group{margin-left:auto;display:inline-flex;flex-wrap:nowrap;flex-shrink:0;gap:4px;}
+.cand-badges-row .fp-state,.cand-badges-row .fp-kind{margin-right:0;padding:0 3px;}
+.cand-acct-group{margin-left:auto;display:inline-flex;flex-wrap:nowrap;flex-shrink:0;gap:3px;}
 /* チャンネル表記のpill（fp-kind/fp-stateと同サイズ）。月詠み(acc1)=紫 / 宵桜艶帖(acc2)=ワイン */
-.cand-acct-pill{font-size:.64rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 4px;white-space:nowrap;line-height:1.7;display:inline-flex;align-items:center;gap:2px;} /* 投稿日チップと同居しても1行に収まるよう少しコンパクトに */
+.cand-acct-pill{font-size:.64rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 3px;white-space:nowrap;line-height:1.7;display:inline-flex;align-items:center;gap:1px;} /* 投稿日チップと同居しても1行に収まるよう少しコンパクトに */
 .cand-acct-pill.cand-acct-acc1{color:#8a6fb8;border-color:#8a6fb8;}
 .cand-acct-pill.cand-acct-acc2{color:#c76b93;border-color:#c76b93;}
 /* 未投稿：淡色・ボタン化しない（クリック無効） */
@@ -508,7 +509,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-acct-pill.posted:active{transform:scale(.95);}
 .cand-acct-pill.posted b{font-size:.62rem;}
 /* 投稿済みの投稿日 ✔（Booksとpillの間・チャンネルテーマ色）。pillより軽い枠なし表記。 */
-.cand-posted-date{font-size:.6rem;font-weight:700;white-space:nowrap;line-height:1.7;padding:0 1px;font-variant-numeric:tabular-nums;flex-shrink:0;}
+.cand-posted-date{font-size:.64rem;font-weight:700;white-space:nowrap;line-height:1.7;padding:0 1px;font-variant-numeric:tabular-nums;flex-shrink:0;} /* 新作/月詠み表記と同じくらいの大きさに（pillと同font） */
 .cand-posted-date.cand-acct-acc1{color:#7a5aa8;}
 .cand-posted-date.cand-acct-acc2{color:#b0405f;}
 /* 投稿詳細モーダル（.fz-modalはダーク背景＝文字は明るく） */
@@ -558,7 +559,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* 複数画像あり＝サムネをアンバー枠で表現（旧「🖼複数あり×N」バッジは廃止） */
 .cand-refimg-thumb.multi{border:1.5px solid #e6c14e !important;} /* 複数枚＝枠線を1.5倍(1px→1.5px)で明示 */
 /* 保存済みコメント（プレビュー画像の右に一行・黒字。長い場合は…で省略） */
-.cand-refimg-comment{flex-basis:100%;width:100%;margin-top:6px;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;overflow:visible;} /* カード最下段の全幅行・1行（改行しない）・絶対に省略しない（末尾…を出さず全文表示） */
+.cand-refimg-comment{flex-basis:100%;width:100%;margin-top:6px;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:normal;word-break:break-word;text-align:left;overflow:visible;} /* 動画生成用画像の真下・全幅・左寄せ・絶対に省略しない（字の大きさは変えない） */
 .cand-refimg-comment.cand-refimg-memo{color:#1c9bd6;} /* コメントが無い時に代替表示するメモ＝水色 */
 /* 投稿編集モーダルの「メモ・URL 追加」ボタン（水色・黒字。メモ/URLを縦積み、追加を中央に） */
 .cand-memo-addbtn{display:flex;align-items:center;justify-content:center;gap:5px;background:#5ec6e8;color:#000;border:none;border-radius:8px;padding:4px 8px;font-weight:700;cursor:pointer;line-height:1.1;}
