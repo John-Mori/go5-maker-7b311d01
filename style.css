@@ -526,10 +526,10 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .pd-imgs .hint{color:#9fb0c3;}
 .pd-img{max-width:46%;max-height:38vh;border-radius:8px;border:1px solid rgba(255,255,255,.18);cursor:zoom-in;}
 /* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
-.cand-manage-row{display:flex;align-items:center;gap:6px;margin-top:6px;}
+.cand-manage-row{display:flex;align-items:flex-start;gap:6px;margin-top:4px;}
 .cand-manage-spacer{flex:1 1 auto;}
-/* コメントを 🙈非表示／🗑 と同じ行に（左＝コメント・右＝ボタン）。1行・省略しない（短文運用）。 */
-.cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;} /* 左寄せ・改行しない・非表示/🗑ボタンと被らないよう溢れは省略 */
+/* コメントを 非表示／🗑 と同じ行に（左＝コメント・右＝ボタン）。左寄せ・省略しない（長ければ折り返して全文表示）。 */
+.cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:normal;word-break:break-word;text-align:left;overflow:visible;padding-top:5px;} /* 左寄せ・省略しない（折り返し可）・ボタンと縦位置を合わせる */
 /* 削除ボタン：🗑️のみで枠節約 */
 .cand-del-btn{padding-left:8px;padding-right:8px;}
 /* 追加モーダルの画像スロット（縦長×4・左から詰める）。押すとコピー中の画像が入る */

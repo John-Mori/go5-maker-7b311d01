@@ -2193,13 +2193,11 @@
           '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿編集' + (hasRef ? '✓' : '') + '</button>' +
           '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
         '</div>' +
-        // 管理行：非表示／🗑（右寄せ）。コメント/メモはカード下段の全幅行へ（下記）。
-        '<div class="cand-manage-row"><span class="cand-manage-spacer"></span>' + actionHtml + '</div>' +
-      '</div>' +
-      // メモ(水色)→コメント(黒)の順に、動画生成用画像の真下・左寄せ・全幅で表示。字の大きさは変えず省略もしない。
-      (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '') +
-      (refCmt ? '<div class="cand-refimg-comment">' + esc(refCmt) + '</div>' : '') +
-      '</div>';
+        // メモ(水色)＝コメントの上（管理行の上）に表示。
+        (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '') +
+        // 管理行：コメント（左・左寄せ・省略しない）＋ 非表示／🗑（右）。コメントを非表示と同じ列に置き、画像との余白を詰める。
+        '<div class="cand-manage-row">' + (refCmt ? '<span class="cand-manage-comment">' + esc(refCmt) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>' +
+      '</div>' + '</div>';
   }
 
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
