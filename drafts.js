@@ -23,6 +23,11 @@
   function saveDrafts(arr) { try { localStorage.setItem(draftsKey(), JSON.stringify(arr.slice(0, MAX_DRAFTS))); return true; } catch (e) { return false; } }
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  // サークルを表すアイコン（旧「🏷」の置き換え＝グレー人物シルエットのSVG・白背景は透過・文字サイズに追従）。
+  var CIRCLE_ICON = '<svg viewBox="0 0 100 100" width="1em" height="1em" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:-0.15em;">' +
+    '<ellipse cx="50" cy="33" rx="25" ry="30" fill="#c2c4c7"/>' +
+    '<path fill="#c2c4c7" d="M50 57C33 57 21 64 15 74 10 82 8 91 8 100L92 100C92 91 90 82 85 74 79 64 67 57 50 57Z"/>' +
+    '</svg>';
   function fmtTs(ts) {
     try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
     catch (e) { return ''; }
@@ -193,14 +198,15 @@
     list.innerHTML = arr.map(function (d, i) {
       // 題名部分：作品URLのDMM作品名＋作者（保存時スナップ）＋保存日時。無ければ従来のコメントラベル。
       var line1 = d.workTitle || d.label;
-      var line2 = d.workAuthor ? ('🏷 ' + d.workAuthor) : (d.workTitle ? d.label : '');
+      // line2html は既に安全なHTML（アイコンSVG＋escした著者名）。作者が無ければescしたラベル。
+      var line2html = d.workAuthor ? (CIRCLE_ICON + ' ' + esc(d.workAuthor)) : (d.workTitle ? esc(d.label) : '');
       // 幅が足りない時は flex-wrap でボタン行が下段へ落ちる（スマホはみ出し対策）。
       // ※ボタンは width:auto 明示＝グローバル button{width:100%} の波及ではみ出す事故(INC-47系)の再発防止。
       return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #2a3346;">' +
         (d.photo ? '<img src="' + d.photo + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:0 0 auto;">' : '<div style="width:44px;height:44px;border-radius:6px;background:#0e1422;flex:0 0 auto;"></div>') +
         '<div style="flex:1 1 160px;min-width:0;">' +
           '<div style="font-size:.88rem;color:#eef2f7;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(line1) + '</div>' +
-          (line2 ? '<div style="font-size:.76rem;color:#9fb0c3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(line2) + '</div>' : '') +
+          (line2html ? '<div style="font-size:.76rem;color:#9fb0c3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + line2html + '</div>' : '') +
           '<div style="font-size:.72rem;color:#8a93a3;">保存: ' + esc(fmtTs(d.ts)) + '</div>' +
         '</div>' +
         '<div style="display:flex;gap:6px;flex:0 0 auto;margin-left:auto;">' +

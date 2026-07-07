@@ -54,6 +54,13 @@
   // ジャンルタグに「AI」を含むものがあれば AI 作品とみなす（わかる範囲のベストエフォート判定）。
   function isAiWork_(genres) { return (genres || []).some(function (g) { return /AI/i.test(String(g || '')); }); }
 
+  // サークルを表すアイコン。旧「🏷」絵文字の置き換え＝グレーの人物シルエット(添付画像)をSVG化。
+  //   白背景は描かない＝透過。width/height=1em で文字サイズに追従。inline-blockで前後の文字と揃う。
+  var CIRCLE_ICON = '<svg class="cand-circle-ico" viewBox="0 0 100 100" width="1em" height="1em" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:-0.15em;">' +
+    '<ellipse cx="50" cy="33" rx="25" ry="30" fill="#c2c4c7"/>' +
+    '<path fill="#c2c4c7" d="M50 57C33 57 21 64 15 74 10 82 8 91 8 100L92 100C92 91 90 82 85 74 79 64 67 57 50 57Z"/>' +
+    '</svg>';
+
   // ── 保存キー ──
   var K_ITEMS = 'cand_items';   // 候補リスト(共通): [{url,cid,title,author,thumb,listPrice,price,discountPct,addedAt}]
   var K_TABS = 'cand_tabs';    // サークルタブ: [{id,name,makerId,makerName}]
@@ -1125,6 +1132,32 @@
       });
     });
   }
+  // ── 1タブに複数サークル ──
+  //   サークルタブは makers:[{id,name},…] を持てる。レガシー tab.makerId/makerName は
+  //   先頭サークルと同期して後方互換を保つ（他コードが tab.makerId を見ても壊れない）。
+  //   makersOf は新旧どちらの形でも {id,name} 配列を返す。
+  function makersOf(tab) {
+    if (tab && Array.isArray(tab.makers) && tab.makers.length) {
+      return tab.makers.map(function (m) { return { id: String(m.id), name: m.name || '' }; });
+    }
+    if (tab && tab.makerId) return [{ id: String(tab.makerId), name: tab.makerName || tab.name || '' }];
+    return [];
+  }
+  function makerIdsOf(tab) { return makersOf(tab).map(function (m) { return m.id; }); }
+  function isMakerTab_(tab) { return makersOf(tab).length > 0; }
+  // タブのサークル一覧を書き換え、レガシー単一フィールドを先頭に同期して保存。
+  function writeMakers_(tabId, makers) {
+    var norm = (makers || []).map(function (m) { return { id: String(m.id), name: m.name || '' }; });
+    var tabs = lsGet(K_TABS, '[]');
+    tabs.forEach(function (t) {
+      if (t.id !== tabId) return;
+      t.makers = norm;
+      if (norm.length) { t.makerId = norm[0].id; t.makerName = norm[0].name; }
+      else { delete t.makerId; delete t.makerName; }
+    });
+    lsSet(K_TABS, tabs);
+  }
+
   // サークルを販売数の「追跡対象」としてworkerへ登録/解除。登録済みサークルは
   // PCバッチ(販売数を取得.bat)が「タブを表示しなくても」全作品の販売数を自動取得する。
   function trackMaker(makerId, makerName, remove) {
@@ -1141,7 +1174,7 @@
   }
   // 既存タブの移行用: 全サークルタブを追跡登録（登録済みはローカルフラグでスキップ＝実質1回だけ）。
   function ensureTrackedAll() {
-    lsGet(K_TABS, '[]').forEach(function (t) { if (t.makerId) trackMaker(t.makerId, t.makerName || t.name || ''); });
+    lsGet(K_TABS, '[]').forEach(function (t) { makersOf(t).forEach(function (m) { trackMaker(m.id, m.name || t.name || ''); }); });
   }
   // 「▶今すぐ取得」: どの端末のWebアプリからでもPCへ実行要求を送る（PC常駐タスクが数分以内に拾う）。
   // 実スクレイプは日本IPのPCでしか動かないので、これは実行予約のみ。
@@ -1174,6 +1207,29 @@
       if (items.length) { lsSet(ck, { at: new Date().getTime(), items: items }); recordReviewSnapshots(items); }
       cb(items, null);
     }).catch(function () { cb(null, '通信エラー'); });
+  }
+  // 複数サークルをまとめて取得し、cidで重複排除してマージ（1タブに複数サークルを表示する用）。
+  //   一部サークルが失敗しても成功分は表示。全滅時のみエラーを返す。
+  function fetchMakerItemsMulti(makerIds, mode, cb, force) {
+    var ids = (makerIds || []).filter(Boolean);
+    if (!ids.length) { cb(null, 'サークルが登録されていません'); return; }
+    if (ids.length === 1) { fetchMakerItems(ids[0], mode, cb, force); return; }
+    var results = new Array(ids.length), firstErr = null, done = 0;
+    ids.forEach(function (id, i) {
+      fetchMakerItems(id, mode, function (items, err) {
+        if (err) { if (!firstErr) firstErr = err; } else { results[i] = items || []; }
+        if (++done === ids.length) {
+          var merged = [], seen = {};
+          results.forEach(function (arr) {
+            (arr || []).forEach(function (it) {
+              if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; merged.push(it); }
+            });
+          });
+          if (!merged.length && firstErr) { cb(null, firstErr); return; }
+          cb(merged, null);
+        }
+      }, force);
+    });
   }
   function priceOf(it) { return (it.price != null) ? it.price : (it.listPrice != null ? it.listPrice : Infinity); }
   function isOnSale_(it) { return !!(it && it.listPrice != null && it.price != null && it.discountPct > 0 && it.price < it.listPrice); } // price=0(100%OFF)もセール扱い
@@ -1251,7 +1307,7 @@
     else {
       var tab = null; tabs.forEach(function (t) { if (t.id === _activeTab) tab = t; });
       if (!tab) { _activeTab = 'main'; renderMain('main'); }
-      else if (tab.makerId) renderMaker(_activeTab);   // サークル作品一覧タブ
+      else if (isMakerTab_(tab)) renderMaker(_activeTab);   // サークル作品一覧タブ（1つ以上のサークル）
       else renderMain(tab.id);                          // 独立した候補リストタブ（タブ名だけのタブ）
     }
   }
@@ -1391,7 +1447,7 @@
       }
       function addTab(makerId, makerName) {
         var tabs = lsGet(K_TABS, '[]');
-        var tab = { id: 'ct' + new Date().getTime(), name: name || makerName || ('サークル' + makerId), makerId: makerId, makerName: makerName || '' };
+        var tab = { id: 'ct' + new Date().getTime(), name: name || makerName || ('サークル' + makerId), makerId: makerId, makerName: makerName || '', makers: [{ id: String(makerId), name: makerName || '' }] };
         tabs.push(tab); lsSet(K_TABS, tabs);
         trackMaker(makerId, makerName || tab.name); // 登録した時点でPCバッチの販売数自動取得の対象にする
         _activeTab = tab.id; render();
@@ -2016,14 +2072,19 @@
     $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
     bindPcRun_($('candPcRun'), 'candMakerList');
     $('candEditTab').addEventListener('click', function () { showEditTabForm(tab); });
-    fetchMakerItems(tab.makerId, _sort, function (items, err) {
+    var makerIds = makerIdsOf(tab);
+    fetchMakerItemsMulti(makerIds, _sort, function (items, err) {
       var el = $('candMakerList');
       if (!el || _activeTab !== tabId) return;
       if (err) { el.innerHTML = '<p class="hint" style="padding:8px;">⚠️ ' + esc(err) + '</p>'; return; }
-      // タブ名が自動生成の「サークルNNN」のままで、一覧からサークル名が取れたら本名へ自動修正。
-      if (items && items.length && items[0].makerName && /^サークル\d+$/.test(tab.name || '')) {
+      // タブ名が自動生成の「サークルNNN」のままで、一覧からサークル名が取れたら本名へ自動修正（単一サークルのタブのみ）。
+      if (makerIds.length === 1 && items && items.length && items[0].makerName && /^サークル\d+$/.test(tab.name || '')) {
         var tabs2 = lsGet(K_TABS, '[]');
-        tabs2.forEach(function (t) { if (t.id === tabId) { t.name = items[0].makerName; t.makerName = items[0].makerName; } });
+        tabs2.forEach(function (t) {
+          if (t.id !== tabId) return;
+          t.name = items[0].makerName; t.makerName = items[0].makerName;
+          if (Array.isArray(t.makers) && t.makers.length) t.makers[0].name = items[0].makerName;
+        });
         lsSet(K_TABS, tabs2);
         render(); return; // タブバーを本名で再描画（この後の描画は再入で行われる）
       }
@@ -2042,7 +2103,7 @@
       var salesMiss = missingCount(topCids);
       var head = '<div style="display:flex;justify-content:flex-end;padding:2px 6px 6px;">' +
         '<button id="candBulkToCand" type="button" class="ghost" style="width:auto;margin:0;font-size:12.5px;padding:6px 10px;">💡 全作品を候補に追加</button></div>' +
-        '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
+        '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (makerIds.length > 1 ? '(' + makerIds.length + 'サークル)' : '') + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
         (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます(PCの電源が必要)。' : '') + '</p>';
       el.innerHTML = head + arr.map(function (it) {
         var btn = _showHidden
@@ -2071,66 +2132,90 @@
     }, force);
   }
 
-  // ── タブ編集モーダル（タブ名の変更・サークルの貼り替え・削除） ──
+  // ── タブ編集モーダル（タブ名の変更・サークルの追加/削除・タブ削除） ──
+  //   サークルタブは1タブに複数サークルを持てる。現在のサークルを一覧表示し、追加/個別削除できる。
   function showEditTabForm(tab) {
     var f = $('candEditForm');
     if (!f) return;
-    var isMaker = !!tab.makerId; // サークルタブのみ「貼り替え」欄を出す（候補タブは名前のみ編集）
+    // 最新のtab状態を取り直す（追加/削除で再入した時に反映）
+    lsGet(K_TABS, '[]').forEach(function (t) { if (t.id === tab.id) tab = t; });
+    var isMaker = isMakerTab_(tab); // サークルタブのみ「サークル一覧＋追加」欄を出す（候補タブは名前のみ編集）
+    var makers = makersOf(tab);
+    var makersHtml = '';
+    if (isMaker) {
+      makersHtml =
+        '<label class="hint" style="display:block;margin:8px 0 2px;">このタブに表示するサークル（複数可）</label>' +
+        '<div id="candEditMakers">' + makers.map(function (m) {
+          return '<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">' +
+            '<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + CIRCLE_ICON + ' ' + esc(m.name || ('サークル' + m.id)) + ' <span class="hint">(ID ' + esc(m.id) + ')</span></span>' +
+            '<button type="button" class="ghost cand-maker-del" data-mkid="' + esc(m.id) + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:4px 9px;color:#c0392b;border-color:#c0392b;"' + (makers.length <= 1 ? ' disabled title="最後の1件は外せません(タブ削除を使ってください)"' : '') + '>🗑</button>' +
+          '</div>';
+        }).join('') + '</div>' +
+        '<label class="hint" style="display:block;margin:8px 0 2px;">サークルを追加（ID / サークルURL / 作品URL）</label>' +
+        pasteRow_('<input id="candEditSrc" type="text" inputmode="url" autocomplete="off" placeholder="追加したいサークルを入れて「＋ 追加」" style="flex:1;">', 'candEditSrc') +
+        '<button id="candEditAddMaker" type="button" class="ghost" style="width:max-content;margin:6px 0 0;font-size:12.5px;padding:6px 11px;">＋ サークルを追加</button>';
+    }
     f.innerHTML = '<div class="card" style="margin:8px 0;">' +
       '<div class="field-label" style="margin-top:0;">✏️ タブを編集</div>' +
       '<label class="hint" style="display:block;margin-bottom:2px;">タブ名（長い場合は短く編集できます）</label>' +
       '<input id="candEditName" type="text" autocomplete="off" value="' + esc(tab.name) + '">' +
-      (isMaker ?
-        '<label class="hint" style="display:block;margin:8px 0 2px;">サークルを貼り替える（任意：ID/サークルURL/作品URL）</label>' +
-        pasteRow_('<input id="candEditSrc" type="text" inputmode="url" autocomplete="off" placeholder="変更しないなら空のまま" style="flex:1;">', 'candEditSrc') : '') +
+      makersHtml +
       '<div style="display:flex;gap:8px;margin-top:8px;">' +
       '<button id="candEditSave" type="button" class="primary" style="flex:1;font-size:.9rem;padding:10px;">保存</button>' +
       '<button id="candEditDel" type="button" class="ghost" style="flex:0 0 auto;width:auto;color:#c0392b;border-color:#c0392b;">タブ削除</button>' +
       '<button id="candEditCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">やめる</button>' +
       '</div><div id="candEditMsg" class="hint" style="min-height:1.3em;"></div></div>';
     wirePaste_(f);
-    $('candEditCancel').addEventListener('click', function () { f.innerHTML = ''; });
+    $('candEditCancel').addEventListener('click', function () { f.innerHTML = ''; render(); });
+    // サークルを個別に外す（他タブが使っていなければ追跡解除）。外したら編集フォームを再描画。
+    f.querySelectorAll('.cand-maker-del').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (b.disabled) return;
+        var mkid = String(b.getAttribute('data-mkid'));
+        var cur = makersOf(tab);
+        if (cur.length <= 1) return;
+        if (!window.confirm('このサークルをタブから外しますか？')) return;
+        writeMakers_(tab.id, cur.filter(function (m) { return String(m.id) !== mkid; }));
+        if (!lsGet(K_TABS, '[]').some(function (t) { return makerIdsOf(t).indexOf(mkid) >= 0; })) trackMaker(mkid, '', true);
+        showEditTabForm(tab);
+      });
+    });
+    // サークルを追加（重複は弾く）。追加したら編集フォームを再描画。
+    var addBtn = $('candEditAddMaker');
+    if (addBtn) addBtn.addEventListener('click', function () {
+      var src = ($('candEditSrc').value || '').trim();
+      var msg = $('candEditMsg');
+      if (!src) { msg.textContent = '⚠️ 追加するサークル情報を入れてください'; return; }
+      msg.textContent = '⏳ サークルを特定中…';
+      resolveMakerId(src, function (makerId, makerName, err) {
+        if (!makerId) { msg.textContent = '⚠️ ' + err; return; }
+        var cur = makersOf(tab);
+        if (cur.some(function (m) { return String(m.id) === String(makerId); })) { msg.textContent = '⚠️ そのサークルは既に追加済みです'; return; }
+        cur.push({ id: String(makerId), name: makerName || ('サークル' + makerId) });
+        writeMakers_(tab.id, cur);
+        trackMaker(makerId, makerName || ''); // 追加した時点でPCバッチの販売数自動取得の対象にする
+        showEditTabForm(tab);
+      });
+    });
     $('candEditDel').addEventListener('click', function () {
       if (!window.confirm('タブ「' + tab.name + '」を削除しますか？' + (isMaker ? '(非表示リストも消えます)' : '(このタブに貯めた候補も消えます)'))) return;
       var rest = lsGet(K_TABS, '[]').filter(function (t) { return t.id !== tab.id; });
       lsSet(K_TABS, rest);
       try { localStorage.removeItem(hiddenKey(tab.id)); } catch (e) {}
       try { localStorage.removeItem(itemsKey(tab.id)); } catch (e) {} // 候補タブの保存アイテムも破棄
-      // 他タブが同じサークルを使っていなければ、PCバッチの追跡対象から外す
-      if (tab.makerId && !rest.some(function (t) { return t.makerId === tab.makerId; })) trackMaker(tab.makerId, '', true);
+      // 他タブが使っていないサークルはPCバッチの追跡対象から外す
+      makerIdsOf(tab).forEach(function (mid) {
+        if (!rest.some(function (t) { return makerIdsOf(t).indexOf(mid) >= 0; })) trackMaker(mid, '', true);
+      });
       _activeTab = 'main'; render();
     });
     $('candEditSave').addEventListener('click', function () {
       var name = ($('candEditName').value || '').trim();
-      var srcEl = $('candEditSrc');
-      var src = srcEl ? (srcEl.value || '').trim() : ''; // 候補タブには貼り替え欄が無い
-      var msg = $('candEditMsg');
-      function applyTab(makerId, makerName) {
-        var tabs = lsGet(K_TABS, '[]');
-        var oldMakerId = tab.makerId;
-        tabs.forEach(function (t) {
-          if (t.id !== tab.id) return;
-          t.name = name || makerName || t.name;
-          if (makerId) { t.makerId = makerId; if (makerName) t.makerName = makerName; }
-        });
-        lsSet(K_TABS, tabs);
-        // サークル貼り替え時: 新サークルを追跡登録し、旧サークルは他タブが使っていなければ解除
-        if (makerId && makerId !== oldMakerId) {
-          trackMaker(makerId, makerName);
-          if (oldMakerId && !tabs.some(function (t) { return t.makerId === oldMakerId; })) trackMaker(oldMakerId, '', true);
-        }
-        render(); // タブバー再描画＋一覧再取得
-      }
-      if (src) {
-        msg.textContent = '⏳ サークルを特定中…';
-        resolveMakerId(src, function (makerId, makerName, err) {
-          if (!makerId) { msg.textContent = '⚠️ ' + err; return; }
-          applyTab(makerId, makerName);
-        });
-      } else {
-        if (!name) { msg.textContent = '⚠️ タブ名を入れてください'; return; }
-        applyTab(null, '');
-      }
+      if (!name) { $('candEditMsg').textContent = '⚠️ タブ名を入れてください'; return; }
+      var tabs = lsGet(K_TABS, '[]');
+      tabs.forEach(function (t) { if (t.id === tab.id) t.name = name; });
+      lsSet(K_TABS, tabs);
+      f.innerHTML = ''; render(); // タブバー再描画＋一覧再取得
     });
   }
 
@@ -2141,7 +2226,7 @@
       ? '<span class="cand-list-price">' + yen(it.listPrice) + '</span> <b class="cand-sale">' + yen(it.price) + '</b> <span class="cand-off">' + it.discountPct + '%off</span>'
       : '<b>' + yen(it.price != null ? it.price : it.listPrice) + '</b>');
     var sub = [];
-    if (it.author || it.makerName) sub.push('🏷 ' + esc(it.author || it.makerName));
+    if (it.author || it.makerName) sub.push(CIRCLE_ICON + ' ' + esc(it.author || it.makerName));
     if (it.date) sub.push('発売 ' + esc(fmtDate(it.date)));
     if (it.addedAt) sub.push('<span class="cand-added">追加 ' + esc(fmtTs(it.addedAt)) + '</span>');
     var ws = deriveWorkState_(it.date);
