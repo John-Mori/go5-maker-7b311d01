@@ -526,7 +526,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .pd-imgs .hint{color:#9fb0c3;}
 .pd-img{max-width:46%;max-height:38vh;border-radius:8px;border:1px solid rgba(255,255,255,.18);cursor:zoom-in;}
 /* 右下の管理行：非表示／削除を作品・投稿編集とは別の行で右寄せ */
-.cand-manage-row{display:flex;align-items:flex-start;gap:6px;margin-top:4px;}
+.cand-manage-row{flex-basis:100%;width:100%;display:flex;align-items:flex-start;gap:6px;margin-top:4px;} /* カード全幅の行＝コメントが画像の下(左端)から広く使えて1行に収まる */
 .cand-manage-spacer{flex:1 1 auto;}
 /* コメントを 非表示／🗑 と同じ行に（左＝コメント・右＝ボタン）。左寄せ・省略しない（長ければ折り返して全文表示）。 */
 .cand-manage-comment{flex:1 1 auto;min-width:0;font-size:13px;color:#111;font-weight:700;line-height:1.35;white-space:normal;word-break:break-word;text-align:left;overflow:visible;padding-top:5px;} /* 左寄せ・省略しない（折り返し可）・ボタンと縦位置を合わせる */

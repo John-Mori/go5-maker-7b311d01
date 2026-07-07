@@ -2193,11 +2193,12 @@
           '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">🖼 投稿編集' + (hasRef ? '✓' : '') + '</button>' +
           '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>' +
         '</div>' +
-        // メモ(水色)＝コメントの上（管理行の上）に表示。
-        (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '') +
-        // 管理行：コメント（左・左寄せ・省略しない）＋ 非表示／🗑（右）。コメントを非表示と同じ列に置き、画像との余白を詰める。
-        '<div class="cand-manage-row">' + (refCmt ? '<span class="cand-manage-comment">' + esc(refCmt) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>' +
-      '</div>' + '</div>';
+      '</div>' +
+      // メモ(水色)＝コメントの上。次の管理行はカード全幅（画像の下まで）＝コメントが左端(画像の下)から広く使え1行に収まる。
+      (refMemo ? '<div class="cand-refimg-comment cand-refimg-memo">' + esc(refMemo) + '</div>' : '') +
+      // 管理行：コメント（左・左寄せ・省略しない）＋ 非表示／🗑（右）。カード全幅なので文字/画像の大きさを変えず広く表示できる。
+      '<div class="cand-manage-row">' + (refCmt ? '<span class="cand-manage-comment">' + esc(refCmt) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>' +
+      '</div>';
   }
 
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
