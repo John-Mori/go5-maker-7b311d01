@@ -27,12 +27,11 @@
   const TSCALE_MIN = 0.7, TSCALE_MAX = 1.5;      // 大タイトルの拡大率（1.0＝従来。影・帯は文字サイズ比なので連動）
   const IMG_MIN = -0.15, IMG_MAX = 0.15;         // 前景画像だけの上下オフセット（基準フレーム高さ比・文字とは独立）
 
-  // 縦オフセット（すべて基準フレーム高さ比）。段別は「文字」と「帯」を別個に持ち、互いに独立。
-  // 文字オフセットはその段の文字描画位置にのみ加算し、段の送り（次段Y）には影響させない＝他段は不動。
+  // 縦オフセット（すべて基準フレーム高さ比）。段別は「文字」1軸のみ＝帯は文字に統合され一緒に動く。
+  // 段別オフセットはその段の描画位置にのみ加算し、段の送り（次段Y）には影響させない＝他段は不動。
   const OFF = {
     whole: VOFF_DEFAULT,
-    textAuthor: 0, textDetail: 0, textTitle: 0,  // 各段の「文字」だけ
-    bandAuthor: 0, bandDetail: 0, bandTitle: 0,  // 各段の「黒帯」だけ
+    textAuthor: 0, textDetail: 0, textTitle: 0,  // 各段の位置（帯＋文字を一体で動かす）
     bandPad: 0,                                  // 黒帯の余白（全段共通で厚みを足す）
     rowGap: 0,                                   // 段と段の間に足す縦スペース
     titleScale: 1,                               // 大タイトルの拡大率（1.0＝従来。影・帯は px 比で自動連動）
@@ -175,24 +174,24 @@
   }
 
   // 通常テキストブロック（中央寄せ・帯・白文字＋黒縁）。
-  // bandOff＝この段の帯だけ／textOff＝この段の文字だけ の縦オフセット比（互いに独立）。
-  function drawBlock(lines, y, px, pad, gap, bandAlpha, bandOff, textOff, shadowScale) {
+  // off＝この段の縦オフセット比。帯と文字を一体で動かす（帯は常に文字を包む＝各段に統合）。
+  //   送りy（次段位置）には反映しない＝この段を動かしても他段は不動。
+  function drawBlock(lines, y, px, pad, gap, bandAlpha, off, shadowScale) {
     setFont(px, 700);
     ctx.textBaseline = "top";
     const sw = Math.max(U(2), px / 12);
     const th = px * 1.04;
-    const bandY = H * (bandOff || 0);  // 帯だけの縦シフト
-    const txtY = H * (textOff || 0);   // 文字だけの縦シフト（送り y には反映しない）
+    const offY = H * (off || 0);  // 帯＋文字を一緒に縦シフト
     for (const ln of lines) {
       const tw = ctx.measureText(ln).width;
       const x = (W - tw) / 2;
       const mB = sw;  // 縁取り分だけ帯を広げ、文字が帯からはみ出ないようにする
       const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : bandAlpha;  // テーマで固定不透明度があれば優先
       ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
-      roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
+      roundRect(x - pad - mB, y - pad * 0.45 - mB + offY, tw + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5);
       ctx.fill();
-      paintGlyph(ln, x, y + txtY, px, sw, shadowScale);
-      y += th + pad + gap;  // 送りは基準位置のまま（文字オフセットの影響を受けない＝他段に波及しない）
+      paintGlyph(ln, x, y + offY, px, sw, shadowScale);
+      y += th + pad + gap;  // 送りは基準位置のまま（オフセットの影響を受けない＝他段に波及しない）
     }
     return y;
   }
@@ -220,11 +219,11 @@
   }
 
   // 2段目（誘導文）：「：」→⋮、「説明」→≡説明 をインライン描画。
-  // bandOff＝この段の帯だけ／textOff＝この段の文字（アイコン含む）だけ の縦オフセット比。
-  function drawDetail(text, y, px, pad, bandOff, textOff) {
+  // off＝この段の縦オフセット比。帯と文字（アイコン含む）を一体で動かす。
+  function drawDetail(text, y, px, pad, off) {
     setFont(px, 700);
     ctx.textBaseline = "middle";
-    const sw = Math.max(U(2), px / 12), th = px * 1.04, ym = y + th / 2 + H * (textOff || 0);
+    const sw = Math.max(U(2), px / 12), th = px * 1.04, ym = y + th / 2 + H * (off || 0);
     const iconPad = px * 0.16, kebabW = px * 0.42, hamW = px * 0.80;
     // トークン分解
     const segs = []; let i = 0; const s = String(text);
@@ -238,7 +237,7 @@
     const total = widths.reduce((a, b) => a + b, 0);
     let x = (W - total) / 2;
     const mB = sw;  // 縁取り分だけ帯を広げる
-    const bandY = H * (bandOff || 0);  // 軸2：この段の帯だけを上下（文字は動かさない）
+    const bandY = H * (off || 0);  // 帯も文字と同じオフセットで一緒に動く（各段に統合）
     const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : 175;  // テーマで固定不透明度があれば優先
     ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
     roundRect(x - pad - mB, y - pad * 0.45 - mB + bandY, total + (pad + mB) * 2, th + pad * 0.9 + mB * 2, pad + mB * 0.5); ctx.fill();
@@ -278,7 +277,7 @@
   }
   // 2行モードの大タイトル：帯は「両行をひとまとめに囲う1枚」。影の位置分離はせず、帯と文字は同じ
   //   blockOff（＝文字オフセット）で一緒に動く＝拡大/移動しても影が同量ずれる。文字は帯の中央に来る。
-  function drawTitleBlockUnified(lines, y, px, pad, gap, shadowScale, blockOff) {
+  function drawTitleBlockUnified(lines, y, px, pad, gap, shadowScale, blockOff, bandAlpha) {
     setFont(px, 700);
     ctx.textBaseline = "top";
     const sw = Math.max(U(2), px / 12);
@@ -287,7 +286,7 @@
     let maxTw = 0;
     for (let i = 0; i < lines.length; i++) { const tw = ctx.measureText(lines[i]).width; if (tw > maxTw) maxTw = tw; }
     const blockH = lines.length * th + (lines.length - 1) * gap;
-    const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : 195;
+    const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : (bandAlpha || 195);
     ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
     // 文字全体を中央で囲う1枚の帯（サイズを文字に合わせる＝文字が中央に来る）
     roundRect((W - maxTw) / 2 - pad - mB, y - pad * 0.45 - mB + offY, maxTw + (pad + mB) * 2, blockH + pad * 0.9 + mB * 2, pad + mB * 0.5);
@@ -302,6 +301,8 @@
   }
   // 3段目コメントを「2行モード」で描くか（④コメント横のチェックボックス）。
   function isTwoLineMode() { var c = document.getElementById("topTwoLine"); return !!(c && c.checked); }
+  // ①作者も「2行モード」で描くか（作者欄横のチェックボックス。コメントと同仕様）。
+  function isAuthorTwoLineMode() { var c = document.getElementById("authorTwoLine"); return !!(c && c.checked); }
 
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
@@ -312,9 +313,15 @@
     if (author) {
       author = author.replace(/^(作者|引用)\s*[:：]\s*/, "");      // 既存プレフィックスを一旦除去
       author = theme().authorPrefix + author;                      // テーマのプレフィックスを常に表示（acc1=作者：/acc2=引用：）
-      y = drawBlock(wrap(author, fA, maxw), y, fA, U(11) + padExtra, U(3), 175, OFF.bandAuthor, OFF.textAuthor) + U(2) + rowGap;
+      if (isAuthorTwoLineMode()) {
+        // 作者も2行モード（コメントと同仕様）：ユーザーの改行(\n)で最大2行・中央揃え・帯は両行を1枚で囲う。
+        var fa2 = fitTwoLines(author, fA, maxw, U(11));
+        y = drawTitleBlockUnified(fa2.lines, y, fa2.px, U(11) + padExtra, U(3), 1, OFF.textAuthor, 175) + U(2) + rowGap;
+      } else {
+        y = drawBlock(wrap(author, fA, maxw), y, fA, U(11) + padExtra, U(3), 175, OFF.textAuthor) + U(2) + rowGap;
+      }
     }
-    if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.bandDetail, OFF.textDetail) + U(4) + rowGap;
+    if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.textDetail) + U(4) + rowGap;
     if (top) {
       // まず幅に収まる基準サイズを求め、その上に「大タイトル拡大」を掛ける＝拡大が幅上限で打ち消されない。
       // 影も同じ倍率(ss)で拡大（drawBlock→paintGlyphへ伝播）。
@@ -327,7 +334,7 @@
       } else {
         var f = fitOneLine(top, fT, maxw, U(14));
         var tpx = Math.max(1, Math.round(f.px * tScale));
-        y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.bandTitle, OFF.textTitle, tScale) + U(4);
+        y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale) + U(4);
       }
     }
   }
@@ -397,6 +404,21 @@
   }
   // ④コメントは textarea 化＝入力中(改行含む)も即プレビュー反映（2行モードの改行が2行目に出るのを確認しやすく）。
   els.top.addEventListener("input", preview);
+
+  // ①作者の「2行モード」チェックボックス（コメントと同仕様）：保存値を復元し、切替でプレビュー再描画。
+  const authorTwoLineEl = document.getElementById("authorTwoLine");
+  if (authorTwoLineEl) {
+    try { authorTwoLineEl.checked = localStorage.getItem("movie_author_two_line") === "1"; } catch (e) {}
+    const syncAuthorRows = () => { if (els.author && els.author.tagName === "TEXTAREA") els.author.rows = authorTwoLineEl.checked ? 2 : 1; };
+    syncAuthorRows(); // 保存状態に応じて①行/②行のテキストボックスに
+    authorTwoLineEl.addEventListener("change", () => {
+      try { localStorage.setItem("movie_author_two_line", authorTwoLineEl.checked ? "1" : "0"); } catch (e) {}
+      syncAuthorRows();
+      preview();
+    });
+  }
+  // 作者も textarea 化＝入力中(改行含む)も即プレビュー反映。
+  els.author.addEventListener("input", preview);
 
   function setStatus(m) { els.status.textContent = m; }
   function sanitize(t) {
@@ -514,9 +536,6 @@
     { key: "textAuthor", m: "taMinus",    p: "taPlus",    v: "taVal",    ls: "preview_text_author", lsDef: "preview_text_author_default", legacy: null,             def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
     { key: "textDetail", m: "tdMinus",    p: "tdPlus",    v: "tdVal",    ls: "preview_text_detail", lsDef: "preview_text_detail_default", legacy: null,             def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
     { key: "textTitle",  m: "ttMinus",    p: "ttPlus",    v: "ttVal",    ls: "preview_text_title",  lsDef: "preview_text_title_default",  legacy: null,             def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
-    { key: "bandAuthor", m: "baMinus",    p: "baPlus",    v: "baVal",    ls: "preview_band_author", lsDef: "preview_band_author_default", legacy: "preview_band_y", def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
-    { key: "bandDetail", m: "bdMinus",    p: "bdPlus",    v: "bdVal",    ls: "preview_band_detail", lsDef: "preview_band_detail_default", legacy: "preview_band_y", def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
-    { key: "bandTitle",  m: "btMinus",    p: "btPlus",    v: "btVal",    ls: "preview_band_title",  lsDef: "preview_band_title_default",  legacy: "preview_band_y", def: 0,            min: ROW_MIN, max: ROW_MAX,     step: 0.0025, signed: true  },
     { key: "bandPad",    m: "bpMinus",    p: "bpPlus",    v: "bpVal",    ls: "preview_band_pad",    lsDef: "preview_band_pad_default",    legacy: null,             def: 0,            min: 0,       max: BANDPAD_MAX, step: 0.0025, signed: false },
     { key: "rowGap",     m: "rgMinus",    p: "rgPlus",    v: "rgVal",    ls: "preview_row_gap",     lsDef: "preview_row_gap_default",     legacy: null,             def: 0,            min: 0,       max: ROWGAP_MAX,  step: 0.005,  signed: false },
     { key: "titleScale", m: "tsMinus",    p: "tsPlus",    v: "tsVal",    ls: "preview_title_scale", lsDef: "preview_title_scale_default", legacy: null,             def: 1,            min: TSCALE_MIN, max: TSCALE_MAX, step: 0.05,   signed: false },
