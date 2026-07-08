@@ -1,0 +1,29 @@
+# sync-worker — 全端末クラウド同期（状態=KV / 画像=R2 / トークン認証）
+# ワーカー名＝サブドメイン部。短い中立名。
+name = "go5-sync"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# ── 非秘密の設定（秘密はここに書かない。SYNC_TOKEN は wrangler secret put で登録）──
+[vars]
+# フロント(GitHub Pages)のOrigin。ローカル検証も使うならカンマで足す。"*" で全許可。
+#   例: "https://john-mori.github.io,http://localhost:8124"
+ALLOWED_ORIGINS = "https://john-mori.github.io"
+# 1日あたりの push/画像PUT 上限（レート制限。KV未設定なら無効）
+DAILY_CAP = "5000"
+
+# ── KV（状態JSON＋version＋レート制限。SETUP.md で作成して id を貼る）──
+[[kv_namespaces]]
+binding = "SYNC"
+id = "（CloudflareでKV namespaceを作成して貼る）"
+
+# ── R2（画像バイトを content-hash キーで保存。SETUP.md でバケット作成）──
+[[r2_buckets]]
+binding = "SYNC_IMAGES"
+bucket_name = "go5-sync-images"
+
+# ── Secrets（コマンドで登録。ここには書かない）──
+#   wrangler secret put SYNC_TOKEN
+#   （フロントの同期設定に入れるトークンと同じ値。ソフト鍵＝クライアントに載る。
+#     ※本当の鍵＝アプリPW等はクライアントでパスフレーズ暗号化してから同期するので、
+#       SYNC_TOKEN が漏れても平文の鍵は漏れない設計）
