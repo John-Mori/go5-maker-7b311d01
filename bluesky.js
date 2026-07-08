@@ -430,33 +430,44 @@
   if (els.discountSelPc) els.discountSelPc.addEventListener('change', applyDiscountPc);
   if (els.discountNewPc) els.discountNewPc.addEventListener('change', applyDiscountPc);
 
-  // ---- 🔥 割引一覧(セール)ページのアフィリンクを本文へ添付（トグル） ----
-  //   一覧/キャンペーンURLは cid が無く作品リンク生成では弾かれるため buildFanzaListLink で包む。
+  // ---- 🔥 割引一覧(セール)ページのアフィリンクを本文へ添付（トグル・短縮あり） ----
+  //   ・一覧/キャンペーンURLは cid が無く作品リンク生成では弾かれるため buildFanzaListLink で包む。
+  //   ・★このセール会場リンクだけ短縮する（作品リンク・本文は生のまま＝ユーザー指定）。
+  //     短縮は shortenUrl(自前worker→da.gd→TinyURL、全滅時はフルURL)。302素通しなので af_id は保持。
+  //   ・除去は見出し行(DISCOUNT_LIST_LEAD)を目印にする（短縮でURL文字列が変わるため）。
   var DISCOUNT_LIST_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/';
-  var DISCOUNT_LIST_MARK = 'campaign%3Dgain'; // 本文内の一覧リンク検出用（af_id非依存の目印）
+  var DISCOUNT_LIST_LEAD = '🔥大幅割引セール中の同人はこちら';
   function dlStatus_(msg) { var s = document.getElementById('postStatus'); if (s) s.textContent = msg; else try { window.alert(msg); } catch (e) {} }
+  function setDiscountBody_(v) { els.text.value = v; saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus(); }
   function toggleDiscountList_() {
     if (!els.text) return;
-    var txt = els.text.value || '';
-    if (txt.indexOf(DISCOUNT_LIST_MARK) >= 0) {
-      // 添付済み→一覧リンク行（と直前の🔥見出し行）を除去して外す
-      var lines = txt.split('\n'), kept = [];
-      for (var i = 0; i < lines.length; i++) {
-        if (lines[i].indexOf(DISCOUNT_LIST_MARK) >= 0) { if (kept.length && /^🔥/.test(kept[kept.length - 1])) kept.pop(); continue; }
-        kept.push(lines[i]);
-      }
-      els.text.value = kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '');
+    var lines = (els.text.value || '').split('\n');
+    var leadIdx = lines.indexOf(DISCOUNT_LIST_LEAD);
+    if (leadIdx >= 0) {
+      // 添付済み→見出し行＋直後のリンク行を除去
+      var n = (leadIdx + 1 < lines.length && /^https?:\/\//.test((lines[leadIdx + 1] || '').trim())) ? 2 : 1;
+      lines.splice(leadIdx, n);
+      setDiscountBody_(lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, ''));
       dlStatus_('割引一覧リンクを外しました。');
-    } else {
-      var afId = ''; try { afId = (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) {}
-      if (!afId) { dlStatus_('先に「AFIリンク」タブで af_id を設定してください(未設定だと成果が付きません)。'); return; }
-      var r = window.buildFanzaListLink ? window.buildFanzaListLink(DISCOUNT_LIST_URL, afId) : null;
-      if (!r || !r.ok) { dlStatus_('割引一覧リンクを生成できませんでした。'); return; }
-      var base = txt.replace(/\s+$/, '');
-      els.text.value = (base ? base + '\n\n' : '') + '🔥大幅割引セール中の同人はこちら\n' + r.link;
-      dlStatus_('割引一覧リンクを本文末尾に添えました。');
+      return;
     }
-    saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
+    var afId = ''; try { afId = (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) {}
+    if (!afId) { dlStatus_('先に「AFIリンク」タブで af_id を設定してください(未設定だと成果が付きません)。'); return; }
+    var r = window.buildFanzaListLink ? window.buildFanzaListLink(DISCOUNT_LIST_URL, afId) : null;
+    if (!r || !r.ok) { dlStatus_('割引一覧リンクを生成できませんでした。'); return; }
+    var btn = document.getElementById('bskyDiscountListBtn');
+    if (btn) btn.disabled = true;
+    dlStatus_('割引一覧リンクを短縮中…');
+    shortenUrl(r.link).then(function (shortUrl) {
+      var link = shortUrl || r.link; // 短縮全滅時はフルのアフィリンク（af_idは同じく有効）
+      var base = (els.text.value || '').replace(/\s+$/, '');
+      setDiscountBody_((base ? base + '\n\n' : '') + DISCOUNT_LIST_LEAD + '\n' + link);
+      dlStatus_(shortUrl ? '割引一覧(短縮)リンクを本文末尾に添えました。' : '割引一覧リンクを添えました(短縮できずフルURL)。');
+    }).catch(function () {
+      var base = (els.text.value || '').replace(/\s+$/, '');
+      setDiscountBody_((base ? base + '\n\n' : '') + DISCOUNT_LIST_LEAD + '\n' + r.link);
+      dlStatus_('割引一覧リンクを添えました(短縮できずフルURL)。');
+    }).then(function () { if (btn) btn.disabled = false; });
   }
   var _dlBtn = document.getElementById('bskyDiscountListBtn');
   if (_dlBtn) _dlBtn.addEventListener('click', toggleDiscountList_);
