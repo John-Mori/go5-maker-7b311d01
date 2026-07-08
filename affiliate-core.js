@@ -42,6 +42,26 @@ function buildAffiliateLink(rawUrl, afId) {
 }
 
 /**
+ * 一覧・キャンペーンページ用アフィリンク（cid不要＝作品ページ以外を包む）。
+ * 作品リンク(buildAffiliateLink)は cid 必須で一覧URLを弾くため、こちらで al.fanza の
+ * lurl ラッパだけを作る。計測パラメータ(utm等)は normalizeWorkUrl で除去。
+ * @param {string} rawUrl - 一覧/キャンペーンページのURL（utm付きでも可）
+ * @param {string} afId   - アフィID（空なら【アフィID】で構造プレビュー）
+ * @returns {{ok:true, link:string, clean:string}|{ok:false, error:'empty'|'bad_url'}}
+ */
+function buildFanzaListLink(rawUrl, afId) {
+  const raw = (rawUrl || '').trim();
+  if (!raw) return { ok: false, error: 'empty' };
+  let clean = normalizeWorkUrl(raw); // utm等を除去（?/#以降を落とす）
+  if (!clean) return { ok: false, error: 'bad_url' };
+  if (!clean.endsWith('/')) clean += '/';
+  const lurl = encodeURIComponent(clean);
+  const af = (afId && afId.trim()) ? afId.trim() : '【アフィID】';
+  const link = `https://al.fanza.co.jp/?lurl=${lurl}&af_id=${af}&ch=toolbar&ch_id=link`;
+  return { ok: true, link, clean };
+}
+
+/**
  * アフィリンク付きURL・計測パラメータ付きURLを「素の作品URL」に正規化する。
  * - al.fanza.co.jp/?lurl=… → lurl をデコードして取り出す
  * - ?以降・#以降の計測パラメータを除去（dmm系は cid= がパス側にあるため安全）
@@ -61,10 +81,11 @@ function normalizeWorkUrl(rawUrl) {
 // ブラウザ環境向けグローバル公開
 if (typeof window !== 'undefined') {
   window.buildAffiliateLink = buildAffiliateLink;
+  window.buildFanzaListLink = buildFanzaListLink;
   window.normalizeWorkUrl = normalizeWorkUrl;
 }
 
 // Node.js（CommonJS）向けエクスポート
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildAffiliateLink, normalizeWorkUrl };
+  module.exports = { buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl };
 }
