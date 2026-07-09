@@ -346,9 +346,10 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* 🗑を押したとき、削除される範囲(この行)を赤枠で明示（確認ダイアログ中も見える） */
 .vrow-deleting{outline:2px solid #dc465a;outline-offset:1px;}
 /* ── URL編集モーダル ── */
-.vedit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;box-sizing:border-box;}
+/* align-items:flex-start + overflow:auto＝内容が長い時にスマホでもモーダルごとスクロールできる */
+.vedit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:16px;box-sizing:border-box;overflow:auto;}
 .vedit-overlay[hidden]{display:none !important;}
-.vedit-modal{background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:20px 18px;width:100%;max-width:480px;box-sizing:border-box;}
+.vedit-modal{background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:20px 18px;width:100%;max-width:480px;box-sizing:border-box;margin:auto;}
 .vedit-title{font-size:15px;font-weight:700;color:var(--ink);margin:0 0 14px;}
 .vedit-error{font-size:12px;color:#ff7b7b;margin:0 0 12px;line-height:1.5;white-space:pre-line;}
 .vedit-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--sub);margin-bottom:12px;}
@@ -503,9 +504,10 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
   border-radius:10px;padding:12px;text-align:center;}
 
 /* ── 投稿前の編集できる確認モーダル ── */
-.pc-modal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
+/* align-items:flex-start + overflow:auto＝内容が長い時にスマホでもモーダルごとスクロールできる(.fz-overlayと同じパターン) */
+.pc-modal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:flex-start;justify-content:center;z-index:100;padding:16px;box-sizing:border-box;overflow:auto;}
 .pc-modal[hidden]{display:none;}
-.pc-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;max-width:520px;width:100%;}
+.pc-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;max-width:520px;width:100%;margin:auto;}
 .pc-title{font-weight:800;font-size:15px;margin-bottom:10px;}
 .pc-agecheck{background:rgba(224,179,65,.10);border:1px solid rgba(224,179,65,.45);border-radius:10px;padding:8px 10px;margin-bottom:10px;font-size:13px;font-weight:700;color:#e6c14e;}
 .pc-agecheck span{display:block;font-weight:400;font-size:11.5px;color:var(--sub);margin-top:3px;}

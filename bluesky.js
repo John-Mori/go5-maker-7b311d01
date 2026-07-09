@@ -430,47 +430,53 @@
   if (els.discountSelPc) els.discountSelPc.addEventListener('change', applyDiscountPc);
   if (els.discountNewPc) els.discountNewPc.addEventListener('change', applyDiscountPc);
 
-  // ---- 🔥 割引一覧(セール)ページのアフィリンクを本文へ添付（トグル・短縮あり） ----
+  // ---- 🔥 割引一覧(セール)ページのアフィリンクを本文へ添付（永続トグル・composePostTextに統合） ----
   //   ・一覧/キャンペーンURLは cid が無く作品リンク生成では弾かれるため buildFanzaListLink で包む。
   //   ・★このセール会場リンクだけ短縮する（作品リンク・本文は生のまま＝ユーザー指定）。
   //     短縮は shortenUrl(自前worker→da.gd→TinyURL、全滅時はフルURL)。302素通しなので af_id は保持。
-  //   ・除去は見出し行(DISCOUNT_LIST_LEAD)を目印にする（短縮でURL文字列が変わるため）。
+  //   ・ON/OFFは端末に永続化＋composePostText()が最後に付け足す＝「案内する作品URL」より必ず後ろに来る。
+  //     動画作成後の自動投稿(投稿確認モーダル)もcomposePostText()で本文を作るため自動的に反映される。
   var DISCOUNT_LIST_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/';
   var DISCOUNT_LIST_LEAD = '🔥大幅割引セール中の同人はこちら';
-  function dlStatus_(msg) { var s = document.getElementById('postStatus'); if (s) s.textContent = msg; else try { window.alert(msg); } catch (e) {} }
-  function setDiscountBody_(v) { els.text.value = v; saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus(); }
-  function toggleDiscountList_() {
-    if (!els.text) return;
-    var lines = (els.text.value || '').split('\n');
-    var leadIdx = lines.indexOf(DISCOUNT_LIST_LEAD);
-    if (leadIdx >= 0) {
-      // 添付済み→見出し行＋直後のリンク行を除去
-      var n = (leadIdx + 1 < lines.length && /^https?:\/\//.test((lines[leadIdx + 1] || '').trim())) ? 2 : 1;
-      lines.splice(leadIdx, n);
-      setDiscountBody_(lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, ''));
-      dlStatus_('割引一覧リンクを外しました。');
-      return;
-    }
-    var afId = ''; try { afId = (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) {}
-    if (!afId) { dlStatus_('先に「AFIリンク」タブで af_id を設定してください(未設定だと成果が付きません)。'); return; }
-    var r = window.buildFanzaListLink ? window.buildFanzaListLink(DISCOUNT_LIST_URL, afId) : null;
-    if (!r || !r.ok) { dlStatus_('割引一覧リンクを生成できませんでした。'); return; }
-    var btn = document.getElementById('bskyDiscountListBtn');
-    if (btn) btn.disabled = true;
-    dlStatus_('割引一覧リンクを短縮中…');
-    shortenUrl(r.link).then(function (shortUrl) {
-      var link = shortUrl || r.link; // 短縮全滅時はフルのアフィリンク（af_idは同じく有効）
-      var base = (els.text.value || '').replace(/\s+$/, '');
-      setDiscountBody_((base ? base + '\n\n' : '') + DISCOUNT_LIST_LEAD + '\n' + link);
-      dlStatus_(shortUrl ? '割引一覧(短縮)リンクを本文末尾に添えました。' : '割引一覧リンクを添えました(短縮できずフルURL)。');
-    }).catch(function () {
-      var base = (els.text.value || '').replace(/\s+$/, '');
-      setDiscountBody_((base ? base + '\n\n' : '') + DISCOUNT_LIST_LEAD + '\n' + r.link);
-      dlStatus_('割引一覧リンクを添えました(短縮できずフルURL)。');
-    }).then(function () { if (btn) btn.disabled = false; });
+  var DISC_ON_KEY = 'bsky_discount_list_on', DISC_LINK_KEY = 'bsky_discount_list_link', DISC_LINK_AF_KEY = 'bsky_discount_list_link_af';
+  function discountListOn_() { try { return localStorage.getItem(DISC_ON_KEY) === '1'; } catch (e) { return false; } }
+  function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
+  function curAfId_() { try { return (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) { return ''; } }
+  // af_idごとにキャッシュ（af_idが変わったら作り直す）。
+  function cachedDiscountLink_() {
+    var af = curAfId_(); if (!af) return '';
+    try { if (localStorage.getItem(DISC_LINK_AF_KEY) !== af) return ''; return localStorage.getItem(DISC_LINK_KEY) || ''; } catch (e) { return ''; }
   }
-  var _dlBtn = document.getElementById('bskyDiscountListBtn');
-  if (_dlBtn) _dlBtn.addEventListener('click', toggleDiscountList_);
+  function ensureDiscountLink_(onReady) {
+    var af = curAfId_(); if (!af) return;
+    if (cachedDiscountLink_()) { if (onReady) onReady(cachedDiscountLink_()); return; }
+    var r = window.buildFanzaListLink ? window.buildFanzaListLink(DISCOUNT_LIST_URL, af) : null;
+    if (!r || !r.ok) return;
+    var save = function (link) { try { localStorage.setItem(DISC_LINK_KEY, link); localStorage.setItem(DISC_LINK_AF_KEY, af); } catch (e) {} if (onReady) onReady(link); };
+    shortenUrl(r.link).then(function (s) { save(s || r.link); }).catch(function () { save(r.link); });
+  }
+  function recomposePcText_() { if (els.pcText) els.pcText.value = composePostText(); }
+  // 投稿タブ／投稿確認モーダル、どちらのチェックボックスからでも同じ状態を共有・操作できるように配線。
+  function wireDiscountListToggle_(id, statusSetter, onChanged) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.checked = discountListOn_();
+    el.addEventListener('change', function () {
+      setDiscountListOn_(el.checked);
+      ['bskyDiscountListOn', 'pcDiscountListOn'].forEach(function (oid) { var o = document.getElementById(oid); if (o && o !== el) o.checked = el.checked; });
+      if (el.checked) {
+        var af = curAfId_();
+        if (!af) { if (statusSetter) statusSetter('先に「AFIリンク」タブで af_id を設定してください(未設定だと成果が付きません)。'); }
+        else if (!cachedDiscountLink_()) {
+          if (statusSetter) statusSetter('割引一覧リンクを準備中…');
+          ensureDiscountLink_(function () { if (statusSetter) statusSetter('割引一覧リンクを本文末尾に添えます。'); if (onChanged) onChanged(); });
+        } else if (statusSetter) statusSetter('割引一覧リンクを本文末尾に添えます。');
+      } else if (statusSetter) statusSetter('割引一覧リンクを外しました。');
+      if (onChanged) onChanged();
+    });
+  }
+  wireDiscountListToggle_('bskyDiscountListOn', function (m) { var s = document.getElementById('postStatus'); if (s) s.textContent = m; }, function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); });
+  wireDiscountListToggle_('pcDiscountListOn', function (m) { var s = document.getElementById('pcDiscStatus'); if (s) s.textContent = m; }, function () { recomposePcText_(); });
 
   // ---- アカウント切替で再読込 ----
   document.addEventListener('account-changed', function () { applyAccount(); });
@@ -533,7 +539,14 @@
   function composePostText() {
     var caption = (els.text.value || '').replace(/[ \t\r\n]+$/, '');
     var link = resolveAffLink();
-    return link ? (caption + '\n\n' + link) : caption;
+    var out = link ? (caption + '\n\n' + link) : caption;
+    // 🔥割引一覧（ON中は常に「案内する作品URL」より後ろに付く＝ここで最後に追加するだけで済む）。
+    if (discountListOn_()) {
+      var dlink = cachedDiscountLink_();
+      if (dlink) out += '\n\n' + DISCOUNT_LIST_LEAD + '\n' + dlink;
+      else ensureDiscountLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }); // 未キャッシュなら取得だけ開始し、出来次第プレビュー/モーダルへ反映
+    }
+    return out;
   }
 
   // ---- アバター（実アカウントのアイコンを公開APIで取得） ----
@@ -587,6 +600,12 @@
     var html = caption ? highlightLinks(escapeHtml(caption)) : '<span class="ph">（本文）</span>';
     html += link ? ('\n\n<span class="lnk">' + escapeHtml(link) + '</span>')
                  : '\n\n<span class="ph">（投稿時にアフィリンクを自動で追加します）</span>';
+    // 🔥割引一覧（composePostTextと同じ位置＝作品URLより後ろ）をプレビューにも反映。
+    if (discountListOn_()) {
+      var dlink = cachedDiscountLink_();
+      if (dlink) html += '\n\n' + escapeHtml(DISCOUNT_LIST_LEAD) + '\n<span class="lnk">' + escapeHtml(dlink) + '</span>';
+      else html += '\n\n<span class="ph">（🔥割引一覧リンクを準備中…）</span>';
+    }
     if (els.pvBody) els.pvBody.innerHTML = html;
 
     if (els.count) { var n = countGraphemes(composePostText()); els.count.textContent = n + ' / 300'; els.count.classList.toggle('over', n > 300); }
@@ -1444,6 +1463,8 @@
       if (els.pcWorkUrl) els.pcWorkUrl.value = (els.workUrl && els.workUrl.value || '').trim();
       els.pcText.value = text;
       if (els.discountSelPc) els.discountSelPc.value = '';
+      var pcDiscEl = document.getElementById('pcDiscountListOn'); if (pcDiscEl) pcDiscEl.checked = discountListOn_(); // 現在のON/OFFを反映
+      var pcDiscStatusEl = document.getElementById('pcDiscStatus'); if (pcDiscStatusEl) pcDiscStatusEl.textContent = '';
       // 画像選択をリセット（モーダルを開くたびに白紙から選択させる）
       pcSelectedFile = null;
       if (els.pcImg) els.pcImg.value = '';
