@@ -1313,10 +1313,13 @@
 
   // announce=true（手動更新ボタン）のときは、完了時に成功/失敗を明確に表示する。
   function refresh(announce) {
-    var fixed = sanitizeOwnership_(); // ★誤アカウント混入を正へ帰還（ensureIdsより前＝偽の接頭辞を刻む前に所属確定）
-    flushSheetMovePending_(); // 前回失敗したシート行移動を自動再送（T2）
-    ensureIds(); // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
-    reconnectStrandedYt_(); // 取り残されたYT URLマップを正しいアカウントへ自己再接続（冪等）
+    // 前段（所有権サニタイズ等）のどれかが例外を投げても、保存済みデータが一覧に反映されない
+    // （＝保存はできるが表示されない）事態を防ぐため、render() 到達を最優先で保証する。
+    var fixed = false;
+    try { fixed = sanitizeOwnership_(); } catch (e) {} // ★誤アカウント混入を正へ帰還（ensureIdsより前＝偽の接頭辞を刻む前に所属確定）
+    try { flushSheetMovePending_(); } catch (e) {} // 前回失敗したシート行移動を自動再送（T2）
+    try { ensureIds(); } catch (e) {} // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
+    try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続（冪等）
     render();
     // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ（postUriアイテムのDID確定分＝混入投稿を自動帰還）。冪等。
     (function () {

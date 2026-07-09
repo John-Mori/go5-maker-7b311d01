@@ -538,8 +538,12 @@
     if (typeof buildAffiliateLink === 'function') { var r = buildAffiliateLink(url, afId); if (r && r.ok) return r.link; }
     return url;
   }
+  // 一時的に自動追加(PR行/作品リンク/割引ブロック)を無効化中（要望によりQ保存Q読込での手動運用に切替・両ch共通）。
+  // 再度有効化する場合は true に戻すだけでよい。
+  var AUTO_APPEND_ENABLED = false;
   function composePostText() {
     var caption = (els.text.value || '').replace(/[ \t\r\n]+$/, '');
+    if (!AUTO_APPEND_ENABLED) return caption;
     var link = resolveAffLink();
     // 本文に手動で作品URL/割引リンクを含めて書いた場合（例：しばらく手動投稿する場合）に、
     // 自動追加分と重複しないよう、既に本文へ含まれていればスキップする。
@@ -604,10 +608,11 @@
     var hasLink = !!(link && caption.indexOf(link) >= 0);
     var html = caption ? highlightLinks(escapeHtml(caption)) : '<span class="ph">（本文）</span>';
     // 本文に既に作品URLが含まれる場合（手動投稿など）は自動追加分を重複させない。
-    if (link && !hasLink) html += '\n\n' + highlightLinks(escapeHtml(PR_LINE_TEXT)) + '\n\n<span class="lnk">' + escapeHtml(link) + '</span>';
+    if (!AUTO_APPEND_ENABLED) { /* 自動追加を一時停止中：本文そのまま */ }
+    else if (link && !hasLink) html += '\n\n' + highlightLinks(escapeHtml(PR_LINE_TEXT)) + '\n\n<span class="lnk">' + escapeHtml(link) + '</span>';
     else if (!link) html += '\n\n<span class="ph">（投稿時にアフィリンクを自動で追加します）</span>';
     // 🔥割引一覧（composePostTextと同じ位置＝作品URLより後ろ）をプレビューにも反映。同じ理由で重複防止。
-    if (discountListOn_()) {
+    if (AUTO_APPEND_ENABLED && discountListOn_()) {
       var dlink = cachedDiscountLink_();
       if (dlink) { if (caption.indexOf(dlink) < 0) html += '\n\n' + escapeHtml(DISCOUNT_LIST_LEAD) + '\n\n<span class="lnk">' + escapeHtml(dlink) + '</span>'; }
       else html += '\n\n<span class="ph">（🔥割引一覧リンクを準備中…）</span>';
