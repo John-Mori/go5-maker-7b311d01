@@ -428,12 +428,17 @@
   }
 
   // Bluesky URLをアイテムに保存（go5-short → shortUrl、その他 → postUrl）。
+  // 表示（bskyCur/bskyHref）は shareUrl→shortUrl→postUrl の優先順で読むため、優先度の低い
+  // postUrl だけを書き換えても、既存の shareUrl/shortUrl に隠れて訂正が画面へ反映されない
+  // （INC: 訂正して保存しても直らない）。現在表示中＝優先度最上位の項目を直接書き換える。
   function saveBskyToItem_(item, bskyUrl) {
     var w = (window.Go5Short && window.Go5Short.WORKER_URL) ? window.Go5Short.WORKER_URL.replace(/\/+$/, '') : '';
     var isGo5 = w && bskyUrl && bskyUrl.indexOf(w) === 0;
     if (bskyUrl) {
-      if (isGo5) { item.shortUrl = bskyUrl; delete item.postUrl; }
-      else { item.postUrl = bskyUrl; }
+      if (isGo5) { item.shortUrl = bskyUrl; delete item.postUrl; delete item.shareUrl; }
+      else if (item.shareUrl) item.shareUrl = bskyUrl;
+      else if (item.shortUrl) item.shortUrl = bskyUrl;
+      else item.postUrl = bskyUrl;
     } else {
       // 空白のとき：手動アイテムは両方消す、履歴アイテムは postUrl だけ消す（shortUrl はクリック計測に必要）
       if (item.manual) delete item.shortUrl;
