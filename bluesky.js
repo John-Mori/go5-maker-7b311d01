@@ -541,11 +541,13 @@
   function composePostText() {
     var caption = (els.text.value || '').replace(/[ \t\r\n]+$/, '');
     var link = resolveAffLink();
-    var out = link ? (caption + '\n\n' + PR_LINE_TEXT + '\n\n' + link) : caption;
+    // 本文に手動で作品URL/割引リンクを含めて書いた場合（例：しばらく手動投稿する場合）に、
+    // 自動追加分と重複しないよう、既に本文へ含まれていればスキップする。
+    var out = (link && caption.indexOf(link) < 0) ? (caption + '\n\n' + PR_LINE_TEXT + '\n\n' + link) : caption;
     // 🔥割引一覧（ON中は常に「案内する作品URL」より後ろに付く＝ここで最後に追加するだけで済む）。
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
-      if (dlink) out += '\n\n' + DISCOUNT_LIST_LEAD + '\n\n' + dlink;
+      if (dlink) { if (caption.indexOf(dlink) < 0) out += '\n\n' + DISCOUNT_LIST_LEAD + '\n\n' + dlink; }
       else ensureDiscountLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }); // 未キャッシュなら取得だけ開始し、出来次第プレビュー/モーダルへ反映
     }
     return out;
@@ -599,13 +601,15 @@
   function renderPreview() {
     var caption = els.text.value;
     var link = resolveAffLink();
+    var hasLink = !!(link && caption.indexOf(link) >= 0);
     var html = caption ? highlightLinks(escapeHtml(caption)) : '<span class="ph">（本文）</span>';
-    html += link ? ('\n\n' + highlightLinks(escapeHtml(PR_LINE_TEXT)) + '\n\n<span class="lnk">' + escapeHtml(link) + '</span>')
-                 : '\n\n<span class="ph">（投稿時にアフィリンクを自動で追加します）</span>';
-    // 🔥割引一覧（composePostTextと同じ位置＝作品URLより後ろ）をプレビューにも反映。
+    // 本文に既に作品URLが含まれる場合（手動投稿など）は自動追加分を重複させない。
+    if (link && !hasLink) html += '\n\n' + highlightLinks(escapeHtml(PR_LINE_TEXT)) + '\n\n<span class="lnk">' + escapeHtml(link) + '</span>';
+    else if (!link) html += '\n\n<span class="ph">（投稿時にアフィリンクを自動で追加します）</span>';
+    // 🔥割引一覧（composePostTextと同じ位置＝作品URLより後ろ）をプレビューにも反映。同じ理由で重複防止。
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
-      if (dlink) html += '\n\n' + escapeHtml(DISCOUNT_LIST_LEAD) + '\n\n<span class="lnk">' + escapeHtml(dlink) + '</span>';
+      if (dlink) { if (caption.indexOf(dlink) < 0) html += '\n\n' + escapeHtml(DISCOUNT_LIST_LEAD) + '\n\n<span class="lnk">' + escapeHtml(dlink) + '</span>'; }
       else html += '\n\n<span class="ph">（🔥割引一覧リンクを準備中…）</span>';
     }
     if (els.pvBody) els.pvBody.innerHTML = html;
