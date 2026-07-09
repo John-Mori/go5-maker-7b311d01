@@ -43,6 +43,12 @@
       body: JSON.stringify({ cid: PROBE_FANZA_CID })
     }).then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); }).then(function (res) {
       if (res.j && res.j.ok && res.j.item && res.j.item.title) return line('FANZA作品情報', 'ok', 'worker正常（テスト作品「' + String(res.j.item.title).slice(0, 14) + '…」取得OK）');
+      // 認証は成功したが、この特定のテスト作品がまだ「部分情報(画像のみ)」の状態。
+      //   Cloudflare側からのDMM直接スクレイプは地域判定でブロックされることがあり(既知の制約)、
+      //   PC側の定期取得タスクが解決するまで作品ごとに一時的に起こり得る。設定不備ではない。
+      if (res.j && res.j.ok && res.j.item && res.j.item.partial) {
+        return line('FANZA作品情報', 'warn', '認証OK・このテスト作品はまだ部分情報(画像のみ)です。設定は正常。PC側の定期取得(タスクスケジューラ)が解決するまで作品ごとに一時的に起こり得ます');
+      }
       var code = (res.j && res.j.error) || ('HTTP ' + res.s);
       var hint = code === 'bad_secret' ? '（共有シークレット不一致。⚙️の値とworkerのSHARED_SECRETを揃えてください）'
                : code === 'origin_not_allowed' ? '（このサイトのOriginがworkerで未許可）' : '';

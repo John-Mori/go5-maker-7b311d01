@@ -256,8 +256,8 @@
           var e = mls[k];
           var isSec = k.indexOf(SEC_PREFIX) === 0, sk = isSec ? k.slice(SEC_PREFIX.length) : null;
           if (e.d) { if (isSec) { return; } /* ★鍵は tombstone でもローカル削除しない（既存の誤tombstoneから鍵を守る） */ newSnapLs[k] = undefined; try { if (isSyncLsKey(k)) LS.removeItem(k); } catch (x) {} return; }
-          newSnapLs[k] = e.v;
           if (isSec) {
+            newSnapLs[k] = e.v;
             // 自分の暗号文が採用＝復号不要（PBKDF2の無駄打ち回避）。remote勝ち(別の値)の時だけ復号して反映。
             if (secInfo.entries[k] && e.v === secInfo.entries[k]) { newSecPlain[sk] = secInfo.plain[sk]; return; }
             if (c.pass && subtle && e.v) applies.push(decryptJson(e.v, c.pass).then(function (val) {
@@ -265,7 +265,22 @@
             }).catch(function () { _lastErr = "鍵の復号に失敗（パスフレーズ不一致?）"; }));
             return;
           }
-          try { if (LS.getItem(k) !== e.v) LS.setItem(k, e.v); } catch (x) {}
+          // ★競合防止：この同期は curLs を「開始時点」のスナップショットで動いている。非同期処理
+          //   (画像アップロード/pull/push)の間にユーザーが候補を追加/編集した場合、そのままだと
+          //   古いマージ結果で上書きして「追加した直後の候補が消える／情報が古いままになる」事故になる。
+          var live = LS.getItem(k), finalV = e.v;
+          if (isCandArrayKey(k)) {
+            // 候補配列は「ライブ値」ともう一度cidでunionしてから書く＝進行中に増えた分を絶対に失わない。
+            var u2 = unionCand(e.v, live);
+            if (u2 != null) finalV = u2;
+          } else if (live !== null && live !== curLs[k] && live !== e.v) {
+            // 非配列キーはライブ値がこの同期開始後に変わっている＝マージ結果は古い。上書きせず次回同期に委ねる
+            //   （スナップショット/push対象もLIVE値のまま記録＝クラウドへ古い値を送らず、次回の変更検知も正しく働く）。
+            newSnapLs[k] = live; mls[k] = { t: now, v: live };
+            return;
+          }
+          newSnapLs[k] = finalV; if (finalV !== e.v) mls[k] = { t: e.t, v: finalV }; // 再union分をpush対象にも反映
+          try { if (LS.getItem(k) !== finalV) LS.setItem(k, finalV); } catch (x) {}
         });
         Object.keys(midb).forEach(function (k) {
           var e = midb[k];

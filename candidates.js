@@ -198,6 +198,54 @@
   // 指定cidの販売数キャッシュを無効化（🔁リロードで最新を取り直すため）。
   function invalidateSales_(cids) { var c = salesCache(); (cids || []).forEach(function (cid) { delete c[cid]; }); lsSet(K_SALES, c); }
 
+  // ── 候補の「タイトル/発売日 未取得」を自動でバックフィル ──
+  //   追加した直後、FANZA workerがその時たまたま部分情報(画像のみ)しか返せなかった作品は
+  //   title/date が空のまま残り、作品状態(新作/準新作/旧作)バッジも出ない。販売数(fetchSalesFor)と
+  //   同じパターンで、表示のたびに未取得ぶんを控えめに再取得し、取れたら候補データへ書き戻す。
+  var K_INFOMISS = 'cand_infomiss'; // {cid: atMs}  直近の再取得試行時刻（無駄打ち防止）
+  var INFOMISS_RETRY_TTL = 20 * 60 * 1000; // 同じcidの再試行は20分に1回まで
+  function needsInfoBackfill_(it) { return !it || !it.cid || !it.title || it.title === '(タイトル未取得)' || !it.date; }
+  function backfillMissingInfo_(key, items, cb) {
+    if (!window.FanzaCore) { cb(false); return; }
+    var cfg = workerCfg(); if (!cfg.url) { cb(false); return; }
+    var miss = lsGet(K_INFOMISS, '{}'), now = new Date().getTime();
+    var targets = items.filter(function (it) {
+      if (!needsInfoBackfill_(it)) return false;
+      var last = miss[it.cid]; return !last || (now - last) >= INFOMISS_RETRY_TTL;
+    }).slice(0, 12); // 一度に叩きすぎない（無駄打ち防止・worker保護）
+    if (!targets.length) { cb(false); return; }
+    var pending = targets.length, updates = {}; // cid -> 取得できた差分フィールド
+    targets.forEach(function (it) {
+      miss[it.cid] = now;
+      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url).then(function (info) {
+        if (info && info.title) {
+          updates[it.cid] = {
+            title: info.title, author: info.author || undefined,
+            date: info.releaseDate || undefined, listPrice: info.listPrice, price: info.price,
+            discountPct: info.discountPct || undefined, genres: (info.genres && info.genres.length) ? info.genres : undefined,
+            thumb: info.thumb || info.thumbSmall || undefined, reviewCount: info.reviewCount, reviewAvg: info.reviewAvg
+          };
+        }
+        if (--pending === 0) finish();
+      }).catch(function () { if (--pending === 0) finish(); });
+    });
+    // ★書き戻しは「今の実際のlocalStorage配列」を読み直してcidで当てる（他の変更を巻き戻さない・
+    //   同期の競合ガードと同じ考え方＝古い参照(items)ではなく現在値に対して差分だけ適用）。
+    function finish() {
+      lsSet(K_INFOMISS, miss);
+      var cids = Object.keys(updates);
+      if (!cids.length) { cb(false); return; }
+      var cur = lsGet(key, '[]'), changed = false;
+      cur.forEach(function (it) {
+        var u = it && it.cid != null ? updates[it.cid] : null; if (!u) return;
+        Object.keys(u).forEach(function (f) { if (u[f] !== undefined) it[f] = u[f]; });
+        changed = true;
+      });
+      if (changed) lsSet(key, cur);
+      cb(changed);
+    }
+  }
+
   // ── 現在描画中カードの cid→item 索引（サムネ/投稿画像モーダルが item を引くため）──
   var _cardIndex = {};
   function itemByCid_(cid) { return _cardIndex[cid] || null; }
@@ -2060,6 +2108,8 @@
     });
     // 候補作品の実売本数を取得（未取得はPC取得キューへ）。反映されたら再描画。
     fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
+    // タイトル/発売日が未取得の候補を控えめに再取得（追加直後の一時的な部分取得を自動で埋める）。
+    backfillMissingInfo_(key, arr, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
   }
 
   // ── サークルタブ ──
