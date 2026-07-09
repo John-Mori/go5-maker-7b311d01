@@ -152,15 +152,26 @@ export default {
       let body;
       try { body = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, null); }
       const items = Array.isArray(body.items) ? body.items.slice(0, 100) : []; // KV操作上限対策で1回100件まで
-      let saved = 0;
+      let saved = 0, skipped = 0, quotaHit = false;
       for (const raw of items) {
         const it = sanitizeOverride(raw);
         if (!it) continue;
-        await env.FANZA_KV.put("ov:" + it.content_id, JSON.stringify(it));
-        try { await env.FANZA_KV.delete("req:" + it.content_id); } catch (e) {}
-        saved++;
+        if (quotaHit) { skipped++; continue; } // 上限到達後は残りを静かにスキップ（1件のクラッシュで全件失敗にしない）
+        try {
+          const key = "ov:" + it.content_id;
+          const newStr = JSON.stringify(it);
+          // 内容が前回と同一なら書き込みを省略（KV1日書き込み上限の消費を減らす＝価格変動が無い作品の再書き込み防止）。
+          const prevStr = await env.FANZA_KV.get(key).catch(() => null);
+          if (prevStr === newStr) { skipped++; continue; }
+          await env.FANZA_KV.put(key, newStr);
+          try { await env.FANZA_KV.delete("req:" + it.content_id); } catch (e) {}
+          saved++;
+        } catch (e) {
+          if (String(e && e.message || e).indexOf("limit exceeded") >= 0) quotaHit = true;
+          skipped++;
+        }
       }
-      return json({ ok: true, saved }, 200, null);
+      return json({ ok: true, saved, skipped, quotaHit: quotaHit || undefined }, 200, null);
     }
 
     // ── 実売本数（販売数）：作品詳細ページの「販売数」を返す（APIには無い数値）。──
@@ -189,8 +200,15 @@ export default {
         } catch (e) { missing.push(cid); }
       }));
       // 未取得cidは「PC取得依頼キュー(販売数)」へ記録（PCバッチが拾って日本IPでスクレイプ→保存）。
+      //   ★候補タブを開くたびに同じ未取得cidを毎回書き直すとKV1日書き込み上限をすぐ消費するため、
+      //   既に24時間以内に登録済みなら書き込みを省略する（読み取りは無制限なので事前チェックしてよい）。
       await Promise.all(missing.map(async (cid) => {
-        try { await env.FANZA_KV.put("salesreq:" + cid, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 1209600 }); } catch (e) {}
+        try {
+          const key = "salesreq:" + cid;
+          const prev = await env.FANZA_KV.get(key, "json").catch(() => null);
+          if (prev && prev.at && (Date.now() - Date.parse(prev.at)) < 86400000) return; // 24h以内なら再登録不要
+          await env.FANZA_KV.put(key, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 1209600 });
+        } catch (e) {}
       }));
       return json({ ok: true, sales, missing }, 200, cors3);
     }
@@ -204,16 +222,27 @@ export default {
       let body;
       try { body = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, null); }
       const items = Array.isArray(body.items) ? body.items.slice(0, 200) : [];
-      let saved = 0;
+      let saved = 0, skipped = 0, quotaHit = false;
       for (const raw of items) {
         const cid = String((raw && raw.cid) || "").trim();
         const n = raw && raw.n != null ? parseInt(raw.n, 10) : NaN;
         if (!/^[0-9A-Za-z_]{1,64}$/.test(cid) || isNaN(n)) continue;
-        await env.FANZA_KV.put("sales:" + cid, JSON.stringify({ n, at: new Date().toISOString() }));
-        try { await env.FANZA_KV.delete("salesreq:" + cid); } catch (e) {}
-        saved++;
+        if (quotaHit) { skipped++; continue; } // 上限到達後は残りを静かにスキップ（1件のクラッシュで全件失敗にしない）
+        try {
+          const key = "sales:" + cid;
+          // 数値が前回と変わっていなければ書き込みを省略（KV1日書き込み上限の消費を減らす＝
+          //   15分毎のポーリングで変動の無い作品を毎回書き直さない）。
+          const prev = await env.FANZA_KV.get(key, "json").catch(() => null);
+          if (prev && prev.n === n) { skipped++; continue; }
+          await env.FANZA_KV.put(key, JSON.stringify({ n, at: new Date().toISOString() }));
+          try { await env.FANZA_KV.delete("salesreq:" + cid); } catch (e) {}
+          saved++;
+        } catch (e) {
+          if (String(e && e.message || e).indexOf("limit exceeded") >= 0) quotaHit = true;
+          skipped++;
+        }
       }
-      return json({ ok: true, saved }, 200, null);
+      return json({ ok: true, saved, skipped, quotaHit: quotaHit || undefined }, 200, null);
     }
 
     // ── 販売数の「今すぐ取得」リモート要求：どの端末のWebアプリからでも押せる。──
@@ -237,7 +266,13 @@ export default {
       const secR = request.headers.get("X-Shared-Secret") || "";
       if (!env.SHARED_SECRET || secR !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsR);
       if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, corsR);
-      await env.FANZA_KV.put("salesrun:req", JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 86400 });
+      try {
+        await env.FANZA_KV.put("salesrun:req", JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 86400 });
+      } catch (e) {
+        // KV1日書き込み上限等で失敗しても「クラッシュ(素の500)」ではなく分かるエラーを返す。
+        const msg = String(e && e.message || e);
+        return json({ ok: false, error: msg.indexOf("limit exceeded") >= 0 ? "kv_quota_exceeded" : "kv_error" }, 503, corsR);
+      }
       return json({ ok: true, requested: true }, 200, corsR);
     }
 
@@ -258,7 +293,15 @@ export default {
       if (!/^\d{1,10}$/.test(mkId)) return json({ ok: false, error: "bad_maker_id" }, 400, cors4);
       if (tbody.remove) { try { await env.FANZA_KV.delete("salestrack:" + mkId); } catch (e) {} return json({ ok: true, removed: mkId }, 200, cors4); }
       const mkName = String(tbody.name || "").slice(0, 100);
-      await env.FANZA_KV.put("salestrack:" + mkId, JSON.stringify({ name: mkName, at: new Date().toISOString() }));
+      try {
+        const tkey = "salestrack:" + mkId;
+        const prevT = await env.FANZA_KV.get(tkey, "json").catch(() => null);
+        // 既に同じ名前で登録済みなら書き込みを省略（同じサークルへ何度もタブを足す操作でのKV消費を防ぐ）。
+        if (!prevT || prevT.name !== mkName) await env.FANZA_KV.put(tkey, JSON.stringify({ name: mkName, at: new Date().toISOString() }));
+      } catch (e) {
+        const msg = String(e && e.message || e);
+        return json({ ok: false, error: msg.indexOf("limit exceeded") >= 0 ? "kv_quota_exceeded" : "kv_error" }, 503, cors4);
+      }
       return json({ ok: true, tracked: mkId }, 200, cors4);
     }
 

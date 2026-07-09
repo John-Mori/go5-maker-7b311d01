@@ -1239,7 +1239,8 @@
     btn.addEventListener('click', function () {
       var b = this; b.disabled = true; var t0 = b.textContent; b.textContent = '⏳ 要求中…';
       requestPcRun(function (ok, err) {
-        b.textContent = ok ? '✅ 要求しました' : '⚠️ ' + (err || '失敗');
+        var friendly = err === 'kv_quota_exceeded' ? '本日の上限に達しました(明日また使えます)' : (err || '失敗');
+        b.textContent = ok ? '✅ 要求しました' : '⚠️ ' + friendly;
         if (ok) { var el = $(noticeParentId); if (el) { var p = document.createElement('p'); p.className = 'hint'; p.style.padding = '4px 6px'; p.style.color = '#c0392b'; p.textContent = '▶ PCへ取得を要求しました。PCの電源が入っていれば数分以内に取得→🔁で反映されます。'; el.insertBefore(p, el.firstChild); } }
         setTimeout(function () { b.textContent = t0; b.disabled = false; }, 4000);
       });
