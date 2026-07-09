@@ -437,7 +437,9 @@
   //   ・ON/OFFは端末に永続化＋composePostText()が最後に付け足す＝「案内する作品URL」より必ず後ろに来る。
   //     動画作成後の自動投稿(投稿確認モーダル)もcomposePostText()で本文を作るため自動的に反映される。
   var DISCOUNT_LIST_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/';
-  var DISCOUNT_LIST_LEAD = '🔥大幅割引セール中の同人はこちら';
+  var DISCOUNT_LIST_LEAD = '🔥大幅割引セール中の同人はこちら🎀↓';
+  // 作品URLの直前に挟む定型のPR明示行（本文の標準構成・composePostTextとrenderPreviewの両方で使用）。
+  var PR_LINE_TEXT = '↓詳細はこちらから🎀 #PR #漫画';
   var DISC_ON_KEY = 'bsky_discount_list_on', DISC_LINK_KEY = 'bsky_discount_list_link', DISC_LINK_AF_KEY = 'bsky_discount_list_link_af';
   function discountListOn_() { try { return localStorage.getItem(DISC_ON_KEY) === '1'; } catch (e) { return false; } }
   function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
@@ -539,11 +541,11 @@
   function composePostText() {
     var caption = (els.text.value || '').replace(/[ \t\r\n]+$/, '');
     var link = resolveAffLink();
-    var out = link ? (caption + '\n\n' + link) : caption;
+    var out = link ? (caption + '\n\n' + PR_LINE_TEXT + '\n\n' + link) : caption;
     // 🔥割引一覧（ON中は常に「案内する作品URL」より後ろに付く＝ここで最後に追加するだけで済む）。
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
-      if (dlink) out += '\n\n' + DISCOUNT_LIST_LEAD + '\n' + dlink;
+      if (dlink) out += '\n\n' + DISCOUNT_LIST_LEAD + '\n\n' + dlink;
       else ensureDiscountLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }); // 未キャッシュなら取得だけ開始し、出来次第プレビュー/モーダルへ反映
     }
     return out;
@@ -598,12 +600,12 @@
     var caption = els.text.value;
     var link = resolveAffLink();
     var html = caption ? highlightLinks(escapeHtml(caption)) : '<span class="ph">（本文）</span>';
-    html += link ? ('\n\n<span class="lnk">' + escapeHtml(link) + '</span>')
+    html += link ? ('\n\n' + highlightLinks(escapeHtml(PR_LINE_TEXT)) + '\n\n<span class="lnk">' + escapeHtml(link) + '</span>')
                  : '\n\n<span class="ph">（投稿時にアフィリンクを自動で追加します）</span>';
     // 🔥割引一覧（composePostTextと同じ位置＝作品URLより後ろ）をプレビューにも反映。
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
-      if (dlink) html += '\n\n' + escapeHtml(DISCOUNT_LIST_LEAD) + '\n<span class="lnk">' + escapeHtml(dlink) + '</span>';
+      if (dlink) html += '\n\n' + escapeHtml(DISCOUNT_LIST_LEAD) + '\n\n<span class="lnk">' + escapeHtml(dlink) + '</span>';
       else html += '\n\n<span class="ph">（🔥割引一覧リンクを準備中…）</span>';
     }
     if (els.pvBody) els.pvBody.innerHTML = html;

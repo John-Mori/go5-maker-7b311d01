@@ -394,10 +394,18 @@
   }
 
   // ---- 画像選択 ----
+  // 表示専用の匿名化（実ファイル名の代わりにランダムな英数字）。アップロード/投稿には一切関与しない。
+  function anonPhotoLabel_(file) {
+    const ext = (file && file.name && /\.[0-9a-z]{1,5}$/i.test(file.name)) ? file.name.slice(file.name.lastIndexOf(".")) : ".jpg";
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+    let s = "";
+    for (let i = 0; i < 10; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+    return s + ext;
+  }
   els.photo.addEventListener("change", () => {
     const f = els.photo.files[0];
     if (!f) return;
-    els.photoName.textContent = f.name;
+    els.photoName.textContent = anonPhotoLabel_(f);
     const url = URL.createObjectURL(f);
     const img = new Image();
     img.onload = () => { fgImg = img; preview(); };
