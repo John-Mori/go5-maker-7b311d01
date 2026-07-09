@@ -626,7 +626,7 @@
     els.postImg.addEventListener('change', function () {
       var f = els.postImg.files[0]; if (!f) return;
       selectedPostFile = f;
-      if (els.postImgName) els.postImgName.textContent = f.name;
+      if (els.postImgName) els.postImgName.textContent = anonFileLabel_(f);
       if (els.postImgClear) els.postImgClear.style.display = '';
       if (els.postImgPreview) { els.postImgPreview.src = URL.createObjectURL(f); els.postImgPreview.style.display = ''; }
       renderPreview();
@@ -646,7 +646,7 @@
     els.pcImg.addEventListener('change', function () {
       var f = els.pcImg.files[0]; if (!f) return;
       pcSelectedFile = f;
-      if (els.pcImgName) els.pcImgName.textContent = f.name;
+      if (els.pcImgName) els.pcImgName.textContent = anonFileLabel_(f);
       if (els.pcImgClear) els.pcImgClear.style.display = '';
       if (els.pcImgPreview) { els.pcImgPreview.src = URL.createObjectURL(f); els.pcImgPreview.style.display = ''; }
     });
@@ -663,6 +663,15 @@
   // ---- 画像圧縮（Bluesky blob 上限 ≈ 976KB） ----
   var MAX_BYTES = 950000;
   function toBlob(c, q) { return new Promise(function (r) { c.toBlob(r, 'image/jpeg', q); }); }
+  // 選択画像の「表示名」を実ファイル名の代わりにランダムな英数字にする（実際のアップロードは
+  //   バイナリのみ・Bluesky uploadBlob はファイル名を一切送らないため無関係。あくまで画面表示上、
+  //   動画/候補のタイトルに由来する元ファイル名が見えてしまうのを防ぐための表示専用の匿名化）。
+  function anonFileLabel_(file) {
+    var ext = (file && file.name && /\.[0-9a-z]{1,5}$/i.test(file.name)) ? file.name.slice(file.name.lastIndexOf('.')) : '.jpg';
+    var chars = 'abcdefghijklmnopqrstuvwxyz0123456789', s = '';
+    for (var i = 0; i < 10; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+    return s + ext;
+  }
   function compressCanvas(canvas) {
     var quality = 0.9;
     function tryQ() { return toBlob(canvas, quality).then(function (b) { if (b && b.size <= MAX_BYTES) return b; quality -= 0.12; if (quality >= 0.3) return tryQ(); return down(0.85); }); }
