@@ -164,7 +164,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
     align-items:start;
   }
   #candList > :not(.cand-card), #candMakerList > :not(.cand-card){ grid-column:1/-1; }
-  #candList .cand-card, #candMakerList .cand-card{ margin-top:0; height:100%; }
+  /* max-width＋justify-self:start＝列数に対して作品数が少ない(特に1件だけ)時、余った列幅いっぱいに
+     間延びして表示されるのを防ぐ(1枚のカードが不必要に横長になり見にくい問題への対策)。 */
+  #candList .cand-card, #candMakerList .cand-card{ margin-top:0; height:100%; max-width:640px; justify-self:start; }
 }
 /* 候補ページの列数コントロール：PCのみ表示（モバイルではグリッド化しないため無意味）。 */
 .cand-cols-ctl{display:none;}
