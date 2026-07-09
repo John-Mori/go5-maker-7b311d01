@@ -179,6 +179,9 @@
     var c = cfg(); _busy = true;
     var snap = loadSnap(), ts = loadTs(), now = Date.now();
     var snapLs = snap.ls || {}, snapIdb = snap.idb || {};
+    // ★初回参加(この端末が未同期)は、確立済みのクラウドを壊さないよう「既存キーは雲を採用」。
+    //   候補は union で両立、この端末だけが持つキーは push する。＝新規端末が正しい設定を上書きするのを防ぐ。
+    var firstSync = getVer() === 0;
     var curLs = gatherLs();
     var secInfo = { entries: {}, plain: {}, skip: true };
     var newSecPlain = {};                 // push成功時に保存する {key:平文}（remote勝ちは復号後に追記）
@@ -221,6 +224,11 @@
       return pullState().then(function (res) {
         var remote = {}; if (res && res.ok && !res.empty && res.blob) { try { remote = JSON.parse(res.blob); } catch (e) {} }
         var rver = (res && res.version) || 0, rls = remote.ls || {}, ridb = remote.idb || {};
+        // ★初回参加：クラウドに既にあるキーは雲を採用（この端末の値で上書きしない）。候補はunionで両立。
+        if (firstSync) {
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
+        }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
         // 候補リストは両側にあれば cid で union（消さない）。
         Object.keys(mls).forEach(function (k) {
