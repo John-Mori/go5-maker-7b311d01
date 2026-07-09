@@ -552,11 +552,15 @@
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
+      // YouTube動画が紐付いていない投稿(Bluesky単体投稿等)は、YouTube公開日時が原理的に存在しない。
+      //   sendSync_()と同じ考え方（実投稿時刻(ts)を正とする）でit.tsにフォールバックする＝
+      //   「投稿日時不明」のまま放置しない（シート復元直後のvid無し投稿で顕在化）。
       var dateHtml = sched
         ? ((sched.publishAt ? '<b>' + fmtPostDate(sched.publishAt) + '</b> ' : '') + '<span class="vtag vtag-scheduled">投稿予定</span>')
         : (pub != null
           ? '<b>' + fmtPostDate(pub) + '</b>'
-          : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>'));
+          : (vid ? '<b class="vdate-pending">…</b>'
+            : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>' : '<b class="vdate-unknown">投稿日時不明</b>')));
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
       var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
@@ -1876,7 +1880,12 @@
     setStatus('📥 シートから投稿履歴を復元中…');
     restoreHistoryFromSheet_(function (r) {
       if (!r || !r.ok) { setStatus('⚠️ 復元できません：' + ((r && r.reason) || '不明')); return; }
-      if (r.added || r.movedBack) { setStatus('✅ 復元しました：戻した投稿 ' + r.movedBack + '件／シートから復活 ' + r.added + '件（シート ' + r.total + '件を照合）。'); render(); maybeRestoreYt_(); }
+      if (r.added || r.movedBack) {
+        var restoreMsg = '✅ 復元しました：戻した投稿 ' + r.movedBack + '件／シートから復活 ' + r.added + '件（シート ' + r.total + '件を照合）。';
+        setStatus(restoreMsg); render(); maybeRestoreYt_();
+        // 復元だけではYouTube再生数・公開日時は取得されない（別途fetch要）ため、続けて自動更新する。
+        refresh().then(function () { setStatus(restoreMsg + '（再生数・投稿日時も更新しました）'); });
+      }
       else setStatus('✅ ' + acctName_(acct()) + ' の投稿履歴は既にシートと一致しています（復元不要）。');
     });
   });
