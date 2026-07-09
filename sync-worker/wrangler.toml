@@ -15,7 +15,7 @@ DAILY_CAP = "5000"
 # ── KV（状態JSON＋version＋レート制限。SETUP.md で作成して id を貼る）──
 [[kv_namespaces]]
 binding = "SYNC"
-id = "（CloudflareでKV namespaceを作成して貼る）"
+id = "bce921e5d10443eb86a0dfb626664592"
 
 # ── R2（画像バイトを content-hash キーで保存。SETUP.md でバケット作成）──
 [[r2_buckets]]
