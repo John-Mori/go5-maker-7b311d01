@@ -56,9 +56,11 @@
       .then(function (ct) { return JSON.stringify({ salt: b64(salt), iv: b64(iv), ct: b64(ct) }); });
   }
   function decryptJson(recStr, pass) {
-    var rec = JSON.parse(recStr);
-    return deriveKey(pass, unb64(rec.salt)).then(function (key) { return subtle.decrypt({ name: "AES-GCM", iv: unb64(rec.iv) }, key, unb64(rec.ct)); })
-      .then(function (buf) { return JSON.parse(new TextDecoder().decode(buf)); });
+    return Promise.resolve().then(function () {          // JSON.parse も含め全て reject 経路へ（同期throwで同期全体を止めない）
+      var rec = JSON.parse(recStr);
+      return deriveKey(pass, unb64(rec.salt)).then(function (key) { return subtle.decrypt({ name: "AES-GCM", iv: unb64(rec.iv) }, key, unb64(rec.ct)); })
+        .then(function (buf) { return JSON.parse(new TextDecoder().decode(buf)); });
+    });
   }
 
   // ── 通信 ──
@@ -137,7 +139,8 @@
   //   pass 未設定なら skip=true（この端末では鍵を同期しない＝雲側の暗号鍵は触らない）。
   function buildSecEntries(snap) {
     var c = cfg(), plain = {};
-    try { for (var i = 0; i < LS.length; i++) { var k = LS.key(i); if (syncableSecret(k)) plain[k] = LS.getItem(k); } } catch (e) {}
+    // ★空の秘密は同期対象にしない（空で上書き/削除誤爆を防ぐ）。値がある鍵だけ。
+    try { for (var i = 0; i < LS.length; i++) { var k = LS.key(i); if (syncableSecret(k)) { var v = LS.getItem(k); if (v) plain[k] = v; } } } catch (e) {}
     if (!c.pass || !subtle) return Promise.resolve({ entries: {}, plain: {}, skip: true });
     var snapPlain = (snap && snap.secPlain) || {}, snapLs = (snap && snap.ls) || {}, entries = {}, jobs = [];
     Object.keys(plain).forEach(function (sk) {
@@ -210,13 +213,19 @@
           if (JSON.stringify(cur[k]) !== JSON.stringify(snp[k])) ts[prefix + k] = now;
           else if (!ts[prefix + k]) ts[prefix + k] = now;
         });
-        Object.keys(snp).forEach(function (k) { if (!(k in cur) && !ts[prefix + k + " d"]) { ts[prefix + k] = now; ts[prefix + k + " d"] = 1; } });
+        Object.keys(snp).forEach(function (k) {
+          if (prefix === "ls:" && k.indexOf(SEC_PREFIX) === 0) return; // ★鍵は絶対にtombstone(削除)しない＝復号失敗端末による鍵消失を防ぐ
+          if (!(k in cur) && !ts[prefix + k + " d"]) { ts[prefix + k] = now; ts[prefix + k + " d"] = 1; }
+        });
       }
       stamp("ls:", curLs, snapLsStamp); stamp("idb:", curIdb, snapIdb);
       function localMap(prefix, cur, snp) {
         var m = {};
         Object.keys(cur).forEach(function (k) { m[k] = { t: ts[prefix + k] || now, v: cur[k] }; });
-        Object.keys(snp).forEach(function (k) { if (!(k in cur) && ts[prefix + k + " d"]) m[k] = { t: ts[prefix + k] || now, d: 1 }; });
+        Object.keys(snp).forEach(function (k) {
+          if (prefix === "ls:" && k.indexOf(SEC_PREFIX) === 0) return; // 鍵の削除は送らない
+          if (!(k in cur) && ts[prefix + k + " d"]) m[k] = { t: ts[prefix + k] || now, d: 1 };
+        });
         return m;
       }
       var lmapLs = localMap("ls:", curLs, snapLsStamp), lmapIdb = localMap("idb:", curIdb, snapIdb);
@@ -246,7 +255,7 @@
         Object.keys(mls).forEach(function (k) {
           var e = mls[k];
           var isSec = k.indexOf(SEC_PREFIX) === 0, sk = isSec ? k.slice(SEC_PREFIX.length) : null;
-          if (e.d) { newSnapLs[k] = undefined; try { if (isSec) { LS.removeItem(sk); delete newSecPlain[sk]; } else if (isSyncLsKey(k)) LS.removeItem(k); } catch (x) {} return; }
+          if (e.d) { if (isSec) { return; } /* ★鍵は tombstone でもローカル削除しない（既存の誤tombstoneから鍵を守る） */ newSnapLs[k] = undefined; try { if (isSyncLsKey(k)) LS.removeItem(k); } catch (x) {} return; }
           newSnapLs[k] = e.v;
           if (isSec) {
             // 自分の暗号文が採用＝復号不要（PBKDF2の無駄打ち回避）。remote勝ち(別の値)の時だけ復号して反映。
