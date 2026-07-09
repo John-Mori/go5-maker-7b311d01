@@ -61,6 +61,23 @@
     '<path fill="#c2c4c7" d="M50 57C33 57 21 64 15 74 10 82 8 91 8 100L92 100C92 91 90 82 85 74 79 64 67 57 50 57Z"/>' +
     '</svg>';
 
+  // ── PC(広い画面)向け：候補カードの列数（ユーザーが選べる・スマホでは無効） ──
+  var K_PCCOLS = 'cand_pc_cols';
+  var PCCOLS_MIN = 1, PCCOLS_MAX = 5, PCCOLS_DEF = 2;
+  function candCols_() { var n = parseInt(lsGet(K_PCCOLS, String(PCCOLS_DEF)), 10); return (n >= PCCOLS_MIN && n <= PCCOLS_MAX) ? n : PCCOLS_DEF; }
+  function applyCandCols_(n) { try { document.documentElement.style.setProperty('--cand-cols', String(n)); } catch (e) {} }
+  applyCandCols_(candCols_()); // モジュール読み込み時に一度反映（以後は選択時のみ更新）
+  // 列数セレクタのHTML（renderMain/renderMakerの両ヘッダーで共通。PCのみCSSで表示）。
+  function candColsCtlHtml_() {
+    var cur = candCols_(), opts = '';
+    for (var n = PCCOLS_MIN; n <= PCCOLS_MAX; n++) opts += '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + '列</option>';
+    return '<div class="cand-cols-ctl"><label class="hint" style="margin:0;white-space:nowrap;">表示列数</label><select id="candColsSel">' + opts + '</select></div>';
+  }
+  function wireCandColsCtl_() {
+    var sel = $('candColsSel');
+    if (sel) sel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PCCOLS_DEF; lsSet(K_PCCOLS, n); applyCandCols_(n); });
+  }
+
   // ── 保存キー ──
   var K_ITEMS = 'cand_items';   // 候補リスト(共通): [{url,cid,title,author,thumb,listPrice,price,discountPct,addedAt}]
   var K_TABS = 'cand_tabs';    // サークルタブ: [{id,name,makerId,makerName}]
@@ -735,7 +752,7 @@
     var ov = _refOverlay;
     if (!ov) {
       ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
-      ov.innerHTML = '<div class="fz-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+      ov.innerHTML = '<div class="fz-modal refimg-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
       document.body.appendChild(ov);
       ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
       ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
@@ -754,6 +771,17 @@
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
       '<div class="fz-title refimg-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 6px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + esc(it.title || it.cid) + '</div>' +
+      // PC(広い画面)専用：メモ・2つ目URLをボタンを押さず直接編集できる列（CSSで左列に配置・保存ボタンで一緒に反映）。
+      // スマホはCSSで非表示のまま＝従来どおり「メモ・URL追加」ボタンから小モーダルで編集。
+      '<div class="refimg-pc-memo">' +
+        '<label class="hint" style="display:block;margin-bottom:2px;">メモ</label>' +
+        '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ（コメントが無い時にカードへ水色で表示）">' +
+        '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL（2つ目・カードに X2↗ / B2↗ で表示）</label>' +
+        '<div style="display:flex;gap:6px;align-items:stretch;">' +
+          '<input id="refImgUrl2Inline" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
+          '<button type="button" class="ghost paste-btn" data-paste="refImgUrl2Inline" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
+        '</div>' +
+      '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
         '<span class="hint" style="margin:0;flex:1;">動画生成用の画像</span>' +
         '<button id="refImgToMovie" type="button" class="primary" style="width:auto;margin:0;flex:0 0 auto;font-size:13px;padding:8px 14px;">動画生成へ</button>' +
@@ -825,6 +853,8 @@
     drawPreview();
     body.querySelector('#refImgComment').value = pending.comment;
     body.querySelector('#refImgTwitter').value = pending.twitterUrl;
+    body.querySelector('#refImgMemoInline').value = pending.memo || '';
+    body.querySelector('#refImgUrl2Inline').value = pending.twitterUrl2 || '';
     body.querySelector('#refImgFile').addEventListener('change', function () {
       var files = [], fl = this.files || [], fi;
       for (fi = 0; fi < fl.length; fi++) files.push(fl[fi]);
@@ -868,10 +898,19 @@
       drawPreview();
       body.querySelector('#refImgMsg').textContent = '画像を削除しました（保存で確定・残り' + pending.imgs.length + '枚）';
     });
+    // PC専用インライン欄(メモ・2つ目URL)を pending へ取り込む（ボタンを押さず保存/動画生成へで一緒に反映）。
+    //   スマホはCSSでこの欄自体を表示しない＝値は常に空文字のまま→pending.memo/twitterUrl2を上書きしない
+    //   （非表示要素の空値でモバイル利用中の「メモ・URL追加」小モーダルの内容を消さないための安全策）。
+    function syncPcMemoInline_() {
+      var memoEl = body.querySelector('#refImgMemoInline'), url2El = body.querySelector('#refImgUrl2Inline');
+      if (memoEl && memoEl.offsetParent !== null) pending.memo = memoEl.value || '';
+      if (url2El && url2El.offsetParent !== null) pending.twitterUrl2 = (url2El.value || '').trim();
+    }
     // 動画生成へ：このモーダルの作品データを動画作成タブへ引き継いで移動する。
     body.querySelector('#refImgToMovie').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
+      syncPcMemoInline_();
       var workVal = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
       if (!workVal && !it.isTwitter && it.url) workVal = it.url; // 欄が空でも候補が作品URLを持つなら使う（動画側へ確実に反映）
       var workUrl = workVal ? (window.normalizeWorkUrl ? window.normalizeWorkUrl(workVal) : workVal) : '';
@@ -890,6 +929,7 @@
     body.querySelector('#refImgSave').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
+      syncPcMemoInline_();
       var workRaw = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
       // 作品URL欄が空、またはプレフィル値から変更が無ければ何もしない（無駄なAPI呼び出し/意図しないaddedAtリセットを防止）。
       if (workRaw && workRaw !== workUrlPrefill) {
@@ -1889,9 +1929,10 @@
       '</div>' +
       // アカウント別「投稿済みを非表示」トグル（非表示リストの上段・右寄せ）。両方同時ON可。
       candHidePostedRowHtml_() +
-      // 省スペース行：セール絞込（左）＋非表示トグル（右端・状態で色と文言が変化）
-      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">' +
+      // 省スペース行：セール絞込（左）＋列数(PCのみ)＋非表示トグル（右端・状態で色と文言が変化）
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
+        candColsCtlHtml_() +
         '<span style="flex:1 1 auto;"></span>' +
         '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '非表示リスト') + '</button>' +
       '</div>' +
@@ -1902,6 +1943,7 @@
     $('candSort').addEventListener('change', function () { _sort = this.value; renderCandList(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; this.classList.toggle('active', _showHidden); this.textContent = _showHidden ? '👁 通常表示に戻す' : '非表示リスト'; renderCandList(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderCandList(tabId); });
+    wireCandColsCtl_();
     wireHidePostedButtons_(function () { renderCandList(tabId); });
     $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
     bindPcRun_($('candPcRun'), 'candList');
@@ -2129,9 +2171,10 @@
       '</div>' +
       // アカウント別「投稿済みを非表示」トグル（非表示リストの上段・右寄せ）。両方同時ON可。
       candHidePostedRowHtml_() +
-      // 省スペース行：セール絞込（左）＋非表示トグル（右端・状態で色と文言が変化）
-      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">' +
+      // 省スペース行：セール絞込（左）＋列数(PCのみ)＋非表示トグル（右端・状態で色と文言が変化）
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
+        candColsCtlHtml_() +
         '<span style="flex:1 1 auto;"></span>' +
         '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '非表示リスト') + '</button>' +
       '</div>' +
@@ -2143,6 +2186,7 @@
     $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderMaker(tabId); });
+    wireCandColsCtl_();
     wireHidePostedButtons_(function () { renderMaker(tabId); });
     $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
     bindPcRun_($('candPcRun'), 'candMakerList');

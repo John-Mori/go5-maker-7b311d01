@@ -32,6 +32,10 @@ header{padding:18px 16px 6px;text-align:center;}
 h1{margin:0;font-size:22px;font-weight:900;letter-spacing:.02em;}
 .sub{margin:4px 0 0;color:var(--sub);font-size:13px;}
 main{max-width:520px;margin:0 auto;padding:8px 14px 40px;}
+/* PC(広い画面)：候補ページは画面全体を使う。他タブは読みやすさ優先で幅制限を維持。 */
+@media (min-width:1024px){
+  #pageCand main{max-width:none;padding-left:28px;padding-right:28px;}
+}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
   padding:14px;margin:12px 0;}
 .field-label{display:block;font-size:13px;color:var(--accent);font-weight:700;margin:10px 0 5px;}
@@ -149,6 +153,25 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .buzz-stats{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:6px;font-size:12.5px;color:var(--sub);}
 .buzz-eng{font-weight:700;color:var(--accent);}
 .cand-card{display:flex;flex-wrap:wrap;gap:3px 10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 10px 7px;margin-top:8px;align-items:flex-start;} /* 行間(row-gap)を詰め下部余白を圧縮＝枠を狭く。列間(画像↔本文)は10px維持 */
+/* PC(広い画面)：候補カードを複数列で並べる（列数はユーザーが選べる・既定2列）。
+   モバイルは対象外＝従来どおり縦1列。見出し/ボタン行(非.cand-card)は#candList/#candMakerListの直下
+   にある全部の列をまたいで表示（並べ替えUI等が1列に押し込められないように）。 */
+@media (min-width:1024px){
+  #candList, #candMakerList{
+    display:grid;
+    grid-template-columns:repeat(var(--cand-cols,2), minmax(0,1fr));
+    gap:8px 14px;
+    align-items:start;
+  }
+  #candList > :not(.cand-card), #candMakerList > :not(.cand-card){ grid-column:1/-1; }
+  #candList .cand-card, #candMakerList .cand-card{ margin-top:0; height:100%; }
+}
+/* 候補ページの列数コントロール：PCのみ表示（モバイルではグリッド化しないため無意味）。 */
+.cand-cols-ctl{display:none;}
+@media (min-width:1024px){
+  .cand-cols-ctl{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+  .cand-cols-ctl select{width:auto;padding:6px 8px;font-size:13px;}
+}
 .cand-card.cand-nocomment{padding-bottom:5px;} /* コメント/メモ無し＝下部余白を最小化 */
 .cand-card.cand-nocomment .cand-manage-row{margin-top:-1px;} /* 非表示/🗑列を上に詰める */
 /* 投稿済み作品＝カード大枠をチャンネルのイメージカラーで太線囲み（月詠み=紫 / 宵桜艶帖=葡萄）。
@@ -271,6 +294,16 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;box-sizing:border-box;overflow:auto;}
 .fz-overlay[hidden]{display:none;}
 .fz-modal{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:16px;width:100%;max-width:520px;box-sizing:border-box;margin:auto;}
+/* 候補「投稿編集」モーダル：PC(広い画面)ではメモ・2つ目URLを左列に常時表示し、ボタンを押さず
+   保存/動画生成へで一緒に反映できるようにする。スマホは従来どおり非表示＝「メモ・URL追加」ボタンから小モーダル。 */
+.refimg-pc-memo{display:none;}
+@media (min-width:1024px){
+  .refimg-modal{max-width:860px;}
+  .refimg-modal .fz-body{display:grid;grid-template-columns:260px 1fr;gap:0 24px;align-items:start;}
+  .refimg-modal .refimg-pc-memo{display:block;grid-column:1;grid-row:1/-1;border-right:1px solid var(--line);padding-right:20px;}
+  .refimg-modal .fz-body > :not(.refimg-pc-memo){grid-column:2;}
+  .refimg-modal #refMemoAdd{display:none;} /* PCでは左列に常時表示済み＝ボタン不要 */
+}
 /* 【恒久ルール】ボタンの横幅はテキスト長に自動追従（固定値・全幅にしない）。全幅は主要CTA(button.primary等)のみ。
    モーダル内はグローバル button{width:100%} を打ち消してテキスト幅に。flex:1 指定のボタン（保存/コピー等）は
    flex-basis が優先されるため従来どおり flex で伸びる。 */
@@ -635,6 +668,10 @@ video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
   overflow-x:auto;                 /* 5タブが入り切らなければ横スクロール（折り返さない） */
   -webkit-overflow-scrolling:touch;
   scrollbar-width:none;
+}
+/* PC(広い画面)：全タブが横に収まる幅を確保し、スクロール無しで一望できるように。 */
+@media (min-width:1024px){
+  .tabbar{max-width:none;justify-content:center;}
 }
 .tabbar::-webkit-scrollbar{display:none;}
 .tab{
