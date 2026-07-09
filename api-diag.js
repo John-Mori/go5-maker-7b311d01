@@ -93,14 +93,58 @@
     });
   }
 
+  // ── ⑤ 記録GASへの<script>タグ読込（実際の「シートから復元」と同じ経路）──
+  //   checkGas()はfetch()、実際の復元機能(yt-clicks.jsのjsonp_)は<script>タグ挿入。
+  //   広告ブロッカー/セキュリティソフトはこの2つを別々に扱う(fetchは通すがscriptタグは遮断、等)ことが
+  //   あるため、fetch()でOKでも実際の復元は失敗し得る。ここは実物と同じ<script>経路で直接検査する。
+  function checkGasScriptTag() {
+    var gas = ls('bsky_gas_url');
+    if (!gas) return Promise.resolve(line('復元(シート読込)', 'warn', 'GAS URL未設定'));
+    return new Promise(function (resolve) {
+      var name = '__go5diag_' + Date.now(), done = false, t0 = Date.now();
+      var s = document.createElement('script');
+      function clean() { try { delete window[name]; } catch (e) { window[name] = undefined; } if (s.parentNode) s.parentNode.removeChild(s); }
+      var timer = setTimeout(function () {
+        if (done) return; done = true; clean();
+        resolve(line('復元(シート読込)', 'bad', (Date.now() - t0) + 'msで応答なし(タイムアウト)。通信不安定またはGAS側の遅延'));
+      }, 10000);
+      window[name] = function (d) {
+        if (done) return; done = true; clearTimeout(timer); clean();
+        resolve((d && d.ok) ? line('復元(シート読込)', 'ok', '<script>読込も正常(HTTP経路と同じ結果)')
+          : line('復元(シート読込)', 'bad', 'GASが応答しましたが内容が異常です'));
+      };
+      s.onerror = function () {
+        if (done) return; done = true; clearTimeout(timer); clean();
+        resolve(line('復元(シート読込)', 'bad', (Date.now() - t0) + 'msで読込失敗＝広告ブロッカー/セキュリティソフト/DNSフィルタが script.google.com への<script>読込だけを遮断している可能性が高いです(fetch()は通っても<script>だけ止める拡張機能があります)。拡張機能を無効化するかシークレットウィンドウで試してください'));
+      };
+      // ★action未指定でcallbackだけ送る＝GAS側のJSONP分岐(p.callback)がデフォルトの軽い応答
+      //   ({ok:true,shortUrl:''})を返す。action=pingはcallbackより先に判定されJSONPで包まれない
+      //   ため使えない(gas/コード.gs の doGet 参照)。
+      s.src = gas + (gas.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + name;
+      document.body.appendChild(s);
+    });
+  }
+
+  // ── ⑥ FANZA画像CDN（サムネイル表示の実体）──
+  function checkImageCdn() {
+    return new Promise(function (resolve) {
+      var t0 = Date.now(), done = false;
+      var img = new Image();
+      var timer = setTimeout(function () { if (done) return; done = true; resolve(line('サムネ画像CDN', 'bad', (Date.now() - t0) + 'msで応答なし(タイムアウト)。回線が遅いか読み込みが遮断されている可能性')); }, 8000);
+      img.onload = function () { if (done) return; done = true; clearTimeout(timer); resolve(line('サムネ画像CDN', 'ok', '正常(' + (Date.now() - t0) + 'ms)')); };
+      img.onerror = function () { if (done) return; done = true; clearTimeout(timer); resolve(line('サムネ画像CDN', 'bad', (Date.now() - t0) + 'msで読込失敗＝広告ブロッカー/セキュリティソフト/DNSフィルタが doujin-assets.dmm.co.jp 等の画像を遮断している可能性が高いです')); };
+      img.src = 'https://doujin-assets.dmm.co.jp/digital/comic/d_784975/d_784975pt.jpg?diag=' + Date.now();
+    });
+  }
+
   function runDiag() {
     var out = $('apiDiagResult'), btn = $('apiDiagBtn');
     if (!out) return;
     if (btn) btn.disabled = true;
     out.innerHTML = '<span style="color:var(--sub);">診断中…（数秒かかります）</span>';
-    Promise.all([checkYouTube(), checkFanza(), checkClicks(), checkGas()]).then(function (lines) {
+    Promise.all([checkYouTube(), checkFanza(), checkClicks(), checkGas(), checkGasScriptTag(), checkImageCdn()]).then(function (lines) {
       out.innerHTML = lines.join('') +
-        '<div class="hint" style="margin-top:6px;">⚠️/❌の行が故障箇所です。全部✅なのに一覧が「…」のままの場合は、投稿履歴タブの「🔄 更新」を押すか、少し待ってから再読込してください。</div>';
+        '<div class="hint" style="margin-top:6px;">⚠️/❌の行が故障箇所です。全部✅なのに一覧が「…」のままの場合は、投稿履歴タブの「🔄 更新」を押すか、少し待ってから再読込してください。「復元(シート読込)」「サムネ画像CDN」が❌の場合は、広告ブロッカー/セキュリティソフトの拡張機能を疑ってください(シークレットウィンドウ/拡張機能オフで再テスト推奨)。</div>';
       if (btn) btn.disabled = false;
     });
   }

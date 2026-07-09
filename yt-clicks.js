@@ -149,16 +149,21 @@
   var _deltaFetched = false;
   function gasUrl_() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
   // JSONP（GASのGETをCORS回避で読む。キャッシュバスターcb付き）。
+  //   失敗時は null ではなく {__jsonpFail:true, reason} を渡す（呼び出し側は !res||!res.ok の
+  //   既存チェックで従来どおり「失敗」と判定できる＝後方互換。reason で原因を区別できる：
+  //   'blocked'＝<script>読込が即エラー(広告ブロッカー/セキュリティソフト/DNSフィルタで
+  //   script.google.com 等が遮断されている可能性が高い＝数百ms〜数秒で発生)、
+  //   'timeout'＝20秒待っても応答無し(通信不安定/GAS側の遅延)。
   function jsonp_(base, params, cb) {
     if (!base) { cb(null); return; }
     var name = '__go5d_' + new Date().getTime() + '_' + Math.floor(Math.random() * 1e6);
-    var s = document.createElement('script'), done = false;
+    var s = document.createElement('script'), done = false, t0 = Date.now();
     function clean() { try { delete window[name]; } catch (e) { window[name] = undefined; } if (s.parentNode) s.parentNode.removeChild(s); }
-    var timer = setTimeout(function () { if (done) return; done = true; clean(); cb(null); }, 20000);
+    var timer = setTimeout(function () { if (done) return; done = true; clean(); cb({ __jsonpFail: true, reason: 'timeout', ms: Date.now() - t0 }); }, 20000);
     window[name] = function (d) { if (done) return; done = true; clearTimeout(timer); clean(); cb(d); };
     var q = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
     s.src = base + (base.indexOf('?') >= 0 ? '&' : '?') + q + '&cb=' + new Date().getTime() + '&callback=' + name;
-    s.onerror = function () { if (done) return; done = true; clearTimeout(timer); clean(); cb(null); };
+    s.onerror = function () { if (done) return; done = true; clearTimeout(timer); clean(); cb({ __jsonpFail: true, reason: 'blocked', ms: Date.now() - t0 }); };
     document.body.appendChild(s);
   }
   function fmtDelta_(d) {
@@ -1045,7 +1050,14 @@
     var gas = gasUrl_(); if (!gas) { if (cb) cb({ ok: false, reason: '記録用GAS（⚙記録用URL）が未設定です' }); return; }
     var to = acct();
     jsonp_(gas, { action: 'history', channel: to, limit: 300 }, function (res) {
-      if (!res || !res.ok || !Array.isArray(res.items)) { if (cb) cb({ ok: false, reason: 'シートの投稿履歴を取得できませんでした' }); return; }
+      if (!res || !res.ok || !Array.isArray(res.items)) {
+        var why = 'シートの投稿履歴を取得できませんでした';
+        if (res && res.__jsonpFail && res.reason === 'blocked') why += '（' + res.ms + 'ms で読込失敗＝広告ブロッカー/セキュリティソフト/DNSフィルタが script.google.com への通信を遮断している可能性が高いです。拡張機能を無効化するかシークレットウィンドウで試してください）';
+        else if (res && res.__jsonpFail && res.reason === 'timeout') why += '（20秒応答なし＝通信不安定、またはGAS側が混雑している可能性）';
+        else if (res && res.error) why += '（GAS: ' + res.error + '）';
+        if (cb) cb({ ok: false, reason: why });
+        return;
+      }
       var arrs = {};
       function arrOf(base, a) { var kk = base + '__' + a; if (!arrs[kk]) arrs[kk] = loadArrFor_(base, a); return arrs[kk]; }
       // 1アイテムを表す全キー（postUri/短縮URL/videoId/題名+YT）。安定キーが無い行も題名+YTで重複判定。
