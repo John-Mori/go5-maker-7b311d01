@@ -29,6 +29,13 @@ binding = "FANZA_DB"
 database_name = "go5_fanza"
 database_id = "39c22ab0-e90b-4755-9270-7265b9fed530"
 
+# ── D1(継続改善制度): 改善要求/行動ログ/変更ログ/insights/部門イベント/タスク/ペルソナ/学習/コピー差分の12表 ──
+#   スキーマ=kaizen_schema.sql。設計=docs/設計・調査/AI組織_実装設計書_v3_統合ロードマップ.md
+[[d1_databases]]
+binding = "KAIZEN_DB"
+database_name = "go5_kaizen"
+database_id = "dff88863-c040-4429-b847-a528c9b68914"
+
 # ── Secrets（コマンドで登録。ここには書かない）──
 #   wrangler secret put SHARED_SECRET         ← フロント認証キー（必須・公開可のソフト鍵）
 #   wrangler secret put ADMIN_SECRET          ← 管理鍵（override/queue用・PCバッチのみ保持・配布禁止）

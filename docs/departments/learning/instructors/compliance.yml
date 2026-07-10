@@ -1,0 +1,6 @@
+instructor_id: compliance
+type: on-demand
+domain: コンプライアンス
+covers: [YouTube規約, アフィリエイト規約, 広告表示, 著作権, 外部リンク, 成人向け表現, 景表法]
+tone_hint: 規約原文の確認(Freshness)を必ず行う。断定を避け原文参照を促す
+referral_to: [marketing-behavior]

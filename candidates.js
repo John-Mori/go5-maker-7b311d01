@@ -27,6 +27,8 @@
   //   キャッシュ系(cand_sales/cand_mk2 等)では発火させない＝no-op同期の無駄打ちを避ける。
   function reqSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
   function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); }
+  // 継続改善制度の行動ログ(意味のある操作のみ・失敗は無害)。
+  function klog_(action, objType, objId, meta) { try { if (window.Go5Kaizen) window.Go5Kaizen.log('candidates', action, objType, objId, meta); } catch (e) {} }
   function workerCfg() {
     var u = '', s = '';
     try { u = (localStorage.getItem('fanza_worker_url') || '').trim(); s = (localStorage.getItem('fanza_shared_secret') || '').trim(); } catch (e) {}
@@ -306,6 +308,7 @@
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
       (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
       reqSync_(); // 参照画像(動画生成用)の保存直後に即時同期＝他端末で即反映（画像はR2へ）
+      if (rec) klog_('ref_image_saved', 'work', cid, { imgs: imgs.length });
       return true; // IDBは容量に余裕。非同期失敗は稀（メモリ保持＋ログ）
     }
     try {
@@ -1244,6 +1247,7 @@
   function bindPcRun_(btn, noticeParentId) {
     btn.addEventListener('click', function () {
       var b = this; b.disabled = true; var t0 = b.textContent; b.textContent = '⏳ 要求中…';
+      klog_('fetch_now_requested', '', '', null);
       requestPcRun(function (ok, err) {
         var friendly = err === 'kv_quota_exceeded' ? '本日の上限に達しました(明日また使えます)' : (err || '失敗');
         b.textContent = ok ? '✅ 要求しました' : '⚠️ ' + friendly;
@@ -2084,6 +2088,7 @@
       have[w.cid] = true; added++;
     });
     lsSet(key, items); recordReviewSnapshots(items);
+    if (added > 0) klog_('candidate_added', 'work', (works[0] && works[0].cid) || '', { added: added, dup: dup });
     return { added: added, dup: dup };
   }
   // 🔁: このタブの各作品の価格・販売数を最新化（FANZA再取得＋販売数キャッシュ無効化）。

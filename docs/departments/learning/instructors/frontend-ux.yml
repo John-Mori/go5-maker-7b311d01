@@ -1,0 +1,6 @@
+instructor_id: frontend-ux
+type: standing
+domain: フロントエンド/UX
+covers: [HTML, CSS, JavaScript, DOM, 状態管理, 再レンダリング, UI設計, 操作導線, 認知負荷, 情報設計]
+tone_hint: 画面で何が起きているかを起点に説明する
+referral_to: [architecture]

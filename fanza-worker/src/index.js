@@ -301,6 +301,38 @@ export default {
       }
     }
 
+    // ── 継続改善制度: 行動ログ受け口（フロントの core/kaizen-log.js が送る）──
+    //   POST /api/kaizen-event { events:[{screen,action,objectType,objectId,meta,deviceType,sessionId}] }
+    //   認証=公開ソフト鍵+Origin(他のフロント向けAPIと同型)。保存先=D1 go5_kaizen(KAIZEN_DB)。
+    //   秘密を持ち込めないようフィールド許可制+文字数上限で再構築してから保存する。
+    if (path === "/api/kaizen-event") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      const corsK = corsHeaders(origin, allowed);
+      if (!corsK) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, corsK);
+      const secK = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || secK !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsK);
+      if (!env.KAIZEN_DB) return json({ ok: false, error: "kaizen_unbound" }, 500, corsK);
+      let kbody;
+      try { kbody = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, corsK); }
+      const evs = Array.isArray(kbody.events) ? kbody.events.slice(0, 50) : [];
+      const S = (v, n) => String(v == null ? "" : v).slice(0, n);
+      const ID = (v, n) => (/^[0-9A-Za-z_:\-\.\/]*$/.test(String(v == null ? "" : v)) ? S(v, n) : "");
+      const stmts = [];
+      for (const raw of evs) {
+        if (!raw || !raw.action) continue;
+        stmts.push(env.KAIZEN_DB.prepare(
+          "INSERT INTO user_events(device_type,session_id,screen,action,object_type,object_id,metadata) VALUES(?,?,?,?,?,?,?)"
+        ).bind(
+          S(raw.deviceType, 8), ID(raw.sessionId, 16), S(raw.screen, 40), S(raw.action, 64),
+          S(raw.objectType, 32), S(raw.objectId, 80), S(raw.meta, 300)
+        ));
+      }
+      if (!stmts.length) return json({ ok: true, saved: 0 }, 200, corsK);
+      try { await env.KAIZEN_DB.batch(stmts); } catch (e) { return json({ ok: false, error: "d1_error" }, 503, corsK); }
+      return json({ ok: true, saved: stmts.length }, 200, corsK);
+    }
+
     // ── KV↔D1 照合（on切替前の安全確認）。認証は管理鍵。読み取りのみ（無害）。──
     if (path === "/api/d1-verify") {
       if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);

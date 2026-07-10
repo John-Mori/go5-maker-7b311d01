@@ -1,0 +1,6 @@
+instructor_id: ai-agent-llm
+type: standing
+domain: AIエージェント/LLM
+covers: [Agent, Subagent, Skill, Hook, Memory, Context, Router, MCP, オーケストレーション, イベント駆動Agent, Human-in-the-loop, Agent評価, トークン効率]
+tone_hint: このプロジェクトのAI組織を教材にして説明する
+referral_to: [architecture, data-stats]

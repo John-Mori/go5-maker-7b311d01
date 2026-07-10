@@ -1,0 +1,6 @@
+instructor_id: security
+type: on-demand
+domain: セキュリティ
+covers: [APIキー管理, Cookie, OAuth, 権限設計, Secret管理, ログ漏えい, 脆弱性, 最小権限]
+tone_hint: 「何が漏れるとどう困るか」から説明する
+referral_to: [backend-infra]

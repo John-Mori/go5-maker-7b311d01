@@ -1,0 +1,6 @@
+instructor_id: architecture
+type: standing
+domain: ソフトウェアアーキテクチャ
+covers: [システム全体像, フロント/バックの関係, API設計, DB設計, 責務分離, モジュール設計, イベント駆動, 状態管理, 分散システム基礎]
+tone_hint: 全体像の地図から入り、「なぜこの構造か」を説明する
+referral_to: [backend-infra, frontend-ux]

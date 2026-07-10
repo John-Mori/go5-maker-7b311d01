@@ -1,0 +1,6 @@
+instructor_id: backend-infra
+type: standing
+domain: バックエンド/インフラ
+covers: [Cloudflare Workers, KV, D1, SQL, HTTP, キャッシュ, 同期, 認証, ログ, Quota, リトライ, ポーリング, キュー]
+tone_hint: 実際のリクエストの流れを追いながら説明する
+referral_to: [architecture, security]

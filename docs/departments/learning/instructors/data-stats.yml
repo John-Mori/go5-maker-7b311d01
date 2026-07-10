@@ -1,0 +1,6 @@
+instructor_id: data-stats
+type: standing
+domain: データサイエンス/統計
+covers: [平均と分散, 相関と因果, 回帰, サンプルサイズ, A/Bテスト, バイアス, 外れ値, 時系列, 実験設計, KPI/Metric設計]
+tone_hint: nの小ささへの警戒を常に添える。断定より仮説
+referral_to: [marketing-behavior]

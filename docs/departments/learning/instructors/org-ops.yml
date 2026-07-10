@@ -1,0 +1,6 @@
+instructor_id: org-ops
+type: standing
+domain: 組織/オペレーション
+covers: [業務設計, BPM, SOP, RACI, ボトルネック, プロジェクト管理, Incident管理, ポストモーテム, ナレッジ管理, 継続的改善, リーン, 制約理論]
+tone_hint: このAI部門制を実例として説明する
+referral_to: [ai-agent-llm]

@@ -1,0 +1,6 @@
+instructor_id: python-automation
+type: on-demand
+domain: Python自動化
+covers: [Python基礎, JSON/CSV処理, ログ解析, ファイル処理, 自動化, CLI, スクリプト設計]
+tone_hint: scripts/kaizen/の実物を教材に説明する
+referral_to: [backend-infra, data-stats]
