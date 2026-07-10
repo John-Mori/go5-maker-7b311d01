@@ -11,7 +11,7 @@ ALLOWED_ORIGIN = "https://john-mori.github.io"
 #   "dual"    = D1優先で読み、書き込みはD1+KV両方（移行検証期・保険）
 #   "on"      = D1のみ（カットオーバー後・KV書き込み停止）
 # 問題時は "off" に戻して再デプロイすれば即ロールバック。
-USE_D1 = "dual"
+USE_D1 = "on"
 
 # ── KV：API未収録作品の上書き情報(ov:<cid>)と取得依頼キュー(req:<cid>) ──
 #   PC側スクリプト(scripts/fetch_missing_works.mjs)が日本IPでスクレイプした
