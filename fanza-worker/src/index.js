@@ -69,7 +69,8 @@ export default {
             const age = Date.now() - (Date.parse(ov.scrapedAt || "") || 0);
             if (age > 30 * 86400000) {
               ov.prices = { list_price: null, price: null };
-              try { await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString(), reason: "stale_override" }), { expirationTtl: 604800 }); } catch (e) {}
+              // dedup: 既に再取得依頼済みなら書き直さない(30日超えの同じ作品を開くたびの再書き込み防止)。
+              try { const exists = await env.FANZA_KV.get("req:" + cid); if (!exists) await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString(), reason: "stale_override" }), { expirationTtl: 604800 }); } catch (e) {}
             }
             item = ov;
           }
@@ -88,7 +89,19 @@ export default {
       // フル情報が取れなかった作品は「PC取得依頼キュー」へ記録（PCのバッチが拾ってスクレイプ→ov:へ保存）。
       //   book等のsrcUrlがあれば一緒に保存し、PC側がそのURL（同人以外）を正しくスクレイプできるようにする。
       if (env.FANZA_KV && (!item || item.partial)) {
-        try { await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString(), url: srcUrl || "" }), { expirationTtl: 604800 }); } catch (e) {}
+        try {
+          // ★KV1日書き込み上限(1,000/日)の主因対策：唯一dedupの無かったPUT。候補タブを開くたび・
+          //   バックフィル再試行のたびに未取得作品ぶんのreq:を無条件で書き直していたため、
+          //   FANZA Books等の頑固なpartial作品が数件あるだけで上限を「すぐ」使い切っていた。
+          //   読み取りは無制限(10万/日)なので、既にキューにあれば書き込みを省略する。
+          //   ただしBooks等でスクレイプ先URL(srcUrl)を今回初めて渡せた場合(既存req:にurl無し)だけは、
+          //   PC側が正しくスクレイプできるよう1回だけ上書きして enrich する。
+          const prevReq = await env.FANZA_KV.get("req:" + cid, "json").catch(() => null);
+          const needUrlEnrich = srcUrl && (!prevReq || !prevReq.url);
+          if (!prevReq || needUrlEnrich) {
+            await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString(), url: srcUrl || (prevReq && prevReq.url) || "" }), { expirationTtl: 604800 });
+          }
+        } catch (e) {}
       }
 
       if (!item) return json({ ok: false, error: "not_found", cid }, 404, cors);
@@ -267,7 +280,9 @@ export default {
       if (!env.SHARED_SECRET || secR !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsR);
       if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, corsR);
       try {
-        await env.FANZA_KV.put("salesrun:req", JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 86400 });
+        // dedup: 既に取得要求が立っていれば書き直さない(ボタン連打・複数端末からの同時要求でのKV消費防止)。
+        const alreadyReq = await env.FANZA_KV.get("salesrun:req").catch(() => null);
+        if (!alreadyReq) await env.FANZA_KV.put("salesrun:req", JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 86400 });
       } catch (e) {
         // KV1日書き込み上限等で失敗しても「クラッシュ(素の500)」ではなく分かるエラーを返す。
         const msg = String(e && e.message || e);
