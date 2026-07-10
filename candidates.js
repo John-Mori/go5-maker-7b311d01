@@ -22,7 +22,11 @@
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function lsGet(k, def) { try { return JSON.parse(localStorage.getItem(k) || def); } catch (e) { return JSON.parse(def); } }
-  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} reqSyncFor_(k); }
+  // 同期対象の候補キーが変わったら即時同期を要求（デバウンス＋最小間隔はGo5Sync側で吸収）。
+  //   キャッシュ系(cand_sales/cand_mk2 等)では発火させない＝no-op同期の無駄打ちを避ける。
+  function reqSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
+  function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); }
   function workerCfg() {
     var u = '', s = '';
     try { u = (localStorage.getItem('fanza_worker_url') || '').trim(); s = (localStorage.getItem('fanza_shared_secret') || '').trim(); } catch (e) {}
@@ -301,6 +305,7 @@
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
       (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
+      reqSync_(); // 参照画像(動画生成用)の保存直後に即時同期＝他端末で即反映（画像はR2へ）
       return true; // IDBは容量に余裕。非同期失敗は稀（メモリ保持＋ログ）
     }
     try {
@@ -320,6 +325,7 @@
     if (_idbOk) {
       if (rec) _imgMem.bsky[cid] = rec; else delete _imgMem.bsky[cid];
       (rec ? window.Go5Idb.set(idbKey('bsky', cid), rec) : window.Go5Idb.del(idbKey('bsky', cid))).catch(idbFail_);
+      reqSync_(); // Bluesky添付画像の保存直後にも即時同期
       return true;
     }
     try {

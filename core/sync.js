@@ -314,8 +314,21 @@
     if (root.document) root.document.addEventListener("visibilitychange", function () { if (root.document.visibilityState === "hidden") syncOnce(false); });
   }
 
+  // 変更駆動の即時同期（候補追加・画像保存の直後に呼ぶ）。25秒周期を待たずに反映しつつ、
+  //   デバウンス（連続変更を1回に）＋最小間隔（連打・多発でsync-workerのKV上限を突かない）で保護。
+  //   ・no-op時はpushしない既存仕様（syncOnceのchanged判定）と合わせ、実変更が無ければ書き込みも起きない。
+  var _reqTimer = null;
+  var REQ_DEBOUNCE_MS = 3000;   // これだけ変更が途切れたらまとめて1回同期
+  var REQ_MIN_GAP_MS = 10000;   // 直近同期からの最小間隔（下限）
+  function requestSync() {
+    if (!configured() || _reqTimer) return;             // 既に予約済み＝デバウンス（追加予約しない）
+    var sinceLast = Date.now() - (_lastAt || 0);
+    var wait = Math.max(REQ_DEBOUNCE_MS, REQ_MIN_GAP_MS - sinceLast);
+    _reqTimer = root.setTimeout(function () { _reqTimer = null; syncOnce(false); }, wait);
+  }
+
   root.Go5Sync = {
-    configured: configured, syncNow: function () { return syncOnce(false); }, status: status, startAuto: startAuto,
+    configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, status: status, startAuto: startAuto,
     setConfig: function (o) {
       try {
         if (o.url != null) LS.setItem("sync2_url", String(o.url).trim());
