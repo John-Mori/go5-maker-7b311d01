@@ -62,15 +62,14 @@ export default {
       // ①′ KV上書き：PC側バッチ(scripts/fetch_missing_works.mjs)が日本IPでスクレイプした
       //    フル情報。API未収録の作品はここで解決する。
       //    30日以上前のスクレイプは価格だけ無効化（旧セール価格の配信防止）し、再取得を依頼キューへ。
-      if (!item && env.FANZA_KV) {
+      if (!item) {
         try {
-          const ov = await env.FANZA_KV.get("ov:" + cid, "json");
+          const ov = await stGetOverride(env, cid);
           if (ov && ov.title) {
             const age = Date.now() - (Date.parse(ov.scrapedAt || "") || 0);
             if (age > 30 * 86400000) {
               ov.prices = { list_price: null, price: null };
-              // dedup: 既に再取得依頼済みなら書き直さない(30日超えの同じ作品を開くたびの再書き込み防止)。
-              try { const exists = await env.FANZA_KV.get("req:" + cid); if (!exists) await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString(), reason: "stale_override" }), { expirationTtl: 604800 }); } catch (e) {}
+              await stQueueInfoPut(env, cid, ""); // 30日超=再取得依頼（既存なら書かない=dedup内蔵）
             }
             item = ov;
           }
@@ -88,20 +87,10 @@ export default {
 
       // フル情報が取れなかった作品は「PC取得依頼キュー」へ記録（PCのバッチが拾ってスクレイプ→ov:へ保存）。
       //   book等のsrcUrlがあれば一緒に保存し、PC側がそのURL（同人以外）を正しくスクレイプできるようにする。
-      if (env.FANZA_KV && (!item || item.partial)) {
-        try {
-          // ★KV1日書き込み上限(1,000/日)の主因対策：唯一dedupの無かったPUT。候補タブを開くたび・
-          //   バックフィル再試行のたびに未取得作品ぶんのreq:を無条件で書き直していたため、
-          //   FANZA Books等の頑固なpartial作品が数件あるだけで上限を「すぐ」使い切っていた。
-          //   読み取りは無制限(10万/日)なので、既にキューにあれば書き込みを省略する。
-          //   ただしBooks等でスクレイプ先URL(srcUrl)を今回初めて渡せた場合(既存req:にurl無し)だけは、
-          //   PC側が正しくスクレイプできるよう1回だけ上書きして enrich する。
-          const prevReq = await env.FANZA_KV.get("req:" + cid, "json").catch(() => null);
-          const needUrlEnrich = srcUrl && (!prevReq || !prevReq.url);
-          if (!prevReq || needUrlEnrich) {
-            await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at: new Date().toISOString(), url: srcUrl || (prevReq && prevReq.url) || "" }), { expirationTtl: 604800 });
-          }
-        } catch (e) {}
+      // フル情報が取れなかった作品は取得依頼キューへ（dedup+Books用URL enrich はstQueueInfoPut内蔵）。
+      //   ★KV1日書き込み上限の主因だった無条件req:書き込みは、ストレージ層のdedupで解消済み。
+      if (!item || item.partial) {
+        try { await stQueueInfoPut(env, cid, srcUrl); } catch (e) {}
       }
 
       if (!item) return json({ ok: false, error: "not_found", cid }, 404, cors);
@@ -141,18 +130,15 @@ export default {
     if (path === "/api/fanza-queue") {
       if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, null);
       if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
-      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
-      const reqCids = await listAll(env.FANZA_KV, "req:"); // 取得依頼中のcid
-      // book等の非同人はスクレイプ先URLが必要なので、req:値からcid→urlを添える。
+      if (!env.FANZA_KV && !env.FANZA_DB) return json({ ok: false, error: "store_unbound" }, 500, null);
+      const infoQ = await stQueueList(env, "info"); // 取得依頼中のcid（+book等のスクレイプ先url）
       const queuedUrls = {};
-      await Promise.all(reqCids.map(async (c) => {
-        try { const v = await env.FANZA_KV.get("req:" + c, "json"); if (v && v.url) queuedUrls[c] = v.url; } catch (e) {}
-      }));
+      infoQ.forEach((q) => { if (q.url) queuedUrls[q.cid] = q.url; });
       return json({
         ok: true,
-        queued: reqCids,
+        queued: infoQ.map((q) => q.cid),
         queuedUrls: queuedUrls,
-        overridden: await listAll(env.FANZA_KV, "ov:"),   // 上書き登録済みのcid（価格更新のため再取得対象）
+        overridden: await stListOverrideCids(env),   // 上書き登録済みのcid（価格更新のため再取得対象）
       }, 200, null);
     }
 
@@ -171,14 +157,9 @@ export default {
         if (!it) continue;
         if (quotaHit) { skipped++; continue; } // 上限到達後は残りを静かにスキップ（1件のクラッシュで全件失敗にしない）
         try {
-          const key = "ov:" + it.content_id;
-          const newStr = JSON.stringify(it);
-          // 内容が前回と同一なら書き込みを省略（KV1日書き込み上限の消費を減らす＝価格変動が無い作品の再書き込み防止）。
-          const prevStr = await env.FANZA_KV.get(key).catch(() => null);
-          if (prevStr === newStr) { skipped++; continue; }
-          await env.FANZA_KV.put(key, newStr);
-          try { await env.FANZA_KV.delete("req:" + it.content_id); } catch (e) {}
-          saved++;
+          // 内容が前回と同一なら書き込みを省略（stPutOverride内蔵のdedup）。保存できたら取得依頼を消す。
+          const { saved: didSave } = await stPutOverride(env, it);
+          if (didSave) { await stQueueDelete(env, it.content_id, "info"); saved++; } else skipped++;
         } catch (e) {
           if (String(e && e.message || e).indexOf("limit exceeded") >= 0) quotaHit = true;
           skipped++;
@@ -205,24 +186,9 @@ export default {
       let cids = Array.isArray(sbody.cids) ? sbody.cids : (sbody.cid ? [sbody.cid] : []);
       cids = cids.map((c) => String(c || "").trim()).filter((c) => /^[0-9A-Za-z_]{1,64}$/.test(c)).slice(0, 30);
       if (!cids.length) return json({ ok: false, error: "missing_cid" }, 400, cors3);
-      const sales = {}; const missing = [];
-      await Promise.all(cids.map(async (cid) => {
-        try {
-          const v = await env.FANZA_KV.get("sales:" + cid, "json");
-          if (v && v.n != null) sales[cid] = v.n; else missing.push(cid);
-        } catch (e) { missing.push(cid); }
-      }));
-      // 未取得cidは「PC取得依頼キュー(販売数)」へ記録（PCバッチが拾って日本IPでスクレイプ→保存）。
-      //   ★候補タブを開くたびに同じ未取得cidを毎回書き直すとKV1日書き込み上限をすぐ消費するため、
-      //   既に24時間以内に登録済みなら書き込みを省略する（読み取りは無制限なので事前チェックしてよい）。
-      await Promise.all(missing.map(async (cid) => {
-        try {
-          const key = "salesreq:" + cid;
-          const prev = await env.FANZA_KV.get(key, "json").catch(() => null);
-          if (prev && prev.at && (Date.now() - Date.parse(prev.at)) < 86400000) return; // 24h以内なら再登録不要
-          await env.FANZA_KV.put(key, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 1209600 });
-        } catch (e) {}
-      }));
+      const { sales, missing } = await stGetSalesMany(env, cids);
+      // 未取得cidは「PC取得依頼キュー(販売数)」へ（24h以内に登録済みなら書かない=stQueueSalesPut内蔵）。
+      await Promise.all(missing.map(async (cid) => { try { await stQueueSalesPut(env, cid); } catch (e) {} }));
       return json({ ok: true, sales, missing }, 200, cors3);
     }
 
@@ -242,14 +208,9 @@ export default {
         if (!/^[0-9A-Za-z_]{1,64}$/.test(cid) || isNaN(n)) continue;
         if (quotaHit) { skipped++; continue; } // 上限到達後は残りを静かにスキップ（1件のクラッシュで全件失敗にしない）
         try {
-          const key = "sales:" + cid;
-          // 数値が前回と変わっていなければ書き込みを省略（KV1日書き込み上限の消費を減らす＝
-          //   15分毎のポーリングで変動の無い作品を毎回書き直さない）。
-          const prev = await env.FANZA_KV.get(key, "json").catch(() => null);
-          if (prev && prev.n === n) { skipped++; continue; }
-          await env.FANZA_KV.put(key, JSON.stringify({ n, at: new Date().toISOString() }));
-          try { await env.FANZA_KV.delete("salesreq:" + cid); } catch (e) {}
-          saved++;
+          // 数値が前回と同じなら書き込み省略（stPutSales内蔵）。保存できたら取得依頼を消す。
+          const { saved: didSave } = await stPutSales(env, cid, n);
+          if (didSave) { await stQueueDelete(env, cid, "sales"); saved++; } else skipped++;
         } catch (e) {
           if (String(e && e.message || e).indexOf("limit exceeded") >= 0) quotaHit = true;
           skipped++;
@@ -266,11 +227,10 @@ export default {
       if (request.method === "OPTIONS") return preflight(origin, allowed);
       if (request.method === "GET") {
         if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
-        if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
-        const v = await env.FANZA_KV.get("salesrun:req", "json").catch(() => null);
+        const v = await stGetFlag(env, "sales_run");
         // 既定は peek（消さない）。?consume=1 の時だけ消費。
         // ※実行を確約した後にだけ消費することで、直近ガードで見送った要求を取りこぼさない。
-        if (v && url.searchParams.get("consume") === "1") { try { await env.FANZA_KV.delete("salesrun:req"); } catch (e) {} }
+        if (v && url.searchParams.get("consume") === "1") await stDeleteFlag(env, "sales_run");
         return json({ ok: true, pending: !!v, at: (v && v.at) || null }, 200, null);
       }
       const corsR = corsHeaders(origin, allowed);
@@ -278,11 +238,9 @@ export default {
       if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, corsR);
       const secR = request.headers.get("X-Shared-Secret") || "";
       if (!env.SHARED_SECRET || secR !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsR);
-      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, corsR);
       try {
         // dedup: 既に取得要求が立っていれば書き直さない(ボタン連打・複数端末からの同時要求でのKV消費防止)。
-        const alreadyReq = await env.FANZA_KV.get("salesrun:req").catch(() => null);
-        if (!alreadyReq) await env.FANZA_KV.put("salesrun:req", JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 86400 });
+        await stPutFlagIfAbsent(env, "sales_run");
       } catch (e) {
         // KV1日書き込み上限等で失敗しても「クラッシュ(素の500)」ではなく分かるエラーを返す。
         const msg = String(e && e.message || e);
@@ -301,18 +259,15 @@ export default {
       if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, cors4);
       const sec4 = request.headers.get("X-Shared-Secret") || "";
       if (!env.SHARED_SECRET || sec4 !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors4);
-      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, cors4);
       let tbody;
       try { tbody = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, cors4); }
       const mkId = String(tbody.makerId || "").trim();
       if (!/^\d{1,10}$/.test(mkId)) return json({ ok: false, error: "bad_maker_id" }, 400, cors4);
-      if (tbody.remove) { try { await env.FANZA_KV.delete("salestrack:" + mkId); } catch (e) {} return json({ ok: true, removed: mkId }, 200, cors4); }
+      if (tbody.remove) { await stDeleteMaker(env, mkId); return json({ ok: true, removed: mkId }, 200, cors4); }
       const mkName = String(tbody.name || "").slice(0, 100);
       try {
-        const tkey = "salestrack:" + mkId;
-        const prevT = await env.FANZA_KV.get(tkey, "json").catch(() => null);
-        // 既に同じ名前で登録済みなら書き込みを省略（同じサークルへ何度もタブを足す操作でのKV消費を防ぐ）。
-        if (!prevT || prevT.name !== mkName) await env.FANZA_KV.put(tkey, JSON.stringify({ name: mkName, at: new Date().toISOString() }));
+        // 既に同じ名前で登録済みなら書き込みを省略（stPutMaker内蔵）。
+        await stPutMaker(env, mkId, mkName);
       } catch (e) {
         const msg = String(e && e.message || e);
         return json({ ok: false, error: msg.indexOf("limit exceeded") >= 0 ? "kv_quota_exceeded" : "kv_error" }, 503, cors4);
@@ -324,13 +279,10 @@ export default {
     if (path === "/api/fanza-sales-queue") {
       if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, null);
       if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
-      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
-      const trackIds = await listAll(env.FANZA_KV, "salestrack:");
-      const trackedMakers = await Promise.all(trackIds.map(async (mid) => {
-        const v = await env.FANZA_KV.get("salestrack:" + mid, "json").catch(() => null);
-        return { makerId: mid, name: (v && v.name) || "" };
-      }));
-      return json({ ok: true, queued: await listAll(env.FANZA_KV, "salesreq:"), trackedMakers }, 200, null);
+      if (!env.FANZA_KV && !env.FANZA_DB) return json({ ok: false, error: "store_unbound" }, 500, null);
+      const trackedMakers = await stListMakers(env);
+      const salesQ = await stQueueList(env, "sales");
+      return json({ ok: true, queued: salesQ.map((q) => q.cid), trackedMakers }, 200, null);
     }
 
     // ── 一度きり：KV→D1 バックフィル（移行Phase1-C）。認証は管理鍵。冪等（何度呼んでも同じ結果）。──
@@ -667,6 +619,202 @@ async function listAll(kv, prefix) {
   } while (cursor);
   return out;
 }
+
+// ══ ストレージ抽象層（KV or D1・env.USE_D1 で切替）════════════════════════════
+//   off  = KVのみ（現行・デフォルト）
+//   dual = 読みはKV（両書きでKVも最新）／書きは D1+KV 両方（D1を実データで検証しつつKVで安全網）
+//   on   = 読み書きともD1のみ（カットオーバー後・KV書き込み停止＝1,000/日の天井が消える）
+//   ★dualでKVも最新に保つため、読みは on の時だけD1にすればよい（移行中の読み取りリスク最小）。
+function d1on_(env) { return (env.USE_D1 || "off") === "on"; }      // 読みをD1にするか
+function d1write_(env) { return (env.USE_D1 || "off") !== "off"; }  // D1へ書くか（dual/on）
+function kvwrite_(env) { return (env.USE_D1 || "off") !== "on"; }   // KVへ書くか（off/dual）
+function nowIso_() { return new Date().toISOString(); }
+function plusDaysIso_(d) { return new Date(Date.now() + d * 86400000).toISOString(); }
+function flagKvKey_(key) { return key === "sales_run" ? "salesrun:req" : ("flag:" + key); }
+// D1書き込み実行：dual(KVも書く)ならD1失敗を握りつぶしてKV(安全網)へ進む／on(D1のみ)なら失敗を伝播。
+async function d1run_(env, stmt) {
+  try { await stmt.run(); return true; }
+  catch (e) { if (kvwrite_(env)) return false; throw e; }
+}
+
+// ---- override（作品フル情報：works.info_json） ----
+async function stGetOverride(env, cid) {
+  if (d1on_(env)) {
+    const r = await env.FANZA_DB.prepare("SELECT info_json FROM works WHERE cid=?").bind(cid).first().catch(() => null);
+    return (r && r.info_json) ? safeJsonParse_(r.info_json) : null;
+  }
+  return await env.FANZA_KV.get("ov:" + cid, "json").catch(() => null);
+}
+async function stListOverrideCids(env) {
+  if (d1on_(env)) {
+    const rs = await env.FANZA_DB.prepare("SELECT cid FROM works WHERE info_json IS NOT NULL").all().catch(() => null);
+    return (rs && rs.results) ? rs.results.map((r) => r.cid) : [];
+  }
+  return await listAll(env.FANZA_KV, "ov:");
+}
+async function stPutOverride(env, item) { // returns {saved}
+  const cid = item.content_id, newStr = JSON.stringify(item);
+  let saved = false;
+  if (d1write_(env)) {
+    const r = await env.FANZA_DB.prepare("SELECT info_json FROM works WHERE cid=?").bind(cid).first().catch(() => null);
+    if (!r || r.info_json !== newStr) {
+      if (await d1run_(env, env.FANZA_DB.prepare("INSERT INTO works(cid,title,info_json,scraped_at,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(cid) DO UPDATE SET title=excluded.title, info_json=excluded.info_json, scraped_at=excluded.scraped_at, updated_at=datetime('now')")
+        .bind(cid, item.title || null, newStr, item.scrapedAt || null))) saved = true;
+    }
+  }
+  if (kvwrite_(env)) {
+    try {
+      const prevStr = await env.FANZA_KV.get("ov:" + cid).catch(() => null);
+      if (prevStr !== newStr) { await env.FANZA_KV.put("ov:" + cid, newStr); saved = true; }
+    } catch (e) { if (!d1write_(env)) throw e; } // offはquota検出のため再送出／dualはD1が正なので握りつぶす
+  }
+  return { saved };
+}
+
+// ---- sales（実売本数：works.sales_n） ----
+async function stGetSalesMany(env, cids) { // {sales:{cid:n}, missing:[cid]}
+  const sales = {}, missing = [];
+  if (d1on_(env)) {
+    const ph = cids.map(() => "?").join(",");
+    const rs = cids.length ? await env.FANZA_DB.prepare("SELECT cid, sales_n FROM works WHERE sales_n IS NOT NULL AND cid IN (" + ph + ")").bind(...cids).all().catch(() => null) : null;
+    const found = new Set();
+    if (rs && rs.results) rs.results.forEach((r) => { sales[r.cid] = r.sales_n; found.add(r.cid); });
+    cids.forEach((c) => { if (!found.has(c)) missing.push(c); });
+    return { sales, missing };
+  }
+  await Promise.all(cids.map(async (c) => {
+    const v = await env.FANZA_KV.get("sales:" + c, "json").catch(() => null);
+    if (v && v.n != null) sales[c] = v.n; else missing.push(c);
+  }));
+  return { sales, missing };
+}
+async function stPutSales(env, cid, n) { // returns {saved}
+  let saved = false;
+  if (d1write_(env)) {
+    const r = await env.FANZA_DB.prepare("SELECT sales_n FROM works WHERE cid=?").bind(cid).first().catch(() => null);
+    if (!r || r.sales_n !== n) {
+      if (await d1run_(env, env.FANZA_DB.prepare("INSERT INTO works(cid,sales_n,sales_at,updated_at) VALUES(?,?,?,datetime('now')) ON CONFLICT(cid) DO UPDATE SET sales_n=excluded.sales_n, sales_at=excluded.sales_at, updated_at=datetime('now')")
+        .bind(cid, n, nowIso_()))) saved = true;
+    }
+  }
+  if (kvwrite_(env)) {
+    try {
+      const prev = await env.FANZA_KV.get("sales:" + cid, "json").catch(() => null);
+      if (!(prev && prev.n === n)) { await env.FANZA_KV.put("sales:" + cid, JSON.stringify({ n, at: nowIso_() })); saved = true; }
+    } catch (e) { if (!d1write_(env)) throw e; }
+  }
+  return { saved };
+}
+
+// ---- fetch_queue（取得依頼：req:=info / salesreq:=sales） ----
+async function stQueueGet(env, cid, kind) { // {url, at}|null
+  if (d1on_(env)) {
+    const r = await env.FANZA_DB.prepare("SELECT src_url, requested_at FROM fetch_queue WHERE cid=? AND kind=? AND (expires_at IS NULL OR expires_at > ?)").bind(cid, kind, nowIso_()).first().catch(() => null);
+    return r ? { url: r.src_url || "", at: r.requested_at } : null;
+  }
+  return await env.FANZA_KV.get((kind === "info" ? "req:" : "salesreq:") + cid, "json").catch(() => null);
+}
+async function stQueueList(env, kind) { // [{cid, url}]
+  if (d1on_(env)) {
+    const rs = await env.FANZA_DB.prepare("SELECT cid, src_url FROM fetch_queue WHERE kind=? AND (expires_at IS NULL OR expires_at > ?)").bind(kind, nowIso_()).all().catch(() => null);
+    return (rs && rs.results) ? rs.results.map((r) => ({ cid: r.cid, url: r.src_url || "" })) : [];
+  }
+  const prefix = kind === "info" ? "req:" : "salesreq:";
+  const cids = await listAll(env.FANZA_KV, prefix);
+  const out = [];
+  for (const cid of cids) { const v = await env.FANZA_KV.get(prefix + cid, "json").catch(() => null); out.push({ cid, url: (v && v.url) || "" }); }
+  return out;
+}
+// info: 既存なら書かない（enrich=既存にurl無く今回srcUrlありの時のみ上書き）。req:はquota握りつぶし（原コード踏襲）。
+async function stQueueInfoPut(env, cid, srcUrl) {
+  const prev = await stQueueGet(env, cid, "info");
+  const needEnrich = srcUrl && (!prev || !prev.url);
+  if (prev && !needEnrich) return;
+  const url = srcUrl || (prev && prev.url) || "";
+  const at = nowIso_();
+  if (d1write_(env)) {
+    await env.FANZA_DB.prepare("INSERT INTO fetch_queue(cid,kind,src_url,requested_at,expires_at) VALUES(?,'info',?,?,?) ON CONFLICT(cid,kind) DO UPDATE SET src_url=excluded.src_url, requested_at=excluded.requested_at, expires_at=excluded.expires_at")
+      .bind(cid, url || null, at, plusDaysIso_(7)).run().catch(() => {});
+  }
+  if (kvwrite_(env)) { try { await env.FANZA_KV.put("req:" + cid, JSON.stringify({ at, url }), { expirationTtl: 604800 }); } catch (e) {} }
+}
+// sales: 24h以内に登録済みなら書かない。
+async function stQueueSalesPut(env, cid) {
+  const prev = await stQueueGet(env, cid, "sales");
+  if (prev && prev.at && (Date.now() - Date.parse(prev.at)) < 86400000) return;
+  const at = nowIso_();
+  if (d1write_(env)) {
+    await env.FANZA_DB.prepare("INSERT INTO fetch_queue(cid,kind,requested_at,expires_at) VALUES(?,'sales',?,?) ON CONFLICT(cid,kind) DO UPDATE SET requested_at=excluded.requested_at, expires_at=excluded.expires_at")
+      .bind(cid, at, plusDaysIso_(14)).run().catch(() => {});
+  }
+  if (kvwrite_(env)) { try { await env.FANZA_KV.put("salesreq:" + cid, JSON.stringify({ at }), { expirationTtl: 1209600 }); } catch (e) {} }
+}
+async function stQueueDelete(env, cid, kind) {
+  if (d1write_(env)) await env.FANZA_DB.prepare("DELETE FROM fetch_queue WHERE cid=? AND kind=?").bind(cid, kind).run().catch(() => {});
+  if (kvwrite_(env)) { try { await env.FANZA_KV.delete((kind === "info" ? "req:" : "salesreq:") + cid); } catch (e) {} }
+}
+
+// ---- tracked_makers（追跡サークル：salestrack:） ----
+async function stGetMaker(env, mid) {
+  if (d1on_(env)) {
+    const r = await env.FANZA_DB.prepare("SELECT name FROM tracked_makers WHERE maker_id=?").bind(mid).first().catch(() => null);
+    return r ? { name: r.name || "" } : null;
+  }
+  return await env.FANZA_KV.get("salestrack:" + mid, "json").catch(() => null);
+}
+async function stListMakers(env) { // [{makerId, name}]
+  if (d1on_(env)) {
+    const rs = await env.FANZA_DB.prepare("SELECT maker_id, name FROM tracked_makers").all().catch(() => null);
+    return (rs && rs.results) ? rs.results.map((r) => ({ makerId: r.maker_id, name: r.name || "" })) : [];
+  }
+  const ids = await listAll(env.FANZA_KV, "salestrack:");
+  const out = [];
+  for (const mid of ids) { const v = await env.FANZA_KV.get("salestrack:" + mid, "json").catch(() => null); out.push({ makerId: mid, name: (v && v.name) || "" }); }
+  return out;
+}
+async function stPutMaker(env, mid, name) { // 同名なら書かない。quotaはoffのみ再送出。
+  const prev = await stGetMaker(env, mid);
+  if (prev && prev.name === name) return;
+  if (d1write_(env)) {
+    await d1run_(env, env.FANZA_DB.prepare("INSERT INTO tracked_makers(maker_id,name,added_at) VALUES(?,?,?) ON CONFLICT(maker_id) DO UPDATE SET name=excluded.name")
+      .bind(mid, name || null, nowIso_()));
+  }
+  if (kvwrite_(env)) {
+    try { await env.FANZA_KV.put("salestrack:" + mid, JSON.stringify({ name, at: nowIso_() })); }
+    catch (e) { if (!d1write_(env)) throw e; }
+  }
+}
+async function stDeleteMaker(env, mid) {
+  if (d1write_(env)) await env.FANZA_DB.prepare("DELETE FROM tracked_makers WHERE maker_id=?").bind(mid).run().catch(() => {});
+  if (kvwrite_(env)) { try { await env.FANZA_KV.delete("salestrack:" + mid); } catch (e) {} }
+}
+
+// ---- run_flags（単発フラグ：salesrun:req = key 'sales_run'） ----
+async function stGetFlag(env, key) {
+  if (d1on_(env)) {
+    const r = await env.FANZA_DB.prepare("SELECT requested_at FROM run_flags WHERE key=? AND (expires_at IS NULL OR expires_at > ?)").bind(key, nowIso_()).first().catch(() => null);
+    return r ? { at: r.requested_at } : null;
+  }
+  return await env.FANZA_KV.get(flagKvKey_(key), "json").catch(() => null);
+}
+async function stPutFlagIfAbsent(env, key) { // 既に立っていれば書かない。quotaはoffのみ再送出。
+  const prev = await stGetFlag(env, key);
+  if (prev) return;
+  const at = nowIso_();
+  if (d1write_(env)) {
+    await d1run_(env, env.FANZA_DB.prepare("INSERT INTO run_flags(key,requested_at,expires_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET requested_at=excluded.requested_at, expires_at=excluded.expires_at")
+      .bind(key, at, plusDaysIso_(1)));
+  }
+  if (kvwrite_(env)) {
+    try { await env.FANZA_KV.put(flagKvKey_(key), JSON.stringify({ at }), { expirationTtl: 86400 }); }
+    catch (e) { if (!d1write_(env)) throw e; }
+  }
+}
+async function stDeleteFlag(env, key) {
+  if (d1write_(env)) await env.FANZA_DB.prepare("DELETE FROM run_flags WHERE key=?").bind(key).run().catch(() => {});
+  if (kvwrite_(env)) { try { await env.FANZA_KV.delete(flagKvKey_(key)); } catch (e) {} }
+}
+function safeJsonParse_(s) { try { return JSON.parse(s); } catch (e) { return null; } }
 
 // ── KV→D1 バックフィル（移行Phase1-C）。冪等。ov:+sales:を works へ統合、req:/salesreq:を fetch_queue へ。──
 async function backfillKvToD1(env) {
