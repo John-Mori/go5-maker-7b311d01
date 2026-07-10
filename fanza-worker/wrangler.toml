@@ -6,6 +6,12 @@ compatibility_date = "2024-11-01"
 [vars]
 # フロント(GitHub Pages)のOriginだけ許可（ワイルドカード不可）
 ALLOWED_ORIGIN = "https://john-mori.github.io"
+# D1移行の切替弁：
+#   "off"     = 従来どおりKVのみ（現行・デフォルト）
+#   "dual"    = D1優先で読み、書き込みはD1+KV両方（移行検証期・保険）
+#   "on"      = D1のみ（カットオーバー後・KV書き込み停止）
+# 問題時は "off" に戻して再デプロイすれば即ロールバック。
+USE_D1 = "off"
 
 # ── KV：API未収録作品の上書き情報(ov:<cid>)と取得依頼キュー(req:<cid>) ──
 #   PC側スクリプト(scripts/fetch_missing_works.mjs)が日本IPでスクレイプした
@@ -13,6 +19,15 @@ ALLOWED_ORIGIN = "https://john-mori.github.io"
 [[kv_namespaces]]
 binding = "FANZA_KV"
 id = "2e310c3f2fe44c7b814dfc2f1027ade6"
+
+# ── D1：KVの書き込み枠(1,000/日)の天井を外すため、高頻度データをD1(10万行/日)へ移行 ──
+#   works(ov:+sales:統合) / fetch_queue(req:+salesreq:) / tracked_makers / run_flags。
+#   スキーマ=schema.sql。移行手順=docs/設計・調査/D1移行設計書_fanzaデータ_Phase1.md。
+#   USE_D1(下の[vars])で D1優先/KVフォールバック を切替=即ロールバック可。
+[[d1_databases]]
+binding = "FANZA_DB"
+database_name = "go5_fanza"
+database_id = "39c22ab0-e90b-4755-9270-7265b9fed530"
 
 # ── Secrets（コマンドで登録。ここには書かない）──
 #   wrangler secret put SHARED_SECRET         ← フロント認証キー（必須・公開可のソフト鍵）

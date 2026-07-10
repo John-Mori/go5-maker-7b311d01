@@ -333,6 +333,22 @@ export default {
       return json({ ok: true, queued: await listAll(env.FANZA_KV, "salesreq:"), trackedMakers }, 200, null);
     }
 
+    // ── 一度きり：KV→D1 バックフィル（移行Phase1-C）。認証は管理鍵。冪等（何度呼んでも同じ結果）。──
+    //   読み取り(KV)は無制限、書き込み(D1)は10万行/日なので351件程度は一撃。途中で切れても再実行で収束。
+    //   ※このエンドポイントは移行専用。USE_D1="off"の間も既存ハンドラの挙動には一切影響しない（純増）。
+    if (path === "/api/d1-backfill") {
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, null);
+      if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
+      if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, null);
+      if (!env.FANZA_DB) return json({ ok: false, error: "d1_unbound" }, 500, null);
+      try {
+        const stats = await backfillKvToD1(env);
+        return json({ ok: true, ...stats }, 200, null);
+      } catch (e) {
+        return json({ ok: false, error: String(e && e.message || e) }, 500, null);
+      }
+    }
+
     if (path === "/" || path === "") {
       const mode = (env.FANZA_API_ID) ? "api+scrape" : "scrape-only";
       return text("go5-fanza-proxy ok (mode=" + mode + ")", 200);
@@ -650,6 +666,72 @@ async function listAll(kv, prefix) {
     cursor = r.list_complete ? null : r.cursor;
   } while (cursor);
   return out;
+}
+
+// ── KV→D1 バックフィル（移行Phase1-C）。冪等。ov:+sales:を works へ統合、req:/salesreq:を fetch_queue へ。──
+async function backfillKvToD1(env) {
+  const db = env.FANZA_DB, kv = env.FANZA_KV;
+  const now = new Date().toISOString();
+  const addDays = (d) => new Date(Date.now() + d * 86400000).toISOString();
+  let works = 0, salesN = 0, queueInfo = 0, queueSales = 0, makers = 0, flags = 0;
+
+  // ov: → works(title/info_json/scraped_at)
+  for (const cid of await listAll(kv, "ov:")) {
+    const ov = await kv.get("ov:" + cid, "json").catch(() => null);
+    if (!ov) continue;
+    await db.prepare(
+      "INSERT INTO works(cid,title,info_json,scraped_at,updated_at) VALUES(?,?,?,?,datetime('now')) " +
+      "ON CONFLICT(cid) DO UPDATE SET title=excluded.title, info_json=excluded.info_json, scraped_at=excluded.scraped_at, updated_at=datetime('now')"
+    ).bind(cid, ov.title || null, JSON.stringify(ov), ov.scrapedAt || null).run();
+    works++;
+  }
+  // sales: → works(sales_n/sales_at)  ※同一cidの ov: 行があれば統合される
+  for (const cid of await listAll(kv, "sales:")) {
+    const v = await kv.get("sales:" + cid, "json").catch(() => null);
+    if (!v || v.n == null) continue;
+    await db.prepare(
+      "INSERT INTO works(cid,sales_n,sales_at,updated_at) VALUES(?,?,?,datetime('now')) " +
+      "ON CONFLICT(cid) DO UPDATE SET sales_n=excluded.sales_n, sales_at=excluded.sales_at, updated_at=datetime('now')"
+    ).bind(cid, v.n, v.at || now).run();
+    salesN++;
+  }
+  // req: → fetch_queue(kind='info', src_url)
+  for (const cid of await listAll(kv, "req:")) {
+    const v = await kv.get("req:" + cid, "json").catch(() => null);
+    await db.prepare(
+      "INSERT INTO fetch_queue(cid,kind,src_url,requested_at,expires_at) VALUES(?,'info',?,?,?) " +
+      "ON CONFLICT(cid,kind) DO UPDATE SET src_url=excluded.src_url, requested_at=excluded.requested_at, expires_at=excluded.expires_at"
+    ).bind(cid, (v && v.url) || null, (v && v.at) || now, addDays(7)).run();
+    queueInfo++;
+  }
+  // salesreq: → fetch_queue(kind='sales')
+  for (const cid of await listAll(kv, "salesreq:")) {
+    const v = await kv.get("salesreq:" + cid, "json").catch(() => null);
+    await db.prepare(
+      "INSERT INTO fetch_queue(cid,kind,requested_at,expires_at) VALUES(?,'sales',?,?) " +
+      "ON CONFLICT(cid,kind) DO UPDATE SET requested_at=excluded.requested_at, expires_at=excluded.expires_at"
+    ).bind(cid, (v && v.at) || now, addDays(14)).run();
+    queueSales++;
+  }
+  // salestrack: → tracked_makers
+  for (const mid of await listAll(kv, "salestrack:")) {
+    const v = await kv.get("salestrack:" + mid, "json").catch(() => null);
+    await db.prepare(
+      "INSERT INTO tracked_makers(maker_id,name,added_at) VALUES(?,?,?) " +
+      "ON CONFLICT(maker_id) DO UPDATE SET name=excluded.name"
+    ).bind(mid, (v && v.name) || null, (v && v.at) || now).run();
+    makers++;
+  }
+  // salesrun:req → run_flags('sales_run')
+  const runFlag = await kv.get("salesrun:req", "json").catch(() => null);
+  if (runFlag) {
+    await db.prepare(
+      "INSERT INTO run_flags(key,requested_at,expires_at) VALUES('sales_run',?,?) " +
+      "ON CONFLICT(key) DO UPDATE SET requested_at=excluded.requested_at, expires_at=excluded.expires_at"
+    ).bind(runFlag.at || now, addDays(1)).run();
+    flags++;
+  }
+  return { works, salesN, queueInfo, queueSales, makers, flags };
 }
 // override の入力検証：許可フィールドのみ再構築。画像URLはDMM公式CDNドメイン限定。
 const IMG_OK = /^https:\/\/(doujin-assets\.dmm\.co\.jp|pics\.dmm\.co\.jp|ebook-assets\.dmm\.com)\//;
