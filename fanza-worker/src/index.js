@@ -301,6 +301,18 @@ export default {
       }
     }
 
+    // ── KV↔D1 照合（on切替前の安全確認）。認証は管理鍵。読み取りのみ（無害）。──
+    if (path === "/api/d1-verify") {
+      if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
+      if (!env.FANZA_KV || !env.FANZA_DB) return json({ ok: false, error: "store_unbound" }, 500, null);
+      try {
+        const rep = await verifyKvVsD1(env);
+        return json({ ok: true, ...rep }, 200, null);
+      } catch (e) {
+        return json({ ok: false, error: String(e && e.message || e) }, 500, null);
+      }
+    }
+
     if (path === "/" || path === "") {
       const mode = (env.FANZA_API_ID) ? "api+scrape" : "scrape-only";
       return text("go5-fanza-proxy ok (mode=" + mode + ")", 200);
@@ -815,6 +827,34 @@ async function stDeleteFlag(env, key) {
   if (kvwrite_(env)) { try { await env.FANZA_KV.delete(flagKvKey_(key)); } catch (e) {} }
 }
 function safeJsonParse_(s) { try { return JSON.parse(s); } catch (e) { return null; } }
+
+// ── KV↔D1 照合（on切替前の安全確認）。キー集合の全件差分＋値サンプル比較。読み取りのみ。──
+async function verifyKvVsD1(env) {
+  const kv = env.FANZA_KV, db = env.FANZA_DB;
+  const nowIso = nowIso_();
+  const d1cids = async (sql, ...b) => { const rs = await db.prepare(sql).bind(...b).all().catch(() => null); return (rs && rs.results) ? rs.results.map((r) => r.cid != null ? r.cid : r.maker_id) : []; };
+  const setDiff = (a, b) => { const bs = new Set(b); return a.filter((x) => !bs.has(x)); };
+  const pair = (kvArr, d1Arr) => ({ kv: kvArr.length, d1: d1Arr.length, onlyKv: setDiff(kvArr, d1Arr).slice(0, 8), onlyD1: setDiff(d1Arr, kvArr).slice(0, 8) });
+
+  const ov = pair(await listAll(kv, "ov:"), await d1cids("SELECT cid FROM works WHERE info_json IS NOT NULL"));
+  const kvSales = await listAll(kv, "sales:");
+  const sales = pair(kvSales, await d1cids("SELECT cid FROM works WHERE sales_n IS NOT NULL"));
+  const reqInfo = pair(await listAll(kv, "req:"), await d1cids("SELECT cid FROM fetch_queue WHERE kind='info' AND (expires_at IS NULL OR expires_at > ?)", nowIso));
+  const reqSales = pair(await listAll(kv, "salesreq:"), await d1cids("SELECT cid FROM fetch_queue WHERE kind='sales' AND (expires_at IS NULL OR expires_at > ?)", nowIso));
+  const makers = pair(await listAll(kv, "salestrack:"), await d1cids("SELECT maker_id FROM tracked_makers"));
+
+  // 値サンプル比較（sales_n）：先頭最大15件を KV と D1 で突き合わせ。
+  let checked = 0, mismatch = 0; const samples = [];
+  for (const cid of kvSales.slice(0, 15)) {
+    const kvv = await kv.get("sales:" + cid, "json").catch(() => null);
+    const d1v = await db.prepare("SELECT sales_n FROM works WHERE cid=?").bind(cid).first().catch(() => null);
+    checked++;
+    if (!kvv || !d1v || kvv.n !== d1v.sales_n) { mismatch++; if (samples.length < 5) samples.push({ cid, kv: kvv && kvv.n, d1: d1v && d1v.sales_n }); }
+  }
+  const clean = ov.onlyKv.length === 0 && ov.onlyD1.length === 0 && sales.onlyKv.length === 0 && sales.onlyD1.length === 0 &&
+    reqInfo.onlyKv.length === 0 && reqSales.onlyKv.length === 0 && makers.onlyKv.length === 0 && makers.onlyD1.length === 0 && mismatch === 0;
+  return { clean, ov, sales, reqInfo, reqSales, makers, valueSample: { checked, mismatch, samples } };
+}
 
 // ── KV→D1 バックフィル（移行Phase1-C）。冪等。ov:+sales:を works へ統合、req:/salesreq:を fetch_queue へ。──
 async function backfillKvToD1(env) {
