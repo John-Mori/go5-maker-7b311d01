@@ -504,6 +504,8 @@
     }
     if (saved) pushItemToGas_(saved); // スプレッドシートのカテゴリ列等へ反映（GAS設定時のみ）
     if (ytUrl) pokeSnapshotNow_();   // YT URLを紐付けた日は即スナップ=日別記録のベースラインを当日中に作る(④)
+    // 非r2リンクを入れた保存でも自動で計測キーを確定させる(冪等短縮=同URLなら既存コード+累積クリックを引き継ぐ)
+    if (saved) autoMeasureItem_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
     refresh();
   }
 
@@ -1511,6 +1513,7 @@
           if (res && res.shortUrl) {
             it.shortUrl = res.shortUrl; it.shareUrl = res.shareUrl || res.shortUrl; done++;
             saveArr(histKey(), hist); saveArr(manualKey(), manual); // 逐次保存（途中終了に強い）
+            pushItemToGas_(it); // シートの短縮URL列も更新→snapshotStatsがクリックを拾い日別🖱が出る(2026-07-12)
           } else fail++;
         });
       }).catch(function () { fail++; }).then(function () { setTimeout(step, 800); });
@@ -1519,6 +1522,41 @@
   }
   // 投稿履歴を開いたら、未生成の項目があれば自動で計測リンクを生成する（ボタン任せにしない）。
   function maybeAutoGen() { if (!_bulkBusy) runBulkGen(true); }
+  // 投稿履歴タブを開いた時にも自動再生成を発火(従来は初期ロード時のみ=タブ遷移で開くと未修復のままだった・2026-07-12)
+  (function () { var tb = $('tabVerify'); if (tb) tb.addEventListener('click', function () { setTimeout(maybeAutoGen, 1200); }); })();
+
+  // 編集保存の直後に単一アイテムを自動計測化(2026-07-12・根本対策):
+  //   入れたリンクがda.gd/生URL等(非r2)でも、最終URL(bsky.app)へ解決→Go5MakeShort(冪等=同URLは同コード)で
+  //   計測キーを確定し、シートの短縮URL/共有URL列にも反映する。以後クリック数と日別🖱が表示される。
+  function autoMeasureItem_(it, persist) {
+    try {
+      var go5 = window.Go5Short || {}; var w = (go5.WORKER_URL || '').replace(/\/+$/, ''); var sec = go5.SHARED_SECRET || '';
+      function isR2(u) { return !!u && u.indexOf(w + '/') === 0; }
+      if (!it || !w || typeof window.Go5MakeShort !== 'function' || isR2(it.shortUrl)) return;
+      var handle = ''; try { handle = localStorage.getItem('bsky_handle__' + acct()) || ''; } catch (e) {}
+      var srcP;
+      if (it.postUri && handle) srcP = Promise.resolve('https://bsky.app/profile/' + handle + '/post/' + String(it.postUri).split('/').pop());
+      else {
+        var cand = [it.postUrl, it.shareUrl, it.shortUrl].filter(function (u) { return /^https?:\/\//.test(u || '') && !isR2(u); })[0] || '';
+        if (!cand) return;
+        srcP = /bsky\.app\//.test(cand) ? Promise.resolve(cand)
+          : fetch(w + '/api/resolve?url=' + encodeURIComponent(cand) + '&secret=' + encodeURIComponent(sec))
+              .then(function (r) { return r.json(); })
+              .then(function (j) { return (j && j.ok && /bsky\.app/.test(j.final || '')) ? j.final : ''; })
+              .catch(function () { return ''; });
+      }
+      srcP.then(function (target) {
+        if (!target) return;
+        return window.Go5MakeShort(target).then(function (res) {
+          if (!(res && res.shortUrl && isR2(res.shortUrl))) return;
+          it.shortUrl = res.shortUrl; it.shareUrl = res.shareUrl || res.shortUrl;
+          if (typeof persist === 'function') persist();
+          pushItemToGas_(it); // シートへ反映→snapshotStatsがこのコードのクリックを拾い日別🖱も出始める
+          refresh();
+        });
+      });
+    } catch (e) {}
+  }
 
   // ── YouTube URL をシート(記録)から復元 ─────────────────────────────────────
   //   YouTube URLは端末内の verify_yt__<acct> にのみ表示元がある。iOSのストレージ消去等で
