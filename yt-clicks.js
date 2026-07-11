@@ -436,8 +436,9 @@
     var isGo5 = w && bskyUrl && bskyUrl.indexOf(w) === 0;
     if (bskyUrl) {
       if (isGo5) { item.shortUrl = bskyUrl; delete item.postUrl; delete item.shareUrl; }
-      else if (item.shareUrl) item.shareUrl = bskyUrl;
-      else if (item.shortUrl) item.shortUrl = bskyUrl;
+      // ★r2でない入力は計測キー(shortUrl)を絶対に上書きしない(INC調査2026-07-12: 「–」化の原因の一つ)。
+      //   shareUrlが空でも先にそちらへ入れ、shortUrlはr2のまま守る。
+      else if (item.shareUrl || item.shortUrl) item.shareUrl = bskyUrl;
       else item.postUrl = bskyUrl;
     } else {
       // 空白のとき：手動アイテムは両方消す、履歴アイテムは postUrl だけ消す（shortUrl はクリック計測に必要）
@@ -450,6 +451,18 @@
   function applyAttrs_(item, attrs) {
     ATTR_DEFS.forEach(function (a) { if (attrs && attrs[a.key]) item[a.key] = true; else delete item[a.key]; });
   }
+  // YT URLを紐付けた直後にGASへ即時スナップショットを要求(fire-and-forget)。
+  //   視聴履歴はURL記載後からしか蓄積されないため、紐付け当日中にベースラインを作る=「今日/昨日」が翌日から出る(④対策2026-07-12)。
+  var _snapPokeAt = 0;
+  function pokeSnapshotNow_() {
+    try {
+      var gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim();
+      if (!gasUrl || Date.now() - _snapPokeAt < 60000) return; // 1分デバウンス
+      _snapPokeAt = Date.now();
+      jsonp_(gasUrl, { action: 'snapshot_now' }, function () {});
+    } catch (e) {}
+  }
+
   // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL・カテゴリ属性・作品状態（アイテム）を一括更新。
   function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState) {
     // YouTube URL
@@ -490,6 +503,7 @@
       saveArr(histKey(), hist);
     }
     if (saved) pushItemToGas_(saved); // スプレッドシートのカテゴリ列等へ反映（GAS設定時のみ）
+    if (ytUrl) pokeSnapshotNow_();   // YT URLを紐付けた日は即スナップ=日別記録のベースラインを当日中に作る(④)
     refresh();
   }
 
@@ -617,7 +631,7 @@
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右（画像の真下）まで届く
         '<div class="vrow-foot">' +
-          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + '>' + (vid ? fmtDelta_(deltaCache[vid]) : '') + '</span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + ' title="日別の増分(GASが毎時記録する視聴履歴シートから)。–＝その期間の記録がまだ無い(YT URL紐付け日から蓄積開始・週は7日分必要)">' + (vid ? (fmtDelta_(deltaCache[vid]) || '<span style="opacity:.55;">今日 ▶– 🖱–　昨日 ▶– 🖱–　週 ▶– 🖱–</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
             (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ（同一作品ならBluesky投稿を引き継ぎ）">🔁 リビルドで作成</button>' : '') +
             '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける（削除ではなく記録として残す）">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
@@ -1248,6 +1262,7 @@
       if (_pendingShare) entry.shareUrl = _pendingShare; // 表示用(da.gd)
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
+      pokeSnapshotNow_(); // 手動追加でもYT URL紐付け当日に日別記録のベースラインを作る(④)
       refresh();
     });
   }
@@ -1466,7 +1481,13 @@
     var i = 0, done = 0, fail = 0;
     function resolveTarget(it) {
       if (it.postUri && handle) { var rk = String(it.postUri).split('/').pop(); return Promise.resolve('https://bsky.app/profile/' + handle + '/post/' + rk); }
+      // ★postUrlはシート復元品では常に空(historyItems_が返さない)。旧行の自己修復のため
+      //   shareUrl(da.gd等)や非r2のshortUrlも/api/resolveで最終URLへ解決して再生成の元にする(2026-07-12)。
       var src = it.postUrl || '';
+      if (!/^https?:\/\//.test(src)) {
+        var cand = it.shareUrl || it.shortUrl || '';
+        if (/^https?:\/\//.test(cand) && !(workerUrl && cand.indexOf(workerUrl + '/') === 0)) src = cand; // r2自身は解決しても意味がない(自分に戻る)
+      }
       if (/^https?:\/\/[^/]*bsky\.app\//.test(src)) return Promise.resolve(src);      // 既にbsky.app
       if (!/^https?:\/\//.test(src)) return Promise.resolve('');
       return fetch(workerUrl + '/api/resolve?url=' + encodeURIComponent(src) + '&secret=' + encodeURIComponent(secret))

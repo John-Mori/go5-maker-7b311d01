@@ -921,8 +921,10 @@
       recordToSheet({ account: account, meta: meta, title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri, videoId: vid });
       shortenAndShow(d.post_url, d.post_uri, d.title, function (res) {
         // 短縮URL確定 → videoId があれば同一行へ upsert（shortUrl=r2計測用 / shareUrl=da.gd表示用）。
+        // ★計測キー(短縮URL列)へはr2成功時のみ書く。r2失敗時のda.gd/生URLを混ぜない(「–」化防止・2026-07-12)。
+        //   shortUrl空はGAS側putIfが既存値を保護するので上書き事故も起きない。
         var short = res && (res.shortUrl || res.shareUrl);
-        if (vid && short) recordToSheet({ account: account, meta: meta, postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: (res.shortUrl || res.shareUrl), shareUrl: res.shareUrl || '' });
+        if (vid && short) recordToSheet({ account: account, meta: meta, postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: res.shortUrl || '', shareUrl: res.shareUrl || '', noShorten: !res.shortUrl });
       }, account, meta, (d.work_short_url ? { shortUrl: d.work_short_url, shareUrl: d.work_share_url || d.work_short_url } : null));
     });
   });
