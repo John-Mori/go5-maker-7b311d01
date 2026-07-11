@@ -9,7 +9,8 @@ compatibility_date = "2024-11-01"
 ALLOWED_ORIGIN = "https://john-mori.github.io"
 # 短縮を許可する宛先ホスト（カンマ区切り）。乗っ取られても踏み台にされないよう既定はBlueskyのみ。
 #   すべて許可 → "*" ／ FANZA等も短縮したい → "bsky.app,bsky.social,video.dmm.co.jp" のように足す
-ALLOWED_HOSTS = "bsky.app,bsky.social,youtube.com,youtu.be"
+# FANZA系(dmm.co.jp/fanza.co.jp/dmm.com)は3導線計測(作品リンク・セール会場リンク短縮)のため追加(2026-07-12)
+ALLOWED_HOSTS = "bsky.app,bsky.social,youtube.com,youtu.be,dmm.co.jp,fanza.co.jp,dmm.com"
 # 1日あたりの発行上限（レート制限）
 DAILY_LIMIT = "500"
 

@@ -455,7 +455,11 @@
     var r = window.buildFanzaListLink ? window.buildFanzaListLink(DISCOUNT_LIST_URL, af) : null;
     if (!r || !r.ok) return;
     var save = function (link) { try { localStorage.setItem(DISC_LINK_KEY, link); localStorage.setItem(DISC_LINK_AF_KEY, af); } catch (e) {} if (onReady) onReady(link); };
-    shortenUrl(r.link).then(function (s) { save(s || r.link); }).catch(function () { save(r.link); });
+    // 計測付きで短縮(r2=計測キーも保存)。ALLOWED_HOSTSにFANZA系追加済み(2026-07-12)なのでr2が通る。
+    makeShortAndShare(r.link).then(function (res) {
+      try { if (res && res.shortUrl) localStorage.setItem('bsky_discount_list_link_r2', res.shortUrl); } catch (e) {}
+      save((res && (res.shareUrl || res.shortUrl)) || r.link);
+    }).catch(function () { save(r.link); });
   }
   function recomposePcText_() { if (els.pcText) els.pcText.value = composePostText(); }
   // 投稿タブ／投稿確認モーダル、どちらのチェックボックスからでも同じ状態を共有・操作できるように配線。
@@ -852,9 +856,9 @@
 
   // 投稿成功通知（integration.js が書き戻し＋下のリスナが必ず記録）
   // account/meta＝投稿を実行した瞬間のアカウントと凍結メタ（即時投稿は呼び出し時に確定）。
-  function notifyPosted(res, text, alt, account, meta) {
+  function notifyPosted(res, text, alt, account, meta, workShort) {
     var tags = (String(text).match(/#[^\s#]+/g) || []).join(' ');
-    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || ''), account: account || acctId(), meta: meta || null } })); } catch (e) {}
+    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || ''), account: account || acctId(), meta: meta || null, work_short_url: (workShort && workShort.shortUrl) || '', work_share_url: (workShort && workShort.shareUrl) || '' } })); } catch (e) {}
   }
   // すべての投稿を一元的に記録（即時・自動・予約のどれでも必ず記録される）
   document.addEventListener('bluesky-posted', function (e) {
@@ -879,7 +883,7 @@
         // 短縮URL確定 → videoId があれば同一行へ upsert（shortUrl=r2計測用 / shareUrl=da.gd表示用）。
         var short = res && (res.shortUrl || res.shareUrl);
         if (vid && short) recordToSheet({ account: account, meta: meta, postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: (res.shortUrl || res.shareUrl), shareUrl: res.shareUrl || '' });
-      }, account, meta);
+      }, account, meta, (d.work_short_url ? { shortUrl: d.work_short_url, shareUrl: d.work_share_url || d.work_short_url } : null));
     });
   });
 
@@ -1085,7 +1089,29 @@
   }
   // 投稿履歴タブ(yt-clicks.js)から、過去投稿URLの計測用短縮リンク(r2+da.gd)を生成するために公開。
   try { window.Go5MakeShort = makeShortAndShare; } catch (e) {}
-  function shortenAndShow(longUrl, postUri, title, onShort, account, meta) {
+
+  // ---- 導線2: 投稿本文の作品リンクを計測付き短縮へ置換 ----
+  //   本文中の生のFANZA系リンク(al.fanza/dmm)を投稿直前に r2計測リンク(表示はda.gd)へ差し替える。
+  //   手動運用の本文でも自動で効く。r2が取れない時は本文を変えず null(安全側・投稿は止めない)。
+  //   これで「YT→投稿」(導線1=投稿URLの短縮・既存)と「投稿→FANZA」(導線2=本リンク)を別コードで計測できる。
+  var WORK_LINK_RE = /https?:\/\/(?:al\.fanza\.co\.jp|www\.dmm\.co\.jp|book\.dmm\.co\.jp|book\.dmm\.com)\/[^\s]+/;
+  function measureWorkLink_(text) {
+    try {
+      var m = String(text || '').match(WORK_LINK_RE);
+      if (!m) return Promise.resolve({ text: text, workShort: null });
+      var raw = m[0];
+      return makeShortAndShare(raw).then(function (r) {
+        var w = ((window.Go5Short && window.Go5Short.WORKER_URL) || '').replace(/\/+$/, '');
+        // r2計測URLが取れた時だけ置換(da.gd単独やフォールバック長URLでは置換しない=計測できない置換をしない)
+        if (!r || !r.shortUrl || !w || r.shortUrl.indexOf(w + '/') !== 0) return { text: text, workShort: null };
+        var disp = r.shareUrl || r.shortUrl;
+        return { text: String(text).replace(raw, disp), workShort: { shortUrl: r.shortUrl, shareUrl: disp, original: raw } };
+      }).catch(function () { return { text: text, workShort: null }; });
+    } catch (e) { return Promise.resolve({ text: text, workShort: null }); }
+  }
+  try { window.__go5MeasureWork = measureWorkLink_; } catch (e) {} // 検証用フック
+
+  function shortenAndShow(longUrl, postUri, title, onShort, account, meta, workShort) {
     if (!longUrl) return;
     if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを作成中…';
     makeShortAndShare(longUrl).then(function (res) {
@@ -1093,7 +1119,7 @@
       var share = res.shareUrl || short || longUrl;    // da.gd（表示・概要欄・コピー用）
       // 表示・概要欄への反映は「今のUIと同じアカウントの投稿」のときだけ（別アカウントの記録でUIを書き換えない）。
       if (!account || account === acctId()) setShareOutputs(share, longUrl);
-      histAdd({ account: account, meta: meta, title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: (meta && meta.videoId) || (!account || account === acctId() ? currentVideoId : '') || '' });
+      histAdd({ account: account, meta: meta, title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: (meta && meta.videoId) || (!account || account === acctId() ? currentVideoId : '') || '', workShortUrl: (workShort && workShort.shortUrl) || '', workShareUrl: (workShort && workShort.shareUrl) || '' });
       if (typeof onShort === 'function') onShort({ shortUrl: short, shareUrl: share });
     });
   }
@@ -1139,6 +1165,7 @@
     var a = histLoadFor_(account).filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
     var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '' };
     if (rec.rebuildBaseClicks != null) entry.rebuildBaseClicks = rec.rebuildBaseClicks; // リビルド前の動画までのクリック数（投稿履歴の括弧表示用）
+    if (rec.workShortUrl) { entry.workShortUrl = rec.workShortUrl; entry.workShareUrl = rec.workShareUrl || ''; } // 導線2(投稿→FANZA)の計測リンク
     if (workUrl) {
       entry.workUrl = workUrl;
       // 作品cidも串刺しで保存（候補タブの「投稿済み」判定を確実にする）。workUrlはアフィリンク付き/
@@ -1267,11 +1294,14 @@
     }
     var btn = els.manualShortBtn, orig = btn.textContent;
     btn.disabled = true; btn.textContent = '短縮中…';
-    shortenUrl(url).then(function (short) {
-      var s = short || url;  // 失敗時は元URLで代替
-      if (els.manualOut) els.manualOut.textContent = s;
+    makeShortAndShare(url).then(function (res) {
+      var s = (res && (res.shareUrl || res.shortUrl)) || url;  // 失敗時は元URLで代替
+      // 計測コード(r2)が取れたら添える=クリック数は検証タブ「🔗短縮リンク台帳」で見られる
+      var w = ((window.Go5Short && window.Go5Short.WORKER_URL) || '').replace(/\/+$/, '');
+      var code = (res && res.shortUrl && w && res.shortUrl.indexOf(w + '/') === 0) ? res.shortUrl.slice(w.length + 1) : '';
+      if (els.manualOut) els.manualOut.textContent = s + (code ? ' (計測コード: ' + code + ' → 台帳で確認可)' : ' (計測なし)');
       if (els.manualResult) els.manualResult.hidden = false;
-      // 履歴（投稿履歴タブ）には追加しない。短縮URLを表示するだけ。
+      // 履歴（投稿履歴タブ）には追加しない。短縮URLと計測コードを表示するだけ(台帳=/api/listが記録の正)。
       btn.textContent = '✓ 短縮しました'; setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
       if (els.manualUrl) els.manualUrl.value = '';
     });
@@ -1526,9 +1556,11 @@
       els.postNow.disabled = true; setPostStatus('投稿中…');
       var alt = (text.split('\n')[0] || ''), f = selectedPostFile || photoFile();
       var postAcct = acctId(), postMeta = captureMeta_(); // 投稿を押した瞬間のアカウント・メタを凍結
-      (f ? compressFile(f) : Promise.resolve(null))
+      var _ws = null; // 導線2(投稿→FANZA)の計測リンク情報
+      measureWorkLink_(text)
+        .then(function (mw) { text = mw.text; _ws = mw.workShort; return (f ? compressFile(f) : Promise.resolve(null)); })
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: text, imageBlob: blob, alt: alt }); })
-        .then(function (res) { setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true); notifyPosted(res, text, alt, postAcct, postMeta); })
+        .then(function (res) { setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true); notifyPosted(res, text, alt, postAcct, postMeta, _ws); })
         .catch(function (e) { setPostStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); })
         .then(function () { els.postNow.disabled = false; });
     });
@@ -1565,6 +1597,8 @@
       var slotId = window.__activeSlot__ ? window.__activeSlot__.id : null, f = selectedPostFile || photoFile();
       var unattended = els.unattended && els.unattended.checked;
       setPostStatus('予約を準備中…');
+      measureWorkLink_(text).then(function (mw) {
+      text = mw.text; // 予約本文も導線2計測リンクへ置換してから予約する(発火時の再置換は不要)
       if (unattended) {
         var _uMeta = captureMeta_(); // 予約時に動画メタを凍結（発火時UIに依存させない・D-1）
         (f ? compressFile(f) : Promise.resolve(null)).then(function (blob) { reserveUnattended(text, blob, ms, slotId, _uMeta); });
@@ -1577,6 +1611,7 @@
       (f ? compressFile(f) : Promise.resolve(null)).then(function (blob) {
         window.Scheduler.reserve({ slotId: slotId, text: text, imageBlob: blob, scheduledAtMs: ms, alt: alt, handle: c.handle, appPw: c.appPw, account: acctId(), meta: _mMeta });
         setPostStatus('⏰ 予約しました：' + new Date(ms).toLocaleString('ja-JP') + '（このタブを開いている間に自動投稿）');
+      });
       });
     });
   }
@@ -1636,6 +1671,9 @@
     confirmEditable(composed, null).then(function (edited) {
       if (edited == null) { setBskyStatus('自動投稿をキャンセルしました。'); return; }
       if (!edited.trim()) { setBskyStatus('本文が空のため中止しました。'); return; }
+      // 導線2: 本文中の作品リンクを計測付き短縮へ置換してから投稿/予約する
+      measureWorkLink_(edited).then(function (mw) {
+      edited = mw.text; var _ws = mw.workShort;
       // 予約時刻チェック（movieSchedAt に値があれば即時投稿せず予約）
       var msEl = $('movieSchedAt'), schedMs = msEl && msEl.value ? new Date(msEl.value).getTime() : NaN;
       if (!isNaN(schedMs) && schedMs > Date.now()) {
@@ -1662,7 +1700,7 @@
         .then(function (blob) { return window.BlueskyCore.blueskyPostRaw({ identifier: c.handle, appPassword: c.appPw, text: edited, imageBlob: blob, alt: alt }); })
         .then(function (res) {
           setBskyStatus('✅ Bluesky に投稿しました<br>@' + (res.handle || c.handle) + (gasSet ? '  ✏️記録しました' : ''), true);
-          notifyPosted(res, edited, alt, _postAcct, _postMeta);
+          notifyPosted(res, edited, alt, _postAcct, _postMeta, _ws);
           // Bluesky独自の画像を添付したときだけ、その画像を Drive の同じ動画フォルダへ後追い保存（drive-upload.js が購読）。
           // 未添付（pcSelectedFile が無い＝動画の元写真をそのまま投稿）なら動画の画像と同一なので重複保存しない。
           try {
@@ -1670,6 +1708,7 @@
           } catch (e2) {}
         })
         .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); });
+      }); // measureWorkLink_
     });
   }
   document.addEventListener('video-created', handleVideoCreated);

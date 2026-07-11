@@ -51,6 +51,30 @@ export default {
       return handleStats(url, env);
     }
 
+    // ---- 短縮リンク台帳（全コード一覧+クリック数。フロントの「🔗短縮リンク台帳」用）----
+    //   手動で作った短縮も含め、このワーカーが払い出した全リンクを1回で見える化する。
+    //   認証は /api/stats と同じ共有シークレット。読み取りのみ(KV write 0)。
+    if (path === "/api/list") {
+      const cors = { "Access-Control-Allow-Origin": "*" };
+      if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+      const secret = url.searchParams.get("secret") || "";
+      if (!env.SHARED_SECRET || secret !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors);
+      if (!env.LINKS) return json({ ok: false, error: "kv_unbound" }, 500, cors);
+      const codes = [];
+      let cursor;
+      do {
+        const r = await env.LINKS.list(cursor ? { prefix: "u:", cursor } : { prefix: "u:" });
+        r.keys.forEach((k) => codes.push(k.name.slice(2)));
+        cursor = r.list_complete ? null : r.cursor;
+      } while (cursor && codes.length < 2000); // 安全上限
+      const links = await Promise.all(codes.map(async (code) => {
+        const [u, c] = await Promise.all([env.LINKS.get("u:" + code), env.LINKS.get("c:" + code)]);
+        return { code, url: u || "", clicks: parseInt(c || "0", 10) || 0 };
+      }));
+      links.sort((a, b) => b.clicks - a.clicks);
+      return json({ ok: true, total: links.length, links }, 200, cors);
+    }
+
     // ---- 短縮URL(x.gd/da.gd/bit.ly等)の最終遷移先を解決（過去投稿の計測リンク一括生成用）----
     //   ブラウザからは他社短縮のリダイレクト先をCORSで読めないため、Worker側で追って final を返す。
     if (path === "/api/resolve") {

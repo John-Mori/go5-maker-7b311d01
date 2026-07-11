@@ -543,6 +543,9 @@
       var vid = ytIdOf(yt);
       var code = codeOf(it.shortUrl || '');
       var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
+      // 導線2(投稿→FANZA): 本文中の作品リンクの計測コード(bluesky.jsが投稿時に置換・記録)
+      var wcode = codeOf(it.workShortUrl || '');
+      var wclicks = wcode && (wcode in clicksCache) ? clicksCache[wcode] : null;
       // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に（別短縮URLのため加算）。
       // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する（例：0+5=5(5)）。
       var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
@@ -596,8 +599,9 @@
         (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
-          '<span title="Bsky投稿クリック数' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
+          '<span title="Bsky投稿クリック数(YT→投稿・導線1)' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
+          (wcode ? '<span title="作品リンククリック数(投稿→FANZA・導線2)">🛒 ' + (wclicks != null ? num(wclicks) : '…') + '</span>' : '') +
           '<span class="vrow-links">' + // 🛠️編集/Bsky↗/YouTube↗/作品↗ を1グループに＝編集もBskyと同じ段に表示・作品↗だけ改行される事故を防ぐ
             '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
             (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
@@ -1244,7 +1248,10 @@
 
   // クリック数(開封数)・YouTube視聴回数/投稿日時/題名をAPIから取得しキャッシュへ。Promiseを返す。
   function fetchData_(items, ymap) {
-    var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
+    // 導線1(shortUrl=YT→投稿)と導線2(workShortUrl=投稿→FANZA)の両計測コードをまとめて照会
+    var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); })
+      .concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); }))
+      .filter(Boolean).filter(function (v, i, a) { return a.indexOf(v) === i; });
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
     var uniqVids = vids.filter(function (v, i, a) { return a.indexOf(v) === i; }); // 重複動画IDは1回だけ照会
     if (!codes.length && !uniqVids.length) return Promise.resolve(false);
@@ -1330,7 +1337,7 @@
     })();
     var note = sanitizeNoteHtml_(fixed); // 更新完了メッセージに付記（サニタイズ通知が上書きで消えない）
     var items = allItems(); var ymap = loadYtMap();
-    var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).filter(Boolean);
+    var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); })).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
     if (!codes.length && !vids.length) {
       if (announce) setStatus('更新対象がありません（各行にYouTube URLを入れる／⚙️詳細設定でAPIキー設定が必要です）' + note, !!note);
