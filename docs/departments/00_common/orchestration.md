@@ -66,6 +66,17 @@ npx wrangler d1 execute go5_kaizen --remote --command "INSERT INTO system_change
 - SQL文字列に秘密・全文チャットログを入れない。原文は要点のみ
 - user_events はフロントが自動送信(core/kaizen-log.js→fanza-worker→D1)。司令塔が手で書く必要なし
 
+## 記録粒度規約 (100%記録しない・Chami裁定2026-07-12「粒度は任せる」に基づく司令塔決定)
+| ログ | 記録する | 記録しない |
+|---|---|---|
+| improvement_requests | 機能・運用・ルールを**変える**依頼(REQ) | 質問・確認・雑談・その場limitedの軽微な文言指示 |
+| system_changes | デプロイ or ?v=バンプを伴う変更のまとまり1件 | 連続する微修正の個別記録(1件に集約する) |
+| user_events | 意味のある操作(candidate_added/ref_image_saved/video_generated/bsky_posted等) | ページ表示・初期化イベント・高頻度低意味の操作 |
+| dept_events/tasks | 購読表にある型のみ | 部門の内部進捗の逐一記録 |
+| learning_questions | 実質的な学習質問 | 挨拶・操作依頼・雑談 |
+- 原則: 「後で傾向分析に使えるか」で判断。迷ったら記録するが、同種の反復は既存行に集約する
+- ノイズ事例(修正済): account_switchedがページ読み込みの初期化で発火していた→読込5秒以内は無視(kaizen-log.js)
+
 ## 部門間イベント購読表 (Dispatcher=司令塔。イベント記録時に本表へ従いdept_tasksを生成し、セッション開始時にdispatched=0を掃引)
 | event_type | 発生元 | 購読部門(→自動でdept_task化) |
 |---|---|---|

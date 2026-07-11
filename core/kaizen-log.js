@@ -75,7 +75,11 @@
       var d = (e && e.detail) || {};
       log("bluesky", "bsky_posted", "post", d.post_uri || "", { account: d.account || "" });
     });
+    var _loadedAt = Date.now();
     root.document.addEventListener("account-changed", function () {
+      // ページ読み込み直後のaccount-changedは初期化イベント(実際の切替操作ではない)なので記録しない。
+      //   記録粒度規約: 「意味のある操作」だけを残す(orchestration.md)。
+      if (Date.now() - _loadedAt < 5000) return;
       log("app", "account_switched", "", "", null);
     });
     root.document.addEventListener("visibilitychange", function () {
