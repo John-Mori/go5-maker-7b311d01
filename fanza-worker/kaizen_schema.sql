@@ -1,4 +1,8 @@
 -- go5_kaizen D1 スキーマ (継続改善制度・第1段階=記録基盤)
+-- ★2026-07-12: マルチプロジェクト対応。稼働DBには project TEXT NOT NULL DEFAULT 'afi' 列を
+--   7表(improvement_requests/user_events/system_changes/improvement_insights/dept_events/dept_tasks/copy_revisions)へ
+--   ALTERで追加済み。学習4表とpersona_change_logは横断(共通)のため対象外。
+--   Genesis Kit抽出時にCREATE文へproject列を正式反映すること(現行コードはDEFAULTで動作)。
 -- 適用: fanza-worker/ で npx wrangler d1 execute go5_kaizen --remote --file kaizen_schema.sql
 -- 冪等: IF NOT EXISTS 付き。
 
