@@ -16,7 +16,7 @@ model: sonnet
 1. 秘密(アプリパスワード/APIキー/シークレット/`scripts/scrape_config.json`等)を出力・コミットしない
 2. UI文言の括弧は半角`()`のみ。全角`（）`禁止
 3. フロント変更時は `index.html` の `?v=` を全参照一括バンプ
-4. **`wrangler deploy`/`wrangler d1 create`/GASデプロイ系コマンドは実行禁止**(司令塔がChamiの承認を得て実行する)。フロントのcommit/pushも司令塔に委ねる
+4. **`wrangler deploy`/`wrangler d1 create`/GASデプロイ系コマンドは実行禁止**(実行は司令塔。Workerは要Chami承認・GASは承認不要2026-07-12)。フロントのcommit/pushも司令塔に委ねる
 5. KV書き込みはdedup(read-before-write)を崩さない。D1は`USE_D1`切替弁の設計を尊重
 6. 変更したら「何を・なぜ・どのファイル・検証方法」を最終報告に含める(司令塔がsystem_changesへ記録する)
 

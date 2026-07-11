@@ -42,7 +42,7 @@
 1. Chamiの依頼を司令塔が分類(どの部門か・単独か複数か・モデルは)
 2. **改善要求ならまずログ**: `improvement_requests` へ記録(下記コマンド)
 3. 部門へ委任(並列可)。書き込みを伴う実装はsystem-engineerのみ
-4. 実装後: qa-reviewerで確認 → 司令塔がデプロイ(フロントpush=承認不要 / **Worker・GAS・D1作成=毎回Chami承認**)
+4. 実装後: qa-reviewerで確認 → 司令塔がデプロイ(フロントpush=承認不要 / **GAS=承認不要(2026-07-12)** / **Worker・D1作成=毎回Chami承認**)
 5. デプロイしたら `system_changes` へ記録
 6. 結果をChamiへ報告
 
@@ -101,4 +101,4 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 - 主要4部門(system-engineer/product-scout/copy-director/shorts-analyst)が対象。qa-reviewer/kaizen-analyst/learning-coachはスポーン型
 
 ## 不変条件(全部門共通)
-半角括弧 / 秘密を出力・コミットしない / ?v=一括バンプ / Worker・GASデプロイは要承認 / KV dedup維持 / 成約は観測不可(追わない) / 品質優先6段原則(冒頭) / 改善は承認制(観測→仮説→提案→Chami承認→実装→効果測定) / **戦略・事業文書はGitHubに上げない**(Chami指定 2026-07-12: リポジトリに上げるのはプログラム等の必要物のみ。戦略・目標・優先度は `local/`〔gitignore済〕へ。AIはローカルを直接読むため公開不要)
+半角括弧 / 秘密を出力・コミットしない / ?v=一括バンプ / Workerデプロイは要承認(★GASは承認不要=Chami裁定2026-07-12) / KV dedup維持 / 成約は観測不可(追わない) / 品質優先6段原則(冒頭) / 改善は承認制(観測→仮説→提案→Chami承認→実装→効果測定) / **戦略・事業文書はGitHubに上げない**(Chami指定 2026-07-12: リポジトリに上げるのはプログラム等の必要物のみ。戦略・目標・優先度は `local/`〔gitignore済〕へ。AIはローカルを直接読むため公開不要)

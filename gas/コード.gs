@@ -74,7 +74,12 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-07A（T11 LockService＝重複行根絶／T10 channel×videoId接頭辞ガード＝誤タブ薄行の最終防壁）';
+var GAS_VERSION = '2026-07-12A（列順統一reorder_headers／短縮URL列=r2限定／時点記録30分〜72h・スナップ30分毎）';
+
+// 統一列順の正(2026-07-12・⑥)。両chシートの列の左右順をこの並びに固定する(?action=reorder_headers / admin_setupが適用)。
+//   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
+//   集計シートの位置参照数式やmove_row(列名不一致でサイレント欠落)の事故を防ぐため順序も固定する。
+var CANONICAL_HEADERS = HEADERS40.concat(FANZA_HEADERS).concat(EXTRA_HEADERS);
 
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function jsonOut_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
@@ -118,6 +123,10 @@ function doGet(e) {
   if (p.action === 'cleanup_columns') {
     return jsonOut_(cleanupColumns_());
   }
+  // 列順統一(⑥): <exec URL>?action=reorder_headers で両chシートの列をCANONICAL_HEADERS順へ固定（冪等）。
+  if (p.action === 'reorder_headers') {
+    return jsonOut_(reorderHeaders_());
+  }
   // 診断: <exec URL>?action=diagnose でスプレッドシート名・全タブ名・各記録タブの中身を返す（読み取りのみ）。
   if (p.action === 'diagnose') {
     return jsonOut_(diagnose_());
@@ -143,9 +152,10 @@ function doGet(e) {
     var adminWant = prop_('ADMIN_SECRET') || 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol';
     if (String(p.secret || '') !== adminWant) return jsonOut_({ ok: false, error: 'bad_secret' });
     var mig = migrateHeaders_();
+    var reo = reorderHeaders_(); // ⑥列順統一もデプロイ毎に冪等適用(以後ズレない)
     setupTrigger();
     var handlers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
-    return jsonOut_({ ok: true, version: GAS_VERSION, migrated: mig, triggers: handlers });
+    return jsonOut_({ ok: true, version: GAS_VERSION, migrated: mig, reordered: reo, triggers: handlers });
   }
   // JSONP：ブラウザはGASのPOST応答をCORSで読めないため、callback 付きGETで取得する。
   if (p.callback) {
@@ -493,7 +503,10 @@ function writeRecord_(channel, f) {
   // 無い経路（無人予約・旧クライアント）だけ GAS が da.gd で短縮（1投稿1回・トークン不要・軽量）。
   // ※Bitlyは無料枠オーバーの主因かつ冗長（共有されず計測不能）なため全廃。
   var shortUrl = f.shortUrl || '';
-  if (!shortUrl && f.postUrl && !f.noShorten) shortUrl = daGdShorten_(f.postUrl);
+  // ★短縮URL列は計測キー(r2)専用(2026-07-12・①)。GAS側のda.gd代替は共有URL列へのみ入れ、
+  //   計測キー列にda.gd/生URLを混ぜない(投稿履歴の「クリック–」化の根絶)。
+  var fbShare = '';
+  if (!shortUrl && f.postUrl && !f.noShorten) fbShare = daGdShorten_(f.postUrl);
   var sh = getChannelSheet_(channel);
   var map = headerMap_(sh);
   var dcol = map['投稿日時'] || 2;
@@ -535,8 +548,8 @@ function writeRecord_(channel, f) {
   else if (isNewRow || f.postUrl) put('投稿日時', now);
   putIf('題名(コメント)', f.ytTitle || f.title || '');         // YouTube題名を優先して題名(コメント)へ集約
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
-  putIf('短縮URL', shortUrl);                                   // r2＝計測用（codeFromShort_対象）
-  putIf('共有URL', f.shareUrl || '');                           // da.gd＝実際に概要欄へ貼る短いURL
+  putIf('短縮URL', shortUrl);                                   // r2＝計測用（codeFromShort_対象・r2以外は入れない）
+  putIf('共有URL', f.shareUrl || fbShare || '');                // da.gd＝実際に概要欄へ貼る短いURL(GAS代替はこちらへ)
   putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
   putIf(clickColName_(map), (f.clicks !== undefined && f.clicks !== null && f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
@@ -823,20 +836,25 @@ function snapshotStats() {
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
   var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   var nowStr = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
-  var recs = [];
+  var recs = [], tpRecs = []; // tpRecs=時点記録(投稿からの経過バケット)用の全行(vid無し・クリックのみも含む)
   CH_SHEETS.forEach(function (name) {
     var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
     var map = headerMap_(sh); var last = sh.getLastRow(); if (last < 2) return;
-    var pidc = map['post_id'], ytc = map['YouTube動画URL'], sc = map['短縮URL'];
+    var pidc = map['post_id'], ytc = map['YouTube動画URL'], sc = map['短縮URL'], dc = map['投稿日時'];
     var chKey = (name === '宵桜艶帖') ? 'acc2' : 'acc1';
     var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     vals.forEach(function (row) {
-      var vid = ytc ? ytIdFromUrl_(row[ytc - 1]) : ''; if (!vid) return;
+      var vid = ytc ? ytIdFromUrl_(row[ytc - 1]) : '';
       var code = sc ? codeFromShort_(row[sc - 1]) : '';
+      // 時点記録(⑤)用: vidが無くてもクリックだけ記録できるよう、YT未連携行も対象に含める。
+      var pd = dc ? row[dc - 1] : '';
+      var pms = pd instanceof Date ? pd.getTime() : (pd ? (new Date(String(pd).replace(/-/g, '/'))).getTime() : 0);
+      if ((vid || code) && pms) tpRecs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code, postedAtMs: pms });
+      if (!vid) return;
       recs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code });
     });
   });
-  if (!recs.length) return;
+  if (!recs.length && !tpRecs.length) return;
   // 同一videoId(同じ動画を複数投稿・両ch)で重複行を作らないよう vid で1件に正規化（最初の1件＝コード保持）。
   var seenVid = {}, urecs = [];
   recs.forEach(function (r) { if (r.vid && !seenVid[r.vid]) { seenVid[r.vid] = 1; urecs.push(r); } });
@@ -844,7 +862,7 @@ function snapshotStats() {
   var vids = recs.map(function (r) { return r.vid; });
   var views = ytViews_(vids);
   var clickByCode = {};
-  recs.forEach(function (r) { if (r.code && clickByCode[r.code] === undefined) { clickByCode[r.code] = workerClicks_(r.code); Utilities.sleep(80); } });
+  recs.concat(tpRecs).forEach(function (r) { if (r.code && clickByCode[r.code] === undefined) { clickByCode[r.code] = workerClicks_(r.code); Utilities.sleep(80); } });
   var sh = statsSheet_(); var last = sh.getLastRow();
   var data = last >= 2 ? sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues() : [];
   // ★日付列はSheetが 'yyyy-MM-dd' 文字列を Date に自動変換して返すことがある。キーは必ず
@@ -913,6 +931,8 @@ function snapshotStats() {
     }
   });
   pruneStats_(sh, 12);
+  // ⑤時点記録: 投稿からの経過バケット(30分〜72h)を跨いだ最初のスナップで再生数/クリック数を確定記録。
+  try { captureTimepoints_(tpRecs, views, clickByCode, nowStr, tz); } catch (e) {}
 }
 // 12日より古い履歴行を掃除（週次差分に必要なぶんだけ保持）。
 function pruneStats_(sh, keepDays) {
@@ -970,7 +990,79 @@ function setupTrigger() {
   });
   ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('refreshEngagement').timeBased().everyHours(1).create();
-  ScriptApp.newTrigger('snapshotStats').timeBased().everyHours(1).create();
+  // ⑤時点記録(30分バケット)の精度確保のためスナップを30分毎に(日次スナップはupsertなので2回/時でも無害)。
+  ScriptApp.newTrigger('snapshotStats').timeBased().everyMinutes(30).create();
+}
+
+// ============================================================
+// ⑤ 時点記録: 投稿時刻からの経過バケット(30分/1h/2h/6h/24h/72h)ごとに、そのバケットを
+//   跨いだ最初のスナップ実行時の再生数・クリック数を「時点記録」シートへ確定保存する。
+//   旧実装(ランキングタブのlocalStorageバケット)は端末でアプリを開いた時しか記録されず
+//   欠測が常態化していたため、サーバー(30分毎トリガー)で確実に記録する(2026-07-12)。
+//   ・許容窓を過ぎたバケットは記録しない(遅れた値を「その時点の値」と偽らない)＝空欄は未記録の正直な表現
+//   ・1行=1(post_id×バケット)。分析はピボットで post_id 別に横持ち化できる
+// ============================================================
+var TIMEPOINT_SHEET = '時点記録';
+var TIMEPOINT_HEADERS = ['post_id', 'channel', '投稿日時', 'バケット', '経過分(実測)', '再生数', 'クリック数', '記録日時'];
+var TIME_BUCKETS = [[30, '30分'], [60, '1時間'], [120, '2時間'], [360, '6時間'], [1440, '24時間'], [4320, '72時間']];
+function timepointSheet_() {
+  var ss = openSS_(); var sh = ss.getSheetByName(TIMEPOINT_SHEET);
+  if (!sh) { sh = ss.insertSheet(TIMEPOINT_SHEET); sh.appendRow(TIMEPOINT_HEADERS); }
+  else if (sh.getLastRow() === 0) { sh.appendRow(TIMEPOINT_HEADERS); }
+  return sh;
+}
+function captureTimepoints_(tpRecs, viewsByVid, clickByCode, nowStr, tz) {
+  if (!tpRecs || !tpRecs.length) return 0;
+  var sh = timepointSheet_(); var last = sh.getLastRow();
+  var seen = {};
+  if (last >= 2) {
+    var ex = sh.getRange(2, 1, last - 1, 4).getValues();
+    for (var i = 0; i < ex.length; i++) seen[String(ex[i][0]) + '|' + String(ex[i][3])] = 1;
+  }
+  var now = Date.now(); var added = [];
+  tpRecs.forEach(function (r) {
+    if (!r.post_id || !r.postedAtMs) return;
+    var elapsed = (now - r.postedAtMs) / 60000;
+    TIME_BUCKETS.forEach(function (b) {
+      var min = b[0], label = b[1];
+      if (elapsed < min) return;
+      var tol = Math.max(45, min * 0.5); // 30分トリガー前提の許容窓。超過分は未記録のまま(誤値を作らない)
+      if (elapsed > min + tol) return;
+      if (seen[r.post_id + '|' + label]) return;
+      var v = (r.vid && viewsByVid && viewsByVid[r.vid] != null) ? viewsByVid[r.vid] : '';
+      var c = (r.code && clickByCode && clickByCode[r.code] != null) ? clickByCode[r.code] : '';
+      if (v === '' && c === '') return; // どちらも取れない行は書かない
+      added.push([r.post_id, r.channel, Utilities.formatDate(new Date(r.postedAtMs), tz, 'yyyy-MM-dd HH:mm'), label, Math.round(elapsed), v, c, nowStr]);
+      seen[r.post_id + '|' + label] = 1;
+    });
+  });
+  if (added.length) sh.getRange(sh.getLastRow() + 1, 1, added.length, TIMEPOINT_HEADERS.length).setValues(added);
+  return added.length;
+}
+
+// ============================================================
+// ⑥ 列順統一: 両chシートの列を CANONICAL_HEADERS の並びへ固定する(冪等)。
+//   無い列は正位置へ挿入(空)。CANONICALに無い列は末尾へ自然に寄る。値・書式ごとmoveColumnsで移動。
+// ============================================================
+function reorderHeaders_() {
+  var out = {};
+  CH_SHEETS.forEach(function (name) {
+    var ss = openSS_(); var sh = ss.getSheetByName(name);
+    if (!sh || sh.getLastRow() === 0) { out[name] = 'not_found'; return; }
+    var moved = 0, inserted = 0;
+    for (var target = 0; target < CANONICAL_HEADERS.length; target++) {
+      var lastCol = sh.getLastColumn();
+      var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h); });
+      var cur = headers.indexOf(CANONICAL_HEADERS[target]);
+      if (cur === -1) { sh.insertColumnBefore(target + 1); sh.getRange(1, target + 1).setValue(CANONICAL_HEADERS[target]); inserted++; continue; }
+      if (cur === target) continue;
+      sh.moveColumns(sh.getRange(1, cur + 1, sh.getMaxRows(), 1), target + 1); // 左方向への移動のみ発生(cur>target)
+      moved++;
+    }
+    var finalHeaders = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+    out[name] = { moved: moved, inserted: inserted, cols: sh.getLastColumn(), extraTail: finalHeaders.slice(CANONICAL_HEADERS.length) };
+  });
+  return out;
 }
 
 // ============================================================
