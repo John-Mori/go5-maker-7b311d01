@@ -166,16 +166,29 @@
     s.onerror = function () { if (done) return; done = true; clearTimeout(timer); clean(); cb({ __jsonpFail: true, reason: 'blocked', ms: Date.now() - t0 }); };
     document.body.appendChild(s);
   }
-  function fmtDelta_(d) {
+  // Chami仕様(2026-07-12): 「–」が許されるのは【今日投稿した動画の"昨日"】だけ。
+  //   それ以外で値が出せない時は ⚠(記録欠損=追跡開始前の期間/取得失敗) を明示して区別する。
+  function postedTodayOf_(tsMs) {
+    if (!tsMs) return false;
+    var d = new Date(Number(tsMs)), n = new Date();
+    return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+  }
+  function fmtDelta_(d, tsMs) {
     if (!d) return '';
     var CI = '<img class="emico" src="assets/icons/ic-link.png" alt="">';
-    function seg(lbl, v, c) { return '<span class="dl-seg"><b>' + lbl + '</b> ▶' + (v == null ? '–' : num(v)) + ' ' + CI + (c == null ? '–' : num(c)) + '</span>'; }
-    return seg('今日', d.tv, d.tc) + seg('昨日', d.yv, d.yc) + seg('週', d.wv, d.wc);
+    var todayPosted = postedTodayOf_(tsMs);
+    function cell(v, allowDash) {
+      if (v != null) return num(v);
+      return allowDash ? '–' : '<span title="記録欠損: 追跡開始前の期間か、その回の取得失敗(YT APIクォータ等)。以後の期間は正常に記録されます">⚠</span>';
+    }
+    function seg(lbl, v, c, allowDash) { return '<span class="dl-seg"><b>' + lbl + '</b> ▶' + cell(v, allowDash) + ' ' + CI + cell(c, allowDash) + '</span>'; }
+    // 昨日だけ「今日投稿なら–許容」。今日/週はフォールバック済みでnullが出るのは欠損時のみ=⚠。
+    return seg('今日', d.tv, d.tc, false) + seg('昨日', d.yv, d.yc, todayPosted) + seg('週', d.wv, d.wc, false);
   }
   function applyDeltas_() {
     document.querySelectorAll('[data-delta-vid]').forEach(function (el) {
       var vid = el.getAttribute('data-delta-vid');
-      el.innerHTML = fmtDelta_(vid && deltaCache[vid]);
+      el.innerHTML = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts')) || el.innerHTML;
     });
   }
   function fetchDeltas_(force, cb) {
@@ -633,7 +646,7 @@
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右（画像の真下）まで届く
         '<div class="vrow-foot">' +
-          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '"' : '') + ' title="日別の増分(GASが毎時記録する視聴履歴シートから)。–＝その期間の記録がまだ無い(YT URL紐付け日から蓄積開始・週は7日分必要)">' + (vid ? (fmtDelta_(deltaCache[vid]) || '<span style="opacity:.55;">今日 ▶– 🖱–　昨日 ▶– 🖱–　週 ▶– 🖱–</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' : '') + ' title="日別の増分(30分毎のサーバー記録から)。⚠=記録欠損(追跡開始前/取得失敗)。–は今日投稿の昨日のみ">' + (vid ? (fmtDelta_(deltaCache[vid], it.ts) || '<span style="opacity:.55;" title="30分毎のサーバースナップ後に数値が出ます">⏳記録待ち(最大30分)</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
             (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ（同一作品ならBluesky投稿を引き継ぎ）">🔁 リビルドで作成</button>' : '') +
             '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける（削除ではなく記録として残す）">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
@@ -1523,7 +1536,7 @@
   // 投稿履歴を開いたら、未生成の項目があれば自動で計測リンクを生成する（ボタン任せにしない）。
   function maybeAutoGen() { if (!_bulkBusy) runBulkGen(true); }
   // 投稿履歴タブを開いた時にも自動再生成を発火(従来は初期ロード時のみ=タブ遷移で開くと未修復のままだった・2026-07-12)
-  (function () { var tb = $('tabVerify'); if (tb) tb.addEventListener('click', function () { setTimeout(maybeAutoGen, 1200); }); })();
+  (function () { var tb = $('tabVerify'); if (tb) tb.addEventListener('click', function () { setTimeout(function () { maybeAutoGen(); try { fetchDeltas_(); } catch (e) {} }, 1200); }); })();
 
   // 編集保存の直後に単一アイテムを自動計測化(2026-07-12・根本対策):
   //   入れたリンクがda.gd/生URL等(非r2)でも、最終URL(bsky.app)へ解決→Go5MakeShort(冪等=同URLは同コード)で
