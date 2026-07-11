@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-12A（列順統一reorder_headers／短縮URL列=r2限定／時点記録30分〜72h・スナップ30分毎）';
+var GAS_VERSION = '2026-07-12B（デルタ0起点フォールバック=今日/週は投稿日基準でハイフン根絶・–許容は今日投稿の昨日のみ）';
 
 // 統一列順の正(2026-07-12・⑥)。両chシートの列の左右順をこの並びに固定する(?action=reorder_headers / admin_setupが適用)。
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -961,19 +961,48 @@ function computeDeltas_() {
     var date = ymd_(row[1], tz), vid = row[4]; if (!vid || !date) return; // ★日付は文字列キーに正規化
     (byVid[vid] || (byVid[vid] = {}))[date] = { v: row[5] === '' ? null : Number(row[5]), c: row[6] === '' ? null : Number(row[6]) };
   });
+  // 投稿日(vid別・最古)を記録シートから取得。ベースライン不在時の「0起点」判定に使う(Chami仕様2026-07-12):
+  //   ・今日/昨日=その暦日の増分(投稿日に関係なく) ・週=直近7日間の合計
+  //   ・投稿日が期間内でベースラインが存在し得ない場合は0起点(例: 今日投稿→今日=累計そのまま・週=同)
+  //   ・「–」が許されるのは今日投稿の「昨日」のみ
+  var postedByVid = {};
+  CH_SHEETS.forEach(function (name) {
+    var ss2 = openSS_(); var sh2 = ss2.getSheetByName(name); if (!sh2) return;
+    var map2 = headerMap_(sh2); var l2 = sh2.getLastRow(); if (l2 < 2) return;
+    var ytc2 = map2['YouTube動画URL'], dc2 = map2['投稿日時']; if (!ytc2 || !dc2) return;
+    sh2.getRange(2, 1, l2 - 1, sh2.getLastColumn()).getValues().forEach(function (row) {
+      var v2 = ytIdFromUrl_(row[ytc2 - 1]); if (!v2) return;
+      var ds2 = ymd_(row[dc2 - 1], tz); if (!ds2) return;
+      if (!postedByVid[v2] || ds2 < postedByVid[v2]) postedByVid[v2] = ds2;
+    });
+  });
   function dstr(off) { var d = new Date(); d.setDate(d.getDate() + off); return Utilities.formatDate(d, tz, 'yyyy-MM-dd'); }
   var today = dstr(0), yest = dstr(-1), wk = dstr(-7);
+  var ZERO = { v: 0, c: 0 };
   var out = {};
   Object.keys(byVid).forEach(function (vid) {
     var m = byVid[vid], dates = Object.keys(m).sort();
     function leOf(ds) { var b = null; for (var i = 0; i < dates.length; i++) if (dates[i] <= ds) b = dates[i]; return b ? m[b] : null; }
     function ltOf(ds) { var b = null; for (var i = 0; i < dates.length; i++) if (dates[i] < ds) b = dates[i]; return b ? m[b] : null; }
+    var posted = postedByVid[vid] || '';
     var cur = m[today] || m[dates[dates.length - 1]];
-    var st = ltOf(today), sy = ltOf(yest), w7 = leOf(wk);
+    // 今日: 前日以前の最新値が基準。無ければ「今日投稿=0起点(累計がそのまま今日分)」、
+    //   古い投稿を今日から追跡開始した場合は今日の観測値を基準(=0表示・明日から実増分)。
+    var st = ltOf(today);
+    if (!st) st = (posted === today) ? ZERO : (m[today] || ZERO);
+    // 昨日: (昨日以前の最新)-(一昨日以前の最新)。今日投稿はnull(–のまま=唯一の許容)。
+    //   昨日投稿で一昨日基準が無ければ0起点。
+    var sy = ltOf(yest);
+    if (!sy && posted && posted !== today) sy = (posted === yest) ? ZERO : sy;
+    // 週: 7日前以前の最新が基準。無ければ「投稿が7日以内=0起点(累計がそのまま週分)」、
+    //   それより古い投稿は最古の観測値を基準(追跡開始からの合計を週として表示)。
+    var w7 = leOf(wk);
+    if (!w7) w7 = (posted && posted > wk) ? ZERO : (dates.length ? m[dates[0]] : null);
     function df(a, b, k) { return (a && b && a[k] != null && b[k] != null) ? (a[k] - b[k]) : null; }
+    var stY = ltOf(today); // 昨日の計算は「昨日時点の最新(フォールバック前)」を使う
     out[vid] = {
-      tv: df(cur, st, 'v'), yv: df(st, sy, 'v'), wv: df(cur, w7, 'v'),
-      tc: df(cur, st, 'c'), yc: df(st, sy, 'c'), wc: df(cur, w7, 'c')
+      tv: df(cur, st, 'v'), yv: (posted === today) ? null : df(stY, sy, 'v'), wv: df(cur, w7, 'v'),
+      tc: df(cur, st, 'c'), yc: (posted === today) ? null : df(stY, sy, 'c'), wc: df(cur, w7, 'c')
     };
   });
   return out;
