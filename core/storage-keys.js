@@ -51,6 +51,7 @@
     /^yt_desc(_|__|$)/,          // yt_desc / yt_desc_quick(_at) / yt_desc_undostack / _redostack
     /^yt_tags(__|$)/,
     /^affi_urls(_|__|$)/,        // affi_urls / affi_urls_quick(_at) / _undostack / _redostack
+    /^bsky_tpl_book(__|$)/,      // 📝テンプレ帳(本文定型文・アカウント別・2026-07-12)
   ];
   // 前方一致では拾わない単発の共有設定キー（完全一致）。
   var SYNC_EXACT = {
@@ -58,6 +59,7 @@
     "fanza_af_id": 1,            // FANZA アフィリエイトID（共有設定）
     "fanza_worker_url": 1,       // FANZA worker URL（共有設定）
     "ytdesc_tpl_v3": 1,          // YouTube説明欄テンプレ版（共有設定）
+    "yt_tags_shared": 1,         // YTタグ（全チャンネル共通・2026-07-12統一）
   };
 
   // このキーはクラウド同期してよいか（＝本物の設定か）。

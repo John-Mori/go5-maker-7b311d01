@@ -681,14 +681,20 @@
     });
 
     // 動画で使った画像 → 拡大ズーム。Bluesky投稿画像が動画画像と異なれば左右フリックで両方見られるよう並べる。
+    //   モーダル各ページの上に用途見出しを表示: 動画生成用/Bluesky投稿用。同一画像なら1ページで「動画生成/Bluesky投稿」。
     list.querySelectorAll('.vrow-refimg').forEach(function (im) {
       im.addEventListener('click', function () {
         var cid = im.getAttribute('data-refcid');
         var imgs = (cid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(cid) || []).slice() : [];
         var b = (cid && window.Go5Cand && window.Go5Cand.bskyImg) ? window.Go5Cand.bskyImg(cid) : '';
-        if (b && imgs.indexOf(b) < 0) imgs.push(b); // 動画画像と違うBluesky投稿画像は末尾に追加（フリックで確認）
-        if (!imgs.length && im.getAttribute('src')) imgs = [im.getAttribute('src')];
-        if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0);
+        var caps = imgs.map(function () { return '動画生成で使用した画像'; });
+        if (b) {
+          var bi = imgs.indexOf(b);
+          if (bi >= 0) caps[bi] = '動画生成/Bluesky投稿';             // 同一画像＝1ページに統合表記
+          else { imgs.push(b); caps.push('Bluesky投稿用画像'); }      // 異なる＝末尾ページに追加
+        }
+        if (!imgs.length && im.getAttribute('src')) { imgs = [im.getAttribute('src')]; caps = ['動画生成で使用した画像']; }
+        if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0, { captions: caps });
       });
     });
 

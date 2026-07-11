@@ -216,7 +216,11 @@
     var hv = loadA('bsky_handle'); if (els.handle) els.handle.value = (hv != null ? hv : DEF.handle);
     var pv = loadA('bsky_app_pw'); if (els.appPw) els.appPw.value = (pv != null ? pv : DEF.appPw);
     var dv = loadA('yt_desc'); if (els.ytDesc) els.ytDesc.value = (dv != null ? dv : defYtDesc());
-    var tgv = loadA('yt_tags'); if (els.ytTags) els.ytTags.value = (tgv != null ? tgv : DEF.ytTags);
+    // YTタグは全チャンネル共通(Chami指定2026-07-12: #マンガ紹介等の検証はチャンネル横断で統一変更する)。
+    //   初回はアカウント別の旧値(acc1優先)から共有キーへ移行。
+    var tgv = load('yt_tags_shared');
+    if (tgv == null) { tgv = load('yt_tags__acc1') != null ? load('yt_tags__acc1') : loadA('yt_tags'); if (tgv != null) save('yt_tags_shared', tgv); }
+    if (els.ytTags) els.ytTags.value = (tgv != null ? tgv : DEF.ytTags);
 
     // 本文の括弧書き自動クリーンアップ（移行直後の旧注記を除去）
     if (els.text && els.text.value) {
@@ -290,7 +294,7 @@
     });
   }
   if (els.ytDesc) els.ytDesc.addEventListener('input', function () { saveA('yt_desc', els.ytDesc.value); });
-  if (els.ytTags) els.ytTags.addEventListener('input', function () { saveA('yt_tags', els.ytTags.value); buildTitle(); });
+  if (els.ytTags) els.ytTags.addEventListener('input', function () { save('yt_tags_shared', els.ytTags.value); buildTitle(); }); // タグは全チャンネル共通保存
 
   // ---- 説明欄／本文の編集補助：Qセーブ／Qロード／リセット／元に戻す↶／やり直す↷（アカウント別・確認なし・再読込耐性あり） ----
   // ・Qセーブ＝今の文面を「お気に入りの下書き」として localStorage に退避（アカウント別）。
@@ -484,8 +488,44 @@
   wireDiscountListToggle_('bskyDiscountListOn', function (m) { var s = document.getElementById('postStatus'); if (s) s.textContent = m; }, function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); });
   wireDiscountListToggle_('pcDiscountListOn', function (m) { var s = document.getElementById('pcDiscStatus'); if (s) s.textContent = m; }, function () { recomposePcText_(); });
 
+  // ---- 📝テンプレ帳: 本文定型文の名前付き保存/適用/削除(アカウント別・検証で文面を切替える用) ----
+  function tplBookKey_() { return 'bsky_tpl_book__' + acctId(); }
+  function tplBookLoad_() { try { return JSON.parse(localStorage.getItem(tplBookKey_()) || '[]') || []; } catch (e) { return []; } }
+  function tplBookSave_(arr) { try { localStorage.setItem(tplBookKey_(), JSON.stringify(arr.slice(0, 30))); } catch (e) {} }
+  function tplSelRefresh_() {
+    var sel = $('bskyTplSel'); if (!sel) return;
+    var book = tplBookLoad_();
+    sel.innerHTML = '<option value="">(選択)</option>' + book.map(function (t, i) { return '<option value="' + i + '">' + escapeHtml(t.name) + '</option>'; }).join('');
+  }
+  (function wireTplBook_() {
+    var sel = $('bskyTplSel'); if (!sel) return;
+    $('bskyTplSave').addEventListener('click', function () {
+      if (!els.text || !els.text.value.trim()) { var h = $('bskyTplHint'); if (h) h.textContent = '本文が空です。'; return; }
+      var name = window.prompt('この定型文の名前(例: 断定型A / セール強調)', '');
+      if (!name || !name.trim()) return;
+      var book = tplBookLoad_().filter(function (t) { return t.name !== name.trim(); }); // 同名は上書き
+      book.unshift({ name: name.trim(), text: els.text.value, at: new Date().getTime() });
+      tplBookSave_(book); tplSelRefresh_(); sel.value = '0';
+      var h2 = $('bskyTplHint'); if (h2) h2.textContent = '「' + name.trim() + '」として保存しました。';
+    });
+    $('bskyTplApply').addEventListener('click', function () {
+      var book = tplBookLoad_(), t = book[parseInt(sel.value, 10)];
+      if (!t) { var h = $('bskyTplHint'); if (h) h.textContent = 'テンプレを選択してください。'; return; }
+      if (els.text) { els.text.value = t.text; saveA('bsky_text', t.text); renderPreview(); }
+      var h2 = $('bskyTplHint'); if (h2) h2.textContent = '「' + t.name + '」を本文へ適用しました(この文面が固定されます)。';
+    });
+    $('bskyTplDel').addEventListener('click', function () {
+      var book = tplBookLoad_(), i = parseInt(sel.value, 10), t = book[i];
+      if (!t) return;
+      if (!window.confirm('テンプレ「' + t.name + '」を削除しますか？')) return;
+      book.splice(i, 1); tplBookSave_(book); tplSelRefresh_();
+      var h = $('bskyTplHint'); if (h) h.textContent = '削除しました。';
+    });
+    tplSelRefresh_();
+  })();
+
   // ---- アカウント切替で再読込 ----
-  document.addEventListener('account-changed', function () { applyAccount(); });
+  document.addEventListener('account-changed', function () { applyAccount(); tplSelRefresh_(); });
 
   // ---- テンプレ更新の一回限り移行（2026Q2）：旧テンプレ保存値を新テンプレへ。独自文（旧マーカー無し）は保持。----
   (function migrateTemplates2026q2() {

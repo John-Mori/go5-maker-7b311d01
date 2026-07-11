@@ -512,14 +512,14 @@
     } else { renderImgModal_(it.title, big, null, 'サンプル画像の取得にはFANZA Workerの設定が必要です。'); }
   }
   // 画像ズーム（左右スワイプで切替）。.fz-zoom を流用。
-  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null;
+  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null, _zoomCaps = null; // _zoomCaps=各ページの見出し(画像の上に表示・投稿履歴の「動画生成で使用した画像」等)
   function ensureZoom_() {
     if (_zoom) return _zoom;
     var z = document.createElement('div'); z.className = 'fz-zoom'; z.hidden = true;
     z.innerHTML = '<button class="fz-zoom-close" type="button" aria-label="閉じる">✕</button>' +
       '<button class="fz-zoom-tofirst" type="button" hidden>この画像を1ページ目にする</button>' +
       '<button class="fz-zoom-add" type="button" hidden>＋ 画像を貼り付けて新規追加</button>' +
-      '<img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div><div class="fz-zoom-msg"></div>';
+      '<div class="fz-zoom-cap" hidden></div><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div><div class="fz-zoom-msg"></div>';
     document.body.appendChild(z);
     z.addEventListener('click', function (e) { if (e.target === z) z.hidden = true; });
     z.querySelector('.fz-zoom-close').addEventListener('click', function () { z.hidden = true; });
@@ -551,6 +551,8 @@
     var z = ensureZoom_();
     z.querySelector('.fz-zoom-img').src = _zoomList[_zi] || '';
     z.querySelector('.fz-zoom-count').textContent = _zoomList.length ? (_zi + 1) + ' / ' + _zoomList.length : ''; // 画像の下に「現在 / 総ページ数」を白字で常時表示
+    var cap = z.querySelector('.fz-zoom-cap'); // 画像の上の見出し(このページの画像が何に使われたか)
+    if (cap) { var ct = (_zoomCaps && _zoomCaps[_zi]) || ''; cap.textContent = ct; cap.hidden = !ct; }
     var tf = z.querySelector('.fz-zoom-tofirst'); if (tf) tf.hidden = !(_zoomReorder && _zi > 0); // 2ページ目以降だけ表示
     var ab = z.querySelector('.fz-zoom-add'); if (ab) ab.hidden = !_zoomAdd; // 貼り付け追加が可能な文脈でのみ表示
     z.hidden = false;
@@ -562,6 +564,7 @@
     if (!images || !images.length) return;
     _zoomReorder = (opts && typeof opts.onReorder === 'function') ? opts.onReorder : null;
     _zoomAdd = (opts && typeof opts.onPasteAdd === 'function') ? opts.onPasteAdd : null;
+    _zoomCaps = (opts && Array.isArray(opts.captions)) ? opts.captions.slice() : null; // ページ別見出し(任意)
     _zoomList = images.slice(); _zi = Math.min(Math.max(0, idx || 0), _zoomList.length - 1); zoomShow_();
   }
   // 「画像を貼り付けて新規追加」：クリップボード画像を cid の refimg 先頭へ追加・保存し一覧再描画（投稿編集と同じ保存先に同期）。
@@ -2442,7 +2445,7 @@
     render: render,
     refImgs: refImgsOf_,                                        // cid → 動画生成用の保存画像の配列（無ければ[]）
     bskyImg: function (cid) { var r = bskyImgOf(cid); return (r && r.img) || ''; }, // cid → Bluesky添付画像（無ければ''）
-    zoomImages: function (images, idx) { openImgZoom_((images || []).filter(Boolean), idx || 0); }, // 任意の画像配列をズーム(スワイプ)
+    zoomImages: function (images, idx, opts) { openImgZoom_((images || []).filter(Boolean), idx || 0, opts); }, // 任意の画像配列をズーム(スワイプ)。opts.captions=ページ別見出し
     zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); }, // タップで全画像ズーム＋1ページ目にする＋貼り付け新規追加
     postImgs: postImgsOf_,                                      // 履歴キー → 🛠️編集で添付した投稿画像の配列（無ければ[]）
     postImgHas: function (key) { return postImgsOf_(key).length > 0; },
