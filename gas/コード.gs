@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-12B（デルタ0起点フォールバック=今日/週は投稿日基準でハイフン根絶・–許容は今日投稿の昨日のみ）';
+var GAS_VERSION = '2026-07-12C（デルタを列単位基準に修正=クリック等の後発計測列も0起点で数値化・⚠は真の欠損のみ）';
 
 // 統一列順の正(2026-07-12・⑥)。両chシートの列の左右順をこの並びに固定する(?action=reorder_headers / admin_setupが適用)。
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -982,28 +982,37 @@ function computeDeltas_() {
   var out = {};
   Object.keys(byVid).forEach(function (vid) {
     var m = byVid[vid], dates = Object.keys(m).sort();
-    function leOf(ds) { var b = null; for (var i = 0; i < dates.length; i++) if (dates[i] <= ds) b = dates[i]; return b ? m[b] : null; }
-    function ltOf(ds) { var b = null; for (var i = 0; i < dates.length; i++) if (dates[i] < ds) b = dates[i]; return b ? m[b] : null; }
     var posted = postedByVid[vid] || '';
-    var cur = m[today] || m[dates[dates.length - 1]];
-    // 今日: 前日以前の最新値が基準。無ければ「今日投稿=0起点(累計がそのまま今日分)」、
-    //   古い投稿を今日から追跡開始した場合は今日の観測値を基準(=0表示・明日から実増分)。
-    var st = ltOf(today);
-    if (!st) st = (posted === today) ? ZERO : (m[today] || ZERO);
-    // 昨日: (昨日以前の最新)-(一昨日以前の最新)。今日投稿はnull(–のまま=唯一の許容)。
-    //   昨日投稿で一昨日基準が無ければ0起点。
-    var sy = ltOf(yest);
-    if (!sy && posted && posted !== today) sy = (posted === yest) ? ZERO : sy;
-    // 週: 7日前以前の最新が基準。無ければ「投稿が7日以内=0起点(累計がそのまま週分)」、
-    //   それより古い投稿は最古の観測値を基準(追跡開始からの合計を週として表示)。
-    var w7 = leOf(wk);
-    if (!w7) w7 = (posted && posted > wk) ? ZERO : (dates.length ? m[dates[0]] : null);
-    function df(a, b, k) { return (a && b && a[k] != null && b[k] != null) ? (a[k] - b[k]) : null; }
-    var stY = ltOf(today); // 昨日の計算は「昨日時点の最新(フォールバック前)」を使う
-    out[vid] = {
-      tv: df(cur, st, 'v'), yv: (posted === today) ? null : df(stY, sy, 'v'), wv: df(cur, w7, 'v'),
-      tc: df(cur, st, 'c'), yc: (posted === today) ? null : df(stY, sy, 'c'), wc: df(cur, w7, 'c')
-    };
+    // ★列ごと(v=再生/c=クリック)に独立して基準を解決する(2026-07-12C・根本修正)。
+    //   「再生数は前から記録・クリックは今日から記録開始」のような列単位のズレで、
+    //   既存スナップの空欄(null)を基準に採って⚠を出していた設計ミスを直す。
+    //   規則: 基準日以前に非nullが無い列=「その列の記録がまだ始まっていなかった」→0起点。
+    //   (今日投稿の0起点・7日以内投稿の週0起点も、この一般則に自然に含まれる)
+    function lastNonNull(k, ds, inclusive) { // ds以前(未満)で最後にk列が非nullだった値
+      var best = null;
+      for (var i = 0; i < dates.length; i++) {
+        var ok = inclusive ? (dates[i] <= ds) : (dates[i] < ds);
+        if (ok && m[dates[i]][k] != null) best = m[dates[i]][k];
+      }
+      return best;
+    }
+    function curOf(k) { var c = m[today]; if (c && c[k] != null) return c[k]; return lastNonNull(k, '9999-99-99', true); }
+    function calc(k) {
+      var cur = curOf(k);
+      if (cur == null) return { t: null, y: null, w: null }; // その列は一度も記録なし=正直に⚠(取得失敗系)
+      var bT = lastNonNull(k, today, false); if (bT == null) bT = 0;   // 今日の基準: 無ければ記録開始=今日→0起点
+      var bW = lastNonNull(k, wk, true);     if (bW == null) bW = 0;   // 週の基準: 無ければ記録開始が7日以内→0起点
+      var y;
+      if (posted === today) y = null; // 唯一の–許容(今日投稿の昨日)
+      else {
+        var aY = lastNonNull(k, today, false);         // 昨日終了時点の値
+        var bY = lastNonNull(k, yest, false);          // 一昨日終了時点の値(無ければ記録開始が昨日→0起点)
+        y = (aY == null) ? null : (aY - (bY == null ? 0 : bY)); // aY自体が無い=昨日以前の記録ゼロ→⚠(不可知)
+      }
+      return { t: cur - bT, y: y, w: cur - bW };
+    }
+    var V = calc('v'), C = calc('c');
+    out[vid] = { tv: V.t, yv: V.y, wv: V.w, tc: C.t, yc: C.y, wc: C.w };
   });
   return out;
 }
