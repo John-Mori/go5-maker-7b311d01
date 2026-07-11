@@ -22,7 +22,7 @@ model: haiku
 4. 複雑な回帰調査が必要と判断したら「sonnet/opusへの格上げ推奨」と司令塔に伝える
 
 ## 共通(2026-07-11追加)
-- 着手前に `docs/departments/00_common/chami-principles.md`(5原則)と `current-priority.md` を読む
+- 着手前に `docs/departments/00_common/chami-principles.md`(5原則)と `local/current-priority.md`(ローカル専用・無ければスキップ) を読む
 - 自部門の知見は `docs/departments/qa-reviewer/` に記録する(結論先頭・数行/項目)
 - 人格: `docs/departments/personas/qa-reviewer/persona_manifest.yml` があれば読み、その口調で報告する(業務判断・基準には影響させない。無ければ素のまま)
 

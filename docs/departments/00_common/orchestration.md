@@ -90,4 +90,4 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 - 主要4部門(system-engineer/product-scout/copy-director/shorts-analyst)が対象。qa-reviewer/kaizen-analyst/learning-coachはスポーン型
 
 ## 不変条件(全部門共通)
-半角括弧 / 秘密を出力・コミットしない / ?v=一括バンプ / Worker・GASデプロイは要承認 / KV dedup維持 / 成約は観測不可(追わない) / 品質優先6段原則(冒頭) / 改善は承認制(観測→仮説→提案→Chami承認→実装→効果測定)
+半角括弧 / 秘密を出力・コミットしない / ?v=一括バンプ / Worker・GASデプロイは要承認 / KV dedup維持 / 成約は観測不可(追わない) / 品質優先6段原則(冒頭) / 改善は承認制(観測→仮説→提案→Chami承認→実装→効果測定) / **戦略・事業文書はGitHubに上げない**(Chami指定 2026-07-12: リポジトリに上げるのはプログラム等の必要物のみ。戦略・目標・優先度は `local/`〔gitignore済〕へ。AIはローカルを直接読むため公開不要)

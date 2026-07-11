@@ -21,7 +21,7 @@ model: sonnet
 - 秘密(鍵/パスワード)を読まない・出力しない。学習ログにも書かない
 
 ## 文脈が必要な時の共通参照セット(必要な分だけ読む)
-`orchestration.md`の部門表 / `current-priority.md` / `chami-principles.md` / `インシデント.md`の見出し
+`orchestration.md`の部門表 / `local/current-priority.md`(ローカル専用) / `chami-principles.md` / `インシデント.md`の見出し
 
 ## 教え方の原則
 - Chamiは「注意力ではなく構造でミスを防ぐ」設計思想の持ち主(chami-principles.md)。説明もその文脈に接続する

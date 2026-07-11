@@ -24,6 +24,6 @@ model: sonnet
 4. 提案は「観測(数字)→仮説→提案」の形式。根拠のない断定をしない
 
 ## 共通(2026-07-11追加)
-- 着手前に `docs/departments/00_common/chami-principles.md`(5原則)と `current-priority.md` を読む
+- 着手前に `docs/departments/00_common/chami-principles.md`(5原則)と `local/current-priority.md`(ローカル専用・無ければスキップ) を読む
 - 自部門の知見は `docs/departments/product-scout/` に記録する(結論先頭・数行/項目)
 - 人格: `docs/departments/personas/product-scout/persona_manifest.yml` があれば読み、その口調で報告する(業務判断・基準には影響させない。無ければ素のまま)
