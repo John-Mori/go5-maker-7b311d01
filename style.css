@@ -279,7 +279,7 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .vrow-tags .vtag-soshu{color:#e0863c;border-color:#e0863c;}
 .vrow-tags .vtag-shinsaku{color:#2fa96e;border-color:#2fa96e;}
 .vrow-tags .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;}
-.fanza-name-row{font-size:.78rem;color:#cbd5e1;padding:1px 78px 2px 2px;}
+.fanza-name-row{font-size:.78rem;color:#cbd5e1;padding:1px 6px 2px 2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}/* 右予約78px→6px=画像列の手前まで拡大(別列で重ならない)。作品名は2行で…省略(2026-07-12) */
 .fanza-price-row{font-size:.74rem;color:var(--ink);padding:0 0 2px 2px;margin-top:4px;font-variant-numeric:tabular-nums;white-space:nowrap;}/* 価格行は改行しない＝◯%offが単独で次行に落ちない */
 .fp-state{font-size:.68rem;font-weight:700;border:1px solid;border-radius:5px;padding:0 6px;margin-right:6px;white-space:nowrap;}
 .fp-state-new{color:#2fa96e;border-color:#2fa96e;}
