@@ -130,5 +130,5 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 ## Discord双方向連携 Phase DB (2026-07-12実装・受信基盤)
 - 受信: `scripts/discord/inbox_poller.py`(常駐=start_discord_inbox.bat)が各部門chの発言を `local/discord_inbox.jsonl` へ蓄積。Bot/Webhook発言は無視(ループ防止)
 - 処理: **司令塔はセッション開始時と「Discord確認して」で受信箱を確認**し、行のdeptに従い部門へ振り分け(router=司令塔triage・research-room=アメス/アロンソ)。処理済み行は `local/discord_inbox_processed.jsonl` へ移す(受信箱は常に未処理のみ)
-- 返信: **キャラ名義=`scripts/discord/persona_send.py --dept <slug> --persona <キャラ名> "本文"`を優先**(Webhook自動作成・表示名/アイコン上書き=Bot1つで全人格)。素の名義=bot_send.py。webhook版discord_notify.pyはフォールバック。返信にも秘密を書かない
+- 返信: **キャラ名義=`scripts/discord/persona_send.py --dept <slug> --persona <キャラ名> "本文"`を優先**(Webhook自動作成・表示名/アイコン上書き=Bot1つで全人格)。素の名義=bot_send.py。webhook版discord_notify.pyはフォールバック。返信にも秘密を書かない。**本文に署名・肩書きを書かない**(表示名が名乗り=Chami指定2026-07-12)
 - 完全自動化(セッション無しの定期自動処理)はAPI使用コストが伴うため、Chami承認で別途有効化
