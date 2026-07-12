@@ -162,3 +162,15 @@ CREATE TABLE IF NOT EXISTS copy_revisions (
   cid         TEXT,     -- 対象作品(あれば)
   source      TEXT      -- 'chat'(copy-director案の修正) | 'app'(アプリ内テンプレ編集)
 );
+
+-- ⑬ 研究室-コーチングルームの研究メモ(仮説/決定/仮定/未解決の問い)。設計=docs/departments/research-room/運用説明書.md §12 (2026-07-12)
+CREATE TABLE IF NOT EXISTS research_notes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  project    TEXT NOT NULL DEFAULT 'afi',
+  note_type  TEXT NOT NULL,   -- hypothesis|decision|assumption|open_question
+  topic      TEXT,
+  content    TEXT NOT NULL,
+  source     TEXT,            -- chat|discord
+  status     TEXT NOT NULL DEFAULT 'open'  -- open|resolved|superseded
+);
