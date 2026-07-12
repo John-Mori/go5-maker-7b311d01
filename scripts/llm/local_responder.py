@@ -63,9 +63,40 @@ def append_line(path, line):
         f.write(line.rstrip("\n") + "\n")
 
 
+AUDIO_EXT = (".ogg", ".m4a", ".mp3", ".wav", ".webm")
+
+
+def fetch_and_transcribe(url):
+    """Discordの音声添付をダウンロードして文字起こし(失敗時は空文字)。"""
+    import urllib.request
+    tmp = os.path.join(ROOT, "local", "llm", "voice_tmp.bin")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (go5-responder)"})
+        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            f.write(r.read())
+        from transcribe import transcribe
+        return transcribe(tmp)
+    except Exception as e:
+        print(f"  文字起こし失敗: {type(e).__name__}")
+        return ""
+
+
 def handle(rec, raw_line):
     content = rec.get("content", "")
     channel = rec.get("channel", "")
+    if not content.strip():
+        voice = next((a for a in (rec.get("attachments") or [])
+                      if any(x in a.lower() for x in AUDIO_EXT)), "")
+        if voice:
+            content = fetch_and_transcribe(voice)
+            if not content:
+                append_line(FOR_CLAUDE, raw_line)
+                append_line(PROCESSED, raw_line)
+                send(channel, "ボイスメモを受け取ったけど聞き起こせなかったから、司令塔の受付箱に入れておくね。")
+                log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated_voice_fail", "channel": channel})
+                return
+            rec = dict(rec, content=content, voice=True)
+            raw_line = json.dumps(rec, ensure_ascii=False)
     is_work = any(w in content for w in WORK_WORDS)
     answer = ""
     if not is_work:
