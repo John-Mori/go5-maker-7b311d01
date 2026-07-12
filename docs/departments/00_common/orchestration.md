@@ -126,3 +126,9 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 - **人格層**=4コーチ(ヴィルシーナ=学習戦略/中野五月=基礎/田中琴葉=記録・構造化/姫崎莉波=実践・受付)が応対の顔
 - **知識層**=既存の10分野講師プロファイル(learning/instructors/)は「専門書棚」として存続。コーチが内容の正確さのために参照する(人格としては演じない)
 - 裁定理由: Chami設計(教育機能軸)と既存(技術分野軸)は役割が異なる二軸であり、顔と書棚に分ければ衝突なく両立する
+
+## Discord双方向連携 Phase DB (2026-07-12実装・受信基盤)
+- 受信: `scripts/discord/inbox_poller.py`(常駐=start_discord_inbox.bat)が各部門chの発言を `local/discord_inbox.jsonl` へ蓄積。Bot/Webhook発言は無視(ループ防止)
+- 処理: **司令塔はセッション開始時と「Discord確認して」で受信箱を確認**し、行のdeptに従い部門へ振り分け(router=司令塔triage・research-room=アメス/アロンソ)。処理済み行は `local/discord_inbox_processed.jsonl` へ移す(受信箱は常に未処理のみ)
+- 返信: `scripts/discord/bot_send.py --dept <slug> "本文"` で発言元チャンネルへ返す(webhook版discord_notify.pyはフォールバック)。返信にも秘密を書かない
+- 完全自動化(セッション無しの定期自動処理)はAPI使用コストが伴うため、Chami承認で別途有効化

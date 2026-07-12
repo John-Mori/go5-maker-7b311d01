@@ -35,7 +35,7 @@ Chami ⇄ Discord(入口/出口) ⇄ 受け渡し層 ⇄ AI組織本体(既存: 
 | Phase | 内容 | 必要なChami作業 | 状態 |
 |---|---|---|---|
 | **DA 通知(OUT)** | discord_notify.py(汎用Webhook送信)+手順書。用途: デプロイ/Incident/朝レポート/改善提案/教材URL | ★DiscordサーバーでWebhook作成→URLを`local/discord_webhook.txt`に保存(手順=`local/discord_setup.md`) | **受け皿実装済**(URL待ち) |
-| **DB 質問(IN)** | PC常駐bot(Node+discord.js・タスクスケジューラ)が#質問受付を監視→learning_questionsへキュー→回答は次セッション/定期実行がスレッドへWebhook返信 | Discord DeveloperでBot作成→トークンをlocal/へ | 設計のみ |
+| **DB 質問(IN)** | PC常駐ポーラー(Python stdlib・`scripts/discord/inbox_poller.py`)が**全部門ch**を監視→`local/discord_inbox.jsonl`へキュー→司令塔がセッション開始時/依頼時に振り分け処理→`bot_send.py`で発言元chへ返信。※原典のNode+discord.js(Gateway常駐)から**ポーリング方式へ適合変更**(依存ゼロ・低トラフィックな個人利用では単純で壊れにくい。送信もBotに統一しWebhook 9本を不要化) | ★Discord DeveloperでBot作成→トークンを`local/discord_bot_token.txt`+チャンネルIDを`local/discord_channels.json`(手順=`local/discord_bot_setup.md`・10分) | **受信基盤実装済**(トークン待ち) |
 | **DC HTML教材** | 「HTMLで」「図解で」と言われたらArtifactで教材生成(構成=原典§7.2の11項目)→URLをDiscordへ。Visual/Educational QAチェックリスト適用 | なし(今日から使える) | **利用可能** |
 | **DD デザイン嗜好** | local/design-refs/に好き嫌い実例+理由を蓄積→教材生成時に司令塔が参照。A/B比較メモ。D1化は実績後 | 良い/悪い例を投げるだけ | 受け皿=フォルダ+README |
 | **DE 状態可視化** | scripts/kaizen/status_report.py(D1から部門別open/doneタスク・直近イベント・件数を要約)→Discord/コンソール。簡易HTML版はArtifactで随時 | なし | 設計のみ(次の軽作業) |

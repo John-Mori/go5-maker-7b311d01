@@ -15,7 +15,7 @@ model: haiku
 - P1(高): 主要機能停止/QA FAIL/デプロイ失敗 → 即時送信。担当部門・影響範囲・次のActionを明示
 - P2(通常): タスク完了/QA PASS/Handoff完了 → 通常送信(複数件はまとめてよい)
 - P3(低): 軽微な進捗 → 即時送信せずDaily Reportへ統合
-- 送信手段: `python scripts/kaizen/discord_notify.py --channel <名前> --title "<件名>" "<本文>"`(チャンネル対応表=AI組織_実装設計書_v4 §5.5。webhook未設定チャンネル宛は既定=discord_webhook.txtへ)
+- 送信手段(優先順): ①`python scripts/discord/bot_send.py --dept <部門slug> "<本文>"`(Botトークン・チャンネル表=local/discord_channels.json) ②`python scripts/kaizen/discord_notify.py --channel <名前> --title "<件名>" "<本文>"`(webhookフォールバック)。どちらも未設定ならコンソール報告のみ
 
 ## 鉄の掟
 1. **確認済みの事実のみ**通知する。推測は「推測」と明記。QA結果を勝手に格上げ/格下げしない
