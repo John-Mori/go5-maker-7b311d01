@@ -81,9 +81,18 @@ def fetch_and_transcribe(url):
         return ""
 
 
+SENSITIVE_DEPTS = ("dream-care", "past-room")  # 夢と回復/過去の共有=機微な部屋。ローカルLLMは応答せず必ず司令塔へ
+
+
 def handle(rec, raw_line):
     content = rec.get("content", "")
     channel = rec.get("channel", "")
+    if rec.get("dept") in SENSITIVE_DEPTS:
+        append_line(FOR_CLAUDE, raw_line)
+        append_line(PROCESSED, raw_line)
+        send(channel, "受け取ったよ。ここは司令塔(アメスたち)が直接読む部屋だから、次に起きた時に必ず応えるね。")
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "sensitive_deferred", "channel": channel})
+        return
     if not content.strip():
         voice = next((a for a in (rec.get("attachments") or [])
                       if any(x in a.lower() for x in AUDIO_EXT)), "")
