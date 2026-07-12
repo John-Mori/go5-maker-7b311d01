@@ -38,7 +38,8 @@ ROSTER = [
     {"dept": "qa-reviewer", "label": "品質管理部", "color": "#f2cfd9",
      "members": [{"n": "ジェンティルドンナ", "c": "#e08bab"}, {"n": "スネーク", "c": "#8ba3ab"}, {"n": "オタコン", "c": "#9bb5e0"}], "idle": []},
     {"dept": "learning-coach", "label": "学習室", "color": "#d9e8f2",
-     "members": [{"n": "ヴィルシーナ", "c": "#a58be0"}, {"n": "中野五月", "c": "#e0908b"}, {"n": "田中琴葉", "c": "#8be0c9"}, {"n": "姫崎莉波", "c": "#f0b3d5"}], "idle": []},
+     "members": [{"n": "ヴィルシーナ", "c": "#a58be0", "idle": "お風呂中"}, {"n": "中野五月", "c": "#e0908b", "idle": "食事中"},
+                  {"n": "田中琴葉", "c": "#8be0c9"}, {"n": "姫崎莉波", "c": "#f0b3d5", "idle": "着替え中"}], "idle": []},
     {"dept": "report-notify", "label": "報告・通知部", "color": "#e8f2cf",
      "members": [{"n": "オタコン(兼)", "c": "#9bb5e0"}, {"n": "メタルギアMk.II", "c": "#a3a3a3"}], "idle": []},
     {"dept": "kaizen-analyst", "label": "改善部", "color": "#e5e5e5",
@@ -105,8 +106,16 @@ def main():
             bubble = f"📥 仕事箱に{len(opens)}件"
             bubble_cls = "queue"
         else:
-            idles = [m.get("idle") for m in r["members"] if m.get("idle")] or r["idle"]
-            bubble = ("🍵 " + idles[0] + " ※演出") if idles else "🍵 待機中"
+            import random
+            idles = [(m["n"], m["idle"]) for m in r["members"] if m.get("idle")]
+            # 演出は「稀に」(Chami指定): 3割の確率でメンバー1人の待機演出、普段は素の待機
+            if idles and random.random() < 0.3:
+                who, act = random.choice(idles)
+                bubble = f"🍵 {who}: {act} ※演出"
+            elif r["idle"]:
+                bubble = "🍵 " + r["idle"][0] + " ※演出"
+            else:
+                bubble = "🍵 待機中"
             bubble_cls = "idle"
         chips = "".join(
             f'<div class="chip"><span class="face" style="background:{m["c"]}">{html.escape(m["n"][0])}</span>'
