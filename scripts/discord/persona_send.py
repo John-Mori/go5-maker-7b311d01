@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Discordキャラ名義送信 (人格ごとの表示名/アイコンで発言。Bot1つで全キャラ対応)。
+
+仕組み: 各チャンネルにWebhookを自動作成(初回のみ・要Manage Webhooks権限)し、
+username/avatar_url上書きで送信する。Webhook URLは local/discord_webhooks_auto.json にキャッシュ。
+
+使い方:
+  python scripts/discord/persona_send.py --channel "研究室-コーチングルーム" --persona "アメス" "本文..."
+  python scripts/discord/persona_send.py --dept qa-reviewer --persona "ジェンティルドンナ" --avatar https://... "本文"
+  echo 本文 | python scripts/discord/persona_send.py --dept research-room --persona "シャビ・アロンソ"
+
+アイコン: --avatar <画像URL> 省略可(省略時はDiscord既定アバター+キャラ名)。
+         local/persona_avatars.json ({"アメス":"https://...", ...}) があれば自動適用。
+"""
+import json
+import os
+import sys
+import urllib.request
+import urllib.error
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+LOCAL = os.path.join(ROOT, "local")
+HOOKS_CACHE = os.path.join(LOCAL, "discord_webhooks_auto.json")
+AVATARS_FILE = os.path.join(LOCAL, "persona_avatars.json")
+API = "https://discord.com/api/v10"
+
+
+def api(path, token, payload=None):
+    req = urllib.request.Request(
+        API + path,
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+        headers={"Authorization": "Bot " + token, "Content-Type": "application/json",
+                 "User-Agent": "go5-org-persona (personal, v1)"},
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def ensure_webhook(channel_id, token):
+    cache = {}
+    if os.path.exists(HOOKS_CACHE):
+        with open(HOOKS_CACHE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+    if channel_id in cache:
+        return cache[channel_id]
+    try:
+        hooks = api(f"/channels/{channel_id}/webhooks", token)
+        hook = next((h for h in hooks if h.get("name") == "go5-persona" and h.get("token")), None)
+        if not hook:
+            hook = api(f"/channels/{channel_id}/webhooks", token, {"name": "go5-persona"})
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            print("Webhook管理権限がありません。再招待URL(Manage Webhooks追加済み)を開いて認証し直してください:")
+            print("https://discord.com/oauth2/authorize?client_id=1525787101055160360&scope=bot&permissions=536939520")
+            sys.exit(3)
+        raise
+    url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
+    cache[channel_id] = url
+    with open(HOOKS_CACHE, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=1)
+    return url
+
+
+def main():
+    args = sys.argv[1:]
+    channel = dept = persona = avatar = None
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--channel" and i + 1 < len(args):
+            channel = args[i + 1]; i += 2
+        elif a == "--dept" and i + 1 < len(args):
+            dept = args[i + 1]; i += 2
+        elif a == "--persona" and i + 1 < len(args):
+            persona = args[i + 1]; i += 2
+        elif a == "--avatar" and i + 1 < len(args):
+            avatar = args[i + 1]; i += 2
+        else:
+            rest.append(a); i += 1
+    if not persona or not (channel or dept):
+        print("使い方: persona_send.py (--channel <名前> | --dept <slug>) --persona <キャラ名> [--avatar URL] [本文]")
+        sys.exit(1)
+    body = " ".join(rest) if rest else sys.stdin.read().strip()
+    if not body:
+        print("本文が空です。")
+        sys.exit(1)
+    with open(os.path.join(LOCAL, "discord_bot_token.txt"), "r", encoding="utf-8") as f:
+        token = f.read().strip()
+    with open(os.path.join(LOCAL, "discord_channels.json"), "r", encoding="utf-8") as f:
+        channels = json.load(f)
+    field, key = ("name", channel) if channel else ("dept", dept)
+    ch = next((c for c in channels if c.get(field) == key and str(c.get("id", "")).strip().isdigit()), None)
+    if not ch:
+        print(f"チャンネル未登録: {key}")
+        sys.exit(2)
+    if not avatar and os.path.exists(AVATARS_FILE):
+        with open(AVATARS_FILE, "r", encoding="utf-8") as f:
+            avatar = json.load(f).get(persona)
+    hook_url = ensure_webhook(str(ch["id"]), token)
+    payload = {"content": body[:1900], "username": persona[:80]}
+    if avatar:
+        payload["avatar_url"] = avatar
+    req = urllib.request.Request(
+        hook_url, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": "go5-org-persona (personal, v1)"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            print(f"送信OK → {ch.get('name')} as {persona} (HTTP {r.status})")
+    except Exception as e:
+        print(f"送信失敗: {type(e).__name__}")
+        sys.exit(3)
+
+
+if __name__ == "__main__":
+    main()
