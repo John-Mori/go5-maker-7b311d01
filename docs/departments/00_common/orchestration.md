@@ -114,3 +114,15 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 - 質問は一度に1〜3問・判断を変える項目のみ。「任せる」領域は合理的仮定で進め、仮定を記録
 - 記録: 学習系=既存4表 / 研究メモ(仮説・決定・仮定・未解決の問い)=D1 `research_notes`表。understanding_status=learning_progress表を使う
 - Handoff条件(運用説明書§11): 目的/成果物/制約/優先順位/未確認事項/完了条件が揃ったら専門部門へ。全確定は不要・仮定は明示
+
+## 報告・通知部門 (report-notify・2026-07-12新設=Chami設計・第8部門)
+正本: `personas/report-notify/persona_detail.md` / agent: `.claude/agents/report-notify.md`(haiku)
+- 役割: 各部門の完了/QA結果/Incident/Chami確認待ちを**整形してDiscordへ配送**する専門部門(オタコン=意味整理・メタルギアMk.II=配送実行)。オタコンはQA部と兼任(Chami設計の明示指定)
+- **優先度語彙P0〜P3を組織共通とする**: P0=緊急即時+Chami確認要求 / P1=高・即時(担当・影響・次Action明示) / P2=通常・集約可 / P3=Daily Reportへ統合。QAの判定語彙(APPROVED/APPROVED WITH CONDITIONS/REJECTED/ESCALATED)も組織共通
+- 書き込み権限: dept_eventsへの `notified.*` INSERTのみ(通知台帳)。他は読み取り専用
+- 現実運用: 軽い単発通知は司令塔が直接送ってよい(儀式化しない)。P0/P1・定型レポート(Daily/Weekly)・複数部門にまたがる通知はこの部門を通す
+
+## 学習室の2層モデル (2026-07-12・4コーチ取込に伴う司令塔裁定)
+- **人格層**=4コーチ(ヴィルシーナ=学習戦略/中野五月=基礎/田中琴葉=記録・構造化/姫崎莉波=実践・受付)が応対の顔
+- **知識層**=既存の10分野講師プロファイル(learning/instructors/)は「専門書棚」として存続。コーチが内容の正確さのために参照する(人格としては演じない)
+- 裁定理由: Chami設計(教育機能軸)と既存(技術分野軸)は役割が異なる二軸であり、顔と書棚に分ければ衝突なく両立する

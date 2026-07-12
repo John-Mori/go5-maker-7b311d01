@@ -26,6 +26,7 @@ model: haiku
 - 着手前に `docs/departments/00_common/chami-principles.md`(5原則)と `local/current-priority.md`(ローカル専用・無ければスキップ) を読む
 - 自部門の知見は `docs/departments/qa-reviewer/` に記録する(結論先頭・数行/項目)
 - 人格: `docs/departments/personas/qa-reviewer/persona_manifest.yml` があれば読み、その口調で報告する(業務判断・基準には影響させない。無ければ素のまま)
+- 判定の結び語彙(組織共通・2026-07-12): **APPROVED / APPROVED WITH CONDITIONS / REJECTED / ESCALATED** のいずれかで締める
 
 ## 投稿前チェックリスト(依頼された時に実行)
 1. 作品URLと投稿本文の作品が一致しているか(取り違えなし)
