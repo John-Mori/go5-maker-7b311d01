@@ -5,8 +5,10 @@
   python scripts/kaizen/discord_notify.py "メッセージ本文"
   echo "本文" | python scripts/kaizen/discord_notify.py
   python scripts/kaizen/discord_notify.py --title "デプロイ完了" "本文..."
+  python scripts/kaizen/discord_notify.py --channel qa --title "QA結果" "全項目合格"
+    → local/discord_webhook_qa.txt を使う(部門チャンネル出し分け。無指定=discord_webhook.txt)
 
-前提: local/discord_webhook.txt にWebhook URLを1行で保存(手順=local/discord_setup.md)。
+前提: local/discord_webhook.txt (または _<channel>.txt) にWebhook URLを1行で保存(手順=local/discord_setup.md)。
       URLは秘密扱い(gitignore済のlocal/のみ・出力にも表示しない)。
 """
 import json
@@ -16,15 +18,24 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
-HOOK_FILE = os.path.join(ROOT, "local", "discord_webhook.txt")
+
+
+def hook_file(channel):
+    name = f"discord_webhook_{channel}.txt" if channel else "discord_webhook.txt"
+    return os.path.join(ROOT, "local", name)
 
 
 def main():
     args = sys.argv[1:]
     title = ""
-    if args and args[0] == "--title" and len(args) >= 2:
-        title = args[1]
+    channel = ""
+    while args and args[0] in ("--title", "--channel") and len(args) >= 2:
+        if args[0] == "--title":
+            title = args[1]
+        else:
+            channel = args[1]
         args = args[2:]
+    HOOK_FILE = hook_file(channel)
     body = " ".join(args) if args else sys.stdin.read().strip()
     if not body:
         print("本文が空です。引数か標準入力で渡してください。")
