@@ -1,5 +1,5 @@
 @echo off
-rem Discord受信テスト(1回だけ巡回して終了)
+rem go5 Discord inbox test - one polling pass
 cd /d D:\SougouStartFolder\go5-maker
 python scripts\discord\inbox_poller.py --once
 pause

@@ -1,7 +1,7 @@
 @echo off
-rem Discord受信ポーラー常駐起動 (Phase DB)
-rem 自動起動したい場合: このファイルのショートカットを shell:startup フォルダへ置く
+rem go5 Discord inbox poller (Phase DB) - resident
 cd /d D:\SougouStartFolder\go5-maker
-title go5 Discord受信ポーラー
-python scripts\discord\inbox_poller.py
+title go5-discord-inbox
+python scripts\discord\inbox_poller.py >> local\discord_poller.log 2>&1
+echo poller exited - see local\discord_poller.log
 pause
