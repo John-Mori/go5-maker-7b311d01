@@ -129,15 +129,36 @@ def main():
                 c = int(color.lstrip("#"), 16)
             except ValueError:
                 c = COLORS["blue"]
-        # 太字デフォルト(Chami指定2026-07-13: Embed本文は小さいので太字で補う)。--nobold で無効化。
-        desc = body[:3900]
-        if "--nobold" not in sys.argv:
-            desc = "\n".join(
-                (f"**{ln}**" if ln.strip() and "**" not in ln else ln) for ln in desc.splitlines())
-        emb = {"description": desc[:4000], "color": c}
         if etitle:
-            emb["title"] = etitle[:250]
-        payload["embeds"] = [emb]
+            # 明示見出しモード: 見出し+太字本文(--nobold で太字解除)
+            desc = body[:3900]
+            if "--nobold" not in sys.argv:
+                desc = "\n".join(
+                    (f"**{ln}**" if ln.strip() and "**" not in ln else ln) for ln in desc.splitlines())
+            payload["embeds"] = [{"title": etitle[:250], "description": desc[:4000], "color": c}]
+        else:
+            # 全文見出しモード(Chami指定2026-07-13): 本文を丸ごと見出し(大きい文字)で出す。
+            # 見出しは256字制限+マークダウン非対応のため、装飾を除去し段落単位で複数カードに分割(最大10)。
+            plain = body.replace("**", "").replace("__", "")
+            chunks, cur = [], ""
+            for ln in plain.splitlines():
+                ln = ln.rstrip()
+                if not ln:
+                    if cur:
+                        chunks.append(cur); cur = ""
+                    continue
+                while len(ln) > 240:
+                    if cur:
+                        chunks.append(cur); cur = ""
+                    chunks.append(ln[:240]); ln = ln[240:]
+                cur = (cur + "\n" + ln) if cur and len(cur) + len(ln) < 230 else (chunks.append(cur) or ln if cur else ln)
+            if cur:
+                chunks.append(cur)
+            embs = [{"title": ch[:250], "color": c} for ch in chunks[:10]]
+            rest = "\n".join(chunks[10:])
+            if rest:
+                embs[-1]["description"] = ("**" + rest[:3800] + "**")
+            payload["embeds"] = embs
     else:
         payload["content"] = body[:1900]
     if avatar:
