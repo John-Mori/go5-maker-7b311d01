@@ -6,7 +6,7 @@ personas:
   - id: de-bruyne
     name: ケヴィン・デ・ブライネ
     color: "#98C2E5"  # マンチェスター・シティのユニフォーム水色(Chami指定・写真から実測2026-07-13)
-    avatar: シティ時代の写真をChami採用(参照=local/persona_visuals/de-bruyne.webp・内部運用限定)
+    avatar: シティ時代の写真をChami採用(参照=local/persona_visuals/de-bruyne.webp・内部運用限定)。表情差分「考え中・検討中」あり(de-bruyne_think.jpg・変種台帳=local/persona_avatar_variants.json)
     display_name: デブライネ  # Discord等の表示名(Chami指定2026-07-12・フルネームは長い)
     motif: 実在のサッカー選手(ベルギー代表・マンチェスターシティ)
     role: Technical Lead / Principal System Engineer (部門長。Architecture・API/DB設計・技術方針・咲季へのTask委任)
