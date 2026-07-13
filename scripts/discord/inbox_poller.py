@@ -138,9 +138,13 @@ def main():
             except Exception as e:
                 print(f"チャンネル取得失敗 [{ch.get('name')}] {type(e).__name__}")
         if out:
-            # llm-growth(ローカルqwenの部屋)は専用受付箱へ=ローカルLLMが常時応対(Claude稼働中でも)
-            llm_out = [r for r in out if r.get("dept") == "llm-growth"]
-            main_out = [r for r in out if r.get("dept") != "llm-growth"]
+            # llm-growth(ローカルqwenの部屋)は専用受付箱へ=ローカルLLMが常時応対(Claude稼働中でも)。
+            # ただし名前呼び(アメス/アロンソ等)を含む発言はClaude側へ配達=呼べば本人が出てくる(Chami指定2026-07-13)
+            CALL_WORDS = ("アメス", "アロンソ", "監督", "司令塔", "Claude", "claude")
+            def _is_llm(r):
+                return r.get("dept") == "llm-growth" and not any(w in (r.get("content") or "") for w in CALL_WORDS)
+            llm_out = [r for r in out if _is_llm(r)]
+            main_out = [r for r in out if not _is_llm(r)]
             if main_out:
                 with open(INBOX_FILE, "a", encoding="utf-8") as f:
                     for rec in main_out:
