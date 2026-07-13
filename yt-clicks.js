@@ -214,8 +214,34 @@
         if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
       }
       applyDeltas_();
+      try { repairClickWarn_(); } catch (e) {} // クリック⚠(サーバーにスナップ無し)を実データ基点で自己修復
       if (cb) cb();
     });
+  }
+  // クリックのデルタが「不可知(⚠)」＝サーバーにこのvidのクリックスナップが1つも無い状態。
+  //   端末には計測キー(r2短縮)があるのにサーバーに無い＝シートの短縮URL欠落が原因。楽観的な同期台帳が
+  //   「送信済み」と誤マークして再送しない取りこぼしを、実際の⚠を検知して確実に後追い反映して治す。(Chami報告2026-07-14)
+  var _clickRepairDone = {};
+  function repairClickWarn_() {
+    var url = gasUrl_(); if (!url) return;
+    var ymap = loadYtMap();
+    var pushed = 0;
+    allItems().forEach(function (it) {
+      if (pushed >= 8) return;
+      var k = itemKey(it);
+      var vid = ytIdOf(ymap[k] || it.ytUrl || '');
+      if (!vid || _clickRepairDone[vid]) return;
+      var d = deltaCache[vid];
+      if (!d || d.tc !== null) return;             // tc===null のみ=クリック記録なし。0(記録あり)は対象外
+      if (!codeOf(it.shortUrl || '') || !it.videoId) return; // 端末にr2短縮が無ければ送っても治らない
+      _clickRepairDone[vid] = true;
+      pushItemToGas_(it);                          // シートの短縮URL列を確実に埋める
+      pushed++;
+    });
+    if (pushed > 0) {
+      pokeSnapshotNow_();                          // 反映後に即スナップ→クリックが記録され⚠が数字に変わる
+      setTimeout(function () { try { fetchDeltas_(true); } catch (e) {} }, 9000);
+    }
   }
 
   // クリック数キャッシュは localStorage に永続化(リロード直後や取得失敗時に「…」のままに
