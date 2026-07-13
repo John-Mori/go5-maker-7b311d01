@@ -4,7 +4,7 @@
  * link-worker(/api/list)から「このワーカーが払い出した全短縮リンク+クリック数」を取得して一覧表示。
  * 手動で作った短縮も含め全部ここで見える=「どこに記録されてるか分からない」の解消。
  * 種別は飛び先URLから自動判定: 🏮セール会場 / 🛒FANZA作品 / 🦋Bluesky投稿(導線1) / ▶YouTube / その他。
- * 読み取りのみ(KV write 0)。認証は既存のGo5Short.SHARED_SECRET(端末のlocalStorage同期済み)。
+ * 読み取りのみ。(KV write 0)認証は既存のGo5Short.SHARED_SECRET。(端末のlocalStorage同期済み)
  */
 (function () {
   'use strict';

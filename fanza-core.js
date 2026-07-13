@@ -1,6 +1,6 @@
 /**
- * fanza-core.js — FANZA商品情報取得・解析（純粋関数）
- * ブラウザ（window グローバル）と Node.js（CommonJS）の両方で動く。
+ * fanza-core.js — FANZA商品情報取得・解析(純粋関数)
+ * ブラウザ(window グローバル)と Node.js(CommonJS)の両方で動く。
  */
 
 /**
@@ -27,9 +27,9 @@ function parseFanzaItem(item) {
 
   var authorArr = (item.iteminfo && Array.isArray(item.iteminfo.author)) ? item.iteminfo.author : [];
   var author = authorArr.length > 0 ? String(authorArr[0].name || '') : '';
-  var authorId = authorArr.length > 0 && authorArr[0].id != null ? String(authorArr[0].id) : ''; // サークル/作者ID（候補タブのサークル一覧取得に使用）
+  var authorId = authorArr.length > 0 && authorArr[0].id != null ? String(authorArr[0].id) : ''; // サークル/作者ID(候補タブのサークル一覧取得に使用)
 
-  // サムネ・サンプル画像・ジャンル（詳細モーダル用）。
+  // サムネ・サンプル画像・ジャンル。(詳細モーダル用)
   var img = item.imageURL || {};
   var thumb = String(img.large || img.list || '');
   var thumbSmall = String(img.list || img.large || '');
@@ -43,13 +43,13 @@ function parseFanzaItem(item) {
   return {
     cid: item.content_id || '',
     title: item.title || '',
-    partial: !!item.partial,   // 画像のみの部分情報（API未収録＋ページ取得不能の作品）
+    partial: !!item.partial,   // 画像のみの部分情報(API未収録＋ページ取得不能の作品)
     author: author,
     authorId: authorId,
     listPrice: listPrice,
     price: price,
     discountPct: discountPct,
-    releaseDate: item.date || '',   // 発売日（作品状態=新作/準新作/旧作 の判定に使用）
+    releaseDate: item.date || '',   // 発売日(作品状態=新作/準新作/旧作 の判定に使用)
     service: String(item.service_name || ''),
     floor: String(item.floor_name || ''),
     thumb: thumb,
@@ -64,7 +64,7 @@ function parseFanzaItem(item) {
 
 /**
  * fanza-worker プロキシ経由で cid → 商品情報を取得する。
- * 取得失敗・Worker 未設定はすべて null を返す（呼び出し元で try/catch 不要）。
+ * 取得失敗・Worker 未設定はすべて null を返す。(呼び出し元で try/catch 不要)
  *
  * @param {string} cid
  * @param {string} workerUrl  - localStorage の fanza_worker_url
@@ -74,30 +74,30 @@ function parseFanzaItem(item) {
 // 失敗時のエラーコード/HTTPから、人が読める失敗理由を作る。
 function fanzaReason_(status, data) {
   var code = (data && data.error) ? String(data.error) : '';
-  if (code === 'not_found') return '作品が見つかりません（cid違い・配信終了・対象フロア外の可能性）';
-  if (code === 'bad_secret') return '認証エラー（共有シークレット不一致。⚙️詳細設定を確認）';
-  if (code === 'origin_not_allowed') return 'Origin不許可（ワーカー設定）';
-  if (code === 'missing_cid' || code === 'bad_json') return 'リクエスト不正（' + code + '）';
-  if (status && status >= 500) return 'サーバーエラー（HTTP ' + status + '）';
-  if (status && status >= 400) return 'リクエストエラー（HTTP ' + status + '）';
+  if (code === 'not_found') return '作品が見つかりません(cid違い・配信終了・対象フロア外の可能性)';
+  if (code === 'bad_secret') return '認証エラー(共有シークレット不一致。⚙️詳細設定を確認)';
+  if (code === 'origin_not_allowed') return 'Origin不許可(ワーカー設定)';
+  if (code === 'missing_cid' || code === 'bad_json') return 'リクエスト不正(' + code + ')';
+  if (status && status >= 500) return 'サーバーエラー(HTTP ' + status + ')';
+  if (status && status >= 400) return 'リクエストエラー(HTTP ' + status + ')';
   return code ? ('エラー: ' + code) : '不明なエラー';
 }
-// リトライして意味があるか（一時的失敗=true / 恒久的失敗=false）。
-// 「見つからない」「認証」「リクエスト不正」は何度やっても同じ＝リトライしない（無駄な待ち時間を作らない）。
+// リトライして意味があるか。(一時的失敗=true / 恒久的失敗=false)
+// 「見つからない」「認証」「リクエスト不正」は何度やっても同じ＝リトライしない。(無駄な待ち時間を作らない)
 function fanzaRetryable_(status, data) {
   var code = (data && data.error) ? String(data.error) : '';
   if (code === 'not_found' || code === 'bad_secret' || code === 'origin_not_allowed' || code === 'missing_cid' || code === 'bad_json') return false;
   if (status && status >= 500) return true;   // サーバー一時エラーは再試行の価値あり
   if (status && status >= 400) return false;  // その他4xxは恒久的
-  return !!code === false;                    // コード不明（想定外）＝一応リトライ
+  return !!code === false;                    // コード不明(想定外)＝一応リトライ
 }
 
-// 成功時は parseFanzaItem の結果（title を持つ）を返す。失敗時は { __error:true, reason } を返す。
-// ※呼び出し側は「info && info.title」で成功判定できる（従来どおり）。reason で失敗内容が分かる。
-// srcUrl（任意・第4引数）: 作品ページの元URL。FANZA Books等、同人以外のスクレイプフォールバック先として worker が使う。
+// 成功時は parseFanzaItem の結果(title を持つ)を返す。失敗時は { __error:true, reason } を返す。
+// ※呼び出し側は「info && info.title」で成功判定できる。(従来どおり)reason で失敗内容が分かる。
+// srcUrl(任意・第4引数): 作品ページの元URL。FANZA Books等、同人以外のスクレイプフォールバック先として worker が使う。
 function fetchFanzaInfo(cid, workerUrl, sharedSecret, srcUrl) {
   if (!cid || !workerUrl) return Promise.resolve({ __error: true, reason: '作品URL/ワーカーURLが未設定' });
-  // タイムアウト（スマホ回線での無限待ちを防ぎ、呼び出し側のリトライを効かせる）。
+  // タイムアウト。(スマホ回線での無限待ちを防ぎ、呼び出し側のリトライを効かせる)
   var ctrl = null, timer = null, timedOut = false;
   try { ctrl = new AbortController(); timer = setTimeout(function () { timedOut = true; try { ctrl.abort(); } catch (e) {} }, 9000); } catch (e) { ctrl = null; }
   var opts = {
@@ -116,7 +116,7 @@ function fetchFanzaInfo(cid, workerUrl, sharedSecret, srcUrl) {
   })
   .catch(function () {
     if (timer) clearTimeout(timer);
-    return { __error: true, reason: timedOut ? '通信タイムアウト（9秒）' : '通信エラー（オフライン/接続失敗）', retryable: true };
+    return { __error: true, reason: timedOut ? '通信タイムアウト(9秒)' : '通信エラー(オフライン/接続失敗)', retryable: true };
   });
 }
 
@@ -125,7 +125,7 @@ if (typeof window !== 'undefined') {
   window.FanzaCore = { parseFanzaItem: parseFanzaItem, fetchFanzaInfo: fetchFanzaInfo };
 }
 
-// Node.js（CommonJS）向けエクスポート
+// Node.js(CommonJS)向けエクスポート
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { parseFanzaItem: parseFanzaItem, fetchFanzaInfo: fetchFanzaInfo };
 }

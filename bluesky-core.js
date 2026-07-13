@@ -1,12 +1,12 @@
 /**
  * bluesky-core.js
- * Bluesky（AT Protocol）投稿コア — 完全クライアントサイド（サーバー不要）。
+ * Bluesky(AT Protocol)投稿コア — 完全クライアントサイド。(サーバー不要)
  * bsky.social の XRPC はブラウザ CORS 対応のため、アプリパスワードで直接投稿できる。
  *
- * 公開API（window / CommonJS 両対応）：
- *   buildBlueskyPost({ words, disclosure, link })  … 本文テキスト＋リンクfacet（純粋関数・テスト可）
+ * 公開API(window / CommonJS 両対応)：
+ *   buildBlueskyPost({ words, disclosure, link })  … 本文テキスト＋リンクfacet(純粋関数・テスト可)
  *   blueskyPostWithImage({ identifier, appPassword, words, disclosure, link, imageBlob, alt, service })
- *                                                  … ログイン→画像アップロード→投稿（ブラウザ実行）
+ *                                                  … ログイン→画像アップロード→投稿(ブラウザ実行)
  *
  * 注意：appPassword は通常パスワードではなく「アプリパスワード」。秘匿情報なので console には出さない。
  */
@@ -15,16 +15,16 @@
 
   var DEFAULT_SERVICE = 'https://bsky.social';
 
-  // UTF-8 バイト長（facet の index は「バイト」オフセットで指定する必要がある）
+  // UTF-8 バイト長(facet の index は「バイト」オフセットで指定する必要がある)
   function byteLen(s) {
     if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(s).length;
-    // フォールバック（TextEncoder 非対応環境用）
+    // フォールバック(TextEncoder 非対応環境用)
     return unescape(encodeURIComponent(s)).length;
   }
 
   /**
    * 投稿本文とリンク facet を組み立てる純粋関数。
-   * 並び：固定文 →（空行）→ 提携文 →（改行）→ リンク
+   * 並び：固定文 →(空行)→ 提携文 →(改行)→ リンク
    * リンクは richtext#link facet を付け、Bluesky 上でクリック可能リンクになる。
    * @returns {{ text: string, facets: Array }}
    */
@@ -53,13 +53,13 @@
     return { text: text, facets: facets };
   }
 
-  // ---- 以下はネットワーク呼び出し（ブラウザ／fetch 環境で動作） ----
+  // ---- 以下はネットワーク呼び出し(ブラウザ／fetch 環境で動作) ----
 
   function safeJson(res) {
     return res.json().then(function (j) { return j; }, function () { return null; });
   }
 
-  // ログイン（セッション発行）。identifier はハンドル（@なし）またはメール。
+  // ログイン。(セッション発行)identifier はハンドル(@なし)またはメール。
   function createSession(service, identifier, appPassword) {
     return fetch(service + '/xrpc/com.atproto.server.createSession', {
       method: 'POST',
@@ -69,7 +69,7 @@
       if (!res.ok) {
         return safeJson(res).then(function (e) {
           var m = (e && e.message) ? e.message : ('HTTP ' + res.status);
-          throw new Error('ログインに失敗しました（' + m + '）');
+          throw new Error('ログインに失敗しました(' + m + ')');
         });
       }
       return res.json(); // { accessJwt, did, handle, ... }
@@ -89,7 +89,7 @@
       if (!res.ok) {
         return safeJson(res).then(function (e) {
           var m = (e && e.message) ? e.message : ('HTTP ' + res.status);
-          throw new Error('画像のアップロードに失敗しました（' + m + '）');
+          throw new Error('画像のアップロードに失敗しました(' + m + ')');
         });
       }
       return res.json(); // { blob: {...} }
@@ -127,7 +127,7 @@
       if (!res.ok) {
         return safeJson(res).then(function (e) {
           var m = (e && e.message) ? e.message : ('HTTP ' + res.status);
-          throw new Error('投稿に失敗しました（' + m + '）');
+          throw new Error('投稿に失敗しました(' + m + ')');
         });
       }
       return res.json(); // { uri, cid }
@@ -135,7 +135,7 @@
   }
 
   /**
-   * 一連の投稿フロー：ログイン → （画像があれば）アップロード → 投稿。
+   * 一連の投稿フロー：ログイン → (画像があれば)アップロード → 投稿。
    * @returns Promise<{ uri, cid, handle }>
    */
   function blueskyPostWithImage(o) {
@@ -156,7 +156,7 @@
         alt: o.alt || ''
       });
     }).then(function (res) {
-      // at://did/app.bsky.feed.post/<rkey> から公開URL（共有URL）を組み立てる
+      // at://did/app.bsky.feed.post/<rkey> から公開URL(共有URL)を組み立てる
       var rkey = String(res.uri || '').split('/').pop();
       var postUrl = (sess.handle && rkey)
         ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey)
@@ -165,7 +165,7 @@
     });
   }
 
-  // 自由テキストから URL（#link）とハッシュタグ（#tag）を検出して facets を作る。
+  // 自由テキストから URL(#link)とハッシュタグ(#tag)を検出して facets を作る。
   // index は UTF-8 バイトオフセット。タグ範囲は「#」を含み、tag値は「#」を除く。半角#のみ検出。
   function detectFacets(text) {
     text = String(text || '');
@@ -174,7 +174,7 @@
     // URL → link facet
     var ure = /https?:\/\/[^\s]+/g;
     while ((m = ure.exec(text))) {
-      var url = m[0].replace(/[.,;:!?。、！？）)】」』]+$/, '');  // 末尾の句読点・閉じ括弧は含めない
+      var url = m[0].replace(/[.,;:!?。、！？))】」』]+$/, '');  // 末尾の句読点・閉じ括弧は含めない
       var s = m.index, e = s + url.length;
       used.push([s, e]);
       facets.push({
@@ -183,10 +183,10 @@
       });
     }
 
-    // ハッシュタグ → tag facet（行頭 or 空白の直後の半角#のみ。URLと重なる分は除外）
+    // ハッシュタグ → tag facet(行頭 or 空白の直後の半角#のみ。URLと重なる分は除外)
     var tre = /(^|\s)(#[^\s#]+)/g, t;
     while ((t = tre.exec(text))) {
-      var hash = t[2].replace(/[.,;:!?。、！？）)】」』]+$/, '');  // 末尾の句読点はタグに含めない
+      var hash = t[2].replace(/[.,;:!?。、！？))】」』]+$/, '');  // 末尾の句読点はタグに含めない
       if (hash.length < 2) continue;  // 「#」だけは除外
       var ts = t.index + t[1].length, te = ts + hash.length;
       var overlap = used.some(function (r) { return ts < r[1] && te > r[0]; });
@@ -202,7 +202,7 @@
   }
 
   /**
-   * 1つの自由テキスト本文をそのまま投稿（改行も維持／本文中のURLは自動でリンク化）。
+   * 1つの自由テキスト本文をそのまま投稿。(改行も維持／本文中のURLは自動でリンク化)
    * @returns Promise<{ uri, cid, handle, rkey, postUrl }>
    */
   function blueskyPostRaw(o) {
@@ -227,8 +227,8 @@
   }
 
   /**
-   * 資格情報の検証だけを行う（ログインを試すのみ・投稿はしない）。
-   * 成功時：{ ok:true, handle, did }、失敗時：reject(Error)。
+   * 資格情報の検証だけを行う。(ログインを試すのみ・投稿はしない)
+   * 成功時：{ ok:true, handle, did }、失敗時：reject。(Error)
    */
   function blueskyVerify(o) {
     o = o || {};

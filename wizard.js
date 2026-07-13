@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================
-   * wizard.js  多段ウィザード（オブザーバ型）
+   * wizard.js  多段ウィザード(オブザーバ型)
    * 既存フロー・既存タブを一切壊さない追加のみ実装
    * ========================================================= */
 
@@ -25,10 +25,10 @@
   /* bskyEnable の元の値を保持 */
   var _prevBskyEnable = false;
 
-  /* 現在ステップ（1-5）*/
+  /* 現在ステップ(1-5)*/
   var _currentStep = 1;
 
-  /* video-created / bluesky-posted リスナー参照（解除用） */
+  /* video-created / bluesky-posted リスナー参照(解除用) */
   var _onVideoCreated = null;
   var _onBskyPosted = null;
 
@@ -39,7 +39,7 @@
    * DOM 構築
    * ========================================================= */
   function buildDOM() {
-    /* --- 起動ボタン行（今から1本／下書きから呼び出し・半々） --- */
+    /* --- 起動ボタン行(今から1本／下書きから呼び出し・半々) --- */
     var startRow = document.createElement('div');
     startRow.style.cssText = 'display:flex;gap:8px;margin:12px 0;';
 
@@ -51,7 +51,7 @@
       'flex:1',
       'min-width:0',
       'padding:10px 6px',
-      'background:#2563eb',   /* Qセーブの既定色を参照した固定値（連動はしない） */
+      'background:#2563eb',   /* Qセーブの既定色を参照した固定値(連動はしない) */
       'color:#fff',
       'border:none',
       'border-radius:10px',
@@ -71,7 +71,7 @@
       'flex:1',
       'min-width:0',
       'padding:10px 6px',
-      'background:#16a34a',   /* Qロードの既定色を参照した固定値（連動はしない） */
+      'background:#16a34a',   /* Qロードの既定色を参照した固定値(連動はしない) */
       'color:#fff',
       'border:none',
       'border-radius:10px',
@@ -306,7 +306,7 @@
     body.appendChild(acctRow);
 
     /* 作品URL入力 */
-    body.appendChild(el('label', { style: 'font-size:.85rem;color:#aaa;display:block;margin-bottom:4px;' }, '作品URL（FANZA等）'));
+    body.appendChild(el('label', { style: 'font-size:.85rem;color:#aaa;display:block;margin-bottom:4px;' }, '作品URL(FANZA等)'));
     var urlInput = el('input', {
       type: 'url',
       id: 'wizWorkUrl',
@@ -351,7 +351,7 @@
       } else {
         W.affLink = '';
         affResult.style.color = '#f88';
-        affResult.textContent = '⚠️ URLを確認してください（FANZA商品URLを入力してください）';
+        affResult.textContent = '⚠️ URLを確認してください(FANZA商品URLを入力してください)';
         btnNext.disabled = true;
       }
     });
@@ -395,15 +395,15 @@
     document.addEventListener('video-created', _onVideoCreated);
   }
 
-  /* ---- ステップ3: Bluesky投稿（自動） ---- */
+  /* ---- ステップ3: Bluesky投稿(自動) ---- */
   function renderStep3(heading, body, btnNext) {
-    heading.textContent = '③ Bluesky 投稿（自動）';
-    btnNext.textContent = '次へ（スキップ） ▶';
+    heading.textContent = '③ Bluesky 投稿(自動)';
+    btnNext.textContent = '次へ(スキップ) ▶';
     btnNext.disabled = false;
 
     body.innerHTML = '';
     body.appendChild(el('p', {}, 'Bluesky投稿の確認ダイアログが出ます。作品URLを確認して投稿してください。'));
-    body.appendChild(el('p', { style: 'font-size:.85rem;color:#aaa;' }, '投稿が完了すると自動で次のステップへ進みます。投稿しない場合は「次へ（スキップ）」を押してください。'));
+    body.appendChild(el('p', { style: 'font-size:.85rem;color:#aaa;' }, '投稿が完了すると自動で次のステップへ進みます。投稿しない場合は「次へ(スキップ)」を押してください。'));
 
     var waiting = el('div', { id: 'wizWaitPost', style: 'margin-top:10px;font-size:.85rem;color:#2bb3c0;' }, '⏳ 投稿完了を待っています…');
     body.appendChild(waiting);
@@ -441,7 +441,7 @@
     if (titleText && titleText.indexOf('動画作成') !== -1) titleText = W.title; /* デフォルトメッセージを回避 */
 
     body.appendChild(el('div', { style: 'font-size:.85rem;color:#aaa;margin-bottom:4px;' }, 'YouTube 題名'));
-    var titleBox = el('div', { style: 'background:#111;border-radius:8px;padding:8px;margin-bottom:8px;font-size:.9rem;word-break:break-all;' }, titleText || '（題名が取得できませんでした）');
+    var titleBox = el('div', { style: 'background:#111;border-radius:8px;padding:8px;margin-bottom:8px;font-size:.9rem;word-break:break-all;' }, titleText || '(題名が取得できませんでした)');
     body.appendChild(titleBox);
 
     var copyTitle = el('button', { type: 'button', style: copyBtnStyle() }, '📋 題名をコピー');
@@ -453,7 +453,7 @@
     /* YouTube 説明欄 */
     var ytDescEl = document.getElementById('ytDesc');
     var descText = (ytDescEl && ytDescEl.value) ? ytDescEl.value : '';
-    body.appendChild(el('div', { style: 'font-size:.85rem;color:#aaa;margin-top:14px;margin-bottom:4px;' }, 'YouTube 説明欄（短縮URL入り）'));
+    body.appendChild(el('div', { style: 'font-size:.85rem;color:#aaa;margin-top:14px;margin-bottom:4px;' }, 'YouTube 説明欄(短縮URL入り)'));
     var descBox = el('textarea', { rows: '6', readonly: '', style: 'width:100%;box-sizing:border-box;background:#111;border:1px solid #444;border-radius:8px;padding:8px;color:#ccc;font-size:.82rem;resize:vertical;' });
     descBox.value = descText;
     body.appendChild(descBox);
@@ -467,7 +467,7 @@
     body.appendChild(el('p', { style: 'font-size:.85rem;color:#aaa;margin-top:10px;' }, 'この5秒動画をYouTubeにアップし、説明欄に上を貼ってください。'));
 
     /* YouTube URL 入力 */
-    body.appendChild(el('div', { style: 'font-size:.85rem;color:#aaa;margin-top:14px;margin-bottom:4px;' }, 'YouTubeのURL（アップ後に貼ってください）'));
+    body.appendChild(el('div', { style: 'font-size:.85rem;color:#aaa;margin-top:14px;margin-bottom:4px;' }, 'YouTubeのURL(アップ後に貼ってください)'));
     var ytUrlInput = el('input', {
       type: 'url',
       id: 'wizYtUrl',
@@ -488,7 +488,7 @@
       W.ytId = (url && typeof window.IdGen !== 'undefined' && typeof window.IdGen.youtubeId === 'function')
         ? (window.IdGen.youtubeId(url) || '')
         : '';
-      // 検証タブ（yt-clicks.js）が再生数を出せるよう、この投稿の動画URLを保存（itemKey と同形式）。
+      // 検証タブ(yt-clicks.js)が再生数を出せるよう、この投稿の動画URLを保存。(itemKey と同形式)
       try {
         if (url) {
           var acc = W.account || 'acc1';
@@ -509,7 +509,7 @@
     body.appendChild(recordBtn);
 
     /* スキップリンク */
-    var skipLink = el('a', { href: '#', style: 'display:block;text-align:center;margin-top:8px;font-size:.85rem;color:#888;' }, 'YouTubeはあとで（スキップ）');
+    var skipLink = el('a', { href: '#', style: 'display:block;text-align:center;margin-top:8px;font-size:.85rem;color:#888;' }, 'YouTubeはあとで(スキップ)');
     skipLink.addEventListener('click', function (e) {
       e.preventDefault();
       _currentStep = 5;
@@ -545,7 +545,7 @@
       body.appendChild(d);
     });
 
-    /* 閉じるボタンのイベント（goNext が closeWizard を呼ぶ設計に合わせて btnNext を閉じるに振る） */
+    /* 閉じるボタンのイベント(goNext が closeWizard を呼ぶ設計に合わせて btnNext を閉じるに振る) */
     /* btnNext の click は goNext() → step>5 のルートで closeWizard() を呼ぶ (_currentStep=5 → step=6 → else branch) */
     /* 実際には step===5 で goNext すると _currentStep++ で 6 になり closeWizard に入る */
   }
@@ -582,7 +582,7 @@
   }
 
   /* =========================================================
-   * GAS 記録（ステップ4）
+   * GAS 記録(ステップ4)
    * ========================================================= */
   function recordToGas() {
     var gasUrl = '';
@@ -613,7 +613,7 @@
   }
 
   // FANZA 商品情報を取得して W.fanzaInfo に格納してから done() を呼ぶ。
-  // cid なし・テストモード・Worker 未設定・失敗はいずれも done() を呼ぶだけ（記録フローを止めない）。
+  // cid なし・テストモード・Worker 未設定・失敗はいずれも done() を呼ぶだけ。(記録フローを止めない)
   function fetchFanzaForRecord(done) {
     var isTest = /^test-/.test(W.videoId || '');
     var cid = W.cid;
@@ -624,7 +624,7 @@
     try { sharedSecret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
     if (!workerUrl || typeof window.FanzaCore === 'undefined') { done(); return; }
     window.FanzaCore.fetchFanzaInfo(cid, workerUrl, sharedSecret, W.workUrl || '').then(function (info) {
-      W.fanzaInfo = (info && info.title) ? info : null; // 失敗（{__error}）は情報なし扱い
+      W.fanzaInfo = (info && info.title) ? info : null; // 失敗({__error})は情報なし扱い
       done();
     }).catch(function () { done(); });
   }
@@ -649,7 +649,7 @@
   function accountLabel(acc) {
     if (acc === 'acc1') return '月読み色恋劇場';
     if (acc === 'acc2') return '宵桜艶帖';
-    return acc || '（未設定）';
+    return acc || '(未設定)';
   }
 
   function copyBtnStyle() {
@@ -770,7 +770,7 @@
             testResult.style.color = '#7fe87f';
           } else if (d.error === 'not_found' || res.status === 404) {
             if (isReal) {
-              testResult.textContent = '⚠️ 認証OK・商品が見つからず — FANZAページのスクレイピングに失敗しました（CID: ' + cid + '）。ページ構造が変わった可能性があります';
+              testResult.textContent = '⚠️ 認証OK・商品が見つからず — FANZAページのスクレイピングに失敗しました。(CID: ' + cid + ')ページ構造が変わった可能性があります';
               testResult.style.color = '#f0b429';
             } else {
               testResult.textContent = '✅ 接続OK・認証成功。CIDを入力して再テストすると商品取得も確認できます';
@@ -781,7 +781,7 @@
             testResult.style.color = '#f0b429';
           }
         }).catch(function (e) {
-          testResult.textContent = '❌ 接続失敗 — URL が違うか Worker 未デプロイです（' + (e && e.message ? e.message : 'network error') + '）';
+          testResult.textContent = '❌ 接続失敗 — URL が違うか Worker 未デプロイです(' + (e && e.message ? e.message : 'network error') + ')';
           testResult.style.color = '#f88';
         });
       });

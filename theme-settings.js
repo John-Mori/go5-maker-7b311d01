@@ -1,10 +1,10 @@
 /**
- * theme-settings.js — 「詳細設定」タブ：編集ボタン（Qセーブ/Qロード/リセット/元に戻す）の色を
- * 色コードでカスタマイズし、アプリ全体（どの画面でも）に反映する。
+ * theme-settings.js — 「詳細設定」タブ：編集ボタン(Qセーブ/Qロード/リセット/元に戻す)の色を
+ * 色コードでカスタマイズし、アプリ全体(どの画面でも)に反映する。
  *
- * 仕組み：色は CSS カスタムプロパティ（:root の --qbtn-*）として適用するため、
- * 同じクラス（.qbtn-save 等）のボタンが置かれている画面すべてに一度で反映される。
- * 値は localStorage（全アカウント共通・グローバル）に保存し、起動時に自動適用。
+ * 仕組み：色は CSS カスタムプロパティ(:root の --qbtn-*)として適用するため、
+ * 同じクラス(.qbtn-save 等)のボタンが置かれている画面すべてに一度で反映される。
+ * 値は localStorage(全アカウント共通・グローバル)に保存し、起動時に自動適用。
  * 完全クライアントサイド。
  */
 (function () {
@@ -23,7 +23,7 @@
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
   function remove(k) { try { localStorage.removeItem(k); } catch (e) {} }
 
-  // 色コードの妥当性チェック（16進・rgb()・CSS色名すべて）。ブラウザに解釈させる。
+  // 色コードの妥当性チェック(16進・rgb()・CSS色名すべて)。ブラウザに解釈させる。
   function isValidColor(c) {
     c = String(c || "").trim();
     if (!c) return false;
@@ -32,7 +32,7 @@
     s.color = c;
     return s.color !== "";
   }
-  // 入力テキスト（#hex / 色名）を #rrggbb に正規化（color ピッカー同期用）。失敗なら null。
+  // 入力テキスト(#hex / 色名)を #rrggbb に正規化。(color ピッカー同期用)失敗なら null。
   function toHex(c) {
     if (!isValidColor(c)) return null;
     var ctx = toHex._ctx || (toHex._ctx = document.createElement("canvas").getContext("2d"));
@@ -48,27 +48,27 @@
     return null;
   }
 
-  // 現在の有効値（保存 > 既定）。
+  // 現在の有効値。(保存 > 既定)
   function curVal(c) { var v = load(c.ls); return (v != null && v !== "") ? v : c.def; }
 
-  // :root に CSS 変数を適用（＝アプリ全体のボタン色が変わる）。
+  // :root に CSS 変数を適用。(＝アプリ全体のボタン色が変わる)
   function applyRootVar(c, val) {
     try { document.documentElement.style.setProperty(c.varName, val); } catch (e) {}
   }
 
-  // 起動時：保存済み（or 既定）を :root へ適用。入力UIが無くても動く。
+  // 起動時：保存済み(or 既定)を :root へ適用。入力UIが無くても動く。
   function applyAllFromStore() {
     COLORS.forEach(function (c) { applyRootVar(c, curVal(c)); });
   }
   applyAllFromStore();
 
-  // 入力UI（詳細設定タブ）の配線。
+  // 入力UI(詳細設定タブ)の配線。
   function setupUI() {
-    if (!$("colorApply")) return; // 詳細設定タブが無いページ（post.html等）では何もしない
+    if (!$("colorApply")) return; // 詳細設定タブが無いページ(post.html等)では何もしない
 
     function paintSwatch(c, val) { var el = $(c.sw); if (el) el.style.background = val; }
 
-    // 1色ぶんの「仮表示」（保存はしない・:root と入力欄/見本に反映）。
+    // 1色ぶんの「仮表示」。(保存はしない・:root と入力欄/見本に反映)
     function previewOne(c, val) {
       applyRootVar(c, val);
       paintSwatch(c, val);
@@ -118,11 +118,11 @@
         applyRootVar(c, v);
         paintSwatch(c, v);
       });
-      if (bad.length) status("⚠️ 色コードが正しくありません（" + bad.join(", ") + "）。例：#2563eb / red", false);
+      if (bad.length) status("⚠️ 色コードが正しくありません(" + bad.join(", ") + ")。例：#2563eb / red", false);
       else status("✅ 反映しました。アプリ全体のボタン色に保存されました。", true);
     });
 
-    // 既定の色に戻す＝保存を消して既定値へ（保存も既定で確定）。
+    // 既定の色に戻す＝保存を消して既定値へ。(保存も既定で確定)
     var resetBtn = $("colorResetDefault");
     if (resetBtn) resetBtn.addEventListener("click", function () {
       COLORS.forEach(function (c) { remove(c.ls); applyRootVar(c, c.def); });
@@ -137,9 +137,9 @@
   else setupUI();
 })();
 
-// ---- アカウント別テーマ（account-changed CustomEvent 連動）----
-// 実際の配色は style.css の html[data-account="accX"] 側で定義（背景・アクセント・文字を
-// 各タブ/文字/ボタンへCSS変数で一括反映）。ここでは data-account 属性の付け替えだけ行う。
+// ---- アカウント別テーマ(account-changed CustomEvent 連動)----
+// 実際の配色は style.css の html[data-account="accX"] 側で定義(背景・アクセント・文字を
+// 各タブ/文字/ボタンへCSS変数で一括反映)。ここでは data-account 属性の付け替えだけ行う。
 // ※インラインで --app-bg を設定しない＝ランキングタブ(html[data-tab])のクリーム上書きが効くようにする。
 (function () {
   function applyAccount(id) {

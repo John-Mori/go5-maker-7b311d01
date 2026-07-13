@@ -1,107 +1,107 @@
-/* 5秒動画メーカー（クライアントサイド合成）
+/* 5秒動画メーカー(クライアントサイド合成)
    背景動画＋前景画像＋テキスト3段を Canvas で描画し、MediaRecorder で録画して動画化する。
    仕上がりはデスクトップ版 composite.py に合わせている。 */
 (() => {
   "use strict";
 
-  // ---- 仕上がり設定（composite.py / jobs.json と統一） ----
-  // 基準フレーム＝唯一の基準座標系（9:16）。位置・サイズ・余白・行間は全てこの値への比率で表現する。
+  // ---- 仕上がり設定(composite.py / jobs.json と統一) ----
+  // 基準フレーム＝唯一の基準座標系。(9:16)位置・サイズ・余白・行間は全てこの値への比率で表現する。
   // プレビューも書き出しも同じ Canvas(=この解像度) に描くため、画面幅に関係なく完全に一致する。
-  const W = 1080, H = 1920;         // 基準フレーム解像度（ここを変えれば出力解像度が変わる／レイアウトは比率維持）
+  const W = 1080, H = 1920;         // 基準フレーム解像度(ここを変えれば出力解像度が変わる／レイアウトは比率維持)
   const DURATION = 5, FPS = 30;
   const REVEAL_START = 0.5, REVEAL_DUR = 2.0;
   const FG_MAX_RATIO = 0.92, FG_ZOOM = 0.04, FG_CENTER_Y = 0.55;
   const DEFAULT_DETAIL = "作品の詳細は右上の：から説明";
 
-  // 旧来 1280px フレーム基準で決めた絶対px定数（余白・行間・縁取り下限など）を、
+  // 旧来 1280px フレーム基準で決めた絶対px定数(余白・行間・縁取り下限など)を、
   // 現在の基準フレーム高さに合わせて比率換算する。基準解像度を変えてもレイアウトが崩れない。
   const U = (v) => v * H / 1280;
 
-  // 構成全体（上部テキストブロック＋前景の漫画ページ）の縦位置オフセット。
-  // 基準フレーム高さに対する比率（0〜VOFF_MAX）。テキスト開始Yと前景中心Yに同じだけ加算するため、
-  // 両者の相対関係（中央揃え・行間）は崩れない。スライダーで微調整する。
-  const VOFF_DEFAULT = 0.02, VOFF_MAX = 0.05;   // 全体（文字＋帯＋漫画）を下へ
-  const ROW_MIN = -0.03, ROW_MAX = 0.03;        // 段別（文字・帯とも）上下双方向（＋下／−上）
-  const BANDPAD_MAX = 0.02;                      // 黒帯の余白（厚み）を追加できる上限（基準フレーム高さ比）
-  const ROWGAP_MAX = 0.04;                       // 段と段の追加スペース上限（基準フレーム高さ比）
-  const TSCALE_MIN = 0.7, TSCALE_MAX = 1.5;      // 大タイトルの拡大率（1.0＝従来。影・帯は文字サイズ比なので連動）
-  const IMG_MIN = -0.15, IMG_MAX = 0.15;         // 前景画像だけの上下オフセット（基準フレーム高さ比・文字とは独立）
+  // 構成全体(上部テキストブロック＋前景の漫画ページ)の縦位置オフセット。
+  // 基準フレーム高さに対する比率。(0〜VOFF_MAX)テキスト開始Yと前景中心Yに同じだけ加算するため、
+  // 両者の相対関係(中央揃え・行間)は崩れない。スライダーで微調整する。
+  const VOFF_DEFAULT = 0.02, VOFF_MAX = 0.05;   // 全体(文字＋帯＋漫画)を下へ
+  const ROW_MIN = -0.03, ROW_MAX = 0.03;        // 段別(文字・帯とも)上下双方向(＋下／−上)
+  const BANDPAD_MAX = 0.02;                      // 黒帯の余白(厚み)を追加できる上限(基準フレーム高さ比)
+  const ROWGAP_MAX = 0.04;                       // 段と段の追加スペース上限(基準フレーム高さ比)
+  const TSCALE_MIN = 0.7, TSCALE_MAX = 1.5;      // 大タイトルの拡大率(1.0＝従来。影・帯は文字サイズ比なので連動)
+  const IMG_MIN = -0.15, IMG_MAX = 0.15;         // 前景画像だけの上下オフセット(基準フレーム高さ比・文字とは独立)
 
-  // 縦オフセット（すべて基準フレーム高さ比）。段別は「文字」1軸のみ＝帯は文字に統合され一緒に動く。
-  // 段別オフセットはその段の描画位置にのみ加算し、段の送り（次段Y）には影響させない＝他段は不動。
+  // 縦オフセット。(すべて基準フレーム高さ比)段別は「文字」1軸のみ＝帯は文字に統合され一緒に動く。
+  // 段別オフセットはその段の描画位置にのみ加算し、段の送り(次段Y)には影響させない＝他段は不動。
   const OFF = {
     whole: VOFF_DEFAULT,
-    textAuthor: 0, textDetail: 0, textTitle: 0,  // 各段の位置（帯＋文字を一体で動かす）
-    bandPad: 0,                                  // 黒帯の余白（全段共通で厚みを足す）
+    textAuthor: 0, textDetail: 0, textTitle: 0,  // 各段の位置(帯＋文字を一体で動かす)
+    bandPad: 0,                                  // 黒帯の余白(全段共通で厚みを足す)
     rowGap: 0,                                   // 段と段の間に足す縦スペース
-    titleScale: 1,                               // 大タイトルの拡大率（1.0＝従来。影・帯は px 比で自動連動）
-    imgY: 0,                                      // 前景画像だけの上下オフセット（文字・帯は不動）
+    titleScale: 1,                               // 大タイトルの拡大率(1.0＝従来。影・帯は px 比で自動連動)
+    imgY: 0,                                      // 前景画像だけの上下オフセット(文字・帯は不動)
   };
 
   const $ = (id) => document.getElementById(id);
   const cv = $("cv"), ctx = cv.getContext("2d");
   const bg = $("bg");
 
-  // ---- アカウント定義（背景動画の切替。Bluesky/YouTube個別資格情報は保留＝acc1共有を流用）----
+  // ---- アカウント定義(背景動画の切替。Bluesky/YouTube個別資格情報は保留＝acc1共有を流用)----
   const ACCOUNTS = {
     acc1: { label: "月読み色恋劇場", bg: "assets/bg_main.mp4" },
-    acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え(継ぎ目21.2→27.0dB)。?vはキャッシュ更新用
+    acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え。(継ぎ目21.2→27.0dB)?vはキャッシュ更新用
   };
   let curAccount = "acc1";
 
-  // ---- アカウント別テンプレ・テーマ（派生プリセット）----
-  // 変えるのは「表示テキストと装飾色」のみ。レイアウト・座標・送り・生成フローは共通（§3座標規約は不変）。
-  // acc1＝従来値そのまま（見た目不変）。acc2＝桜ピンクの派生（温白文字＋桜グロー＋ダークプラム帯）。
+  // ---- アカウント別テンプレ・テーマ(派生プリセット)----
+  // 変えるのは「表示テキストと装飾色」のみ。レイアウト・座標・送り・生成フローは共通。(§3座標規約は不変)
+  // acc1＝従来値そのまま。(見た目不変)acc2＝桜ピンクの派生。(温白文字＋桜グロー＋ダークプラム帯)
   const THEME = {
     acc1: {
       authorPrefix: "作者：",
-      defaultDetail: DEFAULT_DETAIL,        // "作品の詳細は右上の：から説明"（：→⋮、説明→≡説明）
-      detailMenu: true,                     // 誘導文の「説明」前に ≡（ハンバーガー）を出す
-      textFill: "#F5E6B8",                  // 月光金（文字）
+      defaultDetail: DEFAULT_DETAIL,        // "作品の詳細は右上の：から説明"(：→⋮、説明→≡説明)
+      detailMenu: true,                     // 誘導文の「説明」前に ≡(ハンバーガー)を出す
+      textFill: "#F5E6B8",                  // 月光金(文字)
       stroke: "rgba(0,0,0,1)",              // soft時は未使用
       bandRGB: "46,64,104",                 // #2E4068 宵藍の帯
-      bandAlpha255: 204,                    // 不透明度80%（acc1のみ固定＝#2E4068CC相当）
-      soft: true,                           // 淡金のごく弱いグロー＋可読性用の暗い影（黒い太縁は使わない）
-      glowSoft: "rgba(245,230,184,0.15)",   // 淡金グロー（ほぼ無し・ぼかし6px相当）
-      darkShadow: "rgba(0,0,0,0.5)",        // 可読性用の暗い影（0 1px 2px 相当）
+      bandAlpha255: 204,                    // 不透明度80%(acc1のみ固定＝#2E4068CC相当)
+      soft: true,                           // 淡金のごく弱いグロー＋可読性用の暗い影(黒い太縁は使わない)
+      glowSoft: "rgba(245,230,184,0.15)",   // 淡金グロー(ほぼ無し・ぼかし6px相当)
+      darkShadow: "rgba(0,0,0,0.5)",        // 可読性用の暗い影(0 1px 2px 相当)
       iconFill: "#F5E6B8", iconHalo: "rgba(46,64,104,0.95)",  // アイコンも月光金＋宵藍で統一
     },
     acc2: {
       authorPrefix: "引用：",               // A：作者：→引用：
-      defaultDetail: "作品は右上の：から説明へ🌸",  // A：誘導文（：→⋮、≡なし、末尾🌸）
-      detailMenu: false,                    // acc2は ≡ を出さない（「⋮から説明へ🌸」）
-      textFill: "#FFF0F5",                  // C：温白（lavender blush）
-      stroke: "rgba(0,0,0,1)",              // glow時は未使用（黒縁は廃止）
-      bandRGB: "74,30,58",                  // D：#4A1E3A 葡萄色プラム（α＝既存0.69〜0.76を踏襲＝指定の0.7前後）
-      glow: true,                           // B：黒縁→桜ローズの発光影（にじみ・グロー）
-      glow1: "rgba(232,75,138,0.95)",       // #E84B8A 中心・小ぼかし（強）
+      defaultDetail: "作品は右上の：から説明へ🌸",  // A：誘導文(：→⋮、≡なし、末尾🌸)
+      detailMenu: false,                    // acc2は ≡ を出さない(「⋮から説明へ🌸」)
+      textFill: "#FFF0F5",                  // C：温白(lavender blush)
+      stroke: "rgba(0,0,0,1)",              // glow時は未使用(黒縁は廃止)
+      bandRGB: "74,30,58",                  // D：#4A1E3A 葡萄色プラム(α＝既存0.69〜0.76を踏襲＝指定の0.7前後)
+      glow: true,                           // B：黒縁→桜ローズの発光影(にじみ・グロー)
+      glow1: "rgba(232,75,138,0.95)",       // #E84B8A 中心・小ぼかし(強)
       glow2: "rgba(214,51,108,0.60)",       // #D6336C 中間・中ぼかし
       glow3: "rgba(214,51,108,0.40)",       // #D6336C 外側・大ぼかし
-      contour: "rgba(140,30,70,0.9)",       // 最内の細い同系濃色の輪郭（可読性確保・黒は使わない）
+      contour: "rgba(140,30,70,0.9)",       // 最内の細い同系濃色の輪郭(可読性確保・黒は使わない)
       iconFill: "#FFF0F5", iconHalo: "rgba(140,30,70,0.95)",  // アイコンも温白の芯＋同系濃色の輪郭で艶トーン統一
     },
   };
   const theme = () => THEME[curAccount] || THEME.acc1;
 
-  // 文字本体の描画（テーマ依存）。acc1＝黒縁＋白、acc2＝桜ピンク2層グロー＋温白の芯。
+  // 文字本体の描画。(テーマ依存)acc1＝黒縁＋白、acc2＝桜ピンク2層グロー＋温白の芯。
   function paintGlyph(ln, x, y, px, sw, shadowScale) {
     const t = theme();
-    var ss = shadowScale || 1;  // 影のスケール（大タイトル拡大に連動。既定=1）
+    var ss = shadowScale || 1;  // 影のスケール(大タイトル拡大に連動。既定=1)
     if (t.soft) {
-      // acc1：淡金のごく弱いグロー＋可読性用の暗い影（参考: 0 0 6px rgba(245,230,184,.15), 0 1px 2px rgba(0,0,0,.5)）。
-      // px固定値はU()で基準フレームへ換算（CSSの6/1/2px相当）。黒い太縁は使わない。
+      // acc1：淡金のごく弱いグロー＋可読性用の暗い影(参考: 0 0 6px rgba(245,230,184,.15), 0 1px 2px rgba(0,0,0,.5))。
+      // px固定値はU()で基準フレームへ換算。(CSSの6/1/2px相当)黒い太縁は使わない。
       ctx.save();
       ctx.fillStyle = t.textFill;
-      // 暗い影（0 1px 2px rgba(0,0,0,.5)）※大タイトル拡大時は同率で拡大
+      // 暗い影(0 1px 2px rgba(0,0,0,.5))※大タイトル拡大時は同率で拡大
       ctx.shadowColor = t.darkShadow; ctx.shadowBlur = U(2) * ss; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = U(1) * ss;
       ctx.fillText(ln, x, y);
-      // 淡金のグロー（0 0 6px rgba(245,230,184,.15)）※同率で拡大
+      // 淡金のグロー(0 0 6px rgba(245,230,184,.15))※同率で拡大
       ctx.shadowColor = t.glowSoft; ctx.shadowBlur = U(6) * ss; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
       ctx.fillText(ln, x, y);
       ctx.restore();
-      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // 影なしの芯（くっきり）
+      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // 影なしの芯(くっきり)
     } else if (t.glow) {
-      // 桜ローズの発光影（外→内の3層グロー）。ぼかし量は文字サイズ比（CSSの6/14/22px相当）。
+      // 桜ローズの発光影。(外→内の3層グロー)ぼかし量は文字サイズ比。(CSSの6/14/22px相当)
       ctx.save();
       ctx.fillStyle = t.textFill;
       ctx.shadowColor = t.glow3; ctx.shadowBlur = px * 0.55; ctx.fillText(ln, x, y);
@@ -111,7 +111,7 @@
       // 黒縁は使わず、最内に細い同系濃色の輪郭を1枚だけ重ねて滲みの中でも字形を保つ
       ctx.lineJoin = "round"; ctx.lineWidth = Math.max(1, sw * 0.9);
       ctx.strokeStyle = t.contour; ctx.strokeText(ln, x, y);
-      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // 温白の芯（影なし）
+      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);  // 温白の芯(影なし)
     } else {
       ctx.lineJoin = "round"; ctx.lineWidth = sw * 2;
       ctx.strokeStyle = t.stroke; ctx.strokeText(ln, x, y);
@@ -133,7 +133,7 @@
   let fontReady = false;
   let lastBlob = null, lastName = "video.mp4";
 
-  // ---- フォント読み込み（Canvas描画前に必須） ----
+  // ---- フォント読み込み(Canvas描画前に必須) ----
   function ensureFont() {
     if (fontReady) return Promise.resolve();
     const loads = [
@@ -146,7 +146,7 @@
   function setFont(px, weight) { ctx.font = `${weight || 700} ${px}px "Noto Sans JP", sans-serif`; }
   function smoothstep(x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }
 
-  // ---- テキスト：折り返し（文字単位） ----
+  // ---- テキスト：折り返し(文字単位) ----
   function wrap(text, px, maxw) {
     setFont(px, 700);
     const lines = [];
@@ -173,9 +173,9 @@
     ctx.closePath();
   }
 
-  // 通常テキストブロック（中央寄せ・帯・白文字＋黒縁）。
-  // 実際の字形インクの上端/下端（canvas座標）を返す。帯を「行ボックス」でなく「見えている文字」に
-  //   合わせて上下対称の余白で囲うために使う。drawY＝テキスト描画Y（baselineは呼び出し側の設定に一致）。
+  // 通常テキストブロック。(中央寄せ・帯・白文字＋黒縁)
+  // 実際の字形インクの上端/下端(canvas座標)を返す。帯を「行ボックス」でなく「見えている文字」に
+  //   合わせて上下対称の余白で囲うために使う。drawY＝テキスト描画Y。(baselineは呼び出し側の設定に一致)
   //   actualBoundingBox が使えない/退化時はフォント比の近似にフォールバック。
   function inkExtent(sampleText, drawY, px) {
     const m = ctx.measureText(sampleText);
@@ -186,8 +186,8 @@
     return { top: drawY + px * 0.06, bot: drawY + px * 0.94 };
   }
 
-  // off＝この段の縦オフセット比。帯と文字を一体で動かす（帯は常に文字を包む＝各段に統合）。
-  //   送りy（次段位置）には反映しない＝この段を動かしても他段は不動。
+  // off＝この段の縦オフセット比。帯と文字を一体で動かす。(帯は常に文字を包む＝各段に統合)
+  //   送りy(次段位置)には反映しない＝この段を動かしても他段は不動。
   //   帯は「行ボックス」ではなく実際の字形インクに対称な余白(vpad)で囲う＝文字の上下と帯の余白が等しい。
   function drawBlock(lines, y, px, pad, gap, bandAlpha, off, shadowScale) {
     setFont(px, 700);
@@ -207,7 +207,7 @@
       roundRect(x - pad - mB, ie.top - vpad, tw + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5);
       ctx.fill();
       paintGlyph(ln, x, drawY, px, sw, shadowScale);
-      y += th + pad + gap;  // 送りは基準位置のまま（オフセットの影響を受けない＝他段に波及しない）
+      y += th + pad + gap;  // 送りは基準位置のまま(オフセットの影響を受けない＝他段に波及しない)
     }
     return y;
   }
@@ -234,8 +234,8 @@
     for (const dy of [-sp, 0, sp]) hbar(xl, ym + dy, w, t, halo);
   }
 
-  // 2段目（誘導文）：「：」→⋮、「説明」→≡説明 をインライン描画。
-  // off＝この段の縦オフセット比。帯と文字（アイコン含む）を一体で動かす。
+  // 2段目(誘導文)：「：」→⋮、「説明」→≡説明 をインライン描画。
+  // off＝この段の縦オフセット比。帯と文字(アイコン含む)を一体で動かす。
   function drawDetail(text, y, px, pad, off) {
     setFont(px, 700);
     ctx.textBaseline = "middle";
@@ -254,7 +254,7 @@
     let x = (W - total) / 2;
     const mB = sw;  // 縁取り分だけ帯を広げる
     const vpad = pad * 0.45 + mB;                 // 文字インクの上下に付ける対称な余白
-    const ie = inkExtent(s, ym, px);              // baseline "middle" のまま実インクを計測（ymはオフセット込み）
+    const ie = inkExtent(s, ym, px);              // baseline "middle" のまま実インクを計測(ymはオフセット込み)
     const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : 175;  // テーマで固定不透明度があれば優先
     ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
     roundRect(x - pad - mB, ie.top - vpad, total + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5); ctx.fill();
@@ -279,8 +279,8 @@
     if (w > maxw && w > 0) px = Math.max(minPx || 14, Math.floor(basePx * (maxw / w) * 0.98));
     return { px, text };
   }
-  // 3段目コメントの「2行モード」：★ユーザーの改行(\n)で分割（1行目=改行前 / 2行目=改行後）。
-  //   改行が無ければ1行。各行が幅に収まる最大フォントを求める（広い行に合わせて縮小）。
+  // 3段目コメントの「2行モード」：★ユーザーの改行(\n)で分割。(1行目=改行前 / 2行目=改行後)
+  //   改行が無ければ1行。各行が幅に収まる最大フォントを求める。(広い行に合わせて縮小)
   function fitTwoLines(text, basePx, maxw, minPx) {
     var parts = String(text).split("\n");
     var lines = [(parts[0] || "").trim()];
@@ -293,17 +293,17 @@
     return { px: px, lines: lines.length ? lines : [""] };
   }
   // 2行モードの大タイトル：帯は「両行をひとまとめに囲う1枚」。影の位置分離はせず、帯と文字は同じ
-  //   blockOff（＝文字オフセット）で一緒に動く＝拡大/移動しても影が同量ずれる。文字は帯の中央に来る。
+  //   blockOff(＝文字オフセット)で一緒に動く＝拡大/移動しても影が同量ずれる。文字は帯の中央に来る。
   function drawTitleBlockUnified(lines, y, px, pad, gap, shadowScale, blockOff, bandAlpha) {
     setFont(px, 700);
     ctx.textBaseline = "top";
     const sw = Math.max(U(2), px / 12);
     const th = px * 1.04, mB = sw;
-    const offY = H * (blockOff || 0);       // 帯・文字を一緒に動かす（分離しない）
+    const offY = H * (blockOff || 0);       // 帯・文字を一緒に動かす(分離しない)
     let maxTw = 0;
     for (let i = 0; i < lines.length; i++) { const tw = ctx.measureText(lines[i]).width; if (tw > maxTw) maxTw = tw; }
     const blockH = lines.length * th + (lines.length - 1) * gap;
-    // 帯は「行ボックス」でなく実際の字形インク（1行目の上端〜最終行の下端）を上下対称の余白(vpad)で囲う
+    // 帯は「行ボックス」でなく実際の字形インク(1行目の上端〜最終行の下端)を上下対称の余白(vpad)で囲う
     //   ＝文字の上下と帯の余白が等しくなる。
     const line1Y = y + offY, lineNY = y + offY + (lines.length - 1) * (th + gap);
     const ie1 = inkExtent(lines[0], line1Y, px), ieN = inkExtent(lines[lines.length - 1], lineNY, px);
@@ -320,22 +320,22 @@
     }
     return y + blockH + pad;
   }
-  // 3段目コメントを「2行モード」で描くか（④コメント横のチェックボックス）。
+  // 3段目コメントを「2行モード」で描くか。(④コメント横のチェックボックス)
   function isTwoLineMode() { var c = document.getElementById("topTwoLine"); return !!(c && c.checked); }
-  // ①作者も「2行モード」で描くか（作者欄横のチェックボックス。コメントと同仕様）。
+  // ①作者も「2行モード」で描くか。(作者欄横のチェックボックス。コメントと同仕様)
   function isAuthorTwoLineMode() { var c = document.getElementById("authorTwoLine"); return !!(c && c.checked); }
 
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
     const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048);
-    const padExtra = H * OFF.bandPad;   // 黒帯の余白（厚み）を全段に加算
+    const padExtra = H * OFF.bandPad;   // 黒帯の余白(厚み)を全段に加算
     const rowGap = H * OFF.rowGap;      // 段と段の間に足す縦スペース
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
     if (author) {
       author = author.replace(/^(作者|引用)\s*[:：]\s*/, "");      // 既存プレフィックスを一旦除去
-      author = theme().authorPrefix + author;                      // テーマのプレフィックスを常に表示（acc1=作者：/acc2=引用：）
+      author = theme().authorPrefix + author;                      // テーマのプレフィックスを常に表示(acc1=作者：/acc2=引用：)
       if (isAuthorTwoLineMode()) {
-        // 作者も2行モード（コメントと同仕様）：ユーザーの改行(\n)で最大2行・中央揃え・帯は両行を1枚で囲う。
+        // 作者も2行モード(コメントと同仕様)：ユーザーの改行(\n)で最大2行・中央揃え・帯は両行を1枚で囲う。
         var fa2 = fitTwoLines(author, fA, maxw, U(11));
         y = drawTitleBlockUnified(fa2.lines, y, fa2.px, U(11) + padExtra, U(3), 1, OFF.textAuthor, 175) + U(2) + rowGap;
       } else {
@@ -345,7 +345,7 @@
     if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.textDetail) + U(4) + rowGap;
     if (top) {
       // まず幅に収まる基準サイズを求め、その上に「大タイトル拡大」を掛ける＝拡大が幅上限で打ち消されない。
-      // 影も同じ倍率(ss)で拡大（drawBlock→paintGlyphへ伝播）。
+      // 影も同じ倍率(ss)で拡大。(drawBlock→paintGlyphへ伝播)
       var tScale = OFF.titleScale || 1;
       if (isTwoLineMode()) {
         // 2行モード：最大2行・中央揃え。帯は両行を1枚で囲い、帯と文字は同じオフセット(textTitle)で一緒に動く。
@@ -363,14 +363,14 @@
   // ---- 1フレーム描画 ----
   function drawFrame(t) {
     ctx.clearRect(0, 0, W, H);
-    // 背景（9:16をそのまま）
+    // 背景(9:16をそのまま)
     if (bg.readyState >= 2) {
       const vw = bg.videoWidth, vh = bg.videoHeight, tar = W / H, cur = vw / vh;
       let sx = 0, sy = 0, sw = vw, sh = vh;
       if (cur > tar) { sw = vh * tar; sx = (vw - sw) / 2; } else { sh = vw / tar; sy = (vh - sh) / 2; }
       ctx.drawImage(bg, sx, sy, sw, sh, 0, 0, W, H);
     } else { ctx.fillStyle = "#28424a"; ctx.fillRect(0, 0, W, H); }
-    // 前景（フェードイン＋微ズーム）
+    // 前景(フェードイン＋微ズーム)
     if (fgImg) {
       const a = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : smoothstep((t - REVEAL_START) / REVEAL_DUR));
       if (a > 0) {
@@ -386,7 +386,7 @@
     drawText(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, titleForDraw(els.top.value));
   }
 
-  // ---- プレビュー（完全表示状態の1枚） ----
+  // ---- プレビュー(完全表示状態の1枚) ----
   async function preview() {
     await ensureFont();
     if (bg.readyState < 2) { try { await bg.play(); } catch (e) {} }
@@ -394,7 +394,7 @@
   }
 
   // ---- 画像選択 ----
-  // 表示専用の匿名化（実ファイル名の代わりにランダムな英数字）。アップロード/投稿には一切関与しない。
+  // 表示専用の匿名化。(実ファイル名の代わりにランダムな英数字)アップロード/投稿には一切関与しない。
   function anonPhotoLabel_(file) {
     const ext = (file && file.name && /\.[0-9a-z]{1,5}$/i.test(file.name)) ? file.name.slice(file.name.lastIndexOf(".")) : ".jpg";
     const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -409,12 +409,12 @@
     const url = URL.createObjectURL(f);
     const img = new Image();
     img.onload = () => { fgImg = img; preview(); };
-    img.onerror = () => { setStatus("画像を読み込めませんでした（形式をご確認ください）"); };
+    img.onerror = () => { setStatus("画像を読み込めませんでした(形式をご確認ください)"); };
     img.src = url;
   });
 
   els.previewBtn.addEventListener("click", preview);
-  // テキストは入力確定（フォーカスアウト/Enter）で反映＝IMEを妨げない
+  // テキストは入力確定(フォーカスアウト/Enter)で反映＝IMEを妨げない
   for (const el of [els.author, els.detail, els.top]) {
     el.addEventListener("change", preview);
     el.addEventListener("blur", preview);
@@ -431,10 +431,10 @@
       preview();
     });
   }
-  // ④コメントは textarea 化＝入力中(改行含む)も即プレビュー反映（2行モードの改行が2行目に出るのを確認しやすく）。
+  // ④コメントは textarea 化＝入力中(改行含む)も即プレビュー反映。(2行モードの改行が2行目に出るのを確認しやすく)
   els.top.addEventListener("input", preview);
 
-  // ①作者の「2行モード」チェックボックス（コメントと同仕様）：保存値を復元し、切替でプレビュー再描画。
+  // ①作者の「2行モード」チェックボックス(コメントと同仕様)：保存値を復元し、切替でプレビュー再描画。
   const authorTwoLineEl = document.getElementById("authorTwoLine");
   if (authorTwoLineEl) {
     try { authorTwoLineEl.checked = localStorage.getItem("movie_author_two_line") === "1"; } catch (e) {}
@@ -454,12 +454,12 @@
     t = (t || "").trim().replace(/[\\/:*?"<>|\r\n\t]/g, "").replace(/^\.+|\.+$/g, "");
     return (t.slice(0, 60) || "video");
   }
-  // 保存ファイル名用：定型投稿タグを非表示にし、★改行は無視して連続した文字列にする（2行モードでも1つの名前に）。
+  // 保存ファイル名用：定型投稿タグを非表示にし、★改行は無視して連続した文字列にする。(2行モードでも1つの名前に)
   function titleForBurn(s) {
     var t = String(s == null ? "" : s).replace(/\n+/g, "").trim();
     return (typeof Go5Util !== "undefined" && Go5Util.stripPostTags) ? Go5Util.stripPostTags(t) : t;
   }
-  // 動画へ焼く描画用：定型投稿タグを除去しつつ改行(\n)は保持（2行モードの行分割に使う）。
+  // 動画へ焼く描画用：定型投稿タグを除去しつつ改行(\n)は保持。(2行モードの行分割に使う)
   function titleForDraw(s) {
     var t = String(s == null ? "" : s);
     if (typeof Go5Util !== "undefined" && Go5Util.stripPostTags) {
@@ -476,11 +476,11 @@
   // ---- 動画作成 ----
   async function make() {
     if (!fgImg) { setStatus("先に写真を選んでください。"); return; }
-    if (!window.MediaRecorder) { setStatus("この端末は動画書き出しに未対応です（iOS15以降のSafari推奨）。"); return; }
+    if (!window.MediaRecorder) { setStatus("この端末は動画書き出しに未対応です。(iOS15以降のSafari推奨)"); return; }
     await ensureFont();
     els.makeBtn.disabled = true;
     els.resultArea.hidden = true;
-    setStatus("動画を作成中…（約5秒録画します。画面はそのままで）");
+    setStatus("動画を作成中…(約5秒録画します。画面はそのままで)");
 
     try {
       bg.currentTime = 0;
@@ -515,13 +515,13 @@
       els.result.src = url;
       els.dl.href = url; els.dl.download = lastName;
       els.resultArea.hidden = false;
-      setStatus("✅ 完成しました：" + lastName + (ext === "webm" ? "（この端末ではwebm形式）" : ""));
+      setStatus("✅ 完成しました：" + lastName + (ext === "webm" ? "(この端末ではwebm形式)" : ""));
       els.resultArea.scrollIntoView({ behavior: "smooth" });
-      // 完成を通知（Bluesky自動投稿などが購読）。この時点で Canvas は最終フレームを保持している。
-      // 一本道運用の背骨＝安定動画IDを“作成時（投稿前）”に発番し、購読側（Drive保存・記録）へ串刺しで渡す。
+      // 完成を通知。(Bluesky自動投稿などが購読)この時点で Canvas は最終フレームを保持している。
+      // 一本道運用の背骨＝安定動画IDを“作成時(投稿前)”に発番し、購読側(Drive保存・記録)へ串刺しで渡す。
       var account = (typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "acc1";
       var testEl = document.getElementById("testMode");
-      var isTest = !!(testEl && testEl.checked);   // テストモード＝記録しない（IDに test- 接頭辞）
+      var isTest = !!(testEl && testEl.checked);   // テストモード＝記録しない(IDに test- 接頭辞)
       var videoId = (window.IdGen && window.IdGen.makeVideoId) ? window.IdGen.makeVideoId(account, new Date(), { test: isTest }) : "";
       document.dispatchEvent(new CustomEvent("video-created", { detail: { title: els.top.value.trim(), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest } }));
     } catch (e) {
@@ -544,15 +544,15 @@
     els.dl.click();
   });
 
-  // ---- 設定の保存・復元（localStorage 汎用ヘルパ：アフィID等 将来の設定値もこれで保存できる） ----
+  // ---- 設定の保存・復元(localStorage 汎用ヘルパ：アフィID等 将来の設定値もこれで保存できる) ----
   const Store = {
     getNum(key) { try { const v = localStorage.getItem(key); const n = v === null ? NaN : parseFloat(v); return isNaN(n) ? null : n; } catch (e) { return null; } },
     set(key, val) { try { localStorage.setItem(key, String(val)); } catch (e) {} },
     remove(key) { try { localStorage.removeItem(key); } catch (e) {} },
   };
 
-  // ---- 位置調整（＋/−ボタン式・プレビュー横）。各コントロールは独立。----
-  // 値は基準フレーム高さ比、localStorage に保存・自動復元。legacy は旧バージョンの保存キー（移行用）。
+  // ---- 位置調整。(＋/−ボタン式・プレビュー横)各コントロールは独立。----
+  // 値は基準フレーム高さ比、localStorage に保存・自動復元。legacy は旧バージョンの保存キー。(移行用)
   function flashBtn(btn, msg) {
     if (!btn) return;
     if (!btn.dataset.label) btn.dataset.label = btn.textContent;
@@ -587,13 +587,13 @@
     if (redraw) preview();
   }
 
-  // ---- レイアウト設定をアカウント別に（Task 8d）----
+  // ---- レイアウト設定をアカウント別に(Task 8d)----
   // 位置調整値は preview_*__acc1 / preview_*__acc2 に保存し、アカウントごとに独立。
-  // 旧来の共通キー（preview_*）は一度だけ両アカウントへ複製して引き継ぐ（移行・冪等）。
+  // 旧来の共通キー(preview_*)は一度だけ両アカウントへ複製して引き継ぐ。(移行・冪等)
   function lsk(base) { return base + "__" + curAccount; }
   (function migrateLayoutOnce() {
     try { if (localStorage.getItem("layout_acct_split_migrated") === "1") return; } catch (e) { return; }
-    // 旧共通値（無ければ旧バージョンキー）を両アカウントの現在値へ、旧共通既定値を両既定値へ複製。
+    // 旧共通値(無ければ旧バージョンキー)を両アカウントの現在値へ、旧共通既定値を両既定値へ複製。
     ["acc1", "acc2"].forEach((a) => {
       CONTROLS.forEach((c) => {
         const curKey = c.ls + "__" + a, defKey = c.lsDef + "__" + a;
@@ -604,7 +604,7 @@
         if (Store.getNum(defKey) == null && defOld != null) Store.set(defKey, defOld);
       });
     });
-    // 旧共通キー・旧バージョンキーは退役（per-account リセット後に値が蘇らないように）。
+    // 旧共通キー・旧バージョンキーは退役。(per-account リセット後に値が蘇らないように)
     CONTROLS.forEach((c) => { Store.remove(c.ls); Store.remove(c.lsDef); if (c.legacy) Store.remove(c.legacy); });
     try { localStorage.setItem("layout_acct_split_migrated", "1"); } catch (e) {}
   })();
@@ -627,7 +627,7 @@
     if (mb) mb.addEventListener("click", () => { applyC(c, OFF[c.key] - c.step, true); Store.set(lsk(c.ls), OFF[c.key]); });
     if (pb) pb.addEventListener("click", () => { applyC(c, OFF[c.key] + c.step, true); Store.set(lsk(c.ls), OFF[c.key]); });
   });
-  loadOffsets(false); // 起動時の初期復元（このあとの setAccount でも再読込される）
+  loadOffsets(false); // 起動時の初期復元(このあとの setAccount でも再読込される)
 
   // 「既定値に保存」：現アカウントの全コントロール現在値を既定値として確定
   if (els.voffSaveDefault) els.voffSaveDefault.addEventListener("click", () => {
@@ -635,7 +635,7 @@
     flashBtn(els.voffSaveDefault, "✓ 既定値に保存しました");
   });
 
-  // 「リセット」：現アカウントの保存値だけ消し、工場既定に戻す（他アカウントには影響しない）
+  // 「リセット」：現アカウントの保存値だけ消し、工場既定に戻す(他アカウントには影響しない)
   if (els.voffReset) els.voffReset.addEventListener("click", () => {
     CONTROLS.forEach((c) => { Store.remove(lsk(c.ls)); Store.remove(lsk(c.lsDef)); });
     CONTROLS.forEach((c, i) => applyC(c, c.def, i === CONTROLS.length - 1));  // 最後の1回だけ再描画
@@ -647,7 +647,7 @@
     if (!ACCOUNTS[id]) id = "acc1";
     curAccount = id;
     try { localStorage.setItem("current_account", id); } catch (e) {}
-    // 誘導文が未編集（空 or いずれかのテーマ既定文）なら、当該テーマの既定文へ追従。ユーザーが書き換えた文面は尊重して残す。
+    // 誘導文が未編集(空 or いずれかのテーマ既定文)なら、当該テーマの既定文へ追従。ユーザーが書き換えた文面は尊重して残す。
     if (els.detail) {
       const known = Object.keys(THEME).map((k) => THEME[k].defaultDetail).concat([DEFAULT_DETAIL]);
       const cur = els.detail.value.trim();
@@ -665,9 +665,9 @@
   }
   window.getCurrentAccount = () => curAccount;
 
-  // 下書き機能（drafts.js）向け：Fileを #photo の実際のFileListにセットし、通常の写真選択と
-  // 同じ経路（changeイベント）で反映する。こうすることで、以後のBluesky添付/Drive保存等が
-  // 参照する photo.files[0] も正しく更新される（プレビューだけを書き換えるより確実）。
+  // 下書き機能(drafts.js)向け：Fileを #photo の実際のFileListにセットし、通常の写真選択と
+  // 同じ経路(changeイベント)で反映する。こうすることで、以後のBluesky添付/Drive保存等が
+  // 参照する photo.files[0] も正しく更新される。(プレビューだけを書き換えるより確実)
   window.Go5SetForegroundFile = (file) => {
     if (!file || !els.photo) return false;
     try {
@@ -682,8 +682,8 @@
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
   ensureFont().then(preview);
-  // フォント確定後にもう一度描画（初回がフォールバックフォントの計測で描かれてしまうのを防ぐ＝
-  // プレビューと書き出しで measureText 由来の自動縮小・折返しがズレないようにする保険）。
+  // フォント確定後にもう一度描画(初回がフォールバックフォントの計測で描かれてしまうのを防ぐ＝
+  // プレビューと書き出しで measureText 由来の自動縮小・折返しがズレないようにする保険)。
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => { fontReady = true; preview(); });
   }

@@ -1,10 +1,10 @@
 /**
- * core/idb-store.js — IndexedDB の小さなKVストア（Go5Idb）。
+ * core/idb-store.js — IndexedDB の小さなKVストア。(Go5Idb)
  *
- * 目的：候補の保存画像（dataURL・大きい）を localStorage（iOS Safariは1サイト約5MB固定）から
- *   IndexedDB（容量は端末の空きに応じて数百MB〜）へ逃がし、「保存容量が不足」で保存できない問題を解く。
+ * 目的：候補の保存画像(dataURL・大きい)を localStorage(iOS Safariは1サイト約5MB固定)から
+ *   IndexedDB(容量は端末の空きに応じて数百MB〜)へ逃がし、「保存容量が不足」で保存できない問題を解く。
  *
- * 単一DB `go5store`・単一オブジェクトストア `kv`（キー=文字列・値=任意）。Promiseベース。
+ * 単一DB `go5store`・単一オブジェクトストア `kv`。(キー=文字列・値=任意)Promiseベース。
  * 非対応/オープン失敗時は available() が false になり、呼び出し側が localStorage へフォールバックする。
  */
 (function (root) {
@@ -30,7 +30,7 @@
     return _dbP;
   }
 
-  // トランザクション1つで fn(store) を実行し、oncomplete で解決（get は req.result を返す）。
+  // トランザクション1つで fn(store) を実行し、oncomplete で解決。(get は req.result を返す)
   function withStore(mode, fn) {
     return open().then(function (db) {
       return new Promise(function (resolve, reject) {
@@ -49,7 +49,7 @@
   function set(key, val) { return withStore("readwrite", function (st) { return st.put(val, key); }); }
   function del(key) { return withStore("readwrite", function (st) { return st.delete(key); }); }
 
-  // 全エントリを {key: value} で返す（起動時のハイドレート用）。
+  // 全エントリを {key: value} で返す。(起動時のハイドレート用)
   function entries() {
     return open().then(function (db) {
       return new Promise(function (resolve, reject) {

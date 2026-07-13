@@ -1,9 +1,9 @@
 /**
- * scheduler.js — 予約投稿（Phase3：client-side「開いている間」スケジューラ＋通知）
+ * scheduler.js — 予約投稿(Phase3：client-side「開いている間」スケジューラ＋通知)
  * - reserve() で {slotId,text,imageBlob,scheduledAtMs,alt,handle,appPw,account} をキューへ
  * - 30秒ごとに tick：期限到来(pending かつ scheduledAtMs<=now)の予約を自動投稿
  * - update(id,newMs)：予約時刻変更 / postNow(id)：今すぐ投稿 / cancel(id)：取消
- * - renderTab()：⏰予約タブ（両アカウント一覧）を再描画
+ * - renderTab()：⏰予約タブ(両アカウント一覧)を再描画
  * 制約：画像Blob等は in-memory。ページを閉じる/再読込すると未投稿の予約は消える。
  * dueItems は純粋関数として Node からもテスト可能に公開。
  */
@@ -52,8 +52,8 @@
             affiliate: (it.text.match(firstUrlRe) || [''])[0],
             posted_at: new Date().toISOString(), slotId: it.slotId || null,
             title: it.alt || (String(it.text).split('\n')[0] || ''),
-            account: it.account || null,   // ★予約時に凍結した所属アカウント（発火時のUIに依存しない）
-            meta: it.meta || null          // ★予約時に凍結した投稿メタ（作品URL/カテゴリ/作品状態/当時価格）
+            account: it.account || null,   // ★予約時に凍結した所属アカウント(発火時のUIに依存しない)
+            meta: it.meta || null          // ★予約時に凍結した投稿メタ(作品URL/カテゴリ/作品状態/当時価格)
           } }));
         } catch (e) {}
       }).catch(function (e) {
@@ -86,14 +86,14 @@
       if (it && it.status === 'pending') fire(it);
     }
 
-    // ---- 投稿タブ内の予約リスト（#reserveList） ----
+    // ---- 投稿タブ内の予約リスト(#reserveList) ----
     function renderList() {
       var el = document.getElementById('reserveList');
       if (!el) return;
       var pend = queue.filter(function (it) { return it.status === 'pending' && it.scheduledAtMs > Date.now(); }); // 予約時刻を過ぎたら表示から消す
       if (!pend.length) { el.hidden = true; el.innerHTML = ''; return; }
       el.hidden = false;
-      el.innerHTML = '<div class="rsv-title">⏰ 予約中（このタブを開いている間に自動投稿）</div>' +
+      el.innerHTML = '<div class="rsv-title">⏰ 予約中(このタブを開いている間に自動投稿)</div>' +
         pend.map(function (it) {
           return '<div class="rsv-row"><span class="rsv-when">' + fmt(it.scheduledAtMs) + '</span>' +
             '<span class="rsv-text">' + esc((it.text || '').split('\n')[0].slice(0, 26)) + '</span>' +
@@ -104,7 +104,7 @@
       });
     }
 
-    // ---- 予約タブ（#pageReserve）：両アカウント一覧 ----
+    // ---- 予約タブ(#pageReserve)：両アカウント一覧 ----
     function showTimeDlg(item) {
       var dlg = document.getElementById('rsvTimeDlg');
       var picker = document.getElementById('rsvTimePicker');
@@ -134,13 +134,13 @@
       var el = document.getElementById('pageReserve');
       if (!el) return;
       var pend = queue.filter(function (it) { return it.status === 'pending' && it.scheduledAtMs > Date.now(); }); // 予約時刻を過ぎたら表示から消す
-      // 予約時刻の早い順。同時刻は acc1（月詠み）が先
+      // 予約時刻の早い順。同時刻は acc1(月詠み)が先
       pend.sort(function (a, b) {
         if (a.scheduledAtMs !== b.scheduledAtMs) return a.scheduledAtMs - b.scheduledAtMs;
         var ord = { acc1: 0, acc2: 1 };
         return (ord[a.account] !== undefined ? ord[a.account] : 9) - (ord[b.account] !== undefined ? ord[b.account] : 9);
       });
-      // YouTube 公開待ち（投稿履歴のYouTube URLのうち、まだ公開されていない＝非公開/予約公開中の作品）。
+      // YouTube 公開待ち。(投稿履歴のYouTube URLのうち、まだ公開されていない＝非公開/予約公開中の作品)
       var ytList = (global.YtSchedule && global.YtSchedule.list) ? (global.YtSchedule.list() || []) : [];
       ytList.sort(function (a, b) {
         var pa = a.publishAt || Infinity, pb = b.publishAt || Infinity; // 公開予定時刻の早い順、時刻不明は後ろ
@@ -157,8 +157,8 @@
       // ① YouTube 公開待ち
       if (ytList.length) {
         html += '<div class="card">' +
-          '<div class="field-label" style="margin-bottom:4px;">🎬 YouTube 公開待ち（非公開/予約公開）</div>' +
-          '<div class="hint" style="margin-bottom:12px;">投稿履歴のYouTube URLのうち、まだ公開されていない作品です（投稿履歴を更新すると最新化・公開されると自動で消えます）。予約公開の正確な時刻はYouTube側の仕様で取得できないため「公開待ち」と表示します。</div>' +
+          '<div class="field-label" style="margin-bottom:4px;">🎬 YouTube 公開待ち(非公開/予約公開)</div>' +
+          '<div class="hint" style="margin-bottom:12px;">投稿履歴のYouTube URLのうち、まだ公開されていない作品です。(投稿履歴を更新すると最新化・公開されると自動で消えます)予約公開の正確な時刻はYouTube側の仕様で取得できないため「公開待ち」と表示します。</div>' +
           ytList.map(function (y) {
             var label = y.account === 'acc2' ? '宵桜艶帖' : '月詠み';
             var cls = y.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
@@ -174,7 +174,7 @@
       }
       // ② Bluesky 予約投稿
       html += '<div class="card">' +
-        '<div class="field-label" style="margin-bottom:8px;">⏰ 予約済み投稿一覧（Bluesky）</div>' +
+        '<div class="field-label" style="margin-bottom:8px;">⏰ 予約済み投稿一覧(Bluesky)</div>' +
         (pend.length ? pend.map(function (it) {
           var label = it.account === 'acc2' ? '宵桜艶帖' : '月詠み';
           var cls = it.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
@@ -213,7 +213,7 @@
 
     function renderAll() { renderList(); renderTab(); }
 
-    // 初期描画（予約なし状態）
+    // 初期描画(予約なし状態)
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', renderTab);
     else renderTab();
 

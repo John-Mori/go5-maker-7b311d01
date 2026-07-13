@@ -1,5 +1,5 @@
 /**
- * integration.js — スケジュール(📅カレンダー iframe) と 本体(動画作成/投稿) の橋渡し（Phase2 一気通貫）
+ * integration.js — スケジュール(📅カレンダー iframe) と 本体(動画作成/投稿) の橋渡し(Phase2 一気通貫)
  * - iframe からの「🎬作る / 🦋投稿」メッセージ → 該当タブへ切替＋対象スロットを表示
  * - 投稿成功イベント(bluesky-posted) → iframe のスロットへ status/URL を書き戻し
  * 同一オリジン前提。スロットの正本は iframe 側(localStorage 共有)に置き、本体は文脈表示と書き戻しのみ行う。
@@ -60,7 +60,7 @@
     if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'recompute' }, '*');
   });
 
-  // 予約作成（枠から）→ カレンダー枠を「予約登録済」に書き戻し（双方向連携）
+  // 予約作成(枠から)→ カレンダー枠を「予約登録済」に書き戻し(双方向連携)
   document.addEventListener('bluesky-reserved', function (e) {
     var d = (e && e.detail) || {}; if (!d.slotId) return;
     var f = $('calFrame');
@@ -73,7 +73,7 @@
     if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'slot-writeback', id: d.slotId, status: '制作済・未予約' }, '*');
   });
 
-  // 投稿成功（即時/単独/予約）→ iframe のスロットへ書き戻し
+  // 投稿成功(即時/単独/予約)→ iframe のスロットへ書き戻し
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
     var slotId = d.slotId || (activeSlot && activeSlot.id);  // 予約はdetail.slotId、手動はactiveSlot

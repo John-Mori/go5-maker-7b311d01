@@ -3,7 +3,7 @@
  *
  * 「業務上意味のある操作」だけを D1(go5_kaizen) へ送る軽量ロガー。
  *   ・送信はバッチ(30秒ごと or 20件たまったら or タブ離脱時)＝リクエスト数を増やさない
- *   ・失敗は静かに諦める(本業を絶対に邪魔しない)。キュー上限100で古いものから捨てる
+ *   ・失敗は静かに諦める。(本業を絶対に邪魔しない)キュー上限100で古いものから捨てる
  *   ・秘密/個人情報は送らない(screen/action/objectId=cid等/小さなmetaのみ)
  *   ・無効化: localStorage kaizen_log_off = '1'
  *
@@ -78,7 +78,7 @@
     var _loadedAt = Date.now();
     root.document.addEventListener("account-changed", function () {
       // ページ読み込み直後のaccount-changedは初期化イベント(実際の切替操作ではない)なので記録しない。
-      //   記録粒度規約: 「意味のある操作」だけを残す(orchestration.md)。
+      //   記録粒度規約: 「意味のある操作」だけを残す。(orchestration.md)
       if (Date.now() - _loadedAt < 5000) return;
       log("app", "account_switched", "", "", null);
     });

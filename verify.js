@@ -2,7 +2,7 @@
  * verify.js — Phase4 Bluesky検証ダッシュボードのUI配線。
  * 共有ストア(sch_state_v1)の「公開済」投稿を一覧し、Bluesky公開APIで いいね/リポスト/返信 を取得。
  * Bitlyクリック(slot.click_count)＋FANZA成約(手入力・localStorage)を併記し day-type 別に集計。
- * 注意：クリック実数はFANZA管理画面が正（ここは到達/反応の代理指標）。
+ * 注意：クリック実数はFANZA管理画面が正。(ここは到達/反応の代理指標)
  */
 (function () {
   'use strict';

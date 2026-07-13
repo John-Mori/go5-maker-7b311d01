@@ -1,9 +1,9 @@
 /**
  * secret-reveal.js — 秘密入力欄(●●で隠れる値)に「👁 表示/🙈 隠す」トグルを付ける。
  *
- * 対象：type="password" の全入力＋ data-secret を付けた入力（APIキー/トークン等）。
- *   ・既定はマスク(password)。👁 で一時的に平文表示、🙈 で再マスク。値は console に出さない。
- *   ・入力を .secret-wrap で包み、右端に目のボタンを重ねる（見た目は style.css）。
+ * 対象：type="password" の全入力＋ data-secret を付けた入力。(APIキー/トークン等)
+ *   ・既定はマスク。(password)👁 で一時的に平文表示、🙈 で再マスク。値は console に出さない。
+ *   ・入力を .secret-wrap で包み、右端に目のボタンを重ねる。(見た目は style.css)
  *   ・動的に増える欄にも対応するため、詳細設定タブを開いた時にも再スキャンする。
  */
 (function () {

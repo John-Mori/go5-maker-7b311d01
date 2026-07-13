@@ -1,16 +1,16 @@
 /**
  * affiliate.js
  * FANZAアフィリエイトリンク生成画面のUI配線
- * - アフィID永続化（localStorage: fanza_af_id）
- * - リアルタイム生成（input イベント）
- * - コピー（clipboard API + execCommand フォールバック）
- * - タブ切替（#tabMovie / #tabAffi）
+ * - アフィID永続化(localStorage: fanza_af_id)
+ * - リアルタイム生成(input イベント)
+ * - コピー(clipboard API + execCommand フォールバック)
+ * - タブ切替(#tabMovie / #tabAffi)
  */
 
 (function () {
   'use strict';
 
-  /* ── タブ切替（動画作成／カレンダー／投稿／アフィリンク／検証の5タブ） ── */
+  /* ── タブ切替(動画作成／カレンダー／投稿／アフィリンク／検証の5タブ) ── */
   var TABS = [
     { btn: 'tabRank',    page: 'pageRank'    },
     { btn: 'tabCand',    page: 'pageCand'    },
@@ -23,7 +23,7 @@
     { btn: 'tabAffi',   page: 'pageAffi'     },
     { btn: 'tabSettings', page: 'pageSettings' }
   ];
-  // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む（遅延ロード）。
+  // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む。(遅延ロード)
   function lazyLoadCalendar() {
     var f = document.getElementById('calFrame');
     if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=23');
@@ -36,7 +36,7 @@
       p.hidden = !on;
       b.classList.toggle('active', on);
     });
-    // 現在タブをCSSへ通知（ランキングタブだけクリーム背景＋金文字にするフック）。
+    // 現在タブをCSSへ通知。(ランキングタブだけクリーム背景＋金文字にするフック)
     document.documentElement.setAttribute('data-tab', activeBtnId);
     // リロード/再アクセス時に前回のタブを復元するため保存。
     try { localStorage.setItem('go5_active_tab', activeBtnId); } catch (e) {}
@@ -49,15 +49,15 @@
     var b = document.getElementById(t.btn);
     if (b) b.addEventListener('click', function () { showTab(t.btn); });
   });
-  // 前回表示していたタブを復元（リロード/再アクセスで動画作成に強制的に戻らないように）。
+  // 前回表示していたタブを復元。(リロード/再アクセスで動画作成に強制的に戻らないように)
   //   全モジュール(YtRank/Go5Cand/Scheduler等)が定義された後に実行したいので DOMContentLoaded を待つ
-  //   （このスクリプトより後に読まれる candidates.js 等の render を確実に呼ぶため）。
+  //   。(このスクリプトより後に読まれる candidates.js 等の render を確実に呼ぶため)
   function restoreActiveTab_() {
     var saved = '';
     try { saved = localStorage.getItem('go5_active_tab') || ''; } catch (e) {}
     var ok = saved && TABS.some(function (t) { return t.btn === saved; }) && document.getElementById(saved);
-    if (ok && saved !== 'tabMovie') { showTab(saved); return; } // 保存タブへ復元（既定=動画作成なら何もしない）
-    // 保存が無い/不正＝HTMLの active（既定=動画作成）をCSSへ反映するだけ。
+    if (ok && saved !== 'tabMovie') { showTab(saved); return; } // 保存タブへ復元(既定=動画作成なら何もしない)
+    // 保存が無い/不正＝HTMLの active(既定=動画作成)をCSSへ反映するだけ。
     var active = TABS.filter(function (t) { var b = document.getElementById(t.btn); return b && b.classList.contains('active'); })[0];
     document.documentElement.setAttribute('data-tab', active ? active.btn : 'tabMovie');
   }
@@ -70,7 +70,7 @@
   const affiResultsEl = document.getElementById('affiResults');
   const affiWarnEl = document.getElementById('affiWarn');
 
-  // 起動時復元（af_id は console.log に出さない）
+  // 起動時復元(af_id は console.log に出さない)
   (function restoreAfId() {
     try {
       var saved = localStorage.getItem('fanza_af_id');
@@ -151,7 +151,7 @@
         if (result.error === 'empty') return; // 空は無視
         var msg = result.error === 'no_cid'
           ? '作品IDが見つかりません'
-          : 'URLが不正です（http(s):// で始まる必要があります）';
+          : 'URLが不正です(http(s):// で始まる必要があります)';
         html += '<div class="affi-result affi-error-card">'
           + '<span class="affi-error">' + escHtml(msg) + '</span>'
           + '<div class="affi-url-hint">' + escHtml(line.trim()) + '</div>'

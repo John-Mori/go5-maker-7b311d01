@@ -1,17 +1,17 @@
 /**
- * core/sync.js — 全端末クラウド同期エンジン（Go5Sync）。sync-worker と対で動く。
+ * core/sync.js — 全端末クラウド同期エンジン。(Go5Sync)sync-worker と対で動く。
  *
  * 同期対象：
- *   ・localStorage の「設定」(Go5Keys.syncAllowed) と「候補テキスト」(cand_items ・ cand_tabs ・ cand_hidden__ 系)。
- *   ・IndexedDB の候補素材（ref:/bsky:/post: ＝ 参照画像・コメント・メモ）。画像は R2 に content-hash で保存し、
- *     状態には {__img:<hash>} だけ入れる（blobを小さく保つ）。
- *   ・「鍵(アプリPW等)」は passphrase で AES-GCM 暗号化した1件(__sec)としてだけ同期（平文はクラウドに出さない）。
+ *   ・localStorage の「設定」(Go5Keys.syncAllowed) と「候補テキスト」。(cand_items ・ cand_tabs ・ cand_hidden__ 系)
+ *   ・IndexedDB の候補素材。(ref:/bsky:/post: ＝ 参照画像・コメント・メモ)画像は R2 に content-hash で保存し、
+ *     状態には {__img:<hash>} だけ入れる。(blobを小さく保つ)
+ *   ・「鍵(アプリPW等)」は passphrase で AES-GCM 暗号化した1件(__sec)としてだけ同期。(平文はクラウドに出さない)
  *
- * 同期方式：各キー last-write-wins（per-key タイムスタンプ・スナップショット差分で変更/削除を検出）。
+ * 同期方式：各キー last-write-wins。(per-key タイムスタンプ・スナップショット差分で変更/削除を検出)
  *   push は baseVersion 付き。衝突(他端末先行)なら再pull→マージ→再push。変更が無ければ push しない。
  *   自動＝起動時pull＋一定間隔＋タブ非表示化(離脱)時。手動ボタンもあり。
  *
- * 設定(この端末だけ・同期しない・送らない)：localStorage sync2_url / sync2_token / sync2_pass(パスフレーズ)。
+ * 設定(この端末だけ・同期しない・送らない)：localStorage sync2_url / sync2_token / sync2_pass。(パスフレーズ)
  */
 (function (root) {
   "use strict";
@@ -33,12 +33,12 @@
     if (/^cand_(items|tabs)(__|$)/.test(k)) return true; // 候補リスト・タブ・独立タブのアイテム
     if (/^cand_hidden__/.test(k)) return true;           // 非表示リスト
     if (k === "cand_hide_posted") return true;
-    if (Keys && Keys.syncAllowed(k)) return true;        // 本物の設定（レイアウト/本文/説明欄/af_id 等）
+    if (Keys && Keys.syncAllowed(k)) return true;        // 本物の設定(レイアウト/本文/説明欄/af_id 等)
     return false;
   }
   function isSyncIdbKey(k) { return /^(ref:|bsky:|post:)/.test(String(k)); }
 
-  // ── 暗号（WebCrypto AES-GCM / PBKDF2）──
+  // ── 暗号(WebCrypto AES-GCM / PBKDF2)──
   var subtle = (root.crypto && root.crypto.subtle) || null;
   function u8(str) { return new TextEncoder().encode(str); }
   function b64(buf) { var b = new Uint8Array(buf), s = ""; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return root.btoa(s); }
@@ -56,7 +56,7 @@
       .then(function (ct) { return JSON.stringify({ salt: b64(salt), iv: b64(iv), ct: b64(ct) }); });
   }
   function decryptJson(recStr, pass) {
-    return Promise.resolve().then(function () {          // JSON.parse も含め全て reject 経路へ（同期throwで同期全体を止めない）
+    return Promise.resolve().then(function () {          // JSON.parse も含め全て reject 経路へ(同期throwで同期全体を止めない)
       var rec = JSON.parse(recStr);
       return deriveKey(pass, unb64(rec.salt)).then(function (key) { return subtle.decrypt({ name: "AES-GCM", iv: unb64(rec.iv) }, key, unb64(rec.ct)); })
         .then(function (buf) { return JSON.parse(new TextDecoder().decode(buf)); });
@@ -75,7 +75,7 @@
     return api("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); });
   }
 
-  // ── 画像（R2）：dataURL⇄content-hash ──
+  // ── 画像(R2)：dataURL⇄content-hash ──
   function collectDataUrls(val, bag) {
     if (typeof val === "string") { if (/^data:/.test(val)) bag.push(val); return; }
     if (Array.isArray(val)) { val.forEach(function (x) { collectDataUrls(x, bag); }); return; }
@@ -90,7 +90,7 @@
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function isImgRef(v) { return v && typeof v === "object" && !Array.isArray(v) && typeof v.__img === "string"; }
 
-  // IDB値(dataURL入り) → hash化。未アップロード画像を R2 へ。失敗画像は dataURL のまま残す（データ保全）。
+  // IDB値(dataURL入り) → hash化。未アップロード画像を R2 へ。失敗画像は dataURL のまま残す。(データ保全)
   function uploadImagesIn(val) {
     var urls = []; collectDataUrls(val, urls);
     if (!urls.length) return Promise.resolve(val);
@@ -110,7 +110,7 @@
       return mapVal(val, function (v) { return typeof v === "string" && /^data:/.test(v); }, function (u) { var h = hByUrl[u]; return h ? { __img: h } : u; });
     });
   }
-  // hash化された値 → R2 から dataURL を復元。失敗画像は空文字（表示されないだけ）。
+  // hash化された値 → R2 から dataURL を復元。失敗画像は空文字。(表示されないだけ)
   function downloadImagesIn(val) {
     var refs = []; (function walk(v) { if (isImgRef(v)) { refs.push(v.__img); return; } if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === "object") for (var k in v) if (has(v, k)) walk(v[k]); })(val);
     if (!refs.length) return Promise.resolve(val);
@@ -135,11 +135,11 @@
   // 鍵(秘密)＝キー単位で暗号化して同期。sync2_*(同期自身の設定＝端末ローカル)は絶対に対象外。
   var SEC_PREFIX = "sec:";
   function syncableSecret(k) { k = String(k); return !!(Keys && Keys.isSecret(k)) && !/^sync2_/.test(k); }
-  // 現在の秘密を {SEC_PREFIX+key: 暗号文} に。平文が前回と同じなら暗号文を再利用（毎回変わらないように）。
-  //   pass 未設定なら skip=true（この端末では鍵を同期しない＝雲側の暗号鍵は触らない）。
+  // 現在の秘密を {SEC_PREFIX+key: 暗号文} に。平文が前回と同じなら暗号文を再利用。(毎回変わらないように)
+  //   pass 未設定なら skip=true。(この端末では鍵を同期しない＝雲側の暗号鍵は触らない)
   function buildSecEntries(snap) {
     var c = cfg(), plain = {};
-    // ★空の秘密は同期対象にしない（空で上書き/削除誤爆を防ぐ）。値がある鍵だけ。
+    // ★空の秘密は同期対象にしない。(空で上書き/削除誤爆を防ぐ)値がある鍵だけ。
     try { for (var i = 0; i < LS.length; i++) { var k = LS.key(i); if (syncableSecret(k)) { var v = LS.getItem(k); if (v) plain[k] = v; } } } catch (e) {}
     if (!c.pass || !subtle) return Promise.resolve({ entries: {}, plain: {}, skip: true });
     var snapPlain = (snap && snap.secPlain) || {}, snapLs = (snap && snap.ls) || {}, entries = {}, jobs = [];
@@ -154,14 +154,14 @@
   var _busy = false, _lastErr = "", _lastAt = 0;
   function status() { return { configured: configured(), busy: _busy, version: getVer(), lastError: _lastErr, lastAt: _lastAt, device: deviceName() }; }
 
-  // per-key マージ（t 大きい方を採用）。
+  // per-key マージ。(t 大きい方を採用)
   function mergeMaps(local, rem) {
     var out = {}, seen = {};
     Object.keys(local).forEach(function (k) { seen[k] = 1; }); Object.keys(rem).forEach(function (k) { seen[k] = 1; });
     Object.keys(seen).forEach(function (k) { var a = local[k], b = rem[k]; out[k] = (a && b) ? (((b.t || 0) > (a.t || 0)) ? b : a) : (a || b); });
     return out;
   }
-  function stripT(map) { var o = {}; Object.keys(map).forEach(function (k) { var e = map[k]; o[k] = e.d ? { d: 1 } : { v: e.v }; }); return o; } // 比較用（t除去）
+  function stripT(map) { var o = {}; Object.keys(map).forEach(function (k) { var e = map[k]; o[k] = e.d ? { d: 1 } : { v: e.v }; }); return o; } // 比較用(t除去)
 
   // 候補リスト(cand_items / cand_items__*)は配列を1キーに持つため、whole-key LWW だと初回に別端末の
   //   候補を丸ごと消し得る。cid で union し、重複cidは newer 側を採用＝「集めた候補を失わない」。
@@ -187,14 +187,14 @@
     var firstSync = getVer() === 0;
     var curLs = gatherLs();
     var secInfo = { entries: {}, plain: {}, skip: true };
-    var newSecPlain = {};                 // push成功時に保存する {key:平文}（remote勝ちは復号後に追記）
-    // 鍵をキー単位で暗号化して curLs へ（sec:<key>）。pass無しなら付けない。
+    var newSecPlain = {};                 // push成功時に保存する {key:平文}(remote勝ちは復号後に追記)
+    // 鍵をキー単位で暗号化して curLs へ。(sec:<key>)pass無しなら付けない。
     var secStep = buildSecEntries(snap).then(function (info) {
       secInfo = info; newSecPlain = Object.assign({}, info.plain);
       Object.keys(info.entries).forEach(function (pk) { curLs[pk] = info.entries[pk]; });
     });
 
-    // IDB を hash化（画像アップロード）
+    // IDB を hash化(画像アップロード)
     var curIdb = {};
     var idbStep = (Idb && Idb.available()) ? Idb.entries().then(function (all) {
       return Object.keys(all).filter(isSyncIdbKey).reduce(function (p, k) {
@@ -203,7 +203,7 @@
     }) : Promise.resolve();
 
     return Promise.all([secStep, idbStep]).then(function () {
-      // pass無し(skip)の端末は、雲側の sec: キーを消さない（削除判定から除外）。
+      // pass無し(skip)の端末は、雲側の sec: キーを消さない。(削除判定から除外)
       var snapLsStamp = snapLs;
       if (secInfo.skip) { snapLsStamp = {}; Object.keys(snapLs).forEach(function (k) { if (k.indexOf(SEC_PREFIX) !== 0) snapLsStamp[k] = snapLs[k]; }); }
       // 変更/削除→タイムスタンプ更新。
@@ -233,13 +233,13 @@
       return pullState().then(function (res) {
         var remote = {}; if (res && res.ok && !res.empty && res.blob) { try { remote = JSON.parse(res.blob); } catch (e) {} }
         var rver = (res && res.version) || 0, rls = remote.ls || {}, ridb = remote.idb || {};
-        // ★初回参加：クラウドに既にあるキーは雲を採用（この端末の値で上書きしない）。候補はunionで両立。
+        // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
-        // 候補リストは両側にあれば cid で union（消さない）。
+        // 候補リストは両側にあれば cid で union。(消さない)
         Object.keys(mls).forEach(function (k) {
           if (!isCandArrayKey(k)) return;
           var a = lmapLs[k], b = rls[k];
@@ -255,14 +255,14 @@
         Object.keys(mls).forEach(function (k) {
           var e = mls[k];
           var isSec = k.indexOf(SEC_PREFIX) === 0, sk = isSec ? k.slice(SEC_PREFIX.length) : null;
-          if (e.d) { if (isSec) { return; } /* ★鍵は tombstone でもローカル削除しない（既存の誤tombstoneから鍵を守る） */ newSnapLs[k] = undefined; try { if (isSyncLsKey(k)) LS.removeItem(k); } catch (x) {} return; }
+          if (e.d) { if (isSec) { return; } /* ★鍵は tombstone でもローカル削除しない(既存の誤tombstoneから鍵を守る) */ newSnapLs[k] = undefined; try { if (isSyncLsKey(k)) LS.removeItem(k); } catch (x) {} return; }
           if (isSec) {
             newSnapLs[k] = e.v;
-            // 自分の暗号文が採用＝復号不要（PBKDF2の無駄打ち回避）。remote勝ち(別の値)の時だけ復号して反映。
+            // 自分の暗号文が採用＝復号不要。(PBKDF2の無駄打ち回避)remote勝ち(別の値)の時だけ復号して反映。
             if (secInfo.entries[k] && e.v === secInfo.entries[k]) { newSecPlain[sk] = secInfo.plain[sk]; return; }
             if (c.pass && subtle && e.v) applies.push(decryptJson(e.v, c.pass).then(function (val) {
               try { LS.setItem(sk, String(val)); } catch (x) {} newSecPlain[sk] = String(val);
-            }).catch(function () { _lastErr = "鍵の復号に失敗（パスフレーズ不一致?）"; }));
+            }).catch(function () { _lastErr = "鍵の復号に失敗(パスフレーズ不一致?)"; }));
             return;
           }
           // ★競合防止：この同期は curLs を「開始時点」のスナップショットで動いている。非同期処理
@@ -275,7 +275,7 @@
             if (u2 != null) finalV = u2;
           } else if (live !== null && live !== curLs[k] && live !== e.v) {
             // 非配列キーはライブ値がこの同期開始後に変わっている＝マージ結果は古い。上書きせず次回同期に委ねる
-            //   （スナップショット/push対象もLIVE値のまま記録＝クラウドへ古い値を送らず、次回の変更検知も正しく働く）。
+            //   。(スナップショット/push対象もLIVE値のまま記録＝クラウドへ古い値を送らず、次回の変更検知も正しく働く)
             newSnapLs[k] = live; mls[k] = { t: now, v: live };
             return;
           }
@@ -314,14 +314,14 @@
     if (root.document) root.document.addEventListener("visibilitychange", function () { if (root.document.visibilityState === "hidden") syncOnce(false); });
   }
 
-  // 変更駆動の即時同期（候補追加・画像保存の直後に呼ぶ）。25秒周期を待たずに反映しつつ、
-  //   デバウンス（連続変更を1回に）＋最小間隔（連打・多発でsync-workerのKV上限を突かない）で保護。
-  //   ・no-op時はpushしない既存仕様（syncOnceのchanged判定）と合わせ、実変更が無ければ書き込みも起きない。
+  // 変更駆動の即時同期。(候補追加・画像保存の直後に呼ぶ)25秒周期を待たずに反映しつつ、
+  //   デバウンス(連続変更を1回に)＋最小間隔(連打・多発でsync-workerのKV上限を突かない)で保護。
+  //   ・no-op時はpushしない既存仕様(syncOnceのchanged判定)と合わせ、実変更が無ければ書き込みも起きない。
   var _reqTimer = null;
   var REQ_DEBOUNCE_MS = 3000;   // これだけ変更が途切れたらまとめて1回同期
-  var REQ_MIN_GAP_MS = 10000;   // 直近同期からの最小間隔（下限）
+  var REQ_MIN_GAP_MS = 10000;   // 直近同期からの最小間隔(下限)
   function requestSync() {
-    if (!configured() || _reqTimer) return;             // 既に予約済み＝デバウンス（追加予約しない）
+    if (!configured() || _reqTimer) return;             // 既に予約済み＝デバウンス(追加予約しない)
     var sinceLast = Date.now() - (_lastAt || 0);
     var wait = Math.max(REQ_DEBOUNCE_MS, REQ_MIN_GAP_MS - sinceLast);
     _reqTimer = root.setTimeout(function () { _reqTimer = null; syncOnce(false); }, wait);
@@ -348,15 +348,15 @@
     if (url) url.value = c.url; if (tok) tok.value = c.token; if (pass) pass.value = c.pass;
     function save() { root.Go5Sync.setConfig({ url: url ? url.value : "", token: tok ? tok.value : "", pass: pass ? pass.value : "" }); }
     [url, tok, pass].forEach(function (el) { if (el) { el.addEventListener("change", save); el.addEventListener("blur", save); } });
-    function showStatus() { if (!st) return; var s = status(); st.textContent = !s.configured ? "未設定（3つを入力すると自動同期します）" : (s.busy ? "同期中…" : (s.lastError ? "⚠️ " + s.lastError : (s.version ? "✅ 同期済み（v" + s.version + "）" : "設定OK。「今すぐ同期」で開始"))); }
+    function showStatus() { if (!st) return; var s = status(); st.textContent = !s.configured ? "未設定(3つを入力すると自動同期します)" : (s.busy ? "同期中…" : (s.lastError ? "⚠️ " + s.lastError : (s.version ? "✅ 同期済み(v" + s.version + ")" : "設定OK。「今すぐ同期」で開始"))); }
     if (nowBtn) nowBtn.addEventListener("click", function () {
       save();
       if (!configured()) { if (st) st.textContent = "⚠️ 同期URLとトークンを入れてください"; return; }
       if (st) st.textContent = "🔄 同期中…";
-      syncOnce(false).then(function (r) { if (st) st.textContent = r.ok ? ("✅ 同期しました（v" + r.version + "）") : ("⚠️ " + (r.error || "失敗")); });
+      syncOnce(false).then(function (r) { if (st) st.textContent = r.ok ? ("✅ 同期しました(v" + r.version + ")") : ("⚠️ " + (r.error || "失敗")); });
     });
     var tab = $("tabSettings"); if (tab) tab.addEventListener("click", function () { root.setTimeout(showStatus, 300); });
     showStatus();
-    startAuto(); // 設定済みなら自動同期を開始（起動時pull＋25秒間隔＋離脱時push）
+    startAuto(); // 設定済みなら自動同期を開始(起動時pull＋25秒間隔＋離脱時push)
   });
 })(typeof window !== "undefined" ? window : this);

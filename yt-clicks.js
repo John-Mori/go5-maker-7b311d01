@@ -1,18 +1,18 @@
 /**
- * yt-clicks.js — 検証タブの「再生数・クリック数（投稿別）」一覧。
+ * yt-clicks.js — 検証タブの「再生数・クリック数(投稿別)」一覧。
  *
  * 投稿ごとに：
- *   ・短縮URLのクリック数 … link-worker /api/stats（go5-short）から取得（共有シークレットで読み取り）。
- *   ・YouTube動画の再生数・投稿日時・タイトル … YouTube Data API v3（端末内のAPIキー）から取得。
+ *   ・短縮URLのクリック数 … link-worker /api/stats(go5-short)から取得。(共有シークレットで読み取り)
+ *   ・YouTube動画の再生数・投稿日時・タイトル … YouTube Data API v3(端末内のAPIキー)から取得。
  *
- * 行の見出し日時は「YouTubeに投稿した時刻（snippet.publishedAt）」を表示する（動画の作成時刻ではない）。
+ * 行の見出し日時は「YouTubeに投稿した時刻(snippet.publishedAt)」を表示する。(動画の作成時刻ではない)
  * 並び順：YouTube投稿日時が新しいものほど上。YouTube URL未入力＝投稿日時不明のものは末尾へ。
  *
  * データ源：
- *   ・端末内の短縮URL履歴 short_hist__<acct>（bluesky.js が投稿のたびに記録）
- *   ・手動追加分 verify_manual__<acct>（このタブの「手動で追加」）
- *   ・各行のYouTube動画URL verify_yt__<acct>（行ごとに入力・ウィザードが自動プリフィル）
- * 完全クライアントサイド。APIキーはこの端末内だけに保存（リポジトリには置かない）。
+ *   ・端末内の短縮URL履歴 short_hist__<acct>(bluesky.js が投稿のたびに記録)
+ *   ・手動追加分 verify_manual__<acct>(このタブの「手動で追加」)
+ *   ・各行のYouTube動画URL verify_yt__<acct>(行ごとに入力・ウィザードが自動プリフィル)
+ * 完全クライアントサイド。APIキーはこの端末内だけに保存。(リポジトリには置かない)
  */
 (function () {
   'use strict';
@@ -21,7 +21,7 @@
 
   function acct() { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
-  // 作品属性（複数可）。キャラ=実在キャラの二次創作 / JK / ギャル / 異世界。キャラ無し＝オリジナル(非表示)。
+  // 作品属性。(複数可)キャラ=実在キャラの二次創作 / JK / ギャル / 異世界。キャラ無し＝オリジナル。(非表示)
   var ATTR_DEFS = [
     { key: 'chara', label: 'キャラ' },
     { key: 'jk', label: 'JK' },
@@ -53,7 +53,7 @@
   function itemKey(it) { if (it.manual) return it.id; return it.postUri ? ('u:' + it.postUri) : ('s:' + (it.shortUrl || '')); }
   function num(n) { try { return Number(n).toLocaleString(); } catch (e) { return String(n); } }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
-  // 祝日セット（内閣府データ window.__HOLIDAYS__）。土=青/日祝=赤 の判定に使う。
+  // 祝日セット。(内閣府データ window.__HOLIDAYS__)土=青/日祝=赤 の判定に使う。
   var _holSet = null;
   function holSet() {
     if (_holSet) return _holSet;
@@ -62,7 +62,7 @@
     return _holSet;
   }
   var DOW = ['日', '月', '火', '水', '木', '金', '土'];
-  // 「6/18 (土) 20:00」形式。曜日だけ色付け（土=青/日祝=赤）。戻り値はHTML（自前データのみ・エスケープ不要）。
+  // 「6/18 (土) 20:00」形式。曜日だけ色付け。(土=青/日祝=赤)戻り値はHTML。(自前データのみ・エスケープ不要)
   function fmtPostDate(ms) {
     try {
       var d = new Date(ms), p = function (n) { return (n < 10 ? '0' : '') + n; };
@@ -74,12 +74,12 @@
     } catch (e) { return ''; }
   }
   function setStatus(m, html) { var e = $('ytClickStatus'); if (!e) return; if (html) e.innerHTML = m || ''; else e.textContent = m || ''; }
-  // DMM作品情報の処理メッセージ専用ゾーン（クリック数/再生数の更新メッセージと別枠で消し合わない・常に先頭にFANZAのFアイコン）。
+  // DMM作品情報の処理メッセージ専用ゾーン。(クリック数/再生数の更新メッセージと別枠で消し合わない・常に先頭にFANZAのFアイコン)
   var FICON = '<img class="emico fico" src="assets/icons/ic-fanza.png" alt="F"> ';
   function setDmmStatus(m) { var e = $('ytDmmStatus'); if (!e) return; e.innerHTML = m ? (FICON + m) : ''; }
   function ytIdOf(url) { return (url && window.IdGen && window.IdGen.youtubeId) ? (window.IdGen.youtubeId(url) || '') : ''; }
 
-  // 表示する全アイテム（履歴＋手動追加）を結合。manualOnly=true の手動短縮URL履歴は除外。
+  // 表示する全アイテム(履歴＋手動追加)を結合。manualOnly=true の手動短縮URL履歴は除外。
   function allItems() { return loadHist().filter(function (it) { return !it.manualOnly; }).concat(loadManual()); }
 
   // 投稿時刻(ts)等から背骨ID(videoId)を生成。idgen があれば流用、無ければ同形式で自前生成。
@@ -91,7 +91,7 @@
     var r = ''; for (var i = 0; i < 4; i++) r += Math.floor(Math.random() * 36).toString(36);
     return acct() + '-' + stamp + '-' + r;
   }
-  // この履歴を正とし、IDが未付与のアイテムへ背骨IDを付与・永続化（投稿履歴=スプレッドシートの行キー）。
+  // この履歴を正とし、IDが未付与のアイテムへ背骨IDを付与・永続化。(投稿履歴=スプレッドシートの行キー)
   function ensureIds() {
     var hist = loadHist(), c1 = false;
     hist.forEach(function (it) { if (!it.videoId) { it.videoId = genVideoId(it.ts); c1 = true; } });
@@ -101,7 +101,7 @@
     if (c2) saveArr(manualKey(), man);
   }
 
-  // 短縮URLから go5-short のコードを抽出（自前ワーカーの払い出しURLのみ対象）。
+  // 短縮URLから go5-short のコードを抽出。(自前ワーカーの払い出しURLのみ対象)
   function codeOf(shortUrl) {
     var w = (window.Go5Short && window.Go5Short.WORKER_URL) || '';
     if (!w || !shortUrl) return '';
@@ -115,7 +115,7 @@
     var u = w.WORKER_URL.replace(/\/+$/, '') + '/api/stats?code=' + encodeURIComponent(code) + '&secret=' + encodeURIComponent(w.SHARED_SECRET);
     return fetch(u).then(function (r) { return r.json(); }).then(function (j) { return (j && j.ok && typeof j.clicks === 'number') ? j.clicks : null; }).catch(function () { return null; });
   }
-  // 複数の動画ID → {views, publishedAt(ms), title}（videos.list は parts に関わらず1回1ユニット・最大50件）。
+  // 複数の動画ID → {views, publishedAt(ms), title}。(videos.list は parts に関わらず1回1ユニット・最大50件)
   function fetchVideos(ids) {
     var key = apiKey();
     var uniq = ids.filter(function (v, i, a) { return v && a.indexOf(v) === i; });
@@ -130,29 +130,29 @@
         if (it.snippet) { rec.title = it.snippet.title || ''; rec.channelId = it.snippet.channelId || ''; var t = Date.parse(it.snippet.publishedAt || ''); if (!isNaN(t)) rec.published = t; } // channelId＝アカウント判定の鍵
         if (it.status) {
           rec.privacy = it.status.privacyStatus || '';
-          var pa = Date.parse(it.status.publishAt || ''); if (!isNaN(pa)) rec.publishAt = pa; // 予約公開時刻（オーナー認証時のみ返る）
+          var pa = Date.parse(it.status.publishAt || ''); if (!isNaN(pa)) rec.publishAt = pa; // 予約公開時刻(オーナー認証時のみ返る)
         }
         out[it.id] = rec;
       });
-      // 照会したID一覧（応答に含まれないID＝非公開/予約公開の判定に使う）。
+      // 照会したID一覧。(応答に含まれないID＝非公開/予約公開の判定に使う)
       out.__queried = uniq.slice(0, 50);
       if (j && j.error) out.__error = (j.error.message || 'YouTube APIエラー');
       return out;
-    }).catch(function () { return { __error: '通信エラー（YouTubeに接続できませんでした）' }; }); // D2: 失敗を{}で握りつぶさない＝「成功表示なのに取れない」を防ぐ
+    }).catch(function () { return { __error: '通信エラー(YouTubeに接続できませんでした)' }; }); // D2: 失敗を{}で握りつぶさない＝「成功表示なのに取れない」を防ぐ
   }
 
-  // ── 今日/昨日/直近1週間の再生・クリック増加（GASが毎時サーバー側で記録した差分）──
+  // ── 今日/昨日/直近1週間の再生・クリック増加(GASが毎時サーバー側で記録した差分)──
   // localStorageに前回値を保持し、開いた瞬間に即表示→GAS取得で最新化。
   var deltaCache = (function () { try { return JSON.parse(localStorage.getItem('delta_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {tv,yv,wv,tc,yc,wc}
   var peakCache = (function () { try { return JSON.parse(localStorage.getItem('peak_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {vRate,vWin,cRate,cWin}
   var _deltaFetched = false;
   function gasUrl_() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
-  // JSONP（GASのGETをCORS回避で読む。キャッシュバスターcb付き）。
-  //   失敗時は null ではなく {__jsonpFail:true, reason} を渡す（呼び出し側は !res||!res.ok の
+  // JSONP。(GASのGETをCORS回避で読む。キャッシュバスターcb付き)
+  //   失敗時は null ではなく {__jsonpFail:true, reason} を渡す(呼び出し側は !res||!res.ok の
   //   既存チェックで従来どおり「失敗」と判定できる＝後方互換。reason で原因を区別できる：
   //   'blocked'＝<script>読込が即エラー(広告ブロッカー/セキュリティソフト/DNSフィルタで
   //   script.google.com 等が遮断されている可能性が高い＝数百ms〜数秒で発生)、
-  //   'timeout'＝20秒待っても応答無し(通信不安定/GAS側の遅延)。
+  //   'timeout'＝20秒待っても応答無し。(通信不安定/GAS側の遅延)
   function jsonp_(base, params, cb) {
     if (!base) { cb(null); return; }
     var name = '__go5d_' + new Date().getTime() + '_' + Math.floor(Math.random() * 1e6);
@@ -178,7 +178,7 @@
     var todayPosted = postedTodayOf_(tsMs);
     function cell(v, allowDash) {
       if (v != null) return num(v);
-      return allowDash ? '–' : '<span title="記録欠損: 追跡開始前の期間か、その回の取得失敗(YT APIクォータ等)。以後の期間は正常に記録されます">⚠</span>';
+      return allowDash ? '–' : '<span title="記録欠損: 追跡開始前の期間か、その回の取得失敗。(YT APIクォータ等)以後の期間は正常に記録されます">⚠</span>';
     }
     function seg(lbl, v, c, allowDash) { return '<span class="dl-seg"><b>' + lbl + '</b> ▶' + cell(v, allowDash) + ' ' + CI + cell(c, allowDash) + '</span>'; }
     // 昨日だけ「今日投稿なら–許容」。今日/週はフォールバック済みでnullが出るのは欠損時のみ=⚠。
@@ -204,8 +204,8 @@
     });
   }
 
-  // クリック数キャッシュは localStorage に永続化（リロード直後や取得失敗時に「…」のままに
-  // ならず、前回値を即表示→取得成功で最新化。再生数等の yt_meta_cache と同方針）。
+  // クリック数キャッシュは localStorage に永続化(リロード直後や取得失敗時に「…」のままに
+  // ならず、前回値を即表示→取得成功で最新化。再生数等の yt_meta_cache と同方針)。
   var clicksCache = (function () { try { return JSON.parse(localStorage.getItem('clicks_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> clicks
   function clicksPersist_() { try { localStorage.setItem('clicks_cache', JSON.stringify(clicksCache)); } catch (e) {} }
   var viewsCache = {};     // videoId -> views
@@ -213,16 +213,16 @@
   var titleCache = {};     // videoId -> YouTubeタイトル
   var lastErr = '';
 
-  // ── YouTubeメタ（題名/投稿日時/視聴回数）を localStorage に永続化 ──────────────
+  // ── YouTubeメタ(題名/投稿日時/視聴回数)を localStorage に永続化 ──────────────
   //   在メモリだけだとリロードのたびに再取得＝取得失敗時に題名が消えて不安定。
-  //   永続化して起動時に即表示し、refresh で上書き更新する（題名/投稿日時は不変・視聴回数は最新化）。
+  //   永続化して起動時に即表示し、refresh で上書き更新する。(題名/投稿日時は不変・視聴回数は最新化)
   function ytMetaLoad() { try { return JSON.parse(localStorage.getItem('yt_meta_cache') || '{}') || {}; } catch (e) { return {}; } }
   function ytMetaSave(m) { try { localStorage.setItem('yt_meta_cache', JSON.stringify(m)); } catch (e) {} }
   (function () { // 起動時：永続キャッシュ→在メモリへ
     var m = ytMetaLoad();
     Object.keys(m).forEach(function (id) { var r = m[id] || {}; if (r.title) titleCache[id] = r.title; if (r.published != null) publishedCache[id] = r.published; if (r.views != null) viewsCache[id] = r.views; });
   })();
-  // 既存キャッシュのゴミ掃除（過去バージョンで __queried 等のメタキーが混入した分を1回で除去）。
+  // 既存キャッシュのゴミ掃除。(過去バージョンで __queried 等のメタキーが混入した分を1回で除去)
   (function () {
     try {
       var m = ytMetaLoad(), dirty = false;
@@ -265,9 +265,9 @@
 
   // ── モーダル ──────────────────────────────────────────────────────────────
   var _saveCb = null;
-  var _pendingShare = ''; // 生成した計測用リンクの共有URL(da.gd)。保存時に item.shareUrl へ付与
-  var _pendingShort = ''; // 生成した計測用リンクのr2 URL。保存時に item.shortUrl へ付与（計測キー）
-  var _curSrcUrl = '';    // 生成の元にする投稿URL（編集中アイテムのpostUrl等）
+  var _pendingShare = ''; // 生成した計測用リンクの共有URL。(da.gd)保存時に item.shareUrl へ付与
+  var _pendingShort = ''; // 生成した計測用リンクのr2 URL。保存時に item.shortUrl へ付与(計測キー)
+  var _curSrcUrl = '';    // 生成の元にする投稿URL(編集中アイテムのpostUrl等)
 
   function injectModal_() {
     if ($('veditOverlay')) return;
@@ -281,30 +281,30 @@
         '<p class="vedit-error" id="veditError" hidden></p>' +
         '<label class="vedit-field">YouTube URL' +
           '<div class="vedit-bsky-row">' +
-            '<input id="veditYt" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…（省略可）">' +
+            '<input id="veditYt" type="url" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…(省略可)">' +
             '<button id="veditYtPaste" type="button" class="vedit-copy">貼り付け</button>' +
           '</div>' +
         '</label>' +
-        '<label class="vedit-field">Bluesky 投稿URL（計測用の短縮URL）' +
+        '<label class="vedit-field">Bluesky 投稿URL(計測用の短縮URL)' +
           '<div class="vedit-bsky-row">' +
-            '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL（省略可）">' +
+            '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL(省略可)">' +
             '<button id="veditBskyCopy" type="button" class="vedit-copy">Copy</button>' +
           '</div>' +
         '</label>' +
         '<div id="veditGenResult" class="vedit-gen-result" hidden></div>' +
-        '<label class="vedit-field">作品URL（DMM/FANZAの商品ページURL）' +
+        '<label class="vedit-field">作品URL(DMM/FANZAの商品ページURL)' +
           '<div class="vedit-bsky-row">' +
-            '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…（省略可）">' +
+            '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…(省略可)">' +
             '<button id="veditWorkCopy" type="button" class="vedit-copy">コピー</button>' +
           '</div>' +
         '</label>' +
         '<div class="vedit-attrs">' +
-          '<div class="vedit-attrs-title">カテゴリ（複数選択可・キャラ無し＝オリジナル）</div>' +
+          '<div class="vedit-attrs-title">カテゴリ(複数選択可・キャラ無し＝オリジナル)</div>' +
           ATTR_DEFS.map(function (a) {
             return '<label class="vedit-attr"><input id="veditAttr_' + a.key + '" type="checkbox"><span class="vatt vatt-' + a.key + '">' + a.label + '</span></label>';
           }).join('') +
         '</div>' +
-        '<label class="vedit-field">作品状態（投稿当時の状態・後から変更可）' +
+        '<label class="vedit-field">作品状態(投稿当時の状態・後から変更可)' +
           '<select id="veditWorkState">' +
             '<option value="新作">新作</option>' +
             '<option value="準新作">準新作</option>' +
@@ -322,7 +322,7 @@
     document.body.appendChild(d);
     $('veditCancel').addEventListener('click', closeModal_);
     d.addEventListener('click', function (e) { if (e.target === d) closeModal_(); });
-    // Bluesky投稿URLのコピー（clipboard API＋execCommandフォールバック）。
+    // Bluesky投稿URLのコピー。(clipboard API＋execCommandフォールバック)
     $('veditBskyCopy').addEventListener('click', function () {
       var inp = $('veditBsky'); if (!inp) return;
       var v = (inp.value || '').trim();
@@ -335,7 +335,7 @@
         } else { copyFallback_(inp, ok); }
       } catch (e) { copyFallback_(inp, ok); }
     });
-    // 作品URLのコピー（Blueskyのコピーと同じ挙動）。
+    // 作品URLのコピー。(Blueskyのコピーと同じ挙動)
     $('veditWorkCopy').addEventListener('click', function () {
       var inp = $('veditWork'); if (!inp) return;
       var v = (inp.value || '').trim(); if (!v) return;
@@ -347,7 +347,7 @@
         } else { copyFallback_(inp, ok); }
       } catch (e) { copyFallback_(inp, ok); }
     });
-    // YouTube URLの貼り付け（クリップボードの文字列を入れる）。
+    // YouTube URLの貼り付け。(クリップボードの文字列を入れる)
     $('veditYtPaste').addEventListener('click', function () {
       var inp = $('veditYt'); if (!inp) return;
       if (navigator.clipboard && navigator.clipboard.readText) {
@@ -372,20 +372,20 @@
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
     });
-    // 計測用の短縮リンクを生成（過去のBluesky投稿URL→r2短縮(計測)＋da.gd短縮(表示)）
+    // 計測用の短縮リンクを生成(過去のBluesky投稿URL→r2短縮(計測)＋da.gd短縮(表示))
     $('veditGenShort').addEventListener('click', function () {
       var btn = this;
       var src = _curSrcUrl || ($('veditBsky').value || '').trim();
-      if (!/^https?:\/\//.test(src)) { showModalErr_('先に「Bluesky投稿URL」を入れてください（https://bsky.app/… ）'); return; }
+      if (!/^https?:\/\//.test(src)) { showModalErr_('先に「Bluesky投稿URL」を入れてください(https://bsky.app/… )'); return; }
       if (typeof window.Go5MakeShort !== 'function') { showModalErr_('短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
       var errEl = $('veditError'); if (errEl) errEl.hidden = true;
       var orig = btn.textContent; btn.disabled = true; btn.textContent = '生成中…';
       window.Go5MakeShort(src).then(function (res) {
         var r2 = (res && res.shortUrl) || '', share = (res && res.shareUrl) || r2;
-        if (!r2) { showModalErr_('短縮に失敗しました（r2ワーカーに接続できませんでした）。'); return; }
+        if (!r2) { showModalErr_('短縮に失敗しました。(r2ワーカーに接続できませんでした)'); return; }
         $('veditBsky').value = share; // 欄には短い計測URL(da.gd)を表示
-        _pendingShort = r2;          // 保存時に shortUrl=r2（クリック計測のキー）
-        _pendingShare = share;       // 保存時に shareUrl=da.gd（表示・概要欄用）
+        _pendingShort = r2;          // 保存時に shortUrl=r2(クリック計測のキー)
+        _pendingShare = share;       // 保存時に shareUrl=da.gd(表示・概要欄用)
         var gr = $('veditGenResult');
         if (gr) {
           gr.hidden = false;
@@ -430,7 +430,7 @@
     el.textContent = msg; el.hidden = false;
   }
 
-  // clipboard API 不可の環境向けフォールバック（テキスト選択→execCommand('copy')）。
+  // clipboard API 不可の環境向けフォールバック(テキスト選択→execCommand('copy'))。
   function copyFallback_(inp, ok) {
     try {
       inp.focus(); inp.select();
@@ -439,32 +439,32 @@
     } catch (e) {}
   }
 
-  // Bluesky URLをアイテムに保存（go5-short → shortUrl、その他 → postUrl）。
-  // 表示（bskyCur/bskyHref）は shareUrl→shortUrl→postUrl の優先順で読むため、優先度の低い
+  // Bluesky URLをアイテムに保存。(go5-short → shortUrl、その他 → postUrl)
+  // 表示(bskyCur/bskyHref)は shareUrl→shortUrl→postUrl の優先順で読むため、優先度の低い
   // postUrl だけを書き換えても、既存の shareUrl/shortUrl に隠れて訂正が画面へ反映されない
-  // （INC: 訂正して保存しても直らない）。現在表示中＝優先度最上位の項目を直接書き換える。
+  // 。(INC: 訂正して保存しても直らない)現在表示中＝優先度最上位の項目を直接書き換える。
   function saveBskyToItem_(item, bskyUrl) {
     var w = (window.Go5Short && window.Go5Short.WORKER_URL) ? window.Go5Short.WORKER_URL.replace(/\/+$/, '') : '';
     var isGo5 = w && bskyUrl && bskyUrl.indexOf(w) === 0;
     if (bskyUrl) {
       if (isGo5) { item.shortUrl = bskyUrl; delete item.postUrl; delete item.shareUrl; }
-      // ★r2でない入力は計測キー(shortUrl)を絶対に上書きしない(INC調査2026-07-12: 「–」化の原因の一つ)。
+      // ★r2でない入力は計測キー(shortUrl)を絶対に上書きしない。(INC調査2026-07-12: 「–」化の原因の一つ)
       //   shareUrlが空でも先にそちらへ入れ、shortUrlはr2のまま守る。
       else if (item.shareUrl || item.shortUrl) item.shareUrl = bskyUrl;
       else item.postUrl = bskyUrl;
     } else {
-      // 空白のとき：手動アイテムは両方消す、履歴アイテムは postUrl だけ消す（shortUrl はクリック計測に必要）
+      // 空白のとき：手動アイテムは両方消す、履歴アイテムは postUrl だけ消す(shortUrl はクリック計測に必要)
       if (item.manual) delete item.shortUrl;
       delete item.postUrl;
     }
   }
 
-  // アイテムへ属性フラグを反映（true は立て、false は削除）。
+  // アイテムへ属性フラグを反映。(true は立て、false は削除)
   function applyAttrs_(item, attrs) {
     ATTR_DEFS.forEach(function (a) { if (attrs && attrs[a.key]) item[a.key] = true; else delete item[a.key]; });
   }
-  // YT URLを紐付けた直後にGASへ即時スナップショットを要求(fire-and-forget)。
-  //   視聴履歴はURL記載後からしか蓄積されないため、紐付け当日中にベースラインを作る=「今日/昨日」が翌日から出る(④対策2026-07-12)。
+  // YT URLを紐付けた直後にGASへ即時スナップショットを要求。(fire-and-forget)
+  //   視聴履歴はURL記載後からしか蓄積されないため、紐付け当日中にベースラインを作る=「今日/昨日」が翌日から出る。(④対策2026-07-12)
   var _snapPokeAt = 0;
   function pokeSnapshotNow_() {
     try {
@@ -475,14 +475,14 @@
     } catch (e) {}
   }
 
-  // 編集保存：YouTube URL（ytMap）と Bluesky URL・作品URL・カテゴリ属性・作品状態（アイテム）を一括更新。
+  // 編集保存：YouTube URL(ytMap)と Bluesky URL・作品URL・カテゴリ属性・作品状態(アイテム)を一括更新。
   function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState) {
     // YouTube URL
     var ymap = loadYtMap();
     if (ytUrl) ymap[k] = ytUrl; else delete ymap[k];
     saveYtMap(ymap);
     var saved = null;
-    // Bluesky URL と 作品URL・カテゴリ・作品状態（アイテムを直接書き換え）
+    // Bluesky URL と 作品URL・カテゴリ・作品状態(アイテムを直接書き換え)
     if (it.manual) {
       var manual = loadManual();
       for (var i = 0; i < manual.length; i++) {
@@ -514,16 +514,16 @@
       }
       saveArr(histKey(), hist);
     }
-    if (saved) pushItemToGas_(saved); // スプレッドシートのカテゴリ列等へ反映（GAS設定時のみ）
+    if (saved) pushItemToGas_(saved); // スプレッドシートのカテゴリ列等へ反映(GAS設定時のみ)
     if (ytUrl) pokeSnapshotNow_();   // YT URLを紐付けた日は即スナップ=日別記録のベースラインを当日中に作る(④)
     // 非r2リンクを入れた保存でも自動で計測キーを確定させる(冪等短縮=同URLなら既存コード+累積クリックを引き継ぐ)
     if (saved) autoMeasureItem_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
     refresh();
   }
 
-  // 履歴アイテム1件をスプレッドシート（GAS）へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
-  // 投稿日時を上書きしないよう postUrl は送らない（既存行のカテゴリ列だけ更新する用途）。
-  // T5: シートへ送るchannelは背骨ID(videoId)接頭辞を優先（現UIではなく作品の所属）。
+  // 履歴アイテム1件をスプレッドシート(GAS)へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
+  // 投稿日時を上書きしないよう postUrl は送らない。(既存行のカテゴリ列だけ更新する用途)
+  // T5: シートへ送るchannelは背骨ID(videoId)接頭辞を優先。(現UIではなく作品の所属)
   //   混入アイテムを現アカウントのタブへ薄行として転写する『感染プリンタ』を止める。
   function chOfVid_(videoId, fallback) { var m = String(videoId || '').match(/^(acc[12])-/); return m ? m[1] : (fallback || acct()); }
   function chForItem_(it) { return chOfVid_(it && it.videoId, acct()); }
@@ -534,7 +534,7 @@
     var payload = {
       op: 'upsert',
       channel: chForItem_(it),       // 接頭辞優先で誤タブ書き込みを防ぐ
-      videoId: it.videoId,           // post_id（upsertキー）
+      videoId: it.videoId,           // post_id(upsertキー)
       title: it.title || '',
       postUri: it.postUri || '',
       workUrl: it.workUrl || '',
@@ -552,18 +552,18 @@
     var rawItems = allItems();
     var ymap = loadYtMap();
     if (!rawItems.length) {
-      list.innerHTML = '<p class="hint">まだ投稿の記録がありません（投稿して短縮URLが出ると、ここに集まります）。「➕ 手動で追加」からYouTube動画を直接登録もできます。表示中アカウント：' + esc(acct()) + '</p>';
+      list.innerHTML = '<p class="hint">まだ投稿の記録がありません。(投稿して短縮URLが出ると、ここに集まります)「➕ 手動で追加」からYouTube動画を直接登録もできます。表示中アカウント：' + esc(acct()) + '</p>';
       return;
     }
     var items = sortItems(rawItems, ymap);
-    // YouTube公開前(非公開/予約公開)の動画一覧 → vidで引けるマップに（「投稿予定」バッジ表示用）
+    // YouTube公開前(非公開/予約公開)の動画一覧 → vidで引けるマップに(「投稿予定」バッジ表示用)
     var schedMap = {};
     try { loadYtSched_(acct()).forEach(function (y) { if (y && y.vid) schedMap[y.vid] = y; }); } catch (e) {}
-    // 被リビルド作品の非表示トグル（最新の投稿カードにボタンを設置。ONで被リビルド済みを一覧から除外）。
+    // 被リビルド作品の非表示トグル。(最新の投稿カードにボタンを設置。ONで被リビルド済みを一覧から除外)
     var hideRemadeKey = 'verify_hide_remade__' + acct();
     var hideRemade = false; try { hideRemade = localStorage.getItem(hideRemadeKey) === '1'; } catch (e) {}
     var visibleItems = hideRemade ? items.filter(function (it) { return !it.remade; }) : items;
-    // 非表示トグルは行の枠外（リスト最上部の独立バー）に置く＝先頭カードに重ならない。
+    // 非表示トグルは行の枠外(リスト最上部の独立バー)に置く＝先頭カードに重ならない。
     var hideBarHtml = '<div class="vhide-remade-bar"><button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
     list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
       var k = itemKey(it);
@@ -574,14 +574,14 @@
       // 導線2(投稿→FANZA): 本文中の作品リンクの計測コード(bluesky.jsが投稿時に置換・記録)
       var wcode = codeOf(it.workShortUrl || '');
       var wclicks = wcode && (wcode in clicksCache) ? clicksCache[wcode] : null;
-      // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に（別短縮URLのため加算）。
-      // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する（例：0+5=5(5)）。
+      // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に。(別短縮URLのため加算)
+      // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する(例：0+5=5(5))。
       var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
-      // 作品の動画で使った画像（＋Bluesky添付画像）。作品cid経由で候補タブの保存画像を引く。
+      // 作品の動画で使った画像。(＋Bluesky添付画像)作品cid経由で候補タブの保存画像を引く。
       var rImgCid = it.workUrl ? workCidOf_(it.workUrl) : '';
       var rImgArr = (rImgCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(rImgCid) || []) : [];
       var refThumb = rImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || '';
-      // 🛠️編集で後付け添付した投稿画像（履歴アイテム単位）。1枚目をカードに表示し、タップで全枚数をズーム。
+      // 🛠️編集で後付け添付した投稿画像。(履歴アイテム単位)1枚目をカードに表示し、タップで全枚数をズーム。
       var pKey = it.videoId || k;
       var postImgArr = (window.Go5Cand && window.Go5Cand.postImgs) ? (window.Go5Cand.postImgs(pKey) || []) : [];
       var postThumb = postImgArr[0] || '';
@@ -589,8 +589,8 @@
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
       // YouTube動画が紐付いていない投稿(Bluesky単体投稿等)は、YouTube公開日時が原理的に存在しない。
-      //   sendSync_()と同じ考え方（実投稿時刻(ts)を正とする）でit.tsにフォールバックする＝
-      //   「投稿日時不明」のまま放置しない（シート復元直後のvid無し投稿で顕在化）。
+      //   sendSync_()と同じ考え方(実投稿時刻(ts)を正とする)でit.tsにフォールバックする＝
+      //   「投稿日時不明」のまま放置しない。(シート復元直後のvid無し投稿で顕在化)
       var dateHtml = sched
         ? ((sched.publishAt ? '<b>' + fmtPostDate(sched.publishAt) + '</b> ' : '') + '<span class="vtag vtag-scheduled">投稿予定</span>')
         : (pub != null
@@ -604,14 +604,14 @@
         ? '<span style="color:#dc465a;font-weight:700;">' + dispTitle + ' ⚠タグ忘れあり</span>'
         : dispTitle;
       var bskyHref = it.shareUrl || it.shortUrl || it.postUrl || ''; // 表示リンクは共有(da.gd)優先。計測は下のcode(=r2)で行う
-      // 属性バッジ（作品名の下に改行して表示。作品状態は価格行の左に別途表示）
+      // 属性バッジ(作品名の下に改行して表示。作品状態は価格行の左に別途表示)
       var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
       // 作り直し系バッジ：rebuild=この動画自体がリビルド版 / remade=この投稿は被リビルド(=リビルド版に取って代わられた)
       if (it.rebuild) tagsHtml += '<span class="vtag vtag-rebuild">🔁リビルド版</span>';
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
         '<div class="vrow-body">' +
-        // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名（改行して統一）
+        // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名(改行して統一)
         '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
         '<div class="vrow-title">' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
@@ -627,7 +627,7 @@
         (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
-          '<span title="Bsky投稿クリック数(YT→投稿・導線1)' + (it.rebuildBaseClicks != null ? '（総合値。カッコ内＝リビルド前の動画までのクリック数）' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
+          '<span title="Bsky投稿クリック数(YT→投稿・導線1)' + (it.rebuildBaseClicks != null ? '(総合値。カッコ内＝リビルド前の動画までのクリック数)' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
           (wcode ? '<span title="作品リンククリック数(投稿→FANZA・導線2)">🛒 ' + (wclicks != null ? num(wclicks) : '…') + '</span>' : '') +
           '<span class="vrow-links">' + // 🛠️編集/Bsky↗/YouTube↗/作品↗ を1グループに＝編集もBskyと同じ段に表示・作品↗だけ改行される事故を防ぐ
@@ -639,22 +639,22 @@
         '</div>' +
         '</div>' + // .vrow-body
         ((it.workUrl || refThumb || postThumb) ? '<div class="vrow-thumbcol">' +
-          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
-          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" src="' + esc(refThumb) + '" alt="動画で使った画像（タップで拡大）" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
-          (postThumb ? '<img class="vrow-postimg" data-postkey="' + esc(pKey) + '" src="' + esc(postThumb) + '" alt="投稿画像（タップで拡大）" title="🛠️編集で添付した投稿画像。タップで拡大・左右で全枚数" loading="lazy">' : '') +
+          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
+          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" src="' + esc(refThumb) + '" alt="動画で使った画像(タップで拡大)" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
+          (postThumb ? '<img class="vrow-postimg" data-postkey="' + esc(pKey) + '" src="' + esc(postThumb) + '" alt="投稿画像(タップで拡大)" title="🛠️編集で添付した投稿画像。タップで拡大・左右で全枚数" loading="lazy">' : '') +
         '</div>' : '') +
-        // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右（画像の真下）まで届く
+        // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
-          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' : '') + ' title="日別の増分(30分毎のサーバー記録から)。⚠=記録欠損(追跡開始前/取得失敗)。–は今日投稿の昨日のみ">' + (vid ? (fmtDelta_(deltaCache[vid], it.ts) || '<span style="opacity:.55;" title="30分毎のサーバースナップ後に数値が出ます">⏳記録待ち(最大30分)</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日のみ">' + (vid ? (fmtDelta_(deltaCache[vid], it.ts) || '<span style="opacity:.55;" title="30分毎のサーバースナップ後に数値が出ます">⏳記録待ち(最大30分)</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
-            (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ（同一作品ならBluesky投稿を引き継ぎ）">🔁 リビルドで作成</button>' : '') +
-            '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける（削除ではなく記録として残す）">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
+            (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルドで作成</button>' : '') +
+            '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
           '</div>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
         '</div>';
     }).join('');
-    applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示（フェッチ待ちで遅れない）
+    applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示(フェッチ待ちで遅れない)
     fillFanzaNames();
 
     // YouTube URL 直接入力
@@ -684,19 +684,19 @@
       });
     });
 
-    // 作り直し（削除の代わりに「被リビルド」の印を付ける／取り消す）
+    // 作り直し(削除の代わりに「被リビルド」の印を付ける／取り消す)
     list.querySelectorAll('.vremake').forEach(function (b) {
       b.addEventListener('click', function () { toggleRemade(b.getAttribute('data-k')); });
     });
 
-    // 🔁リビルドで作る：この投稿をリビルド元にして動画作成タブへ（bluesky.jsのGo5Rebuildが対象選択＋作品データ反映まで実施）
+    // 🔁リビルドで作る：この投稿をリビルド元にして動画作成タブへ(bluesky.jsのGo5Rebuildが対象選択＋作品データ反映まで実施)
     list.querySelectorAll('.vrebuild-from').forEach(function (b) {
       b.addEventListener('click', function () {
         if (window.Go5Rebuild && window.Go5Rebuild.startFromHistory) window.Go5Rebuild.startFromHistory(b.getAttribute('data-rbvid'));
       });
     });
 
-    // 被リビルド作品の非表示トグル（最新の投稿カードのみに設置）
+    // 被リビルド作品の非表示トグル(最新の投稿カードのみに設置)
     var hideBtn = $('hideRemadeBtn');
     if (hideBtn) hideBtn.addEventListener('click', function () {
       try { localStorage.setItem(hideRemadeKey, hideRemade ? '0' : '1'); } catch (e) {}
@@ -726,7 +726,7 @@
       });
     });
 
-    // 🛠️編集で添付した投稿画像 → 拡大ズーム（左右で全枚数・下に「現在 / 総ページ数」）。
+    // 🛠️編集で添付した投稿画像 → 拡大ズーム。(左右で全枚数・下に「現在 / 総ページ数」)
     list.querySelectorAll('.vrow-postimg').forEach(function (im) {
       im.addEventListener('click', function () {
         var key = im.getAttribute('data-postkey');
@@ -755,14 +755,14 @@
         });
         addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
         addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
-        addPostImagesToModal_(k, it); // 「投稿画像を添付（複数可）」を差し込む
+        addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
       });
     });
   }
 
-  // ── 🔁リビルド結合：この投稿を、別の投稿（＝リビルド前の動画）のリビルド版として結合する ──
-  // 選んだ側が「被リビルド」（ランキング除外）になり、この投稿がランキングに残る。この投稿のクリックは
-  // 「この投稿＋リビルド前」の総合値表示になり、括弧内にリビルド前分（結合時点のクリック数）を出す。
+  // ── 🔁リビルド結合：この投稿を、別の投稿(＝リビルド前の動画)のリビルド版として結合する ──
+  // 選んだ側が「被リビルド」(ランキング除外)になり、この投稿がランキングに残る。この投稿のクリックは
+  // 「この投稿＋リビルド前」の総合値表示になり、括弧内にリビルド前分(結合時点のクリック数)を出す。
   function addRebuildMergeButtonToModal_(k, it) {
     var actions = $('veditOverlay') && $('veditOverlay').querySelector('.vedit-actions');
     if (!actions) return;
@@ -771,7 +771,7 @@
     var row = document.createElement('div');
     row.id = 'veditRebuildMergeRow';
     row.style.cssText = 'margin:8px 0 0;';
-    var cur = (it.rebuildOf && it.rebuildMerged) ? ('（現在：' + esc(rebuildTargetTitle_(it.rebuildOf) || '結合済み') + '）') : '';
+    var cur = (it.rebuildOf && it.rebuildMerged) ? ('(現在：' + esc(rebuildTargetTitle_(it.rebuildOf) || '結合済み') + ')') : '';
     row.innerHTML = '<button id="veditRebuildMerge" type="button" class="vedit-gen">🔁 リビルド結合' + (cur ? '<span class="vgen-note" style="display:block;">' + cur + '</span>' : '') + '</button>';
     actions.parentNode.insertBefore(row, actions); // 保存を含む actions の直前＝「保存の上」
     row.querySelector('#veditRebuildMerge').addEventListener('click', function () { openRebuildMergePicker_(k, it); });
@@ -781,7 +781,7 @@
     for (var i = 0; i < all.length; i++) { if (all[i].videoId === videoId) return all[i].title || '(無題)'; }
     return '';
   }
-  // 履歴アイテムの作品cid（候補タブと同じ normalize+buildAffiliateLink）。
+  // 履歴アイテムの作品cid。(候補タブと同じ normalize+buildAffiliateLink)
   function workCidOf_(u) {
     try {
       if (!u || !window.buildAffiliateLink) return '';
@@ -814,11 +814,11 @@
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
       '<div class="fz-title" style="background:#fffef9;color:#111;padding:8px 12px;border-radius:8px;margin:2px 34px 10px 0;">🔁 リビルド結合する動画を選ぶ</div>' +
-      '<div class="hint" style="color:#c8cdd4;">選んだ動画が「被リビルド」になり（ランキングから外れます）、この投稿がリビルド版として残ります。クリック数は合算されます。</div>' +
+      '<div class="hint" style="color:#c8cdd4;">選んだ動画が「被リビルド」になり(ランキングから外れます)、この投稿がリビルド版として残ります。クリック数は合算されます。</div>' +
       '<div class="rbm-sec-label">作品URLが一致する投稿</div>' +
       (matched.length ? '<div class="rbm-list">' + matched.map(rowHtml).join('') + '</div>'
-        : '<div class="hint" style="padding:4px 0;">一致する投稿はありません' + (myCid ? '' : '（この投稿に作品URLが無いため照合できません）') + '。下の一覧から選べます。</div>') +
-      '<div class="rbm-sec-label">すべての投稿（新しい順）</div>' +
+        : '<div class="hint" style="padding:4px 0;">一致する投稿はありません' + (myCid ? '' : '(この投稿に作品URLが無いため照合できません)') + '。下の一覧から選べます。</div>') +
+      '<div class="rbm-sec-label">すべての投稿(新しい順)</div>' +
       (all.length ? '<div class="rbm-list">' + all.map(rowHtml).join('') + '</div>' : '<div class="hint">他に投稿がありません。</div>');
     ov.hidden = false;
     body.querySelectorAll('.rbm-item').forEach(function (b) {
@@ -832,7 +832,7 @@
       });
     });
   }
-  // リビルド結合の適用：この投稿=リビルド版（rebuild/rebuildOf/結合スナップショット）、選んだ動画=被リビルド。
+  // リビルド結合の適用：この投稿=リビルド版(rebuild/rebuildOf/結合スナップショット)、選んだ動画=被リビルド。
   function mergeRebuild_(thisKey, thisItem, target) {
     var baseClicks = null;
     try { var tcode = codeOf(target.shortUrl || ''); if (tcode && (tcode in clicksCache)) baseClicks = clicksCache[tcode]; } catch (e) {}
@@ -850,7 +850,7 @@
     refresh();
   }
 
-  // 1件削除（確認ダイアログ）。手動追加分は verify_manual から、投稿履歴は short_hist から除去。
+  // 1件削除。(確認ダイアログ)手動追加分は verify_manual から、投稿履歴は short_hist から除去。
   function deleteItem(k, row) {
     function clearMark() { if (row && row.classList) row.classList.remove('vrow-deleting'); }
     var rawItems = allItems(), ymap = loadYtMap();
@@ -859,7 +859,7 @@
     if (!target) { clearMark(); return; }
     var vid = ytIdOf(ymap[k] || target.ytUrl || '');
     var title = (vid && titleCache[vid]) || target.title || (target.manual ? '(手動追加)' : '(無題)');
-    if (!window.confirm('「' + title + '」を本当に消去しますか？\n（この記録を一覧から削除します。取り消せません）')) { clearMark(); return; }
+    if (!window.confirm('「' + title + '」を本当に消去しますか？\n(この記録を一覧から削除します。取り消せません)')) { clearMark(); return; }
     if (target.manual) {
       saveArr(manualKey(), loadManual().filter(function (x) { return itemKey(x) !== k; }));
     } else {
@@ -869,7 +869,7 @@
     refresh();
   }
 
-  // 作り直し印のトグル（削除はしない）。ONで「この動画を消して作り直した」印を付け、記録シートにも反映。
+  // 作り直し印のトグル。(削除はしない)ONで「この動画を消して作り直した」印を付け、記録シートにも反映。
   function toggleRemade(k) {
     var arrKey, arr;
     // 対象が手動追加(verify_manual)か投稿履歴(short_hist)かを判定して、その配列内のフラグを反転。
@@ -880,11 +880,11 @@
     arr.forEach(function (x) { if (itemKey(x) === k) { x.remade = !x.remade; target = x; next = !!x.remade; } });
     if (!target) return;
     saveArr(arrKey, arr);
-    // 記録シート（GAS）にも反映：videoId 行の「作り直し」列を 作り直し済/解除 に。テストIDと未設定は送らない。
+    // 記録シート(GAS)にも反映：videoId 行の「作り直し」列を 作り直し済/解除 に。テストIDと未設定は送らない。
     pushRemadeToGas_(target.videoId || '', next);
     refresh();
   }
-  // channel省略時は現在UIのアカウント（既存の呼び出し=ボタン操作は常にUIと同じアカウントを見ているため安全）。
+  // channel省略時は現在UIのアカウント。(既存の呼び出し=ボタン操作は常にUIと同じアカウントを見ているため安全)
   function pushRemadeToGas_(videoId, remade, channel) {
     if (!videoId) return;
     var isTest = (window.IdGen && window.IdGen.isTestId) ? window.IdGen.isTestId(videoId) : /^test-/.test(videoId);
@@ -899,15 +899,15 @@
   }
 
   // ── 🔁リビルド連携：動画作成タブの「どの作品をリビルドするか」ピッカー・被リビルド自動反映 ──
-  //   window.Go5History として外部（bluesky.js/index.html）から使う。
-  //   listForRebuildPicker: 現在アカウントの投稿履歴を新しい順で返す（既に被リビルド済みは対象から除外）。
+  //   window.Go5History として外部(bluesky.js/index.html)から使う。
+  //   listForRebuildPicker: 現在アカウントの投稿履歴を新しい順で返す。(既に被リビルド済みは対象から除外)
   function listForRebuildPicker_() {
-    ensureIds(); // 履歴を正としてID未付与のアイテムへ背骨IDを付与＝ピッカーに全件を確実に出す（履歴一覧との不一致を防ぐ）
+    ensureIds(); // 履歴を正としてID未付与のアイテムへ背骨IDを付与＝ピッカーに全件を確実に出す(履歴一覧との不一致を防ぐ)
     var ymap = loadYtMap();
     return allItems()
       .filter(function (it) { return it.videoId && !it.remade; })
       .map(function (it) {
-        // 題名は投稿履歴一覧と同じ解決順（YouTubeタイトルがあれば優先→なければ記録タイトル）。#タグは除去。
+        // 題名は投稿履歴一覧と同じ解決順。(YouTubeタイトルがあれば優先→なければ記録タイトル)#タグは除去。
         var k = itemKey(it);
         var vid = ytIdOf(ymap[k] || it.ytUrl || '');
         var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
@@ -916,7 +916,7 @@
       .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
   }
   // videoIdを指定して「被リビルド」フラグ(remade)をONにする。account省略時は現在UIのアカウント。
-  //   新しい動画作成時の自動リンク付け（bluesky.js）から呼ばれるため、投稿先アカウントを明示できるようにしている。
+  //   新しい動画作成時の自動リンク付け(bluesky.js)から呼ばれるため、投稿先アカウントを明示できるようにしている。
   function markRebuilt_(videoId, account) {
     if (!videoId) return;
     var a = account || acct();
@@ -935,13 +935,13 @@
   }
   try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_ }; } catch (e) {}
 
-  // ── アイテムのアカウント間移動（誤って別アカウントに入った履歴/手動追加を正しい側へ）──
+  // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }
   function loadArrFor_(base, a) { try { var x = JSON.parse(localStorage.getItem(base + '__' + a) || '[]'); return Array.isArray(x) ? x : []; } catch (e) { return []; } }
   function saveArrFor_(base, a, arr) { try { localStorage.setItem(base + '__' + a, JSON.stringify(arr.slice(0, 200))); } catch (e) {} }
   function loadYtMapFor_(a) { try { return JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { return {}; } }
   function saveYtMapFor_(a, m) { try { localStorage.setItem('verify_yt__' + a, JSON.stringify(m)); } catch (e) {} }
-  // 1件をアカウント間で移動（ローカルの base 配列＋verify_yt＋シート行）。表示更新はしない。
+  // 1件をアカウント間で移動。(ローカルの base 配列＋verify_yt＋シート行)表示更新はしない。
   function moveOne_(base, it, from, to) {
     if (from === to || !it) return;
     var k = itemKey(it);
@@ -956,14 +956,14 @@
     var gas = gasUrl_();
     if (gas && (moved.videoId || moved.postUri || moved.shortUrl)) {
       var mvpay = { from: from, to: to, videoId: moved.videoId || '', postUri: moved.postUri || '', short: moved.shortUrl || '' };
-      // T2: 応答を検証し、失敗（通信断/GASエラー/ok:false）は再送キューへ積む＝ローカルとシートの無通知乖離を防ぐ。
+      // T2: 応答を検証し、失敗(通信断/GASエラー/ok:false)は再送キューへ積む＝ローカルとシートの無通知乖離を防ぐ。
       fetch(gas, { method: 'POST', body: JSON.stringify({ op: 'move_row', videoId: mvpay.videoId, postUri: mvpay.postUri, short: mvpay.short, from: from, to: to }) })
         .then(function (r) { return r.json(); })
         .then(function (j) { if (!j || !j.ok) throw new Error((j && j.error) || 'move_row_failed'); })
         .catch(function () { queueSheetMove_(mvpay); });
     }
   }
-  // T2: シート行移動の失敗を貯めて次回更新時に自動再送（ローカルだけ動いてシートが取り残される事故の恒久対策）。
+  // T2: シート行移動の失敗を貯めて次回更新時に自動再送。(ローカルだけ動いてシートが取り残される事故の恒久対策)
   function queueSheetMove_(mv) {
     try { var q = JSON.parse(localStorage.getItem('sheet_move_pending') || '[]') || []; q.push(mv); localStorage.setItem('sheet_move_pending', JSON.stringify(q)); } catch (e) {}
   }
@@ -971,7 +971,7 @@
     var gas = gasUrl_(); if (!gas) return;
     var q; try { q = JSON.parse(localStorage.getItem('sheet_move_pending') || '[]') || []; } catch (e) { q = []; }
     if (!q.length) return;
-    var mv = q[0]; // 1回のrefreshで1件ずつ（軽量・順序保存）
+    var mv = q[0]; // 1回のrefreshで1件ずつ(軽量・順序保存)
     fetch(gas, { method: 'POST', body: JSON.stringify({ op: 'move_row', videoId: mv.videoId, postUri: mv.postUri, short: mv.short, from: mv.from, to: mv.to }) })
       .then(function (r) { return r.json(); })
       .then(function (j) { if (j && j.ok) { var qq; try { qq = JSON.parse(localStorage.getItem('sheet_move_pending') || '[]') || []; } catch (e) { qq = []; } qq.shift(); try { localStorage.setItem('sheet_move_pending', JSON.stringify(qq)); } catch (e) {} } })
@@ -982,14 +982,14 @@
     // T2: 本人投稿の誤移動ブロック。DID台帳が健全で「この投稿は現アカウント本人のもの」と確定できるなら強警告。
     var R = window.Go5AccountRepair;
     if (R && R.classifyByPost && R.ledgerFresh && R.ledgerFresh() && R.classifyByPost(it) === from) {
-      if (!window.confirm('⚠️ この投稿は「' + acctName_(from) + '」本人のアカウント（投稿者DID）で投稿されています。\nそれでも ' + acctName_(to) + ' へ移動しますか？（通常は不要です）')) return;
+      if (!window.confirm('⚠️ この投稿は「' + acctName_(from) + '」本人のアカウント(投稿者DID)で投稿されています。\nそれでも ' + acctName_(to) + ' へ移動しますか？(通常は不要です)')) return;
     }
     moveOne_(it.manual ? 'verify_manual' : 'short_hist', it, from, to);
-    setStatus('✅ 「' + (it.title || k) + '」を ' + acctName_(to) + ' へ移動しました。' + (gasUrl_() ? '' : '（シートは⚙記録用URL設定時に反映）'));
+    setStatus('✅ 「' + (it.title || k) + '」を ' + acctName_(to) + ' へ移動しました。' + (gasUrl_() ? '' : '(シートは⚙記録用URL設定時に反映)'));
     render();
   }
 
-  // ── YouTube channelId 取得（fetchVideos を流用・yt_meta_cache にキャッシュ）──
+  // ── YouTube channelId 取得(fetchVideos を流用・yt_meta_cache にキャッシュ)──
   function fetchChannelIds_(vids, cb) {
     var meta = ytMetaLoad(), need = [], out = {};
     (vids || []).forEach(function (v) { if (!v) return; if (meta[v] && meta[v].channelId) out[v] = meta[v].channelId; else need.push(v); });
@@ -1007,16 +1007,16 @@
     });
   }
 
-  // ── アカウント分類の「検出」（DID/ハンドル→YouTubeチャンネル→videoId接頭辞）──
-  //   ★移動はしない。移動候補リストを返すだけ（適用は applyMoves_ でユーザー確認後）。
-  //   安全ゲート: ①DID台帳をverifyLedgerで毎回検証（force解決・両DID相異・失敗時中止）
-  //              ②channel地図は「片方のアカウントの票しか無いチャンネル」だけ採用（排他）
+  // ── アカウント分類の「検出」(DID/ハンドル→YouTubeチャンネル→videoId接頭辞)──
+  //   ★移動はしない。移動候補リストを返すだけ。(適用は applyMoves_ でユーザー確認後)
+  //   安全ゲート: ①DID台帳をverifyLedgerで毎回検証(force解決・両DID相異・失敗時中止)
+  //              ②channel地図は「片方のアカウントの票しか無いチャンネル」だけ採用(排他)
   var _smartRepairBusy = false;
   function detectAccountMoves_(cb) {
     if (_smartRepairBusy) { cb({ ok: false, reason: 'busy' }); return; }
     _smartRepairBusy = true;
     var R = window.Go5AccountRepair;
-    if (!R || typeof R.verifyLedger !== 'function') { _smartRepairBusy = false; cb({ ok: false, reason: '修復モジュール未読込（🦋投稿タブを一度開いてください）' }); return; }
+    if (!R || typeof R.verifyLedger !== 'function') { _smartRepairBusy = false; cb({ ok: false, reason: '修復モジュール未読込(🦋投稿タブを一度開いてください)' }); return; }
     R.verifyLedger(function (led) {
       if (!led.ok) { _smartRepairBusy = false; cb({ ok: false, reason: led.reason, ledger: led }); return; }
       var classifyByPost = R.classifyByPost;
@@ -1028,7 +1028,7 @@
       var ymapBy = { acc1: loadYtMapFor_('acc1'), acc2: loadYtMapFor_('acc2') };
       function vidOf(b) { return ytIdOf(ymapBy[b.a][itemKey(b.it)] || b.it.ytUrl || ''); }
       fetchChannelIds_(buckets.map(vidOf).filter(Boolean), function (vidChan) {
-        // channel→account 地図（排他票のみ。両アカウントの票が入ったチャンネルは判定に使わない）
+        // channel→account 地図(排他票のみ。両アカウントの票が入ったチャンネルは判定に使わない)
         var tally = {};
         buckets.forEach(function (b) {
           var byPost = classifyByPost(b.it); var vid = vidOf(b); var ch = vid ? vidChan[vid] : '';
@@ -1039,7 +1039,7 @@
           var t = tally[ch];
           if (t.acc1 > 0 && t.acc2 === 0) chanToAcct[ch] = 'acc1';
           else if (t.acc2 > 0 && t.acc1 === 0) chanToAcct[ch] = 'acc2';
-          // 両方の票があるチャンネルは曖昧＝不採用（誤った多数決で全量誤移動しない）
+          // 両方の票があるチャンネルは曖昧＝不採用(誤った多数決で全量誤移動しない)
         });
         var moves = [], unknown = 0;
         buckets.forEach(function (b) {
@@ -1054,7 +1054,7 @@
       });
     });
   }
-  // 検出結果を適用（移動ログを保存し「元に戻す」を可能にする）。高信頼(post/channel)のみ。
+  // 検出結果を適用。(移動ログを保存し「元に戻す」を可能にする)高信頼(post/channel)のみ。
   function applyMoves_(moves) {
     var log = [];
     moves.forEach(function (mv) {
@@ -1065,7 +1065,7 @@
     if (log.length) { try { localStorage.setItem('acct_move_log_last', JSON.stringify(log)); } catch (e) {} }
     return log.length;
   }
-  // 直前の一括移動を元に戻す（ログから逆適用。シート行も move_row で戻る）。
+  // 直前の一括移動を元に戻す。(ログから逆適用。シート行も move_row で戻る)
   function undoLastMoves_() {
     var log = []; try { log = JSON.parse(localStorage.getItem('acct_move_log_last') || '[]') || []; } catch (e) {}
     if (!log.length) { setStatus('元に戻せる移動履歴がありません。'); return; }
@@ -1074,40 +1074,40 @@
     setStatus('↩️ ' + log.length + '件の移動を元に戻しました。');
     render();
   }
-  // 確認ダイアログ用の移動一覧テキスト（最大12件表示）。
+  // 確認ダイアログ用の移動一覧テキスト。(最大12件表示)
   function movesSummary_(moves, led) {
     var lines = moves.slice(0, 12).map(function (mv) {
-      return '・「' + String(mv.it.title || itemKey(mv.it)).slice(0, 24) + '」 ' + acctName_(mv.from) + ' → ' + acctName_(mv.to) + '（' + (mv.by === 'post' ? 'Bluesky投稿者' : 'YouTubeチャンネル') + '判定）';
+      return '・「' + String(mv.it.title || itemKey(mv.it)).slice(0, 24) + '」 ' + acctName_(mv.from) + ' → ' + acctName_(mv.to) + '(' + (mv.by === 'post' ? 'Bluesky投稿者' : 'YouTubeチャンネル') + '判定)';
     });
     if (moves.length > 12) lines.push('…ほか ' + (moves.length - 12) + '件');
     var idLine = '判定基準: 月詠み=@' + led.h1 + (led.dn1 ? '(' + led.dn1 + ')' : '') + ' / 宵桜=@' + led.h2 + (led.dn2 ? '(' + led.dn2 + ')' : '');
     return idLine + '\n\n' + lines.join('\n');
   }
-  // ── シート(記録)から、現在アカウントの投稿履歴をローカルへ復元（非破壊）──
+  // ── シート(記録)から、現在アカウントの投稿履歴をローカルへ復元(非破壊)──
   //   記録シートを正本として、①別アカウントへ誤って入ったアイテムを現アカウントへ戻す
-  //   ②ローカルに無い投稿はシートから薄いアイテムとして復活。既存ローカルは尊重（消さない）。
-  // シートの作品cid → 作品URL を再構成（同人=d_… / ブックス=数字ID）。復元時に作品URLを取り戻す。
+  //   ②ローカルに無い投稿はシートから薄いアイテムとして復活。既存ローカルは尊重。(消さない)
+  // シートの作品cid → 作品URL を再構成。(同人=d_… / ブックス=数字ID)復元時に作品URLを取り戻す。
   function workUrlFromCid_(cid) {
     cid = String(cid || '').trim(); if (!cid) return '';
     if (/^d_/.test(cid)) return 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/';
     if (/^\d+$/.test(cid)) return 'https://book.dmm.com/product/' + cid + '/';
-    return ''; // それ以外（動画等）はドメイン推定が難しいので空（手動編集で補完可）
+    return ''; // それ以外(動画等)はドメイン推定が難しいので空(手動編集で補完可)
   }
   function restoreHistoryFromSheet_(cb) {
-    var gas = gasUrl_(); if (!gas) { if (cb) cb({ ok: false, reason: '記録用GAS（⚙記録用URL）が未設定です' }); return; }
+    var gas = gasUrl_(); if (!gas) { if (cb) cb({ ok: false, reason: '記録用GAS(⚙記録用URL)が未設定です' }); return; }
     var to = acct();
     jsonp_(gas, { action: 'history', channel: to, limit: 300 }, function (res) {
       if (!res || !res.ok || !Array.isArray(res.items)) {
         var why = 'シートの投稿履歴を取得できませんでした';
-        if (res && res.__jsonpFail && res.reason === 'blocked') why += '（' + res.ms + 'ms で読込失敗＝広告ブロッカー/セキュリティソフト/DNSフィルタが script.google.com への通信を遮断している可能性が高いです。拡張機能を無効化するかシークレットウィンドウで試してください）';
-        else if (res && res.__jsonpFail && res.reason === 'timeout') why += '（20秒応答なし＝通信不安定、またはGAS側が混雑している可能性）';
-        else if (res && res.error) why += '（GAS: ' + res.error + '）';
+        if (res && res.__jsonpFail && res.reason === 'blocked') why += '(' + res.ms + 'ms で読込失敗＝広告ブロッカー/セキュリティソフト/DNSフィルタが script.google.com への通信を遮断している可能性が高いです。拡張機能を無効化するかシークレットウィンドウで試してください)';
+        else if (res && res.__jsonpFail && res.reason === 'timeout') why += '(20秒応答なし＝通信不安定、またはGAS側が混雑している可能性)';
+        else if (res && res.error) why += '(GAS: ' + res.error + ')';
         if (cb) cb({ ok: false, reason: why });
         return;
       }
       var arrs = {};
       function arrOf(base, a) { var kk = base + '__' + a; if (!arrs[kk]) arrs[kk] = loadArrFor_(base, a); return arrs[kk]; }
-      // 1アイテムを表す全キー（postUri/短縮URL/videoId/題名+YT）。安定キーが無い行も題名+YTで重複判定。
+      // 1アイテムを表す全キー。(postUri/短縮URL/videoId/題名+YT)安定キーが無い行も題名+YTで重複判定。
       function keysFor(o, yt) {
         var ks = [];
         if (o.postUri) ks.push('u:' + o.postUri);
@@ -1117,7 +1117,7 @@
         if ((o.title || y)) ks.push('t:' + (o.title || '') + '|' + y);
         return ks;
       }
-      // ローカル全体を索引（両アカウント×short_hist/verify_manual）。各アイテムの全キーを登録。
+      // ローカル全体を索引。(両アカウント×short_hist/verify_manual)各アイテムの全キーを登録。
       var idx = {};
       ['acc1', 'acc2'].forEach(function (a) {
         ['short_hist', 'verify_manual'].forEach(function (base) {
@@ -1131,39 +1131,39 @@
         var sheetKeys = keysFor(si, si.youtubeUrl);
         if (!sheetKeys.length) { skipped++; return; } // 識別子が全く無い空行はスキップ
         // P4: 背骨IDの接頭辞が現アカウントと矛盾する行は取り込まない。
-        //   シート側の誤タブ行（例: 宵桜タブに紛れた acc1-… の行）を復元経由でローカルへ「再感染」させない。
+        //   シート側の誤タブ行(例: 宵桜タブに紛れた acc1-… の行)を復元経由でローカルへ「再感染」させない。
         var pm = String(si.videoId || '').match(/^(acc[12])-/);
         if (pm && pm[1] !== to) { skipped++; return; }
         var loc = null, matchedKey = ''; for (var i = 0; i < sheetKeys.length && !loc; i++) { if (idx[sheetKeys[i]]) { loc = idx[sheetKeys[i]]; matchedKey = sheetKeys[i]; } }
         if (loc) {
-          if (loc.a !== to) { // 誤って別アカウントに入っている→現アカウントへ戻す（ローカルのみ・シートは触らない）
-            // T3: 弱キー(t:題名|YT)一致での横断移動は禁止（別作品/両垢同題名の誤吸引＝再感染を防ぐ。取り込まず据え置き）。
+          if (loc.a !== to) { // 誤って別アカウントに入っている→現アカウントへ戻す(ローカルのみ・シートは触らない)
+            // T3: 弱キー(t:題名|YT)一致での横断移動は禁止。(別作品/両垢同題名の誤吸引＝再感染を防ぐ。取り込まず据え置き)
             if (matchedKey.charAt(0) === 't') { skipped++; return; }
             var srcArr = arrOf(loc.base, loc.a), mv = null;
             var na = srcArr.filter(function (x) { if (itemKey(x) === loc.key) { mv = x; return false; } return true; });
-            // T3: ローカル品の所属(投稿者DID／背骨ID接頭辞)が現アカウントと矛盾するなら移動しない（naは未保存＝副作用なし）。
+            // T3: ローカル品の所属(投稿者DID／背骨ID接頭辞)が現アカウントと矛盾するなら移動しない。(naは未保存＝副作用なし)
             if (mv) { var ow = ownerOf_(mv); if (ow && ow !== to) { skipped++; return; } }
             arrs[loc.base + '__' + loc.a] = na; saveArrFor_(loc.base, loc.a, na);
             var dstBase = (mv && mv.manual) ? 'verify_manual' : 'short_hist';
             var dstArr = arrOf(dstBase, to).filter(function (x) { return itemKey(x) !== loc.key; });
             dstArr.unshift(mv || {}); arrs[dstBase + '__' + to] = dstArr; saveArrFor_(dstBase, to, dstArr);
             var fm = loadYtMapFor_(loc.a); if (fm[loc.key]) { ytTo[loc.key] = fm[loc.key]; delete fm[loc.key]; saveYtMapFor_(loc.a, fm); }
-            loc.a = to; loc.base = dstBase; // 索引も現在地へ更新（同一runでの二重処理防止）
+            loc.a = to; loc.base = dstBase; // 索引も現在地へ更新(同一runでの二重処理防止)
             movedBack++;
           }
           // 既に to にある：何もしない
         } else { // ローカルに無い→シートから薄い履歴アイテムを復活
           // ts＝postedAt優先。空なら背骨ID(videoId=acc-YYYYMMDD-HHMM-)から作成日時を復元＝投稿日が0のまま
-          //   復元される「月詠み✔なのに投稿日が出ない」再発を防止（次回のシート記録にも正しいpostedAtが乗る）。
+          //   復元される「月詠み✔なのに投稿日が出ない」再発を防止。(次回のシート記録にも正しいpostedAtが乗る)
           var _svid = si.videoId || '';
           var _sts = (si.postedAt ? (Date.parse(si.postedAt) || 0) : 0) || (window.IdGen && window.IdGen.tsOfId ? window.IdGen.tsOfId(_svid) : 0);
           var item = { account: to, title: si.title || '', shortUrl: si.shortUrl || '', shareUrl: si.shareUrl || si.shortUrl || '', postUrl: si.postUrl || '', postUri: si.postUri || '', videoId: _svid, ts: _sts };
-          var wu = si.workUrl || workUrlFromCid_(si.cid); if (wu) item.workUrl = wu; // 作品URLをcidから復元（サムネ・価格・作品状態が戻る）
-          if (si.cid) item.cid = String(si.cid); // 作品cidも串刺しで保持（候補タブの「投稿済み」判定を確実にする）
+          var wu = si.workUrl || workUrlFromCid_(si.cid); if (wu) item.workUrl = wu; // 作品URLをcidから復元(サムネ・価格・作品状態が戻る)
+          if (si.cid) item.cid = String(si.cid); // 作品cidも串刺しで保持(候補タブの「投稿済み」判定を確実にする)
           if (si.workState) item.workState = si.workState;
           var dstArr2 = arrOf('short_hist', to); dstArr2.unshift(item); arrs['short_hist__' + to] = dstArr2; saveArrFor_('short_hist', to, dstArr2);
           var k = itemKey(item); if (si.youtubeUrl) ytTo[k] = si.youtubeUrl;
-          // 追加分も索引へ（同一run内の重複シート行を二重追加しない）
+          // 追加分も索引へ(同一run内の重複シート行を二重追加しない)
           var newLoc = { a: to, base: 'short_hist', key: k }; keysFor(item, si.youtubeUrl).forEach(function (kx) { if (!idx[kx]) idx[kx] = newLoc; });
           added++;
         }
@@ -1186,14 +1186,14 @@
     var actions = modal.querySelector('.vedit-actions');
     if (actions) modal.insertBefore(div, actions); else modal.appendChild(div);
     div.querySelector('.vedit-move-btn').addEventListener('click', function () {
-      if (!window.confirm('「' + (it.title || k) + '」を ' + acctName_(to) + ' の投稿履歴へ移動します。\n（この端末とスプレッドシートの両方を移します）よろしいですか？')) return;
+      if (!window.confirm('「' + (it.title || k) + '」を ' + acctName_(to) + ' の投稿履歴へ移動します。\n(この端末とスプレッドシートの両方を移します)よろしいですか？')) return;
       closeModal_();
       moveItemAccount_(k, it, to);
     });
   }
 
-  // 編集モーダルへ「投稿画像を添付（複数可）」セクションを差し込む。1枚目が投稿履歴カードに表示され、
-  //   タップで作品画像と同様に拡大（左右で全枚数・下に「現在 / 総ページ数」）。保存はwrite-through（追加/削除で即反映）。
+  // 編集モーダルへ「投稿画像を添付(複数可)」セクションを差し込む。1枚目が投稿履歴カードに表示され、
+  //   タップで作品画像と同様に拡大。(左右で全枚数・下に「現在 / 総ページ数」)保存はwrite-through。(追加/削除で即反映)
   function addPostImagesToModal_(k, it) {
     var ov = document.getElementById('veditOverlay'); if (!ov) return;
     var modal = ov.querySelector('.vedit-modal'); if (!modal) return;
@@ -1204,7 +1204,7 @@
     var imgs = (api.postImgs(pKey) || []).slice(); // 作業コピー
     var wrap = document.createElement('div'); wrap.className = 'vedit-field vedit-postimg';
     wrap.innerHTML =
-      '<div class="vedit-postimg-lbl">投稿画像（複数可・1枚目が投稿履歴に表示）</div>' +
+      '<div class="vedit-postimg-lbl">投稿画像(複数可・1枚目が投稿履歴に表示)</div>' +
       '<div class="vedit-postimg-grid"></div>' +
       '<label class="vedit-postimg-add">＋ 画像を追加<input type="file" accept="image/*" multiple hidden></label>';
     var actions = modal.querySelector('.vedit-actions');
@@ -1244,9 +1244,9 @@
     draw();
   }
 
-  // YouTube動画を手動で追加（モーダルで YouTube URL + Bluesky URL + 作品URL を一括入力）。
+  // YouTube動画を手動で追加。(モーダルで YouTube URL + Bluesky URL + 作品URL を一括入力)
   function addManual() {
-    // 作品URLをアフィリンクタブの②から自動取得（なければ bsky_work_url を使用）
+    // 作品URLをアフィリンクタブの②から自動取得(なければ bsky_work_url を使用)
     var autoWorkUrl = '';
     try {
       var afEl = document.getElementById('affiUrls');
@@ -1293,12 +1293,12 @@
     var jobs = [];
     codes.forEach(function (code) { jobs.push(fetchClicks(code).then(function (c) { if (c != null) clicksCache[code] = c; })); });
     // D1: YouTube照会は videos.list の上限(50件/回)に合わせて50件ずつ分割。件数が増えても全行を取得する
-    //   （旧実装は先頭50件で silent 打ち切り＝古い投稿/末尾の手動追加から更新が止まっていた）。
+    //   。(旧実装は先頭50件で silent 打ち切り＝古い投稿/末尾の手動追加から更新が止まっていた)
     //   予約公開判定は「照会したのに応答に無い」を用いるため、queried は全バッチ合算してから一度だけ判定する。
     var merged = {}, allQueried = [], firstErr = '';
     for (var bi = 0; bi < uniqVids.length; bi += 50) {
       (function (batch) {
-        jobs.push(fetchVideos(batch).catch(function () { return { __error: 'YouTube APIに接続できませんでした（通信エラー）' }; }).then(function (m) {
+        jobs.push(fetchVideos(batch).catch(function () { return { __error: 'YouTube APIに接続できませんでした(通信エラー)' }; }).then(function (m) {
           if (m.__error && !firstErr) firstErr = m.__error;
           if (m.__queried) allQueried = allQueried.concat(m.__queried);
           Object.keys(m).forEach(function (id) {
@@ -1315,7 +1315,7 @@
     return Promise.all(jobs).then(function () {
       if (uniqVids.length) {
         lastErr = firstErr;
-        ytMetaPersist(merged); // 永続化（リロードで消えない）
+        ytMetaPersist(merged); // 永続化(リロードで消えない)
         updateYtScheduled_(items, ymap, merged, allQueried); // 公開前(非公開/予約公開)の作品を予約タブ用に抽出
       }
       clicksPersist_();
@@ -1353,42 +1353,42 @@
   // 予約タブ(scheduler.js)から参照：両アカウントの公開前YouTube作品をまとめて返す。
   try { window.YtSchedule = { list: function () { return loadYtSched_('acc1').concat(loadYtSched_('acc2')); } }; } catch (e) {}
 
-  // announce=true（手動更新ボタン）のときは、完了時に成功/失敗を明確に表示する。
+  // announce=true(手動更新ボタン)のときは、完了時に成功/失敗を明確に表示する。
   function refresh(announce) {
-    // 前段（所有権サニタイズ等）のどれかが例外を投げても、保存済みデータが一覧に反映されない
-    // （＝保存はできるが表示されない）事態を防ぐため、render() 到達を最優先で保証する。
+    // 前段(所有権サニタイズ等)のどれかが例外を投げても、保存済みデータが一覧に反映されない
+    // (＝保存はできるが表示されない)事態を防ぐため、render() 到達を最優先で保証する。
     var fixed = false;
-    try { fixed = sanitizeOwnership_(); } catch (e) {} // ★誤アカウント混入を正へ帰還（ensureIdsより前＝偽の接頭辞を刻む前に所属確定）
-    try { flushSheetMovePending_(); } catch (e) {} // 前回失敗したシート行移動を自動再送（T2）
-    try { ensureIds(); } catch (e) {} // IDが無いアイテムへ背骨IDを付与（履歴=スプレッドシートの正キー）
-    try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続（冪等）
+    try { fixed = sanitizeOwnership_(); } catch (e) {} // ★誤アカウント混入を正へ帰還(ensureIdsより前＝偽の接頭辞を刻む前に所属確定)
+    try { flushSheetMovePending_(); } catch (e) {} // 前回失敗したシート行移動を自動再送(T2)
+    try { ensureIds(); } catch (e) {} // IDが無いアイテムへ背骨IDを付与(履歴=スプレッドシートの正キー)
+    try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続(冪等)
     render();
-    // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ（postUriアイテムのDID確定分＝混入投稿を自動帰還）。冪等。
+    // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ。(postUriアイテムのDID確定分＝混入投稿を自動帰還)冪等。
     (function () {
       var R = window.Go5AccountRepair;
       if (R && R.ensureDids && !(R.ledgerFresh && R.ledgerFresh())) {
         R.ensureDids(function () { var more = sanitizeOwnership_(); if (more) { render(); notifySanitized_(more); } });
       }
     })();
-    var note = sanitizeNoteHtml_(fixed); // 更新完了メッセージに付記（サニタイズ通知が上書きで消えない）
+    var note = sanitizeNoteHtml_(fixed); // 更新完了メッセージに付記(サニタイズ通知が上書きで消えない)
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); })).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
     if (!codes.length && !vids.length) {
-      if (announce) setStatus('更新対象がありません（各行にYouTube URLを入れる／⚙️詳細設定でAPIキー設定が必要です）' + note, !!note);
+      if (announce) setStatus('更新対象がありません(各行にYouTube URLを入れる／⚙️詳細設定でAPIキー設定が必要です)' + note, !!note);
       else setStatus((apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます') + note, !!note);
       if (fixed) wireSanUndo_();
       return Promise.resolve(false);
     }
-    setStatus('🔄 更新中…（再生数・クリック数）');
+    setStatus('🔄 更新中…(再生数・クリック数)');
     return fetchData_(items, ymap).then(function () {
       if (lastErr) setStatus('⚠️ 更新に失敗しました：' + lastErr + note, !!note);
-      else if (announce) setStatus('✅ 更新しました（再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + '）' + note, !!note);
+      else if (announce) setStatus('✅ 更新しました(再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + ')' + note, !!note);
       else setStatus((!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : '') + note, !!note);
       render();
       if (fixed) wireSanUndo_();
       return true;
-    }).catch(function () { setStatus('⚠️ 更新に失敗しました（通信エラー）', false); return false; });
+    }).catch(function () { setStatus('⚠️ 更新に失敗しました(通信エラー)', false); return false; });
   }
 
   // この投稿履歴を正として、全アイテムを記録シート(GAS)へ一括 upsert 同期する。
@@ -1396,11 +1396,11 @@
   function syncSheet() {
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
-    if (!gasUrl) { setStatus('⚠️ 記録用GASのURLが未設定です（⚙️詳細設定で設定してください）'); return; }
+    if (!gasUrl) { setStatus('⚠️ 記録用GASのURLが未設定です(⚙️詳細設定で設定してください)'); return; }
     ensureIds();
     var btn = $('ytSyncSheet'); if (btn) btn.disabled = true;
     setStatus('最新の再生数・クリック数を取得中…');
-    // まずYouTube題名・視聴回数・開封数を最新取得してから送る（取れたぶんだけ反映）。
+    // まずYouTube題名・視聴回数・開封数を最新取得してから送る。(取れたぶんだけ反映)
     fetchData_(allItems(), loadYtMap()).then(function () { sendSync_(gasUrl, btn); });
   }
   function sendSync_(gasUrl, btn) {
@@ -1410,15 +1410,15 @@
       var yt = ymap[k] || it.ytUrl || '';
       var vid = ytIdOf(yt);
       var code = codeOf(it.shortUrl || '');
-      // 投稿日時：実投稿時刻(ts)を最優先。無ければYouTube公開日時を使う（→朝ばかり/今日になる問題を解消）。
+      // 投稿日時：実投稿時刻(ts)を最優先。無ければYouTube公開日時を使う。(→朝ばかり/今日になる問題を解消)
       var pubMs = (vid && publishedCache[vid] != null) ? publishedCache[vid] : null;
       var postedMs = (it.ts && it.ts > 0) ? it.ts : pubMs;
       var rec = {
         videoId: it.videoId || '',
         title: it.title || '',                                          // 題名(コメント)＝アプリの④コメント
-        ytTitle: (vid && titleCache[vid]) || '',                        // YouTube動画の実題名（取得済みのみ）
-        views: (vid && viewsCache[vid] != null) ? viewsCache[vid] : '', // YouTube視聴回数（取得済みのみ）
-        clicks: (code && clicksCache[code] != null) ? clicksCache[code] : '', // 短縮URLクリック数（取得済みのみ）
+        ytTitle: (vid && titleCache[vid]) || '',                        // YouTube動画の実題名(取得済みのみ)
+        views: (vid && viewsCache[vid] != null) ? viewsCache[vid] : '', // YouTube視聴回数(取得済みのみ)
+        clicks: (code && clicksCache[code] != null) ? clicksCache[code] : '', // 短縮URLクリック数(取得済みのみ)
         postUri: it.postUri || '',
         postUrl: it.postUrl || '',
         shortUrl: it.shortUrl || '',
@@ -1429,53 +1429,53 @@
       };
       ATTR_DEFS.forEach(function (a) { rec[a.key] = !!it[a.key]; }); // カテゴリ属性
       rec.workState = it.workState || '旧作'; // 作品状態
-      if (it.goal) rec.goal = it.goal;          // 狙い（成約/集客）
-      if (it.cmtType) rec.cmtType = it.cmtType; // コメント型（①〜⑧）
+      if (it.goal) rec.goal = it.goal;          // 狙い(成約/集客)
+      if (it.cmtType) rec.cmtType = it.cmtType; // コメント型(①〜⑧)
       return rec;
     }).filter(function (r) { return r.videoId; });
-    // T5: 接頭辞が現アカウントと矛盾するアイテム（混入品）は現タブへ同期しない＝シートを汚さない。
+    // T5: 接頭辞が現アカウントと矛盾するアイテム(混入品)は現タブへ同期しない＝シートを汚さない。
     var total0 = items.length;
     items = items.filter(function (r) { var m = String(r.videoId).match(/^(acc[12])-/); return !m || m[1] === acct(); });
     var excluded = total0 - items.length;
-    if (!items.length) { setStatus('同期する履歴がありません' + (excluded ? '（別アカウント所属の' + excluded + '件は除外）' : '')); if (btn) btn.disabled = false; return; }
+    if (!items.length) { setStatus('同期する履歴がありません' + (excluded ? '(別アカウント所属の' + excluded + '件は除外)' : '')); if (btn) btn.disabled = false; return; }
     setStatus('スプレッドシートへ同期中… (' + items.length + '件' + (excluded ? '・別アカウント所属の' + excluded + '件は除外' : '') + ')');
     fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'sync_history', channel: acct(), items: items }) })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        if (j && j.ok) setStatus('✅ スプレッドシートへ同期しました（' + (j.synced != null ? j.synced : items.length) + '件）');
+        if (j && j.ok) setStatus('✅ スプレッドシートへ同期しました(' + (j.synced != null ? j.synced : items.length) + '件)');
         else setStatus('⚠️ 同期に失敗しました' + (j && j.error ? '：' + j.error : ''));
       })
       .catch(function () {
-        // GASのCORS応答は読めないことがあるが、送信自体は届いている（記録は実行される）。
-        setStatus('📤 同期リクエストを送信しました（' + items.length + '件）。数秒後にスプレッドシートをご確認ください。');
+        // GASのCORS応答は読めないことがあるが、送信自体は届いている。(記録は実行される)
+        setStatus('📤 同期リクエストを送信しました。(' + items.length + '件)数秒後にスプレッドシートをご確認ください。');
       })
       .then(function () { if (btn) btn.disabled = false; });
   }
 
-  // この投稿履歴に無い post_id の行を、記録シート(GAS)から消去する（このアカウントのタブのみ）。
+  // この投稿履歴に無い post_id の行を、記録シート(GAS)から消去する。(このアカウントのタブのみ)
   function pruneSheet() {
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
-    if (!gasUrl) { setStatus('⚠️ 記録用GASのURLが未設定です（⚙️詳細設定で設定してください）'); return; }
+    if (!gasUrl) { setStatus('⚠️ 記録用GASのURLが未設定です(⚙️詳細設定で設定してください)'); return; }
     ensureIds();
     var keepIds = allItems().map(function (it) { return it.videoId; }).filter(Boolean);
-    if (!keepIds.length) { setStatus('掃除の基準になる履歴がありません（先に同期してください）'); return; }
-    if (!window.confirm('この投稿履歴に無い行を、スプレッドシートの「' + acct() + '」タブから消去します。\n（記録シートをこの履歴に合わせます。よろしいですか？）')) return;
+    if (!keepIds.length) { setStatus('掃除の基準になる履歴がありません(先に同期してください)'); return; }
+    if (!window.confirm('この投稿履歴に無い行を、スプレッドシートの「' + acct() + '」タブから消去します。\n(記録シートをこの履歴に合わせます。よろしいですか？)')) return;
     var btn = $('ytPruneSheet'); if (btn) btn.disabled = true;
     setStatus('履歴に無い行を掃除中…');
     fetch(gasUrl, { method: 'POST', body: JSON.stringify({ op: 'prune_history', channel: acct(), keepIds: keepIds }) })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        if (j && j.ok) setStatus('🧹 掃除しました（' + (j.cleared != null ? j.cleared : '?') + '行を消去）');
+        if (j && j.ok) setStatus('🧹 掃除しました(' + (j.cleared != null ? j.cleared : '?') + '行を消去)');
         else setStatus('⚠️ 掃除に失敗しました' + (j && j.error ? '：' + j.error : ''));
       })
       .catch(function () { setStatus('🧹 掃除リクエストを送信しました。数秒後にスプレッドシートをご確認ください。'); })
       .then(function () { if (btn) btn.disabled = false; });
   }
 
-  // 過去投稿に計測用の短縮リンク(r2+da.gd)を生成する。silent=true で自動実行（確認・完了ダイアログ無し）。
+  // 過去投稿に計測用の短縮リンク(r2+da.gd)を生成する。silent=true で自動実行。(確認・完了ダイアログ無し)
   //   対象＝shortUrlがr2でない or shareUrl無しの履歴。各投稿URL→(必要ならworkerで解決)→r2短縮→da.gd短縮。
-  //   1件ごとに保存＝途中で閉じても進んだぶんは残る（冪等：既にr2済みは対象外）。
+  //   1件ごとに保存＝途中で閉じても進んだぶんは残る。(冪等：既にr2済みは対象外)
   var _bulkBusy = false;
   function runBulkGen(silent) {
     if (_bulkBusy) return;
@@ -1489,14 +1489,14 @@
     var hist = loadHist(), manual = loadManual(), targets = [];
     hist.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
     manual.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
-    if (!targets.length) { if (!silent) setStatus('未生成の項目はありません（すべて計測リンク済み）'); return; }
+    if (!targets.length) { if (!silent) setStatus('未生成の項目はありません(すべて計測リンク済み)'); return; }
     _bulkBusy = true;
     var btn = $('ytBulkGen'); if (btn) btn.disabled = true;
     var i = 0, done = 0, fail = 0;
     function resolveTarget(it) {
       if (it.postUri && handle) { var rk = String(it.postUri).split('/').pop(); return Promise.resolve('https://bsky.app/profile/' + handle + '/post/' + rk); }
-      // ★postUrlはシート復元品では常に空(historyItems_が返さない)。旧行の自己修復のため
-      //   shareUrl(da.gd等)や非r2のshortUrlも/api/resolveで最終URLへ解決して再生成の元にする(2026-07-12)。
+      // ★postUrlはシート復元品では常に空。(historyItems_が返さない)旧行の自己修復のため
+      //   shareUrl(da.gd等)や非r2のshortUrlも/api/resolveで最終URLへ解決して再生成の元にする。(2026-07-12)
       var src = it.postUrl || '';
       if (!/^https?:\/\//.test(src)) {
         var cand = it.shareUrl || it.shortUrl || '';
@@ -1513,8 +1513,8 @@
       if (i >= targets.length) {
         saveArr(histKey(), hist); saveArr(manualKey(), manual);
         _bulkBusy = false; if (btn) btn.disabled = false;
-        setStatus('✅ 計測リンク生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「Bsky↗」が計測用の短縮URLです（長押しでコピー→YouTube概要欄に貼り替え）。');
-        refresh(); // 新しく発行したコードのクリック数も取得（renderだけだと「…」のままになる）
+        setStatus('✅ 計測リンク生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「Bsky↗」が計測用の短縮URLです。(長押しでコピー→YouTube概要欄に貼り替え)');
+        refresh(); // 新しく発行したコードのクリック数も取得(renderだけだと「…」のままになる)
         return;
       }
       var it = targets[i++];
@@ -1524,7 +1524,7 @@
         return window.Go5MakeShort(target).then(function (res) {
           if (res && res.shortUrl) {
             it.shortUrl = res.shortUrl; it.shareUrl = res.shareUrl || res.shortUrl; done++;
-            saveArr(histKey(), hist); saveArr(manualKey(), manual); // 逐次保存（途中終了に強い）
+            saveArr(histKey(), hist); saveArr(manualKey(), manual); // 逐次保存(途中終了に強い)
             pushItemToGas_(it); // シートの短縮URL列も更新→snapshotStatsがクリックを拾い日別🖱が出る(2026-07-12)
           } else fail++;
         });
@@ -1532,7 +1532,7 @@
     }
     step();
   }
-  // 投稿履歴を開いたら、未生成の項目があれば自動で計測リンクを生成する（ボタン任せにしない）。
+  // 投稿履歴を開いたら、未生成の項目があれば自動で計測リンクを生成する。(ボタン任せにしない)
   function maybeAutoGen() { if (!_bulkBusy) runBulkGen(true); }
   // 投稿履歴タブを開いた時にも自動再生成を発火(従来は初期ロード時のみ=タブ遷移で開くと未修復のままだった・2026-07-12)
   (function () { var tb = $('tabVerify'); if (tb) tb.addEventListener('click', function () { setTimeout(function () { maybeAutoGen(); try { fetchDeltas_(); } catch (e) {} }, 1200); }); })();
@@ -1573,9 +1573,9 @@
   // ── YouTube URL をシート(記録)から復元 ─────────────────────────────────────
   //   YouTube URLは端末内の verify_yt__<acct> にのみ表示元がある。iOSのストレージ消去等で
   //   これが消えると履歴からYT URLが消える。ただし sync_history でシートの「YouTube動画URL」列に
-  //   常にバックアップされているため、そこから読み戻してローカルへ補完する（手動編集は上書きしない）。
+  //   常にバックアップされているため、そこから読み戻してローカルへ補完する。(手動編集は上書きしない)
   var _ytRestored = {}, _ytRestoreBusy = false;
-  var _sheetYtCandidates = []; // 直近のシート照会で得たYT URL（P1: 題名照合の候補に加える）
+  var _sheetYtCandidates = []; // 直近のシート照会で得たYT URL(P1: 題名照合の候補に加える)
   function restoreYtFromSheet_(onDone) {
     if (_ytRestoreBusy) { if (onDone) onDone(0); return; }
     var gasUrl = gasUrl_();
@@ -1594,33 +1594,33 @@
       var histDirty = false, manDirty = false;
       res.items.forEach(function (it) {
         // この行のYT URL候補: ①シートの youtubeUrl ②無ければ端末に残る「迷子のYT URL」
-        //   （旧識別子キーで verify_yt に残った分）をシート行の旧識別子から回収する。
+        //   (旧識別子キーで verify_yt に残った分)をシート行の旧識別子から回収する。
         var yt = String((it && it.youtubeUrl) || '').trim();
-        var strayKey = ''; // 回収に使った迷子キー（回収成功時に掃除して件数を減らす）
+        var strayKey = ''; // 回収に使った迷子キー(回収成功時に掃除して件数を減らす)
         if (!yt) {
           if (it.postUri && m['u:' + it.postUri]) { yt = m['u:' + it.postUri]; strayKey = 'u:' + it.postUri; }
           else if (it.shortUrl && m['s:' + it.shortUrl]) { yt = m['s:' + it.shortUrl]; strayKey = 's:' + it.shortUrl; }
         }
         if (!yt) return;
         // ローカル項目のキー付けは postUri 優先だが、シート行は postUri か短縮URLの
-        // どちらかしか無いことがある。取り違えを防ぐため両方のキーに補完する（上書きはしない）。
+        // どちらかしか無いことがある。取り違えを防ぐため両方のキーに補完する。(上書きはしない)
         var did = false;
         if (it.postUri) { var ku = 'u:' + it.postUri; if (!m[ku]) { m[ku] = yt; did = true; } }
         if (it.shortUrl) { var ks = 's:' + it.shortUrl; if (!m[ks]) { m[ks] = yt; did = true; } }
-        // ★背骨IDで現アイテムへ直結：アイテム自身の ytUrl に書き戻す（ymap[k] || it.ytUrl の第2経路）。
-        //   これで今後キーがずれても表示が消えない。既にYT URLが引ける行には書かない（手動編集を尊重）。
+        // ★背骨IDで現アイテムへ直結：アイテム自身の ytUrl に書き戻す。(ymap[k] || it.ytUrl の第2経路)
+        //   これで今後キーがずれても表示が消えない。既にYT URLが引ける行には書かない。(手動編集を尊重)
         var loc = it.videoId ? byVid[it.videoId] : null;
         if (loc) {
           var curKey = itemKey(loc);
           var curHas = !!ytIdOf(m[curKey] || loc.ytUrl || '');
           if (!curHas) {
             loc.ytUrl = yt; if (loc.manual) manDirty = true; else histDirty = true; did = true;
-            // 迷子キーから回収できた場合は掃除（現行キーと同一なら生きているので消さない）
+            // 迷子キーから回収できた場合は掃除(現行キーと同一なら生きているので消さない)
             if (strayKey && strayKey !== curKey && m[strayKey]) delete m[strayKey];
           }
           // ★計測コード(r2短縮URL)もシートから端末へ書き戻す(2026-07-13)：
           //   サーバー側backfillで直した行が端末に届かず「累計🖱が–のまま」になる問題の根治。
-          //   端末側が空/非r2で、シート側がr2の時だけ採用（手動編集や既存r2は上書きしない）。
+          //   端末側が空/非r2で、シート側がr2の時だけ採用。(手動編集や既存r2は上書きしない)
           var sheetShort = String(it.shortUrl || '');
           if (/workers\.dev\//.test(sheetShort) && !/workers\.dev\//.test(String(loc.shortUrl || ''))) {
             loc.shortUrl = sheetShort;
@@ -1635,18 +1635,18 @@
       if (onDone) onDone(restored);
     });
   }
-  // 履歴を開いたとき各アカウント1回だけ自動復元（端末のYT URLが消えていても静かに戻る）。
+  // 履歴を開いたとき各アカウント1回だけ自動復元。(端末のYT URLが消えていても静かに戻る)
   function maybeRestoreYt_() {
     var a = acct(); if (_ytRestored[a]) return; _ytRestored[a] = true;
     setTimeout(function () {
       restoreYtFromSheet_(function (n) { if (n > 0) setStatus('☁️ シートからYouTube URLを ' + n + '件 復元しました。'); });
     }, 1200);
   }
-  // ── YT URLマップの取り残しを再接続（自己修復）──────────────────────────────
+  // ── YT URLマップの取り残しを再接続(自己修復)──────────────────────────────
   //   DID矯正等でアイテムだけ別アカウントへ移り、YT URLマップ(verify_yt)が元アカウントに
-  //   取り残されると、移動先で再生数/投稿日時/題名が出なくなる（宵桜艶帖だけ欠落する主因の一つ）。
+  //   取り残されると、移動先で再生数/投稿日時/題名が出なくなる。(宵桜艶帖だけ欠落する主因の一つ)
   //   あるアカウントのマップにあるキーの item が実際には別アカウントに居るなら、その別アカウントへ移す。
-  //   安全: 「itemが自分側に無く・相手側にあり・相手側マップが未設定」のときだけ移す（誤上書きしない）。冪等。
+  //   安全: 「itemが自分側に無く・相手側にあり・相手側マップが未設定」のときだけ移す。(誤上書きしない)冪等。
   function reconnectStrandedYt_() {
     try {
       var accs = ['acc1', 'acc2'];
@@ -1671,19 +1671,19 @@
       return moved;
     } catch (e) { return 0; }
   }
-  // ── T1: 所有権サニタイザ（誤アカウントに混入した投稿を、正しいアカウントへ自動帰還）──────
+  // ── T1: 所有権サニタイザ(誤アカウントに混入した投稿を、正しいアカウントへ自動帰還)──────
   //   所属判定 ownerOf_: (a) postUriあり かつ DID台帳がこのセッションで解決済み(権威) なら投稿者DIDで確定。
-  //     postUriがあるのに台帳未解決なら“動かさない”（次のrefreshで台帳解決後に判定＝正当な手動移動を誤って戻さない）。
-  //     どちらのDIDでもない場合も動かさない。 (b) postUri無し＝DID判定不能なら背骨ID接頭辞(acc1-/acc2-)。
-  //   移動は「削除でなく別ストアへ移送＋到着先で強キー重複統合＋verify_yt随伴移送」。冪等・ローカルのみ（シートは🩺/手動の役割）。
+  //     postUriがあるのに台帳未解決なら“動かさない”。(次のrefreshで台帳解決後に判定＝正当な手動移動を誤って戻さない)
+  //     どちらのDIDでもない場合も動かさない。 (b) postUri無し＝DID判定不能なら背骨ID接頭辞。(acc1-/acc2-)
+  //   移動は「削除でなく別ストアへ移送＋到着先で強キー重複統合＋verify_yt随伴移送」。冪等・ローカルのみ。(シートは🩺/手動の役割)
   function ownerOf_(it) {
     if (!it) return '';
-    if (it._ownerPin === 'acc1' || it._ownerPin === 'acc2') return it._ownerPin; // ユーザーが↩️で固定した所属を最優先（自動判定より人の指示が上）
+    if (it._ownerPin === 'acc1' || it._ownerPin === 'acc2') return it._ownerPin; // ユーザーが↩️で固定した所属を最優先(自動判定より人の指示が上)
     var R = window.Go5AccountRepair;
     var ledgerOK = !!(R && R.ledgerFresh && R.ledgerFresh() && R.didReady && R.didReady());
     if (it.postUri) {
       if (ledgerOK && R.classifyByPost) return R.classifyByPost(it) || ''; // DIDで確定 or 不明('')
-      return ''; // 台帳未解決の postUri アイテムは触らない（安全側）
+      return ''; // 台帳未解決の postUri アイテムは触らない(安全側)
     }
     var m = String(it.videoId || '').match(/^(acc[12])-/);
     return m ? m[1] : '';
@@ -1710,18 +1710,18 @@
           src.forEach(function (it) {
             var owner = ownerOf_(it);
             if (!owner || owner === from) { keep.push(it); return; }
-            // リビルド系譜の分断防止：リビルド相手が同ストアに居て所有者不明ならペアごと保留（🩺へ委譲）
+            // リビルド系譜の分断防止：リビルド相手が同ストアに居て所有者不明ならペアごと保留(🩺へ委譲)
             if (it.rebuildOf && src.some(function (x) { return x.videoId === it.rebuildOf && !ownerOf_(x); })) { keep.push(it); return; }
             var dstBase = it.manual ? 'verify_manual' : base;
             var dst = store[dstBase + '__' + owner];
             var di = findDup_(dst, it);
-            if (di >= 0) { // 既存を正とし欠損フィールドのみ補完（薄い復元行×実データの統合）
+            if (di >= 0) { // 既存を正とし欠損フィールドのみ補完(薄い復元行×実データの統合)
               var x = dst[di], fs = ['title', 'shortUrl', 'shareUrl', 'postUrl', 'postUri', 'videoId', 'workUrl', 'cid', 'workState', 'ytUrl'];
               for (var fi = 0; fi < fs.length; fi++) { if (!x[fs[fi]] && it[fs[fi]]) x[fs[fi]] = it[fs[fi]]; }
               if ((!x.ts || x.ts === 0) && it.ts) x.ts = it.ts;
             } else { dst.unshift(it); }
             dirty[dstBase + '__' + owner] = true; dirty[base + '__' + from] = true;
-            var k = itemKey(it); // verify_yt 随伴移送（itemKeyは移動不変）
+            var k = itemKey(it); // verify_yt 随伴移送(itemKeyは移動不変)
             if (ymaps[from][k] != null) { if (ymaps[owner][k] == null) ymaps[owner][k] = ymaps[from][k]; delete ymaps[from][k]; ydirty[from] = true; ydirty[owner] = true; }
             moved.push({ base: base, dstBase: dstBase, item: it, from: from, to: owner, by: (it.postUri ? 'post' : 'videoId'), at: new Date().getTime() });
           });
@@ -1734,7 +1734,7 @@
       return moved.length;
     } catch (e) { return 0; }
   }
-  // サニタイザの取り消し（ローカルのみ逆適用。undoLastMoves_はシートへmove_rowを送るため共用しない）。
+  // サニタイザの取り消し。(ローカルのみ逆適用。undoLastMoves_はシートへmove_rowを送るため共用しない)
   function undoSanitize_() {
     var log = []; try { log = JSON.parse(localStorage.getItem('sanitize_move_log') || '[]') || []; } catch (e) {}
     if (!log.length) { setStatus('元に戻せる自動移動がありません。'); return; }
@@ -1750,20 +1750,20 @@
     try { localStorage.removeItem('sanitize_move_log'); } catch (e) {}
     setStatus('↩️ 自動移動を元に戻しました。'); refresh();
   }
-  // サニタイズ結果の通知HTML（更新完了メッセージに付記して上書き消失を防ぐ）＋↩️ボタン配線。
+  // サニタイズ結果の通知HTML(更新完了メッセージに付記して上書き消失を防ぐ)＋↩️ボタン配線。
   function sanitizeNoteHtml_(n) {
-    return n ? '<br>⚠️ ' + n + '件を正しいアカウントへ移動しました（投稿者DID／背骨IDで判定）。 <button type="button" id="ytSanUndo" class="ghost" style="width:auto;font-size:12px;padding:4px 10px;">↩️ 元に戻す</button>' : '';
+    return n ? '<br>⚠️ ' + n + '件を正しいアカウントへ移動しました。(投稿者DID／背骨IDで判定) <button type="button" id="ytSanUndo" class="ghost" style="width:auto;font-size:12px;padding:4px 10px;">↩️ 元に戻す</button>' : '';
   }
   function wireSanUndo_() { var ub = $('ytSanUndo'); if (ub) ub.addEventListener('click', undoSanitize_); }
-  function notifySanitized_(n) { // 単独通知（DID解決後の後追いサニタイズ用）
+  function notifySanitized_(n) { // 単独通知(DID解決後の後追いサニタイズ用)
     if (!n) return;
     setStatus(sanitizeNoteHtml_(n).replace(/^<br>/, ''), true); wireSanUndo_();
   }
-  // ── P1: YouTube実データ（題名・投稿時刻）で迷子のYT URLを行へつなぎ直す ─────────
+  // ── P1: YouTube実データ(題名・投稿時刻)で迷子のYT URLを行へつなぎ直す ─────────
   //   識別子(postUri/短縮URL/videoId)が何世代ずれていても成立する最後の照合手段。
   //   投稿題名とYouTube題名は「コメント+タグ」で同一生成されるため、正規化題名の一致で対応づく。
   //   同名投稿が複数ある場合は |YouTube公開時刻 − 投稿時刻| が最小(72h以内)のものを採用。
-  //   確定分はアイテム本体の ytUrl へ書き戻す（キー回転の影響を受けない恒久形）。
+  //   確定分はアイテム本体の ytUrl へ書き戻す。(キー回転の影響を受けない恒久形)
   function restoreByYtData_(cb) {
     if (!apiKey()) { cb({ matched: 0, ambiguous: 0, candidates: 0, reason: 'APIキー未設定' }); return; }
     var m = loadYtMap();
@@ -1779,7 +1779,7 @@
     _sheetYtCandidates.forEach(addCand);
     var vids = Object.keys(vidToUrl);
     if (!vids.length) { cb({ matched: 0, ambiguous: 0, candidates: 0 }); return; }
-    // YouTube照会（50件ずつ）→ 題名・公開時刻で照合
+    // YouTube照会(50件ずつ)→ 題名・公開時刻で照合
     var meta = {}, jobs = [];
     for (var bi = 0; bi < vids.length; bi += 50) {
       (function (batch) {
@@ -1791,7 +1791,7 @@
     Promise.all(jobs).then(function () {
       function norm(t) { return stripCommonTags(String(t || '')).replace(/\s+/g, '').trim(); }
       var matched = 0, ambiguous = 0, histDirty = false, manDirty = false;
-      // 新しい順で処理（同名投稿が複数ある場合、各行が時刻の近い動画から順に取る）
+      // 新しい順で処理(同名投稿が複数ある場合、各行が時刻の近い動画から順に取る)
       all.slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); }).forEach(function (it) {
         if (ytIdOf(m[itemKey(it)] || it.ytUrl || '')) return; // 解決済み
         var nt = norm(it.title); if (!nt) return;
@@ -1815,14 +1815,14 @@
     });
   }
 
-  // 現状を人が読める形にまとめる（iPhoneでも状況が分かる診断表示用）。
+  // 現状を人が読める形にまとめる。(iPhoneでも状況が分かる診断表示用)
   function diagnoseYt_() {
     var lines = [];
     ['acc1', 'acc2'].forEach(function (a) {
       var items = loadArrFor_('short_hist', a).concat(loadArrFor_('verify_manual', a));
       var map = loadYtMapFor_(a), withYt = 0, vids = {}, keys = {};
       items.forEach(function (it) { var k = itemKey(it); keys[k] = 1; var v = ytIdOf(map[k] || it.ytUrl || ''); if (v) { withYt++; vids[v] = 1; } });
-      // 迷子＝マップにあるがitemに紐づかず、かつその動画がどの行にも表示されていないURL（復元済みは数えない）。
+      // 迷子＝マップにあるがitemに紐づかず、かつその動画がどの行にも表示されていないURL。(復元済みは数えない)
       var orphan = Object.keys(map).filter(function (k) { return !keys[k] && !vids[ytIdOf(map[k] || '')]; }).length;
       lines.push(acctName_(a) + '：履歴' + items.length + '件／YT URL付き' + withYt + '件／動画ID' + Object.keys(vids).length + '種／迷子のYT URL ' + orphan + '件');
     });
@@ -1830,17 +1830,17 @@
     return lines.join('<br>');
   }
 
-  // 投稿本文からの当時割引/新作の復元を「1回だけ」自動実行（フラグ管理・ボタン不要で確実に）。
+  // 投稿本文からの当時割引/新作の復元を「1回だけ」自動実行。(フラグ管理・ボタン不要で確実に)
   function maybeRestorePromo_() {
     var FLAG = 'bsky_promo_restored_v1';
     try { if (localStorage.getItem(FLAG)) return; } catch (e) {}
-    // 価格(定価)キャッシュが載ってから走らせたいので少し待つ。完了時のみフラグを立てる（対象0件では立てない）。
+    // 価格(定価)キャッシュが載ってから走らせたいので少し待つ。完了時のみフラグを立てる。(対象0件では立てない)
     setTimeout(function () {
       restorePctFromBsky_(function () { try { localStorage.setItem(FLAG, '1'); } catch (e) {} });
     }, 3500);
   }
 
-  // Bluesky本文から「新作」「◯%オフ」を検出（半角/全角%・オフ/OFF/割引・半額に対応）。
+  // Bluesky本文から「新作」「◯%オフ」を検出。(半角/全角%・オフ/OFF/割引・半額に対応)
   function parseBskyPromo_(text) {
     var t = String(text || '').replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
     var isNew = /新作/.test(t);
@@ -1851,7 +1851,7 @@
     return { isNew: isNew, pct: pct };
   }
   // 【1回限り】両chの投稿本文をBluesky公開APIで取得し、明記された当時の割引率/新作を当時スナップへ反映。
-  // onDone は実際に処理を走らせたときだけ完了後に呼ぶ（対象0件のときは呼ばない＝フラグを立てず後で再試行可能に）。
+  // onDone は実際に処理を走らせたときだけ完了後に呼ぶ。(対象0件のときは呼ばない＝フラグを立てず後で再試行可能に)
   var _restoreBusy = false;
   function restorePctFromBsky_(onDone) {
     if (_restoreBusy) return;
@@ -1888,14 +1888,14 @@
       if (i >= jobs.length) {
         keys.forEach(function (k) { try { localStorage.setItem(k, JSON.stringify(store[k])); } catch (e) {} });
         _restoreBusy = false;
-        if (updated) setStatus('✅ 投稿文から当時の割引/新作を反映：' + updated + '件（記載なし ' + skipped + '件・両ch）。');
+        if (updated) setStatus('✅ 投稿文から当時の割引/新作を反映：' + updated + '件。(記載なし ' + skipped + '件・両ch)');
         render();
         if (typeof onDone === 'function') onDone();
         return;
       }
       var slice = jobs.slice(i, i + BATCH);
       var q = slice.map(function (j) { return 'uris=' + encodeURIComponent(j.uri); }).join('&');
-      setStatus('Blueskyの投稿本文を確認中…（' + Math.min(i, jobs.length) + '/' + jobs.length + '）');
+      setStatus('Blueskyの投稿本文を確認中…(' + Math.min(i, jobs.length) + '/' + jobs.length + ')');
       fetch('https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?' + q)
         .then(function (r) { return r.json(); })
         .then(function (data) {
@@ -1923,46 +1923,46 @@
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
   var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
   // 🔧 YT情報を診断・修復：取り残しYT URLマップの再接続＋シートからのYT URL復元＋再取得を一括で行い、
-  //   人が読める診断（各アカウントの履歴数/YT URL付き数/動画ID数/孤児数）を表示する（iPhoneでも状況が分かる）。
+  //   人が読める診断(各アカウントの履歴数/YT URL付き数/動画ID数/孤児数)を表示する。(iPhoneでも状況が分かる)
   var yrl = $('ytRepairLinks');
   if (yrl) yrl.addEventListener('click', function () {
     var moved = reconnectStrandedYt_();
-    setStatus('🔧 YT情報を診断・修復中…（シート照合→YouTube題名照合の順で復元します）');
+    setStatus('🔧 YT情報を診断・修復中…(シート照合→YouTube題名照合の順で復元します)');
     restoreYtFromSheet_(function (restored) {
-      // P1: 識別子で繋がらなかった分を、YouTube実データ（題名・投稿時刻）で照合して行へ書き戻す。
+      // P1: 識別子で繋がらなかった分を、YouTube実データ(題名・投稿時刻)で照合して行へ書き戻す。
       restoreByYtData_(function (r2) {
-        // refresh完了後に診断を表示（announce=trueだとrefreshの「✅更新しました」が診断を上書きしてしまう）。
+        // refresh完了後に診断を表示。(announce=trueだとrefreshの「✅更新しました」が診断を上書きしてしまう)
         refresh().then(function () {
           setStatus('🔧 YT情報 診断・修復<br>取り残しマップ再接続：<b>' + moved + '</b>件／シート照合で復元：<b>' + restored + '</b>件／YouTube題名照合で復元：<b>' + r2.matched + '</b>件'
-            + (r2.ambiguous ? '（同名で確定できず ' + r2.ambiguous + '件）' : '') + (r2.reason ? '（' + r2.reason + '）' : '') + '<br>'
+            + (r2.ambiguous ? '(同名で確定できず ' + r2.ambiguous + '件)' : '') + (r2.reason ? '(' + r2.reason + ')' : '') + '<br>'
             + diagnoseYt_()
-            + '<br><span style="color:var(--sub);font-size:.9em;">※<b>迷子のYT URL</b>＝過去に保存したYouTube URLのうち、投稿の目印（短縮URLなど）が変わって行から外れてしまったもの。シートの背骨ID照合→YouTubeの題名・投稿時刻照合の順で自動でつなぎ直します。それでも残った行は、各行の🛠️編集からYouTube URLを入れると確実に戻ります（今後は行本体に保存されるので迷子になりません）。</span>', true);
+            + '<br><span style="color:var(--sub);font-size:.9em;">※<b>迷子のYT URL</b>＝過去に保存したYouTube URLのうち、投稿の目印(短縮URLなど)が変わって行から外れてしまったもの。シートの背骨ID照合→YouTubeの題名・投稿時刻照合の順で自動でつなぎ直します。それでも残った行は、各行の🛠️編集からYouTube URLを入れると確実に戻ります。(今後は行本体に保存されるので迷子になりません)</span>', true);
         });
       });
     });
   });
   // 🩺 アカウント検証・修復：post_uri の DID で「別アカウントに紛れ込んだ履歴/シート行」を正しい側へ移す。
-  // 🩺 検出→一覧を見せて確認→適用（自動では動かさない）。適用後は「元に戻す」可能。
+  // 🩺 検出→一覧を見せて確認→適用。(自動では動かさない)適用後は「元に戻す」可能。
   var rp = $('ytRepairAcct');
   if (rp) rp.addEventListener('click', function () {
-    setStatus('🩺 投稿の所属アカウントを検証中…（Bluesky投稿者・YouTubeチャンネルで判定）');
+    setStatus('🩺 投稿の所属アカウントを検証中…(Bluesky投稿者・YouTubeチャンネルで判定)');
     detectAccountMoves_(function (r) {
       if (!r || !r.ok) { setStatus('⚠️ 検証できません：' + ((r && r.reason) || '不明')); return; }
       var strong = r.moves.filter(function (m) { return m.by === 'post' || m.by === 'channel'; });
       if (!strong.length) {
-        setStatus('✅ 全て正しいアカウントに記録されています（移動候補なし）。'
+        setStatus('✅ 全て正しいアカウントに記録されています。(移動候補なし)'
           + (r.unknown ? ' ※判定材料が無い ' + r.unknown + '件は各✏️編集で手動移動できます。' : ''));
         return;
       }
-      var msg = strong.length + '件が「別アカウントの投稿」と判定されました。移動しますか？\n\n' + movesSummary_(strong, r.ledger) + '\n\n（移動後も「元に戻す」ができます）';
-      if (!window.confirm(msg)) { setStatus('移動を中止しました（内容は変わっていません）。'); return; }
+      var msg = strong.length + '件が「別アカウントの投稿」と判定されました。移動しますか？\n\n' + movesSummary_(strong, r.ledger) + '\n\n(移動後も「元に戻す」ができます)';
+      if (!window.confirm(msg)) { setStatus('移動を中止しました。(内容は変わっていません)'); return; }
       var n = applyMoves_(strong);
       setStatus('✅ ' + n + '件を移動しました。<button type="button" id="ytUndoMoves" class="ghost" style="width:auto;margin-left:8px;font-size:12px;padding:3px 10px;">↩️ 元に戻す</button>', true);
       var ub = $('ytUndoMoves'); if (ub) ub.addEventListener('click', undoLastMoves_);
       render(); maybeRestoreYt_();
     });
   });
-  // 📥 シートから投稿履歴を復元（非破壊）。誤って別アカウントへ入った分は現アカウントへ戻す。
+  // 📥 シートから投稿履歴を復元。(非破壊)誤って別アカウントへ入った分は現アカウントへ戻す。
   // ★静的HTMLは ?v= でキャッシュ破棄できず、端末に古いHTMLが残るとボタンが出ないことがある。
   //   そのためJS(=?v=で更新される)側で、ボタンが無ければツールバーへ動的生成して確実に出す。
   var rh = $('ytRestoreHist');
@@ -1976,37 +1976,37 @@
     }
   }
   if (rh) rh.addEventListener('click', function () {
-    if (!window.confirm(acctName_(acct()) + ' の投稿履歴を、記録スプレッドシートから復元します。\n・別アカウントへ誤って入った投稿を ' + acctName_(acct()) + ' へ戻します\n・端末に無い投稿はシートから復活します\n（既にある投稿は消しません）\nよろしいですか？')) return;
+    if (!window.confirm(acctName_(acct()) + ' の投稿履歴を、記録スプレッドシートから復元します。\n・別アカウントへ誤って入った投稿を ' + acctName_(acct()) + ' へ戻します\n・端末に無い投稿はシートから復活します\n(既にある投稿は消しません)\nよろしいですか？')) return;
     setStatus('📥 シートから投稿履歴を復元中…');
     restoreHistoryFromSheet_(function (r) {
       if (!r || !r.ok) { setStatus('⚠️ 復元できません：' + ((r && r.reason) || '不明')); return; }
       if (r.added || r.movedBack) {
-        var restoreMsg = '✅ 復元しました：戻した投稿 ' + r.movedBack + '件／シートから復活 ' + r.added + '件（シート ' + r.total + '件を照合）。';
+        var restoreMsg = '✅ 復元しました：戻した投稿 ' + r.movedBack + '件／シートから復活 ' + r.added + '件。(シート ' + r.total + '件を照合)';
         setStatus(restoreMsg); render(); maybeRestoreYt_();
-        // 復元だけではYouTube再生数・公開日時は取得されない（別途fetch要）ため、続けて自動更新する。
-        refresh().then(function () { setStatus(restoreMsg + '（再生数・投稿日時も更新しました）'); });
+        // 復元だけではYouTube再生数・公開日時は取得されない(別途fetch要)ため、続けて自動更新する。
+        refresh().then(function () { setStatus(restoreMsg + '(再生数・投稿日時も更新しました)'); });
       }
-      else setStatus('✅ ' + acctName_(acct()) + ' の投稿履歴は既にシートと一致しています（復元不要）。');
+      else setStatus('✅ ' + acctName_(acct()) + ' の投稿履歴は既にシートと一致しています。(復元不要)');
     });
   });
-  // 履歴を開いたときは「検出のみ」（自動移動は廃止＝INC-64の教訓）。候補があれば件数を知らせる。
+  // 履歴を開いたときは「検出のみ」。(自動移動は廃止＝INC-64の教訓)候補があれば件数を知らせる。
   var _smartAutoDone = false;
   function maybeSmartRepair_() {
     if (_smartAutoDone) return; _smartAutoDone = true;
     setTimeout(function () {
       detectAccountMoves_(function (r) {
-        if (!r || !r.ok) return; // 検出できない時は黙る（🩺を押せば理由が出る）
+        if (!r || !r.ok) return; // 検出できない時は黙る(🩺を押せば理由が出る)
         var strong = r.moves.filter(function (m) { return m.by === 'post' || m.by === 'channel'; });
-        if (strong.length) setStatus('⚠️ ' + strong.length + '件が別アカウントの投稿の可能性があります。「🩺 アカウント検証・修復」で内容を確認してください（自動では動かしません）。');
+        if (strong.length) setStatus('⚠️ ' + strong.length + '件が別アカウントの投稿の可能性があります。「🩺 アカウント検証・修復」で内容を確認してください。(自動では動かしません)');
       });
     }, 2000);
   }
-  // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得（renderだけだと「…」のままになる）。
+  // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得。(renderだけだと「…」のままになる)
   document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeRestoreYt_(); } else render(); });
-  // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理（各1回）。
+  // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理。(各1回)
   setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
 
-  // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元（秘密扱い）。
+  // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元。(秘密扱い)
   var keyEl = $('ytApiKey');
   if (keyEl) {
     try { keyEl.value = localStorage.getItem('yt_api_key') || ''; } catch (e) {}
@@ -2027,7 +2027,7 @@
     return false;
   }
   // キャッシュのスキーマ版。取得内容の意味が変わったら上げる＝旧キャッシュを一度だけ強制再取得。
-  //   sv=2: サークル名(author)を iteminfo.maker から取るよう修正（旧版はauthor空のまま固定されるため）
+  //   sv=2: サークル名(author)を iteminfo.maker から取るよう修正(旧版はauthor空のまま固定されるため)
   var FZ_SV = 2;
   function fanzaNameCacheLoad() {
     try { return JSON.parse(localStorage.getItem('fanza_title_cache') || '{}'); } catch (e) { return {}; }
@@ -2038,7 +2038,7 @@
   // 既存キャッシュから「ログイン/エラーページ等の“中身のある不正タイトル”」だけを一掃する。
   // ★空タイトル('')は消さない：negativeキャッシュ(30分)とpartial(画像のみ・1日)は正規の
   //   キャッシュ。以前ここで空も消していたため、失敗/画像のみ作品はタブを開くたび全件再取得
-  //   になり「速くならない」原因になっていた（isBadFanzaTitle('')===true の巻き添え）。
+  //   になり「速くならない」原因になっていた(isBadFanzaTitle('')===true の巻き添え)。
   function purgeBadFanzaCache() {
     var c = fanzaNameCacheLoad();
     var changed = false;
@@ -2049,13 +2049,13 @@
     });
     if (changed) fanzaNameCacheSave(c);
   }
-  // ── 手動入力の作品情報（API未収録作品用）────────────────────────────────
+  // ── 手動入力の作品情報(API未収録作品用)────────────────────────────────
   // 作品URL→{title,listPrice,price,releaseDate,genres[],updatedAt}。自動取得より常に優先。
   // 秘密キーではないので端末間クラウド同期(settings-io)にも自動で乗る。
   function fanzaManualLoad() { try { return JSON.parse(localStorage.getItem('fanza_manual_info') || '{}') || {}; } catch (e) { return {}; } }
   function fanzaManualSaveAll(m) { try { localStorage.setItem('fanza_manual_info', JSON.stringify(m)); } catch (e) {} }
   function fanzaManualOf_(url) { var m = fanzaManualLoad(); return (url && m[url]) || null; }
-  // 手動価格を priceInfo 形式にマージ（手動値があれば上書き。割引率は自動計算）。
+  // 手動価格を priceInfo 形式にマージ。(手動値があれば上書き。割引率は自動計算)
   function mergeManualPrice_(url, priceInfo) {
     var man = fanzaManualOf_(url);
     if (!man) return priceInfo;
@@ -2078,7 +2078,7 @@
     });
     if (changed) fanzaNameCacheSave(c);
   }
-  // data-fanza-url が一致する現在の DOM 要素を全て更新（DOM 再描画後も正しく反映される）
+  // data-fanza-url が一致する現在の DOM 要素を全て更新(DOM 再描画後も正しく反映される)
   function setFanzaEls(fanzaUrl, title) {
     var man = fanzaManualOf_(fanzaUrl);
     if (man && man.title) title = man.title; // 手動入力の作品名が最優先
@@ -2099,7 +2099,7 @@
     if (days <= 90) return '準新作';
     return '旧作';
   }
-  // 作品状態バッジのHTML（新作=緑 / 準新作=青緑 / 旧作=セピア）。空/未指定は旧作扱い。
+  // 作品状態バッジのHTML。(新作=緑 / 準新作=青緑 / 旧作=セピア)空/未指定は旧作扱い。
   function stateBadgeHtml_(ws) {
     var s = ws || '旧作';
     var cls = s === '新作' ? 'fp-state-new' : (s === '準新作' ? 'fp-state-semi' : 'fp-state-old');
@@ -2116,7 +2116,7 @@
     }
     return '現定価:<span class="fp-cur">' + yen_(p.price) + '</span>';
   }
-  // 投稿時（当時）価格のHTML。全体を作品名と同じ淡色で表示。%offは現在と同様に枠で囲む。
+  // 投稿時(当時)価格のHTML。全体を作品名と同じ淡色で表示。%offは現在と同様に枠で囲む。
   function fmtSnapPriceHtml(p) {
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
@@ -2155,7 +2155,7 @@
     });
   }
 
-  // 手動入力済みの作品情報を、描画直後に即時反映する（フェッチ完了を待たず表示が遅れない）。
+  // 手動入力済みの作品情報を、描画直後に即時反映する。(フェッチ完了を待たず表示が遅れない)
   function applyManualInfoNow_() {
     var m = fanzaManualLoad();
     Object.keys(m).forEach(function (u) {
@@ -2166,7 +2166,7 @@
   }
 
   // data-fanza-thumb-url が一致するサムネ<img>へ画像を設定して表示。
-  // src＝メイン画像（モーダルと同じ・存在確認済みの大きい方）。altSrc＝読込失敗時の代替。両方ダメなら非表示。
+  // src＝メイン画像。(モーダルと同じ・存在確認済みの大きい方)altSrc＝読込失敗時の代替。両方ダメなら非表示。
   function setFanzaThumbEls(fanzaUrl, src, altSrc) {
     if (!src && altSrc) { src = altSrc; altSrc = ''; }
     if (!src) return;
@@ -2181,7 +2181,7 @@
     });
   }
 
-  // 作品詳細モーダル（サムネクリックで開く）。キャッシュから作品名/画像/ジャンル/発売日/サービスを表示。
+  // 作品詳細モーダル。(サムネクリックで開く)キャッシュから作品名/画像/ジャンル/発売日/サービスを表示。
   function openFanzaModal_(fanzaUrl) {
     var cache = fanzaNameCacheLoad();
     var c = cache[fanzaUrl] || {};
@@ -2205,7 +2205,7 @@
       ov.addEventListener('click', function (e) { if (e.target === ov) closeFanzaModal_(); });
       ov.querySelector('.fz-close').addEventListener('click', closeFanzaModal_);
     }
-    // 画像ギャラリー：作品画像（先頭）＋サンプル画像。クリックでズームビューア（スワイプ切替）。
+    // 画像ギャラリー：作品画像(先頭)＋サンプル画像。クリックでズームビューア。(スワイプ切替)
     _fzGallery = [];
     if (big) _fzGallery.push(big);
     samples.forEach(function (s) { _fzGallery.push(s); });
@@ -2231,7 +2231,7 @@
   }
   function closeFanzaModal_() { var ov = $('fzOverlay'); if (ov) ov.hidden = true; }
 
-  // ── 作品情報の手動入力モーダル（詳細モーダルからさらに開く）────────────────
+  // ── 作品情報の手動入力モーダル(詳細モーダルからさらに開く)────────────────
   // API未収録・取得不能な作品でも、作品名/定価/セール価格/発売日/ジャンルを手入力して表示できる。
   function openFanzaEdit_(fanzaUrl) {
     var ov = $('fzEditOverlay');
@@ -2244,7 +2244,7 @@
         '<div class="fz-modal">' +
           '<button class="fz-close" type="button" aria-label="閉じる">✕</button>' +
           '<div class="fz-title">✏️ 作品情報を手動入力</div>' +
-          '<div class="hint" style="margin:0 0 10px;">自動取得できない作品(API未収録等)向け。入力した値は<b>自動取得より優先</b>して表示されます。<br>全て空にして保存すると手動入力を解除(自動取得に戻る)。</div>' +
+          '<div class="hint" style="margin:0 0 10px;">自動取得できない作品(API未収録等)向け。入力した値は<b>自動取得より優先</b>して表示されます。<br>全て空にして保存すると手動入力を解除。(自動取得に戻る)</div>' +
           '<label class="vedit-field">作品名<input id="fzeTitle" type="text" autocomplete="off" placeholder="作品の正式タイトル"></label>' +
           '<label class="vedit-field">サークル名(作者名)<input id="fzeAuthor" type="text" autocomplete="off" placeholder="サークル名"></label>' +
           '<div style="display:flex;gap:10px;">' +
@@ -2275,7 +2275,7 @@
         if (!t && !au && lp == null && pr == null && !rd && !gs.length) delete all[url]; // 全空＝解除
         else all[url] = { title: t, author: au, listPrice: lp, price: pr, releaseDate: rd, genres: gs, updatedAt: new Date().toISOString() };
         fanzaManualSaveAll(all);
-        // 当時スナップが未保存の投稿には、この価格を当時として固定（一覧の当時行にも出る）。
+        // 当時スナップが未保存の投稿には、この価格を当時として固定。(一覧の当時行にも出る)
         var lp2 = lp != null ? lp : pr, pr2 = pr != null ? pr : lp;
         if (pr2 != null) backfillSnap_(url, { price: pr2, listPrice: lp2, discountPct: (lp2 && pr2 && pr2 < lp2) ? Math.round((1 - pr2 / lp2) * 100) : 0 });
         closeFanzaEdit_(); closeFanzaModal_();
@@ -2298,7 +2298,7 @@
   }
   function closeFanzaEdit_() { var ov = $('fzEditOverlay'); if (ov) ov.hidden = true; }
 
-  // 画像ズームビューア（作品画像＋サンプルを1つのギャラリーとして、左右スワイプで切替。矢印ボタンなし）。
+  // 画像ズームビューア。(作品画像＋サンプルを1つのギャラリーとして、左右スワイプで切替。矢印ボタンなし)
   var _fzGallery = [], _zoomImgs = [], _zoomIdx = 0;
   function openZoom_(images, idx) {
     if (!images || !images.length) return;
@@ -2333,7 +2333,7 @@
     var z = $('fzZoom'); if (!z) return;
     var im = z.querySelector('.fz-zoom-img'), cnt = z.querySelector('.fz-zoom-count');
     if (im) im.src = _zoomImgs[_zoomIdx] || '';
-    if (cnt) cnt.textContent = _zoomImgs.length > 1 ? (_zoomIdx + 1) + ' / ' + _zoomImgs.length + '（左右スワイプ）' : '';
+    if (cnt) cnt.textContent = _zoomImgs.length > 1 ? (_zoomIdx + 1) + ' / ' + _zoomImgs.length + '(左右スワイプ)' : '';
   }
   function zoomGo_(dir) {
     if (_zoomImgs.length < 2) return;
@@ -2352,8 +2352,8 @@
       if (html) { el.innerHTML = html; el.style.display = ''; }
       else { el.innerHTML = ''; el.style.display = 'none'; }
     });
-    // 発売日→現在の作品状態。投稿時より「新しい」ときだけ引き上げる（格下げはしない）。
-    //   例: 投稿時=旧作/準新作 でも 現在=新作 なら 新作 に合わせる（準新作も同様）。両アカウント共通ロジック。
+    // 発売日→現在の作品状態。投稿時より「新しい」ときだけ引き上げる。(格下げはしない)
+    //   例: 投稿時=旧作/準新作 でも 現在=新作 なら 新作 に合わせる。(準新作も同様)両アカウント共通ロジック。
     var apiState = priceInfo && deriveWorkState_(priceInfo.releaseDate);
     if (apiState) {
       var cr = wsRank_(apiState);
@@ -2361,10 +2361,10 @@
         if (el.getAttribute('data-fanza-state-url') !== fanzaUrl) return;
         if (cr > wsRank_((el.textContent || '').trim())) el.innerHTML = stateBadgeHtml_(apiState); // 引き上げのみ
       });
-      reconcileWorkStateUp_(fanzaUrl, apiState); // 保存＋GAS反映（表示中アカウントの該当アイテム）
+      reconcileWorkStateUp_(fanzaUrl, apiState); // 保存＋GAS反映(表示中アカウントの該当アイテム)
     }
   }
-  // 作品状態の新しさ順位（新作>準新作>旧作>未設定）。
+  // 作品状態の新しさ順位。(新作>準新作>旧作>未設定)
   function wsRank_(s) { return s === '新作' ? 3 : (s === '準新作' ? 2 : (s === '旧作' ? 1 : 0)); }
   // 現在の作品状態が投稿時より新しい該当アイテムの workState を引き上げて保存＋GAS反映。変更があれば再描画。
   var _wsRenderPending = false;
@@ -2382,20 +2382,20 @@
     if (changed && !_wsRenderPending) { _wsRenderPending = true; setTimeout(function () { _wsRenderPending = false; render(); }, 1500); }
   }
 
-  // ── FANZA取得の実行管理（世代トークン方式）──────────────────────────────
+  // ── FANZA取得の実行管理(世代トークン方式)──────────────────────────────
   // 旧実装は「実行中フラグ(_fanzaBusy)が立っている間、手動ボタンは一言出して黙って戻る」だった。
   // タブを開いた直後は“無表示の自動取得”が数十秒動いているため、その間にボタンを押すと
   // 表示が一向に変わらない＝根本原因。さらに処理チェーンが例外で死ぬとフラグが立ったまま永久停止。
   // 対策：
-  //   ・手動実行は進行中の実行を「乗っ取る」（世代番号++。旧実行は次stepで世代不一致を見て静かに停止）
-  //   ・自動実行だけ進行中なら遠慮する（ただし60秒進捗が無い実行は死んだとみなして開始＝スタック自動復帰）
+  //   ・手動実行は進行中の実行を「乗っ取る」(世代番号++。旧実行は次stepで世代不一致を見て静かに停止)
+  //   ・自動実行だけ進行中なら遠慮する(ただし60秒進捗が無い実行は死んだとみなして開始＝スタック自動復帰)
   //   ・ボタンは絶対に無視されない：押せば必ず進捗表示つきで最初から取得が始まる
-  var _fanzaGen = 0;        // 現在有効な実行の世代（新実行開始で++）
-  var _fanzaActive = false; // 実行中フラグ（自動実行の遠慮判定用）
-  var _fanzaTick = 0;       // 最終進捗時刻（watchdog：古いままなら実行は死んでいる）
-  var _fanzaManual = false; // 現行世代が手動実行か（自動が手動を引き継ぐとき進捗表示も引き継ぐ）
-  // manual=true（DMM作品情報取得ボタン）のときは進捗と完了/失敗をステータスへ表示する。
-  // sweepDepth: 完了後の追い掛けスイープの深さ（1段まで。キャッシュ保存不能な環境での無限ループ防止）。
+  var _fanzaGen = 0;        // 現在有効な実行の世代(新実行開始で++)
+  var _fanzaActive = false; // 実行中フラグ(自動実行の遠慮判定用)
+  var _fanzaTick = 0;       // 最終進捗時刻(watchdog：古いままなら実行は死んでいる)
+  var _fanzaManual = false; // 現行世代が手動実行か(自動が手動を引き継ぐとき進捗表示も引き継ぐ)
+  // manual=true(DMM作品情報取得ボタン)のときは進捗と完了/失敗をステータスへ表示する。
+  // sweepDepth: 完了後の追い掛けスイープの深さ。(1段まで。キャッシュ保存不能な環境での無限ループ防止)
   function fillFanzaNames(manual, sweepDepth) {
     var targets = document.querySelectorAll('[data-fanza-url]');
     if (!targets.length) { if (manual) setDmmStatus('作品URLのある投稿がありません。'); return; }
@@ -2404,7 +2404,7 @@
     var sharedSecret = '';
     try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
     try { sharedSecret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
-    if (!workerUrl) { if (manual) setDmmStatus('⚠️ FANZAワーカーURLが未設定です（⚙️詳細設定で設定してください）。'); return; }
+    if (!workerUrl) { if (manual) setDmmStatus('⚠️ FANZAワーカーURLが未設定です。(⚙️詳細設定で設定してください)'); return; }
     purgeBadFanzaCache(); // 旧版で混入したログイン/エラータイトルを先に掃除
     var cache = fanzaNameCacheLoad();
     var now = new Date().getTime();
@@ -2426,7 +2426,7 @@
       var url = nameEl.getAttribute('data-fanza-url');
       if (!url) return;
       var cached = cache[url];
-      var displayed = false; // 既に何か表示したか（「…」で潰さない判定）
+      var displayed = false; // 既に何か表示したか(「…」で潰さない判定)
       if (cached) {
         var age = now - (cached.fetchedAt || 0);
         var freshFull = cached.title && !isBadFanzaTitle(cached.title) && age < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media && cached.sv === FZ_SV;
@@ -2435,45 +2435,45 @@
         //   新鮮ならここで確定。古ければ表示は残したまま下のjobsに積んで裏で静かに最新化する。
         if (cached.title && !isBadFanzaTitle(cached.title)) {
           setFanzaEls(url, cached.title); setFanzaAuthorEls(url, cached.author || '');
-          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo); if (freshFull) backfillSnap_(url, cached.priceInfo); } // 当時価格の固定は新鮮な価格のときだけ（古い価格を投稿時価格にしない）
+          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo); if (freshFull) backfillSnap_(url, cached.priceInfo); } // 当時価格の固定は新鮮な価格のときだけ(古い価格を投稿時価格にしない)
           if (cached.media) setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall);
           displayed = true;
           if (freshFull) return;
         } else if (cached.partial && cached.media) {
-          // 画像のみの部分情報（API未収録作品）：サムネ＋手動入力の作品名/価格を表示
+          // 画像のみの部分情報(API未収録作品)：サムネ＋手動入力の作品名/価格を表示
           setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, cached.author || '');
           setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall);
           displayed = true;
           if (freshPartial) return;
         } else if (!cached.title && !cached.partial && age < NEG) {
-          setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, ''); return; // 直近「未取得」→再取得しない（手動入力があれば表示）
+          setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, ''); return; // 直近「未取得」→再取得しない(手動入力があれば表示)
         }
       }
       var res = window.buildAffiliateLink(url, '');
       if (!res || !res.ok || !res.cid) return;
       if (seen[url]) return; seen[url] = true;
-      // prev＝表示中の旧キャッシュ。裏取得が失敗/降格しても旧内容を消さないための保険（SWR）。
+      // prev＝表示中の旧キャッシュ。裏取得が失敗/降格しても旧内容を消さないための保険。(SWR)
       jobs.push({ url: url, cid: res.cid, el: nameEl, title: titleByUrl[url] || '', prev: cached || null });
-      // 手動タイトル/旧キャッシュ表示がある場合は「…」で潰さない（見た目は即・裏で最新化）
+      // 手動タイトル/旧キャッシュ表示がある場合は「…」で潰さない(見た目は即・裏で最新化)
       var manJ = fanzaManualOf_(url);
       if (manJ && manJ.title) { nameEl.textContent = manJ.title; nameEl.style.display = ''; }
       else if (!displayed) { nameEl.textContent = '…'; nameEl.style.display = ''; }
     });
-    if (!jobs.length) { if (manual) setDmmStatus('✅ 作品情報は取得済みです（再取得の必要はありません）。'); return; }
-    // 自動実行は、生きている実行が進行中なら遠慮（重複取得を避ける）。60秒進捗が無ければ死亡とみなし開始。
-    // 手動実行はここを素通り＝進行中でも乗っ取って必ず開始する（ボタンが無視されることは無い）。
+    if (!jobs.length) { if (manual) setDmmStatus('✅ 作品情報は取得済みです。(再取得の必要はありません)'); return; }
+    // 自動実行は、生きている実行が進行中なら遠慮。(重複取得を避ける)60秒進捗が無ければ死亡とみなし開始。
+    // 手動実行はここを素通り＝進行中でも乗っ取って必ず開始する。(ボタンが無視されることは無い)
     if (!manual && _fanzaActive && (new Date().getTime() - _fanzaTick) < 60000) return;
-    // 手動実行を（停止とみなして）自動が引き継ぐ場合は進捗表示も引き継ぐ＝「取得中…」表示が凍結しない。
+    // 手動実行を(停止とみなして)自動が引き継ぐ場合は進捗表示も引き継ぐ＝「取得中…」表示が凍結しない。
     if (!manual && _fanzaActive && _fanzaManual) manual = true;
-    // ★取得は3本並列（各系列は350ms間隔）＝直列1本より約3倍速。DMMは実測で30並列でも安定
+    // ★取得は3本並列(各系列は350ms間隔)＝直列1本より約3倍速。DMMは実測で30並列でも安定
     //   だが、安全域として3本に抑える。一時的な失敗のみ最大3回リトライ。恒久的失敗は1回で確定。
     var gen = ++_fanzaGen;  // 旧実行を無効化し、この実行が主導権を取る
     _fanzaActive = true; _fanzaTick = new Date().getTime(); _fanzaManual = !!manual;
     var GAP = 350, CONC = 3, next = 0, running = 0, processed = 0;
     var done = 0, fail = 0, partial = 0, total = jobs.length, fails = [], partials = [];
-    // カウントダウン：初期見積り＝1件≈0.7秒(3本並列)。各件完了ごとに実測平均で補正しつつ毎秒-1。
+    // カウントダウン：初期見積り＝1件≈0.7秒。(3本並列)各件完了ごとに実測平均で補正しつつ毎秒-1。
     var startT = new Date().getTime(), etaSec = Math.max(1, Math.ceil(total * 0.7)), ticker = null;
-    function dmmProgress() { if (manual) setDmmStatus('DMMから作品情報を取得中… （' + processed + '/' + total + '）・<b>終了まであと約 ' + Math.max(etaSec, 0) + ' 秒</b>'); }
+    function dmmProgress() { if (manual) setDmmStatus('DMMから作品情報を取得中… (' + processed + '/' + total + ')・<b>終了まであと約 ' + Math.max(etaSec, 0) + ' 秒</b>'); }
     if (manual) {
       dmmProgress();
       ticker = setInterval(function () {
@@ -2483,11 +2483,11 @@
       }, 1000);
     }
     function fetchWithRetry(job, tries) {
-      if (gen === _fanzaGen) _fanzaTick = new Date().getTime(); // 試行開始＝生存を刻む（長い1件でwatchdogに誤殺されない）
+      if (gen === _fanzaGen) _fanzaTick = new Date().getTime(); // 試行開始＝生存を刻む(長い1件でwatchdogに誤殺されない)
       return window.FanzaCore.fetchFanzaInfo(job.cid, workerUrl, sharedSecret, job.url || '').then(function (info) {
-        if (gen !== _fanzaGen) return null; // 乗っ取り後の旧実行はリトライも継続もしない（静かに中止）
+        if (gen !== _fanzaGen) return null; // 乗っ取り後の旧実行はリトライも継続もしない(静かに中止)
         if (info && info.title && !isBadFanzaTitle(info.title)) return info; // 成功
-        // 恒久的失敗（作品が見つからない等）はリトライしない＝無駄な待ち時間を作らない。一時的失敗のみ再試行。
+        // 恒久的失敗(作品が見つからない等)はリトライしない＝無駄な待ち時間を作らない。一時的失敗のみ再試行。
         var canRetry = info && info.__error ? !!info.retryable : true;
         if (tries > 0 && canRetry) return new Promise(function (r) { setTimeout(r, 1300); }).then(function () { return (gen === _fanzaGen) ? fetchWithRetry(job, tries - 1) : null; });
         return info || null;
@@ -2502,13 +2502,13 @@
       if (ticker) { clearInterval(ticker); ticker = null; }
       if (manual) {
         var msg = '';
-        if (!fails.length && !partials.length) msg = '✅ DMM作品情報を取得しました（成功 ' + done + ' 件）。';
+        if (!fails.length && !partials.length) msg = '✅ DMM作品情報を取得しました。(成功 ' + done + ' 件)';
         else {
           msg = 'DMM作品情報：成功 ' + done + (partial ? ' / 画像のみ ' + partial : '') + (fail ? ' / <b>失敗 ' + fail + '</b>' : '');
           if (partials.length) {
-            msg += '<br><b>画像のみ取得（API未収録作品）：</b><br>' +
+            msg += '<br><b>画像のみ取得(API未収録作品)：</b><br>' +
               partials.map(function (p) { return '・「' + esc(p.title || '(無題)') + '」'; }).join('<br>') +
-              '<br>　└ サークル設定等でアフィリエイトAPIに収録されておらず、作品名・価格は取得できません（サムネ/サンプル画像は表示します）。';
+              '<br>　└ サークル設定等でアフィリエイトAPIに収録されておらず、作品名・価格は取得できません。(サムネ/サンプル画像は表示します)';
           }
           if (fails.length) {
             msg += '<br><b>取得に失敗した投稿と原因：</b><br>' +
@@ -2517,7 +2517,7 @@
         }
         setDmmStatus(msg);
       }
-      // 実行中に描画が変わって取り漏れた分を1段だけ追い掛け（深さ制限＝キャッシュ保存不能環境でも無限ループしない）。
+      // 実行中に描画が変わって取り漏れた分を1段だけ追い掛け。(深さ制限＝キャッシュ保存不能環境でも無限ループしない)
       if ((sweepDepth || 0) < 1) setTimeout(function () { if (gen === _fanzaGen) fillFanzaNames(false, (sweepDepth || 0) + 1); }, 100);
     }
     function pump() {
@@ -2525,7 +2525,7 @@
       _fanzaTick = new Date().getTime(); // watchdog：生存を刻む
       if (next >= jobs.length) {
         running--;
-        if (running === 0) finish(); // 全系列が仕事を終えた時だけ完了処理（in-flight分の集計を待つ）
+        if (running === 0) finish(); // 全系列が仕事を終えた時だけ完了処理(in-flight分の集計を待つ)
         return;
       }
       var job = jobs[next++];
@@ -2541,10 +2541,10 @@
           setFanzaThumbEls(job.url, media.thumb || media.thumbSmall, media.thumbSmall); done++;
         } else if (info && info.partial && (info.thumb || info.thumbSmall)) {
           // 旧キャッシュにフル作品名があるのに今回partialに降格＝APIから一時的に外れただけ。
-          // 旧フル情報を維持（表示・キャッシュとも触らない）＝作品名が無言で消えるのを防ぐ。
+          // 旧フル情報を維持(表示・キャッシュとも触らない)＝作品名が無言で消えるのを防ぐ。
           if (job.prev && job.prev.title && !isBadFanzaTitle(job.prev.title)) { done++; }
           else {
-            // 画像のみの部分情報（API未収録＋ページ取得不能の作品）：サムネ・サンプルだけ保存/表示。
+            // 画像のみの部分情報(API未収録＋ページ取得不能の作品)：サムネ・サンプルだけ保存/表示。
             var mediaP = { thumb: info.thumb || '', thumbSmall: info.thumbSmall || info.thumb || '', samples: info.samples || [], genres: [], service: info.service || '', floor: info.floor || '' };
             c[job.url] = { title: '', author: '', partial: true, priceInfo: null, media: mediaP, sv: FZ_SV, fetchedAt: new Date().getTime() };
             fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); setFanzaAuthorEls(job.url, '');
@@ -2552,41 +2552,41 @@
             if (manual) partials.push({ title: job.title });
           }
         } else if (job.prev && (job.prev.title || job.prev.partial)) {
-          // 取得失敗だが表示中の旧データがある＝旧内容を維持（SWR：失敗時はstale保持）。DOM/キャッシュとも触らない。
+          // 取得失敗だが表示中の旧データがある＝旧内容を維持。(SWR：失敗時はstale保持)DOM/キャッシュとも触らない。
           done++;
         } else {
-          c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得は30分だけキャッシュ（再ハンマー防止＆早期復帰）
+          c[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() }; // 未取得は30分だけキャッシュ(再ハンマー防止＆早期復帰)
           fanzaNameCacheSave(c); setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;
           if (manual) fails.push({ title: job.title, reason: (info && info.__error && info.reason) ? info.reason : '作品が見つかりません' });
         }
       }).catch(function () {
         if (gen !== _fanzaGen) return;
-        // 表示中の旧データがあれば維持（通信エラーで作品名を消さない）。
+        // 表示中の旧データがあれば維持。(通信エラーで作品名を消さない)
         if (job.prev && (job.prev.title || job.prev.partial)) { done++; return; }
-        // 旧データが無い場合のみネガティブキャッシュを書く（追い掛けスイープの再実行を止めるため）。
+        // 旧データが無い場合のみネガティブキャッシュを書く。(追い掛けスイープの再実行を止めるため)
         var c2 = fanzaNameCacheLoad();
         c2[job.url] = { title: '', priceInfo: null, media: null, fetchedAt: new Date().getTime() };
         fanzaNameCacheSave(c2);
         setFanzaEls(job.url, ''); setFanzaPriceEls(job.url, null); fail++;
         if (manual) fails.push({ title: job.title, reason: '通信エラー' });
-      }).then(laneNext, laneNext); // 成功/例外どちらでも系列を必ず継続（拒否ハンドラ欠落による系列死を防止）
+      }).then(laneNext, laneNext); // 成功/例外どちらでも系列を必ず継続(拒否ハンドラ欠落による系列死を防止)
     }
-    // 1件処理後の共通後処理＝この系列の次へ。gen不一致時は何もしない（乗っ取られた系列を止める）。
+    // 1件処理後の共通後処理＝この系列の次へ。gen不一致時は何もしない。(乗っ取られた系列を止める)
     function laneNext() {
       if (gen !== _fanzaGen) return;
       processed++;
       if (manual && processed > 0) { var avg = (new Date().getTime() - startT) / processed; etaSec = Math.ceil(avg * (total - processed) / 1000); }
       dmmProgress();
-      setTimeout(pump, GAP); // この系列の次の1件へ（間隔をあけて）
+      setTimeout(pump, GAP); // この系列の次の1件へ(間隔をあけて)
     }
-    // 3本の取得系列を150msずつずらして起動（同時バーストを避ける）
+    // 3本の取得系列を150msずつずらして起動(同時バーストを避ける)
     var starters = Math.min(CONC, jobs.length);
     running = starters;
     for (var w = 0; w < starters; w++) setTimeout(pump, w * 150);
   }
 
   // 「DMM 作品情報を取得」ボタン：表示中アイテムのFANZAキャッシュを消して、DMM APIから強制再取得。
-  // ※実行中でも「取得中です…」で無視せず、進行中の実行を乗っ取って必ず最初から取得する（世代トークン方式）。
+  // ※実行中でも「取得中です…」で無視せず、進行中の実行を乗っ取って必ず最初から取得する。(世代トークン方式)
   function refetchFanza_() {
     var urls = {};
     document.querySelectorAll('[data-fanza-url]').forEach(function (el) { var u = el.getAttribute('data-fanza-url'); if (u) urls[u] = 1; });
@@ -2594,7 +2594,7 @@
     var c = fanzaNameCacheLoad(), changed = false;
     Object.keys(urls).forEach(function (u) { if (c[u]) { delete c[u]; changed = true; } }); // キャッシュ削除＝強制再取得
     if (changed) fanzaNameCacheSave(c);
-    fillFanzaNames(true);   // 進捗・完了を表示しつつ取得（進行中の自動取得があっても乗っ取る）
+    fillFanzaNames(true);   // 進捗・完了を表示しつつ取得(進行中の自動取得があっても乗っ取る)
   }
 
   var _rankMode = (function () { try { return localStorage.getItem('rank_mode') || 'views'; } catch (e) { return 'views'; } })();
@@ -2629,7 +2629,7 @@
   }
   function fmtAge_(min) { return min == null ? '' : (min < 90 ? min + '分後' : (Math.round(min / 6) / 10) + 'h後'); }
 
-  // ── ランキングタブ（両アカウント合算・3モード切替）──────────────────────────────
+  // ── ランキングタブ(両アカウント合算・3モード切替)──────────────────────────────
   function renderRank() {
     var el = $('pageRank');
     if (!el) return;
@@ -2641,7 +2641,7 @@
       try { ymap = JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { ymap = {}; }
       var items = loadArr('short_hist__' + a).concat(loadArr('verify_manual__' + a));
       items.forEach(function (it) {
-        if (it.remade) return; // 被リビルド（リビルド版に置き換え済み）はランキングに出さない＝新しい方だけ載る
+        if (it.remade) return; // 被リビルド(リビルド版に置き換え済み)はランキングに出さない＝新しい方だけ載る
         var k = itemKey(it);
         var yt = ymap[k] || it.ytUrl || '';
         var vid = ytIdOf(yt);
@@ -2650,7 +2650,7 @@
       });
     });
 
-    // vid で重複排除（同じ動画が両アカウントに存在する場合、先に出た方のみ）
+    // vid で重複排除(同じ動画が両アカウントに存在する場合、先に出た方のみ)
     var seen = {};
     var uniq = combined.filter(function (x) {
       if (seen[x.vid]) return false;
@@ -2675,8 +2675,8 @@
     var RANK_MODES = [
       { key: 'views', label: '総合(再生数)' },
       { key: 'clicks', label: 'クリック数' },
-      { key: 'pv', label: '▶ピーク' },   // 再生の最大瞬間風速（▶＝再生数の絵文字。一番伸びた区間の再生/時）
-      { key: 'pc', label: '<img class="emico" src="assets/icons/ic-link.png" alt="クリック">ピーク' } // クリックの最大瞬間風速（クリック絵文字＝ic-link）
+      { key: 'pv', label: '▶ピーク' },   // 再生の最大瞬間風速(▶＝再生数の絵文字。一番伸びた区間の再生/時)
+      { key: 'pc', label: '<img class="emico" src="assets/icons/ic-link.png" alt="クリック">ピーク' } // クリックの最大瞬間風速(クリック絵文字＝ic-link)
     ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/24時間/72時間
     // 旧モード名(early)は廃止。保存済みなら b120(2時間)へ読み替え。
     if (_rankMode === 'early') _rankMode = 'b120';
@@ -2696,7 +2696,7 @@
           vid: x.vid, yt: x.yt, acct: x.acct,
           title: titleCache[x.vid] || it.title || (it.manual ? '(手動追加)' : '(無題)'),
           views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
-          clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((c != null ? c : 0) + it.rebuildBaseClicks) : c; })(), // 結合は総合値（この投稿＋リビルド前。自分が0/未取得でも被リビルド分は加算）
+          clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((c != null ? c : 0) + it.rebuildBaseClicks) : c; })(), // 結合は総合値(この投稿＋リビルド前。自分が0/未取得でも被リビルド分は加算)
           code: code,
           snapV: snap ? snap.v : null, snapAge: snap ? snap.ageMin : null,
           peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
@@ -2714,7 +2714,7 @@
         if (isBucket) return r.snapV;
         return r.views;
       }
-      // 未記録(値なし)は除外（総合=再生数モードは一覧の基本なので除外しない）。
+      // 未記録(値なし)は除外。(総合=再生数モードは一覧の基本なので除外しない)
       if (_rankMode !== 'views') rows = rows.filter(function (r) { return metricVal(r) != null; });
       rows.sort(function (a, b) {
         var av = metricVal(a), bv = metricVal(b);
@@ -2726,10 +2726,10 @@
         return '<button class="rank-tab' + (m.key === _rankMode ? ' active' : '') + '" data-mode="' + m.key + '" type="button">' + m.label + '</button>';
       }).join('') + '</div>';
       var noteHtml = isBucket
-        ? '<div class="rank-note">投稿から約' + bucketDef.label + '時点の再生数ランキング（自動記録・この機能導入後の投稿が対象。「(◯後)」は実記録時刻。未記録は非表示）。</div>'
-        : (_rankMode === 'clicks' ? '<div class="rank-note">短縮URLのクリック数ランキング（クリックURLの無い投稿は非表示）。</div>'
-          : (_rankMode === 'pv' ? '<div class="rank-note">再生数の最大瞬間風速ランキング（一番伸びた時間帯の1時間あたり再生数。GASが自動記録・スプレッドシート保存。未記録は非表示）。</div>'
-            : (_rankMode === 'pc' ? '<div class="rank-note">クリック数の最大瞬間風速ランキング（一番伸びた時間帯の1時間あたりクリック数。GASが自動記録・保存。未記録は非表示）。</div>' : '')));
+        ? '<div class="rank-note">投稿から約' + bucketDef.label + '時点の再生数ランキング(自動記録・この機能導入後の投稿が対象。「(◯後)」は実記録時刻。未記録は非表示)。</div>'
+        : (_rankMode === 'clicks' ? '<div class="rank-note">短縮URLのクリック数ランキング。(クリックURLの無い投稿は非表示)</div>'
+          : (_rankMode === 'pv' ? '<div class="rank-note">再生数の最大瞬間風速ランキング。(一番伸びた時間帯の1時間あたり再生数。GASが自動記録・スプレッドシート保存。未記録は非表示)</div>'
+            : (_rankMode === 'pc' ? '<div class="rank-note">クリック数の最大瞬間風速ランキング。(一番伸びた時間帯の1時間あたりクリック数。GASが自動記録・保存。未記録は非表示)</div>' : '')));
       var emptyHtml = rows.length ? '' : '<p class="hint" style="padding:10px 14px;">このランキングに表示できる記録がまだありません。</p>';
       el.innerHTML = tabsHtml + noteHtml + emptyHtml + '<div class="rank-list">' +
         rows.map(function (r, i) {
@@ -2743,13 +2743,13 @@
           try { if (rcid && window.Go5Cand && window.Go5Cand.refImgs) { var _ri = window.Go5Cand.refImgs(rcid); refSrc = (_ri && _ri[0]) || ''; } } catch (e) {}
           var thumbColHtml = (r.workUrl || refSrc)
             ? '<div class="rank-thumbcol">' +
-                (r.workUrl ? '<img class="rank-thumb" data-fanza-thumb-url="' + esc(r.workUrl) + '" alt="作品サムネ（タップで詳細）" title="タップで作品詳細（サンプル画像）" loading="lazy" style="display:none;">' : '') +
-                (refSrc ? '<img class="rank-refimg" data-rank-refimg="' + esc(rcid) + '" src="' + esc(refSrc) + '" alt="動画で使った画像（タップで拡大）" title="動画で使った画像（タップで拡大）" loading="lazy">' : '') +
+                (r.workUrl ? '<img class="rank-thumb" data-fanza-thumb-url="' + esc(r.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細(サンプル画像)" loading="lazy" style="display:none;">' : '') +
+                (refSrc ? '<img class="rank-refimg" data-rank-refimg="' + esc(rcid) + '" src="' + esc(refSrc) + '" alt="動画で使った画像(タップで拡大)" title="動画で使った画像(タップで拡大)" loading="lazy">' : '') +
               '</div>'
             : '';
           var dateStr = fmtTsFull(r.ts);
           var acctLabel = ACCT_NAME[r.acct] || r.acct;
-          // 指標スパン（並びの中でソート対象を rank-main で強調）。バケットモードのみ先頭にスナップ値。
+          // 指標スパン。(並びの中でソート対象を rank-main で強調)バケットモードのみ先頭にスナップ値。
           var mViews = '<span class="' + (_rankMode === 'views' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
           var mClicks = '<span class="' + (_rankMode === 'clicks' ? 'rank-main' : '') + '" title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
           var mBucket = isBucket ? '<span class="rank-main" title="投稿から約' + bucketDef.label + 'の再生数">⏱ ' + num(r.snapV) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + ')</span></span>' : '';
@@ -2791,7 +2791,7 @@
           doRender();
         });
       });
-      // 右端の画像列: 作品サムネ→作品詳細（サンプル一覧）モーダル / 動画生成に使った画像→ズーム（スワイプ）
+      // 右端の画像列: 作品サムネ→作品詳細(サンプル一覧)モーダル / 動画生成に使った画像→ズーム(スワイプ)
       el.querySelectorAll('img.rank-thumb').forEach(function (im) {
         im.addEventListener('click', function () { openFanzaModal_(im.getAttribute('data-fanza-thumb-url')); });
       });
@@ -2813,7 +2813,7 @@
       vbatches.forEach(function (b) {
         jobs.push(fetchVideos(b).then(function (m) {
           var err = m.__error || ''; delete m.__error; if (err && !lastErr) lastErr = err;
-          delete m.__queried; // メタキーを消してからキャッシュ反映（yt_meta_cacheへのゴミ混入防止）
+          delete m.__queried; // メタキーを消してからキャッシュ反映(yt_meta_cacheへのゴミ混入防止)
           Object.keys(m).forEach(function (id) {
             var rec = m[id] || {};
             if (rec.views != null) viewsCache[id] = rec.views;
@@ -2828,10 +2828,10 @@
     } else {
       doRender();
     }
-    // ピーク/差分（GAS）を取得したら再描画（ピーク2モードに反映）。
+    // ピーク/差分(GAS)を取得したら再描画。(ピーク2モードに反映)
     fetchDeltas_(false, doRender);
   }
   try { window.YtRank = { renderRank: renderRank }; } catch (e) {}
-  // 短縮URL→現在のクリック数（bluesky.jsのリビルド引き継ぎが「リビルド前スナップショット」取得に使う）。
+  // 短縮URL→現在のクリック数。(bluesky.jsのリビルド引き継ぎが「リビルド前スナップショット」取得に使う)
   try { window.Go5Clicks = { of: function (shortUrl) { var c = codeOf(shortUrl || ''); return (c && (c in clicksCache)) ? clicksCache[c] : null; } }; } catch (e) {}
 })();

@@ -1,7 +1,7 @@
 /**
- * verify-core.js — Phase4 Bluesky検証KPIの純粋関数（テスト可）。
+ * verify-core.js — Phase4 Bluesky検証KPIの純粋関数。(テスト可)
  * Bluesky公開API(public.api.bsky.app)は未認証・CORSでエンゲージメントを取得できる。
- *   buildGetPostsUrl(uris) … getPosts のURL（最大25件）
+ *   buildGetPostsUrl(uris) … getPosts のURL(最大25件)
  *   parseEngagement(json)  … uri→{like,repost,reply,quote}
  *   postedSlotsFromState(state) … 共有ストアから「公開済＋post_uri/url」スロットを新しい順に
  */

@@ -1,11 +1,11 @@
 /**
  * drafts.js — 動画作成タブの「下書き」機能。
- * - 「📝 下書き保存」（仕上がりプレビューの見出し行）：写真・作者名・誘導文・コメント・
- *   作品URL・カテゴリ・リビルドの現在値を1件保存する（アカウント別・最大20件・古い順に押し出し）。
- * - 「下書きから呼び出し」（ウィザード起動ボタンの隣）：保存済み下書きの一覧から選んで、
- *   動画作成タブの各欄へ書き戻す（写真は #photo の実ファイルとしてセットするため、
- *   Bluesky添付/Drive保存など後続処理も通常の写真選択と同じに動く）。
- * 他スクリプトへの依存：window.Go5SetForegroundFile（app.js）／getCurrentAccount（app.js）。
+ * - 「📝 下書き保存」(仕上がりプレビューの見出し行)：写真・作者名・誘導文・コメント・
+ *   作品URL・カテゴリ・リビルドの現在値を1件保存する。(アカウント別・最大20件・古い順に押し出し)
+ * - 「下書きから呼び出し」(ウィザード起動ボタンの隣)：保存済み下書きの一覧から選んで、
+ *   動画作成タブの各欄へ書き戻す(写真は #photo の実ファイルとしてセットするため、
+ *   Bluesky添付/Drive保存など後続処理も通常の写真選択と同じに動く)。
+ * 他スクリプトへの依存：window.Go5SetForegroundFile(app.js)／getCurrentAccount。(app.js)
  */
 (function () {
   'use strict';
@@ -23,7 +23,7 @@
   function saveDrafts(arr) { try { localStorage.setItem(draftsKey(), JSON.stringify(arr.slice(0, MAX_DRAFTS))); return true; } catch (e) { return false; } }
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
-  // サークルを表すアイコン（旧「🏷」の置き換え＝グレー人物シルエットのSVG・白背景は透過・文字サイズに追従）。
+  // サークルを表すアイコン。(旧「🏷」の置き換え＝グレー人物シルエットのSVG・白背景は透過・文字サイズに追従)
   var CIRCLE_ICON = '<svg viewBox="0 0 100 100" width="1em" height="1em" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:-0.15em;">' +
     '<ellipse cx="50" cy="33" rx="25" ry="30" fill="#c2c4c7"/>' +
     '<path fill="#c2c4c7" d="M50 57C33 57 21 64 15 74 10 82 8 91 8 100L92 100C92 91 90 82 85 74 79 64 67 57 50 57Z"/>' +
@@ -33,7 +33,7 @@
     catch (e) { return ''; }
   }
 
-  // 下書き用の縮小画像（プレビュー用途・保存容量を抑えるため小さめ）。
+  // 下書き用の縮小画像。(プレビュー用途・保存容量を抑えるため小さめ)
   function compressForDraft_(file) {
     return new Promise(function (resolve) {
       var url = URL.createObjectURL(file);
@@ -90,7 +90,7 @@
     var pf = (photoInput && photoInput.files && photoInput.files[0]) ? photoInput.files[0] : null;
 
     function finish(photoDataUrl, photoName) {
-      // 作品URLからDMM作品情報（作品名/作者）をスナップショット（取得済みキャッシュのみ・通信しない）。
+      // 作品URLからDMM作品情報(作品名/作者)をスナップショット。(取得済みキャッシュのみ・通信しない)
       var wTitle = '', wAuthor = '';
       try {
         var wi = (workUrl && window.Go5WorkInfo) ? window.Go5WorkInfo(workUrl) : null;
@@ -130,9 +130,9 @@
     if (draft.photo) {
       dataUrlToFile_(draft.photo, draft.photoName).then(function (file) {
         var ok = window.Go5SetForegroundFile && window.Go5SetForegroundFile(file);
-        if (!ok) showRecallToast_('⚠️ 写真の復元に失敗しました（文章欄のみ反映）。写真は選び直してください。');
+        if (!ok) showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)写真は選び直してください。');
         else done();
-      }).catch(function () { showRecallToast_('⚠️ 写真の復元に失敗しました（文章欄のみ反映）。'); });
+      }).catch(function () { showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)'); });
     } else {
       done();
     }
@@ -152,7 +152,7 @@
     setTimeout(function () { if (el.textContent === msg) el.textContent = ''; }, 5000);
   }
 
-  // ── 一覧モーダル（下書きから呼び出し） ──
+  // ── 一覧モーダル(下書きから呼び出し) ──
   function buildPicker_() {
     var overlay = document.createElement('div');
     overlay.id = 'draftPicker';
@@ -184,23 +184,23 @@
     if (!list) return;
     var arr = loadDrafts();
     if (!arr.length) {
-      // 別アカウントに下書きがある場合はそれも案内（アカウント別保存のため「消えた?」を防ぐ）。
+      // 別アカウントに下書きがある場合はそれも案内。(アカウント別保存のため「消えた?」を防ぐ)
       var other = (acctId() === 'acc2') ? 'acc1' : 'acc2';
       var otherName = (other === 'acc2') ? '宵桜艶帖' : '月詠み';
       var otherN = 0;
       try { otherN = (JSON.parse(localStorage.getItem('movie_drafts__' + other) || '[]') || []).length; } catch (e) {}
       list.innerHTML = '<p style="color:var(--sub);font-size:.88rem;line-height:1.7;">' +
         'このアカウントの下書きはまだありません。<br>プレビュー欄の「📝 下書き保存」で今の内容を保存できます。' +
-        (otherN ? '<br><b style="color:var(--accent);">' + otherName + '</b>アカウントに ' + otherN + '件 あります（上部でアカウントを切り替えてください）。' : '') +
+        (otherN ? '<br><b style="color:var(--accent);">' + otherName + '</b>アカウントに ' + otherN + '件 あります。(上部でアカウントを切り替えてください)' : '') +
         '</p>';
       return;
     }
     list.innerHTML = arr.map(function (d, i) {
-      // 題名部分：作品URLのDMM作品名＋作者（保存時スナップ）＋保存日時。無ければ従来のコメントラベル。
+      // 題名部分：作品URLのDMM作品名＋作者(保存時スナップ)＋保存日時。無ければ従来のコメントラベル。
       var line1 = d.workTitle || d.label;
-      // line2html は既に安全なHTML（アイコンSVG＋escした著者名）。作者が無ければescしたラベル。
+      // line2html は既に安全なHTML。(アイコンSVG＋escした著者名)作者が無ければescしたラベル。
       var line2html = d.workAuthor ? (CIRCLE_ICON + ' ' + esc(d.workAuthor)) : (d.workTitle ? esc(d.label) : '');
-      // 幅が足りない時は flex-wrap でボタン行が下段へ落ちる（スマホはみ出し対策）。
+      // 幅が足りない時は flex-wrap でボタン行が下段へ落ちる。(スマホはみ出し対策)
       // ※ボタンは width:auto 明示＝グローバル button{width:100%} の波及ではみ出す事故(INC-47系)の再発防止。
       return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #2a3346;">' +
         (d.photo ? '<img src="' + d.photo + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:0 0 auto;">' : '<div style="width:44px;height:44px;border-radius:6px;background:#0e1422;flex:0 0 auto;"></div>') +

@@ -1,16 +1,16 @@
 /**
- * candidates.js — 「💡 候補」タブ（ランキングと予約の間）。
+ * candidates.js — 「💡 候補」タブ。(ランキングと予約の間)
  *
- * ① 候補リスト（既定サブタブ）:
+ * ① 候補リスト(既定サブタブ):
  *    作品URLを入れると候補として記録。アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でも
  *    素の作品URLへ正規化して保存。作品名/サークル名/サムネ/現在価格/セール◯%offを表示。
- *    複数記録・削除可。データは両アカウント共通(localStorage: cand_items)。
- * ② サークルタブ（＋タブを追加で生成）:
+ *    複数記録・削除可。データは両アカウント共通。(localStorage: cand_items)
+ * ② サークルタブ(＋タブを追加で生成):
  *    特定サークルの全作品を縦一覧表示。並び替え(発売日新/古・売上(人気)・直近1週間で売れてる・値引き率)。
  *    ジャンル・作品状態(新作/準新作/旧作)バッジも表示。各作品に「非表示」、上部「非表示リストを
  *    表示」で再表示可。サークルの特定に必要な入力: サークルID(数字) / サークルページURL
  *    (…article=maker/id=数字…) / そのサークルの作品URL1つ(→APIでサークルIDを自動解決) のどれか1つ。
- *    タブはPC=ドラッグ、スマホ=長押し→ドラッグで並べ替え可（固定の候補/＋タブを除く）。
+ *    タブはPC=ドラッグ、スマホ=長押し→ドラッグで並べ替え可。(固定の候補/＋タブを除く)
  *    🔁リロード=キャッシュ無視で全件取り直し／✏️編集=タブ名変更・サークル貼り替え・削除。
  *    ＋タブ追加で作品URLを入れるとサークル名が自動でタブ名に入る。
  *
@@ -23,11 +23,11 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function lsGet(k, def) { try { return JSON.parse(localStorage.getItem(k) || def); } catch (e) { return JSON.parse(def); } }
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} reqSyncFor_(k); }
-  // 同期対象の候補キーが変わったら即時同期を要求（デバウンス＋最小間隔はGo5Sync側で吸収）。
+  // 同期対象の候補キーが変わったら即時同期を要求。(デバウンス＋最小間隔はGo5Sync側で吸収)
   //   キャッシュ系(cand_sales/cand_mk2 等)では発火させない＝no-op同期の無駄打ちを避ける。
   function reqSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
   function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); }
-  // 継続改善制度の行動ログ(意味のある操作のみ・失敗は無害)。
+  // 継続改善制度の行動ログ。(意味のある操作のみ・失敗は無害)
   function klog_(action, objType, objId, meta) { try { if (window.Go5Kaizen) window.Go5Kaizen.log('candidates', action, objType, objId, meta); } catch (e) {} }
   function workerCfg() {
     var u = '', s = '';
@@ -37,7 +37,7 @@
   function yen(n) { return (n != null && !isNaN(n)) ? '¥' + Number(n).toLocaleString('ja-JP') : '—'; }
   function fmtDate(s) { return String(s || '').slice(0, 10); }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
-  // 発売日→作品状態（新作=30日以内/準新作=90日以内/旧作=それ以降）。yt-clicks.jsのderiveWorkState_と同ロジック。
+  // 発売日→作品状態。(新作=30日以内/準新作=90日以内/旧作=それ以降)yt-clicks.jsのderiveWorkState_と同ロジック。
   function deriveWorkState_(dateStr) {
     if (!dateStr) return '';
     var t = Date.parse(String(dateStr).replace(' ', 'T'));
@@ -51,13 +51,13 @@
     var cls = ws === '新作' ? 'fp-state-new' : (ws === '準新作' ? 'fp-state-semi' : 'fp-state-old');
     return '<span class="fp-state ' + cls + '">' + esc(ws) + '</span>';
   }
-  // 作品URLのホストで判定：book.dmm.(com|co.jp) = FANZA Books、それ以外(dmm.co.jp同人等) = 同人(コミックス)。
+  // 作品URLのホストで判定：book.dmm.(com|co.jp) = FANZA Books、それ以外(dmm.co.jp同人等) = 同人。(コミックス)
   function workKindOf_(url) { return /book\.dmm\.(com|co\.jp)/i.test(url || '') ? 'Books' : '同人'; }
   function workKindBadgeHtml_(url) {
     var kind = workKindOf_(url);
     return '<span class="fp-kind ' + (kind === 'Books' ? 'fp-kind-books' : 'fp-kind-doujin') + '">' + kind + '</span>';
   }
-  // ジャンルタグに「AI」を含むものがあれば AI 作品とみなす（わかる範囲のベストエフォート判定）。
+  // ジャンルタグに「AI」を含むものがあれば AI 作品とみなす。(わかる範囲のベストエフォート判定)
   function isAiWork_(genres) { return (genres || []).some(function (g) { return /AI/i.test(String(g || '')); }); }
 
   // サークルを表すアイコン。旧「🏷」絵文字の置き換え＝グレーの人物シルエット(添付画像)をSVG化。
@@ -67,13 +67,13 @@
     '<path fill="#c2c4c7" d="M50 57C33 57 21 64 15 74 10 82 8 91 8 100L92 100C92 91 90 82 85 74 79 64 67 57 50 57Z"/>' +
     '</svg>';
 
-  // ── PC(広い画面)向け：候補カードの列数（ユーザーが選べる・スマホでは無効） ──
+  // ── PC(広い画面)向け：候補カードの列数(ユーザーが選べる・スマホでは無効) ──
   var K_PCCOLS = 'cand_pc_cols';
   var PCCOLS_MIN = 1, PCCOLS_MAX = 5, PCCOLS_DEF = 2;
   function candCols_() { var n = parseInt(lsGet(K_PCCOLS, String(PCCOLS_DEF)), 10); return (n >= PCCOLS_MIN && n <= PCCOLS_MAX) ? n : PCCOLS_DEF; }
   function applyCandCols_(n) { try { document.documentElement.style.setProperty('--cand-cols', String(n)); } catch (e) {} }
-  applyCandCols_(candCols_()); // モジュール読み込み時に一度反映（以後は選択時のみ更新）
-  // 列数セレクタのHTML（renderMain/renderMakerの両ヘッダーで共通。PCのみCSSで表示）。
+  applyCandCols_(candCols_()); // モジュール読み込み時に一度反映(以後は選択時のみ更新)
+  // 列数セレクタのHTML。(renderMain/renderMakerの両ヘッダーで共通。PCのみCSSで表示)
   function candColsCtlHtml_() {
     var cur = candCols_(), opts = '';
     for (var n = PCCOLS_MIN; n <= PCCOLS_MAX; n++) opts += '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + '列</option>';
@@ -97,7 +97,7 @@
   var _sort = 'added_desc';
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
-  // アカウント別「投稿済みを非表示」トグル（両方同時ONで、いずれかで投稿済みの作品を隠せる）。localStorageで永続。
+  // アカウント別「投稿済みを非表示」トグル。(両方同時ONで、いずれかで投稿済みの作品を隠せる)localStorageで永続。
   var _hidePosted = (function () { try { return JSON.parse(localStorage.getItem('cand_hide_posted') || '{}') || {}; } catch (e) { return {}; } })();
   function saveHidePosted_() { try { localStorage.setItem('cand_hide_posted', JSON.stringify(_hidePosted)); } catch (e) {} }
   function isHiddenByPosted_(cid) {
@@ -106,21 +106,21 @@
     if (_hidePosted.acc2 && postedItemForCid_(cid, 'acc2')) return true;
     return false;
   }
-  // 「◯◯✔非表示」トグル2つ（非表示リストの上段・右寄せ）のHTML。_ACCTS は描画時に定義済み。
+  // 「◯◯✔非表示」トグル2つ(非表示リストの上段・右寄せ)のHTML。_ACCTS は描画時に定義済み。
   function candHidePostedRowHtml_() {
     return '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;justify-content:flex-end;">' +
       '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="' + esc(_ACCTS[0][1]) + 'で投稿済みの作品を一覧から隠す">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
       '<button id="candHidePosted2" type="button" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="' + esc(_ACCTS[1][1]) + 'で投稿済みの作品を一覧から隠す">' + esc(_ACCTS[1][1]) + '✔非表示</button>' +
     '</div>';
   }
-  // 上記トグルの配線。両方独立にON/OFFでき、いずれかで投稿済みなら非表示（isHiddenByPosted_）。
+  // 上記トグルの配線。両方独立にON/OFFでき、いずれかで投稿済みなら非表示。(isHiddenByPosted_)
   function wireHidePostedButtons_(rerender) {
     var b1 = $('candHidePosted1'), b2 = $('candHidePosted2');
     if (b1) b1.addEventListener('click', function () { _hidePosted.acc1 = !_hidePosted.acc1; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc1); rerender(); });
     if (b2) b2.addEventListener('click', function () { _hidePosted.acc2 = !_hidePosted.acc2; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc2); rerender(); });
   }
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
-  // 並べ替え対象外の固定タブ（🦋バズ・💡候補）。左端の2つは動かさない。
+  // 並べ替え対象外の固定タブ。(🦋バズ・💡候補)左端の2つは動かさない。
   function isFixedCandTab_(id) { return id === 'main' || id === 'buzz'; }
 
   var SORTS = [
@@ -134,9 +134,9 @@
   ];
   // 「直近1週間で売れてる順」の注記。
   var RANK7D_NOTE = '※「直近1週間で売れてる順」は、実売本数(販売数)の週次差分があればそれで、無ければレビュー件数の伸びで並べます。差分は記録が溜まる数日後から出ます。';
-  var SALES_NOTE = '※DMMの販売数(実売本数)は日本IPの詳細ページにのみ有り、サーバー(海外IP)からは取得不可のため、PCで「販売数を取得.bat」を実行して取り込みます(未取得の間はレビュー件数を代理表示)。';
+  var SALES_NOTE = '※DMMの販売数(実売本数)は日本IPの詳細ページにのみ有り、サーバー(海外IP)からは取得不可のため、PCで「販売数を取得.bat」を実行して取り込みます。(未取得の間はレビュー件数を代理表示)';
 
-  // ── レビュー件数スナップショット（「直近1週間で売れてる順」の差分計算用）──
+  // ── レビュー件数スナップショット(「直近1週間で売れてる順」の差分計算用)──
   //   cid毎に {at,c} を最大8件・45日以内で保持。12時間に1回だけ記録して肥大化を防ぐ。
   var K_RVSNAP = 'cand_rvsnap';
   function recordReviewSnapshots(items) {
@@ -153,7 +153,7 @@
     });
     if (changed) lsSet(K_RVSNAP, snap);
   }
-  // 約1週間前のスナップとの差分（＝直近1週間で増えたレビュー数≒売れた数の近似）。基準が新しすぎ/無ければ null。
+  // 約1週間前のスナップとの差分。(＝直近1週間で増えたレビュー数≒売れた数の近似)基準が新しすぎ/無ければ null。
   function weekReviewDelta(cid, currentCount) {
     if (currentCount == null) return null;
     var snap = lsGet(K_RVSNAP, '{}'), arr = snap[cid];
@@ -166,7 +166,7 @@
     return Math.max(0, currentCount - best.c);
   }
 
-  // ── 実売本数（販売数）：worker/api/fanza-sales(=PC取得→KV)から取得。端末に24hキャッシュ。──
+  // ── 実売本数(販売数)：worker/api/fanza-sales(=PC取得→KV)から取得。端末に24hキャッシュ。──
   //   販売数はDMM詳細ページにのみ有り、海外IP(worker)は取れない→PC(日本IP)がスクレイプ保存したものを読む。
   var K_SALES = 'cand_sales';       // {cid:{n:(number|null), at}}
   var K_SALESSNAP = 'cand_salessnap'; // {cid:[{at,n}]}  週次差分用
@@ -196,7 +196,7 @@
     if (!best || (new Date().getTime() - best.at) / 86400000 < 3) return null;
     return Math.max(0, currentN - best.n);
   }
-  // 未取得cidを worker へ問い合わせ（＝未取得はPC取得キューへ自動登録）。取得できたら cb(changed,missingCount)。
+  // 未取得cidを worker へ問い合わせ。(＝未取得はPC取得キューへ自動登録)取得できたら cb。(changed,missingCount)
   function fetchSalesFor(cids, cb) {
     var cache = salesCache(), need = [], now = new Date().getTime();
     cids.forEach(function (cid) { var c = cache[cid]; var ttl = (c && c.n == null ? SALES_MISS_TTL : SALES_TTL); if (!c || (now - c.at) >= ttl) need.push(cid); });
@@ -218,14 +218,14 @@
     });
   }
   function missingCount(cids) { var c = salesCache(); var n = 0; cids.forEach(function (cid) { if (!c[cid] || c[cid].n == null) n++; }); return n; }
-  // 指定cidの販売数キャッシュを無効化（🔁リロードで最新を取り直すため）。
+  // 指定cidの販売数キャッシュを無効化。(🔁リロードで最新を取り直すため)
   function invalidateSales_(cids) { var c = salesCache(); (cids || []).forEach(function (cid) { delete c[cid]; }); lsSet(K_SALES, c); }
 
   // ── 候補の「タイトル/発売日 未取得」を自動でバックフィル ──
   //   追加した直後、FANZA workerがその時たまたま部分情報(画像のみ)しか返せなかった作品は
   //   title/date が空のまま残り、作品状態(新作/準新作/旧作)バッジも出ない。販売数(fetchSalesFor)と
   //   同じパターンで、表示のたびに未取得ぶんを控えめに再取得し、取れたら候補データへ書き戻す。
-  var K_INFOMISS = 'cand_infomiss'; // {cid: atMs}  直近の再取得試行時刻（無駄打ち防止）
+  var K_INFOMISS = 'cand_infomiss'; // {cid: atMs}  直近の再取得試行時刻(無駄打ち防止)
   var INFOMISS_RETRY_TTL = 20 * 60 * 1000; // 同じcidの再試行は20分に1回まで
   function needsInfoBackfill_(it) { return !it || !it.cid || !it.title || it.title === '(タイトル未取得)' || !it.date; }
   function backfillMissingInfo_(key, items, cb) {
@@ -235,7 +235,7 @@
     var targets = items.filter(function (it) {
       if (!needsInfoBackfill_(it)) return false;
       var last = miss[it.cid]; return !last || (now - last) >= INFOMISS_RETRY_TTL;
-    }).slice(0, 12); // 一度に叩きすぎない（無駄打ち防止・worker保護）
+    }).slice(0, 12); // 一度に叩きすぎない(無駄打ち防止・worker保護)
     if (!targets.length) { cb(false); return; }
     var pending = targets.length, updates = {}; // cid -> 取得できた差分フィールド
     targets.forEach(function (it) {
@@ -252,8 +252,8 @@
         if (--pending === 0) finish();
       }).catch(function () { if (--pending === 0) finish(); });
     });
-    // ★書き戻しは「今の実際のlocalStorage配列」を読み直してcidで当てる（他の変更を巻き戻さない・
-    //   同期の競合ガードと同じ考え方＝古い参照(items)ではなく現在値に対して差分だけ適用）。
+    // ★書き戻しは「今の実際のlocalStorage配列」を読み直してcidで当てる(他の変更を巻き戻さない・
+    //   同期の競合ガードと同じ考え方＝古い参照(items)ではなく現在値に対して差分だけ適用)。
     function finish() {
       lsSet(K_INFOMISS, miss);
       var cids = Object.keys(updates);
@@ -269,47 +269,47 @@
     }
   }
 
-  // ── 現在描画中カードの cid→item 索引（サムネ/投稿画像モーダルが item を引くため）──
+  // ── 現在描画中カードの cid→item 索引(サムネ/投稿画像モーダルが item を引くため)──
   var _cardIndex = {};
   function itemByCid_(cid) { return _cardIndex[cid] || null; }
 
-  // ── 作品ごとの保存画像（refimg=生成用の元画像＋コメント＋Twitter URL / bskyimg=Bluesky添付用）──
-  //   保存先は IndexedDB（容量は端末の空きに応じて数百MB〜＝iOS Safariの localStorage 約5MB壁を回避）。
+  // ── 作品ごとの保存画像(refimg=生成用の元画像＋コメント＋Twitter URL / bskyimg=Bluesky添付用)──
+  //   保存先は IndexedDB。(容量は端末の空きに応じて数百MB〜＝iOS Safariの localStorage 約5MB壁を回避)
   //   読みは同期のままにしたいので、起動時に全画像をメモリ(_imgMem)へハイドレートし以後は同期参照。
-  //   書きは _imgMem を即更新＋IDBへ非同期反映（write-through）。IDB非対応時は localStorage フォールバック。
+  //   書きは _imgMem を即更新＋IDBへ非同期反映。(write-through)IDB非対応時は localStorage フォールバック。
   var _imgMem = { ref: {}, bsky: {}, post: {} };
   var _idbOk = !!(window.Go5Idb && window.Go5Idb.available());
-  function refImgKey(cid) { return 'cand_refimg__' + cid; }   // localStorage互換キー（フォールバック/移行用）
+  function refImgKey(cid) { return 'cand_refimg__' + cid; }   // localStorage互換キー(フォールバック/移行用)
   function bskyImgKey(cid) { return 'cand_bskyimg__' + cid; }
   function idbKey(kind, cid) { return kind + ':' + cid; }     // IDBキー 'ref:<cid>' / 'bsky:<cid>'
-  function idbFail_(e) { try { console.warn('[go5 idb] 画像保存に失敗（メモリには保持）', e); } catch (_) {} }
+  function idbFail_(e) { try { console.warn('[go5 idb] 画像保存に失敗(メモリには保持)', e); } catch (_) {} }
 
   function refImgOf(cid) {
     if (_idbOk) return _imgMem.ref[cid] || null;
     try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
   }
-  // 保存画像を常に配列で返す（旧形式 {img:単発} → [img] に正規化・新形式は {imgs:[...]}. 37ページ級の複数コマ保持に対応）。
+  // 保存画像を常に配列で返す。(旧形式 {img:単発} → [img] に正規化・新形式は {imgs:[...]}. 37ページ級の複数コマ保持に対応)
   function refImgsOf_(cid) {
     var r = refImgOf(cid); if (!r) return [];
     if (Array.isArray(r.imgs)) return r.imgs.filter(Boolean);
     return r.img ? [r.img] : [];
   }
   function refImgHas(cid) {
-    var r = refImgOf(cid); if (!r) return false; // 1回の読みで判定（フォールバック時の多重JSON.parse回避）
+    var r = refImgOf(cid); if (!r) return false; // 1回の読みで判定(フォールバック時の多重JSON.parse回避)
     var has = Array.isArray(r.imgs) ? r.imgs.some(Boolean) : !!r.img;
     return !!(has || r.comment || r.memo || r.twitterUrl || r.twitterUrl2);
   }
   function refImgSave(cid, data) {
-    // data.imgs（配列・新）または data.img（単発・旧）を受け付け、{imgs, img:先頭} で保存（img は旧読み手互換用）。
+    // data.imgs(配列・新)または data.img(単発・旧)を受け付け、{imgs, img:先頭} で保存。(img は旧読み手互換用)
     var imgs = data ? (Array.isArray(data.imgs) ? data.imgs.filter(Boolean) : (data.img ? [data.img] : [])) : [];
     var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl && !data.twitterUrl2);
     var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: data.twitterUrl2 || '', at: new Date().getTime() };
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
       (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
-      reqSync_(); // 参照画像(動画生成用)の保存直後に即時同期＝他端末で即反映（画像はR2へ）
+      reqSync_(); // 参照画像(動画生成用)の保存直後に即時同期＝他端末で即反映(画像はR2へ)
       if (rec) klog_('ref_image_saved', 'work', cid, { imgs: imgs.length });
-      return true; // IDBは容量に余裕。非同期失敗は稀（メモリ保持＋ログ）
+      return true; // IDBは容量に余裕。非同期失敗は稀(メモリ保持＋ログ)
     }
     try {
       if (!rec) { localStorage.removeItem(refImgKey(cid)); return true; }
@@ -338,8 +338,8 @@
     } catch (e) { return false; }
   }
 
-  // ── 投稿画像（🛠️編集で後付け添付・履歴アイテム単位＝videoId/itemKey をキーに複数枚保存）──
-  //   作品cid単位の refimg（動画の元画像）とは別系統。1枚目が投稿履歴カードに表示され、タップで全枚数をズーム。
+  // ── 投稿画像(🛠️編集で後付け添付・履歴アイテム単位＝videoId/itemKey をキーに複数枚保存)──
+  //   作品cid単位の refimg(動画の元画像)とは別系統。1枚目が投稿履歴カードに表示され、タップで全枚数をズーム。
   function postImgsOf_(key) {
     if (!key) return [];
     var r = _idbOk ? _imgMem.post[key] : (function () { try { return JSON.parse(localStorage.getItem('hist_postimg__' + key) || 'null'); } catch (e) { return null; } })();
@@ -374,14 +374,14 @@
       });
       return migrateLocalImages_();
     }).then(function () {
-      // 画像がメモリに載ったので、候補タブ表示中なら描画し直す（サムネ・✓バッジを反映）。
+      // 画像がメモリに載ったので、候補タブ表示中なら描画し直す。(サムネ・✓バッジを反映)
       try { var pc = document.getElementById('pageCand'); if (pc && !pc.hidden) render(); } catch (e) {}
     }).catch(function (e) {
-      // オープン/読み取りに失敗＝この環境ではIDB不可。localStorageフォールバックへ切り替え（旧データはそのまま読める）。
+      // オープン/読み取りに失敗＝この環境ではIDB不可。localStorageフォールバックへ切り替え。(旧データはそのまま読める)
       _idbOk = false; try { console.warn('[go5 idb] 利用不可のためlocalStorageで継続', e); } catch (_) {}
     });
   }
-  // localStorage の cand_refimg__* / cand_bskyimg__* を IDB へ移して localStorage から削除（冪等・IDB書込成功後にのみ削除＝データロス防止）。
+  // localStorage の cand_refimg__* / cand_bskyimg__* を IDB へ移して localStorage から削除。(冪等・IDB書込成功後にのみ削除＝データロス防止)
   function migrateLocalImages_() {
     var keys = [];
     try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && (k.indexOf('cand_refimg__') === 0 || k.indexOf('cand_bskyimg__') === 0)) keys.push(k); } } catch (e) {}
@@ -393,11 +393,11 @@
       if (isRef) _imgMem.ref[cid] = val; else _imgMem.bsky[cid] = val;
       return window.Go5Idb.set(idbKey(isRef ? 'ref' : 'bsky', cid), val)
         .then(function () { try { localStorage.removeItem(k); } catch (e) {} })
-        .catch(idbFail_); // 失敗時はlocalStorageに残す（次回再試行）
+        .catch(idbFail_); // 失敗時はlocalStorageに残す(次回再試行)
     });
     return Promise.all(jobs);
   }
-  // クリップボードの文字列を対象inputへ貼り付け（[data-paste=inputId] のボタンを配線）。
+  // クリップボードの文字列を対象inputへ貼り付け。([data-paste=inputId] のボタンを配線)
   function wirePaste_(root) {
     (root || document).querySelectorAll('.paste-btn[data-paste]').forEach(function (b) {
       if (b._wired) return; b._wired = true;
@@ -406,7 +406,7 @@
         var orig = b.textContent;
         function restore(label) { b.textContent = label || orig; if (label) setTimeout(function () { b.textContent = orig; }, 1600); }
         if (navigator.clipboard && navigator.clipboard.readText) {
-          b.textContent = '読み取り中…'; // 即時の視覚反応（「押しても無反応」を無くす）
+          b.textContent = '読み取り中…'; // 即時の視覚反応(「押しても無反応」を無くす)
           var settled = false;
           // iOSは画面に出る「ペースト」許可をタップしないと readText が返らないことがある→タイムアウトで案内
           var timer = setTimeout(function () { if (settled) return; settled = true; restore(); inp.focus(); alert('クリップボードを読み取れませんでした。iOSでは表示される「ペースト」の吹き出しをタップしてください。入力欄の長押し貼り付けも使えます。'); }, 8000);
@@ -426,12 +426,12 @@
       });
     });
   }
-  // input要素のHTMLに「📋貼り付け」ボタンを横付けした行を返す（inputはflex:1で伸びる）。
+  // input要素のHTMLに「📋貼り付け」ボタンを横付けした行を返す。(inputはflex:1で伸びる)
   function pasteRow_(inputHtml, inputId) {
     return '<div style="display:flex;gap:6px;align-items:stretch;">' + inputHtml +
       '<button type="button" class="ghost paste-btn" data-paste="' + inputId + '" title="コピー中の文字を貼り付け" style="flex:0 0 auto;width:max-content;margin:0;white-space:nowrap;padding:0 12px;">貼り付け</button></div>';
   }
-  // 画像ファイル→縮小dataURL(長辺1280px・JPEG)。localStorage肥大とQuota超過を防ぐ。
+  // 画像ファイル→縮小dataURL。(長辺1280px・JPEG)localStorage肥大とQuota超過を防ぐ。
   function fileToScaledDataUrl(file, cb) {
     if (!file || !/^image\//.test(file.type || '')) { cb(null, '画像ファイルを選んでください'); return; }
     var fr = new FileReader();
@@ -452,24 +452,24 @@
     fr.onerror = function () { cb(null, 'ファイルを読み込めませんでした'); };
     fr.readAsDataURL(file);
   }
-  // クリップボードにコピーされた画像を取り出して縮小dataURLで返す。cb(dataUrl, err)。
+  // クリップボードにコピーされた画像を取り出して縮小dataURLで返す。cb。(dataUrl, err)
   function pasteImageFromClipboard_(cb) {
-    if (!(navigator.clipboard && navigator.clipboard.read)) { cb(null, 'この端末では画像の貼り付けに未対応です（「画像を選ぶ」をお使いください）'); return; }
+    if (!(navigator.clipboard && navigator.clipboard.read)) { cb(null, 'この端末では画像の貼り付けに未対応です(「画像を選ぶ」をお使いください)'); return; }
     navigator.clipboard.read().then(function (items) {
       for (var i = 0; i < items.length; i++) {
         var t = (items[i].types || []).filter(function (x) { return /^image\//.test(x); })[0];
         if (t) { items[i].getType(t).then(function (blob) { fileToScaledDataUrl(blob, cb); }).catch(function () { cb(null, '画像を取り出せませんでした'); }); return; }
       }
-      cb(null, 'クリップボードに画像がありません（先に画像をコピーしてください）');
-    }).catch(function () { cb(null, 'クリップボードを読み取れませんでした（貼り付けの許可が必要です）'); });
+      cb(null, 'クリップボードに画像がありません(先に画像をコピーしてください)');
+    }).catch(function () { cb(null, 'クリップボードを読み取れませんでした(貼り付けの許可が必要です)'); });
   }
 
-  // ── サンプル画像キャッシュ（サムネモーダル用。cid毎にサンプルURL配列を保持）──
+  // ── サンプル画像キャッシュ(サムネモーダル用。cid毎にサンプルURL配列を保持)──
   var K_SAMPLES = 'cand_samples';
   function samplesCacheGet(cid) { var c = lsGet(K_SAMPLES, '{}')[cid]; return (c && Array.isArray(c.imgs)) ? c : null; }
   function samplesCacheSet(cid, imgs, thumb) { var all = lsGet(K_SAMPLES, '{}'); all[cid] = { imgs: imgs || [], thumb: thumb || '', at: new Date().getTime() }; lsSet(K_SAMPLES, all); }
 
-  // ── サムネ/サンプル画像モーダル（投稿履歴の詳細ビューと同じ .fz-* を流用したライトボックス）──
+  // ── サムネ/サンプル画像モーダル(投稿履歴の詳細ビューと同じ .fz-* を流用したライトボックス)──
   var _imgOverlay = null;
   function ensureImgOverlay_() {
     if (_imgOverlay) return _imgOverlay;
@@ -511,7 +511,7 @@
       }).catch(function () { if (_imgOverlay && !_imgOverlay.hidden) renderImgModal_(it.title, big, null, 'サンプル画像を取得できませんでした。'); });
     } else { renderImgModal_(it.title, big, null, 'サンプル画像の取得にはFANZA Workerの設定が必要です。'); }
   }
-  // 画像ズーム（左右スワイプで切替）。.fz-zoom を流用。
+  // 画像ズーム。(左右スワイプで切替).fz-zoom を流用。
   var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null, _zoomCaps = null; // _zoomCaps=各ページの見出し(画像の上に表示・投稿履歴の「動画生成で使用した画像」等)
   function ensureZoom_() {
     if (_zoom) return _zoom;
@@ -529,7 +529,7 @@
       var nl = _zoomReorder(_zi);
       if (nl && nl.length) { _zoomList = nl.slice(); _zi = 0; zoomShow_(); }
     });
-    // 「画像を貼り付けて新規追加」＝クリップボードの画像を挿入・保存し、1ページ目に表示（投稿編集と同じ保存先に同期）。
+    // 「画像を貼り付けて新規追加」＝クリップボードの画像を挿入・保存し、1ページ目に表示。(投稿編集と同じ保存先に同期)
     z.querySelector('.fz-zoom-add').addEventListener('click', function () {
       if (!_zoomAdd) return;
       var msg = z.querySelector('.fz-zoom-msg'); if (msg) msg.textContent = '貼り付け中…';
@@ -559,7 +559,7 @@
   }
   function zoomGo_(d) { if (!_zoomList.length) return; _zi = (_zi + d + _zoomList.length) % _zoomList.length; zoomShow_(); }
   // opts.onReorder(currentIdx) で「1ページ目にする」ボタン、opts.onPasteAdd(done) で「貼り付けて新規追加」ボタンを出す。
-  //   onPasteAdd はクリップボード画像を先頭へ追加・保存し done(新画像配列, err) を呼ぶ（先頭＝新しい1ページ目）。
+  //   onPasteAdd はクリップボード画像を先頭へ追加・保存し done(新画像配列, err) を呼ぶ。(先頭＝新しい1ページ目)
   function openImgZoom_(images, idx, opts) {
     if (!images || !images.length) return;
     _zoomReorder = (opts && typeof opts.onReorder === 'function') ? opts.onReorder : null;
@@ -567,7 +567,7 @@
     _zoomCaps = (opts && Array.isArray(opts.captions)) ? opts.captions.slice() : null; // ページ別見出し(任意)
     _zoomList = images.slice(); _zi = Math.min(Math.max(0, idx || 0), _zoomList.length - 1); zoomShow_();
   }
-  // 「画像を貼り付けて新規追加」：クリップボード画像を cid の refimg 先頭へ追加・保存し一覧再描画（投稿編集と同じ保存先に同期）。
+  // 「画像を貼り付けて新規追加」：クリップボード画像を cid の refimg 先頭へ追加・保存し一覧再描画。(投稿編集と同じ保存先に同期)
   function pasteAddRefImgToFirst_(cid, done) {
     pasteImageFromClipboard_(function (durl, err) {
       if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
@@ -589,19 +589,19 @@
   }
 
   var _ACCTS = [['acc1', '月詠み'], ['acc2', '宵桜艶帖']];
-  // ── 投稿履歴の cid→item 索引（チャンネル別・メモ化） ──
+  // ── 投稿履歴の cid→item 索引(チャンネル別・メモ化) ──
   //   候補cidは buildAffiliateLink(normalizeWorkUrl(raw)) の出力。履歴側も同じ正規化→解析で
   //   cidを求めないと、アフィリンク付きURL(al.fanza.co.jp/?lurl=…)や計測パラメータ付きURLが
-  //   silentに紐付かない（投稿済みpillが光らない）不具合になる。索引は履歴配列の「件数＋先頭ts」
-  //   を鍵にメモ化し、新規投稿が入れば自動で作り直す（フルリロード不要）。
+  //   silentに紐付かない(投稿済みpillが光らない)不具合になる。索引は履歴配列の「件数＋先頭ts」
+  //   を鍵にメモ化し、新規投稿が入れば自動で作り直す。(フルリロード不要)
   var _postedIdxCache = {}; // { account: { sig: string, map: {cid:item} } }
-  // 履歴アイテムから作品cidを求める（複数経路）。順に: 明示cidフィールド → workUrlを正規化+解析 → cid形状の推定。
+  // 履歴アイテムから作品cidを求める。(複数経路)順に: 明示cidフィールド → workUrlを正規化+解析 → cid形状の推定。
   function cidOfHistItem_(it) {
     if (!it) return '';
-    // ① 明示的な cid フィールド（将来の復元でシートの作品cidを串刺しで持たせた場合）。
+    // ① 明示的な cid フィールド。(将来の復元でシートの作品cidを串刺しで持たせた場合)
     var direct = it.cid || it.workCid || '';
     if (direct) return String(direct);
-    // ② 作品URL → normalizeWorkUrl（lurl展開・計測パラメータ除去）→ buildAffiliateLink で候補と同じcidを得る。
+    // ② 作品URL → normalizeWorkUrl(lurl展開・計測パラメータ除去)→ buildAffiliateLink で候補と同じcidを得る。
     var u = it.workUrl || '';
     if (u && window.buildAffiliateLink) {
       var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(u) : u;
@@ -610,7 +610,7 @@
     }
     return '';
   }
-  // チャンネルの cid→item 索引を（必要なら作り直して）返す。
+  // チャンネルの cid→item 索引を(必要なら作り直して)返す。
   function postedIndexFor_(account) {
     if (typeof window.Go5PostedItems !== 'function') return {};
     var items = window.Go5PostedItems(account) || [];
@@ -625,7 +625,7 @@
     _postedIdxCache[account] = { sig: sig, map: map };
     return map;
   }
-  // 索引を明示的に無効化（一覧描画の起点で呼び、確実に新規投稿を拾う）。
+  // 索引を明示的に無効化。(一覧描画の起点で呼び、確実に新規投稿を拾う)
   function invalidatePostedIndex_() { _postedIdxCache = {}; }
   // 指定アカウントの投稿履歴(short_hist)＋手動追加(verify_manual)から、この作品(cid)のエントリを全て外す。
   //   「このアカウントでは投稿していないのに投稿済み判定になる」誤検出を、内容を確認した上で解消する用途。
@@ -644,7 +644,7 @@
     invalidatePostedIndex_();
     return removed;
   }
-  // この作品(cid)を、指定チャンネルで投稿した投稿履歴アイテムを返す（cid照合・無ければ null）。
+  // この作品(cid)を、指定チャンネルで投稿した投稿履歴アイテムを返す。(cid照合・無ければ null)
   function postedItemForCid_(cid, account) {
     if (!cid) return null;
     return postedIndexFor_(account)[cid] || null;
@@ -655,14 +655,14 @@
       var posted = !!postedItemForCid_(cid, a[0]);
       if (posted) {
         return '<span class="cand-acct-pill cand-acct-' + a[0] + ' posted" role="button" tabindex="0" ' +
-          'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(cid) + '" title="' + esc(a[1]) + 'で投稿済み（タップで投稿内容）">' +
+          'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(cid) + '" title="' + esc(a[1]) + 'で投稿済み(タップで投稿内容)">' +
           esc(a[1]) + ' <b>✔</b></span>';
       }
-      return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" title="' + esc(a[1]) + '（未投稿）">' + esc(a[1]) + '</span>';
+      return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" title="' + esc(a[1]) + '(未投稿)">' + esc(a[1]) + '</span>';
     }).join('');
   }
   // 投稿履歴アイテムから投稿日時(ms)を頑健に取り出す。ts欠落時も背骨ID(videoId=acc-YYYYMMDD-HHMM-)から復元
-  //   ＝「月詠み✔なのに投稿日が出ない」バグの根治（シート復元でpostedAt空・手動移動でtsが0/欠落でも日付が出る）。
+  //   ＝「月詠み✔なのに投稿日が出ない」バグの根治。(シート復元でpostedAt空・手動移動でtsが0/欠落でも日付が出る)
   function postedTsOf_(it) {
     if (!it) return 0;
     if (it.ts && it.ts > 0) return it.ts;
@@ -683,7 +683,7 @@
       return '<span class="cand-posted-date cand-acct-' + a[0] + '" title="' + esc(a[1]) + 'で ' + esc(ds) + ' に投稿済み">' + esc(ds) + ' ✔</span>';
     }).join('');
   }
-  // Bluesky公開APIから、その投稿に添付された画像URL配列を取得（未認証・CORS）。cb(images[]|null)。
+  // Bluesky公開APIから、その投稿に添付された画像URL配列を取得。(未認証・CORS)cb。(images[]|null)
   function fetchPostImages_(postUri, cb) {
     if (!postUri) { cb(null); return; }
     fetch('https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?uris=' + encodeURIComponent(postUri))
@@ -695,7 +695,7 @@
         cb(imgs);
       }).catch(function () { cb(null); });
   }
-  // 投稿詳細モーダル：投稿済みチャンネルのpillをタップ→いつ/何で投稿したか（履歴内容＋実際の投稿画像）を表示。
+  // 投稿詳細モーダル：投稿済みチャンネルのpillをタップ→いつ/何で投稿したか(履歴内容＋実際の投稿画像)を表示。
   var _postedOverlay = null;
   function openPostedDetailModal_(cid, account, label) {
     var it = postedItemForCid_(cid, account); if (!it) return;
@@ -726,9 +726,9 @@
       rows +
       '<div class="pd-imgs-label hint" style="margin-top:8px;">投稿した画像</div>' +
       '<div id="pdImgs" class="pd-imgs"><div class="hint">⏳ 画像を取得中…</div></div>' +
-      // 誤検出の解消：このアカウントで実際には投稿していない場合、この作品の判定（履歴）を外す。
-      '<button id="pdRemove" type="button" class="ghost" style="width:max-content;margin-top:14px;font-size:12.5px;color:#c0392b;border-color:#c0392b;">🚫 ' + esc(label) + 'では投稿していない（この判定を消す）</button>' +
-      '<div class="hint" style="margin-top:4px;">この作品を「' + esc(label) + '」の投稿履歴から外します（誤検出の解消用）。実際の投稿記録が消えるので、投稿済みが正しい場合は押さないでください。</div>';
+      // 誤検出の解消：このアカウントで実際には投稿していない場合、この作品の判定(履歴)を外す。
+      '<button id="pdRemove" type="button" class="ghost" style="width:max-content;margin-top:14px;font-size:12.5px;color:#c0392b;border-color:#c0392b;">🚫 ' + esc(label) + 'では投稿していない(この判定を消す)</button>' +
+      '<div class="hint" style="margin-top:4px;">この作品を「' + esc(label) + '」の投稿履歴から外します。(誤検出の解消用)実際の投稿記録が消えるので、投稿済みが正しい場合は押さないでください。</div>';
     ov.hidden = false;
     var rmBtn = ov.querySelector('#pdRemove');
     if (rmBtn) rmBtn.addEventListener('click', function () {
@@ -737,7 +737,7 @@
       ov.hidden = true;
       try { render(); } catch (e) {} // 候補一覧を再描画＝pillが「未投稿」表示に戻る
     });
-    // 実際の投稿画像を取得（無ければ候補に保存済みの画像でフォールバック）。
+    // 実際の投稿画像を取得。(無ければ候補に保存済みの画像でフォールバック)
     fetchPostImages_(it.postUri, function (imgs) {
       var box = ov.querySelector('#pdImgs'); if (!box) return;
       var list = (imgs && imgs.length) ? imgs : refImgsOf_(cid);
@@ -746,7 +746,7 @@
       box.querySelectorAll('.pd-img').forEach(function (im, i) { im.addEventListener('click', function () { openImgZoom_(list.slice(), i); }); });
     });
   }
-  // カードの「投稿済みpill」の配線：タップで投稿詳細モーダル（未投稿pillは data-posted-acct を持たない＝無反応）。
+  // カードの「投稿済みpill」の配線：タップで投稿詳細モーダル。(未投稿pillは data-posted-acct を持たない＝無反応)
   function wireAcctRow_(root) {
     root.querySelectorAll('[data-posted-acct]').forEach(function (b) {
       var handler = function (e) { e.stopPropagation(); var a = b.getAttribute('data-posted-acct'), c = b.getAttribute('data-posted-cid'); var lbl = (a === 'acc2') ? '宵桜艶帖' : '月詠み'; openPostedDetailModal_(c, a, lbl); };
@@ -755,9 +755,9 @@
     });
   }
 
-  // ── 投稿画像モーダル（複数画像＋メモを保存）──
+  // ── 投稿画像モーダル(複数画像＋メモを保存)──
   var _refOverlay = null;
-  var _refOpenSeq = 0; // モーダルを開くたびに増える通し番号（遅い非同期処理が古いpendingへ書き込むのを防ぐ）
+  var _refOpenSeq = 0; // モーダルを開くたびに増える通し番号(遅い非同期処理が古いpendingへ書き込むのを防ぐ)
   function openRefImgModal_(it, onSaved) {
     if (!it) return;
     var mySeq = ++_refOpenSeq;
@@ -772,23 +772,23 @@
     }
     var cur = refImgOf(it.cid) || {};
     var curImgs = Array.isArray(cur.imgs) ? cur.imgs.filter(Boolean) : (cur.img ? [cur.img] : []);
-    // pending.imgs=保存候補の画像列（複数可・37ページ級の連続貼り付けOK）・idx=表示中（「動画生成へ」で採用される1枚）
+    // pending.imgs=保存候補の画像列(複数可・37ページ級の連続貼り付けOK)・idx=表示中(「動画生成へ」で採用される1枚)
     // X/Bluesky URL は refimg 側に無ければ候補アイテム側(it.twitterUrl=カードのXリンクの出所)からフォールバック
-    //   （カードにXリンクが出ているのにモーダルの欄が空になる不一致を防ぐ）。
+    //   。(カードにXリンクが出ているのにモーダルの欄が空になる不一致を防ぐ)
     var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || it.twitterUrl || '', memo: cur.memo || '', twitterUrl2: cur.twitterUrl2 || '' };
-    var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補（埋め込みポストURLあり）
-    // 作品URLのプレフィル：候補が実際に作品URLを持つ（!isTwitter かつ it.url がDMM/book等）なら、
-    //   twitterUrl の有無に関わらずそのまま欄に表示（＝カードの「作品↗」と同じ判定）。X起点(it.url=ポストURL)は空。
+    var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補(埋め込みポストURLあり)
+    // 作品URLのプレフィル：候補が実際に作品URLを持つ(!isTwitter かつ it.url がDMM/book等)なら、
+    //   twitterUrl の有無に関わらずそのまま欄に表示。(＝カードの「作品↗」と同じ判定)X起点(it.url=ポストURL)は空。
     var workUrlPrefill = (!it.isTwitter && it.url) ? it.url : '';
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
       '<div class="fz-title refimg-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 6px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + esc(it.title || it.cid) + '</div>' +
-      // PC(広い画面)専用：メモ・2つ目URLをボタンを押さず直接編集できる列（CSSで左列に配置・保存ボタンで一緒に反映）。
+      // PC(広い画面)専用：メモ・2つ目URLをボタンを押さず直接編集できる列。(CSSで左列に配置・保存ボタンで一緒に反映)
       // スマホはCSSで非表示のまま＝従来どおり「メモ・URL追加」ボタンから小モーダルで編集。
       '<div class="refimg-pc-memo">' +
         '<label class="hint" style="display:block;margin-bottom:2px;">メモ</label>' +
-        '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ（コメントが無い時にカードへ水色で表示）">' +
-        '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL（2つ目・カードに X2↗ / B2↗ で表示）</label>' +
+        '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)">' +
+        '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL(2つ目・カードに X2↗ / B2↗ で表示)</label>' +
         '<div style="display:flex;gap:6px;align-items:stretch;">' +
           '<input id="refImgUrl2Inline" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
           '<button type="button" class="ghost paste-btn" data-paste="refImgUrl2Inline" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
@@ -826,26 +826,26 @@
     function drawPreview() {
       var n = pending.imgs.length;
       if (pending.idx >= n) pending.idx = Math.max(0, n - 1);
-      if (!n) { previewEl.innerHTML = '<div class="hint" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">画像は未保存です（貼り付けで追加・複数枚OK）</div>'; return; }
+      if (!n) { previewEl.innerHTML = '<div class="hint" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">画像は未保存です(貼り付けで追加・複数枚OK)</div>'; return; }
       previewEl.innerHTML =
         '<div class="cand-refimg-stage">' +
           '<img src="' + esc(pending.imgs[pending.idx]) + '" alt="" class="fz-zoomable" style="max-width:100%;max-height:40vh;border-radius:8px;border:1px solid var(--line);display:block;margin:0 auto;">' +
           (n > 1 ? '<button type="button" class="cand-refimg-nav prev" aria-label="前へ">‹</button><button type="button" class="cand-refimg-nav next" aria-label="次へ">›</button>' : '') +
         '</div>' +
         '<div class="hint" style="text-align:center;margin-top:3px;">' +
-          (n > 1 ? '🖼 複数あり ' + (pending.idx + 1) + ' / ' + n + '（スワイプで切替・<b>表示中の画像が「動画生成へ」で使われます</b>）' : '画像 1枚') +
+          (n > 1 ? '🖼 複数あり ' + (pending.idx + 1) + ' / ' + n + '(スワイプで切替・<b>表示中の画像が「動画生成へ」で使われます</b>)' : '画像 1枚') +
         '</div>';
       previewEl.querySelector('img').addEventListener('click', function () {
         openImgZoom_(pending.imgs.slice(), pending.idx, {
           onReorder: function (i) {
             if (i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
-            var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; drawPreview(); // 旧1枚目は2枚目へずれる（保存で確定）
+            var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; drawPreview(); // 旧1枚目は2枚目へずれる(保存で確定)
             return pending.imgs.slice();
           },
           onPasteAdd: function (done) {
             pasteImageFromClipboard_(function (durl, err) {
               if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
-              pending.imgs.unshift(durl); pending.idx = 0; drawPreview(); // 先頭＝1ページ目（保存で確定）
+              pending.imgs.unshift(durl); pending.idx = 0; drawPreview(); // 先頭＝1ページ目(保存で確定)
               done(pending.imgs.slice(), null);
             });
           }
@@ -855,7 +855,7 @@
       if (pv) pv.addEventListener('click', function (e) { e.stopPropagation(); navTo(pending.idx - 1); });
       if (nx) nx.addEventListener('click', function (e) { e.stopPropagation(); navTo(pending.idx + 1); });
     }
-    // プレビュー上の左右スワイプで切替（ズーム(fz-zoom)側は既存実装でスワイプ対応済み）。
+    // プレビュー上の左右スワイプで切替(ズーム(fz-zoom)側は既存実装でスワイプ対応済み)。
     var _tsx = null, _tsy = null;
     previewEl.addEventListener('touchstart', function (e) { var t = e.changedTouches[0]; _tsx = t.clientX; _tsy = t.clientY; }, { passive: true });
     previewEl.addEventListener('touchend', function (e) {
@@ -872,16 +872,16 @@
       for (fi = 0; fi < fl.length; fi++) files.push(fl[fi]);
       this.value = '';
       if (!files.length) return;
-      body.querySelector('#refImgMsg').textContent = '画像を処理中…（' + files.length + '枚）';
-      // 1枚ずつ順に処理（大量選択時のメモリ圧迫を防ぐ・選択順も保たれる）。
+      body.querySelector('#refImgMsg').textContent = '画像を処理中…(' + files.length + '枚)';
+      // 1枚ずつ順に処理。(大量選択時のメモリ圧迫を防ぐ・選択順も保たれる)
       var added = 0, failed = 0, batch = [];
       (function step(i) {
         if (mySeq !== _refOpenSeq) return; // モーダルが開き直された＝この処理結果は破棄
         if (i >= files.length) {
-          if (added) { pending.imgs = batch.concat(pending.imgs); pending.idx = 0; } // ★追加画像を先頭(1枚目)へ（標準）
+          if (added) { pending.imgs = batch.concat(pending.imgs); pending.idx = 0; } // ★追加画像を先頭(1枚目)へ(標準)
           drawPreview();
           body.querySelector('#refImgMsg').textContent = added
-            ? (added + '枚を追加しました（先頭＝1枚目に配置）' + (failed ? '（' + failed + '枚は読み込めず）' : '') + '（計' + pending.imgs.length + '枚・保存で確定）')
+            ? (added + '枚を追加しました(先頭＝1枚目に配置)' + (failed ? '(' + failed + '枚は読み込めず)' : '') + '(計' + pending.imgs.length + '枚・保存で確定)')
             : '画像を読み込めませんでした';
           return;
         }
@@ -897,22 +897,22 @@
       pasteImageFromClipboard_(function (durl, err) {
         if (mySeq !== _refOpenSeq) return; // モーダルが開き直された＝破棄
         if (err) { body.querySelector('#refImgMsg').textContent = err; return; }
-        pending.imgs.unshift(durl); pending.idx = 0; drawPreview(); // ★追加画像を先頭(1枚目)へ（置換せず追加・複数枚OK）
-        body.querySelector('#refImgMsg').textContent = '貼り付けました（1枚目に追加・計' + pending.imgs.length + '枚）。続けて貼り付けできます（保存で確定）';
+        pending.imgs.unshift(durl); pending.idx = 0; drawPreview(); // ★追加画像を先頭(1枚目)へ(置換せず追加・複数枚OK)
+        body.querySelector('#refImgMsg').textContent = '貼り付けました。(1枚目に追加・計' + pending.imgs.length + '枚)続けて貼り付けできます(保存で確定)';
       });
     });
     body.querySelector('#refImgClear').addEventListener('click', function () {
       var n = pending.imgs.length;
       if (!n) { drawPreview(); return; }
-      if (!window.confirm(n > 1 ? ('表示中の画像（' + (pending.idx + 1) + '/' + n + '）を削除しますか？') : '本当に画像を削除しますか？')) return;
+      if (!window.confirm(n > 1 ? ('表示中の画像(' + (pending.idx + 1) + '/' + n + ')を削除しますか？') : '本当に画像を削除しますか？')) return;
       pending.imgs.splice(pending.idx, 1);
       if (pending.idx >= pending.imgs.length) pending.idx = Math.max(0, pending.imgs.length - 1);
       drawPreview();
-      body.querySelector('#refImgMsg').textContent = '画像を削除しました（保存で確定・残り' + pending.imgs.length + '枚）';
+      body.querySelector('#refImgMsg').textContent = '画像を削除しました(保存で確定・残り' + pending.imgs.length + '枚)';
     });
-    // PC専用インライン欄(メモ・2つ目URL)を pending へ取り込む（ボタンを押さず保存/動画生成へで一緒に反映）。
+    // PC専用インライン欄(メモ・2つ目URL)を pending へ取り込む。(ボタンを押さず保存/動画生成へで一緒に反映)
     //   スマホはCSSでこの欄自体を表示しない＝値は常に空文字のまま→pending.memo/twitterUrl2を上書きしない
-    //   （非表示要素の空値でモバイル利用中の「メモ・URL追加」小モーダルの内容を消さないための安全策）。
+    //   。(非表示要素の空値でモバイル利用中の「メモ・URL追加」小モーダルの内容を消さないための安全策)
     function syncPcMemoInline_() {
       var memoEl = body.querySelector('#refImgMemoInline'), url2El = body.querySelector('#refImgUrl2Inline');
       if (memoEl && memoEl.offsetParent !== null) pending.memo = memoEl.value || '';
@@ -924,15 +924,15 @@
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
       syncPcMemoInline_();
       var workVal = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
-      if (!workVal && !it.isTwitter && it.url) workVal = it.url; // 欄が空でも候補が作品URLを持つなら使う（動画側へ確実に反映）
+      if (!workVal && !it.isTwitter && it.url) workVal = it.url; // 欄が空でも候補が作品URLを持つなら使う(動画側へ確実に反映)
       var workUrl = workVal ? (window.normalizeWorkUrl ? window.normalizeWorkUrl(workVal) : workVal) : '';
-      refImgSave(it.cid, pending); // 画像・コメントを失わないよう保存（best-effort）
+      refImgSave(it.cid, pending); // 画像・コメントを失わないよう保存(best-effort)
       transferToMovie_(it, pending.imgs[pending.idx] || '', pending.comment, workUrl); // ★表示中の画像を採用
       if (onSaved) onSaved();
       ov.hidden = true;
     });
     body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
-    // メモ・URL追加：親の入力を pending に取り込んでから小モーダルを開く（親の未保存入力を失わない）。
+    // メモ・URL追加：親の入力を pending に取り込んでから小モーダルを開く。(親の未保存入力を失わない)
     body.querySelector('#refMemoAdd').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
@@ -943,7 +943,7 @@
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
       syncPcMemoInline_();
       var workRaw = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
-      // 作品URL欄が空、またはプレフィル値から変更が無ければ何もしない（無駄なAPI呼び出し/意図しないaddedAtリセットを防止）。
+      // 作品URL欄が空、またはプレフィル値から変更が無ければ何もしない。(無駄なAPI呼び出し/意図しないaddedAtリセットを防止)
       if (workRaw && workRaw !== workUrlPrefill) {
         body.querySelector('#refImgMsg').textContent = isTw ? '作品候補に変換中…' : '作品URLを更新中…';
         applyWorkUrl_(it, workRaw, pending, function (ok, err) {
@@ -955,7 +955,7 @@
         });
         return;
       }
-      if (!refImgSave(it.cid, pending)) { body.querySelector('#refImgMsg').textContent = '保存できません（このブラウザの保存枠が不足。古い候補の画像を「消す」で減らしてください）'; return; }
+      if (!refImgSave(it.cid, pending)) { body.querySelector('#refImgMsg').textContent = '保存できません(このブラウザの保存枠が不足。古い候補の画像を「消す」で減らしてください)'; return; }
       body.querySelector('#refImgMsg').textContent = '保存しました';
       if (onSaved) onSaved();
       setTimeout(function () { ov.hidden = true; }, 600);
@@ -964,9 +964,9 @@
     ov.hidden = false;
   }
 
-  // ── メモ＋X/Bluesky URL 追加モーダル（投稿編集モーダルから開く小モーダル・縦は内容に応じて短め）──
+  // ── メモ＋X/Bluesky URL 追加モーダル(投稿編集モーダルから開く小モーダル・縦は内容に応じて短め)──
   //   メモはコメントが無い時にカードへ水色で表示。URLは「2つ目のURL」(twitterUrl2)＝親の1つ目とは別枠。
-  //   記録するとカードで1つ目リンクの横に X2↗ / B2↗（Blueskyは B）が出る。既存URLはここには入れない（空欄）。
+  //   記録するとカードで1つ目リンクの横に X2↗ / B2↗(Blueskyは B)が出る。既存URLはここには入れない。(空欄)
   var _memoOverlay = null;
   function openMemoUrlModal_(cid, pending, mainBody, onSaved) {
     var ov = _memoOverlay;
@@ -982,8 +982,8 @@
     body.innerHTML =
       '<div class="fz-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 10px;font-weight:700;">メモ・URLを追加</div>' +
       '<label class="hint" style="display:block;margin-bottom:2px;">メモ</label>' +
-      '<input id="memoText" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ（コメントが無い時にカードへ水色で表示）">' +
-      '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL（2つ目・カードに X2↗ / B2↗ で表示）</label>' +
+      '<input id="memoText" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)">' +
+      '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL(2つ目・カードに X2↗ / B2↗ で表示)</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="memoUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="memoUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
@@ -998,8 +998,8 @@
     body.querySelector('#memoClose').addEventListener('click', function () { ov.hidden = true; });
     body.querySelector('#memoSave').addEventListener('click', function () {
       pending.memo = body.querySelector('#memoText').value || '';
-      pending.twitterUrl2 = (body.querySelector('#memoUrl').value || '').trim(); // 2つ目のURLとして保存（親の1つ目には触れない）
-      if (!refImgSave(cid, pending)) { body.querySelector('#memoMsg').textContent = '保存できません（保存枠不足）'; return; }
+      pending.twitterUrl2 = (body.querySelector('#memoUrl').value || '').trim(); // 2つ目のURLとして保存(親の1つ目には触れない)
+      if (!refImgSave(cid, pending)) { body.querySelector('#memoMsg').textContent = '保存できません(保存枠不足)'; return; }
       body.querySelector('#memoMsg').textContent = '保存しました';
       if (onSaved) onSaved();
       try { if (_activeTab) render(); } catch (e) {}
@@ -1007,13 +1007,13 @@
     });
     ov.hidden = false;
   }
-  // 動画作成タブへ切替え、候補の作品データ（前景画像/作者/コメント/作品URL）を各入力欄へ埋め込む。
+  // 動画作成タブへ切替え、候補の作品データ(前景画像/作者/コメント/作品URL)を各入力欄へ埋め込む。
   //   ※drafts.js の applyDraft_ と同じ手法：#author/#top/#movieWorkUrl を値+イベントで設定、
   //     前景画像は data-URL→File にして window.Go5SetForegroundFile() で #photo に反映。
   function transferToMovie_(it, imgDataUrl, comment, workUrl) {
     var mv = document.getElementById('tabMovie'); if (mv) mv.click(); // affiliate.js の showTab へ委譲
     // input と change の両方を発火：キャンバス再描画は change を、YouTube題名(ytTitle)の再構築は input を聴くため、
-    // 片方だけだと題名が前作のまま更新されない（コメント→題名の反映漏れ）。両方投げて確実に上書きする。
+    // 片方だけだと題名が前作のまま更新されない。(コメント→題名の反映漏れ)両方投げて確実に上書きする。
     function setVal(id, val) {
       var el = document.getElementById(id);
       if (el && val != null) {
@@ -1023,14 +1023,14 @@
       }
     }
     setVal('author', it.author || '');   // 作者＝サークル名
-    setVal('top', comment || '');         // コメント（＝YouTube題名の素。無ければ空で上書き＝前作の題名を残さない）
-    if (workUrl) setVal('movieWorkUrl', workUrl); // 作品URL（正規化済み）
+    setVal('top', comment || '');         // コメント(＝YouTube題名の素。無ければ空で上書き＝前作の題名を残さない)
+    if (workUrl) setVal('movieWorkUrl', workUrl); // 作品URL(正規化済み)
     if (imgDataUrl && window.Go5SetForegroundFile) {
       fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
         window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }));
       }).catch(function () {});
     }
-    // U-2「一気に作成」：作品データを流し込んだら、作成ボタンまで運んで光らせる＝残り1タップ（行動量支援）。
+    // U-2「一気に作成」：作品データを流し込んだら、作成ボタンまで運んで光らせる＝残り1タップ。(行動量支援)
     focusMakeButton_();
   }
   // 作成ボタン(#makeBtn)を画面内へスクロール＋一時ハイライト＋フォーカス。無ければ先頭へ。
@@ -1044,9 +1044,9 @@
       setTimeout(function () { mk.classList.remove('cta-ready-pulse'); }, 2400);
     }, 260); // タブ切替の描画が終わってから
   }
-  // 保存直後に、その候補カードのサムネ＋コメント/メモを即時反映（一覧を全再描画せず＝スクロール位置を保つ）。
+  // 保存直後に、その候補カードのサムネ＋コメント/メモを即時反映。(一覧を全再描画せず＝スクロール位置を保つ)
   //   ★コメント/メモは candCard と同一構造(cand-comment-row / cand-manage-row)で組み直し fitOneLineTexts_ で
-  //     1行化する＝「保存直後に改行、リロードで直る」不整合を解消（INC）。
+  //     1行化する＝「保存直後に改行、リロードで直る」不整合を解消。(INC)
   function updateCardRefThumb_(cardEl, cid) {
     if (!cardEl) return;
     var col = cardEl.querySelector('.cand-thumbcol');
@@ -1060,32 +1060,32 @@
           thumb.className = 'cand-refimg-thumb';
           thumb.setAttribute('data-refimgview', cid);
           thumb.setAttribute('loading', 'lazy');
-          thumb.alt = '動画生成用の画像（タップで拡大）';
-          thumb.title = '動画生成用の画像（タップで拡大）';
+          thumb.alt = '動画生成用の画像(タップで拡大)';
+          thumb.title = '動画生成用の画像(タップで拡大)';
           thumb.addEventListener('click', function () { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); });
           col.appendChild(thumb);
         }
         thumb.src = src;
-        thumb.classList.toggle('multi', imgs.length > 1); // 複数あり＝アンバー枠で表現（バッジ表記は廃止）
+        thumb.classList.toggle('multi', imgs.length > 1); // 複数あり＝アンバー枠で表現(バッジ表記は廃止)
         if (badge && badge.parentNode) badge.parentNode.removeChild(badge); // 旧バッジの掃除
       } else {
         if (thumb && thumb.parentNode) thumb.parentNode.removeChild(thumb);
         if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
       }
-      var stray = col.querySelector('.cand-refimg-comment'); // 旧構造（サムネ列に折り返すコメント）の名残を掃除
+      var stray = col.querySelector('.cand-refimg-comment'); // 旧構造(サムネ列に折り返すコメント)の名残を掃除
       if (stray && stray.parentNode) stray.parentNode.removeChild(stray);
     }
     syncCardLower_(cardEl, cid);
   }
-  // カード下部（コメント行＋メモ/非表示・🗑行）を candCard と同一構造で組み直す。
+  // カード下部(コメント行＋メモ/非表示・🗑行)を candCard と同一構造で組み直す。
   //   非表示/🗑ボタンはノードごと移動してリスナーを温存。最後に fitOneLineTexts_ で必ず1行化。
   function syncCardLower_(cardEl, cid) {
     var info = cardEl.querySelector('.cand-info'), actions = cardEl.querySelector('.cand-actions');
     if (!info || !actions) return;
     var rr = refImgOf(cid) || {}, cmt = rr.comment || '', memo = rr.memo || '';
     var noComment = !cmt && !memo;
-    var actionBtns = [].slice.call(cardEl.querySelectorAll('.cand-hide-btn')); // 非表示/再表示/🗑（リスナー保持のため移動）
-    // 旧: コメント行/管理行/旧メモdiv/作品リンク行内のスペーサを撤去（ボタンは上で確保済み）
+    var actionBtns = [].slice.call(cardEl.querySelectorAll('.cand-hide-btn')); // 非表示/再表示/🗑(リスナー保持のため移動)
+    // 旧: コメント行/管理行/旧メモdiv/作品リンク行内のスペーサを撤去(ボタンは上で確保済み)
     [].slice.call(cardEl.querySelectorAll('.cand-comment-row, .cand-manage-row, .cand-refimg-memo, .cand-actions-mspacer'))
       .forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
     cardEl.classList.toggle('cand-nocomment', noComment);
@@ -1106,18 +1106,18 @@
     }
     fitOneLineTexts_(cardEl);
   }
-  // 候補（Twitter起点/DMM起点どちらも）に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ（旧項目を置換）。
+  // 候補(Twitter起点/DMM起点どちらも)に作品URLを適用：正規化した作品URLへ変換/更新し、画像・メモ・Twitter URLを引き継ぐ。(旧項目を置換)
   function applyWorkUrl_(oldItem, workUrlRaw, refData, cb) {
     var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(workUrlRaw) : (workUrlRaw || '').trim();
     var r = (url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
     if (!r || !r.ok) { cb(false, 'FANZAの作品URLではないようです'); return; }
     var tabId = _activeTab, key = itemsKey(tabId), items = lsGet(key, '[]'), oldCid = oldItem.cid;
-    if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'この作品は既に追加されています（重複追加しません）'); return; }
+    if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'この作品は既に追加されています(重複追加しません)'); return; }
     // 画像・メモ・Twitter URL を新cidへ移す
     var okRef = refImgSave(r.cid, { imgs: Array.isArray(refData.imgs) ? refData.imgs : (refData.img ? [refData.img] : []), comment: refData.comment || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '' });
     var bimg = (bskyImgOf(oldCid) || {}).img;
     var okB = bimg ? bskyImgSave(r.cid, bimg) : true;
-    // 新cidへの保存が成功した時だけ旧cidを消す（localStorageフォールバック時の容量超過で唯一のコピーを失わない）
+    // 新cidへの保存が成功した時だけ旧cidを消す(localStorageフォールバック時の容量超過で唯一のコピーを失わない)
     if (oldCid !== r.cid && okRef && okB) { refImgSave(oldCid, null); bskyImgSave(oldCid, null); }
     var newItem = { url: url, cid: r.cid, twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '', title: '(タイトル未取得)', addedAt: oldItem.addedAt || new Date().getTime() };
     var idx = -1; items.forEach(function (x, i) { if (x.cid === oldCid) idx = i; });
@@ -1140,7 +1140,7 @@
     else finish(null);
   }
 
-  // ── Bluesky添付画像モーダル（1枚を保存。投稿画像とは別枠）──
+  // ── Bluesky添付画像モーダル(1枚を保存。投稿画像とは別枠)──
   var _bskyOverlay = null;
   function openBskyImgModal_(it, onSaved) {
     if (!it) return;
@@ -1176,20 +1176,20 @@
       body.querySelector('#bskyImgMsg').textContent = '⏳ 画像を処理中…';
       fileToScaledDataUrl(f, function (durl, err) {
         if (err) { body.querySelector('#bskyImgMsg').textContent = '⚠️ ' + err; return; }
-        pending.img = durl; drawPreview(); body.querySelector('#bskyImgMsg').textContent = '画像を差し替えました（保存で確定）';
+        pending.img = durl; drawPreview(); body.querySelector('#bskyImgMsg').textContent = '画像を差し替えました(保存で確定)';
       });
     });
     body.querySelector('#bskyImgPaste').addEventListener('click', function () {
       body.querySelector('#bskyImgMsg').textContent = '⏳ 画像を貼り付け中…';
       pasteImageFromClipboard_(function (durl, err) {
         if (err) { body.querySelector('#bskyImgMsg').textContent = '⚠️ ' + err; return; }
-        pending.img = durl; drawPreview(); body.querySelector('#bskyImgMsg').textContent = 'コピー画像を貼り付けました（保存で確定）';
+        pending.img = durl; drawPreview(); body.querySelector('#bskyImgMsg').textContent = 'コピー画像を貼り付けました(保存で確定)';
       });
     });
-    body.querySelector('#bskyImgClear').addEventListener('click', function () { pending.img = ''; drawPreview(); body.querySelector('#bskyImgMsg').textContent = '画像を消しました（保存で確定）'; });
+    body.querySelector('#bskyImgClear').addEventListener('click', function () { pending.img = ''; drawPreview(); body.querySelector('#bskyImgMsg').textContent = '画像を消しました(保存で確定)'; });
     body.querySelector('#bskyImgCancel').addEventListener('click', function () { ov.hidden = true; });
     body.querySelector('#bskyImgSave').addEventListener('click', function () {
-      if (!bskyImgSave(it.cid, pending.img)) { body.querySelector('#bskyImgMsg').textContent = '⚠️ 保存できません（このブラウザの保存枠が不足。古い候補の画像を減らしてください）'; return; }
+      if (!bskyImgSave(it.cid, pending.img)) { body.querySelector('#bskyImgMsg').textContent = '⚠️ 保存できません(このブラウザの保存枠が不足。古い候補の画像を減らしてください)'; return; }
       body.querySelector('#bskyImgMsg').textContent = '✅ 保存しました';
       if (onSaved) onSaved();
       setTimeout(function () { ov.hidden = true; }, 600);
@@ -1197,7 +1197,7 @@
     ov.hidden = false;
   }
 
-  // コメント/メモを必ず1行に収める（可変フォント）。幅に収まらない時だけ実測しながらフォントを縮小＝折り返さない・極力省略しない。
+  // コメント/メモを必ず1行に収める。(可変フォント)幅に収まらない時だけ実測しながらフォントを縮小＝折り返さない・極力省略しない。
   function fitOneLineTexts_(root) {
     var els = (root || document).querySelectorAll('.cand-manage-comment, .cand-manage-memo, .cand-refimg-memo');
     for (var i = 0; i < els.length; i++) {
@@ -1206,7 +1206,7 @@
       var cw = el.clientWidth; if (!cw) continue;
       if (el.scrollWidth <= cw + 1) continue; // 既に1行に収まっている
       var base = parseFloat(getComputedStyle(el).fontSize) || 13;
-      // 幅比で初期見積り→実測で微調整（収まるまで1pxずつ下げる。下限7px）。
+      // 幅比で初期見積り→実測で微調整。(収まるまで1pxずつ下げる。下限7px)
       var px = Math.max(7, Math.floor(base * (cw / el.scrollWidth)));
       el.style.fontSize = px + 'px';
       var guard = 0;
@@ -1216,11 +1216,11 @@
   // カード共通の配線：サムネのタップで画像モーダル／🖼投稿画像ボタン。
   function wireCardCommon_(el) {
     wireAcctRow_(el); // カード右上のチャンネル切替＋投稿済み表示
-    fitOneLineTexts_(el); // コメント/メモを1行に収める（可変フォント）
+    fitOneLineTexts_(el); // コメント/メモを1行に収める(可変フォント)
     el.querySelectorAll('[data-thumbcid]').forEach(function (im) {
       im.addEventListener('click', function () { openThumbModal_(itemByCid_(im.getAttribute('data-thumbcid'))); });
     });
-    // 保存済みの動画生成用画像（サムネ下の縦長画像）：タップで拡大プレビュー。
+    // 保存済みの動画生成用画像(サムネ下の縦長画像)：タップで拡大プレビュー。
     el.querySelectorAll('[data-refimgview]').forEach(function (im) {
       im.addEventListener('click', function () { var rc = im.getAttribute('data-refimgview'); var imgs = refImgsOf_(rc); if (imgs.length) openImgZoom_(imgs, 0, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } }); }); // 複数あればスワイプ＋1ページ目にする＋貼り付け新規追加
     });
@@ -1231,7 +1231,7 @@
           var has = refImgHas(cid);
           b.classList.toggle('has-img', has);
           b.innerHTML = has ? '🖼 投稿編集✓' : '🖼 投稿編集';
-          updateCardRefThumb_(b.closest ? b.closest('.cand-card') : null, cid); // 保存直後に一覧のサムネへ反映（リロード不要）
+          updateCardRefThumb_(b.closest ? b.closest('.cand-card') : null, cid); // 保存直後に一覧のサムネへ反映(リロード不要)
         });
       });
     });
@@ -1246,7 +1246,7 @@
       });
     });
   }
-  // 「▶今すぐ取得」ボタンの共通配線（notceParentId=通知メッセージを差し込む要素id）。
+  // 「▶今すぐ取得」ボタンの共通配線。(notceParentId=通知メッセージを差し込む要素id)
   function bindPcRun_(btn, noticeParentId) {
     btn.addEventListener('click', function () {
       var b = this; b.disabled = true; var t0 = b.textContent; b.textContent = '⏳ 要求中…';
@@ -1261,7 +1261,7 @@
   }
   // ── 1タブに複数サークル ──
   //   サークルタブは makers:[{id,name},…] を持てる。レガシー tab.makerId/makerName は
-  //   先頭サークルと同期して後方互換を保つ（他コードが tab.makerId を見ても壊れない）。
+  //   先頭サークルと同期して後方互換を保つ。(他コードが tab.makerId を見ても壊れない)
   //   makersOf は新旧どちらの形でも {id,name} 配列を返す。
   function makersOf(tab) {
     if (tab && Array.isArray(tab.makers) && tab.makers.length) {
@@ -1290,7 +1290,7 @@
   function trackMaker(makerId, makerName, remove) {
     if (!makerId) return;
     var flagKey = 'cand_tracked__' + makerId;
-    if (!remove && localStorage.getItem(flagKey)) return; // 登録済みなら送らない（解除は常に送る）
+    if (!remove && localStorage.getItem(flagKey)) return; // 登録済みなら送らない(解除は常に送る)
     var cfg = workerCfg(); if (!cfg.url) return;
     fetch(cfg.url + '/api/fanza-sales-track', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
@@ -1299,11 +1299,11 @@
       if (d && d.ok) { if (remove) localStorage.removeItem(flagKey); else localStorage.setItem(flagKey, '1'); }
     }).catch(function () {}); // 失敗しても次の機会(ensureTrackedAll)に再送される
   }
-  // 既存タブの移行用: 全サークルタブを追跡登録（登録済みはローカルフラグでスキップ＝実質1回だけ）。
+  // 既存タブの移行用: 全サークルタブを追跡登録。(登録済みはローカルフラグでスキップ＝実質1回だけ)
   function ensureTrackedAll() {
     lsGet(K_TABS, '[]').forEach(function (t) { makersOf(t).forEach(function (m) { trackMaker(m.id, m.name || t.name || ''); }); });
   }
-  // 「▶今すぐ取得」: どの端末のWebアプリからでもPCへ実行要求を送る（PC常駐タスクが数分以内に拾う）。
+  // 「▶今すぐ取得」: どの端末のWebアプリからでもPCへ実行要求を送る。(PC常駐タスクが数分以内に拾う)
   // 実スクレイプは日本IPのPCでしか動かないので、これは実行予約のみ。
   function requestPcRun(cb) {
     var cfg = workerCfg(); if (!cfg.url) { cb && cb(false, 'FANZA Workerが未設定です(⚙️詳細設定)'); return; }
@@ -1312,8 +1312,8 @@
       .catch(function () { cb && cb(false, '通信エラー'); });
   }
 
-  // ── サークル作品の取得（全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ） ──
-  //   force=true でキャッシュを無視して取り直す（🔁リロードボタン用）。
+  // ── サークル作品の取得(全ページ＋全同人フロアの巡回はworker側で完結・フロントは1回呼ぶだけ) ──
+  //   force=true でキャッシュを無視して取り直す。(🔁リロードボタン用)
   function fetchMakerItems(makerId, mode, cb, force) {
     // date/discountは sort=date、rank・rank7dは同一データ(sort=rank)を使用。
     var apiMode = (mode === 'rank' || mode === 'rank7d') ? 'rank' : 'date';
@@ -1330,12 +1330,12 @@
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || !d.ok) { cb(null, (d && d.error) === 'bad_secret' ? '共有シークレット不一致(⚙️詳細設定)' : ('取得エラー: ' + ((d && d.error) || '不明'))); return; }
       var items = d.items || [];
-      // 空データはキャッシュしない（一時失敗やサークル未収録を固定化しない）。
+      // 空データはキャッシュしない。(一時失敗やサークル未収録を固定化しない)
       if (items.length) { lsSet(ck, { at: new Date().getTime(), items: items }); recordReviewSnapshots(items); }
       cb(items, null);
     }).catch(function () { cb(null, '通信エラー'); });
   }
-  // 複数サークルをまとめて取得し、cidで重複排除してマージ（1タブに複数サークルを表示する用）。
+  // 複数サークルをまとめて取得し、cidで重複排除してマージ。(1タブに複数サークルを表示する用)
   //   一部サークルが失敗しても成功分は表示。全滅時のみエラーを返す。
   function fetchMakerItemsMulti(makerIds, mode, cb, force) {
     var ids = (makerIds || []).filter(Boolean);
@@ -1384,7 +1384,7 @@
     return a;
   }
 
-  // ── サークルIDの解決（数字 / maker URL / 作品URL） ──
+  // ── サークルIDの解決(数字 / maker URL / 作品URL) ──
   function resolveMakerId(input, cb) {
     var t = (input || '').trim();
     if (!t) { cb(null, null, '入力が空です'); return; }
@@ -1434,14 +1434,14 @@
     else {
       var tab = null; tabs.forEach(function (t) { if (t.id === _activeTab) tab = t; });
       if (!tab) { _activeTab = 'main'; renderMain('main'); }
-      else if (isMakerTab_(tab)) renderMaker(_activeTab);   // サークル作品一覧タブ（1つ以上のサークル）
-      else renderMain(tab.id);                          // 独立した候補リストタブ（タブ名だけのタブ）
+      else if (isMakerTab_(tab)) renderMaker(_activeTab);   // サークル作品一覧タブ(1つ以上のサークル)
+      else renderMain(tab.id);                          // 独立した候補リストタブ(タブ名だけのタブ)
     }
   }
-  // 候補アイテムの保存先: メインは cand_items、独立タブは各タブ固有キー（表示を共有しない）。
+  // 候補アイテムの保存先: メインは cand_items、独立タブは各タブ固有キー。(表示を共有しない)
   function itemsKey(tabId) { return (!tabId || tabId === 'main') ? K_ITEMS : 'cand_items__' + tabId; }
 
-  // ── タブの並べ替え：PC=ドラッグ、スマホ=長押し→ドラッグ（Pointer Eventsでマウス/タッチ統一） ──
+  // ── タブの並べ替え：PC=ドラッグ、スマホ=長押し→ドラッグ(Pointer Eventsでマウス/タッチ統一) ──
   //   固定の「💡候補」「＋タブを追加」は並べ替え対象外。サークルタブ同士のみ入れ替え可能。
   function wireTabDrag_() {
     var bar = document.querySelector('.cand-tabs');
@@ -1489,7 +1489,7 @@
         if (e.pointerType === 'touch') {
           longPressTimer = setTimeout(function () { longPressTimer = null; beginDrag(btn); }, LONG_PRESS_MS);
         } else {
-          // マウス/ペン：微小な移動でドラッグ開始（クリックと区別）
+          // マウス/ペン：微小な移動でドラッグ開始(クリックと区別)
           var onMove = function (me) {
             if (Math.abs(me.clientX - startX) > MOVE_THRESHOLD || Math.abs(me.clientY - startY) > MOVE_THRESHOLD) {
               document.removeEventListener('pointermove', onMove);
@@ -1522,26 +1522,26 @@
     render();
   }
 
-  // ── ＋タブを追加（名前＋サークル特定情報→決定） ──
+  // ── ＋タブを追加(名前＋サークル特定情報→決定) ──
   function showAddTabForm() {
     var f = $('candAddForm');
     if (!f) return;
     f.style.display = '';
     f.innerHTML = '<div class="card" style="margin:10px 0;">' +
       '<div class="field-label" style="margin-top:0;">タブを追加</div>' +
-      '<label class="hint" style="display:block;margin:0 0 2px;">タブ名（必須・後から編集可）</label>' +
+      '<label class="hint" style="display:block;margin:0 0 2px;">タブ名(必須・後から編集可)</label>' +
       '<input id="candTabName" type="text" placeholder="タブの名前" autocomplete="off">' +
-      '<div class="hint" style="margin-top:6px;">タブ名だけで決定すると、💡候補とは別に独立して作品URLを貯められる<b>候補タブ</b>になります。<br>特定サークルの作品一覧タブにしたい場合だけ、下の欄にサークル情報を入れてください（任意）。</div>' +
-      '<label class="hint" style="display:block;margin:8px 0 2px;">サークル情報（任意）: 作品URL / サークルID / サークルURL</label>' +
+      '<div class="hint" style="margin-top:6px;">タブ名だけで決定すると、💡候補とは別に独立して作品URLを貯められる<b>候補タブ</b>になります。<br>特定サークルの作品一覧タブにしたい場合だけ、下の欄にサークル情報を入れてください。(任意)</div>' +
+      '<label class="hint" style="display:block;margin:8px 0 2px;">サークル情報(任意): 作品URL / サークルID / サークルURL</label>' +
       pasteRow_('<input id="candTabSrc" type="text" inputmode="url" placeholder="空欄なら「ただの候補タブ」になります" autocomplete="off" style="flex:1;">', 'candTabSrc') +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
       '<button id="candTabOk" type="button" class="primary" style="flex:1;font-size:.9rem;padding:10px;">決定</button>' +
       '<button id="candTabCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">やめる</button>' +
       '</div><div id="candTabMsg" class="hint" style="min-height:1.3em;"></div></div>';
     var _nameAuto = true; // ユーザーが手入力するまでは自動反映を許可
-    var _resolved = null; // {src, makerId, makerName} 自動判定の結果を決定時に再利用（二重解決回避）
+    var _resolved = null; // {src, makerId, makerName} 自動判定の結果を決定時に再利用(二重解決回避)
     $('candTabName').addEventListener('input', function () { _nameAuto = false; });
-    // 作品URL等を入れたら、サークル名を自動でタブ名へ反映（手入力済みなら尊重）。
+    // 作品URL等を入れたら、サークル名を自動でタブ名へ反映。(手入力済みなら尊重)
     function autoFillName() {
       var src = ($('candTabSrc').value || '').trim();
       if (!src || (_resolved && _resolved.src === src)) return;
@@ -1551,7 +1551,7 @@
         if (!$('candTabSrc') || ($('candTabSrc').value || '').trim() !== src) return; // 入力が変わっていたら破棄
         if (!makerId) { _resolved = null; msg.textContent = '⚠️ ' + err; return; }
         _resolved = { src: src, makerId: makerId, makerName: makerName || '' };
-        msg.textContent = '✅ サークルを特定しました' + (makerName ? '：' + makerName : '（ID ' + makerId + '）');
+        msg.textContent = '✅ サークルを特定しました' + (makerName ? '：' + makerName : '(ID ' + makerId + ')');
         if (_nameAuto && makerName) { $('candTabName').value = makerName; }
       });
     }
@@ -1563,7 +1563,7 @@
       var name = ($('candTabName').value || '').trim();
       var src = ($('candTabSrc').value || '').trim();
       var msg = $('candTabMsg');
-      // サークル情報が無ければ「独立した候補タブ」（タブ名だけでOK）。
+      // サークル情報が無ければ「独立した候補タブ」。(タブ名だけでOK)
       if (!src) {
         if (!name) { msg.textContent = '⚠️ タブ名を入れてください'; return; }
         var tabsL = lsGet(K_TABS, '[]');
@@ -1596,17 +1596,17 @@
   //  API量を抑えるため：フォロー取得ページ数・叩くフィード数・並列数・キャッシュに上限を設ける。
   // ══════════════════════════════════════════════════════════════════
   var BSKY_PUB = 'https://public.api.bsky.app/xrpc/';
-  var K_BUZZ = 'cand_buzz_cache';       // {at, accKey, posts:[...]}（アカウント別ではなく対象集合キーで判定）
-  var BUZZ_TTL = 30 * 60 * 1000;        // 30分キャッシュ（🔁で強制更新）
-  var BUZZ_FOLLOW_PAGES = 3;            // 各アカのフォロー取得ページ数上限（×100件）
-  var BUZZ_MAX_FEEDS = 120;             // getAuthorFeed を叩く最大フォロー先数（API量の上限）
+  var K_BUZZ = 'cand_buzz_cache';       // {at, accKey, posts:[...]}(アカウント別ではなく対象集合キーで判定)
+  var BUZZ_TTL = 30 * 60 * 1000;        // 30分キャッシュ(🔁で強制更新)
+  var BUZZ_FOLLOW_PAGES = 3;            // 各アカのフォロー取得ページ数上限(×100件)
+  var BUZZ_MAX_FEEDS = 120;             // getAuthorFeed を叩く最大フォロー先数(API量の上限)
   var BUZZ_FEED_LIMIT = 15;             // 1フォロー先あたり取得する投稿数
-  var BUZZ_CONCURRENCY = 5;             // 同時fetch数（フォロー数×フィードで膨らむのを抑える）
+  var BUZZ_CONCURRENCY = 5;             // 同時fetch数(フォロー数×フィードで膨らむのを抑える)
   var BUZZ_RECENT_DAYS = 14;            // これより古い投稿は対象外
   var BUZZ_SHOW = 60;                   // 表示件数
   var _buzzLoading = false;
 
-  // ハンドルとDIDのどちらかがあるアカウントのみ対象（🦋投稿タブ⚙設定で保存済み）。
+  // ハンドルとDIDのどちらかがあるアカウントのみ対象。(🦋投稿タブ⚙設定で保存済み)
   function buzzAccounts_() {
     return ['acc1', 'acc2'].map(function (a) {
       var h = '', d = '';
@@ -1621,7 +1621,7 @@
     var q = Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
     return fetch(BSKY_PUB + method + '?' + q).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
   }
-  // ハンドル→DID（未キャッシュ時のみ解決し bsky_did__ に保存）。
+  // ハンドル→DID。(未キャッシュ時のみ解決し bsky_did__ に保存)
   function resolveBuzzDid_(o) {
     if (o.did && /^did:/.test(o.did)) return Promise.resolve(o.did);
     if (!o.handle) return Promise.resolve('');
@@ -1631,7 +1631,7 @@
       return did;
     });
   }
-  // 1アカウントの全フォロー先を取得（ページング・BUZZ_FOLLOW_PAGES上限）。
+  // 1アカウントの全フォロー先を取得。(ページング・BUZZ_FOLLOW_PAGES上限)
   function fetchFollows_(did) {
     var out = [], cursor = '';
     function step(page) {
@@ -1647,7 +1647,7 @@
     }
     return step(0);
   }
-  // 並列プール（同時active数を conc に制限）。worker(item,idx)→Promise。結果を index順に返す。
+  // 並列プール。(同時active数を conc に制限)worker(item,idx)→Promise。結果を index順に返す。
   function buzzPool_(items, worker, conc) {
     return new Promise(function (resolve) {
       var i = 0, active = 0, results = [];
@@ -1748,7 +1748,7 @@
       '<button id="buzzReload" type="button" class="ghost" title="最新を取り直す" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '</div>' +
       '<div class="hint" style="margin-top:6px;">フォローしている人の直近' + BUZZ_RECENT_DAYS + '日の投稿を、<b>反応の多い順</b>に並べます。' +
-      'Blueskyは表示回数(インプレッション)を公開していないため、<b>エンゲージメント（❤️いいね+🔁リポスト+💬返信+❝引用）</b>が唯一の勢いの指標です。</div>' +
+      'Blueskyは表示回数(インプレッション)を公開していないため、<b>エンゲージメント(❤️いいね+🔁リポスト+💬返信+❝引用)</b>が唯一の勢いの指標です。</div>' +
       '</div>';
     if (!accs.length) {
       body.innerHTML = head + '<div class="card"><div class="hint">⚠️ Blueskyのハンドルが未設定です。🦋投稿タブの⚙設定でハンドル(@…)を保存すると、そのアカウントのフォローが対象になります。</div></div>';
@@ -1758,7 +1758,7 @@
     var namesLabel = accs.map(function (o) { return '@' + (o.handle || o.did.slice(0, 14) + '…'); }).join(' / ');
     body.innerHTML = head +
       '<div class="hint" style="margin:6px 2px;">対象アカウント：' + esc(namesLabel) + '</div>' +
-      '<div id="buzzList"><div class="card"><div class="hint">⏳ フォローと投稿を集計中…（初回・更新直後は少し時間がかかります）</div></div></div>';
+      '<div id="buzzList"><div class="card"><div class="hint">⏳ フォローと投稿を集計中…(初回・更新直後は少し時間がかかります)</div></div></div>';
     wireBuzzReload_();
     renderBuzzList_(false);
   }
@@ -1777,7 +1777,7 @@
       var posts = res.posts || [];
       if (!posts.length) { el.innerHTML = '<div class="card"><div class="hint">直近' + BUZZ_RECENT_DAYS + '日でフォロー先の投稿が見つかりませんでした。</div></div>'; return; }
       var meta = '<div class="hint" style="margin:2px 2px 4px;">' +
-        (res.cached ? '🕘 ' + fmtTs(res.at) + ' 時点のキャッシュ（🔁で更新）' : '✅ ' + fmtTs(res.at) + ' に更新') +
+        (res.cached ? '🕘 ' + fmtTs(res.at) + ' 時点のキャッシュ(🔁で更新)' : '✅ ' + fmtTs(res.at) + ' に更新') +
         (res.truncated ? '　※フォローが多いため上位' + BUZZ_MAX_FEEDS + '人ぶんを対象にしています' : '') +
         '</div>';
       el.innerHTML = meta + posts.map(buzzCardHtml_).join('');
@@ -1803,9 +1803,9 @@
       '</div></div>';
   }
 
-  // ── 候補リスト（既定の💡候補 と 独立した候補タブ で共用。tabIdごとに保存先が独立） ──
-  //   サークルタブと同じヘッダ（並び替え／🔁／▶今すぐ取得／✏️編集／🙈非表示）を持つ。
-  // 作品URL追加フォーム（モーダル化＝恒常表示をやめて省スペース）。入力はダーク面用の白字(.cand-refimg-line)。
+  // ── 候補リスト(既定の💡候補 と 独立した候補タブ で共用。tabIdごとに保存先が独立) ──
+  //   サークルタブと同じヘッダ(並び替え／🔁／▶今すぐ取得／✏️編集／🙈非表示)を持つ。
+  // 作品URL追加フォーム。(モーダル化＝恒常表示をやめて省スペース)入力はダーク面用の白字。(.cand-refimg-line)
   function addFormHtml_(isMain) {
     var slots = '';
     for (var si = 0; si < 4; si++) slots += '<button type="button" class="cand-add-imgslot" data-slot="' + si + '"><span class="cand-add-slot-hint">＋<br>画像<br>貼り付け</span></button>';
@@ -1820,7 +1820,7 @@
       '<div style="margin-top:6px;display:flex;">' +
         '<label class="ghost cand-refimg-pick" style="width:auto;flex:0 0 auto;margin:0;">画像を選ぶ<input id="candAddImgFile" type="file" accept="image/*" multiple style="display:none;"></label>' +
       '</div>' +
-      // ボタン幅は固定せず内容(テキスト)に追従(width:max-content)。続行ボタンは小さめ＝メモ欄を広く。
+      // ボタン幅は固定せず内容(テキスト)に追従。(width:max-content)続行ボタンは小さめ＝メモ欄を広く。
       '<div style="display:flex;gap:8px;margin-top:8px;align-items:stretch;">' +
         '<input id="candMemo" type="text" class="cand-refimg-line" placeholder="メモ(任意・候補のメモに保存)" autocomplete="off" style="flex:1;min-width:0;">' +
         '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.78rem;padding:8px 10px;width:max-content;flex:0 0 auto;white-space:nowrap;">' + (isMain ? '候補に追加 / 続行' : 'このタブに追加 / 続行') + '</button>' +
@@ -1829,7 +1829,7 @@
       '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
         '<div class="hint">サークルの作品をまとめて' + (isMain ? '候補' : 'このタブ') + 'に追加できます。<br>(サークルID / サークルURL / 作品URLのどれか)</div>' +
         '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" type="text" inputmode="url" class="cand-refimg-line" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;min-width:0;">', 'candBulkSrc') + '</div>' +
-        // サークル作品を全て追加 と 候補に追加/閉じる を並列（どちらも幅は内容に追従・狭い端末でも1行に収まるよう小さめ）。
+        // サークル作品を全て追加 と 候補に追加/閉じる を並列。(どちらも幅は内容に追従・狭い端末でも1行に収まるよう小さめ)
         '<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap;">' +
           '<button id="candBulkAdd" type="button" class="ghost" style="margin:0;width:max-content;white-space:nowrap;font-size:.72rem;padding:7px 9px;">サークル作品を全て追加</button>' +
           '<button id="candAddClose" type="button" class="primary" style="margin:0 0 0 auto;width:max-content;white-space:nowrap;font-size:.72rem;padding:7px 9px;">' + (isMain ? '候補に追加 / 閉じる' : 'このタブに追加 / 閉じる') + '</button>' +
@@ -1837,7 +1837,7 @@
         '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
       '</div>';
   }
-  // 追加モーダルの画像スロット（最大4・左詰め）。候補追加時に「動画生成用の画像」として一緒に保存される。
+  // 追加モーダルの画像スロット。(最大4・左詰め)候補追加時に「動画生成用の画像」として一緒に保存される。
   var _addModalImgs = [];
   function renderAddSlots_() {
     if (!_addOverlay) return;
@@ -1856,7 +1856,7 @@
   function wireAddSlots_(body) {
     body.querySelectorAll('.cand-add-imgslot').forEach(function (b) {
       b.addEventListener('click', function (e) {
-        // ✕（削除）：そのスロットを消して左詰め
+        // ✕(削除)：そのスロットを消して左詰め
         var x = e.target && e.target.getAttribute && e.target.getAttribute('data-clearslot');
         if (x != null && x !== '') { _addModalImgs.splice(parseInt(x, 10), 1); renderAddSlots_(); return; }
         var slot = parseInt(b.getAttribute('data-slot'), 10);
@@ -1866,7 +1866,7 @@
           if (_addModalImgs[slot]) _addModalImgs[slot] = durl;      // 充填済みスロット＝差し替え
           else { _addModalImgs.push(durl); if (_addModalImgs.length > 4) _addModalImgs.length = 4; } // 空き＝左から詰める
           renderAddSlots_();
-          if (msg) msg.textContent = '画像を貼り付けました（' + _addModalImgs.filter(Boolean).length + '/4枚・追加ボタンで確定）';
+          if (msg) msg.textContent = '画像を貼り付けました(' + _addModalImgs.filter(Boolean).length + '/4枚・追加ボタンで確定)';
         });
       });
     });
@@ -1881,7 +1881,7 @@
       var cur = refImgOf(cid) || {};
       refImgSave(cid, { imgs: imgs.length ? imgs : (cur.imgs || []), comment: cur.comment || '', memo: memo || cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' });
     }
-    if (memoEl) memoEl.value = ''; // 追加後はメモ欄をクリア（続ける時に持ち越さない）
+    if (memoEl) memoEl.value = ''; // 追加後はメモ欄をクリア(続ける時に持ち越さない)
     _addModalImgs = [];
     renderAddSlots_();
   }
@@ -1899,22 +1899,22 @@
     var body = ov.querySelector('.fz-body');
     _addModalImgs = []; // 開くたびにスロットを白紙に
     body.innerHTML = addFormHtml_(isMain);
-    $('candAdd').addEventListener('click', function () { addCandidate(tabId); }); // 追加して続ける（開いたまま）
+    $('candAdd').addEventListener('click', function () { addCandidate(tabId); }); // 追加して続ける(開いたまま)
     $('candAddClose').addEventListener('click', function () { addCandidate(tabId, function () { ov.hidden = true; }); }); // 追加して閉じる
     $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
-    // 「画像を選ぶ」(複数可): ファイルからもスロットへ左詰めで追加（1枚ずつ順に処理=メモリ圧迫回避）。
+    // 「画像を選ぶ」(複数可): ファイルからもスロットへ左詰めで追加。(1枚ずつ順に処理=メモリ圧迫回避)
     var addFile = $('candAddImgFile');
     if (addFile) addFile.addEventListener('change', function () {
       var files = [], fl = this.files || [], fi;
       for (fi = 0; fi < fl.length; fi++) files.push(fl[fi]);
       this.value = '';
       if (!files.length) return;
-      var msg = $('candMsg'); if (msg) msg.textContent = '画像を処理中…（' + files.length + '枚）';
+      var msg = $('candMsg'); if (msg) msg.textContent = '画像を処理中…(' + files.length + '枚)';
       var added = 0, failed = 0;
       (function step(i) {
         if (i >= files.length) {
           renderAddSlots_();
-          if (msg) msg.textContent = added ? ('画像を追加しました（' + _addModalImgs.filter(Boolean).length + '/4枚' + (failed ? '・' + failed + '枚は読み込めず' : '') + '・追加ボタンで確定）') : '画像を読み込めませんでした';
+          if (msg) msg.textContent = added ? ('画像を追加しました(' + _addModalImgs.filter(Boolean).length + '/4枚' + (failed ? '・' + failed + '枚は読み込めず' : '') + '・追加ボタンで確定)') : '画像を読み込めませんでした';
           return;
         }
         fileToScaledDataUrl(files[i], function (durl) {
@@ -1941,9 +1941,9 @@
       (isMain ? '' : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
       '<button id="candAddOpen" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ ' + (isMain ? '追加' : 'このタブに追加') + '</button>' +
       '</div>' +
-      // アカウント別「投稿済みを非表示」トグル（非表示リストの上段・右寄せ）。両方同時ON可。
+      // アカウント別「投稿済みを非表示」トグル。(非表示リストの上段・右寄せ)両方同時ON可。
       candHidePostedRowHtml_() +
-      // 省スペース行：セール絞込（左）＋列数(PCのみ)＋非表示トグル（右端・状態で色と文言が変化）
+      // 省スペース行：セール絞込(左)＋列数(PCのみ)＋非表示トグル(右端・状態で色と文言が変化)
       '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
         candColsCtlHtml_() +
@@ -1978,27 +1978,27 @@
     if (m2) { var u = m2[0].split('?')[0]; return { ok: true, user: '', id: '', url: u, cid: 'tw_' + u.replace(/[^0-9A-Za-z_]/g, '').slice(-40) }; }
     return { ok: false };
   }
-  // Bluesky の投稿URL（https://bsky.app/profile/<handle>/post/<rkey>）を判定・正規化。
+  // Bluesky の投稿URL(https://bsky.app/profile/<handle>/post/<rkey>)を判定・正規化。
   function parseBskyUrl_(raw) {
     var s = String(raw || '').trim(); if (!s) return { ok: false };
     var m = s.match(/https?:\/\/(?:www\.)?bsky\.app\/profile\/([^\/?#]+)\/post\/([0-9a-z]+)/i);
     if (m) return { ok: true, user: m[1], id: m[2], url: 'https://bsky.app/profile/' + m[1] + '/post/' + m[2], cid: 'bs_' + m[2], kind: 'bsky' };
     return { ok: false };
   }
-  // X(Twitter) / Bluesky どちらの投稿URLも受け付ける（kind='x'|'bsky'）。
+  // X(Twitter) / Bluesky どちらの投稿URLも受け付ける。(kind='x'|'bsky')
   function parseSnsUrl_(raw) {
     var t = parseTwitterUrl_(raw); if (t.ok) { t.kind = 'x'; return t; }
     return parseBskyUrl_(raw);
   }
   function addTwitterCandidate_(tabId, tw, inp, twInp, msg, onDone) {
     var key = itemsKey(tabId), items = lsGet(key, '[]');
-    if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) { msg.textContent = 'ℹ️ この投稿は既に追加されています（重複追加しません）'; return; }
+    if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) { msg.textContent = 'ℹ️ この投稿は既に追加されています(重複追加しません)'; return; }
     var isB = tw.kind === 'bsky';
     var title = isB ? (tw.user ? ('🦋 @' + tw.user + ' のポスト') : '🦋 Blueskyのポスト')
                     : (tw.user ? ('🐦 @' + tw.user + ' のポスト') : '🐦 X(Twitter)のポスト');
     items.unshift({ url: tw.url, cid: tw.cid, twitterUrl: tw.url, isTwitter: true, title: title, addedAt: new Date().getTime() });
     lsSet(key, items);
-    attachAddImgs_(tw.cid); // 追加モーダルの画像スロットも一緒に保存（動画生成用）
+    attachAddImgs_(tw.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用)
     if (inp) inp.value = ''; if (twInp) twInp.value = '';
     msg.textContent = isB ? '✅ Blueskyの投稿URLを追加しました' : '✅ Twitter(X)のURLを追加しました';
     renderCandList(tabId);
@@ -2012,11 +2012,11 @@
     var twRaw = (twInp && twInp.value || '').trim();
     var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(raw) : raw;
     var r = (raw && url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
-    // ①作品URLがFANZA作品として有効 → 従来のFANZA候補（Twitter URLがあれば紐づけて保存）
+    // ①作品URLがFANZA作品として有効 → 従来のFANZA候補(Twitter URLがあれば紐づけて保存)
     if (raw && r && r.ok) {
       var twForWork = parseSnsUrl_(twRaw); // X / Bluesky どちらの投稿URLでも紐づけ可
       var items0 = lsGet(key, '[]');
-      if (items0.some(function (x) { return x.cid === r.cid; })) { msg.textContent = 'ℹ️ この作品は既に追加されています（重複追加しません）'; return; }
+      if (items0.some(function (x) { return x.cid === r.cid; })) { msg.textContent = 'ℹ️ この作品は既に追加されています(重複追加しません)'; return; }
       msg.textContent = '⏳ 作品情報を取得中…';
       var cfg = workerCfg();
       var put = function (info) {
@@ -2038,7 +2038,7 @@
         if (twForWork.ok) it.twitterUrl = twForWork.url; // X / Bluesky の投稿URLも一緒に保存
         items.unshift(it);
         lsSet(key, items);
-        attachAddImgs_(r.cid); // 追加モーダルの画像スロットも一緒に保存（動画生成用・左から順）
+        attachAddImgs_(r.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用・左から順)
         inp.value = ''; if (twInp) twInp.value = ''; msg.textContent = '✅ 追加しました';
         renderCandList(tabId);
         if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
@@ -2050,37 +2050,37 @@
       } else put(null);
       return;
     }
-    // ②作品URLが無い/FANZA以外 → Twitter(X)のURLだけで追加（Twitter欄優先、無ければ作品欄に貼られたX URLも可）
+    // ②作品URLが無い/FANZA以外 → Twitter(X)のURLだけで追加(Twitter欄優先、無ければ作品欄に貼られたX URLも可)
     var tw = parseSnsUrl_(twRaw); if (!tw.ok) tw = parseSnsUrl_(raw); // X / Bluesky どちらでも単独追加可
     if (tw.ok) { addTwitterCandidate_(tabId, tw, inp, twInp, msg, onDone); return; }
     // ③どちらでもない
     msg.textContent = (raw || twRaw) ? '⚠️ FANZAの作品URL か X / Bluesky の投稿URLを入れてください' : '⚠️ URLを入力してください';
   }
-  // サークルの全作品を、指定タブ(候補/独立タブ)へまとめて追加（重複cidは除外・タブ名は不変）。
+  // サークルの全作品を、指定タブ(候補/独立タブ)へまとめて追加。(重複cidは除外・タブ名は不変)
   function bulkAddCircle(tabId) {
     var src = ($('candBulkSrc').value || '').trim(), msg = $('candBulkMsg');
     if (!src) { msg.textContent = '⚠️ サークル情報を入れてください'; return; }
     msg.textContent = '⏳ サークルを特定中…';
     resolveMakerId(src, function (makerId, makerName, err) {
       if (!makerId) { msg.textContent = '⚠️ ' + err; return; }
-      msg.textContent = '⏳ 作品一覧を取得中…（多いと時間がかかります）';
+      msg.textContent = '⏳ 作品一覧を取得中…(多いと時間がかかります)';
       fetchMakerItems(makerId, 'date', function (works, err2) {
         if (err2) { msg.textContent = '⚠️ ' + err2; return; }
         var res = appendWorks_(itemsKey(tabId), works || []);
-        msg.textContent = '✅ ' + res.added + '件を追加しました' + (res.dup ? '（重複' + res.dup + '件は除外）' : '');
+        msg.textContent = '✅ ' + res.added + '件を追加しました' + (res.dup ? '(重複' + res.dup + '件は除外)' : '');
         $('candBulkSrc').value = '';
         renderCandList(tabId);
       }, true); // force=キャッシュ無視で最新の全件
     });
   }
-  // サークルモードから: 表示中サークルの全作品を「💡候補」へ追加（重複除外・確認あり）。
+  // サークルモードから: 表示中サークルの全作品を「💡候補」へ追加。(重複除外・確認あり)
   function addWorksToMain_(works, btn, circleName) {
     if (!works || !works.length) return;
     if (!window.confirm('「' + (circleName || 'このサークル') + '」の全' + works.length + '作品を「💡候補」に追加しますか？')) return;
     var res = appendWorks_(K_ITEMS, works);
-    if (btn) { btn.textContent = '✅ ' + res.added + '件を候補へ' + (res.dup ? '（重複' + res.dup + '件除外）' : ''); setTimeout(function () { btn.textContent = '💡 全作品を候補に追加'; }, 3500); }
+    if (btn) { btn.textContent = '✅ ' + res.added + '件を候補へ' + (res.dup ? '(重複' + res.dup + '件除外)' : ''); setTimeout(function () { btn.textContent = '💡 全作品を候補に追加'; }, 3500); }
   }
-  // 作品配列を保存キーへ追記（cid重複は除外）。追加数・重複数を返す。
+  // 作品配列を保存キーへ追記。(cid重複は除外)追加数・重複数を返す。
   function appendWorks_(key, works) {
     var items = lsGet(key, '[]'), have = {}; items.forEach(function (x) { have[x.cid] = true; });
     var added = 0, dup = 0;
@@ -2094,7 +2094,7 @@
     if (added > 0) klog_('candidate_added', 'work', (works[0] && works[0].cid) || '', { added: added, dup: dup });
     return { added: added, dup: dup };
   }
-  // 🔁: このタブの各作品の価格・販売数を最新化（FANZA再取得＋販売数キャッシュ無効化）。
+  // 🔁: このタブの各作品の価格・販売数を最新化。(FANZA再取得＋販売数キャッシュ無効化)
   function refreshCandItems(tabId) {
     var key = itemsKey(tabId), items = lsGet(key, '[]');
     if (!items.length) { renderCandList(tabId); return; }
@@ -2123,7 +2123,7 @@
   }
   function renderCandList(tabId) {
     tabId = tabId || 'main';
-    invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す（前回描画以降の新規投稿を確実に反映）
+    invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
     var key = itemsKey(tabId);
     var el = $('candList');
     var all = lsGet(key, '[]');
@@ -2139,8 +2139,8 @@
     if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる候補がありません。') + '</p>'; return; }
     var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
     var salesMiss = missingCount(topCids);
-    var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中 ' : '') + arr.length + '件' + (_showHidden ? '（「再表示」で戻せます）' : ' / 非表示 ' + hidden.length + '件') +
-      (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます(PCの電源が必要)。' : '') + '</p>';
+    var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件') +
+      (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
     el.innerHTML = head + arr.map(function (it) {
       var act = _showHidden
         ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>'
@@ -2163,15 +2163,15 @@
         renderCandList(tabId);
       });
     });
-    // 候補作品の実売本数を取得（未取得はPC取得キューへ）。反映されたら再描画。
+    // 候補作品の実売本数を取得。(未取得はPC取得キューへ)反映されたら再描画。
     fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
-    // タイトル/発売日が未取得の候補を控えめに再取得（追加直後の一時的な部分取得を自動で埋める）。
+    // タイトル/発売日が未取得の候補を控えめに再取得。(追加直後の一時的な部分取得を自動で埋める)
     backfillMissingInfo_(key, arr, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
   }
 
   // ── サークルタブ ──
   function renderMaker(tabId, force) {
-    invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す（前回描画以降の新規投稿を確実に反映）
+    invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
     var tabs = lsGet(K_TABS, '[]');
     var tab = null; tabs.forEach(function (t) { if (t.id === tabId) tab = t; });
     var body = $('candBody');
@@ -2184,9 +2184,9 @@
       '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
       '<button id="candEditTab" type="button" class="ghost" title="タブ名・サークルを編集" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
       '</div>' +
-      // アカウント別「投稿済みを非表示」トグル（非表示リストの上段・右寄せ）。両方同時ON可。
+      // アカウント別「投稿済みを非表示」トグル。(非表示リストの上段・右寄せ)両方同時ON可。
       candHidePostedRowHtml_() +
-      // 省スペース行：セール絞込（左）＋列数(PCのみ)＋非表示トグル（右端・状態で色と文言が変化）
+      // 省スペース行：セール絞込(左)＋列数(PCのみ)＋非表示トグル(右端・状態で色と文言が変化)
       '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
         candColsCtlHtml_() +
@@ -2211,7 +2211,7 @@
       var el = $('candMakerList');
       if (!el || _activeTab !== tabId) return;
       if (err) { el.innerHTML = '<p class="hint" style="padding:8px;">⚠️ ' + esc(err) + '</p>'; return; }
-      // タブ名が自動生成の「サークルNNN」のままで、一覧からサークル名が取れたら本名へ自動修正（単一サークルのタブのみ）。
+      // タブ名が自動生成の「サークルNNN」のままで、一覧からサークル名が取れたら本名へ自動修正。(単一サークルのタブのみ)
       if (makerIds.length === 1 && items && items.length && items[0].makerName && /^サークル\d+$/.test(tab.name || '')) {
         var tabs2 = lsGet(K_TABS, '[]');
         tabs2.forEach(function (t) {
@@ -2220,7 +2220,7 @@
           if (Array.isArray(t.makers) && t.makers.length) t.makers[0].name = items[0].makerName;
         });
         lsSet(K_TABS, tabs2);
-        render(); return; // タブバーを本名で再描画（この後の描画は再入で行われる）
+        render(); return; // タブバーを本名で再描画(この後の描画は再入で行われる)
       }
       var hidden = lsGet(hiddenKey(tabId), '[]');
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
@@ -2232,13 +2232,13 @@
       });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる作品がありません。') + '</p>'; return; }
       _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
-      // 実売本数(販売数)を先頭60件ぶん取得（未取得はPC取得キューへ自動登録）。反映されたら再描画。
+      // 実売本数(販売数)を先頭60件ぶん取得。(未取得はPC取得キューへ自動登録)反映されたら再描画。
       var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
       var salesMiss = missingCount(topCids);
       var head = '<div style="display:flex;justify-content:flex-end;padding:2px 6px 6px;">' +
         '<button id="candBulkToCand" type="button" class="ghost" style="width:auto;margin:0;font-size:12.5px;padding:6px 10px;">💡 全作品を候補に追加</button></div>' +
         '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (makerIds.length > 1 ? '(' + makerIds.length + 'サークル)' : '') + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
-        (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます(PCの電源が必要)。' : '') + '</p>';
+        (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
       el.innerHTML = head + arr.map(function (it) {
         var btn = _showHidden
           ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button>'
@@ -2266,32 +2266,32 @@
     }, force);
   }
 
-  // ── タブ編集モーダル（タブ名の変更・サークルの追加/削除・タブ削除） ──
+  // ── タブ編集モーダル(タブ名の変更・サークルの追加/削除・タブ削除) ──
   //   サークルタブは1タブに複数サークルを持てる。現在のサークルを一覧表示し、追加/個別削除できる。
   function showEditTabForm(tab) {
     var f = $('candEditForm');
     if (!f) return;
-    // 最新のtab状態を取り直す（追加/削除で再入した時に反映）
+    // 最新のtab状態を取り直す(追加/削除で再入した時に反映)
     lsGet(K_TABS, '[]').forEach(function (t) { if (t.id === tab.id) tab = t; });
-    var isMaker = isMakerTab_(tab); // サークルタブのみ「サークル一覧＋追加」欄を出す（候補タブは名前のみ編集）
+    var isMaker = isMakerTab_(tab); // サークルタブのみ「サークル一覧＋追加」欄を出す(候補タブは名前のみ編集)
     var makers = makersOf(tab);
     var makersHtml = '';
     if (isMaker) {
       makersHtml =
-        '<label class="hint" style="display:block;margin:8px 0 2px;">このタブに表示するサークル（複数可）</label>' +
+        '<label class="hint" style="display:block;margin:8px 0 2px;">このタブに表示するサークル(複数可)</label>' +
         '<div id="candEditMakers">' + makers.map(function (m) {
           return '<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">' +
             '<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + CIRCLE_ICON + ' ' + esc(m.name || ('サークル' + m.id)) + ' <span class="hint">(ID ' + esc(m.id) + ')</span></span>' +
             '<button type="button" class="ghost cand-maker-del" data-mkid="' + esc(m.id) + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:4px 9px;color:#c0392b;border-color:#c0392b;"' + (makers.length <= 1 ? ' disabled title="最後の1件は外せません(タブ削除を使ってください)"' : '') + '>🗑</button>' +
           '</div>';
         }).join('') + '</div>' +
-        '<label class="hint" style="display:block;margin:8px 0 2px;">サークルを追加（ID / サークルURL / 作品URL）</label>' +
+        '<label class="hint" style="display:block;margin:8px 0 2px;">サークルを追加(ID / サークルURL / 作品URL)</label>' +
         pasteRow_('<input id="candEditSrc" type="text" inputmode="url" autocomplete="off" placeholder="追加したいサークルを入れて「＋ 追加」" style="flex:1;">', 'candEditSrc') +
         '<button id="candEditAddMaker" type="button" class="ghost" style="width:max-content;margin:6px 0 0;font-size:12.5px;padding:6px 11px;">＋ サークルを追加</button>';
     }
     f.innerHTML = '<div class="card" style="margin:8px 0;">' +
       '<div class="field-label" style="margin-top:0;">✏️ タブを編集</div>' +
-      '<label class="hint" style="display:block;margin-bottom:2px;">タブ名（長い場合は短く編集できます）</label>' +
+      '<label class="hint" style="display:block;margin-bottom:2px;">タブ名(長い場合は短く編集できます)</label>' +
       '<input id="candEditName" type="text" autocomplete="off" value="' + esc(tab.name) + '">' +
       makersHtml +
       '<div style="display:flex;gap:8px;margin-top:8px;">' +
@@ -2301,7 +2301,7 @@
       '</div><div id="candEditMsg" class="hint" style="min-height:1.3em;"></div></div>';
     wirePaste_(f);
     $('candEditCancel').addEventListener('click', function () { f.innerHTML = ''; render(); });
-    // サークルを個別に外す（他タブが使っていなければ追跡解除）。外したら編集フォームを再描画。
+    // サークルを個別に外す。(他タブが使っていなければ追跡解除)外したら編集フォームを再描画。
     f.querySelectorAll('.cand-maker-del').forEach(function (b) {
       b.addEventListener('click', function () {
         if (b.disabled) return;
@@ -2314,7 +2314,7 @@
         showEditTabForm(tab);
       });
     });
-    // サークルを追加（重複は弾く）。追加したら編集フォームを再描画。
+    // サークルを追加。(重複は弾く)追加したら編集フォームを再描画。
     var addBtn = $('candEditAddMaker');
     if (addBtn) addBtn.addEventListener('click', function () {
       var src = ($('candEditSrc').value || '').trim();
@@ -2353,7 +2353,7 @@
     });
   }
 
-  // 作品カード（候補/サークル共通・縦並び）。actionHtml=右下のボタン(削除/非表示/再表示)。
+  // 作品カード。(候補/サークル共通・縦並び)actionHtml=右下のボタン。(削除/非表示/再表示)
   function candCard(it, actionHtml) {
     var sale = isOnSale_(it);
     var priceHtml = '<span class="cand-price-lbl">現価格:</span> ' + (sale
@@ -2368,7 +2368,7 @@
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';
-    // 売れ行きの数値。実売本数(販売数)がPC取得済みなら実数を最優先。無ければレビュー件数(代理指標)。
+    // 売れ行きの数値。実売本数(販売数)がPC取得済みなら実数を最優先。無ければレビュー件数。(代理指標)
     var rc = it.reviewCount;
     var avg = (it.reviewAvg != null && it.reviewAvg !== '') ? (' ★' + it.reviewAvg) : '';
     var num = function (n) { return Number(n).toLocaleString('ja-JP'); };
@@ -2379,15 +2379,15 @@
       if (_sort === 'rank7d') {
         var sd = weekSalesDelta(it.cid, sales);
         salesHtml = (sd != null)
-          ? '<div class="cand-sales">🔥 直近1週間の販売：+' + num(sd) + '本（累計 ' + num(sales) + '本）</div>'
+          ? '<div class="cand-sales">🔥 直近1週間の販売：+' + num(sd) + '本(累計 ' + num(sales) + '本)</div>'
           : '<div class="cand-sales">販売数：' + num(sales) + '本</div>';
       } else {
         salesHtml = '<div class="cand-sales">販売数：' + num(sales) + '本</div>';
       }
     } else if (_sort === 'rank7d') {
       var wd = weekReviewDelta(it.cid, rc);
-      if (wd != null) salesHtml = '<div class="cand-sales">🔥 直近1週間の伸び：レビュー +' + num(wd) + '件' + (rc != null ? '（累計' + num(rc) + '件）' : '') + '</div>';
-      else if (rc != null) salesHtml = '<div class="cand-sales">売れ行きの目安：レビュー ' + num(rc) + '件' + avg + '<span style="color:var(--sub);">（販売数はPC取得待ち）</span></div>';
+      if (wd != null) salesHtml = '<div class="cand-sales">🔥 直近1週間の伸び：レビュー +' + num(wd) + '件' + (rc != null ? '(累計' + num(rc) + '件)' : '') + '</div>';
+      else if (rc != null) salesHtml = '<div class="cand-sales">売れ行きの目安：レビュー ' + num(rc) + '件' + avg + '<span style="color:var(--sub);">(販売数はPC取得待ち)</span></div>';
     } else if (_sort === 'rank' && rc != null) {
       salesHtml = '<div class="cand-sales">売れ行きの目安：レビュー ' + num(rc) + '件' + avg + '</div>';
     } else if (rc != null && rc > 0) {
@@ -2395,20 +2395,20 @@
     }
     var hasRef = refImgHas(it.cid);
     var hasBsky = bskyImgHas(it.cid);
-    var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像（複数可）
+    var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像(複数可)
     var refImgSrc = refImgs[0] || '';
     var _refRec = refImgOf(it.cid) || {};
-    var refCmt = _refRec.comment || ''; // 保存済みコメント（動画生成用画像の真下に全文表示）
-    var refMemo = _refRec.memo || '';   // メモ（コメントが無い時にカードへ水色で代替表示）
-    // 動画生成用の画像は作品サムネの真下（左の画像列）に少し余白を開けて縦積み。点線の区切りは廃止。
-    var refImgHtml = refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像（タップで拡大）" title="動画生成用の画像（タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + '）">' : '';
-    // メモ（コメントの上・水色）とコメント（🙈/🗑と同じ管理行の左）は下の return 内で直接組み立てる。
+    var refCmt = _refRec.comment || ''; // 保存済みコメント(動画生成用画像の真下に全文表示)
+    var refMemo = _refRec.memo || '';   // メモ(コメントが無い時にカードへ水色で代替表示)
+    // 動画生成用の画像は作品サムネの真下(左の画像列)に少し余白を開けて縦積み。点線の区切りは廃止。
+    var refImgHtml = refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像(タップで拡大)" title="動画生成用の画像(タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + ')">' : '';
+    // メモ(コメントの上・水色)とコメント(🙈/🗑と同じ管理行の左)は下の return 内で直接組み立てる。
     // 投稿済み作品はカード大枠をチャンネルのイメージカラーで太線囲み。両channel投稿は月詠み(外)＋宵桜(内)の二重。
     var _pAcc1 = !!postedItemForCid_(it.cid, 'acc1'), _pAcc2 = !!postedItemForCid_(it.cid, 'acc2');
     var _postCls = (_pAcc1 && _pAcc2) ? ' cand-posted-both' : (_pAcc1 ? ' cand-posted-acc1' : (_pAcc2 ? ' cand-posted-acc2' : ''));
     var _noComment = !refCmt && !refMemo; // コメント/メモ無し＝非表示/🗑を作品リンク行に統合し余白を縮小
     if (_noComment) _postCls += ' cand-nocomment';
-    // 作品リンク群（作品↗ / X↗ / X2↗ / 投稿編集 / 🦋）。無コメント時は全幅行で非表示/🗑と同列に置くため変数化。
+    // 作品リンク群。(作品↗ / X↗ / X2↗ / 投稿編集 / 🦋)無コメント時は全幅行で非表示/🗑と同列に置くため変数化。
     var _actionsInner =
       ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
       (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B↗' : 'X↗') + '</a>'; })(it.twitterUrl) : '') +
@@ -2421,7 +2421,7 @@
         refImgHtml +
       '</div>' +
       '<div class="cand-info">' +
-        // 新作/同人バッジと同じ行にチャンネル表記を並べる（バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記）
+        // 新作/同人バッジと同じ行にチャンネル表記を並べる(バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記)
         //   投稿済みなら Books 等と pill の間に「投稿日 ✔」をチャンネルテーマ色で表示。
         '<div class="cand-badges-row">' + badgesHtml + '<span class="cand-acct-group">' + postedDatesHtml_(it.cid) + acctBadgesHtml_(it.cid) + '</span></div>' +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
@@ -2429,7 +2429,7 @@
         genresHtml +
         ((it.price != null || it.listPrice != null) ? '<div class="cand-price">' + priceHtml + '</div>' : '') +
         salesHtml +
-        // 作品リンク行（cand-info内＝画像の右の定位置）。コメント/メモ無し時は同じ行の右端に 非表示/🗑 を統合。
+        // 作品リンク行。(cand-info内＝画像の右の定位置)コメント/メモ無し時は同じ行の右端に 非表示/🗑 を統合。
         '<div class="cand-actions">' + _actionsInner + (_noComment ? '<span class="cand-actions-mspacer"></span>' + actionHtml : '') + '</div>' +
       '</div>' +
       // コメント(黒・全幅・必ず1行＝可変縮小)＝独立行。
@@ -2443,15 +2443,15 @@
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
   try { window.Go5Cand = {
     render: render,
-    refImgs: refImgsOf_,                                        // cid → 動画生成用の保存画像の配列（無ければ[]）
-    bskyImg: function (cid) { var r = bskyImgOf(cid); return (r && r.img) || ''; }, // cid → Bluesky添付画像（無ければ''）
-    zoomImages: function (images, idx, opts) { openImgZoom_((images || []).filter(Boolean), idx || 0, opts); }, // 任意の画像配列をズーム(スワイプ)。opts.captions=ページ別見出し
+    refImgs: refImgsOf_,                                        // cid → 動画生成用の保存画像の配列(無ければ[])
+    bskyImg: function (cid) { var r = bskyImgOf(cid); return (r && r.img) || ''; }, // cid → Bluesky添付画像(無ければ'')
+    zoomImages: function (images, idx, opts) { openImgZoom_((images || []).filter(Boolean), idx || 0, opts); }, // 任意の画像配列をズーム。(スワイプ)opts.captions=ページ別見出し
     zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); }, // タップで全画像ズーム＋1ページ目にする＋貼り付け新規追加
-    postImgs: postImgsOf_,                                      // 履歴キー → 🛠️編集で添付した投稿画像の配列（無ければ[]）
+    postImgs: postImgsOf_,                                      // 履歴キー → 🛠️編集で添付した投稿画像の配列(無ければ[])
     postImgHas: function (key) { return postImgsOf_(key).length > 0; },
-    postImgSave: postImgSave_                                   // 履歴キー + 画像配列 を保存（write-through）
+    postImgSave: postImgSave_                                   // 履歴キー + 画像配列 を保存(write-through)
   }; } catch (e) {}
-  hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行（5MB枠を解放）
-  // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ（登録済みはフラグでスキップ＝通信は初回のみ）
+  hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行(5MB枠を解放)
+  // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ(登録済みはフラグでスキップ＝通信は初回のみ)
   ensureTrackedAll();
 }());
