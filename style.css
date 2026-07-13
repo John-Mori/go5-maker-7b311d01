@@ -945,3 +945,5 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 
 /* 導線2(作品リンク)のクリックマーク=赤いカーソル(2026-07-14 Chami指定) */
 .emico-red { filter: brightness(0) saturate(100%) invert(40%) sepia(51%) saturate(2878%) hue-rotate(322deg) brightness(97%) contrast(93%); }
+.vhide-remade-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.sale-stats { font-size:11px; opacity:.9; margin-right:auto; }

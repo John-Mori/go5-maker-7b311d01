@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-13C(YT補正累計列の挿入がreorderの範囲外エラーで失敗していたのを修正=canonical末尾の新列は末尾追加)';
+var GAS_VERSION = '2026-07-14A(セール会場リンクの日次記録=vid SALE行を追加・🏮表示のデルタ供給)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -859,6 +859,9 @@ function snapshotStats() {
   var seenVid = {}, urecs = [];
   recs.forEach(function (r) { if (r.vid && !seenVid[r.vid]) { seenVid[r.vid] = 1; urecs.push(r); } });
   recs = urecs;
+  // セール会場リンク(導線3・共通コードJrziR=campaign利用のutm先)も日次記録する。(2026-07-14 Chami依頼)
+  //   vid='SALE'の擬似行として保存→computeDeltas_が自動で今日/昨日/週を算出し、フロントの🏮表示が使う。
+  recs.push({ channel: '-', post_id: 'SALE', vid: 'SALE', code: 'JrziR' });
   var vids = recs.map(function (r) { return r.vid; });
   var views = ytViews_(vids);
   var clickByCode = {};

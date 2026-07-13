@@ -110,6 +110,17 @@
     var rest = shortUrl.slice(base.length + 1).split(/[/?#]/)[0];
     return /^[0-9A-Za-z]+$/.test(rest) ? rest : '';
   }
+  // セール会場リンク(導線3・共通コード)のクリック統計。(2026-07-14 Chami依頼: 累計/今日/昨日/週を投稿履歴に表示)
+  var SALE_CODES = ['JrziR']; // campaign=gain(utm)の決定的コード。ensureDiscountLink_の短縮先と同一
+  function renderSaleStats_() {
+    var el = document.getElementById('saleStats'); if (!el) return;
+    Promise.all(SALE_CODES.map(fetchClicks)).then(function (arr) {
+      var cum = null; arr.forEach(function (c) { if (c != null) cum = (cum || 0) + c; });
+      var d = (typeof deltaCache === 'object' && deltaCache) ? deltaCache.SALE : null;
+      function f(x) { return (x == null ? '–' : num(x)); }
+      el.textContent = '🏮 セール会場 累計' + f(cum) + '・今日' + f(d && d.tc) + '・昨日' + f(d && d.yc) + '・週' + f(d && d.wc);
+    });
+  }
   function fetchClicks(code) {
     var w = window.Go5Short; if (!w || !code) return Promise.resolve(null);
     var u = w.WORKER_URL.replace(/\/+$/, '') + '/api/stats?code=' + encodeURIComponent(code) + '&secret=' + encodeURIComponent(w.SHARED_SECRET);
@@ -185,6 +196,8 @@
     return seg('今日', d.tv, d.tc, false) + seg('昨日', d.yv, d.yc, todayPosted) + seg('週', d.wv, d.wc, false);
   }
   function applyDeltas_() {
+    try { renderSaleStats_(); } catch (e) {} // セール会場統計もデルタ到着時に更新
+
     document.querySelectorAll('[data-delta-vid]').forEach(function (el) {
       var vid = el.getAttribute('data-delta-vid');
       el.innerHTML = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts')) || el.innerHTML;
@@ -564,7 +577,9 @@
     var hideRemade = false; try { hideRemade = localStorage.getItem(hideRemadeKey) === '1'; } catch (e) {}
     var visibleItems = hideRemade ? items.filter(function (it) { return !it.remade; }) : items;
     // 非表示トグルは行の枠外(リスト最上部の独立バー)に置く＝先頭カードに重ならない。
-    var hideBarHtml = '<div class="vhide-remade-bar"><button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
+    var hideBarHtml = '<div class="vhide-remade-bar">' +
+      '<span id="saleStats" class="sale-stats" title="セール会場リンク(🏮大幅割引セール中の同人祭ページ)のクリック数。累計はr2計測・今日/昨日/週は日次スナップショット">🏮 セール会場 …</span>' +
+      '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
     list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
       var k = itemKey(it);
       var yt = ymap[k] || it.ytUrl || '';
@@ -656,6 +671,7 @@
     }).join('');
     applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示(フェッチ待ちで遅れない)
     fillFanzaNames();
+    try { renderSaleStats_(); } catch (e) {} // セール会場統計(再描画のたびに最新表示)
 
     // YouTube URL 直接入力
     list.querySelectorAll('input[data-k]').forEach(function (inp) {
