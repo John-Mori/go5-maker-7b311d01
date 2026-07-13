@@ -2373,31 +2373,28 @@
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';
-    // 売れ行きの数値。実売本数(販売数)がPC取得済みなら実数を最優先。無ければレビュー件数。(代理指標)
+    // 売れ行きの数値。販売数(実売)とレビュー件数を「並べて」常に表示する(Chami指定2026-07-14)。
+    //   従来はどちらか一方だけ=追加方法で表示が割れていた。以後は両方を1行に「・」で連結する。
     var rc = it.reviewCount;
     var avg = (it.reviewAvg != null && it.reviewAvg !== '') ? (' ★' + it.reviewAvg) : '';
     var num = function (n) { return Number(n).toLocaleString('ja-JP'); };
     var sales = salesOf(it.cid); // number=実売 / null=PC未取得 / undefined=未問い合わせ
-    // 販売数は黒字・強調なし・「(実売)」表記なし。価格の下の段に置く。
-    var salesHtml = '';
+    // ① 販売数パート。取得済み=実数 / PC未取得(null)=取得待ち / 未問い合わせ(undefined)=省略。
+    var salesPart = '';
     if (typeof sales === 'number') {
+      salesPart = '販売数 ' + num(sales) + '本';
+      // rank7d でも「+0本」は出さない=週次の伸びが正の時だけ🔥を前置(全部0に見える誤解を解消)。
       if (_sort === 'rank7d') {
         var sd = weekSalesDelta(it.cid, sales);
-        salesHtml = (sd != null)
-          ? '<div class="cand-sales">🔥 直近1週間の販売：+' + num(sd) + '本(累計 ' + num(sales) + '本)</div>'
-          : '<div class="cand-sales">販売数：' + num(sales) + '本</div>';
-      } else {
-        salesHtml = '<div class="cand-sales">販売数：' + num(sales) + '本</div>';
+        if (sd != null && sd > 0) salesPart = '🔥 直近1週間 +' + num(sd) + '本 (累計 ' + num(sales) + '本)';
       }
-    } else if (_sort === 'rank7d') {
-      var wd = weekReviewDelta(it.cid, rc);
-      if (wd != null) salesHtml = '<div class="cand-sales">🔥 直近1週間の伸び：レビュー +' + num(wd) + '件' + (rc != null ? '(累計' + num(rc) + '件)' : '') + '</div>';
-      else if (rc != null) salesHtml = '<div class="cand-sales">売れ行きの目安：レビュー ' + num(rc) + '件' + avg + '<span style="color:var(--sub);">(販売数はPC取得待ち)</span></div>';
-    } else if (_sort === 'rank' && rc != null) {
-      salesHtml = '<div class="cand-sales">売れ行きの目安：レビュー ' + num(rc) + '件' + avg + '</div>';
-    } else if (rc != null && rc > 0) {
-      salesHtml = '<div class="cand-sub">レビュー ' + num(rc) + '件' + avg + '</div>';
+    } else if (sales === null) {
+      salesPart = '販売数 取得待ち'; // PC(日本IP)のバッチ取得待ち
     }
+    // ② レビューパート。件数があれば常に併記(販売数の横)。
+    var reviewPart = (rc != null) ? ('レビュー ' + num(rc) + '件' + avg) : '';
+    var joined = [salesPart, reviewPart].filter(Boolean).join(' ・ ');
+    var salesHtml = joined ? '<div class="cand-sales">' + joined + '</div>' : '';
     var hasRef = refImgHas(it.cid);
     var hasBsky = bskyImgHas(it.cid);
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像(複数可)
