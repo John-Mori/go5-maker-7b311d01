@@ -47,6 +47,7 @@ var ATTR_DEFS = [
   { key: 'jk', label: 'JK' },
   { key: 'gyaru', label: 'ギャル' },
   { key: 'isekai', label: '異世界' },
+  { key: 'harem', label: 'ハーレム' },
   { key: 'ai', label: 'AI' },
   { key: 'ol', label: 'OL' },
   { key: 'soshu', label: '総集編' }
@@ -74,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-14A(セール会場リンクの日次記録=vid SALE行を追加・🏮表示のデルタ供給)';
+var GAS_VERSION = '2026-07-14B(カテゴリにハーレム追加=ATTR_DEFS+受け渡し3箇所)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -413,7 +414,7 @@ function doPost(e) {
       goal: body.goal || '', cmtType: body.cmtType || '', // 狙い(成約/集客)・コメント型(①〜⑧)＝勝ちパターン集計用
       shareUrl: body.shareUrl || '',       // da.gd共有URL(共有URL列)
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから(同IDの行へ後追いupsert)
-      chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性(複数可)
+      chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, harem: body.harem, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性(複数可)
       workState: body.workState,           // 作品状態(新作/準新作/旧作)
       rebuild: body.rebuild,               // この動画自体が作り直し版(動画作成タブのリビルド)
       remade: body.remade,                 // この動画は作り直されて置き換え済み(投稿履歴の作り直し印)
@@ -602,7 +603,7 @@ function syncHistory_(channel, items) {
         workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '', shareUrl: it.shareUrl || '',
         youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '',
         views: it.views, clicks: it.clicks,
-        chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, ai: it.ai, ol: it.ol, soshu: it.soshu, // カテゴリ属性(複数可)
+        chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, harem: it.harem, ai: it.ai, ol: it.ol, soshu: it.soshu, // カテゴリ属性(複数可)
         workState: it.workState,           // 作品状態(新作/準新作/旧作)
         rebuild: it.rebuild, remade: it.remade, // 作り直し(リビルド版/作り直し済)
         goal: it.goal, cmtType: it.cmtType, // 狙い・コメント型(履歴にあれば同期)
@@ -1218,7 +1219,7 @@ function runReservations() {
           workUrl: meta.workUrl || '', hashtags: extractHashtags_(text), postUri: res.uri,
           workState: meta.workState, rebuild: meta.rebuild, rebuildOf: meta.rebuildOf || '',
           goal: meta.goal || '', cmtType: meta.cmtType || '',
-          chara: attrs.chara, jk: attrs.jk, gyaru: attrs.gyaru, isekai: attrs.isekai, ai: attrs.ai, ol: attrs.ol, soshu: attrs.soshu
+          chara: attrs.chara, jk: attrs.jk, gyaru: attrs.gyaru, isekai: attrs.isekai, harem: attrs.harem, ai: attrs.ai, ol: attrs.ol, soshu: attrs.soshu
         });
       } catch (e) {}
       if (imgId) { try { DriveApp.getFileById(imgId).setTrashed(true); } catch (e) {} }

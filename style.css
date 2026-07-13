@@ -121,6 +121,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-h .vtag-ai{color:#4d9fff;border-color:#4d9fff;font-weight:700;}
 .vrow-h .vtag-ol{color:#b56db0;border-color:#b56db0;font-weight:700;}
 .vrow-h .vtag-soshu{color:#e0863c;border-color:#e0863c;font-weight:700;}
+.vrow-h .vtag-harem{color:#ef6da8;border-color:#ef6da8;font-weight:700;} /* ハーレム=鮮やかピンク(既存色と非重複) */
 /* 作品状態バッジ。新作=フレッシュな緑 / 準新作=ティール（旧作は非表示） */
 .vrow-h .vtag-shinsaku{color:#2fa96e;border-color:#2fa96e;font-weight:700;}
 .vrow-h .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;font-weight:700;}
@@ -247,6 +248,7 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .vatt-ai{color:#4d9fff;border-color:#4d9fff;}
 .vatt-ol{color:#b56db0;border-color:#b56db0;}
 .vatt-soshu{color:#e0863c;border-color:#e0863c;}
+.vatt-harem{color:#ef6da8;border-color:#ef6da8;}
 .vatt-rebuild{color:#3fb6a8;border-color:#3fb6a8;}
 .vedit-attrs{margin:0 0 14px;}
 .vedit-attrs-title{font-size:12px;color:var(--sub);margin-bottom:7px;}
@@ -277,6 +279,7 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .vrow-tags .vtag-ai{color:#4d9fff;border-color:#4d9fff;}
 .vrow-tags .vtag-ol{color:#b56db0;border-color:#b56db0;}
 .vrow-tags .vtag-soshu{color:#e0863c;border-color:#e0863c;}
+.vrow-tags .vtag-harem{color:#ef6da8;border-color:#ef6da8;}
 .vrow-tags .vtag-shinsaku{color:#2fa96e;border-color:#2fa96e;}
 .vrow-tags .vtag-junshinsaku{color:#5bb8ae;border-color:#5bb8ae;}
 .fanza-name-row{font-size:.78rem;color:#cbd5e1;padding:1px 6px 2px 2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}/* 右予約78px→6px=画像列の手前まで拡大(別列で重ならない)。作品名は2行で…省略(2026-07-12) */

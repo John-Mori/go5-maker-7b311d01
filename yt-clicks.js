@@ -27,6 +27,7 @@
     { key: 'jk', label: 'JK' },
     { key: 'gyaru', label: 'ギャル' },
     { key: 'isekai', label: '異世界' },
+    { key: 'harem', label: 'ハーレム' },
     { key: 'ai', label: 'AI' },
     { key: 'ol', label: 'OL' },
     { key: 'soshu', label: '総集編' }

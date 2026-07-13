@@ -50,7 +50,7 @@
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
   // 動画作成タブの「カテゴリ」チェック状態を読む。(キャラ/JK/ギャル/異世界・複数可・キャラ無し＝オリジナル)
-  var MOVIE_ATTRS = [['chara', 'movieAttrChara'], ['jk', 'movieAttrJk'], ['gyaru', 'movieAttrGyaru'], ['isekai', 'movieAttrIsekai'], ['ai', 'movieAttrAi'], ['ol', 'movieAttrOl'], ['soshu', 'movieAttrSoshu']];
+  var MOVIE_ATTRS = [['chara', 'movieAttrChara'], ['jk', 'movieAttrJk'], ['gyaru', 'movieAttrGyaru'], ['isekai', 'movieAttrIsekai'], ['harem', 'movieAttrHarem'], ['ai', 'movieAttrAi'], ['ol', 'movieAttrOl'], ['soshu', 'movieAttrSoshu']];
   // 動画作成タブの「リビルド(作り直し)」チェック状態。ONなら「同じ作品を作り直した動画」として記録。
   function readRebuild() { var el = $('movieRebuild'); return !!(el && el.checked); }
   // リビルド対象として選んだ投稿履歴のvideoId。(未選択なら空)投稿履歴のGo5History.markRebuiltで「被リビルド」に自動反映する。
@@ -118,6 +118,41 @@
     MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); o[p[0]] = !!(el && el.checked); });
     return o;
   }
+  // ---- カテゴリ自動チェック(FANZAジャンル名→該当カテゴリ) ----
+  // 作品が決まったら(候補から/作品URL入力/ウィザード)、取得済みジャンル名で該当カテゴリへ自動チェック。
+  // 全カテゴリを一旦外してから該当だけON＝前回のチェックを引き継がない。
+  var GENRE_ATTR_KEYWORDS = {
+    chara: ['二次創作'],
+    jk: ['女子校生', '女子高生', 'JK'],
+    gyaru: ['ギャル'],
+    isekai: ['異世界', '転生'],
+    harem: ['ハーレム'],
+    ai: ['AI生成', 'AIイラスト', 'AIグラビア'],
+    ol: ['OL'],
+    soshu: ['総集編']
+  };
+  function setMovieAttrsFromGenres(genres) {
+    var names = (genres || []).map(function (g) { return String(g || ''); });
+    MOVIE_ATTRS.forEach(function (p) {
+      var el = $(p[1]); if (!el) return;
+      var kws = GENRE_ATTR_KEYWORDS[p[0]] || [];
+      el.checked = names.some(function (n) { return kws.some(function (k) { return n.indexOf(k) >= 0; }); });
+    });
+  }
+  // 同じ作品(cid)には1回だけ自動適用＝再描画・キャッシュヒットのたびに手動調整を上書きしない。(割引自動反映と同じ設計)
+  // リロードを跨いでも尊重できるよう localStorage に記録する。
+  function autoApplyAttrsFromInfo_(info) {
+    if (!info) return;
+    var cid = String(info.cid || ''); if (!cid) return;
+    if (load('movie_auto_attrs_cid') === cid) return;
+    save('movie_auto_attrs_cid', cid);
+    setMovieAttrsFromGenres(info.genres || []);
+  }
+  // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=即時チェック(cid指定で以後の自動適用を抑止)。
+  try { window.Go5MovieAttrs = {
+    reset: function () { save('movie_auto_attrs_cid', ''); MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); if (el) el.checked = false; }); },
+    applyGenres: function (genres, cid) { if (cid) save('movie_auto_attrs_cid', String(cid)); setMovieAttrsFromGenres(genres || []); }
+  }; } catch (e) {}
   // 投稿時の作品状態を判定：新作(discountNew2) > 準新作(movieJunshinsaku) > 旧作。(どちらも無し)
   function readWorkState() {
     var shin = $('discountNew2') && $('discountNew2').checked;
@@ -1457,6 +1492,7 @@
     el.style.color = 'var(--ink)';
     el.innerHTML = lines.join('');
     autoApplyDiscountFromInfo_(info); // 現在の割引率を投稿文へ自動反映(取得できない時だけ手動ドロップダウンが効く)
+    autoApplyAttrsFromInfo_(info); // ジャンル→カテゴリ自動チェック(同一cidは1回だけ＝手動調整を尊重)
   }
   // 作品URLから取得できた「現在の割引率」を投稿文へ自動反映する。取得できなかった/セール無しの
   // ときは何もしない。(＝割引文ドロップダウンでの手動指定がそのまま使える・補助的フォールバック)
