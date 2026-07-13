@@ -116,6 +116,12 @@ def main():
             avatar = json.load(f).get(persona)
     hook_url = ensure_webhook(str(ch["id"]), token)
     payload = {"username": persona[:80]}
+    if color == "auto":
+        # 話者のテーマカラー(local/persona_colors.json)で送る。未定義なら通常メッセージにフォールバック
+        try:
+            color = json.load(open(os.path.join(LOCAL, "persona_colors.json"), encoding="utf-8")).get(persona)
+        except Exception:
+            color = None
     if color:
         c = COLORS.get(color.lower())
         if c is None:
