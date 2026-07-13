@@ -47,6 +47,26 @@ ROSTER = [
 ]
 
 
+# 標準アイコン(Discordアバターと同じ台帳)をオフィスのサムネに使う(Chami指定2026-07-14)。
+# 台帳に増えたキャラは次のビルドから自動でサムネ化される。
+def load_avatars():
+    try:
+        with open(os.path.join(ROOT, "local", "persona_avatars.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+AVATARS = load_avatars()
+
+
+def avatar_of(name):
+    v = AVATARS.get(name.replace("(兼)", ""))
+    if isinstance(v, list):
+        v = v[0] if v else None
+    return v
+
+
 def d1(sql):
     r = subprocess.run(["npx", "wrangler", "d1", "execute", "go5_kaizen", "--remote", "--json", "--command", sql],
                        capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -120,9 +140,15 @@ def main():
             else:
                 bubble = "🍵 待機中"
             bubble_cls = "idle"
-        chips = "".join(
-            f'<div class="chip"><span class="face" style="background:{m["c"]}">{html.escape(m["n"][0])}</span>'
-            f'<span class="nm">{html.escape(m["n"])}</span></div>' for m in r["members"])
+        chips = ""
+        for m in r["members"]:
+            av = avatar_of(m["n"])
+            if av:  # 標準アイコンがある部員は写真サムネ(色はフォールバック背景として残す)
+                face = (f'<span class="face" style="background:{m["c"]} url({html.escape(av, quote=True)}) '
+                        f'center/cover no-repeat"></span>')
+            else:
+                face = f'<span class="face" style="background:{m["c"]}">{html.escape(m["n"][0])}</span>'
+            chips += f'<div class="chip">{face}<span class="nm">{html.escape(m["n"])}</span></div>'
         detail_rows = ""
         for t in (working + blocked + opens)[:6]:
             detail_rows += f'<li>[{t["status"]}] {esc(t["summary"])}</li>'
