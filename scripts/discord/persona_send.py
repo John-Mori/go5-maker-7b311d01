@@ -8,6 +8,9 @@ username/avatar_url上書きで送信する。Webhook URLは local/discord_webho
   python scripts/discord/persona_send.py --channel "研究室-コーチングルーム" --persona "アメス" "本文..."
   python scripts/discord/persona_send.py --dept qa-reviewer --persona "ジェンティルドンナ" --avatar https://... "本文"
   echo 本文 | python scripts/discord/persona_send.py --dept research-room --persona "シャビ・アロンソ"
+  # 色付きカード(Embed): --color red|orange|green|blue|grey|#RRGGBB [--etitle 見出し]
+  python scripts/discord/persona_send.py --channel 報告-通知 --persona オタコン --color green --etitle "デプロイ完了" "本文"
+本文はDiscordマークダウン対応(**太字** *斜体* __下線__ ~~打消~~ `code` > 引用 - リスト)。
 
 アイコン: --avatar <画像URL> 省略可(省略時はDiscord既定アバター+キャラ名)。
          local/persona_avatars.json ({"アメス":"https://...", ...}) があれば自動適用。
@@ -67,9 +70,13 @@ def ensure_webhook(channel_id, token):
     return url
 
 
+COLORS = {"red": 0xED4245, "orange": 0xE67E22, "yellow": 0xFEE75C, "green": 0x57F287,
+          "blue": 0x5865F2, "purple": 0x9B59B6, "grey": 0x95A5A6, "pink": 0xEB459E}
+
+
 def main():
     args = sys.argv[1:]
-    channel = dept = persona = avatar = None
+    channel = dept = persona = avatar = color = etitle = None
     rest = []
     i = 0
     while i < len(args):
@@ -82,6 +89,10 @@ def main():
             persona = args[i + 1]; i += 2
         elif a == "--avatar" and i + 1 < len(args):
             avatar = args[i + 1]; i += 2
+        elif a == "--color" and i + 1 < len(args):
+            color = args[i + 1]; i += 2
+        elif a == "--etitle" and i + 1 < len(args):
+            etitle = args[i + 1]; i += 2
         else:
             rest.append(a); i += 1
     if not persona or not (channel or dept):
@@ -104,7 +115,20 @@ def main():
         with open(AVATARS_FILE, "r", encoding="utf-8") as f:
             avatar = json.load(f).get(persona)
     hook_url = ensure_webhook(str(ch["id"]), token)
-    payload = {"content": body[:1900], "username": persona[:80]}
+    payload = {"username": persona[:80]}
+    if color:
+        c = COLORS.get(color.lower())
+        if c is None:
+            try:
+                c = int(color.lstrip("#"), 16)
+            except ValueError:
+                c = COLORS["blue"]
+        emb = {"description": body[:3900], "color": c}
+        if etitle:
+            emb["title"] = etitle[:250]
+        payload["embeds"] = [emb]
+    else:
+        payload["content"] = body[:1900]
     if avatar:
         payload["avatar_url"] = avatar
     req = urllib.request.Request(
