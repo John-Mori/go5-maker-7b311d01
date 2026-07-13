@@ -219,32 +219,38 @@
         if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
       }
       applyDeltas_();
-      try { repairClickWarn_(); } catch (e) {} // クリック⚠(サーバーにスナップ無し)を実データ基点で自己修復
+      try { repairMissing_(); } catch (e) {} // 「記録待ち」「クリック⚠」を実データ基点で自己修復
       if (cb) cb();
     });
   }
-  // クリックのデルタが「不可知(⚠)」＝サーバーにこのvidのクリックスナップが1つも無い状態。
-  //   端末には計測キー(r2短縮)があるのにサーバーに無い＝シートの短縮URL欠落が原因。楽観的な同期台帳が
-  //   「送信済み」と誤マークして再送しない取りこぼしを、実際の⚠を検知して確実に後追い反映して治す。(Chami報告2026-07-14)
-  var _clickRepairDone = {};
-  function repairClickWarn_() {
+  // サーバーのデルタを見て、シートに計測URLが取りこぼされた投稿を後追い反映して治す。(Chami報告2026-07-14)
+  //   ①「記録待ち」= deltaCache[vid] 不在 = サーバーがこのvidを知らない = YouTube動画URLがシート未反映。
+  //   ②「クリック⚠」= tc===null = 短縮URLがシート未反映でクリックがスナップされていない。
+  //   楽観的な同期台帳が「送信済み」と誤マークして再送しない取りこぼしを、実データ基点で確実に治す。
+  var _repairDone = {};
+  function repairMissing_() {
     var url = gasUrl_(); if (!url) return;
     var ymap = loadYtMap();
     var pushed = 0;
     allItems().forEach(function (it) {
-      if (pushed >= 8) return;
+      if (pushed >= 20) return;
+      if (!it.videoId) return;
       var k = itemKey(it);
-      var vid = ytIdOf(ymap[k] || it.ytUrl || '');
-      if (!vid || _clickRepairDone[vid]) return;
+      var yt = ymap[k] || it.ytUrl || '';
+      var vid = ytIdOf(yt);
+      if (!vid || _repairDone[vid]) return;
       var d = deltaCache[vid];
-      if (!d || d.tc !== null) return;             // tc===null のみ=クリック記録なし。0(記録あり)は対象外
-      if (!codeOf(it.shortUrl || '') || !it.videoId) return; // 端末にr2短縮が無ければ送っても治らない
-      _clickRepairDone[vid] = true;
-      pushItemToGas_(it);                          // シートの短縮URL列を確実に埋める
+      var needYt = !d;                                              // ①記録待ち: vidがサーバーに無い
+      var needShort = !!(d && d.tc === null && codeOf(it.shortUrl || '')); // ②クリック⚠: 短縮URL未反映
+      if (!needYt && !needShort) return;
+      _repairDone[vid] = true;
+      // pushItemToGas_ は it.ytUrl を送る=YT URLがymap側だけの時に備えて補完してから送る。
+      var toSend = it.ytUrl ? it : (function () { var c = {}; for (var p in it) c[p] = it[p]; c.ytUrl = yt; return c; })();
+      pushItemToGas_(toSend);                                       // YT URL+短縮URL+作品短縮URLをまとめて反映
       pushed++;
     });
     if (pushed > 0) {
-      pokeSnapshotNow_();                          // 反映後に即スナップ→クリックが記録され⚠が数字に変わる
+      pokeSnapshotNow_();                          // 反映後に即スナップ→vid/クリックが記録され表示に変わる
       setTimeout(function () { try { fetchDeltas_(true); } catch (e) {} }, 9000);
     }
   }
