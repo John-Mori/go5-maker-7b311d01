@@ -34,7 +34,7 @@ ROSTER = [
      "members": [{"n": "三笘薫", "c": "#5fae7a", "idle": "自主トレ中"},
                   {"n": "早坂芽衣", "c": "#f5c96e", "idle": "野良猫と会話中 / 昼寝中"}], "idle": []},
     {"dept": "shorts-analyst", "label": "分析部", "color": "#f5d9cf",
-     "members": [{"n": "モドリッチ", "c": "#d98c66"}, {"n": "アーモンドアイ", "c": "#c9a06e"}], "idle": []},
+     "members": [{"n": "モドリッチ", "c": "#d98c66"}, {"n": "アーモンドアイ", "c": "#BAD4F4"}], "idle": []},
     {"dept": "qa-reviewer", "label": "品質管理部", "color": "#f2cfd9",
      "members": [{"n": "ジェンティルドンナ", "c": "#e08bab"}, {"n": "スネーク", "c": "#8ba3ab"}, {"n": "オタコン", "c": "#9bb5e0"}], "idle": []},
     {"dept": "learning-coach", "label": "学習室", "color": "#d9e8f2",
