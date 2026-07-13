@@ -690,6 +690,21 @@
     } catch (e) { return false; }
   };
 
+  // 販促ラベル(promo-label.js)向け: プレビュー完全表示時(t=DURATION・ズーム完了)の前景写真の
+  // キャンバス内矩形。タッチ座標→写真内座標の変換に使う。(drawFrameと同じ式で計算)
+  window.Go5PhotoRect = function () {
+    if (!fgImg) return null;
+    const base = Math.min(W * FG_MAX_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height);
+    const fw = fgImg.width * base, fh = fgImg.height * base;
+    return {
+      x: (W - fw) / 2,
+      y: H * (FG_CENTER_Y + OFF.whole + (OFF.imgY || 0)) - fh / 2,
+      w: fw, h: fh,
+      imgW: fgImg.width, imgH: fgImg.height,
+      cvW: W, cvH: H
+    };
+  };
+
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
   ensureFont().then(preview);

@@ -249,6 +249,9 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .vatt-ol{color:#b56db0;border-color:#b56db0;}
 .vatt-soshu{color:#e0863c;border-color:#e0863c;}
 .vatt-harem{color:#ef6da8;border-color:#ef6da8;}
+/* 販促ラベルの位置調整行(ラベルが焼かれている時だけ表示) */
+.promo-pos-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;}
+.promo-pos-row[hidden]{display:none;}
 .vatt-rebuild{color:#3fb6a8;border-color:#3fb6a8;}
 .vedit-attrs{margin:0 0 14px;}
 .vedit-attrs-title{font-size:12px;color:var(--sub);margin-bottom:7px;}

@@ -17,13 +17,27 @@
   var lastInfo = null;    // 直近で確定した作品情報 {cid, pct}
   var appliedKey = '';    // 今photoに焼いてある内容のキー('' = 原本のまま)
   var selfSet = false;    // 自分の書き戻しで発火したchangeを原本扱いしないためのフラグ
+  var posOv = null;       // 手動調整の位置(852×1280基準の左上{x,y})。写真を替えたらリセット
 
   function photoEl() { return document.getElementById('photo'); }
   function acct() { return window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'; }
   function labelText(pct) { return acct() === 'acc2' ? ('今だと' + pct + '%OFF🌸') : ('今なら' + pct + '%OFF🌙'); }
   function keyOf() {
     if (!orig || !lastInfo || !(lastInfo.pct > 0)) return '';
-    return [lastInfo.cid, lastInfo.pct, acct(), orig.name, orig.size].join('|');
+    var p = posOv ? Math.round(posOv.x) + ',' + Math.round(posOv.y) : 'def';
+    return [lastInfo.cid, lastInfo.pct, acct(), orig.name, orig.size, p].join('|');
+  }
+
+  // 現在のラベル位置(852×1280基準の左上)。手動調整があればそれ、無ければ既定+右余白クランプ。
+  function basisPos() {
+    if (posOv) {
+      return {
+        x: Math.min(Math.max(0, posOv.x), BASE_W - POS.w),
+        y: Math.min(Math.max(0, posOv.y), BASE_H - POS.h)
+      };
+    }
+    var x = Math.min(POS.x, BASE_W - POS.rightMargin - POS.w); // 右端余白30〜35px(基準33px)を厳守
+    return { x: Math.max(0, x), y: POS.y };
   }
 
   function roundRectPath(ctx, x, y, w, h, r) {
@@ -38,10 +52,9 @@
 
   function drawLabel(ctx, imgW, imgH, pct) {
     var sx = imgW / BASE_W, sy = imgH / BASE_H;
+    var bp = basisPos();
     var w = POS.w * sx, h = POS.h * sy;
-    var x = POS.x * sx, y = POS.y * sy;
-    var xMax = imgW - POS.rightMargin * sx - w; // 右端余白30〜35px(基準33px)を厳守
-    if (x > xMax) x = Math.max(0, xMax);
+    var x = bp.x * sx, y = bp.y * sy;
     var r = POS.radius * Math.min(sx, sy);
     ctx.save();
     // 帯: 赤ピンクの角丸+白フチ+薄い影。(窓背景の白でも読める濃度・メインコピーより明確に小さい)
@@ -80,6 +93,7 @@
     if (!k) {
       // 割引なし・情報未確定・原本なし: 焼いた状態なら原本へ戻す(作品を替えたら前作のラベルを残さない)
       if (appliedKey && orig) { appliedKey = ''; setFile(orig); }
+      updateRow();
       return;
     }
     if (k === appliedKey) return; // 同内容は焼き直さない(無限ループ・無駄な再描画防止)
@@ -94,10 +108,11 @@
         drawLabel(ctx, c.width, c.height, lastInfo.pct);
         c.toBlob(function (b) {
           if (!b) return;
-          if (k !== keyOf()) return; // 合成中に作品/割引/口座が変わった＝この結果は破棄
+          if (k !== keyOf()) return; // 合成中に作品/割引/口座/位置が変わった＝この結果は破棄
           var f = new File([b], ((orig.name || 'photo').replace(/\.[^.]+$/, '')) + '_off.jpg', { type: 'image/jpeg' });
           appliedKey = k;
           setFile(f);
+          updateRow();
         }, 'image/jpeg', 0.92);
       } finally { URL.revokeObjectURL(url); }
     };
@@ -105,13 +120,111 @@
     img.src = url;
   }
 
+  // ---- 位置の手動調整: ボタン+プレビュードラッグ(Chami依頼2026-07-14・両対応) ----
+  var bakeTimer = null;
+  function scheduleBake() { // ボタン連打・ドラッグ確定をまとめて1回で焼き直す
+    if (bakeTimer) clearTimeout(bakeTimer);
+    bakeTimer = setTimeout(function () { bakeTimer = null; apply(); }, 250);
+  }
+  function nudge(dx, dy) {
+    if (!appliedKey) return; // ラベルが出ていない時は動かすものが無い
+    var bp = basisPos();
+    posOv = { x: bp.x + dx, y: bp.y + dy };
+    scheduleBake();
+  }
+  function resetPos() { if (!appliedKey) return; posOv = null; scheduleBake(); }
+  function updateRow() { // 調整UIはラベルが焼かれている時だけ出す。ドラッグ中のスクロール暴発も防ぐ
+    var row = document.getElementById('promoPosRow');
+    if (row) row.hidden = !appliedKey;
+    var cv = document.getElementById('cv');
+    if (cv) cv.style.touchAction = appliedKey ? 'none' : '';
+  }
+  (function wireButtons() {
+    var map = { promoPosL: [-12, 0], promoPosR: [12, 0], promoPosU: [0, -12], promoPosD: [0, 12] };
+    Object.keys(map).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('click', function () { nudge(map[id][0], map[id][1]); });
+    });
+    var rs = document.getElementById('promoPosReset');
+    if (rs) rs.addEventListener('click', resetPos);
+  })();
+
+  // プレビュー(canvas#cv)のラベルを指/マウスで直接ドラッグ。掴めるのはラベルの上だけ。
+  // ドラッグ中は破線ゴーストで移動先を表示し、離した位置で原本から焼き直す。
+  (function wireDrag() {
+    var cv = document.getElementById('cv');
+    if (!cv || !window.PointerEvent) return;
+    var drag = null;  // {gx,gy}=掴んだ点とラベル左上のずれ(基準座標)
+    var ghost = null;
+    function basisPoint(ev) { // ポインタ位置→852×1280基準座標。写真の外ならnull
+      var R = window.Go5PhotoRect ? window.Go5PhotoRect() : null;
+      if (!R) return null;
+      var b = cv.getBoundingClientRect();
+      if (!b.width || !b.height) return null;
+      var px = (ev.clientX - b.left) * (R.cvW / b.width);
+      var py = (ev.clientY - b.top) * (R.cvH / b.height);
+      var ix = (px - R.x) / R.w * R.imgW, iy = (py - R.y) / R.h * R.imgH;
+      if (ix < 0 || iy < 0 || ix > R.imgW || iy > R.imgH) return null;
+      return { x: ix * BASE_W / R.imgW, y: iy * BASE_H / R.imgH };
+    }
+    function ghostShow(bp) {
+      var R = window.Go5PhotoRect ? window.Go5PhotoRect() : null;
+      if (!R) return;
+      var b = cv.getBoundingClientRect();
+      var sx = b.width / R.cvW, sy = b.height / R.cvH; // canvas内部px→画面CSSpx
+      var cx = R.x + (bp.x * R.imgW / BASE_W) * R.w / R.imgW;
+      var cy = R.y + (bp.y * R.imgH / BASE_H) * R.h / R.imgH;
+      var cw = (POS.w * R.imgW / BASE_W) * R.w / R.imgW;
+      var ch = (POS.h * R.imgH / BASE_H) * R.h / R.imgH;
+      if (!ghost) {
+        ghost = document.createElement('div');
+        ghost.style.cssText = 'position:fixed;pointer-events:none;z-index:9999;border:2px dashed #fff;background:rgba(224,37,78,.55);border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.4);';
+        document.body.appendChild(ghost);
+      }
+      ghost.style.left = (b.left + cx * sx) + 'px';
+      ghost.style.top = (b.top + cy * sy) + 'px';
+      ghost.style.width = (cw * sx) + 'px';
+      ghost.style.height = (ch * sy) + 'px';
+      ghost.hidden = false;
+    }
+    function ghostHide() { if (ghost) ghost.hidden = true; }
+    cv.addEventListener('pointerdown', function (ev) {
+      if (!appliedKey) return;
+      var p = basisPoint(ev);
+      if (!p) return;
+      var cur = basisPos();
+      if (p.x < cur.x || p.x > cur.x + POS.w || p.y < cur.y || p.y > cur.y + POS.h) return; // ラベル上のみ
+      drag = { gx: p.x - cur.x, gy: p.y - cur.y };
+      try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
+      ghostShow(cur);
+      ev.preventDefault();
+    });
+    cv.addEventListener('pointermove', function (ev) {
+      if (!drag) return;
+      var p = basisPoint(ev);
+      if (!p) return;
+      posOv = { x: p.x - drag.gx, y: p.y - drag.gy };
+      ghostShow(basisPos()); // クランプ後の実位置を表示
+      ev.preventDefault();
+    });
+    function endDrag() {
+      if (!drag) return;
+      drag = null;
+      ghostHide();
+      apply(); // 離した位置で焼き直し(冪等キーに位置が入っているので確実に更新される)
+    }
+    cv.addEventListener('pointerup', endDrag);
+    cv.addEventListener('pointercancel', endDrag);
+  })();
+
   // 写真の変更(ユーザー選択・候補流し込み・下書き復元)=新しい原本。自分の書き戻しは除外。
   document.addEventListener('change', function (e) {
     if (!e.target || e.target.id !== 'photo' || selfSet) return;
     var p = photoEl();
     var f = p && p.files && p.files[0];
     if (!f) return;
-    orig = f; appliedKey = '';
+    orig = f; appliedKey = ''; posOv = null; // 新しい写真=位置調整もやり直し(画像の内容次第のため)
+    updateRow();
     apply(); // 割引が既に確定していれば即焼き込み(写真が情報より後に来た場合)
   }, true);
 
@@ -131,6 +244,9 @@
       if (lastInfo && lastInfo.cid !== String(cid || '')) { lastInfo = null; apply(); }
     },
     // 新規作成の起点で呼ぶ。(Go5NewMovieReset)
-    clear: function () { lastInfo = null; apply(); }
+    clear: function () { lastInfo = null; posOv = null; apply(); },
+    // 位置調整(ボタンUIと同じ動き。デバッグ・外部利用向け)
+    nudge: nudge,
+    resetPos: resetPos
   };
 })();
