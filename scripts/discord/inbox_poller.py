@@ -142,13 +142,34 @@ def main():
             # ただし名前呼び(アメス/アロンソ等)を含む発言はClaude側へ配達=呼べば本人が出てくる(Chami指定2026-07-13)
             CALL_WORDS = ("アメス", "アロンソ", "監督", "司令塔", "Claude", "claude")
             QWEN_WORDS = ("ローカル", "qwen", "Qwen")
+            # トークン節約(Chami承認2026-07-14・案A): 簡単な質問はローカルqwenが一次回答し、
+            #   コード変更・数字・投稿など誤答が怖い依頼はClaudeへ回す。誤爆を避けるため保守的に判定。
+            WORK_WORDS = ("改修", "修正", "直し", "直す", "変更", "追加", "実装", "作っ", "作成", "してくれ",
+                          "対応", "バグ", "エラー", "ボタン", "表示", "幅", "位置", "デプロイ", "反映",
+                          "変えて", "移動", "削除", "登録", "設定して", "頼む", "お願い", "やって", "解析")
+            Q_MARKS = ("?", "？", "教え", "わかる", "分かる", "どれくらい", "どのくらい", "何", "なに",
+                       "どう", "いくら", "かな", "だっけ", "ですか", "だろうか", "ある?", "ある？")
+            SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room")  # 機微/司令塔直轄=ローカル一次回答しない
+            def _is_simple_q(r):
+                c = r.get("content") or ""
+                if r.get("attachments"):
+                    return False                                  # 画像添付=作業依頼が多い
+                if r.get("dept") in SENSITIVE_DEPTS:
+                    return False
+                if any(w in c for w in CALL_WORDS):
+                    return False                                  # 名前呼び=本人(Claude)へ
+                if any(w in c for w in WORK_WORDS):
+                    return False                                  # 依頼語=Claudeへ
+                if len(c) > 200:
+                    return False                                  # 長文=仕様/依頼の可能性
+                return any(m in c for m in Q_MARKS)               # 質問らしさがある短文だけローカルへ
             def _is_llm(r):
                 c = r.get("content") or ""
                 if r.get("dept") == "llm-growth":
                     return not any(w in c for w in CALL_WORDS)  # 彼女の部屋: 名前呼び以外は彼女
                 if r.get("dept") == "imagegen":
                     return any(w in c for w in QWEN_WORDS)      # 画像生成室: 逆に呼ばれた時だけ彼女
-                return False
+                return _is_simple_q(r)                          # 他部屋: 簡単な質問だけローカル一次回答
             llm_out = [r for r in out if _is_llm(r)]
             main_out = [r for r in out if not _is_llm(r)]
             if main_out:
