@@ -169,6 +169,7 @@
       var el = $(id);
       if (el && el.checked) { el.checked = false; try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
     });
+    try { if (window.Go5PromoLabel) window.Go5PromoLabel.clear(); } catch (e) {} // 販促ラベルも前作の割引で焼かない
   }; } catch (e) {}
   // 投稿時の作品状態を判定：新作(discountNew2) > 準新作(movieJunshinsaku) > 旧作。(どちらも無し)
   function readWorkState() {
@@ -1510,6 +1511,7 @@
     el.innerHTML = lines.join('');
     autoApplyDiscountFromInfo_(info); // 現在の割引率を投稿文へ自動反映(取得できない時だけ手動ドロップダウンが効く)
     autoApplyAttrsFromInfo_(info); // ジャンル→カテゴリ自動チェック(同一cidは1回だけ＝手動調整を尊重)
+    try { if (window.Go5PromoLabel) window.Go5PromoLabel.notify(info); } catch (e) {} // 販促ラベル(今なら◯%OFF)を元写真へ焼き込み
   }
   // 作品URLから取得できた「現在の割引率」を投稿文へ自動反映する。取得できなかった/セール無しの
   // ときは何もしない。(＝割引文ドロップダウンでの手動指定がそのまま使える・補助的フォールバック)
@@ -1530,6 +1532,7 @@
     var r = window.buildAffiliateLink ? window.buildAffiliateLink(url, '') : null;
     var cid = (r && r.ok) ? r.cid : '';
     if (!cid) { if (el) { el.style.color = 'var(--sub)'; el.textContent = ''; } return; }
+    try { if (window.Go5PromoLabel) window.Go5PromoLabel.begin(cid); } catch (e) {} // 作品替え=前作の%で焼かない
     var workerUrl = '', secret = '';
     try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; } catch (e) {}
     try { secret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
