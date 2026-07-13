@@ -22,7 +22,7 @@ SOURCES = [
 ]
 
 
-SENSITIVE_DEPTS = ("dream-care", "past-room")  # 機微部屋は学習対象から恒久除外
+SENSITIVE_DEPTS = ()  # 夢/過去部屋も学習対象に含める(Chami明示2026-07-13「プライバシーとかいいよ」。知識パックはlocal内で完結=外部送信なし)
 
 
 def recent_conversation(limit=40):
