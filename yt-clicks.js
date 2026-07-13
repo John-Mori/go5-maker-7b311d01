@@ -281,6 +281,8 @@
   var _saveCb = null;
   var _pendingShare = ''; // 生成した計測用リンクの共有URL。(da.gd)保存時に item.shareUrl へ付与
   var _pendingShort = ''; // 生成した計測用リンクのr2 URL。保存時に item.shortUrl へ付与(計測キー)
+  var _pendingWorkShort = ''; // 作品クリック(導線2)の生成r2 URL。保存時に item.workShortUrl へ付与
+  var _pendingWorkShare = ''; // 作品クリック(導線2)の生成表示URL。保存時に item.workShareUrl へ付与
   var _curSrcUrl = '';    // 生成の元にする投稿URL(編集中アイテムのpostUrl等)
 
   function injectModal_() {
@@ -311,6 +313,13 @@
             '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…(省略可)">' +
             '<button id="veditWorkCopy" type="button" class="vedit-copy">コピー</button>' +
           '</div>' +
+        '</label>' +
+        '<label class="vedit-field">作品クリック計測用の短縮URL(投稿→FANZA・導線2)' +
+          '<div class="vedit-bsky-row">' +
+            '<input id="veditWorkShort" type="url" inputmode="url" autocomplete="off" placeholder="投稿すると自動で入ります・空なら「自動生成」で作成">' +
+            '<button id="veditWorkShortGen" type="button" class="vedit-copy">自動生成</button>' +
+          '</div>' +
+          '<span class="vedit-hint" style="font-size:11px;color:var(--sub);">この短縮URLのクリックが作品クリック数(ピンクの矢印)として集計されます。空だと表示されません。</span>' +
         '</label>' +
         '<div class="vedit-attrs">' +
           '<div class="vedit-attrs-title">カテゴリ(複数選択可・キャラ無し＝オリジナル)</div>' +
@@ -381,7 +390,8 @@
         ($('veditBsky').value || '').trim(),
         ($('veditWork').value || '').trim(),
         attrs,
-        (wsEl && wsEl.value) || '旧作'
+        (wsEl && wsEl.value) || '旧作',
+        ($('veditWorkShort').value || '').trim()
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -415,6 +425,26 @@
       }).catch(function () { showModalErr_('短縮に失敗しました。'); })
         .then(function () { btn.disabled = false; btn.textContent = orig; });
     });
+    // 作品クリック計測URL(導線2)の自動生成: 作品URL→アフィリンク→r2短縮。投稿時と同じ計測キーを作る。
+    $('veditWorkShortGen').addEventListener('click', function () {
+      var btn = this;
+      var wurl = ($('veditWork').value || '').trim();
+      if (!/^https?:\/\//.test(wurl)) { showModalErr_('先に「作品URL(DMM/FANZAの商品ページURL)」を入れてください'); return; }
+      if (typeof window.buildAffiliateLink !== 'function' || typeof window.Go5MakeShort !== 'function') { showModalErr_('短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
+      var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+      var aff = window.buildAffiliateLink(wurl, afId);
+      if (!aff || !aff.ok || !aff.link) { showModalErr_('作品URLからアフィリンクを作れませんでした(URLを確認してください)'); return; }
+      var errEl = $('veditError'); if (errEl) errEl.hidden = true;
+      var orig = btn.textContent; btn.disabled = true; btn.textContent = '生成中…';
+      window.Go5MakeShort(aff.link).then(function (res) {
+        var r2 = (res && res.shortUrl) || '', share = (res && res.shareUrl) || r2;
+        if (!r2) { showModalErr_('短縮に失敗しました。(r2ワーカーに接続できませんでした)'); return; }
+        $('veditWorkShort').value = share; // 欄には短い表示URLを表示
+        _pendingWorkShort = r2;            // 保存時 workShortUrl=r2(作品クリック計測キー)
+        _pendingWorkShare = share;         // 保存時 workShareUrl=表示URL
+      }).catch(function () { showModalErr_('短縮に失敗しました。'); })
+        .then(function () { btn.disabled = false; btn.textContent = orig; });
+    });
   }
 
   function closeModal_() {
@@ -422,16 +452,17 @@
     _saveCb = null;
   }
 
-  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave) {
+  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
     $('veditBsky').value = bskyVal || '';
     $('veditWork').value = workVal || '';
+    if ($('veditWorkShort')) $('veditWorkShort').value = workShortVal || '';
     attrs = attrs || {};
     ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
     if ($('veditWorkState')) $('veditWorkState').value = workState || '旧作';
-    _pendingShare = ''; _pendingShort = ''; // 生成状態をリセット
+    _pendingShare = ''; _pendingShort = ''; _pendingWorkShare = ''; _pendingWorkShort = ''; // 生成状態をリセット
     var gr = $('veditGenResult'); if (gr) { gr.hidden = true; gr.innerHTML = ''; }
     var errEl = $('veditError'); if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
     $('veditOverlay').hidden = false;
@@ -490,7 +521,13 @@
   }
 
   // 編集保存：YouTube URL(ytMap)と Bluesky URL・作品URL・カテゴリ属性・作品状態(アイテム)を一括更新。
-  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState) {
+  // 作品クリック計測URL(導線2)を item へ反映。自動生成(_pendingWorkShort)>手入力>クリアの優先。
+  function applyWorkShort_(item, typedVal) {
+    if (_pendingWorkShort) { item.workShortUrl = _pendingWorkShort; item.workShareUrl = _pendingWorkShare || _pendingWorkShort; }
+    else if (typedVal) { item.workShortUrl = typedVal; item.workShareUrl = typedVal; }
+    else { delete item.workShortUrl; delete item.workShareUrl; }
+  }
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
     // YouTube URL
     var ymap = loadYtMap();
     if (ytUrl) ymap[k] = ytUrl; else delete ymap[k];
@@ -508,6 +545,7 @@
         manual[i].workState = workState || '旧作';
         if (_pendingShort) { manual[i].shortUrl = _pendingShort; delete manual[i].postUrl; } // 計測キー(r2)
         if (_pendingShare) manual[i].shareUrl = _pendingShare; // 表示用(da.gd)
+        applyWorkShort_(manual[i], workShortVal); // 作品クリック計測URL(導線2)
         saved = manual[i];
         break;
       }
@@ -523,6 +561,7 @@
         hist[j].workState = workState || '旧作';
         if (_pendingShort) { hist[j].shortUrl = _pendingShort; delete hist[j].postUrl; } // 計測キー(r2)
         if (_pendingShare) hist[j].shareUrl = _pendingShare; // 表示用(da.gd)
+        applyWorkShort_(hist[j], workShortVal); // 作品クリック計測URL(導線2)
         saved = hist[j];
         break;
       }
@@ -562,9 +601,9 @@
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
 
-  // 自己修復: 端末にYT URLがあるのにシートのYouTube動画URL列へ未反映＝サーバーがvidを知らず
-  //   「記録待ち」が永久固定になる旧投稿を、YT URLをシートへ後追いupsertして治す(pushItemToGas_が
-  //   youtube_urlを送るようになった後の遡及対応)。videoId毎に同一URLは1度だけ送る(localStorage台帳)。
+  // 自己修復: 端末が持つ計測URL(YouTube動画URL・短縮URL=r2)がシートへ未反映だと、サーバーが
+  //   vid/クリックを認識できず「記録待ち」や日別クリックの⚠が固定化する。それをシートへ後追いupsertで治す。
+  //   videoId毎に「YT URL＋短縮URL」の署名が変わった時だけ送る(localStorage台帳・冪等)。
   function reconcileYtToSheet_() {
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
@@ -576,18 +615,20 @@
     allItems().forEach(function (it) {
       var k = itemKey(it);
       var yt = ymap[k] || it.ytUrl || '';
-      if (!yt || !it.videoId) return;
-      if (ledger[it.videoId] === yt) return;      // 同一URLは送信済み=再送しない
+      var short = it.shortUrl || '';
+      if ((!yt && !short) || !it.videoId) return;
+      var sig = yt + '' + short;            // YT URL＋短縮URLの複合署名=どちらが欠けていても治す
+      if (ledger[it.videoId] === sig) return;      // 同一署名は送信済み=再送しない
       if (pushed >= 12) return;                    // 1回のreconcileで送る上限=大量アイテム時のGAS負荷を抑える
       var toSend = it.ytUrl ? it : (function () { var c = {}; for (var p in it) c[p] = it[p]; c.ytUrl = yt; return c; })();
       pushItemToGas_(toSend);
-      ledger[it.videoId] = yt;
+      ledger[it.videoId] = sig;
       pushed++;
     });
     if (pushed > 0) {
       try { localStorage.setItem('yt_sheet_synced', JSON.stringify(ledger)); } catch (e) {}
       pokeSnapshotNow_(); // シート反映後に即スナップ=次の巡回を待たず当日中にベースラインを作る
-      // スナップが載る頃合いでデルタを再取得＝リロードせず同一セッションで「記録待ち」を解消する。
+      // スナップが載る頃合いでデルタを再取得＝リロードせず同一セッションで「記録待ち」「クリック⚠」を解消する。
       setTimeout(function () { try { fetchDeltas_(true); } catch (e) {} }, 8000);
     }
   }
@@ -796,12 +837,13 @@
         var ytCur = ymap[k] || it.ytUrl || '';
         var bskyCur = it.shareUrl || it.shortUrl || it.postUrl || ''; // 短い計測URL(da.gd)を優先表示
         var workCur = it.workUrl || '';
+        var workShortCur = it.workShareUrl || it.workShortUrl || ''; // 作品クリック計測URL(導線2)の現値
         var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
         _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
-        openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState) {
+        openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
           closeModal_();
-          saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState);
-        });
+          saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal);
+        }, workShortCur);
         addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
         addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
         addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
@@ -1307,7 +1349,7 @@
       }
     } catch (e) {}
     _curSrcUrl = ''; // 新規追加：生成元はveditBskyの入力値を使う
-    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState) {
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -1323,6 +1365,7 @@
       if (workState && workState !== '旧作') entry.workState = workState; else entry.workState = '旧作';
       if (_pendingShort) { entry.shortUrl = _pendingShort; delete entry.postUrl; } // 計測キー(r2)
       if (_pendingShare) entry.shareUrl = _pendingShare; // 表示用(da.gd)
+      applyWorkShort_(entry, workShortVal); // 作品クリック計測URL(導線2)
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       pokeSnapshotNow_(); // 手動追加でもYT URL紐付け当日に日別記録のベースラインを作る(④)
