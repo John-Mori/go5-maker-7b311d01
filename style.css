@@ -942,3 +942,6 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 .llk-table .llk-clicks{text-align:right;}
 /* ズームモーダル: 画像の上の用途見出し(動画生成で使用した画像 / Bluesky投稿用画像 / 動画生成/Bluesky投稿) */
 .fz-zoom-cap{position:absolute;top:14px;left:50%;transform:translateX(-50%);max-width:88%;color:#fff;font-size:14px;font-weight:700;background:rgba(0,0,0,.55);padding:6px 14px;border-radius:999px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:2;}
+
+/* 導線2(作品リンク)のクリックマーク=赤いカーソル(2026-07-14 Chami指定) */
+.emico-red { filter: brightness(0) saturate(100%) invert(40%) sepia(51%) saturate(2878%) hue-rotate(322deg) brightness(97%) contrast(93%); }
