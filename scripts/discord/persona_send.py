@@ -129,7 +129,12 @@ def main():
                 c = int(color.lstrip("#"), 16)
             except ValueError:
                 c = COLORS["blue"]
-        emb = {"description": body[:3900], "color": c}
+        # 太字デフォルト(Chami指定2026-07-13: Embed本文は小さいので太字で補う)。--nobold で無効化。
+        desc = body[:3900]
+        if "--nobold" not in sys.argv:
+            desc = "\n".join(
+                (f"**{ln}**" if ln.strip() and "**" not in ln else ln) for ln in desc.splitlines())
+        emb = {"description": desc[:4000], "color": c}
         if etitle:
             emb["title"] = etitle[:250]
         payload["embeds"] = [emb]
