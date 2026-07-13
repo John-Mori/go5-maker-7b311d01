@@ -467,6 +467,16 @@
     }).catch(function () { save(r.link); });
   }
   function recomposePcText_() { if (els.pcText) els.pcText.value = composePostText(); }
+  // 割引リンクの用意をPromise化(2026-07-13): 動画生成→投稿モーダルを「完成形」で開くための待ち合わせ。
+  //   取得に失敗しても投稿は止めない(4秒で諦めてそのまま進む)。
+  function ensureDiscountReadyP_() {
+    return new Promise(function (res) {
+      if (!discountListOn_() || cachedDiscountLink_()) return res();
+      var done = false;
+      var t = setTimeout(function () { if (!done) { done = true; res(); } }, 4000);
+      ensureDiscountLink_(function () { if (!done) { done = true; clearTimeout(t); res(); } });
+    });
+  }
   // 投稿タブ／投稿確認モーダル、どちらのチェックボックスからでも同じ状態を共有・操作できるように配線。
   function wireDiscountListToggle_(id, statusSetter, onChanged) {
     var el = document.getElementById(id);
@@ -1711,7 +1721,15 @@
     var composed = composePostText();
     if (!composed.trim()) { setBskyStatus('投稿本文が空です（「🦋 投稿」タブで入力）。'); return; }
     var alt = (ev && ev.detail && ev.detail.title) ? String(ev.detail.title) : (composed.split('\n')[0] || '');
-    confirmEditable(composed, null).then(function (edited) {
+    // ★2026-07-13 Chami指定: モーダルを「完成形」で開く——①割引行を確定 ②アフィリンクを計測付き短縮に変換してから表示。
+    //   (従来は生リンクで表示し投稿直前に短縮していた。ユーザーがモーダルで見る文=実際に投稿される文、に揃える)
+    ensureDiscountReadyP_().then(function () {
+      composed = composePostText(); // 割引リンク確定後に再構成
+      return measureWorkLink_(composed);
+    }).then(function (pre) {
+      return { text: pre.text };
+    }).catch(function () { return { text: composed }; }).then(function (prep) {
+    confirmEditable(prep.text, null).then(function (edited) {
       if (edited == null) { setBskyStatus('自動投稿をキャンセルしました。'); return; }
       if (!edited.trim()) { setBskyStatus('本文が空のため中止しました。'); return; }
       // 導線2: 本文中の作品リンクを計測付き短縮へ置換してから投稿/予約する
@@ -1753,6 +1771,7 @@
         .catch(function (e) { setBskyStatus('⚠️ 投稿に失敗しました：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); });
       }); // measureWorkLink_
     });
+    }); // 完成形プリペア(割引確定+短縮)のthen
   }
   document.addEventListener('video-created', handleVideoCreated);
   // 自動投稿のON/OFFに関わらず、発番された安定動画IDは常に保持（投稿記録の背骨キー）。
