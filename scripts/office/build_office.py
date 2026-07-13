@@ -107,13 +107,16 @@ def main():
             bubble_cls = "queue"
         else:
             import random
-            idles = [(m["n"], m["idle"]) for m in r["members"] if m.get("idle")]
-            # 演出は「稀に」(Chami指定): 3割の確率でメンバー1人の待機演出、普段は素の待機
-            if idles and random.random() < 0.3:
-                who, act = random.choice(idles)
-                bubble = f"🍵 {who}: {act} ※演出"
+            # 待機はメンバーごとに個別表示(Chami指定2026-07-14: ※演出タグ不要・
+            # 「三笘:自主トレ中/芽衣:待機中」のように分けないと片方の演出が部屋全体に見える)
+            if any(m.get("idle") for m in r["members"]):
+                lines = []
+                for m in r["members"]:
+                    act = random.choice(m["idle"].split(" / ")) if m.get("idle") else "待機中"
+                    lines.append(f"{m['n']}: {act}")
+                bubble = "🍵 " + "<br>".join(html.escape(x) for x in lines)
             elif r["idle"]:
-                bubble = "🍵 " + r["idle"][0] + " ※演出"
+                bubble = "🍵 " + html.escape(r["idle"][0])
             else:
                 bubble = "🍵 待機中"
             bubble_cls = "idle"
