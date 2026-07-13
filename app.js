@@ -477,6 +477,17 @@
   async function make() {
     if (!fgImg) { setStatus("先に写真を選んでください。"); return; }
     if (!window.MediaRecorder) { setStatus("この端末は動画書き出しに未対応です。(iOS15以降のSafari推奨)"); return; }
+    // 狙い・コメント型は生成前の必須選択＝未設定のまま投稿されると分析を汚すため入口で止める。(Chami指定2026-07-14)
+    const goalSel = document.getElementById("movieGoal"), cmtSel = document.getElementById("movieCmtType");
+    const missSel = [];
+    if (goalSel && !goalSel.value) missSel.push("狙い");
+    if (cmtSel && !cmtSel.value) missSel.push("コメント型");
+    if (missSel.length) {
+      setStatus("⚠ " + missSel.join("と") + "が未選択です。選択してから動画を作成してください。(生成前の必須項目)");
+      const tgt = (goalSel && !goalSel.value) ? goalSel : cmtSel;
+      try { tgt.scrollIntoView({ behavior: "smooth", block: "center" }); tgt.focus(); } catch (e) {}
+      return;
+    }
     await ensureFont();
     els.makeBtn.disabled = true;
     els.resultArea.hidden = true;

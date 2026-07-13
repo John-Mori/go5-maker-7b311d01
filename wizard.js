@@ -195,8 +195,10 @@
     W = { account: '', workUrl: '', affLink: '', cid: '', videoId: '', title: '', postUrl: '', postUri: '', shortUrl: '', ytUrl: '', ytId: '', fanzaInfo: null };
     _currentStep = 1;
 
-    /* カテゴリチェックも前回分を引き継がずリセット(作品URL入力後のFANZA取得が該当ジャンルへ自動チェックする) */
-    if (window.Go5MovieAttrs) window.Go5MovieAttrs.reset();
+    /* カテゴリ+狙い+コメント型+リビルド+2行モードを前回分から引き継がずリセット。
+       (カテゴリは作品URL入力後のFANZA取得が該当ジャンルへ自動チェックする) */
+    if (window.Go5NewMovieReset) window.Go5NewMovieReset();
+    else if (window.Go5MovieAttrs) window.Go5MovieAttrs.reset();
 
     showOverlay();
     renderStep(1);

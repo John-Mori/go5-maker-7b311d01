@@ -153,6 +153,23 @@
     reset: function () { save('movie_auto_attrs_cid', ''); MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); if (el) el.checked = false; }); },
     applyGenres: function (genres, cid) { if (cid) save('movie_auto_attrs_cid', String(cid)); setMovieAttrsFromGenres(genres || []); }
   }; } catch (e) {}
+  // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
+  // 前回の選択・チェックを引き継がない。狙い・コメント型は生成前の必須選択なので未設定へ戻す。(Chami指定2026-07-14)
+  try { window.Go5NewMovieReset = function () {
+    if (window.Go5MovieAttrs) window.Go5MovieAttrs.reset();
+    var g = $('movieGoal'); if (g) g.value = '';
+    var ct = $('movieCmtType'); if (ct) ct.value = '';
+    try { localStorage.removeItem('field_movieGoal'); localStorage.removeItem('field_movieCmtType'); } catch (e) {}
+    var rb = $('movieRebuild');
+    if (rb && rb.checked) { rb.checked = false; try { rb.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
+    var rbRow = $('movieRebuildTargetRow'), rbSel = $('movieRebuildTarget');
+    if (rbSel) rbSel.value = ''; if (rbRow) rbRow.hidden = true;
+    // 2行モード(コメント/作者)もOFFへ。change発火で保存値・行数・プレビューまで通常経路で同期させる。
+    ['topTwoLine', 'authorTwoLine'].forEach(function (id) {
+      var el = $(id);
+      if (el && el.checked) { el.checked = false; try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
+    });
+  }; } catch (e) {}
   // 投稿時の作品状態を判定：新作(discountNew2) > 準新作(movieJunshinsaku) > 旧作。(どちらも無し)
   function readWorkState() {
     var shin = $('discountNew2') && $('discountNew2').checked;

@@ -1024,12 +1024,11 @@
     }
     setVal('author', it.author || '');   // 作者＝サークル名
     setVal('top', comment || '');         // コメント(＝YouTube題名の素。無ければ空で上書き＝前作の題名を残さない)
-    // カテゴリチェックは前作分を引き継がずリセット→候補が持つジャンルで即時自動チェック。
-    // (ジャンル未取得の候補はリセットのみ＝作品URL経由のFANZA取得が後から自動チェックする)
-    if (window.Go5MovieAttrs) {
-      window.Go5MovieAttrs.reset();
-      if (it.genres && it.genres.length) window.Go5MovieAttrs.applyGenres(it.genres, it.cid || '');
-    }
+    // 新規作成の初期化: カテゴリ+狙い+コメント型+リビルド+2行モードを前作から引き継がずリセット。
+    // カテゴリは候補が持つジャンルで即時自動チェック。(ジャンル未取得ならFANZA取得が後から自動チェックする)
+    if (window.Go5NewMovieReset) window.Go5NewMovieReset();
+    else if (window.Go5MovieAttrs) window.Go5MovieAttrs.reset();
+    if (window.Go5MovieAttrs && it.genres && it.genres.length) window.Go5MovieAttrs.applyGenres(it.genres, it.cid || '');
     if (workUrl) setVal('movieWorkUrl', workUrl); // 作品URL(正規化済み)
     if (imgDataUrl && window.Go5SetForegroundFile) {
       fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
