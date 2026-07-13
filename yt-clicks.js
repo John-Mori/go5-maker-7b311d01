@@ -571,7 +571,34 @@
     if (ytUrl) pokeSnapshotNow_();   // YT URLを紐付けた日は即スナップ=日別記録のベースラインを当日中に作る(④)
     // 非r2リンクを入れた保存でも自動で計測キーを確定させる(冪等短縮=同URLなら既存コード+累積クリックを引き継ぐ)
     if (saved) autoMeasureItem_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
+    // 作品クリック計測URL(導線2)も、手入力がr2でなければ自動で計測キー(r2)へ確定させる。
+    //   これをしないと codeOf() がコードを取れず、ピンクの矢印(作品クリック数)が表示されない。(Chami報告2026-07-14)
+    if (saved) autoMeasureWorkShort_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
     refresh();
+  }
+  // 作品クリック計測URL(導線2)の自動確定。手入力が r2 でない(作品ページURL/アフィリンク/da.gd等)場合、
+  //   アフィリンク化→r2短縮して workShortUrl を計測可能なキーに整える。既に r2 なら何もしない(冪等)。
+  function autoMeasureWorkShort_(it, persist) {
+    try {
+      var go5 = window.Go5Short || {}; var w = (go5.WORKER_URL || '').replace(/\/+$/, '');
+      function isR2(u) { return !!u && u.indexOf(w + '/') === 0; }
+      var cur = (it && it.workShortUrl) || '';
+      if (!it || !w || typeof window.Go5MakeShort !== 'function') return;
+      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 値なし/既にr2＝そのまま
+      var toShorten = cur;
+      // FANZA/DMMの作品ページURL(al.fanza等のアフィリンクではない)なら、先にアフィリンク化する。
+      if (window.buildAffiliateLink && /(^|\.)dmm\.co\.jp|(^|\.)dlsite|fanza/.test(cur) && !/al\.(fanza|dmm)/.test(cur)) {
+        var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+        var aff = window.buildAffiliateLink(cur, afId);
+        if (aff && aff.ok && aff.link) toShorten = aff.link;
+      }
+      window.Go5MakeShort(toShorten).then(function (res) {
+        if (!(res && res.shortUrl && isR2(res.shortUrl))) return;
+        it.workShortUrl = res.shortUrl; it.workShareUrl = res.shareUrl || res.shortUrl;
+        if (typeof persist === 'function') persist();
+        refresh(); // 作品クリック(ピンク矢印)がこの再描画で出るようになる
+      });
+    } catch (e) {}
   }
 
   // 履歴アイテム1件をスプレッドシート(GAS)へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
@@ -736,8 +763,8 @@
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日のみ">' + (vid ? (fmtDelta_(deltaCache[vid], it.ts) || '<span style="opacity:.55;" title="30分毎のサーバースナップ後に数値が出ます">⏳記録待ち(最大30分)</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
-            (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルドで作成</button>' : '') +
-            '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルドを取消' : '🔁 被リビルドにする') + '</button>' +
+            (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
+            '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' +
           '</div>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
