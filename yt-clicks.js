@@ -31,16 +31,15 @@
     { key: 'ol', label: 'OL' },
     { key: 'soshu', label: '総集編' }
   ];
-  var COMMON_TAGS = ['#マンガ紹介', '#漫画', '#アニメ', '#anime'];
-  // 題名表示から定型投稿タグを除去。トークン単位の正版(Go5Util.stripPostTags)へ委譲＝
-  //   '#anime' が '#animeedit' を割って 'edit' が残る旧バグを解消。COMMON_TAGS は下の #タグ忘れ判定でのみ使用。
+  // 題名表示のタグ省略(2026-07-13・Chami指定): タグ構成は今後も変わるため固定リスト方式を廃止し、
+  //   「最初の#以降を丸ごと省略」に統一。#が一個も無い題名だけ「タグ忘れあり」を表示する。
   function stripCommonTags(t) {
-    if (typeof Go5Util !== 'undefined' && Go5Util.stripPostTags) return Go5Util.stripPostTags(t);
     var r = String(t || '');
-    COMMON_TAGS.forEach(function (tag) { r = r.split(tag).join(''); });
-    return r.replace(/\s+/g, ' ').trim();
+    var i = r.indexOf('#');
+    if (i < 0) return r.trim();
+    return (r.slice(0, i).trim() || r.trim()); // #開始の題名は全消えを避けて原文のまま
   }
-  function missingCommonTags(t) { return COMMON_TAGS.some(function (tag) { return String(t || '').indexOf(tag) < 0; }); }
+  function missingCommonTags(t) { return String(t || '').indexOf('#') < 0; }
   function histKey() { return 'short_hist__' + acct(); }
   function manualKey() { return 'verify_manual__' + acct(); }
   function ytMapKey() { return 'verify_yt__' + acct(); }
@@ -602,7 +601,7 @@
       var dispTitle = esc(stripCommonTags(rawTitle));
       var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
       var titleHtml = tagWarn
-        ? '<span style="color:#dc465a;font-weight:700;">' + dispTitle + ' #タグ忘れ</span>'
+        ? '<span style="color:#dc465a;font-weight:700;">' + dispTitle + ' ⚠タグ忘れあり</span>'
         : dispTitle;
       var bskyHref = it.shareUrl || it.shortUrl || it.postUrl || ''; // 表示リンクは共有(da.gd)優先。計測は下のcode(=r2)で行う
       // 属性バッジ（作品名の下に改行して表示。作品状態は価格行の左に別途表示）
