@@ -27,7 +27,7 @@ ROSTER = [
     {"dept": "司令塔", "label": "司令塔・研究室", "color": "#f5e6c8",
      "members": [{"n": "アメス", "c": "#e58bb5"}, {"n": "シャビ・アロンソ", "c": "#FFFFFF"}], "idle": ["次の相談待ち"]},
     {"dept": "system-engineer", "label": "改修部", "color": "#cfe3f5",
-     "members": [{"n": "デブライネ", "c": "#98C2E5"}, {"n": "花海咲季", "c": "#f2a9c4"}], "idle": []},
+     "members": [{"n": "デブライネ", "c": "#98C2E5"}, {"n": "花海咲季", "c": "#BA7278"}], "idle": []},
     {"dept": "product-scout", "label": "商品選定部", "color": "#e8d9f2",
      "members": [{"n": "十王星南", "c": "#b98be0"}, {"n": "クラウディア", "c": "#e0c06e"}], "idle": []},
     {"dept": "copy-director", "label": "コピー部", "color": "#d9f2df",

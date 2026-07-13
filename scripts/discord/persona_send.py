@@ -114,6 +114,20 @@ def main():
     if not avatar and os.path.exists(AVATARS_FILE):
         with open(AVATARS_FILE, "r", encoding="utf-8") as f:
             avatar = json.load(f).get(persona)
+        if isinstance(avatar, list) and avatar:
+            # ランダムアバター(咲季方式・Chami指定2026-07-13): 毎回ランダム・ただし2回連続同じ画像は禁止
+            import random
+            last_p = os.path.join(LOCAL, "persona_avatar_last.json")
+            last = {}
+            try:
+                last = json.load(open(last_p, encoding="utf-8"))
+            except Exception:
+                pass
+            cands = [u for u in avatar if u != last.get(persona)] or avatar
+            avatar = random.choice(cands)
+            last[persona] = avatar
+            with open(last_p, "w", encoding="utf-8") as f:
+                json.dump(last, f, ensure_ascii=False, indent=1)
     hook_url = ensure_webhook(str(ch["id"]), token)
     payload = {"username": persona[:80]}
     if color == "auto":
