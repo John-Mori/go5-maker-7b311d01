@@ -141,8 +141,14 @@ def main():
             # llm-growth(ローカルqwenの部屋)は専用受付箱へ=ローカルLLMが常時応対(Claude稼働中でも)。
             # ただし名前呼び(アメス/アロンソ等)を含む発言はClaude側へ配達=呼べば本人が出てくる(Chami指定2026-07-13)
             CALL_WORDS = ("アメス", "アロンソ", "監督", "司令塔", "Claude", "claude")
+            QWEN_WORDS = ("ローカル", "qwen", "Qwen")
             def _is_llm(r):
-                return r.get("dept") == "llm-growth" and not any(w in (r.get("content") or "") for w in CALL_WORDS)
+                c = r.get("content") or ""
+                if r.get("dept") == "llm-growth":
+                    return not any(w in c for w in CALL_WORDS)  # 彼女の部屋: 名前呼び以外は彼女
+                if r.get("dept") == "imagegen":
+                    return any(w in c for w in QWEN_WORDS)      # 画像生成室: 逆に呼ばれた時だけ彼女
+                return False
             llm_out = [r for r in out if _is_llm(r)]
             main_out = [r for r in out if not _is_llm(r)]
             if main_out:
