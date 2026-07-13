@@ -40,7 +40,7 @@ var FANZA_HEADERS = [
 // カテゴリ＝作品属性を名前で明記（キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄）。
 // ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する（consolidate_title で既存分も移行・列削除）。
-var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数', '目的', 'コメント型'];
+var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数', '目的', 'コメント型', 'YT補正累計'];
 // 作品属性の定義（順序＝カテゴリ列での並び）。フラグ名→表示名。
 var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
@@ -74,7 +74,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン（中身を変えたら上げる）。<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-12C（デルタを列単位基準に修正=クリック等の後発計測列も0起点で数値化・⚠は真の欠損のみ）';
+var GAS_VERSION = '2026-07-13B（YT補正累計列の挿入がreorderの範囲外エラーで失敗していたのを修正=canonical末尾の新列は末尾追加）';
 
 // 統一列順の正(2026-07-12・⑥)。両chシートの列の左右順をこの並びに固定する(?action=reorder_headers / admin_setupが適用)。
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -931,6 +931,37 @@ function snapshotStats() {
     }
   });
   pruneStats_(sh, 12);
+  // CH書き戻し(2026-07-13A・Chami依頼): 累計再生/クリックを投稿記録シートの列にも反映し、
+  //   YouTubeの下方補正(前回スナップより累計が減った分)は「YT補正累計」列へ累積する。
+  //   デルタ(昨日/週)は従来通り実測(マイナスあり得る)＝真の視聴増はこの列の増分を引けば分離できる。
+  try {
+    var corrByVid = {};
+    recs.forEach(function (r0) {
+      var v0 = views[r0.vid], p0 = prevByVid[r0.vid];
+      if (v0 != null && p0 && p0.views != null && v0 < p0.views) corrByVid[r0.vid] = p0.views - v0;
+    });
+    CH_SHEETS.forEach(function (name3) {
+      var ss3 = openSS_(); var sh3 = ss3.getSheetByName(name3); if (!sh3) return;
+      var map3 = headerMap_(sh3); var l3 = sh3.getLastRow(); if (l3 < 2) return;
+      var ytc3 = map3['YouTube動画URL']; if (!ytc3) return;
+      var vc3 = map3['視聴回数'], cc3 = map3[clickColName_(map3)], sc3 = map3['短縮URL'], corrc3 = map3['YT補正累計'];
+      var vals3 = sh3.getRange(2, 1, l3 - 1, sh3.getLastColumn()).getValues();
+      for (var r3 = 0; r3 < vals3.length; r3++) {
+        var vid3 = ytIdFromUrl_(vals3[r3][ytc3 - 1]); if (!vid3) continue;
+        var rowN3 = r3 + 2;
+        var v3 = views[vid3];
+        if (vc3 && v3 != null && Number(vals3[r3][vc3 - 1]) !== v3) sh3.getRange(rowN3, vc3).setValue(v3);
+        var code3 = sc3 ? codeFromShort_(vals3[r3][sc3 - 1]) : '';
+        var c3 = code3 ? clickByCode[code3] : null;
+        if (cc3 && c3 != null && Number(vals3[r3][cc3 - 1]) !== c3) sh3.getRange(rowN3, cc3).setValue(c3);
+        var corr3 = corrByVid[vid3];
+        if (corrc3 && corr3 > 0) {
+          var cur3 = Number(vals3[r3][corrc3 - 1] || 0);
+          sh3.getRange(rowN3, corrc3).setValue(cur3 + corr3);
+        }
+      }
+    });
+  } catch (e) {}
   // ⑤時点記録: 投稿からの経過バケット(30分〜72h)を跨いだ最初のスナップで再生数/クリック数を確定記録。
   try { captureTimepoints_(tpRecs, views, clickByCode, nowStr, tz); } catch (e) {}
 }
@@ -1092,7 +1123,12 @@ function reorderHeaders_() {
       var lastCol = sh.getLastColumn();
       var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h); });
       var cur = headers.indexOf(CANONICAL_HEADERS[target]);
-      if (cur === -1) { sh.insertColumnBefore(target + 1); sh.getRange(1, target + 1).setValue(CANONICAL_HEADERS[target]); inserted++; continue; }
+      if (cur === -1) {
+        // 挿入位置が現在の列数を超える(=canonical末尾に新列を足した)場合はinsertColumnBeforeが範囲外エラーに
+        // なるため末尾追加に切り替える(2026-07-13B: YT補正累計の追加で発覚)。
+        if (target + 1 <= lastCol) sh.insertColumnBefore(target + 1); else sh.insertColumnAfter(lastCol);
+        sh.getRange(1, target + 1).setValue(CANONICAL_HEADERS[target]); inserted++; continue;
+      }
       if (cur === target) continue;
       sh.moveColumns(sh.getRange(1, cur + 1, sh.getMaxRows(), 1), target + 1); // 左方向への移動のみ発生(cur>target)
       moved++;
