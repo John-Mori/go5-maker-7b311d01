@@ -1618,6 +1618,14 @@
             // 迷子キーから回収できた場合は掃除（現行キーと同一なら生きているので消さない）
             if (strayKey && strayKey !== curKey && m[strayKey]) delete m[strayKey];
           }
+          // ★計測コード(r2短縮URL)もシートから端末へ書き戻す(2026-07-13)：
+          //   サーバー側backfillで直した行が端末に届かず「累計🖱が–のまま」になる問題の根治。
+          //   端末側が空/非r2で、シート側がr2の時だけ採用（手動編集や既存r2は上書きしない）。
+          var sheetShort = String(it.shortUrl || '');
+          if (/workers\.dev\//.test(sheetShort) && !/workers\.dev\//.test(String(loc.shortUrl || ''))) {
+            loc.shortUrl = sheetShort;
+            if (loc.manual) manDirty = true; else histDirty = true; did = true;
+          }
         }
         if (did) restored++;
       });
