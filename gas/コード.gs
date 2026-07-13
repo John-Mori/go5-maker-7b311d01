@@ -40,7 +40,7 @@ var FANZA_HEADERS = [
 // カテゴリ＝作品属性を名前で明記。(キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄)
 // ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する。(consolidate_title で既存分も移行・列削除)
-var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数', '目的', 'コメント型', 'YT補正累計'];
+var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数', '目的', 'コメント型', 'YT補正累計', '作品短縮URL'];
 // 作品属性の定義。(順序＝カテゴリ列での並び)フラグ名→表示名。
 var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-14B(カテゴリにハーレム追加=ATTR_DEFS+受け渡し3箇所)';
+var GAS_VERSION = '2026-07-14C(ハーレム追加+導線2作品クリックの日次スナップ=作品短縮URL列/作品クリック数列/twc-ywc-wwcデルタ)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -414,6 +414,7 @@ function doPost(e) {
       goal: body.goal || '', cmtType: body.cmtType || '', // 狙い(成約/集客)・コメント型(①〜⑧)＝勝ちパターン集計用
       shareUrl: body.shareUrl || '',       // da.gd共有URL(共有URL列)
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから(同IDの行へ後追いupsert)
+      workShortUrl: body.work_short_url || '', // 導線2(作品クリック)の計測URL
       chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, harem: body.harem, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性(複数可)
       workState: body.workState,           // 作品状態(新作/準新作/旧作)
       rebuild: body.rebuild,               // この動画自体が作り直し版(動画作成タブのリビルド)
@@ -550,6 +551,7 @@ function writeRecord_(channel, f) {
   putIf('題名(コメント)', f.ytTitle || f.title || '');         // YouTube題名を優先して題名(コメント)へ集約
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
   putIf('短縮URL', shortUrl);                                   // r2＝計測用(codeFromShort_対象・r2以外は入れない)
+  putIf('作品短縮URL', f.workShortUrl || '');                    // 導線2(作品クリック)の計測URL=作品クリック数の日次スナップ元
   putIf('共有URL', f.shareUrl || fbShare || '');                // da.gd＝実際に概要欄へ貼る短いURL(GAS代替はこちらへ)
   putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
@@ -601,7 +603,7 @@ function syncHistory_(channel, items) {
       writeRecord_(channel, {
         videoId: it.videoId, title: it.title || '', postUrl: it.postUrl || '',
         workUrl: it.workUrl || '', postUri: it.postUri || '', shortUrl: it.shortUrl || '', shareUrl: it.shareUrl || '',
-        youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '',
+        youtubeUrl: it.youtubeUrl || '', ytTitle: it.ytTitle || '', workShortUrl: it.workShortUrl || '',
         views: it.views, clicks: it.clicks,
         chara: it.chara, jk: it.jk, gyaru: it.gyaru, isekai: it.isekai, harem: it.harem, ai: it.ai, ol: it.ol, soshu: it.soshu, // カテゴリ属性(複数可)
         workState: it.workState,           // 作品状態(新作/準新作/旧作)
@@ -788,7 +790,7 @@ function refreshEngagement() {
 //   ※再生数取得には Script Property `YT_API_KEY`(アプリ⚙のYouTube APIキーと同値)が必要。
 // ============================================================
 var STATS_SHEET = '視聴履歴';
-var STATS_HEADERS = ['記録日時', '日付', 'channel', 'post_id', 'videoId', '再生数', '短縮URLクリック数'];
+var STATS_HEADERS = ['記録日時', '日付', 'channel', 'post_id', 'videoId', '再生数', '短縮URLクリック数', '作品クリック数'];
 function statsSheet_() {
   var ss = openSS_();
   var sh = ss.getSheetByName(STATS_SHEET) || ss.insertSheet(STATS_SHEET);
@@ -841,18 +843,19 @@ function snapshotStats() {
   CH_SHEETS.forEach(function (name) {
     var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
     var map = headerMap_(sh); var last = sh.getLastRow(); if (last < 2) return;
-    var pidc = map['post_id'], ytc = map['YouTube動画URL'], sc = map['短縮URL'], dc = map['投稿日時'];
+    var pidc = map['post_id'], ytc = map['YouTube動画URL'], sc = map['短縮URL'], dc = map['投稿日時'], wsc = map['作品短縮URL'];
     var chKey = (name === '宵桜艶帖') ? 'acc2' : 'acc1';
     var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     vals.forEach(function (row) {
       var vid = ytc ? ytIdFromUrl_(row[ytc - 1]) : '';
       var code = sc ? codeFromShort_(row[sc - 1]) : '';
+      var wcode = wsc ? codeFromShort_(row[wsc - 1]) : ''; // 導線2(作品クリック)の計測コード
       // 時点記録(⑤)用: vidが無くてもクリックだけ記録できるよう、YT未連携行も対象に含める。
       var pd = dc ? row[dc - 1] : '';
       var pms = pd instanceof Date ? pd.getTime() : (pd ? (new Date(String(pd).replace(/-/g, '/'))).getTime() : 0);
       if ((vid || code) && pms) tpRecs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code, postedAtMs: pms });
       if (!vid) return;
-      recs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code });
+      recs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code, wcode: wcode });
     });
   });
   if (!recs.length && !tpRecs.length) return;
@@ -866,7 +869,11 @@ function snapshotStats() {
   var vids = recs.map(function (r) { return r.vid; });
   var views = ytViews_(vids);
   var clickByCode = {};
-  recs.concat(tpRecs).forEach(function (r) { if (r.code && clickByCode[r.code] === undefined) { clickByCode[r.code] = workerClicks_(r.code); Utilities.sleep(80); } });
+  // 導線1(短縮URL)＋導線2(作品短縮URL)の両コードのクリックをまとめて取得。(同一コードは1回)
+  recs.concat(tpRecs).forEach(function (r) {
+    if (r.code && clickByCode[r.code] === undefined) { clickByCode[r.code] = workerClicks_(r.code); Utilities.sleep(80); }
+    if (r.wcode && clickByCode[r.wcode] === undefined) { clickByCode[r.wcode] = workerClicks_(r.wcode); Utilities.sleep(80); }
+  });
   var sh = statsSheet_(); var last = sh.getLastRow();
   var data = last >= 2 ? sh.getRange(2, 1, last - 1, STATS_HEADERS.length).getValues() : [];
   // ★日付列はSheetが 'yyyy-MM-dd' 文字列を Date に自動変換して返すことがある。キーは必ず
@@ -900,14 +907,16 @@ function snapshotStats() {
   var appends = [];
   recs.forEach(function (r) {
     var v = views[r.vid]; var c = r.code ? clickByCode[r.code] : null;
-    if (v == null && c == null) return;
+    var wc = r.wcode ? clickByCode[r.wcode] : null; // 導線2(作品クリック)
+    if (v == null && c == null && wc == null) return;
     var key = today + '|' + r.vid, rowN = idx[key];
     if (rowN && rowN > 0) {
       sh.getRange(rowN, 1).setValue(nowStr);
       if (v != null) sh.getRange(rowN, 6).setValue(v);
       if (c != null) sh.getRange(rowN, 7).setValue(c);
+      if (wc != null) sh.getRange(rowN, 8).setValue(wc); // 作品クリック数列
     } else {
-      appends.push([nowStr, today, r.channel, r.post_id, r.vid, v == null ? '' : v, c == null ? '' : c]);
+      appends.push([nowStr, today, r.channel, r.post_id, r.vid, v == null ? '' : v, c == null ? '' : c, wc == null ? '' : wc]);
       idx[key] = -1;
     }
     // 最大瞬間風速：前回スナップからの伸び率。(件/時)妥当な間隔(0.2〜6h)のみ採用。
@@ -994,7 +1003,7 @@ function computeDeltas_() {
   var byVid = {};
   data.forEach(function (row) {
     var date = ymd_(row[1], tz), vid = row[4]; if (!vid || !date) return; // ★日付は文字列キーに正規化
-    (byVid[vid] || (byVid[vid] = {}))[date] = { v: row[5] === '' ? null : Number(row[5]), c: row[6] === '' ? null : Number(row[6]) };
+    (byVid[vid] || (byVid[vid] = {}))[date] = { v: row[5] === '' ? null : Number(row[5]), c: row[6] === '' ? null : Number(row[6]), w: (row[7] === '' || row[7] == null) ? null : Number(row[7]) };
   });
   // 投稿日(vid別・最古)を記録シートから取得。ベースライン不在時の「0起点」判定に使う(Chami仕様2026-07-12):
   //   ・今日/昨日=その暦日の増分(投稿日に関係なく) ・週=直近7日間の合計
@@ -1046,8 +1055,9 @@ function computeDeltas_() {
       }
       return { t: cur - bT, y: y, w: cur - bW };
     }
-    var V = calc('v'), C = calc('c');
-    out[vid] = { tv: V.t, yv: V.y, wv: V.w, tc: C.t, yc: C.y, wc: C.w };
+    var V = calc('v'), C = calc('c'), W = calc('w');
+    // twc/ywc/wwc = 導線2(作品クリック=ピンク矢印)の今日/昨日/週デルタ。(Chami依頼2026-07-14)
+    out[vid] = { tv: V.t, yv: V.y, wv: V.w, tc: C.t, yc: C.y, wc: C.w, twc: W.t, ywc: W.y, wwc: W.w };
   });
   return out;
 }
