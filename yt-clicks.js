@@ -553,11 +553,43 @@
       postUri: it.postUri || '',
       workUrl: it.workUrl || '',
       shortUrl: it.shortUrl || '',
-      shareUrl: it.shareUrl || ''
+      shareUrl: it.shareUrl || '',
+      youtube_url: it.ytUrl || ''    // ★YouTube動画URL列へ反映=サーバーがvidを認識→日別記録(デルタ)開始。
+                                     //   これが空だとシートにvidが無く、スナップされず「記録待ち」が永久固定になる(根治)
     };
     ATTR_DEFS.forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
     payload.workState = it.workState || '旧作'; // 作品状態列
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
+  }
+
+  // 自己修復: 端末にYT URLがあるのにシートのYouTube動画URL列へ未反映＝サーバーがvidを知らず
+  //   「記録待ち」が永久固定になる旧投稿を、YT URLをシートへ後追いupsertして治す(pushItemToGas_が
+  //   youtube_urlを送るようになった後の遡及対応)。videoId毎に同一URLは1度だけ送る(localStorage台帳)。
+  function reconcileYtToSheet_() {
+    var gasUrl = '';
+    try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
+    if (!gasUrl) return;
+    var ledger = {};
+    try { ledger = JSON.parse(localStorage.getItem('yt_sheet_synced') || '{}') || {}; } catch (e) { ledger = {}; }
+    var ymap = loadYtMap();
+    var pushed = 0;
+    allItems().forEach(function (it) {
+      var k = itemKey(it);
+      var yt = ymap[k] || it.ytUrl || '';
+      if (!yt || !it.videoId) return;
+      if (ledger[it.videoId] === yt) return;      // 同一URLは送信済み=再送しない
+      if (pushed >= 12) return;                    // 1回のreconcileで送る上限=大量アイテム時のGAS負荷を抑える
+      var toSend = it.ytUrl ? it : (function () { var c = {}; for (var p in it) c[p] = it[p]; c.ytUrl = yt; return c; })();
+      pushItemToGas_(toSend);
+      ledger[it.videoId] = yt;
+      pushed++;
+    });
+    if (pushed > 0) {
+      try { localStorage.setItem('yt_sheet_synced', JSON.stringify(ledger)); } catch (e) {}
+      pokeSnapshotNow_(); // シート反映後に即スナップ=次の巡回を待たず当日中にベースラインを作る
+      // スナップが載る頃合いでデルタを再取得＝リロードせず同一セッションで「記録待ち」を解消する。
+      setTimeout(function () { try { fetchDeltas_(true); } catch (e) {} }, 8000);
+    }
   }
 
   // ── render ──────────────────────────────────────────────────────────────
@@ -1379,6 +1411,7 @@
     try { flushSheetMovePending_(); } catch (e) {} // 前回失敗したシート行移動を自動再送(T2)
     try { ensureIds(); } catch (e) {} // IDが無いアイテムへ背骨IDを付与(履歴=スプレッドシートの正キー)
     try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続(冪等)
+    try { reconcileYtToSheet_(); } catch (e) {} // 端末のYT URLをシートへ後追い反映=「記録待ち」永久固定の自己修復(冪等・台帳ガード)
     render();
     // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ。(postUriアイテムのDID確定分＝混入投稿を自動帰還)冪等。
     (function () {
