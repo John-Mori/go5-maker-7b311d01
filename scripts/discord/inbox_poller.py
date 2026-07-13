@@ -32,7 +32,7 @@ TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")
 CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
 STATE_FILE = os.path.join(LOCAL, "discord_inbox_state.json")
 INBOX_FILE = os.path.join(LOCAL, "discord_inbox.jsonl")
-POLL_SEC = 45
+POLL_SEC = 15
 API = "https://discord.com/api/v10"
 
 
