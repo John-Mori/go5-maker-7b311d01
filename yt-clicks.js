@@ -677,7 +677,7 @@
           '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
           '<span title="Bsky投稿クリック数(YT→投稿・導線1)' + (it.rebuildBaseClicks != null ? '(総合値。カッコ内＝リビルド前の動画までのクリック数)' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
-          (wcode ? '<span title="作品リンククリック数(投稿→FANZA・導線2)"><img class="emico emico-red" src="assets/icons/ic-link.png" alt="作品クリック"> ' + (wclicks != null ? num(wclicks) : '…') + '</span>' : '') +
+          (wcode ? '<span title="作品リンククリック数(投稿→FANZA・導線2)"><img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="作品クリック"> ' + (wclicks != null ? num(wclicks) : '…') + '</span>' : '') +
           '<span class="vrow-links">' + // 🛠️編集/Bsky↗/YouTube↗/作品↗ を1グループに＝編集もBskyと同じ段に表示・作品↗だけ改行される事故を防ぐ
             '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
             (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
