@@ -32,8 +32,9 @@ PROCESSED = os.path.join(LOCAL, "discord_inbox_processed.jsonl")
 FOR_CLAUDE = os.path.join(LOCAL, "discord_inbox_for_claude.jsonl")
 CLAUDE_ACTIVE = os.path.join(LOCAL, "llm", "claude_active.txt")
 LOG = os.path.join(LOCAL, "llm", "responder_log.jsonl")
-PERSONA = "ローカル受付"
-MODEL = "qwen3:4b"
+PERSONA = "ローカルqwen"  # 旧名「ローカル受付」(Chami改名2026-07-13)
+MODEL = "qwen3:8b"  # RTX 3060 Ti 8GBで実測55秒/回・品質向上のため4b→8bへ格上げ(2026-07-13)
+INBOX_LLM = os.path.join(LOCAL, "discord_inbox_llm.jsonl")  # llm-growth部屋専用=Claude稼働中でも本人が応対
 WORK_WORDS = ("直して", "修正", "実装", "追加して", "デプロイ", "変えて", "作って", "調べて", "特定して",
               "バグ", "エラー", "壊れ", "対応して", "やって", "反映", "消して", "削除")
 
@@ -135,6 +136,17 @@ def main():
     once = "--once" in sys.argv
     print(f"ローカル受付 起動 (model={MODEL}, 30秒間隔, Claude稼働中は待機)")
     while True:
+        # llm-growth部屋(自分の部屋)はClaude稼働中でも常時応対
+        if os.path.exists(INBOX_LLM) and os.path.getsize(INBOX_LLM) > 0:
+            with open(INBOX_LLM, "r", encoding="utf-8") as f:
+                llm_lines = [l for l in f.read().splitlines() if l.strip()]
+            os.remove(INBOX_LLM)
+            for line in llm_lines:
+                try:
+                    handle(json.loads(line), line)
+                except Exception as e:
+                    print(f"  処理失敗(llm箱): {type(e).__name__}")
+                    append_line(FOR_CLAUDE, line)
         if claude_is_active():
             if once:
                 print("Claudeセッション稼働中のため待機のみで終了")

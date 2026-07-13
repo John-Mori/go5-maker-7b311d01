@@ -138,10 +138,18 @@ def main():
             except Exception as e:
                 print(f"チャンネル取得失敗 [{ch.get('name')}] {type(e).__name__}")
         if out:
-            with open(INBOX_FILE, "a", encoding="utf-8") as f:
-                for rec in out:
-                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            print(f"{time.strftime('%H:%M:%S')} 新着{len(out)}件 → local/discord_inbox.jsonl")
+            # llm-growth(ローカルqwenの部屋)は専用受付箱へ=ローカルLLMが常時応対(Claude稼働中でも)
+            llm_out = [r for r in out if r.get("dept") == "llm-growth"]
+            main_out = [r for r in out if r.get("dept") != "llm-growth"]
+            if main_out:
+                with open(INBOX_FILE, "a", encoding="utf-8") as f:
+                    for rec in main_out:
+                        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            if llm_out:
+                with open(os.path.join(LOCAL, "discord_inbox_llm.jsonl"), "a", encoding="utf-8") as f:
+                    for rec in llm_out:
+                        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            print(f"{time.strftime('%H:%M:%S')} 新着{len(out)}件 → 受付箱(main={len(main_out)}/llm={len(llm_out)})")
         save_state(state)
         if once:
             print(f"1回分の巡回完了(新着{len(out)}件)")
