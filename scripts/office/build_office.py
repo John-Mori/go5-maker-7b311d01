@@ -38,7 +38,7 @@ ROSTER = [
     {"dept": "qa-reviewer", "label": "品質管理部", "color": "#f2cfd9",
      "members": [{"n": "ジェンティルドンナ", "c": "#e08bab"}, {"n": "スネーク", "c": "#8ba3ab"}, {"n": "オタコン", "c": "#9bb5e0"}], "idle": []},
     {"dept": "learning-coach", "label": "学習室", "color": "#d9e8f2",
-     "members": [{"n": "ヴィルシーナ", "c": "#a58be0", "idle": "お風呂中"}, {"n": "中野五月", "c": "#e0908b", "idle": "食事中"},
+     "members": [{"n": "ヴィルシーナ", "c": "#4747CC", "idle": "お風呂中"}, {"n": "中野五月", "c": "#e0908b", "idle": "食事中"},
                   {"n": "田中琴葉", "c": "#8be0c9"}, {"n": "姫崎莉波", "c": "#f0b3d5", "idle": "着替え中"}], "idle": []},
     {"dept": "report-notify", "label": "報告・通知部", "color": "#e8f2cf",
      "members": [{"n": "オタコン(兼)", "c": "#9bb5e0"}, {"n": "メタルギアMk.II", "c": "#a3a3a3"}], "idle": []},
