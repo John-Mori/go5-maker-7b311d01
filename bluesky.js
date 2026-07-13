@@ -441,11 +441,11 @@
   //   ・ON/OFFは端末に永続化＋composePostText()が最後に付け足す＝「案内する作品URL」より必ず後ろに来る。
   //     動画作成後の自動投稿(投稿確認モーダル)もcomposePostText()で本文を作るため自動的に反映される。
   var DISCOUNT_LIST_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/';
-  var DISCOUNT_LIST_LEAD = '🔥大幅割引セール中の同人はこちら🎀↓';
+  var DISCOUNT_LIST_LEAD = '⭐大幅割引セール中の同人はこちら 🎀'; // 2026-07-13 目標形式(スクショ)に合わせ変更
   // 作品URLの直前に挟む定型のPR明示行（本文の標準構成・composePostTextとrenderPreviewの両方で使用）。
   var PR_LINE_TEXT = '↓詳細はこちらから🎀 #PR #漫画';
   var DISC_ON_KEY = 'bsky_discount_list_on', DISC_LINK_KEY = 'bsky_discount_list_link', DISC_LINK_AF_KEY = 'bsky_discount_list_link_af';
-  function discountListOn_() { try { return localStorage.getItem(DISC_ON_KEY) === '1'; } catch (e) { return false; } }
+  function discountListOn_() { try { return localStorage.getItem(DISC_ON_KEY) !== '0'; } catch (e) { return true; } } // 既定ON(標準形式の一部・2026-07-13)
   function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
   function curAfId_() { try { return (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) { return ''; } }
   // af_idごとにキャッシュ（af_idが変わったら作り直す）。
@@ -584,7 +584,7 @@
   }
   // 一時的に自動追加(PR行/作品リンク/割引ブロック)を無効化中（要望によりQ保存Q読込での手動運用に切替・両ch共通）。
   // 再度有効化する場合は true に戻すだけでよい。
-  var AUTO_APPEND_ENABLED = false;
+  var AUTO_APPEND_ENABLED = true; // 2026-07-13 Chami指定: 標準投稿形式(フック+PR行+短縮アフィ+セール行)を再有効化
   function composePostText() {
     var caption = (els.text.value || '').replace(/[ \t\r\n]+$/, '');
     if (!AUTO_APPEND_ENABLED) return caption;
@@ -595,7 +595,7 @@
     // 🔥割引一覧（ON中は常に「案内する作品URL」より後ろに付く＝ここで最後に追加するだけで済む）。
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
-      if (dlink) { if (caption.indexOf(dlink) < 0) out += '\n\n' + DISCOUNT_LIST_LEAD + '\n\n' + dlink; }
+      if (dlink) { if (caption.indexOf(dlink) < 0) out += '\n\n' + DISCOUNT_LIST_LEAD + '\n' + dlink; }
       else ensureDiscountLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }); // 未キャッシュなら取得だけ開始し、出来次第プレビュー/モーダルへ反映
     }
     return out;
@@ -658,7 +658,7 @@
     // 🔥割引一覧（composePostTextと同じ位置＝作品URLより後ろ）をプレビューにも反映。同じ理由で重複防止。
     if (AUTO_APPEND_ENABLED && discountListOn_()) {
       var dlink = cachedDiscountLink_();
-      if (dlink) { if (caption.indexOf(dlink) < 0) html += '\n\n' + escapeHtml(DISCOUNT_LIST_LEAD) + '\n\n<span class="lnk">' + escapeHtml(dlink) + '</span>'; }
+      if (dlink) { if (caption.indexOf(dlink) < 0) html += '\n\n' + escapeHtml(DISCOUNT_LIST_LEAD) + '\n<span class="lnk">' + escapeHtml(dlink) + '</span>'; }
       else html += '\n\n<span class="ph">（🔥割引一覧リンクを準備中…）</span>';
     }
     if (els.pvBody) els.pvBody.innerHTML = html;
