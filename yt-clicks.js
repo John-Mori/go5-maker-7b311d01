@@ -242,7 +242,8 @@
       var d = deltaCache[vid];
       var needYt = !d;                                              // ①記録待ち: vidがサーバーに無い
       var needShort = !!(d && d.tc === null && codeOf(it.shortUrl || '')); // ②クリック⚠: 短縮URL未反映
-      if (!needYt && !needShort) return;
+      var needWork = !!(d && d.twc === null && codeOf(it.workShortUrl || '')); // ③作品クリック⚠: 作品短縮URL未反映
+      if (!needYt && !needShort && !needWork) return;
       _repairDone[vid] = true;
       // pushItemToGas_ は it.ytUrl を送る=YT URLがymap側だけの時に備えて補完してから送る。
       var toSend = it.ytUrl ? it : (function () { var c = {}; for (var p in it) c[p] = it[p]; c.ytUrl = yt; return c; })();
