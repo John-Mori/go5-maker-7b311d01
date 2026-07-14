@@ -36,6 +36,8 @@ FOR_CLAUDE_FILE = os.path.join(LOCAL, "discord_inbox_for_claude.jsonl")
 CLAUDE_ACTIVE = os.path.join(LOCAL, "llm", "claude_active.txt")
 STATE_FILE = os.path.join(LOCAL, "discord_watchdog_state.json")
 BOT_SEND = os.path.join(ROOT, "scripts", "discord", "bot_send.py")
+PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
+MACHINE_PERSONA = "メタルギアMk.II"  # 機械的アナウンスの担当(Chami指定2026-07-14・report-notifyの配送役)
 
 STALE_MIN = 15                 # これ以上未処理なら「司令塔不在の可能性」
 POLL_SEC = 60                  # 常駐時の巡回間隔
@@ -132,12 +134,10 @@ def bot_send(channel, body, dry_run, by_dept=False):
         target = f"--dept {channel}" if by_dept else channel
         print(f"[dry-run] bot_send -> {target}: {body}")
         return True
-    args = [sys.executable, BOT_SEND]
-    if by_dept:
-        args += ["--dept", channel]
-    else:
-        args += [channel]
-    args += [body]
+    # 機械的アナウンスはメタルギアMk.II名義(persona_send)で送る(Chami指定2026-07-14)
+    args = [sys.executable, PERSONA_SEND]
+    args += (["--dept", channel] if by_dept else ["--channel", channel])
+    args += ["--persona", MACHINE_PERSONA, body]
     r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode == 0
 

@@ -44,6 +44,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 BOT_SEND = os.path.join(ROOT, "scripts", "discord", "bot_send.py")
+PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
+MACHINE_PERSONA = "メタルギアMk.II"  # 機械的アナウンスの担当(Chami指定2026-07-14)
 
 DEFAULT_MINUTES = 10.0
 DEFAULT_INTERVAL = 20.0
@@ -101,7 +103,8 @@ def rearm_bookkeeping(name):
            f"(直近3hで再武装{count}回)。区切りの良い所で引き継ぎ(正本md/memory更新→新セッション)を推奨。"
            f"※開始直後のセッションならこの通知は無視してOK")
     try:
-        subprocess.run([sys.executable, BOT_SEND, "--dept", "router", msg],
+        # 機械的アナウンスはメタルギアMk.II名義(Chami指定2026-07-14)
+        subprocess.run([sys.executable, PERSONA_SEND, "--dept", "router", "--persona", MACHINE_PERSONA, msg],
                        timeout=25, capture_output=True)
         with open(mark, "w", encoding="utf-8") as f:
             f.write(str(int(now)))
