@@ -183,9 +183,12 @@ def run_once(dry_run=False):
     sent_ts = [t for t in state.get("sent_ts", []) if now_epoch - t < 3600]  # 直近1時間だけ保持
 
     # (a) 未アナウンスの滞留行へ個別返信(暴走ガード込み・古い順)
+    # ★2026-07-15 Chami指示「Mk.IIがやかましい・トークンの無駄」で個別通知は無効化。
+    #   (b)復旧chへの1時間毎サマリのみ残す(不在の把握には十分で、各chへの連投を止める)。
+    ANNOUNCE_PER_MESSAGE = False
     stale_sorted = sorted(stale, key=lambda t: -t[1])
     sent_this_cycle = 0
-    for rec, age_min in stale_sorted:
+    for rec, age_min in (stale_sorted if ANNOUNCE_PER_MESSAGE else []):
         if sent_this_cycle >= MAX_ANNOUNCE_PER_CYCLE:
             break
         if len(sent_ts) >= MAX_ANNOUNCE_PER_HOUR:
