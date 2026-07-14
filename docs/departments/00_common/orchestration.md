@@ -184,6 +184,9 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 
 ## 並行セッションの所有権 (2026-07-14 Chami承認・再分裂防止)
 - 同時に複数のClaudeセッションがこのrepoを触る時は**領域を分ける**(1領域1オーナー)。現在: **司令塔(Vol.7)**=Discord運用(scripts/discord・scripts/llm)・規約(docs/departments)・改修依頼の実装／**復旧システム(別セッション)**=Gemini組み込み(gemini受付係・API連携)
+- **復旧システムの専用ch=「🚨システム事故対•復旧部門🚨」(dept=recovery・2026-07-14 Chami開設・登録済)**。部門窓として受けるには `python scripts/llm/heartbeat.py --name recovery` で脈を打つ(受信箱=local/inbox/recovery.jsonl)
+- **「改善提案部門」ch(dept=kaizen-analyst・同日開設)**=Chamiの改善アイデア受け皿。**担当キャラ着任まではアメスが常駐代行**(Chami指定「アメスだけ入っといて」)。改善は承認制の原則を維持
+- ⚠️共有常駐(inbox_poller等)の再起動は**司令塔が行う**。他セッションが必要とする時はrouter経由で依頼(20:12にpoller二重管理で世代混乱が起きた教訓)
 - 共通ルール: push前に必ず `git pull --rebase`。相手の領域は読み取りのみ。横断変更は先にorchestration.mdへ宣言してから
 - 部門窓(BOOT.md起動の常駐セッション)は自部門のBOOT記載領域のみ編集可
 
