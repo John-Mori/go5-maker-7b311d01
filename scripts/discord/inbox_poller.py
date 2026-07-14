@@ -27,13 +27,60 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
-LOCAL = os.path.join(ROOT, "local")
+LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")  # テスト用にlocal/差し替え可
 TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")
 CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
 STATE_FILE = os.path.join(LOCAL, "discord_inbox_state.json")
 INBOX_FILE = os.path.join(LOCAL, "discord_inbox.jsonl")
 POLL_SEC = 15
 API = "https://discord.com/api/v10"
+
+# --- 部門常駐セッション分離(2026-07-14) ---
+# 部門窓(別Claude Codeセッション)が heartbeat_ttl.sh <回数> <dept> で
+# local/llm/claude_active_<dept>.txt を打っている間だけ、その部門宛ての新着を
+# local/inbox/<dept>.jsonl へ配達する(main箱に入れない=窓ごとの役割分離)。
+# 窓が死ねば脈が止まり(TTL10分)、以後の新着は従来通りmain箱へ。
+# 取り残し対策: 脈が古い部門箱に未処理が残っていれば巡回ごとにmain箱へ書き戻す(自己修復)。
+RESIDENT_FRESH_SEC = 90
+
+
+def dept_active(dept):
+    if not dept or dept in ("router", "llm-growth"):  # 総合受付とqwenの部屋は対象外
+        return False
+    p = os.path.join(LOCAL, "llm", f"claude_active_{dept}.txt")
+    try:
+        return (time.time() - os.path.getmtime(p)) < RESIDENT_FRESH_SEC
+    except OSError:
+        return False
+
+
+def dept_box(dept):
+    return os.path.join(LOCAL, "inbox", f"{dept}.jsonl")
+
+
+def sweep_stale_dept_boxes():
+    d = os.path.join(LOCAL, "inbox")
+    if not os.path.isdir(d):
+        return
+    for fn in os.listdir(d):
+        if not fn.endswith(".jsonl"):
+            continue
+        dept = fn[:-len(".jsonl")]
+        if dept_active(dept):
+            continue
+        p = os.path.join(d, fn)
+        try:
+            if os.path.getsize(p) == 0:
+                continue
+            with open(p, "r", encoding="utf-8") as f:
+                lines = [l for l in f.read().splitlines() if l.strip()]
+            if lines:
+                with open(INBOX_FILE, "a", encoding="utf-8") as f:
+                    f.write("\n".join(lines) + "\n")
+            open(p, "w").close()
+            print(f"{time.strftime('%H:%M:%S')} 常駐不在の部門箱を回収 [{dept}] {len(lines)}件→main")
+        except OSError:
+            pass
 
 
 def read_token():
@@ -126,6 +173,7 @@ def main():
     print(f"受信ポーラー開始: {len(channels)}チャンネルを{POLL_SEC}秒間隔で監視" + (" (--once)" if once else ""))
     while True:
         state = load_state()
+        sweep_stale_dept_boxes()  # 常駐が消えた部門箱の取り残しをmainへ回収
         out = []
         for ch in channels:
             try:
@@ -175,16 +223,24 @@ def main():
                     return any(w in c for w in QWEN_WORDS)      # 画像生成室: 逆に呼ばれた時だけ彼女
                 return LOCAL_FIRST_ENABLED and _is_simple_q(r)  # 他部屋の一次受付は停止中(上記)
             llm_out = [r for r in out if _is_llm(r)]
-            main_out = [r for r in out if not _is_llm(r)]
+            rest = [r for r in out if not _is_llm(r)]
+            # 部門常駐セッションが生きていればその部門箱へ、いなければmain箱へ
+            dept_out = [r for r in rest if dept_active(r.get("dept", ""))]
+            main_out = [r for r in rest if not dept_active(r.get("dept", ""))]
             if main_out:
                 with open(INBOX_FILE, "a", encoding="utf-8") as f:
                     for rec in main_out:
                         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            for rec in dept_out:
+                bp = dept_box(rec["dept"])
+                os.makedirs(os.path.dirname(bp), exist_ok=True)
+                with open(bp, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             if llm_out:
                 with open(os.path.join(LOCAL, "discord_inbox_llm.jsonl"), "a", encoding="utf-8") as f:
                     for rec in llm_out:
                         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            print(f"{time.strftime('%H:%M:%S')} 新着{len(out)}件 → 受付箱(main={len(main_out)}/llm={len(llm_out)})")
+            print(f"{time.strftime('%H:%M:%S')} 新着{len(out)}件 → 受付箱(main={len(main_out)}/dept={len(dept_out)}/llm={len(llm_out)})")
         save_state(state)
         if once:
             print(f"1回分の巡回完了(新着{len(out)}件)")
