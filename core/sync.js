@@ -152,7 +152,12 @@
   }
 
   var _busy = false, _lastErr = "", _lastAt = 0;
-  function status() { return { configured: configured(), busy: _busy, version: getVer(), lastError: _lastErr, lastAt: _lastAt, device: deviceName() }; }
+  // 進捗(Chami依頼2026-07-14「同期中…が長い・進んでるか分からない」): 画像の送受信を件数で見せる。
+  var _prog = { phase: "", done: 0, total: 0 };
+  function setProg(phase, done, total) { _prog = { phase: phase, done: done, total: total }; }
+  // 同期完了時に発火＝各タブが localStorage の新しい値を入力欄へ読み直せる(反映されない不安の解消)。
+  function fireSynced(pulled) { try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-synced", { detail: { pulled: pulled } })); } catch (e) {} }
+  function status() { return { configured: configured(), busy: _busy, version: getVer(), lastError: _lastErr, lastAt: _lastAt, device: deviceName(), prog: _prog }; }
 
   // per-key マージ。(t 大きい方を採用)
   function mergeMaps(local, rem) {
@@ -197,8 +202,10 @@
     // IDB を hash化(画像アップロード)
     var curIdb = {};
     var idbStep = (Idb && Idb.available()) ? Idb.entries().then(function (all) {
-      return Object.keys(all).filter(isSyncIdbKey).reduce(function (p, k) {
-        return p.then(function () { return uploadImagesIn(all[k]).then(function (hv) { curIdb[k] = hv; }); });
+      var keys = Object.keys(all).filter(isSyncIdbKey);
+      var done = 0; setProg("画像を送信", 0, keys.length);
+      return keys.reduce(function (p, k) {
+        return p.then(function () { return uploadImagesIn(all[k]).then(function (hv) { curIdb[k] = hv; setProg("画像を送信", ++done, keys.length); }); });
       }, Promise.resolve());
     }) : Promise.resolve();
 
@@ -282,11 +289,13 @@
           newSnapLs[k] = finalV; if (finalV !== e.v) mls[k] = { t: e.t, v: finalV }; // 再union分をpush対象にも反映
           try { if (LS.getItem(k) !== finalV) LS.setItem(k, finalV); } catch (x) {}
         });
+        var dlKeys = Object.keys(midb).filter(function (k) { return !midb[k].d && Idb && Idb.available(); });
+        var dlDone = 0; if (dlKeys.length) setProg("画像を受信", 0, dlKeys.length);
         Object.keys(midb).forEach(function (k) {
           var e = midb[k];
           if (e.d) { if (Idb && Idb.available()) applies.push(Idb.del(k).catch(function () {})); return; }
           newSnapIdb[k] = e.v;
-          if (Idb && Idb.available()) applies.push(downloadImagesIn(e.v).then(function (rebuilt) { return Idb.set(k, rebuilt); }).catch(function () {}));
+          if (Idb && Idb.available()) applies.push(downloadImagesIn(e.v).then(function (rebuilt) { return Idb.set(k, rebuilt); }).catch(function () {}).then(function () { setProg("画像を受信", ++dlDone, dlKeys.length); }));
         });
 
         return Promise.all(applies).then(function () {
@@ -294,16 +303,18 @@
           Object.keys(newSnapLs).forEach(function (k) { if (newSnapLs[k] === undefined) delete newSnapLs[k]; });
           var outState = { fmt: 2, ls: mls, idb: midb, device: deviceName(), updatedAt: new Date().toISOString() };
           var changed = JSON.stringify(stripT(mls)) !== JSON.stringify(stripT(rls)) || JSON.stringify(stripT(midb)) !== JSON.stringify(stripT(ridb));
-          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); }
-          if (!changed) { persist(rver); return { ok: true, version: rver, noChange: true }; }
+          // クラウド側で実際に更新されたLSキー数=この端末に「反映」された設定の件数。(反映されない不安への可視化)
+          var pulledLs = 0; Object.keys(mls).forEach(function (k) { if (k.indexOf(SEC_PREFIX) !== 0 && !isCandArrayKey(k) && rls[k] && (!snapLs[k] || JSON.stringify(rls[k].v) !== JSON.stringify(snapLs[k]))) pulledLs++; });
+          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs); }
+          if (!changed) { persist(rver); return { ok: true, version: rver, noChange: true, pulled: pulledLs }; }
           return pushState(outState, rver).then(function (pr) {
-            if (pr && pr.ok) { persist(pr.version); return { ok: true, version: pr.version }; }
+            if (pr && pr.ok) { persist(pr.version); return { ok: true, version: pr.version, pulled: pulledLs }; }
             if (pr && pr.conflict && !retry) { _busy = false; return syncOnce(true); } // 再pull→マージ→再push
-            _busy = false; _lastErr = (pr && pr.error) || "push失敗"; return { ok: false, error: _lastErr };
+            _busy = false; _lastErr = (pr && pr.error) || "push失敗"; setProg("", 0, 0); return { ok: false, error: _lastErr };
           });
         });
       });
-    }).catch(function (e) { _busy = false; _lastErr = String((e && e.message) || e); return { ok: false, error: _lastErr }; });
+    }).catch(function (e) { _busy = false; _lastErr = String((e && e.message) || e); setProg("", 0, 0); return { ok: false, error: _lastErr }; });
   }
 
   var _timer = null;
@@ -348,13 +359,34 @@
     if (url) url.value = c.url; if (tok) tok.value = c.token; if (pass) pass.value = c.pass;
     function save() { root.Go5Sync.setConfig({ url: url ? url.value : "", token: tok ? tok.value : "", pass: pass ? pass.value : "" }); }
     [url, tok, pass].forEach(function (el) { if (el) { el.addEventListener("change", save); el.addEventListener("blur", save); } });
-    function showStatus() { if (!st) return; var s = status(); st.textContent = !s.configured ? "未設定(3つを入力すると自動同期します)" : (s.busy ? "同期中…" : (s.lastError ? "⚠️ " + s.lastError : (s.version ? "✅ 同期済み(v" + s.version + ")" : "設定OK。「今すぐ同期」で開始"))); }
+    // 進捗テキスト。busy中は画像の件数/％を出し、「本当に進んでいるか分からない」不安を解消する。
+    function busyText(s) {
+      var p = s.prog || {};
+      if (p.total > 0) { var pct = Math.round(p.done / p.total * 100); return "🔄 同期中… " + (p.phase || "処理中") + " " + p.done + "/" + p.total + " (" + pct + "%)"; }
+      return "🔄 同期中…";
+    }
+    function showStatus() {
+      if (!st) return; var s = status();
+      st.textContent = !s.configured ? "未設定(3つを入力すると自動同期します)"
+        : (s.busy ? busyText(s)
+          : (s.lastError ? "⚠️ " + s.lastError
+            : (s.version ? "✅ 同期済み(v" + s.version + ")" : "設定OK。「今すぐ同期」で開始")));
+    }
+    // busy中は進捗を1秒ごとに更新(件数が動くのが見える)。
+    var _pollTimer = null;
+    function startStatusPoll() { if (_pollTimer) return; _pollTimer = root.setInterval(function () { if (status().busy) showStatus(); else { root.clearInterval(_pollTimer); _pollTimer = null; showStatus(); } }, 1000); }
     if (nowBtn) nowBtn.addEventListener("click", function () {
       save();
       if (!configured()) { if (st) st.textContent = "⚠️ 同期URLとトークンを入れてください"; return; }
-      if (st) st.textContent = "🔄 同期中…";
-      syncOnce(false).then(function (r) { if (st) st.textContent = r.ok ? ("✅ 同期しました(v" + r.version + ")") : ("⚠️ " + (r.error || "失敗")); });
+      if (st) st.textContent = "🔄 同期中…"; startStatusPoll();
+      syncOnce(false).then(function (r) {
+        if (st) st.textContent = r.ok
+          ? ("✅ 同期しました(v" + r.version + ")" + (r.pulled ? " ・" + r.pulled + "件を反映" : ""))
+          : ("⚠️ " + (r.error || "失敗"));
+      });
     });
+    // 自動同期中も進捗表示を更新。(タブを開いていれば見える)
+    if (root.document) root.document.addEventListener("go5-synced", showStatus);
     var tab = $("tabSettings"); if (tab) tab.addEventListener("click", function () { root.setTimeout(showStatus, 300); });
     showStatus();
     startAuto(); // 設定済みなら自動同期を開始(起動時pull＋25秒間隔＋離脱時push)
