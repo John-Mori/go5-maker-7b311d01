@@ -111,6 +111,22 @@ npx wrangler d1 execute go5_kaizen --remote --command "INSERT INTO system_change
 
 entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。insightのevidenceは参照ID(events.id/REQ/CHG)を必ず含める。
 
+## セッション分離マップ (2026-07-15 Chami方針=文脈混在でトークンを無駄にしない・1セッション=関連ch群)
+> Discordのchは細かく分かれていても、**セッションは役割単位でまとめる**(1セッションが複数の関連chを担当してよい)。起動=各BOOT.md。
+| セッション | 担当ch(dept) | 人格 |
+|---|---|---|
+| 司令塔(main) | 総合-受付(router)・横断裁定 | アロンソ/アメス |
+| 改修(system-engineer) | 改修-依頼(system-engineer) | デ・ブライネ/咲季 |
+| AI office改修(ai-office) | システム改修設計-ai-office(ai-office)=**改修とは別セッション**(Chami指定) | デ・ブライネ/咲季 |
+| 研究室(research-room) | 研究室-コーチングルーム(research-room) | アメス/アロンソ |
+| 人事(hr) | 人事-補強(hr-room)+人事-コンテキスト(hr-context)=**2ch1セッション** | ククール/琴葉 |
+| 学習(learning-coach) | 学習3部屋(learning-coach)=**3ch1セッション**(質問ルームは複数あるが運用1つ) | 4コーチ |
+| 改善提案(kaizen-analyst) | 改善提案部門(kaizen-analyst) | 専任待ち/アメス代行 |
+| 復旧+Gemini(別セッション) | incident-recovery(incident)+gemini-reception(gemini) | 復旧システム(Gemini担当) |
+| その他部門(product-scout/copy-director/shorts-analyst/qa-reviewer/report-notify) | 各ch | 各人格・必要時にスポーン |
+- 運用: 新窓でgo5-makerを開き「あなたは○○部門、docs/departments/<dept>/BOOT.mdに従って」。複数dept担当時は各deptで `heartbeat.py --name <dept>` を打てば各箱を受ける。
+- 未起動部門宛ての新着は司令塔のmain箱へ集約(取りこぼしなし)。
+
 ## 部門専用セッションの開設手順 (コンテキスト逼迫時・専門作業が続く時)
 1. 新セッションで宣言「○○部門として作業する」
 2. 読む順: CLAUDE.md → 本ファイル → 自部門の.claude/agents/○○.md → chami-principles.md → 自部門docs → dept_tasks(自部門・open)
