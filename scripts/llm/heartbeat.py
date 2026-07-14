@@ -48,13 +48,18 @@ PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
 MACHINE_PERSONA = "メタルギアMk.II"  # 機械的アナウンスの担当(Chami指定2026-07-14)
 
 
-def session_label():
-    """司令塔セッションのChami命名の表示名(通知に明示)。未設定なら既定。"""
-    try:
-        s = open(os.path.join(LOCAL, "llm", "session_label.txt"), encoding="utf-8").read().strip()
-        return s or "(名称未設定の司令塔セッション)"
-    except OSError:
-        return "(名称未設定の司令塔セッション)"
+def session_label(name="main"):
+    """セッションのChami命名の表示名(通知に明示)。名前別ファイルを優先(部門窓が各自の名を持てる)。
+    優先: session_label_<name>.txt → (mainなら)session_label.txt → 既定(name)。"""
+    d = os.path.join(LOCAL, "llm")
+    for fn in ([f"session_label_{name}.txt"] + (["session_label.txt"] if name == "main" else [])):
+        try:
+            s = open(os.path.join(d, fn), encoding="utf-8").read().strip()
+            if s:
+                return s
+        except OSError:
+            pass
+    return "(名称未設定の司令塔セッション)" if name == "main" else f"{name}セッション"
 
 DEFAULT_MINUTES = 10.0
 DEFAULT_INTERVAL = 20.0
@@ -108,8 +113,8 @@ def rearm_bookkeeping(name):
     if os.environ.get("GO5_LOCAL_DIR"):
         print(f"heartbeat: (テストモード)限界前通知を抑止(再武装{count}回/3h)")
         return  # テスト隔離時は実Discordへ発報しない(bot_sendは実local/を読むため)
-    label = session_label()
-    msg = (f"⏳【限界前通知/INC-091対策】司令塔セッション「{label}」の連続稼働が長くなっています"
+    label = session_label(name)
+    msg = (f"⏳【限界前通知/INC-091対策】セッション「{label}」の連続稼働が長くなっています"
            f"(直近3hで再武装{count}回≒90分超)。区切りの良い所で引き継ぎ(正本md/memory更新→新セッション)を推奨。"
            f"※判定は連続稼働「時間」ベースで、コンテキスト残量(%)とは無関係です。開始直後のセッションなら無視でOK")
     try:
