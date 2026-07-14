@@ -163,13 +163,17 @@ def main():
                 if len(c) > 200:
                     return False                                  # 長文=仕様/依頼の可能性
                 return any(m in c for m in Q_MARKS)               # 質問らしさがある短文だけローカルへ
+            # ★他部屋の「ローカル一次受付」は一時停止(Chami指定2026-07-14「まだ早い」)。
+            #   デブライネ/咲季/コーチ(先生)等の名前呼びをローカルが横取りしてしまう問題のため。
+            #   再開時は、全人格名+コーチ/先生をCALL_WORDSに入れてから _is_simple_q(r) へ戻すこと。
+            LOCAL_FIRST_ENABLED = False
             def _is_llm(r):
                 c = r.get("content") or ""
                 if r.get("dept") == "llm-growth":
                     return not any(w in c for w in CALL_WORDS)  # 彼女の部屋: 名前呼び以外は彼女
                 if r.get("dept") == "imagegen":
                     return any(w in c for w in QWEN_WORDS)      # 画像生成室: 逆に呼ばれた時だけ彼女
-                return _is_simple_q(r)                          # 他部屋: 簡単な質問だけローカル一次回答
+                return LOCAL_FIRST_ENABLED and _is_simple_q(r)  # 他部屋の一次受付は停止中(上記)
             llm_out = [r for r in out if _is_llm(r)]
             main_out = [r for r in out if not _is_llm(r)]
             if main_out:
