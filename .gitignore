@@ -23,3 +23,4 @@ raw/
 
 # ローカル専用文書(戦略・事業目標・優先度など。AIは読むがGitHubへは上げない)
 local/
+.claude/settings.local.json
