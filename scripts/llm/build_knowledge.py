@@ -18,6 +18,7 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 OUT_DIR = os.path.join(ROOT, "local", "llm")
 SOURCES = [
     os.path.join(ROOT, "docs", "departments", "00_common", "system-brief.md"),
+    os.path.join(ROOT, "docs", "departments", "00_common", "faq_knowledge.md"),
     os.path.join(ROOT, "docs", "departments", "personas", "INDEX.md"),
 ]
 
