@@ -147,6 +147,7 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 - **ハートビートはTTL付き(既定10分で自然終了)。`while true`での無限touchは禁止**(INC-091 対策1・偽の生存信号で本体フリーズ時に無応答の空白を生む)。司令塔は実際に仕事をしたタイミングで`python scripts/llm/heartbeat.py`(または`start_heartbeat.bat`)を都度起動し直して再武装する。フリーズすれば10分以内に脈が切れ、ローカルqwenが自動で受付を引き継ぐ
 - **司令塔の義務: セッション開始時に`local/discord_inbox_for_claude.jsonl`を確認して処理**(処理後はprocessedへ移動)
 - 権限: ローカル受付は読み取り=知識パックのみ。コード/シート/D1への書き込み・取得は一切しない(できないことは正直に言う設計)
+- `dept=="gemini"` の部屋は別枠の専用受付`scripts/llm/gemini_responder.py`(「Gemini受付」名義)が担当。自分の部屋なのでClaude稼働中でも常時応答(claude_active待機なし)。APIキー未設定(`local/gemini_api_key.txt`)の間は受付箱を消費せず自動待機。起動=`start_gemini_responder.bat`
 
 ## 夢と回復の部屋・過去の共有部屋 (2026-07-13新設・Chami発案)
 - 機微な個人領域の部屋。**内容はlocal/dreams・local/pastのみに記録(リポジトリ・D1・メモリ以外のクラウドへ書かない)**。ローカルqwenの学習(知識パック=local内完結)には含める(Chami明示2026-07-13)

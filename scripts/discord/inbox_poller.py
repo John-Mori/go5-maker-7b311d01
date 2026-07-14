@@ -45,7 +45,7 @@ RESIDENT_FRESH_SEC = 90
 
 
 def dept_active(dept):
-    if not dept or dept in ("router", "llm-growth"):  # 総合受付とqwenの部屋は対象外
+    if not dept or dept in ("router", "llm-growth", "gemini"):  # 総合受付/qwenの部屋/Gemini専用部屋は対象外
         return False
     p = os.path.join(LOCAL, "llm", f"claude_active_{dept}.txt")
     try:
@@ -222,8 +222,11 @@ def main():
                 if r.get("dept") == "imagegen":
                     return any(w in c for w in QWEN_WORDS)      # 画像生成室: 逆に呼ばれた時だけ彼女
                 return LOCAL_FIRST_ENABLED and _is_simple_q(r)  # 他部屋の一次受付は停止中(上記)
-            llm_out = [r for r in out if _is_llm(r)]
-            rest = [r for r in out if not _is_llm(r)]
+            # Gemini専用部屋(dept=="gemini")は独立レーン→discord_inbox_gemini.jsonlのみ(qwenのllm-growthと同じ扱い・main/llm/dept箱には入れない)
+            gemini_out = [r for r in out if r.get("dept") == "gemini"]
+            base = [r for r in out if r.get("dept") != "gemini"]
+            llm_out = [r for r in base if _is_llm(r)]
+            rest = [r for r in base if not _is_llm(r)]
             # 部門常駐セッションが生きていればその部門箱へ、いなければmain箱へ
             dept_out = [r for r in rest if dept_active(r.get("dept", ""))]
             main_out = [r for r in rest if not dept_active(r.get("dept", ""))]
@@ -240,7 +243,11 @@ def main():
                 with open(os.path.join(LOCAL, "discord_inbox_llm.jsonl"), "a", encoding="utf-8") as f:
                     for rec in llm_out:
                         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            print(f"{time.strftime('%H:%M:%S')} 新着{len(out)}件 → 受付箱(main={len(main_out)}/dept={len(dept_out)}/llm={len(llm_out)})")
+            if gemini_out:
+                with open(os.path.join(LOCAL, "discord_inbox_gemini.jsonl"), "a", encoding="utf-8") as f:
+                    for rec in gemini_out:
+                        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            print(f"{time.strftime('%H:%M:%S')} 新着{len(out)}件 → 受付箱(main={len(main_out)}/dept={len(dept_out)}/llm={len(llm_out)}/gemini={len(gemini_out)})")
         save_state(state)
         if once:
             print(f"1回分の巡回完了(新着{len(out)}件)")
