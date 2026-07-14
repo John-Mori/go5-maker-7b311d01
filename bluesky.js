@@ -500,7 +500,7 @@
   function PR_LINE_() { return acctId() === 'acc2' ? '↓詳しくはこちらから🌙 #PR #漫画' : '↓詳細はこちらから🎀 #PR #漫画'; }
   // 2026-07-14: キー名をv2へ(旧キャッシュに計測を通らないda.gd直リンクが残存=qtedy問題。改名で全端末が計測付きリンクを再生成する)
   var DISC_ON_KEY = 'bsky_discount_list_on', DISC_LINK_KEY = 'bsky_discount_list_link_v2', DISC_LINK_AF_KEY = 'bsky_discount_list_link_af_v2';
-  function discountListOn_() { try { return localStorage.getItem(DISC_ON_KEY) !== '0'; } catch (e) { return true; } } // 既定ON(標準形式の一部・2026-07-13)
+  function discountListOn_() { return true; } // 常時ON(標準投稿形式の一部・2026-07-14 Chami指定でトグルUI廃止=セール行は常に添える)
   function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
   function curAfId_() { try { return (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) { return ''; } }
   // af_idごとにキャッシュ。(af_idが変わったら作り直す)
