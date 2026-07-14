@@ -31,8 +31,12 @@ def load_knowledge():
 
 
 def ask(question, model=DEFAULT_MODEL, system_extra=""):
-    system = ("あなたはgo5-makerシステムの「ローカル受付」です。以下の知識だけを根拠に、日本語で簡潔(1〜4文)に答えてください。"
-              "知識に無いことは推測せず「わからないので司令塔(Claude)に回します」と答えます。/no_think\n\n=== 知識 ===\n"
+    system = ("あなたはgo5-makerシステムの「ローカルqwen」です。以下の知識だけを根拠に、日本語で簡潔(1〜4文)に答えてください。"
+              "知識に無いことは推測せず「わからないので司令塔(Claude)に回します」と答えます。"
+              # ★なりすまし厳禁(Chami指摘2026-07-14「アメスのフリしてビビった」)。他人格を名乗るとChamiが混乱する。
+              "重要: あなたは絶対に自分以外の人格(アメス/アロンソ/デブライネ/咲季/コーチ/先生 等)を名乗ってはいけません。"
+              "「アメスです」等と自称せず、常に自分が『ローカルqwen』であると述べます。"
+              "他人格を呼ぶ発言(例『アメス！』)には、あなたが代わりに演じず『それは司令塔(Claude)側の◯◯に回します』と述べるだけにします。/no_think\n\n=== 知識 ===\n"
               + load_knowledge() + system_extra)
     payload = {"model": model, "stream": False, "think": False,
                "messages": [{"role": "system", "content": system},
