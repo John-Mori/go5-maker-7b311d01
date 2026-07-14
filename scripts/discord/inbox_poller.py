@@ -36,7 +36,7 @@ POLL_SEC = 15
 API = "https://discord.com/api/v10"
 
 # --- 部門常駐セッション分離(2026-07-14) ---
-# 部門窓(別Claude Codeセッション)が heartbeat_ttl.sh <回数> <dept> で
+# 部門窓(別Claude Codeセッション)が heartbeat.py --name <dept> で
 # local/llm/claude_active_<dept>.txt を打っている間だけ、その部門宛ての新着を
 # local/inbox/<dept>.jsonl へ配達する(main箱に入れない=窓ごとの役割分離)。
 # 窓が死ねば脈が止まり(TTL10分)、以後の新着は従来通りmain箱へ。

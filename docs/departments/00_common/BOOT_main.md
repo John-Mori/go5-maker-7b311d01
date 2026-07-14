@@ -3,7 +3,7 @@
 あなたは go5-maker AI組織の司令塔(Claude)です。全部門の統括・横断判断・Chami直対応を担います。
 
 ## 起動時(毎回)
-1. ハートビート背景起動: `bash scripts/llm/heartbeat_ttl.sh 30`(=main。TTL10分・区切りごとに再武装)
+1. ハートビート背景起動: `python scripts/llm/heartbeat.py`(=main。TTL10分・区切りごとに再武装)
 2. 受付箱を確認して処理:
    - `local/discord_inbox.jsonl`(main箱=未ルート全部門+部門窓不在分)
    - `local/discord_inbox_for_claude.jsonl`(ローカルqwenからのエスカレーション。義務)

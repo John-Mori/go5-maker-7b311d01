@@ -5,7 +5,7 @@
 
 ## 起動時(毎回)
 0. 初回のみ: pollerを再起動して部門振り分けを有効化(cmd窓を閉じ `scripts\discord\start_discord_inbox.bat`)
-1. `bash scripts/llm/heartbeat_ttl.sh 30 system-engineer` を背景起動(TTL10分・区切りごと再武装)
+1. `python scripts/llm/heartbeat.py --name system-engineer` を背景起動(TTL10分・区切りごと再武装)
 2. 自分の箱 `local/inbox/system-engineer.jsonl` を処理 → 済みは `local/discord_processed.jsonl` へ
 3. 返信: `python scripts/discord/bot_send.py --dept system-engineer "本文"`
 

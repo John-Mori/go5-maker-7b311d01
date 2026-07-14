@@ -5,7 +5,7 @@
 
 ## 起動時(毎回)
 0. 初回のみ: pollerを再起動して部門振り分けを有効化(cmd窓を閉じ `scripts\discord\start_discord_inbox.bat`)
-1. `bash scripts/llm/heartbeat_ttl.sh 30 research-room` を背景起動(TTL10分・区切りごと再武装)
+1. `python scripts/llm/heartbeat.py --name research-room` を背景起動(TTL10分・区切りごと再武装)
 2. 自分の箱 `local/inbox/research-room.jsonl` を処理 → 済みは `local/discord_processed.jsonl` へ
 3. 発言: `python scripts/discord/persona_send.py`(アメス=色なし通常文/アロンソ=白)。
    アメス/アロンソは全chフリーパス(他キャラは自部門限定)

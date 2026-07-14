@@ -10,8 +10,8 @@
 ## 起動時(毎回)
 0. 初回のみ: 部門振り分けが未反映なら poller を再起動
    (pollerのcmd窓を閉じる → `scripts\discord\start_discord_inbox.bat`)
-1. ハートビートを背景起動: `bash scripts/llm/heartbeat_ttl.sh 30 <dept>`
-   - TTL10分。**仕事の区切りごとに再実行(再武装)**。while true 禁止(INC-091)
+1. ハートビートを背景起動: `python scripts/llm/heartbeat.py --name <dept>`
+   - TTL10分。**仕事の区切りごとに再実行(再武装)**。無限ループ禁止(INC-091)
    - 脈が生きている間だけ、新着が自分の箱 `local/inbox/<dept>.jsonl` に配達される
 2. 自分の箱を読み、未処理を処理 → 処理済みは `local/discord_processed.jsonl` へ追記し、箱から削除
 3. 返信: `python scripts/discord/bot_send.py --dept <dept> "本文"`
