@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>外出先リモート復旧ガイド - go5-maker</title>
+<style>
+  :root{
+    --bg:#0b0f1a;
+    --card:#0e1422;
+    --border:#1e2a3d;
+    --accent:#2bb3c0;
+    --text:#e6edf5;
+    --sub:#9fb0c3;
+    --green:#3ec97a;
+    --orange:#e0a44a;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;
+    padding:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    font-size:16px;
+    line-height:1.75;
+    -webkit-text-size-adjust:100%;
+    overflow-x:hidden;
+  }
+  .wrap{
+    max-width:680px;
+    margin:0 auto;
+    padding:20px 16px 56px;
+  }
+  header.page-head{
+    padding:8px 4px 20px;
+  }
+  header.page-head h1{
+    font-size:1.55em;
+    line-height:1.4;
+    margin:0 0 10px;
+    color:var(--text);
+    border-bottom:3px solid var(--accent);
+    padding-bottom:10px;
+  }
+  header.page-head p.lead{
+    margin:0 0 8px;
+    color:var(--sub);
+    font-size:1.02em;
+  }
+  header.page-head .updated{
+    font-size:0.8em;
+    color:var(--sub);
+    opacity:0.85;
+  }
+  .card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:18px 16px;
+    margin-bottom:18px;
+  }
+  .card h2{
+    font-size:1.15em;
+    margin:0 0 14px;
+    color:var(--text);
+    display:flex;
+    align-items:center;
+    gap:8px;
+    border-bottom:2px solid var(--accent);
+    padding-bottom:8px;
+  }
+  .card h3{
+    font-size:1em;
+    margin:18px 0 8px;
+    color:var(--accent);
+  }
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:1.6em;
+    height:1.6em;
+    padding:0 5px;
+    border-radius:8px;
+    background:var(--accent);
+    color:#04262a;
+    font-weight:700;
+    font-size:0.85em;
+    flex:none;
+  }
+  /* まず30秒: 3枚の小カード */
+  .quick-grid{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .quick-item{
+    background:#0b1220;
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:12px 14px;
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+  }
+  .quick-item .icon{
+    font-size:1.3em;
+    line-height:1.4;
+    flex:none;
+  }
+  .quick-item .body b{
+    display:block;
+    color:var(--text);
+    margin-bottom:4px;
+  }
+  .quick-item .body span{
+    color:var(--sub);
+    font-size:0.95em;
+  }
+  /* 番号つきステップ */
+  ol.steps{
+    list-style:none;
+    margin:0;
+    padding:0;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+  ol.steps li{
+    display:flex;
+    gap:12px;
+    align-items:flex-start;
+  }
+  ol.steps li .num{
+    flex:none;
+    width:1.7em;
+    height:1.7em;
+    border-radius:50%;
+    background:var(--accent);
+    color:#04262a;
+    font-weight:700;
+    font-size:0.9em;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    margin-top:1px;
+  }
+  ol.steps li .txt{
+    color:var(--text);
+    padding-top:2px;
+  }
+  code, .code-block{
+    font-family:ui-monospace, Menlo, Consolas, monospace;
+    font-size:0.92em;
+  }
+  code{
+    background:#0b1220;
+    border:1px solid var(--border);
+    border-radius:5px;
+    padding:1px 6px;
+    color:var(--accent);
+    word-break:break-all;
+  }
+  .code-block{
+    display:block;
+    background:#0b1220;
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:10px 12px;
+    margin:6px 0;
+    overflow-x:auto;
+    white-space:pre;
+    color:var(--accent);
+  }
+  a{
+    color:var(--accent);
+    text-decoration:underline;
+    word-break:break-all;
+  }
+  /* 二択カード(外から直せる / PC必須) */
+  .compare-grid{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .compare-box{
+    border-radius:10px;
+    padding:14px;
+    border:1px solid var(--border);
+  }
+  .compare-box.ok{
+    background:rgba(62,201,122,0.08);
+    border-color:rgba(62,201,122,0.35);
+  }
+  .compare-box.ng{
+    background:rgba(224,164,74,0.08);
+    border-color:rgba(224,164,74,0.35);
+  }
+  .compare-box .compare-title{
+    font-weight:700;
+    margin-bottom:10px;
+    font-size:1.02em;
+  }
+  .compare-box.ok .compare-title{color:var(--green);}
+  .compare-box.ng .compare-title{color:var(--orange);}
+  .compare-box ul{
+    margin:0;
+    padding-left:1.3em;
+  }
+  .compare-box ul li{
+    margin-bottom:6px;
+    color:var(--text);
+  }
+  .note-box{
+    border-radius:10px;
+    padding:14px;
+    margin-top:14px;
+    background:rgba(224,164,74,0.08);
+    border:1px solid rgba(224,164,74,0.35);
+  }
+  .note-box .note-title{
+    font-weight:700;
+    color:var(--orange);
+    margin-bottom:8px;
+  }
+  .note-box ul{
+    margin:0;
+    padding-left:1.3em;
+  }
+  .note-box ul li{
+    color:var(--text);
+    margin-bottom:6px;
+  }
+  .good-list{
+    margin:8px 0 0;
+    padding-left:1.3em;
+  }
+  .good-list li{
+    color:var(--green);
+    margin-bottom:6px;
+  }
+  .good-list li span{
+    color:var(--text);
+  }
+  p.lead-sub{
+    color:var(--sub);
+    margin:0 0 4px;
+  }
+  footer.page-foot{
+    margin-top:28px;
+    padding:16px 4px 0;
+    border-top:1px solid var(--border);
+    color:var(--sub);
+    font-size:0.9em;
+  }
+  footer.page-foot p{
+    margin:6px 0;
+  }
+  footer.page-foot .updated{
+    margin-top:12px;
+    font-size:0.85em;
+    opacity:0.8;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page-head">
+    <h1>外出先リモート復旧ガイド</h1>
+    <p class="lead">スマホだけで診断→復旧。困ったら まずここを開く。</p>
+    <p class="updated">最終更新: 2026-07-14</p>
+  </header>
+
+  <section class="card">
+    <h2><span class="badge">!</span>まず30秒</h2>
+    <div class="quick-grid">
+      <div class="quick-item">
+        <div class="icon">🔄</div>
+        <div class="body">
+          <b>セッションが固まった</b>
+          <span>アプリを完全終了して再起動。ダメなら新しいセッションを開く。push済みの作業は消えない</span>
+        </div>
+      </div>
+      <div class="quick-item">
+        <div class="icon">💬</div>
+        <div class="body">
+          <b>Discord返信が来ない</b>
+          <span>司令塔が不在の可能性(仕様)。急ぎの用件は Claude Code の新セッションに直接指示する方が早い</span>
+        </div>
+      </div>
+      <div class="quick-item">
+        <div class="icon">🌐</div>
+        <div class="body">
+          <b>サイトがおかしい</b>
+          <span>スマホのブラウザで公開URLを直接開いて確認する</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="badge">5</span>5分診断</h2>
+    <ol class="steps">
+      <li>
+        <div class="num">1</div>
+        <div class="txt">
+          公開サイトの生存:
+          <span class="code-block"><a href="https://john-mori.github.io/go5-maker-7b311d01/" target="_blank" rel="noopener">https://john-mori.github.io/go5-maker-7b311d01/</a></span>
+          を開く。動けば配信は正常
+        </div>
+      </li>
+      <li>
+        <div class="num">2</div>
+        <div class="txt">直近のpushとビルド: GitHubの Actions タブで <code>pages build and deployment</code> が success か。最終pushの日時も確認できる</div>
+      </li>
+      <li>
+        <div class="num">3</div>
+        <div class="txt">PC・受信系の生存(生存ping): Discordの #llm成長ルーム に短い質問を送る(例「今日の日付わかる?」)。アメス/アロンソ/監督/司令塔/Claude の名前は入れない。3分以内に返信があれば PC+ポーラー+ollama が全部生きている</div>
+      </li>
+      <li>
+        <div class="num">4</div>
+        <div class="txt">司令塔の生存: 部門chに送って返信が来ない=不在と推定。watchdog稼働時は受付箱が15分滞留すると総合受付chへ通知が来る</div>
+      </li>
+      <li>
+        <div class="num">5</div>
+        <div class="txt">代理セッション: Claude Code でこのリポジトリの新セッションを開き、調べたい/直したいことを指示する</div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2><span class="badge">☑</span>外から直せる / PC必須</h2>
+    <div class="compare-grid">
+      <div class="compare-box ok">
+        <div class="compare-title">外から直せる(◎)</div>
+        <ul>
+          <li>Claudeセッション(固まっても新セッションで続行)</li>
+          <li>コードの調査・修正・テスト・push</li>
+          <li>公開サイト(状態確認・再push)</li>
+          <li>Cloudflare Workers(push→自動デプロイ)</li>
+        </ul>
+      </div>
+      <div class="compare-box ng">
+        <div class="compare-title">PC必須(✕ 現状)</div>
+        <ul>
+          <li>PC本体の電源・ネット</li>
+          <li>常駐プロセスの再起動(ポーラー/ローカルqwen/watchdog)</li>
+          <li>司令塔セッションの起動(Discord返信の再開)</li>
+          <li>GAS反映(claspの認証がPCのみ)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="badge">★</span>この穴を塞ぐ本命: リモートデスクトップ</h2>
+    <p class="lead-sub">帰宅前に一度だけ設定(所要10分)</p>
+    <p>これを設定しておくと、スマホからPC画面を直接操作でき、上の「PC必須」がほぼ全部 外から可能になる。塞げないのはPCの電源断・ネット断だけ。</p>
+
+    <h3>設定手順</h3>
+    <ol class="steps">
+      <li>
+        <div class="num">1</div>
+        <div class="txt">PCのChromeで <code>remotedesktop.google.com/access</code> を開く</div>
+      </li>
+      <li>
+        <div class="num">2</div>
+        <div class="txt">「リモートアクセスの設定」からChromeリモートデスクトップを追加</div>
+      </li>
+      <li>
+        <div class="num">3</div>
+        <div class="txt">PIN(6桁以上・推測されにくい値)を設定して有効化。使うGoogleアカウントは普段PCで使うものと同じに</div>
+      </li>
+      <li>
+        <div class="num">4</div>
+        <div class="txt">スマホに「Chromeリモートデスクトップ」アプリを入れ、同じGoogleアカウントでログイン</div>
+      </li>
+      <li>
+        <div class="num">5</div>
+        <div class="txt">一覧にPCが出る→タップ→PIN入力で画面を操作</div>
+      </li>
+    </ol>
+
+    <h3>これで外から出来ること</h3>
+    <ul class="good-list">
+      <li><span>司令塔(Claude Code)をPCで開き直す</span></li>
+      <li><span>常駐bat(ポーラー/watchdog/ローカルqwen)の再起動</span></li>
+      <li><span>GAS反映(GASを反映.bat の実行)</span></li>
+    </ul>
+
+    <div class="note-box">
+      <div class="note-title">注意</div>
+      <ul>
+        <li>PC側がスリープ/自動ロックすると接続が切れる。電源設定でスリープを無効(または長め)にしておく</li>
+        <li>PINは他人に教えない。画面共有中はPCがロック解除状態になる</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="badge">⚠</span>watchdogの通知が来たら</h2>
+    <p>「⚠司令塔不在の可能性」通知=受付箱が15分以上未処理。対応:</p>
+    <ol class="steps">
+      <li>
+        <div class="num">1</div>
+        <div class="txt">リモートデスクトップでPC画面を見る</div>
+      </li>
+      <li>
+        <div class="num">2</div>
+        <div class="txt">Claude Codeが固まっていれば新セッションを開く</div>
+      </li>
+      <li>
+        <div class="num">3</div>
+        <div class="txt">Discord受信(ポーラー)が落ちていれば <code>start_discord_inbox.bat</code> を再起動</div>
+      </li>
+      <li>
+        <div class="num">4</div>
+        <div class="txt">落ち着いたら新セッションで「Discord確認して」で溜まった分を処理</div>
+      </li>
+    </ol>
+  </section>
+
+  <footer class="page-foot">
+    <p>参照: インシデント.md / docs/departments/00_common/orchestration.md / 復旧設計書(docs/設計・調査/外出先リモート復旧_設計書.md)</p>
+    <p>このページのURL(反映後): <a href="https://john-mori.github.io/go5-maker-7b311d01/recovery.html" target="_blank" rel="noopener">https://john-mori.github.io/go5-maker-7b311d01/recovery.html</a></p>
+    <p class="updated">最終更新: 2026-07-14</p>
+  </footer>
+
+</div>
+</body>
+</html>
