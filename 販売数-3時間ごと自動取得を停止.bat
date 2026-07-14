@@ -1,8 +1,6 @@
 @echo off
-chcp 65001 >nul
-echo === 販売数の「3時間ごと自動取得」を停止します ===
+echo Stopping "go5_sales_3h"...
 schtasks /Delete /TN "go5_sales_3h" /F
 echo.
-echo 停止しました。（再開したいときは「販売数-3時間ごと自動取得を設定.bat」を押してください）
-echo.
+echo Stopped. (Re-run the setup .bat to enable again.)
 pause
