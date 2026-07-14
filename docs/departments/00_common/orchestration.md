@@ -138,6 +138,7 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 - 処理: **司令塔はセッション開始時と「Discord確認して」で受信箱を確認**し、行のdeptに従い部門へ振り分け(router=司令塔triage・research-room=アメス/アロンソ)。処理済み行は `local/discord_inbox_processed.jsonl` へ移す(受信箱は常に未処理のみ)
 - 返信: **キャラ名義=`scripts/discord/persona_send.py --dept <slug> --persona <キャラ名> "本文"`を優先**(Webhook自動作成・表示名/アイコン上書き=Bot1つで全人格)。素の名義=bot_send.py。webhook版discord_notify.pyはフォールバック。返信にも秘密を書かない。**本文に署名・肩書きを書かない**(表示名が名乗り=Chami指定2026-07-12)
 - 完全自動化(セッション無しの定期自動処理)はAPI使用コストが伴うため、Chami承認で別途有効化
+- **司令塔不在watchdog(2026-07-14実装)**: `scripts/discord/absence_watchdog.py`が受付箱の15分以上未処理滞留を検知し、発生元chへ自動お知らせ+総合受付chへサマリ通知(暴走ガードつき)。起動=`start_absence_watchdog.bat`。受付箱ファイルは読み取り専用(消費/削除/書き換えしない)
 
 ## ローカルLLM受付 (S4前倒し・2026-07-12稼働)
 - 実体: Ollama(qwen3:4b)+知識パック(正本=`00_common/system-brief.md`→`scripts/llm/build_knowledge.py`で生成。構成変更時は正本を更新して再生成)
