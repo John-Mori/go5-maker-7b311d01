@@ -197,7 +197,7 @@ def main():
                           "変えて", "移動", "削除", "登録", "設定して", "頼む", "お願い", "やって", "解析")
             Q_MARKS = ("?", "？", "教え", "わかる", "分かる", "どれくらい", "どのくらい", "何", "なに",
                        "どう", "いくら", "かな", "だっけ", "ですか", "だろうか", "ある?", "ある？")
-            SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room")  # 機微/司令塔直轄=ローカル一次回答しない
+            SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room", "hr-context")  # 機微/司令塔直轄=ローカル一次回答しない
             def _is_simple_q(r):
                 c = r.get("content") or ""
                 if r.get("attachments"):
