@@ -5,7 +5,7 @@
   Discordの返信は「司令塔(Claude Codeセッション)が受付箱を読む」ことで初めて発生する
   設計(自動botではない)。セッションフリーズ等で誰にも読まれないと無反応になる。
   本スクリプトは local/discord_inbox.jsonl の未処理滞留そのものを検知し、
-  (a) 滞留メッセージの発生元chへ受領お知らせ、(b) 総合受付chへサマリ、を自動送信する。
+  (a) 滞留メッセージの発生元chへ受領お知らせ、(b) 復旧用ch(dept=="incident")へサマリ、を自動送信する。
 
 監視は読み取り専用(受付箱ファイルは消費・削除・書き換えしない。所有者は
 inbox_poller.py / local_responder.py / 司令塔)。heartbeat(local/llm/claude_active.txt)
@@ -45,7 +45,9 @@ SUMMARY_COOLDOWN_SEC = 60 * 60  # (b)は60分に1回まで
 ANNOUNCED_KEEP = 500           # announced履歴の保持件数
 
 ANNOUNCE_TEXT = "司令塔が不在です。このメッセージは受付済み・復帰後に対応します(自動お知らせ)"
-ROUTER_DEPT = "router"
+# 不在サマリの通知先=復旧用チャンネル(dept=="incident"・「システム事故対・復旧部門」)。
+# 未登録の間はbot_sendが失敗し次周期で再試行(取りこぼしなし)。総合受付でなくここへ集約(Chami指定2026-07-14)。
+SUMMARY_DEPT = "incident"
 
 
 def load_state():
@@ -200,7 +202,7 @@ def run_once(dry_run=False):
             f"(最古{int(oldest_min)}分)・{hb_text}・司令塔待ち{for_claude_n}件。"
             "PCでClaude Codeを開くか受付箱を確認してください(自動監視)"
         )
-        ok = bot_send(ROUTER_DEPT, summary, dry_run, by_dept=True)
+        ok = bot_send(SUMMARY_DEPT, summary, dry_run, by_dept=True)
         if ok:
             state["last_summary"] = now_epoch
 
