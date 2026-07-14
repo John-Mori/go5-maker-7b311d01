@@ -38,6 +38,16 @@ STATE_FILE = os.path.join(LOCAL, "discord_watchdog_state.json")
 BOT_SEND = os.path.join(ROOT, "scripts", "discord", "bot_send.py")
 PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
 MACHINE_PERSONA = "メタルギアMk.II"  # 機械的アナウンスの担当(Chami指定2026-07-14・report-notifyの配送役)
+SESSION_LABEL_FILE = os.path.join(LOCAL, "llm", "session_label.txt")
+
+
+def session_label():
+    """司令塔セッションのChami命名の表示名(通知に明示・Chami指定2026-07-14)。未設定なら既定。"""
+    try:
+        s = open(SESSION_LABEL_FILE, encoding="utf-8").read().strip()
+        return s or "(名称未設定の司令塔セッション)"
+    except OSError:
+        return "(名称未設定の司令塔セッション)"
 
 STALE_MIN = 15                 # これ以上未処理なら「司令塔不在の可能性」
 POLL_SEC = 60                  # 常駐時の巡回間隔
@@ -197,10 +207,12 @@ def run_once(dry_run=False):
     last_summary = state.get("last_summary", 0)
     if now_epoch - last_summary >= SUMMARY_COOLDOWN_SEC:
         hb_text = "heartbeat未検出" if hb_age is None else f"heartbeat最終更新{int(hb_age)}分前"
+        label = session_label()
         summary = (
-            f"⚠司令塔不在の可能性: 受付箱{n_stale}件が{STALE_MIN}分以上未処理"
-            f"(最古{int(oldest_min)}分)・{hb_text}・司令塔待ち{for_claude_n}件。"
-            "PCでClaude Codeを開くか受付箱を確認してください(自動監視)"
+            f"⚠受付箱の滞留を検知(自動監視): 司令塔セッション「{label}」宛ての受付箱に"
+            f"{n_stale}件が{STALE_MIN}分以上未処理(最古{int(oldest_min)}分)・{hb_text}・司令塔待ち{for_claude_n}件。"
+            "※これは『受付箱を読む司令塔が15分不在』の検知であり、コンテキスト残量とは無関係です。"
+            "該当セッションが稼働中なら受付箱を確認、終了済みなら新セッションへ引き継ぎを。"
         )
         ok = bot_send(SUMMARY_DEPT, summary, dry_run, by_dept=True)
         if ok:
