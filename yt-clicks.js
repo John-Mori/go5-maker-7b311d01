@@ -2308,9 +2308,11 @@
   function setFanzaAuthorEls(fanzaUrl, author) {
     var man = fanzaManualOf_(fanzaUrl);
     if (man && man.author) author = man.author;
+    // サークル名の前にサークルマーク(候補タブと同じグレーの人物シルエット)を付ける。(Chami依頼2026-07-14「全部のタブに」)
+    var ico = (typeof window.Go5CircleIcon === 'string') ? window.Go5CircleIcon : '';
     document.querySelectorAll('[data-fanza-author-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-author-url') !== fanzaUrl) return;
-      el.textContent = author || '';
+      el.innerHTML = author ? (ico + ' ' + esc(author)) : '';
     });
   }
 
