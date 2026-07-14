@@ -143,7 +143,8 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 ## ローカルLLM受付 (S4前倒し・2026-07-12稼働)
 - 実体: Ollama(qwen3:4b)+知識パック(正本=`00_common/system-brief.md`→`scripts/llm/build_knowledge.py`で生成。構成変更時は正本を更新して再生成)
 - 役割: **Claudeセッション不在時だけ**のDiscord一次応答(「ローカル受付」名義)。質問=知識の範囲で即答/作業依頼・知識外=`local/discord_inbox_for_claude.jsonl`へ回して次セッション対応と返信
-- 自動バトンタッチ: 司令塔セッションは**専用ハートビートループ**(受信監視とは別)で`local/llm/claude_active.txt`を20秒毎にtouch。90秒以内に更新があればローカル受付は待機=二重応答なし。セッション終了→自然にローカルへ交代
+- 自動バトンタッチ: 司令塔セッションは**専用ハートビート**(受信監視とは別・`scripts/llm/heartbeat.py`)で`local/llm/claude_active.txt`を20秒毎にtouch。90秒以内に更新があればローカル受付は待機=二重応答なし。セッション終了→自然にローカルへ交代
+- **ハートビートはTTL付き(既定10分で自然終了)。`while true`での無限touchは禁止**(INC-091 対策1・偽の生存信号で本体フリーズ時に無応答の空白を生む)。司令塔は実際に仕事をしたタイミングで`python scripts/llm/heartbeat.py`(または`start_heartbeat.bat`)を都度起動し直して再武装する。フリーズすれば10分以内に脈が切れ、ローカルqwenが自動で受付を引き継ぐ
 - **司令塔の義務: セッション開始時に`local/discord_inbox_for_claude.jsonl`を確認して処理**(処理後はprocessedへ移動)
 - 権限: ローカル受付は読み取り=知識パックのみ。コード/シート/D1への書き込み・取得は一切しない(できないことは正直に言う設計)
 
