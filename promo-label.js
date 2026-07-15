@@ -18,6 +18,10 @@
   var appliedKey = '';    // 今photoに焼いてある内容のキー('' = 原本のまま)
   var selfSet = false;    // 自分の書き戻しで発火したchangeを原本扱いしないためのフラグ
   var posOv = null;       // 手動調整の位置(852×1280基準の左上{x,y})。写真を替えたらリセット
+  var scale = 1;          // ラベルの大きさ倍率(Chami依頼2026-07-15・0.6〜2.5)。localStorageで永続
+  try { var _s = parseFloat(localStorage.getItem('promo_label_scale')); if (_s >= 0.6 && _s <= 2.5) scale = _s; } catch (e) {}
+  function lw() { return POS.w * scale; }  // 現在の倍率でのラベル幅(852基準)
+  function lh() { return POS.h * scale; }  // 現在の倍率でのラベル高(852基準)
 
   function photoEl() { return document.getElementById('photo'); }
   function acct() { return window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'; }
@@ -25,18 +29,21 @@
   function keyOf() {
     if (!orig || !lastInfo || !(lastInfo.pct > 0)) return '';
     var p = posOv ? Math.round(posOv.x) + ',' + Math.round(posOv.y) : 'def';
-    return [lastInfo.cid, lastInfo.pct, acct(), orig.name, orig.size, p].join('|');
+    return [lastInfo.cid, lastInfo.pct, acct(), orig.name, orig.size, p, scale].join('|');
   }
 
   // 現在のラベル位置(852×1280基準の左上)。手動調整があればそれ、無ければ既定+右余白クランプ。
+  // 手動時のクランプは緩め=端からはみ出す位置まで許可(「画像内でしか動かせない」の解消・Chami依頼2026-07-15)。
+  // 完全に消えないよう、幅・高さの一部は画像内に残す。
   function basisPos() {
     if (posOv) {
+      var w = lw(), h = lh();
       return {
-        x: Math.min(Math.max(0, posOv.x), BASE_W - POS.w),
-        y: Math.min(Math.max(0, posOv.y), BASE_H - POS.h)
+        x: Math.min(Math.max(-w * 0.7, posOv.x), BASE_W - w * 0.3),
+        y: Math.min(Math.max(-h * 0.7, posOv.y), BASE_H - h * 0.3)
       };
     }
-    var x = Math.min(POS.x, BASE_W - POS.rightMargin - POS.w); // 右端余白30〜35px(基準33px)を厳守
+    var x = Math.min(POS.x, BASE_W - POS.rightMargin - lw()); // 右端余白30〜35px(基準33px)を厳守
     return { x: Math.max(0, x), y: POS.y };
   }
 
@@ -53,9 +60,9 @@
   function drawLabel(ctx, imgW, imgH, pct) {
     var sx = imgW / BASE_W, sy = imgH / BASE_H;
     var bp = basisPos();
-    var w = POS.w * sx, h = POS.h * sy;
+    var w = POS.w * scale * sx, h = POS.h * scale * sy;
     var x = bp.x * sx, y = bp.y * sy;
-    var r = POS.radius * Math.min(sx, sy);
+    var r = POS.radius * scale * Math.min(sx, sy);
     ctx.save();
     // 帯: 赤ピンクの角丸+白フチ+薄い影。(窓背景の白でも読める濃度・メインコピーより明確に小さい)
     ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 8 * sx; ctx.shadowOffsetY = 2 * sy;
@@ -67,7 +74,7 @@
     ctx.lineWidth = Math.max(2, 2.5 * sx); ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.stroke();
     // 文字: 白の太字(基準36px=指定34〜38pxの中央)。はみ出す場合だけ縮小。
     var text = labelText(pct);
-    var fs = POS.font * sx;
+    var fs = POS.font * scale * sx;
     var setF = function () { ctx.font = '700 ' + fs + 'px "Noto Sans JP", sans-serif'; };
     setF();
     while (fs > 20 && ctx.measureText(text).width > w - 18 * sx) { fs -= 1; setF(); }
@@ -133,9 +140,25 @@
     scheduleBake();
   }
   function resetPos() { if (!appliedKey) return; posOv = null; scheduleBake(); }
+  function updateSizeLabel() {
+    var el = document.getElementById('promoSizeVal');
+    if (el) el.textContent = Math.round(scale * 100) + '%';
+  }
+  function setScale(mult) {
+    if (!appliedKey) return; // ラベルが出ていない時は変えるものが無い
+    var ns = Math.min(2.5, Math.max(0.6, Math.round((scale + mult) * 100) / 100));
+    if (ns === scale) return;
+    scale = ns;
+    try { localStorage.setItem('promo_label_scale', String(scale)); } catch (e) {}
+    updateSizeLabel();
+    scheduleBake();
+  }
   function updateRow() { // 調整UIはラベルが焼かれている時だけ出す。ドラッグ中のスクロール暴発も防ぐ
     var row = document.getElementById('promoPosRow');
     if (row) row.hidden = !appliedKey;
+    updateSizeLabel();
+    var pw = document.querySelector('.preview-wrap');
+    if (pw) pw.classList.toggle('has-dpad', !!appliedKey); // D-pad分の横余白を確保(真横並べ)
     var cv = document.getElementById('cv');
     if (cv) cv.style.touchAction = appliedKey ? 'none' : '';
   }
@@ -147,6 +170,9 @@
     });
     var rs = document.getElementById('promoPosReset');
     if (rs) rs.addEventListener('click', resetPos);
+    var sm = document.getElementById('promoSizeMinus'); if (sm) sm.addEventListener('click', function () { setScale(-0.1); });
+    var sp = document.getElementById('promoSizePlus'); if (sp) sp.addEventListener('click', function () { setScale(0.1); });
+    updateSizeLabel();
   })();
 
   // プレビュー(canvas#cv)のラベルを指/マウスで直接ドラッグ。掴めるのはラベルの上だけ。
@@ -174,8 +200,8 @@
       var sx = b.width / R.cvW, sy = b.height / R.cvH; // canvas内部px→画面CSSpx
       var cx = R.x + (bp.x * R.imgW / BASE_W) * R.w / R.imgW;
       var cy = R.y + (bp.y * R.imgH / BASE_H) * R.h / R.imgH;
-      var cw = (POS.w * R.imgW / BASE_W) * R.w / R.imgW;
-      var ch = (POS.h * R.imgH / BASE_H) * R.h / R.imgH;
+      var cw = (POS.w * scale * R.imgW / BASE_W) * R.w / R.imgW;
+      var ch = (POS.h * scale * R.imgH / BASE_H) * R.h / R.imgH;
       if (!ghost) {
         ghost = document.createElement('div');
         ghost.style.cssText = 'position:fixed;pointer-events:none;z-index:9999;border:2px dashed #fff;background:rgba(224,37,78,.55);border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.4);';
@@ -188,18 +214,21 @@
       ghost.hidden = false;
     }
     function ghostHide() { if (ghost) ghost.hidden = true; }
+    var downX = 0, downY = 0, downMoved = false;
     cv.addEventListener('pointerdown', function (ev) {
-      if (!appliedKey) return;
+      downX = ev.clientX; downY = ev.clientY; downMoved = false;
+      if (!appliedKey) return;             // ラベル無し=ドラッグ対象なし(タップ拡大は指離しで判定)
       var p = basisPoint(ev);
       if (!p) return;
       var cur = basisPos();
-      if (p.x < cur.x || p.x > cur.x + POS.w || p.y < cur.y || p.y > cur.y + POS.h) return; // ラベル上のみ
+      if (p.x < cur.x || p.x > cur.x + lw() || p.y < cur.y || p.y > cur.y + lh()) return; // ラベル上のみ掴める
       drag = { gx: p.x - cur.x, gy: p.y - cur.y };
       try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
       ghostShow(cur);
       ev.preventDefault();
     });
     cv.addEventListener('pointermove', function (ev) {
+      if (Math.abs(ev.clientX - downX) > 8 || Math.abs(ev.clientY - downY) > 8) downMoved = true;
       if (!drag) return;
       var p = basisPoint(ev);
       if (!p) return;
@@ -208,13 +237,12 @@
       ev.preventDefault();
     });
     function endDrag() {
-      if (!drag) return;
-      drag = null;
-      ghostHide();
-      apply(); // 離した位置で焼き直し(冪等キーに位置が入っているので確実に更新される)
+      if (drag) { drag = null; ghostHide(); apply(); return; } // 離した位置で焼き直し
+      // ドラッグしていない＝ほぼ動かない指離し=タップ→プレビュー拡大/縮小トグル(Chami依頼2026-07-15)
+      if (!downMoved) cv.classList.toggle('cv-zoom');
     }
     cv.addEventListener('pointerup', endDrag);
-    cv.addEventListener('pointercancel', endDrag);
+    cv.addEventListener('pointercancel', function () { if (drag) { drag = null; ghostHide(); } });
   })();
 
   // 写真の変更(ユーザー選択・候補流し込み・下書き復元)=新しい原本。自分の書き戻しは除外。

@@ -52,11 +52,26 @@ input[type=datetime-local]:focus{border-color:var(--accent);}
   color:var(--accent);font-weight:700;padding:18px;border-radius:12px;font-size:16px;cursor:pointer;}
 .photo-btn:active{background:#10203033;}
 .hint{color:var(--sub);font-size:12px;margin-top:6px;word-break:break-all;}
-.preview-wrap{display:flex;justify-content:center;margin:8px 0;}
+.preview-wrap{display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;}
 /* 幅・高さとも auto にして固有比(9:16)のまま max-width/max-height 内に収める。
    どちらか片方だけを固定しないことで、縦長・狭幅端末でも 9:16 が崩れず横潰れしない。 */
 canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/16;
-  background:#000;border:1px solid var(--line);border-radius:10px;}
+  background:#000;border:1px solid var(--line);border-radius:10px;cursor:zoom-in;}
+/* タップで拡大した状態(もう一度タップで戻る)。画面いっぱいのオーバーレイに(Chami依頼2026-07-15)。
+   fixedにするのは、モバイルでは幅制約が効いてmax-heightだけでは大きくならないため=確実に拡大。 */
+canvas#cv.cv-zoom{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  max-width:96vw;max-height:94vh;width:auto;height:auto;z-index:1000;cursor:zoom-out;
+  box-shadow:0 0 0 100vmax rgba(0,0,0,.62);}
+/* 販促ラベルのD-pad(プレビュー真横の余白に配置。ラベルが焼かれている時だけ表示・Chami依頼2026-07-15) */
+.promo-dpad{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:4px;user-select:none;}
+.promo-dpad[hidden]{display:none;}
+.promo-dpad-cap{font-size:10.5px;color:var(--sub);white-space:nowrap;}
+.promo-dpad-pad{display:grid;grid-template-columns:repeat(3,36px);grid-template-rows:repeat(3,36px);gap:3px;}
+.promo-dpad-pad .ctl-btn,.promo-size .ctl-btn{width:36px;height:36px;font-size:17px;}
+.pd-u{grid-column:2;grid-row:1;} .pd-l{grid-column:1;grid-row:2;} .pd-c{grid-column:2;grid-row:2;}
+.pd-r{grid-column:3;grid-row:2;} .pd-d{grid-column:2;grid-row:3;}
+.promo-size{display:flex;align-items:center;gap:4px;}
+.promo-size-val{min-width:32px;text-align:center;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;}
 
 /* ── プレビュー＆位置調整（プレビュー横／見ながら＋−） ── */
 .editor{display:flex;gap:14px;align-items:flex-start;margin:8px 0;}
@@ -65,6 +80,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 @media(max-width:560px){
   .editor{flex-direction:column;}
   .preview-col{align-self:center;z-index:5;background:var(--card);padding-bottom:6px;width:100%;text-align:center;}
+  /* ラベルD-pad表示中だけ、プレビュー横にD-pad分の余白を確保(真横に並べる=Chami依頼)。無い時は全幅。 */
+  .preview-wrap.has-dpad canvas#cv{max-width:calc(100% - 124px);}
 }
 .ctl-group{margin-top:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;}
 .ctl-group:first-child{margin-top:0;}
