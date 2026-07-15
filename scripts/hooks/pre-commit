@@ -1,0 +1,15 @@
+#!/bin/sh
+# go5 表記チェック pre-commit フック (記載ミスの根治・Chami承認2026-07-15)。
+# ステージ済みの .md に 全角括弧（）/ 句点位置ミス「本文(補足)。」があればコミットを中止する。
+# 設置: bash scripts/hooks/install.sh (または本ファイルを .git/hooks/pre-commit へコピーし実行権付与)。
+# 回避: 意図的な例示などで通したい時は git commit --no-verify。
+files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.md$')
+[ -z "$files" ] && exit 0
+python scripts/check_notation.py $files
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo ""
+  echo "表記違反でコミットを中止しました。修正するか、意図的なら git commit --no-verify で回避してください。"
+  exit 1
+fi
+exit 0
