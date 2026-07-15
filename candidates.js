@@ -90,6 +90,13 @@
   var K_ITEMS = 'cand_items';   // 候補リスト(共通): [{url,cid,title,author,thumb,listPrice,price,discountPct,addedAt}]
   var K_TABS = 'cand_tabs';    // サークルタブ: [{id,name,makerId,makerName}]
   function hiddenKey(tabId) { return 'cand_hidden__' + tabId; }
+  // 削除の墓標(トゥームストーン)キー: { cid: 削除ts }。同期で他端末へ伝播し、union後に「削除ts>=addedAt」の候補を
+  //   除外する＝「消したものは消えたまま」を成立させる。(再収集は addedAt が新しいので自動復活。INC 2026-07-15)
+  function delKey(tabId) { return (!tabId || tabId === 'main') ? 'cand_del' : 'cand_del__' + tabId; }
+  function tombstoneCid_(tabId, cid) {
+    var k = delKey(tabId), m = lsGet(k, '{}'); if (!m || typeof m !== 'object' || Array.isArray(m)) m = {};
+    m[cid] = new Date().getTime(); lsSet(k, m);
+  }
   // ★キャッシュ版数(v2)：v170前の「最大400件しか取れていない不完全キャッシュ」を確実に無効化する。
   //   これを上げると全ユーザーの旧キャッシュが読まれなくなり、次回表示で全件を取り直す。
   function cacheKey(makerId, mode) { return 'cand_mk2__' + makerId + '__' + mode; }
@@ -2167,6 +2174,7 @@
         var it = items2.filter(function (x) { return x.cid === c; })[0];
         if (!it || !window.confirm('「' + (it.title || c) + '」をこのタブから削除しますか？')) return;
         lsSet(key, items2.filter(function (x) { return x.cid !== c; }));
+        tombstoneCid_(tabId, c); // ★削除を墓標に記録＝同期で他端末にも伝播し復活を防ぐ(INC 2026-07-15)
         renderCandList(tabId);
       });
     });

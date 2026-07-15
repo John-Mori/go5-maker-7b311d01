@@ -31,6 +31,7 @@
     if (/^sync2_/.test(k)) return false;                 // 同期自身の設定/内部状態は同期しない
     if (Keys && Keys.isSecret(k)) return false;          // 秘密は __sec(暗号化)経由でのみ
     if (/^cand_(items|tabs)(__|$)/.test(k)) return true; // 候補リスト・タブ・独立タブのアイテム
+    if (/^cand_del(__|$)/.test(k)) return true;          // 削除の墓標(候補復活の恒久対策・INC 2026-07-15)
     if (/^cand_hidden__/.test(k)) return true;           // 非表示リスト
     if (k === "cand_hide_posted") return true;
     if (Keys && Keys.syncAllowed(k)) return true;        // 本物の設定(レイアウト/本文/説明欄/af_id 等)
@@ -113,12 +114,14 @@
   // hash化された値 → R2 から dataURL を復元。失敗画像は空文字。(表示されないだけ)
   function downloadImagesIn(val) {
     var refs = []; (function walk(v) { if (isImgRef(v)) { refs.push(v.__img); return; } if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === "object") for (var k in v) if (has(v, k)) walk(v[k]); })(val);
-    if (!refs.length) return Promise.resolve(val);
+    if (!refs.length) return Promise.resolve({ val: val, failed: 0 });
     var c = cfg(), byHash = {}, uniq = {}; refs.forEach(function (h) { uniq[h] = 1; });
     return Promise.all(Object.keys(uniq).map(function (h) {
       return root.fetch(c.url + "/img/" + h).then(function (r) { return r.ok ? r.text() : ""; }).then(function (t) { byHash[h] = /^data:/.test(t) ? t : ""; }).catch(function () { byHash[h] = ""; });
     })).then(function () {
-      return mapVal(val, isImgRef, function (ref) { return byHash[ref.__img] || ""; });
+      var failed = 0;
+      var out = mapVal(val, isImgRef, function (ref) { var v = byHash[ref.__img]; if (!v) failed++; return v || ""; });
+      return { val: out, failed: failed };
     });
   }
 
@@ -182,6 +185,32 @@
     } catch (e) { return null; }
   }
 
+  // 削除の墓標(トゥームストーン)：{ cid: 削除ts } を1キーに持つ。端末をまたぐと LWW では
+  //   別端末の削除を丸ごと失う(＝復活)ので、cid 単位で union し ts の大きい方を採る。
+  function isCandDelKey(k) { return /^cand_del(__|$)/.test(String(k)); }
+  function candDelKeyOf(itemsKey) { return String(itemsKey).replace(/^cand_items/, "cand_del"); } // cand_items[__t]→cand_del[__t]
+  function parseDelMap(str) { try { var m = JSON.parse(str || "{}"); return (m && typeof m === "object" && !Array.isArray(m)) ? m : {}; } catch (e) { return {}; } }
+  function mergeDelMap(olderStr, newerStr) {
+    try {
+      var a = parseDelMap(olderStr), b = parseDelMap(newerStr), out = {};
+      Object.keys(a).forEach(function (c) { out[c] = a[c]; });
+      Object.keys(b).forEach(function (c) { if (!(c in out) || (b[c] || 0) > (out[c] || 0)) out[c] = b[c]; });
+      return JSON.stringify(out);
+    } catch (e) { return null; }
+  }
+  // 候補配列から、墓標にある cid を除外。削除ts が addedAt 以上なら削除確定。addedAt が新しい＝再収集は残す。
+  function applyTombstone(arrStr, delMap) {
+    try {
+      if (!delMap) return arrStr;
+      var arr = JSON.parse(arrStr || "[]"); if (!Array.isArray(arr)) return arrStr;
+      return JSON.stringify(arr.filter(function (it) {
+        var c = it && it.cid; if (c == null) return true;
+        var dts = delMap[c]; if (dts == null) return true;
+        return (it.addedAt || 0) > dts;
+      }));
+    } catch (e) { return arrStr; }
+  }
+
   function syncOnce(retry) {
     if (!configured() || (_busy && !retry)) return Promise.resolve({ ok: false, skipped: true });
     var c = cfg(); _busy = true;
@@ -242,7 +271,7 @@
         var rver = (res && res.version) || 0, rls = remote.ls || {}, ridb = remote.idb || {};
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -253,6 +282,15 @@
           if (a && b && !a.d && !b.d) {
             var localNewer = (a.t || 0) >= (b.t || 0);
             var u = unionCand(localNewer ? b.v : a.v, localNewer ? a.v : b.v);
+            if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
+          }
+        });
+        // 墓標(cand_del)は両側にあれば cid 単位で union。(片側の削除を失わない)
+        Object.keys(mls).forEach(function (k) {
+          if (!isCandDelKey(k)) return;
+          var a = lmapLs[k], b = rls[k];
+          if (a && b && !a.d && !b.d) {
+            var u = mergeDelMap(a.v, b.v);
             if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
           }
         });
@@ -280,6 +318,14 @@
             // 候補配列は「ライブ値」ともう一度cidでunionしてから書く＝進行中に増えた分を絶対に失わない。
             var u2 = unionCand(e.v, live);
             if (u2 != null) finalV = u2;
+            // ★墓標を適用：削除済みcidをunion結果から除外し復活を防ぐ。マージ済み墓標とライブ墓標の両方を効かせる。
+            var dk = candDelKeyOf(k);
+            var dmerged = (mls[dk] && !mls[dk].d) ? mls[dk].v : LS.getItem(dk);
+            finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(dmerged || "{}", LS.getItem(dk) || "{}")));
+          } else if (isCandDelKey(k)) {
+            // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
+            var u3 = mergeDelMap(e.v, live);
+            if (u3 != null) finalV = u3;
           } else if (live !== null && live !== curLs[k] && live !== e.v) {
             // 非配列キーはライブ値がこの同期開始後に変わっている＝マージ結果は古い。上書きせず次回同期に委ねる
             //   。(スナップショット/push対象もLIVE値のまま記録＝クラウドへ古い値を送らず、次回の変更検知も正しく働く)
@@ -295,7 +341,16 @@
           var e = midb[k];
           if (e.d) { if (Idb && Idb.available()) applies.push(Idb.del(k).catch(function () {})); return; }
           newSnapIdb[k] = e.v;
-          if (Idb && Idb.available()) applies.push(downloadImagesIn(e.v).then(function (rebuilt) { return Idb.set(k, rebuilt); }).catch(function () {}).then(function () { setProg("画像を受信", ++dlDone, dlKeys.length); }));
+          if (Idb && Idb.available()) applies.push((function (kk) {
+            return Idb.get(kk).catch(function () { return undefined; }).then(function (prev) {
+              return downloadImagesIn(e.v).then(function (res) {
+                // ★R2から画像本体が取れなかった時、既存のローカル画像を空で潰さない(サムネ/参照画像の消失防止・INC 2026-07-15)。
+                //   既存が無い(初回)なら部分的にでも書く。
+                if (res.failed > 0 && prev !== undefined && prev !== null) return;
+                return Idb.set(kk, res.val);
+              });
+            }).catch(function () {}).then(function () { setProg("画像を受信", ++dlDone, dlKeys.length); });
+          })(k));
         });
 
         return Promise.all(applies).then(function () {
@@ -348,8 +403,11 @@
       } catch (e) {}
     },
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
-    resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); }
+    resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
+    // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
+    _test: { unionCand: unionCand, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey }
   };
+  if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 
   // ── ⚙詳細設定 UI 配線＋自動同期の起動 ──
   if (root.document) root.document.addEventListener("DOMContentLoaded", function () {
