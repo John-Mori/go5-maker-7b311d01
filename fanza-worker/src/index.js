@@ -474,6 +474,24 @@ async function fetchViaApi(cid, apiId, affiliateId) {
       const circleArr = Array.isArray(info.circle) ? info.circle : [];
       const authorArr = makerArr.length ? makerArr : (Array.isArray(info.author) && info.author.length ? info.author : circleArr);
       var genreArr = Array.isArray(info.genre) ? info.genre : [];
+      // ebook(Books)後処理：Booksの商品ページ(JSON-LD offers.price)はセール中でも定価のまま
+      // 返る癖があるが、公式APIの prices.list_price/price が同じ癖を持つかは未確認（要live確認）。
+      // 確証が無いため副作用ゼロの形にとどめる＝APIレスポンスに割引後価格の手がかり
+      // (deliveries等の内訳)が実在すればそちらの最安値を採用し、無ければ何もせず素通しする。
+      let apiListPrice = prices.list_price || null;
+      let apiPrice = prices.price || null;
+      if (service === "ebook" && Array.isArray(prices.deliveries) && prices.deliveries.length) {
+        const dPrices = prices.deliveries
+          .map((d) => parseInt(d && d.price, 10))
+          .filter((n) => Number.isFinite(n) && n >= 0);
+        if (dPrices.length) {
+          const minD = Math.min.apply(null, dPrices);
+          if (apiPrice == null || minD < apiPrice) {
+            if (apiListPrice == null) apiListPrice = apiPrice;
+            apiPrice = minD;
+          }
+        }
+      }
       return {
         content_id:   cid,
         title:        it.title || "",
@@ -484,8 +502,8 @@ async function fetchViaApi(cid, apiId, affiliateId) {
         sampleImageURL: it.sampleImageURL || null,   // {sample_s:{image:[]}, sample_l:{image:[]}}
         iteminfo:   { author: authorArr, genre: genreArr },
         prices: {
-          list_price: prices.list_price  || null,
-          price:      prices.price       || null,
+          list_price: apiListPrice,
+          price:      apiPrice,
         },
         review: it.review || { count: null, average: null },
       };
@@ -532,6 +550,7 @@ async function fetchDmmPage(url, trace) {
 }
 async function scrapeFanzaItem(cid, srcUrl) {
   // srcUrl（FANZA Books等の実ページURL・呼び出し元で許可ドメイン検証済み）があればそちらを優先。
+  const isBook = /book\.dmm\./.test(srcUrl); // FANZAブックス判定（同人ページとは価格の出方が異なる＝下記価格ブロックで分岐）
   const pageUrl = srcUrl || (DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/");
   let res;
   try { res = await fetchDmmPage(pageUrl); } catch (e) { return null; }
@@ -584,11 +603,35 @@ async function scrapeFanzaItem(cid, srcUrl) {
   ) return null;
 
   // 価格情報（取れれば付ける）
-  const currentPriceM = html.match(/["']offers["']\s*:\s*\{[^}]*["']price["']\s*:\s*["']?(\d+)/);
-  const currentPriceStr = currentPriceM ? currentPriceM[1] : null;
+  let currentPriceStr = null;
+  let listPriceStr = null;
+  if (isBook) {
+    // FANZAブックス：JSON-LD offers.price はセール中でも定価のままのことがある（値引きは
+    // カート適用のため）。定価＋割引バッジ(>◯%OFF<)から割引後価格を逆算する。
+    // ロジックは scripts/fetch_missing_works.mjs の scrapeBookPage() と同一（移植・同期を保つ）。
+    const ldPriceM = html.match(/["']offers["']\s*:\s*\{[^}]*["']price["']\s*:\s*["']?(\d+)/);
+    let price = ldPriceM ? parseInt(ldPriceM[1], 10) : null;
+    const lm = html.match(/(?:定価|通常価格|参考価格)[^0-9]{0,16}([\d,]+)\s*円/);
+    let listPrice = lm ? parseInt(lm[1].replace(/,/g, ""), 10) : null;
+    if (listPrice == null) listPrice = price; // 定価表記が無ければ現在価格＝定価扱い
+    const offM = html.match(/>\s*(\d{1,3})\s*[%％]\s*OFF\s*</i);
+    if (offM && price != null) {
+      const pct = parseInt(offM[1], 10);
+      if (pct > 0 && pct <= 100) {
+        if (listPrice == null || listPrice < price) listPrice = price; // 定価＝JSON-LDの価格
+        price = Math.round(listPrice * (100 - pct) / 100);              // 割引後（100%OFFなら0円）
+      }
+    }
+    currentPriceStr = price != null ? String(price) : null;
+    listPriceStr = listPrice != null ? String(listPrice) : null;
+  } else {
+    // 同人（従来ロジック・無変更）
+    const currentPriceM = html.match(/["']offers["']\s*:\s*\{[^}]*["']price["']\s*:\s*["']?(\d+)/);
+    currentPriceStr = currentPriceM ? currentPriceM[1] : null;
 
-  const lpM = html.match(/priceList__sub--big[^>]*>[\s\S]{0,80}?([\d,]+)円/);
-  const listPriceStr = lpM ? lpM[1].replace(/,/g, "") : null;
+    const lpM = html.match(/priceList__sub--big[^>]*>[\s\S]{0,80}?([\d,]+)円/);
+    listPriceStr = lpM ? lpM[1].replace(/,/g, "") : null;
+  }
 
   // 発売日（JSON-LD releaseDate / 商品情報の「YYYY-MM-DD」表記から拾えれば）。取れなければ空。
   var dateStr = "";
@@ -633,8 +676,8 @@ async function scrapeFanzaItem(cid, srcUrl) {
     content_id: cid,
     title:      title,
     date:       dateStr,
-    service_name: "同人",
-    floor_name:   "同人",
+    service_name: isBook ? "FANZAブックス" : "同人",
+    floor_name:   isBook ? "ブックス"     : "同人",
     imageURL:       ogImg ? { list: ogImg, large: ogImg } : null,
     sampleImageURL: null,
     iteminfo:   { author: authorArr, genre: [] },
