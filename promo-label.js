@@ -127,15 +127,21 @@
     updateSizeLabel();
   })();
 
-  // ---- プレビュー上の操作: 二本指ピンチ=ズーム / 一本指=ラベルのドラッグ ----
+  // ---- プレビュー上の操作 ----
+  // 二本指ピンチ=連続ズーム(画面フィット→実寸相当までズームイン・Chami「等倍で拡大」)。
+  // ズーム中は一本指=パン(移動)。ズームしていない時の一本指=ラベルのドラッグ。
   (function wirePointer() {
     var cv = document.getElementById('cv');
     if (!cv || !window.PointerEvent) return;
-    var pointers = {};   // 触れているポインタ {id:{x,y}}
-    var pinchBase = 0;   // ピンチ開始の2点間距離
-    var drag = null;     // {gx,gy}=掴んだ点とラベル左上のずれ(フレーム比)
+    var pointers = {};      // 触れているポインタ {id:{x,y}}
+    var pinchBase = 0;      // ピンチ開始の2点間距離
+    var zoomK = 1;          // ズーム倍率(1=フィット, 上限2.8=実寸相当)
+    var zoomStartK = 1;     // ピンチ開始時のzoomK
+    var panX = 0, panY = 0; // パン(表示px)
+    var panPrev = null;     // 一本指パンの前回座標
+    var drag = null;        // ラベルドラッグ {gx,gy}=掴んだ点とラベル左上のずれ(フレーム比)
 
-    function framePoint(ev) { // ポインタ→フレーム比(0..1)。canvasの外側でもそのまま比で返す。
+    function framePoint(ev) { // ポインタ→フレーム比(0..1)。ズーム無しの時だけ使う(変形なし)。
       var b = cv.getBoundingClientRect();
       if (!b.width || !b.height) return null;
       return { x: (ev.clientX - b.left) / b.width, y: (ev.clientY - b.top) / b.height };
@@ -146,26 +152,40 @@
       var a = pointers[ids[0]], b = pointers[ids[1]];
       return Math.hypot(a.x - b.x, a.y - b.y);
     }
+    function zoomed() { return cv.classList.contains('cv-zoom'); }
+    function applyZoom() {
+      if (zoomed()) cv.style.transform = 'translate(calc(-50% + ' + panX + 'px), calc(-50% + ' + panY + 'px)) scale(' + zoomK + ')';
+      else { cv.style.transform = ''; zoomK = 1; panX = 0; panY = 0; }
+    }
+    function exitZoom() { cv.classList.remove('cv-zoom'); applyZoom(); }
+
     cv.addEventListener('pointerdown', function (ev) {
       pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
-      if (Object.keys(pointers).length >= 2) { pinchBase = pinchDist(); drag = null; return; } // 二本指=ピンチ
-      if (!active()) return;
+      if (Object.keys(pointers).length >= 2) { pinchBase = pinchDist(); zoomStartK = zoomK; drag = null; panPrev = null; return; } // 二本指=ピンチ
+      if (zoomed()) { panPrev = { x: ev.clientX, y: ev.clientY }; ev.preventDefault(); return; }          // ズーム中の一本指=パン
+      if (!active()) return;                                                                              // ラベル無し=何もしない
       var p = framePoint(ev); if (!p) return;
       var cp = curPos(), wr = lw() / FRAME_W, hr = lh() / FRAME_H;
-      if (p.x < cp.x || p.x > cp.x + wr || p.y < cp.y || p.y > cp.y + hr) return; // ラベル上のみ掴める
+      if (p.x < cp.x || p.x > cp.x + wr || p.y < cp.y || p.y > cp.y + hr) return;                          // ラベル上のみ掴める
       drag = { gx: p.x - cp.x, gy: p.y - cp.y };
       try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
       ev.preventDefault();
     });
     cv.addEventListener('pointermove', function (ev) {
       if (pointers[ev.pointerId]) { pointers[ev.pointerId].x = ev.clientX; pointers[ev.pointerId].y = ev.clientY; }
-      if (Object.keys(pointers).length >= 2 && pinchBase) { // ピンチ中=距離比で拡大/縮小(Chami指定「二本指でズーム」)
-        var d = pinchDist();
-        if (d) {
-          if (d / pinchBase > 1.2) cv.classList.add('cv-zoom');
-          else if (d / pinchBase < 0.83) cv.classList.remove('cv-zoom');
+      if (Object.keys(pointers).length >= 2 && pinchBase) {   // 二本指=連続ズーム
+        var ratio = pinchDist() / pinchBase;
+        if (!zoomed() && ratio > 1.15) { cv.classList.add('cv-zoom'); zoomStartK = 1; }
+        if (zoomed()) {
+          zoomK = Math.min(2.8, Math.max(1, zoomStartK * ratio));
+          if (zoomK <= 1 && ratio < 0.9) exitZoom(); else applyZoom();
         }
         ev.preventDefault(); return;
+      }
+      if (panPrev && zoomed()) {                              // 一本指パン
+        panX += ev.clientX - panPrev.x; panY += ev.clientY - panPrev.y;
+        panPrev = { x: ev.clientX, y: ev.clientY };
+        applyZoom(); ev.preventDefault(); return;
       }
       if (!drag) return;
       var p = framePoint(ev); if (!p) return;
@@ -176,6 +196,7 @@
     function endPointer(ev) {
       delete pointers[ev.pointerId];
       if (Object.keys(pointers).length < 2) pinchBase = 0;
+      if (Object.keys(pointers).length === 0) panPrev = null;
       if (drag) { drag = null; persist(); redraw(); }
     }
     cv.addEventListener('pointerup', endPointer);

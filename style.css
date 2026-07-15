@@ -61,6 +61,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 /* タップで拡大した状態(もう一度タップで戻る)。画面いっぱいのオーバーレイに(Chami依頼2026-07-15)。
    fixedにするのは、モバイルでは幅制約が効いてmax-heightだけでは大きくならないため=確実に拡大。 */
 canvas#cv.cv-zoom{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  transform-origin:center center;
   max-width:96vw;max-height:94vh;width:auto;height:auto;z-index:1000;cursor:zoom-out;
   box-shadow:0 0 0 100vmax rgba(0,0,0,.62);}
 /* 販促ラベルのD-pad(プレビュー真横の余白に配置。ラベルが焼かれている時だけ表示・Chami依頼2026-07-15) */

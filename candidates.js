@@ -315,10 +315,12 @@
     var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: data.twitterUrl2 || '', at: new Date().getTime() };
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
-      (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
+      // IDB書込みのPromiseを返す(常にtruthy=従来のtrueと同じ扱いで既存の if(okRef)/if(!refImgSave()) と互換)。
+      // 呼び出し元が画面遷移の前に書込み完了を確認したい場合は await/.then() できる(例: #refImgToMovie)。
+      var p = (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
       reqSync_(); // 参照画像(動画生成用)の保存直後に即時同期＝他端末で即反映(画像はR2へ)
       if (rec) klog_('ref_image_saved', 'work', cid, { imgs: imgs.length });
-      return true; // IDBは容量に余裕。非同期失敗は稀(メモリ保持＋ログ)
+      return p; // IDBは容量に余裕。非同期失敗は稀(メモリ保持＋ログ)
     }
     try {
       if (!rec) { localStorage.removeItem(refImgKey(cid)); return true; }
@@ -935,10 +937,13 @@
       var workVal = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
       if (!workVal && !it.isTwitter && it.url) workVal = it.url; // 欄が空でも候補が作品URLを持つなら使う(動画側へ確実に反映)
       var workUrl = workVal ? (window.normalizeWorkUrl ? window.normalizeWorkUrl(workVal) : workVal) : '';
-      refImgSave(it.cid, pending); // 画像・コメントを失わないよう保存(best-effort)
-      transferToMovie_(it, pending.imgs[pending.idx] || '', pending.comment, workUrl); // ★表示中の画像を採用
-      if (onSaved) onSaved();
-      ov.hidden = true;
+      // 画像・コメントの保存完了を待ってから遷移(IDB書込みがfire-and-forgetのまま画面遷移で
+      // 取りこぼされないように・完了確認)。okでもエラーでもPromiseは必ず解決するため待ち逃げしない。
+      Promise.resolve(refImgSave(it.cid, pending)).then(function () {
+        transferToMovie_(it, pending.imgs[pending.idx] || '', pending.comment, workUrl); // ★表示中の画像を採用
+        if (onSaved) onSaved();
+        ov.hidden = true;
+      });
     });
     body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
     // メモ・URL追加：親の入力を pending に取り込んでから小モーダルを開く。(親の未保存入力を失わない)
@@ -1127,8 +1132,8 @@
     if (!r || !r.ok) { cb(false, 'FANZAの作品URLではないようです'); return; }
     var tabId = _activeTab, key = itemsKey(tabId), items = lsGet(key, '[]'), oldCid = oldItem.cid;
     if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'この作品は既に追加されています(重複追加しません)'); return; }
-    // 画像・メモ・Twitter URL を新cidへ移す
-    var okRef = refImgSave(r.cid, { imgs: Array.isArray(refData.imgs) ? refData.imgs : (refData.img ? [refData.img] : []), comment: refData.comment || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '' });
+    // 画像・コメント・メモ・Twitter URL(1つ目/2つ目)を新cidへ移す(★memo/twitterUrl2も引き継ぐ・旧実装は落としていた)
+    var okRef = refImgSave(r.cid, { imgs: Array.isArray(refData.imgs) ? refData.imgs : (refData.img ? [refData.img] : []), comment: refData.comment || '', memo: refData.memo || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '', twitterUrl2: refData.twitterUrl2 || '' });
     var bimg = (bskyImgOf(oldCid) || {}).img;
     var okB = bimg ? bskyImgSave(r.cid, bimg) : true;
     // 新cidへの保存が成功した時だけ旧cidを消す(localStorageフォールバック時の容量超過で唯一のコピーを失わない)
