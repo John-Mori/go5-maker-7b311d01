@@ -16,6 +16,8 @@ import urllib.request
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # stdinもUTF-8に(パイプ経路 `echo 日本語 | bot_send` の文字化け根治・2026-07-15)。
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
