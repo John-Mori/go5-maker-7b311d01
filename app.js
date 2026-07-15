@@ -384,6 +384,11 @@
     }
     // テキスト
     drawText(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, titleForDraw(els.top.value));
+    // 販促ラベル(今なら◯%OFF)=動画フレームへ重ね描き(写真に焼き込まない=Bluesky添付に入らない・Chami2026-07-15)。
+    // フレーム基準(W×H)で描くので画像の外(黒帯・余白)にも自由に置ける。
+    if (window.Go5PromoLabel && window.Go5PromoLabel.drawOverlay) {
+      try { window.Go5PromoLabel.drawOverlay(ctx, W, H); } catch (e) {}
+    }
   }
 
   // ---- プレビュー(完全表示状態の1枚) ----
@@ -392,6 +397,7 @@
     if (bg.readyState < 2) { try { await bg.play(); } catch (e) {} }
     drawFrame(DURATION);
   }
+  window.Go5Preview = preview; // 販促ラベル等がプレビュー再描画を要求するためのフック
 
   // ---- 画像選択 ----
   // 表示専用の匿名化。(実ファイル名の代わりにランダムな英数字)アップロード/投稿には一切関与しない。
