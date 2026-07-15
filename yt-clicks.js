@@ -83,6 +83,18 @@
   // 表示する全アイテム(履歴＋手動追加)を結合。manualOnly=true の手動短縮URL履歴は除外。
   function allItems() { return loadHist().filter(function (it) { return !it.manualOnly; }).concat(loadManual()); }
 
+  // ── PC(広い画面)向け：投稿履歴カードの列数(ユーザー選択・スマホは無効)。候補タブと同方式。 ──
+  var K_HISTCOLS = 'hist_pc_cols';
+  var HCOLS_MIN = 1, HCOLS_MAX = 4, HCOLS_DEF = 1;
+  function histCols_() { var n; try { n = parseInt(localStorage.getItem(K_HISTCOLS) || String(HCOLS_DEF), 10); } catch (e) { n = HCOLS_DEF; } return (n >= HCOLS_MIN && n <= HCOLS_MAX) ? n : HCOLS_DEF; }
+  function applyHistCols_(n) { try { document.documentElement.style.setProperty('--hist-cols', String(n)); } catch (e) {} }
+  function histColsCtlHtml_() {
+    var cur = histCols_(), opts = '';
+    for (var n = HCOLS_MIN; n <= HCOLS_MAX; n++) opts += '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + '列</option>';
+    return '<span class="hist-cols-ctl"><label class="hint">表示列数</label><select id="histColsSel">' + opts + '</select></span>';
+  }
+  try { applyHistCols_(histCols_()); } catch (e) {}
+
   // 投稿時刻(ts)等から背骨ID(videoId)を生成。idgen があれば流用、無ければ同形式で自前生成。
   function genVideoId(ts) {
     var d = (ts && ts > 0) ? new Date(ts) : new Date();
@@ -719,6 +731,7 @@
     // 非表示トグルは行の枠外(リスト最上部の独立バー)に置く＝先頭カードに重ならない。
     var hideBarHtml = '<div class="vhide-remade-bar">' +
       '<span id="saleStats" class="sale-stats" title="セール会場リンク(🏮大幅割引セール中の同人祭ページ)のクリック数。累計はr2計測・今日/昨日/週は日次スナップショット">🏮 セール会場 …</span>' +
+      histColsCtlHtml_() + // 列数セレクタ(PCのみCSSで表示)
       '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
     list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
       var k = itemKey(it);
@@ -812,6 +825,8 @@
     applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示(フェッチ待ちで遅れない)
     fillFanzaNames();
     try { renderSaleStats_(); } catch (e) {} // セール会場統計(再描画のたびに最新表示)
+    try { applyHistCols_(histCols_()); } catch (e) {} // 列数を反映(PCのみCSSで効く)
+    (function () { var hcs = $('histColsSel'); if (hcs) hcs.addEventListener('change', function () { var n = parseInt(this.value, 10) || HCOLS_DEF; try { localStorage.setItem(K_HISTCOLS, String(n)); } catch (e) {} applyHistCols_(n); }); })();
 
     // YouTube URL 直接入力
     list.querySelectorAll('input[data-k]').forEach(function (inp) {

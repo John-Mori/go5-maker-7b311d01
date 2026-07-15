@@ -94,8 +94,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-body .vmetrics{flex-wrap:wrap;} /* 本文が狭くなるので指標・リンク行は折り返す（nowrapでの見切れ防止） */
 .vrow-thumbcol{flex:0 1 auto;width:clamp(46px,15vw,66px);display:flex;flex-direction:column;gap:6px;} /* 右の画像列：文字優先で可変（狭い端末では縮小）。作品サムネの下に動画で使った画像 */
 .vrow-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;display:block;}
-.vrow-refimg{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;background:#0b1019;display:block;}
-.vrow-postimg{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--accent);cursor:zoom-in;background:#0b1019;display:block;} /* 🛠️編集で添付した投稿画像（枠色でrefimgと区別） */
+/* refimg/postimgは正方形クロップ(cover)をやめ、元画像の比率のまま全体を表示＝下部まで見える(引き延ばし/比率変更なし・Chami依頼2026-07-15)。高さ上限で伸びすぎを防ぐ。 */
+.vrow-refimg{width:100%;height:auto;max-height:180px;object-fit:contain;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;background:#0b1019;display:block;}
+.vrow-postimg{width:100%;height:auto;max-height:180px;object-fit:contain;border-radius:6px;border:1px solid var(--accent);cursor:zoom-in;background:#0b1019;display:block;} /* 🛠️編集で添付した投稿画像（枠色でrefimgと区別） */
 .vrow-postimg:active{opacity:.7;}
 .vrow-refimg:active{opacity:.7;}
 /* 被リビルドの非表示トグル：行の枠外（リスト最上部の独立バー・右寄せ）に置く＝先頭カードに重ならない。 */
@@ -103,6 +104,26 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vhide-remade-btn{width:auto;margin:0;font-size:11px;font-weight:700;line-height:1.1;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:#0e1422;color:var(--sub);cursor:pointer;white-space:nowrap;} /* 縦幅を約1.5倍・横幅はテキスト長に自動追従 */
 .vhide-remade-btn:active{opacity:.7;}
 .vrow-thumb:active{opacity:.7;}
+/* 投稿履歴の管理・診断ツールの折り畳み(普段使わない設定系を畳む・Chami依頼2026-07-15)。アプリ配色(紫は使わない)。 */
+.tools-fold{margin:6px 0;border:1px solid var(--line);border-radius:8px;background:#0e1422;}
+.tools-fold > summary{cursor:pointer;list-style:none;padding:8px 12px;font-size:12.5px;font-weight:700;color:var(--sub);user-select:none;}
+.tools-fold > summary::-webkit-details-marker{display:none;}
+.tools-fold > summary::before{content:"▸ ";color:var(--accent);}
+.tools-fold[open] > summary::before{content:"▾ ";}
+.tools-fold[open] > summary{border-bottom:1px solid var(--line);}
+.tools-fold-body{padding:8px 12px 4px;}
+/* 投稿履歴：PCで複数列表示(列数はユーザー選択・既定1列)。モバイルは従来どおり縦1列。候補タブと同方式。 */
+@media (min-width:1024px){
+  #ytClickList{display:grid;grid-template-columns:repeat(var(--hist-cols,1), minmax(0,1fr));gap:8px 12px;align-items:start;}
+  #ytClickList > :not(.vrow){grid-column:1/-1;} /* hideBar(セール会場/列数/被リビルド)等は全列またぎ */
+  #ytClickList .vrow{margin-top:0;height:100%;}
+}
+.hist-cols-ctl{display:none;} /* PCのみ表示(モバイルはグリッド化しないため無意味) */
+@media (min-width:1024px){
+  .hist-cols-ctl{display:inline-flex;align-items:center;gap:6px;}
+  .hist-cols-ctl label{margin:0;white-space:nowrap;}
+  .hist-cols-ctl select{width:auto;padding:4px 6px;font-size:12px;}
+}
 .vrow-h{font-size:14px;color:var(--ink);display:flex;align-items:baseline;flex-wrap:nowrap;gap:6px;min-width:0;}
 .vrow-author{margin-left:2ch;font-size:.78rem;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;}
 /* 旧🏷プレフィックスは撤去(PCで単色しおり型に描画され、JS側の人物シルエットと二重表示になるため。Chami依頼2026-07-14) */
