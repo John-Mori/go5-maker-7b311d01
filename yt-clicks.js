@@ -124,10 +124,17 @@
     return /^[0-9A-Za-z]+$/.test(rest) ? rest : '';
   }
   // セール会場リンク(導線3・共通コード)のクリック統計。(2026-07-14 Chami依頼: 累計/今日/昨日/週を投稿履歴に表示)
-  var SALE_CODES = ['JrziR']; // campaign=gain(utm)の決定的コード。ensureDiscountLink_の短縮先と同一
+  var SALE_CODES = ['JrziR']; // campaign=gain(utm)の歴史的コード(フォールバック)。af_id差/再生成でコードが変わり得るため下で実リンクからも導出。
+  // 実際に生成されたセール会場短縮リンク(bsky_discount_list_link_r2)から現行コードを導出し、ハードコードと合算(重複除去)。
+  //   ＝af_id変更や再短縮でコードが変わっても累計が0のまま張り付かない(Chami報告2026-07-15「累計0」対策)。歴史的JrziRも残し過去分を失わない。
+  function saleCodes_() {
+    var codes = SALE_CODES.slice();
+    try { var c = codeOf(localStorage.getItem('bsky_discount_list_link_r2') || ''); if (c && codes.indexOf(c) < 0) codes.push(c); } catch (e) {}
+    return codes;
+  }
   function renderSaleStats_() {
     var el = document.getElementById('saleStats'); if (!el) return;
-    Promise.all(SALE_CODES.map(fetchClicks)).then(function (arr) {
+    Promise.all(saleCodes_().map(fetchClicks)).then(function (arr) {
       var cum = null; arr.forEach(function (c) { if (c != null) cum = (cum || 0) + c; });
       var d = (typeof deltaCache === 'object' && deltaCache) ? deltaCache.SALE : null;
       function f(x) { return (x == null ? '–' : num(x)); }
@@ -1373,23 +1380,47 @@
     var api = window.Go5Cand || {};
     if (!api.postImgs || !api.postImgSave) return; // 画像ストア未対応環境では出さない
     var pKey = it.videoId || k;
-    var imgs = (api.postImgs(pKey) || []).slice(); // 作業コピー
+    var cid = it.workUrl ? workCidOf_(it.workUrl) : '';
+    // 用途(保存先)。ref(動画で使った画像)/bsky(Bluesky添付)は作品cidが要る＝workUrlがある時だけ選べる。
+    var USES = [{ v: 'post', label: '投稿画像', multi: true }];
+    if (cid) { USES.push({ v: 'ref', label: '動画で使った画像', multi: true }); USES.push({ v: 'bsky', label: 'Bluesky投稿画像', multi: false }); }
+    var use = 'post';
+    function useDef_() { for (var i = 0; i < USES.length; i++) { if (USES[i].v === use) return USES[i]; } return USES[0]; }
+    function load_() {
+      if (use === 'ref') return (api.refImgs ? api.refImgs(cid) : []).slice();
+      if (use === 'bsky') { var b = api.bskyImg ? api.bskyImg(cid) : ''; return b ? [b] : []; }
+      return (api.postImgs(pKey) || []).slice();
+    }
+    function store_(arr) {
+      if (use === 'ref') return api.refImgsSet ? api.refImgsSet(cid, arr) : false;
+      if (use === 'bsky') return api.bskyImgSet ? api.bskyImgSet(cid, arr[0] || '') : false;
+      return api.postImgSave(pKey, arr);
+    }
+    var imgs = load_(); // 作業コピー
     var wrap = document.createElement('div'); wrap.className = 'vedit-field vedit-postimg';
+    var opts = USES.map(function (u) { return '<option value="' + u.v + '">' + u.label + '</option>'; }).join('');
     wrap.innerHTML =
-      '<div class="vedit-postimg-lbl">投稿画像(複数可・1枚目が投稿履歴に表示)</div>' +
+      '<div class="vedit-postimg-lbl">画像を添付 <span style="font-weight:400;color:var(--sub);font-size:11px;">(用途を選び、コピー中の画像を貼り付け or ファイルから追加。1枚目が投稿履歴に表示)</span></div>' +
+      '<div class="vedit-bsky-row" style="margin-bottom:6px;">' +
+        '<select id="veditImgUse" style="flex:1;min-width:0;">' + opts + '</select>' +
+        '<button id="veditImgPaste" type="button" class="vedit-copy">📋 貼り付け</button>' +
+        '<label class="vedit-copy" style="cursor:pointer;margin:0;">＋ 選ぶ<input type="file" accept="image/*" multiple hidden></label>' +
+      '</div>' +
       '<div class="vedit-postimg-grid"></div>' +
-      '<label class="vedit-postimg-add">＋ 画像を追加<input type="file" accept="image/*" multiple hidden></label>';
+      '<div class="vedit-postimg-msg hint" style="min-height:0;margin:2px 0 0;"></div>';
     var actions = modal.querySelector('.vedit-actions');
     if (actions) modal.insertBefore(wrap, actions); else modal.appendChild(wrap);
     var grid = wrap.querySelector('.vedit-postimg-grid');
     var fileInp = wrap.querySelector('input[type=file]');
-    function persist() { api.postImgSave(pKey, imgs); try { refresh(); } catch (e) {} } // 即保存＋カード再描画
+    var useSel = wrap.querySelector('#veditImgUse');
+    var msg = wrap.querySelector('.vedit-postimg-msg');
+    function persist() { store_(imgs); try { refresh(); } catch (e) {} } // 即保存＋カード再描画
     function draw() {
       grid.innerHTML = '';
-      if (!imgs.length) { grid.innerHTML = '<div class="hint" style="padding:6px 2px;">まだありません。「＋ 画像を追加」から選択してください。</div>'; return; }
+      if (!imgs.length) { grid.innerHTML = '<div class="hint" style="padding:6px 2px;">まだありません。「📋 貼り付け」か「＋ 選ぶ」で追加してください。</div>'; return; }
       imgs.forEach(function (src, i) {
         var cell = document.createElement('div'); cell.className = 'vedit-postimg-cell';
-        cell.innerHTML = '<img src="' + esc(src) + '" alt="投稿画像' + (i + 1) + '" loading="lazy">' +
+        cell.innerHTML = '<img src="' + esc(src) + '" alt="画像' + (i + 1) + '" loading="lazy">' +
           (i === 0 ? '<span class="vedit-postimg-first">1枚目</span>' : '') +
           '<button type="button" class="vedit-postimg-del" title="この画像を削除">✕</button>';
         grid.appendChild(cell);
@@ -1397,6 +1428,21 @@
         cell.querySelector('.vedit-postimg-del').addEventListener('click', function () { imgs.splice(i, 1); persist(); draw(); });
       });
     }
+    function addUrls_(urls) {
+      urls = (urls || []).filter(Boolean); if (!urls.length) return;
+      if (useDef_().multi) { urls.forEach(function (u) { imgs.push(u); }); }
+      else { imgs = [urls[urls.length - 1]]; } // 単発用途(Bluesky)は最後の1枚に差し替え
+      persist(); draw();
+    }
+    useSel.addEventListener('change', function () { use = this.value; imgs = load_(); msg.textContent = ''; draw(); });
+    wrap.querySelector('#veditImgPaste').addEventListener('click', function () {
+      if (!api.pasteImage) { msg.textContent = 'この環境では貼り付けに未対応です(「＋ 選ぶ」をお使いください)'; return; }
+      msg.textContent = '貼り付け中…';
+      api.pasteImage(function (durl, err) {
+        if (durl) { msg.textContent = ''; addUrls_([durl]); }
+        else { msg.textContent = err || '画像を貼り付けできませんでした'; setTimeout(function () { if (msg) msg.textContent = ''; }, 2400); }
+      });
+    });
     fileInp.addEventListener('change', function () {
       var files = Array.prototype.slice.call(fileInp.files || []);
       if (!files.length) return;
@@ -1407,11 +1453,7 @@
           r.onerror = function () { res(''); };
           r.readAsDataURL(f);
         });
-      })).then(function (urls) {
-        urls.filter(Boolean).forEach(function (u) { imgs.push(u); });
-        fileInp.value = ''; // 同じ画像を続けて選べるようにクリア
-        persist(); draw();
-      });
+      })).then(function (urls) { fileInp.value = ''; addUrls_(urls); }); // 同じ画像を続けて選べるようクリア
     });
     draw();
   }

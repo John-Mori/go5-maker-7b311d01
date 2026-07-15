@@ -2461,7 +2461,11 @@
     zoomRefImgs: function (cid) { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); }, // タップで全画像ズーム＋1ページ目にする＋貼り付け新規追加
     postImgs: postImgsOf_,                                      // 履歴キー → 🛠️編集で添付した投稿画像の配列(無ければ[])
     postImgHas: function (key) { return postImgsOf_(key).length > 0; },
-    postImgSave: postImgSave_                                   // 履歴キー + 画像配列 を保存(write-through)
+    postImgSave: postImgSave_,                                  // 履歴キー + 画像配列 を保存(write-through)
+    // ── 🛠️編集の画像添付(貼り付け＋用途選択・Chami依頼2026-07-15)用の公開API ──
+    pasteImage: function (cb) { return pasteImageFromClipboard_(cb); }, // クリップボード画像→dataURL(cb(durl,err))
+    refImgsSet: function (cid, arr) { if (!cid) return false; var cur = refImgOf(cid) || {}; return refImgSave(cid, { imgs: (arr || []).filter(Boolean), comment: cur.comment || '', memo: cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' }); }, // 動画で使った画像(配列)を差し替え保存(コメント等は保持)
+    bskyImgSet: function (cid, durl) { if (!cid) return false; return bskyImgSave(cid, durl || ''); } // Bluesky添付画像(単発)を設定/クリア
   }; } catch (e) {}
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行(5MB枠を解放)
   // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ(登録済みはフラグでスキップ＝通信は初回のみ)
