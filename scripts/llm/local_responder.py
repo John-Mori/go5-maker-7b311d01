@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """ローカルLLM受付係 (Discord一次応答・Claudeセッション不在時の24時間窓口)。
 
-仕組み:
-  - local/discord_inbox.jsonl を30秒ごとに監視(受信はinbox_poller.pyが担当)
-  - Claudeセッション稼働中(local/llm/claude_active.txt が90秒以内に更新)は何もしない=自動バトンタッチ
-  - 質問系: Ollama(知識パック注入)で即答 → persona_send「ローカル受付」名義で返信
-  - 作業依頼系(修正/実装/デプロイ等)や知識外: local/discord_inbox_for_claude.jsonl へ回し、その旨を返信
+仕組み(2026-07-15 変更・Chami指示「一次受けにローカルを挟むな・全部門で排除」):
+  - **部門の依頼(main箱 discord_inbox.jsonl)には一切触れない**。以前はClaude不在時にmain箱を
+    ドレインしてqwen応答/for_claude箱へ再エスカレしていたが、それが「依頼が横取りされて司令塔に
+    届かない/無視される」原因だった。部門の依頼は司令塔(Claude)専任=main箱のまま待たせる。
+  - ローカルqwenが応対するのは**自室 llm-growth(discord_inbox_llm.jsonl)だけ**。
+  - 質問系: Ollama(知識パック注入)で即答 → persona_send「ローカルqwen」名義で返信
   - 処理済みは local/discord_inbox_processed.jsonl へ移動。応答ログは local/llm/responder_log.jsonl
 使い方: python scripts/llm/local_responder.py [--once]
 常駐: scripts/llm/start_local_responder.bat
@@ -147,35 +148,14 @@ def main():
                 except Exception as e:
                     print(f"  処理失敗(llm箱): {type(e).__name__}")
                     append_line(FOR_CLAUDE, line)
-        if claude_is_active():
-            if once:
-                print("Claudeセッション稼働中のため待機のみで終了")
-                break
-            time.sleep(30)
-            continue
-        if os.path.exists(INBOX) and os.path.getsize(INBOX) > 0:
-            with open(INBOX, "r", encoding="utf-8") as f:
-                lines = [l for l in f.read().splitlines() if l.strip()]
-            # 先に受付箱を空にする(処理中の新着はpollerが追記→次周期で拾う)
-            os.remove(INBOX)
-            deferred = []
-            for line in lines:
-                try:
-                    rec = json.loads(line)
-                    # gemini部屋は専用のgemini_responderが応対し、そのエスカレはmain箱に置かれる。
-                    # ローカルqwenが横取りするとfor_claude箱へ跳ね返って喪失問題が再発するため、
-                    # dept=="gemini"行は処理せず保全し、司令塔(次セッション)へ残す。
-                    if rec.get("dept") == "gemini":
-                        deferred.append(line)
-                        continue
-                    handle(rec, line)
-                except Exception as e:
-                    print(f"  処理失敗: {type(e).__name__}")
-                    append_line(FOR_CLAUDE, line)
-            for line in deferred:  # 保全分を主受付箱へ戻す(司令塔が処理する)
-                append_line(INBOX, line)
+        # ★main箱(部門の依頼)には一切触れない=ローカルを一次受付として挟まない
+        #   (Chami指示2026-07-15「一次受けにローカルを挟むな・全部門で排除」)。
+        #   以前はClaude不在時にmain箱をドレインしてqwen応答/for_claude箱へ再エスカレしていたが、
+        #   それが「依頼が横取りされて司令塔に届かない/無視される」原因だった。
+        #   部門の依頼は司令塔(Claude)の専任。main箱はそのまま司令塔が処理する。
+        #   ローカルqwenは自室 llm-growth(上の INBOX_LLM)だけを応対する。
         if once:
-            print("1回分の処理完了")
+            print("1回分の処理完了(自室llm-growthのみ・main箱は司令塔専任)")
             break
         time.sleep(30)
 
