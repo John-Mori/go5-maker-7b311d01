@@ -82,7 +82,7 @@ def fetch_and_transcribe(url):
         return ""
 
 
-SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room")  # 夢と回復/過去の共有/人事=司令塔直轄。ローカルLLMは応答せず受領印のみ
+SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room", "health-log")  # 夢と回復/過去の共有/人事/健康記録=司令塔直轄・機微。ローカルLLMは応答せず受領印のみ
 
 
 def handle(rec, raw_line):
@@ -158,12 +158,22 @@ def main():
                 lines = [l for l in f.read().splitlines() if l.strip()]
             # 先に受付箱を空にする(処理中の新着はpollerが追記→次周期で拾う)
             os.remove(INBOX)
+            deferred = []
             for line in lines:
                 try:
-                    handle(json.loads(line), line)
+                    rec = json.loads(line)
+                    # gemini部屋は専用のgemini_responderが応対し、そのエスカレはmain箱に置かれる。
+                    # ローカルqwenが横取りするとfor_claude箱へ跳ね返って喪失問題が再発するため、
+                    # dept=="gemini"行は処理せず保全し、司令塔(次セッション)へ残す。
+                    if rec.get("dept") == "gemini":
+                        deferred.append(line)
+                        continue
+                    handle(rec, line)
                 except Exception as e:
                     print(f"  処理失敗: {type(e).__name__}")
                     append_line(FOR_CLAUDE, line)
+            for line in deferred:  # 保全分を主受付箱へ戻す(司令塔が処理する)
+                append_line(INBOX, line)
         if once:
             print("1回分の処理完了")
             break

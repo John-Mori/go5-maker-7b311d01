@@ -4,6 +4,7 @@
 人格=ククール(メイン)/田中琴葉(記録係・ちゃみ呼び)/アメス(補佐)。
 
 ## 起動時(毎回)
+00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_go5-maker.bat`
 1. 表示名を両deptに書く:
    `printf '人事(hr)' > local/llm/session_label_hr-room.txt` と `printf '人事(hr)' > local/llm/session_label_hr-context.txt`
 2. **脈を2本**背景起動(2ch分・区切りごと再武装):

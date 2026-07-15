@@ -24,9 +24,11 @@
 部門セッション分離(2026-07-14): --name <dept> で部門窓用の脈ファイルを打つ。
   inbox_poller はこの脈が新鮮(90秒)な間だけ新着を local/inbox/<dept>.jsonl へ配達する。
 
-限界前通知(INC-091 対策2): 本スクリプトの起動=再武装1回として記録し、直近3時間で
-  9回以上(≒90分超の連続稼働)に達したら Discord総合受付(router)へ「引き継ぎ推奨」を
-  自動発報する(2時間スロットル)。モデルの自覚に頼らずOS側の事実だけで判断する。
+限界前通知の撤去(2026-07-15 Chami指摘): 旧「直近3hで再武装9回≒90分超で自動発報」は
+  **廃止**。連続稼働「時間」は危険の指標にならない(=アルゴリズムが違う)。真の危険信号は
+  出力の退行・同型反復であって稼働時間ではなく、それはOS側スクリプトでは測れない。
+  引き継ぎ判断は司令塔の自己申告に一本化する(orchestration.md「兆候(同型文の反復・出力退行)を
+  自覚したら通知を待たず即引き継ぎ」)。再武装の回数はログには残す(観測用)が、通知はしない。
 """
 import argparse
 import os
@@ -64,10 +66,8 @@ def session_label(name="main"):
 DEFAULT_MINUTES = 10.0
 DEFAULT_INTERVAL = 20.0
 
-# 限界前通知(INC-091 対策2)
-REARM_WINDOW_SEC = 3 * 3600   # 再武装を数える窓=直近3時間
-REARM_THRESHOLD = 9           # この回数以上で「長時間稼働」とみなす(≒90分超)
-NOTIFY_COOLDOWN_SEC = 7200    # 通知は2時間に1回まで
+# 旧・限界前通知の時間閾値(REARM_WINDOW_SEC/REARM_THRESHOLD/NOTIFY_COOLDOWN_SEC)は
+# 2026-07-15に撤去。連続稼働「時間」は危険の指標にならないため(Chami指摘)。
 
 
 def active_path(name):
@@ -84,7 +84,12 @@ def touch(name="main"):
 
 
 def rearm_bookkeeping(name):
-    """再武装1回を記録し、閾値超過ならDiscordへ限界前通知(失敗しても脈は止めない)。"""
+    """再武装1回を観測用にログへ残すだけ(Discord通知はしない)。
+
+    2026-07-15 Chami指摘で時間ベースの限界前通知は撤去。連続稼働「時間」は危険の指標にならず、
+    真の危険信号(出力の退行・同型反復)はここ(OS側)では測れないため。引き継ぎ判断は司令塔の
+    自己申告に一本化(orchestration.md)。ログは後日の観測・分析用に残す(通知トリガーには使わない)。
+    """
     llm_dir = os.path.join(LOCAL, "llm")
     os.makedirs(llm_dir, exist_ok=True)
     log = os.path.join(llm_dir, f"heartbeat_rearm_{name}.log")
@@ -98,34 +103,8 @@ def rearm_bookkeeping(name):
         lines = lines[-200:]  # 肥大防止
         with open(log, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
-        count = sum(1 for l in lines if l.isdigit() and int(l) >= now - REARM_WINDOW_SEC)
     except OSError:
         return
-    if count < REARM_THRESHOLD:
-        return
-    mark = os.path.join(llm_dir, f"limit_notified_{name}.txt")
-    try:
-        last = float(open(mark, encoding="utf-8").read().strip() or 0) if os.path.exists(mark) else 0.0
-    except (OSError, ValueError):
-        last = 0.0
-    if now - last < NOTIFY_COOLDOWN_SEC:
-        return
-    if os.environ.get("GO5_LOCAL_DIR"):
-        print(f"heartbeat: (テストモード)限界前通知を抑止(再武装{count}回/3h)")
-        return  # テスト隔離時は実Discordへ発報しない(bot_sendは実local/を読むため)
-    label = session_label(name)
-    msg = (f"⏳【限界前通知/INC-091対策】セッション「{label}」の連続稼働が長くなっています"
-           f"(直近3hで再武装{count}回≒90分超)。区切りの良い所で引き継ぎ(正本md/memory更新→新セッション)を推奨。"
-           f"※判定は連続稼働「時間」ベースで、コンテキスト残量(%)とは無関係です。開始直後のセッションなら無視でOK")
-    try:
-        # 機械的アナウンスはメタルギアMk.II名義(Chami指定2026-07-14)
-        subprocess.run([sys.executable, PERSONA_SEND, "--dept", "router", "--persona", MACHINE_PERSONA, msg],
-                       timeout=25, capture_output=True)
-        with open(mark, "w", encoding="utf-8") as f:
-            f.write(str(int(now)))
-        print(f"heartbeat: 限界前通知を送信(再武装{count}回/3h)")
-    except Exception:
-        pass  # 通知は補助機能。失敗しても脈は打つ
 
 
 def _safe_float(value, default, minimum):

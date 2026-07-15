@@ -4,6 +4,7 @@
 フロント(Pages)/GAS/workerの改修実装を受け持つ。
 
 ## 起動時(毎回)
+00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_go5-maker.bat`
 0. 初回のみ: pollerを再起動して部門振り分けを有効化(cmd窓を閉じ `scripts\discord\start_discord_inbox.bat`)
 1. `python scripts/llm/heartbeat.py --name system-engineer` を背景起動(TTL10分・区切りごと再武装)
 2. 自分の箱 `local/inbox/system-engineer.jsonl` を処理 → 済みは `local/discord_processed.jsonl` へ

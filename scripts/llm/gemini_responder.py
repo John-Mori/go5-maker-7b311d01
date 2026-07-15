@@ -5,7 +5,9 @@
   - local/discord_inbox_gemini.jsonl を30秒ごとに監視(受信振り分けはinbox_poller.pyが担当・dept=="gemini")
   - 自分専用の部屋なので、qwenのllm-growth部屋と同じく**Claude稼働中でも常時応答**する(claude_active待機なし)
   - 質問系: Gemini(ask_gemini.ask・知識パック注入)で即答 → persona_send「Gemini受付」名義で返信
-  - 作業依頼系(修正/実装/デプロイ等)や知識外: local/discord_inbox_for_claude.jsonl へ回し、その旨を返信
+  - 作業依頼系(修正/実装/デプロイ等)や知識外: **司令塔の主受付箱 local/discord_inbox.jsonl** へ回す
+    (専用for_claude箱は司令塔が開始時しか読まず滞留・喪失していた=2026-07-15恒久修正)。
+    司令塔不在(claude_active.txt>90秒)なら「受け取った・復帰後対応」を返信/稼働中は黙ってエスカレ
   - APIキー未設定(local/gemini_api_key.txt / 環境変数GEMINI_API_KEY)の間は**受付箱を消費せず**待機(キー設定後に自動開始)
   - 受付箱は処理前に mv で先に退避してから全行処理(INC-76対策・読了後の追記巻き込みを防ぐ)
   - 処理済みは local/discord_inbox_processed.jsonl へ移動。応答ログは local/llm/gemini_responder_log.jsonl
@@ -33,13 +35,18 @@ from ask_gemini import ask, read_key  # noqa: E402
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 INBOX = os.path.join(LOCAL, "discord_inbox_gemini.jsonl")
 PROCESSED = os.path.join(LOCAL, "discord_inbox_processed.jsonl")
-FOR_CLAUDE = os.path.join(LOCAL, "discord_inbox_for_claude.jsonl")
+# エスカレーション先=司令塔の主受付箱(discord_inbox.jsonl)。専用for_claude箱は司令塔がセッション
+# 開始時にしか読まず、開始前に届いた分が喪失していた(2026-07-14に3件滞留)。main箱なら司令塔が
+# 毎セッション必ず処理し、Gemini自身はmain箱を読まない(=読むのはgemini箱のみ)ので取り込みループも無い。
+# (local_responterはClaude不在時にmain箱をドレインするが、dept=="gemini"行は保全する側のガード有り)
+FOR_CLAUDE = os.path.join(LOCAL, "discord_inbox.jsonl")
+CLAUDE_ACTIVE = os.path.join(LOCAL, "llm", "claude_active.txt")
 LOG = os.path.join(LOCAL, "llm", "gemini_responder_log.jsonl")
-PERSONA = "Gemini受付"
+PERSONA = "ホイミン(Gemini)"  # 表示名=persona_avatars.json のアバター引き先(Chami改名2026-07-15・旧「Gemini受付」)
 # local_responder.pyのWORK_WORDSをそのまま流用(作業依頼語の判定基準を揃える)
 WORK_WORDS = ("直して", "修正", "実装", "追加して", "デプロイ", "変えて", "作って", "調べて", "特定して",
               "バグ", "エラー", "壊れ", "対応して", "やって", "反映", "消して", "削除")
-SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room")  # 通常はgemini部屋に該当しないが防御的にガード
+SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room", "health-log")  # 機微=司令塔直轄。通常はgemini部屋に該当しないが防御的にガード
 
 
 def send(channel, text):
@@ -47,6 +54,30 @@ def send(channel, text):
                         "--channel", channel, "--persona", PERSONA, text],
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode == 0
+
+
+def claude_absent():
+    """司令塔(Claude)が不在か。claude_active.txt が90秒以内に更新されていなければ不在とみなす
+    (local_responder.claude_is_active と同一基準)。"""
+    try:
+        return (time.time() - os.path.getmtime(CLAUDE_ACTIVE)) >= 90
+    except OSError:
+        return True
+
+
+# 司令塔不在時にエスカレーションした際の受領返信(稼働中は黙ってエスカレ=逐一アナウンス不要)。
+ABSENT_ACK = ("🤖 司令塔(Claude)が今は応答できない状態なんだけど、メッセージはちゃんと受け取ったよ。"
+              "復帰したら必ず対応するから、少し待っててね。")
+
+
+def escalate(channel, raw_line, announce_when_active=False):
+    """作業依頼・知識外を司令塔の主受付箱へ回す。不在時のみ受領を返信する。"""
+    append_line(FOR_CLAUDE, raw_line)
+    append_line(PROCESSED, raw_line)
+    if claude_absent():
+        send(channel, ABSENT_ACK)
+    elif announce_when_active:
+        send(channel, "これは司令塔(Claude)が対応するね。")
 
 
 def log(rec):
@@ -94,12 +125,11 @@ def handle(rec, raw_line):
         append_line(PROCESSED, raw_line)
         print(f"  即答 [{channel}] {content[:30]!r}")
     else:
-        append_line(FOR_CLAUDE, raw_line)
-        append_line(PROCESSED, raw_line)
-        send(channel, "これは司令塔(Claude)の仕事として受付箱に入れておくね。次のセッションで対応されるよ。")
+        absent = claude_absent()
+        escalate(channel, raw_line)  # main箱へ。不在時のみ受領を返信・稼働中は黙ってエスカレ
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated", "channel": channel,
-             "q": content[:200]})
-        print(f"  Claude行き [{channel}] {content[:30]!r}")
+             "q": content[:200], "claude_absent": absent})
+        print(f"  Claude行き [{channel}] {content[:30]!r} (claude_absent={absent})")
 
 
 def take_inbox():
@@ -119,7 +149,7 @@ def take_inbox():
 
 def main():
     once = "--once" in sys.argv
-    print("Gemini受付 起動 (30秒間隔, 自分の部屋なのでClaude稼働中でも常時応答)")
+    print("ホイミン(Gemini)受付 起動 (30秒間隔, 自分の部屋なのでClaude稼働中でも常時応答)")
     while True:
         if not read_key():
             print("GeminiのAPIキー未設定(local/gemini_api_key.txt)。キー設定後に自動で受付開始します")
@@ -132,7 +162,7 @@ def main():
                 handle(json.loads(line), line)
             except Exception as e:
                 print(f"  処理失敗: {type(e).__name__}")
-                append_line(FOR_CLAUDE, line)
+                append_line(FOR_CLAUDE, line)  # =main箱。喪失させない
         if once:
             print("1回分の処理完了")
             break
