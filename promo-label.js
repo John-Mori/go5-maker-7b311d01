@@ -214,10 +214,23 @@
       ghost.hidden = false;
     }
     function ghostHide() { if (ghost) ghost.hidden = true; }
-    var downX = 0, downY = 0, downMoved = false;
+    // ズーム=二本指ピンチ(Chami指定2026-07-15「タップではなく二本指」)。1本指=ラベルのドラッグ。
+    var pointers = {};   // 現在触れているポインタ {id:{x,y}}
+    var pinchBase = 0;   // ピンチ開始時の2点間距離
+    function pinchDist() {
+      var ids = Object.keys(pointers);
+      if (ids.length < 2) return 0;
+      var a = pointers[ids[0]], b = pointers[ids[1]];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
     cv.addEventListener('pointerdown', function (ev) {
-      downX = ev.clientX; downY = ev.clientY; downMoved = false;
-      if (!appliedKey) return;             // ラベル無し=ドラッグ対象なし(タップ拡大は指離しで判定)
+      pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+      if (Object.keys(pointers).length >= 2) {          // 二本指=ピンチ開始(ラベルドラッグは中断)
+        pinchBase = pinchDist();
+        if (drag) { drag = null; ghostHide(); }
+        return;
+      }
+      if (!appliedKey) return;                          // ラベル無し=掴む対象なし
       var p = basisPoint(ev);
       if (!p) return;
       var cur = basisPos();
@@ -228,7 +241,16 @@
       ev.preventDefault();
     });
     cv.addEventListener('pointermove', function (ev) {
-      if (Math.abs(ev.clientX - downX) > 8 || Math.abs(ev.clientY - downY) > 8) downMoved = true;
+      if (pointers[ev.pointerId]) { pointers[ev.pointerId].x = ev.clientX; pointers[ev.pointerId].y = ev.clientY; }
+      if (Object.keys(pointers).length >= 2 && pinchBase) { // ピンチ中=距離比で拡大/縮小
+        var d = pinchDist();
+        if (d) {
+          if (d / pinchBase > 1.2) cv.classList.add('cv-zoom');
+          else if (d / pinchBase < 0.83) cv.classList.remove('cv-zoom');
+        }
+        ev.preventDefault();
+        return;
+      }
       if (!drag) return;
       var p = basisPoint(ev);
       if (!p) return;
@@ -236,13 +258,13 @@
       ghostShow(basisPos()); // クランプ後の実位置を表示
       ev.preventDefault();
     });
-    function endDrag() {
-      if (drag) { drag = null; ghostHide(); apply(); return; } // 離した位置で焼き直し
-      // ドラッグしていない＝ほぼ動かない指離し=タップ→プレビュー拡大/縮小トグル(Chami依頼2026-07-15)
-      if (!downMoved) cv.classList.toggle('cv-zoom');
+    function endPointer(ev) {
+      delete pointers[ev.pointerId];
+      if (Object.keys(pointers).length < 2) pinchBase = 0;
+      if (drag) { drag = null; ghostHide(); apply(); } // 離した位置で焼き直し
     }
-    cv.addEventListener('pointerup', endDrag);
-    cv.addEventListener('pointercancel', function () { if (drag) { drag = null; ghostHide(); } });
+    cv.addEventListener('pointerup', endPointer);
+    cv.addEventListener('pointercancel', endPointer);
   })();
 
   // 写真の変更(ユーザー選択・候補流し込み・下書き復元)=新しい原本。自分の書き戻しは除外。

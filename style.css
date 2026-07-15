@@ -56,7 +56,8 @@ input[type=datetime-local]:focus{border-color:var(--accent);}
 /* 幅・高さとも auto にして固有比(9:16)のまま max-width/max-height 内に収める。
    どちらか片方だけを固定しないことで、縦長・狭幅端末でも 9:16 が崩れず横潰れしない。 */
 canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/16;
-  background:#000;border:1px solid var(--line);border-radius:10px;cursor:zoom-in;}
+  background:#000;border:1px solid var(--line);border-radius:10px;cursor:zoom-in;
+  touch-action:none;} /* 二本指ピンチをこちらで取るためブラウザ既定ジェスチャを無効化(Chami指定2026-07-15) */
 /* タップで拡大した状態(もう一度タップで戻る)。画面いっぱいのオーバーレイに(Chami依頼2026-07-15)。
    fixedにするのは、モバイルでは幅制約が効いてmax-heightだけでは大きくならないため=確実に拡大。 */
 canvas#cv.cv-zoom{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
