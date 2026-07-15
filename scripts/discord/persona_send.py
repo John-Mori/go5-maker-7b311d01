@@ -80,7 +80,7 @@ COLORS = {"red": 0xED4245, "orange": 0xE67E22, "yellow": 0xFEE75C, "green": 0x57
 
 def main():
     args = sys.argv[1:]
-    channel = dept = persona = avatar = color = etitle = None
+    channel = dept = persona = avatar = color = etitle = body_file = None
     rest = []
     i = 0
     while i < len(args):
@@ -97,12 +97,17 @@ def main():
             color = args[i + 1]; i += 2
         elif a == "--etitle" and i + 1 < len(args):
             etitle = args[i + 1]; i += 2
+        elif a == "--body-file" and i + 1 < len(args):
+            body_file = args[i + 1]; i += 2   # 本文をファイルから読む(heredoc/shell quoting崩れを回避=送信信頼性)
         else:
             rest.append(a); i += 1
     if not persona or not (channel or dept):
-        print("使い方: persona_send.py (--channel <名前> | --dept <slug>) --persona <キャラ名> [--avatar URL] [本文]")
+        print("使い方: persona_send.py (--channel <名前> | --dept <slug>) --persona <キャラ名> [--avatar URL] [--body-file path | 本文]")
         sys.exit(1)
-    body = " ".join(rest) if rest else sys.stdin.read().strip()
+    if body_file:
+        body = open(body_file, "r", encoding="utf-8").read().strip()
+    else:
+        body = " ".join(rest) if rest else sys.stdin.read().strip()
     if not body:
         print("本文が空です。")
         sys.exit(1)
