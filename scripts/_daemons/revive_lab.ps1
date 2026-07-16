@@ -18,8 +18,16 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $root = 'D:\SougouStartFolder\go5-maker'
 $log  = Join-Path $root 'local\_lab_revive.log'
-# Lab session: "5秒動画メーカー 研究室 Vol.8 アロンソ/アメス" (kept across reboots so history survives)
-$labId = 'local_94702660-bf3d-44ea-a8a7-b918998bb9c2'
+# Lab session id. MUST be the real session UUID (the .jsonl filename under
+#   C:\Users\chami\.claude\projects\D--SougouStartFolder-go5-maker\ ), NOT the cross-session
+#   "local_xxxx" identifier. Those are two different id systems and mixing them silently breaks
+#   revival: 2026-07-16 this held 'local_94702660-...' and `claude -r` rejected it with
+#   "is not a UUID and does not match any session title" — i.e. the Lab would NOT have come back
+#   after a reboot while Chami was away. It was never caught because revive only fires when no
+#   claude process is alive, which had not happened since the task was registered.
+# When the Lab session is handed over (new volume), update this to the new UUID: see
+#   scripts/_daemons/set_lab_session.ps1 which resolves the newest session file and rewrites it.
+$labId = '46c7212b-68e9-48d1-ac5e-c671d356db02'
 
 function Write-Log($m) {
   $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
