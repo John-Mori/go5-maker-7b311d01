@@ -7,8 +7,8 @@
 00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_go5-maker.bat`
 1. 表示名を両deptに書く:
    `printf '人事(hr)' > local/llm/session_label_hr-room.txt` と `printf '人事(hr)' > local/llm/session_label_hr-context.txt`
-2. **脈を2本**背景起動(2ch分・区切りごと再武装):
-   `python scripts/llm/heartbeat.py --name hr-room` と `python scripts/llm/heartbeat.py --name hr-context`
+2. **チャイム線を2本**run_in_backgroundで起動(2ch分・新着で即起床+脈・TTL45分・区切りごと再武装):
+   `python scripts/llm/inbox_waiter.py --name hr-room` と `python scripts/llm/inbox_waiter.py --name hr-context`
 3. **両方の箱**を処理: `local/inbox/hr-room.jsonl` と `local/inbox/hr-context.jsonl` → 済みは `local/discord_processed.jsonl` へ
 4. 返信: `python scripts/discord/persona_send.py --dept hr-room --persona "ククール"`(or --dept hr-context / --persona "田中琴葉")
 

@@ -6,7 +6,7 @@
 #   既存の docs/departments/learning/instructors/*.yml (10技術分野の講師: ai-agent-llm/architecture/backend-infra/
 #   compliance/data-stats/frontend-ux/marketing-behavior/org-ops/python-automation/security) および
 #   learning-coach.md エージェント定義(「10分野の講師を演じ分ける」運用)とは別軸であり、原典はこの2系統の統合方法に
-#   言及していない。司令塔判断待ち(取込報告のwarnings参照)。
+#   言及していない。研究室判断待ち(取込報告のwarnings参照)。
 department: learning-coach
 personas:
   - id: verxina

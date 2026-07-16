@@ -7,7 +7,7 @@
 ## 起動時(毎回)
 00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_go5-maker.bat`
 0. 初回のみ: pollerを再起動して部門振り分けを有効化(cmd窓を閉じ `scripts\discord\start_discord_inbox.bat`)
-1. `python scripts/llm/heartbeat.py --name ai-office` を背景起動(TTL10分・区切りごと再武装)
+1. `python scripts/llm/inbox_waiter.py --name ai-office` を run_in_background で起動(チャイム線=新着で即起床+脈・TTL45分・区切りごと再武装)
 2. 自分の箱 `local/inbox/ai-office.jsonl` を処理 → 済みは `local/discord_processed.jsonl` へ
 3. 返信: `python scripts/discord/persona_send.py --dept ai-office --persona "花海咲季"`(ちゃみ呼び・自信家口調)
    設計判断はデ・ブライネ(Chami呼び・先輩口調)
@@ -19,4 +19,4 @@
 
 ## go5規約(共通)
 - ?v=一括バンプ→commit→push / UI文言の括弧は半角() / 変更記録=「直した。(ファイル名)」
-- 大きい/横断の改修は着手前にmain箱(司令塔)へ相談(1領域1オーナー)
+- 大きい/横断の改修は着手前にmain箱(研究室)へ相談(1領域1オーナー)

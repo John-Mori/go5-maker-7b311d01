@@ -10,5 +10,5 @@
 - **③断定に必要な捕獲(Chamiに依頼済・未回収)**: 次に消えた時、復旧前にPC F12コンソールで採取→
   `JSON.stringify({acc2hist:(JSON.parse(localStorage.short_hist__acc2||'[]')).length, acc2man:(JSON.parse(localStorage.verify_manual__acc2||'[]')).length, moves:localStorage.sanitize_move_log, h1:localStorage.bsky_handle__acc1, h2:localStorage.bsky_handle__acc2, d1:localStorage.bsky_did__acc1, d2:localStorage.bsky_did__acc2})`
 - **修正案(承認後・?v=一括バンプ→commit→push)**: ①候補削除にトゥームストーン(`cand_del__<tab>`: cid+削除ts)新設→sync union後に削除記録が新しければ除外。「消したものは消えたまま/集めた候補は失わない」を両立。②R2取得失敗を`""`で潰さず旧dataURL保持orリトライ。③捕獲データを見てから(DID台帳の同期経由汚染ならガード追加)。
-- **横断範囲**: sync-core × account-model。1オーナー規約で司令塔と所有権調整が前提。
+- **横断範囲**: sync-core × account-model。1オーナー規約で研究室と所有権調整が前提。
 - **関連ファイル**: `core/sync.js`(unionCand/downloadImagesIn) / `core/storage-keys.js`(syncAllowed) / `candidates.js`(候補削除:約2169) / `yt-clicks.js`(サニタイザ:1838-1895) / `bluesky.js`(Go5AccountRepair:1062-1103)

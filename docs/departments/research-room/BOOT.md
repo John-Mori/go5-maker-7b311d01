@@ -6,7 +6,7 @@
 ## 起動時(毎回)
 00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_go5-maker.bat`
 0. 初回のみ: pollerを再起動して部門振り分けを有効化(cmd窓を閉じ `scripts\discord\start_discord_inbox.bat`)
-1. `python scripts/llm/heartbeat.py --name research-room` を背景起動(TTL10分・区切りごと再武装)
+1. `python scripts/llm/inbox_waiter.py --name research-room` を run_in_background で起動(チャイム線=新着で即起床+脈・TTL45分・区切りごと再武装)
 2. 自分の箱 `local/inbox/research-room.jsonl` を処理 → 済みは `local/discord_processed.jsonl` へ
 3. 発言: `python scripts/discord/persona_send.py`(アメス=色なし通常文/アロンソ=白)。
    アメス/アロンソは全chフリーパス(他キャラは自部門限定)
@@ -15,7 +15,7 @@
 - 編集可: `docs/departments/research-room/` 配下、`local/rooms/`・`local/knowledge/`(研究ノート)
 - D1 `research_notes` への記録
 - コード(フロント/GAS/scripts)は**編集不可**=改修が要る結論に至ったら Request Packet として
-  routerかmain箱へ渡す(実装は改修部門/司令塔)
+  routerかmain箱へ渡す(実装は改修部門/研究室)
 
 ## この部屋の心得(運用説明書の要旨)
 - Chamiは研究者・哲学者。権威的にしない。急かさない

@@ -11,9 +11,11 @@
 00. **【最初に必須】作業ディレクトリ自己点検**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` であることを確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書き込み全滅=INC 2026-07-15)。ワンクリック起動=`起動_go5-maker.bat`。
 0. 初回のみ: 部門振り分けが未反映なら poller を再起動
    (pollerのcmd窓を閉じる → `scripts\discord\start_discord_inbox.bat`)
-1. ハートビートを背景起動: `python scripts/llm/heartbeat.py --name <dept>`
-   - TTL10分。**仕事の区切りごとに再実行(再武装)**。無限ループ禁止(INC-091)
-   - 脈が生きている間だけ、新着が自分の箱 `local/inbox/<dept>.jsonl` に配達される
+1. チャイム線を背景起動: `python scripts/llm/inbox_waiter.py --name <dept>`(run_in_background)
+   - 脈打ち+自分の箱`local/inbox/<dept>.jsonl`の見張りを兼ねる。**新着が入った瞬間にこのセッションが起こされる**(イベント駆動・TTL45分)
+   - **仕事の区切りごとに、箱をドレインしてから再武装**(=空箱で待機に入る)。無限待ち禁止(INC-091)
+   - 脈が生きている間だけ新着が自分の箱へ配達される。フリーズ→90秒で脈切れ→sweepがmain箱へ回収(自己修復)
+   - (旧`heartbeat.py`は互換で残置。新規の脈打ちはwaiterに一本化)
 2. 自分の箱を読み、未処理を処理 → 処理済みは `local/discord_processed.jsonl` へ追記し、箱から削除
 3. 返信: `python scripts/discord/bot_send.py --dept <dept> "本文"`
    (キャラ発言は `python scripts/discord/persona_send.py` — 色/様式はlocal/persona_colors.json)
