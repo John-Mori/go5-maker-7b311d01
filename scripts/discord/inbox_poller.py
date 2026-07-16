@@ -112,6 +112,38 @@ def read_channels():
     return [c for c in chans if str(c.get("id", "")).strip().isdigit()]
 
 
+def sync_channel_names_(chans, token):
+    """台帳の表示名をDiscordの実名へ追従させる(Chami依頼2026-07-16)。
+
+    Chamiは部屋名を自由に変える(キャラ名を後ろに足す等)。名前は台帳の"見出し"でしかなく
+    routingはIDで行うので実害は出ないが、放置すると台帳と実態がズレてログが読めなくなる
+    (2026-07-16時点で14件ズレていた)。起動時に一度だけ実名へ揃える。
+    IDとdeptは触らない=対応関係は壊さない。名前が引けない時は現状維持。
+    """
+    changed = []
+    for c in chans:
+        live = api_get(f"/channels/{c['id']}", token)
+        name = (live or {}).get("name")
+        if name and name != c.get("name"):
+            changed.append((c.get("name"), name))
+            c["name"] = name
+    if not changed:
+        return
+    try:
+        with open(CHANNELS_FILE, "r", encoding="utf-8") as f:
+            full = json.load(f)
+        by_id = {str(c["id"]): c["name"] for c in chans}
+        for row in full:
+            if str(row.get("id", "")) in by_id:
+                row["name"] = by_id[str(row["id"])]
+        with open(CHANNELS_FILE, "w", encoding="utf-8") as f:
+            json.dump(full, f, ensure_ascii=False, indent=1)
+        for old, new in changed:
+            print(f"{time.strftime('%H:%M:%S')} 部屋名を追従: {old} → {new}")
+    except Exception as e:
+        print(f"部屋名の同期に失敗(実害なし・次回再試行): {e}")
+
+
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -264,6 +296,7 @@ def main():
     if not channels:
         print("有効なチャンネルIDが0件です。local/discord_channels.json のidを埋めてください。")
         sys.exit(2)
+    sync_channel_names_(channels, token)  # 台帳の表示名をDiscordの実名へ追従(起動時に一度)
     print(f"受信ポーラー開始: {len(channels)}チャンネルを{POLL_SEC}秒間隔で監視" + (" (--once)" if once else ""))
     while True:
         touch_poller_active()  # 死活の脈(watchdogが監視・ポーラー停止=チャイム沈黙の単一障害点)
