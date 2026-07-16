@@ -18,8 +18,52 @@ username/avatar_url上書きで送信する。Webhook URLは local/discord_webho
 import json
 import os
 import sys
+import time
 import urllib.request
 import urllib.error
+
+LIMIT = 1900  # Discordの本文上限2000字に対する安全域
+
+
+def split_body(text, limit=LIMIT):
+    """長文をDiscordの上限内へ"意味の切れ目"で分割する(切り捨てない=INC-92)。
+
+    優先順: 段落(空行) → 行 → 字数。
+    旧実装は body[:1900] で黙って捨てており、webhookが204を返すため送信側は成功と誤認、
+    Chamiには文の途中で切れたものが届いていた(実例=6452字が1900字で切れた)。
+    """
+    text = text.rstrip("\n")
+    if len(text) <= limit:
+        return [text]
+    parts, cur = [], ""
+    for para in text.split("\n\n"):
+        piece = para if not cur else cur + "\n\n" + para
+        if len(piece) <= limit:
+            cur = piece
+            continue
+        if cur:
+            parts.append(cur)
+            cur = ""
+        if len(para) <= limit:
+            cur = para
+            continue
+        # 段落単体が長い→行で割る
+        for ln in para.split("\n"):
+            piece = ln if not cur else cur + "\n" + ln
+            if len(piece) <= limit:
+                cur = piece
+                continue
+            if cur:
+                parts.append(cur)
+                cur = ""
+            # 行単体が長い→字数で割る(最後の手段)
+            while len(ln) > limit:
+                parts.append(ln[:limit])
+                ln = ln[limit:]
+            cur = ln
+    if cur:
+        parts.append(cur)
+    return parts
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -182,17 +226,32 @@ def main():
             if rest:
                 embs[-1]["description"] = ("**" + rest[:3800] + "**")
             payload["embeds"] = embs
-    else:
-        payload["content"] = body[:1900]
     if avatar:
         payload["avatar_url"] = avatar
-    req = urllib.request.Request(
-        hook_url, data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "go5-org-persona (personal, v1)"},
-    )
-    try:
+
+    def post(pl):
+        req = urllib.request.Request(
+            hook_url, data=json.dumps(pl).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "go5-org-persona (personal, v1)"},
+        )
         with urllib.request.urlopen(req, timeout=20) as r:
-            print(f"送信OK → {ch.get('name')} as {persona} (HTTP {r.status})")
+            return r.status
+
+    try:
+        if "embeds" in payload:
+            print(f"送信OK → {ch.get('name')} as {persona} (HTTP {post(payload)})")
+        else:
+            # 長文は切り捨てず"分割して連投"する(2026-07-17・INC-92)。
+            # 旧実装は body[:1900] で黙って捨てていた: Discordの上限は2000字だが、
+            # webhookはHTTP 204を返すので送信側は成功と誤認し、Chamiには文の途中で
+            # 切れたものが届いていた(実例=アメスの6452字が1900字で切れ「途中で話止まってるぜ?」)。
+            # 段落(空行)優先→行→字数の順で切れ目を選び、意味の切れ目で分ける。
+            for i, part in enumerate(split_body(body)):
+                pl = dict(payload)
+                pl["content"] = part
+                st = post(pl)
+                print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})" + (f" [{i+1}通目]" if i else ""))
+                time.sleep(0.4)  # webhookのレート制限を避ける
     except Exception as e:
         print(f"送信失敗: {type(e).__name__}")
         sys.exit(3)
