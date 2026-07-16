@@ -244,6 +244,14 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
    - 文字起こし=Gemini(`local/gemini_api_key.txt`)へ `inline_data`(mime=audio/ogg)で送る。モデルは429対策で `gemini-flash-lite-latest` 等へフォールバック。
 3. 対象=案件・依頼・判断に関わる発言。挨拶や短い相槌まで機械的に貼らない(ノイズ化を避ける)。秘密・機微は貼らない(該当ch限定の原則が優先)。
 
+## ★質問・選択肢・承認要求も必ずDiscordへ出す (2026-07-16 Chami指示・上と対になる規約)
+> 前提=**Claude Code本体のUI(chatペインの質問・permission承認ダイアログ・選択肢)はChamiに届かない**。PCの前にいない限り気づけず、**セッションが切れていれば永久に気づかない**。そこで止まると「AIが黙った」ことになる。
+1. **AskUserQuestion(chatペインの選択肢UI)を使わない**。質問・選択肢は **Discordのその部門chへ、番号付きで**出す(例「(A)既存に相乗り (B)専用を新設 — どっちで行く?」)。
+2. **ツールがブロックされた/承認が要る操作に当たったら、黙って諦めない・勝手に迂回しない**。**①何をしようとしたか ②なぜ止まったか ③Chamiが何と言えば進むか(承認の文言そのもの)** をDiscordで説明する。
+   - 実例(2026-07-16): 本番R2バケットへの書き込みが安全装置に拒否された → 人事chで「R2バケット go5-sync-images へアイコン画像を書き込むことを許可する、の一言が要る」と提示して待った。
+3. **実装の判断で迷ったらDiscordで聞く**。推測で進めて後から作り直す方が高くつく(品質優先6段原則: 正確性>トークン効率)。
+4. 逆に**Chamiが「任せる」と言った領域は合理的な仮定で進め、仮定を記録して報告する**(いちいち止めない)。
+
 ## 並行セッションの所有権 (2026-07-14 Chami承認・再分裂防止)
 - 同時に複数のClaudeセッションがこのrepoを触る時は**領域を分ける**(1領域1オーナー)。現在: **研究室(Vol.7)**=Discord運用(scripts/discord・scripts/llm)・規約(docs/departments)・改修依頼の実装／**復旧システム(別セッション)**=Gemini組み込み(gemini受付係・API連携)
 - **復旧システムの専用ch=「incident-recovery(🚨システム事故対•復旧部門🚨)」(dept=incident・2026-07-14 Chami開設)**。absence_watchdogの不在サマリ通知先(SUMMARY_DEPT="incident")でもある。部門窓として受けるには `python scripts/llm/inbox_waiter.py --name incident` を打つ(チャイム線=新着で即起床+脈・受信箱=local/inbox/incident.jsonl)
