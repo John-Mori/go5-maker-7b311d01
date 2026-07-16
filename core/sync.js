@@ -91,26 +91,6 @@
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function isImgRef(v) { return v && typeof v === "object" && !Array.isArray(v) && typeof v.__img === "string"; }
 
-  // IDB値(dataURL入り) → hash化。未アップロード画像を R2 へ。失敗画像は dataURL のまま残す。(データ保全)
-  function uploadImagesIn(val) {
-    var urls = []; collectDataUrls(val, urls);
-    if (!urls.length) return Promise.resolve(val);
-    var uniq = {}; urls.forEach(function (u) { uniq[u] = 1; }); urls = Object.keys(uniq);
-    var hByUrl = {};
-    return Promise.all(urls.map(function (u) { return sha256hex(u).then(function (h) { hByUrl[u] = h; }); })).then(function () {
-      var keys = urls.map(function (u) { return hByUrl[u]; });
-      return api("/api/img/has?keys=" + keys.join(",")).then(function (r) { return r.json(); }).catch(function () { return { present: [] }; });
-    }).then(function (hasRes) {
-      var present = {}; (hasRes.present || []).forEach(function (k) { present[k] = 1; });
-      var toUp = urls.filter(function (u) { return !present[hByUrl[u]]; });
-      return Promise.all(toUp.map(function (u) {
-        return api("/api/img/" + hByUrl[u], { method: "PUT", headers: { "Content-Type": "text/plain" }, body: u })
-          .then(function (r) { return r.json(); }).then(function (j) { if (!j || !j.ok) hByUrl[u] = null; }).catch(function () { hByUrl[u] = null; });
-      }));
-    }).then(function () {
-      return mapVal(val, function (v) { return typeof v === "string" && /^data:/.test(v); }, function (u) { var h = hByUrl[u]; return h ? { __img: h } : u; });
-    });
-  }
   // hash化された値 → R2 から dataURL を復元。失敗画像は空文字。(表示されないだけ)
   function downloadImagesIn(val) {
     var refs = []; (function walk(v) { if (isImgRef(v)) { refs.push(v.__img); return; } if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === "object") for (var k in v) if (has(v, k)) walk(v[k]); })(val);
@@ -132,6 +112,18 @@
   function saveTs(t) { try { LS.setItem("sync2_ts", JSON.stringify(t)); } catch (e) {} }
   function getVer() { try { return parseInt(LS.getItem("sync2_ver") || "0", 10) || 0; } catch (e) { return 0; } }
   function setVer(v) { try { LS.setItem("sync2_ver", String(v)); } catch (e) {} }
+  // R2に存在が確定した画像ハッシュの記憶(端末ローカル・sync2_*なので同期対象外)。
+  //   毎サイクル /api/img/has を投げ直さないためのキャッシュ。24hで期限切れ＝R2から実体が
+  //   消えた場合(既知症状②)も最長1日で再検出して再アップロードできる。
+  var IMGOK_TTL_MS = 24 * 3600 * 1000;
+  function loadImgOk() { try { return JSON.parse(LS.getItem("sync2_imgok") || "{}") || {}; } catch (e) { return {}; } }
+  function saveImgOk(o) {
+    try {
+      var ks = Object.keys(o);
+      if (ks.length > 4000) { var t = {}; ks.slice(-3000).forEach(function (h) { t[h] = o[h]; }); o = t; } // 肥大防止
+      LS.setItem("sync2_imgok", JSON.stringify(o));
+    } catch (e) {}
+  }
 
   function gatherLs() { var out = {}; try { for (var i = 0; i < LS.length; i++) { var k = LS.key(i); if (isSyncLsKey(k)) out[k] = LS.getItem(k); } } catch (e) {} return out; }
 
@@ -229,13 +221,60 @@
     });
 
     // IDB を hash化(画像アップロード)
+    // ★旧実装は uploadImagesIn をキー毎に呼び、その中で /api/img/has を1本ずつ投げていた。
+    //   画像を持つ候補がN件あると「変更が無くても毎サイクルN本」のWorkerリクエストが飛び、
+    //   go5-sync=159k req/日(無料枠10万/日を単独超過)の主因になっていた。(Chami報告2026-07-16)
+    //   候補が増えるほど線形に増える構造=+163%急増の説明もつく。
+    //   → 全キーのdataURLをまとめて一意化→ハッシュ化1回→has確認は「未確認ハッシュだけチャンク一括」。
+    //   存在確定ハッシュは端末に24hだけ記憶(sync2_imgok)して問い合わせを省く=定常状態はほぼ0本。
+    //   TTLを設けるのは、R2から画像実体が消える既知症状(②)を最長24hで再検出して再アップするため
+    //   (恒久キャッシュにすると「消えたのに存在扱い」で二度と直らなくなる)。
     var curIdb = {};
     var idbStep = (Idb && Idb.available()) ? Idb.entries().then(function (all) {
       var keys = Object.keys(all).filter(isSyncIdbKey);
-      var done = 0; setProg("画像を送信", 0, keys.length);
-      return keys.reduce(function (p, k) {
-        return p.then(function () { return uploadImagesIn(all[k]).then(function (hv) { curIdb[k] = hv; setProg("画像を送信", ++done, keys.length); }); });
-      }, Promise.resolve());
+      if (!keys.length) return;
+      var bag = []; keys.forEach(function (k) { collectDataUrls(all[k], bag); });
+      var uniq = {}; bag.forEach(function (u) { uniq[u] = 1; });
+      var urls = Object.keys(uniq);
+      var toRef = function () { // dataURL → {__img:hash} 変換(通信なし)。失敗画像はdataURLのまま残す=データ保全
+        keys.forEach(function (k) {
+          curIdb[k] = mapVal(all[k], function (v) { return typeof v === "string" && /^data:/.test(v); }, function (u) { var h = hByUrl[u]; return h ? { __img: h } : u; });
+        });
+        setProg("", 0, 0);
+      };
+      var hByUrl = {};
+      if (!urls.length) { keys.forEach(function (k) { curIdb[k] = all[k]; }); return; }
+      setProg("画像を確認", 0, urls.length);
+      return Promise.all(urls.map(function (u) { return sha256hex(u).then(function (h) { hByUrl[u] = h; }); })).then(function () {
+        var okSet = loadImgOk(), tNow = Date.now(), present = {};
+        var unknown = urls.filter(function (u) { var t = okSet[hByUrl[u]]; return !(t && (tNow - t) < IMGOK_TTL_MS); });
+        if (!unknown.length) return;                       // 全部確認済み＝リクエスト0本
+        var chunks = [], CH = 50;                          // URL長対策(hash64桁×50≒3.3KB)
+        for (var i = 0; i < unknown.length; i += CH) chunks.push(unknown.slice(i, i + CH));
+        return chunks.reduce(function (p, ch) {
+          return p.then(function () {
+            return api("/api/img/has?keys=" + ch.map(function (u) { return hByUrl[u]; }).join(","))
+              .then(function (r) { return r.json(); }).catch(function () { return { present: [] }; })
+              .then(function (res) { (res.present || []).forEach(function (h) { present[h] = 1; }); });
+          });
+        }, Promise.resolve()).then(function () {
+          var toUp = unknown.filter(function (u) { return !present[hByUrl[u]]; });
+          var done = 0; if (toUp.length) setProg("画像を送信", 0, toUp.length);
+          return toUp.reduce(function (p, u) {
+            return p.then(function () {
+              return api("/api/img/" + hByUrl[u], { method: "PUT", headers: { "Content-Type": "text/plain" }, body: u })
+                .then(function (r) { return r.json(); })
+                .then(function (j) { if (!j || !j.ok) hByUrl[u] = null; else present[hByUrl[u]] = 1; })
+                .catch(function () { hByUrl[u] = null; })
+                .then(function () { setProg("画像を送信", ++done, toUp.length); });
+            });
+          }, Promise.resolve());
+        }).then(function () {
+          var okNow = loadImgOk(); // 存在が確定したものだけ記憶(失敗=nullは記憶しない→次回再挑戦)
+          urls.forEach(function (u) { var h = hByUrl[u]; if (h && present[h]) okNow[h] = tNow; });
+          saveImgOk(okNow);
+        });
+      }).then(toRef);
     }) : Promise.resolve();
 
     return Promise.all([secStep, idbStep]).then(function () {
