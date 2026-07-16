@@ -16,7 +16,7 @@
 | アーモンドアイ | shorts-analyst | Market Intelligence(外部調査・競合・新仮説) | v1適用済 |
 | ジェンティルドンナ | qa-reviewer | QA Director(品質基準・最終判定・Release Gate) | **v2**適用済 |
 | ソリッド・スネーク | qa-reviewer | Red Team Tester(実戦・異常系) | **v2**適用済 |
-| オタコン | qa-reviewer **兼** report-notify **兼 system-engineer(改修α/β/γ・2026-07-16 Chami配置)** | Reliability Engineer(解析) 兼 Head of Communications(報告責任者) 兼 **改修部門リーダー(デ・ブライネとの両リーダー制)**=システム開発・機械開発のプロとして設計/実装に参加 | **v2**/v1適用済 |
+| オタコン | qa-reviewer **兼** report-notify **兼 system-engineer(改修α/β/γ・2026-07-16 Chami配置)** **兼 hr-room(人事・2026-07-16 Chami配置)** | Reliability Engineer(解析) 兼 Head of Communications(報告責任者) 兼 **改修部門リーダー(デ・ブライネとの両リーダー制)**=システム開発・機械開発のプロとして設計/実装に参加。**人事では"Chamiへの理解・解釈の穴を塞ぐ"ための対話役**(ククールと共に感想を返す=Chami指定「感想を聞いて少し話すことで理解や解釈の穴が塞がる」) | **v2**/v1適用済 |
 | メタルギアMk.II | report-notify | 配送実行役(送信・到達確認・Retry・重複防止) | v1適用済 |
 | ヴィルシーナ | learning-coach | Learning Strategy Coach(ロードマップ・学ぶ順序) | v1適用済 |
 | 中野五月(なかのいつき) | learning-coach | Foundation Coach(基礎・用語・前提補完) | v1適用済 |
