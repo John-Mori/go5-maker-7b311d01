@@ -228,6 +228,15 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 - **学習部屋は3部屋体制(2026-07-14 Chami新設)**: ①#学習-質問=メイン(いままでのやつが1) ②#質問-chamiの学習と癒しのルーム2=①が長引いている時の並行質問用サブ ③#質問-chamiのローカルllm学習ルーム=ローカルLLM特化の質問用。メンバーは3部屋とも先生4人(学習ルームと同じ)
 - **変更記録の記載様式(2026-07-14 Chami指定・明文化)**: ファイルへ記録した旨をDiscordで報告する時は **「刻んだ。(ファイル名)」**=句点はカッコの**前**・カッコは半角()。誤: 「刻んだ(orchestration.md)。」／正: 「刻んだ。(orchestration.md)」。他の完了報告も同型(「直した。(style.css)」等)に揃える
 
+## ★Chamiの発言をDiscordへミラーする (2026-07-16 Chami指示・全セッション必須)
+> 狙い=**Discordだけ見れば文脈が全部揃う**状態にする。Chamiがchatペイン(Claude Code本体)や音声で話した内容はDiscordに残らず、後から読むと**キャラの回答だけが浮いて意味不明になる**ため。
+1. **chatペインでChamiが発言したら**、応答する前に、その内容を **`Chami(from Claude)` 名義**でその案件が属する部門chへ **そのまま貼る** → **その後に各キャラが回答**する。
+   `python scripts/discord/persona_send.py --dept <slug> --persona "Chami(from Claude)" --body-file <path>`
+   (persona_sendは未登録の名義でも表示名として使える=実証済み2026-07-16)
+2. **音声入力(voice-message)が来たら**、Gemini APIで文字起こし → **文字起こし内容を`Chami(from Claude)`名義で音声の直後に貼る** → その後に各キャラが回答。
+   文字起こし=Gemini(`local/gemini_api_key.txt`)へ `inline_data`(mime=audio/ogg)で送る。モデルは429対策で `gemini-flash-lite-latest` 等へフォールバック。
+3. 対象=案件・依頼・判断に関わる発言。挨拶や短い相槌まで機械的に貼らない(ノイズ化を避ける)。秘密・機微は貼らない(該当ch限定の原則が優先)。
+
 ## 並行セッションの所有権 (2026-07-14 Chami承認・再分裂防止)
 - 同時に複数のClaudeセッションがこのrepoを触る時は**領域を分ける**(1領域1オーナー)。現在: **研究室(Vol.7)**=Discord運用(scripts/discord・scripts/llm)・規約(docs/departments)・改修依頼の実装／**復旧システム(別セッション)**=Gemini組み込み(gemini受付係・API連携)
 - **復旧システムの専用ch=「incident-recovery(🚨システム事故対•復旧部門🚨)」(dept=incident・2026-07-14 Chami開設)**。absence_watchdogの不在サマリ通知先(SUMMARY_DEPT="incident")でもある。部門窓として受けるには `python scripts/llm/inbox_waiter.py --name incident` を打つ(チャイム線=新着で即起床+脈・受信箱=local/inbox/incident.jsonl)
