@@ -21,7 +21,13 @@ import urllib.request
 import urllib.error
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # line_buffering=True は必須(2026-07-17 INC-93)。これが無いと、ファイルへ向けたstdoutは
+    # 約8KBのブロックバッファになる。鳩は無口(新着時しかprintしない)ため8KBに永久に到達せず、
+    # 再起動のたびに Stop-Process で未書き出し分ごと破棄される=**ログが3日間まるごと空だった**。
+    # 監視役は正しくリダイレクト(>> local\discord_poller.log)して起動しており、起動バナーの
+    # printもあるのに1行も残らない、という形で発覚した。背骨(鳩)が壊れた時に追う手段が
+    # 静かに壊れていた=「リダイレクトした≠記録されている」。行ごとに書き出せば即座に残る。
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 except Exception:
     pass
 
