@@ -13,10 +13,13 @@
    (pollerのcmd窓を閉じる → `scripts\discord\start_discord_inbox.bat`)
 1. チャイム線を背景起動: `python scripts/llm/inbox_waiter.py --name <dept>`(run_in_background)
    - 脈打ち+自分の箱`local/inbox/<dept>.jsonl`の見張りを兼ねる。**新着が入った瞬間にこのセッションが起こされる**(イベント駆動・TTL45分)
-   - **仕事の区切りごとに、箱をドレインしてから再武装**(=空箱で待機に入る)。無限待ち禁止(INC-091)
    - 脈が生きている間だけ新着が自分の箱へ配達される。フリーズ→90秒で脈切れ→sweepがmain箱へ回収(自己修復)
    - (旧`heartbeat.py`は互換で残置。新規の脈打ちはwaiterに一本化)
-2. 自分の箱を読み、未処理を処理 → 処理済みは `local/discord_processed.jsonl` へ追記し、箱から削除
+2. **★起床したら必ずこの順(INC-85・2026-07-17改訂)**:
+   ① まず `mv local/inbox/<dept>.jsonl local/inbox/<dept>_work.jsonl` で**箱を先に空にする**
+   ② **即座にwaiterを再武装**(バックグラウンド起動)——脈が復活し、作業中の新着も自分の箱で受けられる
+   ③ その後落ち着いて `<dept>_work.jsonl` を処理 → 処理済みは `local/discord_processed.jsonl` へ追記し、workファイルを削除
+   - **理由**: waiterの脈は新着到達の瞬間に止まる(waiterは配達と同時に自了する)。旧手順(読む→処理→終わってから再武装)だと、**処理に90秒以上かかる案件は全て「常駐不在」と誤判定され、sweepが箱ごとmainへ奪う**(=研究室の代打が67%に膨らんだ主因・QA実測2026-07-17)。sweepは空の箱を触らないため、①のmv先行で奪われなくなる(INC-76のmv先行ルールの部門箱への適用)
 3. 返信: `python scripts/discord/bot_send.py --dept <dept> "本文"`
    (キャラ発言は `python scripts/discord/persona_send.py` — 色/様式はlocal/persona_colors.json)
 4. 横断ルール: `D:\SougouStartFolder\00_AI-HQ\PRIORITY.md` を一読(全体の優先度と衝突しないこと)
