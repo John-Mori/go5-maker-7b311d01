@@ -288,6 +288,23 @@
   //   書きは _imgMem を即更新＋IDBへ非同期反映。(write-through)IDB非対応時は localStorage フォールバック。
   var _imgMem = { ref: {}, bsky: {}, post: {} };
   var _idbOk = !!(window.Go5Idb && window.Go5Idb.available());
+  // ★IDB→メモリへの展開(hydrateImages_)は非同期。完了前は _imgMem が空なので refImgOf() が
+  //   「実際にはIDBに在るのに null」を返す=モーダルのpendingが全項目空で作られ、そのまま保存すると
+  //   refImgSaveのempty判定に入り【画像もコメントも削除】されていた。(Chami報告2026-07-17
+  //   「動画生成へ進むと候補用画像とコメントが候補から消える・作り直せない」の真因。画像が多い/重い
+  //   ほど展開が遅く、間欠的に発火する。commit 2a16fceが直したのは別件=書込完了待ちで、この競合は
+  //   残っていたためChamiの「多分治ってない」は正しかった)
+  //   → 展開の完了フラグと待ち合わせを持ち、(1)未展開のうちは破壊的な空保存を拒否 (2)モーダルは
+  //     展開を待ってから開く、の二段で防ぐ。
+  var _hydrated = false;
+  var _hydrateWaiters = [];
+  function markHydrated_() { _hydrated = true; _hydrateWaiters.splice(0).forEach(function (f) { try { f(); } catch (e) {} }); }
+  function whenImagesReady_(cb) {                 // 展開済みなら即時、未了なら完了時に呼ぶ(最大3秒で諦めて続行)
+    if (_hydrated || !_idbOk) { cb(); return; }
+    var done = false, fire = function () { if (done) return; done = true; cb(); };
+    _hydrateWaiters.push(fire);
+    setTimeout(fire, 3000);                       // 保険(展開が異常に遅い/失敗しても操作は止めない)
+  }
   function refImgKey(cid) { return 'cand_refimg__' + cid; }   // localStorage互換キー(フォールバック/移行用)
   function bskyImgKey(cid) { return 'cand_bskyimg__' + cid; }
   function idbKey(kind, cid) { return kind + ':' + cid; }     // IDBキー 'ref:<cid>' / 'bsky:<cid>'
@@ -312,6 +329,9 @@
     // data.imgs(配列・新)または data.img(単発・旧)を受け付け、{imgs, img:先頭} で保存。(img は旧読み手互換用)
     var imgs = data ? (Array.isArray(data.imgs) ? data.imgs.filter(Boolean) : (data.img ? [data.img] : [])) : [];
     var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl && !data.twitterUrl2);
+    // ★展開前(_imgMemが空)の「空データ=削除」は、読めていないだけの既存データを消す事故になる。
+    //   未展開のうちは破壊的な空保存を拒否する。(明示削除はUIから展開後に行われるので実害なし)
+    if (empty && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
     var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: data.twitterUrl2 || '', at: new Date().getTime() };
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
@@ -335,6 +355,7 @@
   }
   function bskyImgHas(cid) { var r = bskyImgOf(cid); return !!(r && r.img); }
   function bskyImgSave(cid, img) {
+    if (!img && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; } // refImgSaveと同じ理由
     var rec = img ? { img: img, at: new Date().getTime() } : null;
     if (_idbOk) {
       if (rec) _imgMem.bsky[cid] = rec; else delete _imgMem.bsky[cid];
@@ -385,11 +406,13 @@
       });
       return migrateLocalImages_();
     }).then(function () {
+      markHydrated_(); // ここから先は _imgMem が真値=空保存の拒否を解除し、待たせていたモーダルを進める
       // 画像がメモリに載ったので、候補タブ表示中なら描画し直す。(サムネ・✓バッジを反映)
       try { var pc = document.getElementById('pageCand'); if (pc && !pc.hidden) render(); } catch (e) {}
     }).catch(function (e) {
       // オープン/読み取りに失敗＝この環境ではIDB不可。localStorageフォールバックへ切り替え。(旧データはそのまま読める)
       _idbOk = false; try { console.warn('[go5 idb] 利用不可のためlocalStorageで継続', e); } catch (_) {}
+      markHydrated_(); // localStorageは同期で読める=以後は待たせない・拒否もしない
     });
   }
   // localStorage の cand_refimg__* / cand_bskyimg__* を IDB へ移して localStorage から削除。(冪等・IDB書込成功後にのみ削除＝データロス防止)
@@ -771,6 +794,9 @@
   var _refOpenSeq = 0; // モーダルを開くたびに増える通し番号(遅い非同期処理が古いpendingへ書き込むのを防ぐ)
   function openRefImgModal_(it, onSaved) {
     if (!it) return;
+    // ★画像の展開(IDB→メモリ)が終わる前に開くと、pendingが空で作られ「動画生成へ/保存」で
+    //   既存の画像・コメントを消してしまう。展開を待ってから開く。(Chami報告2026-07-17の真因)
+    if (_idbOk && !_hydrated) { whenImagesReady_(function () { openRefImgModal_(it, onSaved); }); return; }
     var mySeq = ++_refOpenSeq;
     var ov = _refOverlay;
     if (!ov) {
