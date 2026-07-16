@@ -32,6 +32,7 @@ TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")
 CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
 STATE_FILE = os.path.join(LOCAL, "discord_inbox_state.json")
 INBOX_FILE = os.path.join(LOCAL, "discord_inbox.jsonl")
+POLLER_ACTIVE = os.path.join(LOCAL, "llm", "poller_active.txt")  # 死活の脈(absence_watchdogが鮮度を監視)
 POLL_SEC = 15
 API = "https://discord.com/api/v10"
 
@@ -56,6 +57,17 @@ def dept_active(dept):
 
 def dept_box(dept):
     return os.path.join(LOCAL, "inbox", f"{dept}.jsonl")
+
+
+def touch_poller_active():
+    """巡回ごとに死活の脈を打つ。absence_watchdogがこの鮮度で『ポーラー停止』を検知する。
+    ポーラーが死ぬと新着が一切配達されず=チャイム全体が沈黙するため、単独の死活監視が要る。"""
+    try:
+        os.makedirs(os.path.dirname(POLLER_ACTIVE), exist_ok=True)
+        with open(POLLER_ACTIVE, "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())) + "\n")
+    except OSError:
+        pass
 
 
 def sweep_stale_dept_boxes():
@@ -133,6 +145,71 @@ def api_get(path, token):
     return None
 
 
+# --- 既読リアクション(2026-07-16 Chami依頼) ---
+# 配達した瞬間にカスタム絵文字「既読」を押す=「届いた」をトークンゼロで可視化。
+# 「無視されてる/考え中/未達」の区別と確認往復の削減が目的。着手印はClaude側が
+# scripts/discord/react.py で押す(2段階)。未登録の間はUnicode✅で代用し、
+# 登録され次第(10分毎に再解決)自動でカスタム絵文字に切り替わる。失敗しても配達は止めない。
+import urllib.parse
+
+REACT_READ_NAME = "既読"          # サーバー絵文字名(Chami登録)
+REACT_READ_FALLBACK = "✅"    # ✅(未登録時の代用)
+_react = {"guild": "", "emoji": "", "at": 0.0}
+
+
+def api_put_(path, token):
+    req = urllib.request.Request(
+        API + path, method="PUT", data=b"",
+        headers={"Authorization": "Bot " + token, "User-Agent": "go5-org-inbox (personal, v1)"},
+    )
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return 200 <= r.status < 300
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                try:
+                    wait = float(json.loads(e.read().decode("utf-8")).get("retry_after", 1))
+                except Exception:
+                    wait = 1.0
+                time.sleep(min(wait, 10) + 0.3)
+                continue
+            return False  # 権限なし(403)等は諦める(配達最優先)
+        except Exception:
+            return False
+    return False
+
+
+def resolve_read_emoji_(token, any_cid):
+    """「既読」カスタム絵文字を name:id 形式で解決(10分キャッシュ)。無ければ✅。"""
+    now = time.time()
+    if _react["emoji"] and (":" in _react["emoji"] or now - _react["at"] < 600):
+        return _react["emoji"]  # カスタム解決済みは恒久・✅代用中は10分毎に再解決
+    _react["at"] = now
+    try:
+        if not _react["guild"]:
+            ch = api_get(f"/channels/{any_cid}", token)
+            _react["guild"] = str((ch or {}).get("guild_id", "") or "")
+        if _react["guild"]:
+            for e in (api_get(f"/guilds/{_react['guild']}/emojis", token) or []):
+                if e.get("name") == REACT_READ_NAME and e.get("id"):
+                    _react["emoji"] = f"{REACT_READ_NAME}:{e['id']}"
+                    print(f"{time.strftime('%H:%M:%S')} 既読絵文字を解決: :{REACT_READ_NAME}:")
+                    return _react["emoji"]
+    except Exception:
+        pass
+    _react["emoji"] = REACT_READ_FALLBACK
+    return _react["emoji"]
+
+
+def react_read_(cid, mid, token):
+    try:
+        emoji = urllib.parse.quote(resolve_read_emoji_(token, cid))
+        api_put_(f"/channels/{cid}/messages/{mid}/reactions/{emoji}/@me", token)
+    except Exception:
+        pass  # リアクション失敗で配達を止めない
+
+
 def poll_channel(ch, token, state, out):
     cid = str(ch["id"])
     last = state.get(cid)
@@ -159,6 +236,7 @@ def poll_channel(ch, token, state, out):
             "msg_id": m["id"],
         }
         out.append(rec)
+        react_read_(cid, m["id"], token)  # 既読印=「届いた」を即可視化(トークンゼロ・失敗しても配達継続)
         new += 1
     return new
 
@@ -172,6 +250,7 @@ def main():
         sys.exit(2)
     print(f"受信ポーラー開始: {len(channels)}チャンネルを{POLL_SEC}秒間隔で監視" + (" (--once)" if once else ""))
     while True:
+        touch_poller_active()  # 死活の脈(watchdogが監視・ポーラー停止=チャイム沈黙の単一障害点)
         state = load_state()
         sweep_stale_dept_boxes()  # 常駐が消えた部門箱の取り残しをmainへ回収
         out = []
