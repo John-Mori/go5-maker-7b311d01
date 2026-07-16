@@ -34,6 +34,7 @@ LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 INBOX_FILE = os.path.join(LOCAL, "discord_inbox.jsonl")
 FOR_CLAUDE_FILE = os.path.join(LOCAL, "discord_inbox_for_claude.jsonl")
 CLAUDE_ACTIVE = os.path.join(LOCAL, "llm", "claude_active.txt")
+POLLER_ACTIVE = os.path.join(LOCAL, "llm", "poller_active.txt")  # inbox_pollerの死活脈(巡回毎に更新)
 STATE_FILE = os.path.join(LOCAL, "discord_watchdog_state.json")
 BOT_SEND = os.path.join(ROOT, "scripts", "discord", "bot_send.py")
 PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
@@ -50,6 +51,12 @@ def session_label():
         return "(名称未設定の司令塔セッション)"
 
 STALE_MIN = 15                 # これ以上未処理なら「司令塔不在の可能性」
+# ポーラー脈がこれ以上古い/無い=停止の可能性。
+# 2026-07-16: 120秒だと誤検知が頻発した(実測の発報は121〜166秒=閾値のわずかな超過ばかり)。
+# 原因はch数の増加(27ch)で1巡回のAPI往復が伸び、脈の更新間隔が120秒を超えるようになったため。
+# ポーラーは生きているのに鳴る=狼少年になり、本当の停止を見落とす。実態に合わせ5分へ。
+POLLER_STALE_SEC = 300
+POLLER_ALERT_COOLDOWN_SEC = 30 * 60  # ポーラー停止アラートは30分に1回まで
 POLL_SEC = 60                  # 常駐時の巡回間隔
 MAX_ANNOUNCE_PER_CYCLE = 3     # (a)の1周期あたり上限(暴走ガード)
 MAX_ANNOUNCE_PER_HOUR = 6      # (a)の直近1時間あたり上限
@@ -70,10 +77,11 @@ def load_state():
             data.setdefault("announced", [])
             data.setdefault("sent_ts", [])
             data.setdefault("last_summary", 0)
+            data.setdefault("last_poller_alert", 0)
             return data
         except Exception:
             pass
-    return {"announced": [], "sent_ts": [], "last_summary": 0}
+    return {"announced": [], "sent_ts": [], "last_summary": 0, "last_poller_alert": 0}
 
 
 def save_state(state):
@@ -152,10 +160,43 @@ def bot_send(channel, body, dry_run, by_dept=False):
     return r.returncode == 0
 
 
+def poller_age_sec():
+    """inbox_pollerの死活脈の古さ(秒)。ファイルが無ければNone(=一度も動いていない/停止)。"""
+    if not os.path.exists(POLLER_ACTIVE):
+        return None
+    return time.time() - os.path.getmtime(POLLER_ACTIVE)
+
+
+def check_poller_health(state, dry_run):
+    """ポーラー停止を単独で検知して通知する(受付箱の滞留とは独立)。
+
+    ポーラーが死ぬと新着が一切配達されず、受付箱は空のまま=滞留検知は永久に発火しない。
+    そのためチャイム全体の単一障害点として、ここで死活脈の鮮度を直接見る。
+    30分に1回までincidentへ通知(暴走ガード)。State(last_poller_alert)を更新する。
+    """
+    age = poller_age_sec()
+    if age is not None and age < POLLER_STALE_SEC:
+        return  # 正常
+    now_epoch = time.time()
+    if now_epoch - state.get("last_poller_alert", 0) < POLLER_ALERT_COOLDOWN_SEC:
+        return  # クールダウン中
+    when = "脈ファイルなし(未起動/停止)" if age is None else f"最終更新{int(age)}秒前"
+    msg = (
+        f"⚠inbox_poller 停止の可能性(自動監視): Discord受信ポーラーの死活脈が{when}。"
+        "ポーラーが止まると新着が一切受付箱へ届かず、Discordの呼びかけに誰も気づけません。"
+        "司令塔は `scripts\\discord\\start_discord_inbox.bat` で再起動を(二重起動に注意=既存cmd窓を閉じてから)。"
+    )
+    if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
+        state["last_poller_alert"] = now_epoch
+
+
 def run_once(dry_run=False):
     if not os.path.isdir(LOCAL):
         print(f"local/ ディレクトリが見つかりません({LOCAL})。監視対象なしのため正常終了します。")
         return
+    state = load_state()
+    check_poller_health(state, dry_run)  # ポーラー死活は受付箱の滞留と独立に監視(単一障害点)
+    save_state(state)
     rows = read_inbox_rows()
     if rows is None:
         print(f"受付箱ファイルが見つかりません({INBOX_FILE})。正常終了します。")
