@@ -1,32 +1,49 @@
 /**
- * promo-label.js — 販促ラベル(今なら◯%OFF🌙/今だと◯%OFF🌸)
+ * promo-label.js — 販促ラベル(セールラベル)
  *
- * 2026-07-15 作り替え(Chami指示): 写真への「焼き込み」をやめ、動画フレーム(1080×1920)への
- * 「重ね描き(オーバーレイ)」に一本化。app.js の drawFrame() が Go5PromoLabel.drawOverlay() を呼ぶ。
- *   - フレーム基準で描くので、挿入画像の外(黒帯・余白)にも自由に配置できる。
- *   - 写真File自体は無改変 → Bluesky添付画像にはラベルが入らない(Chami指定「記載しない」)。
- *   - プレビューも書き出し(録画)も同じ drawFrame を通るので一致する。
- * 位置はフレーム比(0..1)、大きさは倍率。どちらも localStorage で永続。
- * 位置調整=プレビュー横のD-pad(promoPos*)＋プレビュー上で指ドラッグ。大きさ=promoSize±。
+ * 2026-07-16 作り替え(Chami指示・指示書「セールラベル数値可変化」):
+ *   Chami提供の完成デザインPNG(数字なしテンプレ)を敷き、数字だけをコードで描く。
+ *   - テンプレは4種: 月詠み(acc1)×[割引率/価格] / 宵桜(acc2)×[割引率/価格]。
+ *   - 固定文言(今なら/%OFF/月影に綴る/¥/作品案内…)は全てPNG側に焼き込み済み=コードでは触らない。
+ *   - 数字は指示書の通り「数字領域(slot)の中央」へ。1〜3桁は幅に合わせ自動縮小。
+ *   - 不正値(0/負/NaN/未設定)はラベルごと非表示。定価(セールでない)も非表示。
+ *   - 数字の質感はCanvas描画で原画に合わせる(提供された数字シートは背景が焼き込みで
+ *     切り出すと継ぎ目が出るため不採用。シートは local/promo-ref/ に保管=将来の精密化用)。
+ *
+ * 2026-07-15の設計を継承: 写真への焼き込みはせず、動画フレーム(1080×1920)への重ね描き。
+ *   app.js の drawFrame() が Go5PromoLabel.drawOverlay() を呼ぶ。プレビュー=書き出し一致。
+ *   位置はフレーム比(0..1)、大きさは倍率。D-pad+指ドラッグで調整、localStorageで永続。
  */
 (function () {
   'use strict';
   var FRAME_W = 1080, FRAME_H = 1920;
-  // 帯フォールバック用の基本寸法(テンプレPNG未設置時のみ使用・フレーム基準)。
+  // 帯フォールバック用の基本寸法(テンプレPNGが読めない間のみ使用・フレーム基準)。
   var LBL = { w: 335, h: 79, font: 46, radius: 18 };
 
-  // ── デコラティブ・テンプレート(Chami依頼2026-07-15) ──
-  // 文字を焼き込んでいない透過PNGを背景に敷き、文字(今なら/割引率/%OFF/絵文字)はコードで描く。
-  // PNGは assets/promo/ に置く(未設置なら従来の帯へ自動フォールバック=壊れない)。
-  // baseW(フレーム基準の基本幅)/aspect(暫定・実PNG読込後は実アスペクト優先)/zone(文字の安全域=装飾に重ねない箱内比率)。
-  // ★実アセット差し替え後に zone と baseW を微調整する前提の暫定値。
+  // ── テンプレート定義 ──
+  // slot = 数字を置く領域(画像内の比率)。基材PNGの画素解析で確定した値(2026-07-16):
+  //   ・月詠み割引: 「今なら」(行331-436)と「%OFF」(行781-)の間の空き
+  //   ・月詠み価格: 仕切り(〜754)と「作品」(995-)の間・¥の右側
+  //   ・宵桜割引: 「今だと」(列〜753)と「%OFF」(列1292-)の間
+  //   ・宵桜価格: 「今宵の¥」(列〜848)と「作品案内」(列1297-)の間
+  // ink = 数字の色(グラデ上/下・縁・光彩)。原画の数字(クリーム金/白桜)に合わせる。
   var TEMPLATES = {
-    acc1: { src: 'assets/promo/tsukuyomi.png', baseW: 360, aspect: 360 / 900, orient: 'vertical',
-            lead: '今なら', tail: 'OFF', emoji: '🌙', ink: '#f3e6c0',
-            zone: { x: 0.30, y: 0.10, w: 0.52, h: 0.76 } },
-    acc2: { src: 'assets/promo/yoizakura.png', baseW: 620, aspect: 620 / 165, orient: 'horizontal',
-            lead: '今だと', tail: '%OFF', emoji: '🌸', ink: '#fffdf6',
-            zone: { x: 0.06, y: 0.20, w: 0.66, h: 0.60 } }
+    acc1: {
+      baseW: 360, aspect: 1024 / 1536,
+      ink: { top: '#fff6d8', bottom: '#f0cf8a', edge: 'rgba(210,168,90,.85)', glow: 'rgba(255,224,150,.9)' },
+      discount: { src: 'assets/promo/tsukuyomi-discount-base.png',
+                  slot: { x: 0.332, y: 0.306, w: 0.342, h: 0.189 } },
+      price:    { src: 'assets/promo/tsukuyomi-price-base.png',
+                  slot: { x: 0.440, y: 0.505, w: 0.233, h: 0.140 } }
+    },
+    acc2: {
+      baseW: 620, aspect: 2172 / 724,
+      ink: { top: '#ffffff', bottom: '#f8c9d6', edge: 'rgba(214,130,150,.9)', glow: 'rgba(255,160,185,.95)' },
+      discount: { src: 'assets/promo/yoizakura-discount-base.png',
+                  slot: { x: 0.364, y: 0.260, w: 0.211, h: 0.490 } },
+      price:    { src: 'assets/promo/yoizakura-price-base.png',
+                  slot: { x: 0.405, y: 0.260, w: 0.175, h: 0.490 } }
+    }
   };
   var _imgCache = {};
   function tplImg(src) {
@@ -42,31 +59,43 @@
     return im._failed ? null : im;
   }
 
-  var scale = 1;    // 大きさ倍率(0.6〜2.5)
-  var fpos = null;  // 手動位置 {x,y}=ラベル左上のフレーム比(0..1)。null=既定(右上)
-  var pct = 0;      // 現在の割引率(0=ラベル非表示)
-  var lastCid = ''; // 直近の作品id(begin/notifyの取り違え防止)
+  var scale = 1;      // 大きさ倍率(0.6〜2.5)
+  var fpos = null;    // 手動位置 {x,y}=ラベル左上のフレーム比(0..1)。null=既定(右上)
+  var pct = 0;        // 割引率(セール中のみ>0)
+  var priceVal = 0;   // 割引後価格(セール中のみ>0)。価格ラベルの数字
+  var ltype = 'discount'; // ラベル種類 'discount'(◯%OFF) | 'price'(¥◯)
+  var lastCid = '';   // 直近の作品id(begin/notifyの取り違え防止)
   // 表示ON/OFF(Chami依頼2026-07-16)。既定=ON。新規作成のリセット後もONへ戻す(clear参照)。
   // ★これはあくまで「出す気があるか」のスイッチ。セール判定(onSale)とはAND=定価の作品には
   //   チェックが入っていても出さない(Chami明示)。判定は active() に集約する。
   var enabled = true;
   try { var _e = localStorage.getItem('promo_label_enabled'); if (_e === '0') enabled = false; } catch (e) {}
-
+  try { var _t = localStorage.getItem('promo_label_type'); if (_t === 'price') ltype = 'price'; } catch (e) {}
   try { var _s = parseFloat(localStorage.getItem('promo_label_scale')); if (_s >= 0.6 && _s <= 2.5) scale = _s; } catch (e) {}
   try { var _p = JSON.parse(localStorage.getItem('promo_label_fpos') || 'null'); if (_p && typeof _p.x === 'number' && typeof _p.y === 'number') fpos = _p; } catch (e) {}
 
   function acct() { return window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'; }
-  function tpl() { return TEMPLATES[acct()] || null; }
-  function labelText(p) { return acct() === 'acc2' ? ('今だと' + p + '%OFF🌸') : ('今なら' + p + '%OFF🌙'); }
-  // 表示可否の唯一の判定点。pct>0 = セール中(notifyがonSaleの時だけ入れる=定価は0)。
+  function tplAcct() { return TEMPLATES[acct()] || TEMPLATES.acc1; }
+  function tplVariant() { return tplAcct()[ltype] || tplAcct().discount; }
+  // 表示する数字。指示書§7: 正の整数のみ(0/負/NaN/undefinedは不正=非表示)。
+  function val() {
+    var v = ltype === 'price' ? priceVal : pct;
+    return (typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v > 0) ? v : 0;
+  }
+  // 表示可否の唯一の判定点。val()>0 = セール中かつ値が正当(notifyがonSaleの時だけ値を入れる=定価は0)。
   // enabled = Chamiのチェックボックス。両方満たした時だけ描く。
-  function active() { return enabled && pct > 0; }  // discountRate null/0/NaN/未設定=非表示(0%OFF等を出さない)
-  // ラベル箱の寸法(フレーム単位)。テンプレPNGが読めていれば実アスペクト、無ければ暫定/帯。
+  function active() { return enabled && val() > 0; }
+  // フォールバック帯の文言(テンプレ未読込時のみ)。
+  function labelText(v) {
+    if (ltype === 'price') return (acct() === 'acc2' ? '今宵の¥' + v + '作品案内🌸' : '月影に綴る¥' + v + '作品🌙');
+    return acct() === 'acc2' ? ('今だと' + v + '%OFF🌸') : ('今なら' + v + '%OFF🌙');
+  }
+  // ラベル箱の寸法(フレーム単位)。テンプレPNGが読めていれば実アスペクト、無ければ定義値/帯。
   function boxWH() {
-    var t = tpl();
-    var w = (t ? t.baseW : LBL.w) * scale;
-    var img = t ? tplImg(t.src) : null;
-    var asp = (img && img.naturalWidth) ? (img.naturalWidth / img.naturalHeight) : (t ? t.aspect : LBL.w / LBL.h);
+    var t = tplAcct(), v = tplVariant();
+    var w = t.baseW * scale;
+    var img = tplImg(v.src);
+    var asp = (img && img.naturalWidth) ? (img.naturalWidth / img.naturalHeight) : t.aspect;
     return { w: w, h: w / asp };
   }
   function lw() { return boxWH().w; }
@@ -93,23 +122,47 @@
   }
 
   // app.js drawFrame から毎フレーム呼ばれる。フレーム(W×H)にラベルを重ね描き。
-  // テンプレPNGが読めていれば「装飾PNG＋コード描画の文字」、無ければ従来の帯。
   function drawOverlay(ctx, W, H) {
     if (!active()) return;
-    var sx = W / FRAME_W, sy = H / FRAME_H;
+    var sx = W / FRAME_W;
     var cp = curPos();
-    var bw = lw() * sx, bh = lh() * sy, x = cp.x * W, y = cp.y * H;
-    var t = tpl();
-    var img = t ? tplImg(t.src) : null;
-    if (t && img && img.complete && img.naturalWidth) {
-      ctx.drawImage(img, x, y, bw, bh);        // 装飾テンプレ(透過PNG・文字なし)
-      drawTplText(ctx, t, x, y, bw, bh);        // 文字はここでコード描画
+    var bw = lw() * sx, bh = lh() * (H / FRAME_H), x = cp.x * W, y = cp.y * H;
+    var v = tplVariant();
+    var img = tplImg(v.src);
+    if (img && img.complete && img.naturalWidth) {
+      ctx.drawImage(img, x, y, bw, bh);              // 完成デザイン(数字なし透過PNG)
+      drawDigits(ctx, tplAcct().ink, v.slot, x, y, bw, bh, String(val()));
     } else {
-      drawBand(ctx, x, y, bw, bh, sx, sy);      // フォールバック=従来の帯
+      drawBand(ctx, x, y, bw, bh, sx, H / FRAME_H);  // フォールバック=従来の帯
     }
   }
 
-  // 従来の帯(テンプレPNG未設置時のフォールバック。挙動は従来通り)。
+  // 数字だけを slot(数字領域)の中央へ描く。指示書§3.2/§6:
+  //   ・slotの中心位置は固定。桁数が変わっても中央揃え(幅に収まるよう縮小のみ)。
+  //   ・質感=原画の数字に合わせたグラデ+縁+光彩。フォントは近似セリフ(指示書§12の許容)。
+  function drawDigits(ctx, ink, slot, x, y, bw, bh, text) {
+    var zx = x + slot.x * bw, zy = y + slot.y * bh, zw = slot.w * bw, zh = slot.h * bh;
+    var fs = zh;                                   // 高さ基準で開始し、幅に収める
+    ctx.save();
+    var setF = function () { ctx.font = '700 ' + fs + 'px Georgia, "Times New Roman", serif'; };
+    setF();
+    var pad = zw * 0.04;
+    while (fs > zh * 0.4 && ctx.measureText(text).width > zw - pad * 2) { fs -= Math.max(1, fs * 0.04); setF(); }
+    var cx = zx + zw / 2, cy = zy + zh / 2;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var grad = ctx.createLinearGradient(0, cy - fs / 2, 0, cy + fs / 2);
+    grad.addColorStop(0, ink.top); grad.addColorStop(1, ink.bottom);
+    // 1) 光彩(2度描きで原画のふわっとした光に寄せる。広げすぎると枠線を跨ぐので0.18に抑える)
+    ctx.shadowColor = ink.glow; ctx.shadowBlur = fs * 0.18; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    ctx.fillStyle = grad; ctx.fillText(text, cx, cy);
+    ctx.shadowBlur = fs * 0.07; ctx.fillText(text, cx, cy);
+    // 2) 縁(光彩なしで輪郭を締める)
+    ctx.shadowColor = 'transparent';
+    ctx.lineWidth = Math.max(1, fs * 0.028); ctx.strokeStyle = ink.edge; ctx.strokeText(text, cx, cy);
+    ctx.restore();
+  }
+
+  // 従来の帯(テンプレPNGが読めない間のフォールバック)。
   function drawBand(ctx, x, y, w, h, sx, sy) {
     var r = LBL.radius * scale * Math.min(sx, sy);
     ctx.save();
@@ -118,59 +171,12 @@
     ctx.fillStyle = 'rgba(224,37,78,.93)'; ctx.fill();
     ctx.shadowColor = 'transparent';
     ctx.lineWidth = Math.max(2, 2.5 * sx); ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.stroke();
-    var text = labelText(pct);
+    var text = labelText(val());
     var fs = LBL.font * scale * sx;
     var setF = function () { ctx.font = '700 ' + fs + 'px "Noto Sans JP", sans-serif'; }; setF();
     while (fs > 20 && ctx.measureText(text).width > w - 18 * sx) { fs -= 1; setF(); }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
     ctx.fillText(text, x + w / 2, y + h / 2 + fs * 0.04);
-    ctx.restore();
-  }
-
-  // テンプレPNGの上に文字を描く。数字を最も大きく。1〜3桁ではみ出す時だけ全体を縮小(桁数自動調整)。
-  // zone=装飾に重ねない安全域(箱内の比率)。文字はzone内に収める。
-  function drawTplText(ctx, t, x, y, bw, bh) {
-    var z = t.zone, num = String(pct);
-    var zx = x + z.x * bw, zy = y + z.y * bh, zw = z.w * bw, zh = z.h * bh;
-    ctx.save();
-    ctx.fillStyle = t.ink;
-    ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = Math.max(2, zh * 0.03); ctx.shadowOffsetY = 1;
-    if (t.orient === 'horizontal') {
-      // 「今だと」＋大きい数字＋「%OFF」＋🌸 を1行。数字は1.5倍。ゾーン幅に収める(3桁は自動縮小)。
-      var f = zh * 0.6;
-      var meas = function (fB) {
-        var fN = fB * 1.5;
-        ctx.font = '700 ' + fB + 'px "Noto Sans JP", sans-serif';
-        var wLead = ctx.measureText(t.lead).width, wTail = ctx.measureText(t.tail).width, wEmoji = ctx.measureText(t.emoji).width;
-        ctx.font = '800 ' + fN + 'px "Noto Sans JP", sans-serif';
-        var wNum = ctx.measureText(num).width;
-        return { fN: fN, wLead: wLead, wNum: wNum, wTail: wTail, wEmoji: wEmoji,
-                 total: wLead + fB * 0.12 + wNum + fB * 0.06 + wTail + fB * 0.18 + wEmoji };
-      };
-      var m = meas(f);
-      if (m.total > zw) { f = f * zw / m.total; m = meas(f); }
-      var cx = zx + Math.max(0, (zw - m.total) / 2), cy = zy + zh / 2;
-      ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-      ctx.font = '700 ' + f + 'px "Noto Sans JP", sans-serif'; ctx.fillText(t.lead, cx, cy); cx += m.wLead + f * 0.12;
-      ctx.font = '800 ' + m.fN + 'px "Noto Sans JP", sans-serif'; ctx.fillText(num, cx, cy); cx += m.wNum + f * 0.06;
-      ctx.font = '700 ' + f + 'px "Noto Sans JP", sans-serif'; ctx.fillText(t.tail, cx, cy); cx += m.wTail + f * 0.18;
-      ctx.fillText(t.emoji, cx, cy);
-    } else {
-      // 縦: 「今なら」を小さく縦積み → 大きい数字＋% → 「OFF」→ 🌙。ゾーン高に収める。
-      var lead = t.lead.split(''), cxc = zx + zw / 2;
-      var fLead = zh * 0.072, fNum = zh * 0.26, fTail = zh * 0.11, fEmoji = zh * 0.12;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      var yy = zy + fLead;
-      ctx.font = '700 ' + fLead + 'px "Noto Sans JP", sans-serif';
-      for (var i = 0; i < lead.length; i++) { ctx.fillText(lead[i], cxc, yy); yy += fLead * 1.18; }
-      yy += fNum * 0.55;
-      var fN = fNum;
-      ctx.font = '800 ' + fN + 'px "Noto Sans JP", sans-serif';
-      while (fN > fNum * 0.5 && ctx.measureText(num + '%').width > zw * 0.94) { fN -= 2; ctx.font = '800 ' + fN + 'px "Noto Sans JP", sans-serif'; }
-      ctx.fillText(num + '%', cxc, yy); yy += fN * 0.6 + fTail * 0.6;
-      ctx.font = '700 ' + fTail + 'px "Noto Sans JP", sans-serif'; ctx.fillText(t.tail, cxc, yy); yy += fTail * 0.7 + fEmoji * 0.6;
-      ctx.font = '700 ' + fEmoji + 'px sans-serif'; ctx.fillText(t.emoji, cxc, yy);
-    }
     ctx.restore();
   }
 
@@ -185,6 +191,7 @@
   function persist() {
     try { localStorage.setItem('promo_label_scale', String(scale)); } catch (e) {}
     try { localStorage.setItem('promo_label_fpos', fpos ? JSON.stringify(fpos) : ''); } catch (e) {}
+    try { localStorage.setItem('promo_label_type', ltype); } catch (e) {}
   }
 
   // ---- 位置・大きさの手動調整 ----
@@ -209,6 +216,8 @@
     var row = document.getElementById('promoPosRow');
     if (row) row.hidden = !active();
     updateSizeLabel();
+    var sel = document.getElementById('promoType');
+    if (sel && sel.value !== ltype) sel.value = ltype;
     var pw = document.querySelector('.preview-wrap');
     if (pw) pw.classList.toggle('has-dpad', active());
   }
@@ -226,6 +235,14 @@
         enabled = !!en.checked;
         try { localStorage.setItem('promo_label_enabled', enabled ? '1' : '0'); } catch (e) {}
         updateRow(); redraw();
+      });
+    }
+    var sel = document.getElementById('promoType');
+    if (sel) {
+      sel.value = ltype;
+      sel.addEventListener('change', function () {
+        ltype = (sel.value === 'price') ? 'price' : 'discount';
+        persist(); updateRow(); redraw();
       });
     }
     var rs = document.getElementById('promoPosReset'); if (rs) rs.addEventListener('click', resetPos);
@@ -310,35 +327,51 @@
     cv.addEventListener('pointercancel', endPointer);
   })();
 
-  // アカウント切替=文言(🌙⇔🌸)が変わるため再描画。
+  // アカウント切替=テンプレ(月詠み⇔宵桜)が変わるため再描画。
   document.addEventListener('account-changed', function () { redraw(); });
 
   window.Go5PromoLabel = {
     drawOverlay: drawOverlay,     // app.js drawFrame から呼ぶ(フレームへ重ね描き)
-    // 作品情報が確定した時に呼ぶ(bluesky.js renderMovieInfo)。割引0%はラベル無し。
+    // 作品情報が確定した時に呼ぶ(bluesky.js renderMovieInfo)。セール中のみ値を保持(定価=0=非表示)。
     notify: function (info) {
       if (!info || !info.title) return;
       var onSale = info.listPrice && info.price != null && info.discountPct > 0 && info.price < info.listPrice;
       lastCid = String(info.cid || info.title || '');
-      pct = onSale ? info.discountPct : 0;
+      pct = onSale ? Math.round(info.discountPct) : 0;
+      priceVal = onSale ? Math.round(info.price) : 0;
       updateRow(); redraw();
     },
-    // 別作品の取得開始(前作の%を残さない)。
+    // 別作品の取得開始(前作の値を残さない)。
     begin: function (cid) {
-      if (String(cid || '') !== lastCid) { pct = 0; updateRow(); redraw(); }
+      if (String(cid || '') !== lastCid) { pct = 0; priceVal = 0; updateRow(); redraw(); }
     },
     // 新規作成の起点(Go5NewMovieReset)。位置は既定へ戻す。
     // ★チェックは必ずONへ戻す(Chami指定2026-07-16「前の情報がリセットされた時もチェックを入れた状態に」)。
     //   前回OFFにしていても、新しい動画では既定のONから始まる=消し忘れでラベルが出ない事故を防ぐ。
     clear: function () {
-      pct = 0; fpos = null;
+      pct = 0; priceVal = 0; fpos = null;
       enabled = true;
       try { localStorage.setItem('promo_label_enabled', '1'); } catch (e) {}
       var en = document.getElementById('promoEnable'); if (en) en.checked = true;
       persist(); updateRow(); redraw();
     },
     nudge: nudge,
-    resetPos: resetPos
+    resetPos: resetPos,
+    // 検証用(テストからテンプレ+数字を素のサイズで描かせる。実機能はdrawOverlay経由)。
+    _test: {
+      slots: TEMPLATES,
+      renderTo: function (canvas, acctId, type, value) {
+        var t = TEMPLATES[acctId], v = t[type];
+        var img = tplImg(v.src);
+        if (!img || !img.complete || !img.naturalWidth) return false;
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        var c = canvas.getContext('2d');
+        c.clearRect(0, 0, canvas.width, canvas.height);
+        c.drawImage(img, 0, 0);
+        drawDigits(c, t.ink, v.slot, 0, 0, canvas.width, canvas.height, String(value));
+        return true;
+      }
+    }
   };
 
   updateRow();
