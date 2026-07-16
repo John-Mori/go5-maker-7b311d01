@@ -134,17 +134,42 @@
   }
   function renderSaleStats_() {
     var el = document.getElementById('saleStats'); if (!el) return;
-    Promise.all(saleCodes_().map(fetchClicks)).then(function (arr) {
-      var cum = null; arr.forEach(function (c) { if (c != null) cum = (cum || 0) + c; });
+    var codes = saleCodes_();
+    function paint() {
+      var cum = null; codes.forEach(function (c) { if (c in clicksCache) cum = (cum || 0) + clicksCache[c]; });
       var d = (typeof deltaCache === 'object' && deltaCache) ? deltaCache.SALE : null;
       function f(x) { return (x == null ? '–' : num(x)); }
       el.textContent = '🏮 セール会場 累計' + f(cum) + '・今日' + f(d && d.tc) + '・昨日' + f(d && d.yc) + '・週' + f(d && d.wc);
-    });
+    }
+    // 既に一括取得済みならリクエスト0で描画。未取得のときだけ /api/list を1本(TTL内は再利用)。
+    //   ＝render()のたびに /api/stats を叩いていた旧実装の無駄を除去(Cloudflare無料枠対策2026-07-16)
+    if (codes.some(function (c) { return c in clicksCache; })) { paint(); return; }
+    fetchAllClicks_().then(paint);
   }
   function fetchClicks(code) {
     var w = window.Go5Short; if (!w || !code) return Promise.resolve(null);
     var u = w.WORKER_URL.replace(/\/+$/, '') + '/api/stats?code=' + encodeURIComponent(code) + '&secret=' + encodeURIComponent(w.SHARED_SECRET);
     return fetch(u).then(function (r) { return r.json(); }).then(function (j) { return (j && j.ok && typeof j.clicks === 'number') ? j.clicks : null; }).catch(function () { return null; });
+  }
+  // ── クリック数は /api/list で「全コードを1リクエスト」で取得する ──
+  //   旧実装は codes.forEach で /api/stats をコード毎に1本叩いていたため、投稿N件×2導線(導線1/2)で
+  //   1回のrefreshにつき最大2N本のWorkerリクエストが飛び、Cloudflare無料枠(10万/日)を焼いていた。
+  //   (Chami報告2026-07-16 上限超過メール)refresh()はタブ表示/アカウント切替/編集/削除など多数から
+  //   呼ばれるため、1アクション=数百リクエストになっていたのが主因。→ 1本＋TTL再利用に置換。
+  var _clicksAt = 0, _clicksP = null, CLICKS_TTL_MS = 60000;
+  function fetchAllClicks_(force) {
+    var w = window.Go5Short;
+    if (!w || !w.WORKER_URL || !w.SHARED_SECRET) return Promise.resolve(false);
+    var now = new Date().getTime();
+    if (!force && _clicksP && (now - _clicksAt) < CLICKS_TTL_MS) return _clicksP; // 直近取得を再利用(連打・多発を抑制)
+    _clicksAt = now;
+    var u = w.WORKER_URL.replace(/\/+$/, '') + '/api/list?secret=' + encodeURIComponent(w.SHARED_SECRET);
+    _clicksP = fetch(u).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.ok || !j.links) return false;
+      j.links.forEach(function (l) { if (l && l.code) clicksCache[l.code] = l.clicks || 0; });
+      return true;
+    }).catch(function () { return false; });
+    return _clicksP;
   }
   // 複数の動画ID → {views, publishedAt(ms), title}。(videos.list は parts に関わらず1回1ユニット・最大50件)
   function fetchVideos(ids) {
@@ -1414,7 +1439,7 @@
     var fileInp = wrap.querySelector('input[type=file]');
     var useSel = wrap.querySelector('#veditImgUse');
     var msg = wrap.querySelector('.vedit-postimg-msg');
-    function persist() { store_(imgs); try { refresh(); } catch (e) {} } // 即保存＋カード再描画
+    function persist() { store_(imgs); try { render(); } catch (e) {} } // 即保存＋カード再描画(画像変更なのでrender=クリック再取得を伴わない)
     function draw() {
       grid.innerHTML = '';
       if (!imgs.length) { grid.innerHTML = '<div class="hint" style="padding:6px 2px;">まだありません。「📋 貼り付け」か「＋ 選ぶ」で追加してください。</div>'; return; }
@@ -1497,7 +1522,7 @@
   }
 
   // クリック数(開封数)・YouTube視聴回数/投稿日時/題名をAPIから取得しキャッシュへ。Promiseを返す。
-  function fetchData_(items, ymap) {
+  function fetchData_(items, ymap, force) { // force=true(手動🔄更新)のときだけTTLを無視して取り直す
     // 導線1(shortUrl=YT→投稿)と導線2(workShortUrl=投稿→FANZA)の両計測コードをまとめて照会
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); })
       .concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); }))
@@ -1506,7 +1531,8 @@
     var uniqVids = vids.filter(function (v, i, a) { return a.indexOf(v) === i; }); // 重複動画IDは1回だけ照会
     if (!codes.length && !uniqVids.length) return Promise.resolve(false);
     var jobs = [];
-    codes.forEach(function (code) { jobs.push(fetchClicks(code).then(function (c) { if (c != null) clicksCache[code] = c; })); });
+    // クリック数は全コードまとめて1リクエスト(/api/list)。旧: コード毎に /api/stats=N本(無料枠を焼く原因)
+    if (codes.length) jobs.push(fetchAllClicks_(!!force));
     // D1: YouTube照会は videos.list の上限(50件/回)に合わせて50件ずつ分割。件数が増えても全行を取得する
     //   。(旧実装は先頭50件で silent 打ち切り＝古い投稿/末尾の手動追加から更新が止まっていた)
     //   予約公開判定は「照会したのに応答に無い」を用いるため、queried は全バッチ合算してから一度だけ判定する。
@@ -1597,7 +1623,7 @@
       return Promise.resolve(false);
     }
     setStatus('🔄 更新中…(再生数・クリック数)');
-    return fetchData_(items, ymap).then(function () {
+    return fetchData_(items, ymap, !!announce).then(function () { // 手動更新(announce)のみ強制再取得
       if (lastErr) setStatus('⚠️ 更新に失敗しました：' + lastErr + note, !!note);
       else if (announce) setStatus('✅ 更新しました(再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + ')' + note, !!note);
       else setStatus((!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : '') + note, !!note);
@@ -3041,7 +3067,7 @@
           ytMetaPersist(m);
         }));
       });
-      missingC.forEach(function (code) { jobs.push(fetchClicks(code).then(function (c) { if (c != null) clicksCache[code] = c; })); });
+      if (missingC.length) jobs.push(fetchAllClicks_()); // 未取得コードは /api/list で一括(旧: コード毎に1本=無料枠を焼く)
       Promise.all(jobs).then(function () { clicksPersist_(); doRender(); });
     } else {
       doRender();

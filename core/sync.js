@@ -373,11 +373,20 @@
   }
 
   var _timer = null;
+  // 自動同期の周期。25秒→60秒(Cloudflare無料枠10万req/日の超過対策2026-07-16: 1タブ3,456回/日→1,440回/日)。
+  //   変更駆動の requestSync(デバウンス)があるので、周期を伸ばしても実変更の反映は遅れない。
+  var AUTO_MS = 60000;
   function startAuto() {
     if (_timer || !configured()) return;
     syncOnce(false);
-    _timer = root.setInterval(function () { syncOnce(false); }, 25000);
-    if (root.document) root.document.addEventListener("visibilitychange", function () { if (root.document.visibilityState === "hidden") syncOnce(false); });
+    // 非表示タブでは回さない＝裏で開きっぱなしのタブがWorkerを叩き続けるのを止める。
+    //   表示に戻った瞬間に1回同期するため、体感の反映速度は落とさない。
+    _timer = root.setInterval(function () {
+      if (root.document && root.document.visibilityState === "hidden") return;
+      syncOnce(false);
+    }, AUTO_MS);
+    // 隠れる直前=ローカル変更を押し出す / 表示に戻った直後=最新を取り込む(裏で止めた分を即回復)
+    if (root.document) root.document.addEventListener("visibilitychange", function () { syncOnce(false); });
   }
 
   // 変更駆動の即時同期。(候補追加・画像保存の直後に呼ぶ)25秒周期を待たずに反映しつつ、
