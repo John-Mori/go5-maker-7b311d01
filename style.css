@@ -56,14 +56,12 @@ input[type=datetime-local]:focus{border-color:var(--accent);}
 /* 幅・高さとも auto にして固有比(9:16)のまま max-width/max-height 内に収める。
    どちらか片方だけを固定しないことで、縦長・狭幅端末でも 9:16 が崩れず横潰れしない。 */
 canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/16;
-  background:#000;border:1px solid var(--line);border-radius:10px;cursor:zoom-in;
+  background:#000;border:1px solid var(--line);border-radius:10px;
   touch-action:none;} /* 二本指ピンチをこちらで取るためブラウザ既定ジェスチャを無効化(Chami指定2026-07-15) */
-/* タップで拡大した状態(もう一度タップで戻る)。画面いっぱいのオーバーレイに(Chami依頼2026-07-15)。
-   fixedにするのは、モバイルでは幅制約が効いてmax-heightだけでは大きくならないため=確実に拡大。 */
-canvas#cv.cv-zoom{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-  transform-origin:center center;
-  max-width:96vw;max-height:94vh;width:auto;height:auto;z-index:1000;cursor:zoom-out;
-  box-shadow:0 0 0 100vmax rgba(0,0,0,.62);}
+/* ★プレビューの全画面ズーム(.cv-zoom=fixed+暗幕のモーダル)は廃止(Chami依頼2026-07-17
+   「プレビュー画面のモーダルはいらない」)。二本指は「見た目の拡大」ではなく
+   動画に使う画像そのものの拡大縮小(OFF.imgScale)に付け替えたため、この見た目専用の
+   拡大状態は不要になった。cursor:zoom-in も一緒に撤去(拡大する場所ではなくなったため)。 */
 /* 販促ラベルのD-pad(プレビュー真横の余白に配置。ラベルが焼かれている時だけ表示・Chami依頼2026-07-15) */
 .promo-dpad{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:4px;user-select:none;}
 .promo-dpad[hidden]{display:none;}

@@ -26,6 +26,7 @@
   const ROWGAP_MAX = 0.04;                       // 段と段の追加スペース上限(基準フレーム高さ比)
   const TSCALE_MIN = 0.7, TSCALE_MAX = 1.5;      // 大タイトルの拡大率(1.0＝従来。影・帯は文字サイズ比なので連動)
   const IMG_MIN = -0.15, IMG_MAX = 0.15;         // 前景画像だけの上下オフセット(基準フレーム高さ比・文字とは独立)
+  const ISCALE_MIN = 0.5, ISCALE_MAX = 2.0;      // 前景画像の拡大率(1.0=従来のフィット)。二本指ピンチと±で操作(Chami依頼2026-07-17)
 
   // 縦オフセット。(すべて基準フレーム高さ比)段別は「文字」1軸のみ＝帯は文字に統合され一緒に動く。
   // 段別オフセットはその段の描画位置にのみ加算し、段の送り(次段Y)には影響させない＝他段は不動。
@@ -36,6 +37,7 @@
     rowGap: 0,                                   // 段と段の間に足す縦スペース
     titleScale: 1,                               // 大タイトルの拡大率(1.0＝従来。影・帯は px 比で自動連動)
     imgY: 0,                                      // 前景画像だけの上下オフセット(文字・帯は不動)
+    imgScale: 1,                                  // 前景画像の拡大率(1.0=フィット)。★プレビューの見た目ではなく書き出す動画の画像そのものを拡大縮小する(Chami依頼2026-07-17)
   };
 
   const $ = (id) => document.getElementById(id);
@@ -374,7 +376,8 @@
     if (fgImg) {
       const a = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : smoothstep((t - REVEAL_START) / REVEAL_DUR));
       if (a > 0) {
-        const base = Math.min(W * FG_MAX_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height);
+        // フィット倍率 × ユーザーの拡大率(OFF.imgScale)。プレビューも書き出しも同じ式=見た目と動画が一致する。
+        const base = Math.min(W * FG_MAX_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1);
         const sc = (a < 1 && FG_ZOOM > 0) ? base * ((1 - FG_ZOOM) + FG_ZOOM * a) : base;
         const fw = fgImg.width * sc, fh = fgImg.height * sc;
         ctx.globalAlpha = a;
@@ -398,6 +401,15 @@
     drawFrame(DURATION);
   }
   window.Go5Preview = preview; // 販促ラベル等がプレビュー再描画を要求するためのフック
+  // 二本指ピンチ(promo-label.jsが取得)から前景画像の拡大率を操作するためのフック。
+  //   ★旧実装のピンチは canvas に CSS transform を掛けるだけ=プレビューの見た目が拡大するだけで
+  //     書き出す動画は一切変わらなかった。Chamiの意図は「動画に使う画像自体の拡大縮小」なので、
+  //     ピンチをこのフック経由で OFF.imgScale へ繋ぎ替える(=描画式に入る=動画に反映される)。
+  window.Go5ImgScale = {
+    get: () => OFF.imgScale || 1,
+    set: (k) => { const c = CONTROLS.find((x) => x.key === "imgScale"); if (!c) return; applyC(c, k, true); Store.set(lsk(c.ls), OFF[c.key]); }, // ±ボタンと同じ保存経路(アカウント別キー)
+    min: ISCALE_MIN, max: ISCALE_MAX,
+  };
 
   // ---- 画像選択 ----
   // 表示専用の匿名化。(実ファイル名の代わりにランダムな英数字)アップロード/投稿には一切関与しない。
@@ -586,6 +598,7 @@
     { key: "rowGap",     m: "rgMinus",    p: "rgPlus",    v: "rgVal",    ls: "preview_row_gap",     lsDef: "preview_row_gap_default",     legacy: null,             def: 0,            min: 0,       max: ROWGAP_MAX,  step: 0.005,  signed: false },
     { key: "titleScale", m: "tsMinus",    p: "tsPlus",    v: "tsVal",    ls: "preview_title_scale", lsDef: "preview_title_scale_default", legacy: null,             def: 1,            min: TSCALE_MIN, max: TSCALE_MAX, step: 0.05,   signed: false },
     { key: "imgY",       m: "iyMinus",    p: "iyPlus",    v: "iyVal",    ls: "preview_img_y",       lsDef: "preview_img_y_default",       legacy: null,             def: 0,            min: IMG_MIN, max: IMG_MAX,     step: 0.0025, signed: true  },
+    { key: "imgScale",   m: "isMinus",    p: "isPlus",    v: "isVal",    ls: "preview_img_scale",   lsDef: "preview_img_scale_default",   legacy: null,             def: 1,            min: ISCALE_MIN, max: ISCALE_MAX, step: 0.05,   signed: false },
   ];
   function clampC(c, v) {
     if (isNaN(v)) v = c.def;
@@ -700,7 +713,7 @@
   // キャンバス内矩形。タッチ座標→写真内座標の変換に使う。(drawFrameと同じ式で計算)
   window.Go5PhotoRect = function () {
     if (!fgImg) return null;
-    const base = Math.min(W * FG_MAX_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height);
+    const base = Math.min(W * FG_MAX_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1); // drawFrameと同式(拡大率込み)
     const fw = fgImg.width * base, fh = fgImg.height * base;
     return {
       x: (W - fw) / 2,
