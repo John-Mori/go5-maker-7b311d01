@@ -1275,7 +1275,10 @@
         openRefImgModal_(it, function () {
           var has = refImgHas(cid);
           b.classList.toggle('has-img', has);
-          b.innerHTML = has ? '🖼 投稿編集✓' : '🖼 投稿編集';
+          // 文言は常に「投稿編集」。★保存後だけ🖼/✓が付いて初期描画(2459行)と食い違っていたため
+          //   統一した(Chami依頼2026-07-17「🖼️と✅は必要ない。編集投稿のままにしといて」)。
+          //   画像の有無は has-img クラス(枠色)で示すのでバッジは不要。
+          b.textContent = '投稿編集';
           updateCardRefThumb_(b.closest ? b.closest('.cand-card') : null, cid); // 保存直後に一覧のサムネへ反映(リロード不要)
         });
       });
