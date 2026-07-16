@@ -42,7 +42,13 @@ API = "https://discord.com/api/v10"
 # local/inbox/<dept>.jsonl へ配達する(main箱に入れない=窓ごとの役割分離)。
 # 窓が死ねば脈が止まり(TTL10分)、以後の新着は従来通りmain箱へ。
 # 取り残し対策: 脈が古い部門箱に未処理が残っていれば巡回ごとにmain箱へ書き戻す(自己修復)。
-RESIDENT_FRESH_SEC = 90
+# 部門常駐の生存判定TTL(脈がこれより古い=不在とみなし箱をmainへ回収)。
+# 2026-07-17: 90秒→600秒へ延長(INC-86)。waiterの脈は「新着を配達した瞬間に止まる」ため、
+#   90秒だと**正常に働いている窓**を不在と誤判定し、処理中の箱をmainへ引き剥がしていた
+#   (QA/data-orgが独立に実測。研究室の代打67%の主因=INC-85と同根)。
+# 誤判定の害(取りこぼし・二重対応・研究室の負荷)>検知遅延の害(箱に残るだけで損失なし)。
+# 偽生存の危険は無い: waiterはTTL(既定45分)で必ず死ぬのでフリーズ時は最長10分で救出される。
+RESIDENT_FRESH_SEC = 600
 
 
 def dept_active(dept):
@@ -70,7 +76,7 @@ def touch_poller_active():
         pass
 
 
-def sweep_stale_dept_boxes():
+def sweep_stale_dept_boxes(known_depts=frozenset()):
     d = os.path.join(LOCAL, "inbox")
     if not os.path.isdir(d):
         return
@@ -78,6 +84,13 @@ def sweep_stale_dept_boxes():
         if not fn.endswith(".jsonl"):
             continue
         dept = fn[:-len(".jsonl")]
+        # 台帳に無いdept名のファイルは触らない(INC-86)。
+        # 理由: sweepはファイル名をそのままdept名と解釈するため、部門が箱の隣へ退避した
+        #   作業ファイル(_qa_work.jsonl 等)を「脈の無い部門箱」と誤認し、中身をmainへ流して
+        #   truncateしていた=退避したのに黙って消える取りこぼし(QA/data-orgが実測)。
+        #   退避先はlocal/_work/へ移す規約にしたが、規約だけに頼らずここでも構造的に防ぐ。
+        if dept not in known_depts:
+            continue
         if dept_active(dept):
             continue
         p = os.path.join(d, fn)
@@ -301,7 +314,8 @@ def main():
     while True:
         touch_poller_active()  # 死活の脈(watchdogが監視・ポーラー停止=チャイム沈黙の単一障害点)
         state = load_state()
-        sweep_stale_dept_boxes()  # 常駐が消えた部門箱の取り残しをmainへ回収
+        # 台帳のdeptだけを対象に回収(部門の退避ファイルを誤って食わない=INC-86)
+        sweep_stale_dept_boxes({str(c.get("dept", "")) for c in channels})
         out = []
         for ch in channels:
             try:
