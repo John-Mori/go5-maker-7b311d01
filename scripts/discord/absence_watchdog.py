@@ -24,7 +24,10 @@ import time
 from datetime import datetime, timezone
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # line_buffering=True が必須(INC-93): ファイル向けstdoutは約8KBのブロックバッファになり、
+    # 無口な常駐は到達せず、Stop-Process -Forceで未書き出し分が破棄される=ログが残らない。
+    # (このwatchdogだけログが生きていたのは、お喋りで8KBを埋め続けていたからに過ぎない)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 except Exception:
     pass
 

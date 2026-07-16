@@ -18,7 +18,11 @@ import sys
 import time
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # line_buffering=True が必須(INC-93): 常駐はログをファイルへリダイレクトして走るが、
+    # ファイル向けstdoutは約8KBのブロックバッファになる。無口な常駐は8KBに到達せず、
+    # 再起動時のStop-Process -Forceで未書き出し分が破棄される=ログが1行も残らない。
+    # (鳩は7/14から3日間、6バイトのまま凍結していた。壊れた時に追う道具が壊れていた)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 except Exception:
     pass
 

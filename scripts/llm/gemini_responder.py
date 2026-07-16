@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Gemini受付係 (Discord専用部屋の一次応答・local_responder.pyのGemini版)。
+"""ホイミン(Gemini)受付係 (Discord専用部屋の一次応答・local_responder.pyのGemini版)。
 
 仕組み:
   - local/discord_inbox_gemini.jsonl を30秒ごとに監視(受信振り分けはinbox_poller.pyが担当・dept=="gemini")
   - 自分専用の部屋なので、qwenのllm-growth部屋と同じく**Claude稼働中でも常時応答**する(claude_active待機なし)
-  - 質問系: Gemini(ask_gemini.ask・知識パック注入)で即答 → persona_send「Gemini受付」名義で返信
+  - 質問系: Gemini(ask_gemini.ask・知識パック注入)で即答 → persona_send「ホイミン(Gemini)」名義で返信
   - 作業依頼系(修正/実装/デプロイ等)や知識外: **司令塔の主受付箱 local/discord_inbox.jsonl** へ回す
     (専用for_claude箱は司令塔が開始時しか読まず滞留・喪失していた=2026-07-15恒久修正)。
     司令塔不在(claude_active.txt>90秒)なら「受け取った・復帰後対応」を返信/稼働中は黙ってエスカレ
@@ -21,7 +21,9 @@ import sys
 import time
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # line_buffering=True が必須(INC-93): ファイル向けstdoutは約8KBのブロックバッファになり、
+    # 無口な常駐は到達せず、Stop-Process -Forceで未書き出し分が破棄される=ログが残らない。
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 except Exception:
     pass
 
