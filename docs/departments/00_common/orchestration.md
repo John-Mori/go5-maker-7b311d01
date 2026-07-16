@@ -211,7 +211,7 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 ## Discord双方向連携 Phase DB (2026-07-12実装・受信基盤)
 - 受信: `scripts/discord/inbox_poller.py`(常駐=start_discord_inbox.bat)が各部門chの発言を `local/discord_inbox.jsonl` へ蓄積。Bot/Webhook発言は無視(ループ防止)
 - 処理: **研究室はセッション開始時と「Discord確認して」で受信箱を確認**し、行のdeptに従い部門へ振り分け(router=研究室triage・research-room=アメス/アロンソ)。処理済み行は `local/discord_inbox_processed.jsonl` へ移す(受信箱は常に未処理のみ)
-- 返信: **キャラ名義=`scripts/discord/persona_send.py --dept <slug> --persona <キャラ名> "本文"`を優先**(Webhook自動作成・表示名/アイコン上書き=Bot1つで全人格)。素の名義=bot_send.py。webhook版discord_notify.pyはフォールバック。返信にも秘密を書かない。**本文に署名・肩書きを書かない**(表示名が名乗り=Chami指定2026-07-12)
+- 返信: **キャラ名義=`scripts/discord/persona_send.py --dept <slug> --persona <キャラ名> "本文"`を優先**(Webhook自動作成・表示名/アイコン上書き=Bot1つで全人格)。素の名義=bot_send.py。webhook版discord_notify.pyはフォールバック。返信にも秘密を書かない。**本文に署名・肩書きを書かない**(表示名が名乗り=Chami指定2026-07-12)。★**冒頭で名乗らない(Chami指示2026-07-16・全人格)**: 「中野五月です」「ヴィルシーナよ」等の自己紹介は不要——アイコンと表示名で既に分かる。**本題の1行目から書く**(口調と一人称でキャラは十分伝わる)。原文=「あとみんな最初に名乗らなくていいよ(笑) わかってるから」。既存の「発言の最初と最後に@を付けない」(2026-07-15)と同じ"発言の作法"系
 - 完全自動化(セッション無しの定期自動処理)はAPI使用コストが伴うため、Chami承認で別途有効化
 - **研究室不在watchdog(2026-07-14実装)**: `scripts/discord/absence_watchdog.py`が受付箱の15分以上未処理滞留を検知し、発生元chへ自動お知らせ+総合受付chへサマリ通知(暴走ガードつき)。起動=`start_absence_watchdog.bat`。受付箱ファイルは読み取り専用(消費/削除/書き換えしない)
 
