@@ -1,41 +1,43 @@
 # 改名移行台本: go5-maker → 5SecMovieMaker
 
-> 2026-07-16 Chami発意「go5-makerはAIが勝手に付けた名前で分かりにくい。整理を兼ねて5SecMovieMakerへ」。
-> 研究室が采配(Chami承認済み): **(A)呼び名の統一=即日 / ②リポジトリ名=Chami就寝中に実行 / ①フォルダ改名=データ整理が一段落した後の専用枠**。
-> 実測済みの影響: 絶対パス焼き込み25ファイル・スケジュールタスク6本・全セッションcwd・メモリdir。
+> **正はデータ整理部門とChamiの合意(2026-07-16 16:46 Chami承認)**。研究室が当初書いた別案(夜にリポジトリ名だけ実行)は**撤回**した。
+> 撤回理由: ①**公開URLはリポジトリ名を変えても変わらない**(Pages URLは既に別名`go5-maker-7b311d01`に紐づく=データ整理の調査)。夜にやる価値が薄い ②Chamiは既に一度説明を受けて判断済み——**二重の計画を出すと同じ判断を二度させる**(INC-85で同種の失敗)。
+> **計画を立て直してChamiへ再提示しないこと。** 変更が要る時はまずデータ整理部門と合議する。
 
-## (A) 呼び名の統一(実施中・リスクゼロ)
-- ドキュメント・会話・UIでの呼称を「**5SecMovieMaker**(旧称go5-maker)」とする。実体パス・リポジトリ名は本台本の②①で追従。
-- UIタイトル等のアプリ内表記は改修部門の通常改修で(②と同時が効率的)。
+## 合意した順序
+1. **整理**(データ整理部門・安全な分は実施済)
+2. **下準備=スクリプトの絶対パス依存を排除**(`%~dp0` / `$PSScriptRoot` 化) ← **研究室が担当**
+3. **朝、Chamiが起きている時に一気に**: 改名 + タスク7件の住所書き換え + 事務所(常駐・全窓)の再起動
 
-## ② リポジトリ名の改名(今夜・Chami就寝中に研究室が実行)
-**影響が軽い理由**: Workerの許可判定はオリジン(`https://john-mori.github.io`)基準=パス無関係で無傷。短縮リンクはbsky.app宛て=無傷。GAS無関係。**唯一の実害=旧Pages URLが死ぬ(Pagesはリダイレクトされない)→Chamiのブックマーク張り替えのみ**。
+## なぜ「寝てる間に完了まで」をやらないか(データ整理の説明・Chami納得済み)
+- 絶対パス**21ファイル**+タスク**6件**+スタートアップ**1件**が壊れる。しかも**全て静かに壊れる**(気づけない)。
+- **改名を実行するセッション自身が家を失う**。自動復活(revive_lab)も旧パスを見ているため**復旧不能**。
+- したがって**人が見ている時間帯にやる**のが唯一安全。
 
-手順:
-1. 新名の決定: `5SecMovieMaker-7b311d01`(**難読サフィックスは維持を既定とする**——公開URLの推測困難性は現名の設計意図。外したければChami判断)
-2. `gh repo rename` (または GitHub Web) → ローカルの `git remote set-url origin <新URL>`
-3. push疎通確認(`git fetch`)・Pagesビルド完了確認(新URLで200)
-4. 旧URL(404化)の確認
-5. **朝の報告**: 新URLをコードブロック単独メッセージでDiscordへ(ブックマーク張り替え用)。MacBook側cloneのremote更新手順も添える
-6. ロールバック: renameを元に戻すだけ(GitHubは旧名を一定期間予約=他人に取られない)
+## ② 下準備の中身(研究室担当・着手前に改修セッションと調整)
+- 対象: `scripts/discord/start_*.bat` / `scripts/llm/*.bat` / `scripts/_daemons/*.ps1`(revive_lab・set_lab_session・supervise_daemons・open_dept_window・winupdate_watch)/ `scripts/maintenance/*`
+- 方針: ハードコードした `D:\SougouStartFolder\go5-maker` を**スクリプト自身の位置からの相対解決**へ置換(`%~dp0..\..` / `$PSScriptRoot`)。Pythonは既に `os.path.dirname(__file__)` 基準で解決済み(改修不要)。
+- **注意**: 対象ファイルは改修α/βが実装中に触る領域と重なる。**着手前に改修セッションへ調整**(Chami明示16:59「システム改修とか実行中とかを避けながら進めて」)。
+- 完了後: 下準備だけでは動作は変わらない(旧パスのままでも相対解決で同じ場所を指す)=**安全に先行実施できる**。検証=常駐4種を再起動して脈/配達が正常なこと。
 
-## ① フォルダ改名(D:\SougouStartFolder\go5-maker → 5SecMovieMaker)(後日・専用枠1時間級)
-**前提条件**: Chamiが**開いている全Claude窓を閉じる**(13窓・旧cwdのまま倒れるため)。動画作業なしの時間帯。
+## ③ 当日(朝・Chami在席)の手順
+1. Chamiが**開いている全Claude窓を閉じる**(閉じないと旧cwdのまま倒れる)
+2. 常駐4種を停止・スケジュールタスク7件を無効化
+3. フォルダ改名
+4. タスク7件を新パスで再登録(下準備が済んでいればスクリプト内の書き換えは不要)
+5. **メモリの引っ越し**: `C:\Users\chami\.claude\projects\D--SougouStartFolder-go5-maker\memory\` → 新スラッグdirへコピー
+6. 常駐起動→検証(下記)→全部門の窓を立て直し(研究室が新パス版の起動文を配布)
+7. AI-HQ(PORTFOLIO/status)のパス表記更新
+- ロールバック: フォルダ名を戻す→タスク再登録
 
-手順(実行時に最新のgrepで棚卸しし直すこと):
-1. 停止: スケジュールタスク6本(go5_daemons_hidden/go5_lab_revive/go5_sales_3h/go5_sales_auto/go5_winupdate_watch/go5_backup_local_daily)を無効化 → 常駐4種を停止
-2. フォルダ改名(エクスプローラかRename-Item)
-3. パス書き換え(実測25ファイル+タスク定義6本): `grep -rl "SougouStartFolder.\{0,3\}go5-maker"` の全ヒットを新パスへ。対象例=scripts/**/*.bat・*.ps1(revive_lab/set_lab_session/supervise_daemons/open_dept_window/winupdate_watch/backup_local_to_drive)・scheduled task XML(再登録が確実)
-4. **メモリの引っ越し**: `C:\Users\chami\.claude\projects\D--SougouStartFolder-go5-maker\memory\` → 新スラッグdirへコピー(研究室の記憶はフォルダパスに紐づく)。`.claude/settings.local.json`は相対なので無傷
-5. タスク再登録(register系ps1を新パスで実行)→常駐起動→検証: 鳩の脈/waiter/persona_send疎通/revive_labのlabId(=①後の新セッションIDへset_lab_session)
-6. 全部門セッションの立て直し: Chamiが起動文を貼り直す(研究室が新パス版の起動文を9+α通で再配布)
-7. AI-HQ(PORTFOLIO/status)のパス表記更新・グローバルCLAUDE.mdは言及なし(確認済み)
-- ロールバック: フォルダ名を戻す→タスク再登録のみ(書き換えはgit管理分はrevert可・管理外はバックアップを先に取る)
-
-## 検証チェックリスト(①②共通・実行後に全行)
-- [ ] 公開URLで200(スマホ実機)
+## 検証チェックリスト(③の後に全行)
+- [ ] 公開URLで200(**改名しても変わらない**が念のため実機確認)
 - [ ] git push/pull疎通
-- [ ] 鳩の脈<30秒・main waiter稼働
+- [ ] 鳩の脈<60秒・main waiter稼働・部門箱への直配
 - [ ] persona_send疎通(研究室chへテスト1通)
-- [ ] スケジュールタスク6本=Ready・直近実行成功
-- [ ] revive_labのlabIdが実在セッションUUID(set_lab_session実行)
+- [ ] スケジュールタスク7件=Ready・直近実行成功
+- [ ] revive_labのlabIdが実在セッションUUID(`set_lab_session.ps1`実行)
+- [ ] 常駐4種(鳩/ローカル/ホイミン/watchdog)稼働
+
+## リポジトリ名(②の枠外・任意)
+- 変えても**公開URLは変わらない**(難読サフィックス付きの別名に紐づくため)。やるなら `gh repo rename` + `git remote set-url` のみ。急がない。

@@ -58,8 +58,9 @@ def build(dept: str) -> str:
    ★退避先は必ず local/_work/(local/inbox/ の外)。inbox内へ退避するとsweepが「脈の無い部門箱」と誤認して
      中身をmainへ流し空にする=退避したのに黙って消える(INC-86・実測)
    ★箱に中身が残ったままだとsweepがmainへ奪う(=研究室の代打に化ける)。mv先行なら奪われない
-3. 依頼を拾ったら着手印(処理を始める前に押す): python scripts/discord/react.py --channel <ch名> --msg <msg_id> --emoji 着手
-   (既読印は鳩が配達時に自動付与済み)
+3. 進捗印(3段階・2026-07-17): 送信=鳩が配達時に自動付与 / **既読=起床して読んだ直後に自分で押す** / **着手=作業を始める時に押す**
+   python scripts/discord/react.py --channel <ch名> --msg <msg_id> --emoji 既読
+   python scripts/discord/react.py --channel <ch名> --msg <msg_id> --emoji 着手
 
 発言の仕方:
   python scripts/discord/persona_send.py --dept {dept} --persona "{speaker}" --body-file <path>
