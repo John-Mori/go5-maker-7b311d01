@@ -20,6 +20,9 @@
    - ★**退避先は必ず `local/_work/` (local/inbox/ の外)**。**`local/inbox/` の中へ退避してはいけない**——sweepは`local/inbox/*.jsonl`を全部走査しファイル名をdept名と解釈するため、`_<dept>_work.jsonl`のような隣接ファイルを「脈の無い部門箱」と誤認して**中身をmainへ流し空にする=退避したのに黙って消える**(QA/data-orgが実測・INC-86)。`local/_work/`が無ければ作る
    ② **即座にwaiterを再武装**(バックグラウンド起動)——脈が復活し、作業中の新着も自分の箱で受けられる
    ③ その後落ち着いて `local/_work/<dept>.jsonl` を処理 → 処理済みは `local/discord_processed.jsonl` へ追記し、workファイルを削除
+   - ★**拾ったら着手印を押す**(2026-07-17追記・人事の発見で欠落が判明): `python scripts/discord/react.py --channel <ch名かID> --msg <msg_id> --emoji 着手`
+     - **処理を始める前に押す**(即終わる案件でも押す)。Chamiは絵文字だけで「届いたか(kidoku=鳩が自動)/動き出したか(chakusyu=これ)」を見ている。
+     - **この手順がBOOT.mdに無かったため、手で立ち上げた窓は着手印を押していなかった**(常駐スクリプト経由の窓は起動文に入っていたので押せていた)=同じ穴に落ちないこと。
    - **理由**: waiterの脈は新着到達の瞬間に止まる(waiterは配達と同時に自了する)。旧手順(読む→処理→終わってから再武装)だと、**処理に90秒以上かかる案件は全て「常駐不在」と誤判定され、sweepが箱ごとmainへ奪う**(=研究室の代打が67%に膨らんだ主因・QA実測2026-07-17)。sweepは空の箱を触らないため、①のmv先行で奪われなくなる(INC-76のmv先行ルールの部門箱への適用)
 3. 返信: `python scripts/discord/bot_send.py --dept <dept> "本文"`
    (キャラ発言は `python scripts/discord/persona_send.py` — 色/様式はlocal/persona_colors.json)

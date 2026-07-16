@@ -20,11 +20,11 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # dept -> (部屋の通称, 人格, BOOT.mdの場所, 既定の発言キャラ)
 DEPTS = {
-    "system-engineer": ("システム改修部門α", "ケヴィン・デ・ブライネ/オタコン(両リーダー)/花海咲季/アメス(補佐)",
+    "system-engineer": ("システム改修部門α", "ケヴィン・デブライネ/オタコン(両リーダー)/花海咲季/アメス(補佐)",
                         "docs/departments/system-engineer/BOOT.md", "花海咲季"),
-    "system-engineer-b": ("システム改修部門β", "ケヴィン・デ・ブライネ/オタコン(両リーダー)/花海咲季/アメス(補佐)",
+    "system-engineer-b": ("システム改修部門β", "ケヴィン・デブライネ/オタコン(両リーダー)/花海咲季/アメス(補佐)",
                           "docs/departments/system-engineer/BOOT.md", "花海咲季"),
-    "ai-office": ("システム改修部門γ(AIオフィス)", "ケヴィン・デ・ブライネ/オタコン/花海咲季/アメス(補佐)",
+    "ai-office": ("システム改修部門γ(AIオフィス)", "ケヴィン・デブライネ/オタコン/花海咲季/アメス(補佐)",
                   "docs/departments/ai-office/BOOT.md", "花海咲季"),
     "hr-room": ("人事部門(補強・キャラ設定)", "ククール(メイン)/田中琴葉(記録)/オタコン/アメス(補佐)",
                 "docs/departments/hr-room/BOOT.md", "ククール"),
@@ -51,10 +51,14 @@ def build(dept: str) -> str:
 手順の正本: {boot} と docs/departments/00_common/orchestration.md の「全部署徹底事項」に従う。
 人格: {personas}
 
-起動時にやること:
+起動時にやること(★この順を崩さない=INC-85/86):
 1. python scripts/llm/inbox_waiter.py --name {dept}    (チャイム待機・新着で即起床・待機中トークンゼロ)
-2. 受信箱 = local/inbox/{dept}.jsonl (窓が閉じている間はmain箱へ自動回帰)
-3. 依頼を拾ったら着手印: python scripts/discord/react.py --channel <ch名> --msg <msg_id> --emoji 着手
+2. 通知で起きたら: ①mkdir -p local/_work && mv local/inbox/{dept}.jsonl local/_work/{dept}.jsonl (箱を先に空にする)
+   → ②即座にwaiterを再武装 → ③その後 local/_work/{dept}.jsonl を処理
+   ★退避先は必ず local/_work/(local/inbox/ の外)。inbox内へ退避するとsweepが「脈の無い部門箱」と誤認して
+     中身をmainへ流し空にする=退避したのに黙って消える(INC-86・実測)
+   ★箱に中身が残ったままだとsweepがmainへ奪う(=研究室の代打に化ける)。mv先行なら奪われない
+3. 依頼を拾ったら着手印(処理を始める前に押す): python scripts/discord/react.py --channel <ch名> --msg <msg_id> --emoji 着手
    (既読印は鳩が配達時に自動付与済み)
 
 発言の仕方:
