@@ -83,7 +83,7 @@ def fetch_and_transcribe(url):
         return ""
 
 
-SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room", "health-log")  # 夢と回復/過去の共有/人事/健康記録=司令塔直轄・機微。ローカルLLMは応答せず受領印のみ
+SENSITIVE_DEPTS = ("dream-care", "past-room", "future-room", "hr-room", "health-log")  # 夢と回復/過去の共有/現在と未来(2026-07-17新設)/人事/健康記録=研究室直轄・機微。ローカルLLMは応答せず受領印のみ
 
 
 def handle(rec, raw_line):

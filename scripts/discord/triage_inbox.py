@@ -17,6 +17,13 @@ import json
 import os
 import sys
 
+# Windowsの既定コンソール(cp932)は絵文字を出せず、printでUnicodeEncodeErrorになる。
+# 仕分け結果に絵文字入りの本文が来ると落ちるので、出力を必ずUTF-8へ寄せる。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 LOCAL = os.path.join(ROOT, "local")
 INBOX = os.path.join(LOCAL, "discord_inbox.jsonl")
