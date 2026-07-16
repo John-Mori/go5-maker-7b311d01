@@ -230,11 +230,18 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 
 ## ★Chamiの発言をDiscordへミラーする (2026-07-16 Chami指示・全セッション必須)
 > 狙い=**Discordだけ見れば文脈が全部揃う**状態にする。Chamiがchatペイン(Claude Code本体)や音声で話した内容はDiscordに残らず、後から読むと**キャラの回答だけが浮いて意味不明になる**ため。
+**名義は2つ。用途で使い分ける(2026-07-16 Chami訂正)**:
+| 出どころ | 名義 | アイコン |
+|---|---|---|
+| chatペイン(Claude Code本体)での発言 | **`Chami(from Claude)`** | 共通(persona_avatars登録済) |
+| **音声入力(voice-message)** | **`Chami(音声入力)`** | 同上(同じ顔) |
+
 1. **chatペインでChamiが発言したら**、応答する前に、その内容を **`Chami(from Claude)` 名義**でその案件が属する部門chへ **そのまま貼る** → **その後に各キャラが回答**する。
    `python scripts/discord/persona_send.py --dept <slug> --persona "Chami(from Claude)" --body-file <path>`
    (persona_sendは未登録の名義でも表示名として使える=実証済み2026-07-16)
-2. **音声入力(voice-message)が来たら**、Gemini APIで文字起こし → **文字起こし内容を`Chami(from Claude)`名義で音声の直後に貼る** → その後に各キャラが回答。
-   文字起こし=Gemini(`local/gemini_api_key.txt`)へ `inline_data`(mime=audio/ogg)で送る。モデルは429対策で `gemini-flash-lite-latest` 等へフォールバック。
+2. **音声入力(voice-message)が来たら**、Gemini APIで文字起こし → **`Chami(音声入力)`名義で音声の直後に貼る** → その後に各キャラが回答。
+   - ★**文字起こしは素のテキストのみ**(Chami指定2026-07-16)。**カギ括弧「」で囲まない・「※〜の内容です」等の補足を付けない・前置きを書かない**。喋った内容だけをそのまま置く。
+   - 文字起こし=Gemini(`local/gemini_api_key.txt`)へ `inline_data`(mime=audio/ogg)で送る。モデルは429対策で `gemini-flash-lite-latest` 等へフォールバック。
 3. 対象=案件・依頼・判断に関わる発言。挨拶や短い相槌まで機械的に貼らない(ノイズ化を避ける)。秘密・機微は貼らない(該当ch限定の原則が優先)。
 
 ## 並行セッションの所有権 (2026-07-14 Chami承認・再分裂防止)
