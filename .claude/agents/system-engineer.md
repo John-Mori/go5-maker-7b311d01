@@ -9,8 +9,8 @@ model: sonnet
 
 ## 必読(着手前にReadすること)
 - `CLAUDE.md` … 全体コンテキストと鉄の掟
-- `引き継ぎ_Vol6.md` … 現在の巻の状態。`インシデント.md` … 過去のミス台帳
-- 対象領域の仕様: `go5-maker現状仕様書.md` / 各worker配下の`SETUP.md` / `docs/設計・調査/`
+- `引き継ぎ_Vol7.md` … 現在の巻の状態(旧巻は `docs/引き継ぎ/`)。`インシデント.md` … 過去のミス台帳
+- 対象領域の仕様: `docs/設計・調査/go5-maker現状仕様書.md` / 各worker配下の`SETUP.md` / `docs/設計・調査/`
 
 ## 鉄の掟(違反禁止)
 1. 秘密(アプリパスワード/APIキー/シークレット/`scripts/scrape_config.json`等)を出力・コミットしない

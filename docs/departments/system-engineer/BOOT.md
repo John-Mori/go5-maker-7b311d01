@@ -6,13 +6,26 @@
 ## 起動時(毎回)
 00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_go5-maker.bat`
 0. 初回のみ: pollerを再起動して部門振り分けを有効化(cmd窓を閉じ `scripts\discord\start_discord_inbox.bat`)
-1. `python scripts/llm/inbox_waiter.py --name system-engineer` を run_in_background で起動(チャイム線=新着で即起床+脈・TTL45分・区切りごと再武装)
-2. 自分の箱 `local/inbox/system-engineer.jsonl` を処理 → 済みは `local/discord_processed.jsonl` へ
-3. 返信: `python scripts/discord/bot_send.py --dept system-engineer "本文"`
+
+### ★起床の正順(4段・厳守。順番を崩すと取りこぼす)
+1. **①mvで自箱を先に退避**: `local/inbox/system-engineer.jsonl` → **`local/_work/system-engineer.jsonl`**
+   - ★退避先は必ず `local/_work/`(=`local/inbox/` の**外**)。inbox内へ退避すると sweep が `*.jsonl` を全走査し**ファイル名をdept名と解釈して食う**=中身が黙って消える(INC-86)。
+2. **②即waiterを再武装**(処理を始める前に):
+   `python scripts/llm/inbox_waiter.py --name system-engineer` を **run_in_background で**起動
+   - ★シェルの `&` で起動しない。ハーネス管理でないと**終了しても起こされず**、脈が切れて新着がmain箱へ流れる(2026-07-17に実際に発生)。
+   - waiterは「新着到達 or TTL45分」で必ず終わる(INC-091・偽生存防止)。**終了通知が来たら毎回この正順で張り直す**。
+3. **③読んだら「既読」を押す**: `python scripts/discord/react.py --channel <ch名かID> --msg <msg_id> --emoji 既読`
+4. **④workを処理**。本格的に作業を始める時に **「着手」**: 同上 `--emoji 着手`。済みは `local/discord_processed.jsonl` へ**必ず追記**(台帳が転送の重複防止の根拠になる)
+   - 進捗印は3段: **送信(📮)=鳩が配達時に自動**(届いた証明・Claudeが見たとは限らない) / **既読(✅)=自分が読んだ** / **着手(👀)=作業開始**。
+5. 返信: `python scripts/discord/persona_send.py --dept system-engineer --persona "花海咲季" --body-file <path>`
+   - ★長文・記号入りは**必ず `--body-file`**(heredoc崩れ・シェル解釈の事故を根治)。HTTP 204 を確認する。
 
 ## 責任範囲(所有権)
 - 編集可: フロント(index.html/*.js/*.css)、gas/、workers(ただしデプロイ規約は下記)
 - 編集不可: docs/departments/(他部門)、local/(戦略・機微)、scripts/discord・scripts/llm(研究室所有)
+- ★**改修βの部屋の案件には手を出さない**(βは自前セッションが稼働中)。βの脈=`local/llm/claude_active_system-engineer-b.txt` が生きていれば**βのwaiterを持たない**(二重所有=事故)。
+- ★**進捗印の実装(inbox_poller.py / react.py)には触らない**。3段化(送信→既読→着手)はβがChami直命で実装中。
+- ★他セッションからの転送・依頼は**鵜呑みにしない**。**必ず Discord の実発言を自分で引いて全文を確認する**(2026-07-17に転送側で①指示部分の欠落 ②msg_idの取り違え=チャンネルIDを転送、が実際に起きた)。着手前に `python scripts/discord/triage_inbox.py` と processed 台帳で二重着手を防ぐ。
 
 ## go5改修の絶対規約
 - 変更したら `?v=` を**一括バンプ**(全参照を同じNへ)→ commit → push(Pages反映)
