@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Discordメッセージにリアクションを押す (AI組織の進捗印・2026-07-16 Chami依頼)。
 
-2段階印の2つ目「着手」を、応対するClaudeセッションが依頼を拾った瞬間に押す。
-(1つ目「既読」は inbox_poller.py が配達時に自動で押す)
-これで Chami の画面から「未達 / 届いたが無人 / 着手済み」が一目で分かる。
+3段階印のうち後ろ2つ「既読」「着手」を、応対するClaudeセッションが押す。
+(1つ目「送信」は inbox_poller.py が配達時に自動で押す=機械が届けた印)
+  送信 = 鳩が箱へ入れた(届いた証明。Claudeが見たとは限らない)
+  既読 = Claudeセッションが起床して読んだ(起床直後に押す)
+  着手 = 本格的に作業を始めた
+これで Chami の画面から「未達 / 届いたが無人 / 読んだ / 着手済み」の4状態が一目で分かる。
+※2026-07-17改訂: 旧実装は鳩が配達時に「既読」を押していたが、それは"届いた"であって
+  "Claudeが読んだ"ではなかった(Chami指摘)。鳩の印を送信へ改称し、既読はセッションが押す。
 
 使い方:
   python scripts/discord/react.py --channel 改修-依頼 --msg 1526809157544574976
@@ -30,9 +35,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.path.join(ROOT, "local")
 API = "https://discord.com/api/v10"
-FALLBACK = {"着手": "👀", "既読": "✅"}  # サーバー絵文字が未登録の間の代用
+FALLBACK = {"着手": "👀", "既読": "✅", "送信": "📮"}  # サーバー絵文字が未登録の間の代用
 # 呼び名(日本語) → Chami登録の実際の絵文字名。どちらで指定しても解決する
-ALIAS = {"着手": ["chakusyu", "着手"], "既読": ["kidoku", "既読"]}
+ALIAS = {"着手": ["chakusyu", "着手"], "既読": ["kidoku", "既読"], "送信": ["sendms", "送信"]}
 
 
 def read_token():

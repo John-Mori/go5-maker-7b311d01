@@ -190,17 +190,22 @@ def api_get(path, token):
     return None
 
 
-# --- 既読リアクション(2026-07-16 Chami依頼) ---
-# 配達した瞬間にカスタム絵文字「既読」を押す=「届いた」をトークンゼロで可視化。
-# 「無視されてる/考え中/未達」の区別と確認往復の削減が目的。着手印はClaude側が
-# scripts/discord/react.py で押す(2段階)。未登録の間はUnicode✅で代用し、
-# 登録され次第(10分毎に再解決)自動でカスタム絵文字に切り替わる。失敗しても配達は止めない。
+# --- 送信リアクション(2026-07-16 Chami依頼 → 2026-07-17 Chami指摘で「既読」から改称) ---
+# 配達した瞬間にカスタム絵文字「送信」を押す=「届いた」をトークンゼロで可視化。
+# 「無視されてる/考え中/未達」の区別と確認往復の削減が目的。未登録の間はUnicode📮で
+# 代用し、登録され次第(10分毎に再解決)自動でカスタム絵文字に切り替わる。失敗しても配達は止めない。
+#
+# ★なぜ改称したか(2026-07-17 Chami指摘): 鳩が押すこの印は「箱へ入れた」であって
+#   「Claudeが読んだ」ではない。旧実装はこれを「既読」と呼んでいたため、実態は配達済に過ぎず、
+#   結果としてClaudeが自ら押す最初の印である「着手」が事実上の既読として機能していた。
+#   そこで3段へ分離: 送信(鳩=ここ) → 既読(セッションが起床時に押す) → 着手(本格作業の開始時)。
+#   既読・着手はClaude側が scripts/discord/react.py で押す。
 import urllib.parse
 
-REACT_READ_NAME = "既読"          # 呼び名(表示用)
-# Chami登録の実際の絵文字名。呼び名(既読)と実名(kidoku)の両方で解決する
-REACT_READ_NAMES = ("kidoku", "既読")
-REACT_READ_FALLBACK = "✅"    # ✅(未登録時の代用)
+REACT_SENT_NAME = "送信"          # 呼び名(表示用)
+# Chami登録の実際の絵文字名。呼び名(送信)と実名(sendms)の両方で解決する
+REACT_SENT_NAMES = ("sendms", "送信")
+REACT_SENT_FALLBACK = "📮"    # 📮(未登録時の代用)
 _react = {"guild": "", "emoji": "", "at": 0.0}
 
 
@@ -227,8 +232,8 @@ def api_put_(path, token):
     return False
 
 
-def resolve_read_emoji_(token, any_cid):
-    """「既読」カスタム絵文字を name:id 形式で解決(10分キャッシュ)。無ければ✅。"""
+def resolve_sent_emoji_(token, any_cid):
+    """「送信」カスタム絵文字を name:id 形式で解決(10分キャッシュ)。無ければ📮。"""
     now = time.time()
     if _react["emoji"] and (":" in _react["emoji"] or now - _react["at"] < 600):
         return _react["emoji"]  # カスタム解決済みは恒久・✅代用中は10分毎に再解決
@@ -239,21 +244,21 @@ def resolve_read_emoji_(token, any_cid):
             _react["guild"] = str((ch or {}).get("guild_id", "") or "")
         if _react["guild"]:
             emojis = api_get(f"/guilds/{_react['guild']}/emojis", token) or []
-            for want in REACT_READ_NAMES:      # kidoku(実名) → 既読(呼び名) の順で探す
+            for want in REACT_SENT_NAMES:      # sendms(実名) → 送信(呼び名) の順で探す
                 for e in emojis:
                     if e.get("name") == want and e.get("id"):
                         _react["emoji"] = f"{e['name']}:{e['id']}"
-                        print(f"{time.strftime('%H:%M:%S')} 既読絵文字を解決: :{e['name']}:")
+                        print(f"{time.strftime('%H:%M:%S')} 送信絵文字を解決: :{e['name']}:")
                         return _react["emoji"]
     except Exception:
         pass
-    _react["emoji"] = REACT_READ_FALLBACK
+    _react["emoji"] = REACT_SENT_FALLBACK
     return _react["emoji"]
 
 
-def react_read_(cid, mid, token):
+def react_sent_(cid, mid, token):
     try:
-        emoji = urllib.parse.quote(resolve_read_emoji_(token, cid))
+        emoji = urllib.parse.quote(resolve_sent_emoji_(token, cid))
         api_put_(f"/channels/{cid}/messages/{mid}/reactions/{emoji}/@me", token)
     except Exception:
         pass  # リアクション失敗で配達を止めない
@@ -297,7 +302,7 @@ def poll_channel(ch, token, state, out):
             # 引用元が古い等でDiscordが本文を展開しなかった場合はIDだけ残す
             rec["reply_to"] = {"msg_id": str(m["message_reference"].get("message_id", "")), "author": "?", "content": ""}
         out.append(rec)
-        react_read_(cid, m["id"], token)  # 既読印=「届いた」を即可視化(トークンゼロ・失敗しても配達継続)
+        react_sent_(cid, m["id"], token)  # 送信印=「届いた」を即可視化(トークンゼロ・失敗しても配達継続)
         new += 1
     return new
 
