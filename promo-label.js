@@ -140,11 +140,18 @@
   // 数字だけを slot(数字領域)の中央へ描く。指示書§3.2/§6:
   //   ・slotの中心位置は固定。桁数が変わっても中央揃え(幅に収まるよう縮小のみ)。
   //   ・質感=原画の数字に合わせたグラデ+縁+光彩。フォントは近似セリフ(指示書§12の許容)。
+  // ★書体(Chami指摘2026-07-17「数字がクールじゃない」): 原画の数字は Didot/Bodoni 系の
+  //   ディドネ体=縦が太く横が極細のハイコントラスト。旧実装は Georgia の bold(700) で、
+  //   Georgia は画面可読性重視の低コントラスト書体+太字化で細い横線が潰れる=真逆の性格。
+  //   同じ札の「%OFF」(基材に焼き込み済み)が上品なセリフ体のため、数字だけ浮いていた。
+  //   → ディドネ体を優先し、太字化をやめる(400)。iOS/macOSは Didot / Bodoni 72 を標準搭載
+  //   =主戦場のiPhoneで原画とほぼ一致する。非搭載環境は Georgia の regular へ落ちる。
+  var DIGIT_FONT = 'Didot, "Bodoni 72", "Bodoni MT", "Playfair Display", Georgia, "Times New Roman", serif';
   function drawDigits(ctx, ink, slot, x, y, bw, bh, text) {
     var zx = x + slot.x * bw, zy = y + slot.y * bh, zw = slot.w * bw, zh = slot.h * bh;
     var fs = zh;                                   // 高さ基準で開始し、幅に収める
     ctx.save();
-    var setF = function () { ctx.font = '700 ' + fs + 'px Georgia, "Times New Roman", serif'; };
+    var setF = function () { ctx.font = '400 ' + fs + 'px ' + DIGIT_FONT; };
     setF();
     var pad = zw * 0.04;
     while (fs > zh * 0.4 && ctx.measureText(text).width > zw - pad * 2) { fs -= Math.max(1, fs * 0.04); setF(); }
