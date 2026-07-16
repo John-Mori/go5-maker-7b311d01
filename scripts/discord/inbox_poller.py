@@ -239,6 +239,18 @@ def poll_channel(ch, token, state, out):
             "attachments": [a.get("url") for a in m.get("attachments", [])],
             "msg_id": m["id"],
         }
+        # 引用返信(Discordの返信機能)の引用元を残す。捨てると「何に対する返事か」が読めなくなる。
+        # 2026-07-16 Chami要望。引用がある時だけキーが付く(既存の読み手は無視すればよい)。
+        ref = m.get("referenced_message") or {}
+        if ref:
+            rec["reply_to"] = {
+                "msg_id": ref.get("id", ""),
+                "author": (ref.get("author") or {}).get("username", "?"),
+                "content": ref.get("content", ""),
+            }
+        elif m.get("message_reference"):
+            # 引用元が古い等でDiscordが本文を展開しなかった場合はIDだけ残す
+            rec["reply_to"] = {"msg_id": str(m["message_reference"].get("message_id", "")), "author": "?", "content": ""}
         out.append(rec)
         react_read_(cid, m["id"], token)  # 既読印=「届いた」を即可視化(トークンゼロ・失敗しても配達継続)
         new += 1
