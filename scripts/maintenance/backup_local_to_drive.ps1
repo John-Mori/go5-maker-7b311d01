@@ -7,7 +7,10 @@ $ErrorActionPreference = 'Stop'
 
 $Src       = 'D:\SougouStartFolder\go5-maker\local'
 $LogFile   = 'D:\SougouStartFolder\go5-maker\local\backup.log'
-$DestFile  = Join-Path $PSScriptRoot 'backup_dest.txt'
+# Config lives under local/ (gitignored), NOT next to this script: the destination
+# contains a strategy folder name, and scripts/ is tracked by a PUBLIC repo.
+# It was pushed once (QA found it 2026-07-17); the original design already said local/.
+$DestFile  = 'D:\SougouStartFolder\go5-maker\local\backup_dest.txt'
 $KeepCount = 14
 $MinFreeGB = 2
 
