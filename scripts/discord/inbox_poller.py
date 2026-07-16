@@ -152,7 +152,9 @@ def api_get(path, token):
 # 登録され次第(10分毎に再解決)自動でカスタム絵文字に切り替わる。失敗しても配達は止めない。
 import urllib.parse
 
-REACT_READ_NAME = "既読"          # サーバー絵文字名(Chami登録)
+REACT_READ_NAME = "既読"          # 呼び名(表示用)
+# Chami登録の実際の絵文字名。呼び名(既読)と実名(kidoku)の両方で解決する
+REACT_READ_NAMES = ("kidoku", "既読")
 REACT_READ_FALLBACK = "✅"    # ✅(未登録時の代用)
 _react = {"guild": "", "emoji": "", "at": 0.0}
 
@@ -191,11 +193,13 @@ def resolve_read_emoji_(token, any_cid):
             ch = api_get(f"/channels/{any_cid}", token)
             _react["guild"] = str((ch or {}).get("guild_id", "") or "")
         if _react["guild"]:
-            for e in (api_get(f"/guilds/{_react['guild']}/emojis", token) or []):
-                if e.get("name") == REACT_READ_NAME and e.get("id"):
-                    _react["emoji"] = f"{REACT_READ_NAME}:{e['id']}"
-                    print(f"{time.strftime('%H:%M:%S')} 既読絵文字を解決: :{REACT_READ_NAME}:")
-                    return _react["emoji"]
+            emojis = api_get(f"/guilds/{_react['guild']}/emojis", token) or []
+            for want in REACT_READ_NAMES:      # kidoku(実名) → 既読(呼び名) の順で探す
+                for e in emojis:
+                    if e.get("name") == want and e.get("id"):
+                        _react["emoji"] = f"{e['name']}:{e['id']}"
+                        print(f"{time.strftime('%H:%M:%S')} 既読絵文字を解決: :{e['name']}:")
+                        return _react["emoji"]
     except Exception:
         pass
     _react["emoji"] = REACT_READ_FALLBACK

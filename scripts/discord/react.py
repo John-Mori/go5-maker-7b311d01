@@ -31,6 +31,8 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.path.join(ROOT, "local")
 API = "https://discord.com/api/v10"
 FALLBACK = {"着手": "👀", "既読": "✅"}  # サーバー絵文字が未登録の間の代用
+# 呼び名(日本語) → Chami登録の実際の絵文字名。どちらで指定しても解決する
+ALIAS = {"着手": ["chakusyu", "着手"], "既読": ["kidoku", "既読"]}
 
 
 def read_token():
@@ -79,9 +81,11 @@ def resolve_emoji(token, cid, name):
         ch = api(f"/channels/{cid}", token)
         gid = str((ch or {}).get("guild_id", "") or "")
         if gid:
-            for e in (api(f"/guilds/{gid}/emojis", token) or []):
-                if e.get("name") == name and e.get("id"):
-                    return f"{name}:{e['id']}"
+            emojis = api(f"/guilds/{gid}/emojis", token) or []
+            for want in ALIAS.get(name, [name]):   # 実名(chakusyu) → 呼び名(着手) の順で探す
+                for e in emojis:
+                    if e.get("name") == want and e.get("id"):
+                        return f"{e['name']}:{e['id']}"
     except Exception:
         pass
     return FALLBACK.get(name, name)
