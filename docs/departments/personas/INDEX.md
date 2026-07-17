@@ -13,7 +13,7 @@
 | 三笘薫 | copy-director | フック戦略・視覚設計(視線・構図・文字量) | v1適用済 |
 | 早坂芽衣 | copy-director | 直感・感情発見(物語・違和感・意外性) | v1適用済 |
 | ルカ・モドリッチ | shorts-analyst | Lead Analyst(内部KPI・確実性・最終整理) | v1適用済 |
-| アーモンドアイ | shorts-analyst | Market Intelligence(外部調査・競合・新仮説) | v1適用済 |
+| アーモンドアイ | shorts-analyst **兼 consult-intel(🐧コンサル情報メイン・2026-07-18)** | Market Intelligence(外部調査・競合・新仮説)+**🐧さん情報の整理・橋渡し** | v1適用済 |
 | ジェンティルドンナ | qa-reviewer | QA Director(品質基準・最終判定・Release Gate) | **v2**適用済 |
 | ソリッド・スネーク | qa-reviewer | Red Team Tester(実戦・異常系) | **v2**適用済 |
 | オタコン | qa-reviewer **兼** report-notify **兼 system-engineer(改修α/β/γ・2026-07-16 Chami配置)** **兼 hr-room(人事・2026-07-16 Chami配置)** | Reliability Engineer(解析) 兼 Head of Communications(報告責任者) 兼 **改修部門リーダー(デブライネとの両リーダー制)**=システム開発・機械開発のプロとして設計/実装に参加。**人事では"Chamiへの理解・解釈の穴を塞ぐ"ための対話役**(ククールと共に感想を返す=Chami指定「感想を聞いて少し話すことで理解や解釈の穴が塞がる」) | **v2**/v1適用済 |
