@@ -45,7 +45,48 @@
   function manualKey() { return 'verify_manual__' + acct(); }
   function ytMapKey() { return 'verify_yt__' + acct(); }
   function loadArr(k) { try { var a = JSON.parse(localStorage.getItem(k) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
-  function saveArr(k, a) { try { localStorage.setItem(k, JSON.stringify(a)); } catch (e) {} }
+
+  // ── 履歴消失の自動証拠採取(INC 宵桜③・Chami承認2026-07-17) ────────────────
+  // 背景: 「宵桜(acc2)の投稿履歴だけが消える」が唯一の未解決INC。静的解析では犯人を断定できず、
+  //   これまで「次に消えた時にChamiがF12で採取する」という人間頼みの受け身だった。再現が稀な上、
+  //   Chamiが先に復旧してしまうと証拠も消える=永遠に捕まらない構造だった。
+  // 設計: short_hist__/verify_manual__ への書き込みは saveArr/saveArrFor_ の2つが唯一の出口。
+  //   ここで「件数が減る瞬間」だけを捕らえれば、犯人が誰であっても(サニタイザ/復元/未知の第三者)
+  //   必ず記録に残る。呼び出し元は new Error().stack から取る=事前に容疑者を決め打ちしない。
+  // 制約: 常時ONだが、減少時以外は何もしない(通常運用のコストはゼロ)。証拠は直近3件のみ保持。
+  var LOSS_KEY = 'hist_loss_evidence';
+  function recordLoss_(key, before, after) {
+    try {
+      var log = [];
+      try { log = JSON.parse(localStorage.getItem(LOSS_KEY) || '[]') || []; } catch (e) {}
+      var stack = '';
+      try { stack = String((new Error()).stack || '').split('\n').slice(2, 7).join(' | ').replace(/https?:\/\/[^)]*\//g, ''); } catch (e) {}
+      log.unshift({
+        at: new Date().toISOString(),
+        key: key,                      // どのキーが減ったか(short_hist__acc2 等)
+        before: before.length,
+        after: after.length,
+        lostIds: before.filter(function (b) {                       // 消えた実体のid(先頭5件)
+          return !after.some(function (a) { return a && b && (a.videoId || a.id) === (b.videoId || b.id); });
+        }).slice(0, 5).map(function (x) { return (x && (x.videoId || x.id || x.shortUrl)) || '?'; }),
+        acct: (function () { try { return acct(); } catch (e) { return '?'; } })(),
+        by: stack                      // ★犯人=呼び出し元のスタック
+      });
+      localStorage.setItem(LOSS_KEY, JSON.stringify(log.slice(0, 3)));
+      try { console.warn('[go5 hist] 履歴が減少したので証拠を記録した', key, before.length + '→' + after.length); } catch (e) {}
+    } catch (e) {}
+  }
+  // 監視対象=消失が報告されているキーだけ(他キーの正常な削除に反応しない)
+  function watched_(k) { return /^(short_hist__|verify_manual__)/.test(String(k)); }
+  function saveArr(k, a) {
+    try {
+      if (watched_(k)) {
+        var before = loadArr(k);
+        if (before.length && Array.isArray(a) && a.length < before.length) recordLoss_(k, before, a);
+      }
+    } catch (e) {}
+    try { localStorage.setItem(k, JSON.stringify(a)); } catch (e) {}
+  }
   function loadHist() { return loadArr(histKey()); }
   function loadManual() { return loadArr(manualKey()); }
   function loadYtMap() { try { return JSON.parse(localStorage.getItem(ytMapKey()) || '{}') || {}; } catch (e) { return {}; } }
@@ -1142,7 +1183,17 @@
   // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }
   function loadArrFor_(base, a) { try { var x = JSON.parse(localStorage.getItem(base + '__' + a) || '[]'); return Array.isArray(x) ? x : []; } catch (e) { return []; } }
-  function saveArrFor_(base, a, arr) { try { localStorage.setItem(base + '__' + a, JSON.stringify(arr.slice(0, 200))); } catch (e) {} }
+  function saveArrFor_(base, a, arr) {
+    // saveArr と並ぶ もう一方の書き込み出口。ここを塞がないとサニタイザ等の移動系がすり抜ける。
+    var k = base + '__' + a;
+    try {
+      if (watched_(k)) {
+        var before = loadArrFor_(base, a), after = (arr || []).slice(0, 200);
+        if (before.length && after.length < before.length) recordLoss_(k, before, after);
+      }
+    } catch (e) {}
+    try { localStorage.setItem(k, JSON.stringify(arr.slice(0, 200))); } catch (e) {}
+  }
   function loadYtMapFor_(a) { try { return JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { return {}; } }
   function saveYtMapFor_(a, m) { try { localStorage.setItem('verify_yt__' + a, JSON.stringify(m)); } catch (e) {} }
   // 1件をアカウント間で移動。(ローカルの base 配列＋verify_yt＋シート行)表示更新はしない。
@@ -2185,6 +2236,23 @@
   });
   // 🩺 アカウント検証・修復：post_uri の DID で「別アカウントに紛れ込んだ履歴/シート行」を正しい側へ移す。
   // 🩺 検出→一覧を見せて確認→適用。(自動では動かさない)適用後は「元に戻す」可能。
+  // 🕵 履歴消失の証拠を見る: recordLoss_ が自動採取した証拠を人が読める形で出す。
+  //   ★Chamiに「消えた瞬間にF12で採取して」と頼まなくて済むようにするのが目的(受け身→攻め)。
+  var le = $('ytLossEvidence');
+  if (le) le.addEventListener('click', function () {
+    var log = [];
+    try { log = JSON.parse(localStorage.getItem('hist_loss_evidence') || '[]') || []; } catch (e) {}
+    if (!log.length) { setStatus('🕵 履歴が減った記録はありません。(消失が起きた後にここを見てください)'); return; }
+    var html = log.map(function (r, i) {
+      return '<b>' + (i + 1) + '. ' + esc(String(r.at || '').replace('T', ' ').slice(0, 19)) + '</b>　' +
+        esc(r.key || '') + '：<b style="color:#dc465a;">' + r.before + ' → ' + r.after + '</b> 件' +
+        (r.lostIds && r.lostIds.length ? '<br>　消えたID: ' + esc(r.lostIds.join(', ')) : '') +
+        (r.by ? '<br>　<span style="opacity:.7;font-size:11px;">呼び出し元: ' + esc(String(r.by).slice(0, 220)) + '</span>' : '');
+    }).join('<br><br>');
+    setStatus('🕵 履歴消失の証拠(新しい順・最大3件)<br>' + html, true);
+    try { console.log('[go5 hist] 履歴消失の証拠', log); } catch (e) {}
+  });
+
   var rp = $('ytRepairAcct');
   if (rp) rp.addEventListener('click', function () {
     setStatus('🩺 投稿の所属アカウントを検証中…(Bluesky投稿者・YouTubeチャンネルで判定)');
