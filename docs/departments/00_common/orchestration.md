@@ -75,6 +75,7 @@
 - ★**先行実施の例外条項(同裁定で承認・運用設計書§2-4の条文)**: 規約違反状態の是正のうち、**①完全に可逆 ②実測で検証済み ③本番インフラ(Worker/D1作成・デプロイ等の明示的要承認操作)に触れない**、の3条件を全て満たすものに限り、先行実施+即時開示を認める。1つでも欠けたら待つ
 - 承認されたら `improvement_insights.status='approved'` に更新し、改修タスク化する
 - **提案の集約ルート(2026-07-14 Chami指定・テスト運用)**: 各部門の改善提案は**Chamiへ直接出さず「改善提案部門」ch(dept=kaizen-analyst)へ全部集約**。同部屋の専任人員(Chamiがキャラ設定作成中・着任待ち)が提案を判断し、分かりやすく翻訳してChamiへ提示する。**部門からの直接提案は一旦停止**。着任まではアメスが席を預かり、届いた提案は判断せず蓄積→着任後に引き継ぐ
+- ★**実装(2026-07-18・アスナ着任後にkaizen部門が自己実装)**: この集約ルートを仕組み化した。(1)部門発insightは研究室がD1記録と同時にkaizen chへミラー(発案部門のキャラ名義) (2)kaizen-analystが**週次改善便**(前回から7日でTTL起床時に自走・最大3件・KZ-NNN番号付き・効果/根拠(n付き)/コスト+金銭有無を表記)でChamiへ提示 (3)承認/却下は台帳(`kaizen-analyst/improvement-findings.md` + D1 improvement_insights)へ記録し趣向DB(`behavior-patterns.md`)を育てて的中率を上げる。設計正本=`docs/departments/kaizen-analyst/設計書_改善提案部門の再設計.md`・起動=同ディレクトリ `BOOT.md`
 
 ## ログ記録コマンド(研究室が実行・fanza-workerディレクトリで)
 部門識別子の正規語彙は**agent名**(system-engineer等)。全テーブル・全記録で統一する。
@@ -108,7 +109,7 @@ npx wrangler d1 execute go5_kaizen --remote --command "INSERT INTO system_change
 | video.generated | app(user_events) | qa-reviewer(投稿前チェック・任意) |
 | post.published | app(user_events) | shorts-analyst(初動観測の予約) |
 | metrics.updated | app(数字の更新操作) | shorts-analyst(定期分析の起点) |
-| insight.created | shorts-analyst/kaizen-analyst | departmentカラムの宛先部門 |
+| insight.created | 全部門 | **kaizen-analyst**(集約・翻訳→週次改善便で提示) + departmentカラムの宛先部門 |
 | fix.deployed / system.changed | system-engineer(研究室記録) | qa-reviewer(回帰確認) |
 | qa.failed | qa-reviewer | system-engineer(差し戻し) |
 | qa.passed | qa-reviewer | (研究室へ報告のみ) |
