@@ -7,9 +7,9 @@
 
 | 番号 | 状態 | タイトル | コスト/金銭 | 出典 |
 |---|---|---|---|---|
-| KZ-006 | approved | インシデント記録Skill(記録漏れ防止・INC-83の抜けを塞ぐ) | 小/なし | Chami承認2026-07-18「全部」 |
-| KZ-005 | approved | 投稿前チェックSkill(規約防衛=露出/2ch重複/煽り/2段リンク)★先行 | 小/なし | Chami承認2026-07-18「全部」 |
-| KZ-004 | approved | デプロイ反映Skill(?v=バンプ→commit→pull rebase→push→検証) | 小/なし | Chami承認2026-07-18「全部」 |
+| KZ-006 | implemented | インシデント記録Skill(.claude/skills/go5-incident) | 小/なし | Chami承認2026-07-18「全部」 |
+| KZ-005 | implemented | 投稿前チェックSkill(.claude/skills/go5-post-guard・規約防衛) | 小/なし | Chami承認2026-07-18「全部」 |
+| KZ-004 | implemented | デプロイ反映Skill(.claude/skills/go5-deploy) | 小/なし | Chami承認2026-07-18「全部」 |
 | KZ-003 | implemented | 各LLM/部門の「できるようになったこと」定型報告(週次便に組込) | 小/なし | Chami承認2026-07-18「両方go」 |
 | KZ-002 | deferred | 投稿の相関ビュー(時刻×曜日×作品×再生数) | 中/なし | Chami要望 se 2026-07-17。競合サーチ設計(a0e4ab7)と要整合 |
 | KZ-001 | implemented | 承認疲れの解消(settings.local.jsonへ安全コマンド13件を事前許可) | 小/なし | Chami承認2026-07-18「両方go」 |
