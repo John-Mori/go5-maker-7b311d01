@@ -23,6 +23,10 @@ var COMP_WEEKLY_SHEET   = '競合_週次';
 var COMP_WEEKLY_HEADERS = ['集計日', '種別', '対象', '値1', '値2', '値3'];
 var COMP_SEARCHLOG_SHEET   = '競合_検索ログ';
 var COMP_SEARCHLOG_HEADERS = ['日付', 'クエリ', 'ヒット数', 'candidate化数'];
+// コミュニティ投稿は公式APIに窓口が無い=自動収集不可(2026-07-18確認)。人が見て手で貯める観察タブ。
+// 背景: Chamiがアダアフィのコンサルから「コミュニティ投稿での訴求が効果高い」と教わった戦略仮説の受け皿。
+var COMP_COMMUNITY_SHEET   = '競合_コミュニティ観察';
+var COMP_COMMUNITY_HEADERS = ['記録日', 'チャンネル名', '投稿URL', '内容メモ', '効果メモ(反応/推移)', '記録者'];
 
 var COMP_WINDOW_DAYS = 30;    // 追跡窓(この日数を過ぎた動画は日次スナップの対象外)
 var COMP_QUOTA_CAP   = 2000;  // 競合ジョブの当日クォータ自主停止しきい値(標準10,000の20%)
@@ -238,6 +242,17 @@ function compUpsertVideos_(records) {
   });
   if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, COMP_VID_HEADERS.length).setValues(rows);
   return seen;
+}
+
+// ---- 全タブを確保(手動記録タブ=競合_コミュニティ観察 を含む)。冪等・doGetから呼ぶ ----
+function compEnsureTabs_() {
+  compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
+  compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
+  compSheet_(COMP_DAILY_SHEET, COMP_DAILY_HEADERS);
+  compSheet_(COMP_WEEKLY_SHEET, COMP_WEEKLY_HEADERS);
+  compSheet_(COMP_SEARCHLOG_SHEET, COMP_SEARCHLOG_HEADERS);
+  compSheet_(COMP_COMMUNITY_SHEET, COMP_COMMUNITY_HEADERS);
+  return { ok: true, tabs: [COMP_CH_SHEET, COMP_VID_SHEET, COMP_DAILY_SHEET, COMP_WEEKLY_SHEET, COMP_SEARCHLOG_SHEET, COMP_COMMUNITY_SHEET] };
 }
 
 // ---- シード登録: URLをwatch行として台帳へ追加(channel_id重複はスキップ)。doGetから呼ぶ ----
