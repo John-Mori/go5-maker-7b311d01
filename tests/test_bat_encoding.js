@@ -83,14 +83,12 @@ batFiles.forEach(function (file) {
   const buf = fs.readFileSync(file);
 
   if (KNOWN_VIOLATIONS.has(rel)) {
+    // 注意: .gitattributes(eol=crlf)により新規クローンではCRLFで生成されるため、
+    // 「修正済みか」は環境依存(PCの既存作業ツリーはLFのまま)。誤爆を避け、FAILにはせず情報表示のみ。
     if (!hasBareLf(buf)) {
-      // 直っているのにリストに残っている=リストの掃除漏れを検出
-      test('CLEANUP: ' + rel + ' は修正済み。KNOWN_VIOLATIONSから削除すること', function () {
-        throw new Error(rel + ' はCRLF化済み。tests/test_bat_encoding.js のリストから削除する');
-      });
-    } else {
-      knownSkipped++;
+      console.log('INFO: ' + rel + ' はこの環境ではCRLF済み(PC側のchcp/実行テスト完了後にリストから削除)');
     }
+    knownSkipped++;
     return;
   }
 
