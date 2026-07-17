@@ -125,7 +125,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-postimg:active{opacity:.7;}
 .vrow-refimg:active{opacity:.7;}
 /* 被リビルドの非表示トグル：行の枠外（リスト最上部の独立バー・右寄せ）に置く＝先頭カードに重ならない。 */
-.vhide-remade-bar{display:flex;justify-content:flex-end;margin:0 0 6px;}
+.vhide-remade-bar{display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 6px;}
+/* 計測ヘルス(B-3・Chami依頼2026-07-17「本当に計測できているのか」への恒久策)。
+   正常時は地味に(読み飛ばせる)・異常時だけ赤く目立たせる=常時表示でも邪魔にならない。 */
+.meas-health{font-size:11px;color:var(--sub);white-space:nowrap;}
 .vhide-remade-btn{width:auto;margin:0;font-size:11px;font-weight:700;line-height:1.1;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:#0e1422;color:var(--sub);cursor:pointer;white-space:nowrap;} /* 縦幅を約1.5倍・横幅はテキスト長に自動追従 */
 .vhide-remade-btn:active{opacity:.7;}
 .vrow-thumb:active{opacity:.7;}

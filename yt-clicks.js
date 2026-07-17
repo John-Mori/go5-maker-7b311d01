@@ -197,6 +197,24 @@
   //   1回のrefreshにつき最大2N本のWorkerリクエストが飛び、Cloudflare無料枠(10万/日)を焼いていた。
   //   (Chami報告2026-07-16 上限超過メール)refresh()はタブ表示/アカウント切替/編集/削除など多数から
   //   呼ばれるため、1アクション=数百リクエストになっていたのが主因。→ 1本＋TTL再利用に置換。
+  // ── 計測ヘルス(B-3・Chami承認2026-07-17) ─────────────────────────────
+  // 「🏮セール会場 累計0」「YouTube→Bluesky 0なのにBluesky→FANZA 19」のように、Chamiが数字を
+  // 疑うたびに調査が1回走っていた。**信頼は可視化からしか生まれない**ので、計測3経路の生死を常時出す。
+  // ★P-2(1操作=Nリクエスト禁止)を守るため、**追加の通信は一切しない**。既存の fetchAllClicks_ /
+  //   fetchDeltas_ / fetchVideos の**結果を記録するだけ**(観測のために叩かない)。
+  var _health = { r2: null, gas: null, yt: null, gasAt: 0 }; // null=未実行 / true=OK / false=失敗
+  function healthHtml_() {
+    function seg(label, st, note) {
+      if (st === null) return '<span style="opacity:.45;">' + label + ' —</span>';
+      return st ? '<span style="opacity:.75;">' + label + ' OK' + (note ? '(' + note + ')' : '') + '</span>'
+                : '<span style="color:#dc465a;font-weight:700;">' + label + ' 応答なし</span>';
+    }
+    var gasNote = _health.gasAt ? ('最終 ' + fmtTimeShort_(_health.gasAt)) : '';
+    return '計測: ' + seg('短縮URL', _health.r2) + ' / ' + seg('記録GAS', _health.gas, gasNote) + ' / ' + seg('YouTube', _health.yt);
+  }
+  function fmtTimeShort_(ms) { try { var d = new Date(ms); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); } catch (e) { return ''; } }
+  function renderHealth_() { var el = document.getElementById('measHealth'); if (el) el.innerHTML = healthHtml_(); }
+
   var _clicksAt = 0, _clicksP = null, CLICKS_TTL_MS = 60000;
   function fetchAllClicks_(force) {
     var w = window.Go5Short;
@@ -206,10 +224,11 @@
     _clicksAt = now;
     var u = w.WORKER_URL.replace(/\/+$/, '') + '/api/list?secret=' + encodeURIComponent(w.SHARED_SECRET);
     _clicksP = fetch(u).then(function (r) { return r.json(); }).then(function (j) {
-      if (!j || !j.ok || !j.links) return false;
+      if (!j || !j.ok || !j.links) { _health.r2 = false; renderHealth_(); return false; }
       j.links.forEach(function (l) { if (l && l.code) clicksCache[l.code] = l.clicks || 0; });
+      _health.r2 = true; renderHealth_();                 // ★既存の取得結果を記録するだけ=追加通信ゼロ
       return true;
-    }).catch(function () { return false; });
+    }).catch(function () { _health.r2 = false; renderHealth_(); return false; });
     return _clicksP;
   }
   // 複数の動画ID → {views, publishedAt(ms), title}。(videos.list は parts に関わらず1回1ユニット・最大50件)
@@ -234,8 +253,9 @@
       // 照会したID一覧。(応答に含まれないID＝非公開/予約公開の判定に使う)
       out.__queried = uniq.slice(0, 50);
       if (j && j.error) out.__error = (j.error.message || 'YouTube APIエラー');
+      _health.yt = !(j && j.error); try { renderHealth_(); } catch (e) {} // 既存取得の結果を記録(追加通信ゼロ)
       return out;
-    }).catch(function () { return { __error: '通信エラー(YouTubeに接続できませんでした)' }; }); // D2: 失敗を{}で握りつぶさない＝「成功表示なのに取れない」を防ぐ
+    }).catch(function () { _health.yt = false; try { renderHealth_(); } catch (e) {} return { __error: '通信エラー(YouTubeに接続できませんでした)' }; }); // D2: 失敗を{}で握りつぶさない＝「成功表示なのに取れない」を防ぐ
   }
 
   // ── 今日/昨日/直近1週間の再生・クリック増加(GASが毎時サーバー側で記録した差分)──
@@ -302,7 +322,9 @@
         deltaCache = res.deltas; _deltaFetched = true;
         try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); } catch (e) {}
         if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
-      }
+        _health.gas = true; _health.gasAt = new Date().getTime(); // 既存取得の結果を記録(追加通信ゼロ)
+      } else { _health.gas = false; }
+      try { renderHealth_(); } catch (e) {}
       applyDeltas_();
       try { repairMissing_(); } catch (e) {} // 「記録待ち」「クリック⚠」を実データ基点で自己修復
       if (cb) cb();
@@ -804,6 +826,8 @@
     // 非表示トグルは行の枠外(リスト最上部の独立バー)に置く＝先頭カードに重ならない。
     var hideBarHtml = '<div class="vhide-remade-bar">' +
       '<span id="saleStats" class="sale-stats" title="セール会場リンク(🏮大幅割引セール中の同人祭ページ)のクリック数。累計はr2計測・今日/昨日/週は日次スナップショット">🏮 セール会場 …</span>' +
+      // 計測ヘルス(B-3): 正常時は目立たせない。異常時だけ赤字。追加通信はしない(既存取得の結果を映すだけ)
+      '<span id="measHealth" class="meas-health" title="計測3経路の生死。短縮URL=クリック数/記録GAS=今日昨日週の日別記録/YouTube=再生数。「応答なし」の時、その数字は古い値です">' + healthHtml_() + '</span>' +
       histColsCtlHtml_() + // 列数セレクタ(PCのみCSSで表示)
       '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
     list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
