@@ -230,9 +230,19 @@ def run_once(dry_run=False):
     # ★2026-07-15 Chami指示「Mk.IIがやかましい・トークンの無駄」で個別通知は無効化。
     #   (b)復旧chへの1時間毎サマリのみ残す(不在の把握には十分で、各chへの連投を止める)。
     ANNOUNCE_PER_MESSAGE = False
+    # ★例外: 機微部屋だけは滞留を黙らせない(dream-care設計書 P0-2・Chami承認2026-07-17)。
+    #   理由: 悪夢の夜に書き込んで無反応だと「無視された」に見える。全体方針(個別通知OFF)は
+    #   維持したまま、この3部屋の滞留に限り「届いている・必ず読まれる」という**事実**だけを返す。
+    #   慰めではなく可用性の下限の担保。生涯1回は既存のannounced台帳がそのまま保証する。
+    SENSITIVE_DEPTS = ("dream-care", "past-room", "health-log")
+    SENSITIVE_TEXT = ("(自動通知)今は応対できるセッションが居ない。"
+                      "内容は受付箱に届いていて、次に起きた研究室が必ず読む。")
     stale_sorted = sorted(stale, key=lambda t: -t[1])
     sent_this_cycle = 0
-    for rec, age_min in (stale_sorted if ANNOUNCE_PER_MESSAGE else []):
+    targets = stale_sorted if ANNOUNCE_PER_MESSAGE else [
+        (rec, age) for rec, age in stale_sorted if rec.get("dept") in SENSITIVE_DEPTS
+    ]
+    for rec, age_min in targets:
         if sent_this_cycle >= MAX_ANNOUNCE_PER_CYCLE:
             break
         if len(sent_ts) >= MAX_ANNOUNCE_PER_HOUR:
@@ -241,7 +251,9 @@ def run_once(dry_run=False):
         channel = rec.get("channel")
         if not msg_id or not channel or msg_id in announced:
             continue  # id/ch不明、または既に生涯1回済み=送らない(超過分は次周期へ)
-        ok = bot_send(channel, ANNOUNCE_TEXT, dry_run)
+        # 機微部屋には専用の事実通知(慰めない・急かさない・内容に一切触れない)。他は従来文。
+        text = SENSITIVE_TEXT if rec.get("dept") in SENSITIVE_DEPTS else ANNOUNCE_TEXT
+        ok = bot_send(channel, text, dry_run)
         if ok:
             announced.append(msg_id)
             sent_ts.append(now_epoch)
