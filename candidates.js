@@ -380,6 +380,10 @@
   function postImgSave_(key, imgs) {
     if (!key) return false;
     imgs = (imgs || []).filter(Boolean);
+    // ★refImgSave/bskyImgSaveと同じ穴(v=349で塞ぎ忘れていた3つ目のストア)。post画像も同じ
+    //   非同期IDB系なので、展開前は postImgsOf_ が「実際は在るのにnull」を返す=空で保存すると
+    //   既存の投稿画像を削除してしまう。未展開中の破壊的な空保存を拒否する。(B-2棚卸しで発見)
+    if (!imgs.length && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', key); } catch (e) {} return false; }
     var rec = imgs.length ? { imgs: imgs, at: new Date().getTime() } : null;
     if (_idbOk) {
       if (rec) _imgMem.post[key] = rec; else delete _imgMem.post[key];

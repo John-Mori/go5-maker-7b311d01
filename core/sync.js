@@ -274,6 +274,12 @@
           urls.forEach(function (u) { var h = hByUrl[u]; if (h && present[h]) okNow[h] = tNow; });
           saveImgOk(okNow);
         });
+      }).catch(function (e) {
+        // ★致命的な保険(B-2棚卸しで発見): ここで例外が出ると toRef に到達せず curIdb が空のままになる。
+        //   空の curIdb は「IDBの全キーが削除された」と解釈され、**雲へ削除がpushされて全端末の
+        //   候補画像が消える**。sha256hex(crypto.subtle)はhttps以外や古い環境で落ち得るため実在の危険。
+        //   → 何が起きても curIdb は必ず埋める(hByUrlが空ならdataURLのまま=無変換で送る=データは死なない)。
+        try { root.console && root.console.warn("[go5 sync] 画像のhash化に失敗。無変換で継続(削除誤爆を防止)", e); } catch (x) {}
       }).then(toRef);
     }) : Promise.resolve();
 
