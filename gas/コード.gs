@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-18A(YouTube競合サーチ追加=競合.gs・日次/週次トリガー・comp_digest/comp_titles/comp_daily_now/comp_discovery_now・既存YT_API_KEY再利用・SHEET_IDへ競合_タブ追加)';
+var GAS_VERSION = '2026-07-18B(競合サーチにシード登録comp_add_seedを追加=(A)改修βが登録する受け口・URLからchannel_id抽出/解決・watch行append・重複はwatch昇格)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -151,6 +151,7 @@ function doGet(e) {
   if (p.action === 'comp_titles') { return jsonOut_(compTitles_(p.days, p.top)); }           // コピー部: 速度順タイトルコーパス
   if (p.action === 'comp_daily_now') { try { return jsonOut_(runCompetitorDaily()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }
   if (p.action === 'comp_discovery_now') { try { return jsonOut_(runCompetitorDiscovery()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }
+  if (p.action === 'comp_add_seed') { try { return jsonOut_(compAddSeed_(p.url, p.name)); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // シード登録(改修βが使用)
   // デプロイ後の自動後処理: トリガー再設定＋ヘッダ移行を一括冪等実行。(scripts/deploy_gas.mjs が反映確認後に呼ぶ)
   //   secret はスクリプトプロパティ ADMIN_SECRET(未設定なら固定のソフト鍵にフォールバック)と照合。
   //   ※ソフト鍵は deploy_gas.mjs の SOFT_ADMIN_SECRET と一致させる。(短縮URL用 shortSecret_ とは独立)

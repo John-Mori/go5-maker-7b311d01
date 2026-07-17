@@ -240,6 +240,41 @@ function compUpsertVideos_(records) {
   return seen;
 }
 
+// ---- シード登録: URLをwatch行として台帳へ追加(channel_id重複はスキップ)。doGetから呼ぶ ----
+//   Chamiが(A)「改修βに登録してもらう」を選んだ時の受け口。競合名/URLはシート内のみ(コード・commitに書かない)。
+function compAddSeed_(url, name) {
+  url = String(url || '').trim();
+  if (!url) return { ok: false, reason: 'no_url' };
+  var m = url.match(/\/channel\/(UC[0-9A-Za-z_-]{20,})/);
+  var cid = m ? m[1] : compResolveChannelId_(url);
+  if (!cid) return { ok: false, reason: 'unresolved', url: url };
+  var sh = compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
+  var map = headerMap_(sh);
+  var last = sh.getLastRow();
+  if (last >= 2) {
+    var ex = sh.getRange(2, map['channel_id'], last - 1, 1).getValues();
+    for (var i = 0; i < ex.length; i++) {
+      if (String(ex[i][0]).trim() === cid) {
+        // 既存がcandidateならwatchへ昇格
+        if (String(sh.getRange(i + 2, map['状態']).getValue()).trim() !== 'watch') sh.getRange(i + 2, map['状態']).setValue('watch');
+        return { ok: true, channel_id: cid, added: false, note: 'already_exists' };
+      }
+    }
+  }
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var row = [];
+  for (var c = 0; c < COMP_CH_HEADERS.length; c++) row.push('');
+  row[map['channel_id'] - 1] = cid;
+  row[map['チャンネル名'] - 1] = String(name || '');
+  row[map['URL'] - 1] = url;
+  row[map['状態'] - 1] = 'watch';
+  row[map['発見経路'] - 1] = 'seed';
+  row[map['追加日'] - 1] = today;
+  sh.getRange(sh.getLastRow() + 1, 1, 1, COMP_CH_HEADERS.length).setValues([row]);
+  return { ok: true, channel_id: cid, added: true };
+}
+
 // ============================================================
 // 日次ジョブ: チャンネル統計更新 → 新着動画の取り込み → 追跡窓内の統計スナップ
 // ============================================================
