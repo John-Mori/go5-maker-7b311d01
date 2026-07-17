@@ -30,6 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 from ask_local import ask  # noqa: E402
+from ask_vision import describe_images  # noqa: E402
+from image_prep import images_of  # noqa: E402
 
 LOCAL = os.path.join(ROOT, "local")
 INBOX = os.path.join(LOCAL, "discord_inbox.jsonl")
@@ -88,6 +90,10 @@ def fetch_and_transcribe(url):
 
 
 SENSITIVE_DEPTS = ("dream-care", "past-room", "future-room", "hr-room", "health-log")  # 夢と回復/過去の共有/現在と未来(2026-07-17新設)/人事/健康記録=研究室直轄・機微。ローカルLLMは応答せず受領印のみ
+# ★画像をローカルVLMに渡してよい部門(allow-list=fail-closed)。ここに無い部門・dept未設定の
+#   行の画像は一切VLMに渡さない。deny-listだと部屋の新設時に追記を忘れた瞬間に機微画像が
+#   VLMへ流れる(実際SENSITIVE_DEPTSは4箇所に散在しドリフトしている)。迷ったら見ない、が正。
+VISION_ALLOWED_DEPTS = ("llm-growth",)
 
 
 def handle(rec, raw_line):
@@ -98,6 +104,36 @@ def handle(rec, raw_line):
         append_line(PROCESSED, raw_line)
         send(channel, "受け取ったよ。ここは司令塔(アメスたち)が直接読む部屋だから、次に起きた時に必ず応えるね。")
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "sensitive_deferred", "channel": channel})
+        return
+    # ★V0シャドー配線(改善設計書_ローカルLLM画像認識強化_2026-07-17 §3・T-2)
+    #   画像添付は司令塔(Claude)へ回し、ローカルVLMの**下読み(vision_draft)を箱の行に添える**。
+    #   狙いは (a)司令塔が画像を開く前に中身の当たりが付く (b)qwenの画像読解の質が
+    #   ログに溜まり週次で採点・測定できる(=llm-growthの見える化の材料になる)。
+    #   ※正直な但し書き: 「画像+テキスト」はV0以前はqwenが(画像を見ずに)即答していたため、
+    #     V0で即答→エスカレへ**判断が変わる**通がある。即答率/エスカレ率の傾向が画像の混入で
+    #     動くので、週報では vision:true を分けて読む必要がある(指標定義は変えない=R3)。
+    #   VLMが落ちても配達は止めない: describe_imagesは例外を投げない設計だが、契約に依存せず
+    #   ここでもtryで包む(2026-07-17レビュー: importが契約を貫通し得た実例があったため)。
+    #   ★機微はallow-list方式(fail-closed)。deny-list(SENSITIVE_DEPTS)は部屋が増えるたびに
+    #     追記漏れが起き、dept未設定の行も素通りする。VLMに渡してよい部屋だけを明示列挙する。
+    imgs = images_of(rec) if rec.get("dept") in VISION_ALLOWED_DEPTS else []
+    if imgs:
+        try:
+            v = describe_images(imgs)
+        except Exception as e:
+            v = {"draft": "", "model": "", "sec": 0.0, "error": f"vision_crashed:{type(e).__name__}"}
+        rec = dict(rec, vision_draft=v["draft"], vision_model=v["model"], vision_sec=v["sec"])
+        raw_line = json.dumps(rec, ensure_ascii=False)
+        append_line(FOR_CLAUDE, raw_line)
+        append_line(PROCESSED, raw_line)
+        send(channel, "画像を受け取ったよ。読み取りメモを添えて司令塔の受付箱に入れておくね。")
+        # mode は既存の "escalated" のまま(=司令塔へ回した、の意味は同じ)。
+        # 画像かどうかは vision フィールドで見分ける。modeを増やすと learning_report.py の
+        # 即答率/エスカレ率の分母分子がずれるため(指標は再定義しない=改善設計書R3)。
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated", "channel": channel,
+             "q": (content or "(画像のみ)")[:200], "vision": True, "vision_model": v["model"],
+             "vision_sec": v["sec"], "vision_draft": v["draft"][:300], "vision_error": v["error"]})
+        print(f"  画像→Claude行き(下読み{len(v['draft'])}字/{v['sec']}秒) [{channel}]")
         return
     if not content.strip():
         voice = next((a for a in (rec.get("attachments") or [])
@@ -137,21 +173,59 @@ def handle(rec, raw_line):
         print(f"  Claude行き [{channel}] {content[:30]!r}")
 
 
+def drain_lines(path):
+    """受付箱を .inflight へ退避して全行を返す(既に退避済みがあればそれを優先)。
+
+    ★kill耐性(2026-07-17): 旧実装は「読む→os.remove→処理」で、処理中に強制終了
+      (Windows Update再起動・stop_daemons・重複排除のkill)が入ると、箱から消えて
+      まだ着地していない行が**どこにも残らず消滅**した(レビューで3通中2通の喪失を再現)。
+      inflightに残しておけば、次回起動時に拾い直せる=喪失が「遅延」に変わる。
+    """
+    inflight = path + ".inflight"
+    if os.path.exists(inflight) and os.path.getsize(inflight) > 0:   # 前回の中断分が最優先
+        with open(inflight, "r", encoding="utf-8") as f:
+            rest = [l for l in f.read().splitlines() if l.strip()]
+        if os.path.exists(path) and os.path.getsize(path) > 0:       # 新着があれば後ろに繋ぐ
+            with open(path, "r", encoding="utf-8") as f:
+                rest += [l for l in f.read().splitlines() if l.strip()]
+            os.remove(path)
+        _write_inflight(inflight, rest)
+        return rest, inflight
+    if not (os.path.exists(path) and os.path.getsize(path) > 0):
+        return [], inflight
+    with open(path, "r", encoding="utf-8") as f:
+        lines = [l for l in f.read().splitlines() if l.strip()]
+    os.replace(path, inflight)     # 原子的に退避(この瞬間に落ちてもinflightに全行が残る)
+    return lines, inflight
+
+
+def _write_inflight(path, lines):
+    if not lines:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)          # 書き換えも原子的に(途中で落ちても壊れた箱を残さない)
+
+
 def main():
     once = "--once" in sys.argv
     print(f"ローカル受付 起動 (model={MODEL}, 30秒間隔, Claude稼働中は待機)")
     while True:
         # llm-growth部屋(自分の部屋)はClaude稼働中でも常時応対
-        if os.path.exists(INBOX_LLM) and os.path.getsize(INBOX_LLM) > 0:
-            with open(INBOX_LLM, "r", encoding="utf-8") as f:
-                llm_lines = [l for l in f.read().splitlines() if l.strip()]
-            os.remove(INBOX_LLM)
-            for line in llm_lines:
+        llm_lines, inflight = drain_lines(INBOX_LLM)
+        if llm_lines:
+            for i, line in enumerate(llm_lines):
                 try:
                     handle(json.loads(line), line)
                 except Exception as e:
                     print(f"  処理失敗(llm箱): {type(e).__name__}")
                     append_line(FOR_CLAUDE, line)
+                # 1行を着地させるたびに残りだけをinflightへ書き戻す。
+                # 落ちても「未処理の行だけ」が残る(着地済みの重複返信より、喪失を避ける方を採る)。
+                _write_inflight(inflight, llm_lines[i + 1:])
         # ★main箱(部門の依頼)には一切触れない=ローカルを一次受付として挟まない
         #   (Chami指示2026-07-15「一次受けにローカルを挟むな・全部門で排除」)。
         #   以前はClaude不在時にmain箱をドレインしてqwen応答/for_claude箱へ再エスカレしていたが、
