@@ -28,6 +28,7 @@
     コスト: 小/中/大 + 金銭の有無 + 実装先(改修部/運用のみ/GAS等)
   ```
   1便は最大3件(Chamiの判断コストを溢れさせない)。溢れた分は次便へ繰り越し、台帳では管理し続ける。実行後 `last_weekly.txt` を当日日付で更新。
+- **成長ダイジェスト(KZ-003・Chami承認2026-07-18)**: 便の末尾に各部門・ローカルLLMの「今週できるようになったこと」を1行ずつ添える(各部門docsの更新差分・dept_eventsから拾う)。動いている実感を届けるのがChamiの要望。
 
 ## 台帳・趣向DBの運用
 - **提案台帳**: `improvement-findings.md`(人が読む1行索引)+ D1 `improvement_insights`(正本・status列)。番号=PRO-NNN(集約)/KZ-NNN(能動)。状態 `proposed→presented→approved/rejected/deferred→implemented→measured`。
