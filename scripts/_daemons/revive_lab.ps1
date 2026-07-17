@@ -64,6 +64,21 @@ try {
   }
 } catch { Write-Log ("lab: prompt build failed: {0}" -f $_.Exception.Message) }
 
+# Authentication (Chami approved 2026-07-17). A script-launched claude is NOT logged in:
+#   auth is host-injected into the app's sessions and NOT inherited by a cold-started CLI.
+#   That is why every past "revival" produced a deaf window (auth status: loggedIn=false)
+#   and never armed a waiter. Fix: `claude setup-token` gives a long-lived OAuth token;
+#   set it as CLAUDE_CODE_OAUTH_TOKEN (NOT ANTHROPIC_API_KEY - the oat token is rejected there).
+#   Verified 2026-07-17: with this env var, a spawned `claude --print` returned "alive".
+# The token lives in local/cli_auth_token.txt (gitignored). Set it as an ENV VAR (inherited by
+#   the child), never on the command line - a command-line token would show in the process list.
+$tokFile = Join-Path $root 'local\cli_auth_token.txt'
+if (Test-Path -LiteralPath $tokFile) {
+  $env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content -LiteralPath $tokFile -Raw).Trim()
+} else {
+  Write-Log "lab: WARNING - local\cli_auth_token.txt missing. Revived session will NOT be logged in (deaf window). Run: claude setup-token"
+}
+
 # Visible window on purpose (interactive TUI + last-resort manual input path).
 # Fall back to a bare resume if the prompt could not be built: reviving without a prompt is
 # still better than not reviving at all (Chami can type into the window).
