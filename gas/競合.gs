@@ -14,7 +14,8 @@
 // ============================================================
 
 var COMP_CH_SHEET   = '競合_チャンネル';
-var COMP_CH_HEADERS = ['channel_id', 'チャンネル名', 'URL', '登録者数', '総再生数', '動画数', '状態', '発見経路', 'uploads', '追加日', '最終更新'];
+// Bluesky/X/訴求メモ = Chamiが競合と一緒に共有する横断情報(どこで・どう訴求しているか)。分析部の外部リンク経路分析の材料。
+var COMP_CH_HEADERS = ['channel_id', 'チャンネル名', 'URL', '登録者数', '総再生数', '動画数', '状態', '発見経路', 'uploads', '追加日', '最終更新', 'Bluesky', 'X', '訴求メモ'];
 var COMP_VID_SHEET   = '競合_動画';
 var COMP_VID_HEADERS = ['video_id', 'channel_id', 'タイトル', '公開日時', '長さ秒', 'isShort', '初回取得日'];
 var COMP_DAILY_SHEET   = '競合_日次';
@@ -244,9 +245,20 @@ function compUpsertVideos_(records) {
   return seen;
 }
 
+// ---- 競合_チャンネルの見出しに不足列を追記(既存タブへ後から列を足す・冪等) ----
+function compMigrateChannelHeaders_() {
+  var sh = compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
+  var lastCol = Math.max(1, sh.getLastColumn());
+  var have = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (x) { return String(x); });
+  var missing = COMP_CH_HEADERS.filter(function (h) { return have.indexOf(h) < 0; });
+  if (missing.length) sh.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+  return { ok: true, added: missing };
+}
+
 // ---- 全タブを確保(手動記録タブ=競合_コミュニティ観察 を含む)。冪等・doGetから呼ぶ ----
 function compEnsureTabs_() {
   compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
+  compMigrateChannelHeaders_();  // 既存タブへBluesky/X/訴求メモ列を後付け
   compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
   compSheet_(COMP_DAILY_SHEET, COMP_DAILY_HEADERS);
   compSheet_(COMP_WEEKLY_SHEET, COMP_WEEKLY_HEADERS);
@@ -257,21 +269,28 @@ function compEnsureTabs_() {
 
 // ---- シード登録: URLをwatch行として台帳へ追加(channel_id重複はスキップ)。doGetから呼ぶ ----
 //   Chamiが(A)「改修βに登録してもらう」を選んだ時の受け口。競合名/URLはシート内のみ(コード・commitに書かない)。
-function compAddSeed_(url, name) {
+function compAddSeed_(url, name, bluesky, x, note) {
   url = String(url || '').trim();
   if (!url) return { ok: false, reason: 'no_url' };
+  compMigrateChannelHeaders_();  // Bluesky/X/訴求メモ列を確保してから書く
   var m = url.match(/\/channel\/(UC[0-9A-Za-z_-]{20,})/);
   var cid = m ? m[1] : compResolveChannelId_(url);
   if (!cid) return { ok: false, reason: 'unresolved', url: url };
   var sh = compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
   var map = headerMap_(sh);
+  // 追記する横断情報(空でない分だけ後で書く)
+  var setExtra = function (rowIndex) {
+    if (bluesky && map['Bluesky']) sh.getRange(rowIndex, map['Bluesky']).setValue(String(bluesky));
+    if (x && map['X']) sh.getRange(rowIndex, map['X']).setValue(String(x));
+    if (note && map['訴求メモ']) sh.getRange(rowIndex, map['訴求メモ']).setValue(String(note));
+  };
   var last = sh.getLastRow();
   if (last >= 2) {
     var ex = sh.getRange(2, map['channel_id'], last - 1, 1).getValues();
     for (var i = 0; i < ex.length; i++) {
       if (String(ex[i][0]).trim() === cid) {
-        // 既存がcandidateならwatchへ昇格
         if (String(sh.getRange(i + 2, map['状態']).getValue()).trim() !== 'watch') sh.getRange(i + 2, map['状態']).setValue('watch');
+        setExtra(i + 2);  // 既存行にも横断情報を補完
         return { ok: true, channel_id: cid, added: false, note: 'already_exists' };
       }
     }
@@ -286,6 +305,9 @@ function compAddSeed_(url, name) {
   row[map['状態'] - 1] = 'watch';
   row[map['発見経路'] - 1] = 'seed';
   row[map['追加日'] - 1] = today;
+  if (bluesky && map['Bluesky']) row[map['Bluesky'] - 1] = String(bluesky);
+  if (x && map['X']) row[map['X'] - 1] = String(x);
+  if (note && map['訴求メモ']) row[map['訴求メモ'] - 1] = String(note);
   sh.getRange(sh.getLastRow() + 1, 1, 1, COMP_CH_HEADERS.length).setValues([row]);
   return { ok: true, channel_id: cid, added: true };
 }

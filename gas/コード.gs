@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-18C(競合サーチに手動記録タブ=競合_コミュニティ観察を追加=公式APIに窓口が無いコミュニティ投稿を人が手で貯める器・comp_ensure_tabsで冪等確保)';
+var GAS_VERSION = '2026-07-18D(競合_チャンネルにBluesky/X/訴求メモ列を追加=Chami共有の横断情報・既存タブへ列後付け移行・comp_add_seedがbluesky/x/note受け取り)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -151,7 +151,7 @@ function doGet(e) {
   if (p.action === 'comp_titles') { return jsonOut_(compTitles_(p.days, p.top)); }           // コピー部: 速度順タイトルコーパス
   if (p.action === 'comp_daily_now') { try { return jsonOut_(runCompetitorDaily()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }
   if (p.action === 'comp_discovery_now') { try { return jsonOut_(runCompetitorDiscovery()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }
-  if (p.action === 'comp_add_seed') { try { return jsonOut_(compAddSeed_(p.url, p.name)); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // シード登録(改修βが使用)
+  if (p.action === 'comp_add_seed') { try { return jsonOut_(compAddSeed_(p.url, p.name, p.bluesky, p.x, p.note)); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // シード登録(改修βが使用・横断情報つき)
   if (p.action === 'comp_ensure_tabs') { try { return jsonOut_(compEnsureTabs_()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // 全タブ確保(手動記録タブ含む)
   // デプロイ後の自動後処理: トリガー再設定＋ヘッダ移行を一括冪等実行。(scripts/deploy_gas.mjs が反映確認後に呼ぶ)
   //   secret はスクリプトプロパティ ADMIN_SECRET(未設定なら固定のソフト鍵にフォールバック)と照合。
