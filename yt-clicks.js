@@ -131,7 +131,7 @@
 
   // ── PC(広い画面)向け：投稿履歴カードの列数(ユーザー選択・スマホは無効)。候補タブと同方式。 ──
   var K_HISTCOLS = 'hist_pc_cols';
-  var HCOLS_MIN = 1, HCOLS_MAX = 4, HCOLS_DEF = 1;
+  var HCOLS_MIN = 1, HCOLS_MAX = 4, HCOLS_DEF = 2; // 既定2列(候補タブと同方式・PC幅拡張に合わせ2026-07-17)。モバイルはCSSで常に1列
   function histCols_() { var n; try { n = parseInt(localStorage.getItem(K_HISTCOLS) || String(HCOLS_DEF), 10); } catch (e) { n = HCOLS_DEF; } return (n >= HCOLS_MIN && n <= HCOLS_MAX) ? n : HCOLS_DEF; }
   function applyHistCols_(n) { try { document.documentElement.style.setProperty('--hist-cols', String(n)); } catch (e) {} }
   function histColsCtlHtml_() {

@@ -14,8 +14,9 @@ html[data-account="acc2"]{           /* 宵桜艶帖：ワイン × 桜ピンク
   --app-bg:#2e1224; --card:#381630; --line:#57294a;
   --accent:#ff85ac; --accent2:#ffce9a; --ink:#fbeef4; --sub:#d6abc0;
 }
-/* ── ランキング・候補・予約タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
+/* ── ランキング・分析・候補・予約タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
 html[data-tab="tabRank"],
+html[data-tab="tabAnalyze"],
 html[data-tab="tabCand"],
 html[data-tab="tabReserve"]{
   --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
@@ -32,9 +33,12 @@ header{padding:18px 16px 6px;text-align:center;}
 h1{margin:0;font-size:22px;font-weight:900;letter-spacing:.02em;}
 .sub{margin:4px 0 0;color:var(--sub);font-size:13px;}
 main{max-width:520px;margin:0 auto;padding:8px 14px 40px;}
-/* PC(広い画面)：候補ページは画面全体を使う。他タブは読みやすさ優先で幅制限を維持。 */
+/* PC(広い画面)：候補ページと投稿履歴ページは画面全体を使う。他タブは読みやすさ優先で幅制限を維持。 */
 @media (min-width:1024px){
   #pageCand main{max-width:none;padding-left:28px;padding-right:28px;}
+  #pageVerify main{max-width:none;padding-left:28px;padding-right:28px;}
+  /* 投稿履歴の「上部の設定系」(管理・診断ツール)はリストと違い幅を広げず右側へ寄せる(Chami指定2026-07-17)。 */
+  #pageVerify .tools-fold{max-width:420px;margin-left:auto;}
 }
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
   padding:14px;margin:12px 0;}
@@ -137,12 +141,21 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .comp-add-row input{flex:1;min-width:0;}
 .comp-add-row button{flex:0 0 auto;width:auto;white-space:nowrap;margin:0;}
 .comp-list{margin-top:8px;display:flex;flex-direction:column;gap:6px;}
-.comp-item{display:flex;align-items:center;gap:8px;background:#0e1422;border:1px solid var(--line);border-radius:8px;padding:8px 10px;}
-.comp-item-main{flex:1;min-width:0;}
+/* comp-item はテーマ変数で描く＝分析タブ(クリーム)でもアカウント色でも文字が読める(#0e1422固定にすると
+   クリーム時に暗色文字が暗色背景に乗って読めなくなるため)。候補カードと同方式(var(--card)+枠線)。 */
+.comp-item{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;}
+.comp-item-main{flex:1;min-width:0;cursor:pointer;} /* クリックで分析詳細を開閉 */
 .comp-name{font-size:14px;color:var(--ink);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.comp-name::before{content:"▸ ";color:var(--accent);font-weight:700;} /* 展開ヒント(開いてる時は▾) */
+.comp-item.open .comp-name::before{content:"▾ ";}
 .comp-link{font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
-.comp-del{flex:0 0 auto;width:auto;margin:0;padding:4px 10px;font-size:13px;background:#0e1422;border:1px solid var(--line);color:var(--sub);border-radius:8px;cursor:pointer;}
+.comp-del{flex:0 0 auto;width:auto;margin:0;padding:4px 10px;font-size:13px;background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:8px;cursor:pointer;}
 .comp-del:active{opacity:.7;}
+/* チャンネル別の分析詳細パネル(クリックで展開)。監視データはβのGAS実装後にここへ充填する。 */
+.comp-detail{margin:2px 0 4px;padding:10px 12px;background:var(--card);border:1px dashed var(--line);border-radius:8px;font-size:12.5px;color:var(--sub);}
+.comp-detail .cd-row{margin:2px 0;word-break:break-all;}
+.comp-detail .cd-k{color:var(--accent);font-weight:700;margin-right:6px;}
+.comp-detail .cd-soon{margin-top:6px;color:var(--sub);opacity:.9;}
 /* 投稿履歴の管理・診断ツールの折り畳み(普段使わない設定系を畳む・Chami依頼2026-07-15)。アプリ配色(紫は使わない)。 */
 .tools-fold{margin:6px 0;border:1px solid var(--line);border-radius:8px;background:#0e1422;}
 .tools-fold > summary{cursor:pointer;list-style:none;padding:8px 12px;font-size:12.5px;font-weight:700;color:var(--sub);user-select:none;}

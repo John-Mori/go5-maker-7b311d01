@@ -64,25 +64,56 @@
   }
 
   function status(msg, isErr) { var el = $('compStatus'); if (el) { el.textContent = msg || ''; el.style.color = isErr ? '#dc465a' : 'var(--sub)'; } }
+  // ISO日時 → 表示用の日付(YYYY-MM-DD)。パース失敗時は原文。
+  function fmtDate(iso) {
+    var s = String(iso || ''); if (!s) return '(不明)';
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? (m[1] + '-' + m[2] + '-' + m[3]) : s;
+  }
+  // チャンネル別の分析詳細(クリックで展開)。監視データ(伸び・投稿時刻・タイトル傾向)はβのGAS稼働後に充填。
+  function detailHtml(c) {
+    return '<div class="cd-row"><span class="cd-k">登録入力</span>' + esc(c.input || '') + '</div>' +
+      '<div class="cd-row"><span class="cd-k">チャンネルID</span>' + esc(c.channelId || '(未取得・APIキー設定で埋まる)') + '</div>' +
+      '<div class="cd-row"><span class="cd-k">追加日</span>' + esc(fmtDate(c.addedAt)) + '</div>' +
+      '<div class="cd-soon">📊 このチャンネルの分析(前日の投稿本数・投稿時刻・再生の伸び・タイトル傾向)は、監視バックエンド(GAS)の稼働後にここへ表示されます。今は登録のみです。</div>';
+  }
   function render() {
     var el = $('compList'); if (!el) return;
     var arr = load();
     if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:4px 2px;">まだ登録がありません。上に競合のチャンネルURLか@ハンドルを貼って「＋ 登録」してください。</p>'; return; }
+    // 登録した順に上から並べる(load()＝保存配列の順＝登録順)。
     el.innerHTML = arr.map(function (c, i) {
       var url = c.channelId ? 'https://www.youtube.com/channel/' + esc(c.channelId) : (/^https?:/.test(c.input || '') ? esc(c.input) : '');
-      return '<div class="comp-item">' +
-        '<div class="comp-item-main">' +
-          '<div class="comp-name">' + esc(c.name || '(名称未取得)') + '</div>' +
-          (url ? '<a class="comp-link" href="' + url + '" target="_blank" rel="noopener">' + esc(c.channelId || c.input || '') + ' ↗</a>'
-               : '<span class="comp-link">' + esc(c.input || '') + '</span>') +
+      return '<div class="comp-entry">' +
+        '<div class="comp-item" data-i="' + i + '">' +
+          '<div class="comp-item-main" data-toggle="' + i + '" title="クリックで分析詳細を開閉">' +
+            '<div class="comp-name">' + esc(c.name || '(名称未取得)') + '</div>' +
+            (url ? '<a class="comp-link" href="' + url + '" target="_blank" rel="noopener">' + esc(c.channelId || c.input || '') + ' ↗</a>'
+                 : '<span class="comp-link">' + esc(c.input || '') + '</span>') +
+          '</div>' +
+          '<button class="comp-del" type="button" data-i="' + i + '" title="この競合を削除">✕</button>' +
         '</div>' +
-        '<button class="comp-del" type="button" data-i="' + i + '" title="この競合を削除">✕</button>' +
+        '<div class="comp-detail" data-detail="' + i + '" hidden>' + detailHtml(c) + '</div>' +
       '</div>';
     }).join('');
+    // 削除(リンク遷移や展開に巻き込まれないよう stopPropagation)
     el.querySelectorAll('.comp-del').forEach(function (b) {
-      b.addEventListener('click', function () {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
         var i = parseInt(b.getAttribute('data-i'), 10);
         var a = load(); if (i >= 0 && i < a.length) { a.splice(i, 1); save(a); render(); }
+      });
+    });
+    // チャンネル名の行をクリック→そのチャンネルの分析詳細を開閉(リンク↗のクリックは除外)
+    el.querySelectorAll('.comp-item-main').forEach(function (m) {
+      m.addEventListener('click', function (e) {
+        if (e.target && e.target.closest && e.target.closest('a.comp-link')) return; // ↗リンクは通常遷移
+        var i = m.getAttribute('data-toggle');
+        var item = m.parentNode, detail = el.querySelector('.comp-detail[data-detail="' + i + '"]');
+        if (!detail) return;
+        var willOpen = detail.hasAttribute('hidden');
+        if (willOpen) { detail.removeAttribute('hidden'); item.classList.add('open'); }
+        else { detail.setAttribute('hidden', ''); item.classList.remove('open'); }
       });
     });
   }
