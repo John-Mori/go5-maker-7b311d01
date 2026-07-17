@@ -16,6 +16,7 @@
     { btn: 'tabCand',    page: 'pageCand'    },
     { btn: 'tabReserve', page: 'pageReserve' },
     { btn: 'tabVerify', page: 'pageVerify'   },
+    { btn: 'tabAnalyze', page: 'pageAnalyze' },
     { btn: 'tabMovie',  page: 'pageMovie'    },
     { btn: 'tabCal',    page: 'pageCalendar' },
     { btn: 'tabYT',     page: 'pageYouTube'  },
