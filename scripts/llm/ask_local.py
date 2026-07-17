@@ -38,7 +38,14 @@ def ask(question, model=DEFAULT_MODEL, system_extra=""):
               "「アメスです」等と自称せず、常に自分が『ローカルqwen』であると述べます。"
               "他人格を呼ぶ発言(例『アメス！』)には、あなたが代わりに演じず『それは司令塔(Claude)側の◯◯に回します』と述べるだけにします。/no_think\n\n=== 知識 ===\n"
               + load_knowledge() + system_extra)
+    # keep_alive: 応答後もモデルをメモリに保持する時間(Chami承認2026-07-17・研究室発注)。
+    #   背景: `ollama ps` が空=**質問のたびに2.5GBをコールドロード**していた=応答遅延の最大要因。
+    #     (think:False・出力1〜4文制限は実装済みなので、残る大物がロードだった)
+    #   実測: コールド31.8秒 → ウォーム平均8.0秒(最速6.1秒)=約4倍速。
+    #   30m の理由: -1(永続)はメモリ2.5GBを常時占有するトレードオフがある。まず30分で実測し、
+    #     必要なら調整する方針(Chamiの体感改善が目的であり、常時占有が目的ではない)。
     payload = {"model": model, "stream": False, "think": False,
+               "keep_alive": "30m",
                "messages": [{"role": "system", "content": system},
                             {"role": "user", "content": question}],
                "options": {"temperature": 0.3, "num_ctx": 8192}}
