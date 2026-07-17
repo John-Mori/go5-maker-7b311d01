@@ -8,6 +8,8 @@
 1. チャイム線を背景起動: `python scripts/llm/inbox_waiter.py --name main`(run_in_background)。
    - 脈打ち+受信箱の見張りを兼ねる。**新着が入った瞬間にこのセッションが起こされる**(イベント駆動)。TTL45分。
    - **仕事の区切りごとに、箱をドレインしてから再武装**(=空箱で待機に入る)。無限待ち禁止(INC-091)。設計=`docs/設計・調査/チャイム設計_Discord即時ウェイク.md`
+   - ★★**「区切り」を待たない(規約3c・INC-98)**: 長作業中はワークフロー通知等でターンが何度も始まる。**どんな理由で起きたターンでも、終える前にmain waiterの生存を確認し、死んでいれば張り直す**。これを怠った実例=waiterがTTL全滅したまま9時間、Chamiの「大至急」に3時間無応答(2026-07-17)。
+   - 脈ファイルの名前に注意: **mainの脈は `local/llm/claude_active.txt`(無印)**。`claude_active_main.txt` は設計上存在しない(heartbeat互換の命名・inbox_waiter.py:active_path)。生存診断で誤った名前を探すと「起動実績ゼロ」と誤診する。
    - ★ScheduleWakeup約90秒の自己巡回は不要になった(waiterが起こす)。保険として30〜60分の長いwakeupだけ残すのは可。
    - (旧`heartbeat.py`は互換で残置。新規の脈打ちはwaiterに一本化)
 2. 受付箱を確認して処理:
