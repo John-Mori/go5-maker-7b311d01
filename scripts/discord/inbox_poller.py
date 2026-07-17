@@ -291,6 +291,12 @@ def poll_channel(ch, token, state, out):
             "channel": ch.get("name", cid),
             "dept": ch.get("dept", "router"),
             "author": m.get("author", {}).get("username", "?"),
+            # author_id: 本人確認の突合キー(dream-care設計書 P1-4・Chami承認2026-07-17)。
+            #   usernameは変更され得るため本人判定に使えない。IDは不変なので
+            #   local/chami_discord_id.txt との照合で「本人か」を確実に判定できる。
+            #   ★後方互換: 既存レコードにはこのキーが無い=読む側は不在を「本人と確認できない」
+            #     として扱う(=安全側の一般応対へ倒れる)。全部屋に有益なので鳩側で一律付与する。
+            "author_id": str(m.get("author", {}).get("id", "") or ""),
             "content": m.get("content", ""),
             "attachments": [a.get("url") for a in m.get("attachments", [])],
             "msg_id": m["id"],
