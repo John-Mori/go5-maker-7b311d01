@@ -62,7 +62,12 @@
       var stack = '';
       try { stack = String((new Error()).stack || '').split('\n').slice(2, 7).join(' | ').replace(/https?:\/\/[^)]*\//g, ''); } catch (e) {}
       log.unshift({
-        at: new Date().toISOString(),
+        // ★日本時間で記録する(Chami依頼2026-07-17「JSTで今後記録して」)。
+        //   toISOString()はUTC=Chamiの体感と9時間ズレ、日付すら変わって「いつ消えたか」が読めない。
+        //   端末のローカル時刻(=JST)で 'YYYY-MM-DD HH:MM:SS' として持つ。
+        at: (function () { var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
+          return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+                 p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); })(),
         key: key,                      // どのキーが減ったか(short_hist__acc2 等)
         before: before.length,
         after: after.length,
@@ -2268,6 +2273,7 @@
     try { log = JSON.parse(localStorage.getItem('hist_loss_evidence') || '[]') || []; } catch (e) {}
     if (!log.length) { setStatus('🕵 履歴が減った記録はありません。(消失が起きた後にここを見てください)'); return; }
     var html = log.map(function (r, i) {
+      // at はJSTの 'YYYY-MM-DD HH:MM:SS'(v=354以降)。旧UTC(ISO)の記録も読めるようTだけ均す。
       return '<b>' + (i + 1) + '. ' + esc(String(r.at || '').replace('T', ' ').slice(0, 19)) + '</b>　' +
         esc(r.key || '') + '：<b style="color:#dc465a;">' + r.before + ' → ' + r.after + '</b> 件' +
         (r.lostIds && r.lostIds.length ? '<br>　消えたID: ' + esc(r.lostIds.join(', ')) : '') +

@@ -39,6 +39,7 @@ GQL = "https://api.cloudflare.com/client/v4/graphql"
 
 FREE_LIMIT = 100000      # 無料枠(req/日)
 WARN_AT = 80000          # ここを超えたら警告(8万/日=黄信号・設計書の基準)
+JST = timezone(timedelta(hours=9))   # 表示は日本時間で(Chami依頼2026-07-17「JSTで今後記録して」)
 
 
 def read(path):
@@ -91,10 +92,24 @@ def fmt(n):
     return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
 
+def jst_span(day_utc):
+    """UTCの1日が日本時間ではいつからいつかを返す(例: 2026-07-16 → 「7/16 09:00〜7/17 09:00」)。
+    ★集計日をJSTにしてはいけない: Cloudflareの無料枠のリセットは **UTC 00:00 固定**(超過メールの
+      「制限のリセット日時: 00:00:00 UTC」)。JSTで区切ると枠の境界とズレて数字が意味を失う。
+      よって **集計はUTCのまま・表示にJSTの実時間を併記** する(Chami依頼「JSTで記録して」への回答)。
+    """
+    try:
+        s = datetime.strptime(day_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc).astimezone(JST)
+        e = s + timedelta(days=1)
+        return f"{s.month}/{s.day} {s.hour:02d}:00〜{e.month}/{e.day} {e.hour:02d}:00"
+    except Exception:
+        return ""
+
+
 def build_line(day, rows):
     total = sum(n for _, n in rows)
     parts = " / ".join(f"{name} {fmt(n)}" for name, n in rows if n > 0) or "(呼び出しなし)"
-    head = f"☁️ Cloudflare {day}: {parts}　計 {fmt(total)} / 枠 {fmt(FREE_LIMIT)}"
+    head = f"☁️ Cloudflare 日本時間 {jst_span(day)}: {parts}　計 {fmt(total)} / 枠 {fmt(FREE_LIMIT)}"
     if total >= FREE_LIMIT:
         return head + "\n🚨 **上限超過**。Workerが停止した可能性がある。改修αへ調査を回してくれ。"
     if total >= WARN_AT:
