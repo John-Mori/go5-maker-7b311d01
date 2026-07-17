@@ -60,6 +60,7 @@
     "fanza_worker_url": 1,       // FANZA worker URL(共有設定)
     "ytdesc_tpl_v3": 1,          // YouTube説明欄テンプレ版(共有設定)
     "yt_tags_shared": 1,         // YTタグ(全チャンネル共通・2026-07-12統一)
+    "competitor_channels": 1,    // 競合チャンネル監視の登録リスト(PCで登録→スマホでも見える・2026-07-17)
   };
 
   // このキーはクラウド同期してよいか。(＝本物の設定か)
