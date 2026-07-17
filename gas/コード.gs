@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-14C(ハーレム追加+導線2作品クリックの日次スナップ=作品短縮URL列/作品クリック数列/twc-ywc-wwcデルタ)';
+var GAS_VERSION = '2026-07-18A(YouTube競合サーチ追加=競合.gs・日次/週次トリガー・comp_digest/comp_titles/comp_daily_now/comp_discovery_now・既存YT_API_KEY再利用・SHEET_IDへ競合_タブ追加)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -146,6 +146,11 @@ function doGet(e) {
   if (p.action === 'consolidate_title') {
     return jsonOut_(consolidateTitle_());
   }
+  // 競合サーチ(gas/競合.gs)。部門はWebFetchでJSONを読む。設計書=docs/設計・調査/設計書_YouTube競合サーチ.md
+  if (p.action === 'comp_digest') { return jsonOut_(compDigest_()); }                       // 分析部: 週次サマリ
+  if (p.action === 'comp_titles') { return jsonOut_(compTitles_(p.days, p.top)); }           // コピー部: 速度順タイトルコーパス
+  if (p.action === 'comp_daily_now') { try { return jsonOut_(runCompetitorDaily()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }
+  if (p.action === 'comp_discovery_now') { try { return jsonOut_(runCompetitorDiscovery()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }
   // デプロイ後の自動後処理: トリガー再設定＋ヘッダ移行を一括冪等実行。(scripts/deploy_gas.mjs が反映確認後に呼ぶ)
   //   secret はスクリプトプロパティ ADMIN_SECRET(未設定なら固定のソフト鍵にフォールバック)と照合。
   //   ※ソフト鍵は deploy_gas.mjs の SOFT_ADMIN_SECRET と一致させる。(短縮URL用 shortSecret_ とは独立)
@@ -1069,12 +1074,16 @@ function computeDeltas_() {
 function setupTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var f = t.getHandlerFunction();
-    if (f === 'refreshClicks' || f === 'refreshEngagement' || f === 'snapshotStats') ScriptApp.deleteTrigger(t);
+    if (f === 'refreshClicks' || f === 'refreshEngagement' || f === 'snapshotStats' ||
+        f === 'runCompetitorDaily' || f === 'runCompetitorDiscovery') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('refreshEngagement').timeBased().everyHours(1).create();
   // ⑤時点記録(30分バケット)の精度確保のためスナップを30分毎に。(日次スナップはupsertなので2回/時でも無害)
   ScriptApp.newTrigger('snapshotStats').timeBased().everyMinutes(30).create();
+  // 競合サーチ(gas/競合.gs): 日次スナップ=毎日4時台 / 発見=日曜4時台。watch対象0件の間は無害に空回り
+  ScriptApp.newTrigger('runCompetitorDaily').timeBased().everyDays(1).atHour(4).create();
+  ScriptApp.newTrigger('runCompetitorDiscovery').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(4).create();
 }
 
 // ============================================================
