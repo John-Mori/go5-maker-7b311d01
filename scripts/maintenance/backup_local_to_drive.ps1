@@ -11,7 +11,8 @@ $LogFile   = 'D:\SougouStartFolder\go5-maker\local\backup.log'
 # contains a strategy folder name, and scripts/ is tracked by a PUBLIC repo.
 # It was pushed once (QA found it 2026-07-17); the original design already said local/.
 $DestFile  = 'D:\SougouStartFolder\go5-maker\local\backup_dest.txt'
-$KeepCount = 14
+# 3 per Chami (2026-07-17 kaizen ch): "14 days not needed, 3 is enough, delete the rest"
+$KeepCount = 3
 $MinFreeGB = 2
 
 function Write-Log($msg) {
@@ -40,6 +41,14 @@ if (-not $rel) {
     exit 1
 }
 
+# Validate the resolved drive root actually contains our destination path.
+# QA 2026-07-17: if a Shared Drive ever appears first under G:\, blind "first dir"
+# resolution would point retention's Remove-Item at the wrong tree. Property-based
+# check (no hardcoded Japanese folder name; this file must stay ASCII).
+if (-not (Test-Path (Join-Path $driveRoot.FullName $rel))) {
+    Write-Log ("ABORT: resolved drive root '{0}' does not contain the expected destination. Backup skipped." -f $driveRoot.FullName)
+    exit 1
+}
 $BackupRoot = Join-Path $driveRoot.FullName $rel
 $stamp = Get-Date -Format 'yyyy-MM-dd'
 $dest  = Join-Path $BackupRoot $stamp
