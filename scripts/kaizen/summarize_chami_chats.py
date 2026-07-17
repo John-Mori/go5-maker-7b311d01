@@ -27,8 +27,8 @@ SOURCES = [
     os.path.join(ROOT, "local", "discord_inbox_processed.jsonl"),
 ]
 
-# 機微な個人領域の部屋。分析・記録の対象から完全に除外する
-# (不変条件: past-room専属・代打時も中身を読まない / dream-care・health-logも個人機微)。
+# 機微な個人領域の部屋。集計(件数・傾向)には含めてよいが、生の記述は表示・引用・
+# 公開docs/D1への書き込みをしない(Chami方針2026-07-18「読んでいい・要約に・健康職歴は書かない」)。
 SENSITIVE_DEPTS = ("dream-care", "past-room", "health-log", "future-room")
 
 # カテゴリ = (見出し, [キーワード]). 1発言が複数カテゴリに入ってよい。
@@ -65,8 +65,6 @@ def load_rows(days):
             author = (d.get("author") or "").lower()
             if "chami" not in author:
                 continue
-            if (d.get("dept") or "") in SENSITIVE_DEPTS:
-                continue  # 機微部屋は読まない・記録しない
             ts = d.get("ts") or ""
             if cutoff and ts < cutoff:
                 continue
@@ -74,6 +72,8 @@ def load_rows(days):
                 "ts": ts,
                 "dept": d.get("dept") or "?",
                 "content": (d.get("content") or "").replace("\n", " "),
+                # 機微部屋は集計に含めてよいが、生の記述は代表例に出さない(健康・職歴等)
+                "sensitive": (d.get("dept") or "") in SENSITIVE_DEPTS,
             })
     return rows
 
@@ -106,11 +106,17 @@ def main():
     for day in sorted(by_day):
         print(f"- {day}: {by_day[day]}")
 
-    print("\n## 各カテゴリの代表例(最大4件・新しい順)")
+    print("\n## 各カテゴリの代表例(最大4件・新しい順・機微部屋は生表示せず件数のみ)")
     for name in cat_hits:
         print(f"\n### {name}")
-        for r in sorted(cat_hits[name], key=lambda x: x["ts"], reverse=True)[:4]:
+        shown = 0
+        for r in sorted(cat_hits[name], key=lambda x: x["ts"], reverse=True):
+            if shown >= 4:
+                break
+            if r["sensitive"]:
+                continue  # 健康・職歴・夢などの生記述は表示・引用しない(Chami方針2026-07-18)
             print(f"- [{(r['ts'] or '')[:16]} {r['dept']}] {r['content'][:90]}")
+            shown += 1
 
 
 if __name__ == "__main__":

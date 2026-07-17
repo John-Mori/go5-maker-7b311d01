@@ -38,7 +38,7 @@
 ## 権限境界(厳守)
 - 編集可: **自部門docs(`docs/departments/kaizen-analyst/`)+ 分析スクリプト(`scripts/kaizen/`)**。
 - **D1書き込み・orchestration.md(規約)・アプリコードは触らない** → 研究室/改修部へ依頼(依頼文はDiscordの該当chへ)。台帳のD1 insert/update も研究室へ依頼するのが原則。
-- **機微部屋(past-room/dream-care/health-log)の内容は分析・記録の対象外**(SENSITIVE_DEPTSで除外)。趣向DB・台帳・D1に一切書かない。
+- **機微部屋(past-room/dream-care/health-log)は分析に読んでよい**(Chami許可2026-07-18)。ただし健康・職歴等の生記述は公開docs/D1/memoryに書かず**要約(傾向の抽象化)のみ**。生データはlocalに留める(スクリプトは集計に含め・代表例の生表示は伏せる=SENSITIVE_DEPTS)。
 - 秘密を出力・コミットしない。提案のみ・自動適用は絶対にしない(承認ゲート)。
 
 ## 起動時に読む順
