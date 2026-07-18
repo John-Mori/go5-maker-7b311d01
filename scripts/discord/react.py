@@ -35,9 +35,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.path.join(ROOT, "local")
 API = "https://discord.com/api/v10"
-FALLBACK = {"着手": "👀", "既読": "✅", "送信": "📮"}  # サーバー絵文字が未登録の間の代用
+FALLBACK = {"着手": "👀", "既読": "✅", "送信": "📮", "即答": "💬"}  # サーバー絵文字が未登録の間の代用
 # 呼び名(日本語) → Chami登録の実際の絵文字名。どちらで指定しても解決する
-ALIAS = {"着手": ["chakusyu", "着手"], "既読": ["kidoku", "既読"], "送信": ["sendms", "送信"]}
+# 即答=4段印の新設(Chami発案2026-07-19・QA合意)。サーバー絵文字sokutou作成までは💬で代用
+ALIAS = {"着手": ["chakusyu", "着手"], "既読": ["kidoku", "既読"], "送信": ["sendms", "送信"],
+         "即答": ["sokutou", "即答"]}
 
 
 def read_token():
