@@ -53,5 +53,10 @@ def lab_alive():
 
 
 if __name__ == "__main__":
-    # 点検用: 現在の判定と各脈の鮮度を表示
+    import sys
+    # --check: 終了コードで生存を返す(生存=0 / 死亡=3)。ASCII-only必須のPS(revive_lab.ps1)が
+    #   この2信号ロジックを再実装せず shell out で同じ真実を使うための口(=PS側でのdrift再発を防ぐ)。
+    if "--check" in sys.argv:
+        sys.exit(0 if lab_alive() else 3)
+    # 引数なし: 点検用に現在の判定と各脈の鮮度を表示
     print(f"lab_alive={lab_alive()}  readiness={_age(LAB_PULSE):.1f}s  liveness={_age(LAB_TOOL_PULSE):.1f}s")

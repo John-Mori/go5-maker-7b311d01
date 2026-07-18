@@ -1,92 +1,100 @@
-# revive_lab.ps1 - go5-maker: revive the Lab (Lab/kenkyushitsu) Claude session after logon / crash.
+# revive_lab.ps1 - go5-maker: revive the Lab (kenkyushitsu) Claude session after logon / crash.
 #
 # WHY: every other line (Discord chime, daemons) only DELIVERS. Something must ANSWER.
 #   The Lab session is the single always-open catch-all. If the PC reboots (Windows Update,
-#   power loss) or the session dies while Chami is away (Fukuoka trip), nothing answers until
-#   he opens it by hand - which he cannot do remotely. This restores it automatically.
+#   power loss) or the session dies while Chami is away, nothing answers in-character until he
+#   opens it by hand - which he cannot do remotely. This restores it automatically.
+#   (Availability itself is already floored by claude_responder.py's unmanned 代打; this brings
+#    back a FULL character-capable Lab, which is strictly better than mechanical acks.)
 #
-# WHAT: if no Claude process is alive, open ONE terminal running `claude -r <LAB_SESSION_ID>`
-#   in the repo root. Deliberately VISIBLE: `claude` is an interactive TUI; a hidden window
-#   cannot be typed into, and Chami needs that window as the last-resort input path
-#   (via remote desktop). Every other daemon stays hidden - this one window is the exception.
+# LIVENESS DETECTION (rewritten 2026-07-18, INC-104):
+#   The old check "any claude.exe process alive -> ok" NEVER fired: ~25 unrelated claude.exe
+#   processes (desktop app, subagents, `claude --print`) are always alive, so it always logged
+#   "ok" and never revived a truly-dead Lab. Now we shell out to scripts/llm/presence.py --check,
+#   the SINGLE source of truth for Lab liveness (2-signal: readiness OR liveness+HARD_CAP). PS
+#   never re-implements that logic -> no drift (drift between responders is exactly what caused
+#   INC-104).
 #
-# IDEMPOTENT: does nothing when a Claude session is already running (checked by process name),
-#   so the 10-minute scheduled task never spawns a second one.
+# FRESH SPAWN, NOT RESUME (rewritten 2026-07-18, INC-104):
+#   The old code did `claude -r <hardcoded labId>`. That id (46c7212b...) was stale - it matched
+#   no current session - so a fire would have resumed a dead/wrong session. Session ids are also
+#   no longer reliably discoverable: the multi-session env writes many concurrent *.jsonl and even
+#   the Lab cannot identify its own id by "newest file". So we drop resume entirely and spawn a
+#   FRESH Lab with a self-contained boot prompt, mirroring the proven open_dept_window.ps1 (the
+#   boot prompt re-arms the waiter and drains the inbox on its own - it does not need prior context).
+#
+# IDEMPOTENT / no pileup:
+#   - if presence says the Lab is alive -> do nothing.
+#   - if a `inbox_waiter --name main` process exists -> a Lab window is already booting -> skip.
+#   - cooldown: never respawn more than once per 15 min (guards a spawn that fails to arm a waiter).
 #
 # NOTE: keep this file ASCII-only. PowerShell 5.1 reads a no-BOM file as the system ANSI
-#       codepage; non-ASCII here corrupts parsing. Japanese notes live in README.md.
+#       codepage; non-ASCII here corrupts parsing. Japanese notes live in README.md / the prompt.
 $ErrorActionPreference = 'SilentlyContinue'
 $root = 'D:\SougouStartFolder\go5-maker'
 $log  = Join-Path $root 'local\_lab_revive.log'
-# Lab session id. MUST be the real session UUID (the .jsonl filename under
-#   C:\Users\chami\.claude\projects\D--SougouStartFolder-go5-maker\ ), NOT the cross-session
-#   "local_xxxx" identifier. Those are two different id systems and mixing them silently breaks
-#   revival: 2026-07-16 this held 'local_94702660-...' and `claude -r` rejected it with
-#   "is not a UUID and does not match any session title" - i.e. the Lab would NOT have come back
-#   after a reboot while Chami was away. It was never caught because revive only fires when no
-#   claude process is alive, which had not happened since the task was registered.
-# When the Lab session is handed over (new volume), update this to the new UUID: see
-#   scripts/_daemons/set_lab_session.ps1 which resolves the newest session file and rewrites it.
-$labId = '46c7212b-68e9-48d1-ac5e-c671d356db02'
+$stateFile = Join-Path $root 'local\_lab_revive_state.txt'  # epoch seconds of last spawn (cooldown)
+$cooldownSec = 15 * 60
 
 function Write-Log($m) {
   $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
   try { Add-Content -LiteralPath $log -Value "$ts $m" -Encoding UTF8 } catch {}
 }
 
-# Is any Claude session alive? claude.exe is the CLI; node.exe running claude is the fallback shape.
-$alive = @(Get-Process -Name 'claude' -ErrorAction SilentlyContinue)
-if ($alive.Count -gt 0) {
-  Write-Log ("lab: ok ({0} claude process(es) alive)" -f $alive.Count)
+# --- 1) Is the Lab alive? Single source of truth = presence.lab_alive (exit 0 alive / 3 dead). ---
+$py = 'python'
+& $py (Join-Path $root 'scripts\llm\presence.py') --check 2>$null | Out-Null
+$labAlive = ($LASTEXITCODE -eq 0)
+if ($labAlive) {
+  Write-Log 'lab: ok (presence.lab_alive)'
   exit 0
 }
 
-$claude = 'C:\Users\chami\.local\bin\claude.exe'
-if (-not (Test-Path -LiteralPath $claude)) {
-  Write-Log "lab: claude.exe not found - cannot revive"
-  exit 1
+# --- 2) Double-open guard: a main waiter means a Lab window is already booting/armed. ---
+$waiter = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+  $_.Name -eq 'python.exe' -and $_.CommandLine -match 'inbox_waiter' -and $_.CommandLine -match '--name\s+main(\s|$|")'
+})
+if ($waiter.Count -gt 0) {
+  Write-Log ('lab: dead by presence but main waiter armed (pid {0}) - window booting, skip' -f $waiter[0].ProcessId)
+  exit 0
 }
 
-# Revival prompt (dream-care design P0-3, Chami approved 2026-07-17).
-# WHY: `claude -r <id>` alone only re-opens the window - the session then sits there with no
-#   waiter and no inbox processing = it is awake but deaf. That is exactly INC-98 (Chami's
-#   "urgent" went 3 hours unanswered because the main waiter was never re-armed).
-#   Passing a first prompt makes it re-arm the chime and drain the inbox on its own.
-# The Japanese text lives in lab_revive_prompt.py because this file must stay ASCII-only
-#   (PS 5.1 reads a BOM-less .ps1 as the system ANSI codepage and would mangle it).
-#   Same proven pattern as open_dept_window.ps1 / dept_boot_prompt.py.
+# --- 3) Cooldown: do not respawn faster than every 15 min. ---
+$now = [int][double]::Parse((Get-Date -UFormat %s))
+if (Test-Path -LiteralPath $stateFile) {
+  $last = 0
+  [int]::TryParse((Get-Content -LiteralPath $stateFile -Raw).Trim(), [ref]$last) | Out-Null
+  if (($now - $last) -lt $cooldownSec) {
+    Write-Log ('lab: dead but within cooldown ({0}s since last spawn) - skip' -f ($now - $last))
+    exit 0
+  }
+}
+
+# --- 4) Build the self-contained boot prompt (python owns the Japanese text). ---
+$claude = 'C:\Users\chami\.local\bin\claude.exe'
+if (-not (Test-Path -LiteralPath $claude)) { Write-Log 'lab: claude.exe not found - cannot revive'; exit 1 }
 $promptFile = Join-Path $root 'local\_lab_revive_prompt.txt'
 $prompt = ''
 try {
-  & python (Join-Path $root 'scripts\_daemons\lab_revive_prompt.py') $promptFile | Out-Null
+  & $py (Join-Path $root 'scripts\_daemons\lab_revive_prompt.py') $promptFile | Out-Null
   if (Test-Path -LiteralPath $promptFile) {
     $prompt = (Get-Content -LiteralPath $promptFile -Raw -Encoding UTF8).Trim()
   }
-} catch { Write-Log ("lab: prompt build failed: {0}" -f $_.Exception.Message) }
+} catch { Write-Log ('lab: prompt build failed: {0}' -f $_.Exception.Message) }
+if (-not $prompt) { Write-Log 'lab: empty boot prompt - cannot revive safely'; exit 1 }
 
-# Authentication (Chami approved 2026-07-17). A script-launched claude is NOT logged in:
-#   auth is host-injected into the app's sessions and NOT inherited by a cold-started CLI.
-#   That is why every past "revival" produced a deaf window (auth status: loggedIn=false)
-#   and never armed a waiter. Fix: `claude setup-token` gives a long-lived OAuth token;
-#   set it as CLAUDE_CODE_OAUTH_TOKEN (NOT ANTHROPIC_API_KEY - the oat token is rejected there).
-#   Verified 2026-07-17: with this env var, a spawned `claude --print` returned "alive".
-# The token lives in local/cli_auth_token.txt (gitignored). Set it as an ENV VAR (inherited by
-#   the child), never on the command line - a command-line token would show in the process list.
+# --- 5) Auth: a script-launched claude is NOT logged in unless we inject the OAuth token
+#        (host auth is not inherited by a cold CLI). Token lives in local/cli_auth_token.txt
+#        (gitignored). Set it as an ENV VAR (inherited by the child), never on the command line. ---
 $tokFile = Join-Path $root 'local\cli_auth_token.txt'
 if (Test-Path -LiteralPath $tokFile) {
   $env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content -LiteralPath $tokFile -Raw).Trim()
 } else {
-  Write-Log "lab: WARNING - local\cli_auth_token.txt missing. Revived session will NOT be logged in (deaf window). Run: claude setup-token"
+  Write-Log 'lab: WARNING - local\cli_auth_token.txt missing. Revived session may not be logged in (deaf window). Run: claude setup-token'
 }
 
-# Visible window on purpose (interactive TUI + last-resort manual input path).
-# Fall back to a bare resume if the prompt could not be built: reviving without a prompt is
-# still better than not reviving at all (Chami can type into the window).
-if ($prompt) {
-  $cmd = 'cd /d "' + $root + '" && "' + $claude + '" -r ' + $labId + ' "' + ($prompt -replace '"', '""') + '"'
-  Write-Log ("lab: revived with prompt (claude -r {0})" -f $labId)
-} else {
-  $cmd = 'cd /d "' + $root + '" && "' + $claude + '" -r ' + $labId
-  Write-Log ("lab: revived WITHOUT prompt (fallback) (claude -r {0})" -f $labId)
-}
-Start-Process -FilePath 'cmd.exe' -ArgumentList ('/k ' + $cmd) -WorkingDirectory $root
+# --- 6) Spawn a FRESH Lab (visible window on purpose: interactive TUI + last-resort manual input
+#        path via remote desktop). No -r resume. Same shape as open_dept_window.ps1. ---
+Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', 'cd', '/d', $root, '&&', $claude, $prompt) -WorkingDirectory $root
+Set-Content -LiteralPath $stateFile -Value $now -Encoding ASCII
+Write-Log 'lab: revived FRESH (no resume) with boot prompt - spawned visible window'
