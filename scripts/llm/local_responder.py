@@ -36,7 +36,11 @@ from image_prep import images_of  # noqa: E402
 LOCAL = os.path.join(ROOT, "local")
 INBOX = os.path.join(LOCAL, "discord_inbox.jsonl")
 PROCESSED = os.path.join(LOCAL, "discord_inbox_processed.jsonl")
-FOR_CLAUDE = os.path.join(LOCAL, "discord_inbox_for_claude.jsonl")
+# ★L0(2026-07-18 Chami「残っていることをよろしく」で実装): エスカレ先=main箱へ変更。
+#   旧 for_claude箱は「消費者=セッション開始時の研究室だけ」で、長寿命セッションでは誰も読まず
+#   Chami直令が1.2h滞留する実害が出た(QA発見)。main箱ならwaiterのチャイムが鳴る=無音滞留が
+#   構造的に消える。裁定の原典=memory: escalation-to-main-box(2026-07-17)。旧箱は完全退役。
+FOR_CLAUDE = os.path.join(LOCAL, "discord_inbox.jsonl")  # エスカレ先=main箱(変数名は互換のため維持)
 CLAUDE_ACTIVE = os.path.join(LOCAL, "llm", "claude_active.txt")
 LOG = os.path.join(LOCAL, "llm", "responder_log.jsonl")
 PERSONA = "ローカルqwen"  # 旧名「ローカル受付」(Chami改名2026-07-13)
