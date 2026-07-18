@@ -31,14 +31,19 @@ def main():
         check("enqueue 同msg_id 2件目は無視 (冪等)", q.enqueue({"content": "A2"}, msg_id="M1", dept="qa") is False)
         check("total=1 (二重投入されていない)", q.stats()["total"] == 1)
 
-        # 2) claim→ack の基本
-        c = q.claim(dept="qa")
+        # 2) claim→ack の基本 (2026-07-18統合: ackは行を消さずdone=台帳として残る)
+        c = q.claim(dept="qa", who="tester")
         check("claim で内容が取れる", c and c["body"]["content"] == "A")
         check("claim後 ready=0 leased=1 (見えなくなった)", q.stats()["ready"] == 0 and q.stats()["leased"] == 1)
         c2 = q.claim(dept="qa")
         check("リース中は同じ行を二重取得しない (INC-85相当)", c2 is None)
-        q.ack(c["id"])
-        check("ack後 total=0 (処理済で消える)", q.stats()["total"] == 0)
+        check("ack=True", q.ack(c["id"], result="返信済") is True)
+        st = q.stats()
+        check("ack後 done=1 (台帳として残る=INC-103)", st["done"] == 1 and st["ready"] == 0 and st["leased"] == 0)
+        check("二重ackはFalse", q.ack(c["id"]) is False)
+        # ★done行が残るから、鳩の再起動等で同msg_idが再投入されても冪等照合が生きる
+        check("ack後の同msg_id再投入も無視される (再起動跨ぎの二重処理防止)",
+              q.enqueue({"content": "A3"}, msg_id="M1", dept="qa") is False)
 
         # 3) ★リース切れ自動再配布 (INC-94/86の核心): 処理せず放置=死んだワーカー
         q.enqueue({"content": "B"}, msg_id="M2", dept="qa")
@@ -80,7 +85,59 @@ def main():
         q3.enqueue({"content": "D"}, msg_id="M4", dept="qa")
         c = q3.claim(dept="qa")
         q3.nack(c["id"])
-        check("nack後は即座に再claimできる (長リースでも待たない)", q3.claim(dept="qa") is not None)
+        c = q3.claim(dept="qa")
+        check("nack後は即座に再claimできる (長リースでも待たない)", c is not None)
+        q3.ack(c["id"])
+
+        # 7) extend: 長い処理のリース延長 (2026-07-18統合)
+        q4 = LeaseQueue(os.path.join(d, "q4.db"), lease_sec=1)
+        q4.enqueue({"content": "long"}, msg_id="L1", dept="qa")
+        c = q4.claim(dept="qa")
+        check("extend=True", q4.extend(c["id"], lease_sec=60) is True)
+        time.sleep(1.1)
+        check("延長後はリース切れ扱いにならない", q4.claim(dept="qa") is None)
+        q4.ack(c["id"])
+
+        # 8) stale_pending: 一度もclaimされない放置の検出 (部門が死んでいる時の救済)
+        q4.enqueue({"content": "ghost"}, msg_id="G1", dept="ghost-dept")
+        time.sleep(0.2)
+        sp = q4.stale_pending(older_sec=0.1)
+        check("未claim放置が検出される", any(r["msg_id"] == "G1" for r in sp))
+        check("新しい行や処理済みは検出されない", not q4.stale_pending(older_sec=3600))
+
+        # 9) next_counter: 表示用連番の原子的採番 (INC-99/100二重の根治)
+        check("counter 1", q4.next_counter("INC") == 1)
+        check("counter 2", q4.next_counter("INC") == 2)
+        check("counter 別名は独立", q4.next_counter("REQ") == 1)
+
+        # 10) purge_done: 古いdoneだけ消える (台帳の掃除)
+        n = q4.purge_done(older_sec=0)   # 全doneが対象
+        check("purge_doneでdone行だけ掃除される", n >= 1 and q4.stats()["done"] == 0)
+        check("pending(ghost)は残る", q4.stats()["ready"] == 1)
+
+        # 11) ★並行claim: 2スレッドで40件を取り合い、重複ゼロ・取りこぼしゼロ
+        import threading
+        q5 = LeaseQueue(os.path.join(d, "q5.db"), lease_sec=60)
+        for i in range(40):
+            q5.enqueue({"i": i}, msg_id=f"R{i}", dept="race")
+        got, lock = [], threading.Lock()
+
+        def racer(name):
+            mine = LeaseQueue(os.path.join(d, "q5.db"), lease_sec=60)
+            while True:
+                r = mine.claim(dept="race", who=name)
+                if r is None:
+                    break
+                with lock:
+                    got.append(r["msg_id"])
+                mine.ack(r["id"])
+            mine.close()
+
+        ts = [threading.Thread(target=racer, args=(f"t{i}",)) for i in range(2)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        check("並行claimで40件ちょうど1回ずつ (重複/取りこぼしゼロ)",
+              len(got) == 40 and len(set(got)) == 40)
 
         ok = all(v for _, v in results)
         print(f"\n== {sum(v for _, v in results)}/{len(results)} PASS ==")

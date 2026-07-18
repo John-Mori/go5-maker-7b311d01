@@ -20,14 +20,23 @@
 
 依存ゼロ (標準ライブラリのみ)。1ファイル=既存のバックアップ機構にそのまま乗る。
 本モジュールは「部品」であり、まだ本番の受信経路には配線しない (strangler移行はPoC後)。
+
+2026-07-18 研究室統合 (Chami実装Go・並行実装だったgo5busを本モジュールへ一本化):
+  6. ★ackは行を**消さずdoneに変える** (旧実装は削除だった)。行を消すと、鳩の再起動などで
+     同じmsg_idが再投入された時にUNIQUEの照合相手が消えており二重処理が復活する。
+     「台帳だけが記憶を持つ」(INC-103) を守るにも処理済み行=台帳そのもの。肥大化は
+     purge_done() で古いdoneだけ掃除する (既定30日・監査猶予)。
+  追加API: claim(who=)=誰が借りたか記録 / extend()=長い処理のリース延長 /
+  stale_pending()=一度もclaimされない放置の検出 (部門が死んでいる時の救済・sweep相当) /
+  next_counter()=INC-等の表示用連番の原子的採番 (採番衝突INC-99/100型の根治)。
 """
 import json
 import os
 import sqlite3
 import time
 
-# 状態: pending(未処理) → (claim) → 見えない期間はlease_untilで表現 → ack でdone行削除。
-# dead は毒メッセージの隔離。done は行削除で表現 (テーブルを小さく保つ)。
+# 状態: pending(未処理) → (claim) → 見えない期間はlease_untilで表現 → ack で status='done'。
+# dead は毒メッセージの隔離。done行は台帳として残す (削除は purge_done のみ)。
 DEFAULT_LEASE_SEC = 900          # 既定リース (処理猶予)。INC-94の実測(処理は数分〜十数分)より長く
 DEFAULT_MAX_DELIVERIES = 5       # これを超えたら dead-letter
 
@@ -57,9 +66,16 @@ class LeaseQueue:
                 enqueued_at  REAL NOT NULL,
                 lease_until  REAL NOT NULL DEFAULT 0,  -- これを過ぎたら再配布可
                 deliveries   INTEGER NOT NULL DEFAULT 0,
-                status       TEXT NOT NULL DEFAULT 'pending'  -- pending | dead
+                status       TEXT NOT NULL DEFAULT 'pending',  -- pending | done | dead
+                claimed_by   TEXT NOT NULL DEFAULT '',
+                acked_at     REAL,
+                result       TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_ready ON queue(status, lease_until);
+            CREATE TABLE IF NOT EXISTS counters (
+                name TEXT PRIMARY KEY,
+                n    INTEGER NOT NULL
+            );
             """
         )
 
@@ -78,22 +94,18 @@ class LeaseQueue:
             return False  # msg_id 重複 = 既に入っている
 
     # --- クレーム (原子的占有) ---
-    def claim(self, dept=None):
-        """処理可能な1件を占有して返す。無ければ None。
+    def claim(self, dept=None, who=""):
+        """処理可能な1件を占有して返す。無ければ None。who=処理者名 (台帳に残る)。
 
         「未処理 or リース切れ」の最古を1件、lease_until を延ばして掴む。BEGIN IMMEDIATE で
         書き込みロックを取ってから RETURNING するため、同時claimでも同一行は1者にしか渡らない。
         """
         now = time.time()
         where_dept = "AND dept = ?" if dept else ""
-        params = [now]
-        if dept:
-            params.append(dept)
-        params += [now + self.lease_sec, now]
         # SQLite は UPDATE ... LIMIT を既定ビルドで許さないので、対象idを副問い合わせで1件に絞る。
         sql = f"""
             UPDATE queue
-               SET lease_until = ?, deliveries = deliveries + 1
+               SET lease_until = ?, deliveries = deliveries + 1, claimed_by = ?
              WHERE id = (
                  SELECT id FROM queue
                   WHERE status='pending' AND lease_until < ? {where_dept}
@@ -101,8 +113,7 @@ class LeaseQueue:
              )
          RETURNING id, msg_id, dept, body, deliveries
         """
-        # params順: SET lease_until(now+lease) は先頭に来る → 並べ直す
-        ordered = [now + self.lease_sec, now]
+        ordered = [now + self.lease_sec, who, now]
         if dept:
             ordered.append(dept)
         try:
@@ -127,13 +138,59 @@ class LeaseQueue:
                 "deliveries": deliveries, "body": parsed}
 
     # --- 完了・失敗 ---
-    def ack(self, qid):
-        """処理完了。行を消す (これで初めて『処理済』になる)。"""
-        self._db.execute("DELETE FROM queue WHERE id=?", (qid,))
+    def ack(self, qid, result=""):
+        """処理完了。行は消さず done に変える=これが処理済み台帳になる (INC-103)。
+        消すと再投入時の冪等照合 (msg_id UNIQUE) の相手も消え、二重処理が復活するため。"""
+        cur = self._db.execute(
+            "UPDATE queue SET status='done', acked_at=?, result=? WHERE id=? AND status='pending'",
+            (time.time(), str(result)[:2000], qid))
+        return cur.rowcount == 1
 
     def nack(self, qid):
         """処理失敗・手放す。lease を即時解放して他ワーカーが拾えるようにする (再配布は次のclaimで)。"""
         self._db.execute("UPDATE queue SET lease_until=0 WHERE id=? AND status='pending'", (qid,))
+
+    def extend(self, qid, lease_sec=None):
+        """長い処理のリース延長 (SQSのハートビート相当)。処理中の行のみ有効。"""
+        cur = self._db.execute(
+            "UPDATE queue SET lease_until=? WHERE id=? AND status='pending'",
+            (time.time() + (lease_sec or self.lease_sec), qid))
+        return cur.rowcount == 1
+
+    def purge_done(self, older_sec=30 * 24 * 3600):
+        """古いdone行の掃除 (テーブル肥大化対策・既定30日)。台帳の監査猶予を残して消す。"""
+        cur = self._db.execute(
+            "DELETE FROM queue WHERE status='done' AND acked_at < ?",
+            (time.time() - older_sec,))
+        return cur.rowcount
+
+    # --- 救済・採番 ---
+    def stale_pending(self, older_sec, dept=None):
+        """一度もclaimされずに放置されている行 (=その部門が起きていない)。
+        リース失効の自動再配布はclaim済みしか救えないため、未claim放置はこの一覧を
+        研究室/sweepが定期的に見てエスカレートする (現行sweepの「mainへ回収」相当)。"""
+        q = ("SELECT id, msg_id, dept, body, enqueued_at FROM queue"
+             " WHERE status='pending' AND deliveries=0 AND enqueued_at < ?")
+        args = [time.time() - older_sec]
+        if dept:
+            q += " AND dept=?"
+            args.append(dept)
+        q += " ORDER BY id"
+        return [{"id": r[0], "msg_id": r[1], "dept": r[2], "body": r[3],
+                 "enqueued_at": r[4]} for r in self._db.execute(q, args)]
+
+    def next_counter(self, name):
+        """表示用連番 (INC- 等) の原子的採番。共有カウンタの衝突 (INC-99/100二重) を根治。"""
+        try:
+            self._db.execute("BEGIN IMMEDIATE")
+            self._db.execute("INSERT OR IGNORE INTO counters(name, n) VALUES(?, 0)", (name,))
+            n = self._db.execute(
+                "UPDATE counters SET n=n+1 WHERE name=? RETURNING n", (name,)).fetchone()[0]
+            self._db.execute("COMMIT")
+            return n
+        except sqlite3.OperationalError:
+            self._db.execute("ROLLBACK")
+            raise
 
     # --- 観測 ---
     def stats(self):
@@ -143,12 +200,13 @@ class LeaseQueue:
                  SUM(CASE WHEN status='pending' AND lease_until < ? THEN 1 ELSE 0 END) AS ready,
                  SUM(CASE WHEN status='pending' AND lease_until >= ? THEN 1 ELSE 0 END) AS leased,
                  SUM(CASE WHEN status='dead' THEN 1 ELSE 0 END) AS dead,
+                 SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) AS done,
                  COUNT(*) AS total
                FROM queue""",
             (now, now),
         ).fetchone()
         return {"ready": row[0] or 0, "leased": row[1] or 0,
-                "dead": row[2] or 0, "total": row[3] or 0}
+                "dead": row[2] or 0, "done": row[3] or 0, "total": row[4] or 0}
 
     def dead_letters(self):
         cur = self._db.execute("SELECT msg_id, dept, body FROM queue WHERE status='dead' ORDER BY id")
