@@ -155,8 +155,11 @@ def ensure_webhook(channel_id, token):
             hook = api(f"/channels/{channel_id}/webhooks", token, {"name": "go5-persona"})
     except urllib.error.HTTPError as e:
         if e.code == 403:
-            print("Webhook管理権限がありません。再招待URL(Manage Webhooks追加済み)を開いて認証し直してください:")
-            print("https://discord.com/oauth2/authorize?client_id=1525787101055160360&scope=bot&permissions=536939520")
+            # ★再招待URLを案内しない (2026-07-19 Chami指摘): 再認可はbotロールの権限をURLの
+            #   permissions値で**置き換える**ため、値が古いと既存権限 (リアクション等) が消える退行になる。
+            #   安全なのはロール編集=既存に足すだけ。
+            print("Webhook管理権限がありません。サーバー設定→ロール→botのロール(MultiAgent)→権限→"
+                  "「ウェブフックの管理」をONにしてください(ロール編集は追加のみ=既存権限は減りません)。")
             sys.exit(3)
         raise
     url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
