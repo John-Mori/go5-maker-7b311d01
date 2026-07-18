@@ -128,6 +128,12 @@ DEPT_CONF = {
         "persona": "三笘薫",
         "port": 18806,
     },
+    "learning-coach": {  # 4コーチ対等の中からChami指名(2026-07-19「学習室はヴィルシーナで」)
+        "character": os.path.join(_CHAR, "verxina.md"),
+        "memory": os.path.join(_MEM, "learning-coach.jsonl"),
+        "persona": "ヴィルシーナ",
+        "port": 18808,
+    },
 }
 
 

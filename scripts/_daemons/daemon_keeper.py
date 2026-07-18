@@ -26,7 +26,7 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 
 # R2全部門展開(2026-07-19 Chami承認「やって」)。機微部屋は対象外(PROTOCOL管轄)。
 DEPTS = ["hq", "hr-room", "hr-context", "qa-reviewer", "system-engineer",
-         "product-scout", "shorts-analyst", "copy-director"]
+         "product-scout", "shorts-analyst", "copy-director", "learning-coach"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット
