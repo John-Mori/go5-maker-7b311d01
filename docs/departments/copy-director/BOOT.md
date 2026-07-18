@@ -4,7 +4,7 @@
 
 ## 起動時(毎回)
 
-00. cwd自己点検: `node -e "console.log(process.cwd())"` が `D:\SougouStartFolder\go5-maker` 直下であること。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(cd跨ぎ続行禁止)。
+00. cwd自己点検: `node -e "console.log(process.cwd())"` が `D:\SougouStartFolder\5SecMovieMaker` 直下であること。違えば止めてChamiへ「5SecMovieMaker直下で開き直して」と要請(cd跨ぎ続行禁止)。
 0. セッションラベル: `printf 'コピー部(copy-director)' > local/llm/session_label_copy-director.txt`
 1. チャイム線: `python scripts/llm/inbox_waiter.py --name copy-director --minutes 45` を run_in_background で起動(while true禁止=INC-091)。
 2. **起床の正順(INC-85/86/103・全5工程)**: ①`mv local/inbox/copy-director.jsonl local/_work/copy-director.jsonl`(local/inbox/内への退避は禁止=sweepに食われる)→②即waiter再武装→③既読印→④処理(本格作業開始時に着手印)→⑤処理済みを**同じ手で** local/discord_processed.jsonl へ記帳(記帳するまでが退避=INC-103)。
@@ -40,4 +40,4 @@
 ## 終了時(コンテキスト限界・交代)
 
 - STATUS.md を更新(進行中案件・待ち事項・次の一手)。受けた依頼はdept_tasksに起票し、限界時はresultへ途中経過を書いてから交代(後続セッションが案件を復元できる状態を保つ)。
-- 大きな決定は `00_AI-HQ\status\go5-maker.md` へ1行。
+- 大きな決定は `00_AI-HQ\status\5SecMovieMaker.md` へ1行。

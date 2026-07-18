@@ -1,10 +1,10 @@
-# go5-maker システム概要 (ローカルLLM知識パック正本)
+# 5SecMovieMaker システム概要 (ローカルLLM知識パック正本)
 
 > 用途: ローカルLLM(Ollama)受付係への知識注入。秘密(鍵/トークン/戦略・目標)は書かない。
 > 更新: 構成が変わったらここを直す → scripts/llm/build_knowledge.py が knowledge.md を再生成。
 
 ## 1. プロジェクトとは
-- 「go5-maker」= 写真+文字から5秒縦動画を作りYouTube Shortsへ投稿、Bluesky告知、FANZA同人作品のアフィリエイト導線につなげる個人事業システム。運営者はChami(1人)。
+- 「5SecMovieMaker」= 写真+文字から5秒縦動画を作りYouTube Shortsへ投稿、Bluesky告知、FANZA同人作品のアフィリエイト導線につなげる個人事業システム。運営者はChami(1人)。
 - 2アカウント体制: acc1=月詠み / acc2=宵桜艶帖(Bluesky)。UI文言の括弧は半角()のみ。
 
 ## 2. アーキテクチャ

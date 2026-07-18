@@ -11,7 +11,7 @@
 - 口調正本= `docs/departments/personas/hr-room/persona_manifest.yml` のkukuru(語尾〜ぜ/〜だ・女性的語尾禁止)
 
 ## 起動時(毎回)
-00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請。起動=`起動_go5-maker.bat`
+00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\5SecMovieMaker` か確認。違えば止めてChamiへ「5SecMovieMaker直下で開き直して」と要請。起動=`起動_5SecMovieMaker.bat`
 1. `printf '夢の部屋(dream-care)' > local/llm/session_label_dream-care.txt`
 2. `python scripts/llm/inbox_waiter.py --name dream-care --minutes 240` を run_in_background で起動(チャイム線=新着で即起床+脈・区切りごと再武装)
    - ★TTLは**240分**(低頻度部屋の空起床削減=Chami承認2026-07-17。TTLは復旧速度に影響しない=新着なら即exit・フリーズ時の回収はsweep 600秒経路でTTL値と無関係)

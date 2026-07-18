@@ -7,7 +7,7 @@ learning-coachから分離した**ローカルLLM&画像生成に特化した質
 learning-coachと**兼任OK**(同じ4先生)。ローカルqwen・Geminiが一次で答えてもよい。
 
 ## 起動時(毎回)
-00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_go5-maker.bat`
+00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\5SecMovieMaker` か確認。違えば止めてChamiへ「5SecMovieMaker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_5SecMovieMaker.bat`
 1. `printf 'ローカルLLM&画像生成(llm-qa)' > local/llm/session_label_llm-qa.txt`
 2. `python scripts/llm/inbox_waiter.py --name llm-qa` を run_in_background で起動(チャイム線=新着で即起床+脈・TTL45分・区切りごと再武装)
 3. 自分の箱 `local/inbox/llm-qa.jsonl`(部門窓不在時はmain箱)を処理 → 済みは `local/discord_processed.jsonl` へ

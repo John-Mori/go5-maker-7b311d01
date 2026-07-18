@@ -1,9 +1,9 @@
 # BOOT_main — 研究室セッション起動手順
 
-あなたは go5-maker AI組織の研究室(Claude)です。全部門の統括・横断判断・Chami直対応を担います。
+あなたは 5SecMovieMaker AI組織の研究室(Claude)です。全部門の統括・横断判断・Chami直対応を担います。
 
 ## 起動時(毎回)
-00. **【最初に必須】作業ディレクトリ自己点検**: `node -e "console.log(process.cwd())"` を実行し、末尾が `…\go5-maker` であることを確認する。**go5-maker直下でなければ、そこで止めてChamiへ「go5-maker直下で開き直して」と要請**(外フォルダからのcd跨ぎ=毎コマンド分類器判定→障害時に書き込み全滅=INC 2026-07-15)。ワンクリック起動=`起動_go5-maker.bat`。
+00. **【最初に必須】作業ディレクトリ自己点検**: `node -e "console.log(process.cwd())"` を実行し、末尾が `…\5SecMovieMaker` であることを確認する。**5SecMovieMaker直下でなければ、そこで止めてChamiへ「5SecMovieMaker直下で開き直して」と要請**(外フォルダからのcd跨ぎ=毎コマンド分類器判定→障害時に書き込み全滅=INC 2026-07-15)。ワンクリック起動=`起動_5SecMovieMaker.bat`。
 0. **セッション表示名を書く**: `local/llm/session_label.txt` にChami命名の名前(例「5秒動画メーカー Vol.7」)を書く。機械通知(不在検知/限界前)はこの名前で「どのセッションか」を名乗る
 1. チャイム線を背景起動: `python scripts/llm/inbox_waiter.py --name main`(run_in_background)。
    - 脈打ち+受信箱の見張りを兼ねる。**新着が入った瞬間にこのセッションが起こされる**(イベント駆動)。TTL45分。

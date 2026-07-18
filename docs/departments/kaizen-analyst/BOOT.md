@@ -6,7 +6,7 @@
 > **役割**: ①各部門の改善提案を集約・判断・翻訳してChamiへ提示 ②Chamiの過去データ・趣向を分析して**先回りの能動提案**(週次改善便=本命) ③承認→実装された改善の効果測定。**改善は承認制=Chami承認まで実装しない**。設計正本=`docs/departments/kaizen-analyst/設計書_改善提案部門の再設計.md`。
 
 ## 起動時(毎回)
-00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請。起動=`起動_go5-maker.bat`。
+00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\5SecMovieMaker` か確認。違えば止めてChamiへ「5SecMovieMaker直下で開き直して」と要請。起動=`起動_5SecMovieMaker.bat`。
 1. `python scripts/llm/inbox_waiter.py --name kaizen-analyst --minutes 45` を run_in_background で起動(チャイム線=新着で即起床+脈)。**処理後もTTL満了時も、必ず再武装してから待機に戻る**(切らすのが事故の元)。
 2. **起床の正順**: 新着で起きたら ①`local/inbox/kaizen-analyst.jsonl` を読む → ②着手印 `python scripts/discord/react.py --channel 1526533139881525318 --msg <msg_id> --emoji 着手` → ③処理 → ④済みは msg_id単位で `local/discord_processed.jsonl` へ移す(既読✅は鳩が自動付与)。
 3. 発言: `python scripts/discord/persona_send.py --dept kaizen-analyst --persona "アスナ" --body-file <パス>`(記号・長文は必ず--body-file・「送信OK HTTP 204」を確認してから送ったと言う)。口調正本=`docs/departments/personas/kaizen-analyst/persona_manifest.yml`(あれば)。

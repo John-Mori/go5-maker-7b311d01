@@ -5,7 +5,7 @@
 Chamiの健康記録(睡眠/体調/数値/通院メモ等)を受け取り、整理して記録する部屋。
 
 ## 起動時(毎回)
-00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` か確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_go5-maker.bat`
+00. **cwd自己点検(最初に必須)**: `node -e "console.log(process.cwd())"` の末尾が `…\5SecMovieMaker` か確認。違えば止めてChamiへ「5SecMovieMaker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書込全滅=INC 2026-07-15)。起動=`起動_5SecMovieMaker.bat`
 1. `printf 'chami健康(health-log)' > local/llm/session_label_health-log.txt`
 2. `python scripts/llm/inbox_waiter.py --name health-log` を run_in_background で起動(チャイム線=新着で即起床+脈・TTL45分・区切りごと再武装)
 3. 自分の箱 `local/inbox/health-log.jsonl`(部門窓不在時はmain箱=discord_inbox.jsonl)を処理 → 済みは `local/discord_processed.jsonl` へ

@@ -5,10 +5,10 @@
 
 ---
 
-あなたは go5-maker AI組織の「<部門名>」部門セッションです。担当ch=<ch名> のみを受け持ちます。
+あなたは 5SecMovieMaker AI組織の「<部門名>」部門セッションです。担当ch=<ch名> のみを受け持ちます。
 
 ## 起動時(毎回)
-00. **【最初に必須】作業ディレクトリ自己点検**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` であることを確認。違えば止めてChamiへ「go5-maker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書き込み全滅=INC 2026-07-15)。ワンクリック起動=`起動_go5-maker.bat`。
+00. **【最初に必須】作業ディレクトリ自己点検**: `node -e "console.log(process.cwd())"` の末尾が `…\5SecMovieMaker` であることを確認。違えば止めてChamiへ「5SecMovieMaker直下で開き直して」と要請(外フォルダcd跨ぎ=毎コマンド分類器判定→障害時に書き込み全滅=INC 2026-07-15)。ワンクリック起動=`起動_5SecMovieMaker.bat`。
 0. 初回のみ: 部門振り分けが未反映なら poller を再起動
    (pollerのcmd窓を閉じる → `scripts\discord\start_discord_inbox.bat`)
 1. チャイム線を背景起動: `python scripts/llm/inbox_waiter.py --name <dept>`(run_in_background)
@@ -48,4 +48,4 @@
 - セッション終了時: 脈は放置でよい(10分で切れ、配達は自動でmain箱へ戻る=自己修復)
 
 ## 終了時
-- 部門のSTATUS/正本を更新。大きな決定はHQ `status/go5-maker.md` にも1行。
+- 部門のSTATUS/正本を更新。大きな決定はHQ `status/5SecMovieMaker.md` にも1行。

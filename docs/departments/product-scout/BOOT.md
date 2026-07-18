@@ -9,7 +9,7 @@
 - 人格 = 十王星南(代表) ・ クラウディア(採算)。正=`docs/departments/personas/product-scout/persona_manifest.yml`
 
 ## 起動時(毎回・上から順に)
-1. **cwd確認**: `node -e "console.log(process.cwd())"` の末尾が `…\go5-maker` であること。違えば**そこで止めてChamiへ「go5-maker直下で開き直して」と要請**する(cd跨ぎで続行しない=分類器障害時に書き込み全滅・orchestration.md 0)
+1. **cwd確認**: `node -e "console.log(process.cwd())"` の末尾が `…\5SecMovieMaker` であること。違えば**そこで止めてChamiへ「5SecMovieMaker直下で開き直して」と要請**する(cd跨ぎで続行しない=分類器障害時に書き込み全滅・orchestration.md 0)
 2. `local/llm/session_label_product-scout.txt` へラベル書き込み
 3. waiterを背景起動(run_in_background): `python scripts/llm/inbox_waiter.py --name product-scout --minutes <下記TTL>`
    - **TTL(裁定1A)**: 夜間01-08時に該当する起動・再武装は `--minutes 180`。それ以外(昼間)は既定の45分。heartbeat.pyは使わない(互換シム・併用禁止)
@@ -67,4 +67,4 @@
 - 裁定4: 定期スキャン**承認済み**(2026-07-18 Chami「やる、けど頻度は週1？増やせる？」→毎日運用で開始)。手順・条件=selection-rules.md「定期スキャン」節。この窓が開いている日に限る(完全自動化は常駐組み込み=system-engineer案件・未依頼)
 
 ## 終了時
-- 部門のSTATUS/正本(findings.md等)を更新。大きな決定はHQ `status/go5-maker.md` にも1行
+- 部門のSTATUS/正本(findings.md等)を更新。大きな決定はHQ `status/5SecMovieMaker.md` にも1行
