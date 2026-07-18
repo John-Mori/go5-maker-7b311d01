@@ -123,16 +123,22 @@ def check_retired_and_banned(problems, notes):
                     problems.append(f"[禁止句] {rel(p)}:{i} 「{word}」 ({why})")
 
 
+# ペルソナ台帳は2026-07-18にHQ直下(00_AI-HQ/departments/hr/personas)へ移転した。
+# 公開repoにHQ絶対パスを書かないため環境変数で外部化する(未設定なら旧パス=移転で消滅)。
+# 読めない/名簿0人のときは check_avatar_keys が明示エラーを出す(サイレント0件素通しを防ぐ)。
+PERSONA_INDEX = os.environ.get("GO5_PERSONA_INDEX") or os.path.join(
+    ROOT, "docs", "departments", "personas", "INDEX.md")
+
+
 def index_personas():
-    """personas/INDEX.md の**名簿表だけ**からキャラ名を取る。
+    """INDEX.md の**名簿表だけ**からキャラ名を取る(参照先は環境変数 GO5_PERSONA_INDEX)。
 
     INDEX.mdには名簿表のほかに呼称マトリクス・改修3部屋の表もあるため、
     ヘッダ「| キャラ名 |」で始まる表に入ってから空行までを名簿とみなす
     (全ての表を読むと「部屋」等を人名と誤認する=2026-07-17実測)。
     """
-    p = os.path.join(ROOT, "docs", "departments", "personas", "INDEX.md")
     names, in_roster = [], False
-    for line in read(p).splitlines():
+    for line in read(PERSONA_INDEX).splitlines():
         if line.startswith("|") and "キャラ名" in line:
             in_roster = True
             continue
@@ -157,10 +163,22 @@ def check_avatar_keys(problems, notes):
     except (OSError, ValueError) as e:
         problems.append(f"[台帳] persona_avatars.json を読めない: {type(e).__name__}")
         return
+    # ★サイレント故障ガード(2026-07-18): 名簿を1件も読めない=INDEXの場所が変わった等で
+    #   アイコン欠落チェックが空回りし「問題なし」と誤報する(莉波の未登録を実際に見逃した)。
+    #   0件は正常ではありえない(常に十数名居る)ので、明示エラーで止める。
+    roster = index_personas()
+    if not roster:
+        problems.append(
+            f"[道具異常] 名簿を1件も読めない(参照={PERSONA_INDEX})。ペルソナ台帳は2026-07-18に"
+            "HQ直下(00_AI-HQ/departments/hr/personas)へ移転済み=旧パスは消滅。"
+            "環境変数 GO5_PERSONA_INDEX で移転先INDEX.mdを指すか、本チェッカーをHQ側へ移設せよ。"
+            "※このガードが無い間、アイコン欠落チェックはサイレントに素通ししていた。")
+        notes.append("アイコン欠落チェックは名簿0件のためスキップ(上の道具異常を解消後に再実行)")
+        return
     # ★判定は完全一致。persona_send.py は json.get(persona) で引くため、
     #   部分一致では引けない(甘く判定すると顔なし投稿を見逃す=2026-07-17に判定を厳格化)。
     missing, drift = [], []
-    for name in index_personas():
+    for name in roster:
         if not name:
             continue
         if name in keys:
