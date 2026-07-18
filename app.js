@@ -390,7 +390,9 @@
     // 販促ラベル(今なら◯%OFF)=動画フレームへ重ね描き(写真に焼き込まない=Bluesky添付に入らない・Chami2026-07-15)。
     // フレーム基準(W×H)で描くので画像の外(黒帯・余白)にも自由に置ける。
     if (window.Go5PromoLabel && window.Go5PromoLabel.drawOverlay) {
-      try { window.Go5PromoLabel.drawOverlay(ctx, W, H); } catch (e) {}
+      // 画像と同じ"浮き出てくる"演出のため、前景画像と同じreveal進捗(0..1)を渡す(Chami依頼2026-07-18)。
+      var promoReveal = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : smoothstep((t - REVEAL_START) / REVEAL_DUR));
+      try { window.Go5PromoLabel.drawOverlay(ctx, W, H, promoReveal); } catch (e) {}
     }
   }
 

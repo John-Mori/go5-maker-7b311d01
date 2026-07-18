@@ -122,19 +122,31 @@
   }
 
   // app.js drawFrame から毎フレーム呼ばれる。フレーム(W×H)にラベルを重ね描き。
-  function drawOverlay(ctx, W, H) {
+  //   reveal(0..1)=前景画像と同じ登場進捗(Chami依頼2026-07-18)。画像と同じく"浮き出てくる":
+  //   フェードイン+ごく軽い拡大ポップ+ドロップシャドウでフレームから持ち上げる。未指定(プレビュー)は1。
+  function drawOverlay(ctx, W, H, reveal) {
     if (!active()) return;
-    var sx = W / FRAME_W;
+    var rv = (typeof reveal === 'number') ? Math.max(0, Math.min(1, reveal)) : 1;
+    if (rv <= 0) return; // まだ出ていない(画像と同じタイミングで登場)
+    var sx = W / FRAME_W, sy = H / FRAME_H;
     var cp = curPos();
-    var bw = lw() * sx, bh = lh() * (H / FRAME_H), x = cp.x * W, y = cp.y * H;
+    var bw = lw() * sx, bh = lh() * sy, x = cp.x * W, y = cp.y * H;
     var v = tplVariant();
     var img = tplImg(v.src);
+    ctx.save();
+    ctx.globalAlpha = rv;                                   // フェードイン(画像と同じ)
+    var pop = 0.86 + 0.14 * rv, cx = x + bw / 2, cy = y + bh / 2; // 0.86→1.0の拡大ポップ(中心基準)
+    ctx.translate(cx, cy); ctx.scale(pop, pop); ctx.translate(-cx, -cy);
+    // ドロップシャドウ=フレームから持ち上がる立体感(バッジ形状=PNGのalphaに沿って落ちる)。
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20 * sx; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 7 * sy;
     if (img && img.complete && img.naturalWidth) {
-      ctx.drawImage(img, x, y, bw, bh);              // 完成デザイン(数字なし透過PNG)
+      ctx.drawImage(img, x, y, bw, bh);                    // 完成デザイン(数字なし透過PNG)+影
+      ctx.shadowColor = 'transparent';                     // 数字には二重影を掛けない(自前の光彩がある)
       drawDigits(ctx, tplAcct().ink, v.slot, x, y, bw, bh, String(val()));
     } else {
-      drawBand(ctx, x, y, bw, bh, sx, H / FRAME_H);  // フォールバック=従来の帯
+      drawBand(ctx, x, y, bw, bh, sx, sy);                 // フォールバック=従来の帯(自前で影を持つ)
     }
+    ctx.restore();
   }
 
   // 数字だけを slot(数字領域)の中央へ描く。指示書§3.2/§6:
