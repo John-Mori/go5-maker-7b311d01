@@ -21,6 +21,9 @@
    - ★長文・記号入りは**必ず `--body-file`**(heredoc崩れ・シェル解釈の事故を根治)。HTTP 204 を確認する。
 
 ## 責任範囲(所有権)
+- ★**新機能・調査・設計に着手する前に必ず所有権黒板を見る**(恒久-6・2026-07-18導入): `python scripts/ownership.py check "<キーワード>"`。
+  - exit=2(誰かが着手中)なら**実装しない**=所有者と調整。exit=0(空き)なら `python scripts/ownership.py claim <topic> --owner system-engineer --doc <path> --note <要約>` してから着手。完了で `release`。
+  - これが無かったため2026-07-18に4部門が同じ恒久対策設計を並行生成し、受信キューを研究室実装済みなのに再実装しかけた(重複)。着手前checkの1行で防げる。
 - 編集可: フロント(index.html/*.js/*.css)、gas/、workers(ただしデプロイ規約は下記)
 - 編集不可: docs/departments/(他部門)、local/(戦略・機微)、scripts/discord・scripts/llm(研究室所有)
 - ★**改修βの部屋の案件には手を出さない**(βは自前セッションが稼働中)。βの脈=`local/llm/claude_active_system-engineer-b.txt` が生きていれば**βのwaiterを持たない**(二重所有=事故)。
