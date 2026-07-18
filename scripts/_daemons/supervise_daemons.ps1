@@ -14,7 +14,9 @@ function Write-SupLog($m) {
 }
 
 $daemons = @(
-  @{ Name='inbox_poller';     File='inbox_poller.py';     Rel='scripts\discord\inbox_poller.py';     LogRel='local\discord_poller.log' },
+  # inbox_poller RETIRED from supervision (2026-07-19 cutover complete: Gateway+LeaseQueue is
+  #   the delivery path). Kept commented for instant rollback (uncomment + run this script).
+  # @{ Name='inbox_poller';     File='inbox_poller.py';     Rel='scripts\discord\inbox_poller.py';     LogRel='local\discord_poller.log' },
   @{ Name='absence_watchdog'; File='absence_watchdog.py'; Rel='scripts\discord\absence_watchdog.py'; LogRel='local\discord_watchdog.log' },
   @{ Name='local_responder';  File='local_responder.py';  Rel='scripts\llm\local_responder.py';      LogRel='local\llm\responder_console.log' },
   @{ Name='gemini_responder'; File='gemini_responder.py'; Rel='scripts\llm\gemini_responder.py';     LogRel='local\llm\gemini_responder_console.log' },
