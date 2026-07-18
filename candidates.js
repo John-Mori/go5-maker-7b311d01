@@ -1074,6 +1074,19 @@
     else if (window.Go5MovieAttrs) window.Go5MovieAttrs.reset();
     if (window.Go5MovieAttrs && it.genres && it.genres.length) window.Go5MovieAttrs.applyGenres(it.genres, it.cid || '');
     if (workUrl) setVal('movieWorkUrl', workUrl); // 作品URL(正規化済み)
+    // 割引率・金額を候補が保持する実データから販促ラベルへ直接反映する(Chami依頼2026-07-18)。
+    //   従来は movieWorkUrl のセット→FANZA再取得(fetchMovieWorkInfo)頼みで、worker未設定/取得失敗時は
+    //   bluesky.js:1539で早期returnしnotifyが呼ばれず、ラベルが該当作品の値を読まず不一致になっていた。
+    //   候補は追加/更新時に該当作品の listPrice/price/discountPct を保持済み=これを直接渡せば即一致。
+    //   cidは workUrl 由来で算出し、後続 fetchMovieWorkInfo の begin(cid) と一致させる(値を消させない)。
+    //   worker再取得が成功すれば現行価格で上書き(それも該当作品の値)=いずれにせよ前作の値は残らない。
+    try {
+      if (window.Go5PromoLabel && window.Go5PromoLabel.notify && (it.price != null || it.listPrice != null)) {
+        var _pr = (workUrl && window.buildAffiliateLink) ? window.buildAffiliateLink(workUrl, '') : null;
+        var _pcid = (_pr && _pr.ok) ? _pr.cid : (it.cid || '');
+        window.Go5PromoLabel.notify({ cid: _pcid, title: it.title || '作品', listPrice: it.listPrice, price: it.price, discountPct: it.discountPct || 0 });
+      }
+    } catch (e) {}
     if (imgDataUrl && window.Go5SetForegroundFile) {
       fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
         window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }));
