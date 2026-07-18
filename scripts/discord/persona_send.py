@@ -82,6 +82,54 @@ AVATARS_FILE = os.path.join(LOCAL, "persona_avatars.json")
 API = "https://discord.com/api/v10"
 
 
+def _persona_aliases():
+    """manifestの id(ラテン)→ name(かな)の別名表を作る(ames→アメス 等)。
+    yaml非妥当なmanifestもあるので行テキストで拾う(他script同様)。"""
+    import glob
+    amap = {}
+    base = os.path.join(ROOT, "docs", "departments", "personas")
+    for p in glob.glob(os.path.join(base, "**", "persona_manifest.yml"), recursive=True):
+        cur_id = None
+        try:
+            for line in open(p, encoding="utf-8", errors="replace"):
+                s = line.strip()
+                if s.startswith("- id:") or (s.startswith("id:") and cur_id is None):
+                    cur_id = s.split(":", 1)[1].strip()
+                elif s.startswith("name:") and cur_id:
+                    nm = s.split(":", 1)[1].strip()
+                    if cur_id and nm:
+                        amap[cur_id] = nm
+                    cur_id = None
+        except OSError:
+            continue
+    return amap
+
+
+def resolve_persona(name):
+    """人格名を正規化する(QA D1・2026-07-18)。avatars.jsonのキーにあればそのまま。
+    ラテンidなら manifestの かな名へ解決(ames→アメス)。未登録なら stderr へ大声で警告
+    (=無人代打が persona=ames を渡してデフォルトアイコン+名前amesで黙って送っていた事故の根治)。
+    喪失させないため送信自体は続行する(fail-open)。"""
+    known = set()
+    if os.path.exists(AVATARS_FILE):
+        try:
+            known = set(json.load(open(AVATARS_FILE, encoding="utf-8")).keys())
+        except Exception:
+            pass
+    if name in known:
+        return name
+    amap = _persona_aliases()
+    if name in amap:
+        resolved = amap[name]
+        print(f"[persona_send] 別名解決: {name!r} -> {resolved!r}", file=sys.stderr)
+        return resolved
+    if known:
+        print(f"[persona_send] ★警告: 未登録の人格名 {name!r}(avatars.jsonにキー無し・別名表にも無し)。"
+              f"このままだとデフォルトアイコン+その綴りの表示名で送られます。"
+              f"ラテン綴りなら かな名で渡し直してください。", file=sys.stderr)
+    return name
+
+
 def api(path, token, payload=None):
     req = urllib.request.Request(
         API + path,
@@ -164,6 +212,7 @@ def main():
     if not ch:
         print(f"チャンネル未登録: {key}")
         sys.exit(2)
+    persona = resolve_persona(persona)  # QA D1: ames→アメス等の別名解決+未登録は大声警告
     if not avatar and os.path.exists(AVATARS_FILE):
         with open(AVATARS_FILE, "r", encoding="utf-8") as f:
             avatar = json.load(f).get(persona)
