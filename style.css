@@ -156,6 +156,20 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .comp-detail .cd-row{margin:2px 0;word-break:break-all;}
 .comp-detail .cd-k{color:var(--accent);font-weight:700;margin-right:6px;}
 .comp-detail .cd-soon{margin-top:6px;color:var(--sub);opacity:.9;}
+/* 競合分析パネル(GASから実行時fetchして表示。2026-07-18 接続フェーズ・β)。アプリ配色(紫は使わない)。 */
+.comp-analysis-wrap{margin-top:10px;}
+.comp-analysis{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;color:var(--sub);}
+.comp-an-head{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+.comp-an-kpis{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;}
+.comp-an-kpi{background:#0e1422;border:1px solid var(--line);border-radius:6px;padding:3px 8px;color:var(--sub);}
+.comp-an-kpi b{color:var(--accent);font-size:14px;}
+.comp-an-row{margin:2px 0;word-break:break-word;}
+.comp-an-k{color:var(--accent);font-weight:700;margin-right:6px;}
+.comp-an-top{margin:4px 0 0;padding-left:20px;}
+.comp-an-top li{margin:3px 0;color:var(--ink);word-break:break-word;}
+.comp-an-spd{color:var(--accent);font-weight:700;white-space:nowrap;}
+.comp-an-soon{margin-top:6px;color:var(--sub);opacity:.9;}
+#compAnalysisRefresh{width:auto;margin:6px 0 0;padding:5px 12px;font-size:12px;}
 /* 投稿履歴の管理・診断ツールの折り畳み(普段使わない設定系を畳む・Chami依頼2026-07-15)。アプリ配色(紫は使わない)。 */
 .tools-fold{margin:6px 0;border:1px solid var(--line);border-radius:8px;background:#0e1422;}
 .tools-fold > summary{cursor:pointer;list-style:none;padding:8px 12px;font-size:12.5px;font-weight:700;color:var(--sub);user-select:none;}

@@ -127,8 +127,8 @@
     if (arr.some(function (c) { return (c.input || '') === raw; })) { status('もう登録されています。', true); return; }
     if (!apiKey()) {
       // キーが無くても登録自体はできる(名称は後で取得)。入力をそのまま保存。
-      arr.push({ input: raw, channelId: '', name: '', addedAt: new Date().toISOString() });
-      save(arr); inp.value = ''; render();
+      var e0 = { input: raw, channelId: '', name: '', addedAt: new Date().toISOString() };
+      arr.push(e0); save(arr); inp.value = ''; render(); syncToGas(e0);
       status('登録しました。(チャンネル名は⚙️詳細設定でYouTube APIキーを入れると取得できます)');
       return;
     }
@@ -136,8 +136,8 @@
     resolve(raw).then(function (r) {
       // 解決したchannelIdの重複も弾く
       if (r.channelId && arr.some(function (c) { return c.channelId === r.channelId; })) { status('そのチャンネルはもう登録されています。', true); return; }
-      arr.push({ input: raw, channelId: r.channelId || '', name: r.name || '', addedAt: new Date().toISOString() });
-      save(arr); inp.value = ''; render();
+      var e1 = { input: raw, channelId: r.channelId || '', name: r.name || '', addedAt: new Date().toISOString() };
+      arr.push(e1); save(arr); inp.value = ''; render(); syncToGas(e1);
       status('登録しました：' + (r.name || r.channelId || raw));
     }).catch(function (e) {
       var msg = (e && e.message) === 'no_key' ? 'YouTube APIキーが未設定です(⚙️詳細設定)。'
@@ -147,10 +147,83 @@
     });
   }
 
+  // ── GAS接続(2026-07-18・βの監視バックエンドと繋ぐ) ──────────────────
+  // 架構: GAS(スプレッドシート)が登録リストの正。localStorageは表示キャッシュ扱い(研究室裁定)。
+  // 競合の実名/IDはrepoにハードコードせず、分析は実行時にGASからfetchして表示する(遵守事項)。
+  function gasUrl() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
+  // 1件をGASのcomp_add_seedへ同期(fire-and-forget・GAS側でchannel_id重複はスキップ)。
+  function syncToGas(entry) {
+    var url = gasUrl(); if (!url || !U.jsonp) return;
+    var input = (entry && entry.input) || (entry && entry.channelId ? 'https://www.youtube.com/channel/' + entry.channelId : '');
+    if (!input) return;
+    try { U.jsonp(url, { action: 'comp_add_seed', url: input, name: (entry && entry.name) || '' }, function () {}); } catch (e) {}
+  }
+  // 既存のlocalStorage登録をGASへ一度だけ移送(接続前に貯めた分の片寄せ)。
+  function migrateToGas() {
+    var url = gasUrl(); if (!url) return;
+    try { if (localStorage.getItem('competitor_gas_migrated') === '1') return; } catch (e) {}
+    load().forEach(function (c) { syncToGas(c); });
+    try { localStorage.setItem('competitor_gas_migrated', '1'); } catch (e) {}
+  }
+
+  // 題名群からパターンを集計(平均長/Short率/頻出タグ)。競合名は保存せず表示のみ。
+  function titleStats(titles) {
+    var n = titles.length || 1, sumLen = 0, shorts = 0, tags = {};
+    titles.forEach(function (t) {
+      var s = t.title || ''; sumLen += s.length;
+      if (t.isShort === 'yes') shorts++;
+      (s.match(/#[^\s#]+/g) || []).forEach(function (h) { tags[h] = (tags[h] || 0) + 1; });
+    });
+    var top = Object.keys(tags).sort(function (a, b) { return tags[b] - tags[a]; }).slice(0, 6)
+      .map(function (h) { return h + '(' + tags[h] + ')'; });
+    return { avgLen: Math.round(sumLen / n * 10) / 10, shortPct: Math.round(shorts / n * 100), topTags: top };
+  }
+  // 分析パネルを描画(comp_digest=監視数/comp_titles=題名コーパス)。
+  function renderAnalysis(el, dg, tt) {
+    var titles = (tt && tt.titles) || [];
+    var st = titleStats(titles);
+    // 速度TOP(伸びてる競合動画)。speedがnull(=収集2日目前)なら「計測中」。
+    var withSpeed = titles.filter(function (t) { return typeof t.speed === 'number'; })
+      .sort(function (a, b) { return b.speed - a.speed; }).slice(0, 5);
+    var watch = (dg && dg.watchChannels) || 0;
+    var html = '<div class="comp-an-head">📊 競合分析(自動収集・毎日4時更新)</div>' +
+      '<div class="comp-an-kpis">' +
+        '<span class="comp-an-kpi"><b>' + watch + '</b> 監視中</span>' +
+        '<span class="comp-an-kpi">題名 平均<b>' + st.avgLen + '</b>字</span>' +
+        '<span class="comp-an-kpi">Short <b>' + st.shortPct + '</b>%</span>' +
+      '</div>' +
+      '<div class="comp-an-row"><span class="comp-an-k">頻出タグ</span>' + (st.topTags.length ? esc(st.topTags.join('  ')) : '(データ待ち)') + '</div>';
+    if (withSpeed.length) {
+      html += '<div class="comp-an-k" style="margin-top:8px;">🔥 いま伸びてる競合動画(1日の再生の伸び)</div>' +
+        '<ol class="comp-an-top">' + withSpeed.map(function (t) {
+          return '<li>' + esc(t.title) + ' <span class="comp-an-spd">+' + Number(t.speed).toLocaleString() + '/日</span></li>';
+        }).join('') + '</ol>';
+    } else {
+      html += '<div class="comp-an-soon">🔥 伸び速度は収集2日目(明日4時)から算出されます。今夜は登録と初回収集(ベースライン)まで完了しています。</div>';
+    }
+    el.innerHTML = html;
+  }
+  // 分析データを取得して描画。GAS URL未設定なら案内。
+  function loadAnalysis() {
+    var el = $('compAnalysis'); if (!el) return;
+    var url = gasUrl();
+    if (!url || !U.jsonp) { el.innerHTML = '<p class="hint" style="padding:2px;">分析を表示するには ⚙️詳細設定 で「記録用GASのURL」を設定してください。</p>'; return; }
+    el.innerHTML = '<p class="hint" style="padding:2px;">競合の分析を読み込み中…</p>';
+    U.jsonp(url, { action: 'comp_digest' }, function (dg) {
+      U.jsonp(url, { action: 'comp_titles', days: '30', top: '200' }, function (tt) {
+        try { renderAnalysis(el, dg || {}, tt || {}); }
+        catch (e) { el.innerHTML = '<p class="hint" style="padding:2px;">分析の表示に失敗しました(データ収集後に再度お試しください)。</p>'; }
+      });
+    });
+  }
+
   function wire() {
     var b = $('compAdd'); if (b) b.addEventListener('click', add);
     var inp = $('compInput'); if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
     render();
+    migrateToGas();   // 接続前に貯めたlocalStorage登録をGASへ片寄せ(一度だけ)
+    loadAnalysis();   // 分析パネルをGASから充填
+    var rb = $('compAnalysisRefresh'); if (rb) rb.addEventListener('click', loadAnalysis);
     // 同期で他端末から更新が入ったら再描画(存在すれば購読)
     try { document.addEventListener('go5-synced', render); } catch (e) {}
     try { document.addEventListener('account-changed', render); } catch (e) {}
