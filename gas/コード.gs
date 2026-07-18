@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-18F(競合JSONP: プレーン分岐を!p.callbackでガード=callback時はJSONP分岐へ流す。フロントがcomp_digest/comp_titles/comp_add_seedをjsonpで読める)';
+var GAS_VERSION = '2026-07-18G(無人投稿の画像alt(代替テキスト)を常時空に=画像ビューアに④コメントが出るのを止める・フロントbluesky-core.jsと対で修正・Chami依頼)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -1286,7 +1286,8 @@ function bskyPost_(text, imageBlob, channel) {
       method: 'post', contentType: imageBlob.getContentType() || 'image/jpeg',
       headers: { Authorization: 'Bearer ' + s.accessJwt }, payload: imageBlob.getBytes(), muteHttpExceptions: true
     }).getContentText());
-    if (up.blob) embed = { '$type': 'app.bsky.embed.images', images: [{ alt: (String(text).split('\n')[0] || ''), image: up.blob }] };
+    // ★alt(代替テキスト)は常に空。無人予約投稿でも画像ビューアに④コメント等が出るのを止める(Chami依頼2026-07-18・フロントのbluesky-core.jsと対で修正)。
+    if (up.blob) embed = { '$type': 'app.bsky.embed.images', images: [{ alt: '', image: up.blob }] };
   }
   var record = { '$type': 'app.bsky.feed.post', text: text, createdAt: new Date().toISOString(), langs: ['ja'] };
   var facets = detectFacets_(text);

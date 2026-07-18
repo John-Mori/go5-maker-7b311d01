@@ -109,7 +109,10 @@
     if (imageRefs.length) {
       record.embed = {
         $type: 'app.bsky.embed.images',
-        images: imageRefs.slice(0, 4).map(function (ref, i) { return { alt: (i === 0 ? payload.alt : '') || '', image: ref }; })
+        // ★alt(代替テキスト)は常に空。Blueskyの画像ビューアで画像下に④コメント等が表示されるのを止める
+        //   (Chami依頼2026-07-18「画像の下に文字が入るのを何も表示しないように」)。呼び出し側が
+        //   payload.altを渡しても無視=どの投稿フロー(今すぐ/動画後自動/予約)でも確実に空にする単一箇所。
+        images: imageRefs.slice(0, 4).map(function (ref) { return { alt: '', image: ref }; })
       };
     }
     return fetch(service + '/xrpc/com.atproto.repo.createRecord', {
