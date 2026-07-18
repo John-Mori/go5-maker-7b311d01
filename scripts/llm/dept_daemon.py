@@ -103,36 +103,81 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "qa-reviewer.jsonl"),
         "persona": "ジェンティルドンナ",
         "port": 18802,
+        "work_scope": (
+            "あなたが自分で完結してよい作業(品質・監査範囲。正本=D:\\SougouStartFolder\\00_AI-HQ\\"
+            "departments\\qa\\BOOT.md・検証標準.md):\n"
+            "- 品質基準の策定・保守: 検証標準.md(8条・判定様式)の追記/更新\n"
+            "- 独立検証・Release Gate判定(APPROVED/APPROVED WITH CONDITIONS/REJECTED/ESCALATED)\n"
+            "- 回帰チェック実行: python docs/departments/qa-reviewer/checks/run_all.py\n"
+            "- インシデント→回帰テスト化(docs/departments/qa-reviewer/checks/ への追加)\n"
+            "範囲外(=回送): 検証対象そのものの実装修正(直すのは実装部門)・他PJの品質基準変更(HQへ相談)"
+        ),
     },
     "system-engineer": {
         "character": os.path.join(_CHAR, "debruyne.md"),
         "memory": os.path.join(_MEM, "system-engineer.jsonl"),
         "persona": "ケヴィン・デ・ブライネ",
         "port": 18803,
+        "work_scope": (
+            "あなたが自分で完結してよい作業(改修範囲。正本=docs/departments/system-engineer/BOOT.md):\n"
+            "- フロント(Pages)/GAS/Workerの改修実装\n"
+            "- ★着手前に必ず所有権黒板を確認: python scripts/ownership.py check \"<キーワード>\""
+            "(exit=2=作業中なら実装しない。exit=0=空きなら claim してから着手・完了で release)\n"
+            "範囲外(=回送): 所有権が競合する変更・人事/QA/座標系(CLAUDE.md §3)を壊す変更・"
+            "他部門の担当ドキュメント"
+        ),
     },
     "product-scout": {
         "character": os.path.join(_CHAR, "sena.md"),
         "memory": os.path.join(_MEM, "product-scout.jsonl"),
         "persona": "十王星南",
         "port": 18804,
+        "work_scope": (
+            "あなたが自分で完結してよい作業(商品-候補範囲。正本=docs/departments/product-scout/BOOT.md):\n"
+            "- 素材・潜在力の一次評価(星南)・採算/投入条件/A〜E判定(クラウディア)\n"
+            "- 評価結果をdocs/departments/product-scout/配下の記録ファイルへ追記\n"
+            "範囲外(=回送): コード実装・他部門の担当領域・投稿可否の最終判断(qa-reviewerへ)"
+        ),
     },
     "shorts-analyst": {
         "character": os.path.join(_CHAR, "modric.md"),
         "memory": os.path.join(_MEM, "shorts-analyst.jsonl"),
         "persona": "ルカ・モドリッチ",
         "port": 18805,
+        "work_scope": (
+            "あなたが自分で完結してよい作業(分析範囲。正本=docs/departments/shorts-analyst/BOOT.md):\n"
+            "- 内部KPI・確実性・最終整理(モドリッチ)/外部調査・競合・新仮説(アーモンドアイ)\n"
+            "- 分析結果をdocs/departments/shorts-analyst/(hypotheses.md・STATUS.md等)へ記録\n"
+            "範囲外(=回送): コード実装・投稿判断そのもの(qa-reviewer/copy-directorと合議)"
+        ),
     },
     "copy-director": {
         "character": os.path.join(_CHAR, "mitoma.md"),
         "memory": os.path.join(_MEM, "copy-director.jsonl"),
         "persona": "三笘薫",
         "port": 18806,
+        "work_scope": (
+            "あなたが自分で完結してよい作業(コピー部範囲。正本=docs/departments/copy-director/BOOT.md・"
+            "copy-rules.md):\n"
+            "- 訴求文・タイトル・作者名表記・Bluesky投稿文・画像フック評価・コピー改善\n"
+            "- 執筆前にcopy-rules.mdのガードレール(字数・規約)を通す\n"
+            "- タスク後の知見をcopy-rules/winning-patterns/rejected-patternsのいずれかへ1行追記\n"
+            "範囲外(=回送): 露出・煽り判定に迷う/評価が割れる境界事例は**自己判断で通さず**回送"
+            "(規約の最終判断はCreativeだけで行わない)・コード実装"
+        ),
     },
     "learning-coach": {  # 4コーチ対等の中からChami指名(2026-07-19「学習室はヴィルシーナで」)
         "character": os.path.join(_CHAR, "verxina.md"),
         "memory": os.path.join(_MEM, "learning-coach.jsonl"),
         "persona": "ヴィルシーナ",
         "port": 18808,
+        "work_scope": (
+            "あなたが自分で完結してよい作業(学習範囲。正本=docs/departments/learning-coach/BOOT.md):\n"
+            "- 質問への解説・学ぶ順序の提示(2層モデル=人格層はコーチ4人・知識層は"
+            "personas/instructors/を書棚として参照)\n"
+            "- 理解確認は短く1問程度(過剰な小テストはしない)\n"
+            "範囲外(=回送): コード実装・他部門の担当内容"
+        ),
     },
 }
 
