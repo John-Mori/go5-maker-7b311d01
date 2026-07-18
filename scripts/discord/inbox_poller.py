@@ -56,6 +56,18 @@ API = "https://discord.com/api/v10"
 # 偽生存の危険は無い: waiterはTTL(既定45分)で必ず死ぬのでフリーズ時は最長10分で救出される。
 RESIDENT_FRESH_SEC = 600
 
+# --- P1 受領スタンプ (2026-07-18 応答性改善書P1・Chami承認「実装して」) ---
+# 窓の無い部屋の発言はmain箱(研究室の直列キュー)へ落ち、初動が数十分沈黙する。
+# ここで鳩自身が「受領した」だけをメタルギアMk.II名義(機械的アナウンスの既存規約)で返す。
+# LLMを起動しない=無人代打を増やさない(Chami指示2026-07-18「無人代打が起こらないように」)。
+# キャラを騙らない=ames型の口調事故を構造的に排除。本回答は従来経路のまま別途届く。
+ACK_ENABLED = True
+ACK_AFTER_SEC = 45                                   # main箱に無応答で滞留したら受領を返すまでの秒数
+ACK_LEDGER = os.path.join(LOCAL, "ack_ledger.txt")   # ack済みmsg_id(重複ack防止・再起動を跨いで有効)
+ACK_SENSITIVE = ("dream-care", "past-room")          # 機微部屋はPROTOCOL管轄=定型文を置かない
+ACK_PERSONA = "メタルギアMk.II"
+ACK_TEXT = "受領した。担当の起床後に返答する。"
+
 
 def dept_active(dept):
     if not dept or dept in ("router", "llm-growth", "gemini"):  # 総合受付/qwenの部屋/Gemini専用部屋は対象外
@@ -110,6 +122,78 @@ def sweep_stale_dept_boxes(known_depts=frozenset()):
                     f.write("\n".join(lines) + "\n")
             open(p, "w").close()
             print(f"{time.strftime('%H:%M:%S')} 常駐不在の部門箱を回収 [{dept}] {len(lines)}件→main")
+        except OSError:
+            pass
+
+
+def _send_ack(channel_name):
+    """Mk.II名義の定型受領をpersona_send経由で送る。成否をboolで返す(鳩は絶対に落とさない)。"""
+    import subprocess
+    try:
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "persona_send.py"),
+             "--channel", channel_name, "--persona", ACK_PERSONA, ACK_TEXT],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def ack_stale_main_records(send_fn=None):
+    """main箱に滞留した人間の発言へ、機械の受領スタンプを1メッセージ1回だけ返す(P1)。
+
+    判定は「main箱に居る+発言からACK_AFTER_SEC経過+未ack」。部門箱の発言は対象外
+    (窓が生きている=本人がすぐ既読を押す)。送信は1回だけ試行し、成否に関わらず
+    台帳へ記録する(壊れた宛先への再試行ループでログを汚さない。ackは best-effort・
+    本回答は従来経路で必ず届くため、ackの取りこぼしは損失にならない)。
+    """
+    if not ACK_ENABLED:
+        return
+    try:
+        with open(INBOX_FILE, "r", encoding="utf-8") as f:
+            lines = [l for l in f.read().splitlines() if l.strip()]
+    except OSError:
+        return
+    if not lines:
+        return
+    try:
+        with open(ACK_LEDGER, "r", encoding="utf-8") as f:
+            acked = [l.strip() for l in f if l.strip()]
+    except OSError:
+        acked = []
+    if len(acked) > 2000:                      # 台帳の肥大防止(直近1000件だけ保持)
+        acked = acked[-1000:]
+        try:
+            with open(ACK_LEDGER, "w", encoding="utf-8") as f:
+                f.write("\n".join(acked) + "\n")
+        except OSError:
+            pass
+    acked_set = set(acked)
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    for l in lines:
+        try:
+            rec = json.loads(l)
+        except ValueError:
+            continue
+        mid = str(rec.get("msg_id", ""))
+        ch_name = rec.get("channel", "")
+        if not mid or not ch_name or mid in acked_set:
+            continue
+        if rec.get("dept") in ACK_SENSITIVE:
+            continue
+        try:
+            age = (now - _dt.datetime.fromisoformat(str(rec.get("ts", "")))).total_seconds()
+        except (ValueError, TypeError):
+            continue
+        if age < ACK_AFTER_SEC:
+            continue
+        ok = (send_fn or _send_ack)(ch_name)
+        print(f"{time.strftime('%H:%M:%S')} 受領スタンプ [{ch_name}] msg={mid} {'OK' if ok else 'FAIL'}")
+        acked_set.add(mid)
+        try:
+            with open(ACK_LEDGER, "a", encoding="utf-8") as f:
+                f.write(mid + "\n")
         except OSError:
             pass
 
@@ -333,6 +417,7 @@ def main():
         state = load_state()
         # 台帳のdeptだけを対象に回収(部門の退避ファイルを誤って食わない=INC-86)
         sweep_stale_dept_boxes({str(c.get("dept", "")) for c in channels})
+        ack_stale_main_records()  # P1 受領スタンプ: 滞留した発言へ機械の即応(応答性改善書2026-07-18)
         out = []
         for ch in channels:
             try:
