@@ -61,7 +61,7 @@
 - 裁定1A: 夜間(01-08時) waiter TTL180分・昼間45分(上記「起動時」参照)
 - 裁定2A: 使用済み作品台帳は`findings.md`内の節(暫定・§3.4(b)の調査後に恒久化)
 - 裁定3A: Packet引き継ぎは「部門chでPacket報告→Chami最終採用→研究室がD1のcandidate.recommended記録とcopy-directorへのdispatchを行う」
-- 裁定4: 週1定期スキャンは**保留**(実装しない。言及時は「保留」と明記する)
+- 裁定4: 定期スキャン**承認済み**(2026-07-18 Chami「やる、けど頻度は週1？増やせる？」→毎日運用で開始)。手順・条件=selection-rules.md「定期スキャン」節。この窓が開いている日に限る(完全自動化は常駐組み込み=system-engineer案件・未依頼)
 
 ## 終了時
 - 部門のSTATUS/正本(findings.md等)を更新。大きな決定はHQ `status/go5-maker.md` にも1行
