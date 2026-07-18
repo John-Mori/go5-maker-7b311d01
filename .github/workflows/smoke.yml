@@ -1,0 +1,90 @@
+name: Frontend deploy smoke (恒久-3)
+
+# フロント(GitHub Pages)を変えて push したら、公開URLの実物に対して薄いスモークを回す。
+#   目的: 過去に最頻だったEクラス事故(版ずれ/キャッシュ/回帰)を、スマホ実機確認の前に機械で捕まえる。
+#   公開リポなので Actions 分数は無制限=完全無料。手動実行(workflow_dispatch)も可。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - '**/*.js'
+      - '**/*.css'
+      - 'assets/**'
+      - '.github/workflows/smoke.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # 秘密ファイルが追跡に混入していないかの門番(INC-95=バックアップ設定がpublic repoへpushされた の再発防止)。
+  secret-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 追跡ファイルに秘密が無いか検査
+        run: |
+          set -e
+          # 追跡してはいけない厳密なファイル名/パス(誤検知を避けるため広いキーワード検索はしない)
+          FORBIDDEN='^\.clasp\.json$|(^|/)\.clasprc\.json$|^scripts/gas_deploy_config\.json$|^scripts/scrape_config\.json$|^local/|(^|/)cli_auth_token\.txt$'
+          HITS=$(git ls-files | grep -E "$FORBIDDEN" | grep -vE '\.example\.' || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::秘密ファイルが追跡されています。gitignoreされているはずのものがコミットされました:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "OK: 秘密ファイルの混入なし"
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: secret-guard
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 今回pushの版(?v=N)を取り出す
+        id: ver
+        run: |
+          V=$(grep -oE '\?v=[0-9]+' index.html | head -1 | grep -oE '[0-9]+')
+          echo "expected=$V" >> "$GITHUB_OUTPUT"
+          echo "今回の期待版: $V"
+
+      - name: Pagesが今回の版を配信し始めるまで待つ(伝播の閉ループ)
+        env:
+          EXPECTED: ${{ steps.ver.outputs.expected }}
+        run: |
+          URL="https://john-mori.github.io/go5-maker-7b311d01/index.html"
+          for i in $(seq 1 30); do
+            # キャッシュを避けるためクエリを毎回変える
+            BODY=$(curl -fsSL "$URL?cachebust=$i-$RANDOM" || true)
+            LIVE=$(printf '%s' "$BODY" | grep -oE '\?v=[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+            echo "試行 $i: 公開版=$LIVE / 期待版=$EXPECTED"
+            if [ "$LIVE" = "$EXPECTED" ]; then echo "反映を確認"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::5分待っても公開版が $EXPECTED になりませんでした(Pagesビルド失敗 or 遅延)"
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Playwright導入
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: スモーク実行
+        env:
+          BASE_URL: https://john-mori.github.io/go5-maker-7b311d01/
+          EXPECTED_VERSION: ${{ steps.ver.outputs.expected }}
+        run: npx playwright test
+
+      - name: レポート保全(失敗時の調査用)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

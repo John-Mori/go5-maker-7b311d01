@@ -1,0 +1,13 @@
+{
+  "name": "go5-maker-ci",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CIスモーク専用(恒久-3)。アプリ本体はビルド無しの静的HTML/JSで、この依存は配信されない。GitHub Actionsでのデプロイ後スモークテストにのみ使う。",
+  "scripts": {
+    "test:unit": "node tests/test_affiliate.js && node tests/test_bluesky.js",
+    "test:smoke": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

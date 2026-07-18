@@ -28,3 +28,8 @@ local/
 # Python cache
 __pycache__/
 *.pyc
+
+# CIスモーク(Playwright)用。アプリ本体には無関係(Pagesは静的配信)。
+node_modules/
+test-results/
+playwright-report/
