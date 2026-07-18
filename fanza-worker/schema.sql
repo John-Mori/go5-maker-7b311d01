@@ -60,3 +60,11 @@ CREATE TABLE IF NOT EXISTS market_snapshot (
   PRIMARY KEY (day, cid)
 );
 CREATE INDEX IF NOT EXISTS idx_market_day ON market_snapshot(day);
+
+-- 全候補プール（📚全候補タブの作品cid集合・2026-07-18）。フロントが総入れ替えでPOST、部門はこれをJOINして
+-- 「全候補タブに出ている作品だけ」を読む。除外タブ(excludeFromAll)を反映済みの集合がフロントから来る。
+CREATE TABLE IF NOT EXISTS candidate_pool (
+  cid         TEXT PRIMARY KEY,
+  updated_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_candpool_cid ON candidate_pool(cid);

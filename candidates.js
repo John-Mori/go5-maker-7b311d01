@@ -1529,6 +1529,26 @@
   // 候補アイテムの保存先: メインは cand_items、独立タブは各タブ固有キー。(表示を共有しない)
   function itemsKey(tabId) { return (!tabId || tabId === 'main') ? K_ITEMS : 'cand_items__' + tabId; }
 
+  // 全候補cid集合をD1へ同期(部門が「全候補だけ」を読めるように)。変化時のみPOST=無駄打ち防止。
+  //   送るのは除外タブ反映後の"キュレート集合"(価格/セール絞込は表示専用なので含めない)。
+  function syncCandidatePool_(cids) {
+    try {
+      var cfg = workerCfg();
+      if (!cfg || !cfg.url || !cfg.secret) return; // worker未設定なら同期しない(表示は動く)
+      var uniq = []; var seen = {};
+      (cids || []).forEach(function (c) { if (c && !seen[c]) { seen[c] = true; uniq.push(c); } });
+      var hash = uniq.slice().sort().join(',');
+      var last = ''; try { last = localStorage.getItem('cand_pool_hash') || ''; } catch (e) {}
+      if (hash === last) return; // 前回と同じ集合＝送らない
+      fetch(cfg.url + '/api/candidate-pool', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
+        body: JSON.stringify({ cids: uniq })
+      }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+        if (j && j.ok) { try { localStorage.setItem('cand_pool_hash', hash); } catch (e) {} }
+      }).catch(function () { /* 同期失敗は表示に影響しない(次回再送) */ });
+    } catch (e) {}
+  }
+
   // ── 📚全候補タブ: 候補(main)+独立タブ+全サークルタブの作品を集約表示(cidで重複排除)。
   //    タブの✏️編集で excludeFromAll=true にしたタブは除外。各部門はこの集合を読む(段階2でD1へ橋渡し予定)。
   //    集約読み取り中心のビューなので個別の非表示/削除ボタンは出さない(各タブ側で行う)。サークル作品は非同期取得。
@@ -1570,6 +1590,8 @@
       if (!el || _activeTab !== 'all') return; // 集約中にタブが変わっていたら破棄
       var all = stored.slice();
       (makerItems || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; all.push(it); } });
+      // 部門ブリッジ: 除外反映後の全候補cid(表示フィルタ前=キュレート集合)をD1へ同期。
+      syncCandidatePool_(all.map(function (it) { return it.cid; }));
       var arr = sortItems(all, _sort).filter(function (it) {
         if (_filterSale && !isOnSale_(it)) return false;
         if (!passPrice_(it)) return false;

@@ -97,6 +97,53 @@ export default {
       return json({ ok: true, item }, 200, cors);
     }
 
+    // ── 全候補プール：📚全候補タブの作品cid集合を保存/参照 ──────────────────
+    //   POST /api/candidate-pool { cids:[...] } = プールを総入れ替え(除外タブ反映済みの集合をフロントが送る)。
+    //   GET  /api/candidate-pool               = { ok, count, cids } (部門・検証用)。
+    //   部門は go5_fanza を candidate_pool でJOINして「全候補タブに出ている作品だけ」を読む。
+    if (path === "/api/candidate-pool") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      const corsC = corsHeaders(origin, allowed);
+      if (!corsC) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      if (!env.FANZA_DB) return json({ ok: false, error: "db_unbound" }, 500, corsC);
+
+      if (request.method === "GET") {
+        try {
+          const rs = await env.FANZA_DB.prepare("SELECT cid FROM candidate_pool ORDER BY cid").all();
+          const list = (rs.results || []).map((r) => r.cid);
+          return json({ ok: true, count: list.length, cids: list }, 200, corsC);
+        } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC); }
+      }
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, corsC);
+      const secretC = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || secretC !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsC);
+      let bodyC;
+      try { bodyC = await request.json(); }
+      catch (e) { return json({ ok: false, error: "bad_json" }, 400, corsC); }
+      // cidを厳格検証＋重複除去。安全上限5000(巨大サークル群でも収まる)。
+      const seenC = {}, poolCids = [];
+      for (const raw of (Array.isArray(bodyC.cids) ? bodyC.cids : [])) {
+        const cid = String(raw || "").trim();
+        if (!/^[0-9A-Za-z_-]{1,64}$/.test(cid) || seenC[cid]) continue;
+        seenC[cid] = true; poolCids.push(cid);
+        if (poolCids.length >= 5000) break;
+      }
+      const nowC = Date.now();
+      try {
+        // 総入れ替え。DELETE + 複数行INSERT(400件/文=SQLite変数上限999未満)を1バッチ=原子的トランザクション。
+        const stmts = [env.FANZA_DB.prepare("DELETE FROM candidate_pool")];
+        for (let i = 0; i < poolCids.length; i += 400) {
+          const chunk = poolCids.slice(i, i + 400);
+          const ph = chunk.map(() => "(?, ?)").join(", ");
+          const binds = [];
+          chunk.forEach((c) => { binds.push(c, nowC); });
+          stmts.push(env.FANZA_DB.prepare("INSERT INTO candidate_pool (cid, updated_at) VALUES " + ph).bind(...binds));
+        }
+        await env.FANZA_DB.batch(stmts);
+        return json({ ok: true, count: poolCids.length }, 200, corsC);
+      } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC); }
+    }
+
     // ── サークル（maker）の作品一覧：候補タブの「サークルタブ」用 ──────────────────
     //   POST /api/fanza-maker-list { makerId, sort? }
     //   sort: "date"(既定・発売日新しい順) | "rank"(人気=直近の売れ行きに近い動的ランキング) | "review"
