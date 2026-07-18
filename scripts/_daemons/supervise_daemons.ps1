@@ -22,7 +22,11 @@ $daemons = @(
   # claude_responder (2026-07-17): while the Lab session is dead, process the main box with
   #   `claude --print` so Discord still gets replies when every session is down (root fix for
   #   INC-98). Stays silent when the Lab is alive (lab_alive guard). Needs local\cli_auth_token.txt.
-  @{ Name='claude_responder'; File='claude_responder.py'; Rel='scripts\llm\claude_responder.py';     LogRel='local\llm\claude_responder_console.log' }
+  @{ Name='claude_responder'; File='claude_responder.py'; Rel='scripts\llm\claude_responder.py';     LogRel='local\llm\claude_responder_console.log' },
+  # daemon_keeper (2026-07-18, R0): keeps per-department character daemons (dept_daemon.py) alive
+  #   with exponential backoff + circuit breaker. Departments never go unmanned (Chami directive).
+  #   Two layers: keeper restarts daemons in seconds; this supervisor restarts the keeper in <=10min.
+  @{ Name='daemon_keeper';    File='daemon_keeper.py';    Rel='scripts\_daemons\daemon_keeper.py';   LogRel='local\_daemon_keeper.log' }
 )
 
 $sh = New-Object -ComObject WScript.Shell
