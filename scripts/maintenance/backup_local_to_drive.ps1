@@ -1,15 +1,15 @@
-# go5 local/ backup to Google Drive (dated snapshot, create-only)
+# go5 backup to Google Drive (dated snapshot, create-only) - multi-source.
+# Sources: go5-maker\local  AND  00_AI-HQ (added 2026-07-19, lab order: HQ left the
+# backup path when HR moved there; local git protects history but not disk loss).
 # Why dated snapshots instead of a mirror: a mirror propagates an accidental
 # local deletion to the backup on the next run. Snapshots do not.
 # ASCII-only on purpose (see memory: executable ps1 must stay ASCII).
 
 $ErrorActionPreference = 'Stop'
 
-$Src       = 'D:\SougouStartFolder\go5-maker\local'
 $LogFile   = 'D:\SougouStartFolder\go5-maker\local\backup.log'
 # Config lives under local/ (gitignored), NOT next to this script: the destination
 # contains a strategy folder name, and scripts/ is tracked by a PUBLIC repo.
-# It was pushed once (QA found it 2026-07-17); the original design already said local/.
 $DestFile  = 'D:\SougouStartFolder\go5-maker\local\backup_dest.txt'
 # 3 per Chami (2026-07-17 kaizen ch): "14 days not needed, 3 is enough, delete the rest"
 $KeepCount = 3
@@ -43,15 +43,11 @@ if (-not $rel) {
 
 # Validate the resolved drive root actually contains our destination path.
 # QA 2026-07-17: if a Shared Drive ever appears first under G:\, blind "first dir"
-# resolution would point retention's Remove-Item at the wrong tree. Property-based
-# check (no hardcoded Japanese folder name; this file must stay ASCII).
+# resolution would point retention's Remove-Item at the wrong tree.
 if (-not (Test-Path (Join-Path $driveRoot.FullName $rel))) {
     Write-Log ("ABORT: resolved drive root '{0}' does not contain the expected destination. Backup skipped." -f $driveRoot.FullName)
     exit 1
 }
-$BackupRoot = Join-Path $driveRoot.FullName $rel
-$stamp = Get-Date -Format 'yyyy-MM-dd'
-$dest  = Join-Path $BackupRoot $stamp
 
 $free = (Get-PSDrive -Name G).Free / 1GB
 if ($free -lt $MinFreeGB) {
@@ -59,87 +55,112 @@ if ($free -lt $MinFreeGB) {
     exit 1
 }
 
-New-Item -ItemType Directory -Path $dest -Force | Out-Null
-
-# /E recurse incl. empty dirs, /R:2 /W:5 keep retries short, /NP no per-file progress.
-# Deliberately NOT /MIR: never delete anything at the destination.
-$null = robocopy $Src $dest /E /R:2 /W:5 /NP /NDL /NFL /NJH /NJS
-$rc = $LASTEXITCODE
-if ($rc -ge 8) {
-    Write-Log "FAIL: robocopy exit $rc"
-    exit 1
-}
-
-$files = @(Get-ChildItem $dest -Recurse -File -ErrorAction SilentlyContinue)
-$sizeMB = [math]::Round((($files | Measure-Object Length -Sum).Sum / 1MB), 1)
-Write-Log ("OK: {0} -> {1} ({2} files, {3} MB, robocopy rc={4})" -f $Src, $dest, $files.Count, $sizeMB, $rc)
-
-# --- Sensitive dirs: monthly PERMANENT snapshot (never touched by retention) ---
-# Why (dream-care design P1-5, Chami approved 2026-07-17): retention was cut 14 -> 3 days.
-# With create-only dated snapshots, a file deleted locally silently vanishes from every
-# surviving snapshot after 3 days. For dreams/past/health that means Chami's own history
-# is gone with no way back. These are a few KB, so a monthly keeper costs effectively zero.
-# Kept OUTSIDE $BackupRoot so the retention block above can never reach it.
-$SensitiveDirs = @('dreams', 'past', 'health')
+# Config keeps its historical form (ends with '\local'). Derive the base so both
+# sources land side by side: <base>\local\YYYY-MM-DD and <base>\00_AI-HQ\YYYY-MM-DD.
+$destBase = Join-Path $driveRoot.FullName (Split-Path $rel -Parent)
 $keepRoot = Join-Path $driveRoot.FullName 'go5-backup-keep'
+$stamp    = Get-Date -Format 'yyyy-MM-dd'
 $month    = Get-Date -Format 'yyyy-MM'
-foreach ($d in $SensitiveDirs) {
-    $srcDir = Join-Path $Src $d
-    if (-not (Test-Path -LiteralPath $srcDir)) { continue }
-    $dstDir = Join-Path (Join-Path $keepRoot $month) $d
-    if (Test-Path -LiteralPath $dstDir) { continue }   # already kept this month = idempotent
-    New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
-    $null = robocopy $srcDir $dstDir /E /R:2 /W:5 /NP /NDL /NFL /NJH /NJS
-    if ($LASTEXITCODE -ge 8) { Write-Log ("WARN: monthly keep failed for {0} (rc={1})" -f $d, $LASTEXITCODE) }
-    else { Write-Log ("keep: monthly permanent snapshot {0}/{1}" -f $month, $d) }
-}
 
-# --- Deletion detector: report files that vanished from the SOURCE ---
-# Compares file NAMES only against the previous snapshot. Contents are never read
-# (these dirs are sensitive). Runs BEFORE retention so the last copy still exists when
-# the alert goes out. Alert only - this script never restores or deletes anything.
-$prev = @(Get-ChildItem $BackupRoot -Directory -ErrorAction SilentlyContinue |
-          Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' -and $_.FullName -ne $dest } |
-          Sort-Object Name -Descending | Select-Object -First 1)
-if ($prev.Count -gt 0) {
-    $prevRoot = $prev[0].FullName
-    $prevRel = @(Get-ChildItem $prevRoot -Recurse -File -ErrorAction SilentlyContinue |
-                 ForEach-Object { $_.FullName.Substring($prevRoot.Length).TrimStart('\') })
-    $curRel  = @(Get-ChildItem $dest -Recurse -File -ErrorAction SilentlyContinue |
-                 ForEach-Object { $_.FullName.Substring($dest.Length).TrimStart('\') })
-    $curSet = @{}; foreach ($p in $curRel) { $curSet[$p] = $true }
-    $gone = @($prevRel | Where-Object { -not $curSet.ContainsKey($_) })
-    if ($gone.Count -gt 0) {
-        Write-Log ("DETECT: {0} file(s) disappeared from source since {1}" -f $gone.Count, $prev[0].Name)
-        $list = ($gone | Select-Object -First 20) -join "`n"
-        $more = if ($gone.Count -gt 20) { "`n(and {0} more)" -f ($gone.Count - 20) } else { '' }
-        $body = "(auto) Backup detected {0} file(s) removed from local/ since {1}. Names only, contents not read. If unintended, the copy still exists in the latest snapshot - restore before it ages out (retention keeps {2}).`n{3}{4}" -f $gone.Count, $prev[0].Name, $KeepCount, $list, $more
-        $tmp = Join-Path $env:TEMP ("go5_backup_gone_{0}.txt" -f (Get-Date -Format 'yyyyMMddHHmmss'))
-        Set-Content -LiteralPath $tmp -Value $body -Encoding utf8
-        # Persona name is Japanese ("Metal Gear Mk.II"). This file must stay ASCII-only
-        # (PS 5.1 reads a no-BOM file as the system ANSI codepage; non-ASCII here corrupts
-        # parsing), so pass it as an escaped literal instead of writing the glyphs.
-        $persona = [regex]::Unescape('\u30E1\u30BF\u30EB\u30AE\u30A2Mk.II')
-        try {
-            & python 'D:\SougouStartFolder\go5-maker\scripts\discord\persona_send.py' `
-                --channel 'incident' --persona $persona --body-file $tmp | Out-Null
-            Write-Log "DETECT: notified incident channel"
-        } catch { Write-Log ("WARN: notify failed: {0}" -f $_.Exception.Message) }
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+# --- One tree = snapshot + monthly sensitive keep + deletion detect + retention ---
+# $SensitiveRel: dirs (relative to $Src) copied once a month to a PERMANENT area the
+# retention below can never reach. Rationale (P1-5, Chami approved 2026-07-17):
+# retention is 3 days; a locally deleted file silently vanishes from every surviving
+# snapshot. For irreplaceable personal/character history that is unacceptable.
+# $KeepSub: '' for local (historical layout, keeps existing July keeps idempotent),
+# source name for others (avoids leaf-name collisions between sources).
+function Backup-Tree([string]$Label, [string]$Src, [string]$BackupRoot,
+                     [string[]]$SensitiveRel, [string]$KeepSub) {
+    if (-not (Test-Path -LiteralPath $Src)) {
+        Write-Log ("WARN: source missing, skipped: {0}" -f $Src)
+        return
+    }
+    $dest = Join-Path $BackupRoot $stamp
+    New-Item -ItemType Directory -Path $dest -Force | Out-Null
+
+    # /E recurse incl. empty dirs. Deliberately NOT /MIR: never delete at destination.
+    $null = robocopy $Src $dest /E /R:2 /W:5 /NP /NDL /NFL /NJH /NJS
+    $rc = $LASTEXITCODE
+    if ($rc -ge 8) {
+        Write-Log ("FAIL: robocopy exit {0} for {1}" -f $rc, $Label)
+        return
+    }
+    $files = @(Get-ChildItem $dest -Recurse -File -Force -ErrorAction SilentlyContinue)
+    $sizeMB = [math]::Round((($files | Measure-Object Length -Sum).Sum / 1MB), 1)
+    Write-Log ("OK: {0} -> {1} ({2} files, {3} MB, robocopy rc={4})" -f $Src, $dest, $files.Count, $sizeMB, $rc)
+
+    # Monthly permanent snapshot for sensitive dirs (idempotent per month).
+    foreach ($d in $SensitiveRel) {
+        $srcDir = Join-Path $Src $d
+        if (-not (Test-Path -LiteralPath $srcDir)) { continue }
+        $leaf = Split-Path $d -Leaf
+        $dstDir = Join-Path $keepRoot $month
+        if ($KeepSub) { $dstDir = Join-Path $dstDir $KeepSub }
+        $dstDir = Join-Path $dstDir $leaf
+        if (Test-Path -LiteralPath $dstDir) { continue }
+        New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
+        $null = robocopy $srcDir $dstDir /E /R:2 /W:5 /NP /NDL /NFL /NJH /NJS
+        if ($LASTEXITCODE -ge 8) { Write-Log ("WARN: monthly keep failed for {0}/{1} (rc={2})" -f $Label, $leaf, $LASTEXITCODE) }
+        else { Write-Log ("keep: monthly permanent snapshot {0}/{1}/{2}" -f $month, $Label, $leaf) }
+    }
+
+    # Deletion detector: names only, contents never read. Alert only, before retention,
+    # so the last copy still exists when the alert goes out.
+    $prev = @(Get-ChildItem $BackupRoot -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' -and $_.FullName -ne $dest } |
+              Sort-Object Name -Descending | Select-Object -First 1)
+    if ($prev.Count -gt 0) {
+        $prevRoot = $prev[0].FullName
+        $prevRel = @(Get-ChildItem $prevRoot -Recurse -File -Force -ErrorAction SilentlyContinue |
+                     ForEach-Object { $_.FullName.Substring($prevRoot.Length).TrimStart('\') })
+        $curRel  = @(Get-ChildItem $dest -Recurse -File -Force -ErrorAction SilentlyContinue |
+                     ForEach-Object { $_.FullName.Substring($dest.Length).TrimStart('\') })
+        $curSet = @{}; foreach ($p in $curRel) { $curSet[$p] = $true }
+        $gone = @($prevRel | Where-Object { -not $curSet.ContainsKey($_) })
+        if ($gone.Count -gt 0) {
+            Write-Log ("DETECT: {0} file(s) disappeared from {1} since {2}" -f $gone.Count, $Label, $prev[0].Name)
+            $list = ($gone | Select-Object -First 20) -join "`n"
+            $more = if ($gone.Count -gt 20) { "`n(and {0} more)" -f ($gone.Count - 20) } else { '' }
+            $body = "(auto) Backup detected {0} file(s) removed from {1} since {2}. Names only, contents not read. If unintended, the copy still exists in the latest snapshot - restore before it ages out (retention keeps {3}).`n{4}{5}" -f $gone.Count, $Label, $prev[0].Name, $KeepCount, $list, $more
+            $tmp = Join-Path $env:TEMP ("go5_backup_gone_{0}.txt" -f (Get-Date -Format 'yyyyMMddHHmmss'))
+            Set-Content -LiteralPath $tmp -Value $body -Encoding utf8
+            # Persona name is Japanese ("Metal Gear Mk.II"); escaped so this file stays ASCII
+            # (PS 5.1 reads a no-BOM file as the system ANSI codepage; glyphs here would corrupt).
+            $persona = [regex]::Unescape('\u30E1\u30BF\u30EB\u30AE\u30A2Mk.II')
+            try {
+                & python 'D:\SougouStartFolder\go5-maker\scripts\discord\persona_send.py' `
+                    --channel 'incident' --persona $persona --body-file $tmp | Out-Null
+                Write-Log "DETECT: notified incident channel"
+            } catch { Write-Log ("WARN: notify failed: {0}" -f $_.Exception.Message) }
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Retention: keep the newest $KeepCount snapshots, drop older ones.
+    $snaps = @(Get-ChildItem $BackupRoot -Directory -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' } |
+               Sort-Object Name -Descending)
+    if ($snaps.Count -gt $KeepCount) {
+        foreach ($old in $snaps[$KeepCount..($snaps.Count - 1)]) {
+            Remove-Item $old.FullName -Recurse -Force -Confirm:$false
+            Write-Log ("retention: removed old snapshot {0}" -f $old.Name)
+        }
     }
 }
 
-# Retention: keep the newest $KeepCount snapshots, drop older ones.
-$snaps = @(Get-ChildItem $BackupRoot -Directory -ErrorAction SilentlyContinue |
-           Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' } |
-           Sort-Object Name -Descending)
-if ($snaps.Count -gt $KeepCount) {
-    foreach ($old in $snaps[$KeepCount..($snaps.Count - 1)]) {
-        Remove-Item $old.FullName -Recurse -Force -Confirm:$false
-        Write-Log ("retention: removed old snapshot {0}" -f $old.Name)
-    }
-}
+# Source 1: go5-maker local/ (historical layout: BackupRoot comes straight from config,
+# monthly keeps live directly under go5-backup-keep\YYYY-MM\<dir> as before).
+Backup-Tree -Label 'local' -Src 'D:\SougouStartFolder\go5-maker\local' `
+    -BackupRoot (Join-Path $driveRoot.FullName $rel) `
+    -SensitiveRel @('dreams', 'past', 'health') -KeepSub ''
 
-# robocopy rc 1-7 means success (files copied). Without this the caller sees
-# robocopy's rc as our exit code and reads a good run as a failure.
+# Source 2: 00_AI-HQ (HR personas/characters/memory = irreplaceable character context,
+# so they join the monthly permanent frame; namespaced under 00_AI-HQ to avoid collisions).
+# .git is included on purpose: it carries the history protection the lab set up.
+Backup-Tree -Label '00_AI-HQ' -Src 'D:\SougouStartFolder\00_AI-HQ' `
+    -BackupRoot (Join-Path $destBase '00_AI-HQ') `
+    -SensitiveRel @('departments\hr\personas', 'departments\hr\characters', 'departments\hr\memory') `
+    -KeepSub '00_AI-HQ'
+
+# robocopy rc 1-7 means success. Task-scheduler health must read rc=0.
 exit 0
