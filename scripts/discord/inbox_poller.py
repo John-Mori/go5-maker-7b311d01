@@ -426,6 +426,12 @@ def poll_channel(ch, token, state, out):
     for m in msgs:
         state[cid] = m["id"]
         if m.get("webhook_id") or m.get("author", {}).get("bot"):
+            # ★例外: Chamiミラー (Chami(from Claude)/Chami(音声入力)等のwebhook名義) には
+            #   送信印だけ押す (Chami指示2026-07-18「ミラーにもスタンプを」)。enqueueはしない
+            #   (ミラーは既に応対中の発言の写しであり、二重処理させない)。既読/着手は
+            #   貼った本人のセッションが押す (persona_sendがmsg=IDを返すのはそのため)。
+            if m.get("webhook_id") and str(m.get("author", {}).get("username", "")).startswith("Chami("):
+                react_sent_(cid, m["id"], token)
             continue
         rec = {
             "ts": m.get("timestamp", ""),
@@ -529,6 +535,18 @@ def main():
                 if r.get("dept") == "imagegen":
                     return any(w in c for w in QWEN_WORDS)      # 画像生成室: 逆に呼ばれた時だけ彼女
                 return LOCAL_FIRST_ENABLED and _is_simple_q(r)  # 他部屋の一次受付は停止中(上記)
+            # ★段階2パイロット用の配達除外(2026-07-18・手順書§3-4/QA条件2の裁定=(a)):
+            #   GO5_POLLER_SKIP_DEPTS(カンマ区切り)のdeptはjsonl経路へ配達しない=Gateway/queue経路が受け持つ。
+            #   二重配達許容案(b)は、セッション層でjsonlとqueueの同一msgを二重処理するリスクを
+            #   台帳規律に預けることになるため不採用(規律は必ず破られる)。上流の送信印/添付退避は
+            #   Gateway側と重複するが無害(同一Bot同一絵文字は1個に収束・添付は既存ファイルスキップ)。
+            #   反映はポーラー再起動時(環境変数を付けて起動)。
+            skip_depts = {s.strip() for s in os.environ.get("GO5_POLLER_SKIP_DEPTS", "").split(",") if s.strip()}
+            if skip_depts:
+                n_skip = sum(1 for r in out if r.get("dept") in skip_depts)
+                if n_skip:
+                    print(f"  配達除外(queue経路へ委譲): {n_skip}件 depts={sorted(skip_depts)}")
+                out = [r for r in out if r.get("dept") not in skip_depts]
             # Gemini専用部屋(dept=="gemini")は独立レーン→discord_inbox_gemini.jsonlのみ(qwenのllm-growthと同じ扱い・main/llm/dept箱には入れない)
             gemini_out = [r for r in out if r.get("dept") == "gemini"]
             base = [r for r in out if r.get("dept") != "gemini"]
