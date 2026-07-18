@@ -62,13 +62,23 @@ WORK_TIMEOUT = 600             # ツール付き作業(work_generate)の上限
 WORK_WORDS = ("直して", "修正", "実装", "追加して", "デプロイ", "変えて", "作って", "調べて",
               "特定して", "バグ", "エラー", "壊れ", "対応して", "やって", "反映", "消して", "削除")
 
-# 部門→(characterfile, 記憶ストア, 送信ペルソナ名, /liveポート, 作業範囲)。R2で全部門へ拡張。
+# 部門→(characterfile, 記憶ストア, 送信ペルソナ名, /liveポート, 作業範囲)。R2で全部門へ拡張(2026-07-19 Chami「やって」)。
 # work_scope: 定義があると作業依頼(WORK_WORDS)をツール付きagentで**部屋の中で完結**させる
 #   (2026-07-18 Chami「反映作業もここでやれないのか?」への恒久回答)。範囲外はmain箱へ回送。
+# work_scope無し: 会話はキャラで即応・作業依頼はキャラの声で受けてmain箱へ回送(研究室が本対応)。
+# 機微部屋(dream-care/past-room/health-log)は対象外=PROTOCOL管轄・デーモン化しない。
+_CHAR = os.path.join(HQ, "departments", "hr", "characters")
+_MEM = os.path.join(HQ, "departments", "hr", "memory")
 DEPT_CONF = {
+    "hq": {  # 研究室HQの二段構え: アメスが即応・判断/作業はアロンソ(研究室)へ回送
+        "character": os.path.join(_CHAR, "ames.md"),
+        "memory": os.path.join(_MEM, "hq.jsonl"),
+        "persona": "アメス",
+        "port": 18800,
+    },
     "hr-room": {
-        "character": os.path.join(HQ, "departments", "hr", "characters", "kukuru.md"),
-        "memory": os.path.join(HQ, "departments", "hr", "memory", "hr-room.jsonl"),
+        "character": os.path.join(_CHAR, "kukuru.md"),
+        "memory": os.path.join(_MEM, "hr-room.jsonl"),
         "persona": "ククール",
         "port": 18801,
         "work_scope": (
@@ -81,6 +91,42 @@ DEPT_CONF = {
             "- local/persona_sprites/・local/persona_context/ の整理\n"
             "範囲外(=回送): 上記以外のコード変更・他部門/他PJのファイル・GAS/Worker/デプロイ・queue/常駐の改修"
         ),
+    },
+    "hr-context": {  # ククールのもう一つの部屋(キャラ背景の聞き取り)。記憶は部屋別
+        "character": os.path.join(_CHAR, "kukuru.md"),
+        "memory": os.path.join(_MEM, "hr-context.jsonl"),
+        "persona": "ククール",
+        "port": 18807,
+    },
+    "qa-reviewer": {
+        "character": os.path.join(_CHAR, "gentildonna.md"),
+        "memory": os.path.join(_MEM, "qa-reviewer.jsonl"),
+        "persona": "ジェンティルドンナ",
+        "port": 18802,
+    },
+    "system-engineer": {
+        "character": os.path.join(_CHAR, "debruyne.md"),
+        "memory": os.path.join(_MEM, "system-engineer.jsonl"),
+        "persona": "ケヴィン・デ・ブライネ",
+        "port": 18803,
+    },
+    "product-scout": {
+        "character": os.path.join(_CHAR, "sena.md"),
+        "memory": os.path.join(_MEM, "product-scout.jsonl"),
+        "persona": "十王星南",
+        "port": 18804,
+    },
+    "shorts-analyst": {
+        "character": os.path.join(_CHAR, "modric.md"),
+        "memory": os.path.join(_MEM, "shorts-analyst.jsonl"),
+        "persona": "ルカ・モドリッチ",
+        "port": 18805,
+    },
+    "copy-director": {
+        "character": os.path.join(_CHAR, "mitoma.md"),
+        "memory": os.path.join(_MEM, "copy-director.jsonl"),
+        "persona": "三笘薫",
+        "port": 18806,
     },
 }
 
