@@ -9,7 +9,7 @@
   // プレビューも書き出しも同じ Canvas(=この解像度) に描くため、画面幅に関係なく完全に一致する。
   const W = 1080, H = 1920;         // 基準フレーム解像度(ここを変えれば出力解像度が変わる／レイアウトは比率維持)
   const DURATION = 5, FPS = 30;
-  const REVEAL_START = 0.5, REVEAL_DUR = 2.0;
+  const REVEAL_START = 0.5, REVEAL_DUR = 2.4;   // 浮き上がり: 0.5s開始→2.9s完成(以後2.1s保持)。Chami依頼2026-07-18で0.7s遅らせた
   const FG_MAX_RATIO = 0.92, FG_ZOOM = 0.04, FG_CENTER_Y = 0.55;
   const DEFAULT_DETAIL = "作品の詳細は右上の：から説明";
 
@@ -147,6 +147,22 @@
 
   function setFont(px, weight) { ctx.font = `${weight || 700} ${px}px "Noto Sans JP", sans-serif`; }
   function smoothstep(x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }
+  // 浮き上がりのイージング(前半で認識可能まで進み後半で緩やかに完成・Chami依頼2026-07-18 §5/§6)。
+  //   ★仕様推奨の cubic-bezier(0.22,1,0.36,1) は前半が急でDUR2.4でもt=2.5sで100%に達し、狙い(2.9s完成・
+  //     後半の静止を減らす §4/§9)を満たせなかった(実測1.0s=69%)。そこで §4タイムライン(1.0s≈28%/2.5s<100/
+  //     2.9s=100)に合う cubic-bezier(0.30,0.3,0.50,1) を採用(実測 28/60/88/97/100)。漫画・ラベル共通。
+  //   x(時間0..1)→y(進捗)。Newton法でベジェのtを解く(標準実装)。
+  const easeReveal = (function () {
+    var x1 = 0.30, y1 = 0.3, x2 = 0.50, y2 = 1;
+    function bz(t, a, b) { return (((1 - 3 * b + 3 * a) * t + (3 * b - 6 * a)) * t + (3 * a)) * t; }
+    function sl(t, a, b) { return 3 * (1 - 3 * b + 3 * a) * t * t + 2 * (3 * b - 6 * a) * t + (3 * a); }
+    return function (x) {
+      if (x <= 0) return 0; if (x >= 1) return 1;
+      var t = x;
+      for (var i = 0; i < 8; i++) { var s = sl(t, x1, x2); if (!s) break; t -= (bz(t, x1, x2) - x) / s; }
+      return bz(t, y1, y2);
+    };
+  })();
 
   // ---- テキスト：折り返し(文字単位) ----
   function wrap(text, px, maxw) {
@@ -374,7 +390,7 @@
     } else { ctx.fillStyle = "#28424a"; ctx.fillRect(0, 0, W, H); }
     // 前景(フェードイン＋微ズーム)
     if (fgImg) {
-      const a = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : smoothstep((t - REVEAL_START) / REVEAL_DUR));
+      const a = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - REVEAL_START) / REVEAL_DUR));
       if (a > 0) {
         // フィット倍率 × ユーザーの拡大率(OFF.imgScale)。プレビューも書き出しも同じ式=見た目と動画が一致する。
         const base = Math.min(W * FG_MAX_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1);
@@ -391,7 +407,7 @@
     // フレーム基準(W×H)で描くので画像の外(黒帯・余白)にも自由に置ける。
     if (window.Go5PromoLabel && window.Go5PromoLabel.drawOverlay) {
       // 画像と同じ"浮き出てくる"演出のため、前景画像と同じreveal進捗(0..1)を渡す(Chami依頼2026-07-18)。
-      var promoReveal = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : smoothstep((t - REVEAL_START) / REVEAL_DUR));
+      var promoReveal = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - REVEAL_START) / REVEAL_DUR)); // 漫画と同一進捗・同一イージング(§6)
       try { window.Go5PromoLabel.drawOverlay(ctx, W, H, promoReveal); } catch (e) {}
     }
   }
