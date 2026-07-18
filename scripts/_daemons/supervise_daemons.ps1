@@ -26,7 +26,12 @@ $daemons = @(
   # daemon_keeper (2026-07-18, R0): keeps per-department character daemons (dept_daemon.py) alive
   #   with exponential backoff + circuit breaker. Departments never go unmanned (Chami directive).
   #   Two layers: keeper restarts daemons in seconds; this supervisor restarts the keeper in <=10min.
-  @{ Name='daemon_keeper';    File='daemon_keeper.py';    Rel='scripts\_daemons\daemon_keeper.py';   LogRel='local\_daemon_keeper.log' }
+  @{ Name='daemon_keeper';    File='daemon_keeper.py';    Rel='scripts\_daemons\daemon_keeper.py';   LogRel='local\_daemon_keeper.log' },
+  # discord_gateway (2026-07-19, cutover): real-time Gateway -> LeaseQueue producer. Runs alongside
+  #   the pigeon during pilot (GO5_POLLER_SKIP_DEPTS decides which depts are queue-only). Env vars
+  #   GO5_GATEWAY_JOBS / GO5_GATEWAY_JOBS_DEPTS / GO5_POLLER_SKIP_DEPTS are USER-level env
+  #   (set via [Environment]::SetEnvironmentVariable) so schtasks-spawned instances inherit them.
+  @{ Name='discord_gateway';  File='discord_gateway.py';  Rel='scripts\queue\discord_gateway.py';    LogRel='local\queue\_gateway_console.log' }
 )
 
 $sh = New-Object -ComObject WScript.Shell

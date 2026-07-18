@@ -551,7 +551,15 @@ def main():
             #   台帳規律に預けることになるため不採用(規律は必ず破られる)。上流の送信印/添付退避は
             #   Gateway側と重複するが無害(同一Bot同一絵文字は1個に収束・添付は既存ファイルスキップ)。
             #   反映はポーラー再起動時(環境変数を付けて起動)。
-            skip_depts = {s.strip() for s in os.environ.get("GO5_POLLER_SKIP_DEPTS", "").split(",") if s.strip()}
+            #   ★2026-07-19: 正本はlocal/queue/cutover.json(env変数は子プロセスへ届かない事故が実測されたため。
+            #   gateway側と同じ設定ファイルを読む=両者のdept集合が構造的に一致する)
+            _sk = os.environ.get("GO5_POLLER_SKIP_DEPTS", "")
+            try:
+                _cj = json.load(open(os.path.join(LOCAL, "queue", "cutover.json"), encoding="utf-8"))
+                _sk = str(_cj.get("poller_skip_depts", _sk))
+            except Exception:
+                pass
+            skip_depts = {s.strip() for s in _sk.split(",") if s.strip()}
             if skip_depts:
                 n_skip = sum(1 for r in out if r.get("dept") in skip_depts)
                 if n_skip:

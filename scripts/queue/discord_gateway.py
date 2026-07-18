@@ -44,11 +44,28 @@ LOG_FILE = os.path.join(LOCAL, "discord_gateway.log")
 #   理由: シャドウ中はqueueを誰も消費しない=全行が「未claim滞留」に見え、窓が即答する部屋にも
 #   受領文が飛ぶ過剰動作になる。カットオーバー(consumer稼働)時に GO5_GATEWAY_JOBS=1 で解禁する。
 #   添付退避(P4相当)だけは受信時の記録行為なので常時有効(送信を伴わない・無害)。
-ACTIVE_JOBS = os.environ.get("GO5_GATEWAY_JOBS", "") == "1"
+def _cutover_conf():
+    """切替設定の正本=local/queue/cutover.json(env変数より優先)。
+
+    2026-07-19実測: User環境変数はハーネス/スケジューラの環境スナップショットに埋もれて
+    子プロセスへ届かないことがある(gatewayがshadowで再起動する事故)。ファイルなら
+    どの経路で起動しても同じ値を読む=決定論的。無ければenvへフォールバック。
+    """
+    import json as _json
+    p = os.path.join(LOCAL, "queue", "cutover.json")
+    try:
+        return _json.load(open(p, encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+_CONF = _cutover_conf()
+ACTIVE_JOBS = str(_CONF.get("gateway_jobs", os.environ.get("GO5_GATEWAY_JOBS", ""))) == "1"
 # パイロット限定用のdept allowlist (カンマ区切り・空=全部門)。手順書§2-1「data-org箱だけ仮点灯」を
 # 正確に実現する (無いとリハーサル中に他部屋へも受領印が飛ぶ=QAレビュー指摘の是正)。
 # 対象: 受領印(ack)・エスカレート・送信印(A2)。受信/添付退避は全部門のまま (無害な記録行為)。
-JOBS_DEPTS = frozenset(d.strip() for d in os.environ.get("GO5_GATEWAY_JOBS_DEPTS", "").split(",") if d.strip())
+JOBS_DEPTS = frozenset(d.strip() for d in str(_CONF.get("gateway_jobs_depts",
+    os.environ.get("GO5_GATEWAY_JOBS_DEPTS", ""))).split(",") if d.strip())
 # ★2026-07-19 Chami指示「この発言要らないんだけど…」で無効化(鳩P1と同時・詳細はinbox_poller.py参照)
 ACK_ENABLED = False
 ACK_AFTER_SEC = 45                                    # 未claim滞留→受領スタンプまで (鳩P1と同値)
