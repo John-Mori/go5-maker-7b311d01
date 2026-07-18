@@ -133,6 +133,11 @@ def main():
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
         io.open(out, "w", encoding="utf-8").write(body + "\n")
         print(f"\n書き出し: {out}", file=sys.stderr)
+        # タスクモード(--out-dir)は常に0を返す。意味つき終了コード(2=超過/1=接近)を
+        # スケジュールタスクに漏らすと、接近が出るたび毎週「失敗したタスク」に見え、
+        # 本物の故障(python不在等)と区別できなくなる(reregister_tasksの発火検証で実測)。
+        # レポートファイルが信号・終了コードは健康状態、と役割を分ける。
+        return 0
     return 2 if n_over else (1 if n_warn else 0)
 
 

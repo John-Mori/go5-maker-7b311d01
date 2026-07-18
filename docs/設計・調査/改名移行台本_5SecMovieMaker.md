@@ -41,3 +41,31 @@
 
 ## リポジトリ名(②の枠外・任意)
 - 変えても**公開URLは変わらない**(難読サフィックス付きの別名に紐づくため)。やるなら `gh repo rename` + `git remote set-url` のみ。急がない。
+
+## 凍結時の再実測(3分・データ整理が整備2026-07-18・手順書_受信基盤切替_段階2 §5から参照)
+
+> 棚卸しの数字は生き物(2026-07-18実測: タスク6→**11本**・実行系ファイル約22)。**計画停止の凍結直後にこの2本を流し、その結果を最終版とする。** 事前の数字は目安に過ぎない。
+
+絶対パスを焼き込んだファイル(bash・repo直下で):
+```bash
+grep -rlI "SougouStartFolder" --exclude-dir=local --exclude-dir=node_modules \
+  --exclude-dir=.git --exclude-dir=.obsidian --exclude-dir=.wrangler . | sort
+```
+※ `.claude/worktrees/` 配下が出たら**先に `git worktree remove`**(worktreeのgitdirは絶対パス相互参照=改名で両方向に壊れる。残すなら改名後に `git worktree repair`)。
+
+パスを参照するスケジュールタスク(PowerShell):
+```powershell
+Get-ScheduledTask | Where-Object { $_.Actions | Where-Object {
+  ($_.Execute -like '*go5-maker*') -or ($_.Arguments -like '*go5-maker*') -or ($_.WorkingDirectory -like '*go5-maker*') } } |
+  Select-Object TaskName | Sort-Object TaskName
+```
+
+タスクの一括再登録+発火検証(改名後・データ整理製):
+```powershell
+powershell -File scripts\maintenance\reregister_tasks.ps1              # dry-run(何が変わるか確認)
+powershell -File scripts\maintenance\reregister_tasks.ps1 -Apply       # 書き換え+再登録
+powershell -File scripts\maintenance\reregister_tasks.ps1 -Apply -Fire go5_context_budget_weekly,go5_build_knowledge_daily,go5_learning_report_weekly,go5_backup_local_daily
+# 常駐系(daemons_hidden/lab_revive/sales系)は再開フェーズで各自の手順に従い起動(むやみにFireAllしない)
+```
+- 検出は**タスク名でなく中身**(Execute/Arguments/WorkingDirectory)で行うため、今後増えたタスクも自動で拾う。
+- python系タスクは絶対パス登録が前提(PATH解決は黙って死ぬ・2026-07-17実測)。reregister_tasksは既存定義を書き換えるだけなので、正しく登録されていれば絶対パスは維持される。

@@ -185,7 +185,11 @@ def main():
     if total_all == 0:
         # R5: 流入ゼロの期間は週報を発行しない。呼び出し側がこの終了コードで送信を止める。
         print("\n(R5: 観測期間の流入ゼロ → 週報は発行しない)", file=sys.stderr)
-        return EXIT_NO_DATA
+        # ただしタスクモード(--out/--out-dir)では0を返す。意味つき終了コードをスケジュール
+        # タスクに漏らすと流入ゼロの週が「失敗したタスク」に見え、本物の故障と区別できない
+        # (context_budgetと同じ判断・reregister_tasksの発火検証で実測)。R5の「発行しない」
+        # 判断は送信側がレポートファイルの有無/内容で行う。
+        return 0 if args.out else EXIT_NO_DATA
     return 0
 
 
