@@ -37,3 +37,6 @@ playwright-report/
 # wrangler ローカルdev秘密
 .dev.vars
 **/.dev.vars
+
+# Obsidian(PC閲覧用ビューア)の設定フォルダ。保管庫=このリポジトリを開くと生成される
+.obsidian/
