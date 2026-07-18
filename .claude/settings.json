@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/hooks/pulse_touch.py",
+            "command": "python D:/SougouStartFolder/go5-maker/scripts/hooks/pulse_touch.py",
             "timeout": 10
           }
         ]
