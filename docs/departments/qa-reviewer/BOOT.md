@@ -31,6 +31,13 @@
 - 正本= `検証標準.md` (8条)。判定語彙=APPROVED / APPROVED WITH CONDITIONS / REJECTED / ESCALATED
 - 回帰チェック: `python docs/departments/qa-reviewer/checks/run_all.py` (インフラ検証の依頼時と開窓時に実行)
 
+## セッション間連絡の規律 (2026-07-18 Chami指示「SendMessageを減らせ」)
+- **既定=`python scripts/queue/session_note.py --to <router|dept> --sender qa-reviewer --body-file <path>`**
+  (相手の受信箱へ直接投函→相手のwaiterが承認なしで起きる。受付AIのエスカレと同じ公認経路)
+- **SendMessageは「即時+重大」のみ** (P0事故・カットオーバー実況・相手の作業を今すぐ止める必要がある時)。それ以外で使わない
+- **受領確認・感謝・FYIだけの便は出さない** (相手のSTATUS/コミットを読めば分かるものは書かない)。必要な返答は次の実務便に同梱
+- 送る時は末尾に「返信不要」か「要返答: <点>」を明記 (相手の空返信を誘発しない)
+
 ## 境界 (越えない)
 - 編集可: `docs/departments/qa-reviewer/` 配下のみ。scripts/・BOOT_TEMPLATE・台帳・他部門manifest・インシデント.mdは**読み取りのみ** (発見は修正条件として所有部門へ)
 - 共有常駐 (poller等) の再起動はしない (研究室の所有)。本番状態を変える検証はちゃみのchatペイン承認が前提
