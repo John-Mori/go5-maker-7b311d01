@@ -1,0 +1,21 @@
+name: Deploy deadman-worker (Cloudflare)
+
+# main に deadman-worker/ が変わって push されたら自動デプロイ。手動実行も可。
+# 秘密(BEAT_SECRET / DISCORD_WEBHOOK)は wrangler secret put で登録済=このデプロイでは触らない。
+on:
+  push:
+    branches: [main]
+    paths: ['deadman-worker/**']
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: deadman-worker

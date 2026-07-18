@@ -37,6 +37,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
@@ -48,6 +49,9 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 SUP_LOG = os.path.join(ROOT, "local", "_daemons_supervisor.log")
 STATE = os.path.join(ROOT, "local", "_deadman_state.json")
 PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
+# 外部dead-man(Cloudflare)へのビート。健全な間だけ叩く=途絶えたら「PCごと停止」とみなされる。
+BEAT_URL = os.environ.get("GO5_DEADMAN_BEAT_URL", "https://deadman.trustsignalbot.workers.dev/beat")
+BEAT_SECRET_FILE = os.path.join(ROOT, "local", "deadman_beat_secret.txt")
 
 EXPECTED = ["inbox_poller", "absence_watchdog", "local_responder",
             "gemini_responder", "office_daily", "claude_responder"]
@@ -114,10 +118,37 @@ def notify(text, dry_run):
         return False
 
 
+def send_beat():
+    """外部dead-man(Cloudflare)へビートを送る。健全時のみ呼ぶ=途絶=PCごと停止のシグナル。
+    best-effort(ネット不通でも監視本体は止めない)。"""
+    try:
+        with open(BEAT_SECRET_FILE, "r", encoding="utf-8") as f:
+            secret = f.read().strip()
+    except Exception:
+        return False  # 秘密未配置なら外部ビートはスキップ(ローカル監視は続行)
+    if not secret:
+        return False
+    try:
+        # ★User-Agent必須: 既定の "Python-urllib/x" は Cloudflare にbot扱いされ403になる
+        #   (avatar-cdn-expiryと同族の罠)。明示UAで回避。
+        req = urllib.request.Request(BEAT_URL, data=b"", method="POST",
+                                     headers={"X-Beat-Secret": secret,
+                                              "User-Agent": "go5-deadman-beat/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status in (200, 204)
+    except Exception as e:
+        print(f"外部ビート送信に失敗(監視は続行): {e}")
+        return False
+
+
 def run_once(stale_min, dry_run):
     st = _load_state()
     was_down = st.get("status") == "down"
     is_down, reasons = assess(stale_min)
+
+    # 健全(supervisor生存)な間だけ外部Workerへビート。dry-runでは送らない。
+    if (not is_down) and (not dry_run):
+        send_beat()
 
     if is_down and not was_down:
         msg = ("🚨 **艦隊dead-man検知** — 常駐supervisorが停止している疑い。\n"

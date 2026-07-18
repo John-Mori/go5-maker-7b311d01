@@ -1,0 +1,22 @@
+# deadman-worker — 外部dead-man (恒久-1の外部半分・2026-07-18)。
+#   家PCが健全な間だけ deadman_check.py が /beat を叩く。PCがロック画面/再起動/電源断で
+#   ビートが途絶えたら、この Worker の cron がそれを検知して Discord へ通知する。
+#   = 家PC自身が走れない状態(logon-gap)を、PCの外から見張る唯一の目。
+#   非破壊: 自分のKV(last_beat/alerted)の読み書きと、1つのDiscord webhookへのPOSTだけ。
+name = "deadman"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# cron: 15分ごとにビートの鮮度を点検する。
+[triggers]
+crons = ["*/15 * * * *"]
+
+# 非秘密の設定。秘密(BEAT_SECRET / DISCORD_WEBHOOK)は wrangler secret put で登録する(ここには書かない)。
+[vars]
+# ビートがこの分数を超えて途絶えたら「PCごと停止」とみなす。
+#   PC側 deadman_check.py は15分間隔なので、35分=約2.3周期(一時的な遅延では鳴らない)。
+STALE_MIN = "35"
+
+[[kv_namespaces]]
+binding = "DEADMAN"
+id = "e7303974696448fa8510c800ba13b45c"
