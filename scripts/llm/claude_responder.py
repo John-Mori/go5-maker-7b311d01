@@ -181,6 +181,15 @@ def cycle_queue(token):
                 q.ack(c["id"], result="代打応答" if ok else "代打失敗(再試行なし)")
                 append_processed(json.dumps(rec, ensure_ascii=False))
                 sent += 1
+                # ★followup投函(jsonl経路と同じ穴の対。研究室の本対応へ必ず届ける)
+                with open(INBOX, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "type": "followup", "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "dept": rec.get("dept"), "channel": rec.get("channel"),
+                        "author": rec.get("author"), "content": rec.get("content"),
+                        "orig_msg_id": mid, "msg_id": mid + "-fu",
+                        "note": "無人代打が一次ack済み(queue経路)。研究室が本対応すること",
+                    }, ensure_ascii=False) + "\n")
         for qid in held:
             q.nack(qid)  # サイクル末尾でpendingへ返す(研究室が起きたら本人が読む)
         if sent:
@@ -205,6 +214,9 @@ def cycle(token):
         except Exception:
             remaining.append(line)
             continue
+        if rec.get("type") == "followup":
+            remaining.append(line)  # ★followupは研究室宛て(下記)。代打は絶対に触らない
+            continue
         mid = str(rec.get("msg_id", ""))
         if mid in done:
             continue  # 二重処理しない(main箱からは落とす)
@@ -221,6 +233,18 @@ def cycle(token):
         ok = handle(rec, token)
         append_processed(line)  # 成否に関わらず台帳へ(暴走・無限再試行を防ぐ)
         sent += 1
+        # ★followup投函(2026-07-18: 「担当の起床後に返答」が構造的に嘘だった穴の修正。
+        #   実害=Chami「人事部門がずっと死んでるんやけど…」(研究室HQ 20:35)が代打ackのみで
+        #   本対応されず放置。代打は台帳記帳+箱から除去するため、担当には永遠に届かなかった)。
+        #   本対応が要る便はfollowupレコードとして箱へ残す→waiterが鳴り研究室が本対応する。
+        #   msg_idを変える(-fu)ので台帳dedupeに食われない。代打自身は上のtype判定で素通り。
+        remaining.append(json.dumps({
+            "type": "followup", "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "dept": rec.get("dept"), "channel": rec.get("channel"),
+            "author": rec.get("author"), "content": rec.get("content"),
+            "orig_msg_id": mid, "msg_id": mid + "-fu",
+            "note": "無人代打が一次ack済み。研究室が本対応すること",
+        }, ensure_ascii=False))
     # main箱を「残す分」だけに書き戻す(処理済み+機微以外は消える)
     with open(INBOX, "w", encoding="utf-8") as f:
         for line in remaining:
