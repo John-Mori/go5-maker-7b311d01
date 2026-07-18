@@ -44,24 +44,12 @@ LOCAL = os.path.join(ROOT, "local")
 INBOX = os.path.join(LOCAL, "discord_inbox.jsonl")
 PROCESSED = os.path.join(LOCAL, "discord_processed.jsonl")
 TOKEN_FILE = os.path.join(LOCAL, "cli_auth_token.txt")
-LAB_PULSE = os.path.join(LOCAL, "llm", "claude_active.txt")     # readiness=waiterの脈(箱を見ている)
-LAB_TOOL_PULSE = os.path.join(LOCAL, "llm", "lab_tool_pulse.txt")  # liveness=presence hookの脈(道具を使って働いている)
 CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
 
 POLL_SEC = 20
-# ★2信号判定へ改訂(2026-07-18・S1 presence hook導入・出荷前批評のfatal指摘反映):
-#   readiness(waiter脈) < READY_SEC          → 生存(耳が箱を見ている=本人が応対する)
-#   さもなくば liveness(hook脈) < BUSY_SEC
-#     かつ readiness < HARD_CAP_SEC          → 生存扱い(処理中で耳が一時停止。ターン末尾に再武装される猶予)
-#   それ以外                                  → 死亡=代打が出る
-# HARD_CAP: livenessがいくら新しくても、耳が45分止まったままなら代打を出す(硬い上限)。
-#   これが無いと「耳が死んだまま作業を続ける研究室」が新着を永久に放置できてしまう
-#   (=フック導入が900秒の安全網を撤廃してしまう、という批評の指摘への対処)。
-# 旧LAB_ALIVE_SEC=900(閾値だけで凌ぐ応急)はこの2信号で置き換え。INC-94の誤発火は
-# liveness猶予で防ぎ、真の死亡はreadiness 90秒+liveness 300秒で従来より速く検知できる。
-READY_SEC = 90                 # waiterは監視中2秒毎に脈を打つ=90秒あれば十分
-BUSY_SEC = 300                 # 直近5分以内にツール実行があれば「処理中」とみなす
-HARD_CAP_SEC = 45 * 60         # 耳の停止がこれを超えたら、働いていても代打を出す
+# ★生存判定(2信号)は共有ヘルパ scripts/llm/presence.py へ一本化(2026-07-18 INC対策)。
+#   readiness(waiter脈) OR liveness(hook脈)+HARD_CAP。閾値と設計理由はpresence.pyに集約。
+#   以前はここに実装があり、local/gemini responderへ横展開されず drift → 代打暴発を招いた。
 MAX_PER_CYCLE = 3              # 1巡回で処理する上限(暴走と費用の歯止め)
 SENSITIVE_DEPTS = ("dream-care", "past-room", "health-log")
 
@@ -74,19 +62,8 @@ def read_token():
         return ""
 
 
-def _age(path):
-    try:
-        return time.time() - os.path.getmtime(path)
-    except OSError:
-        return float("inf")
-
-
-def lab_alive():
-    ready = _age(LAB_PULSE)       # readiness: 耳(waiter)が箱を見ているか
-    if ready < READY_SEC:
-        return True
-    busy = _age(LAB_TOOL_PULSE)   # liveness: 道具を使って働いているか(presence hook)
-    return busy < BUSY_SEC and ready < HARD_CAP_SEC
+sys.path.insert(0, HERE)
+from presence import lab_alive  # noqa: E402  生存判定(2信号)は全responder共通の1関数へ一本化
 
 
 def processed_ids():

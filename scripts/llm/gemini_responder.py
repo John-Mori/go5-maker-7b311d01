@@ -59,12 +59,13 @@ def send(channel, text):
 
 
 def claude_absent():
-    """司令塔(Claude)が不在か。claude_active.txt が90秒以内に更新されていなければ不在とみなす
-    (local_responder.claude_is_active と同一基準)。"""
-    try:
-        return (time.time() - os.path.getmtime(CLAUDE_ACTIVE)) >= 90
-    except OSError:
-        return True
+    """司令塔(Claude)が不在か。判定は共有ヘルパ presence.lab_alive へ一本化(全responder同一基準)。
+
+    旧・claude_active.txt 90秒単独ゲートは、mainが長い作業中(耳=waiter脈が一時途切れ・
+    toolフック脈は新鮮)でも不在と誤判定し、ホイミンが受領文を暴発させた(2026-07-18 INC)。
+    presence.lab_alive は readiness(耳) OR liveness(toolフック脈)+HARD_CAP の2信号で判定する。"""
+    from presence import lab_alive  # sys.path に HERE を追加済(冒頭)
+    return not lab_alive()
 
 
 # 司令塔不在時にエスカレーションした際の受領返信(稼働中は黙ってエスカレ=逐一アナウンス不要)。

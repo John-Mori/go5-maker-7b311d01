@@ -51,10 +51,11 @@ WORK_WORDS = ("直して", "修正", "実装", "追加して", "デプロイ", "
 
 
 def claude_is_active():
-    try:
-        return (time.time() - os.path.getmtime(CLAUDE_ACTIVE)) < 90
-    except Exception:
-        return False
+    # 判定は共有ヘルパへ一本化(2026-07-18 INC対策): 旧・claude_active.txt 90秒単独ゲートは
+    # 「mainが作業中で耳(waiter脈)が一時途切れただけ」でも不在と誤判定し、generic即答を暴発させた。
+    # presence.lab_alive は readiness(耳) OR liveness(toolフック脈)+HARD_CAP の2信号で判定する。
+    from presence import lab_alive  # sys.path に HERE を追加済(冒頭)
+    return lab_alive()
 
 
 def send(channel, text):
