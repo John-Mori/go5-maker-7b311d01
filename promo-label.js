@@ -59,7 +59,17 @@
     return im._failed ? null : im;
   }
 
-  var scale = 1;      // 大きさ倍率(0.6〜2.5)
+  // ChatGPT分析(Chami依頼2026-07-18「セールラベル既定配置・表示設定」)に沿う既定値。
+  //   スクショの現配置を参考に、漫画・メインコピー・顔を邪魔せず自然に馴染む初期値。
+  // 既定サイズ: 仕様§3「ラベル幅≈13.5%」を"視認幅"で満たす値。月詠みバッジは縦長でboxに透明余白があるため
+  //   box基準の13.5%(scale0.4)は視認7%=読めない。視認幅≈13%になる scale0.72 を既定に(実測で調整)。
+  //   スクショの現状(視認≈18%=元既定scale1.0)より一回り小さく=仕様の"漫画より先に目へ飛び込まない"を満たす。
+  var DEFAULT_SCALE = 0.72;
+  var SCALE_MIN = 0.35, SCALE_MAX = 2.5;
+  var LABEL_OPACITY = 0.89;   // 既定不透明度(仕様§4・89%。文字が読めるよう下げすぎない)
+  // 色の馴染ませ(仕様§6-8): 金光彩/光沢/彩度を弱め、ラベルだけ浮きすぎるのを抑える近似。
+  var LABEL_FILTER = 'saturate(0.92) contrast(0.96) brightness(0.98)';
+  var scale = DEFAULT_SCALE;  // 大きさ倍率(SCALE_MIN〜SCALE_MAX)
   var fpos = null;    // 手動位置 {x,y}=ラベル左上のフレーム比(0..1)。null=既定(右上)
   var pct = 0;        // 割引率(セール中のみ>0)
   var priceVal = 0;   // 割引後価格(セール中のみ>0)。価格ラベルの数字
@@ -71,7 +81,7 @@
   var enabled = true;
   try { var _e = localStorage.getItem('promo_label_enabled'); if (_e === '0') enabled = false; } catch (e) {}
   try { var _t = localStorage.getItem('promo_label_type'); if (_t === 'price') ltype = 'price'; } catch (e) {}
-  try { var _s = parseFloat(localStorage.getItem('promo_label_scale')); if (_s >= 0.6 && _s <= 2.5) scale = _s; } catch (e) {}
+  try { var _s = parseFloat(localStorage.getItem('promo_label_scale')); if (_s >= SCALE_MIN && _s <= SCALE_MAX) scale = _s; } catch (e) {}
   try { var _p = JSON.parse(localStorage.getItem('promo_label_fpos') || 'null'); if (_p && typeof _p.x === 'number' && typeof _p.y === 'number') fpos = _p; } catch (e) {}
 
   function acct() { return window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'; }
@@ -102,7 +112,9 @@
   function lh() { return boxWH().h; }
 
   // 既定位置(右上・フレーム比)。scale込みで右端に余白40px。
-  function defPos() { return { x: (FRAME_W - lw() - 40) / FRAME_W, y: 300 / FRAME_H }; }
+  // 既定位置=漫画左上へ軽く重ねる(仕様§2)。左端に密着させず少し内側・メインコピーの下・顔や右のShorts UIを避ける。
+  //   絶対フォールバック(852×1280基準の X48/Y300)を解像度非依存の比率で保持。
+  function defPos() { return { x: 48 / 852, y: 300 / 1280 }; }
   // 現在のラベル左上(フレーム比)。手動があればそれ。画像外もOK＝端から大きくはみ出す所まで許可(一部は残す)。
   function curPos() {
     var pp = fpos || defPos();
@@ -134,13 +146,17 @@
     var v = tplVariant();
     var img = tplImg(v.src);
     ctx.save();
-    ctx.globalAlpha = rv;                                   // フェードイン(画像と同じ)
-    var pop = 0.86 + 0.14 * rv, cx = x + bw / 2, cy = y + bh / 2; // 0.86→1.0の拡大ポップ(中心基準)
+    ctx.globalAlpha = rv * LABEL_OPACITY;                  // フェードイン(画像と同じ)×既定不透明度89%
+    var pop = 0.9 + 0.1 * rv, cx = x + bw / 2, cy = y + bh / 2; // 0.9→1.0の控えめな拡大ポップ(中心基準)
     ctx.translate(cx, cy); ctx.scale(pop, pop); ctx.translate(-cx, -cy);
-    // ドロップシャドウ=フレームから持ち上がる立体感(バッジ形状=PNGのalphaに沿って落ちる)。
-    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20 * sx; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 7 * sy;
+    // ドロップシャドウ=フレームから軽く持ち上がる程度(仕様§5: 黒0.16・y+3・blur7・濃くしない)。
+    ctx.shadowColor = 'rgba(0,0,0,0.16)'; ctx.shadowBlur = 7 * sx; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 3 * sy;
     if (img && img.complete && img.naturalWidth) {
-      ctx.drawImage(img, x, y, bw, bh);                    // 完成デザイン(数字なし透過PNG)+影
+      // 色の馴染ませ(仕様§6-8): 彩度/コントラスト/明度を少し下げ、金光彩・光沢の浮きを抑える近似。
+      var prevFilter = ctx.filter;
+      try { ctx.filter = LABEL_FILTER; } catch (e) {}
+      ctx.drawImage(img, x, y, bw, bh);                    // 完成デザイン(数字なし透過PNG)+影+馴染ませ
+      try { ctx.filter = prevFilter || 'none'; } catch (e) {}
       ctx.shadowColor = 'transparent';                     // 数字には二重影を掛けない(自前の光彩がある)
       drawDigits(ctx, tplAcct().ink, v.slot, x, y, bw, bh, String(val()));
     } else {
@@ -220,14 +236,15 @@
     fpos = { x: cp.x + dxFrame / FRAME_W, y: cp.y + dyFrame / FRAME_H };
     persist(); redraw();
   }
-  function resetPos() { if (!active()) return; fpos = null; persist(); redraw(); }
+  // リセット(仕様§12): 位置=既定(漫画左上の推奨)・サイズ=既定へ戻す。
+  function resetPos() { if (!active()) return; fpos = null; scale = DEFAULT_SCALE; persist(); updateSizeLabel(); redraw(); }
   function updateSizeLabel() {
     var el = document.getElementById('promoSizeVal');
     if (el) el.textContent = Math.round(scale * 100) + '%';
   }
   function setScale(mult) {
     if (!active()) return;
-    var ns = Math.min(2.5, Math.max(0.6, Math.round((scale + mult) * 100) / 100));
+    var ns = Math.min(SCALE_MAX, Math.max(SCALE_MIN, Math.round((scale + mult) * 100) / 100));
     if (ns === scale) return;
     scale = ns; persist(); updateSizeLabel(); redraw();
   }
@@ -360,7 +377,7 @@
     // ★チェックは必ずONへ戻す(Chami指定2026-07-16「前の情報がリセットされた時もチェックを入れた状態に」)。
     //   前回OFFにしていても、新しい動画では既定のONから始まる=消し忘れでラベルが出ない事故を防ぐ。
     clear: function () {
-      pct = 0; priceVal = 0; fpos = null;
+      pct = 0; priceVal = 0; fpos = null; scale = DEFAULT_SCALE; // 新規動画は既定の位置・サイズから
       enabled = true;
       try { localStorage.setItem('promo_label_enabled', '1'); } catch (e) {}
       var en = document.getElementById('promoEnable'); if (en) en.checked = true;
