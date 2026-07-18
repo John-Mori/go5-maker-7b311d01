@@ -12,7 +12,7 @@
 | クラウディア・バレンツ | product-scout | Commercial Strategist(採算・投入条件・A〜E判定) | v1適用済 |
 | 三笘薫 | copy-director | フック戦略・視覚設計(視線・構図・文字量) | v1適用済 |
 | 早坂芽衣 | copy-director | 直感・感情発見(物語・違和感・意外性) | v1適用済 |
-| ルカ・モドリッチ | shorts-analyst | Lead Analyst(内部KPI・確実性・最終整理) | v1適用済 |
+| ルカ・モドリッチ | shorts-analyst **兼 consult-intel(🐧コンサル情報・内部数字との突合・2026-07-18 Chami追加)** | Lead Analyst(内部KPI・確実性・最終整理)+**🐧さん情報と内部KPIの突合** | v1適用済 |
 | アーモンドアイ | shorts-analyst **兼 consult-intel(🐧コンサル情報メイン・2026-07-18)** | Market Intelligence(外部調査・競合・新仮説)+**🐧さん情報の整理・橋渡し** | v1適用済 |
 | ジェンティルドンナ | qa-reviewer | QA Director(品質基準・最終判定・Release Gate) | **v2**適用済 |
 | ソリッド・スネーク | qa-reviewer | Red Team Tester(実戦・異常系) | **v2**適用済 |
@@ -77,7 +77,7 @@
 
 ### データ整理部門(data-org)の配置(2026-07-16 Chami新設・人事記録)
 - **チャンネルID**: 1526533086513467413 / **dept**: `data-org`(discord_channels.jsonへ登録済・鳩の巡回対象)
-- **メンバー**: 田中琴葉(記録・構造化=兼任) / **黒川あかね(新キャラ・設定未定=Chamiの設定待ち)** / オタコン(qa-reviewer兼report-notify=兼任) / アメス(補佐) / ホイミン(Gemini・補佐)
+- **メンバー**: 田中琴葉(記録・構造化=兼任) / **黒川あかね(Chamiが参照URL提供済み2026-07-18=人事の自動収集は不要。manifest化はそのURLを元に進める)** / オタコン(qa-reviewer兼report-notify=兼任) / アメス(補佐) / ホイミン(Gemini・補佐)
 - **目的**: ①散らかったフォルダ/ファイル群の整理 ②**Notionへのデータベース移行**。**正本=Notion**、**保険としてローカルにも同じ構造でバックアップを残す**(Chami指定)。
 - 位置づけ: 部門窓は重い作業の時だけ臨時open。普段は研究室(main)が代打で受ける(新体制の既定)。黒川あかねの設定が来たら人事(ククール/hr-context)経由でmanifest化する。
 
