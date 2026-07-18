@@ -179,6 +179,15 @@ class LeaseQueue:
         return [{"id": r[0], "msg_id": r[1], "dept": r[2], "body": r[3],
                  "enqueued_at": r[4]} for r in self._db.execute(q, args)]
 
+    def reroute(self, qid, new_dept):
+        """未処理行の宛先部門を付け替える (sweep相当のエスカレート用・2026-07-18 QA追加)。
+        用途: stale_pending (誰もclaimしない放置) を 'router'(=研究室) へ回す。
+        リースも解放するので、付け替え先のconsumerが即claimできる。処理済み行には効かない。"""
+        cur = self._db.execute(
+            "UPDATE queue SET dept=?, lease_until=0 WHERE id=? AND status='pending'",
+            (new_dept, qid))
+        return cur.rowcount == 1
+
     def next_counter(self, name):
         """表示用連番 (INC- 等) の原子的採番。共有カウンタの衝突 (INC-99/100二重) を根治。"""
         try:

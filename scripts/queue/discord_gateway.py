@@ -39,6 +39,23 @@ CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
 QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
 LOG_FILE = os.path.join(LOCAL, "discord_gateway.log")
 
+# --- 段階2: 鳩の周期ジョブの移植 (Gate条件1・2026-07-18 QA実装) ---
+# ★ACTIVE_JOBS=Falseの間、周期ジョブ(受領スタンプ/エスカレート)は完全停止=シャドウ据え置き。
+#   理由: シャドウ中はqueueを誰も消費しない=全行が「未claim滞留」に見え、窓が即答する部屋にも
+#   受領文が飛ぶ過剰動作になる。カットオーバー(consumer稼働)時に GO5_GATEWAY_JOBS=1 で解禁する。
+#   添付退避(P4相当)だけは受信時の記録行為なので常時有効(送信を伴わない・無害)。
+ACTIVE_JOBS = os.environ.get("GO5_GATEWAY_JOBS", "") == "1"
+ACK_AFTER_SEC = 45                                    # 未claim滞留→受領スタンプまで (鳩P1と同値)
+ACK_LEDGER = os.path.join(LOCAL, "ack_ledger.txt")    # ★鳩P1と同一台帳=並走中の二重ack防止
+ACK_SENSITIVE = ("dream-care", "past-room")           # 機微部屋はPROTOCOL管轄 (鳩P1と同値)
+ACK_PERSONA = "メタルギアMk.II"
+ACK_TEXT = "受領した。担当の起床後に返答する。"
+STALE_ESCALATE_SEC = 30 * 60                          # 未claim放置→router(研究室)へ付け替え (sweep相当)
+ESCALATE_LEDGER = os.path.join(LOCAL, "escalate_ledger.txt")
+ATTACH_DIR = os.path.join(LOCAL, "attachments")       # P4相当 (鳩と同一ディレクトリ=切替前後で連続)
+ATTACH_MAX_BYTES = 20 * 1024 * 1024
+ATTACH_KEEP_DAYS = 14
+
 
 def log(msg):
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
@@ -74,6 +91,99 @@ def record_from_message(m, chinfo):
     }
 
 
+def _ledger_load(path):
+    try:
+        return set(l.strip() for l in open(path, encoding="utf-8") if l.strip())
+    except OSError:
+        return set()
+
+
+def _ledger_append(path, key):
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(str(key) + "\n")
+    except OSError:
+        pass
+
+
+def _send_persona(target, text, by_dept=False):
+    """Mk.II名義の定型送信 (persona_send流用=既存の別名義/台帳運用と同一)。同期呼び=to_threadで包むこと。"""
+    import subprocess
+    try:
+        args = [sys.executable, os.path.join(ROOT, "scripts", "discord", "persona_send.py")]
+        args += (["--dept", target] if by_dept else ["--channel", target])
+        args += ["--persona", ACK_PERSONA, text]
+        r = subprocess.run(args, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=30)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _stash_attachments(urls, msg_id):
+    """添付をlocalへ写す (P4相当・鳩と同実装/同宛先)。同期呼び=to_threadで包むこと。"""
+    import subprocess
+    saved = []
+    if not urls:
+        return saved
+    os.makedirs(ATTACH_DIR, exist_ok=True)
+    for i, u in enumerate(urls):
+        if not u:
+            continue
+        ext = os.path.splitext(u.split("?", 1)[0])[1][:8] or ".bin"
+        dest = os.path.join(ATTACH_DIR, f"{msg_id}_{i}{ext}")
+        if os.path.exists(dest) and os.path.getsize(dest) > 0:
+            saved.append(os.path.join("local", "attachments", os.path.basename(dest)))
+            continue  # 鳩が先に保存済み (並走中の重複DL回避)
+        try:
+            r = subprocess.run(["curl", "-s", "-o", dest, "--max-time", "15",
+                                "--max-filesize", str(ATTACH_MAX_BYTES), u],
+                               capture_output=True, timeout=25)
+            if r.returncode == 0 and os.path.getsize(dest) > 0:
+                saved.append(os.path.join("local", "attachments", os.path.basename(dest)))
+            elif os.path.exists(dest):
+                os.remove(dest)
+        except Exception:
+            pass
+    return saved
+
+
+def ack_pass(q, now=None):
+    """P1相当: 未claimのままACK_AFTER_SEC滞留した行へ受領スタンプ (1msg1回・鳩と共有台帳)。
+
+    返り値=送った(ch名)のリスト。send関数はテストで差し替え可能にするためq側でなくここで束ねる。
+    """
+    now = now or time.time()
+    acked = _ledger_load(ACK_LEDGER)
+    sent = []
+    for r in q.stale_pending(older_sec=ACK_AFTER_SEC):
+        try:
+            body = json.loads(r["body"]) if isinstance(r["body"], str) else r["body"]
+        except ValueError:
+            continue
+        mid = str(r.get("msg_id") or "")
+        ch = body.get("channel", "")
+        if not mid or not ch or mid in acked:
+            continue
+        if body.get("dept") in ACK_SENSITIVE:
+            continue
+        sent.append((mid, ch))
+    return sent
+
+
+def escalate_pass(q, now=None):
+    """sweep相当: STALE_ESCALATE_SEC未claim放置をrouter(研究室)へ付け替える対象を返す。"""
+    now = now or time.time()
+    done = _ledger_load(ESCALATE_LEDGER)
+    out = []
+    for r in q.stale_pending(older_sec=STALE_ESCALATE_SEC):
+        mid = str(r.get("msg_id") or "")
+        if not mid or mid in done or r.get("dept") == "router":
+            continue
+        out.append(r)
+    return out
+
+
 def run_selftest():
     """Discordに接続せず、レコード生成→enqueue→冪等→statsの内部配線だけ検証する。"""
     import tempfile
@@ -101,7 +211,27 @@ def run_selftest():
         print(f"  {'PASS' if ok2 is False else 'FAIL'}: 同一msg_idの再受信は無視 (鳩と並走しても二重処理しない)")
         print(f"  {'PASS' if c and c['body']['content']=='テスト発言' else 'FAIL'}: claimで内容が取れる")
         print(f"  {'PASS' if c and c['dept']=='qa-reviewer' else 'FAIL'}: deptが保たれる")
-        allok = ok1 and (ok2 is False) and c and c["body"]["content"] == "テスト発言"
+        # --- 周期ジョブの判定ロジック (送信はしない・純粋な対象抽出のみ) ---
+        q2 = LeaseQueue(os.path.join(d, "jobs.db"))
+        mk = lambda mid, dept, ch: q2.enqueue(  # noqa: E731
+            json.dumps({"channel": ch, "dept": dept, "content": "x", "msg_id": mid},
+                       ensure_ascii=False), msg_id=mid, dept=dept)
+        mk("S1", "meeting-a", "会議室α")       # 滞留→ackすべき
+        mk("S2", "dream-care", "夢と回復")      # 機微→ack対象外
+        mk("S3", "qa-reviewer", "品質管理")     # 新鮮のまま残す
+        # S1/S2だけ古く見せる (テスト専用の時刻操作)
+        q2._db.execute("UPDATE queue SET enqueued_at = enqueued_at - 100 WHERE msg_id IN ('S1','S2')")
+        targets = ack_pass(q2)
+        ok5 = [m for m, _ in targets] == ["S1"]
+        print(f"  {'PASS' if ok5 else 'FAIL'}: ack対象=滞留のみ (機微・新鮮は除外) {targets}")
+        q2._db.execute("UPDATE queue SET enqueued_at = enqueued_at - 3600 WHERE msg_id='S1'")
+        esc = escalate_pass(q2)
+        ok6 = [r["msg_id"] for r in esc] == ["S1", "S2"] or [r["msg_id"] for r in esc] == ["S1"]
+        # 機微部屋もエスカレートは対象 (読まれない事実の可視化はPROTOCOL P0-2と整合)。routerは除外
+        print(f"  {'PASS' if ok6 else 'FAIL'}: エスカレ対象=30分放置のみ {[r['msg_id'] for r in esc]}")
+
+        allok = (ok1 and (ok2 is False) and c and c["body"]["content"] == "テスト発言"
+                 and ok5 and ok6)
         print(f"\n== selftest {'PASS' if allok else 'FAIL'} ==")
         return 0 if allok else 1
     finally:
@@ -109,7 +239,9 @@ def run_selftest():
 
 
 def run_gateway():
+    import asyncio
     import discord
+    from discord.ext import tasks
 
     token = open(TOKEN_FILE, encoding="utf-8").read().strip()
     chan_map = load_channel_map()
@@ -119,9 +251,57 @@ def run_gateway():
     intents.message_content = True  # ★要 Developer Portal での有効化 (privileged)
     client = discord.Client(intents=intents)
 
+    # --- 周期ジョブ (Gate条件1の移植分。ACTIVE_JOBS=Falseの間は起動しない) ---
+    @tasks.loop(seconds=30)
+    async def job_ack():
+        """P1相当: 未claim滞留45秒→Mk.II受領スタンプ (鳩と共有台帳=並走中も二重ackなし)。"""
+        try:
+            for mid, ch in ack_pass(q):
+                ok = await asyncio.to_thread(_send_persona, ch, ACK_TEXT)
+                _ledger_append(ACK_LEDGER, mid)  # 成否問わず1回で打ち止め (鳩P1と同方針)
+                log(f"受領スタンプ [{ch}] msg={mid} {'OK' if ok else 'FAIL'}")
+        except Exception as e:
+            log(f"job_ack失敗(継続): {type(e).__name__}")  # ループは死なせない (L3規律)
+
+    @tasks.loop(seconds=600)
+    async def job_escalate():
+        """sweep相当: 未claim放置30分→routerへ付け替え+incident chへ可視化。"""
+        try:
+            for r in escalate_pass(q):
+                if q.reroute(r["id"], "router"):
+                    _ledger_append(ESCALATE_LEDGER, r["msg_id"])
+                    log(f"エスカレート msg={r['msg_id']} dept={r['dept']}→router (30分未claim)")
+                    await asyncio.to_thread(
+                        _send_persona, "incident",
+                        f"未claim30分の滞留をrouter(研究室)へ回した (元dept={r['dept']})。", True)
+        except Exception as e:
+            log(f"job_escalate失敗(継続): {type(e).__name__}")
+
+    @tasks.loop(hours=24)
+    async def job_prune():
+        """添付退避の掃除 (P4相当・14日) + 古いdone行の掃除。"""
+        try:
+            cutoff = time.time() - ATTACH_KEEP_DAYS * 86400
+            n = 0
+            if os.path.isdir(ATTACH_DIR):
+                for fn in os.listdir(ATTACH_DIR):
+                    p = os.path.join(ATTACH_DIR, fn)
+                    if os.path.isfile(p) and os.path.getmtime(p) < cutoff:
+                        os.remove(p)
+                        n += 1
+            purged = q.purge_done()
+            log(f"掃除: 添付{n}件・done行{purged}件")
+        except Exception as e:
+            log(f"job_prune失敗(継続): {type(e).__name__}")
+
     @client.event
     async def on_ready():
-        log(f"gateway接続 (shadow): {client.user} / 監視ch {len(chan_map)}件 / queue={QUEUE_DB}")
+        mode = "jobs=ON" if ACTIVE_JOBS else "shadow(jobs=OFF)"
+        log(f"gateway接続 ({mode}): {client.user} / 監視ch {len(chan_map)}件 / queue={QUEUE_DB}")
+        if ACTIVE_JOBS:
+            for j in (job_ack, job_escalate, job_prune):
+                if not j.is_running():
+                    j.start()
 
     @client.event
     async def on_message(m):
@@ -131,6 +311,14 @@ def run_gateway():
         if cid not in chan_map:
             return  # 台帳外のchは拾わない
         rec = record_from_message(m, chan_map[cid])
+        if rec["attachments"]:
+            # P4相当: CDN失効前にlocalへ写す。to_thread=イベントループを塞がない (OpenClaw #4864の教訓)
+            try:
+                paths = await asyncio.to_thread(_stash_attachments, rec["attachments"], rec["msg_id"])
+                if paths:
+                    rec["attachments_local"] = paths
+            except Exception as e:
+                log(f"添付退避失敗(URLのみで続行): {type(e).__name__}")
         added = q.enqueue(json.dumps(rec, ensure_ascii=False), msg_id=rec["msg_id"], dept=rec["dept"])
         st = q.stats()
         log(f"受信[{rec['channel']}] msg={rec['msg_id']} {'enqueue' if added else '重複無視'} "

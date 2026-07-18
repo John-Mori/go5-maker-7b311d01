@@ -105,6 +105,17 @@ def main():
         check("未claim放置が検出される", any(r["msg_id"] == "G1" for r in sp))
         check("新しい行や処理済みは検出されない", not q4.stale_pending(older_sec=3600))
 
+        # 8.5) reroute: 未claim放置のエスカレート (sweep相当・2026-07-18 QA追加)
+        # ※G1(ghost)はテスト10の前提として触らず、専用メッセージで検証する
+        q5r = LeaseQueue(os.path.join(d, "q5r.db"), lease_sec=900)
+        q5r.enqueue({"content": "orphan"}, msg_id="O1", dept="dead-dept")
+        time.sleep(0.15)
+        oid = q5r.stale_pending(older_sec=0.1)[0]["id"]
+        check("rerouteでdeptを付け替えられる", q5r.reroute(oid, "router") is True)
+        rc = q5r.claim(dept="router")
+        check("付け替え先のdeptでclaimできる (リースも解放済)", rc is not None and rc["msg_id"] == "O1")
+        check("処理済み行へのrerouteは効かない", q5r.ack(rc["id"]) and q5r.reroute(rc["id"], "qa") is False)
+
         # 9) next_counter: 表示用連番の原子的採番 (INC-99/100二重の根治)
         check("counter 1", q4.next_counter("INC") == 1)
         check("counter 2", q4.next_counter("INC") == 2)
