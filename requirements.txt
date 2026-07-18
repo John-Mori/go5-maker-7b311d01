@@ -1,0 +1,10 @@
+# go5-maker Python依存 (2026-07-18 新設・恒久解 案Aで初の外部依存が入ったため)
+# フロント(index.html/app.js)はビルド不要・依存ゼロ。ここに書くのはPC側スクリプト
+# (scripts/) が使う外部パッケージのみ。標準ライブラリ(sqlite3/json/urllib等)は書かない。
+#
+# 導入: python -m pip install -r requirements.txt
+
+# Discord Gateway受信口 (scripts/queue/discord_gateway.py・恒久解 案A段階1)。
+# on_messageの即時push受信+Webhook別名義送信+リアクション+添付取得を担う。
+# 現行の鳩(inbox_poller・REST・標準ライブラリのみ)は依存不要のまま並走している。
+discord.py>=2.4

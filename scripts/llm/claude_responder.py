@@ -44,16 +44,24 @@ LOCAL = os.path.join(ROOT, "local")
 INBOX = os.path.join(LOCAL, "discord_inbox.jsonl")
 PROCESSED = os.path.join(LOCAL, "discord_processed.jsonl")
 TOKEN_FILE = os.path.join(LOCAL, "cli_auth_token.txt")
-LAB_PULSE = os.path.join(LOCAL, "llm", "claude_active.txt")   # 研究室(main)の脈=無印
+LAB_PULSE = os.path.join(LOCAL, "llm", "claude_active.txt")     # readiness=waiterの脈(箱を見ている)
+LAB_TOOL_PULSE = os.path.join(LOCAL, "llm", "lab_tool_pulse.txt")  # liveness=presence hookの脈(道具を使って働いている)
 CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
 
 POLL_SEC = 20
-LAB_ALIVE_SEC = 900            # 研究室の脈がこれより新しければ「生きている」=触らない。
-# ★120→900へ延長(2026-07-18・Chami「研究室に無人代打を出させないで・総括する場所だから」)。
-# 真因(INC-94): 脈を打つのはwaiterだけで、研究室が長いターンを処理中はwaiterが死んで脈が止まる。
-# 120秒だと処理中に「研究室が死んだ」と誤判定し無人代打が発火していた(11:30台に11回・amesドリフト事故)。
-# 900秒なら通常の処理ターンを跨いでも生存扱い=誤代打しない。genuineな長時間ダウンは自動復活(go5_lab_revive)の担当。
-# 完全な精度が要るなら「ツール実行毎に脈をtouchするpresence hook」(規約機械化§2-2)=Chami承認後に別途。
+# ★2信号判定へ改訂(2026-07-18・S1 presence hook導入・出荷前批評のfatal指摘反映):
+#   readiness(waiter脈) < READY_SEC          → 生存(耳が箱を見ている=本人が応対する)
+#   さもなくば liveness(hook脈) < BUSY_SEC
+#     かつ readiness < HARD_CAP_SEC          → 生存扱い(処理中で耳が一時停止。ターン末尾に再武装される猶予)
+#   それ以外                                  → 死亡=代打が出る
+# HARD_CAP: livenessがいくら新しくても、耳が45分止まったままなら代打を出す(硬い上限)。
+#   これが無いと「耳が死んだまま作業を続ける研究室」が新着を永久に放置できてしまう
+#   (=フック導入が900秒の安全網を撤廃してしまう、という批評の指摘への対処)。
+# 旧LAB_ALIVE_SEC=900(閾値だけで凌ぐ応急)はこの2信号で置き換え。INC-94の誤発火は
+# liveness猶予で防ぎ、真の死亡はreadiness 90秒+liveness 300秒で従来より速く検知できる。
+READY_SEC = 90                 # waiterは監視中2秒毎に脈を打つ=90秒あれば十分
+BUSY_SEC = 300                 # 直近5分以内にツール実行があれば「処理中」とみなす
+HARD_CAP_SEC = 45 * 60         # 耳の停止がこれを超えたら、働いていても代打を出す
 MAX_PER_CYCLE = 3              # 1巡回で処理する上限(暴走と費用の歯止め)
 SENSITIVE_DEPTS = ("dream-care", "past-room", "health-log")
 
@@ -66,11 +74,19 @@ def read_token():
         return ""
 
 
-def lab_alive():
+def _age(path):
     try:
-        return (time.time() - os.path.getmtime(LAB_PULSE)) < LAB_ALIVE_SEC
+        return time.time() - os.path.getmtime(path)
     except OSError:
-        return False
+        return float("inf")
+
+
+def lab_alive():
+    ready = _age(LAB_PULSE)       # readiness: 耳(waiter)が箱を見ているか
+    if ready < READY_SEC:
+        return True
+    busy = _age(LAB_TOOL_PULSE)   # liveness: 道具を使って働いているか(presence hook)
+    return busy < BUSY_SEC and ready < HARD_CAP_SEC
 
 
 def processed_ids():
