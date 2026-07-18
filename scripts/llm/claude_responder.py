@@ -214,8 +214,10 @@ def cycle(token):
         except Exception:
             remaining.append(line)
             continue
-        if rec.get("type") == "followup":
-            remaining.append(line)  # ★followupは研究室宛て(下記)。代打は絶対に触らない
+        if rec.get("type") in ("followup", "session-note"):
+            remaining.append(line)  # ★followup/session-noteは研究室宛て。代打は触らない
+            # (session-noteはセッション間連絡=Discord返信不要。代打が--printを浪費し
+            #  followupを量産するだけ=2026-07-19実測で確認)
             continue
         mid = str(rec.get("msg_id", ""))
         if mid in done:
