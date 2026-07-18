@@ -132,7 +132,7 @@
   }
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
   // 並べ替え対象外の固定タブ。(🦋バズ・💡候補)左端の2つは動かさない。
-  function isFixedCandTab_(id) { return id === 'main' || id === 'buzz'; }
+  function isFixedCandTab_(id) { return id === 'main' || id === 'buzz' || id === 'all'; }
 
   var SORTS = [
     { key: 'added_desc', label: '追加日が新しい順' },
@@ -1497,6 +1497,7 @@
     var tabs = lsGet(K_TABS, '[]');
     var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 バズ</button>' +
       '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 候補</button>' +
+      '<button class="cand-tab' + (_activeTab === 'all' ? ' active' : '') + '" data-ct="all" type="button">📚 全候補</button>' +
       tabs.map(function (t) {
         return '<button class="cand-tab' + (_activeTab === t.id ? ' active' : '') + '" data-ct="' + esc(t.id) + '" type="button">' + esc(t.name) + '</button>';
       }).join('') +
@@ -1516,6 +1517,7 @@
     wireTabDrag_();
 
     if (_activeTab === 'buzz') renderBuzz();
+    else if (_activeTab === 'all') renderAll_();
     else if (_activeTab === 'main') renderMain('main');
     else {
       var tab = null; tabs.forEach(function (t) { if (t.id === _activeTab) tab = t; });
@@ -1526,6 +1528,65 @@
   }
   // 候補アイテムの保存先: メインは cand_items、独立タブは各タブ固有キー。(表示を共有しない)
   function itemsKey(tabId) { return (!tabId || tabId === 'main') ? K_ITEMS : 'cand_items__' + tabId; }
+
+  // ── 📚全候補タブ: 候補(main)+独立タブ+全サークルタブの作品を集約表示(cidで重複排除)。
+  //    タブの✏️編集で excludeFromAll=true にしたタブは除外。各部門はこの集合を読む(段階2でD1へ橋渡し予定)。
+  //    集約読み取り中心のビューなので個別の非表示/削除ボタンは出さない(各タブ側で行う)。サークル作品は非同期取得。
+  function renderAll_() {
+    var body = $('candBody');
+    if (!body) return;
+    var tabs = lsGet(K_TABS, '[]');
+    var sortOpts = SORTS.map(function (s) { return '<option value="' + s.key + '"' + (s.key === _sort ? ' selected' : '') + '>' + s.label + '</option>'; }).join('');
+    body.innerHTML = '<div class="card" style="padding:10px 12px;">' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+        '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
+        '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
+        priceFilterHtml_() +
+        candColsCtlHtml_() +
+      '</div>' +
+      '<div class="hint" style="margin-top:6px;">💡候補・独立タブ・全サークルタブの作品をまとめて表示します。タブの✏️編集で「全候補に含まない」にしたタブは除外(各部門もこの一覧の作品だけを読みます)。</div>' +
+      '</div>' +
+      '<div id="candList"><p class="hint" style="padding:8px;">⏳ 全候補を集約中…</p></div>';
+    $('candSort').addEventListener('change', function () { _sort = this.value; renderAll_(); });
+    $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderAll_(); });
+    wirePriceFilter_(function () { renderAll_(); });
+    wireCandColsCtl_();
+
+    // 保存アイテム(main + 独立listタブ・除外でない)を集約し、サークルidを収集。
+    var seen = {}, stored = [];
+    function addItems(a) { (a || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; stored.push(it); } }); }
+    addItems(lsGet(K_ITEMS, '[]')); // 💡候補(main)は常に含む
+    var makerIds = [];
+    tabs.forEach(function (t) {
+      if (t.excludeFromAll) return; // このタブを全候補に含まない
+      if (isMakerTab_(t)) makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); });
+      else addItems(lsGet('cand_items__' + t.id, '[]')); // 独立した候補リストタブ
+    });
+
+    function finish(makerItems) {
+      var el = $('candList');
+      if (!el || _activeTab !== 'all') return; // 集約中にタブが変わっていたら破棄
+      var all = stored.slice();
+      (makerItems || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; all.push(it); } });
+      var arr = sortItems(all, _sort).filter(function (it) {
+        if (_filterSale && !isOnSale_(it)) return false;
+        if (!passPrice_(it)) return false;
+        if (isHiddenByPosted_(it.cid)) return false; // アカウント別「投稿済みを非表示」は全候補でも尊重
+        return true;
+      });
+      _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
+      if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">表示できる作品がありません。(💡候補やサークルタブに作品を追加してください)</p>'; return; }
+      var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
+      el.innerHTML = '<p class="hint" style="padding:2px 6px;">📚 全候補 ' + arr.length + '件</p>' +
+        arr.map(function (it) { return candCard(it, ''); }).join('');
+      wireCardCommon_(el);
+      fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === 'all') renderAll_(); });
+    }
+    if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items) { finish(items || []); });
+    else finish([]);
+  }
 
   // ── タブの並べ替え：PC=ドラッグ、スマホ=長押し→ドラッグ(Pointer Eventsでマウス/タッチ統一) ──
   //   固定の「💡候補」「＋タブを追加」は並べ替え対象外。サークルタブ同士のみ入れ替え可能。
@@ -2387,6 +2448,7 @@
       '<label class="hint" style="display:block;margin-bottom:2px;">タブ名(長い場合は短く編集できます)</label>' +
       '<input id="candEditName" type="text" autocomplete="off" value="' + esc(tab.name) + '">' +
       makersHtml +
+      '<label class="cand-filter-sale" style="display:flex;align-items:center;gap:6px;margin:12px 0 2px;"><input id="candEditExclude" type="checkbox"' + (tab.excludeFromAll ? ' checked' : '') + '><span>このタブを📚全候補に含めない(各部門の読み取りからも除外)</span></label>' +
       '<div style="display:flex;gap:8px;margin-top:8px;">' +
       '<button id="candEditSave" type="button" class="primary" style="flex:1;font-size:.9rem;padding:10px;">保存</button>' +
       '<button id="candEditDel" type="button" class="ghost" style="flex:0 0 auto;width:auto;color:#c0392b;border-color:#c0392b;">タブ削除</button>' +
@@ -2439,8 +2501,9 @@
     $('candEditSave').addEventListener('click', function () {
       var name = ($('candEditName').value || '').trim();
       if (!name) { $('candEditMsg').textContent = '⚠️ タブ名を入れてください'; return; }
+      var exclude = !!($('candEditExclude') && $('candEditExclude').checked); // 📚全候補に含めない
       var tabs = lsGet(K_TABS, '[]');
-      tabs.forEach(function (t) { if (t.id === tab.id) t.name = name; });
+      tabs.forEach(function (t) { if (t.id === tab.id) { t.name = name; t.excludeFromAll = exclude; } });
       lsSet(K_TABS, tabs);
       f.innerHTML = ''; render(); // タブバー再描画＋一覧再取得
     });
