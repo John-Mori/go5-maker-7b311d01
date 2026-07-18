@@ -106,6 +106,8 @@
   var _sort = 'added_desc';
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
+  // 絞り込み：現在価格が _priceMax 円以下の作品のみ表示(0=無効)。localStorageで永続。
+  var _priceMax = (function () { try { var n = parseInt(localStorage.getItem('cand_price_max') || '0', 10); return (n > 0) ? n : 0; } catch (e) { return 0; } })();
   // アカウント別「投稿済みを非表示」トグル。(両方同時ONで、いずれかで投稿済みの作品を隠せる)localStorageで永続。
   var _hidePosted = (function () { try { return JSON.parse(localStorage.getItem('cand_hide_posted') || '{}') || {}; } catch (e) { return {}; } })();
   function saveHidePosted_() { try { localStorage.setItem('cand_hide_posted', JSON.stringify(_hidePosted)); } catch (e) {} }
@@ -1425,6 +1427,25 @@
   }
   function priceOf(it) { return (it.price != null) ? it.price : (it.listPrice != null ? it.listPrice : Infinity); }
   function isOnSale_(it) { return !!(it && it.listPrice != null && it.price != null && it.discountPct > 0 && it.price < it.listPrice); } // price=0(100%OFF)もセール扱い
+  // 作品の「現在価格」(セール中はセール後価格)。無ければ定価、どちらも無ければnull(=価格不明)。
+  function priceOf_(it) { if (!it) return null; if (it.price != null && it.price !== '') return Number(it.price); if (it.listPrice != null && it.listPrice !== '') return Number(it.listPrice); return null; }
+  // 価格絞り込みを通過するか。_priceMax=0は無効(全通過)。価格不明の作品は通す(隠さない)。
+  function passPrice_(it) { if (!_priceMax) return true; var p = priceOf_(it); return (p == null || isNaN(p)) ? true : (p <= _priceMax); }
+  // 価格絞り込み入力のHTML(セール絞込の隣に置く・両render共通)。
+  function priceFilterHtml_() {
+    return '<label class="cand-filter-price" style="margin:0;display:inline-flex;align-items:center;gap:4px;">' +
+      '<input id="candPriceMax" type="number" inputmode="numeric" min="0" step="100" placeholder="円以下" value="' + (_priceMax ? _priceMax : '') + '" style="width:88px;">' +
+      '<span>円以下</span></label>';
+  }
+  // 価格絞り込み入力を配線(値変更で保存＋再描画)。rerenderは各タブの再描画関数。
+  function wirePriceFilter_(rerender) {
+    var el = $('candPriceMax'); if (!el) return;
+    el.addEventListener('change', function () {
+      var n = parseInt(this.value || '0', 10); _priceMax = (n > 0) ? n : 0;
+      try { localStorage.setItem('cand_price_max', String(_priceMax)); } catch (e) {}
+      rerender();
+    });
+  }
   function sortItems(items, mode) {
     var a = items.slice();
     if (mode === 'added_desc') a.sort(function (x, y) { return (y.addedAt || 0) - (x.addedAt || 0); });
@@ -2011,6 +2032,7 @@
       // 省スペース行：セール絞込(左)＋列数(PCのみ)＋非表示トグル(右端・状態で色と文言が変化)
       '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
+        priceFilterHtml_() +
         candColsCtlHtml_() +
         '<span style="flex:1 1 auto;"></span>' +
         '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '非表示リスト') + '</button>' +
@@ -2022,6 +2044,7 @@
     $('candSort').addEventListener('change', function () { _sort = this.value; renderCandList(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; this.classList.toggle('active', _showHidden); this.textContent = _showHidden ? '👁 通常表示に戻す' : '非表示リスト'; renderCandList(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderCandList(tabId); });
+    wirePriceFilter_(function () { renderCandList(tabId); });
     wireCandColsCtl_();
     wireHidePostedButtons_(function () { renderCandList(tabId); });
     $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
@@ -2197,6 +2220,7 @@
     var arr = sortItems(all, _sort).filter(function (it) {
       if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
       if (_filterSale && !isOnSale_(it)) return false;
+      if (!passPrice_(it)) return false;
       if (!_showHidden && isHiddenByPosted_(it.cid)) return false; // アカウント別「投稿済みを非表示」
       return true;
     });
@@ -2255,6 +2279,7 @@
       // 省スペース行：セール絞込(左)＋列数(PCのみ)＋非表示トグル(右端・状態で色と文言が変化)
       '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
+        priceFilterHtml_() +
         candColsCtlHtml_() +
         '<span style="flex:1 1 auto;"></span>' +
         '<button id="candShowHidden" type="button" class="cand-hidden-toggle' + (_showHidden ? ' active' : '') + '" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 11px;">' + (_showHidden ? '👁 通常表示に戻す' : '非表示リスト') + '</button>' +
@@ -2267,6 +2292,7 @@
     $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderMaker(tabId); });
+    wirePriceFilter_(function () { renderMaker(tabId); });
     wireCandColsCtl_();
     wireHidePostedButtons_(function () { renderMaker(tabId); });
     $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
@@ -2293,6 +2319,7 @@
       var arr = sortItems(items, _sort).filter(function (it) {
         if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
+        if (!passPrice_(it)) return false;
         if (!_showHidden && isHiddenByPosted_(it.cid)) return false; // アカウント別「投稿済みを非表示」
         return true;
       });
