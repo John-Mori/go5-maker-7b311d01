@@ -33,6 +33,7 @@
 3. 返信: `python scripts/discord/bot_send.py --dept <dept> "本文"`
    (キャラ発言は `python scripts/discord/persona_send.py` — 色/様式はlocal/persona_colors.json)
 4. 横断ルール: `D:\SougouStartFolder\00_AI-HQ\PRIORITY.md` を一読(全体の優先度と衝突しないこと)
+5. **ペルソナ台帳(INDEX.md)を読むツール(整合チェッカー等)を使う部門のみ**: 環境変数 `GO5_PERSONA_INDEX` にHQのINDEX.mdを指定してから実行する。ペルソナ台帳は2026-07-18にHQ直下へ移転済み(RULES.md§6=HQは運用ドキュメント専用・道具はrepoが正)。例: `GO5_PERSONA_INDEX="D:/SougouStartFolder/00_AI-HQ/departments/hr/personas/INDEX.md" python <tool>`。正本の場所=docs/departments/personas/README_移転.md。
 
 ## 責任範囲(所有権)
 - 編集可: <この部門が所有するファイル/領域を列挙>
