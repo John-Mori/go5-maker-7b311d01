@@ -278,17 +278,33 @@ def main():
     if avatar:
         payload["avatar_url"] = avatar
 
-    def post(pl):
+    # ミラー名義 (Chami(from Claude)/Chami(音声入力)等) は通知を鳴らさない (Chami指示2026-07-18:
+    # 「自分の発言だし通知消したい」)。専用bot新設は不要 — Discordのサイレントフラグ
+    # (SUPPRESS_NOTIFICATIONS=4096) で同じ目的を達成する (メッセージは普通に見え、通知だけ出ない)。
+    # あわせて wait=true で送信結果のmsg_idを取得し表示する=貼った本人が既読/着手印を押せるように。
+    mirror = persona.startswith("Chami(")
+    if mirror or "--silent" in sys.argv:
+        payload["flags"] = 4096
+
+    def post(pl, want_id=False):
+        url = hook_url + ("?wait=true" if want_id else "")
         req = urllib.request.Request(
-            hook_url, data=json.dumps(pl).encode("utf-8"),
+            url, data=json.dumps(pl).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": "go5-org-persona (personal, v1)"},
         )
         with urllib.request.urlopen(req, timeout=20) as r:
-            return r.status
+            if want_id:
+                try:
+                    data = json.loads(r.read().decode("utf-8"))
+                    return r.status, str(data.get("id", ""))
+                except ValueError:
+                    return r.status, ""
+            return r.status, ""
 
     try:
         if "embeds" in payload:
-            print(f"送信OK → {ch.get('name')} as {persona} (HTTP {post(payload)})")
+            st, mid = post(payload, want_id=mirror)
+            print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})" + (f" msg={mid}" if mid else ""))
         else:
             # 長文は切り捨てず"分割して連投"する(2026-07-17・INC-92)。
             # 旧実装は body[:1900] で黙って捨てていた: Discordの上限は2000字だが、
@@ -298,8 +314,9 @@ def main():
             for i, part in enumerate(split_body(body)):
                 pl = dict(payload)
                 pl["content"] = part
-                st = post(pl)
-                print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})" + (f" [{i+1}通目]" if i else ""))
+                st, mid = post(pl, want_id=mirror)
+                print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})"
+                      + (f" msg={mid}" if mid else "") + (f" [{i+1}通目]" if i else ""))
                 time.sleep(0.4)  # webhookのレート制限を避ける
     except Exception as e:
         print(f"送信失敗: {type(e).__name__}")

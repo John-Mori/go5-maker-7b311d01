@@ -353,6 +353,16 @@ def run_gateway():
     @client.event
     async def on_message(m):
         if m.author.bot or m.webhook_id:
+            # 鳩と同じ例外 (2026-07-18 Chami指示): Chamiミラーには送信印だけ押す (enqueueしない)。
+            # jobsゲート内=シャドウ無副作用の原則維持。鳩と並走中は同一絵文字が1個に収束=無害。
+            if (ACTIVE_JOBS and m.webhook_id
+                    and str(getattr(m.author, "name", "")).startswith("Chami(")):
+                try:
+                    emoji = (discord.utils.get(m.guild.emojis, name="sendms")
+                             or discord.utils.get(m.guild.emojis, name="送信") or "📮")
+                    await m.add_reaction(emoji)
+                except Exception as e:
+                    log(f"ミラー送信印失敗(継続): {type(e).__name__}")
             return  # Bot/Webhookの発言は無視 (自分の返信でループしない=鳩と同じ方針)
         cid = str(m.channel.id)
         if cid not in chan_map:
