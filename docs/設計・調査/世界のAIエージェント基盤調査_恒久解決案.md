@@ -173,7 +173,7 @@ D:\SougouStartFolder\go5-maker\.claude\worktrees\
 | 順 | 恒久解 | 消える問題 | 状態(2026-07-18) |
 |---|---|---|---|
 | 1 | C1 書き込み時検証 | P3-2 | **✅実装済**(`scripts/lib/jsonl_store.py`・8/8テスト・build_corpusに適用し壊れ行4件を実排除) |
-| 2 | A SQLiteメールボックス | P1全部 | **既存実装あり**(`scripts/bus/bus.py`・改修/人事が2026-07-18に着手・9/9テスト独立検証済)。data-orgは作らない=二重実装回避 |
+| 2 | A SQLiteメールボックス | P1全部 | **正本=`scripts/queue/leasequeue.py`**(研究室/QA共同所有・30/30テスト・DLQ実装済[max_deliveries=5超でdead隔離]・Gatewayシャドウがenqueue中)。3系統が独立実装され同設計に収束→統合済(研究室裁定2026-07-18)。data-orgは作らない=二重実装回避 |
 | 3 | B worktree分離 | P2全部 | **除外**(Chami指示「改名作業のやつ以外」。改名②下準備と同枠) |
 | 4 | C2 ローテーション | P3-1 | **✅実装済(安全版)**(`scripts/maintenance/archive_old.py`・日次生成物のみ・常駐ログ/共有台帳は改修とAの領分) |
 | 5 | D 反省バッチ(mem0型) | P4-2/P4-3 | **✅実装済(第一版)**(`scripts/llm/reflect.py`・ルールベース・自動変更なし・85件検出)。LLM判定の第二版はL2採点後 |
@@ -181,7 +181,7 @@ D:\SougouStartFolder\go5-maker\.claude\worktrees\
 
 ### 実装メモ(2026-07-18・Chami指示「改名以外を実装」)
 
-- **恒久解A(バス)は既に存在した**: `scripts/bus/`(bus.py=SQS型リースのSQLiteバス / jsonl_adapter.py=鳩無変更でパイロット並走)。設計思想(msg_id主キーで冪等・claim→complete・リース失効で再配達・outboxパターン)が本書§3提案Aと一致。**別途作れば二重実装=今日3度批判した失敗**のため作らず、既存テスト(bus 5/5・adapter 4/4)を独立に走らせて検証だけした。data-orgの箱をパイロットに乗せる/DLQ(attempts上限→dead_letter化)の追加は改修と調整。
+- **恒久解A(バス)は既に存在した**: 本日3系統が並行実装され(研究室go5bus / QA leasequeue / 人事bus.py)、**正本は `scripts/queue/leasequeue.py` に一本化**(研究室裁定2026-07-18)。私が最初に検証した `scripts/bus/bus.py` は人事の独立検証プロトタイプ(役目完了)で、**正本ではなかった**——検証対象を取り違えたので origin/main で正本を確認し訂正(「push済みと言う前にgrep」の自分版)。正本にはDLQ(max_deliveries=5超でdead隔離+dead_letters()一覧)が実装済みで、私が提案したDLQ懸念は正本側で既に解消。**3系統が独立に同設計へ収束した事実は「方向が正しい」ことの強い裏付け**(私の世界調査§3提案Aとも一致=4例目)。data-org箱をパイロット部門第1号にする(横取り事故4連の当事者=検証に最適・研究室裁定)。C1のjsonl_store検証はenqueue時の本文検証へ流用予定(統合レビュー)。
 - **C1が実運用で効いた**: `ts='t'`/空の壊れ行4件がコーパスから構造的に排除(644件・壊れ0)。
 - **C2の発見**: 肥大トップは画像(design-refs/promo-ref/persona_visuals・最大2.7MB)。**ログ・台帳は1MB未満でローテーション不急**。容量対策の本丸はログではなく画像整理かもしれない(別途)。
 - **Dの第一版はLLMを使わない**: 日次でqwen[55秒/回]を回すコストと8GBモデルの判定精度への公式懸念(§2.1)を踏まえ、まずルールベースで当たりを付ける。1件目がdream-care規約変更を正しく捉えた。
