@@ -578,6 +578,18 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 #pageRank .rank-title-acc2{color:#a8306e;}   /* 宵桜艶帖＝濃桜 */
 /* 作品名（FANZA作品名）はクリーム背景で読めるよう濃色に。 */
 #pageRank .fanza-name-row{color:#5a4a2e;font-weight:600;}
+/* PC版ランキングのレイアウト調整(Chami依頼2026-07-18): 画像を左へ・各項目を大きく・題名は約43字で2行clamp。
+   スマホ(既定)は従来のまま。真ん中が開く問題=情報列がflex:1で全幅に伸びるのを、画像左寄せ+題名の複数行化で解消。 */
+@media (min-width:1024px){
+  #pageRank .rank-row{gap:16px;padding:14px 18px;align-items:flex-start;}
+  #pageRank .rank-thumbcol{order:-1;margin-left:0;width:104px;}                 /* 画像を左へ(order)・大きく */
+  #pageRank .rank-thumbcol img{width:104px;max-height:150px;}
+  #pageRank .rank-num{font-size:20px;min-width:1.6em;padding-top:2px;}
+  #pageRank .rank-title-row{flex-wrap:wrap;}                                    /* 題名を2行に回せるように */
+  #pageRank .rank-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:16px;line-height:1.4;max-width:43em;} /* 約43字(全角)で改行・2行超は…省略。emは全角1文字≒1emに合わせるため */
+  #pageRank .rank-date{font-size:13px;}
+  #pageRank .vmetrics{font-size:14px;}
+}
 .rank-metrics{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--sub);margin-top:3px;flex-wrap:wrap;}
 .rsv-tab-row{display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;}
 .rsv-tab-row:last-child{border-bottom:none;}
