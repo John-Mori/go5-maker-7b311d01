@@ -184,7 +184,8 @@ entity_idにvideoIdを入れる時は必ずacc接頭辞付き(acc1-/acc2-)。ins
 6. **チャイム線(脈)**: `inbox_waiter.py --name <dept>` をrun_in_backgroundで起動し区切りごと再武装(while true禁止=INC-091)。新着で即起床+脈touch兼任。旧`heartbeat.py`は互換シムで転送されるが新規はwaiterで。session_label_<dept>.txtに自名。
 7. **UI文言の括弧は半角()** / 改修は?v=一括バンプ→commit→**push前に git pull --rebase**(並行セッションの衝突防止) / 著作権のあるキャラ設定原文は転記しない(要約のみ)。
 8. **★共有ツリーのgit規律 (2026-07-18・実害3件を受け全部署必須)**: N個のセッションが1つの作業ツリーを共有している。
-   - **新規ファイルは作成したターンのうちに「パス限定 add→commit」まで済ませる**(1呼吸で)。未コミットのuntrackedは保護ゼロ=本日、人事の設計書2ファイルが**実ファイルごと消失**した(autostashでは説明不能=clean系の疑い・現行犯特定は不可能だった)。
+   - **新規ファイルは作成したターンのうちに「パス限定 add→commit」まで済ませる**(1呼吸で)。**危険帯=untrackedかつ非ignoreのファイル**(保護ゼロ)=本日、人事の設計書2ファイルが**実ファイルごと消失**した(autostashでは説明不能=clean系の疑い・現行犯特定は不可能だった)。
+   - 補足: **gitignored配下(local/等)は別扱い**——`git clean -fd`のデフォルト対象外(-x指定時のみ消える)+`local/`全体が日次Driveスナップショット(消失検知つき・retention3日・機微3dirは月次永久)の対象=規約上repoに置けないもの(競合実名・機微)はlocal/に置けば無保護ではない。
    - **共有ツリーで `git clean` / `git stash -u` / `git checkout -f` / `git reset --hard` を実行しない**(他セッションの未コミット・untrackedを黙って消す)。どうしても必要ならChami承認+全セッション停止の窓で。
    - add→commitの間を空けない(ステージも共有=他セッションのcommitに黙って吸われる・2026-07-18実測)。
    - 恒久解=部門worktree分離(基盤恒久化設計書S5)。それまで本規律で守る。
