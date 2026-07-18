@@ -51,7 +51,13 @@
     var im = _imgCache[src];
     if (!im) {
       im = new Image();
-      im.onload = function () { redraw(); };  // 読み込めたら再描画(帯→テンプレへ切替)
+      // ★onloadだけでなくdecode()完了まで待つ(仕様§4)。complete=trueでも未デコードだと
+      //   drawImageが空描画になり、Canvasの数字だけが先に出る不具合の原因になる。
+      im.onload = function () {
+        var done = function () { im._ready = true; _composite = null; redraw(); }; // 準備完了→合成を作り直して再描画
+        if (typeof im.decode === 'function') { im.decode().then(done).catch(done); }
+        else { done(); }
+      };
       im.onerror = function () { im._failed = true; };
       im.src = src;
       _imgCache[src] = im;
@@ -61,10 +67,10 @@
 
   // ChatGPT分析(Chami依頼2026-07-18「セールラベル既定配置・表示設定」)に沿う既定値。
   //   スクショの現配置を参考に、漫画・メインコピー・顔を邪魔せず自然に馴染む初期値。
-  // 既定サイズ: 仕様§3「ラベル幅≈13.5%」を"視認幅"で満たす値。月詠みバッジは縦長でboxに透明余白があるため
-  //   box基準の13.5%(scale0.4)は視認7%=読めない。視認幅≈13%になる scale0.72 を既定に(実測で調整)。
-  //   スクショの現状(視認≈18%=元既定scale1.0)より一回り小さく=仕様の"漫画より先に目へ飛び込まない"を満たす。
-  var DEFAULT_SCALE = 0.72;
+  // 既定サイズ: 仕様§3「ラベル幅≈13.5%」を"視認幅"で満たす scale0.72 を、実機確認を踏まえ更に-5%(仕様§8)。
+  //   0.72×0.95=0.684。視認幅≈12.6%。左の集中線・「里香さん!?」への重なりを軽減。box基準13.5%(scale0.4)は
+  //   縦長PNGの透明余白で視認7%=不可読のため視認基準で管理。
+  var DEFAULT_SCALE = 0.684;
   var SCALE_MIN = 0.35, SCALE_MAX = 2.5;
   var LABEL_OPACITY = 0.89;   // 既定不透明度(仕様§4・89%。文字が読めるよう下げすぎない)
   // 色の馴染ませ(仕様§6-8): 金光彩/光沢/彩度を弱め、ラベルだけ浮きすぎるのを抑える近似。
@@ -133,35 +139,54 @@
     ctx.closePath();
   }
 
+  // ── ラベル合成(方式A・仕様§2/§3): テンプレPNG+数字を1枚のオフスクリーンCanvasへ焼く。
+  //   これに"だけ"フェードを掛ける=数字が本体と別タイミング/別透明度で出る不具合を根絶(仕様§1/§10)。
+  //   キャッシュキー=acct|type|value|src。値/アカウント/種別が変わったら作り直す(_composite=null)。
+  var _composite = null, _compKey = '';
+  function compositeReady_() {
+    var v = tplVariant(), img = tplImg(v.src);
+    if (!img || img._failed) return null;                  // PNG恒久失敗=帯フォールバックへ
+    if (!(img.complete && img.naturalWidth)) return null;  // 読込前=まだ描かない(仕様§4「読込中は全体非表示」)。
+    //   ※decode完了(_ready)時にonloadが_composite=nullで作り直す=万一complete先行で空焼きしても是正される。
+    var key = acct() + '|' + ltype + '|' + val() + '|' + v.src;
+    if (_composite && _compKey === key) return _composite;
+    var off = document.createElement('canvas');
+    off.width = img.naturalWidth; off.height = img.naturalHeight;
+    var octx = off.getContext('2d');
+    octx.clearRect(0, 0, off.width, off.height);
+    octx.drawImage(img, 0, 0);                             // 本体+装飾+三日月+固定文言(PNGに焼込済)
+    drawDigits(octx, tplAcct().ink, v.slot, 0, 0, off.width, off.height, String(val())); // 数字も同じ1枚へ
+    _composite = off; _compKey = key;
+    return off;
+  }
+  function invalidateComposite_() { _composite = null; _compKey = ''; }
+
   // app.js drawFrame から毎フレーム呼ばれる。フレーム(W×H)にラベルを重ね描き。
-  //   reveal(0..1)=前景画像と同じ登場進捗(Chami依頼2026-07-18)。画像と同じく"浮き出てくる":
-  //   フェードイン+ごく軽い拡大ポップ+ドロップシャドウでフレームから持ち上げる。未指定(プレビュー)は1。
+  //   reveal(0..1)=前景画像と同じ登場進捗(Chami依頼2026-07-18)。ラベルは"1枚の合成画像"として
+  //   前景画像と同じ透明度進行でフェードイン(仕様§5)。子要素の個別アニメ・個別透明度は一切無し。
   function drawOverlay(ctx, W, H, reveal) {
     if (!active()) return;
     var rv = (typeof reveal === 'number') ? Math.max(0, Math.min(1, reveal)) : 1;
-    if (rv <= 0) return; // まだ出ていない(画像と同じタイミングで登場)
+    if (rv <= 0) return; // まだ出ていない(前景画像と同じタイミングで登場)
     var sx = W / FRAME_W, sy = H / FRAME_H;
     var cp = curPos();
     var bw = lw() * sx, bh = lh() * sy, x = cp.x * W, y = cp.y * H;
-    var v = tplVariant();
-    var img = tplImg(v.src);
+    var v = tplVariant(), img = tplImg(v.src);
+    var comp = compositeReady_();
     ctx.save();
-    ctx.globalAlpha = rv * LABEL_OPACITY;                  // フェードイン(画像と同じ)×既定不透明度89%
-    var pop = 0.9 + 0.1 * rv, cx = x + bw / 2, cy = y + bh / 2; // 0.9→1.0の控えめな拡大ポップ(中心基準)
-    ctx.translate(cx, cy); ctx.scale(pop, pop); ctx.translate(-cx, -cy);
-    // ドロップシャドウ=フレームから軽く持ち上がる程度(仕様§5: 黒0.16・y+3・blur7・濃くしない)。
+    ctx.globalAlpha = rv * LABEL_OPACITY;                  // 合成1枚にだけフェード(前景画像と同一進行)×既定89%
+    // ドロップシャドウ=フレームから軽く持ち上がる(仕様§5: 黒0.16・y+3・blur7・濃くしない)。合成のalpha形状に落ちる。
     ctx.shadowColor = 'rgba(0,0,0,0.16)'; ctx.shadowBlur = 7 * sx; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 3 * sy;
-    if (img && img.complete && img.naturalWidth) {
-      // 色の馴染ませ(仕様§6-8): 彩度/コントラスト/明度を少し下げ、金光彩・光沢の浮きを抑える近似。
+    if (comp) {
+      // 色の馴染ませ(仕様§6-8): 彩度/コントラスト/明度を少し下げ、金光彩・光沢の浮きを抑える近似(合成全体へ均一)。
       var prevFilter = ctx.filter;
       try { ctx.filter = LABEL_FILTER; } catch (e) {}
-      ctx.drawImage(img, x, y, bw, bh);                    // 完成デザイン(数字なし透過PNG)+影+馴染ませ
+      ctx.drawImage(comp, x, y, bw, bh);                   // 本体+数字を1単位で描画=数字だけ先行しない
       try { ctx.filter = prevFilter || 'none'; } catch (e) {}
-      ctx.shadowColor = 'transparent';                     // 数字には二重影を掛けない(自前の光彩がある)
-      drawDigits(ctx, tplAcct().ink, v.slot, x, y, bw, bh, String(val()));
-    } else {
-      drawBand(ctx, x, y, bw, bh, sx, sy);                 // フォールバック=従来の帯(自前で影を持つ)
+    } else if (img && img._failed) {
+      drawBand(ctx, x, y, bw, bh, sx, sy);                 // PNG恒久失敗時のみ従来の帯(帯も本体+文言が一体)
     }
+    // decode未完了(comp==null かつ失敗でもない)は何も描かない=数字だけの先行表示を防ぐ(仕様§4)。
     ctx.restore();
   }
 
