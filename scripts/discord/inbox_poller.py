@@ -61,7 +61,10 @@ RESIDENT_FRESH_SEC = 600
 # ここで鳩自身が「受領した」だけをメタルギアMk.II名義(機械的アナウンスの既存規約)で返す。
 # LLMを起動しない=無人代打を増やさない(Chami指示2026-07-18「無人代打が起こらないように」)。
 # キャラを騙らない=ames型の口調事故を構造的に排除。本回答は従来経路のまま別途届く。
-ACK_ENABLED = True
+# ★2026-07-19 Chami指示「この発言要らないんだけど…」(研究室HQ・Mk.II ackへの返信)で無効化。
+#   実運用では研究室の応答が45秒を超える度に毎回鳴り、Chamiの苦情メッセージ自体にも
+#   ackを返す騒音になった(進捗は既存の3段スタンプ=送信/既読/着手で足りる)。
+ACK_ENABLED = False
 ACK_AFTER_SEC = 45                                   # main箱に無応答で滞留したら受領を返すまでの秒数
 ACK_LEDGER = os.path.join(LOCAL, "ack_ledger.txt")   # ack済みmsg_id(重複ack防止・再起動を跨いで有効)
 ACK_SENSITIVE = ("dream-care", "past-room")          # 機微部屋はPROTOCOL管轄=定型文を置かない

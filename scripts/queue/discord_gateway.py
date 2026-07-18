@@ -49,6 +49,8 @@ ACTIVE_JOBS = os.environ.get("GO5_GATEWAY_JOBS", "") == "1"
 # 正確に実現する (無いとリハーサル中に他部屋へも受領印が飛ぶ=QAレビュー指摘の是正)。
 # 対象: 受領印(ack)・エスカレート・送信印(A2)。受信/添付退避は全部門のまま (無害な記録行為)。
 JOBS_DEPTS = frozenset(d.strip() for d in os.environ.get("GO5_GATEWAY_JOBS_DEPTS", "").split(",") if d.strip())
+# ★2026-07-19 Chami指示「この発言要らないんだけど…」で無効化(鳩P1と同時・詳細はinbox_poller.py参照)
+ACK_ENABLED = False
 ACK_AFTER_SEC = 45                                    # 未claim滞留→受領スタンプまで (鳩P1と同値)
 ACK_LEDGER = os.path.join(LOCAL, "ack_ledger.txt")    # ★鳩P1と同一台帳=並走中の二重ack防止
 ACK_SENSITIVE = ("dream-care", "past-room")           # 機微部屋はPROTOCOL管轄 (鳩P1と同値)
@@ -283,6 +285,8 @@ def run_gateway():
     @tasks.loop(seconds=30)
     async def job_ack():
         """P1相当: 未claim滞留45秒→Mk.II受領スタンプ (鳩と共有台帳=並走中も二重ackなし)。"""
+        if not ACK_ENABLED:
+            return  # Chami指示2026-07-19で停止(コードは残置=再有効化はフラグ1つ)
         try:
             for mid, ch in ack_pass(q):
                 ok = await asyncio.to_thread(_send_persona, ch, ACK_TEXT)
