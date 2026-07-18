@@ -27,6 +27,9 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+# 検証付き追記ヘルパー(恒久解C1)。壊れ行(ts='t'等)を書き込む前に弾く。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+from jsonl_store import append_jsonl, SCHEMAS  # noqa: E402
 LEDGERS = [
     os.path.join(ROOT, "local", "discord_processed.jsonl"),          # 現役
     os.path.join(ROOT, "local", "discord_inbox_processed.jsonl"),    # 旧(2026-07-15で停止)
@@ -127,13 +130,19 @@ def main():
     rows = read_ledgers()
     fresh = [r for mid, r in rows.items() if mid not in known]
     fresh.sort(key=lambda r: (ts_key(r["ts"]), r["msg_id"]))
-    if fresh:
-        with io.open(OUT, "a", encoding="utf-8") as f:
-            for r in fresh:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    total = len(known) + len(fresh)
+    written = skipped = 0
+    for r in fresh:
+        try:
+            # 検証付き追記(恒久解C1)。ts='t' 等の壊れ行はここで弾かれ、コーパスに入らない。
+            append_jsonl(OUT, r, SCHEMAS["corpus"])
+            written += 1
+        except ValueError as e:
+            skipped += 1
+            print(f"  skip(不正): {e}")
+    total = len(known) + written
     sens = sum(1 for r in fresh if r["sensitive"])
-    print(f"コーパス追記 {len(fresh)}件 (うち機微 {sens}件) / 累計 {total}件 → {os.path.relpath(OUT, ROOT)}")
+    tail = f" / 不正でskip {skipped}件" if skipped else ""
+    print(f"コーパス追記 {written}件 (うち機微 {sens}件) / 累計 {total}件{tail} → {os.path.relpath(OUT, ROOT)}")
     return 0
 
 
