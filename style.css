@@ -1053,4 +1053,8 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 /* 作品クリック(導線2)のピンクカーソル印(Chami指定2026-07-14・提供画像を絵文字化)。既に着色済みのため filter 不要・角丸なし */
 .emico-cursor { height: 1.15em; vertical-align: -0.2em; border-radius: 0; }
 .vhide-remade-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.sale-stats { font-size:11px; opacity:.9; margin-right:auto; }
+.sale-stats { font-size:13px; opacity:.9; margin-right:auto; } /* 文字サイズ=field-label(▶リンク見出し)と同じ13px(Chami依頼2026-07-18・A) */
+/* PC版はセール会場の統計を全幅・中央ぞろえに(他のバー要素は下段へ折り返し)。スマホは従来のまま。 */
+@media (min-width:1024px){
+  .sale-stats{ flex-basis:100%; text-align:center; margin:0 0 6px 0; }
+}
