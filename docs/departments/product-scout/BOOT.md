@@ -43,7 +43,10 @@
 ## データ取得
 - **D1 go5_fanza(読み取りSELECTのみ可)**: fanza-workerディレクトリで
   `npx wrangler d1 execute go5_fanza --remote --json --command "SELECT ..."`
-- **cand_items(localStorage)**: Bashから読めない(既知の制約)。エクスポート手段の有無は要調査(system-engineerへ要件として引き継ぎ済・§3.4(a))
+- **全候補タブの作品だけを読む(§3.4(a)解決・改修α 2026-07-18)**: フロントの📚全候補タブの作品集合はD1 `candidate_pool` に同期される。worksとJOINで全候補に絞れる:
+  `SELECT w.* FROM works w JOIN candidate_pool p ON p.cid=w.cid ORDER BY p.updated_at DESC;`
+  (除外サークルは既に外れている。価格/セール絞込は表示専用でプール不変。空の時=Chamiがまだ全候補タブを開いていない=フロントが開くたび変化時のみ総入れ替え。worker経由=GET /api/candidate-pool・Origin必要)
+- **cand_items(localStorage)の直読み**: Bashから不可(既知の制約)。上のcandidate_pool経由で代替する
 - **FANZAページのWebFetch可否(年齢ゲート)**: 未検証。初回実務時に1回試し、結果を`findings.md`へ記録する
 
 ## 責任範囲(所有権)
