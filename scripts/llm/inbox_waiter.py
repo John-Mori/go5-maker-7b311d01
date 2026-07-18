@@ -25,6 +25,15 @@
 判定はレベル駆動: 箱が非空なら鳴る(=未処理メールを絶対に取り残さない)。増分ではなく
   「今そこに未処理があるか」で判断するため、起動時に既に溜まっていても即座に拾う。
 
+★デュアル監視 (段階2・2026-07-18・QA Release Gate条件3の研究室担当分):
+  旧jsonl箱に加えて、LeaseQueue(SQLite=local/queue/inbox.db・Gatewayシャドウの投入先)の
+  自dept宛てready件数(pending かつ リース切れ/未リース)も見張り、**どちらかに未処理があれば鳴る**。
+  - WAITER:MESSAGE契約は不変(各窓のBOOT手順は変わらない)。total=箱+queueの合計、内訳を併記。
+  - mainは queue側で router/research-room/main の3dept宛てを受ける(未claim放置はsweepが
+    reroute()でrouterへ回す設計=QA実装。mainがrouterを見張ることで確実に鳴る)。
+  - queue DBが無い/読めない間は従来どおり箱だけで動く(fail-open・依存を増やさない)。
+  - カットオーバー後に旧鳩を止めても、waiterはこのままqueue側で鳴り続ける=waiterの再改修不要。
+
 終了時の1行(起床ターンで最初に見える):
   WAITER:MESSAGE name=<name> total=<現行数>   … 新着あり=すぐ箱を処理
   WAITER:TTL     name=<name> total=<現行数>   … 満了=静かな定期点検(再武装だけでよい)
@@ -86,6 +95,41 @@ def count_lines(path):
         return 0
 
 
+QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
+
+
+def queue_depts(name):
+    """queue側で見張る宛先dept。mainは横断3dept(router=sweepのreroute先を含む)。"""
+    if name == "main":
+        return ("router", "research-room", "main")
+    return (name,)
+
+
+def count_queue_ready(name, db_path=QUEUE_DB):
+    """LeaseQueueの自dept宛てready件数(pendingかつリース切れ/未リース)。
+
+    読み取り専用・fail-open: DBが無い/ロック中/壊れている時は0を返し、旧jsonl箱だけの
+    従来動作に退化する(チャイム線は新機構の障害で死んではならない)。
+    """
+    if not os.path.exists(db_path):
+        return 0
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
+        try:
+            con.execute("PRAGMA busy_timeout=1000")
+            marks = ",".join("?" for _ in queue_depts(name))
+            row = con.execute(
+                f"SELECT COUNT(*) FROM queue WHERE status='pending'"
+                f" AND lease_until < ? AND dept IN ({marks})",
+                (time.time(), *queue_depts(name))).fetchone()
+            return int(row[0] or 0)
+        finally:
+            con.close()
+    except Exception:
+        return 0
+
+
 def _safe_float(value, default, minimum):
     try:
         v = float(value)
@@ -116,25 +160,26 @@ def main(argv=None):
 
     if args.once:
         touch(args.name)
-        n = count_lines(box)
+        n = count_lines(box) + count_queue_ready(args.name)
         print(f"WAITER:ONCE name={args.name} total={n}")
         return 0
 
     max_count = max(1, int(round((args.minutes * 60.0) / args.interval)))
     print(f"inbox_waiter開始[{args.name}]: {args.interval:g}秒間隔・最大{args.minutes:g}分"
-          f"({max_count}回) box={box}")
+          f"({max_count}回) box={box} (+queue={QUEUE_DB} depts={','.join(queue_depts(args.name))})")
 
     for _ in range(max_count):
         touch(args.name)                 # 脈=配達先の維持(見張るたびに新鮮化)
-        cur = count_lines(box)
-        if cur > 0:                      # ★チャイム鳴動: 箱に未処理がある(レベル駆動)
-            print(f"WAITER:MESSAGE name={args.name} total={cur}")
+        bn = count_lines(box)
+        qn = count_queue_ready(args.name)
+        if bn + qn > 0:                  # ★チャイム鳴動: 箱かqueueに未処理がある(レベル駆動)
+            print(f"WAITER:MESSAGE name={args.name} total={bn + qn} box={bn} queue={qn}")
             return 0
         if args.verbose:
-            print(f"  watch name={args.name} cur={cur}")
+            print(f"  watch name={args.name} box={bn} queue={qn}")
         time.sleep(args.interval)
 
-    print(f"WAITER:TTL name={args.name} total={count_lines(box)}")
+    print(f"WAITER:TTL name={args.name} total={count_lines(box) + count_queue_ready(args.name)}")
     return 0
 
 
