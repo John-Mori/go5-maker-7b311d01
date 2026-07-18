@@ -345,12 +345,41 @@ export default {
       }
     }
 
+    // ── 市場全体巡回(Market Crawl)の手動起動：cronと同じ処理をその場で1回実行。──
+    //   認証は管理鍵(ADMIN_SECRET・配布しない)。無認証で本番を叩かせない(既存管理EPと同型)。
+    //   通常は毎朝cronが自動実行するため、これは検証/取りこぼし補完用。
+    if (path === "/api/market-crawl") {
+      if (request.method !== "GET" && request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, null);
+      if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
+      if (!env.FANZA_DB) return json({ ok: false, error: "d1_unbound" }, 500, null);
+      if (!env.FANZA_API_ID || !env.FANZA_AFFILIATE_ID) return json({ ok: false, error: "api_not_configured" }, 500, null);
+      try {
+        const stats = await runMarketCrawl(env);
+        return json({ ok: true, ...stats }, 200, null);
+      } catch (e) {
+        return json({ ok: false, error: String(e && e.message || e) }, 500, null);
+      }
+    }
+
     if (path === "/" || path === "") {
       const mode = (env.FANZA_API_ID) ? "api+scrape" : "scrape-only";
       return text("go5-fanza-proxy ok (mode=" + mode + ")", 200);
     }
 
     return json({ ok: false, error: "not_found" }, 404, null);
+  },
+
+  // ── cron: 市場全体巡回(毎朝06:00 JST=UTC 21:00)。──
+  //   同人フロアのランキング上位+新着を D1 market_snapshot へ保存し、90日より前を掃除する。
+  //   既存works表/KV/候補タブ/実売取得には一切触れない(追加のみ・回帰ゼロ)。失敗は次回cronで回復。
+  async scheduled(event, env, ctx) {
+    try {
+      if (!env.FANZA_API_ID || !env.FANZA_AFFILIATE_ID || !env.FANZA_DB) return;
+      await runMarketCrawl(env);
+    } catch (e) {
+      // cronは投げ返しても再試行が乱れるだけ。翌朝の再実行で収束させる(秘密はログに出さない)。
+      console.error("market_crawl_failed", String(e && e.message || e));
+    }
   }
 };
 
@@ -419,6 +448,86 @@ async function fetchDmmJson(url, tries) {
     if (t < tries - 1) await new Promise((r) => setTimeout(r, 250));
   }
   return null;
+}
+
+// ── 市場全体巡回(Market Crawl)─────────────────────────────────────────────────
+//   fetchAllMakerItems の様式を流用し、サークル指定(article=maker/article_id)を外して
+//   同人フロア(digital_doujin)を sort 指定で引く=市場全体の巡回。fetchDmmJson + mapMakerItem
+//   をそのまま再利用(レビュー件数/平均・割引率・ジャンル・メーカー名・サムネまで整形済)。
+//   対象は通常フロアのみ(BL/TLは別客層のため初期対象外=設計書§2.1 裁定1(A))。
+//   ※campaign/セール期限フィールドがAPIレスポンスに入るかは【未確認・要実測】(実測は親=T5/§2.3)。
+//     入るなら market_snapshot へ列追加、入らなければ現行「期限は出品ページで要確認」を維持する。
+//   ※実売数(sales_n)はAPIに無い→予選通過cidのみ既存の sales キュー経路(stQueueSalesPut)で翌日補完
+//     するのは【次段】。本PRは市場snapshot保存までに留める(全件の実売スクレイプはしない=設計書§2.4)。
+const MARKET_FLOOR = { site: "FANZA", service: "doujin", floor: "digital_doujin" };
+
+// JST(UTC+9)の暦日 YYYY-MM-DD。cron は UTC 21:00=JST 06:00 に発火するため当日=JST基準で決める。
+function todayJst_() { return new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); }
+function jstDayMinus_(days) { return new Date(Date.now() + 9 * 3600000 - days * 86400000).toISOString().slice(0, 10); }
+
+// 同人フロアを sort 指定で最大 limit 件(hits上限=100・1ページ)取得し mapMakerItem で整形して返す。
+async function fetchMarketItems(env, sort, limit) {
+  const params = new URLSearchParams({
+    api_id: env.FANZA_API_ID, affiliate_id: env.FANZA_AFFILIATE_ID,
+    site: MARKET_FLOOR.site, service: MARKET_FLOOR.service, floor: MARKET_FLOOR.floor,
+    hits: String(Math.min(limit, 100)), offset: "1", sort: sort, output: "json",
+  });
+  const data = await fetchDmmJson(DMM_API_BASE + "?" + params.toString(), 2);
+  if (!data || !data.result) return [];
+  const pageItems = Array.isArray(data.result.items) ? data.result.items : [];
+  return pageItems.map(mapMakerItem);
+}
+
+// 当日の市場行を組み立てる：①sort=rank 上位100(rank=順位) ②sort=date 新着100(発売7日以内のみ採用)。
+//   rank枠とdate枠で重複したcidは rank枠の順位を優先(date枠のみで拾った作品は rank=null)。
+async function gatherMarketRows(env) {
+  const rankItems = await fetchMarketItems(env, "rank", 100);
+  const dateItems = await fetchMarketItems(env, "date", 100);
+  const cutoff = Date.now() - 7 * 86400000; // 新着枠は発売7日以内のみ
+  const byCid = new Map();
+  rankItems.forEach((it, i) => { if (it.cid && !byCid.has(it.cid)) byCid.set(it.cid, { it, rank: i + 1 }); });
+  for (const it of dateItems) {
+    if (!it.cid || byCid.has(it.cid)) continue; // rank枠にあればその順位を尊重
+    const rel = Date.parse(it.date || "");
+    if (!Number.isFinite(rel) || rel < cutoff) continue; // 発売7日より前は捨てる
+    byCid.set(it.cid, { it, rank: null });
+  }
+  return Array.from(byCid.values());
+}
+
+// 当日の market_snapshot を UPSERT 保存し、末尾で90日より前(91日以上前)を掃除する(PK=day,cid)。
+//   市場snapshotはD1専用の追加テーブル=既存works表/KV/USE_D1切替弁の挙動には一切触れない。
+async function saveMarketSnapshot(env, day, rows) {
+  if (!env.FANZA_DB) throw new Error("d1_unbound");
+  const num  = (v) => (v != null && v !== "" && Number.isFinite(Number(v))) ? Math.round(Number(v)) : null;
+  const real = (v) => (v != null && v !== "" && Number.isFinite(Number(v))) ? Number(v) : null;
+  const stmts = [];
+  for (const { it, rank } of rows) {
+    stmts.push(env.FANZA_DB.prepare(
+      "INSERT INTO market_snapshot(day,cid,rank,title,price,list_price,discount_pct,review_count,review_avg,genres,maker_name,thumb,released) " +
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) " +
+      "ON CONFLICT(day,cid) DO UPDATE SET rank=COALESCE(excluded.rank, market_snapshot.rank), title=excluded.title, price=excluded.price, list_price=excluded.list_price, discount_pct=excluded.discount_pct, review_count=excluded.review_count, review_avg=excluded.review_avg, genres=excluded.genres, maker_name=excluded.maker_name, thumb=excluded.thumb, released=excluded.released"
+    ).bind(
+      day, it.cid, (rank != null ? rank : null),
+      it.title || "", num(it.price), num(it.listPrice), (num(it.discountPct) || 0),
+      num(it.reviewCount), real(it.reviewAvg),
+      JSON.stringify(Array.isArray(it.genres) ? it.genres : []),
+      it.makerName || "", it.thumb || "", it.date || ""
+    ));
+  }
+  // 90日より前(91日以上前)の行を掃除(容量対策・設計書§2.1)。同一batchの末尾で実行。
+  stmts.push(env.FANZA_DB.prepare("DELETE FROM market_snapshot WHERE day < ?").bind(jstDayMinus_(90)));
+  if (stmts.length) await env.FANZA_DB.batch(stmts);
+  return { rows: rows.length };
+}
+
+// 市場巡回の実行本体(cron と手動エンドポイント /api/market-crawl の共通処理)。
+async function runMarketCrawl(env) {
+  const day = todayJst_();
+  const rows = await gatherMarketRows(env);
+  const rankN = rows.filter((r) => r.rank != null).length;
+  await saveMarketSnapshot(env, day, rows);
+  return { day, saved: rows.length, rank: rankN, date: rows.length - rankN };
 }
 
 // ── DMM 公式 API ─────────────────────────────────────────────────────────────

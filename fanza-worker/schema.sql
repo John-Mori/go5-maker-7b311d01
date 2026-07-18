@@ -37,3 +37,26 @@ CREATE TABLE IF NOT EXISTS run_flags (
   requested_at TEXT NOT NULL DEFAULT (datetime('now')),
   expires_at   TEXT
 );
+
+-- 市場全体巡回スナップショット (Market Crawl・Worker cronが毎朝保存)
+--   サークル追跡とは別軸で「同人フロア(digital_doujin)のランキング上位+新着」を日次でスナップショット。
+--   works表とは独立(母集団の意味を変えない=候補タブ/追跡サークル/実売取得に波及ゼロ)。
+--   1日約200行(rank上位100 + 新着100)。90日より前は保存処理末尾のDELETEで自動掃除(容量対策)。
+--   product-scoutは読み取りSELECTのみで市場候補を提案に含める(書き込みはcron/手動巡回だけ)。
+CREATE TABLE IF NOT EXISTS market_snapshot (
+  day           TEXT,       -- 取得日 YYYY-MM-DD(JST)
+  cid           TEXT,       -- content_id
+  rank          INTEGER,    -- sort=rank での順位(1..100)。新着枠のみで拾った作品は NULL
+  title         TEXT,
+  price         INTEGER,    -- 割引後価格
+  list_price    INTEGER,    -- 定価
+  discount_pct  INTEGER,    -- 割引率(%)
+  review_count  INTEGER,    -- レビュー件数(API標準装備)
+  review_avg    REAL,       -- レビュー平均(API標準装備)
+  genres        TEXT,       -- ジャンル名の JSON 配列文字列
+  maker_name    TEXT,       -- サークル/メーカー名
+  thumb         TEXT,       -- サムネURL
+  released      TEXT,       -- 発売日
+  PRIMARY KEY (day, cid)
+);
+CREATE INDEX IF NOT EXISTS idx_market_day ON market_snapshot(day);

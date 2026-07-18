@@ -2,6 +2,13 @@ name = "go5-fanza-proxy"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
+# ── cron トリガー：市場全体巡回(Market Crawl)を毎朝06:00 JST(=UTC 21:00)に実行 ──
+#   同人フロアのランキング上位+新着を D1 market_snapshot へスナップショット保存する。
+#   PC/Claude窓に依存せず「ちゃんと毎朝」を取得側で担保(設計書§0)。
+#   ※新規cron追加(既存トリガーは無かった)。デプロイ=要Chami承認(不変条件)。
+[triggers]
+crons = ["0 21 * * *"]
+
 # ── 非秘密の設定（ここに秘密は書かない。秘密は wrangler secret put で登録）──
 [vars]
 # フロント(GitHub Pages)のOriginだけ許可（ワイルドカード不可）
