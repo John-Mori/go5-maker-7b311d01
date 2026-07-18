@@ -9,7 +9,9 @@
    `printf '人事(hr)' > local/llm/session_label_hr-room.txt` と `printf '人事(hr)' > local/llm/session_label_hr-context.txt`
 2. **チャイム線を2本**run_in_backgroundで起動(2ch分・新着で即起床+脈・TTL45分・区切りごと再武装):
    `python scripts/llm/inbox_waiter.py --name hr-room` と `python scripts/llm/inbox_waiter.py --name hr-context`
-3. **両方の箱**を処理: `local/inbox/hr-room.jsonl` と `local/inbox/hr-context.jsonl` → 済みは `local/discord_processed.jsonl` へ
+3. **両方の箱を処理**: `local/inbox/hr-room.jsonl`・`local/inbox/hr-context.jsonl`
+   - ★**起床時の正順**: ① **mv退避**(退避先は**必ず`local/_work/<dept>.jsonl`**・`local/inbox/`内は禁止=sweepが空にするINC-86)→ ② **即waiter再武装**(処理の前に)→ ③ **読んだら既読印✅**・**作業開始で着手印👀**(`react.py`。送信📮は鳩が自動)→ ④ `_work`を処理→ 済みは `local/discord_processed.jsonl` へ
+   - ※SQLiteバス化(喪失/二重処理の恒久解)は**正本= scripts/queue/leasequeue.py に一本化・Chami指示で段階2待機中**(2026-07-18 研究室裁定)。人事が試作した `scripts/bus/`(検証済プロトタイプ)経由の運用は**保留=まだ使わない**。本統合はChami可視化+QA Release Gate通過後、改修主導で。
 4. 返信: `python scripts/discord/persona_send.py --dept hr-room --persona "ククール"`(or --dept hr-context / --persona "田中琴葉")
 
 ## 責任範囲(所有権)
