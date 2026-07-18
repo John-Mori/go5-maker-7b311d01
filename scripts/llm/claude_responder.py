@@ -162,10 +162,61 @@ def append_processed(line):
         f.write(line.rstrip("\n") + "\n")
 
 
+QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
+QUEUE_DEPTS = ("router", "research-room", "main")  # main宛て=waiterデュアル監視と同じ3dept
+
+
+def cycle_queue(token):
+    """段階2(2026-07-18): queue経路の代打。研究室死亡時にLeaseQueueのmain系宛てをclaim→処理→ack。
+
+    切替後はjsonlに新着が来ないため、これが無いと「絶対応対の最後の受け皿」が盲目になる
+    (手順書_受信基盤切替_段階2 §1-0)。DB/モジュールが無い間は何もしない=fail-open。
+    機微deptはQUEUE_DEPTSに含まれない(dream-care等は部門dept付きでenqueueされ、ここでは触らない)。
+    """
+    if not os.path.exists(QUEUE_DB):
+        return
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+        from leasequeue import LeaseQueue
+        q = LeaseQueue(QUEUE_DB)
+    except Exception:
+        return
+    try:
+        done = processed_ids()
+        sent = 0
+        held = []  # 機微でclaimしたまま保留したid(リース中=再claimされない→頭詰まりせず先へ進める)
+        for dept in QUEUE_DEPTS:
+            while sent < MAX_PER_CYCLE:
+                if lab_alive():
+                    break  # 研究室が起きた=即引く(多重応答防止。保留分はfinallyで返す)
+                c = q.claim(dept=dept, who="claude_responder")
+                if c is None:
+                    break
+                rec = c["body"] if isinstance(c["body"], dict) else {}
+                mid = str(rec.get("msg_id", c["msg_id"] or ""))
+                if mid in done:
+                    q.ack(c["id"], result="skip(jsonl経路で処理済)")
+                    continue
+                if rec.get("dept") in SENSITIVE_DEPTS:
+                    held.append(c["id"])  # 機微は内容に触れない(reroute流入時)。リース保持で素通り
+                    continue
+                ok = handle(rec, token)
+                q.ack(c["id"], result="代打応答" if ok else "代打失敗(再試行なし)")
+                append_processed(json.dumps(rec, ensure_ascii=False))
+                sent += 1
+        for qid in held:
+            q.nack(qid)  # サイクル末尾でpendingへ返す(研究室が起きたら本人が読む)
+        if sent:
+            print(f"{time.strftime('%H:%M:%S')} 無人代打(queue経路)で {sent} 件処理")
+    finally:
+        q.close()
+
+
 def cycle(token):
     if lab_alive():
         print("研究室が生存=代打しない(多重応答防止)")
         return
+    cycle_queue(token)  # 段階2: queue経路(jsonlと並行して見る。切替後はこちらが主)
     if not os.path.exists(INBOX) or os.path.getsize(INBOX) == 0:
         return
     done = processed_ids()
