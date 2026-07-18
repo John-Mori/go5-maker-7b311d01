@@ -166,6 +166,86 @@ def ensure_webhook(channel_id, token):
     return url
 
 
+PERSONA_HOOKS_CACHE = os.path.join(LOCAL, "discord_webhooks_personas.json")
+
+
+def _avatar_data_uri(persona):
+    """人格の標準アイコンをdata URIへ (Webhook自身のアバター設定用・作成時のみ)。失敗はNone (名前だけでも価値がある)。"""
+    try:
+        av = json.load(open(AVATARS_FILE, encoding="utf-8")).get(persona)
+        if isinstance(av, list):
+            av = av[0] if av else None
+        if not av:
+            return None
+        import base64
+        import subprocess
+        import tempfile
+        fd, tmp = tempfile.mkstemp(suffix=".img")
+        os.close(fd)
+        try:
+            r = subprocess.run(["curl", "-s", "-o", tmp, "--max-time", "15",
+                                "--max-filesize", "8000000", av], capture_output=True, timeout=25)
+            if r.returncode == 0 and os.path.getsize(tmp) > 0:
+                data = open(tmp, "rb").read()
+                mime = "image/png"
+                if data[:3] == b"\xff\xd8\xff":
+                    mime = "image/jpeg"
+                elif data[:4] == b"RIFF":
+                    mime = "image/webp"
+                elif data[:6] in (b"GIF87a", b"GIF89a"):
+                    mime = "image/gif"
+                return f"data:{mime};base64," + base64.b64encode(data).decode("ascii")
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+def ensure_persona_webhook(channel_id, persona, token):
+    """人格専用Webhookの取得/作成 (2026-07-18 Chami Go「タップで別人格が出る」の根治)。
+
+    従来は全人格が1本のWebhook(go5-persona)を共有し、発言ごとに名前/アイコンを上書きしていた。
+    Discordのプロフィール表示(タップ)はWebhook単位のため、直前に喋った別人格の姿が
+    キャッシュ表示される事象が起きていた。人格ごとにWebhookを分ける(名前=人格名・
+    Webhook自身のアバター=標準アイコン)ことで、タップ時も常に本人が出る。
+    1ch上限15本到達や作成失敗時は従来の共有Webhookへフォールバック(fail-open=送信は死なせない)。
+    """
+    cache = {}
+    if os.path.exists(PERSONA_HOOKS_CACHE):
+        try:
+            cache = json.load(open(PERSONA_HOOKS_CACHE, encoding="utf-8"))
+        except Exception:
+            cache = {}
+    key = f"{channel_id}:{persona}"
+    if key in cache:
+        return cache[key]
+    try:
+        hooks = api(f"/channels/{channel_id}/webhooks", token)
+        hook = next((h for h in hooks if h.get("name") == persona and h.get("token")), None)
+        if not hook:
+            payload = {"name": persona[:80]}
+            uri = _avatar_data_uri(persona)
+            if uri:
+                payload["avatar"] = uri
+            hook = api(f"/channels/{channel_id}/webhooks", token, payload)
+    except urllib.error.HTTPError as e:
+        # 403 (Webhook管理権限なし) でも従来の共有Webhookはキャッシュで生きている場合が多い。
+        # ここでexitすると「昨日まで送れていた送信」を壊す退行になるため、必ずフォールバックする。
+        # 人格別表示を有効化するにはbotへ「ウェブフックの管理」権限の再付与が要る (Chami作業・報告済)。
+        print(f"[persona_send] 人格別Webhook不可(HTTP {e.code})→共有Webhookへフォールバック"
+              + (" ※権限再付与で人格別が有効になる" if e.code == 403 else ""), file=sys.stderr)
+        return ensure_webhook(channel_id, token)
+    url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
+    cache[key] = url
+    with open(PERSONA_HOOKS_CACHE, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=1)
+    return url
+
+
 COLORS = {"red": 0xED4245, "orange": 0xE67E22, "yellow": 0xFEE75C, "green": 0x57F287,
           "blue": 0x5865F2, "purple": 0x9B59B6, "grey": 0x95A5A6, "pink": 0xEB459E}
 
@@ -230,7 +310,7 @@ def main():
             last[persona] = avatar
             with open(last_p, "w", encoding="utf-8") as f:
                 json.dump(last, f, ensure_ascii=False, indent=1)
-    hook_url = ensure_webhook(str(ch["id"]), token)
+    hook_url = ensure_persona_webhook(str(ch["id"]), persona, token)  # 人格別 (タップ表示の根治2026-07-18)
     payload = {"username": persona[:80]}
     if color == "auto":
         # 話者のテーマカラー(local/persona_colors.json)で送る。未定義なら通常メッセージにフォールバック
