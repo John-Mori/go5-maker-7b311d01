@@ -16,7 +16,7 @@
 #   codepage; non-ASCII here corrupts parsing. The Japanese message body lives in
 #   winupdate_message.py (UTF-8), which builds the text file this script sends.
 $ErrorActionPreference = 'SilentlyContinue'
-$root  = 'D:\SougouStartFolder\go5-maker'
+$root  = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $state = Join-Path $root 'local\_winupdate_state.txt'
 $body  = Join-Path $root 'local\_winupdate_body.txt'
 $titlesFile = Join-Path $root 'local\_winupdate_titles.txt'

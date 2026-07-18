@@ -15,7 +15,7 @@
 #
 # NOTE: ASCII-only (PS 5.1 reads a BOM-less .ps1 as ANSI; non-ASCII corrupts parsing).
 $ErrorActionPreference = 'SilentlyContinue'
-$root = 'D:\SougouStartFolder\go5-maker'
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $log  = Join-Path $root 'local\_lab_revive_verify.log'
 
 function Say($m) {

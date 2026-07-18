@@ -31,7 +31,7 @@
 # NOTE: keep this file ASCII-only. PowerShell 5.1 reads a no-BOM file as the system ANSI
 #       codepage; non-ASCII here corrupts parsing. Japanese notes live in README.md / the prompt.
 $ErrorActionPreference = 'SilentlyContinue'
-$root = 'D:\SougouStartFolder\go5-maker'
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $log  = Join-Path $root 'local\_lab_revive.log'
 $stateFile = Join-Path $root 'local\_lab_revive_state.txt'  # epoch seconds of last spawn (cooldown)
 $cooldownSec = 15 * 60

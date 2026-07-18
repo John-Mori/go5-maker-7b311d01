@@ -12,7 +12,7 @@
 
 $ErrorActionPreference = 'Stop'
 $TaskName = 'go5_deadman_check'
-$root = 'D:\SougouStartFolder\go5-maker'
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $script = Join-Path $root 'scripts\_daemons\deadman_check.py'
 
 # Resolve pythonw.exe (hidden interpreter). Prefer the real Python install over the WindowsApps shim.

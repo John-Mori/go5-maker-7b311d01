@@ -5,7 +5,7 @@
 # NOTE: keep this file ASCII-only. PowerShell 5.1 reads a no-BOM file as the system ANSI
 #       codepage; non-ASCII here corrupts parsing. Japanese notes live in README.md (not executed).
 $ErrorActionPreference = 'SilentlyContinue'
-$root = 'D:\SougouStartFolder\go5-maker'
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $suplog = Join-Path $root 'local\_daemons_supervisor.log'
 
 function Write-SupLog($m) {

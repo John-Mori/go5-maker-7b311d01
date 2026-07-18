@@ -7,10 +7,11 @@
 
 $ErrorActionPreference = 'Stop'
 
-$LogFile   = 'D:\SougouStartFolder\go5-maker\local\backup.log'
+$RepoRoot  = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$LogFile   = Join-Path $RepoRoot 'local\backup.log'
 # Config lives under local/ (gitignored), NOT next to this script: the destination
 # contains a strategy folder name, and scripts/ is tracked by a PUBLIC repo.
-$DestFile  = 'D:\SougouStartFolder\go5-maker\local\backup_dest.txt'
+$DestFile  = Join-Path $RepoRoot 'local\backup_dest.txt'
 # 3 per Chami (2026-07-17 kaizen ch): "14 days not needed, 3 is enough, delete the rest"
 $KeepCount = 3
 $MinFreeGB = 2
@@ -128,7 +129,7 @@ function Backup-Tree([string]$Label, [string]$Src, [string]$BackupRoot,
             # (PS 5.1 reads a no-BOM file as the system ANSI codepage; glyphs here would corrupt).
             $persona = [regex]::Unescape('\u30E1\u30BF\u30EB\u30AE\u30A2Mk.II')
             try {
-                & python 'D:\SougouStartFolder\go5-maker\scripts\discord\persona_send.py' `
+                & python (Join-Path $RepoRoot 'scripts\discord\persona_send.py') `
                     --channel 'incident' --persona $persona --body-file $tmp | Out-Null
                 Write-Log "DETECT: notified incident channel"
             } catch { Write-Log ("WARN: notify failed: {0}" -f $_.Exception.Message) }
@@ -150,7 +151,7 @@ function Backup-Tree([string]$Label, [string]$Src, [string]$BackupRoot,
 
 # Source 1: go5-maker local/ (historical layout: BackupRoot comes straight from config,
 # monthly keeps live directly under go5-backup-keep\YYYY-MM\<dir> as before).
-Backup-Tree -Label 'local' -Src 'D:\SougouStartFolder\go5-maker\local' `
+Backup-Tree -Label 'local' -Src (Join-Path $RepoRoot 'local') `
     -BackupRoot (Join-Path $driveRoot.FullName $rel) `
     -SensitiveRel @('dreams', 'past', 'health') -KeepSub ''
 

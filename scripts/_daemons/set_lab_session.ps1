@@ -19,8 +19,8 @@ param(
   [string]$SessionId = ''
 )
 $ErrorActionPreference = 'SilentlyContinue'
-$root     = 'D:\SougouStartFolder\go5-maker'
-$projDir  = 'C:\Users\chami\.claude\projects\D--SougouStartFolder-go5-maker'
+$root     = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$projDir  = 'C:\Users\chami\.claude\projects\D--SougouStartFolder-' + (Split-Path -Leaf $root)
 $revive   = Join-Path $root 'scripts\_daemons\revive_lab.ps1'
 $log      = Join-Path $root 'local\_lab_revive.log'
 

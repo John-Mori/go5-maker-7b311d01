@@ -17,7 +17,7 @@ param(
   [Parameter(Mandatory = $true)][string]$Dept
 )
 $ErrorActionPreference = 'SilentlyContinue'
-$root = 'D:\SougouStartFolder\go5-maker'
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $log  = Join-Path $root 'local\_dept_window.log'
 
 function Write-Log($m) {
