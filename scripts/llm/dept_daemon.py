@@ -367,6 +367,56 @@ class Daemon:
             pass
         return done
 
+    def drain_queue(self):
+        """LeaseQueue経路のドレイン(切替④の必須前提・2026-07-19)。
+
+        カットオーバー後はjsonlに新着が来ない=queueを読めないデーモンは盲目になる
+        (手順書_受信基盤切替_段階2 §1-0と同じ穴のデーモン版)。claim→handle→ack。
+        DBが無い間は何もしない(fail-open)。二重処理はprocessed台帳で防ぐ。
+        """
+        qdb = os.path.join(LOCAL, "queue", "inbox.db")
+        if not os.path.exists(qdb):
+            return 0
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+            from leasequeue import LeaseQueue
+            q = LeaseQueue(qdb)
+        except Exception:
+            return 0
+        done = 0
+        try:
+            processed = set()
+            try:
+                for pl in open(PROCESSED, encoding="utf-8", errors="replace"):
+                    try:
+                        m = json.loads(pl).get("msg_id")
+                        if m:
+                            processed.add(str(m))
+                    except Exception:
+                        continue
+            except OSError:
+                pass
+            while done < 5:  # 1巡回の上限(暴走ガード)
+                c = q.claim(dept=self.dept, who=f"dept_daemon:{self.dept}")
+                if c is None:
+                    break
+                rec = c["body"] if isinstance(c["body"], dict) else {}
+                mid = str(rec.get("msg_id", c.get("msg_id") or ""))
+                if mid and mid in processed:
+                    q.ack(c["id"], result="skip(処理済)")
+                    continue
+                ok = self.handle(rec, json.dumps(rec, ensure_ascii=False))
+                q.ack(c["id"], result="キャラ応答" if ok else "失敗(main回送済)")
+                if not ok:  # jsonl側drainと同じ安全網: 失敗はmain箱へ
+                    with open(MAIN_INBOX, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                done += 1
+        finally:
+            q.close()
+        if done:
+            log(self.dept, f"queue経路 {done}件処理")
+        return done
+
     def recover_inflight(self):
         """前回killの取り残し(inflight)を起動時に箱へ戻す=喪失を遅延に変える。"""
         inflight = self.box + ".inflight"
@@ -419,7 +469,7 @@ class Daemon:
                     pass  # 対話窓が生きている=本人が応対。箱に触れない(脈も窓waiterが打つ)
                 else:
                     self.touch_pulse()
-                    n = self.drain()
+                    n = self.drain() + self.drain_queue()
                     if n:
                         log(self.dept, f"{n}件処理")
                 self.last_loop = time.time()
