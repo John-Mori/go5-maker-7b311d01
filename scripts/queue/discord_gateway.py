@@ -45,6 +45,10 @@ LOG_FILE = os.path.join(LOCAL, "discord_gateway.log")
 #   受領文が飛ぶ過剰動作になる。カットオーバー(consumer稼働)時に GO5_GATEWAY_JOBS=1 で解禁する。
 #   添付退避(P4相当)だけは受信時の記録行為なので常時有効(送信を伴わない・無害)。
 ACTIVE_JOBS = os.environ.get("GO5_GATEWAY_JOBS", "") == "1"
+# パイロット限定用のdept allowlist (カンマ区切り・空=全部門)。手順書§2-1「data-org箱だけ仮点灯」を
+# 正確に実現する (無いとリハーサル中に他部屋へも受領印が飛ぶ=QAレビュー指摘の是正)。
+# 対象: 受領印(ack)・エスカレート・送信印(A2)。受信/添付退避は全部門のまま (無害な記録行為)。
+JOBS_DEPTS = frozenset(d.strip() for d in os.environ.get("GO5_GATEWAY_JOBS_DEPTS", "").split(",") if d.strip())
 ACK_AFTER_SEC = 45                                    # 未claim滞留→受領スタンプまで (鳩P1と同値)
 ACK_LEDGER = os.path.join(LOCAL, "ack_ledger.txt")    # ★鳩P1と同一台帳=並走中の二重ack防止
 ACK_SENSITIVE = ("dream-care", "past-room")           # 機微部屋はPROTOCOL管轄 (鳩P1と同値)
@@ -148,10 +152,16 @@ def _stash_attachments(urls, msg_id):
     return saved
 
 
-def ack_pass(q, now=None):
+def _dept_allowed(dept, allow=None):
+    allow = JOBS_DEPTS if allow is None else allow
+    return not allow or dept in allow
+
+
+def ack_pass(q, now=None, allow=None):
     """P1相当: 未claimのままACK_AFTER_SEC滞留した行へ受領スタンプ (1msg1回・鳩と共有台帳)。
 
     返り値=送った(ch名)のリスト。send関数はテストで差し替え可能にするためq側でなくここで束ねる。
+    allow=dept allowlist (パイロット限定・既定は環境変数JOBS_DEPTS)。
     """
     now = now or time.time()
     acked = _ledger_load(ACK_LEDGER)
@@ -165,20 +175,27 @@ def ack_pass(q, now=None):
         ch = body.get("channel", "")
         if not mid or not ch or mid in acked:
             continue
-        if body.get("dept") in ACK_SENSITIVE:
+        if body.get("dept") in ACK_SENSITIVE or not _dept_allowed(r.get("dept"), allow):
             continue
         sent.append((mid, ch))
     return sent
 
 
-def escalate_pass(q, now=None):
-    """sweep相当: STALE_ESCALATE_SEC未claim放置をrouter(研究室)へ付け替える対象を返す。"""
+def escalate_pass(q, now=None, allow=None):
+    """sweep相当: 30分放置をrouter(研究室)へ付け替える対象。
+
+    2026-07-18改: stale_pending→**abandoned** (リース失効放置の全部) へ変更。研究室指摘の
+    エッジ=一度claimされnackされた行 (deliveries>0) がstale_pendingでは検出外に落ちるため。
+    処理中 (リース有効) は含まれないので、働いている行を奪うことはない。
+    """
     now = now or time.time()
     done = _ledger_load(ESCALATE_LEDGER)
     out = []
-    for r in q.stale_pending(older_sec=STALE_ESCALATE_SEC):
+    for r in q.abandoned(older_sec=STALE_ESCALATE_SEC):
         mid = str(r.get("msg_id") or "")
         if not mid or mid in done or r.get("dept") == "router":
+            continue
+        if not _dept_allowed(r.get("dept"), allow):
             continue
         out.append(r)
     return out
@@ -230,8 +247,19 @@ def run_selftest():
         # 機微部屋もエスカレートは対象 (読まれない事実の可視化はPROTOCOL P0-2と整合)。routerは除外
         print(f"  {'PASS' if ok6 else 'FAIL'}: エスカレ対象=30分放置のみ {[r['msg_id'] for r in esc]}")
 
+        # --- パイロット限定allowlist (手順書§2-1の実効化) ---
+        ok7 = ack_pass(q2, allow=frozenset(["data-org"])) == [] \
+            and [m for m, _ in ack_pass(q2, allow=frozenset(["meeting-a"]))] == ["S1"]
+        print(f"  {'PASS' if ok7 else 'FAIL'}: dept allowlistで対象を限定できる (パイロット=1部門だけ点灯)")
+        # --- nack済み行のエスカレ (abandoned化・研究室指摘エッジ) ---
+        cS = q2.claim(dept="meeting-a")
+        q2.nack(cS["id"])  # claim→nack=deliveries=1 (stale_pendingでは見えなくなる)
+        esc2 = [r["msg_id"] for r in escalate_pass(q2)]
+        ok8 = "S1" in esc2
+        print(f"  {'PASS' if ok8 else 'FAIL'}: nack済み放置もエスカレ対象に拾う (abandoned) {esc2}")
+
         allok = (ok1 and (ok2 is False) and c and c["body"]["content"] == "テスト発言"
-                 and ok5 and ok6)
+                 and ok5 and ok6 and ok7 and ok8)
         print(f"\n== selftest {'PASS' if allok else 'FAIL'} ==")
         return 0 if allok else 1
     finally:
@@ -279,7 +307,7 @@ def run_gateway():
 
     @tasks.loop(hours=24)
     async def job_prune():
-        """添付退避の掃除 (P4相当・14日) + 古いdone行の掃除。"""
+        """添付退避の掃除 (P4相当・14日) + 古いdone行の掃除 + チャンネル名の日次追従 (A10)。"""
         try:
             cutoff = time.time() - ATTACH_KEEP_DAYS * 86400
             n = 0
@@ -293,6 +321,25 @@ def run_gateway():
             log(f"掃除: 添付{n}件・done行{purged}件")
         except Exception as e:
             log(f"job_prune失敗(継続): {type(e).__name__}")
+        try:
+            # A10: 台帳の表示名をDiscordの実名へ追従 (旧鳩sync_channel_names_の日次版・裁定2026-07-18)
+            changed = 0
+            reg = json.load(open(CHANNELS_FILE, encoding="utf-8"))
+            for c in reg:
+                cid = str(c.get("id", ""))
+                ch = client.get_channel(int(cid)) if cid.isdigit() else None
+                real = getattr(ch, "name", None)
+                if real and c.get("name") != real:
+                    log(f"名前追従: {c.get('name')} -> {real}")
+                    c["name"] = real
+                    if cid in chan_map:
+                        chan_map[cid]["name"] = real
+                    changed += 1
+            if changed:
+                with open(CHANNELS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(reg, f, ensure_ascii=False, indent=1)
+        except Exception as e:
+            log(f"名前追従失敗(継続): {type(e).__name__}")
 
     @client.event
     async def on_ready():
@@ -323,6 +370,15 @@ def run_gateway():
         st = q.stats()
         log(f"受信[{rec['channel']}] msg={rec['msg_id']} {'enqueue' if added else '重複無視'} "
             f"(ready={st['ready']} leased={st['leased']})")
+        if ACTIVE_JOBS and added and _dept_allowed(rec["dept"]):
+            # A2: 送信印 (3段印の1段目=「届いた」の即可視化・裁定2026-07-18で移植)。
+            # 並走中は鳩と二重押しになるが、同一Bot同一絵文字はDiscord側で1個に収束=無害。
+            try:
+                emoji = (discord.utils.get(m.guild.emojis, name="sendms")
+                         or discord.utils.get(m.guild.emojis, name="送信") or "📮")
+                await m.add_reaction(emoji)
+            except Exception as e:
+                log(f"送信印失敗(配達は継続): {type(e).__name__}")
 
     try:
         client.run(token, log_handler=None)

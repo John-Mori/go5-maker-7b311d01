@@ -116,6 +116,21 @@ def main():
         check("付け替え先のdeptでclaimできる (リースも解放済)", rc is not None and rc["msg_id"] == "O1")
         check("処理済み行へのrerouteは効かない", q5r.ack(rc["id"]) and q5r.reroute(rc["id"], "qa") is False)
 
+        # 8.7) abandoned: nack済み行もエスカレ対象に拾う (研究室指摘のエッジ・2026-07-18)
+        qa2 = LeaseQueue(os.path.join(d, "qa2.db"), lease_sec=900)
+        qa2.enqueue({"content": "nacked"}, msg_id="N1", dept="qa")
+        qa2.enqueue({"content": "working"}, msg_id="N2", dept="qa")
+        c1 = qa2.claim(dept="qa")              # 最古優先=N1
+        c2 = qa2.claim(dept="qa")              # 次=N2 (両方リース中)
+        qa2.nack(c1["id"])                     # N1だけ手放す=deliveries=1でリース失効状態
+        time.sleep(0.15)
+        ab = qa2.abandoned(older_sec=0.1)
+        ids = [r["msg_id"] for r in ab]
+        check("abandonedはnack済み行(N1)を拾う (stale_pendingの検出外)", "N1" in ids)
+        check("abandonedはリース有効の処理中行(N2)を含まない", "N2" not in ids)
+        check("stale_pendingはN1を拾えない (エッジの実証)",
+              "N1" not in [r["msg_id"] for r in qa2.stale_pending(older_sec=0.1)])
+
         # 9) next_counter: 表示用連番の原子的採番 (INC-99/100二重の根治)
         check("counter 1", q4.next_counter("INC") == 1)
         check("counter 2", q4.next_counter("INC") == 2)

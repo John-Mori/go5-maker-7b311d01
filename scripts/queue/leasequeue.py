@@ -179,6 +179,25 @@ class LeaseQueue:
         return [{"id": r[0], "msg_id": r[1], "dept": r[2], "body": r[3],
                  "enqueued_at": r[4]} for r in self._db.execute(q, args)]
 
+    def abandoned(self, older_sec, dept=None):
+        """リースが切れたまま放置の未処理行 (claim経験の有無を問わない・2026-07-18 QA追加)。
+
+        stale_pending()はdeliveries=0限定のため、一度claimされnackされた行 (例: 代打が
+        機微をリース返却した行) が検出外に落ちる (研究室指摘)。エスカレート判定はこちらを使う:
+        「pending かつ リース失効 かつ enqueueからolder_sec経過」= いま誰も働いていない放置全部。
+        処理中 (リース有効) の行は含まない。"""
+        now = time.time()
+        sql = ("SELECT id, msg_id, dept, body, enqueued_at, deliveries FROM queue"
+               " WHERE status='pending' AND lease_until < ? AND enqueued_at < ?")
+        args = [now, now - older_sec]
+        if dept:
+            sql += " AND dept=?"
+            args.append(dept)
+        sql += " ORDER BY id"
+        return [{"id": r[0], "msg_id": r[1], "dept": r[2], "body": r[3],
+                 "enqueued_at": r[4], "deliveries": r[5]}
+                for r in self._db.execute(sql, args)]
+
     def reroute(self, qid, new_dept):
         """未処理行の宛先部門を付け替える (sweep相当のエスカレート用・2026-07-18 QA追加)。
         用途: stale_pending (誰もclaimしない放置) を 'router'(=研究室) へ回す。
