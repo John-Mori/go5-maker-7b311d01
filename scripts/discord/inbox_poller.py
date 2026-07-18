@@ -285,7 +285,14 @@ def sync_channel_names_(chans, token):
     """
     changed = []
     for c in chans:
-        live = api_get(f"/channels/{c['id']}", token)
+        # ★1chの失敗で鳩全体を殺さない(2026-07-19実障害: ホイミン部屋のbot権限喪失=403で
+        #   起動即死→supervisorが起こしても即死のループ=全部屋無応答。docstringの
+        #   「名前が引けない時は現状維持」を実装レベルでも守る=fail-open)
+        try:
+            live = api_get(f"/channels/{c['id']}", token)
+        except Exception as e:
+            print(f"ch名同期スキップ [{c.get('name')}] {type(e).__name__}: {getattr(e, 'code', '')}")
+            continue
         name = (live or {}).get("name")
         if name and name != c.get("name"):
             changed.append((c.get("name"), name))
