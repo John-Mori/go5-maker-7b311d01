@@ -219,10 +219,13 @@ class Daemon:
         )
         env = dict(os.environ)
         env["CLAUDE_CODE_OAUTH_TOKEN"] = self.token
+        # ★promptはstdinで渡す(引数で渡すと--add-dirが可変長のためpromptまでdirとして
+        #   飲み込み「Input must be provided」で即死する=2026-07-18に実障害。stdinは
+        #   Windowsのコマンドライン長制限(約32K)の回避にもなる)
         p = subprocess.run(
             [CLAUDE, "--print", "--permission-mode", "bypassPermissions",
-             "--add-dir", HQ, prompt],
-            cwd=ROOT, env=env, capture_output=True, text=True,
+             "--add-dir", HQ],
+            input=prompt, cwd=ROOT, env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=WORK_TIMEOUT)
         reply = ""
         if os.path.exists(reply_file):
@@ -290,7 +293,16 @@ class Daemon:
                 rec = json.loads(line)
             except Exception:
                 continue
-            self.handle(rec, line)
+            ok = self.handle(rec, line)
+            if not ok:
+                # ★失敗を黙って落とさない(2026-07-18実障害: 「ククール、反映して。」が
+                #   生成失敗→箱から消失=INC-103族)。failedへ記録し、main箱へ回送
+                #   (研究室が安全網として本対応。二重処理はprocessed台帳が防ぐ)
+                with open(self.box + ".failed.jsonl", "a", encoding="utf-8") as f:
+                    f.write(line.rstrip("\n") + "\n")
+                with open(MAIN_INBOX, "a", encoding="utf-8") as f:
+                    f.write(line.rstrip("\n") + "\n")
+                log(self.dept, f"処理失敗→failed記録+main箱へ回送 msg={rec.get('msg_id')}")
             done += 1
             rest = lines[i + 1:]  # 残りだけをinflightへ書き戻す(kill耐性)
             with open(inflight, "w", encoding="utf-8") as f:
