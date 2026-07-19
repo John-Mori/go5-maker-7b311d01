@@ -59,8 +59,36 @@ INTERACTIVE_CHECK_SEC = 30      # 対話窓waiterの存在確認の間隔(プロ
 MEMORY_TAIL = 20                # promptへ注入する記憶の末尾件数
 PRINT_TIMEOUT = 300
 WORK_TIMEOUT = 600             # ツール付き作業(work_generate)の上限
-WORK_WORDS = ("直して", "修正", "実装", "追加して", "デプロイ", "変えて", "作って", "調べて",
-              "特定して", "バグ", "エラー", "壊れ", "対応して", "やって", "反映", "消して", "削除")
+WORK_MODEL = "sonnet"          # ★O3(裁-3): 作業agentのモデルを固定(実装の物量=sonnet・分業表準拠)
+# ★O3(裁-3・改善書P1-5): 作業agentの許可ツールを最小allowlistへ固定。旧 bypassPermissions は
+#   「何でも実行可」=プロンプトインジェクション耐性が最弱線だった。--print(headless)では未許可
+#   ツールは自動拒否(プロンプトを出せないため)=allowlist外は安全に落ちる。ファイル作業+検証に
+#   必要な範囲だけ許可。Bashのコマンド単位のさらなる絞り込みはO5の follow-up。
+WORK_ALLOWED_TOOLS = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
+# 作業依頼キーワード(=main箱回送 or work_scope部門でのwork_generate起動の判定に使う)。
+# ★依頼形(〜して/〜お願い等)に限定する(2026-07-20 qa-reviewer点検・過剰回送修正=INC本文参照)。
+#   旧版は「反映」「実装」「修正」「デプロイ」等を裸の名詞で拾っており、"反映完了したら知らせて"
+#   のような単なる報告依頼(情報要求)にも一致→研究室への過剰回送(実測 hq 8件+hr-context 5件)の主因だった。
+#   バグ/エラー/壊れ は完了報告パターン(「〜したら知らせて」)と結びつかない症状語のため対象外
+#   (system-engineerの通常のバグ報告受理を壊さないよう保守的に現状維持)。
+WORK_WORDS = ("直して", "直しといて", "修正して", "修正お願い", "実装して", "実装お願い",
+              "追加して", "デプロイして", "デプロイお願い", "変えて", "作って", "調べて",
+              "特定して", "バグ", "エラー", "壊れ", "対応して", "やって",
+              "反映して", "反映お願い", "反映をお願い", "消して", "削除して", "削除お願い")
+# 情報要求語(教えて/知らせて/確認して 等)。WORK_WORDSはこれらとは重複しない設計
+# (=情報要求のみの文はWORK_WORDSに一致せず自動的にis_work=Falseになる)。
+# テスト(test_dept_daemon_classify.py)で非重複と分類結果を検証する。
+INFO_WORDS = ("教えて", "教えてほしい", "知らせて", "確認して", "見てほしい", "見せて")
+
+
+def classify_work(content):
+    """本文が「作業依頼」かどうかを判定する(main箱回送/work_scope起動の判定に使用)。
+
+    単純なWORK_WORDS部分一致だが、判定ロジックを1箇所に集約することで
+    generate()とhandle()の重複判定がズレる事故を防ぐ(2026-07-20)。
+    """
+    return any(w in str(content) for w in WORK_WORDS)
+
 
 # 部門→(characterfile, 記憶ストア, 送信ペルソナ名, /liveポート, 作業範囲)。R2で全部門へ拡張(2026-07-19 Chami「やって」)。
 # work_scope: 定義があると作業依頼(WORK_WORDS)をツール付きagentで**部屋の中で完結**させる
@@ -262,7 +290,7 @@ class Daemon:
         content = str(rec.get("content", ""))
         atts = rec.get("attachments") or []
         att_note = f"\n(添付{len(atts)}件あり。画像の中身は見えていない=見えている振りをしない)" if atts else ""
-        is_work = any(w in content for w in WORK_WORDS)
+        is_work = classify_work(content)
         work_note = ("\n★この便は作業依頼の可能性が高い。内容に踏み込まず「研究室へ回す」と短く伝えろ"
                      "(回送はシステムが自動でやる)。" if is_work else "")
         prompt = (
@@ -319,8 +347,12 @@ class Daemon:
         # ★promptはstdinで渡す(引数で渡すと--add-dirが可変長のためpromptまでdirとして
         #   飲み込み「Input must be provided」で即死する=2026-07-18に実障害。stdinは
         #   Windowsのコマンドライン長制限(約32K)の回避にもなる)
+        # ★O3: bypassPermissions を廃し、最小allowlist + モデル固定で起動。
+        #   --allowedTools は可変長。直後に別フラグ(--add-dir)が来るのでツール列はそこで区切られる。
+        #   promptはstdin(引数だと可変長フラグが飲み込む2026-07-18の実障害の回避)。
         p = subprocess.run(
-            [CLAUDE, "--print", "--permission-mode", "bypassPermissions",
+            [CLAUDE, "--print", "--model", WORK_MODEL,
+             "--allowedTools", *WORK_ALLOWED_TOOLS,
              "--add-dir", HQ],
             input=prompt, cwd=ROOT, env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=WORK_TIMEOUT)
@@ -339,7 +371,7 @@ class Daemon:
         if not self.dry_run and ch and mid:
             subprocess.run([sys.executable, REACT, "--channel", ch, "--msg", mid,
                             "--emoji", "既読"], capture_output=True, timeout=60)
-        is_work = any(w in str(rec.get("content", "")) for w in WORK_WORDS)
+        is_work = classify_work(rec.get("content", ""))
         try:
             if is_work and self.conf.get("work_scope"):
                 # 作業依頼は部屋の中で完結を試みる(範囲外だけ回送=escalate)
