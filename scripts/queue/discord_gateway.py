@@ -31,6 +31,24 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
+GW_PULSE = os.path.join(LOCAL, "queue", "_gateway_pulse.txt")
+
+
+def _touch_pulse():
+    """discord.pyのイベントループが実際に回っているかのliveness証跡(2026-07-19 INC対策)。
+
+    2026-07-19実測: TCP:443は張られたままdiscord.py内部のイベント処理だけが無言で
+    詰まり、on_readyの二度目以降が「接続」ログだけ出して「掃除」まで到達しない事故が
+    発生(数時間、Discordの新着に一切反応しない=TCP生存≠アプリ生存)。job_prune等の
+    周期ジョブは間隔が長い(600s〜24h)ため生死判定に使えない。専用の高頻度脈を持つ。
+    """
+    try:
+        os.makedirs(os.path.dirname(GW_PULSE), exist_ok=True)
+        with open(GW_PULSE, "a", encoding="utf-8"):
+            pass
+        os.utime(GW_PULSE, None)
+    except OSError:
+        pass
 sys.path.insert(0, HERE)
 from leasequeue import LeaseQueue  # noqa: E402
 
@@ -362,10 +380,18 @@ def run_gateway():
         except Exception as e:
             log(f"名前追従失敗(継続): {type(e).__name__}")
 
+    @tasks.loop(seconds=45)
+    async def job_pulse():
+        """イベントループ自体が生きている証跡を45秒毎に打つ(ジョブ内容と無関係・常時稼働)。"""
+        _touch_pulse()
+
     @client.event
     async def on_ready():
         mode = "jobs=ON" if ACTIVE_JOBS else "shadow(jobs=OFF)"
         log(f"gateway接続 ({mode}): {client.user} / 監視ch {len(chan_map)}件 / queue={QUEUE_DB}")
+        _touch_pulse()
+        if not job_pulse.is_running():
+            job_pulse.start()
         if ACTIVE_JOBS:
             for j in (job_ack, job_escalate, job_prune):
                 if not j.is_running():
@@ -373,6 +399,7 @@ def run_gateway():
 
     @client.event
     async def on_message(m):
+        _touch_pulse()  # 実メッセージが処理経路を通った証跡(job_pulseの45秒より高解像度)
         if m.author.bot or m.webhook_id:
             # 鳩と同じ例外 (2026-07-18 Chami指示): Chamiミラーには送信印だけ押す (enqueueしない)。
             # jobsゲート内=シャドウ無副作用の原則維持。鳩と並走中は同一絵文字が1個に収束=無害。

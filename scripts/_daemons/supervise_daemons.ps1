@@ -36,11 +36,27 @@ $daemons = @(
   @{ Name='discord_gateway';  File='discord_gateway.py';  Rel='scripts\queue\discord_gateway.py';    LogRel='local\queue\_gateway_console.log' }
 )
 
+# gateway liveness (2026-07-19 INC): TCP:443 can stay ESTABLISHED while discord.py's event
+#   loop silently stalls (observed: 2h41m with zero message intake, process healthy per OS).
+#   "process exists" alone (the check below) cannot see this. job_pulse touches this file
+#   every 45s from inside the event loop itself - staleness here means the loop is stuck,
+#   not just that Discord has been quiet.
+$gwPulse = Join-Path $root 'local\queue\_gateway_pulse.txt'
+$gwPulseStaleSec = 180
+
 $sh = New-Object -ComObject WScript.Shell
 $allPy = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'")
 
 foreach ($d in $daemons) {
   $procs = @($allPy | Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*' + $d.File + '*')) })
+  if ($d.Name -eq 'discord_gateway' -and $procs.Count -eq 1 -and (Test-Path -LiteralPath $gwPulse)) {
+    $age = (Get-Date) - (Get-Item -LiteralPath $gwPulse).LastWriteTime
+    if ($age.TotalSeconds -gt $gwPulseStaleSec) {
+      Write-SupLog ("{0}: STALE PULSE ({1}s, event loop likely hung) - killing pid {2}" -f $d.Name, [int]$age.TotalSeconds, $procs[0].ProcessId)
+      Stop-Process -Id $procs[0].ProcessId -Force
+      $procs = @()  # fall through to the missing-process restart path below
+    }
+  }
   if ($procs.Count -eq 1) {
     Write-SupLog ("{0}: ok (1 running, pid {1})" -f $d.Name, $procs[0].ProcessId)
     continue
