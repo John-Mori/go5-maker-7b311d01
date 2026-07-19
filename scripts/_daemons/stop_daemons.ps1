@@ -1,15 +1,9 @@
-# stop_daemons.ps1 - stop all 4 resident daemons and disable the auto-start task
-# (so they stay down). Re-enable by running register_daemons_logon_task.ps1 again.
+# stop_daemons.ps1 - DEPRECATED shim (2026-07-20, O1). The old version only stopped 4 of the
+#   daemons and left gateway/keeper/9 dept_daemon/claude_responder running = name did not match
+#   reality (改善書 P0-3). It now delegates to panic_stop.ps1, the complete + tested full-stop.
 # ASCII-only (PS 5.1 codepage safety).
 $ErrorActionPreference = 'SilentlyContinue'
-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$suplog = Join-Path $root 'local\_daemons_supervisor.log'
-function Write-SupLog($m){ $ts=Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; try{Add-Content -LiteralPath $suplog -Value "$ts $m" -Encoding UTF8}catch{} }
-
-try { Disable-ScheduledTask -TaskName 'go5_daemons_hidden' -ErrorAction Stop | Out-Null; Write-SupLog "task go5_daemons_hidden disabled (stop_daemons)" } catch { Write-SupLog "task disable skipped" }
-
-$pat = 'inbox_poller\.py|absence_watchdog\.py|local_responder\.py|gemini_responder\.py'
-$procs = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -and ($_.CommandLine -match $pat) })
-foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force }
-Write-SupLog ("stopped {0} daemon process(es) (stop_daemons)" -f $procs.Count)
-Write-Host ("stopped {0} daemon(s) and disabled auto-start." -f $procs.Count)
+$here = $PSScriptRoot
+Write-Host "stop_daemons.ps1 -> delegating to panic_stop.ps1 (full fleet stop)"
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $here 'panic_stop.ps1') @args
+Write-Host "(to also kill Claude '--print' workers: panic_stop.ps1 -IncludeWorkers ; to resume: resume_daemons.ps1)"

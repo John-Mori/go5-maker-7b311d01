@@ -53,8 +53,12 @@ PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
 BEAT_URL = os.environ.get("GO5_DEADMAN_BEAT_URL", "https://deadman.trustsignalbot.workers.dev/beat")
 BEAT_SECRET_FILE = os.path.join(ROOT, "local", "deadman_beat_secret.txt")
 
-EXPECTED = ["inbox_poller", "absence_watchdog", "local_responder",
-            "gemini_responder", "office_daily", "claude_responder"]
+# ★2026-07-20 O1修正: supervise_daemons.ps1 が実際に管理する7常駐に一致させた。
+#   旧リストは退役済み inbox_poller を含み、現行の daemon_keeper / discord_gateway を
+#   欠いていた(=艦隊全滅検知が旧艦隊を見ていた・改善書P0-2)。
+#   恒久解: O2でorg_registry.ymlから生成。それまではsupervisorのName列と手動一致。
+EXPECTED = ["absence_watchdog", "local_responder", "gemini_responder",
+            "office_daily", "claude_responder", "daemon_keeper", "discord_gateway"]
 
 
 def _now():
