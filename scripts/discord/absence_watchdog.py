@@ -218,6 +218,51 @@ def check_poller_health(state, dry_run):
         state["last_poller_alert"] = now_epoch
 
 
+# --- ★O1 DLQ監視 (改善書P0-5: 5回配送失敗→dead に隔離された毒メッセージを誰も見ていない) ---
+QUEUE_DB_WD = os.path.join(LOCAL, "queue", "inbox.db")
+DEAD_ALERT_COOLDOWN_SEC = 60 * 60  # デッドレター通知は1時間に1回まで(暴走ガード)
+
+
+def dead_letter_summary():
+    """DLQ(status='dead')の総数とdept内訳。読み取り専用・fail-open(DB不在/ロックで0)。"""
+    if not os.path.exists(QUEUE_DB_WD):
+        return 0, {}
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
+        try:
+            con.execute("PRAGMA busy_timeout=1000")
+            rows = con.execute(
+                "SELECT dept, COUNT(*) FROM queue WHERE status='dead' GROUP BY dept").fetchall()
+        finally:
+            con.close()
+        return sum(r[1] for r in rows), {(r[0] or "?"): r[1] for r in rows}
+    except Exception:
+        return 0, {}
+
+
+def check_dead_letters(state, dry_run):
+    """毒メッセージ(max_deliveries超過でdead隔離)が黙って消えるのを防ぐ。
+    dead件数が前回より増えたらincidentへ1通(1hクールダウン)。減ったら基準を追従し再発報しない。"""
+    total, by = dead_letter_summary()
+    last = state.get("last_dead_count", 0)
+    if total <= last:
+        state["last_dead_count"] = total  # 手当て済(dead→purge等)で減ったら基準を下げる
+        return
+    now_epoch = time.time()
+    if now_epoch - state.get("last_dead_alert", 0) < DEAD_ALERT_COOLDOWN_SEC:
+        return
+    detail = "、".join(f"{d}={n}" for d, n in by.items()) or "(内訳不明)"
+    msg = (f"⚠デッドレター{total}件(前回{last}件から増加): {detail}。"
+           "5回配送しても処理できずキューに隔離されたメッセージです。"
+           "毒メッセージ(壊れた本文/対応不能な依頼)か、宛先部門の長期不在が原因。"
+           "確認: `powershell scripts\\_daemons\\status.ps1`(dead数)。中身は "
+           "LeaseQueue.dead_letters() で参照できます。")
+    if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
+        state["last_dead_alert"] = now_epoch
+        state["last_dead_count"] = total
+
+
 def check_dead_windows(state, dry_run):
     """最近まで生きていた部門窓の脈が途絶えたら、incident chへまとめて1通で可視化する(P2)。
 
@@ -329,6 +374,7 @@ def run_once(dry_run=False):
     check_poller_health(state, dry_run)  # ポーラー死活は受付箱の滞留と独立に監視(単一障害点)
     check_dead_windows(state, dry_run)   # P2: 死んだ部門窓の可視化(応答性改善書2026-07-18)
     check_busy_notices(state, dry_run)   # ⏳対応中(生存)通知: Chami直要望2026-07-18・4段目の進捗信号
+    check_dead_letters(state, dry_run)   # ★O1(P0-5): DLQ(毒メッセージ)が黙って消えるのを検知
     save_state(state)
     rows = read_inbox_rows()
     if rows is None:

@@ -70,4 +70,10 @@ foreach ($d in $daemons) {
   $sh.Run($cmd, 0, $false) | Out-Null
   Write-SupLog ("{0}: started hidden" -f $d.Name)
 }
+# boot report (O1 P0-7): fire-and-forget, hidden, non-blocking. Idempotent - boot_report.py posts
+#   only once per boot (state file). Fires within one supervise cycle (<=10min) after any reboot,
+#   so an unattended Windows Update restart never goes unnoticed again (改善書 P0-7).
+$brCmd = 'cmd /c cd /d "' + $root + '" && python "scripts\_daemons\boot_report.py" --once >> "' + $root + '\local\_boot_report.log" 2>&1'
+$sh.Run($brCmd, 0, $false) | Out-Null
+
 Write-SupLog "supervise pass done"
