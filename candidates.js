@@ -101,6 +101,10 @@
   //   これを上げると全ユーザーの旧キャッシュが読まれなくなり、次回表示で全件を取り直す。
   function cacheKey(makerId, mode) { return 'cand_mk2__' + makerId + '__' + mode; }
   var CACHE_TTL = 3 * 3600 * 1000;
+  // 更新サーチ(🔁 force)の最小再取得間隔。この時間内の二度目はキャッシュ再利用で無駄打ちを防ぐ。
+  //   FANZAのサークル新作は日単位でしか変わらないため、数十秒内の再取得は情報が同じ＝負荷だけ増える。
+  //   🔁は「今すぐ最新に」ボタンなので、連打/焦りの再タップだけを吸収する短めの値にする(値変更はここ1箇所)。
+  var MAKER_REFRESH_MIN_MS = 60 * 1000; // 60秒
 
   var _activeTab = 'main'; // 'main' | サークルタブid
   var _sort = 'added_desc';
@@ -1385,9 +1389,13 @@
     // date/discountは sort=date、rank・rank7dは同一データ(sort=rank)を使用。
     var apiMode = (mode === 'rank' || mode === 'rank7d') ? 'rank' : 'date';
     var ck = cacheKey(makerId, apiMode);
+    var c = lsGet(ck, 'null');
+    var hasCache = c && c.at && Array.isArray(c.items) && c.items.length;
     if (!force) {
-      var c = lsGet(ck, 'null');
-      if (c && c.at && (new Date().getTime() - c.at) < CACHE_TTL && Array.isArray(c.items) && c.items.length) { cb(c.items, null); return; }
+      if (hasCache && (new Date().getTime() - c.at) < CACHE_TTL) { cb(c.items, null); return; }
+    } else {
+      // 更新サーチ(🔁): forceでも直近 MAKER_REFRESH_MIN_MS 以内の二度目は再取得せずキャッシュを返す(負荷軽減)。
+      if (hasCache && (new Date().getTime() - c.at) < MAKER_REFRESH_MIN_MS) { cb(c.items, null, true); return; }
     }
     var cfg = workerCfg();
     if (!cfg.url) { cb(null, 'FANZA Workerが未設定です(⚙️詳細設定)'); return; }
@@ -1408,10 +1416,10 @@
     var ids = (makerIds || []).filter(Boolean);
     if (!ids.length) { cb(null, 'サークルが登録されていません'); return; }
     if (ids.length === 1) { fetchMakerItems(ids[0], mode, cb, force); return; }
-    var results = new Array(ids.length), firstErr = null, done = 0;
+    var results = new Array(ids.length), firstErr = null, done = 0, throttledN = 0, netN = 0;
     ids.forEach(function (id, i) {
-      fetchMakerItems(id, mode, function (items, err) {
-        if (err) { if (!firstErr) firstErr = err; } else { results[i] = items || []; }
+      fetchMakerItems(id, mode, function (items, err, throttled) {
+        if (err) { if (!firstErr) firstErr = err; } else { results[i] = items || []; if (throttled) throttledN++; else netN++; }
         if (++done === ids.length) {
           var merged = [], seen = {};
           results.forEach(function (arr) {
@@ -1420,7 +1428,7 @@
             });
           });
           if (!merged.length && firstErr) { cb(null, firstErr); return; }
-          cb(merged, null);
+          cb(merged, null, force && netN === 0 && throttledN > 0); // 全サークルが再取得スキップ＝throttled扱い
         }
       }, force);
     });
@@ -2382,10 +2390,11 @@
     bindPcRun_($('candPcRun'), 'candMakerList');
     $('candEditTab').addEventListener('click', function () { showEditTabForm(tab); });
     var makerIds = makerIdsOf(tab);
-    fetchMakerItemsMulti(makerIds, _sort, function (items, err) {
+    fetchMakerItemsMulti(makerIds, _sort, function (items, err, throttled) {
       var el = $('candMakerList');
       if (!el || _activeTab !== tabId) return;
       if (err) { el.innerHTML = '<p class="hint" style="padding:8px;">⚠️ ' + esc(err) + '</p>'; return; }
+      var throttleNote = throttled ? '<p class="hint" style="padding:2px 6px;">🕘 さっき取得したばかりです。負荷軽減のため直近の結果を表示中(約1分後の🔁で最新を取り直せます)。</p>' : '';
       // タブ名が自動生成の「サークルNNN」のままで、一覧からサークル名が取れたら本名へ自動修正。(単一サークルのタブのみ)
       if (makerIds.length === 1 && items && items.length && items[0].makerName && /^サークル\d+$/.test(tab.name || '')) {
         var tabs2 = lsGet(K_TABS, '[]');
@@ -2411,7 +2420,7 @@
       // 実売本数(販売数)を先頭60件ぶん取得。(未取得はPC取得キューへ自動登録)反映されたら再描画。
       var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
       var salesMiss = missingCount(topCids);
-      var head = '<div style="display:flex;justify-content:flex-end;padding:2px 6px 6px;">' +
+      var head = throttleNote + '<div style="display:flex;justify-content:flex-end;padding:2px 6px 6px;">' +
         '<button id="candBulkToCand" type="button" class="ghost" style="width:auto;margin:0;font-size:12.5px;padding:6px 10px;">💡 全作品を候補に追加</button></div>' +
         '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (makerIds.length > 1 ? '(' + makerIds.length + 'サークル)' : '') + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
         (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
