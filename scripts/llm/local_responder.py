@@ -46,6 +46,8 @@ LOG = os.path.join(LOCAL, "llm", "responder_log.jsonl")
 PERSONA = "ローカルqwen"  # 旧名「ローカル受付」(Chami改名2026-07-13)
 MODEL = "qwen3:8b"  # RTX 3060 Ti 8GBで実測55秒/回・品質向上のため4b→8bへ格上げ(2026-07-13)
 INBOX_LLM = os.path.join(LOCAL, "discord_inbox_llm.jsonl")  # llm-growth部屋専用=Claude稼働中でも本人が応対
+QDB = os.path.join(LOCAL, "queue", "inbox.db")  # ★O1(2026-07-20): カットオーバー後の受信経路
+QUEUE_DEPT = "llm-growth"  # 自室のdept(discord_channels.json)
 WORK_WORDS = ("直して", "修正", "実装", "追加して", "デプロイ", "変えて", "作って", "調べて", "特定して",
               "バグ", "エラー", "壊れ", "対応して", "やって", "反映", "消して", "削除")
 
@@ -215,6 +217,62 @@ def _write_inflight(path, lines):
     os.replace(tmp, path)          # 書き換えも原子的に(途中で落ちても壊れた箱を残さない)
 
 
+def _processed_msg_ids():
+    ids = set()
+    try:
+        for pl in open(PROCESSED, encoding="utf-8", errors="replace"):
+            try:
+                m = json.loads(pl).get("msg_id")
+                if m:
+                    ids.add(str(m))
+            except Exception:
+                continue
+    except OSError:
+        pass
+    return ids
+
+
+def drain_queue():
+    """★O1(改善書P0-1): llm-growth宛はカットオーバー(2026-07-19 鳩退役)後、
+    jsonl(discord_inbox_llm.jsonl)には来ず LeaseQueue に入る。旧実装はjsonlしか
+    見ていなかったため llm-growth が事実上無応答だった(30分放置エスカレまで沈黙)。
+    ここで queue の dept='llm-growth' を claim→handle→ack する。二重処理はPROCESSED台帳で防ぐ。
+    dept_daemon.drain_queue と同じ契約。DBが無い間は何もしない(fail-open)。"""
+    if not os.path.exists(QDB):
+        return 0
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+        from leasequeue import LeaseQueue
+        q = LeaseQueue(QDB)
+    except Exception:
+        return 0
+    done = 0
+    try:
+        processed = _processed_msg_ids()
+        while done < 5:  # 1巡回の上限(暴走ガード)
+            c = q.claim(dept=QUEUE_DEPT, who="local_responder")
+            if c is None:
+                break
+            rec = c["body"] if isinstance(c["body"], dict) else {}
+            mid = str(rec.get("msg_id", c.get("msg_id") or ""))
+            if mid and mid in processed:
+                q.ack(c["id"], result="skip(処理済)")
+                continue
+            try:
+                handle(rec, json.dumps(rec, ensure_ascii=False))
+                q.ack(c["id"], result="qwen応答")
+            except Exception as e:
+                # 失敗は握りつぶさずmain箱へ回す(dept_daemonと同じ安全網)
+                q.ack(c["id"], result=f"失敗:{type(e).__name__}")
+                append_line(FOR_CLAUDE, json.dumps(rec, ensure_ascii=False))
+            done += 1
+    finally:
+        q.close()
+    if done:
+        print(f"  queue経路 {done}件処理 [llm-growth]")
+    return done
+
+
 def main():
     once = "--once" in sys.argv
     print(f"ローカル受付 起動 (model={MODEL}, 30秒間隔, Claude稼働中は待機)")
@@ -231,6 +289,12 @@ def main():
                 # 1行を着地させるたびに残りだけをinflightへ書き戻す。
                 # 落ちても「未処理の行だけ」が残る(着地済みの重複返信より、喪失を避ける方を採る)。
                 _write_inflight(inflight, llm_lines[i + 1:])
+        # ★O1: カットオーバー後の本経路=LeaseQueue(dept='llm-growth')をドレイン。
+        #   上のjsonl(discord_inbox_llm.jsonl)は鳩退役で新着が来ないため、こちらが実体。
+        try:
+            drain_queue()
+        except Exception as e:
+            print(f"  queue drain失敗: {type(e).__name__}")
         # ★main箱(部門の依頼)には一切触れない=ローカルを一次受付として挟まない
         #   (Chami指示2026-07-15「一次受けにローカルを挟むな・全部門で排除」)。
         #   以前はClaude不在時にmain箱をドレインしてqwen応答/for_claude箱へ再エスカレしていたが、
