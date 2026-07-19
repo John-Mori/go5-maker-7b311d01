@@ -130,6 +130,83 @@ def count_queue_ready(name, db_path=QUEUE_DB):
         return 0
 
 
+# ── 単一化ガード(★O1・改善書P0-4: main waiterの二重稼働を実測。二重チャイム/二重drainの温床)──
+#   再武装のたびに新waiterが立つが、旧waiterが未終了だと重複する。新waiterが「同名の生きた
+#   waiter」を引き継ぐ(take-over): ロックが新鮮(生きたwaiterが毎周回mtimeを更新)かつPID生存の
+#   時だけ旧を停止する。古い(=死んだwaiterが残した)ロックは殺さず黙って引き継ぐ=PID再利用での
+#   誤kill窓を最小化。ロックは自分のディレクトリ(local/llm)にwaiter自身しか書かない。
+LOCK_FRESH_SEC = 15.0  # この秒数以内に更新されたロックだけ「生きた重複」とみなす
+
+
+def _lock_path(name):
+    return os.path.join(LOCAL, "llm", f"waiter_{name}.lock")
+
+
+def _pid_alive(pid):
+    if not pid or pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if h:
+                k.CloseHandle(h)
+                return True
+            return False
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _write_lock(name):
+    p = _lock_path(name)
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(f"{os.getpid()} {name}\n")
+    except OSError:
+        pass
+
+
+def acquire_singleton(name):
+    """同名の「生きた重複waiter」があれば停止して自分が唯一になる。best-effort。"""
+    p = _lock_path(name)
+    old = 0
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            old = int(f.read().strip().split()[0])
+        fresh = (time.time() - os.path.getmtime(p)) < LOCK_FRESH_SEC
+    except Exception:
+        fresh = False
+    if old and old != os.getpid() and fresh and _pid_alive(old):
+        try:
+            import signal
+            os.kill(old, signal.SIGTERM)  # Windowsでは TerminateProcess
+            print(f"inbox_waiter[{name}]: 生きた重複waiter pid={old} を停止(単一化)")
+        except Exception:
+            pass
+    _write_lock(name)
+
+
+def release_singleton(name):
+    p = _lock_path(name)
+    try:
+        with open(p, "r", encoding="utf-8") as f:      # ★Windows: 開いたままremoveは失敗する
+            owner = int(f.read().strip().split()[0])    #   ので、まず読み切って閉じてから消す
+    except Exception:
+        return
+    if owner == os.getpid():
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
 def _safe_float(value, default, minimum):
     try:
         v = float(value)
@@ -164,23 +241,29 @@ def main(argv=None):
         print(f"WAITER:ONCE name={args.name} total={n}")
         return 0
 
+    acquire_singleton(args.name)         # ★単一化: 同名の生きた重複waiterを引き継ぐ(P0-4)
+
     max_count = max(1, int(round((args.minutes * 60.0) / args.interval)))
     print(f"inbox_waiter開始[{args.name}]: {args.interval:g}秒間隔・最大{args.minutes:g}分"
           f"({max_count}回) box={box} (+queue={QUEUE_DB} depts={','.join(queue_depts(args.name))})")
 
-    for _ in range(max_count):
-        touch(args.name)                 # 脈=配達先の維持(見張るたびに新鮮化)
-        bn = count_lines(box)
-        qn = count_queue_ready(args.name)
-        if bn + qn > 0:                  # ★チャイム鳴動: 箱かqueueに未処理がある(レベル駆動)
-            print(f"WAITER:MESSAGE name={args.name} total={bn + qn} box={bn} queue={qn}")
-            return 0
-        if args.verbose:
-            print(f"  watch name={args.name} box={bn} queue={qn}")
-        time.sleep(args.interval)
+    try:
+        for _ in range(max_count):
+            touch(args.name)                 # 脈=配達先の維持(見張るたびに新鮮化)
+            _write_lock(args.name)           # ロックmtimeも新鮮化=自分が生きた唯一の印
+            bn = count_lines(box)
+            qn = count_queue_ready(args.name)
+            if bn + qn > 0:                  # ★チャイム鳴動: 箱かqueueに未処理がある(レベル駆動)
+                print(f"WAITER:MESSAGE name={args.name} total={bn + qn} box={bn} queue={qn}")
+                return 0
+            if args.verbose:
+                print(f"  watch name={args.name} box={bn} queue={qn}")
+            time.sleep(args.interval)
 
-    print(f"WAITER:TTL name={args.name} total={count_lines(box) + count_queue_ready(args.name)}")
-    return 0
+        print(f"WAITER:TTL name={args.name} total={count_lines(box) + count_queue_ready(args.name)}")
+        return 0
+    finally:
+        release_singleton(args.name)
 
 
 if __name__ == "__main__":
