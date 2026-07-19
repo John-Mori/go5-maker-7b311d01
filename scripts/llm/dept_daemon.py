@@ -214,6 +214,45 @@ def log(dept, msg):
     print(f"{time.strftime('%H:%M:%S')} [{dept}] {msg}")
 
 
+# ★O5(2026-07-20): 認証失効の自動検知。cli_auth_token.txt(claude setup-token由来)は
+#   自動更新が無く失効する(2026-07-19に49hで401失効を実測)。失効すると generate/work_generate が
+#   静かに失敗しmain箱へescalateするだけ=Lab生存中は露見しない。ここで401を検知し報告-通知へ
+#   1回だけ(1hクールダウン・全9デーモン共有state)警報する=「気づけない沈黙の劣化」を潰す。
+_AUTH_ALERT_STATE = os.path.join(LOCAL, "_auth_alert_state.json")
+_AUTH_ALERT_COOLDOWN = 3600
+
+
+def _looks_like_auth_failure(text):
+    t = text or ""
+    return ("token has expired" in t
+            or "OAuth" in t and "authenticate" in t
+            or ("401" in t and "authenticate" in t)
+            or "Failed to authenticate" in t)
+
+
+def _maybe_alert_auth(dept, output):
+    if not _looks_like_auth_failure(output):
+        return
+    now = time.time()
+    try:
+        st = json.load(open(_AUTH_ALERT_STATE, encoding="utf-8"))
+    except Exception:
+        st = {}
+    if now - st.get("last", 0) < _AUTH_ALERT_COOLDOWN:
+        return
+    msg = (f"🔑 **認証失効の疑い**(自動検知): dept={dept} のClaude呼び出しが認証エラーを返した。"
+           "local/cli_auth_token.txt のOAuthトークンが失効している可能性(自動更新なし)。"
+           "対処: PCで `claude setup-token` を実行し、出力を local/cli_auth_token.txt へ上書き保存。"
+           "その間、キャラの生成応答はmain箱へ自動escalateされる(取りこぼしは無し・研究室が対応)。")
+    try:
+        subprocess.run([sys.executable, PERSONA_SEND, "--dept", "report-notify", "--persona", "オタコン", msg],
+                       capture_output=True, timeout=60)
+        json.dump({"last": now}, open(_AUTH_ALERT_STATE, "w", encoding="utf-8"))
+        log(dept, "認証失効を検知→報告-通知へ警報")
+    except Exception:
+        pass
+
+
 class Daemon:
     def __init__(self, dept, dry_run=False):
         if dept not in DEPT_CONF:
@@ -307,7 +346,10 @@ class Daemon:
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=PRINT_TIMEOUT)
         reply = (p.stdout or "").strip()
-        return (reply, is_work) if p.returncode == 0 and reply else (None, is_work)
+        if p.returncode != 0 or not reply:
+            _maybe_alert_auth(self.dept, (p.stdout or "") + (p.stderr or ""))
+            return (None, is_work)
+        return (reply, is_work)
 
     def work_generate(self, rec):
         """作業依頼をツール付きagentで部屋の中で完結させる(hr範囲=work_scope)。
@@ -361,6 +403,7 @@ class Daemon:
             reply = open(reply_file, encoding="utf-8", errors="replace").read().strip()
         escalate = os.path.exists(esc_flag)
         if p.returncode != 0 or not reply:
+            _maybe_alert_auth(self.dept, (p.stdout or "") + (p.stderr or ""))
             return None, True  # 失敗=安全側(回送)へ
         return reply, escalate
 
