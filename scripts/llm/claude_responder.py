@@ -66,6 +66,33 @@ sys.path.insert(0, HERE)
 from presence import lab_alive  # noqa: E402  生存判定(2信号)は全responder共通の1関数へ一本化
 
 
+# 総括本部4室= Chami裁定(2026-07-20)でデーモンを撤去し、**人格を持つ本人(セッション)が
+# 応対する**と決めた部屋。ここは留守なら沈黙してよい(watchdogが15分で鳴らす)。
+# ★session_rooms.PAIRS は引かない: PAIRSは「ミラー先が配線済みの部屋」であって
+#   「担当がセッションの部屋」ではない(実際 research-room / keiei-kikaku はPAIRSに無い)。
+#   別の目的の表を流用すると、片方を増やした時に静かにズレる(ORG-06と同型)。
+SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku")
+
+
+def room_is_session_owned(dept):
+    """その部屋の担当が**対話セッション本人**か(=総括本部4室)。
+
+    ★2026-07-21 Chamiのスクショで発覚。02:17の便に 02:23 `研究室(無人代打)` が
+      **「受領(既読/着手リアクション欠落)。担当の起床後に返答。」**と返していた。
+      これは ORG-04 で「悪質」と判定したのと**寸分違わぬ嘘**——担当は対話セッション(私)で、
+      「起床」するイベントは存在しない。私はターンの合間に居ただけで、在席(TTL150秒)が
+      枯れたので代打が起きた。
+
+    ★ORG-03の対処は「専任デーモンが居れば一次ackを省く」だったが、
+      **デーモンが居ない部屋(=総括本部4室)は素通りしていた**。
+      Chami裁定でデーモンを撤去した4室こそ、この嘘が出る場所だった=対処が穴を1つ残していた。
+
+    → これらの部屋では**一次ackを打たない**。便はfollowupとして残り、
+      15分で absence_watchdog が鳴らす。**偽の返事より沈黙が良い**(Chami既決の原則)。
+    """
+    return bool(dept) and dept in SESSION_OWNED_DEPTS
+
+
 def room_has_own_responder(dept):
     """その部屋に**自前の応答者**(専任dept_daemon)が生きているか。
 
@@ -214,7 +241,7 @@ def cycle_queue(token):
                 if rec.get("dept") in SENSITIVE_DEPTS:
                     held.append(c["id"])  # 機微は内容に触れない(reroute流入時)。リース保持で素通り
                     continue
-                if room_has_own_responder(rec.get("dept")):
+                if room_has_own_responder(rec.get("dept")) or room_is_session_owned(rec.get("dept")):
                     # 部屋の専任デーモンが既に応答済み=一次ackは二重応答にしかならない。
                     # ★followupは下で必ず投函する(=本対応は落とさない。消すのは「重複した声」だけ)。
                     q.ack(c["id"], result="一次ack省略(部屋の専任デーモンが応答済み)")
@@ -275,7 +302,7 @@ def cycle(token):
         if lab_alive():
             remaining.append(line)
             continue
-        if room_has_own_responder(rec.get("dept")):
+        if room_has_own_responder(rec.get("dept")) or room_is_session_owned(rec.get("dept")):
             # 部屋の専任デーモンが既に応答済み=一次ackは二重応答にしかならない(下でfollowupは残す)。
             print(f"{time.strftime('%H:%M:%S')} 一次ack省略: {rec.get('dept')} は専任デーモン稼働中")
         else:

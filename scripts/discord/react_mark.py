@@ -104,6 +104,34 @@ def recent_messages(dept, within_sec):
             except Exception:
                 pass
         out.append((mid, ch))
+    out.extend(mirrored_messages(dept))
+    return out
+
+
+MIRROR_IDS = os.path.join(LOCAL, "llm", "mirror_msgids.jsonl")
+
+
+def mirrored_messages(dept, limit=20):
+    """ミラーで投稿した `Chami(from Claude)` の便。
+
+    ★これはqueueに存在しない(webhook投稿なのでgatewayがenqueueしない=二重処理を避ける設計)。
+      そのためqueueだけ見ていると**ミラーには一生印が付かない**。
+      Chamiの指示は2026-07-18(orchestration.md §139)と2026-07-21の**2度**出ている。
+    """
+    if not os.path.exists(MIRROR_IDS):
+        return []
+    out = []
+    try:
+        with open(MIRROR_IDS, encoding="utf-8") as f:
+            rows = [l for l in f.read().splitlines() if l.strip()][-limit:]
+        for l in rows:
+            r = json.loads(l)
+            if r.get("dept") != dept:
+                continue
+            if r.get("msg_id") and r.get("channel"):
+                out.append((str(r["msg_id"]), r["channel"]))
+    except Exception:
+        return out
     return out
 
 

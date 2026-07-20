@@ -89,20 +89,27 @@ def save_state(st):
         pass
 
 
-REACT_MARK = os.path.join(ROOT, "scripts", "discord", "react_mark.py")
+MIRROR_IDS = os.path.join(LOCAL, "llm", "mirror_msgids.jsonl")
 
 
-def mark_reactions(dept):
-    """この部屋のChami発言へ「既読/着手」を押す(2026-07-21 Chami指摘への恒久対処)。
+def record_mirror_id(dept, channel_hint, stdout):
+    """ミラーで投稿した `Chami(from Claude)` のmsg_idを控える。
 
-    ★総括本部4室はデーモンを撤去した時に**既読を押す主体まで一緒に失っていた**。
-      着手は元々BOOT.mdに手順が書いてあるだけで、誰も叩いていなかった。
-      「心がけに任せると忘れる。hookが強制する」を適用し、ターン終了時に機構で押す。
-    べき等(react_mark側が(msg_id,種別)単位で記録)・失敗してもセッションは止めない。
+    ★2026-07-18 Chami指示(orchestration.md §139)= 「貼った本人のセッションは、表示された
+      msg=IDへ既読印を即押し、作業開始時に着手印を押す」。**ミラーにも4状態の可視化を通す**。
+      2026-07-21 Chami「Chami(from Claude)にも既読と着手をつけて欲しいってことも
+      忘れられてるから再びよろしく」= **指示は2度目**。今度は機構に載せる。
+    persona_sendが `msg=<id>` を標準出力に出すので、それを拾って進捗印の対象に加える。
     """
     try:
-        subprocess.run([sys.executable, REACT_MARK, "--dept", dept],
-                       capture_output=True, timeout=45)
+        ids = re.findall(r"msg=(\d+)", stdout or "")
+        if not ids:
+            return
+        os.makedirs(os.path.dirname(MIRROR_IDS), exist_ok=True)
+        with open(MIRROR_IDS, "a", encoding="utf-8") as f:
+            for mid in ids:
+                f.write(json.dumps({"dept": dept, "msg_id": mid,
+                                    "channel": channel_hint}, ensure_ascii=False) + "\n")
     except Exception:
         pass
 
@@ -165,9 +172,11 @@ def send(dept, persona, body):
         print(f"[DRY] dept={dept} persona={persona} chars={len(body)}\n  {body[:160]}...")
         return
     try:
-        subprocess.run(
+        p = subprocess.run(
             [sys.executable, PERSONA_SEND, "--dept", dept, "--persona", persona, body],
-            capture_output=True, timeout=60)
+            capture_output=True, timeout=60, text=True, encoding="utf-8", errors="replace")
+        if persona == CHAMI_NAME:
+            record_mirror_id(dept, dept, p.stdout or "")
     except Exception:
         pass
 
@@ -186,7 +195,10 @@ def main():
     # ターン終了時点でも在席を延長する。PostToolUseが一度も鳴らないターン(道具を使わず
     # 会話だけで返したターン)では在席が枯れており、直後の便をデーモンが攫うため。
     touch_presence(dept)
-    mark_reactions(dept)
+    # ★進捗印はここでは押さない。既読/着手/即答は**時系列を表す信号**なので、
+    #   ターン終了時にまとめて押すと時系列が消える(初版の誤り)。
+    #   正しい担当= scripts/hooks/progress_mark.py(UserPromptSubmit=既読 /
+    #   PostToolUse=着手 / Stop=即答)。仕様の正本= 運用細則_セッションと起床.md §37。
     tp = payload.get("transcript_path")
     if not tp or not os.path.exists(tp):
         return
