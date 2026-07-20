@@ -150,9 +150,32 @@
 
       if (!result.ok) {
         if (result.error === 'empty') return; // 空は無視
-        var msg = result.error === 'no_cid'
-          ? '作品IDが見つかりません'
-          : 'URLが不正です(http(s):// で始まる必要があります)';
+
+        // 作品ID(cid)が取れないURL＝セール会場・キャンペーン・一覧ページ等。
+        // 作品リンクは作れないが、一覧ラッパ(buildFanzaListLink)で会場URLをそのまま
+        // アフィ化できる。(cid不要／他人のアフィリンクや計測パラメータは normalizeWorkUrl で除去)
+        if (result.error === 'no_cid') {
+          var listRes = buildFanzaListLink(line.trim(), afId);
+          if (listRes.ok) {
+            html += '<div class="affi-result">'
+              + '<div class="affi-row">'
+              + '  <span class="affi-label">種別:</span>'
+              + '  <code class="affi-cid">会場/一覧リンク</code>'
+              + '</div>'
+              + '<div class="affi-row affi-link-row">'
+              + '  <span class="affi-label">リンク:</span>'
+              + '  <code class="affi-code">' + escHtml(listRes.link) + '</code>'
+              + '</div>'
+              + '<div class="affi-row">'
+              + '  <button class="copy-btn copy-btn-wide" data-copy="link" data-val="' + escAttr(listRes.link) + '">リンクをコピー</button>'
+              + '</div>'
+              + '</div>';
+            return;
+          }
+        }
+
+        // ここに来るのは bad_url、または no_cid かつ一覧ラッパも失敗(＝http(s)でない等)。
+        var msg = 'URLが不正です(http(s):// で始まる必要があります)';
         html += '<div class="affi-result affi-error-card">'
           + '<span class="affi-error">' + escHtml(msg) + '</span>'
           + '<div class="affi-url-hint">' + escHtml(line.trim()) + '</div>'

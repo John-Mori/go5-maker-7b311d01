@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildAffiliateLink, normalizeWorkUrl } = require('../affiliate-core.js');
+const { buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl } = require('../affiliate-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -200,6 +200,43 @@ test('T-9: Books .com 2階層URL → cid=content_id（旧仕様は数字ID＝API
   const r1 = buildAffiliateLink('https://book.dmm.com/product/4163193/', 'test-001');
   assert.strictEqual(r1.ok, true);
   assert.strictEqual(r1.cid, '4163193');
+});
+
+// ────────────────────────────────────────────────────────────
+// L-1〜L-4  buildFanzaListLink（セール会場・一覧・キャンペーンページのアフィ化）
+// ────────────────────────────────────────────────────────────
+test('L-1: セール会場(キャンペーン)URL → cid不要で一覧リンク生成', function () {
+  const url = 'https://www.dmm.co.jp/dc/doujin/-/list/=/article=campaign/id=317274/sort=sales/';
+  // 作品リンク関数は cid が無いので弾く（＝UIが一覧経路へフォールバックする条件）
+  assert.strictEqual(buildAffiliateLink(url, 'af001').error, 'no_cid');
+  // 一覧リンク関数は成功する
+  const r = buildFanzaListLink(url, 'af001');
+  assert.strictEqual(r.ok, true, 'list link should succeed');
+  const expected = 'https://al.fanza.co.jp/?lurl=' + encodeURIComponent(url) + '&af_id=af001&ch=toolbar&ch_id=link';
+  assert.strictEqual(r.link, expected, 'link mismatch\n  got:      ' + r.link + '\n  expected: ' + expected);
+});
+test('L-2: 一覧URL + 計測パラメータ付き → utm等を除去して包む', function () {
+  const withParam = 'https://www.dmm.co.jp/dc/doujin/-/list/=/article=campaign/id=317274/sort=sales/?utm_source=x&dmmref=y';
+  const clean     = 'https://www.dmm.co.jp/dc/doujin/-/list/=/article=campaign/id=317274/sort=sales/';
+  const r1 = buildFanzaListLink(withParam, 'af001');
+  const r2 = buildFanzaListLink(clean,     'af001');
+  assert.strictEqual(r1.ok, true);
+  assert.strictEqual(r1.clean, clean, 'clean should strip ?以降');
+  assert.strictEqual(r1.link, r2.link, 'param-stripped link should match clean link');
+});
+test('L-3: 他人のアフィリンク(al.fanza lurl包み) → 素URLを取り出し自分のaf_idで包み直す', function () {
+  const others = 'https://al.fanza.co.jp/?lurl=' +
+    encodeURIComponent('https://www.dmm.co.jp/dc/doujin/-/list/=/article=campaign/id=317274/') +
+    '&af_id=SOMEONE_ELSE&ch=toolbar&ch_id=link';
+  const r = buildFanzaListLink(others, 'MY_ID');
+  assert.strictEqual(r.ok, true);
+  assert.ok(r.link.includes('af_id=MY_ID'), 'should use my af_id, got: ' + r.link);
+  assert.ok(!r.link.includes('SOMEONE_ELSE'), 'must not retain the other affiliate id');
+  assert.strictEqual(r.clean, 'https://www.dmm.co.jp/dc/doujin/-/list/=/article=campaign/id=317274/');
+});
+test('L-4: 非URL → {ok:false, error:bad_url}', function () {
+  assert.strictEqual(buildFanzaListLink('not a url', 'af001').error, 'bad_url');
+  assert.strictEqual(buildFanzaListLink('', 'af001').error, 'empty');
 });
 
 // ────────────────────────────────────────────────────────────
