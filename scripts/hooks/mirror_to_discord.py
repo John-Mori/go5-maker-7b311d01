@@ -37,7 +37,14 @@ sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
 from session_rooms import dept_of_payload, touch_presence  # noqa: E402
 import persona_render  # noqa: E402
 CHAMI_NAME = "Chami(from Claude)"   # persona_send側で通知を鳴らさない名義(mirror判定)
-MAX_CHARS = 3500                    # 1メッセージの上限(長文は末尾を落として注記)
+# ★2026-07-21 Chami「話が長すぎてDiscord上だと途切れてます。前も言おうとしたけど」
+#   真因= **ここで切っていた**。persona_send は split_body() で1900字ずつ正しく分割して
+#   全文を送る実装になっている(6452字が切れた事故の対処済み)のに、その手前で本文を
+#   3500字に詰めて捨てていた。=**下流の恒久対処を上流が無効化していた**。
+#   → 上限を上げて分割に任せる。暴走(数万字)だけは止める。
+#   ★ただし本当の対処は**書く側が短く書くこと**。機構は取りこぼしを防ぐだけで、
+#     長文が4通に分かれて届く読みにくさは解決しない。
+MAX_CHARS = 9000                    # ≒Discord 5通ぶん。これを超える時だけ末尾を落として注記
 
 # ★Discordへ流すだけでは**デーモンには何も伝わらない**(2026-07-20実測):
 #   gatewayがwebhook投稿を弾く -> キューに入らない -> dept_daemonのmemory_appendが走らない
