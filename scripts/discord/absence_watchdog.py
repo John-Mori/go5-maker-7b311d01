@@ -218,6 +218,51 @@ def check_poller_health(state, dry_run):
         state["last_poller_alert"] = now_epoch
 
 
+# --- ★リンク死活監視 (2026-07-20 da.gd障害インシデント対応・緊急Chami指示) ---
+#   実害: da.gdグローバル障害(522)で公開64本中53本のYT概要欄リンク(表示用da.gd)が全滅。
+#   発見がChamiのiPad手動アクセス=監視の穴。ここで収益導線の外部依存を定期監視し、
+#   down/復旧の状態遷移でincidentへ1通ずつ通知する(狼少年にしない)。
+LINK_HEALTH_GATE_SEC = 30 * 60   # 30分毎(外部サービスへ礼儀的な頻度)
+LINK_TARGETS = [
+    # (名前, URL, タイムアウト秒) — 収益導線の全ホップ
+    ("da.gd(表示用短縮・外部)", "https://da.gd/", 10),
+    ("r2(自前計測短縮worker)", "https://r2.trustsignalbot.workers.dev/", 10),
+]
+
+
+def _http_alive(url, timeout):
+    """HTTP応答が返れば生存(404も生存=サーバは生きている)。5xx/timeout/接続不能=死。"""
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "go5-linkhealth/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status < 500
+    except Exception as e:
+        code = getattr(e, "code", None)   # HTTPError(4xx)は生存扱い
+        return code is not None and code < 500
+
+
+def check_link_health(state, dry_run):
+    now_epoch = time.time()
+    if now_epoch - state.get("last_link_health", 0) < LINK_HEALTH_GATE_SEC:
+        return
+    state["last_link_health"] = now_epoch
+    st = state.setdefault("link_health", {})
+    for name, url, to in LINK_TARGETS:
+        alive = _http_alive(url, to)
+        prev = st.get(name, "up")
+        cur = "up" if alive else "down"
+        if cur != prev:
+            if cur == "down":
+                msg = (f"🔗⚠ **{name} がダウン**({url} 応答なし/5xx)。"
+                       "YT概要欄の表示用リンクがda.gd依存の場合、その導線は今止まっています。"
+                       "計測用r2リンクは独立(こちらもこの監視の対象)。復旧したら再度通知します。")
+            else:
+                msg = f"🔗✅ **{name} 復旧** — リンク導線は再び機能しています。"
+            bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True)
+        st[name] = cur
+
+
 # --- ★O1 DLQ監視 (改善書P0-5: 5回配送失敗→dead に隔離された毒メッセージを誰も見ていない) ---
 QUEUE_DB_WD = os.path.join(LOCAL, "queue", "inbox.db")
 DEAD_ALERT_COOLDOWN_SEC = 60 * 60  # デッドレター通知は1時間に1回まで(暴走ガード)
@@ -375,6 +420,7 @@ def run_once(dry_run=False):
     check_dead_windows(state, dry_run)   # P2: 死んだ部門窓の可視化(応答性改善書2026-07-18)
     check_busy_notices(state, dry_run)   # ⏳対応中(生存)通知: Chami直要望2026-07-18・4段目の進捗信号
     check_dead_letters(state, dry_run)   # ★O1(P0-5): DLQ(毒メッセージ)が黙って消えるのを検知
+    check_link_health(state, dry_run)    # ★2026-07-20: 収益導線(da.gd/r2)の死活監視(da.gd障害の再発防止)
     save_state(state)
     rows = read_inbox_rows()
     if rows is None:
