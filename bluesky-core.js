@@ -256,9 +256,47 @@
     return [o.account || '', o.entryId || '', o.afId || '', o.domain || ''].join('|');
   }
 
+  // ---- 本文に貼り付け済みの「古い完成形」を取り除く(2026-07-20 Chami報告の二重投稿対策) ----
+  //   背景: 自動付与を一時停止していた期間(Q保存/Q読込の手動運用)に保存した本文は、PR行・セール行と
+  //   当時の短縮URLを含んだ「完成形」になっている。自動付与を再有効化(2026-07-13)した結果、
+  //   同じ見出しが2組出る状態になっていた。
+  //   旧ガードは「そのリンク文字列が本文にあるか」の完全一致判定のため、本文の古い短縮URL(da.gd等)と
+  //   今回付ける最新URL(5mgl.com等)が別物だとすり抜けていた＝重複の真因。
+  //   対策: compose/preview の直前に既知テンプレ行(+直下の裸URL行)を剥がし、常に最新の1組だけを付け直す。
+  //   ★既知テンプレと完全一致する行だけを対象にする(独自に書いた文はそのまま残す)。
+  var KNOWN_PR_LINES = [
+    '↓詳細はこちらから🎀 #PR #漫画',   // acc1
+    '↓詳しくはこちらから🌙 #PR #漫画', // acc2
+    '↓続きはこちらから🌙 #PR #漫画'    // acc2 旧テンプレ
+  ];
+  var KNOWN_DISCOUNT_LEADS = [
+    '⭐大幅割引セール中の同人はこちら 🎀',  // acc1
+    '🏮 大幅割引セール中の同人祭ページ 🏮'  // acc2
+  ];
+  /**
+   * 既知の自動付与ブロック(PR行/セール行＋その直下の裸URL行)を本文から取り除く。純粋関数。
+   * @param {string} text
+   * @returns {string}
+   */
+  function stripAutoBlocks(text) {
+    var lines = String(text == null ? '' : text).split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (KNOWN_PR_LINES.indexOf(t) < 0 && KNOWN_DISCOUNT_LEADS.indexOf(t) < 0) { out.push(lines[i]); continue; }
+      // 見出し行を落とす。直下が「裸URLだけの行」ならそれも古いリンクなので一緒に落とす。
+      if (i + 1 < lines.length && /^https?:\/\/\S+$/.test(lines[i + 1].trim())) i++;
+    }
+    // 行を抜いた跡の空行が続くのを詰める＋末尾の空白を落とす(compose/previewで同じ形にする)
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t\r\n]+$/, '');
+  }
+
   var api = {
     DEFAULT_SERVICE: DEFAULT_SERVICE,
     buildBlueskyPost: buildBlueskyPost,
+    stripAutoBlocks: stripAutoBlocks,
+    KNOWN_PR_LINES: KNOWN_PR_LINES,
+    KNOWN_DISCOUNT_LEADS: KNOWN_DISCOUNT_LEADS,
     blueskyPostWithImage: blueskyPostWithImage,
     detectFacets: detectFacets,
     blueskyPostRaw: blueskyPostRaw,

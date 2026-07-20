@@ -504,6 +504,17 @@
   // 作品URLの直前に挟む定型のPR明示行。(本文の標準構成・composePostTextとrenderPreviewの両方で使用)
   // PR行・セール行はアカウント別文言(2026-07-13 Chami共有: 順番=共通・文言=チャンネルの世界観に合わせ差し替え)
   function PR_LINE_() { return acctId() === 'acc2' ? '↓詳しくはこちらから🌙 #PR #漫画' : '↓詳細はこちらから🎀 #PR #漫画'; }
+
+  // 本文に貼り付け済みの「古い完成形」(PR行/セール行+当時の短縮URL)を取り除く。
+  //   実体は純粋関数 BlueskyCore.stripAutoBlocks(＝Nodeテスト対象)。詳しい経緯はそちらのコメント参照。
+  //   core未読込(読み込み順の事故)でも投稿本文を壊さないよう、素通しにフォールバックする。
+  function stripAutoBlocks_(text) {
+    if (window.BlueskyCore && typeof window.BlueskyCore.stripAutoBlocks === 'function') {
+      return window.BlueskyCore.stripAutoBlocks(text);
+    }
+    return String(text == null ? '' : text).replace(/[ \t\r\n]+$/, '');
+  }
+  try { window.__go5StripAutoBlocks = stripAutoBlocks_; } catch (e) {} // 検証用フック
   var DISC_ON_KEY = 'bsky_discount_list_on';
   function discountListOn_() { return true; } // 常時ON(標準投稿形式の一部・2026-07-14 Chami指定でトグルUI廃止=セール行は常に添える)
   function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
@@ -785,7 +796,8 @@
   // 再度有効化する場合は true に戻すだけでよい。
   var AUTO_APPEND_ENABLED = true; // 2026-07-13 Chami指定: 標準投稿形式(フック+PR行+短縮アフィ+セール行)を再有効化
   function composePostText() {
-    var caption = (els.text.value || '').replace(/[ \t\r\n]+$/, '');
+    // 貼り付け済みの古い完成形(PR行/セール行+旧URL)を剥がしてから組み直す＝二重化しない。
+    var caption = stripAutoBlocks_(els.text.value);
     if (!AUTO_APPEND_ENABLED) return caption;
     var link = resolveAffLink();
     // 本文に手動で作品URL/割引リンクを含めて書いた場合(例：しばらく手動投稿する場合)に、
@@ -801,6 +813,7 @@
     }
     return out;
   }
+  try { window.__go5ComposePostText = composePostText; } catch (e) {} // 検証用フック(プレビューとの一致確認)
 
   // ---- アバター(実アカウントのアイコンを公開APIで取得) ----
   var avatarFor = null, avatarUrl = null, displayNameVal = null;
@@ -848,13 +861,17 @@
 
   // ---- プレビュー描画(＝投稿される見た目) ----
   function renderPreview() {
-    var caption = els.text.value;
+    // ★composePostTextと同じ前処理を通す。(ここがズレると「プレビューと実際の投稿が違う」の原因になる)
+    var caption = stripAutoBlocks_(els.text.value);
     var link = resolveAffLink();
     var hasLink = !!(link && caption.indexOf(link) >= 0);
     var html = caption ? highlightLinks(escapeHtml(caption)) : '<span class="ph">(本文)</span>';
     // 本文に既に作品URLが含まれる場合(手動投稿など)は自動追加分を重複させない。
     if (!AUTO_APPEND_ENABLED) { /* 自動追加を一時停止中：本文そのまま */ }
-    else if (link && !hasLink) html += '\n\n' + highlightLinks(escapeHtml(PR_LINE_())) + '\n<span class="lnk">' + escapeHtml(link) + '</span>';
+    // ★作品リンクは投稿直前に measureWorkLink_ が計測付き短縮URLへ置換する。プレビューだけ生リンクの
+    //   ままだと「このまま投稿されます」の表示が実態と食い違う(Chami報告2026-07-20)ので注記を添える。
+    else if (link && !hasLink) html += '\n\n' + highlightLinks(escapeHtml(PR_LINE_())) + '\n<span class="lnk">' + escapeHtml(link) + '</span>'
+      + '\n<span class="ph">(投稿時に計測用の短縮URLへ変換されます)</span>';
     else if (!link) html += '\n\n<span class="ph">(投稿時にアフィリンクを自動で追加します)</span>';
     // 🔥割引一覧(composePostTextと同じ位置＝作品URLより後ろ)をプレビューにも反映。同じ理由で重複防止。
     if (AUTO_APPEND_ENABLED && discountListOn_()) {
