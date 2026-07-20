@@ -1146,11 +1146,19 @@
       .catch(function () { return ''; });
   }
   // 外部サービス短縮。(GET・テキスト返却)da.gd → TinyURL の順で保険に使う。
+  //   ★6秒タイムアウト付き(2026-07-20 da.gd障害の教訓): da.gdが「拒否」でなく「無限タイムアウト」型で
+  //   死ぬと(実測: 522/応答なし)、タイムアウト無しのfetchはブラウザ既定(数十秒〜)まで待ち、投稿UIが
+  //   フリーズ同然になる。6秒で諦めて次のプロバイダ(TinyURL→r2)へ即フォールバックする。
   function shortenVia(api, longUrl) {
-    return fetch(api + encodeURIComponent(longUrl))
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 6000) : null;
+    return fetch(api + encodeURIComponent(longUrl), ctl ? { signal: ctl.signal } : undefined)
       .then(function (r) { return r.ok ? r.text() : ''; })
-      .then(function (t) { t = String(t || '').trim(); return /^https?:\/\//.test(t) ? t : ''; })
-      .catch(function () { return ''; });
+      .then(function (t) {
+        if (timer) clearTimeout(timer);
+        t = String(t || '').trim(); return /^https?:\/\//.test(t) ? t : '';
+      })
+      .catch(function () { if (timer) clearTimeout(timer); return ''; });
   }
   // 案A(da.gdチェーン)：true でr2短縮を da.gd でさらに短縮して“表示用の短いURL”にする。
   //   false にすると従来どおり r2URL をそのまま表示。(＝ワンフラグで即ロールバック)
