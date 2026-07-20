@@ -66,6 +66,38 @@ sys.path.insert(0, HERE)
 from presence import lab_alive  # noqa: E402  生存判定(2信号)は全responder共通の1関数へ一本化
 
 
+def room_has_own_responder(dept):
+    """その部屋に**自前の応答者**(専任dept_daemon)が生きているか。
+
+    ★これは「代打すべきか」ではなく「**一次ackを打つべきか**」の判定(2026-07-21 研究室HQ Vol.4)。
+
+    背景= `forward_all` の部門は1便で2つのことが起きる: ①部屋のキャラが返信する
+    ②main箱へ回送される。研究室が寝ていると代打がそのmain箱の便を処理して**Discordへ返信する**
+    ため、**Chamiが同じ部屋で2回返事をもらう**(1回目=キャラ・2回目=代打の一次ack)。
+    実測= `プラットホームse` 21:04 の1便に platform-se デーモンが応答済みなのに、
+    main箱の写しにも代打が反応した。2026-07-21 00:52時点でmain箱に溜まっていた followup 5件は
+    **全て部屋の側で既に応答済み**だった=代打の一次ackは1件も必要が無かった。
+
+    判定は dept_daemon が公開している `/live`(127.0.0.1:<port>)へのTCP接続で行う。
+    ログのmtime推定にしないのは、デーモンは無通信だとログを書かない=**静かに誤判定する**ため。
+
+    ★fail-open(判定不能・DEPT_CONF読めない・dept未指定は全て False=従来どおり一次ackを打つ)。
+      沈黙が最悪の事故なので、**迷ったら喋る側へ倒す**。この関数が壊れても代打は止まらない。
+    """
+    if not dept:
+        return False
+    try:
+        import socket
+        from dept_daemon import DEPT_CONF
+        conf = DEPT_CONF.get(dept)
+        if not conf or not conf.get("port"):
+            return False
+        with socket.create_connection(("127.0.0.1", int(conf["port"])), timeout=0.3):
+            return True
+    except Exception:
+        return False  # ★必ず従来動作へ倒す(黙らせない)
+
+
 def processed_ids():
     ids = set()
     if not os.path.exists(PROCESSED):
@@ -140,7 +172,12 @@ def append_processed(line):
 
 
 QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
-QUEUE_DEPTS = ("router", "research-room", "main")  # main宛て=waiterデュアル監視と同じ3dept
+# ★research-roomを外した(2026-07-20 Chami裁定B)。あの部屋に専任dept_daemon(アメス・port18815)を
+#   置いたため、両方がclaimしに行くと**勝った方で名乗りが変わる**(アメス or「研究室(無人代打)」)
+#   =応答が非決定的になる。1領域1オーナー(RULES §3)を消費者にも適用し、部屋の主をデーモンに一本化する。
+#   デーモン死亡時はdaemon_keeperが数秒で復帰させるので、可用性は落ちない
+#   (むしろ代打より速い)。研究室Vol.9の対話窓が開いている間はデーモンが待機するのは従来どおり。
+QUEUE_DEPTS = ("router", "main")  # main宛て=waiterデュアル監視と同じ
 
 
 def cycle_queue(token):
@@ -177,8 +214,14 @@ def cycle_queue(token):
                 if rec.get("dept") in SENSITIVE_DEPTS:
                     held.append(c["id"])  # 機微は内容に触れない(reroute流入時)。リース保持で素通り
                     continue
-                ok = handle(rec, token)
-                q.ack(c["id"], result="代打応答" if ok else "代打失敗(再試行なし)")
+                if room_has_own_responder(rec.get("dept")):
+                    # 部屋の専任デーモンが既に応答済み=一次ackは二重応答にしかならない。
+                    # ★followupは下で必ず投函する(=本対応は落とさない。消すのは「重複した声」だけ)。
+                    q.ack(c["id"], result="一次ack省略(部屋の専任デーモンが応答済み)")
+                    print(f"{time.strftime('%H:%M:%S')} 一次ack省略: {rec.get('dept')} は専任デーモン稼働中")
+                else:
+                    ok = handle(rec, token)
+                    q.ack(c["id"], result="代打応答" if ok else "代打失敗(再試行なし)")
                 append_processed(json.dumps(rec, ensure_ascii=False))
                 sent += 1
                 # ★followup投函(jsonl経路と同じ穴の対。研究室の本対応へ必ず届ける)
@@ -232,7 +275,11 @@ def cycle(token):
         if lab_alive():
             remaining.append(line)
             continue
-        ok = handle(rec, token)
+        if room_has_own_responder(rec.get("dept")):
+            # 部屋の専任デーモンが既に応答済み=一次ackは二重応答にしかならない(下でfollowupは残す)。
+            print(f"{time.strftime('%H:%M:%S')} 一次ack省略: {rec.get('dept')} は専任デーモン稼働中")
+        else:
+            handle(rec, token)
         append_processed(line)  # 成否に関わらず台帳へ(暴走・無限再試行を防ぐ)
         sent += 1
         # ★followup投函(2026-07-18: 「担当の起床後に返答」が構造的に嘘だった穴の修正。
