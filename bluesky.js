@@ -1111,24 +1111,47 @@
   //   ・端末ごとに localStorage short_worker_url / short_shared_secret で上書き可。
   //   ・未設定/失敗時は da.gd→TinyURL→長いURL に安全フォールバック。(計測できないだけで壊れない)
   var SHORT = {
-    // ★2026-07-20: 独自ドメイン 5mgl.com へ切替(da.gd外部依存の根絶・INC-108恒久策)。
-    //   5mgl.com は r2 workerのカスタムドメイン=同一worker・同一KV。既存 r2.workers.dev の
-    //   コードもそのまま生存。E2E検証済(POST /api/shorten→5mgl.com/xxxxx・GET→302転送OK)。
-    WORKER_URL: 'https://5mgl.com',
+    // ★2026-07-20: 独自ドメインへ切替(da.gd外部依存の根絶・INC-108恒久策)。
+    //   ★2026-07-20b: チャンネル別ドメイン。月詠み(acc1)=5mgl.com / 宵桜艶帖(acc2)=yoz2.com。
+    //   どちらも同一r2 worker・同一KVのカスタムドメイン=計測は一括・記録はch別。既存
+    //   r2.workers.devのコードも生存。E2E検証済(POST→<domain>/xxxxx・GET→302転送)。
+    URL_BY_ACCT: { acc1: 'https://5mgl.com', acc2: 'https://yoz2.com' },
+    WORKER_URL: 'https://5mgl.com',   // 既定(acct不明時fallback。stats/listは同一KVなのでどのドメインでも可)
+    // 「これは自前の計測リンクか」判定に使う全ドメイン(旧r2も含める=既存リンク互換)
+    WORKER_HOSTS: ['https://5mgl.com', 'https://yoz2.com', 'https://r2.trustsignalbot.workers.dev'],
     SHARED_SECRET: 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'
   };
   try {
-    SHORT.WORKER_URL = localStorage.getItem('short_worker_url') || SHORT.WORKER_URL;
     SHORT.SHARED_SECRET = localStorage.getItem('short_shared_secret') || SHORT.SHARED_SECRET;
   } catch (e) {}
-  // 検証タブ(yt-clicks.js)が短縮URLのクリック数を /api/stats から読むために公開。(ソフト鍵＝公開可)
-  try { window.Go5Short = { WORKER_URL: SHORT.WORKER_URL, SHARED_SECRET: SHORT.SHARED_SECRET }; } catch (e) {}
+  // 投稿用ベースURL: 端末上書き(short_worker_url)が最優先→現アカウント別→既定。
+  function workerBase() {
+    try { var ov = localStorage.getItem('short_worker_url'); if (ov) return ov; } catch (e) {}
+    var acc = (typeof acctId === 'function') ? acctId() : 'acc1';
+    return SHORT.URL_BY_ACCT[acc] || SHORT.WORKER_URL;
+  }
+  // 「そのURLは自前の短縮ドメインか?」一致したベースを返す(両ドメイン+旧r2+端末上書きに対応)。
+  function ourShortBase(u) {
+    u = String(u || '');
+    var hosts = SHORT.WORKER_HOSTS.slice();
+    try { var ov = localStorage.getItem('short_worker_url'); if (ov) hosts.push(ov); } catch (e) {}
+    for (var i = 0; i < hosts.length; i++) {
+      var b = hosts[i].replace(/\/+$/, '');
+      if (b && u.indexOf(b + '/') === 0) return b;
+    }
+    return '';
+  }
+  // 検証タブ(yt-clicks.js)へ公開。WORKER_URL=stats/list用(KV共有)/ourBase=自前判定/base=現ch投稿用。
+  try {
+    window.Go5Short = { WORKER_URL: SHORT.WORKER_URL, WORKER_HOSTS: SHORT.WORKER_HOSTS,
+                        SHARED_SECRET: SHORT.SHARED_SECRET, base: workerBase, ourBase: ourShortBase };
+  } catch (e) {}
   // 「自分のクリックを計測から除外」：この端末(同ブラウザ)を対象外にする。worker が Cookie(go5nc) を立て、以後この端末の
   //   短縮URLアクセスは数えない。(アプリからのクリックも、Bluesky内蔵ブラウザからのクリックもCookie共有で除外＝iOS Safari)
   try {
     var _excBtn = document.getElementById('clickExcludeSelf');
     if (_excBtn) _excBtn.addEventListener('click', function () {
-      var base = (SHORT.WORKER_URL || '').replace(/\/+$/, '');
+      var base = (workerBase() || '').replace(/\/+$/, '');  // 現チャンネルのドメインで自分を除外
       if (!base) { window.alert('短縮URLワーカーが未設定です'); return; }
       window.open(base + '/?nc=1', '_blank'); // トップレベル遷移で一次Cookieを確実にセット
       _excBtn.textContent = '✅ 除外しました(開いたページで確認)';
@@ -1136,11 +1159,11 @@
     });
   } catch (e) {}
   function shortWorkerReady() {
-    return /^https?:\/\//.test(SHORT.WORKER_URL) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
+    return /^https?:\/\//.test(workerBase()) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
   }
   function shortenViaWorker(longUrl) {
     if (!shortWorkerReady()) return Promise.resolve('');
-    return fetch(SHORT.WORKER_URL.replace(/\/+$/, '') + '/api/shorten', {
+    return fetch(workerBase().replace(/\/+$/, '') + '/api/shorten', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Shared-Secret': SHORT.SHARED_SECRET },
       body: 'url=' + encodeURIComponent(longUrl)
@@ -1221,9 +1244,10 @@
       if (!m) return Promise.resolve({ text: text, workShort: null });
       var raw = m[0];
       return makeShortAndShare(raw).then(function (r) {
-        var w = ((window.Go5Short && window.Go5Short.WORKER_URL) || '').replace(/\/+$/, '');
-        // r2計測URLが取れた時だけ置換(da.gd単独やフォールバック長URLでは置換しない=計測できない置換をしない)
-        if (!r || !r.shortUrl || !w || r.shortUrl.indexOf(w + '/') !== 0) return { text: text, workShort: null };
+        // 自前ドメイン(5mgl.com/yoz2.com/旧r2)の計測URLが取れた時だけ置換
+        //   (da.gd単独やフォールバック長URLでは置換しない=計測できない置換をしない)
+        var ourOk = r && r.shortUrl && window.Go5Short && window.Go5Short.ourBase && window.Go5Short.ourBase(r.shortUrl);
+        if (!ourOk) return { text: text, workShort: null };
         var disp = r.shareUrl || r.shortUrl;
         return { text: String(text).replace(raw, disp), workShort: { shortUrl: r.shortUrl, shareUrl: disp, original: raw } };
       }).catch(function () { return { text: text, workShort: null }; });

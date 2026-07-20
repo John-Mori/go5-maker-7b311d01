@@ -162,10 +162,9 @@
 
   // 短縮URLから go5-short のコードを抽出。(自前ワーカーの払い出しURLのみ対象)
   function codeOf(shortUrl) {
-    var w = (window.Go5Short && window.Go5Short.WORKER_URL) || '';
-    if (!w || !shortUrl) return '';
-    var base = w.replace(/\/+$/, '');
-    if (shortUrl.indexOf(base + '/') !== 0) return '';
+    var g = window.Go5Short;
+    var base = (g && g.ourBase) ? g.ourBase(shortUrl) : '';  // 両ドメイン+旧r2のどれかに一致したベース
+    if (!base || !shortUrl) return '';
     var rest = shortUrl.slice(base.length + 1).split(/[/?#]/)[0];
     return /^[0-9A-Za-z]+$/.test(rest) ? rest : '';
   }
@@ -639,8 +638,8 @@
   // postUrl だけを書き換えても、既存の shareUrl/shortUrl に隠れて訂正が画面へ反映されない
   // 。(INC: 訂正して保存しても直らない)現在表示中＝優先度最上位の項目を直接書き換える。
   function saveBskyToItem_(item, bskyUrl) {
-    var w = (window.Go5Short && window.Go5Short.WORKER_URL) ? window.Go5Short.WORKER_URL.replace(/\/+$/, '') : '';
-    var isGo5 = w && bskyUrl && bskyUrl.indexOf(w) === 0;
+    var g = window.Go5Short;
+    var isGo5 = !!(g && g.ourBase && bskyUrl && g.ourBase(bskyUrl));  // 両ドメイン+旧r2を自前と認識
     if (bskyUrl) {
       if (isGo5) { item.shortUrl = bskyUrl; delete item.postUrl; delete item.shareUrl; }
       // ★r2でない入力は計測キー(shortUrl)を絶対に上書きしない。(INC調査2026-07-12: 「–」化の原因の一つ)
@@ -730,11 +729,11 @@
   //   アフィリンク化→r2短縮して workShortUrl を計測可能なキーに整える。既に r2 なら何もしない(冪等)。
   function autoMeasureWorkShort_(it, persist) {
     try {
-      var go5 = window.Go5Short || {}; var w = (go5.WORKER_URL || '').replace(/\/+$/, '');
-      function isR2(u) { return !!u && u.indexOf(w + '/') === 0; }
+      var go5 = window.Go5Short || {};
+      function isR2(u) { return !!(go5.ourBase && go5.ourBase(u)); }  // 両ドメイン+旧r2を自前と認識
       var cur = (it && it.workShortUrl) || '';
-      if (!it || !w || typeof window.Go5MakeShort !== 'function') return;
-      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 値なし/既にr2＝そのまま
+      if (!it || !go5.ourBase || typeof window.Go5MakeShort !== 'function') return;
+      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 値なし/既に自前短縮＝そのまま
       var toShorten = cur;
       // FANZA/DMMの作品ページURL(al.fanza等のアフィリンクではない)なら、先にアフィリンク化する。
       if (window.buildAffiliateLink && /(^|\.)dmm\.co\.jp|(^|\.)dlsite|fanza/.test(cur) && !/al\.(fanza|dmm)/.test(cur)) {
