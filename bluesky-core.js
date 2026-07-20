@@ -242,13 +242,28 @@
     });
   }
 
+  /**
+   * セール案内リンクのキャッシュキーを組み立てる。(純粋関数)
+   * account/entryId/afId/domain のいずれかが変われば別キーになる＝短縮先ドメインが変わっても
+   * 古いキャッシュへは二度とヒットせず自動的に作り直される。(恒久対策・2026-07-20。
+   * 旧実装はaf_idだけをキーにしていたため、短縮先ドメインを変えた時にキー名を手動で
+   * 改名する運用になっていた＝v1→v2→v3で2回発生。domainをキーに含めれば以後は不要)
+   * @param {{account?:string, entryId?:string, afId?:string, domain?:string}} o
+   * @returns {string}
+   */
+  function buildDiscountCacheKey(o) {
+    o = o || {};
+    return [o.account || '', o.entryId || '', o.afId || '', o.domain || ''].join('|');
+  }
+
   var api = {
     DEFAULT_SERVICE: DEFAULT_SERVICE,
     buildBlueskyPost: buildBlueskyPost,
     blueskyPostWithImage: blueskyPostWithImage,
     detectFacets: detectFacets,
     blueskyPostRaw: blueskyPostRaw,
-    blueskyVerify: blueskyVerify
+    blueskyVerify: blueskyVerify,
+    buildDiscountCacheKey: buildDiscountCacheKey
   };
 
   if (typeof window !== 'undefined') {

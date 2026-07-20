@@ -52,6 +52,8 @@
     /^yt_tags(__|$)/,
     /^affi_urls(_|__|$)/,        // affi_urls / affi_urls_quick(_at) / _undostack / _redostack
     /^bsky_tpl_book(__|$)/,      // 📝テンプレ帳(本文定型文・アカウント別・2026-07-12)
+    /^bsky_discount_urls(__|$)/,    // 🔥セール案内URL(複数・名前付き・アカウント別・2026-07-20)
+    /^bsky_discount_selected(__|$)/, // 選択中のセール案内URL(次回も同じものを使う・アカウント別・2026-07-20)
   ];
   // 前方一致では拾わない単発の共有設定キー。(完全一致)
   var SYNC_EXACT = {

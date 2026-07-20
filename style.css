@@ -865,6 +865,21 @@ textarea:focus{border-color:var(--accent);}
 .disc-new{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;white-space:nowrap;}
 .disc-new input[type=checkbox]{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent2);margin:0;}
 
+/* 🔥 セール案内URL管理(複数保持・名前付き・2026-07-20) */
+.disc-url-list{margin-top:8px;}
+.disc-url-item{display:flex;align-items:center;gap:8px;background:#0e1422;border:1px solid var(--line);
+  border-radius:8px;padding:8px 10px;margin-top:6px;font-size:13px;cursor:pointer;}
+.disc-url-item input[type=radio]{accent-color:var(--accent);flex-shrink:0;width:16px;height:16px;margin:0;}
+.disc-url-name{display:block;color:var(--ink);font-weight:700;}
+.disc-url-url{display:block;color:var(--sub);font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.disc-url-del{flex-shrink:0;background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:6px;
+  padding:5px 10px;font-size:12px;width:auto;margin-top:0;}
+.disc-url-add{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+.disc-url-add input{flex:1 1 140px;min-width:0;font-size:14px;padding:8px 10px;border-radius:8px;
+  border:1px solid var(--line);background:#0e1422;color:var(--ink);outline:none;}
+.disc-url-add input:focus{border-color:var(--accent);}
+.disc-url-add button{flex:0 0 auto;width:auto;margin-top:0;}
+
 #bskySettings{margin-top:6px;}
 #bskyAppPw{
   width:100%;font-size:16px;padding:11px 12px;border-radius:10px;

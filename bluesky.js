@@ -260,6 +260,7 @@
     if (els.discountSel2) els.discountSel2.value = '';
     if (els.discountNew) els.discountNew.checked = false;
     if (els.discountNew2) els.discountNew2.checked = false;
+    ensureDiscUrlsSeeded_(); renderDiscUrlList_(); // 🔥セール案内URL一覧(アカウント別・選択は永続)
     if (els.histList) loadHistory();
     var wv = loadA('bsky_work_url'); var wval = (wv != null ? wv : DEF.workUrl);
     if (els.workUrl) els.workUrl.value = wval;
@@ -498,37 +499,143 @@
   //     短縮は makeShortAndShare。(自前worker[チャンネル別ドメイン]→da.gd→TinyURL、全滅時はフルURL)302素通しなので af_id は保持。
   //   ・ON/OFFは端末に永続化＋composePostText()が最後に付け足す＝「案内する作品URL」より必ず後ろに来る。
   //     動画作成後の自動投稿(投稿確認モーダル)もcomposePostText()で本文を作るため自動的に反映される。
-  var DISCOUNT_LIST_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/';
+  var DISCOUNT_LIST_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/'; // 初回だけの既定シード(下のensureDiscUrlsSeeded_)
   function DISCOUNT_LEAD_() { return acctId() === 'acc2' ? '🏮 大幅割引セール中の同人祭ページ 🏮' : '⭐大幅割引セール中の同人はこちら 🎀'; }
   // 作品URLの直前に挟む定型のPR明示行。(本文の標準構成・composePostTextとrenderPreviewの両方で使用)
   // PR行・セール行はアカウント別文言(2026-07-13 Chami共有: 順番=共通・文言=チャンネルの世界観に合わせ差し替え)
   function PR_LINE_() { return acctId() === 'acc2' ? '↓詳しくはこちらから🌙 #PR #漫画' : '↓詳細はこちらから🎀 #PR #漫画'; }
-  // 2026-07-14: キー名をv2へ(旧キャッシュに計測を通らないda.gd直リンクが残存=qtedy問題。改名で全端末が計測付きリンクを再生成する)
-  // 2026-07-20: v2→v3(同じ理由の再発)。チャンネル別独自ドメイン(5mgl.com/yoz2.com)化で短縮の出力先が変わったが、
-  //   v2キャッシュは端末に残ったまま(af_id不変なら再生成されない)＝セール案内URLだけ旧ドメインが残っていた。
-  //   キー名を変えて強制的に作り直す(作品リンク側はmeasureWorkLink_で投稿の都度その場生成のためキャッシュ問題が無かった)。
-  var DISC_ON_KEY = 'bsky_discount_list_on', DISC_LINK_KEY = 'bsky_discount_list_link_v3', DISC_LINK_AF_KEY = 'bsky_discount_list_link_af_v3';
+  var DISC_ON_KEY = 'bsky_discount_list_on';
   function discountListOn_() { return true; } // 常時ON(標準投稿形式の一部・2026-07-14 Chami指定でトグルUI廃止=セール行は常に添える)
   function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
   function curAfId_() { try { return (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) { return ''; } }
-  // af_idごとにキャッシュ。(af_idが変わったら作り直す)
+
+  // ---- 🔥 セール案内URLの複数管理(名前付き・追加/選択/保存/削除・選択は永続) ----
+  //   Chami依頼2026-07-20:「セール中の案内URLはキャンペーン/季節で増減するので、追加・選択・保存・
+  //   削除ができ、選んだものはリセットせず次回も同じものを使う」。アカウント別(acc1/acc2で別々に持てる)。
+  //   永続キーは core/storage-keys.js の許可リストへ登録済み(sync対象)。
+  function discUrlsKey_() { return 'bsky_discount_urls__' + acctId(); }
+  function discSelKey_() { return 'bsky_discount_selected__' + acctId(); }
+  function discUrlsLoad_() { try { var a = JSON.parse(localStorage.getItem(discUrlsKey_()) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  function discUrlsSave_(arr) { try { localStorage.setItem(discUrlsKey_(), JSON.stringify(arr.slice(0, 50))); } catch (e) {} }
+  function discSelectedId_() { try { return localStorage.getItem(discSelKey_()) || ''; } catch (e) { return ''; } }
+  function discSetSelectedId_(id) { try { localStorage.setItem(discSelKey_(), id || ''); } catch (e) {} }
+  // 初回のみ：旧・単一URL運用の既定値(DISCOUNT_LIST_URL)を「名前付きリストの1件目」として移行・選択する。
+  function ensureDiscUrlsSeeded_() {
+    var acc = acctId();
+    if (load('disc_urls_seeded__' + acc) === '1') return;
+    save('disc_urls_seeded__' + acc, '1');
+    if (discUrlsLoad_().length) return; // 既に何か登録済みなら何もしない
+    var seed = { id: 'seed-' + acc, name: '既定のセールページ', url: DISCOUNT_LIST_URL, at: Date.now() };
+    discUrlsSave_([seed]);
+    if (!discSelectedId_()) discSetSelectedId_(seed.id);
+  }
+  // 現在選択中のエントリ。(選択IDが失効していたら先頭にフォールバック／1件も無ければ null)
+  function discCurrentEntry_() {
+    var arr = discUrlsLoad_(); if (!arr.length) return null;
+    var sel = discSelectedId_(), found = null;
+    arr.forEach(function (e) { if (e.id === sel) found = e; });
+    return found || arr[0];
+  }
+
+  // ---- 🔥 セール案内リンクのキャッシュ(ドメイン自己修復・恒久対策2026-07-20) ----
+  //   旧実装は af_id だけをキーにしていたため、短縮先ドメインを変えると(v1→v2、v2→v3で2回発生)
+  //   古いキャッシュが残り続け、その都度キー名を手動で改名する運用になっていた。
+  //   → キャッシュキーに「選択中のエントリ」「af_id」「実際の短縮先ドメイン(workerBase())」を
+  //   すべて含める。ドメインが変われば workerBase() の返り値も変わり、キーが自動的に別物になる
+  //   ため古い値には二度とヒットせず自動で作り直される＝以後、手動でのキー改名が不要になる。
+  var DISC_CACHE_KEY = 'bsky_discount_link_cache'; // 中身はキャッシュのみ(storage-keysに未登録=既定で同期しない・意図通り)
+  function discCacheLoad_() { try { var o = JSON.parse(localStorage.getItem(DISC_CACHE_KEY) || '{}'); return (o && typeof o === 'object') ? o : {}; } catch (e) { return {}; } }
+  // キー組み立ては bluesky-core.js の純粋関数(buildDiscountCacheKey・テスト済)へ委譲。
+  function discCacheKeyFor_(entry, af) {
+    var o = { account: acctId(), entryId: entry ? entry.id : '', afId: af, domain: workerBase() };
+    return (window.BlueskyCore && window.BlueskyCore.buildDiscountCacheKey) ? window.BlueskyCore.buildDiscountCacheKey(o) : [o.account, o.entryId, o.afId, o.domain].join('|');
+  }
+  function discCacheGet_(key) { return discCacheLoad_()[key] || ''; }
+  function discCacheSet_(key, link) {
+    var c = discCacheLoad_();
+    c[key] = link;
+    var keys = Object.keys(c);
+    if (keys.length > 30) { keys.slice(0, keys.length - 30).forEach(function (k) { delete c[k]; }); } // 古いエントリ/旧ドメイン分は溜め過ぎない
+    try { localStorage.setItem(DISC_CACHE_KEY, JSON.stringify(c)); } catch (e) {}
+  }
+  // 選択中エントリ×af_id×現ドメインでキャッシュ済みか。
   function cachedDiscountLink_() {
     var af = curAfId_(); if (!af) return '';
-    try { if (localStorage.getItem(DISC_LINK_AF_KEY) !== af) return ''; return localStorage.getItem(DISC_LINK_KEY) || ''; } catch (e) { return ''; }
+    var entry = discCurrentEntry_(); if (!entry) return '';
+    return discCacheGet_(discCacheKeyFor_(entry, af));
   }
   function ensureDiscountLink_(onReady) {
     var af = curAfId_(); if (!af) return;
-    if (cachedDiscountLink_()) { if (onReady) onReady(cachedDiscountLink_()); return; }
-    var r = window.buildFanzaListLink ? window.buildFanzaListLink(DISCOUNT_LIST_URL, af) : null;
-    if (!r || !r.ok) return;
-    var save = function (link) { try { localStorage.setItem(DISC_LINK_KEY, link); localStorage.setItem(DISC_LINK_AF_KEY, af); } catch (e) {} if (onReady) onReady(link); };
-    // 計測付きで短縮。(r2=計測キーも保存)ALLOWED_HOSTSにFANZA系追加済み(2026-07-12)なのでr2が通る。
-    makeShortAndShare(r.link).then(function (res) {
-      try { if (res && res.shortUrl) localStorage.setItem('bsky_discount_list_link_r2', res.shortUrl); } catch (e) {}
-      save((res && (res.shareUrl || res.shortUrl)) || r.link);
-    }).catch(function () { save(r.link); });
+    var entry = discCurrentEntry_(); if (!entry) return;
+    var cached = cachedDiscountLink_();
+    if (cached) { if (onReady) onReady(cached); return; }
+    // 依頼2の自動解決(af_id欠落/未短縮のどちらも自動補完・既に短縮済みならそのまま)を利用。
+    resolvePromoUrl(entry.url).then(function (r) {
+      if (!r || !r.ok) return;
+      discCacheSet_(discCacheKeyFor_(entry, af), r.link);
+      if (onReady) onReady(r.link);
+    });
   }
   function recomposePcText_() { if (els.pcText) els.pcText.value = composePostText(); }
+
+  // ---- UI: セール案内URL一覧(選択・追加・削除)の描画・配線 ----
+  function renderDiscUrlList_() {
+    var wrap = $('discUrlList'); if (!wrap) return;
+    var arr = discUrlsLoad_(), cur = discCurrentEntry_(), sel = cur ? cur.id : '';
+    if (!arr.length) { wrap.innerHTML = '<div class="hint">(未登録。下から追加してください)</div>'; return; }
+    wrap.innerHTML = arr.map(function (e) {
+      var checked = (e.id === sel) ? ' checked' : '';
+      return '<label class="disc-url-item">' +
+        '<input type="radio" name="discUrlSel" value="' + escapeHtml(e.id) + '"' + checked + '>' +
+        '<span style="flex:1;min-width:0;">' +
+          '<span class="disc-url-name">' + escapeHtml(e.name || '(無題)') + '</span>' +
+          '<span class="disc-url-url">' + escapeHtml(e.url) + '</span>' +
+        '</span>' +
+        '<button type="button" class="ghost disc-url-del" data-id="' + escapeHtml(e.id) + '">🗑</button>' +
+        '</label>';
+    }).join('');
+    Array.prototype.forEach.call(wrap.querySelectorAll('input[name="discUrlSel"]'), function (r) {
+      r.addEventListener('change', function () {
+        discSetSelectedId_(r.value); // 選択は永続化(リセットしない・次回も同じものを使う)
+        renderPreview();
+        if (els.pcModal && !els.pcModal.hidden) recomposePcText_();
+      });
+    });
+    Array.prototype.forEach.call(wrap.querySelectorAll('.disc-url-del'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-id');
+        var arr2 = discUrlsLoad_(), target = null;
+        arr2.forEach(function (x) { if (x.id === id) target = x; });
+        if (!target) return;
+        if (!window.confirm('「' + target.name + '」を削除しますか？')) return;
+        arr2 = arr2.filter(function (x) { return x.id !== id; });
+        discUrlsSave_(arr2);
+        if (discSelectedId_() === id) discSetSelectedId_(arr2.length ? arr2[0].id : '');
+        renderDiscUrlList_();
+        renderPreview();
+        if (els.pcModal && !els.pcModal.hidden) recomposePcText_();
+      });
+    });
+  }
+  (function wireDiscUrlAdd_() {
+    var btn = $('discUrlAddBtn'); if (!btn) return;
+    btn.addEventListener('click', function () {
+      var nameEl = $('discUrlName'), urlEl = $('discUrlInput'), hint = $('discUrlHint');
+      var name = ((nameEl && nameEl.value) || '').trim();
+      var url = ((urlEl && urlEl.value) || '').trim();
+      if (!/^https?:\/\//.test(url)) { if (hint) hint.textContent = 'URLは http:// か https:// で始めてください。'; return; }
+      var arr = discUrlsLoad_();
+      var entry = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name || ('セールURL' + (arr.length + 1)), url: url, at: Date.now() };
+      arr.unshift(entry); discUrlsSave_(arr);
+      discSetSelectedId_(entry.id); // 追加したものをそのまま選択(=次回もこれを使う)
+      if (nameEl) nameEl.value = ''; if (urlEl) urlEl.value = '';
+      if (hint) hint.textContent = '「' + entry.name + '」を追加・選択しました。';
+      renderDiscUrlList_();
+      renderPreview();
+      if (els.pcModal && !els.pcModal.hidden) recomposePcText_();
+    });
+  })();
+
   // 割引リンクの用意をPromise化(2026-07-13): 動画生成→投稿モーダルを「完成形」で開くための待ち合わせ。
   //   取得に失敗しても投稿は止めない。(4秒で諦めてそのまま進む)
   function ensureDiscountReadyP_() {
@@ -1261,6 +1368,28 @@
   }
   // 投稿履歴タブ(yt-clicks.js)から、過去投稿URLの計測用短縮リンク(r2+da.gd)を生成するために公開。
   try { window.Go5MakeShort = makeShortAndShare; } catch (e) {}
+
+  // ---- 🔁 URL自動解決：af_id欠落/未短縮のどちらも自動で補い、最終的に「短縮済みアフィリンク」にする ----
+  //   Chami依頼2026-07-20②。判定は affiliate-core.js の classifyPromoUrl/ensureAffiliateLink(純粋関数・
+  //   tests/test_promo_url.js)。既に「短縮済み」なら判定だけでネットワークを叩かない(二重処理しない)。
+  function shortHostList_() {
+    // SHORT.WORKER_HOSTS は "https://xxx" 形式なので、ホスト名だけに変換して渡す。
+    return SHORT.WORKER_HOSTS.map(function (h) { try { return new URL(h).hostname; } catch (e) { return ''; } }).filter(Boolean);
+  }
+  function resolvePromoUrl(rawUrl) {
+    var url = (rawUrl || '').trim();
+    if (!url) return Promise.resolve({ ok: false, error: 'empty' });
+    if (!window.classifyPromoUrl || !window.ensureAffiliateLink) return Promise.resolve({ ok: false, error: 'module_missing' });
+    var state = window.classifyPromoUrl(url, shortHostList_());
+    if (state.isShortened) return Promise.resolve({ ok: true, link: url, changed: false }); // 既に短縮済み→そのまま
+    var built = window.ensureAffiliateLink(url, curAfId_());
+    if (!built.ok) return Promise.resolve({ ok: false, error: built.error });
+    return makeShortAndShare(built.link).then(function (r) {
+      var link = (r && (r.shareUrl || r.shortUrl)) || built.link;
+      return { ok: true, link: link, changed: true };
+    });
+  }
+  try { window.Go5ResolvePromoUrl = resolvePromoUrl; } catch (e) {}
 
   // ---- 導線2: 投稿本文の作品リンクを計測付き短縮へ置換 ----
   //   本文中の生のFANZA系リンク(al.fanza/dmm)を投稿直前に r2計測リンク(表示はda.gd)へ差し替える。

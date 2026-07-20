@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=376">
+<link rel="stylesheet" href="style.css?v=380">
 </head>
 <body>
 <header>
@@ -457,6 +457,21 @@
     <div id="reserveList" class="rsv-list" hidden></div>
   </section>
 
+  <!-- 🔥 セール案内URL管理(複数保持・名前付き・追加/選択/保存/削除。選んだURLは次回も自動で使う・アカウント別) -->
+  <section class="card">
+    <details class="bsky-adv" id="discUrlsDetails">
+      <summary>🔥 セール案内URLの管理</summary>
+      <div class="hint">本文の最後に添えるセール/キャンペーンの案内URL。キャンペーンや季節で増減するので、名前を付けて複数登録し、使うものを選べます。<b>選んだものは次回もそのまま使われます</b>(このアカウントのみ)。URLはaf_id無し・短縮前のままでも構いません(投稿時に自動で補います)。</div>
+      <div id="discUrlList" class="disc-url-list"></div>
+      <div class="disc-url-add">
+        <input id="discUrlName" type="text" placeholder="名前(例: 夏祭りセール)" autocomplete="off">
+        <input id="discUrlInput" type="url" inputmode="url" placeholder="https://…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <button id="discUrlAddBtn" class="ghost" type="button">＋追加</button>
+      </div>
+      <div class="hint" id="discUrlHint" style="margin-top:4px;"></div>
+    </details>
+  </section>
+
   <!-- アカウント・記録設定(自動投稿と共通)：初期設定後はあまり触らないため最下段に配置 -->
   <section class="card">
     <details class="bsky-adv" id="bskyAccDetails">
@@ -803,7 +818,7 @@
 <!-- ── core 層(共通土台・最初に読み込む)：util/account/storage-keys ─────────── -->
 <script src="core/util.js?v=376"></script>
 <script src="core/account.js?v=376"></script>
-<script src="core/storage-keys.js?v=376"></script>
+<script src="core/storage-keys.js?v=380"></script>
 <script src="core/idb-store.js?v=376"></script>
 <script src="core/sync.js?v=376"></script>
 <script src="core/kaizen-log.js?v=376"></script>
@@ -811,12 +826,12 @@
 <script src="idgen.js?v=376"></script>
 <script src="app.js?v=376"></script>
 <script src="promo-label.js?v=376"></script>
-<script src="affiliate-core.js?v=376"></script>
+<script src="affiliate-core.js?v=380"></script>
 <script src="fanza-core.js?v=376"></script>
 <script src="affiliate.js?v=376"></script>
-<script src="bluesky-core.js?v=376"></script>
+<script src="bluesky-core.js?v=380"></script>
 <script src="scheduler.js?v=376"></script>
-<script src="bluesky.js?v=379"></script>
+<script src="bluesky.js?v=380"></script>
 <script src="drive-upload.js?v=376"></script>
 <script src="verify-core.js?v=376"></script>
 <script src="verify.js?v=376"></script>

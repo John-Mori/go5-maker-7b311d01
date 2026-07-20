@@ -78,14 +78,94 @@ function normalizeWorkUrl(rawUrl) {
   return u;
 }
 
+/**
+ * 短縮URLとして扱う既知ホスト。(自前r2ドメイン＋外部フォールバック。bluesky.js の
+ * SHORT.WORKER_HOSTS / SHARE_SHORTENERS が実際に使う宛先と同じ＝二重処理防止の判定に使う)
+ * サブドメイン(例: www.tinyurl.com)も許容。
+ */
+const SHORT_URL_HOSTS = ['5mgl.com', 'yoz2.com', 'r2.trustsignalbot.workers.dev', 'da.gd', 'tinyurl.com'];
+
+/**
+ * URLのホスト名が「既に短縮済み」とみなせるホストか。
+ * @param {string} rawUrl
+ * @param {string[]} [extraHosts] - 端末上書き等、追加で信頼するホスト
+ * @returns {boolean}
+ */
+function isShortenedUrl(rawUrl, extraHosts) {
+  const u = (rawUrl || '').trim();
+  if (!u) return false;
+  let host;
+  try { host = new URL(u).hostname.toLowerCase(); } catch (e) { return false; }
+  const hosts = SHORT_URL_HOSTS.concat(extraHosts || []);
+  return hosts.some((h) => { h = String(h || '').toLowerCase(); return !!h && (host === h || host.endsWith('.' + h)); });
+}
+
+/**
+ * URLに「実在のaf_id」(プレースホルダ【アフィID】でない)が入っているか。
+ * @param {string} rawUrl
+ * @returns {boolean}
+ */
+function hasRealAffiliateId(rawUrl) {
+  const u = (rawUrl || '').trim();
+  const m = u.match(/[?&]af_id=([^&]*)/);
+  if (!m) return false;
+  let v = m[1] || '';
+  try { v = decodeURIComponent(v); } catch (e) { /* デコード不能ならそのまま比較 */ }
+  return !!v && v !== '【アフィID】';
+}
+
+/**
+ * 入力URLの状態を判定する。(セール案内URL自動解決の判断材料・純粋関数・ネットワーク不使用)
+ * @param {string} rawUrl
+ * @param {string[]} [extraShortHosts] - 追加で「短縮済み」とみなすホスト(端末上書き分)
+ * @returns {{isShortened:boolean, hasAffiliate:boolean, needsAffiliate:boolean, needsShorten:boolean}}
+ */
+function classifyPromoUrl(rawUrl, extraShortHosts) {
+  const isShortened = isShortenedUrl(rawUrl, extraShortHosts);
+  // 短縮済みなら中身は見ない＝「もう手を加えなくてよいか」の判定にaf_idの有無は無関係。
+  const hasAffiliate = isShortened ? true : hasRealAffiliateId(rawUrl);
+  return {
+    isShortened,
+    hasAffiliate,
+    needsAffiliate: !isShortened && !hasAffiliate,
+    needsShorten: !isShortened
+  };
+}
+
+/**
+ * URLにaf_idが無ければ付与してアフィリンク化する。(cidが取れれば作品リンク、
+ * 取れなければ一覧/キャンペーンページとして buildFanzaListLink で包む＝セール会場対応)
+ * 既にaf_idが入っている場合は二重ラップせずそのまま返す。(冪等)
+ * @param {string} rawUrl
+ * @param {string} afId
+ * @returns {{ok:true, link:string, wasAlready:boolean}|{ok:false, error:string}}
+ */
+function ensureAffiliateLink(rawUrl, afId) {
+  const url = (rawUrl || '').trim();
+  if (!url) return { ok: false, error: 'empty' };
+  if (hasRealAffiliateId(url)) return { ok: true, link: url, wasAlready: true };
+  const r1 = buildAffiliateLink(url, afId);
+  if (r1.ok) return { ok: true, link: r1.link, wasAlready: false };
+  const r2 = buildFanzaListLink(url, afId);
+  if (r2.ok) return { ok: true, link: r2.link, wasAlready: false };
+  return { ok: false, error: r2.error || r1.error };
+}
+
 // ブラウザ環境向けグローバル公開
 if (typeof window !== 'undefined') {
   window.buildAffiliateLink = buildAffiliateLink;
   window.buildFanzaListLink = buildFanzaListLink;
   window.normalizeWorkUrl = normalizeWorkUrl;
+  window.isShortenedUrl = isShortenedUrl;
+  window.hasRealAffiliateId = hasRealAffiliateId;
+  window.classifyPromoUrl = classifyPromoUrl;
+  window.ensureAffiliateLink = ensureAffiliateLink;
 }
 
 // Node.js(CommonJS)向けエクスポート
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl };
+  module.exports = {
+    buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl,
+    isShortenedUrl, hasRealAffiliateId, classifyPromoUrl, ensureAffiliateLink
+  };
 }
