@@ -2080,7 +2080,11 @@
   }
   function buildTitle() {
     if (!els.ytTitle) return;
-    var comment = (topEl && topEl.value ? topEl.value.trim() : '');
+    // ★2行モードの改行はYouTube題名に持ち込まない(Chami指定2026-07-19)。
+    //   YouTubeの題名は1行が仕様。改行を空白に置換もしない=詰めて連結する(Chami明示)。
+    //   ここは video-created の detail.title とは別経路で #top を直読みしているため、
+    //   app.js 側の対処だけでは漏れる(コピーボタンでそのままクリップボードへ入る)。
+    var comment = (topEl && topEl.value ? String(topEl.value).replace(/\n+/g, '').trim() : '');
     var tags = (els.ytTags && els.ytTags.value ? els.ytTags.value.trim() : '');
     var title = comment + (comment && tags ? ' ' : '') + tags;
     lastTitle = title;

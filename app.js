@@ -514,10 +514,15 @@
     if (!fgImg) { setStatus("先に写真を選んでください。"); return; }
     if (!window.MediaRecorder) { setStatus("この端末は動画書き出しに未対応です。(iOS15以降のSafari推奨)"); return; }
     // 狙い・コメント型は生成前の必須選択＝未設定のまま投稿されると分析を汚すため入口で止める。(Chami指定2026-07-14)
+    // ★テストモード時は必須にしない(Chami指定2026-07-19)。テストは記録シートに残らない
+    //   (bluesky.js の testMode 分岐で除外される)ので、そもそも分析を汚さない。
+    //   動作確認のたびに狙いとコメント型を選ばされるのは手間だけで得るものが無い。
+    const testChk = document.getElementById("testMode");
+    const isTestRun = !!(testChk && testChk.checked);
     const goalSel = document.getElementById("movieGoal"), cmtSel = document.getElementById("movieCmtType");
     const missSel = [];
-    if (goalSel && !goalSel.value) missSel.push("狙い");
-    if (cmtSel && !cmtSel.value) missSel.push("コメント型");
+    if (!isTestRun && goalSel && !goalSel.value) missSel.push("狙い");
+    if (!isTestRun && cmtSel && !cmtSel.value) missSel.push("コメント型");
     if (missSel.length) {
       setStatus("⚠ " + missSel.join("と") + "が未選択です。選択してから動画を作成してください。(生成前の必須項目)");
       const tgt = (goalSel && !goalSel.value) ? goalSel : cmtSel;
@@ -570,7 +575,13 @@
       var testEl = document.getElementById("testMode");
       var isTest = !!(testEl && testEl.checked);   // テストモード＝記録しない(IDに test- 接頭辞)
       var videoId = (window.IdGen && window.IdGen.makeVideoId) ? window.IdGen.makeVideoId(account, new Date(), { test: isTest }) : "";
-      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: els.top.value.trim(), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest } }));
+      // ★titleは titleForBurn で改行を潰してから配る(Chami指定2026-07-19
+      //   「2行モードで改行しても、投稿など他の箇所では改行や空白を挟まない」)。
+      //   改行が要るのは**Canvasの行分割だけ**(titleForDraw)で、購読側は全て1行の題名を欲しがる:
+      //   Bluesky alt / GAS記録のtitle / 端末予約 / Drive のフォルダ名・ファイル名。
+      //   ★空白に置換しない=詰めて連結する(Chami明示「改行や空白を挟まない」)。
+      //   ここ1箇所で潰すことで購読側6経路すべてに効く(個別対処だと足し忘れが必ず出る)。
+      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest } }));
     } catch (e) {
       setStatus("作成に失敗しました：" + e.message);
     } finally {

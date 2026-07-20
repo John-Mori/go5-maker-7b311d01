@@ -85,6 +85,13 @@
     var top = ($('top') || {}).value || '';
     var workUrl = ($('movieWorkUrl') || {}).value || '';
     var rebuild = !!($('movieRebuild') || {}).checked;
+    // ★2行モードのON/OFFも保存する(Chami指定2026-07-19「更新前に下書き保存した作品でも、
+    //   更新後に下書きから引っ張る作品は更新後の影響を反映して表示すること」)。
+    //   これが無いと: top/author の値には改行が入っているのに、呼び出し先のチェックがOFFだと
+    //   fitOneLine で1行に潰れ、**保存した時と見た目が変わる**。下書きは見た目の再現が仕事なので
+    //   表示を決めるフラグを本文と一緒に持たせる。
+    var topTwo = !!($('topTwoLine') || {}).checked;
+    var authorTwo = !!($('authorTwoLine') || {}).checked;
     var attrs = currentAttrs_();
     var photoInput = $('photo');
     var pf = (photoInput && photoInput.files && photoInput.files[0]) ? photoInput.files[0] : null;
@@ -102,6 +109,7 @@
         author: author, detail: detail, top: top, workUrl: workUrl,
         workTitle: wTitle, workAuthor: wAuthor,
         attrs: attrs, rebuild: rebuild,
+        topTwoLine: topTwo, authorTwoLine: authorTwo,
         label: makeLabel_(top, author)
       };
       var arr = loadDrafts();
@@ -119,6 +127,27 @@
   // ── 下書きの呼び出し ──
   function applyDraft_(draft) {
     var author = $('author'), detail = $('detail'), top = $('top'), workUrl = $('movieWorkUrl'), rebuild = $('movieRebuild');
+    // ★2行モードは**本文より先に**復元する(Chami指定2026-07-19)。
+    //   textareaへ値を入れると change が飛んでプレビューが再描画されるため、
+    //   後からチェックを変えると一瞬1行で描かれてから2行になる(ちらつき)。
+    //   ★旧い下書き(このフラグを持たない時期に保存したもの)への後方互換:
+    //     フラグが無ければ**本文に改行が入っているかどうか**から推定する。
+    //     保存時に2行だったからこそ改行が入っているので、これで当時の見た目を復元できる。
+    //     undefined と false を区別するため hasOwnProperty で判定する(=== undefined だと
+    //     「意図してOFFで保存した下書き」まで推定に流れてしまう)。
+    function twoLineOf_(key, text) {
+      if (draft && Object.prototype.hasOwnProperty.call(draft, key)) return !!draft[key];
+      return String(text || '').indexOf('\n') >= 0;
+    }
+    var topTwoEl = $('topTwoLine'), authorTwoEl = $('authorTwoLine');
+    if (topTwoEl) {
+      topTwoEl.checked = twoLineOf_('topTwoLine', draft.top);
+      topTwoEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (authorTwoEl) {
+      authorTwoEl.checked = twoLineOf_('authorTwoLine', draft.author);
+      authorTwoEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
     if (author) { author.value = draft.author || ''; author.dispatchEvent(new Event('change', { bubbles: true })); }
     if (detail) { detail.value = draft.detail || ''; detail.dispatchEvent(new Event('change', { bubbles: true })); }
     if (top) { top.value = draft.top || ''; top.dispatchEvent(new Event('change', { bubbles: true })); }
