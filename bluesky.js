@@ -1111,7 +1111,10 @@
   //   ・端末ごとに localStorage short_worker_url / short_shared_secret で上書き可。
   //   ・未設定/失敗時は da.gd→TinyURL→長いURL に安全フォールバック。(計測できないだけで壊れない)
   var SHORT = {
-    WORKER_URL: 'https://r2.trustsignalbot.workers.dev',
+    // ★2026-07-20: 独自ドメイン 5mgl.com へ切替(da.gd外部依存の根絶・INC-108恒久策)。
+    //   5mgl.com は r2 workerのカスタムドメイン=同一worker・同一KV。既存 r2.workers.dev の
+    //   コードもそのまま生存。E2E検証済(POST /api/shorten→5mgl.com/xxxxx・GET→302転送OK)。
+    WORKER_URL: 'https://5mgl.com',
     SHARED_SECRET: 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'
   };
   try {
@@ -1161,8 +1164,10 @@
       .catch(function () { if (timer) clearTimeout(timer); return ''; });
   }
   // 案A(da.gdチェーン)：true でr2短縮を da.gd でさらに短縮して“表示用の短いURL”にする。
-  //   false にすると従来どおり r2URL をそのまま表示。(＝ワンフラグで即ロールバック)
-  var USE_DAGD_CHAIN = true;
+  //   false にすると r2(=5mgl.com)URL をそのまま表示。(＝ワンフラグで即ロールバック)
+  //   ★2026-07-20: 独自ドメイン5mgl.com化により表示URL自体が短い(5mgl.com/xxxxx≈14字)ため
+  //   false に。da.gd/tinyurlは normal path から外れ、worker障害時の深いフォールバックにのみ残す。
+  var USE_DAGD_CHAIN = false;
   // ── 表示用の短縮プロバイダ(da.gd代替策)──────────────────────────────
   //   上から順に試し、最初に成功した短縮URLを「共有URL」に採用する。
   //   ★da.gd が消えた/不調になったら、この配列を並べ替える or 差し替えるだけで置換できる。
