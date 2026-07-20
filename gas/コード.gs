@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-18G(無人投稿の画像alt(代替テキスト)を常時空に=画像ビューアに④コメントが出るのを止める・フロントbluesky-core.jsと対で修正・Chami依頼)';
+var GAS_VERSION = '2026-07-20A(SHORT_WORKER_HOSTSに新ドメイン5mgl.com/yoz2.comを追加=クリック数が「取得⚠️」のまま埋まらない不具合の修正・未知ホストはLogger警告・Chami報告)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -717,10 +717,19 @@ function daGdShorten_(longUrl) {
 //   テンプレ列「Bitlyクリック」(＝今後は link-worker の開封数の意味)に毎時反映する。
 //   ※列名はテンプレ互換のため変えない。(意味だけ Bitly→開封数 に変更)
 var SHORT_WORKER_URL = 'https://r2.trustsignalbot.workers.dev';
-// 旧名(go5-short)で発行済みの短縮URLも計測できるよう、旧ホストも候補に残す。
-var SHORT_WORKER_HOSTS = ['https://r2.trustsignalbot.workers.dev', 'https://go5-short.trustsignalbot.workers.dev'];
+// ★このリストは「自前の計測リンクか」を判定する唯一の材料。**フロント(bluesky.js SHORT.WORKER_HOSTS)と
+//   必ず揃えること**。片方だけ新ドメインを足すと、GASがコードを抽出できず視聴履歴シートの
+//   クリック列が空のまま→画面は「取得⚠️」になる(2026-07-20 INC-112の実際の事故)。
+//   ・5mgl.com(月詠み/acc1) と yoz2.com(宵桜艶帖/acc2) は2026-07-20に切替。同一worker・同一KV。
+//   ・旧ホスト(r2/go5-short)は発行済みリンクの計測継続のため残す。
+var SHORT_WORKER_HOSTS = [
+  'https://5mgl.com',                                 // acc1(月詠み)・現行
+  'https://yoz2.com',                                 // acc2(宵桜艶帖)・現行
+  'https://r2.trustsignalbot.workers.dev',            // 旧(現在も生存)
+  'https://go5-short.trustsignalbot.workers.dev'      // 最旧
+];
 function shortSecret_() { return prop_('SHORT_SHARED_SECRET') || 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'; }
-// 自前ワーカー(r2/旧go5-short)のURLから末尾コードを抽出。(da.gd等の別ホストは '')
+// 自前ワーカーのURLから末尾コードを抽出。(da.gd等の別ホストは '')
 function codeFromShort_(url) {
   var s = String(url || '');
   for (var i = 0; i < SHORT_WORKER_HOSTS.length; i++) {
@@ -729,6 +738,11 @@ function codeFromShort_(url) {
       var rest = s.slice(base.length + 1).split(/[/?#]/)[0];
       if (/^[0-9A-Za-z]+$/.test(rest)) return rest;
     }
+  }
+  // ★未知ホストを無言で捨てない。ドメイン切替の取りこぼし(＝クリックが永久に空欄)は
+  //   静かに起きると誰も気づけない。自前ドメイン風のURLだけログに出す(da.gd等の想定内は除く)。
+  if (s && !/^https?:\/\/(da\.gd|tinyurl\.com)\//.test(s)) {
+    try { Logger.log('codeFromShort_: 未知の短縮ホスト=' + s + ' (SHORT_WORKER_HOSTSに追加が必要かもしれません)'); } catch (e) {}
   }
   return '';
 }

@@ -179,7 +179,12 @@
   }
 
   // ---- アカウント別永続化ヘルパ ----
-  function acctId() { return (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'); }
+  // ★読み出し側(yt-clicks.js acct())と必ず同じ解決を使う。ここが分裂していると
+  //   「acc2で書いた履歴をacc1から読む」状態になり宵桜艶帖の履歴だけ消えて見える(INC-112)。
+  function acctId() {
+    try { if (window.Go5Acct) return window.Go5Acct.current(); } catch (e) {}
+    return (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
+  }
   function pk(base) { return base + '__' + acctId(); }
 
   // ---- アカウント同定(DID)：投稿の所属を「今のUI」ではなくpost_uriのDIDで確定する ----
@@ -1457,7 +1462,30 @@
 
   // ---- 過去の短縮URL履歴(端末内・アカウント別。GAS非依存で確実)----
   function histKeyFor_(a) { return 'short_hist__' + (a || acctId()); }
-  function histLoadFor_(a) { try { return JSON.parse(localStorage.getItem(histKeyFor_(a)) || '[]'); } catch (e) { return []; } }
+  // ★「中身が空」と「読めなかった(壊れている)」を区別する。区別しないと、パース失敗→[]→
+  //   histAddが[新1件]で上書き保存＝**履歴全消し**が無言で起きる(そしてこの消え方は
+  //   yt-clicks側の減少検知にも引っかからない)。読めない時は破損フラグを立てて保存を止める。
+  // ★状態は関数経由で持つ。`var histBroken_ = {}` 形式だと、代入行より前に histLoadFor_ が
+  //   呼ばれた場合(applyAccount→loadHistory が初期化より先に走る)に undefined へ代入して落ちる。
+  //   関数宣言は巻き上げられるので、この形なら呼び出し順に依存しない。
+  function histBrokenMap_() { return histBrokenMap_._ || (histBrokenMap_._ = {}); }
+  function histBrokenSet_(k, v) { histBrokenMap_()[k] = v; }
+  function histBrokenGet_(k) { return histBrokenMap_()[k] || null; }
+  function histLoadFor_(a) {
+    var k = histKeyFor_(a), raw = null;
+    try { raw = localStorage.getItem(k); } catch (e) { histBrokenSet_(k, 'localStorage読み取り不可'); return []; }
+    if (raw == null || raw === '') { histBrokenSet_(k, null); return []; }
+    try {
+      var v = JSON.parse(raw);
+      if (!Array.isArray(v)) { histBrokenSet_(k, '配列ではない'); return []; }
+      histBrokenSet_(k, null);
+      return v;
+    } catch (e) {
+      histBrokenSet_(k, 'JSONが壊れている(' + raw.length + '文字)');
+      try { console.warn('[go5 hist] 履歴が読めない。上書き保存を止めた:', k, histBrokenGet_(k)); } catch (e2) {}
+      return [];
+    }
+  }
   // 指定アカウントで投稿済みの作品URL一覧。(候補タブの「投稿済み」判定用・重複投稿=P0-3の防止に使う)
   try { window.Go5PostedWorkUrls = function (a) { try { return histLoadFor_(a || acctId()).map(function (h) { return (h && h.workUrl) || ''; }).filter(Boolean); } catch (e) { return []; } }; } catch (e) {}
   // 指定アカウントの投稿履歴アイテム一覧。(候補タブの投稿詳細モーダル用＝いつ/何で投稿したか)
@@ -1469,7 +1497,22 @@
     try { var man = JSON.parse(localStorage.getItem('verify_manual__' + acc) || '[]'); if (man && man.length) out = out.concat(man); } catch (e) {}
     return out;
   }; } catch (e) {}
-  function histSaveFor_(a, arr) { try { localStorage.setItem(histKeyFor_(a), JSON.stringify(arr.slice(0, 200))); } catch (e) {} }
+  // ★保存の前に2つ確かめる。①破損中のキーへは書かない(壊れた読み取り結果で上書き＝全消しを防ぐ)
+  //   ②件数が減るなら証拠を残す。yt-clicks.js の recordLoss_ は「saveArr/saveArrFor_ が唯一の出口」を
+  //   前提にしていたが、この関数が第3の出口として素通りしていた＝罠が犯人を捕れなかった理由(INC-112)。
+  function histSaveFor_(a, arr) {
+    var k = histKeyFor_(a);
+    if (histBrokenGet_(k)) { try { console.warn('[go5 hist] 破損中のため保存を中止:', k, histBrokenGet_(k)); } catch (e) {} return; }
+    try {
+      var before = histLoadFor_(a);
+      if (before.length && Array.isArray(arr) && arr.length < before.length) {
+        try { window.Go5HistLoss && window.Go5HistLoss.record(k, before, arr); } catch (e) {}
+      }
+    } catch (e) {}
+    try { localStorage.setItem(k, JSON.stringify(arr.slice(0, 200))); } catch (e) {
+      try { console.warn('[go5 hist] 履歴の保存に失敗(容量超過の可能性):', k); } catch (e2) {}
+    }
+  }
   function histKey() { return histKeyFor_(acctId()); }
   function histLoad() { return histLoadFor_(acctId()); }
   function histSaveArr(a) { histSaveFor_(acctId(), a); }

@@ -19,7 +19,16 @@
   var $ = function (id) { return document.getElementById(id); };
   if (!$('ytClickList')) return;
 
-  function acct() { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } }
+  // ★アカウント解決は必ず Go5Acct.current() を通す(core/account.js＝唯一の入口という規約)。
+  //   かつては当ファイルが localStorage('current_account') を直読みし、書き込み側の bluesky.js は
+  //   window.getCurrentAccount()(＝メモリ上の curAccount)を見ていた。この2つは setAccount() の
+  //   localStorage 書き込みが失敗した時や別タブで切り替えた時にズレる。ズレると
+  //   「書き込みは acc2 / 読み出しは acc1」となり、**宵桜艶帖(acc2)の履歴だけが表示されなくなる**。
+  //   どちらのフォールバックも 'acc1' なので、月詠み(acc1)では症状が出ない＝非対称の正体(INC-112)。
+  function acct() {
+    try { if (window.Go5Acct) return window.Go5Acct.current(); } catch (e) {}
+    try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; }
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   // 作品属性。(複数可)キャラ=実在キャラの二次創作 / JK / ギャル / 異世界。キャラ無し＝オリジナル。(非表示)
   var ATTR_DEFS = [
@@ -81,6 +90,11 @@
       try { console.warn('[go5 hist] 履歴が減少したので証拠を記録した', key, before.length + '→' + after.length); } catch (e) {}
     } catch (e) {}
   }
+  // ★bluesky.js の histSaveFor_ からも証拠を採れるよう公開する。
+  //   当初この罠は「short_hist__ への書き込みは saveArr/saveArrFor_ が唯一の出口」を前提にしていたが、
+  //   実際には bluesky.js:histSaveFor_ が第3の出口として素通りしていた。**罠の外で消えていたから
+  //   犯人が捕まらなかった**(=「唯一の未解決INC」が長引いた構造的な理由・INC-112)。
+  try { window.Go5HistLoss = { record: recordLoss_ }; } catch (e) {}
   // 監視対象=消失が報告されているキーだけ(他キーの正常な削除に反応しない)
   function watched_(k) { return /^(short_hist__|verify_manual__)/.test(String(k)); }
   function saveArr(k, a) {
