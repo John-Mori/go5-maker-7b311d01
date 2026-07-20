@@ -70,6 +70,40 @@ def chami_pending():
     return out[:5]
 
 
+CLAUDE_BIN = r"C:\Users\chami\.local\bin\claude.exe"
+
+
+def token_health():
+    """合鍵(cli_auth_token)が生きているか安価なpingで"事前"確認する(段階1・INC-109の教訓)。
+    失効を放置すると全デーモンが黙って死に、lab_reviveが無効な今でも一次応答が止まる。
+    毎日2便で先回り検知し、失効の兆しを報告-通知へ出す=「気づいた時には手遅れ」を防ぐ。"""
+    tf = os.path.join(LOCAL, "cli_auth_token.txt")
+    try:
+        tok = open(tf, encoding="utf-8").read().strip()
+    except OSError:
+        return "🔑合鍵: ★ファイル無し(要 claude setup-token)"
+    if not tok:
+        return "🔑合鍵: ★空(要 claude setup-token)"
+    # ★狼少年防止: タイムアウト≠失効(コールドスタートは60s超あり)。アラームは"実際の認証エラー
+    #   文言"が出た時だけ。タイムアウトは「遅延・判定保留」に留める。失効は401で速く返る(遅延ではない)。
+    env = dict(os.environ)
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
+    try:
+        p = subprocess.run([CLAUDE_BIN, "--print", "--model", "sonnet", "ok"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=120, env=env)
+    except subprocess.TimeoutExpired:
+        return "🔑合鍵: 応答遅延(判定保留・起動が重いだけの可能性)"
+    except Exception:
+        return "🔑合鍵: 照会不可"
+    blob = (p.stdout or "") + (p.stderr or "")
+    if p.returncode == 0 and (p.stdout or "").strip():
+        return "🔑合鍵: 正常"
+    if any(k in blob for k in ("expired", "authenticate", "401", "Invalid")):
+        return "🔑合鍵: ★失効の疑い(要 claude setup-token 再認証)"
+    return "🔑合鍵: ★応答異常(要確認)"
+
+
 def system_health():
     now = time.time()
     lines = []
@@ -93,6 +127,7 @@ def system_health():
                      + (" ★dead letter要確認" if st["dead"] else ""))
     except Exception:
         lines.append("キュー: 照会不可")
+    lines.append(token_health())   # ★段階1: 合鍵の事前健全性チェック
     return lines
 
 
@@ -112,7 +147,7 @@ def build_report():
     else:
         L.append("②ちゃみ確認待ち: なし (QA台帳上)")
     L.append("③自動系: " + " / ".join(health))
-    L.append("(④P3軽微進捗の集約はv1未実装。1Aの裁定どおり、止めろと言われるまで毎日続けるよ)")
+    # ④P3軽微進捗の集約はv1未実装。定型の断り文言はChami指示(2026-07-20 msg=1528419155231903764)で廃止。
     return "\n".join(L[:20])
 
 
