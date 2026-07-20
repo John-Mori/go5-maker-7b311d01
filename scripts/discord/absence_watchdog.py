@@ -225,7 +225,13 @@ def check_poller_health(state, dry_run):
 LINK_HEALTH_GATE_SEC = 30 * 60   # 30分毎(外部サービスへ礼儀的な頻度)
 LINK_TARGETS = [
     # (名前, URL, タイムアウト秒) — 収益導線の全ホップ
-    ("da.gd(表示用短縮・外部)", "https://da.gd/", 10),
+    # ★2026-07-21: da.gd を監視から外した(Chami裁定「復旧待ちはやめる。治ったらラッキー」)。
+    #   サービス本体が停止しており復旧の見込みを誰も制御できない=鳴らし続けても行動が変わらない
+    #   =ORG-09と同じ「読まれない警報」を自分で作ることになる。調査書=
+    #   docs/設計・調査/調査_da.gd障害はBANか障害か_2026-07-21.md
+    #   代わりに**現行の収益導線である自前ドメイン2本**を監視対象にした(ここが死ぬと実害が出る)。
+    ("5mgl.com(acc1 月詠み・現行短縮)", "https://5mgl.com/", 10),
+    ("yoz2.com(acc2 宵桜艶帖・現行短縮)", "https://yoz2.com/", 10),
     ("r2(自前計測短縮worker)", "https://r2.trustsignalbot.workers.dev/", 10),
 ]
 
@@ -263,6 +269,65 @@ def check_link_health(state, dry_run):
         st[name] = cur
 
 
+# --- ★CI失敗の可視化 (2026-07-21 Chami「cl失敗はまかせる」= 宛先は研究室HQが決める) ---
+#
+# 背景(ORG-09): GitHub Actionsの失敗通知は**メールにしか出ていなかった**。
+#   2026-07-20は同じ検査が6回落ちて6通届いたが、誰も読まず運用は変わらなかった。
+#   Chamiが不審に思って持ち込むまで表に出ていない。**鳴っていたが届いていなかった**。
+#
+# ★宛先を system-engineer(バックエンドα)にした理由:
+#   ①**生きた消費者が居る唯一の候補**(dept_daemon稼働中)。report-notify は自動出力の部屋で、
+#     そこへ流すと「メールの代わりに読まれない部屋へ置く」だけ=同じ穴を掘り直すことになる。
+#   ②フロント/CI/デプロイはこの部門の職責そのもの(直せる主体の手元へ出す)。
+#   ③デーモンが受けるので、範囲外なら本人の判断でHQへ上げてくる(3階梯=RULES §6.4)。
+CI_DEPT = "system-engineer"
+CI_GATE_SEC = 15 * 60            # 15分毎(GitHub APIへ礼儀的な頻度)
+CI_REPO = "John-Mori/go5-maker-7b311d01"
+
+
+def _gh_recent_failures(limit=5):
+    """gh CLIで直近の失敗runを取る。ghが無い/未認証なら**黙って空**(fail-open)。"""
+    try:
+        p = subprocess.run(
+            ["gh", "run", "list", "--repo", CI_REPO, "--status", "failure",
+             "--limit", str(limit), "--json", "databaseId,name,displayTitle,url,createdAt"],
+            capture_output=True, timeout=45, text=True, encoding="utf-8", errors="replace")
+        if p.returncode != 0:
+            return []
+        return json.loads(p.stdout or "[]")
+    except Exception:
+        return []
+
+
+def check_ci_health(state, dry_run):
+    now_epoch = time.time()
+    if now_epoch - state.get("last_ci_check", 0) < CI_GATE_SEC:
+        return
+    state["last_ci_check"] = now_epoch
+    seen = state.setdefault("ci_seen", [])
+    seen_set = set(seen)
+    fresh = []
+    for r in _gh_recent_failures():
+        rid = str(r.get("databaseId") or "")
+        if not rid or rid in seen_set:
+            continue
+        fresh.append(r)
+        seen_set.add(rid)
+        seen.append(rid)
+    state["ci_seen"] = seen[-100:]
+    if not fresh:
+        return
+    lines = []
+    for r in fresh[:3]:
+        lines.append(f"・**{r.get('name','')}** — {str(r.get('displayTitle',''))[:70]}\n  {r.get('url','')}")
+    more = f"\n(他 {len(fresh) - 3} 件)" if len(fresh) > 3 else ""
+    msg = ("🚨 **CIが落ちています**(GitHub Actions)\n" + "\n".join(lines) + more +
+           "\n\n★`?v=` は必ず `node scripts/bump.mjs` で**一括**バンプすること"
+           "(個別に手で上げるとスモークが即赤になる=ORG-09)。"
+           "\n原因が分からない/範囲外なら研究室HQへ上げてください。")
+    bot_send(CI_DEPT, msg, dry_run, by_dept=True)
+
+
 # --- ★O1 DLQ監視 (改善書P0-5: 5回配送失敗→dead に隔離された毒メッセージを誰も見ていない) ---
 QUEUE_DB_WD = os.path.join(LOCAL, "queue", "inbox.db")
 DEAD_ALERT_COOLDOWN_SEC = 60 * 60  # デッドレター通知は1時間に1回まで(暴走ガード)
@@ -284,6 +349,62 @@ def dead_letter_summary():
         return sum(r[1] for r in rows), {(r[0] or "?"): r[1] for r in rows}
     except Exception:
         return 0, {}
+
+
+# --- ★2026-07-20 未配送pending監視 (INC-110: 消費者不在のdept宛が無警報で永久に沈む) ---
+# 背景: data-org宛の依頼が25分間pendingのまま誰にも拾われなかった。チャンネル台帳には在ったが
+#   dept_daemon.py の DEPT_CONF に未登録=消費者プロセスが存在しなかった。
+#   既存の警報は「_work/へ退避済みの滞留」と「DLQ(dead)」しか見ない。一度もリースされない行
+#   (status='pending' かつ deliveries=0)はどちらにも該当せず、全ての目を素通りする穴だった。
+ORPHAN_PENDING_MIN_SEC = 15 * 60      # これ以上誰にも掴まれなければ異常
+ORPHAN_ALERT_COOLDOWN_SEC = 60 * 60
+
+
+def orphan_pending_summary():
+    """一度も配送されていないpending行のdept内訳と最古の滞留秒数。読み取り専用・fail-open。"""
+    if not os.path.exists(QUEUE_DB_WD):
+        return {}
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
+        try:
+            con.execute("PRAGMA busy_timeout=1000")
+            rows = con.execute(
+                "SELECT dept, COUNT(*), MIN(enqueued_at) FROM queue "
+                "WHERE status='pending' AND deliveries=0 GROUP BY dept").fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return {}
+    now_epoch = time.time()
+    out = {}
+    for dept, cnt, oldest in rows:
+        try:
+            age = now_epoch - float(oldest)
+        except (TypeError, ValueError):
+            continue
+        if age >= ORPHAN_PENDING_MIN_SEC:
+            out[dept or "?"] = (cnt, int(age // 60))
+    return out
+
+
+def check_orphan_pending(state, dry_run):
+    """宛先部門に消費者が居ないまま沈んだ依頼を検知する。
+    deliveries=0=一度もリースされていない=デーモン未登録/全滅の疑い。"""
+    orphans = orphan_pending_summary()
+    if not orphans:
+        return
+    now_epoch = time.time()
+    if now_epoch - state.get("last_orphan_alert", 0) < ORPHAN_ALERT_COOLDOWN_SEC:
+        return
+    detail = "、".join(f"{d}={n}件/最古{m}分" for d, (n, m) in orphans.items())
+    msg = (f"🕳 **未配送のまま滞留**: {detail}。"
+           "一度も配送されていない(deliveries=0)=宛先部門に**消費者プロセスが存在しない**疑いです。"
+           "確認: dept_daemon.py の DEPT_CONF に該当deptが登録されているか / "
+           "`powershell scripts\\_daemons\\status.ps1` でdept_daemon数が期待値か。"
+           "チャンネルだけ作ってDEPT_CONF登録を忘れると、依頼はここに永久に沈みます(INC-110)。")
+    if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
+        state["last_orphan_alert"] = now_epoch
 
 
 def check_dead_letters(state, dry_run):
@@ -420,7 +541,9 @@ def run_once(dry_run=False):
     check_dead_windows(state, dry_run)   # P2: 死んだ部門窓の可視化(応答性改善書2026-07-18)
     check_busy_notices(state, dry_run)   # ⏳対応中(生存)通知: Chami直要望2026-07-18・4段目の進捗信号
     check_dead_letters(state, dry_run)   # ★O1(P0-5): DLQ(毒メッセージ)が黙って消えるのを検知
-    check_link_health(state, dry_run)    # ★2026-07-20: 収益導線(da.gd/r2)の死活監視(da.gd障害の再発防止)
+    check_orphan_pending(state, dry_run)  # ★INC-110: 消費者不在のdept宛が無警報で沈む穴を塞ぐ
+    check_link_health(state, dry_run)    # ★2026-07-20: 収益導線(自前ドメイン/r2)の死活監視
+    check_ci_health(state, dry_run)      # ★2026-07-21: CI失敗をDiscordへ(ORG-09=メールは読まれない)
     save_state(state)
     rows = read_inbox_rows()
     if rows is None:

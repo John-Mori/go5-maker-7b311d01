@@ -82,6 +82,24 @@ def save_state(st):
         pass
 
 
+REACT_MARK = os.path.join(ROOT, "scripts", "discord", "react_mark.py")
+
+
+def mark_reactions(dept):
+    """この部屋のChami発言へ「既読/着手」を押す(2026-07-21 Chami指摘への恒久対処)。
+
+    ★総括本部4室はデーモンを撤去した時に**既読を押す主体まで一緒に失っていた**。
+      着手は元々BOOT.mdに手順が書いてあるだけで、誰も叩いていなかった。
+      「心がけに任せると忘れる。hookが強制する」を適用し、ターン終了時に機構で押す。
+    べき等(react_mark側が(msg_id,種別)単位で記録)・失敗してもセッションは止めない。
+    """
+    try:
+        subprocess.run([sys.executable, REACT_MARK, "--dept", dept],
+                       capture_output=True, timeout=45)
+    except Exception:
+        pass
+
+
 def body_key(who, body):
     """送信済み判定のキー。uuidではなく**中身**で見る。"""
     import hashlib
@@ -161,6 +179,7 @@ def main():
     # ターン終了時点でも在席を延長する。PostToolUseが一度も鳴らないターン(道具を使わず
     # 会話だけで返したターン)では在席が枯れており、直後の便をデーモンが攫うため。
     touch_presence(dept)
+    mark_reactions(dept)
     tp = payload.get("transcript_path")
     if not tp or not os.path.exists(tp):
         return
