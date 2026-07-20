@@ -16,7 +16,7 @@
 ---
 
 ### Q. コードを直したのに古いまま表示される。どうすればいい?
-`index.html`のアセット参照は`app.js?v=N`の形。中身を変えたら`N`を1つ上げるとスマホで確実に最新が読まれる。公開は`git add -A && git commit && git push`後、GitHub Pagesへ1〜2分で自動反映される(フロントのpushは研究室に委ねる)。
+`index.html`のアセット参照は`app.js?v=N`の形。中身を変えたら版を上げる。★**必ず `node scripts/bump.mjs` で全参照を一括バンプ**(触ったファイルだけ手で上げるとCIスモークが赤になる)。公開は`git add -A && git commit && git push`後、GitHub Pagesへ1〜2分で自動反映される(フロントのpushは研究室に委ねる)。
 (出典: CLAUDE.md §3「キャッシュ運用」/§4「ビルド・テスト・公開」)
 
 ### Q. GAS(コード.gs)を直したらどう反映する?

@@ -95,7 +95,12 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 `preview_offset_y`(全体)／`preview_text_author|detail|title`、各 `*_default`(既定値)。2行モード＝`movie_author_two_line`/`movie_two_line`。旧キー `v_offset`・`preview_band_y`・`preview_band_author|detail|title` は退役(読まれない)。
 
 ### キャッシュ運用
-`index.html` のアセット参照は `app.js?v=N` の形。**中身を変えたら `N` を1つ上げる**とスマホで確実に最新が読まれる(現在 v=12)。
+`index.html` のアセット参照は `app.js?v=N` の形。中身を変えたら版を上げるとスマホで確実に最新が読まれる。
+
+★**必ず `node scripts/bump.mjs` で「全参照を一括」バンプする。触ったファイルだけ手で上げてはいけない。**
+CIのスモーク(`Frontend deploy smoke (恒久-3)`)は**配信された `?v=` が全て同一であること**を検査しており、
+部分バンプは即failする。2026-07-20は5版が混在(376/380/381/382/383)し**push6回すべてが赤**になった。
+復旧= `node scripts/bump.mjs --to <N>`(全参照を強制的に揃える)。現在値の確認= `--check`。
 
 ### Bluesky 投稿(§9 機能)の要点
 - 完全クライアントサイド。`https://bsky.social` の XRPC を直接叩く(CORS対応・サーバー不要)。認証は**アプリパスワード**(通常PWではない／revoke 可能)。
@@ -176,7 +181,7 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 
 - 上記 §3 の比率ベース座標系を崩さない(px/vh/vw を直接使わない)。
 - プレビューと書き出しは同一Canvas・同一描画式に保つ(一致が崩れる変更を避ける)。
-- 変更後はアセットの `?v=` を上げる。
+- 変更後はアセットの `?v=` を上げる。**必ず `node scripts/bump.mjs` で一括**(手で個別に上げるとCIが赤になる・§3参照)。
 - アフィリンクのテンプレート変更は `affiliate-core.js` の `buildAffiliateLink()` 内のみで局所化する。
 - **過去の失敗と汎用教訓は `インシデント.md` にまとまっている。** 設計・実装・デプロイの前に
   該当カテゴリ(§3 A〜F)を一読する。不具合を直したら同ファイルに追記する。
