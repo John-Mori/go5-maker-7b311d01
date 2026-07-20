@@ -185,6 +185,28 @@ test('T-4: URL＋タグ混在は両方・昇順、URL内#は拾わない', funct
 });
 
 // ────────────────────────────────────────────────────────────
+// F-4 composePostTextの新レイアウト(案内テンプレ文の直下にURL・URL2本)でも
+//     両方のリンクfacetが正しいバイト範囲を指す(2026-07-20 レイアウト修正の回帰防止)
+// ────────────────────────────────────────────────────────────
+test('F-4: 案内文の直下にURL(改行1つ)が2ブロック続いても両方のfacetが正しい', function () {
+  var workLink = 'https://5mgl.com/abc12';
+  var saleLink = 'https://yoz2.com/def34';
+  var text = '続きが気になっちゃう一冊、みつけた📚\nしかも今なら20%オフ💕\n\n' +
+    '↓詳しくはこちらから🌙 #PR #漫画\n' + workLink + '\n\n' +
+    '🏮 大幅割引セール中の同人祭ページ 🏮\n' + saleLink;
+  var facets = detectFacets(text).filter(function (f) { return f.features[0].$type === 'app.bsky.richtext.facet#link'; });
+  assert.strictEqual(facets.length, 2, 'リンクfacetは2個(作品URL・セールURL)');
+  var bytes = enc.encode(text);
+  var uris = facets.map(function (f) { return new TextDecoder().decode(bytes.slice(f.index.byteStart, f.index.byteEnd)); });
+  assert.deepStrictEqual(uris, [workLink, saleLink], 'facetの並び・範囲がURLと一致');
+  // 各facetの直前の1文字が改行であること(=案内文の"すぐ下の行"に置かれている)
+  [workLink, saleLink].forEach(function (u) {
+    var idx = text.indexOf(u);
+    assert.strictEqual(text[idx - 1], '\n', u + ' の直前は改行1つ(すぐ上の行の直下にある)');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
 // 結果集計
 // ────────────────────────────────────────────────────────────
 console.log('');

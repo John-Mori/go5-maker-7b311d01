@@ -218,9 +218,12 @@
     workUrl: '', handle: '', appPw: ''
   };
   // アカウント別の本文テンプレ既定。(保存が空のときに使う)〇 は割引％のプレースホルダ。
+  //   ★2026-07-20: PR行(↓詳細はこちらから…)はcomposePostText/renderPreviewが自動で付け足すため、
+  //   ここには含めない(旧テンプレには含まれていた＝自動付与分と重複し「本文が一部重なる/URLが
+  //   いつも下に来る」不具合の原因だった。旧保存値は下のmigrateDedupPrLine_で1回だけ剥がす)。
   var DEF_TEXT = {
-    acc1: 'おすすめ漫画見つけた💕\n\n↓詳細はこちらから🎀 #PR #漫画',
-    acc2: '続きが気になっちゃう一冊、みつけた📚\n\n↓続きはこちらから🌙 #PR #漫画'
+    acc1: 'おすすめ漫画見つけた💕',
+    acc2: '続きが気になっちゃう一冊、みつけた📚'
   };
   function defText() { return DEF_TEXT[acctId()] || DEF_TEXT.acc1; }
 
@@ -489,8 +492,10 @@
 
   // ---- 🔥 割引一覧(セール)ページのアフィリンクを本文へ添付(永続トグル・composePostTextに統合) ----
   //   ・一覧/キャンペーンURLは cid が無く作品リンク生成では弾かれるため buildFanzaListLink で包む。
-  //   ・★このセール会場リンクだけ短縮する。(作品リンク・本文は生のまま＝ユーザー指定)
-  //     短縮は shortenUrl。(自前worker→da.gd→TinyURL、全滅時はフルURL)302素通しなので af_id は保持。
+  //   ・★セール会場リンクはここで事前に短縮してキャッシュする。(作品リンクも無改変ではなく、
+  //     投稿直前にmeasureWorkLink_が同じ経路で短縮リンクへ差し替える＝どちらも最終投稿文では短縮リンク。
+  //     訂正2026-07-20: 旧コメント「作品リンクは生のまま」は誤り)
+  //     短縮は makeShortAndShare。(自前worker[チャンネル別ドメイン]→da.gd→TinyURL、全滅時はフルURL)302素通しなので af_id は保持。
   //   ・ON/OFFは端末に永続化＋composePostText()が最後に付け足す＝「案内する作品URL」より必ず後ろに来る。
   //     動画作成後の自動投稿(投稿確認モーダル)もcomposePostText()で本文を作るため自動的に反映される。
   var DISCOUNT_LIST_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/';
@@ -499,7 +504,10 @@
   // PR行・セール行はアカウント別文言(2026-07-13 Chami共有: 順番=共通・文言=チャンネルの世界観に合わせ差し替え)
   function PR_LINE_() { return acctId() === 'acc2' ? '↓詳しくはこちらから🌙 #PR #漫画' : '↓詳細はこちらから🎀 #PR #漫画'; }
   // 2026-07-14: キー名をv2へ(旧キャッシュに計測を通らないda.gd直リンクが残存=qtedy問題。改名で全端末が計測付きリンクを再生成する)
-  var DISC_ON_KEY = 'bsky_discount_list_on', DISC_LINK_KEY = 'bsky_discount_list_link_v2', DISC_LINK_AF_KEY = 'bsky_discount_list_link_af_v2';
+  // 2026-07-20: v2→v3(同じ理由の再発)。チャンネル別独自ドメイン(5mgl.com/yoz2.com)化で短縮の出力先が変わったが、
+  //   v2キャッシュは端末に残ったまま(af_id不変なら再生成されない)＝セール案内URLだけ旧ドメインが残っていた。
+  //   キー名を変えて強制的に作り直す(作品リンク側はmeasureWorkLink_で投稿の都度その場生成のためキャッシュ問題が無かった)。
+  var DISC_ON_KEY = 'bsky_discount_list_on', DISC_LINK_KEY = 'bsky_discount_list_link_v3', DISC_LINK_AF_KEY = 'bsky_discount_list_link_af_v3';
   function discountListOn_() { return true; } // 常時ON(標準投稿形式の一部・2026-07-14 Chami指定でトグルUI廃止=セール行は常に添える)
   function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
   function curAfId_() { try { return (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) { return ''; } }
@@ -621,6 +629,25 @@
     save('ytdesc_tpl_v3', '1');
   })();
 
+  // ---- composePostTextの自動PR行と重複する「旧テンプレ末尾のPR行」を1回だけ剥がす(2026-07-20) ----
+  //   旧DEF_TEXTは末尾にPR行を含んでいた→composePostTextが同じ趣旨のPR行(PR_LINE_)をさらに自動追加
+  //   するため「投稿本文が一部重なる/作品案内URLがいつも一番下」の原因になっていた(Chami報告)。
+  //   末尾が旧テンプレの既知パターンと完全一致する場合のみ剥がす。(独自に書いた文はそのまま保持)
+  (function migrateDedupPrLine_() {
+    if (load('tpl_prline_dedup_v1') === '1') return;
+    var TAIL = {
+      acc1: /\n\n↓詳細はこちらから🎀 #PR #漫画\s*$/,
+      acc2: /\n\n↓続きはこちらから🌙 #PR #漫画\s*$/
+    };
+    ['acc1', 'acc2'].forEach(function (a) {
+      try {
+        var key = 'bsky_text__' + a, v = load(key);
+        if (v != null && TAIL[a].test(v)) save(key, v.replace(TAIL[a], ''));
+      } catch (e) {}
+    });
+    save('tpl_prline_dedup_v1', '1');
+  })();
+
   // ---- 初期化(移行→applyAccount の順) ----
   applyAccount();
 
@@ -656,7 +683,9 @@
     var link = resolveAffLink();
     // 本文に手動で作品URL/割引リンクを含めて書いた場合(例：しばらく手動投稿する場合)に、
     // 自動追加分と重複しないよう、既に本文へ含まれていればスキップする。
-    var out = (link && caption.indexOf(link) < 0) ? (caption + '\n\n' + PR_LINE_() + '\n\n' + link) : caption;
+    // ★URLはPR行の「すぐ下の行」に置く(改行1つ)。PR行との間を空けるとURLが遠く見える/常に下段に
+    //   見える不具合の元だった(Chami指定の完成形＝案内テンプレ文の直下に対応URL・2026-07-20)。
+    var out = (link && caption.indexOf(link) < 0) ? (caption + '\n\n' + PR_LINE_() + '\n' + link) : caption;
     // 🔥割引一覧。(ON中は常に「案内する作品URL」より後ろに付く＝ここで最後に追加するだけで済む)
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
@@ -718,7 +747,7 @@
     var html = caption ? highlightLinks(escapeHtml(caption)) : '<span class="ph">(本文)</span>';
     // 本文に既に作品URLが含まれる場合(手動投稿など)は自動追加分を重複させない。
     if (!AUTO_APPEND_ENABLED) { /* 自動追加を一時停止中：本文そのまま */ }
-    else if (link && !hasLink) html += '\n\n' + highlightLinks(escapeHtml(PR_LINE_())) + '\n\n<span class="lnk">' + escapeHtml(link) + '</span>';
+    else if (link && !hasLink) html += '\n\n' + highlightLinks(escapeHtml(PR_LINE_())) + '\n<span class="lnk">' + escapeHtml(link) + '</span>';
     else if (!link) html += '\n\n<span class="ph">(投稿時にアフィリンクを自動で追加します)</span>';
     // 🔥割引一覧(composePostTextと同じ位置＝作品URLより後ろ)をプレビューにも反映。同じ理由で重複防止。
     if (AUTO_APPEND_ENABLED && discountListOn_()) {

@@ -53,7 +53,7 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 15. **スケジュール統合 Phase3 予約投稿(v=15)**：`scheduler.js` を追加。🦋投稿タブに **⏰予約投稿**(datetime＋予約ボタン＋予約中リスト)。30秒ごとの tick で期限到来(pending かつ scheduledAtMs≤now)の予約を `BlueskyCore.blueskyPostRaw` で自動投稿→`bluesky-posted`(slotId付)発火→`integration.js`がスロット書き戻し＋ブラウザ通知。**このタブを開いている間のみ**(画像等はin-memory／無人化はPhase5のcronで対応)。`dueItems` は純粋関数でNodeテスト可(`tests/test_scheduler.js` 3項目)。📅から来た場合は枠の予定時刻をプリフィル。
 14. **スケジュール統合 Phase2 一気通貫(v=14)**：カレンダーのスロット編集に「🎬この枠で動画を作る／🦋この枠を投稿する」を追加→`postMessage`で親へ(`schedule/js/app.js`)。親は `integration.js` で受けて該当タブへ切替＋**対象スロットのバナー表示**(`#slotCtxMovie/#slotCtxPost`)。投稿成功で `bluesky.js` が `bluesky-posted` を発火→`integration.js`がiframeへ`slot-writeback`→スロットを **公開済＋URL** に更新。橋渡しは postMessage＋同一オリジンlocalStorage。次：Phase3 予約投稿／Phase4 Bluesky用検証KPI。
 12. **3タブ統合(v=12)**：1ページに **🎬動画作成／🦋投稿／🔗アフィリンク** の3タブ。投稿手段は2つ＝**①動画作成後の自動投稿**(`#bskyEnable`／本文＋動画の元写真)と **②単独で今すぐ投稿**(🦋投稿タブの `#postNowBtn`／本文＋任意画像 `#postImg`)。本文 `#bskyText`・アカウント設定は両手段で共通。🦋投稿タブに **Bluesky風ライブプレビュー**(このまま投稿される見た目)。タブ切替は `affiliate.js` の `TABS`。`post.html` は単独ページとして残置(同等機能)。
-11. **UI再設計(v=11)**：①位置調整を**スライダー→＋/−ボタン**化し、プレビュー横(スマホは sticky)で見ながら微調整。②**黒帯の余白**(`OFF.bandPad`)と**段の間隔**(`OFF.rowGap`)を追加(計9コントロール)。③Bluesky投稿欄を**1つの自由テキスト本文(`bskyText`)に統合**(固定文/提携文/作品URL欄を廃止)。本文中の生アフィリンクは `detectFacets` で自動リンク化＝無改変。④アプリパスワード等は折りたたみ＝任意(未入力なら投稿スキップ)
+11. **UI再設計(v=11)**：①位置調整を**スライダー→＋/−ボタン**化し、プレビュー横(スマホは sticky)で見ながら微調整。②**黒帯の余白**(`OFF.bandPad`)と**段の間隔**(`OFF.rowGap`)を追加(計9コントロール)。③Bluesky投稿欄を**1つの自由テキスト本文(`bskyText`)に統合**(固定文/提携文/作品URL欄を廃止)。本文中のURLは `detectFacets` で自動リンク化(facetのindexは**UTF-8バイトオフセット**)。★アフィリンクは編集中は生表示だが**投稿直前に短縮へ差し替わる**(2026-07-20訂正)。④アプリパスワード等は折りたたみ＝任意(未入力なら投稿スキップ)
 
 ---
 
@@ -71,7 +71,7 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 | `affiliate.js` | アフィリンク画面のUI配線(入力・コピー・永続化) | |
 | `bluesky-core.js` | Bluesky 投稿コア。**純粋関数** `buildBlueskyPost()`(本文＋リンクfacet)＋ `blueskyPostWithImage()`(ログイン→画像アップロード→投稿) | 仕様変更時のみ |
 | `bluesky.js` | Bluesky 設定UIの配線・確認ダイアログ・**元写真**のJPEG圧縮(1MB制限対応)・投稿後に GAS へ記録送信。`video-created` イベントを購読 | |
-| `gas/コード.gs` | **サーバーレス(Google Apps Script)**。投稿URLを Bitly 短縮→スプレッドシート追記、`refreshClicks` で毎時クリック数更新。本体とは別デプロイ | 仕様変更時 |
+| `gas/コード.gs` | **サーバーレス(Google Apps Script)**。投稿記録をスプレッドシートへ追記、`refreshClicks` で毎時クリック数更新(★Bitlyは全廃・短縮はクライアント側/自前worker)。本体とは別デプロイ | 仕様変更時 |
 | `gas/セットアップ手順.md` | Bitlyトークン・Sheet・GASデプロイの手順書 | |
 | `assets/bg_main.mp4` | 背景動画 | 差し替え可 |
 | `tests/test_affiliate.js` | Node テスト(T-1〜T-4＋エッジ) | |
@@ -106,11 +106,11 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 - 秘匿情報(アプリパスワード・af_id・シークレット)は **console に出さない**(既存方針を踏襲)。
 
 ### 投稿記録＆クリック集計(§10 機能)の要点
-- **クリック数＝投稿の短縮URL(Bitly)の開封数**。アフィリンクは本文に**生のまま(無改変)**貼るため af_id 計測は壊れない。生アフィリンクのクリック実数は取得不可(FANZA 管理画面が正)。
+- **クリック数＝投稿の短縮URLの開封数**(★Bitlyは全廃・現在は自前 link-worker＝2026-07-20確認)。本文の作品リンク/セール会場リンクは**どちらも最終投稿時には短縮リンク**(★旧記述「生のまま(無改変)」は誤り)。作品リンクは編集中は生アフィリンク表示だが、**投稿直前に `measureWorkLink_` が短縮へ差し替える**(今すぐ/予約/無人予約/動画後自動の全経路)。短縮は302素通し(Locationに完全URL)なので **af_id は保持され計測は壊れない**。アフィリンクのクリック実数は取得不可(FANZA 管理画面が正)。
 - 投稿の共有URLは `at://…/<rkey>` から `https://bsky.app/profile/<handle>/post/<rkey>` を組み立て(`bluesky-core.js`)。
-- クライアントは GAS Web App へ `{channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri}` を **Content-Type無指定の POST**(＝simple request でプリフライト回避)。GAS が Bitly 短縮＋シート追記。
+- クライアントは GAS Web App へ `{channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri}` を **Content-Type無指定の POST**(＝simple request でプリフライト回避)。★共有URLの短縮は**クライアント側**(`shortenAndShow`→`makeShortAndShare`)が投稿直後に行い、GASへは**短縮済みの値**を送る。GASはシート追記が主で、短縮値が来なかった時だけ `daGdShorten_()`(da.gdのみ)でフォールバック短縮する副経路が残る。
 - **記録は2チャンネル別シート**：GAS(`gas/コード.gs` v2)が `channel`(acc1/acc2)に応じて **`記録_ch1`/`記録_ch2`** へ**列名マッピング**で自動記入(記録先は「動画記録分析テンプレート.xlsx」を取り込んだスプレッドシート前提＝`設定`/`Holidays`/`集計` 含む)。`refreshClicks`(Bitly)＋`refreshEngagement`(Bluesky公開API いいね/リポスト/返信)を毎時更新。分析テンプレ＝プロジェクト直下 `記録分析テンプレート/`。
-- Bitly トークンは **GAS 側のスクリプトプロパティに隠蔽**(公開サイトには置かない)。トークン秘匿＋CORS回避のためにサーバーレスを1つ挟む構成。
+- ★**Bitlyは全廃**(`gas/コード.gs` 冒頭コメントに明記)。短縮は自前 Cloudflare Worker(`link-worker`)＝**チャンネル別独自ドメイン**(月詠み `5mgl.com` / 宵桜艶帖 `yoz2.com`)。Worker失敗時のみ da.gd→TinyURL へフォールバック、全滅時は元URLのまま。シートの「Bitly_ID」「Bitlyクリック」列名は互換のため残置だが、中身は **link-worker の開封数**。
 - X(旧Twitter)はこの構成では不可(OAuth＋サーバー必須・直投稿はCORS不可)。
 
 ---
