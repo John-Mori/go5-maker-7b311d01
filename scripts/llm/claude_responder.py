@@ -264,7 +264,7 @@ def main():
     print(f"claude無人応答係 起動 ({'--once' if once else f'{POLL_SEC}秒間隔'}・研究室が死んでいる間のみ動く)")
     while True:
         try:
-            cycle(token)
+            cycle(read_token() or token)  # ★2026-07-20(裁4): トークン都度読み=更新が再起動なしで反映
         except Exception as e:
             print(f"巡回失敗: {type(e).__name__}")
         if once:

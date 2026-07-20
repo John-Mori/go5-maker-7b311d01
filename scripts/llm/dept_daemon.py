@@ -320,6 +320,17 @@ class Daemon:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # --- 応答生成(claude --print・本文のみ) ---
+    def _token(self):
+        """★2026-07-20(裁4): トークンを都度読む。更新が艦隊再起動なしで即反映される
+        (今夜の痛み=失効→再認証後に全再起動、を次回から不要にする)。読めなければ起動時値へ。"""
+        try:
+            t = open(TOKEN_FILE, encoding="utf-8").read().strip()
+            if t:
+                return t
+        except OSError:
+            pass
+        return self.token
+
     def generate(self, rec):
         character = open(self.conf["character"], encoding="utf-8").read()
         mem = self.memory_tail()
@@ -341,7 +352,7 @@ class Daemon:
             f"=== 新着(送信者: {rec.get('author','')}) ===\n{content}{att_note}{work_note}"
         )
         env = dict(os.environ)
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = self.token
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
         p = subprocess.run([CLAUDE, "--print", prompt], cwd=ROOT, env=env,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=PRINT_TIMEOUT)
@@ -385,7 +396,7 @@ class Daemon:
             "4. 秘密(トークン/PW)は出力しない。Discordへの直接送信はしない(送信はシステムが行う)。"
         )
         env = dict(os.environ)
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = self.token
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
         # ★promptはstdinで渡す(引数で渡すと--add-dirが可変長のためpromptまでdirとして
         #   飲み込み「Input must be provided」で即死する=2026-07-18に実障害。stdinは
         #   Windowsのコマンドライン長制限(約32K)の回避にもなる)
