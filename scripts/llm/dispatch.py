@@ -47,6 +47,48 @@ CHANNELS = os.path.join(LOCAL, "discord_channels.json")
 PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
 
 
+# ★3階梯のガード(2026-07-21 ORG-34・Chami指摘で新設)
+#   RULES §6.4=「カテゴリ=部門、その部門長=そのカテゴリの『研究室』。**飛び級しない**」。
+#   Chami原文=「今回の件が研究室HQ→システム改修部門って流れだったから、
+#   **間の部門長のモドリッチ(AD研究室)が通ってない**。…**まずAD研究室を通すこと**」
+#   ★HQはX切替の指令を system-engineer / frontend へ**直接**投げていた=②を飛ばした運用ミス。
+#     部門長が把握しないまま配下が動くと、部門長が事業の全体像を持てなくなる。
+#   → 事業層/組織層の配下へ直接投げようとしたら**止めて部門長を教える**。
+#     `--direct` を明示した時だけ通す(緊急時の逃げ道。理由を添えて使うこと)。
+CATEGORY_HEAD = {
+    # 配下dept → その部門長(② カテゴリの研究室)
+    "ADAFI事業部": "research-room",
+    "イージス AegisConciel": "aegis-gl",
+}
+# Discordの実カテゴリを正とする(registryのcategoryは15室で未設定のため使えない)。
+LAYER_OF = {
+    "1528674269285060731": "イージス AegisConciel",
+    "1525644847346880713": "ADAFI事業部",
+}
+
+
+def head_of(dept):
+    """その部門の「部門長」を返す。部門長自身・最上位・判定不能は None(=素通し)。"""
+    if dept in ("hq", "research-room", "aegis-gl", "keiei-kikaku"):
+        return None                 # 部門長自身と最上位、横から支える経営企画は対象外
+    try:
+        import urllib.request
+        tok = open(os.path.join(LOCAL, "discord_bot_token.txt"), encoding="utf-8").read().strip()
+        cid = None
+        for c in json.load(open(CHANNELS, encoding="utf-8")):
+            if c.get("dept") == dept:
+                cid = c["id"]
+                break
+        if not cid:
+            return None
+        req = urllib.request.Request(f"https://discord.com/api/v10/channels/{cid}",
+                                     headers={"Authorization": f"Bot {tok}", "User-Agent": "go5/1.0"})
+        parent = json.load(urllib.request.urlopen(req, timeout=15)).get("parent_id")
+        return CATEGORY_HEAD.get(LAYER_OF.get(str(parent)))
+    except Exception:
+        return None                 # ★判定できない時は止めない(配達を殺さない=fail-open)
+
+
 def channel_name_of(dept):
     try:
         for c in json.load(open(CHANNELS, encoding="utf-8")):
@@ -106,6 +148,8 @@ def main():
     ap.add_argument("--body")
     ap.add_argument("--also-post", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--direct", action="store_true",
+                    help="3階梯を飛ばして配下へ直接投函する(緊急時のみ・理由を本文に書く)")
     a = ap.parse_args()
 
     body = a.body or ""
@@ -116,6 +160,23 @@ def main():
         return 1
 
     depts = [d.strip() for d in a.dept.split(",") if d.strip()]
+
+    # ★3階梯チェック(RULES §6.4「飛び級しない」)
+    if not a.direct:
+        blocked = {}
+        for d in depts:
+            h = head_of(d)
+            if h and h not in depts:
+                blocked[d] = h
+        if blocked:
+            print("★3階梯に反しています(RULES §6.4「飛び級しない」)。投函を中止しました。")
+            for d, h in blocked.items():
+                print(f"  '{d}' の部門長は '{h}' です。まず '{h}' へ通してください。")
+            heads = sorted(set(blocked.values()))
+            print(f"  推奨: --dept {','.join(heads)} へ出し、配下への割り振りは部門長に任せる。")
+            print("  どうしても直接出す必要がある時だけ --direct を付ける(理由を本文に書くこと)。")
+            return 2
+
     ok = 0
     for d in depts:
         good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run)
