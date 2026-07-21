@@ -18,6 +18,7 @@
     postUri: '',
     shortUrl: '',
     shareUrl: '',
+    hashtags: '',
     ytUrl: '',
     ytId: '',
     fanzaInfo: null
@@ -433,6 +434,7 @@
       var detail = (e && e.detail) || {};
       W.postUrl = detail.post_url || '';
       W.postUri = detail.post_uri || '';
+      W.hashtags = detail.hashtags || '';
 
       var waitEl = document.getElementById('wizWaitPost');
       if (waitEl) waitEl.textContent = '✅ 投稿完了。短縮URLを取得中…';
@@ -524,11 +526,16 @@
       if (recordStatus) { recordStatus.textContent = ''; }
       fetchFanzaForRecord(function () {
         recordToGas(function (ok) {
-          if (!ok) {
+          if (ok === null || !ok) {
             recordBtn.disabled = false;
             recordBtn.textContent = '記録して次へ ▶';
             var st = document.getElementById('wizRecordStatus');
-            if (st) { st.textContent = '⚠️ シートへの記録に失敗しました。再度押してください。'; st.style.color = '#f88'; }
+            if (st) {
+              st.textContent = ok === null
+                ? '⚠️ GAS URLが未設定です。⚙設定でURLを入力してください。'
+                : '⚠️ シートへの記録に失敗しました。再度押してください。';
+              st.style.color = '#f88';
+            }
             return;
           }
           markHistConfirmed_(W.postUri, W.shortUrl);
@@ -620,9 +627,12 @@
   function recordToGas(cb) {
     var gasUrl = '';
     try { gasUrl = localStorage.getItem('bsky_gas_url') || ''; } catch (e) { /* ignore */ }
-    if (!gasUrl) { if (cb) cb(true); return; }
-    // shortUrl/shareUrl を履歴から補完(histAdd で保存済みの値を使う)
+    if (!gasUrl) { if (cb) cb(null); return; }  // null = URL未設定(成功とは別扱い)
+    // shortUrl/shareUrl + 投稿メタを履歴から補完(histAdd で保存済みの値を使う)
     var histShort = W.shortUrl || '', histShare = W.shareUrl || '';
+    var ATTR_KEYS = ['chara', 'jk', 'gyaru', 'isekai', 'harem', 'ai', 'ol', 'soshu'];
+    var histAttrs = null, histWorkState = '', histRebuild = false, histRebuildOf = '';
+    var histGoal = '', histCmtType = '', histPostedAt = '';
     try {
       if (window.BlueskyPostHistory) {
         var acc = W.account || 'acc1';
@@ -632,6 +642,15 @@
           if (W.postUri ? it.postUri === W.postUri : it.shortUrl === W.shortUrl) {
             histShort = it.shortUrl || histShort;
             histShare = it.shareUrl || histShare;
+            // カテゴリ属性・投稿メタを一括回収
+            histAttrs = {};
+            ATTR_KEYS.forEach(function (k) { histAttrs[k] = !!it[k]; });
+            histWorkState = it.workState || '';
+            histRebuild = !!it.rebuild;
+            histRebuildOf = it.rebuildOf || '';
+            histGoal = it.goal || '';
+            histCmtType = it.cmtType || '';
+            if (it.ts) histPostedAt = new Date(it.ts).toISOString();
             break;
           }
         }
@@ -650,8 +669,20 @@
         shortUrl: histShort,
         shareUrl: histShare,
         workUrl: W.workUrl,
+        affiliateUrl: W.affLink || '',
+        hashtags: W.hashtags || '',
         title: W.title
       };
+      // 属性8つ: 履歴に一致エントリがある時だけ送る(attrProvided_がtrueになる条件)
+      if (histAttrs) {
+        ATTR_KEYS.forEach(function (k) { payload[k] = histAttrs[k]; });
+        payload.workState = histWorkState;
+        payload.rebuild = histRebuild;
+        if (histRebuildOf) payload.rebuildOf = histRebuildOf;
+      }
+      if (histGoal) payload.goal = histGoal;
+      if (histCmtType) payload.cmtType = histCmtType;
+      if (histPostedAt) payload.postedAt = histPostedAt;
       if (W.fanzaInfo) {
         payload.fanza_list_price = W.fanzaInfo.listPrice;
         payload.fanza_price = W.fanzaInfo.price;
