@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-20A(SHORT_WORKER_HOSTSに新ドメイン5mgl.com/yoz2.comを追加=クリック数が「取得⚠️」のまま埋まらない不具合の修正・未知ホストはLogger警告・Chami報告)';
+var GAS_VERSION = '2026-07-21A(診断action=reservations_statusを追加=無人予約の待機状況とrunReservationsトリガーの生死を読み取り専用で確認。Bluesky凍結多発を受けた安全確認用・投稿処理は無変更)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -140,6 +140,40 @@ function doGet(e) {
       var n = Math.min(Math.max(parseInt(p.n || '5', 10) || 5, 1), 20);
       var rows = slast >= 2 ? ssh.getRange(Math.max(2, slast - n + 1), 1, Math.min(n, slast - 1), STATS_HEADERS.length).getValues() : [];
       return jsonOut_({ ok: true, headers: STATS_HEADERS, totalRows: Math.max(0, slast - 1), tail: rows });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // 診断: 無人予約投稿の待機状況を返す。(読み取りのみ・投稿はしない)
+  //   ★2026-07-21追加: Bluesky凍結多発を受け「予約が自動発射し続けていないか」を外から確認するため。
+  //   端末側(localStorage)の予約は見えないが、GAS側の無人予約はここで把握できる。
+  //   本文は出さない(先頭20字のみ)=秘匿情報を診断URLに載せない。
+  if (p.action === 'reservations_status') {
+    try {
+      var rsh = getResSheet_(), rlast = rsh.getLastRow();
+      var counts = { pending: 0, posting: 0, posted: 0, error: 0, other: 0 }, upcoming = [];
+      if (rlast >= 2) {
+        var rrows = rsh.getRange(2, 1, rlast - 1, RES_HEADERS.length).getValues();
+        for (var ri = 0; ri < rrows.length; ri++) {
+          var st = String(rrows[ri][RCOL.status - 1] || '');
+          if (counts[st] == null) counts.other++; else counts[st]++;
+          if (st === 'pending' || st === 'posting') {
+            var w = rrows[ri][RCOL.when - 1];
+            upcoming.push({
+              row: ri + 2, status: st, when: w ? String(w) : '',
+              channel: String(rrows[ri][RCOL.channel - 1] || ''),
+              textHead: String(rrows[ri][RCOL.text - 1] || '').slice(0, 20)
+            });
+          }
+        }
+      }
+      // 5分トリガー(runReservations)が生きているか＝自動発射の有無を判断する材料
+      var trg = [];
+      try { trg = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); }); } catch (e) {}
+      return jsonOut_({
+        ok: true, totalRows: Math.max(0, rlast - 1), counts: counts,
+        upcoming: upcoming.slice(0, 20),
+        runReservationsTriggerAlive: trg.indexOf('runReservations') >= 0,
+        triggers: trg, now: new Date().toISOString()
+      });
     } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 題名集約: <exec URL>?action=consolidate_title で「YouTube題名」を「題名(コメント)」へ移し、列を削除。
