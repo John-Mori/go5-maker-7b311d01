@@ -150,6 +150,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--direct", action="store_true",
                     help="3階梯を飛ばして配下へ直接投函する(緊急時のみ・理由を本文に書く)")
+    ap.add_argument("--from-dept", dest="from_dept", default="hq",
+                    help="送信元の部門(既定=hq)。★部門長が自分の配下へ出す時は自分のdeptを指定する"
+                         "(例 --from-dept research-room)。正規の下り(②→①)はブロックしない")
     a = ap.parse_args()
 
     body = a.body or ""
@@ -166,6 +169,15 @@ def main():
         blocked = {}
         for d in depts:
             h = head_of(d)
+            # ★送信元が「その部門の部門長本人」なら正規の下り=止めない(2026-07-22 ORG-42)。
+            #   AD-GL(モドリッチ)の指摘: 差出人を見ずに配下deptを一律ブロックしていたため、
+            #   **部門長が自分の配下へ出す正規の経路まで止まっていた**。
+            #   結果「部門長が毎回 --direct を使う」ことになり、緊急用の逃げ道が日常運用になって
+            #   ガードが形骸化する。モドリッチの言葉=
+            #   「発火しない安全網は検証されない、の逆で、**常に誤発火する安全網は無視される**」。
+            #   ORG-34で止めたかったのは **③HQ→①配下 の飛び級**であって、②→①ではない。
+            if h and h == a.from_dept:
+                continue
             if h and h not in depts:
                 blocked[d] = h
         if blocked:
