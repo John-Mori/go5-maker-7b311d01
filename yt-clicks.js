@@ -2316,7 +2316,7 @@
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
   var bg = $('ytBulkGen'); if (bg) bg.addEventListener('click', function () { runBulkGen(false); });
   var sb = $('ytSyncSheet'); if (sb) sb.addEventListener('click', syncSheet);
-  var pb = $('ytPruneSheet'); if (pb) pb.addEventListener('click', pruneSheet);
+  // ytPruneSheet: D2-a で無効化(hidden属性付与・配線削除)。本体pruneSheet_()は残置(C-003)
   // 🔧 YT情報を診断・修復：取り残しYT URLマップの再接続＋シートからのYT URL復元＋再取得を一括で行い、
   //   人が読める診断(各アカウントの履歴数/YT URL付き数/動画ID数/孤児数)を表示する。(iPhoneでも状況が分かる)
   var yrl = $('ytRepairLinks');
