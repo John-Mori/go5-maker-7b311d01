@@ -12,6 +12,9 @@
  *   ・端末内の短縮URL履歴 short_hist__<acct>(bluesky.js が投稿のたびに記録)
  *   ・手動追加分 verify_manual__<acct>(このタブの「手動で追加」)
  *   ・各行のYouTube動画URL verify_yt__<acct>(行ごとに入力・ウィザードが自動プリフィル)
+ *   ・上記のどちらにも無い行は、記録シート(GAS action=history)から**表示専用**で補う(displayItems_/
+ *     mergeSheetExtras_・hist-merge-core.js)。この端末には元々存在しない行(＝別端末で投稿した分)を
+ *     ☁️シート由来バッジ付きで見せるだけで、localStorageへは書き戻さない(編集/削除もこの端末からは不可)。
  * 完全クライアントサイド。APIキーはこの端末内だけに保存。(リポジトリには置かない)
  */
 (function () {
@@ -142,6 +145,45 @@
 
   // 表示する全アイテム(履歴＋手動追加)を結合。manualOnly=true の手動短縮URL履歴は除外。
   function allItems() { return loadHist().filter(function (it) { return !it.manualOnly; }).concat(loadManual()); }
+
+  // ── シート由来・表示専用マージ(Chami報告2026-07-21：「宵桜(acc2)の履歴だけ消える」「月詠み(acc1)の
+  //   再生数が出ない」の真因は、この端末にその行が元々無いこと=別端末で投稿した分だった)。
+  //   GAS(action=history)は行を丸ごと返せるのに、従来は既存ローカル行への欠損補完(restoreYtFromSheet_)
+  //   にしか使っておらず、ローカルに無い行は一生表示されなかった。
+  //   ★表示だけをマージする。localStorage(short_hist__)へは絶対に書き戻さない
+  //   (INC-112「JSON破損時[]で上書き全消し」と同じ危険を新経路に持ち込まないため＝AD-GL裁定)。
+  //   allItems() 自体は不変のまま(reconcileYtToSheet_/sendSync_/pruneSheet 等の書き込み系は
+  //   これまで通りローカルのみを見る＝GAS/短縮Workerへの追加書き込みは一切発生しない)。
+  //   重複排除・整形は hist-merge-core.js の純粋関数(HistMerge.mergeSheetExtras)へ切り出しテスト済み。
+  var _sheetExtraCache = {}; // acct -> {at, items:[表示専用アイテム(_fromSheet:true)]}
+  var SHEET_EXTRA_TTL_MS = 60000;
+  function displayItems_() {
+    var local = allItems();
+    var c = _sheetExtraCache[acct()];
+    return (c && c.items && c.items.length) ? local.concat(c.items) : local;
+  }
+  // GASのhistoryをマージ用に取得。未設定/失敗時は前回キャッシュ(無ければ空)を返すだけ＝ローカル表示は無傷。
+  function fetchSheetExtra_(cb) {
+    var a = acct(), now = Date.now(), c = _sheetExtraCache[a];
+    if (c && (now - c.at) < SHEET_EXTRA_TTL_MS) { if (cb) cb(c.items); return; }
+    var gasUrl = gasUrl_();
+    if (!gasUrl) { if (cb) cb((c && c.items) || []); return; } // 未設定＝マージ対象なし・従来通りローカルのみ
+    jsonp_(gasUrl, { action: 'history', channel: a, limit: 300 }, function (res) {
+      if (!res || !res.ok || !Array.isArray(res.items)) { if (cb) cb((c && c.items) || []); return; } // 失敗時は前回キャッシュ
+      var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(allItems(), res.items) : [];
+      _sheetExtraCache[a] = { at: now, items: extra };
+      if (cb) cb(extra);
+    });
+  }
+  // refresh()から毎回呼ぶ(TTLキャッシュ内は通信ゼロ)。マージが増えたら再描画し、増えた行だけ
+  // 再生数・クリック数を後追い取得(読み取りのみ・GAS/Workerへは書かない)。
+  function mergeSheetExtras_() {
+    fetchSheetExtra_(function (extra) {
+      if (!extra || !extra.length) return; // 空/失敗時は何もしない＝直前のローカル表示のまま
+      render();
+      try { fetchData_(extra, {}, false).then(function () { render(); }); } catch (e) {}
+    });
+  }
 
   // ── PC(広い画面)向け：投稿履歴カードの列数(ユーザー選択・スマホは無効)。候補タブと同方式。 ──
   var K_HISTCOLS = 'hist_pc_cols';
@@ -827,7 +869,7 @@
   // ── render ──────────────────────────────────────────────────────────────
   function render() {
     var list = $('ytClickList');
-    var rawItems = allItems();
+    var rawItems = displayItems_(); // ローカル＋シート由来の表示専用マージ(書き込み系はallItems()のまま不変)
     var ymap = loadYtMap();
     if (!rawItems.length) {
       list.innerHTML = '<p class="hint">まだ投稿の記録がありません。(投稿して短縮URLが出ると、ここに集まります)「➕ 手動で追加」からYouTube動画を直接登録もできます。表示中アカウント：' + esc(acct()) + '</p>';
@@ -892,6 +934,8 @@
       // 作り直し系バッジ：rebuild=この動画自体がリビルド版 / remade=この投稿は被リビルド(=リビルド版に取って代わられた)
       if (it.rebuild) tagsHtml += '<span class="vtag vtag-rebuild">🔁リビルド版</span>';
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
+      // ★この端末のローカル履歴には無く、記録シートから表示のみ補った行(書き込みは一切していない)。
+      if (it._fromSheet) tagsHtml += '<span class="vtag vtag-sheet" title="この端末にはこの記録が無く、記録シートの内容を表示のみで補っています(編集/削除はこの端末からはできません)">☁️シート由来</span>';
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
         '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名(改行して統一)
@@ -914,7 +958,9 @@
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
           (wcode ? '<span title="作品リンククリック数(投稿→FANZA・導線2)"><img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="作品クリック"> ' + (wclicks != null ? num(wclicks) : '…') + '</span>' : '') +
           '<span class="vrow-links">' + // 🛠️編集/Bsky↗/YouTube↗/作品↗ を1グループに＝編集もBskyと同じ段に表示・作品↗だけ改行される事故を防ぐ
-            '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
+            // ★シート由来行(_fromSheet)はこの端末のローカル配列に実体が無いため、編集/削除/被リビルド操作の
+            //   対象になり得ない(押しても保存先が無く何も起きない)。混乱を避けボタンごと出さない(表示専用)。
+            (!it._fromSheet ? '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' : '') +
             (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
             (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
             (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
@@ -930,10 +976,10 @@
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' + (wcode ? ' data-delta-haswork="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日のみ">' + (vid ? (fmtDelta_(deltaCache[vid], it.ts, !!wcode) || '<span style="opacity:.55;" title="30分毎のサーバースナップ後に数値が出ます">⏳記録待ち(最大30分)</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
-            (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
-            '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' +
+            (!it._fromSheet && !it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
+            (!it._fromSheet ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
           '</div>' +
-          '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
+          (!it._fromSheet ? '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' : '') +
         '</div>' +
         '</div>';
     }).join('');
@@ -1698,6 +1744,7 @@
     try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続(冪等)
     try { reconcileYtToSheet_(); } catch (e) {} // 端末のYT URLをシートへ後追い反映=「記録待ち」永久固定の自己修復(冪等・台帳ガード)
     render();
+    try { mergeSheetExtras_(); } catch (e) {} // ローカルに無い行をシートから表示専用で補う(書き込みはしない・失敗しても上のrender()は無傷)
     // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ。(postUriアイテムのDID確定分＝混入投稿を自動帰還)冪等。
     (function () {
       var R = window.Go5AccountRepair;
