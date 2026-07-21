@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-22B(sheet_audit+backup_sheetsアクション追加=行分類・件数出し・ヘッダー差分・バックアップをGET経由で実行可能に)';
+var GAS_VERSION = '2026-07-22C(sheet_audit拡張=no_yt行詳細[rowNum/title/postUri/shortUrl]+dupDetail.hasYt+extraColCounts[Bitly_ID/Bluesky投稿URL]追加)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -454,9 +454,13 @@ function sheetAudit_() {
     var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String).filter(function (h) { return h !== ''; });
     var last = sh.getLastRow();
     var counts = { complete: 0, no_yt: 0, no_uri: 0, minimal: 0, empty: 0 };
-    var uriSeen = {};  // postUri -> [行番号]
+    var uriSeen = {};  // postUri -> [{rowNum, hasYt}]
+    var noYtRows = [];
+    var extraColCounts = {};
     if (last >= 2) {
       var pidCol = map['post_id'], uriCol = map['post_uri'], ytCol = map['YouTube動画URL'];
+      var titleCol = map['題名(コメント)'], shortCol = map['短縮URL'];
+      var bitlyCol = map['Bitly_ID'], bskyUrlCol = map['Bluesky投稿URL'];
       var rows = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
       rows.forEach(function (row, i) {
         var pid = pidCol ? String(row[pidCol - 1] || '') : '';
@@ -464,10 +468,20 @@ function sheetAudit_() {
         var yt  = ytCol  ? String(row[ytCol  - 1] || '') : '';
         if (!pid) { counts.empty++; return; }
         if (uri && yt) counts.complete++;
-        else if (uri && !yt) counts.no_yt++;
+        else if (uri && !yt) {
+          counts.no_yt++;
+          noYtRows.push({
+            rowNum: i + 2,
+            title: titleCol ? String(row[titleCol - 1] || '') : '',
+            postUri: uri,
+            shortUrl: shortCol ? String(row[shortCol - 1] || '') : ''
+          });
+        }
         else if (!uri && yt) counts.no_uri++;
         else counts.minimal++;
-        if (uri) { if (!uriSeen[uri]) uriSeen[uri] = []; uriSeen[uri].push(i + 2); }
+        if (uri) { if (!uriSeen[uri]) uriSeen[uri] = []; uriSeen[uri].push({ rowNum: i + 2, hasYt: !!yt }); }
+        if (bitlyCol && row[bitlyCol - 1]) extraColCounts['Bitly_ID'] = (extraColCounts['Bitly_ID'] || 0) + 1;
+        if (bskyUrlCol && row[bskyUrlCol - 1]) extraColCounts['Bluesky投稿URL'] = (extraColCounts['Bluesky投稿URL'] || 0) + 1;
       });
     }
     var dups = [];
@@ -478,6 +492,7 @@ function sheetAudit_() {
     audit[name] = {
       exists: true, totalDataRows: Math.max(0, last - 1),
       counts: counts, duplicateUris: dups.length, dupDetail: dups.slice(0, 10),
+      noYtRows: noYtRows, extraColCounts: extraColCounts,
       headers: headers, headerCount: headers.length,
       missingFromCanonical: missingFromCanonical, extraColumns: extraColumns
     };
