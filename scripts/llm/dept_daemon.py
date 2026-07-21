@@ -53,6 +53,9 @@ CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
 PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
 REACT = os.path.join(ROOT, "scripts", "discord", "react.py")
 MAIN_INBOX = os.path.join(LOCAL, "discord_inbox.jsonl")
+# ★本人セッションが最終処理する部屋(判定の正本は presence.py)。ここではimportせず定数で持つ
+#   (dept_daemonはpresence.pyに依存していないため。増減時は presence.py と対で直すこと)。
+SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku")
 
 try:
     import session_rooms        # 対話セッションの在席(liveness)。同ディレクトリ
@@ -1226,6 +1229,26 @@ class Daemon:
             if is_work or self.conf.get("forward_all"):
                 with open(MAIN_INBOX, "a", encoding="utf-8") as f:
                     f.write(raw_line.rstrip("\n") + "\n")
+            # ★総括本部4室は「自分の箱」にも写す(2026-07-24 ORG-24)。
+            #   実害= Chamiの承認「デプロイしていい」をhqデーモンが処理し、回送先(main箱)へは
+            #   入っていたのに、**セッションのwaiterが見る箱と回送先が別物**だったため届かなかった。
+            #     hq waiterが見る箱 = local/inbox/hq.jsonl
+            #     デーモンの回送先   = local/discord_inbox.jsonl (main箱)
+            #   便は消えていない。**監視先と投函先がズレていた**だけ。だが結果は同じ(届かない)。
+            #   ★「main waiterも武装すれば拾えた」= 運用で埋める話にしない。心がけは忘れる。
+            #   デーモンが答えた便は、その部屋のセッションが**後で必ず読める**ようにする。
+            if self.dept in SESSION_OWNED_DEPTS:
+                try:
+                    note = dict(rec, type="session-note",
+                                msg_id=str(rec.get("msg_id", "")) + "-dn",
+                                note=f"{self.conf.get('persona','デーモン')}が代わりに応答済み。"
+                                     "内容を把握し、必要なら本人として引き取ること。",
+                                daemon_reply=(reply or "")[:800])
+                    os.makedirs(os.path.dirname(self.box), exist_ok=True)
+                    with open(self.box, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(note, ensure_ascii=False) + "\n")
+                except OSError:
+                    pass        # 写しの失敗で本体(応答)を巻き添えにしない
             with open(PROCESSED, "a", encoding="utf-8") as f:
                 f.write(raw_line.rstrip("\n") + "\n")
         self.memory_append(rec, reply)
@@ -1243,10 +1266,24 @@ class Daemon:
             return 0
         lines = [l for l in open(inflight, encoding="utf-8", errors="replace").read().splitlines() if l.strip()]
         done = 0
+        keep_for_session = []   # セッション宛て(session-note/followup)=処理せず箱へ戻す
         for i, line in enumerate(lines):
             try:
                 rec = json.loads(line)
             except Exception:
+                continue
+            # ★セッション宛ての記録には手を出さない(2026-07-24 ORG-24の第2幕)。
+            #   同じ箱を「デーモン」と「セッション」の2者が読む構造なので、
+            #   セッションへ残した写し(session-note)をデーモンが**自分で食って消して**しまい、
+            #   届けるために書いたものが届かなくなっていた(実測: msg=...-dn を自分で応答処理)。
+            #   放置すると写しに写しを重ねる自己ループの芽にもなる。
+            #   → 残す。セッションが読むまで箱に置いておく(claude_responderと同じ扱い)。
+            if rec.get("type") in ("session-note", "followup"):
+                keep_for_session.append(line)
+                rest = lines[i + 1:]          # inflightからは確実に外す(recoverでの二重復元を防ぐ)
+                with open(inflight, "w", encoding="utf-8") as f:
+                    for l in rest:
+                        f.write(l + "\n")
                 continue
             ok = self.handle(rec, line)
             if not ok:
@@ -1268,6 +1305,14 @@ class Daemon:
                 os.remove(inflight)
         except OSError:
             pass
+        # ★セッション宛ての記録を箱へ戻す。これが無いと「届けるために書いたもの」が消える。
+        if keep_for_session:
+            try:
+                with open(self.box, "a", encoding="utf-8") as f:
+                    for l in keep_for_session:
+                        f.write(l.rstrip("\n") + "\n")
+            except OSError:
+                pass
         return done
 
     def drain_queue(self):
