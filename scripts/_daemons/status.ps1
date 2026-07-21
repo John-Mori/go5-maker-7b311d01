@@ -10,8 +10,8 @@ Write-Host ("time: {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
 # expected fleet (script -> human role). Keep in sync with supervise_daemons.ps1 (O2: generate from registry).
 $fleet = [ordered]@{
   'discord_gateway.py' = 'gateway (Discord -> queue)'
-  'daemon_keeper.py'   = 'keeper (guards 9 dept daemons)'
-  'dept_daemon.py'     = 'dept character daemons (expect 9)'
+  'daemon_keeper.py'   = 'keeper (guards 16 dept daemons)'
+  'dept_daemon.py'     = 'dept character daemons (expect 16)'
   'absence_watchdog.py'= 'watchdog (stalls/DLQ)'
   'local_responder.py' = 'local qwen responder'
   'gemini_responder.py'= 'gemini responder'
