@@ -1203,7 +1203,18 @@ class Daemon:
         if not reply:
             log(self.dept, f"生成失敗 msg={mid}")
             return False
-        if self.dry_run:
+        # ★検証便はDiscordへ出さない(2026-07-21 ORG-25・研究室HQが実際にChamiの部屋を汚した)。
+        #   実害= HQが機構の実弾検証のため `author: chami_fusoh` を騙った便をqueueへ3回投入した。
+        #   デーモンは正しく「Chamiが3回送ってきた」と解釈し、**本番の部屋へ3回返答**。
+        #   Chamiには誰も送っていないのにアメスが連投したように見え、
+        #   「届いてるわよ連投は何？」と言わせた。さらにアメスはChamiへ
+        #   「送った側が連投したってことじゃないの」と返した=**濡れ衣**。
+        #   ★HQは同じ過ちを人事部門で一度やりかけ「筋が悪い」と自分で言った直後にhqで繰り返した。
+        #   → レコードに test:true があれば、処理も記憶も通常どおり行い**送信だけ**しない。
+        #     これで実弾検証はできるが、Chamiの部屋は汚れない。
+        if rec.get("test"):
+            log(self.dept, f"[test] 送信を抑止 msg={mid} reply={reply[:80]!r}")
+        elif self.dry_run:
             log(self.dept, f"[dry-run] reply={reply[:100]!r} work={is_work}")
         else:
             body = os.path.join(LOCAL, f"_daemon_reply_{self.dept}.txt")
