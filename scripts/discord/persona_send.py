@@ -76,6 +76,9 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+# ペルソナ台帳の正本=研究室HQ(2026-07-18移転・docs/departments/personas/README_移転.md)
+_HQ_ROOT = os.environ.get("GO5_HQ_DIR") or os.path.normpath(
+    os.path.join(os.path.dirname(ROOT), "00_AI-HQ"))
 LOCAL = os.path.join(ROOT, "local")
 HOOKS_CACHE = os.path.join(LOCAL, "discord_webhooks_auto.json")
 AVATARS_FILE = os.path.join(LOCAL, "persona_avatars.json")
@@ -87,21 +90,33 @@ def _persona_aliases():
     yaml非妥当なmanifestもあるので行テキストで拾う(他script同様)。"""
     import glob
     amap = {}
-    base = os.path.join(ROOT, "docs", "departments", "personas")
-    for p in glob.glob(os.path.join(base, "**", "persona_manifest.yml"), recursive=True):
-        cur_id = None
-        try:
-            for line in open(p, encoding="utf-8", errors="replace"):
-                s = line.strip()
-                if s.startswith("- id:") or (s.startswith("id:") and cur_id is None):
-                    cur_id = s.split(":", 1)[1].strip()
-                elif s.startswith("name:") and cur_id:
-                    nm = s.split(":", 1)[1].strip()
-                    if cur_id and nm:
-                        amap[cur_id] = nm
-                    cur_id = None
-        except OSError:
-            continue
+    # ★参照先は2箇所を見る(2026-07-22 hr-context・実測で塞いだ穴):
+    #   ペルソナ台帳は2026-07-18にHQ(00_AI-HQ/departments/hr/personas)へ移転したが、
+    #   ここはrepo側(docs/departments/personas)を見たままだった。移転後そこはREADMEのみ=
+    #   **別名表が0件**になり、ames→アメスの解決(D1)が黙って死んでいた
+    #   (resolve_personaが'ames'をそのまま返し、デフォルトアイコン+ラテン綴りで送られる事故の再来)。
+    #   旧パスも残す=将来どちらに置かれても拾える(fail-safe)。
+    bases = [os.path.join(_HQ_ROOT, "departments", "hr", "personas"),
+             os.path.join(ROOT, "docs", "departments", "personas")]
+    seen = set()
+    for base in bases:
+        for p in glob.glob(os.path.join(base, "**", "persona_manifest.yml"), recursive=True):
+            if p in seen:
+                continue
+            seen.add(p)
+            cur_id = None
+            try:
+                for line in open(p, encoding="utf-8", errors="replace"):
+                    s = line.strip()
+                    if s.startswith("- id:") or (s.startswith("id:") and cur_id is None):
+                        cur_id = s.split(":", 1)[1].strip()
+                    elif s.startswith("name:") and cur_id:
+                        nm = s.split(":", 1)[1].strip()
+                        if cur_id and nm:
+                            amap[cur_id] = nm
+                        cur_id = None
+            except OSError:
+                continue
     return amap
 
 
@@ -256,6 +271,7 @@ COLORS = {"red": 0xED4245, "orange": 0xE67E22, "yellow": 0xFEE75C, "green": 0x57
 def main():
     args = sys.argv[1:]
     channel = dept = persona = avatar = color = etitle = body_file = None
+    suffix = ""      # 表示名にだけ足す肩書(例 "(常駐)")。人格の解決には使わない
     rest = []
     i = 0
     while i < len(args):
@@ -266,6 +282,8 @@ def main():
             dept = args[i + 1]; i += 2
         elif a == "--persona" and i + 1 < len(args):
             persona = args[i + 1]; i += 2
+        elif a == "--suffix" and i + 1 < len(args):
+            suffix = args[i + 1]; i += 2      # 表示名の肩書のみ(アバター/色/webhookは素の人格名で引く)
         elif a == "--avatar" and i + 1 < len(args):
             avatar = args[i + 1]; i += 2
         elif a == "--color" and i + 1 < len(args):
@@ -314,7 +332,13 @@ def main():
             with open(last_p, "w", encoding="utf-8") as f:
                 json.dump(last, f, ensure_ascii=False, indent=1)
     hook_url = ensure_persona_webhook(str(ch["id"]), persona, token)  # 人格別 (タップ表示の根治2026-07-18)
-    payload = {"username": persona[:80]}
+    # ★表示名だけに肩書を足す(2026-07-20 Chami指摘への対処)。
+    #   「デーモンではない人格とデーモンである人格が同じ場合、どちらが言ったか判別がつかない」。
+    #   ★suffixを persona 本体に混ぜてはいけない: アバター検索/色/webhookキーが全て
+    #     その名前で引かれるため、混ぜるとアイコンが消え色も落ちる(=キャラが劣化する)。
+    #     解決・アバター・色・webhookは**素の人格名**で行い、最後にusernameだけへ足す。
+    display = f"{persona}{suffix}" if suffix else persona
+    payload = {"username": display[:80]}
     if color == "auto":
         # 話者のテーマカラー(local/persona_colors.json)で送る。未定義なら通常メッセージにフォールバック
         try:
