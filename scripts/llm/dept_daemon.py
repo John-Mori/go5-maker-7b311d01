@@ -269,6 +269,47 @@ _REGISTRY = os.path.join(HQ, "org_registry.yml")
 _reg_cache = {"mtime": 0.0, "depts": {}}
 
 
+_DISCIPLINE = os.path.join(HQ, "departments", "00_common", "全部門共通規律.md")
+_disc_cache = {"mtime": None, "text": ""}
+
+
+def common_discipline():
+    """全部門共通の規律を**都度読み**して返す(2026-07-21 Chami指示)。
+
+    Chami原文=「どこかで問題が起きたら**全部が勝手に自動的に更新されて、どの部門でも
+    二度と起きない**仕組みにして。**こっちの承認とか、こっちが言わなくても裏で自動でやって**。
+    じゃないとここで潰しても他の部門でまたやらかすやん」。
+
+    ★なぜファイルを都度読みするのか(定数に埋めない理由):
+      DEPT_CONFやモジュール定数は**プロセス起動時にしか読まれない**ので、教訓を1行足すたびに
+      艦隊16部門の再起動が要る=運用が回らず、結局誰も足さなくなる(=今までがそれ)。
+      mtimeを見て変わった時だけ読み直せば、**1行足した次の発話から全部門に効く**。
+      registry_purpose() と同じ設計。
+
+    ★これが無かった時に何が起きていたか: 教訓は台帳(インシデント.md)に書かれるだけで、
+      **誰かが手で共通プロンプトへ移した分しか効かなかった**。移し忘れれば他部門が同じ穴を踏む。
+      実際 ORG-08(人格)・ORG-13(URL)は「1箇所に書いただけ」で全部門に届いていなかった。
+
+    読めなければ空文字(=規律が無くても応対は続ける。fail-open)。
+    """
+    try:
+        m = os.path.getmtime(_DISCIPLINE)
+        if m != _disc_cache["mtime"]:
+            with open(_DISCIPLINE, encoding="utf-8", errors="replace") as f:
+                _disc_cache["text"] = f.read().strip()
+            _disc_cache["mtime"] = m
+    except Exception:
+        return ""
+    return _disc_cache["text"]
+
+
+
+def _disc_block():
+    """共通規律をプロンプト用の節にする。空(読めない)なら何も足さない=fail-open。"""
+    d = common_discipline()
+    return ("■全部門共通の規律(★必ず守る。違反は事故になる)\n" + d + "\n\n") if d else ""
+
+
 def registry_purpose(dept):
     """org_registry.yml から purpose/kpi を**都度読み**する(2026-07-20 Chami指示への対応)。
 
@@ -1041,7 +1082,7 @@ class Daemon:
             "あなたは以下のcharacterfileのキャラクターとして、Discordの新着1件に返信する。\n"
             "出力は【返信本文のみ】。前置き・説明・引用符・メタ発言・箇条書きの分析は一切禁止。"
             "キャラの声で、チャットとして自然な長さで(短さのために温度を削らない)。\n\n"
-            f"{rest_note}{warmth_note}"
+            f"{rest_note}{warmth_note}{_disc_block()}"
             f"=== characterfile ===\n{character}{purpose_note}\n\n"
             f"=== 直近の記憶(古→新) ===\n{mem_text}\n\n"
             f"=== 新着(送信者: {rec.get('author','')}) ===\n{content}{att_note}{work_note}"
