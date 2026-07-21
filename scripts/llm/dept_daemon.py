@@ -504,9 +504,16 @@ DEPT_CONF = {
         ),
     },
     "shorts-analyst": {
-        "character": os.path.join(_CHAR, "modric.md"),
+        # ★2026-07-22 Chami指示で常駐を交代(モドリッチ → アーモンドアイ)。
+        #   「モドリッチはGLに専念させて」「三笘さんがリーダー、アーモンドアイが常駐」。
+        #   分析部門の体制= リーダー:三笘薫 / 常駐(この部屋の応答):アーモンドアイ /
+        #   モドリッチは AD-GL(ad研究室)へ専念し、分析部門からは外れた。
+        #   ※役職(リーダー)と常駐(デーモン)は別物。経営企画でも
+        #     担当人格=ジェンティルドンナ・常駐=アメス という同じ形を採っている。
+        #   ※アーモンドアイは consult-intel と本部屋の2部屋を持つ(アメス4/ククール2の前例あり)。
+        "character": os.path.join(_CHAR, "almond-eye.md"),
         "memory": os.path.join(_MEM, "shorts-analyst.jsonl"),
-        "persona": "ルカ・モドリッチ",
+        "persona": "アーモンドアイ",
         "port": 18805,
         "work_scope": (
             "あなたが自分で完結してよい作業(分析範囲。正本=docs/departments/shorts-analyst/BOOT.md):\n"
@@ -957,6 +964,52 @@ def _maybe_alert_auth(dept, output):
         pass
 
 
+def _dir_has_md(path, depth=3):
+    """path の下(depth階層まで)に .md が1枚でもあるか。
+
+    ★読めなければ例外をそのまま投げる(握り潰さない)。呼び元の persona_ready が
+      まとめて拾って**fail-open**へ倒すため、ここで False を返すと
+      「読めなかった=原典なし」になり守りの機構が誤爆する。
+    """
+    for name in os.listdir(path):        # 読めなければOSError→呼び元のfail-openへ
+        p = os.path.join(path, name)
+        if os.path.isdir(p):
+            if depth > 1 and _dir_has_md(p, depth - 1):
+                return True
+        elif name.lower().endswith(".md"):
+            return True
+    return False
+
+
+def persona_source_exists(ctx_dir, stem):
+    """persona_context に stem の原典(.md)があるか。判定不能は例外で返す(fail-openは呼び元)。
+
+    ★2026-07-22 人事の問題報告(問題5)への対処: **鍵が画像1枚でも開いていた**。
+      旧実装は `stem in c` の**部分一致・拡張子不問**だったため、
+      `evidence_kukuru代役_….png`(スクリーンショット)にもヒットした。
+      = **原典が無いのに演じる**経路が空いていた(この安全機構が防ぐはずだった事態そのもの)。
+      → 原典と数えるのは **.md だけ** + **stemの前方一致** の2条件へ厳格化。
+
+    ★運用中の置き方は2形態あり、**両方とも通す**(片方を落とすと重大な退行):
+      - フラット   : persona_context/mei_context.md / ames_source.md / gentildonna_ウマ娘.md
+      - サブフォルダ: persona_context/kukuru/vol1_台詞集_….md  ← **フォルダ名がstem**
+        (この形はファイル名にstemが入らない。フォルダを見ないとククールが原典なし扱いになる)
+      サブフォルダは**中に.mdが1枚でもある場合だけ**原典と数える
+      (画像しか入っていないフォルダで鍵が開かないようにするため)。
+    """
+    for name in os.listdir(ctx_dir):
+        low = name.lower()
+        if not low.startswith(stem):     # 前方一致のみ(部分一致で他キャラの物を拾わない)
+            continue
+        p = os.path.join(ctx_dir, name)
+        if os.path.isdir(p):
+            if _dir_has_md(p):           # サブフォルダ運用(フォルダ名=stem)
+                return True
+        elif low.endswith(".md"):        # フラット運用(.md以外は原典に数えない)
+            return True
+    return False
+
+
 class Daemon:
     def __init__(self, dept, dry_run=False):
         if dept not in DEPT_CONF:
@@ -1005,16 +1058,11 @@ class Daemon:
         try:
             ctx = os.path.join(os.path.dirname(ROOT), "5SecMovieMaker",
                                "local", "persona_context")
-            # ★2026-07-21 人事の問題報告(問題5)への対処: **鍵が画像1枚でも開いていた**。
-            #   旧実装は `stem in c` の**部分一致・拡張子不問**だったため、
-            #   `evidence_kukuru代役_….png`(スクリーンショット)にもヒットした。
-            #   =**原典が無いのに演じる**経路が空いていた(この安全機構が防ぐはずだった事態そのもの)。
-            #   → **.md に限定 + stemの前方一致**へ厳格化。
-            #   ★変更前に実測済み: 全16キャラで**判定は1件も変わらない**(実害ゼロで穴だけ塞げる)。
-            names = [c.lower() for c in os.listdir(ctx) if c.lower().endswith(".md")]
             stem = os.path.splitext(os.path.basename(self.conf["character"]))[0].lower()
-            key = stem.split("-")[0]
-            ready = any(c.startswith(key) for c in names)
+            # 判定の本体は persona_source_exists(.md限定+前方一致、フラット/サブフォルダ両対応)。
+            # ★実測済み(2026-07-22 JST): 全16キャラで**判定は1件も変わらない**
+            #   (原典あり9=True / 原典なし7=False のまま。実害ゼロで穴だけ塞げる)。
+            ready = persona_source_exists(ctx, stem)
         except Exception:
             ready = True                 # fail-open
         self._persona_ready = ready
