@@ -476,7 +476,11 @@ def run_gateway():
         #   「集中60」「focus 90」で分指定・「集中off」で終了。誤爆しないよう**先頭一致**に限定。
         _txt = (m.content or "").strip()
         _low = _txt.lower()
-        if _low.startswith("集中") or _low.startswith("focus"):
+        # ★集中ウィンドウは2026-07-21に廃止(常時2秒)。このトリガーは無効化した。
+        #   放置すると「集中オフだった場合は…」のような**普通の文**が先頭一致で誤爆し、
+        #   さらに文中の数字(「10時間前」の10)を分数として拾って札を立てていた(実測)。
+        #   Chamiは「作動してそう」と正しく疑い、HQは誤ったgrep(存在しないパス)で否定した。
+        if False:
             try:
                 import re as _re
                 arg = _txt[2:].strip() if _low.startswith("集中") else _txt[5:].strip()

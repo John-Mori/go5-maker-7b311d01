@@ -22,6 +22,20 @@ HARD_CAP: livenessがいくら新しくても耳が45分止まったままなら
 テスト: 環境変数 GO5_LOCAL_DIR があれば local/ の代わりにそれを使う(全パス)。
 """
 import os
+
+# ★総括本部4室=デーモンではなく**対話セッション本人**が最終処理する部屋(Chami裁定2026-07-20)。
+#   **どの常駐もこれらの便をmain箱から消してはいけない**(2026-07-21 ORG-20)。
+#   実害= Chamiが「最優先」と明示したコンサル情報(Bluesky凍結の全体連絡)が、
+#   hqデーモンの回送→**local_responderがmain箱から消費**、でセッションに一度も届かなかった。
+#   ★ここに置く理由= SENSITIVE_DEPTS がコード内4箇所に散ってドリフトしている実績があるため
+#   (local_responder.py の自コメントが明記している)。**判定は1箇所に置く**。
+#   presence.py は claude/local/gemini の全responderが既にimportしている共通土台。
+SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku")
+
+
+def is_session_owned(dept):
+    """その便は対話セッション本人が読むべきものか(=常駐が箱から消してはいけない)。"""
+    return bool(dept) and dept in SESSION_OWNED_DEPTS
 import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))

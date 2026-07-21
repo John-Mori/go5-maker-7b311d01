@@ -294,11 +294,17 @@ def cycle(token):
             #  followupを量産するだけ=2026-07-19実測で確認)
             continue
         mid = str(rec.get("msg_id", ""))
-        if mid in done:
-            continue  # 二重処理しない(main箱からは落とす)
+        # ★この判定は「処理済みか」より**前**に置く(2026-07-21 ORG-20)。
+        #   実害= hqデーモンが便を捌く→PROCESSEDへ記帳→**その直後にここの `mid in done` が
+        #   一致して箱から落とす**、という経路で、Chamiが「最優先」と明示したコンサル情報
+        #   (Bluesky凍結の全体連絡)がセッションに一度も届かなかった。
+        #   ★「デーモンが答えた」と「セッションが読んだ」は**別の完了**。前者で後者を消してはいけない。
+        #   総括本部4室はセッション本人が最終処理する部屋なので、処理済みでも箱に残す。
         if rec.get("dept") in SENSITIVE_DEPTS or room_is_session_owned(rec.get("dept")):
             remaining.append(line)  # 機微 / 総括本部4室は本人セッションが応対。箱に残して待たせる。
             continue                # ★processedへ送らない=次のセッションが箱で必ず見る(ORG-12)
+        if mid in done:
+            continue  # 二重処理しない(main箱からは落とす)
         if sent >= MAX_PER_CYCLE:
             remaining.append(line)  # 上限。次巡回へ
             continue
