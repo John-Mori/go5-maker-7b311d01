@@ -105,6 +105,61 @@ ATTACH_MAX_BYTES = 20 * 1024 * 1024
 ATTACH_KEEP_DAYS = 14
 
 
+GW_LOCK = os.path.join(LOCAL, "queue", "_gateway.lock")
+
+
+def _pid_alive(pid):
+    """PIDが生きているか(Windows/POSIX両対応)。判定不能はFalse=起動を止めない側へ倒す。"""
+    if not pid or pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+            if h:
+                k.CloseHandle(h)
+                return True
+            return False
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def claim_singleton():
+    """既に生きたgatewayが居るなら自分は起動しない(2026-07-21 ORG-22・ad研究室からの差し戻し)。
+
+    ★なぜ要るか: gatewayには多重起動ガードが無かった。supervise_daemons は「プロセスが0なら起動」
+      なので、手動再起動と巡回が重なると**2本立ち得る**。実際 ad研究室(AD-GL)が二重起動を
+      観測してHQへ差し戻してきた(3階梯のエスカレーションが機能した実例)。
+      被害は限定的だった(queueのmsg_id冪等が効き、実測で**重複msg_id 0件**)が、
+      受領スタンプやescalateジョブは二重に走るため、根本を塞ぐ。
+
+    ★**fail-open**: ロックが読めない・PID判定に失敗した等の「分からない」時は**起動する**。
+      ここはDiscord受信の唯一の入口で、**起動を止める誤判定は全部屋の沈黙**を意味する。
+      重複の害(スタンプ二重)より、不在の害(全便が届かない)の方が桁違いに大きい。
+    """
+    try:
+        with open(GW_LOCK, encoding="utf-8") as f:
+            old = int(f.read().strip().split()[0])
+    except Exception:
+        old = 0
+    if old and old != os.getpid() and _pid_alive(old):
+        log(f"既に稼働中のgateway pid={old} を検出。二重起動を避けて終了する。")
+        return False
+    try:
+        os.makedirs(os.path.dirname(GW_LOCK), exist_ok=True)
+        with open(GW_LOCK, "w", encoding="utf-8") as f:
+            f.write(f"{os.getpid()}\n")
+    except OSError:
+        pass            # 書けなくても起動は続ける(fail-open)
+    return True
+
+
 def log(msg):
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
     print(line)
@@ -544,7 +599,9 @@ def run_gateway():
 
 def main():
     if "--selftest" in sys.argv:
-        return run_selftest()
+        return run_selftest()          # selftestは接続しないので単一化の対象外
+    if not claim_singleton():
+        return 0                        # 既に稼働中=正常終了(superviseが再起動を繰り返さない)
     return run_gateway()
 
 
