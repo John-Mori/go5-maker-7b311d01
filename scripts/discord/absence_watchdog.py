@@ -354,6 +354,24 @@ def _waiter_armed(name):
         return False
 
 
+def _daemon_alive(dept):
+    """その部屋に留守番デーモンが生きているか。判定不能はFalse(=居ない側)へ倒す。
+
+    居ないのに「居る」と案内する方が有害(Chamiが待ってしまう)ため、迷ったら居ない扱いにする。
+    """
+    try:
+        import socket
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        from dept_daemon import DEPT_CONF
+        port = (DEPT_CONF.get(dept) or {}).get("port")
+        if not port:
+            return False
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.3):
+            return True
+    except Exception:
+        return False
+
+
 def _pending_age(dept):
     """その deptで最も古い pending便の経過秒。無ければ0。読み取り専用・fail-open。"""
     if not os.path.exists(QUEUE_DB_WD):
@@ -387,11 +405,28 @@ def check_chime_health(state, dry_run):
         if now_epoch - st.get(dept, 0) < CHIME_COOLDOWN_SEC:
             continue
         st[dept] = now_epoch
+        # ★部屋名を必ず本文に入れる(2026-07-21 ORG-28)。
+        #   旧文は「**この部屋の**チャイム線が…」だった。Chamiがこの警告を別の部屋へ**転送**した瞬間、
+        #   どの部屋の話か分からなくなり、hqのデーモン(アメス)が「この部屋=hqにデーモンが居ない」と
+        #   誤読した(実際はアメス自身がhqのデーモン)。**転送されても意味が保たれる文にする**。
+        #   今日の他の事故と同型= 文脈は転送で失われる前提で書く。
+        # ★デーモンの有無で文面を変える(同 ORG-28)。留守番デーモンを置いた部屋に対して
+        #   「セッションを開かないと拾えません」と出すのは**事実と違う**。
+        #   デーモンが居るのに便が5分溜まっているなら、それは**デーモンも止まっている**という
+        #   より重い異常で、案内すべき対処が正反対になる。
+        if _daemon_alive(dept):
+            tail = (f"★`{dept}` には留守番デーモンが居ます。**それでも便が滞留している**＝"
+                    "デーモン側も止まっている疑いがあります(通常は数秒で拾います)。\n"
+                    "→ 艦隊の状態を確認してください: `scripts\\_daemons\\status.ps1`")
+        else:
+            tail = (f"★`{dept}` は対話セッション本人が担当する部屋で、留守番デーモンが居ません。\n"
+                    "**その部屋のClaude Codeセッションを開かないと拾えません**。")
         bot_send(dept, (
-            f"⚠ **この部屋のチャイム線が落ちています**(約{int(age // 60)}分前の依頼が未受信)。\n"
-            "依頼は消えていません。queueに保持されていて、セッションが起きれば必ず読まれます。\n"
-            "★担当は対話セッション本人でデーモンが居ない部屋のため、"
-            "**Claude Codeのセッションを開かないと拾えません**。"), dry_run, by_dept=True)
+            f"⚠ **`{dept}` のチャイム線が落ちています**(約{int(age // 60)}分前の依頼が未受信)。\n"
+            "依頼は消えていません。queueに保持されていて、担当が起きれば必ず読まれます。\n"
+            f"{tail}\n"
+            "(この文を別の部屋へ転送する場合は、上の部屋名がどこを指すかご注意ください)"),
+            dry_run, by_dept=True)
 
 
 # --- ★O1 DLQ監視 (改善書P0-5: 5回配送失敗→dead に隔離された毒メッセージを誰も見ていない) ---
