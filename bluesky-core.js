@@ -291,10 +291,46 @@
     return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t\r\n]+$/, '');
   }
 
+  // ---- X(Twitter)の加重文字数 ----
+  //   ★X公式仕様(docs.x.com/fundamentals/counting-characters)：
+  //     ・上限は「加重280」。文字数ではなく重みの合計。
+  //     ・Latin・記号・句読点=重み1／**CJK(日本語)と絵文字=重み2**／その他の範囲も既定2。
+  //     ・URLはt.coに巻かれるため、長さに関わらず一律23。
+  //   つまり日本語だけなら実質127字前後(+URL1本)しか入らない。1文字=1で数えると
+  //   **書ける量を約2倍に見せてしまい**、「余裕あり」と表示された文がXで弾かれる。
+  //   重み1の範囲は twitter-text の default weighted ranges に合わせる。
+  var X_MAX_WEIGHTED = 280;
+  var X_URL_WEIGHT = 23;
+  var X_LIGHT_RANGES = [[0x0000, 0x10FF], [0x2000, 0x200D], [0x2010, 0x201F], [0x2032, 0x2037]];
+  function xCharWeight(cp) {
+    for (var i = 0; i < X_LIGHT_RANGES.length; i++) {
+      if (cp >= X_LIGHT_RANGES[i][0] && cp <= X_LIGHT_RANGES[i][1]) return 1;
+    }
+    return 2;
+  }
+  /**
+   * Xの加重文字数を返す。(URLは一律23・CJK/絵文字は2)純粋関数。
+   * @param {string} text
+   * @returns {number} 加重合計(280以下なら投稿可能)
+   */
+  function xWeightedLength(text) {
+    var s = String(text == null ? '' : text);
+    var urls = s.match(/https?:\/\/[^\s]+/g) || [];
+    var rest = s.replace(/https?:\/\/[^\s]+/g, '');
+    var w = 0;
+    // for...of でサロゲートペア(絵文字)を1文字として走査する。
+    for (var it = rest[Symbol.iterator](), r = it.next(); !r.done; r = it.next()) {
+      w += xCharWeight(r.value.codePointAt(0));
+    }
+    return w + urls.length * X_URL_WEIGHT;
+  }
+
   var api = {
     DEFAULT_SERVICE: DEFAULT_SERVICE,
     buildBlueskyPost: buildBlueskyPost,
     stripAutoBlocks: stripAutoBlocks,
+    xWeightedLength: xWeightedLength,
+    X_MAX_WEIGHTED: X_MAX_WEIGHTED,
     KNOWN_PR_LINES: KNOWN_PR_LINES,
     KNOWN_DISCOUNT_LEADS: KNOWN_DISCOUNT_LEADS,
     blueskyPostWithImage: blueskyPostWithImage,

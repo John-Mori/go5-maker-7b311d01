@@ -2179,10 +2179,17 @@
     var _xOverrideShort = '';
 
     // X文字数カウント(URL=23文字換算・Xの実装に準拠)
+    // Xの加重文字数。実体は BlueskyCore.xWeightedLength(＝Nodeテスト対象)。
+    //   ★日本語と絵文字は重み2で数える必要がある(X公式仕様)。1文字=1で数えると書ける量を
+    //   約2倍に見せてしまい、「余裕あり」と出た文がXで弾かれる。
+    //   core未読込時は安全側(重み2)に倒す＝過小表示で投稿が弾かれるより、多めに見せて縮めてもらう方がまし。
     function xCount(text) {
+      if (window.BlueskyCore && typeof window.BlueskyCore.xWeightedLength === 'function') {
+        return window.BlueskyCore.xWeightedLength(text);
+      }
       var urls = (String(text || '').match(/https?:\/\/[^\s]+/g) || []);
       var noUrl = String(text || '').replace(/https?:\/\/[^\s]+/g, '');
-      return Array.from(noUrl).length + urls.length * 23;
+      return Array.from(noUrl).length * 2 + urls.length * 23;
     }
 
     // Xツイート用本文を組み立てる
@@ -2206,7 +2213,9 @@
       var t = (text !== undefined) ? text : xTxt.value;
       var n = xCount(t);
       if (xCnt) {
-        xCnt.textContent = n + ' / 280';
+        // 「280」は文字数ではなく加重の上限。日本語は1字=2で効くため、素の字数と一致しない。
+        // 数字だけだと「まだ書ける」と誤解されるので単位を明示する。
+        xCnt.textContent = n + ' / 280 (Xの換算・日本語は1字=2)';
         xCnt.style.color = n > 280 ? '#e74c3c' : n > 240 ? '#e6a14e' : 'var(--sub)';
       }
     }
@@ -2216,6 +2225,11 @@
       xTxt.value = text;
       updateXCount_(text);
     }
+
+    // ★X用テキストを直接手直しした時もカウンタを追従させる。
+    //   上限280は「短くしてもらう」ための表示なので、手で削っている最中に数字が固まっていると
+    //   まさに一番必要な場面で役に立たない(コピー時に初めて超過が分かる状態だった)。
+    if (xTxt) xTxt.addEventListener('input', function () { updateXCount_(); });
 
     // 本文・作品URL変更時に再生成(短縮URL差し替えはリセット)
     if (els.text) els.text.addEventListener('input', function () { _xOverrideShort = ''; refreshXTweet(); });
@@ -2251,7 +2265,7 @@
         var text = xTxt.value;
         if (!text.trim()) { if (xStatus) xStatus.textContent = '本文がありません。'; return; }
         var n = xCount(text);
-        if (n > 280) { if (xStatus) xStatus.textContent = '⚠️ ' + n + '文字(280超)。短くしてから投稿してください。'; return; }
+        if (n > 280) { if (xStatus) xStatus.textContent = '⚠️ Xの換算で' + n + '(上限280)。日本語は1字=2で効きます。短くしてから投稿してください。'; return; }
         function done() { if (xStatus) xStatus.textContent = '✅ コピーしました。Xに貼り付けて投稿してください。'; }
         try {
           if (navigator.clipboard) {

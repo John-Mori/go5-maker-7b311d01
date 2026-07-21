@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks } = require('../bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength } = require('../bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -247,6 +247,48 @@ test('S-8: 冪等(2回かけても結果が変わらない)', function () {
   var once = stripAutoBlocks(stale);
   assert.strictEqual(stripAutoBlocks(once), once, '2回目で追加の変化が起きてはいけない');
   assert.strictEqual(once, 'フック');
+});
+
+// ────────────────────────────────────────────────────────────
+// X-1〜X-6  xWeightedLength(X投稿の加重文字数)
+//   典拠: X公式 docs.x.com/fundamentals/counting-characters
+//   上限=加重280 / Latin・記号=1 / CJK(日本語)・絵文字=2 / URLは長さに関わらず一律23。
+//   1文字=1で数えると書ける量を約2倍に見せ、「余裕あり」表示の文がXで弾かれる。
+// ────────────────────────────────────────────────────────────
+test('X-1: 英数字は1文字=1', function () {
+  assert.strictEqual(xWeightedLength('abc123'), 6);
+});
+test('X-2: 日本語は1文字=2(ひらがな/カタカナ/漢字)', function () {
+  assert.strictEqual(xWeightedLength('あ'), 2);
+  assert.strictEqual(xWeightedLength('ア'), 2);
+  assert.strictEqual(xWeightedLength('漢'), 2);
+  assert.strictEqual(xWeightedLength('あいう'), 6);
+});
+test('X-3: 絵文字は1つ=2(サロゲートペアを1文字として数える)', function () {
+  assert.strictEqual(xWeightedLength('\u{1F495}'), 2, '💕 は2');
+  assert.strictEqual(xWeightedLength('\u{1F380}'), 2, '🎀 は2');
+});
+test('X-4: URLは長さに関わらず一律23', function () {
+  assert.strictEqual(xWeightedLength('https://5mgl.com/fCIQv'), 23);
+  assert.strictEqual(xWeightedLength('https://al.fanza.co.jp/?lurl=' + 'x'.repeat(300)), 23,
+    '長いアフィリンクでも23');
+  assert.strictEqual(xWeightedLength('https://a.com/1 https://b.com/2'), 23 + 1 + 23, 'URL2本+間の空白');
+});
+test('X-5: 日本語のみなら実質127字前後が上限(+URL1本)', function () {
+  var url = '\n\nhttps://5mgl.com/fCIQv';
+  assert.ok(xWeightedLength('あ'.repeat(127) + url) <= 280, '127字は収まる');
+  assert.ok(xWeightedLength('あ'.repeat(130) + url) > 280, '130字は超える');
+});
+test('X-6: 旧実装(1文字=1)との差＝過大表示の再現', function () {
+  var t = 'おすすめ漫画見つけた\u{1F495}\nなんと今なら50%オフのおトク作品！✨\n\n' +
+          '↓詳細はこちらから\u{1F380} #PR #漫画\nhttps://5mgl.com/fCIQv';
+  function old(s) { // 修正前の xCount
+    var u = (s.match(/https?:\/\/[^\s]+/g) || []);
+    return Array.from(s.replace(/https?:\/\/[^\s]+/g, '')).length + u.length * 23;
+  }
+  assert.strictEqual(old(t), 75, '旧実装は75と表示していた');
+  assert.strictEqual(xWeightedLength(t), 114, '実際のXの換算は114');
+  assert.ok(xWeightedLength(t) > old(t), '旧実装は少なく見積もる=書ける量を過大に見せる');
 });
 
 // ────────────────────────────────────────────────────────────
