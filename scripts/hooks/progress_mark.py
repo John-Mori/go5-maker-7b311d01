@@ -26,6 +26,7 @@ phase:
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -49,6 +50,55 @@ def turn_flag(dept):
     return os.path.join(LOCAL, "llm", f"progress_turn_{dept}.flag")
 
 
+# 本人セッションが応対する部屋。ここに載っている名前だけを自己申告として受け付ける
+# (system-engineer等の**デーモンの部屋を巻き込まない**ための白名簿)。
+SESSION_ROOMS = ("hq", "aegis-gl", "research-room", "keiei-kikaku")
+WAITER_RE = re.compile(r"inbox_waiter\.py\s+--name\s+([A-Za-z][\w-]*)")
+
+
+def room_from_transcript(tp):
+    """このセッションが自分で武装したwaiterの名前から部屋を決める(2026-07-21・ORG-17)。
+
+    ★なぜcwdで決められないか: `D:\\SougouStartFolder\\5SecMovieMaker` は**22セッションが共有**
+      している(実測)。ここをPAIRSでad研究室に割り当てると、バックエンドやQAのセッションまで
+      ad研究室へ印を押し、ミラーと在席も混線する(引き継ぎ書§5が禁じている構成そのもの)。
+      hq(専用cwd)と違い、ad研究室は**cwdで識別できない**。
+
+    ★代わりに使う信号= セッションが起動時に必ず打つ `inbox_waiter.py --name <部屋>`。
+      transcriptはセッション毎に別ファイルなので、**自分が打ったコマンドだけ**が入っている
+      =他セッションと混ざらない。新しい手順を増やさずに済む(既にBOOTでやっていること)。
+
+    ★白名簿(SESSION_ROOMS)で絞るので、`--name system-engineer` 等のデーモン部屋は
+      一致せず**印を押さない**(あちらはデーモンが押す)。
+
+    ★**素のテキスト検索では駄目**(実測で誤検出): 引き継ぎ書やBOOT.mdには
+      `inbox_waiter.py --name hq` という**文字列そのものが載っている**ため、それを読んだだけの
+      無関係なセッションまでhqと判定された(5SecMovieMakerの1セッションが実際に誤判定された)。
+      → **実際に実行したコマンド(tool_use)だけ**を見る。読んだ/書いた文字列は数えない。
+    """
+    hits = []
+    try:
+        with open(tp, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "inbox_waiter" not in line:
+                    continue            # 安いフィルタ(大きいtranscriptでも軽い)
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                content = (rec.get("message") or {}).get("content")
+                if not isinstance(content, list):
+                    continue
+                for b in content:
+                    if not isinstance(b, dict) or b.get("type") != "tool_use":
+                        continue
+                    cmd = str((b.get("input") or {}).get("command") or "")
+                    hits += [m for m in WAITER_RE.findall(cmd) if m in SESSION_ROOMS]
+    except OSError:
+        return None
+    return hits[-1] if hits else None     # 最後の申告=今その部屋を担当している
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -59,7 +109,12 @@ def main():
         from session_rooms import dept_of_payload
         dept, _ = dept_of_payload(payload)
     except Exception:
-        return
+        dept = None
+    if not dept:
+        # cwdで決まらない部屋(ad研究室=5SecMovieMakerを22セッションで共有)は自己申告で解決する。
+        # ★進捗印だけに使う。ミラーには広げない——あちらは本人が手で投稿している部屋があり、
+        #   二重投稿になる(ORG-03と同型の事故を自分で作らない)。
+        dept = room_from_transcript(payload.get("transcript_path") or "")
     if not dept:
         return
 

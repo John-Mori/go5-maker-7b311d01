@@ -1,4 +1,16 @@
-﻿{
+{
+  "permissions": {
+    "deny": [
+      "Read(./local/_secrets/**)",
+      "Read(./local/*token*)",
+      "Read(./local/*secret*)",
+      "Read(./local/*api_key*)",
+      "Read(./local/*credential*)",
+      "Read(./local/.env*)",
+      "Read(./.clasp.json)",
+      "Read(./scripts/gas_deploy_config.json)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
@@ -10,8 +22,41 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/SougouStartFolder/5SecMovieMaker/scripts/hooks/progress_mark.py work",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/SougouStartFolder/5SecMovieMaker/scripts/hooks/progress_mark.py read",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/SougouStartFolder/5SecMovieMaker/scripts/hooks/progress_mark.py end",
+            "timeout": 60
+          }
+        ]
       }
     ]
   }
 }
-
