@@ -273,8 +273,18 @@
     '⭐大幅割引セール中の同人はこちら 🎀',  // acc1
     '🏮 大幅割引セール中の同人祭ページ 🏮'  // acc2
   ];
+  // ---- フックの深掘り＋CTA行(X案2・Chami承認2026-07-21) ----
+  //   ch共通(Chami裁定「④コメントのch別ボイス分けはしない」2026-07-18の趣旨を踏襲)。
+  //   ch別のPR行・セール行(bluesky.js側のDISCOUNT_LEAD_/PR_LINE_)は一切変更しない。
+  //   挿入位置：1行目(フック)の直後に深掘り行／本文(割引行を含む)の最後にCTA行。
+  //   ★見出し+URLの形(PR行/セール行)ではなく「単独行」なので、剥がす時は直下を消費しない。
+  var HOOK_DEEPEN_LINE = '気になる展開でつい読み進めちゃう作品✨';
+  var CTA_LINE = '気になったら今のうちにチェックしてね';
   /**
-   * 既知の自動付与ブロック(PR行/セール行＋その直下の裸URL行)を本文から取り除く。純粋関数。
+   * 既知の自動付与ブロック(PR行/セール行＋その直下の裸URL行、フック深掘り行/CTA行)を本文から取り除く。純粋関数。
+   * ★INC-111と同じ経路(Q保存/Q読込で「完成形」を保存→自動付与が二重に足す)を防ぐため、
+   *   フック深掘り行/CTA行もここで剥がす対象に含める(2026-07-21 AD-GL指摘で追加)。
+   *   既知テンプレと完全一致する行だけを対象にする(独自に書いた文はそのまま残す＝S-2の原則を踏襲)。
    * @param {string} text
    * @returns {string}
    */
@@ -283,12 +293,42 @@
     var out = [];
     for (var i = 0; i < lines.length; i++) {
       var t = lines[i].trim();
+      if (t === HOOK_DEEPEN_LINE || t === CTA_LINE) continue; // 単独行として剥がす(直下は消費しない)
       if (KNOWN_PR_LINES.indexOf(t) < 0 && KNOWN_DISCOUNT_LEADS.indexOf(t) < 0) { out.push(lines[i]); continue; }
       // 見出し行を落とす。直下が「裸URLだけの行」ならそれも古いリンクなので一緒に落とす。
       if (i + 1 < lines.length && /^https?:\/\/\S+$/.test(lines[i + 1].trim())) i++;
     }
     // 行を抜いた跡の空行が続くのを詰める＋末尾の空白を落とす(compose/previewで同じ形にする)
     return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t\r\n]+$/, '');
+  }
+
+  /**
+   * フック深掘り行/CTA行(単独行)だけを本文から取り除く。純粋関数。stripAutoBlocksの部分機能を
+   * insertHookCta自身からも使えるよう切り出したもの(=insertHookCtaを単体で2回通しても積み上がらない・真の冪等性)。
+   * @param {string} text
+   * @returns {string}
+   */
+  function stripHookCtaLines(text) {
+    var lines = String(text == null ? '' : text).split('\n');
+    return lines.filter(function (l) { var t = l.trim(); return t !== HOOK_DEEPEN_LINE && t !== CTA_LINE; }).join('\n');
+  }
+
+  /**
+   * captionの1行目の直後にフック深掘り行、最終行の後にCTA行を挿入する。純粋関数。
+   * ★挿入前に既存のフック深掘り行/CTA行を剥がしてから足すため、同じ入力を何度通しても常に1組に収束する
+   *   (insertHookCta(insertHookCta(x)) === insertHookCta(x))。空文字(本文なし)にはそのまま何も足さない。
+   * @param {string} caption
+   * @returns {string}
+   */
+  function insertHookCta(caption) {
+    var s = String(caption == null ? '' : caption);
+    if (!s.trim()) return caption == null ? '' : caption;
+    var cleaned = stripHookCtaLines(s);
+    if (!cleaned.trim()) return caption == null ? '' : caption; // 剥がした結果が空になる異常系はそのまま返す(保険)
+    var lines = cleaned.split('\n');
+    lines.splice(Math.min(1, lines.length), 0, HOOK_DEEPEN_LINE);
+    lines.push(CTA_LINE);
+    return lines.join('\n');
   }
 
   // ---- X(Twitter)の加重文字数 ----
@@ -329,6 +369,10 @@
     DEFAULT_SERVICE: DEFAULT_SERVICE,
     buildBlueskyPost: buildBlueskyPost,
     stripAutoBlocks: stripAutoBlocks,
+    insertHookCta: insertHookCta,
+    stripHookCtaLines: stripHookCtaLines,
+    HOOK_DEEPEN_LINE: HOOK_DEEPEN_LINE,
+    CTA_LINE: CTA_LINE,
     xWeightedLength: xWeightedLength,
     X_MAX_WEIGHTED: X_MAX_WEIGHTED,
     KNOWN_PR_LINES: KNOWN_PR_LINES,

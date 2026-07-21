@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength } = require('../bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE } = require('../bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -247,6 +247,121 @@ test('S-8: 冪等(2回かけても結果が変わらない)', function () {
   var once = stripAutoBlocks(stale);
   assert.strictEqual(stripAutoBlocks(once), once, '2回目で追加の変化が起きてはいけない');
   assert.strictEqual(once, 'フック');
+});
+// ── S-9/S-10: フック深掘り行/CTA行もstripAutoBlocksの対象に含める(2026-07-21 AD-GL指摘・INC-111と同じ経路対策) ──
+//   背景: Q保存で「完成形」(フック深掘り行/CTA行を含む本文)を保存→Q読込で本文に戻す→
+//   composePostTextが自動付与をもう一度足す、という二重化が起きうる。stripAutoBlocksが
+//   フック深掘り行/CTA行も剥がすことで、この経路でも常に生のフック+割引行まで戻ってから組み直す。
+test('S-9: フック深掘り行/CTA行(単独行)も剥がす。直下の行は消費しない', function () {
+  var stale = 'フック\n' + HOOK_DEEPEN_LINE + '\n割引行\n' + CTA_LINE + '\n\n' +
+    '↓詳細はこちらから🎀 #PR #漫画\nhttps://da.gd/x';
+  assert.strictEqual(stripAutoBlocks(stale), 'フック\n割引行');
+});
+test('S-10: 独自に書いた似た文は残す(完全一致する行だけを対象にする・S-2の原則)', function () {
+  var t = 'フック\n気になる展開だけど読み進めるか迷う\n本文続き';
+  assert.strictEqual(stripAutoBlocks(t), t, '完全一致しない独自文は保持する');
+});
+
+// ────────────────────────────────────────────────────────────
+// H-1〜H-7  insertHookCta(フックの深掘り＋CTA行・X案2・Chami承認2026-07-21)
+//   挿入位置：1行目(フック)の直後に深掘り行／本文の最後にCTA行。ch共通(acc1/acc2で文言差はない)。
+// ────────────────────────────────────────────────────────────
+test('H-1: フック1行のみ → 深掘り行を2行目、CTA行を末尾に挿入', function () {
+  assert.strictEqual(
+    insertHookCta('おすすめ漫画見つけた💕'),
+    'おすすめ漫画見つけた💕\n' + HOOK_DEEPEN_LINE + '\n' + CTA_LINE
+  );
+});
+test('H-2: フック＋割引行 → 深掘り行は割引行の前、CTA行は割引行の後', function () {
+  assert.strictEqual(
+    insertHookCta('おすすめ漫画見つけた💕\nなんと今なら50%オフのおトク作品！✨'),
+    'おすすめ漫画見つけた💕\n' + HOOK_DEEPEN_LINE + '\nなんと今なら50%オフのおトク作品！✨\n' + CTA_LINE
+  );
+});
+test('H-3: 空文字/null/undefined → 何も足さずそのまま', function () {
+  assert.strictEqual(insertHookCta(''), '');
+  assert.strictEqual(insertHookCta(null), '');
+  assert.strictEqual(insertHookCta(undefined), '');
+});
+test('H-4: acc2テンプレでも同じ位置関係(ch共通・文言分けしない)', function () {
+  assert.strictEqual(
+    insertHookCta('続きが気になっちゃう一冊、みつけた📚\nしかも今なら20%オフ💕'),
+    '続きが気になっちゃう一冊、みつけた📚\n' + HOOK_DEEPEN_LINE + '\nしかも今なら20%オフ💕\n' + CTA_LINE
+  );
+});
+// ── H-5: 真の冪等性(2026-07-21 AD-GL指摘で修正) ──
+//   ★以前のH-5は「同じ未加工入力に2回かけて結果を比べる」誤ったテストで、
+//   本来検証すべき f(f(x)) === f(x) (=1回目の出力をもう一度入力にする)ではなかった。
+//   AD-GLが実測した結果、旧実装は1回目の出力を入力にするとフック行/CTA行が2行ずつになり
+//   冪等ではなかった(INC-111と同じ二重化の経路)。今回の修正(insertHookCta自身が挿入前に
+//   既存のフック深掘り行/CTA行を剥がす)で f(f(x)) === f(x) が成立することを確認する。
+test('H-5: 真の冪等性 insertHookCta(insertHookCta(x)) === insertHookCta(x)(フック1行のみ)', function () {
+  var x = 'おすすめ漫画見つけた💕';
+  var once = insertHookCta(x);
+  var twice = insertHookCta(once);
+  assert.strictEqual(twice, once, 'f(f(x)) は f(x) と一致するはず(=行が増えてはいけない)');
+});
+test('H-6: 真の冪等性(フック＋割引行)', function () {
+  var x = 'おすすめ漫画見つけた💕\nなんと今なら50%オフのおトク作品！✨';
+  var once = insertHookCta(x);
+  var twice = insertHookCta(once);
+  assert.strictEqual(twice, once, 'f(f(x)) は f(x) と一致するはず(=行が増えてはいけない)');
+  // フック深掘り行・CTA行がそれぞれ1個ずつであること(数えて確認)
+  var lines = once.split('\n');
+  assert.strictEqual(lines.filter(function (l) { return l === HOOK_DEEPEN_LINE; }).length, 1, '深掘り行は1個のみ');
+  assert.strictEqual(lines.filter(function (l) { return l === CTA_LINE; }).length, 1, 'CTA行は1個のみ');
+});
+test('H-7: 「完成形」の本文(Q読込を想定)を入力にしても行が増えない', function () {
+  // Q保存されていた「完成形」＝過去にinsertHookCtaを通した後の本文をそのまま入力にするケース。
+  var complete = 'おすすめ漫画見つけた💕\n' + HOOK_DEEPEN_LINE + '\nなんと今なら50%オフのおトク作品！✨\n' + CTA_LINE;
+  var result = insertHookCta(complete);
+  var lines = result.split('\n');
+  assert.strictEqual(lines.filter(function (l) { return l === HOOK_DEEPEN_LINE; }).length, 1, '深掘り行が2重にならない');
+  assert.strictEqual(lines.filter(function (l) { return l === CTA_LINE; }).length, 1, 'CTA行が2重にならない');
+  assert.strictEqual(result, complete, '既に正しい形なら見た目は変わらない');
+});
+
+// ────────────────────────────────────────────────────────────
+// R-1〜R-3  bluesky.js composePostText相当のフル組み立て(stripAutoBlocks→insertHookCta→
+//   PR行+リンク→セール行+リンク、の順)の回帰テスト。
+//   ★INC-111と同じ経路(Q保存で完成形を保存→Q読込で本文に戻す→自動付与がもう一度足す)を
+//   再現し、二重化しないことを固定する(2026-07-21 AD-GL指摘)。PR行/セール行の文言はbluesky.jsの
+//   PR_LINE_()/DISCOUNT_LEAD_()と同一(ch別・1文字も変えていない)。
+// ────────────────────────────────────────────────────────────
+var PR_LINE = { acc1: '↓詳細はこちらから🎀 #PR #漫画', acc2: '↓詳しくはこちらから🌙 #PR #漫画' };
+var DISCOUNT_LEAD = { acc1: '⭐大幅割引セール中の同人はこちら 🎀', acc2: '🏮 大幅割引セール中の同人祭ページ 🏮' };
+function composePostTextLike(acc, rawCaption, link, dlink) {
+  var caption = insertHookCta(stripAutoBlocks(rawCaption));
+  var out = (link && caption.indexOf(link) < 0) ? (caption + '\n\n' + PR_LINE[acc] + '\n' + link) : caption;
+  if (dlink && caption.indexOf(dlink) < 0) out += '\n\n' + DISCOUNT_LEAD[acc] + '\n' + dlink;
+  return out;
+}
+test('R-1: acc1のフル組み立て(フック+深掘り+割引50%+CTA+PR行+リンク+セール行+リンク)がChami承認案2(加重251/280)と一致', function () {
+  var raw = 'おすすめ漫画見つけた💕\nなんと今なら50%オフのおトク作品！✨';
+  var text = composePostTextLike('acc1', raw, 'https://5mgl.com/abc12', 'https://5mgl.com/xyz89');
+  assert.strictEqual(text,
+    'おすすめ漫画見つけた💕\n' + HOOK_DEEPEN_LINE + '\nなんと今なら50%オフのおトク作品！✨\n' + CTA_LINE +
+    '\n\n↓詳細はこちらから🎀 #PR #漫画\nhttps://5mgl.com/abc12' +
+    '\n\n⭐大幅割引セール中の同人はこちら 🎀\nhttps://5mgl.com/xyz89'
+  );
+  assert.strictEqual(xWeightedLength(text), 251, 'Chami承認済みの目標値(案2)と一致(実測で固定)');
+});
+test('R-2: acc2のフル組み立て → 既存の🏮/🌙文言はそのまま・フック深掘り/CTA行も1組だけ追加される', function () {
+  var raw = '続きが気になっちゃう一冊、みつけた📚\nしかも今なら20%オフ💕';
+  var text = composePostTextLike('acc2', raw, 'https://yoz2.com/abc12', 'https://yoz2.com/xyz89');
+  assert.strictEqual(text,
+    '続きが気になっちゃう一冊、みつけた📚\n' + HOOK_DEEPEN_LINE + '\nしかも今なら20%オフ💕\n' + CTA_LINE +
+    '\n\n↓詳しくはこちらから🌙 #PR #漫画\nhttps://yoz2.com/abc12' +
+    '\n\n🏮 大幅割引セール中の同人祭ページ 🏮\nhttps://yoz2.com/xyz89'
+  );
+});
+test('R-3: 「完成形」(Q読込を想定)を入力に再度フル組み立てしても二重化しない(INC-111と同じ経路の回帰防止)', function () {
+  var raw = 'おすすめ漫画見つけた💕\nなんと今なら50%オフのおトク作品！✨';
+  var link = 'https://5mgl.com/abc12', dlink = 'https://5mgl.com/xyz89';
+  var once = composePostTextLike('acc1', raw, link, dlink);
+  // Q保存→Q読込で「完成形」がそのままels.text.valueに戻ってきたケースを再現。
+  var twice = composePostTextLike('acc1', once, link, dlink);
+  assert.strictEqual(twice, once, '完成形を入力にしても行・見出しが増えてはいけない');
 });
 
 // ────────────────────────────────────────────────────────────

@@ -520,6 +520,14 @@
     return String(text == null ? '' : text).replace(/[ \t\r\n]+$/, '');
   }
   try { window.__go5StripAutoBlocks = stripAutoBlocks_; } catch (e) {} // 検証用フック
+  // フックの深掘り＋CTA行を差し込む(X案2・Chami承認2026-07-21)。ch共通・実体は純粋関数
+  //   BlueskyCore.insertHookCta(＝Nodeテスト対象)。core未読込でも壊れないよう素通しにフォールバック。
+  function applyHookCta_(caption) {
+    if (window.BlueskyCore && typeof window.BlueskyCore.insertHookCta === 'function') {
+      return window.BlueskyCore.insertHookCta(caption);
+    }
+    return caption;
+  }
   var DISC_ON_KEY = 'bsky_discount_list_on';
   function discountListOn_() { return true; } // 常時ON(標準投稿形式の一部・2026-07-14 Chami指定でトグルUI廃止=セール行は常に添える)
   function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
@@ -804,6 +812,7 @@
     // 貼り付け済みの古い完成形(PR行/セール行+旧URL)を剥がしてから組み直す＝二重化しない。
     var caption = stripAutoBlocks_(els.text.value);
     if (!AUTO_APPEND_ENABLED) return caption;
+    caption = applyHookCta_(caption); // ★フックの深掘り＋CTA行(X案2・Chami承認2026-07-21)。PR行/リンクを付ける前に差し込む。
     var link = resolveAffLink();
     // 本文に手動で作品URL/割引リンクを含めて書いた場合(例：しばらく手動投稿する場合)に、
     // 自動追加分と重複しないよう、既に本文へ含まれていればスキップする。
@@ -868,6 +877,7 @@
   function renderPreview() {
     // ★composePostTextと同じ前処理を通す。(ここがズレると「プレビューと実際の投稿が違う」の原因になる)
     var caption = stripAutoBlocks_(els.text.value);
+    if (AUTO_APPEND_ENABLED) caption = applyHookCta_(caption); // フックの深掘り＋CTA行(X案2・Chami承認2026-07-21)
     var link = resolveAffLink();
     var hasLink = !!(link && caption.indexOf(link) >= 0);
     var html = caption ? highlightLinks(escapeHtml(caption)) : '<span class="ph">(本文)</span>';
