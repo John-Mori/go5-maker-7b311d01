@@ -60,27 +60,23 @@ except Exception:
     session_rooms = None        # 読めなくても現行動作(プロセス列挙)に安全に退化する
 
 POLL_SEC = 3                    # 箱の見張り間隔(waiterの2秒に準拠した軽さ)
-# ★可変応答間隔(2026-07-21 Chami要望「やり取りする時だけすぐ拾う。寝てる時は遅くていい」)。
-#   集中ウィンドウ(local/llm/focus_until.txt=有効期限のepoch)が生きている間だけ速く見張る。
-#   ウィンドウが切れている(=Chamiが触っていない想定)時は遅くしてPCの負荷を下げる。
-#   ★設定は `python scripts/llm/focus.py [分]`(既定60分)。0でその場終了。
-#   ★ポーリング間隔はトークンを消費しない(SQLiteを見るだけ)。速さの主役は集中窓ではなく
-#     生成時間だが、Chamiが「今から見てる」と宣言できる明示的な札として機能する。
-POLL_ACTIVE = 2                 # 集中ウィンドウ中=速く拾う
-POLL_IDLE = 12                  # 平常(Chami不在想定)=遅く見張る
-FOCUS_FILE = os.path.join(LOCAL, "llm", "focus_until.txt")
+# ★2026-07-21 Chami裁定「常時2秒でやる」= **集中ウィンドウ(可変間隔)は廃止した**。
+#   同日の午前に「寝てる時は遅くていい」の要望で 2秒/12秒 の切替を入れたが、
+#   **節約できている量を測ったら実質ゼロ**だったため、概念ごと畳んだ:
+#     実測 1クエリ = 0.005ms → 16部門×2秒間隔で **1コアの0.004%**。
+#     12秒間隔なら0.001%。**差は0.003%**=切り替える価値が無い(SQLiteを見るだけでトークンも0)。
+#   さらに、遅い側が既定だと**Chamiが札を立て忘れた時だけ遅い**という最悪の外し方をする。
+#   ★本当の待ち時間は生成時間(会話15〜60秒/実作業は最大10分)。ポーリングは主役ではない。
+#     速さに効いたのは間隔ではなく**その部屋に消費者が居ること**だった(ORG-15)。
+POLL_QUEUE = 2                  # queueの見張り間隔(常時)。可変にしない
 
 
 def poll_interval():
-    """集中ウィンドウが生きていれば速い間隔、切れていれば遅い間隔を返す。
+    """queueの見張り間隔。常に2秒(集中ウィンドウは2026-07-21に廃止)。
 
-    判定不能・ファイル無しは**遅い側**へ倒す(=既定は省エネ。Chamiが明示的に集中を宣言した時だけ速い)。
+    互換のため関数は残す(呼び出し側を書き換えずに済ませる)。
     """
-    try:
-        until = float(open(FOCUS_FILE, encoding="utf-8").read().strip())
-        return POLL_ACTIVE if time.time() < until else POLL_IDLE
-    except Exception:
-        return POLL_IDLE
+    return POLL_QUEUE
 INTERACTIVE_CHECK_SEC = 30      # 対話窓waiterの存在確認の間隔(プロセス列挙は重いのでキャッシュ)
 MEMORY_TAIL = 20                # promptへ注入する記憶の末尾件数
 PRINT_TIMEOUT = 300
@@ -1322,7 +1318,7 @@ class Daemon:
                 log(self.dept, f"ループ失敗: {type(e).__name__}: {e}")
             if once:
                 return 0
-            time.sleep(poll_interval())   # 集中ウィンドウで可変(2026-07-21)
+            time.sleep(poll_interval())   # 常時2秒(集中ウィンドウは2026-07-21に廃止)
 
 
 def main():
