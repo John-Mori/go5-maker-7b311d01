@@ -2165,4 +2165,100 @@
       if (makeBtnEl) makeBtnEl.click();
     });
   }
+
+  // ---- X(Twitter)投稿用テキスト(コピペ手動投稿・2026-07-21) ----
+  (function wireXTweet_() {
+    var xTxt = document.getElementById('xTweetText');
+    var xCnt = document.getElementById('xTweetCount');
+    var xCopy = document.getElementById('xTweetCopyBtn');
+    var xShortBtn = document.getElementById('xTweetUseShort');
+    var xStatus = document.getElementById('xTweetStatus');
+    if (!xTxt) return;
+
+    // 短縮URL差し替えのオーバーライド(「📎 短縮URLを挿入」クリック後に保持)
+    var _xOverrideShort = '';
+
+    // X文字数カウント(URL=23文字換算・Xの実装に準拠)
+    function xCount(text) {
+      var urls = (String(text || '').match(/https?:\/\/[^\s]+/g) || []);
+      var noUrl = String(text || '').replace(/https?:\/\/[^\s]+/g, '');
+      return Array.from(noUrl).length + urls.length * 23;
+    }
+
+    // Xツイート用本文を組み立てる
+    //   Bluesky向け自動追加ブロック(セール行等)を除いた構成：キャプション + PR行 + 作品リンク
+    function composeXText() {
+      var base = stripAutoBlocks_(els.text ? els.text.value : '');
+      var rawLink = resolveAffLink();
+      var link = _xOverrideShort || rawLink;
+      if (!link) return base;
+      // 短縮URLオーバーライド時：本文内の生リンクを差し替え、なければ末尾に付加
+      if (_xOverrideShort && rawLink && base.indexOf(rawLink) >= 0) {
+        return base.replace(rawLink, _xOverrideShort);
+      }
+      if (base.indexOf(link) < 0) {
+        return base + '\n\n' + PR_LINE_() + '\n' + link;
+      }
+      return base;
+    }
+
+    function updateXCount_(text) {
+      var t = (text !== undefined) ? text : xTxt.value;
+      var n = xCount(t);
+      if (xCnt) {
+        xCnt.textContent = n + ' / 280';
+        xCnt.style.color = n > 280 ? '#e74c3c' : n > 240 ? '#e6a14e' : 'var(--sub)';
+      }
+    }
+
+    function refreshXTweet() {
+      var text = composeXText();
+      xTxt.value = text;
+      updateXCount_(text);
+    }
+
+    // 本文・作品URL変更時に再生成(短縮URL差し替えはリセット)
+    if (els.text) els.text.addEventListener('input', function () { _xOverrideShort = ''; refreshXTweet(); });
+    if (els.workUrl) els.workUrl.addEventListener('input', function () { _xOverrideShort = ''; refreshXTweet(); });
+    if (els.movieWorkUrl) els.movieWorkUrl.addEventListener('input', function () { _xOverrideShort = ''; refreshXTweet(); });
+    document.addEventListener('account-changed', function () { _xOverrideShort = ''; refreshXTweet(); });
+    refreshXTweet();
+
+    // 📎 短縮URLを挿入：link-worker 経由で作品URLを短縮し、生リンクを差し替える
+    if (xShortBtn) {
+      xShortBtn.addEventListener('click', function () {
+        var raw = resolveAffLink();
+        if (!raw) { if (xStatus) xStatus.textContent = '先に作品URLを入力してください。'; return; }
+        xShortBtn.disabled = true;
+        if (xStatus) xStatus.textContent = '短縮リンクを取得中…';
+        makeShortAndShare(raw).then(function (res) {
+          var shortLink = res.shareUrl || res.shortUrl || '';
+          if (!shortLink) { if (xStatus) xStatus.textContent = '⚠️ 短縮リンクの取得に失敗しました。生URLを使います。'; return; }
+          _xOverrideShort = shortLink;
+          var text = composeXText();
+          xTxt.value = text;
+          updateXCount_(text);
+          if (xStatus) xStatus.textContent = '✅ 短縮URLを挿入しました。';
+        }).catch(function () {
+          if (xStatus) xStatus.textContent = '⚠️ 短縮リンクの取得に失敗しました。';
+        }).then(function () { xShortBtn.disabled = false; });
+      });
+    }
+
+    // 📋 コピー
+    if (xCopy) {
+      xCopy.addEventListener('click', function () {
+        var text = xTxt.value;
+        if (!text.trim()) { if (xStatus) xStatus.textContent = '本文がありません。'; return; }
+        var n = xCount(text);
+        if (n > 280) { if (xStatus) xStatus.textContent = '⚠️ ' + n + '文字(280超)。短くしてから投稿してください。'; return; }
+        function done() { if (xStatus) xStatus.textContent = '✅ コピーしました。Xに貼り付けて投稿してください。'; }
+        try {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(done).catch(function () { xTxt.select(); document.execCommand('copy'); done(); });
+          } else { xTxt.select(); document.execCommand('copy'); done(); }
+        } catch (e) { if (xStatus) xStatus.textContent = '⚠️ コピーに失敗しました。手動で選択してください。'; }
+      });
+    }
+  })();
 })();
