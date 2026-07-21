@@ -328,6 +328,72 @@ def check_ci_health(state, dry_run):
     bot_send(CI_DEPT, msg, dry_run, by_dept=True)
 
 
+# --- ★チャイム線の死活 (2026-07-21 ORG-14: Chami「10分応答なし」「塞いだ→塞いでません」) ---
+#
+# 何が起きたか: ORG-12でsweepを止め「便が消えない」ようにしたが、**誰も起こしに来ない**穴が
+#   残っていた。総括本部4室は専任デーモンを持たないので、消費者は対話セッションだけ。
+#   そのセッションを起こす唯一の線が inbox_waiter(チャイム)で、これは**新着で1回鳴って終了する**
+#   使い捨て(終了がハーネスへの通知=起床の合図)。つまり毎ターン**再武装が必須**。
+#   研究室HQが再武装を忘れ、Chamiの便(msg 178)は pending・deliveries=0 のまま10分放置された。
+#
+# ★構造的な制約(正直に書く): チャイムを再武装できるのは**セッション自身のターン中だけ**。
+#   hookや常駐から起動しても、ハーネスが追跡しないプロセスの終了はセッションを起こせない。
+#   =この穴は「機構で完全自動化」できない。**だから最低限、落ちていることをChamiに見せる**。
+#   沈黙は良いが(ORG-02)、**理由の分からない沈黙は良くない**。
+SESSION_OWNED_DEPTS_WD = ("hq", "aegis-gl", "research-room", "keiei-kikaku")
+CHIME_STALE_SEC = 5 * 60          # 5分待たされたら知らせる(15分のwatchdogでは遅い)
+CHIME_COOLDOWN_SEC = 20 * 60      # 同じ部屋への再通知は20分に1回(鳴りっぱなし防止)
+
+
+def _waiter_armed(name):
+    """その部屋のチャイムが武装中か。lockのmtimeで見る(waiterが生存中だけ更新される)。"""
+    p = os.path.join(LOCAL, "llm", f"waiter_{name}.lock")
+    try:
+        return (time.time() - os.path.getmtime(p)) < 120
+    except OSError:
+        return False
+
+
+def _pending_age(dept):
+    """その deptで最も古い pending便の経過秒。無ければ0。読み取り専用・fail-open。"""
+    if not os.path.exists(QUEUE_DB_WD):
+        return 0
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
+        try:
+            row = con.execute(
+                "select min(enqueued_at) from queue where dept=? and status='pending'",
+                (dept,)).fetchone()
+        finally:
+            con.close()
+        return max(0, time.time() - row[0]) if row and row[0] else 0
+    except Exception:
+        return 0
+
+
+def check_chime_health(state, dry_run):
+    """便が待っているのにチャイムが落ちている部屋を、その部屋自身へ知らせる。
+
+    ★通知先を incident ではなく**その部屋**にするのが要点。Chamiが待っているのはそこで、
+      incidentへ出しても読まれない(ORG-09=読まれない警報を自分で作る、の再発になる)。
+    """
+    st = state.setdefault("chime_alert", {})
+    now_epoch = time.time()
+    for dept in SESSION_OWNED_DEPTS_WD:
+        age = _pending_age(dept)
+        if age < CHIME_STALE_SEC or _waiter_armed(dept):
+            continue
+        if now_epoch - st.get(dept, 0) < CHIME_COOLDOWN_SEC:
+            continue
+        st[dept] = now_epoch
+        bot_send(dept, (
+            f"⚠ **この部屋のチャイム線が落ちています**(約{int(age // 60)}分前の依頼が未受信)。\n"
+            "依頼は消えていません。queueに保持されていて、セッションが起きれば必ず読まれます。\n"
+            "★担当は対話セッション本人でデーモンが居ない部屋のため、"
+            "**Claude Codeのセッションを開かないと拾えません**。"), dry_run, by_dept=True)
+
+
 # --- ★O1 DLQ監視 (改善書P0-5: 5回配送失敗→dead に隔離された毒メッセージを誰も見ていない) ---
 QUEUE_DB_WD = os.path.join(LOCAL, "queue", "inbox.db")
 DEAD_ALERT_COOLDOWN_SEC = 60 * 60  # デッドレター通知は1時間に1回まで(暴走ガード)
@@ -544,6 +610,7 @@ def run_once(dry_run=False):
     check_orphan_pending(state, dry_run)  # ★INC-110: 消費者不在のdept宛が無警報で沈む穴を塞ぐ
     check_link_health(state, dry_run)    # ★2026-07-20: 収益導線(自前ドメイン/r2)の死活監視
     check_ci_health(state, dry_run)      # ★2026-07-21: CI失敗をDiscordへ(ORG-09=メールは読まれない)
+    check_chime_health(state, dry_run)   # ★2026-07-21: チャイム線が落ちた部屋を可視化(ORG-14)
     save_state(state)
     rows = read_inbox_rows()
     if rows is None:
