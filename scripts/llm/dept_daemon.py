@@ -1225,6 +1225,70 @@ class Daemon:
             return None, True  # 失敗=安全側(回送)へ
         return reply, escalate
 
+    def _escalate_to_head(self, rec, raw_line):
+        """回送を**部門長のキュー**へ入れる。入れられたら True。
+
+        ★3階梯(RULES §6.4)を上り方向でも守るための経路(ORG-36)。
+          従来は全部門が MAIN_INBOX(HQ)へ直行し、②の部門長を飛ばしていた。
+          部門長が把握しないまま案件がHQへ上がると、**部門長が自分のカテゴリを掌握できない**。
+
+        ★fail-open: 部門長が引けない/投函に失敗したら False を返し、
+          呼び出し側が**従来どおりHQのmain箱へ回す**。**回送そのものは絶対に落とさない**
+          (沈黙が最悪の事故=今日一貫した方針)。
+        """
+        head = self._head_dept()
+        if not head:
+            return False
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+            from leasequeue import LeaseQueue
+            ch = ""
+            for c in json.load(open(os.path.join(LOCAL, "discord_channels.json"),
+                                    encoding="utf-8")):
+                if c.get("dept") == head:
+                    ch = c.get("name", "")
+                    break
+            mid = f"ESC-{self.dept}-{rec.get('msg_id', '')}"
+            body = dict(rec, dept=head, channel=ch, msg_id=mid, via="escalate",
+                        note=f"{self.dept} から部門長へ上申(元の部屋= {rec.get('channel', '')})。"
+                             "扱えるならそちらで処理し、手に余る時だけ研究室HQへ上げてください。")
+            q = LeaseQueue(os.path.join(LOCAL, "queue", "inbox.db"))
+            q.enqueue(json.dumps(body, ensure_ascii=False), msg_id=mid, dept=head)
+            q.close()
+            log(self.dept, f"部門長 {head} へ上申 msg={mid}")
+            return True
+        except Exception as e:
+            log(self.dept, f"部門長への上申に失敗({type(e).__name__})→HQへ回す")
+            return False
+
+    def _head_dept(self):
+        """自部門の部門長。起動時に1回だけDiscordのカテゴリを引いてキャッシュする。"""
+        if hasattr(self, "_head_cache"):
+            return self._head_cache
+        head = None
+        try:
+            if self.dept not in ("hq", "research-room", "aegis-gl", "keiei-kikaku"):
+                import urllib.request
+                tok = open(os.path.join(LOCAL, "discord_bot_token.txt"),
+                           encoding="utf-8").read().strip()
+                cid = ""
+                for c in json.load(open(os.path.join(LOCAL, "discord_channels.json"),
+                                        encoding="utf-8")):
+                    if c.get("dept") == self.dept:
+                        cid = c["id"]
+                        break
+                if cid:
+                    req = urllib.request.Request(
+                        f"https://discord.com/api/v10/channels/{cid}",
+                        headers={"Authorization": f"Bot {tok}", "User-Agent": "go5/1.0"})
+                    parent = str(json.load(urllib.request.urlopen(req, timeout=15)).get("parent_id"))
+                    head = {"1525644847346880713": "research-room",   # 事業層 ADAFI事業部
+                            "1528674269285060731": "aegis-gl"}.get(parent)  # 組織層 イージス
+        except Exception:
+            head = None          # 引けない=止めない(fail-open)
+        self._head_cache = head
+        return head
+
     # --- 1件処理 ---
     def handle(self, rec, raw_line):
         ch = rec.get("channel", "")
@@ -1290,8 +1354,15 @@ class Daemon:
             # forward_all部門(hq)は判定せず全便回送=キーワード網の取りこぼしを構造で塞ぐ
             # (2026-07-20: 「設計して手足として動かして」がWORK_WORDS不一致で沈黙した実測への恒久対処)
             if is_work or self.conf.get("forward_all"):
-                with open(MAIN_INBOX, "a", encoding="utf-8") as f:
-                    f.write(raw_line.rstrip("\n") + "\n")
+                # ★回送先は**まず部門長**(2026-07-21 ORG-36・Chami指摘)。
+                #   Chami原文=「逆(システム改修部門などの各部門)も然りで**まずAD研究室に
+                #   報告を回すべき**。その方が**情報の齟齬が生じない**と考える」
+                #   ★従来は全部門が MAIN_INBOX(HQ)へ直行しており、**②の部門長を飛ばしていた**
+                #     =ORG-34(上から下)の裏返し。上りも下りも部門長を通っていなかった。
+                #   部門長が居ない(部門長自身・最上位)場合だけ従来どおりHQのmain箱へ。
+                if not self._escalate_to_head(rec, raw_line):
+                    with open(MAIN_INBOX, "a", encoding="utf-8") as f:
+                        f.write(raw_line.rstrip("\n") + "\n")
             # ★総括本部4室は「自分の箱」にも写す(2026-07-24 ORG-24)。
             #   実害= Chamiの承認「デプロイしていい」をhqデーモンが処理し、回送先(main箱)へは
             #   入っていたのに、**セッションのwaiterが見る箱と回送先が別物**だったため届かなかった。
