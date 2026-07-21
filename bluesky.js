@@ -2193,18 +2193,16 @@
     }
 
     // Xツイート用本文を組み立てる
-    //   Bluesky向け自動追加ブロック(セール行等)を除いた構成：キャプション + PR行 + 作品リンク
+    //   ★本文はBlueskyと共通(Chami指定2026-07-21「投稿する内容はブルースカイもXも同じ」)。
+    //   新しい文言生成はせず、既存の composePostText()(セール行含む・投稿ボタン③つで実績のある
+    //   組み立て)をそのまま使う。「📎 短縮URLを挿入」で作品リンクだけ手動プレビュー差し替え可能。
     function composeXText() {
-      var base = stripAutoBlocks_(els.text ? els.text.value : '');
+      var base = composePostText();
       var rawLink = resolveAffLink();
-      var link = _xOverrideShort || rawLink;
-      if (!link) return base;
-      // 短縮URLオーバーライド時：本文内の生リンクを差し替え、なければ末尾に付加
+      // 短縮URLオーバーライド時：本文内の生リンクを差し替え(手動プレビュー用。実際のコピー時は
+      // measureWorkLink_ が同じ計測付き短縮へ差し替えるため、押し忘れても生リンクのままにはならない)
       if (_xOverrideShort && rawLink && base.indexOf(rawLink) >= 0) {
         return base.replace(rawLink, _xOverrideShort);
-      }
-      if (base.indexOf(link) < 0) {
-        return base + '\n\n' + PR_LINE_() + '\n' + link;
       }
       return base;
     }
@@ -2260,18 +2258,27 @@
     }
 
     // 📋 コピー
+    //   ★コピー直前に measureWorkLink_(Blueskyの今すぐ投稿/予約と同じ関数)を通し、作品リンクを
+    //   計測付き短縮URLへ差し替えてからコピーする。「📎 短縮URLを挿入」を押し忘れても、
+    //   コピーした時点で完成形になっている(AD-GL決定③・Chami指定2026-07-21)。
     if (xCopy) {
       xCopy.addEventListener('click', function () {
         var text = xTxt.value;
         if (!text.trim()) { if (xStatus) xStatus.textContent = '本文がありません。'; return; }
-        var n = xCount(text);
-        if (n > 280) { if (xStatus) xStatus.textContent = '⚠️ Xの換算で' + n + '(上限280)。日本語は1字=2で効きます。短くしてから投稿してください。'; return; }
-        function done() { if (xStatus) xStatus.textContent = '✅ コピーしました。Xに貼り付けて投稿してください。'; }
-        try {
-          if (navigator.clipboard) {
-            navigator.clipboard.writeText(text).then(done).catch(function () { xTxt.select(); document.execCommand('copy'); done(); });
-          } else { xTxt.select(); document.execCommand('copy'); done(); }
-        } catch (e) { if (xStatus) xStatus.textContent = '⚠️ コピーに失敗しました。手動で選択してください。'; }
+        xCopy.disabled = true;
+        if (xStatus) xStatus.textContent = '計測用の短縮URLへ変換中…';
+        measureWorkLink_(text).then(function (mw) {
+          var finalText = mw.text;
+          xTxt.value = finalText; updateXCount_(finalText); // 表示＝実際にコピーする文と一致させる
+          var n = xCount(finalText);
+          if (n > 280) { if (xStatus) xStatus.textContent = '⚠️ Xの換算で' + n + '(上限280)。日本語は1字=2で効きます。短くしてから投稿してください。'; return; }
+          function done() { if (xStatus) xStatus.textContent = '✅ コピーしました。Xに貼り付けて投稿してください。'; }
+          try {
+            if (navigator.clipboard) {
+              navigator.clipboard.writeText(finalText).then(done).catch(function () { xTxt.select(); document.execCommand('copy'); done(); });
+            } else { xTxt.select(); document.execCommand('copy'); done(); }
+          } catch (e) { if (xStatus) xStatus.textContent = '⚠️ コピーに失敗しました。手動で選択してください。'; }
+        }).then(function () { xCopy.disabled = false; });
       });
     }
   })();

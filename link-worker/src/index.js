@@ -25,7 +25,12 @@
  *   rl:<日付> → 日次の発行カウンタ（レート制限・2日で自動失効）
  */
 
+import { isBotUA } from "./bot-ua.mjs";
+
 const BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+// ---- 既知クローラ UA 判定は bot-ua.mjs の純粋関数 isBotUA() に集約（テスト可能にするため）----
+// X(Twitter)投稿時の Twitterbot カード生成クロール等。数えないがリダイレクトは返す。
 const CODE_MIN = 5;   // 既定のコード長（62^5 ≈ 9.2億通り。個人運用には十分・URLを短く）
 const CODE_MAX = 12;  // 万一の衝突時はここまで伸ばして再試行
 
@@ -169,10 +174,13 @@ async function handleRedirect(code, env, ctx, request) {
   const cookie = request.headers.get("Cookie") || "";
   const optedOut = /(?:^|;\s*)go5nc=1(?:;|$)/.test(cookie);
   const markSelf = reqUrl.searchParams.get("nc") === "1";
+  // 既知クローラは数えない（X投稿時の Twitterbot カード生成クロール等）。リダイレクト自体は返す。
+  const ua = request.headers.get("User-Agent") || "";
+  const isBot = isBotUA(ua);
   const headers = { Location: urlStr, "Cache-Control": "no-store" };
   if (markSelf) headers["Set-Cookie"] = "go5nc=1; Max-Age=63072000; Path=/; Secure; SameSite=Lax";
-  if (!optedOut && !markSelf) {
-    // クリックを概算カウント（リダイレクトはブロックしない）。自分(除外対象)なら数えない。
+  if (!optedOut && !markSelf && !isBot) {
+    // クリックを概算カウント（リダイレクトはブロックしない）。自分(除外対象)/ボットなら数えない。
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(bumpClick(env, code));
   }
   // 302（恒久キャッシュでカウントが漏れないよう一時リダイレクト）
@@ -214,6 +222,9 @@ function hostAllowed(urlStr, env) {
 }
 
 async function bumpClick(env, code) {
+  // ★KV の get→put はアトミックでない（同時アクセスで +1 が失われる）。
+  //   これは既知の設計上の制約で「概算」として許容している。
+  //   正確なカウントが必要になった場合は Durable Objects への移行が最小コスト案。
   try {
     const k = "c:" + code;
     const cur = parseInt((await env.LINKS.get(k)) || "0", 10);
