@@ -238,10 +238,14 @@ def cycle_queue(token):
                 if mid in done:
                     q.ack(c["id"], result="skip(jsonl経路で処理済)")
                     continue
-                if rec.get("dept") in SENSITIVE_DEPTS:
-                    held.append(c["id"])  # 機微は内容に触れない(reroute流入時)。リース保持で素通り
+                if rec.get("dept") in SENSITIVE_DEPTS or room_is_session_owned(rec.get("dept")):
+                    # 機微=PROTOCOL管轄で内容に触れない / 総括本部4室=本人セッションが処理する部屋。
+                    # ★どちらもここでack(done化)してはいけない。done化すると次にセッションが開いても
+                    #   waiterに出てこない=依頼が消える(ORG-12=Chamiの10時間放置の真因)。
+                    #   held→末尾でnack=pendingへ戻し、セッションの起床を待つ。偽ackより沈黙。
+                    held.append(c["id"])
                     continue
-                if room_has_own_responder(rec.get("dept")) or room_is_session_owned(rec.get("dept")):
+                if room_has_own_responder(rec.get("dept")):
                     # 部屋の専任デーモンが既に応答済み=一次ackは二重応答にしかならない。
                     # ★followupは下で必ず投函する(=本対応は落とさない。消すのは「重複した声」だけ)。
                     q.ack(c["id"], result="一次ack省略(部屋の専任デーモンが応答済み)")
@@ -292,9 +296,9 @@ def cycle(token):
         mid = str(rec.get("msg_id", ""))
         if mid in done:
             continue  # 二重処理しない(main箱からは落とす)
-        if rec.get("dept") in SENSITIVE_DEPTS:
-            remaining.append(line)  # 機微は内容に触れず残す(本人/研究室が応対・watchdogが無人signal)
-            continue
+        if rec.get("dept") in SENSITIVE_DEPTS or room_is_session_owned(rec.get("dept")):
+            remaining.append(line)  # 機微 / 総括本部4室は本人セッションが応対。箱に残して待たせる。
+            continue                # ★processedへ送らない=次のセッションが箱で必ず見る(ORG-12)
         if sent >= MAX_PER_CYCLE:
             remaining.append(line)  # 上限。次巡回へ
             continue
@@ -302,7 +306,7 @@ def cycle(token):
         if lab_alive():
             remaining.append(line)
             continue
-        if room_has_own_responder(rec.get("dept")) or room_is_session_owned(rec.get("dept")):
+        if room_has_own_responder(rec.get("dept")):
             # 部屋の専任デーモンが既に応答済み=一次ackは二重応答にしかならない(下でfollowupは残す)。
             print(f"{time.strftime('%H:%M:%S')} 一次ack省略: {rec.get('dept')} は専任デーモン稼働中")
         else:
