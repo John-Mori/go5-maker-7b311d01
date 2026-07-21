@@ -165,22 +165,29 @@
   // GASのhistoryをマージ用に取得。未設定/失敗時は前回キャッシュ(無ければ空)を返すだけ＝ローカル表示は無傷。
   function fetchSheetExtra_(cb) {
     var a = acct(), now = Date.now(), c = _sheetExtraCache[a];
-    if (c && (now - c.at) < SHEET_EXTRA_TTL_MS) { if (cb) cb(c.items); return; }
+    // at < 0 = 失敗マーク(常にTTL切れ扱い→リトライ。ただしcが存在するためrender()は「読み込み中...」を解除する)
+    if (c && c.at >= 0 && (now - c.at) < SHEET_EXTRA_TTL_MS) { if (cb) cb(c.items); return; }
     var gasUrl = gasUrl_();
-    if (!gasUrl) { if (cb) cb((c && c.items) || []); return; } // 未設定＝マージ対象なし・従来通りローカルのみ
+    if (!gasUrl) {
+      if (!c) _sheetExtraCache[a] = { at: 0, items: [] }; // GAS未設定=マージ対象なし・キャッシュを「取得済み扱い」にして「読み込み中...」を出さない
+      if (cb) cb((c && c.items) || []); return;
+    }
     jsonp_(gasUrl, { action: 'history', channel: a, limit: 300 }, function (res) {
-      if (!res || !res.ok || !Array.isArray(res.items)) { if (cb) cb((c && c.items) || []); return; } // 失敗時は前回キャッシュ
+      if (!res || !res.ok || !Array.isArray(res.items)) {
+        // 失敗: at=-1でマーク→render()は「読み込み中...」を解除して「まだ記録がありません」を出す。次回リトライ可(TTL常に切れ)。
+        if (!_sheetExtraCache[a]) _sheetExtraCache[a] = { at: -1, items: [] };
+        if (cb) cb((_sheetExtraCache[a] && _sheetExtraCache[a].items) || []); return;
+      }
       var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(allItems(), res.items) : [];
       _sheetExtraCache[a] = { at: now, items: extra };
       if (cb) cb(extra);
     });
   }
-  // refresh()から毎回呼ぶ(TTLキャッシュ内は通信ゼロ)。マージが増えたら再描画し、増えた行だけ
-  // 再生数・クリック数を後追い取得(読み取りのみ・GAS/Workerへは書かない)。
+  // refresh()から毎回呼ぶ(TTLキャッシュ内は通信ゼロ)。GASレスポンス後は必ずrender()=「読み込み中...」を確実に解除する。
   function mergeSheetExtras_() {
     fetchSheetExtra_(function (extra) {
-      if (!extra || !extra.length) return; // 空/失敗時は何もしない＝直前のローカル表示のまま
-      render();
+      render(); // GAS応答後に必ず再描画(「読み込み中...」→実データ or「まだ記録がありません」へ更新)
+      if (!extra || !extra.length) return; // 追加行が無ければここで終了
       try { fetchData_(extra, {}, false).then(function () { render(); }); } catch (e) {}
     });
   }
@@ -872,7 +879,13 @@
     var rawItems = displayItems_(); // ローカル＋シート由来の表示専用マージ(書き込み系はallItems()のまま不変)
     var ymap = loadYtMap();
     if (!rawItems.length) {
-      list.innerHTML = '<p class="hint">まだ投稿の記録がありません。(投稿して短縮URLが出ると、ここに集まります)「➕ 手動で追加」からYouTube動画を直接登録もできます。表示中アカウント：' + esc(acct()) + '</p>';
+      // GAS設定済みかつキャッシュ未初期化(=シート取得がまだ終わっていない)→「読み込み中...」を表示。
+      // GAS未設定 / 取得失敗(at=-1) / 取得完了(at>=0) のいずれかでは通常の「まだ記録がありません」を表示。
+      var _noCache = !_sheetExtraCache[acct()];
+      var _emptyMsg = (_noCache && gasUrl_())
+        ? '記録シートから読み込み中...'
+        : 'まだ投稿の記録がありません。(投稿して短縮URLが出ると、ここに集まります)「➕ 手動で追加」からYouTube動画を直接登録もできます。表示中アカウント：' + esc(acct());
+      list.innerHTML = '<p class="hint">' + _emptyMsg + '</p>';
       return;
     }
     var items = sortItems(rawItems, ymap);
