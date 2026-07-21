@@ -30,7 +30,7 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 #   指令室の職務は捌く・裁くことで、権能と全体文脈が要る=セッションの仕事。
 #   留守なら沈黙してよい(absence_watchdogが15分で検知する)。偽の返事より沈黙が良い。
 #   DEPT_CONFの定義は残す(手動起動や将来の再開に備える)。ここから外すだけ。
-DEPTS = ["hq", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel"]
+DEPTS = ["hq", "research-room", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット
