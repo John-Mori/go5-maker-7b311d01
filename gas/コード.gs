@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-22A(書き込み経路の反転D2-b=wizard_confirm op追加+doPost入口バリデーション。bluesky.js:1154/1160の即時recordToSheet削除・ウィザード完了ボタンで全情報を1回送信)';
+var GAS_VERSION = '2026-07-22B(sheet_audit+backup_sheetsアクション追加=行分類・件数出し・ヘッダー差分・バックアップをGET経由で実行可能に)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -131,6 +131,17 @@ function doGet(e) {
   // 診断: <exec URL>?action=diagnose でスプレッドシート名・全タブ名・各記録タブの中身を返す。(読み取りのみ)
   if (p.action === 'diagnose') {
     return jsonOut_(diagnose_());
+  }
+  // 行分類と件数: <exec URL>?action=sheet_audit で各記録シートの行を分類して返す。(読み取りのみ)
+  //   complete=postUri+YT両方あり / no_yt=postUriのみ / no_uri=YTのみ / minimal=どちらも無 / empty=post_id空
+  //   ヘッダー一覧とCANONICALとの差分(missing/extra)も同時に返す。
+  if (p.action === 'sheet_audit') {
+    try { return jsonOut_(sheetAudit_()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // バックアップ: <exec URL>?action=backup_sheets で両記録シートを同スプレッドシート内にコピーする。(読み取りのみ)
+  //   コピー先タブ名: <シート名>_bk_<YYYYMMdd_HHmm>。削除・上書きはしない。
+  if (p.action === 'backup_sheets') {
+    try { return jsonOut_(backupSheets_()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 診断: 視聴履歴(スナップショット)の末尾N行を返す。(読み取りのみ)
   //   YT_API_KEY が効いて views が記録できているか等、サーバー自動記録の生存確認用。
@@ -428,6 +439,70 @@ function diagnose_() {
     channels[name] = info;
   });
   return { ok: true, version: GAS_VERSION, spreadsheet: ss.getName(), allTabs: allTabs, channels: channels };
+}
+
+// 行分類と件数。(読み取りのみ・削除しない)
+// 各チャンネルシートの全行を post_id / post_uri / YouTube動画URL の3列で分類する。
+// CANONICAL_HEADERS との差分(実シートに無い列 / 正本に無い余剰列)も同時に返す。
+function sheetAudit_() {
+  var ss = openSS_();
+  var audit = {};
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { audit[name] = { exists: false }; return; }
+    var map = headerMap_(sh);
+    var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String).filter(function (h) { return h !== ''; });
+    var last = sh.getLastRow();
+    var counts = { complete: 0, no_yt: 0, no_uri: 0, minimal: 0, empty: 0 };
+    var uriSeen = {};  // postUri -> [行番号]
+    if (last >= 2) {
+      var pidCol = map['post_id'], uriCol = map['post_uri'], ytCol = map['YouTube動画URL'];
+      var rows = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+      rows.forEach(function (row, i) {
+        var pid = pidCol ? String(row[pidCol - 1] || '') : '';
+        var uri = uriCol ? String(row[uriCol - 1] || '') : '';
+        var yt  = ytCol  ? String(row[ytCol  - 1] || '') : '';
+        if (!pid) { counts.empty++; return; }
+        if (uri && yt) counts.complete++;
+        else if (uri && !yt) counts.no_yt++;
+        else if (!uri && yt) counts.no_uri++;
+        else counts.minimal++;
+        if (uri) { if (!uriSeen[uri]) uriSeen[uri] = []; uriSeen[uri].push(i + 2); }
+      });
+    }
+    var dups = [];
+    Object.keys(uriSeen).forEach(function (uri) { if (uriSeen[uri].length > 1) dups.push({ postUri: uri, rows: uriSeen[uri] }); });
+    // CANONICALとの差分
+    var missingFromCanonical = CANONICAL_HEADERS.filter(function (h) { return !map[h]; });
+    var extraColumns = headers.filter(function (h) { return CANONICAL_HEADERS.indexOf(h) < 0; });
+    audit[name] = {
+      exists: true, totalDataRows: Math.max(0, last - 1),
+      counts: counts, duplicateUris: dups.length, dupDetail: dups.slice(0, 10),
+      headers: headers, headerCount: headers.length,
+      missingFromCanonical: missingFromCanonical, extraColumns: extraColumns
+    };
+  });
+  return { ok: true, audit: audit, canonicalTotal: CANONICAL_HEADERS.length };
+}
+
+// 両記録シートをバックアップ。(コピーのみ・元シートを削除・変更しない)
+// コピー先タブ名: <シート名>_bk_<YYYYMMdd_HHmm>。同スプレッドシート内に作成。冪等ではない(毎回新タブ)。
+function backupSheets_() {
+  var ss = openSS_();
+  var ts = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmm');
+  var result = [];
+  CH_SHEETS.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { result.push({ sheet: name, status: 'not_found' }); return; }
+    var backupName = name + '_bk_' + ts;
+    try {
+      sh.copyTo(ss).setName(backupName);
+      result.push({ sheet: name, backup: backupName, rows: Math.max(0, sh.getLastRow() - 1), status: 'ok' });
+    } catch (err) {
+      result.push({ sheet: name, status: 'error', error: String(err) });
+    }
+  });
+  return { ok: true, result: result, timestamp: ts };
 }
 
 function doPost(e) {
