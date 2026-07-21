@@ -17,6 +17,7 @@
     postUrl: '',
     postUri: '',
     shortUrl: '',
+    shareUrl: '',
     ytUrl: '',
     ytId: '',
     fanzaInfo: null
@@ -281,6 +282,20 @@
 
     body.innerHTML = '';
 
+    /* 未確定 draft バナー */
+    try {
+      if (window.BlueskyPostHistory) {
+        var acc0 = W.account || (typeof getCurrentAccount === 'function' ? getCurrentAccount() : '') || 'acc1';
+        var hist0 = window.BlueskyPostHistory.loadFor(acc0) || [];
+        var unconf = hist0.filter(function (it) { return it.confirmed !== true; });
+        if (unconf.length > 0) {
+          var banner = el('div', { style: 'background:#3a2a00;border:1px solid #f5a623;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:.85rem;color:#f5c869;' },
+            '⚠️ 前回の投稿が完了していません — YouTube URL を入力して「記録して次へ」を押すと記録が完了します');
+          body.appendChild(banner);
+        }
+      }
+    } catch (e) {}
+
     /* アカウント表示 */
     var acctLabel = el('div', { style: 'margin-bottom:10px;' });
     acctLabel.appendChild(el('span', { style: 'color:#aaa;font-size:.85rem;' }, 'アカウント: '));
@@ -505,13 +520,26 @@
       } catch (e) {}
       recordBtn.disabled = true;
       recordBtn.textContent = '記録中…';
+      var recordStatus = document.getElementById('wizRecordStatus');
+      if (recordStatus) { recordStatus.textContent = ''; }
       fetchFanzaForRecord(function () {
-        recordToGas();
-        _currentStep = 5;
-        renderStep(5);
+        recordToGas(function (ok) {
+          if (!ok) {
+            recordBtn.disabled = false;
+            recordBtn.textContent = '記録して次へ ▶';
+            var st = document.getElementById('wizRecordStatus');
+            if (st) { st.textContent = '⚠️ シートへの記録に失敗しました。再度押してください。'; st.style.color = '#f88'; }
+            return;
+          }
+          markHistConfirmed_(W.postUri, W.shortUrl);
+          _currentStep = 5;
+          renderStep(5);
+        });
       });
     });
     body.appendChild(recordBtn);
+    var recordStatus = el('div', { id: 'wizRecordStatus', style: 'font-size:.85rem;min-height:1.4em;margin-top:4px;' });
+    body.appendChild(recordStatus);
 
     /* スキップリンク */
     var skipLink = el('a', { href: '#', style: 'display:block;text-align:center;margin-top:8px;font-size:.85rem;color:#888;' }, 'YouTubeはあとで(スキップ)');
@@ -589,18 +617,40 @@
   /* =========================================================
    * GAS 記録(ステップ4)
    * ========================================================= */
-  function recordToGas() {
+  function recordToGas(cb) {
     var gasUrl = '';
     try { gasUrl = localStorage.getItem('bsky_gas_url') || ''; } catch (e) { /* ignore */ }
-    if (!gasUrl) return;
+    if (!gasUrl) { if (cb) cb(true); return; }
+    // shortUrl/shareUrl を履歴から補完(histAdd で保存済みの値を使う)
+    var histShort = W.shortUrl || '', histShare = W.shareUrl || '';
+    try {
+      if (window.BlueskyPostHistory) {
+        var acc = W.account || 'acc1';
+        var entries = window.BlueskyPostHistory.loadFor(acc) || [];
+        for (var i = 0; i < entries.length; i++) {
+          var it = entries[i];
+          if (W.postUri ? it.postUri === W.postUri : it.shortUrl === W.shortUrl) {
+            histShort = it.shortUrl || histShort;
+            histShare = it.shareUrl || histShare;
+            break;
+          }
+        }
+      }
+    } catch (e) {}
     try {
       var payload = {
-        op: 'upsert',
+        op: 'wizard_confirm',
         testMode: /^test-/.test(W.videoId || ''),
         videoId: W.videoId,
         channel: W.account,
         youtube_url: W.ytUrl,
-        youtube_id: W.ytId
+        youtube_id: W.ytId,
+        postUrl: W.postUrl,
+        postUri: W.postUri,
+        shortUrl: histShort,
+        shareUrl: histShare,
+        workUrl: W.workUrl,
+        title: W.title
       };
       if (W.fanzaInfo) {
         payload.fanza_list_price = W.fanzaInfo.listPrice;
@@ -613,8 +663,27 @@
       fetch(gasUrl, {
         method: 'POST',
         body: JSON.stringify(payload)
-      }).catch(function () { /* 失敗は無視 */ });
-    } catch (e) { /* ignore */ }
+      }).then(function (res) {
+        if (!res.ok) { if (cb) cb(false); return; }
+        res.json().then(function (d) { if (cb) cb(!!(d && d.ok)); }).catch(function () { if (cb) cb(false); });
+      }).catch(function () { if (cb) cb(false); });
+    } catch (e) { if (cb) cb(false); }
+  }
+
+  function markHistConfirmed_(postUri, shortUrl) {
+    try {
+      if (!window.BlueskyPostHistory) return;
+      var acc = W.account || 'acc1';
+      var arr = window.BlueskyPostHistory.loadFor(acc) || [];
+      var changed = false;
+      arr.forEach(function (it) {
+        if (postUri ? it.postUri === postUri : it.shortUrl === shortUrl) {
+          it.confirmed = true;
+          changed = true;
+        }
+      });
+      if (changed) window.BlueskyPostHistory.saveFor(acc, arr);
+    } catch (e) {}
   }
 
   // FANZA 商品情報を取得して W.fanzaInfo に格納してから done() を呼ぶ。

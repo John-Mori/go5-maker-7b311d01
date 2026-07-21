@@ -75,7 +75,7 @@ function categoryOf_(f) {
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-21A(診断action=reservations_statusを追加=無人予約の待機状況とrunReservationsトリガーの生死を読み取り専用で確認。Bluesky凍結多発を受けた安全確認用・投稿処理は無変更)';
+var GAS_VERSION = '2026-07-22A(書き込み経路の反転D2-b=wizard_confirm op追加+doPost入口バリデーション。bluesky.js:1154/1160の即時recordToSheet削除・ウィザード完了ボタンで全情報を1回送信)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -449,6 +449,8 @@ function doPost(e) {
     if (body.op === 'settings_push') return settingsPush_(body.blob || '', body.updatedAt || '', body.device || '');
     // テストモード：シートには一切書かない。(Bluesky実投稿はフロント側で実施)
     if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
+    // ウィザード経路はyoutube_url必須。他経路(無人予約/リビルド/矯正等)は素通り。(★writeRecord_中に置くな=裁定C)
+    if (body.op === 'wizard_confirm' && !body.youtube_url) return jsonOut_({ ok: false, error: 'youtube_url_required' });
     var r = writeRecord_(body.channel || 'acc1', {
       videoId: body.videoId || '',   // 背骨ID。あれば post_id に採用＋同ID行へ upsert(重複行を作らない)
       postedAt: body.postedAt || '', // 過去データ矯正時に当時の投稿日時を保持(無ければGASがnow)
@@ -456,6 +458,7 @@ function doPost(e) {
       workUrl: body.workUrl || '', hashtags: body.hashtags || '', postUri: body.postUri || '',
       rebuildOf: body.rebuildOf || '',     // リビルド元の投稿videoId(送っているのに未記録だった取りこぼしを回収・D-1)
       goal: body.goal || '', cmtType: body.cmtType || '', // 狙い(成約/集客)・コメント型(①〜⑧)＝勝ちパターン集計用
+      shortUrl: body.shortUrl || '',       // r2計測用短縮URL(短縮URL列)
       shareUrl: body.shareUrl || '',       // da.gd共有URL(共有URL列)
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから(同IDの行へ後追いupsert)
       workShortUrl: body.work_short_url || '', // 導線2(作品クリック)の計測URL

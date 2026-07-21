@@ -1150,14 +1150,7 @@
       }
       var uiSame = (account === acctId());
       var vid = (meta && meta.videoId) || (uiSame ? currentVideoId : '') || '';
-      // まず即時記録。(短縮URLが遅い/失敗しても投稿は確実に残す)videoIdがあれば後追いで同一行へ追記。
-      recordToSheet({ account: account, meta: meta, title: d.title || '', postUrl: d.post_url, affiliate: d.affiliate, hashtags: d.hashtags, postUri: d.post_uri, videoId: vid });
-      shortenAndShow(d.post_url, d.post_uri, d.title, function (res) {
-        // 短縮URL確定 → videoId があれば同一行へ upsert。(shortUrl=r2計測用 / shareUrl=da.gd表示用)
-        // ★計測キー(短縮URL列)へはr2成功時のみ書く。r2失敗時のda.gd/生URLを混ぜない。(「–」化防止・2026-07-12)
-        //   shortUrl空はGAS側putIfが既存値を保護するので上書き事故も起きない。
-        var short = res && (res.shortUrl || res.shareUrl);
-        if (vid && short) recordToSheet({ account: account, meta: meta, postUrl: d.post_url, postUri: d.post_uri, videoId: vid, shortUrl: res.shortUrl || '', shareUrl: res.shareUrl || '', noShorten: !res.shortUrl });
+      shortenAndShow(d.post_url, d.post_uri, d.title, function () {
       }, account, meta, (d.work_short_url ? { shortUrl: d.work_short_url, shareUrl: d.work_share_url || d.work_short_url } : null));
     });
   });
@@ -1526,6 +1519,7 @@
   function histKey() { return histKeyFor_(acctId()); }
   function histLoad() { return histLoadFor_(acctId()); }
   function histSaveArr(a) { histSaveFor_(acctId(), a); }
+  try { window.BlueskyPostHistory = { loadFor: histLoadFor_, saveFor: histSaveFor_, load: histLoad, saveArr: histSaveArr }; } catch (e) {}
   // rec.account＝所属アカウント。(未指定は現在UI)rec.meta＝凍結済み投稿メタ。(あれば優先)
   function histAdd(rec) {
     if (!rec || !rec.shortUrl) return; // 短縮URLが取れた投稿だけ記録
@@ -1535,7 +1529,7 @@
     // 作品URL：metaがあればそれ、無ければ(現在UIと同じ時だけ)UIから採取。
     var workUrl = meta ? meta.workUrl : (uiSame ? captureWorkUrl_() : '');
     var a = histLoadFor_(account).filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
-    var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '' };
+    var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '', confirmed: false };
     if (rec.rebuildBaseClicks != null) entry.rebuildBaseClicks = rec.rebuildBaseClicks; // リビルド前の動画までのクリック数(投稿履歴の括弧表示用)
     if (rec.workShortUrl) { entry.workShortUrl = rec.workShortUrl; entry.workShareUrl = rec.workShareUrl || ''; } // 導線2(投稿→FANZA)の計測リンク
     if (workUrl) {
