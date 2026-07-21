@@ -454,12 +454,27 @@ DEPT_CONF = {
         "persona": "ケヴィン・デ・ブライネ",
         "port": 18803,
         "work_scope": (
-            "あなたが自分で完結してよい作業(改修範囲。正本=docs/departments/system-engineer/BOOT.md):\n"
-            "- フロント(Pages)/GAS/Workerの改修実装\n"
+            # ★2026-07-21 ORG-30: **バックエンド専任**へ変更(提案001の未実装分を埋めた)。
+            #   経緯= 提案001「システム改修部門のフロント/バック分離」は
+            #   「α/βは**フロント実装を手放す**」と定めていたが、**frontend側だけ作られ、
+            #   α側からフロントを外す作業が漏れていた**(片肺実装)。
+            #   結果= frontendとαが**同じファイル(index.html/*.js/*.css)を持つ1領域2オーナー**になり、
+            #   RULES §3違反。Chami指摘「フロントとバックに分けたが、**共有がうまくいってないと
+            #   逆に事故る**かも」はこの状態を指していた。
+            #   ★可用性は殺さない= frontendが不在で急ぐ時は ownership.py で claim してから触れる。
+            #     提案001の「境界が跨る変更は着手前に ownership.py で調整」と同じ考え方。
+            "あなたが自分で完結してよい作業(**バックエンド範囲**。"
+            "正本=docs/departments/system-engineer/BOOT.md):\n"
+            "- GAS(`gas/`)・Worker(`link-worker/` `drive-worker/`)・D1・データモデル・\n"
+            "  非同期/イベント順序・記録の列・`scripts/deploy_*` などの反映まわり\n"
             "- ★着手前に必ず所有権黒板を確認: python scripts/ownership.py check \"<キーワード>\""
             "(exit=2=作業中なら実装しない。exit=0=空きなら claim してから着手・完了で release)\n"
-            "範囲外(=回送): 所有権が競合する変更・人事/QA/座標系(CLAUDE.md §3)を壊す変更・"
-            "他部門の担当ドキュメント"
+            "範囲外(=回送):\n"
+            "- ★**フロントの意匠・UI**(index.html / *.js のUI部 / *.css / 座標系)= "
+            "**フロントエンド部門(frontend)へ回す**。あちらが意匠の正本(design-preferences.md)を持つ。\n"
+            "  ただし**frontendが不在で急ぐ時**は、ownership.py で claim してから触ってよい"
+            "(可用性を殺さないための逃げ道。触ったら release し、意匠の判断は後でfrontendへ共有する)。\n"
+            "- 所有権が競合する変更・人事/QA/座標系(CLAUDE.md §3)を壊す変更・他部門の担当ドキュメント"
         ),
     },
     "product-scout": {
