@@ -2183,7 +2183,19 @@
     var xCopy = document.getElementById('xTweetCopyBtn');
     var xShortBtn = document.getElementById('xTweetUseShort');
     var xStatus = document.getElementById('xTweetStatus');
+    var xAcctHint = document.getElementById('xAcctHint');
     if (!xTxt) return;
+
+    // X アカウントヒント(固定値は core/account.js Go5Acct に集約済み・そちらを参照)
+    function updateXAcctHint_() {
+      if (!xAcctHint) return;
+      if (!window.Go5Acct) return;
+      var name   = window.Go5Acct.xNameOf();
+      var handle = window.Go5Acct.xHandleOf();
+      xAcctHint.textContent = (name && handle) ? '📮 投稿先: ' + name + ' (@' + handle + ')' : '';
+    }
+    document.addEventListener('account-changed', updateXAcctHint_);
+    updateXAcctHint_();
 
     // 短縮URL差し替えのオーバーライド(「📎 短縮URLを挿入」クリック後に保持)
     var _xOverrideShort = '';
@@ -2229,15 +2241,22 @@
     }
 
     function refreshXTweet() {
+      updateXAcctHint_(); // 投稿先の表示も一緒に更新(生成のたびに正しい宛先が出る)
       var text = composeXText();
       xTxt.value = text;
       updateXCount_(text);
     }
 
-    // ★X用テキストを直接手直しした時もカウンタを追従させる。
-    //   上限280は「短くしてもらう」ための表示なので、手で削っている最中に数字が固まっていると
-    //   まさに一番必要な場面で役に立たない(コピー時に初めて超過が分かる状態だった)。
-    if (xTxt) xTxt.addEventListener('input', function () { updateXCount_(); });
+    // ★X欄はその場で短くできるようにする(readonlyを解除)。
+    //   Xは加重280で日本語1字=2。フック行・CTA行が入った現行テンプレは残りが数十しかなく、
+    //   キャプションを少し伸ばすと超える。readonlyのままだと超えた時に**アプリ内で短くする術が無く**、
+    //   Blueskyのキャプションを削る(=Blueskyの投稿文まで変わる)しかなかった。
+    //   ここはコピー用の作業領域なので、直接削れる方が用途に合う。
+    //   ※キャプション/作品URL/アカウントを変えると再生成で上書きされる(意図的な操作時のみ)。
+    if (xTxt) {
+      xTxt.removeAttribute('readonly');
+      xTxt.addEventListener('input', function () { updateXCount_(); });
+    }
 
     // 本文・作品URL変更時に再生成(短縮URL差し替えはリセット)
     if (els.text) els.text.addEventListener('input', function () { _xOverrideShort = ''; refreshXTweet(); });
