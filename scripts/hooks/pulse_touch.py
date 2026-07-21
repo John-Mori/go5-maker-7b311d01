@@ -30,11 +30,30 @@ LAB_ID_FILE = os.path.join(ROOT, "local", "llm", "lab_session_id.txt")
 PULSE = os.path.join(ROOT, "local", "llm", "lab_tool_pulse.txt")  # liveness専用(readinessと分離)
 
 
+def _touch_room_presence(payload):
+    """対になるDiscord部屋がある対話セッションなら、その部屋の在席を刻む(2026-07-20 Vol.3)。
+
+    waiterは新着配達と同時に自了するため、私が返信を書いている数分は readiness が消える。
+    その窓でデーモン(アメス)が同じ便に応答した=実測。ここは liveness 側の信号で、
+    dept_daemon.interactive_alive() が readiness と合成して判定する。
+    ※研究室本体のliveness(lab_tool_pulse)とは別ファイル・別用途なので混ぜない。
+    """
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        from session_rooms import dept_of_payload, touch_presence
+        dept, _ = dept_of_payload(payload)
+        touch_presence(dept)
+    except Exception:
+        pass            # 在席が刻めなくても現行動作(waiterの脈)に安全に退化する
+
+
 def main():
     try:
-        sid = json.load(sys.stdin).get("session_id", "")
+        payload = json.load(sys.stdin)
     except Exception:
         return 0
+    _touch_room_presence(payload)
+    sid = payload.get("session_id", "")
     if not sid:
         return 0
     try:

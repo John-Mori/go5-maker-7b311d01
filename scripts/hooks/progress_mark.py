@@ -99,6 +99,34 @@ def room_from_transcript(tp):
     return hits[-1] if hits else None     # 最後の申告=今その部屋を担当している
 
 
+def _room_cached(payload, phase):
+    """room_from_transcript の結果をセッション単位でキャッシュする(ORG-43)。
+
+    ★なぜ: room_from_transcript は transcript 全行を読む。PostToolUse は全ツールで鳴るため、
+      毎回フル走査すると長いセッションほど hook が重くなる。
+      部屋は途中で変わらない(変わるのは再武装した時だけ)ので、
+      **read(=ユーザー発言ごと・低頻度)でフル解決してキャッシュを更新**し、
+      work/end はキャッシュを読むだけにする。
+    """
+    sid = payload.get("session_id") or "S"
+    cache = os.path.join(LOCAL, "llm", f"_room_cache_{sid}.txt")
+    if phase != "read":
+        try:
+            v = open(cache, encoding="utf-8").read().strip()
+            if v:
+                return None if v == "-" else v
+        except OSError:
+            pass
+    room = room_from_transcript(payload.get("transcript_path") or "")
+    try:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        with open(cache, "w", encoding="utf-8") as f:
+            f.write(room or "-")
+    except OSError:
+        pass
+    return room
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -114,9 +142,24 @@ def main():
         # cwdで決まらない部屋(ad研究室=5SecMovieMakerを22セッションで共有)は自己申告で解決する。
         # ★進捗印だけに使う。ミラーには広げない——あちらは本人が手で投稿している部屋があり、
         #   二重投稿になる(ORG-03と同型の事故を自分で作らない)。
-        dept = room_from_transcript(payload.get("transcript_path") or "")
+        dept = _room_cached(payload, phase)
     if not dept:
         return
+
+    # ★在席(presence)を刻む(2026-07-22 ORG-43・AD-GLの不備報告2件目への恒久解)。
+    #   モドリッチの実測= research-room の presence は**一度も立たない**。
+    #   `PAIRS` は cwd→部屋 の表で research-room の行が無く、足すと**22セッション全部が
+    #   research-room の在席を刻む**(彼が自ら指摘した罠)。
+    #   → このhookは既に**セッション単位**で部屋を解決している(waiter信号・ORG-17)ので、
+    #     ここで刻むのが正しい置き場。PostToolUse は全ツールで鳴る=ターン中ずっと新鮮に保てる。
+    #   ★モドリッチは回避策として「刻み続ける常駐ループ」を立てていたが、あれは
+    #     **セッションを閉じても在席が残り、留守番が永遠に譲って部屋が無音になる**。
+    #     hookなら本人が実際に動いている間だけ刻まれる=閉じれば自然に枯れて留守番へ渡る。
+    try:
+        from session_rooms import touch_presence
+        touch_presence(dept)
+    except Exception:
+        pass
 
     if phase == "work":
         if payload.get("tool_name") not in WORK_TOOLS:
