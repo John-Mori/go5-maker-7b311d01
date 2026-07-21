@@ -811,6 +811,92 @@ DEPT_CONF = {
 }
 
 
+WORK_AUDIT = os.path.join(LOCAL, "llm", "work_audit.jsonl")
+
+
+def _git_snapshot():
+    """作業ディレクトリの変更状態(path -> status)。取れなければ空dict。
+
+    ★自己申告ではなく**観測**にするための基準線。git が使えない環境でも落とさない。
+    """
+    try:
+        r = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=30)
+        if r.returncode != 0:
+            return {}
+        out = {}
+        for line in (r.stdout or "").splitlines():
+            if len(line) > 3:
+                out[line[3:].strip()] = line[:2]
+    except Exception:
+        return {}
+    # ★gitignore配下も見る(2026-07-21 実弾検証で判明した穴)。
+    #   初版は `git status` だけを見ていたため、**`local/` 配下の作業が1件も記録されなかった**
+    #   (実測: ファイルは実際に作られたのに touched=0件)。
+    #   `local/` はgitignoreだが、**デーモンの作業の多くはここ**(作業メモ・調査結果・台帳)。
+    #   肝心な所が抜けた監査は、無いのとほぼ同じ。
+    #   ★ノイズ(ログ・DB・脈・キュー)は除く= 常に変わるので証跡にならず、埋もれさせるだけ。
+    try:
+        for base in ("local", os.path.join("..", "00_AI-HQ")):
+            root = os.path.join(ROOT, base)
+            if not os.path.isdir(root):
+                continue
+            for dirpath, dirnames, files in os.walk(root):
+                dirnames[:] = [d for d in dirnames
+                               if d not in (".git", "node_modules", "__pycache__",
+                                            "attachments", "_work", "queue")]
+                for fn in files:
+                    if not fn.lower().endswith((".md", ".txt", ".json", ".yml", ".csv")):
+                        continue
+                    # ★常に変わる「状態・脈」は証跡にならない=除外する(実弾検証で判明)。
+                    #   初版はこれが甘く、**17件中16件が他デーモンの生存脈**という結果になった。
+                    #   本物(_audit_probe.txt)は拾えていたが**埋もれていた**。
+                    #   今日の教訓「拾いすぎは実害あり(ORG-03)」の適用=ノイズは本物を隠す。
+                    if fn.startswith(("_daemon_", "waiter_", "interactive_presence_",
+                                      "claude_active", "session_label", "heartbeat",
+                                      "limit_notified", "poller_active", "lab_")):
+                        continue
+                    if fn.endswith(("_state.json", "_until.txt", ".lock", ".pick",
+                                    ".inflight", "_pulse.txt")):
+                        continue
+                    fp = os.path.join(dirpath, fn)
+                    try:
+                        out["~" + os.path.relpath(fp, ROOT)] = str(int(os.path.getmtime(fp)))
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+    return out
+
+
+def _audit_work(dept, msg_id, before, after, rc, secs, model, tail):
+    """作業agentが**実際に何を触ったか**を記録する(2026-07-21 人事の問題報告・問題2)。
+
+    ★なぜ要るか(人事の指摘をそのまま引く):
+      「デーモンが何をしたかの唯一の痕跡は `memory/<dept>.jsonl` の**返信本文=自己申告**。
+       **証拠ではなく主張であり、照合できない**」
+      「**これが無い限り、他の全ての改善は検証できない。最優先。**」
+
+    ★記録するのは **git差分=観測された事実**。「反映しました」という主張と突き合わせられる。
+      失敗しても本番経路は壊さない(監査はあくまで付随物)。
+    """
+    try:
+        touched = sorted(set(after) - set(before)) + \
+                  sorted(k for k in after if k in before and after[k] != before[k])
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "dept": dept,
+               "msg_id": str(msg_id), "model": model, "rc": rc,
+               "sec": round(secs, 1), "touched": touched,
+               "touched_count": len(touched), "stdout_tail": tail}
+        os.makedirs(os.path.dirname(WORK_AUDIT), exist_ok=True)
+        with open(WORK_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        log(dept, f"作業ログ: 触ったファイル{len(touched)}件 rc={rc} {secs:.0f}秒"
+                  + (f" -> {touched[:3]}" if touched else " (変更なし)"))
+    except Exception:
+        pass          # 監査の失敗で作業を巻き添えにしない
+
+
 def log(dept, msg):
     print(f"{time.strftime('%H:%M:%S')} [{dept}] {msg}")
 
@@ -902,9 +988,16 @@ class Daemon:
         try:
             ctx = os.path.join(os.path.dirname(ROOT), "5SecMovieMaker",
                                "local", "persona_context")
-            names = [c.lower() for c in os.listdir(ctx)]
+            # ★2026-07-21 人事の問題報告(問題5)への対処: **鍵が画像1枚でも開いていた**。
+            #   旧実装は `stem in c` の**部分一致・拡張子不問**だったため、
+            #   `evidence_kukuru代役_….png`(スクリーンショット)にもヒットした。
+            #   =**原典が無いのに演じる**経路が空いていた(この安全機構が防ぐはずだった事態そのもの)。
+            #   → **.md に限定 + stemの前方一致**へ厳格化。
+            #   ★変更前に実測済み: 全16キャラで**判定は1件も変わらない**(実害ゼロで穴だけ塞げる)。
+            names = [c.lower() for c in os.listdir(ctx) if c.lower().endswith(".md")]
             stem = os.path.splitext(os.path.basename(self.conf["character"]))[0].lower()
-            ready = any(stem.split("-")[0] in c or stem in c for c in names)
+            key = stem.split("-")[0]
+            ready = any(c.startswith(key) for c in names)
         except Exception:
             ready = True                 # fail-open
         self._persona_ready = ready
@@ -1220,12 +1313,21 @@ class Daemon:
         # ★O3: bypassPermissions を廃し、最小allowlist + モデル固定で起動。
         #   --allowedTools は可変長。直後に別フラグ(--add-dir)が来るのでツール列はそこで区切られる。
         #   promptはstdin(引数だと可変長フラグが飲み込む2026-07-18の実障害の回避)。
+        before = _git_snapshot()          # ★作業前の状態(証跡の基準線)
+        _t0 = time.time()
         p = subprocess.run(
             [CLAUDE, "--print", "--model", work_model_for(self.conf),
              "--allowedTools", *WORK_ALLOWED_TOOLS,
              "--add-dir", HQ],
             input=prompt, cwd=ROOT, env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=WORK_TIMEOUT)
+        # ★作業ログ(2026-07-21 人事の問題報告・問題2への対処。人事が「最優先」と指定)
+        #   人事の指摘=「デーモンが何をしたかの唯一の痕跡は memory の**返信本文=自己申告**。
+        #   **証拠ではなく主張であり、照合できない**。これが無い限り、他の全ての改善は検証できない」
+        #   → **git の差分**で「実際に触ったファイル」を残す。自己申告ではなく**観測された事実**。
+        _audit_work(self.dept, rec.get("msg_id", ""), before, _git_snapshot(),
+                    p.returncode, time.time() - _t0,
+                    work_model_for(self.conf), (p.stdout or "")[-1500:])
         reply = ""
         if os.path.exists(reply_file):
             reply = open(reply_file, encoding="utf-8", errors="replace").read().strip()
