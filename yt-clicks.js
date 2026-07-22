@@ -114,7 +114,7 @@
   function loadYtMap() { try { return JSON.parse(localStorage.getItem(ytMapKey()) || '{}') || {}; } catch (e) { return {}; } }
   function saveYtMap(m) { try { localStorage.setItem(ytMapKey(), JSON.stringify(m)); } catch (e) {} }
   function apiKey() { try { return (localStorage.getItem('yt_api_key') || '').trim(); } catch (e) { return ''; } }
-  function itemKey(it) { if (it.manual) return it.id; return it.postUri ? ('u:' + it.postUri) : ('s:' + (it.shortUrl || '')); }
+  function itemKey(it) { return (window.HistMerge && window.HistMerge.historyItemKey) ? window.HistMerge.historyItemKey(it) : (it.manual ? it.id : (it.postUri ? ('u:' + it.postUri) : (it.shortUrl ? ('s:' + it.shortUrl) : ('v:' + (it.videoId || ''))))); }
   function num(n) { try { return Number(n).toLocaleString(); } catch (e) { return String(n); } }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
   // 祝日セット。(内閣府データ window.__HOLIDAYS__)土=青/日祝=赤 の判定に使う。
@@ -1062,8 +1062,8 @@
       // 作り直し系バッジ：rebuild=この動画自体がリビルド版 / remade=この投稿は被リビルド(=リビルド版に取って代わられた)
       if (it.rebuild) tagsHtml += '<span class="vtag vtag-rebuild">🔁リビルド版</span>';
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
-      // ★この端末のローカル履歴には無く、記録シートから表示のみ補った行(書き込みは一切していない)。
-      if (it._fromSheet) tagsHtml += '<span class="vtag vtag-sheet" title="この端末にはこの記録が無く、記録シートの内容を表示のみで補っています(編集/削除はこの端末からはできません)">☁️シート由来</span>';
+      // ★この端末のローカル履歴には無く、記録シートから補った行。編集・削除はGAS経由で正本へ反映する。
+      if (it._fromSheet) tagsHtml += '<span class="vtag vtag-sheet" title="この端末にはこの記録が無く、記録シートの内容を表示して補っています(編集・削除は記録シートへ反映)">☁️シート由来</span>';
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
         '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名(改行して統一)
@@ -1105,7 +1105,7 @@
             (!it._fromSheet && !it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
             (!it._fromSheet ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
           '</div>' +
-          (!it._fromSheet ? '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' : '') +
+          '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
         '</div>';
     }).join('');
@@ -1323,17 +1323,35 @@
     var rawItems = allItems(), ymap = loadYtMap();
     var target = null;
     for (var i = 0; i < rawItems.length; i++) { if (itemKey(rawItems[i]) === k) { target = rawItems[i]; break; } }
-    if (!target) { clearMark(); return; }
-    var vid = ytIdOf(ymap[k] || target.ytUrl || '');
-    var title = (vid && titleCache[vid]) || target.title || (target.manual ? '(手動追加)' : '(無題)');
-    if (!window.confirm('「' + title + '」を本当に消去しますか？\n(この記録を一覧から削除します。取り消せません)')) { clearMark(); return; }
-    if (target.manual) {
-      saveArr(manualKey(), loadManual().filter(function (x) { return itemKey(x) !== k; }));
-    } else {
-      saveArr(histKey(), loadHist().filter(function (x) { return itemKey(x) !== k; }));
+    if (target) {
+      var vid = ytIdOf(ymap[k] || target.ytUrl || '');
+      var title = (vid && titleCache[vid]) || target.title || (target.manual ? '(手動追加)' : '(無題)');
+      if (!window.confirm('「' + title + '」を本当に消去しますか？\n(この記録を一覧から削除します。取り消せません)')) { clearMark(); return; }
+      if (target.manual) {
+        saveArr(manualKey(), loadManual().filter(function (x) { return itemKey(x) !== k; }));
+      } else {
+        saveArr(histKey(), loadHist().filter(function (x) { return itemKey(x) !== k; }));
+      }
+      if (ymap[k] != null) { delete ymap[k]; saveYtMap(ymap); }
+      refresh();
+      return;
     }
-    if (ymap[k] != null) { delete ymap[k]; saveYtMap(ymap); }
-    refresh();
+    // ★この端末のローカルには無く、記録シートから表示だけ補った行(_fromSheet)。
+    //   ローカル配列には存在しないので上のfilterでは消えない＝ごみ箱を押しても何も起きなかった
+    //   (Chami報告2026-07-23「ごみ箱が表示されないものがある」)。シート側をGAS action=delete で
+    //   直接消し、表示キャッシュからも同じ行を除いて即座に一覧から消す。
+    var sheetTarget = null, extraCache = _sheetExtraCache[acct()];
+    ((extraCache && extraCache.items) || []).forEach(function (it) { if (itemKey(it) === k) sheetTarget = it; });
+    if (!sheetTarget) { clearMark(); return; }
+    var sTitle = sheetTarget.title || '(無題・シート由来)';
+    if (!window.confirm('「' + sTitle + '」を本当に消去しますか？\n(この端末には元データが無いため、記録シート側を直接削除します。取り消せません)')) { clearMark(); return; }
+    var gasUrl = gasUrl_();
+    if (!gasUrl) { clearMark(); window.alert('記録用URL(GAS)が未設定のため削除できません。'); return; }
+    jsonp_(gasUrl, { action: 'delete', channel: acct(), videoId: sheetTarget.videoId || '', postUri: sheetTarget.postUri || '', short: sheetTarget.shortUrl || '' }, function (res) {
+      if (!res || !res.ok || !(Number(res.deleted) > 0)) { clearMark(); window.alert('削除対象を記録シートで特定できませんでした。再読み込み後にもう一度お試しください。'); return; }
+      if (extraCache && extraCache.items) extraCache.items = extraCache.items.filter(function (it) { return itemKey(it) !== k; });
+      refresh();
+    });
   }
 
   // 作り直し印のトグル。(削除はしない)ONで「この動画を消して作り直した」印を付け、記録シートにも反映。

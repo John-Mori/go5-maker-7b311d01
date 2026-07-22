@@ -93,7 +93,7 @@ function categoryOf_(f) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-23I(header_format/header_align追加=全列のヘッダ書式を列名対応で比較・月詠みへ統一。col1のみでは不十分だったための拡張)';
+var GAS_VERSION = '2026-07-23J(history削除をpost_id対応。post_uri/短縮URL欠損行も動画IDで1件削除)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -487,7 +487,7 @@ function doGet(e) {
     try {
       var ch = p.channel || 'acc1';
       if (p.action === 'history') out = { ok: true, items: historyItems_(ch, parseInt(p.limit || '40', 10)) };
-      else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.postUri || '', p.short || '') };
+      else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.videoId || '', p.postUri || '', p.short || '') };
       else if (p.action === 'settings_pull') out = settingsPull_();   // 端末間同期：非秘密設定の取得
       else if (p.action === 'settings_meta') out = settingsMeta_();   // 端末間同期：最終保存メタのみ(状態表示)
       else if (p.action === 'deltas') out = { ok: true, deltas: computeDeltas_(), peaks: computePeaks_() }; // 今日/昨日/週の増加＋最大瞬間風速
@@ -529,13 +529,14 @@ function historyItems_(channel, limit) {
   for (var i = 0; i < vals.length; i++) {
     var row = vals[i];
     var d = dCol ? row[dCol - 1] : '', uri = uCol ? row[uCol - 1] : '', short = sCol ? row[sCol - 1] : '';
-    if (!d && !uri && !short) continue; // 空行スキップ
+    var pid = pidCol ? row[pidCol - 1] : '';
+    if (!d && !uri && !short && !pid) continue; // 完全な空行だけスキップ。動画IDだけ残る異常行も削除用に返す
     var ds = '', iso = '';
     try { if (d) { var dd = new Date(d); ds = Utilities.formatDate(dd, tz, 'MM/dd HH:mm'); iso = dd.toISOString(); } } catch (e) {}
     items.push({
       postUri: String(uri || ''), title: String(tCol ? row[tCol - 1] : ''),
       date: ds, postedAt: iso, shortUrl: String(short || ''), shareUrl: String(shareCol ? (row[shareCol - 1] || '') : ''), postUrl: '',
-      videoId: String(pidCol ? (row[pidCol - 1] || '') : ''),
+      videoId: String(pid || ''),
       workState: String(wsCol ? (row[wsCol - 1] || '') : ''),
       cid: String(cidCol ? (row[cidCol - 1] || '') : ''), // 作品URL復元用(cid→作品URLをフロントで再構成)
       youtubeUrl: String(yCol ? (row[yCol - 1] || '') : '')
@@ -544,12 +545,13 @@ function historyItems_(channel, limit) {
   items.reverse(); // 新しい順
   return items.slice(0, limit > 0 ? limit : 40);
 }
-// 1件削除。(行の内容をクリア＝再利用可。行は詰めない＝集計の整合を保つ)post_uri優先、無ければ短縮URLで一致。
-function deleteRecord_(channel, postUri, short) {
+// 1件削除。(行の内容をクリア＝再利用可。行は詰めない＝集計の整合を保つ)
+// 安定動画ID(post_id)を最優先し、無ければ post_uri、短縮URLの順。URL欠損の異常行も削除できる。
+function deleteRecord_(channel, videoId, postUri, short) {
   var sh = getChannelSheet_(channel), map = headerMap_(sh);
   var last = sh.getLastRow(); if (last < 2) return 0;
-  var col = postUri ? map['post_uri'] : map['短縮URL'];
-  var want = postUri || short; if (!col || !want) return 0;
+  var col = videoId ? map['post_id'] : (postUri ? map['post_uri'] : map['短縮URL']);
+  var want = videoId || postUri || short; if (!col || !want) return 0;
   var vals = sh.getRange(2, col, last - 1, 1).getValues(), cleared = 0;
   for (var i = 0; i < vals.length; i++) {
     if (String(vals[i][0]) === String(want)) { sh.getRange(i + 2, 1, 1, sh.getLastColumn()).clearContent(); cleared++; }

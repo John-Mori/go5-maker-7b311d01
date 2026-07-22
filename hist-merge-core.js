@@ -129,8 +129,19 @@
     return legacy.length ? [legacy[0]] : [];
   }
 
+  // 投稿履歴カードの安定キー。通常は投稿URI/短縮URL、どちらも欠けたシート行は動画IDで識別する。
+  function historyItemKey(it) {
+    if (!it) return '';
+    if (it.manual) return String(it.id || '');
+    if (it.postUri) return 'u:' + String(it.postUri);
+    if (it.shortUrl) return 's:' + String(it.shortUrl);
+    if (it.videoId) return 'v:' + String(it.videoId);
+    return '';
+  }
+
   var api = {
     mergeSheetExtras: mergeSheetExtras,
+    historyItemKey: historyItemKey,
     historyUsedImages: historyUsedImages,
     workCidFromUrl: workCidFromUrl,
     workUrlFromCid: workUrlFromCid,
