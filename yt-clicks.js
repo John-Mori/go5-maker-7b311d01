@@ -788,6 +788,76 @@
     if (saved) autoMeasureWorkShort_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
     refresh();
   }
+
+  // シート由来行(_fromSheet)の編集をGASへ即時upsertする。成功後にUIを更新、失敗はモーダルにエラーを出す。
+  // localStorageへは書き戻さない(INC-112防壁を維持)。
+  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
+    var gasUrl = '';
+    try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
+    if (!gasUrl) { showModalErr_('GAS URLが設定されていません。'); return; }
+    if (!it.videoId) { showModalErr_('この行にはvideoIdがありません。保存できません。'); return; }
+
+    // 送信用コピーに編集内容を反映。キャッシュ(_sheetExtraCache)は成功後に更新する。
+    var edited = {};
+    for (var p in it) if (Object.prototype.hasOwnProperty.call(it, p)) edited[p] = it[p];
+    if (ytUrl) edited.ytUrl = ytUrl; else delete edited.ytUrl;
+    saveBskyToItem_(edited, bskyUrl);
+    if (workUrl) edited.workUrl = workUrl; else delete edited.workUrl;
+    applyAttrs_(edited, attrs);
+    edited.workState = workState || '旧作';
+    if (_pendingShort) { edited.shortUrl = _pendingShort; delete edited.postUrl; }
+    if (_pendingShare) edited.shareUrl = _pendingShare;
+    applyWorkShort_(edited, workShortVal);
+
+    var saveBtn = $('veditSave'), origText = saveBtn ? saveBtn.textContent : '保存';
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
+
+    var payload = {
+      op: 'upsert',
+      channel: chForItem_(edited),
+      videoId: edited.videoId,
+      title: edited.title || '',
+      postUri: edited.postUri || '',
+      workUrl: edited.workUrl || '',
+      shortUrl: edited.shortUrl || '',
+      shareUrl: edited.shareUrl || '',
+      youtube_url: edited.ytUrl || '',
+      work_short_url: edited.workShortUrl || ''
+    };
+    ATTR_DEFS.forEach(function (a) { payload[a.key] = !!edited[a.key]; });
+    payload.workState = edited.workState || '旧作';
+
+    var curAcct = acct();
+    try {
+      fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) })
+        .then(function (res) { return res.json(); })
+        .then(function (r) {
+          if (!r || r.ok === false) throw new Error(r && r.error ? String(r.error) : 'GASエラー');
+          // 成功: キャッシュを更新してUIを即時反映
+          var c = _sheetExtraCache[curAcct];
+          if (c && c.items) {
+            for (var i = 0; i < c.items.length; i++) {
+              if (itemKey(c.items[i]) === k) {
+                var cached = c.items[i];
+                for (var q in edited) if (Object.prototype.hasOwnProperty.call(edited, q)) cached[q] = edited[q];
+                break;
+              }
+            }
+          }
+          closeModal_();
+          refresh();
+          if (ytUrl) pokeSnapshotNow_();
+        })
+        .catch(function (err) {
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = origText; }
+          showModalErr_('保存できませんでした。(' + (err && err.message ? err.message : 'エラー') + ')');
+        });
+    } catch (e) {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = origText; }
+      showModalErr_('保存できませんでした。');
+    }
+  }
+
   // 作品クリック計測URL(導線2)の自動確定。手入力が r2 でない(作品ページURL/アフィリンク/da.gd等)場合、
   //   アフィリンク化→r2短縮して workShortUrl を計測可能なキーに整える。既に r2 なら何もしない(冪等)。
   function autoMeasureWorkShort_(it, persist) {
@@ -971,9 +1041,7 @@
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
           (wcode ? '<span title="作品リンククリック数(投稿→FANZA・導線2)"><img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="作品クリック"> ' + (wclicks != null ? num(wclicks) : '…') + '</span>' : '') +
           '<span class="vrow-links">' + // 🛠️編集/Bsky↗/YouTube↗/作品↗ を1グループに＝編集もBskyと同じ段に表示・作品↗だけ改行される事故を防ぐ
-            // ★シート由来行(_fromSheet)はこの端末のローカル配列に実体が無いため、編集/削除/被リビルド操作の
-            //   対象になり得ない(押しても保存先が無く何も起きない)。混乱を避けボタンごと出さない(表示専用)。
-            (!it._fromSheet ? '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' : '') +
+            '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
             (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
             (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
             (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
@@ -1085,7 +1153,7 @@
     list.querySelectorAll('.vedit-btn').forEach(function (b) {
       b.addEventListener('click', function () {
         var k = b.getAttribute('data-k');
-        var rawItems = allItems(), ymap = loadYtMap();
+        var rawItems = displayItems_(), ymap = loadYtMap();
         var it = null;
         for (var i = 0; i < rawItems.length; i++) { if (itemKey(rawItems[i]) === k) { it = rawItems[i]; break; } }
         if (!it) return;
@@ -1095,13 +1163,19 @@
         var workShortCur = it.workShareUrl || it.workShortUrl || ''; // 作品クリック計測URL(導線2)の現値
         var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
         _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
-        openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
-          closeModal_();
-          saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal);
-        }, workShortCur);
-        addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
-        addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
-        addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
+        if (it._fromSheet) {
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
+            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal);
+          }, workShortCur);
+        } else {
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
+            closeModal_();
+            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal);
+          }, workShortCur);
+          addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
+          addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
+          addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
+        }
       });
     });
   }
