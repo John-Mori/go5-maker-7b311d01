@@ -2195,7 +2195,48 @@
     if (raw && r && r.ok) {
       var twForWork = parseSnsUrl_(twRaw); // X / Bluesky どちらの投稿URLでも紐づけ可
       var items0 = lsGet(key, '[]');
-      if (items0.some(function (x) { return x.cid === r.cid; })) { msg.textContent = 'ℹ️ この作品は既に追加されています(重複追加しません)'; return; }
+      // 重複チェック: 同じcidが既にある場合はサブデータ(X/BlueskyURL・画像・メモ)のみ追記
+      var dupIdx = -1;
+      for (var di = 0; di < items0.length; di++) { if (items0[di] && items0[di].cid === r.cid) { dupIdx = di; break; } }
+      if (dupIdx >= 0) {
+        var existItem = items0[dupIdx];
+        var newImgs = _addModalImgs.filter(Boolean);
+        var memoElDup = $('candMemo');
+        var newMemo = (memoElDup && memoElDup.value || '').trim();
+        var newTwUrl = twForWork.ok ? twForWork.url : '';
+        var cur = refImgOf(r.cid) || {};
+        var curImgs = Array.isArray(cur.imgs) ? cur.imgs.filter(Boolean) : (cur.img ? [cur.img] : []);
+        var curTw = existItem.twitterUrl || cur.twitterUrl || '';
+        var curTw2 = cur.twitterUrl2 || '';
+        var mergedTw = curTw, mergedTw2 = curTw2;
+        var mergedAny = false;
+        // X/BlueskyURL: 1つ目が空なら設定、1つ目と異なりかつ2つ目が空なら2つ目へ
+        if (newTwUrl && newTwUrl !== curTw && newTwUrl !== curTw2) {
+          if (!curTw) { mergedTw = newTwUrl; existItem.twitterUrl = newTwUrl; mergedAny = true; }
+          else if (!curTw2) { mergedTw2 = newTwUrl; mergedAny = true; }
+        }
+        // 画像: 末尾へ追加(最大8枚)
+        var mergedImgs = curImgs.slice();
+        newImgs.forEach(function (img) { if (mergedImgs.length < 8) { mergedImgs.push(img); mergedAny = true; } });
+        // メモ: 無ければ設定、あれば改行追記
+        var mergedMemo = cur.memo || '';
+        if (newMemo && newMemo !== mergedMemo) {
+          mergedMemo = mergedMemo ? (mergedMemo + '\n' + newMemo) : newMemo;
+          mergedAny = true;
+        }
+        if (mergedAny) {
+          lsSet(key, items0);
+          refImgSave(r.cid, { imgs: mergedImgs, comment: cur.comment || '', memo: mergedMemo, twitterUrl: mergedTw, twitterUrl2: mergedTw2 });
+          if (inp) inp.value = ''; if (twInp) twInp.value = ''; if (memoElDup) memoElDup.value = '';
+          _addModalImgs = []; renderAddSlots_();
+          msg.textContent = 'ℹ️ 既に追加済み — X/画像/メモを追記しました';
+          renderCandList(tabId);
+          if (onDone) onDone();
+        } else {
+          msg.textContent = 'ℹ️ この作品は既に追加されています(重複追加しません)';
+        }
+        return;
+      }
       msg.textContent = '⏳ 作品情報を取得中…';
       var cfg = workerCfg();
       var put = function (info) {
