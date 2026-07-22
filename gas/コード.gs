@@ -93,7 +93,7 @@ function categoryOf_(f) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-23E(trim_empty_rowsの境界を「表示される値がある最後の行」へ修正=数式の残骸だけの行も詰める。宵桜の974行は空行でなく数式残骸だった)';
+var GAS_VERSION = '2026-07-23H(col1_format/col1_align/title_fix追加=1列目書式の月詠み揃え+既存2行モード題名の改行/余分空白を正規化。既定dry-run)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -137,6 +137,111 @@ function doGet(e) {
   // 一回限りのヘッダ移行: <exec URL>?action=migrate_headers で既存シートに FANZA 列を追加する。
   if (p.action === 'migrate_headers') {
     return jsonOut_(migrateHeaders_());
+  }
+  // 診断: 1列目(post_id)のヘッダ・データセルの書式を両シートで比較する。(読み取り専用)
+  //   ★「1列目の表示や色が変わっていない」報告(2026-07-23)の実態確認用。
+  if (p.action === 'col1_format') {
+    try {
+      var fOut = {};
+      CH_SHEETS.forEach(function (nm) {
+        var fsh = openSS_().getSheetByName(nm); if (!fsh) { fOut[nm] = null; return; }
+        var hdrCell = fsh.getRange(1, 1);
+        var dataCell = fsh.getLastRow() >= 2 ? fsh.getRange(2, 1) : null;
+        function snap(rng) {
+          if (!rng) return null;
+          return {
+            background: rng.getBackground(), fontColor: rng.getFontColor(),
+            fontWeight: rng.getFontWeight(), fontFamily: rng.getFontFamily(),
+            fontSize: rng.getFontSize(), numberFormat: rng.getNumberFormat(),
+            horizontalAlignment: rng.getHorizontalAlignment()
+          };
+        }
+        fOut[nm] = { header: snap(hdrCell), data: snap(dataCell), colWidth: fsh.getColumnWidth(1) };
+      });
+      return jsonOut_({ ok: true, format: fOut });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // 実行: 月詠み(正)の1列目の書式を宵桜艶帖へ揃える。(&apply=1 で実行・既定はdry-runで差分だけ返す)
+  if (p.action === 'col1_align') {
+    try {
+      var faApply = String(p.apply || '') === '1';
+      var srcSh = openSS_().getSheetByName('月詠み'), dstSh = openSS_().getSheetByName('宵桜艶帖');
+      if (!srcSh || !dstSh) return jsonOut_({ ok: false, error: 'sheet not found' });
+      var srcHdr = srcSh.getRange(1, 1), dstHdr = dstSh.getRange(1, 1);
+      var srcW = srcSh.getColumnWidth(1);
+      var before = { headerBg: dstHdr.getBackground(), headerColor: dstHdr.getFontColor(), width: dstSh.getColumnWidth(1) };
+      var after = { headerBg: srcHdr.getBackground(), headerColor: srcHdr.getFontColor(), width: srcW };
+      if (!faApply) return jsonOut_({ ok: true, applied: false, before: before, after: after });
+      // ヘッダ行の書式一式をコピー(値は上書きしない=setValuesではなくcopyTo書式のみ)
+      srcHdr.copyTo(dstHdr, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+      dstSh.setColumnWidth(1, srcW);
+      // データ行があれば2行目以降の書式も列全体で揃える(値は変えない)
+      var dstLast = dstSh.getLastRow();
+      if (dstLast >= 2) {
+        var srcDataFmt = srcSh.getLastRow() >= 2 ? srcSh.getRange(2, 1) : srcHdr;
+        var dstRange = dstSh.getRange(2, 1, dstLast - 1, 1);
+        srcDataFmt.copyTo(dstRange, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+      }
+      return jsonOut_({ ok: true, applied: true, before: before, after: after });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // 診断: 題名(コメント)列の生値を調べる。(読み取り専用)
+  //   ★「記録の題名が2行モードで2行になっている/改行やスペースが入る」報告(2026-07-23)の実態確認用。
+  //   JSON化前の生文字列を返すので、改行・前後空白・連続空白の有無が正確に分かる。
+  if (p.action === 'title_scan') {
+    try {
+      var tsOut = {};
+      CH_SHEETS.forEach(function (nm) {
+        var tsh2 = openSS_().getSheetByName(nm); if (!tsh2) { tsOut[nm] = null; return; }
+        var tmap = headerMap_(tsh2), tCol2 = tmap['題名(コメント)'];
+        var tlast = tsh2.getLastRow();
+        if (!tCol2 || tlast < 2) { tsOut[nm] = { rows: [] }; return; }
+        var n = Math.min(tlast - 1, 1000); // 実運用は数十行なので全件走査で問題ない
+        var start = Math.max(2, tlast - n + 1);
+        var tvals = tsh2.getRange(start, tCol2, tlast - start + 1, 1).getValues();
+        var rows = [];
+        for (var ti = 0; ti < tvals.length; ti++) {
+          var raw = String(tvals[ti][0] || '');
+          if (!raw) continue;
+          rows.push({
+            row: start + ti, raw: raw,
+            hasNewline: /\r|\n/.test(raw),
+            hasLeadTrailSpace: raw !== raw.trim(),
+            hasDoubleSpace: /[ 　]{2,}/.test(raw)
+          });
+        }
+        tsOut[nm] = { rows: rows };
+      });
+      return jsonOut_({ ok: true, scan: tsOut });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // 実行: 題名(コメント)列の改行・行境の余分な空白を正規化する。(&apply=1 で実行・既定はdry-run)
+  //   ★フロント側(app.js titleForBurn)は2026-07-23に「行ごとtrimしてから結合」へ修正済み(新規は再発しない)。
+  //   これは修正前に記録された既存2行(月詠み row2/3)を一度だけ正す後始末。
+  //   正規化＝改行で分割→各行trim→空区切りで結合→連続空白を1つに圧縮→全体trim。
+  if (p.action === 'title_fix') {
+    try {
+      var tfApply = String(p.apply || '') === '1';
+      var tfOut = [];
+      CH_SHEETS.forEach(function (nm) {
+        var tfsh = openSS_().getSheetByName(nm); if (!tfsh) { tfOut.push({ sheet: nm, status: 'not_found' }); return; }
+        var tfmap = headerMap_(tfsh), tfCol = tfmap['題名(コメント)'];
+        var tfLast = tfsh.getLastRow();
+        if (!tfCol || tfLast < 2) { tfOut.push({ sheet: nm, status: 'no_title_col_or_empty' }); return; }
+        var tfVals = tfsh.getRange(2, tfCol, tfLast - 1, 1).getValues();
+        var changes = [];
+        for (var fi = 0; fi < tfVals.length; fi++) {
+          var raw = String(tfVals[fi][0] || ''); if (!raw) continue;
+          var fixed = raw.split(/\r?\n/).map(function (l) { return l.trim(); }).join('').replace(/[ \t　]{2,}/g, ' ').trim();
+          if (fixed !== raw) changes.push({ row: fi + 2, before: raw, after: fixed });
+        }
+        if (tfApply && changes.length) {
+          changes.forEach(function (c) { tfsh.getRange(c.row, tfCol).setValue(c.after); });
+        }
+        tfOut.push({ sheet: nm, status: tfApply ? 'fixed' : 'dry_run', changeCount: changes.length, changes: changes });
+      });
+      return jsonOut_({ ok: true, applied: tfApply, result: tfOut });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 診断: 全列の「実データが入っている行数」を返す。(読み取り専用)
   //   ★列を消す前に「何が失われるか」を数える。0件なら消しても失うものは無い、と機械的に言える。
