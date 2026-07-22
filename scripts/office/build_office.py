@@ -39,6 +39,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sqlite3
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -358,6 +359,54 @@ def load_latest_incident():
     return best
 
 
+def load_queue_db():
+    """inbox.db(read-only)からキュー統計を取得。書き込まない=配送を壊さない。
+
+    戻り値: (by_dept, pending_total, dead_total, error_str)
+    by_dept: {normalized_dept: {'pending': N, 'dead': N}}
+    """
+    db = os.path.join(LOCAL, "queue", "inbox.db")
+    if not os.path.exists(db):
+        return {}, 0, 0, "inbox.db が無い"
+    try:
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=3)
+        totals = {s: n for s, n in c.execute(
+            "SELECT status, COUNT(*) FROM queue GROUP BY status"
+        ).fetchall()}
+        by_dept = {}
+        for dept, status, n in c.execute(
+            "SELECT dept, status, COUNT(*) FROM queue "
+            "WHERE status IN ('pending','dead') GROUP BY dept, status"
+        ).fetchall():
+            by_dept.setdefault(normalize_dept(dept), {})[status] = n
+        c.close()
+        return by_dept, totals.get("pending", 0), totals.get("dead", 0), ""
+    except Exception as e:
+        return {}, -1, -1, str(e)
+
+
+def load_ownership():
+    """ownership.jsonl から現在 claimed 中のトピックを返す。
+
+    戻り値: {topic: {owner, status, ts, doc, note}} — status='claimed' のもののみ
+    """
+    path = os.path.join(LOCAL, "ownership.jsonl")
+    try:
+        lines = open(path, encoding="utf-8").readlines()
+    except OSError:
+        return {}
+    latest = {}
+    for line in lines:
+        try:
+            d = json.loads(line)
+            topic = d.get("topic", "")
+            if topic:
+                latest[topic] = d
+        except ValueError:
+            continue
+    return {t: v for t, v in latest.items() if v.get("status") == "claimed"}
+
+
 # ── アバターの取り込み(自己完結) ─────────────────────────────────
 def localize_asset(url, report):
     """URLを local/office/assets/ へ取り込み、相対パスを返す。失敗はNone(=色ブロックへ劣化)。"""
@@ -493,6 +542,11 @@ def render_room(dept, label, ts, members, ctx):
         badges += f'<span class="badge op">箱{len(opens)}</span>'
     if pend:
         badges += f'<span class="badge ib">未処理{pend}</span>'
+    q_info = ctx.get("queue", {}).get(dept, {})
+    if q_info.get("pending", 0):
+        badges += f'<span class="badge qp">Q{q_info["pending"]}</span>'
+    if q_info.get("dead", 0):
+        badges += f'<span class="badge dlq">DLQ{q_info["dead"]}</span>'
     color = ctx["room_color"](dept)
     return f'''
 <details class="room" data-dept="{html.escape(dept)}" style="--room:{color}">
@@ -572,6 +626,12 @@ CSS = """
  .pres.active{background:#2bb3c0;color:#04222a} .pres.stale{background:#e6d7b0} .pres.none{background:#c9cfd8;color:#5a6472}
  .badge{font-size:10px;border:2px solid var(--line);border-radius:6px;padding:1px 5px;background:#fff}
  .badge.bl{background:#ffd2d2} .badge.op{background:#d8ecff} .badge.ib{background:#ffe9c7}
+ .badge.qp{background:#d2f5e3} .badge.dlq{background:#ffd2d2;font-weight:bold}
+ .qsect{background:#16203a;border:3px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+ .qsect .qok{color:#2bb3c0} .qsect .qwarn{color:#f59e4a;font-weight:bold}
+ .own{background:#1a2640;border:3px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px}
+ .own b{color:var(--cream)} .own ul{margin:4px 0 0;padding-left:18px} .own li{margin:2px 0}
+ .own .claimed{color:#ffd080}
  .tasks{font-size:11px;background:#fff;border:2px solid var(--line);border-radius:6px;margin:8px 0 0;padding:8px 8px 8px 24px}
  .tasks .done{color:#2a6b45} .ts{color:#7c8797;font-size:10px}
  .timeline{background:var(--card);border:3px solid var(--line);border-radius:8px;padding:10px;margin-top:14px}
@@ -636,6 +696,44 @@ def render_html(ctx, rooms, gen_epoch):
         f'<span class="dmn {"" if s == "ok" else ("unk" if s in ("start", "restart") else "bad")}">{html.escape(n)}: {html.escape(s)}</span>'
         for n, s in dmn) or '<span class="dmn unk">常駐ログなし</span>'
 
+    # キューDB セクション
+    q_pending = ctx.get("q_pending", -1)
+    q_dead = ctx.get("q_dead", -1)
+    q_err = ctx.get("q_err", "")
+    if q_err:
+        q_body = f'<span class="qwarn">⚠ 取得失敗: {esc(q_err, 80)}</span>'
+    else:
+        q_cls = "qwarn" if q_dead > 0 else "qok"
+        q_body = (f'<span class="{q_cls}">pending {q_pending} / dead {q_dead}</span>'
+                  f'{"  <b>⚡ DLQ有り</b>" if q_dead > 0 else ""}')
+        # 部門別の内訳(pending/dead がある部門のみ)
+        by_dept = ctx.get("queue", {})
+        if by_dept:
+            items = []
+            for d, v in sorted(by_dept.items()):
+                parts = []
+                if v.get("pending"):
+                    parts.append(f'Q{v["pending"]}')
+                if v.get("dead"):
+                    parts.append(f'DLQ{v["dead"]}')
+                items.append(f'{html.escape(d)}:{"/".join(parts)}')
+            q_body += '  <span class="ts">(' + " / ".join(items) + ")</span>"
+    queue_section = f'<div class="qsect"><b>📬 キューDB(inbox.db)</b>{q_body}</div>'
+
+    # 所有権黒板セクション
+    own = ctx.get("ownership", {})
+    if own:
+        own_items = "".join(
+            f'<li><span class="claimed">📌 {esc(t, 44)}</span>'
+            f' ← <b>{html.escape(v.get("owner", "?"))}</b>'
+            f' <span class="ts">{html.escape(str(v.get("ts", ""))[:16])}</span>'
+            f'{(" / " + esc(v.get("doc"), 30)) if v.get("doc") else ""}</li>'
+            for t, v in sorted(own.items(), key=lambda x: x[1].get("ts", ""), reverse=True)[:10]
+        )
+        own_section = f'<div class="own"><b>🏷 所有権黒板(占有中 {len(own)}件)</b><ul>{own_items}</ul></div>'
+    else:
+        own_section = ''
+
     tl = []
     for e in ctx["events"]:
         tl.append((e.get("created_at"), "dept_events", esc(e.get("source_dept"), 18),
@@ -657,6 +755,8 @@ def render_html(ctx, rooms, gen_epoch):
  <span>🔧 本日のCHG(JST): <b>{chg_today}</b></span><span>🚨 最新: {inc_html}</span></div>
 <div class="ceo">👑 <b>CEO室 — Chami</b>: あなた待ちの案件<ul>{ceo_items}</ul></div>
 <div class="mach"><b>⚙ 機械室(常駐)</b>{dmn_html}<span class="ts">最終確認: {epoch_jst(dmn_at) or "—"}</span></div>
+{queue_section}
+{own_section}
 <div class="grid">{"".join(rooms)}</div>
 <div class="timeline"><h2>📜 タイムライン(dept_events + git log)</h2><ul>{tl_html}</ul></div>
 <footer>ローカル専用・非公開 / 再生成: python scripts/office/build_office.py --open /
@@ -734,10 +834,17 @@ def main():
         "reqs": d1.get("reqs", []), "d1_ok": d1_ok, "d1_error": d1_err,
         "presence": load_presence(now_epoch), "inbox": load_inbox_counts(),
         "daemons": load_daemons(), "git": load_git_log(), "incident": load_latest_incident(),
+        "ownership": load_ownership(),
         "dept_extra": dept_extra, "dept_detail": dept_detail, "room_color": room_color,
         # 同じ入力なら同じ出力にする(F7: 無シードだと再生成のたび無意味な差分が出る)
         "rng": random.Random(to_jst(now).strftime("%Y-%m-%d")),
     }
+
+    q_by_dept, q_pending, q_dead, q_err = load_queue_db()
+    ctx["queue"] = q_by_dept
+    ctx["q_pending"] = q_pending
+    ctx["q_dead"] = q_dead
+    ctx["q_err"] = q_err
 
     rooms, drift = build_rooms(ctx)
     doc = render_html(ctx, rooms, now_epoch)
