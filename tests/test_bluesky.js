@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE } = require('../bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder } = require('../bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -404,6 +404,48 @@ test('X-6: 旧実装(1文字=1)との差＝過大表示の再現', function () {
   assert.strictEqual(old(t), 75, '旧実装は75と表示していた');
   assert.strictEqual(xWeightedLength(t), 114, '実際のXの換算は114');
   assert.ok(xWeightedLength(t) > old(t), '旧実装は少なく見積もる=書ける量を過大に見せる');
+});
+
+// ────────────────────────────────────────────────────────────
+// P-1〜P-8  紹介用短縮リンクのプレースホルダ方式(2026-07-23 Chami指定)
+//   テンプレ帳に「紹介用短縮リンク」という文字を書いておくと、実際の作品短縮リンクへ
+//   機械的に置換される。PR行の直下にプレースホルダがある形は「古い完成形」として
+//   剥がされてはいけない(それをやると二重化する)。
+// ────────────────────────────────────────────────────────────
+test('P-1: PR行+プレースホルダの対は剥がされない(現行の生きたテンプレとして保持)', function () {
+  var t = 'おすすめ漫画見つけた💕\nなんと今なら50%オフのおトク作品！✨\n\n' +
+    '↓詳細はこちらから🎀 #PR #漫画\n' + WORK_LINK_PLACEHOLDER;
+  assert.strictEqual(stripAutoBlocks(t), t, 'プレースホルダ形式はそのまま保持される');
+});
+test('P-2: acc2の文言(↓詳しくはこちらから🌙)でも同様に保持される', function () {
+  var t = '本文\n\n↓詳しくはこちらから🌙 #PR #漫画\n' + WORK_LINK_PLACEHOLDER;
+  assert.strictEqual(stripAutoBlocks(t), t);
+});
+test('P-3: プレースホルダを実リンクへ置換', function () {
+  var t = '見出し\n' + WORK_LINK_PLACEHOLDER + '\n続き';
+  assert.strictEqual(fillWorkLinkPlaceholder(t, 'https://5mgl.com/fCIQv', ''),
+    '見出し\nhttps://5mgl.com/fCIQv\n続き');
+});
+test('P-4: 短縮リンクが未取得ならfallback(生リンク)を使う', function () {
+  var t = WORK_LINK_PLACEHOLDER;
+  assert.strictEqual(fillWorkLinkPlaceholder(t, '', 'https://al.fanza.co.jp/?lurl=x&af_id=y'),
+    'https://al.fanza.co.jp/?lurl=x&af_id=y', '短縮が無ければ生リンクへ倒す(安全網measureWorkLink_が拾えるように)');
+});
+test('P-5: 短縮リンクも生リンクも無ければプレースホルダのまま(作品URL未入力時の旧仕様どおり)', function () {
+  assert.strictEqual(fillWorkLinkPlaceholder(WORK_LINK_PLACEHOLDER, '', ''), WORK_LINK_PLACEHOLDER);
+});
+test('P-6: プレースホルダが複数出現しても全て置換', function () {
+  var t = WORK_LINK_PLACEHOLDER + '\n' + WORK_LINK_PLACEHOLDER;
+  assert.strictEqual(fillWorkLinkPlaceholder(t, 'https://5mgl.com/x', ''), 'https://5mgl.com/x\nhttps://5mgl.com/x');
+});
+test('P-7: プレースホルダを含まない本文は無変化(fillWorkLinkPlaceholder)', function () {
+  assert.strictEqual(fillWorkLinkPlaceholder('普通の本文', 'https://5mgl.com/x', ''), '普通の本文');
+});
+test('P-8: 割引ブロック(セール行+実リンク)は従来どおり剥がされる(プレースホルダとは無関係の既存動作)', function () {
+  var t = 'おすすめ漫画見つけた💕\n\n↓詳細はこちらから🎀 #PR #漫画\n' + WORK_LINK_PLACEHOLDER +
+    '\n\n⭐大幅割引セール中の同人はこちら 🎀\nhttps://5mgl.com/fCIQv';
+  var expected = 'おすすめ漫画見つけた💕\n\n↓詳細はこちらから🎀 #PR #漫画\n' + WORK_LINK_PLACEHOLDER;
+  assert.strictEqual(stripAutoBlocks(t), expected, 'PR行+プレースホルダは残り、割引ブロックだけ剥がれる');
 });
 
 // ────────────────────────────────────────────────────────────

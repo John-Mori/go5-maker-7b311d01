@@ -582,6 +582,39 @@
     if (keys.length > 30) { keys.slice(0, keys.length - 30).forEach(function (k) { delete c[k]; }); } // 古いエントリ/旧ドメイン分は溜め過ぎない
     try { localStorage.setItem(DISC_CACHE_KEY, JSON.stringify(c)); } catch (e) {}
   }
+  // ---- 紹介用短縮リンクのキャッシュ(2026-07-23 プレースホルダ方式) ----
+  //   composePostText/renderPreviewの両方が「今の作品URLに対応する短縮リンク」を必要とするたび
+  //   毎回ネットワーク往復させないための素朴なメモリキャッシュ。resolveAffLink()(生の長いリンク)を
+  //   キーにする＝作品URL・af_idのどちらが変わってもresolveAffLink()の戻り値が変わるため自動的に
+  //   無効化される(割引リンクキャッシュと同じ設計思想)。
+  var workShortCache_ = { forLink: '', shareUrl: '' };
+  function cachedWorkShortLink_() {
+    var raw = resolveAffLink();
+    return (raw && workShortCache_.forLink === raw) ? workShortCache_.shareUrl : '';
+  }
+  function ensureWorkShortLink_(onReady) {
+    var raw = resolveAffLink(); if (!raw) return;
+    if (workShortCache_.forLink === raw && workShortCache_.shareUrl) { if (onReady) onReady(workShortCache_.shareUrl); return; }
+    if (workShortCache_._pendingFor === raw) return; // 同じリンクへの取得が既に進行中なら二重発火しない
+    workShortCache_._pendingFor = raw;
+    // ★実際の取得(makeShortAndShare)は次のティックへ遅延させる。
+    //   composePostText/renderPreviewはapplyAccount()の初回同期呼び出し(スクリプト冒頭・DOM構築中)から
+    //   既に呼ばれるが、makeShortAndShareが依存するSHORT(workerBase()等)はまだ後方(このファイルの
+    //   下の方)で`var SHORT = {...}`として代入される前＝初回はundefinedのまま参照して例外になる
+    //   (実際にこの事故が起きた：script全体が初回ロード時に静かに止まっていた)。
+    //   setTimeoutで1ティック遅らせれば、その時点ではスクリプト全体の実行が完了しSHORTも代入済みになる。
+    setTimeout(function () {
+      makeShortAndShare(raw).then(function (r) {
+        var share = (r && (r.shareUrl || r.shortUrl)) || '';
+        if (share) {
+          workShortCache_ = { forLink: raw, shareUrl: share };
+          // ★X欄(wireXTweet_)は別のIIFEスコープに居るため直接呼べない。DOMイベントで疎結合に通知する。
+          try { document.dispatchEvent(new CustomEvent('go5-work-short-ready')); } catch (e) {}
+        } else workShortCache_._pendingFor = ''; // 失敗時は再試行できるようにペンディング解除
+        if (onReady && share) onReady(share);
+      }).catch(function () { workShortCache_._pendingFor = ''; });
+    }, 0);
+  }
   // 選択中エントリ×af_id×現ドメインでキャッシュ済みか。
   function cachedDiscountLink_() {
     var af = curAfId_(); if (!af) return '';
@@ -814,11 +847,27 @@
     if (!AUTO_APPEND_ENABLED) return caption;
     caption = applyHookCta_(caption); // ★フックの深掘り＋CTA行(X案2・Chami承認2026-07-21)。PR行/リンクを付ける前に差し込む。
     var link = resolveAffLink();
-    // 本文に手動で作品URL/割引リンクを含めて書いた場合(例：しばらく手動投稿する場合)に、
-    // 自動追加分と重複しないよう、既に本文へ含まれていればスキップする。
-    // ★URLはPR行の「すぐ下の行」に置く(改行1つ)。PR行との間を空けるとURLが遠く見える/常に下段に
-    //   見える不具合の元だった(Chami指定の完成形＝案内テンプレ文の直下に対応URL・2026-07-20)。
-    var out = (link && caption.indexOf(link) < 0) ? (caption + '\n\n' + PR_LINE_() + '\n' + link) : caption;
+    var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
+    var out;
+    if (caption.indexOf(PH) >= 0) {
+      // ★プレースホルダ方式(2026-07-23 Chami指定): テンプレ帳の本文自体にPR行+プレースホルダが
+      //   既に書かれている。旧来の「PR行の直下に自動でリンクを足す」処理はしない(足すと二重になる)。
+      //   プレースホルダを実際の短縮リンクへ機械的に置換するだけでよい。
+      var short = link ? cachedWorkShortLink_() : '';
+      out = (window.BlueskyCore && window.BlueskyCore.fillWorkLinkPlaceholder)
+        ? window.BlueskyCore.fillWorkLinkPlaceholder(caption, short, link)
+        : caption;
+      // 未キャッシュなら取得だけ開始し、出来次第プレビュー/モーダル/X欄へ反映。
+      //   (投稿直前は既存の安全網measureWorkLink_が生リンクを検出して最終的に短縮するため、
+      //   ここで取得が間に合わなくても実際に投稿される文には生リンクが残るだけで壊れない)
+      if (link && !short) ensureWorkShortLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }); // X欄はgo5-work-short-readyイベントで自律的に追従する
+    } else {
+      // 本文に手動で作品URL/割引リンクを含めて書いた場合(例：しばらく手動投稿する場合)に、
+      // 自動追加分と重複しないよう、既に本文へ含まれていればスキップする。
+      // ★URLはPR行の「すぐ下の行」に置く(改行1つ)。PR行との間を空けるとURLが遠く見える/常に下段に
+      //   見える不具合の元だった(Chami指定の完成形＝案内テンプレ文の直下に対応URL・2026-07-20)。
+      out = (link && caption.indexOf(link) < 0) ? (caption + '\n\n' + PR_LINE_() + '\n' + link) : caption;
+    }
     // 🔥割引一覧。(ON中は常に「案内する作品URL」より後ろに付く＝ここで最後に追加するだけで済む)
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
@@ -879,19 +928,34 @@
     var caption = stripAutoBlocks_(els.text.value);
     if (AUTO_APPEND_ENABLED) caption = applyHookCta_(caption); // フックの深掘り＋CTA行(X案2・Chami承認2026-07-21)
     var link = resolveAffLink();
-    var hasLink = !!(link && caption.indexOf(link) >= 0);
-    var html = caption ? highlightLinks(escapeHtml(caption)) : '<span class="ph">(本文)</span>';
-    // 本文に既に作品URLが含まれる場合(手動投稿など)は自動追加分を重複させない。
-    if (!AUTO_APPEND_ENABLED) { /* 自動追加を一時停止中：本文そのまま */ }
-    // ★作品リンクは投稿直前に measureWorkLink_ が計測付き短縮URLへ置換する。プレビューだけ生リンクの
-    //   ままだと「このまま投稿されます」の表示が実態と食い違う(Chami報告2026-07-20)ので注記を添える。
-    else if (link && !hasLink) html += '\n\n' + highlightLinks(escapeHtml(PR_LINE_())) + '\n<span class="lnk">' + escapeHtml(link) + '</span>'
-      + '\n<span class="ph">(投稿時に計測用の短縮URLへ変換されます)</span>';
-    else if (!link) html += '\n\n<span class="ph">(投稿時にアフィリンクを自動で追加します)</span>';
+    var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
+    var short = link ? cachedWorkShortLink_() : '';
+    var PENDING = '(短縮リンク取得中…)';
+    var hasPlaceholder = caption.indexOf(PH) >= 0;
+    var hasRawLinkInCaption = !!(link && caption.indexOf(link) >= 0);
+    var needFetch = false;
+    // ★プレビューには生の長いリンクを一切出さない(Chami指定2026-07-23)。短縮できていれば短縮版、
+    //   まだなら「取得中」の目印だけを見せる(生リンクの一瞬表示すら避ける)。実際に投稿される文の
+    //   組み立ては composePostText 側にある(こちらは表示専用の派生ロジック)。
+    var dispCaption = caption;
+    if (hasPlaceholder) {
+      if (short) dispCaption = dispCaption.split(PH).join(short);
+      else { dispCaption = dispCaption.split(PH).join(PENDING); needFetch = true; }
+    } else if (link && !hasRawLinkInCaption) {
+      if (short) dispCaption += '\n\n' + PR_LINE_() + '\n' + short;
+      else { dispCaption += '\n\n' + PR_LINE_() + '\n' + PENDING; needFetch = true; }
+    } else if (hasRawLinkInCaption) {
+      if (short) dispCaption = dispCaption.split(link).join(short);
+      else { dispCaption = dispCaption.split(link).join(PENDING); needFetch = true; }
+    }
+    if (needFetch) ensureWorkShortLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); });
+
+    var html = dispCaption ? highlightLinks(escapeHtml(dispCaption)) : '<span class="ph">(本文)</span>';
+    if (AUTO_APPEND_ENABLED && !link) html += '\n\n<span class="ph">(投稿時にアフィリンクを自動で追加します)</span>';
     // 🔥割引一覧(composePostTextと同じ位置＝作品URLより後ろ)をプレビューにも反映。同じ理由で重複防止。
     if (AUTO_APPEND_ENABLED && discountListOn_()) {
       var dlink = cachedDiscountLink_();
-      if (dlink) { if (caption.indexOf(dlink) < 0) html += '\n\n' + escapeHtml(DISCOUNT_LEAD_()) + '\n<span class="lnk">' + escapeHtml(dlink) + '</span>'; }
+      if (dlink) { if (dispCaption.indexOf(dlink) < 0) html += '\n\n' + escapeHtml(DISCOUNT_LEAD_()) + '\n<span class="lnk">' + escapeHtml(dlink) + '</span>'; }
       else html += '\n\n<span class="ph">(🔥割引一覧リンクを準備中…)</span>';
     }
     if (els.pvBody) els.pvBody.innerHTML = html;
@@ -2212,6 +2276,7 @@
     //   ★本文はBlueskyと共通(Chami指定2026-07-21「投稿する内容はブルースカイもXも同じ」)。
     //   新しい文言生成はせず、既存の composePostText()(セール行含む・投稿ボタン③つで実績のある
     //   組み立て)をそのまま使う。「📎 短縮URLを挿入」で作品リンクだけ手動プレビュー差し替え可能。
+    var X_LINK_PENDING = '(短縮リンク取得中…)'; // Blueskyプレビューと共通の目印文字列
     function composeXText() {
       var base = composePostText();
       var rawLink = resolveAffLink();
@@ -2219,6 +2284,17 @@
       // measureWorkLink_ が同じ計測付き短縮へ差し替えるため、押し忘れても生リンクのままにはならない)
       if (_xOverrideShort && rawLink && base.indexOf(rawLink) >= 0) {
         return base.replace(rawLink, _xOverrideShort);
+      }
+      // ★composePostTextは実送信時の安全網として生の長いリンクへフォールバックすることがある
+      //   (紹介用短縮リンクの取得が間に合わなかった場合)。表示欄には生リンクを一切出さない
+      //   (Chami指定2026-07-23・Blueskyプレビューと同じ方針)ので、ここで短縮版か取得中の目印へ
+      //   差し替える。取得中ならensureWorkShortLink_を起動し、出来次第X欄も再構成する
+      //   (go5-work-short-readyイベント経由・composePostText側と二重発火しない共有キャッシュ)。
+      if (rawLink && base.indexOf(rawLink) >= 0) {
+        var short = cachedWorkShortLink_();
+        if (short) return base.split(rawLink).join(short);
+        ensureWorkShortLink_(function () {}); // composePostText側と同じキャッシュ・二重取得はしない
+        return base.split(rawLink).join(X_LINK_PENDING);
       }
       return base;
     }
@@ -2257,6 +2333,8 @@
     if (els.workUrl) els.workUrl.addEventListener('input', function () { _xOverrideShort = ''; refreshXTweet(); });
     if (els.movieWorkUrl) els.movieWorkUrl.addEventListener('input', function () { _xOverrideShort = ''; refreshXTweet(); });
     document.addEventListener('account-changed', function () { _xOverrideShort = ''; refreshXTweet(); });
+    // ★composePostText側で紹介用短縮リンクの取得が完了した時にX欄も追従させる(別IIFEスコープのため疎結合通知)。
+    document.addEventListener('go5-work-short-ready', function () { refreshXTweet(); });
     refreshXTweet();
 
     // 📎 短縮URLを挿入：link-worker 経由で作品URLを短縮し、生リンクを差し替える
@@ -2288,6 +2366,9 @@
       xCopy.addEventListener('click', function () {
         var text = xTxt.value;
         if (!text.trim()) { if (xStatus) xStatus.textContent = '本文がありません。'; return; }
+        // ★「取得中」の目印はプレビュー専用の表示であり、このままコピーすると意味不明な文字列が
+        //   実際にXへ投稿されてしまう。取得できるまでコピーさせない(Chami指定の完成形保証)。
+        if (text.indexOf(X_LINK_PENDING) >= 0) { if (xStatus) xStatus.textContent = '⏳ 短縮リンクを取得中です。少し待ってからコピーしてください。'; return; }
         xCopy.disabled = true;
         if (xStatus) xStatus.textContent = '計測用の短縮URLへ変換中…';
         measureWorkLink_(text).then(function (mw) {

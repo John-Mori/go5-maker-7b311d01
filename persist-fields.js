@@ -27,6 +27,12 @@
     // affiliate.js(afId は fanza_af_id で保存済み)／割引セレクト・新作チェック(アカウント切替でリセット運用)
     afId: 1, discountSel: 1, discountSel2: 1, discountSelPc: 1,
     discountNew: 1, discountNew2: 1, discountNewPc: 1,
+    // X(Twitter)欄の本文(xTweetText)は常にBlueskyの本文/作品URL/割引URLから機械的に組み立て直す
+    // 完全な派生値(bluesky.js:refreshXTweet)。読み取り専用を解除(2026-07-23)した際、この汎用復元に
+    // 拾われてしまい、bluesky.js側で正しく組み立てた直後の値をここが古い値で上書きしていた
+    // (script読み込み順=bluesky.js→persist-fields.jsのため、後勝ちで壊れる)。手で書き換えても
+    // 本文/URLが変わればすぐ再構成で上書きされる欄なので、そもそも保存/復元してはいけない。
+    xTweetText: 1,
     // theme-settings.js(ボタン色)
     colorSave: 1, colorLoad: 1, colorReset: 1, colorUndo: 1,
     pickSave: 1, pickLoad: 1, pickReset: 1, pickUndo: 1,
@@ -83,6 +89,15 @@
       el.addEventListener("change", onChange);
     });
   }
+
+  // ★EXCLUDEへ後から追加した欄は、それ以前に汚染された field_<id> が端末に残り続ける
+  //   (EXCLUDEはこれ以降の保存/復元を止めるだけで、既存の保存値は消えない)。
+  //   一度だけ掃除する。xTweetText はEXCLUDE追加時点(2026-07-23)で汚染が実際に確認されたため対象。
+  (function cleanupExcludedLeftovers_() {
+    if (load("field_cleanup_v1") === "1") return;
+    Object.keys(EXCLUDE).forEach(function (id) { try { localStorage.removeItem(key(id)); } catch (e) {} });
+    save("field_cleanup_v1", "1");
+  })();
 
   // body 末尾で読み込まれる前提。(app.js 等の初期化＝既定値投入の後に復元したい)
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", restoreAndWire);

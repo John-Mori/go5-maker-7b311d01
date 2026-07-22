@@ -288,15 +288,51 @@
    * @param {string} text
    * @returns {string}
    */
+  // ---- 紹介用短縮リンクのプレースホルダ方式(2026-07-23 Chami指定) ----
+  //   従来は「PR行の直下に自動で作品リンクを足す」方式だったが、これだと本文中でリンクの位置を
+  //   自由に決められない(常にPR行の直下固定)。Chamiはテンプレ帳に本文を保存する際、リンクを置きたい
+  //   場所へ直接この文字列を書き込む運用に変更した。システムは本文中のこの文字列を実際の作品短縮
+  //   リンクへ機械的に置換するだけでよい(位置はテンプレ側が決める・見出し文言もアカウント別に変えてよい)。
+  var WORK_LINK_PLACEHOLDER = '紹介用短縮リンク';
+  /**
+   * 本文中のプレースホルダ(WORK_LINK_PLACEHOLDER)を実リンクへ置換する。純粋関数。
+   * shortLink(計測付き短縮URL)が用意できていればそれを、まだ用意できていなければ
+   * fallbackLink(生の長いリンク)を使う。どちらも無い(作品URL未入力)ならプレースホルダのまま返す
+   * (＝リンクが無い時に何も足さない、という旧仕様の挙動を保つ)。
+   * ★fallbackLinkへ倒すのは安全側の判断。短縮取得が間に合わなかった場合でも、投稿直前の
+   *   measureWorkLink_(WORK_LINK_RE一致で短縮変換する既存の安全網)がこの生リンクを検出して
+   *   最終的に短縮できる。プレースホルダの文字列(日本語)のままでは安全網が検出できず、
+   *   意味不明な文字列が実際に投稿されてしまう恐れがあるため、必ずURL形式を残す。
+   * @param {string} text
+   * @param {string} shortLink
+   * @param {string} [fallbackLink]
+   * @returns {string}
+   */
+  function fillWorkLinkPlaceholder(text, shortLink, fallbackLink) {
+    var s = String(text == null ? '' : text);
+    var repl = shortLink || fallbackLink || '';
+    if (!repl) return s;
+    return s.split(WORK_LINK_PLACEHOLDER).join(repl);
+  }
   function stripAutoBlocks(text) {
     var lines = String(text == null ? '' : text).split('\n');
     var out = [];
     for (var i = 0; i < lines.length; i++) {
       var t = lines[i].trim();
       if (t === HOOK_DEEPEN_LINE || t === CTA_LINE) continue; // 単独行として剥がす(直下は消費しない)
-      if (KNOWN_PR_LINES.indexOf(t) < 0 && KNOWN_DISCOUNT_LEADS.indexOf(t) < 0) { out.push(lines[i]); continue; }
-      // 見出し行を落とす。直下が「裸URLだけの行」ならそれも古いリンクなので一緒に落とす。
-      if (i + 1 < lines.length && /^https?:\/\/\S+$/.test(lines[i + 1].trim())) i++;
+      var isPrLine = KNOWN_PR_LINES.indexOf(t) >= 0;
+      if (isPrLine || KNOWN_DISCOUNT_LEADS.indexOf(t) >= 0) {
+        // ★PR行の直下が「まだ実リンクに置換されていないプレースホルダ」なら、これは古い完成形では
+        //   なく現行の生きたテンプレなので剥がさない(2026-07-23 プレースホルダ方式)。
+        if (isPrLine && i + 1 < lines.length && lines[i + 1].trim() === WORK_LINK_PLACEHOLDER) {
+          out.push(lines[i]);
+          continue;
+        }
+        // 見出し行を落とす。直下が「裸URLだけの行」ならそれも古いリンクなので一緒に落とす。
+        if (i + 1 < lines.length && /^https?:\/\/\S+$/.test(lines[i + 1].trim())) i++;
+        continue;
+      }
+      out.push(lines[i]);
     }
     // 行を抜いた跡の空行が続くのを詰める＋末尾の空白を落とす(compose/previewで同じ形にする)
     return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t\r\n]+$/, '');
@@ -369,6 +405,8 @@
     DEFAULT_SERVICE: DEFAULT_SERVICE,
     buildBlueskyPost: buildBlueskyPost,
     stripAutoBlocks: stripAutoBlocks,
+    WORK_LINK_PLACEHOLDER: WORK_LINK_PLACEHOLDER,
+    fillWorkLinkPlaceholder: fillWorkLinkPlaceholder,
     insertHookCta: insertHookCta,
     stripHookCtaLines: stripHookCtaLines,
     HOOK_DEEPEN_LINE: HOOK_DEEPEN_LINE,
