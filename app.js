@@ -491,8 +491,15 @@
     return (t.slice(0, 60) || "video");
   }
   // 保存ファイル名用：定型投稿タグを非表示にし、★改行は無視して連続した文字列にする。(2行モードでも1つの名前に)
+  //   このtitleForBurnの結果は投稿記録(スプレッドシートの題名(コメント)列)の題名にもなる(video-created
+  //   イベントのtitleとしてbluesky.jsへ渡る)ため、記録に改行・余分な空白を残さないことが重要(Chami指摘2026-07-23)。
+  //   ★行ごとにtrimしてから結合する。旧実装は単純に\nを除去するだけで、行末尾のスペースがそのまま
+  //   結合部に残る余地があった(例「行1 \n行2」→「行1 行2」は良いが「行1  \n  行2」→二重空白が残る)。
+  //   行ごとtrim→区切り無しで結合→万一残った連続空白を1つに圧縮→全体trim、の順で確実に1行・素の文字列にする。
   function titleForBurn(s) {
-    var t = String(s == null ? "" : s).replace(/\n+/g, "").trim();
+    var t = String(s == null ? "" : s)
+      .split("\n").map(function (line) { return line.trim(); }).join("")
+      .replace(/[ \t　]{2,}/g, " ").trim();
     return (typeof Go5Util !== "undefined" && Go5Util.stripPostTags) ? Go5Util.stripPostTags(t) : t;
   }
   // 動画へ焼く描画用：定型投稿タグを除去しつつ改行(\n)は保持。(2行モードの行分割に使う)
