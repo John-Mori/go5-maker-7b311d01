@@ -845,7 +845,6 @@
     // 貼り付け済みの古い完成形(PR行/セール行+旧URL)を剥がしてから組み直す＝二重化しない。
     var caption = stripAutoBlocks_(els.text.value);
     if (!AUTO_APPEND_ENABLED) return caption;
-    caption = applyHookCta_(caption); // ★フックの深掘り＋CTA行(X案2・Chami承認2026-07-21)。PR行/リンクを付ける前に差し込む。
     var link = resolveAffLink();
     var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
     var out;
@@ -926,7 +925,6 @@
   function renderPreview() {
     // ★composePostTextと同じ前処理を通す。(ここがズレると「プレビューと実際の投稿が違う」の原因になる)
     var caption = stripAutoBlocks_(els.text.value);
-    if (AUTO_APPEND_ENABLED) caption = applyHookCta_(caption); // フックの深掘り＋CTA行(X案2・Chami承認2026-07-21)
     var link = resolveAffLink();
     var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
     var short = link ? cachedWorkShortLink_() : '';
