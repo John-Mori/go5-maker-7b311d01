@@ -93,7 +93,7 @@ function categoryOf_(f) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-23H(col1_format/col1_align/title_fix追加=1列目書式の月詠み揃え+既存2行モード題名の改行/余分空白を正規化。既定dry-run)';
+var GAS_VERSION = '2026-07-23I(header_format/header_align追加=全列のヘッダ書式を列名対応で比較・月詠みへ統一。col1のみでは不十分だったための拡張)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -137,6 +137,71 @@ function doGet(e) {
   // 一回限りのヘッダ移行: <exec URL>?action=migrate_headers で既存シートに FANZA 列を追加する。
   if (p.action === 'migrate_headers') {
     return jsonOut_(migrateHeaders_());
+  }
+  // 診断: 全列のヘッダ書式を両シートで比較する。(読み取り専用)
+  //   ★col1_format(1列目だけ)では不十分だった(Chami指摘・スクショで他列の色違いを提示された
+  //   2026-07-23)。ヘッダ行全体を列ごとに比較し、どこが違うかを機械的に洗い出す。
+  if (p.action === 'header_format') {
+    try {
+      var hfOut = {};
+      CH_SHEETS.forEach(function (nm) {
+        var hfsh = openSS_().getSheetByName(nm); if (!hfsh) { hfOut[nm] = null; return; }
+        var hfCols = hfsh.getLastColumn();
+        var hfHdrVals = hfsh.getRange(1, 1, 1, hfCols).getValues()[0].map(String);
+        var hfBg = hfsh.getRange(1, 1, 1, hfCols).getBackgrounds()[0];
+        var hfColor = hfsh.getRange(1, 1, 1, hfCols).getFontColors()[0];
+        var hfWeight = hfsh.getRange(1, 1, 1, hfCols).getFontWeights()[0];
+        var hfFamily = hfsh.getRange(1, 1, 1, hfCols).getFontFamilies()[0];
+        var hfSize = hfsh.getRange(1, 1, 1, hfCols).getFontSizes()[0];
+        var hfAlign = hfsh.getRange(1, 1, 1, hfCols).getHorizontalAlignments()[0];
+        var cols = [];
+        for (var hi = 0; hi < hfCols; hi++) {
+          cols.push({
+            col: hi + 1, header: hfHdrVals[hi], background: hfBg[hi], fontColor: hfColor[hi],
+            fontWeight: hfWeight[hi], fontFamily: hfFamily[hi], fontSize: hfSize[hi], align: hfAlign[hi],
+            width: hfsh.getColumnWidth(hi + 1)
+          });
+        }
+        hfOut[nm] = { colCount: hfCols, cols: cols };
+      });
+      // 月詠みを正として、列名一致するもの同士で差分を出す。
+      var diff = [];
+      if (hfOut['月詠み'] && hfOut['宵桜艶帖']) {
+        var byName = {}; hfOut['月詠み'].cols.forEach(function (c) { byName[c.header] = c; });
+        hfOut['宵桜艶帖'].cols.forEach(function (c) {
+          var ref = byName[c.header]; if (!ref) { diff.push({ header: c.header, status: 'not_in_月詠み' }); return; }
+          var keys = ['background', 'fontColor', 'fontWeight', 'fontFamily', 'fontSize', 'align', 'width'];
+          var d = {};
+          keys.forEach(function (k) { if (ref[k] !== c[k]) d[k] = { 月詠み: ref[k], 宵桜艶帖: c[k] }; });
+          if (Object.keys(d).length) diff.push({ header: c.header, col月詠み: ref.col, col宵桜艶帖: c.col, diff: d });
+        });
+      }
+      return jsonOut_({ ok: true, format: hfOut, mismatches: diff });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // 実行: 全列のヘッダ書式(背景/文字色/太さ/フォント/サイズ/揃え/幅)を月詠みへ揃える。
+  //   (&apply=1 で実行・既定はdry-runで差分だけ返す)列名で対応付けるため列の並びがズレていても正しく揃う。
+  if (p.action === 'header_align') {
+    try {
+      var haApply = String(p.apply || '') === '1';
+      var haSrc = openSS_().getSheetByName('月詠み'), haDst = openSS_().getSheetByName('宵桜艶帖');
+      if (!haSrc || !haDst) return jsonOut_({ ok: false, error: 'sheet not found' });
+      var haSrcMap = headerMap_(haSrc), haDstMap = headerMap_(haDst);
+      var haResult = [];
+      Object.keys(haDstMap).forEach(function (name) {
+        var sCol = haSrcMap[name], dCol = haDstMap[name];
+        if (!sCol) { haResult.push({ header: name, status: 'skip_no_月詠み_match' }); return; }
+        var sCell = haSrc.getRange(1, sCol), dCell = haDst.getRange(1, dCol);
+        var before = { background: dCell.getBackground(), fontColor: dCell.getFontColor(), width: haDst.getColumnWidth(dCol) };
+        var after = { background: sCell.getBackground(), fontColor: sCell.getFontColor(), width: haSrc.getColumnWidth(sCol) };
+        if (haApply) {
+          sCell.copyTo(dCell, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false); // 値は変えない・書式のみ
+          haDst.setColumnWidth(dCol, haSrc.getColumnWidth(sCol));
+        }
+        haResult.push({ header: name, colSrc: sCol, colDst: dCol, before: before, after: after, changed: before.background !== after.background || before.fontColor !== after.fontColor || before.width !== after.width });
+      });
+      return jsonOut_({ ok: true, applied: haApply, result: haResult });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 診断: 1列目(post_id)のヘッダ・データセルの書式を両シートで比較する。(読み取り専用)
   //   ★「1列目の表示や色が変わっていない」報告(2026-07-23)の実態確認用。
