@@ -292,7 +292,7 @@
   //   保存先は IndexedDB。(容量は端末の空きに応じて数百MB〜＝iOS Safariの localStorage 約5MB壁を回避)
   //   読みは同期のままにしたいので、起動時に全画像をメモリ(_imgMem)へハイドレートし以後は同期参照。
   //   書きは _imgMem を即更新＋IDBへ非同期反映。(write-through)IDB非対応時は localStorage フォールバック。
-  var _imgMem = { ref: {}, bsky: {}, post: {} };
+  var _imgMem = { ref: {}, bsky: {}, post: {}, used: {} };
   var _idbOk = !!(window.Go5Idb && window.Go5Idb.available());
   // ★IDB→メモリへの展開(hydrateImages_)は非同期。完了前は _imgMem が空なので refImgOf() が
   //   「実際にはIDBに在るのに null」を返す=モーダルのpendingが全項目空で作られ、そのまま保存すると
@@ -404,6 +404,37 @@
     } catch (e) { return false; } // 容量超過など
   }
 
+  // ── 動画で実際に使った画像(履歴アイテム単位＝videoId/itemKey)──
+  // 候補タブの ref は「候補として保存した全画像」。投稿履歴から同じ ref を読むと未採用画像まで混ざるため、
+  // 実際に動画へ渡した画像だけを used として別保存する。
+  function usedImgsOf_(key) {
+    if (!key) return [];
+    var r = _idbOk ? _imgMem.used[key] : (function () { try { return JSON.parse(localStorage.getItem('hist_usedimg__' + key) || 'null'); } catch (e) { return null; } })();
+    return (r && Array.isArray(r.imgs)) ? r.imgs.filter(Boolean) : [];
+  }
+  function usedImgKnown_(key) {
+    if (!key) return false;
+    if (_idbOk) return Object.prototype.hasOwnProperty.call(_imgMem.used, key);
+    try { return localStorage.getItem('hist_usedimg__' + key) != null; } catch (e) { return false; }
+  }
+  function usedImgSave_(key, imgs) {
+    if (!key) return false;
+    imgs = (imgs || []).filter(Boolean);
+    if (!imgs.length && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', key); } catch (e) {} return false; }
+    // 空配列もレコードとして残す。「未移行」ではなく「使用画像を明示的に削除した」と区別し、
+    // 旧候補画像の先頭が互換表示で復活するのを防ぐ。
+    var rec = { imgs: imgs, at: new Date().getTime() };
+    if (_idbOk) {
+      _imgMem.used[key] = rec;
+      window.Go5Idb.set(idbKey('used', key), rec).catch(idbFail_);
+      return true;
+    }
+    try {
+      localStorage.setItem('hist_usedimg__' + key, JSON.stringify(rec));
+      return true;
+    } catch (e) { return false; }
+  }
+
   // 起動時：IDBから全画像をメモリへ + localStorageの旧画像をIDBへ移行して5MB枠を解放。
   function hydrateImages_() {
     if (!_idbOk) return;
@@ -413,6 +444,7 @@
         if (k.indexOf('ref:') === 0) _imgMem.ref[k.slice(4)] = v;
         else if (k.indexOf('bsky:') === 0) _imgMem.bsky[k.slice(5)] = v;
         else if (k.indexOf('post:') === 0) _imgMem.post[k.slice(5)] = v;
+        else if (k.indexOf('used:') === 0) _imgMem.used[k.slice(5)] = v;
       });
       return migrateLocalImages_();
     }).then(function () {
@@ -2665,6 +2697,16 @@
       '</div>';
   }
 
+  // 動画完成時、実際に前景として使った1枚だけを動画IDへ保存する。
+  // 候補タブの全画像(ref)は一切コピーしないため、投稿履歴へ未採用画像が混ざらない。
+  document.addEventListener('video-created', function (e) {
+    var d = (e && e.detail) || {};
+    if (!d.videoId || !d.sourceImageFile || d.test) return;
+    fileToScaledDataUrl(d.sourceImageFile, function (durl, err) {
+      if (!err && durl) usedImgSave_(d.videoId, [durl]);
+    });
+  });
+
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
   try { window.Go5Cand = {
     render: render,
@@ -2675,6 +2717,9 @@
     postImgs: postImgsOf_,                                      // 履歴キー → 🛠️編集で添付した投稿画像の配列(無ければ[])
     postImgHas: function (key) { return postImgsOf_(key).length > 0; },
     postImgSave: postImgSave_,                                  // 履歴キー + 画像配列 を保存(write-through)
+    usedImgs: usedImgsOf_,                                      // 履歴キー → 実際に動画へ使った画像だけ(候補画像とは別)
+    usedImgKnown: usedImgKnown_,                                  // 履歴キーに明示保存済みか(空＝削除済みも区別)
+    usedImgSave: usedImgSave_,                                  // 履歴キー + 使用画像配列 を保存(write-through)
     // ── 🛠️編集の画像添付(貼り付け＋用途選択・Chami依頼2026-07-15)用の公開API ──
     pasteImage: function (cb) { return pasteImageFromClipboard_(cb); }, // クリップボード画像→dataURL(cb(durl,err))
     refImgsSet: function (cid, arr) { if (!cid) return false; var cur = refImgOf(cid) || {}; return refImgSave(cid, { imgs: (arr || []).filter(Boolean), comment: cur.comment || '', memo: cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' }); }, // 動画で使った画像(配列)を差し替え保存(コメント等は保持)

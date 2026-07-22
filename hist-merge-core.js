@@ -118,8 +118,20 @@
     return extra;
   }
 
+  // 投稿履歴の「動画で使った画像」を決める。
+  // 新しい履歴単位の used があればそれだけを使う。旧データは互換のため候補画像の先頭1枚だけに限定し、
+  // 候補タブの2枚目以降が投稿履歴へ混ざることを防ぐ。
+  function historyUsedImages(usedImages, legacyCandidateImages, usedRecordKnown) {
+    var used = Array.isArray(usedImages) ? usedImages.filter(Boolean) : [];
+    if (used.length) return used;
+    if (usedRecordKnown) return []; // 明示的に空へした履歴。旧候補画像を復活させない
+    var legacy = Array.isArray(legacyCandidateImages) ? legacyCandidateImages.filter(Boolean) : [];
+    return legacy.length ? [legacy[0]] : [];
+  }
+
   var api = {
     mergeSheetExtras: mergeSheetExtras,
+    historyUsedImages: historyUsedImages,
     workCidFromUrl: workCidFromUrl,
     workUrlFromCid: workUrlFromCid,
     historyHasEdit: historyHasEdit,

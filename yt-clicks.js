@@ -1025,12 +1025,17 @@
       // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に。(別短縮URLのため加算)
       // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する(例：0+5=5(5))。
       var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
-      // 作品の動画で使った画像。(＋Bluesky添付画像)作品cid経由で候補タブの保存画像を引く。
+      // 動画で実際に使った画像は履歴単位で読む。候補タブの全画像(ref)とは分離する。
+      // 旧データだけは先頭1枚を互換表示するが、2枚目以降の候補画像は絶対に投稿履歴へ混ぜない。
       var rImgCid = it.workUrl ? workCidOf_(it.workUrl) : '';
-      var rImgArr = (rImgCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(rImgCid) || []) : [];
-      var refThumb = rImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || '';
-      // 🛠️編集で後付け添付した投稿画像。(履歴アイテム単位)1枚目をカードに表示し、タップで全枚数をズーム。
       var pKey = it.videoId || k;
+      var legacyRefImgs = (rImgCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(rImgCid) || []) : [];
+      var storedUsedImgs = (window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(pKey) || []) : [];
+      var usedImgArr = (window.HistMerge && window.HistMerge.historyUsedImages)
+        ? window.HistMerge.historyUsedImages(storedUsedImgs, legacyRefImgs, !!(window.Go5Cand && window.Go5Cand.usedImgKnown && window.Go5Cand.usedImgKnown(pKey)))
+        : (storedUsedImgs.length ? storedUsedImgs : legacyRefImgs.slice(0, 1));
+      var refThumb = usedImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || '';
+      // 🛠️編集で後付け添付した投稿画像。(履歴アイテム単位)1枚目をカードに表示し、タップで全枚数をズーム。
       var postImgArr = (window.Go5Cand && window.Go5Cand.postImgs) ? (window.Go5Cand.postImgs(pKey) || []) : [];
       var postThumb = postImgArr[0] || '';
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
@@ -1090,7 +1095,7 @@
         '</div>' + // .vrow-body
         ((it.workUrl || refThumb || postThumb) ? '<div class="vrow-thumbcol">' +
           (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
-          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" src="' + esc(refThumb) + '" alt="動画で使った画像(タップで拡大)" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
+          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画で使った画像(タップで拡大)" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
           (postThumb ? '<img class="vrow-postimg" data-postkey="' + esc(pKey) + '" src="' + esc(postThumb) + '" alt="投稿画像(タップで拡大)" title="🛠️編集で添付した投稿画像。タップで拡大・左右で全枚数" loading="lazy">' : '') +
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
@@ -1161,12 +1166,14 @@
       im.addEventListener('click', function () { openFanzaModal_(im.getAttribute('data-fanza-thumb-url')); });
     });
 
-    // 動画で使った画像 → 拡大ズーム。Bluesky投稿画像が動画画像と異なれば左右フリックで両方見られるよう並べる。
-    //   モーダル各ページの上に用途見出しを表示: 動画生成用/Bluesky投稿用。同一画像なら1ページで「動画生成/Bluesky投稿」。
+    // 動画で使った画像 → 拡大ズーム。候補タブのref画像は読まず、履歴単位のusedだけを表示する。
+    //   旧履歴でused未保存の場合も、カードに表示済みの先頭1枚だけを使うため候補画像が後ろへ混ざらない。
     list.querySelectorAll('.vrow-refimg').forEach(function (im) {
       im.addEventListener('click', function () {
         var cid = im.getAttribute('data-refcid');
-        var imgs = (cid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(cid) || []).slice() : [];
+        var usedKey = im.getAttribute('data-usedkey');
+        var imgs = (usedKey && window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []).slice() : [];
+        if (!imgs.length && im.getAttribute('src')) imgs = [im.getAttribute('src')];
         var b = (cid && window.Go5Cand && window.Go5Cand.bskyImg) ? window.Go5Cand.bskyImg(cid) : '';
         var caps = imgs.map(function () { return '動画生成で使用した画像'; });
         if (b) {
@@ -1669,21 +1676,27 @@
     var modal = ov.querySelector('.vedit-modal'); if (!modal) return;
     var old = modal.querySelector('.vedit-postimg'); if (old) old.parentNode.removeChild(old);
     var api = window.Go5Cand || {};
-    if (!api.postImgs || !api.postImgSave) return; // 画像ストア未対応環境では出さない
+    if (!api.postImgs || !api.postImgSave || !api.usedImgs || !api.usedImgSave) return; // 画像ストア未対応環境では出さない
     var pKey = it.videoId || k;
     var cid = it.workUrl ? workCidOf_(it.workUrl) : '';
-    // 用途(保存先)。ref(動画で使った画像)/bsky(Bluesky添付)は作品cidが要る＝workUrlがある時だけ選べる。
-    var USES = [{ v: 'post', label: '投稿画像', multi: true }];
-    if (cid) { USES.push({ v: 'ref', label: '動画で使った画像', multi: true }); USES.push({ v: 'bsky', label: 'Bluesky投稿画像', multi: false }); }
+    // 用途(保存先)。動画使用画像は履歴単位のusedへ分離。Bluesky添付だけは作品cid単位。
+    var USES = [{ v: 'post', label: '投稿画像', multi: true }, { v: 'used', label: '動画で使った画像', multi: false }];
+    if (cid) USES.push({ v: 'bsky', label: 'Bluesky投稿画像', multi: false });
     var use = 'post';
     function useDef_() { for (var i = 0; i < USES.length; i++) { if (USES[i].v === use) return USES[i]; } return USES[0]; }
     function load_() {
-      if (use === 'ref') return (api.refImgs ? api.refImgs(cid) : []).slice();
+      if (use === 'used') {
+        var saved = (api.usedImgs(pKey) || []).slice();
+        var legacy = (cid && api.refImgs) ? (api.refImgs(cid) || []) : [];
+        return (window.HistMerge && window.HistMerge.historyUsedImages)
+          ? window.HistMerge.historyUsedImages(saved, legacy, !!(api.usedImgKnown && api.usedImgKnown(pKey)))
+          : (saved.length ? saved : legacy.slice(0, 1));
+      }
       if (use === 'bsky') { var b = api.bskyImg ? api.bskyImg(cid) : ''; return b ? [b] : []; }
       return (api.postImgs(pKey) || []).slice();
     }
     function store_(arr) {
-      if (use === 'ref') return api.refImgsSet ? api.refImgsSet(cid, arr) : false;
+      if (use === 'used') return api.usedImgSave(pKey, arr);
       if (use === 'bsky') return api.bskyImgSet ? api.bskyImgSet(cid, arr[0] || '') : false;
       return api.postImgSave(pKey, arr);
     }

@@ -132,6 +132,7 @@
   els.detail.value = DEFAULT_DETAIL;
 
   let fgImg = null;               // 前景画像
+  let fgFile = null;              // 実際に動画生成へ使った元ファイル(投稿履歴の使用画像を候補画像と分離して記録)
   let fontReady = false;
   let lastBlob = null, lastName = "video.mp4";
 
@@ -441,6 +442,7 @@
   els.photo.addEventListener("change", () => {
     const f = els.photo.files[0];
     if (!f) return;
+    fgFile = f;
     els.photoName.textContent = anonPhotoLabel_(f);
     const url = URL.createObjectURL(f);
     const img = new Image();
@@ -588,7 +590,7 @@
       //   Bluesky alt / GAS記録のtitle / 端末予約 / Drive のフォルダ名・ファイル名。
       //   ★空白に置換しない=詰めて連結する(Chami明示「改行や空白を挟まない」)。
       //   ここ1箇所で潰すことで購読側6経路すべてに効く(個別対処だと足し忘れが必ず出る)。
-      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest } }));
+      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest, sourceImageFile: fgFile } }));
     } catch (e) {
       setStatus("作成に失敗しました：" + e.message);
     } finally {
