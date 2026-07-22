@@ -24,12 +24,26 @@ var HEADERS40 = [
   'post_id','投稿日時','曜日','day-type','時間帯スロット','ジャンル','題名(コメント)',
   '作品cid','YouTube動画URL','短縮URL',
   'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','返信','フォロー増','短縮URLクリック数',
-  'FANZA発生成約','FANZA確定成約','発生報酬¥','確定報酬¥','承認率%','リンククリック率%','CVR発生%','CVR確定%',
-  'EPC発生¥','EPC確定¥','RPM(¥/1000再生)','post_uri','クリック更新日時','反応更新日時'
+  'リンククリック率%','post_uri','クリック更新日時','反応更新日時'
 ];
 // ?action=cleanup_columns で既存シートから削除する列。(コードが唯一の正・ClaudeCodeから増減)
-// ※分析数式(承認率/CVR/EPC/RPM)の計算元(FANZA成約・報酬系)やpost_uri(反応自動更新に必須)は含めない。
-var CLEANUP_COLUMNS = ['特別期間(手動)', 'サムネ/フック種別(A/B)', 'CTA・リンク提示方法', 'Blueskyラベル'];
+//
+// ★FANZA成約・報酬系とその派生指標を削除(Chami依頼 2026-07-23「検証不可のデータ列を削除」)。
+//   実測(action=column_fill)の根拠:
+//     ・FANZA発生成約/FANZA確定成約/発生報酬¥/確定報酬¥ … 両シートとも **0件**(手入力列・一度も入らず)
+//     ・承認率% … 0件
+//     ・CVR発生%/CVR確定%/EPC発生¥/EPC確定¥/RPM … 分子(成約・報酬)が空のため **常に0**が並ぶだけ
+//   FANZAは投稿単位の成約を返さない(管理画面が正)ため、これらは埋めようがない＝分析を汚すだけ。
+//   ★'リンククリック率%' は削除しない。クリック数÷視聴回数＝**両方とも実データがある**(検証可能)。
+//     FANZA由来ではないので今回の「検証不可」に当たらない。
+// ※'Bluesky投稿URL'/'Bitly_ID' は宵桜艶帖にだけ在った余分列。月詠みへ揃えるため削除。
+//   Bluesky投稿URLは'共有URL'と重複、Bitly_IDはBitly廃止済みで死んだ列。
+var CLEANUP_COLUMNS = [
+  '特別期間(手動)', 'サムネ/フック種別(A/B)', 'CTA・リンク提示方法', 'Blueskyラベル',
+  'FANZA発生成約', 'FANZA確定成約', '発生報酬¥', '確定報酬¥',
+  '承認率%', 'CVR発生%', 'CVR確定%', 'EPC発生¥', 'EPC確定¥', 'RPM(¥/1000再生)',
+  'Bluesky投稿URL', 'Bitly_ID'
+];
 // FANZA投稿時スナップショット列。(記録シート末尾追加。既存40列は不変)
 // レビュー件数は販売部数の代理指標。(実際の売上本数は取得不可)
 var FANZA_HEADERS = [
@@ -68,14 +82,18 @@ function categoryOf_(f) {
 //     作品cid / YouTube動画URL / 短縮URL / 視聴回数 / いいね / リポスト / 返信 /
 //     短縮URLクリック数 / post_uri / クリック更新日時 / 反応更新日時 / カテゴリ /
 //     元値list_price / 割引後price / 割引率pct / FANZA取得日時 / レビュー件数(代理指標) / レビュー平均 /
-//     承認率% / リンククリック率% / CVR発生% / CVR確定% / EPC発生¥ / EPC確定¥ / RPM(←数式・自動計算)
+//     リンククリック率%(←数式・クリック数÷視聴回数。両辺とも実データがあるので有効)
 //   【手動入力のみ＝APIで自動取得不可】ジャンル / インプレッション / インプCTR% /
-//     平均視聴維持率% / フォロー増 / FANZA発生成約 / FANZA確定成約 / 発生報酬¥ / 確定報酬¥
-//   ※FANZA成約・報酬の手動4列は、承認率%/CVR/EPC/RPM の計算元。消すと分析数式が無価値になる点に注意。
+//     平均視聴維持率% / フォロー増
+//   ※FANZA成約・報酬系(FANZA発生成約/FANZA確定成約/発生報酬¥/確定報酬¥)と、その派生数式
+//     (承認率%/CVR発生%/CVR確定%/EPC発生¥/EPC確定¥/RPM)は **2026-07-23に削除**(Chami依頼)。
+//     FANZAは投稿単位の成約を返さない=手入力するしかなく、実測で両シートとも0件だった。
+//     派生数式は分子が空のため常に0を並べるだけで、分析を汚していた。**復活させないこと。**
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
+//   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-22C(sheet_audit拡張=no_yt行詳細[rowNum/title/postUri/shortUrl]+dupDetail.hasYt+extraColCounts[Bitly_ID/Bluesky投稿URL]追加)';
+var GAS_VERSION = '2026-07-23B(検証不可列を削除=FANZA成約・報酬4列とその派生数式6列+宵桜のみの余分2列。実測0件を確認済。リンククリック率%は実データがあるため存置。Chami依頼)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -119,6 +137,33 @@ function doGet(e) {
   // 一回限りのヘッダ移行: <exec URL>?action=migrate_headers で既存シートに FANZA 列を追加する。
   if (p.action === 'migrate_headers') {
     return jsonOut_(migrateHeaders_());
+  }
+  // 診断: 全列の「実データが入っている行数」を返す。(読み取り専用)
+  //   ★列を消す前に「何が失われるか」を数える。0件なら消しても失うものは無い、と機械的に言える。
+  //   数えずに消すのは取り返しがつかない(スプレッドシートはコードと違って戻せない)。
+  if (p.action === 'column_fill') {
+    try {
+      var cfOut = {};
+      CH_SHEETS.forEach(function (nm) {
+        var csh = openSS_().getSheetByName(nm); if (!csh) { cfOut[nm] = null; return; }
+        var clast = csh.getLastRow(), ccols = csh.getLastColumn();
+        var chdr = csh.getRange(1, 1, 1, ccols).getValues()[0].map(String);
+        var counts = {};
+        if (clast >= 2) {
+          var vals = csh.getRange(2, 1, clast - 1, ccols).getValues();
+          for (var ci = 0; ci < ccols; ci++) {
+            var n = 0;
+            for (var ri = 0; ri < vals.length; ri++) {
+              var v = vals[ri][ci];
+              if (v !== '' && v !== null && v !== undefined) n++;
+            }
+            counts[chdr[ci]] = n;
+          }
+        } else { chdr.forEach(function (h) { counts[h] = 0; }); }
+        cfOut[nm] = { dataRows: Math.max(0, clast - 1), counts: counts };
+      });
+      return jsonOut_({ ok: true, fill: cfOut });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 不要列の削除: <exec URL>?action=cleanup_columns で CLEANUP_COLUMNS の列を各シートから削除。(冪等)
   if (p.action === 'cleanup_columns') {
@@ -318,7 +363,8 @@ function moveRow_(from, to, videoId, postUri, short) {
     if (!target) target = dlast + 1;
   }
   setComputed_(dst, dmap, target); // 計算式列は式を貼る(値上書きしない)
-  var COMPUTED = { '曜日': 1, 'day-type': 1, '時間帯スロット': 1, '承認率%': 1, 'リンククリック率%': 1, 'CVR発生%': 1, 'CVR確定%': 1, 'タイトル文字数': 1 };
+  // 数式で自動計算される列。(手で書き込まない)FANZA成約由来の数式は2026-07-23に撤去済み。
+  var COMPUTED = { '曜日': 1, 'day-type': 1, '時間帯スロット': 1, 'リンククリック率%': 1, 'タイトル文字数': 1 };
   headers.forEach(function (h, ci) {
     if (COMPUTED[h]) return;             // 計算式列は上書きしない
     var dc = dmap[h]; if (!dc) return;   // 目的地に無い列はスキップ
@@ -607,17 +653,11 @@ function setComputed_(sh, map, r) {
   if (cTitle) set('タイトル文字数', '=IF(' + cTitle + r + '="","",LEN(' + cTitle + r + '))');
   var cClick  = columnLetter_(map[clickColName_(map)]); // 短縮URLクリック数(旧称：開封数/Bitlyクリック)
   var cViews  = columnLetter_(map['視聴回数']);
-  var cFhap   = columnLetter_(map['FANZA発生成約']);
-  var cFok    = columnLetter_(map['FANZA確定成約']);
-  var cRhap   = columnLetter_(map['発生報酬¥']);
-  var cRok    = columnLetter_(map['確定報酬¥']);
-  if (cFok && cFhap)    set('承認率%',        '=IFERROR(' + cFok   + r + '/' + cFhap  + r + ',"")');
+  // ★FANZA成約・報酬由来の数式(承認率/CVR/EPC/RPM)は撤去(2026-07-23)。
+  //   分子となる手入力4列が一度も埋まらず(実測0件)、結果は常に0＝分析を汚すだけだった。
+  //   FANZAは投稿単位の成約を返さないため、今後も埋まる見込みが無い。
+  //   残すのは「両辺とも実データがある」リンククリック率%だけ。
   if (cClick && cViews) set('リンククリック率%','=IFERROR(' + cClick + r + '/' + cViews + r + ',"")');
-  if (cFhap && cClick)  set('CVR発生%',        '=IFERROR(' + cFhap  + r + '/' + cClick + r + ',"")');
-  if (cFok && cClick)   set('CVR確定%',        '=IFERROR(' + cFok   + r + '/' + cClick + r + ',"")');
-  if (cRhap && cClick)  set('EPC発生¥',        '=IFERROR(' + cRhap  + r + '/' + cClick + r + ',"")');
-  if (cRok && cClick)   set('EPC確定¥',        '=IFERROR(' + cRok   + r + '/' + cClick + r + ',"")');
-  if (cRok && cViews)   set('RPM(¥/1000再生)', '=IFERROR(' + cRok   + r + '/' + cViews + r + '*1000,"")');
 }
 
 // 純粋関数：post_id 列の値配列(2行目以降)と videoId から upsert 先の行番号(2始まり)を返す。
