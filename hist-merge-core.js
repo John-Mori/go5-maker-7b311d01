@@ -20,11 +20,60 @@
 (function (root) {
   'use strict';
 
+  // 記録シートは作品URLそのものではなく「作品cid」を正本として持つ。
+  // URL編集後の保存確認と、シート由来行の再表示で同じ変換規則を使う。
+  function workCidFromUrl(url) {
+    if (!url) return '';
+    var s = String(url);
+    var lm = s.match(/[?&]lurl=([^&]+)/);
+    if (lm) {
+      try {
+        var decoded = decodeURIComponent(lm[1]);
+        var inner = workCidFromUrl(decoded);
+        if (inner) return inner;
+      } catch (e) {}
+    }
+    var books = s.match(/book\.dmm\.(com|co\.jp)\/product\/([^/?&#\s]+)(?:\/([^/?&#\s]+))?/);
+    if (books) return books[3] || books[2];
+    var cid = s.match(/cid=([^/?&\s]+)/);
+    return cid ? cid[1] : '';
+  }
+
+  function workUrlFromCid(cid) {
+    cid = String(cid || '').trim();
+    if (!cid) return '';
+    if (/^d_/.test(cid)) return 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/';
+    if (/^\d+$/.test(cid)) return 'https://book.dmm.com/product/' + cid + '/';
+    return '';
+  }
+
+  // POSTはGASのCORS制約で本文を読めないため、action=history の読み直し結果で保存を確認する。
+  // 現在のhistory APIで確認可能な項目だけを比較し、videoIdの別行を成功扱いしない。
+  function historyHasEdit(items, expected) {
+    expected = expected || {};
+    var wantVid = String(expected.videoId || '');
+    if (!wantVid) return false;
+    var row = null;
+    (items || []).some(function (x) {
+      if (x && String(x.videoId || '') === wantVid) { row = x; return true; }
+      return false;
+    });
+    if (!row) return false;
+    if (expected.youtubeUrl && String(row.youtubeUrl || '') !== String(expected.youtubeUrl)) return false;
+    if (expected.workUrl) {
+      var wantCid = workCidFromUrl(expected.workUrl);
+      if (!wantCid || String(row.cid || '') !== wantCid) return false;
+    }
+    if (expected.workState && String(row.workState || '') !== String(expected.workState)) return false;
+    return true;
+  }
+
   // GAS(action=history)の1行 → 表示専用アイテム。render()が期待する形へ寄せる。
   //   ytUrl は yt-clicks.js の `ymap[k] || it.ytUrl` 経路にそのまま乗るキー名(youtubeUrl→ytUrl)。
   function toDisplayItem_(x) {
     var ts = 0;
     try { var t = Date.parse((x && x.postedAt) || ''); if (!isNaN(t)) ts = t; } catch (e) {}
+    var cid = String((x && x.cid) || '');
     return {
       postUri: String((x && x.postUri) || ''),
       videoId: String((x && x.videoId) || ''),
@@ -32,6 +81,8 @@
       ts: ts,
       shortUrl: String((x && x.shortUrl) || ''),
       shareUrl: String((x && x.shareUrl) || ''),
+      cid: cid,
+      workUrl: workUrlFromCid(cid),
       workState: String((x && x.workState) || ''),
       ytUrl: String((x && x.youtubeUrl) || ''),
       _fromSheet: true // 表示バッジ用: この端末の履歴には無くシートから補った行
@@ -69,6 +120,9 @@
 
   var api = {
     mergeSheetExtras: mergeSheetExtras,
+    workCidFromUrl: workCidFromUrl,
+    workUrlFromCid: workUrlFromCid,
+    historyHasEdit: historyHasEdit,
     _toDisplayItem: toDisplayItem_ // テスト用に露出
   };
   if (typeof window !== 'undefined') root.HistMerge = api;

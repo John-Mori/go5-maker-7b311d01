@@ -56,6 +56,29 @@ test('H-6: null/undefined/不正入力でも例外を投げず空配列', functi
   assert.deepStrictEqual(HM.mergeSheetExtras([], [null, undefined, {}]), []);
 });
 
+test('H-7: シートの作品cidを表示用の作品URLへ復元する', function () {
+  var item = HM._toDisplayItem({ cid: 'd_test001' });
+  assert.strictEqual(item.cid, 'd_test001');
+  assert.strictEqual(item.workUrl, 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_test001/');
+  assert.strictEqual(HM._toDisplayItem({ cid: '12345' }).workUrl, 'https://book.dmm.com/product/12345/');
+});
+
+test('H-8: 商品URLとアフィリエイトURLから作品cidを抽出する', function () {
+  assert.strictEqual(HM.workCidFromUrl('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_test001/'), 'd_test001');
+  assert.strictEqual(HM.workCidFromUrl('https://book.dmm.com/product/12345/'), '12345');
+  var inner = encodeURIComponent('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_test002/');
+  assert.strictEqual(HM.workCidFromUrl('https://al.fanza.co.jp/?lurl=' + inner), 'd_test002');
+});
+
+test('H-9: history再読込は同一videoIdかつ編集値の反映後だけ成功と判定する', function () {
+  var rows = [{ videoId: 'acc1-1', cid: 'd_old', youtubeUrl: '', workState: '旧作' }];
+  var expected = { videoId: 'acc1-1', workUrl: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_new/', workState: '旧作' };
+  assert.strictEqual(HM.historyHasEdit(rows, expected), false, '反映前のcidは失敗');
+  rows[0].cid = 'd_new';
+  assert.strictEqual(HM.historyHasEdit(rows, expected), true, '反映後のcidは成功');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc2-1', cid: 'd_new', workState: '旧作' }], expected), false, '別行は成功扱いしない');
+});
+
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);

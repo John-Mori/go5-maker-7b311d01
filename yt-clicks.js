@@ -796,6 +796,11 @@
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
     if (!gasUrl) { showModalErr_('GAS URLが設定されていません。'); return; }
     if (!it.videoId) { showModalErr_('この行にはvideoIdがありません。保存できません。'); return; }
+    var editCore = window.HistMerge;
+    if (workUrl && (!editCore || !editCore.workCidFromUrl || !editCore.workCidFromUrl(workUrl))) {
+      showModalErr_('作品URLから作品ID(cid)を読み取れません。DMM/FANZAの商品ページURLを確認してください。');
+      return;
+    }
 
     // 送信用コピーに編集内容を反映。キャッシュ(_sheetExtraCache)は成功後に更新する。
     var edited = {};
@@ -818,6 +823,7 @@
       videoId: edited.videoId,
       title: edited.title || '',
       postUri: edited.postUri || '',
+      postUrl: edited.postUrl || '',
       workUrl: edited.workUrl || '',
       shortUrl: edited.shortUrl || '',
       shareUrl: edited.shareUrl || '',
@@ -828,33 +834,67 @@
     payload.workState = edited.workState || '旧作';
 
     var curAcct = acct();
-    try {
-      fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) })
-        .then(function (res) { return res.json(); })
-        .then(function (r) {
-          if (!r || r.ok === false) throw new Error(r && r.error ? String(r.error) : 'GASエラー');
-          // 成功: キャッシュを更新してUIを即時反映
-          var c = _sheetExtraCache[curAcct];
-          if (c && c.items) {
-            for (var i = 0; i < c.items.length; i++) {
-              if (itemKey(c.items[i]) === k) {
-                var cached = c.items[i];
-                for (var q in edited) if (Object.prototype.hasOwnProperty.call(edited, q)) cached[q] = edited[q];
-                break;
-              }
-            }
-          }
-          closeModal_();
-          refresh();
-          if (ytUrl) pokeSnapshotNow_();
-        })
-        .catch(function (err) {
-          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = origText; }
-          showModalErr_('保存できませんでした。(' + (err && err.message ? err.message : 'エラー') + ')');
-        });
-    } catch (e) {
+    var finished = false, verifyStarted = false;
+    function finishError_(message) {
+      if (finished) return;
+      finished = true;
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = origText; }
-      showModalErr_('保存できませんでした。');
+      showModalErr_(message);
+    }
+    function finishSuccess_(sheetItems) {
+      if (finished) return;
+      finished = true;
+      // 成功: 読み直したシート正本をキャッシュへ反映し、UIを即時更新する。
+      var c = _sheetExtraCache[curAcct];
+      var merged = (window.HistMerge && window.HistMerge.mergeSheetExtras)
+        ? window.HistMerge.mergeSheetExtras(allItems(), sheetItems || []) : null;
+      if (c && merged) { c.items = merged; c.at = Date.now(); }
+      else if (c && c.items) {
+        for (var i = 0; i < c.items.length; i++) {
+          if (itemKey(c.items[i]) === k) {
+            var cached = c.items[i];
+            for (var q in edited) if (Object.prototype.hasOwnProperty.call(edited, q)) cached[q] = edited[q];
+            break;
+          }
+        }
+      }
+      closeModal_();
+      refresh();
+      if (ytUrl) pokeSnapshotNow_();
+    }
+    function verifyFromSheet_() {
+      if (verifyStarted || finished) return;
+      verifyStarted = true;
+      var tries = 0;
+      function check_() {
+        tries++;
+        jsonp_(gasUrl, { action: 'history', channel: curAcct, limit: 300 }, function (res) {
+          if (finished) return;
+          if (!res || !res.ok || !Array.isArray(res.items)) {
+            var reason = (res && res.__jsonpFail && res.reason === 'timeout') ? 'スプレッドシートの確認が時間切れになりました。'
+              : 'スプレッドシートの保存結果を確認できませんでした。';
+            finishError_(reason + ' 通信を確認して、もう一度「保存」を押してください。');
+            return;
+          }
+          var expected = { videoId: payload.videoId, youtubeUrl: payload.youtube_url, workUrl: payload.workUrl, workState: payload.workState };
+          if (window.HistMerge && window.HistMerge.historyHasEdit && window.HistMerge.historyHasEdit(res.items, expected)) {
+            finishSuccess_(res.items);
+            return;
+          }
+          if (tries < 3) { setTimeout(check_, 1200 * tries); return; }
+          finishError_('スプレッドシートへの反映を確認できませんでした。入力内容を確認して、もう一度「保存」を押してください。');
+        });
+      }
+      check_();
+    }
+    try {
+      // GASのPOST応答はCORSで本文を読めない。no-corsで確実に送信し、成否は上のhistory再読込で判定する。
+      // 送信自体が返らない環境でも3秒後に確認へ進むため、「保存中…」で永久停止しない。
+      fetch(gasUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) })
+        .then(verifyFromSheet_, verifyFromSheet_);
+      setTimeout(verifyFromSheet_, 3000);
+    } catch (e) {
+      verifyFromSheet_();
     }
   }
 
