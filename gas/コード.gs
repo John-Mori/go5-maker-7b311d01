@@ -93,7 +93,7 @@ function categoryOf_(f) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-23B(検証不可列を削除=FANZA成約・報酬4列とその派生数式6列+宵桜のみの余分2列。実測0件を確認済。リンククリック率%は実データがあるため存置。Chami依頼)';
+var GAS_VERSION = '2026-07-23E(trim_empty_rowsの境界を「表示される値がある最後の行」へ修正=数式の残骸だけの行も詰める。宵桜の974行は空行でなく数式残骸だった)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -163,6 +163,62 @@ function doGet(e) {
         cfOut[nm] = { dataRows: Math.max(0, clast - 1), counts: counts };
       });
       return jsonOut_({ ok: true, fill: cfOut });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // 末尾の空行を詰める: <exec URL>?action=trim_empty_rows
+  //   ★既定は dry-run(数えるだけ・消さない)。実際に消すのは &apply=1 を付けた時だけ。
+  //     行削除は列と違って「1行ズレただけで別の行が消える」ので、まず何が消えるかを見る。
+  //   ★安全条件を満たさない限り消さない:
+  //     ・削除するのは「最後の実データ行より下」だけ(データの間に挟まった空行には触らない)
+  //     ・その範囲の全セルが空であることを実際に確認してから消す
+  //   ・数式だけが入っている行も「空」とみなさない(getValuesは数式の結果を返すため、
+  //     結果が空文字なら空と判定される=意図せず消えるのを防ぐためgetFormulasも見る)
+  if (p.action === 'trim_empty_rows') {
+    try {
+      var apply = String(p.apply || '') === '1';
+      var trOut = [];
+      CH_SHEETS.forEach(function (nm) {
+        var tsh = openSS_().getSheetByName(nm);
+        if (!tsh) { trOut.push({ sheet: nm, status: 'not_found' }); return; }
+        var maxRow = tsh.getMaxRows(), cols = tsh.getLastColumn();
+        if (maxRow < 2 || cols < 1) { trOut.push({ sheet: nm, status: 'empty_sheet' }); return; }
+        var vals = tsh.getRange(2, 1, maxRow - 1, cols).getValues();
+        var frms = tsh.getRange(2, 1, maxRow - 1, cols).getFormulas();
+        // ★境界は「表示される値がある最後の行」。数式が残っているだけの行は空とみなす。
+        //   実測(宵桜艶帖)で分かったこと: 行を1000まで占有していたのは空行ではなく、
+        //   曜日/day-type/時間帯スロット/リンククリック率% の**数式の残骸**だった(974行分)。
+        //   これらは参照先が空なので表示は空。見た目は空行なのに「中身あり」と判定され消せなかった。
+        //   値が無い＝表示上なにも失われないので、数式ごと行を消してよい。
+        //   (逆に値がある行より上は絶対に触らない。データの間に挟まった空行も残す)
+        var lastUsed = 1; // シート行番号(1=ヘッダ)
+        for (var i = 0; i < vals.length; i++) {
+          for (var c = 0; c < cols; c++) {
+            if (vals[i][c] !== '' && vals[i][c] !== null) { lastUsed = i + 2; break; }
+          }
+        }
+        var firstTrim = lastUsed + 1, count = maxRow - lastUsed;
+        // 「値は無いが数式だけ残っている行」がどこから始まり、どの列が原因かを併せて返す。
+        //   これが分かると「空に見えるのに消せない行」の正体が特定できる。
+        var lastValue = 1, hdr = tsh.getRange(1, 1, 1, cols).getValues()[0].map(String);
+        for (var vi = 0; vi < vals.length; vi++) {
+          for (var vc = 0; vc < cols; vc++) {
+            if (vals[vi][vc] !== '' && vals[vi][vc] !== null) { lastValue = vi + 2; break; }
+          }
+        }
+        var ghostCols = {};
+        for (var gi = lastValue - 1; gi < frms.length; gi++) {          // 最終“値”行より下
+          for (var gc = 0; gc < cols; gc++) { if (frms[gi][gc] !== '') ghostCols[hdr[gc]] = (ghostCols[hdr[gc]] || 0) + 1; }
+        }
+        var info = { sheet: nm, maxRows: maxRow, lastUsedRow: lastUsed, lastValueRow: lastValue,
+                     trimFrom: firstTrim, trimCount: count, formulaOnlyBelowValue: ghostCols };
+        if (count <= 0) { info.status = 'already_tight'; trOut.push(info); return; }
+        if (!apply) { info.status = 'dry_run'; trOut.push(info); return; }
+        tsh.deleteRows(firstTrim, count);
+        info.status = 'trimmed';
+        info.maxRowsAfter = tsh.getMaxRows();
+        trOut.push(info);
+      });
+      return jsonOut_({ ok: true, applied: apply, result: trOut });
     } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 不要列の削除: <exec URL>?action=cleanup_columns で CLEANUP_COLUMNS の列を各シートから削除。(冪等)
