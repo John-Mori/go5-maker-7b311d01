@@ -2048,6 +2048,26 @@
   }
   // 追加モーダルの画像スロット。(最大4・左詰め)候補追加時に「動画生成用の画像」として一緒に保存される。
   var _addModalImgs = [];
+  var _candAddNotice = '';
+  var _candAddNoticeTimer = null;
+  var _candAddHydrationPending = false;
+  function showCandAddNotice_(msgEl, text) {
+    if (msgEl) msgEl.textContent = text || '';
+    _candAddNotice = text || '';
+    var pageMsg = $('candPageMsg');
+    if (pageMsg) {
+      pageMsg.textContent = _candAddNotice;
+      pageMsg.hidden = !_candAddNotice;
+    }
+    if (_candAddNoticeTimer) clearTimeout(_candAddNoticeTimer);
+    if (_candAddNotice) {
+      _candAddNoticeTimer = setTimeout(function () {
+        _candAddNotice = '';
+        var el = $('candPageMsg');
+        if (el) { el.textContent = ''; el.hidden = true; }
+      }, 8000);
+    }
+  }
   function renderAddSlots_() {
     if (!_addOverlay) return;
     var btns = _addOverlay.querySelectorAll('.cand-add-imgslot');
@@ -2162,6 +2182,7 @@
       '</div>' +
       (_sort === 'rank7d' ? '<div class="hint" style="margin-top:6px;">' + esc(RANK7D_NOTE) + '</div>' : '') +
       ((_sort === 'rank' || _sort === 'rank7d') ? '<div class="hint" style="margin-top:4px;">' + esc(SALES_NOTE) + '</div>' : '') +
+       '<div id="candPageMsg" class="hint" role="status" aria-live="polite"' + (_candAddNotice ? '' : ' hidden') + ' style="margin-top:7px;color:var(--accent);font-weight:700;">' + esc(_candAddNotice) + '</div>' +
       '</div>';
     body.innerHTML = header + '<div id="candEditForm"></div>' + '<div id="candList"></div>';
     $('candSort').addEventListener('change', function () { _sort = this.value; renderCandList(tabId); });
@@ -2203,7 +2224,11 @@
   }
   function addTwitterCandidate_(tabId, tw, inp, twInp, msg, onDone) {
     var key = itemsKey(tabId), items = lsGet(key, '[]');
-    if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) { msg.textContent = 'ℹ️ この投稿は既に追加されています(重複追加しません)'; return; }
+    if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) {
+      showCandAddNotice_(msg, 'ℹ️ 同じ投稿がすでに候補にあるため、1件にまとめたままです');
+      if (onDone) onDone();
+      return;
+    }
     var isB = tw.kind === 'bsky';
     var title = isB ? (tw.user ? ('🦋 @' + tw.user + ' のポスト') : '🦋 Blueskyのポスト')
                     : (tw.user ? ('🐦 @' + tw.user + ' のポスト') : '🐦 X(Twitter)のポスト');
@@ -2211,7 +2236,7 @@
     lsSet(key, items);
     attachAddImgs_(tw.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用)
     if (inp) inp.value = ''; if (twInp) twInp.value = '';
-    msg.textContent = isB ? '✅ Blueskyの投稿URLを追加しました' : '✅ Twitter(X)のURLを追加しました';
+    showCandAddNotice_(msg, isB ? '✅ Blueskyの投稿URLを候補に登録しました' : '✅ Twitter(X)のURLを候補に登録しました');
     renderCandList(tabId);
     if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
   }
@@ -2219,6 +2244,22 @@
     tabId = tabId || 'main';
     var key = itemsKey(tabId);
     var inp = $('candUrl'), twInp = $('candTwitter'), msg = $('candMsg');
+    // 候補の画像・メモはIndexedDBから非同期で展開される。重複作品への追記も既存内容との
+    // マージなので、展開前の空メモリを正として上書きしないよう読込み完了後に開始する。
+    if (_idbOk && !_hydrated) {
+      if (msg) msg.textContent = '⏳ 保存済みの候補データを確認中…';
+      if (_candAddHydrationPending) return; // 連打で待機処理を増やさない
+      _candAddHydrationPending = true;
+      whenImagesReady_(function () {
+        _candAddHydrationPending = false;
+        if (!_hydrated) {
+          if (msg) msg.textContent = '⚠️ 保存済みデータの確認に時間がかかっています。少し待って、もう一度押してください';
+          return; // 未展開のままマージすると既存画像・メモを失うため進めない
+        }
+        addCandidate(tabId, onDone);
+      });
+      return;
+    }
     var raw = (inp && inp.value || '').trim();
     var twRaw = (twInp && twInp.value || '').trim();
     var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(raw) : raw;
@@ -2261,11 +2302,12 @@
           refImgSave(r.cid, { imgs: mergedImgs, comment: cur.comment || '', memo: mergedMemo, twitterUrl: mergedTw, twitterUrl2: mergedTw2 });
           if (inp) inp.value = ''; if (twInp) twInp.value = ''; if (memoElDup) memoElDup.value = '';
           _addModalImgs = []; renderAddSlots_();
-          msg.textContent = 'ℹ️ 既に追加済み — X/画像/メモを追記しました';
+          showCandAddNotice_(msg, '✅ 候補に登録しました(同じ作品がすでにあったため、追加内容を1件にまとめました)');
           renderCandList(tabId);
           if (onDone) onDone();
         } else {
-          msg.textContent = 'ℹ️ この作品は既に追加されています(重複追加しません)';
+          showCandAddNotice_(msg, 'ℹ️ 同じ作品がすでに候補にあるため、1件にまとめたままです(新しい追加内容はありません)');
+          if (onDone) onDone();
         }
         return;
       }
@@ -2273,6 +2315,12 @@
       var cfg = workerCfg();
       var put = function (info) {
         var items = lsGet(key, '[]');
+        // 作品情報の取得中に連打・別端末同期が入っても、保存直前の再確認で同じcidを2件作らない。
+        if (items.some(function (x) { return x && x.cid === r.cid; })) {
+          showCandAddNotice_(msg, '✅ 候補に登録しました(同じ作品がすでにあったため、1件にまとめました)');
+          if (onDone) onDone();
+          return;
+        }
         var it = {
           url: url, cid: r.cid,
           title: (info && info.title) || '(タイトル未取得)',
@@ -2291,7 +2339,7 @@
         items.unshift(it);
         lsSet(key, items);
         attachAddImgs_(r.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用・左から順)
-        inp.value = ''; if (twInp) twInp.value = ''; msg.textContent = '✅ 追加しました';
+        inp.value = ''; if (twInp) twInp.value = ''; showCandAddNotice_(msg, '✅ 候補に登録しました');
         renderCandList(tabId);
         if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
       };
