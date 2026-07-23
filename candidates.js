@@ -110,6 +110,8 @@
   var _sort = 'added_desc';
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
+  var _workSearchByTab = {};
+  var DUPLICATE_WORK_NOTICE = '同じ作品が既に追加されているので統合';
   // 絞り込み：現在価格が _priceMax 円以下の作品のみ表示(0=無効)。localStorageで永続。
   var _priceMax = (function () { try { var n = parseInt(localStorage.getItem('cand_price_max') || '0', 10); return (n > 0) ? n : 0; } catch (e) { return 0; } })();
   // アカウント別「投稿済みを非表示」トグル。(両方同時ONで、いずれかで投稿済みの作品を隠せる)localStorageで永続。
@@ -2302,11 +2304,11 @@
           refImgSave(r.cid, { imgs: mergedImgs, comment: cur.comment || '', memo: mergedMemo, twitterUrl: mergedTw, twitterUrl2: mergedTw2 });
           if (inp) inp.value = ''; if (twInp) twInp.value = ''; if (memoElDup) memoElDup.value = '';
           _addModalImgs = []; renderAddSlots_();
-          showCandAddNotice_(msg, '✅ 候補に登録しました(同じ作品がすでにあったため、追加内容を1件にまとめました)');
+          showCandAddNotice_(msg, DUPLICATE_WORK_NOTICE);
           renderCandList(tabId);
           if (onDone) onDone();
         } else {
-          showCandAddNotice_(msg, 'ℹ️ 同じ作品がすでに候補にあるため、1件にまとめたままです(新しい追加内容はありません)');
+          showCandAddNotice_(msg, DUPLICATE_WORK_NOTICE);
           if (onDone) onDone();
         }
         return;
@@ -2317,7 +2319,7 @@
         var items = lsGet(key, '[]');
         // 作品情報の取得中に連打・別端末同期が入っても、保存直前の再確認で同じcidを2件作らない。
         if (items.some(function (x) { return x && x.cid === r.cid; })) {
-          showCandAddNotice_(msg, '✅ 候補に登録しました(同じ作品がすでにあったため、1件にまとめました)');
+          showCandAddNotice_(msg, DUPLICATE_WORK_NOTICE);
           if (onDone) onDone();
           return;
         }
@@ -2421,6 +2423,51 @@
       }).catch(function () { if (--pending === 0) done(); });
     });
   }
+  function normalizeWorkSearch_(value) {
+    var text = String(value || '');
+    try { text = text.normalize('NFKC'); } catch (e) {}
+    return text.toLowerCase();
+  }
+  function workSearchText_(it) {
+    return normalizeWorkSearch_([
+      it && it.title,
+      it && (it.author || it.makerName),
+      it && it.cid
+    ].filter(Boolean).join(' '));
+  }
+  function workSearchHtml_(tabId) {
+    return '<div class="cand-work-search" style="padding:2px 6px 10px;">' +
+      '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品を検索（部分一致）</label>' +
+      '<div style="display:flex;gap:6px;align-items:center;">' +
+      '<input id="candWorkSearch" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品を検索（部分一致）" autocomplete="off" style="flex:1 1 auto;min-width:0;box-sizing:border-box;margin:0;">' +
+      '<button id="candWorkSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
+      '</div><div id="candWorkSearchResult" class="hint" aria-live="polite" style="min-height:1.4em;margin-top:3px;"></div></div>';
+  }
+  function wireWorkSearch_(root, tabId) {
+    var input = root && root.querySelector('#candWorkSearch');
+    if (!input) return;
+    var clear = root.querySelector('#candWorkSearchClear');
+    var result = root.querySelector('#candWorkSearchResult');
+    var apply = function () {
+      var query = normalizeWorkSearch_(input.value);
+      _workSearchByTab[tabId] = input.value || '';
+      var shown = 0, total = 0;
+      root.querySelectorAll('.cand-card[data-work-search]').forEach(function (card) {
+        total++;
+        var matches = !query || (card.getAttribute('data-work-search') || '').indexOf(query) >= 0;
+        card.style.display = matches ? '' : 'none';
+        if (matches) shown++;
+      });
+      if (result) result.textContent = query ? shown + '件表示 / ' + total + '件中' : '';
+    };
+    input.addEventListener('input', apply);
+    if (clear) clear.addEventListener('click', function () {
+      input.value = '';
+      apply();
+      input.focus();
+    });
+    apply();
+  }
   function renderCandList(tabId) {
     tabId = tabId || 'main';
     invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
@@ -2442,12 +2489,13 @@
     var salesMiss = missingCount(topCids);
     var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件') +
       (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
-    el.innerHTML = head + arr.map(function (it) {
+    el.innerHTML = head + workSearchHtml_(tabId) + arr.map(function (it) {
       var act = _showHidden
         ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>'
         : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(it.cid) + '">非表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>';
       return candCard(it, act);
     }).join('');
+    wireWorkSearch_(el, tabId);
     wireCardCommon_(el);
     el.querySelectorAll('[data-hidecid]').forEach(function (b) {
       b.addEventListener('click', function () { if (!window.confirm('非表示にしますか？')) return; var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); renderCandList(tabId); });
@@ -2545,12 +2593,13 @@
         '<button id="candBulkToCand" type="button" class="ghost" style="width:auto;margin:0;font-size:12.5px;padding:6px 10px;">💡 全作品を候補に追加</button></div>' +
         '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (makerIds.length > 1 ? '(' + makerIds.length + 'サークル)' : '') + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
         (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
-      el.innerHTML = head + arr.map(function (it) {
+      el.innerHTML = head + workSearchHtml_(tabId) + arr.map(function (it) {
         var btn = _showHidden
           ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button>'
           : '<button type="button" class="cand-hide-btn" data-hide="' + esc(it.cid) + '">非表示</button>';
         return candCard(it, btn);
       }).join('');
+      wireWorkSearch_(el, tabId);
       wireCardCommon_(el);
       var bulkBtn = $('candBulkToCand');
       if (bulkBtn) bulkBtn.addEventListener('click', function () { addWorksToMain_(items, bulkBtn, tab.name); });
@@ -2720,7 +2769,7 @@
       (_refRec.twitterUrl2 ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B2↗' : 'X2↗') + '</a>'; })(_refRec.twitterUrl2) : '') +
       '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">投稿編集</button>' +
       '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>';
-    return '<div class="cand-card' + _postCls + '">' +
+    return '<div class="cand-card' + _postCls + '" data-work-search="' + esc(workSearchText_(it)) + '">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
         refImgHtml +
