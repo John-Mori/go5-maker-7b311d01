@@ -9,7 +9,7 @@ global.localStorage = { getItem() { return null; }, setItem() {} };
 global.document = { readyState: 'loading', addEventListener() {}, getElementById() { return null; } };
 const { analysisHtml } = require('../competitor.js');
 const titles = Array.from({ length: 25 }, (_, i) => ({
-  videoId: 'video-' + String(i).padStart(2, '0'),
+  videoId: 'vid' + String(i).padStart(8, '0'),
   channelName: i === 24 ? '<script>危険</script>' : 'チャンネル' + i,
   subscriberCount: i === 23 ? null : 1000 + i,
   title: '題名' + i,
@@ -25,6 +25,7 @@ assert.match(html, /登録者数 1,024/);
 assert.match(html, /\+240\/日/);
 assert.match(html, /総再生数 10,024/);
 assert.match(html, /投稿日 7月25日 8時05分/);
+assert.match(html, /href="https:\/\/www\.youtube\.com\/watch\?v=vid00000024"[^>]*>YouTube<\/a>/);
 assert.match(analysisHtml({}, { titles: [{ title: '日時なし' }] }), /投稿日 取得不可/);
 assert.match(html, /非公開・取得不可/);
 assert.doesNotMatch(html, /<script>危険<\/script>/, 'チャンネル名をHTMLとして解釈させない');
@@ -32,6 +33,8 @@ assert.match(html, /&lt;script&gt;危険&lt;\/script&gt;/);
 const unsafeDigestHtml = analysisHtml({ watchChannels: '<img src=x onerror=alert(1)>' }, { titles: [] });
 assert.doesNotMatch(unsafeDigestHtml, /<img src=x onerror=alert\(1\)>/, '監視数をHTMLとして解釈させない');
 assert.match(unsafeDigestHtml, /<b>0<\/b> 監視中/);
+const unsafeVideoHtml = analysisHtml({}, { titles: [{ videoId: '"><img src=x onerror=alert(1)>', title: '不正ID' }] });
+assert.doesNotMatch(unsafeVideoHtml, /onerror=alert/, '不正な動画IDからリンクを作らない');
 const pendingHtml = analysisHtml({}, { titles: [
   { videoId: 'measured', channelName: '計測済', title: '済', speed: 5, totalViews: 10 },
   { videoId: 'pending', channelName: '計測前', title: '待ち', speed: null, totalViews: 999 }

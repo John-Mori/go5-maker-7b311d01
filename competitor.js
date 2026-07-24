@@ -195,6 +195,10 @@
     return '投稿日 ' + (jst.getUTCMonth() + 1) + '月' + jst.getUTCDate() + '日 ' +
       jst.getUTCHours() + '時' + pad2(jst.getUTCMinutes()) + '分';
   }
+  function youtubeVideoUrl(videoId) {
+    var id = String(videoId || '').trim();
+    return /^[A-Za-z0-9_-]{11}$/.test(id) ? 'https://www.youtube.com/watch?v=' + encodeURIComponent(id) : '';
+  }
   // 分析パネルを描画(comp_digest=監視数/comp_titles=題名コーパス)。
   function analysisHtml(dg, tt) {
     var titles = (tt && tt.titles) || [];
@@ -219,13 +223,17 @@
     if (ranked.length) {
       html += '<div class="comp-an-k comp-an-top-title">🔥 いま伸びてる競合動画(1日の再生の伸び・上位20動画)</div>' +
         '<ol class="comp-an-top">' + ranked.map(function (t) {
+          var ytUrl = youtubeVideoUrl(t.videoId);
           return '<li class="comp-an-video">' +
             '<div class="comp-an-published">' + fmtPublishedAt(t.publishedAt) + '</div>' +
             '<div class="comp-an-video-channel"><span class="comp-an-channel-name">' + esc(t.channelName || '(チャンネル名未取得)') + '</span>' +
               '<span class="comp-an-subs">登録者数 ' + fmtCount(t.subscriberCount, '非公開・取得不可') + '</span></div>' +
             '<div class="comp-an-video-title">' + esc(t.title || '(題名未取得)') + '</div>' +
-            '<div class="comp-an-video-metrics"><span class="comp-an-spd">' + fmtSpeed(t.speed) + '</span>' +
+            '<div class="comp-an-video-metrics"><div class="comp-an-video-numbers">' +
+              '<span class="comp-an-spd">' + fmtSpeed(t.speed) + '</span>' +
               '<span class="comp-an-views">総再生数 ' + fmtCount(t.totalViews, '取得不可') + '</span></div>' +
+              (ytUrl ? '<a class="comp-an-youtube" href="' + esc(ytUrl) + '" target="_blank" rel="noopener noreferrer">YouTube</a>' : '') +
+            '</div>' +
           '</li>';
         }).join('') + '</ol>';
     } else {
