@@ -2485,7 +2485,7 @@
     return '<div class="cand-work-search" style="padding:2px 6px 10px;">' +
       '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品を検索（部分一致）</label>' +
       '<div style="display:flex;gap:6px;align-items:center;">' +
-      '<input id="candWorkSearch" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品を検索（部分一致）" autocomplete="off" style="flex:1 1 auto;min-width:0;box-sizing:border-box;margin:0;">' +
+      '<input id="candWorkSearch" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品を検索（部分一致）" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;">' +
       '<button id="candWorkSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
       '</div><div id="candWorkSearchResult" class="hint" aria-live="polite" style="min-height:1.4em;margin-top:3px;"></div></div>';
   }
