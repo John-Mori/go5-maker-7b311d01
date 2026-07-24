@@ -58,7 +58,7 @@ function parseIsoDuration_(iso) {
   return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2] || '0', 10) * 60) + parseInt(m[3] || '0', 10);
 }
 
-// ---- channels.list(statistics+contentDetails): id[] → {id:{subs,views,videos,uploads}} ----
+// ---- channels.list(snippet+statistics+contentDetails): id[] → {id:{name,subs,hiddenSubs,views,videos,uploads}} ----
 function ytChannels_(ids) {
   var key = ytApiKey_(), out = {};
   if (!key || !ids.length) return out;
@@ -66,14 +66,16 @@ function ytChannels_(ids) {
     if (!compQuotaAdd_(1)) break;
     var batch = ids.slice(i, i + 50);
     try {
-      var u = 'https://www.googleapis.com/youtube/v3/channels?part=statistics,contentDetails&id=' + batch.join(',') + '&key=' + encodeURIComponent(key);
+      var u = 'https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&id=' + batch.join(',') + '&key=' + encodeURIComponent(key);
       var res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
       if (res.getResponseCode() >= 300) continue;
       var d = JSON.parse(res.getContentText() || '{}');
       (d.items || []).forEach(function (it) {
-        var st = it.statistics || {}, cd = it.contentDetails || {};
+        var sn = it.snippet || {}, st = it.statistics || {}, cd = it.contentDetails || {};
         out[it.id] = {
+          name: sn.title || '',
           subs: st.subscriberCount != null ? parseInt(st.subscriberCount, 10) : null,
+          hiddenSubs: st.hiddenSubscriberCount === true,
           views: st.viewCount != null ? parseInt(st.viewCount, 10) : null,
           videos: st.videoCount != null ? parseInt(st.videoCount, 10) : null,
           uploads: (cd.relatedPlaylists && cd.relatedPlaylists.uploads) || ''
@@ -328,7 +330,9 @@ function runCompetitorDaily() {
   var stats = ytChannels_(ids);
   watch.forEach(function (w) {
     var s = stats[w.channelId]; if (!s) return;
-    if (s.subs != null) chSh.getRange(w.rowIndex, chMap['登録者数']).setValue(s.subs);
+    if (s.name) chSh.getRange(w.rowIndex, chMap['チャンネル名']).setValue(s.name);
+    if (s.hiddenSubs) chSh.getRange(w.rowIndex, chMap['登録者数']).setValue('');
+    else if (s.subs != null) chSh.getRange(w.rowIndex, chMap['登録者数']).setValue(s.subs);
     if (s.views != null) chSh.getRange(w.rowIndex, chMap['総再生数']).setValue(s.views);
     if (s.videos != null) chSh.getRange(w.rowIndex, chMap['動画数']).setValue(s.videos);
     if (s.uploads) { chSh.getRange(w.rowIndex, chMap['uploads']).setValue(s.uploads); w.uploads = s.uploads; }
@@ -539,7 +543,25 @@ function compDigest_() {
   return { ok: true, headers: COMP_WEEKLY_HEADERS, weekly: items, watchChannels: watch, candidateChannels: candidate };
 }
 
-// コピー部向け: 速度順のタイトルコーパス(特徴タグつき)
+// 日付値(Date/文字列)を日次キーへ正規化。同日複数スナップは後勝ちで1日にまとめる。
+function compDayKey_(value, tz) {
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, tz, 'yyyy-MM-dd');
+  }
+  var s = String(value == null ? '' : value).trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  var d = new Date(value);
+  return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+}
+function compDaysBetween_(fromDay, toDay) {
+  var a = new Date(fromDay + 'T00:00:00Z').getTime();
+  var b = new Date(toDay + 'T00:00:00Z').getTime();
+  if (!isFinite(a) || !isFinite(b) || b <= a) return 1;
+  return Math.max(1, Math.round((b - a) / 86400000));
+}
+
+// コピー部向け: 速度順のタイトルコーパス(特徴タグつき)。既存フィールドを維持し、画面用のチャンネル・再生情報を加算する。
 function compTitles_(days, top) {
   days = Math.min(Math.max(parseInt(days || '30', 10) || 30, 1), 90);
   top = Math.min(Math.max(parseInt(top || '50', 10) || 50, 1), 200);
@@ -554,34 +576,85 @@ function compTitles_(days, top) {
   if (vlast >= 2) {
     var vv = vSh.getRange(2, 1, vlast - 1, vSh.getLastColumn()).getValues();
     vv.forEach(function (r) {
-      var vid = r[vMap['video_id'] - 1]; if (!vid) return;
+      var vid = String(r[vMap['video_id'] - 1] || '').trim(); if (!vid) return;
       var pub = r[vMap['公開日時'] - 1];
       var t = pub ? new Date(pub).getTime() : 0;
-      if (t && t >= cutoff) meta[vid] = { title: r[vMap['タイトル'] - 1] || '', isShort: r[vMap['isShort'] - 1] || '', publishedAt: pub };
+      if (t && t >= cutoff) meta[vid] = {
+        videoId: vid,
+        channelId: String(r[vMap['channel_id'] - 1] || '').trim(),
+        title: r[vMap['タイトル'] - 1] || '',
+        isShort: r[vMap['isShort'] - 1] || '',
+        publishedAt: pub
+      };
     });
   }
-  // 速度(日次差分の最新)
+
+  // チャンネル名・登録者数。登録者数非公開/未取得はnullのまま返す。
+  var chSh = compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
+  var chMap = headerMap_(chSh);
+  var chlast = chSh.getLastRow();
+  var channels = {};
+  if (chlast >= 2) {
+    var cv = chSh.getRange(2, 1, chlast - 1, chSh.getLastColumn()).getValues();
+    cv.forEach(function (r) {
+      var cid = String(r[chMap['channel_id'] - 1] || '').trim(); if (!cid) return;
+      var rawSubs = r[chMap['登録者数'] - 1];
+      var subs = rawSubs === '' || rawSubs == null ? null : Number(rawSubs);
+      channels[cid] = {
+        name: String(r[chMap['チャンネル名'] - 1] || ''),
+        subscriberCount: isFinite(subs) ? subs : null
+      };
+    });
+  }
+
+  // video_id×暦日へ正規化。同日再実行はその日の最終値だけを使い、欠測日は経過日数で割って1日平均へ直す。
   var dSh = compSheet_(COMP_DAILY_SHEET, COMP_DAILY_HEADERS);
   var dlast = dSh.getLastRow();
-  var spd = {};
+  var daily = {};
   if (dlast >= 2) {
     var dv = dSh.getRange(2, 1, dlast - 1, COMP_DAILY_HEADERS.length).getValues();
-    var prev = {};
     dv.forEach(function (r) {
-      var vid = r[1]; if (!vid || !meta[vid]) return;
-      var views = r[3] === '' ? null : Number(r[3]); if (views == null) return;
-      if (prev[vid] != null) spd[vid] = views - prev[vid];
-      prev[vid] = views;
+      var vid = String(r[1] || '').trim(); if (!vid || !meta[vid]) return;
+      var views = r[3] === '' || r[3] == null ? null : Number(r[3]);
+      var day = compDayKey_(r[0], tz);
+      if (views == null || !isFinite(views) || !day) return;
+      if (!daily[vid]) daily[vid] = {};
+      daily[vid][day] = views;
     });
   }
+
   var out = [];
   Object.keys(meta).forEach(function (vid) {
-    var m = meta[vid];
+    var m = meta[vid], c = channels[m.channelId] || {};
+    var byDay = daily[vid] || {};
+    var dayKeys = Object.keys(byDay).sort();
+    var lastDay = dayKeys.length ? dayKeys[dayKeys.length - 1] : '';
+    var prevDay = dayKeys.length >= 2 ? dayKeys[dayKeys.length - 2] : '';
+    var measurementDays = prevDay ? compDaysBetween_(prevDay, lastDay) : null;
+    var totalViews = lastDay ? byDay[lastDay] : null;
+    var speed = prevDay ? Math.round((byDay[lastDay] - byDay[prevDay]) / measurementDays) : null;
     out.push({
-      title: m.title, isShort: m.isShort, speed: spd[vid] == null ? null : spd[vid],
-      features: compTitleFeatures_([m.title])
+      title: m.title,
+      isShort: m.isShort,
+      speed: speed,
+      features: compTitleFeatures_([m.title]),
+      videoId: m.videoId,
+      channelId: m.channelId,
+      channelName: c.name || '',
+      subscriberCount: c.subscriberCount == null ? null : c.subscriberCount,
+      totalViews: totalViews,
+      publishedAt: m.publishedAt,
+      measurementDays: measurementDays,
+      snapshotDate: lastDay
     });
   });
-  out.sort(function (a, b) { return (b.speed || 0) - (a.speed || 0); });
+  out.sort(function (a, b) {
+    var aHas = typeof a.speed === 'number', bHas = typeof b.speed === 'number';
+    if (aHas !== bHas) return bHas ? 1 : -1;
+    if (aHas && a.speed !== b.speed) return b.speed - a.speed;
+    var av = typeof a.totalViews === 'number' ? a.totalViews : -1;
+    var bv = typeof b.totalViews === 'number' ? b.totalViews : -1;
+    return (bv - av) || String(a.videoId).localeCompare(String(b.videoId));
+  });
   return { ok: true, days: days, count: Math.min(out.length, top), titles: out.slice(0, top) };
 }

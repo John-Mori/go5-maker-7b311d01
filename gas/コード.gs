@@ -93,7 +93,7 @@ function categoryOf_(f) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-23J(history削除をpost_id対応。post_uri/短縮URL欠損行も動画IDで1件削除)';
+var GAS_VERSION = '2026-07-24A(競合分析を上位20件化。チャンネル名・登録者数・日次伸び・総再生数を返す)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、

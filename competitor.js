@@ -178,14 +178,27 @@
       .map(function (h) { return h + '(' + tags[h] + ')'; });
     return { avgLen: Math.round(sumLen / n * 10) / 10, shortPct: Math.round(shorts / n * 100), topTags: top };
   }
+  function fmtCount(n, fallback) {
+    return typeof n === 'number' && isFinite(n) ? n.toLocaleString('ja-JP') : (fallback || '取得不可');
+  }
+  function fmtSpeed(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return '計測中';
+    return (n > 0 ? '+' : '') + n.toLocaleString('ja-JP') + '/日';
+  }
   // 分析パネルを描画(comp_digest=監視数/comp_titles=題名コーパス)。
-  function renderAnalysis(el, dg, tt) {
+  function analysisHtml(dg, tt) {
     var titles = (tt && tt.titles) || [];
     var st = titleStats(titles);
-    // 速度TOP(伸びてる競合動画)。speedがnull(=収集2日目前)なら「計測中」。
-    var withSpeed = titles.filter(function (t) { return typeof t.speed === 'number'; })
-      .sort(function (a, b) { return b.speed - a.speed; }).slice(0, 5);
-    var watch = (dg && dg.watchChannels) || 0;
+    // 速度TOP20(伸びてる競合動画)。計測前の動画は総再生数順で後ろに補い、最大20件を表示する。
+    var ranked = titles.slice().sort(function (a, b) {
+      var aHas = typeof a.speed === 'number', bHas = typeof b.speed === 'number';
+      if (aHas !== bHas) return bHas ? 1 : -1;
+      if (aHas && a.speed !== b.speed) return b.speed - a.speed;
+      return ((Number(b.totalViews) || 0) - (Number(a.totalViews) || 0)) ||
+        String(a.videoId || a.title || '').localeCompare(String(b.videoId || b.title || ''));
+    }).slice(0, 20);
+    var watchRaw = Number(dg && dg.watchChannels);
+    var watch = isFinite(watchRaw) && watchRaw >= 0 ? Math.floor(watchRaw) : 0;
     var html = '<div class="comp-an-head">📊 競合分析(自動収集・毎日4時更新)</div>' +
       '<div class="comp-an-kpis">' +
         '<span class="comp-an-kpi"><b>' + watch + '</b> 監視中</span>' +
@@ -193,15 +206,24 @@
         '<span class="comp-an-kpi">Short <b>' + st.shortPct + '</b>%</span>' +
       '</div>' +
       '<div class="comp-an-row"><span class="comp-an-k">頻出タグ</span>' + (st.topTags.length ? esc(st.topTags.join('  ')) : '(データ待ち)') + '</div>';
-    if (withSpeed.length) {
-      html += '<div class="comp-an-k" style="margin-top:8px;">🔥 いま伸びてる競合動画(1日の再生の伸び)</div>' +
-        '<ol class="comp-an-top">' + withSpeed.map(function (t) {
-          return '<li>' + esc(t.title) + ' <span class="comp-an-spd">+' + Number(t.speed).toLocaleString() + '/日</span></li>';
+    if (ranked.length) {
+      html += '<div class="comp-an-k comp-an-top-title">🔥 いま伸びてる競合動画(1日の再生の伸び・上位20動画)</div>' +
+        '<ol class="comp-an-top">' + ranked.map(function (t) {
+          return '<li class="comp-an-video">' +
+            '<div class="comp-an-video-channel"><span class="comp-an-channel-name">' + esc(t.channelName || '(チャンネル名未取得)') + '</span>' +
+              '<span class="comp-an-subs">登録者数 ' + fmtCount(t.subscriberCount, '非公開・取得不可') + '</span></div>' +
+            '<div class="comp-an-video-title">' + esc(t.title || '(題名未取得)') + '</div>' +
+            '<div class="comp-an-video-metrics"><span class="comp-an-spd">' + fmtSpeed(t.speed) + '</span>' +
+              '<span class="comp-an-views">総再生数 ' + fmtCount(t.totalViews, '取得不可') + '</span></div>' +
+          '</li>';
         }).join('') + '</ol>';
     } else {
       html += '<div class="comp-an-soon">🔥 伸び速度は収集2日目(明日4時)から算出されます。今夜は登録と初回収集(ベースライン)まで完了しています。</div>';
     }
-    el.innerHTML = html;
+    return html;
+  }
+  function renderAnalysis(el, dg, tt) {
+    el.innerHTML = analysisHtml(dg, tt);
   }
   // 分析データを取得して描画。GAS URL未設定なら案内。
   function loadAnalysis() {
@@ -233,5 +255,10 @@
   else wire();
 
   // 監視(GAS)側が使う: 登録チャンネルのID一覧を外へ公開。
-  try { window.Go5Competitors = { list: load, channelIds: function () { return load().map(function (c) { return c.channelId; }).filter(Boolean); } }; } catch (e) {}
+  try { window.Go5Competitors = {
+    list: load,
+    channelIds: function () { return load().map(function (c) { return c.channelId; }).filter(Boolean); },
+    analysisHtml: analysisHtml
+  }; } catch (e) {}
+  if (typeof module !== 'undefined' && module.exports) module.exports = { titleStats: titleStats, analysisHtml: analysisHtml };
 })();

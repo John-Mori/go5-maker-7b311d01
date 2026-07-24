@@ -165,9 +165,17 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .comp-an-kpi b{color:var(--accent);font-size:14px;}
 .comp-an-row{margin:2px 0;word-break:break-word;}
 .comp-an-k{color:var(--accent);font-weight:700;margin-right:6px;}
-.comp-an-top{margin:4px 0 0;padding-left:20px;}
-.comp-an-top li{margin:3px 0;color:var(--ink);word-break:break-word;}
-.comp-an-spd{color:var(--accent);font-weight:700;white-space:nowrap;}
+.comp-an-top-title{margin-top:10px;}
+.comp-an-top{margin:6px 0 0;padding-left:30px;display:grid;gap:8px;}
+.comp-an-video{margin:0;padding:9px 10px;background:var(--card);border:1px solid var(--line);border-radius:9px;color:var(--ink);word-break:break-word;}
+.comp-an-video::marker{color:var(--accent);font-size:13px;font-weight:900;}
+.comp-an-video-channel{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.comp-an-channel-name{font-size:13px;font-weight:900;color:var(--ink);}
+.comp-an-subs{font-size:11.5px;color:var(--sub);white-space:nowrap;}
+.comp-an-video-title{margin:4px 0;font-size:13px;line-height:1.45;color:var(--ink);}
+.comp-an-video-metrics{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.comp-an-spd{color:var(--accent);font-size:13px;font-weight:900;white-space:nowrap;}
+.comp-an-views{color:var(--sub);font-size:11.5px;white-space:nowrap;}
 .comp-an-soon{margin-top:6px;color:var(--sub);opacity:.9;}
 #compAnalysisRefresh{width:auto;margin:6px 0 0;padding:5px 12px;font-size:12px;}
 /* 投稿履歴の管理・診断ツールの折り畳み(普段使わない設定系を畳む・Chami依頼2026-07-15)。アプリ配色(紫は使わない)。 */
