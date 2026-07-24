@@ -50,6 +50,7 @@ function toCid(s) {
   const m = s.match(/cid=([0-9A-Za-z_]+)/) || (/^[0-9A-Za-z_]+$/.test(s) ? [null, s] : null);
   return m ? m[1] : "";
 }
+function salesCidSupported(cid) { return /^d_[0-9A-Za-z]+$/i.test(String(cid || "")); }
 
 // 作品ページから販売数を抽出（日本IPなので普通に読める）。取れなければ null。
 async function scrapeSales(cid) {
@@ -58,14 +59,21 @@ async function scrapeSales(cid) {
   try {
     res = await fetch(url, { headers: { "Cookie": "age_check_done=1", "User-Agent": UA, "Accept-Language": "ja,en-US;q=0.7", "Referer": "https://www.dmm.co.jp/" } });
   } catch (e) { return { error: "network" }; }
+  if (res.status === 404 || res.status === 410) return { unavailable: true, error: "HTTP " + res.status };
   if (!res.ok) return { error: "HTTP " + res.status };
   const finalUrl = res.url || "";
   if (/accounts\.dmm\.co\.jp|\/login\//.test(finalUrl)) return { error: "login_wall(このPCのIPが海外扱い?)" };
+  if (finalUrl && finalUrl.indexOf("cid=" + cid) < 0) return { unavailable: true, error: "商品ページ以外へリダイレクト" };
   const html = await res.text();
   const m = html.match(/numberOfSales__txt["'][^>]*>\s*([\d,]+)/)
     || html.match(/detailInfo-sales["'][^>]*>\s*販売数[:：]\s*<em>\s*([\d,]+)/)
     || html.match(/detailInfo-sales["'][^>]*>\s*販売数[:：]\s*([\d,]+)/);
-  if (!m) return { error: "販売数が見つからない(配信終了/ページ構造変化?)" };
+  if (!m) {
+    const isProductPage = /property=["']og:title["']/i.test(html) || /["']@type["']\s*:\s*["']Product["']/i.test(html);
+    return isProductPage
+      ? { unavailable: true, error: "有効な作品ページに販売数欄なし" }
+      : { error: "販売数欄も作品ページ印も見つからない(一時的な壁/構造変化?)" };
+  }
   const n = parseInt(m[1].replace(/,/g, ""), 10);
   return isNaN(n) ? { error: "数値解析失敗" } : { n };
 }
@@ -166,6 +174,9 @@ async function main() {
     }
   }
   cids = [...new Set(cids)];
+  const unsupported = cids.filter((cid) => !salesCidSupported(cid));
+  if (unsupported.length && !isPoll) console.log("⏭️ 販売数の対象外を除外: " + unsupported.join(", "));
+  cids = cids.filter(salesCidSupported);
   if (!cids.length) {
     // --poll の平常時（要求なし・期限内・キュー空）はDMMに一切触れず静かに終了。
     if (!isPoll) console.log("✅ 取得するものはありません。候補タブでサークルタブを登録すると、そのサークルの全作品がここで取得されます。");
@@ -174,12 +185,13 @@ async function main() {
   console.log("[" + stamp() + "] 📊 販売数を取得します: " + cids.length + "件（日本IPのこのPCで実行中）\n");
 
   const results = [];
-  let ok = 0, ng = 0;
+  let ok = 0, unavailable = 0, ng = 0;
   for (let i = 0; i < cids.length; i++) {
     const cid = cids[i];
     const r = await scrapeSales(cid);
     if (r.n != null) { results.push({ cid, n: r.n }); ok++; console.log(`  [${i + 1}/${cids.length}] ${cid} … 販売数 ${r.n.toLocaleString("ja-JP")}`); }
-    else { ng++; console.log(`  [${i + 1}/${cids.length}] ${cid} … 取得できず（${r.error}）`); }
+    else if (r.unavailable) { results.push({ cid, status: "unavailable" }); unavailable++; console.log(`  [${i + 1}/${cids.length}] ${cid} … 取得不可として完了（${r.error}）`); }
+    else { ng++; console.log(`  [${i + 1}/${cids.length}] ${cid} … 一時失敗・次回再試行（${r.error}）`); }
     // 20件ごとに中間保存（大量でも取りこぼさない）
     if (results.length >= 20) { const s = await saveBatch(results.splice(0, results.length)); console.log("   → 保存 " + s + "件"); }
     await sleep(700); // DMMへの負荷を避ける
@@ -187,6 +199,6 @@ async function main() {
   if (results.length) { const s = await saveBatch(results); console.log("   → 保存 " + s + "件"); }
   // 全件スクレイプを完走したサークルの時刻を記録（次回は18時間スキップが効く）
   if (ranMakers.length) { const st = loadState(); ranMakers.forEach((mid) => { st[mid] = Date.now(); }); saveState(st); }
-  console.log(`\n✅ 完了: 成功 ${ok}件 / 取得できず ${ng}件。スマホの候補タブをリロードすると販売数が反映されます。`);
+  console.log(`\n✅ 完了: 成功 ${ok}件 / 取得不可 ${unavailable}件 / 一時失敗 ${ng}件。候補タブをリロードすると反映されます。`);
 }
 main().catch((e) => die(String(e && e.stack ? e.stack : e)));

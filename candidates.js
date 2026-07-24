@@ -57,6 +57,17 @@
     var kind = workKindOf_(url);
     return '<span class="fp-kind ' + (kind === 'Books' ? 'fp-kind-books' : 'fp-kind-doujin') + '">' + kind + '</span>';
   }
+  function isInfoTarget_(it) {
+    return !!(it && it.cid && !it.isTwitter && !/^tw_/i.test(String(it.cid)));
+  }
+  // DMM同人の販売数ページをPCで取得できるcidだけを販売数キューへ送る。
+  // Books・SNSを同人URLへ誤送信すると「取得待ち」が永久に残るため、入口で分離する。
+  function isSalesTarget_(it) {
+    return isInfoTarget_(it) && /^d_[0-9A-Za-z]+$/i.test(String(it.cid));
+  }
+  function salesTargetCids_(items) {
+    return (items || []).filter(isSalesTarget_).map(function (it) { return it.cid; });
+  }
   // ジャンルタグに「AI」を含むものがあれば AI 作品とみなす。(わかる範囲のベストエフォート判定)
   function isAiWork_(genres) { return (genres || []).some(function (g) { return /AI/i.test(String(g || '')); }); }
 
@@ -185,14 +196,15 @@
 
   // ── 実売本数(販売数)：worker/api/fanza-sales(=PC取得→KV)から取得。端末に24hキャッシュ。──
   //   販売数はDMM詳細ページにのみ有り、海外IP(worker)は取れない→PC(日本IP)がスクレイプ保存したものを読む。
-  var K_SALES = 'cand_sales';       // {cid:{n:(number|null), at}}
+  var K_SALES = 'cand_sales';       // {cid:{n:(number|null), unavailable?:true, at}}
   var K_SALESSNAP = 'cand_salessnap'; // {cid:[{at,n}]}  週次差分用
   var SALES_TTL = 24 * 3600 * 1000, SALES_MISS_TTL = 15 * 60 * 1000;
   function salesCache() { return lsGet(K_SALES, '{}'); }
-  function salesOf(cid) { // number=実売 / null=未取得(PC待ち) / undefined=キャッシュ切れ
+  function salesOf(cid) { // number=実売 / null=PC待ち / 'unavailable'=取得不可 / undefined=キャッシュ切れ
     var c = salesCache()[cid]; if (!c) return undefined;
-    var ttl = (c.n == null ? SALES_MISS_TTL : SALES_TTL);
-    return (new Date().getTime() - c.at < ttl) ? c.n : undefined;
+    var ttl = (c.unavailable || c.n != null) ? SALES_TTL : SALES_MISS_TTL;
+    if (new Date().getTime() - c.at >= ttl) return undefined;
+    return c.unavailable ? 'unavailable' : c.n;
   }
   function recordSalesSnapshots(salesMap) {
     var snap = lsGet(K_SALESSNAP, '{}'), now = new Date().getTime(), changed = false, cutoff = now - 45 * 86400000;
@@ -215,26 +227,51 @@
   }
   // 未取得cidを worker へ問い合わせ。(＝未取得はPC取得キューへ自動登録)取得できたら cb。(changed,missingCount)
   function fetchSalesFor(cids, cb) {
+    cids = (cids || []).filter(function (cid) { return /^d_[0-9A-Za-z]+$/i.test(String(cid || '')); });
     var cache = salesCache(), need = [], now = new Date().getTime();
-    cids.forEach(function (cid) { var c = cache[cid]; var ttl = (c && c.n == null ? SALES_MISS_TTL : SALES_TTL); if (!c || (now - c.at) >= ttl) need.push(cid); });
+    cids.forEach(function (cid) {
+      var c = cache[cid], ttl = (c && (c.unavailable || c.n != null)) ? SALES_TTL : SALES_MISS_TTL;
+      if (!c || (now - c.at) >= ttl) need.push(cid);
+    });
     need = need.filter(function (v, i, a) { return a.indexOf(v) === i; });
     if (!need.length) { cb(false, missingCount(cids)); return; }
     var cfg = workerCfg(); if (!cfg.url) { cb(false, 0); return; }
     var chunks = []; for (var i = 0; i < need.length; i += 30) chunks.push(need.slice(i, i + 30));
-    var pending = chunks.length, changed = false;
-    chunks.forEach(function (ch) {
+    var pending = chunks.length, nextChunk = 0, changed = false;
+    function doneOne_() {
+      pending--;
+      if (pending === 0) cb(changed, missingCount(cids));
+      else runNext_();
+    }
+    function runNext_() {
+      if (nextChunk >= chunks.length) return;
+      var ch = chunks[nextChunk++];
       fetch(cfg.url + '/api/fanza-sales', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret }, body: JSON.stringify({ cids: ch }) })
         .then(function (r) { return r.json(); }).then(function (d) {
           if (d && d.ok) {
             var c = salesCache(), t = new Date().getTime(), s = d.sales || {};
-            ch.forEach(function (cid) { if (s[cid] != null) { c[cid] = { n: s[cid], at: t }; changed = true; } else { c[cid] = { n: null, at: t }; } });
+            var unavailable = {};
+            (d.unavailable || []).concat(d.unsupported || []).forEach(function (cid) { unavailable[cid] = true; });
+            ch.forEach(function (cid) {
+              var prev = c[cid], next;
+              if (s[cid] != null) next = { n: s[cid], at: t };
+              else if (unavailable[cid]) next = { n: null, unavailable: true, at: t };
+              else next = { n: null, at: t };
+              if (next.n != null || next.unavailable || (prev && (!!prev.unavailable !== !!next.unavailable))) changed = true;
+              c[cid] = next;
+            });
             lsSet(K_SALES, c); recordSalesSnapshots(s);
           }
-          if (--pending === 0) cb(changed, missingCount(cids));
-        }).catch(function () { if (--pending === 0) cb(changed, missingCount(cids)); });
-    });
+          doneOne_();
+        }).catch(doneOne_);
+    }
+    for (var worker = 0; worker < Math.min(3, chunks.length); worker++) runNext_();
   }
-  function missingCount(cids) { var c = salesCache(); var n = 0; cids.forEach(function (cid) { if (!c[cid] || c[cid].n == null) n++; }); return n; }
+  function missingCount(cids) {
+    var n = 0;
+    (cids || []).forEach(function (cid) { var v = salesOf(cid); if (v === null || v === undefined) n++; });
+    return n;
+  }
   // 指定cidの販売数キャッシュを無効化。(🔁リロードで最新を取り直すため)
   function invalidateSales_(cids) { var c = salesCache(); (cids || []).forEach(function (cid) { delete c[cid]; }); lsSet(K_SALES, c); }
 
@@ -244,14 +281,20 @@
   //   同じパターンで、表示のたびに未取得ぶんを控えめに再取得し、取れたら候補データへ書き戻す。
   var K_INFOMISS = 'cand_infomiss'; // {cid: atMs}  直近の再取得試行時刻(無駄打ち防止)
   var INFOMISS_RETRY_TTL = 20 * 60 * 1000; // 同じcidの再試行は20分に1回まで
-  function needsInfoBackfill_(it) { return !it || !it.cid || !it.title || it.title === '(タイトル未取得)' || !it.date; }
+  function needsInfoBackfill_(it) {
+    return isInfoTarget_(it) && (!it.title || it.title === '(タイトル未取得)' || !it.date || it.reviewCount == null);
+  }
+  function infoBackfillTtl_(it) {
+    var coreMissing = !it || !it.title || it.title === '(タイトル未取得)' || !it.date;
+    return coreMissing ? INFOMISS_RETRY_TTL : 24 * 3600 * 1000;
+  }
   function backfillMissingInfo_(key, items, cb) {
     if (!window.FanzaCore) { cb(false); return; }
     var cfg = workerCfg(); if (!cfg.url) { cb(false); return; }
     var miss = lsGet(K_INFOMISS, '{}'), now = new Date().getTime();
     var targets = items.filter(function (it) {
       if (!needsInfoBackfill_(it)) return false;
-      var last = miss[it.cid]; return !last || (now - last) >= INFOMISS_RETRY_TTL;
+      var last = miss[it.cid]; return !last || (now - last) >= infoBackfillTtl_(it);
     }).slice(0, 12); // 一度に叩きすぎない(無駄打ち防止・worker保護)
     if (!targets.length) { cb(false); return; }
     var pending = targets.length, updates = {}; // cid -> 取得できた差分フィールド
@@ -278,8 +321,9 @@
       var cur = lsGet(key, '[]'), changed = false;
       cur.forEach(function (it) {
         var u = it && it.cid != null ? updates[it.cid] : null; if (!u) return;
-        Object.keys(u).forEach(function (f) { if (u[f] !== undefined) it[f] = u[f]; });
-        changed = true;
+        Object.keys(u).forEach(function (f) {
+          if (u[f] !== undefined && JSON.stringify(it[f]) !== JSON.stringify(u[f])) { it[f] = u[f]; changed = true; }
+        });
       });
       if (changed) lsSet(key, cur);
       cb(changed);
@@ -1642,11 +1686,11 @@
       });
       _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">表示できる作品がありません。(💡候補やサークルタブに作品を追加してください)</p>'; return; }
-      var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
+      var salesCids = salesTargetCids_(arr);
       el.innerHTML = '<p class="hint" style="padding:2px 6px;">📚 全候補 ' + arr.length + '件</p>' +
         arr.map(function (it) { return candCard(it, ''); }).join('');
       wireCardCommon_(el);
-      fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === 'all') renderAll_(); });
+      fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === 'all') renderAll_(); });
     }
     if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items) { finish(items || []); });
     else finish([]);
@@ -2400,14 +2444,16 @@
   function refreshCandItems(tabId) {
     var key = itemsKey(tabId), items = lsGet(key, '[]');
     if (!items.length) { renderCandList(tabId); return; }
-    var cids = items.map(function (it) { return it.cid; });
+    var targets = items.filter(isInfoTarget_);
+    var cids = salesTargetCids_(items);
     var msgEl = $('candMsg');
     var cfg = workerCfg();
     var done = function () { lsSet(key, items); recordReviewSnapshots(items); if (msgEl) msgEl.textContent = ''; invalidateSales_(cids); renderCandList(tabId); };
     if (!window.FanzaCore || !cfg.url) { done(); return; }
     if (msgEl) msgEl.textContent = '⏳ 価格・情報を更新中…';
-    var pending = items.length;
-    items.forEach(function (it) {
+    if (!targets.length) { done(); return; }
+    var pending = targets.length;
+    targets.forEach(function (it) {
       window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url).then(function (info) {
         if (info && info.title) {
           it.title = info.title; if (info.author) it.author = info.author;
@@ -2485,10 +2531,10 @@
     });
     _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
     if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる候補がありません。') + '</p>'; return; }
-    var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
-    var salesMiss = missingCount(topCids);
+    var salesCids = salesTargetCids_(arr);
+    var salesMiss = missingCount(salesCids);
     var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件') +
-      (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
+      (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
     el.innerHTML = head + workSearchHtml_(tabId) + arr.map(function (it) {
       var act = _showHidden
         ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>'
@@ -2514,7 +2560,7 @@
       });
     });
     // 候補作品の実売本数を取得。(未取得はPC取得キューへ)反映されたら再描画。
-    fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
+    fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
     // タイトル/発売日が未取得の候補を控えめに再取得。(追加直後の一時的な部分取得を自動で埋める)
     backfillMissingInfo_(key, arr, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
   }
@@ -2586,13 +2632,13 @@
       });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる作品がありません。') + '</p>'; return; }
       _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
-      // 実売本数(販売数)を先頭60件ぶん取得。(未取得はPC取得キューへ自動登録)反映されたら再描画。
-      var topCids = arr.slice(0, 60).map(function (it) { return it.cid; });
-      var salesMiss = missingCount(topCids);
+      // 実売本数(販売数)を対象作品ぶん取得。(未取得はPC取得キューへ自動登録)反映されたら再描画。
+      var salesCids = salesTargetCids_(arr);
+      var salesMiss = missingCount(salesCids);
       var head = throttleNote + '<div style="display:flex;justify-content:flex-end;padding:2px 6px 6px;">' +
         '<button id="candBulkToCand" type="button" class="ghost" style="width:auto;margin:0;font-size:12.5px;padding:6px 10px;">💡 全作品を候補に追加</button></div>' +
         '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中の作品 ' : '') + arr.length + '件' + (makerIds.length > 1 ? '(' + makerIds.length + 'サークル)' : '') + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件・不足なら🔁リロード') +
-        (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は上位' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
+        (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
       el.innerHTML = head + workSearchHtml_(tabId) + arr.map(function (it) {
         var btn = _showHidden
           ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button>'
@@ -2603,7 +2649,7 @@
       wireCardCommon_(el);
       var bulkBtn = $('candBulkToCand');
       if (bulkBtn) bulkBtn.addEventListener('click', function () { addWorksToMain_(items, bulkBtn, tab.name); });
-      if (!_showHidden && !force) fetchSalesFor(topCids, function (changed) { if (changed && _activeTab === tabId) renderMaker(tabId); });
+      if (!_showHidden && !force) fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === tabId) renderMaker(tabId); });
       el.querySelectorAll('[data-hide]').forEach(function (b) {
         b.addEventListener('click', function () {
           if (!window.confirm('非表示にしますか？')) return;
@@ -2730,23 +2776,27 @@
     var rc = it.reviewCount;
     var avg = (it.reviewAvg != null && it.reviewAvg !== '') ? (' ★' + it.reviewAvg) : '';
     var num = function (n) { return Number(n).toLocaleString('ja-JP'); };
-    var sales = salesOf(it.cid); // number=実売 / null=PC未取得 / undefined=未問い合わせ
-    // ① 販売数パート。取得済み=実数 / PC未取得(null)=取得待ち / 未問い合わせ(undefined)=省略。
+    var sales = isSalesTarget_(it) ? salesOf(it.cid) : 'unavailable';
+    // ① 販売数パート。どの作品でも必ず表示し、取得対象外・取得不可も区別する。
     var salesPart = '';
-    if (typeof sales === 'number') {
+    if (!isInfoTarget_(it) || !isSalesTarget_(it)) {
+      salesPart = '販売数 対象外';
+    } else if (typeof sales === 'number') {
       salesPart = '販売数 ' + num(sales) + '本';
       // rank7d でも「+0本」は出さない=週次の伸びが正の時だけ🔥を前置(全部0に見える誤解を解消)。
       if (_sort === 'rank7d') {
         var sd = weekSalesDelta(it.cid, sales);
-        if (sd != null && sd > 0) salesPart = '🔥 直近1週間 +' + num(sd) + '本 (累計 ' + num(sales) + '本)';
+        if (sd != null && sd > 0) salesPart = '販売数 🔥 直近1週間 +' + num(sd) + '本 (累計 ' + num(sales) + '本)';
       }
-    } else if (sales === null) {
+    } else if (sales === 'unavailable') {
+      salesPart = '販売数 取得不可';
+    } else {
       salesPart = '販売数 取得待ち'; // PC(日本IP)のバッチ取得待ち
     }
-    // ② レビューパート。件数があれば常に併記(販売数の横)。
-    var reviewPart = (rc != null) ? ('レビュー ' + num(rc) + '件' + avg) : '';
-    var joined = [salesPart, reviewPart].filter(Boolean).join(' ・ ');
-    var salesHtml = joined ? '<div class="cand-sales">' + joined + '</div>' : '';
+    // ② レビューパート。販売数の直後に必ず併記し、取れない作品も欄自体は消さない。
+    var reviewPart = !isInfoTarget_(it) ? 'レビュー 対象外'
+      : ((rc != null) ? ('レビュー ' + num(rc) + '件' + avg) : 'レビュー 取得不可');
+    var salesHtml = '<div class="cand-sales">' + salesPart + ' ・ ' + reviewPart + '</div>';
     var hasRef = refImgHas(it.cid);
     var hasBsky = bskyImgHas(it.cid);
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像(複数可)

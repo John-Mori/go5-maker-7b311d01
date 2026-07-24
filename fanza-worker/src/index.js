@@ -21,6 +21,9 @@
 
 const DMM_API_BASE    = "https://api.dmm.com/affiliate/v3/ItemList";
 const DMM_DOUJIN_BASE = "https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=";
+const SALES_UNAVAILABLE_RETRY_MS = 7 * 86400000;
+function infoCidSupported_(cid) { return !/^tw_/i.test(String(cid || "")); }
+function salesCidSupported_(cid) { return /^d_[0-9A-Za-z]+$/i.test(String(cid || "")); }
 
 export default {
   async fetch(request, env) {
@@ -89,7 +92,7 @@ export default {
       //   book等のsrcUrlがあれば一緒に保存し、PC側がそのURL（同人以外）を正しくスクレイプできるようにする。
       // フル情報が取れなかった作品は取得依頼キューへ（dedup+Books用URL enrich はstQueueInfoPut内蔵）。
       //   ★KV1日書き込み上限の主因だった無条件req:書き込みは、ストレージ層のdedupで解消済み。
-      if (!item || item.partial) {
+      if ((!item || item.partial) && infoCidSupported_(cid)) {
         try { await stQueueInfoPut(env, cid, srcUrl); } catch (e) {}
       }
 
@@ -178,7 +181,10 @@ export default {
       if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, null);
       if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
       if (!env.FANZA_KV && !env.FANZA_DB) return json({ ok: false, error: "store_unbound" }, 500, null);
-      const infoQ = await stQueueList(env, "info"); // 取得依頼中のcid（+book等のスクレイプ先url）
+      const infoQAll = await stQueueList(env, "info"); // 取得依頼中のcid（+book等のスクレイプ先url）
+      const staleInfoQ = infoQAll.filter((q) => !infoCidSupported_(q.cid));
+      await Promise.all(staleInfoQ.map((q) => stQueueDelete(env, q.cid, "info")));
+      const infoQ = infoQAll.filter((q) => infoCidSupported_(q.cid));
       const queuedUrls = {};
       infoQ.forEach((q) => { if (q.url) queuedUrls[q.cid] = q.url; });
       return json({
@@ -204,9 +210,10 @@ export default {
         if (!it) continue;
         if (quotaHit) { skipped++; continue; } // 上限到達後は残りを静かにスキップ（1件のクラッシュで全件失敗にしない）
         try {
-          // 内容が前回と同一なら書き込みを省略（stPutOverride内蔵のdedup）。保存できたら取得依頼を消す。
+          // 内容が同一でも「取得成功」は確定しているため、古い取得依頼は必ず消す。
           const { saved: didSave } = await stPutOverride(env, it);
-          if (didSave) { await stQueueDelete(env, it.content_id, "info"); saved++; } else skipped++;
+          await stQueueDelete(env, it.content_id, "info");
+          if (didSave) saved++; else skipped++;
         } catch (e) {
           if (String(e && e.message || e).indexOf("limit exceeded") >= 0) quotaHit = true;
           skipped++;
@@ -230,13 +237,15 @@ export default {
       if (!env.FANZA_KV) return json({ ok: false, error: "kv_unbound" }, 500, cors3);
       let sbody;
       try { sbody = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, cors3); }
-      let cids = Array.isArray(sbody.cids) ? sbody.cids : (sbody.cid ? [sbody.cid] : []);
-      cids = cids.map((c) => String(c || "").trim()).filter((c) => /^[0-9A-Za-z_]{1,64}$/.test(c)).slice(0, 30);
-      if (!cids.length) return json({ ok: false, error: "missing_cid" }, 400, cors3);
-      const { sales, missing } = await stGetSalesMany(env, cids);
-      // 未取得cidは「PC取得依頼キュー(販売数)」へ（24h以内に登録済みなら書かない=stQueueSalesPut内蔵）。
+      let requested = Array.isArray(sbody.cids) ? sbody.cids : (sbody.cid ? [sbody.cid] : []);
+      requested = requested.map((c) => String(c || "").trim()).filter((c) => /^[0-9A-Za-z_]{1,64}$/.test(c)).slice(0, 30);
+      if (!requested.length) return json({ ok: false, error: "missing_cid" }, 400, cors3);
+      const unsupported = requested.filter((cid) => !salesCidSupported_(cid));
+      const cids = requested.filter(salesCidSupported_);
+      const { sales, missing, unavailable } = await stGetSalesMany(env, cids);
+      // 本当にPC取得できる同人cidだけをキューへ。Books/SNSはunsupportedとして完了させる。
       await Promise.all(missing.map(async (cid) => { try { await stQueueSalesPut(env, cid); } catch (e) {} }));
-      return json({ ok: true, sales, missing }, 200, cors3);
+      return json({ ok: true, sales, missing, unavailable, unsupported }, 200, cors3);
     }
 
     // ── 販売数の登録（PCバッチが日本IPでスクレイプした販売数を保存）。認証は管理鍵。──
@@ -251,13 +260,15 @@ export default {
       let saved = 0, skipped = 0, quotaHit = false;
       for (const raw of items) {
         const cid = String((raw && raw.cid) || "").trim();
+        const unavailable = !!(raw && raw.status === "unavailable");
         const n = raw && raw.n != null ? parseInt(raw.n, 10) : NaN;
-        if (!/^[0-9A-Za-z_]{1,64}$/.test(cid) || isNaN(n)) continue;
+        if (!salesCidSupported_(cid) || (!unavailable && isNaN(n))) continue;
         if (quotaHit) { skipped++; continue; } // 上限到達後は残りを静かにスキップ（1件のクラッシュで全件失敗にしない）
         try {
-          // 数値が前回と同じなら書き込み省略（stPutSales内蔵）。保存できたら取得依頼を消す。
-          const { saved: didSave } = await stPutSales(env, cid, n);
-          if (didSave) { await stQueueDelete(env, cid, "sales"); saved++; } else skipped++;
+          const { saved: didSave } = unavailable ? await stPutSalesUnavailable(env, cid) : await stPutSales(env, cid, n);
+          // 数値が同じ/取得不可が再確認済みでも成功なので、古い依頼を必ず完了させる。
+          await stQueueDelete(env, cid, "sales");
+          if (didSave) saved++; else skipped++;
         } catch (e) {
           if (String(e && e.message || e).indexOf("limit exceeded") >= 0) quotaHit = true;
           skipped++;
@@ -328,7 +339,10 @@ export default {
       if (!adminOk(request, env)) return json({ ok: false, error: "bad_secret" }, 401, null);
       if (!env.FANZA_KV && !env.FANZA_DB) return json({ ok: false, error: "store_unbound" }, 500, null);
       const trackedMakers = await stListMakers(env);
-      const salesQ = await stQueueList(env, "sales");
+      const salesQAll = await stQueueList(env, "sales");
+      const staleSalesQ = salesQAll.filter((q) => !salesCidSupported_(q.cid));
+      await Promise.all(staleSalesQ.map((q) => stQueueDelete(env, q.cid, "sales")));
+      const salesQ = salesQAll.filter((q) => salesCidSupported_(q.cid));
       return json({ ok: true, queued: salesQ.map((q) => q.cid), trackedMakers }, 200, null);
     }
 
@@ -977,21 +991,27 @@ async function stPutOverride(env, item) { // returns {saved}
 }
 
 // ---- sales（実売本数：works.sales_n） ----
-async function stGetSalesMany(env, cids) { // {sales:{cid:n}, missing:[cid]}
-  const sales = {}, missing = [];
+async function stGetSalesMany(env, cids) { // {sales:{cid:n}, missing:[cid], unavailable:[cid]}
+  const sales = {}, missing = [], unavailable = [], now = Date.now();
+  const classify = (cid, n, at, status) => {
+    if (n != null) { sales[cid] = n; return; }
+    const age = now - (Date.parse(at || "") || 0);
+    if ((status === "unavailable" || at) && age >= 0 && age < SALES_UNAVAILABLE_RETRY_MS) unavailable.push(cid);
+    else missing.push(cid); // 7日後に再確認し、後から販売数が出た作品も回復させる
+  };
   if (d1on_(env)) {
     const ph = cids.map(() => "?").join(",");
-    const rs = cids.length ? await env.FANZA_DB.prepare("SELECT cid, sales_n FROM works WHERE sales_n IS NOT NULL AND cid IN (" + ph + ")").bind(...cids).all().catch(() => null) : null;
+    const rs = cids.length ? await env.FANZA_DB.prepare("SELECT cid, sales_n, sales_at FROM works WHERE cid IN (" + ph + ")").bind(...cids).all().catch(() => null) : null;
     const found = new Set();
-    if (rs && rs.results) rs.results.forEach((r) => { sales[r.cid] = r.sales_n; found.add(r.cid); });
+    if (rs && rs.results) rs.results.forEach((r) => { found.add(r.cid); classify(r.cid, r.sales_n, r.sales_at, ""); });
     cids.forEach((c) => { if (!found.has(c)) missing.push(c); });
-    return { sales, missing };
+    return { sales, missing, unavailable };
   }
   await Promise.all(cids.map(async (c) => {
     const v = await env.FANZA_KV.get("sales:" + c, "json").catch(() => null);
-    if (v && v.n != null) sales[c] = v.n; else missing.push(c);
+    if (v) classify(c, v.n, v.at, v.status); else missing.push(c);
   }));
-  return { sales, missing };
+  return { sales, missing, unavailable };
 }
 async function stPutSales(env, cid, n) { // returns {saved}
   let saved = false;
@@ -1006,6 +1026,32 @@ async function stPutSales(env, cid, n) { // returns {saved}
     try {
       const prev = await env.FANZA_KV.get("sales:" + cid, "json").catch(() => null);
       if (!(prev && prev.n === n)) { await env.FANZA_KV.put("sales:" + cid, JSON.stringify({ n, at: nowIso_() })); saved = true; }
+    } catch (e) { if (!d1write_(env)) throw e; }
+  }
+  return { saved };
+}
+async function stPutSalesUnavailable(env, cid) { // 販売数欄の無い有効ページ。既存の実数は消さない。
+  let saved = false;
+  const at = nowIso_();
+  if (d1write_(env)) {
+    const r = await env.FANZA_DB.prepare("SELECT sales_n, sales_at FROM works WHERE cid=?").bind(cid).first().catch(() => null);
+    if (!r || r.sales_n == null) {
+      const prevAt = r && Date.parse(r.sales_at || "");
+      if (!prevAt || Date.now() - prevAt >= SALES_UNAVAILABLE_RETRY_MS) {
+        if (await d1run_(env, env.FANZA_DB.prepare("INSERT INTO works(cid,sales_n,sales_at,updated_at) VALUES(?,NULL,?,datetime('now')) ON CONFLICT(cid) DO UPDATE SET sales_at=excluded.sales_at, updated_at=datetime('now') WHERE works.sales_n IS NULL")
+          .bind(cid, at))) saved = true;
+      }
+    }
+  }
+  if (kvwrite_(env)) {
+    try {
+      const prev = await env.FANZA_KV.get("sales:" + cid, "json").catch(() => null);
+      if (!(prev && prev.n != null)) {
+        const prevAt = prev && Date.parse(prev.at || "");
+        if (!prevAt || Date.now() - prevAt >= SALES_UNAVAILABLE_RETRY_MS) {
+          await env.FANZA_KV.put("sales:" + cid, JSON.stringify({ n: null, status: "unavailable", at })); saved = true;
+        }
+      }
     } catch (e) { if (!d1write_(env)) throw e; }
   }
   return { saved };
@@ -1238,7 +1284,10 @@ function sanitizeOverride(raw) {
     sampleImageURL: sImgs.length ? { sample_l: { image: sImgs } } : null,
     iteminfo: { author: names(raw.iteminfo && raw.iteminfo.author, 3), genre: names(raw.iteminfo && raw.iteminfo.genre, 32) },
     prices: { list_price: numStr(raw.prices && raw.prices.list_price), price: numStr(raw.prices && raw.prices.price) },
-    review: { count: null, average: null },
+    review: {
+      count: (raw.review && raw.review.count != null && raw.review.count !== "" && Number.isInteger(Number(raw.review.count)) && Number(raw.review.count) >= 0) ? Number(raw.review.count) : null,
+      average: (raw.review && raw.review.average != null && raw.review.average !== "" && Number.isFinite(Number(raw.review.average)) && Number(raw.review.average) >= 0 && Number(raw.review.average) <= 5) ? Number(raw.review.average) : null,
+    },
     scrapedAt: String(raw.scrapedAt || "").slice(0, 32),
   };
 }

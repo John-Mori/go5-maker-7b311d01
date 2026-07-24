@@ -23,6 +23,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { productJsonLdFromHtml } from "./fanza_jsonld.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, "scrape_config.json");
@@ -72,21 +73,9 @@ async function scrapeBookPage(url) {
   const tt = html.match(/<title>([^<]+)</);
   if (tt) { const parts = tt[1].split(" - ").map((s) => s.trim()); if (!title) title = parts[0]; if (parts.length >= 3) { author = parts[1]; category = parts[2]; } }
   if (!title || /ログイン|年齢確認|エラー/.test(title)) return { error: "タイトル取得不可（壁 or 構造変化）" };
-  // JSON-LD Product（価格・出版社・書影・発売日）
-  let price = null, brand = "", ldImg = "", releaseDate = "";
-  const ldRe = /<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/g;
-  let m;
-  while ((m = ldRe.exec(html)) !== null) {
-    try {
-      const o = JSON.parse(m[1]);
-      if (o["@type"] === "Product") {
-        if (o.offers && o.offers.price != null) { const v = parseInt(String(o.offers.price).replace(/[^\d]/g, ""), 10); price = Number.isFinite(v) ? v : null; }
-        if (o.brand && o.brand.name) brand = String(o.brand.name);
-        if (typeof o.image === "string") ldImg = o.image;
-        if (o.releaseDate) releaseDate = String(o.releaseDate).slice(0, 10);
-      }
-    } catch (e) {}
-  }
+  // JSON-LD Product（価格・出版社・書影・発売日・レビュー）
+  const ld = productJsonLdFromHtml(html);
+  let price = ld.price, brand = ld.brand, ldImg = ld.image, releaseDate = ld.releaseDate;
   const ogi = html.match(/property=["']og:image["']\s+content=["']([^"']+)/) || html.match(/content=["']([^"']+)["']\s+property=["']og:image["']/);
   const cover = (ogi && ogi[1]) ? ogi[1].trim() : ldImg;
   if (!releaseDate) { const dm = html.match(/(?:発売日|配信開始日)[^0-9]{0,16}(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/); if (dm) releaseDate = dm[1] + "-" + ("0" + dm[2]).slice(-2) + "-" + ("0" + dm[3]).slice(-2); }
@@ -105,7 +94,7 @@ async function scrapeBookPage(url) {
       price = Math.round(listPrice * (100 - pct) / 100);               // 割引後（100%OFFなら0円）
     }
   }
-  return { title, author: author || brand, price, listPrice, releaseDate, genres: category ? [category] : [], cover };
+  return { title, author: author || brand, price, listPrice, releaseDate, genres: category ? [category] : [], cover, reviewCount: ld.reviewCount, reviewAvg: ld.reviewAvg };
 }
 
 // ── 商品ページのスクレイプ（日本IPなので普通に読める） ─────────────────────────
@@ -130,21 +119,9 @@ async function scrapePage(cid) {
   if (!title) { const t = html.match(/<title>([^<]+)</); if (t) title = t[1].replace(/\s*[|｜【].*$/, "").trim(); }
   if (!title || /ログイン|年齢確認|エラー/.test(title)) return { error: "タイトル取得不可（ページ構造変更 or 壁）" };
 
-  // JSON-LD（サークル名・現在価格・発売日が取れることが多い）
-  let author = "", price = null, releaseDate = "";
-  const ldRe = /<script\s+type=["']application\/ld\+json["']>([\s\S]*?)<\/script>/g;
-  let m;
-  while ((m = ldRe.exec(html)) !== null) {
-    try {
-      const obj = JSON.parse(m[1]);
-      if (obj["@type"] === "Product") {
-        if (obj.brand && obj.brand.name) author = String(obj.brand.name);
-        const offers = obj.offers || {};
-        if (offers.price != null) { const v = parseInt(String(offers.price).replace(/[^\d]/g, ""), 10); price = Number.isFinite(v) ? v : null; } // 0円(無料)も保持
-        if (obj.releaseDate) releaseDate = String(obj.releaseDate).slice(0, 10);
-      }
-    } catch (e) { /* 次のJSON-LDへ */ }
-  }
+  // JSON-LD（サークル名・現在価格・発売日・レビュー）
+  const ld = productJsonLdFromHtml(html);
+  let author = ld.brand, price = ld.price, releaseDate = ld.releaseDate;
   // 価格の保険（offers正規表現）
   if (price == null) {
     const pm = html.match(/["']offers["']\s*:\s*\{[^}]*["']price["']\s*:\s*["']?(\d+)/);
@@ -172,7 +149,7 @@ async function scrapePage(cid) {
     if (genres.length >= 16) break;
   }
 
-  return { title, author, price, listPrice, releaseDate, genres };
+  return { title, author, price, listPrice, releaseDate, genres, reviewCount: ld.reviewCount, reviewAvg: ld.reviewAvg };
 }
 
 // ── 画像CDN（NOW PRINTINGプレースホルダを指紋で除外） ────────────────────────
@@ -210,7 +187,7 @@ async function cdnImages(cid) {
 
   // 対象：CLI引数（cid or 作品URL/book URL） ＋ 依頼キュー ＋ 登録済み(価格更新)。cid→urlのMapで保持。
   const targets = new Map();
-  const addTarget = (cid, url) => { if (!cid) return; const cur = targets.get(cid); if (!cur || (!cur.url && url)) targets.set(cid, { url: url || (cur && cur.url) || "" }); };
+  const addTarget = (cid, url) => { if (!cid || /^tw_/i.test(cid)) return; const cur = targets.get(cid); if (!cur || (!cur.url && url)) targets.set(cid, { url: url || (cur && cur.url) || "" }); };
   for (const a of process.argv.slice(2)) { if (a === "--poll") continue; const t = toTarget(a); if (t) addTarget(t.cid, t.url); }
 
   const qres = await fetch(WORKER + "/api/fanza-queue", { headers: { "X-Admin-Secret": ADMIN } }).then((r) => r.json()).catch((e) => ({ ok: false, error: String(e) }));
@@ -243,7 +220,7 @@ async function cdnImages(cid) {
           sampleImageURL: null,
           iteminfo: { author: page.author ? [{ name: page.author }] : [], genre: page.genres.map((n) => ({ name: n })) },
           prices: { list_price: page.listPrice != null ? String(page.listPrice) : null, price: page.price != null ? String(page.price) : null },
-          review: { count: null, average: null },
+          review: { count: page.reviewCount, average: page.reviewAvg },
           scrapedAt: new Date().toISOString(),
         });
         console.log("✔ " + page.title.slice(0, 28) + (page.price != null ? "（¥" + page.price + "）" : ""));
@@ -261,7 +238,7 @@ async function cdnImages(cid) {
           sampleImageURL: img.sampleImageURL,
           iteminfo: { author: page.author ? [{ name: page.author }] : [], genre: page.genres.map((n) => ({ name: n })) },
           prices: { list_price: page.listPrice != null ? String(page.listPrice) : null, price: page.price != null ? String(page.price) : null },
-          review: { count: null, average: null },
+          review: { count: page.reviewCount, average: page.reviewAvg },
           scrapedAt: new Date().toISOString(),
         });
         console.log("✔ " + page.title.slice(0, 28) + (page.price != null ? "（¥" + page.price + "）" : ""));
