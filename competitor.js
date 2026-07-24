@@ -185,6 +185,16 @@
     if (typeof n !== 'number' || !isFinite(n)) return '計測中';
     return (n > 0 ? '+' : '') + n.toLocaleString('ja-JP') + '/日';
   }
+  function fmtPublishedAt(value) {
+    if (!value) return '投稿日 取得不可';
+    var d = new Date(value);
+    if (!isFinite(d.getTime())) return '投稿日 取得不可';
+    // YouTubeの公開日時はUTCで返るため、日本時間へ固定変換する（日本はサマータイムなし）。
+    var jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    return '投稿日 ' + (jst.getUTCMonth() + 1) + '月' + jst.getUTCDate() + '日 ' +
+      jst.getUTCHours() + '時' + pad2(jst.getUTCMinutes()) + '分';
+  }
   // 分析パネルを描画(comp_digest=監視数/comp_titles=題名コーパス)。
   function analysisHtml(dg, tt) {
     var titles = (tt && tt.titles) || [];
@@ -210,6 +220,7 @@
       html += '<div class="comp-an-k comp-an-top-title">🔥 いま伸びてる競合動画(1日の再生の伸び・上位20動画)</div>' +
         '<ol class="comp-an-top">' + ranked.map(function (t) {
           return '<li class="comp-an-video">' +
+            '<div class="comp-an-published">' + fmtPublishedAt(t.publishedAt) + '</div>' +
             '<div class="comp-an-video-channel"><span class="comp-an-channel-name">' + esc(t.channelName || '(チャンネル名未取得)') + '</span>' +
               '<span class="comp-an-subs">登録者数 ' + fmtCount(t.subscriberCount, '非公開・取得不可') + '</span></div>' +
             '<div class="comp-an-video-title">' + esc(t.title || '(題名未取得)') + '</div>' +

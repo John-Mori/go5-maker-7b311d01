@@ -15,6 +15,7 @@ const titles = Array.from({ length: 25 }, (_, i) => ({
   title: '題名' + i,
   speed: i * 10,
   totalViews: 10000 + i,
+  publishedAt: i === 24 ? '2026-07-24T23:05:56Z' : '2026-07-23T00:00:00Z',
   isShort: 'yes'
 }));
 const html = analysisHtml({ watchChannels: 3 }, { titles });
@@ -23,6 +24,8 @@ assert.ok(html.indexOf('チャンネル24') < html.indexOf('チャンネル23'),
 assert.match(html, /登録者数 1,024/);
 assert.match(html, /\+240\/日/);
 assert.match(html, /総再生数 10,024/);
+assert.match(html, /投稿日 7月25日 8時05分/);
+assert.match(analysisHtml({}, { titles: [{ title: '日時なし' }] }), /投稿日 取得不可/);
 assert.match(html, /非公開・取得不可/);
 assert.doesNotMatch(html, /<script>危険<\/script>/, 'チャンネル名をHTMLとして解釈させない');
 assert.match(html, /&lt;script&gt;危険&lt;\/script&gt;/);
