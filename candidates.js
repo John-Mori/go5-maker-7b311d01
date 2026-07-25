@@ -125,11 +125,39 @@
   var DUPLICATE_WORK_NOTICE = '同じ作品が既に追加されているので統合';
   // 重複追加は分かりにくいinline通知ではなくダイアログで明示する(Chami指定2026-07-24)。
   //   重複した時「だけ」出す。今回入力していたメモがあれば改行して2行目に表示する。
-  //   ダイアログを閉じたら、既に登録済みだった該当作品カードへ即座に移動する(Chami追加指定：
-  //   スクロールではなくパッと移動)。alertは同期的にブロックするので、閉じた後に移動処理が走る。
+  //   ★ブラウザ標準のalertではなくアプリ内モーダルで出す(Chami再指定2026-07-26)。標準alertは
+  //     iPhoneでドメイン名が出て安っぽく、アプリの配色にも合わないため。既存のfz-overlay方式に揃える。
+  //   閉じたら、既に登録済みだった該当作品カードへ即座に移動する(スクロールではなくパッと移動)。
+  var _dupOverlay = null;
   function showDuplicateDialog_(memoText, cid) {
-    window.alert(DUPLICATE_WORK_NOTICE + ((memoText || '').trim() ? ('\n' + memoText.trim()) : ''));
-    if (cid) jumpToCandCard_(cid);
+    var memo = (memoText || '').trim();
+    var ov = _dupOverlay;
+    if (!ov) {
+      ov = document.createElement('div'); ov.className = 'fz-overlay dup-overlay'; ov.hidden = true;
+      ov.innerHTML = '<div class="fz-modal dup-modal">' +
+        '<div class="dup-title">⚠️ <span id="dupTitleText"></span></div>' +
+        '<div id="dupMemo" class="dup-memo"></div>' +
+        '<button id="dupOk" type="button" class="primary dup-ok">OK</button>' +
+        '</div>';
+      document.body.appendChild(ov);
+      _dupOverlay = ov;
+    }
+    ov.querySelector('#dupTitleText').textContent = DUPLICATE_WORK_NOTICE;
+    var memoEl = ov.querySelector('#dupMemo');
+    memoEl.textContent = memo;      // メモは改行して2行目に表示(textContent＝HTML混入なし)
+    memoEl.hidden = !memo;
+    function close() {
+      ov.hidden = true;
+      document.removeEventListener('keydown', onKey);
+      if (cid) jumpToCandCard_(cid);
+    }
+    function onKey(e) { if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); close(); } }
+    var ok = ov.querySelector('#dupOk');
+    ok.onclick = close;                                        // onclickで毎回上書き＝リスナー多重登録を防ぐ
+    ov.onclick = function (e) { if (e.target === ov) close(); }; // 背景タップでも閉じる
+    document.addEventListener('keydown', onKey);
+    ov.hidden = false;
+    try { ok.focus({ preventScroll: true }); } catch (e) {}
   }
   // 指定cidの候補カードへ瞬時に移動して一時ハイライト。(behavior:'auto'＝スクロールアニメ無しで即座に表示)
   //   モーダルを閉じた直後は再描画が走ることがあるため、少し待ってから探す。見つからなければ何もしない。
@@ -2528,7 +2556,7 @@
     return '<div class="cand-work-search" style="padding:2px 6px 10px;">' +
       '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品を検索（部分一致）</label>' +
       '<div style="display:flex;gap:6px;align-items:center;">' +
-      '<input id="candWorkSearch" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品を検索（部分一致）" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;">' +
+      '<input id="candWorkSearch" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品を検索（部分一致）" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
       '<button id="candWorkSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
       '</div><div id="candWorkSearchResult" class="hint" aria-live="polite" style="min-height:1.4em;margin-top:3px;"></div></div>';
   }
@@ -2553,7 +2581,9 @@
     if (clear) clear.addEventListener('click', function () {
       input.value = '';
       apply();
-      input.focus();
+      // ★preventScroll: クリアを押しただけで画面が動かないようにする(Chami指定2026-07-26)。
+      //   font-size:16px と併せて、iOSのフォーカス時オートズームも起きない。
+      try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
     });
     apply();
   }

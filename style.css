@@ -44,6 +44,9 @@ main{max-width:520px;margin:0 auto;padding:8px 14px 40px;}
   padding:14px;margin:12px 0;}
 .field-label{display:block;font-size:13px;color:var(--accent);font-weight:700;margin:10px 0 5px;}
 .field-label:first-child{margin-top:0;}
+/* iOS Safariは font-size が16px未満の入力欄にフォーカスすると自動でズームする。
+   type=search は上の input[type=text] 規則に当たらず既定13.3pxになりズームしていた(Chami報告2026-07-26)。 */
+input[type=search]{font-size:16px;}
 input[type=text]{width:100%;font-size:16px;padding:11px 12px;border-radius:10px;
   border:1px solid var(--line);background:#0e1422;color:var(--ink);outline:none;}
 input[type=text]:focus{border-color:var(--accent);}
@@ -751,6 +754,14 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* メモ・URL追加の小モーダル（投稿編集モーダルの上に重ねる・内容に応じて短め） */
 .memo-overlay{z-index:10001;}
 .memo-modal{max-width:440px;}
+/* 重複統合の確認ダイアログ(候補追加)。標準alertの代わり＝アプリ配色に合わせる(紫は使わない・CLAUDE.md §6) */
+.dup-overlay{align-items:center;}
+.dup-modal{max-width:380px;text-align:center;padding:20px 18px 16px;}
+.dup-title{font-size:15px;font-weight:700;color:var(--fg,#e8e8e8);line-height:1.5;}
+.dup-memo{margin-top:8px;font-size:13px;font-weight:700;color:#1c9bd6;line-height:1.5;word-break:break-word;white-space:pre-wrap;}
+.dup-memo[hidden]{display:none;}
+.dup-ok{margin-top:16px;width:100%;font-size:15px;padding:10px;}
+
 #pcText{width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
   background:#0e1422;color:var(--ink);line-height:1.6;white-space:pre-wrap;font-family:inherit;resize:vertical;}
 #pcText:focus{border-color:var(--accent);outline:none;}
