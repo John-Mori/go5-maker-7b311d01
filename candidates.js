@@ -123,6 +123,28 @@
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
   var _workSearchByTab = {};
   var DUPLICATE_WORK_NOTICE = '同じ作品が既に追加されているので統合';
+  // 重複追加は分かりにくいinline通知ではなくダイアログで明示する(Chami指定2026-07-24)。
+  //   重複した時「だけ」出す。今回入力していたメモがあれば改行して2行目に表示する。
+  //   ダイアログを閉じたら、既に登録済みだった該当作品カードへ即座に移動する(Chami追加指定：
+  //   スクロールではなくパッと移動)。alertは同期的にブロックするので、閉じた後に移動処理が走る。
+  function showDuplicateDialog_(memoText, cid) {
+    window.alert(DUPLICATE_WORK_NOTICE + ((memoText || '').trim() ? ('\n' + memoText.trim()) : ''));
+    if (cid) jumpToCandCard_(cid);
+  }
+  // 指定cidの候補カードへ瞬時に移動して一時ハイライト。(behavior:'auto'＝スクロールアニメ無しで即座に表示)
+  //   モーダルを閉じた直後は再描画が走ることがあるため、少し待ってから探す。見つからなければ何もしない。
+  function jumpToCandCard_(cid) {
+    var tries = 0;
+    (function seek() {
+      var anchor = document.querySelector('[data-refimg="' + (window.CSS && CSS.escape ? CSS.escape(cid) : cid) + '"]');
+      var card = anchor;
+      while (card && !(card.classList && card.classList.contains('cand-card'))) card = card.parentNode;
+      if (!card) { if (++tries < 10) { setTimeout(seek, 80); } return; }
+      try { card.scrollIntoView({ behavior: 'auto', block: 'center' }); } catch (e) {}
+      card.classList.add('cand-card-flash');
+      setTimeout(function () { card.classList.remove('cand-card-flash'); }, 2000);
+    })();
+  }
   // 絞り込み：現在価格が _priceMax 円以下の作品のみ表示(0=無効)。localStorageで永続。
   var _priceMax = (function () { try { var n = parseInt(localStorage.getItem('cand_price_max') || '0', 10); return (n > 0) ? n : 0; } catch (e) { return 0; } })();
   // アカウント別「投稿済みを非表示」トグル。(両方同時ONで、いずれかで投稿済みの作品を隠せる)localStorageで永続。
@@ -1239,13 +1261,19 @@
       var sp = document.createElement('span'); sp.className = 'cand-actions-mspacer'; actions.appendChild(sp);
       actionBtns.forEach(function (b) { actions.appendChild(b); }); // 作品リンク行の右端へ統合
     } else {
+      // ★コメント・メモ両方ある時は、メモをコメントの上の行に独立表示(render()の主描画と同じ並び)。
+      if (cmt && memo) {
+        var mAboveRow = document.createElement('div'); mAboveRow.className = 'cand-comment-row cand-memo-above';
+        var mAboveSpan = document.createElement('span'); mAboveSpan.className = 'cand-manage-memo'; mAboveSpan.textContent = memo;
+        mAboveRow.appendChild(mAboveSpan); cardEl.appendChild(mAboveRow);
+      }
       if (cmt) {
         var crow = document.createElement('div'); crow.className = 'cand-comment-row';
         var cspan = document.createElement('span'); cspan.className = 'cand-manage-comment'; cspan.textContent = cmt;
         crow.appendChild(cspan); cardEl.appendChild(crow);
       }
       var mrow = document.createElement('div'); mrow.className = 'cand-manage-row';
-      if (memo) { var mspan = document.createElement('span'); mspan.className = 'cand-manage-memo'; mspan.textContent = memo; mrow.appendChild(mspan); }
+      if (memo && !cmt) { var mspan = document.createElement('span'); mspan.className = 'cand-manage-memo'; mspan.textContent = memo; mrow.appendChild(mspan); }
       else { var msp = document.createElement('span'); msp.className = 'cand-manage-spacer'; mrow.appendChild(msp); }
       actionBtns.forEach(function (b) { mrow.appendChild(b); });
       cardEl.appendChild(mrow);
@@ -2348,22 +2376,25 @@
           refImgSave(r.cid, { imgs: mergedImgs, comment: cur.comment || '', memo: mergedMemo, twitterUrl: mergedTw, twitterUrl2: mergedTw2 });
           if (inp) inp.value = ''; if (twInp) twInp.value = ''; if (memoElDup) memoElDup.value = '';
           _addModalImgs = []; renderAddSlots_();
-          showCandAddNotice_(msg, DUPLICATE_WORK_NOTICE);
           renderCandList(tabId);
+          showDuplicateDialog_(newMemo, r.cid);
           if (onDone) onDone();
         } else {
-          showCandAddNotice_(msg, DUPLICATE_WORK_NOTICE);
+          showDuplicateDialog_(newMemo, r.cid);
           if (onDone) onDone();
         }
         return;
       }
       msg.textContent = '⏳ 作品情報を取得中…';
       var cfg = workerCfg();
-      var put = function (info) {
+      // errored=trueなら取得失敗(placeholder登録)。この場合は入力欄を消さない(Chami指定2026-07-24：
+      // 「取得できなかった場合にURLを消して登録しない」のを避ける＝欄を残し、登録済みも分かるようにする)。
+      var put = function (info, errored) {
         var items = lsGet(key, '[]');
         // 作品情報の取得中に連打・別端末同期が入っても、保存直前の再確認で同じcidを2件作らない。
         if (items.some(function (x) { return x && x.cid === r.cid; })) {
-          showCandAddNotice_(msg, DUPLICATE_WORK_NOTICE);
+          var memoElRace = $('candMemo');
+          showDuplicateDialog_(memoElRace && memoElRace.value, r.cid);
           if (onDone) onDone();
           return;
         }
@@ -2385,15 +2416,27 @@
         items.unshift(it);
         lsSet(key, items);
         attachAddImgs_(r.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用・左から順)
-        inp.value = ''; if (twInp) twInp.value = ''; showCandAddNotice_(msg, '✅ 候補に登録しました');
+        if (errored) {
+          // URLは消さない(登録はできたが情報取得は失敗＝自動バックフィルで後から埋まる)。
+          showCandAddNotice_(msg, '⚠️ 作品情報の取得に失敗しましたが、URLは登録済みです(自動で再取得します)');
+        } else {
+          inp.value = ''; if (twInp) twInp.value = ''; showCandAddNotice_(msg, '✅ 候補に登録しました');
+        }
         renderCandList(tabId);
         if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
       };
+      // 一時的な失敗(タイムアウト/サーバー5xx等・retryable)は1回だけ即リトライしてから諦める。
+      //   そもそも取得エラーになる頻度を減らす狙い(Chami指定2026-07-24)。
+      var fetchOnce = function () { return window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url); };
       if (window.FanzaCore && cfg.url) {
-        window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) {
-          put(info && info.title ? info : null);
-        }).catch(function () { put(null); });
-      } else put(null);
+        fetchOnce().then(function (info) {
+          if (info && info.title) { put(info, false); return; }
+          if (info && info.retryable) {
+            return fetchOnce().then(function (info2) { put(info2 && info2.title ? info2 : null, !(info2 && info2.title)); });
+          }
+          put(null, true);
+        }).catch(function () { put(null, true); });
+      } else put(null, true);
       return;
     }
     // ②作品URLが無い/FANZA以外 → Twitter(X)のURLだけで追加(Twitter欄優先、無ければ作品欄に貼られたX URLも可)
@@ -2836,11 +2879,15 @@
         // 作品リンク行。(cand-info内＝画像の右の定位置)コメント/メモ無し時は同じ行の右端に 非表示/🗑 を統合。
         '<div class="cand-actions">' + _actionsInner + (_noComment ? '<span class="cand-actions-mspacer"></span>' + actionHtml : '') + '</div>' +
       '</div>' +
+      // ★コメント・メモ両方ある時は、メモをコメントの上の行に独立表示する(Chami指定2026-07-24)。
+      //   下のcand-manage-rowは非表示/🗑ボタンの置き場を保つため、この場合はメモを二重に出さない。
+      ((refCmt && refMemo) ? '<div class="cand-comment-row cand-memo-above"><span class="cand-manage-memo">' + esc(refMemo) + '</span></div>' : '') +
       // コメント(黒・全幅・必ず1行＝可変縮小)＝独立行。
       (refCmt ? '<div class="cand-comment-row"><span class="cand-manage-comment">' + esc(refCmt) + '</span></div>' : '') +
       // メモ(水色・左・必ず1行)＋ 非表示/🗑(右)を同じ行に統合＝余白節約。コメント/メモ無し時は作品リンク行に統合済み。
+      //   コメントもある時はメモを上で出し済みなのでここは空(スペーサー)にする。
       (_noComment ? '' :
-        '<div class="cand-manage-row">' + (refMemo ? '<span class="cand-manage-memo">' + esc(refMemo) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>') +
+        '<div class="cand-manage-row">' + ((refMemo && !refCmt) ? '<span class="cand-manage-memo">' + esc(refMemo) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>') +
       '</div>';
   }
 
