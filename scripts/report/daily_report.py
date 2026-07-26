@@ -22,6 +22,7 @@
 import glob
 import json
 import os
+import re as _re
 import subprocess
 import sys
 import time
@@ -34,20 +35,18 @@ LOCAL = os.path.join(ROOT, "local")
 HQ_STATUS = r"D:\SougouStartFolder\00_AI-HQ\departments\qa\STATUS.md"
 WINDOW_SKIP = ("router", "llm-growth", "gemini")
 
-DEPT_DISPLAY = {
-    "hq": "研究室HQ",
-    "main": "司令塔",
-    "system-engineer": "改修部門",
-    "report-notify": "報告通知",
-    "qa-reviewer": "QA部門",
-    "shorts-analyst": "分析部門",
-    "copy-director": "コピー部",
-    "product-scout": "商品選定部",
-    "learning-coach": "学習室",
-    "kaizen-analyst": "改善分析部",
-    "frontend": "フロント部門",
-    "learning": "学習部門",
-}
+# ★2026-07-27 ここにあった DEPT_DISPLAY(独自の対応表)を廃止し、共通の dept_ja() に一本化した。
+#   理由= 同じ日にオタコン(この部屋のセッション)とHQ発注のエージェントが**同じ要望を別々に実装**し、
+#   対応表が2つできた。値も食い違っていた(改修部門↔改修部門α / QA部門↔品質管理部門 /
+#   コピー部↔タイトル文部門 / 商品選定部↔商品候補選定部門 / 学習室↔学習の部屋 …)。
+#   **同じ部屋が報告Aと報告Bで別名になる**のが一番たちが悪い(ORG-11 判定を2本持たない)。
+#   正本= 00_AI-HQ/org_registry.yml の depts.<slug>.display_ja。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from dept_names import dept_ja
+except Exception:                      # fail-safe: 変換できなくても報告は必ず出す
+    def dept_ja(slug, with_slug=False):
+        return slug
 
 
 def dept_activity(hours=24):
@@ -92,8 +91,33 @@ def _dept_hint(status_cell: str) -> str:
     return ""
 
 
+def _status_lines(status_text: str, max_lines: int = 2, line_len: int = 80) -> list:
+    """状態セルから要約行リストを作る(最大max_lines行・1行line_len字)。**bold**を除去。"""
+    text = _re.sub(r'\*\*(.+?)\*\*', r'\1', status_text).strip()
+    if not text:
+        return []
+    result = []
+    BREAKS = frozenset(' 。、）)→/・：:')
+    while text and len(result) < max_lines:
+        if len(text) <= line_len:
+            result.append(text)
+            text = ""
+            break
+        cut = line_len
+        for i in range(line_len, max(line_len - 20, 0), -1):
+            if i < len(text) and text[i] in BREAKS:
+                cut = i + 1
+                break
+        result.append(text[:cut].rstrip())
+        text = text[cut:].lstrip()
+    if text and result:
+        result[-1] = result[-1] + "…"
+    return result
+
+
 def chami_pending():
-    """HQ QA STATUSのopen表から「ちゃみ」が待ち先の行を抽出 (機械可読な範囲の正直な近似)。"""
+    """HQ QA STATUSのopen表から「ちゃみ」が待ち先の行を抽出 (機械可読な範囲の正直な近似)。
+    戻り値: [(display_name, summary_lines), ...] のリスト。"""
     out = []
     try:
         for l in open(HQ_STATUS, encoding="utf-8"):
@@ -102,7 +126,9 @@ def chami_pending():
                 if len(cells) > 1 and cells[1] and not cells[1].startswith("-"):
                     name = cells[1][:40]
                     hint = _dept_hint(cells[2]) if len(cells) > 2 else ""
-                    out.append(f"{name} → {hint}" if hint else name)
+                    status = cells[2] if len(cells) > 2 else ""
+                    display = f"{name} → {hint}" if hint else name
+                    out.append((display, _status_lines(status)))
     except OSError:
         pass
     return out[:5]
@@ -186,16 +212,18 @@ def build_report():
     else:
         L.append("✅ 全系統正常")
     L.append("①直近24hの動静: " + (
-        "、".join(f"{DEPT_DISPLAY.get(d, d)}={n}件" for d, n in list(acts.items())[:6]) if acts else "受信なし"))
+        "、".join(f"{dept_ja(d)}={n}件" for d, n in list(acts.items())[:6]) if acts else "受信なし"))
     if pend:
         L.append("②ちゃみ確認待ち:")
-        for x in pend:
-            L.append(f"  ・{x}")
+        for display, summary in pend:
+            L.append(f"  ・{display}")
+            for s in summary:
+                L.append(f"    {s}")
     else:
         L.append("②ちゃみ確認待ち: なし (QA台帳上)")
     L.append("③自動系: " + " / ".join(health))
     # ④P3軽微進捗の集約はv1未実装。定型の断り文言はChami指示(2026-07-20 msg=1528419155231903764)で廃止。
-    return "\n".join(L[:20])
+    return "\n".join(L[:35])
 
 
 def main():
