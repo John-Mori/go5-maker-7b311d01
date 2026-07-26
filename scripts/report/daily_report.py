@@ -71,6 +71,27 @@ def dept_activity(hours=24):
     return dict(sorted(counts.items(), key=lambda x: -x[1]))
 
 
+# STATUS.md の状態列(cells[2])に含まれるキーワードから担当部門を推定するテーブル。
+# 先に書いたパターンが優先。部門名 = 報告上の表示名。
+_DEPT_PATTERNS = [
+    ("研究室", "研究室HQ"),
+    ("改修β", "改修部門β"),
+    ("改修", "改修部門"),
+    ("QA", "QA部門"),
+    ("人事", "人事部門"),
+    ("データ整理", "データ整理部"),
+    ("分析", "分析部門"),
+]
+
+
+def _dept_hint(status_cell: str) -> str:
+    """状態列テキストからキーワード一致で部門名を返す。見つからなければ空文字。"""
+    for keyword, label in _DEPT_PATTERNS:
+        if keyword in status_cell:
+            return label
+    return ""
+
+
 def chami_pending():
     """HQ QA STATUSのopen表から「ちゃみ」が待ち先の行を抽出 (機械可読な範囲の正直な近似)。"""
     out = []
@@ -79,7 +100,9 @@ def chami_pending():
             if l.startswith("|") and "ちゃみ" in l and ("待ち" in l or "| ちゃみ" in l):
                 cells = [c.strip() for c in l.split("|")]
                 if len(cells) > 1 and cells[1] and not cells[1].startswith("-"):
-                    out.append(cells[1][:40])
+                    name = cells[1][:40]
+                    hint = _dept_hint(cells[2]) if len(cells) > 2 else ""
+                    out.append(f"{name} → {hint}" if hint else name)
     except OSError:
         pass
     return out[:5]
