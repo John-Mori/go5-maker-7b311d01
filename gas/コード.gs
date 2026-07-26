@@ -76,6 +76,17 @@ function categoryOf_(f) {
   ATTR_DEFS.forEach(function (a) { if (attrTrue_(f[a.key])) cats.push(a.label); });
   return cats.join(', ');
 }
+// FANZA サービス種別を作品URLまたはアフィリンクから判定。(books/同人/データ)
+function fanzaType_(url) {
+  if (!url) return '';
+  var s = String(url);
+  var lm = s.match(/[?&]lurl=([^&]+)/);
+  if (lm) { try { s = decodeURIComponent(lm[1]); } catch (e) {} }
+  if (/book\.dmm\.(com|co\.jp)/.test(s)) return 'books';
+  if (/\/doujin\/|\/dc\/doujin/.test(s)) return '同人';
+  if (/\.dmm\.(co\.jp|com)/.test(s)) return 'データ';
+  return '';
+}
 //
 // ── 列の自動取得マップ(保守用メモ：ClaudeCodeはここを基準に列を増減する)──
 //   【自動で埋まる】post_id / 投稿日時 / 曜日 / day-type / 時間帯スロット / 題名(コメント) /
@@ -93,7 +104,7 @@ function categoryOf_(f) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-24A(競合分析を上位20件化。チャンネル名・登録者数・日次伸び・総再生数を返す)';
+var GAS_VERSION = '2026-07-26A(カテゴリ列にFANZA種別=books/同人/データを作品URLから自動判定して記録)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -973,10 +984,15 @@ function writeRecord_(channel, f) {
   putIf('FANZA取得日時', f.fanza_fetched_at || '');
   putIf('レビュー件数(代理指標)', f.fanza_review_count !== undefined && f.fanza_review_count !== null ? f.fanza_review_count : '');
   putIf('レビュー平均', f.fanza_review_avg !== undefined && f.fanza_review_avg !== null ? f.fanza_review_avg : '');
-  // カテゴリ：payload に属性フラグ(chara/jk/gyaru/isekai)が含まれるときだけ明示セット。(未指定なら既存値を保護)
-  // キャラ無し＝オリジナルは空欄。複数属性はカンマ区切りで列挙。
-  if (attrProvided_(f) && map['カテゴリ']) {
-    sh.getRange(target, map['カテゴリ']).setValue(categoryOf_(f));
+  // カテゴリ：FANZA種別(books/同人/データ)を作品URLから自動判定 + 属性フラグ(chara/jk等)を結合。
+  // workUrlもaffiliatUrlも無く属性フラグも無ければ既存値を保護。
+  if (map['カテゴリ']) {
+    var _catParts = [];
+    var _ftype = fanzaType_(f.workUrl || f.affiliateUrl || '');
+    if (_ftype) _catParts.push(_ftype);
+    if (attrProvided_(f)) { var _attrCat = categoryOf_(f); if (_attrCat) _catParts.push(_attrCat); }
+    var _catVal = _catParts.join(', ');
+    if (_catVal) sh.getRange(target, map['カテゴリ']).setValue(_catVal);
   }
   // 作品状態：投稿当時の状態。(新作/準新作/旧作)payload に含まれるときだけセット。
   putIf('作品状態', f.workState || '');
