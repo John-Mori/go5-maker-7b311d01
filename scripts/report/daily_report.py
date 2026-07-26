@@ -145,9 +145,13 @@ def token_health():
 def system_health():
     now = time.time()
     lines = []
-    p = os.path.join(LOCAL, "llm", "poller_active.txt")
-    age = now - os.path.getmtime(p) if os.path.exists(p) else 9e9
-    lines.append(f"鳩: {'正常' if age < 300 else '★停止疑い(' + str(int(age)) + '秒)'}")
+    # ★2026-07-27 「鳩の脈」の行を削除した。Chami原文=「鳩の件ってもう報告いる?あれって昔のやつだよね?」
+    #   鳩(inbox_poller)は **2026-07-19 の受信基盤切替(Gateway+LeaseQueue)で退役済み**
+    #   (PRIORITY.md「鳩退役」)。プロセスは常時0本。
+    #   → この行は**退役した機械の死亡確認を毎日2回報告し続けていた**。
+    #   常時★が出る監視は読まれなくなり、本当の異常を埋める(ORG-42)。だから消す。
+    #   ★復活させるなら「鳩が居るべきなのに居ない」を判定できる形にすること
+    #   (今の実装は poller_active.txt の古さを見るだけで、退役と故障を区別できない)。
     dead = 0
     for f in glob.glob(os.path.join(LOCAL, "llm", "claude_active_*.txt")):
         dept = os.path.basename(f)[len("claude_active_"):-4]
@@ -171,7 +175,7 @@ def system_health():
 
 def build_report():
     now = datetime.now()
-    label = "0時便 (日付が変わった合図)" if now.hour < 4 else "8時便 (朝の残タスク再把握)"
+    label = "0時便" if now.hour < 4 else "8時便 (朝の残タスク再把握)"
     acts = dept_activity(24)
     pend = chami_pending()
     health = system_health()
