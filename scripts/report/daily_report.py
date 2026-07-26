@@ -47,6 +47,11 @@ try:
 except Exception:                      # fail-safe: 変換できなくても報告は必ず出す
     def dept_ja(slug, with_slug=False):
         return slug
+try:
+    from session_presence import window_age as _window_age
+except Exception:                      # fail-safe: 判定できない時は死んだ扱いにしない
+    def _window_age(dept, now=None):
+        return None
 
 
 def dept_activity(hours=24):
@@ -128,7 +133,7 @@ def chami_pending():
                     hint = _dept_hint(cells[2]) if len(cells) > 2 else ""
                     status = cells[2] if len(cells) > 2 else ""
                     display = f"{name} → {hint}" if hint else name
-                    out.append((display, _status_lines(status)))
+                    out.append((display, _status_lines(status, max_lines=3)))
     except OSError:
         pass
     return out[:5]
@@ -178,13 +183,17 @@ def system_health():
     #   常時★が出る監視は読まれなくなり、本当の異常を埋める(ORG-42)。だから消す。
     #   ★復活させるなら「鳩が居るべきなのに居ない」を判定できる形にすること
     #   (今の実装は poller_active.txt の古さを見るだけで、退役と故障を区別できない)。
+    # ★2026-07-27 脈の取り方を差し替えた。旧実装は claude_active_<部屋>.txt の mtime だけを見ており、
+    #   **対話セッションが在席している間はこのファイルが更新されない**ため、
+    #   毎便出ていた「死んだ窓: 1件」は**働いている研究室HQ自身**だった(実測46分前)。
+    #   → 2つの脈の新しい方を採る。正本= scripts/_common/session_presence.py(判定は1本=ORG-11)。
     dead = 0
     for f in glob.glob(os.path.join(LOCAL, "llm", "claude_active_*.txt")):
         dept = os.path.basename(f)[len("claude_active_"):-4]
         if dept in WINDOW_SKIP:
             continue
-        a = now - os.path.getmtime(f)
-        if 20 * 60 <= a < 12 * 3600:
+        a = _window_age(dept, now=now)
+        if a is not None and 20 * 60 <= a < 12 * 3600:
             dead += 1
     lines.append(f"死んだ窓: {dead}件" if dead else "窓: 異常なし")
     try:
