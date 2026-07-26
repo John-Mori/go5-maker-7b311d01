@@ -34,6 +34,21 @@ LOCAL = os.path.join(ROOT, "local")
 HQ_STATUS = r"D:\SougouStartFolder\00_AI-HQ\departments\qa\STATUS.md"
 WINDOW_SKIP = ("router", "llm-growth", "gemini")
 
+DEPT_DISPLAY = {
+    "hq": "研究室HQ",
+    "main": "司令塔",
+    "system-engineer": "改修部門",
+    "report-notify": "報告通知",
+    "qa-reviewer": "QA部門",
+    "shorts-analyst": "分析部門",
+    "copy-director": "コピー部",
+    "product-scout": "商品選定部",
+    "learning-coach": "学習室",
+    "kaizen-analyst": "改善分析部",
+    "frontend": "フロント部門",
+    "learning": "学習部門",
+}
+
 
 def dept_activity(hours=24):
     """discord_processed.jsonl から直近hours時間のdept別件数。"""
@@ -138,8 +153,13 @@ def build_report():
     pend = chami_pending()
     health = system_health()
     L = [f"■日次報告便 {now.strftime('%m/%d %H:%M')} — {label}"]
+    alerts = [h for h in health if "★" in h]
+    if alerts:
+        L.append("⚠️ 要確認: " + " / ".join(alerts))
+    else:
+        L.append("✅ 全系統正常")
     L.append("①直近24hの動静: " + (
-        "、".join(f"{d}={n}件" for d, n in list(acts.items())[:6]) if acts else "受信なし"))
+        "、".join(f"{DEPT_DISPLAY.get(d, d)}={n}件" for d, n in list(acts.items())[:6]) if acts else "受信なし"))
     if pend:
         L.append("②ちゃみ確認待ち:")
         for x in pend:
