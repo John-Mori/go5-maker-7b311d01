@@ -2153,6 +2153,8 @@
   var _candAddNotice = '';
   var _candAddNoticeTimer = null;
   var _candAddHydrationPending = false;
+  var _prefetchCache = {}; // { cid: { done: bool, info: obj|null, errored: bool } }
+  var _prefetchTimer = null;
   function showCandAddNotice_(msgEl, text) {
     if (msgEl) msgEl.textContent = text || '';
     _candAddNotice = text || '';
@@ -2203,7 +2205,7 @@
     });
   }
   // 追加確定時に呼ぶ：スロット画像を候補の動画生成用画像として保存し、スロットを空にする。
-  function attachAddImgs_(cid) {
+  function attachAddImgs_(cid, keepForm) {
     var imgs = _addModalImgs.filter(Boolean);
     var memoEl = $('candMemo');
     var memo = (memoEl && memoEl.value || '').trim(); // メモ欄に入力があれば候補のメモへ保存
@@ -2212,9 +2214,11 @@
       var cur = refImgOf(cid) || {};
       refImgSave(cid, { imgs: imgs.length ? imgs : (cur.imgs || []), comment: cur.comment || '', memo: memo || cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' });
     }
-    if (memoEl) memoEl.value = ''; // 追加後はメモ欄をクリア(続ける時に持ち越さない)
-    _addModalImgs = [];
-    renderAddSlots_();
+    if (!keepForm) {
+      if (memoEl) memoEl.value = ''; // 追加後はメモ欄をクリア(続ける時に持ち越さない)
+      _addModalImgs = [];
+      renderAddSlots_();
+    }
   }
   var _addOverlay = null;
   function openAddModal_(tabId, isMain) {
@@ -2231,7 +2235,7 @@
     _addModalImgs = []; // 開くたびにスロットを白紙に
     body.innerHTML = addFormHtml_(isMain);
     $('candAdd').addEventListener('click', function () { addCandidate(tabId); }); // 追加して続ける(開いたまま)
-    $('candAddClose').addEventListener('click', function () { addCandidate(tabId, function () { ov.hidden = true; }); }); // 追加して閉じる
+    $('candAddClose').addEventListener('click', function () { ov.hidden = true; addCandidate(tabId); }); // 追加して閉じる(即閉→バックグラウンド処理)
     $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
     // 「画像を選ぶ」(複数可): ファイルからもスロットへ左詰めで追加。(1枚ずつ順に処理=メモリ圧迫回避)
     var addFile = $('candAddImgFile');
@@ -2256,6 +2260,47 @@
     });
     wirePaste_(body);
     wireAddSlots_(body);
+    // fix③: URL欄へのペースト/入力と同時にFANZA情報の先読みを開始(ボタン押下時は既に取得済みになる)
+    clearTimeout(_prefetchTimer); _prefetchTimer = null;
+    var urlInp = $('candUrl');
+    if (urlInp) urlInp.addEventListener('input', function () {
+      clearTimeout(_prefetchTimer);
+      var raw = urlInp.value.trim();
+      var urlN = window.normalizeWorkUrl ? window.normalizeWorkUrl(raw) : raw;
+      var rPre = (raw && urlN && window.buildAffiliateLink) ? window.buildAffiliateLink(urlN, '') : null;
+      if (!rPre || !rPre.ok) return;
+      if (_prefetchCache[rPre.cid] && _prefetchCache[rPre.cid].done) return; // 取得済み
+      var cfg2 = workerCfg();
+      if (!window.FanzaCore || !cfg2.url) return;
+      var cidPre = rPre.cid, urlPre = urlN;
+      _prefetchTimer = setTimeout(function () {
+        if (_prefetchCache[cidPre]) return; // 取得中または完了
+        _prefetchCache[cidPre] = { done: false };
+        var pm = $('candMsg'); if (pm) pm.textContent = '⏳ 作品情報を先読み中…';
+        var fOnce = function () { return window.FanzaCore.fetchFanzaInfo(cidPre, cfg2.url, cfg2.secret, urlPre); };
+        fOnce().then(function (info) {
+          if (info && info.title) {
+            _prefetchCache[cidPre] = { done: true, info: info, errored: false };
+            var m = $('candMsg'); if (m) m.textContent = '✅ 作品情報を取得済み — 追加ボタンで確定';
+          } else if (info && info.retryable) {
+            fOnce().then(function (info2) {
+              var ok2 = !!(info2 && info2.title);
+              _prefetchCache[cidPre] = { done: true, info: ok2 ? info2 : null, errored: !ok2 };
+              var m = $('candMsg'); if (m) m.textContent = ok2 ? '✅ 作品情報を取得済み — 追加ボタンで確定' : '⚠️ 作品情報の取得に失敗(追加ボタンで再試行)';
+            }).catch(function () {
+              _prefetchCache[cidPre] = { done: true, info: null, errored: true };
+              var m = $('candMsg'); if (m) m.textContent = '⚠️ 作品情報の取得に失敗(追加ボタンで再試行)';
+            });
+          } else {
+            _prefetchCache[cidPre] = { done: true, info: null, errored: true };
+            var m = $('candMsg'); if (m) m.textContent = '⚠️ 作品情報の取得に失敗(追加ボタンで再試行)';
+          }
+        }).catch(function () {
+          _prefetchCache[cidPre] = { done: true, info: null, errored: true };
+          var m = $('candMsg'); if (m) m.textContent = '⚠️ 作品情報の取得に失敗(追加ボタンで再試行)';
+        });
+      }, 300);
+    });
     ov.hidden = false;
   }
 
@@ -2413,7 +2458,7 @@
         }
         return;
       }
-      msg.textContent = '⏳ 作品情報を取得中…';
+      if (msg) msg.textContent = '⏳ 作品情報を取得中…';
       var cfg = workerCfg();
       // errored=trueなら取得失敗(placeholder登録)。この場合は入力欄を消さない(Chami指定2026-07-24：
       // 「取得できなかった場合にURLを消して登録しない」のを避ける＝欄を残し、登録済みも分かるようにする)。
@@ -2443,7 +2488,7 @@
         if (twForWork.ok) it.twitterUrl = twForWork.url; // X / Bluesky の投稿URLも一緒に保存
         items.unshift(it);
         lsSet(key, items);
-        attachAddImgs_(r.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用・左から順)
+        attachAddImgs_(r.cid, errored); // errored=true → keepForm: URLとメモを消さず再試行を許す
         if (errored) {
           // URLは消さない(登録はできたが情報取得は失敗＝自動バックフィルで後から埋まる)。
           showCandAddNotice_(msg, '⚠️ 作品情報の取得に失敗しましたが、URLは登録済みです(自動で再取得します)');
@@ -2453,6 +2498,12 @@
         renderCandList(tabId);
         if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
       };
+      // プリフェッチ済みキャッシュがあれば即確定(fetchをスキップして体感速度を上げる)
+      if (_prefetchCache[r.cid] && _prefetchCache[r.cid].done) {
+        var cached = _prefetchCache[r.cid]; delete _prefetchCache[r.cid];
+        put(cached.info, cached.errored);
+        return;
+      }
       // 一時的な失敗(タイムアウト/サーバー5xx等・retryable)は1回だけ即リトライしてから諦める。
       //   そもそも取得エラーになる頻度を減らす狙い(Chami指定2026-07-24)。
       var fetchOnce = function () { return window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url); };
