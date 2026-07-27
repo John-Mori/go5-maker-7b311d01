@@ -193,16 +193,21 @@
     }
   }
 
-  function buildYtText_(meta) {
-    return meta.title || '';
+  function buildModalYtTitle_() {
+    var el = $('draftYtTitleText');
+    if (!el || !_modalMeta) return;
+    var title = (_modalMeta.title || '').replace(/\n+/g, '');
+    var tags = ($('draftYtTagsInput') || {}).value || '';
+    el.value = title + (title && tags.trim() ? ' ' : '') + tags.trim();
   }
 
   function saveDraftPost_() {
     if (!_modalMeta) return;
     var data = {
-      xText: ($('draftXText') || {}).value || '',
-      ytText: ($('draftYtText') || {}).value || '',
-      ytUrl: ($('draftYtUrl') || {}).value || '',
+      xText:   ($('draftXText')       || {}).value || '',
+      ytTitle: ($('draftYtTitleText') || {}).value || '',
+      ytTags:  ($('draftYtTagsInput') || {}).value || '',
+      ytUrl:   ($('draftYtUrl')       || {}).value || '',
     };
     try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
   }
@@ -213,50 +218,74 @@
     if (!m) return;
     var saved = {};
     try { saved = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}'); } catch (e) {}
-    $('draftXText').value  = saved.xText  !== undefined ? saved.xText  : (meta.bskyText || '');
-    $('draftYtText').value = saved.ytText !== undefined ? saved.ytText : buildYtText_(meta);
-    $('draftYtUrl').value  = saved.ytUrl  !== undefined ? saved.ytUrl  : (meta.youtubeUrl || '');
+    $('draftXText').value = saved.xText !== undefined ? saved.xText : (meta.bskyText || '');
+    var tags = saved.ytTags !== undefined ? saved.ytTags : null;
+    if (tags === null) { try { tags = localStorage.getItem('yt_tags_shared') || ''; } catch (e) { tags = ''; } }
+    if (!tags) { var te = $('ytTags'); tags = te ? te.value : '#Shorts #マンガ #漫画紹介 #anime'; }
+    $('draftYtTagsInput').value = tags;
+    buildModalYtTitle_();
+    if (saved.ytTitle !== undefined) $('draftYtTitleText').value = saved.ytTitle;
+    $('draftYtUrl').value = saved.ytUrl !== undefined ? saved.ytUrl : (meta.youtubeUrl || '');
     m.style.display = 'flex';
   }
 
   function createModal_() {
     var m = document.createElement('div');
     m.id = 'draftPostModal';
-    m.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.8);overflow-y:auto;-webkit-overflow-scrolling:touch;align-items:flex-start;justify-content:center;padding:20px 0;box-sizing:border-box;';
-    var S = 'style';
+    m.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.82);overflow-y:auto;-webkit-overflow-scrolling:touch;align-items:flex-start;justify-content:center;padding:16px 0;box-sizing:border-box;';
+    var iS = 'width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
+    var cpS = 'flex:0 0 auto;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid #3a4a5e;background:#0e1a2b;color:#aabbc8;cursor:pointer;white-space:nowrap;';
+    var sH  = 'font-size:.72rem;font-weight:700;color:#9fb0c3;letter-spacing:.06em;text-transform:uppercase;';
+    var fL  = 'font-size:.76rem;color:#7a8fa3;margin-bottom:4px;margin-top:12px;';
     m.innerHTML =
-      '<div style="background:#0e1422;border:1px solid #2a3346;border-radius:12px;width:calc(100% - 32px);max-width:480px;margin:auto;padding:20px;">' +
-        '<div style="font-size:1rem;font-weight:700;color:#2bb3c0;margin-bottom:16px;border-bottom:1px solid #2a3346;padding-bottom:10px;">投稿モード</div>' +
-        '<div style="font-size:.85rem;font-weight:700;color:#eef2f7;margin-bottom:6px;">X投稿</div>' +
-        '<textarea id="draftXText" rows="6" style="width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:6px;padding:8px;font-size:.84rem;line-height:1.5;resize:vertical;"></textarea>' +
-        '<button type="button" id="draftCopyX" style="width:100%;margin-top:6px;padding:7px;font-size:.82rem;border-radius:6px;border:1px solid #3a4a5e;background:transparent;color:#ccc;cursor:pointer;">コピー</button>' +
-        '<div style="font-size:.85rem;font-weight:700;color:#eef2f7;margin-top:16px;margin-bottom:6px;">YouTube</div>' +
-        '<textarea id="draftYtText" rows="4" style="width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:6px;padding:8px;font-size:.84rem;line-height:1.5;resize:vertical;"></textarea>' +
-        '<button type="button" id="draftCopyYt" style="width:100%;margin-top:6px;padding:7px;font-size:.82rem;border-radius:6px;border:1px solid #3a4a5e;background:transparent;color:#ccc;cursor:pointer;">コピー</button>' +
-        '<input type="url" id="draftYtUrl" placeholder="YouTube URL(投稿後に貼る)" style="width:100%;box-sizing:border-box;margin-top:10px;padding:8px;font-size:.84rem;border-radius:6px;border:1px solid #3a4a5e;background:#0b1019;color:#eef2f7;">' +
-        '<div style="margin-top:20px;display:flex;gap:8px;">' +
-          '<button type="button" id="draftModalComplete" style="flex:1;padding:10px;font-size:.9rem;border-radius:8px;border:none;background:#2bb3c0;color:#04222a;font-weight:700;cursor:pointer;">投稿完了</button>' +
-          '<button type="button" id="draftModalClose" style="padding:10px 16px;font-size:.9rem;border-radius:8px;border:1px solid #3a4a5e;background:transparent;color:#666;cursor:pointer;">閉じる</button>' +
+      '<div style="background:#0e1422;border:1px solid #2a3346;border-radius:14px;width:calc(100% - 24px);max-width:480px;margin:auto;box-sizing:border-box;overflow:hidden;">' +
+        '<div style="padding:13px 16px;border-bottom:1px solid #1e2d42;display:flex;justify-content:space-between;align-items:center;">' +
+          '<div style="font-size:.95rem;font-weight:700;color:#2bb3c0;">投稿モード</div>' +
+          '<button type="button" id="draftModalClose" style="background:none;border:none;color:#7a8fa3;font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;">✕</button>' +
+        '</div>' +
+        '<div style="padding:16px 16px 20px;">' +
+          '<div style="' + sH + 'margin-bottom:8px;">X 投稿</div>' +
+          '<textarea id="draftXText" rows="6" style="' + iS + 'resize:vertical;"></textarea>' +
+          '<button type="button" id="draftCopyX" style="width:100%;margin-top:7px;padding:8px;font-size:.82rem;border-radius:8px;border:1px solid #3a4a5e;background:#0e1a2b;color:#aabbc8;cursor:pointer;">コピー</button>' +
+          '<div style="height:1px;background:#1e2d42;margin:18px 0;"></div>' +
+          '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
+          '<div style="' + fL + 'margin-top:0;">題名</div>' +
+          '<div style="display:flex;gap:7px;align-items:flex-start;">' +
+            '<textarea id="draftYtTitleText" rows="3" style="flex:1;min-width:0;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
+            '<button type="button" id="draftCopyYtTitle" style="' + cpS + '">コピー</button>' +
+          '</div>' +
+          '<div style="' + fL + '">タグ</div>' +
+          '<div style="display:flex;gap:7px;align-items:center;">' +
+            '<input type="text" id="draftYtTagsInput" style="flex:1;min-width:0;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.82rem;">' +
+            '<button type="button" id="draftCopyYtTags" style="' + cpS + '">コピー</button>' +
+          '</div>' +
+          '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
+          '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + iS + '">' +
+          '<button type="button" id="draftModalComplete" style="width:100%;margin-top:20px;padding:13px;font-size:.95rem;font-weight:700;border-radius:10px;border:none;background:#2bb3c0;color:#04222a;cursor:pointer;">投稿完了</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(m);
 
     $('draftXText').addEventListener('input', saveDraftPost_);
-    $('draftYtText').addEventListener('input', saveDraftPost_);
+    $('draftYtTitleText').addEventListener('input', saveDraftPost_);
+    $('draftYtTagsInput').addEventListener('input', function () {
+      buildModalYtTitle_();
+      try { localStorage.setItem('yt_tags_shared', this.value); } catch (e) {}
+      var yt = $('ytTags'); if (yt) yt.value = this.value;
+      saveDraftPost_();
+    });
     $('draftYtUrl').addEventListener('input', saveDraftPost_);
     $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
-    $('draftCopyYt').addEventListener('click', function () { copyText_(($('draftYtText') || {}).value || '', this); });
+    $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
+    $('draftCopyYtTags').addEventListener('click', function () { copyText_(($('draftYtTagsInput') || {}).value || '', this); });
     $('draftModalClose').addEventListener('click', function () { m.style.display = 'none'; _modalMeta = null; });
     $('draftModalComplete').addEventListener('click', function () {
       if (!_modalMeta) return;
       var ytUrl = ($('draftYtUrl') || {}).value || '';
       handleCompleteOk_(_modalMeta.id, ytUrl.trim());
-      m.style.display = 'none';
-      _modalMeta = null;
+      m.style.display = 'none'; _modalMeta = null;
     });
-    m.addEventListener('click', function (e) {
-      if (e.target === m) { m.style.display = 'none'; _modalMeta = null; }
-    });
+    m.addEventListener('click', function (e) { if (e.target === m) { m.style.display = 'none'; _modalMeta = null; } });
     return m;
   }
 
