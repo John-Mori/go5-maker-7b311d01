@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-26A(カテゴリ列にFANZA種別=books/同人/データを作品URLから自動判定して記録)';
+var GAS_VERSION = '2026-07-27A(時点記録トリガーを30分→10分・許容窓をmax(45,min*0.5)→9固定に変更。統計ブレをほぼ排除)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -1509,8 +1509,8 @@ function setupTrigger() {
   });
   ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('refreshEngagement').timeBased().everyHours(1).create();
-  // ⑤時点記録(30分バケット)の精度確保のためスナップを30分毎に。(日次スナップはupsertなので2回/時でも無害)
-  ScriptApp.newTrigger('snapshotStats').timeBased().everyMinutes(30).create();
+  // ⑤時点記録の精度確保のためスナップを10分毎に。許容窓9分と組み合わせて「バケット+0〜9分」以内に記録。
+  ScriptApp.newTrigger('snapshotStats').timeBased().everyMinutes(10).create();
   // 競合サーチ(gas/競合.gs): 日次スナップ=毎日4時台 / 発見=日曜4時台。watch対象0件の間は無害に空回り
   ScriptApp.newTrigger('runCompetitorDaily').timeBased().everyDays(1).atHour(4).create();
   ScriptApp.newTrigger('runCompetitorDiscovery').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(4).create();
@@ -1548,7 +1548,7 @@ function captureTimepoints_(tpRecs, viewsByVid, clickByCode, nowStr, tz) {
     TIME_BUCKETS.forEach(function (b) {
       var min = b[0], label = b[1];
       if (elapsed < min) return;
-      var tol = Math.max(45, min * 0.5); // 30分トリガー前提の許容窓。超過分は未記録のまま(誤値を作らない)
+      var tol = 9; // 10分トリガー前提。バケット境界+0〜9分で記録=経過分(実測)がバケット目標値に揃う
       if (elapsed > min + tol) return;
       if (seen[r.post_id + '|' + label]) return;
       var v = (r.vid && viewsByVid && viewsByVid[r.vid] != null) ? viewsByVid[r.vid] : '';
