@@ -233,33 +233,33 @@
     var m = document.createElement('div');
     m.id = 'draftPostModal';
     m.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.82);overflow-y:auto;-webkit-overflow-scrolling:touch;align-items:flex-start;justify-content:center;padding:16px 0;box-sizing:border-box;';
-    var iS = 'width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
-    var cpS = 'flex:0 0 auto;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid #3a4a5e;background:#0e1a2b;color:#aabbc8;cursor:pointer;white-space:nowrap;';
-    var sH  = 'font-size:.72rem;font-weight:700;color:#9fb0c3;letter-spacing:.06em;text-transform:uppercase;';
-    var fL  = 'font-size:.76rem;color:#7a8fa3;margin-bottom:4px;margin-top:12px;';
+    var iS = 'width:100%;box-sizing:border-box;background:#261f1c;color:#ede8df;border:1px solid #3a2f28;border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
+    var cpS = 'flex:0 0 auto;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid #3a2f28;background:#231d1a;color:#c8b8a8;cursor:pointer;white-space:nowrap;';
+    var sH  = 'font-size:.72rem;font-weight:600;color:#e07a4a;letter-spacing:.06em;text-transform:uppercase;';
+    var fL  = 'font-size:.76rem;color:#9a8e84;margin-bottom:4px;margin-top:12px;';
     m.innerHTML =
-      '<div style="background:#0e1422;border:1px solid #2a3346;border-radius:14px;width:calc(100% - 24px);max-width:480px;margin:auto;box-sizing:border-box;overflow:hidden;">' +
-        '<div style="padding:13px 16px;border-bottom:1px solid #1e2d42;display:flex;justify-content:space-between;align-items:center;">' +
-          '<div style="font-size:.95rem;font-weight:700;color:#2bb3c0;white-space:nowrap;flex-shrink:0;">投稿モード</div>' +
+      '<div style="background:#1c1916;border:1px solid #3a2f28;border-radius:14px;width:calc(100% - 24px);max-width:480px;margin:auto;box-sizing:border-box;overflow:hidden;color:#ede8df;">' +
+        '<div style="padding:13px 16px;border-bottom:1px solid #2e2420;display:flex;justify-content:space-between;align-items:center;">' +
+          '<div style="font-size:.95rem;font-weight:800;color:#2bb3c0;white-space:nowrap;flex-shrink:0;">投稿モード</div>' +
           '<button type="button" id="draftModalClose" style="background:none;border:none;color:#7a8fa3;font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;">✕</button>' +
         '</div>' +
         '<div style="padding:16px 16px 20px;">' +
           '<div style="' + sH + 'margin-bottom:8px;">X 投稿</div>' +
           '<textarea id="draftXText" rows="6" style="' + iS + 'resize:vertical;"></textarea>' +
-          '<button type="button" id="draftCopyX" style="width:100%;margin-top:7px;padding:8px;font-size:.82rem;border-radius:8px;border:1px solid #3a4a5e;background:#0e1a2b;color:#aabbc8;cursor:pointer;">コピー</button>' +
-          '<div style="height:1px;background:#1e2d42;margin:18px 0;"></div>' +
+          '<button type="button" id="draftCopyX" style="width:100%;margin-top:7px;padding:8px;font-size:.82rem;border-radius:8px;border:1px solid #3a2f28;background:#231d1a;color:#c8b8a8;cursor:pointer;">コピー</button>' +
+          '<div style="height:1px;background:#2e2420;margin:18px 0;"></div>' +
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
           '<div style="' + fL + 'margin-top:0;">題名</div>' +
           '<div style="display:flex;gap:7px;align-items:flex-start;">' +
             '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<textarea id="draftYtTitleText" rows="3" style="width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
+              '<textarea id="draftYtTitleText" rows="3" style="width:100%;box-sizing:border-box;background:#261f1c;color:#ede8df;border:1px solid #3a2f28;border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
             '</div>' +
             '<button type="button" id="draftCopyYtTitle" style="' + cpS + '">コピー</button>' +
           '</div>' +
           '<div style="' + fL + '">タグ</div>' +
           '<div style="display:flex;gap:7px;align-items:center;">' +
             '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<input type="text" id="draftYtTagsInput" style="width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.82rem;">' +
+              '<input type="text" id="draftYtTagsInput" style="width:100%;box-sizing:border-box;background:#261f1c;color:#ede8df;border:1px solid #3a2f28;border-radius:8px;padding:9px 10px;font-size:.82rem;">' +
             '</div>' +
             '<button type="button" id="draftCopyYtTags" style="' + cpS + '">コピー</button>' +
           '</div>' +
