@@ -240,7 +240,7 @@
     m.innerHTML =
       '<div style="background:#0e1422;border:1px solid #2a3346;border-radius:14px;width:calc(100% - 24px);max-width:480px;margin:auto;box-sizing:border-box;overflow:hidden;">' +
         '<div style="padding:13px 16px;border-bottom:1px solid #1e2d42;display:flex;justify-content:space-between;align-items:center;">' +
-          '<div style="font-size:.95rem;font-weight:700;color:#2bb3c0;">投稿モード</div>' +
+          '<div style="font-size:.95rem;font-weight:700;color:#2bb3c0;white-space:nowrap;flex-shrink:0;">投稿モード</div>' +
           '<button type="button" id="draftModalClose" style="background:none;border:none;color:#7a8fa3;font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;">✕</button>' +
         '</div>' +
         '<div style="padding:16px 16px 20px;">' +
@@ -251,12 +251,16 @@
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
           '<div style="' + fL + 'margin-top:0;">題名</div>' +
           '<div style="display:flex;gap:7px;align-items:flex-start;">' +
-            '<textarea id="draftYtTitleText" rows="3" style="flex:1;min-width:0;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
+            '<div style="flex:1;min-width:0;overflow:hidden;">' +
+              '<textarea id="draftYtTitleText" rows="3" style="width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
+            '</div>' +
             '<button type="button" id="draftCopyYtTitle" style="' + cpS + '">コピー</button>' +
           '</div>' +
           '<div style="' + fL + '">タグ</div>' +
           '<div style="display:flex;gap:7px;align-items:center;">' +
-            '<input type="text" id="draftYtTagsInput" style="flex:1;min-width:0;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.82rem;">' +
+            '<div style="flex:1;min-width:0;overflow:hidden;">' +
+              '<input type="text" id="draftYtTagsInput" style="width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:8px;padding:9px 10px;font-size:.82rem;">' +
+            '</div>' +
             '<button type="button" id="draftCopyYtTags" style="' + cpS + '">コピー</button>' +
           '</div>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
