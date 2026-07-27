@@ -96,20 +96,6 @@
     }).catch(function () { alert('動画データの取得に失敗しました。'); });
   }
 
-  // ── 投稿タブへ引き継ぎ ──
-  function sendToPost_(meta) {
-    if (meta.bskyText) {
-      var el = $('bskyText');
-      if (el) {
-        el.value = meta.bskyText;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        try { localStorage.setItem('bsky_text', meta.bskyText); } catch (e) {}
-      }
-    }
-    var tabBtn = $('tabPost');
-    if (tabBtn) tabBtn.click();
-  }
-
   // ── 投稿完了処理 ──
   function handleCompleteOk_(id, ytUrl) {
     var store = idb();
@@ -153,17 +139,9 @@
         (hasYt ? '<div style="font-size:.71rem;color:#2bb3c0;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:#2bb3c0;">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
         '<div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;">' +
           '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">⬇ 動画DL</button>' +
-          '<button type="button" class="stk-post" data-id="' + esc(id) + '" style="' + btnBase + 'border:none;background:#2bb3c0;color:#04222a;font-weight:700;">🦋 投稿タブへ</button>' +
-          (!hasYt ? '<button type="button" class="stk-complete" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #2bb3c0;background:transparent;color:#2bb3c0;">✅ 投稿完了</button>' : '') +
+          '<button type="button" class="stk-mode" data-id="' + esc(id) + '" style="' + btnBase + 'border:none;background:' + (hasYt ? '#1a3a40' : '#2bb3c0') + ';color:' + (hasYt ? '#2bb3c0' : '#04222a') + ';font-weight:700;">投稿モード</button>' +
           '<button type="button" class="stk-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#666;padding:5px 8px;">🗑</button>' +
         '</div>' +
-        (!hasYt ? '<div data-form-id="' + esc(id) + '" style="display:none;margin-top:8px;">' +
-          '<input type="url" class="stk-yt-url" placeholder="YouTube URL(省略可・後でも入力可)" style="width:100%;box-sizing:border-box;padding:6px 8px;font-size:.8rem;border-radius:6px;border:1px solid #3a4a5e;background:#0e1422;color:#eef2f7;margin-bottom:6px;">' +
-          '<div style="display:flex;gap:5px;">' +
-            '<button type="button" class="stk-complete-ok" data-id="' + esc(id) + '" style="flex:1;padding:6px 0;font-size:.78rem;border-radius:6px;border:none;background:#2bb3c0;color:#04222a;font-weight:700;cursor:pointer;">☁️ DriveへUP + 完了記録</button>' +
-            '<button type="button" class="stk-complete-cancel" data-id="' + esc(id) + '" style="padding:6px 10px;font-size:.78rem;border-radius:6px;border:1px solid #3a4a5e;background:transparent;color:#666;cursor:pointer;">キャンセル</button>' +
-          '</div>' +
-        '</div>' : '') +
       '</div>' +
     '</div>';
   }
@@ -198,8 +176,94 @@
     });
   }
 
+  // ── 投稿モード モーダル ──
+  var _modalMeta = null;
+
+  function copyText_(text, btn) {
+    function flash() { var o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(function () { btn.textContent = o; }, 2000); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(flash).catch(function () { fallback_(); });
+    } else { fallback_(); }
+    function fallback_() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.cssText = 'position:fixed;top:0;opacity:0;';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { document.execCommand('copy'); flash(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+  }
+
+  function buildYtText_(meta) {
+    return meta.title || '';
+  }
+
+  function saveDraftPost_() {
+    if (!_modalMeta) return;
+    var data = {
+      xText: ($('draftXText') || {}).value || '',
+      ytText: ($('draftYtText') || {}).value || '',
+      ytUrl: ($('draftYtUrl') || {}).value || '',
+    };
+    try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
+  }
+
+  function openPostModal_(meta) {
+    _modalMeta = meta;
+    var m = $('draftPostModal');
+    if (!m) return;
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}'); } catch (e) {}
+    $('draftXText').value  = saved.xText  !== undefined ? saved.xText  : (meta.bskyText || '');
+    $('draftYtText').value = saved.ytText !== undefined ? saved.ytText : buildYtText_(meta);
+    $('draftYtUrl').value  = saved.ytUrl  !== undefined ? saved.ytUrl  : (meta.youtubeUrl || '');
+    m.style.display = 'flex';
+  }
+
+  function createModal_() {
+    var m = document.createElement('div');
+    m.id = 'draftPostModal';
+    m.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.8);overflow-y:auto;-webkit-overflow-scrolling:touch;align-items:flex-start;justify-content:center;padding:20px 0;box-sizing:border-box;';
+    var S = 'style';
+    m.innerHTML =
+      '<div style="background:#0e1422;border:1px solid #2a3346;border-radius:12px;width:calc(100% - 32px);max-width:480px;margin:auto;padding:20px;">' +
+        '<div style="font-size:1rem;font-weight:700;color:#2bb3c0;margin-bottom:16px;border-bottom:1px solid #2a3346;padding-bottom:10px;">投稿モード</div>' +
+        '<div style="font-size:.85rem;font-weight:700;color:#eef2f7;margin-bottom:6px;">X投稿</div>' +
+        '<textarea id="draftXText" rows="6" style="width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:6px;padding:8px;font-size:.84rem;line-height:1.5;resize:vertical;"></textarea>' +
+        '<button type="button" id="draftCopyX" style="width:100%;margin-top:6px;padding:7px;font-size:.82rem;border-radius:6px;border:1px solid #3a4a5e;background:transparent;color:#ccc;cursor:pointer;">コピー</button>' +
+        '<div style="font-size:.85rem;font-weight:700;color:#eef2f7;margin-top:16px;margin-bottom:6px;">YouTube</div>' +
+        '<textarea id="draftYtText" rows="4" style="width:100%;box-sizing:border-box;background:#0b1019;color:#eef2f7;border:1px solid #3a4a5e;border-radius:6px;padding:8px;font-size:.84rem;line-height:1.5;resize:vertical;"></textarea>' +
+        '<button type="button" id="draftCopyYt" style="width:100%;margin-top:6px;padding:7px;font-size:.82rem;border-radius:6px;border:1px solid #3a4a5e;background:transparent;color:#ccc;cursor:pointer;">コピー</button>' +
+        '<input type="url" id="draftYtUrl" placeholder="YouTube URL(投稿後に貼る)" style="width:100%;box-sizing:border-box;margin-top:10px;padding:8px;font-size:.84rem;border-radius:6px;border:1px solid #3a4a5e;background:#0b1019;color:#eef2f7;">' +
+        '<div style="margin-top:20px;display:flex;gap:8px;">' +
+          '<button type="button" id="draftModalComplete" style="flex:1;padding:10px;font-size:.9rem;border-radius:8px;border:none;background:#2bb3c0;color:#04222a;font-weight:700;cursor:pointer;">投稿完了</button>' +
+          '<button type="button" id="draftModalClose" style="padding:10px 16px;font-size:.9rem;border-radius:8px;border:1px solid #3a4a5e;background:transparent;color:#666;cursor:pointer;">閉じる</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(m);
+
+    $('draftXText').addEventListener('input', saveDraftPost_);
+    $('draftYtText').addEventListener('input', saveDraftPost_);
+    $('draftYtUrl').addEventListener('input', saveDraftPost_);
+    $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
+    $('draftCopyYt').addEventListener('click', function () { copyText_(($('draftYtText') || {}).value || '', this); });
+    $('draftModalClose').addEventListener('click', function () { m.style.display = 'none'; _modalMeta = null; });
+    $('draftModalComplete').addEventListener('click', function () {
+      if (!_modalMeta) return;
+      var ytUrl = ($('draftYtUrl') || {}).value || '';
+      handleCompleteOk_(_modalMeta.id, ytUrl.trim());
+      m.style.display = 'none';
+      _modalMeta = null;
+    });
+    m.addEventListener('click', function (e) {
+      if (e.target === m) { m.style.display = 'none'; _modalMeta = null; }
+    });
+    return m;
+  }
+
   // ── 初期化 ──
   function init() {
+    createModal_();
+
     var draftMakeBtn = $('draftMakeBtn');
     if (draftMakeBtn) {
       draftMakeBtn.addEventListener('click', function () {
@@ -243,23 +307,8 @@
         if (btn.classList.contains('stk-dl')) {
           if (meta) downloadStock_(id, meta.videoName);
 
-        } else if (btn.classList.contains('stk-post')) {
-          if (meta) sendToPost_(meta);
-
-        } else if (btn.classList.contains('stk-complete')) {
-          var form = page.querySelector('[data-form-id="' + id + '"]');
-          if (form) { form.style.display = 'block'; btn.style.display = 'none'; }
-
-        } else if (btn.classList.contains('stk-complete-cancel')) {
-          var form = page.querySelector('[data-form-id="' + id + '"]');
-          if (form) form.style.display = 'none';
-          var completeBtn = page.querySelector('.stk-complete[data-id="' + id + '"]');
-          if (completeBtn) completeBtn.style.display = '';
-
-        } else if (btn.classList.contains('stk-complete-ok')) {
-          var form = page.querySelector('[data-form-id="' + id + '"]');
-          var ytUrl = form ? (form.querySelector('.stk-yt-url') || {}).value || '' : '';
-          handleCompleteOk_(id, ytUrl.trim());
+        } else if (btn.classList.contains('stk-mode')) {
+          if (meta) openPostModal_(meta);
 
         } else if (btn.classList.contains('stk-del')) {
           if (!window.confirm('「' + (meta ? meta.label || '動画' : '動画') + '」をドラフトから削除しますか?')) return;
