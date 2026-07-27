@@ -18,6 +18,7 @@
     { btn: 'tabVerify', page: 'pageVerify'   },
     { btn: 'tabAnalyze', page: 'pageAnalyze' },
     { btn: 'tabMovie',  page: 'pageMovie'    },
+    { btn: 'tabStock',  page: 'pageStock'    },
     { btn: 'tabCal',    page: 'pageCalendar' },
     { btn: 'tabYT',     page: 'pageYouTube'  },
     { btn: 'tabPost',   page: 'pagePost'     },
@@ -45,6 +46,7 @@
     if (activeBtnId === 'tabRank'    && window.YtRank)   window.YtRank.renderRank();
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
     if (activeBtnId === 'tabReserve' && window.Scheduler) window.Scheduler._renderTab();
+    if (activeBtnId === 'tabStock'   && window.Go5Stock)  window.Go5Stock.render();
   }
   TABS.forEach(function (t) {
     var b = document.getElementById(t.btn);
