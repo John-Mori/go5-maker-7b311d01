@@ -2378,7 +2378,7 @@
     }
     var isB = tw.kind === 'bsky';
     var title = isB ? (tw.user ? ('🦋 @' + tw.user + ' のポスト') : '🦋 Blueskyのポスト')
-                    : (tw.user ? ('🐦 @' + tw.user + ' のポスト') : '🐦 X(Twitter)のポスト');
+                    : (tw.user ? ('X @' + tw.user + ' のポスト') : 'X X(Twitter)のポスト');
     items.unshift({ url: tw.url, cid: tw.cid, twitterUrl: tw.url, isTwitter: true, title: title, addedAt: new Date().getTime() });
     lsSet(key, items);
     attachAddImgs_(tw.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用)
