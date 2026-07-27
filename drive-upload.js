@@ -149,52 +149,28 @@
     statusEl().appendChild(b);
   }
 
+  // Drive保存は「投稿完了」まで延期。video-created では Bsky添付画像の後追い用に文脈のみ記録する。
   document.addEventListener("video-created", function (e) {
-    if (!configured()) return; // 未設定時は無害にスキップ(既存フローは一切壊さない)
     var d = (e && e.detail) || {};
-    var blob = d.blob;
-    if (!blob) return; // 動画Blobが取れなければ何もしない
-    if (d.test) return; // テストモード時は Drive 保存をスキップ
+    if (!d.blob || d.test) return;
     var name = d.name || "video.mp4";
-    var rawTitle = (d.title || "").trim() || name.replace(/\.[^.]+$/, "");
-    var title = rawTitle;
-    // フォルダ/ファイル名は動画名(タイトル)そのまま。同名は Worker 側で _2,_3… に自動回避。
-    // ※安定動画IDは記録シートの post_id に使うのみ。(Drive名には付けない)
-
+    var title = (d.title || "").trim() || name.replace(/\.[^.]+$/, "");
     var channel = (typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "";
-    if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
-
-    // Bsky添付画像の後追い保存用に、この動画の文脈を控える。(フォルダIDは保存成功時に確定)
+    if (channel !== "acc1" && channel !== "acc2") return;
     lastCtx = { videoId: d.videoId || "", title: title, channel: channel, folderId: "", queuedImage: null };
-
-    var videoFile = new File([blob], name, { type: blob.type || "video/mp4" });
-
-    // 元写真。(あれば)形式はそのまま＝再エンコードせず原本を保持し、名前だけ「タイトル.元拡張子」に。
-    var origImage = null;
-    var photo = document.getElementById("photo");
-    var pf = (photo && photo.files && photo.files[0]) ? photo.files[0] : null;
-    if (pf) origImage = new File([pf], title + "." + imgExt(pf), { type: pf.type || "image/jpeg" });
-
-    // ※Bsky添付画像は「実際に投稿した画像」を投稿成功時に bsky-image-posted で後追い保存する
-    //   。(動画名_Bsky投稿.拡張子)ここでは動画・プレビュー・元写真のみ保存する。
-
-    function finish(previewImage) {
-      // プレビューを先頭に＝旧Worker(先頭1枚のみ保存)でも仕上がりプレビューは残る。新Workerは両方保存。
-      send({ channel: channel, title: title, videoId: d.videoId || "", videoFile: videoFile, images: [previewImage, origImage].filter(Boolean) });
-    }
-
-    // 仕上がりプレビュー(合成済み Canvas #cv＝1080×1920)を PNG「タイトル_プレビュー.png」で保存。(文字が鮮明)
-    var cv = document.getElementById("cv");
-    if (cv && typeof cv.toBlob === "function") {
-      try {
-        cv.toBlob(function (pngBlob) {
-          finish(pngBlob ? new File([pngBlob], title + "_プレビュー.png", { type: "image/png" }) : null);
-        }, "image/png");
-      } catch (err) { finish(null); }
-    } else {
-      finish(null);
-    }
   });
+
+  // ドラフトタブの「投稿完了」から呼ばれる。blob を受け取って Drive へアップロードする。
+  function driveUpload_(blob, videoName, title, channel, videoId) {
+    if (!configured()) { showError("channel_unresolved"); return; }
+    if (!blob) return;
+    if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
+    // キューに溜まっていた Bsky 添付画像は引き継ぐ
+    lastCtx = { videoId: videoId || "", title: title, channel: channel, folderId: "", queuedImage: lastCtx.queuedImage };
+    var videoFile = new File([blob], videoName || (title.replace(/[\\/:"*?<>|]/g, '_') + '.mp4'), { type: blob.type || "video/mp4" });
+    send({ channel: channel, title: title, videoId: videoId || "", videoFile: videoFile, images: [] });
+  }
+  window.Go5Drive = { upload: driveUpload_ };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {
