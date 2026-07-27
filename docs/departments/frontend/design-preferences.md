@@ -73,25 +73,113 @@
 - 主要操作は**縦一列で親指の届く範囲**に(iPhone片手操作が前提)。
 - 保存/復元・「既定値に保存」・「リセット」を必ず用意する。
 
+### 実装から確定(v=427/428 で通った・直されていない)
+| 項目 | 値 | 出典 |
+|---|---|---|
+| 角丸: カード/モーダル | `border-radius:14px` | draftPostModal v=427 |
+| 角丸: ボタン(primary 全幅) | `border-radius:10px` | draftPostModal v=427 |
+| 角丸: ボタン(ghost/copy) | `border-radius:7〜8px` | draftPostModal v=427 |
+| 角丸: input/textarea | `border-radius:8px` | 全体一貫 |
+| 左右の基準余白 | オーバーレイ `padding:16px`、内ボディ `padding:16px` | draftPostModal v=427 |
+| ボタンの並び順(2択) | キャンセル(左・ghost) / 投稿する(右・primary) | pc-actions(postConfirmModal) |
+| 全幅 primary ボタン(モーダル完了) | `width:100%; padding:13px; border-radius:10px; background:#2bb3c0; color:#04222a` | draftModalComplete v=427 |
+| セクション間 horizontal divider | `height:1px; background:#1e2d42; margin:18px 0` | draftPostModal v=427 |
+| フォントサイズ階層 | タイトル `.95rem` / 本文 `.84rem` / field-label `.76rem` / section-header `.72rem` | draftPostModal v=427 |
+
+> ★**実装確定の意味**: Chami指示で入った後に「直された」という記録が無い = 暗黙の通過。Chami明示確定とは強度が違う。形が変わったら都度更新する。
+
 ### ★未確定(勝手に決めない。必要になったらChamiに**1問だけ**聞いて、答えをここへ恒久化する)
 | 項目 | 状態 |
 |---|---|
-| コンテンツの最大幅(スマホ以外での上限) | 未確定 |
-| 左右の基準余白 | 未確定 |
-| ボタンの標準の高さ・最小タップ領域 | 未確定 |
-| 角丸の量(ボタン/カード) | 未確定 |
-| ボタンの並び順(主要動作を左/右・破壊的操作の位置) | 未確定 |
-| セクション間の余白スケール | 未確定 |
-| フォントサイズの段階(見出し/本文/補助の比) | 未確定 |
+| コンテンツの最大幅(スマホ以外での上限) | 未確定(モーダルは用途で480px/520pxが混在) |
+| ボタンの標準の高さ・最小タップ領域 | 未確定(primary=padding:13px実績あり。タップ最小値Chami未明示) |
 
 > **聞き方の作法**: 質問を3つ並べない。**選択肢を2つ出して選ばせる**のが最短で、Chamiの手も止めない。
 > 答えが出たらこの表から上の「確立済み」へ移し、日付つきで§99の追記ログにも1行残す。
+
+## 4.6 モーダルの設計パターン(v=427/428 draftPostModal から確定)
+
+複数回の改修で定まったモーダルの構造と部品。次のモーダル追加時はこれに揃える。
+
+**構造:**
+- オーバーレイ: `position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.82); overflow-y:auto`(長い中身もスクロール可)
+- カード: `background:#0e1422; border:1px solid #2a3346; border-radius:14px; overflow:hidden`(内側 div の `box-sizing:border-box` も必須=縦潰れ防止)
+- ヘッダー: `padding:13px 16px; border-bottom:1px solid #1e2d42; display:flex; justify-content:space-between; align-items:center`
+  - 左=タイトル(`color:#2bb3c0` ティール・`.95rem` `font-weight:700`)
+  - 右=**✕ 閉じるボタン**(`background:none; border:none; color:#7a8fa3; font-size:1.2rem; padding:2px 8px`)
+  - **★閉じるはヘッダー右**に置く。フッターには置かない(v=428 Chami指示で移動した確定パターン)
+- ボディ: `padding:16px 16px 20px`
+
+**セクション区切り:**
+- ラベル: `font-size:.72rem; font-weight:700; color:#9fb0c3; letter-spacing:.06em; text-transform:uppercase`
+- 水平 divider: `height:1px; background:#1e2d42; margin:18px 0`
+
+**インライン「コピー」ボタン(input/textarea の右隣):**
+- `padding:7px 12px; font-size:.78rem; border-radius:7px; border:1px solid #3a4a5e; background:#0e1a2b; color:#aabbc8`
+- input/textarea と `display:flex; gap:7px; align-items:flex-start` で並べる
+
+**完了/主要アクション:**
+- モーダル最下部に**全幅ボタン**(1つ): `width:100%; margin-top:20px; padding:13px; border-radius:10px; border:none; background:#2bb3c0; color:#04222a; font-size:.95rem; font-weight:700`
+
+**悪い例(v=427→v=428 で直された):**
+- ✕ボタンをフッターに置いていた → **ヘッダー右に移動**(v=428 Chami指示)
+- 内側 div に `box-sizing:border-box` が無い → 「投稿完了」ボタンが縦潰れ → `border-box` 必須
 
 ## 5. モバイル/レイアウト
 
 - **iPhone/iPad のブラウザ最優先。縦型 9:16。** スマホで横潰れしない(CSSの9:16固定を崩さない)。
 - タブ構成の実績: 🎬動画作成 / 📅カレンダー / 🦋投稿 / 🔗アフィリンク(iframe埋め込みでCSS/JS衝突回避)。
 - キャッシュ運用: アセット参照は `app.js?v=N`。中身を変えたら **`node scripts/bump.mjs` で一括バンプ**(手動sed禁止)。
+
+### ★ C-005 端末設計前提(2026-07-22 Chami確定・裁定A/C-005 登録済み)
+
+> **投稿導線はスマホ1台で完結する。端末をまたぐ前提の設計をしない。**
+
+**根拠(固い構造的制約・気分で変わらない):**
+- YouTube Shortsで許諾音楽を付けられるのはスマホアプリからのみ(著作権許諾経路の制約)。
+- 動画生成→投稿完了まで一連の流れ。途中で端末を変えるメリットがない。
+- よって「スマホ前提」は設計の確定前提として使ってよい。
+
+**★ 適用外(取り違え禁止):**
+- **「書き込み」=スマホ1台で完結してよい**。
+- **「表示(履歴閲覧)」=全端末で見えなければならない**。これは別の話。
+  - `displayItems_()` のシート補完は**維持**。落とさない・弱めない。
+  - シートを正本にする意味=「どの端末から見ても履歴が見える」こと(INC-112 の再発防止)。
+  - 「端末をまたがないなら表示も端末ローカルで足りる」は**誤読**。
+
+**実装に転換する時のチェック:**
+1. 書き込み経路か表示経路かを最初に区別する。
+2. シート補完(`displayItems_()`)を弱める変更は C-005 では正当化されない。
+
+## 5.9 承認プロセス(C-006 発効済み・2026-07-22)
+
+> **フロントのpushは承認不要で実行してよい。(裁定 C-006)**
+> Chami原文:「なんならプッシュデプロイまで済ませておいてほしい」
+
+**承認不要で実行できる作業:**
+- 読み取り・影響範囲の測定
+- 部門間の連絡と報告(send message / dispatch / 返信)
+- `docs/` 配下の下書き
+- **フロントのpush**
+- GAS/Workerのデプロイ
+
+**★適用外(今まで通り上申する):**
+- **削除**(裁定 C-003。ファイル・行問わず消さない。退避は可)
+- 本番データの書き換え・移行
+- 設定変更(権限・トリガー・シークレット・registry)
+- **既存の挙動を変える実装**(「改善は承認制」の網は生きている)
+
+**★誤読防止:**
+「pushは承認不要」 = 承認済みの変更を出すのに**もう一度承認を取りに来るな**という裁定。
+**新機能を勝手に作って出す許可ではない**(C-001 と「改善は承認制」が引き続き縛る)。
+
+**★link-worker に注意:**
+`link-worker/**` のpushはGitHub Actionsで**自動デプロイ** = **pushした瞬間に本番**。特に慎重に。
+
+**★?v=バンプ:**
+`?v=` は必ず `node scripts/bump.mjs` で一括。手で個別に上げるとCIスモークが即赤になる。
+
+---
 
 ## 6. トーン/文言
 
@@ -121,3 +209,13 @@
   落とし先: アプリの不具合と対処=`インシデント.md` / Chamiのデザインの好み=**本ファイル** /
   部門をまたぐ教訓=研究室HQへ回す(共通規律へ載ると全部門へ自動配布) /
   自部門の手順=各部門の`BOOT.md`。
+- (2026-07-22) **裁定A確定(b)案** + **C-005 登録**: 投稿導線はスマホ1台完結(構造的制約=YT許諾音楽
+  はスマホアプリのみ)。「表示は全端末」は別軸で生きている。§5 C-005 節に詳細収録。
+- (2026-07-22) **RULES.md §6.7 登録(設計時の確認作法)**: 共有される関数に条件を足す変更は、
+  **呼び出し元を全部数える**。引用行の実在照合では、書かれていない呼び出し元が壊れる形の穴は
+  原理的に見つからない。設計段階でやる(実装後では遅い)。今回は実装前に発見できた好例。
+- (2026-07-22) **裁定 C-006 発効**: フロントのpush・docs/下書き・連絡/報告は承認不要で実行してよい。
+  「承認済みの変更を出すのにもう一度聞くな」という裁定。新機能の実装判断は C-001 が縛り続ける。
+  link-worker は push即本番なので特別注意。?v=バンプは必ず bump.mjs で一括。§5.9 に詳細収録。
+- (2026-07-28) **★iOS Safari flex:1 on form controls バグ(INC-121)**: `flex:1`を`textarea`/`input`に**直接**当てると極細になる(WebKitバグ)。必ず`<div style="flex:1;min-width:0;overflow:hidden;">`でラップし、中要素を`width:100%`にする。PC/Chrome では再現しない=開発中に気づけない。
+- (2026-07-28) **v=427/v=428 モーダル刷新から実装パターン抽出**: draftPostModal(stock.js)の構造・セクションラベル・divider・インラインコピーボタン・✕の位置を §4.5 実装確定表 / §4.6 に収録。未確定7項目のうち5項目を実装確定へ格上げ。残り2項目(最大幅/最小タップ領域)は要Chami確認。直された悪い例: ✕ボタンのフッター配置 / box-sizing欠落(v=428 Chami指示で修正)。
