@@ -9,6 +9,37 @@
 
   var MAX = 20;
   var META_KEY = 'go5_stock_meta';
+  var PH_URL_ = '(投稿するとここに短縮URLが入ります)';
+
+  // 説明欄の短縮URLスロット(textareaの外・薄い placeholder として表示。実URLが入ったら通常色)。
+  //   ★textarea内の文字にはしない=「字としての実態」を持たせず、コピー時に本文へ組み込む(Chami 2026-07-29)。
+  function setDescUrlSlot_(url) {
+    var el = $('draftYtDescUrlSlot');
+    if (!el) return;
+    if (url && /^https?:\/\//.test(url)) {
+      el.textContent = url; el.dataset.url = url;
+      el.style.opacity = '1'; el.style.fontStyle = 'normal'; el.style.color = 'var(--ink)';
+    } else {
+      el.textContent = PH_URL_; el.dataset.url = '';
+      el.style.opacity = '.45'; el.style.fontStyle = 'italic'; el.style.color = 'var(--sub)';
+    }
+  }
+  // 貼り付けたX投稿リンクを link-worker で短縮してスロットへ入れる(全滅時は生URL)。
+  function applyXPostUrl_(raw, btn) {
+    raw = (raw || '').trim();
+    var xin = $('draftXPostUrl'); if (xin) xin.value = raw;
+    if (!raw) { setDescUrlSlot_(''); saveDraftPost_(); return; }
+    if (btn) btn.textContent = '短縮中...';
+    var p = window.Go5MakeShort ? window.Go5MakeShort(raw) : Promise.resolve(null);
+    p.then(function (r) {
+      var shortUrl = (r && (r.shareUrl || r.shortUrl)) || raw;
+      setDescUrlSlot_(shortUrl); saveDraftPost_();
+      if (btn) { btn.textContent = '貼り付けました'; setTimeout(function () { btn.textContent = '貼り付け'; }, 2000); }
+    }).catch(function () {
+      setDescUrlSlot_(raw); saveDraftPost_();
+      if (btn) btn.textContent = '貼り付け';
+    });
+  }
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
@@ -220,12 +251,15 @@
 
   function saveDraftPost_() {
     if (!_modalMeta) return;
+    var slotEl = $('draftYtDescUrlSlot');
     var data = {
       xText:   ($('draftXText')       || {}).value || '',
       ytTitle: ($('draftYtTitleText') || {}).value || '',
       ytTags:  ($('draftYtTagsInput') || {}).value || '',
       ytUrl:   ($('draftYtUrl')       || {}).value || '',
       ytDesc:  ($('draftYtDescText')  || {}).value || '',
+      xPostUrl:  ($('draftXPostUrl')  || {}).value || '',
+      xShortUrl: (slotEl && slotEl.dataset.url) || '',
     };
     try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
   }
@@ -255,7 +289,19 @@
     var ytDescVal = (saved.ytDesc !== undefined && saved.ytDesc !== '') ? saved.ytDesc : '';
     if (!ytDescVal && window.__go5YtDescForAccount) { ytDescVal = window.__go5YtDescForAccount(meta.account || 'acc1'); }
     if (!ytDescVal) { try { ytDescVal = localStorage.getItem('yt_desc__' + (meta.account || 'acc1')) || ''; } catch (e) {} }
-    $('draftYtDescText').value = ytDescVal;
+    // 1行目が短縮URLプレースホルダ/実URLなら本文から外し、スロット側で扱う(textarea内に生placeholderを残さない)。
+    var slotUrl = '';
+    var lines = ytDescVal.split('\n');
+    var first = (lines[0] || '').trim();
+    if (first === PH_URL_ || /短縮URL/.test(first)) {
+      lines.shift(); if (lines.length && lines[0].trim() === '') lines.shift();
+    } else if (/^https?:\/\//.test(first)) {
+      slotUrl = first; lines.shift(); if (lines.length && lines[0].trim() === '') lines.shift();
+    }
+    $('draftYtDescText').value = lines.join('\n');
+    if (saved.xShortUrl) slotUrl = saved.xShortUrl;
+    setDescUrlSlot_(slotUrl);
+    $('draftXPostUrl').value = saved.xPostUrl || '';
     m.style.display = 'flex';
   }
 
@@ -266,6 +312,7 @@
     var iS = 'width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
     var cpS = 'flex:0 0 auto;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
     var bS  = 'display:inline-block;width:auto;margin-top:7px;padding:7px 16px;font-size:.8rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
+    var slotS = 'width:100%;box-sizing:border-box;border:1px dashed var(--line);border-radius:8px;padding:8px 10px;font-size:.8rem;line-height:1.4;word-break:break-all;color:var(--sub);opacity:.45;font-style:italic;margin-bottom:6px;';
     var sH  = 'font-size:.72rem;font-weight:600;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;';
     var fL  = 'font-size:.76rem;color:var(--sub);margin-bottom:4px;margin-top:12px;';
     var ctaS = 'background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);';
@@ -290,8 +337,12 @@
           '<div style="' + fL + '">タグ(半角スペース区切り)</div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
           '<div style="' + fL + '">🖥 YouTube説明欄(コピーして概要欄に貼り付け)</div>' +
-          '<textarea id="draftYtDescText" rows="12" style="' + iS + 'resize:vertical;"></textarea>' +
+          '<div id="draftYtDescUrlSlot" data-url="" style="' + slotS + '">' + PH_URL_ + '</div>' +
+          '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div><button type="button" id="draftCopyYtDesc" style="' + bS + '">コピー</button></div>' +
+          '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
+          '<input type="url" id="draftXPostUrl" placeholder="https://x.com/.../status/..." style="' + iS + '">' +
+          '<div><button type="button" id="draftPasteXPostUrl" style="' + bS + '">貼り付け</button></div>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
           '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + iS + '">' +
           '<div><button type="button" id="draftPasteYtUrl" style="' + bS + '">貼り付け</button></div>' +
@@ -313,8 +364,23 @@
     $('draftYtUrl').addEventListener('input', saveDraftPost_);
     $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
-    $('draftCopyYtDesc').addEventListener('click', function () { copyText_(($('draftYtDescText') || {}).value || '', this); });
+    $('draftCopyYtDesc').addEventListener('click', function () {
+      var body = ($('draftYtDescText') || {}).value || '';
+      var slot = $('draftYtDescUrlSlot');
+      var url = (slot && slot.dataset.url) || '';
+      copyText_(url ? (url + '\n\n' + body) : body, this);
+    });
     $('draftYtDescText').addEventListener('input', saveDraftPost_);
+    $('draftPasteXPostUrl').addEventListener('click', function () {
+      var btn = this;
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function (text) { applyXPostUrl_(text, btn); })
+          .catch(function () { alert('クリップボードの読み取りに失敗しました。手動で貼り付けてください。'); });
+      } else {
+        alert('この環境ではクリップボードの自動読み取りができません。手動で貼り付けてください。');
+      }
+    });
+    $('draftXPostUrl').addEventListener('change', function () { applyXPostUrl_(this.value, null); });
     $('draftPasteYtUrl').addEventListener('click', function () {
       var btn = this;
       if (navigator.clipboard && navigator.clipboard.readText) {
