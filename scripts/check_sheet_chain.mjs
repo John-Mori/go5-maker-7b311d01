@@ -9,8 +9,10 @@
 // 【この門がする
 //   こと】シート由来行で残さねばならない項目を CHAIN に列挙し、各項目について
 //   ①GAS のヘッダ配列に列がある ②upsert に putIf がある ③historyItems_ が返す
-//   ④hist-merge-core の表示変換が値を復元する——を静的に照合する。1つでも欠けたら fail。
-//   新しい編集項目を足したら、この CHAIN にも足すこと(足さないと守られない)。
+//   ④hist-merge-core の表示変換が値を復元する ⑥フロントの saveEditFromSheet_ が payload にその項目を
+//   載せてGASへ送る——を静的に照合する。1つでも欠けたら fail。⑥が無いと「GAS側は受け取れるのに
+//   フロントが送り忘れて保存されない」型(=トトリ指摘『的が確認ロジックと毎回ずれた』の一角)を見逃す。
+//   新しい編集項目を足したら、この CHAIN にも足すこと(col/histKey/payloadKey・足さないと守られない)。
 //
 // 【④の穴を塞ぐ ⑤=保存完成ゲートの往復アサート(2026-07-29 改善提案部門トトリ指摘)】
 //   ①〜④は「繋ぎが在るか」の静的照合だが、実際の再発は「保存の確認(検証)の段そのものが失敗する」
@@ -32,25 +34,49 @@ const root = join(__dirname, '..');
 const require = createRequire(import.meta.url);
 const HM = require(join(root, 'hist-merge-core.js'));
 const gas = readFileSync(join(root, 'gas', 'コード.gs'), 'utf8');
+const yt = readFileSync(join(root, 'yt-clicks.js'), 'utf8');
 
 // シート由来行で「保存したらリロード後も残る」ことを保証する編集項目。
 //   col     = GAS のシート列名(ヘッダ配列・putIf・historyItems_ の map キー)
 //   histKey = historyItems_ が返すキー(GAS の返却オブジェクトのプロパティ名)
 //   probe   = hist-merge-core の toDisplayItem_ へ渡すシート1行(このキーで値を入れる)
 //   expect  = 表示アイテムのどのキーに、どんな値が復元されれば正か
+//   payloadKey = フロントの saveEditFromSheet_ が GAS へ送る payload のプロパティ名(⑥でこれが送信に載るか検査)
 const CHAIN = [
-  { name: '作品URL(作品↗)', col: '作品URL', histKey: 'workUrl',
+  { name: '作品URL(作品↗)', col: '作品URL', histKey: 'workUrl', payloadKey: 'workUrl',
     probe: { workUrl: 'https://video.dmm.co.jp/av/content/?id=chainprobe' },
     expect: (it) => it.workUrl === 'https://video.dmm.co.jp/av/content/?id=chainprobe' },
-  { name: '作品状態', col: '作品状態', histKey: 'workState',
+  { name: '作品状態', col: '作品状態', histKey: 'workState', payloadKey: 'workState',
     probe: { workState: '独占先行' }, expect: (it) => it.workState === '独占先行' },
-  { name: '投稿先(X/Bsky)', col: '投稿先', histKey: 'platform',
+  { name: '投稿先(X/Bsky)', col: '投稿先', histKey: 'platform', payloadKey: 'platform',
     probe: { platform: 'x' }, expect: (it) => it.platform === 'x' },
-  { name: '作品短縮URL(導線2)', col: '作品短縮URL', histKey: 'workShortUrl',
+  { name: '作品短縮URL(導線2)', col: '作品短縮URL', histKey: 'workShortUrl', payloadKey: 'work_short_url',
     probe: { workShortUrl: 'https://5mgl.com/Chain1' }, expect: (it) => it.workShortUrl === 'https://5mgl.com/Chain1' },
-  { name: 'YouTube動画URL', col: 'YouTube動画URL', histKey: 'youtubeUrl',
+  { name: 'YouTube動画URL', col: 'YouTube動画URL', histKey: 'youtubeUrl', payloadKey: 'youtube_url',
     probe: { youtubeUrl: 'https://youtu.be/CHAINabc' }, expect: (it) => it.ytUrl === 'https://youtu.be/CHAINabc' }
 ];
+
+// ⑥ フロント送信の検査。saveEditFromSheet_(シート由来行の編集をGASへupsertする関数)の payload に、
+//   CHAIN 各項目の payloadKey が載っているか。①〜⑤は GAS 側＋純関数だけを見るので、
+//   「新しい編集項目を CHAIN と GAS には足したが、フロントの payload へ入れ忘れた」= シートへ送られず
+//   保存されない=リロードで消える、という繋ぎ切れを静的照合では見逃す(トトリ指摘『的が確認ロジックと毎回ずれた』の一角)。
+//   saveEditFromSheet_ の本体だけを切り出し、payload.<key> か payload['<key>'] の参照を要求する。
+//   payload の作り方は2形= オブジェクトリテラル(`workUrl: …`)と後付け代入(`payload.workState = …`)。
+//   検査は『var payload = {』以降だけを見る=関数上部の三項演算子(`? platform : null`)等を key と誤認しない。
+function saveEditBody() {
+  const i = yt.indexOf('function saveEditFromSheet_');
+  if (i < 0) return '';
+  const rest = yt.slice(i + 10);          // 先頭の 'function ' を飛ばす
+  const j = rest.indexOf('\n  function ');  // 次の同レベル関数の直前まで
+  const body = j < 0 ? rest : rest.slice(0, j);
+  const p = body.indexOf('var payload');   // payload を組み立て始める位置から
+  if (p < 0) return '';
+  // payload 構築ブロックだけに絞る=直後の `var curAcct`(裏方送信/確認の手前)まで。
+  //   これで後段の確認オブジェクト `expected = { workUrl: payload.workUrl … }` を key と誤認しない
+  //   (expected を含めると payload リテラルを壊しても expected 側の同名で誤って通ってしまう)。
+  const e = body.indexOf('var curAcct', p);
+  return e < 0 ? body.slice(p) : body.slice(p, e);
+}
 
 // GAS のヘッダ配列(HEADERS40 / FANZA_HEADERS / EXTRA_HEADERS)の中身を1つの文字列に集める。
 function headerBlob() {
@@ -62,8 +88,11 @@ function headerBlob() {
   return blob;
 }
 const HEADERS = headerBlob();
+const SAVE_BODY = saveEditBody();
 
 const fails = [];
+if (!SAVE_BODY)
+  fails.push('フロント saveEditFromSheet_ が yt-clicks.js に見つからない(⑥フロント送信の検査ができない=関数名が変わったらこの行を直す)');
 for (const f of CHAIN) {
   // ① ヘッダ配列に列がある(map[col] が引ける前提)
   if (HEADERS.indexOf("'" + f.col + "'") < 0 && HEADERS.indexOf('"' + f.col + '"') < 0)
@@ -81,6 +110,12 @@ for (const f of CHAIN) {
   }
   if (!f.expect(it))
     fails.push(`${f.name}: hist-merge-core の表示変換が '${f.histKey}' を復元しない(保存できても再表示で消える)`);
+  // ⑥ フロントの保存 payload にこの項目が載っているか(GAS側が受け取れても送られなければ保存されない)
+  if (f.payloadKey && SAVE_BODY &&
+      SAVE_BODY.indexOf('payload.' + f.payloadKey) < 0 &&
+      SAVE_BODY.indexOf("payload['" + f.payloadKey + "']") < 0 &&
+      !new RegExp('\\b' + f.payloadKey + '\\s*:').test(SAVE_BODY))
+    fails.push(`${f.name}: フロント saveEditFromSheet_ の payload に '${f.payloadKey}' が無い(GAS列は在ってもシートへ送られず=保存されずリロードで消える)`);
 }
 
 // ⑤ 保存完成ゲートの往復アサート。作品URLの各 cid 階層で「保存→再読込相当→完成ゲート＋表示」を実行。
@@ -117,5 +152,5 @@ if (fails.length) {
   for (const m of fails) console.error('  ✗ ' + m);
   process.exit(1);
 }
-console.log(`OK: シート保存連鎖 ${CHAIN.length} 項目すべて フロント表示⇄GAS列⇄putIf⇄historyItems_⇄保存確認 が繋がっている`);
+console.log(`OK: シート保存連鎖 ${CHAIN.length} 項目すべて フロント表示⇄フロント送信payload⇄GAS列⇄putIf⇄historyItems_⇄保存確認 が繋がっている`);
 console.log(`OK: 保存完成ゲートの往復アサート ${ROUNDTRIP.length} 階層すべて 保存→再読込→historyHasEdit(true)＋表示一致 を通過`);
