@@ -265,6 +265,7 @@
     m.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.82);overflow-y:auto;-webkit-overflow-scrolling:touch;align-items:flex-start;justify-content:center;padding:16px 0;box-sizing:border-box;';
     var iS = 'width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
     var cpS = 'flex:0 0 auto;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
+    var bS  = 'display:inline-block;width:auto;margin-top:7px;padding:7px 16px;font-size:.8rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
     var sH  = 'font-size:.72rem;font-weight:600;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;';
     var fL  = 'font-size:.76rem;color:var(--sub);margin-bottom:4px;margin-top:12px;';
     var ctaS = 'background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);';
@@ -284,28 +285,16 @@
           '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
           '<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;margin-top:0;">📋 題名(コピーして貼り付け)</div>' +
-          '<div style="display:flex;gap:7px;align-items:flex-start;">' +
-            '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<textarea id="draftYtTitleText" readonly rows="3" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;cursor:default;"></textarea>' +
-            '</div>' +
-            '<button type="button" id="draftCopyYtTitle" style="' + cpS + '">題名をコピー</button>' +
-          '</div>' +
+          '<textarea id="draftYtTitleText" readonly rows="3" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' +
+          '<div><button type="button" id="draftCopyYtTitle" style="' + bS + '">題名をコピー</button></div>' +
           '<div style="' + fL + '">タグ(半角スペース区切り)</div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
           '<div style="' + fL + '">🖥 YouTube説明欄(コピーして概要欄に貼り付け)</div>' +
-          '<div style="display:flex;gap:7px;align-items:flex-start;">' +
-            '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<textarea id="draftYtDescText" rows="12" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
-            '</div>' +
-            '<button type="button" id="draftCopyYtDesc" style="' + cpS + '">コピー</button>' +
-          '</div>' +
+          '<textarea id="draftYtDescText" rows="12" style="' + iS + 'resize:vertical;"></textarea>' +
+          '<div><button type="button" id="draftCopyYtDesc" style="' + bS + '">コピー</button></div>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
-          '<div style="display:flex;gap:7px;align-items:center;">' +
-            '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + iS + '">' +
-            '</div>' +
-            '<button type="button" id="draftPasteYtUrl" style="' + cpS + '">貼り付け</button>' +
-          '</div>' +
+          '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + iS + '">' +
+          '<div><button type="button" id="draftPasteYtUrl" style="' + bS + '">貼り付け</button></div>' +
           '<div style="display:flex;gap:8px;margin-top:20px;">' +
             '<button type="button" id="draftModalComplete" style="flex:1;padding:13px;font-size:.88rem;font-weight:700;border-radius:10px;border:none;' + ctaS + 'cursor:pointer;">投稿完了</button>' +
             '<button type="button" id="draftModalSave" style="flex:1;padding:13px;font-size:.88rem;font-weight:600;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;">内容を保存</button>' +
