@@ -389,14 +389,15 @@
     var d = new Date(Number(tsMs)), n = new Date();
     return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
   }
-  function fmtDelta_(d, tsMs, hasWork) {
+  function fmtDelta_(d, tsMs, hasWork, prePost) {
     if (!d) return '';
     var CI = '<img class="emico" src="assets/icons/ic-link.png" alt="">';         // 導線1(Bsky投稿クリック)
     var WI = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="">'; // 導線2(作品クリック)
     var todayPosted = postedTodayOf_(tsMs);
     function cell(v, allowDash) {
       if (v != null) return num(v);
-      return allowDash ? '–' : '<span title="記録欠損: 追跡開始前の期間か、その回の取得失敗。(YT APIクォータ等)以後の期間は正常に記録されます">⚠</span>';
+      // 投稿前(YouTube未公開=投稿予定)は「記録欠損」ではなく元々データが無いだけなので ⚠ ではなく – を出す(Chami指示2026-07-28)
+      return (allowDash || prePost) ? '–' : '<span title="記録欠損: 追跡開始前の期間か、その回の取得失敗。(YT APIクォータ等)以後の期間は正常に記録されます">⚠</span>';
     }
     // 作品短縮URLがある投稿だけ導線2(ピンク矢印)の増分を併記する。(Chami依頼2026-07-14)
     function seg(lbl, v, c, wc, allowDash) {
@@ -411,7 +412,7 @@
 
     document.querySelectorAll('[data-delta-vid]').forEach(function (el) {
       var vid = el.getAttribute('data-delta-vid');
-      el.innerHTML = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts'), el.getAttribute('data-delta-haswork') === '1') || el.innerHTML;
+      el.innerHTML = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts'), el.getAttribute('data-delta-haswork') === '1', el.getAttribute('data-delta-prepost') === '1') || el.innerHTML;
     });
   }
   function fetchDeltas_(force, cb) {
@@ -1133,7 +1134,7 @@
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
-          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' + (wcode ? ' data-delta-haswork="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日のみ">' + (vid ? (fmtDelta_(deltaCache[vid], it.ts, !!wcode) || '<span style="opacity:.55;" title="30分毎のサーバースナップ後に数値が出ます">⏳記録待ち(最大30分)</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' + (wcode ? ' data-delta-haswork="1"' : '') + (sched ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前">' + (vid ? (fmtDelta_(deltaCache[vid], it.ts, !!wcode, !!sched) || '<span style="opacity:.55;" title="30分毎のサーバースナップ後に数値が出ます">⏳記録待ち(最大30分)</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
             (!it._fromSheet && !it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
             (!it._fromSheet ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
