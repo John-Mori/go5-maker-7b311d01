@@ -1099,9 +1099,6 @@
         ? window.HistMerge.historyUsedImages(storedUsedImgs, legacyRefImgs, !!(window.Go5Cand && window.Go5Cand.usedImgKnown && window.Go5Cand.usedImgKnown(pKey)))
         : (storedUsedImgs.length ? storedUsedImgs : legacyRefImgs.slice(0, 1));
       var refThumb = usedImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || '';
-      // 🛠️編集で後付け添付した投稿画像。(履歴アイテム単位)1枚目をカードに表示し、タップで全枚数をズーム。
-      var postImgArr = (window.Go5Cand && window.Go5Cand.postImgs) ? (window.Go5Cand.postImgs(pKey) || []) : [];
-      var postThumb = postImgArr[0] || '';
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
@@ -1157,10 +1154,9 @@
           '</span>' +
         '</div>' +
         '</div>' + // .vrow-body
-        ((it.workUrl || refThumb || postThumb) ? '<div class="vrow-thumbcol">' +
+        ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
           (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
           (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画で使った画像(タップで拡大)" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
-          (postThumb ? '<img class="vrow-postimg" data-postkey="' + esc(pKey) + '" src="' + esc(postThumb) + '" alt="投稿画像(タップで拡大)" title="🛠️編集で添付した投稿画像。タップで拡大・左右で全枚数" loading="lazy">' : '') +
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
