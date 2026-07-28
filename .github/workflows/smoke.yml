@@ -36,6 +36,11 @@ jobs:
           fi
           echo "OK: 秘密ファイルの混入なし"
 
+      # iOS Safari 固有のレイアウト崩れ(flex潰れ/%basis/背景落とし穴)を出す前に止める門。
+      #   直近の最頻事故=PC/Chromeで再現せずiOSでだけ壊れるUIを実機未確認で出したこと(v=450/453/435)。
+      - name: iOS Safari レイアウト検査
+        run: node scripts/check_ui_ios.mjs
+
   smoke:
     runs-on: ubuntu-latest
     needs: secret-guard

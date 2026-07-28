@@ -1864,7 +1864,7 @@
       '<input id="candTabName" type="text" placeholder="タブの名前" autocomplete="off">' +
       '<div class="hint" style="margin-top:6px;">タブ名だけで決定すると、💡候補とは別に独立して作品URLを貯められる<b>候補タブ</b>になります。<br>特定サークルの作品一覧タブにしたい場合だけ、下の欄にサークル情報を入れてください。(任意)</div>' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">サークル情報(任意): 作品URL / サークルID / サークルURL</label>' +
-      pasteRow_('<input id="candTabSrc" type="text" inputmode="url" placeholder="空欄なら「ただの候補タブ」になります" autocomplete="off" style="flex:1;">', 'candTabSrc') +
+      pasteRow_('<input id="candTabSrc" type="text" inputmode="url" placeholder="空欄なら「ただの候補タブ」になります" autocomplete="off" style="flex:1;min-width:0;">', 'candTabSrc') +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
       '<button id="candTabOk" type="button" class="primary" style="flex:1;font-size:.9rem;padding:10px;">決定</button>' +
       '<button id="candTabCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">やめる</button>' +
@@ -2831,7 +2831,7 @@
           '</div>';
         }).join('') + '</div>' +
         '<label class="hint" style="display:block;margin:8px 0 2px;">サークルを追加(ID / サークルURL / 作品URL)</label>' +
-        pasteRow_('<input id="candEditSrc" type="text" inputmode="url" autocomplete="off" placeholder="追加したいサークルを入れて「＋ 追加」" style="flex:1;">', 'candEditSrc') +
+        pasteRow_('<input id="candEditSrc" type="text" inputmode="url" autocomplete="off" placeholder="追加したいサークルを入れて「＋ 追加」" style="flex:1;min-width:0;">', 'candEditSrc') +
         '<button id="candEditAddMaker" type="button" class="ghost" style="width:max-content;margin:6px 0 0;font-size:12.5px;padding:6px 11px;">＋ サークルを追加</button>';
     }
     f.innerHTML = '<div class="card" style="margin:8px 0;">' +
