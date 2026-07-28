@@ -323,6 +323,9 @@
     //   入力に flex:1;min-width:0(=flex-basis 0で残り幅を埋める・iOS Safariで潰れない)、ボタンは
     //   flex:0 0 auto(文字幅)。flex-wrapは保険(狭い時だけ折り返す)。★flex-basisを実寸%にすると
     //   iOSで折り返してしまう(v=453の失敗)ので使わない。
+    // ★入力には size="1" も付ける(v=457)。<input>は初期size=20文字ぶんの固有幅を持ち、
+    //   iOS Safariは min-width:0 でもこの固有幅を残して列を割ることがある(実証済みの.short-rowは
+    //   <div>なのでこの穴が無かった)。size=1で固有幅を潰し、flex:1で残り幅を埋める。
     var rowWrap = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;';
     var rowIn = 'flex:1;min-width:0;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
     // 文字幅ボタン(float用・flex無し。ラベル右へ float:right で置く時に使う)。
@@ -345,7 +348,7 @@
           '<div><button type="button" id="draftCopyX" style="' + bS + '">コピー</button></div>' +
           '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
           '<div style="' + rowWrap + '">' +
-            '<input type="url" id="draftXPostUrl" placeholder="https://x.com/.../status/..." style="' + rowIn + '">' +
+            '<input type="url" id="draftXPostUrl" size="1" placeholder="https://x.com/.../status/..." style="' + rowIn + '">' +
             '<button type="button" id="draftPasteXPostUrl" style="' + cpS + '">貼り付け</button>' +
           '</div>' +
           '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
@@ -363,7 +366,7 @@
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
           '<div style="' + rowWrap + '">' +
-            '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + rowIn + '">' +
+            '<input type="url" id="draftYtUrl" size="1" placeholder="https://www.youtube.com/shorts/..." style="' + rowIn + '">' +
             '<button type="button" id="draftPasteYtUrl" style="' + cpS + '">貼り付け</button>' +
           '</div>' +
           '<div style="display:flex;gap:8px;margin-top:20px;">' +
