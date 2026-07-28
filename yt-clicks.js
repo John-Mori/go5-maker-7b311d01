@@ -1247,6 +1247,9 @@
           openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
             saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal);
           }, workShortCur);
+          // シート由来行(別端末で作成)は「動画で使った画像」が欠けるので、ここでも後付け添付できるようにする。
+          // 画像はvideoId単位の別ストア(write-through)＝localStorageの履歴配列には書き戻さない(INC-112防壁は無関係)。
+          addPostImagesToModal_(k, it, 'used');
         } else {
           openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
             closeModal_();
@@ -1758,7 +1761,7 @@
 
   // 編集モーダルへ「投稿画像を添付(複数可)」セクションを差し込む。1枚目が投稿履歴カードに表示され、
   //   タップで作品画像と同様に拡大。(左右で全枚数・下に「現在 / 総ページ数」)保存はwrite-through。(追加/削除で即反映)
-  function addPostImagesToModal_(k, it) {
+  function addPostImagesToModal_(k, it, defaultUse) {
     var ov = document.getElementById('veditOverlay'); if (!ov) return;
     var modal = ov.querySelector('.vedit-modal'); if (!modal) return;
     var old = modal.querySelector('.vedit-postimg'); if (old) old.parentNode.removeChild(old);
@@ -1769,7 +1772,8 @@
     // 用途(保存先)。動画使用画像は履歴単位のusedへ分離。Bluesky添付だけは作品cid単位。
     var USES = [{ v: 'post', label: '投稿画像', multi: true }, { v: 'used', label: '動画で使った画像', multi: false }];
     if (cid) USES.push({ v: 'bsky', label: 'Bluesky投稿画像', multi: false });
-    var use = 'post';
+    // 初期の用途。シート由来行は「動画で使った画像」が別端末で欠けるので、その用途を最初から選んでおく。
+    var use = (defaultUse && USES.some(function (u) { return u.v === defaultUse; })) ? defaultUse : 'post';
     function useDef_() { for (var i = 0; i < USES.length; i++) { if (USES[i].v === use) return USES[i]; } return USES[0]; }
     function load_() {
       if (use === 'used') {
@@ -1804,6 +1808,7 @@
     var grid = wrap.querySelector('.vedit-postimg-grid');
     var fileInp = wrap.querySelector('input[type=file]');
     var useSel = wrap.querySelector('#veditImgUse');
+    useSel.value = use; // 初期用途を反映(シート由来行は「動画で使った画像」)
     var msg = wrap.querySelector('.vedit-postimg-msg');
     function persist() { store_(imgs); try { render(); } catch (e) {} } // 即保存＋カード再描画(画像変更なのでrender=クリック再取得を伴わない)
     function draw() {
