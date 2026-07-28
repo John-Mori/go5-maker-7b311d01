@@ -9,19 +9,18 @@
 
   var MAX = 20;
   var META_KEY = 'go5_stock_meta';
-  var PH_URL_ = '(投稿するとここに短縮URLが入ります)';
+  var PH_URL_ = '(X投稿リンクを入力後、ここに短縮URLが入る)';
 
-  // 説明欄の短縮URLスロット(textareaの外・薄い placeholder として表示。実URLが入ったら通常色)。
-  //   ★textarea内の文字にはしない=「字としての実態」を持たせず、コピー時に本文へ組み込む(Chami 2026-07-29)。
+  // 説明欄の短縮URLスロット=readonlyのテキストボックス。空なら placeholder が枠内に薄く出る、
+  //   実URLが入ったら value として枠内に表示。★placeholderは value に含まれない=コピー時に生の案内文が
+  //   混ざらない(「字としての実態」を持たせない・Chami 2026-07-29/2026-07-28指示で枠内へ移動)。
   function setDescUrlSlot_(url) {
     var el = $('draftYtDescUrlSlot');
     if (!el) return;
     if (url && /^https?:\/\//.test(url)) {
-      el.textContent = url; el.dataset.url = url;
-      el.style.opacity = '1'; el.style.fontStyle = 'normal'; el.style.color = 'var(--ink)';
+      el.value = url; el.dataset.url = url;
     } else {
-      el.textContent = PH_URL_; el.dataset.url = '';
-      el.style.opacity = '.45'; el.style.fontStyle = 'italic'; el.style.color = 'var(--sub)';
+      el.value = ''; el.dataset.url = '';
     }
   }
   // 貼り付けたX投稿リンクを link-worker で短縮してスロットへ入れる(全滅時は生URL)。
@@ -312,7 +311,10 @@
     var iS = 'width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
     var cpS = 'flex:0 0 auto;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
     var bS  = 'display:inline-block;width:auto;margin-top:7px;padding:7px 16px;font-size:.8rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
-    var slotS = 'width:100%;box-sizing:border-box;border:1px dashed var(--line);border-radius:8px;padding:8px 10px;font-size:.8rem;line-height:1.4;word-break:break-all;color:var(--sub);opacity:.45;font-style:italic;margin-bottom:6px;';
+    // 入力欄＋ボタンを同じ行に置く(Chami指示②)。iOS Safariのflex潰れ対策=inputに直接flexを当てず
+    //   flex-basisを実寸で持たせ、flex-wrapで最悪でも折り返す(幅ゼロ潰れを起こさない)。
+    var rowWrap = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;';
+    var rowIn = 'flex:1 1 58%;min-width:0;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
     var sH  = 'font-size:.72rem;font-weight:600;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;';
     var fL  = 'font-size:.76rem;color:var(--sub);margin-bottom:4px;margin-top:12px;';
     var ctaS = 'background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);';
@@ -329,23 +331,29 @@
           '<div style="' + sH + 'margin-bottom:8px;">X 投稿</div>' +
           '<textarea id="draftXText" rows="6" style="' + iS + 'resize:vertical;"></textarea>' +
           '<button type="button" id="draftCopyX" style="width:100%;margin-top:7px;padding:8px;font-size:.82rem;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;">コピー</button>' +
+          '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
+          '<div style="' + rowWrap + '">' +
+            '<input type="url" id="draftXPostUrl" placeholder="https://x.com/.../status/..." style="' + rowIn + '">' +
+            '<button type="button" id="draftPasteXPostUrl" style="' + cpS + '">貼り付け</button>' +
+          '</div>' +
           '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
-          '<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;margin-top:0;">📋 題名(コピーして貼り付け)</div>' +
+          '<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;margin-top:0;">題名(コピーして貼り付け)</div>' +
           '<textarea id="draftYtTitleText" readonly rows="3" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' +
           '<div><button type="button" id="draftCopyYtTitle" style="' + bS + '">題名をコピー</button></div>' +
           '<div style="' + fL + '">タグ(半角スペース区切り)</div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
-          '<div style="' + fL + '">🖥 YouTube説明欄(コピーして概要欄に貼り付け)</div>' +
-          '<div id="draftYtDescUrlSlot" data-url="" style="' + slotS + '">' + PH_URL_ + '</div>' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;' + fL + '">' +
+            '<span style="flex:1;min-width:0;"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)</span>' +
+            '<button type="button" id="draftCopyYtDesc" style="' + cpS + '">コピー</button>' +
+          '</div>' +
+          '<input type="text" id="draftYtDescUrlSlot" data-url="" readonly placeholder="' + PH_URL_ + '" style="' + iS + 'margin-bottom:6px;">' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
-          '<div><button type="button" id="draftCopyYtDesc" style="' + bS + '">コピー</button></div>' +
-          '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
-          '<input type="url" id="draftXPostUrl" placeholder="https://x.com/.../status/..." style="' + iS + '">' +
-          '<div><button type="button" id="draftPasteXPostUrl" style="' + bS + '">貼り付け</button></div>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
-          '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + iS + '">' +
-          '<div><button type="button" id="draftPasteYtUrl" style="' + bS + '">貼り付け</button></div>' +
+          '<div style="' + rowWrap + '">' +
+            '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + rowIn + '">' +
+            '<button type="button" id="draftPasteYtUrl" style="' + cpS + '">貼り付け</button>' +
+          '</div>' +
           '<div style="display:flex;gap:8px;margin-top:20px;">' +
             '<button type="button" id="draftModalComplete" style="flex:1;padding:13px;font-size:.88rem;font-weight:700;border-radius:10px;border:none;' + ctaS + 'cursor:pointer;">投稿完了</button>' +
             '<button type="button" id="draftModalSave" style="flex:1;padding:13px;font-size:.88rem;font-weight:600;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;">内容を保存</button>' +
