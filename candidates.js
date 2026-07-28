@@ -26,7 +26,7 @@
   // 同期対象の候補キーが変わったら即時同期を要求。(デバウンス＋最小間隔はGo5Sync側で吸収)
   //   キャッシュ系(cand_sales/cand_mk2 等)では発火させない＝no-op同期の無駄打ちを避ける。
   function reqSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
-  function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); }
+  function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); if (/^cand_items(__|$)/.test(k)) schedulePoolSync_(); }
   // 継続改善制度の行動ログ。(意味のある操作のみ・失敗は無害)
   function klog_(action, objType, objId, meta) { try { if (window.Go5Kaizen) window.Go5Kaizen.log('candidates', action, objType, objId, meta); } catch (e) {} }
   function workerCfg() {
@@ -1691,6 +1691,26 @@
     } catch (e) {}
   }
 
+  var _poolSyncTimer = null;
+  // 保存済み候補(main + 独立タブ)の cid を D1 へ同期。起動時・追加・削除時に呼ぶ。
+  // サークルタブは API 非同期取得が必要なため含めない(📚全候補タブを開いた時に補完される)。
+  function schedulePoolSync_() {
+    if (_poolSyncTimer) clearTimeout(_poolSyncTimer);
+    _poolSyncTimer = setTimeout(function () {
+      _poolSyncTimer = null;
+      var tabs = lsGet(K_TABS, '[]');
+      var seen = {}, cids = [];
+      (lsGet(K_ITEMS, '[]') || []).forEach(function (it) { if (it && it.cid && !seen[it.cid]) { seen[it.cid] = true; cids.push(it.cid); } });
+      tabs.forEach(function (t) {
+        if (t.excludeFromAll || isMakerTab_(t)) return;
+        (lsGet('cand_items__' + t.id, '[]') || []).forEach(function (it) {
+          if (it && it.cid && !seen[it.cid]) { seen[it.cid] = true; cids.push(it.cid); }
+        });
+      });
+      syncCandidatePool_(cids);
+    }, 500);
+  }
+
   // ── 📚全候補タブ: 候補(main)+独立タブ+全サークルタブの作品を集約表示(cidで重複排除)。
   //    タブの✏️編集で excludeFromAll=true にしたタブは除外。各部門はこの集合を読む(段階2でD1へ橋渡し予定)。
   //    集約読み取り中心のビューなので個別の非表示/削除ボタンは出さない(各タブ側で行う)。サークル作品は非同期取得。
@@ -3003,4 +3023,5 @@
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行(5MB枠を解放)
   // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ(登録済みはフラグでスキップ＝通信は初回のみ)
   ensureTrackedAll();
+  schedulePoolSync_(); // 起動時: 📚タブを開かなくても保存済み候補を D1 へ同期(部門が読める)
 }());
