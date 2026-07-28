@@ -88,6 +88,7 @@
       workState: String((x && x.workState) || ''),
       ytUrl: String((x && x.youtubeUrl) || ''),
       workShortUrl: String((x && x.workShortUrl) || ''), // 導線2(作品クリック=ピンク矢印)の計測URL
+      platform: (function (p) { return (p === 'x' || p === 'bsky') ? p : ''; })(String((x && x.platform) || '')), // 投稿先(X/Bsky)手動指定＝X↗/Bsky↗表示
       _fromSheet: true // 表示バッジ用: この端末の履歴には無くシートから補った行
     };
     if (snap) item.fanzaSnap = snap; // 当時価格があるときだけ付与(render は it.fanzaSnap を見て表示)

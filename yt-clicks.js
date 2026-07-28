@@ -252,6 +252,9 @@
   // 投稿リンクがX(旧Twitter)か判定。(BlueskyのpostUri=at://は常にBsky確定。
   //   生URLがx.com/twitter.comならX。短縮URLしか無い場合は判別不能=既定Bsky)
   function isXLink_(href, it) {
+    // 編集で明示指定(X/Bsky)があれば最優先。短縮URLだけの行はURLから判別できないため手動選択が正。
+    if (it && it.platform === 'x') return true;
+    if (it && it.platform === 'bsky') return false;
     if (it && it.postUri) return false;
     var XRE = /(?:x\.com|twitter\.com)\//i;
     if (XRE.test(String(href || ''))) return true;
@@ -263,6 +266,16 @@
     if (!href) return '';
     var x = isXLink_(href, it);
     return '<a class="vlink ' + (x ? 'vlink-x' : 'vlink-bsky') + '" href="' + esc(href) + '" target="_blank" rel="noopener">' + (x ? 'X↗' : 'Bsky↗') + '</a>';
+  }
+  // 編集モーダルのX/Bskyラジオ用：この行の現在の投稿先。明示指定＞URL判定＞既定X(Chami:これから原則X投稿)。
+  function platOf_(it) {
+    if (it && it.platform === 'x') return 'x';
+    if (it && it.platform === 'bsky') return 'bsky';
+    if (it && it.postUri) return 'bsky';
+    var s = String((it && it.postUrl) || '') + ' ' + String((it && it.shareUrl) || '') + ' ' + String((it && it.shortUrl) || '');
+    if (/(?:x\.com|twitter\.com)\//i.test(s)) return 'x';
+    if (/bsky\.app\//i.test(s)) return 'bsky';
+    return 'x';
   }
   // セール会場リンク(導線3・共通コード)のクリック統計。(2026-07-14 Chami依頼: 累計/今日/昨日/週を投稿履歴に表示)
   var SALE_CODES = ['JrziR']; // campaign=gain(utm)の歴史的コード(フォールバック)。af_id差/再生成でコードが変わり得るため下で実リンクからも導出。
@@ -547,9 +560,14 @@
             '<button id="veditYtPaste" type="button" class="vedit-copy">貼り付け</button>' +
           '</div>' +
         '</label>' +
-        '<label class="vedit-field">Bluesky 投稿URL(計測用の短縮URL)' +
+        '<div class="vedit-plat">' +
+          '<label class="vedit-plat-opt"><span>X</span><input type="radio" name="veditPlat" id="veditPlatX" value="x"></label>' +
+          '<label class="vedit-plat-opt"><span>Bsky</span><input type="radio" name="veditPlat" id="veditPlatBsky" value="bsky"></label>' +
+          '<span class="vedit-plat-cap">投稿URL(計測用の短縮URL)</span>' +
+        '</div>' +
+        '<label class="vedit-field vedit-field-plat">' +
           '<div class="vedit-bsky-row">' +
-            '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://bsky.app/… または短縮URL(省略可)">' +
+            '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://x.com/… または短縮URL(省略可)">' +
             '<button id="veditBskyCopy" type="button" class="vedit-copy">Copy</button>' +
           '</div>' +
         '</label>' +
@@ -631,13 +649,15 @@
       var attrs = {};
       ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); attrs[a.key] = !!(el && el.checked); });
       var wsEl = $('veditWorkState');
+      var platEl = $('veditPlatBsky');
       cb(
         ($('veditYt').value || '').trim(),
         ($('veditBsky').value || '').trim(),
         ($('veditWork').value || '').trim(),
         attrs,
         (wsEl && wsEl.value) || '旧作',
-        ($('veditWorkShort').value || '').trim()
+        ($('veditWorkShort').value || '').trim(),
+        (platEl && platEl.checked) ? 'bsky' : 'x' // 既定=X
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -698,11 +718,14 @@
     _saveCb = null;
   }
 
-  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal) {
+  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal, platform) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
     $('veditBsky').value = bskyVal || '';
+    var plat = (platform === 'bsky') ? 'bsky' : 'x'; // 既定=X(Chami:これから原則X投稿)
+    if ($('veditPlatX')) $('veditPlatX').checked = (plat === 'x');
+    if ($('veditPlatBsky')) $('veditPlatBsky').checked = (plat === 'bsky');
     $('veditWork').value = workVal || '';
     if ($('veditWorkShort')) $('veditWorkShort').value = workShortVal || '';
     attrs = attrs || {};
@@ -773,7 +796,8 @@
     else if (typedVal) { item.workShortUrl = typedVal; item.workShareUrl = typedVal; }
     else { delete item.workShortUrl; delete item.workShareUrl; }
   }
-  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
+    var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
     // YouTube URL
     var ymap = loadYtMap();
     if (ytUrl) ymap[k] = ytUrl; else delete ymap[k];
@@ -789,6 +813,7 @@
         if (workUrl) manual[i].workUrl = workUrl; else delete manual[i].workUrl;
         applyAttrs_(manual[i], attrs);
         manual[i].workState = workState || '旧作';
+        if (plat) manual[i].platform = plat; // X↗/Bsky↗の手動指定(既定X)
         if (_pendingShort) { manual[i].shortUrl = _pendingShort; delete manual[i].postUrl; } // 計測キー(r2)
         if (_pendingShare) manual[i].shareUrl = _pendingShare; // 表示用(da.gd)
         applyWorkShort_(manual[i], workShortVal); // 作品クリック計測URL(導線2)
@@ -805,6 +830,7 @@
         if (workUrl) hist[j].workUrl = workUrl; else delete hist[j].workUrl;
         applyAttrs_(hist[j], attrs);
         hist[j].workState = workState || '旧作';
+        if (plat) hist[j].platform = plat; // X↗/Bsky↗の手動指定(既定X)
         if (_pendingShort) { hist[j].shortUrl = _pendingShort; delete hist[j].postUrl; } // 計測キー(r2)
         if (_pendingShare) hist[j].shareUrl = _pendingShare; // 表示用(da.gd)
         applyWorkShort_(hist[j], workShortVal); // 作品クリック計測URL(導線2)
@@ -825,7 +851,8 @@
 
   // シート由来行(_fromSheet)の編集をGASへ即時upsertする。成功後にUIを更新、失敗はモーダルにエラーを出す。
   // localStorageへは書き戻さない(INC-112防壁を維持)。
-  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
+  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
+    var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
     if (!gasUrl) { showModalErr_('GAS URLが設定されていません。'); return; }
@@ -844,6 +871,7 @@
     if (workUrl) edited.workUrl = workUrl; else delete edited.workUrl;
     applyAttrs_(edited, attrs);
     edited.workState = workState || '旧作';
+    if (plat) edited.platform = plat; // X↗/Bsky↗の手動指定(既定X)
     if (_pendingShort) { edited.shortUrl = _pendingShort; delete edited.postUrl; }
     if (_pendingShare) edited.shareUrl = _pendingShare;
     applyWorkShort_(edited, workShortVal);
@@ -863,6 +891,7 @@
     };
     ATTR_DEFS.forEach(function (a) { payload[a.key] = !!edited[a.key]; });
     payload.workState = edited.workState || '旧作';
+    if (edited.platform === 'x' || edited.platform === 'bsky') payload.platform = edited.platform; // 投稿先(X/Bsky)列
 
     var curAcct = acct();
 
@@ -873,7 +902,7 @@
     //   以後どのタイミングの再取得でもdisplayItems_が上塗りする=「一瞬反映→消失」の再発を封じる。
     (function registerPendingEdit_() {
       var patch = {};
-      ['ytUrl', 'workUrl', 'workState', 'shortUrl', 'shareUrl', 'postUrl', 'postUri', 'workShortUrl']
+      ['ytUrl', 'workUrl', 'workState', 'shortUrl', 'shareUrl', 'postUrl', 'postUri', 'workShortUrl', 'platform']
         .forEach(function (f) { patch[f] = edited[f] || ''; });
       ATTR_DEFS.forEach(function (a) { patch[a.key] = !!edited[a.key]; });
       (_pendingSheetEdits[curAcct] = _pendingSheetEdits[curAcct] || {})[String(edited.videoId)] = patch;
@@ -982,6 +1011,7 @@
     };
     ATTR_DEFS.forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
     payload.workState = it.workState || '旧作'; // 作品状態列
+    if (it.platform === 'x' || it.platform === 'bsky') payload.platform = it.platform; // 投稿先(X/Bsky)列
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
 
@@ -1245,17 +1275,17 @@
         var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
         _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
         if (it._fromSheet) {
-          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
-            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal);
-          }, workShortCur);
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
+            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform);
+          }, workShortCur, platOf_(it));
           // シート由来行(別端末で作成)は「動画で使った画像」が欠けるので、ここでも後付け添付できるようにする。
           // 画像はvideoId単位の別ストア(write-through)＝localStorageの履歴配列には書き戻さない(INC-112防壁は無関係)。
           addPostImagesToModal_(k, it, 'used');
         } else {
-          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
             closeModal_();
-            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal);
-          }, workShortCur);
+            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform);
+          }, workShortCur, platOf_(it));
           addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
           addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
           addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
@@ -1869,7 +1899,7 @@
       }
     } catch (e) {}
     _curSrcUrl = ''; // 新規追加：生成元はveditBskyの入力値を使う
-    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal) {
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -1886,6 +1916,7 @@
       if (_pendingShort) { entry.shortUrl = _pendingShort; delete entry.postUrl; } // 計測キー(r2)
       if (_pendingShare) entry.shareUrl = _pendingShare; // 表示用(da.gd)
       applyWorkShort_(entry, workShortVal); // 作品クリック計測URL(導線2)
+      if (platform === 'x' || platform === 'bsky') entry.platform = platform; // X↗/Bsky↗表示の手動指定(既定X)
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       pokeSnapshotNow_(); // 手動追加でもYT URL紐付け当日に日別記録のベースラインを作る(④)

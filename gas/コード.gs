@@ -54,7 +54,7 @@ var FANZA_HEADERS = [
 // カテゴリ＝作品属性を名前で明記。(キャラ/JK/ギャル/異世界・複数可・カンマ区切り。キャラ無し＝オリジナルで空欄)
 // ※旧「キャラ○」方式は廃止。migrate_headers で既存「キャラ」列は「カテゴリ」へ改名。
 // ※YouTube題名は廃止：題名(コメント)列に集約する。(consolidate_title で既存分も移行・列削除)
-var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数', '目的', 'コメント型', 'YT補正累計', '作品短縮URL', '作品URL'];
+var EXTRA_HEADERS = ['カテゴリ', '作品状態', '共有URL', '作り直し', 'ハッシュタグ', 'リビルド元ID', 'タイトル文字数', '目的', 'コメント型', 'YT補正累計', '作品短縮URL', '作品URL', '投稿先'];
 // 作品属性の定義。(順序＝カテゴリ列での並び)フラグ名→表示名。
 var ATTR_DEFS = [
   { key: 'chara', label: 'キャラ' },
@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-29D(作品URLをシートに保存＋historyで返す＝cidから復元できない階層でもシート由来行の作品URLがリロードで消えない。Chami指示2026-07-28)';
+var GAS_VERSION = '2026-07-29E(投稿先列を追加＝短縮URLだけの行でも編集モーダルのX/Bsky手動指定をシートに保存し、リロード後もX↗/Bsky↗表示を保持。Chami「原則X投稿」2026-07-29)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -537,6 +537,7 @@ function historyItems_(channel, limit) {
   var lpCol = map['元値list_price'], prCol = map['割引後price'], pctCol = map['割引率pct'], fatCol = map['FANZA取得日時']; // 投稿当時(スナップ)の価格＝シート由来行にも復元して表示する
   var wsuCol = map['作品短縮URL']; // 導線2(作品クリック=ピンク矢印)の計測URL＝シート由来行にも復元して表示する
   var wuCol = map['作品URL'];       // 作品URLそのもの＝cidから復元できない階層でも作品↗を戻すため優先して返す
+  var pfCol = map['投稿先'];         // 投稿先(x/bsky)＝短縮URLだけの行はURLから判別できないため手動指定を返す(X↗/Bsky↗表示)
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
   var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   var items = [];
@@ -560,7 +561,8 @@ function historyItems_(channel, limit) {
       fanzaDiscountPct: pctCol ? row[pctCol - 1] : '',
       fanzaFetchedAt: fatCol ? String(row[fatCol - 1] || '') : '',
       workShortUrl: wsuCol ? String(row[wsuCol - 1] || '') : '', // 導線2(作品クリック)の計測URL
-      workUrl: wuCol ? String(row[wuCol - 1] || '') : '' // 作品URLそのもの(あれば優先・cid復元のフォールバックに勝つ)
+      workUrl: wuCol ? String(row[wuCol - 1] || '') : '', // 作品URLそのもの(あれば優先・cid復元のフォールバックに勝つ)
+      platform: pfCol ? String(row[pfCol - 1] || '') : '' // 投稿先(x/bsky)＝X↗/Bsky↗表示の手動指定
     });
   }
   items.reverse(); // 新しい順
@@ -977,6 +979,7 @@ function writeRecord_(channel, f) {
   putIf('題名(コメント)', f.ytTitle || f.title || '');         // YouTube題名を優先して題名(コメント)へ集約
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
   putIf('作品URL', f.workUrl || '');                             // 作品URLそのものを保存＝cidから復元できない階層(FANZA動画等)でもシート由来行に作品↗が戻る(Chami「リロードで作品URLが消える」2026-07-28)
+  putIf('投稿先', (f.platform === 'x' || f.platform === 'bsky') ? f.platform : ''); // 投稿先(X/Bsky)＝短縮URLだけの行のX↗/Bsky↗表示をリロード後も保持(Chami「原則X投稿」2026-07-29)
   putIf('短縮URL', shortUrl);                                   // r2＝計測用(codeFromShort_対象・r2以外は入れない)
   putIf('作品短縮URL', f.workShortUrl || '');                    // 導線2(作品クリック)の計測URL=作品クリック数の日次スナップ元
   putIf('共有URL', f.shareUrl || fbShare || '');                // da.gd＝実際に概要欄へ貼る短いURL(GAS代替はこちらへ)
