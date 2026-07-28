@@ -194,6 +194,7 @@
 
   // ── 投稿モード モーダル ──
   var _modalMeta = null;
+  var _ytTitleDirty = false; // ユーザーが題名を手編集したかどうか(trueの間はタグ変更で上書きしない)
 
   function copyText_(text, btn) {
     function flash() { var o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(function () { btn.textContent = o; }, 2000); }
@@ -231,6 +232,7 @@
 
   function openPostModal_(meta) {
     _modalMeta = meta;
+    _ytTitleDirty = false;
     var m = $('draftPostModal');
     if (!m) return;
     var saved = {};
@@ -239,7 +241,7 @@
     if (saved.xText !== undefined) {
       composedXText = saved.xText;
     } else if (window.__go5ComposeXTextForBskyText) {
-      composedXText = window.__go5ComposeXTextForBskyText(meta.bskyText || '');
+      composedXText = window.__go5ComposeXTextForBskyText(meta.bskyText || '', meta.affiliateUrl || '');
     } else {
       composedXText = (meta.bskyText || '');
     }
@@ -249,11 +251,12 @@
     if (!tags) { var te = $('ytTags'); tags = te ? te.value : '#Shorts #マンガ #漫画紹介 #anime'; }
     $('draftYtTagsInput').value = tags;
     buildModalYtTitle_();
-    if (saved.ytTitle !== undefined) $('draftYtTitleText').value = saved.ytTitle;
+    if (saved.ytTitle) { $('draftYtTitleText').value = saved.ytTitle; _ytTitleDirty = true; } // 空文字は保存済みと見なさない
     $('draftYtUrl').value = saved.ytUrl !== undefined ? saved.ytUrl : (meta.youtubeUrl || '');
     var ytDescKey = 'yt_desc__' + (meta.account || 'acc1');
     var ytDescVal = saved.ytDesc !== undefined ? saved.ytDesc : '';
     if (!ytDescVal) { try { ytDescVal = localStorage.getItem(ytDescKey) || ''; } catch (e) {} }
+    if (!ytDescVal) { var ytDescEl = $('ytDesc'); if (ytDescEl) ytDescVal = ytDescEl.value || ''; }
     $('draftYtDescText').value = ytDescVal;
     m.style.display = 'flex';
   }
@@ -311,9 +314,9 @@
     document.body.appendChild(m);
 
     $('draftXText').addEventListener('input', saveDraftPost_);
-    $('draftYtTitleText').addEventListener('input', saveDraftPost_);
+    $('draftYtTitleText').addEventListener('input', function () { _ytTitleDirty = true; saveDraftPost_(); });
     $('draftYtTagsInput').addEventListener('input', function () {
-      buildModalYtTitle_();
+      if (!_ytTitleDirty) buildModalYtTitle_(); // 題名を手編集済みの場合は上書きしない
       try { localStorage.setItem('yt_tags_shared', this.value); } catch (e) {}
       var yt = $('ytTags'); if (yt) yt.value = this.value;
       saveDraftPost_();
@@ -340,7 +343,14 @@
       if (!m || m.style.display === 'none' || !_modalMeta) return;
       if (window.__go5ComposeXTextForBskyText) {
         var xtEl = $('draftXText');
-        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(_modalMeta.bskyText || '');
+        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(_modalMeta.bskyText || '', _modalMeta.affiliateUrl || '');
+      }
+    });
+    document.addEventListener('go5-work-short-ready', function () {
+      if (!m || m.style.display === 'none' || !_modalMeta) return;
+      if (window.__go5ComposeXTextForBskyText) {
+        var xtEl = $('draftXText');
+        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(_modalMeta.bskyText || '', _modalMeta.affiliateUrl || '');
       }
     });
     m.addEventListener('click', function (e) { if (e.target === m) { m.style.display = 'none'; _modalMeta = null; } });

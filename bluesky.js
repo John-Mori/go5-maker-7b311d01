@@ -877,15 +877,16 @@
     return out;
   }
   try { window.__go5ComposePostText = composePostText; } catch (e) {} // 検証用フック(プレビューとの一致確認)
-  // ドラフトモーダル用: bskyText を渡すと X投稿テキスト(short link置換+disc URL追加済み)を返す
+  // ドラフトモーダル用: bskyText + 保存済み affiliateUrl を渡すと X投稿テキスト(short link置換+disc URL追加済み)を返す
+  // overrideAffLink を渡すと resolveAffLink() の代わりに使う(別作品ロード後の誤リンク防止)
   try {
-    window.__go5ComposeXTextForBskyText = function (bskyText) {
+    window.__go5ComposeXTextForBskyText = function (bskyText, overrideAffLink) {
       var caption = stripAutoBlocks_(bskyText || '');
-      var link = resolveAffLink();
+      var link = overrideAffLink !== undefined ? overrideAffLink : resolveAffLink();
       var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
       var out;
       if (caption.indexOf(PH) >= 0) {
-        var short = link ? cachedWorkShortLink_() : '';
+        var short = link ? ((workShortCache_.forLink === link) ? workShortCache_.shareUrl : '') : '';
         out = (window.BlueskyCore && window.BlueskyCore.fillWorkLinkPlaceholder)
           ? window.BlueskyCore.fillWorkLinkPlaceholder(caption, short, link)
           : caption;
@@ -897,7 +898,7 @@
         if (dlink && out.indexOf(dlink) < 0) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink;
       }
       if (link && out.indexOf(link) >= 0) {
-        var shortX = cachedWorkShortLink_();
+        var shortX = (workShortCache_.forLink === link) ? workShortCache_.shareUrl : '';
         if (shortX) out = out.split(link).join(shortX);
       }
       return out;
