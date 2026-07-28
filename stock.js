@@ -120,6 +120,20 @@
     });
   }
 
+  // ── 再作成(ドラフトデータを動画作成タブに復元) ──
+  function remakeStock_(meta) {
+    var a = $('author');
+    if (a) { a.value = meta.author || ''; a.dispatchEvent(new Event('input')); }
+    var t = $('top');
+    if (t) { t.value = meta.title || ''; t.dispatchEvent(new Event('input')); }
+    var b = $('bskyText');
+    if (b) b.value = meta.bskyText || '';
+    var w = $('movieWorkUrl');
+    if (w) { w.value = meta.workUrl || ''; w.dispatchEvent(new Event('input')); }
+    var tab = $('tabMovie');
+    if (tab) tab.click();
+  }
+
   // ── レンダリング ──
   function renderItem_(meta, thumbUrl) {
     var id = meta.id;
@@ -140,6 +154,7 @@
         '<div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;">' +
           '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">⬇ 動画DL</button>' +
           '<button type="button" class="stk-mode" data-id="' + esc(id) + '" style="' + btnBase + (hasYt ? 'border:1px solid var(--accent);background:transparent;color:var(--accent);' : 'border:none;background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);') + 'font-weight:700;">投稿モード</button>' +
+          '<button type="button" class="stk-remake" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#9fb0c3;">再作成</button>' +
           '<button type="button" class="stk-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#666;padding:5px 8px;">🗑</button>' +
         '</div>' +
       '</div>' +
@@ -149,11 +164,12 @@
   function render() {
     var page = $('pageStock');
     if (!page || page.hidden) return;
-    var metas = loadMeta();
+    var curAcct = window.getCurrentAccount ? window.getCurrentAccount() : 'acc1';
+    var metas = loadMeta().filter(function (m) { return (m.account || 'acc1') === curAcct; });
 
     if (!metas.length) {
       page.innerHTML = '<div class="card" style="color:var(--sub);text-align:center;padding:32px 16px;font-size:.9rem;">' +
-        'ドラフトはまだありません。<br>動画作成タブの「📦 ドラフトで作成」で動画をここへ貯められます。</div>';
+        'このアカウントのドラフトはまだありません。<br>動画作成タブの「📦 ドラフトで作成」で動画をここへ貯められます。</div>';
       return;
     }
 
@@ -328,6 +344,11 @@
     var tabStockBtn = $('tabStock');
     if (tabStockBtn) tabStockBtn.addEventListener('click', function () { setTimeout(render, 0); });
 
+    document.addEventListener('account-changed', function () {
+      var page = $('pageStock');
+      if (page && !page.hidden) render();
+    });
+
     // ドラフトタブのボタン操作(event delegation)
     var page = $('pageStock');
     if (page) {
@@ -343,6 +364,9 @@
 
         } else if (btn.classList.contains('stk-mode')) {
           if (meta) openPostModal_(meta);
+
+        } else if (btn.classList.contains('stk-remake')) {
+          if (meta) remakeStock_(meta);
 
         } else if (btn.classList.contains('stk-del')) {
           if (!window.confirm('「' + (meta ? meta.label || '動画' : '動画') + '」をドラフトから削除しますか?')) return;
