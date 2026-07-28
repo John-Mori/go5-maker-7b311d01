@@ -40,7 +40,7 @@ html[data-tab=”tabReserve”]{
 html[data-tab=”tabRank”] body,
 html[data-tab=”tabAnalyze”] body,
 html[data-tab=”tabCand”] body,
-html[data-tab=”tabReserve”] body{background:var(--app-bg,#f5edd7);}
+html[data-tab=”tabReserve”] body{background:var(--app-bg,#f5edd7);min-height:100vh;}
 /* プレビュー列はアカウント色に染めない（制作物の色判断を狂わせない）。 */
 html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
