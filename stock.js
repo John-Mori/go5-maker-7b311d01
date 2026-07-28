@@ -311,10 +311,14 @@
     var iS = 'width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
     var cpS = 'flex:0 0 auto;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
     var bS  = 'display:inline-block;width:auto;margin-top:7px;padding:7px 16px;font-size:.8rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
-    // 入力欄＋ボタンを同じ行に置く(Chami指示②)。iOS Safariのflex潰れ対策=inputに直接flexを当てず
-    //   flex-basisを実寸で持たせ、flex-wrapで最悪でも折り返す(幅ゼロ潰れを起こさない)。
+    // 入力欄＋ボタンを同じ行に置く(Chami指示①)。本体タブの .short-row と同じ実証済みレシピ=
+    //   入力に flex:1;min-width:0(=flex-basis 0で残り幅を埋める・iOS Safariで潰れない)、ボタンは
+    //   flex:0 0 auto(文字幅)。flex-wrapは保険(狭い時だけ折り返す)。★flex-basisを実寸%にすると
+    //   iOSで折り返してしまう(v=453の失敗)ので使わない。
     var rowWrap = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;';
-    var rowIn = 'flex:1 1 58%;min-width:0;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
+    var rowIn = 'flex:1;min-width:0;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
+    // 文字幅ボタン(float用・flex無し。ラベル右へ float:right で置く時に使う)。
+    var btnW = 'padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
     var sH  = 'font-size:.72rem;font-weight:600;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;';
     var fL  = 'font-size:.76rem;color:var(--sub);margin-bottom:4px;margin-top:12px;';
     var ctaS = 'background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);';
@@ -330,7 +334,7 @@
         '<div style="padding:16px 16px 20px;">' +
           '<div style="' + sH + 'margin-bottom:8px;">X 投稿</div>' +
           '<textarea id="draftXText" rows="6" style="' + iS + 'resize:vertical;"></textarea>' +
-          '<button type="button" id="draftCopyX" style="width:100%;margin-top:7px;padding:8px;font-size:.82rem;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;">コピー</button>' +
+          '<div><button type="button" id="draftCopyX" style="' + bS + '">コピー</button></div>' +
           '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
           '<div style="' + rowWrap + '">' +
             '<input type="url" id="draftXPostUrl" placeholder="https://x.com/.../status/..." style="' + rowIn + '">' +
@@ -343,9 +347,9 @@
           '<div><button type="button" id="draftCopyYtTitle" style="' + bS + '">題名をコピー</button></div>' +
           '<div style="' + fL + '">タグ(半角スペース区切り)</div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;' + fL + '">' +
-            '<span style="flex:1;min-width:0;"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)</span>' +
-            '<button type="button" id="draftCopyYtDesc" style="' + cpS + '">コピー</button>' +
+          '<div style="overflow:hidden;' + fL + '">' +
+            '<button type="button" id="draftCopyYtDesc" style="float:right;margin-left:8px;' + btnW + '">コピー</button>' +
+            '<svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)' +
           '</div>' +
           '<input type="text" id="draftYtDescUrlSlot" data-url="" readonly placeholder="' + PH_URL_ + '" style="' + iS + 'margin-bottom:6px;">' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
