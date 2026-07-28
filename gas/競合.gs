@@ -271,6 +271,22 @@ function compEnsureTabs_() {
 
 // ---- シード登録: URLをwatch行として台帳へ追加(channel_id重複はスキップ)。doGetから呼ぶ ----
 //   Chamiが(A)「改修βに登録してもらう」を選んだ時の受け口。競合名/URLはシート内のみ(コード・commitに書かない)。
+// ---- 1チャンネル分の統計(登録者数/総再生数/動画数/uploads/チャンネル名/最終更新)を即取得して埋める ----
+//   既存の日次ジョブ runCompetitorDaily と同じ ytChannels_ を使う(欄の埋め方も同一)。API失敗時は何もしない。
+function compFillChannelStats_(sh, map, rowIndex, cid, fallbackName, today) {
+  var s = (ytChannels_([cid]) || {})[cid];
+  if (!s) return false;
+  if (s.name) sh.getRange(rowIndex, map['チャンネル名']).setValue(s.name);
+  else if (fallbackName) sh.getRange(rowIndex, map['チャンネル名']).setValue(String(fallbackName));
+  if (s.hiddenSubs) sh.getRange(rowIndex, map['登録者数']).setValue('');
+  else if (s.subs != null) sh.getRange(rowIndex, map['登録者数']).setValue(s.subs);
+  if (s.views != null) sh.getRange(rowIndex, map['総再生数']).setValue(s.views);
+  if (s.videos != null) sh.getRange(rowIndex, map['動画数']).setValue(s.videos);
+  if (s.uploads) sh.getRange(rowIndex, map['uploads']).setValue(s.uploads);
+  sh.getRange(rowIndex, map['最終更新']).setValue(today);
+  return true;
+}
+
 function compAddSeed_(url, name, bluesky, x, note) {
   url = String(url || '').trim();
   if (!url) return { ok: false, reason: 'no_url' };
@@ -280,6 +296,8 @@ function compAddSeed_(url, name, bluesky, x, note) {
   if (!cid) return { ok: false, reason: 'unresolved', url: url };
   var sh = compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
   var map = headerMap_(sh);
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   // 追記する横断情報(空でない分だけ後で書く)
   var setExtra = function (rowIndex) {
     if (bluesky && map['Bluesky']) sh.getRange(rowIndex, map['Bluesky']).setValue(String(bluesky));
@@ -291,27 +309,40 @@ function compAddSeed_(url, name, bluesky, x, note) {
     var ex = sh.getRange(2, map['channel_id'], last - 1, 1).getValues();
     for (var i = 0; i < ex.length; i++) {
       if (String(ex[i][0]).trim() === cid) {
-        if (String(sh.getRange(i + 2, map['状態']).getValue()).trim() !== 'watch') sh.getRange(i + 2, map['状態']).setValue('watch');
-        setExtra(i + 2);  // 既存行にも横断情報を補完
-        return { ok: true, channel_id: cid, added: false, note: 'already_exists' };
+        var ri = i + 2;
+        if (String(sh.getRange(ri, map['状態']).getValue()).trim() !== 'watch') sh.getRange(ri, map['状態']).setValue('watch');
+        setExtra(ri);  // 既存行にも横断情報を補完
+        // 既存行でも統計が未取得(登録者数も総再生数も空)なら、この場で埋める(日次ジョブを待たない)
+        var filled = false;
+        if (!String(sh.getRange(ri, map['登録者数']).getValue()).trim() && !String(sh.getRange(ri, map['総再生数']).getValue()).trim()) {
+          filled = compFillChannelStats_(sh, map, ri, cid, name, today);
+        }
+        return { ok: true, channel_id: cid, added: false, note: 'already_exists', filled: filled };
       }
     }
   }
-  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
-  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  // 新規行: 先にYouTube統計を取得し、欄を埋めた状態で1行書く(Chami指示=登録時にデータ取得して欄を埋める)。
+  var s = (ytChannels_([cid]) || {})[cid] || null;
   var row = [];
   for (var c = 0; c < COMP_CH_HEADERS.length; c++) row.push('');
   row[map['channel_id'] - 1] = cid;
-  row[map['チャンネル名'] - 1] = String(name || '');
+  row[map['チャンネル名'] - 1] = (s && s.name) || String(name || '');
   row[map['URL'] - 1] = url;
   row[map['状態'] - 1] = 'watch';
   row[map['発見経路'] - 1] = 'seed';
   row[map['追加日'] - 1] = today;
+  if (s) {
+    if (!s.hiddenSubs && s.subs != null) row[map['登録者数'] - 1] = s.subs;
+    if (s.views != null) row[map['総再生数'] - 1] = s.views;
+    if (s.videos != null) row[map['動画数'] - 1] = s.videos;
+    if (s.uploads) row[map['uploads'] - 1] = s.uploads;
+    row[map['最終更新'] - 1] = today;
+  }
   if (bluesky && map['Bluesky']) row[map['Bluesky'] - 1] = String(bluesky);
   if (x && map['X']) row[map['X'] - 1] = String(x);
   if (note && map['訴求メモ']) row[map['訴求メモ'] - 1] = String(note);
   sh.getRange(sh.getLastRow() + 1, 1, 1, COMP_CH_HEADERS.length).setValues([row]);
-  return { ok: true, channel_id: cid, added: true };
+  return { ok: true, channel_id: cid, added: true, filled: !!s };
 }
 
 // ============================================================

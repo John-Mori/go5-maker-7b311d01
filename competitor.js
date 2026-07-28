@@ -244,16 +244,32 @@
   function renderAnalysis(el, dg, tt) {
     el.innerHTML = analysisHtml(dg, tt);
   }
+  // 分析の前回結果をlocalStorageへキャッシュし、次回リロード時に即描画する(表示待ちを消す)。
+  //   GASからの取得は毎回このタブが開くたびに走るが、待つ間は前回のキャッシュを見せておく(stale-while-revalidate)。
+  var AN_CACHE = 'competitor_analysis_cache';
+  function loadAnCache() { try { var o = JSON.parse(localStorage.getItem(AN_CACHE) || 'null'); return (o && o.dg) ? o : null; } catch (e) { return null; } }
+  function saveAnCache(dg, tt) { try { localStorage.setItem(AN_CACHE, JSON.stringify({ dg: dg || {}, tt: tt || {}, at: Date.now() })); } catch (e) {} }
+
   // 分析データを取得して描画。GAS URL未設定なら案内。
+  //   ★リロード時の待ち時間対策: キャッシュがあれば先に即描画→裏でGASから最新を取り直して差し替える。
   function loadAnalysis() {
     var el = $('compAnalysis'); if (!el) return;
     var url = gasUrl();
     if (!url || !U.jsonp) { el.innerHTML = '<p class="hint" style="padding:2px;">分析を表示するには ⚙️詳細設定 で「記録用GASのURL」を設定してください。</p>'; return; }
-    el.innerHTML = '<p class="hint" style="padding:2px;">競合の分析を読み込み中…</p>';
+    var cached = loadAnCache();
+    if (cached) {
+      // 前回結果を即表示(通信を待たない)。裏で最新へ更新する。
+      try { renderAnalysis(el, cached.dg, cached.tt); } catch (e) {}
+    } else {
+      el.innerHTML = '<p class="hint" style="padding:2px;">競合の分析を読み込み中…</p>';
+    }
     U.jsonp(url, { action: 'comp_digest' }, function (dg) {
       U.jsonp(url, { action: 'comp_titles', days: '30', top: '200' }, function (tt) {
-        try { renderAnalysis(el, dg || {}, tt || {}); }
-        catch (e) { el.innerHTML = '<p class="hint" style="padding:2px;">分析の表示に失敗しました(データ収集後に再度お試しください)。</p>'; }
+        // 応答が空(GAS未設定/収集前)ならキャッシュ表示を残す。中身が来た時だけ差し替え＆保存。
+        var hasData = (tt && tt.titles && tt.titles.length) || (dg && dg.watchChannels != null);
+        if (!hasData && cached) return;
+        try { renderAnalysis(el, dg || {}, tt || {}); saveAnCache(dg, tt); }
+        catch (e) { if (!cached) el.innerHTML = '<p class="hint" style="padding:2px;">分析の表示に失敗しました(データ収集後に再度お試しください)。</p>'; }
       });
     });
   }
