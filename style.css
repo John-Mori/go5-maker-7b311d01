@@ -3,7 +3,7 @@
   --accent:#2bb3c0; --accent2:#dc465a; --line:#2a3346;
   /* 編集ボタン（Qセーブ等）の色。詳細設定タブで上書き保存される（theme-settings.js が :root に設定）。 */
   --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#546e7a; --qbtn-redo:#0891b2;
-  /* アカウント連動グラデ背景用（body::before で使用）。acc1/acc2 で上書き。 */
+  /* アカウント連動グラデ背景用トークン。html{background}で使用(body::beforeは使わない・iOS Safari対応のため)。acc1/acc2 で上書き。 */
   --canvas-bg:#141419; --vignette:rgba(6,6,18,.44);
 }
 /* ── アカウント別テーマ（data-account は theme-settings.js が html に付与）。
@@ -11,7 +11,7 @@
 html[data-account="acc1"]{           /* 月詠み色恋劇場：瑠璃群青×月光金 */
   --app-bg:#1B2A55; --card:rgba(255,255,255,.06); --line:rgba(255,255,255,.09);
   --accent:#F5E6B8; --accent2:#d98fb0; --ink:#f2edfb; --sub:#dce3f7;
-  /* グラデ背景トークン（body::before で使用） */
+  /* グラデ背景トークン(html{background}で使用) */
   --app-bg-base:#3B5CA8; --app-bg-mid:#2C4480; --app-bg-deep:#1B2A55;
   --app-glow:rgba(245,230,184,.22); --app-counter:rgba(96,160,240,.24);
   --glow-x:74%; --glow-y:-8%; --counter-x:6%; --counter-y:108%;
@@ -21,7 +21,7 @@ html[data-account="acc1"]{           /* 月詠み色恋劇場：瑠璃群青×�
 html[data-account="acc2"]{           /* 宵桜艶帖：宵の花明かり */
   --app-bg:#341A2E; --card:rgba(255,255,255,.065); --line:rgba(255,255,255,.10);
   --accent:#F8B4C8; --accent2:#ffce9a; --ink:#fbeef4; --sub:#f0d6e4;
-  /* グラデ背景トークン（body::before で使用） */
+  /* グラデ背景トークン(html{background}で使用) */
   --app-bg-base:#6E3159; --app-bg-mid:#552748; --app-bg-deep:#341A2E;
   --app-glow:rgba(248,180,200,.26); --app-counter:rgba(232,75,138,.20);
   --glow-x:24%; --glow-y:104%; --counter-x:88%; --counter-y:-4%;
