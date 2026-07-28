@@ -102,6 +102,21 @@ test('H-14: 履歴キーは投稿URI→短縮URL→動画IDの優先順を守る
   assert.strictEqual(HM.historyItemKey({ shortUrl: 'https://s/1', videoId: 'vid-1' }), 's:https://s/1');
 });
 
+test('H-15: シート由来行に投稿当時の価格スナップを復元する(セール)', function () {
+  var it = HM._toDisplayItem({ videoId: 'v1', fanzaListPrice: '1100', fanzaPrice: '770', fanzaDiscountPct: '30', fanzaFetchedAt: '2026-07-20T00:00:00Z' });
+  assert.deepStrictEqual(it.fanzaSnap, { price: 770, listPrice: 1100, discountPct: 30, at: '2026-07-20T00:00:00Z' });
+});
+
+test('H-16: 割引後priceが空欄なら当時価格スナップは付けない', function () {
+  var it = HM._toDisplayItem({ videoId: 'v2', fanzaListPrice: '', fanzaPrice: '', fanzaDiscountPct: '', fanzaFetchedAt: '' });
+  assert.strictEqual('fanzaSnap' in it, false);
+});
+
+test('H-17: 定価のみ(割引なし)の当時価格も復元する', function () {
+  var it = HM._toDisplayItem({ videoId: 'v3', fanzaListPrice: '', fanzaPrice: '880', fanzaDiscountPct: '', fanzaFetchedAt: '' });
+  assert.deepStrictEqual(it.fanzaSnap, { price: 880, listPrice: null, discountPct: 0, at: '' });
+});
+
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);

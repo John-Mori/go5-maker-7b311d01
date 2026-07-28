@@ -74,7 +74,8 @@
     var ts = 0;
     try { var t = Date.parse((x && x.postedAt) || ''); if (!isNaN(t)) ts = t; } catch (e) {}
     var cid = String((x && x.cid) || '');
-    return {
+    var snap = snapFromSheet_(x); // 投稿当時の価格(シートに記録あり)を復元
+    var item = {
       postUri: String((x && x.postUri) || ''),
       videoId: String((x && x.videoId) || ''),
       title: String((x && x.title) || ''),
@@ -87,6 +88,19 @@
       ytUrl: String((x && x.youtubeUrl) || ''),
       _fromSheet: true // 表示バッジ用: この端末の履歴には無くシートから補った行
     };
+    if (snap) item.fanzaSnap = snap; // 当時価格があるときだけ付与(render は it.fanzaSnap を見て表示)
+    return item;
+  }
+
+  // GAS history 行の価格列 → 当時価格スナップ {price,listPrice,discountPct,at}。
+  //   割引後price(数値)が無ければ null(＝当時価格は復元しない)。listPrice/pct は数値のときだけ採用。
+  function snapFromSheet_(x) {
+    if (!x) return null;
+    function n(v) { if (v === '' || v == null) return null; var f = Number(v); return isNaN(f) ? null : f; }
+    var price = n(x.fanzaPrice);
+    if (price == null) return null;
+    var lp = n(x.fanzaListPrice), pct = n(x.fanzaDiscountPct);
+    return { price: price, listPrice: lp, discountPct: pct != null ? pct : 0, at: String(x.fanzaFetchedAt || '') };
   }
 
   // localItems(allItems()相当) と sheetItems(GAS action=history の items) から、

@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-29A(競合_チャンネル: comp_add_seed登録時にytChannels_で登録者数/総再生数/動画数/uploads/チャンネル名/最終更新を即取得して欄を埋める。日次ジョブ待ちを解消。既存行も統計空なら補完)';
+var GAS_VERSION = '2026-07-29B(history: 元値list_price/割引後price/割引率pct/FANZA取得日時 を返す＝シート由来行にも投稿当時の価格を復元表示できるように。Chami指示2026-07-28)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -534,6 +534,7 @@ function historyItems_(channel, limit) {
   var dCol = map['投稿日時'], tCol = map['題名(コメント)'], sCol = map['短縮URL'], uCol = map['post_uri'];
   var yCol = map['YouTube動画URL']; // 端末のverify_yt消失時にここから復元できるよう返す
   var pidCol = map['post_id'], shareCol = map['共有URL'], wsCol = map['作品状態'], cidCol = map['作品cid']; // 端末の投稿履歴復元用
+  var lpCol = map['元値list_price'], prCol = map['割引後price'], pctCol = map['割引率pct'], fatCol = map['FANZA取得日時']; // 投稿当時(スナップ)の価格＝シート由来行にも復元して表示する
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
   var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   var items = [];
@@ -550,7 +551,12 @@ function historyItems_(channel, limit) {
       videoId: String(pid || ''),
       workState: String(wsCol ? (row[wsCol - 1] || '') : ''),
       cid: String(cidCol ? (row[cidCol - 1] || '') : ''), // 作品URL復元用(cid→作品URLをフロントで再構成)
-      youtubeUrl: String(yCol ? (row[yCol - 1] || '') : '')
+      youtubeUrl: String(yCol ? (row[yCol - 1] || '') : ''),
+      // 投稿当時の価格(スナップ)。空欄はそのまま''で返し、フロントが数値のときだけ fanzaSnap を組む。
+      fanzaListPrice: lpCol ? row[lpCol - 1] : '',
+      fanzaPrice: prCol ? row[prCol - 1] : '',
+      fanzaDiscountPct: pctCol ? row[pctCol - 1] : '',
+      fanzaFetchedAt: fatCol ? String(row[fatCol - 1] || '') : ''
     });
   }
   items.reverse(); // 新しい順
