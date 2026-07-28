@@ -46,6 +46,15 @@ for (const f of JS_FILES) {
     if (/(^|[;\s])flex\s*:/i.test(style) && !/min-width\s*:\s*0/i.test(style)) {
       add(f, lineOf(src, m.index), 'R1', `<${m[1]}> に flex: があるが min-width:0 が無い → iOS Safariで幅ゼロに潰れる。${RECIPE}`);
     }
+    // R4: <input> に flex: があるのに size 属性も明示 width も無い(2026-07-29・改善提案部門の再発分析Aで追加)。
+    //   iOS Safari は min-width:0 でも <input> の固有幅(初期 size=20文字ぶん)を残し、flex-wrap 行を割る。
+    //   v=457 で size="1" を付けて初めて封鎖できた実証済みの型。min-width:0(R1)だけでは拾えなかった穴。
+    if (m[1].toLowerCase() === 'input'
+        && /(^|[;\s])flex\s*:/i.test(style)
+        && !/\bsize\s*=/i.test(tag)
+        && !/(^|[;\s])width\s*:/i.test(style)) {
+      add(f, lineOf(src, m.index), 'R4', `<input> に flex: があるが size 属性も明示 width も無い → iOS Safariが<input>固有幅(初期20文字)を残して列を割る(v=457実証)。size="1" を付ける。`);
+    }
   }
 
   // R2: flex の % basis(flex:1 1 58% など)。変数合成も拾えるよう全文を走査。

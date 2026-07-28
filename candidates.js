@@ -965,7 +965,7 @@
         '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)">' +
         '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL(2つ目・カードに X2↗ / B2↗ で表示)</label>' +
         '<div style="display:flex;gap:6px;align-items:stretch;">' +
-          '<input id="refImgUrl2Inline" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
+          '<input id="refImgUrl2Inline" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
           '<button type="button" class="ghost paste-btn" data-paste="refImgUrl2Inline" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
         '</div>' +
       '</div>' +
@@ -983,12 +983,12 @@
       '<input id="refImgComment" type="text" class="cand-refimg-line" autocomplete="off" placeholder="コメント">' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">X / Bluesky URL</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
-        '<input id="refImgTwitter" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;min-width:0;">' +
+        '<input id="refImgTwitter" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;white-space:nowrap;">アフィリンク付き作品URLを貼ると、正式な作品URLに自動変換</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
-        '<input id="refImgWorkUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;min-width:0;">' +
+        '<input id="refImgWorkUrl" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;align-items:stretch;">' +
@@ -1163,7 +1163,7 @@
       '<input id="memoText" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)">' +
       '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL(2つ目・カードに X2↗ / B2↗ で表示)</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
-        '<input id="memoUrl" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
+        '<input id="memoUrl" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="memoUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:14px;">' +
@@ -1864,7 +1864,7 @@
       '<input id="candTabName" type="text" placeholder="タブの名前" autocomplete="off">' +
       '<div class="hint" style="margin-top:6px;">タブ名だけで決定すると、💡候補とは別に独立して作品URLを貯められる<b>候補タブ</b>になります。<br>特定サークルの作品一覧タブにしたい場合だけ、下の欄にサークル情報を入れてください。(任意)</div>' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">サークル情報(任意): 作品URL / サークルID / サークルURL</label>' +
-      pasteRow_('<input id="candTabSrc" type="text" inputmode="url" placeholder="空欄なら「ただの候補タブ」になります" autocomplete="off" style="flex:1;min-width:0;">', 'candTabSrc') +
+      pasteRow_('<input id="candTabSrc" size="1" type="text" inputmode="url" placeholder="空欄なら「ただの候補タブ」になります" autocomplete="off" style="flex:1;min-width:0;">', 'candTabSrc') +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
       '<button id="candTabOk" type="button" class="primary" style="flex:1;font-size:.9rem;padding:10px;">決定</button>' +
       '<button id="candTabCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">やめる</button>' +
@@ -2143,9 +2143,9 @@
     return '' +
       '<div class="fz-title" style="background:none;color:#fff;padding:0 46px 0 0;margin:0 0 6px;font-weight:700;line-height:1.3;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
       '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>💡候補とは別に、このタブに独立して保存されます。') + '</div>' +
-      '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;min-width:0;">', 'candUrl') + '</div>' +
+      '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" size="1" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;min-width:0;">', 'candUrl') + '</div>' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">X / Bluesky の投稿URL(任意)— <b>これだけでも追加できます</b></label>' +
-      '<div>' + pasteRow_('<input id="candTwitter" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://x.com/…/status/… か https://bsky.app/profile/…/post/…" autocomplete="off" style="flex:1;min-width:0;">', 'candTwitter') + '</div>' +
+      '<div>' + pasteRow_('<input id="candTwitter" size="1" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://x.com/…/status/… か https://bsky.app/profile/…/post/…" autocomplete="off" style="flex:1;min-width:0;">', 'candTwitter') + '</div>' +
       '<label class="hint" style="display:block;margin:10px 0 2px;">動画生成用の画像(任意・最大4枚)— ボタンを押すとコピー中の画像が左から入ります</label>' +
       '<div class="cand-add-imgrow">' + slots + '</div>' +
       '<div style="margin-top:6px;display:flex;">' +
@@ -2153,13 +2153,13 @@
       '</div>' +
       // ボタン幅は固定せず内容(テキスト)に追従。(width:max-content)続行ボタンは小さめ＝メモ欄を広く。
       '<div style="display:flex;gap:8px;margin-top:8px;align-items:stretch;">' +
-        '<input id="candMemo" type="text" class="cand-refimg-line" placeholder="メモ(任意・候補のメモに保存)" autocomplete="off" style="flex:1;min-width:0;">' +
+        '<input id="candMemo" size="1" type="text" class="cand-refimg-line" placeholder="メモ(任意・候補のメモに保存)" autocomplete="off" style="flex:1;min-width:0;">' +
         '<button id="candAdd" type="button" class="primary" style="margin:0;font-size:.78rem;padding:8px 10px;width:max-content;flex:0 0 auto;white-space:nowrap;">' + (isMain ? '候補に追加 / 続行' : 'このタブに追加 / 続行') + '</button>' +
       '</div>' +
       '<div id="candMsg" class="hint" style="min-height:1.3em;"></div>' +
       '<div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:10px;">' +
         '<div class="hint">サークルの作品をまとめて' + (isMain ? '候補' : 'このタブ') + 'に追加できます。<br>(サークルID / サークルURL / 作品URLのどれか)</div>' +
-        '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" type="text" inputmode="url" class="cand-refimg-line" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;min-width:0;">', 'candBulkSrc') + '</div>' +
+        '<div style="margin-top:6px;">' + pasteRow_('<input id="candBulkSrc" size="1" type="text" inputmode="url" class="cand-refimg-line" placeholder="サークルID / サークルURL / 作品URL" autocomplete="off" style="flex:1;min-width:0;">', 'candBulkSrc') + '</div>' +
         // サークル作品を全て追加 と 候補に追加/閉じる を並列。(どちらも幅は内容に追従・狭い端末でも1行に収まるよう小さめ)
         '<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap;">' +
           '<button id="candBulkAdd" type="button" class="ghost" style="margin:0;width:max-content;white-space:nowrap;font-size:.72rem;padding:7px 9px;">サークル作品を全て追加</button>' +
@@ -2627,7 +2627,7 @@
     return '<div class="cand-work-search" style="padding:2px 6px 10px;">' +
       '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品を検索（部分一致）</label>' +
       '<div style="display:flex;gap:6px;align-items:center;">' +
-      '<input id="candWorkSearch" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品を検索（部分一致）" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
+      '<input id="candWorkSearch" size="1" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品を検索（部分一致）" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
       '<button id="candWorkSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
       '</div><div id="candWorkSearchResult" class="hint" aria-live="polite" style="min-height:1.4em;margin-top:3px;"></div></div>';
   }
@@ -2831,7 +2831,7 @@
           '</div>';
         }).join('') + '</div>' +
         '<label class="hint" style="display:block;margin:8px 0 2px;">サークルを追加(ID / サークルURL / 作品URL)</label>' +
-        pasteRow_('<input id="candEditSrc" type="text" inputmode="url" autocomplete="off" placeholder="追加したいサークルを入れて「＋ 追加」" style="flex:1;min-width:0;">', 'candEditSrc') +
+        pasteRow_('<input id="candEditSrc" size="1" type="text" inputmode="url" autocomplete="off" placeholder="追加したいサークルを入れて「＋ 追加」" style="flex:1;min-width:0;">', 'candEditSrc') +
         '<button id="candEditAddMaker" type="button" class="ghost" style="width:max-content;margin:6px 0 0;font-size:12.5px;padding:6px 11px;">＋ サークルを追加</button>';
     }
     f.innerHTML = '<div class="card" style="margin:8px 0;">' +
