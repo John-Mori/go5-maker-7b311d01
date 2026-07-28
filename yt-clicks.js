@@ -814,9 +814,6 @@
     if (_pendingShare) edited.shareUrl = _pendingShare;
     applyWorkShort_(edited, workShortVal);
 
-    var saveBtn = $('veditSave'), origText = saveBtn ? saveBtn.textContent : '保存';
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
-
     var payload = {
       op: 'upsert',
       channel: chForItem_(edited),
@@ -834,33 +831,41 @@
     payload.workState = edited.workState || '旧作';
 
     var curAcct = acct();
+
+    // ★Chami指示2026-07-28: 保存を押したら編集モーダルは即閉じ、UIは楽観更新。GAS反映は裏でやる。
+    //   旧実装はGASへupsert→履歴再読込での確認が通るまでモーダルを閉じず(最大3回リトライ)、
+    //   確認が遅い/取れないと「保存しても反映されない」ように見えていた(Chami報告2026-07-28)。
+    //   シート由来行はlocalStorageへ書き戻さない(INC-112防壁)。表示専用の_sheetExtraCacheだけ即時反映する。
+    (function optimisticApply_() {
+      var c = _sheetExtraCache[curAcct];
+      if (!c || !c.items) return;
+      for (var i = 0; i < c.items.length; i++) {
+        if (itemKey(c.items[i]) === k) {
+          var cached = c.items[i];
+          for (var q in edited) if (Object.prototype.hasOwnProperty.call(edited, q)) cached[q] = edited[q];
+          break;
+        }
+      }
+    })();
+    closeModal_();
+    refresh();
+    if (ytUrl) pokeSnapshotNow_();
+
+    // ── ここから裏方(非ブロッキング): GASへupsert→履歴再読込で反映を確認。失敗時だけ静かに通知する。──
     var finished = false, verifyStarted = false;
-    function finishError_(message) {
+    function bgFail_(message) {
       if (finished) return;
       finished = true;
-      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = origText; }
-      showModalErr_(message);
+      try { setStatus('⚠ ' + message, true); } catch (e) {}
     }
-    function finishSuccess_(sheetItems) {
+    function bgSuccess_(sheetItems) {
       if (finished) return;
       finished = true;
-      // 成功: 読み直したシート正本をキャッシュへ反映し、UIを即時更新する。
+      // シート正本を読み直せたらキャッシュを権威データで上書きして再描画(楽観更新のズレを正す)。
       var c = _sheetExtraCache[curAcct];
       var merged = (window.HistMerge && window.HistMerge.mergeSheetExtras)
         ? window.HistMerge.mergeSheetExtras(allItems(), sheetItems || []) : null;
-      if (c && merged) { c.items = merged; c.at = Date.now(); }
-      else if (c && c.items) {
-        for (var i = 0; i < c.items.length; i++) {
-          if (itemKey(c.items[i]) === k) {
-            var cached = c.items[i];
-            for (var q in edited) if (Object.prototype.hasOwnProperty.call(edited, q)) cached[q] = edited[q];
-            break;
-          }
-        }
-      }
-      closeModal_();
-      refresh();
-      if (ytUrl) pokeSnapshotNow_();
+      if (c && merged) { c.items = merged; c.at = Date.now(); refresh(); }
     }
     function verifyFromSheet_() {
       if (verifyStarted || finished) return;
@@ -871,25 +876,23 @@
         jsonp_(gasUrl, { action: 'history', channel: curAcct, limit: 300 }, function (res) {
           if (finished) return;
           if (!res || !res.ok || !Array.isArray(res.items)) {
-            var reason = (res && res.__jsonpFail && res.reason === 'timeout') ? 'スプレッドシートの確認が時間切れになりました。'
-              : 'スプレッドシートの保存結果を確認できませんでした。';
-            finishError_(reason + ' 通信を確認して、もう一度「保存」を押してください。');
+            if (tries < 3) { setTimeout(check_, 1200 * tries); return; }
+            bgFail_('スプレッドシートへの保存を確認できませんでした。通信を確認して、もう一度編集→保存してください。');
             return;
           }
           var expected = { videoId: payload.videoId, youtubeUrl: payload.youtube_url, workUrl: payload.workUrl, workState: payload.workState };
           if (window.HistMerge && window.HistMerge.historyHasEdit && window.HistMerge.historyHasEdit(res.items, expected)) {
-            finishSuccess_(res.items);
+            bgSuccess_(res.items);
             return;
           }
           if (tries < 3) { setTimeout(check_, 1200 * tries); return; }
-          finishError_('スプレッドシートへの反映を確認できませんでした。入力内容を確認して、もう一度「保存」を押してください。');
+          bgFail_('スプレッドシートへの反映を確認できませんでした。もう一度編集→保存してください。');
         });
       }
       check_();
     }
     try {
-      // GASのPOST応答はCORSで本文を読めない。no-corsで確実に送信し、成否は上のhistory再読込で判定する。
-      // 送信自体が返らない環境でも3秒後に確認へ進むため、「保存中…」で永久停止しない。
+      // GASのPOST応答はCORSで本文を読めない。no-corsで確実に送信し、成否は履歴再読込で判定する。
       fetch(gasUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) })
         .then(verifyFromSheet_, verifyFromSheet_);
       setTimeout(verifyFromSheet_, 3000);
