@@ -136,10 +136,10 @@
         '<div style="font-size:.74rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · ' + esc(fmtTs(meta.ts)) + '</div>' +
         (bskyPre ? '<div style="font-size:.74rem;color:#9fb0c3;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(bskyPre) + '</div>' : '') +
         (meta.affiliateUrl ? '<div style="font-size:.71rem;color:#4a7060;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔗 ' + esc(meta.affiliateUrl.replace(/^https?:\/\//, '').slice(0, 44)) + '</div>' : '') +
-        (hasYt ? '<div style="font-size:.71rem;color:#2bb3c0;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:#2bb3c0;">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
+        (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
         '<div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;">' +
           '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">⬇ 動画DL</button>' +
-          '<button type="button" class="stk-mode" data-id="' + esc(id) + '" style="' + btnBase + 'border:none;background:' + (hasYt ? '#1a3a40' : '#2bb3c0') + ';color:' + (hasYt ? '#2bb3c0' : '#04222a') + ';font-weight:700;">投稿モード</button>' +
+          '<button type="button" class="stk-mode" data-id="' + esc(id) + '" style="' + btnBase + (hasYt ? 'border:1px solid var(--accent);background:transparent;color:var(--accent);' : 'border:none;background:var(--accent);color:#04222a;') + 'font-weight:700;">投稿モード</button>' +
           '<button type="button" class="stk-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#666;padding:5px 8px;">🗑</button>' +
         '</div>' +
       '</div>' +
@@ -240,7 +240,7 @@
     m.innerHTML =
       '<div style="background:#1c1916;border:1px solid #3a2f28;border-radius:14px;width:calc(100% - 24px);max-width:480px;margin:auto;box-sizing:border-box;overflow:hidden;color:#ede8df;">' +
         '<div style="padding:13px 16px;border-bottom:1px solid #2e2420;display:flex;justify-content:space-between;align-items:center;">' +
-          '<div style="font-size:.95rem;font-weight:800;color:#2bb3c0;white-space:nowrap;flex-shrink:0;">投稿モード</div>' +
+          '<div style="font-size:.95rem;font-weight:800;color:var(--accent);white-space:nowrap;flex-shrink:0;">投稿モード</div>' +
           '<button type="button" id="draftModalClose" style="background:none;border:none;color:#7a8fa3;font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;">✕</button>' +
         '</div>' +
         '<div style="padding:16px 16px 20px;">' +
@@ -265,7 +265,7 @@
           '</div>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
           '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + iS + '">' +
-          '<button type="button" id="draftModalComplete" style="width:100%;margin-top:20px;padding:13px;font-size:.95rem;font-weight:700;border-radius:10px;border:none;background:#2bb3c0;color:#04222a;cursor:pointer;">投稿完了</button>' +
+          '<button type="button" id="draftModalComplete" style="width:100%;margin-top:20px;padding:13px;font-size:.95rem;font-weight:700;border-radius:10px;border:none;background:var(--accent);color:#04222a;cursor:pointer;">投稿完了</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(m);
