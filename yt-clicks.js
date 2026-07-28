@@ -1418,7 +1418,43 @@
       }
     }
   }
-  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_ }; } catch (e) {}
+  // ── 投稿完了(ドラフトの投稿モード)から1件を投稿履歴へ記録する。account指定で正しいアカウント側へ書く。──
+  //   ①「投稿完了を押しても投稿履歴に載らない」の対処。ここに載れば、既存の updateYtScheduled_ が
+  //   予約公開(公開前)の動画を yt_scheduled__ へ拾い、scheduler.js が予約タブへ「公開待ち」表示する(②は自動達成)。
+  //   同じ動画(videoId)or同じ計測URL(shortUrl)が既にあれば重複追加しない。表示中アカウントなら即反映。
+  function addCompletedPost_(opts) {
+    opts = opts || {};
+    var acc = opts.account || acct();
+    var ytUrl = (opts.ytUrl || '').trim();
+    var shortUrl = (opts.shortUrl || '').trim();
+    if (!ytUrl && !shortUrl) return false; // 動画URLも計測URLも無ければ履歴に載せる意味がない
+    var vid = ytUrl ? ytIdOf(ytUrl) : '';
+    var manual = loadArrFor_('verify_manual', acc);
+    var hist = loadArrFor_('short_hist', acc);
+    var ymap = loadYtMapFor_(acc);
+    var dupe = manual.concat(hist).some(function (it) {
+      var y = ymap[itemKey(it)] || it.ytUrl || '';
+      if (vid && ytIdOf(y) === vid) return true;
+      if (shortUrl && it.shortUrl === shortUrl) return true;
+      return false;
+    });
+    if (dupe) { if (acc === acct()) refresh(); return false; }
+    var id = 'm:' + new Date().getTime();
+    var entry = { manual: true, id: id, ts: opts.ts || new Date().getTime() };
+    if (ytUrl) entry.ytUrl = ytUrl;
+    if (opts.title) entry.title = String(opts.title).replace(/\n+/g, ' ').trim();
+    if (opts.workUrl) entry.workUrl = opts.workUrl;
+    if (shortUrl) entry.shortUrl = shortUrl;
+    if (opts.shareUrl) entry.shareUrl = opts.shareUrl;
+    if (opts.videoId || vid) entry.videoId = opts.videoId || vid;
+    entry.workState = opts.workState || '旧作';
+    manual.push(entry);
+    saveArrFor_('verify_manual', acc, manual);
+    if (ytUrl) { ymap[id] = ytUrl; saveYtMapFor_(acc, ymap); }
+    if (acc === acct()) { try { pokeSnapshotNow_(); } catch (e) {} refresh(); }
+    return true;
+  }
+  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_ }; } catch (e) {}
 
   // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }

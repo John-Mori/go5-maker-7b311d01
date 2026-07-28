@@ -175,7 +175,7 @@
   }
 
   // ── 投稿完了処理 ──
-  function handleCompleteOk_(id, ytUrl) {
+  function handleCompleteOk_(id, ytUrl, shortUrl) {
     var store = idb();
     if (!store) { alert('IndexedDB未対応のため動画データを取得できません。'); return; }
     var metas = loadMeta();
@@ -192,6 +192,20 @@
         metas.forEach(function (m) { if (m.id === id) m.youtubeUrl = ytUrl; });
         saveMeta(metas);
       }
+      // ①投稿完了 → 投稿履歴へ1件記録(既存の投稿履歴機構=Go5History)。載れば予約公開の動画は
+      //   既存の updateYtScheduled_ が予約タブへ拾う(②は自動達成)。ytUrl も shortUrl も無ければ載せない。
+      try {
+        if (window.Go5History && typeof window.Go5History.addCompletedPost === 'function') {
+          window.Go5History.addCompletedPost({
+            account: meta.account || 'acc1',
+            ytUrl: ytUrl || '',
+            shortUrl: shortUrl || '',
+            title: meta.title || '',
+            workUrl: meta.workUrl || meta.affiliateUrl || '',
+            videoId: meta.videoId || ''
+          });
+        }
+      } catch (e) {}
       // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。youtubeUrl保存の後に行う。
       archiveStock_(id);
       render();
@@ -515,7 +529,9 @@
       if (!_modalMeta) return;
       if (!window.confirm('投稿履歴に反映します。OKを押すと正式に投稿完了になります。')) return;
       var ytUrl = ($('draftYtUrl') || {}).value || '';
-      handleCompleteOk_(_modalMeta.id, ytUrl.trim());
+      var slot = $('draftYtDescUrlLink');
+      var shortUrl = (slot && slot.dataset && slot.dataset.url) || '';
+      handleCompleteOk_(_modalMeta.id, ytUrl.trim(), shortUrl);
       m.style.display = 'none'; _modalMeta = null;
     });
     document.addEventListener('go5-disc-url-changed', function () {
