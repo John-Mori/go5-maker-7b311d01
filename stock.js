@@ -9,6 +9,11 @@
 
   var MAX = 20;
   var META_KEY = 'go5_stock_meta';
+  // 作成履歴=投稿完了(③作成完了)でドラフト本体から外した項目を、復元できるように残す退避先(Chami指示④
+  //   「消えてしまうのが怖いので作成履歴に残して復元できるように」)。動画/サムネのidb blobは消さず残すので
+  //   復元すれば動画DL・再投稿まで丸ごと戻る。上限を超えた古い分だけ blob ごと本当に消える。
+  var ARCHIVE_KEY = 'go5_stock_archive';
+  var ARCHIVE_MAX = 30;
   var PH_URL_ = '(X投稿リンクを入力後、ここに短縮URLが入る)';
 
   // 説明欄の短縮URLは「タップで実際に遷移できるリンク」だけで表示(Chami 2026-07-28指示=短縮URLのみの
@@ -48,6 +53,13 @@
 
   function loadMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || '[]') || []; } catch (e) { return []; } }
   function saveMeta(arr) { try { localStorage.setItem(META_KEY, JSON.stringify(arr.slice(0, MAX))); } catch (e) {} }
+  function loadArchive() { try { return JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]') || []; } catch (e) { return []; } }
+  function saveArchive(arr) { try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(arr.slice(0, ARCHIVE_MAX))); } catch (e) {} }
+  function delBlobs_(id) {
+    var store = idb();
+    if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); }
+    if (_thumbCache[id]) { try { URL.revokeObjectURL(_thumbCache[id]); } catch (e) {} delete _thumbCache[id]; }
+  }
 
   function idb() { return window.Go5Idb; }
 
@@ -106,9 +118,46 @@
   // ── 削除 ──
   function deleteStock_(id) {
     saveMeta(loadMeta().filter(function (m) { return m.id !== id; }));
-    var store = idb();
-    if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); }
-    if (_thumbCache[id]) { try { URL.revokeObjectURL(_thumbCache[id]); } catch (e) {} delete _thumbCache[id]; }
+    delBlobs_(id);
+  }
+
+  // ③投稿完了=作成完了 → ドラフト本体から外して作成履歴へ退避(④復元できるよう blob は残す)。
+  //   上限を超えて作成履歴から溢れた古い分だけ、blob ごと本当に削除する。
+  function archiveStock_(id) {
+    var metas = loadMeta();
+    var meta = metas.filter(function (m) { return m.id === id; })[0];
+    if (!meta) return;
+    meta.completedTs = Date.now();
+    saveMeta(metas.filter(function (m) { return m.id !== id; }));
+    var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
+    arch.unshift(meta);
+    var dropped = arch.slice(ARCHIVE_MAX); // 上限超過分=保持できないので blob を掃除
+    dropped.forEach(function (m) { delBlobs_(m.id); });
+    saveArchive(arch);
+  }
+
+  // ④作成履歴からドラフト本体へ戻す。ドラフトが満杯なら溢れる最古の1件は作成履歴へ送り返す(=消さない)。
+  function restoreStock_(id) {
+    var arch = loadArchive();
+    var meta = arch.filter(function (m) { return m.id === id; })[0];
+    if (!meta) return;
+    delete meta.completedTs;
+    arch = arch.filter(function (m) { return m.id !== id; });
+    var metas = loadMeta().filter(function (m) { return m.id !== id; });
+    metas.unshift(meta);
+    if (metas.length > MAX) {
+      var overflow = metas.slice(MAX); // ドラフト満杯で溢れる最古=消さずに作成履歴へ戻す
+      metas = metas.slice(0, MAX);
+      overflow.forEach(function (m) { if (!arch.some(function (a) { return a.id === m.id; })) arch.unshift(m); });
+    }
+    saveMeta(metas);
+    saveArchive(arch);
+  }
+
+  // 作成履歴から完全に削除(復元不可)。blob も消す。
+  function purgeArchived_(id) {
+    saveArchive(loadArchive().filter(function (m) { return m.id !== id; }));
+    delBlobs_(id);
   }
 
   // ── 動画DL ──
@@ -143,6 +192,8 @@
         metas.forEach(function (m) { if (m.id === id) m.youtubeUrl = ytUrl; });
         saveMeta(metas);
       }
+      // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。youtubeUrl保存の後に行う。
+      archiveStock_(id);
       render();
     }).catch(function (err) {
       alert('動画データの取得に失敗しました: ' + (err ? err.message || String(err) : '不明'));
@@ -190,20 +241,38 @@
     '</div>';
   }
 
+  // 作成履歴(退避済み)の1行。復元・動画DL(blobは残してある)・完全削除。
+  function renderArchItem_(meta, thumbUrl) {
+    var id = meta.id;
+    var acctLabel = meta.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+    var hasYt = !!(meta.youtubeUrl);
+    var btnBase = 'width:auto;margin:0;padding:5px 10px;font-size:.76rem;border-radius:6px;cursor:pointer;white-space:nowrap;';
+    return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
+      (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
+                : '<div style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
+      '<div style="flex:1 1 0;min-width:0;">' +
+        '<div style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
+        '<div style="font-size:.72rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · 完了 ' + esc(fmtTs(meta.completedTs || meta.ts)) + '</div>' +
+        (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
+        '<div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;">' +
+          '<button type="button" class="stk-restore" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;">↩ 復元</button>' +
+          '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">⬇ 動画DL</button>' +
+          '<button type="button" class="stk-arch-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #5a2a2a;background:transparent;color:#c77;padding:5px 8px;">🗑 完全削除</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
   function render() {
     var page = $('pageStock');
     if (!page || page.hidden) return;
     var curAcct = window.getCurrentAccount ? window.getCurrentAccount() : 'acc1';
     var metas = loadMeta().filter(function (m) { return (m.account || 'acc1') === curAcct; });
-
-    if (!metas.length) {
-      page.innerHTML = '<div class="card" style="color:var(--sub);text-align:center;padding:32px 16px;font-size:.9rem;">' +
-        'このアカウントのドラフトはまだありません。<br>動画作成タブの「📦 ドラフトで作成」で動画をここへ貯められます。</div>';
-      return;
-    }
+    var arch = loadArchive().filter(function (m) { return (m.account || 'acc1') === curAcct; });
 
     var store = idb();
-    var thumbPs = metas.map(function (m) {
+    var all = metas.concat(arch);
+    var thumbPs = all.map(function (m) {
       if (_thumbCache[m.id]) return Promise.resolve(_thumbCache[m.id]);
       if (!store) return Promise.resolve(null);
       return store.get('stock_t_' + m.id).then(function (blob) {
@@ -214,10 +283,26 @@
     });
 
     Promise.all(thumbPs).then(function (thumbUrls) {
-      page.innerHTML = '<div class="card">' +
-        '<div style="font-size:.95rem;font-weight:700;color:var(--accent);margin-bottom:10px;">📦 ドラフト(' + metas.length + '件)</div>' +
-        metas.map(function (m, i) { return renderItem_(m, thumbUrls[i]); }).join('') +
-        '</div>';
+      var thumbFor = {};
+      all.forEach(function (m, i) { thumbFor[m.id] = thumbUrls[i]; });
+      var html = '<div class="card">';
+      if (metas.length) {
+        html += '<div style="font-size:.95rem;font-weight:700;color:var(--accent);margin-bottom:10px;">📦 ドラフト(' + metas.length + '件)</div>' +
+          metas.map(function (m) { return renderItem_(m, thumbFor[m.id]); }).join('');
+      } else {
+        html += '<div style="color:var(--sub);text-align:center;padding:28px 16px;font-size:.9rem;">' +
+          'このアカウントのドラフトはまだありません。<br>動画作成タブの「📦 ドラフトで作成」で動画をここへ貯められます。</div>';
+      }
+      html += '</div>';
+      // ④作成履歴=投稿完了ぶんの退避リスト。ドラフト本体の下に折りたたみで置く(初期は閉じ・タップで開く)。
+      if (arch.length) {
+        html += '<details style="margin-top:12px;">' +
+          '<summary style="cursor:pointer;font-size:.86rem;font-weight:700;color:var(--sub);padding:11px 14px;background:var(--card);border:1px solid var(--line);border-radius:12px;">🗂 作成履歴(投稿完了ぶん・' + arch.length + '件) — タップで開く/復元</summary>' +
+          '<div class="card" style="margin-top:8px;">' +
+          arch.map(function (m) { return renderArchItem_(m, thumbFor[m.id]); }).join('') +
+          '</div></details>';
+      }
+      page.innerHTML = html;
     });
   }
 
@@ -497,8 +582,9 @@
         var btn = e.target;
         if (!btn || !btn.dataset || !btn.dataset.id) return;
         var id = btn.dataset.id;
-        var metas = loadMeta();
-        var meta = metas.filter(function (m) { return m.id === id; })[0];
+        // meta はドラフト本体・作成履歴のどちらにあるか分からない(動画DLは両方から押せる)ので両方から探す。
+        var meta = loadMeta().filter(function (m) { return m.id === id; })[0]
+                 || loadArchive().filter(function (m) { return m.id === id; })[0];
 
         if (btn.classList.contains('stk-dl')) {
           if (meta) downloadStock_(id, meta.videoName);
@@ -508,6 +594,15 @@
 
         } else if (btn.classList.contains('stk-remake')) {
           if (meta) remakeStock_(meta);
+
+        } else if (btn.classList.contains('stk-restore')) {
+          restoreStock_(id);
+          render();
+
+        } else if (btn.classList.contains('stk-arch-del')) {
+          if (!window.confirm('「' + (meta ? meta.label || '動画' : '動画') + '」を作成履歴から完全に削除しますか?\n(復元できなくなります・Driveの動画は残ります)')) return;
+          purgeArchived_(id);
+          render();
 
         } else if (btn.classList.contains('stk-del')) {
           if (!window.confirm('「' + (meta ? meta.label || '動画' : '動画') + '」をドラフトから削除しますか?')) return;
