@@ -251,7 +251,6 @@
     if (!tags) { var te = $('ytTags'); tags = te ? te.value : '#Shorts #マンガ #漫画紹介 #anime'; }
     $('draftYtTagsInput').value = tags;
     buildModalYtTitle_();
-    if (saved.ytTitle) { $('draftYtTitleText').value = saved.ytTitle; _ytTitleDirty = true; } // 空文字は保存済みと見なさない
     $('draftYtUrl').value = saved.ytUrl !== undefined ? saved.ytUrl : (meta.youtubeUrl || '');
     var ytDescKey = 'yt_desc__' + (meta.account || 'acc1');
     var ytDescVal = saved.ytDesc !== undefined ? saved.ytDesc : '';
@@ -272,9 +271,12 @@
     var ctaS = 'background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);';
     m.innerHTML =
       '<div style="background:var(--card);border:1px solid var(--line);border-radius:14px;width:calc(100% - 24px);max-width:480px;margin:auto;box-sizing:border-box;overflow:hidden;color:var(--ink);">' +
-        '<div style="padding:13px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;position:relative;">' +
-          '<div style="flex:1;text-align:center;font-size:.95rem;font-weight:800;color:var(--accent);">投稿モード</div>' +
-          '<button type="button" id="draftModalClose" style="position:absolute;right:8px;background:none;border:none;color:var(--sub);font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;">✕</button>' +
+        '<div style="padding:13px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;">' +
+          '<div style="flex:1;"></div>' +
+          '<div style="font-size:.95rem;font-weight:800;color:var(--accent);">投稿モード</div>' +
+          '<div style="flex:1;display:flex;justify-content:flex-end;">' +
+            '<button type="button" id="draftModalClose" style="background:none;border:none;color:var(--sub);font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;">✕</button>' +
+          '</div>' +
         '</div>' +
         '<div style="padding:16px 16px 20px;">' +
           '<div style="' + sH + 'margin-bottom:8px;">X 投稿</div>' +
@@ -282,28 +284,29 @@
           '<button type="button" id="draftCopyX" style="width:100%;margin-top:7px;padding:8px;font-size:.82rem;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;">コピー</button>' +
           '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
-          '<div style="' + fL + 'margin-top:0;">題名</div>' +
+          '<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;margin-top:0;">📋 題名(コピーして貼り付け)</div>' +
           '<div style="display:flex;gap:7px;align-items:flex-start;">' +
             '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<textarea id="draftYtTitleText" rows="3" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
+              '<textarea id="draftYtTitleText" readonly rows="3" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;cursor:default;"></textarea>' +
             '</div>' +
-            '<button type="button" id="draftCopyYtTitle" style="' + cpS + '">コピー</button>' +
+            '<button type="button" id="draftCopyYtTitle" style="' + cpS + '">題名をコピー</button>' +
           '</div>' +
-          '<div style="' + fL + '">タグ</div>' +
-          '<div style="display:flex;gap:7px;align-items:center;">' +
-            '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<input type="text" id="draftYtTagsInput" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;">' +
-            '</div>' +
-            '<button type="button" id="draftCopyYtTags" style="' + cpS + '">コピー</button>' +
-          '</div>' +
-          '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
-          '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + iS + '">' +
-          '<div style="' + fL + '">YouTube説明欄</div>' +
+          '<div style="' + fL + '">タグ(半角スペース区切り)</div>' +
+          '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
+          '<div style="font-size:.72rem;color:var(--sub);line-height:1.5;margin-top:6px;margin-bottom:2px;">題名=「動画作成」タブ④コメント+タグ。コメント・タグを変えると自動更新されます。タグは3〜5個・#Shorts+ジャンル語+作品固有が目安。(表示されるのは上位3個のみ・60個超で全無視=公式仕様)</div>' +
+          '<div style="' + fL + '">🖥 YouTube説明欄(コピーして概要欄に貼り付け)</div>' +
           '<div style="display:flex;gap:7px;align-items:flex-start;">' +
             '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<textarea id="draftYtDescText" rows="5" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
+              '<textarea id="draftYtDescText" rows="7" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
             '</div>' +
             '<button type="button" id="draftCopyYtDesc" style="' + cpS + '">コピー</button>' +
+          '</div>' +
+          '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
+          '<div style="display:flex;gap:7px;align-items:center;">' +
+            '<div style="flex:1;min-width:0;overflow:hidden;">' +
+              '<input type="url" id="draftYtUrl" placeholder="https://www.youtube.com/shorts/..." style="' + iS + '">' +
+            '</div>' +
+            '<button type="button" id="draftPasteYtUrl" style="' + cpS + '">貼り付け</button>' +
           '</div>' +
           '<div style="display:flex;gap:8px;margin-top:20px;">' +
             '<button type="button" id="draftModalComplete" style="flex:1;padding:13px;font-size:.88rem;font-weight:700;border-radius:10px;border:none;' + ctaS + 'cursor:pointer;">投稿完了</button>' +
@@ -314,9 +317,8 @@
     document.body.appendChild(m);
 
     $('draftXText').addEventListener('input', saveDraftPost_);
-    $('draftYtTitleText').addEventListener('input', function () { _ytTitleDirty = true; saveDraftPost_(); });
     $('draftYtTagsInput').addEventListener('input', function () {
-      if (!_ytTitleDirty) buildModalYtTitle_(); // 題名を手編集済みの場合は上書きしない
+      buildModalYtTitle_();
       try { localStorage.setItem('yt_tags_shared', this.value); } catch (e) {}
       var yt = $('ytTags'); if (yt) yt.value = this.value;
       saveDraftPost_();
@@ -324,9 +326,19 @@
     $('draftYtUrl').addEventListener('input', saveDraftPost_);
     $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
-    $('draftCopyYtTags').addEventListener('click', function () { copyText_(($('draftYtTagsInput') || {}).value || '', this); });
     $('draftCopyYtDesc').addEventListener('click', function () { copyText_(($('draftYtDescText') || {}).value || '', this); });
     $('draftYtDescText').addEventListener('input', saveDraftPost_);
+    $('draftPasteYtUrl').addEventListener('click', function () {
+      var btn = this;
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function (text) {
+          $('draftYtUrl').value = text.trim(); saveDraftPost_();
+          var o = btn.textContent; btn.textContent = '貼り付けました'; setTimeout(function () { btn.textContent = o; }, 2000);
+        }).catch(function () { alert('クリップボードの読み取りに失敗しました。手動で貼り付けてください。'); });
+      } else {
+        alert('この環境ではクリップボードの自動読み取りができません。手動で貼り付けてください。');
+      }
+    });
     $('draftModalSave').addEventListener('click', function () {
       saveDraftPost_();
       var btn = this; var orig = btn.textContent; btn.textContent = '保存しました'; setTimeout(function () { btn.textContent = orig; }, 2000);
