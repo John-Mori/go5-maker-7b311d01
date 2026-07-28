@@ -4,7 +4,7 @@
   /* 編集ボタン（Qセーブ等）の色。詳細設定タブで上書き保存される（theme-settings.js が :root に設定）。 */
   --qbtn-save:#2563eb; --qbtn-load:#16a34a; --qbtn-reset:#d97706; --qbtn-undo:#546e7a; --qbtn-redo:#0891b2;
   /* アカウント連動グラデ背景用トークン。html{background}で使用(body::beforeは使わない・iOS Safari対応のため)。acc1/acc2 で上書き。 */
-  --canvas-bg:#141419; --vignette:rgba(6,6,18,.44);
+  --canvas-bg:#141419; --vignette:rgba(6,6,18,.44); --app-scrim:transparent;
 }
 /* ── アカウント別テーマ（data-account は theme-settings.js が html に付与）。
    背景・アクセント・文字色を CSS 変数で定義し、各タブ/文字/ボタンへ一括反映する。 ── */
@@ -13,10 +13,10 @@ html[data-account="acc1"]{           /* 月詠み色恋劇場：瑠璃群青×�
   --accent:#F5E6B8; --accent2:#d98fb0; --ink:#f2edfb; --sub:#dce3f7;
   /* グラデ背景トークン(html{background}で使用) */
   --app-bg-base:#3B5CA8; --app-bg-mid:#2C4480; --app-bg-deep:#1B2A55;
-  --app-glow:rgba(245,230,184,.22); --app-counter:rgba(96,160,240,.24);
+  --app-glow:rgba(245,230,184,.18); --app-counter:rgba(96,160,240,.24);
   --glow-x:74%; --glow-y:-8%; --counter-x:6%; --counter-y:108%;
   --cta-from:#F7EAC4; --cta-to:#E4CB86; --cta-ink:#22305A;
-  --field-bg:rgba(8,10,28,.40);
+  --field-bg:rgba(8,10,28,.40); --app-scrim:rgba(10,16,40,.28);
 }
 html[data-account="acc2"]{           /* 宵桜艶帖：宵の花明かり */
   --app-bg:#341A2E; --card:rgba(255,255,255,.065); --line:rgba(255,255,255,.10);
@@ -26,7 +26,7 @@ html[data-account="acc2"]{           /* 宵桜艶帖：宵の花明かり */
   --app-glow:rgba(248,180,200,.26); --app-counter:rgba(232,75,138,.20);
   --glow-x:24%; --glow-y:104%; --counter-x:88%; --counter-y:-4%;
   --cta-from:#FBC6D6; --cta-to:#F193B4; --cta-ink:#4A1E3A;
-  --field-bg:rgba(26,8,22,.40);
+  --field-bg:rgba(26,8,22,.40); --app-scrim:rgba(24,8,20,.28);
 }
 /* ── ランキング・分析・候補・予約タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
 html[data-tab=”tabRank”],
@@ -51,6 +51,7 @@ html,body{margin:0;padding:0;background:transparent;color:var(--ink);
    body::before z-index:-1 は html 背景の後ろに落ちるため使わない。 ── */
 html{
   background:
+    linear-gradient(var(--app-scrim,transparent), var(--app-scrim,transparent)),
     radial-gradient(112% 60% at var(--glow-x,0%) var(--glow-y,0%), var(--app-glow,transparent), transparent 62%),
     radial-gradient(90% 56% at var(--counter-x,0%) var(--counter-y,0%), var(--app-counter,transparent), transparent 70%),
     linear-gradient(166deg, var(--app-bg-base,#0f1420) 0%, var(--app-bg-mid,#0d1220) 54%, var(--app-bg-deep,#0a0e1a) 100%);

@@ -306,7 +306,7 @@
 
     /* 切替ボタン */
     var acctRow = el('div', { style: 'display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;' });
-    var btn1 = el('button', { type: 'button', style: 'padding:6px 12px;border-radius:8px;border:1px solid #2bb3c0;background:#0e1422;color:#2bb3c0;cursor:pointer;font-size:.85rem;' }, '月読み色恋劇場 (acc1)');
+    var btn1 = el('button', { type: 'button', style: 'padding:6px 12px;border-radius:8px;border:1px solid #2bb3c0;background:#0e1422;color:#2bb3c0;cursor:pointer;font-size:.85rem;' }, '月詠み色恋劇場 (acc1)');
     var btn2 = el('button', { type: 'button', style: 'padding:6px 12px;border-radius:8px;border:1px solid #2bb3c0;background:#0e1422;color:#2bb3c0;cursor:pointer;font-size:.85rem;' }, '宵桜艶帖 (acc2)');
     btn1.addEventListener('click', function () {
       var b = document.getElementById('acctBtn1');
@@ -752,7 +752,7 @@
    * ユーティリティ
    * ========================================================= */
   function accountLabel(acc) {
-    if (acc === 'acc1') return '月読み色恋劇場';
+    if (acc === 'acc1') return '月詠み色恋劇場';
     if (acc === 'acc2') return '宵桜艶帖';
     return acc || '(未設定)';
   }
