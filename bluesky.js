@@ -905,6 +905,23 @@
     };
   } catch (e) {}
 
+  // ドラフトモーダル用: 指定アカウントの YouTube説明欄(コピペ用)を返す。
+  //   保存済みのカスタム説明欄(yt_desc__<acc>)があればそれを、無ければ既定テンプレを使い、
+  //   1行目が短縮URL/プレースホルダでなければプレースホルダ行を冠して「概要欄にそのまま貼れる」形にする。
+  try {
+    window.__go5YtDescForAccount = function (account) {
+      var a = account || 'acc1';
+      var body = null;
+      try { var s = localStorage.getItem('yt_desc__' + a); if (s != null && s !== '') body = s; } catch (e) {}
+      if (body == null) body = (DEF_YTDESC[a] || DEF_YTDESC.acc1);
+      var f = ((body.split('\n')[0]) || '').trim();
+      if (!(/^https?:\/\//.test(f) || f === PLACEHOLDER_URL || /短縮URL/.test(f))) {
+        body = PLACEHOLDER_URL + '\n\n' + body;
+      }
+      return body;
+    };
+  } catch (e) {}
+
   // ---- アバター(実アカウントのアイコンを公開APIで取得) ----
   var avatarFor = null, avatarUrl = null, displayNameVal = null;
   function setAvatar(url) {

@@ -252,10 +252,9 @@
     $('draftYtTagsInput').value = tags;
     buildModalYtTitle_();
     $('draftYtUrl').value = saved.ytUrl !== undefined ? saved.ytUrl : (meta.youtubeUrl || '');
-    var ytDescKey = 'yt_desc__' + (meta.account || 'acc1');
-    var ytDescVal = saved.ytDesc !== undefined ? saved.ytDesc : '';
-    if (!ytDescVal) { try { ytDescVal = localStorage.getItem(ytDescKey) || ''; } catch (e) {} }
-    if (!ytDescVal) { var ytDescEl = $('ytDesc'); if (ytDescEl) ytDescVal = ytDescEl.value || ''; }
+    var ytDescVal = (saved.ytDesc !== undefined && saved.ytDesc !== '') ? saved.ytDesc : '';
+    if (!ytDescVal && window.__go5YtDescForAccount) { ytDescVal = window.__go5YtDescForAccount(meta.account || 'acc1'); }
+    if (!ytDescVal) { try { ytDescVal = localStorage.getItem('yt_desc__' + (meta.account || 'acc1')) || ''; } catch (e) {} }
     $('draftYtDescText').value = ytDescVal;
     m.style.display = 'flex';
   }
@@ -293,7 +292,6 @@
           '</div>' +
           '<div style="' + fL + '">タグ(半角スペース区切り)</div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
-          '<div style="font-size:.72rem;color:var(--sub);line-height:1.5;margin-top:6px;margin-bottom:2px;">題名=「動画作成」タブ④コメント+タグ。コメント・タグを変えると自動更新されます。タグは3〜5個・#Shorts+ジャンル語+作品固有が目安。(表示されるのは上位3個のみ・60個超で全無視=公式仕様)</div>' +
           '<div style="' + fL + '">🖥 YouTube説明欄(コピーして概要欄に貼り付け)</div>' +
           '<div style="display:flex;gap:7px;align-items:flex-start;">' +
             '<div style="flex:1;min-width:0;overflow:hidden;">' +
