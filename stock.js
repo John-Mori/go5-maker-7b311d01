@@ -295,7 +295,7 @@
           '<div style="' + fL + '">🖥 YouTube説明欄(コピーして概要欄に貼り付け)</div>' +
           '<div style="display:flex;gap:7px;align-items:flex-start;">' +
             '<div style="flex:1;min-width:0;overflow:hidden;">' +
-              '<textarea id="draftYtDescText" rows="7" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
+              '<textarea id="draftYtDescText" rows="12" style="width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.82rem;line-height:1.5;resize:vertical;"></textarea>' +
             '</div>' +
             '<button type="button" id="draftCopyYtDesc" style="' + cpS + '">コピー</button>' +
           '</div>' +
