@@ -133,6 +133,7 @@
 
   let fgImg = null;               // 前景画像
   let fgFile = null;              // 実際に動画生成へ使った元ファイル(投稿履歴の使用画像を候補画像と分離して記録)
+  const K_PHOTO_CACHE = 'movie_photo_cache'; // リロード後の前景画像復元用キャッシュ
   let fontReady = false;
   let lastBlob = null, lastName = "video.mp4";
 
@@ -446,11 +447,36 @@
     els.photoName.textContent = anonPhotoLabel_(f);
     const url = URL.createObjectURL(f);
     const img = new Image();
-    img.onload = () => { fgImg = img; preview(); };
+    img.onload = () => { fgImg = img; cachePhotoToStorage_(img); preview(); };
     img.onerror = () => { setStatus("画像を読み込めませんでした(形式をご確認ください)"); };
     img.src = url;
   });
 
+  // 前景画像をlocalStorageへ圧縮保存(リロード後に復元するため)。失敗は無害。
+  function cachePhotoToStorage_(img) {
+    try {
+      const MAX = 1280;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      localStorage.setItem(K_PHOTO_CACHE, c.toDataURL('image/jpeg', 0.85));
+    } catch (e) {}
+  }
+  // リロード後: localStorageのキャッシュから前景画像を復元(テキストと同じく保持)。
+  function restorePhotoCache_() {
+    let dataUrl;
+    try { dataUrl = localStorage.getItem(K_PHOTO_CACHE); } catch (e) {}
+    if (!dataUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      fgImg = img;
+      // fgFileも復元: Blob変換(動画生成後のDrive/Bluesky添付用。失敗しても描画は動く)。
+      try { fetch(dataUrl).then(r => r.blob()).then(b => { fgFile = new File([b], 'restored.jpg', { type: 'image/jpeg' }); }).catch(() => {}); } catch (e) {}
+      preview();
+    };
+    img.src = dataUrl;
+  }
   els.previewBtn.addEventListener("click", preview);
   // テキストは入力確定(フォーカスアウト/Enter)で反映＝IMEを妨げない
   for (const el of [els.author, els.detail, els.top]) {
@@ -764,6 +790,7 @@
 
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
+  restorePhotoCache_(); // リロード後の前景画像復元
   ensureFont().then(preview);
   // フォント確定後にもう一度描画(初回がフォールバックフォントの計測で描かれてしまうのを防ぐ＝
   // プレビューと書き出しで measureText 由来の自動縮小・折返しがズレないようにする保険)。
