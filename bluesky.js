@@ -656,6 +656,7 @@
         discSetSelectedId_(r.value); // 選択は永続化(リセットしない・次回も同じものを使う)
         renderPreview();
         if (els.pcModal && !els.pcModal.hidden) recomposePcText_();
+        document.dispatchEvent(new CustomEvent('go5-disc-url-changed'));
       });
     });
     Array.prototype.forEach.call(wrap.querySelectorAll('.disc-url-del'), function (b) {
@@ -876,6 +877,32 @@
     return out;
   }
   try { window.__go5ComposePostText = composePostText; } catch (e) {} // 検証用フック(プレビューとの一致確認)
+  // ドラフトモーダル用: bskyText を渡すと X投稿テキスト(short link置換+disc URL追加済み)を返す
+  try {
+    window.__go5ComposeXTextForBskyText = function (bskyText) {
+      var caption = stripAutoBlocks_(bskyText || '');
+      var link = resolveAffLink();
+      var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
+      var out;
+      if (caption.indexOf(PH) >= 0) {
+        var short = link ? cachedWorkShortLink_() : '';
+        out = (window.BlueskyCore && window.BlueskyCore.fillWorkLinkPlaceholder)
+          ? window.BlueskyCore.fillWorkLinkPlaceholder(caption, short, link)
+          : caption;
+      } else {
+        out = (link && caption.indexOf(link) < 0) ? (caption + '\n\n' + PR_LINE_() + '\n' + link) : caption;
+      }
+      if (discountListOn_()) {
+        var dlink = cachedDiscountLink_();
+        if (dlink && out.indexOf(dlink) < 0) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink;
+      }
+      if (link && out.indexOf(link) >= 0) {
+        var shortX = cachedWorkShortLink_();
+        if (shortX) out = out.split(link).join(shortX);
+      }
+      return out;
+    };
+  } catch (e) {}
 
   // ---- アバター(実アカウントのアイコンを公開APIで取得) ----
   var avatarFor = null, avatarUrl = null, displayNameVal = null;
@@ -2333,6 +2360,8 @@
     document.addEventListener('account-changed', function () { _xOverrideShort = ''; refreshXTweet(); });
     // ★composePostText側で紹介用短縮リンクの取得が完了した時にX欄も追従させる(別IIFEスコープのため疎結合通知)。
     document.addEventListener('go5-work-short-ready', function () { refreshXTweet(); });
+    // セール案内URL変更時もX欄を再構成
+    document.addEventListener('go5-disc-url-changed', function () { _xOverrideShort = ''; refreshXTweet(); });
     refreshXTweet();
 
     // 📎 短縮URLを挿入：link-worker 経由で作品URLを短縮し、生リンクを差し替える
