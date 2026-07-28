@@ -11,22 +11,15 @@
   var META_KEY = 'go5_stock_meta';
   var PH_URL_ = '(X投稿リンクを入力後、ここに短縮URLが入る)';
 
-  // 説明欄の短縮URLスロット=readonlyのテキストボックス。空なら placeholder が枠内に薄く出る、
-  //   実URLが入ったら value として枠内に表示。★placeholderは value に含まれない=コピー時に生の案内文が
-  //   混ざらない(「字としての実態」を持たせない・Chami 2026-07-29/2026-07-28指示で枠内へ移動)。
+  // 説明欄の短縮URLは「タップで実際に遷移できるリンク」だけで表示(Chami 2026-07-28指示=短縮URLのみの
+  //   テキストボックスは不要・リンクだけでいい)。★短縮URLの実体はリンク要素の dataset.url に保持し、
+  //   保存とコピーはそこから読む(readonlyボックスは撤去)。空なら隠す。リンク先頭は textarea の左縦線に揃える。
   function setDescUrlSlot_(url) {
-    var el = $('draftYtDescUrlSlot');
     var lk = $('draftYtDescUrlLink');
     var ok = url && /^https?:\/\//.test(url);
-    if (el) {
-      if (ok) { el.value = url; el.dataset.url = url; }
-      else { el.value = ''; el.dataset.url = ''; }
-    }
-    // 短縮URLを「タップで実際に遷移できるリンク」として表示(Chami確認用・2026-07-29指示③)。
-    //   実URLが入ったら枠下にリンク表示、空なら隠す。
     if (lk) {
-      if (ok) { lk.href = url; lk.textContent = url; lk.style.display = 'inline-block'; }
-      else { lk.removeAttribute('href'); lk.textContent = ''; lk.style.display = 'none'; }
+      if (ok) { lk.href = url; lk.textContent = url; lk.dataset.url = url; lk.style.display = 'inline-block'; }
+      else { lk.removeAttribute('href'); lk.textContent = ''; lk.dataset.url = ''; lk.style.display = 'none'; }
     }
   }
   // 貼り付けたX投稿リンクを link-worker で短縮してスロットへ入れる(全滅時は生URL)。
@@ -256,7 +249,7 @@
 
   function saveDraftPost_() {
     if (!_modalMeta) return;
-    var slotEl = $('draftYtDescUrlSlot');
+    var slotEl = $('draftYtDescUrlLink');
     var data = {
       xText:   ($('draftXText')       || {}).value || '',
       ytTitle: ($('draftYtTitleText') || {}).value || '',
@@ -323,7 +316,9 @@
     m.id = 'draftPostModal';
     m.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.82);overflow-y:auto;-webkit-overflow-scrolling:touch;align-items:flex-start;justify-content:center;padding:16px 0;box-sizing:border-box;';
     var iS = 'width:100%;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
-    var cpS = 'flex:0 0 auto;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
+    // 貼り付けボタン=候補タブの投稿編集モーダル(refImgTwitter等)と同じ .ghost paste-btn の見た目に合わせる
+    //   (Chami指示2026-07-28「候補タブの投稿編集モーダルを参考にこの形に」)。文字幅・白字太字・入力と同じ高さ。
+    var cpS = 'flex:0 0 auto;width:auto;margin:0;padding:0 14px;font-size:.8rem;font-weight:700;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;white-space:nowrap;';
     var bS  = 'display:inline-block;width:auto;margin-top:7px;padding:7px 16px;font-size:.8rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
     // 入力欄＋ボタンを同じ行に置く(Chami指示①)。本体タブの .short-row と同じ実証済みレシピ=
     //   入力に flex:1;min-width:0(=flex-basis 0で残り幅を埋める・iOS Safariで潰れない)、ボタンは
@@ -332,7 +327,10 @@
     // ★入力には size="1" も付ける(v=457)。<input>は初期size=20文字ぶんの固有幅を持ち、
     //   iOS Safariは min-width:0 でもこの固有幅を残して列を割ることがある(実証済みの.short-rowは
     //   <div>なのでこの穴が無かった)。size=1で固有幅を潰し、flex:1で残り幅を埋める。
-    var rowWrap = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;';
+    // 入力＋ボタンを同じ行に(候補タブ pasteRow と同一)。align-items:stretch=ボタンが入力と同じ高さ。
+    //   ★flex-wrap は使わない=候補タブは折り返さず崩れていない。入力は size="1"+min-width:0+flex:1 で
+    //   0まで縮むのでボタンは必ず同列に残る(iOS Safari列割れの実証済み回避形)。
+    var rowWrap = 'display:flex;gap:6px;align-items:stretch;margin-top:6px;';
     var rowIn = 'flex:1;min-width:0;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
     // 文字幅ボタン(float用・flex無し。ラベル右へ float:right で置く時に使う)。
     var btnW = 'padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
@@ -370,7 +368,6 @@
             '<button type="button" id="draftCopyYtDesc" style="float:right;margin-left:8px;' + btnW + '">コピー</button>' +
             '<svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)' +
           '</div>' +
-          '<input type="text" id="draftYtDescUrlSlot" data-url="" readonly placeholder="' + PH_URL_ + '" style="' + iS + 'margin-bottom:6px;">' +
           '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkS + 'display:none;"></a>' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
@@ -398,7 +395,7 @@
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
     $('draftCopyYtDesc').addEventListener('click', function () {
       var body = ($('draftYtDescText') || {}).value || '';
-      var slot = $('draftYtDescUrlSlot');
+      var slot = $('draftYtDescUrlLink');
       var url = (slot && slot.dataset.url) || '';
       copyText_(url ? (url + '\n\n' + body) : body, this);
     });
