@@ -36,20 +36,6 @@ html[data-tab=”tabReserve”]{
   --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
   --accent:#b8860b; --accent2:#a86b1f; --ink:#4b3f2c; --sub:#8a7a5c;
 }
-/* ── アカウント連動グラデ背景：固定レイヤー（body::before）。
-   background-attachment:fixed は iOS Safari 不具合のため使わず position:fixed の擬似要素で代替。 ── */
-body::before{
-  content:””; position:fixed; inset:0; z-index:-1; pointer-events:none;
-  background:
-    radial-gradient(112% 60% at var(--glow-x,0%) var(--glow-y,0%), var(--app-glow,transparent), transparent 62%),
-    radial-gradient(90% 56% at var(--counter-x,0%) var(--counter-y,0%), var(--app-counter,transparent), transparent 70%),
-    linear-gradient(166deg, var(--app-bg-base,#0f1420) 0%, var(--app-bg-mid,#0d1220) 54%, var(--app-bg-deep,#0a0e1a) 100%);
-  transition:background .8s cubic-bezier(.4,0,.2,1);
-}
-body::after{
-  content:””; position:fixed; inset:0; z-index:-1; pointer-events:none;
-  background:radial-gradient(120% 90% at 50% 44%, transparent 40%, var(--vignette,rgba(6,6,18,.44)) 100%);
-}
 /* クリームタブ時は body に不透明な背景を乗せてグラデを隠す。 */
 html[data-tab=”tabRank”] body,
 html[data-tab=”tabAnalyze”] body,
@@ -61,6 +47,14 @@ html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}
 html,body{margin:0;padding:0;background:transparent;color:var(--ink);
   font-family:”Noto Sans JP”,system-ui,sans-serif;
   transition:color .8s cubic-bezier(.4,0,.2,1);}
+/* ── アカウント連動グラデ背景：html 要素に直接設定（ビューポート背景として扱われ iOS Safari でも確実）。
+   body::before z-index:-1 は html 背景の後ろに落ちるため使わない。 ── */
+html{
+  background:
+    radial-gradient(112% 60% at var(--glow-x,0%) var(--glow-y,0%), var(--app-glow,transparent), transparent 62%),
+    radial-gradient(90% 56% at var(--counter-x,0%) var(--counter-y,0%), var(--app-counter,transparent), transparent 70%),
+    linear-gradient(166deg, var(--app-bg-base,#0f1420) 0%, var(--app-bg-mid,#0d1220) 54%, var(--app-bg-deep,#0a0e1a) 100%);
+}
 /* 見出し・タブバーの文字/枠もゆっくり追従（押下フィードバックのtransform等は既存定義が優先） */
 header h1,.sub,.acct-bar-note,.acct-bar-label{transition:color .8s cubic-bezier(.4,0,.2,1);}
 header{padding:18px 16px 6px;text-align:center;}
