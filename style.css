@@ -29,18 +29,20 @@ html[data-account="acc2"]{           /* 宵桜艶帖：宵の花明かり */
   --field-bg:rgba(26,8,22,.40); --app-scrim:rgba(24,8,20,.28);
 }
 /* ── ランキング・分析・候補・予約タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
+/* html 要素に直接 background を設定することで、body が短い時も確実にクリームが全面に出る。 */
 html[data-tab=”tabRank”],
 html[data-tab=”tabAnalyze”],
 html[data-tab=”tabCand”],
 html[data-tab=”tabReserve”]{
   --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
   --accent:#b8860b; --accent2:#a86b1f; --ink:#4b3f2c; --sub:#8a7a5c;
+  background:#f5edd7;
 }
-/* クリームタブ時は body に不透明な背景を乗せてグラデを隠す。 */
+/* body にも同色を重ねてアカウントグラデが透けないよう二重で塞ぐ。 */
 html[data-tab=”tabRank”] body,
 html[data-tab=”tabAnalyze”] body,
 html[data-tab=”tabCand”] body,
-html[data-tab=”tabReserve”] body{background:var(--app-bg,#f5edd7);min-height:100vh;}
+html[data-tab=”tabReserve”] body{background:var(--app-bg,#f5edd7);}
 /* プレビュー列はアカウント色に染めない（制作物の色判断を狂わせない）。 */
 html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
