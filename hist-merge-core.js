@@ -61,8 +61,12 @@
     if (!row) return false;
     if (expected.youtubeUrl && String(row.youtubeUrl || '') !== String(expected.youtubeUrl)) return false;
     if (expected.workUrl) {
+      // 生の作品URL列(GAS 2026-07-29D以降)が一致すれば成功。cidを復元できない階層(FANZA動画等)は
+      // wantCidが空になり、旧来のcid照合だけだと保存できていても永遠に「確認できませんでした」になる。
+      var rawOk = String(row.workUrl || '') === String(expected.workUrl);
       var wantCid = workCidFromUrl(expected.workUrl);
-      if (!wantCid || String(row.cid || '') !== wantCid) return false;
+      var cidOk = !!wantCid && String(row.cid || '') === wantCid;
+      if (!rawOk && !cidOk) return false;
     }
     if (expected.workState && String(row.workState || '') !== String(expected.workState)) return false;
     return true;

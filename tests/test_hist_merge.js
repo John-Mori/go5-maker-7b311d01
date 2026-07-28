@@ -79,6 +79,17 @@ test('H-9: history再読込は同一videoIdかつ編集値の反映後だけ成�
   assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc2-1', cid: 'd_new', workState: '旧作' }], expected), false, '別行は成功扱いしない');
 });
 
+test('H-20: cidを復元できない作品URL(FANZA動画等)は、生の作品URL列の一致で保存確認が成功する', function () {
+  var vurl = 'https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=abc123movie/'; // videoaはcid抽出規則の対象外→wantCid空
+  assert.strictEqual(HM.workCidFromUrl(vurl), 'abc123movie', 'videoaもcid=は拾える(この例はcid有り)');
+  // 本当にcidを取れないケース＝cid=を持たないURL。生URL列の一致だけで成功しなければならない。
+  var nocid = 'https://video.dmm.co.jp/av/content/?id=someid'; // cid=無し→wantCid空
+  var expected = { videoId: 'acc1-9', workUrl: nocid, workState: '旧作' };
+  assert.strictEqual(HM.workCidFromUrl(nocid), '', 'このURLはcidを復元できない');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-9', cid: '', workState: '旧作' }], expected), false, '生URL列が空なら失敗');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-9', cid: '', workUrl: nocid, workState: '旧作' }], expected), true, '生URL列が一致すれば成功(cid不要)');
+});
+
 test('H-10: 履歴単位の使用画像があれば候補画像を混ぜない', function () {
   var got = HM.historyUsedImages(['used-1'], ['candidate-1', 'candidate-2']);
   assert.deepStrictEqual(got, ['used-1']);
