@@ -231,6 +231,21 @@
     var rest = shortUrl.slice(base.length + 1).split(/[/?#]/)[0];
     return /^[0-9A-Za-z]+$/.test(rest) ? rest : '';
   }
+  // 投稿リンクがX(旧Twitter)か判定。(BlueskyのpostUri=at://は常にBsky確定。
+  //   生URLがx.com/twitter.comならX。短縮URLしか無い場合は判別不能=既定Bsky)
+  function isXLink_(href, it) {
+    if (it && it.postUri) return false;
+    var XRE = /(?:x\.com|twitter\.com)\//i;
+    if (XRE.test(String(href || ''))) return true;
+    if (it && (XRE.test(String(it.postUrl || '')) || XRE.test(String(it.shareUrl || '')))) return true;
+    return false;
+  }
+  // 投稿履歴の「Bsky↗」リンク。Xリンクなら「X↗」表示＋白字黒枠(.vlink-x)へ切替。
+  function postLinkHtml_(href, it) {
+    if (!href) return '';
+    var x = isXLink_(href, it);
+    return '<a class="vlink ' + (x ? 'vlink-x' : 'vlink-bsky') + '" href="' + esc(href) + '" target="_blank" rel="noopener">' + (x ? 'X↗' : 'Bsky↗') + '</a>';
+  }
   // セール会場リンク(導線3・共通コード)のクリック統計。(2026-07-14 Chami依頼: 累計/今日/昨日/週を投稿履歴に表示)
   var SALE_CODES = ['JrziR']; // campaign=gain(utm)の歴史的コード(フォールバック)。af_id差/再生成でコードが変わり得るため下で実リンクからも導出。
   // 実際に生成されたセール会場短縮リンク(bsky_discount_list_link_r2)から現行コードを導出し、ハードコードと合算(重複除去)。
@@ -1090,7 +1105,7 @@
           (wcode ? '<span title="作品リンククリック数(投稿→FANZA・導線2)"><img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="作品クリック"> ' + (wclicks != null ? num(wclicks) : '…') + '</span>' : '') +
           '<span class="vrow-links">' + // 🛠️編集/Bsky↗/YouTube↗/作品↗ を1グループに＝編集もBskyと同じ段に表示・作品↗だけ改行される事故を防ぐ
             '<button class="vedit-btn" type="button" data-k="' + esc(k) + '">🛠️編集</button>' +
-            (bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
+            postLinkHtml_(bskyHref, it) +
             (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
             (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
           '</span>' +
@@ -3302,6 +3317,7 @@
           peakC: pk.cRate != null ? pk.cRate : null, peakCWin: pk.cWin || '',
           ts: it.ts || (publishedCache[x.vid] || 0),
           bskyHref: it.shareUrl || it.shortUrl || it.postUrl || '',
+          bskyIsX: isXLink_(it.shareUrl || it.shortUrl || it.postUrl || '', it),
           workUrl: it.workUrl || '', workState: it.workState || '旧作', cats: cats
         };
       });
@@ -3373,7 +3389,7 @@
               (r.cats ? '<div class="vrow-tags">' + r.cats + '</div>' : '') +
               '<div class="vmetrics">' +
                 mPeak + mBucket + mViews + mClicks +
-                (r.bskyHref ? '<a class="vlink vlink-bsky" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">Bsky↗</a>' : '') +
+                (r.bskyHref ? '<a class="vlink ' + (r.bskyIsX ? 'vlink-x' : 'vlink-bsky') + '" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">' + (r.bskyIsX ? 'X↗' : 'Bsky↗') + '</a>' : '') +
                 (r.yt ? '<a class="vlink vlink-yt" href="' + esc(r.yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
                 (r.workUrl ? '<a class="vlink vlink-work" href="' + esc(r.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
               '</div>' +

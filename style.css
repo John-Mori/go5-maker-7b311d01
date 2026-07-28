@@ -401,6 +401,8 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 /* Bsky↗/YouTube↗/作品↗ を1グループに＝作品↗だけが改行される事故を防ぐ（狭いときは3つまとめて次行へ） */
 .vmetrics .vrow-links{display:inline-flex;align-items:baseline;gap:8px;flex-wrap:nowrap;flex-shrink:0;}
 .vmetrics .vlink-bsky{color:#4dabf7;}      /* Bluesky イメージの水色 */
+/* X↗＝白字に黒枠（Xのブランド＝白抜きに合わせ、明るい面でも視認できるよう縁取り） */
+.vmetrics .vlink-x{color:#fff;font-weight:700;text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000,0 0 2px #000;}
 .vmetrics .vlink-yt{color:#ff4d4d;}        /* YouTube イメージの赤 */
 .vmetrics .vlink-work{color:#ff79b0;}      /* 作品＝ピンク */
 /* 曜日の色：土=青 / 日祝=赤（曜日の括弧だけ着色） */
