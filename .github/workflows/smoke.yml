@@ -41,6 +41,10 @@ jobs:
       - name: iOS Safari レイアウト検査
         run: node scripts/check_ui_ios.mjs
 
+      # シート由来行の編集値がリロードで消える型(作品URL/投稿先等)を、繋ぎの欠落として出す前に止める門。
+      - name: シート保存連鎖の検査
+        run: node scripts/check_sheet_chain.mjs
+
   smoke:
     runs-on: ubuntu-latest
     needs: secret-guard
