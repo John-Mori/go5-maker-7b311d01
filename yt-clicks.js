@@ -157,10 +157,28 @@
   //   重複排除・整形は hist-merge-core.js の純粋関数(HistMerge.mergeSheetExtras)へ切り出しテスト済み。
   var _sheetExtraCache = {}; // acct -> {at, items:[表示専用アイテム(_fromSheet:true)]}
   var SHEET_EXTRA_TTL_MS = 60000;
+  // ★シート由来行(_fromSheet)の編集を「保持」する表示専用オーバーレイ。acct -> { videoId: patch }。
+  //   真因(Chami「一瞬反映→消失」2026-07-28 再発): 保存直後の refresh() が mergeSheetExtras_→
+  //   TTL切れなら即GAS再取得し、upsertがまだ届く前の“古いシート値”で _sheetExtraCache を上書き=編集が消える。
+  //   楽観キャッシュの上書き(v=464)だけでは再取得に勝てないため、videoId別のpatchを毎レンダーで上塗りして
+  //   「再取得しても編集が復活しない」を保証する(display専用=localStorageへは一切書かない=INC-112防壁維持)。
+  //   同じ行を編集し直すと上書き。GAS反映が遅れても消えず、届けば同値なので無害。
+  var _pendingSheetEdits = {};
   function displayItems_() {
     var local = allItems();
     var c = _sheetExtraCache[acct()];
-    return (c && c.items && c.items.length) ? local.concat(c.items) : local;
+    var items = (c && c.items && c.items.length) ? local.concat(c.items) : local;
+    var pend = _pendingSheetEdits[acct()];
+    if (!pend) return items;
+    return items.map(function (it) {
+      if (!it || !it._fromSheet || !it.videoId) return it;
+      var patch = pend[String(it.videoId)];
+      if (!patch) return it;
+      var copy = {};
+      for (var p in it) if (Object.prototype.hasOwnProperty.call(it, p)) copy[p] = it[p];
+      for (var q in patch) if (Object.prototype.hasOwnProperty.call(patch, q)) copy[q] = patch[q];
+      return copy;
+    });
   }
   // GASのhistoryをマージ用に取得。未設定/失敗時は前回キャッシュ(無ければ空)を返すだけ＝ローカル表示は無傷。
   function fetchSheetExtra_(cb) {
@@ -850,17 +868,14 @@
     // ★Chami指示2026-07-28: 保存を押したら編集モーダルは即閉じ、UIは楽観更新。GAS反映は裏でやる。
     //   旧実装はGASへupsert→履歴再読込での確認が通るまでモーダルを閉じず(最大3回リトライ)、
     //   確認が遅い/取れないと「保存しても反映されない」ように見えていた(Chami報告2026-07-28)。
-    //   シート由来行はlocalStorageへ書き戻さない(INC-112防壁)。表示専用の_sheetExtraCacheだけ即時反映する。
-    (function optimisticApply_() {
-      var c = _sheetExtraCache[curAcct];
-      if (!c || !c.items) return;
-      for (var i = 0; i < c.items.length; i++) {
-        if (itemKey(c.items[i]) === k) {
-          var cached = c.items[i];
-          for (var q in edited) if (Object.prototype.hasOwnProperty.call(edited, q)) cached[q] = edited[q];
-          break;
-        }
-      }
+    //   シート由来行はlocalStorageへ書き戻さない(INC-112防壁)。表示専用のpatchをvideoId別に登録し、
+    //   以後どのタイミングの再取得でもdisplayItems_が上塗りする=「一瞬反映→消失」の再発を封じる。
+    (function registerPendingEdit_() {
+      var patch = {};
+      ['ytUrl', 'workUrl', 'workState', 'shortUrl', 'shareUrl', 'postUrl', 'postUri', 'workShortUrl']
+        .forEach(function (f) { patch[f] = edited[f] || ''; });
+      ATTR_DEFS.forEach(function (a) { patch[a.key] = !!edited[a.key]; });
+      (_pendingSheetEdits[curAcct] = _pendingSheetEdits[curAcct] || {})[String(edited.videoId)] = patch;
     })();
     closeModal_();
     refresh();
