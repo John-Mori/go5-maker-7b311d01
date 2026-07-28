@@ -301,6 +301,14 @@
     if (saved.xShortUrl) slotUrl = saved.xShortUrl;
     setDescUrlSlot_(slotUrl);
     $('draftXPostUrl').value = saved.xPostUrl || '';
+    // 修正前(x.comがALLOWED_HOSTS未登録の頃)に発行された非ワーカー短縮=da.gd等は、
+    //   元のX投稿リンクが残っていれば開いた時にチャンネル別ドメイン(5mgl/yoz2)へ格上げする。
+    //   自前ワーカードメインの短縮はそのまま(二重短縮しない)。判定は Go5Short.ourBase。
+    try {
+      var og = window.Go5Short;
+      var isOurs = (og && og.ourBase) ? !!og.ourBase(slotUrl) : /\/\/(?:5mgl\.com|yoz2\.com)\//.test(slotUrl);
+      if (slotUrl && !isOurs && saved.xPostUrl) { applyXPostUrl_(saved.xPostUrl, null); }
+    } catch (e) {}
     m.style.display = 'flex';
   }
 
