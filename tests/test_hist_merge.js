@@ -123,6 +123,16 @@ test('H-18: シート由来行に作品短縮URL(導線2=ピンク矢印)を復�
   assert.strictEqual(HM._toDisplayItem({ videoId: 'v5' }).workShortUrl, '');
 });
 
+test('H-19: 作品URLはシートの生URLを優先し、cid復元できない階層でもリロードで消えない', function () {
+  // FANZA動画等の cid は workUrlFromCid で復元できず空になる。シートの生 workUrl があれば必ずそちらを使う。
+  var itVideo = HM._toDisplayItem({ videoId: 'v6', cid: 'ssis00123', workUrl: 'https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ssis00123/' });
+  assert.strictEqual(itVideo.workUrl, 'https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ssis00123/');
+  // 生URLが無い旧行は従来どおり cid から復元(同人)。
+  assert.strictEqual(HM._toDisplayItem({ videoId: 'v7', cid: 'd_98765' }).workUrl, 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_98765/');
+  // 生URLも復元可能cidも無ければ空。
+  assert.strictEqual(HM._toDisplayItem({ videoId: 'v8', cid: 'ssis00999' }).workUrl, '');
+});
+
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);

@@ -83,7 +83,8 @@
       shortUrl: String((x && x.shortUrl) || ''),
       shareUrl: String((x && x.shareUrl) || ''),
       cid: cid,
-      workUrl: workUrlFromCid(cid),
+      // 作品URLはシートが持つ生URLを優先。無い旧行だけ cid から復元(FANZA動画等の cid は復元不可＝空になるため)。
+      workUrl: ((x && x.workUrl) ? String(x.workUrl) : '') || workUrlFromCid(cid),
       workState: String((x && x.workState) || ''),
       ytUrl: String((x && x.youtubeUrl) || ''),
       workShortUrl: String((x && x.workShortUrl) || ''), // 導線2(作品クリック=ピンク矢印)の計測URL
