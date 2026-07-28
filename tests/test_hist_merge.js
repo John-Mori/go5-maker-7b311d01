@@ -117,6 +117,12 @@ test('H-17: 定価のみ(割引なし)の当時価格も復元する', function 
   assert.deepStrictEqual(it.fanzaSnap, { price: 880, listPrice: null, discountPct: 0, at: '' });
 });
 
+test('H-18: シート由来行に作品短縮URL(導線2=ピンク矢印)を復元する', function () {
+  var it = HM._toDisplayItem({ videoId: 'v4', workShortUrl: 'https://5mgl.com/AbcdE' });
+  assert.strictEqual(it.workShortUrl, 'https://5mgl.com/AbcdE');
+  assert.strictEqual(HM._toDisplayItem({ videoId: 'v5' }).workShortUrl, '');
+});
+
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);

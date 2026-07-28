@@ -3236,6 +3236,7 @@
     { key: 'b120', min: 120, label: '2時間' },
     { key: 'b360', min: 360, label: '6時間' },
     { key: 'b1440', min: 1440, label: '24時間' },
+    { key: 'b2880', min: 2880, label: '48時間' },
     { key: 'b4320', min: 4320, label: '72時間' }
   ];
   var snapCache = (function () { try { return JSON.parse(localStorage.getItem('view_snaps') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,ageMin},...}

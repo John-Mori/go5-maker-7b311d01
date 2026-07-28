@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-29B(history: 元値list_price/割引後price/割引率pct/FANZA取得日時 を返す＝シート由来行にも投稿当時の価格を復元表示できるように。Chami指示2026-07-28)';
+var GAS_VERSION = '2026-07-29C(history: 作品短縮URL も返す＝シート由来行にも導線2(作品クリック=ピンク矢印)の計測を復元表示できるように。Chami指示2026-07-28)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -535,6 +535,7 @@ function historyItems_(channel, limit) {
   var yCol = map['YouTube動画URL']; // 端末のverify_yt消失時にここから復元できるよう返す
   var pidCol = map['post_id'], shareCol = map['共有URL'], wsCol = map['作品状態'], cidCol = map['作品cid']; // 端末の投稿履歴復元用
   var lpCol = map['元値list_price'], prCol = map['割引後price'], pctCol = map['割引率pct'], fatCol = map['FANZA取得日時']; // 投稿当時(スナップ)の価格＝シート由来行にも復元して表示する
+  var wsuCol = map['作品短縮URL']; // 導線2(作品クリック=ピンク矢印)の計測URL＝シート由来行にも復元して表示する
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
   var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   var items = [];
@@ -556,7 +557,8 @@ function historyItems_(channel, limit) {
       fanzaListPrice: lpCol ? row[lpCol - 1] : '',
       fanzaPrice: prCol ? row[prCol - 1] : '',
       fanzaDiscountPct: pctCol ? row[pctCol - 1] : '',
-      fanzaFetchedAt: fatCol ? String(row[fatCol - 1] || '') : ''
+      fanzaFetchedAt: fatCol ? String(row[fatCol - 1] || '') : '',
+      workShortUrl: wsuCol ? String(row[wsuCol - 1] || '') : '' // 導線2(作品クリック)の計測URL
     });
   }
   items.reverse(); // 新しい順
