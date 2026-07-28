@@ -16,11 +16,17 @@
   //   混ざらない(「字としての実態」を持たせない・Chami 2026-07-29/2026-07-28指示で枠内へ移動)。
   function setDescUrlSlot_(url) {
     var el = $('draftYtDescUrlSlot');
-    if (!el) return;
-    if (url && /^https?:\/\//.test(url)) {
-      el.value = url; el.dataset.url = url;
-    } else {
-      el.value = ''; el.dataset.url = '';
+    var lk = $('draftYtDescUrlLink');
+    var ok = url && /^https?:\/\//.test(url);
+    if (el) {
+      if (ok) { el.value = url; el.dataset.url = url; }
+      else { el.value = ''; el.dataset.url = ''; }
+    }
+    // 短縮URLを「タップで実際に遷移できるリンク」として表示(Chami確認用・2026-07-29指示③)。
+    //   実URLが入ったら枠下にリンク表示、空なら隠す。
+    if (lk) {
+      if (ok) { lk.href = url; lk.textContent = url; lk.style.display = 'inline-block'; }
+      else { lk.removeAttribute('href'); lk.textContent = ''; lk.style.display = 'none'; }
     }
   }
   // 貼り付けたX投稿リンクを link-worker で短縮してスロットへ入れる(全滅時は生URL)。
@@ -330,6 +336,8 @@
     var rowIn = 'flex:1;min-width:0;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
     // 文字幅ボタン(float用・flex無し。ラベル右へ float:right で置く時に使う)。
     var btnW = 'padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
+    // 短縮URLの確認用リンク(タップで実際に遷移・Chami確認用)。アクセント色＋下線＋折り返し。
+    var lnkS = 'display:inline-block;margin:0 0 8px;font-size:.86rem;color:var(--accent);text-decoration:underline;word-break:break-all;';
     var sH  = 'font-size:.72rem;font-weight:600;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;';
     var fL  = 'font-size:.76rem;color:var(--sub);margin-bottom:4px;margin-top:12px;';
     var ctaS = 'background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);';
@@ -363,6 +371,7 @@
             '<svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)' +
           '</div>' +
           '<input type="text" id="draftYtDescUrlSlot" data-url="" readonly placeholder="' + PH_URL_ + '" style="' + iS + 'margin-bottom:6px;">' +
+          '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkS + 'display:none;"></a>' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
           '<div style="' + rowWrap + '">' +
