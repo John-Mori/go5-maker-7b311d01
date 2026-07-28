@@ -12,6 +12,15 @@
 //   ④hist-merge-core の表示変換が値を復元する——を静的に照合する。1つでも欠けたら fail。
 //   新しい編集項目を足したら、この CHAIN にも足すこと(足さないと守られない)。
 //
+// 【④の穴を塞ぐ ⑤=保存完成ゲートの往復アサート(2026-07-29 改善提案部門トトリ指摘)】
+//   ①〜④は「繋ぎが在るか」の静的照合だが、実際の再発は「保存の確認(検証)の段そのものが失敗する」
+//   ——保存はできているのに historyHasEdit(=保存完成の判定ゲート)が cid を復元できない階層で
+//   永遠に false を返し「反映を確認できませんでした」と出て、Chami には保存が効いていないように見えた
+//   (commit 4b965ca の自白)。静的に繋ぎが在っても、このゲートが誤って弾けば症状は再発する。
+//   そこで作品URLの各 cid 階層(同人 d_* / Books 数字 / FANZA動画 cid= / FANZA動画 cid無し ?id=)について
+//   「保存→再読込相当の行 → 完成ゲート historyHasEdit が true を返し、かつ表示 workUrl が入力と一致するか」
+//   を実際に走らせて往復で確かめる。1階層でもゲートが弾いたら fail=「直った」を出す前にここで止まる。
+//
 // 実行: node scripts/check_sheet_chain.mjs   (CI: smoke.yml の secret-guard ジョブ)
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -74,9 +83,39 @@ for (const f of CHAIN) {
     fails.push(`${f.name}: hist-merge-core の表示変換が '${f.histKey}' を復元しない(保存できても再表示で消える)`);
 }
 
+// ⑤ 保存完成ゲートの往復アサート。作品URLの各 cid 階層で「保存→再読込相当→完成ゲート＋表示」を実行。
+//   reloaded = GAS が upsert 後の action=history で返す1行を模す(生の 作品URL 列＋GAS が持つ cid)。
+//   FANZA動画の cid 無し(?id=)は wantCid が空になり、旧来の cid 照合だけのゲートだと保存できても永遠に
+//   false=これが 07-29 に5回再発した本体。生 workUrl 列の一致で true にならなければここで fail。
+const ROUNDTRIP = [
+  { name: '同人 d_*',        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_rt001/' },
+  { name: 'Books 数字',      url: 'https://book.dmm.com/product/778899/' },
+  { name: 'FANZA動画 cid=',  url: 'https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=ssis00777/' },
+  { name: 'FANZA動画 cid無し', url: 'https://video.dmm.co.jp/av/content/?id=rtnocid' } // ← 4b965ca の再発本体
+];
+for (const r of ROUNDTRIP) {
+  const vid = 'rtprobe';
+  // 保存→再読込相当: GAS が返す行 = 生の作品URL列 + GAS が保持する cid(復元不能階層では空)。
+  const reloaded = { videoId: vid, workUrl: r.url, cid: HM.workCidFromUrl(r.url), workState: '旧作' };
+  const expected = { videoId: vid, workUrl: r.url, workState: '旧作' };
+  // (a) 保存完成ゲートが true を返すか(=「反映を確認できませんでした」を出さないか)
+  let gateOk = false;
+  try { gateOk = !!(HM.historyHasEdit && HM.historyHasEdit([reloaded], expected)); } catch (e) {
+    fails.push(`往復[${r.name}]: historyHasEdit が例外 (${e.message})`);
+  }
+  if (!gateOk)
+    fails.push(`往復[${r.name}]: 保存完成ゲート historyHasEdit が false(保存できても「反映を確認できませんでした」と出て消えたように見える=07-29の再発型)`);
+  // (b) リロード後の表示 workUrl が入力と一致するか
+  let disp = null;
+  try { disp = HM._toDisplayItem(reloaded); } catch (e) { fails.push(`往復[${r.name}]: toDisplayItem_ が例外 (${e.message})`); continue; }
+  if (!disp || disp.workUrl !== r.url)
+    fails.push(`往復[${r.name}]: 再読込後の表示 workUrl が入力と不一致(期待 ${r.url} / 実際 ${disp && disp.workUrl})`);
+}
+
 if (fails.length) {
   console.error('シート由来行の保存連鎖に欠落があります(編集→保存→リロードで消える型の再発):');
   for (const m of fails) console.error('  ✗ ' + m);
   process.exit(1);
 }
 console.log(`OK: シート保存連鎖 ${CHAIN.length} 項目すべて フロント表示⇄GAS列⇄putIf⇄historyItems_⇄保存確認 が繋がっている`);
+console.log(`OK: 保存完成ゲートの往復アサート ${ROUNDTRIP.length} 階層すべて 保存→再読込→historyHasEdit(true)＋表示一致 を通過`);
