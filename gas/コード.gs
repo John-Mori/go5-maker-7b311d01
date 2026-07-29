@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-29E(投稿先列を追加＝短縮URLだけの行でも編集モーダルのX/Bsky手動指定をシートに保存し、リロード後もX↗/Bsky↗表示を保持。Chami「原則X投稿」2026-07-29)';
+var GAS_VERSION = '2026-07-29G(名前付きセールURLの短縮コードをaction=sale_regでアカウント別に登録し、snapshotStatsが各コードを個別スナップ=投稿履歴のセール会場を名前別に今日/昨日/週まで出せるようにした。Fの競合フレーム3列も同梱で継続。Chami「夏セールのURLも貼ってるのに表示がない」2026-07-29)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -480,6 +480,7 @@ function doGet(e) {
   if (p.action === 'comp_discovery_now') { try { return jsonOut_(runCompetitorDiscovery()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }
   if (p.action === 'comp_add_seed' && !p.callback) { try { return jsonOut_(compAddSeed_(p.url, p.name, p.bluesky, p.x, p.note)); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // シード登録(callback時は下のJSONP分岐へ)
   if (p.action === 'comp_ensure_tabs') { try { return jsonOut_(compEnsureTabs_()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // 全タブ確保(手動記録タブ含む)
+  if (p.action === 'comp_frame_pending') { try { return jsonOut_(compFramePending_(p.limit)); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // 代表フレーム未取得のShort一覧(PC側スクレイパが引く)
   // デプロイ後の自動後処理: トリガー再設定＋ヘッダ移行を一括冪等実行。(scripts/deploy_gas.mjs が反映確認後に呼ぶ)
   //   secret はスクリプトプロパティ ADMIN_SECRET(未設定なら固定のソフト鍵にフォールバック)と照合。
   //   ※ソフト鍵は deploy_gas.mjs の SOFT_ADMIN_SECRET と一致させる。(短縮URL用 shortSecret_ とは独立)
@@ -505,6 +506,7 @@ function doGet(e) {
       else if (p.action === 'comp_digest') out = compDigest_();                          // 競合: 週次サマリ(分析タブ表示用)
       else if (p.action === 'comp_titles') out = compTitles_(p.days, p.top);             // 競合: 題名コーパス(分析タブ表示用)
       else if (p.action === 'comp_add_seed') out = compAddSeed_(p.url, p.name, p.bluesky, p.x, p.note); // 競合: フロント登録→GASへ同期
+      else if (p.action === 'sale_reg') out = saleReg_(p.acc, p.sale);                 // 名前付きセールURLの短縮コードを登録(snapshotStatsが各コードを日次スナップ)
       else if (p.action === 'snapshot_now') { snapshotStats(); out = { ok: true, snapped: true }; } // 手動で即スナップ
       else out = { ok: true, shortUrl: p.postUri ? lookupShortByUri_(ch, p.postUri) : '' }; // 既定＝action=short
     } catch (err) { out = { ok: false, error: String(err) }; }
@@ -834,6 +836,8 @@ function doPost(e) {
     if (body.op === 'move_row') return jsonOut_(moveRow_(body.from || '', body.to || '', body.videoId || '', body.postUri || '', body.short || ''));
     // 端末間 設定同期：非秘密設定の保存。(クラウドへ push)
     if (body.op === 'settings_push') return settingsPush_(body.blob || '', body.updatedAt || '', body.device || '');
+    // 競合の代表フレーム結果を書き戻す(PC側スクレイパから。焼き込み文字/コマ要約を既存行へ追記のみ)
+    if (body.op === 'comp_frame_write') return jsonOut_(compFrameWriteback_(body.items || []));
     // テストモード：シートには一切書かない。(Bluesky実投稿はフロント側で実施)
     if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
     // ウィザード経路はyoutube_url必須。他経路(無人予約/リビルド/矯正等)は素通り。(★writeRecord_中に置くな=裁定C)
@@ -1284,6 +1288,18 @@ function ytViews_(ids) {
   }
   return out;
 }
+// 名前付きセールURLの短縮コードをアカウント別に保存する。(フロント action=sale_reg から)
+//   コードは [0-9A-Za-z] のみ許可(短縮コードの形)。最大30件。snapshotStats がこれを読んで各コードを日次スナップ。
+function saleReg_(acc, saleJson) {
+  acc = (acc === 'acc2') ? 'acc2' : 'acc1';
+  var arr = [];
+  try { arr = JSON.parse(saleJson || '[]'); } catch (e) { return { ok: false, error: 'bad_json' }; }
+  if (!Array.isArray(arr)) return { ok: false, error: 'not_array' };
+  var codes = [];
+  arr.forEach(function (c) { c = String(c || ''); if (/^[0-9A-Za-z]+$/.test(c) && codes.indexOf(c) < 0 && codes.length < 30) codes.push(c); });
+  PropertiesService.getScriptProperties().setProperty('SALE_CODES_' + acc, JSON.stringify(codes));
+  return { ok: true, acc: acc, count: codes.length };
+}
 function snapshotStats() {
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
   var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
@@ -1315,6 +1331,18 @@ function snapshotStats() {
   // セール会場リンク(導線3・共通コードJrziR=campaign利用のutm先)も日次記録する。(2026-07-14 Chami依頼)
   //   vid='SALE'の擬似行として保存→computeDeltas_が自動で今日/昨日/週を算出し、フロントの🏮表示が使う。
   recs.push({ channel: '-', post_id: 'SALE', vid: 'SALE', code: 'JrziR' });
+  // 名前付きセールURL(夏セール等)も各コードを個別スナップ→フロントで名前別に今日/昨日/週を出す。(Chami依頼2026-07-29)
+  //   コードはフロントが action=sale_reg で登録(アカウント別プロパティ)。vid='SALE:'+code で個別行にする。
+  var saleSeen = { JrziR: 1 };
+  ['acc1', 'acc2'].forEach(function (a) {
+    var arr = []; try { arr = JSON.parse(prop_('SALE_CODES_' + a) || '[]'); } catch (e) { arr = []; }
+    if (!Array.isArray(arr)) return;
+    arr.forEach(function (c) {
+      c = String(c || ''); if (!/^[0-9A-Za-z]+$/.test(c) || saleSeen[c]) return;
+      saleSeen[c] = 1;
+      recs.push({ channel: '-', post_id: 'SALE:' + c, vid: 'SALE:' + c, code: c });
+    });
+  });
   var vids = recs.map(function (r) { return r.vid; });
   var views = ytViews_(vids);
   var clickByCode = {};

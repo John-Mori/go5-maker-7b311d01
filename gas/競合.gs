@@ -17,7 +17,10 @@ var COMP_CH_SHEET   = '競合_チャンネル';
 // Bluesky/X/訴求メモ = Chamiが競合と一緒に共有する横断情報(どこで・どう訴求しているか)。分析部の外部リンク経路分析の材料。
 var COMP_CH_HEADERS = ['channel_id', 'チャンネル名', 'URL', '登録者数', '総再生数', '動画数', '状態', '発見経路', 'uploads', '追加日', '最終更新', 'Bluesky', 'X', '訴求メモ'];
 var COMP_VID_SHEET   = '競合_動画';
-var COMP_VID_HEADERS = ['video_id', 'channel_id', 'タイトル', '公開日時', '長さ秒', 'isShort', '初回取得日'];
+// 焼き込み文字/コマ要約/フレーム取得日 = PC側の代表フレーム取得(4.5秒付近1枚)＋Gemini vision の格納先(2026-07-29 追加)。
+//   ★この3列だけ「公開メタデータのみ/映像取得なし」の原則の例外=Chami指示(分析部アーモンドアイ経由 msg 1531767096482988065)。
+//   取得は全編DLせず --download-sections で4.5秒付近の一瞬のみ。IDはシート内のみ(このコードに競合IDを書かない)。
+var COMP_VID_HEADERS = ['video_id', 'channel_id', 'タイトル', '公開日時', '長さ秒', 'isShort', '初回取得日', '焼き込み文字', 'コマ要約', 'フレーム取得日'];
 var COMP_DAILY_SHEET   = '競合_日次';
 var COMP_DAILY_HEADERS = ['日付', 'video_id', 'channel_id', '再生数', '高評価', 'コメント数'];
 var COMP_WEEKLY_SHEET   = '競合_週次';
@@ -241,7 +244,9 @@ function compUpsertVideos_(records) {
     if (!v.video_id || seen[v.video_id]) return;
     seen[v.video_id] = true;
     var isShort = (v.durationSec != null && v.durationSec > 0 && v.durationSec <= COMP_SHORT_MAX_SEC) ? 'yes' : 'no';
-    rows.push([v.video_id, v.channel_id, v.title || '', v.publishedAt || '', v.durationSec || 0, isShort, today]);
+    var row = [v.video_id, v.channel_id, v.title || '', v.publishedAt || '', v.durationSec || 0, isShort, today];
+    while (row.length < COMP_VID_HEADERS.length) row.push('');  // 焼き込み文字/コマ要約/フレーム取得日は後からPC側が埋める
+    rows.push(row);
   });
   if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, COMP_VID_HEADERS.length).setValues(rows);
   return seen;
@@ -257,16 +262,90 @@ function compMigrateChannelHeaders_() {
   return { ok: true, added: missing };
 }
 
+// ---- 競合_動画の見出しに不足列を追記(焼き込み文字/コマ要約/フレーム取得日 を後付け・冪等) ----
+function compMigrateVideoHeaders_() {
+  var sh = compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
+  var lastCol = Math.max(1, sh.getLastColumn());
+  var have = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (x) { return String(x); });
+  var missing = COMP_VID_HEADERS.filter(function (h) { return have.indexOf(h) < 0; });
+  if (missing.length) sh.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+  return { ok: true, added: missing };
+}
+
 // ---- 全タブを確保(手動記録タブ=競合_コミュニティ観察 を含む)。冪等・doGetから呼ぶ ----
 function compEnsureTabs_() {
   compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
   compMigrateChannelHeaders_();  // 既存タブへBluesky/X/訴求メモ列を後付け
   compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
+  compMigrateVideoHeaders_();    // 既存タブへ焼き込み文字/コマ要約/フレーム取得日 を後付け
   compSheet_(COMP_DAILY_SHEET, COMP_DAILY_HEADERS);
   compSheet_(COMP_WEEKLY_SHEET, COMP_WEEKLY_HEADERS);
   compSheet_(COMP_SEARCHLOG_SHEET, COMP_SEARCHLOG_HEADERS);
   compSheet_(COMP_COMMUNITY_SHEET, COMP_COMMUNITY_HEADERS);
   return { ok: true, tabs: [COMP_CH_SHEET, COMP_VID_SHEET, COMP_DAILY_SHEET, COMP_WEEKLY_SHEET, COMP_SEARCHLOG_SHEET, COMP_COMMUNITY_SHEET] };
+}
+
+// ============================================================
+// 代表フレーム取得(PC側スクレイパとの受け渡し)  2026-07-29
+//   PCが comp_frame_pending で未取得のShortを引き、yt-dlpで4.5秒付近1枚を抜き、
+//   Gemini(ベホップ)で 焼き込み文字/コマ要約 を起こして comp_frame_write で書き戻す。
+//   GAS側は台帳の読み書きのみ(映像取得・OCRはPC側)。
+// ============================================================
+
+// ---- 未取得の代表フレーム対象を返す(Shortのみ・追跡窓内・焼き込み文字が空の行)。read-only ----
+function compFramePending_(limit) {
+  limit = Math.min(Math.max(parseInt(limit || '20', 10) || 20, 1), 100);
+  compMigrateVideoHeaders_();
+  var cutoff = new Date().getTime() - COMP_WINDOW_DAYS * 86400000;
+  var sh = compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
+  var map = headerMap_(sh);
+  var last = sh.getLastRow();
+  var out = [];
+  if (last >= 2) {
+    var vv = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+    for (var i = 0; i < vv.length && out.length < limit; i++) {
+      var r = vv[i];
+      var vid = String(r[map['video_id'] - 1] || '').trim(); if (!vid) continue;
+      if (String(r[map['isShort'] - 1] || '').trim() !== 'yes') continue;   // 縦型フックの観測が目的=Shortのみ
+      var done = String(r[map['焼き込み文字'] - 1] || '').trim() || String(r[map['フレーム取得日'] - 1] || '').trim();
+      if (done) continue;                                                   // 取得済みは飛ばす(冪等)
+      var pub = r[map['公開日時'] - 1];
+      var t = pub ? new Date(pub).getTime() : 0;
+      if (t && t < cutoff) continue;                                        // 追跡窓の外は対象外
+      out.push({
+        videoId: vid,
+        channelId: String(r[map['channel_id'] - 1] || '').trim(),
+        title: r[map['タイトル'] - 1] || '',
+        durationSec: Number(r[map['長さ秒'] - 1] || 0) || 0
+      });
+    }
+  }
+  return { ok: true, count: out.length, pending: out };
+}
+
+// ---- 代表フレームの結果を書き戻す(video_id一致の既存行へ追記のみ。新規行は作らない) ----
+function compFrameWriteback_(items) {
+  if (!items || !items.length) return { ok: true, written: 0 };
+  compMigrateVideoHeaders_();
+  var sh = compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
+  var map = headerMap_(sh);
+  var last = sh.getLastRow();
+  if (last < 2) return { ok: true, written: 0, note: 'no_rows' };
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var idCol = sh.getRange(2, map['video_id'], last - 1, 1).getValues();
+  var rowOf = {};
+  idCol.forEach(function (r, i) { var v = String(r[0] || '').trim(); if (v) rowOf[v] = i + 2; });
+  var written = 0;
+  items.forEach(function (it) {
+    var vid = String(it.videoId || '').trim(); if (!vid) return;
+    var ri = rowOf[vid]; if (!ri) return;
+    if (it.frameText != null) sh.getRange(ri, map['焼き込み文字']).setValue(String(it.frameText));
+    if (it.panelDesc != null) sh.getRange(ri, map['コマ要約']).setValue(String(it.panelDesc));
+    sh.getRange(ri, map['フレーム取得日']).setValue(today);
+    written++;
+  });
+  return { ok: true, written: written };
 }
 
 // ---- シード登録: URLをwatch行として台帳へ追加(channel_id重複はスキップ)。doGetから呼ぶ ----
@@ -615,7 +694,10 @@ function compTitles_(days, top) {
         channelId: String(r[vMap['channel_id'] - 1] || '').trim(),
         title: r[vMap['タイトル'] - 1] || '',
         isShort: r[vMap['isShort'] - 1] || '',
-        publishedAt: pub
+        publishedAt: pub,
+        frameText: r[vMap['焼き込み文字'] - 1] || '',   // 代表フレームの焼き込み文字(未取得なら空)
+        panelDesc: r[vMap['コマ要約'] - 1] || '',       // コマ画像の中身の要約(未取得なら空)
+        frameAt: r[vMap['フレーム取得日'] - 1] || ''
       };
     });
   }
@@ -676,7 +758,10 @@ function compTitles_(days, top) {
       totalViews: totalViews,
       publishedAt: m.publishedAt,
       measurementDays: measurementDays,
-      snapshotDate: lastDay
+      snapshotDate: lastDay,
+      frameText: m.frameText,
+      panelDesc: m.panelDesc,
+      frameAt: m.frameAt
     });
   });
   out.sort(function (a, b) {
