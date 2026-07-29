@@ -161,14 +161,21 @@
   });
 
   // ドラフトタブの「投稿完了」から呼ばれる。blob を受け取って Drive へアップロードする。
-  function driveUpload_(blob, videoName, title, channel, videoId) {
+  //   srcImages=動画に使った元画像(stock.js が投稿完了時にIDBから読み出して渡す)。動画と同じフォルダへ一緒に保存する。
+  function driveUpload_(blob, videoName, title, channel, videoId, srcImages) {
     if (!configured()) { showError("channel_unresolved"); return; }
     if (!blob) return;
     if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
     // キューに溜まっていた Bsky 添付画像は引き継ぐ
     lastCtx = { videoId: videoId || "", title: title, channel: channel, folderId: "", queuedImage: lastCtx.queuedImage };
     var videoFile = new File([blob], videoName || (title.replace(/[\\/:"*?<>|]/g, '_') + '.mp4'), { type: blob.type || "video/mp4" });
-    send({ channel: channel, title: title, videoId: videoId || "", videoFile: videoFile, images: [] });
+    // 元画像は「動画名_元画像(_2,_3…).拡張子」で名付ける。File名が無い/被る事故を防ぐ。
+    var safeTitle = String(title || "動画").replace(/[\\/:"*?<>|]/g, '_');
+    var images = (srcImages || []).filter(Boolean).map(function (f, i) {
+      var name = safeTitle + "_元画像" + (i ? "_" + (i + 1) : "") + "." + imgExt(f);
+      return new File([f], name, { type: f.type || "image/jpeg" });
+    });
+    send({ channel: channel, title: title, videoId: videoId || "", videoFile: videoFile, images: images });
   }
   window.Go5Drive = { upload: driveUpload_ };
 

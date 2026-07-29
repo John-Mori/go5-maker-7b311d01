@@ -69,7 +69,7 @@
   function saveArchive(arr) { try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(arr.slice(0, ARCHIVE_MAX))); } catch (e) {} }
   function delBlobs_(id) {
     var store = idb();
-    if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); }
+    if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); store.del('stock_img_' + id).catch(function () {}); }
     if (_thumbCache[id]) { try { URL.revokeObjectURL(_thumbCache[id]); } catch (e) {} delete _thumbCache[id]; }
   }
 
@@ -117,6 +117,9 @@
       if (store) {
         if (evDetail.blob) ops.push(store.set('stock_v_' + id, evDetail.blob));
         if (thumbBlob)      ops.push(store.set('stock_t_' + id, thumbBlob));
+        // 元画像(前景)もIDBへ保存＝投稿完了(別セッションのこともある)まで残し、Driveへ動画と一緒に上げる。
+        //   これが無いと handleCompleteOk_ の時点で元画像が手元に無く、Driveに動画だけが保存される(Chami指摘2026-07-29)。
+        if (evDetail.sourceImageFile) ops.push(store.set('stock_img_' + id, evDetail.sourceImageFile));
       }
       return Promise.all(ops).then(function () {
         var arr = loadMeta();
@@ -218,7 +221,12 @@
     store.get('stock_v_' + id).then(function (blob) {
       if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
       if (window.Go5Drive && typeof window.Go5Drive.upload === 'function') {
-        window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id);
+        // 元画像(保存時にIDBへ退避したもの)も一緒にDriveへ。取れなくても動画だけは必ず上げる。
+        store.get('stock_img_' + id).then(function (img) {
+          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, img ? [img] : []);
+        }).catch(function () {
+          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, []);
+        });
       } else {
         alert('Drive連携が未設定です。動画作成タブのDriveStatus欄を確認してください。');
       }
