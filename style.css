@@ -47,7 +47,7 @@ html[data-tab="tabReserve"] body{background:var(--app-bg,#f5edd7);}
 html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:transparent;color:var(--ink);
-  font-family:”Noto Sans JP”,system-ui,sans-serif;
+  font-family:"Noto Sans JP",system-ui,sans-serif;
   transition:color .8s cubic-bezier(.4,0,.2,1);}
 /* ── アカウント連動グラデ背景：html 要素に直接設定（ビューポート背景として扱われ iOS Safari でも確実）。
    body::before z-index:-1 は html 背景の後ろに落ちるため使わない。 ── */
