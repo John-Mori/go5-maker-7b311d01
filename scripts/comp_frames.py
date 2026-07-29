@@ -44,6 +44,7 @@ SECTION_START = 4.0       # DLする区間の開始秒(4.5をこの中に含め�
 SECTION_END = 5.4         # DLする区間の終了秒
 TARGET_OFFSET = 4.5 - SECTION_START   # 区間先頭からの目的フレーム位置(=0.5秒)
 SHORT_TAIL_EPS = 0.15     # 短尺動画で末尾フレームを取る時の末尾からの戻し(秒)
+PRO_MODEL = "gemini-2.5-pro"   # 無料枠のpro。flashへ降格しない(Chami 2026-07-29)。尽きたら翌日繰り越し
 
 VISION_PROMPT = (
     "この画像は縦型ショート動画(9:16)の1コマです。次を日本語で答え、JSONだけを返してください。\n"
@@ -200,9 +201,14 @@ def main():
         return 3
 
     key = behop._read(behop.KEY_FILE, "ベホップ用APIキー")
-    model, avail = behop.pick_model(key)
+    # ★flashへ降格しない (Chami 2026-07-29「flashだと認識が弱くなるなら要らない」)。
+    #   proの無料枠で読めるだけ読む→尽きたらその日は打ち切り→残りは翌日pendingへ繰り越し(冪等)。
+    if PRO_MODEL not in behop.list_models(key):
+        print(f"ABORT: {PRO_MODEL} がこのキーで使えません(pro無料枠の対象モデル)。")
+        return 5
 
     results, ok = [], 0
+    quota_hit = False
     for it in items:
         vid = it.get("videoId", "")
         dur = float(it.get("durationSec") or 0)
@@ -214,10 +220,17 @@ def main():
             if not frame:
                 print(f"  {vid}: フレーム取得失敗(スキップ)")
                 continue
-            text, used = behop.ask(key, model, VISION_PROMPT, [frame], avail)
+            text, status = behop.ask_pro(key, VISION_PROMPT, [frame], PRO_MODEL)
+            if status == "quota":
+                print(f"  {vid}: pro無料枠が尽きた。本日はここで打ち切り、残りは翌日pendingへ繰り越し。")
+                quota_hit = True
+                break
+            if status != "ok":
+                print(f"  {vid}: 視覚失敗({status})スキップ")
+                continue
             v = parse_vision(text)
             if not v:
-                print(f"  {vid}: 視覚結果パース失敗(スキップ) model={used}")
+                print(f"  {vid}: 視覚結果パース失敗(スキップ)")
                 continue
             results.append({"videoId": vid, "frameText": v["frameText"], "panelDesc": v["panelDesc"]})
             ok += 1
@@ -226,7 +239,7 @@ def main():
             shutil.rmtree(work, ignore_errors=True)
         time.sleep(1.0)
 
-    print(f"視覚化 {ok}/{len(items)} 件")
+    print(f"視覚化 {ok}/{len(items)} 件" + ("(pro無料枠で打ち切り・残りは翌日)" if quota_hit else ""))
     if args.dry:
         print("--dry のため書き戻さない")
         return 0

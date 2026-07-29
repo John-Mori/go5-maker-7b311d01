@@ -127,6 +127,35 @@ def ask(key, model, prompt, image_paths=(), avail=()):
     return f"(生成失敗: {last_err}。時間を置くか--modelで明示指定を)", None
 
 
+def ask_pro(key, prompt, image_paths=(), model="gemini-2.5-pro"):
+    """pro単一モデルで生成。flashへ降格しない (認識の質を落とさないための専用経路)。
+    共有の ask() とは別物: ask() は無料proの割当が尽きるとflashへ落として粘るが、
+    こちらは「proの無料枠で読めるだけ読み、尽きたら打ち切る」用途 (競合フレーム日次収集)。
+
+    戻り値 (text, status):
+      ("...", "ok")             成功
+      (None,  "quota")          pro無料枠が尽きた (HTTP 429)。呼び出し側はその日を打ち切る
+      (None,  "error:<detail>") それ以外の失敗。呼び出し側はこの1件だけスキップ
+    """
+    parts = [{"text": prompt}]
+    for p in image_paths:
+        ext = os.path.splitext(p)[1].lower()
+        with open(p, "rb") as f:
+            parts.append({"inline_data": {"mime_type": MIME.get(ext, "image/png"),
+                                          "data": base64.b64encode(f.read()).decode("ascii")}})
+    payload = {"contents": [{"parts": parts}]}
+    try:
+        return _gen_once(key, model, payload), "ok"
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            return None, "quota"
+        return None, f"error:HTTP {e.code}"
+    except (KeyError, IndexError):
+        return None, "error:応答形式が想定外"
+    except Exception as e:
+        return None, f"error:{type(e).__name__}"
+
+
 def resolve_channel(token, target):
     if str(target).isdigit():
         return str(target)
