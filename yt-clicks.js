@@ -317,7 +317,7 @@
       var codes = (codesByEntry[e.id] || []).slice();
       if (/campaign=gain/.test(String(e.url || '')) && codes.indexOf('JrziR') < 0) codes.push('JrziR'); // 既定セールページは歴史的JrziRを合算(過去分を失わない)
       var uniq = codes.filter(function (c, i) { return codes.indexOf(c) === i; });
-      return { id: e.id, name: String(e.name || '(無題)'), url: String(e.url || ''), codes: uniq };
+      return { id: e.id, name: String(e.name || '(無題)'), url: String(e.url || ''), codes: uniq, at: (typeof e.at === 'number' ? e.at : 0) };
     });
   }
   // 現行のセールコードをGASへ登録(変化時のみ送信)。→ snapshotStatsが各コードを日次スナップし
@@ -355,18 +355,25 @@
       });
       return { tc: tc, yc: yc, wc: wc };
     }
+    // 旧🏮絵文字を金色カーソル(白背景透過済み)へ置換(Chami指定2026-07-29)
+    var SALE_ICO = '<img class="emico emico-sale" src="assets/icons/ic-sale-gold.png" alt="セール">';
+    function fmtDay_(ms) { if (!ms) return ''; var d = new Date(ms); return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate(); }
     function paint() {
       var lines;
       if (entries.length) {
+        // 1段目=金矢印＋名前 / 2段目=記載開始日・累計/今日/昨日/週(見やすさ優先で改行・Chami指定2026-07-29)
         lines = entries.map(function (e) {
           var cum = null; e.codes.forEach(function (c) { if (c in clicksCache) cum = (cum || 0) + clicksCache[c]; });
           var dl = deltasFor(e.codes);
-          return '🏮 ' + esc(e.name) + ' 累計' + f(cum) + '・今日' + f(dl.tc) + '・昨日' + f(dl.yc) + '・週' + f(dl.wc);
+          var day = fmtDay_(e.at);
+          var sub = (day ? '記載開始:' + day + '　' : '') +
+            '累計:' + f(cum) + '　今日:' + f(dl.tc) + '　昨日:' + f(dl.yc) + '　週:' + f(dl.wc);
+          return SALE_ICO + esc(e.name) + '<br><span class="sale-sub">' + sub + '</span>';
         });
       } else {
         var cum = null; allCodes.forEach(function (c) { if (c in clicksCache) cum = (cum || 0) + clicksCache[c]; });
         var d = (typeof deltaCache === 'object' && deltaCache) ? deltaCache.SALE : null;
-        lines = ['🏮 セール会場 累計' + f(cum) + '・今日' + f(d && d.tc) + '・昨日' + f(d && d.yc) + '・週' + f(d && d.wc)];
+        lines = [SALE_ICO + 'セール会場<br><span class="sale-sub">累計:' + f(cum) + '　今日:' + f(d && d.tc) + '　昨日:' + f(d && d.yc) + '　週:' + f(d && d.wc) + '</span>'];
       }
       el.innerHTML = lines.join('<br>');
     }
@@ -1147,7 +1154,7 @@
     var visibleItems = hideRemade ? items.filter(function (it) { return !it.remade; }) : items;
     // 非表示トグルは行の枠外(リスト最上部の独立バー)に置く＝先頭カードに重ならない。
     var hideBarHtml = '<div class="vhide-remade-bar">' +
-      '<span id="saleStats" class="sale-stats" title="セール会場リンク(🏮大幅割引セール中の同人祭ページ)のクリック数。累計はr2計測・今日/昨日/週は日次スナップショット">🏮 セール会場 …</span>' +
+      '<span id="saleStats" class="sale-stats" title="セール会場リンク(大幅割引セール中の同人祭ページ)のクリック数。累計はr2計測・今日/昨日/週は日次スナップショット"><img class="emico emico-sale" src="assets/icons/ic-sale-gold.png" alt=""> セール会場 …</span>' +
       // 計測ヘルス(B-3): 正常時は目立たせない。異常時だけ赤字。追加通信はしない(既存取得の結果を映すだけ)
       '<span id="measHealth" class="meas-health" title="計測3経路の生死。短縮URL=クリック数/記録GAS=今日昨日週の日別記録/YouTube=再生数。「応答なし」の時、その数字は古い値です">' + healthHtml_() + '</span>' +
       histColsCtlHtml_() + // 列数セレクタ(PCのみCSSで表示)

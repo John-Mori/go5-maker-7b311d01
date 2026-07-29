@@ -1132,6 +1132,10 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 .emico-red { filter: brightness(0) saturate(100%) invert(40%) sepia(51%) saturate(2878%) hue-rotate(322deg) brightness(97%) contrast(93%); }
 /* 作品クリック(導線2)のピンクカーソル印(Chami指定2026-07-14・提供画像を絵文字化)。既に着色済みのため filter 不要・角丸なし */
 .emico-cursor { height: 1.15em; vertical-align: -0.2em; border-radius: 0; }
+/* セール会場の金色カーソル印(旧🏮絵文字の置換・Chami指定2026-07-29・白背景を透過済み)。縦長画像なので少し大きめ・角丸なし */
+.emico-sale { height: 1.4em; vertical-align: -0.32em; border-radius: 0; margin-right: 2px; }
+/* セール会場の2段目(記載開始日・累計/今日/昨日/週)は少し控えめに */
+.sale-stats .sale-sub { opacity:.82; font-size:.92em; }
 .vhide-remade-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .sale-stats { font-size:13px; opacity:.9; margin-right:auto; } /* 文字サイズ=field-label(▶リンク見出し)と同じ13px(Chami依頼2026-07-18・A) */
 /* PC版はセール会場の統計を全幅・中央ぞろえに(他のバー要素は下段へ折り返し)。スマホは従来のまま。 */
