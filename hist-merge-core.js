@@ -113,26 +113,38 @@
   // localItems(allItems()相当) と sheetItems(GAS action=history の items) から、
   // 「ローカルに無い行だけ」を表示専用アイテムに変換して返す。ローカルにあれば出さない。
   function mergeSheetExtras(localItems, sheetItems) {
-    var haveUri = {}, haveVid = {};
+    var haveUri = {}, haveVid = {}, haveYt = {};
     (localItems || []).forEach(function (it) {
       if (!it) return;
       if (it.postUri) haveUri[String(it.postUri)] = true;
       if (it.videoId) haveVid[String(it.videoId)] = true;
+      // ★YouTube動画URLも同一性キーに使う。1動画=1投稿なので、videoId/postUriが食い違っても
+      //   同じytUrlならローカルとシートは同じ投稿=二重表示させない(Chami報告2026-07-29「シート由来か
+      //   そうでないかで分裂」。短縮リンク再入力で背骨IDが割れても、同じYT動画なら1枚に畳む)。
+      var yt = String(it.ytUrl || it.youtubeUrl || '').trim();
+      if (yt) haveYt[yt] = true;
     });
-    var seenUri = {}, seenVid = {};
+    var seenUri = {}, seenVid = {}, seenYt = {};
     var extra = [];
     (sheetItems || []).forEach(function (x) {
       if (!x) return;
       var uri = String(x.postUri || '').trim();
       var vid = String(x.videoId || '').trim();
+      var yt = String(x.youtubeUrl || x.ytUrl || '').trim();
+      // YouTube動画URL一致=ローカルに同じ投稿が既にある(または同一シート内の重複)=畳む。
+      //   ★これは postUri/videoId の前に効かせる(背骨IDが割れていても同じYT動画なら1枚)。
+      if (yt) {
+        if (haveYt[yt] || seenYt[yt]) return;
+        seenYt[yt] = true;
+      }
       if (uri) {
         if (haveUri[uri] || seenUri[uri]) return; // ローカル優先 or 同一シート内の重複
         seenUri[uri] = true;
       } else if (vid) {
         if (haveVid[vid] || seenVid[vid]) return;
         seenVid[vid] = true;
-      } else {
-        return; // 一致キーが無い行は重複判定できないため安全側でスキップ
+      } else if (!yt) {
+        return; // 一致キー(uri/vid/yt)が全く無い行は重複判定できないため安全側でスキップ
       }
       extra.push(toDisplayItem_(x));
     });

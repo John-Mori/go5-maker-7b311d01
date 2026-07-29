@@ -148,7 +148,11 @@ async function handleShorten(request, env, cors) {
   if (!env.LINKS) return json({ ok: false, error: "kv_unbound" }, 500, cors);
 
   // 決定的コード（同じURLは常に同じコード＝重複作成なし）。衝突時のみ伸ばす。
-  const full = await codeFor(urlStr);
+  //   ★短縮ドメイン(hostname)で塩を振る＝同じ宛先URLでも 5mgl.com(月詠み) と yoz2.com(宵桜艶帖) で
+  //     別コードになる=チャンネル別に別カウンタで計測できる(Chami依頼2026-07-29・2度目)。
+  //     旧・URLだけのコードは両chで同一コード→共有KVのc:<code>が合算され「切り替えても同じ数字」だった。
+  //     同一ドメイン+同一URLは従来どおり冪等(常に同じコード)。既存の旧コードもKVに残り302は不変。
+  const full = await codeFor(urlStr, new URL(request.url).hostname);
   let code = "";
   for (let len = CODE_MIN; len <= CODE_MAX; len++) {
     const cand = full.slice(0, len);
@@ -203,8 +207,11 @@ async function handleStats(url, env) {
 }
 
 /* ====================== ヘルパ ====================== */
-async function codeFor(urlStr) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(urlStr));
+async function codeFor(urlStr, host) {
+  // host(短縮ドメイン)を塩に混ぜる=同じ宛先でもドメインが違えば別コード=チャンネル別計測。
+  //   host無し(旧呼び出し互換)ならURLだけ=従来コード。
+  const seed = (host ? host + "\n" : "") + urlStr;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed));
   const bytes = new Uint8Array(buf);
   let s = "";
   for (let i = 0; i < CODE_MAX; i++) s += BASE62[bytes[i] % 62];

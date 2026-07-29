@@ -144,6 +144,20 @@ test('H-19: 作品URLはシートの生URLを優先し、cid復元できない�
   assert.strictEqual(HM._toDisplayItem({ videoId: 'v8', cid: 'ssis00999' }).workUrl, '');
 });
 
+test('H-20: 同じYouTube動画URLならvideoId/postUriが割れてもシート由来を畳む(分裂防止)', function () {
+  // ローカルは背骨ID acc1-A・YT動画 yt1。シートは同じ投稿だが背骨IDが acc1-B に割れ postUriも無い。
+  //   旧実装は videoId が食い違うため両方表示=「シート由来かそうでないかで分裂」(Chami報告2026-07-29)。
+  var local = [{ videoId: 'acc1-A', ytUrl: 'https://youtu.be/yt1', title: '同じ投稿' }];
+  var sheet = [{ videoId: 'acc1-B', youtubeUrl: 'https://youtu.be/yt1', title: '同じ投稿' }];
+  assert.deepStrictEqual(HM.mergeSheetExtras(local, sheet), [], 'YT動画URLが一致=ローカルにある=シート由来を出さない');
+  // 別のYT動画なら従来どおりシート由来として出る。
+  var sheet2 = [{ videoId: 'acc1-C', youtubeUrl: 'https://youtu.be/yt2', title: '別投稿' }];
+  assert.strictEqual(HM.mergeSheetExtras(local, sheet2).length, 1, '別YT動画は畳まない');
+  // 同一シート内に同じYT動画が2行あっても1行に畳む。
+  var dup = [{ videoId: 'acc1-D', youtubeUrl: 'https://youtu.be/yt3' }, { videoId: 'acc1-E', youtubeUrl: 'https://youtu.be/yt3' }];
+  assert.strictEqual(HM.mergeSheetExtras([], dup).length, 1, 'シート内の同一YT動画重複も畳む');
+});
+
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);
