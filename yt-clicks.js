@@ -2103,25 +2103,48 @@
   try { window.YtSchedule = { list: function () { return loadYtSched_('acc1').concat(loadYtSched_('acc2')); } }; } catch (e) {}
 
   // announce=true(手動更新ボタン)のときは、完了時に成功/失敗を明確に表示する。
+  // ── 点検(自己修復)と再生数/クリック取得の間引き ───────────────────────────
+  //   Chami要望2026-07-29「投稿履歴が毎回色々読み込んで遅い。毎回読むべきものと不要なものを分けて、
+  //   点検は裏で何日かに一回でいい」。所有権サニタイズ/シート後追い/取り残しYT再接続は表示を正すための
+  //   冪等な自己修復で、タブを開くたびに走らせる必要はない。→ まずキャッシュから即描画し、点検はTTLで間引く。
+  //   手動🔄(announce)は必ず全部走らせる。再生数/クリックはキャッシュ表示は常に即・自動再取得だけ間引く。
+  var HIST_MAINT_TTL_MS = 6 * 3600 * 1000;   // 点検の最短間隔(6時間)。手動🔄は即時
+  var HIST_METRICS_TTL_MS = 30 * 60 * 1000;  // 再生数/クリックの自動再取得の最短間隔(30分)。表示自体はキャッシュから即時
+  function tsGet_(k) { try { return parseInt(localStorage.getItem(k) || '0', 10) || 0; } catch (e) { return 0; } }
+  function tsSet_(k, v) { try { localStorage.setItem(k, String(v)); } catch (e) {} }
+  function maintDue_() { return (Date.now() - tsGet_('hist_maint_at')) > HIST_MAINT_TTL_MS; }
+  function metricsDue_() { return (Date.now() - tsGet_('hist_metrics_at')) > HIST_METRICS_TTL_MS; }
+
   function refresh(announce) {
-    // 前段(所有権サニタイズ等)のどれかが例外を投げても、保存済みデータが一覧に反映されない
-    // (＝保存はできるが表示されない)事態を防ぐため、render() 到達を最優先で保証する。
-    var fixed = false;
-    try { fixed = sanitizeOwnership_(); } catch (e) {} // ★誤アカウント混入を正へ帰還(ensureIdsより前＝偽の接頭辞を刻む前に所属確定)
-    try { flushSheetMovePending_(); } catch (e) {} // 前回失敗したシート行移動を自動再送(T2)
-    try { ensureIds(); } catch (e) {} // IDが無いアイテムへ背骨IDを付与(履歴=スプレッドシートの正キー)
-    try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続(冪等)
-    try { reconcileYtToSheet_(); } catch (e) {} // 端末のYT URLをシートへ後追い反映=「記録待ち」永久固定の自己修復(冪等・台帳ガード)
+    // ★まずキャッシュから即描画。点検・通信でタブ表示を待たせない(Chami「表示が遅い」対策)。
     render();
-    try { mergeSheetExtras_(); } catch (e) {} // ローカルに無い行をシートから表示専用で補う(書き込みはしない・失敗しても上のrender()は無傷)
-    // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ。(postUriアイテムのDID確定分＝混入投稿を自動帰還)冪等。
-    (function () {
-      var R = window.Go5AccountRepair;
-      if (R && R.ensureDids && !(R.ledgerFresh && R.ledgerFresh())) {
-        R.ensureDids(function () { var more = sanitizeOwnership_(); if (more) { render(); notifySanitized_(more); } });
-      }
-    })();
+    // 点検(自己修復)は 手動🔄 か TTL到来時だけ・描画の後に走らせる。冪等なので裏で回して問題ない。
+    //   ★サニタイズは ensureIds より前(偽の背骨ID接頭辞を刻む前に所属を確定する)——この順序は崩さない。
+    var fixed = false;
+    if (announce || maintDue_()) {
+      try { fixed = sanitizeOwnership_(); } catch (e) {} // 誤アカウント混入を正へ帰還
+      try { flushSheetMovePending_(); } catch (e) {} // 前回失敗したシート行移動を自動再送(T2)
+      try { ensureIds(); } catch (e) {} // IDが無いアイテムへ背骨IDを付与(サニタイズ後)
+      try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続(冪等)
+      try { reconcileYtToSheet_(); } catch (e) {} // 端末のYT URLをシートへ後追い反映(冪等・台帳ガード)
+      tsSet_('hist_maint_at', Date.now());
+      if (fixed) render(); // 点検で移動が発生した時だけ再描画
+      // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ(冪等)。点検時のみ通信する。
+      (function () {
+        var R = window.Go5AccountRepair;
+        if (R && R.ensureDids && !(R.ledgerFresh && R.ledgerFresh())) {
+          R.ensureDids(function () { var more = sanitizeOwnership_(); if (more) { render(); notifySanitized_(more); } });
+        }
+      })();
+    }
+    try { mergeSheetExtras_(); } catch (e) {} // シート由来行の表示補完(60秒TTL・SWR・書き込みなし)
     var note = sanitizeNoteHtml_(fixed); // 更新完了メッセージに付記(サニタイズ通知が上書きで消えない)
+    // 再生数/クリックはキャッシュが既に描画済み。自動更新は30分間引き(手動🔄は即・強制)。
+    if (!announce && !metricsDue_()) {
+      setStatus((apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます') + note, !!note);
+      if (fixed) wireSanUndo_();
+      return Promise.resolve(false);
+    }
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); })).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
@@ -2133,6 +2156,7 @@
     }
     setStatus('🔄 更新中…(再生数・クリック数)');
     return fetchData_(items, ymap, !!announce).then(function () { // 手動更新(announce)のみ強制再取得
+      tsSet_('hist_metrics_at', Date.now()); // 自動再取得の間引き基準(次の30分は再通信しない)
       if (lastErr) setStatus('⚠️ 更新に失敗しました：' + lastErr + note, !!note);
       else if (announce) setStatus('✅ 更新しました(再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + ')' + note, !!note);
       else setStatus((!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : '') + note, !!note);
