@@ -299,6 +299,12 @@
   function saleEntries_() {
     var acc = acct(), arr = [];
     try { var a = JSON.parse(localStorage.getItem('bsky_discount_urls__' + acc) || '[]'); if (Array.isArray(a)) arr = a; } catch (e) {}
+    // 後方互換: アカウント別キーが空なら、口座分割(2026-07-20)前の旧・単一キー(bsky_discount_urls)も見る。
+    //   旧運用でここへ登録された名前付きセール(例 夏セールの同人祭)が、suffix付きキーしか読まないため
+    //   名前で一切出ず、投稿履歴の上が汎用「セール会場」に落ちていた穴を塞ぐ(Chami報告2026-07-29)。
+    if (!arr.length) {
+      try { var lg = JSON.parse(localStorage.getItem('bsky_discount_urls') || '[]'); if (Array.isArray(lg)) arr = lg; } catch (e) {}
+    }
     var cache = {};
     try { var o = JSON.parse(localStorage.getItem('bsky_discount_link_cache') || '{}'); if (o && typeof o === 'object') cache = o; } catch (e) {}
     var codesByEntry = {}; // entryId → [短縮コード…](af_id/ドメイン違いで複数あり得る＝名前ごとの通算)
