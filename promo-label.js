@@ -30,7 +30,7 @@
   var TEMPLATES = {
     acc1: {
       baseW: 360, aspect: 1024 / 1536,
-      ink: { top: '#fff6d8', bottom: '#f0cf8a', edge: 'rgba(210,168,90,.85)', glow: 'rgba(255,224,150,.9)' },
+      ink: { top: '#fff6d8', bottom: '#f0cf8a', edge: 'rgba(210,168,90,.85)', glow: 'rgba(255,224,150,.9)', contour: 'rgba(92,58,16,.92)' },
       discount: { src: 'assets/promo/tsukuyomi-discount-base.png',
                   slot: { x: 0.332, y: 0.306, w: 0.342, h: 0.189 } },
       price:    { src: 'assets/promo/tsukuyomi-price-base.png',
@@ -38,7 +38,7 @@
     },
     acc2: {
       baseW: 620, aspect: 2172 / 724,
-      ink: { top: '#ffffff', bottom: '#f8c9d6', edge: 'rgba(214,130,150,.9)', glow: 'rgba(255,160,185,.95)' },
+      ink: { top: '#ffffff', bottom: '#ffeaf1', edge: 'rgba(150,40,80,.9)', glow: 'rgba(255,190,210,.55)', contour: 'rgba(74,30,58,.94)' },
       discount: { src: 'assets/promo/yoizakura-discount-base.png',
                   slot: { x: 0.364, y: 0.260, w: 0.211, h: 0.490 } },
       price:    { src: 'assets/promo/yoizakura-price-base.png',
@@ -212,13 +212,22 @@
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     var grad = ctx.createLinearGradient(0, cy - fs / 2, 0, cy + fs / 2);
     grad.addColorStop(0, ink.top); grad.addColorStop(1, ink.bottom);
-    // 1) 光彩(2度描きで原画のふわっとした光に寄せる。広げすぎると枠線を跨ぐので0.18に抑える)
-    ctx.shadowColor = ink.glow; ctx.shadowBlur = fs * 0.18; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
-    ctx.fillStyle = grad; ctx.fillText(text, cx, cy);
-    ctx.shadowBlur = fs * 0.07; ctx.fillText(text, cx, cy);
-    // 2) 縁(光彩なしで輪郭を締める)
+    ctx.lineJoin = 'round'; ctx.miterLimit = 2;
+    // 1) 濃い輪郭を「下地」に敷く=明るい札から数字を持ち上げる(かすみ防止)。
+    //   数字が明るい札(特に宵桜の桜ピンク)に溶けて霞む主因は「明色の数字＋明色の光彩」で
+    //   コントラストが立たなかったこと。下に濃色の縁＋弱い落ち影を敷いてから本体を重ねる。
+    var contour = ink.contour || 'rgba(60,30,20,.9)';
+    ctx.shadowColor = 'rgba(0,0,0,.30)'; ctx.shadowBlur = fs * 0.05; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = fs * 0.015;
+    ctx.lineWidth = Math.max(1.5, fs * 0.075); ctx.strokeStyle = contour; ctx.strokeText(text, cx, cy);
     ctx.shadowColor = 'transparent';
-    ctx.lineWidth = Math.max(1, fs * 0.028); ctx.strokeStyle = ink.edge; ctx.strokeText(text, cx, cy);
+    // 2) 本体グラデ(くっきり=光彩なしで一度置く)
+    ctx.fillStyle = grad; ctx.fillText(text, cx, cy);
+    // 3) 細い縁で輪郭を締める
+    ctx.lineWidth = Math.max(1, fs * 0.024); ctx.strokeStyle = ink.edge; ctx.strokeText(text, cx, cy);
+    // 4) ごく控えめな光彩(にじませ過ぎない=0.07)を最後に本体へ重ねる
+    ctx.shadowColor = ink.glow; ctx.shadowBlur = fs * 0.07; ctx.shadowOffsetY = 0;
+    ctx.fillStyle = grad; ctx.fillText(text, cx, cy);
+    ctx.shadowColor = 'transparent';
     ctx.restore();
   }
 
