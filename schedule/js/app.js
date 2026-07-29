@@ -34,6 +34,16 @@ window.SCH = window.SCH || {};
     return dt.addDays(s, delta);
   }
 
+  // 今日を画面の先頭へ寄せる（Chami指定・仕様v0.1）。scrollIntoView は使わない
+  // （iframe内で親も動かしうる smooth 挙動を避け、自フレームを位置指定で先頭揃え）。
+  const TOP_GAP = 8;                   // 今日セルの上に残す余白(px)
+  function alignTodayToTop() {
+    const el = document.querySelector(".day.is-today");
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.pageYOffset - TOP_GAP;
+    window.scrollTo({ top: y < 0 ? 0 : y, behavior: "auto" });
+  }
+
   // ---- 描画範囲・生成範囲 ----
   function displayStart() {
     return dt.addDays(mondayOf(todayJST()), weekOffset * 7);
@@ -417,8 +427,7 @@ window.SCH = window.SCH || {};
     if (todayBtn) todayBtn.addEventListener("click", async () => {
       weekOffset = 0;
       await recomputeAndRender();
-      var el = document.querySelector(".day.is-today");
-      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      requestAnimationFrame(alignTodayToTop);
     });
     document.getElementById("btn-verify").addEventListener("click", (e) => {
       verificationMode = !verificationMode;
@@ -438,6 +447,7 @@ window.SCH = window.SCH || {};
     if (inFrame) window.addEventListener("message", handleParentMessage);
 
     await recomputeAndRender();
+    requestAnimationFrame(alignTodayToTop);   // 起動時も今日を先頭へ寄せる
   }
 
   document.addEventListener("DOMContentLoaded", boot);

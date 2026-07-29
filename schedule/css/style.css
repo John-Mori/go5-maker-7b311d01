@@ -190,3 +190,55 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 .slot.pr-3 { border-left-color: var(--role-normal); }
 .slot.is-top { border: 2px solid #ffd34d; background: linear-gradient(90deg, rgba(255,211,77,.16), transparent); }
 .slot.is-top .slot-time, .slot.is-top .slot-pri { color: #ffd34d; }
+
+/* ══ 生成り地リテーマ（カレンダーのグリッドのみ・Chami指定 仕様v0.1・2026-07-29）══
+   ・地は生成り3階調（#F8F5EE / #EDE7DA / #FFFFFF）でアカウント非連動。
+   ・優先マーカーは暗色のみ。本命は★（絵文字禁止＝CSS clip-path）で示す。
+   ・状態強調は反転（未着手を明るく＝白／公開済を沈める＝退色。これは仕様であってバグではない）。
+   ・アプリ枠（ヘッダ／凡例／モーダル）は既存のダークのまま。ここはグリッド面だけ光の生成りにする。
+   注: 文字色まで暗色へ揃える（光地に明色文字＝不可視の回帰を避ける）。両chペア行・38pxバッジは次弾。 */
+.week-grid .day {
+  background: #F8F5EE; color: #2b2621; border-color: #e0d8c8;
+}
+.week-grid .day.dt-weekday { background: #F8F5EE; }
+.week-grid .day.dt-eve,
+.week-grid .day.dt-runstart,
+.week-grid .day.dt-runmid,
+.week-grid .day.dt-last { background: #EDE7DA; }
+.week-grid .day.has-longvac { box-shadow: inset 0 0 0 1px #c9a24a; border-color: #c9a24a; }
+.week-grid .day.is-today { outline: 2px solid #A66A0C; }
+.week-grid .day .day-wd,
+.week-grid .day .day-type-badge,
+.week-grid .day .slot-pri,
+.week-grid .day .slot-row3 { color: #7a7266; }
+.week-grid .day .day-type-badge { border-color: #d8cfbe; }
+.week-grid .day .day-ctrl button { color: #7a7266; border-color: #d8cfbe; }
+.week-grid .day .day-ctrl button:hover { color: #2b2621; border-color: #A66A0C; }
+
+/* スロット＝白カード。優先マーカーは暗色のみ */
+.week-grid .day .slot {
+  background: #FFFFFF; border-color: #e2dccd; color: #2b2621;
+}
+.week-grid .day .slot.pr-1 { border-left-color: #A66A0C; }
+.week-grid .day .slot.pr-2 { border-left-color: #0B7E56; }
+.week-grid .day .slot.pr-3 { border-left-color: #0C6E85; }
+.week-grid .day .slot.pr-4 { border-left-color: rgba(42,37,32,.30); }
+.week-grid .day .slot.pr-5 { border-left-color: transparent; }
+.week-grid .day .slot:hover { border-color: #A66A0C; }
+
+/* 本命＝暗色の縁＋★（clip-path。絵文字は使わない） */
+.week-grid .day .slot.is-top {
+  border: 2px solid #A66A0C; background: #FFFBF2;
+}
+.week-grid .day .slot.is-top .slot-time,
+.week-grid .day .slot.is-top .slot-pri { color: #A66A0C; }
+.week-grid .day .slot.is-top .slot-time::before {
+  content: ""; display: inline-block; width: 11px; height: 11px; margin-right: 3px;
+  vertical-align: -1px; background: #A66A0C;
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+
+/* 状態強調は反転：未着手を明るく／公開済・取り下げを沈める（仕様・直さない） */
+.week-grid .day .slot.st-todo { background: #FFFFFF; }
+.week-grid .day .slot.st-published { background: #efeae0; opacity: .5; }
+.week-grid .day .slot.st-dropped { opacity: .4; }
