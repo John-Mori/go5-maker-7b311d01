@@ -185,7 +185,9 @@
       var file = null;
       try { file = new File([blob], name, { type: blob.type || 'video/mp4' }); } catch (e) {}
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({ files: [file], title: name }).catch(function () { anchorDownload_(blob, name); });
+        // ★共有シートを出せたらキャンセル/完了に関わらずここで完結する。<a download>へ落とすと
+        //   iOSで共有シートの後に「ダウンロードしますか?」が二重に出て邪魔(Chami指摘2026-07-29・スクショ実物)。
+        navigator.share({ files: [file], title: name }).catch(function () {});
         return;
       }
       anchorDownload_(blob, name);
@@ -207,6 +209,12 @@
     var metas = loadMeta();
     var meta = metas.filter(function (m) { return m.id === id; })[0];
     if (!meta) return;
+    // ★X短縮URLが引数で来なかった時(短縮生成前・スロット読み取り失敗)でも、保存済みドラフトデータ
+    //   (saveDraftPost_ が xShortUrl として都度保存)から補って投稿履歴へ渡す。これが無いと投稿履歴の
+    //   「投稿URL(計測用の短縮URL)」欄が空になり毎回手入力になる(Chami指摘2026-07-29)。
+    if (!shortUrl) {
+      try { var sv = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); shortUrl = (sv.xShortUrl || '').trim(); } catch (e) {}
+    }
     store.get('stock_v_' + id).then(function (blob) {
       if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
       if (window.Go5Drive && typeof window.Go5Drive.upload === 'function') {
