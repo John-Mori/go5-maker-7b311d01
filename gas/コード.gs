@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-29I(upsertにwork_short_clearを追加＝作品短縮URLを意図的に消した保存を空で確定させる。putIfは空を書かず既存値を保護するため、導線2導入前の履歴に誤挿入された短縮URLを消しても復活していた穴を修正。H(codeFromShort_scheme無し許容)を継続。Chami「消して保存するも復活して保存が意味をなさない」2026-07-29)';
+var GAS_VERSION = '2026-07-29J(computeDeltas_にクリック実数の積み直しを追加＝短縮コード差し替えで日次スナップが0起点に戻る段差を検出し旧コード最終値を土台に繰り上げて単調増加へ復元。クリック(導線1c/導線2w)のみ・再生数vは対象外。累計cc/cwcを出力しフロントの累計表示の下限に採用。「累計0なのに週-16」の負値と矛盾を根から解消。I(work_short_clear)を継続。Chami「過去クリックの実数まで積み直したい・週が-16」2026-07-29)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -1507,6 +1507,22 @@ function computeDeltas_() {
   Object.keys(byVid).forEach(function (vid) {
     var m = byVid[vid], dates = Object.keys(m).sort();
     var posted = postedByVid[vid] || '';
+    // ★クリック計測URL(導線1=c / 導線2=w)の短縮コードが差し替わると、新コードのカウンタは0起点になり
+    //   日次スナップの系列が [.., 16, 16, 0, 3] のように「段差で落ちる」。この段差を検出して旧コードの
+    //   最終値を土台へ繰り上げ、単調増加の「実数」へ積み直す(Chami「累計0なのに先週-16」2026-07-29)。
+    //   ※クリックは減らない前提のc/wだけ。再生数(v)はYouTubeの下方修正で正当に減るので積み直さない。
+    //   ※取得失敗はnull(空欄)で記録され段差判定に使わない=偶発0で誤って繰り上げない。
+    function reconMonotonic_(k) {
+      var carry = 0, prevRaw = null;
+      for (var ri = 0; ri < dates.length; ri++) {
+        var cell = m[dates[ri]], raw = cell[k];
+        if (raw == null) continue;
+        if (prevRaw != null && raw < prevRaw) carry += prevRaw; // コード差し替え=旧コード最終値を土台に繰上げ
+        cell[k] = raw + carry;                                  // 実数へ積み直し(以後 lastNonNull/curOf はこの値を読む)
+        prevRaw = raw;
+      }
+    }
+    reconMonotonic_('c'); reconMonotonic_('w');
     // ★列ごと(v=再生/c=クリック)に独立して基準を解決する。(2026-07-12C・根本修正)
     //   「再生数は前から記録・クリックは今日から記録開始」のような列単位のズレで、
     //   既存スナップの空欄(null)を基準に採って⚠を出していた設計ミスを直す。
@@ -1523,7 +1539,7 @@ function computeDeltas_() {
     function curOf(k) { var c = m[today]; if (c && c[k] != null) return c[k]; return lastNonNull(k, '9999-99-99', true); }
     function calc(k) {
       var cur = curOf(k);
-      if (cur == null) return { t: null, y: null, w: null }; // その列は一度も記録なし=正直に⚠(取得失敗系)
+      if (cur == null) return { t: null, y: null, w: null, cur: null }; // その列は一度も記録なし=正直に⚠(取得失敗系)
       var bT = lastNonNull(k, today, false); if (bT == null) bT = 0;   // 今日の基準: 無ければ記録開始=今日→0起点
       var bW = lastNonNull(k, wk, true);     if (bW == null) bW = 0;   // 週の基準: 無ければ記録開始が7日以内→0起点
       var y;
@@ -1533,11 +1549,13 @@ function computeDeltas_() {
         var bY = lastNonNull(k, yest, false);          // 一昨日終了時点の値(無ければ記録開始が昨日→0起点)
         y = (aY == null) ? null : (aY - (bY == null ? 0 : bY)); // aY自体が無い=昨日以前の記録ゼロ→⚠(不可知)
       }
-      return { t: cur - bT, y: y, w: cur - bW };
+      return { t: cur - bT, y: y, w: cur - bW, cur: cur };
     }
     var V = calc('v'), C = calc('c'), W = calc('w');
     // twc/ywc/wwc = 導線2(作品クリック=ピンク矢印)の今日/昨日/週デルタ。(Chami依頼2026-07-14)
-    out[vid] = { tv: V.t, yv: V.y, wv: V.w, tc: C.t, yc: C.y, wc: C.w, twc: W.t, ywc: W.y, wwc: W.w };
+    // cc/cwc = 積み直し済みの「実数の累計」(導線1/導線2)。短縮コード差し替えで0起点に戻る前の分も含む。
+    //   フロントはこれを累計表示の下限に使い、「累計0なのに週N」「週-16」の矛盾を根から消す。(Chami 2026-07-29)
+    out[vid] = { tv: V.t, yv: V.y, wv: V.w, tc: C.t, yc: C.y, wc: C.w, twc: W.t, ywc: W.y, wwc: W.w, cc: C.cur, cwc: W.cur };
   });
   return out;
 }

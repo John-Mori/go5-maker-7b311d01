@@ -1272,10 +1272,13 @@
       //   原因が何であれ矛盾表示を消す。(集計の整合。導線1も同じ理屈で揃える)
       var _dl = vid ? deltaCache[vid] : null;
       if (_dl) {
-        var cFloor = Math.max(_dl.wc || 0, _dl.tc || 0, _dl.yc || 0);
-        if (cFloor > 0 && code) clicks = Math.max(clicks || 0, cFloor);
-        var wFloor = Math.max(_dl.wwc || 0, _dl.twc || 0, _dl.ywc || 0);
-        if (wFloor > 0 && wcode) wclicks = Math.max(wclicks || 0, wFloor);
+        // GASが日次スナップの段差(短縮コード差し替えでカウンタが0起点に戻る)を検出して積み直した
+        //   「実数の累計」cc(導線1)/cwc(導線2)があればそれを採用。無ければ既知の期間デルタで下限を張る。
+        //   どちらでも累計≥週が保証され、「累計0なのに週8/週-16」の矛盾表示は出ない。(Chami 2026-07-29)
+        var cCum = (_dl.cc != null) ? _dl.cc : Math.max(_dl.wc || 0, _dl.tc || 0, _dl.yc || 0);
+        if (cCum > 0 && code) clicks = Math.max(clicks || 0, cCum);
+        var wCum = (_dl.cwc != null) ? _dl.cwc : Math.max(_dl.wwc || 0, _dl.twc || 0, _dl.ywc || 0);
+        if (wCum > 0 && wcode) wclicks = Math.max(wclicks || 0, wCum);
       }
       // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に。(別短縮URLのため加算)
       // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する(例：0+5=5(5))。
