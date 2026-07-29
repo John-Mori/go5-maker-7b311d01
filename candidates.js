@@ -851,6 +851,13 @@
     if (cached && cached.sig === sig) return cached.map;
     var map = {};
     for (var i = 0; i < items.length; i++) {
+      // ★このチャンネルの投稿済み判定は「このチャンネルが所有する記録」だけで行う。
+      //   背骨ID(videoId=acc1-/acc2-…)が別チャンネルを指す記録は、両方の投稿履歴に載って
+      //   しまっても(誤って両channelへ記録された時)このchの判定には数えない＝候補タブのpillが
+      //   投稿履歴を直せば自動で正しく戻る(連動・Chami依頼2026-07-29)。
+      //   ★prefixが無い/取れない古い記録は所有判定不能＝従来どおり数える(fail-open＝正規投稿を消さない)。
+      var owner = String((items[i] && items[i].videoId) || '').match(/^(acc[12])-/);
+      if (owner && owner[1] !== account) continue;
       var cid = cidOfHistItem_(items[i]);
       if (cid && !map[cid]) map[cid] = items[i]; // 先頭＝新しい順なので最新の投稿を優先
     }
