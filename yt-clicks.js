@@ -235,6 +235,9 @@
         if (typeof pv === 'string' && pv === '') continue;
         copy[q] = pv;
       }
+      // ★意図的クリア印が立っていたら、シートに残る誤挿入の作品短縮URLを表示上も空にする
+      //   (patchのworkShortUrl='' は上の空スキップで効かないので、boolの印で確実に消す)。
+      if (copy.workShortNone) { copy.workShortUrl = ''; copy.workShareUrl = ''; }
       return copy;
     });
     return filterOtherChannel_(items);
@@ -941,9 +944,15 @@
   // 編集保存：YouTube URL(ytMap)と Bluesky URL・作品URL・カテゴリ属性・作品状態(アイテム)を一括更新。
   // 作品クリック計測URL(導線2)を item へ反映。自動生成(_pendingWorkShort)>手入力>クリアの優先。
   function applyWorkShort_(item, typedVal) {
-    if (_pendingWorkShort) { item.workShortUrl = _pendingWorkShort; item.workShareUrl = _pendingWorkShare || _pendingWorkShort; }
-    else if (typedVal) { item.workShortUrl = typedVal; item.workShareUrl = typedVal; }
-    else { delete item.workShortUrl; delete item.workShareUrl; }
+    if (_pendingWorkShort) { item.workShortUrl = _pendingWorkShort; item.workShareUrl = _pendingWorkShare || _pendingWorkShort; delete item.workShortNone; }
+    else if (typedVal) { item.workShortUrl = typedVal; item.workShareUrl = typedVal; delete item.workShortNone; }
+    else {
+      // ★元々入っていた作品短縮URLを消して空で保存した=意図的な削除。印(workShortNone)を残して
+      //   自動生成(autoMeasureWorkShort_)の再充填を止める。これをしないと導線2導入前の履歴に
+      //   誤って入った短縮URLを消しても、作品URLから自動再生成されて復活する(Chami報告2026-07-29)。
+      if (item.workShortUrl || item.workShareUrl) item.workShortNone = true;
+      delete item.workShortUrl; delete item.workShareUrl;
+    }
   }
   function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
     var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
@@ -1036,7 +1045,8 @@
       shortUrl: edited.shortUrl || '',
       shareUrl: edited.shareUrl || '',
       youtube_url: edited.ytUrl || '',
-      work_short_url: edited.workShortUrl || ''
+      work_short_url: edited.workShortUrl || '',
+      work_short_clear: !!edited.workShortNone // ★意図的クリア=GAS側でセルを空に確定(putIfの空スキップを越える)
     };
     ATTR_DEFS.forEach(function (a) { payload[a.key] = !!edited[a.key]; });
     payload.workState = edited.workState || '旧作';
@@ -1054,6 +1064,7 @@
       ['ytUrl', 'workUrl', 'workState', 'shortUrl', 'shareUrl', 'postUrl', 'postUri', 'workShortUrl', 'platform']
         .forEach(function (f) { patch[f] = edited[f] || ''; });
       ATTR_DEFS.forEach(function (a) { patch[a.key] = !!edited[a.key]; });
+      patch.workShortNone = !!edited.workShortNone; // ★意図的クリアの印はboolで保持=リロード跨ぎでも復活させない(#5系)
       (_pendingSheetEdits[curAcct] = _pendingSheetEdits[curAcct] || {})[String(edited.videoId)] = patch;
       savePend_(curAcct, _pendingSheetEdits[curAcct]); // ★リロードを越えて保持(#5根治)
     })();
@@ -1128,6 +1139,7 @@
   //   アフィリンク化→r2短縮して workShortUrl を計測可能なキーに整える。既に r2 なら何もしない(冪等)。
   function autoMeasureWorkShort_(it, persist) {
     try {
+      if (it && it.workShortNone) return; // ★ユーザーが意図的に消した行は自動生成で復活させない(Chami 2026-07-29)
       var go5 = window.Go5Short || {};
       function isR2(u) { return !!(go5.ourBase && go5.ourBase(u)); }  // 両ドメイン+旧r2を自前と認識
       var cur = (it && it.workShortUrl) || '';

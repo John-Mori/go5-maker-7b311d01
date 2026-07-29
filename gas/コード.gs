@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-29H(codeFromShort_をscheme無しURL許容へ＝作品計測URLを"5mgl.com/xxxxx"(https省略の表示形)で貼った投稿の導線2コードを抽出できず日次スナップが0になっていた穴を修正。G(sale_reg)/F(競合フレーム3列)も同梱で継続。Chami「X→作品が0はおかしい」2026-07-29)';
+var GAS_VERSION = '2026-07-29I(upsertにwork_short_clearを追加＝作品短縮URLを意図的に消した保存を空で確定させる。putIfは空を書かず既存値を保護するため、導線2導入前の履歴に誤挿入された短縮URLを消しても復活していた穴を修正。H(codeFromShort_scheme無し許容)を継続。Chami「消して保存するも復活して保存が意味をなさない」2026-07-29)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -853,6 +853,7 @@ function doPost(e) {
       shareUrl: body.shareUrl || '',       // da.gd共有URL(共有URL列)
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから(同IDの行へ後追いupsert)
       workShortUrl: body.work_short_url || '', // 導線2(作品クリック)の計測URL
+      workShortClear: body.work_short_clear === true || body.work_short_clear === 'true', // ★意図的クリア=空でも確定(putIfの空スキップを越えてセルを消す)
       chara: body.chara, jk: body.jk, gyaru: body.gyaru, isekai: body.isekai, harem: body.harem, ai: body.ai, ol: body.ol, soshu: body.soshu, // カテゴリ属性(複数可)
       workState: body.workState,           // 作品状態(新作/準新作/旧作)
       rebuild: body.rebuild,               // この動画自体が作り直し版(動画作成タブのリビルド)
@@ -985,7 +986,8 @@ function writeRecord_(channel, f) {
   putIf('作品URL', f.workUrl || '');                             // 作品URLそのものを保存＝cidから復元できない階層(FANZA動画等)でもシート由来行に作品↗が戻る(Chami「リロードで作品URLが消える」2026-07-28)
   putIf('投稿先', (f.platform === 'x' || f.platform === 'bsky') ? f.platform : ''); // 投稿先(X/Bsky)＝短縮URLだけの行のX↗/Bsky↗表示をリロード後も保持(Chami「原則X投稿」2026-07-29)
   putIf('短縮URL', shortUrl);                                   // r2＝計測用(codeFromShort_対象・r2以外は入れない)
-  putIf('作品短縮URL', f.workShortUrl || '');                    // 導線2(作品クリック)の計測URL=作品クリック数の日次スナップ元
+  if (f.workShortClear) put('作品短縮URL', '');                  // ★ユーザーが意図的に消した=空で確定(導線2導入前の履歴に誤挿入された短縮URLを除去・Chami 2026-07-29)
+  else putIf('作品短縮URL', f.workShortUrl || '');               // 導線2(作品クリック)の計測URL=作品クリック数の日次スナップ元
   putIf('共有URL', f.shareUrl || fbShare || '');                // da.gd＝実際に概要欄へ貼る短いURL(GAS代替はこちらへ)
   putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
