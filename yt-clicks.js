@@ -276,7 +276,8 @@
     return /^[0-9A-Za-z]+$/.test(rest) ? rest : '';
   }
   // 投稿リンクがX(旧Twitter)か判定。(BlueskyのpostUri=at://は常にBsky確定。
-  //   生URLがx.com/twitter.comならX。短縮URLしか無い場合は判別不能=既定Bsky)
+  //   生URLがx.com/twitter.comならX。短縮URLしか無い場合は判別不能=既定X＝platOf_(ラジオ)の既定と一致させる。
+  //   ★旧・既定Bskyだと、保存前は「ラジオ=X」なのに「表示=Bsky↗」に食い違った(Chami報告2026-07-29)。
   function isXLink_(href, it) {
     // 編集で明示指定(X/Bsky)があれば最優先。短縮URLだけの行はURLから判別できないため手動選択が正。
     if (it && it.platform === 'x') return true;
@@ -285,7 +286,8 @@
     var XRE = /(?:x\.com|twitter\.com)\//i;
     if (XRE.test(String(href || ''))) return true;
     if (it && (XRE.test(String(it.postUrl || '')) || XRE.test(String(it.shareUrl || '')))) return true;
-    return false;
+    if (it && /bsky\.app\//i.test(String((it.postUrl || '') + ' ' + (it.shareUrl || '') + ' ' + (it.shortUrl || '')))) return false;
+    return true; // 判別不能=既定X(Chami:これから原則X投稿)。platOf_ と揃える
   }
   // 投稿履歴の「Bsky↗」リンク。Xリンクなら「X↗」表示＋白字黒枠(.vlink-x)へ切替。
   function postLinkHtml_(href, it) {
