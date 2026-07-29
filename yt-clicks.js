@@ -1254,6 +1254,17 @@
       // 導線2(投稿→FANZA): 本文中の作品リンクの計測コード(bluesky.jsが投稿時に置換・記録)
       var wcode = codeOf(it.workShortUrl || '');
       var wclicks = wcode && (wcode in clicksCache) ? clicksCache[wcode] : null;
+      // ★累計は各期間デルタ(今日/昨日/週)を必ず内包する=累計 ≥ 週。短縮コードが差し替わると累計(r2 KV・
+      //   現コード)だけ0に戻り、GASの日次スナップ由来の週(過去コード分)が残って「累計0なのに週8」の矛盾に
+      //   なる(Chami報告2026-07-29 宵桜艶帖「いつも助かってます」)。既知の期間デルタで累計に下限を張り、
+      //   原因が何であれ矛盾表示を消す。(集計の整合。導線1も同じ理屈で揃える)
+      var _dl = vid ? deltaCache[vid] : null;
+      if (_dl) {
+        var cFloor = Math.max(_dl.wc || 0, _dl.tc || 0, _dl.yc || 0);
+        if (cFloor > 0 && code) clicks = Math.max(clicks || 0, cFloor);
+        var wFloor = Math.max(_dl.wwc || 0, _dl.twc || 0, _dl.ywc || 0);
+        if (wFloor > 0 && wcode) wclicks = Math.max(wclicks || 0, wFloor);
+      }
       // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に。(別短縮URLのため加算)
       // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する(例：0+5=5(5))。
       var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
