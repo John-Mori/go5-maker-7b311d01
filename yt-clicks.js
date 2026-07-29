@@ -994,7 +994,7 @@
     if (saved) autoMeasureItem_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
     // 作品クリック計測URL(導線2)も、手入力がr2でなければ自動で計測キー(r2)へ確定させる。
     //   これをしないと codeOf() がコードを取れず、ピンクの矢印(作品クリック数)が表示されない。(Chami報告2026-07-14)
-    if (saved) autoMeasureWorkShort_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
+    if (saved) autoMeasureWorkShort_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); pushItemToGas_(saved); });
     refresh();
   }
 
@@ -1061,6 +1061,17 @@
     refresh();
     if (ytUrl) pokeSnapshotNow_();
 
+    // ★導線2(作品クリック計測URL)が空でも、作品URLがあれば自動生成してシートへ再upsert。
+    //   Chami報告(2026-07-29)「作品クリック計測用の短縮URLは反映されてない。空欄のまま」対策。
+    //   シート由来行はlocalStorageへ書き戻さない(INC-112防壁)ので、保持patch(_pendingSheetEdits)へ反映する。
+    if (!edited.workShortUrl && edited.workUrl) {
+      autoMeasureWorkShort_(edited, function () {
+        var pm = _pendingSheetEdits[curAcct]; var pv = pm && pm[String(edited.videoId)];
+        if (pv) { pv.workShortUrl = edited.workShortUrl || ''; pv.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm); }
+        try { pushItemToGas_(edited); } catch (e) {}
+      });
+    }
+
     // ── ここから裏方(非ブロッキング): GASへupsert→履歴再読込で反映を確認。失敗時だけ静かに通知する。──
     var finished = false, verifyStarted = false;
     function bgFail_(message) {
@@ -1121,7 +1132,12 @@
       function isR2(u) { return !!(go5.ourBase && go5.ourBase(u)); }  // 両ドメイン+旧r2を自前と認識
       var cur = (it && it.workShortUrl) || '';
       if (!it || !go5.ourBase || typeof window.Go5MakeShort !== 'function') return;
-      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 値なし/既に自前短縮＝そのまま
+      // ★導線2(作品クリック計測URL)が空でも、作品URLがあれば作品URLから計測短縮を起こす。
+      //   狙い(Chami報告2026-07-29「作品クリック計測用の短縮URLは反映されてない。空欄のまま」):
+      //   投稿時に本文へ生リンクが無く導線2が捕捉できなかった記録でも、編集を開いた時点で
+      //   作品URL→アフィリンク→r2短縮を自動生成して埋める。空をそのまま放置しない。
+      if (!/^https?:\/\//.test(cur)) cur = (it && it.workUrl) || '';
+      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 値なし(作品URLも無し)/既に自前短縮＝そのまま
       var toShorten = cur;
       // FANZA/DMMの作品ページURL(al.fanza等のアフィリンクではない)なら、先にアフィリンク化する。
       if (window.buildAffiliateLink && /(^|\.)dmm\.co\.jp|(^|\.)dlsite|fanza/.test(cur) && !/al\.(fanza|dmm)/.test(cur)) {

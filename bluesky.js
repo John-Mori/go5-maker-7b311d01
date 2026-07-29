@@ -1204,7 +1204,8 @@
       channel: account,                                   // ★所属アカウント＝post_uriのDIDで確定した正しいチャンネル
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
       workUrl: workUrl, hashtags: record.hashtags || '', postUri: record.postUri || '',
-      shortUrl: record.shortUrl || '', shareUrl: record.shareUrl || '', videoId: vid
+      shortUrl: record.shortUrl || '', shareUrl: record.shareUrl || '', videoId: vid,
+      work_short_url: record.workShortUrl || '' // 導線2(作品クリック計測URL)＝アカウント移送/再記録でも欠落させない
     };
     if (record.postedAt) payload.postedAt = record.postedAt; // 過去データ矯正時は当時の投稿時刻を保持
     MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = !!attrs[p[0]]; });
@@ -1314,7 +1315,7 @@
       if (gasUrl) {
         moved.forEach(function (mv) {
           var it = mv.item;
-          recordToSheet({ account: mv.to, meta: metaFromHistItem_(it), title: it.title, postUrl: it.postUrl, postUri: it.postUri, videoId: it.videoId, shortUrl: it.shortUrl, shareUrl: it.shareUrl, workUrl: it.workUrl, workState: it.workState, rebuild: it.rebuild, postedAt: it.ts ? new Date(it.ts).toISOString() : '' });
+          recordToSheet({ account: mv.to, meta: metaFromHistItem_(it), title: it.title, postUrl: it.postUrl, postUri: it.postUri, videoId: it.videoId, shortUrl: it.shortUrl, shareUrl: it.shareUrl, workUrl: it.workUrl, workShortUrl: it.workShortUrl, workState: it.workState, rebuild: it.rebuild, postedAt: it.ts ? new Date(it.ts).toISOString() : '' });
           if (it.postUri) jsonpGet(gasUrl + '?action=delete&channel=' + encodeURIComponent(mv.from) + '&postUri=' + encodeURIComponent(it.postUri), function () {});
         });
       }
