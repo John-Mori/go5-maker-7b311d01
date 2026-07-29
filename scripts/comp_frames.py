@@ -207,9 +207,21 @@ def main():
     if BASE_MODEL not in behop.list_models(key):
         print(f"ABORT: {BASE_MODEL} がこのキーで使えません。")
         return 5
+    # ★2枠束ね(Chami 2026-07-30・msg 1532071671765143773「もしflashでも問題なければ
+    #   もうひとつのGemini(ホイミン)も必要なら優先的に使って」)。ベホップのflash無料枠が
+    #   尽きた(429)ら、ホイミンのキー(local/gemini_api_key.txt・別アカ=別枠)へ切り替えて続行する。
+    #   ホイミンの別キーでも flash が焼き込み文字を読めることは実測済(2026-07-30)。無ければ従来通り1枚で回す。
+    keys = [("ベホップ", key)]
+    try:
+        homin = open(os.path.join(ROOT, "local", "gemini_api_key.txt"), encoding="utf-8").read().strip()
+    except OSError:
+        homin = ""
+    if homin and homin != key:
+        keys.append(("ホイミン", homin))
 
     results, ok = [], 0
     quota_hit = False
+    kidx = 0                 # 現在使っているキーの番号(429で尽きたら次へ進めて戻さない)
     for it in items:
         vid = it.get("videoId", "")
         dur = float(it.get("durationSec") or 0)
@@ -221,9 +233,18 @@ def main():
             if not frame:
                 print(f"  {vid}: フレーム取得失敗(スキップ)")
                 continue
-            text, status = behop.ask_pro(key, VISION_PROMPT, [frame], BASE_MODEL)
-            if status == "quota":
-                print(f"  {vid}: 無料枠が尽きた(429)。本日はここで打ち切り、残りは翌日pendingへ繰り越し。")
+            # 現キーで試し、429ならそのキーは以後使わず次のキー(ホイミン)へ回して同じフレームを取り直す。
+            text, status = None, None
+            while kidx < len(keys):
+                kname, kval = keys[kidx]
+                text, status = behop.ask_pro(kval, VISION_PROMPT, [frame], BASE_MODEL)
+                if status == "quota":
+                    print(f"  {vid}: {kname}のflash無料枠が尽きた(429)→次のキーへ切替")
+                    kidx += 1
+                    continue
+                break
+            if kidx >= len(keys):
+                print(f"  {vid}: 全キーの無料枠が尽きた(429)。本日はここで打ち切り、残りは翌日pendingへ繰り越し。")
                 quota_hit = True
                 break
             if status != "ok":
