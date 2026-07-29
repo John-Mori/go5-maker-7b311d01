@@ -422,6 +422,24 @@
     }, INFOMISS_FAST_TTL + 3000);              // TTLより少し長く=再描画時に必ず再取得が解禁される
   }
 
+  // 「ユーザーが見に来た」瞬間(タブへ戻る/アプリ再前面化)に、素早い再取得フェーズ(25秒×6回)を
+  //   使い切って20分間隔へ落ちてしまった核未取得の候補を、もう一度素早く追う状態へ戻す。
+  //   ★試行回数(n)だけ0に戻し、直近試行時刻(at)は残す＝直後の連続再描画では叩かず、25秒経てば
+  //   backfillが解禁され、hasFastPendingInfo_→scheduleInfoTick_の自動追跡も再開する。
+  //   取れきる/回数上限/タブ離脱で再び自然に落ち着く(無限ポーリングにならない)。
+  function kickInfoBackfill_() {
+    try {
+      var key = itemsKey(_activeTab), items = lsGet(key, '[]');
+      var miss = lsGet(K_INFOMISS, '{}'), changed = false;
+      items.forEach(function (it) {
+        if (!needsInfoBackfill_(it) || !coreInfoMissing_(it)) return;
+        var rec = missRec_(miss, it.cid);
+        if (rec && rec.n >= INFOMISS_FAST_TRIES) { miss[it.cid] = { at: rec.at, n: 0 }; changed = true; }
+      });
+      if (changed) lsSet(K_INFOMISS, miss);
+    } catch (e) {}
+  }
+
   // ── 現在描画中カードの cid→item 索引(サムネ/投稿画像モーダルが item を引くため)──
   var _cardIndex = {};
   function itemByCid_(cid) { return _cardIndex[cid] || null; }
@@ -1678,6 +1696,7 @@
   function render() {
     var page = $('pageCand');
     if (!page) return;
+    kickInfoBackfill_(); // タブへ戻ってきた時=未取得タイトルの追跡を素早いフェーズへ戻す(この後の描画でbackfillが回る)
     var tabs = lsGet(K_TABS, '[]');
     var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 バズ</button>' +
       '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 候補</button>' +
@@ -3065,6 +3084,16 @@
     refImgsSet: function (cid, arr) { if (!cid) return false; var cur = refImgOf(cid) || {}; return refImgSave(cid, { imgs: (arr || []).filter(Boolean), comment: cur.comment || '', memo: cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' }); }, // 動画で使った画像(配列)を差し替え保存(コメント等は保持)
     bskyImgSet: function (cid, durl) { if (!cid) return false; return bskyImgSave(cid, durl || ''); } // Bluesky添付画像(単発)を設定/クリア
   }; } catch (e) {}
+  // アプリを他アプリ/他タブから前面へ戻した時、候補パネルが表示中なら未取得タイトルを追い直す。
+  //   (Chamiが候補追加→別アプリで確認→戻ってくる導線＝再操作なしで埋める。画面に無ければ何もしない)
+  try {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState !== 'visible') return;
+      var el = document.getElementById('candList');
+      if (!el || el.offsetParent === null) return; // 候補が画面に無い＝無駄な通信をしない
+      render(); // 先頭で kickInfoBackfill_ → backfill が即解禁される
+    });
+  } catch (e) {}
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行(5MB枠を解放)
   // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ(登録済みはフラグでスキップ＝通信は初回のみ)
   ensureTrackedAll();
