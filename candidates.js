@@ -1286,18 +1286,20 @@
         window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }));
       }).catch(function () {});
     }
-    // U-2「一気に作成」：作品データを流し込んだら、作成ボタンまで運んで光らせる＝残り1タップ。(行動量支援)
-    focusMakeButton_();
+    // 作品データを流し込んだら、動画タブの「上部」に着地させる(Chami依頼2026-07-29：
+    //   投稿編集→動画生成で最下段の作成ボタンへ強制スクロールしていたのをやめ、上から順に確認できるように)。
+    //   作成ボタンは光らせておく＝下までスクロールすれば残り1タップと分かる(行動量支援は維持)。
+    landAtMovieTop_();
   }
-  // 作成ボタン(#makeBtn)を画面内へスクロール＋一時ハイライト＋フォーカス。無ければ先頭へ。
-  function focusMakeButton_() {
+  // 動画タブの先頭へスクロール＋作成ボタン(#makeBtn)を一時ハイライト(スクロールはしない)。
+  function landAtMovieTop_() {
     setTimeout(function () {
+      try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (e) { try { window.scrollTo(0, 0); } catch (e2) {} }
       var mk = document.getElementById('makeBtn');
-      if (!mk) { try { window.scrollTo(0, 0); } catch (e) {} return; }
-      try { mk.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { try { window.scrollTo(0, 0); } catch (e2) {} }
-      try { mk.focus({ preventScroll: true }); } catch (e) {}
-      mk.classList.add('cta-ready-pulse');
-      setTimeout(function () { mk.classList.remove('cta-ready-pulse'); }, 2400);
+      if (mk) {
+        mk.classList.add('cta-ready-pulse');
+        setTimeout(function () { mk.classList.remove('cta-ready-pulse'); }, 2400);
+      }
     }, 260); // タブ切替の描画が終わってから
   }
   // 保存直後に、その候補カードのサムネ＋コメント/メモを即時反映。(一覧を全再描画せず＝スクロール位置を保つ)
@@ -1500,16 +1502,46 @@
         });
       });
     });
-    el.querySelectorAll('[data-bsky]').forEach(function (b) {
+    el.querySelectorAll('[data-reloadinfo]').forEach(function (b) {
       b.addEventListener('click', function () {
-        var cid = b.getAttribute('data-bsky'), it = itemByCid_(cid); if (!it) return;
-        openBskyImgModal_(it, function () {
-          var has = bskyImgHas(cid);
-          b.classList.toggle('has-img', has);
-          b.innerHTML = has ? '🦋✓' : '🦋';
-        });
+        var cid = b.getAttribute('data-reloadinfo'); if (!cid) return;
+        reloadWorkInfo_(cid, b);
       });
     });
+  }
+  // 1作品だけ作品情報(タイトル・サムネ・作者・価格・発売日・レビュー等)をworkerから取り直して候補データへ書き戻す。
+  //   「情報は取れたがサムネだけ空」のような部分取得を、作品ごとに手動で埋め直すための導線(Chami依頼2026-07-29)。
+  //   一時失敗(タイムアウト/5xx=retryable)は1回だけ即リトライしてから諦める(追加時・backfillと同じ作法)。
+  function reloadWorkInfo_(cid, btn) {
+    var it = itemByCid_(cid); if (!it) return;
+    if (!window.FanzaCore) { if (btn) { btn.textContent = '⚠️ 取得不可'; } return; }
+    var cfg = workerCfg(); if (!cfg.url) { if (btn) { btn.textContent = '⚠️ worker未設定'; } return; }
+    if (btn && btn.disabled) return;
+    var label = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 取得中…'; }
+    var once = function () { return window.FanzaCore.fetchFanzaInfo(cid, cfg.url, cfg.secret, it.url); };
+    once().then(function (info) {
+      if (info && info.title) return info;
+      if (info && info.retryable) return once();
+      return info;
+    }).then(function (info) {
+      if (!(info && info.title)) { if (btn) { btn.disabled = false; btn.textContent = '⚠️ 失敗'; setTimeout(function () { btn.innerHTML = label; }, 2200); } return; }
+      // ★書き戻しは現在のlocalStorage配列を読み直してcidで当てる(古い参照itemsを上書きしない・backfillと同じ考え方)。
+      var key = itemsKey(_activeTab), arr = lsGet(key, '[]'), changed = false;
+      arr.forEach(function (x) {
+        if (!x || x.cid !== cid) return;
+        x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
+        x.listPrice = info.listPrice; x.price = info.price; x.discountPct = info.discountPct || 0;
+        x.date = info.releaseDate || ''; x.genres = info.genres || [];
+        x.reviewCount = info.reviewCount; x.reviewAvg = info.reviewAvg;
+        if (info.samples && info.samples.length) x.samples = info.samples;
+        changed = true;
+      });
+      if (changed) { lsSet(key, arr); recordReviewSnapshots(arr); }
+      // 取り直せたら未取得フェーズの記録も掃除(再取得の追跡対象から外す)。
+      try { var miss = lsGet(K_INFOMISS, '{}'); if (miss[cid] != null) { delete miss[cid]; lsSet(K_INFOMISS, miss); } } catch (e) {}
+      renderCandList(_activeTab); // サムネ含め即反映(リロード不要)
+    }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = '⚠️ 失敗'; setTimeout(function () { btn.innerHTML = label; }, 2200); } });
   }
   // 「▶今すぐ取得」ボタンの共通配線。(notceParentId=通知メッセージを差し込む要素id)
   function bindPcRun_(btn, noticeParentId) {
@@ -3006,7 +3038,6 @@
       : ((rc != null) ? ('レビュー ' + num(rc) + '件' + avg) : 'レビュー 取得不可');
     var salesHtml = '<div class="cand-sales">' + salesPart + ' ・ ' + reviewPart + '</div>';
     var hasRef = refImgHas(it.cid);
-    var hasBsky = bskyImgHas(it.cid);
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像(複数可)
     var refImgSrc = refImgs[0] || '';
     var _refRec = refImgOf(it.cid) || {};
@@ -3026,7 +3057,9 @@
       (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B↗' : 'X↗') + '</a>'; })(it.twitterUrl) : '') +
       (_refRec.twitterUrl2 ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B2↗' : 'X2↗') + '</a>'; })(_refRec.twitterUrl2) : '') +
       '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">投稿編集</button>' +
-      '<button type="button" class="cand-bsky-btn' + (hasBsky ? ' has-img' : '') + '" data-bsky="' + esc(it.cid) + '" title="Bluesky投稿に添付する画像を保存">🦋' + (hasBsky ? '✓' : '') + '</button>';
+      // 🦋(Bluesky添付画像)ボタンは全く使っていないため撤去(Chami依頼2026-07-29)。跡地へ「作品情報リロード」を配置。
+      //   FANZA作品のみ対象(X/Bluesky候補にはFANZA情報が無い)。押すと単発でworkerから取り直し=サムネ未表示等を埋める。
+      (isInfoTarget_(it) ? '<button type="button" class="cand-reload-btn" data-reloadinfo="' + esc(it.cid) + '" title="作品情報(サムネ・タイトル・価格等)を取得し直す">🔁作品情報</button>' : '');
     return '<div class="cand-card' + _postCls + '" data-work-search="' + esc(workSearchText_(it)) + '">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +

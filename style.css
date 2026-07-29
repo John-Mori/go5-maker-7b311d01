@@ -350,10 +350,12 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-thumb-click{cursor:zoom-in;}
 .cand-thumb-click:active{opacity:.85;}
 /* 投稿画像ボタン（作品リンクの右）。保存済みは強調。 */
-.cand-refimg-btn,.cand-bsky-btn{width:auto;margin:0;flex:0 0 auto;font-size:11px;padding:4px 8px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;}
+.cand-refimg-btn,.cand-bsky-btn,.cand-reload-btn{width:auto;margin:0;flex:0 0 auto;font-size:11px;padding:4px 8px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;}
 .cand-refimg-btn.has-img{border-color:#c0392b;color:#c0392b;font-weight:700;}
 .cand-bsky-btn{padding:4px 9px;}
 .cand-bsky-btn.has-img{border-color:#1185fe;color:#1185fe;font-weight:700;}
+.cand-reload-btn:active{opacity:.75;}
+.cand-card.cand-nocomment .cand-actions .cand-reload-btn{padding:4px 6px;font-size:10.5px;}
 .paste-btn{font-size:12px;border-radius:8px;border:1px solid var(--line);background:#fffef9;color:var(--sub);cursor:pointer;}
 /* 投稿画像モーダル内（.fz-modal＝ダーク）の入力要素 */
 .cand-refimg-preview{text-align:center;}
