@@ -45,6 +45,11 @@ jobs:
       - name: シート保存連鎖の検査
         run: node scripts/check_sheet_chain.mjs
 
+      # クリック集計(累計/週)の不変条件を固定する門。短縮コード差し替えで「累計0なのに週-16」等の
+      #   矛盾が繰り返しChamiから再報告された型(2026-07-30朝レビュー)。積み直しロジックの静かな回帰を止める。
+      - name: クリック集計の不変条件検査
+        run: node scripts/check_click_recon.mjs
+
   smoke:
     runs-on: ubuntu-latest
     needs: secret-guard
