@@ -26,6 +26,18 @@
       if (ok) { lk.href = url; lk.textContent = url; lk.dataset.url = url; lk.style.display = 'inline-block'; }
       else { lk.removeAttribute('href'); lk.textContent = ''; lk.dataset.url = ''; lk.style.display = 'none'; }
     }
+    // ★短縮URLを概要欄テキストボックス(draftYtDescText)の最上段にも入れる(Chami指示2026-07-29)。
+    //   既存の先頭URL行(+続く空行)を一旦剥がしてから入れ直す=貼り替えても重複しない。空なら剥がすだけ。
+    //   ここ1箇所に集約=貼り付け時(applyXPostUrl_)もモーダル再表示時(openPostModal_)も同じ経路で最上段に乗る。
+    var ta = $('draftYtDescText');
+    if (ta) {
+      var lines = String(ta.value || '').split('\n');
+      if (lines.length && /^https?:\/\//.test((lines[0] || '').trim())) {
+        lines.shift(); if (lines.length && lines[0].trim() === '') lines.shift();
+      }
+      var body = lines.join('\n');
+      ta.value = ok ? (url + (body ? '\n\n' + body : '')) : body;
+    }
   }
   // 貼り付けたX投稿リンクを link-worker で短縮してスロットへ入れる(全滅時は生URL)。
   function applyXPostUrl_(raw, btn) {
@@ -166,12 +178,26 @@
     if (!store) { alert('IndexedDB未対応のため再DLできません。'); return; }
     store.get('stock_v_' + id).then(function (blob) {
       if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url; a.download = videoName || 'video.mp4';
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+      var name = videoName || 'video.mp4';
+      // ★iPhoneはカメラロール(アルバム)へ直接入れたい(Chami指示2026-07-29)。<a download>だと「ファイル」アプリ止まりで
+      //   写真アルバムに入らない。Web共有シート(navigator.share)には「ビデオを保存」があり、そこからアルバムへ入る=
+      //   本体タブの保存ボタン(app.js saveBtn)と同じ経路。共有が使えない/断られた時だけ従来の<a download>へ落とす。
+      var file = null;
+      try { file = new File([blob], name, { type: blob.type || 'video/mp4' }); } catch (e) {}
+      if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: name }).catch(function () { anchorDownload_(blob, name); });
+        return;
+      }
+      anchorDownload_(blob, name);
     }).catch(function () { alert('動画データの取得に失敗しました。'); });
+  }
+  // 共有が使えない/キャンセル時のフォールバック=従来の <a download>(PC・非対応ブラウザはこちら)。
+  function anchorDownload_(blob, name) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name || 'video.mp4';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
   }
 
   // ── 投稿完了処理 ──
@@ -493,10 +519,9 @@
     $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
     $('draftCopyYtDesc').addEventListener('click', function () {
-      var body = ($('draftYtDescText') || {}).value || '';
-      var slot = $('draftYtDescUrlLink');
-      var url = (slot && slot.dataset.url) || '';
-      copyText_(url ? (url + '\n\n' + body) : body, this);
+      // 短縮URLは概要欄テキストボックスの最上段に既に入っている(setDescUrlSlot_)ので、
+      //   テキストボックスの中身をそのままコピーする(先頭URLを二重に足さない)。
+      copyText_(($('draftYtDescText') || {}).value || '', this);
     });
     $('draftYtDescText').addEventListener('input', saveDraftPost_);
     $('draftPasteXPostUrl').addEventListener('click', function () {
@@ -521,8 +546,9 @@
       }
     });
     $('draftModalSave').addEventListener('click', function () {
+      // 保存したらモーダルを閉じる(Chami指示2026-07-29「内容を保存を押したら保存してモーダルが閉じるように」)。
       saveDraftPost_();
-      var btn = this; var orig = btn.textContent; btn.textContent = '保存しました'; setTimeout(function () { btn.textContent = orig; }, 2000);
+      m.style.display = 'none'; _modalMeta = null;
     });
     $('draftModalClose').addEventListener('click', function () { m.style.display = 'none'; _modalMeta = null; });
     $('draftModalComplete').addEventListener('click', function () {
