@@ -329,14 +329,35 @@
   //   追加した直後、FANZA workerがその時たまたま部分情報(画像のみ)しか返せなかった作品は
   //   title/date が空のまま残り、作品状態(新作/準新作/旧作)バッジも出ない。販売数(fetchSalesFor)と
   //   同じパターンで、表示のたびに未取得ぶんを控えめに再取得し、取れたら候補データへ書き戻す。
-  var K_INFOMISS = 'cand_infomiss'; // {cid: atMs}  直近の再取得試行時刻(無駄打ち防止)
-  var INFOMISS_RETRY_TTL = 20 * 60 * 1000; // 同じcidの再試行は20分に1回まで
+  var K_INFOMISS = 'cand_infomiss'; // {cid:{at,n}} 直近の再取得試行時刻と試行回数(無駄打ち防止＋追加直後は素早く追う)
+  var INFOMISS_RETRY_TTL = 20 * 60 * 1000; // 落ち着いた後の再試行間隔(20分に1回)
+  var INFOMISS_FAST_TTL  = 25 * 1000;      // 追加直後の未取得は素早く再取得(25秒に1回)
+  var INFOMISS_FAST_TRIES = 6;             // 素早い再取得はこの回数まで(以後は20分間隔へ落として無駄打ちを防ぐ)
+  // 旧形式(数値=試行時刻のみ)との後方互換で {at,n} に正規化する。
+  function missRec_(miss, cid) {
+    var r = miss[cid];
+    if (r == null) return null;
+    if (typeof r === 'number') return { at: r, n: 1 };
+    return { at: r.at || 0, n: r.n || 0 };
+  }
   function needsInfoBackfill_(it) {
     return isInfoTarget_(it) && (!it.title || it.title === '(タイトル未取得)' || !it.date || it.reviewCount == null);
   }
-  function infoBackfillTtl_(it) {
-    var coreMissing = !it || !it.title || it.title === '(タイトル未取得)' || !it.date;
-    return coreMissing ? INFOMISS_RETRY_TTL : 24 * 3600 * 1000;
+  function coreInfoMissing_(it) {
+    return !it || !it.title || it.title === '(タイトル未取得)' || !it.date;
+  }
+  function infoBackfillTtl_(it, rec) {
+    // タイトル等が揃い、レビュー数だけ薄い時は1日1回で十分。核(タイトル/発売日)が欠けている間は素早く追う。
+    if (!coreInfoMissing_(it)) return 24 * 3600 * 1000;
+    return (rec && rec.n >= INFOMISS_FAST_TRIES) ? INFOMISS_RETRY_TTL : INFOMISS_FAST_TTL;
+  }
+  // まだ「素早い再取得」フェーズに居る未取得候補が残っているか(=タブを見ている間に自動で追う対象)。
+  function hasFastPendingInfo_(items) {
+    var miss = lsGet(K_INFOMISS, '{}');
+    return (items || []).some(function (it) {
+      if (!needsInfoBackfill_(it) || !coreInfoMissing_(it)) return false;
+      var rec = missRec_(miss, it.cid); return !rec || rec.n < INFOMISS_FAST_TRIES;
+    });
   }
   function backfillMissingInfo_(key, items, cb) {
     if (!window.FanzaCore) { cb(false); return; }
@@ -344,13 +365,20 @@
     var miss = lsGet(K_INFOMISS, '{}'), now = new Date().getTime();
     var targets = items.filter(function (it) {
       if (!needsInfoBackfill_(it)) return false;
-      var last = miss[it.cid]; return !last || (now - last) >= infoBackfillTtl_(it);
+      var rec = missRec_(miss, it.cid); return !rec || (now - rec.at) >= infoBackfillTtl_(it, rec);
     }).slice(0, 12); // 一度に叩きすぎない(無駄打ち防止・worker保護)
     if (!targets.length) { cb(false); return; }
     var pending = targets.length, updates = {}; // cid -> 取得できた差分フィールド
     targets.forEach(function (it) {
-      miss[it.cid] = now;
-      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url).then(function (info) {
+      var prev = missRec_(miss, it.cid);
+      miss[it.cid] = { at: now, n: (prev ? prev.n : 0) + 1 };
+      // 一時失敗(タイムアウト/5xx=retryable)は追加時と同じく1回だけ即リトライしてから諦める(スマホ回線の単発失敗で20分待たせない)。
+      var once = function () { return window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url); };
+      once().then(function (info) {
+        if (info && info.title) return info;
+        if (info && info.retryable) return once();
+        return info;
+      }).then(function (info) {
         if (info && info.title) {
           updates[it.cid] = {
             title: info.title, author: info.author || undefined,
@@ -378,6 +406,20 @@
       if (changed) lsSet(key, cur);
       cb(changed);
     }
+  }
+
+  // 追加直後の未取得タイトルを、タブ表示中に自動で追いかける自己再予約タイマー。
+  //   素早い再取得フェーズ(n<INFOMISS_FAST_TRIES)の未取得が残る間だけ、TTLより少し長い間隔で
+  //   1回だけ再描画を予約する。再描画が backfill を回し、まだ残れば scheduleInfoTick_ が再度予約する
+  //   ＝取れきる/回数上限/タブ離脱 のいずれかで自然に止まる(無限ループ・多重予約なし)。
+  var _infoTickTimer = null;
+  function scheduleInfoTick_(tabId, items) {
+    if (_infoTickTimer) return;                // 二重予約しない
+    if (!hasFastPendingInfo_(items)) return;   // 追う対象が無ければ止める
+    _infoTickTimer = setTimeout(function () {
+      _infoTickTimer = null;
+      if (_activeTab === tabId) renderCandList(tabId); // 再描画→backfill→(まだ残れば)再予約
+    }, INFOMISS_FAST_TTL + 3000);              // TTLより少し長く=再描画時に必ず再取得が解禁される
   }
 
   // ── 現在描画中カードの cid→item 索引(サムネ/投稿画像モーダルが item を引くため)──
@@ -2707,6 +2749,9 @@
     fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
     // タイトル/発売日が未取得の候補を控えめに再取得。(追加直後の一時的な部分取得を自動で埋める)
     backfillMissingInfo_(key, arr, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
+    // 追加直後の未取得は、タブを開いている間だけ自動で追いかける(ユーザーの再操作/再オープンを待たない)。
+    // 素早い再取得フェーズの未取得が残る間のみ、短い間隔で1回だけ再描画を予約する(TTLが無駄打ちを抑える)。
+    scheduleInfoTick_(tabId, arr);
   }
 
   // ── サークルタブ ──
