@@ -346,6 +346,8 @@ window.SCH = window.SCH || {};
   function handleParentMessage(ev) {
     const d = ev.data;
     if (!d || d.target !== "sch-calendar") return;
+    // 親がカレンダータブを表示した合図。iframeは再ロードされないので、開くたびに今日へ寄せる。
+    if (d.type === "show") { requestAnimationFrame(function () { scrollToToday(false); }); return; }
     if (d.type === "recompute") { recomputeAndRender(); return; }
     if (d.type !== "slot-writeback") return;
     const s = lastRender && lastRender.slots && lastRender.slots[d.id];

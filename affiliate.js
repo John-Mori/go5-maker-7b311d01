@@ -28,7 +28,7 @@
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む。(遅延ロード)
   function lazyLoadCalendar() {
     var f = document.getElementById('calFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=23');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=27');
   }
   function showTab(activeBtnId) {
     TABS.forEach(function (t) {
@@ -42,7 +42,15 @@
     document.documentElement.setAttribute('data-tab', activeBtnId);
     // リロード/再アクセス時に前回のタブを復元するため保存。
     try { localStorage.setItem('go5_active_tab', activeBtnId); } catch (e) {}
-    if (activeBtnId === 'tabCal') lazyLoadCalendar();
+    if (activeBtnId === 'tabCal') {
+      lazyLoadCalendar();
+      // iframeは再ロードされないため、開くたびに「表示された」と伝えて今日へ寄せさせる。
+      // 初回はロード直後でリスナ未装着なので iframe 側の初回スクロールが担う。表示反映を待って rAF で送る。
+      var cf = document.getElementById('calFrame');
+      if (cf && cf.contentWindow) requestAnimationFrame(function () {
+        cf.contentWindow.postMessage({ target: 'sch-calendar', type: 'show' }, '*');
+      });
+    }
     if (activeBtnId === 'tabRank'    && window.YtRank)   window.YtRank.renderRank();
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
     if (activeBtnId === 'tabReserve' && window.Scheduler) window.Scheduler._renderTab();
