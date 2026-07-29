@@ -246,7 +246,11 @@
     var g = window.Go5Short;
     var base = (g && g.ourBase) ? g.ourBase(shortUrl) : '';  // 両ドメイン+旧r2のどれかに一致したベース
     if (!base || !shortUrl) return '';
-    var rest = shortUrl.slice(base.length + 1).split(/[/?#]/)[0];
+    // ★base.length で切ると scheme 無しURL("5mgl.com/xxxxx")でズレる。両者から scheme を外して比較・抽出する。
+    var bareBase = base.replace(/^https?:\/\//, '');
+    var bareUrl = String(shortUrl).replace(/^https?:\/\//, '');
+    if (bareUrl.indexOf(bareBase + '/') !== 0) return '';
+    var rest = bareUrl.slice(bareBase.length + 1).split(/[/?#]/)[0];
     return /^[0-9A-Za-z]+$/.test(rest) ? rest : '';
   }
   // 投稿リンクがX(旧Twitter)か判定。(BlueskyのpostUri=at://は常にBsky確定。

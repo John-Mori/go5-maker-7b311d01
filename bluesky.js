@@ -1410,12 +1410,16 @@
   }
   // 「そのURLは自前の短縮ドメインか?」一致したベースを返す(両ドメイン+旧r2+端末上書きに対応)。
   function ourShortBase(u) {
-    u = String(u || '');
+    // ★スキーム無し(例 "5mgl.com/YD5dl")も許容する。Chamiが画面表示の短縮URL(https:// を省いた表示形)を
+    //   そのまま作品計測欄へ貼ると scheme 無しで保存され、旧実装はコード抽出に失敗して計測が0/⚠に見えていた。
+    //   (実クリックはr2に存在=15回。2026-07-29)。返り値は正規(https付き)ベースのまま=呼び出し側は不変。
+    var bare = String(u || '').replace(/^https?:\/\//, '');
     var hosts = SHORT.WORKER_HOSTS.slice();
     try { var ov = localStorage.getItem('short_worker_url'); if (ov) hosts.push(ov); } catch (e) {}
     for (var i = 0; i < hosts.length; i++) {
       var b = hosts[i].replace(/\/+$/, '');
-      if (b && u.indexOf(b + '/') === 0) return b;
+      var bb = b.replace(/^https?:\/\//, '');
+      if (bb && bare.indexOf(bb + '/') === 0) return b;
     }
     return '';
   }

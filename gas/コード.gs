@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-29G(名前付きセールURLの短縮コードをaction=sale_regでアカウント別に登録し、snapshotStatsが各コードを個別スナップ=投稿履歴のセール会場を名前別に今日/昨日/週まで出せるようにした。Fの競合フレーム3列も同梱で継続。Chami「夏セールのURLも貼ってるのに表示がない」2026-07-29)';
+var GAS_VERSION = '2026-07-29H(codeFromShort_をscheme無しURL許容へ＝作品計測URLを"5mgl.com/xxxxx"(https省略の表示形)で貼った投稿の導線2コードを抽出できず日次スナップが0になっていた穴を修正。G(sale_reg)/F(競合フレーム3列)も同梱で継続。Chami「X→作品が0はおかしい」2026-07-29)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -1161,10 +1161,11 @@ function shortSecret_() { return prop_('SHORT_SHARED_SECRET') || 'daremogamewoub
 // 自前ワーカーのURLから末尾コードを抽出。(da.gd等の別ホストは '')
 function codeFromShort_(url) {
   var s = String(url || '');
+  var bare = s.replace(/^https?:\/\//, '');   // ★scheme無し("5mgl.com/YD5dl")も許容(画面表示形をそのまま貼った投稿対策)
   for (var i = 0; i < SHORT_WORKER_HOSTS.length; i++) {
-    var base = SHORT_WORKER_HOSTS[i].replace(/\/+$/, '');
-    if (s.indexOf(base + '/') === 0) {
-      var rest = s.slice(base.length + 1).split(/[/?#]/)[0];
+    var base = SHORT_WORKER_HOSTS[i].replace(/\/+$/, '').replace(/^https?:\/\//, '');
+    if (bare.indexOf(base + '/') === 0) {
+      var rest = bare.slice(base.length + 1).split(/[/?#]/)[0];
       if (/^[0-9A-Za-z]+$/.test(rest)) return rest;
     }
   }
