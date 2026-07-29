@@ -2745,6 +2745,17 @@
   }
   // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得。(renderだけだと「…」のままになる)
   document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeRestoreYt_(); } else render(); });
+  // ★すぐ表示(Chami依頼2026-07-29「リロードで毎回全部読み込み直して遅い/毎回要る物と要らない物を分けて」):
+  //   リロード直後はまず localStorage の永続キャッシュ(yt_meta_cache=題名/再生数/日付・clicks_cache=クリック数)
+  //   から即描画し、シート由来行だけ先に取りに行く。重い再取得(YouTube再生数・クリックの再フェッチ/自動生成/
+  //   各種復元)は下の 2500ms 便に残す=初回表示を2.5秒待たせない。render/merge は冪等なので下の refresh() と二重でも無害。
+  function paintCachedNow_() {
+    var pv = $('pageVerify'); if (!pv || pv.hidden) return;
+    try { render(); } catch (e) {}           // 在メモリの永続キャッシュから即描画(通信0)
+    try { mergeSheetExtras_(); } catch (e) {} // シート由来行だけ先に取得(TTL内なら通信0)。応答後に自身がrender()
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', paintCachedNow_);
+  else paintCachedNow_();
   // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理。(各1回)
   setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
 
