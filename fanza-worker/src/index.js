@@ -910,10 +910,11 @@ async function scrapeFanzaItem(cid, srcUrl) {
     dateStr = rdM.length >= 4 && rdM[2] ? (rdM[1] + "-" + ("0" + rdM[2]).slice(-2) + "-" + ("0" + rdM[3]).slice(-2)) : rdM[1];
   }
 
-  // ジャンル（FANZAブックス：商品詳細の data-testid="volume-description-genre" のアンカー、
+  // ジャンル（FANZAブックス：商品詳細の data-testid="volume-detail-info-genre" のアンカー、旧構造 volume-description-genre も許容、
   //   無ければJSON-LDの genre 配列）。同人ページはこのアンカーが無いので従来どおり空になる。
+  //   ★実ページ検証(2026-07-29)=現行testidは volume-detail-info-genre。旧名だけだと0件でJSONフォールバック頼みだった。
   var genreArr = [];
-  var gRe = /data-testid=["']volume-description-genre["'][^>]*>\s*([^<]+?)\s*</g;
+  var gRe = /data-testid=["']volume-(?:detail-info|description)-genre["'][^>]*>\s*([^<]+?)\s*</g;
   var gm;
   while ((gm = gRe.exec(html)) !== null) {
     var gn = gm[1].replace(/&amp;/g, "&").trim();

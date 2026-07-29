@@ -83,10 +83,11 @@ async function scrapeBookPage(url) {
   if (!releaseDate) { const dc = html.match(/["'](?:dateCreated|datePublished)["']\s*:\s*["'](\d{4}-\d{2}-\d{2})/); if (dc) releaseDate = dc[1]; }
   if (!releaseDate) { const pd = html.match(/publish-date["'][^>]{0,20}>\s*(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/); if (pd) releaseDate = pd[1] + "-" + ("0" + pd[2]).slice(-2) + "-" + ("0" + pd[3]).slice(-2); }
   if (!releaseDate) { const dm = html.match(/(?:発売日|配信開始日)[^0-9]{0,16}(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/); if (dm) releaseDate = dm[1] + "-" + ("0" + dm[2]).slice(-2) + "-" + ("0" + dm[3]).slice(-2); }
-  // ジャンル：商品詳細の data-testid="volume-description-genre" アンカー（作品固有ジャンル）。
+  // ジャンル：商品詳細の data-testid="volume-detail-info-genre" アンカー（作品固有ジャンル。旧構造 volume-description-genre も許容）。
+  //   ★実ページ検証(2026-07-29)=現行testidは volume-detail-info-genre(21件)。旧 volume-description-genre は0件でJSONフォールバック頼みだった。
   //   無ければ JSON-LD の genre 配列。どちらも取れなければ category(サイト分類ラベル)で代替。
   const bkGenres = [];
-  const bgRe = /data-testid=["']volume-description-genre["'][^>]*>\s*([^<]+?)\s*</g;
+  const bgRe = /data-testid=["']volume-(?:detail-info|description)-genre["'][^>]*>\s*([^<]+?)\s*</g;
   let bgm;
   while ((bgm = bgRe.exec(html)) !== null) { const nm = bgm[1].replace(/&amp;/g, "&").trim(); if (nm && bkGenres.indexOf(nm) < 0) bkGenres.push(nm); if (bkGenres.length >= 32) break; }
   if (!bkGenres.length) { const gj = html.match(/["']genre["']\s*:\s*\[([^\]]*)\]/); if (gj) { gj[1].split(",").forEach((s) => { const t = s.replace(/^\s*["']|["']\s*$/g, "").trim(); if (t && bkGenres.indexOf(t) < 0 && bkGenres.length < 32) bkGenres.push(t); }); } }
