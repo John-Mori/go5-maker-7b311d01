@@ -184,8 +184,14 @@ window.SCH = window.SCH || {};
     head.innerHTML =
       `<span class="day-md ${meta && (meta.isHoliday || meta.weekdayIndex === 0) ? "holiday-num" : ""} ${meta && meta.weekdayIndex === 6 ? "sat-num" : ""}">${md}</span>` +
       `<span class="day-wd">(${meta ? meta.weekday : ""})</span>` +
+      // 型変更は普段は畳み、この「編集」で下からボトムシートを出す(§Chami 2026-07-29)。型表示の左に配置。
+      (meta ? `<button class="day-type-edit" type="button" title="平日/休日型を編集">編集</button>` : "") +
       `<span class="day-type-badge">${meta ? meta.dayType : ""}</span>`;
     cell.appendChild(head);
+    if (meta) {
+      const eb = head.querySelector(".day-type-edit");
+      if (eb) eb.addEventListener("click", () => openTypeSheet(date, meta));
+    }
 
     const tags = document.createElement("div");
     tags.className = "day-tags";
@@ -197,19 +203,7 @@ window.SCH = window.SCH || {};
     if (meta && meta.hasOverride) tags.innerHTML += `<span class="tag tag-override">上書き</span>`;
     cell.appendChild(tags);
 
-    // 長期休暇/休日トグル（ボタン一つ・§7.4）
-    const ctrl = document.createElement("div");
-    ctrl.className = "day-ctrl";
-    ctrl.innerHTML =
-      `<button data-act="off" title="この日を休みにする">休みにする</button>` +
-      `<button data-act="weekday" title="平日扱いにする（祝日でも可）">平日にする</button>` +
-      `<button data-act="follow" title="自動判定に戻す">自動に戻す</button>` +
-      `<button data-act="obon" title="お盆として扱う">お盆</button>` +
-      `<button data-act="newyear" title="年末年始として扱う">年末年始</button>`;
-    ctrl.querySelectorAll("button").forEach((b) => {
-      b.addEventListener("click", () => onDayAction(date, meta, b.dataset.act));
-    });
-    cell.appendChild(ctrl);
+    // 型変更ボタン(休みにする 等)は day-head の「編集」→ ボトムシートへ移設。カード内には常設しない(コンパクト化)。
 
     // 6枠＝1日6行を維持。1行に月詠み(左)・宵桜(右)を同時表示(指示書v0.1 §3)。優先度はch非依存(roleで決まる)
     const slotWrap = document.createElement("div");
@@ -289,6 +283,36 @@ window.SCH = window.SCH || {};
       await store.setOverride(date, { long_vac_tag_override: "newyear", force_day_off: true });
     }
     await recomputeAndRender(); // 近傍連動カスケード（§7.5）
+  }
+
+  // 型変更ボトムシート：day-head の「編集」から下からせり上がる。5アクションを対象日に束ねる(§Chami 2026-07-29)。
+  const TYPE_ACTIONS = [
+    { act: "off", label: "休みにする" },
+    { act: "weekday", label: "平日にする" },
+    { act: "follow", label: "自動に戻す" },
+    { act: "obon", label: "お盆" },
+    { act: "newyear", label: "年末年始" },
+  ];
+  function openTypeSheet(date, meta) {
+    const sheet = document.getElementById("typesheet");
+    if (!sheet) return;
+    const md = date.slice(5).replace("-", "/");
+    document.getElementById("typesheet-title").textContent =
+      `${md}（${meta ? meta.weekday : ""}）の型を変更` + (meta ? ` — 現在: ${meta.dayType}` : "");
+    const body = document.getElementById("typesheet-body");
+    body.innerHTML = "";
+    TYPE_ACTIONS.forEach((a) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = a.label;
+      b.addEventListener("click", async () => { closeTypeSheet(); await onDayAction(date, meta, a.act); });
+      body.appendChild(b);
+    });
+    sheet.classList.add("open");
+  }
+  function closeTypeSheet() {
+    const sheet = document.getElementById("typesheet");
+    if (sheet) sheet.classList.remove("open");
   }
 
   // 統合アプリ（iframe）内で動いているか
@@ -517,6 +541,10 @@ window.SCH = window.SCH || {};
     });
     document.getElementById("modal-save").addEventListener("click", saveEditor);
     document.getElementById("modal-close").addEventListener("click", closeEditor);
+    var tsc = document.getElementById("typesheet-close");
+    if (tsc) tsc.addEventListener("click", closeTypeSheet);
+    var ts = document.getElementById("typesheet");
+    if (ts) ts.addEventListener("click", function (e) { if (e.target === ts) closeTypeSheet(); }); // 背景タップで閉じる
     if (inFrame) window.addEventListener("message", handleParentMessage);
 
     await recomputeAndRender();

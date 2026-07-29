@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>投稿スケジュール カレンダー（5週ローリング）</title>
-  <link rel="stylesheet" href="css/style.css?v=25">
+  <link rel="stylesheet" href="css/style.css?v=26">
 </head>
 <body>
   <header class="app-header">
@@ -15,8 +15,8 @@
     <div class="nav">
       <button id="nav-prev">‹ 前週</button>
       <button id="nav-today">今週</button>
-      <button id="nav-today-center" title="今日の日付を中央に表示">📍今日</button>
       <button id="nav-next">翌週 ›</button>
+      <button id="nav-today-center" title="今日の日付を先頭に表示">📍今日</button>
       <button id="btn-verify" title="検証モード：割れ枠の変種タグ・KPI記録">🧪 検証</button>
       <button id="btn-verify-csv" title="検証ログをCSVで書き出し">⤓ 検証CSV</button>
       <button id="btn-export" title="バックアップJSONを書き出し">⤓ Export</button>
@@ -50,6 +50,18 @@
     </div>
   </div>
 
+  <!-- 型変更ボトムシート(各日の「編集」ボタンから下から出す) -->
+  <div id="typesheet" class="typesheet" aria-hidden="true">
+    <div class="typesheet-card">
+      <div class="typesheet-grip"></div>
+      <div class="typesheet-head">
+        <span id="typesheet-title"></span>
+        <button id="typesheet-close" type="button" aria-label="閉じる">✕</button>
+      </div>
+      <div id="typesheet-body" class="typesheet-body"></div>
+    </div>
+  </div>
+
   <!-- データ（自動生成・window グローバル） -->
   <script src="data/holidays.js"></script>
   <script src="data/schedule_master.js"></script>
@@ -59,6 +71,6 @@
   <script src="js/daytype.js"></script>
   <script src="js/generator.js?v=21"></script>
   <script src="js/store.js?v=22"></script>
-  <script src="js/app.js?v=27"></script>
+  <script src="js/app.js?v=28"></script>
 </body>
 </html>

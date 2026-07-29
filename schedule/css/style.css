@@ -240,7 +240,7 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 /* 優先度ラベル＋★(clip-path。絵文字は不可) */
 #calendar .slot .prio { font-size: 10px; font-weight: 700; color: var(--tx-dim); white-space: nowrap; padding-left: 2px; }
 #calendar .slot .star {
-  width: 11px; height: 11px; display: inline-block; background: #A66A0C; vertical-align: middle; position: relative; top: -1px; margin-right: 3px;
+  width: 11px; height: 11px; display: inline-block; background: #A66A0C; vertical-align: middle; position: relative; top: -1px; margin-right: 1px;
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 #calendar .slot .slot-review { font-size: 10px; background: var(--holiday); color: #fff; border-radius: 50%; width: 13px; height: 13px; text-align: center; line-height: 13px; display: inline-block; }
@@ -260,3 +260,42 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
   #calendar .slot { gap: 0 6px; }
   #calendar .slot .acc { width: 34px; }
 }
+
+/* ===== 型編集ボタン＋コンパクト化(§Chami 2026-07-29) ===== */
+/* 「編集」= 型表示の左。auto を編集ボタンへ移し、型バッジはその右に密着 */
+#calendar .day-head { align-items: center; gap: 4px 5px; }
+#calendar .day-type-edit {
+  margin-left: auto; font-size: 10px; line-height: 1.4; padding: 1px 8px; cursor: pointer;
+  border: 1px solid var(--cline); background: var(--chip); color: var(--tx-dim); border-radius: 4px;
+}
+#calendar .day-type-edit:active { background: #EFE7D8; }
+#calendar .day-type-badge { margin-left: 0; }   /* auto は編集ボタンが担うので解除 */
+/* 空のタグ行は畳んで詰める(旧・型変更ボタン列の撤去とあわせてコンパクトに) */
+#calendar .day-tags { margin: 2px 0; min-height: 0; }
+#calendar .day-tags:empty { display: none; margin: 0; }
+#calendar .day { padding: 6px 6px 7px; }
+
+/* ===== 型変更ボトムシート(下からせり上がる) ===== */
+.typesheet { position: fixed; inset: 0; z-index: 60; display: none; }
+.typesheet.open { display: block; }
+.typesheet::before { content: ""; position: absolute; inset: 0; background: rgba(0,0,0,.4); }
+.typesheet-card {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: #F8F5EE; color: #2A2520;
+  border-radius: 14px 14px 0 0;
+  padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -8px 30px rgba(0,0,0,.32);
+  transform: translateY(100%); transition: transform .22s ease;
+}
+.typesheet.open .typesheet-card { transform: translateY(0); }
+.typesheet-grip { width: 38px; height: 4px; border-radius: 2px; background: rgba(42,37,32,.22); margin: 2px auto 10px; }
+.typesheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.typesheet-head span { font-size: 13px; font-weight: 700; color: #2A2520; }
+.typesheet-head button { background: transparent; border: 0; font-size: 18px; line-height: 1; color: rgba(42,37,32,.6); cursor: pointer; padding: 2px 4px; }
+.typesheet-body { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.typesheet-body button {
+  font-size: 13px; font-weight: 600; padding: 12px 8px; border-radius: 8px; cursor: pointer;
+  background: #FFFFFF; color: #2A2520; border: 1px solid rgba(42,37,32,.18);
+}
+.typesheet-body button:active { background: #EFE7D8; }
+.typesheet-body button:last-child:nth-child(odd) { grid-column: 1 / -1; }  /* 5個目(自動に戻す等の端数)は全幅 */
