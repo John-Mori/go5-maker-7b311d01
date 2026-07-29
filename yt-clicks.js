@@ -286,18 +286,83 @@
     try { var c = codeOf(localStorage.getItem('bsky_discount_list_link_r2') || ''); if (c && codes.indexOf(c) < 0) codes.push(c); } catch (e) {}
     return codes;
   }
+  // 管理中のセール案内URL(名前付き・アカウント別)を列挙し、各エントリの短縮コード集合を導出する。
+  //   bluesky.js が短縮リンクを bsky_discount_link_cache(map: account|entryId|afId|domain → 短縮URL)へ貯める。
+  //   別IIFEだが同一ページ・同一localStorageなので直接読む。名前で分けて表示するため(Chami依頼2026-07-29)。
+  //   ★旧実装は saleCodes_()(JrziR＋死んだキー bsky_discount_list_link_r2＝どこからも書かれない)しか
+  //   見ておらず、名前付き管理へ移行した現行のセールURL(例 夏セールの同人祭)が投稿履歴に一切出なかった=本件の根因。
+  var SALE_SEED_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/';
+  function saleEntries_() {
+    var acc = acct(), arr = [];
+    try { var a = JSON.parse(localStorage.getItem('bsky_discount_urls__' + acc) || '[]'); if (Array.isArray(a)) arr = a; } catch (e) {}
+    var cache = {};
+    try { var o = JSON.parse(localStorage.getItem('bsky_discount_link_cache') || '{}'); if (o && typeof o === 'object') cache = o; } catch (e) {}
+    var codesByEntry = {}; // entryId → [短縮コード…](af_id/ドメイン違いで複数あり得る＝名前ごとの通算)
+    Object.keys(cache).forEach(function (k) {
+      var seg = String(k).split('|'), eid = seg[1] || ''; if (!eid) return;
+      var c = codeOf(cache[k] || ''); if (!c) return;
+      (codesByEntry[eid] = codesByEntry[eid] || []).push(c);
+    });
+    return arr.map(function (e) {
+      var codes = (codesByEntry[e.id] || []).slice();
+      if (/campaign=gain/.test(String(e.url || '')) && codes.indexOf('JrziR') < 0) codes.push('JrziR'); // 既定セールページは歴史的JrziRを合算(過去分を失わない)
+      var uniq = codes.filter(function (c, i) { return codes.indexOf(c) === i; });
+      return { id: e.id, name: String(e.name || '(無題)'), url: String(e.url || ''), codes: uniq };
+    });
+  }
+  // 現行のセールコードをGASへ登録(変化時のみ送信)。→ snapshotStatsが各コードを日次スナップし
+  //   今日/昨日/週を名前別に出せるようにする。アカウント別に保持(両chのコードを失わない)。
+  function registerSaleCodes_() {
+    var base = gasUrl_(); if (!base) return;
+    var codes = [];
+    saleEntries_().forEach(function (e) { e.codes.forEach(function (c) { if (codes.indexOf(c) < 0) codes.push(c); }); });
+    if (!codes.length) return;
+    var acc = acct(), tag = acc + ':' + JSON.stringify(codes), last = '';
+    try { last = localStorage.getItem('sale_codes_reg') || ''; } catch (e) {}
+    if (last === tag) return; // 変化が無ければ送らない(通信を増やさない)
+    jsonp_(base, { action: 'sale_reg', acc: acc, sale: JSON.stringify(codes) }, function (res) {
+      // saleReg_ が応答した時だけ登録済みにする(countを返すのはsaleReg_のみ。未デプロイGASの
+      //   既定分岐は{ok:true,shortUrl:''}を返すため、それを成功と誤認して再送を止めないようcountで判別)。
+      if (res && res.ok && typeof res.count === 'number') { try { localStorage.setItem('sale_codes_reg', tag); } catch (e) {} }
+    });
+  }
   function renderSaleStats_() {
     var el = document.getElementById('saleStats'); if (!el) return;
-    var codes = saleCodes_();
+    var entries = saleEntries_();
+    try { registerSaleCodes_(); } catch (e) {}
+    var allCodes = [];
+    entries.forEach(function (e) { e.codes.forEach(function (c) { if (allCodes.indexOf(c) < 0) allCodes.push(c); }); });
+    if (!allCodes.length) allCodes = saleCodes_(); // 後方互換(管理URL未登録の旧環境)
+    function f(x) { return (x == null ? '–' : num(x)); }
+    function deltasFor(codes) {
+      var tc = null, yc = null, wc = null;
+      codes.forEach(function (c) {
+        var d = deltaCache && (deltaCache['SALE:' + c] || (c === 'JrziR' ? deltaCache.SALE : null));
+        if (!d) return;
+        if (d.tc != null) tc = (tc || 0) + d.tc;
+        if (d.yc != null) yc = (yc || 0) + d.yc;
+        if (d.wc != null) wc = (wc || 0) + d.wc;
+      });
+      return { tc: tc, yc: yc, wc: wc };
+    }
     function paint() {
-      var cum = null; codes.forEach(function (c) { if (c in clicksCache) cum = (cum || 0) + clicksCache[c]; });
-      var d = (typeof deltaCache === 'object' && deltaCache) ? deltaCache.SALE : null;
-      function f(x) { return (x == null ? '–' : num(x)); }
-      el.textContent = '🏮 セール会場 累計' + f(cum) + '・今日' + f(d && d.tc) + '・昨日' + f(d && d.yc) + '・週' + f(d && d.wc);
+      var lines;
+      if (entries.length) {
+        lines = entries.map(function (e) {
+          var cum = null; e.codes.forEach(function (c) { if (c in clicksCache) cum = (cum || 0) + clicksCache[c]; });
+          var dl = deltasFor(e.codes);
+          return '🏮 ' + esc(e.name) + ' 累計' + f(cum) + '・今日' + f(dl.tc) + '・昨日' + f(dl.yc) + '・週' + f(dl.wc);
+        });
+      } else {
+        var cum = null; allCodes.forEach(function (c) { if (c in clicksCache) cum = (cum || 0) + clicksCache[c]; });
+        var d = (typeof deltaCache === 'object' && deltaCache) ? deltaCache.SALE : null;
+        lines = ['🏮 セール会場 累計' + f(cum) + '・今日' + f(d && d.tc) + '・昨日' + f(d && d.yc) + '・週' + f(d && d.wc)];
+      }
+      el.innerHTML = lines.join('<br>');
     }
     // 既に一括取得済みならリクエスト0で描画。未取得のときだけ /api/list を1本(TTL内は再利用)。
     //   ＝render()のたびに /api/stats を叩いていた旧実装の無駄を除去(Cloudflare無料枠対策2026-07-16)
-    if (codes.some(function (c) { return c in clicksCache; })) { paint(); return; }
+    if (allCodes.some(function (c) { return c in clicksCache; })) { paint(); return; }
     fetchAllClicks_().then(paint);
   }
   function fetchClicks(code) {
