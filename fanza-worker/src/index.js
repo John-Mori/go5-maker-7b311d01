@@ -100,6 +100,27 @@ export default {
         } catch (e) {}
       }
 
+      // ③″ FANZAブックスのジャンル/発売日補完：API/override がタイトルだけで genre/date を
+      //    持たない（旧overrideや同人以外でAPI未収録）時、実ページ(srcUrl)を1回スクレイプして
+      //    空欄だけ埋める。scrapeFanzaItem を流用（同一抽出）。scrape 由来（line 84）で既に
+      //    埋まっている場合は noGenre/noDate が false になり二重フェッチしない。
+      if (item && item.title && /book\.dmm\./.test(srcUrl)) {
+        const noGenre = !(item.iteminfo && Array.isArray(item.iteminfo.genre) && item.iteminfo.genre.length);
+        const noDate = !item.date;
+        if (noGenre || noDate) {
+          try {
+            const pg = await scrapeFanzaItem(cid, srcUrl);
+            if (pg) {
+              if (noDate && pg.date) item.date = pg.date;
+              if (noGenre && pg.iteminfo && Array.isArray(pg.iteminfo.genre) && pg.iteminfo.genre.length) {
+                item.iteminfo = item.iteminfo || {};
+                item.iteminfo.genre = pg.iteminfo.genre;
+              }
+            }
+          } catch (e) {}
+        }
+      }
+
       // フル情報が取れなかった作品は「PC取得依頼キュー」へ記録（PCのバッチが拾ってスクレイプ→ov:へ保存）。
       //   book等のsrcUrlがあれば一緒に保存し、PC側がそのURL（同人以外）を正しくスクレイプできるようにする。
       // フル情報が取れなかった作品は取得依頼キューへ（dedup+Books用URL enrich はstQueueInfoPut内蔵）。
@@ -877,12 +898,35 @@ async function scrapeFanzaItem(cid, srcUrl) {
     listPriceStr = lpM ? lpM[1].replace(/,/g, "") : null;
   }
 
-  // 発売日（JSON-LD releaseDate / 商品情報の「YYYY-MM-DD」表記から拾えれば）。取れなければ空。
+  // 発売日（JSON-LD releaseDate/dateCreated/datePublished／FANZAブックスの商品詳細
+  //   data-testid="volume-description-content-publish-date"／「発売日・配信開始日」表記の順で拾う）。
+  //   ★book商品ページは配信開始日と発売日ラベルの間にタグが挟まり従来の {0,12} では届かなかった
+  //     ため data-testid アンカー経由も見る。取れなければ空。
   var dateStr = "";
-  var rdM = html.match(/["']releaseDate["']\s*:\s*["'](\d{4}-\d{2}-\d{2})/)
+  var rdM = html.match(/["'](?:releaseDate|dateCreated|datePublished)["']\s*:\s*["'](\d{4}-\d{2}-\d{2})/)
+    || html.match(/publish-date["'][^>]{0,20}>\s*(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/)
     || html.match(/(?:発売日|配信開始日)[^0-9]{0,12}(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
   if (rdM) {
     dateStr = rdM.length >= 4 && rdM[2] ? (rdM[1] + "-" + ("0" + rdM[2]).slice(-2) + "-" + ("0" + rdM[3]).slice(-2)) : rdM[1];
+  }
+
+  // ジャンル（FANZAブックス：商品詳細の data-testid="volume-description-genre" のアンカー、
+  //   無ければJSON-LDの genre 配列）。同人ページはこのアンカーが無いので従来どおり空になる。
+  var genreArr = [];
+  var gRe = /data-testid=["']volume-description-genre["'][^>]*>\s*([^<]+?)\s*</g;
+  var gm;
+  while ((gm = gRe.exec(html)) !== null) {
+    var gn = gm[1].replace(/&amp;/g, "&").trim();
+    if (gn && genreArr.length < 32) genreArr.push({ name: gn });
+  }
+  if (!genreArr.length) {
+    var gjM = html.match(/["']genre["']\s*:\s*\[([^\]]*)\]/);
+    if (gjM) {
+      gjM[1].split(",").forEach(function (s) {
+        var t = s.replace(/^\s*["']|["']\s*$/g, "").trim();
+        if (t && genreArr.length < 32) genreArr.push({ name: t });
+      });
+    }
   }
 
   // サムネ（og:image）。サンプル画像はスクレイプでは安定取得できないため空。
@@ -924,7 +968,7 @@ async function scrapeFanzaItem(cid, srcUrl) {
     floor_name:   isBook ? "ブックス"     : "同人",
     imageURL:       ogImg ? { list: ogImg, large: ogImg } : null,
     sampleImageURL: null,
-    iteminfo:   { author: authorArr, genre: [] },
+    iteminfo:   { author: authorArr, genre: genreArr },
     prices: {
       list_price: listPriceStr,
       price:      currentPriceStr,

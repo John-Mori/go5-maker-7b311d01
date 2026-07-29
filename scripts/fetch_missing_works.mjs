@@ -78,7 +78,18 @@ async function scrapeBookPage(url) {
   let price = ld.price, brand = ld.brand, ldImg = ld.image, releaseDate = ld.releaseDate;
   const ogi = html.match(/property=["']og:image["']\s+content=["']([^"']+)/) || html.match(/content=["']([^"']+)["']\s+property=["']og:image["']/);
   const cover = (ogi && ogi[1]) ? ogi[1].trim() : ldImg;
+  // 発売日：JSON-LD releaseDate → dateCreated → 商品詳細 data-testid=publish-date → ラベル近傍。
+  //   ★book商品ページは配信開始日ラベルとタグの間隔が広く従来の {0,16} では届かなかった。
+  if (!releaseDate) { const dc = html.match(/["'](?:dateCreated|datePublished)["']\s*:\s*["'](\d{4}-\d{2}-\d{2})/); if (dc) releaseDate = dc[1]; }
+  if (!releaseDate) { const pd = html.match(/publish-date["'][^>]{0,20}>\s*(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/); if (pd) releaseDate = pd[1] + "-" + ("0" + pd[2]).slice(-2) + "-" + ("0" + pd[3]).slice(-2); }
   if (!releaseDate) { const dm = html.match(/(?:発売日|配信開始日)[^0-9]{0,16}(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/); if (dm) releaseDate = dm[1] + "-" + ("0" + dm[2]).slice(-2) + "-" + ("0" + dm[3]).slice(-2); }
+  // ジャンル：商品詳細の data-testid="volume-description-genre" アンカー（作品固有ジャンル）。
+  //   無ければ JSON-LD の genre 配列。どちらも取れなければ category(サイト分類ラベル)で代替。
+  const bkGenres = [];
+  const bgRe = /data-testid=["']volume-description-genre["'][^>]*>\s*([^<]+?)\s*</g;
+  let bgm;
+  while ((bgm = bgRe.exec(html)) !== null) { const nm = bgm[1].replace(/&amp;/g, "&").trim(); if (nm && bkGenres.indexOf(nm) < 0) bkGenres.push(nm); if (bkGenres.length >= 32) break; }
+  if (!bkGenres.length) { const gj = html.match(/["']genre["']\s*:\s*\[([^\]]*)\]/); if (gj) { gj[1].split(",").forEach((s) => { const t = s.replace(/^\s*["']|["']\s*$/g, "").trim(); if (t && bkGenres.indexOf(t) < 0 && bkGenres.length < 32) bkGenres.push(t); }); } }
   let listPrice = null;
   const lm = html.match(/(?:定価|通常価格|参考価格)[^0-9]{0,16}([\d,]+)\s*円/);
   if (lm) listPrice = parseInt(lm[1].replace(/,/g, ""), 10);
@@ -94,7 +105,8 @@ async function scrapeBookPage(url) {
       price = Math.round(listPrice * (100 - pct) / 100);               // 割引後（100%OFFなら0円）
     }
   }
-  return { title, author: author || brand, price, listPrice, releaseDate, genres: category ? [category] : [], cover, reviewCount: ld.reviewCount, reviewAvg: ld.reviewAvg };
+  const genres = bkGenres.length ? bkGenres : (category ? [category] : []);
+  return { title, author: author || brand, price, listPrice, releaseDate, genres, cover, reviewCount: ld.reviewCount, reviewAvg: ld.reviewAvg };
 }
 
 // ── 商品ページのスクレイプ（日本IPなので普通に読める） ─────────────────────────
