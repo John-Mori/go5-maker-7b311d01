@@ -1224,6 +1224,16 @@
       payload.fanza_fetched_at = mi.fetchedAt;
       payload.fanza_review_count = mi.reviewCount;
       payload.fanza_review_avg = mi.reviewAvg;
+    } else {
+      // fanzaInfo(movieInfoCache=投稿タブの取得)が無くても、当時価格スナップ(fanza_title_cache=
+      // 投稿履歴側の取得)があれば価格列だけは記録する。どちらか一方でも取れていれば「投稿時の価格」を残す。
+      var snap = meta ? meta.fanzaSnap : (uiSame ? fanzaSnapForWorkUrl_(workUrl) : null);
+      if (snap && snap.price != null) {
+        payload.fanza_price = snap.price;
+        if (snap.listPrice != null) payload.fanza_list_price = snap.listPrice;
+        if (snap.discountPct != null) payload.fanza_discount_pct = snap.discountPct;
+        if (snap.at) payload.fanza_fetched_at = snap.at;
+      }
     }
     return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); }).catch(function () { return null; });
   }
@@ -1528,10 +1538,27 @@
   //   手動運用の本文でも自動で効く。r2が取れない時は本文を変えず null。(安全側・投稿は止めない)
   //   これで「YT→投稿」(導線1=投稿URLの短縮・既存)と「投稿→FANZA」(導線2=本リンク)を別コードで計測できる。
   var WORK_LINK_RE = /https?:\/\/(?:al\.fanza\.co\.jp|www\.dmm\.co\.jp|book\.dmm\.co\.jp|book\.dmm\.com)\/[^\s]+/;
+  // 本文に生の作品リンクが無い時は、作品URL欄(captureWorkUrl_)から計測リンクを作る。
+  //   Chamiが本文へ生リンクを載せずに投稿しても、導線2(投稿→FANZA=ピンク矢印)の計測URLが
+  //   記録へ自動で入るようにする。本文は書き換えない(＝作品URL欄だけで完結・手動生成を不要にする)。
+  function measureWorkFromField_() {
+    try {
+      var wurl = captureWorkUrl_();
+      if (!wurl || !window.ensureAffiliateLink) return Promise.resolve(null);
+      var built = window.ensureAffiliateLink(wurl, curAfId_());
+      if (!built || !built.ok || !built.link) return Promise.resolve(null);
+      return makeShortAndShare(built.link).then(function (r) {
+        var ourOk = r && r.shortUrl && window.Go5Short && window.Go5Short.ourBase && window.Go5Short.ourBase(r.shortUrl);
+        if (!ourOk) return null;
+        var disp = r.shareUrl || r.shortUrl;
+        return { shortUrl: r.shortUrl, shareUrl: disp, original: built.link };
+      }).catch(function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
   function measureWorkLink_(text) {
     try {
       var m = String(text || '').match(WORK_LINK_RE);
-      if (!m) return Promise.resolve({ text: text, workShort: null });
+      if (!m) return measureWorkFromField_().then(function (ws) { return { text: text, workShort: ws }; });
       var raw = m[0];
       return makeShortAndShare(raw).then(function (r) {
         // 自前ドメイン(5mgl.com/yoz2.com/旧r2)の計測URLが取れた時だけ置換
