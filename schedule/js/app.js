@@ -34,14 +34,25 @@ window.SCH = window.SCH || {};
     return dt.addDays(s, delta);
   }
 
-  // 今日を画面の先頭へ寄せる（Chami指定・仕様v0.1）。scrollIntoView は使わない
-  // （iframe内で親も動かしうる smooth 挙動を避け、自フレームを位置指定で先頭揃え）。
-  const TOP_GAP = 8;                   // 今日セルの上に残す余白(px)
-  function alignTodayToTop() {
+  // 今日カードを先頭へ寄せる(指示書v0.1 §8)。scrollIntoView は使わない
+  // (祖先まで巻き込みページ全体が動いてヘッダ・タブが画面外へ飛ぶため)。範囲外なら何もしない。
+  const TOP_GAP = 8;                   // 今日カードの上に残す余白(px)
+  function calScroller() {
+    const cal = document.getElementById("calendar");
+    if (cal && cal.scrollHeight > cal.clientHeight + 4) return cal; // 本体が独自にスクロールする時
+    return document.scrollingElement || document.documentElement;    // それ以外はドキュメント側
+  }
+  function scrollToToday(smooth) {
+    const slab = calScroller();
     const el = document.querySelector(".day.is-today");
-    if (!el) return;
-    const y = el.getBoundingClientRect().top + window.pageYOffset - TOP_GAP;
-    window.scrollTo({ top: y < 0 ? 0 : y, behavior: "auto" });
+    if (!el) return false;                                           // 今日が表示範囲外→先頭に飛ばさない
+    const winScroll = (slab === document.scrollingElement || slab === document.documentElement);
+    const slabTop = winScroll ? 0 : slab.getBoundingClientRect().top;
+    const cur = winScroll ? (window.pageYOffset || 0) : slab.scrollTop;
+    const target = el.getBoundingClientRect().top - slabTop + cur - TOP_GAP;
+    const max = slab.scrollHeight - slab.clientHeight;
+    slab.scrollTo({ top: Math.max(0, Math.min(target, max)), behavior: smooth ? "smooth" : "auto" });
+    return true;
   }
 
   // ---- 描画範囲・生成範囲 ----
@@ -61,14 +72,24 @@ window.SCH = window.SCH || {};
   // ---- 中核：生成→保存→描画 ----
   async function recomputeAndRender() {
     const overrides = store.getOverrides();
-    // 現在チャンネルの実行層を合成したフラットスロットを渡す
-    const acc = curAcc();
-    const existing = store.getSlotDataForAccount(acc);
+    const acc = curAcc();                 // ヘッダ・タブ用。カレンダー本体は両ch同時＝アカウント非連動(指示書v0.1 §1)
     const { genStart, genEnd } = genWindow();
-    const result = gen.generateRange(genStart, genEnd, master, config, overrides, existing);
-    lastRender = result;
-    await store.saveSlots(result.slots); // 自動公開・要確認などの変化を永続化
-    render(result);
+    // 両チャンネルを1画面へ統合。左=月詠み(acc1)固定・右=宵桜(acc2)固定。優先度・尺は両者同一、時刻のみ20分ずれ。
+    const r1 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc1"));
+    const r2 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc2"));
+    const result = acc === "acc2" ? r2 : r1;   // 保存は現行タブの結果のみ(既存の永続化挙動を保つ)
+    lastRender = { slots: result.slots, dayMetas: r1.dayMetas, review: result.review, slots1: r1.slots, slots2: r2.slots };
+    await store.saveSlots(result.slots);       // 自動公開・要確認などの変化を永続化
+    render(lastRender);
+  }
+
+  // "HH:MM" に分を加算(generator の shiftTime_ と同一仕様＝24時以降も許容)
+  function addMin(hhmm, min) {
+    if (!min) return hhmm;
+    const p = String(hhmm).split(":");
+    const total = Number(p[0]) * 60 + Number(p[1]) + min;
+    const nh = Math.floor(total / 60), nm = ((total % 60) + 60) % 60;
+    return nh + ":" + String(nm).padStart(2, "0");
   }
 
   function dayTypeClass(meta) {
@@ -113,17 +134,17 @@ window.SCH = window.SCH || {};
       grid.className = "week-grid";
       for (let i = 0; i < 7; i++) {
         const date = dt.addDays(weekStart, i);
-        grid.appendChild(renderDay(date, metaByDate[date], result.slots));
+        grid.appendChild(renderDay(date, metaByDate[date], result));
       }
       weekEl.appendChild(grid);
       root.appendChild(weekEl);
     }
   }
 
-  function renderDay(date, meta, slots) {
+  function renderDay(date, meta, ctx) {
     const cell = document.createElement("div");
     cell.className = "day " + (meta ? dayTypeClass(meta) : "");
-    if (meta && meta.date === todayJST()) cell.classList.add("is-today");
+    if (meta && meta.date === todayJST()) { cell.classList.add("is-today"); cell.setAttribute("data-today", "1"); }
     if (meta && meta.longVacTag) cell.classList.add("has-longvac");
 
     const md = date.slice(5).replace("-", "/");
@@ -159,16 +180,16 @@ window.SCH = window.SCH || {};
     });
     cell.appendChild(ctrl);
 
-    // 6枠（その日の優先順位 1〜5 を算出して表示。本命＝優先度1のみ強調）
+    // 6枠＝1日6行を維持。1行に月詠み(左)・宵桜(右)を同時表示(指示書v0.1 §3)。優先度はch非依存(roleで決まる)
     const slotWrap = document.createElement("div");
     slotWrap.className = "slots";
-    const dayslots = [];
+    const dayslots1 = [];
     for (let idx = 0; idx < config.slotsPerDay; idx++) {
-      const s = slots[gen.slotId(date, idx)];
-      if (s) dayslots.push(s);
+      const s1 = ctx.slots1[gen.slotId(date, idx)];
+      if (s1) dayslots1.push(s1);
     }
-    assignPriorities(dayslots);
-    dayslots.forEach((s) => slotWrap.appendChild(renderSlot(s)));
+    assignPriorities(dayslots1);
+    dayslots1.forEach((s1) => slotWrap.appendChild(renderPairRow(s1, ctx.slots2[s1.id])));
     cell.appendChild(slotWrap);
     return cell;
   }
@@ -180,22 +201,41 @@ window.SCH = window.SCH || {};
     ranked.forEach((s, i) => { s._priority = Math.min(i + 1, 5); });
   }
 
-  function renderSlot(s) {
+  // 1スロット＝1ペア行：[優先度バー][月詠み 時刻 状態][宵桜 時刻 状態][優先度ラベル](指示書v0.1 §3)
+  function renderPairRow(s1, s2) {
     const el = document.createElement("div");
-    const pri = s._priority || 5;
-    el.className = "slot pr-" + pri + " st-" + statusClass(s.status);
-    if (pri === 1) el.classList.add("is-top");        // その日の本命だけ強調
-    if (s.needs_review) el.classList.add("needs-review");
+    const pri = (s1 && s1._priority) || 5;
+    el.className = "slot pr-" + pri;
+    if (pri === 1) el.classList.add("top");
+    if (s1 && s1.needs_review) el.classList.add("needs-review");
+
+    // 素の時刻(現行タブのオフセットを外す)→左右へ各chのオフセットを当てる。20分ずれを1行に並置。
+    const off = config.accountOffsetMin || {};
+    const curOff = (typeof off[curAcc()] === "number") ? off[curAcc()] : 0;
+    const base = addMin(s1.time, -curOff);
+    const st1 = (s1 && s1.status) || "未着手";
+    const st2 = (s2 && s2.status) || "未着手";
+    if (st1 === "公開済" && st2 === "公開済") el.classList.add("cleared"); // 両ch済＝行ごと沈める
 
     el.innerHTML =
-      `<div class="slot-row1"><span class="slot-time">${s.time}</span>` +
-      `<span class="slot-pri">優先度${pri}${pri === 1 ? "・本命" : ""}</span>` +
-      (s.needs_review ? `<span class="slot-review" title="要確認">!</span>` : "") +
-      `</div>` +
-      (s.title ? `<div class="slot-row2">${escapeHtml(s.title)}</div>` : "") +
-      `<div class="slot-row3"><span class="status-dot st-${statusClass(s.status)}"></span>${s.status}</div>`;
-    el.addEventListener("click", () => openEditor(s));
+      `<span class="bar"></span>` +
+      chanCell("月詠み", addMin(base, (typeof off.acc1 === "number") ? off.acc1 : 0), st1) +
+      chanCell("宵桜", addMin(base, (typeof off.acc2 === "number") ? off.acc2 : 0), st2) +
+      `<span class="prio">${pri === 1 ? '<span class="star"></span>本命' : "優先度" + pri}` +
+      ((s1 && s1.needs_review) ? ' <span class="slot-review" title="要確認">!</span>' : "") + `</span>`;
+    // 編集は現行タブのスロットに対して(従来どおり＝アクティブなアカウントの exec を編集)
+    el.addEventListener("click", () => openEditor(lastRender.slots[s1.id] || s1));
     return el;
+  }
+
+  // 片チャンネルのセル：バッジ(38px固定・無彩色)＋時刻＋状態マーク。公開済=done、それ以外=pending
+  function chanCell(name, time, status) {
+    const done = status === "公開済";
+    return `<span class="cell ${done ? "done" : "pending"}">` +
+      `<span class="acc">${name}</span>` +
+      `<span class="time">${time}</span>` +
+      `<span class="st"><span class="mk"></span></span>` +
+      `</span>`;
   }
 
   function statusClass(st) {
@@ -427,7 +467,7 @@ window.SCH = window.SCH || {};
     if (todayBtn) todayBtn.addEventListener("click", async () => {
       weekOffset = 0;
       await recomputeAndRender();
-      requestAnimationFrame(alignTodayToTop);
+      requestAnimationFrame(function () { scrollToToday(true); });  // 手動の「今日へ」は smooth
     });
     document.getElementById("btn-verify").addEventListener("click", (e) => {
       verificationMode = !verificationMode;
@@ -447,7 +487,7 @@ window.SCH = window.SCH || {};
     if (inFrame) window.addEventListener("message", handleParentMessage);
 
     await recomputeAndRender();
-    requestAnimationFrame(alignTodayToTop);   // 起動時も今日を先頭へ寄せる
+    requestAnimationFrame(function () { scrollToToday(false); });  // 初回遷移のみ・auto(§8)
   }
 
   document.addEventListener("DOMContentLoaded", boot);
