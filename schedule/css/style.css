@@ -240,7 +240,7 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 /* 優先度ラベル＋★(clip-path。絵文字は不可) */
 #calendar .slot .prio { font-size: 10px; font-weight: 700; color: var(--tx-dim); white-space: nowrap; padding-left: 2px; }
 #calendar .slot .star {
-  width: 12px; height: 12px; display: inline-block; background: #A66A0C; vertical-align: -1px; margin-right: 3px;
+  width: 11px; height: 11px; display: inline-block; background: #A66A0C; vertical-align: middle; position: relative; top: -1px; margin-right: 3px;
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 #calendar .slot .slot-review { font-size: 10px; background: var(--holiday); color: #fff; border-radius: 50%; width: 13px; height: 13px; text-align: center; line-height: 13px; display: inline-block; }

@@ -42,6 +42,13 @@ window.SCH = window.SCH || {};
     if (cal && cal.scrollHeight > cal.clientHeight + 4) return cal; // 本体が独自にスクロールする時
     return document.scrollingElement || document.documentElement;    // それ以外はドキュメント側
   }
+  // sticky なヘッダの高さ。ドキュメントスクロール時はヘッダが今日カードの上に浮くので、その分だけ下げて着地させる。
+  function stickyHeaderH() {
+    const h = document.querySelector(".app-header");
+    if (!h) return 0;
+    if (getComputedStyle(h).position !== "sticky") return 0;
+    return h.getBoundingClientRect().height || 0;
+  }
   function scrollToToday(smooth) {
     const slab = calScroller();
     const el = document.querySelector(".day.is-today");
@@ -49,10 +56,34 @@ window.SCH = window.SCH || {};
     const winScroll = (slab === document.scrollingElement || slab === document.documentElement);
     const slabTop = winScroll ? 0 : slab.getBoundingClientRect().top;
     const cur = winScroll ? (window.pageYOffset || 0) : slab.scrollTop;
-    const target = el.getBoundingClientRect().top - slabTop + cur - TOP_GAP;
+    const headerH = winScroll ? stickyHeaderH() : 0;                 // 浮くヘッダに今日が潜らないよう補正
+    const target = el.getBoundingClientRect().top - slabTop + cur - TOP_GAP - headerH;
     const max = slab.scrollHeight - slab.clientHeight;
     slab.scrollTo({ top: Math.max(0, Math.min(target, max)), behavior: smooth ? "smooth" : "auto" });
     return true;
+  }
+  // 初回の今日スクロールは「カレンダーが実際に表示された時」に撃つ。
+  // (iframe が display:none の間に boot が走ると採寸が 0 で不発になり、表示後は今週の頭=月曜のまま=今日が下にずれる)
+  function scheduleFirstScroll() {
+    let done = false;
+    let io = null;
+    function fire() {
+      if (done) return;
+      const cal = document.getElementById("calendar");
+      if (!cal || cal.clientHeight < 40) return;                     // まだ採寸できない(非表示)
+      if (!document.querySelector(".day.is-today")) return;          // 今日が範囲外
+      done = true;
+      scrollToToday(false);
+      if (io) io.disconnect();
+    }
+    requestAnimationFrame(fire);                                     // 既に表示済みなら即
+    if ("IntersectionObserver" in window) {
+      io = new IntersectionObserver(function (es) {
+        if (es.some(function (e) { return e.isIntersecting; })) requestAnimationFrame(fire);
+      });
+      io.observe(document.getElementById("calendar"));
+    }
+    window.addEventListener("pageshow", function () { requestAnimationFrame(fire); });
   }
 
   // ---- 描画範囲・生成範囲 ----
@@ -487,7 +518,7 @@ window.SCH = window.SCH || {};
     if (inFrame) window.addEventListener("message", handleParentMessage);
 
     await recomputeAndRender();
-    requestAnimationFrame(function () { scrollToToday(false); });  // 初回遷移のみ・auto(§8)
+    scheduleFirstScroll();  // 初回遷移のみ・カレンダーが実際に表示された時に撃つ・auto(§8)
   }
 
   document.addEventListener("DOMContentLoaded", boot);
