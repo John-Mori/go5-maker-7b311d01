@@ -629,6 +629,12 @@
     }
 
     window.Go5Stock = { render: render };
+    // 初回アクセスでドラフトが空表示になる穴の根治(Chami 2026-07-29):
+    //   affiliate.js の restoreActiveTab_ が「このモジュールより先」に走ると、ドラフトタブへ
+    //   復元されても showTab の render 呼び出しが window.Go5Stock 未定義でスキップされ、
+    //   タブは開いているのに中身が空のまま(再タップで直る)になっていた。読み込み順に依存せず、
+    //   init 時点でドラフトタブが既に表示中なら自分で描画して穴を塞ぐ。
+    if (page && !page.hidden) render();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

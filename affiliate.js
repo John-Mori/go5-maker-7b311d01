@@ -55,14 +55,36 @@
   // 前回表示していたタブを復元。(リロード/再アクセスで動画作成に強制的に戻らないように)
   //   全モジュール(YtRank/Go5Cand/Scheduler等)が定義された後に実行したいので DOMContentLoaded を待つ
   //   。(このスクリプトより後に読まれる candidates.js 等の render を確実に呼ぶため)
+  // 対象タブをタブバー(横スクロール)の中央へ寄せる。scrollIntoView は祖先ごとスクロールして
+  //   ヘッダーが画面外へ飛ぶため使わず、.tabbar の scrollLeft だけを動かす(Chami 2026-07-29)。
+  function centerTab_(btnId) {
+    var b = document.getElementById(btnId);
+    if (!b) return;
+    var bar = (b.closest && b.closest('.tabbar')) || b.parentNode;
+    if (!bar || bar.scrollWidth <= bar.clientWidth) return; // 全タブが収まっていれば動かさない(PC等)
+    var barRect = bar.getBoundingClientRect();
+    var bRect = b.getBoundingClientRect();
+    var delta = (bRect.left - barRect.left) + b.offsetWidth / 2 - bar.clientWidth / 2;
+    bar.scrollLeft += delta;
+  }
   function restoreActiveTab_() {
     var saved = '';
     try { saved = localStorage.getItem('go5_active_tab') || ''; } catch (e) {}
     var ok = saved && TABS.some(function (t) { return t.btn === saved; }) && document.getElementById(saved);
-    if (ok && saved !== 'tabMovie') { showTab(saved); return; } // 保存タブへ復元(既定=動画作成なら何もしない)
-    // 保存が無い/不正＝HTMLの active(既定=動画作成)をCSSへ反映するだけ。
-    var active = TABS.filter(function (t) { var b = document.getElementById(t.btn); return b && b.classList.contains('active'); })[0];
-    document.documentElement.setAttribute('data-tab', active ? active.btn : 'tabMovie');
+    var activeId;
+    if (ok && saved !== 'tabMovie') {
+      showTab(saved); activeId = saved; // 保存タブへ復元(既定=動画作成なら showTab しない)
+    } else {
+      // 保存が無い/不正＝HTMLの active(既定=動画作成)をCSSへ反映するだけ。
+      var active = TABS.filter(function (t) { var b = document.getElementById(t.btn); return b && b.classList.contains('active'); })[0];
+      activeId = active ? active.btn : 'tabMovie';
+      document.documentElement.setAttribute('data-tab', activeId);
+    }
+    // アクセス時に該当タブをタブバー中央へ(Chami 2026-07-29)。アイコン画像やフォントで幅が
+    //   後から変わるため、rAF(初回レイアウト後)と load(画像確定後)の二段で寄せ直す。
+    var recenter = function () { centerTab_(activeId); };
+    if (window.requestAnimationFrame) window.requestAnimationFrame(recenter); else recenter();
+    try { window.addEventListener('load', recenter, { once: true }); } catch (e) { window.addEventListener('load', recenter); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreActiveTab_);
   else restoreActiveTab_();
