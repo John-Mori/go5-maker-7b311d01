@@ -307,9 +307,14 @@
     }
     var cache = {};
     try { var o = JSON.parse(localStorage.getItem('bsky_discount_link_cache') || '{}'); if (o && typeof o === 'object') cache = o; } catch (e) {}
-    var codesByEntry = {}; // entryId → [短縮コード…](af_id/ドメイン違いで複数あり得る＝名前ごとの通算)
+    var codesByEntry = {}; // entryId → [短縮コード…](同一ch内のaf_id違いだけ合算＝名前ごとの通算)
+    // ★キャッシュキーは account|entryId|afId|domain(bluesky-core.js buildDiscountCacheKey)。
+    //   セール案内URLはチャンネル別ドメインで計測される(月詠み=5mgl.com/acc1・宵桜艶帖=yoz2.com/acc2)。
+    //   entryId だけで束ねると別ch(別ドメイン)のクリックまで合算=「ごっちゃ」になっていた(Chami報告2026-07-29③)。
+    //   → 表示中アカウント(=そのドメイン)のコードだけを集計し、ドメインごとに独立計測する。
     Object.keys(cache).forEach(function (k) {
-      var seg = String(k).split('|'), eid = seg[1] || ''; if (!eid) return;
+      var seg = String(k).split('|'), kacc = seg[0] || '', eid = seg[1] || ''; if (!eid) return;
+      if (kacc && kacc !== acc) return; // 別チャンネル(別ドメイン)のコードは混ぜない=独立計測
       var c = codeOf(cache[k] || ''); if (!c) return;
       (codesByEntry[eid] = codesByEntry[eid] || []).push(c);
     });
