@@ -88,6 +88,18 @@ export default {
       //    地域制限なしで取れる。サムネ＋サンプル画像だけの「部分情報」(partial)を返す。
       if (!item) item = await cdnFallbackItem(cid);
 
+      // ③′ FANZAブックスのサムネ補完：ebook作品の書影は cid から決定的
+      //    （…/digital/e-book/<cid>/<cid>pl.jpg @ ebook-assets.dmm.co.jp）。API未収録＋画像なしの
+      //    古い override（上のIMG_OK取りこぼしで画像が剥がれて保存された分）で「タイトルは在るのに
+      //    サムネだけ空」になる作品を、決定的URLをHEADで実在確認してから埋める（再スクレイプ不要で即時）。
+      if (item && item.title && (!item.imageURL || !item.imageURL.list) && /^b\d/i.test(cid)) {
+        const cov = "https://ebook-assets.dmm.co.jp/digital/e-book/" + cid + "/" + cid + "pl.jpg";
+        try {
+          const h = await headInfo_(cov);
+          if (h.ok && (h.len === "" || parseInt(h.len, 10) > 3000)) item.imageURL = { list: cov, large: cov };
+        } catch (e) {}
+      }
+
       // フル情報が取れなかった作品は「PC取得依頼キュー」へ記録（PCのバッチが拾ってスクレイプ→ov:へ保存）。
       //   book等のsrcUrlがあれば一緒に保存し、PC側がそのURL（同人以外）を正しくスクレイプできるようにする。
       // フル情報が取れなかった作品は取得依頼キューへ（dedup+Books用URL enrich はstQueueInfoPut内蔵）。
@@ -1261,7 +1273,10 @@ async function backfillKvToD1(env) {
   return { works, salesN, queueInfo, queueSales, makers, flags };
 }
 // override の入力検証：許可フィールドのみ再構築。画像URLはDMM公式CDNドメイン限定。
-const IMG_OK = /^https:\/\/(doujin-assets\.dmm\.co\.jp|pics\.dmm\.co\.jp|ebook-assets\.dmm\.com)\//;
+// ★ebook-assets は実体が .co.jp（FANZAブックスの og:image/JSON-LD image のホスト）。.com だけだと
+//   PC側スクレイプが渡す書影URL(…dmm.co.jp/…)が sanitizeOverride で剥がれ、override が「タイトルのみ・
+//   画像なし」で保存される＝ブックスのサムネが永久に出ない主因だった（2026-07-29 実測）。両方許可。
+const IMG_OK = /^https:\/\/(doujin-assets\.dmm\.co\.jp|pics\.dmm\.co\.jp|ebook-assets\.dmm\.(com|co\.jp))\//;
 function sanitizeOverride(raw) {
   if (!raw || typeof raw !== "object") return null;
   const cid = String(raw.content_id || "").trim();
