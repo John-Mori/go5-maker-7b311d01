@@ -216,9 +216,11 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 #calendar .day-ctrl button:hover { color: var(--tx); border-color: #A66A0C; }
 #calendar .tag { color: var(--tx); }
 
-/* ペア行本体：[3px 優先度バー][月詠み 1fr][宵桜 1fr][優先度ラベル auto] */
+/* ペア行本体：[3px 優先度バー][月詠み 1fr][宵桜 1fr][優先度ラベル 固定幅]
+   ★最終列は固定幅にする。auto だと「本命」(★+2字)行だけ列が狭く→1fr セルが広がり、
+   その行の ○ マークと ★ の始まりラインが他行とズレる(Chami 2026-07-29)。全行で列幅を揃えて解消。 */
 #calendar .slot {
-  display: grid; grid-template-columns: 3px 1fr 1fr auto; align-items: center;
+  display: grid; grid-template-columns: 3px 1fr 1fr 56px; align-items: center;
   gap: 0 8px; padding: 6px 8px 6px 0; overflow: hidden;
   background: var(--row); border: 1px solid var(--cline); border-radius: 5px; color: var(--tx);
 }
@@ -283,7 +285,9 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
   position: absolute; left: 0; right: 0; bottom: 0;
   background: #F8F5EE; color: #2A2520;
   border-radius: 14px 14px 0 0;
-  padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+  /* iframe内では env(safe-area-inset-bottom)=0 になり、iOS SafariのURLバーに最下段ボタンが隠れる。
+     バー分を定数で押し上げてから安全域を足す(2026-07-29 Chami「下のURL表示と被る」)。 */
+  padding: 8px 14px calc(84px + env(safe-area-inset-bottom, 0px));
   box-shadow: 0 -8px 30px rgba(0,0,0,.32);
   transform: translateY(100%); transition: transform .22s ease;
 }
