@@ -164,13 +164,34 @@
   //   「再取得しても編集が復活しない」を保証する(display専用=localStorageへは一切書かない=INC-112防壁維持)。
   //   同じ行を編集し直すと上書き。GAS反映が遅れても消えず、届けば同値なので無害。
   var _pendingSheetEdits = {};
+  // 短縮URLのドメインからチャンネルを判定(月詠み=5mgl.com/acc1・宵桜艶帖=yoz2.com/acc2)。
+  //   短縮リンクは投稿時にチャンネル別ドメインで払い出される(bluesky.js URL_BY_ACCT)ので、
+  //   postUri/背骨IDの無い手動・ドラフト由来行でも所属を確定できる唯一の権威シグナル。
+  function acctByShort_(it) {
+    var s = String((it && it.shortUrl) || '') + ' ' + String((it && it.workShortUrl) || '') + ' ' + String((it && it.shareUrl) || '');
+    if (s.indexOf('5mgl.com') >= 0) return 'acc1';
+    if (s.indexOf('yoz2.com') >= 0) return 'acc2';
+    return '';
+  }
+  // 表示専用のチャンネルガード。所属が「別チャンネルだと確定できた」行だけを今のタブから隠す。
+  //   判定不能(ownerOf_='' かつ ドメイン無し)は残す=fail-open(正当な行を誤って消さない)。
+  //   ★表示だけ。localStorage/シートへは一切書かない(INC-112 防壁を維持)。
+  //   狙い(Chami報告2026-07-29): 同じ題名が両チャンネルの投稿履歴に出る=正本がどちらのストアにも
+  //   居る状態でも、短縮URLドメイン/投稿者DID/背骨ID接頭辞で正しい側のタブにだけ出す。
+  function filterOtherChannel_(items) {
+    var cur = acct();
+    return items.filter(function (it) {
+      if (!it) return false;
+      var ch = ownerOf_(it) || acctByShort_(it);
+      return !ch || ch === cur; // 他chと確定した行のみ隠す。不明はそのまま出す
+    });
+  }
   function displayItems_() {
     var local = allItems();
     var c = _sheetExtraCache[acct()];
     var items = (c && c.items && c.items.length) ? local.concat(c.items) : local;
     var pend = _pendingSheetEdits[acct()];
-    if (!pend) return items;
-    return items.map(function (it) {
+    if (pend) items = items.map(function (it) {
       if (!it || !it._fromSheet || !it.videoId) return it;
       var patch = pend[String(it.videoId)];
       if (!patch) return it;
@@ -179,6 +200,7 @@
       for (var q in patch) if (Object.prototype.hasOwnProperty.call(patch, q)) copy[q] = patch[q];
       return copy;
     });
+    return filterOtherChannel_(items);
   }
   // GASのhistoryをマージ用に取得。未設定/失敗時は前回キャッシュ(無ければ空)を返すだけ＝ローカル表示は無傷。
   function fetchSheetExtra_(cb) {
