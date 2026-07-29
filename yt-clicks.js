@@ -164,6 +164,36 @@
   //   「再取得しても編集が復活しない」を保証する(display専用=localStorageへは一切書かない=INC-112防壁維持)。
   //   同じ行を編集し直すと上書き。GAS反映が遅れても消えず、届けば同値なので無害。
   var _pendingSheetEdits = {};
+  // ★シート由来編集をリロードを越えて保持する専用ストア(hist/verify_manualとは別キー＝INC-112防壁の対象外)。
+  //   真因(#5 Chami「リロードしたら保存したのにまた消えた」2026-07-29): _pendingSheetEdits は在メモリのみで、
+  //   GAS往復が届く前にリロードすると {} に戻り、_fromSheet行が古いシート値へ戻る=編集が消える。
+  //   → 編集を sheet_edit_pending__<acct>(専用キー・非同期=許可リスト外で既定ローカル)へも書き、起動時に復元する。
+  //   シート正本が編集を反映できたら(historyHasEdit)そのvideoIdの保持は消す(=以後はシートが権威)。
+  function pendKey_(a) { return 'sheet_edit_pending__' + (a || acct()); }
+  function loadPend_(a) { try { return JSON.parse(localStorage.getItem(pendKey_(a)) || '{}') || {}; } catch (e) { return {}; } }
+  function savePend_(a, obj) {
+    try {
+      if (obj && Object.keys(obj).length) localStorage.setItem(pendKey_(a), JSON.stringify(obj));
+      else localStorage.removeItem(pendKey_(a));
+    } catch (e) {}
+  }
+  // シート正本が編集を反映できたvideoIdの保持を落とす(在メモリ＋localStorage双方)。過剰保持を防ぐ自己清掃。
+  //   ★workUrl/ytUrlのどちらかが非空のpatchだけ照合対象(historyHasEditはこの2つ＋workStateしか見ないため、
+  //    属性/platformだけの編集を空expectedで誤って"反映済み"と判定して消さない)。
+  function reconcilePend_(a, sheetItems) {
+    var pm = _pendingSheetEdits[a]; if (!pm) return;
+    var he = window.HistMerge && window.HistMerge.historyHasEdit; if (!he) return;
+    var changed = false;
+    Object.keys(pm).forEach(function (vid) {
+      var patch = pm[vid] || {};
+      if (!patch.workUrl && !patch.ytUrl) return; // 照合できる実体が無い=在セッションのbgSuccessに任せる
+      var expected = { videoId: vid, youtubeUrl: patch.ytUrl || '', workUrl: patch.workUrl || '', workState: patch.workState || '' };
+      if (he(sheetItems, expected)) { delete pm[vid]; changed = true; }
+    });
+    if (changed) savePend_(a, pm);
+  }
+  // 起動時に両チャンネルの保持を復元(リロードを越えて編集を生かす)。acctは明示指定=呼び出し時のタブに依存しない。
+  ['acc1', 'acc2'].forEach(function (a) { var p = loadPend_(a); if (p && Object.keys(p).length) _pendingSheetEdits[a] = p; });
   // 短縮URLのドメインからチャンネルを判定(月詠み=5mgl.com/acc1・宵桜艶帖=yoz2.com/acc2)。
   //   短縮リンクは投稿時にチャンネル別ドメインで払い出される(bluesky.js URL_BY_ACCT)ので、
   //   postUri/背骨IDの無い手動・ドラフト由来行でも所属を確定できる唯一の権威シグナル。
@@ -197,7 +227,14 @@
       if (!patch) return it;
       var copy = {};
       for (var p in it) if (Object.prototype.hasOwnProperty.call(it, p)) copy[p] = it[p];
-      for (var q in patch) if (Object.prototype.hasOwnProperty.call(patch, q)) copy[q] = patch[q];
+      for (var q in patch) if (Object.prototype.hasOwnProperty.call(patch, q)) {
+        var pv = patch[q];
+        // ★空文字のpatchでシート値を消さない=編集で触っていない/未入力の欄が空でも上書きしない。
+        //   (これをしないと保持patchのworkShortUrl='' 等が導線2の短縮URLを毎回空欄に戻す事故になる)
+        //   カテゴリ属性はbooleanで false も有効値なので常に反映する。
+        if (typeof pv === 'string' && pv === '') continue;
+        copy[q] = pv;
+      }
       return copy;
     });
     return filterOtherChannel_(items);
@@ -220,6 +257,7 @@
       }
       var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(allItems(), res.items) : [];
       _sheetExtraCache[a] = { at: now, items: extra };
+      reconcilePend_(a, res.items); // シートが編集を反映済みなら保持を落とす(リロード後の自己清掃)
       if (cb) cb(extra);
     });
   }
@@ -1017,6 +1055,7 @@
         .forEach(function (f) { patch[f] = edited[f] || ''; });
       ATTR_DEFS.forEach(function (a) { patch[a.key] = !!edited[a.key]; });
       (_pendingSheetEdits[curAcct] = _pendingSheetEdits[curAcct] || {})[String(edited.videoId)] = patch;
+      savePend_(curAcct, _pendingSheetEdits[curAcct]); // ★リロードを越えて保持(#5根治)
     })();
     closeModal_();
     refresh();
@@ -1037,6 +1076,8 @@
       var merged = (window.HistMerge && window.HistMerge.mergeSheetExtras)
         ? window.HistMerge.mergeSheetExtras(allItems(), sheetItems || []) : null;
       if (c && merged) { c.items = merged; c.at = Date.now(); refresh(); }
+      // シートが編集を反映できた=以後シートが権威。この行の保持を落とす(在メモリ＋localStorage)。
+      try { var pm = _pendingSheetEdits[curAcct]; if (pm && pm[String(payload.videoId)]) { delete pm[String(payload.videoId)]; savePend_(curAcct, pm); } } catch (e) {}
     }
     function verifyFromSheet_() {
       if (verifyStarted || finished) return;

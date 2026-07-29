@@ -29,7 +29,7 @@
   //    差分(反転の目視)を出すために旧判定を保持する。
   function legacyNoSync(k) {
     k = String(k);
-    return /^(short_hist__|verify_manual__|verify_yt__|bsky_did__|cand_)/.test(k)
+    return /^(short_hist__|verify_manual__|verify_yt__|bsky_did__|cand_|sheet_edit_pending__)/.test(k)
       || /^(delta_cache|peak_cache|clicks_cache|yt_meta_cache|fanza_title_cache)$/.test(k)
       || /^acct_did_repair/.test(k)
       || k === "sync_device_name";
