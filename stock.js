@@ -501,7 +501,32 @@
       var isOurs = (og && og.ourBase) ? !!og.ourBase(slotUrl) : /\/\/(?:5mgl\.com|yoz2\.com)\//.test(slotUrl);
       if (slotUrl && !isOurs && saved.xPostUrl) { applyXPostUrl_(saved.xPostUrl, null); }
     } catch (e) {}
+    // 作品遷移リンク(Chami依頼2026-07-30④)=作品のアフィリンクをタップで開ける(遷移先の確認用)。無ければ隠す。
+    var wl = $('draftWorkLink'), waff = (meta.affiliateUrl || meta.workUrl || '').trim();
+    if (wl) {
+      if (/^https?:\/\//.test(waff)) { wl.href = waff; wl.style.display = 'inline-block'; }
+      else { wl.removeAttribute('href'); wl.style.display = 'none'; }
+    }
+    renderAffCheck_(meta);
     m.style.display = 'flex';
+  }
+
+  // ⑤ アフィID入り確認(Chami依頼2026-07-30)。作品紹介・セールの短縮リンクに自分のaf_idが入っているかを表示。
+  //   実体の判定は bluesky.js の __go5AffCheck(作品アフィリンク＋現在のセール設定＋af_idを見る)。未読込時は表示しない。
+  function renderAffCheck_(meta) {
+    var box = $('draftAffCheck'); if (!box) return;
+    if (typeof window.__go5AffCheck !== 'function') { box.innerHTML = ''; return; }
+    var r; try { r = window.__go5AffCheck((meta && (meta.affiliateUrl || meta.workUrl)) || ''); } catch (e) { box.innerHTML = ''; return; }
+    if (!r) { box.innerHTML = ''; return; }
+    function esc2(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function line_(label, v) {
+      if (!v) return '';
+      if (v.applicable === false) return '<div style="color:var(--sub);">' + label + '：—(未使用)</div>';
+      if (v.ok) return '<div style="color:var(--ink);">' + label + '：<b style="color:#2bb3c0;">✅</b></div>';
+      return '<div style="color:var(--ink);">' + label + '：<b style="color:#e06">🆖</b>' + (v.reason ? ' <span style="color:var(--sub);">' + esc2(v.reason) + '</span>' : '') + '</div>';
+    }
+    box.innerHTML = '<div style="font-weight:700;color:var(--accent);margin-bottom:2px;">アフィチェック</div>' +
+      line_('投稿作品', r.work) + line_('セールURL', r.sale);
   }
 
   function createModal_() {
@@ -529,6 +554,8 @@
     var btnW = 'padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
     // 短縮URLの確認用リンク(タップで実際に遷移・Chami確認用)。アクセント色＋下線＋折り返し。
     var lnkS = 'display:inline-block;margin:0 0 8px;font-size:.86rem;color:var(--accent);text-decoration:underline;word-break:break-all;';
+    // フレックス行の中に置くリンク(下マージン無し・折り返し許容)。説明欄行の短縮URL/作品遷移リンク用。
+    var lnkR = 'font-size:.82rem;color:var(--accent);text-decoration:underline;word-break:break-all;min-width:0;';
     var sH  = 'font-size:.72rem;font-weight:600;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;';
     var fL  = 'font-size:.76rem;color:var(--sub);margin-bottom:4px;margin-top:12px;';
     var ctaS = 'background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);';
@@ -542,9 +569,8 @@
           '</div>' +
         '</div>' +
         '<div style="padding:16px 16px 20px;">' +
-          '<div style="' + sH + 'margin-bottom:8px;">X 投稿</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="' + sH + 'flex:1;min-width:0;">X 投稿</div><button type="button" id="draftCopyX" style="' + btnW + '">コピー</button></div>' +
           '<textarea id="draftXText" rows="6" style="' + iS + 'resize:vertical;"></textarea>' +
-          '<div><button type="button" id="draftCopyX" style="' + bS + '">コピー</button></div>' +
           '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
           '<div style="' + rowWrap + '">' +
             '<input type="url" id="draftXPostUrl" size="1" placeholder="https://x.com/.../status/..." style="' + rowIn + '">' +
@@ -552,22 +578,29 @@
           '</div>' +
           '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
-          '<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;margin-top:0;">題名(コピーして貼り付け)</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div style="font-size:.78rem;font-weight:600;color:var(--sub);flex:1;min-width:0;">題名(コピーして貼り付け)</div><button type="button" id="draftCopyYtTitle" style="' + btnW + '">題名をコピー</button></div>' +
           '<textarea id="draftYtTitleText" readonly rows="3" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' +
-          '<div><button type="button" id="draftCopyYtTitle" style="' + bS + '">題名をコピー</button></div>' +
-          '<div style="' + fL + '">タグ(半角スペース区切り)</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;' + fL + '"><span style="flex:1;min-width:0;">タグ(半角スペース区切り)</span><button type="button" id="draftCopyYtTags" style="' + btnW + '">コピー</button></div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
-          '<div style="overflow:hidden;' + fL + '">' +
-            '<button type="button" id="draftCopyYtDesc" style="float:right;margin-left:8px;' + btnW + '">コピー</button>' +
+          '<div style="' + fL + '">' +
             '<svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)' +
           '</div>' +
-          '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkS + 'display:none;"></a>' +
+          // 説明欄の短縮リンク行(Chami依頼2026-07-30④)=左に「説明欄をコピー」・短縮リンク／右に作品遷移リンク・動画DL
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
+            '<button type="button" id="draftCopyYtDesc" style="' + btnW + '">説明欄をコピー</button>' +
+            '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkR + 'display:none;"></a>' +
+            '<span style="flex:1;min-width:8px;"></span>' +
+            '<a id="draftWorkLink" target="_blank" rel="noopener" style="' + lnkR + 'display:none;">作品遷移↗</a>' +
+            '<button type="button" id="draftDlVideo" style="' + btnW + '">動画DL</button>' +
+          '</div>' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
           '<div style="' + rowWrap + '">' +
             '<input type="url" id="draftYtUrl" size="1" placeholder="https://www.youtube.com/shorts/..." style="' + rowIn + '">' +
             '<button type="button" id="draftPasteYtUrl" style="' + cpS + '">貼り付け</button>' +
           '</div>' +
+          // アフィID入り確認(Chami依頼2026-07-30⑤)。作品紹介・セールの短縮リンクに自分のaf_idが入っているか。
+          '<div id="draftAffCheck" style="font-size:.78rem;margin-top:10px;line-height:1.65;"></div>' +
           '<div style="display:flex;gap:8px;margin-top:20px;">' +
             '<button type="button" id="draftModalComplete" style="flex:1;padding:13px;font-size:.88rem;font-weight:700;border-radius:10px;border:none;' + ctaS + 'cursor:pointer;">投稿完了</button>' +
             '<button type="button" id="draftModalSave" style="flex:1;padding:13px;font-size:.88rem;font-weight:600;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;">内容を保存</button>' +
@@ -586,6 +619,8 @@
     $('draftYtUrl').addEventListener('input', saveDraftPost_);
     $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
+    $('draftCopyYtTags').addEventListener('click', function () { copyText_(($('draftYtTagsInput') || {}).value || '', this); }); // タグ欄をコピー(Chami依頼2026-07-30③)
+    $('draftDlVideo').addEventListener('click', function () { if (_modalMeta) downloadStock_(_modalMeta.id, _modalMeta.videoName); }); // 動画DL(Chami依頼2026-07-30④)
     $('draftCopyYtDesc').addEventListener('click', function () {
       // 短縮URLは概要欄テキストボックスの最上段に既に入っている(setDescUrlSlot_)ので、
       //   テキストボックスの中身をそのままコピーする(先頭URLを二重に足さない)。

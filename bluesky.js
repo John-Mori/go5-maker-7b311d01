@@ -905,6 +905,30 @@
     };
   } catch (e) {}
 
+  // ドラフトモーダル用⑤: 作品紹介・セールの短縮リンクに「自分のaf_id」が入っているかを判定(Chami依頼2026-07-30)。
+  //   ・投稿作品 = 渡された作品アフィリンク(meta.affiliateUrl)。短縮済みは302素通しでaf_id保持=OK扱い。生FANZA URLでaf_id無しなら🆖。
+  //   ・セールURL = 現在選択中のセール案内URLを buildFanzaListLink(af_id) で包んだ結果にaf_idが乗るか(＝af_id未設定なら🆖)。未選択なら「未使用」。
+  //   返り値 { af, work:{ok,reason}, sale:{applicable,ok,reason} }。ネットワーク不使用(すべて手元の値で判定)。
+  try {
+    window.__go5AffCheck = function (workAffLink) {
+      var af = curAfId_();
+      var out = { af: af };
+      var w = String(workAffLink || '').trim();
+      if (!w) out.work = { ok: false, reason: '作品リンク未設定' };
+      else if (window.isShortenedUrl && window.isShortenedUrl(w)) out.work = { ok: true };
+      else if (window.hasRealAffiliateId && window.hasRealAffiliateId(w)) out.work = { ok: true };
+      else out.work = { ok: false, reason: af ? '作品リンクにaf_idが入っていない(生FANZA URLのまま)' : 'アフィID未設定(🔗アフィリンクタブで設定)' };
+      var entry = discCurrentEntry_();
+      if (!entry || !entry.url) { out.sale = { applicable: false }; }
+      else {
+        var saleRaw = window.buildFanzaListLink ? (window.buildFanzaListLink(entry.url, af) || {}).link || '' : '';
+        if (window.hasRealAffiliateId && window.hasRealAffiliateId(saleRaw)) out.sale = { applicable: true, ok: true };
+        else out.sale = { applicable: true, ok: false, reason: af ? 'セールURLにaf_idが付かない' : 'アフィID未設定(🔗アフィリンクタブで設定)' };
+      }
+      return out;
+    };
+  } catch (e) {}
+
   // ドラフトモーダル用: 指定アカウントの YouTube説明欄(コピペ用)を返す。
   //   保存済みのカスタム説明欄(yt_desc__<acc>)があればそれを、無ければ既定テンプレを使い、
   //   1行目が短縮URL/プレースホルダでなければプレースホルダ行を冠して「概要欄にそのまま貼れる」形にする。
