@@ -699,6 +699,55 @@
   var _pendingWorkShare = ''; // 作品クリック(導線2)の生成表示URL。保存時に item.workShareUrl へ付与
   var _curSrcUrl = '';    // 生成の元にする投稿URL(編集中アイテムのpostUrl等)
 
+  // 合算(導線1のみ・Chami依頼2026-07-31): X凍結→Bluesky退避などで別の短縮URLに割れた
+  //   同一作品のクリックを、この投稿へ束ねる。各行=合算したい短縮URLの入力欄＋「短縮」＋「✕」。
+  function addMergeRow_(url) {
+    var list = $('veditMergeList'); if (!list) return;
+    var row = document.createElement('div');
+    row.className = 'vedit-merge-row vedit-bsky-row';
+    var inp = document.createElement('input');
+    inp.type = 'url'; inp.className = 'vedit-merge-url'; inp.setAttribute('inputmode', 'url');
+    inp.autocomplete = 'off'; inp.placeholder = '合算したい短縮URL(導線1)を入れる';
+    inp.value = url || '';
+    var bShort = document.createElement('button');
+    bShort.type = 'button'; bShort.className = 'vedit-copy vedit-copy-fit vedit-merge-short'; bShort.textContent = '短縮';
+    var bDel = document.createElement('button');
+    bDel.type = 'button'; bDel.className = 'vedit-copy vedit-copy-fit vedit-merge-del'; bDel.textContent = '✕';
+    bDel.title = 'この合算URLを外す';
+    row.appendChild(inp); row.appendChild(bShort); row.appendChild(bDel);
+    list.appendChild(row);
+    // 短縮: 入力欄のURLを短縮リンク(r2計測キー付き)へ差し替える。合算はコード解決が要るため短縮推奨。
+    bShort.addEventListener('click', function () {
+      var v = (inp.value || '').trim();
+      if (!/^https?:\/\//.test(v)) { showModalErr_('先に合算したいURLを入れてください'); return; }
+      if (typeof window.Go5MakeShort !== 'function') { showModalErr_('短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
+      var errEl = $('veditError'); if (errEl) errEl.hidden = true;
+      var orig = bShort.textContent; bShort.disabled = true; bShort.textContent = '生成中…';
+      window.Go5MakeShort(v).then(function (res) {
+        var share = (res && res.shareUrl) || (res && res.shortUrl) || '';
+        if (!share) { showModalErr_('短縮に失敗しました。(r2ワーカーに接続できませんでした)'); return; }
+        inp.value = share; // 欄には短い計測URL(da.gd)を表示。クリック集計はコードで行う
+      }).catch(function () { showModalErr_('短縮に失敗しました。'); })
+        .then(function () { bShort.disabled = false; bShort.textContent = orig; });
+    });
+    bDel.addEventListener('click', function () { if (row.parentNode) row.parentNode.removeChild(row); });
+    return inp;
+  }
+  function setMergeRows_(urls) {
+    var list = $('veditMergeList'); if (!list) return;
+    list.innerHTML = '';
+    (Array.isArray(urls) ? urls : []).forEach(function (u) { if (u) addMergeRow_(u); });
+  }
+  function collectMergeUrls_() {
+    var out = [], list = $('veditMergeList');
+    if (!list) return out;
+    list.querySelectorAll('.vedit-merge-url').forEach(function (inp) {
+      var v = (inp.value || '').trim();
+      if (v && out.indexOf(v) < 0) out.push(v);
+    });
+    return out;
+  }
+
   function injectModal_() {
     if ($('veditOverlay')) return;
     var d = document.createElement('div');
@@ -724,8 +773,10 @@
         '<label class="vedit-field vedit-field-plat">' +
           '<div class="vedit-bsky-row">' +
             '<input id="veditBsky" type="url" inputmode="url" autocomplete="off" placeholder="https://x.com/… または短縮URL(省略可)">' +
-            '<button id="veditBskyCopy" type="button" class="vedit-copy">Copy</button>' +
+            '<button id="veditBskyCopy" type="button" class="vedit-copy vedit-copy-fit">コピー</button>' +
+            '<button id="veditMergeAdd" type="button" class="vedit-copy vedit-copy-fit" title="X凍結→Bluesky退避などで別の短縮URLに割れた同一作品のクリックを、この投稿へ合算する(導線1のみ)">合算</button>' +
           '</div>' +
+          '<div id="veditMergeList" class="vedit-merge-list"></div>' +
         '</label>' +
         '<div id="veditGenResult" class="vedit-gen-result" hidden></div>' +
         '<label class="vedit-field">作品URL(DMM/FANZAの商品ページURL)' +
@@ -779,6 +830,11 @@
         } else { copyFallback_(inp, ok); }
       } catch (e) { copyFallback_(inp, ok); }
     });
+    // 合算: 押すたびに投稿URL欄の下へ空の合算入力欄を1つ追加する。(Chami依頼2026-07-31)
+    $('veditMergeAdd').addEventListener('click', function () {
+      var inp = addMergeRow_('');
+      if (inp) inp.focus();
+    });
     // 作品URLのコピー。(Blueskyのコピーと同じ挙動)
     $('veditWorkCopy').addEventListener('click', function () {
       var inp = $('veditWork'); if (!inp) return;
@@ -814,7 +870,8 @@
         attrs,
         (wsEl && wsEl.value) || '旧作',
         ($('veditWorkShort').value || '').trim(),
-        (platEl && platEl.checked) ? 'bsky' : 'x' // 既定=X
+        (platEl && platEl.checked) ? 'bsky' : 'x', // 既定=X
+        collectMergeUrls_() // 合算URL(導線1のみ)
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -875,11 +932,12 @@
     _saveCb = null;
   }
 
-  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal, platform) {
+  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal, platform, mergeUrls) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
     $('veditBsky').value = bskyVal || '';
+    setMergeRows_(mergeUrls); // 合算URL(導線1のみ)を復元
     var plat = (platform === 'bsky') ? 'bsky' : 'x'; // 既定=X(Chami:これから原則X投稿)
     if ($('veditPlatX')) $('veditPlatX').checked = (plat === 'x');
     if ($('veditPlatBsky')) $('veditPlatBsky').checked = (plat === 'bsky');
@@ -959,7 +1017,12 @@
       delete item.workShortUrl; delete item.workShareUrl;
     }
   }
-  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
+  // 合算URL(導線1のみ)を item へ反映。空配列=合算なし=印を消す。
+  function applyMergeUrls_(item, mergeUrls) {
+    if (Array.isArray(mergeUrls) && mergeUrls.length) item.mergeUrls = mergeUrls;
+    else delete item.mergeUrls;
+  }
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
     var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
     // YouTube URL
     var ymap = loadYtMap();
@@ -980,6 +1043,7 @@
         if (_pendingShort) { manual[i].shortUrl = _pendingShort; delete manual[i].postUrl; } // 計測キー(r2)
         if (_pendingShare) manual[i].shareUrl = _pendingShare; // 表示用(da.gd)
         applyWorkShort_(manual[i], workShortVal); // 作品クリック計測URL(導線2)
+        applyMergeUrls_(manual[i], mergeUrls); // 合算URL(導線1のみ)
         saved = manual[i];
         break;
       }
@@ -997,6 +1061,7 @@
         if (_pendingShort) { hist[j].shortUrl = _pendingShort; delete hist[j].postUrl; } // 計測キー(r2)
         if (_pendingShare) hist[j].shareUrl = _pendingShare; // 表示用(da.gd)
         applyWorkShort_(hist[j], workShortVal); // 作品クリック計測URL(導線2)
+        applyMergeUrls_(hist[j], mergeUrls); // 合算URL(導線1のみ)
         saved = hist[j];
         break;
       }
@@ -1014,7 +1079,7 @@
 
   // シート由来行(_fromSheet)の編集をGASへ即時upsertする。成功後にUIを更新、失敗はモーダルにエラーを出す。
   // localStorageへは書き戻さない(INC-112防壁を維持)。
-  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
+  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
     var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
@@ -1038,6 +1103,7 @@
     if (_pendingShort) { edited.shortUrl = _pendingShort; delete edited.postUrl; }
     if (_pendingShare) edited.shareUrl = _pendingShare;
     applyWorkShort_(edited, workShortVal);
+    applyMergeUrls_(edited, mergeUrls); // 合算URL(導線1のみ・クライアント表示用。GAS列は持たない)
 
     var payload = {
       op: 'upsert',
@@ -1070,6 +1136,7 @@
         .forEach(function (f) { patch[f] = edited[f] || ''; });
       ATTR_DEFS.forEach(function (a) { patch[a.key] = !!edited[a.key]; });
       patch.workShortNone = !!edited.workShortNone; // ★意図的クリアの印はboolで保持=リロード跨ぎでも復活させない(#5系)
+      patch.mergeUrls = Array.isArray(edited.mergeUrls) ? edited.mergeUrls : []; // 合算URL(導線1のみ・表示専用オーバレイ)
       (_pendingSheetEdits[curAcct] = _pendingSheetEdits[curAcct] || {})[String(edited.videoId)] = patch;
       savePend_(curAcct, _pendingSheetEdits[curAcct]); // ★リロードを越えて保持(#5根治)
     })();
@@ -1268,6 +1335,16 @@
       var vid = ytIdOf(yt);
       var code = codeOf(it.shortUrl || '');
       var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
+      // 合算(導線1のみ・Chami依頼2026-07-31): X凍結→Bluesky退避などで別の短縮URLへ割れた同一作品の
+      //   クリックを、この投稿へ手動で束ねる。合算URL(r2)のクリックを導線1クリックへ加算する。
+      if (Array.isArray(it.mergeUrls) && it.mergeUrls.length) {
+        var _mSum = 0, _mGot = false;
+        for (var _mi = 0; _mi < it.mergeUrls.length; _mi++) {
+          var _mc = codeOf(it.mergeUrls[_mi] || '');
+          if (_mc && (_mc in clicksCache)) { _mSum += (clicksCache[_mc] || 0); _mGot = true; }
+        }
+        if (_mGot) clicks = (clicks || 0) + _mSum;
+      }
       // 導線2(投稿→FANZA): 本文中の作品リンクの計測コード(bluesky.jsが投稿時に置換・記録)
       var wcode = codeOf(it.workShortUrl || '');
       var wclicks = wcode && (wcode in clicksCache) ? clicksCache[wcode] : null;
@@ -1492,17 +1569,17 @@
         var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
         _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
         if (it._fromSheet) {
-          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
-            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform);
-          }, workShortCur, platOf_(it));
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
+            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls);
+          }, workShortCur, platOf_(it), it.mergeUrls);
           // シート由来行(別端末で作成)は「動画で使った画像」が欠けるので、ここでも後付け添付できるようにする。
           // 画像はvideoId単位の別ストア(write-through)＝localStorageの履歴配列には書き戻さない(INC-112防壁は無関係)。
           addPostImagesToModal_(k, it, 'used');
         } else {
-          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
             closeModal_();
-            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform);
-          }, workShortCur, platOf_(it));
+            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls);
+          }, workShortCur, platOf_(it), it.mergeUrls);
           addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
           addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
           addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
@@ -2161,7 +2238,7 @@
       }
     } catch (e) {}
     _curSrcUrl = ''; // 新規追加：生成元はveditBskyの入力値を使う
-    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform) {
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -2179,6 +2256,7 @@
       if (_pendingShare) entry.shareUrl = _pendingShare; // 表示用(da.gd)
       applyWorkShort_(entry, workShortVal); // 作品クリック計測URL(導線2)
       if (platform === 'x' || platform === 'bsky') entry.platform = platform; // X↗/Bsky↗表示の手動指定(既定X)
+      if (Array.isArray(mergeUrls) && mergeUrls.length) entry.mergeUrls = mergeUrls; // 合算URL(導線1のみ)
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       pokeSnapshotNow_(); // 手動追加でもYT URL紐付け当日に日別記録のベースラインを作る(④)
@@ -2189,8 +2267,11 @@
   // クリック数(開封数)・YouTube視聴回数/投稿日時/題名をAPIから取得しキャッシュへ。Promiseを返す。
   function fetchData_(items, ymap, force) { // force=true(手動🔄更新)のときだけTTLを無視して取り直す
     // 導線1(shortUrl=YT→投稿)と導線2(workShortUrl=投稿→FANZA)の両計測コードをまとめて照会
+    var mergeCodes = [];
+    items.forEach(function (it) { if (Array.isArray(it.mergeUrls)) it.mergeUrls.forEach(function (u) { var c = codeOf(u || ''); if (c) mergeCodes.push(c); }); });
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); })
       .concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); }))
+      .concat(mergeCodes)
       .filter(Boolean).filter(function (v, i, a) { return a.indexOf(v) === i; });
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
     var uniqVids = vids.filter(function (v, i, a) { return a.indexOf(v) === i; }); // 重複動画IDは1回だけ照会

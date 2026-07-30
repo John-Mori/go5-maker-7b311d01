@@ -566,6 +566,15 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .vedit-bsky-row #veditYtPaste,.vedit-bsky-row #veditWorkCopy{flex:0 0 auto;padding:8px 10px;}
 /* 画像添付行の「貼り付け」「＋ 選ぶ」も文字幅に合わせ、余った幅を用途ドロップダウンへ回す（Chami依頼2026-07-30） */
 .vedit-postimg-btn{flex:0 0 auto;padding:8px 10px;}
+/* 投稿URL行の「コピー」「合算」、合算行の「短縮」「✕」は文字幅ぴったり（伸ばさない・Chami依頼2026-07-31） */
+.vedit-copy-fit{flex:0 0 auto;padding:8px 10px;}
+/* 投稿URL(計測用の短縮URL)のテキストボックスを狭めてボタン2つ分の余白を作る */
+.vedit-field-plat #veditBsky{flex:1 1 0;}
+/* 合算URL(導線1のみ)：投稿URL欄の下に現れる入力欄＋「短縮」「✕」 */
+.vedit-merge-list{display:flex;flex-direction:column;gap:6px;}
+.vedit-merge-list:not(:empty){margin-top:6px;}
+.vedit-merge-row .vedit-merge-url{flex:1 1 0;min-width:0;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);box-sizing:border-box;}
+.vedit-merge-del{background:transparent;color:var(--sub);border-color:var(--line);font-weight:400;}
 .vedit-chara{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);margin:0 0 14px;cursor:pointer;}
 .vedit-chara input{width:20px;height:20px;flex-shrink:0;accent-color:#ff79b0;margin:0;}
 /* 計測用の短縮リンク生成（編集モーダル） */
