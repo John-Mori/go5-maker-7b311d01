@@ -177,6 +177,26 @@
       else localStorage.removeItem(pendKey_(a));
     } catch (e) {}
   }
+  // ── 合算URL(導線1)の永続ストア(Chami依頼2026-07-31) ─────────────────────────
+  //   シート由来行(_fromSheet)の合算URLはシートに列が無く、_pendingSheetEdits(反映後に破棄される
+  //   保持patch)にしか乗らないため、GAS往復が届くと消える。videoId別の専用キーへ書き、displayItems_
+  //   が常に上塗りする=シートが権威になっても合算(クリック加算＋投稿URL欄の合算後URL表示)を維持する。
+  //   ローカル行は it.mergeUrls(履歴配列に同梱)で永続するのでこのストアは使わない。
+  function mergeStoreKey_(a) { return 'merge_urls__' + (a || acct()); }
+  function loadMergeStore_(a) { try { return JSON.parse(localStorage.getItem(mergeStoreKey_(a)) || '{}') || {}; } catch (e) { return {}; } }
+  function saveMergeStore_(a, obj) {
+    try {
+      if (obj && Object.keys(obj).length) localStorage.setItem(mergeStoreKey_(a), JSON.stringify(obj));
+      else localStorage.removeItem(mergeStoreKey_(a));
+    } catch (e) {}
+  }
+  function setMergeForVideo_(a, vid, urls) {
+    if (!vid) return;
+    var m = loadMergeStore_(a);
+    if (Array.isArray(urls) && urls.length) m[String(vid)] = urls;
+    else delete m[String(vid)];
+    saveMergeStore_(a, m);
+  }
   // シート正本が編集を反映できたvideoIdの保持を落とす(在メモリ＋localStorage双方)。過剰保持を防ぐ自己清掃。
   //   ★workUrl/ytUrlのどちらかが非空のpatchだけ照合対象(historyHasEditはこの2つ＋workStateしか見ないため、
   //    属性/platformだけの編集を空expectedで誤って"反映済み"と判定して消さない)。
@@ -238,6 +258,16 @@
       // ★意図的クリア印が立っていたら、シートに残る誤挿入の作品短縮URLを表示上も空にする
       //   (patchのworkShortUrl='' は上の空スキップで効かないので、boolの印で確実に消す)。
       if (copy.workShortNone) { copy.workShortUrl = ''; copy.workShareUrl = ''; }
+      return copy;
+    });
+    // 合算URL(導線1)を_fromSheet行へ上塗り(保持patchが破棄された後も維持・Chami依頼2026-07-31)。
+    var mstore = loadMergeStore_(acct());
+    if (mstore && Object.keys(mstore).length) items = items.map(function (it) {
+      if (!it || !it._fromSheet || !it.videoId) return it;
+      var mu = mstore[String(it.videoId)];
+      if (!Array.isArray(mu) || !mu.length) return it;
+      var copy = {}; for (var p in it) if (Object.prototype.hasOwnProperty.call(it, p)) copy[p] = it[p];
+      copy.mergeUrls = mu;
       return copy;
     });
     return filterOtherChannel_(items);
@@ -699,17 +729,18 @@
   var _pendingWorkShare = ''; // 作品クリック(導線2)の生成表示URL。保存時に item.workShareUrl へ付与
   var _curSrcUrl = '';    // 生成の元にする投稿URL(編集中アイテムのpostUrl等)
 
-  // 合算(導線1のみ・Chami依頼2026-07-31): X凍結→Bluesky退避などで別の短縮URLに割れた
-  //   同一作品のクリックを、この投稿へ束ねる。各行=合算したい短縮URLの入力欄＋「短縮」＋「✕」。
+  // 合算(導線1のみ・Chami依頼2026-07-31): X凍結→Bluesky退避などで別の短縮URLへ割れた同一作品の
+  //   クリックを、この投稿へ束ねる。合算した短縮URL群のうち「最新の1本」を投稿URL欄(veditBsky)の
+  //   代表へ昇格させ(＝合算後の短縮URLを投稿URL欄へ置き換えて表示)、残りはクリック加算用に保持する。
+  //   ・addMergeRow_ =「合算」ボタンで足す入力欄(短縮ボタン付き)。保存すると最新の1本が投稿URL欄へ。
+  //   ・addHistRow_  = 再オープン時、既に合算済み(過去)の短縮URLを読み取り専用で並べる(✕で外せる)。
   function addMergeRow_(url) {
     var list = $('veditMergeList'); if (!list) return;
-    var wrap = document.createElement('div');
-    wrap.className = 'vedit-merge-item';
     var row = document.createElement('div');
     row.className = 'vedit-merge-row vedit-bsky-row';
     var inp = document.createElement('input');
     inp.type = 'url'; inp.className = 'vedit-merge-url'; inp.setAttribute('inputmode', 'url');
-    inp.autocomplete = 'off'; inp.placeholder = '合算したい短縮URL(導線1)を入れる';
+    inp.autocomplete = 'off'; inp.placeholder = '合算したい短縮URL(導線1)→保存で投稿URL欄へ';
     inp.value = url || '';
     var bShort = document.createElement('button');
     bShort.type = 'button'; bShort.className = 'vedit-copy vedit-copy-fit vedit-merge-short'; bShort.textContent = '短縮';
@@ -717,26 +748,8 @@
     bDel.type = 'button'; bDel.className = 'vedit-copy vedit-copy-fit vedit-merge-del'; bDel.textContent = '✕';
     bDel.title = 'この合算URLを外す';
     row.appendChild(inp); row.appendChild(bShort); row.appendChild(bDel);
-    // 合算後のURLを表示する行(Chami依頼2026-07-31)。短縮後/復元時に「合算後のURL＋そのクリック数」を出す。
-    var note = document.createElement('div');
-    note.className = 'vedit-merge-note'; note.hidden = true;
-    wrap.appendChild(row); wrap.appendChild(note);
-    list.appendChild(wrap);
-    function showNote_(u) {
-      var v = (u || '').trim();
-      if (!v) { note.hidden = true; note.innerHTML = ''; return; }
-      var c = codeOf(v);
-      var cl = (c && (c in clicksCache)) ? clicksCache[c] : null;
-      note.hidden = false;
-      note.innerHTML = '合算後のURL：<code class="vgen-url">' + esc(v) + '</code> ' +
-        '<button type="button" class="vgen-copy vedit-merge-notecopy">コピー</button>' +
-        (cl != null ? ' <span class="vmerge-clicks">(クリック ' + num(cl) + ')</span>'
-                    : (c ? ' <span class="vmerge-clicks" style="opacity:.6;">(クリック 取得待ち)</span>' : ' <span class="vmerge-clicks" style="opacity:.6;">(未短縮=計測コード無し)</span>'));
-      var cp = note.querySelector('.vedit-merge-notecopy');
-      if (cp) cp.addEventListener('click', function () { try { navigator.clipboard.writeText(v); cp.textContent = '✓ コピー'; } catch (e) {} });
-    }
-    if (inp.value) showNote_(inp.value); // 復元時：保存済みの合算URLを最初から表示
-    // 短縮: 入力欄のURLを短縮リンク(自前ドメイン・計測コード付き)へ差し替える。合算はコード解決が要るため短縮推奨。
+    list.appendChild(row);
+    // 短縮: 長いURLを自前ドメインの計測用短縮URL(codeOf解決可＝クリック加算の対象)へ差し替える。
     bShort.addEventListener('click', function () {
       var v = (inp.value || '').trim();
       if (!/^https?:\/\//.test(v)) { showModalErr_('先に合算したいURLを入れてください'); return; }
@@ -744,30 +757,54 @@
       var errEl = $('veditError'); if (errEl) errEl.hidden = true;
       var orig = bShort.textContent; bShort.disabled = true; bShort.textContent = '生成中…';
       window.Go5MakeShort(v).then(function (res) {
-        var share = (res && res.shareUrl) || (res && res.shortUrl) || '';
-        if (!share) { showModalErr_('短縮に失敗しました。(短縮ワーカーに接続できませんでした)'); return; }
-        inp.value = share; // 欄には短い計測URL(da.gd)を表示。クリック集計はコードで行う
-        showNote_(share); // 合算後のURLを表示
+        var short = (res && res.shortUrl) || (res && res.shareUrl) || ''; // 計測キー(自前ドメイン)を優先＝codeOf解決可
+        if (!short) { showModalErr_('短縮に失敗しました。(短縮ワーカーに接続できませんでした)'); return; }
+        inp.value = short;
       }).catch(function () { showModalErr_('短縮に失敗しました。'); })
         .then(function () { bShort.disabled = false; bShort.textContent = orig; });
     });
-    inp.addEventListener('change', function () { showNote_(inp.value); }); // 手入力での確定時も表示を更新
-    bDel.addEventListener('click', function () { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); });
+    bDel.addEventListener('click', function () { if (row.parentNode) row.parentNode.removeChild(row); });
     return inp;
+  }
+  function addHistRow_(url) {
+    var list = $('veditMergeList'); if (!list) return;
+    var v = (url || '').trim(); if (!v) return;
+    var row = document.createElement('div');
+    row.className = 'vedit-merge-row vedit-bsky-row vedit-merge-histrow';
+    var c = codeOf(v);
+    var cl = (c && (c in clicksCache)) ? clicksCache[c] : null;
+    var span = document.createElement('span');
+    span.className = 'vedit-merge-hist-url';
+    span.setAttribute('data-url', v);
+    span.innerHTML = '合算元：<code class="vgen-url">' + esc(v) + '</code>' +
+      (cl != null ? ' <span class="vmerge-clicks">(クリック ' + num(cl) + ')</span>'
+                  : (c ? ' <span class="vmerge-clicks" style="opacity:.6;">(取得待ち)</span>' : ' <span class="vmerge-clicks" style="opacity:.6;">(計測コード無し)</span>'));
+    var bDel = document.createElement('button');
+    bDel.type = 'button'; bDel.className = 'vedit-copy vedit-copy-fit vedit-merge-del'; bDel.textContent = '✕';
+    bDel.title = 'この合算を外す';
+    row.appendChild(span); row.appendChild(bDel);
+    list.appendChild(row);
+    bDel.addEventListener('click', function () { if (row.parentNode) row.parentNode.removeChild(row); });
   }
   function setMergeRows_(urls) {
     var list = $('veditMergeList'); if (!list) return;
     list.innerHTML = '';
-    (Array.isArray(urls) ? urls : []).forEach(function (u) { if (u) addMergeRow_(u); });
+    (Array.isArray(urls) ? urls : []).forEach(function (u) { if (u) addHistRow_(u); });
   }
-  function collectMergeUrls_() {
-    var out = [], list = $('veditMergeList');
-    if (!list) return out;
-    list.querySelectorAll('.vedit-merge-url').forEach(function (inp) {
-      var v = (inp.value || '').trim();
-      if (v && out.indexOf(v) < 0) out.push(v);
-    });
-    return out;
+  // 現在のモーダルDOMから {primary: 合算後の代表(最新の短縮URL), mergeUrls: 残り(過去)} を作る。
+  //   並び＝過去(hist・読み取り専用)→現primary(投稿URL欄)→今回追加(staging)。最後(＝最新)を代表にする。
+  //   保存→再オープンでも並びは同型なので代表が入れ替わらない(安定)。
+  function resolveMerge_() {
+    var boxEl = $('veditBsky');
+    var box = (boxEl && boxEl.value || '').trim();
+    var hist = [], staged = [], list = $('veditMergeList');
+    if (list) {
+      list.querySelectorAll('.vedit-merge-hist-url').forEach(function (el) { var v = (el.getAttribute('data-url') || '').trim(); if (v) hist.push(v); });
+      list.querySelectorAll('.vedit-merge-url').forEach(function (inp) { var v = (inp.value || '').trim(); if (v) staged.push(v); });
+    }
+    var all = [];
+    hist.concat([box]).concat(staged).forEach(function (u) { var v = (u || '').trim(); if (v && all.indexOf(v) < 0) all.push(v); });
+    return { primary: all.length ? all[all.length - 1] : '', mergeUrls: all.slice(0, -1) };
   }
 
   function injectModal_() {
@@ -885,15 +922,16 @@
       ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); attrs[a.key] = !!(el && el.checked); });
       var wsEl = $('veditWorkState');
       var platEl = $('veditPlatBsky');
+      var _mres = resolveMerge_(); // 合算後の代表(最新)を投稿URL欄へ昇格・残りはクリック加算用に保持
       cb(
         ($('veditYt').value || '').trim(),
-        ($('veditBsky').value || '').trim(),
+        _mres.primary, // 投稿URL＝合算後の短縮URL(最新)
         ($('veditWork').value || '').trim(),
         attrs,
         (wsEl && wsEl.value) || '旧作',
         ($('veditWorkShort').value || '').trim(),
         (platEl && platEl.checked) ? 'bsky' : 'x', // 既定=X
-        collectMergeUrls_() // 合算URL(導線1のみ)
+        _mres.mergeUrls // 合算URL(導線1のみ・過去の短縮URL群=クリック加算)
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -1146,6 +1184,8 @@
     if (edited.platform === 'x' || edited.platform === 'bsky') payload.platform = edited.platform; // 投稿先(X/Bsky)列
 
     var curAcct = acct();
+    // 合算URL(導線1)を永続ストアへ=保持patch(反映後に破棄)が消えても維持する(Chami依頼2026-07-31)
+    setMergeForVideo_(curAcct, edited.videoId, Array.isArray(edited.mergeUrls) ? edited.mergeUrls : []);
 
     // ★Chami指示2026-07-28: 保存を押したら編集モーダルは即閉じ、UIは楽観更新。GAS反映は裏でやる。
     //   旧実装はGASへupsert→履歴再読込での確認が通るまでモーダルを閉じず(最大3回リトライ)、
@@ -1585,7 +1625,11 @@
         for (var i = 0; i < rawItems.length; i++) { if (itemKey(rawItems[i]) === k) { it = rawItems[i]; break; } }
         if (!it) return;
         var ytCur = ymap[k] || it.ytUrl || '';
-        var bskyCur = it.shareUrl || it.shortUrl || it.postUrl || ''; // 短い計測URL(da.gd)を優先表示
+        // 合算済み(mergeUrls有・shortUrlが自前ドメイン)=合算後の代表(自前短縮)を投稿URL欄へ置き換えて表示(Chami依頼2026-07-31)
+        var _g = window.Go5Short;
+        var bskyCur = (it.mergeUrls && it.mergeUrls.length && it.shortUrl && _g && _g.ourBase && _g.ourBase(it.shortUrl))
+          ? it.shortUrl
+          : (it.shareUrl || it.shortUrl || it.postUrl || ''); // 通常は短い計測URL(da.gd)を優先表示
         var workCur = it.workUrl || '';
         var workShortCur = it.workShareUrl || it.workShortUrl || ''; // 作品クリック計測URL(導線2)の現値
         var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });

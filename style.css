@@ -576,8 +576,9 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .vedit-merge-row .vedit-merge-url{flex:1 1 0;min-width:0;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);box-sizing:border-box;}
 .vedit-merge-del{background:transparent;color:var(--sub);border-color:var(--line);font-weight:400;}
 .vedit-merge-item{display:flex;flex-direction:column;gap:5px;}
-/* 合算後のURL表示（Chami依頼2026-07-31） */
-.vedit-merge-note{font-size:12px;color:var(--sub);line-height:1.5;}
+/* 再オープン時：合算済み(過去)の短縮URLを読み取り専用で並べる行（Chami依頼2026-07-31） */
+.vedit-merge-histrow{align-items:center;}
+.vedit-merge-hist-url{flex:1 1 0;min-width:0;font-size:12px;color:var(--sub);line-height:1.4;word-break:break-all;}
 .vmerge-clicks{color:var(--accent);font-weight:700;white-space:nowrap;}
 .vedit-chara{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);margin:0 0 14px;cursor:pointer;}
 .vedit-chara input{width:20px;height:20px;flex-shrink:0;accent-color:#ff79b0;margin:0;}
