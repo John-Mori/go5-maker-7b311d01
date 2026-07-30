@@ -1302,6 +1302,14 @@
         : (storedUsedImgs.length ? storedUsedImgs : legacyRefImgs.slice(0, 1));
       var refThumb = usedImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || '';
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
+      // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
+      //   YouTube再生数はAPI未取得/クォータ切れ/紐付け直後だと0や未取得のまま張り付き、下段の「今日▶120/週▶120」
+      //   と食い違う(=総再生数0表示。Chami報告2026-07-30)。週デルタは all-time 累計に必ず内包されるので
+      //   max(週,今日,昨日)を下限に置けば「累計 ≥ 週」を守りつつ、取得済みの実累計が大きければそちらを活かす。
+      if (_dl) {
+        var vCum = (_dl.cv != null) ? _dl.cv : Math.max(_dl.wv || 0, _dl.tv || 0, _dl.yv || 0);
+        if (vCum > 0) views = Math.max(views || 0, vCum);
+      }
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
       // YouTube動画が紐付いていない投稿(Bluesky単体投稿等)は、YouTube公開日時が原理的に存在しない。
