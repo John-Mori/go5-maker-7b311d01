@@ -1300,7 +1300,11 @@
       var usedImgArr = (window.HistMerge && window.HistMerge.historyUsedImages)
         ? window.HistMerge.historyUsedImages(storedUsedImgs, legacyRefImgs, !!(window.Go5Cand && window.Go5Cand.usedImgKnown && window.Go5Cand.usedImgKnown(pKey)))
         : (storedUsedImgs.length ? storedUsedImgs : legacyRefImgs.slice(0, 1));
-      var refThumb = usedImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || '';
+      // ★投稿画像(編集モーダルで添付する用途'post')も履歴カードのサムネ候補に入れる。
+      //   動画で使った画像/Bluesky画像が両方無い作品(投稿画像だけ添付した作品)は、モーダルにデータが在るのに
+      //   カードが空表示になっていた(Chami報告2026-07-30・添付=1532357129657385031)。用途'post'の1枚目を最後の砦にする。
+      var postImgArr = (window.Go5Cand && window.Go5Cand.postImgs) ? (window.Go5Cand.postImgs(pKey) || []) : [];
+      var refThumb = usedImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || postImgArr[0] || '';
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
       //   YouTube再生数はAPI未取得/クォータ切れ/紐付け直後だと0や未取得のまま張り付き、下段の「今日▶120/週▶120」
@@ -1443,11 +1447,14 @@
         var cid = im.getAttribute('data-refcid');
         var usedKey = im.getAttribute('data-usedkey');
         var imgs = (usedKey && window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []).slice() : [];
+        // 動画で使った画像が無い作品は投稿画像(用途'post')を開く＝サムネがpostImgArr[0]由来のケース。
+        var fromPost = false;
+        if (!imgs.length && usedKey && window.Go5Cand && window.Go5Cand.postImgs) { imgs = (window.Go5Cand.postImgs(usedKey) || []).slice(); fromPost = imgs.length > 0; }
         if (!imgs.length && im.getAttribute('src')) imgs = [im.getAttribute('src')];
         var b = (cid && window.Go5Cand && window.Go5Cand.bskyImg) ? window.Go5Cand.bskyImg(cid) : '';
-        // 先頭prevN枚は「投稿プレビュー画像」、それ以降は動画で使った画像(Chami依頼2026-07-30)。
+        // 先頭prevN枚は「投稿プレビュー画像」、それ以降は動画で使った画像(Chami依頼2026-07-30)。投稿画像由来なら全ページ「投稿画像」。
         var prevN = (usedKey && window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
-        var caps = imgs.map(function (_c, i) { return i < prevN ? '投稿プレビュー画像' : '動画生成で使用した画像'; });
+        var caps = imgs.map(function (_c, i) { return fromPost ? '投稿画像' : (i < prevN ? '投稿プレビュー画像' : '動画生成で使用した画像'); });
         if (b) {
           var bi = imgs.indexOf(b);
           if (bi >= 0) caps[bi] = '動画生成/Bluesky投稿';             // 同一画像＝1ページに統合表記
