@@ -98,11 +98,12 @@ def main():
         elif not lats:
             lines.append(f"  {name}: 応答実績なし {note}")
         else:
-            p95 = statistics.quantiles(lats, n=20)[-1] if len(lats) >= 2 else lats[0]
+            # method='inclusive'= p95が観測最悪値を超えない(既定のexclusiveは小n時に外挿し最悪値超えの偽p95を出す)
+            p95 = statistics.quantiles(lats, n=20, method="inclusive")[-1] if len(lats) >= 2 else lats[0]
             lines.append(f"  {name}: n={len(lats)} 中央値={fmt(statistics.median(lats))}"
                          f" p95={fmt(p95)} 最悪={fmt(max(lats))} {note}")
     if all_lat:
-        p95a = statistics.quantiles(all_lat, n=20)[-1] if len(all_lat) >= 2 else all_lat[0]
+        p95a = statistics.quantiles(all_lat, n=20, method="inclusive")[-1] if len(all_lat) >= 2 else all_lat[0]
         lines.append(f"全体: n={len(all_lat)} 中央値={fmt(statistics.median(all_lat))}"
                      f" p95={fmt(p95a)} (目標: 受領≤60秒/本回答p95≤15分)")
     else:
