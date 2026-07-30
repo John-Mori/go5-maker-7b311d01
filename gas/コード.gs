@@ -114,7 +114,7 @@ function fanzaGenre_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-31C(③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-07-31F(②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -384,6 +384,90 @@ function doGet(e) {
         gOut.push({ sheet: nm, dataRows: glast - 1, wouldFill: filled, skippedNoUrl: skippedNoUrl, applied: gApply, sample: sample });
       });
       return jsonOut_({ ok: true, mode: gApply ? 'apply' : 'dry-run', force: gForce, genre: gOut });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // ①バックアップ復元: <exec URL>?action=restore_from_bk&sheet=月詠み&bk=月詠み_bk_20260722_0834
+  //   バックアップに在って本シートに無い post_id の行を、列名マッピングで本シートへ挿入し投稿日時で整列。
+  //   既定 dry-run(挿入候補を返すだけ)。&apply=1 で実挿入。post_id一致は重複扱いでスキップ(冪等)。
+  if (p.action === 'restore_from_bk') {
+    try {
+      var rbApply = String(p.apply || '') === '1';
+      var rbOnlyPid = String(p.pid || ''); // 指定時はこのpost_idの1行だけ復元(Chami「2行目だけ」等の限定用)
+      var liveNm = p.sheet || '月詠み', bkNm = p.bk || '';
+      var rbss = openSS_();
+      var live = rbss.getSheetByName(liveNm), bk = rbss.getSheetByName(bkNm);
+      if (!live || !bk) return jsonOut_({ ok: false, error: 'sheet_not_found', liveExists: !!live, bkExists: !!bk });
+      var lmap = headerMap_(live), bmap = headerMap_(bk);
+      var lpid = lmap['post_id'], bpid = bmap['post_id'];
+      if (!lpid || !bpid) return jsonOut_({ ok: false, error: 'no_postid_col' });
+      var llast = live.getLastRow(), blast = bk.getLastRow(), lcols = live.getLastColumn();
+      var lpids = {};
+      if (llast >= 2) live.getRange(2, lpid, llast - 1, 1).getValues().forEach(function (r) { if (r[0] !== '' && r[0] !== null) lpids[String(r[0])] = 1; });
+      var bhdr = bk.getRange(1, 1, 1, bk.getLastColumn()).getValues()[0];
+      var brows = blast >= 2 ? bk.getRange(2, 1, blast - 1, bk.getLastColumn()).getValues() : [];
+      var candidates = [], inserted = 0;
+      for (var i = 0; i < brows.length; i++) {
+        var pid = String(brows[i][bpid - 1] || '');
+        if (!pid) continue;
+        if (rbOnlyPid && pid !== rbOnlyPid) continue; // pid限定時は対象外をスキップ
+        if (lpids[pid]) continue; // 既に本シートにある=重複挿入しない
+        var newRow = [];
+        for (var z = 0; z < lcols; z++) newRow.push('');
+        for (var c = 0; c < bhdr.length; c++) { var lc = lmap[bhdr[c]]; if (lc) newRow[lc - 1] = brows[i][c]; }
+        candidates.push({
+          bkRow: i + 2, post_id: pid,
+          投稿日時: String(bmap['投稿日時'] ? brows[i][bmap['投稿日時'] - 1] : ''),
+          題名: String(bmap['題名(コメント)'] ? brows[i][bmap['題名(コメント)'] - 1] : '')
+        });
+        if (rbApply) { live.appendRow(newRow); inserted++; }
+      }
+      if (rbApply && inserted) sortByDate_(live, lmap['投稿日時'] || 2);
+      return jsonOut_({ ok: true, mode: rbApply ? 'apply' : 'dry-run', live: liveNm, bk: bkNm, missingCount: candidates.length, inserted: inserted, candidates: candidates.slice(0, 20) });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // ②YouTube公開日時で投稿日時を修正: <exec URL>?action=fix_date_from_yt&channel=acc1&pids=pid1,pid2
+  //   指定post_idの行のYouTube動画URLから動画IDを取り、YouTube Data APIのpublishedAtを投稿日時に設定。
+  //   既定 dry-run(現状before→新値afterを返すだけ)。&apply=1 で書き込み。YT_API_KEY(スクリプトプロパティ)必須。
+  //   pids未指定時はYouTube動画URLを持つ全行が対象(dry-runで差分を確認してから絞る想定)。
+  if (p.action === 'fix_date_from_yt') {
+    try {
+      var fdApply = String(p.apply || '') === '1';
+      var fdCh = p.channel || 'acc1';
+      var fdPids = String(p.pids || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      var ytKey = prop_('YT_API_KEY');
+      if (!ytKey) return jsonOut_({ ok: false, error: 'no_YT_API_KEY' });
+      var fsh = getChannelSheet_(fdCh), fmap = headerMap_(fsh);
+      var fpidc = fmap['post_id'], fytc = fmap['YouTube動画URL'], fdc = fmap['投稿日時'];
+      if (!fpidc || !fytc || !fdc) return jsonOut_({ ok: false, error: 'missing_col' });
+      var fflast = fsh.getLastRow();
+      if (fflast < 2) return jsonOut_({ ok: true, rows: [] });
+      var fvals = fsh.getRange(2, 1, fflast - 1, fsh.getLastColumn()).getValues();
+      var ftargets = [];
+      for (var fi = 0; fi < fvals.length; fi++) {
+        var fpid = String(fvals[fi][fpidc - 1] || '');
+        if (fdPids.length && fdPids.indexOf(fpid) < 0) continue;
+        var fyurl = String(fvals[fi][fytc - 1] || '');
+        var fm = fyurl.match(/(?:shorts\/|watch\?v=|youtu\.be\/|embed\/|live\/)([A-Za-z0-9_-]{11})/);
+        if (!fm) continue;
+        ftargets.push({ row: fi + 2, pid: fpid, vid: fm[1], cur: String(fvals[fi][fdc - 1] || '') });
+      }
+      var fout = [];
+      for (var fb = 0; fb < ftargets.length; fb += 50) {
+        var fslice = ftargets.slice(fb, fb + 50);
+        var fids = fslice.map(function (x) { return x.vid; }).join(',');
+        var fres = UrlFetchApp.fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet&id=' + fids + '&key=' + ytKey, { muteHttpExceptions: true });
+        var fdata = JSON.parse(fres.getContentText() || '{}');
+        var fById = {};
+        (fdata.items || []).forEach(function (it) { fById[it.id] = it.snippet && it.snippet.publishedAt; });
+        fslice.forEach(function (x) {
+          var pub = fById[x.vid];
+          if (!pub) { fout.push({ row: x.row, pid: x.pid, vid: x.vid, status: 'no_yt_data' }); return; }
+          if (fdApply) fsh.getRange(x.row, fdc).setValue(new Date(pub));
+          fout.push({ row: x.row, pid: x.pid, vid: x.vid, before: x.cur, after: pub, applied: fdApply });
+        });
+      }
+      if (fdApply && fout.length) sortByDate_(fsh, fdc);
+      return jsonOut_({ ok: true, mode: fdApply ? 'apply' : 'dry-run', channel: fdCh, rows: fout });
     } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 末尾の空行を詰める: <exec URL>?action=trim_empty_rows
