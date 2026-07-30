@@ -1276,9 +1276,14 @@
         //   「実数の累計」cc(導線1)/cwc(導線2)があればそれを採用。無ければ既知の期間デルタで下限を張る。
         //   どちらでも累計≥週が保証され、「累計0なのに週8/週-16」の矛盾表示は出ない。(Chami 2026-07-29)
         var cCum = (_dl.cc != null) ? _dl.cc : Math.max(_dl.wc || 0, _dl.tc || 0, _dl.yc || 0);
-        if (cCum > 0 && code) clicks = Math.max(clicks || 0, cCum);
+        // ★下限は「表示される累計 ≥ 表示される週」を守るためのもの。クライアントが短縮コードを解決
+        //   できるか(code/wcode)に依存させてはいけない——手入力の作品短縮URL等でcodeOfが空になる時こそ
+        //   「累計0なのに週8」が起きる(GASはシートの作品短縮URL列から週を出せるが、クライアントは
+        //   ローカルのURLからコードを取れず累計を0のまま残す)。コード有無の門を外し、GAS由来のデルタが
+        //   あれば必ず累計へ反映する。(Chami報告2026-07-30 宵桜艶帖「いつも助かってます」累計0/週8)
+        if (cCum > 0) clicks = Math.max(clicks || 0, cCum);
         var wCum = (_dl.cwc != null) ? _dl.cwc : Math.max(_dl.wwc || 0, _dl.twc || 0, _dl.ywc || 0);
-        if (wCum > 0 && wcode) wclicks = Math.max(wclicks || 0, wCum);
+        if (wCum > 0) wclicks = Math.max(wclicks || 0, wCum);
       }
       // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に。(別短縮URLのため加算)
       // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する(例：0+5=5(5))。
