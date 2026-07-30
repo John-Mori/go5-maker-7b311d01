@@ -1149,12 +1149,12 @@
       function isR2(u) { return !!(go5.ourBase && go5.ourBase(u)); }  // 両ドメイン+旧r2を自前と認識
       var cur = (it && it.workShortUrl) || '';
       if (!it || !go5.ourBase || typeof window.Go5MakeShort !== 'function') return;
-      // ★導線2(作品クリック計測URL)が空でも、作品URLがあれば作品URLから計測短縮を起こす。
-      //   狙い(Chami報告2026-07-29「作品クリック計測用の短縮URLは反映されてない。空欄のまま」):
-      //   投稿時に本文へ生リンクが無く導線2が捕捉できなかった記録でも、編集を開いた時点で
-      //   作品URL→アフィリンク→r2短縮を自動生成して埋める。空をそのまま放置しない。
-      if (!/^https?:\/\//.test(cur)) cur = (it && it.workUrl) || '';
-      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 値なし(作品URLも無し)/既に自前短縮＝そのまま
+      // ★作品URLからの自動発行はしない(Chami依頼2026-07-30)。導線2(作品クリック計測URL)の短縮は
+      //   「自動生成」ボタン(_pendingWorkShort)か投稿時のフローだけが起こす。編集保存では勝手に発行しない。
+      //   ここでやるのは、既に導線2欄へ入っている非r2リンクを計測キー(r2)へ正規化することだけ。
+      //   ★2026-07-29に入れた it.workUrl フォールバックが「画像だけ直して保存→短縮URLが勝手に湧く」の原因。
+      //   空欄は空欄のまま残す(作品URLへフォールバックしない)。
+      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 空 / 既に自前短縮＝何もしない
       var toShorten = cur;
       // FANZA/DMMの作品ページURL(al.fanza等のアフィリンクではない)なら、先にアフィリンク化する。
       if (window.buildAffiliateLink && /(^|\.)dmm\.co\.jp|(^|\.)dlsite|fanza/.test(cur) && !/al\.(fanza|dmm)/.test(cur)) {
