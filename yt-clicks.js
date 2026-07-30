@@ -1456,7 +1456,7 @@
         var b = (cid && window.Go5Cand && window.Go5Cand.bskyImg) ? window.Go5Cand.bskyImg(cid) : '';
         // 先頭prevN枚は「投稿プレビュー画像」、それ以降は動画で使った画像(Chami依頼2026-07-30)。投稿画像由来なら全ページ「投稿画像」。
         var prevN = (usedKey && window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
-        var caps = imgs.map(function (_c, i) { return fromPost ? '投稿画像' : (i < prevN ? '動画投稿プレビュー画像' : '動画生成で使用した画像'); });
+        var caps = imgs.map(function (_c, i) { return fromPost ? '投稿画像' : (i < prevN ? '動画投稿プレビュー' : '動画生成で使用した画像'); });
         if (b) {
           var bi = imgs.indexOf(b);
           if (bi >= 0) caps[bi] = '動画生成/Bluesky投稿';             // 同一画像＝1ページに統合表記
@@ -2057,7 +2057,7 @@
     // 用途(保存先)。usedストア(履歴単位)の先頭prev枚が「動画投稿プレビュー画像」、それ以降が「動画で使った画像」。
     //   ★プレビューと使用画像は1レコードを頭割りで共有する(prev=先頭何枚がプレビューか)。用途を分けて別々に編集でき、
     //   過去の投稿履歴(prev未設定)でもプレビュー枠から追加できる(Chami依頼2026-07-30)。Bluesky添付だけは作品cid単位。
-    var USES = [{ v: 'prev', label: '動画投稿プレビュー画像', multi: true }, { v: 'post', label: '投稿画像', multi: true }, { v: 'used', label: '動画で使った画像', multi: false }];
+    var USES = [{ v: 'prev', label: '動画投稿プレビュー', multi: true }, { v: 'post', label: '投稿画像', multi: true }, { v: 'used', label: '動画で使った画像', multi: false }];
     if (cid) USES.push({ v: 'bsky', label: 'Bluesky投稿画像', multi: false });
     // usedストアの現在の全画像(表示と同じ合成)と、先頭プレビュー枚数。
     function usedAll_() {
@@ -2091,8 +2091,8 @@
       '<div class="vedit-postimg-lbl">画像を添付 <span style="font-weight:400;color:var(--sub);font-size:11px;">(用途を選び、コピー中の画像を貼り付け or ファイルから追加。1枚目が投稿履歴に表示)</span></div>' +
       '<div class="vedit-bsky-row" style="margin-bottom:6px;">' +
         '<select id="veditImgUse" style="flex:1;min-width:0;">' + opts + '</select>' +
-        '<button id="veditImgPaste" type="button" class="vedit-copy">📋 貼り付け</button>' +
-        '<label class="vedit-copy" style="cursor:pointer;margin:0;">＋ 選ぶ<input type="file" accept="image/*" multiple hidden></label>' +
+        '<button id="veditImgPaste" type="button" class="vedit-copy vedit-postimg-btn">貼り付け</button>' +
+        '<label class="vedit-copy vedit-postimg-btn" style="cursor:pointer;margin:0;">＋ 選ぶ<input type="file" accept="image/*" multiple hidden></label>' +
       '</div>' +
       '<div class="vedit-postimg-grid"></div>' +
       '<div class="vedit-postimg-msg hint" style="min-height:0;margin:2px 0 0;"></div>';
@@ -2106,7 +2106,7 @@
     function persist() { store_(imgs); try { render(); } catch (e) {} } // 即保存＋カード再描画(画像変更なのでrender=クリック再取得を伴わない)
     function draw() {
       grid.innerHTML = '';
-      if (!imgs.length) { grid.innerHTML = '<div class="hint" style="padding:6px 2px;">まだありません。「📋 貼り付け」か「＋ 選ぶ」で追加してください。</div>'; return; }
+      if (!imgs.length) { grid.innerHTML = '<div class="hint" style="padding:6px 2px;">まだありません。「貼り付け」か「＋ 選ぶ」で追加してください。</div>'; return; }
       imgs.forEach(function (src, i) {
         var cell = document.createElement('div'); cell.className = 'vedit-postimg-cell';
         cell.innerHTML = '<img src="' + esc(src) + '" alt="画像' + (i + 1) + '" loading="lazy">' +
