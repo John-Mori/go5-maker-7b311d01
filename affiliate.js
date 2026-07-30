@@ -19,7 +19,7 @@
     { btn: 'tabAnalyze', page: 'pageAnalyze' },
     { btn: 'tabMovie',  page: 'pageMovie'    },
     { btn: 'tabStock',  page: 'pageStock'    },
-    { btn: 'tabCal',    page: 'pageCalendar' },
+    { btn: 'calBtn',    page: 'pageCalendar' },
     { btn: 'tabYT',     page: 'pageYouTube'  },
     { btn: 'tabPost',   page: 'pagePost'     },
     { btn: 'tabAffi',   page: 'pageAffi'     },
@@ -42,7 +42,7 @@
     document.documentElement.setAttribute('data-tab', activeBtnId);
     // リロード/再アクセス時に前回のタブを復元するため保存。
     try { localStorage.setItem('go5_active_tab', activeBtnId); } catch (e) {}
-    if (activeBtnId === 'tabCal') {
+    if (activeBtnId === 'calBtn') {
       lazyLoadCalendar();
       // iframeは再ロードされないため、開くたびに「表示された」と伝えて今日へ寄せさせる。
       // 初回はロード直後でリスナ未装着なので iframe 側の初回スクロールが担う。表示反映を待って rAF で送る。
