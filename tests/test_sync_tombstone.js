@@ -56,5 +56,19 @@ eq("削除後の再収集は残る", JSON.parse(S.applyTombstone(reAdd, tomb)), 
 // ── unionCand 回帰: 既存挙動(newer優先・cid重複統合)を壊していない ──
 eq("unionCand newer優先", JSON.parse(S.unionCand('[{"cid":"a","v":1}]', '[{"cid":"a","v":2}]')), [{ cid: "a", v: 2 }]);
 
+// ── unionCand フィールド統合: newer に欠けた作品URLは older から保持する(作品URL消失の根治) ──
+eq("union newerにurl無→olderのurlを保持",
+   JSON.parse(S.unionCand('[{"cid":"a","url":"https://x/works/a/","price":500}]', '[{"cid":"a","price":400}]')),
+   [{ cid: "a", url: "https://x/works/a/", price: 400 }]); // price は newer(400)、url は older を保持
+eq("union newerの空文字urlはolderを上書きしない",
+   JSON.parse(S.unionCand('[{"cid":"a","url":"https://x/works/a/"}]', '[{"cid":"a","url":""}]')),
+   [{ cid: "a", url: "https://x/works/a/" }]);
+eq("union newerの実値0は尊重(空扱いしない)",
+   JSON.parse(S.unionCand('[{"cid":"a","discountPct":50}]', '[{"cid":"a","discountPct":0}]')),
+   [{ cid: "a", discountPct: 0 }]);
+eq("union olderに欠けnewerにあるフィールドは追加",
+   JSON.parse(S.unionCand('[{"cid":"a","url":"https://x/works/a/"}]', '[{"cid":"a","title":"T"}]')),
+   [{ cid: "a", url: "https://x/works/a/", title: "T" }]);
+
 console.log((fail === 0 ? "✅ ALL PASS" : "❌ FAIL") + "  (" + pass + " passed, " + fail + " failed)");
 process.exit(fail === 0 ? 0 : 1);

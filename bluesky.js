@@ -1731,6 +1731,8 @@
     }
     a.unshift(entry);
     histSaveFor_(account, a);
+    // ★本当にこのchで投稿した＝候補タブの「投稿していない」宣言(手動オフ)を解除して pill を光らせ直す。
+    try { if (entry.cid && window.Go5Cand && window.Go5Cand.notePosted) window.Go5Cand.notePosted(entry.cid, account); } catch (e) {}
     if (uiSame && els.histList) renderHistory(a); // 現在UIの履歴だけ即描画(他アカウントは切替時に反映)
     // リビルド対象を選んでいたら、その投稿履歴に「被リビルド」の印を自動で付ける。
     //   ★上のhistSaveFor_の後に呼ぶこと＝先に呼ぶと、その変更が上書き保存(a=更新前のスナップショット)で消える。

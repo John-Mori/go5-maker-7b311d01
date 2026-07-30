@@ -178,6 +178,26 @@
   // アカウント別「投稿済みを非表示」トグル。(両方同時ONで、いずれかで投稿済みの作品を隠せる)localStorageで永続。
   var _hidePosted = (function () { try { return JSON.parse(localStorage.getItem('cand_hide_posted') || '{}') || {}; } catch (e) { return {}; } })();
   function saveHidePosted_() { try { localStorage.setItem('cand_hide_posted', JSON.stringify(_hidePosted)); } catch (e) {} }
+  // ★「このchでは投稿していない」ユーザー宣言の恒久オーバーライド。({acc:{cid:ts}})
+  //   投稿履歴レコードを消すだけだと、シート再マージ/DID矯正の移動/リビルド等がyt-clicks側で
+  //   short_hist__/verify_manual__ を再投入して pill が復活する(「手動で外しても復元される」の真因)。
+  //   復元経路を全部塞ぐ代わりに、ユーザーの宣言を durable に持ち、pill判定で常に尊重する(Chami依頼2026-07-30)。
+  var _postedOff = (function () { try { var m = JSON.parse(localStorage.getItem('cand_posted_off') || '{}'); return (m && typeof m === 'object') ? m : {}; } catch (e) { return {}; } })();
+  function savePostedOff_() { try { localStorage.setItem('cand_posted_off', JSON.stringify(_postedOff)); } catch (e) {} }
+  // この作品(取りうる全cidキー)は、このアカウントで「投稿していない」と宣言済みか。
+  function isPostedOff_(keys, account) {
+    var m = _postedOff[account]; if (!m) return false;
+    for (var i = 0; i < (keys || []).length; i++) { if (m[keys[i]] != null) return true; }
+    return false;
+  }
+  // 宣言を立てる/解除する。cid＝ヒットした照合キー(pillのdata-posted-cidと一致)。
+  function setPostedOff_(cid, account, on) {
+    if (!cid || !account) return;
+    if (!_postedOff[account]) _postedOff[account] = {};
+    if (on) _postedOff[account][String(cid)] = new Date().getTime();
+    else delete _postedOff[account][String(cid)];
+    savePostedOff_();
+  }
   function isHiddenByPosted_(it) {
     if (!it) return false;
     if (_hidePosted.acc1 && postedMatchForCand_(it, 'acc1')) return true;
@@ -892,6 +912,11 @@
       //   ★prefixが無い/取れない古い記録は所有判定不能＝従来どおり数える(fail-open＝正規投稿を消さない)。
       var owner = String((items[i] && items[i].videoId) || '').match(/^(acc[12])-/);
       if (owner && owner[1] !== account) continue;
+      // ★背骨IDが無くても、記録自身が持つ account(投稿時に付与)が別chを指すなら、このchでは数えない。
+      //   ＝誤って別chの投稿履歴へ紛れ込んだ記録で pill が両ch光る誤検出を、追加の手当てなしに正す。
+      //   (accountが無い古い記録は従来どおり fail-open で数える＝正規投稿を消さない)
+      var explicitAcct = String((items[i] && items[i].account) || '');
+      if ((explicitAcct === 'acc1' || explicitAcct === 'acc2') && explicitAcct !== account) continue;
       // ★取りうる cid キーを全部索引に登録(明示cid・workCid・workUrl再計算)。先頭＝新しい順なので最新を優先。
       var keys = cidKeysOfHistItem_(items[i]);
       for (var ki = 0; ki < keys.length; ki++) { if (!map[keys[ki]]) map[keys[ki]] = items[i]; }
@@ -926,7 +951,11 @@
   // ★候補アイテムを、取りうる全cidキーで投稿履歴と和集合照合。{item, key}(ヒットしたキー)or null。
   //   key は履歴側のキーでもある(索引が両側の和集合)ので、pillのdata-posted-cidに使えば削除照合も一致する。
   function postedMatchForCand_(it, account) {
-    var idx = postedIndexFor_(account), ks = candCidsOf_(it);
+    var ks = candCidsOf_(it);
+    // ★ユーザーが「このchでは投稿していない」と宣言済みなら、履歴に記録が残っていても未投稿扱い。
+    //   (シート再マージ等で記録が復活しても pill は光らせない＝手動オフが効き続ける)
+    if (isPostedOff_(ks, account)) return null;
+    var idx = postedIndexFor_(account);
     for (var i = 0; i < ks.length; i++) { if (idx[ks[i]]) return { item: idx[ks[i]], key: ks[i] }; }
     return null;
   }
@@ -1015,7 +1044,11 @@
     var rmBtn = ov.querySelector('#pdRemove');
     if (rmBtn) rmBtn.addEventListener('click', function () {
       if (!window.confirm('「' + cleanTitle + '」を ' + label + ' の投稿履歴から外します。\nランキングや投稿履歴タブからも消えます。よろしいですか？')) return;
-      var n = removePostedForAcct_(cid, account);
+      // ①恒久オーバーライドを先に立てる＝以後シート再マージ等で記録が戻っても pill は光らない(復元対策)。
+      setPostedOff_(cid, account, true);
+      // ②実レコードも外す(ランキング/投稿履歴タブからも消す＝従来動作)。
+      removePostedForAcct_(cid, account);
+      invalidatePostedIndex_();
       ov.hidden = true;
       try { render(); } catch (e) {} // 候補一覧を再描画＝pillが「未投稿」表示に戻る
     });
@@ -3152,6 +3185,8 @@
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
   try { window.Go5Cand = {
     render: render,
+    notePosted: function (cid, account) { setPostedOff_(cid, account, false); invalidatePostedIndex_(); }, // 本投稿で手動オフ宣言を解除(pill復帰)
+
     refImgs: refImgsOf_,                                        // cid → 動画生成用の保存画像の配列(無ければ[])
     bskyImg: function (cid) { var r = bskyImgOf(cid); return (r && r.img) || ''; }, // cid → Bluesky添付画像(無ければ'')
     zoomImages: function (images, idx, opts) { openImgZoom_((images || []).filter(Boolean), idx || 0, opts); }, // 任意の画像配列をズーム。(スワイプ)opts.captions=ページ別見出し

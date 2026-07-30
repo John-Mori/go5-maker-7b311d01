@@ -166,13 +166,36 @@
   // 候補リスト(cand_items / cand_items__*)は配列を1キーに持つため、whole-key LWW だと初回に別端末の
   //   候補を丸ごと消し得る。cid で union し、重複cidは newer 側を採用＝「集めた候補を失わない」。
   function isCandArrayKey(k) { return /^cand_items(__|$)/.test(String(k)); }
+  // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
+  function isEmptyVal_(v) { return v === undefined || v === null || v === ""; }
+  // ★同一cidの2レコードをフィールド単位で統合する。newer を基本に採るが、newer 側で空(欠け)の
+  //   フィールドは older の非空値で補う。＝価格・discountPctなどの実更新(0含む)は尊重しつつ、
+  //   「url が欠けた側で丸ごと上書きして作品URLが消える」事故を根治する(Chami依頼2026-07-30)。
+  //   旧実装は byCid[key]=it の丸ごと置換で、newer に url が無いと older の url を失っていた。
+  function mergeCandItem_(older, newer) {
+    if (!older || typeof older !== "object") return newer;
+    if (!newer || typeof newer !== "object") return older;
+    var out = {}, k;
+    for (k in older) { if (Object.prototype.hasOwnProperty.call(older, k)) out[k] = older[k]; }
+    for (k in newer) {
+      if (!Object.prototype.hasOwnProperty.call(newer, k)) continue;
+      if (!isEmptyVal_(newer[k])) out[k] = newer[k];               // newerに値がある→newer優先
+      else if (isEmptyVal_(out[k])) out[k] = newer[k];             // 両方空なら形だけnewerに合わせる
+      // newerが空でolderに値がある→olderを保持(=作品URL等を消さない)
+    }
+    return out;
+  }
   function unionCand(olderStr, newerStr) {
     try {
       var older = JSON.parse(olderStr || "[]"), newer = JSON.parse(newerStr || "[]");
       if (!Array.isArray(older) || !Array.isArray(newer)) return null;
       var byCid = {}, order = [], anon = 0;
-      function add(arr) { arr.forEach(function (it) { var key = (it && it.cid != null) ? ("c:" + it.cid) : ("a:" + (anon++)); if (!(key in byCid)) order.push(key); byCid[key] = it; }); }
-      add(older); add(newer); // 後入れ(newer)が重複cidを上書き＝newer優先
+      function add(arr) { arr.forEach(function (it) {
+        var key = (it && it.cid != null) ? ("c:" + it.cid) : ("a:" + (anon++));
+        if (!(key in byCid)) { order.push(key); byCid[key] = it; }
+        else byCid[key] = mergeCandItem_(byCid[key], it); // 重複cid＝フィールド単位で統合(newer優先・空で消さない)
+      }); }
+      add(older); add(newer); // 後入れ(newer)が重複cidで優先・ただし欠けたフィールドはolderを保持
       return JSON.stringify(order.map(function (k) { return byCid[k]; }));
     } catch (e) { return null; }
   }
