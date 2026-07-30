@@ -1562,6 +1562,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "aegis-gl.jsonl"),
         "persona": "ケヴィン・デ・ブライネ",
         "port": 18814,
+        "work_model": "opus",    # 2026-07-31 Chami直命令「Opusにしておいて」。人格の呼称精度(アロンソコーチ/監督)がsonnetで守れず「アロンソさん」に落ちた実害=DEF-hr-room-e23a84e918。C-014既定opusの適用漏れ補正(hr)
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "personas": [
             {"persona": "ケヴィン・デ・ブライネ",
@@ -1602,6 +1603,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "keiei-kikaku.jsonl"),
         "persona": "アメス",
         "port": 18816,
+        "work_model": "opus",    # 2026-07-31 Chami「Opusにしておいて」+C-009/C-014。aegis-glと同じ適用漏れ補正(hr)
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
     },
     # プラットホームse(2026-07-20 channel_audit.py の初回実行で発見)。
