@@ -19,6 +19,12 @@
  */
 (function () {
   'use strict';
+  // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
+  //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
+  if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
+    module.exports = { buildPostedIndex_: buildPostedIndex_ };
+    return;
+  }
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function lsGet(k, def) { try { return JSON.parse(localStorage.getItem(k) || def); } catch (e) { return JSON.parse(def); } }
@@ -896,31 +902,111 @@
     push(it.cid); push(cidFromUrl_(it.url || ''));
     return out;
   }
-  // チャンネルの cid→item 索引を(必要なら作り直して)返す。
+  // ★投稿済み判定の索引を合成する純関数(3層)。tests/test_posted_index.js が require する(module.exports両対応)。
+  //   引数: authorityItems=GASシート由来の権威アイテム配列([{c,w,v,t}] or 空/未取得null)、
+  //         localItems=端末ローカル履歴アイテム配列(短縮URL履歴+手動追加)、account='acc1'|'acc2'、
+  //         offMap=このaccountの「投稿していない」宣言({cid:ts})、fetchedAt=権威キャッシュのfetchedAt(ms)、
+  //         cidFromUrl=作品URL→cidの再計算関数(ブラウザは cidFromUrl_ を渡す。無ければ再計算しない)。
+  //   戻り: { cid: item }。item は「ローカル実体があればそれ、無ければ権威の薄いアイテム(t/tsだけ持つ)」。
+  //   設計書_投稿済み判定の権威ソース化_2026-07-31 S1。
+  function buildPostedIndex_(authorityItems, localItems, account, offMap, fetchedAt, cidFromUrl) {
+    var map = {};
+    var off = offMap || {};
+    var fa = fetchedAt || 0;
+    var toUrlCid = (typeof cidFromUrl === 'function') ? cidFromUrl : function () { return ''; };
+    // ローカルアイテムが取りうる cid キー(明示cid + workCid + workUrl再計算)。cidKeysOfHistItem_ と同一。
+    function localKeys(it) {
+      if (!it) return [];
+      var o = [], seen = {};
+      function push(c) { c = String(c || ''); if (c && !seen[c]) { seen[c] = 1; o.push(c); } }
+      push(it.cid); push(it.workCid); push(toUrlCid(it.workUrl || ''));
+      return o;
+    }
+    // 権威アイテムが取りうる cid キー(明示c + wを再計算)。
+    function authKeys(a) {
+      if (!a) return [];
+      var o = [], seen = {};
+      function push(c) { c = String(c || ''); if (c && !seen[c]) { seen[c] = 1; o.push(c); } }
+      push(a.c); push(toUrlCid(a.w || ''));
+      return o;
+    }
+    // ローカルアイテムを索引へ。所有ガード(videoId prefix / account欄)は fail-open(prefix/account無しは数える)。
+    function addLocal(it, requireFresh) {
+      var owner = String((it && it.videoId) || '').match(/^(acc[12])-/);
+      if (owner && owner[1] !== account) return; // 背骨IDが別ch=このchでは数えない
+      var explicitAcct = String((it && it.account) || '');
+      if ((explicitAcct === 'acc1' || explicitAcct === 'acc2') && explicitAcct !== account) return; // account欄が別ch
+      if (requireFresh) {
+        // 権威が生きている時は無印(所有スタンプ無し)を数えない(fail-closed)。
+        //   採用条件: ①ts>fetchedAt(直近投稿=権威に未反映でも即載せる) ②所有スタンプ陽性一致(account一致 or videoId prefix一致)。
+        var fresh = (it && it.ts && it.ts > fa);
+        var ownedByAcct = (explicitAcct === account);
+        var ownedByPrefix = !!(owner && owner[1] === account);
+        if (!fresh && !ownedByAcct && !ownedByPrefix) return;
+      }
+      var keys = localKeys(it);
+      for (var ki = 0; ki < keys.length; ki++) { if (!map[keys[ki]]) map[keys[ki]] = it; }
+    }
+    var loc = localItems || [];
+    var hasAuthority = !!(authorityItems && authorityItems.length);
+    if (hasAuthority) {
+      // 権威層: シート由来の各行を索引化(薄いアイテム。t を ms へパースして ts に持たせ postedTsOf_ が日付を出せるようにする)。
+      for (var i = 0; i < authorityItems.length; i++) {
+        var a = authorityItems[i]; if (!a) continue;
+        var tms = 0; if (a.t) { var p = Date.parse(a.t); if (p) tms = p; }
+        var thin = { cid: String(a.c || ''), workUrl: String(a.w || ''), videoId: String(a.v || ''), t: String(a.t || ''), ts: tms, account: account, _authority: true };
+        var aks = authKeys(a);
+        for (var ai = 0; ai < aks.length; ai++) { if (!map[aks[ai]]) map[aks[ai]] = thin; }
+      }
+      // ローカル新鮮層: ts>fetchedAt または所有スタンプ陽性のみ(無印は fail-closed)。ローカル実体は権威の薄いアイテムに勝つ。
+      for (var j = 0; j < loc.length; j++) addLocal(loc[j], true);
+    } else {
+      // レガシー層(権威未取得): 現行 postedIndexFor_ と同じ fail-open 挙動。
+      for (var k = 0; k < loc.length; k++) addLocal(loc[k], false);
+    }
+    // 「このchでは投稿していない」宣言のキーは索引から除外(postedMatchForCand_ 側の isPostedOff_ と二重でも害はない)。
+    for (var key in map) { if (map.hasOwnProperty(key) && off[key] != null) delete map[key]; }
+    return map;
+  }
+  // 権威キャッシュ(GASシート由来)を読む。{fetchedAt, acc1, acc2} or null。
+  function postedAuthorityCache_() {
+    try { var v = JSON.parse(localStorage.getItem('posted_sheet_v1') || 'null'); return (v && typeof v === 'object') ? v : null; } catch (e) { return null; }
+  }
+  // GAS action=posted_cids を叩いて権威キャッシュを更新する(10分TTL・stale-while-revalidate)。
+  //   bsky_gas_url 未設定/通信失敗は静かに何もしない＝ローカル判定へ完全フォールバック(可用性優先)。
+  var _postedAuthorityInflight = false;
+  function fetchPostedAuthority_() {
+    if (_postedAuthorityInflight) return;
+    var url = '';
+    try { url = localStorage.getItem('bsky_gas_url') || ''; } catch (e) { url = ''; }
+    if (!url) return; // 未設定＝フォールバック(何もしない)
+    var cache = postedAuthorityCache_();
+    if (cache && cache.fetchedAt && (Date.now() - cache.fetchedAt) < 600000) return; // 10分TTL(多重取得を防ぐ)
+    if (typeof window === 'undefined' || !window.Go5Util || typeof window.Go5Util.jsonp !== 'function') return;
+    _postedAuthorityInflight = true;
+    window.Go5Util.jsonp(url, { action: 'posted_cids', channel: 'both' }, function (data) {
+      _postedAuthorityInflight = false;
+      if (!data || data.ok !== true) return; // 失敗はキャッシュ据え置き(フォールバック)
+      try {
+        localStorage.setItem('posted_sheet_v1', JSON.stringify({ fetchedAt: Date.now(), acc1: data.acc1 || [], acc2: data.acc2 || [] }));
+      } catch (e) { return; }
+      invalidatePostedIndex_();
+      try { if (_activeTab === 'main') render(); else if (typeof renderMaker === 'function') renderMaker(_activeTab); } catch (e) {}
+    });
+  }
+  // チャンネルの cid→item 索引を(必要なら作り直して)返す。権威は posted_sheet_v1 キャッシュから読む。
   function postedIndexFor_(account) {
     if (typeof window.Go5PostedItems !== 'function') return {};
     var items = window.Go5PostedItems(account) || [];
-    var sig = items.length + ':' + ((items[0] && items[0].ts) || '') + ':' + ((items[items.length - 1] && items[items.length - 1].ts) || '');
+    var cache = postedAuthorityCache_();
+    var authorityItems = cache ? (account === 'acc2' ? cache.acc2 : cache.acc1) : null;
+    var fetchedAt = (cache && cache.fetchedAt) || 0;
+    // sig にキャッシュの fetchedAt を混ぜる＝権威が更新されたら索引を作り直す。
+    var sig = items.length + ':' + ((items[0] && items[0].ts) || '') + ':' + ((items[items.length - 1] && items[items.length - 1].ts) || '') +
+      ':a' + ((authorityItems && authorityItems.length) || 0) + ':' + fetchedAt;
     var cached = _postedIdxCache[account];
     if (cached && cached.sig === sig) return cached.map;
-    var map = {};
-    for (var i = 0; i < items.length; i++) {
-      // ★このチャンネルの投稿済み判定は「このチャンネルが所有する記録」だけで行う。
-      //   背骨ID(videoId=acc1-/acc2-…)が別チャンネルを指す記録は、両方の投稿履歴に載って
-      //   しまっても(誤って両channelへ記録された時)このchの判定には数えない＝候補タブのpillが
-      //   投稿履歴を直せば自動で正しく戻る(連動・Chami依頼2026-07-29)。
-      //   ★prefixが無い/取れない古い記録は所有判定不能＝従来どおり数える(fail-open＝正規投稿を消さない)。
-      var owner = String((items[i] && items[i].videoId) || '').match(/^(acc[12])-/);
-      if (owner && owner[1] !== account) continue;
-      // ★背骨IDが無くても、記録自身が持つ account(投稿時に付与)が別chを指すなら、このchでは数えない。
-      //   ＝誤って別chの投稿履歴へ紛れ込んだ記録で pill が両ch光る誤検出を、追加の手当てなしに正す。
-      //   (accountが無い古い記録は従来どおり fail-open で数える＝正規投稿を消さない)
-      var explicitAcct = String((items[i] && items[i].account) || '');
-      if ((explicitAcct === 'acc1' || explicitAcct === 'acc2') && explicitAcct !== account) continue;
-      // ★取りうる cid キーを全部索引に登録(明示cid・workCid・workUrl再計算)。先頭＝新しい順なので最新を優先。
-      var keys = cidKeysOfHistItem_(items[i]);
-      for (var ki = 0; ki < keys.length; ki++) { if (!map[keys[ki]]) map[keys[ki]] = items[i]; }
-    }
+    var map = buildPostedIndex_(authorityItems, items, account, _postedOff[account] || {}, fetchedAt, cidFromUrl_);
     _postedIdxCache[account] = { sig: sig, map: map };
     return map;
   }
@@ -2842,6 +2928,7 @@
   function renderCandList(tabId) {
     tabId = tabId || 'main';
     invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
+    fetchPostedAuthority_(); // 投稿済み判定の権威索引(GASシート)を裏で更新(10分TTL・失敗時はローカル判定へフォールバック)
     var key = itemsKey(tabId);
     var el = $('candList');
     var all = lsGet(key, '[]');
@@ -2896,6 +2983,7 @@
   // ── サークルタブ ──
   function renderMaker(tabId, force) {
     invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
+    fetchPostedAuthority_(); // 投稿済み判定の権威索引(GASシート)を裏で更新(10分TTL・失敗時はローカル判定へフォールバック)
     var tabs = lsGet(K_TABS, '[]');
     var tab = null; tabs.forEach(function (t) { if (t.id === tabId) tab = t; });
     var body = $('candBody');
@@ -3190,7 +3278,7 @@
   // ランキングタブ(yt-clicks.js)から「動画生成用に保存した画像」を参照するための公開API。
   try { window.Go5Cand = {
     render: render,
-    notePosted: function (cid, account) { setPostedOff_(cid, account, false); invalidatePostedIndex_(); }, // 本投稿で手動オフ宣言を解除(pill復帰)
+    notePosted: function (cid, account) { setPostedOff_(cid, account, false); invalidatePostedIndex_(); fetchPostedAuthority_(); }, // 本投稿で手動オフ宣言を解除(pill復帰)＋権威索引を更新
 
     refImgs: refImgsOf_,                                        // cid → 動画生成用の保存画像の配列(無ければ[])
     bskyImg: function (cid) { var r = bskyImgOf(cid); return (r && r.img) || ''; }, // cid → Bluesky添付画像(無ければ'')

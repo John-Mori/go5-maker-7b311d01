@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-29J(computeDeltas_にクリック実数の積み直しを追加＝短縮コード差し替えで日次スナップが0起点に戻る段差を検出し旧コード最終値を土台に繰り上げて単調増加へ復元。クリック(導線1c/導線2w)のみ・再生数vは対象外。累計cc/cwcを出力しフロントの累計表示の下限に採用。「累計0なのに週-16」の負値と矛盾を根から解消。I(work_short_clear)を継続。Chami「過去クリックの実数まで積み直したい・週が-16」2026-07-29)';
+var GAS_VERSION = '2026-07-31A(action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -499,6 +499,8 @@ function doGet(e) {
     try {
       var ch = p.channel || 'acc1';
       if (p.action === 'history') out = { ok: true, items: historyItems_(ch, parseInt(p.limit || '40', 10)) };
+      else if (p.action === 'posted_cids') out = postedCids_(p.channel || 'both'); // 投稿済み判定の権威索引(読み取り専用・c/w両空行は除外・prefixガード)
+
       else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.videoId || '', p.postUri || '', p.short || '') };
       else if (p.action === 'settings_pull') out = settingsPull_();   // 端末間同期：非秘密設定の取得
       else if (p.action === 'settings_meta') out = settingsMeta_();   // 端末間同期：最終保存メタのみ(状態表示)
@@ -569,6 +571,40 @@ function historyItems_(channel, limit) {
   }
   items.reverse(); // 新しい順
   return items.slice(0, limit > 0 ? limit : 40);
+}
+// 投稿済み判定の権威索引(読み取り専用・軽量)。historyItems_ の縮小版=全行を4列だけ射影して返す。
+//   フロント候補タブの✔pillを「端末ローカルの短縮URL履歴」でなく「チャンネル別シート」で判定させ、
+//   偽陽性(記録_ch2に無ければacc2は未投稿)と偽陰性(全端末が同じシートを読む=端末分断で✔が出ない)を
+//   構造的に消す(設計書_投稿済み判定の権威ソース化_2026-07-31 S1)。c/w両空の行は判定に使えないので除外。
+function postedCidsOne_(channel) {
+  var sh = getChannelSheet_(channel), map = headerMap_(sh);
+  var last = sh.getLastRow(); if (last < 2) return [];
+  var cidCol = map['作品cid'], wuCol = map['作品URL'], pidCol = map['post_id'], dCol = map['投稿日時'];
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+  var out = [];
+  for (var i = 0; i < vals.length; i++) {
+    var row = vals[i];
+    var c = cidCol ? String(row[cidCol - 1] || '') : '';
+    var w = wuCol ? String(row[wuCol - 1] || '') : '';
+    if (!c && !w) continue; // c/w両空=投稿済み判定に使えない行は出さない
+    var pid = pidCol ? String(row[pidCol - 1] || '') : '';
+    // サーバー側prefixガード：背骨ID(post_id)の acc-prefix がこのシートのchと矛盾する行は除外(fail-open：prefix無し行は通す)。
+    var pm = pid.match(/^(?:test-)?(acc[12])-/);
+    if (pm && pm[1] !== channel) continue;
+    var t = '';
+    if (dCol) { try { var d = row[dCol - 1]; if (d) t = Utilities.formatDate(new Date(d), tz, 'yyyy-MM-dd'); } catch (e) {} }
+    out.push({ c: c, w: w, v: pid, t: t });
+  }
+  return out;
+}
+// channel='acc1'|'acc2'|'both'(既定 both)。指定ch以外は空配列で返す。
+function postedCids_(channel) {
+  var ch = channel || 'both';
+  var res = { ok: true, version: GAS_VERSION, at: new Date().toISOString(), acc1: [], acc2: [] };
+  if (ch === 'acc1' || ch === 'both') res.acc1 = postedCidsOne_('acc1');
+  if (ch === 'acc2' || ch === 'both') res.acc2 = postedCidsOne_('acc2');
+  return res;
 }
 // 1件削除。(行の内容をクリア＝再利用可。行は詰めない＝集計の整合を保つ)
 // 安定動画ID(post_id)を最優先し、無ければ post_uri、短縮URLの順。URL欠損の異常行も削除できる。
