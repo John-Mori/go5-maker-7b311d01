@@ -1213,6 +1213,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "product-scout.jsonl"),
         "persona": "十王星南",
         "port": 18804,
+        "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         # ★多人格モード(2026-07-26 Chami指示Cで members から統合)。
         #   顔ぶれの根拠= 部屋名「商品候補選定部門-星南•クラウディア」。
@@ -1311,6 +1312,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "learning-coach.jsonl"),
         "persona": "ヴィルシーナ",
         "port": 18808,
+        "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         # ★会話専用(2026-07-22 Chami指示)。ここは「質問-chamiの学習と癒しのルーム」=
         #   解説をこの部屋で完結させる部屋。回送もwork_generateもしない(DEPT_CONF冒頭の説明参照)。
         "conversation_only": True,
@@ -1505,6 +1507,7 @@ DEPT_CONF = {
              "aliases": ("verxina", "ヴィルシーナ", "シーナ")},
         ],
         "port": 18812,  # 18811まで使用済(ai-office)
+        "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "work_scope": (
             "あなたが自分で完結してよい作業(ローカルLLMを実務で使える状態に育てる範囲):\n"
@@ -1526,6 +1529,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "llm-qa.jsonl"),
         "persona": "中野五月",
         "port": 18813,
+        "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         # work_scopeは置かない=**質問部屋なので会話で答えるのが仕事**。
         # ツール付きagentを起こすと「調べて」の一言でファイルを触りに行く事故になる。
         # ★旧仕様(2026-07-22に廃止・退避。削除しない=C-003):
@@ -1843,6 +1847,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "past-room.jsonl"),
         "persona": "アメス",            # 既定の精霊名(名義が引けない時のfail-safe先)
         "port": 18819,                  # 既存は18800〜18818で埋まっている(実測)
+        "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         "session_relay": True,
         "conversation_only": True,
         # ★Chami名簿(2026-07-26)の顔ぶれのうち、**この部屋に出てよい6人**だけ。
@@ -1897,6 +1902,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "future-room.jsonl"),
         "persona": "アメス",
         "port": 18820,
+        "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         "session_relay": True,
         "conversation_only": True,
         # ★名簿= アメス/ヴィルシーナ/ジェンティルドンナ/オタコン/十王星南の5人
@@ -1948,6 +1954,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "kaizen-analyst.jsonl"),
         "persona": "トトリ",
         "port": 18821,                  # 18820まで使用済(実測)
+        "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         "session_relay": True,
         "boot_note": (
             "■この部屋の性格(必ず守る)\n"
