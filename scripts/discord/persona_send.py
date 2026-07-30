@@ -8,6 +8,7 @@ username/avatar_url上書きで送信する。Webhook URLは local/discord_webho
   python scripts/discord/persona_send.py --channel "研究室-コーチングルーム" --persona "アメス" "本文..."
   python scripts/discord/persona_send.py --dept qa-reviewer --persona "ジェンティルドンナ" --avatar https://... "本文"
   echo 本文 | python scripts/discord/persona_send.py --dept research-room --persona "シャビ・アロンソ"
+  # 本文の渡し方は3通り: 裸の引数 / --body "<文章>" / --body-file <path>(長文・改行はこれが安全)
   # 色付きカード(Embed): --color red|orange|green|blue|grey|#RRGGBB [--etitle 見出し]
   python scripts/discord/persona_send.py --channel 報告-通知 --persona オタコン --color green --etitle "デプロイ完了" "本文"
 本文はDiscordマークダウン対応(**太字** *斜体* __下線__ ~~打消~~ `code` > 引用 - リスト)。
@@ -17,6 +18,7 @@ username/avatar_url上書きで送信する。Webhook URLは local/discord_webho
 """
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -71,6 +73,10 @@ try:
     # (パイプ経路)でUTF-8バイトをcp932誤デコード→日本語だけ文字化け(縺ヨ繧九…)する。
     # argv経路(CreateProcessWでUnicode渡し)は化けないが、stdin経路の根治にこれが必要(2026-07-15)。
     sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    # ★stderrもUTF-8へ(2026-07-28)。警告はここへ出しているのに、Windowsの既定stderr=cp932の
+    #   ままだと**日本語の警告が文字化けして読めない**(実測)。「黙って壊れた本文を出さない」ための
+    #   警告が読めなければ意味が無いので、出口の文字コードも揃える。
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
@@ -120,11 +126,106 @@ def _persona_aliases():
     return amap
 
 
+# ★表記ゆれ→正式名(2026-07-28)。**人格設定は一切ここに書かない**(正本= persona_manifest.yml の `name:`)。
+#   ここに載せるのは manifest から機械的に導けない**綴りの揺れ**だけ。
+#   なぜ要るか= avatars.json は「同じ顔を別綴りでも出す」ために別名キーを持っている。
+#   その結果 resolve_persona が別綴りをそのまま通し、**同じ人が別名義のwebhookで喋る**
+#   (実測 2026-07-27: 1525646154933735425 に `ケヴィン・デ・ブライネ` と `デブライネ` の2本)。
+#   ★アバター登録(avatars.json)は消さない= 別名でも顔は出る。名義だけを正式名へ寄せる。
+_SPELLING_CANON = {
+    "デ・ブライネ": "ケヴィン・デ・ブライネ",
+    "ケヴィン・デブライネ": "ケヴィン・デ・ブライネ",
+}
+
+
+def _dept_conf_aliases():
+    """DEPT_CONF の personas[].aliases → 正式名。**別名の正本はあそこ1本**(ORG-11)。
+
+    ★2026-07-28 実測で足した。Chami=「さっきの咲季とかも差分の画像も出ない」。
+      改修αに `咲季` 名義の投稿があり **avatar=None・07-28に新しいwebhookが生えていた**。
+      原因= avatars.json のキーは `花海咲季` だけで、**短い呼び名 `咲季` では顔が引けない**。
+      同じ形が `五月`(→中野五月) `シーナ`(→ヴィルシーナ) にもある(実測で未解決)。
+      ★手で別名表に足すと**同じ表が2つ**になる。DEPT_CONF の personas[].aliases が既に
+      「シーナ→ヴィルシーナ」を持っているので、**そこを引く**。
+    ★重い import なので**引けなかった時だけ**呼ぶ(通常の送信は従来どおりの速さ)。
+    ★失敗しても送信は続ける(顔が出ないだけ。黙って落とさない)。
+    """
+    out = {}
+    try:
+        import sys as _s
+        _s.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        from dept_daemon import DEPT_CONF
+    except Exception:
+        return out
+    for conf in DEPT_CONF.values():
+        for p in (conf.get("personas") or ()):
+            nm = p.get("persona")
+            if not nm:
+                continue
+            for a in (p.get("aliases") or ()):
+                if a and a != nm:
+                    out.setdefault(str(a), nm)
+        # personas を持たない部屋は persona 名そのものだけ(別名は無い)
+    return out
+
+
+def _canonical_names():
+    """別名(display_name / ラテンid / 綴りの揺れ)→ 台帳の正式名。
+
+    正本は persona_manifest.yml の `name:`。`display_name:`(Discord表示名)は
+    system-engineer の `デブライネ` だけが持つ実測値なので、**この経路で効くのは
+    デ・ブライネ1人**(他の人格の名義は1バイトも変わらない)。
+    """
+    canon = {}
+    import glob
+    bases = [os.path.join(_HQ_ROOT, "departments", "hr", "personas"),
+             os.path.join(ROOT, "docs", "departments", "personas")]
+    seen = set()
+    for base in bases:
+        for p in glob.glob(os.path.join(base, "**", "persona_manifest.yml"), recursive=True):
+            if p in seen:
+                continue
+            seen.add(p)
+            cur = {}
+            try:
+                for line in open(p, encoding="utf-8", errors="replace"):
+                    s = line.strip()
+                    if s.startswith("- id:"):
+                        if cur.get("name"):
+                            for a in (cur.get("id"), cur.get("display_name")):
+                                if a and a != cur["name"]:
+                                    canon[a] = cur["name"]
+                        cur = {"id": s.split(":", 1)[1].strip()}
+                    elif s.startswith("name:") and "display_name:" not in s:
+                        cur["name"] = s.split(":", 1)[1].strip()
+                    elif s.startswith("display_name:"):
+                        # 行末コメント(# Discord等の表示名…)を落とす
+                        cur["display_name"] = s.split(":", 1)[1].split("#", 1)[0].strip()
+            except OSError:
+                continue
+            if cur.get("name"):
+                for a in (cur.get("id"), cur.get("display_name")):
+                    if a and a != cur["name"]:
+                        canon[a] = cur["name"]
+    canon.update(_SPELLING_CANON)
+    return canon
+
+
 def resolve_persona(name):
     """人格名を正規化する(QA D1・2026-07-18)。avatars.jsonのキーにあればそのまま。
     ラテンidなら manifestの かな名へ解決(ames→アメス)。未登録なら stderr へ大声で警告
     (=無人代打が persona=ames を渡してデフォルトアイコン+名前amesで黙って送っていた事故の根治)。
-    喪失させないため送信自体は続行する(fail-open)。"""
+    喪失させないため送信自体は続行する(fail-open)。
+
+    ★2026-07-28 追加: **正式名への寄せを avatars.json のキー判定より先に**行う。
+      旧実装は「avatars.jsonにキーがあればそのまま」だったため、別名キー(`デブライネ`)が
+      そのまま通り、同じ部屋に **2つの名義の webhook** が生まれていた(実測)。
+    """
+    canon = _canonical_names().get(name)
+    if canon and canon != name:
+        print(f"[persona_send] 正式名へ正規化: {name!r} -> {canon!r}"
+              f"(正本= persona_manifest.yml の name:)", file=sys.stderr)
+        return canon
     known = set()
     if os.path.exists(AVATARS_FILE):
         try:
@@ -137,6 +238,15 @@ def resolve_persona(name):
     if name in amap:
         resolved = amap[name]
         print(f"[persona_send] 別名解決: {name!r} -> {resolved!r}", file=sys.stderr)
+        return resolved
+    # ★ここまでで引けなかった時だけ DEPT_CONF の personas[].aliases を見る(2026-07-28)。
+    #   呼び名(咲季 / 五月 / シーナ …)はあそこが正本。**別名表を2つ持たない**(ORG-11)。
+    #   ★重いので最後の手段。通常の送信は上で解決して終わる。
+    dmap = _dept_conf_aliases()
+    if name in dmap:
+        resolved = dmap[name]
+        print(f"[persona_send] 呼び名を正式名へ: {name!r} -> {resolved!r}"
+              f"(正本= DEPT_CONF の personas[].aliases)", file=sys.stderr)
         return resolved
     if known:
         print(f"[persona_send] ★警告: 未登録の人格名 {name!r}(avatars.jsonにキー無し・別名表にも無し)。"
@@ -267,10 +377,50 @@ def ensure_persona_webhook(channel_id, persona, token):
 COLORS = {"red": 0xED4245, "orange": 0xE67E22, "yellow": 0xFEE75C, "green": 0x57F287,
           "blue": 0x5865F2, "purple": 0x9B59B6, "grey": 0x95A5A6, "pink": 0xEB459E}
 
+# 値を取らないフラグ(下の方で sys.argv から直接読んでいる)。★rest(=本文)へ混ぜない。
+# --print-id: 投稿の実Discord message_idを stdout に `msg=<id>` で出す(?wait=true を強制)。
+#   C-023(2026-07-30)で dispatch の実依頼を表投稿する時、そのIDでリアクションを着弾させるため。
+#   通常のdept投稿はwait無しでIDを返さないので、この口を足した(mirror名義以外でもIDを取れる)。
+_BARE_FLAGS = ("--nobold", "--silent", "--print-id")
+# 「未知のオプション」らしさの判定。`---`(Markdownの区切り線)や `--` 単体は本文なので除く。
+_UNKNOWN_FLAG_RE = re.compile(r"^--[A-Za-z][A-Za-z0-9-]*$")
+
+
+def sanitize_rest(rest):
+    """本文に紛れ込んだ**未知の `--xxx`** を握りつぶさない(2026-07-28)。
+
+    実測事故(2026-07-27 20:33 / 2026-07-28 00:29・5secシステム改修部門α):
+      呼び側が `--body "対応しました(v=425)。…"` と叩いたが persona_send は `--body` を
+      知らなかったため、`--body` という**文字列がそのまま本文の先頭**として投稿された。
+      webhookは204を返すので送信側は成功と誤認し、**壊れた本文だけがChamiに見えていた**。
+    → 方針:
+      1) `--body` は正式に受け付ける(下の引数解析)。**呼び側は既にそう叩いている**ので素直。
+      2) それでも残った未知の `--xxx` は **stderrへ大声で警告**する(黙って投稿しない)。
+      3) **本文の先頭に来ている**未知フラグだけ落とす。本文が `--word` で始まることは
+         実運用では無く、そこに居るのは十中八九「解析されなかったフラグ」だから。
+         ★途中に出てくるものは**落とさない**(本文を削るほうが害が大きい=喪失させない)。
+    """
+    unknown = [t for t in rest if _UNKNOWN_FLAG_RE.match(t)]
+    if not unknown:
+        return rest
+    print(f"[persona_send] ★警告: 未知の引数 {unknown} を本文として受け取った。"
+          f"綴り間違い/未対応オプションの可能性がある(既知= --channel/--dept/--persona/"
+          f"--suffix/--avatar/--color/--etitle/--body/--body-file/--nobold/--silent)。",
+          file=sys.stderr)
+    out = list(rest)
+    dropped = []
+    while out and _UNKNOWN_FLAG_RE.match(out[0]):
+        dropped.append(out.pop(0))
+    if dropped:
+        print(f"[persona_send] ★本文の先頭にあった {dropped} は投稿本文から外した"
+              f"(引数の解析漏れとみなす)。", file=sys.stderr)
+    return out
+
 
 def main():
     args = sys.argv[1:]
     channel = dept = persona = avatar = color = etitle = body_file = None
+    body_arg = None  # --body <文章>(2026-07-28 追加。sanitize_rest の説明を参照)
     suffix = ""      # 表示名にだけ足す肩書(例 "(常駐)")。人格の解決には使わない
     rest = []
     i = 0
@@ -292,13 +442,24 @@ def main():
             etitle = args[i + 1]; i += 2
         elif a == "--body-file" and i + 1 < len(args):
             body_file = args[i + 1]; i += 2   # 本文をファイルから読む(heredoc/shell quoting崩れを回避=送信信頼性)
+        elif a == "--body" and i + 1 < len(args):
+            body_arg = args[i + 1]; i += 2    # 本文を引数で明示(2026-07-28。sanitize_rest の説明を参照)
+        elif a in _BARE_FLAGS:
+            i += 1                            # 値なしフラグ。後で sys.argv から読むのでここでは捨てる(本文へ混ぜない)
         else:
             rest.append(a); i += 1
+    rest = sanitize_rest(rest)                # 未知の --xxx を黙って本文にしない(2026-07-28)
     if not persona or not (channel or dept):
-        print("使い方: persona_send.py (--channel <名前> | --dept <slug>) --persona <キャラ名> [--avatar URL] [--body-file path | 本文]")
+        print("使い方: persona_send.py (--channel <名前> | --dept <slug>) --persona <キャラ名> [--avatar URL] [--body <文章> | --body-file path | 本文]")
         sys.exit(1)
     if body_file:
         body = open(body_file, "r", encoding="utf-8").read().strip()
+    elif body_arg is not None:
+        body = body_arg.strip()
+        if rest:
+            # --body と裸の本文が両方来た= 解析漏れの疑い。**捨てた側を必ず見せる**(黙って消さない)。
+            print(f"[persona_send] ★警告: --body 以外にも本文らしき引数 {rest} が来たが、"
+                  f"--body の内容を採用した。", file=sys.stderr)
     else:
         body = " ".join(rest) if rest else sys.stdin.read().strip()
     if not body:
@@ -392,6 +553,9 @@ def main():
     mirror = persona.startswith("Chami(")
     if mirror or "--silent" in sys.argv:
         payload["flags"] = 4096
+    # ★--print-id: mirror名義でなくても実Discord msg_idを返す(C-023の実依頼表投稿用)。
+    #   通知の抑制(4096)は付けない=実依頼は相手部門に気づいてほしいため。
+    want_id = mirror or ("--print-id" in sys.argv)
 
     def post(pl, want_id=False):
         url = hook_url + ("?wait=true" if want_id else "")
@@ -410,7 +574,7 @@ def main():
 
     try:
         if "embeds" in payload:
-            st, mid = post(payload, want_id=mirror)
+            st, mid = post(payload, want_id=want_id)
             print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})" + (f" msg={mid}" if mid else ""))
         else:
             # 長文は切り捨てず"分割して連投"する(2026-07-17・INC-92)。
@@ -421,7 +585,7 @@ def main():
             for i, part in enumerate(split_body(body)):
                 pl = dict(payload)
                 pl["content"] = part
-                st, mid = post(pl, want_id=mirror)
+                st, mid = post(pl, want_id=want_id)
                 print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})"
                       + (f" msg={mid}" if mid else "") + (f" [{i+1}通目]" if i else ""))
                 time.sleep(0.4)  # webhookのレート制限を避ける
