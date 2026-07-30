@@ -1161,6 +1161,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "system-engineer.jsonl"),
         "persona": "花海咲季",
         "port": 18803,
+        "work_model": "opus",    # 2026-07-30 Chami号令(C-014)=作業生成もopusで人格の演技を担保。relayは既定でopus
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "boot_note": (
             "■この部屋の顔ぶれ(2026-07-28 Chamiの人事)\n"
@@ -1245,6 +1246,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "shorts-analyst.jsonl"),
         "persona": "アーモンドアイ",
         "port": 18805,
+        "work_model": "opus",    # 2026-07-30 Chami号令(C-014)=作業生成もopusで人格の演技を担保。relayは既定でopus
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         # ★多人格モード(2026-07-26 Chami指示Cで members から統合)。
         #   元の事故(2026-07-22): Chamiが「ここのグループにいる三笘さんを呼んで」と書いたのに、便は
@@ -1281,6 +1283,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "copy-director.jsonl"),
         "persona": "早坂芽衣",
         "port": 18806,
+        "work_model": "opus",    # 2026-07-30 Chami号令(C-014)=作業生成もopusで人格の演技を担保。relayは既定でopus
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         # ★多人格モード(2026-07-26 Chami指示Cで members から統合)。この部屋の担当は三笘薫。
         "personas": [
@@ -1609,6 +1612,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "platform-se.jsonl"),
         "persona": "一ノ瀬怜",
         "port": 18817,
+        "work_model": "opus",    # 2026-07-30 Chami号令(C-014)=作業生成もopusで人格の演技を担保。relayは既定でopus
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         # ★forward_all を外した(2026-07-20 21:20・aegis-gl/keiei-kikakuと同じ理由)。
         #   組織層の部門はHQへ全便を流さない。実作業依頼のみWORK_MARKER経由で回送される。
