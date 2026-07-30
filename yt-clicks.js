@@ -3070,11 +3070,14 @@
     }
     return '定価:' + yen_(p.price);
   }
-  // data-fanza-snap-url が一致する当時価格の要素へ反映。
+  // data-fanza-snap-url が一致する当時価格の要素へ反映。★既に当時価格が出ている要素は上書きしない
+  //   (現在価格で真の投稿時価格を潰さない)。空スロットにだけ埋める=過去投稿の空欄を救済する用途に使える。
   function setFanzaSnapEls(fanzaUrl, html) {
+    if (!html) return; // 空HTMLで既存表示を消さない
     document.querySelectorAll('[data-fanza-snap-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-snap-url') !== fanzaUrl) return;
-      el.innerHTML = html || '';
+      if ((el.innerHTML || '').trim()) return; // 既に表示済み(真の当時価格)は保護
+      el.innerHTML = html;
     });
   }
   // 投稿履歴/手動アイテムのうち、この作品URLで当時スナップ未保存のものに現在価格を当時として固定保存。
@@ -3089,7 +3092,9 @@
     }
     var d1 = apply(loadHist(), histKey());
     var d2 = apply(loadManual(), manualKey());
-    if (d1 || d2) setFanzaSnapEls(workUrl, fmtSnapPriceHtml(snap));
+    // ★ローカル配列に無い行(☁️シート由来など)は d1/d2 が立たないが、空の当時価格スロットには
+    //   表示だけ反映する。setFanzaSnapEls は非空を上書きしない=真の当時価格は保護される。(Chami依頼2026-07-30)
+    setFanzaSnapEls(workUrl, fmtSnapPriceHtml(snap));
   }
   // data-fanza-author-url が一致する要素へサークル名(作者名)を反映。手動入力が最優先。
   function setFanzaAuthorEls(fanzaUrl, author, root) {
@@ -3390,7 +3395,7 @@
         //   新鮮ならここで確定。古ければ表示は残したまま下のjobsに積んで裏で静かに最新化する。
         if (cached.title && !isBadFanzaTitle(cached.title)) {
           setFanzaEls(url, cached.title, row); setFanzaAuthorEls(url, cached.author || '', row);
-          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo, row); if (freshPrice) backfillSnap_(url, cached.priceInfo); } // 当時価格の固定は新鮮な価格のときだけ(古い価格を投稿時価格にしない・freshPrice=price有り+sv一致+age<DAY)
+          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo, row); setFanzaSnapEls(url, fmtSnapPriceHtml(cached.priceInfo)); if (freshPrice) backfillSnap_(url, cached.priceInfo); } // 当時価格の"永続固定"は新鮮な価格のときだけ(古い価格を投稿時価格に保存しない・freshPrice=price有り+sv一致+age<DAY)。ただし空スロットの"表示"はキャッシュ価格でも即埋める(過去投稿の空欄救済・非空は保護・Chami依頼2026-07-30)
           if (cached.media) setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall, row);
           displayed = true;
           if (freshFull) return;
