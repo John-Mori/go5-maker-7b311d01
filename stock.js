@@ -116,6 +116,15 @@
   var _restoreBskyEl = null;
   var _thumbCache = {}; // id → ObjectURL
 
+  // 動画作成タブのカテゴリ(ジャンル)チェックを読む。投稿完了時に投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
+  //   これが無いと下書き→投稿完了で履歴にジャンルのチェックが渡らず、毎回手で入れ直しになる。
+  var MOVIE_ATTR_IDS = { chara: 'movieAttrChara', jk: 'movieAttrJk', gyaru: 'movieAttrGyaru', isekai: 'movieAttrIsekai', harem: 'movieAttrHarem', ai: 'movieAttrAi', ol: 'movieAttrOl', soshu: 'movieAttrSoshu' };
+  function readMovieAttrs_() {
+    var o = {};
+    Object.keys(MOVIE_ATTR_IDS).forEach(function (kk) { var el = $(MOVIE_ATTR_IDS[kk]); if (el && el.checked) o[kk] = true; });
+    return o;
+  }
+
   function saveStock_(evDetail) {
     var ts = Date.now();
     var id = 'stk' + ts;
@@ -132,6 +141,8 @@
       videoName: evDetail.name || (title.replace(/[\\/:"*?<>|]/g, '_') + '.mp4'),
       // ★動画IDを保持＝投稿完了時に投稿履歴↔使用画像(usedImgSaveはvideoIdキー)を紐付ける。(Chami依頼2026-07-30)
       videoId: evDetail.videoId || '',
+      // カテゴリ(ジャンル)チェックを作成時にスナップ＝投稿完了で投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
+      attrs: readMovieAttrs_(),
       youtubeUrl: '',
     };
     return Promise.all([captureThumb_(), capturePreview_()]).then(function (caps) {
@@ -260,7 +271,8 @@
               if (!durl) return;
               var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
               if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
-              window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })));
+              // 先頭1枚=投稿プレビュー画像(拡大表示の見出しを「投稿プレビュー画像」に分ける・Chami依頼2026-07-30)
+              window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
             });
           }
         }).catch(function () {
@@ -283,7 +295,8 @@
             shortUrl: shortUrl || '',
             title: meta.title || '',
             workUrl: meta.workUrl || meta.affiliateUrl || '',
-            videoId: meta.videoId || ''
+            videoId: meta.videoId || '',
+            attrs: meta.attrs || null // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30)
           });
         }
       } catch (e) {}

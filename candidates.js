@@ -573,13 +573,21 @@
     if (_idbOk) return Object.prototype.hasOwnProperty.call(_imgMem.used, key);
     try { return localStorage.getItem('hist_usedimg__' + key) != null; } catch (e) { return false; }
   }
-  function usedImgSave_(key, imgs) {
+  // 先頭何枚が「投稿プレビュー画像」か。(投稿履歴の拡大表示で見出しを分ける・Chami依頼2026-07-30)
+  function usedPrevCount_(key) {
+    if (!key) return 0;
+    var r = _idbOk ? _imgMem.used[key] : (function () { try { return JSON.parse(localStorage.getItem('hist_usedimg__' + key) || 'null'); } catch (e) { return null; } })();
+    return (r && r.prev) ? (r.prev | 0) : 0;
+  }
+  function usedImgSave_(key, imgs, prevCount) {
     if (!key) return false;
     imgs = (imgs || []).filter(Boolean);
     if (!imgs.length && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', key); } catch (e) {} return false; }
     // 空配列もレコードとして残す。「未移行」ではなく「使用画像を明示的に削除した」と区別し、
     // 旧候補画像の先頭が互換表示で復活するのを防ぐ。
+    // prevCount=先頭何枚が「投稿プレビュー画像」か。投稿履歴の拡大表示で見出しを分けるのに使う(Chami依頼2026-07-30)。
     var rec = { imgs: imgs, at: new Date().getTime() };
+    if (prevCount != null) rec.prev = prevCount | 0;
     if (_idbOk) {
       _imgMem.used[key] = rec;
       window.Go5Idb.set(idbKey('used', key), rec).catch(idbFail_);
@@ -3118,6 +3126,7 @@
     postImgSave: postImgSave_,                                  // 履歴キー + 画像配列 を保存(write-through)
     usedImgs: usedImgsOf_,                                      // 履歴キー → 実際に動画へ使った画像だけ(候補画像とは別)
     usedImgKnown: usedImgKnown_,                                  // 履歴キーに明示保存済みか(空＝削除済みも区別)
+    usedPrevCount: usedPrevCount_,                              // 履歴キー → 先頭何枚が投稿プレビュー画像か(見出し分け用)
     usedImgSave: usedImgSave_,                                  // 履歴キー + 使用画像配列 を保存(write-through)
     // ── 🛠️編集の画像添付(貼り付け＋用途選択・Chami依頼2026-07-15)用の公開API ──
     pasteImage: function (cb) { return pasteImageFromClipboard_(cb); }, // クリップボード画像→dataURL(cb(durl,err))
