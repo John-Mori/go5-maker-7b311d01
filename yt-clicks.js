@@ -1361,8 +1361,8 @@
         '<div class="vrow-foot">' +
           '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (sched ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前">' + (vid ? (fmtDelta_(deltaCache[vid], it.ts, !!(wcode || it.workShortUrl), !!sched) || '<span style="opacity:.55;" title="30分毎のサーバースナップ後に数値が出ます">⏳記録待ち(最大30分)</span>') : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
-            (!it._fromSheet && !it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
-            (!it._fromSheet ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
+            (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
+            ((!it._fromSheet || it.videoId) ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
           '</div>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
@@ -1618,17 +1618,36 @@
 
   // 作り直し印のトグル。(削除はしない)ONで「この動画を消して作り直した」印を付け、記録シートにも反映。
   function toggleRemade(k) {
-    var arrKey, arr;
     // 対象が手動追加(verify_manual)か投稿履歴(short_hist)かを判定して、その配列内のフラグを反転。
     var manual = loadManual(), hist = loadHist();
     var inManual = manual.some(function (x) { return itemKey(x) === k; });
-    if (inManual) { arrKey = manualKey(); arr = manual; } else { arrKey = histKey(); arr = hist; }
-    var target = null, next = false;
-    arr.forEach(function (x) { if (itemKey(x) === k) { x.remade = !x.remade; target = x; next = !!x.remade; } });
-    if (!target) return;
-    saveArr(arrKey, arr);
-    // 記録シート(GAS)にも反映：videoId 行の「作り直し」列を 作り直し済/解除 に。テストIDと未設定は送らない。
-    pushRemadeToGas_(target.videoId || '', next);
+    var inHist = hist.some(function (x) { return itemKey(x) === k; });
+    if (inManual || inHist) {
+      var arrKey = inManual ? manualKey() : histKey();
+      var arr = inManual ? manual : hist;
+      var target = null, next = false;
+      arr.forEach(function (x) { if (itemKey(x) === k) { x.remade = !x.remade; target = x; next = !!x.remade; } });
+      if (!target) return;
+      saveArr(arrKey, arr);
+      // 記録シート(GAS)にも反映：videoId 行の「作り直し」列を 作り直し済/解除 に。テストIDと未設定は送らない。
+      pushRemadeToGas_(target.videoId || '', next);
+      refresh();
+      return;
+    }
+    // ★シート由来行(_fromSheet)：ローカルに実体が無いのでGAS(videoId)へ反映し、表示は保持patchで即反転する。
+    //   (Chami依頼2026-07-30「両chでほとんどが被リビルドボタンが消えた」＝ローカル履歴が消えてシート由来に
+    //    なった行にも従来通り被リビルドを効かせる。シートはremade列を返さないため保持patchで状態を維持する。)
+    var a = acct(), c = _sheetExtraCache[a], sheetTarget = null;
+    ((c && c.items) || []).forEach(function (x) { if (itemKey(x) === k) sheetTarget = x; });
+    if (!sheetTarget || !sheetTarget.videoId) return;
+    var vid = String(sheetTarget.videoId);
+    var pm = (_pendingSheetEdits[a] = _pendingSheetEdits[a] || {});
+    var patch = pm[vid] || {};
+    var cur = (patch.remade != null) ? patch.remade : !!sheetTarget.remade;
+    var nextR = !cur;
+    patch.remade = nextR; pm[vid] = patch;
+    savePend_(a, pm); // リロードを越えて保持(シートが権威のremade列を返さないため保持で維持)
+    pushRemadeToGas_(vid, nextR, a);
     refresh();
   }
   // channel省略時は現在UIのアカウント。(既存の呼び出し=ボタン操作は常にUIと同じアカウントを見ているため安全)
@@ -1651,7 +1670,8 @@
   function listForRebuildPicker_() {
     ensureIds(); // 履歴を正としてID未付与のアイテムへ背骨IDを付与＝ピッカーに全件を確実に出す(履歴一覧との不一致を防ぐ)
     var ymap = loadYtMap();
-    return allItems()
+    // ★シート由来行(ローカル履歴が消えた端末)もリビルド元に選べるようにdisplayItems_を使う(Chami依頼2026-07-30)。
+    return displayItems_()
       .filter(function (it) { return it.videoId && !it.remade; })
       .map(function (it) {
         // 題名は投稿履歴一覧と同じ解決順。(YouTubeタイトルがあれば優先→なければ記録タイトル)#タグは除去。
@@ -1679,6 +1699,12 @@
         return;
       }
     }
+    // ★ローカルに実体が無い(シート由来)動画をリビルド元にした場合も、被リビルドをGAS＋保持patchへ反映。
+    var pm = (_pendingSheetEdits[a] = _pendingSheetEdits[a] || {});
+    var patch = pm[String(videoId)] || {}; patch.remade = true; pm[String(videoId)] = patch;
+    savePend_(a, pm);
+    pushRemadeToGas_(videoId, true, a);
+    if (a === acct()) refresh();
   }
   // ── 投稿完了(ドラフトの投稿モード)から1件を投稿履歴へ記録する。account指定で正しいアカウント側へ書く。──
   //   ①「投稿完了を押しても投稿履歴に載らない」の対処。ここに載れば、既存の updateYtScheduled_ が

@@ -399,9 +399,9 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .vmetrics > span{white-space:nowrap;flex-shrink:0;}
 .vmetrics .vfanza{display:flex;align-items:center;gap:6px;color:var(--gold);font-size:12px;}
 .vmetrics .vfanza input{width:64px;font-size:14px;padding:5px 7px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);}
-.vmetrics .vlink{color:var(--bsky);font-size:12px;text-decoration:none;white-space:nowrap;flex-shrink:0;}
+.vmetrics .vlink{color:var(--bsky);font-size:14px;text-decoration:none;white-space:nowrap;flex-shrink:0;}/* 編集/リンク列を約1.2倍に（Chami依頼2026-07-30） */
 /* Bsky↗/YouTube↗/作品↗ を1グループに＝作品↗だけが改行される事故を防ぐ（狭いときは3つまとめて次行へ） */
-.vmetrics .vrow-links{display:inline-flex;align-items:baseline;gap:8px;flex-wrap:nowrap;flex-shrink:0;}
+.vmetrics .vrow-links{display:inline-flex;align-items:baseline;gap:11px;flex-wrap:nowrap;flex-shrink:0;}/* それぞれの横余白を若干広げる（Chami依頼2026-07-30） */
 .vmetrics .vlink-bsky{color:#4dabf7;}      /* Bluesky イメージの水色 */
 /* X↗＝白字に黒枠（Xのブランド＝白抜きに合わせ、明るい面でも視認できるよう縁取り） */
 .vmetrics .vlink-x{color:#fff;font-weight:700;text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000,0 0 2px #000;}
@@ -502,14 +502,15 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .fanza-price-row .fp-sale-lbl{color:#ff6b8a;}
 .fanza-price-row .fp-sale{color:#ff6b8a;font-weight:700;}
 .fanza-price-row .fp-off{color:#04222a;background:#ff6b8a;border-radius:4px;padding:0 5px;font-weight:700;font-size:.68rem;white-space:nowrap;}
-.vmetrics .vedit-btn{background:transparent;border:none;color:var(--bsky);font-size:12px;cursor:pointer;padding:0;line-height:1;white-space:nowrap;flex-shrink:0;width:auto;margin-top:0;}
+.vmetrics .vedit-btn{background:transparent;border:none;color:var(--bsky);font-size:14px;cursor:pointer;padding:0;line-height:1;white-space:nowrap;flex-shrink:0;width:auto;margin-top:0;}/* 編集ボタンも約1.2倍（Chami依頼2026-07-30） */
 .vmetrics .vedit-btn:active{opacity:.65;}
 .vrow-foot{flex:0 0 100%;width:100%;display:flex;align-items:center;gap:8px;margin-top:0;}/* カード全幅の独立行＝🗑がカードの一番右まで届く */
 .vrow-foot-gap{flex:1;min-height:1.6em;}
 /* リビルド操作は縦積み：「リビルドで作成」を「被リビルドにする」の上に置く */
 .vrow-actcol{flex:0 0 auto;display:flex;flex-direction:column;gap:4px;align-items:flex-end;}/* ボタンは右寄せ（ゴミ箱の左にまとめる） */
 /* 今日/昨日/週の再生・クリック増加（ゴミ箱の左） */
-.vrow-delta{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:3px 10px;font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums;}
+/* 今日/昨日/週は常に縦積みに統一（ボタンの有無で横並び/縦積みが混在していたのをそろえる・Chami依頼2026-07-30） */
+.vrow-delta{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums;}
 .vrow-delta .dl-seg{white-space:nowrap;}
 .vrow-delta .dl-seg b{color:#cbd5e1;font-weight:700;margin-right:1px;font-size:.95em;}
 .vrow-delta .emico{height:.95em;vertical-align:-0.12em;}
