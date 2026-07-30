@@ -316,24 +316,22 @@
       });
     }
     var rs = document.getElementById('promoPosReset'); if (rs) rs.addEventListener('click', resetPos);
-    var sm = document.getElementById('promoSizeMinus'); if (sm) sm.addEventListener('click', function () { setScale(-0.1); });
-    var sp = document.getElementById('promoSizePlus'); if (sp) sp.addEventListener('click', function () { setScale(0.1); });
+    // 大きさは二段階(粗5%・微1%)。Chami依頼2026-07-30。
+    var sizeBtns = { promoSizeMinus5: -0.05, promoSizePlus5: 0.05, promoSizeMinus1: -0.01, promoSizePlus1: 0.01 };
+    Object.keys(sizeBtns).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('click', function () { setScale(sizeBtns[id]); });
+    });
     updateSizeLabel();
   })();
 
   // ---- プレビュー上の操作 ----
-  // 二本指ピンチ = 動画に使う前景画像そのものの拡大縮小(Chami依頼2026-07-17)。
-  //   ★旧実装はピンチで canvas に CSS transform を掛け、全画面オーバーレイ(cv-zoom)へ拡大していた。
-  //     それは「プレビューの見た目が拡大するだけ」で書き出す動画は一切変わらない=Chamiの意図と違った。
-  //     (本人談「ズームのプレビューの概念が伝え間違えてた。動画生成に用いる画像を拡大縮小させたい」)
-  //     → ピンチを app.js の OFF.imgScale(描画式に入る値)へ繋ぎ替え、モーダル/パンは廃止した。
-  // 一本指 = ラベルのドラッグ(従来どおり)。
+  // 一本指 = ラベルのドラッグで移動。
+  //   ★二本指ピンチ(画像の拡大縮小)は廃止(Chami依頼2026-07-30「二本指ズームは使いにくい」)。
+  //     画像の拡大縮小・上下移動はプレビュー横の±ボタン(app.js CONTROLS: imgScale/imgY)で操作する。
   (function wirePointer() {
     var cv = document.getElementById('cv');
     if (!cv || !window.PointerEvent) return;
-    var pointers = {};      // 触れているポインタ {id:{x,y}}
-    var pinchBase = 0;      // ピンチ開始の2点間距離
-    var scaleStart = 1;     // ピンチ開始時の画像拡大率
     var drag = null;        // ラベルドラッグ {gx,gy}=掴んだ点とラベル左上のずれ(フレーム比)
 
     function framePoint(ev) { // ポインタ→フレーム比(0..1)
@@ -341,21 +339,8 @@
       if (!b.width || !b.height) return null;
       return { x: (ev.clientX - b.left) / b.width, y: (ev.clientY - b.top) / b.height };
     }
-    function pinchDist() {
-      var ids = Object.keys(pointers);
-      if (ids.length < 2) return 0;
-      var a = pointers[ids[0]], b = pointers[ids[1]];
-      return Math.hypot(a.x - b.x, a.y - b.y);
-    }
-    function imgScaleApi() { return window.Go5ImgScale || null; }
 
     cv.addEventListener('pointerdown', function (ev) {
-      pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
-      if (Object.keys(pointers).length >= 2) {                                                             // 二本指=画像の拡大縮小
-        var api = imgScaleApi();
-        pinchBase = pinchDist(); scaleStart = api ? api.get() : 1; drag = null;
-        return;
-      }
       if (!active()) return;                                                                              // ラベル無し=何もしない
       var p = framePoint(ev); if (!p) return;
       var cp = curPos(), wr = lw() / FRAME_W, hr = lh() / FRAME_H;
@@ -365,24 +350,13 @@
       ev.preventDefault();
     });
     cv.addEventListener('pointermove', function (ev) {
-      if (pointers[ev.pointerId]) { pointers[ev.pointerId].x = ev.clientX; pointers[ev.pointerId].y = ev.clientY; }
-      if (Object.keys(pointers).length >= 2 && pinchBase) {   // 二本指=画像の拡大縮小(動画に反映される)
-        var api = imgScaleApi();
-        if (api) {
-          var k = scaleStart * (pinchDist() / pinchBase);
-          api.set(Math.min(api.max, Math.max(api.min, k)));   // clamp+保存+再描画はapp.js側(±ボタンと同経路)
-        }
-        ev.preventDefault(); return;
-      }
       if (!drag) return;
       var p = framePoint(ev); if (!p) return;
       fpos = { x: p.x - drag.gx, y: p.y - drag.gy };
       redraw(); // ラベルが指に追従(rAFで間引き)
       ev.preventDefault();
     });
-    function endPointer(ev) {
-      delete pointers[ev.pointerId];
-      if (Object.keys(pointers).length < 2) pinchBase = 0;
+    function endPointer() {
       if (drag) { drag = null; persist(); redraw(); }
     }
     cv.addEventListener('pointerup', endPointer);

@@ -91,11 +91,24 @@ input[type=datetime-local]:focus{border-color:var(--accent);}
 .photo-btn:active{background:#10203033;}
 .hint{color:var(--sub);font-size:12px;margin-top:6px;word-break:break-all;}
 .preview-wrap{display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;}
+/* キャンバスを内包し、YouTube切れ範囲ガイド(CSSオーバーレイ)の位置基準にする。inline-blockでキャンバスにぴったり。 */
+.canvas-box{position:relative;display:inline-block;line-height:0;font-size:0;flex:0 0 auto;max-width:100%;}
+/* YouTube Shorts が縦長端末で左右を切り落とす範囲(cover・左右各約9%)を薄く覆って可視化。書き出しには影響しない(pointer-events:none) */
+.yt-safe-guide{position:absolute;inset:0;pointer-events:none;z-index:2;border-radius:10px;overflow:hidden;}
+.yt-safe-guide .ytsg-band{position:absolute;top:0;bottom:0;width:9%;background:rgba(0,0,0,.34);}
+.yt-safe-guide .ytsg-l{left:0;border-right:1.5px dashed rgba(43,179,192,.92);}
+.yt-safe-guide .ytsg-r{right:0;border-left:1.5px dashed rgba(43,179,192,.92);}
+.yt-safe-guide .ytsg-cap{position:absolute;top:5px;left:50%;transform:translateX(-50%);white-space:nowrap;
+  font-size:9px;line-height:1.25;color:#eafcff;background:rgba(0,0,0,.55);padding:2px 7px;border-radius:6px;letter-spacing:.02em;}
+/* プレビュー右横の操作列(ラベル位置・大きさ・画像調整)。上寄せ=「少し上に配置」(Chami依頼2026-07-30) */
+.preview-side{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:10px;align-self:flex-start;}
+.img-adjust{display:flex;flex-direction:column;align-items:center;gap:3px;}
+.promo-size-tag{font-size:10px;color:var(--sub);min-width:20px;text-align:right;}
 /* 幅・高さとも auto にして固有比(9:16)のまま max-width/max-height 内に収める。
    どちらか片方だけを固定しないことで、縦長・狭幅端末でも 9:16 が崩れず横潰れしない。 */
 canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/16;
   background:#000;border:1px solid var(--line);border-radius:10px;
-  touch-action:none;} /* 二本指ピンチをこちらで取るためブラウザ既定ジェスチャを無効化(Chami指定2026-07-15) */
+  touch-action:none;} /* ラベルの指ドラッグ中にページがスクロールしないようブラウザ既定ジェスチャを無効化(二本指ピンチは2026-07-30に廃止) */
 /* ★プレビューの全画面ズーム(.cv-zoom=fixed+暗幕のモーダル)は廃止(Chami依頼2026-07-17
    「プレビュー画面のモーダルはいらない」)。二本指は「見た目の拡大」ではなく
    動画に使う画像そのものの拡大縮小(OFF.imgScale)に付け替えたため、この見た目専用の
@@ -126,8 +139,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 @media(max-width:560px){
   .editor{flex-direction:column;}
   .preview-col{align-self:center;z-index:5;background:var(--card);padding-bottom:6px;width:100%;text-align:center;}
-  /* ラベルD-pad表示中だけ、プレビュー横にD-pad分の余白を確保(真横に並べる=Chami依頼)。無い時は全幅。 */
-  .preview-wrap.has-dpad canvas#cv{max-width:calc(100% - 124px);}
+  /* プレビュー横の操作列(画像調整は常設)の分だけキャンバス幅を確保して真横に並べる(Chami依頼)。 */
+  .preview-wrap .canvas-box{max-width:calc(100% - 124px);}
 }
 .ctl-group{margin-top:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;}
 .ctl-group:first-child{margin-top:0;}
