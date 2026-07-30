@@ -104,7 +104,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-31A(action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-07-31B(action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -510,6 +510,8 @@ function doGet(e) {
       else if (p.action === 'comp_add_seed') out = compAddSeed_(p.url, p.name, p.bluesky, p.x, p.note); // 競合: フロント登録→GASへ同期
       else if (p.action === 'sale_reg') out = saleReg_(p.acc, p.sale);                 // 名前付きセールURLの短縮コードを登録(snapshotStatsが各コードを日次スナップ)
       else if (p.action === 'snapshot_now') { snapshotStats(); out = { ok: true, snapped: true }; } // 手動で即スナップ
+      else if (p.action === 'click_agg') out = { ok: true, version: GAS_VERSION, at: new Date().toISOString(), works: clicksByWork_(p.channel || 'both') }; // 作品別クリック合算(読み取り)
+      else if (p.action === 'rebuild_click_agg') out = { ok: true, works: rebuildClickAggSheet_() };  // 合算シートを即再構築
       else out = { ok: true, shortUrl: p.postUri ? lookupShortByUri_(ch, p.postUri) : '' }; // 既定＝action=short
     } catch (err) { out = { ok: false, error: String(err) }; }
     return ContentService.createTextOutput(p.callback + '(' + JSON.stringify(out) + ')')
@@ -1243,6 +1245,58 @@ function refreshClicks() {
       Utilities.sleep(100);
     }
   });
+  try { rebuildClickAggSheet_(); } catch (e) {} // クリック更新のたびに作品別合算シートを積み直す(手番ゼロ)
+}
+
+// ── 作品別クリック合算(分析部門依頼2026-07-31・X凍結→Bluesky退避対策)────────────
+// X→Bluesky退避で、同じ作品でも投稿ごとに導線1短縮URL(YouTube→投稿)が変わり、クリックが
+// 複数行に割れる。作品cid(=作品URLの正規化キー・投稿や媒体が変わっても不変)でまとめ直し、
+// 1作品=1行の合計クリックにする。合算キーは作品URL/cid(短縮リンクは投稿・媒体ごとに変わり
+// タイトルも凍結対策で変わるためキーに使えない/作品URLは記録POST payloadに入り不変)。
+// 導線1(短縮URLクリック数)を合算＝記録シートに行ごとに在る値なので「行を足すだけ」で足りる
+// (STATS/videoId層に依存しない＝YouTube動画を伴わないBluesky単独投稿でも拾える)。
+function clicksByWork_(channel) {
+  var pick = (channel === 'acc1' || channel === '月詠み') ? ['月詠み']
+           : (channel === 'acc2' || channel === '宵桜艶帖') ? ['宵桜艶帖'] : CH_SHEETS.slice();
+  var agg = {};
+  pick.forEach(function (name) {
+    var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
+    var map = headerMap_(sh); var last = sh.getLastRow(); if (last < 2) return;
+    var clickCol = map[clickColName_(map)];
+    var wuCol = map['作品URL'], cidCol = map['作品cid'], tCol = map['題名(コメント)'], sCol = map['短縮URL'];
+    var ch = (name === '宵桜艶帖') ? 'acc2' : 'acc1';
+    var rows = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+    rows.forEach(function (row) {
+      var wu  = wuCol  ? String(row[wuCol - 1]  || '') : '';
+      var cid = cidCol ? String(row[cidCol - 1] || '') : '';
+      if (!cid && wu) cid = extractCid_(wu);
+      var key = cid || wu; if (!key) return;                 // 作品を特定できない行(cid/作品URLとも空)は除外
+      var clk = clickCol ? Number(row[clickCol - 1]) : 0; if (!isFinite(clk)) clk = 0;
+      var short = sCol ? String(row[sCol - 1] || '') : '';
+      var title = tCol ? String(row[tCol - 1] || '') : '';
+      var gk = ch + '\t' + key;                              // 集計はチャンネル別(記録が物理分離のため)
+      var a = agg[gk] || (agg[gk] = { channel: ch, key: key, workUrl: wu, title: '', clicks: 0, links: 0, posts: 0 });
+      a.clicks += clk; a.posts += 1; if (short) a.links += 1;
+      if (title) a.title = title;                            // 下の行ほど新しい=最新タイトルを採用
+      if (wu && !a.workUrl) a.workUrl = wu;
+    });
+  });
+  return Object.keys(agg).map(function (k) { return agg[k]; })
+    .sort(function (a, b) { return (b.clicks - a.clicks) || (a.channel < b.channel ? -1 : 1); });
+}
+// 合算結果を専用タブ「作品別クリック合算」へ書き出す(非破壊=新規タブ・既存集計に相乗りしない)。
+function rebuildClickAggSheet_() {
+  var ss = openSS_(); var name = '作品別クリック合算';
+  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+  sh.clearContents();
+  var header = ['チャンネル', '作品タイトル', '作品cid/キー', '作品URL', '合計クリック(導線1)', '短縮リンク数', '投稿数', '更新'];
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm');
+  var list = clicksByWork_('both'), rows = [header];
+  list.forEach(function (r) {
+    rows.push([r.channel === 'acc2' ? '宵桜艶帖' : '月詠み', r.title, r.key, r.workUrl, r.clicks, r.links, r.posts, now]);
+  });
+  sh.getRange(1, 1, rows.length, header.length).setValues(rows);
+  return list.length;
 }
 
 // ---- Bluesky反応(いいね/リポスト/返信)の定期更新。(毎時トリガー)公開API getPosts を25件ずつ ----
