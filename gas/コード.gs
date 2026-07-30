@@ -5,7 +5,7 @@
  *   1) クライアント(bluesky.js)から {op,videoId,channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri,shortUrl,testMode} を受け取る(doPost)
  *   2) videoId(背骨ID)をキーに「記録_ch1 / 記録_ch2」へ upsert。(重複行を作らない・列名マッピング)
  *      短縮URLはフロント生成(da.gd/link-worker)を優先、無い経路のみ GAS が da.gd で短縮。
- *   3) refreshEngagement()(毎時)で Bluesky反応(いいね/リポスト/返信)を更新
+ *   3) refreshEngagement()(毎時)で Bluesky反応(いいね/リポスト)を更新
  *   4) Phase5：無人予約投稿(runReservations / 5分トリガー)
  *   ※ Bitly は全廃。(無料枠オーバーの主因かつ冗長＝共有されず計測不能)クリック計測は link-worker(KV) に一本化する方針。
  *      テンプレの 'Bitly_ID'/'Bitlyクリック' 列は当面温存。(未使用。将来 link-worker クリックへ転用可)
@@ -23,7 +23,7 @@
 var HEADERS40 = [
   'post_id','投稿日時','曜日','day-type','時間帯スロット','ジャンル','題名(コメント)',
   '作品cid','YouTube動画URL','短縮URL',
-  'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','返信','フォロー増','短縮URLクリック数',
+  'インプレッション','インプCTR%','視聴回数','平均視聴維持率%','いいね','リポスト','短縮URLクリック数',
   'リンククリック率%','post_uri','クリック更新日時','反応更新日時'
 ];
 // ?action=cleanup_columns で既存シートから削除する列。(コードが唯一の正・ClaudeCodeから増減)
@@ -38,11 +38,15 @@ var HEADERS40 = [
 //     FANZA由来ではないので今回の「検証不可」に当たらない。
 // ※'Bluesky投稿URL'/'Bitly_ID' は宵桜艶帖にだけ在った余分列。月詠みへ揃えるため削除。
 //   Bluesky投稿URLは'共有URL'と重複、Bitly_IDはBitly廃止済みで死んだ列。
+// ★'返信'(Q列)・'フォロー増'(R列)を削除(Chami依頼 2026-07-31 ⑦⑤)。
+//   返信＝Blueskyの返信数。Chami「返信はない・不要」。refreshEngagement の書き込みも停止済。
+//   フォロー増＝手動入力の想定だったが一度も運用されず「わからないので削除」(Chami)。
 var CLEANUP_COLUMNS = [
   '特別期間(手動)', 'サムネ/フック種別(A/B)', 'CTA・リンク提示方法', 'Blueskyラベル',
   'FANZA発生成約', 'FANZA確定成約', '発生報酬¥', '確定報酬¥',
   '承認率%', 'CVR発生%', 'CVR確定%', 'EPC発生¥', 'EPC確定¥', 'RPM(¥/1000再生)',
-  'Bluesky投稿URL', 'Bitly_ID'
+  'Bluesky投稿URL', 'Bitly_ID',
+  '返信', 'フォロー増'
 ];
 // FANZA投稿時スナップショット列。(記録シート末尾追加。既存40列は不変)
 // レビュー件数は販売部数の代理指標。(実際の売上本数は取得不可)
@@ -87,15 +91,21 @@ function fanzaType_(url) {
   if (/\.dmm\.(co\.jp|com)/.test(s)) return 'データ';
   return '';
 }
+// F列「ジャンル」= FANZA種別を 同人/Books/データ で表記。(fanzaType_ の 'books' のみ 'Books' へ正規化。Chami依頼 2026-07-31③)
+function fanzaGenre_(url) {
+  var t = fanzaType_(url);
+  return t === 'books' ? 'Books' : t; // '同人' / 'データ' はそのまま。判定不可は '' (既存値を潰さない)
+}
 //
 // ── 列の自動取得マップ(保守用メモ：ClaudeCodeはここを基準に列を増減する)──
 //   【自動で埋まる】post_id / 投稿日時 / 曜日 / day-type / 時間帯スロット / 題名(コメント) /
-//     作品cid / YouTube動画URL / 短縮URL / 視聴回数 / いいね / リポスト / 返信 /
+//     ジャンル(同人/Books/データ＝作品URLから判定) / 作品cid / YouTube動画URL / 短縮URL /
+//     視聴回数 / いいね / リポスト /
 //     短縮URLクリック数 / post_uri / クリック更新日時 / 反応更新日時 / カテゴリ /
 //     元値list_price / 割引後price / 割引率pct / FANZA取得日時 / レビュー件数(代理指標) / レビュー平均 /
 //     リンククリック率%(←数式・クリック数÷視聴回数。両辺とも実データがあるので有効)
-//   【手動入力のみ＝APIで自動取得不可】ジャンル / インプレッション / インプCTR% /
-//     平均視聴維持率% / フォロー増
+//   【手動入力のみ＝APIで自動取得不可】インプレッション / インプCTR% / 平均視聴維持率%
+//   ※'返信'(Bluesky返信数)・'フォロー増' は 2026-07-31 に削除(Chami依頼⑦⑤)。CLEANUP_COLUMNS で既存シートからも除去。復活させないこと。
 //   ※FANZA成約・報酬系(FANZA発生成約/FANZA確定成約/発生報酬¥/確定報酬¥)と、その派生数式
 //     (承認率%/CVR発生%/CVR確定%/EPC発生¥/EPC確定¥/RPM)は **2026-07-23に削除**(Chami依頼)。
 //     FANZAは投稿単位の成約を返さない=手入力するしかなく、実測で両シートとも0件だった。
@@ -104,7 +114,7 @@ function fanzaType_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-31B(action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-07-31C(③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -344,6 +354,36 @@ function doGet(e) {
         cfOut[nm] = { dataRows: Math.max(0, clast - 1), counts: counts };
       });
       return jsonOut_({ ok: true, fill: cfOut });
+    } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
+  // F列ジャンルの一括補完(③): <exec URL>?action=genre_fill で 作品URL から 同人/Books/データ を判定して ジャンル 列へ。
+  //   既定は dry-run(何行が対象かを返すだけ)。&apply=1 で実際に書き込む。&force=1 で既存値も上書き(既定は空セルのみ)。
+  if (p.action === 'genre_fill') {
+    try {
+      var gApply = String(p.apply || '') === '1', gForce = String(p.force || '') === '1';
+      var gOut = [];
+      CH_SHEETS.forEach(function (nm) {
+        var gsh = openSS_().getSheetByName(nm);
+        if (!gsh) { gOut.push({ sheet: nm, status: 'not_found' }); return; }
+        var gmap = headerMap_(gsh), glast = gsh.getLastRow();
+        var jc = gmap['ジャンル'], wc = gmap['作品URL'];
+        if (!jc) { gOut.push({ sheet: nm, status: 'no_genre_col' }); return; }
+        if (glast < 2) { gOut.push({ sheet: nm, status: 'no_rows' }); return; }
+        var vals = gsh.getRange(2, 1, glast - 1, gsh.getLastColumn()).getValues();
+        var filled = 0, skippedNoUrl = 0, sample = [];
+        for (var r = 0; r < vals.length; r++) {
+          var cur = vals[r][jc - 1];
+          if (cur !== '' && cur !== null && cur !== undefined && !gForce) continue;
+          var g = fanzaGenre_(wc ? vals[r][wc - 1] : '');
+          if (!g) { if (!(cur !== '' && cur !== null)) skippedNoUrl++; continue; }
+          if (String(cur) === g) continue;
+          if (gApply) gsh.getRange(r + 2, jc).setValue(g);
+          filled++;
+          if (sample.length < 5) sample.push({ row: r + 2, genre: g });
+        }
+        gOut.push({ sheet: nm, dataRows: glast - 1, wouldFill: filled, skippedNoUrl: skippedNoUrl, applied: gApply, sample: sample });
+      });
+      return jsonOut_({ ok: true, mode: gApply ? 'apply' : 'dry-run', force: gForce, genre: gOut });
     } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
   }
   // 末尾の空行を詰める: <exec URL>?action=trim_empty_rows
@@ -1021,6 +1061,7 @@ function writeRecord_(channel, f) {
   else if (isNewRow || f.postUrl) put('投稿日時', now);
   putIf('題名(コメント)', f.ytTitle || f.title || '');         // YouTube題名を優先して題名(コメント)へ集約
   putIf('作品cid', extractCid_(f.workUrl || f.affiliateUrl || ''));
+  putIf('ジャンル', fanzaGenre_(f.workUrl || f.affiliateUrl || ''));  // F列＝同人/Books/データ を作品URLから自動記載(Chami③ 2026-07-31)
   putIf('作品URL', f.workUrl || '');                             // 作品URLそのものを保存＝cidから復元できない階層(FANZA動画等)でもシート由来行に作品↗が戻る(Chami「リロードで作品URLが消える」2026-07-28)
   putIf('投稿先', (f.platform === 'x' || f.platform === 'bsky') ? f.platform : ''); // 投稿先(X/Bsky)＝短縮URLだけの行のX↗/Bsky↗表示をリロード後も保持(Chami「原則X投稿」2026-07-29)
   putIf('短縮URL', shortUrl);                                   // r2＝計測用(codeFromShort_対象・r2以外は入れない)
@@ -1063,7 +1104,7 @@ function writeRecord_(channel, f) {
     else if (f.rebuild === true || f.rebuild === 'true') put('作り直し', 'リビルド版');
   }
   // カウンタは新規行のみ0初期化。(upsert更新で既存のいいね数等を0で潰さない)
-  if (isNewRow) { put('いいね', 0); put('リポスト', 0); put('返信', 0); }
+  if (isNewRow) { put('いいね', 0); put('リポスト', 0); }
   // 投稿履歴を正とし、投稿日時の新しい順にシートを並べ替える。(空日時は末尾へ)
   // 一括同期(sync_history)では noSort で抑止し、最後に1回だけ並べ替える。
   if (!f.noSort) sortByDate_(sh, dcol);
@@ -1320,7 +1361,6 @@ function refreshEngagement() {
           var p = byUri[x.uri]; if (!p) return;
           if (map['いいね']) sh.getRange(x.row, map['いいね']).setValue(p.likeCount || 0);
           if (map['リポスト']) sh.getRange(x.row, map['リポスト']).setValue(p.repostCount || 0);
-          if (map['返信']) sh.getRange(x.row, map['返信']).setValue(p.replyCount || 0);
           if (map['反応更新日時']) sh.getRange(x.row, map['反応更新日時']).setValue(new Date());
         });
       } catch (e) {}
