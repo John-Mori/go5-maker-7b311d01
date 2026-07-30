@@ -703,6 +703,8 @@
   //   同一作品のクリックを、この投稿へ束ねる。各行=合算したい短縮URLの入力欄＋「短縮」＋「✕」。
   function addMergeRow_(url) {
     var list = $('veditMergeList'); if (!list) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'vedit-merge-item';
     var row = document.createElement('div');
     row.className = 'vedit-merge-row vedit-bsky-row';
     var inp = document.createElement('input');
@@ -715,8 +717,26 @@
     bDel.type = 'button'; bDel.className = 'vedit-copy vedit-copy-fit vedit-merge-del'; bDel.textContent = '✕';
     bDel.title = 'この合算URLを外す';
     row.appendChild(inp); row.appendChild(bShort); row.appendChild(bDel);
-    list.appendChild(row);
-    // 短縮: 入力欄のURLを短縮リンク(r2計測キー付き)へ差し替える。合算はコード解決が要るため短縮推奨。
+    // 合算後のURLを表示する行(Chami依頼2026-07-31)。短縮後/復元時に「合算後のURL＋そのクリック数」を出す。
+    var note = document.createElement('div');
+    note.className = 'vedit-merge-note'; note.hidden = true;
+    wrap.appendChild(row); wrap.appendChild(note);
+    list.appendChild(wrap);
+    function showNote_(u) {
+      var v = (u || '').trim();
+      if (!v) { note.hidden = true; note.innerHTML = ''; return; }
+      var c = codeOf(v);
+      var cl = (c && (c in clicksCache)) ? clicksCache[c] : null;
+      note.hidden = false;
+      note.innerHTML = '合算後のURL：<code class="vgen-url">' + esc(v) + '</code> ' +
+        '<button type="button" class="vgen-copy vedit-merge-notecopy">コピー</button>' +
+        (cl != null ? ' <span class="vmerge-clicks">(クリック ' + num(cl) + ')</span>'
+                    : (c ? ' <span class="vmerge-clicks" style="opacity:.6;">(クリック 取得待ち)</span>' : ' <span class="vmerge-clicks" style="opacity:.6;">(未短縮=計測コード無し)</span>'));
+      var cp = note.querySelector('.vedit-merge-notecopy');
+      if (cp) cp.addEventListener('click', function () { try { navigator.clipboard.writeText(v); cp.textContent = '✓ コピー'; } catch (e) {} });
+    }
+    if (inp.value) showNote_(inp.value); // 復元時：保存済みの合算URLを最初から表示
+    // 短縮: 入力欄のURLを短縮リンク(自前ドメイン・計測コード付き)へ差し替える。合算はコード解決が要るため短縮推奨。
     bShort.addEventListener('click', function () {
       var v = (inp.value || '').trim();
       if (!/^https?:\/\//.test(v)) { showModalErr_('先に合算したいURLを入れてください'); return; }
@@ -725,12 +745,14 @@
       var orig = bShort.textContent; bShort.disabled = true; bShort.textContent = '生成中…';
       window.Go5MakeShort(v).then(function (res) {
         var share = (res && res.shareUrl) || (res && res.shortUrl) || '';
-        if (!share) { showModalErr_('短縮に失敗しました。(r2ワーカーに接続できませんでした)'); return; }
+        if (!share) { showModalErr_('短縮に失敗しました。(短縮ワーカーに接続できませんでした)'); return; }
         inp.value = share; // 欄には短い計測URL(da.gd)を表示。クリック集計はコードで行う
+        showNote_(share); // 合算後のURLを表示
       }).catch(function () { showModalErr_('短縮に失敗しました。'); })
         .then(function () { bShort.disabled = false; bShort.textContent = orig; });
     });
-    bDel.addEventListener('click', function () { if (row.parentNode) row.parentNode.removeChild(row); });
+    inp.addEventListener('change', function () { showNote_(inp.value); }); // 手入力での確定時も表示を更新
+    bDel.addEventListener('click', function () { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); });
     return inp;
   }
   function setMergeRows_(urls) {
