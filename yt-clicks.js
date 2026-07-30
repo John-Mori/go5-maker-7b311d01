@@ -3332,11 +3332,15 @@
         var age = now - (cached.fetchedAt || 0);
         var freshFull = cached.title && !isBadFanzaTitle(cached.title) && age < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media && cached.sv === FZ_SV;
         var freshPartial = cached.partial && cached.media && cached.sv === FZ_SV && age < DAY;
+        // ★当時スナップの固定条件は「価格が新鮮か」だけで判定する(freshFullは releaseDate/media も要求するため、
+        //   価格はあるのに発売日や画像が欠けた作品は snap が永久に空＝「投稿時価格が出ない作品がある」の主因)。
+        //   ここは age<DAY・sv一致・price有りに限る＝古い価格を投稿時価格にしない担保は保つ。(Chami報告2026-07-30)
+        var freshPrice = cached.priceInfo && cached.priceInfo.price != null && cached.sv === FZ_SV && age < DAY;
         // ★stale-while-revalidate：古い/旧スキーマのキャッシュでも「まず即表示」して待たせない。
         //   新鮮ならここで確定。古ければ表示は残したまま下のjobsに積んで裏で静かに最新化する。
         if (cached.title && !isBadFanzaTitle(cached.title)) {
           setFanzaEls(url, cached.title, row); setFanzaAuthorEls(url, cached.author || '', row);
-          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo, row); if (freshFull) backfillSnap_(url, cached.priceInfo); } // 当時価格の固定は新鮮な価格のときだけ(古い価格を投稿時価格にしない)
+          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo, row); if (freshPrice) backfillSnap_(url, cached.priceInfo); } // 当時価格の固定は新鮮な価格のときだけ(古い価格を投稿時価格にしない・freshPrice=price有り+sv一致+age<DAY)
           if (cached.media) setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall, row);
           displayed = true;
           if (freshFull) return;
