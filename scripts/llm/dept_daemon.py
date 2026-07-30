@@ -2316,6 +2316,81 @@ def audit_hangul(dept, rec, reply):
 
 
 # ============================================================================
+# 出力ゲート ルールA(非日本語スクリプト混入=ハングル)  2026-07-30
+# ----------------------------------------------------------------------------
+# 設計書= 00_AI-HQ/設計_出力ゲート_呼称スラッグ非日本語スクリプト_2026-07-30.md §2・§5。
+# 裁定= Chami(2026-07-30「推奨どおりでいい」)。
+#   ★これは**ルールAのみ**。B(スラッグ露出)・C(呼称違反)は未実装(設計書§5・§1)。
+#     B/Cを足す時に設計書の `output_gate(dept, persona, text)` へ切り出す。今は最小手。
+#
+# 方針(ORG-45を**ルールAに限り**反転させる=ログ止まりから「1回だけ再生成」へ):
+#   1. ハングルを検知したら、**同じ入力でもう1回だけ**生成し直す(グリッチは再生成でほぼ消える)。
+#   2. 再生成後もまだハングルが残るなら、**元文(1回目)に警告行を1行付けて送る**。
+#   ★沈黙にしない(fail-open): regen が無い/失敗/空/例外なら、元文をそのまま(要検査で警告付き)送る。
+#   ★自動での文字置換は**絶対にしない**(각약→各約 等。任意ハングル→意図漢字は不確実で誤修正が事故)。
+HANGUL_WARN = "⚠️(自動)生成不良: 非日本語スクリプト(ハングル)混入を検知。要確認。"
+
+
+def hangul_gate(text, regen=None, strip_marker=None):
+    """ルールA: ハングル検知→1回だけ再生成→なお出たら元文に警告付与(純関数・テスト可)。
+
+    引数:
+      text        : 1回目の本文(既に split_wip_marker 済みが渡る想定)。
+      regen       : 無引数callable。呼ぶと**再生成後の本文**を返す(None なら再生成しない)。
+      strip_marker: 再生成本文から <<WIP>> 等を落とす callable(任意)。呼び出し側で split_wip_marker を渡す。
+
+    返り値: (out_text, info)
+      out_text : 実際に送るべき本文。
+      info     : {"hit1": bool, "regenerated": bool, "hit2": bool, "warned": bool} 監査/ログ用。
+
+    挙動:
+      - 1回目にハングルが無ければ text をそのまま返す(hit1=False。**通常返信は1ミリも変わらない**)。
+      - regen が None なら再生成せず、元文に警告を付けて返す(fail-open・沈黙にしない)。
+      - regen が本文を返し、そこにハングルが無ければ**その本文へ差し替えて**返す(warned=False)。
+      - 再生成後もハングルが残る/regen失敗/空なら、**元文(1回目)に警告行を付けて**返す。
+    """
+    info = {"hit1": False, "regenerated": False, "hit2": False, "warned": False}
+    try:
+        base = str(text or "")
+        if detect_hangul(base) is None:
+            return base, info                # 通常経路=何もしない
+        info["hit1"] = True
+        if regen is None:
+            # 再生成できない経路(session_relay/失敗告知/test等)=沈黙にしない=警告付きで送る
+            info["warned"] = True
+            return _append_hangul_warn(base), info
+        try:
+            regen_text = regen()
+        except Exception:
+            regen_text = None                # 再生成の例外は握り潰す(fail-open)
+        if regen_text:
+            info["regenerated"] = True
+            cleaned = str(regen_text)
+            if strip_marker is not None:
+                try:
+                    cleaned, _ = strip_marker(cleaned)
+                except Exception:
+                    cleaned = str(regen_text)
+            if cleaned and detect_hangul(cleaned) is None:
+                return cleaned, info         # 再生成で消えた=きれいな本文へ差し替え
+            info["hit2"] = detect_hangul(cleaned) is not None
+        # ここに来る=再生成しなかった/失敗/空/2回目も混入 → 元文に警告付き(沈黙にしない)
+        info["warned"] = True
+        return _append_hangul_warn(base), info
+    except Exception:
+        # ゲート自身が配送を殺さない(fail-safe)=元文をそのまま返す
+        return str(text or ""), info
+
+
+def _append_hangul_warn(text):
+    """本文末尾に改行2つ+警告行を付ける(既に付いていれば二重に付けない)。"""
+    s = str(text or "")
+    if HANGUL_WARN in s:
+        return s
+    return s + "\n\n" + HANGUL_WARN
+
+
+# ============================================================================
 # replied の確認 (提案書§6/§12・2026-07-27実装)
 # ----------------------------------------------------------------------------
 # 正本= D:\SougouStartFolder\ChatGPT提案書_デーモンとDiscord-Claude連携改善_2026-07-25.md
@@ -3851,6 +3926,10 @@ class Daemon:
         self._member, _why = self._resolve_member(rec.get("content", ""), kw_work)
         if self._member:
             log(self.dept, f"{_why}→{self._member['persona']}が応答(回送しない)")
+        # ★出力ゲート ルールA(ハングル再生成)の再生成用thunk。既定=None(=再生成しない)。
+        #   各生成分岐で「その分岐が使った生成関数を無引数で呼び本文だけ返すcallable」を捕捉する。
+        #   session_relay/失敗告知/test便では None のまま=再生成せず即・警告判定へ倒す(§ルールA)。
+        regen = None
         try:
             # ★★2026-07-26 Chami直接指示(選択肢C)で**ガードを外した**。原文=
             #   「**デーモンが処理するのはもうやめたい…こういう放置が治らないから**」
@@ -3975,11 +4054,14 @@ class Daemon:
                 # 名指し便は常駐ではなく本人が会話で受ける(回送しない=事故の再発防止)
                 reply, _declared = self.generate(rec)
                 is_work = False
+                regen = lambda: self.generate(rec)[0]   # ★ルールA: 本文だけ取り出す
             elif kw_work and self.conf.get("work_scope"):
                 # 作業依頼は部屋の中で完結を試みる(範囲外だけ回送=escalate)
                 reply, is_work = self.work_generate(rec)  # is_work=回送要否に読み替え
+                regen = lambda: self.work_generate(rec)[0]  # ★ルールA: 本文だけ取り出す
             else:
                 reply, is_work = self.generate(rec)
+                regen = lambda: self.generate(rec)[0]   # ★ルールA: 本文だけ取り出す
                 # ★二段判定(2026-07-20 組織層GL室): キーワードは外したがキャラ自身が
                 #   「これは作業依頼」と申告した便。work_scope部門ならここで**本当に作業を回す**。
                 #   これが無いと、キャラが「やっておくね」と言った直後に何も起きない
@@ -3990,6 +4072,7 @@ class Daemon:
                     w_reply, w_esc = self.work_generate(rec)
                     if w_reply:
                         reply, is_work = w_reply, w_esc
+                        regen = lambda: self.work_generate(rec)[0]  # ★ルールA: 昇格後はwork_generateを再生成に
                     # w_replyが無い(作業agent失敗)時は is_work=True のまま=main箱へ回送(安全側)
         except subprocess.TimeoutExpired:
             log(self.dept, f"生成タイムアウト msg={mid}")
@@ -4008,10 +4091,23 @@ class Daemon:
         # ★ハングル混入の検知(ORG-45の恒久策)。送信直前・**全経路の合流点**に置く。
         #   ここは generate / work_generate / 名指し(members)のどの経路の返信も必ず通る
         #   唯一の地点なので、経路ごとに検査を散らさない(=入れ忘れが起きない)。
-        #   ★検知しても**送信は止めない**(この下の送信処理へそのまま進む)。
-        #     沈黙が最悪の事故=見えるようにするだけが目的。自動修正もしない。
         #   ★全19部門に一律で効かせる(裁定C-009)。部門ごとの分岐は作らない。
+        #   ★検知の記録( log + hangul_audit.jsonl)は**残す**(ORG-45の監査は消さない)。
         audit_hangul(self.dept, rec, reply)
+        # ★★出力ゲート ルールA(2026-07-30・Chami「推奨どおりでいい」)。
+        #   これは**ルールAのみ**。B(スラッグ露出)・C(呼称違反)は未実装(設計書§5)。
+        #   ORG-45(ログ止まり)を**ルールAに限り**反転し、ハングル検知時に
+        #     ①同じ入力で1回だけ再生成 → ②なお残れば元文へ警告付き送信(沈黙にしない)へ格上げする。
+        #   ★regen thunk は上の各生成分岐で捕捉済み(session_relay/失敗告知/test では None=再生成しない)。
+        #   ★自動での文字置換はしない(각약→各約 等は誤修正が事故)。検査例外は握り潰し従来動作へ倒す。
+        #   ★<<WORK>>/split_wip_marker/所有者再確認/test抑止には**一切触っていない**。
+        _reply2, _hg = hangul_gate(reply, regen=regen, strip_marker=split_wip_marker)
+        if _hg.get("hit1"):
+            log(self.dept,
+                f"★出力ゲートA(ハングル): 再生成={'実施' if _hg.get('regenerated') else '不可/未実施'} "
+                f"2回目混入={'有' if _hg.get('hit2') else '無'} "
+                f"警告付与={'有' if _hg.get('warned') else '無(再生成で解消)'} msg={mid}")
+        reply = _reply2
         # ★★所有者の再確認(出口・**ここが二重応答を構造的に不可能にする最後の1点**)。
         #   relayの1便は実測で60〜200秒かかる。その最中にChamiが窓を開け直すと、
         #   「渡した時は窓が居なかったが、返事を出す時には窓が居る」状態が起きうる。
