@@ -531,8 +531,11 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* align-items:flex-start + overflow:auto＝内容が長い時にスマホでもモーダルごとスクロールできる */
 .vedit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:16px;box-sizing:border-box;overflow:auto;}
 .vedit-overlay[hidden]{display:none !important;}
-.vedit-modal{background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:20px 18px;width:100%;max-width:480px;box-sizing:border-box;margin:auto;}
-.vedit-title{font-size:15px;font-weight:700;color:var(--ink);margin:0 0 14px;}
+.vedit-modal{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:20px 18px;width:100%;max-width:480px;box-sizing:border-box;margin:auto;}
+.vedit-title{font-size:15px;font-weight:700;color:var(--ink);margin:0 40px 14px 0;}
+/* 右上の✕閉じるボタン(design-preferences §4.6 の確定パターン=ヘッダー右) */
+.vedit-close{position:absolute;top:10px;right:10px;background:none;border:none;color:#7a8fa3;font-size:1.2rem;line-height:1;padding:2px 8px;cursor:pointer;width:auto;margin:0;}
+.vedit-close:hover,.vedit-close:active{color:var(--ink);}
 .vedit-error{font-size:12px;color:#ff7b7b;margin:0 0 12px;line-height:1.5;white-space:pre-line;}
 .vedit-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--sub);margin-bottom:12px;}
 /* 投稿先(X/Bsky)ラジオ＝短縮URLだけの行のX↗/Bsky↗を手動指定。文字サイズは説明ラベルと同じ12px。 */

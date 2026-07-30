@@ -707,6 +707,7 @@
     d.hidden = true;
     d.innerHTML =
       '<div class="vedit-modal">' +
+        '<button id="veditClose" type="button" class="vedit-close" aria-label="閉じる" title="閉じる">✕</button>' +
         '<p class="vedit-title" id="veditTitle">URL を編集</p>' +
         '<p class="vedit-error" id="veditError" hidden></p>' +
         '<label class="vedit-field">YouTube URL' +
@@ -763,6 +764,7 @@
       '</div>';
     document.body.appendChild(d);
     $('veditCancel').addEventListener('click', closeModal_);
+    $('veditClose').addEventListener('click', closeModal_); // ★右上の✕で閉じる(Chami依頼2026-07-30)
     d.addEventListener('click', function (e) { if (e.target === d) closeModal_(); });
     // Bluesky投稿URLのコピー。(clipboard API＋execCommandフォールバック)
     $('veditBskyCopy').addEventListener('click', function () {
@@ -1454,7 +1456,7 @@
         var b = (cid && window.Go5Cand && window.Go5Cand.bskyImg) ? window.Go5Cand.bskyImg(cid) : '';
         // 先頭prevN枚は「投稿プレビュー画像」、それ以降は動画で使った画像(Chami依頼2026-07-30)。投稿画像由来なら全ページ「投稿画像」。
         var prevN = (usedKey && window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
-        var caps = imgs.map(function (_c, i) { return fromPost ? '投稿画像' : (i < prevN ? '投稿プレビュー画像' : '動画生成で使用した画像'); });
+        var caps = imgs.map(function (_c, i) { return fromPost ? '投稿画像' : (i < prevN ? '動画投稿プレビュー画像' : '動画生成で使用した画像'); });
         if (b) {
           var bi = imgs.indexOf(b);
           if (bi >= 0) caps[bi] = '動画生成/Bluesky投稿';             // 同一画像＝1ページに統合表記
@@ -2052,25 +2054,33 @@
     if (!api.postImgs || !api.postImgSave || !api.usedImgs || !api.usedImgSave) return; // 画像ストア未対応環境では出さない
     var pKey = it.videoId || k;
     var cid = it.workUrl ? workCidOf_(it.workUrl) : '';
-    // 用途(保存先)。動画使用画像は履歴単位のusedへ分離。Bluesky添付だけは作品cid単位。
-    var USES = [{ v: 'post', label: '投稿画像', multi: true }, { v: 'used', label: '動画で使った画像', multi: false }];
+    // 用途(保存先)。usedストア(履歴単位)の先頭prev枚が「動画投稿プレビュー画像」、それ以降が「動画で使った画像」。
+    //   ★プレビューと使用画像は1レコードを頭割りで共有する(prev=先頭何枚がプレビューか)。用途を分けて別々に編集でき、
+    //   過去の投稿履歴(prev未設定)でもプレビュー枠から追加できる(Chami依頼2026-07-30)。Bluesky添付だけは作品cid単位。
+    var USES = [{ v: 'prev', label: '動画投稿プレビュー画像', multi: true }, { v: 'post', label: '投稿画像', multi: true }, { v: 'used', label: '動画で使った画像', multi: false }];
     if (cid) USES.push({ v: 'bsky', label: 'Bluesky投稿画像', multi: false });
-    // 初期の用途。シート由来行は「動画で使った画像」が別端末で欠けるので、その用途を最初から選んでおく。
-    var use = (defaultUse && USES.some(function (u) { return u.v === defaultUse; })) ? defaultUse : 'post';
+    // usedストアの現在の全画像(表示と同じ合成)と、先頭プレビュー枚数。
+    function usedAll_() {
+      var saved = (api.usedImgs(pKey) || []).slice();
+      var legacy = (cid && api.refImgs) ? (api.refImgs(cid) || []) : [];
+      return (window.HistMerge && window.HistMerge.historyUsedImages)
+        ? window.HistMerge.historyUsedImages(saved, legacy, !!(api.usedImgKnown && api.usedImgKnown(pKey)))
+        : (saved.length ? saved : legacy.slice(0, 1));
+    }
+    function prevN_() { return (api.usedPrevCount ? (api.usedPrevCount(pKey) || 0) : 0); }
+    // 初期の用途。プレビュー画像を持つ動画はプレビュー枠を最初に開く。シート由来行は「動画で使った画像」を指定して開く。
+    var use = (defaultUse && USES.some(function (u) { return u.v === defaultUse; })) ? defaultUse
+      : (prevN_() > 0 ? 'prev' : 'post');
     function useDef_() { for (var i = 0; i < USES.length; i++) { if (USES[i].v === use) return USES[i]; } return USES[0]; }
     function load_() {
-      if (use === 'used') {
-        var saved = (api.usedImgs(pKey) || []).slice();
-        var legacy = (cid && api.refImgs) ? (api.refImgs(cid) || []) : [];
-        return (window.HistMerge && window.HistMerge.historyUsedImages)
-          ? window.HistMerge.historyUsedImages(saved, legacy, !!(api.usedImgKnown && api.usedImgKnown(pKey)))
-          : (saved.length ? saved : legacy.slice(0, 1));
-      }
+      if (use === 'prev') { return usedAll_().slice(0, prevN_()); }        // 先頭プレビュー枚
+      if (use === 'used') { return usedAll_().slice(prevN_()); }           // プレビュー以降＝実際に動画へ使った画像
       if (use === 'bsky') { var b = api.bskyImg ? api.bskyImg(cid) : ''; return b ? [b] : []; }
       return (api.postImgs(pKey) || []).slice();
     }
     function store_(arr) {
-      if (use === 'used') return api.usedImgSave(pKey, arr);
+      if (use === 'prev') { var restU = usedAll_().slice(prevN_()); return api.usedImgSave(pKey, arr.concat(restU), arr.length); }   // 新プレビュー＋既存の使用画像・prev=新プレビュー枚数
+      if (use === 'used') { var pv = usedAll_().slice(0, prevN_()); return api.usedImgSave(pKey, pv.concat(arr), pv.length); }        // 既存プレビューを保持したまま使用画像だけ差し替え
       if (use === 'bsky') return api.bskyImgSet ? api.bskyImgSet(cid, arr[0] || '') : false;
       return api.postImgSave(pKey, arr);
     }
