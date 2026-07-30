@@ -20,11 +20,11 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # dept -> (部屋の通称, 人格, BOOT.mdの場所, 既定の発言キャラ)
 DEPTS = {
-    "system-engineer": ("システム改修部門α", "ケヴィン・デブライネ/オタコン(両リーダー)/花海咲季/アメス(補佐)",
+    "system-engineer": ("システム改修部門α", "オタコン/花海咲季/アメス(補佐)",
                         "docs/departments/system-engineer/BOOT.md", "花海咲季"),
-    "system-engineer-b": ("システム改修部門β", "ケヴィン・デブライネ/オタコン(両リーダー)/花海咲季/アメス(補佐)",
+    "system-engineer-b": ("システム改修部門β", "オタコン/花海咲季/アメス(補佐)",
                           "docs/departments/system-engineer/BOOT.md", "花海咲季"),
-    "ai-office": ("システム改修部門γ(AIオフィス)", "ケヴィン・デブライネ/オタコン/花海咲季/アメス(補佐)",
+    "ai-office": ("システム改修部門γ(AIオフィス)", "オタコン/花海咲季/アメス(補佐)",
                   "docs/departments/ai-office/BOOT.md", "花海咲季"),
     "hr-room": ("人事部門(補強・キャラ設定)", "ククール(メイン)/田中琴葉(記録)/オタコン/アメス(補佐)",
                 "docs/departments/hr-room/BOOT.md", "ククール"),
@@ -38,6 +38,35 @@ DEPTS = {
                  "docs/departments/00_common/BOOT_TEMPLATE.md", "田中琴葉"),
     "kaizen-analyst": ("改善提案部門", "アスナ(専任)/アメス(補佐)",
                        "docs/departments/00_common/BOOT_TEMPLATE.md", "アスナ"),
+    # ここから下は2026-07-22追加(裁定C-009=全部屋に効かせるべき改善は言われなくても全部屋へ)。
+    # 追加の理由(実測): Chamiが「ai-office起動できない」と言った時、起動文は在ったが
+    #   19部門中7部門しか DEPTS に無かった。残り12部門で窓を開けば同じ「起動できない」が
+    #   必ず起きる=1件ずつ手で足す運用は取り残しを生む(ORG-11)。
+    # ★「精霊」= デーモン = 常駐(2026-07-22 Chami指示)。人格欄では精霊がどれかを明示する。
+    "hq": ("研究室HQ(コーチングルーム)", "シャビ・アロンソ(GL)/アメス(精霊・補佐)",
+           "docs/departments/hq/BOOT.md", "シャビ・アロンソ"),
+    "aegis-gl": ("イージス研究室(組織層の部門長)", "シャビ・アロンソ(GL兼務)/アメス(精霊)",
+                 "docs/departments/aegis-gl/BOOT.md", "シャビ・アロンソ"),
+    "research-room": ("ad研究室(ADAFI事業部の部門長)", "ルカ・モドリッチ(AD-GL)/アメス(精霊)",
+                      "docs/departments/research-room/BOOT.md", "ルカ・モドリッチ"),
+    "keiei-kikaku": ("経営企画", "ジェンティルドンナ(担当)/アメス(精霊)",
+                     "docs/departments/keiei-kikaku/BOOT.md", "ジェンティルドンナ"),
+    "qa-reviewer": ("品質管理部門", "ジェンティルドンナ(精霊)/オタコン",
+                    "docs/departments/qa-reviewer/BOOT.md", "ジェンティルドンナ"),
+    "copy-director": ("タイトル文相談及び創造(コピー部)", "早坂芽衣(精霊)/三笘薫(担当)",
+                      "docs/departments/copy-director/BOOT.md", "早坂芽衣"),
+    "shorts-analyst": ("分析部門", "アーモンドアイ(精霊)/三笘薫(リーダー)",
+                       "docs/departments/shorts-analyst/BOOT.md", "アーモンドアイ"),
+    "consult-intel": ("🐧コンサル情報", "アーモンドアイ(精霊)/三笘薫(リーダー)/早坂芽衣/十王星南/クラウディア・バレンツ",
+                      "docs/departments/consult-intel/BOOT.md", "アーモンドアイ"),
+    "product-scout": ("商品候補選定部門", "十王星南(精霊)/クラウディア",
+                      "docs/departments/product-scout/BOOT.md", "十王星南"),
+    "frontend": ("フロントエンドデザイン部門", "花海咲季(精霊)/ケヴィン・デ・ブライネ",
+                 "docs/departments/frontend/BOOT.md", "花海咲季"),
+    "platform-se": ("プラットフォームSE部門", "一ノ瀬怜(精霊)",
+                    "docs/departments/platform-se/BOOT.md", "一ノ瀬怜"),
+    "llm-qa": ("ローカルllm学習ルーム", "中野五月(精霊)",
+               "docs/departments/llm-qa/BOOT.md", "中野五月"),
 }
 
 
@@ -49,10 +78,19 @@ def build(dept: str) -> str:
 
 まず自己点検: node -e "console.log(process.cwd())" が go5-maker 直下であることを確認する(違えば止めてChamiへ開き直しを要請)。
 手順の正本: {boot} と docs/departments/00_common/orchestration.md の「全部署徹底事項」に従う。
+★{boot} は**まず在るかどうかを確かめる**(ポインタは指す先の実在を確認する=全部門の規律)。無ければ読もうとせず、最初の仕事として自室のBOOT.mdをそこへ作る(職務・範囲・範囲外・報告先の4項目)。
 人格: {personas}
+★Chamiがこの部屋に無い人格を名指しした場合: `D:\\SougouStartFolder\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md` でファイル名を確認し、対応する `.md` を読んでそのキャラとして応答する(characterfileが `—` の場合は「まだファイルが無い」と正直に答える)。**persona_send.pyの--personaはそのキャラ名に切り替えて送信する。テキストに[キャラ名]プレフィックスを書かない——アイコンと名前で誰が喋っているか分かる。**
 
 起動時にやること(★この順を崩さない=INC-85/86):
 1. python scripts/llm/inbox_waiter.py --name {dept}    (チャイム待機・新着で即起床・待機中トークンゼロ)
+   ★★**waiterは「1件来たら発火して終了する一発物」だ。再武装を忘れると二度と鳴らない。**
+     2026-07-22、研究室HQがこれを忘れて**約13時間セッションが起こされなかった**(実測)。
+     その間Chamiの便はデーモンが受けていたが、**セッションには1件も届いていなかった**。
+   ★**鳴り続ける版を使ってもよい(推奨)**。Monitor等で常駐させれば再武装が要らない:
+     PYTHONIOENCODING=utf-8 python -u D:\\SougouStartFolder\\00_AI-HQ\\scripts\\hq_chime.py
+     (※HQ用。自室向けに使うなら dept を読み替える。**PYTHONIOENCODING=utf-8 を必ず付ける**
+       = Windowsのpythonはパイプ出力を既定でcp932にするが受け手はUTF-8で読む→通知が全部化ける)
 2. 通知で起きたら: ①mkdir -p local/_work && mv local/inbox/{dept}.jsonl local/_work/{dept}.jsonl (箱を先に空にする)
    → ②即座にwaiterを再武装 → ③その後 local/_work/{dept}.jsonl を処理
    ★退避先は必ず local/_work/(local/inbox/ の外)。inbox内へ退避するとsweepが「脈の無い部門箱」と誤認して
