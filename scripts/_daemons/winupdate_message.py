@@ -16,10 +16,26 @@
 """
 import io
 import os
+import re
 import subprocess
 import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+
+def read_active_hours():
+    """アクティブ時間(この時間帯は自動再起動しない)をレジストリから読む。
+    取れなければ None(=時間窓の説明を出さない・嘘の値は書かない)。"""
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                           r"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings")
+        start = int(winreg.QueryValueEx(k, "ActiveHoursStart")[0])
+        end = int(winreg.QueryValueEx(k, "ActiveHoursEnd")[0])
+        winreg.CloseKey(k)
+        return start, end
+    except Exception:
+        return None
 
 
 def build(reboot: bool, titles: list) -> str:
@@ -42,6 +58,32 @@ def build(reboot: bool, titles: list) -> str:
         L.append("・" + t)
     if n > 5:
         L.append("・…他 {} 件".format(n - 5))
+    L.append("")
+    # --- 起源(Chami要望 2026-07-30): この弾がどこから来て、いつ勝手に再起動しうるか。 ---
+    L.append("**起源(どこから来た弾か)**")
+    kbs = []
+    for t in titles:
+        m = re.search(r"KB\d+", t)
+        if m and m.group(0) not in kbs:
+            kbs.append(m.group(0))
+    if kbs:
+        L.append(
+            "Windows Update が配信した更新だよ。番号=" + "、".join(kbs[:5])
+            + "。この番号で Microsoft の更新履歴を検索すれば、何のための更新かが辿れる。"
+        )
+    else:
+        L.append("Windows Update が配信した更新だよ(KB番号はタイトルに載ってる)。")
+    ah = read_active_hours()
+    if ah:
+        s, e = ah
+        L.append(
+            "**いつ再起動しうるか**: 君のアクティブ時間({}時〜{}時)の**外側**、"
+            "つまり だいたい {}時〜翌{}時 の間に、Windowsが勝手に再起動しうる。".format(s, e, e, s)
+        )
+    L.append(
+        "ただし\"何時何分に\"を事前に知る方法はWindowsにはないんだ(OSが保留を溜めてから決めるからね)。"
+        "だからこの通知そのものが\"予告\"の役割なんだ——気づいた今のうちに当ててしまうのが一番安全だよ。"
+    )
     L.append("")
     L.append(
         "**おすすめの動き**: 出かける予定がないうちに、**自分の意思で当てて再起動まで済ませてしまう**。"
