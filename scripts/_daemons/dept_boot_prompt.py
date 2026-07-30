@@ -61,7 +61,7 @@ DEPTS = {
                       "docs/departments/consult-intel/BOOT.md", "アーモンドアイ"),
     "product-scout": ("商品候補選定部門", "十王星南(精霊)/クラウディア",
                       "docs/departments/product-scout/BOOT.md", "十王星南"),
-    "frontend": ("フロントエンドデザイン部門", "花海咲季(精霊)/ケヴィン・デ・ブライネ",
+    "frontend": ("フロントエンドデザイン部門", "花海咲季(精霊)",
                  "docs/departments/frontend/BOOT.md", "花海咲季"),
     "platform-se": ("プラットフォームSE部門", "一ノ瀬怜(精霊)",
                     "docs/departments/platform-se/BOOT.md", "一ノ瀬怜"),
