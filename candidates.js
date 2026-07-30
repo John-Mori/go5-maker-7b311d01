@@ -178,10 +178,10 @@
   // アカウント別「投稿済みを非表示」トグル。(両方同時ONで、いずれかで投稿済みの作品を隠せる)localStorageで永続。
   var _hidePosted = (function () { try { return JSON.parse(localStorage.getItem('cand_hide_posted') || '{}') || {}; } catch (e) { return {}; } })();
   function saveHidePosted_() { try { localStorage.setItem('cand_hide_posted', JSON.stringify(_hidePosted)); } catch (e) {} }
-  function isHiddenByPosted_(cid) {
-    if (!cid) return false;
-    if (_hidePosted.acc1 && postedItemForCid_(cid, 'acc1')) return true;
-    if (_hidePosted.acc2 && postedItemForCid_(cid, 'acc2')) return true;
+  function isHiddenByPosted_(it) {
+    if (!it) return false;
+    if (_hidePosted.acc1 && postedMatchForCand_(it, 'acc1')) return true;
+    if (_hidePosted.acc2 && postedMatchForCand_(it, 'acc2')) return true;
     return false;
   }
   // 「◯◯✔非表示」トグル2つ(非表示リストの上段・右寄せ)のHTML。_ACCTS は描画時に定義済み。
@@ -850,6 +850,32 @@
     }
     return '';
   }
+  // 指定URLから候補と同じcidを1つ求める小ヘルパ。(明示cidが無い履歴/候補の突き合わせ用)
+  function cidFromUrl_(u) {
+    if (!u || !window.buildAffiliateLink) return '';
+    var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(u) : u;
+    var r = url ? window.buildAffiliateLink(url, '') : null;
+    return (r && r.ok && r.cid) ? r.cid : '';
+  }
+  // ★履歴アイテムが取りうる cid キーを「全部」返す(明示cid＋workCid＋workUrl再計算)。
+  //   候補側の cid はadd時に保存された固定値、履歴側は毎回workUrlから再計算——cid規則が変わった作品
+  //   (FANZA Books .com: 旧=数字ID / 新=content_id)で両者が食い違い、投稿済みなのにpillが光らない
+  //   (＝未投稿表示)不具合の根治。索引を「片側1キー」から「両側の全キーの和集合」にする。(Chami依頼2026-07-30)
+  function cidKeysOfHistItem_(it) {
+    if (!it) return [];
+    var out = [], seen = {};
+    function push(c) { c = String(c || ''); if (c && !seen[c]) { seen[c] = 1; out.push(c); } }
+    push(it.cid); push(it.workCid); push(cidFromUrl_(it.workUrl || ''));
+    return out;
+  }
+  // ★候補アイテムが取りうる cid キーを全部返す(保存cid＋url再計算cid)。履歴側と同じ和集合照合に使う。
+  function candCidsOf_(it) {
+    if (!it) return [];
+    var out = [], seen = {};
+    function push(c) { c = String(c || ''); if (c && !seen[c]) { seen[c] = 1; out.push(c); } }
+    push(it.cid); push(cidFromUrl_(it.url || ''));
+    return out;
+  }
   // チャンネルの cid→item 索引を(必要なら作り直して)返す。
   function postedIndexFor_(account) {
     if (typeof window.Go5PostedItems !== 'function') return {};
@@ -866,8 +892,9 @@
       //   ★prefixが無い/取れない古い記録は所有判定不能＝従来どおり数える(fail-open＝正規投稿を消さない)。
       var owner = String((items[i] && items[i].videoId) || '').match(/^(acc[12])-/);
       if (owner && owner[1] !== account) continue;
-      var cid = cidOfHistItem_(items[i]);
-      if (cid && !map[cid]) map[cid] = items[i]; // 先頭＝新しい順なので最新の投稿を優先
+      // ★取りうる cid キーを全部索引に登録(明示cid・workCid・workUrl再計算)。先頭＝新しい順なので最新を優先。
+      var keys = cidKeysOfHistItem_(items[i]);
+      for (var ki = 0; ki < keys.length; ki++) { if (!map[keys[ki]]) map[keys[ki]] = items[i]; }
     }
     _postedIdxCache[account] = { sig: sig, map: map };
     return map;
@@ -882,7 +909,7 @@
     ['short_hist__', 'verify_manual__'].forEach(function (pre) {
       var key = pre + account, arr;
       try { arr = JSON.parse(localStorage.getItem(key) || '[]') || []; } catch (e) { arr = []; }
-      var kept = arr.filter(function (x) { return cidOfHistItem_(x) !== cid; });
+      var kept = arr.filter(function (x) { return cidKeysOfHistItem_(x).indexOf(cid) < 0; });
       if (kept.length !== arr.length) {
         removed += (arr.length - kept.length);
         try { localStorage.setItem(key, JSON.stringify(kept)); } catch (e) {}
@@ -896,13 +923,20 @@
     if (!cid) return null;
     return postedIndexFor_(account)[cid] || null;
   }
+  // ★候補アイテムを、取りうる全cidキーで投稿履歴と和集合照合。{item, key}(ヒットしたキー)or null。
+  //   key は履歴側のキーでもある(索引が両側の和集合)ので、pillのdata-posted-cidに使えば削除照合も一致する。
+  function postedMatchForCand_(it, account) {
+    var idx = postedIndexFor_(account), ks = candCidsOf_(it);
+    for (var i = 0; i < ks.length; i++) { if (idx[ks[i]]) return { item: idx[ks[i]], key: ks[i] }; }
+    return null;
+  }
   // バッジ行に並べるチャンネル表記。投稿済み＝ボタン化(クリックで投稿詳細)＋テーマ色。未投稿＝ボタン化せず淡色表記。
-  function acctBadgesHtml_(cid) {
+  function acctBadgesHtml_(it) {
     return _ACCTS.map(function (a) {
-      var posted = !!postedItemForCid_(cid, a[0]);
-      if (posted) {
+      var m = postedMatchForCand_(it, a[0]);
+      if (m) {
         return '<span class="cand-acct-pill cand-acct-' + a[0] + ' posted" role="button" tabindex="0" ' +
-          'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(cid) + '" title="' + esc(a[1]) + 'で投稿済み(タップで投稿内容)">' +
+          'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(m.key) + '" title="' + esc(a[1]) + 'で投稿済み(タップで投稿内容)">' +
           esc(a[1]) + ' <b>✔</b></span>';
       }
       return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" title="' + esc(a[1]) + '(未投稿)">' + esc(a[1]) + '</span>';
@@ -919,9 +953,10 @@
     return 0;
   }
   // 投稿済み作品：Books等のバッジとチャンネルpillの間に、投稿日(YYYY/M/D)+✔ をチャンネルテーマ色で表示。
-  function postedDatesHtml_(cid) {
+  function postedDatesHtml_(cand) {
     return _ACCTS.map(function (a) {
-      var it = postedItemForCid_(cid, a[0]);
+      var m = postedMatchForCand_(cand, a[0]);
+      var it = m && m.item;
       if (!it) return '';
       var ts = postedTsOf_(it);
       if (!ts) return ''; // 日時が全経路で取れない稀ケースのみ非表示
@@ -1865,7 +1900,7 @@
       var arr = sortItems(all, _sort).filter(function (it) {
         if (_filterSale && !isOnSale_(it)) return false;
         if (!passPrice_(it)) return false;
-        if (isHiddenByPosted_(it.cid)) return false; // アカウント別「投稿済みを非表示」は全候補でも尊重
+        if (isHiddenByPosted_(it)) return false; // アカウント別「投稿済みを非表示」は全候補でも尊重
         return true;
       });
       _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
@@ -2778,7 +2813,7 @@
       if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
       if (_filterSale && !isOnSale_(it)) return false;
       if (!passPrice_(it)) return false;
-      if (!_showHidden && isHiddenByPosted_(it.cid)) return false; // アカウント別「投稿済みを非表示」
+      if (!_showHidden && isHiddenByPosted_(it)) return false; // アカウント別「投稿済みを非表示」
       return true;
     });
     _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
@@ -2882,7 +2917,7 @@
         if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
         if (!passPrice_(it)) return false;
-        if (!_showHidden && isHiddenByPosted_(it.cid)) return false; // アカウント別「投稿済みを非表示」
+        if (!_showHidden && isHiddenByPosted_(it)) return false; // アカウント別「投稿済みを非表示」
         return true;
       });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる作品がありません。') + '</p>'; return; }
@@ -3062,7 +3097,7 @@
     var refImgHtml = refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像(タップで拡大)" title="動画生成用の画像(タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + ')">' : '';
     // メモ(コメントの上・水色)とコメント(🙈/🗑と同じ管理行の左)は下の return 内で直接組み立てる。
     // 投稿済み作品はカード大枠をチャンネルのイメージカラーで太線囲み。両channel投稿は月詠み(外)＋宵桜(内)の二重。
-    var _pAcc1 = !!postedItemForCid_(it.cid, 'acc1'), _pAcc2 = !!postedItemForCid_(it.cid, 'acc2');
+    var _pAcc1 = !!postedMatchForCand_(it, 'acc1'), _pAcc2 = !!postedMatchForCand_(it, 'acc2');
     var _postCls = (_pAcc1 && _pAcc2) ? ' cand-posted-both' : (_pAcc1 ? ' cand-posted-acc1' : (_pAcc2 ? ' cand-posted-acc2' : ''));
     var _noComment = !refCmt && !refMemo; // コメント/メモ無し＝非表示/🗑を作品リンク行に統合し余白を縮小
     if (_noComment) _postCls += ' cand-nocomment';
@@ -3083,7 +3118,7 @@
       '<div class="cand-info">' +
         // 新作/同人バッジと同じ行にチャンネル表記を並べる(バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記)
         //   投稿済みなら Books 等と pill の間に「投稿日 ✔」をチャンネルテーマ色で表示。
-        '<div class="cand-badges-row">' + badgesHtml + '<span class="cand-acct-group">' + postedDatesHtml_(it.cid) + acctBadgesHtml_(it.cid) + '</span></div>' +
+        '<div class="cand-badges-row">' + badgesHtml + '<span class="cand-acct-group">' + postedDatesHtml_(it) + acctBadgesHtml_(it) + '</span></div>' +
         '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
