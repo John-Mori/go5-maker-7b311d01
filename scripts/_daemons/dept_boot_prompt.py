@@ -20,11 +20,11 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # dept -> (部屋の通称, 人格, BOOT.mdの場所, 既定の発言キャラ)
 DEPTS = {
-    "system-engineer": ("システム改修部門α", "オタコン/花海咲季/アメス(補佐)",
+    "system-engineer": ("システム改修部門α", "花海咲季(リーダー)/オタコン(技術補佐)/アメス(補佐)",
                         "docs/departments/system-engineer/BOOT.md", "花海咲季"),
-    "system-engineer-b": ("システム改修部門β", "オタコン/花海咲季/アメス(補佐)",
+    "system-engineer-b": ("システム改修部門β", "花海咲季(リーダー)/オタコン(技術補佐)/アメス(補佐)",
                           "docs/departments/system-engineer/BOOT.md", "花海咲季"),
-    "ai-office": ("システム改修部門γ(AIオフィス)", "オタコン/花海咲季/アメス(補佐)",
+    "ai-office": ("システム改修部門γ(AIオフィス)", "花海咲季(リーダー)/オタコン(技術補佐)/アメス(補佐)",
                   "docs/departments/ai-office/BOOT.md", "花海咲季"),
     "hr-room": ("人事部門(補強・キャラ設定)", "ククール(メイン)/田中琴葉(記録)/オタコン/アメス(補佐)",
                 "docs/departments/hr-room/BOOT.md", "ククール"),
