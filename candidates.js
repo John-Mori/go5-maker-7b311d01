@@ -1876,12 +1876,17 @@
       _poolSyncTimer = null;
       var tabs = lsGet(K_TABS, '[]');
       var seen = {}, cids = [];
-      (lsGet(K_ITEMS, '[]') || []).forEach(function (it) { if (it && it.cid && !seen[it.cid]) { seen[it.cid] = true; cids.push(it.cid); } });
+      // ★cid が未解決の候補(URL追加後にcid抽出前 / Books .com 旧数字ID↔新content_id 食い違い)も
+      //   その場で url から cid を解決して同期に乗せる。cidFromUrl_ は同期(通信なし・buildAffiliateLink)。
+      //   これをしないと cid が取れている作品だけが D1 candidate_pool に届き、大半が落ちていた(2026-07-30 商品候補選定部門の実測=D1が1件)。
+      function pushCid_(it) {
+        var c = (it && it.cid) ? String(it.cid) : cidFromUrl_((it && it.url) || '');
+        if (c && !seen[c]) { seen[c] = true; cids.push(c); }
+      }
+      (lsGet(K_ITEMS, '[]') || []).forEach(pushCid_);
       tabs.forEach(function (t) {
         if (t.excludeFromAll || isMakerTab_(t)) return;
-        (lsGet('cand_items__' + t.id, '[]') || []).forEach(function (it) {
-          if (it && it.cid && !seen[it.cid]) { seen[it.cid] = true; cids.push(it.cid); }
-        });
+        (lsGet('cand_items__' + t.id, '[]') || []).forEach(pushCid_);
       });
       syncCandidatePool_(cids);
     }, 500);
