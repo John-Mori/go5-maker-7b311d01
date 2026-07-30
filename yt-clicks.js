@@ -2973,11 +2973,13 @@
     if (changed) fanzaNameCacheSave(c);
   }
   // data-fanza-url が一致する現在の DOM 要素を全て更新(DOM 再描画後も正しく反映される)
-  function setFanzaEls(fanzaUrl, title) {
+  function setFanzaEls(fanzaUrl, title, root) {
     var man = fanzaManualOf_(fanzaUrl);
     if (man && man.title) title = man.title; // 手動入力の作品名が最優先
     var ok = title && !isBadFanzaTitle(title);
-    document.querySelectorAll('[data-fanza-url]').forEach(function (el) {
+    // rootを渡すとその要素配下だけを走査する(1行分)。既定=document(全行・再描画後の反映用)。
+    //   ★root無しの全体走査を件数分呼ぶとO(N²)＝件数の多いチャンネルで表示が激遅(Chami報告2026-07-30 月詠み)。
+    (root || document).querySelectorAll('[data-fanza-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-url') !== fanzaUrl) return;
       if (ok) { el.textContent = title; el.style.display = ''; }
       else { el.textContent = ''; el.style.display = 'none'; }
@@ -3040,12 +3042,12 @@
     if (d1 || d2) setFanzaSnapEls(workUrl, fmtSnapPriceHtml(snap));
   }
   // data-fanza-author-url が一致する要素へサークル名(作者名)を反映。手動入力が最優先。
-  function setFanzaAuthorEls(fanzaUrl, author) {
+  function setFanzaAuthorEls(fanzaUrl, author, root) {
     var man = fanzaManualOf_(fanzaUrl);
     if (man && man.author) author = man.author;
     // サークル名の前にサークルマーク(候補タブと同じグレーの人物シルエット)を付ける。(Chami依頼2026-07-14「全部のタブに」)
     var ico = (typeof window.Go5CircleIcon === 'string') ? window.Go5CircleIcon : '';
-    document.querySelectorAll('[data-fanza-author-url]').forEach(function (el) {
+    (root || document).querySelectorAll('[data-fanza-author-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-author-url') !== fanzaUrl) return;
       el.innerHTML = author ? (ico + ' ' + esc(author)) : '';
     });
@@ -3063,10 +3065,10 @@
 
   // data-fanza-thumb-url が一致するサムネ<img>へ画像を設定して表示。
   // src＝メイン画像。(モーダルと同じ・存在確認済みの大きい方)altSrc＝読込失敗時の代替。両方ダメなら非表示。
-  function setFanzaThumbEls(fanzaUrl, src, altSrc) {
+  function setFanzaThumbEls(fanzaUrl, src, altSrc, root) {
     if (!src && altSrc) { src = altSrc; altSrc = ''; }
     if (!src) return;
-    document.querySelectorAll('img[data-fanza-thumb-url]').forEach(function (el) {
+    (root || document).querySelectorAll('img[data-fanza-thumb-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-thumb-url') !== fanzaUrl) return;
       el.onerror = function () {
         if (altSrc && el.getAttribute('src') !== altSrc) el.setAttribute('src', altSrc);
@@ -3240,10 +3242,10 @@
 
   // data-fanza-price-url が一致するDOM要素へ価格を反映＋発売日から現在の作品状態バッジを更新。
   // 手動入力の価格・発売日があれば自動取得より優先して表示する。
-  function setFanzaPriceEls(fanzaUrl, priceInfo) {
+  function setFanzaPriceEls(fanzaUrl, priceInfo, root) {
     priceInfo = mergeManualPrice_(fanzaUrl, priceInfo);
     var html = fmtFanzaPriceHtml(priceInfo);
-    document.querySelectorAll('[data-fanza-price-url]').forEach(function (el) {
+    (root || document).querySelectorAll('[data-fanza-price-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-price-url') !== fanzaUrl) return;
       if (html) { el.innerHTML = html; el.style.display = ''; }
       else { el.innerHTML = ''; el.style.display = 'none'; }
@@ -3253,7 +3255,7 @@
     var apiState = priceInfo && deriveWorkState_(priceInfo.releaseDate);
     if (apiState) {
       var cr = wsRank_(apiState);
-      document.querySelectorAll('[data-fanza-state-url]').forEach(function (el) {
+      (root || document).querySelectorAll('[data-fanza-state-url]').forEach(function (el) {
         if (el.getAttribute('data-fanza-state-url') !== fanzaUrl) return;
         if (cr > wsRank_((el.textContent || '').trim())) el.innerHTML = stateBadgeHtml_(apiState); // 引き上げのみ
       });
@@ -3323,6 +3325,9 @@
       if (!url) return;
       var cached = cache[url];
       var displayed = false; // 既に何か表示したか(「…」で潰さない判定)
+      // ★この行だけを更新範囲にする=件数分の全体走査(O(N²))を避ける。(月詠みで表示が激遅・Chami 2026-07-30)
+      //   行が見つからない環境(ランキング等)はdocumentへフォールバック。
+      var row = (nameEl.closest && nameEl.closest('.vrow')) || document;
       if (cached) {
         var age = now - (cached.fetchedAt || 0);
         var freshFull = cached.title && !isBadFanzaTitle(cached.title) && age < DAY && cached.priceInfo && ('releaseDate' in cached.priceInfo) && cached.media && cached.sv === FZ_SV;
@@ -3330,19 +3335,19 @@
         // ★stale-while-revalidate：古い/旧スキーマのキャッシュでも「まず即表示」して待たせない。
         //   新鮮ならここで確定。古ければ表示は残したまま下のjobsに積んで裏で静かに最新化する。
         if (cached.title && !isBadFanzaTitle(cached.title)) {
-          setFanzaEls(url, cached.title); setFanzaAuthorEls(url, cached.author || '');
-          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo); if (freshFull) backfillSnap_(url, cached.priceInfo); } // 当時価格の固定は新鮮な価格のときだけ(古い価格を投稿時価格にしない)
-          if (cached.media) setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall);
+          setFanzaEls(url, cached.title, row); setFanzaAuthorEls(url, cached.author || '', row);
+          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo, row); if (freshFull) backfillSnap_(url, cached.priceInfo); } // 当時価格の固定は新鮮な価格のときだけ(古い価格を投稿時価格にしない)
+          if (cached.media) setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall, row);
           displayed = true;
           if (freshFull) return;
         } else if (cached.partial && cached.media) {
           // 画像のみの部分情報(API未収録作品)：サムネ＋手動入力の作品名/価格を表示
-          setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, cached.author || '');
-          setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall);
+          setFanzaEls(url, '', row); setFanzaPriceEls(url, null, row); setFanzaAuthorEls(url, cached.author || '', row);
+          setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall, row);
           displayed = true;
           if (freshPartial) return;
         } else if (!cached.title && !cached.partial && age < NEG) {
-          setFanzaEls(url, ''); setFanzaPriceEls(url, null); setFanzaAuthorEls(url, ''); return; // 直近「未取得」→再取得しない(手動入力があれば表示)
+          setFanzaEls(url, '', row); setFanzaPriceEls(url, null, row); setFanzaAuthorEls(url, '', row); return; // 直近「未取得」→再取得しない(手動入力があれば表示)
         }
       }
       var res = window.buildAffiliateLink(url, '');
