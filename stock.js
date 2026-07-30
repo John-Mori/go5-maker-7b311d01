@@ -90,6 +90,27 @@
     } catch (e) { return Promise.resolve(null); }
   }
 
+  // ── 仕上がりプレビュー取得(canvas最終フレームを原寸JPEGで) ──
+  //   これを投稿履歴の使用画像1ページ目＋Driveへ入れる(Chami依頼2026-07-30)。
+  //   video-created の時点で #cv は最終フレームを保持している(captureThumb_ と同じ前提)。
+  function capturePreview_() {
+    try {
+      var cv = $('cv');
+      if (!cv || !cv.width) return Promise.resolve(null);
+      return new Promise(function (resolve) {
+        cv.toBlob(function (b) { resolve(b); }, 'image/jpeg', 0.85);
+      });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  function blobToDataUrl_(blob, cb) {
+    try {
+      var r = new FileReader();
+      r.onload = function () { cb(r.result || ''); };
+      r.onerror = function () { cb(''); };
+      r.readAsDataURL(blob);
+    } catch (e) { cb(''); }
+  }
+
   // ── 保存 ──
   var _draftMode = false;
   var _restoreBskyEl = null;
@@ -109,9 +130,12 @@
       affiliateUrl: ($('movieWorkAffi') || {}).value || '',
       workUrl: ($('movieWorkUrl') || {}).value || '',
       videoName: evDetail.name || (title.replace(/[\\/:"*?<>|]/g, '_') + '.mp4'),
+      // ★動画IDを保持＝投稿完了時に投稿履歴↔使用画像(usedImgSaveはvideoIdキー)を紐付ける。(Chami依頼2026-07-30)
+      videoId: evDetail.videoId || '',
       youtubeUrl: '',
     };
-    return captureThumb_().then(function (thumbBlob) {
+    return Promise.all([captureThumb_(), capturePreview_()]).then(function (caps) {
+      var thumbBlob = caps[0], prevBlob = caps[1];
       var store = idb();
       var ops = [];
       if (store) {
@@ -120,6 +144,8 @@
         // 元画像(前景)もIDBへ保存＝投稿完了(別セッションのこともある)まで残し、Driveへ動画と一緒に上げる。
         //   これが無いと handleCompleteOk_ の時点で元画像が手元に無く、Driveに動画だけが保存される(Chami指摘2026-07-29)。
         if (evDetail.sourceImageFile) ops.push(store.set('stock_img_' + id, evDetail.sourceImageFile));
+        // 仕上がりプレビューも投稿完了まで退避(使用画像1ページ目＋Drive行き)。
+        if (prevBlob) ops.push(store.set('stock_prev_' + id, prevBlob));
       }
       return Promise.all(ops).then(function () {
         var arr = loadMeta();
@@ -221,9 +247,22 @@
     store.get('stock_v_' + id).then(function (blob) {
       if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
       if (window.Go5Drive && typeof window.Go5Drive.upload === 'function') {
-        // 元画像(保存時にIDBへ退避したもの)も一緒にDriveへ。取れなくても動画だけは必ず上げる。
-        store.get('stock_img_' + id).then(function (img) {
-          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, img ? [img] : []);
+        // 元画像＋仕上がりプレビュー(保存時にIDBへ退避したもの)も一緒にDriveへ。取れなくても動画だけは必ず上げる。
+        Promise.all([
+          store.get('stock_img_' + id).catch(function () { return null; }),
+          store.get('stock_prev_' + id).catch(function () { return null; })
+        ]).then(function (r) {
+          var img = r[0], prev = r[1];
+          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, img ? [img] : [], prev || null);
+          // ★投稿履歴の使用画像1ページ目に仕上がりプレビューを差し込む(videoIdで紐付く・Chami依頼2026-07-30)。
+          if (prev && meta.videoId && window.Go5Cand && window.Go5Cand.usedImgSave && window.Go5Cand.usedImgs) {
+            blobToDataUrl_(prev, function (durl) {
+              if (!durl) return;
+              var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
+              if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
+              window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })));
+            });
+          }
         }).catch(function () {
           window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, []);
         });

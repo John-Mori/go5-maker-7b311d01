@@ -162,7 +162,7 @@
 
   // ドラフトタブの「投稿完了」から呼ばれる。blob を受け取って Drive へアップロードする。
   //   srcImages=動画に使った元画像(stock.js が投稿完了時にIDBから読み出して渡す)。動画と同じフォルダへ一緒に保存する。
-  function driveUpload_(blob, videoName, title, channel, videoId, srcImages) {
+  function driveUpload_(blob, videoName, title, channel, videoId, srcImages, previewImage) {
     if (!configured()) { showError("channel_unresolved"); return; }
     if (!blob) return;
     if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
@@ -175,6 +175,10 @@
       var name = safeTitle + "_元画像" + (i ? "_" + (i + 1) : "") + "." + imgExt(f);
       return new File([f], name, { type: f.type || "image/jpeg" });
     });
+    // ★仕上がりプレビューは「動画名_プレビュー.拡張子」で先頭に。(Chami依頼2026-07-30・従来通り同フォルダへ)
+    if (previewImage) {
+      images.unshift(new File([previewImage], safeTitle + "_プレビュー." + imgExt(previewImage), { type: previewImage.type || "image/jpeg" }));
+    }
     send({ channel: channel, title: title, videoId: videoId || "", videoFile: videoFile, images: images });
   }
   window.Go5Drive = { upload: driveUpload_ };
