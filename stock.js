@@ -274,24 +274,32 @@
     delBlobs_(id);
   }
 
-  // ── 動画DL ──
-  function downloadStock_(id, videoName) {
+  // ── 動画本体の取得(実体が手元に無い2台目は vidHash で R2 から取り寄せ・②2026-08-01)──
+  //   DL・投稿完了(Driveアップロード)の両方がこれを通す=片方だけ直して片方が「動画が見つかりません」で
+  //   止まる事故を防ぐ(Chami指摘2026-07-31: 2台目で投稿完了が動画未検出で失敗)。
+  function resolveVideoBlob_(id) {
     var store = idb();
-    if (!store) { alert('IndexedDB未対応のため再DLできません。'); return; }
-    store.get('stock_v_' + id).then(function (blob) {
+    if (!store) return Promise.resolve(null);
+    return store.get('stock_v_' + id).then(function (blob) {
       if (blob) return blob;
-      // ★実体が無い端末(2台目)=同期で来た vidHash があれば R2 から取り寄せて落とす(②・2026-08-01)。
       var meta = loadMeta().filter(function (m) { return m.id === id; })[0]
                || loadArchive().filter(function (m) { return m.id === id; })[0];
       var h = meta && meta.vidHash;
       if (h && window.Go5Sync && Go5Sync.fetchBlobR2) {
         return Go5Sync.fetchBlobR2(h).then(function (b) {
-          if (b) { try { idb().set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即DL
+          if (b) { try { store.set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即使える
           return b;
         });
       }
       return null;
-    }).then(function (blob) {
+    });
+  }
+
+  // ── 動画DL ──
+  function downloadStock_(id, videoName) {
+    var store = idb();
+    if (!store) { alert('IndexedDB未対応のため再DLできません。'); return; }
+    resolveVideoBlob_(id).then(function (blob) {
       if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
       var name = videoName || 'video.mp4';
       // ★iPhoneはカメラロール(アルバム)へ直接入れたい(Chami指示2026-07-29)。<a download>だと「ファイル」アプリ止まりで
@@ -330,7 +338,7 @@
     if (!shortUrl) {
       try { var sv = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); shortUrl = (sv.xShortUrl || '').trim(); } catch (e) {}
     }
-    store.get('stock_v_' + id).then(function (blob) {
+    resolveVideoBlob_(id).then(function (blob) {
       if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
       if (window.Go5Drive && typeof window.Go5Drive.upload === 'function') {
         // 元画像＋仕上がりプレビュー(保存時にIDBへ退避したもの)も一緒にDriveへ。取れなくても動画だけは必ず上げる。
