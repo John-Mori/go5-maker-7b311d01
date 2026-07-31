@@ -550,8 +550,10 @@
     //   0まで縮むのでボタンは必ず同列に残る(iOS Safari列割れの実証済み回避形)。
     var rowWrap = 'display:flex;gap:6px;align-items:stretch;margin-top:6px;';
     var rowIn = 'flex:1;min-width:0;box-sizing:border-box;background:var(--field-bg,rgba(0,0,0,.28));color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:.84rem;line-height:1.5;';
-    // 文字幅ボタン(float用・flex無し。ラベル右へ float:right で置く時に使う)。
-    var btnW = 'padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
+    // 文字幅ボタン。★width:auto;margin-top:0 が必須=このモーダル(#draftPostModal)は .fz-modal/.vedit-modal
+    //   ではないので style.css:471 の打ち消しが効かず、グローバル button{width:100%}(style.css:846)が勝って
+    //   横いっぱいに伸び・文字が中央寄せになっていた(Chami報告2026-07-31・v=539の margin-left:auto が死んでいた真因)。
+    var btnW = 'width:auto;margin-top:0;padding:7px 12px;font-size:.78rem;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--sub);cursor:pointer;white-space:nowrap;';
     // 短縮URLの確認用リンク(タップで実際に遷移・Chami確認用)。アクセント色＋下線＋折り返し。
     var lnkS = 'display:inline-block;margin:0 0 8px;font-size:.86rem;color:var(--accent);text-decoration:underline;word-break:break-all;';
     // フレックス行の中に置くリンク(下マージン無し・折り返し許容)。説明欄行の短縮URL/作品遷移リンク用。
