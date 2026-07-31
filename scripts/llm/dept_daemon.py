@@ -174,7 +174,10 @@ WORK_MODEL = "sonnet"          # ★O3(裁-3): 作業agentの既定(実装の物
 #   「品質を犠牲にしたトークン節約は禁止」と明記されている=**判断の部屋は上位モデルにするのが規約側の答え**。
 #   DEPT_CONF に "work_model" があればそれを使う。無ければ従来どおり WORK_MODEL。
 def work_model_for(conf):
-    return (conf or {}).get("work_model") or WORK_MODEL
+    m = (conf or {}).get("work_model") or WORK_MODEL
+    # ★素の "opus" は明示版へ固定(2026-07-31 Chami指示)。CLIが最新へ張り替えても Opus 5 等へ
+    #   黙って乗り換わらせない=単価跳ねの防止。品質の床= Opus 4.8世代。戻すなら下1行を消す。
+    return "claude-opus-4-8" if (m or "").strip() == "opus" else m
 # ★O3(裁-3・改善書P1-5): 作業agentの許可ツールを最小allowlistへ固定。旧 bypassPermissions は
 #   「何でも実行可」=プロンプトインジェクション耐性が最弱線だった。--print(headless)では未許可
 #   ツールは自動拒否(プロンプトを出せないため)=allowlist外は安全に落ちる。ファイル作業+検証に
