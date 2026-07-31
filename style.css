@@ -142,9 +142,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 @media(max-width:560px){
   .editor{flex-direction:column;}
   .preview-col{align-self:center;z-index:5;background:var(--card);padding-bottom:6px;width:100%;text-align:center;}
-  /* ラベルD-pad表示中だけ、プレビュー横にD-pad分の余白を確保して真横に並べる(Chami依頼)。
-     無い時はキャンバス全幅(画像の拡大縮小/上下は右の操作列へ戻したので側列に常設要素は無い・Chami 2026-07-31)。 */
-  .preview-wrap.has-dpad .canvas-box{max-width:calc(100% - 124px);}
+  /* 側列(画像の拡大縮小/上下=常設・セール時はラベルD-padも)の分の余白を常に確保し、
+     プレビューの真横へ並べる。確保しないと側列がキャンバス下へ回り込み縦積みになる
+     (画像ボタンを側列へ戻したので常設・Chami 2026-07-31「消さないで・横に」)。 */
+  .preview-wrap .canvas-box{max-width:calc(100% - 124px);}
 }
 .ctl-group{margin-top:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;}
 .ctl-group:first-child{margin-top:0;}
