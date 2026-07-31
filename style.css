@@ -48,6 +48,10 @@ html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}
 html,body{margin:0;padding:0;background:transparent;color:var(--ink);
   font-family:"Noto Sans JP",system-ui,sans-serif;
   transition:color .8s cubic-bezier(.4,0,.2,1);}
+/* ★中身の短いタブ(予約など)で「謎の背景の区切り」が出る事故の恒久対策(Chami 2026-07-31・2度目)。
+   iOS Safari は html のグラデ背景を「html ボックスの高さ」で描くため、中身が画面より短いと
+   ボックス下端に継ぎ目(seam)が出る。body/html を必ずビューポート高以上にしてグラデを全面へ伸ばす。 */
+html,body{min-height:100vh;min-height:100dvh;}
 /* ── アカウント連動グラデ背景：html 要素に直接設定（ビューポート背景として扱われ iOS Safari でも確実）。
    body::before z-index:-1 は html 背景の後ろに落ちるため使わない。 ── */
 html{
@@ -1107,6 +1111,9 @@ textarea:focus{border-color:var(--accent);}
   border:1px solid #fff;border-radius:999px;padding:6px 12px;min-height:30px;cursor:pointer;width:auto;margin:0;
   white-space:nowrap;line-height:1.15;}
 .cal-launch-btn.active{background:rgba(255,255,255,.18);color:#fff;}
+/* ⏰予約 と 📅カレンダー を同じ行に揃える。flex-basis:100% で必ず自前の1行へ折り返し、2つを横並びにする
+   (アカウントボタンの行に予約だけ残って違和感…を解消・Chami 2026-07-31)。 */
+.acct-launch-row{display:flex;gap:6px;flex-basis:100%;}
 
 /* ── 短縮URL表示 ── */
 .short-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;}

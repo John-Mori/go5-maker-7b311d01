@@ -63,6 +63,9 @@
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
     if (activeBtnId === 'reserveBtn' && window.Scheduler) window.Scheduler._renderTab();
     if (activeBtnId === 'tabStock'   && window.Go5Stock)  window.Go5Stock.render();
+    // 選んだタブをタブバーの中央へ寄せる(タブ選択のたび・Chami 2026-07-31)。オーバーレイ
+    //   (予約/カレンダー)はタブバーに無いので centerTab_ 側の早期returnで何もしない。
+    centerTab_(activeBtnId);
   }
   TABS.forEach(function (t) {
     var b = document.getElementById(t.btn);
