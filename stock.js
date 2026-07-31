@@ -81,8 +81,30 @@
   }
   function delBlobs_(id) {
     var store = idb();
-    if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); store.del('stock_img_' + id).catch(function () {}); }
+    if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); store.del('stock_img_' + id).catch(function () {}); store.del('stock_prev_' + id).catch(function () {}); store.del('stock:imgs:' + id).catch(function () {}); }
     if (_thumbCache[id]) { try { URL.revokeObjectURL(_thumbCache[id]); } catch (e) {} delete _thumbCache[id]; }
+  }
+
+  // ── ①-B ドラフトの画像を全端末へ運ぶ(2026-07-31) ──
+  //   サムネ/プレビュー/元画像を dataURL でまとめ stock:imgs:<id> に置く=Go5Syncの画像レール(R2 content-hash)に乗る。
+  //   ★動画本体(stock_v_)は重いので載せない(②で on-demand 取り寄せにする)。実体はR2、同期台帳には参照だけ=積んでも軽い。
+  function blobToDataUrlP_(blob) { return new Promise(function (res) { if (!blob) return res(''); blobToDataUrl_(blob, function (du) { res(du || ''); }); }); }
+  // この端末が blob 実体を持つドラフトだけ、未作成ならミラーを1回作って雲へ送る(冪等)。既存ドラフトも開けば自動で運ばれる。
+  function ensureBlobMirror_(id) {
+    var store = idb(); if (!store) return;
+    store.get('stock:imgs:' + id).then(function (existing) {
+      if (existing && existing.th) return; // 既にミラー済み=再送しない
+      return Promise.all([store.get('stock_t_' + id), store.get('stock_prev_' + id), store.get('stock_img_' + id)]).then(function (bs) {
+        if (!bs[0] && !bs[1] && !bs[2]) return; // 実体が無い端末=作らない(同期で降ってくる側)
+        return Promise.all([blobToDataUrlP_(bs[0]), blobToDataUrlP_(bs[1]), blobToDataUrlP_(bs[2])]).then(function (du) {
+          var rec = {};
+          if (du[0]) rec.th = du[0];
+          if (du[1]) rec.prev = du[1];
+          if (du[2]) rec.src = du[2];
+          if (rec.th || rec.prev || rec.src) return store.set('stock:imgs:' + id, rec).then(kickSync_);
+        });
+      });
+    }).catch(function () {});
   }
 
   function idb() { return window.Go5Idb; }
@@ -175,6 +197,7 @@
         var arr = loadMeta();
         arr.unshift(meta);
         saveMeta(arr);
+        ensureBlobMirror_(id); // ①-B サムネ/プレビュー/元画像を雲へ(2台目でも出す)
         return id;
       });
     });
@@ -401,9 +424,17 @@
       if (_thumbCache[m.id]) return Promise.resolve(_thumbCache[m.id]);
       if (!store) return Promise.resolve(null);
       return store.get('stock_t_' + m.id).then(function (blob) {
-        if (!blob) return null;
-        _thumbCache[m.id] = URL.createObjectURL(blob);
-        return _thumbCache[m.id];
+        if (blob) {
+          _thumbCache[m.id] = URL.createObjectURL(blob);
+          ensureBlobMirror_(m.id); // 実体を持つ端末=未送なら雲へミラー(①-B・既存ドラフトの後追い同期)
+          return _thumbCache[m.id];
+        }
+        // 実体が無い端末(2台目)=同期で来た stock:imgs ミラーの dataURL からサムネを出す(①-B)
+        return store.get('stock:imgs:' + m.id).then(function (mir) {
+          var du = mir && mir.th;
+          if (du) { _thumbCache[m.id] = du; return du; }
+          return null;
+        }).catch(function () { return null; });
       }).catch(function () { return null; });
     });
 

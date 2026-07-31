@@ -96,5 +96,10 @@ eq("union olderに欠けnewerにあるフィールドは追加",
    JSON.parse(S.unionCand('[{"cid":"a","url":"https://x/works/a/"}]', '[{"cid":"a","title":"T"}]')),
    [{ cid: "a", url: "https://x/works/a/", title: "T" }]);
 
+// ── ①-B ドラフトの画像ミラー(stock:imgs:)＝IDB同期レールに乗る/動画blobは乗らない(2026-07-31) ──
+ok("stock:imgs は同期IDBキー", S.isSyncIdbKey("stock:imgs:stk123"));
+ok("既存の同期IDBキーは維持", S.isSyncIdbKey("ref:abc") && S.isSyncIdbKey("bsky:1") && S.isSyncIdbKey("post:9"));
+ok("動画/サムネの生blobキーは同期しない", !S.isSyncIdbKey("stock_v_stk1") && !S.isSyncIdbKey("stock_t_stk1") && !S.isSyncIdbKey("stock_img_stk1"));
+
 console.log((fail === 0 ? "✅ ALL PASS" : "❌ FAIL") + "  (" + pass + " passed, " + fail + " failed)");
 process.exit(fail === 0 ? 0 : 1);

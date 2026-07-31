@@ -43,7 +43,9 @@
     if (Keys && Keys.syncAllowed(k)) return true;        // 本物の設定(レイアウト/本文/説明欄/af_id 等)
     return false;
   }
-  function isSyncIdbKey(k) { return /^(ref:|bsky:|post:)/.test(String(k)); }
+  // ★stock:imgs:<id> ＝ ドラフトのサムネ/プレビュー/元画像を dataURL でまとめた同期用ミラー(①-B・2026-07-31)。
+  //   重い動画本体(stock_v_)は載せない=積み上がっても同期は軽いまま(実体はR2にhashで、台帳には参照だけ)。
+  function isSyncIdbKey(k) { return /^(ref:|bsky:|post:|stock:imgs:)/.test(String(k)); }
 
   // ── 暗号(WebCrypto AES-GCM / PBKDF2)──
   var subtle = (root.crypto && root.crypto.subtle) || null;
@@ -502,7 +504,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockDelKey: isStockDelKey, arrIdField_: arrIdField_ }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockDelKey: isStockDelKey, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 
