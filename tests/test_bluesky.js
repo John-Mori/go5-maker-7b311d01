@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder } = require('../bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder } = require('../bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -446,6 +446,19 @@ test('P-8: 割引ブロック(セール行+実リンク)は従来どおり剥が
     '\n\n⭐大幅割引セール中の同人はこちら 🎀\nhttps://5mgl.com/fCIQv';
   var expected = 'おすすめ漫画見つけた💕\n\n↓詳細はこちらから🎀 #PR #漫画\n' + WORK_LINK_PLACEHOLDER;
   assert.strictEqual(stripAutoBlocks(t), expected, 'PR行+プレースホルダは残り、割引ブロックだけ剥がれる');
+});
+
+// P-9〜P-11  セール中短縮リンクのプレースホルダ方式(2026-07-31 Chami指定)
+test('P-9: セールプレースホルダを短縮セールリンクへ置換', function () {
+  var t = '☀️大幅割引セール中の夏の同人祭はこちら🍧\n' + SALE_LINK_PLACEHOLDER;
+  assert.strictEqual(fillSaleLinkPlaceholder(t, 'https://5mgl.com/X1iAF'),
+    '☀️大幅割引セール中の夏の同人祭はこちら🍧\nhttps://5mgl.com/X1iAF');
+});
+test('P-10: セールリンク未取得ならプレースホルダのまま(literal投稿は投稿直前の安全網が処理)', function () {
+  assert.strictEqual(fillSaleLinkPlaceholder(SALE_LINK_PLACEHOLDER, ''), SALE_LINK_PLACEHOLDER);
+});
+test('P-11: セールプレースホルダを含まない本文は無変化', function () {
+  assert.strictEqual(fillSaleLinkPlaceholder('普通の本文', 'https://5mgl.com/X1iAF'), '普通の本文');
 });
 
 // ────────────────────────────────────────────────────────────

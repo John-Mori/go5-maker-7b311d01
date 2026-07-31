@@ -294,6 +294,15 @@
   //   場所へ直接この文字列を書き込む運用に変更した。システムは本文中のこの文字列を実際の作品短縮
   //   リンクへ機械的に置換するだけでよい(位置はテンプレ側が決める・見出し文言もアカウント別に変えてよい)。
   var WORK_LINK_PLACEHOLDER = '紹介用短縮リンク';
+  // セール(割引一覧)会場リンク用のプレースホルダ。Chami指定2026-07-31: テンプレ帳の本文へ
+  //   「セール中短縮リンク」と書いた位置に、現在選択中のセール案内URLの短縮リンクを機械的に
+  //   置換する(WORK_LINK_PLACEHOLDERと同じ運用・位置と見出し文言はテンプレ側が決める)。
+  var SALE_LINK_PLACEHOLDER = 'セール中短縮リンク';
+  function fillSaleLinkPlaceholder(text, saleLink) {
+    var s = String(text == null ? '' : text);
+    if (!saleLink) return s;   // まだ短縮リンクが用意できていなければプレースホルダのまま返す
+    return s.split(SALE_LINK_PLACEHOLDER).join(saleLink);
+  }
   /**
    * 本文中のプレースホルダ(WORK_LINK_PLACEHOLDER)を実リンクへ置換する。純粋関数。
    * shortLink(計測付き短縮URL)が用意できていればそれを、まだ用意できていなければ
@@ -407,6 +416,8 @@
     stripAutoBlocks: stripAutoBlocks,
     WORK_LINK_PLACEHOLDER: WORK_LINK_PLACEHOLDER,
     fillWorkLinkPlaceholder: fillWorkLinkPlaceholder,
+    SALE_LINK_PLACEHOLDER: SALE_LINK_PLACEHOLDER,
+    fillSaleLinkPlaceholder: fillSaleLinkPlaceholder,
     insertHookCta: insertHookCta,
     stripHookCtaLines: stripHookCtaLines,
     HOOK_DEEPEN_LINE: HOOK_DEEPEN_LINE,

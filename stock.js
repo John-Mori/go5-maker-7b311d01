@@ -455,6 +455,26 @@
     try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
   }
 
+  // ★投稿本文の「正」= 投稿タブのテキストボックス(テンプレ帳の本文・アカウント別)。Chami指定2026-07-31:
+  //   「今までどれが正かわからなかった」→ 投稿モードもここを参照し、この本文が唯一の正となる。
+  //   ・同一アカウントなら未保存の編集も反映するため生のテキストボックスを優先。
+  //   ・別アカウントの投稿を開いた時は、そのアカウントの保存済みマスター(bsky_text__accN)を読む。
+  //   ・どちらも取れなければ、その投稿の当時のスナップショット(meta.bskyText)にフォールバック。
+  function masterBody_(meta) {
+    var acc = (meta && meta.account) || (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
+    try {
+      var cur = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
+      var b = $('bskyText');
+      if (b && cur === acc && b.value) return b.value;
+    } catch (e) {}
+    try {
+      var k = (window.Go5Acct && Go5Acct.key) ? Go5Acct.key('bsky_text', acc) : ('bsky_text__' + acc);
+      var v = localStorage.getItem(k);
+      if (v != null && v !== '') return v;
+    } catch (e) {}
+    return (meta && meta.bskyText) || '';
+  }
+
   function openPostModal_(meta) {
     _modalMeta = meta;
     _ytTitleDirty = false;
@@ -464,11 +484,12 @@
     try { saved = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}'); } catch (e) {}
     var composedXText;
     if (saved.xText !== undefined) {
+      // この投稿を投稿モードで手編集した履歴があるときだけ、その編集を優先(データ喪失を防ぐ)。
       composedXText = saved.xText;
     } else if (window.__go5ComposeXTextForBskyText) {
-      composedXText = window.__go5ComposeXTextForBskyText(meta.bskyText || '', meta.affiliateUrl || '');
+      composedXText = window.__go5ComposeXTextForBskyText(masterBody_(meta), meta.affiliateUrl || '');
     } else {
-      composedXText = (meta.bskyText || '');
+      composedXText = masterBody_(meta);
     }
     $('draftXText').value = composedXText;
     var tags = saved.ytTags !== undefined ? saved.ytTags : null;
@@ -672,14 +693,14 @@
       if (!m || m.style.display === 'none' || !_modalMeta) return;
       if (window.__go5ComposeXTextForBskyText) {
         var xtEl = $('draftXText');
-        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(_modalMeta.bskyText || '', _modalMeta.affiliateUrl || '');
+        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(masterBody_(_modalMeta), _modalMeta.affiliateUrl || '');
       }
     });
     document.addEventListener('go5-work-short-ready', function () {
       if (!m || m.style.display === 'none' || !_modalMeta) return;
       if (window.__go5ComposeXTextForBskyText) {
         var xtEl = $('draftXText');
-        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(_modalMeta.bskyText || '', _modalMeta.affiliateUrl || '');
+        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(masterBody_(_modalMeta), _modalMeta.affiliateUrl || '');
       }
     });
     m.addEventListener('click', function (e) { if (e.target === m) { m.style.display = 'none'; _modalMeta = null; } });
