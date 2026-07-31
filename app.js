@@ -11,6 +11,11 @@
   const DURATION = 5, FPS = 30;
   const REVEAL_START = 0.5, REVEAL_DUR = 2.4;   // 浮き上がり: 0.5s開始→2.9s完成(以後2.1s保持)。Chami依頼2026-07-18で0.7s遅らせた
   const FG_MAX_RATIO = 0.92, FG_ZOOM = 0.04, FG_CENTER_Y = 0.55;
+  // YouTube Shorts が縦長端末で左右各約9%を切り落とす(cover)。前景画像の"幅"だけは
+  // 切られない安全域(=中央82%)に収まる比率でフィットさせ、端が欠けないよう自動で適正化する
+  // (切れ範囲ガイドの表示は廃止し、代わりに最初から枠内へ収める・Chami依頼2026-07-31)。
+  // 高さは従来どおり FG_MAX_RATIO(上下は切られないため)。プレビューも書き出しも同式=一致。
+  const YT_SIDE_CROP = 0.09, FG_SAFE_W_RATIO = 1 - 2 * YT_SIDE_CROP; // = 0.82
   const DEFAULT_DETAIL = "作品の詳細は右上の：から説明";
 
   // 旧来 1280px フレーム基準で決めた絶対px定数(余白・行間・縁取り下限など)を、
@@ -395,7 +400,8 @@
       const a = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - REVEAL_START) / REVEAL_DUR));
       if (a > 0) {
         // フィット倍率 × ユーザーの拡大率(OFF.imgScale)。プレビューも書き出しも同じ式=見た目と動画が一致する。
-        const base = Math.min(W * FG_MAX_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1);
+        // 幅は安全域(FG_SAFE_W_RATIO=82%)で、高さは FG_MAX_RATIO(92%)でフィット=左右の切れを自動で防ぐ。
+        const base = Math.min(W * FG_SAFE_W_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1);
         const sc = (a < 1 && FG_ZOOM > 0) ? base * ((1 - FG_ZOOM) + FG_ZOOM * a) : base;
         const fw = fgImg.width * sc, fh = fgImg.height * sc;
         ctx.globalAlpha = a;
@@ -777,7 +783,7 @@
   // キャンバス内矩形。タッチ座標→写真内座標の変換に使う。(drawFrameと同じ式で計算)
   window.Go5PhotoRect = function () {
     if (!fgImg) return null;
-    const base = Math.min(W * FG_MAX_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1); // drawFrameと同式(拡大率込み)
+    const base = Math.min(W * FG_SAFE_W_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1); // drawFrameと同式(幅=安全域82%・拡大率込み)
     const fw = fgImg.width * base, fh = fgImg.height * base;
     return {
       x: (W - fw) / 2,
