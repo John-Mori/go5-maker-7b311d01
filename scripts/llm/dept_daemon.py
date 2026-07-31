@@ -1652,6 +1652,7 @@ DEPT_CONF = {
         "character": os.path.join(_CHAR, "almond-eye.md"),
         "memory": os.path.join(_MEM, "consult-intel.jsonl"),
         "persona": "アーモンドアイ",
+        "work_model": "opus",   # ★Chami指示 2026-07-31(msg 1532737067992219788)= session_relay便のsonnet落ちで口調が崩れる・C-014
         "port": 18818,
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         # ★多人格モード(2026-07-26 Chami指示Cで members から統合)。
