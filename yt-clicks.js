@@ -851,13 +851,13 @@
         '<label class="vedit-field">作品URL(DMM/FANZAの商品ページURL)' +
           '<div class="vedit-bsky-row">' +
             '<input id="veditWork" type="url" inputmode="url" autocomplete="off" placeholder="https://www.dmm.co.jp/…(省略可)">' +
-            '<button id="veditWorkCopy" type="button" class="vedit-copy">コピー</button>' +
+            '<button id="veditWorkCopy" type="button" class="vedit-copy vedit-copy-fit">コピー</button>' +
           '</div>' +
         '</label>' +
         '<label class="vedit-field">作品クリック計測用の短縮URL(投稿→FANZA・導線2)' +
           '<div class="vedit-bsky-row">' +
             '<input id="veditWorkShort" type="url" inputmode="url" autocomplete="off" placeholder="投稿すると自動で入ります・空なら「自動生成」で作成">' +
-            '<button id="veditWorkShortGen" type="button" class="vedit-copy">自動生成</button>' +
+            '<button id="veditWorkShortGen" type="button" class="vedit-copy vedit-copy-fit">自動生成</button>' +
           '</div>' +
           '<span class="vedit-hint" style="font-size:11px;color:var(--sub);">この短縮URLのクリックが作品クリック数(ピンクの矢印)として集計されます。空だと表示されません。</span>' +
         '</label>' +
