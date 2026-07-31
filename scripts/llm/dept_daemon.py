@@ -2267,9 +2267,13 @@ _HANGUL_RE = re.compile(r"[가-힣ᄀ-ᇿㄱ-ㆎ]")
 # 出力ゲート ルールC(呼称違反チェック)  2026-07-30 … 人事部門依頼(基盤コード)
 # ----------------------------------------------------------------------------
 # 設計書= 00_AI-HQ/設計_出力ゲート_呼称スラッグ非日本語スクリプト_2026-07-30.md §1-C/§2-C/§3/§6。
-# 裁定= Chami承認(§6 裁定②)=**Cはまず「警告のみ」**(送信は止めない・本文は一切変えない)。
-#   → naming_gate.naming_verdicts で違反候補を出し、naming_audit.jsonl へ1行残すだけ。
-#   自動補完はしない(誤検出率を測ってから将来入れる段階)。
+# 裁定= §6裁定②「まず警告のみ」→ **2026-07-31 Chami『いいよ』で高信頼だけ自動修正へ格上げ**
+#   (引用元 msg 1532524216996462634 へのChami返信 msg 1532737210007289967)。
+#   → naming_gate.naming_corrections が **高信頼の2型だけ**本文を直す(設計§2-C):
+#     ①現役選手→「アロンソさん/裸アロンソ」→「アロンソコーチ」 ②敬称必須の裸の姓→「姓+さん」。
+#   ★それ以外(forbidden・愛称ゆれ・姓+名の境界外)は**警告のみ**=naming_audit.jsonl へ残すだけ。
+#   ★安全弁= allowed[0]が裸の姓始まりの時だけ・違反出現の直後が安全境界の時だけ置換
+#     (「三笘薫」→「三笘さん薫」に壊さない)。GOLDEN= tests/test_naming_gate.py(F-1〜F-7)。
 # 判定は (話者=persona, 部屋=dept, 本文) の三つ組= split_persona_blocks 解決後にブロック単位。
 # 写像= 00_AI-HQ/departments/hr/personas/呼称ルール.json(この1本=ORG-11。散文はパースしない)。
 # fail-open= 検査の例外/ルール未ロードは握り潰して従来動作(そのまま送る)へ倒す。
@@ -2295,40 +2299,53 @@ def _naming_rules():
 
 
 def audit_naming(dept, persona, text, rec=None):
-    """出力ゲートC: ブロック本文の呼称違反を検知→naming_audit.jsonl へ1行(警告のみ)。
+    """出力ゲートC: ブロック本文の呼称違反を **高信頼だけ自動修正** し、残りは警告のみ記録。
 
-    ★送信は止めない・本文は一切変えない(設計§2-C 裁定②)。検知した各違反を1行ずつ記録するだけ。
+    ★2026-07-31 Chami『いいよ』で「警告のみ」→「高信頼だけ自動修正」へ格上げ(設計§2-C)。
+      - 自動修正した違反(applied)= 本文を直して naming_audit.jsonl に event="naming_fix"。
+      - 直さなかった違反(remaining)= 従来どおり event="naming"(警告のみ)。
     ★検査中の例外は握り潰す(fail-open)=ゲート自身が配送を殺さない(audit_hangul と同じ思想)。
-    返り値: 検知した verdicts の list(呼び出し側のログ用。0件なら空)。
+    返り値: (fixed_text, applied, remaining)。ゲート無効/例外時は (元text, [], [])。
     """
     try:
         if _naming_gate is None:
-            return []
+            return text, [], []
         rules = _naming_rules()
         if not rules:
-            return []
-        verdicts = _naming_gate.naming_verdicts(persona, dept, text, rules)
-        if not verdicts:
-            return []
-        os.makedirs(os.path.dirname(NAMING_AUDIT), exist_ok=True)
-        ts = time.strftime("%Y-%m-%dT%H:%M:%S")   # JST(常駐はJSTで動く)
-        with open(NAMING_AUDIT, "a", encoding="utf-8") as f:
-            for v in verdicts:
-                f.write(json.dumps({
-                    "ts": ts,
-                    "dept": dept,
-                    "event": "naming",
-                    "persona": str(persona or ""),
-                    "target": v.get("target", ""),     # 対象
-                    "found": v.get("found", ""),       # 出た形
-                    "expected": v.get("expected", []),  # 期待形(許容形)
-                    "reason": v.get("reason", ""),
-                    "msg_id": str((rec or {}).get("msg_id", "")),
-                    "excerpt": str(text or "")[:200],  # 本文抜粋
-                }, ensure_ascii=False) + "\n")
-        return verdicts
+            return text, [], []
+        res = _naming_gate.naming_corrections(persona, dept, text, rules)
+        applied = res.get("applied") or []
+        remaining = res.get("remaining") or []
+        if applied or remaining:
+            os.makedirs(os.path.dirname(NAMING_AUDIT), exist_ok=True)
+            ts = time.strftime("%Y-%m-%dT%H:%M:%S")   # JST(常駐はJSTで動く)
+            mid = str((rec or {}).get("msg_id", ""))
+            with open(NAMING_AUDIT, "a", encoding="utf-8") as f:
+                for a in applied:
+                    f.write(json.dumps({
+                        "ts": ts, "dept": dept, "event": "naming_fix",
+                        "persona": str(persona or ""),
+                        "target": a.get("target", ""),
+                        "to": a.get("to", ""),          # 直した先の形
+                        "count": a.get("count", 0),     # 直した出現数
+                        "reason": a.get("reason", ""),
+                        "msg_id": mid,
+                        "excerpt": str(text or "")[:200],   # ★修正前の抜粋
+                    }, ensure_ascii=False) + "\n")
+                for v in remaining:
+                    f.write(json.dumps({
+                        "ts": ts, "dept": dept, "event": "naming",
+                        "persona": str(persona or ""),
+                        "target": v.get("target", ""),
+                        "found": v.get("found", ""),
+                        "expected": v.get("expected", []),
+                        "reason": v.get("reason", ""),
+                        "msg_id": mid,
+                        "excerpt": str(text or "")[:200],
+                    }, ensure_ascii=False) + "\n")
+        return res.get("fixed", text), applied, remaining
     except Exception:
-        return []               # 監査の失敗で応答を巻き添えにしない(fail-safe)
+        return text, [], []     # 監査の失敗で応答を巻き添えにしない(fail-safe)
 
 
 def detect_hangul(text, span=20):
@@ -4218,17 +4235,27 @@ class Daemon:
                 _blocks = [(None, reply)]
             # ★★出力ゲート ルールC(呼称違反チェック)= 話者依存(2026-07-30・Chami裁定②)。
             #   split_persona_blocks 解決後・ブロック単位で (話者=persona, 部屋=dept, 本文) を見る。
-            #   ★**警告のみ**= naming_audit.jsonl へ1行残すだけ。送信は止めない・本文は一切変えない
-            #     (誤検出率を測るまで自動補完はしない=設計§2-C)。fail-open=検査例外は握り潰す。
+            #   ★2026-07-31 Chami『いいよ』で格上げ= **高信頼だけ本文を自動修正**、残りは警告のみ。
+            #     修正後のブロックで _blocks を組み直す→下の送信ループはこの修正版を送る。
             #   ★A/B(話者非依存)とは層が違う=ここ(ブロック解決後)が正しい合流点(設計§3)。
+            #   ★fail-open=検査例外は握り潰して元ブロックを使う(audit_naming が保証)。
+            _fixed_blocks = []
             for _who, _part in _blocks:
                 _speaker = _who or self.effective_persona()
-                _nv = audit_naming(self.dept, _speaker, _part, rec)
-                if _nv:
+                _new_part, _applied, _remain = audit_naming(self.dept, _speaker, _part, rec)
+                if _applied:
+                    log(self.dept,
+                        f"★出力ゲートC(呼称・自動修正): 話者={_speaker} "
+                        f"修正={len(_applied)}件 例=対象{_applied[0].get('target')}"
+                        f"→{_applied[0].get('to')}(x{_applied[0].get('count')}) msg={mid}")
+                    _part = _new_part
+                if _remain:
                     log(self.dept,
                         f"★出力ゲートC(呼称・警告のみ): 話者={_speaker} "
-                        f"件数={len(_nv)} 例=対象{_nv[0].get('target')}/出た形{_nv[0].get('found')}"
-                        f"→期待{_nv[0].get('expected')} msg={mid}")
+                        f"残={len(_remain)}件 例=対象{_remain[0].get('target')}/出た形"
+                        f"{_remain[0].get('found')}→期待{_remain[0].get('expected')} msg={mid}")
+                _fixed_blocks.append((_who, _part))
+            _blocks = _fixed_blocks
             body = os.path.join(LOCAL, f"_daemon_reply_{self.dept}.txt")
             # ★2026-07-22 Chami指示で表記を **(常駐) → (精霊)** へ変更。原文=
             #   「デーモンのことを**精霊**って言っても伝わるようにしといて」

@@ -13,7 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
 
-from naming_gate import load_naming_rules, naming_verdicts  # noqa: E402
+from naming_gate import (  # noqa: E402
+    load_naming_rules, naming_verdicts, naming_corrections)
 
 # 呼称ルール.json の場所(AI-HQ 管轄)。無ければ skip せず fail(写像が正本)。
 RULES_PATH = os.path.join(
@@ -82,11 +83,57 @@ def _run():
         print(f"{mark} T-{i}: 期待={'発火' if expect_fire else '通過'} "
               f"実際={'発火' if fired else '通過'}{detail}  {desc}")
 
+    # ==== 自動修正(高信頼のみ・2026-07-31 Chami承認)のGOLDEN ====================
+    #   (話者, 部屋, 本文, 期待fixed, 期待appliedあり, 説明)
+    fix_cases = [
+        ("ケヴィン・デ・ブライネ", "aegis-gl",
+         "アロンソさんに確認する。", "アロンソコーチに確認する。", True,
+         "①現役選手→『アロンソさん』を自動で『アロンソコーチ』へ"),
+
+        ("花海咲季", "system-engineer-a",
+         "デブライネに任せます。", "デブライネさんに任せます。", True,
+         "②敬称必須の裸の姓『デブライネ』→『デブライネさん』"),
+
+        ("ククール", "aegis-gl",
+         "デブライネと話した。", "デブライネと話した。", False,
+         "ククール特例=呼び捨てが正=修正しない(applied無し)"),
+
+        ("花海咲季", "system-engineer-a",
+         "三笘薫と打ち合わせた。", "三笘薫と打ち合わせた。", False,
+         "★姓+名『三笘薫』は直後が漢字=境界外=壊さない(警告のみ)"),
+
+        ("アメス", "hr-room",
+         "その件はシャビさんが詳しい。", "その件はシャビさんが詳しい。", False,
+         "forbidden『シャビさん』は自動修正しない(警告のみ)"),
+
+        ("ケヴィン・デ・ブライネ", "aegis-gl",
+         "アロンソコーチに話した後、アロンソさんにも伝えた。",
+         "アロンソコーチに話した後、アロンソコーチにも伝えた。", True,
+         "混在=許容形はそのまま・違反の『アロンソさん』だけ直す"),
+
+        ("ケヴィン・デ・ブライネ", "aegis-gl",
+         "アロンソコーチに報告した。", "アロンソコーチに報告した。", False,
+         "既に許容形=変更なし(applied無し)"),
+    ]
+    for j, (persona, dept, text, exp_fixed, exp_applied, desc) in enumerate(fix_cases, 1):
+        res = naming_corrections(persona, dept, text, rules)
+        got_fixed = res.get("fixed")
+        got_applied = bool(res.get("applied"))
+        ok = (got_fixed == exp_fixed) and (got_applied == exp_applied)
+        mark = "PASS" if ok else "FAIL"
+        if not ok:
+            failed += 1
+        print(f"{mark} F-{j}: applied={'有' if got_applied else '無'} "
+              f"fixed={got_fixed!r}  {desc}")
+        if not ok:
+            print(f"      期待 applied={'有' if exp_applied else '無'} fixed={exp_fixed!r}")
+
+    total = len(cases) + len(fix_cases)
     print("-" * 60)
     if failed:
-        print(f"{failed} 件 FAIL / {len(cases)} 件")
+        print(f"{failed} 件 FAIL / {total} 件")
         return 1
-    print(f"全 {len(cases)} 件 PASS")
+    print(f"全 {total} 件 PASS")
     return 0
 
 

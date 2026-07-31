@@ -258,3 +258,144 @@ def naming_verdicts(persona, dept, text, rules):
         return out
     except Exception:
         return []               # fail-open=ゲートは配送を殺さない
+
+
+# ==== 自動修正(高信頼のみ・2026-07-31 Chami「いいよ」でGo)========================
+#   設計§2-C「高信頼だけ自動付与、他は警告＋fail-open」を実装する。
+#   ★自動修正するのは次の2型だけ(Chamiへ提案し承認された範囲):
+#     ① override_allowed で「アロンソさん/裸アロンソ」→ allowed[0]=「アロンソコーチ」
+#     ② honorific_required で「裸の姓」→「姓+さん」(=allowed[0])
+#   ★安全弁(誤修正=事故を防ぐ):
+#     - target_form(=allowed[0])が **裸の姓で始まる時だけ**置換する
+#       (別名・愛称への丸ごと置換はしない=「同じ姓に敬称/役職を足す/直す」に限定)。
+#     - 各違反出現の**直後が安全境界**(文末/句読点/助詞)の時だけ置換する
+#       → 「三笘薫」のような姓+名(直後が漢字)は置換せず**警告のみ**へ落とす
+#         (「三笘さん薫」に壊すのを防ぐ=設計が警告したCの false-positive の核)。
+#     - forbidden(シャビさん等)・愛称ゆれ・敬称ゆれは自動修正しない=警告のみ。
+#   fail-open: 例外時は元文をそのまま返す(applied=[])。
+
+# 違反出現の直後に来てよい「境界」文字(この後ろなら姓が言い切られている)。
+_SAFE_AFTER_CHARS = set(
+    " \t\r\n　"
+    "、。，．・！？…‥「」『』（）()【】〈〉《》"
+    "\"'“”‘’~〜:：;；/／\\|,.!?＝=＋+＊*＿_-–—「」"
+)
+# 姓の直後に来てよい助詞/接尾(この並びで姓が終わっていると判る)。長い順。
+_SAFE_AFTER_PARTICLES = (
+    "って", "では", "にも", "へも", "との", "への", "から", "まで", "より",
+    "です", "だっ",
+    "は", "が", "を", "に", "へ", "と", "も", "の", "や", "で",
+    "だ", "さ", "ね", "よ", "な",
+)
+
+
+def _safe_after(s, end_idx):
+    """s[end_idx:] が『姓が言い切られた』境界で始まるか(=そこで置換して安全か)。"""
+    after = s[end_idx:]
+    if after == "":
+        return True
+    if after[0] in _SAFE_AFTER_CHARS:
+        return True
+    return any(after.startswith(p) for p in _SAFE_AFTER_PARTICLES)
+
+
+def _iter_occurrences(s, bare, allowed):
+    """本文中の bare の各出現について (開始位置, 実際に使われた形, 許容か) を返す。
+
+    「実際に使われた形」の求め方は _appears_as_allowed と同じ(2本に割れさせない):
+      (a) その位置から始まる最長の allowed 形(直後にさらに敬称が続くなら不採用)、
+      (b) 無ければ bare + 直後の敬称/接尾。
+    """
+    allowed = [str(a or "") for a in (allowed or []) if str(a or "")]
+    allowed_set = set(allowed)
+    start = 0
+    while True:
+        i = s.find(bare, start)
+        if i < 0:
+            break
+        best_allowed = ""
+        for a in allowed:
+            if not s.startswith(a, i) or len(a) <= len(best_allowed):
+                continue
+            after = s[i + len(a):]
+            if any(after.startswith(h) for h in _HONORIFICS):
+                continue
+            best_allowed = a
+        if best_allowed:
+            actual = best_allowed
+        else:
+            tail = s[i + len(bare):]
+            suf = ""
+            for h in _HONORIFICS:
+                if tail.startswith(h):
+                    suf = h
+                    break
+            actual = bare + suf
+        yield i, actual, (actual in allowed_set)
+        start = i + len(bare)
+
+
+def naming_corrections(persona, dept, text, rules):
+    """高信頼の呼称違反だけ自動修正した本文を返す(純関数)。
+
+    返り値: {"fixed": str, "applied": [ {target,to,reason,count} ], "remaining": [verdict...] }
+      - applied  : 自動修正した違反(本文は fixed に反映済み)。
+      - remaining : 自動修正しなかった違反(=警告のみ・呼び出し側で naming_audit へ残す)。
+    fail-open: 例外時は元文と applied=[] を返す。
+    """
+    result = {"fixed": str(text or ""), "applied": [], "remaining": []}
+    try:
+        s = str(text or "")
+        verdicts = naming_verdicts(persona, dept, s, rules)
+        if not verdicts:
+            return result
+        repls = []  # (start, end, new)
+        for v in verdicts:
+            reason = v.get("reason")
+            bare = str(v.get("found") or "")
+            allowed = [str(a or "") for a in (v.get("expected") or []) if str(a or "")]
+            # 自動修正の対象は2型だけ(forbidden・愛称ゆれ等は警告のみ)
+            if reason not in ("override_allowed", "honorific_required") or not bare or not allowed:
+                result["remaining"].append(v)
+                continue
+            target_form = allowed[0]
+            # 「同じ姓に敬称/役職を足す/直す」= target_form が裸の姓で始まる時だけ
+            if not target_form.startswith(bare):
+                result["remaining"].append(v)
+                continue
+            fixed_n = 0
+            unsafe = False
+            for i, actual, ok in _iter_occurrences(s, bare, allowed):
+                if ok:
+                    continue
+                end = i + len(actual)
+                if not _safe_after(s, end):
+                    unsafe = True          # 姓+名(直後が漢字)等=置換すると壊れる
+                    continue
+                repls.append((i, end, target_form))
+                fixed_n += 1
+            if fixed_n:
+                result["applied"].append({
+                    "target": v.get("target"), "to": target_form,
+                    "reason": reason, "count": fixed_n,
+                })
+            if unsafe or not fixed_n:
+                # 危険な出現が残った/1つも直せなかった=警告として残す(沈黙にしない)
+                result["remaining"].append(v)
+        if repls:
+            repls.sort(key=lambda r: r[0])
+            filtered, last_end = [], -1
+            for a, b, new in repls:
+                if a >= last_end:           # 重なりは最初の1つだけ採る
+                    filtered.append((a, b, new))
+                    last_end = b
+            out, prev = [], 0
+            for a, b, new in filtered:
+                out.append(s[prev:a])
+                out.append(new)
+                prev = b
+            out.append(s[prev:])
+            result["fixed"] = "".join(out)
+        return result
+    except Exception:
+        return {"fixed": str(text or ""), "applied": [], "remaining": []}
