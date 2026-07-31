@@ -28,12 +28,12 @@ html[data-account="acc2"]{           /* 宵桜艶帖：宵の花明かり */
   --cta-from:#FBC6D6; --cta-to:#F193B4; --cta-ink:#4A1E3A;
   --field-bg:rgba(26,8,22,.40); --app-scrim:rgba(24,8,20,.28);
 }
-/* ── ランキング・分析・候補・予約タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
+/* ── ランキング・分析・候補タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
 /* html 要素に直接 background を設定することで、body が短い時も確実にクリームが全面に出る。 */
+/* ★予約はアカウント帯のオーバーレイへ移設したため背景を変えない(Chami 2026-07-31)。 */
 html[data-tab="tabRank"],
 html[data-tab="tabAnalyze"],
-html[data-tab="tabCand"],
-html[data-tab="tabReserve"]{
+html[data-tab="tabCand"]{
   --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
   --accent:#b8860b; --accent2:#a86b1f; --ink:#4b3f2c; --sub:#8a7a5c;
   background:#f5edd7;
@@ -41,8 +41,7 @@ html[data-tab="tabReserve"]{
 /* body にも同色を重ねてアカウントグラデが透けないよう二重で塞ぐ。 */
 html[data-tab="tabRank"] body,
 html[data-tab="tabAnalyze"] body,
-html[data-tab="tabCand"] body,
-html[data-tab="tabReserve"] body{background:var(--app-bg,#f5edd7);}
+html[data-tab="tabCand"] body{background:var(--app-bg,#f5edd7);}
 /* プレビュー列はアカウント色に染めない（制作物の色判断を狂わせない）。 */
 html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
@@ -1102,12 +1101,12 @@ textarea:focus{border-color:var(--accent);}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;}
 .acct-btn.active{background:var(--accent);color:#04222a;border-color:var(--accent);}
 .acct-bar-note{font-size:10.5px;color:var(--sub);flex-basis:100%;line-height:1.5;}
-/* カレンダー起動ボタン(旧📅タブを廃してアカウント帯の宵桜艶帖の右横へ移設・Chami 2026-07-31)。
-   アカウント選択ボタンと見分けるためアウトライン基調にし、開いている間だけ塗り(.active)を付ける。 */
-.cal-launch-btn{flex:0 0 auto;font-family:inherit;font-size:11px;font-weight:700;background:transparent;color:var(--accent);
-  border:1px solid var(--accent);border-radius:999px;padding:6px 12px;min-height:30px;cursor:pointer;width:auto;margin:0;
+/* ⏰予約 / 📅カレンダー 起動ボタン(旧タブを廃してアカウント帯の宵桜艶帖の右横へ移設。予約が左・カレンダーが右)。
+   ★白字・白枠で囲む(Chami 2026-07-31)。作業タブの上に“重ねて開く”オーバーレイで、開いている間だけ薄い塗り(.active)。 */
+.cal-launch-btn{flex:0 0 auto;font-family:inherit;font-size:11px;font-weight:700;background:transparent;color:#fff;
+  border:1px solid #fff;border-radius:999px;padding:6px 12px;min-height:30px;cursor:pointer;width:auto;margin:0;
   white-space:nowrap;line-height:1.15;}
-.cal-launch-btn.active{background:var(--accent);color:#04222a;}
+.cal-launch-btn.active{background:rgba(255,255,255,.18);color:#fff;}
 
 /* ── 短縮URL表示 ── */
 .short-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;}

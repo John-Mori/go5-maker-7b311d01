@@ -14,17 +14,22 @@
   var TABS = [
     { btn: 'tabRank',    page: 'pageRank'    },
     { btn: 'tabCand',    page: 'pageCand'    },
-    { btn: 'tabReserve', page: 'pageReserve' },
     { btn: 'tabVerify', page: 'pageVerify'   },
     { btn: 'tabAnalyze', page: 'pageAnalyze' },
     { btn: 'tabMovie',  page: 'pageMovie'    },
     { btn: 'tabStock',  page: 'pageStock'    },
+    { btn: 'reserveBtn', page: 'pageReserve' },
     { btn: 'calBtn',    page: 'pageCalendar' },
     { btn: 'tabYT',     page: 'pageYouTube'  },
     { btn: 'tabPost',   page: 'pagePost'     },
     { btn: 'tabAffi',   page: 'pageAffi'     },
     { btn: 'tabSettings', page: 'pageSettings' }
   ];
+  // アカウント帯のボタン(⏰予約 / 📅カレンダー)は「タブ」ではなく“上に重ねて開く”オーバーレイ扱い。
+  //   もう一度同じボタンを押すと直前の作業タブへ戻る(Chami 2026-07-31)。タブバーには置かない。
+  var OVERLAY_BTNS = { reserveBtn: 1, calBtn: 1 };
+  var currentTab = 'tabMovie';          // いま前面に出している btn id
+  var prevWorkTab = 'tabMovie';         // オーバーレイを開く直前の“作業タブ”(戻り先)
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む。(遅延ロード)
   function lazyLoadCalendar() {
     var f = document.getElementById('calFrame');
@@ -38,10 +43,13 @@
       p.hidden = !on;
       b.classList.toggle('active', on);
     });
+    currentTab = activeBtnId;
     // 現在タブをCSSへ通知。(ランキングタブだけクリーム背景＋金文字にするフック)
     document.documentElement.setAttribute('data-tab', activeBtnId);
-    // リロード/再アクセス時に前回のタブを復元するため保存。
-    try { localStorage.setItem('go5_active_tab', activeBtnId); } catch (e) {}
+    // リロード/再アクセス時に前回の“作業タブ”を復元するため保存。
+    //   ★オーバーレイ(予約/カレンダー)は作業の上に重ねるだけなので復元対象にしない
+    //   (再アクセス時は下の作業タブへ戻す)。
+    if (!OVERLAY_BTNS[activeBtnId]) { try { localStorage.setItem('go5_active_tab', activeBtnId); } catch (e) {} }
     if (activeBtnId === 'calBtn') {
       lazyLoadCalendar();
       // iframeは再ロードされないため、開くたびに「表示された」と伝えて今日へ寄せさせる。
@@ -53,12 +61,21 @@
     }
     if (activeBtnId === 'tabRank'    && window.YtRank)   window.YtRank.renderRank();
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
-    if (activeBtnId === 'tabReserve' && window.Scheduler) window.Scheduler._renderTab();
+    if (activeBtnId === 'reserveBtn' && window.Scheduler) window.Scheduler._renderTab();
     if (activeBtnId === 'tabStock'   && window.Go5Stock)  window.Go5Stock.render();
   }
   TABS.forEach(function (t) {
     var b = document.getElementById(t.btn);
-    if (b) b.addEventListener('click', function () { showTab(t.btn); });
+    if (!b) return;
+    b.addEventListener('click', function () {
+      if (OVERLAY_BTNS[t.btn]) {
+        // 開いているボタンをもう一度押した＝直前の作業タブへ戻す(トグル)。
+        if (currentTab === t.btn) { showTab(prevWorkTab || 'tabMovie'); return; }
+        // これから重ねる＝下にある作業タブを戻り先として覚える(オーバーレイ同士の切替では上書きしない)。
+        if (!OVERLAY_BTNS[currentTab]) prevWorkTab = currentTab;
+      }
+      showTab(t.btn);
+    });
   });
   // 前回表示していたタブを復元。(リロード/再アクセスで動画作成に強制的に戻らないように)
   //   全モジュール(YtRank/Go5Cand/Scheduler等)が定義された後に実行したいので DOMContentLoaded を待つ
@@ -78,7 +95,8 @@
   function restoreActiveTab_() {
     var saved = '';
     try { saved = localStorage.getItem('go5_active_tab') || ''; } catch (e) {}
-    var ok = saved && TABS.some(function (t) { return t.btn === saved; }) && document.getElementById(saved);
+    // ★オーバーレイ(予約/カレンダー)は復元対象にしない＝再アクセス時は下の作業タブへ戻す。
+    var ok = saved && !OVERLAY_BTNS[saved] && TABS.some(function (t) { return t.btn === saved; }) && document.getElementById(saved);
     var activeId;
     if (ok && saved !== 'tabMovie') {
       showTab(saved); activeId = saved; // 保存タブへ復元(既定=動画作成なら showTab しない)
