@@ -871,7 +871,11 @@
     // 🔥割引一覧。(ON中は常に「案内する作品URL」より後ろに付く＝ここで最後に追加するだけで済む)
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
-      if (dlink) { if (caption.indexOf(dlink) < 0) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink; }
+      // 本文に同じセール短縮URLを手書きしている時は自動追記しない(https有無を無視した重複判定)。
+      //   Chami報告2026-07-31②: 本文へ「夏の同人祭 5mgl.com/X1iAF」を入れたのに⭐同人はこちらで同じX1iAFが
+      //   もう一度付き二重化していた(dlink=https://付き・本文=bare形でindexOfが不一致だった)。
+      var dbare = String(dlink || '').replace(/^https?:\/\//, '');
+      if (dlink) { if (caption.indexOf(dlink) < 0 && (!dbare || caption.indexOf(dbare) < 0)) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink; }
       else ensureDiscountLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }); // 未キャッシュなら取得だけ開始し、出来次第プレビュー/モーダルへ反映
     }
     return out;
@@ -895,7 +899,9 @@
       }
       if (discountListOn_()) {
         var dlink = cachedDiscountLink_();
-        if (dlink && out.indexOf(dlink) < 0) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink;
+        // 本文に同じセール短縮URLが既にある時(https有無どちらでも)は二重に足さない(Chami報告2026-07-31②)。
+        var dbare = String(dlink || '').replace(/^https?:\/\//, '');
+        if (dlink && out.indexOf(dlink) < 0 && (!dbare || out.indexOf(dbare) < 0)) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink;
       }
       if (link && out.indexOf(link) >= 0) {
         var shortX = (workShortCache_.forLink === link) ? workShortCache_.shareUrl : '';

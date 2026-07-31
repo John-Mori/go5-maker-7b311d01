@@ -569,7 +569,10 @@
           '</div>' +
         '</div>' +
         '<div style="padding:16px 16px 20px;">' +
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="' + sH + 'flex:1;min-width:0;">X 投稿</div><button type="button" id="draftCopyX" style="' + btnW + '">コピー</button></div>' +
+          // ★見出しは white-space:nowrap で必ず1行に(flex:1;min-width:0 だと iOS Safari で幅が1文字ぶんへ潰れ、
+          //   日本語は文字間どこでも改行できるため「X／投／稿」と縦積みになっていた・Chami報告2026-07-31①)。
+          //   コピーは margin-left:auto で右端へ寄せ、幅は文字ぶんだけ(Chami③「文字の幅に合うだけ」)。
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="' + sH + 'white-space:nowrap;">X 投稿</div><button type="button" id="draftCopyX" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
           '<textarea id="draftXText" rows="6" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
           '<div style="' + rowWrap + '">' +
@@ -578,9 +581,9 @@
           '</div>' +
           '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div style="font-size:.78rem;font-weight:600;color:var(--sub);flex:1;min-width:0;">題名(コピーして貼り付け)</div><button type="button" id="draftCopyYtTitle" style="' + btnW + '">題名をコピー</button></div>' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div style="font-size:.78rem;font-weight:600;color:var(--sub);white-space:nowrap;">題名(コピーして貼り付け)</div><button type="button" id="draftCopyYtTitle" style="' + btnW + 'margin-left:auto;">題名をコピー</button></div>' +
           '<textarea id="draftYtTitleText" readonly rows="3" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' +
-          '<div style="display:flex;align-items:center;gap:8px;' + fL + '"><span style="flex:1;min-width:0;">タグ(半角スペース区切り)</span><button type="button" id="draftCopyYtTags" style="' + btnW + '">コピー</button></div>' +
+          '<div style="display:flex;align-items:center;gap:8px;' + fL + '"><span style="white-space:nowrap;">タグ(半角スペース区切り)</span><button type="button" id="draftCopyYtTags" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
           '<div style="' + fL + '">' +
             '<svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)' +
