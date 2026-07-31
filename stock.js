@@ -897,9 +897,10 @@
     // ★動画を雲へ上げるのを「ドラフトタブを開いたら」から「アプリが開いていれば裏で」へ格上げ
     //   (Chami依頼2026-07-31: わざわざドラフトタブをタップしなくても上がるように)。
     //   起動直後・タブが前面に戻った時・以後は45秒ごとに、実体を持つ端末が未アップの動画を運ぶ。
-    setTimeout(sweepVideoMirror_, 2500); // 起動直後(sync設定の読み込みを少し待つ)
+    setTimeout(sweepVideoMirror_, 1000);  // 起動直後(sync設定の読み込みを少し待つ・追いつきを速く)
+    setTimeout(sweepVideoMirror_, 6000);  // 1本目でsync未設定だった時の取りこぼしを拾う二度目
     document.addEventListener('visibilitychange', function () { if (!document.hidden) sweepVideoMirror_(); });
-    setInterval(sweepVideoMirror_, 45000);
+    setInterval(sweepVideoMirror_, 30000);
 
     // 初回アクセスでドラフトが空表示になる穴の根治(Chami 2026-07-29):
     //   affiliate.js の restoreActiveTab_ が「このモジュールより先」に走ると、ドラフトタブへ
