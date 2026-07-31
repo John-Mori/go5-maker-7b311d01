@@ -107,6 +107,27 @@
     }).catch(function () {});
   }
 
+  // ── ② 動画本体を全端末でDLできるようにする(2026-08-01・Chami依頼)──
+  //   動画blob(stock_v_)は重いので周期同期レールには載せず、R2へ raw-bytes hash で直接PUT。
+  //   台帳(ドラフトメタ)には vidHash だけ持たせ(=go5_stock_metaのsyncに相乗り・軽い)、
+  //   実体を持たない端末(2台目)は downloadStock_ の時に vidHash で R2 からGETして落とす。
+  //   実体を持つ端末だけが未アップ時に1回上げる(冪等)。既存ドラフトも開けば後追いで運ばれる。
+  function ensureVideoMirror_(id) {
+    var store = idb(); if (!store) return;
+    if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2)) return;
+    var meta = loadMeta().filter(function (m) { return m.id === id; })[0];
+    if (!meta || meta.vidHash) return; // 既に雲へ上げ済み=何もしない
+    store.get('stock_v_' + id).then(function (blob) {
+      if (!blob) return; // 実体が無い端末=上げない(同期で hash が降ってくる側)
+      return Go5Sync.putBlobR2(blob).then(function (h) {
+        if (!h) return; // 失敗(未設定/上限超/通信)=次回の描画でまた試す(非破壊)
+        var arr = loadMeta();
+        var m2 = arr.filter(function (x) { return x.id === id; })[0];
+        if (m2 && !m2.vidHash) { m2.vidHash = h; saveMeta(arr); } // saveMeta が kickSync_ する
+      });
+    }).catch(function () {});
+  }
+
   function idb() { return window.Go5Idb; }
 
   // ── サムネ取得(canvas最終フレームを小さいJPEGに) ──
@@ -198,6 +219,7 @@
         arr.unshift(meta);
         saveMeta(arr);
         ensureBlobMirror_(id); // ①-B サムネ/プレビュー/元画像を雲へ(2台目でも出す)
+        ensureVideoMirror_(id); // ② 動画本体もR2へ(2台目でDLできるように)
         return id;
       });
     });
@@ -257,6 +279,19 @@
     var store = idb();
     if (!store) { alert('IndexedDB未対応のため再DLできません。'); return; }
     store.get('stock_v_' + id).then(function (blob) {
+      if (blob) return blob;
+      // ★実体が無い端末(2台目)=同期で来た vidHash があれば R2 から取り寄せて落とす(②・2026-08-01)。
+      var meta = loadMeta().filter(function (m) { return m.id === id; })[0]
+               || loadArchive().filter(function (m) { return m.id === id; })[0];
+      var h = meta && meta.vidHash;
+      if (h && window.Go5Sync && Go5Sync.fetchBlobR2) {
+        return Go5Sync.fetchBlobR2(h).then(function (b) {
+          if (b) { try { idb().set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即DL
+          return b;
+        });
+      }
+      return null;
+    }).then(function (blob) {
       if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
       var name = videoName || 'video.mp4';
       // ★iPhoneはカメラロール(アルバム)へ直接入れたい(Chami指示2026-07-29)。<a download>だと「ファイル」アプリ止まりで
@@ -427,6 +462,7 @@
         if (blob) {
           _thumbCache[m.id] = URL.createObjectURL(blob);
           ensureBlobMirror_(m.id); // 実体を持つ端末=未送なら雲へミラー(①-B・既存ドラフトの後追い同期)
+          ensureVideoMirror_(m.id); // 実体を持つ端末=未送なら動画本体もR2へ(②・既存ドラフトの後追い)
           return _thumbCache[m.id];
         }
         // 実体が無い端末(2台目)=同期で来た stock:imgs ミラーの dataURL からサムネを出す(①-B)

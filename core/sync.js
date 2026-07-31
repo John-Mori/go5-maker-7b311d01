@@ -492,8 +492,28 @@
     _reqTimer = root.setTimeout(function () { _reqTimer = null; syncOnce(false); }, wait);
   }
 
+  // ── 動画など重いblobの on-demand R2 経路(②・2026-08-01)──
+  //   周期同期レール(isSyncIdbKey)には載せない=積んでも同期は軽いまま。実体はraw-bytesのsha256でR2へ直接PUT、
+  //   台帳(ドラフトメタ)には hash 文字列だけ持たせ、必要な端末が必要な時にGETで取り寄せる。
+  function putBlobR2(blob) {
+    if (!configured() || !blob || !subtle || !blob.arrayBuffer) return Promise.resolve("");
+    return blob.arrayBuffer().then(function (buf) {
+      return subtle.digest("SHA-256", buf).then(function (d) {
+        var h = hex(d);
+        return api("/api/img/" + h, { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: buf })
+          .then(function (r) { return r && r.ok ? h : ""; }).catch(function () { return ""; });
+      });
+    }).catch(function () { return ""; });
+  }
+  function fetchBlobR2(hash) {
+    var c = cfg();
+    if (!/^https?:\/\//.test(c.url) || !/^[a-f0-9]{16,64}$/.test(String(hash || ""))) return Promise.resolve(null);
+    return root.fetch(c.url + "/img/" + hash).then(function (r) { return r && r.ok ? r.blob() : null; }).catch(function () { return null; });
+  }
+
   root.Go5Sync = {
     configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, status: status, startAuto: startAuto,
+    putBlobR2: putBlobR2, fetchBlobR2: fetchBlobR2,
     setConfig: function (o) {
       try {
         if (o.url != null) LS.setItem("sync2_url", String(o.url).trim());

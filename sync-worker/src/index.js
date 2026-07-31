@@ -130,7 +130,7 @@ async function putImage(key, request, env, cors) {
   if (existing) return json({ ok: true, key, deduped: true }, 200, cors); // 冪等：同一content-hashは再保存しない
   const ct = request.headers.get("Content-Type") || "application/octet-stream";
   const buf = await request.arrayBuffer();
-  if (buf.byteLength > 12 * 1024 * 1024) return json({ ok: false, error: "img_too_large" }, 413, cors);
+  if (buf.byteLength > 30 * 1024 * 1024) return json({ ok: false, error: "img_too_large" }, 413, cors); // 画像+5秒動画本体(②)を許容=30MB
   await env.SYNC_IMAGES.put(key, buf, { httpMetadata: { contentType: ct, cacheControl: "public, max-age=31536000, immutable" } });
   return json({ ok: true, key }, 200, cors);
 }
