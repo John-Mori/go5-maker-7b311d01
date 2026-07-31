@@ -510,10 +510,30 @@
     if (!/^https?:\/\//.test(c.url) || !/^[a-f0-9]{16,64}$/.test(String(hash || ""))) return Promise.resolve(null);
     return root.fetch(c.url + "/img/" + hash).then(function (r) { return r && r.ok ? r.blob() : null; }).catch(function () { return null; });
   }
+  // ── 論理名アドレスの blob 経路(KV非依存・2026-08-01)──
+  //   R2キー = sha256hex(論理名)。両端末が「同じ論理名」から同じ鍵を算出できる=
+  //   ポインタ(hash)を state同期(KV)で配る必要が無い。KVが制限で詰まっても2台目が取り寄せられる。
+  //   ★用途: 動画本体(名前="go5vid:"+ドラフトID)。IDは既にメタ同期で両端末が持っている。
+  function putBlobR2At(name, blob) {
+    if (!configured() || !blob || !subtle || !blob.arrayBuffer) return Promise.resolve("");
+    return sha256hex(String(name)).then(function (key) {
+      return blob.arrayBuffer().then(function (buf) {
+        return api("/api/img/" + key, { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: buf })
+          .then(function (r) { return r && r.ok ? key : ""; }).catch(function () { return ""; });
+      });
+    }).catch(function () { return ""; });
+  }
+  function fetchBlobR2At(name) {
+    var c = cfg();
+    if (!/^https?:\/\//.test(c.url) || !subtle) return Promise.resolve(null);
+    return sha256hex(String(name)).then(function (key) {
+      return root.fetch(c.url + "/img/" + key).then(function (r) { return r && r.ok ? r.blob() : null; }).catch(function () { return null; });
+    }).catch(function () { return null; });
+  }
 
   root.Go5Sync = {
     configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, status: status, startAuto: startAuto,
-    putBlobR2: putBlobR2, fetchBlobR2: fetchBlobR2,
+    putBlobR2: putBlobR2, fetchBlobR2: fetchBlobR2, putBlobR2At: putBlobR2At, fetchBlobR2At: fetchBlobR2At,
     setConfig: function (o) {
       try {
         if (o.url != null) LS.setItem("sync2_url", String(o.url).trim());

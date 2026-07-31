@@ -108,24 +108,32 @@
   }
 
   // ── ② 動画本体を全端末でDLできるようにする(2026-08-01・Chami依頼)──
-  //   動画blob(stock_v_)は重いので周期同期レールには載せず、R2へ raw-bytes hash で直接PUT。
-  //   台帳(ドラフトメタ)には vidHash だけ持たせ(=go5_stock_metaのsyncに相乗り・軽い)、
-  //   実体を持たない端末(2台目)は downloadStock_ の時に vidHash で R2 からGETして落とす。
-  //   実体を持つ端末だけが未アップ時に1回上げる(冪等)。既存ドラフトも開けば後追いで運ばれる。
+  //   ★KV非依存の content-addressed 経路(2026-08-01 改訂)。
+  //   旧: R2へ raw-bytes hash でPUT→hashを vidHash としてメタ(state同期=KV)に載せて2台目へ配る。
+  //       →KVが日次制限で詰まると vidHash が2台目に届かず「永遠にDLできない」(Chami実測2026-07-31)。
+  //   新: R2キー = sha256("go5vid:"+ドラフトID)。IDは既にメタ同期で両端末が持っている=
+  //       2台目は自分でキーを算出して直接GETできる。ポインタをKVで配る必要が無い。
+  //   実体を持つ端末だけが未アップ時に1回上げる(冪等)。手元マーカー(_vidUp)で二重PUTを避ける。
+  var VIDNAME = function (id) { return 'go5vid:' + id; };
+  var _vidUp = {}; // このセッションでアップ済みID(再PUT抑止・ローカルのみ)
   function ensureVideoMirror_(id) {
     var store = idb(); if (!store) return;
-    if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2)) return;
-    var meta = loadMeta().filter(function (m) { return m.id === id; })[0];
-    if (!meta || meta.vidHash) return; // 既に雲へ上げ済み=何もしない
+    if (_vidUp[id]) return;
+    if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return;
     store.get('stock_v_' + id).then(function (blob) {
-      if (!blob) return; // 実体が無い端末=上げない(同期で hash が降ってくる側)
-      return Go5Sync.putBlobR2(blob).then(function (h) {
-        if (!h) return; // 失敗(未設定/上限超/通信)=次回の描画でまた試す(非破壊)
-        var arr = loadMeta();
-        var m2 = arr.filter(function (x) { return x.id === id; })[0];
-        if (m2 && !m2.vidHash) { m2.vidHash = h; saveMeta(arr); } // saveMeta が kickSync_ する
+      if (!blob) return; // 実体が無い端末=上げない(取り寄せる側)
+      return Go5Sync.putBlobR2At(VIDNAME(id), blob).then(function (key) {
+        if (key) _vidUp[id] = 1; // 成功=このセッションでは再送しない。失敗時は次のsweepでまた試す(非破壊)
       });
     }).catch(function () {});
+  }
+  // ★ドラフトタブを開かなくても、アプリが開いてさえいれば裏で全ドラフト/作成履歴の動画を雲へ上げる
+  //   (Chami依頼2026-07-31「わざわざドラフトタブをタップしなくても雲に上がるように」)。
+  function sweepVideoMirror_() {
+    try {
+      loadMeta().forEach(function (m) { ensureVideoMirror_(m.id); });
+      loadArchive().forEach(function (m) { ensureVideoMirror_(m.id); });
+    } catch (e) {}
   }
 
   function idb() { return window.Go5Idb; }
@@ -274,38 +282,22 @@
     delBlobs_(id);
   }
 
-  // ── 動画本体の取得(実体が手元に無い2台目は vidHash で R2 から取り寄せ・②2026-08-01)──
+  // ── 動画本体の取得(実体が手元に無い2台目は ID→R2キー算出で取り寄せ・②2026-08-01)──
   //   DL・投稿完了(Driveアップロード)の両方がこれを通す=片方だけ直して片方が「動画が見つかりません」で
   //   止まる事故を防ぐ(Chami指摘2026-07-31: 2台目で投稿完了が動画未検出で失敗)。
-  function metaOf_(id) {
-    return loadMeta().filter(function (m) { return m.id === id; })[0]
-        || loadArchive().filter(function (m) { return m.id === id; })[0] || null;
-  }
   function resolveVideoBlob_(id) {
     var store = idb();
     if (!store) return Promise.resolve(null);
-    function fromR2() {
-      var meta = metaOf_(id);
-      var h = meta && meta.vidHash;
-      if (h && window.Go5Sync && Go5Sync.fetchBlobR2) {
-        return Go5Sync.fetchBlobR2(h).then(function (b) {
+    return store.get('stock_v_' + id).then(function (blob) {
+      if (blob) return blob;
+      // ★手元に実体が無い=キーを ID から算出して R2 から直接取り寄せ(vidHash不要=KV非依存)。
+      if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
+        return Go5Sync.fetchBlobR2At('go5vid:' + id).then(function (b) {
           if (b) { try { store.set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即使える
           return b;
         });
       }
-      return Promise.resolve(null);
-    }
-    return store.get('stock_v_' + id).then(function (blob) {
-      if (blob) return blob;
-      return fromR2().then(function (b) {
-        if (b) return b;
-        // vidHash がこの端末のメタにまだ無い=1台目のアップロード/メタ同期が届いていないだけの可能性。
-        // 諦める前に一度だけ同期を取り寄せて再試行(2台目で「まだ届いてない」だけのケースを自己修復)。
-        if (window.Go5Sync && Go5Sync.syncNow) {
-          return Go5Sync.syncNow().then(fromR2).catch(function () { return null; });
-        }
-        return null;
-      });
+      return null;
     });
   }
 
@@ -315,13 +307,8 @@
     if (!store) { alert('IndexedDB未対応のため再DLできません。'); return; }
     resolveVideoBlob_(id).then(function (blob) {
       if (!blob) {
-        // ★どの段で落ちたかで文言を分ける=次回どちらのケースかChamiに分かる/対処もそれぞれ違う。
-        var m = metaOf_(id);
-        if (m && m.vidHash) {
-          alert('動画を雲(R2)から取り寄せできませんでした。通信状態を確認して、もう一度お試しください。');
-        } else {
-          alert('この端末にはまだ動画本体が届いていません。動画を作成した端末で「候補(ドラフト)」タブを一度開くと雲へ上がり、この端末でも落とせるようになります。');
-        }
+        // 手元にも雲にも無い=作った端末からまだ上がっていない(その端末でアプリを開けば数十秒で上がる)。
+        alert('動画がまだ雲に届いていません。動画を作成した端末でこのアプリを開いていれば数十秒で自動的に上がります。少し待ってもう一度お試しください。');
         return;
       }
       var name = videoName || 'video.mp4';
@@ -906,6 +893,14 @@
     }
 
     window.Go5Stock = { render: render };
+
+    // ★動画を雲へ上げるのを「ドラフトタブを開いたら」から「アプリが開いていれば裏で」へ格上げ
+    //   (Chami依頼2026-07-31: わざわざドラフトタブをタップしなくても上がるように)。
+    //   起動直後・タブが前面に戻った時・以後は45秒ごとに、実体を持つ端末が未アップの動画を運ぶ。
+    setTimeout(sweepVideoMirror_, 2500); // 起動直後(sync設定の読み込みを少し待つ)
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) sweepVideoMirror_(); });
+    setInterval(sweepVideoMirror_, 45000);
+
     // 初回アクセスでドラフトが空表示になる穴の根治(Chami 2026-07-29):
     //   affiliate.js の restoreActiveTab_ が「このモジュールより先」に走ると、ドラフトタブへ
     //   復元されても showTab の render 呼び出しが window.Go5Stock 未定義でスキップされ、
