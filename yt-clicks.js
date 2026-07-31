@@ -53,6 +53,16 @@
     return (r.slice(0, i).trim() || r.trim()); // #開始の題名は全消えを避けて原文のまま
   }
   function missingCommonTags(t) { return String(t || '').indexOf('#') < 0; }
+  // 題名から定番タグに依存せずハッシュタグを抽出する(Chami依頼2026-07-31)。固定リストを持たないので
+  //   実験でタグを変えても「実際に入っているタグ」がそのまま採れる。Chami保証の形式＝
+  //   「題名<半角スペース1個>#tag #tag…」。半角スペース以降の #語 を拾い、無ければ題名全体から拾う。
+  function titleHashtags_(title) {
+    var t = String(title || '');
+    var sp = t.indexOf(' '); // 最初の半角スペース＝題名とタグの区切り
+    var body = sp >= 0 ? t.slice(sp + 1) : t;
+    var m = (body.match(/#[^\s#]+/g)) || (t.match(/#[^\s#]+/g)) || [];
+    return m.join(' ');
+  }
   function histKey() { return 'short_hist__' + acct(); }
   function manualKey() { return 'verify_manual__' + acct(); }
   function ytMapKey() { return 'verify_yt__' + acct(); }
@@ -1319,6 +1329,8 @@
       workUrl: it.workUrl || '',
       shortUrl: it.shortUrl || '',
       shareUrl: it.shareUrl || '',
+      hashtags: titleHashtags_(it.title), // ハッシュタグ列＝題名から抽出(定番タグ依存を廃止・Chami依頼2026-07-31)。
+                                          //   ドラフト投稿完了経路がハッシュタグを送っておらずAH列が空になる不整合を塞ぐ。
       youtube_url: it.ytUrl || '',   // ★YouTube動画URL列へ反映=サーバーがvidを認識→日別記録(デルタ)開始。
                                      //   これが空だとシートにvidが無く、スナップされず「記録待ち」が永久固定になる(根治)
       work_short_url: it.workShortUrl || '' // 導線2(作品クリック)の計測URL=作品クリック数の日次スナップ元(GAS 14C)
@@ -1899,7 +1911,13 @@
     if (opts.workUrl) entry.workUrl = opts.workUrl;
     if (shortUrl) entry.shortUrl = shortUrl;
     if (opts.shareUrl) entry.shareUrl = opts.shareUrl;
-    if (opts.videoId || vid) entry.videoId = opts.videoId || vid;
+    // post_id(=背骨ID)は idgen形式 `acc-YYYYMMDD-HHMM-rand` を正本にする。以前はここで opts.videoId が
+    //   空だと YouTube動画ID(vid)を videoId＝post_id へ流用しており、シートの post_id 列に YouTube ID が
+    //   そのまま入ってしまっていた(Chami指摘2026-07-31・ドラフト投稿モードで videoId 未伝搬の行が該当)。
+    //   YouTube ID は entry.ytUrl / ymap に別途保持していて再生数計測はそちらで効くので、post_id には使わない。
+    //   videoId が来ていればそれ(ドラフトの背骨ID)、無ければ idgen で正規IDを発番＝「今まで通り」の形式へ戻す。
+    if (opts.videoId) entry.videoId = opts.videoId;
+    else if (window.IdGen && window.IdGen.makeVideoId) entry.videoId = window.IdGen.makeVideoId(acc, new Date(), {});
     entry.workState = opts.workState || '旧作';
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
     if (opts.attrs) ATTR_DEFS.forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
