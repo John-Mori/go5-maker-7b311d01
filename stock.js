@@ -380,6 +380,16 @@
       }
       // ①投稿完了 → 投稿履歴へ1件記録(既存の投稿履歴機構=Go5History)。載れば予約公開の動画は
       //   既存の updateYtScheduled_ が予約タブへ拾う(②は自動達成)。ytUrl も shortUrl も無ければ載せない。
+      // ★投稿完了の時点で拾い直す：作成時スナップ(meta)が空でも、動画作成タブのライブ値から
+      //   ジャンル・作品URLを補う。動画を"作った瞬間"はまだ未入力で、Chamiは後からFANZA自動反映や
+      //   手入力で埋めるため、meta が空のまま履歴へ渡り「ジャンル未チェック・導線2URL空」になっていた
+      //   (Chami指摘2026-07-31 msg1532858293440090163)。meta を優先し、空の時だけライブUIで補完する。
+      var liveAttrs = readMovieAttrs_();
+      var histAttrs = (meta.attrs && Object.keys(meta.attrs).length) ? meta.attrs
+        : (Object.keys(liveAttrs).length ? liveAttrs : null);
+      var liveWorkUrl = (($('movieWorkUrl') || {}).value || '').trim();
+      var liveAffi = (($('movieWorkAffi') || {}).value || '').trim();
+      var histWorkUrl = meta.workUrl || meta.affiliateUrl || liveWorkUrl || liveAffi || '';
       try {
         if (window.Go5History && typeof window.Go5History.addCompletedPost === 'function') {
           window.Go5History.addCompletedPost({
@@ -387,9 +397,9 @@
             ytUrl: ytUrl || '',
             shortUrl: shortUrl || '',
             title: meta.title || '',
-            workUrl: meta.workUrl || meta.affiliateUrl || '',
+            workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
             videoId: meta.videoId || '',
-            attrs: meta.attrs || null // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30)
+            attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
           });
         }
       } catch (e) {}
