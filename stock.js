@@ -64,9 +64,21 @@
   }
 
   function loadMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || '[]') || []; } catch (e) { return []; } }
-  function saveMeta(arr) { try { localStorage.setItem(META_KEY, JSON.stringify(arr.slice(0, MAX))); } catch (e) {} }
+  function saveMeta(arr) { try { localStorage.setItem(META_KEY, JSON.stringify(arr.slice(0, MAX))); } catch (e) {} kickSync_(); }
   function loadArchive() { try { return JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]') || []; } catch (e) { return []; } }
   function saveArchive(arr) { try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(arr.slice(0, ARCHIVE_MAX))); } catch (e) {} }
+  // 全端末同期(Go5Sync)へ即時反映を促す。(未設定・未ロードなら何もしない)ドラフトを保存したら他端末へ運ぶ。
+  function kickSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
+  // ドラフト削除の墓標。(id→削除ts)端末をまたいで「消したドラフトが union で復活する」のを防ぐ=候補の cand_del と同型。
+  //   投稿完了・削除でドラフト本体から外す時に打つ。復元(restoreStock_)は addedAt=now を打って墓標を越える。
+  function writeStockDel_(id) {
+    try {
+      var m = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
+      m[id] = Date.now();
+      localStorage.setItem('go5_stock_del', JSON.stringify(m));
+    } catch (e) {}
+    kickSync_();
+  }
   function delBlobs_(id) {
     var store = idb();
     if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); store.del('stock_img_' + id).catch(function () {}); }
@@ -131,6 +143,7 @@
     var title = evDetail.title || '';
     var meta = {
       id: id, ts: ts,
+      addedAt: ts, // 墓標(go5_stock_del)を越えて残すための追加時刻。復元時は now で打ち直す(全端末同期)。
       account: evDetail.account || 'acc1',
       label: title.length > 22 ? title.slice(0, 22) + '…' : (title || '(無題)'),
       title: title,
@@ -169,7 +182,9 @@
 
   // ── 削除 ──
   function deleteStock_(id) {
+    writeStockDel_(id); // 墓標＝他端末でも消す(復活防止)
     saveMeta(loadMeta().filter(function (m) { return m.id !== id; }));
+    try { localStorage.removeItem('go5_draft_post_' + id); } catch (e) {} // 投稿編集も掃除(同期で削除が伝播)
     delBlobs_(id);
   }
 
@@ -180,6 +195,7 @@
     var meta = metas.filter(function (m) { return m.id === id; })[0];
     if (!meta) return;
     meta.completedTs = Date.now();
+    writeStockDel_(id); // 投稿完了＝ドラフト本体から外す。他端末のドラフト一覧からも消す(復活防止)
     saveMeta(metas.filter(function (m) { return m.id !== id; }));
     var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
     arch.unshift(meta);
@@ -194,6 +210,7 @@
     var meta = arch.filter(function (m) { return m.id === id; })[0];
     if (!meta) return;
     delete meta.completedTs;
+    meta.addedAt = Date.now(); // ★墓標(投稿完了/削除で打たれた)を越えて復活させる=全端末で戻る
     arch = arch.filter(function (m) { return m.id !== id; });
     var metas = loadMeta().filter(function (m) { return m.id !== id; });
     metas.unshift(meta);
@@ -453,6 +470,7 @@
       xShortUrl: (slotEl && slotEl.dataset.url) || '',
     };
     try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
+    kickSync_(); // 投稿編集も全端末へ運ぶ
   }
 
   // ★投稿本文の「正」= 投稿タブのテキストボックス(テンプレ帳の本文・アカウント別)。Chami指定2026-07-31:
@@ -742,6 +760,12 @@
     if (tabStockBtn) tabStockBtn.addEventListener('click', function () { setTimeout(render, 0); });
 
     document.addEventListener('account-changed', function () {
+      var page = $('pageStock');
+      if (page && !page.hidden) render();
+    });
+
+    // ★全端末同期で別端末のドラフトが降ってきたら、開いていれば即再描画(タブを再タップしなくても出る)。
+    document.addEventListener('go5-synced', function () {
       var page = $('pageStock');
       if (page && !page.hidden) render();
     });

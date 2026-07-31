@@ -3,6 +3,9 @@
  *
  * 同期対象：
  *   ・localStorage の「設定」(Go5Keys.syncAllowed) と「候補テキスト」。(cand_items ・ cand_tabs ・ cand_hidden__ 系)
+ *   ・「下書き(ドラフト)」の一覧と投稿編集。(go5_stock_meta ＝ id 単位 union / go5_stock_del ＝ 削除の墓標 /
+ *     go5_draft_post_* ＝ per-id LWW)全端末でドラフトを共有する。(Chami依頼2026-07-31)
+ *     ★動画本体(stock_v_)・サムネ/画像(stock_t_/stock_img_)は重いので①-Aでは同期しない。(②で運び方を決める)
  *   ・IndexedDB の候補素材。(ref:/bsky:/post: ＝ 参照画像・コメント・メモ)画像は R2 に content-hash で保存し、
  *     状態には {__img:<hash>} だけ入れる。(blobを小さく保つ)
  *   ・「鍵(アプリPW等)」は passphrase で AES-GCM 暗号化した1件(__sec)としてだけ同期。(平文はクラウドに出さない)
@@ -34,6 +37,9 @@
     if (/^cand_del(__|$)/.test(k)) return true;          // 削除の墓標(候補復活の恒久対策・INC 2026-07-15)
     if (/^cand_hidden__/.test(k)) return true;           // 非表示リスト
     if (k === "cand_hide_posted") return true;
+    if (/^go5_stock_meta$/.test(k)) return true;         // ドラフト一覧(id単位union・Chami依頼2026-07-31)
+    if (/^go5_stock_del$/.test(k)) return true;          // ドラフト削除の墓標(端末をまたぐ削除の伝播)
+    if (/^go5_draft_post_/.test(k)) return true;         // 下書きの投稿編集(per-id・LWW)
     if (Keys && Keys.syncAllowed(k)) return true;        // 本物の設定(レイアウト/本文/説明欄/af_id 等)
     return false;
   }
@@ -166,6 +172,11 @@
   // 候補リスト(cand_items / cand_items__*)は配列を1キーに持つため、whole-key LWW だと初回に別端末の
   //   候補を丸ごと消し得る。cid で union し、重複cidは newer 側を採用＝「集めた候補を失わない」。
   function isCandArrayKey(k) { return /^cand_items(__|$)/.test(String(k)); }
+  // 下書き(ドラフト)一覧＝1キーに配列を持つ。候補と同じく id 単位 union で「端末をまたいだ下書きを失わない」。
+  function isStockArrayKey(k) { return /^go5_stock_meta$/.test(String(k)); }
+  function isStockDelKey(k) { return /^go5_stock_del$/.test(String(k)); }
+  // 配列キーの id フィールド名。(候補=cid / ドラフト=id)union/墓標の両方で使う。
+  function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : (isStockArrayKey(k) ? "id" : null); }
   // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
   function isEmptyVal_(v) { return v === undefined || v === null || v === ""; }
   // ★同一cidの2レコードをフィールド単位で統合する。newer を基本に採るが、newer 側で空(欠け)の
@@ -185,20 +196,24 @@
     }
     return out;
   }
-  function unionCand(olderStr, newerStr) {
+  // id フィールドで配列を union。(候補=cid / ドラフト=id)重複はフィールド単位で統合(newer優先・空で消さない)。
+  function unionByField(olderStr, newerStr, idField) {
+    idField = idField || "cid";
     try {
       var older = JSON.parse(olderStr || "[]"), newer = JSON.parse(newerStr || "[]");
       if (!Array.isArray(older) || !Array.isArray(newer)) return null;
-      var byCid = {}, order = [], anon = 0;
+      var byId = {}, order = [], anon = 0;
       function add(arr) { arr.forEach(function (it) {
-        var key = (it && it.cid != null) ? ("c:" + it.cid) : ("a:" + (anon++));
-        if (!(key in byCid)) { order.push(key); byCid[key] = it; }
-        else byCid[key] = mergeCandItem_(byCid[key], it); // 重複cid＝フィールド単位で統合(newer優先・空で消さない)
+        var idv = it ? it[idField] : null;
+        var key = (idv != null) ? ("k:" + idv) : ("a:" + (anon++));
+        if (!(key in byId)) { order.push(key); byId[key] = it; }
+        else byId[key] = mergeCandItem_(byId[key], it); // 重複id＝フィールド単位で統合(newer優先・空で消さない)
       }); }
-      add(older); add(newer); // 後入れ(newer)が重複cidで優先・ただし欠けたフィールドはolderを保持
-      return JSON.stringify(order.map(function (k) { return byCid[k]; }));
+      add(older); add(newer); // 後入れ(newer)が重複idで優先・ただし欠けたフィールドはolderを保持
+      return JSON.stringify(order.map(function (k) { return byId[k]; }));
     } catch (e) { return null; }
   }
+  function unionCand(olderStr, newerStr) { return unionByField(olderStr, newerStr, "cid"); }
 
   // 削除の墓標(トゥームストーン)：{ cid: 削除ts } を1キーに持つ。端末をまたぐと LWW では
   //   別端末の削除を丸ごと失う(＝復活)ので、cid 単位で union し ts の大きい方を採る。
@@ -213,15 +228,17 @@
       return JSON.stringify(out);
     } catch (e) { return null; }
   }
-  // 候補配列から、墓標にある cid を除外。削除ts が addedAt 以上なら削除確定。addedAt が新しい＝再収集は残す。
-  function applyTombstone(arrStr, delMap) {
+  // 配列から、墓標にある id を除外。削除ts が addedAt 以上なら削除確定。addedAt が新しい＝再追加は残す。
+  //   (候補=cid/addedAt / ドラフト=id/addedAt。ドラフトは復元時に addedAt=now を打つので墓標を越えて復活できる)
+  function applyTombstone(arrStr, delMap, idField, addField) {
+    idField = idField || "cid"; addField = addField || "addedAt";
     try {
       if (!delMap) return arrStr;
       var arr = JSON.parse(arrStr || "[]"); if (!Array.isArray(arr)) return arrStr;
       return JSON.stringify(arr.filter(function (it) {
-        var c = it && it.cid; if (c == null) return true;
+        var c = it && it[idField]; if (c == null) return true;
         var dts = delMap[c]; if (dts == null) return true;
-        return (it.addedAt || 0) > dts;
+        return (it[addField] || 0) > dts;
       }));
     } catch (e) { return arrStr; }
   }
@@ -339,23 +356,25 @@
         var rver = (res && res.version) || 0, rls = remote.ls || {}, ridb = remote.idb || {};
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockDelKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
-        // 候補リストは両側にあれば cid で union。(消さない)
+        // 候補・ドラフトの配列は両側にあれば id で union。(消さない)
         Object.keys(mls).forEach(function (k) {
-          if (!isCandArrayKey(k)) return;
+          var idf = arrIdField_(k);
+          if (!idf) return;
           var a = lmapLs[k], b = rls[k];
           if (a && b && !a.d && !b.d) {
             var localNewer = (a.t || 0) >= (b.t || 0);
-            var u = unionCand(localNewer ? b.v : a.v, localNewer ? a.v : b.v);
+            var u = unionByField(localNewer ? b.v : a.v, localNewer ? a.v : b.v, idf);
             if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
           }
         });
-        // 墓標(cand_del)は両側にあれば cid 単位で union。(片側の削除を失わない)
+        // 墓標(cand_del / go5_stock_del)は両側にあれば id 単位で union。(片側の削除を失わない)
         Object.keys(mls).forEach(function (k) {
-          if (!isCandDelKey(k)) return;
+          if (!isCandDelKey(k) && !isStockDelKey(k)) return;
           var a = lmapLs[k], b = rls[k];
           if (a && b && !a.d && !b.d) {
             var u = mergeDelMap(a.v, b.v);
@@ -382,15 +401,16 @@
           //   (画像アップロード/pull/push)の間にユーザーが候補を追加/編集した場合、そのままだと
           //   古いマージ結果で上書きして「追加した直後の候補が消える／情報が古いままになる」事故になる。
           var live = LS.getItem(k), finalV = e.v;
-          if (isCandArrayKey(k)) {
-            // 候補配列は「ライブ値」ともう一度cidでunionしてから書く＝進行中に増えた分を絶対に失わない。
-            var u2 = unionCand(e.v, live);
+          var idf2 = arrIdField_(k);
+          if (idf2) {
+            // 配列は「ライブ値」ともう一度id unionしてから書く＝進行中に増えた分を絶対に失わない。
+            var u2 = unionByField(e.v, live, idf2);
             if (u2 != null) finalV = u2;
-            // ★墓標を適用：削除済みcidをunion結果から除外し復活を防ぐ。マージ済み墓標とライブ墓標の両方を効かせる。
-            var dk = candDelKeyOf(k);
+            // ★墓標を適用：削除済みidをunion結果から除外し復活を防ぐ。マージ済み墓標とライブ墓標の両方を効かせる。
+            var dk = isCandArrayKey(k) ? candDelKeyOf(k) : "go5_stock_del";
             var dmerged = (mls[dk] && !mls[dk].d) ? mls[dk].v : LS.getItem(dk);
-            finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(dmerged || "{}", LS.getItem(dk) || "{}")));
-          } else if (isCandDelKey(k)) {
+            finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(dmerged || "{}", LS.getItem(dk) || "{}")), idf2, "addedAt");
+          } else if (isCandDelKey(k) || isStockDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
             if (u3 != null) finalV = u3;
@@ -482,7 +502,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockDelKey: isStockDelKey, arrIdField_: arrIdField_ }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 

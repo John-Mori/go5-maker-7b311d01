@@ -56,6 +56,32 @@ eq("削除後の再収集は残る", JSON.parse(S.applyTombstone(reAdd, tomb)), 
 // ── unionCand 回帰: 既存挙動(newer優先・cid重複統合)を壊していない ──
 eq("unionCand newer優先", JSON.parse(S.unionCand('[{"cid":"a","v":1}]', '[{"cid":"a","v":2}]')), [{ cid: "a", v: 2 }]);
 
+// ── ドラフト(go5_stock_meta)＝id 単位 union/墓標(Chami依頼2026-07-31・全端末同期) ──
+ok("isStockArrayKey", S.isStockArrayKey("go5_stock_meta") && !S.isStockArrayKey("go5_stock_archive") && !S.isStockArrayKey("cand_items"));
+ok("isStockDelKey", S.isStockDelKey("go5_stock_del") && !S.isStockDelKey("cand_del"));
+eq("arrIdField cand=cid", S.arrIdField_("cand_items"), "cid");
+eq("arrIdField stock=id", S.arrIdField_("go5_stock_meta"), "id");
+ok("arrIdField 非配列=null", S.arrIdField_("go5_stock_del") === null && S.arrIdField_("bsky_text") === null);
+// id union: 端末Aのドラフトと端末Bのドラフトを両立(消さない)
+eq("stock union で両端末のドラフトを保持",
+   JSON.parse(S.unionByField('[{"id":"stk1","title":"A"}]', '[{"id":"stk2","title":"B"}]', "id")),
+   [{ id: "stk1", title: "A" }, { id: "stk2", title: "B" }]);
+eq("stock union 同idは newer 優先・欠けたフィールドは older 保持",
+   JSON.parse(S.unionByField('[{"id":"stk1","title":"A","workUrl":"https://x/a/"}]', '[{"id":"stk1","title":"A2"}]', "id")),
+   [{ id: "stk1", title: "A2", workUrl: "https://x/a/" }]); // title は newer、workUrl は older を保持
+// 墓標: 削除したドラフトが union で復活→id/addedAt で除外
+var sArr = JSON.stringify([{ id: "stk1", addedAt: 100 }, { id: "stk2", addedAt: 100 }]);
+eq("stock 墓標で削除idを除外",
+   JSON.parse(S.applyTombstone(sArr, { stk1: 200 }, "id", "addedAt")),
+   [{ id: "stk2", addedAt: 100 }]);
+eq("stock 復元(addedAt=now>削除ts)は残る",
+   JSON.parse(S.applyTombstone(JSON.stringify([{ id: "stk1", addedAt: 999 }]), { stk1: 200 }, "id", "addedAt")),
+   [{ id: "stk1", addedAt: 999 }]);
+// 統合: A が stk1 を削除(墓標) / B は stk1 を保持 → union で復活 → 墓標で再除外
+var uni = S.unionByField("[]", JSON.stringify([{ id: "stk1", addedAt: 100 }, { id: "stk2", addedAt: 100 }]), "id");
+ok("stock unionで一旦復活", JSON.parse(uni).length === 2);
+eq("stock 墓標で stk1 だけ除外", JSON.parse(S.applyTombstone(uni, { stk1: 150 }, "id", "addedAt")), [{ id: "stk2", addedAt: 100 }]);
+
 // ── unionCand フィールド統合: newer に欠けた作品URLは older から保持する(作品URL消失の根治) ──
 eq("union newerにurl無→olderのurlを保持",
    JSON.parse(S.unionCand('[{"cid":"a","url":"https://x/works/a/","price":500}]', '[{"cid":"a","price":400}]')),
