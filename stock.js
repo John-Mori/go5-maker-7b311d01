@@ -277,13 +277,15 @@
   // ── 動画本体の取得(実体が手元に無い2台目は vidHash で R2 から取り寄せ・②2026-08-01)──
   //   DL・投稿完了(Driveアップロード)の両方がこれを通す=片方だけ直して片方が「動画が見つかりません」で
   //   止まる事故を防ぐ(Chami指摘2026-07-31: 2台目で投稿完了が動画未検出で失敗)。
+  function metaOf_(id) {
+    return loadMeta().filter(function (m) { return m.id === id; })[0]
+        || loadArchive().filter(function (m) { return m.id === id; })[0] || null;
+  }
   function resolveVideoBlob_(id) {
     var store = idb();
     if (!store) return Promise.resolve(null);
-    return store.get('stock_v_' + id).then(function (blob) {
-      if (blob) return blob;
-      var meta = loadMeta().filter(function (m) { return m.id === id; })[0]
-               || loadArchive().filter(function (m) { return m.id === id; })[0];
+    function fromR2() {
+      var meta = metaOf_(id);
       var h = meta && meta.vidHash;
       if (h && window.Go5Sync && Go5Sync.fetchBlobR2) {
         return Go5Sync.fetchBlobR2(h).then(function (b) {
@@ -291,7 +293,19 @@
           return b;
         });
       }
-      return null;
+      return Promise.resolve(null);
+    }
+    return store.get('stock_v_' + id).then(function (blob) {
+      if (blob) return blob;
+      return fromR2().then(function (b) {
+        if (b) return b;
+        // vidHash がこの端末のメタにまだ無い=1台目のアップロード/メタ同期が届いていないだけの可能性。
+        // 諦める前に一度だけ同期を取り寄せて再試行(2台目で「まだ届いてない」だけのケースを自己修復)。
+        if (window.Go5Sync && Go5Sync.syncNow) {
+          return Go5Sync.syncNow().then(fromR2).catch(function () { return null; });
+        }
+        return null;
+      });
     });
   }
 
@@ -300,7 +314,16 @@
     var store = idb();
     if (!store) { alert('IndexedDB未対応のため再DLできません。'); return; }
     resolveVideoBlob_(id).then(function (blob) {
-      if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
+      if (!blob) {
+        // ★どの段で落ちたかで文言を分ける=次回どちらのケースかChamiに分かる/対処もそれぞれ違う。
+        var m = metaOf_(id);
+        if (m && m.vidHash) {
+          alert('動画を雲(R2)から取り寄せできませんでした。通信状態を確認して、もう一度お試しください。');
+        } else {
+          alert('この端末にはまだ動画本体が届いていません。動画を作成した端末で「候補(ドラフト)」タブを一度開くと雲へ上がり、この端末でも落とせるようになります。');
+        }
+        return;
+      }
       var name = videoName || 'video.mp4';
       // ★iPhoneはカメラロール(アルバム)へ直接入れたい(Chami指示2026-07-29)。<a download>だと「ファイル」アプリ止まりで
       //   写真アルバムに入らない。Web共有シート(navigator.share)には「ビデオを保存」があり、そこからアルバムへ入る=
