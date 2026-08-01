@@ -225,6 +225,31 @@ def is_conversation_only(conf):
         return False
 
 
+def failopen_enabled(dept, rec):
+    """relay無人時 fail-open(§3.1)を、この便で発火してよいか。(2026-08-02 イージス研究室)
+
+    HQ裁定 msg=1533226514794025081 の封筒条件のうち **kill-switch とカナリア** をここに集約する。
+      1 kill-switch: 環境変数 RELAY_FAILOPEN が off/未設定なら **必ず False**(既定OFF=不可逆でない・
+        ワンコマンド `setx RELAY_FAILOPEN off` 相当で即・現行挙動へ戻せる)。
+      2 カナリア: 有効化しても **いきなり全19部門へは入れない**。test:true の検証便か、
+        RELAY_FAILOPEN_DEPTS(カンマ区切り)に挙げた部門だけ発火。`*`/`all` で全部門(最終段)。
+    ★判定不能・例外は False(fail-safe=沈黙対策の追加機構が、既存の配送を巻き込まない)。
+    """
+    try:
+        flag = os.environ.get("RELAY_FAILOPEN", "").strip().lower()
+        if flag in ("", "0", "off", "false", "no"):
+            return False
+        if isinstance(rec, dict) and rec.get("test"):
+            return True
+        allow = [d.strip() for d in os.environ.get("RELAY_FAILOPEN_DEPTS", "").split(",")
+                 if d.strip()]
+        if "*" in allow or "all" in allow:
+            return True
+        return dept in allow
+    except Exception:
+        return False
+
+
 # ★恒久対処(2026-07-20 組織層GL室): 「回します/やっておく」と言って何も起きない事故の真因は
 #   **返信を書く判断者(キャラLLM)と、回送/作業を起こす判断者(キーワード正規表現)が別人**だったこと。
 #   キャラが約束してもコードは約束を知らないので裏切りが構造的に発生する。
@@ -3986,6 +4011,34 @@ class Daemon:
         return ""
 
     # --- 1件処理 ---
+    def _failopen_reply(self, rec, mid):
+        """relay(部屋の永続セッション=消費者)が返せなかった時、沈黙させず**精霊が自前で
+        キャラ応答を1本**出す(§3.1 fail-open「沈黙が最悪の事故=喋る側へ倒す」)。
+
+        戻り値= 送るキャラ応答(str) or None(=fail-openしない/できない→従来の失敗経路のまま)。
+        HQ裁定 msg=1533226514794025081 の封筒4条件を**機構で**満たす:
+          1 kill-switch/カナリア= failopen_enabled()(既定OFFなので普段は必ず None=既存挙動と1バイト差なし)。
+          3 二重応答ガード(前)= 窓が所有者なら精霊は喋らない(出口 owner_of_room 再確認と二段構え)。
+                             owner室(hq/research-room/aegis-gl/keiei-kikaku)は§3.1の除外どおり触らない。
+          4 fail-openのfail-open= 生成が落ちる/空なら None=**従来の失敗経路へ素通し**(実便を落とさない)。
+        ★二重応答ガード(後)と沈黙抑止の合流点は既存の出口(owner再確認・hangulゲート・replied検証)を通る。
+        """
+        if not failopen_enabled(self.dept, rec):
+            return None
+        if self.dept in SESSION_OWNED_DEPTS:
+            return None                     # owner室=本人窓が受ける。§3.1「1バイトも触らない」
+        if self.owner_room and self.owner_of_room() == "window":
+            return None                     # 二重応答ガード(前)=窓が居るなら精霊は黙る
+        try:
+            text, _decl = self.generate(rec)
+        except Exception as e:
+            log(self.dept, f"★fail-open生成が失敗→従来の失敗経路へ素通し msg={mid} "
+                           f"({type(e).__name__})")
+            return None                     # fail-openのfail-open
+        text, _ = split_wip_marker(text or "")
+        text = (text or "").strip()
+        return text or None
+
     def handle(self, rec, raw_line):
         ch = rec.get("channel", "")
         mid = str(rec.get("msg_id", ""))
@@ -4152,6 +4205,25 @@ class Daemon:
                             reply = ""          # 空=送信しない(下の送信ループが回らない)
                     except Exception:
                         pass                    # 判定不能なら従来どおり知らせる(黙るより出す)
+                    # ★★relay無人時 fail-open(2026-08-02 イージス研究室・HQ裁定 msg=1533226514794025081)。
+                    #   ここまでで沈黙 or 詫び文が決まったが、封筒条件(kill-switch/カナリア)を満たす部屋だけ、
+                    #   精霊が自前でキャラ応答を1本出して**沈黙を上書き**する(§3「沈黙が最悪の事故=喋る側へ倒す」)。
+                    #   ★既定は failopen_enabled()=False → _fo=None → この分岐は素通り=**既存挙動と1バイト差なし**。
+                    #   ★出力は下の合流点(WIP除去/hangulゲート/出口 owner再確認=二重応答ガード後/replied検証)を必ず通る。
+                    _fo = self._failopen_reply(rec, mid)
+                    if _fo:
+                        reply = _fo
+                        self._relay_nack = False      # 詫び/nackを取り消す=精霊の一次応答として送る
+                        self._relay_answered = False  # (精霊)印を付ける(本人でなく常駐が代わりに答えた)
+                        is_work = False               # 回送しない=便はここで着地(沈黙にしない)
+                        if session_relay is not None:
+                            try:
+                                session_relay._record(mid, self.dept, "daemon_answered",
+                                                      "relay無人=精霊がfail-openで一次応答(§3.1)")
+                            except Exception:
+                                pass
+                        log(self.dept,
+                            f"★fail-open発火: relay不成立→精霊が一次応答(詫びを上書き) msg={mid}")
             elif self._member:
                 # 名指し便は常駐ではなく本人が会話で受ける(回送しない=事故の再発防止)
                 reply, _declared = self.generate(rec)
