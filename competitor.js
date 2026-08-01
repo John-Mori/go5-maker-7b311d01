@@ -220,24 +220,39 @@
         '<span class="comp-an-kpi">Short <b>' + st.shortPct + '</b>%</span>' +
       '</div>' +
       '<div class="comp-an-row"><span class="comp-an-k">頻出タグ</span>' + (st.topTags.length ? esc(st.topTags.join('  ')) : '(データ待ち)') + '</div>';
+    // 1動画の<li>を組む(TOP/ワースト共通)。表示は同じ形にして片方だけ崩れる事故を防ぐ。
+    function videoLi(t) {
+      var ytUrl = youtubeVideoUrl(t.videoId);
+      return '<li class="comp-an-video">' +
+        '<div class="comp-an-published">' + fmtPublishedAt(t.publishedAt) + '</div>' +
+        '<div class="comp-an-video-channel"><span class="comp-an-channel-name">' + esc(t.channelName || '(チャンネル名未取得)') + '</span>' +
+          '<span class="comp-an-subs">登録者数 ' + fmtCount(t.subscriberCount, '非公開・取得不可') + '</span></div>' +
+        '<div class="comp-an-video-title">' + esc(t.title || '(題名未取得)') + '</div>' +
+        '<div class="comp-an-video-metrics"><div class="comp-an-video-numbers">' +
+          '<span class="comp-an-spd">' + fmtSpeed(t.speed) + '</span>' +
+          '<span class="comp-an-views">総再生数 ' + fmtCount(t.totalViews, '取得不可') + '</span></div>' +
+          (ytUrl ? '<a class="comp-an-youtube" href="' + esc(ytUrl) + '" target="_blank" rel="noopener noreferrer">YouTube</a>' : '') +
+        '</div>' +
+      '</li>';
+    }
     if (ranked.length) {
       html += '<div class="comp-an-k comp-an-top-title">🔥 いま伸びてる競合動画(1日の再生の伸び・上位20動画)</div>' +
-        '<ol class="comp-an-top">' + ranked.map(function (t) {
-          var ytUrl = youtubeVideoUrl(t.videoId);
-          return '<li class="comp-an-video">' +
-            '<div class="comp-an-published">' + fmtPublishedAt(t.publishedAt) + '</div>' +
-            '<div class="comp-an-video-channel"><span class="comp-an-channel-name">' + esc(t.channelName || '(チャンネル名未取得)') + '</span>' +
-              '<span class="comp-an-subs">登録者数 ' + fmtCount(t.subscriberCount, '非公開・取得不可') + '</span></div>' +
-            '<div class="comp-an-video-title">' + esc(t.title || '(題名未取得)') + '</div>' +
-            '<div class="comp-an-video-metrics"><div class="comp-an-video-numbers">' +
-              '<span class="comp-an-spd">' + fmtSpeed(t.speed) + '</span>' +
-              '<span class="comp-an-views">総再生数 ' + fmtCount(t.totalViews, '取得不可') + '</span></div>' +
-              (ytUrl ? '<a class="comp-an-youtube" href="' + esc(ytUrl) + '" target="_blank" rel="noopener noreferrer">YouTube</a>' : '') +
-            '</div>' +
-          '</li>';
-        }).join('') + '</ol>';
+        '<ol class="comp-an-top">' + ranked.map(videoLi).join('') + '</ol>';
     } else {
       html += '<div class="comp-an-soon">🔥 伸び速度は収集2日目(明日4時)から算出されます。今夜は登録と初回収集(ベースライン)まで完了しています。</div>';
+    }
+    // ワースト再生数(登録している競合chの動画の中で総再生数が低い順・下位20)。
+    //   Chami指示2026-08-01 msg1532973541195255970「ワーストを入れて欲しいのは分析タブで登録している登録者の方の動画」。
+    //   総再生数が数値で取れている動画のみ対象(取得不可を最下位に詰めない)。昇順=再生の少ない順。
+    var worst = titles.filter(function (t) {
+      var v = Number(t.totalViews); return typeof t.totalViews === 'number' && isFinite(v);
+    }).sort(function (a, b) {
+      return (Number(a.totalViews) - Number(b.totalViews)) ||
+        String(a.videoId || a.title || '').localeCompare(String(b.videoId || b.title || ''));
+    }).slice(0, 20);
+    if (worst.length) {
+      html += '<div class="comp-an-k comp-an-top-title">🥶 再生数が伸びていない競合動画(総再生数ワースト20)</div>' +
+        '<ol class="comp-an-top comp-an-worst">' + worst.map(videoLi).join('') + '</ol>';
     }
     return html;
   }

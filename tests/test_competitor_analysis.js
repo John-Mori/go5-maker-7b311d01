@@ -19,8 +19,16 @@ const titles = Array.from({ length: 25 }, (_, i) => ({
   isShort: 'yes'
 }));
 const html = analysisHtml({ watchChannels: 3 }, { titles });
-assert.equal((html.match(/class="comp-an-video"/g) || []).length, 20, '上位20件だけ表示する');
-assert.ok(html.indexOf('チャンネル24') < html.indexOf('チャンネル23'), '1日の伸びが多い順に並ぶ');
+// 分析パネルは「伸びてるTOP20」と「総再生数ワースト20」の2本立て(Chami指示2026-08-01 msg1532973541195255970)。
+const topHtml = html.split('🥶')[0];        // TOP側だけ(ワースト見出し🥶より前)
+const worstHtml = '🥶' + (html.split('🥶')[1] || '');
+assert.equal((topHtml.match(/class="comp-an-video"/g) || []).length, 20, 'TOPは上位20件だけ表示する');
+assert.equal((worstHtml.match(/class="comp-an-video"/g) || []).length, 20, 'ワーストは下位20件だけ表示する');
+assert.match(worstHtml, /comp-an-worst/, 'ワースト再生数ランキングを分析タブに出す');
+// ワーストは総再生数の少ない順(totalViews=10000+i なのでi=0が最下位・i=24は上位で圏外)。
+assert.ok(worstHtml.indexOf('チャンネル0<') < worstHtml.indexOf('チャンネル19<'), 'ワーストは総再生数の少ない順に並ぶ');
+assert.ok(worstHtml.indexOf('チャンネル24') === -1, '再生数が多い動画はワースト圏外にする');
+assert.ok(topHtml.indexOf('チャンネル24') < topHtml.indexOf('チャンネル23'), '1日の伸びが多い順に並ぶ');
 assert.match(html, /登録者数 1,024/);
 assert.match(html, /\+240\/日/);
 assert.match(html, /総再生数 10,024/);
@@ -63,11 +71,14 @@ function makeSheet(headers, rows) {
   return {
     getLastRow() { return all.length; },
     getLastColumn() { return headers.length; },
+    clearContents() {},        // 週次サマリの書き直し(compWeeklySummary_)で呼ばれる
+    appendRow() {},            //   同上。モックは書き込みを受け流す
     getRange(row, col, numRows, numCols) {
       return {
         getValues() {
           return all.slice(row - 1, row - 1 + numRows).map(r => r.slice(col - 1, col - 1 + numCols));
-        }
+        },
+        setValues() {}
       };
     }
   };
@@ -165,9 +176,17 @@ const emptyVideoSheet = {
   getLastColumn() { return vidHeaders.length; }
 };
 const emptyDailySheet = { getLastRow() { return 1; } };
+// 週次サマリ(compWeeklySummary_)の書き込み先。clearContents/appendRow/setValues を受け流す。
+const weeklySheet = {
+  getLastRow() { return 1; },
+  getLastColumn() { return 6; },
+  clearContents() {},
+  appendRow() {},
+  getRange() { return { getValues() { return []; }, setValues() {} }; }
+};
 context.compWatchChannels_ = () => [{ channelId: 'chan-hidden', rowIndex: 2, uploads: '' }];
 context.compSheet_ = name => name === '競合_チャンネル' ? channelUpdateSheet :
-  (name === '競合_動画' ? emptyVideoSheet : emptyDailySheet);
+  (name === '競合_動画' ? emptyVideoSheet : (name === '競合_日次' ? emptyDailySheet : weeklySheet));
 context.headerMap_ = sheet => sheet === channelUpdateSheet ? mapHeaders(makeSheet(chHeaders, [])) : mapHeaders(makeSheet(vidHeaders, []));
 context.ytChannels_ = () => ({
   'chan-hidden': { name: '非公開チャンネル', subs: null, hiddenSubs: true, views: 321, videos: 7, uploads: '' }
