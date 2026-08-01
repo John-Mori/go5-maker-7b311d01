@@ -1230,16 +1230,16 @@
     refresh();
     if (ytUrl) pokeSnapshotNow_();
 
-    // ★導線2(作品クリック計測URL)が空でも、作品URLがあれば自動生成してシートへ再upsert。
-    //   Chami報告(2026-07-29)「作品クリック計測用の短縮URLは反映されてない。空欄のまま」対策。
+    // ★導線2(作品クリック計測URL)に手入力された非r2リンク(作品ページURL/アフィリンク/da.gd等)を
+    //   正規の自前r2短縮へ変換してシートへ再upsert=計測可能にする(Chami指示2026-08-01「正規の短縮URLに変更しといて」)。
+    //   autoMeasureWorkShort_ 内で 空/既にr2/意図的クリア(workShortNone) は無変換=冪等。
+    //   ※作品URLからの自動発行はしない方針(2026-07-30)は維持=空欄は空欄のまま(内部ガードでno-op)。
     //   シート由来行はlocalStorageへ書き戻さない(INC-112防壁)ので、保持patch(_pendingSheetEdits)へ反映する。
-    if (!edited.workShortUrl && edited.workUrl) {
-      autoMeasureWorkShort_(edited, function () {
-        var pm = _pendingSheetEdits[curAcct]; var pv = pm && pm[String(edited.videoId)];
-        if (pv) { pv.workShortUrl = edited.workShortUrl || ''; pv.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm); }
-        try { pushItemToGas_(edited); } catch (e) {}
-      });
-    }
+    autoMeasureWorkShort_(edited, function () {
+      var pm = _pendingSheetEdits[curAcct]; var pv = pm && pm[String(edited.videoId)];
+      if (pv) { pv.workShortUrl = edited.workShortUrl || ''; pv.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm); }
+      try { pushItemToGas_(edited); } catch (e) {}
+    });
 
     // ── ここから裏方(非ブロッキング): GASへupsert→履歴再読込で反映を確認。失敗時だけ静かに通知する。──
     var finished = false, verifyStarted = false;
