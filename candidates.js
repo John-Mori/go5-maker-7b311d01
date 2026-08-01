@@ -204,6 +204,29 @@
     else delete _postedOff[account][String(cid)];
     savePostedOff_();
   }
+  // ★「このchで投稿済み」ユーザー宣言の恒久オーバーライド(setPostedOff_ の対称)。({acc:{cid:ts}})
+  //   用途= 実際は投稿したのに ✔ が付かない場合の手動救済(Chami依頼 REQ-428b755f51「投稿済みなのに✅が
+  //   入ってない場合の対処法が現在ない」)。シート権威索引(S1)にも記録が無い偽陰性の逃げ道＝端末ローカルに宣言を
+  //   durable に持ち、pill判定で常に投稿済み扱いにする。※オフ宣言が同時にあればオフを優先(下の postedMatchForCand_)。
+  var _postedOn = (function () { try { var m = JSON.parse(localStorage.getItem('cand_posted_on') || '{}'); return (m && typeof m === 'object') ? m : {}; } catch (e) { return {}; } })();
+  function savePostedOn_() { try { localStorage.setItem('cand_posted_on', JSON.stringify(_postedOn)); } catch (e) {} }
+  function isPostedOn_(keys, account) {
+    var m = _postedOn[account]; if (!m) return false;
+    for (var i = 0; i < (keys || []).length; i++) { if (m[keys[i]] != null) return true; }
+    return false;
+  }
+  function postedOnTs_(keys, account) {
+    var m = _postedOn[account]; if (!m) return 0;
+    for (var i = 0; i < (keys || []).length; i++) { if (m[keys[i]] != null) return m[keys[i]]; }
+    return 0;
+  }
+  function setPostedOn_(cid, account, on) {
+    if (!cid || !account) return;
+    if (!_postedOn[account]) _postedOn[account] = {};
+    if (on) _postedOn[account][String(cid)] = new Date().getTime();
+    else delete _postedOn[account][String(cid)];
+    savePostedOn_();
+  }
   function isHiddenByPosted_(it) {
     if (!it) return false;
     if (_hidePosted.acc1 && postedMatchForCand_(it, 'acc1')) return true;
@@ -1043,6 +1066,11 @@
     if (isPostedOff_(ks, account)) return null;
     var idx = postedIndexFor_(account);
     for (var i = 0; i < ks.length; i++) { if (idx[ks[i]]) return { item: idx[ks[i]], key: ks[i] }; }
+    // ★手動「投稿済み」宣言の救済(索引にもシートにも記録が無い偽陰性)。薄い item を合成して ✔ を光らせる。
+    if (isPostedOn_(ks, account)) {
+      var onTs = postedOnTs_(ks, account);
+      return { item: { cid: ks[0], workUrl: (it && it.url) || '', ts: onTs, account: account, _manualOn: true, title: (it && it.title) || '' }, key: ks[0] };
+    }
     return null;
   }
   // バッジ行に並べるチャンネル表記。投稿済み＝ボタン化(クリックで投稿詳細)＋テーマ色。未投稿＝ボタン化せず淡色表記。
@@ -1054,7 +1082,10 @@
           'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(m.key) + '" title="' + esc(a[1]) + 'で投稿済み(タップで投稿内容)">' +
           esc(a[1]) + ' <b>✔</b></span>';
       }
-      return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" title="' + esc(a[1]) + '(未投稿)">' + esc(a[1]) + '</span>';
+      // 未投稿pill。タップで「実は投稿済み」を手動宣言できる(✔が付かない偽陰性の救済・data-poston-*)。
+      var onCid = (candCidsOf_(it) || [])[0] || '';
+      return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" role="button" tabindex="0" ' +
+        'data-poston-acct="' + a[0] + '" data-poston-cid="' + esc(onCid) + '" title="' + esc(a[1]) + '(未投稿・タップで手動で投稿済みにできる)">' + esc(a[1]) + '</span>';
     }).join('');
   }
   // 投稿履歴アイテムから投稿日時(ms)を頑健に取り出す。ts欠落時も背骨ID(videoId=acc-YYYYMMDD-HHMM-)から復元
@@ -1095,7 +1126,10 @@
   // 投稿詳細モーダル：投稿済みチャンネルのpillをタップ→いつ/何で投稿したか(履歴内容＋実際の投稿画像)を表示。
   var _postedOverlay = null;
   function openPostedDetailModal_(cid, account, label) {
-    var it = postedItemForCid_(cid, account); if (!it) return;
+    var it = postedItemForCid_(cid, account);
+    // 手動「投稿済み」宣言だけで✔が付いている作品は索引に実体が無い＝薄いitemを合成して開ける(🚫で取り消せる)。
+    if (!it && isPostedOn_([cid], account)) it = { cid: cid, ts: postedOnTs_([cid], account), _manualOn: true, title: '' };
+    if (!it) return;
     var ov = _postedOverlay;
     if (!ov) {
       ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
@@ -1131,6 +1165,7 @@
     if (rmBtn) rmBtn.addEventListener('click', function () {
       if (!window.confirm('「' + cleanTitle + '」を ' + label + ' の投稿履歴から外します。\nランキングや投稿履歴タブからも消えます。よろしいですか？')) return;
       // ①恒久オーバーライドを先に立てる＝以後シート再マージ等で記録が戻っても pill は光らない(復元対策)。
+      setPostedOn_(cid, account, false); // 手動「投稿済み」宣言を取り消す(誤タップの逃げ道)
       setPostedOff_(cid, account, true);
       // ②実レコードも外す(ランキング/投稿履歴タブからも消す＝従来動作)。
       removePostedForAcct_(cid, account);
@@ -1151,6 +1186,21 @@
   function wireAcctRow_(root) {
     root.querySelectorAll('[data-posted-acct]').forEach(function (b) {
       var handler = function (e) { e.stopPropagation(); var a = b.getAttribute('data-posted-acct'), c = b.getAttribute('data-posted-cid'); var lbl = (a === 'acc2') ? '宵桜艶帖' : '月詠み'; openPostedDetailModal_(c, a, lbl); };
+      b.addEventListener('click', handler);
+      b.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(e); } });
+    });
+    // 未投稿pill：タップで「実は投稿済み」を手動宣言(✔が付かない偽陰性の救済)。
+    root.querySelectorAll('[data-poston-acct]').forEach(function (b) {
+      var handler = function (e) {
+        e.stopPropagation();
+        var a = b.getAttribute('data-poston-acct'), c = b.getAttribute('data-poston-cid');
+        var lbl = (a === 'acc2') ? '宵桜艶帖' : '月詠み';
+        if (!c) { alert('この作品はcidが解決できないため手動指定できません。'); return; }
+        if (!window.confirm('この作品を「' + lbl + '」で投稿済みにします。\n(実際に投稿したのに✔が付かない時の手動救済です。誤って押した場合は、付いた✔をタップ→🚫で取り消せます)\nよろしいですか？')) return;
+        setPostedOn_(c, a, true);
+        invalidatePostedIndex_();
+        try { render(); } catch (err) {} // 候補一覧を再描画＝✔が付く
+      };
       b.addEventListener('click', handler);
       b.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(e); } });
     });
