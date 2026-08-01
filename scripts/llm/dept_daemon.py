@@ -4084,8 +4084,20 @@ class Daemon:
                         f"[中間通知はDiscordへ出さない=方針統一 2026-07-28] "
                         f"elapsed={elapsed:.0f}秒 soft={int(soft)}秒 work={work} msg={_mid}")
 
+                # ★fail-open(2026-08-02 イージス研究室・C-027/HQ裁定 DISPATCH-aegis-gl-1785603956128)。
+                #   真因= work_scope部屋(改修α等=実作業が本業)への実依頼が WORK_WORDS に一致せず
+                #     kw_work=False→is_work=False で**会話の短い上限**(soft300/hard600)で殺され、
+                #     成果が出ていても「timeout空振り」として捨てられた(8/1 19:40・21:00 実測
+                #     「waited=600s work=False ★成果が残っている可能性」)。§3=判定不能なら実行側へ倒す。
+                #   対処= work_scopeを持つ部屋は、キーワードが拾えなくても is_work へ倒す
+                #     =作業の上限(soft600/hard1200)+成果スナップショットを必ず与える。
+                #   ★安全性= is_work は**起動文の枠組みを変えない**(それは work_scope が決める・session_relay
+                #     行3004)。変わるのは①timeout予算②成果スナップショット③自己説明的なヒント文
+                #     (「実作業と見た/違えば会話でよい」)だけ=全部fail-open側で無害。
+                #   ★キーワードは増やさない(自然文では必ず再発・2026-07-20実測)。部屋の性質で倒す。
+                _is_work = kw_work or bool(self.conf.get("work_scope"))
                 reply, _relay_ok = session_relay.relay(self.dept, rec, self.conf, self._token(),
-                                                       is_work=kw_work, on_slow=_on_slow)
+                                                       is_work=_is_work, on_slow=_on_slow)
                 # ★成功した時だけ「本人が答えた」印を立てる(送信名義から(精霊)を外すため)。
                 #   失敗して精霊の口で詫びる時は立てない=印の意味を保つ。
                 self._relay_answered = bool(_relay_ok)
