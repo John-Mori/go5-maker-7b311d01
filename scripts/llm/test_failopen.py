@@ -27,9 +27,17 @@ def check(name, got, want):
         print(f"  NG  {name}: got={got!r} want={want!r}")
 
 
-def _env(failopen=None, depts=None):
+import tempfile
+
+# ★テストは本番のフラグファイル(local/queue/relay_failopen.flag)を絶対に読まない。
+#   存在しない一時パスへ固定し、フラグ検証だけ明示的に上書きする。
+_ABSENT_FLAG = os.path.join(tempfile.gettempdir(), "failopen_flag_absent_%d.json" % os.getpid())
+
+
+def _env(failopen=None, depts=None, flag=None):
     for k in ("RELAY_FAILOPEN", "RELAY_FAILOPEN_DEPTS"):
         os.environ.pop(k, None)
+    os.environ["RELAY_FAILOPEN_FLAG"] = flag if flag is not None else _ABSENT_FLAG
     if failopen is not None:
         os.environ["RELAY_FAILOPEN"] = failopen
     if depts is not None:
@@ -117,6 +125,47 @@ check("生成が空白のみ→None", call(make_fake(gen=("   \n  ", False)), {}
 # 3g: <<WIP>> は落として本文だけ返す(合流点の split_wip_marker と同じ)
 check("<<WIP>>は除去して返す",
       call(make_fake(gen=("本文\n<<WIP>>", False)), {}, "m9"), "本文")
+
+# ---- 4) フラグファイル: 実行時ON/OFF(envが凍結でも効く経路) ----
+print("[4] フラグファイル(実行時ON/OFF)")
+_fd = os.path.join(tempfile.gettempdir(), "failopen_flag_test_%d.json" % os.getpid())
+
+
+def _write_flag(obj):
+    with open(_fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(obj))
+
+
+import json  # noqa: E402
+
+# 4a: env未設定でもファイルON+allowlistで発火(=走っている精霊への実効操作)
+_env(flag=_fd)
+_write_flag({"enable": True, "depts": ["system-engineer-b"]})
+check("env空+ファイルON+対象→True", d.failopen_enabled("system-engineer-b", {}), True)
+check("env空+ファイルON+対象外→False", d.failopen_enabled("copy-director", {}), False)
+
+# 4b: ファイルenable=false → False(ワンコマンドOFFの一形態)
+_write_flag({"enable": False, "depts": ["system-engineer-b"]})
+check("ファイルenable=false→False", d.failopen_enabled("system-engineer-b", {}), False)
+
+# 4c: ファイルを消す=OFF(rmでの復帰)
+os.remove(_fd)
+check("ファイル削除→False(rmで現行挙動へ)", d.failopen_enabled("system-engineer-b", {}), False)
+
+# 4d: 明示 env off はファイルONより優先(ハードkill)
+_env(failopen="off", flag=_fd)
+_write_flag({"enable": True, "depts": ["*"]})
+check("env off はファイルON(*)を上書き→False(ハードkill)",
+      d.failopen_enabled("system-engineer-b", {}), False)
+os.remove(_fd)
+
+# 4e: 壊れたファイル→envへフォールバック(巻き込まない)
+_env(failopen="on", depts="system-engineer-b", flag=_fd)
+with open(_fd, "w", encoding="utf-8") as fh:
+    fh.write("{壊れたJSON")
+check("壊れたファイル→envで判定継続(対象True)",
+      d.failopen_enabled("system-engineer-b", {}), True)
+os.remove(_fd)
 
 _env()  # 後片付け
 print(f"\n{PASS} passed / {FAIL} failed")

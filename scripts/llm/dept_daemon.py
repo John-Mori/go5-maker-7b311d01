@@ -225,24 +225,63 @@ def is_conversation_only(conf):
         return False
 
 
+def _failopen_flag_path():
+    """実効フラグファイルの在りか。RELAY_FAILOPEN_FLAG で上書き可(テスト用)。既定= local/queue/relay_failopen.flag。"""
+    p = os.environ.get("RELAY_FAILOPEN_FLAG", "").strip()
+    if p:
+        return p
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(root, "local", "queue", "relay_failopen.flag")
+
+
+def _failopen_flagfile():
+    """フラグファイル(あれば)から (enable, depts) を読む。★envは長寿命keeper起動時のブロックに凍結され
+    worker再起動でも解けない(実測 2026-08-02: keeper/worker とも 02:49 起動→06:42 の setx を拾えない)。
+    実効の kill-switch/カナリアは **毎便読み直すこのファイル** で持つ=プロセス再起動なしに実行時ON/OFF。
+    ファイルが無い/空/壊れ= None を返し env へフォールバック(=沈黙対策が既存配送を巻き込まない fail-safe)。
+    """
+    try:
+        p = _failopen_flag_path()
+        if not os.path.exists(p):
+            return None
+        with open(p, "r", encoding="utf-8") as fh:
+            raw = fh.read().strip()
+        if not raw:
+            return None
+        obj = json.loads(raw)
+        depts = [str(d).strip() for d in (obj.get("depts") or []) if str(d).strip()]
+        return (bool(obj.get("enable")), depts)
+    except Exception:
+        return None
+
+
 def failopen_enabled(dept, rec):
     """relay無人時 fail-open(§3.1)を、この便で発火してよいか。(2026-08-02 イージス研究室)
 
     HQ裁定 msg=1533226514794025081 の封筒条件のうち **kill-switch とカナリア** をここに集約する。
-      1 kill-switch: 環境変数 RELAY_FAILOPEN が off/未設定なら **必ず False**(既定OFF=不可逆でない・
-        ワンコマンド `setx RELAY_FAILOPEN off` 相当で即・現行挙動へ戻せる)。
+      1 kill-switch: 明示 env(off/false/no/0)は最優先のハードkill=必ず False。実効の停止は
+        **フラグファイルを消す**こと(ワンコマンド `rm local/queue/relay_failopen.flag` で即・現行挙動へ)。
       2 カナリア: 有効化しても **いきなり全19部門へは入れない**。test:true の検証便か、
-        RELAY_FAILOPEN_DEPTS(カンマ区切り)に挙げた部門だけ発火。`*`/`all` で全部門(最終段)。
+        allowlist(env RELAY_FAILOPEN_DEPTS / フラグファイルの depts)に挙げた部門だけ発火。`*`/`all` で全部門。
+    ★env はプロセス起動時に凍結されるため、走っている精霊への実効操作はフラグファイル側で行う。
     ★判定不能・例外は False(fail-safe=沈黙対策の追加機構が、既存の配送を巻き込まない)。
     """
     try:
-        flag = os.environ.get("RELAY_FAILOPEN", "").strip().lower()
-        if flag in ("", "0", "off", "false", "no"):
+        env_flag = os.environ.get("RELAY_FAILOPEN", "").strip().lower()
+        if env_flag in ("0", "off", "false", "no"):
+            return False  # 明示 env での停止は最優先(ハードkill)
+        env_on = env_flag != ""
+        env_depts = [d.strip() for d in os.environ.get("RELAY_FAILOPEN_DEPTS", "").split(",")
+                     if d.strip()]
+
+        ff = _failopen_flagfile()
+        file_on, file_depts = ff if ff is not None else (False, [])
+
+        if not (env_on or file_on):
             return False
         if isinstance(rec, dict) and rec.get("test"):
             return True
-        allow = [d.strip() for d in os.environ.get("RELAY_FAILOPEN_DEPTS", "").split(",")
-                 if d.strip()]
+        allow = env_depts + file_depts
         if "*" in allow or "all" in allow:
             return True
         return dept in allow
