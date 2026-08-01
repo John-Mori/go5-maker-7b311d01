@@ -1535,6 +1535,9 @@
             postLinkHtml_(bskyHref, it) +
             (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
             (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+            // セール会場(導線3): この投稿に添えたセール案内会場を名前つきで表示(Chami依頼DEF-a57e596842「どの会場を貼ったか出す所がない」)。
+            //   投稿時に histAdd が saleName/saleUrl を刻む=以後の投稿で出る。過去投稿は未保存のため出ない。
+            (it.saleUrl ? '<a class="vlink vlink-sale" href="' + esc(it.saleUrl) + '" target="_blank" rel="noopener" title="この投稿に添えたセール会場(導線3)">🏮' + esc(it.saleName || 'セール会場') + '↗</a>' : '') +
           '</span>' +
         '</div>' +
         '</div>' + // .vrow-body

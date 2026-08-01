@@ -1757,6 +1757,10 @@
     var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '', confirmed: false };
     if (rec.rebuildBaseClicks != null) entry.rebuildBaseClicks = rec.rebuildBaseClicks; // リビルド前の動画までのクリック数(投稿履歴の括弧表示用)
     if (rec.workShortUrl) { entry.workShortUrl = rec.workShortUrl; entry.workShareUrl = rec.workShareUrl || ''; } // 導線2(投稿→FANZA)の計測リンク
+    // セール会場(導線3): この投稿に添えたセール案内(名前付き)を履歴へ刻む=投稿履歴に「どの会場を貼ったか」を出せる(Chami依頼DEF-a57e596842)。
+    //   セール行は常時添付(discountListOn_=true)なので、UIと同一アカウントの投稿は「選択中のセール」を採る。
+    //   別アカウント(無人予約等)は選択の帰属が違うため刻まない(誤帰属を避ける)。過去投稿は未保存=空欄のまま。
+    if (uiSame) { try { var _se = discCurrentEntry_(); if (_se && _se.url) { entry.saleName = String(_se.name || 'セール会場'); entry.saleUrl = String(_se.url || ''); } } catch (e) {} }
     if (workUrl) {
       entry.workUrl = workUrl;
       // 作品cidも串刺しで保存。(候補タブの「投稿済み」判定を確実にする)workUrlはアフィリンク付き/
