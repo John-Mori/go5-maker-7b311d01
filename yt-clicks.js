@@ -3817,6 +3817,7 @@
 
     var RANK_MODES = [
       { key: 'views', label: '総合(再生数)' },
+      { key: 'wviews', label: 'ワースト(再生数)' }, // 再生数が少ない順＝伸びなかった投稿の傾向確認用(Chami依頼2026-07-31 msg1532858994933104772)
       { key: 'clicks', label: 'クリック数' },
       { key: 'pv', label: '▶ピーク' },   // 再生の最大瞬間風速(▶＝再生数の絵文字。一番伸びた区間の再生/時)
       { key: 'pc', label: '<img class="emico" src="assets/icons/ic-link.png" alt="クリック">ピーク' } // クリックの最大瞬間風速(クリック絵文字＝ic-link)
@@ -3858,27 +3859,30 @@
         if (isBucket) return r.snapV;
         return r.views;
       }
-      // 未記録(値なし)は除外。(総合=再生数モードは一覧の基本なので除外しない)
+      // 未記録(値なし)は除外。(総合=再生数モードは一覧の基本なので除外しない。ワーストは再生数が
+      //   取れている投稿の中での下位=未取得を「最下位」にしないよう除外する)
       if (_rankMode !== 'views') rows = rows.filter(function (r) { return metricVal(r) != null; });
+      var _worst = (_rankMode === 'wviews'); // ワーストは昇順(少ない順)
       rows.sort(function (a, b) {
         var av = metricVal(a), bv = metricVal(b);
         if (av == null && bv == null) return (b.views || 0) - (a.views || 0);
         if (av == null) return 1; if (bv == null) return -1;
-        return bv - av;
+        return _worst ? (av - bv) : (bv - av);
       });
       var tabsHtml = '<div class="rank-tabs">' + RANK_MODES.map(function (m) {
         return '<button class="rank-tab' + (m.key === _rankMode ? ' active' : '') + '" data-mode="' + m.key + '" type="button">' + m.label + '</button>';
       }).join('') + '</div>';
       var noteHtml = isBucket
         ? '<div class="rank-note">投稿から約' + bucketDef.label + '時点の再生数ランキング(自動記録・この機能導入後の投稿が対象。「(◯後)」は実記録時刻。未記録は非表示)。</div>'
+        : (_rankMode === 'wviews' ? '<div class="rank-note">再生数が少ない順(ワースト)。伸びなかった投稿の傾向を見る用。(再生数が取得できている投稿が対象・未取得は非表示)</div>'
         : (_rankMode === 'clicks' ? '<div class="rank-note">短縮URLのクリック数ランキング。(クリックURLの無い投稿は非表示)</div>'
           : (_rankMode === 'pv' ? '<div class="rank-note">再生数の最大瞬間風速ランキング。(一番伸びた時間帯の1時間あたり再生数。GASが自動記録・スプレッドシート保存。未記録は非表示)</div>'
-            : (_rankMode === 'pc' ? '<div class="rank-note">クリック数の最大瞬間風速ランキング。(一番伸びた時間帯の1時間あたりクリック数。GASが自動記録・保存。未記録は非表示)</div>' : '')));
+            : (_rankMode === 'pc' ? '<div class="rank-note">クリック数の最大瞬間風速ランキング。(一番伸びた時間帯の1時間あたりクリック数。GASが自動記録・保存。未記録は非表示)</div>' : ''))));
       var emptyHtml = rows.length ? '' : '<p class="hint" style="padding:10px 14px;">このランキングに表示できる記録がまだありません。</p>';
       el.innerHTML = tabsHtml + noteHtml + emptyHtml + '<div class="rank-list">' +
         rows.map(function (r, i) {
           var rank = i + 1;
-          var topCls = rank <= 3 ? ' rank-top' + rank : '';
+          var topCls = (rank <= 3 && _rankMode !== 'wviews') ? ' rank-top' + rank : ''; // ワーストは下位を金枠で強調しない
           var dispTitle = esc(stripCommonTags(r.title));
           // 右端の画像列: 作品サムネ(タップで作品詳細=サンプル一覧) + 動画生成に使った保存画像(タップで拡大)
           var rcid = '';
@@ -3894,7 +3898,7 @@
           var dateStr = fmtTsFull(r.ts);
           var acctLabel = ACCT_NAME[r.acct] || r.acct;
           // 指標スパン。(並びの中でソート対象を rank-main で強調)バケットモードのみ先頭にスナップ値。
-          var mViews = '<span class="' + (_rankMode === 'views' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
+          var mViews = '<span class="' + (_rankMode === 'views' || _rankMode === 'wviews' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
           var mClicks = '<span class="' + (_rankMode === 'clicks' ? 'rank-main' : '') + '" title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
           var mBucket = isBucket ? '<span class="rank-main" title="投稿から約' + bucketDef.label + 'の再生数">⏱ ' + num(r.snapV) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + ')</span></span>' : '';
           var mPeak = (_rankMode === 'pv' || _rankMode === 'pc')
