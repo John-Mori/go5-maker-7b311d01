@@ -3319,6 +3319,11 @@
       setFanzaEls(u, '');        // 手動タイトルがあれば表示
       setFanzaPriceEls(u, null); // 手動価格/発売日があれば表示
       setFanzaAuthorEls(u, '');  // 手動サークル名があれば表示
+      // 投稿時価格(当時)が空の作品は手動価格を当時価格として埋める。API未収録・価格取得前に投稿した作品の救済＝
+      //   「投稿時の価格が表示されない作品がある」の主因(自動キャッシュに価格が無いと snap が永久に空だった)。
+      //   setFanzaSnapEls/backfillSnap_ は非空スロット(真の当時価格)を保護するので既存の当時価格は上書きしない。
+      var pm = mergeManualPrice_(u, null);
+      if (pm && pm.price != null) { setFanzaSnapEls(u, fmtSnapPriceHtml(pm)); backfillSnap_(u, pm); }
     });
   }
 
@@ -3599,7 +3604,7 @@
         //   新鮮ならここで確定。古ければ表示は残したまま下のjobsに積んで裏で静かに最新化する。
         if (cached.title && !isBadFanzaTitle(cached.title)) {
           setFanzaEls(url, cached.title, row); setFanzaAuthorEls(url, cached.author || '', row);
-          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo, row); setFanzaSnapEls(url, fmtSnapPriceHtml(cached.priceInfo)); if (freshPrice) backfillSnap_(url, cached.priceInfo); } // 当時価格の"永続固定"は新鮮な価格のときだけ(古い価格を投稿時価格に保存しない・freshPrice=price有り+sv一致+age<DAY)。ただし空スロットの"表示"はキャッシュ価格でも即埋める(過去投稿の空欄救済・非空は保護・Chami依頼2026-07-30)
+          if (cached.priceInfo) { setFanzaPriceEls(url, cached.priceInfo, row); var _sp = mergeManualPrice_(url, cached.priceInfo); setFanzaSnapEls(url, fmtSnapPriceHtml(_sp)); if (freshPrice) backfillSnap_(url, _sp); } // 当時価格の"永続固定"は新鮮な価格のときだけ(古い価格を投稿時価格に保存しない・freshPrice=price有り+sv一致+age<DAY)。ただし空スロットの"表示"はキャッシュ価格でも即埋める(過去投稿の空欄救済・非空は保護・Chami依頼2026-07-30)
           if (cached.media) setFanzaThumbEls(url, cached.media.thumb || cached.media.thumbSmall, cached.media.thumbSmall, row);
           displayed = true;
           if (freshFull) return;
