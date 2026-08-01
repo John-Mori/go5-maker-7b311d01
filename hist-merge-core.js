@@ -61,12 +61,21 @@
     if (!row) return false;
     if (expected.youtubeUrl && String(row.youtubeUrl || '') !== String(expected.youtubeUrl)) return false;
     if (expected.workUrl) {
-      // 生の作品URL列(GAS 2026-07-29D以降)が一致すれば成功。cidを復元できない階層(FANZA動画等)は
-      // wantCidが空になり、旧来のcid照合だけだと保存できていても永遠に「確認できませんでした」になる。
+      // 生の作品URL列(GAS 2026-07-29D以降)が一致すれば成功。cidを復元できない階層(FANZA動画等)も
+      // rawOk(生URL一致)で確認できる。
+      // ★cid照合は「作品cid列は投稿時からほぼ必ず埋まっている」ため、作品URLを入れ直す編集では
+      //   POSTがシートに届く前でも即trueになる偽陽性を生む=保持patchを早期破棄して編集が一瞬で消える
+      //   (症状: 編集→保存で反映されず消失 / リロードで作品URLがまた消える)。現行GASは作品URL列を
+      //   常にキーとして返す(空でも '')ため、row.workUrl===undefined=作品URL列を持たない旧GAS応答の
+      //   時だけcid照合へフォールバックする。列を持つ現行GASでは rawOk を必須にして偽陽性を封じる。
       var rawOk = String(row.workUrl || '') === String(expected.workUrl);
-      var wantCid = workCidFromUrl(expected.workUrl);
-      var cidOk = !!wantCid && String(row.cid || '') === wantCid;
-      if (!rawOk && !cidOk) return false;
+      if (row.workUrl === undefined) {
+        var wantCid = workCidFromUrl(expected.workUrl);
+        var cidOk = !!wantCid && String(row.cid || '') === wantCid;
+        if (!cidOk) return false;
+      } else if (!rawOk) {
+        return false;
+      }
     }
     if (expected.workState && String(row.workState || '') !== String(expected.workState)) return false;
     return true;

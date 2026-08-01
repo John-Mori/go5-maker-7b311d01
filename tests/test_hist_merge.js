@@ -90,6 +90,18 @@ test('H-20: cidを復元できない作品URL(FANZA動画等)は、生の作品U
   assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-9', cid: '', workUrl: nocid, workState: '旧作' }], expected), true, '生URL列が一致すれば成功(cid不要)');
 });
 
+test('H-21: 現行GAS(作品URL列あり)ではcid一致でも生URL未反映なら成功扱いしない(偽陽性=編集消失の根)', function () {
+  // 作品cid列は投稿時からほぼ必ず埋まっている。作品URLを入れ直す編集で、POSTがシートへ届く前でも
+  //   cid一致で即trueになると保持patchを早期破棄→編集が一瞬で消える(症状: 保存しても反映されず消失)。
+  //   現行GASは作品URL列を常にキー(空でも '')で返すので、rawOkを必須にして偽陽性を封じる。
+  var wurl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_x/';
+  var expected = { videoId: 'acc1-21', workUrl: wurl, workState: '旧作' };
+  // cidは既に一致・作品URL列は空('')=POST未反映 → 成功扱いしてはいけない。
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-21', cid: 'd_x', workUrl: '', workState: '旧作' }], expected), false, '生URL未反映は失敗(cid一致でも早期成功しない)');
+  // POSTが届いて作品URL列も一致 → 成功。
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-21', cid: 'd_x', workUrl: wurl, workState: '旧作' }], expected), true, '生URL反映後は成功');
+});
+
 test('H-10: 履歴単位の使用画像があれば候補画像を混ぜない', function () {
   var got = HM.historyUsedImages(['used-1'], ['candidate-1', 'candidate-2']);
   assert.deepStrictEqual(got, ['used-1']);

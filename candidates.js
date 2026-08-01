@@ -2767,6 +2767,10 @@
         var curTw2 = cur.twitterUrl2 || '';
         var mergedTw = curTw, mergedTw2 = curTw2;
         var mergedAny = false;
+        // ★作品URLの埋め戻し: 既存候補が作品URLを失っている(過去の同期union不具合/X起点追加でurl未設定)
+        //   場合、正しいURLで再追加したら埋め戻す。従来は合流でtwitter/画像/メモしか触らず url は永久に
+        //   空のまま=「候補に追加しても作品URLが消える(入らない)」の根(症状4)。
+        if (url && !existItem.url) { existItem.url = url; mergedAny = true; }
         // X/BlueskyURL: 1つ目が空なら設定、1つ目と異なりかつ2つ目が空なら2つ目へ
         if (newTwUrl && newTwUrl !== curTw && newTwUrl !== curTw2) {
           if (!curTw) { mergedTw = newTwUrl; existItem.twitterUrl = newTwUrl; mergedAny = true; }
@@ -2802,7 +2806,11 @@
       var put = function (info, errored) {
         var items = lsGet(key, '[]');
         // 作品情報の取得中に連打・別端末同期が入っても、保存直前の再確認で同じcidを2件作らない。
-        if (items.some(function (x) { return x && x.cid === r.cid; })) {
+        var dupRace = null;
+        for (var ri = 0; ri < items.length; ri++) { if (items[ri] && items[ri].cid === r.cid) { dupRace = items[ri]; break; } }
+        if (dupRace) {
+          // ★破棄する側の新アイテムはurl入り。既存が作品URLを失っていたらここでも埋め戻す(症状4)。
+          if (url && !dupRace.url) { dupRace.url = url; lsSet(key, items); }
           var memoElRace = $('candMemo');
           showDuplicateDialog_(memoElRace && memoElRace.value, r.cid);
           if (onDone) onDone();
