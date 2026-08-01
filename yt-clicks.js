@@ -121,6 +121,20 @@
   }
   function loadHist() { return loadArr(histKey()); }
   function loadManual() { return loadArr(manualKey()); }
+  // ★データ消失バグの本丸対策(2026-08-01)。長時間走る非同期ループ(バルク計測生成等)は
+  //   開始時に配列をスナップショットして走るため、その窓の中でユーザーが別項目を「編集→保存」しても
+  //   ループ終了時の「スナップショット丸ごと書き戻し」が編集前の値で上書きし、巻き戻してしまう。
+  //   → 保存の直前に現ストレージを読み直し、itemKey一致の1件だけ指定フィールドを更新して書き戻す。
+  //   対象行が既に消えている場合は何もしない(消した行を復活させない)。
+  function persistFields_(storeKey, srcItem, fields) {
+    try {
+      var cur = loadArr(storeKey), key = itemKey(srcItem), idx = -1;
+      for (var i = 0; i < cur.length; i++) { if (itemKey(cur[i]) === key) { idx = i; break; } }
+      if (idx < 0) return;
+      fields.forEach(function (f) { cur[idx][f] = srcItem[f]; });
+      saveArr(storeKey, cur);
+    } catch (e) {}
+  }
   function loadYtMap() { try { return JSON.parse(localStorage.getItem(ytMapKey()) || '{}') || {}; } catch (e) { return {}; } }
   function saveYtMap(m) { try { localStorage.setItem(ytMapKey(), JSON.stringify(m)); } catch (e) {} }
   function apiKey() { try { return (localStorage.getItem('yt_api_key') || '').trim(); } catch (e) { return ''; } }
@@ -1333,7 +1347,10 @@
                                           //   ドラフト投稿完了経路がハッシュタグを送っておらずAH列が空になる不整合を塞ぐ。
       youtube_url: it.ytUrl || '',   // ★YouTube動画URL列へ反映=サーバーがvidを認識→日別記録(デルタ)開始。
                                      //   これが空だとシートにvidが無く、スナップされず「記録待ち」が永久固定になる(根治)
-      work_short_url: it.workShortUrl || '' // 導線2(作品クリック)の計測URL=作品クリック数の日次スナップ元(GAS 14C)
+      work_short_url: it.workShortUrl || '', // 導線2(作品クリック)の計測URL=作品クリック数の日次スナップ元(GAS 14C)
+      work_short_clear: !!it.workShortNone   // ★意図的に消した=空でシートを確定(GAS:1018受信・putIfの空スキップを越える)。
+                                             //   これが無いと、導線2導入前の履歴で誤挿入された短縮URLを消して保存しても
+                                             //   シート側セルが残り、行が_fromSheet化/📥復元した時に「復活」した(2026-08-01・REQ-811075a64f)。
     };
     ATTR_DEFS.forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
     payload.workState = it.workState || '旧作'; // 作品状態列
@@ -2582,7 +2599,10 @@
     if (typeof window.Go5MakeShort !== 'function' || !workerUrl) { if (!silent) setStatus('⚠️ 短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
     var handle = ''; try { handle = localStorage.getItem('bsky_handle__' + acct()) || ''; } catch (e) {}
     ensureIds();
-    function isR2(u) { return !!u && u.indexOf(workerUrl + '/') === 0; }
+    // ★両ドメイン+旧r2を自前と認識(旧: workerUrl 1個だけ判定だと、もう片方のチャンネルの
+    //   短縮URL(yoz2.com等)が永久に「未生成」扱いになり、タブを開くたびフルバルク再生成が走って
+    //   その窓で編集が巻き戻る原因になっていた・2026-08-01)。autoMeasureWorkShort_:1288と同じ基準。
+    function isR2(u) { return !!(go5.ourBase ? go5.ourBase(u) : (u && u.indexOf(workerUrl + '/') === 0)); }
     var hist = loadHist(), manual = loadManual(), targets = [];
     hist.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
     manual.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
@@ -2608,7 +2628,8 @@
     }
     function step() {
       if (i >= targets.length) {
-        saveArr(histKey(), hist); saveArr(manualKey(), manual);
+        // ★ここでの「スナップショット丸ごと書き戻し」は廃止。成功分は下の逐次保存(persistFields_)で
+        //   既に1件ずつ現ストレージへ反映済み。丸ごと保存はこの窓で入った手動編集を巻き戻すだけで害しかない(2026-08-01)。
         _bulkBusy = false; if (btn) btn.disabled = false;
         setStatus('✅ 計測リンク生成 完了：成功 ' + done + ' / 失敗 ' + fail + '。各行の「Bsky↗」が計測用の短縮URLです。(長押しでコピー→YouTube概要欄に貼り替え)');
         refresh(); // 新しく発行したコードのクリック数も取得(renderだけだと「…」のままになる)
@@ -2621,7 +2642,8 @@
         return window.Go5MakeShort(target).then(function (res) {
           if (res && res.shortUrl) {
             it.shortUrl = res.shortUrl; it.shareUrl = res.shareUrl || res.shortUrl; done++;
-            saveArr(histKey(), hist); saveArr(manualKey(), manual); // 逐次保存(途中終了に強い)
+            // ★逐次保存は「1件マージ」で(丸ごと保存だと並行中の手動編集を巻き戻す・2026-08-01)。
+            persistFields_(it.manual ? manualKey() : histKey(), it, ['shortUrl', 'shareUrl']);
             pushItemToGas_(it); // シートの短縮URL列も更新→snapshotStatsがクリックを拾い日別🖱が出る(2026-07-12)
           } else fail++;
         });
@@ -2640,7 +2662,7 @@
   function autoMeasureItem_(it, persist) {
     try {
       var go5 = window.Go5Short || {}; var w = (go5.WORKER_URL || '').replace(/\/+$/, ''); var sec = go5.SHARED_SECRET || '';
-      function isR2(u) { return !!u && u.indexOf(w + '/') === 0; }
+      function isR2(u) { return !!(go5.ourBase ? go5.ourBase(u) : (u && u.indexOf(w + '/') === 0)); } // 両ドメイン+旧r2(2026-08-01)
       if (!it || !w || typeof window.Go5MakeShort !== 'function' || isR2(it.shortUrl)) return;
       var handle = ''; try { handle = localStorage.getItem('bsky_handle__' + acct()) || ''; } catch (e) {}
       var srcP;
