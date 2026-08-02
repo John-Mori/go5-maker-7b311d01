@@ -733,6 +733,11 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* ── カレンダータブ（スケジュール最適化：iframe埋め込み） ── */
 .cal-frame-wrap{max-width:1100px;margin:8px auto 0;padding:0 8px;}
 .cal-frame{width:100%;height:82vh;border:1px solid var(--line);border-radius:12px;background:#fff;display:block;}
+/* PC calendar: use the wide desktop viewport so seven day columns do not collide. */
+@media(min-width:1024px){
+  .cal-frame-wrap{max-width:min(1800px,calc(100vw - 24px));}
+}
+
 @media(max-width:560px){.cal-frame{height:78vh;}}
 
 /* ── 投稿タブ：文字数カウンタ・Bluesky風プレビュー・投稿ボタン ── */
