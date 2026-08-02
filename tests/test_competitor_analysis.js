@@ -20,8 +20,13 @@ const titles = Array.from({ length: 25 }, (_, i) => ({
 }));
 const html = analysisHtml({ watchChannels: 3 }, { titles });
 // 分析パネルは「伸びてるTOP20」と「総再生数ワースト20」の2本立て(Chami指示2026-08-01 msg1532973541195255970)。
-const topHtml = html.split('🥶')[0];        // TOP側だけ(ワースト見出し🥶より前)
-const worstHtml = '🥶' + (html.split('🥶')[1] || '');
+// ボタン1つでTOP/ワーストを切り替える(Chami指示2026-08-02 msg1533373982206726154)ので、切替バーの🥶ではなく
+// ワースト面のol(class=comp-an-worst)を境にTOP側/ワースト側へ割る。
+const topHtml = html.split('comp-an-worst')[0];   // TOP側(切替バー+TOP面。ワーストolより前)
+const worstHtml = 'comp-an-worst' + (html.split('comp-an-worst')[1] || '');
+assert.match(html, /class="comp-an-toggle"/, 'TOP/ワーストの切替ボタンを出す');
+assert.match(html, /data-an-view="top"[\s\S]*data-an-view="worst"/, '切替ボタンはTOPとワーストの2つ');
+assert.match(html, /data-an-pane="worst"[^>]*class="comp-an-pane comp-an-pane-hidden"|class="comp-an-pane comp-an-pane-hidden" data-an-pane="worst"/, '既定はワースト面を隠してTOPを表示する');
 assert.equal((topHtml.match(/class="comp-an-video"/g) || []).length, 20, 'TOPは上位20件だけ表示する');
 assert.equal((worstHtml.match(/class="comp-an-video"/g) || []).length, 20, 'ワーストは下位20件だけ表示する');
 assert.match(worstHtml, /comp-an-worst/, 'ワースト再生数ランキングを分析タブに出す');

@@ -235,12 +235,10 @@
         '</div>' +
       '</li>';
     }
-    if (ranked.length) {
-      html += '<div class="comp-an-k comp-an-top-title">🔥 いま伸びてる競合動画(1日の再生の伸び・上位20動画)</div>' +
-        '<ol class="comp-an-top">' + ranked.map(videoLi).join('') + '</ol>';
-    } else {
-      html += '<div class="comp-an-soon">🔥 伸び速度は収集2日目(明日4時)から算出されます。今夜は登録と初回収集(ベースライン)まで完了しています。</div>';
-    }
+    var topBlock = ranked.length
+      ? '<div class="comp-an-k comp-an-top-title">🔥 いま伸びてる競合動画(1日の再生の伸び・上位20動画)</div>' +
+        '<ol class="comp-an-top">' + ranked.map(videoLi).join('') + '</ol>'
+      : '<div class="comp-an-soon">🔥 伸び速度は収集2日目(明日4時)から算出されます。今夜は登録と初回収集(ベースライン)まで完了しています。</div>';
     // ワースト再生数(登録している競合chの動画の中で総再生数が低い順・下位20)。
     //   Chami指示2026-08-01 msg1532973541195255970「ワーストを入れて欲しいのは分析タブで登録している登録者の方の動画」。
     //   総再生数が数値で取れている動画のみ対象(取得不可を最下位に詰めない)。昇順=再生の少ない順。
@@ -250,14 +248,42 @@
       return (Number(a.totalViews) - Number(b.totalViews)) ||
         String(a.videoId || a.title || '').localeCompare(String(b.videoId || b.title || ''));
     }).slice(0, 20);
-    if (worst.length) {
-      html += '<div class="comp-an-k comp-an-top-title">🥶 再生数が伸びていない競合動画(総再生数ワースト20)</div>' +
-        '<ol class="comp-an-top comp-an-worst">' + worst.map(videoLi).join('') + '</ol>';
+    var worstBlock = worst.length
+      ? '<div class="comp-an-k comp-an-top-title">🥶 再生数が伸びていない競合動画(総再生数ワースト20)</div>' +
+        '<ol class="comp-an-top comp-an-worst">' + worst.map(videoLi).join('') + '</ol>'
+      : '';
+    // ボタン1つでTOP/ワーストを切り替える(Chami指示2026-08-02 msg1533373982206726154)。
+    //   両方あるときだけ切替バーを出す。既定はTOP表示・ワースト面はcomp-an-pane-hiddenで隠す。
+    //   配線はrenderAnalysis→wireAnToggle_(el)。ワーストが無いとき(収集初日等)は従来どおりTOPのみ。
+    if (worstBlock) {
+      html += '<div class="comp-an-toggle" role="tablist">' +
+          '<button type="button" class="comp-an-tab is-active" data-an-view="top">🔥 伸びてる</button>' +
+          '<button type="button" class="comp-an-tab" data-an-view="worst">🥶 ワースト</button>' +
+        '</div>' +
+        '<div class="comp-an-pane" data-an-pane="top">' + topBlock + '</div>' +
+        '<div class="comp-an-pane comp-an-pane-hidden" data-an-pane="worst">' + worstBlock + '</div>';
+    } else {
+      html += topBlock;
     }
     return html;
   }
+  // TOP/ワーストの切替ボタンを配線する(analysisHtmlは純粋関数なのでDOMはここで触る)。
+  function wireAnToggle_(el) {
+    var bar = el.querySelector && el.querySelector('.comp-an-toggle');
+    if (!bar) return;
+    var tabs = el.querySelectorAll('.comp-an-tab');
+    var panes = el.querySelectorAll('.comp-an-pane');
+    bar.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.comp-an-tab') : null;
+      if (!btn) return;
+      var view = btn.getAttribute('data-an-view');
+      Array.prototype.forEach.call(tabs, function (t) { t.classList.toggle('is-active', t === btn); });
+      Array.prototype.forEach.call(panes, function (p) { p.classList.toggle('comp-an-pane-hidden', p.getAttribute('data-an-pane') !== view); });
+    });
+  }
   function renderAnalysis(el, dg, tt) {
     el.innerHTML = analysisHtml(dg, tt);
+    try { wireAnToggle_(el); } catch (e) {}
   }
   // 分析の前回結果をlocalStorageへキャッシュし、次回リロード時に即描画する(表示待ちを消す)。
   //   GASからの取得は毎回このタブが開くたびに走るが、待つ間は前回のキャッシュを見せておく(stale-while-revalidate)。
