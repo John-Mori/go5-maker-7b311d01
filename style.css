@@ -129,6 +129,11 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .promo-toggle small{color:var(--sub);font-size:10.5px;margin-left:4px;}
 .promo-toggle select{background:#0e1422;color:var(--fg);border:1px solid #24304a;border-radius:8px;
   font-size:12px;padding:3px 6px;margin-left:6px;cursor:pointer;}
+/* ラベル種類のタップ切替ボタン(Chami依頼2026-08-02⑥)。ドロップダウンの代わり＝タップで ◯%OFF / ¥価格。 */
+.promo-type-btn{margin-left:6px;padding:3px 12px;border-radius:8px;border:1px solid var(--accent);
+  background:transparent;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;flex:none;}
+.promo-type-btn:hover{background:rgba(43,179,192,.12);}
+.promo-type-btn:active{background:rgba(43,179,192,.22);}
 
 /* ── プレビュー＆位置調整（プレビュー横／見ながら＋−） ── */
 .editor{display:flex;gap:14px;align-items:flex-start;margin:8px 0;}

@@ -302,12 +302,20 @@
     if (ns === scale) return;
     scale = ns; persist(); updateSizeLabel(); redraw();
   }
+  // ラベル種類のタップ切替ボタン(Chami依頼2026-08-02⑥)の表示を現在の種別に合わせる。
+  function syncTypeBtn() {
+    var b = document.getElementById('promoTypeToggle');
+    if (!b) return;
+    b.textContent = (ltype === 'price') ? '¥価格' : '◯%OFF';
+    b.setAttribute('aria-pressed', ltype === 'price' ? 'true' : 'false');
+  }
   function updateRow() {
     var row = document.getElementById('promoPosRow');
     if (row) row.hidden = !active();
     updateSizeLabel();
     var sel = document.getElementById('promoType');
     if (sel && sel.value !== ltype) sel.value = ltype;
+    syncTypeBtn();
     var pw = document.querySelector('.preview-wrap');
     if (pw) pw.classList.toggle('has-dpad', active());
   }
@@ -334,6 +342,17 @@
         ltype = (sel.value === 'price') ? 'price' : 'discount';
         persist(); updateRow(); redraw();
       });
+    }
+    // ⑥タップ切替ボタン：hidden selectの値を反転→change発火(既存の購読=割引文の単位追従などを効かせる)。
+    var tbtn = document.getElementById('promoTypeToggle');
+    if (tbtn) {
+      tbtn.addEventListener('click', function (ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        if (!sel) { ltype = (ltype === 'price') ? 'discount' : 'price'; persist(); updateRow(); redraw(); return; }
+        sel.value = (sel.value === 'price') ? 'discount' : 'price';
+        try { sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (e2) {}
+      });
+      syncTypeBtn();
     }
     var rs = document.getElementById('promoPosReset'); if (rs) rs.addEventListener('click', resetPos);
     // 大きさは二段階(粗5%・微1%)。Chami依頼2026-07-30。
@@ -407,8 +426,10 @@
     clear: function () {
       pct = 0; priceVal = 0; fpos = null; scale = DEFAULT_SCALE; // 新規動画は既定の位置・サイズから
       enabled = true;
+      ltype = 'discount'; // ⑥新規作成のたびに種類は既定の「◯%OFF」へ戻す(Chami依頼2026-08-02「デフォルトは常に%」)
       try { localStorage.setItem('promo_label_enabled', '1'); } catch (e) {}
       var en = document.getElementById('promoEnable'); if (en) en.checked = true;
+      var st = document.getElementById('promoType'); if (st) st.value = 'discount';
       persist(); updateRow(); redraw();
     },
     nudge: nudge,
