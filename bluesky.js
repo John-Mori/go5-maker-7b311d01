@@ -2414,11 +2414,14 @@
   //   ・タグが%／価格が未取得のときは素通し(何も置換しない)。「¥N」「¥ N」の両表記を拾う。
   function ytDescResolved_() {
     var raw = (els.ytDesc ? els.ytDesc.value : '') || '';
-    if (promoLabelType_() !== 'price') return raw;
-    var info = fanzaInfoForWorkUrl_(captureWorkUrl_());
-    if (!info || info.price == null || isNaN(info.price)) return raw;
-    var n = Number(info.price).toLocaleString('ja-JP');
-    return raw.replace(/([¥￥])\s*N/g, '$1' + n); // ¥N / ￥N / ¥ N → ¥<価格>(元の円記号の字体は保つ)
+    if (!(window.BlueskyCore && window.BlueskyCore.resolvePromoTemplate)) return raw;
+    var info = fanzaInfoForWorkUrl_(captureWorkUrl_()) || {};
+    // ¥価格=「¥N→実価格」／%表示=「¥N の価格専用行を行ごと削除」＋「N%→割引率」(Chami依頼2026-08-03②)。
+    return window.BlueskyCore.resolvePromoTemplate(raw, {
+      type: promoLabelType_(),
+      price: (info.price != null ? info.price : null),
+      pct: (info.discountPct != null ? info.discountPct : null)
+    });
   }
   if (els.ytCopy) els.ytCopy.addEventListener('click', function () { if (els.ytDesc) copyText(ytDescResolved_(), els.ytCopy); });
   if (els.ytInsert) els.ytInsert.addEventListener('click', function () { if (lastShortUrl) putUrlTop(lastShortUrl); });

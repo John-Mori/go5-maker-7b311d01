@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder } = require('../bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate } = require('../bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -515,6 +515,36 @@ test('P-23: 「作品」接頭辞も許容', function () {
 test('P-24: プレースホルダを含まない通常本文は検出されない', function () {
   assert.strictEqual(hasWorkLinkPlaceholder('続きが気になっちゃう一冊、みつけた📚'), false);
   assert.strictEqual(hasSaleLinkPlaceholder('続きが気になっちゃう一冊、みつけた📚'), false);
+});
+
+// ────────────────────────────────────────────────────────────
+// PR-* resolvePromoTemplate(販促テンプレ解決・Chami依頼2026-08-03①②)
+//   %:/¥: 候補行の取捨・接頭辞剥がし・N%/N円/¥N 置換・%表示時の¥N行削除
+// ────────────────────────────────────────────────────────────
+var PROMO_BODY = '続きが気になっちゃう一冊、みつけた📚\n%:しかも今ならN%オフ💕\n¥:しかも今ならN円💕\n\n(商品紹介短縮URL)';
+test('PR-1: %モード→%:行を採用(接頭辞除去)しN%を割引率へ・¥:行は行ごと削除', function () {
+  assert.strictEqual(resolvePromoTemplate(PROMO_BODY, { type: 'discount', pct: 35, price: 10 }),
+    '続きが気になっちゃう一冊、みつけた📚\nしかも今なら35%オフ💕\n\n(商品紹介短縮URL)');
+});
+test('PR-2: ¥モード→¥:行を採用しN円を実価格へ・%:行は行ごと削除', function () {
+  assert.strictEqual(resolvePromoTemplate(PROMO_BODY, { type: 'price', pct: 35, price: 10 }),
+    '続きが気になっちゃう一冊、みつけた📚\nしかも今なら10円💕\n\n(商品紹介短縮URL)');
+});
+test('PR-3: 値なしは N を据え置く(誤った数字を貼らない)', function () {
+  assert.strictEqual(resolvePromoTemplate(PROMO_BODY, { type: 'discount', pct: null, price: null }),
+    '続きが気になっちゃう一冊、みつけた📚\nしかも今ならN%オフ💕\n\n(商品紹介短縮URL)');
+});
+test('PR-4: YouTube説明欄 %モード→接頭辞なしの¥N価格行を行ごと削除(②)', function () {
+  assert.strictEqual(resolvePromoTemplate('冒頭\n期間限定今だけ¥N作品をご案内！\n#PR', { type: 'discount', pct: 35, price: 10 }),
+    '冒頭\n#PR');
+});
+test('PR-5: YouTube説明欄 ¥モード→¥Nを実価格へ(行は残す)', function () {
+  assert.strictEqual(resolvePromoTemplate('冒頭\n期間限定今だけ¥N作品をご案内！\n#PR', { type: 'price', pct: 35, price: 3000 }),
+    '冒頭\n期間限定今だけ¥3,000作品をご案内！\n#PR');
+});
+test('PR-6: 冪等(解決済みを再投入しても変わらない)', function () {
+  var once = resolvePromoTemplate(PROMO_BODY, { type: 'price', pct: 35, price: 10 });
+  assert.strictEqual(resolvePromoTemplate(once, { type: 'price', pct: 35, price: 10 }), once);
 });
 
 // ────────────────────────────────────────────────────────────

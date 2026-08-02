@@ -589,20 +589,61 @@
     return (meta && meta.bskyText) || '';
   }
 
-  // ④ YouTube説明欄コピー時：タグが¥価格のときだけ、テンプレ中の「¥N」を作品の実価格へ置換して返す(Chami依頼2026-08-02④)。
-  //   ・価格は Go5WorkInfo(取得済みキャッシュ)→ fanza_title_cache(スナップ) の順に手元の値だけで解決(ネット不使用)。
-  //   ・タグが%／価格が取れないときは素通し(¥N のまま=誤った価格を貼らない)。「¥N」「¥ N」両表記を拾う。
-  function resolveYtDescYen_(text, meta) {
-    var s = String(text || '');
+  // 販促テンプレの解決に必要な値(タグ種別/割引率/実価格)を、手元のキャッシュだけで集める(ネット不使用)。
+  //   ・Go5WorkInfo(取得済みキャッシュ)→ fanza_title_cache(スナップ) の順。取れなければ null(=Nのまま=誤値を貼らない)。
+  function promoInfo_(meta) {
     var type = 'discount';
     try { type = (localStorage.getItem('promo_label_type') === 'price') ? 'price' : 'discount'; } catch (e) {}
-    if (type !== 'price') return s;
     var url = (meta && (meta.workUrl || meta.affiliateUrl)) || '';
-    var price = null;
-    try { var info = window.Go5WorkInfo ? window.Go5WorkInfo(url) : null; if (info && info.price != null) price = info.price; } catch (e) {}
-    if (price == null) { try { var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[url]; if (fc && fc.priceInfo && fc.priceInfo.price != null) price = fc.priceInfo.price; } catch (e) {} }
-    if (price == null || isNaN(price)) return s;
-    return s.replace(/([¥￥])\s*N/g, '$1' + Number(price).toLocaleString('ja-JP')); // ¥N / ￥N / ¥ N → ¥<価格>
+    var price = null, pct = null;
+    try { var info = window.Go5WorkInfo ? window.Go5WorkInfo(url) : null; if (info) { if (info.price != null) price = info.price; if (info.discountPct != null) pct = info.discountPct; } } catch (e) {}
+    if (price == null || pct == null) {
+      try {
+        var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[url];
+        if (fc && fc.priceInfo) { if (price == null && fc.priceInfo.price != null) price = fc.priceInfo.price; if (pct == null && fc.priceInfo.discountPct != null) pct = fc.priceInfo.discountPct; }
+      } catch (e) {}
+    }
+    return { type: type, price: price, pct: pct };
+  }
+  // 販促テンプレ(%:/¥: 候補行・N%/N円/¥N・%表示時の価格行削除)を解決する。純粋関数は bluesky-core 側。(Chami依頼2026-08-03①②)
+  function applyPromo_(text, meta) {
+    if (window.BlueskyCore && window.BlueskyCore.resolvePromoTemplate) return window.BlueskyCore.resolvePromoTemplate(text, promoInfo_(meta));
+    return String(text || '');
+  }
+  // 投稿モードのX本文を組む＝bluesky側の合成(短縮URL置換等)→販促テンプレ解決 の順で通す。
+  function composeXForModal_(meta) {
+    var base;
+    if (window.__go5ComposeXTextForBskyText) base = window.__go5ComposeXTextForBskyText(masterBody_(meta), (meta && meta.affiliateUrl) || '');
+    else base = masterBody_(meta);
+    return applyPromo_(base, meta);
+  }
+  // 後方互換(呼び出し元が残っていても壊さない)。YouTube説明欄も同じ販促解決を通す。
+  function resolveYtDescYen_(text, meta) { return applyPromo_(text, meta); }
+
+  // ①短縮URL置換：このドラフトの作品アフィリンクの短縮を発番し、X本文の生リンク/プレースホルダを短縮へ差し替える。
+  //   ・発番は非同期(Go5MakeShort=makeShortAndShare)。302素通しでaf_idは保持=クリック計測は壊れない。
+  //   ・モーダルが別作品へ切り替わっていたら書かない(_modalMeta !== meta)。失敗時は生リンク/プレースホルダのまま(何も壊さない)。
+  var _shortMintCache = {}; // aff → shareUrl(同一作品の二重発番を避ける)
+  function mintDraftWorkShort_(meta) {
+    var aff = (meta && (meta.affiliateUrl || meta.workUrl) || '').trim();
+    if (!aff || !window.Go5MakeShort) return;
+    function applyShare_(share) {
+      if (!share || _modalMeta !== meta) return;
+      var el = $('draftXText'); if (!el) return;
+      var v = el.value, nv = v;
+      if (v.indexOf(aff) >= 0) nv = v.split(aff).join(share); // 生アフィリンクを短縮へ
+      else if (window.BlueskyCore && window.BlueskyCore.hasWorkLinkPlaceholder && window.BlueskyCore.hasWorkLinkPlaceholder(v)) {
+        nv = window.BlueskyCore.fillWorkLinkPlaceholder(v, share, ''); // プレースホルダを短縮で埋める
+      }
+      if (nv !== v) el.value = nv; // 表示だけ更新(手編集扱いにしない=saveDraftPost_は呼ばない)
+    }
+    if (_shortMintCache[aff]) { applyShare_(_shortMintCache[aff]); return; }
+    try {
+      window.Go5MakeShort(aff).then(function (r) {
+        var share = (r && (r.shareUrl || r.shortUrl)) || '';
+        if (share) { _shortMintCache[aff] = share; applyShare_(share); }
+      }).catch(function () {});
+    } catch (e) {}
   }
 
   function openPostModal_(meta) {
@@ -618,13 +659,15 @@
       //   ★空文字('')は「未編集」とみなして再合成する。過去に空で保存されると saved.xText!==undefined が真になり、
       //     以後ずっと空欄のまま貼れなくなっていた(Chami報告2026-08-02②「X用投稿テキストは空欄」)。
       composedXText = saved.xText;
-    } else if (window.__go5ComposeXTextForBskyText) {
-      composedXText = window.__go5ComposeXTextForBskyText(masterBody_(meta), meta.affiliateUrl || '');
     } else {
-      composedXText = masterBody_(meta);
+      composedXText = composeXForModal_(meta); // 合成(短縮URL置換)→販促テンプレ解決(%:/¥:・N%/N円)
     }
     if (!composedXText) composedXText = masterBody_(meta); // 最後の砦：合成が空でも本文そのままは出す(空欄で貼れない事故の防止)
     $('draftXText').value = composedXText;
+    // ①短縮URL置換：この作品のアフィリンクの短縮を発番し、本文に残る生アフィリンク/プレースホルダを短縮へ差し替える。
+    //   ★短縮は draft の作品に対して非同期で発番する(live UIの作品とは別・workShortCache_は使わない)。
+    //   手編集の保存(saved.xText)を開いている時は尊重して触らない。完了までは生リンク/プレースホルダのまま。
+    if (!saved.xText) mintDraftWorkShort_(meta);
     var tags = saved.ytTags !== undefined ? saved.ytTags : null;
     if (tags === null) { try { tags = localStorage.getItem('yt_tags_shared') || ''; } catch (e) { tags = ''; } }
     if (!tags) { var te = $('ytTags'); tags = te ? te.value : '#Shorts #マンガ #漫画紹介 #anime'; }
@@ -632,8 +675,11 @@
     buildModalYtTitle_();
     $('draftYtUrl').value = saved.ytUrl !== undefined ? saved.ytUrl : (meta.youtubeUrl || '');
     var ytDescVal = (saved.ytDesc !== undefined && saved.ytDesc !== '') ? saved.ytDesc : '';
+    var ytDescFromTemplate = !ytDescVal; // 手編集の保存が無い＝テンプレ由来なら販促解決を通す(②)
     if (!ytDescVal && window.__go5YtDescForAccount) { ytDescVal = window.__go5YtDescForAccount(meta.account || 'acc1'); }
     if (!ytDescVal) { try { ytDescVal = localStorage.getItem('yt_desc__' + (meta.account || 'acc1')) || ''; } catch (e) {} }
+    // テンプレ由来のときだけ「¥N→実価格／%表示なら¥N行を削除」を反映(手編集の保存は尊重してそのまま)。
+    if (ytDescFromTemplate) ytDescVal = applyPromo_(ytDescVal, meta);
     // 1行目が短縮URLプレースホルダ/実URLなら本文から外し、スロット側で扱う(textarea内に生placeholderを残さない)。
     var slotUrl = '';
     var lines = ytDescVal.split('\n');
@@ -738,7 +784,7 @@
           //   日本語は文字間どこでも改行できるため「X／投／稿」と縦積みになっていた・Chami報告2026-07-31①)。
           //   コピーは margin-left:auto で右端へ寄せ、幅は文字ぶんだけ(Chami③「文字の幅に合うだけ」)。
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="' + sH + 'white-space:nowrap;">X 投稿</div><button type="button" id="draftCopyX" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
-          '<textarea id="draftXText" rows="8" style="' + iS + 'resize:vertical;"></textarea>' + // ①縦幅+2行(rows6→8・Chami依頼2026-08-02)
+          '<textarea id="draftXText" rows="9" style="' + iS + 'resize:vertical;"></textarea>' + // ①縦幅(rows6→8→9・もう1行分・Chami依頼2026-08-03)
           '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
           '<div style="' + rowWrap + '">' +
             '<input type="url" id="draftXPostUrl" size="1" placeholder="https://x.com/.../status/..." style="' + rowIn + '">' +
@@ -837,14 +883,14 @@
       if (!m || m.style.display === 'none' || !_modalMeta) return;
       if (window.__go5ComposeXTextForBskyText) {
         var xtEl = $('draftXText');
-        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(masterBody_(_modalMeta), _modalMeta.affiliateUrl || '');
+        if (xtEl) xtEl.value = composeXForModal_(_modalMeta);
       }
     });
     document.addEventListener('go5-work-short-ready', function () {
       if (!m || m.style.display === 'none' || !_modalMeta) return;
       if (window.__go5ComposeXTextForBskyText) {
         var xtEl = $('draftXText');
-        if (xtEl) xtEl.value = window.__go5ComposeXTextForBskyText(masterBody_(_modalMeta), _modalMeta.affiliateUrl || '');
+        if (xtEl) xtEl.value = composeXForModal_(_modalMeta);
       }
     });
     m.addEventListener('click', function (e) { if (e.target === m) { m.style.display = 'none'; _modalMeta = null; } });

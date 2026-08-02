@@ -390,6 +390,43 @@
     return lines.join('\n');
   }
 
+  /**
+   * 販促テンプレの解決(Chami依頼2026-08-03)。純粋関数。
+   * ・行頭 "%:"("％:") は割引率(%)表示用、"¥:"("￥:") は価格(¥)表示用の候補行。
+   *   opts.type('discount'|'price') で選ばれた側だけ残し、選ばれなかった側は行ごと削除・
+   *   選ばれた側は接頭辞を外す(Chami「選ばれなかった方は文を削除+その行ごと削除で」)。
+   * ・"N%" は割引率(opts.pct)、"N円"/"¥N" は実価格(opts.price)へ置換(値が無ければ N のまま=誤値を貼らない)。
+   * ・%表示のときは接頭辞なしの "¥N" を含む価格専用行(例:期間限定今だけ¥N作品をご案内！)を行ごと削除(②)。
+   * @param {string} text
+   * @param {{type:string, pct:(number|null), price:(number|null)}} opts
+   * @returns {string}
+   */
+  function resolvePromoTemplate(text, opts) {
+    var s = String(text == null ? '' : text);
+    opts = opts || {};
+    var isPrice = opts.type === 'price';
+    var pct = (opts.pct != null && !isNaN(opts.pct)) ? String(Number(opts.pct)) : null;
+    var price = (opts.price != null && !isNaN(opts.price)) ? Number(opts.price).toLocaleString('ja-JP') : null;
+    var lines = s.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var m = line.match(/^\s*([%％¥￥])\s*[:：]\s?(.*)$/);
+      if (m) {
+        var priceLine = (m[1] === '¥' || m[1] === '￥');
+        if (isPrice !== priceLine) continue; // 選ばれなかった側は行ごと削除
+        line = m[2];                          // 接頭辞を外して採用
+      } else if (!isPrice && /[¥￥]\s*N(?![0-9A-Za-z])/.test(line)) {
+        continue;                             // %表示のとき価格専用行(¥N)は行ごと削除
+      }
+      out.push(line);
+    }
+    var res = out.join('\n');
+    if (isPrice) { if (price != null) res = res.replace(/([¥￥])\s*N(?![0-9A-Za-z])/g, '$1' + price).replace(/N\s*円/g, price + '円'); }
+    else { if (pct != null) res = res.replace(/N\s*%/g, pct + '%'); }
+    return res;
+  }
+
   // ---- X(Twitter)の加重文字数 ----
   //   ★X公式仕様(docs.x.com/fundamentals/counting-characters)：
   //     ・上限は「加重280」。文字数ではなく重みの合計。
@@ -446,7 +483,8 @@
     detectFacets: detectFacets,
     blueskyPostRaw: blueskyPostRaw,
     blueskyVerify: blueskyVerify,
-    buildDiscountCacheKey: buildDiscountCacheKey
+    buildDiscountCacheKey: buildDiscountCacheKey,
+    resolvePromoTemplate: resolvePromoTemplate
   };
 
   if (typeof window !== 'undefined') {
