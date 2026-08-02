@@ -3851,12 +3851,29 @@
     var el = $('pageRank');
     if (!el) return;
 
+    // ★現タブのシート履歴(記録_ch1/ch2)を確実に取得してからランキングにも反映する。
+    //   投稿履歴(displayItems_)はシート由来行を合算するのにランキングはlocalStorage直読みのみ＝
+    //   データの取り方が分裂していた(Chami報告2026-08-02・③非対称)。月詠み(acc1)はローカル履歴が
+    //   ほぼ空でシート頼みのため、この分裂で「投稿履歴には出るがランキングには出ない」旧い作品が生じる。
+    //   TTL内の同期コールでは at が変わらない→再描画しない=ループ防止。
+    (function ensureSheet_() {
+      var a0 = acct();
+      var before = (_sheetExtraCache[a0] && _sheetExtraCache[a0].at) || 0;
+      fetchSheetExtra_(function () {
+        var nowAt = (_sheetExtraCache[a0] && _sheetExtraCache[a0].at) || 0;
+        if (nowAt !== before && $('pageRank') && !$('pageRank').hidden) renderRank();
+      });
+    })();
+
     // 両アカウントからアイテムとYouTube URLを収集
     var combined = [];
     ['acc1', 'acc2'].forEach(function (a) {
       var ymap;
       try { ymap = JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { ymap = {}; }
       var items = loadArr('short_hist__' + a).concat(loadArr('verify_manual__' + a));
+      // シート由来行(_fromSheet)も合算＝投稿履歴と同じ収集元に揃える。vidで後段重複排除するのでローカルと被っても安全。
+      var sc = _sheetExtraCache[a];
+      if (sc && sc.items && sc.items.length) items = items.concat(sc.items);
       items.forEach(function (it) {
         if (it.remade) return; // 被リビルド(リビルド版に置き換え済み)はランキングに出さない＝新しい方だけ載る
         var k = itemKey(it);
