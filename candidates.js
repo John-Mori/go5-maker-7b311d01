@@ -19,10 +19,14 @@
  */
 (function () {
   'use strict';
+  function usableCandidatePrefetch_(cached) {
+    return !!(cached && cached.done && cached.info && cached.info.title && !cached.errored);
+  }
+
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -2846,8 +2850,9 @@
       // プリフェッチ済みキャッシュがあれば即確定(fetchをスキップして体感速度を上げる)
       if (_prefetchCache[r.cid] && _prefetchCache[r.cid].done) {
         var cached = _prefetchCache[r.cid]; delete _prefetchCache[r.cid];
-        put(cached.info, cached.errored);
-        return;
+        if (usableCandidatePrefetch_(cached)) {
+          put(cached.info, false); return;
+        }
       }
       // 一時的な失敗(タイムアウト/サーバー5xx等・retryable)は1回だけ即リトライしてから諦める。
       //   そもそも取得エラーになる頻度を減らす狙い(Chami指定2026-07-24)。
