@@ -658,6 +658,8 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* ▶(再生数アイコン)は白＋黒フチ（三角は穴なしなので単純stroke・Chami依頼2026-08-02） */
 .rank-play{color:#fff;-webkit-text-stroke:.5px #000;text-stroke:.5px #000;paint-order:stroke fill;text-shadow:0 0 1px #000;}
 .rank-sub{color:var(--sub);font-weight:400;font-size:.85em;margin-left:2px;}
+/* 参考値(目標時刻を大きく外れた旧記録)=主指標より弱く見せる。破棄せず残す=Chami裁定2・2026-08-02 */
+.rank-main.rank-ref{color:var(--sub);font-weight:600;}
 /* 上段=指標トグル(再生数/白矢印/ピンク矢印)は塗りつぶしピル・下段=窓(総合/ピーク/30分…72時間)はタブ */
 .rank-tabs-metric{border-bottom:none;padding:10px 12px 8px;gap:6px;}
 .rank-metric-tab{border-radius:8px;border:1px solid var(--line);background:#0e1422;padding:8px 12px;}

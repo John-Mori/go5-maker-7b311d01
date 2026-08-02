@@ -3886,20 +3886,11 @@
   function snapTol_(b) { return Math.min(b.min * 0.15, 30); }
   var snapCache = (function () { try { return JSON.parse(localStorage.getItem('view_snaps') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,c,w,ageMin},...}  v=再生数 c=導線1クリック w=導線2クリック(公開からの経過時点)
   function snapPersist_() { try { localStorage.setItem('view_snaps', JSON.stringify(snapCache)); } catch (e) {} }
-  // 旧・緩い許容窓で採った「目標を大きく超える」観測(例: 60分窓に78分)を一度だけ一掃する。以後は snapTol_ で新規生成が抑えられる。(2026-08-03 Chami「78分やめて」)
-  function snapPrune_() {
-    var changed = false;
-    Object.keys(snapCache).forEach(function (vid) {
-      var rec = snapCache[vid]; if (!rec) return;
-      SNAP_BUCKETS.forEach(function (b) {
-        var r = rec[b.key];
-        if (r && r.ageMin != null && r.ageMin > b.min + snapTol_(b)) { delete rec[b.key]; changed = true; }
-      });
-      if (!Object.keys(rec).length) delete snapCache[vid];
-    });
-    if (changed) snapPersist_();
-  }
-  try { snapPrune_(); } catch (e) {}
+  // 旧・緩い許容窓で採った「目標を大きく超える」観測(例: 60分窓に78分)は、Chami裁定2(2026-08-02)で
+  //   「破棄せず"参考値"として残す」。よって削除はしない=以後 snapTol_ で新規生成だけを抑え、既存記録は保持する。
+  //   目標+許容窓を超える記録かどうかは表示側で判定し「参考」と明示する(snapIsRef_ / ランキング行の"·参考")。
+  //   ※v=604は起動時に一掃していた(snapPrune_)。裁定2でその一掃を撤去=残す方針へ変更(v=606)。
+  function snapIsRef_(bucketMin, ageMin) { return ageMin != null && bucketMin != null && ageMin > bucketMin + Math.min(bucketMin * 0.15, 30); }
   // vid → {code:導線1短縮コード, wcode:導線2短縮コード}。バケット観測時にクリックも一緒に固定するための索引。
   function vidCodeMap_() {
     var m = {};
@@ -4125,7 +4116,7 @@
       var noteHtml = c2PeakUnsupported
         ? '<div class="rank-note">ピンク矢印(導線2)のピークはまだ集計していません(GAS側の対応待ち)。総合や各時間(30分〜72時間)の窓は表示できます。</div>'
         : (isBucket
-          ? '<div class="rank-note">' + metricName + 'の「公開から約' + bucketDef.label + '」ランキング。YouTube公開時刻を起点に自動記録(この機能導入後の投稿が対象・未記録は非表示)。「(◯後)」は実記録時刻。</div>'
+          ? '<div class="rank-note">' + metricName + 'の「公開から約' + bucketDef.label + '」ランキング。YouTube公開時刻を起点に自動記録(この機能導入後の投稿が対象・未記録は非表示)。「(◯後)」は実記録時刻。<b>·参考</b>付き=目標時刻を大きく外れた旧記録の参考値(そのまま残しています)。</div>'
           : (isPeak
             ? '<div class="rank-note">' + metricName + 'の最大瞬間風速ランキング(1時間あたりの伸びが最大の区間。GAS自動記録・未記録は非表示)。</div>'
             : '<div class="rank-note">' + metricName + 'の総合ランキング。' + (_rankMetric === 'v' ? '' : ('対象' + rows.length + '本 / 数値取得' + _numCnt + '本(未取得は末尾に「…」取得中/失敗・「–」計測URL無しで表示)')) + '</div>'));
@@ -4158,7 +4149,9 @@
           var mClicks = '<span class="' + (hlTotal && _rankMetric === 'c1' ? 'rank-main' : '') + '" title="白矢印クリック(導線1)">' + LINK_IC + ' ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
           var mWork = '<span class="' + (hlTotal && _rankMetric === 'c2' ? 'rank-main' : '') + '" title="ピンク矢印クリック(導線2)">' + CUR_IC + ' ' + (r.wclicks != null ? num(r.wclicks) : (r.wcode ? '…' : '–')) + '</span>';
           var snapVal = _rankMetric === 'v' ? r.snapV : (_rankMetric === 'c1' ? r.snapC : r.snapW);
-          var mBucket = (isBucket && snapVal != null) ? '<span class="rank-main" title="公開から約' + bucketDef.label + 'の' + metricName + '">⏱ ' + METRIC_IC + ' ' + num(snapVal) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + ')</span></span>' : '';
+          // 目標時刻を大きく外れた記録(旧・緩い許容窓)は"参考値"(Chami裁定2・2026-08-02)。行にも「参考」を明示。
+          var snapRef = isBucket && bucketDef && snapIsRef_(bucketDef.min, r.snapAge);
+          var mBucket = (isBucket && snapVal != null) ? '<span class="rank-main' + (snapRef ? ' rank-ref' : '') + '" title="公開から約' + bucketDef.label + 'の' + metricName + (snapRef ? '（参考値:記録時刻が目標から外れた旧記録です）' : '') + '">⏱ ' + METRIC_IC + ' ' + num(snapVal) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + (snapRef ? ' ·参考' : '') + ')</span></span>' : '';
           var peakVal = _rankMetric === 'v' ? r.peakV : (_rankMetric === 'c1' ? r.peakC : null);
           var peakWin = _rankMetric === 'v' ? r.peakVWin : r.peakCWin;
           var mPeak = (isPeak && peakVal != null) ? '<span class="rank-main" title="最大瞬間風速">🌀 ' + METRIC_IC + ' ' + num(peakVal) + '/時<span class="rank-sub">(' + esc(peakWin || '') + ')</span></span>' : '';
