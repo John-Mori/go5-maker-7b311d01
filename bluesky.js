@@ -450,16 +450,29 @@
     if (isDigest) return 'の総集編';
     return '';
   }
+  // 割引文の単位を「動画生成タブのタグ」種別から判定する。(Chami依頼2026-08-02)
+  //   動画生成タブの販促ラベル種別(promoType: ◯%OFF=discount / ¥価格=price)を参照し、
+  //   price のときだけ「N円」表記、それ以外は従来どおり「N%オフ」表記にする。
+  //   ・%: なんと今ならN%オフのおトク作品！✨
+  //   ・¥: なんと今ならN円のおトク作品！✨
+  //   種別は生きているセレクタ(#promoType)を最優先で読み、無ければ localStorage(promo_label_type)。
+  function promoLabelType_() {
+    var sel = document.getElementById('promoType');
+    if (sel && sel.value) return sel.value === 'price' ? 'price' : 'discount';
+    try { return localStorage.getItem('promo_label_type') === 'price' ? 'price' : 'discount'; } catch (e) { return 'discount'; }
+  }
+  function discUnit_() { return promoLabelType_() === 'price' ? '円' : '%オフ'; }
   // build(n, isNew, isDigest)：チェックに応じた文面。mark は通常版／新作版／総集編版すべてにマッチする。(切替時に同じ行を差し替えるため)
+  //   ★mark は「%オフ」版と「円」版の両方を拾う(タグ切替後に既存の割引行を差し替えられるように)。
   var DISC = {
     acc1: {
       // acc1 は「〜おトク作品！」で締める。サフィックスがある時は & で繋いで従来の読みを保つ(の新作&おトク作品！)。
-      build: function (n, isNew, isDigest) { var s = discSuffix_(isNew, isDigest); return 'なんと今なら' + n + '%オフ' + (s ? s + '&' : 'の') + 'おトク作品！✨'; },
-      placeholder: 'なんと今なら〇%オフのおトク作品！✨', mark: /(?:しかも|なんと)今なら[^\n]*オフ/, persistent: false
+      build: function (n, isNew, isDigest) { var s = discSuffix_(isNew, isDigest); return 'なんと今なら' + n + discUnit_() + (s ? s + '&' : 'の') + 'おトク作品！✨'; },
+      placeholder: 'なんと今なら〇%オフのおトク作品！✨', mark: /(?:しかも|なんと)今なら[^\n]*(?:オフ|円)/, persistent: false
     },
     acc2: {
-      build: function (n, isNew, isDigest) { return 'しかも今なら' + n + '%オフ' + discSuffix_(isNew, isDigest) + '💕'; },
-      placeholder: 'しかも今なら〇%オフ💕', mark: /(?:しかも|なんと)今なら[^\n]*オフ/, persistent: false
+      build: function (n, isNew, isDigest) { return 'しかも今なら' + n + discUnit_() + discSuffix_(isNew, isDigest) + '💕'; },
+      placeholder: 'しかも今なら〇%オフ💕', mark: /(?:しかも|なんと)今なら[^\n]*(?:オフ|円)/, persistent: false
     }
   };
   // 割引文の挿入/差し替え/削除を行う純粋関数。(対象テキストを受け取り新テキストを返す)isNew=新作用/isDigest=総集編用の文面。
@@ -511,6 +524,12 @@
   function onDigestBodyToggle(on) { syncDigestBody(on); if (curDiscVal() !== '') applyDiscount(curDiscVal()); }
   if (els.discountDigest) els.discountDigest.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest.checked); });
   if (els.discountDigest2) els.discountDigest2.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest2.checked); });
+  // 動画生成タブの「タグ」種別(◯%OFF / ¥価格)が切り替わったら、割引文の単位(%オフ⇔円)も追従。
+  //   Chami依頼2026-08-02: %か円かは動画生成タブのタグ(promoType)から判定する。選択中の割引文があれば即差し替え。
+  (function () {
+    var sel = document.getElementById('promoType');
+    if (sel) sel.addEventListener('change', function () { if (curDiscVal() !== '') applyDiscount(curDiscVal()); });
+  })();
   // 投稿確認モーダル内：この投稿のテキスト(pcText)にだけ割引文を反映。(保存はしない)新作・総集編チェックも独立。
   function applyDiscountPc() {
     if (els.pcText) els.pcText.value = discApply(els.pcText.value, (els.discountSelPc && els.discountSelPc.value) || '', !!(els.discountNewPc && els.discountNewPc.checked), !!(els.discountDigestPc && els.discountDigestPc.checked));
