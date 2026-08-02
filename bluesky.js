@@ -1292,6 +1292,20 @@
     } catch (e) {}
     return null;
   }
+  // 販促テンプレ(%:/¥:候補行・N/¥N)を解決するための価格情報。手元キャッシュのみ(通信なし)＝
+  //   ①movieInfoCache(スクレイプ済) ②fanza_title_cache のスナップ の順で price/discountPct を拾う。
+  //   ★X欄(wireXTweet_)とYouTube説明欄(ytDescResolved_)の両方から使うので外側スコープに置く。
+  function promoInfoForCompose_() {
+    var url = captureWorkUrl_();
+    var info = fanzaInfoForWorkUrl_(url) || {};
+    var price = (info.price != null) ? info.price : null;
+    var pct = (info.discountPct != null) ? info.discountPct : null;
+    if (price == null || pct == null) {
+      var snap = fanzaSnapForWorkUrl_(url);
+      if (snap) { if (price == null) price = snap.price; if (pct == null) pct = snap.discountPct; }
+    }
+    return { type: promoLabelType_(), price: price, pct: pct };
+  }
   // 戦略ラベル(raw/戦略_画像選びとコメント.md §4): 狙い(成約/集客)とコメント型。(①〜⑧)
   // 動画ごとのラベルなので投稿後に未設定へ戻す。(前作の値が残ると分析を汚す)
   function readGoal() { var el = $('movieGoal'); return el ? (el.value || '') : ''; }
@@ -2415,13 +2429,9 @@
   function ytDescResolved_() {
     var raw = (els.ytDesc ? els.ytDesc.value : '') || '';
     if (!(window.BlueskyCore && window.BlueskyCore.resolvePromoTemplate)) return raw;
-    var info = fanzaInfoForWorkUrl_(captureWorkUrl_()) || {};
     // ¥価格=「¥N→実価格」／%表示=「¥N の価格専用行を行ごと削除」＋「N%→割引率」(Chami依頼2026-08-03②)。
-    return window.BlueskyCore.resolvePromoTemplate(raw, {
-      type: promoLabelType_(),
-      price: (info.price != null ? info.price : null),
-      pct: (info.discountPct != null ? info.discountPct : null)
-    });
+    // 価格情報はX欄と同じ手元キャッシュ経路(movieInfoCache→fanza_title_cache)で拾う。
+    try { return window.BlueskyCore.resolvePromoTemplate(raw, promoInfoForCompose_()); } catch (e) { return raw; }
   }
   if (els.ytCopy) els.ytCopy.addEventListener('click', function () { if (els.ytDesc) copyText(ytDescResolved_(), els.ytCopy); });
   if (els.ytInsert) els.ytInsert.addEventListener('click', function () { if (lastShortUrl) putUrlTop(lastShortUrl); });
@@ -2534,7 +2544,14 @@
     //   新しい文言生成はせず、既存の composePostText()(セール行含む・投稿ボタン③つで実績のある
     //   組み立て)をそのまま使う。「📎 短縮URLを挿入」で作品リンクだけ手動プレビュー差し替え可能。
     var X_LINK_PENDING = '(短縮リンク取得中…)'; // Blueskyプレビューと共通の目印文字列
-    function composeXText() {
+    // %:/¥:候補行の出し分け＋N/¥N置換(Chami依頼2026-08-02〜03)。core未読込・例外時は素通し(壊さない)。
+    //   価格情報は外側スコープの promoInfoForCompose_(手元キャッシュのみ・通信なし)を共用。
+    function applyPromoX_(text) {
+      if (!(window.BlueskyCore && window.BlueskyCore.resolvePromoTemplate)) return text;
+      try { return window.BlueskyCore.resolvePromoTemplate(text, promoInfoForCompose_()); } catch (e) { return text; }
+    }
+    // 生リンク→短縮/取得中の目印への差し替えまでを担う中核(例外を投げうる。fail-openはcomposeXTextで受ける)。
+    function composeXTextRaw_() {
       var base = composePostText();
       var rawLink = resolveAffLink();
       // 短縮URLオーバーライド時：本文内の生リンクを差し替え(手動プレビュー用。実際のコピー時は
@@ -2554,6 +2571,15 @@
         return base.split(rawLink).join(X_LINK_PENDING);
       }
       return base;
+    }
+    // ★fail-open: 組み立てが途中で例外を吐いても、X欄を「まるごと空(0/280)」にしない
+    //   (Chami報告2026-08-03「ここが空欄」。最悪の事故は沈黙＝空表示。書いた本文をそのまま見せる方が安全)。
+    //   組み上がった文には最後に販促テンプレ解決(%:/¥:/N)を掛ける(この行がChamiの言う「%の反映」)。
+    function composeXText() {
+      var base;
+      try { base = composeXTextRaw_(); }
+      catch (e) { base = String((els.text && els.text.value) || ''); }
+      return applyPromoX_(base);
     }
 
     function updateXCount_(text) {
