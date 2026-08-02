@@ -295,11 +295,12 @@
       return !ch || ch === cur; // 他chと確定した行のみ隠す。不明はそのまま出す
     });
   }
-  function displayItems_() {
-    var local = allItems();
-    var c = _sheetExtraCache[acct()];
-    var items = (c && c.items && c.items.length) ? local.concat(c.items) : local;
-    var pend = _pendingSheetEdits[acct()];
+  // 【恒久・供給一本化 2026-08-03】シート由来行(_fromSheet)への上塗り(保持patch＋合算URLストア)を
+  //   投稿履歴とランキングで共通化する。従来は投稿履歴(displayItems_)だけが当てており、ランキングは
+  //   生シート行を直読み=shortUrl/合算URLがpatch側にしか無い作品のクリックコードが解決できず、
+  //   「投稿履歴では出るクリックがランキングに出ない」非対称の温床だった(Chami報告2026-08-02【A】)。
+  function applySheetOverlays_(items, a) {
+    var pend = _pendingSheetEdits[a];
     if (pend) items = items.map(function (it) {
       if (!it || !it._fromSheet || !it.videoId) return it;
       var patch = pend[String(it.videoId)];
@@ -320,7 +321,7 @@
       return copy;
     });
     // 合算URL(導線1)を_fromSheet行へ上塗り(保持patchが破棄された後も維持・Chami依頼2026-07-31)。
-    var mstore = loadMergeStore_(acct());
+    var mstore = loadMergeStore_(a);
     if (mstore && Object.keys(mstore).length) items = items.map(function (it) {
       if (!it || !it._fromSheet || !it.videoId) return it;
       var mu = mstore[String(it.videoId)];
@@ -329,7 +330,13 @@
       copy.mergeUrls = mu;
       return copy;
     });
-    return filterOtherChannel_(items);
+    return items;
+  }
+  function displayItems_() {
+    var local = allItems();
+    var c = _sheetExtraCache[acct()];
+    var items = (c && c.items && c.items.length) ? local.concat(c.items) : local;
+    return filterOtherChannel_(applySheetOverlays_(items, acct()));
   }
   // GASのhistoryをマージ用に取得。未設定/失敗時は前回キャッシュ(無ければ空)を返すだけ＝ローカル表示は無傷。
   function fetchSheetExtra_(cb) {
@@ -359,6 +366,21 @@
       if (cb) cb(extra);
     });
   }
+  // 指定chのシート由来行(キャッシュ→無ければ退避済み生行から即席復元・通信なし)。
+  function rankSheetItems_(a) {
+    var c = _rankSheetCache[a];
+    if (!c) c = _rankSheetCache[a] = { at: 0, items: mergeRawSheetOnly_(loadSheetRaw_(a)) };
+    return c.items || [];
+  }
+  // 【恒久・供給一本化 2026-08-03】指定chの表示アイテム=ローカル履歴＋シート由来行＋上塗り(patch/合算URL)。
+  //   投稿履歴(displayItems_)と同じ材料をチャンネル明示で返す。ランキングの収集とスナップ採録(vidCodeMap_)は
+  //   必ずここを通す=「投稿履歴とランキングでデータの取り方が分裂」する構造を根絶(Chami報告2026-08-02【A】)。
+  //   ローカルとシートの重複は呼び出し側が vid で排除する(ローカルが先=ローカル優先)。
+  function channelItemsFor_(a) {
+    var local = loadArr('short_hist__' + a).filter(function (it) { return it && !it.manualOnly; })
+      .concat(loadArr('verify_manual__' + a));
+    return applySheetOverlays_(local.concat(rankSheetItems_(a)), a);
+  }
   // ランキング(両ch合算)用に、指定チャンネル a のシート履歴を明示取得する。
   //   fetchSheetExtra_ は acct()(今のタブ)固定なので非アクティブ側が取れない。ここは a を明示。
   //   ローカルとの重複排除はランキング側が vid で行うため、mergeSheetExtras の第1引数は空配列
@@ -367,7 +389,7 @@
     var now = Date.now(), c = _rankSheetCache[a];
     if (c && c.at >= 0 && (now - c.at) < SHEET_EXTRA_TTL_MS) { if (cb) cb(c.items); return; }
     // ★SWR: 未取得なら退避済み生行から即復元(非アクティブ側chもランキングから消えない)。
-    if (!c) { var seed = mergeRawSheetOnly_(loadSheetRaw_(a)); if (seed.length) { _rankSheetCache[a] = c = { at: 0, items: seed }; } }
+    if (!c) { rankSheetItems_(a); c = _rankSheetCache[a]; }
     var gasUrl = gasUrl_();
     if (!gasUrl) { if (!c) _rankSheetCache[a] = { at: 0, items: [] }; if (cb) cb((_rankSheetCache[a] && _rankSheetCache[a].items) || []); return; }
     jsonp_(gasUrl, { action: 'history', channel: a, limit: 300 }, function (res) {
@@ -3923,10 +3945,13 @@
     ['acc1', 'acc2'].forEach(function (a) {
       var ymap;
       try { ymap = JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { ymap = {}; }
-      var items = loadArr('short_hist__' + a).concat(loadArr('verify_manual__' + a));
-      // シート由来行(_fromSheet)も合算＝投稿履歴と同じ収集元に揃える。vidで後段重複排除するのでローカルと被っても安全。
-      var sc = _rankSheetCache[a];
-      if (sc && sc.items && sc.items.length) items = items.concat(sc.items);
+      // 【恒久・供給一本化 2026-08-03】投稿履歴(displayItems_)とランキングの材料を channelItemsFor_ で1本化。
+      //   従来ここは生シート行を直読みし、保持patch/合算URLストア(mstore)の上塗りを当てていなかった=
+      //   shortUrl がpatch側にしか無い作品はクリックコード(code)が解決できず、metricVal==null で除外され
+      //   「投稿履歴では210クリック出るのにランキングに出ない」非対称になっていた(Chami報告2026-08-02【A】)。
+      //   channelItemsFor_ はローカル履歴＋シート由来行に applySheetOverlays_ を当てて返す=履歴と同じ材料。
+      //   ローカルとシートの重複は後段の vid 重複排除(seen)で吸収(ローカルが先＝ローカル優先)。
+      var items = channelItemsFor_(a);
       items.forEach(function (it) {
         if (it.remade) return; // 被リビルド(リビルド版に置き換え済み)はランキングに出さない＝新しい方だけ載る
         var k = itemKey(it);
