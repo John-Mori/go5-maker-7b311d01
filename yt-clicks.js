@@ -3881,8 +3881,25 @@
     { key: 'b2880', min: 2880, label: '48時間' },
     { key: 'b4320', min: 4320, label: '72時間' }
   ];
+  // バケットごとの許容窓(分)。旧 max(15, min*0.5) は60分窓に90分まで許し「60分計測が78分」を生んでいた(Chami 2026-08-02)。
+  //   基準の15%かつ最大30分に締める= b60は[60,69](78を弾く)、12h/48hのようなGAS未対応の大窓は最大30分(数%)で残す=空にしない。(2026-08-03)
+  function snapTol_(b) { return Math.min(b.min * 0.15, 30); }
   var snapCache = (function () { try { return JSON.parse(localStorage.getItem('view_snaps') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,c,w,ageMin},...}  v=再生数 c=導線1クリック w=導線2クリック(公開からの経過時点)
   function snapPersist_() { try { localStorage.setItem('view_snaps', JSON.stringify(snapCache)); } catch (e) {} }
+  // 旧・緩い許容窓で採った「目標を大きく超える」観測(例: 60分窓に78分)を一度だけ一掃する。以後は snapTol_ で新規生成が抑えられる。(2026-08-03 Chami「78分やめて」)
+  function snapPrune_() {
+    var changed = false;
+    Object.keys(snapCache).forEach(function (vid) {
+      var rec = snapCache[vid]; if (!rec) return;
+      SNAP_BUCKETS.forEach(function (b) {
+        var r = rec[b.key];
+        if (r && r.ageMin != null && r.ageMin > b.min + snapTol_(b)) { delete rec[b.key]; changed = true; }
+      });
+      if (!Object.keys(rec).length) delete snapCache[vid];
+    });
+    if (changed) snapPersist_();
+  }
+  try { snapPrune_(); } catch (e) {}
   // vid → {code:導線1短縮コード, wcode:導線2短縮コード}。バケット観測時にクリックも一緒に固定するための索引。
   function vidCodeMap_() {
     var m = {};
@@ -3907,7 +3924,7 @@
       var c1 = (cc.code && cc.code in clicksCache) ? clicksCache[cc.code] : null;   // 導線1クリック(白矢印)
       var c2 = (cc.wcode && cc.wcode in clicksCache) ? clicksCache[cc.wcode] : null; // 導線2クリック(ピンク矢印)
       SNAP_BUCKETS.forEach(function (b) {
-        var tol = Math.max(15, b.min * 0.5);
+        var tol = snapTol_(b);
         var inWin = ageMin >= b.min && ageMin <= b.min + tol;
         if (!inWin) return;
         var cur = rec[b.key];
