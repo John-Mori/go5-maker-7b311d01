@@ -581,6 +581,7 @@
   // localStorageに前回値を保持し、開いた瞬間に即表示→GAS取得で最新化。
   var deltaCache = (function () { try { return JSON.parse(localStorage.getItem('delta_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {tv,yv,wv,tc,yc,wc}
   var peakCache = (function () { try { return JSON.parse(localStorage.getItem('peak_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {vRate,vWin,cRate,cWin}
+  var tpCache = (function () { try { return JSON.parse(localStorage.getItem('tp_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,c,age},..} GASサーバー時点記録(公開起点・端末未起動でも記録)
   var _deltaFetched = false;
   function gasUrl_() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
   // JSONP。(GASのGETをCORS回避で読む。キャッシュバスターcb付き)
@@ -645,6 +646,7 @@
         deltaCache = res.deltas; _deltaFetched = true;
         try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); } catch (e) {}
         if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
+        if (res.timepoints) { tpCache = res.timepoints; try { localStorage.setItem('tp_cache', JSON.stringify(tpCache)); } catch (e) {} }
         _health.gas = true; _health.gasAt = new Date().getTime(); // 既存取得の結果を記録(追加通信ゼロ)
       } else { _health.gas = false; }
       try { renderHealth_(); } catch (e) {}
@@ -3913,6 +3915,7 @@
         var code = codeOf(it.shortUrl || '');
         var wcode = codeOf(it.workShortUrl || '');
         var snap = (isBucket && snapCache[x.vid]) ? snapCache[x.vid][_rankWin] : null;
+        var gtp = (isBucket && tpCache[x.vid]) ? tpCache[x.vid][_rankWin] : null; // GASサーバー時点記録(過去分・端末未起動でも記録。再生数と導線1のみ・12h/48h/導線2は非対応)
         var pk = pk0[x.vid] || {};
         var cats = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
         return {
@@ -3922,7 +3925,7 @@
           clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((c != null ? c : 0) + it.rebuildBaseClicks) : c; })(), // 導線1総合(結合はリビルド前も加算)
           wclicks: (wcode && wcode in clicksCache) ? clicksCache[wcode] : null, // 導線2総合(ピンク矢印)
           code: code, wcode: wcode,
-          snapV: snap ? snap.v : null, snapC: (snap && snap.c != null) ? snap.c : null, snapW: (snap && snap.w != null) ? snap.w : null, snapAge: snap ? snap.ageMin : null,
+          snapV: (snap && snap.v != null) ? snap.v : (gtp && gtp.v != null ? gtp.v : null), snapC: (snap && snap.c != null) ? snap.c : (gtp && gtp.c != null ? gtp.c : null), snapW: (snap && snap.w != null) ? snap.w : null, snapAge: (snap && snap.ageMin != null) ? snap.ageMin : (gtp && gtp.age != null ? gtp.age : null),
           peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
           peakC: pk.cRate != null ? pk.cRate : null, peakCWin: pk.cWin || '',
           ts: it.ts || (publishedCache[x.vid] || 0),

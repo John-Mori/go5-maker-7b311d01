@@ -114,7 +114,7 @@ function fanzaGenre_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-07-31F(②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-08-02A(action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -628,7 +628,7 @@ function doGet(e) {
       else if (p.action === 'delete') out = { ok: true, deleted: deleteRecord_(ch, p.videoId || '', p.postUri || '', p.short || '') };
       else if (p.action === 'settings_pull') out = settingsPull_();   // 端末間同期：非秘密設定の取得
       else if (p.action === 'settings_meta') out = settingsMeta_();   // 端末間同期：最終保存メタのみ(状態表示)
-      else if (p.action === 'deltas') out = { ok: true, deltas: computeDeltas_(), peaks: computePeaks_() }; // 今日/昨日/週の増加＋最大瞬間風速
+      else if (p.action === 'deltas') out = { ok: true, deltas: computeDeltas_(), peaks: computePeaks_(), timepoints: computeTimepoints_() }; // 今日/昨日/週の増加＋最大瞬間風速＋公開起点の時点記録(過去分・アプリ未起動でも記録)
       else if (p.action === 'comp_digest') out = compDigest_();                          // 競合: 週次サマリ(分析タブ表示用)
       else if (p.action === 'comp_titles') out = compTitles_(p.days, p.top);             // 競合: 題名コーパス(分析タブ表示用)
       else if (p.action === 'comp_add_seed') out = compAddSeed_(p.url, p.name, p.bluesky, p.x, p.note); // 競合: フロント登録→GASへ同期
@@ -1809,6 +1809,37 @@ function timepointSheet_() {
   if (!sh) { sh = ss.insertSheet(TIMEPOINT_SHEET); sh.appendRow(TIMEPOINT_HEADERS); }
   else if (sh.getLastRow() === 0) { sh.appendRow(TIMEPOINT_HEADERS); }
   return sh;
+}
+// 時点記録シート → videoIdごとの {b30:{v,c,age}, b60:.., b120:.., b360:.., b1440:.., b4320:..}。
+//   ランキングタブの「窓」表示用。シートは post_id 単位なので記録シートで post_id→videoId に解決してから返す。
+//   ※GASが記録するのは 30分/1時間/2時間/6時間/24時間/72時間 の6バケット・再生数(v)と導線1クリック(c)のみ。
+//     12時間/48時間 と 導線2(作品クリック) はGAS未記録＝ここには入らない(クライアントの端末スナップ側で対応)。
+function computeTimepoints_() {
+  var sh = timepointSheet_(); var last = sh.getLastRow(); if (last < 2) return {};
+  // post_id → videoId の対応表を記録シートから作る。
+  var pid2vid = {};
+  CH_SHEETS.forEach(function (name) {
+    var ss = openSS_(); var s = ss.getSheetByName(name); if (!s) return;
+    var map = headerMap_(s); var lr = s.getLastRow(); if (lr < 2) return;
+    var pc = map['post_id'], yc = map['YouTube動画URL']; if (!pc || !yc) return;
+    var vals = s.getRange(2, 1, lr - 1, s.getLastColumn()).getValues();
+    vals.forEach(function (row) {
+      var pid = String(row[pc - 1] || ''); if (!pid) return;
+      var vid = ytIdFromUrl_(row[yc - 1]); if (vid && !pid2vid[pid]) pid2vid[pid] = vid;
+    });
+  });
+  var LAB = { '30分': 'b30', '1時間': 'b60', '2時間': 'b120', '6時間': 'b360', '24時間': 'b1440', '72時間': 'b4320' };
+  var d = sh.getRange(2, 1, last - 1, TIMEPOINT_HEADERS.length).getValues();
+  var out = {};
+  d.forEach(function (r) {
+    var pid = String(r[0] || ''); if (!pid) return;
+    var vid = pid2vid[pid]; if (!vid) return;
+    var key = LAB[String(r[3])]; if (!key) return;
+    var age = r[4], v = r[5], c = r[6];
+    if (!out[vid]) out[vid] = {};
+    if (!out[vid][key]) out[vid][key] = { v: (v === '' ? null : Number(v)), c: (c === '' ? null : Number(c)), age: (age === '' ? null : Number(age)) };
+  });
+  return out;
 }
 function captureTimepoints_(tpRecs, viewsByVid, clickByCode, nowStr, tz) {
   if (!tpRecs || !tpRecs.length) return 0;
