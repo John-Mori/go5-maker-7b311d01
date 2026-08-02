@@ -642,6 +642,11 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .rank-main{font-weight:700;color:var(--ink);}
 .rank-main .emico{height:1.05em;vertical-align:-0.16em;}
 .rank-sub{color:var(--sub);font-weight:400;font-size:.85em;margin-left:2px;}
+/* 上段=指標トグル(再生数/白矢印/ピンク矢印)は塗りつぶしピル・下段=窓(総合/ピーク/30分…72時間)はタブ */
+.rank-tabs-metric{border-bottom:none;padding:10px 12px 8px;gap:6px;}
+.rank-metric-tab{border-radius:8px;border:1px solid var(--line);background:#0e1422;padding:8px 12px;}
+.rank-metric-tab.active{color:#06222a;background:var(--accent);border:1px solid var(--accent);}
+.rank-tabs-win{padding-top:0;font-size:.92em;}
 .rank-list{padding:4px 0;}
 .rank-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);}
 .rank-row:last-child{border-bottom:none;}

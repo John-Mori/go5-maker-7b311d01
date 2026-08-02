@@ -3770,6 +3770,8 @@
   }
 
   var _rankMode = (function () { try { return localStorage.getItem('rank_mode') || 'views'; } catch (e) { return 'views'; } })();
+  var _rankMetric = (function () { try { return localStorage.getItem('rank_metric') || ''; } catch (e) { return ''; } })(); // v/c1/c2(空=旧rank_modeから移行)
+  var _rankWin = (function () { try { return localStorage.getItem('rank_window') || ''; } catch (e) { return ''; } })();    // total/peak/b30…b4320
   // 投稿(YouTube公開)からの経過時間バケットごとに再生数スナップショットを自動記録。
   //   ※アプリが再生数を取得した時にだけ観測できる＝そのバケットの許容窓内に開いた投稿だけ記録される。
   //   各バケットは「基準時刻〜基準+許容(基準の50%)」で初観測した再生数を固定。過去投稿は対象外＝未記録。
@@ -3778,23 +3780,47 @@
     { key: 'b60', min: 60, label: '1時間' },
     { key: 'b120', min: 120, label: '2時間' },
     { key: 'b360', min: 360, label: '6時間' },
+    { key: 'b720', min: 720, label: '12時間' },
     { key: 'b1440', min: 1440, label: '24時間' },
     { key: 'b2880', min: 2880, label: '48時間' },
     { key: 'b4320', min: 4320, label: '72時間' }
   ];
-  var snapCache = (function () { try { return JSON.parse(localStorage.getItem('view_snaps') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,ageMin},...}
+  var snapCache = (function () { try { return JSON.parse(localStorage.getItem('view_snaps') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,c,w,ageMin},...}  v=再生数 c=導線1クリック w=導線2クリック(公開からの経過時点)
   function snapPersist_() { try { localStorage.setItem('view_snaps', JSON.stringify(snapCache)); } catch (e) {} }
+  // vid → {code:導線1短縮コード, wcode:導線2短縮コード}。バケット観測時にクリックも一緒に固定するための索引。
+  function vidCodeMap_() {
+    var m = {};
+    try {
+      allItems().forEach(function (it) {
+        var yt = it.ytUrl || ''; var vid = ytIdOf(yt); if (!vid) return;
+        if (!m[vid]) m[vid] = { code: codeOf(it.shortUrl || ''), wcode: codeOf(it.workShortUrl || '') };
+        else { if (!m[vid].code) m[vid].code = codeOf(it.shortUrl || ''); if (!m[vid].wcode) m[vid].wcode = codeOf(it.workShortUrl || ''); }
+      });
+    } catch (e) {}
+    return m;
+  }
   function captureSnaps_() {
     var now = new Date().getTime(), changed = false;
+    var cm = vidCodeMap_();
     Object.keys(viewsCache).forEach(function (vid) {
       var pub = publishedCache[vid];
       if (!pub || viewsCache[vid] == null) return;
       var ageMin = (now - pub) / 60000;
       var rec = snapCache[vid] || {};
+      var cc = cm[vid] || {};
+      var c1 = (cc.code && cc.code in clicksCache) ? clicksCache[cc.code] : null;   // 導線1クリック(白矢印)
+      var c2 = (cc.wcode && cc.wcode in clicksCache) ? clicksCache[cc.wcode] : null; // 導線2クリック(ピンク矢印)
       SNAP_BUCKETS.forEach(function (b) {
-        if (rec[b.key]) return;
         var tol = Math.max(15, b.min * 0.5);
-        if (ageMin >= b.min && ageMin <= b.min + tol) { rec[b.key] = { v: viewsCache[vid], ageMin: Math.round(ageMin) }; changed = true; }
+        var inWin = ageMin >= b.min && ageMin <= b.min + tol;
+        if (!inWin) return;
+        var cur = rec[b.key];
+        // 再生数は初観測で固定。クリックはその時点でまだ未取得(null)なら、同じ窓内の後続観測で埋める(値が出るまで待つ)。
+        if (!cur) { rec[b.key] = { v: viewsCache[vid], c: c1, w: c2, ageMin: Math.round(ageMin) }; changed = true; }
+        else {
+          if (cur.c == null && c1 != null) { cur.c = c1; changed = true; }
+          if (cur.w == null && c2 != null) { cur.w = c2; changed = true; }
+        }
       });
       if (Object.keys(rec).length) snapCache[vid] = rec;
     });
@@ -3845,35 +3871,58 @@
       } catch (e) { return ''; }
     }
 
-    var RANK_MODES = [
-      { key: 'views', label: '総合(再生数)' },
-      { key: 'clicks', label: 'クリック数' },
-      { key: 'pv', label: '▶ピーク' },   // 再生の最大瞬間風速(▶＝再生数の絵文字。一番伸びた区間の再生/時)
-      { key: 'pc', label: '<img class="emico" src="assets/icons/ic-link.png" alt="クリック">ピーク' } // クリックの最大瞬間風速(クリック絵文字＝ic-link)
-    ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/24時間/72時間
-    // 旧モード名(early)は廃止。保存済みなら b120(2時間)へ読み替え。
-    if (_rankMode === 'early') _rankMode = 'b120';
-    // ワースト(再生数)モードは投稿履歴のランキングから廃止(分析タブ=登録chの動画側へ移設・Chami指示2026-08-01 msg1532973541195255970)。保存済みなら総合へ戻す。
-    if (_rankMode === 'wviews') _rankMode = 'views';
+    // 2軸のランキング(Chami指示2026-08-02)。①指標＝再生数/白矢印(導線1)/ピンク矢印(導線2)を上段ボタンで切替。
+    //   ②窓＝総合/ピーク/30分/1時間/2時間/6時間/12時間/24時間/48時間/72時間 を下段で切替。窓は「YouTube公開時刻」起点。
+    var LINK_IC = '<img class="emico" src="assets/icons/ic-link.png" alt="">';
+    var CUR_IC = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="">';
+    var RANK_METRICS = [
+      { key: 'v', label: '▶ 再生数' },
+      { key: 'c1', label: LINK_IC + ' 白矢印' },
+      { key: 'c2', label: CUR_IC + ' ピンク矢印' }
+    ];
+    var RANK_WINS = [
+      { key: 'total', label: '総合' },
+      { key: 'peak', label: 'ピーク' }
+    ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/12時間/24時間/48時間/72時間
+    // 旧・単一モード(rank_mode)からの移行。views→(v,総合) clicks→(c1,総合) pv→(v,ピーク) pc→(c1,ピーク) bXXX→(v,窓)。
+    (function migrate_() {
+      if (_rankMetric || _rankWin) return; // 既に新形式が入っていれば触らない
+      var m = _rankMode || 'views';
+      if (m === 'early') m = 'b120';
+      if (m === 'wviews') m = 'views';
+      if (m === 'views') { _rankMetric = 'v'; _rankWin = 'total'; }
+      else if (m === 'clicks') { _rankMetric = 'c1'; _rankWin = 'total'; }
+      else if (m === 'pv') { _rankMetric = 'v'; _rankWin = 'peak'; }
+      else if (m === 'pc') { _rankMetric = 'c1'; _rankWin = 'peak'; }
+      else if (m.charAt(0) === 'b') { _rankMetric = 'v'; _rankWin = m; }
+      else { _rankMetric = 'v'; _rankWin = 'total'; }
+    })();
+    // 12時間バケット新設で窓集合が変わっても、未知キーは総合へ戻す。
+    if (!RANK_WINS.some(function (w) { return w.key === _rankWin; })) _rankWin = 'total';
+    if (!RANK_METRICS.some(function (m) { return m.key === _rankMetric; })) _rankMetric = 'v';
 
     function doRender() {
       captureSnaps_();
-      var isBucket = _rankMode.charAt(0) === 'b';
-      var bucketDef = isBucket ? SNAP_BUCKETS.filter(function (b) { return b.key === _rankMode; })[0] : null;
+      var isBucket = _rankWin.charAt(0) === 'b';
+      var isPeak = _rankWin === 'peak';
+      var bucketDef = isBucket ? SNAP_BUCKETS.filter(function (b) { return b.key === _rankWin; })[0] : null;
+      var c2PeakUnsupported = isPeak && _rankMetric === 'c2'; // 導線2(ピンク矢印)のピークはGAS未対応=データ無し
       var pk0 = peakCache || {};
       var rows = uniq.map(function (x) {
         var it = x.it;
         var code = codeOf(it.shortUrl || '');
-        var snap = (isBucket && snapCache[x.vid]) ? snapCache[x.vid][_rankMode] : null;
+        var wcode = codeOf(it.workShortUrl || '');
+        var snap = (isBucket && snapCache[x.vid]) ? snapCache[x.vid][_rankWin] : null;
         var pk = pk0[x.vid] || {};
         var cats = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
         return {
           vid: x.vid, yt: x.yt, acct: x.acct,
           title: titleCache[x.vid] || it.title || (it.manual ? '(手動追加)' : '(無題)'),
           views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
-          clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((c != null ? c : 0) + it.rebuildBaseClicks) : c; })(), // 結合は総合値(この投稿＋リビルド前。自分が0/未取得でも被リビルド分は加算)
-          code: code,
-          snapV: snap ? snap.v : null, snapAge: snap ? snap.ageMin : null,
+          clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((c != null ? c : 0) + it.rebuildBaseClicks) : c; })(), // 導線1総合(結合はリビルド前も加算)
+          wclicks: (wcode && wcode in clicksCache) ? clicksCache[wcode] : null, // 導線2総合(ピンク矢印)
+          code: code, wcode: wcode,
+          snapV: snap ? snap.v : null, snapC: (snap && snap.c != null) ? snap.c : null, snapW: (snap && snap.w != null) ? snap.w : null, snapAge: snap ? snap.ageMin : null,
           peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
           peakC: pk.cRate != null ? pk.cRate : null, peakCWin: pk.cWin || '',
           ts: it.ts || (publishedCache[x.vid] || 0),
@@ -3882,30 +3931,37 @@
           workUrl: it.workUrl || '', workState: it.workState || '旧作', cats: cats
         };
       });
-      // ソート対象の値。views/clicks/bXX(バケット)/pv・pc(最大瞬間風速)
+      // 指標(v/c1/c2)×窓(total/peak/bXX)でソート対象の値を決める。
       function metricVal(r) {
-        if (_rankMode === 'clicks') return r.clicks;
-        if (_rankMode === 'pv') return r.peakV;
-        if (_rankMode === 'pc') return r.peakC;
-        if (isBucket) return r.snapV;
-        return r.views;
+        if (_rankWin === 'total') return _rankMetric === 'v' ? r.views : (_rankMetric === 'c1' ? r.clicks : r.wclicks);
+        if (isPeak) return _rankMetric === 'v' ? r.peakV : (_rankMetric === 'c1' ? r.peakC : null); // 導線2ピークは未対応
+        // バケット窓: 公開からの経過時点で固定した各指標
+        return _rankMetric === 'v' ? r.snapV : (_rankMetric === 'c1' ? r.snapC : r.snapW);
       }
-      // 未記録(値なし)は除外。(総合=再生数モードは一覧の基本なので除外しない)
-      if (_rankMode !== 'views') rows = rows.filter(function (r) { return metricVal(r) != null; });
+      var isBaseList = (_rankMetric === 'v' && _rankWin === 'total'); // 総合(再生数)だけは一覧の基本＝値なしも残す
+      // 未記録(値なし)は除外。
+      if (!isBaseList) rows = rows.filter(function (r) { return metricVal(r) != null; });
       rows.sort(function (a, b) {
         var av = metricVal(a), bv = metricVal(b);
         if (av == null && bv == null) return (b.views || 0) - (a.views || 0);
         if (av == null) return 1; if (bv == null) return -1;
         return bv - av;
       });
-      var tabsHtml = '<div class="rank-tabs">' + RANK_MODES.map(function (m) {
-        return '<button class="rank-tab' + (m.key === _rankMode ? ' active' : '') + '" data-mode="' + m.key + '" type="button">' + m.label + '</button>';
+      var metricName = _rankMetric === 'v' ? '再生数' : (_rankMetric === 'c1' ? '白矢印クリック(導線1)' : 'ピンク矢印クリック(導線2)');
+      var metricRow = '<div class="rank-tabs rank-tabs-metric">' + RANK_METRICS.map(function (m) {
+        return '<button class="rank-tab rank-metric-tab' + (m.key === _rankMetric ? ' active' : '') + '" data-metric="' + m.key + '" type="button">' + m.label + '</button>';
       }).join('') + '</div>';
-      var noteHtml = isBucket
-        ? '<div class="rank-note">投稿から約' + bucketDef.label + '時点の再生数ランキング(自動記録・この機能導入後の投稿が対象。「(◯後)」は実記録時刻。未記録は非表示)。</div>'
-        : (_rankMode === 'clicks' ? '<div class="rank-note">短縮URLのクリック数ランキング。(クリックURLの無い投稿は非表示)</div>'
-          : (_rankMode === 'pv' ? '<div class="rank-note">再生数の最大瞬間風速ランキング。(一番伸びた時間帯の1時間あたり再生数。GASが自動記録・スプレッドシート保存。未記録は非表示)</div>'
-            : (_rankMode === 'pc' ? '<div class="rank-note">クリック数の最大瞬間風速ランキング。(一番伸びた時間帯の1時間あたりクリック数。GASが自動記録・保存。未記録は非表示)</div>' : '')));
+      var winRow = '<div class="rank-tabs rank-tabs-win">' + RANK_WINS.map(function (w) {
+        return '<button class="rank-tab rank-win-tab' + (w.key === _rankWin ? ' active' : '') + '" data-win="' + w.key + '" type="button">' + w.label + '</button>';
+      }).join('') + '</div>';
+      var tabsHtml = metricRow + winRow;
+      var noteHtml = c2PeakUnsupported
+        ? '<div class="rank-note">ピンク矢印(導線2)のピークはまだ集計していません(GAS側の対応待ち)。総合や各時間(30分〜72時間)の窓は表示できます。</div>'
+        : (isBucket
+          ? '<div class="rank-note">' + metricName + 'の「公開から約' + bucketDef.label + '」ランキング。YouTube公開時刻を起点に自動記録(この機能導入後の投稿が対象・未記録は非表示)。「(◯後)」は実記録時刻。</div>'
+          : (isPeak
+            ? '<div class="rank-note">' + metricName + 'の最大瞬間風速ランキング(1時間あたりの伸びが最大の区間。GAS自動記録・未記録は非表示)。</div>'
+            : '<div class="rank-note">' + metricName + 'の総合ランキング。' + (_rankMetric === 'v' ? '' : '(計測URLの無い投稿は非表示)') + '</div>'));
       var emptyHtml = rows.length ? '' : '<p class="hint" style="padding:10px 14px;">このランキングに表示できる記録がまだありません。</p>';
       el.innerHTML = tabsHtml + noteHtml + emptyHtml + '<div class="rank-list">' +
         rows.map(function (r, i) {
@@ -3925,13 +3981,17 @@
             : '';
           var dateStr = fmtTsFull(r.ts);
           var acctLabel = ACCT_NAME[r.acct] || r.acct;
-          // 指標スパン。(並びの中でソート対象を rank-main で強調)バケットモードのみ先頭にスナップ値。
-          var mViews = '<span class="' + (_rankMode === 'views' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
-          var mClicks = '<span class="' + (_rankMode === 'clicks' ? 'rank-main' : '') + '" title="Bsky投稿クリック数"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
-          var mBucket = isBucket ? '<span class="rank-main" title="投稿から約' + bucketDef.label + 'の再生数">⏱ ' + num(r.snapV) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + ')</span></span>' : '';
-          var mPeak = (_rankMode === 'pv' || _rankMode === 'pc')
-            ? '<span class="rank-main" title="最大瞬間風速">🌀 ' + num(_rankMode === 'pv' ? r.peakV : r.peakC) + '/時<span class="rank-sub">(' + esc(_rankMode === 'pv' ? r.peakVWin : r.peakCWin) + ')</span></span>'
-            : '';
+          // 指標スパン。総合3種(▶再生/白矢印/ピンク矢印)は常に併記。窓(バケット/ピーク)は主指標だけ先頭に強調。
+          var hlTotal = _rankWin === 'total';
+          var METRIC_IC = _rankMetric === 'v' ? '▶' : (_rankMetric === 'c1' ? LINK_IC : CUR_IC);
+          var mViews = '<span class="' + (hlTotal && _rankMetric === 'v' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
+          var mClicks = '<span class="' + (hlTotal && _rankMetric === 'c1' ? 'rank-main' : '') + '" title="白矢印クリック(導線1)">' + LINK_IC + ' ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
+          var mWork = '<span class="' + (hlTotal && _rankMetric === 'c2' ? 'rank-main' : '') + '" title="ピンク矢印クリック(導線2)">' + CUR_IC + ' ' + (r.wclicks != null ? num(r.wclicks) : (r.wcode ? '…' : '–')) + '</span>';
+          var snapVal = _rankMetric === 'v' ? r.snapV : (_rankMetric === 'c1' ? r.snapC : r.snapW);
+          var mBucket = (isBucket && snapVal != null) ? '<span class="rank-main" title="公開から約' + bucketDef.label + 'の' + metricName + '">⏱ ' + METRIC_IC + ' ' + num(snapVal) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + ')</span></span>' : '';
+          var peakVal = _rankMetric === 'v' ? r.peakV : (_rankMetric === 'c1' ? r.peakC : null);
+          var peakWin = _rankMetric === 'v' ? r.peakVWin : r.peakCWin;
+          var mPeak = (isPeak && peakVal != null) ? '<span class="rank-main" title="最大瞬間風速">🌀 ' + METRIC_IC + ' ' + num(peakVal) + '/時<span class="rank-sub">(' + esc(peakWin || '') + ')</span></span>' : '';
           return '<div class="rank-row' + topCls + '">' +
             '<span class="rank-num">' + rank + '</span>' +
             '<div class="rank-info">' +
@@ -3949,7 +4009,7 @@
               '</div>' +
               (r.cats ? '<div class="vrow-tags">' + r.cats + '</div>' : '') +
               '<div class="vmetrics">' +
-                mPeak + mBucket + mViews + mClicks +
+                mPeak + mBucket + mViews + mClicks + mWork +
                 (r.bskyHref ? '<a class="vlink ' + (r.bskyIsX ? 'vlink-x' : 'vlink-bsky') + '" href="' + esc(r.bskyHref) + '" target="_blank" rel="noopener">' + (r.bskyIsX ? 'X↗' : 'Bsky↗') + '</a>' : '') +
                 (r.yt ? '<a class="vlink vlink-yt" href="' + esc(r.yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
                 (r.workUrl ? '<a class="vlink vlink-work" href="' + esc(r.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
@@ -3959,11 +4019,12 @@
           '</div>';
         }).join('') +
       '</div>';
-      // サブタブ配線
+      // サブタブ配線(上段=指標 v/c1/c2・下段=窓 total/peak/bXX)
       el.querySelectorAll('.rank-tab').forEach(function (b) {
         b.addEventListener('click', function () {
-          _rankMode = b.getAttribute('data-mode');
-          try { localStorage.setItem('rank_mode', _rankMode); } catch (e) {}
+          var mk = b.getAttribute('data-metric'), wk = b.getAttribute('data-win');
+          if (mk) { _rankMetric = mk; try { localStorage.setItem('rank_metric', _rankMetric); } catch (e) {} }
+          if (wk) { _rankWin = wk; try { localStorage.setItem('rank_window', _rankWin); } catch (e) {} }
           doRender();
         });
       });
