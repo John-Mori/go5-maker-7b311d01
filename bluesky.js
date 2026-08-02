@@ -543,6 +543,24 @@
     return String(text == null ? '' : text).replace(/[ \t\r\n]+$/, '');
   }
   try { window.__go5StripAutoBlocks = stripAutoBlocks_; } catch (e) {} // 検証用フック
+  // 紹介用/セール短縮リンクのプレースホルダ判定・置換(表記ゆれ吸収=core側の正規表現)。core未読込時は
+  //   旧来の標準表記だけ exact で拾うフォールバック(=最低限は動く)。Chami報告2026-08-02の恒久対策。
+  function hasWorkPH_(t) {
+    if (window.BlueskyCore && window.BlueskyCore.hasWorkLinkPlaceholder) return window.BlueskyCore.hasWorkLinkPlaceholder(t);
+    return String(t == null ? '' : t).indexOf('紹介用短縮リンク') >= 0;
+  }
+  function hasSalePH_(t) {
+    if (window.BlueskyCore && window.BlueskyCore.hasSaleLinkPlaceholder) return window.BlueskyCore.hasSaleLinkPlaceholder(t);
+    return String(t == null ? '' : t).indexOf('セール中短縮リンク') >= 0;
+  }
+  function fillWorkPH_(t, repl) {
+    if (window.BlueskyCore && window.BlueskyCore.fillWorkLinkPlaceholder) return window.BlueskyCore.fillWorkLinkPlaceholder(t, repl, '');
+    return String(t == null ? '' : t).split('紹介用短縮リンク').join(repl);
+  }
+  function fillSalePH_(t, repl) {
+    if (window.BlueskyCore && window.BlueskyCore.fillSaleLinkPlaceholder) return window.BlueskyCore.fillSaleLinkPlaceholder(t, repl);
+    return String(t == null ? '' : t).split('セール中短縮リンク').join(repl);
+  }
   // フックの深掘り＋CTA行を差し込む(X案2・Chami承認2026-07-21)。ch共通・実体は純粋関数
   //   BlueskyCore.insertHookCta(＝Nodeテスト対象)。core未読込でも壊れないよう素通しにフォールバック。
   function applyHookCta_(caption) {
@@ -883,7 +901,7 @@
     var link = resolveAffLink();
     var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
     var out;
-    if (caption.indexOf(PH) >= 0) {
+    if (hasWorkPH_(caption)) {
       // ★プレースホルダ方式(2026-07-23 Chami指定): テンプレ帳の本文自体にPR行+プレースホルダが
       //   既に書かれている。旧来の「PR行の直下に自動でリンクを足す」処理はしない(足すと二重になる)。
       //   プレースホルダを実際の短縮リンクへ機械的に置換するだけでよい。
@@ -906,10 +924,10 @@
     if (discountListOn_()) {
       var dlink = cachedDiscountLink_();
       var SPH = (window.BlueskyCore && window.BlueskyCore.SALE_LINK_PLACEHOLDER) || 'セール中短縮リンク';
-      if (out.indexOf(SPH) >= 0) {
+      if (hasSalePH_(out)) {
         // ★テンプレ側が「セール中短縮リンク」で位置を決めている(Chami指定2026-07-31)＝
         //   プレースホルダを短縮セールリンクへ置換するだけ。末尾への自動追記はしない(二重化防止)。
-        if (dlink) out = out.split(SPH).join(dlink);
+        if (dlink) out = fillSalePH_(out, dlink);
         else ensureDiscountLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); });
       } else {
         // 本文に同じセール短縮URLを手書きしている時は自動追記しない(https有無を無視した重複判定)。
@@ -931,7 +949,7 @@
       var link = overrideAffLink !== undefined ? overrideAffLink : resolveAffLink();
       var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
       var out;
-      if (caption.indexOf(PH) >= 0) {
+      if (hasWorkPH_(caption)) {
         var short = link ? ((workShortCache_.forLink === link) ? workShortCache_.shareUrl : '') : '';
         out = (window.BlueskyCore && window.BlueskyCore.fillWorkLinkPlaceholder)
           ? window.BlueskyCore.fillWorkLinkPlaceholder(caption, short, link)
@@ -942,8 +960,8 @@
       if (discountListOn_()) {
         var dlink = cachedDiscountLink_();
         var SPH = (window.BlueskyCore && window.BlueskyCore.SALE_LINK_PLACEHOLDER) || 'セール中短縮リンク';
-        if (out.indexOf(SPH) >= 0) {
-          if (dlink) out = out.split(SPH).join(dlink); // テンプレ側が位置指定=置換のみ・自動追記しない
+        if (hasSalePH_(out)) {
+          if (dlink) out = fillSalePH_(out, dlink); // テンプレ側が位置指定=置換のみ・自動追記しない
         } else {
           // 本文に同じセール短縮URLが既にある時(https有無どちらでも)は二重に足さない(Chami報告2026-07-31②)。
           var dbare = String(dlink || '').replace(/^https?:\/\//, '');
@@ -1051,7 +1069,7 @@
     var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
     var short = link ? cachedWorkShortLink_() : '';
     var PENDING = '(短縮リンク取得中…)';
-    var hasPlaceholder = caption.indexOf(PH) >= 0;
+    var hasPlaceholder = hasWorkPH_(caption);
     var hasRawLinkInCaption = !!(link && caption.indexOf(link) >= 0);
     var needFetch = false;
     // ★プレビューには生の長いリンクを一切出さない(Chami指定2026-07-23)。短縮できていれば短縮版、
@@ -1059,8 +1077,8 @@
     //   組み立ては composePostText 側にある(こちらは表示専用の派生ロジック)。
     var dispCaption = caption;
     if (hasPlaceholder) {
-      if (short) dispCaption = dispCaption.split(PH).join(short);
-      else { dispCaption = dispCaption.split(PH).join(PENDING); needFetch = true; }
+      if (short) dispCaption = fillWorkPH_(dispCaption, short);
+      else { dispCaption = fillWorkPH_(dispCaption, PENDING); needFetch = true; }
     } else if (link && !hasRawLinkInCaption) {
       if (short) dispCaption += '\n\n' + PR_LINE_() + '\n' + short;
       else { dispCaption += '\n\n' + PR_LINE_() + '\n' + PENDING; needFetch = true; }
@@ -1073,11 +1091,11 @@
     // 🔥セール中短縮リンクのプレースホルダ(Chami指定2026-07-31)＝テンプレ側が位置を決めているので、
     //   ここで短縮セールリンクへ置換しておく(未取得なら「準備中」表示＋取得開始)。置換した時は末尾の自動追記はしない。
     var saleSPH = (window.BlueskyCore && window.BlueskyCore.SALE_LINK_PLACEHOLDER) || 'セール中短縮リンク';
-    var saleHasPH = dispCaption.indexOf(saleSPH) >= 0;
+    var saleHasPH = hasSalePH_(dispCaption);
     if (saleHasPH) {
       var dlinkP = cachedDiscountLink_();
-      if (dlinkP) dispCaption = dispCaption.split(saleSPH).join(dlinkP);
-      else { dispCaption = dispCaption.split(saleSPH).join('(🔥セール短縮リンク準備中…)'); ensureDiscountLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }); }
+      if (dlinkP) dispCaption = fillSalePH_(dispCaption, dlinkP);
+      else { dispCaption = fillSalePH_(dispCaption, '(🔥セール短縮リンク準備中…)'); ensureDiscountLink_(function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }); }
     }
 
     var html = dispCaption ? highlightLinks(escapeHtml(dispCaption)) : '<span class="ph">(本文)</span>';
@@ -1667,14 +1685,15 @@
   //   短縮セールリンクへ置換してから投稿する。日本語プレースホルダのまま投稿されるのを防ぐ(WORK側と同思想)。
   //   通常はcomposePostText時点で置換済み。未取得のまま押された時だけここで取得を待つ(最長4秒でフェイルセーフ)。
   function finalizeSalePlaceholder_(text) {
-    var SPH = (window.BlueskyCore && window.BlueskyCore.SALE_LINK_PLACEHOLDER) || 'セール中短縮リンク';
     var s = String(text || '');
-    if (s.indexOf(SPH) < 0) return Promise.resolve(s);
+    if (!hasSalePH_(s)) return Promise.resolve(s);
     var cached = cachedDiscountLink_();
-    if (cached) return Promise.resolve(s.split(SPH).join(cached));
+    if (cached) return Promise.resolve(fillSalePH_(s, cached));
     return new Promise(function (resolve) {
       var done = false;
-      function fin(link) { if (done) return; done = true; resolve(link ? s.split(SPH).join(link) : s.split(SPH).join('')); }
+      // リンク無し=プレースホルダ語を消して投稿(literal投稿を回避)。sentinelで置換→除去し、
+      //   プレースホルダ箇所だけを消す(本文中の空白等は触らない)。
+      function fin(link) { if (done) return; done = true; resolve(link ? fillSalePH_(s, link) : fillSalePH_(s, ' ').split(' ').join('')); }
       ensureDiscountLink_(function (link) { fin(link); });
       setTimeout(function () { fin(cachedDiscountLink_()); }, 4000); // 取れなければプレースホルダ文字を消して投稿(literal投稿を回避)
     });

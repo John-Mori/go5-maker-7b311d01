@@ -293,15 +293,29 @@
   //   自由に決められない(常にPR行の直下固定)。Chamiはテンプレ帳に本文を保存する際、リンクを置きたい
   //   場所へ直接この文字列を書き込む運用に変更した。システムは本文中のこの文字列を実際の作品短縮
   //   リンクへ機械的に置換するだけでよい(位置はテンプレ側が決める・見出し文言もアカウント別に変えてよい)。
-  var WORK_LINK_PLACEHOLDER = '紹介用短縮リンク';
+  var WORK_LINK_PLACEHOLDER = '紹介用短縮リンク'; // 既定の標準表記(「📎 挿入」等でこの語を使う)
   // セール(割引一覧)会場リンク用のプレースホルダ。Chami指定2026-07-31: テンプレ帳の本文へ
   //   「セール中短縮リンク」と書いた位置に、現在選択中のセール案内URLの短縮リンクを機械的に
   //   置換する(WORK_LINK_PLACEHOLDERと同じ運用・位置と見出し文言はテンプレ側が決める)。
   var SALE_LINK_PLACEHOLDER = 'セール中短縮リンク';
+  // ---- プレースホルダの表記ゆれ吸収(Chami報告2026-08-02) ----
+  //   Chamiはテンプレ帳の本文に手書きでプレースホルダを置く。表記は揺れる=括弧付き/語順違い
+  //   (「紹介用短縮リンク」「商品紹介短縮URL」「商品紹介用短縮URL」/「セール中短縮リンク」
+  //   「セール紹介短縮用URL」等)。★exact一致(indexOf/split)だと表記を1文字でも変えた瞬間に
+  //   置換されず、else経路で生の作品/会場URLが末尾に自動追記され、プレースホルダは日本語のまま
+  //   残って二重化する(=Chamiが見た不具合そのもの)。正規表現で表記ゆれを吸収する。
+  //   ★括弧は消費しない=Chamiが付けた「()」はそのまま残り、中身の語だけURLへ替わる
+  //   (「(商品紹介短縮URL)」→「(https://…)」。Chami「短縮URLは()付きに変更した」の意図に沿う)。
+  //   ★作品(WORK)側は「商品/作品」接頭辞 か 既知の"紹介用短縮リンク/URL"のみに限定し、セール側の
+  //   「セール紹介短縮…」を誤って食わない(セール接頭辞の語を作品リンクへ置換する事故を防ぐ)。
+  var WORK_LINK_SRC = '(?:商品|作品)?紹介用短縮(?:リンク|URL)|(?:商品|作品)紹介短縮用?(?:リンク|URL)';
+  var SALE_LINK_SRC = 'セール(?:紹介)?[用中]?短縮[用中]?(?:リンク|URL)';
+  function hasWorkLinkPlaceholder(text) { return new RegExp(WORK_LINK_SRC).test(String(text == null ? '' : text)); }
+  function hasSaleLinkPlaceholder(text) { return new RegExp(SALE_LINK_SRC).test(String(text == null ? '' : text)); }
   function fillSaleLinkPlaceholder(text, saleLink) {
     var s = String(text == null ? '' : text);
-    if (!saleLink) return s;   // まだ短縮リンクが用意できていなければプレースホルダのまま返す
-    return s.split(SALE_LINK_PLACEHOLDER).join(saleLink);
+    if (saleLink == null || saleLink === '') return s; // まだ短縮リンクが用意できていなければプレースホルダのまま返す
+    return s.replace(new RegExp(SALE_LINK_SRC, 'g'), function () { return saleLink; });
   }
   /**
    * 本文中のプレースホルダ(WORK_LINK_PLACEHOLDER)を実リンクへ置換する。純粋関数。
@@ -321,7 +335,7 @@
     var s = String(text == null ? '' : text);
     var repl = shortLink || fallbackLink || '';
     if (!repl) return s;
-    return s.split(WORK_LINK_PLACEHOLDER).join(repl);
+    return s.replace(new RegExp(WORK_LINK_SRC, 'g'), function () { return repl; });
   }
   function stripAutoBlocks(text) {
     var lines = String(text == null ? '' : text).split('\n');
@@ -333,7 +347,7 @@
       if (isPrLine || KNOWN_DISCOUNT_LEADS.indexOf(t) >= 0) {
         // ★PR行の直下が「まだ実リンクに置換されていないプレースホルダ」なら、これは古い完成形では
         //   なく現行の生きたテンプレなので剥がさない(2026-07-23 プレースホルダ方式)。
-        if (isPrLine && i + 1 < lines.length && lines[i + 1].trim() === WORK_LINK_PLACEHOLDER) {
+        if (isPrLine && i + 1 < lines.length && hasWorkLinkPlaceholder(lines[i + 1].trim())) {
           out.push(lines[i]);
           continue;
         }
@@ -416,8 +430,10 @@
     stripAutoBlocks: stripAutoBlocks,
     WORK_LINK_PLACEHOLDER: WORK_LINK_PLACEHOLDER,
     fillWorkLinkPlaceholder: fillWorkLinkPlaceholder,
+    hasWorkLinkPlaceholder: hasWorkLinkPlaceholder,
     SALE_LINK_PLACEHOLDER: SALE_LINK_PLACEHOLDER,
     fillSaleLinkPlaceholder: fillSaleLinkPlaceholder,
+    hasSaleLinkPlaceholder: hasSaleLinkPlaceholder,
     insertHookCta: insertHookCta,
     stripHookCtaLines: stripHookCtaLines,
     HOOK_DEEPEN_LINE: HOOK_DEEPEN_LINE,

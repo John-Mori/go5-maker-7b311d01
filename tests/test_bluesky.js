@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder } = require('../bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder } = require('../bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -459,6 +459,62 @@ test('P-10: セールリンク未取得ならプレースホルダのまま(lite
 });
 test('P-11: セールプレースホルダを含まない本文は無変化', function () {
   assert.strictEqual(fillSaleLinkPlaceholder('普通の本文', 'https://5mgl.com/X1iAF'), '普通の本文');
+});
+
+// P-12〜P-24  表記ゆれ吸収(Chami報告2026-08-02「(商品紹介短縮URL)が置換されず生URLが末尾に二重化」)
+//   Chamiはテンプレ帳の本文に手書きで置く=括弧付き/語順違いが混ざる。exact一致では拾えず
+//   else経路で生URLが自動追記され二重化していた。正規表現で吸収し、括弧は残して中身だけ置換する。
+test('P-12: 括弧付き「(商品紹介短縮URL)」を検出=作品プレースホルダ', function () {
+  assert.strictEqual(hasWorkLinkPlaceholder('本文\n\n(商品紹介短縮URL)'), true);
+});
+test('P-13: 「(商品紹介短縮URL)」置換=括弧は残し中身だけURLへ', function () {
+  assert.strictEqual(fillWorkLinkPlaceholder('本文\n\n(商品紹介短縮URL)', 'https://yoz2.com/OZX3F', ''),
+    '本文\n\n(https://yoz2.com/OZX3F)');
+});
+test('P-14: 「(商品紹介用短縮URL)」(用あり)も置換', function () {
+  assert.strictEqual(fillWorkLinkPlaceholder('(商品紹介用短縮URL)', 'https://yoz2.com/OZX3F', ''),
+    '(https://yoz2.com/OZX3F)');
+});
+test('P-15: 既定表記「紹介用短縮リンク」も従来どおり検出・置換(後方互換)', function () {
+  assert.strictEqual(hasWorkLinkPlaceholder(WORK_LINK_PLACEHOLDER), true);
+  assert.strictEqual(fillWorkLinkPlaceholder(WORK_LINK_PLACEHOLDER, 'https://5mgl.com/x', ''), 'https://5mgl.com/x');
+});
+test('P-16: 括弧付き「(セール紹介短縮用URL)」を検出=セールプレースホルダ', function () {
+  assert.strictEqual(hasSaleLinkPlaceholder('本文\n\n(セール紹介短縮用URL)'), true);
+});
+test('P-17: 「(セール紹介短縮用URL)」置換=括弧は残し中身だけURLへ', function () {
+  assert.strictEqual(fillSaleLinkPlaceholder('(セール紹介短縮用URL)', 'https://yoz2.com/evTh1'),
+    '(https://yoz2.com/evTh1)');
+});
+test('P-18: 既定表記「セール中短縮リンク」も従来どおり検出・置換(後方互換)', function () {
+  assert.strictEqual(hasSaleLinkPlaceholder(SALE_LINK_PLACEHOLDER), true);
+  assert.strictEqual(fillSaleLinkPlaceholder(SALE_LINK_PLACEHOLDER, 'https://5mgl.com/s'), 'https://5mgl.com/s');
+});
+test('P-19: ★作品置換はセール語を食わない(「セール紹介短縮用URL」を作品リンクにしない)', function () {
+  // セール接頭辞の語は作品プレースホルダとして検出されない(=作品リンク置換の対象外)。
+  assert.strictEqual(hasWorkLinkPlaceholder('(セール紹介短縮用URL)'), false);
+  assert.strictEqual(fillWorkLinkPlaceholder('(セール紹介短縮用URL)', 'https://yoz2.com/WORK', ''),
+    '(セール紹介短縮用URL)');
+});
+test('P-20: ★セール置換は作品語を食わない(「商品紹介短縮URL」をセールにしない)', function () {
+  assert.strictEqual(hasSaleLinkPlaceholder('(商品紹介短縮URL)'), false);
+});
+test('P-21: 作品・セール両方を含む本文=それぞれ正しい側だけ置換(Chami報告の再現)', function () {
+  var t = '続きが気になっちゃう一冊、みつけた📚\nしかも今なら50%オフ💕\n\n(商品紹介短縮URL)\n\n(セール紹介短縮用URL)';
+  var afterWork = fillWorkLinkPlaceholder(t, 'https://yoz2.com/OZX3F', '');
+  var afterBoth = fillSaleLinkPlaceholder(afterWork, 'https://yoz2.com/evTh1');
+  assert.strictEqual(afterBoth,
+    '続きが気になっちゃう一冊、みつけた📚\nしかも今なら50%オフ💕\n\n(https://yoz2.com/OZX3F)\n\n(https://yoz2.com/evTh1)');
+});
+test('P-22: 作品リンク未取得ならプレースホルダのまま(表記ゆれ形でも)', function () {
+  assert.strictEqual(fillWorkLinkPlaceholder('(商品紹介短縮URL)', '', ''), '(商品紹介短縮URL)');
+});
+test('P-23: 「作品」接頭辞も許容', function () {
+  assert.strictEqual(fillWorkLinkPlaceholder('(作品紹介短縮URL)', 'https://yoz2.com/W', ''), '(https://yoz2.com/W)');
+});
+test('P-24: プレースホルダを含まない通常本文は検出されない', function () {
+  assert.strictEqual(hasWorkLinkPlaceholder('続きが気になっちゃう一冊、みつけた📚'), false);
+  assert.strictEqual(hasSaleLinkPlaceholder('続きが気になっちゃう一冊、みつけた📚'), false);
 });
 
 // ────────────────────────────────────────────────────────────
