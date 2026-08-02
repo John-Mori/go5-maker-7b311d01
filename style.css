@@ -32,7 +32,7 @@ html[data-account="acc2"]{           /* 宵桜艶帖：宵の花明かり */
 /* html 要素に直接 background を設定することで、body が短い時も確実にクリームが全面に出る。 */
 /* ★予約はアカウント帯のオーバーレイへ移設したため背景を変えない(Chami 2026-07-31)。 */
 html[data-tab="tabRank"],
-html[data-tab="tabAnalyze"],
+html[data-tab="analyzeBtn"],
 html[data-tab="tabCand"]{
   --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
   --accent:#b8860b; --accent2:#a86b1f; --ink:#4b3f2c; --sub:#8a7a5c;
@@ -40,7 +40,7 @@ html[data-tab="tabCand"]{
 }
 /* body にも同色を重ねてアカウントグラデが透けないよう二重で塞ぐ。 */
 html[data-tab="tabRank"] body,
-html[data-tab="tabAnalyze"] body,
+html[data-tab="analyzeBtn"] body,
 html[data-tab="tabCand"] body{background:var(--app-bg,#f5edd7);}
 /* プレビュー列はアカウント色に染めない（制作物の色判断を狂わせない）。 */
 html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}

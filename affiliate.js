@@ -15,7 +15,7 @@
     { btn: 'tabRank',    page: 'pageRank'    },
     { btn: 'tabCand',    page: 'pageCand'    },
     { btn: 'tabVerify', page: 'pageVerify'   },
-    { btn: 'tabAnalyze', page: 'pageAnalyze' },
+    { btn: 'analyzeBtn', page: 'pageAnalyze' },
     { btn: 'tabMovie',  page: 'pageMovie'    },
     { btn: 'tabStock',  page: 'pageStock'    },
     { btn: 'reserveBtn', page: 'pageReserve' },
@@ -27,7 +27,7 @@
   ];
   // アカウント帯のボタン(⏰予約 / 📅カレンダー)は「タブ」ではなく“上に重ねて開く”オーバーレイ扱い。
   //   もう一度同じボタンを押すと直前の作業タブへ戻る(Chami 2026-07-31)。タブバーには置かない。
-  var OVERLAY_BTNS = { reserveBtn: 1, calBtn: 1 };
+  var OVERLAY_BTNS = { reserveBtn: 1, calBtn: 1, analyzeBtn: 1 };
   var currentTab = 'tabMovie';          // いま前面に出している btn id
   var prevWorkTab = 'tabMovie';         // オーバーレイを開く直前の“作業タブ”(戻り先)
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む。(遅延ロード)
