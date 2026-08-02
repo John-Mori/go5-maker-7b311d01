@@ -200,6 +200,7 @@
   //   毎回el.innerHTMLを丸ごと組み直すと、非同期で後から入る作品サムネ/価格が都度消えて“ちらつく”
   //   (Chami報告2026-08-02「サムネが表示されたり消えたり」)。→ 生成HTMLが前回と同一なら再描画を省く。
   var _rankLastHtml = '';
+  var _rankGen = 0; // renderRank の世代(Codex監査 真因2)。古い非同期描画が最新DOMを上書きしないためのトークン。
   // ★シート由来行(_fromSheet)の編集を「保持」する表示専用オーバーレイ。acct -> { videoId: patch }。
   //   真因(Chami「一瞬反映→消失」2026-07-28 再発): 保存直後の refresh() が mergeSheetExtras_→
   //   TTL切れなら即GAS再取得し、upsertがまだ届く前の“古いシート値”で _sheetExtraCache を上書き=編集が消える。
@@ -786,20 +787,25 @@
   //   (deltaCache)による累計の下限 を欠いていた。そのため「手入力の作品短縮URLでcodeOfが空/合算で
   //   割れた作品」は履歴では210出るのにランキングでは null→除外され「クリックがランキングに出ない」が
   //   残った(Chami報告2026-08-03【A再発】)。以後は履歴(render)もランキング(doRender)もこの1関数を通す。
-  function postClicks_(it, vid) {
-    var code = codeOf(it.shortUrl || '');
-    var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
-    // 合算(導線1のみ): X凍結→別ドメインへ割れた同一作品の短縮URL群のクリックを加算(履歴と同一)。
-    if (Array.isArray(it.mergeUrls) && it.mergeUrls.length) {
-      var _mSum = 0, _mGot = false;
-      for (var _mi = 0; _mi < it.mergeUrls.length; _mi++) {
-        var _mc = codeOf(it.mergeUrls[_mi] || '');
-        if (_mc && (_mc in clicksCache)) { _mSum += (clicksCache[_mc] || 0); _mGot = true; }
-      }
-      if (_mGot) clicks = (clicks || 0) + _mSum;
+  // 短縮URL群を code 単位で重複なく合算(Codex §6.3)。表記違い(https有無/query)でも同一codeは1回。
+  //   1つでも clicksCache に在れば数値(取得済み0を含む)、全て未取得なら null(取得中/計測URLなしと区別)。
+  function sumClickCodes_(urls) {
+    var seen = {}, sum = 0, got = false;
+    for (var i = 0; i < urls.length; i++) {
+      var c = codeOf(urls[i] || '');
+      if (c && !seen[c]) { seen[c] = 1; if (c in clicksCache) { sum += (clicksCache[c] || 0); got = true; } }
     }
-    var wcode = codeOf(it.workShortUrl || '');
-    var wclicks = wcode && (wcode in clicksCache) ? clicksCache[wcode] : null;
+    return got ? sum : null;
+  }
+  function postClicks_(it, vid) {
+    var code = codeOf(it.shortUrl || '');   // 表示用の主コード(白矢印リンク)
+    var wcode = codeOf(it.workShortUrl || ''); // 表示用の主コード(ピンク矢印リンク)
+    // 導線1: 主short + clickUrls(異ドメインの別URL) + 合算URL群 を code 単位で重複なく合算。
+    //   従来は主code値に mergeUrls を"別途"足していたため、mergeUrls に主codeが含まれると二重計上し得た。
+    //   URL集合→code重複除去→1回加算 に統一(Codex T2/T3・履歴とランキング共通)。
+    var clicks = sumClickCodes_([it.shortUrl].concat(it.clickUrls || []).concat(it.mergeUrls || []));
+    // 導線2: 作品短縮 + workClickUrls(統合で拾った別URL)。
+    var wclicks = sumClickCodes_([it.workShortUrl].concat(it.workClickUrls || []));
     // GAS日次デルタで累計の下限を張る(累計≥週)。codeOfが空(手入力の作品短縮URL等)でもGAS由来の
     //   実数があれば必ず反映=「累計0なのに週8」やランキング除外を封じる(履歴と同一のロジック)。
     var _dl = vid ? deltaCache[vid] : null;
@@ -3926,6 +3932,7 @@
   function renderRank() {
     var el = $('pageRank');
     if (!el) return;
+    var myGen = ++_rankGen; // この描画系列の世代。以後の非同期callbackはこれが最新の時だけDOMをcommitする。
 
     // ★両チャンネルのシート履歴(記録_ch1/ch2)を確実に取得してからランキングに反映する。
     //   投稿履歴(displayItems_)はシート由来行を合算するのにランキングはlocalStorage直読みのみ＝
@@ -3966,13 +3973,14 @@
       });
     });
 
-    // vid で重複排除(同じ動画が両アカウントに存在する場合、先に出た方のみ)
-    var seen = {};
-    var uniq = combined.filter(function (x) {
-      if (seen[x.vid]) return false;
-      seen[x.vid] = true;
-      return true;
-    });
+    // 【恒久・field-level統合 2026-08-03】同一vidを"1行選んで残り捨て"ではなく field ごとに合成する
+    //   (Codex監査 真因1)。ローカル行の shortUrl が空でも、shortUrl を持つシート行の値を補完し、
+    //   計測URLは clickUrls/workClickUrls に集合で保持=postClicks_ が重複なく合算する。
+    //   rank-core.js 未読込時は従来の先勝ち排除へフォールバック(表示は無傷)。
+    var _attrKeys = ATTR_DEFS.map(function (a) { return a.key; });
+    var uniq = (window.Go5RankCore && window.Go5RankCore.mergeByVid)
+      ? window.Go5RankCore.mergeByVid(combined, _attrKeys)
+      : (function () { var seen = {}; return combined.filter(function (x) { if (seen[x.vid]) return false; seen[x.vid] = true; return true; }); })();
 
     if (!uniq.length) {
       el.innerHTML = '<p class="hint">YouTube URLが設定された動画がありません。<br>🧪 検証タブで各行にYouTube URLを入力すると表示されます。</p>';
@@ -4018,7 +4026,11 @@
     if (!RANK_WINS.some(function (w) { return w.key === _rankWin; })) _rankWin = 'total';
     if (!RANK_METRICS.some(function (m) { return m.key === _rankMetric; })) _rankMetric = 'v';
 
-    function doRender() {
+    function doRender(_async) {
+      // 非同期(_async=true)経由の描画は、より新しいrenderRankが走っていたら破棄=古い一部一覧で
+      //   全件DOMを上書きしない(Codex監査 真因2)。ユーザー操作/即時キャッシュ描画は最新DOM上でのみ
+      //   発火するため素通し。
+      if (_async && myGen !== _rankGen) return;
       captureSnaps_();
       // ★作品サムネのちらつき対策: 取得済み(キャッシュ済み)のFANZA画像URLをHTMLへ直接焼き込む。
       //   従来は img を display:none で出し fillFanzaNames が後から src を差す方式だったため、
@@ -4064,9 +4076,13 @@
         // バケット窓: 公開からの経過時点で固定した各指標
         return _rankMetric === 'v' ? r.snapV : (_rankMetric === 'c1' ? r.snapC : r.snapW);
       }
-      var isBaseList = (_rankMetric === 'v' && _rankWin === 'total'); // 総合(再生数)だけは一覧の基本＝値なしも残す
-      // 未記録(値なし)は除外。
+      // 【恒久 2026-08-03・Codex監査 真因3】「総合」は再生数だけでなく白/ピンク矢印も値なし行を残す。
+      //   silent drop は「作品が存在しない」と「未集計(URL無し/取得失敗)」を同じ"消える"に潰し障害を
+      //   長期化させていた。総合では全件残し、未集計理由は各指標欄の「…」(取得中/失敗)「–」(計測URL無し)
+      //   で示す。ピーク/各時間窓は本質的に未記録が多いので従来どおり値なしを除外する。
+      var isBaseList = (_rankWin === 'total');
       if (!isBaseList) rows = rows.filter(function (r) { return metricVal(r) != null; });
+      var _numCnt = isBaseList && _rankMetric !== 'v' ? rows.filter(function (r) { return metricVal(r) != null; }).length : 0;
       rows.sort(function (a, b) {
         var av = metricVal(a), bv = metricVal(b);
         if (av == null && bv == null) return (b.views || 0) - (a.views || 0);
@@ -4087,7 +4103,7 @@
           ? '<div class="rank-note">' + metricName + 'の「公開から約' + bucketDef.label + '」ランキング。YouTube公開時刻を起点に自動記録(この機能導入後の投稿が対象・未記録は非表示)。「(◯後)」は実記録時刻。</div>'
           : (isPeak
             ? '<div class="rank-note">' + metricName + 'の最大瞬間風速ランキング(1時間あたりの伸びが最大の区間。GAS自動記録・未記録は非表示)。</div>'
-            : '<div class="rank-note">' + metricName + 'の総合ランキング。' + (_rankMetric === 'v' ? '' : '(計測URLの無い投稿は非表示)') + '</div>'));
+            : '<div class="rank-note">' + metricName + 'の総合ランキング。' + (_rankMetric === 'v' ? '' : ('対象' + rows.length + '本 / 数値取得' + _numCnt + '本(未取得は末尾に「…」取得中/失敗・「–」計測URL無しで表示)')) + '</div>'));
       var emptyHtml = rows.length ? '' : '<p class="hint" style="padding:10px 14px;">このランキングに表示できる記録がまだありません。</p>';
       var listHtml = '<div class="rank-list">' +
         rows.map(function (r, i) {
@@ -4202,9 +4218,9 @@
       })(allV.slice(i, i + 50));
     }
     jobs.push(fetchAllClicks_()); // 全コードのクリック数も最新化(TTL内なら通信0=連打抑制)。導線1/導線2とも
-    Promise.all(jobs).then(function () { clicksPersist_(); doRender(); });
+    Promise.all(jobs).then(function () { clicksPersist_(); doRender(true); });
     // ピーク/差分(GAS)を取得したら再描画。(ピーク2モードに反映)
-    fetchDeltas_(false, doRender);
+    fetchDeltas_(false, function () { doRender(true); });
   }
   try { window.YtRank = { renderRank: renderRank }; } catch (e) {}
   // 短縮URL→現在のクリック数。(bluesky.jsのリビルド引き継ぎが「リビルド前スナップショット」取得に使う)
