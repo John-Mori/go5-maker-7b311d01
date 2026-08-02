@@ -181,6 +181,16 @@
   //   重複排除・整形は hist-merge-core.js の純粋関数(HistMerge.mergeSheetExtras)へ切り出しテスト済み。
   var _sheetExtraCache = {}; // acct -> {at, items:[表示専用アイテム(_fromSheet:true)]}
   var SHEET_EXTRA_TTL_MS = 60000;
+  // ★シート履歴(記録_ch1/ch2)の生行をlocalStorageへ退避(SWR)。acct -> [生シート行]。
+  //   真因(Chami報告2026-08-02②「また7/29以前が消えた・同じミス」): GASのhistory取得が一過性に
+  //   失敗/未達だと _sheetExtraCache[a] が空になり、投稿履歴がローカル(直近)だけ＝7/29以前の
+  //   シート由来行が“また消えた”ように見えていた。v=574は「隠す(フィルタ)」だけをfail-openにしたが、
+  //   「取れなかった時に空へ倒れる」経路が残っていた。→ 取得成功時に生行を保存し、失敗/取得前は
+  //   前回の生行から復元して表示する(取れない時ほど旧データを見せる=fail-open)。次の成功で最新化。
+  function persistSheetRaw_(a, rows) { try { localStorage.setItem('sheet_hist_raw__' + a, JSON.stringify(Array.isArray(rows) ? rows : [])); } catch (e) {} }
+  function loadSheetRaw_(a) { try { var r = JSON.parse(localStorage.getItem('sheet_hist_raw__' + a) || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+  function mergeRawVsLocal_(rows) { return (rows && rows.length && window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(allItems(), rows) : []; }
+  function mergeRawSheetOnly_(rows) { return (rows && rows.length && window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras([], rows) : []; }
   // ★ランキング専用のシート履歴キャッシュ。acct -> {at, items}。
   //   _sheetExtraCache は「今のタブのチャンネル(acct())」の分しか取らないため、ランキング(両ch合算)では
   //   非アクティブ側のチャンネルのシート由来行(旧い作品)が永久に欠ける=「片方だけランキングに出ない」非対称に
@@ -326,17 +336,23 @@
     var a = acct(), now = Date.now(), c = _sheetExtraCache[a];
     // at < 0 = 失敗マーク(常にTTL切れ扱い→リトライ。ただしcが存在するためrender()は「読み込み中...」を解除する)
     if (c && c.at >= 0 && (now - c.at) < SHEET_EXTRA_TTL_MS) { if (cb) cb(c.items); return; }
+    // ★SWR: 未取得なら退避済みの生行から即復元して表示(7/29以前を待たせず・消さず出す)。この後で最新化する。
+    if (!c) { var seed = mergeRawVsLocal_(loadSheetRaw_(a)); if (seed.length) { _sheetExtraCache[a] = c = { at: 0, items: seed }; } }
     var gasUrl = gasUrl_();
     if (!gasUrl) {
       if (!c) _sheetExtraCache[a] = { at: 0, items: [] }; // GAS未設定=マージ対象なし・キャッシュを「取得済み扱い」にして「読み込み中...」を出さない
-      if (cb) cb((c && c.items) || []); return;
+      if (cb) cb((_sheetExtraCache[a] && _sheetExtraCache[a].items) || []); return;
     }
     jsonp_(gasUrl, { action: 'history', channel: a, limit: 300 }, function (res) {
       if (!res || !res.ok || !Array.isArray(res.items)) {
-        // 失敗: at=-1でマーク→render()は「読み込み中...」を解除して「まだ記録がありません」を出す。次回リトライ可(TTL常に切れ)。
-        if (!_sheetExtraCache[a]) _sheetExtraCache[a] = { at: -1, items: [] };
-        if (cb) cb((_sheetExtraCache[a] && _sheetExtraCache[a].items) || []); return;
+        // ★失敗時は空へ倒さない=退避済みの生行を復元して「7/29以前が消える」を防ぐ(fail-open)。
+        //   退避も無い場合のみ空(at=-1)にして「読み込み中...」を解除。次回リトライ可(TTL常に切れ)。
+        var fb = mergeRawVsLocal_(loadSheetRaw_(a));
+        var prev = (_sheetExtraCache[a] && _sheetExtraCache[a].items) || [];
+        _sheetExtraCache[a] = { at: -1, items: fb.length ? fb : prev };
+        if (cb) cb(_sheetExtraCache[a].items); return;
       }
+      persistSheetRaw_(a, res.items); // 成功した生行を退避(次の失敗/リロードで復元できる)
       var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(allItems(), res.items) : [];
       _sheetExtraCache[a] = { at: now, items: extra };
       reconcilePend_(a, res.items); // シートが編集を反映済みなら保持を落とす(リロード後の自己清掃)
@@ -350,13 +366,19 @@
   function fetchSheetForRank_(a, cb) {
     var now = Date.now(), c = _rankSheetCache[a];
     if (c && c.at >= 0 && (now - c.at) < SHEET_EXTRA_TTL_MS) { if (cb) cb(c.items); return; }
+    // ★SWR: 未取得なら退避済み生行から即復元(非アクティブ側chもランキングから消えない)。
+    if (!c) { var seed = mergeRawSheetOnly_(loadSheetRaw_(a)); if (seed.length) { _rankSheetCache[a] = c = { at: 0, items: seed }; } }
     var gasUrl = gasUrl_();
-    if (!gasUrl) { if (!c) _rankSheetCache[a] = { at: 0, items: [] }; if (cb) cb((c && c.items) || []); return; }
+    if (!gasUrl) { if (!c) _rankSheetCache[a] = { at: 0, items: [] }; if (cb) cb((_rankSheetCache[a] && _rankSheetCache[a].items) || []); return; }
     jsonp_(gasUrl, { action: 'history', channel: a, limit: 300 }, function (res) {
       if (!res || !res.ok || !Array.isArray(res.items)) {
-        if (!_rankSheetCache[a]) _rankSheetCache[a] = { at: -1, items: [] };
-        if (cb) cb((_rankSheetCache[a] && _rankSheetCache[a].items) || []); return;
+        // ★失敗時は空へ倒さない=退避済み生行を復元(ランキングから旧作が消えるのを防ぐ)。
+        var fb = mergeRawSheetOnly_(loadSheetRaw_(a));
+        var prev = (_rankSheetCache[a] && _rankSheetCache[a].items) || [];
+        _rankSheetCache[a] = { at: -1, items: fb.length ? fb : prev };
+        if (cb) cb(_rankSheetCache[a].items); return;
       }
+      persistSheetRaw_(a, res.items); // 成功した生行を退避(投稿履歴側と共用)
       var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras([], res.items) : [];
       _rankSheetCache[a] = { at: now, items: extra };
       if (cb) cb(extra);
@@ -3969,6 +3991,11 @@
 
     function doRender() {
       captureSnaps_();
+      // ★作品サムネのちらつき対策: 取得済み(キャッシュ済み)のFANZA画像URLをHTMLへ直接焼き込む。
+      //   従来は img を display:none で出し fillFanzaNames が後から src を差す方式だったため、
+      //   再生数/クリック数が届くたびの再描画で img が作り直され、サムネが一瞬消えて“ちらついて”いた
+      //   (Chami報告2026-08-02①)。キャッシュ済みなら src をHTMLに入れておけば再描画でも消えない。
+      var _fzCache = {}; try { _fzCache = fanzaNameCacheLoad() || {}; } catch (e) {}
       var isBucket = _rankWin.charAt(0) === 'b';
       var isPeak = _rankWin === 'peak';
       var bucketDef = isBucket ? SNAP_BUCKETS.filter(function (b) { return b.key === _rankWin; })[0] : null;
@@ -4040,9 +4067,11 @@
           try { if (r.workUrl && window.buildAffiliateLink) { var _nu = window.normalizeWorkUrl ? window.normalizeWorkUrl(r.workUrl) : r.workUrl; var _rr = _nu ? window.buildAffiliateLink(_nu, '') : null; if (_rr && _rr.ok) rcid = _rr.cid; } } catch (e) {}
           var refSrc = '';
           try { if (rcid && window.Go5Cand && window.Go5Cand.refImgs) { var _ri = window.Go5Cand.refImgs(rcid); refSrc = (_ri && _ri[0]) || ''; } } catch (e) {}
+          var thumbSrc = '';
+          try { var _fz = r.workUrl ? _fzCache[r.workUrl] : null; if (_fz && _fz.media) thumbSrc = _fz.media.thumb || _fz.media.thumbSmall || ''; } catch (e) {}
           var thumbColHtml = (r.workUrl || refSrc)
             ? '<div class="rank-thumbcol">' +
-                (r.workUrl ? '<img class="rank-thumb" data-fanza-thumb-url="' + esc(r.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細(サンプル画像)" loading="lazy" style="display:none;">' : '') +
+                (r.workUrl ? '<img class="rank-thumb" data-fanza-thumb-url="' + esc(r.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細(サンプル画像)" loading="lazy"' + (thumbSrc ? ' src="' + esc(thumbSrc) + '"' : ' style="display:none;"') + '>' : '') +
                 (refSrc ? '<img class="rank-refimg" data-rank-refimg="' + esc(rcid) + '" src="' + esc(refSrc) + '" alt="動画で使った画像(タップで拡大)" title="動画で使った画像(タップで拡大)" loading="lazy">' : '') +
               '</div>'
             : '';
