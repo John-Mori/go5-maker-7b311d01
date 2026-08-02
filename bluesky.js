@@ -2579,6 +2579,11 @@
       var base;
       try { base = composeXTextRaw_(); }
       catch (e) { base = String((els.text && els.text.value) || ''); }
+      // ★不変条件(Chami報告2026-08-03「X欄が空欄のまま」): 投稿本文に中身があるのにX欄が空になることは無い。
+      //   組み立てが例外でなく「空/空白」を返した時も、本文そのものへフォールバックする(空表示=最悪の沈黙を防ぐ)。
+      if ((!base || !String(base).trim()) && els.text && String(els.text.value || '').trim()) {
+        base = String(els.text.value);
+      }
       return applyPromoX_(base);
     }
 
@@ -2624,6 +2629,11 @@
     //   これらは els.text.value を直接代入するため input イベントが飛ばず、従来X欄が追従しなかった
     //   (Chami依頼2026-08-02「X用投稿テキストはテンプレ帳を参照して表示する」)。
     document.addEventListener('go5-body-changed', function () { _xOverrideShort = ''; refreshXTweet(); });
+    // ★🦋投稿タブを開いた瞬間にX欄を最新の本文から組み直す(Chami報告2026-08-03「X欄が空欄のまま」)。
+    //   タブ表示のトリガーが無く、初期化順やアカウント切替の隙間で一度空になると、その後この欄は
+    //   本文を触るまで空のまま残っていた。タブを開くたび必ず作り直す=空で放置されない。
+    var _tabPostBtn = document.getElementById('tabPost');
+    if (_tabPostBtn) _tabPostBtn.addEventListener('click', function () { refreshXTweet(); });
     refreshXTweet();
 
     // 📎 短縮URLを挿入：link-worker 経由で作品URLを短縮し、生リンクを差し替える
