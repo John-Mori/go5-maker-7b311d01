@@ -181,6 +181,11 @@
   //   重複排除・整形は hist-merge-core.js の純粋関数(HistMerge.mergeSheetExtras)へ切り出しテスト済み。
   var _sheetExtraCache = {}; // acct -> {at, items:[表示専用アイテム(_fromSheet:true)]}
   var SHEET_EXTRA_TTL_MS = 60000;
+  // ★ランキング専用のシート履歴キャッシュ。acct -> {at, items}。
+  //   _sheetExtraCache は「今のタブのチャンネル(acct())」の分しか取らないため、ランキング(両ch合算)では
+  //   非アクティブ側のチャンネルのシート由来行(旧い作品)が永久に欠ける=「片方だけランキングに出ない」非対称に
+  //   なる(Chami報告2026-08-02: 月詠みは出たが宵桜が出ない)。→ ランキングは acc1/acc2 両方を明示取得する。
+  var _rankSheetCache = {}; // acct -> {at, items:[_fromSheet表示アイテム]}
   // ★シート由来行(_fromSheet)の編集を「保持」する表示専用オーバーレイ。acct -> { videoId: patch }。
   //   真因(Chami「一瞬反映→消失」2026-07-28 再発): 保存直後の refresh() が mergeSheetExtras_→
   //   TTL切れなら即GAS再取得し、upsertがまだ届く前の“古いシート値”で _sheetExtraCache を上書き=編集が消える。
@@ -331,6 +336,25 @@
       var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(allItems(), res.items) : [];
       _sheetExtraCache[a] = { at: now, items: extra };
       reconcilePend_(a, res.items); // シートが編集を反映済みなら保持を落とす(リロード後の自己清掃)
+      if (cb) cb(extra);
+    });
+  }
+  // ランキング(両ch合算)用に、指定チャンネル a のシート履歴を明示取得する。
+  //   fetchSheetExtra_ は acct()(今のタブ)固定なので非アクティブ側が取れない。ここは a を明示。
+  //   ローカルとの重複排除はランキング側が vid で行うため、mergeSheetExtras の第1引数は空配列
+  //   (シート行同士の重複だけ畳む)。GAS未設定/失敗でも表示は無傷(空配列を返すだけ)。
+  function fetchSheetForRank_(a, cb) {
+    var now = Date.now(), c = _rankSheetCache[a];
+    if (c && c.at >= 0 && (now - c.at) < SHEET_EXTRA_TTL_MS) { if (cb) cb(c.items); return; }
+    var gasUrl = gasUrl_();
+    if (!gasUrl) { if (!c) _rankSheetCache[a] = { at: 0, items: [] }; if (cb) cb((c && c.items) || []); return; }
+    jsonp_(gasUrl, { action: 'history', channel: a, limit: 300 }, function (res) {
+      if (!res || !res.ok || !Array.isArray(res.items)) {
+        if (!_rankSheetCache[a]) _rankSheetCache[a] = { at: -1, items: [] };
+        if (cb) cb((_rankSheetCache[a] && _rankSheetCache[a].items) || []); return;
+      }
+      var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras([], res.items) : [];
+      _rankSheetCache[a] = { at: now, items: extra };
       if (cb) cb(extra);
     });
   }
@@ -3851,17 +3875,20 @@
     var el = $('pageRank');
     if (!el) return;
 
-    // ★現タブのシート履歴(記録_ch1/ch2)を確実に取得してからランキングにも反映する。
+    // ★両チャンネルのシート履歴(記録_ch1/ch2)を確実に取得してからランキングに反映する。
     //   投稿履歴(displayItems_)はシート由来行を合算するのにランキングはlocalStorage直読みのみ＝
-    //   データの取り方が分裂していた(Chami報告2026-08-02・③非対称)。月詠み(acc1)はローカル履歴が
-    //   ほぼ空でシート頼みのため、この分裂で「投稿履歴には出るがランキングには出ない」旧い作品が生じる。
+    //   データの取り方が分裂していた(Chami報告2026-08-02・③非対称)。ローカル履歴がほぼ空でシート頼みの
+    //   チャンネルは、この分裂で「投稿履歴には出るがランキングには出ない」旧い作品が生じる。
+    //   ★さらに _sheetExtraCache は acct()(今のタブ)固定のため、非アクティブ側のchはランキングにも永久欠落
+    //   していた(月詠みは出たが宵桜が出ない)。→ acc1/acc2 両方を fetchSheetForRank_ で明示取得する。
     //   TTL内の同期コールでは at が変わらない→再描画しない=ループ防止。
-    (function ensureSheet_() {
-      var a0 = acct();
-      var before = (_sheetExtraCache[a0] && _sheetExtraCache[a0].at) || 0;
-      fetchSheetExtra_(function () {
-        var nowAt = (_sheetExtraCache[a0] && _sheetExtraCache[a0].at) || 0;
-        if (nowAt !== before && $('pageRank') && !$('pageRank').hidden) renderRank();
+    (function ensureRankSheets_() {
+      ['acc1', 'acc2'].forEach(function (a0) {
+        var before = (_rankSheetCache[a0] && _rankSheetCache[a0].at) || 0;
+        fetchSheetForRank_(a0, function () {
+          var nowAt = (_rankSheetCache[a0] && _rankSheetCache[a0].at) || 0;
+          if (nowAt !== before && $('pageRank') && !$('pageRank').hidden) renderRank();
+        });
       });
     })();
 
@@ -3872,7 +3899,7 @@
       try { ymap = JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { ymap = {}; }
       var items = loadArr('short_hist__' + a).concat(loadArr('verify_manual__' + a));
       // シート由来行(_fromSheet)も合算＝投稿履歴と同じ収集元に揃える。vidで後段重複排除するのでローカルと被っても安全。
-      var sc = _sheetExtraCache[a];
+      var sc = _rankSheetCache[a];
       if (sc && sc.items && sc.items.length) items = items.concat(sc.items);
       items.forEach(function (it) {
         if (it.remade) return; // 被リビルド(リビルド版に置き換え済み)はランキングに出さない＝新しい方だけ載る
