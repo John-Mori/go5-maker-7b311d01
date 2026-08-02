@@ -3876,9 +3876,9 @@
     var LINK_IC = '<img class="emico" src="assets/icons/ic-link.png" alt="">';
     var CUR_IC = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="">';
     var RANK_METRICS = [
-      { key: 'v', label: '▶ 再生数' },
-      { key: 'c1', label: LINK_IC + ' 白矢印' },
-      { key: 'c2', label: CUR_IC + ' ピンク矢印' }
+      { key: 'v', label: '再生数' },
+      { key: 'c1', label: '白矢印絵文字クリック数' },   // アイコンでなく文字列で(Chami指示2026-08-02)
+      { key: 'c2', label: 'ピンク矢印絵文字クリック数' }
     ];
     var RANK_WINS = [
       { key: 'total', label: '総合' },
