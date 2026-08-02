@@ -177,8 +177,14 @@
   // 下書き(ドラフト)一覧＝1キーに配列を持つ。候補と同じく id 単位 union で「端末をまたいだ下書きを失わない」。
   function isStockArrayKey(k) { return /^go5_stock_meta$/.test(String(k)); }
   function isStockDelKey(k) { return /^go5_stock_del$/.test(String(k)); }
-  // 配列キーの id フィールド名。(候補=cid / ドラフト=id)union/墓標の両方で使う。
-  function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : (isStockArrayKey(k) ? "id" : null); }
+  // 📝テンプレ帳(本文定型文・アカウント別)＝1キーに配列を持つ。候補/ドラフトと同じく union で
+  //   「端末をまたいだ・空の端末で上書きした時に保存済みテンプレを失わない」(Chami依頼2026-08-02
+  //   「保存した内容を消さずどの端末でも共有」)。id が無く name が実質の一意キーなので name で union。
+  //   ★墓標(削除の伝播)は持たない=片端末で消しても他端末から復活し得るが、消えて困る側の要望なので
+  //   「消えない」を優先する(丸ごとLWWで全消失するより安全)。
+  function isTplBookKey(k) { return /^bsky_tpl_book(__|$)/.test(String(k)); }
+  // 配列キーの id フィールド名。(候補=cid / ドラフト=id / テンプレ帳=name)union/墓標の両方で使う。
+  function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : (isStockArrayKey(k) ? "id" : (isTplBookKey(k) ? "name" : null)); }
   // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
   function isEmptyVal_(v) { return v === undefined || v === null || v === ""; }
   // ★同一cidの2レコードをフィールド単位で統合する。newer を基本に採るが、newer 側で空(欠け)の
@@ -359,7 +365,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockDelKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -409,9 +415,12 @@
             var u2 = unionByField(e.v, live, idf2);
             if (u2 != null) finalV = u2;
             // ★墓標を適用：削除済みidをunion結果から除外し復活を防ぐ。マージ済み墓標とライブ墓標の両方を効かせる。
-            var dk = isCandArrayKey(k) ? candDelKeyOf(k) : "go5_stock_del";
-            var dmerged = (mls[dk] && !mls[dk].d) ? mls[dk].v : LS.getItem(dk);
-            finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(dmerged || "{}", LS.getItem(dk) || "{}")), idf2, "addedAt");
+            //   テンプレ帳(name union)は墓標を持たないので適用しない。(候補/ドラフトのみ)
+            if (isCandArrayKey(k) || isStockArrayKey(k)) {
+              var dk = isCandArrayKey(k) ? candDelKeyOf(k) : "go5_stock_del";
+              var dmerged = (mls[dk] && !mls[dk].d) ? mls[dk].v : LS.getItem(dk);
+              finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(dmerged || "{}", LS.getItem(dk) || "{}")), idf2, "addedAt");
+            }
           } else if (isCandDelKey(k) || isStockDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
@@ -544,7 +553,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockDelKey: isStockDelKey, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 

@@ -96,6 +96,23 @@ eq("union olderに欠けnewerにあるフィールドは追加",
    JSON.parse(S.unionCand('[{"cid":"a","url":"https://x/works/a/"}]', '[{"cid":"a","title":"T"}]')),
    [{ cid: "a", url: "https://x/works/a/", title: "T" }]);
 
+// ── 📝テンプレ帳(bsky_tpl_book__)＝name 単位 union(Chami依頼2026-08-02「保存が消える・全端末で共有」) ──
+ok("isTplBookKey", S.isTplBookKey("bsky_tpl_book__acc1") && S.isTplBookKey("bsky_tpl_book") && !S.isTplBookKey("bsky_text__acc1"));
+eq("arrIdField tpl=name", S.arrIdField_("bsky_tpl_book__acc2"), "name");
+// ★核心: 空の端末が保存済みテンプレを丸ごと消さない(旧・whole-key LWWの事故を根治)
+eq("空×populated → 消えない(空が先)",
+   JSON.parse(S.unionByField("[]", '[{"name":"テンプレ1","text":"本文A","at":100}]', "name")),
+   [{ name: "テンプレ1", text: "本文A", at: 100 }]);
+eq("populated×空 → 消えない(空が後)",
+   JSON.parse(S.unionByField('[{"name":"テンプレ1","text":"本文A","at":100}]', "[]", "name")),
+   [{ name: "テンプレ1", text: "本文A", at: 100 }]);
+eq("別nameは両端末で両立(集めたテンプレを失わない)",
+   JSON.parse(S.unionByField('[{"name":"A","text":"a"}]', '[{"name":"B","text":"b"}]', "name")),
+   [{ name: "A", text: "a" }, { name: "B", text: "b" }]);
+eq("同nameは newer(後入れ)の本文を採用",
+   JSON.parse(S.unionByField('[{"name":"A","text":"旧","at":1}]', '[{"name":"A","text":"新","at":2}]', "name")),
+   [{ name: "A", text: "新", at: 2 }]);
+
 // ── ①-B ドラフトの画像ミラー(stock:imgs:)＝IDB同期レールに乗る/動画blobは乗らない(2026-07-31) ──
 ok("stock:imgs は同期IDBキー", S.isSyncIdbKey("stock:imgs:stk123"));
 ok("既存の同期IDBキーは維持", S.isSyncIdbKey("ref:abc") && S.isSyncIdbKey("bsky:1") && S.isSyncIdbKey("post:9"));

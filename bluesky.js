@@ -27,6 +27,7 @@
     ytTitle: $('ytTitle'), ytTitleCopy: $('ytTitleCopy'), ytTags: $('ytTags'),
     discountSel: $('discountSel'), discountSel2: $('discountSel2'), discountSelPc: $('discountSelPc'),
     discountNew: $('discountNew'), discountNew2: $('discountNew2'), discountNewPc: $('discountNewPc'),
+    discountDigest: $('discountDigest'), discountDigest2: $('discountDigest2'), discountDigestPc: $('discountDigestPc'),
     histList: $('histList'), histRefresh: $('histRefresh'), histShowDiscarded: $('histShowDiscarded'),
     manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
     manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
@@ -265,6 +266,8 @@
     if (els.discountSel2) els.discountSel2.value = '';
     if (els.discountNew) els.discountNew.checked = false;
     if (els.discountNew2) els.discountNew2.checked = false;
+    if (els.discountDigest) els.discountDigest.checked = false;
+    if (els.discountDigest2) els.discountDigest2.checked = false;
     ensureDiscUrlsSeeded_(); renderDiscUrlList_(); // 🔥セール案内URL一覧(アカウント別・選択は永続)
     if (els.histList) loadHistory();
     var wv = loadA('bsky_work_url'); var wval = (wv != null ? wv : DEF.workUrl);
@@ -439,19 +442,28 @@
   // ---- 割引％ドロップダウン(アカウント別の割引文テンプレ) ----
   // acc1：本文1行目の直下に「N%オフのおトク作品！」を挿入／なしで削除。
   // acc2：本文テンプレに含まれる「しかも今なら〇%オフ💕」の数字を差し替え／なしで〇に戻す。
-  // build(n, isNew)：isNew=新作チェック時の文面。mark は通常版／新作版の両方にマッチする。(切替時に同じ行を差し替えるため)
+  // 割引文の末尾サフィックス(「オフ」と締め絵文字の間)。Chami指定2026-08-02:
+  //   新作のみ=「の新作」／総集編のみ=「の総集編」／両方=「の新作&総集編」／どちらも無し=空。
+  function discSuffix_(isNew, isDigest) {
+    if (isNew && isDigest) return 'の新作&総集編';
+    if (isNew) return 'の新作';
+    if (isDigest) return 'の総集編';
+    return '';
+  }
+  // build(n, isNew, isDigest)：チェックに応じた文面。mark は通常版／新作版／総集編版すべてにマッチする。(切替時に同じ行を差し替えるため)
   var DISC = {
     acc1: {
-      build: function (n, isNew) { return isNew ? ('なんと今なら' + n + '%オフの新作&おトク作品！✨') : ('なんと今なら' + n + '%オフのおトク作品！✨'); },
+      // acc1 は「〜おトク作品！」で締める。サフィックスがある時は & で繋いで従来の読みを保つ(の新作&おトク作品！)。
+      build: function (n, isNew, isDigest) { var s = discSuffix_(isNew, isDigest); return 'なんと今なら' + n + '%オフ' + (s ? s + '&' : 'の') + 'おトク作品！✨'; },
       placeholder: 'なんと今なら〇%オフのおトク作品！✨', mark: /(?:しかも|なんと)今なら[^\n]*オフ/, persistent: false
     },
     acc2: {
-      build: function (n, isNew) { return isNew ? ('しかも今なら' + n + '%オフの新作💕') : ('しかも今なら' + n + '%オフ💕'); },
+      build: function (n, isNew, isDigest) { return 'しかも今なら' + n + '%オフ' + discSuffix_(isNew, isDigest) + '💕'; },
       placeholder: 'しかも今なら〇%オフ💕', mark: /(?:しかも|なんと)今なら[^\n]*オフ/, persistent: false
     }
   };
-  // 割引文の挿入/差し替え/削除を行う純粋関数。(対象テキストを受け取り新テキストを返す)isNew=新作用の文面。
-  function discApply(text, val, isNew) {
+  // 割引文の挿入/差し替え/削除を行う純粋関数。(対象テキストを受け取り新テキストを返す)isNew=新作用/isDigest=総集編用の文面。
+  function discApply(text, val, isNew, isDigest) {
     var cfg = DISC[acctId()] || DISC.acc1;
     var lines = String(text == null ? '' : text).split('\n');
     var idx = -1;
@@ -460,22 +472,28 @@
       if (cfg.persistent) { if (idx >= 0) lines[idx] = cfg.placeholder; else lines.splice(Math.min(1, lines.length), 0, cfg.placeholder); }
       else if (idx >= 0) lines.splice(idx, 1);
     } else {
-      var nl = cfg.build(val === 'custom' ? '' : val, isNew);  // custom は数字なし(ユーザーが入力)
+      var nl = cfg.build(val === 'custom' ? '' : val, isNew, isDigest);  // custom は数字なし(ユーザーが入力)
       if (idx >= 0) lines[idx] = nl; else lines.splice(Math.min(1, lines.length), 0, nl);
     }
     return lines.join('\n');
   }
-  // 本文(自動投稿/今すぐ投稿で共通)側の「新作」状態。2つのチェックボックスは同期。
+  // 本文(自動投稿/今すぐ投稿で共通)側の「新作」「総集編」状態。2つのチェックボックスは同期。
   function isNewBody() { return !!(els.discountNew && els.discountNew.checked) || !!(els.discountNew2 && els.discountNew2.checked); }
+  function isDigestBody() { return !!(els.discountDigest && els.discountDigest.checked) || !!(els.discountDigest2 && els.discountDigest2.checked); }
   function syncNewBody(on) {
     if (els.discountNew) els.discountNew.checked = on;
     if (els.discountNew2) els.discountNew2.checked = on;
   }
+  function syncDigestBody(on) {
+    if (els.discountDigest) els.discountDigest.checked = on;
+    if (els.discountDigest2) els.discountDigest2.checked = on;
+  }
   function curDiscVal() { return (els.discountSel && els.discountSel.value) || (els.discountSel2 && els.discountSel2.value) || ''; }
   function setDiscountLine(val) {
     if (!els.text) return;
-    els.text.value = discApply(els.text.value, val, isNewBody());
+    els.text.value = discApply(els.text.value, val, isNewBody(), isDigestBody());
     saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
+    try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {} // X欄も追従(input未発火の補完)
   }
   // 割引文：投稿タブ／動画作成タブ どちらのドロップダウンからでも共通の本文へ反映し、両方の表示を同期。
   function applyDiscount(val) {
@@ -485,16 +503,21 @@
   }
   if (els.discountSel) els.discountSel.addEventListener('change', function () { applyDiscount(els.discountSel.value); });
   if (els.discountSel2) els.discountSel2.addEventListener('change', function () { applyDiscount(els.discountSel2.value); });
-  // 「新作」チェック切替：両チェックを同期し、選択中の割引文があれば新作版/通常版へ即差し替え。
+  // 「新作」チェック切替：両チェックを同期し、選択中の割引文があれば版を即差し替え。
   function onNewBodyToggle(on) { syncNewBody(on); if (curDiscVal() !== '') applyDiscount(curDiscVal()); }
   if (els.discountNew) els.discountNew.addEventListener('change', function () { onNewBodyToggle(els.discountNew.checked); });
   if (els.discountNew2) els.discountNew2.addEventListener('change', function () { onNewBodyToggle(els.discountNew2.checked); });
-  // 投稿確認モーダル内：この投稿のテキスト(pcText)にだけ割引文を反映。(保存はしない)新作チェックも独立。
+  // 「総集編」チェック切替：両チェックを同期し、選択中の割引文があれば版を即差し替え。
+  function onDigestBodyToggle(on) { syncDigestBody(on); if (curDiscVal() !== '') applyDiscount(curDiscVal()); }
+  if (els.discountDigest) els.discountDigest.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest.checked); });
+  if (els.discountDigest2) els.discountDigest2.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest2.checked); });
+  // 投稿確認モーダル内：この投稿のテキスト(pcText)にだけ割引文を反映。(保存はしない)新作・総集編チェックも独立。
   function applyDiscountPc() {
-    if (els.pcText) els.pcText.value = discApply(els.pcText.value, (els.discountSelPc && els.discountSelPc.value) || '', !!(els.discountNewPc && els.discountNewPc.checked));
+    if (els.pcText) els.pcText.value = discApply(els.pcText.value, (els.discountSelPc && els.discountSelPc.value) || '', !!(els.discountNewPc && els.discountNewPc.checked), !!(els.discountDigestPc && els.discountDigestPc.checked));
   }
   if (els.discountSelPc) els.discountSelPc.addEventListener('change', applyDiscountPc);
   if (els.discountNewPc) els.discountNewPc.addEventListener('change', applyDiscountPc);
+  if (els.discountDigestPc) els.discountDigestPc.addEventListener('change', applyDiscountPc);
 
   // ---- 🔥 割引一覧(セール)ページのアフィリンクを本文へ添付(永続トグル・composePostTextに統合) ----
   //   ・一覧/キャンペーンURLは cid が無く作品リンク生成では弾かれるため buildFanzaListLink で包む。
@@ -767,7 +790,7 @@
     sel.addEventListener('change', function () {
       var t = tplBookLoad_()[parseInt(sel.value, 10)];
       if (!t) return;
-      if (els.text) { els.text.value = t.text; saveA('bsky_text', t.text); renderPreview(); }
+      if (els.text) { els.text.value = t.text; saveA('bsky_text', t.text); renderPreview(); try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {} }
       var h = $('bskyTplHint'); if (h) h.textContent = '「' + t.name + '」を本文へ反映しました。(この本文が正)';
     });
     tplSelRefresh_();
@@ -2504,6 +2527,10 @@
     document.addEventListener('go5-work-short-ready', function () { refreshXTweet(); });
     // セール案内URL変更時もX欄を再構成
     document.addEventListener('go5-disc-url-changed', function () { _xOverrideShort = ''; refreshXTweet(); });
+    // ★本文をプログラムで差し替えた時(テンプレ帳の選択・割引文の挿入)もX欄を再構成する。
+    //   これらは els.text.value を直接代入するため input イベントが飛ばず、従来X欄が追従しなかった
+    //   (Chami依頼2026-08-02「X用投稿テキストはテンプレ帳を参照して表示する」)。
+    document.addEventListener('go5-body-changed', function () { _xOverrideShort = ''; refreshXTweet(); });
     refreshXTweet();
 
     // 📎 短縮URLを挿入：link-worker 経由で作品URLを短縮し、生リンクを差し替える
