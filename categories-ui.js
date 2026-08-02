@@ -43,7 +43,7 @@
     draft = Cats.list().map(function (c) { return { key: c.key, label: c.label, color: c.color, keywords: c.keywords.slice(), builtin: c.builtin, hidden: c.hidden }; });
     overlay = document.createElement('div');
     overlay.className = 'cat-modal-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.82);overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;padding:16px;';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(24,22,19,0.58);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px 16px;';
     overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(); });
     document.body.appendChild(overlay);
     drawModal();
@@ -51,44 +51,74 @@
 
   function drawModal() {
     if (!overlay) return;
-    // ★1行に全部を横並びにすると、空のキーワード欄が伸びて 👁/✕ が画面端へ押し出され「センスない」見た目になる
-    //   (Chami 2026-08-02)。評判の良いモバイル編集リストの定石=カテゴリ1件を1枚のサーフェスカードにし、
-    //   上段=色+名前+操作(並べ替え/削除)、下段=一致語を独立行にする。横詰めを止め奥行き(サーフェス階層)を出す。
+    // ★UIごと刷新(Chami 2026-08-02「Claude Design / Anthropic公式みたいにオシャレに」)。
+    //   Anthropic公式ブランド(web調査 2026-08-02)= 紙色 #faf9f5 / 墨 #141413 / クレイ橙 #d97757 を基調に、
+    //   余白を広く・操作は丸い当たり判定のアイコンボタン(裸のグリフを画面端に浮かせない)・focus/hoverを付ける。
+    //   スタイルは毎回このscoped <style> を先頭に差し込む(innerHTML置換で重複しない)。
     var rows = draft.map(function (c, idx) {
       var canDelete = !c.builtin;
       var atTop = (idx === 0), atBottom = (idx === draft.length - 1);
-      var mvStyle = 'background:none;border:none;color:#7a8fa3;cursor:pointer;font-size:.82rem;line-height:1;padding:5px 7px;border-radius:6px;';
       var actBtn = canDelete
-        ? '<button type="button" class="cat-del" data-idx="' + idx + '" title="削除" aria-label="削除" style="background:none;border:none;color:#d0736f;cursor:pointer;font-size:1rem;line-height:1;padding:5px 7px;border-radius:6px;flex:0 0 auto;">✕</button>'
-        : '<button type="button" class="cat-hide" data-idx="' + idx + '" title="' + (c.hidden ? '表示に戻す' : '欄から隠す') + '" aria-label="' + (c.hidden ? '表示に戻す' : '欄から隠す') + '" style="background:none;border:none;color:' + (c.hidden ? '#5aa8cc' : '#7a8fa3') + ';cursor:pointer;font-size:1rem;line-height:1;padding:5px 7px;border-radius:6px;flex:0 0 auto;">' + (c.hidden ? '◻︎' : '👁') + '</button>';
-      return '<div class="cat-edit-row" data-idx="' + idx + '" style="background:' + (c.hidden ? 'rgba(255,255,255,.02)' : '#141c2b') + ';border:1px solid #24304a;border-radius:12px;padding:10px 12px;margin-bottom:10px;box-sizing:border-box;' + (c.hidden ? 'opacity:.72;' : '') + '">' +
-        '<div style="display:flex;align-items:center;gap:10px;">' +
-          '<input type="color" class="cat-color" data-idx="' + idx + '" value="' + esc(/^#[0-9a-fA-F]{6}$/.test(c.color) ? c.color : '#3fb6a8') + '" title="色" aria-label="色" style="width:26px;height:26px;padding:0;border:none;border-radius:50%;background:none;cursor:pointer;flex:0 0 auto;">' +
-          '<input type="text" class="cat-label" data-idx="' + idx + '" value="' + esc(c.label) + '" placeholder="名前" style="flex:1 1 auto;min-width:0;border-radius:8px;border:1px solid #3a4a5e;background:#0e1a2b;color:#e6eef5;padding:7px 9px;font-size:.86rem;box-sizing:border-box;">' +
-          '<div style="display:flex;align-items:center;gap:1px;flex:0 0 auto;">' +
-            '<button type="button" class="cat-mv" data-dir="-1" data-idx="' + idx + '" title="上へ" aria-label="上へ" style="' + mvStyle + (atTop ? 'opacity:.25;' : '') + '">▲</button>' +
-            '<button type="button" class="cat-mv" data-dir="1" data-idx="' + idx + '" title="下へ" aria-label="下へ" style="' + mvStyle + (atBottom ? 'opacity:.25;' : '') + '">▼</button>' +
+        ? '<button type="button" class="cat-del catm-ib" data-idx="' + idx + '" title="削除" aria-label="削除">✕</button>'
+        : '<button type="button" class="cat-hide catm-ib" data-idx="' + idx + '" title="' + (c.hidden ? '表示に戻す' : '欄から隠す') + '" aria-label="' + (c.hidden ? '表示に戻す' : '欄から隠す') + '">' + (c.hidden ? '◻︎' : '👁') + '</button>';
+      return '<div class="cat-edit-row' + (c.hidden ? ' is-hidden' : '') + '" data-idx="' + idx + '">' +
+        '<div class="catm-r1">' +
+          '<input type="color" class="cat-color" data-idx="' + idx + '" value="' + esc(/^#[0-9a-fA-F]{6}$/.test(c.color) ? c.color : '#d97757') + '" title="色" aria-label="色">' +
+          '<input type="text" class="cat-label" data-idx="' + idx + '" value="' + esc(c.label) + '" placeholder="名前">' +
+          '<div class="catm-ctl">' +
+            '<button type="button" class="cat-mv catm-ib" data-dir="-1" data-idx="' + idx + '" title="上へ" aria-label="上へ"' + (atTop ? ' disabled' : '') + '>▲</button>' +
+            '<button type="button" class="cat-mv catm-ib" data-dir="1" data-idx="' + idx + '" title="下へ" aria-label="下へ"' + (atBottom ? ' disabled' : '') + '>▼</button>' +
             actBtn +
           '</div>' +
         '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-top:9px;">' +
-          '<span style="font-size:.68rem;font-weight:700;color:#6f8296;flex:0 0 auto;letter-spacing:.04em;">一致語</span>' +
-          '<input type="text" class="cat-kw" data-idx="' + idx + '" value="' + esc(c.keywords.join('、')) + '" placeholder="作品ジャンル/フロア名に含む語(、で区切る)" style="flex:1 1 auto;min-width:0;border-radius:8px;border:1px solid #2c3a4e;background:#0e1a2b;color:#aabbc8;padding:6px 9px;font-size:.78rem;box-sizing:border-box;">' +
+        '<div class="catm-r2">' +
+          '<span>一致語</span>' +
+          '<input type="text" class="cat-kw" data-idx="' + idx + '" value="' + esc(c.keywords.join('、')) + '" placeholder="作品ジャンル/フロア名に含む語(、で区切る)">' +
         '</div>' +
       '</div>';
     }).join('');
 
+    var CSS =
+      '.catm{background:#faf9f5;border:1px solid #e8e4d9;border-radius:18px;overflow:hidden;box-sizing:border-box;width:100%;max-width:560px;box-shadow:0 24px 60px rgba(20,20,19,.42);}' +
+      '.catm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 20px;border-bottom:1px solid #ece8dd;}' +
+      '.catm-title{display:flex;align-items:center;gap:9px;}' +
+      '.catm-title b{color:#141413;font-size:1.12rem;font-weight:700;white-space:nowrap;letter-spacing:.01em;}' +
+      '.catm-dot{width:9px;height:9px;border-radius:3px;background:#d97757;flex:0 0 auto;}' +
+      '.catm-x{width:32px;height:32px;border-radius:50%;border:none;background:transparent;color:#6b6559;font-size:1.05rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;}' +
+      '.catm-x:hover{background:#efece2;color:#141413;}' +
+      '.catm-body{padding:18px 20px 22px;box-sizing:border-box;}' +
+      '.catm-help{color:#8a8271;font-size:.74rem;line-height:1.6;margin-bottom:16px;}' +
+      '.cat-edit-row{background:#fff;border:1px solid #ece8dd;border-radius:14px;padding:12px 14px;margin-bottom:12px;box-sizing:border-box;box-shadow:0 1px 2px rgba(20,20,19,.05);}' +
+      '.cat-edit-row.is-hidden{opacity:.55;background:#f4f2ec;}' +
+      '.catm-r1{display:flex;align-items:center;gap:11px;}' +
+      '.cat-color{width:26px;height:26px;padding:0;border:1px solid #e2ddd0;border-radius:50%;background:none;cursor:pointer;flex:0 0 auto;overflow:hidden;}' +
+      '.cat-color::-webkit-color-swatch-wrapper{padding:0;}.cat-color::-webkit-color-swatch{border:none;border-radius:50%;}' +
+      '.cat-label{flex:1 1 auto;min-width:0;border:1px solid #e0dccf;border-radius:9px;background:#fbfaf6;color:#141413;padding:8px 11px;font-size:.9rem;font-weight:600;box-sizing:border-box;}' +
+      '.cat-label:focus,.cat-kw:focus{outline:none;border-color:#d97757;box-shadow:0 0 0 3px rgba(217,119,87,.16);}' +
+      '.catm-ctl{display:flex;align-items:center;gap:3px;flex:0 0 auto;}' +
+      '.catm-ib{width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#6b6559;font-size:.9rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;flex:0 0 auto;}' +
+      '.catm-ib:hover{background:#f0ede3;color:#141413;}.catm-ib:disabled{opacity:.25;cursor:default;}' +
+      '.cat-del{color:#bf4d43;}.cat-del:hover{background:#f7e7e4;color:#a13a31;}' +
+      '.catm-r2{display:flex;align-items:center;gap:10px;margin-top:10px;}' +
+      '.catm-r2 span{font-size:.68rem;font-weight:700;color:#a39a89;letter-spacing:.04em;flex:0 0 auto;}' +
+      '.cat-kw{flex:1 1 auto;min-width:0;border:1px solid #e6e2d6;border-radius:9px;background:#fbfaf6;color:#5b554a;padding:7px 11px;font-size:.8rem;box-sizing:border-box;}' +
+      '#catAddBtn{width:100%;margin-top:2px;padding:11px;border-radius:11px;border:1px dashed #d3ccbb;background:transparent;color:#8a8271;font-size:.85rem;font-weight:600;cursor:pointer;transition:background .15s;}' +
+      '#catAddBtn:hover{background:#f2efe7;color:#6b6559;}' +
+      '#catApplyBtn{width:100%;margin-top:18px;padding:14px;border-radius:12px;border:none;background:#d97757;color:#fff;font-size:.95rem;font-weight:700;cursor:pointer;box-shadow:0 3px 10px rgba(217,119,87,.32);transition:background .15s,transform .05s;}' +
+      '#catApplyBtn:hover{background:#c8663f;}#catApplyBtn:active{transform:translateY(1px);}';
+
     overlay.innerHTML =
-      '<div class="cat-modal-card" style="background:#0e1422;border:1px solid #2a3346;border-radius:14px;overflow:hidden;box-sizing:border-box;width:100%;max-width:560px;">' +
-        '<div style="padding:13px 16px;border-bottom:1px solid #1e2d42;display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
-          '<div style="color:#2bb3c0;font-size:.95rem;font-weight:800;white-space:nowrap;">カテゴリ編集</div>' +
-          '<button type="button" id="catModalClose" aria-label="閉じる" style="background:none;border:none;color:#7a8fa3;font-size:1.2rem;padding:2px 8px;cursor:pointer;flex:0 0 auto;">✕</button>' +
+      '<style>' + CSS + '</style>' +
+      '<div class="cat-modal-card catm">' +
+        '<div class="catm-head">' +
+          '<div class="catm-title"><span class="catm-dot"></span><b>カテゴリ編集</b></div>' +
+          '<button type="button" id="catModalClose" class="catm-x" aria-label="閉じる">✕</button>' +
         '</div>' +
-        '<div style="padding:14px 16px 20px;box-sizing:border-box;">' +
-          '<div style="font-size:.72rem;color:#8195a8;line-height:1.5;margin-bottom:12px;">▲▼で並べ替え／左の丸をタップで色／「一致語」は作品ジャンル・フロア名との部分一致</div>' +
+        '<div class="catm-body">' +
+          '<div class="catm-help">▲▼で並べ替え／左の丸をタップで色／「一致語」は作品ジャンル・フロア名との部分一致</div>' +
           '<div id="catEditList">' + rows + '</div>' +
-          '<button type="button" id="catAddBtn" style="margin-top:12px;padding:9px 14px;border-radius:8px;border:1px dashed #3a4a5e;background:#0e1a2b;color:#aabbc8;font-size:.82rem;cursor:pointer;">＋ カテゴリを追加</button>' +
-          '<button type="button" id="catApplyBtn" style="width:100%;margin-top:18px;padding:13px;border-radius:10px;border:none;background:#2bb3c0;color:#04222a;font-size:.95rem;font-weight:700;cursor:pointer;">保存する</button>' +
+          '<button type="button" id="catAddBtn">＋ カテゴリを追加</button>' +
+          '<button type="button" id="catApplyBtn">保存する</button>' +
         '</div>' +
       '</div>';
 
