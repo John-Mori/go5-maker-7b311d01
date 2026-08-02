@@ -780,6 +780,39 @@
   // ならず、前回値を即表示→取得成功で最新化。再生数等の yt_meta_cache と同方針)。
   var clicksCache = (function () { try { return JSON.parse(localStorage.getItem('clicks_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> clicks
   function clicksPersist_() { try { localStorage.setItem('clicks_cache', JSON.stringify(clicksCache)); } catch (e) {} }
+  // 【恒久・供給一本化 2026-08-03】導線1/導線2のクリック数を「投稿履歴と全く同じ計算」で1関数へ寄せる。
+  //   v=579 は材料(shortUrl)の供給を履歴とランキングで揃えたが、値の"計算式"は分裂したままだった=
+  //   ランキングは clicksCache[code] を直読みするだけで ①合算URL(mergeUrls)の加算 ②GAS日次デルタ
+  //   (deltaCache)による累計の下限 を欠いていた。そのため「手入力の作品短縮URLでcodeOfが空/合算で
+  //   割れた作品」は履歴では210出るのにランキングでは null→除外され「クリックがランキングに出ない」が
+  //   残った(Chami報告2026-08-03【A再発】)。以後は履歴(render)もランキング(doRender)もこの1関数を通す。
+  function postClicks_(it, vid) {
+    var code = codeOf(it.shortUrl || '');
+    var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
+    // 合算(導線1のみ): X凍結→別ドメインへ割れた同一作品の短縮URL群のクリックを加算(履歴と同一)。
+    if (Array.isArray(it.mergeUrls) && it.mergeUrls.length) {
+      var _mSum = 0, _mGot = false;
+      for (var _mi = 0; _mi < it.mergeUrls.length; _mi++) {
+        var _mc = codeOf(it.mergeUrls[_mi] || '');
+        if (_mc && (_mc in clicksCache)) { _mSum += (clicksCache[_mc] || 0); _mGot = true; }
+      }
+      if (_mGot) clicks = (clicks || 0) + _mSum;
+    }
+    var wcode = codeOf(it.workShortUrl || '');
+    var wclicks = wcode && (wcode in clicksCache) ? clicksCache[wcode] : null;
+    // GAS日次デルタで累計の下限を張る(累計≥週)。codeOfが空(手入力の作品短縮URL等)でもGAS由来の
+    //   実数があれば必ず反映=「累計0なのに週8」やランキング除外を封じる(履歴と同一のロジック)。
+    var _dl = vid ? deltaCache[vid] : null;
+    if (_dl) {
+      var cCum = (_dl.cc != null) ? _dl.cc : Math.max(_dl.wc || 0, _dl.tc || 0, _dl.yc || 0);
+      if (cCum > 0) clicks = Math.max(clicks || 0, cCum);
+      var wCum = (_dl.cwc != null) ? _dl.cwc : Math.max(_dl.wwc || 0, _dl.twc || 0, _dl.ywc || 0);
+      if (wCum > 0) wclicks = Math.max(wclicks || 0, wCum);
+    }
+    // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(別短縮URLのため加算)。
+    var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
+    return { c1: clicksTotal, c2: wclicks, code: code, wcode: wcode };
+  }
   var viewsCache = {};     // videoId -> views
   var publishedCache = {}; // videoId -> publishedAt(ms)
   var titleCache = {};     // videoId -> YouTubeタイトル
@@ -1514,43 +1547,14 @@
       var k = itemKey(it);
       var yt = ymap[k] || it.ytUrl || '';
       var vid = ytIdOf(yt);
-      var code = codeOf(it.shortUrl || '');
-      var clicks = code && (code in clicksCache) ? clicksCache[code] : null;
-      // 合算(導線1のみ・Chami依頼2026-07-31): X凍結→Bluesky退避などで別の短縮URLへ割れた同一作品の
-      //   クリックを、この投稿へ手動で束ねる。合算URL(r2)のクリックを導線1クリックへ加算する。
-      if (Array.isArray(it.mergeUrls) && it.mergeUrls.length) {
-        var _mSum = 0, _mGot = false;
-        for (var _mi = 0; _mi < it.mergeUrls.length; _mi++) {
-          var _mc = codeOf(it.mergeUrls[_mi] || '');
-          if (_mc && (_mc in clicksCache)) { _mSum += (clicksCache[_mc] || 0); _mGot = true; }
-        }
-        if (_mGot) clicks = (clicks || 0) + _mSum;
-      }
-      // 導線2(投稿→FANZA): 本文中の作品リンクの計測コード(bluesky.jsが投稿時に置換・記録)
-      var wcode = codeOf(it.workShortUrl || '');
-      var wclicks = wcode && (wcode in clicksCache) ? clicksCache[wcode] : null;
-      // ★累計は各期間デルタ(今日/昨日/週)を必ず内包する=累計 ≥ 週。短縮コードが差し替わると累計(r2 KV・
-      //   現コード)だけ0に戻り、GASの日次スナップ由来の週(過去コード分)が残って「累計0なのに週8」の矛盾に
-      //   なる(Chami報告2026-07-29 宵桜艶帖「いつも助かってます」)。既知の期間デルタで累計に下限を張り、
-      //   原因が何であれ矛盾表示を消す。(集計の整合。導線1も同じ理屈で揃える)
+      // 【供給一本化 2026-08-03】導線1/導線2のクリックは postClicks_ で計算(ランキングと同一の1関数)。
+      //   合算URLの加算・GAS日次デルタの累計下限・リビルド結合まで内包する(旧・この場のインライン計算を
+      //   関数へ寄せた=履歴とランキングで計算式が二度と割れないようにする)。_dl は下の総再生数下限で再利用。
+      var _pc = postClicks_(it, vid);
+      var code = _pc.code, wcode = _pc.wcode;
+      var wclicks = _pc.c2;
+      var clicksTotal = _pc.c1;
       var _dl = vid ? deltaCache[vid] : null;
-      if (_dl) {
-        // GASが日次スナップの段差(短縮コード差し替えでカウンタが0起点に戻る)を検出して積み直した
-        //   「実数の累計」cc(導線1)/cwc(導線2)があればそれを採用。無ければ既知の期間デルタで下限を張る。
-        //   どちらでも累計≥週が保証され、「累計0なのに週8/週-16」の矛盾表示は出ない。(Chami 2026-07-29)
-        var cCum = (_dl.cc != null) ? _dl.cc : Math.max(_dl.wc || 0, _dl.tc || 0, _dl.yc || 0);
-        // ★下限は「表示される累計 ≥ 表示される週」を守るためのもの。クライアントが短縮コードを解決
-        //   できるか(code/wcode)に依存させてはいけない——手入力の作品短縮URL等でcodeOfが空になる時こそ
-        //   「累計0なのに週8」が起きる(GASはシートの作品短縮URL列から週を出せるが、クライアントは
-        //   ローカルのURLからコードを取れず累計を0のまま残す)。コード有無の門を外し、GAS由来のデルタが
-        //   あれば必ず累計へ反映する。(Chami報告2026-07-30 宵桜艶帖「いつも助かってます」累計0/週8)
-        if (cCum > 0) clicks = Math.max(clicks || 0, cCum);
-        var wCum = (_dl.cwc != null) ? _dl.cwc : Math.max(_dl.wwc || 0, _dl.twc || 0, _dl.ywc || 0);
-        if (wCum > 0) wclicks = Math.max(wclicks || 0, wCum);
-      }
-      // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(rebuildBaseClicks)を総合値に。(別短縮URLのため加算)
-      // リビルド版はカッコ内(rebuildBaseClicks)も足した総合計を表示。自分のクリックが0/未取得でも被リビルド分は必ず加算する(例：0+5=5(5))。
-      var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
       // 動画で実際に使った画像は履歴単位で読む。候補タブの全画像(ref)とは分離する。
       // 旧データだけは先頭1枚を互換表示するが、2枚目以降の候補画像は絶対に投稿履歴へ混ぜない。
       var rImgCid = it.workUrl ? workCidOf_(it.workUrl) : '';
@@ -4028,8 +4032,11 @@
       var pk0 = peakCache || {};
       var rows = uniq.map(function (x) {
         var it = x.it;
-        var code = codeOf(it.shortUrl || '');
-        var wcode = codeOf(it.workShortUrl || '');
+        // 【供給一本化 2026-08-03】クリック値は投稿履歴と同一の postClicks_ で計算(合算URL/GAS日次
+        //   デルタ/リビルドを内包)。従来はここで clicksCache[code] を直読みするだけで、履歴が加算する
+        //   合算URL・GASデルタ下限を欠き「履歴では出るクリックがランキングに出ない」が残っていた【A再発】。
+        var _pc = postClicks_(it, x.vid);
+        var code = _pc.code, wcode = _pc.wcode;
         var snap = (isBucket && snapCache[x.vid]) ? snapCache[x.vid][_rankWin] : null;
         var gtp = (isBucket && tpCache[x.vid]) ? tpCache[x.vid][_rankWin] : null; // GASサーバー時点記録(過去分・端末未起動でも記録。再生数と導線1のみ・12h/48h/導線2は非対応)
         var pk = pk0[x.vid] || {};
@@ -4038,8 +4045,8 @@
           vid: x.vid, yt: x.yt, acct: x.acct,
           title: titleCache[x.vid] || it.title || (it.manual ? '(手動追加)' : '(無題)'),
           views: (x.vid in viewsCache) ? viewsCache[x.vid] : null,
-          clicks: (function () { var c = (code && code in clicksCache) ? clicksCache[code] : null; return (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((c != null ? c : 0) + it.rebuildBaseClicks) : c; })(), // 導線1総合(結合はリビルド前も加算)
-          wclicks: (wcode && wcode in clicksCache) ? clicksCache[wcode] : null, // 導線2総合(ピンク矢印)
+          clicks: _pc.c1, // 導線1総合(投稿履歴と同一計算=合算URL/GAS日次デルタ/リビルドを内包・供給一本化2026-08-03)
+          wclicks: _pc.c2, // 導線2総合(ピンク矢印・同上)
           code: code, wcode: wcode,
           snapV: (snap && snap.v != null) ? snap.v : (gtp && gtp.v != null ? gtp.v : null), snapC: (snap && snap.c != null) ? snap.c : (gtp && gtp.c != null ? gtp.c : null), snapW: (snap && snap.w != null) ? snap.w : null, snapAge: (snap && snap.ageMin != null) ? snap.ageMin : (gtp && gtp.age != null ? gtp.age : null),
           peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
