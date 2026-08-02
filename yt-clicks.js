@@ -4043,15 +4043,20 @@
       fillFanzaNames();
     }
 
-    // 再生数・クリック数のうちキャッシュに無いものを取得してから描画。
-    var missingV = uniq.map(function (x) { return x.vid; }).filter(function (v) { return !(v in viewsCache); });
-    var missingC = uniq.map(function (x) { return codeOf(x.it.shortUrl || ''); }).filter(function (c) { return c && !(c in clicksCache); });
-    if (missingV.length || missingC.length) {
-      el.innerHTML = '<p style="color:var(--sub);font-size:13px;padding:8px 14px;">再生数・クリック数を取得中…</p>';
-      var jobs = [];
-      var vbatches = [];
-      for (var i = 0; i < missingV.length; i += 50) { vbatches.push(missingV.slice(i, i + 50)); }
-      vbatches.forEach(function (b) {
+    // 再生数・クリック数を取得してから描画。
+    // ★総合(再生数)は「YouTubeの"現在の"総再生数」なので、キャッシュ済みでも毎回取り直す。
+    //   旧実装は missing(=一度も取得していない動画)だけ取っていたため、過去に一度でも取得した動画は
+    //   起動時に yt_meta_cache から読んだ"古い再生数"で固定され、その後いくら伸びてもランキングに
+    //   反映されなかった(=「直近しか反映されない/もっと再生されてる過去分が反映されない」Chami指摘
+    //   2026-08-02)。対策: 一覧の全動画IDを毎回 videos.list で最新化する(50件/回=無料枠は十分)。
+    //   まずキャッシュで即描画→取得後に最新値へ差し替える(初回表示を待たせない)。
+    var allV = uniq.map(function (x) { return x.vid; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+    var hadCache = allV.some(function (v) { return v in viewsCache; });
+    if (hadCache) { try { doRender(); } catch (e) {} } // 既存キャッシュで即表示(通信0)。取得後に下で最新化。
+    else { el.innerHTML = '<p style="color:var(--sub);font-size:13px;padding:8px 14px;">再生数・クリック数を取得中…</p>'; }
+    var jobs = [];
+    for (var i = 0; i < allV.length; i += 50) {
+      (function (b) {
         jobs.push(fetchVideos(b).then(function (m) {
           var err = m.__error || ''; delete m.__error; if (err && !lastErr) lastErr = err;
           delete m.__queried; // メタキーを消してからキャッシュ反映(yt_meta_cacheへのゴミ混入防止)
@@ -4063,12 +4068,10 @@
           });
           ytMetaPersist(m);
         }));
-      });
-      if (missingC.length) jobs.push(fetchAllClicks_()); // 未取得コードは /api/list で一括(旧: コード毎に1本=無料枠を焼く)
-      Promise.all(jobs).then(function () { clicksPersist_(); doRender(); });
-    } else {
-      doRender();
+      })(allV.slice(i, i + 50));
     }
+    jobs.push(fetchAllClicks_()); // 全コードのクリック数も最新化(TTL内なら通信0=連打抑制)。導線1/導線2とも
+    Promise.all(jobs).then(function () { clicksPersist_(); doRender(); });
     // ピーク/差分(GAS)を取得したら再描画。(ピーク2モードに反映)
     fetchDeltas_(false, doRender);
   }
