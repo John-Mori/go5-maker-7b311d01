@@ -12,7 +12,7 @@
 
   /* ── タブ切替(動画作成／カレンダー／投稿／アフィリンク／検証の5タブ) ── */
   var TABS = [
-    { btn: 'tabRank',    page: 'pageRank'    },
+    { btn: 'rankBtn',    page: 'pageRank'    },
     { btn: 'tabCand',    page: 'pageCand'    },
     { btn: 'tabVerify', page: 'pageVerify'   },
     { btn: 'analyzeBtn', page: 'pageAnalyze' },
@@ -25,9 +25,10 @@
     { btn: 'tabAffi',   page: 'pageAffi'     },
     { btn: 'tabSettings', page: 'pageSettings' }
   ];
-  // アカウント帯のボタン(⏰予約 / 📅カレンダー)は「タブ」ではなく“上に重ねて開く”オーバーレイ扱い。
-  //   もう一度同じボタンを押すと直前の作業タブへ戻る(Chami 2026-07-31)。タブバーには置かない。
-  var OVERLAY_BTNS = { reserveBtn: 1, calBtn: 1, analyzeBtn: 1 };
+  // アカウント帯のボタン(⏰予約 / 📅カレンダー / 📊分析 / 🏆ランキング)は「タブ」ではなく“上に重ねて
+  //   開く”オーバーレイ扱い。もう一度同じボタンを押すと直前の作業タブへ戻る(予約/カレンダー=Chami
+  //   2026-07-31 / ランキングをタブから帯へ移設=Chami 2026-08-02)。タブバーには置かない。
+  var OVERLAY_BTNS = { reserveBtn: 1, calBtn: 1, analyzeBtn: 1, rankBtn: 1 };
   var currentTab = 'tabMovie';          // いま前面に出している btn id
   var prevWorkTab = 'tabMovie';         // オーバーレイを開く直前の“作業タブ”(戻り先)
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む。(遅延ロード)
@@ -59,7 +60,7 @@
         cf.contentWindow.postMessage({ target: 'sch-calendar', type: 'show' }, '*');
       });
     }
-    if (activeBtnId === 'tabRank'    && window.YtRank)   window.YtRank.renderRank();
+    if (activeBtnId === 'rankBtn'    && window.YtRank)   window.YtRank.renderRank();
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
     if (activeBtnId === 'reserveBtn' && window.Scheduler) window.Scheduler._renderTab();
     if (activeBtnId === 'tabStock'   && window.Go5Stock)  window.Go5Stock.render();
