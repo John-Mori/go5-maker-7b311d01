@@ -22,7 +22,11 @@ function parseFanzaItem(item) {
 
   var discountPct = 0;
   if (listPrice != null && price != null && listPrice > 0 && price < listPrice) { // price=0(100%OFF)も割引計算する
-    discountPct = Math.round((1 - price / listPrice) * 100);
+    // ★FANZA表記に合わせた二段階四捨五入(Chami依頼2026-08-02⑤)：
+    //   例 660円→10円は 98.4848…%。小数第2位を四捨五入して98.5%、さらに整数へ四捨五入して99%。
+    //   単純な Math.round((1-price/listPrice)*100) だと98%になり、FANZAが銘打つ「99%オフ」とズレる。
+    var raw = (1 - price / listPrice) * 100;
+    discountPct = Math.round(Math.round(raw * 10) / 10);
   }
 
   var authorArr = (item.iteminfo && Array.isArray(item.iteminfo.author)) ? item.iteminfo.author : [];

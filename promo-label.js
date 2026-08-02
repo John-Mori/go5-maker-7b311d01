@@ -89,6 +89,17 @@
   try { var _t = localStorage.getItem('promo_label_type'); if (_t === 'price') ltype = 'price'; } catch (e) {}
   try { var _s = parseFloat(localStorage.getItem('promo_label_scale')); if (_s >= SCALE_MIN && _s <= SCALE_MAX) scale = _s; } catch (e) {}
   try { var _p = JSON.parse(localStorage.getItem('promo_label_fpos') || 'null'); if (_p && typeof _p.x === 'number' && typeof _p.y === 'number') fpos = _p; } catch (e) {}
+  // ①リロードで割引タグが消える不具合の対策(Chami依頼2026-08-02①)。
+  //   pct/priceVal は notify() でしか入らず、リロード直後は作品情報を取り直すまで0=非表示になっていた。
+  //   直近の値を永続化して復元し、作品替え(begin)・新規作成(clear)で正しく上書きする。
+  try {
+    var _v = JSON.parse(localStorage.getItem('promo_label_vals') || 'null');
+    if (_v) {
+      if (typeof _v.pct === 'number') pct = _v.pct;
+      if (typeof _v.priceVal === 'number') priceVal = _v.priceVal;
+      if (typeof _v.cid === 'string') lastCid = _v.cid;
+    }
+  } catch (e) {}
 
   function acct() { return window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'; }
   function tplAcct() { return TEMPLATES[acct()] || TEMPLATES.acc1; }
@@ -261,6 +272,15 @@
     try { localStorage.setItem('promo_label_scale', String(scale)); } catch (e) {}
     try { localStorage.setItem('promo_label_fpos', fpos ? JSON.stringify(fpos) : ''); } catch (e) {}
     try { localStorage.setItem('promo_label_type', ltype); } catch (e) {}
+    // ①リロード耐性：表示値も永続化(cidで作品替え時に古い値を出さない)。
+    try { localStorage.setItem('promo_label_vals', JSON.stringify({ pct: pct, priceVal: priceVal, cid: lastCid })); } catch (e) {}
+  }
+  // FANZA表記に合わせた二段階四捨五入(Chami依頼2026-08-02⑤)。fanza-core.js parseFanzaItem と同じ式。
+  //   候補タブ由来の info.discountPct は旧単純丸めのことがあるため、ラベルは価格から取り直して揃える。
+  function pctFanza_(listPrice, price) {
+    if (!(listPrice > 0) || price == null || price >= listPrice) return 0;
+    var raw = (1 - price / listPrice) * 100;
+    return Math.round(Math.round(raw * 10) / 10);
   }
 
   // ---- 位置・大きさの手動調整 ----
@@ -373,13 +393,13 @@
       if (!info || !info.title) return;
       var onSale = info.listPrice && info.price != null && info.discountPct > 0 && info.price < info.listPrice;
       lastCid = String(info.cid || info.title || '');
-      pct = onSale ? Math.round(info.discountPct) : 0;
+      pct = onSale ? pctFanza_(info.listPrice, info.price) : 0; // ⑤FANZA表記の丸めで揃える
       priceVal = onSale ? Math.round(info.price) : 0;
-      updateRow(); redraw();
+      persist(); updateRow(); redraw(); // ①値も永続化してリロードで消えないように
     },
     // 別作品の取得開始(前作の値を残さない)。
     begin: function (cid) {
-      if (String(cid || '') !== lastCid) { pct = 0; priceVal = 0; updateRow(); redraw(); }
+      if (String(cid || '') !== lastCid) { pct = 0; priceVal = 0; persist(); updateRow(); redraw(); }
     },
     // 新規作成の起点(Go5NewMovieReset)。位置は既定へ戻す。
     // ★チェックは必ずONへ戻す(Chami指定2026-07-16「前の情報がリセットされた時もチェックを入れた状態に」)。

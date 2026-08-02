@@ -154,6 +154,21 @@ test('F-8: 100%OFF（price=0）でも割引計算される（0円はfalsyだが�
 });
 
 // ────────────────────────────────────────────────────────────
+// F-9 FANZA表記に合わせた二段階四捨五入（Chami依頼2026-08-02⑤）
+//   660円→10円は98.4848…%。小数第2位を四捨五入して98.5%、さらに整数へ四捨五入して99%。
+//   単純な Math.round では98%になりFANZAの「99%オフ」表記とズレる。
+// ────────────────────────────────────────────────────────────
+test('F-9: list 660 / price 10 → discountPct=99（FANZA表記の二段階丸め）', function () {
+  var r = parseFanzaItem({ content_id: 'd_000006', title: '99%OFFテスト', prices: { list_price: '660', price: '10' }, iteminfo: {}, review: {} });
+  assert.strictEqual(r.discountPct, 99);
+});
+test('F-10: 二段階丸めでも切り上がらない例（84.4%→84%）', function () {
+  // (1 - 156/1000)*100 = 84.4 → 小数第2位四捨五入で84.4 → 整数四捨五入で84。切り上げにはならない。
+  var r = parseFanzaItem({ content_id: 'd_000007', title: '端数テスト', prices: { list_price: '1000', price: '156' }, iteminfo: {}, review: {} });
+  assert.strictEqual(r.discountPct, 84);
+});
+
+// ────────────────────────────────────────────────────────────
 // 結果集計
 // ────────────────────────────────────────────────────────────
 console.log('');
