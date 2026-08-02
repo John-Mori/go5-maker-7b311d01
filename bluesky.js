@@ -543,6 +543,18 @@
     return String(text == null ? '' : text).replace(/[ \t\r\n]+$/, '');
   }
   try { window.__go5StripAutoBlocks = stripAutoBlocks_; } catch (e) {} // 検証用フック
+  // ★安全網: stripAutoBlocks_で本文が丸ごと消える(＝全行が「旧完成形」＝PR行+裸URL/セール行+裸URL/
+  //   フック深掘り行/CTA行と判定された)場合、本文が非空なら剥がす前の本文をそのまま返す。
+  //   作品URL欄が空だと再構築もできず、X欄/プレビュー/ドラフトが「まるごと空(0/280)」になる
+  //   (Chami報告2026-08-03「そして何も出なくなった」)。空表示より、書いた本文をそのまま見せる方が安全。
+  function stripAutoBlocksSafe_(text) {
+    var s = stripAutoBlocks_(text);
+    if (!s.replace(/\s/g, '') && String(text == null ? '' : text).replace(/\s/g, '')) {
+      return String(text).replace(/[ \t\r\n]+$/, '');
+    }
+    return s;
+  }
+  try { window.__go5StripAutoBlocksSafe = stripAutoBlocksSafe_; } catch (e) {} // 検証用フック
   // 紹介用/セール短縮リンクのプレースホルダ判定・置換(表記ゆれ吸収=core側の正規表現)。core未読込時は
   //   旧来の標準表記だけ exact で拾うフォールバック(=最低限は動く)。Chami報告2026-08-02の恒久対策。
   function hasWorkPH_(t) {
@@ -896,7 +908,8 @@
   var AUTO_APPEND_ENABLED = true; // 2026-07-13 Chami指定: 標準投稿形式(フック+PR行+短縮アフィ+セール行)を再有効化
   function composePostText() {
     // 貼り付け済みの古い完成形(PR行/セール行+旧URL)を剥がしてから組み直す＝二重化しない。
-    var caption = stripAutoBlocks_(els.text.value);
+    //   ★剥がした結果が空になる時だけ本文をそのまま使う(空表示防止・stripAutoBlocksSafe_)。
+    var caption = stripAutoBlocksSafe_(els.text.value);
     if (!AUTO_APPEND_ENABLED) return caption;
     var link = resolveAffLink();
     var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
@@ -945,7 +958,7 @@
   // overrideAffLink を渡すと resolveAffLink() の代わりに使う(別作品ロード後の誤リンク防止)
   try {
     window.__go5ComposeXTextForBskyText = function (bskyText, overrideAffLink) {
-      var caption = stripAutoBlocks_(bskyText || '');
+      var caption = stripAutoBlocksSafe_(bskyText || '');
       var link = overrideAffLink !== undefined ? overrideAffLink : resolveAffLink();
       var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
       var out;
@@ -1064,7 +1077,7 @@
   // ---- プレビュー描画(＝投稿される見た目) ----
   function renderPreview() {
     // ★composePostTextと同じ前処理を通す。(ここがズレると「プレビューと実際の投稿が違う」の原因になる)
-    var caption = stripAutoBlocks_(els.text.value);
+    var caption = stripAutoBlocksSafe_(els.text.value);
     var link = resolveAffLink();
     var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
     var short = link ? cachedWorkShortLink_() : '';
