@@ -3927,6 +3927,17 @@
     if (changed) snapPersist_();
   }
   function fmtAge_(min) { return min == null ? '' : (min < 90 ? min + '分後' : (Math.round(min / 6) / 10) + 'h後'); }
+  // バケット値を「目標分に最も近い側(ローカル/GAS)」で1組選ぶ(Chami「60分計測なのに78分になる」2026-08-02)。
+  //   rank-core が未読込の時だけ従来のローカル優先へフォールバック。
+  function pickBucketRec_(snap, gtp, targetMin) {
+    if (window.Go5RankCore && window.Go5RankCore.pickBucketRec) return window.Go5RankCore.pickBucketRec(snap, gtp, targetMin);
+    return {
+      v: (snap && snap.v != null) ? snap.v : (gtp && gtp.v != null ? gtp.v : null),
+      c: (snap && snap.c != null) ? snap.c : (gtp && gtp.c != null ? gtp.c : null),
+      w: (snap && snap.w != null) ? snap.w : null,
+      age: (snap && snap.ageMin != null) ? snap.ageMin : (gtp && gtp.age != null ? gtp.age : null)
+    };
+  }
 
   // ── ランキングタブ(両アカウント合算・3モード切替)──────────────────────────────
   function renderRank() {
@@ -4051,6 +4062,7 @@
         var code = _pc.code, wcode = _pc.wcode;
         var snap = (isBucket && snapCache[x.vid]) ? snapCache[x.vid][_rankWin] : null;
         var gtp = (isBucket && tpCache[x.vid]) ? tpCache[x.vid][_rankWin] : null; // GASサーバー時点記録(過去分・端末未起動でも記録。再生数と導線1のみ・12h/48h/導線2は非対応)
+        var bkr = (isBucket && bucketDef) ? pickBucketRec_(snap, gtp, bucketDef.min) : null; // 目標分に近い側を1組で採用(78分ズレの根治)
         var pk = pk0[x.vid] || {};
         var cats = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
         return {
@@ -4060,7 +4072,7 @@
           clicks: _pc.c1, // 導線1総合(投稿履歴と同一計算=合算URL/GAS日次デルタ/リビルドを内包・供給一本化2026-08-03)
           wclicks: _pc.c2, // 導線2総合(ピンク矢印・同上)
           code: code, wcode: wcode,
-          snapV: (snap && snap.v != null) ? snap.v : (gtp && gtp.v != null ? gtp.v : null), snapC: (snap && snap.c != null) ? snap.c : (gtp && gtp.c != null ? gtp.c : null), snapW: (snap && snap.w != null) ? snap.w : null, snapAge: (snap && snap.ageMin != null) ? snap.ageMin : (gtp && gtp.age != null ? gtp.age : null),
+          snapV: bkr ? bkr.v : null, snapC: bkr ? bkr.c : null, snapW: bkr ? bkr.w : null, snapAge: bkr ? bkr.age : null,
           peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
           peakC: pk.cRate != null ? pk.cRate : null, peakCWin: pk.cWin || '',
           ts: it.ts || (publishedCache[x.vid] || 0),

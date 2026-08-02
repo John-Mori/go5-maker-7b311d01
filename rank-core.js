@@ -66,7 +66,39 @@
     return order;
   }
 
-  var api = { mergeByVid: mergeByVid };
+  /**
+   * バケット窓(30分/1時間…)の値を、ローカル観測(snap)とGASサーバー記録(gtp)から1組で選ぶ。
+   *
+   * 【解く問題(真因4=Chami「60分計測なのに78分になる」2026-08-02)】
+   *   フロントの captureSnaps_ は許容窓が広く(目標分+50%)、アプリを78分時点で初めて開くと
+   *   「1時間」バケットに ageMin=78 で固定されていた。表示は「ローカル優先→GAS補完」だったため、
+   *   GAS側が [目標, 目標+9分] の厳しい窓で 66分の記録を持っていても、緩いローカルの78分が勝っていた。
+   *
+   * 【設計】v/c/age を別々に混ぜず、「記録時刻が目標分に最も近い側」を主に、欠けた指標だけ他方で補完する。
+   *   - age は主(=目標に近い方)の値を使う → 表示される「◯分後」が目標へ寄る。
+   *   - 導線2(w)はローカルのみ観測なので snap から取る。
+   *   - 同点(距離が同じ)はローカル据え置き=既存挙動を壊さない。
+   * snap: {v,c,w,ageMin} | null  gtp: {v,c,age} | null  targetMin: バケット目標分(例60)
+   */
+  function pickBucketRec(snap, gtp, targetMin) {
+    var s = snap ? { v: (snap.v == null ? null : snap.v), c: (snap.c == null ? null : snap.c), w: (snap.w == null ? null : snap.w), age: (snap.ageMin == null ? null : snap.ageMin) } : null;
+    var g = gtp ? { v: (gtp.v == null ? null : gtp.v), c: (gtp.c == null ? null : gtp.c), w: null, age: (gtp.age == null ? null : gtp.age) } : null;
+    if (!s && !g) return { v: null, c: null, w: null, age: null };
+    if (!s) return g;
+    if (!g) return s;
+    var ds = (s.age == null) ? Infinity : Math.abs(s.age - targetMin);
+    var dg = (g.age == null) ? Infinity : Math.abs(g.age - targetMin);
+    var primary = (dg < ds) ? g : s;              // より目標分に近い側を主に(同点はローカル)
+    var other = (primary === g) ? s : g;
+    return {
+      v: primary.v != null ? primary.v : other.v,
+      c: primary.c != null ? primary.c : other.c,
+      w: s.w != null ? s.w : null,                // 導線2(ピンク矢印)はローカル観測のみ
+      age: primary.age != null ? primary.age : other.age
+    };
+  }
+
+  var api = { mergeByVid: mergeByVid, pickBucketRec: pickBucketRec };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Go5RankCore = api;
 })(typeof window !== 'undefined' ? window : this);
