@@ -6,6 +6,7 @@
  *   ・「下書き(ドラフト)」の一覧と投稿編集。(go5_stock_meta ＝ id 単位 union / go5_stock_del ＝ 削除の墓標 /
  *     go5_draft_post_* ＝ per-id LWW)全端末でドラフトを共有する。(Chami依頼2026-07-31)
  *     ★動画本体(stock_v_)・サムネ/画像(stock_t_/stock_img_)は重いので①-Aでは同期しない。(②で運び方を決める)
+ *   ・「カレンダー予定」(sch_state_v1)を日付/枠/アカウント単位で統合し、公開済みの逆戻りを防いで同期。
  *   ・IndexedDB の候補素材。(ref:/bsky:/post: ＝ 参照画像・コメント・メモ)画像は R2 に content-hash で保存し、
  *     状態には {__img:<hash>} だけ入れる。(blobを小さく保つ)
  *   ・「鍵(アプリPW等)」は passphrase で AES-GCM 暗号化した1件(__sec)としてだけ同期。(平文はクラウドに出さない)
@@ -73,15 +74,45 @@
   }
 
   // ── 通信 ──
+  var API_RETRY_DELAYS = [0, 500, 1200];
   function api(path, opts) {
-    var c = cfg(); opts = opts || {};
-    opts.headers = Object.assign({ "X-Sync-Token": c.token }, opts.headers || {});
-    return root.fetch(c.url + path, opts);
+    var c = cfg(), src = opts || {};
+    var init = Object.assign({}, src, {
+      mode: "cors",
+      cache: "no-store",
+      headers: Object.assign({ "X-Sync-Token": c.token }, src.headers || {})
+    });
+    function attempt(n) {
+      return root.fetch(c.url + path, init).catch(function (cause) {
+        if (n + 1 < API_RETRY_DELAYS.length) {
+          return new Promise(function (resolve) { root.setTimeout(resolve, API_RETRY_DELAYS[n + 1]); }).then(function () { return attempt(n + 1); });
+        }
+        var e = new Error("同期Workerへ接続できません(3回試行)。公開URL・通信環境を確認してください");
+        e.cause = cause;
+        throw e;
+      });
+    }
+    return attempt(0);
   }
-  function pullState() { return api("/api/pull").then(function (r) { return r.json(); }); }
+  function apiErrorMessage(r, body) {
+    var code = body && body.error;
+    if (code === "bad_token") return "同期トークンが一致しません";
+    if (code === "rate_limited") return "同期の一日上限に達しました。時間を置いて再試行してください";
+    if (code === "kv_unset") return "同期Workerの保存先が未設定です";
+    if (code === "too_large") return "同期データが上限を超えています";
+    return "同期Workerでエラーが発生しました(" + ((r && r.status) || code || "unknown") + ")";
+  }
+  function readApiJson(r, allowConflict) {
+    return r.json().catch(function () { return null; }).then(function (body) {
+      if (allowConflict && body && body.conflict) return body;
+      if (!r.ok || !body || body.ok === false) throw new Error(apiErrorMessage(r, body));
+      return body;
+    });
+  }
+  function pullState() { return api("/api/pull").then(function (r) { return readApiJson(r, false); }); }
   function pushState(map, baseVersion) {
     var body = { blob: JSON.stringify(map), updatedAt: new Date().toISOString(), device: deviceName(), baseVersion: baseVersion || 0 };
-    return api("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); });
+    return api("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return readApiJson(r, true); });
   }
 
   // ── 画像(R2)：dataURL⇄content-hash ──
@@ -222,6 +253,107 @@
     } catch (e) { return null; }
   }
   function unionCand(olderStr, newerStr) { return unionByField(olderStr, newerStr, "cid"); }
+
+  // カレンダー予定は1キーに全日・全枠を持つ。whole-key LWWでは、スマホの公開済みと
+  // PCの古い予約状態が互いを丸ごと消すため、日付/枠/アカウント単位で統合する。
+  function isScheduleStateKey(k) { return String(k) === "sch_state_v1"; }
+  var SCHEDULE_STATUS_RANK = { "未着手": 0, "制作済・未予約": 1, "予約登録済": 2, "公開済": 3, "取り下げ": 4 };
+  var SCHEDULE_EXEC_FIELDS = ["status", "video_id", "url", "post_uri", "post_url", "short_url", "posted_at", "exec_updated_at"];
+  function recordTime_(rec) {
+    var n = Date.parse(rec && rec.updated_at || "");
+    return isNaN(n) ? 0 : n;
+  }
+  // 予定専用: newer にプロパティがあれば null/空文字も「明示的に消した値」として採用する。
+  function mergeScheduleRecord_(older, newer) {
+    var out = {};
+    older = (older && typeof older === "object" && !Array.isArray(older)) ? older : {};
+    newer = (newer && typeof newer === "object" && !Array.isArray(newer)) ? newer : {};
+    Object.keys(older).forEach(function (x) { out[x] = older[x]; });
+    Object.keys(newer).forEach(function (x) { out[x] = newer[x]; });
+    return out;
+  }
+  function orderedRecords_(a, b) {
+    var ta = recordTime_(a), tb = recordTime_(b);
+    return ta > tb ? [b || {}, a || {}] : [a || {}, b || {}];
+  }
+  function mergeScheduleExec_(older, newer) {
+    older = (older && typeof older === "object") ? older : {};
+    newer = (newer && typeof newer === "object") ? newer : {};
+    var ro = Object.prototype.hasOwnProperty.call(SCHEDULE_STATUS_RANK, older.status) ? SCHEDULE_STATUS_RANK[older.status] : -1;
+    var to = Date.parse(older.exec_updated_at || ""), tn = Date.parse(newer.exec_updated_at || "");
+    to = isNaN(to) ? 0 : to; tn = isNaN(tn) ? 0 : tn;
+    // 新実装の明示操作(取消・取り下げを含む)は、状態の順位より更新時刻を優先する。
+    if (to !== tn && (to || tn)) {
+      return to > tn ? mergeScheduleRecord_(newer, older) : mergeScheduleRecord_(older, newer);
+    }
+    var rn = Object.prototype.hasOwnProperty.call(SCHEDULE_STATUS_RANK, newer.status) ? SCHEDULE_STATUS_RANK[newer.status] : -1;
+    // 公開済み等の進んだ状態を、別端末の古い予約状態へ戻さない。
+    // 取り下げは明示的な終端状態なので公開済みより優先する。
+    if (ro > rn) return mergeScheduleRecord_(newer, older);
+    return mergeScheduleRecord_(older, newer);
+  }
+  function scheduleExecMap_(slot) {
+    if (slot && slot.exec && typeof slot.exec === "object") return slot.exec;
+    var acc1 = {};
+    SCHEDULE_EXEC_FIELDS.forEach(function (f) {
+      if (slot && slot[f] !== undefined) acc1[f] = slot[f];
+    });
+    if (!acc1.status) acc1.status = "未着手";
+    return { acc1: acc1, acc2: { status: "未着手" } };
+  }
+  function mergeScheduleSlot_(a, b) {
+    var ord = orderedRecords_(a, b), older = ord[0], newer = ord[1];
+    var out = mergeScheduleRecord_(older, newer);
+    var oe = scheduleExecMap_(older), ne = scheduleExecMap_(newer);
+    out.exec = {};
+    SCHEDULE_EXEC_FIELDS.forEach(function (f) { delete out[f]; });
+    ["acc1", "acc2"].forEach(function (acc) { out.exec[acc] = mergeScheduleExec_(oe[acc], ne[acc]); });
+    Object.keys(oe).concat(Object.keys(ne)).forEach(function (acc) {
+      if (acc === "acc1" || acc === "acc2" || out.exec[acc]) return;
+      out.exec[acc] = mergeScheduleExec_(oe[acc], ne[acc]);
+    });
+    return out;
+  }
+  function validScheduleState_(v) {
+    return v && typeof v === "object" && !Array.isArray(v)
+      && (!v.overrides || (typeof v.overrides === "object" && !Array.isArray(v.overrides)))
+      && (!v.slotData || (typeof v.slotData === "object" && !Array.isArray(v.slotData)));
+  }
+  function parseScheduleState_(str) {
+    if (typeof str !== "string") return null;
+    try {
+      var parsed = JSON.parse(str);
+      return validScheduleState_(parsed) ? parsed : null;
+    } catch (e) { return null; }
+  }
+  function normalizedScheduleState_(v) {
+    return { overrides: v.overrides || {}, slotData: v.slotData || {} };
+  }
+  function mergeScheduleState(olderStr, newerStr) {
+      var a = parseScheduleState_(olderStr), b = parseScheduleState_(newerStr);
+      if (!a && !b) return null;
+      if (!a) return JSON.stringify(normalizedScheduleState_(b));
+      if (!b) return JSON.stringify(normalizedScheduleState_(a));
+      var out = { overrides: {}, slotData: {} };
+      var ao = a.overrides || {}, bo = b.overrides || {};
+      Object.keys(ao).concat(Object.keys(bo)).forEach(function (date) {
+        if (Object.prototype.hasOwnProperty.call(out.overrides, date)) return;
+        if (ao[date] === undefined) out.overrides[date] = bo[date];
+        else if (bo[date] === undefined) out.overrides[date] = ao[date];
+        else {
+          var ord = orderedRecords_(ao[date], bo[date]);
+          out.overrides[date] = mergeScheduleRecord_(ord[0], ord[1]);
+        }
+      });
+      var as = a.slotData || {}, bs = b.slotData || {};
+      Object.keys(as).concat(Object.keys(bs)).forEach(function (id) {
+        if (Object.prototype.hasOwnProperty.call(out.slotData, id)) return;
+        if (as[id] === undefined) out.slotData[id] = bs[id];
+        else if (bs[id] === undefined) out.slotData[id] = as[id];
+        else out.slotData[id] = mergeScheduleSlot_(as[id], bs[id]);
+      });
+      return JSON.stringify(out);
+  }
 
   // 削除の墓標(トゥームストーン)：{ cid: 削除ts } を1キーに持つ。端末をまたぐと LWW では
   //   別端末の削除を丸ごと失う(＝復活)ので、cid 単位で union し ts の大きい方を採る。
@@ -365,7 +497,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isScheduleStateKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -380,6 +512,21 @@
             if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
           }
         });
+        // カレンダーは日付・枠・アカウント単位で統合。スマホの公開済みをPCの古い予定で戻さない。
+        Object.keys(mls).forEach(function (k) {
+          if (!isScheduleStateKey(k)) return;
+          var a = lmapLs[k], b = rls[k];
+          // tombstone は通常のLWWに任せる。値は片側だけでも検証し、破損JSONをクラウドへ送らない。
+          if ((a && a.d) || (b && b.d)) return;
+          if (!a && !b) return;
+          var localNewer = a && b ? (a.t || 0) >= (b.t || 0) : !!a;
+          var olderValue = a && b ? (localNewer ? b.v : a.v) : null;
+          var newerValue = a && b ? (localNewer ? a.v : b.v) : (a ? a.v : b.v);
+          var mergedSchedule = mergeScheduleState(olderValue, newerValue);
+          if (mergedSchedule != null) mls[k] = { t: Math.max(a && a.t || 0, b && b.t || 0), v: mergedSchedule };
+          else delete mls[k];
+        });
+
         // 墓標(cand_del / go5_stock_del)は両側にあれば id 単位で union。(片側の削除を失わない)
         Object.keys(mls).forEach(function (k) {
           if (!isCandDelKey(k) && !isStockDelKey(k)) return;
@@ -421,6 +568,10 @@
               var dmerged = (mls[dk] && !mls[dk].d) ? mls[dk].v : LS.getItem(dk);
               finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(dmerged || "{}", LS.getItem(dk) || "{}")), idf2, "addedAt");
             }
+          } else if (isScheduleStateKey(k)) {
+            // 同期中にカレンダーが編集されても、開始時点の値で上書きせずライブ値を再統合する。
+            var sm = mergeScheduleState(e.v, live);
+            if (sm != null) finalV = sm;
           } else if (isCandDelKey(k) || isStockDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
@@ -553,7 +704,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 

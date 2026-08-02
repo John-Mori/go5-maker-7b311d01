@@ -118,5 +118,75 @@ ok("stock:imgs は同期IDBキー", S.isSyncIdbKey("stock:imgs:stk123"));
 ok("既存の同期IDBキーは維持", S.isSyncIdbKey("ref:abc") && S.isSyncIdbKey("bsky:1") && S.isSyncIdbKey("post:9"));
 ok("動画/サムネの生blobキーは同期しない", !S.isSyncIdbKey("stock_v_stk1") && !S.isSyncIdbKey("stock_t_stk1") && !S.isSyncIdbKey("stock_img_stk1"));
 
+
+// ── カレンダー予定(sch_state_v1)＝日付/枠/アカウント単位の安全な同期 ──
+ok("schedule key 判定", S.isScheduleStateKey("sch_state_v1") && !S.isScheduleStateKey("yt_scheduled__acc1"));
+var schA = {
+  overrides: { "2026-08-03": { date: "2026-08-03", note: "A", updated_at: "2026-08-03T01:00:00Z" } },
+  slotData: {
+    a: { id: "a", title: "作品A", updated_at: "2026-08-03T01:00:00Z", exec: { acc1: { status: "予約登録済" }, acc2: { status: "未着手" } } },
+    same: { id: "same", title: "旧題", updated_at: "2026-08-03T01:00:00Z", exec: { acc1: { status: "公開済", post_url: "https://example.com/post", posted_at: "2026-08-03T01:00:00Z" }, acc2: { status: "未着手" } } }
+  }
+};
+var schB = {
+  overrides: { "2026-08-04": { date: "2026-08-04", note: "B", updated_at: "2026-08-04T01:00:00Z" } },
+  slotData: {
+    b: { id: "b", title: "作品B", updated_at: "2026-08-04T01:00:00Z", exec: { acc1: { status: "未着手" }, acc2: { status: "予約登録済" } } },
+    same: { id: "same", title: "新題", updated_at: "2026-08-04T01:00:00Z", exec: { acc1: { status: "予約登録済" }, acc2: { status: "公開済", post_url: "https://example.com/post2" } } }
+  }
+};
+var schMerged = JSON.parse(S.mergeScheduleState(JSON.stringify(schA), JSON.stringify(schB)));
+ok("schedule 別端末の枠を両方保持", schMerged.slotData.a && schMerged.slotData.b);
+ok("schedule 同じ枠の新しいプランを採用", schMerged.slotData.same.title === "新題");
+ok("schedule 公開済を古い予約へ戻さない", schMerged.slotData.same.exec.acc1.status === "公開済");
+ok("schedule 公開URL/投稿日時を保持", schMerged.slotData.same.exec.acc1.post_url === "https://example.com/post" && schMerged.slotData.same.exec.acc1.posted_at === "2026-08-03T01:00:00Z");
+ok("schedule 2アカウントの公開状態を独立保持", schMerged.slotData.same.exec.acc2.status === "公開済" && schMerged.slotData.same.exec.acc2.post_url === "https://example.com/post2");
+ok("schedule 日付overrideをunion", schMerged.overrides["2026-08-03"] && schMerged.overrides["2026-08-04"]);
+
+var ovOld = { overrides: { "2026-08-05": { date: "2026-08-05", note: "old", force_day_off: true, updated_at: "2026-08-05T01:00:00Z" } }, slotData: {} };
+var ovNew = { overrides: { "2026-08-05": { date: "2026-08-05", note: "new", updated_at: "2026-08-05T02:00:00Z" } }, slotData: {} };
+var ovMerged = JSON.parse(S.mergeScheduleState(JSON.stringify(ovOld), JSON.stringify(ovNew)));
+ok("schedule override はupdated_atが新しい側＋欠落補完", ovMerged.overrides["2026-08-05"].note === "new" && ovMerged.overrides["2026-08-05"].force_day_off === true);
+
+var legacy = { overrides: {}, slotData: { legacy: { id: "legacy", status: "公開済", post_url: "https://example.com/legacy", updated_at: "2026-08-05T01:00:00Z" } } };
+var modern = { overrides: {}, slotData: { legacy: { id: "legacy", updated_at: "2026-08-05T02:00:00Z", exec: { acc1: { status: "予約登録済" }, acc2: { status: "未着手" } } } } };
+var legacyMerged = JSON.parse(S.mergeScheduleState(JSON.stringify(legacy), JSON.stringify(modern)));
+ok("schedule 旧フラット形式もacc1へ移行して保持", legacyMerged.slotData.legacy.exec.acc1.status === "公開済" && legacyMerged.slotData.legacy.exec.acc1.post_url === "https://example.com/legacy");
+ok("schedule 旧フラット実行フィールドはbodyに残さない", !Object.prototype.hasOwnProperty.call(legacyMerged.slotData.legacy, "status") && !Object.prototype.hasOwnProperty.call(legacyMerged.slotData.legacy, "post_url"));
+var reservedState = { overrides: {}, slotData: { c: { id: "c", exec: { acc1: { status: "予約登録済", exec_updated_at: "2026-08-05T01:00:00Z" }, acc2: { status: "未着手" } } } } };
+var cancelledState = { overrides: {}, slotData: { c: { id: "c", exec: { acc1: { status: "制作済・未予約", exec_updated_at: "2026-08-05T02:00:00Z" }, acc2: { status: "未着手" } } } } };
+var cancelledMerged = JSON.parse(S.mergeScheduleState(JSON.stringify(reservedState), JSON.stringify(cancelledState)));
+ok("schedule 新しい明示取消は古い予約状態より優先", cancelledMerged.slotData.c.exec.acc1.status === "制作済・未予約");
+ok("schedule 実行状態の更新時刻を保持", cancelledMerged.slotData.c.exec.acc1.exec_updated_at === "2026-08-05T02:00:00Z");
+
+var clearOld = {
+  overrides: { "2026-08-06": { date: "2026-08-06", force_day_off: true, note: "旧メモ", updated_at: "2026-08-06T01:00:00Z" } },
+  slotData: {
+    clear: { id: "clear", title: "旧題", notes: "旧メモ", updated_at: "2026-08-06T01:00:00Z",
+      exec: { acc1: { status: "公開済", post_url: "https://example.com/old", exec_updated_at: "2026-08-06T01:00:00Z" }, acc2: { status: "未着手" } } }
+  }
+};
+var clearNew = {
+  overrides: { "2026-08-06": { date: "2026-08-06", force_day_off: null, note: "", updated_at: "2026-08-06T02:00:00Z" } },
+  slotData: {
+    clear: { id: "clear", title: "", notes: "", updated_at: "2026-08-06T02:00:00Z",
+      exec: { acc1: { status: "公開済", post_url: "", exec_updated_at: "2026-08-06T02:00:00Z" }, acc2: { status: "未着手" } } }
+  }
+};
+var clearMerged = JSON.parse(S.mergeScheduleState(JSON.stringify(clearOld), JSON.stringify(clearNew)));
+ok("schedule override の明示null/空文字を旧値で復活させない",
+   clearMerged.overrides["2026-08-06"].force_day_off === null && clearMerged.overrides["2026-08-06"].note === "");
+ok("schedule 題名/メモの明示クリアを旧値で復活させない",
+   clearMerged.slotData.clear.title === "" && clearMerged.slotData.clear.notes === "");
+ok("schedule 実行URLの明示クリアを旧値で復活させない",
+   clearMerged.slotData.clear.exec.acc1.post_url === "");
+
+var validRemote = JSON.stringify(schB);
+eq("schedule 破損local＋正常remoteは正常remoteを採用",
+   JSON.parse(S.mergeScheduleState("garbage", validRemote)), schB);
+eq("schedule 正常local＋破損remoteは正常localを採用",
+   JSON.parse(S.mergeScheduleState(JSON.stringify(schA), "garbage")), schA);
+ok("schedule 両側破損だけは拒否", S.mergeScheduleState("garbage", "[1,2,3]") === null);
+
 console.log((fail === 0 ? "✅ ALL PASS" : "❌ FAIL") + "  (" + pass + " passed, " + fail + " failed)");
 process.exit(fail === 0 ? 0 : 1);

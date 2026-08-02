@@ -23,13 +23,13 @@ const SHOULD_SYNC = [
   'yt_desc__acc1', 'yt_desc_quick__acc2', 'yt_desc_undostack__acc1', 'yt_tags__acc1',
   'affi_urls__acc1', 'affi_urls_quick__acc2', 'affi_urls_undostack__acc1',
   'bsky_gas_url', 'fanza_af_id', 'fanza_worker_url', 'ytdesc_tpl_v3',
+  'sch_state_v1',
 ];
 
-// ── 記録/履歴/キャッシュ/下書き/DID/移行フラグ/スケジュール/スナップ/UI状態＝同期しない（sync:false）
+// ── 記録/履歴/キャッシュ/下書き/DID/移行フラグ/スナップ/UI状態＝同期しない（sync:false）
 //    改善書 §2-4 が「漏れて同期対象になっていた」と問題視したキー群を含む。
 const SHOULD_NOT_SYNC = [
   'movie_drafts__acc1',          // 下書き（画像dataURL入り）
-  'sch_state_v1',                // スケジュール状態
   'view_snaps',                  // 再生数スナップショット
   'yt_scheduled__acc1',          // YT予約
   'current_account',             // 端末UI状態

@@ -162,7 +162,8 @@ window.SCH = window.SCH || {};
 
   // ---- チャンネル分離ヘルパ ----
   // 実行層フィールド（チャンネル別に保持する項目）
-  const EXEC_FIELDS = ["status", "video_id", "url", "post_uri", "post_url", "short_url", "posted_at"];
+  const EXEC_VALUE_FIELDS = ["status", "video_id", "url", "post_uri", "post_url", "short_url", "posted_at"];
+  const EXEC_FIELDS = EXEC_VALUE_FIELDS.concat(["exec_updated_at"]);
 
   // slot の exec.{acc} を取得（なければ空オブジェクト）
   function getExec(slot, acc) {
@@ -172,7 +173,14 @@ window.SCH = window.SCH || {};
   // slot の exec.{acc} を更新（他チャンネルは不変）
   function setExec(slot, acc, patch) {
     if (!slot.exec) slot.exec = {};
-    slot.exec[acc] = Object.assign({}, slot.exec[acc] || {}, patch);
+    const before = slot.exec[acc] || {};
+    const next = Object.assign({}, before, patch || {});
+    const changed = Object.keys(patch || {}).some((k) =>
+      k !== "exec_updated_at" && JSON.stringify(before[k]) !== JSON.stringify(next[k])
+    );
+    if (changed) next.exec_updated_at = new Date().toISOString();
+    slot.exec[acc] = next;
+    return changed;
   }
 
   // 旧形式スロット（exec なし）を新形式へ変換（冪等）。
@@ -290,10 +298,16 @@ window.SCH = window.SCH || {};
           // 実行フィールドを指定チャンネルの exec へ反映
           const targetAcc = acc || 'acc1';
           if (!stored.exec[targetAcc]) stored.exec[targetAcc] = {};
-          for (const f of EXEC_FIELDS) {
-            if (slot[f] !== undefined) stored.exec[targetAcc][f] = slot[f];
+          let execChanged = false;
+          for (const f of EXEC_VALUE_FIELDS) {
+            if (slot[f] !== undefined && JSON.stringify(stored.exec[targetAcc][f]) !== JSON.stringify(slot[f])) {
+              stored.exec[targetAcc][f] = slot[f];
+              execChanged = true;
+            }
           }
           if (!stored.exec[targetAcc].status) stored.exec[targetAcc].status = "未着手";
+          // 題名/メモ等のプラン編集だけでは実行状態の更新時刻を進めない。
+          if (execChanged) stored.exec[targetAcc].exec_updated_at = new Date().toISOString();
         }
         // body に実行フィールドを残さない（exec を唯一の正とする＝他chへ漏れない）。
         for (const f of EXEC_FIELDS) delete stored[f];
@@ -316,27 +330,22 @@ window.SCH = window.SCH || {};
       },
 
       // 自動公開などで一括変化した slots を保存（generateRange 返り値のフラットスロット群）
-      // 自動公開はチャンネル共通のため両 exec の status を更新する
-      async saveSlots(slotMap) {
+      // 自動公開判定を行ったチャンネルの exec だけを更新する。
+      // acc1/acc2 は投稿時刻が異なるため、片方の判定で両方を公開済みにしない。
+      async saveSlots(slotMap, acc) {
+        const targetAcc = acc === "acc2" ? "acc2" : "acc1";
         for (const id of Object.keys(slotMap)) {
           const s = slotMap[id];
           const existing = state.slotData[id];
           // 自動公開チェック：status が "予約登録済" → "公開済" に変わった場合のみ保存
           const statusChanged = existing &&
             existing.exec &&
-            s.status === "公開済" &&
-            (
-              (existing.exec.acc1 && existing.exec.acc1.status === "予約登録済") ||
-              (existing.exec.acc2 && existing.exec.acc2.status === "予約登録済")
-            );
+            existing.exec[targetAcc] &&
+            existing.exec[targetAcc].status === "予約登録済" &&
+            s.status === "公開済";
           if (statusChanged) {
-            // 自動公開：予約登録済の exec を公開済へ
-            if (existing.exec.acc1 && existing.exec.acc1.status === "予約登録済") {
-              existing.exec.acc1.status = "公開済";
-            }
-            if (existing.exec.acc2 && existing.exec.acc2.status === "予約登録済") {
-              existing.exec.acc2.status = "公開済";
-            }
+            existing.exec[targetAcc].status = "公開済";
+            existing.exec[targetAcc].exec_updated_at = new Date().toISOString();
             existing.updated_at = new Date().toISOString();
             state.slotData[id] = existing;
           }

@@ -60,29 +60,38 @@
     if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'recompute' }, '*');
   });
 
+  // クラウド同期でlocalStorageの予定が更新されたら、iframe内のメモリ状態も読み直す。
+  document.addEventListener('go5-synced', function () {
+    var f = $('calFrame');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'sync-refresh' }, '*');
+  });
+
   // 予約作成(枠から)→ カレンダー枠を「予約登録済」に書き戻し(双方向連携)
   document.addEventListener('bluesky-reserved', function (e) {
     var d = (e && e.detail) || {}; if (!d.slotId) return;
     var f = $('calFrame');
-    if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'slot-writeback', id: d.slotId, status: '予約登録済' }, '*');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'slot-writeback', id: d.slotId, account: d.account || '', status: '予約登録済' }, '*');
   });
   // 予約取消 → カレンダー枠を「制作済・未予約」へ戻す
   document.addEventListener('bluesky-reservation-cancelled', function (e) {
     var d = (e && e.detail) || {}; if (!d.slotId) return;
     var f = $('calFrame');
-    if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'slot-writeback', id: d.slotId, status: '制作済・未予約' }, '*');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'slot-writeback', id: d.slotId, account: d.account || '', status: '制作済・未予約' }, '*');
   });
 
   // 投稿成功(即時/単独/予約)→ iframe のスロットへ書き戻し
   document.addEventListener('bluesky-posted', function (e) {
     var d = (e && e.detail) || {};
-    var slotId = d.slotId || (activeSlot && activeSlot.id);  // 予約はdetail.slotId、手動はactiveSlot
+    // 予約投稿は slotId:null を明示する場合がある。その時は別の activeSlot へ誤記録しない。
+    var hasSlotId = Object.prototype.hasOwnProperty.call(d, 'slotId');
+    var slotId = hasSlotId ? d.slotId : (activeSlot && activeSlot.id);
     if (!slotId) return;
     var f = $('calFrame');
     if (f && f.contentWindow) {
       f.contentWindow.postMessage({
         target: 'sch-calendar', type: 'slot-writeback',
         id: slotId, status: '公開済',
+        account: d.account || '',
         post_uri: d.post_uri || '', post_url: d.post_url || '',
         short_url: d.short_url || '', url: d.affiliate || d.post_url || '',
         posted_at: d.posted_at || ''

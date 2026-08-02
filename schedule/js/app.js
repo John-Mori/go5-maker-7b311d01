@@ -110,7 +110,7 @@ window.SCH = window.SCH || {};
     const r2 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc2"));
     const result = acc === "acc2" ? r2 : r1;   // 保存は現行タブの結果のみ(既存の永続化挙動を保つ)
     lastRender = { slots: result.slots, dayMetas: r1.dayMetas, review: result.review, slots1: r1.slots, slots2: r2.slots };
-    await store.saveSlots(result.slots);       // 自動公開・要確認などの変化を永続化
+    await store.saveSlots(result.slots, acc);  // 自動公開は判定したチャンネルだけを更新
     render(lastRender);
   }
 
@@ -373,21 +373,29 @@ window.SCH = window.SCH || {};
     // 親がカレンダータブを表示した合図。iframeは再ロードされないので、開くたびに今日へ寄せる。
     if (d.type === "show") { requestAnimationFrame(function () { scrollToToday(false); }); return; }
     if (d.type === "recompute") { recomputeAndRender(); return; }
+    if (d.type === "sync-refresh") {
+      store.init()
+        .then(recomputeAndRender)
+        .catch(function (e) { console.warn("[schedule] 同期後の再読込に失敗", e); });
+      return;
+    }
     if (d.type !== "slot-writeback") return;
-    const s = lastRender && lastRender.slots && lastRender.slots[d.id];
-    if (!s) return;
-    const acc = curAcc();
-    // フラットスロット（s）は表示用コピーなので更新してから store へ渡す
-    if (d.status) s.status = d.status;
-    if (d.url) s.url = d.url;
-    if (d.video_id) s.video_id = d.video_id;
-    if (d.post_uri) s.post_uri = d.post_uri;
-    if (d.post_url) s.post_url = d.post_url;
-    if (d.short_url) s.short_url = d.short_url;
-    if (d.posted_at) s.posted_at = d.posted_at;
-    s.needs_review = false;
-    // acc を指定して現チャンネルの実行層にのみ書き込む
-    store.upsertSlot(s, acc).then(recomputeAndRender);
+    const acc = (d.account === "acc1" || d.account === "acc2") ? d.account : curAcc();
+    // メッセージに明示された実行値だけを書き戻す。他chの表示用コピーを混ぜない。
+    const patch = {};
+    ["status", "url", "video_id", "post_uri", "post_url", "short_url", "posted_at"].forEach(function (key) {
+      if (Object.prototype.hasOwnProperty.call(d, key)) patch[key] = d[key];
+    });
+    const stored = store.getSlotData()[d.id];
+    if (stored) {
+      store.upsertExec(d.id, acc, patch).then(recomputeAndRender);
+    } else {
+      const sourceMap = lastRender && (acc === "acc2" ? lastRender.slots2 : lastRender.slots1);
+      const source = sourceMap && sourceMap[d.id];
+      if (!source) return;
+      // 未保存の自動生成枠だけ、対象ch自身の表示値を種にして新規保存する。
+      store.upsertSlot(Object.assign({}, source, patch, { needs_review: false }), acc).then(recomputeAndRender);
+    }
   }
 
   // 検証セクション（verify_flag枠 or 検証モード時に表示）
