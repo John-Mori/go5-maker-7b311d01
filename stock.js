@@ -588,6 +588,22 @@
     return (meta && meta.bskyText) || '';
   }
 
+  // ④ YouTube説明欄コピー時：タグが¥価格のときだけ、テンプレ中の「¥N」を作品の実価格へ置換して返す(Chami依頼2026-08-02④)。
+  //   ・価格は Go5WorkInfo(取得済みキャッシュ)→ fanza_title_cache(スナップ) の順に手元の値だけで解決(ネット不使用)。
+  //   ・タグが%／価格が取れないときは素通し(¥N のまま=誤った価格を貼らない)。「¥N」「¥ N」両表記を拾う。
+  function resolveYtDescYen_(text, meta) {
+    var s = String(text || '');
+    var type = 'discount';
+    try { type = (localStorage.getItem('promo_label_type') === 'price') ? 'price' : 'discount'; } catch (e) {}
+    if (type !== 'price') return s;
+    var url = (meta && (meta.workUrl || meta.affiliateUrl)) || '';
+    var price = null;
+    try { var info = window.Go5WorkInfo ? window.Go5WorkInfo(url) : null; if (info && info.price != null) price = info.price; } catch (e) {}
+    if (price == null) { try { var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[url]; if (fc && fc.priceInfo && fc.priceInfo.price != null) price = fc.priceInfo.price; } catch (e) {} }
+    if (price == null || isNaN(price)) return s;
+    return s.replace(/([¥￥])\s*N/g, '$1' + Number(price).toLocaleString('ja-JP')); // ¥N / ￥N / ¥ N → ¥<価格>
+  }
+
   function openPostModal_(meta) {
     _modalMeta = meta;
     _ytTitleDirty = false;
@@ -596,14 +612,17 @@
     var saved = {};
     try { saved = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}'); } catch (e) {}
     var composedXText;
-    if (saved.xText !== undefined) {
+    if (saved.xText) {
       // この投稿を投稿モードで手編集した履歴があるときだけ、その編集を優先(データ喪失を防ぐ)。
+      //   ★空文字('')は「未編集」とみなして再合成する。過去に空で保存されると saved.xText!==undefined が真になり、
+      //     以後ずっと空欄のまま貼れなくなっていた(Chami報告2026-08-02②「X用投稿テキストは空欄」)。
       composedXText = saved.xText;
     } else if (window.__go5ComposeXTextForBskyText) {
       composedXText = window.__go5ComposeXTextForBskyText(masterBody_(meta), meta.affiliateUrl || '');
     } else {
       composedXText = masterBody_(meta);
     }
+    if (!composedXText) composedXText = masterBody_(meta); // 最後の砦：合成が空でも本文そのままは出す(空欄で貼れない事故の防止)
     $('draftXText').value = composedXText;
     var tags = saved.ytTags !== undefined ? saved.ytTags : null;
     if (tags === null) { try { tags = localStorage.getItem('yt_tags_shared') || ''; } catch (e) { tags = ''; } }
@@ -763,7 +782,8 @@
     $('draftCopyYtDesc').addEventListener('click', function () {
       // 短縮URLは概要欄テキストボックスの最上段に既に入っている(setDescUrlSlot_)ので、
       //   テキストボックスの中身をそのままコピーする(先頭URLを二重に足さない)。
-      copyText_(($('draftYtDescText') || {}).value || '', this);
+      //   ★タグが¥価格のときは「¥N」を実価格へ置換してコピー(④・テキストボックスの中身は¥Nのまま保つ)。
+      copyText_(resolveYtDescYen_(($('draftYtDescText') || {}).value || '', _modalMeta), this);
     });
     $('draftYtDescText').addEventListener('input', saveDraftPost_);
     $('draftPasteXPostUrl').addEventListener('click', function () {

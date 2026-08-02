@@ -528,7 +528,11 @@
   //   Chami依頼2026-08-02: %か円かは動画生成タブのタグ(promoType)から判定する。選択中の割引文があれば即差し替え。
   (function () {
     var sel = document.getElementById('promoType');
-    if (sel) sel.addEventListener('change', function () { if (curDiscVal() !== '') applyDiscount(curDiscVal()); });
+    // タグ切替時：セール情報があれば¥価格⇔割引%を出し分けて再適用(③)。無ければ従来どおり単位だけ差し替え。
+    if (sel) sel.addEventListener('change', function () {
+      if (typeof _lastSaleForDisc !== 'undefined' && _lastSaleForDisc) applyDiscount(discNumForMode_(_lastSaleForDisc));
+      else if (curDiscVal() !== '') applyDiscount(curDiscVal());
+    });
   })();
   // 投稿確認モーダル内：この投稿のテキスト(pcText)にだけ割引文を反映。(保存はしない)新作・総集編チェックも独立。
   function applyDiscountPc() {
@@ -2082,13 +2086,21 @@
   // ※同じ作品(cid)には1回だけ自動適用する。再描画・キャッシュヒットのたびに発火すると、
   //   ユーザーが手で選び直した割引％を毎回上書きしてしまうため。(v164のリグレッション対策)
   var _autoDiscDoneCid = '';
+  var _lastSaleForDisc = null; // 直近取得のセール情報 {cid,pct,price}。タグ(¥価格⇔◯%OFF)切替で割引文の数値を出し分けるため保持。
+  // 現在のタグ種別に応じて割引文へ入れる数値(文字列)を返す。セール無し/未取得は '' (＝割引文を消す)。
+  //   Chami依頼2026-08-02③: ¥価格モードのときはドロップダウンの割引%ではなく作品の実価格を自動で入れる。
+  function discNumForMode_(sale) {
+    if (!sale) return '';
+    return promoLabelType_() === 'price' ? String(sale.price) : String(sale.pct);
+  }
   function autoApplyDiscountFromInfo_(info) {
     if (!info || !info.title) return; // 取得失敗＝手動フォールバックのため触らない
     var cid = info.cid || info.title; // cid欠落時はタイトルで代用
+    var onSale = info.listPrice && info.price && info.discountPct > 0 && info.price < info.listPrice;
+    _lastSaleForDisc = onSale ? { cid: cid, pct: info.discountPct, price: info.price } : null;
     if (cid === _autoDiscDoneCid) return; // この作品には適用済み＝手動変更を尊重
     _autoDiscDoneCid = cid;
-    var onSale = info.listPrice && info.price && info.discountPct > 0 && info.price < info.listPrice;
-    applyDiscount(onSale ? String(info.discountPct) : '');
+    applyDiscount(discNumForMode_(_lastSaleForDisc));
   }
   function fetchMovieWorkInfo(url) {
     var el = els.movieWorkInfo;
@@ -2407,7 +2419,18 @@
   //   出て邪魔＆Drive保存と干渉するため)。添付画像は投稿成功時に Drive へ保存する。(drive-upload.js)
 
   if (els.shortUrlCopy) els.shortUrlCopy.addEventListener('click', function () { if (lastShortUrl) copyText(lastShortUrl, els.shortUrlCopy); });
-  if (els.ytCopy) els.ytCopy.addEventListener('click', function () { if (els.ytDesc) copyText(els.ytDesc.value, els.ytCopy); });
+  // YouTube説明欄コピー時：タグが¥価格のときだけ、テンプレ中の「¥N」を作品の実価格へ置換して返す(Chami依頼2026-08-02④)。
+  //   ・保存テンプレは ¥N のまま(次の作品でも効く)＝置換はコピーする文字列にだけ効かせる(前作の価格が焼き付くINC-70型を避ける)。
+  //   ・タグが%／価格が未取得のときは素通し(何も置換しない)。「¥N」「¥ N」の両表記を拾う。
+  function ytDescResolved_() {
+    var raw = (els.ytDesc ? els.ytDesc.value : '') || '';
+    if (promoLabelType_() !== 'price') return raw;
+    var info = fanzaInfoForWorkUrl_(captureWorkUrl_());
+    if (!info || info.price == null || isNaN(info.price)) return raw;
+    var n = Number(info.price).toLocaleString('ja-JP');
+    return raw.replace(/([¥￥])\s*N/g, '$1' + n); // ¥N / ￥N / ¥ N → ¥<価格>(元の円記号の字体は保つ)
+  }
+  if (els.ytCopy) els.ytCopy.addEventListener('click', function () { if (els.ytDesc) copyText(ytDescResolved_(), els.ytCopy); });
   if (els.ytInsert) els.ytInsert.addEventListener('click', function () { if (lastShortUrl) putUrlTop(lastShortUrl); });
 
   var lastTitle = '';
