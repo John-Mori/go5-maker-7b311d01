@@ -669,12 +669,12 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .rank-title{font-size:14px;font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .rank-title-link{color:var(--ink);text-decoration:none;}
 .rank-title-link:hover{text-decoration:underline;}
-/* ランキング（クリーム背景）：順位番号は「外枠だけ」＝四角い黒枠の箱で囲む（文字の輪郭はなぞらない）。
-   4位以降=白字／1〜3位=金/銀/銅。全順位を黒枠の箱で統一（Chami 2026-08-02）。 */
-#pageRank .rank-num{display:inline-block;color:#fff;border:2px solid #000;border-radius:5px;padding:0 5px;background:rgba(0,0,0,.72);text-align:center;-webkit-text-stroke:0;text-stroke:0;text-shadow:none;}
-#pageRank .rank-top1 .rank-num{color:#f0c02a;}   /* 金 */
-#pageRank .rank-top2 .rank-num{color:#c7ced6;}   /* 銀 */
-#pageRank .rank-top3 .rank-num{color:#d98844;}   /* 銅 */
+/* ランキング（クリーム背景）：順位番号は文字の輪郭を黒線でなぞる（従来どおりの縁取り）。
+   4位以降=白字＋黒フチ／1〜3位=金/銀/銅の字にも同じ黒フチを付ける（Chami 2026-08-02）。 */
+#pageRank .rank-num{color:#fff;-webkit-text-stroke:1.2px #000;text-stroke:1.2px #000;text-shadow:0 1px 2px rgba(0,0,0,.5);}
+#pageRank .rank-top1 .rank-num{color:#e8b31f;}   /* 金＋黒フチ */
+#pageRank .rank-top2 .rank-num{color:#9198a1;}   /* 銀＋黒フチ */
+#pageRank .rank-top3 .rank-num{color:#c1712f;}   /* 銅＋黒フチ */
 /* 動画の題名はアカウントのイメージカラー（クリーム背景で読める濃色）。 */
 #pageRank .rank-title{color:var(--ink);font-weight:800;}
 #pageRank .rank-title-acc1{color:#34478f;}   /* 月詠み＝藍 */
