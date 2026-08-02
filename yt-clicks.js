@@ -34,16 +34,12 @@
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   // 作品属性。(複数可)キャラ=実在キャラの二次創作 / JK / ギャル / 異世界。キャラ無し＝オリジナル。(非表示)
-  var ATTR_DEFS = [
-    { key: 'chara', label: 'キャラ' },
-    { key: 'jk', label: 'JK' },
-    { key: 'gyaru', label: 'ギャル' },
-    { key: 'isekai', label: '異世界' },
-    { key: 'harem', label: 'ハーレム' },
-    { key: 'ai', label: 'AI' },
-    { key: 'ol', label: 'OL' },
-    { key: 'soshu', label: '総集編' }
-  ];
+  // カテゴリの正本は core/categories.js(Go5Cats)。ここは list() から {key,label,color} を都度派生させる。
+  //   ★都度読み＝カテゴリを追加/並べ替え/色替えしても再描画で即反映される(Chami依頼2026-08-02)。
+  function attrDefs_() {
+    try { return window.Go5Cats.visible().map(function (c) { return { key: c.key, label: c.label, color: c.color }; }); }
+    catch (e) { return []; }
+  }
   // 題名表示のタグ省略(2026-07-13・Chami指定): タグ構成は今後も変わるため固定リスト方式を廃止し、
   //   「最初の#以降を丸ごと省略」に統一。#が一個も無い題名だけ「タグ忘れあり」を表示する。
   function stripCommonTags(t) {
@@ -1006,8 +1002,8 @@
         '</label>' +
         '<div class="vedit-attrs">' +
           '<div class="vedit-attrs-title">カテゴリ(複数選択可・キャラ無し＝オリジナル)</div>' +
-          ATTR_DEFS.map(function (a) {
-            return '<label class="vedit-attr"><input id="veditAttr_' + a.key + '" type="checkbox"><span class="vatt vatt-' + a.key + '">' + a.label + '</span></label>';
+          attrDefs_().map(function (a) {
+            return '<label class="vedit-attr"><input id="veditAttr_' + a.key + '" type="checkbox"><span class="vatt" style="color:' + esc(a.color) + ';border-color:' + esc(a.color) + ';">' + esc(a.label) + '</span></label>';
           }).join('') +
         '</div>' +
         '<label class="vedit-field">作品状態(投稿当時の状態・後から変更可)' +
@@ -1072,7 +1068,7 @@
       var cb = _saveCb;
       _saveCb = null;
       var attrs = {};
-      ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); attrs[a.key] = !!(el && el.checked); });
+      attrDefs_().forEach(function (a) { var el = $('veditAttr_' + a.key); attrs[a.key] = !!(el && el.checked); });
       var wsEl = $('veditWorkState');
       var platEl = $('veditPlatBsky');
       var _mres = resolveMerge_(); // 合算後の代表(最新)を投稿URL欄へ昇格・残りはクリック加算用に保持
@@ -1157,7 +1153,7 @@
     $('veditWork').value = workVal || '';
     if ($('veditWorkShort')) $('veditWorkShort').value = workShortVal || '';
     attrs = attrs || {};
-    ATTR_DEFS.forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
+    attrDefs_().forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
     if ($('veditWorkState')) $('veditWorkState').value = workState || '旧作';
     _pendingShare = ''; _pendingShort = ''; _pendingWorkShare = ''; _pendingWorkShort = ''; // 生成状態をリセット
     var gr = $('veditGenResult'); if (gr) { gr.hidden = true; gr.innerHTML = ''; }
@@ -1203,7 +1199,7 @@
 
   // アイテムへ属性フラグを反映。(true は立て、false は削除)
   function applyAttrs_(item, attrs) {
-    ATTR_DEFS.forEach(function (a) { if (attrs && attrs[a.key]) item[a.key] = true; else delete item[a.key]; });
+    attrDefs_().forEach(function (a) { if (attrs && attrs[a.key]) item[a.key] = true; else delete item[a.key]; });
   }
   // YT URLを紐付けた直後にGASへ即時スナップショットを要求。(fire-and-forget)
   //   視聴履歴はURL記載後からしか蓄積されないため、紐付け当日中にベースラインを作る=「今日/昨日」が翌日から出る。(④対策2026-07-12)
@@ -1332,7 +1328,7 @@
       work_short_url: edited.workShortUrl || '',
       work_short_clear: !!edited.workShortNone // ★意図的クリア=GAS側でセルを空に確定(putIfの空スキップを越える)
     };
-    ATTR_DEFS.forEach(function (a) { payload[a.key] = !!edited[a.key]; });
+    attrDefs_().forEach(function (a) { payload[a.key] = !!edited[a.key]; });
     payload.workState = edited.workState || '旧作';
     if (edited.platform === 'x' || edited.platform === 'bsky') payload.platform = edited.platform; // 投稿先(X/Bsky)列
 
@@ -1349,7 +1345,7 @@
       var patch = {};
       ['ytUrl', 'workUrl', 'workState', 'shortUrl', 'shareUrl', 'postUrl', 'postUri', 'workShortUrl', 'platform']
         .forEach(function (f) { patch[f] = edited[f] || ''; });
-      ATTR_DEFS.forEach(function (a) { patch[a.key] = !!edited[a.key]; });
+      attrDefs_().forEach(function (a) { patch[a.key] = !!edited[a.key]; });
       patch.workShortNone = !!edited.workShortNone; // ★意図的クリアの印はboolで保持=リロード跨ぎでも復活させない(#5系)
       patch.mergeUrls = Array.isArray(edited.mergeUrls) ? edited.mergeUrls : []; // 合算URL(導線1のみ・表示専用オーバレイ)
       (_pendingSheetEdits[curAcct] = _pendingSheetEdits[curAcct] || {})[String(edited.videoId)] = patch;
@@ -1481,7 +1477,7 @@
                                              //   これが無いと、導線2導入前の履歴で誤挿入された短縮URLを消して保存しても
                                              //   シート側セルが残り、行が_fromSheet化/📥復元した時に「復活」した(2026-08-01・REQ-811075a64f)。
     };
-    ATTR_DEFS.forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
+    attrDefs_().forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
     payload.workState = it.workState || '旧作'; // 作品状態列
     if (it.platform === 'x' || it.platform === 'bsky') payload.platform = it.platform; // 投稿先(X/Bsky)列
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
@@ -1603,7 +1599,7 @@
         : dispTitle;
       var bskyHref = it.shareUrl || it.shortUrl || it.postUrl || ''; // 表示リンクは共有(da.gd)優先。計測は下のcode(=r2)で行う
       // 属性バッジ(作品名の下に改行して表示。作品状態は価格行の左に別途表示)
-      var tagsHtml = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
+      var tagsHtml = attrDefs_().map(function (a) { return it[a.key] ? '<span class="vtag" style="color:' + esc(a.color) + ';border-color:' + esc(a.color) + ';font-weight:700;">' + esc(a.label) + '</span>' : ''; }).join('');
       // 作り直し系バッジ：rebuild=この動画自体がリビルド版 / remade=この投稿は被リビルド(=リビルド版に取って代わられた)
       if (it.rebuild) tagsHtml += '<span class="vtag vtag-rebuild">🔁リビルド版</span>';
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
@@ -1764,7 +1760,7 @@
           : (it.shareUrl || it.shortUrl || it.postUrl || ''); // 通常は短い計測URL(da.gd)を優先表示
         var workCur = it.workUrl || '';
         var workShortCur = it.workShareUrl || it.workShortUrl || ''; // 作品クリック計測URL(導線2)の現値
-        var attrCur = {}; ATTR_DEFS.forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
+        var attrCur = {}; attrDefs_().forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
         _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
         if (it._fromSheet) {
           openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
@@ -2040,7 +2036,7 @@
     else if (window.IdGen && window.IdGen.makeVideoId) entry.videoId = window.IdGen.makeVideoId(acc, new Date(), {});
     entry.workState = opts.workState || '旧作';
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
-    if (opts.attrs) ATTR_DEFS.forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
+    if (opts.attrs) attrDefs_().forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
     manual.push(entry);
     saveArrFor_('verify_manual', acc, manual);
     if (ytUrl) { ymap[id] = ytUrl; saveYtMapFor_(acc, ymap); }
@@ -2644,7 +2640,7 @@
         youtubeUrl: yt,
         postedAt: postedMs ? new Date(postedMs).toISOString() : ''
       };
-      ATTR_DEFS.forEach(function (a) { rec[a.key] = !!it[a.key]; }); // カテゴリ属性
+      attrDefs_().forEach(function (a) { rec[a.key] = !!it[a.key]; }); // カテゴリ属性
       rec.workState = it.workState || '旧作'; // 作品状態
       if (it.goal) rec.goal = it.goal;          // 狙い(成約/集客)
       if (it.cmtType) rec.cmtType = it.cmtType; // コメント型(①〜⑧)
@@ -3988,7 +3984,7 @@
     //   (Codex監査 真因1)。ローカル行の shortUrl が空でも、shortUrl を持つシート行の値を補完し、
     //   計測URLは clickUrls/workClickUrls に集合で保持=postClicks_ が重複なく合算する。
     //   rank-core.js 未読込時は従来の先勝ち排除へフォールバック(表示は無傷)。
-    var _attrKeys = ATTR_DEFS.map(function (a) { return a.key; });
+    var _attrKeys = attrDefs_().map(function (a) { return a.key; });
     var uniq = (window.Go5RankCore && window.Go5RankCore.mergeByVid)
       ? window.Go5RankCore.mergeByVid(combined, _attrKeys)
       : (function () { var seen = {}; return combined.filter(function (x) { if (seen[x.vid]) return false; seen[x.vid] = true; return true; }); })();
@@ -4064,7 +4060,7 @@
         var gtp = (isBucket && tpCache[x.vid]) ? tpCache[x.vid][_rankWin] : null; // GASサーバー時点記録(過去分・端末未起動でも記録。再生数と導線1のみ・12h/48h/導線2は非対応)
         var bkr = (isBucket && bucketDef) ? pickBucketRec_(snap, gtp, bucketDef.min) : null; // 目標分に近い側を1組で採用(78分ズレの根治)
         var pk = pk0[x.vid] || {};
-        var cats = ATTR_DEFS.map(function (a) { return it[a.key] ? '<span class="vtag vtag-' + a.key + '">' + a.label + '</span>' : ''; }).join('');
+        var cats = attrDefs_().map(function (a) { return it[a.key] ? '<span class="vtag" style="color:' + esc(a.color) + ';border-color:' + esc(a.color) + ';font-weight:700;">' + esc(a.label) + '</span>' : ''; }).join('');
         return {
           vid: x.vid, yt: x.yt, acct: x.acct,
           title: titleCache[x.vid] || it.title || (it.manual ? '(手動追加)' : '(無題)'),

@@ -181,10 +181,11 @@
 
   // 動画作成タブのカテゴリ(ジャンル)チェックを読む。投稿完了時に投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
   //   これが無いと下書き→投稿完了で履歴にジャンルのチェックが渡らず、毎回手で入れ直しになる。
-  var MOVIE_ATTR_IDS = { chara: 'movieAttrChara', jk: 'movieAttrJk', gyaru: 'movieAttrGyaru', isekai: 'movieAttrIsekai', harem: 'movieAttrHarem', ai: 'movieAttrAi', ol: 'movieAttrOl', soshu: 'movieAttrSoshu' };
+  // カテゴリの正本は core/categories.js(Go5Cats)。チェックボックスの要素IDは Go5Cats.elId(key)。
   function readMovieAttrs_() {
     var o = {};
-    Object.keys(MOVIE_ATTR_IDS).forEach(function (kk) { var el = $(MOVIE_ATTR_IDS[kk]); if (el && el.checked) o[kk] = true; });
+    var cats = (window.Go5Cats && window.Go5Cats.visible()) || [];
+    cats.forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el && el.checked) o[c.key] = true; });
     return o;
   }
 

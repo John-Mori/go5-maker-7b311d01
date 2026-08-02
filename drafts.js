@@ -11,10 +11,11 @@
   'use strict';
   function $(id) { return document.getElementById(id); }
 
-  var ATTR_KEYS = [
-    ['chara', 'movieAttrChara', 'キャラ'], ['jk', 'movieAttrJk', 'JK'], ['gyaru', 'movieAttrGyaru', 'ギャル'],
-    ['isekai', 'movieAttrIsekai', '異世界'], ['ai', 'movieAttrAi', 'AI'], ['ol', 'movieAttrOl', 'OL'], ['soshu', 'movieAttrSoshu', '総集編']
-  ];
+  // カテゴリの正本は core/categories.js(Go5Cats)。ここは [key, elId] を list()/elId() から派生させる(ハードコードしない)。
+  function attrKeys_() {
+    var cats = (window.Go5Cats && window.Go5Cats.visible()) || [];
+    return cats.map(function (c) { return [c.key, window.Go5Cats.elId(c.key)]; });
+  }
   var MAX_DRAFTS = 20;
 
   function acctId() { try { return (typeof window.getCurrentAccount === 'function') ? window.getCurrentAccount() : 'acc1'; } catch (e) { return 'acc1'; } }
@@ -63,7 +64,7 @@
   // ── 下書き保存 ──
   function currentAttrs_() {
     var o = {};
-    ATTR_KEYS.forEach(function (a) { var el = $(a[1]); o[a[0]] = !!(el && el.checked); });
+    attrKeys_().forEach(function (a) { var el = $(a[1]); o[a[0]] = !!(el && el.checked); });
     return o;
   }
   function makeLabel_(top, author) {
@@ -153,7 +154,7 @@
     if (top) { top.value = draft.top || ''; top.dispatchEvent(new Event('change', { bubbles: true })); }
     if (workUrl) { workUrl.value = draft.workUrl || ''; workUrl.dispatchEvent(new Event('input', { bubbles: true })); }
     if (rebuild) rebuild.checked = !!draft.rebuild;
-    ATTR_KEYS.forEach(function (a) { var el = $(a[1]); if (el) el.checked = !!(draft.attrs && draft.attrs[a[0]]); });
+    attrKeys_().forEach(function (a) { var el = $(a[1]); if (el) el.checked = !!(draft.attrs && draft.attrs[a[0]]); });
 
     function done() { showRecallToast_('✅ 下書き「' + draft.label + '」を呼び出しました'); }
     if (draft.photo) {

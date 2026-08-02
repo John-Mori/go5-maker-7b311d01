@@ -50,8 +50,9 @@
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
-  // 動画作成タブの「カテゴリ」チェック状態を読む。(キャラ/JK/ギャル/異世界・複数可・キャラ無し＝オリジナル)
-  var MOVIE_ATTRS = [['chara', 'movieAttrChara'], ['jk', 'movieAttrJk'], ['gyaru', 'movieAttrGyaru'], ['isekai', 'movieAttrIsekai'], ['harem', 'movieAttrHarem'], ['ai', 'movieAttrAi'], ['ol', 'movieAttrOl'], ['soshu', 'movieAttrSoshu']];
+  // 動画作成タブの「カテゴリ」チェック状態を読む。(複数可・キャラ無し＝オリジナル)
+  //   カテゴリの正本は core/categories.js(Go5Cats)。ここは list()/elId() から派生させる(ハードコードしない)。
+  function movieCatList_() { try { return (window.Go5Cats && window.Go5Cats.visible()) || []; } catch (e) { return []; } }
   // 動画作成タブの「リビルド(作り直し)」チェック状態。ONなら「同じ作品を作り直した動画」として記録。
   function readRebuild() { var el = $('movieRebuild'); return !!(el && el.checked); }
   // リビルド対象として選んだ投稿履歴のvideoId。(未選択なら空)投稿履歴のGo5History.markRebuiltで「被リビルド」に自動反映する。
@@ -116,43 +117,31 @@
   } }; } catch (e) {}
   function readMovieAttrs() {
     var o = {};
-    MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); o[p[0]] = !!(el && el.checked); });
+    movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); o[c.key] = !!(el && el.checked); });
     return o;
   }
-  // ---- カテゴリ自動チェック(FANZAジャンル名→該当カテゴリ) ----
+  // ---- カテゴリ自動チェック(FANZAジャンル名/フロア名→該当カテゴリ) ----
   // 作品が決まったら(候補から/作品URL入力/ウィザード)、取得済みジャンル名で該当カテゴリへ自動チェック。
   // 全カテゴリを一旦外してから該当だけON＝前回のチェックを引き継がない。
-  var GENRE_ATTR_KEYWORDS = {
-    chara: ['二次創作'],
-    jk: ['女子校生', '女子高生', 'JK'],
-    gyaru: ['ギャル'],
-    isekai: ['異世界', '転生'],
-    harem: ['ハーレム'],
-    ai: ['AI生成', 'AIイラスト', 'AIグラビア'],
-    ol: ['OL'],
-    soshu: ['総集編']
-  };
-  function setMovieAttrsFromGenres(genres) {
-    var names = (genres || []).map(function (g) { return String(g || ''); });
-    MOVIE_ATTRS.forEach(function (p) {
-      var el = $(p[1]); if (!el) return;
-      var kws = GENRE_ATTR_KEYWORDS[p[0]] || [];
-      el.checked = names.some(function (n) { return kws.some(function (k) { return n.indexOf(k) >= 0; }); });
-    });
+  //   キーワードと部分一致判定は Go5Cats.matchText に集約(「姉」→「姉・妹」も拾う部分一致・Chami依頼2026-08-02③)。
+  function setMovieAttrsFromTexts_(texts) {
+    var hits = (window.Go5Cats && window.Go5Cats.matchText(texts)) || {};
+    movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = !!hits[c.key]; });
   }
   // 同じ作品(cid)には1回だけ自動適用＝再描画・キャッシュヒットのたびに手動調整を上書きしない。(割引自動反映と同じ設計)
   // リロードを跨いでも尊重できるよう localStorage に記録する。
+  //   ★AIはタグ(genre)に載らず「コミック・AI」等フロア名で示されるため、floor/service も判定に混ぜる(Chami依頼2026-08-02②)。
   function autoApplyAttrsFromInfo_(info) {
     if (!info) return;
     var cid = String(info.cid || ''); if (!cid) return;
     if (load('movie_auto_attrs_cid') === cid) return;
     save('movie_auto_attrs_cid', cid);
-    setMovieAttrsFromGenres(info.genres || []);
+    setMovieAttrsFromTexts_((info.genres || []).concat([info.floor, info.service, info.title]));
   }
   // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=即時チェック(cid指定で以後の自動適用を抑止)。
   try { window.Go5MovieAttrs = {
-    reset: function () { save('movie_auto_attrs_cid', ''); MOVIE_ATTRS.forEach(function (p) { var el = $(p[1]); if (el) el.checked = false; }); },
-    applyGenres: function (genres, cid) { if (cid) save('movie_auto_attrs_cid', String(cid)); setMovieAttrsFromGenres(genres || []); }
+    reset: function () { save('movie_auto_attrs_cid', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
+    applyGenres: function (genres, cid) { if (cid) save('movie_auto_attrs_cid', String(cid)); setMovieAttrsFromTexts_(genres || []); }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
   // 前回の選択・チェックを引き継がない。狙い・コメント型は生成前の必須選択なので未設定へ戻す。(Chami指定2026-07-14)
