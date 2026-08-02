@@ -124,9 +124,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 /* セールラベルの表示ON/OFF(Chami依頼2026-07-16)。既定ON・定価の作品では出ない旨を添える */
 /* ★恒久対策(縦書き化)：flex行で文言spanだけが縮む唯一の要素だと、CJKは1文字ごとに折り返せる
    =min-content=1文字幅まで潰れ「一行の文が縦表示」になる(◯%OFFボタン追加=2026-08-02⑥で再発)。
-   flex-wrap:wrapで入り切らない子(ボタン)を次行へ落とし、spanはwhite-space:nowrap+flex-shrink:0で
-   絶対に縦に潰さない。以後この行に子を足しても縦書き化しない。 */
-.promo-toggle{display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:center;margin:6px auto 0;padding:6px 10px;
+   縦書き化を防ぐ本体は span の white-space:nowrap+flex-shrink:0(これで絶対に縦へ潰れない)。
+   チェック文言＋切替ボタンは常に1行=nowrap(Chami依頼2026-08-02)。以後この行に子を足しても縦書き化しない。 */
+.promo-toggle{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;justify-content:center;margin:6px auto 0;padding:6px 10px;
   background:var(--card);border:1px solid #24304a;border-radius:10px;cursor:pointer;user-select:none;width:fit-content;max-width:100%;}
 .promo-toggle input{accent-color:var(--accent);width:16px;height:16px;flex:none;cursor:pointer;}
 .promo-toggle span{font-size:12px;color:var(--fg);line-height:1.3;white-space:nowrap;flex-shrink:0;}
@@ -134,8 +134,11 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .promo-toggle select{background:#0e1422;color:var(--fg);border:1px solid #24304a;border-radius:8px;
   font-size:12px;padding:3px 6px;margin-left:6px;cursor:pointer;}
 /* ラベル種類のタップ切替ボタン(Chami依頼2026-08-02⑥)。ドロップダウンの代わり＝タップで ◯%OFF / ¥価格。 */
-.promo-type-btn{margin-left:6px;padding:3px 12px;border-radius:8px;border:1px solid var(--accent);
-  background:transparent;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;flex:none;}
+/* ★恒久対策(ボタンが無駄に横伸び)：グローバル button{width:100%} を継いで全幅になっていた(Chami「文字が
+   表示できる幅だけでいい」2026-08-02)。width:auto＋max-content で文字幅だけに固定。margin-top:0 も上書き。 */
+.promo-type-btn{margin:0 0 0 6px;padding:3px 12px;border-radius:8px;border:1px solid var(--accent);
+  background:transparent;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;
+  flex:none;width:auto;max-width:max-content;white-space:nowrap;}
 .promo-type-btn:hover{background:rgba(43,179,192,.12);}
 .promo-type-btn:active{background:rgba(43,179,192,.22);}
 
