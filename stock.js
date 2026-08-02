@@ -668,18 +668,27 @@
   //   実体の判定は bluesky.js の __go5AffCheck(作品アフィリンク＋現在のセール設定＋af_idを見る)。未読込時は表示しない。
   function renderAffCheck_(meta) {
     var box = $('draftAffCheck'); if (!box) return;
-    if (typeof window.__go5AffCheck !== 'function') { box.innerHTML = ''; return; }
-    var r; try { r = window.__go5AffCheck((meta && (meta.affiliateUrl || meta.workUrl)) || ''); } catch (e) { box.innerHTML = ''; return; }
-    if (!r) { box.innerHTML = ''; return; }
-    function esc2(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-    function line_(label, v) {
-      if (!v) return '';
-      if (v.applicable === false) return '<div style="color:var(--sub);">' + label + '：—(未使用)</div>';
-      if (v.ok) return '<div style="color:var(--ink);">' + label + '：<b style="color:#2bb3c0;">✅</b></div>';
-      return '<div style="color:var(--ink);">' + label + '：<b style="color:#e06">🆖</b>' + (v.reason ? ' <span style="color:var(--sub);">' + esc2(v.reason) + '</span>' : '') + '</div>';
+    // ★fail-open(Chami依頼2026-08-02④「消えているので復活」)=判定不能でも黙って消さない。
+    //   以前は __go5AffCheck が未定義 or 例外で box を空にしていた=「アフィチェックが消えている」の真因。
+    var r = null;
+    if (typeof window.__go5AffCheck === 'function') {
+      try { r = window.__go5AffCheck((meta && (meta.affiliateUrl || meta.workUrl)) || ''); } catch (e) { r = null; }
     }
-    box.innerHTML = '<div style="font-weight:700;color:var(--accent);margin-bottom:2px;">アフィチェック</div>' +
-      line_('投稿作品', r.work) + line_('セールURL', r.sale);
+    if (!r) {
+      box.innerHTML = '<span style="font-weight:700;color:var(--accent);margin-right:6px;">アフィチェック</span><span style="color:var(--sub);">—(判定不可)</span>';
+      return;
+    }
+    function esc2(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    // ★2つのチェックを1行に(Chami依頼2026-08-02④「2行使わず1行で」)=inline-span＋区切り。
+    function chip_(label, v) {
+      if (!v) return '';
+      if (v.applicable === false) return '<span style="color:var(--sub);">' + label + '：—(未使用)</span>';
+      if (v.ok) return '<span style="color:var(--ink);">' + label + '：<b style="color:#2bb3c0;">✅</b></span>';
+      return '<span style="color:var(--ink);">' + label + '：<b style="color:#e06">🆖</b>' + (v.reason ? '<span style="color:var(--sub);font-size:.72rem;"> ' + esc2(v.reason) + '</span>' : '') + '</span>';
+    }
+    var parts = [chip_('投稿作品', r.work), chip_('セールURL', r.sale)].filter(Boolean);
+    box.innerHTML = '<span style="font-weight:700;color:var(--accent);margin-right:6px;">アフィチェック</span>' +
+      parts.join('<span style="color:var(--sub);margin:0 8px;">/</span>');
   }
 
   function createModal_() {
@@ -728,7 +737,7 @@
           //   日本語は文字間どこでも改行できるため「X／投／稿」と縦積みになっていた・Chami報告2026-07-31①)。
           //   コピーは margin-left:auto で右端へ寄せ、幅は文字ぶんだけ(Chami③「文字の幅に合うだけ」)。
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="' + sH + 'white-space:nowrap;">X 投稿</div><button type="button" id="draftCopyX" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
-          '<textarea id="draftXText" rows="6" style="' + iS + 'resize:vertical;"></textarea>' +
+          '<textarea id="draftXText" rows="8" style="' + iS + 'resize:vertical;"></textarea>' + // ①縦幅+2行(rows6→8・Chami依頼2026-08-02)
           '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
           '<div style="' + rowWrap + '">' +
             '<input type="url" id="draftXPostUrl" size="1" placeholder="https://x.com/.../status/..." style="' + rowIn + '">' +
@@ -737,19 +746,20 @@
           '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div style="font-size:.78rem;font-weight:600;color:var(--sub);white-space:nowrap;">題名(コピーして貼り付け)</div><button type="button" id="draftCopyYtTitle" style="' + btnW + 'margin-left:auto;">題名をコピー</button></div>' +
-          '<textarea id="draftYtTitleText" readonly rows="3" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' +
+          '<textarea id="draftYtTitleText" readonly rows="2" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' + // ②2行の幅に(rows3→2・Chami依頼2026-08-02)
           '<div style="display:flex;align-items:center;gap:8px;' + fL + '"><span style="white-space:nowrap;">タグ(半角スペース区切り)</span><button type="button" id="draftCopyYtTags" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
           '<div style="' + fL + '">' +
             '<svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)' +
           '</div>' +
-          // 説明欄の短縮リンク行(Chami依頼2026-07-30④)=左に「説明欄をコピー」・短縮リンク／右に作品遷移リンク・動画DL
+          // 説明欄の行(Chami依頼2026-08-02③)=左から「説明欄をコピー」「動画DL」／右端に作品遷移リンク(作品↗)。
+          //   短縮URLリンク(draftYtDescUrlLink)は説明欄コピーの直後(表示は短縮URL確定時のみ)。動画DLは説明欄コピーの右横へ移動。
           '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
             '<button type="button" id="draftCopyYtDesc" style="' + btnW + '">説明欄をコピー</button>' +
+            '<button type="button" id="draftDlVideo" style="' + btnW + '">動画DL</button>' +
             '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkR + 'display:none;"></a>' +
             '<span style="flex:1;min-width:8px;"></span>' +
-            '<a id="draftWorkLink" target="_blank" rel="noopener" style="' + lnkR + 'display:none;">作品遷移↗</a>' +
-            '<button type="button" id="draftDlVideo" style="' + btnW + '">動画DL</button>' +
+            '<a id="draftWorkLink" target="_blank" rel="noopener" style="' + lnkR + 'display:none;">作品↗</a>' +
           '</div>' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +

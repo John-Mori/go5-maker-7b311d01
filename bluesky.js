@@ -1025,7 +1025,8 @@
       else if (window.isShortenedUrl && window.isShortenedUrl(w)) out.work = { ok: true };
       else if (window.hasRealAffiliateId && window.hasRealAffiliateId(w)) out.work = { ok: true };
       else out.work = { ok: false, reason: af ? '作品リンクにaf_idが入っていない(生FANZA URLのまま)' : 'アフィID未設定(🔗アフィリンクタブで設定)' };
-      var entry = discCurrentEntry_();
+      // ★セール判定が投げても作品判定を巻き込まない(=box全消し「アフィチェックが消えている」の再発防止・2026-08-02④)。
+      var entry = null; try { entry = discCurrentEntry_(); } catch (e) { entry = null; }
       if (!entry || !entry.url) { out.sale = { applicable: false }; }
       else {
         var saleRaw = window.buildFanzaListLink ? (window.buildFanzaListLink(entry.url, af) || {}).link || '' : '';
