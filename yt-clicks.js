@@ -3997,7 +3997,7 @@
           var peakWin = _rankMetric === 'v' ? r.peakVWin : r.peakCWin;
           var mPeak = (isPeak && peakVal != null) ? '<span class="rank-main" title="最大瞬間風速">🌀 ' + METRIC_IC + ' ' + num(peakVal) + '/時<span class="rank-sub">(' + esc(peakWin || '') + ')</span></span>' : '';
           return '<div class="rank-row' + topCls + '">' +
-            '<span class="rank-num">' + String(rank).replace(/\d/g, function (d) { return '<span class="rd">' + d + '</span>'; }) + '</span>' +
+            '<span class="rank-num">' + rank + '</span>' +
             '<div class="rank-info">' +
               (dateStr || r.workUrl ? '<div class="rank-date">' + esc(dateStr) + (r.workUrl ? '<span class="rank-author" data-fanza-author-url="' + esc(r.workUrl) + '"></span>' : '') + '</div>' : '') +
               '<div class="rank-title-row">' +
