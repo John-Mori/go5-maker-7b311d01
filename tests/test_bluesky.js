@@ -546,6 +546,17 @@ test('PR-6: 冪等(解決済みを再投入しても変わらない)', function 
   var once = resolvePromoTemplate(PROMO_BODY, { type: 'price', pct: 35, price: 10 });
   assert.strictEqual(resolvePromoTemplate(once, { type: 'price', pct: 35, price: 10 }), once);
 });
+// PR-7 = 「X用テキスト欄が丸ごと空(0/280)」の再発封じ(v=586/593/603で3回直した同じ穴)。
+//   候補行(%:/¥:)は片方が必ず削除されるので、素の行が1つでも在れば結果は非空でなければならない。
+//   販促テンプレ解決が本文を空へ落とす経路をここで恒久的に禁止する(=空欄化はもうテストが落ちる)。
+test('PR-7: 非販促行を含む本文は%/¥どちらでも空にならない(X欄空欄化の不変条件)', function () {
+  var body = '続きが気になっちゃう一冊、みつけた📚\n%:しかも今ならN%オフ💕\n¥:しかも今ならN円💕';
+  ['price', 'discount'].forEach(function (t) {
+    var r = resolvePromoTemplate(body, { type: t, pct: 35, price: 10 });
+    assert.ok(r.trim().length > 0, t + 'モードで本文が空になった');
+    assert.ok(r.indexOf('続きが気になっちゃう一冊') >= 0, t + 'モードで素の行が消えた');
+  });
+});
 
 // ────────────────────────────────────────────────────────────
 // 結果集計
