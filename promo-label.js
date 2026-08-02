@@ -410,7 +410,11 @@
     // 作品情報が確定した時に呼ぶ(bluesky.js renderMovieInfo)。セール中のみ値を保持(定価=0=非表示)。
     notify: function (info) {
       if (!info || !info.title) return;
-      var onSale = info.listPrice && info.price != null && info.discountPct > 0 && info.price < info.listPrice;
+      // ★セール判定は「実売価<定価」だけで見る(discountPct>0の追加ゲートは外す)。
+      //   候補/古いデータでは price・listPrice はあるのに discountPct が0/未設定のことがあり、
+      //   その場合ラベルが不当に非表示になっていた(Chami「セールラベルが表示されない・治ってない」)。
+      //   実際の割引率は pctFanza_(listPrice,price) で価格から取り直すので discountPct には依存しない。
+      var onSale = info.listPrice && info.price != null && info.price < info.listPrice;
       lastCid = String(info.cid || info.title || '');
       pct = onSale ? pctFanza_(info.listPrice, info.price) : 0; // ⑤FANZA表記の丸めで揃える
       priceVal = onSale ? Math.round(info.price) : 0;
