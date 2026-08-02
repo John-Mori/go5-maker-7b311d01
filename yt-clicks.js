@@ -186,6 +186,10 @@
   //   非アクティブ側のチャンネルのシート由来行(旧い作品)が永久に欠ける=「片方だけランキングに出ない」非対称に
   //   なる(Chami報告2026-08-02: 月詠みは出たが宵桜が出ない)。→ ランキングは acc1/acc2 両方を明示取得する。
   var _rankSheetCache = {}; // acct -> {at, items:[_fromSheet表示アイテム]}
+  // ★ランキングは1回のrenderRankでdoRenderが複数回走る(即描画→YT取得後→GAS差分後→両chシート到着後)。
+  //   毎回el.innerHTMLを丸ごと組み直すと、非同期で後から入る作品サムネ/価格が都度消えて“ちらつく”
+  //   (Chami報告2026-08-02「サムネが表示されたり消えたり」)。→ 生成HTMLが前回と同一なら再描画を省く。
+  var _rankLastHtml = '';
   // ★シート由来行(_fromSheet)の編集を「保持」する表示専用オーバーレイ。acct -> { videoId: patch }。
   //   真因(Chami「一瞬反映→消失」2026-07-28 再発): 保存直後の refresh() が mergeSheetExtras_→
   //   TTL切れなら即GAS再取得し、upsertがまだ届く前の“古いシート値”で _sheetExtraCache を上書き=編集が消える。
@@ -4026,7 +4030,7 @@
             ? '<div class="rank-note">' + metricName + 'の最大瞬間風速ランキング(1時間あたりの伸びが最大の区間。GAS自動記録・未記録は非表示)。</div>'
             : '<div class="rank-note">' + metricName + 'の総合ランキング。' + (_rankMetric === 'v' ? '' : '(計測URLの無い投稿は非表示)') + '</div>'));
       var emptyHtml = rows.length ? '' : '<p class="hint" style="padding:10px 14px;">このランキングに表示できる記録がまだありません。</p>';
-      el.innerHTML = tabsHtml + noteHtml + emptyHtml + '<div class="rank-list">' +
+      var listHtml = '<div class="rank-list">' +
         rows.map(function (r, i) {
           var rank = i + 1;
           var topCls = rank <= 3 ? ' rank-top' + rank : '';
@@ -4083,6 +4087,12 @@
           '</div>';
         }).join('') +
       '</div>';
+      var fullHtml = tabsHtml + noteHtml + emptyHtml + listHtml;
+      // 同一内容の再描画はスキップ=非同期で入るサムネ/価格を消さない(ちらつき防止)。
+      //   ただしリストがまだDOMに無い(初回/プレースホルダ状態)なら必ず描く。
+      if (fullHtml === _rankLastHtml && el.querySelector('.rank-list')) return;
+      _rankLastHtml = fullHtml;
+      el.innerHTML = fullHtml;
       // サブタブ配線(上段=指標 v/c1/c2・下段=窓 total/peak/bXX)
       el.querySelectorAll('.rank-tab').forEach(function (b) {
         b.addEventListener('click', function () {
@@ -4113,7 +4123,7 @@
     var allV = uniq.map(function (x) { return x.vid; }).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
     var hadCache = allV.some(function (v) { return v in viewsCache; });
     if (hadCache) { try { doRender(); } catch (e) {} } // 既存キャッシュで即表示(通信0)。取得後に下で最新化。
-    else { el.innerHTML = '<p style="color:var(--sub);font-size:13px;padding:8px 14px;">再生数・クリック数を取得中…</p>'; }
+    else { _rankLastHtml = ''; el.innerHTML = '<p style="color:var(--sub);font-size:13px;padding:8px 14px;">再生数・クリック数を取得中…</p>'; }
     var jobs = [];
     for (var i = 0; i < allV.length; i += 50) {
       (function (b) {
