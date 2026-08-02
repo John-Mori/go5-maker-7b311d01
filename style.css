@@ -638,9 +638,13 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .rank-tab.active{color:var(--ink);background:var(--card);border-color:var(--line) var(--line) var(--accent) var(--line);border-bottom:2px solid var(--accent);}
 .rank-tab img.emico{height:1.15em;vertical-align:-0.22em;margin-right:1px;}
 .rank-note{padding:2px 14px 6px;font-size:11px;color:var(--sub);}
-.rank-info .vmetrics{flex-wrap:wrap;}
+/* ▶再生数〜作品↗ まで改行せず1列固定表示（狭ければ横スクロール・Chami依頼2026-08-02） */
+.rank-info .vmetrics{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.rank-info .vmetrics::-webkit-scrollbar{display:none;}
 .rank-main{font-weight:700;color:var(--ink);}
 .rank-main .emico{height:1.05em;vertical-align:-0.16em;}
+/* ▶(再生数アイコン)は白＋黒フチ（三角は穴なしなので単純stroke・Chami依頼2026-08-02） */
+.rank-play{color:#fff;-webkit-text-stroke:.5px #000;text-stroke:.5px #000;paint-order:stroke fill;text-shadow:0 0 1px #000;}
 .rank-sub{color:var(--sub);font-weight:400;font-size:.85em;margin-left:2px;}
 /* 上段=指標トグル(再生数/白矢印/ピンク矢印)は塗りつぶしピル・下段=窓(総合/ピーク/30分…72時間)はタブ */
 .rank-tabs-metric{border-bottom:none;padding:10px 12px 8px;gap:6px;}
@@ -669,13 +673,16 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .rank-title{font-size:14px;font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .rank-title-link{color:var(--ink);text-decoration:none;}
 .rank-title-link:hover{text-decoration:underline;}
-/* ランキング（クリーム背景）：順位番号は文字の外側の輪郭を黒線でなぞる（中は白でスッキリ・Chami手描き準拠）。
-   paint-order:stroke で白い字を黒線の上に乗せ、黒線が外側だけに細く出るようにする。
-   4位以降=白字＋黒フチ／1〜3位=金/銀/銅の字にも同じ黒フチを付ける（Chami 2026-08-02）。 */
-#pageRank .rank-num{color:#fff;-webkit-text-stroke:2.6px #000;text-stroke:2.6px #000;paint-order:stroke fill;text-shadow:0 1px 2px rgba(0,0,0,.5);}
-#pageRank .rank-top1 .rank-num{color:#e8b31f;}   /* 金＋黒フチ */
-#pageRank .rank-top2 .rank-num{color:#9198a1;}   /* 銀＋黒フチ */
-#pageRank .rank-top3 .rank-num{color:#c1712f;}   /* 銅＋黒フチ */
+/* ランキング順位番号：手描き準拠で「外形だけ黒線一本・中は白（三角の穴の線ゼロ）」（Chami 2026-08-02 選択肢2）。
+   桁ごとに .rd で分割し、SVGフィルタ #rankOuter を各桁に適用する（番号全体に一括だと2桁が繋がって潰れる）。
+   フィルタ内で ①穴(4の三角/0/6/8/9)をモルフォロジー・クローズで塞ぐ→②外形の縁だけを黒リングにする
+   →③内側は指定色でベタ塗り。→ 内側に黒線が出ず、外形の細い黒線一本だけになる。
+   1〜3位=金/銀/銅は色違いフィルタ(#rankOuter1/2/3)。 */
+#pageRank .rank-num{text-shadow:none;}
+#pageRank .rank-num .rd{display:inline-block;filter:url(#rankOuter);}
+#pageRank .rank-top1 .rank-num .rd{filter:url(#rankOuter1);}   /* 金 */
+#pageRank .rank-top2 .rank-num .rd{filter:url(#rankOuter2);}   /* 銀 */
+#pageRank .rank-top3 .rank-num .rd{filter:url(#rankOuter3);}   /* 銅 */
 /* 動画の題名はアカウントのイメージカラー（クリーム背景で読める濃色）。 */
 #pageRank .rank-title{color:var(--ink);font-weight:800;}
 #pageRank .rank-title-acc1{color:#34478f;}   /* 月詠み＝藍 */
@@ -688,7 +695,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
   #pageRank .rank-row{gap:16px;padding:14px 18px;align-items:flex-start;}
   #pageRank .rank-thumbcol{order:-1;margin-left:0;width:104px;}                 /* 画像を左へ(order)・大きく */
   #pageRank .rank-thumbcol img{width:104px;max-height:150px;}
-  #pageRank .rank-num{font-size:20px;min-width:1.6em;padding-top:2px;}
+  #pageRank .rank-num{font-size:20px;min-width:1.6em;}
   #pageRank .rank-title-row{flex-wrap:wrap;}                                    /* 題名を2行に回せるように */
   #pageRank .rank-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:16px;line-height:1.4;max-width:43em;} /* 約43字(全角)で改行・2行超は…省略。emは全角1文字≒1emに合わせるため */
   #pageRank .rank-date{font-size:13px;}

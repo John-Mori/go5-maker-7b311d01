@@ -3986,8 +3986,9 @@
           var acctLabel = ACCT_NAME[r.acct] || r.acct;
           // 指標スパン。総合3種(▶再生/白矢印/ピンク矢印)は常に併記。窓(バケット/ピーク)は主指標だけ先頭に強調。
           var hlTotal = _rankWin === 'total';
-          var METRIC_IC = _rankMetric === 'v' ? '▶' : (_rankMetric === 'c1' ? LINK_IC : CUR_IC);
-          var mViews = '<span class="' + (hlTotal && _rankMetric === 'v' ? 'rank-main' : '') + '" title="YouTube再生数">▶ ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
+          var PLAY_IC = '<span class="rank-play">▶</span>'; // ▶再生数アイコン=白＋黒フチ（Chami依頼2026-08-02）
+          var METRIC_IC = _rankMetric === 'v' ? PLAY_IC : (_rankMetric === 'c1' ? LINK_IC : CUR_IC);
+          var mViews = '<span class="' + (hlTotal && _rankMetric === 'v' ? 'rank-main' : '') + '" title="YouTube再生数">' + PLAY_IC + ' ' + (r.views != null ? num(r.views) : (apiKey() ? '…' : '–')) + '</span>';
           var mClicks = '<span class="' + (hlTotal && _rankMetric === 'c1' ? 'rank-main' : '') + '" title="白矢印クリック(導線1)">' + LINK_IC + ' ' + (r.clicks != null ? num(r.clicks) : (r.code ? '…' : '–')) + '</span>';
           var mWork = '<span class="' + (hlTotal && _rankMetric === 'c2' ? 'rank-main' : '') + '" title="ピンク矢印クリック(導線2)">' + CUR_IC + ' ' + (r.wclicks != null ? num(r.wclicks) : (r.wcode ? '…' : '–')) + '</span>';
           var snapVal = _rankMetric === 'v' ? r.snapV : (_rankMetric === 'c1' ? r.snapC : r.snapW);
@@ -3996,7 +3997,7 @@
           var peakWin = _rankMetric === 'v' ? r.peakVWin : r.peakCWin;
           var mPeak = (isPeak && peakVal != null) ? '<span class="rank-main" title="最大瞬間風速">🌀 ' + METRIC_IC + ' ' + num(peakVal) + '/時<span class="rank-sub">(' + esc(peakWin || '') + ')</span></span>' : '';
           return '<div class="rank-row' + topCls + '">' +
-            '<span class="rank-num">' + rank + '</span>' +
+            '<span class="rank-num">' + String(rank).replace(/\d/g, function (d) { return '<span class="rd">' + d + '</span>'; }) + '</span>' +
             '<div class="rank-info">' +
               (dateStr || r.workUrl ? '<div class="rank-date">' + esc(dateStr) + (r.workUrl ? '<span class="rank-author" data-fanza-author-url="' + esc(r.workUrl) + '"></span>' : '') + '</div>' : '') +
               '<div class="rank-title-row">' +
