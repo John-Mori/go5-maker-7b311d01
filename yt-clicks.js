@@ -256,6 +256,22 @@
     var cur = acct();
     return items.filter(function (it) {
       if (!it) return false;
+      // ★シート由来行(_fromSheet)は「そのチャンネルのシート(記録_ch1/ch2)」から channel=<cur> 指定で
+      //   取得した権威データ＝この行はこのタブのチャンネルで確定している。背骨ID接頭辞(INC-73で
+      //   記録_ch2 に紛れた誤 acc1- 行)や短縮ドメイン(7/20分割前の共用 5mgl.com)といった「acc1に倒れる
+      //   歴史的シグナル」で誤って隠すと、宵桜(acc2)の旧い実投稿がどのタブにも出ず“消えた”ように見える
+      //   (Chami報告2026-08-02・v=497の表示ガード発効=7/30以降にacc2の7/29以前が消えた症状に一致)。
+      //   → シート由来行は postUri×DID台帳/↩️固定で「別chと積極的に確定」できた時だけ隠す=fail-open。
+      //   (このガードが本来狙うのは「同一題名がローカル両ストアに居る」ケース＝下のローカル行側で継続)。
+      if (it._fromSheet) {
+        if ((it._ownerPin === 'acc1' || it._ownerPin === 'acc2') && it._ownerPin !== cur) return false;
+        var R = window.Go5AccountRepair;
+        if (it.postUri && R && R.ledgerFresh && R.ledgerFresh() && R.didReady && R.didReady() && R.classifyByPost) {
+          var byPost = R.classifyByPost(it) || '';
+          if (byPost && byPost !== cur) return false; // DIDで別chと確定した時のみ隠す
+        }
+        return true;
+      }
       var ch = ownerOf_(it) || acctByShort_(it);
       return !ch || ch === cur; // 他chと確定した行のみ隠す。不明はそのまま出す
     });
