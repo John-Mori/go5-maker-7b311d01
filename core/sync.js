@@ -698,8 +698,26 @@
       if (root.document && root.document.visibilityState === "hidden") return;
       syncOnce(false);
     }, AUTO_MS);
+    // 復帰イベント(visibilitychange/pageshow/focus/online)は連続して撃たれる=1.5s以内はまとめて1回に。
+    var _lastReturnAt = 0;
+    function syncOnReturn() {
+      var t = Date.now();
+      if (t - _lastReturnAt < 1500) return;
+      _lastReturnAt = t; syncOnce(false);
+    }
     // 隠れる直前=ローカル変更を押し出す / 表示に戻った直後=最新を取り込む(裏で止めた分を即回復)
-    if (root.document) root.document.addEventListener("visibilitychange", function () { syncOnce(false); });
+    if (root.document) root.document.addEventListener("visibilitychange", function () {
+      if (root.document.visibilityState === "hidden") syncOnce(false); // 離脱時=push
+      else syncOnReturn();                                            // 復帰時=pull
+    });
+    // ★iOS Safariはアプリ切替やタブ復帰で bfcache 復元となり visibilitychange を撃たない事がある。
+    //   pageshow/focus/online でも「戻ってきた瞬間に即pull」して、相手端末で編集したドラフトの
+    //   反映待ち(最悪=次の60s周期まで)を無くす(Chami依頼2026-08-03「端末間の反映が遅い」)。
+    if (root.addEventListener) {
+      root.addEventListener("pageshow", syncOnReturn);
+      root.addEventListener("focus", syncOnReturn);
+      root.addEventListener("online", syncOnReturn);
+    }
   }
 
   // 変更駆動の即時同期。(候補追加・画像保存の直後に呼ぶ)25秒周期を待たずに反映しつつ、
