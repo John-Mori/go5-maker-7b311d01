@@ -335,12 +335,29 @@ def _iter_occurrences(s, bare, allowed):
         start = i + len(bare)
 
 
+# ★自動修正を止める部屋(A案・2026-08-03)= 本文を一切変えず「警告のみ」に落とす。
+#   人事部門(hr-room)は このAI組織の呼称ルールそのものを本文で引用・解説する部屋だ
+#   (例:「オタコンは三笘を『三笘くん』と呼ぶ」)。話者の許容形でないからと自動置換すると
+#   解説文の呼称を化けさせる=実例「三笘くん」→「三笘さん」(化けた実物 msg
+#   1533593872004022292 / Chami指摘 msg 1533592980466827335)。この部屋では
+#   naming_corrections は fixed を変えず、違反候補は remaining(警告のみ)として監査に残す。
+#   ★naming_verdicts(監査記録)は不変=見え方は落とさず、本文破壊だけを止める。
+NO_AUTOFIX_DEPTS = {"hr-room"}
+
+
+def _autofix_suppressed(dept):
+    """この部屋で naming_corrections の本文自動修正を止めるか(警告のみへ落とす)。"""
+    return str(dept or "").strip().lower() in NO_AUTOFIX_DEPTS
+
+
 def naming_corrections(persona, dept, text, rules):
     """高信頼の呼称違反だけ自動修正した本文を返す(純関数)。
 
     返り値: {"fixed": str, "applied": [ {target,to,reason,count} ], "remaining": [verdict...] }
       - applied  : 自動修正した違反(本文は fixed に反映済み)。
       - remaining : 自動修正しなかった違反(=警告のみ・呼び出し側で naming_audit へ残す)。
+    ★NO_AUTOFIX_DEPTS の部屋(人事部門など)は本文を一切変えず、違反候補を全部 remaining
+      へ回す(呼称ルールを解説・引用する部屋で本文が化けるのを防ぐ・2026-08-03 A案)。
     fail-open: 例外時は元文と applied=[] を返す。
     """
     result = {"fixed": str(text or ""), "applied": [], "remaining": []}
@@ -348,6 +365,10 @@ def naming_corrections(persona, dept, text, rules):
         s = str(text or "")
         verdicts = naming_verdicts(persona, dept, s, rules)
         if not verdicts:
+            return result
+        # ★呼称ルールを本文で引用/解説する部屋は自動修正しない(警告のみ)。
+        if _autofix_suppressed(dept):
+            result["remaining"] = list(verdicts)
             return result
         repls = []  # (start, end, new)
         for v in verdicts:

@@ -66,6 +66,10 @@ def _run():
         ("ルカ・モドリッチ", "aegis-gl",
          "デブライネ、この件を頼む。", False,
          "モドリッチ→デブライネ呼び捨てOK(override)=通過"),
+
+        ("ククール", "hr-room",
+         "三笘くんはオタコンの呼び方だ。", True,
+         "★人事部門でも監査(verdicts)は発火する=見え方は落とさない(自動修正だけ止める)"),
     ]
 
     failed = 0
@@ -114,6 +118,14 @@ def _run():
         ("ケヴィン・デ・ブライネ", "aegis-gl",
          "アロンソコーチに報告した。", "アロンソコーチに報告した。", False,
          "既に許容形=変更なし(applied無し)"),
+
+        ("ククール", "hr-room",
+         "三笘くんはオタコンの呼び方だ。", "三笘くんはオタコンの呼び方だ。", False,
+         "★A案=人事部門の呼称ルール解説『三笘くん』を化けさせない(自動修正しない)"),
+
+        ("ククール", "aegis-gl",
+         "三笘くんはオタコンの呼び方だ。", "三笘さんはオタコンの呼び方だ。", True,
+         "対照=他部屋では従来どおり自動修正(化けは呼称ルールを解説する人事部門特有)"),
     ]
     for j, (persona, dept, text, exp_fixed, exp_applied, desc) in enumerate(fix_cases, 1):
         res = naming_corrections(persona, dept, text, rules)
