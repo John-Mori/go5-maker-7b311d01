@@ -46,6 +46,32 @@
   // 一本道の背骨：直近の動画作成で発番された安定動画ID。投稿記録に串刺しで持たせる。
   var currentVideoId = '';
 
+  // 短縮URLの設定。一次＝自前 link-worker。(302即リダイレクト＋KVで開封数を計測)
+  //   ・YT説明欄に貼る用途なのでURL長は問題にならない＝計測できる link-worker を最優先。
+  //   ・WORKER_URL は go5-short の払い出しURL。SHARED_SECRET は Worker 側と同値。(公開可＝ソフト鍵)
+  //   ・端末ごとに localStorage short_worker_url / short_shared_secret で上書き可。
+  //   ・未設定/失敗時は da.gd→TinyURL→長いURL に安全フォールバック。(計測できないだけで壊れない)
+  // ★2026-08-03(真因): この定義は元はファイル下部(workerBase 直前)に在ったが、`var SHORT` の宣言巻き上げで
+  //   初期化中は undefined のまま。applyAccount()初回同期→renderPreview→discCacheKeyFor_ が同期的に
+  //   workerBase()を呼ぶと `SHORT.URL_BY_ACCT` で TypeError(undefined is not an object)を投げ、IIFE全体が
+  //   静かに即死してX欄(wireXTweet_)まで到達しない=「X欄が空」の真因(v586/593/603/605で追い切れず)。
+  //   前任者は makeShortAndShare だけ setTimeout で逃がしたが discCacheKeyFor_ の同期経路が漏れていた。
+  //   → 定義自体をIIFE先頭へ引き上げて、どの初期化経路より先に SHORT を確定させる(恒久策)。
+  var SHORT = {
+    // ★2026-07-20: 独自ドメインへ切替(da.gd外部依存の根絶・INC-108恒久策)。
+    //   ★2026-07-20b: チャンネル別ドメイン。月詠み(acc1)=5mgl.com / 宵桜艶帖(acc2)=yoz2.com。
+    //   どちらも同一r2 worker・同一KVのカスタムドメイン=計測は一括・記録はch別。既存
+    //   r2.workers.devのコードも生存。E2E検証済(POST→<domain>/xxxxx・GET→302転送)。
+    URL_BY_ACCT: { acc1: 'https://5mgl.com', acc2: 'https://yoz2.com' },
+    WORKER_URL: 'https://5mgl.com',   // 既定(acct不明時fallback。stats/listは同一KVなのでどのドメインでも可)
+    // 「これは自前の計測リンクか」判定に使う全ドメイン(旧r2も含める=既存リンク互換)
+    WORKER_HOSTS: ['https://5mgl.com', 'https://yoz2.com', 'https://r2.trustsignalbot.workers.dev'],
+    SHARED_SECRET: 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'
+  };
+  try {
+    SHORT.SHARED_SECRET = localStorage.getItem('short_shared_secret') || SHORT.SHARED_SECRET;
+  } catch (e) {}
+
   // ---- 汎用永続化 ----
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -1530,25 +1556,8 @@
   //   (repairAccountsByDid_ は Go5AccountRepair.run として手動フォールバック用に残す)
   void maybeRepairAccountsOnce_;
 
-  // 短縮URLの設定。一次＝自前 link-worker。(302即リダイレクト＋KVで開封数を計測)
-  //   ・YT説明欄に貼る用途なのでURL長は問題にならない＝計測できる link-worker を最優先。
-  //   ・WORKER_URL は go5-short の払い出しURL。SHARED_SECRET は Worker 側と同値。(公開可＝ソフト鍵)
-  //   ・端末ごとに localStorage short_worker_url / short_shared_secret で上書き可。
-  //   ・未設定/失敗時は da.gd→TinyURL→長いURL に安全フォールバック。(計測できないだけで壊れない)
-  var SHORT = {
-    // ★2026-07-20: 独自ドメインへ切替(da.gd外部依存の根絶・INC-108恒久策)。
-    //   ★2026-07-20b: チャンネル別ドメイン。月詠み(acc1)=5mgl.com / 宵桜艶帖(acc2)=yoz2.com。
-    //   どちらも同一r2 worker・同一KVのカスタムドメイン=計測は一括・記録はch別。既存
-    //   r2.workers.devのコードも生存。E2E検証済(POST→<domain>/xxxxx・GET→302転送)。
-    URL_BY_ACCT: { acc1: 'https://5mgl.com', acc2: 'https://yoz2.com' },
-    WORKER_URL: 'https://5mgl.com',   // 既定(acct不明時fallback。stats/listは同一KVなのでどのドメインでも可)
-    // 「これは自前の計測リンクか」判定に使う全ドメイン(旧r2も含める=既存リンク互換)
-    WORKER_HOSTS: ['https://5mgl.com', 'https://yoz2.com', 'https://r2.trustsignalbot.workers.dev'],
-    SHARED_SECRET: 'daremogamewoubawareteikukimihakanpekidekyukyokunoidol'
-  };
-  try {
-    SHORT.SHARED_SECRET = localStorage.getItem('short_shared_secret') || SHORT.SHARED_SECRET;
-  } catch (e) {}
+  // ★短縮URL設定(var SHORT)はIIFE先頭へ移設した(2026-08-03・初期化中の use-before-assign 即死を根治)。
+  //   workerBase/ourShortBase 等の関数はここに残す(関数宣言は巻き上げ済みで参照位置は不問)。
   // 投稿用ベースURL: 端末上書き(short_worker_url)が最優先→現アカウント別→既定。
   function workerBase() {
     try { var ov = localStorage.getItem('short_worker_url'); if (ov) return ov; } catch (e) {}
