@@ -164,10 +164,15 @@
     save('movie_auto_attrs_cid', cid);
     setMovieAttrsFromTexts_((info.genres || []).concat([info.floor, info.service, info.title]));
   }
-  // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=即時チェック(cid指定で以後の自動適用を抑止)。
+  // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=候補の持つジャンルでの即時チェック。
+  //   ★applyGenres は「暫定チェック」に徹し、cidガード(movie_auto_attrs_cid)は張らない。
+  //   候補が持つのはジャンルのみで floor(コミック・AI 等)を持たないため、ここでガードを張ると
+  //   後続の作品URLフェッチ(floor込みで判定する autoApplyAttrsFromInfo_)が抑止され、AI等の
+  //   フロア名でしか分からないカテゴリが永久に自動チェックされない(再発した不具合)。ガードは
+  //   floor込みで判定する autoApplyAttrsFromInfo_ 側に一本化し、そちらが1回だけ正式適用する。
   try { window.Go5MovieAttrs = {
     reset: function () { save('movie_auto_attrs_cid', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
-    applyGenres: function (genres, cid) { if (cid) save('movie_auto_attrs_cid', String(cid)); setMovieAttrsFromTexts_(genres || []); }
+    applyGenres: function (genres, cid) { setMovieAttrsFromTexts_(genres || []); }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
   // 前回の選択・チェックを引き継がない。狙い・コメント型は生成前の必須選択なので未設定へ戻す。(Chami指定2026-07-14)
