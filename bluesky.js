@@ -1274,7 +1274,7 @@
   //   これをしないと、候補から別作品を作った直後にYT説明欄をコピーすると「前作のBluesky投稿」への案内が混入する。
   function resetYtDescShortLink_() {
     prevShortUrl = ''; lastShortUrl = '';
-    if (els.shortUrlOut) els.shortUrlOut.textContent = PLACEHOLDER_URL;
+    if (els.shortUrlOut) els.shortUrlOut.textContent = '投稿すると短縮URLを表示';
     if (!els.ytDesc) return;
     var lines = els.ytDesc.value.split('\n'); if (!lines.length) return;
     var f = (lines[0] || '').trim();

@@ -1151,7 +1151,7 @@ textarea:focus{border-color:var(--accent);}
 
 /* ── 短縮URL表示 ── */
 .short-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;}
-.short-url{flex:1;min-width:0;word-break:break-all;background:#0b1019;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--ink);}
+.short-url{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#0b1019;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--ink);}
 
 /* ── 過去の短縮URL履歴 ── */
 .hist-list{margin-top:8px;display:flex;flex-direction:column;gap:8px;}
