@@ -24,6 +24,22 @@
     try { var og = window.Go5Short; if (og && og.ourBase) return !!og.ourBase(u); } catch (e) {}
     return /\/\/(?:5mgl\.com|yoz2\.com)\//.test(String(u || ''));
   }
+  // 説明欄アクション行(説明欄をコピー／動画DL／生成短縮URL)を必ず1行に収める(Chami依頼2026-08-03)。
+  //   端末が狭い(iPhone16 等)と短縮URLが下段へ改行落ちしていた。ボタンは固定幅のまま、
+  //   短縮URLの文字サイズだけを、行が溢れる間だけ段階的に縮めて1行へ収める(下限あり=可読性維持)。
+  function fitDescRow_() {
+    try {
+      var row = $('draftDescRow'), lk = $('draftYtDescUrlLink');
+      if (!row || !lk || lk.style.display === 'none') return;
+      var px = 13, floor = 8, guard = 0; // 13px≒0.82rem を基準に、下限8pxまで縮める
+      lk.style.fontSize = px + 'px';
+      while (row.scrollWidth > row.clientWidth + 1 && px > floor && guard < 30) {
+        px -= 0.5; lk.style.fontSize = px + 'px'; guard++;
+      }
+    } catch (e) {}
+  }
+  // 端末回転・幅変化でも1行維持を再計算(モーダルが無ければ fitDescRow_ 側で握りつぶす)。
+  try { window.addEventListener('resize', fitDescRow_); } catch (e) {}
   function setDescUrlSlot_(url) {
     var lk = $('draftYtDescUrlLink');
     var ok = url && /^https?:\/\//.test(url);
@@ -50,6 +66,8 @@
       var body = lines.join('\n');
       ta.value = ok ? (url + (body ? '\n\n' + body : '')) : body;
     }
+    // レイアウト確定後に1行フィットを計算(表示直後は幅が未確定なため rAF で1フレーム待つ)。
+    if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(fitDescRow_); else fitDescRow_();
   }
   // 貼り付けたX投稿リンクを link-worker で短縮してスロットへ入れる(全滅時は生URL)。
   function applyXPostUrl_(raw, btn) {
@@ -861,10 +879,12 @@
           '</div>' +
           // 説明欄の行(Chami依頼2026-08-02③)=左から「説明欄をコピー」「動画DL」。
           //   短縮URLリンク(draftYtDescUrlLink)は説明欄コピーの直後(表示は短縮URL確定時のみ)。動画DLは説明欄コピーの右横へ移動。
-          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
-            '<button type="button" id="draftCopyYtDesc" style="' + btnW + '">説明欄をコピー</button>' +
-            '<button type="button" id="draftDlVideo" style="' + btnW + '">動画DL</button>' +
-            '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkR + 'display:none;"></a>' +
+          // ★1行固定(flex-wrap:nowrap)＝ボタンは固定幅、短縮URLは右端に置き、収まらなければ
+          //   fitDescRow_() が文字サイズを縮めて必ず1行に収める(Chami依頼2026-08-03・iPhone16対策)。
+          '<div id="draftDescRow" style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin-bottom:8px;">' +
+            '<button type="button" id="draftCopyYtDesc" style="' + btnW + 'flex:0 0 auto;">説明欄をコピー</button>' +
+            '<button type="button" id="draftDlVideo" style="' + btnW + 'flex:0 0 auto;">動画DL</button>' +
+            '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkR + 'white-space:nowrap;flex:0 0 auto;margin-left:auto;display:none;"></a>' +
           '</div>' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
