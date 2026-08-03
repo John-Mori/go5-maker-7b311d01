@@ -24,6 +24,7 @@ const SHOULD_SYNC = [
   'affi_urls__acc1', 'affi_urls_quick__acc2', 'affi_urls_undostack__acc1',
   'bsky_gas_url', 'fanza_af_id', 'fanza_worker_url', 'ytdesc_tpl_v3',
   'sch_state_v1',
+  'rank_mode', 'rank_metric', 'rank_window',   // ★v621でsyncへ昇格(Chami核2026-08-04・どの端末でも同じランキング表示)
 ];
 
 // ── 記録/履歴/キャッシュ/下書き/DID/移行フラグ/スナップ/UI状態＝同期しない（sync:false）
@@ -41,7 +42,7 @@ const SHOULD_NOT_SYNC = [
   'cand_items', 'cand_hidden__t1', 'cand_refimg__abc', 'cand_mk2__m1__all',
   'delta_cache', 'peak_cache', 'clicks_cache', 'yt_meta_cache', 'fanza_title_cache',
   'acct_did_repair_v1', 'acct_split_migrated', 'layout_acct_split_migrated', 'feat_2026q2_migrated',
-  'rank_mode', 'field_top', 'field_author',
+  'field_top', 'field_author',
 ];
 
 // ── 秘密キー＝secret かつ 同期しない ─────────────────────────────────────────

@@ -50,6 +50,27 @@ jobs:
       - name: クリック集計の不変条件検査
         run: node scripts/check_click_recon.mjs
 
+      # tests/test_*.js(同期方針カバレッジ/墓標/純関数群)を全push で実行する門。
+      #   ★これまでCIは1本もnodeテストを回しておらず、同期漏れ検査(test_sync_coverage)等の安全網が
+      #     「登録済みだが発火しない」状態だった(2026-08-04朝レビューで rank_mode 昇格の取りこぼしを検出)。
+      #     『発火しない安全網は検証されない』を潰す=端末間同期漏れ(前日最頻の言い直し源)を出す前に止める。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: nodeテスト(同期方針/墓標/純関数)を全実行
+        run: |
+          set -e
+          fail=0
+          for t in tests/test_*.js; do
+            echo "── $t ──"
+            node "$t" || fail=1
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::nodeテストに失敗があります(上のログ参照)"
+            exit 1
+          fi
+          echo "OK: 全 tests/test_*.js 緑"
+
   smoke:
     runs-on: ubuntu-latest
     needs: secret-guard
