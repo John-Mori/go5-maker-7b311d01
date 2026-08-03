@@ -1703,15 +1703,30 @@
   function shortWorkerReady() {
     return /^https?:\/\//.test(workerBase()) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
   }
-  function shortenViaWorker(longUrl) {
+  // ★2026-08-04(恒久策・Chami「Xの投稿がda.gdになってる、大問題」): 一時的な失敗で静かに da.gd へ落ちるのを止める。
+  //   従来はワーカーfetchが①タイムアウト無し(ブラウザ既定まで待つ)②失敗即あきらめ で、コールドスタート/瞬断/429の
+  //   一瞬のブレでも da.gd(計測不能・外部依存)が「確定リンク」として保存されていた。→ 6秒タイムアウト＋1回だけ再試行。
+  //   400(host_not_allowed)/401(bad_secret)/403(origin)は宛先・鍵・オリジンの確定的な拒否＝再試行しても同じなので即あきらめる。
+  function shortenViaWorker(longUrl, _tries) {
     if (!shortWorkerReady()) return Promise.resolve('');
+    _tries = _tries || 0;
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 6000) : null;
+    function retryOr(v) { return (_tries >= 1) ? v : shortenViaWorker(longUrl, _tries + 1); }
     return fetch(workerBase().replace(/\/+$/, '') + '/api/shorten', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Shared-Secret': SHORT.SHARED_SECRET },
-      body: 'url=' + encodeURIComponent(longUrl)
-    }).then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) { var s = (j && j.short) || ''; return /^https?:\/\//.test(s) ? s : ''; })
-      .catch(function () { return ''; });
+      body: 'url=' + encodeURIComponent(longUrl),
+      signal: ctl ? ctl.signal : undefined
+    }).then(function (r) {
+      if (timer) clearTimeout(timer);
+      if (r.ok) return r.json().then(function (j) { var s = (j && j.short) || ''; return /^https?:\/\//.test(s) ? s : ''; });
+      if (r.status === 400 || r.status === 401 || r.status === 403) return ''; // 確定的な拒否＝再試行しない
+      return retryOr('');   // 429/5xx＝一時的の可能性＝1回だけ再試行
+    }).catch(function () {
+      if (timer) clearTimeout(timer);
+      return retryOr('');   // ネットワーク例外/タイムアウト＝1回だけ再試行
+    });
   }
   // 外部サービス短縮。(GET・テキスト返却)da.gd → TinyURL の順で保険に使う。
   //   ★6秒タイムアウト付き(2026-07-20 da.gd障害の教訓): da.gdが「拒否」でなく「無限タイムアウト」型で

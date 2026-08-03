@@ -68,6 +68,24 @@
     });
   }
 
+  // 保存済みの外部短縮(da.gd/tinyurl等・生X-URLが手元に無い旧レコード)を、ワーカーの /api/resolve で
+  //   最終遷移先まで追い、それがX投稿URLなら applyXPostUrl_ で自前ドメイン短縮へ格上げする(=YouTube→Xの計測を取り戻す)。
+  //   ★2026-08-04 恒久策(Chami「da.gdになってる、大問題」)。da.gdが落ちていれば resolve が失敗＝現状維持(悪化しない)。
+  function healExternalXShort_(extShort) {
+    try {
+      var og = window.Go5Short;
+      var base = (og && og.WORKER_URL || '').replace(/\/+$/, '');
+      var sec = og && og.SHARED_SECRET;
+      if (!base || !sec || !extShort) return;
+      fetch(base + '/api/resolve?secret=' + encodeURIComponent(sec) + '&url=' + encodeURIComponent(extShort))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          var fin = (j && j.ok && j.final) || '';
+          if (/^https?:\/\/(?:[^/]*\.)?(?:x\.com|twitter\.com)\//.test(fin)) applyXPostUrl_(fin, null);
+        }).catch(function () {});
+    } catch (e) {}
+  }
+
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
   function fmtTs(ts) {
@@ -735,7 +753,10 @@
     try {
       var og = window.Go5Short;
       var isOurs = (og && og.ourBase) ? !!og.ourBase(slotUrl) : /\/\/(?:5mgl\.com|yoz2\.com)\//.test(slotUrl);
-      if (slotUrl && !isOurs && saved.xPostUrl) { applyXPostUrl_(saved.xPostUrl, null); }
+      if (slotUrl && !isOurs) {
+        if (saved.xPostUrl) applyXPostUrl_(saved.xPostUrl, null);   // 生のX投稿URLがある＝それから自前ドメインで再短縮
+        else healExternalXShort_(slotUrl);                          // 無い＝da.gd等を解決して自前ドメインへ格上げ
+      }
     } catch (e) {}
     // 作品遷移リンク(Chami依頼2026-07-30④)=作品のアフィリンクをタップで開ける(遷移先の確認用)。無ければ隠す。
     var wl = $('draftWorkLink'), waff = (meta.affiliateUrl || meta.workUrl || '').trim();
