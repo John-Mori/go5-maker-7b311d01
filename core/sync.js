@@ -39,6 +39,7 @@
     if (/^cand_hidden__/.test(k)) return true;           // 非表示リスト
     if (k === "cand_hide_posted") return true;
     if (/^go5_stock_meta$/.test(k)) return true;         // ドラフト一覧(id単位union・Chami依頼2026-07-31)
+    if (/^go5_stock_archive$/.test(k)) return true;      // 作成履歴(投稿完了ぶん・id単位union・墓標なし・Chami依頼2026-08-03)
     if (/^go5_stock_del$/.test(k)) return true;          // ドラフト削除の墓標(端末をまたぐ削除の伝播)
     if (/^go5_draft_post_/.test(k)) return true;         // 下書きの投稿編集(per-id・LWW)
     if (Keys && Keys.syncAllowed(k)) return true;        // 本物の設定(レイアウト/本文/説明欄/af_id 等)
@@ -207,6 +208,10 @@
   function isCandArrayKey(k) { return /^cand_items(__|$)/.test(String(k)); }
   // 下書き(ドラフト)一覧＝1キーに配列を持つ。候補と同じく id 単位 union で「端末をまたいだ下書きを失わない」。
   function isStockArrayKey(k) { return /^go5_stock_meta$/.test(String(k)); }
+  // 作成履歴(投稿完了ぶん)＝1キーに配列。id 単位 union で端末をまたいで完了作品を失わない。
+  //   ★墓標(go5_stock_del)は適用しない=完了作品は「meta から外れ archive に居る」状態が正しいので、
+  //     墓標で archive からも消すと2台目で完了作品が丸ごと消える(Chami依頼2026-08-03)。復活許容はテンプレ帳と同型。
+  function isStockArchiveKey(k) { return /^go5_stock_archive$/.test(String(k)); }
   function isStockDelKey(k) { return /^go5_stock_del$/.test(String(k)); }
   // 📝テンプレ帳(本文定型文・アカウント別)＝1キーに配列を持つ。候補/ドラフトと同じく union で
   //   「端末をまたいだ・空の端末で上書きした時に保存済みテンプレを失わない」(Chami依頼2026-08-02
@@ -215,7 +220,7 @@
   //   「消えない」を優先する(丸ごとLWWで全消失するより安全)。
   function isTplBookKey(k) { return /^bsky_tpl_book(__|$)/.test(String(k)); }
   // 配列キーの id フィールド名。(候補=cid / ドラフト=id / テンプレ帳=name)union/墓標の両方で使う。
-  function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : (isStockArrayKey(k) ? "id" : (isTplBookKey(k) ? "name" : null)); }
+  function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : ((isStockArrayKey(k) || isStockArchiveKey(k)) ? "id" : (isTplBookKey(k) ? "name" : null)); }
   // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
   function isEmptyVal_(v) { return v === undefined || v === null || v === ""; }
   // ★同一cidの2レコードをフィールド単位で統合する。newer を基本に採るが、newer 側で空(欠け)の
@@ -497,7 +502,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isScheduleStateKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isScheduleStateKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -704,7 +709,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 

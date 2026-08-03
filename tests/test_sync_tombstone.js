@@ -82,6 +82,16 @@ var uni = S.unionByField("[]", JSON.stringify([{ id: "stk1", addedAt: 100 }, { i
 ok("stock unionで一旦復活", JSON.parse(uni).length === 2);
 eq("stock 墓標で stk1 だけ除外", JSON.parse(S.applyTombstone(uni, { stk1: 150 }, "id", "addedAt")), [{ id: "stk2", addedAt: 100 }]);
 
+// ── 作成履歴(go5_stock_archive)＝id union・墓標なし(Chami依頼2026-08-03・完了作品が2台目で消える件) ──
+ok("isStockArchiveKey", S.isStockArchiveKey("go5_stock_archive") && !S.isStockArchiveKey("go5_stock_meta") && !S.isStockArrayKey("go5_stock_archive"));
+eq("arrIdField archive=id", S.arrIdField_("go5_stock_archive"), "id"); // union対象=完了作品を端末間で失わない
+eq("archive union で両端末の完了作品を保持",
+   JSON.parse(S.unionByField('[{"id":"a1","title":"完了A"}]', '[{"id":"a2","title":"完了B"}]', "id")),
+   [{ id: "a1", title: "完了A" }, { id: "a2", title: "完了B" }]);
+// ★墓標(go5_stock_del)は archive には適用しない=完了作品は del墓標を持つが archive では残す。
+//   (sync本体の墓標適用は isStockArrayKey/isCandArrayKey に限定=archiveは対象外なので、ここでは分類のみ検証)
+ok("archiveは墓標適用の分類に含めない", !S.isStockArrayKey("go5_stock_archive") && !S.isCandArrayKey("go5_stock_archive"));
+
 // ── unionCand フィールド統合: newer に欠けた作品URLは older から保持する(作品URL消失の根治) ──
 eq("union newerにurl無→olderのurlを保持",
    JSON.parse(S.unionCand('[{"cid":"a","url":"https://x/works/a/","price":500}]', '[{"cid":"a","price":400}]')),
