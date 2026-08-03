@@ -505,6 +505,29 @@
     }
     return lines.join('\n');
   }
+  // 既存の割引行に「の新作/総集編」サフィックスだけを差し込む純粋関数。数字・単位・末尾の絵文字はそのまま保持する。
+  //   Chami依頼2026-08-04:「💕は勝手につけない=テンプレ帳に書いた絵文字を尊重する」。割引セレクトが未選択でも、
+  //   新作/総集編チェックだけで本文の割引行へ反映できるようにするための土台(トグルで積み上がらないよう既存サフィックスは除去)。
+  function respliceDiscLine_(line, isNew, isDigest) {
+    var s = String(line == null ? '' : line);
+    var m = s.match(/^(.*?(?:オフ|円))(.*)$/);       // 「…N%オフ / …N円」まで(head)と、その後ろの装飾(tail)
+    if (!m) return s;
+    var tail = m[2].replace(/^の(?:新作(?:&総集編)?|総集編)/, '');  // 既存の新作/総集編サフィックスは一旦剥がす(再トグルで重ならない)
+    return m[1] + discSuffix_(isNew, isDigest) + tail;
+  }
+  try { window.__go5RespliceDiscLine = respliceDiscLine_; } catch (e) {} // 検証用フック
+  // 割引セレクト未選択でも、テキストエリア内に既にある割引行へ新作/総集編サフィックスを反映(絵文字トレイルは保持・行が無ければ何もしない)。
+  function retoggleDiscSuffix_(ta, isNew, isDigest) {
+    if (!ta) return false;
+    var cfg = DISC[acctId()] || DISC.acc1;
+    var lines = String(ta.value == null ? '' : ta.value).split('\n');
+    var idx = -1;
+    for (var i = 0; i < lines.length; i++) { if (cfg.mark.test(lines[i])) { idx = i; break; } }
+    if (idx < 0) return false;
+    lines[idx] = respliceDiscLine_(lines[idx], isNew, isDigest);
+    ta.value = lines.join('\n');
+    return true;
+  }
   // 本文(自動投稿/今すぐ投稿で共通)側の「新作」「総集編」状態。2つのチェックボックスは同期。
   function isNewBody() { return !!(els.discountNew && els.discountNew.checked) || !!(els.discountNew2 && els.discountNew2.checked); }
   function isDigestBody() { return !!(els.discountDigest && els.discountDigest.checked) || !!(els.discountDigest2 && els.discountDigest2.checked); }
@@ -532,11 +555,27 @@
   if (els.discountSel) els.discountSel.addEventListener('change', function () { applyDiscount(els.discountSel.value); });
   if (els.discountSel2) els.discountSel2.addEventListener('change', function () { applyDiscount(els.discountSel2.value); });
   // 「新作」チェック切替：両チェックを同期し、選択中の割引文があれば版を即差し替え。
-  function onNewBodyToggle(on) { syncNewBody(on); if (curDiscVal() !== '') applyDiscount(curDiscVal()); }
+  function onNewBodyToggle(on) {
+    syncNewBody(on);
+    if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; }
+    // 割引セレクト未選択(テンプレ帳に割引文を書いて運用)でも、チェックだけで本文の割引行へサフィックスを反映。
+    if (retoggleDiscSuffix_(els.text, isNewBody(), isDigestBody())) {
+      saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
+      try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {}
+    }
+  }
   if (els.discountNew) els.discountNew.addEventListener('change', function () { onNewBodyToggle(els.discountNew.checked); });
   if (els.discountNew2) els.discountNew2.addEventListener('change', function () { onNewBodyToggle(els.discountNew2.checked); });
   // 「総集編」チェック切替：両チェックを同期し、選択中の割引文があれば版を即差し替え。
-  function onDigestBodyToggle(on) { syncDigestBody(on); if (curDiscVal() !== '') applyDiscount(curDiscVal()); }
+  function onDigestBodyToggle(on) {
+    syncDigestBody(on);
+    if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; }
+    // 割引セレクト未選択でも、チェックだけで本文の割引行へサフィックスを反映(絵文字トレイルは保持)。
+    if (retoggleDiscSuffix_(els.text, isNewBody(), isDigestBody())) {
+      saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
+      try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {}
+    }
+  }
   if (els.discountDigest) els.discountDigest.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest.checked); });
   if (els.discountDigest2) els.discountDigest2.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest2.checked); });
   // 動画生成タブの「タグ」種別(◯%OFF / ¥価格)が切り替わったら、割引文の単位(%オフ⇔円)も追従。
