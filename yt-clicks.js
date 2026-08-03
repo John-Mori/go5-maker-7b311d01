@@ -1449,6 +1449,37 @@
     } catch (e) {}
   }
 
+  // 投稿完了時に、作品クリック計測URL(導線2)を作品URLから"一発で発行"する(Chami依頼2026-07-30)。
+  //   ★これは comment(autoMeasureWorkShort_:1430)が許可する「投稿時のフロー」＝作品URLからの新規発行を
+  //   意図的に行う経路。編集保存用の autoMeasureWorkShort_ は空欄を作品URLへフォールバックしない仕様
+  //   (「画像だけ直して保存→短縮URLが勝手に湧く」対策・2026-07-29)なので、投稿完了経路がそれを呼ぶと
+  //   workShortUrl が空のままシートへ載り、サブ端末で「作品クリックの短縮URLが空」になっていた(Chami再発
+  //   指摘2026-08-03②)。完了時は"新規発行してよい"のでこちらを使う。既に有れば触らない(冪等)。
+  function mintWorkShortAtPost_(it, persist) {
+    try {
+      if (!it || it.workShortNone) return;          // 意図的に消した行は復活させない
+      if (it.workShortUrl) return;                  // 既に有れば触らない(冪等)
+      var wurl = (it.workUrl || '').trim();
+      if (!/^https?:\/\//.test(wurl)) return;       // 作品URLが無ければ発行できない
+      var go5 = window.Go5Short || {};
+      function isR2(u) { return !!(go5.ourBase && go5.ourBase(u)); }
+      if (typeof window.Go5MakeShort !== 'function') return;
+      var toShorten = wurl;
+      // FANZA/DMMの作品ページURL(アフィリンクでない)なら、先にアフィリンク化してから短縮する。
+      if (window.buildAffiliateLink && /(^|\.)dmm\.co\.jp|(^|\.)dlsite|fanza/.test(wurl) && !/al\.(fanza|dmm)/.test(wurl)) {
+        var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+        var aff = window.buildAffiliateLink(wurl, afId);
+        if (aff && aff.ok && aff.link) toShorten = aff.link;
+      }
+      window.Go5MakeShort(toShorten).then(function (res) {
+        if (!(res && res.shortUrl && isR2(res.shortUrl))) return;
+        it.workShortUrl = res.shortUrl; it.workShareUrl = res.shareUrl || res.shortUrl;
+        if (typeof persist === 'function') persist();
+        if (acct() === chForItem_(it)) refresh(); // 作品クリック(ピンク矢印)がこの再描画で出る
+      });
+    } catch (e) {}
+  }
+
   // 履歴アイテム1件をスプレッドシート(GAS)へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
   // 投稿日時を上書きしないよう postUrl は送らない。(既存行のカテゴリ列だけ更新する用途)
   // T5: シートへ送るchannelは背骨ID(videoId)接頭辞を優先。(現UIではなく作品の所属)
@@ -2040,10 +2071,13 @@
     manual.push(entry);
     saveArrFor_('verify_manual', acc, manual);
     if (ytUrl) { ymap[id] = ytUrl; saveYtMapFor_(acc, ymap); }
-    // 作品クリック計測URL(導線2)を作品URLから自動生成＝編集→保存を待たずに一発で埋める(Chami依頼2026-07-30)。
+    // 作品クリック計測URL(導線2)を作品URLから自動発行＝編集→保存を待たずに一発で埋める(Chami依頼2026-07-30)。
+    //   ★投稿完了は"新規発行してよい"経路なので mintWorkShortAtPost_ を使う。autoMeasureWorkShort_(編集保存用)は
+    //   空欄を作品URLへフォールバックしない仕様のため、ここで呼ぶと workShortUrl が空のままシート/サブ端末へ
+    //   載っていた(Chami再発②2026-08-03)。
     if (entry.workUrl && !entry.workShortUrl) {
       try {
-        autoMeasureWorkShort_(entry, function () {
+        mintWorkShortAtPost_(entry, function () {
           saveArrFor_('verify_manual', acc, loadArrFor_('verify_manual', acc).map(function (x) { return x.id === id ? entry : x; }));
           pushItemToGas_(entry);
         });

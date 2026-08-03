@@ -546,6 +546,10 @@ test('PR-3: 値なしは N を据え置く(誤った数字を貼らない)', fun
   assert.strictEqual(resolvePromoTemplate(PROMO_BODY, { type: 'discount', pct: null, price: null }),
     '続きが気になっちゃう一冊、みつけた📚\nしかも今ならN%オフ💕\n\n(商品紹介短縮URL)');
 });
+test('PR-3b: 割引0%は N%行を丸ごと削除(「0%オフ」の無意味な文を出さない・Chami依頼①)', function () {
+  assert.strictEqual(resolvePromoTemplate(PROMO_BODY, { type: 'discount', pct: 0, price: null }),
+    '続きが気になっちゃう一冊、みつけた📚\n\n(商品紹介短縮URL)');
+});
 test('PR-4: YouTube説明欄 %モード→接頭辞なしの¥N価格行を行ごと削除(②)', function () {
   assert.strictEqual(resolvePromoTemplate('冒頭\n期間限定今だけ¥N作品をご案内！\n#PR', { type: 'discount', pct: 35, price: 10 }),
     '冒頭\n#PR');

@@ -415,6 +415,10 @@
     var isPrice = opts.type === 'price';
     var pct = (opts.pct != null && !isNaN(opts.pct)) ? String(Number(opts.pct)) : null;
     var price = (opts.price != null && !isNaN(opts.price)) ? Number(opts.price).toLocaleString('ja-JP') : null;
+    // ★割引が0%のときは「0%オフ」と出て文が意味を失うので、割引率プレースホルダ(N%)を含む
+    //   行を丸ごと削除する(Chami依頼2026-08-03①「割引がない時は行ごと削除」)。値不明(null)は
+    //   従来どおり N を据え置く(誤った数字を貼らない=PR-3)。
+    var noDiscount = !isPrice && (pct != null && Number(pct) === 0);
     var lines = s.split('\n');
     var out = [];
     for (var i = 0; i < lines.length; i++) {
@@ -427,6 +431,7 @@
       } else if (!isPrice && /[¥￥]\s*N(?![0-9A-Za-z])/.test(line)) {
         continue;                             // %表示のとき価格専用行(¥N)は行ごと削除
       }
+      if (noDiscount && /N\s*[%％]/.test(line)) continue; // 割引0%=N%を含む行を丸ごと削除(①)
       out.push(line);
     }
     var res = out.join('\n');
