@@ -54,6 +54,7 @@
     /^yt_tags(__|$)/,
     /^affi_urls(_|__|$)/,        // affi_urls / affi_urls_quick(_at) / _undostack / _redostack
     /^bsky_tpl_book(__|$)/,      // 📝テンプレ帳(本文定型文・アカウント別・2026-07-12)
+    /^bsky_tpl_del(__|$)/,       // 📝テンプレ帳の削除墓標(name→削除ts・削除を全端末へ伝播・Chami依頼2026-08-03)
     /^bsky_discount_urls(__|$)/,    // 🔥セール案内URL(複数・名前付き・アカウント別・2026-07-20)
     /^bsky_discount_selected(__|$)/, // 選択中のセール案内URL(次回も同じものを使う・アカウント別・2026-07-20)
     // ▼下書き(ドラフト)を全端末で同期(Chami依頼2026-07-31「別端末でドラフトが出ない・localStorageに頼るな」)。

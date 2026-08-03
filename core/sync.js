@@ -216,9 +216,12 @@
   // 📝テンプレ帳(本文定型文・アカウント別)＝1キーに配列を持つ。候補/ドラフトと同じく union で
   //   「端末をまたいだ・空の端末で上書きした時に保存済みテンプレを失わない」(Chami依頼2026-08-02
   //   「保存した内容を消さずどの端末でも共有」)。id が無く name が実質の一意キーなので name で union。
-  //   ★墓標(削除の伝播)は持たない=片端末で消しても他端末から復活し得るが、消えて困る側の要望なので
-  //   「消えない」を優先する(丸ごとLWWで全消失するより安全)。
+  //   ★削除の墓標(bsky_tpl_del__acc)を持つ=🗑削除を全端末へ伝播(Chami依頼2026-08-03「前のやつ消して」)。
+  //     墓標は name→削除ts。削除ts が保存時刻(at)以上なら消える／at が新しい=削除後に再保存なら残る
+  //     ＝「消さずに共有」(2026-08-02)と「消したら全端末で消える」(2026-08-03)を時刻順で両立。
   function isTplBookKey(k) { return /^bsky_tpl_book(__|$)/.test(String(k)); }
+  function isTplDelKey(k) { return /^bsky_tpl_del(__|$)/.test(String(k)); }
+  function tplDelKeyOf(bookKey) { return String(bookKey).replace(/^bsky_tpl_book/, "bsky_tpl_del"); } // bsky_tpl_book__acc→bsky_tpl_del__acc
   // 配列キーの id フィールド名。(候補=cid / ドラフト=id / テンプレ帳=name)union/墓標の両方で使う。
   function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : ((isStockArrayKey(k) || isStockArchiveKey(k)) ? "id" : (isTplBookKey(k) ? "name" : null)); }
   // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
@@ -502,7 +505,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isScheduleStateKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isScheduleStateKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -532,9 +535,9 @@
           else delete mls[k];
         });
 
-        // 墓標(cand_del / go5_stock_del)は両側にあれば id 単位で union。(片側の削除を失わない)
+        // 墓標(cand_del / go5_stock_del / bsky_tpl_del)は両側にあれば id/name 単位で union。(片側の削除を失わない)
         Object.keys(mls).forEach(function (k) {
-          if (!isCandDelKey(k) && !isStockDelKey(k)) return;
+          if (!isCandDelKey(k) && !isStockDelKey(k) && !isTplDelKey(k)) return;
           var a = lmapLs[k], b = rls[k];
           if (a && b && !a.d && !b.d) {
             var u = mergeDelMap(a.v, b.v);
@@ -566,18 +569,22 @@
             // 配列は「ライブ値」ともう一度id unionしてから書く＝進行中に増えた分を絶対に失わない。
             var u2 = unionByField(e.v, live, idf2);
             if (u2 != null) finalV = u2;
-            // ★墓標を適用：削除済みidをunion結果から除外し復活を防ぐ。マージ済み墓標とライブ墓標の両方を効かせる。
-            //   テンプレ帳(name union)は墓標を持たないので適用しない。(候補/ドラフトのみ)
+            // ★墓標を適用：削除済みid/nameをunion結果から除外し復活を防ぐ。マージ済み墓標とライブ墓標の両方を効かせる。
+            //   候補/ドラフト=id/addedAt。テンプレ帳=name/at(削除後に再保存したものは at>削除ts で残る)。作成履歴は墓標を適用しない。
             if (isCandArrayKey(k) || isStockArrayKey(k)) {
               var dk = isCandArrayKey(k) ? candDelKeyOf(k) : "go5_stock_del";
               var dmerged = (mls[dk] && !mls[dk].d) ? mls[dk].v : LS.getItem(dk);
               finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(dmerged || "{}", LS.getItem(dk) || "{}")), idf2, "addedAt");
+            } else if (isTplBookKey(k)) {
+              var tdk = tplDelKeyOf(k);
+              var tdmerged = (mls[tdk] && !mls[tdk].d) ? mls[tdk].v : LS.getItem(tdk);
+              finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(tdmerged || "{}", LS.getItem(tdk) || "{}")), "name", "at");
             }
           } else if (isScheduleStateKey(k)) {
             // 同期中にカレンダーが編集されても、開始時点の値で上書きせずライブ値を再統合する。
             var sm = mergeScheduleState(e.v, live);
             if (sm != null) finalV = sm;
-          } else if (isCandDelKey(k) || isStockDelKey(k)) {
+          } else if (isCandDelKey(k) || isStockDelKey(k) || isTplDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
             if (u3 != null) finalV = u3;
@@ -721,7 +728,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 

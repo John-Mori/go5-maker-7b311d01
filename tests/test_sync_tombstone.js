@@ -123,6 +123,26 @@ eq("同nameは newer(後入れ)の本文を採用",
    JSON.parse(S.unionByField('[{"name":"A","text":"旧","at":1}]', '[{"name":"A","text":"新","at":2}]', "name")),
    [{ name: "A", text: "新", at: 2 }]);
 
+// ── 📝テンプレ帳の削除墓標(bsky_tpl_del__)＝削除を全端末へ伝播(Chami依頼2026-08-03「前のやつ消して」) ──
+ok("isTplDelKey", S.isTplDelKey("bsky_tpl_del__acc1") && S.isTplDelKey("bsky_tpl_del") && !S.isTplDelKey("bsky_tpl_book__acc1"));
+eq("tplDelKeyOf: book→del(acct保持)", S.tplDelKeyOf("bsky_tpl_book__acc2"), "bsky_tpl_del__acc2");
+// ★核心1: 削除ts が保存時刻(at)以降のテンプレは union 後に除外＝他端末から復活しない
+eq("墓標で同名テンプレを除外(削除ts≧at)",
+   JSON.parse(S.applyTombstone('[{"name":"旧","text":"x","at":100},{"name":"残","text":"y","at":100}]', { "旧": 200 }, "name", "at")),
+   [{ name: "残", text: "y", at: 100 }]);
+// ★核心2: 削除より後に再保存(at>削除ts)したものは墓標を越えて残る＝「保存は消さない」と両立
+eq("削除後に再保存(at>削除ts)は残す",
+   JSON.parse(S.applyTombstone('[{"name":"復活","text":"z","at":300}]', { "復活": 200 }, "name", "at")),
+   [{ name: "復活", text: "z", at: 300 }]);
+// ★核心3: at 欠けの古いテンプレは削除ts があれば除外(0<削除ts)
+eq("at欠けの古テンプレは墓標で除外",
+   JSON.parse(S.applyTombstone('[{"name":"古","text":"w"}]', { "古": 1 }, "name", "at")),
+   []);
+// ★墓標マップは name 単位で新しい削除tsを採用(片端末の削除を失わない)
+eq("tpl墓標マージ=name単位で新ts採用",
+   JSON.parse(S.mergeDelMap('{"A":100,"B":50}', '{"A":200,"C":30}')),
+   { A: 200, B: 50, C: 30 });
+
 // ── ①-B ドラフトの画像ミラー(stock:imgs:)＝IDB同期レールに乗る/動画blobは乗らない(2026-07-31) ──
 ok("stock:imgs は同期IDBキー", S.isSyncIdbKey("stock:imgs:stk123"));
 ok("既存の同期IDBキーは維持", S.isSyncIdbKey("ref:abc") && S.isSyncIdbKey("bsky:1") && S.isSyncIdbKey("post:9"));

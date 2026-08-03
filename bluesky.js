@@ -819,8 +819,19 @@
 
   // ---- 📝テンプレ帳: 本文定型文の名前付き保存/適用/削除(アカウント別・検証で文面を切替える用) ----
   function tplBookKey_() { return 'bsky_tpl_book__' + acctId(); }
+  function tplDelKey_() { return 'bsky_tpl_del__' + acctId(); }
   function tplBookLoad_() { try { return JSON.parse(localStorage.getItem(tplBookKey_()) || '[]') || []; } catch (e) { return []; } }
   function tplBookSave_(arr) { try { localStorage.setItem(tplBookKey_(), JSON.stringify(arr.slice(0, 30))); } catch (e) {} }
+  // 削除墓標を打つ(name→削除ts)＝この削除を全端末へ伝播させ、他端末の同名テンプレから復活しないようにする。
+  //   同名を後から再保存(at>削除ts)すれば墓標を越えて残るので「保存は消さない」要望とも両立する。
+  function tplTombstone_(name) {
+    try {
+      var m = JSON.parse(localStorage.getItem(tplDelKey_()) || '{}') || {};
+      m[name] = new Date().getTime();
+      localStorage.setItem(tplDelKey_(), JSON.stringify(m));
+    } catch (e) {}
+    try { if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync(); else if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {}
+  }
   function tplSelRefresh_() {
     var sel = $('bskyTplSel'); if (!sel) return;
     var book = tplBookLoad_();
@@ -851,8 +862,8 @@
       var book = tplBookLoad_(), i = parseInt(sel.value, 10), t = book[i];
       if (!t) return;
       if (!window.confirm('テンプレ「' + t.name + '」を削除しますか？')) return;
-      book.splice(i, 1); tplBookSave_(book); tplSelRefresh_();
-      var h = $('bskyTplHint'); if (h) h.textContent = '削除しました。';
+      book.splice(i, 1); tplBookSave_(book); tplTombstone_(t.name); tplSelRefresh_();
+      var h = $('bskyTplHint'); if (h) h.textContent = '削除しました。(全端末へ反映)';
     });
     // ドロップダウンで別のテンプレを選んだ瞬間に、その文章を本文へ反映する(Chami指定2026-07-31)。
     sel.addEventListener('change', function () {
