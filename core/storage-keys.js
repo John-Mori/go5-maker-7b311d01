@@ -44,6 +44,10 @@
   var SYNC_ALLOW = [
     /^preview_/,                 // レイアウト微調整(値・_default・各段・帯・余白)＝アカウント別
     /^btn_color_/,               // 編集ボタンの色カスタマイズ(theme-settings・全アカウント共通)
+    // 動画の出力設定(preview_ と同性質＝どの端末でも同じ仕上がりにする・2026-08-04 自己点検で同期漏れを発見)。
+    //   ★promo_label_vals は同期しない=中身が{pct,priceVal,cid}の「直前の作品の値」で、端末をまたぐと古い値を持ち込むため。
+    /^promo_label_(enabled|type|scale|fpos)$/, // 🏷割引/価格ラベルの表示ON/種別/倍率/位置(値valsは除外・出力の見た目設定)
+    /^movie_(two_line|author_two_line)$/,      // ④コメント/①作者の2行モード(出力に効くチェック・全端末で揃える)
     // 本文・YouTube説明欄・アフィURL とその Qセーブ/元に戻す/やり直しスタック(アカウント別)：
     /^bsky_enable(__|$)/,
     /^bsky_unattended(__|$)/,
