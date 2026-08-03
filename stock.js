@@ -71,11 +71,23 @@
   // ドラフト作成/投稿完了/編集は頻度が低くユーザー操作＝即時push(flushSync)で相手端末へ渡す。
   //   これで相手は「今すぐ同期」を押さずとも、アプリを開いた時の自動pullだけで最新が出る(Chami依頼2026-08-03)。
   //   flushSync 未搭載の古いJSでも壊れないよう requestSync へフォールバック。
+  // ★複数キーを続けて書く操作(投稿完了=墓標+meta+作成履歴の3書込)は、途中の kickSync を抑止して
+  //   「全部書き終えてから1回だけ push」する。これをしないと最初の flushSync が走った瞬間の
+  //   localStorage(=墓標だけ書けて meta/archive はまだ旧値)がスナップされ、作成履歴の反映が
+  //   後続のデバウンス push 頼みになる=スマホを閉じると凍って相手端末に作成履歴が渡らない(Chami報告2026-08-04)。
+  var _syncBatch = 0;
   function kickSync_() {
+    if (_syncBatch) return; // バッチ中は溜めて、batchSync_ の末尾で1回だけ push する
     try {
       if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync();
       else if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync();
     } catch (e) {}
+  }
+  // fn 内の localStorage 書込を全て終えてから、揃った状態で1回だけ即時 push する。
+  function batchSync_(fn) {
+    _syncBatch++;
+    try { fn(); } finally { _syncBatch--; }
+    if (!_syncBatch) kickSync_();
   }
   // ドラフト削除の墓標。(id→削除ts)端末をまたいで「消したドラフトが union で復活する」のを防ぐ=候補の cand_del と同型。
   //   投稿完了・削除でドラフト本体から外す時に打つ。復元(restoreStock_)は addedAt=now を打って墓標を越える。
@@ -257,13 +269,17 @@
     var meta = metas.filter(function (m) { return m.id === id; })[0];
     if (!meta) return;
     meta.completedTs = Date.now();
-    writeStockDel_(id); // 投稿完了＝ドラフト本体から外す。他端末のドラフト一覧からも消す(復活防止)
-    saveMeta(metas.filter(function (m) { return m.id !== id; }));
-    var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
-    arch.unshift(meta);
-    var dropped = arch.slice(ARCHIVE_MAX); // 上限超過分=保持できないので blob を掃除
-    dropped.forEach(function (m) { delBlobs_(m.id); });
-    saveArchive(arch);
+    // 墓標+meta+作成履歴の3書込を1トランザクションにして、揃った状態で1回だけ即時 push する
+    //   (途中 push だと作成履歴が旧値のまま送られ、相手端末で完了作品が並ばない・Chami報告2026-08-04)。
+    batchSync_(function () {
+      writeStockDel_(id); // 投稿完了＝ドラフト本体から外す。他端末のドラフト一覧からも消す(復活防止)
+      saveMeta(metas.filter(function (m) { return m.id !== id; }));
+      var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
+      arch.unshift(meta);
+      var dropped = arch.slice(ARCHIVE_MAX); // 上限超過分=保持できないので blob を掃除
+      dropped.forEach(function (m) { delBlobs_(m.id); });
+      saveArchive(arch);
+    });
   }
 
   // ④作成履歴からドラフト本体へ戻す。ドラフトが満杯なら溢れる最古の1件は作成履歴へ送り返す(=消さない)。
