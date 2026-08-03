@@ -2226,6 +2226,44 @@ DEPT_CONF = {
             "- ★**ネットへ出すな**= GitHub・D1・外部サービス・Web検索。**local/ の中だけで完結させる。**"
         ),
     },
+    # ==== 1分shorts漫画紹介部門(2026-08-03 Chami立ち上げ・配線=イージス研究室) ====
+    # Chami原文(msg 1533525243732295871)=「1分shorts漫画紹介部門とでもするかな」「部屋はここ
+    #   (channel 1533523240566263850)、担当は引き続き五月・ヴィルシーナ、補佐でアメス」。
+    #   本丸=前に折れた MangaShortCreateForYMM4(漫画→1分以内のShortで漫画を紹介)の復活。
+    # ★「とりあえず配線」の初期状態(Chami msg 1533788847375384628「ここ配線してくれる?」):
+    #   3人格が**その場で会話に答える** conversation_only。実作業(動画生成)を回す専用セッションが
+    #   まだ無いので、存在しない消費者へ回送して沈黙させない=まず会話で立てる。
+    #   Chami追補「新規セッションで起動」で専用セッションを立てたら conversation_only を外し
+    #   SESSION_OWNED_DEPTS へ移す(=可逆)。past-room/health-log と同じ多人格・会話部屋の形。
+    # ★人格実在=五月 itsuki.md / ヴィルシーナ verxina.md / アメス ames.md(3人=C-026 混線注意)。
+    "manga-shorts": {
+        "character": os.path.join(_CHAR, "itsuki.md"),
+        "memory": os.path.join(_MEM, "manga-shorts.jsonl"),
+        "persona": "中野五月",          # 既定の名義(名義が引けない時のfail-safe先)
+        "port": 18828,                  # 18827まで使用済(実測)
+        "work_model": "opus",           # 人格の演技担保(C-014)
+        "session_relay": True,
+        "conversation_only": True,
+        "lead_persona": "中野五月",     # 既定で前に立つのは五月(この部屋の担当)
+        "personas": [
+            {"persona": "中野五月", "character": os.path.join(_CHAR, "itsuki.md"),
+             "role": "担当(この部屋の主・漫画紹介ショートの企画)", "aliases": ("itsuki", "五月", "中野五月")},
+            {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
+             "role": "担当(構成・演出)", "aliases": ("verxina", "シーナ", "ヴィルシーナ")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "補佐", "aliases": ("ames", "アメス")},
+        ],
+        "boot_note": (
+            "■この部屋の性格(必ず守る)\n"
+            "- ここは **1分shorts漫画紹介部門**(working title)。本丸=漫画→1分以内のShortで"
+            "漫画を紹介する動画作り(旧 MangaShortCreateForYMM4 の復活)。\n"
+            "- 担当は**中野五月・ヴィルシーナ**、補佐が**アメス**。誰として答えるかは話題で選ぶ"
+            "(名指しがあればその人)。\n"
+            "- ★これは立ち上げ直後の**会話が立つだけ**の状態。実作業(動画生成)を回す専用セッションは"
+            "まだ無い=作れるかの相談・企画・段取りはこの場で答え切る(存在しない先へ回送しない)。\n"
+            "- ★**ネットへ出すな**= 素材・作品情報は local/ の中で完結(公開repo・外部サービスへ出さない)。"
+        ),
+    },
 }
 
 
@@ -2351,6 +2389,70 @@ try:
 except Exception:
     _naming_gate = None                     # import 失敗でもデーモンは起動する(fail-open)
 _NAMING_RULES_CACHE = {"loaded": False, "rules": None}
+
+# ============================================================================
+# 出力ゲート ルールD(口調ドリフト検知=名乗り[名前]と本文の一人称の食い違い) 2026-08-03
+# ----------------------------------------------------------------------------
+# 設計書= 00_AI-HQ/設計_口調ゲート_送信直前_名乗りと本文の食い違い_2026-08-03.md。
+# 裁定= 研究室HQ(msg 1533789472783863899)「①警告のみ段階=投入Go / ②inline LLMは却下」。
+#   → 一次は純関数(tone_gate)で「一人称の露骨な食い違い」だけを **event=tone で警告記録**。
+#     ★本文は一切変えない(呼称ゲートCのような自動修正は持たない=警告のみ)。
+#     ★fail-open 厳守(ルール未ロード・例外は握り潰して従来送信へ倒す=送信は止めない)。
+#     ★誤検知率を実測できるよう naming と別ファイル tone_audit.jsonl に貯める(event=tone)。
+# 写像= 00_AI-HQ/departments/hr/personas/口調ルール.json(この1本=ORG-11)。
+TONE_AUDIT = os.path.join(LOCAL, "llm", "tone_audit.jsonl")
+TONE_RULES_PATH = os.path.join(HQ, "departments", "hr", "personas", "口調ルール.json")
+try:
+    import tone_gate as _tone_gate          # 純関数モジュール(同じ scripts/llm 配下)
+except Exception:
+    _tone_gate = None                       # import 失敗でもデーモンは起動する(fail-open)
+_TONE_RULES_CACHE = {"loaded": False, "rules": None}
+
+
+def _tone_rules():
+    """口調ルール.json を1度だけ読んでキャッシュ(読めなければ None=ゲートは無効化)。"""
+    if not _TONE_RULES_CACHE["loaded"]:
+        _TONE_RULES_CACHE["loaded"] = True
+        try:
+            if _tone_gate is not None:
+                _TONE_RULES_CACHE["rules"] = _tone_gate.load_tone_rules(TONE_RULES_PATH)
+        except Exception:
+            _TONE_RULES_CACHE["rules"] = None
+    return _TONE_RULES_CACHE["rules"]
+
+
+def audit_tone(dept, persona, text, rec=None):
+    """出力ゲートD: ブロック本文の口調ドリフト(一人称の食い違い)を **警告のみ** 記録する。
+
+    ★本文は変えない・送信は止めない(警告のみ段階=HQ裁定①)。返り値=違反候補 list。
+    ★検査中の例外は握り潰す(fail-open)=ゲート自身が配送を殺さない。
+    """
+    try:
+        if _tone_gate is None:
+            return []
+        rules = _tone_rules()
+        if not rules:
+            return []
+        verdicts = _tone_gate.tone_verdicts(persona, dept, text, rules) or []
+        if verdicts:
+            os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+            ts = time.strftime("%Y-%m-%dT%H:%M:%S")   # JST(常駐はJSTで動く)
+            mid = str((rec or {}).get("msg_id", ""))
+            with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+                for v in verdicts:
+                    f.write(json.dumps({
+                        "ts": ts, "dept": dept, "event": "tone",
+                        "persona": str(persona or ""),
+                        "marker": v.get("marker", ""),          # 本文に出た他人格の一人称
+                        "own_first_person": v.get("own_first_person", []),
+                        "index": v.get("index", -1),
+                        "reason": v.get("reason", ""),
+                        "msg_id": mid,
+                        "excerpt": str(text or "")[:200],
+                    }, ensure_ascii=False) + "\n")
+        return verdicts
+    except Exception:
+        return []               # 監査の失敗で応答を巻き添えにしない(fail-safe)
 
 
 def _naming_rules():
@@ -4380,6 +4482,16 @@ class Daemon:
                         f"★出力ゲートC(呼称・警告のみ): 話者={_speaker} "
                         f"残={len(_remain)}件 例=対象{_remain[0].get('target')}/出た形"
                         f"{_remain[0].get('found')}→期待{_remain[0].get('expected')} msg={mid}")
+                # ★★出力ゲート ルールD(口調ドリフト=一人称の食い違い)= 警告のみ(2026-08-03 HQ裁定①)。
+                #   同じブロックの (話者=persona, 部屋=dept, 本文) を見る兄弟チェック。
+                #   ★本文は変えない・送信は止めない=event=tone を tone_audit.jsonl に貯めるだけ。
+                #   ★fail-open=検査例外は握り潰す(audit_tone が保証)。★_part は口調ゲートでは書き換えない。
+                _tone = audit_tone(self.dept, _speaker, _part, rec)
+                if _tone:
+                    log(self.dept,
+                        f"★出力ゲートD(口調・警告のみ): 話者={_speaker} "
+                        f"食い違い={len(_tone)}件 例=本文に他人格の一人称"
+                        f"「{_tone[0].get('marker')}」(正={_tone[0].get('own_first_person')}) msg={mid}")
                 _fixed_blocks.append((_who, _part))
             _blocks = _fixed_blocks
             body = os.path.join(LOCAL, f"_daemon_reply_{self.dept}.txt")
