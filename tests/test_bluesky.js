@@ -467,13 +467,13 @@ test('P-11: セールプレースホルダを含まない本文は無変化', fu
 test('P-12: 括弧付き「(商品紹介短縮URL)」を検出=作品プレースホルダ', function () {
   assert.strictEqual(hasWorkLinkPlaceholder('本文\n\n(商品紹介短縮URL)'), true);
 });
-test('P-13: 「(商品紹介短縮URL)」置換=括弧は残し中身だけURLへ', function () {
+test('P-13: 「(商品紹介短縮URL)」置換=括弧ごとURLへ(裸URL・Chami2026-08-03「()から置換対象」)', function () {
   assert.strictEqual(fillWorkLinkPlaceholder('本文\n\n(商品紹介短縮URL)', 'https://yoz2.com/OZX3F', ''),
-    '本文\n\n(https://yoz2.com/OZX3F)');
+    '本文\n\nhttps://yoz2.com/OZX3F');
 });
-test('P-14: 「(商品紹介用短縮URL)」(用あり)も置換', function () {
+test('P-14: 「(商品紹介用短縮URL)」(用あり)も括弧ごと置換', function () {
   assert.strictEqual(fillWorkLinkPlaceholder('(商品紹介用短縮URL)', 'https://yoz2.com/OZX3F', ''),
-    '(https://yoz2.com/OZX3F)');
+    'https://yoz2.com/OZX3F');
 });
 test('P-15: 既定表記「紹介用短縮リンク」も従来どおり検出・置換(後方互換)', function () {
   assert.strictEqual(hasWorkLinkPlaceholder(WORK_LINK_PLACEHOLDER), true);
@@ -482,16 +482,17 @@ test('P-15: 既定表記「紹介用短縮リンク」も従来どおり検出�
 test('P-16: 括弧付き「(セール紹介短縮用URL)」を検出=セールプレースホルダ', function () {
   assert.strictEqual(hasSaleLinkPlaceholder('本文\n\n(セール紹介短縮用URL)'), true);
 });
-test('P-17: 「(セール紹介短縮用URL)」置換=括弧は残し中身だけURLへ', function () {
+test('P-17: 「(セール紹介短縮用URL)」置換=括弧ごとURLへ(裸URL・Chami2026-08-03)', function () {
   assert.strictEqual(fillSaleLinkPlaceholder('(セール紹介短縮用URL)', 'https://yoz2.com/evTh1'),
-    '(https://yoz2.com/evTh1)');
+    'https://yoz2.com/evTh1');
 });
 test('P-18: 既定表記「セール中短縮リンク」も従来どおり検出・置換(後方互換)', function () {
   assert.strictEqual(hasSaleLinkPlaceholder(SALE_LINK_PLACEHOLDER), true);
   assert.strictEqual(fillSaleLinkPlaceholder(SALE_LINK_PLACEHOLDER, 'https://5mgl.com/s'), 'https://5mgl.com/s');
 });
 test('P-19: ★作品置換はセール語を食わない(「セール紹介短縮用URL」を作品リンクにしない)', function () {
-  // セール接頭辞の語は作品プレースホルダとして検出されない(=作品リンク置換の対象外)。
+  // セール接頭辞の語は作品プレースホルダとして検出されない(=作品リンク置換の対象外)。括弧ごと消費する
+  //   パターンでも、語そのものが一致しないので括弧を含めて丸ごと不変(食い違い置換の事故を防ぐ)。
   assert.strictEqual(hasWorkLinkPlaceholder('(セール紹介短縮用URL)'), false);
   assert.strictEqual(fillWorkLinkPlaceholder('(セール紹介短縮用URL)', 'https://yoz2.com/WORK', ''),
     '(セール紹介短縮用URL)');
@@ -499,22 +500,33 @@ test('P-19: ★作品置換はセール語を食わない(「セール紹介短�
 test('P-20: ★セール置換は作品語を食わない(「商品紹介短縮URL」をセールにしない)', function () {
   assert.strictEqual(hasSaleLinkPlaceholder('(商品紹介短縮URL)'), false);
 });
-test('P-21: 作品・セール両方を含む本文=それぞれ正しい側だけ置換(Chami報告の再現)', function () {
+test('P-21: 作品・セール両方を含む本文=それぞれ正しい側だけ置換・括弧ごと裸URL(Chami報告の再現)', function () {
   var t = '続きが気になっちゃう一冊、みつけた📚\nしかも今なら50%オフ💕\n\n(商品紹介短縮URL)\n\n(セール紹介短縮用URL)';
   var afterWork = fillWorkLinkPlaceholder(t, 'https://yoz2.com/OZX3F', '');
   var afterBoth = fillSaleLinkPlaceholder(afterWork, 'https://yoz2.com/evTh1');
   assert.strictEqual(afterBoth,
-    '続きが気になっちゃう一冊、みつけた📚\nしかも今なら50%オフ💕\n\n(https://yoz2.com/OZX3F)\n\n(https://yoz2.com/evTh1)');
+    '続きが気になっちゃう一冊、みつけた📚\nしかも今なら50%オフ💕\n\nhttps://yoz2.com/OZX3F\n\nhttps://yoz2.com/evTh1');
 });
 test('P-22: 作品リンク未取得ならプレースホルダのまま(表記ゆれ形でも)', function () {
   assert.strictEqual(fillWorkLinkPlaceholder('(商品紹介短縮URL)', '', ''), '(商品紹介短縮URL)');
 });
-test('P-23: 「作品」接頭辞も許容', function () {
-  assert.strictEqual(fillWorkLinkPlaceholder('(作品紹介短縮URL)', 'https://yoz2.com/W', ''), '(https://yoz2.com/W)');
+test('P-23: 「作品」接頭辞も許容(括弧ごと裸URL)', function () {
+  assert.strictEqual(fillWorkLinkPlaceholder('(作品紹介短縮URL)', 'https://yoz2.com/W', ''), 'https://yoz2.com/W');
 });
 test('P-24: プレースホルダを含まない通常本文は検出されない', function () {
   assert.strictEqual(hasWorkLinkPlaceholder('続きが気になっちゃう一冊、みつけた📚'), false);
   assert.strictEqual(hasSaleLinkPlaceholder('続きが気になっちゃう一冊、みつけた📚'), false);
+});
+test('P-25: 括弧なしプレースホルダは従来どおり裸URLへ(後方互換)', function () {
+  assert.strictEqual(fillWorkLinkPlaceholder('本文\n商品紹介短縮URL', 'https://yoz2.com/OZX3F', ''),
+    '本文\nhttps://yoz2.com/OZX3F');
+  assert.strictEqual(fillSaleLinkPlaceholder('セール中短縮リンク', 'https://yoz2.com/evTh1'), 'https://yoz2.com/evTh1');
+});
+test('P-26: ★セール見出しの直下がセールプレースホルダなら見出しを剥がさない(大幅セール文面が消える不具合)', function () {
+  // stripAutoBlocks はセール見出し行(KNOWN_DISCOUNT_LEADS)を古い完成形として剥がすが、直下が
+  //   生きたセールプレースホルダの時は現行テンプレ=残す。剥がすとChami報告「大幅セールの文面が消えてる」になる。
+  var t = '続きが気になっちゃう一冊、みつけた📚\n\n(商品紹介短縮URL)\n\n🏮 大幅割引セール中の同人祭ページ 🏮\n(セール紹介短縮用URL)';
+  assert.strictEqual(stripAutoBlocks(t), t, 'セール見出し＋直下プレースホルダは丸ごと残る');
 });
 
 // ────────────────────────────────────────────────────────────

@@ -304,18 +304,22 @@
   //   「セール紹介短縮用URL」等)。★exact一致(indexOf/split)だと表記を1文字でも変えた瞬間に
   //   置換されず、else経路で生の作品/会場URLが末尾に自動追記され、プレースホルダは日本語のまま
   //   残って二重化する(=Chamiが見た不具合そのもの)。正規表現で表記ゆれを吸収する。
-  //   ★括弧は消費しない=Chamiが付けた「()」はそのまま残り、中身の語だけURLへ替わる
-  //   (「(商品紹介短縮URL)」→「(https://…)」。Chami「短縮URLは()付きに変更した」の意図に沿う)。
+  //   ★括弧ごと消費する=Chamiが付けた「()」もURLへ置き換える(「(商品紹介短縮URL)」→「https://…」)。
+  //   2026-08-03 Chami「短縮URL本番は()で囲わない。()から置換対象」で、2026-08-02の「()付きに変更した」を
+  //   撤回。前後の半角/全角括弧(と間の空白)を任意で飲み込み、置換後に裸URLだけを残す。
   //   ★作品(WORK)側は「商品/作品」接頭辞 か 既知の"紹介用短縮リンク/URL"のみに限定し、セール側の
   //   「セール紹介短縮…」を誤って食わない(セール接頭辞の語を作品リンクへ置換する事故を防ぐ)。
   var WORK_LINK_SRC = '(?:商品|作品)?紹介用短縮(?:リンク|URL)|(?:商品|作品)紹介短縮用?(?:リンク|URL)';
   var SALE_LINK_SRC = 'セール(?:紹介)?[用中]?短縮[用中]?(?:リンク|URL)';
+  // 置換用パターン: プレースホルダ語の前後にある半角/全角括弧(と間の空白)も一緒に飲み込む。
+  //   Chami「()から置換対象」(2026-08-03)＝括弧ごとURLへ替えて裸URLだけ残す。検出(has〜)は語だけで足りる。
+  function fillSrc_(inner) { return '[(（]?[ \\t]*(?:' + inner + ')[ \\t]*[)）]?'; }
   function hasWorkLinkPlaceholder(text) { return new RegExp(WORK_LINK_SRC).test(String(text == null ? '' : text)); }
   function hasSaleLinkPlaceholder(text) { return new RegExp(SALE_LINK_SRC).test(String(text == null ? '' : text)); }
   function fillSaleLinkPlaceholder(text, saleLink) {
     var s = String(text == null ? '' : text);
     if (saleLink == null || saleLink === '') return s; // まだ短縮リンクが用意できていなければプレースホルダのまま返す
-    return s.replace(new RegExp(SALE_LINK_SRC, 'g'), function () { return saleLink; });
+    return s.replace(new RegExp(fillSrc_(SALE_LINK_SRC), 'g'), function () { return saleLink; });
   }
   /**
    * 本文中のプレースホルダ(WORK_LINK_PLACEHOLDER)を実リンクへ置換する。純粋関数。
@@ -335,7 +339,7 @@
     var s = String(text == null ? '' : text);
     var repl = shortLink || fallbackLink || '';
     if (!repl) return s;
-    return s.replace(new RegExp(WORK_LINK_SRC, 'g'), function () { return repl; });
+    return s.replace(new RegExp(fillSrc_(WORK_LINK_SRC), 'g'), function () { return repl; });
   }
   function stripAutoBlocks(text) {
     var lines = String(text == null ? '' : text).split('\n');
@@ -344,10 +348,14 @@
       var t = lines[i].trim();
       if (t === HOOK_DEEPEN_LINE || t === CTA_LINE) continue; // 単独行として剥がす(直下は消費しない)
       var isPrLine = KNOWN_PR_LINES.indexOf(t) >= 0;
-      if (isPrLine || KNOWN_DISCOUNT_LEADS.indexOf(t) >= 0) {
-        // ★PR行の直下が「まだ実リンクに置換されていないプレースホルダ」なら、これは古い完成形では
-        //   なく現行の生きたテンプレなので剥がさない(2026-07-23 プレースホルダ方式)。
-        if (isPrLine && i + 1 < lines.length && hasWorkLinkPlaceholder(lines[i + 1].trim())) {
+      var isDiscLead = KNOWN_DISCOUNT_LEADS.indexOf(t) >= 0;
+      if (isPrLine || isDiscLead) {
+        // ★見出し行の直下が「まだ実リンクに置換されていないプレースホルダ」なら、これは古い完成形では
+        //   なく現行の生きたテンプレなので剥がさない(2026-07-23 プレースホルダ方式)。PR行→作品プレースホルダ /
+        //   セール見出し→セールプレースホルダ の両方を保護する。★セール見出しの保護が無く、直下が
+        //   セールプレースホルダでも見出しごと剥がされて消えていた(Chami報告2026-08-03「大幅セールの文面が消えてる」)。
+        var next = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+        if ((isPrLine && hasWorkLinkPlaceholder(next)) || (isDiscLead && hasSaleLinkPlaceholder(next))) {
           out.push(lines[i]);
           continue;
         }
