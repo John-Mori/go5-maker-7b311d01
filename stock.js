@@ -68,7 +68,15 @@
   function loadArchive() { try { return JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]') || []; } catch (e) { return []; } }
   function saveArchive(arr) { try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(arr.slice(0, ARCHIVE_MAX))); } catch (e) {} }
   // 全端末同期(Go5Sync)へ即時反映を促す。(未設定・未ロードなら何もしない)ドラフトを保存したら他端末へ運ぶ。
-  function kickSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
+  // ドラフト作成/投稿完了/編集は頻度が低くユーザー操作＝即時push(flushSync)で相手端末へ渡す。
+  //   これで相手は「今すぐ同期」を押さずとも、アプリを開いた時の自動pullだけで最新が出る(Chami依頼2026-08-03)。
+  //   flushSync 未搭載の古いJSでも壊れないよう requestSync へフォールバック。
+  function kickSync_() {
+    try {
+      if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync();
+      else if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync();
+    } catch (e) {}
+  }
   // ドラフト削除の墓標。(id→削除ts)端末をまたいで「消したドラフトが union で復活する」のを防ぐ=候補の cand_del と同型。
   //   投稿完了・削除でドラフト本体から外す時に打つ。復元(restoreStock_)は addedAt=now を打って墓標を越える。
   function writeStockDel_(id) {

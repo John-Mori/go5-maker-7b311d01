@@ -657,6 +657,18 @@
     _reqTimer = root.setTimeout(function () { _reqTimer = null; syncOnce(false); }, wait);
   }
 
+  // 即時同期。デバウンス(3〜10秒)を待たずに今すぐpush/pullする。
+  //   ドラフト作成/投稿完了/編集の直後に呼ぶ＝相手端末が「今すぐ同期」を押さなくても、
+  //   アプリを開いた時の自動pullだけで最新が出るようにする(Chami依頼2026-08-03「同期押さなくても済むように」)。
+  //   スマホはアプリを閉じる/裏に回すとデバウンス待ちのpushが凍って消える＝そのレースを無くす。
+  //   同期中(_busy)は今の同期の完了を待てないので、短い再同期だけ予約して取りこぼしを防ぐ。
+  function flushSync() {
+    if (!configured()) return Promise.resolve({ ok: false, skipped: true });
+    if (_reqTimer) { try { root.clearTimeout(_reqTimer); } catch (e) {} _reqTimer = null; }
+    if (_busy) { requestSync(); return Promise.resolve({ ok: false, busy: true }); }
+    return syncOnce(false);
+  }
+
   // ── 動画など重いblobの on-demand R2 経路(②・2026-08-01)──
   //   周期同期レール(isSyncIdbKey)には載せない=積んでも同期は軽いまま。実体はraw-bytesのsha256でR2へ直接PUT、
   //   台帳(ドラフトメタ)には hash 文字列だけ持たせ、必要な端末が必要な時にGETで取り寄せる。
@@ -697,7 +709,7 @@
   }
 
   root.Go5Sync = {
-    configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, status: status, startAuto: startAuto,
+    configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, flushSync: flushSync, status: status, startAuto: startAuto,
     putBlobR2: putBlobR2, fetchBlobR2: fetchBlobR2, putBlobR2At: putBlobR2At, fetchBlobR2At: fetchBlobR2At,
     setConfig: function (o) {
       try {
