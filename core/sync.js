@@ -737,9 +737,13 @@
       if (!configured()) { if (st) st.textContent = "⚠️ 同期URLとトークンを入れてください"; return; }
       if (st) st.textContent = "🔄 同期中…"; startStatusPoll();
       syncOnce(false).then(function (r) {
+        // ★skipped＝別の自動同期が進行中で今回のタップは走らなかっただけ。「失敗」ではない。
+        //   進行中の同期の実結果(✅ or 実エラー)は startStatusPoll→showStatus が status().lastError から出す。
+        //   これをしないと「起動直後にタップ→自動同期と競合→中身のない『⚠️ 失敗』」になり、実際の原因が隠れる。
+        if (r && r.skipped) { if (st) st.textContent = busyText(status()); return; }
         if (st) st.textContent = r.ok
           ? ("✅ 同期しました(v" + r.version + ")" + (r.pulled ? " ・" + r.pulled + "件を反映" : ""))
-          : ("⚠️ " + (r.error || "失敗"));
+          : ("⚠️ " + (r.error || "失敗(原因不明)"));
       });
     });
     // 自動同期中も進捗表示を更新。(タブを開いていれば見える)
