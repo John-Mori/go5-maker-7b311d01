@@ -629,11 +629,24 @@
   //   削除ができ、選んだものはリセットせず次回も同じものを使う」。アカウント別(acc1/acc2で別々に持てる)。
   //   永続キーは core/storage-keys.js の許可リストへ登録済み(sync対象)。
   function discUrlsKey_() { return 'bsky_discount_urls__' + acctId(); }
+  function discDelKey_() { return 'bsky_discount_del__' + acctId(); }
   function discSelKey_() { return 'bsky_discount_selected__' + acctId(); }
   function discUrlsLoad_() { try { var a = JSON.parse(localStorage.getItem(discUrlsKey_()) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
-  function discUrlsSave_(arr) { try { localStorage.setItem(discUrlsKey_(), JSON.stringify(arr.slice(0, 50))); } catch (e) {} }
+  function discUrlsSave_(arr) { try { localStorage.setItem(discUrlsKey_(), JSON.stringify(arr.slice(0, 50))); } catch (e) {} discKickSync_(); }
   function discSelectedId_() { try { return localStorage.getItem(discSelKey_()) || ''; } catch (e) { return ''; } }
-  function discSetSelectedId_(id) { try { localStorage.setItem(discSelKey_(), id || ''); } catch (e) {} }
+  function discSetSelectedId_(id) { try { localStorage.setItem(discSelKey_(), id || ''); } catch (e) {} discKickSync_(); }
+  // すぐ全端末へ反映(Chami依頼2026-08-03「全部同期してくれ」)。同期押下を待たず追加/削除/選択の直後に流す。
+  function discKickSync_() { try { if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync(); else if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
+  // 削除墓標を打つ(id→削除ts)＝この削除を全端末へ伝播させ、他端末の同一URLから復活しないようにする。
+  //   同一idを後から再追加(at>削除ts)すれば墓標を越えて残る＝テンプレ帳(tplTombstone_)と同型。
+  function discTombstone_(id) {
+    try {
+      var m = JSON.parse(localStorage.getItem(discDelKey_()) || '{}') || {};
+      m[id] = new Date().getTime();
+      localStorage.setItem(discDelKey_(), JSON.stringify(m));
+    } catch (e) {}
+    discKickSync_();
+  }
   // 初回のみ：旧・単一URL運用の既定値(DISCOUNT_LIST_URL)を「名前付きリストの1件目」として移行・選択する。
   function ensureDiscUrlsSeeded_() {
     var acc = acctId();
@@ -759,6 +772,7 @@
         if (!window.confirm('「' + target.name + '」を削除しますか？')) return;
         arr2 = arr2.filter(function (x) { return x.id !== id; });
         discUrlsSave_(arr2);
+        discTombstone_(id); // 削除を全端末へ伝播(他端末の同一URLから復活させない)
         if (discSelectedId_() === id) discSetSelectedId_(arr2.length ? arr2[0].id : '');
         renderDiscUrlList_();
         renderPreview();

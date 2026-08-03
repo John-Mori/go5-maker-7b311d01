@@ -222,8 +222,14 @@
   function isTplBookKey(k) { return /^bsky_tpl_book(__|$)/.test(String(k)); }
   function isTplDelKey(k) { return /^bsky_tpl_del(__|$)/.test(String(k)); }
   function tplDelKeyOf(bookKey) { return String(bookKey).replace(/^bsky_tpl_book/, "bsky_tpl_del"); } // bsky_tpl_book__acc→bsky_tpl_del__acc
-  // 配列キーの id フィールド名。(候補=cid / ドラフト=id / テンプレ帳=name)union/墓標の両方で使う。
-  function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : ((isStockArrayKey(k) || isStockArchiveKey(k)) ? "id" : (isTplBookKey(k) ? "name" : null)); }
+  // 🔥セール案内URL(名前付きリスト・アカウント別)＝1キーに配列。テンプレ帳と同型で id 単位 union＋削除墓標。
+  //   whole-key LWW だと別端末で追加した分を丸ごと上書きして「たまに消える」(Chami依頼2026-08-03)。
+  //   id で union して消さず、削除は bsky_discount_del__acc(id→削除ts)で全端末へ伝播。at>削除ts で再追加は残る。
+  function isDiscUrlsKey(k) { return /^bsky_discount_urls(__|$)/.test(String(k)); }
+  function isDiscDelKey(k) { return /^bsky_discount_del(__|$)/.test(String(k)); }
+  function discDelKeyOf(urlsKey) { return String(urlsKey).replace(/^bsky_discount_urls/, "bsky_discount_del"); } // bsky_discount_urls__acc→bsky_discount_del__acc
+  // 配列キーの id フィールド名。(候補=cid / ドラフト=id / テンプレ帳=name / セール案内=id)union/墓標の両方で使う。
+  function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : ((isStockArrayKey(k) || isStockArchiveKey(k) || isDiscUrlsKey(k)) ? "id" : (isTplBookKey(k) ? "name" : null)); }
   // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
   function isEmptyVal_(v) { return v === undefined || v === null || v === ""; }
   // ★同一cidの2レコードをフィールド単位で統合する。newer を基本に採るが、newer 側で空(欠け)の
@@ -505,7 +511,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isScheduleStateKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -537,7 +543,7 @@
 
         // 墓標(cand_del / go5_stock_del / bsky_tpl_del)は両側にあれば id/name 単位で union。(片側の削除を失わない)
         Object.keys(mls).forEach(function (k) {
-          if (!isCandDelKey(k) && !isStockDelKey(k) && !isTplDelKey(k)) return;
+          if (!isCandDelKey(k) && !isStockDelKey(k) && !isTplDelKey(k) && !isDiscDelKey(k)) return;
           var a = lmapLs[k], b = rls[k];
           if (a && b && !a.d && !b.d) {
             var u = mergeDelMap(a.v, b.v);
@@ -579,12 +585,16 @@
               var tdk = tplDelKeyOf(k);
               var tdmerged = (mls[tdk] && !mls[tdk].d) ? mls[tdk].v : LS.getItem(tdk);
               finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(tdmerged || "{}", LS.getItem(tdk) || "{}")), "name", "at");
+            } else if (isDiscUrlsKey(k)) {
+              var ddk = discDelKeyOf(k);
+              var ddmerged = (mls[ddk] && !mls[ddk].d) ? mls[ddk].v : LS.getItem(ddk);
+              finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(ddmerged || "{}", LS.getItem(ddk) || "{}")), "id", "at");
             }
           } else if (isScheduleStateKey(k)) {
             // 同期中にカレンダーが編集されても、開始時点の値で上書きせずライブ値を再統合する。
             var sm = mergeScheduleState(e.v, live);
             if (sm != null) finalV = sm;
-          } else if (isCandDelKey(k) || isStockDelKey(k) || isTplDelKey(k)) {
+          } else if (isCandDelKey(k) || isStockDelKey(k) || isTplDelKey(k) || isDiscDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
             if (u3 != null) finalV = u3;
@@ -728,7 +738,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 

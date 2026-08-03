@@ -143,6 +143,24 @@ eq("tpl墓標マージ=name単位で新ts採用",
    JSON.parse(S.mergeDelMap('{"A":100,"B":50}', '{"A":200,"C":30}')),
    { A: 200, B: 50, C: 30 });
 
+// ── 🔥セール案内URL(bsky_discount_urls__)＝id 単位 union＋削除墓標(Chami依頼2026-08-03「全部同期・たまに消える」) ──
+ok("isDiscUrlsKey", S.isDiscUrlsKey("bsky_discount_urls__acc1") && S.isDiscUrlsKey("bsky_discount_urls") && !S.isDiscUrlsKey("bsky_discount_selected__acc1"));
+ok("isDiscDelKey", S.isDiscDelKey("bsky_discount_del__acc1") && S.isDiscDelKey("bsky_discount_del") && !S.isDiscDelKey("bsky_discount_urls__acc1"));
+eq("arrIdField disc=id", S.arrIdField_("bsky_discount_urls__acc2"), "id");
+eq("discDelKeyOf: urls→del(acct保持)", S.discDelKeyOf("bsky_discount_urls__acc2"), "bsky_discount_del__acc2");
+// ★核心: 別端末で追加したセールURLが whole-key LWW で消えず union で両立する(=たまに消えるの根治)
+eq("2端末のセールURLをid unionで両立(消さない)",
+   JSON.parse(S.unionByField('[{"id":"d1","name":"夏","url":"u1","at":100}]', '[{"id":"d2","name":"新春","url":"u2","at":110}]', "id")),
+   [{ id: "d1", name: "夏", url: "u1", at: 100 }, { id: "d2", name: "新春", url: "u2", at: 110 }]);
+// ★核心: 削除した案内は墓標(削除ts≧at)で他端末から復活しない
+eq("セールURL墓標で除外(削除ts≧at)",
+   JSON.parse(S.applyTombstone('[{"id":"d1","name":"旧","url":"u1","at":100},{"id":"d2","name":"残","url":"u2","at":100}]', { d1: 200 }, "id", "at")),
+   [{ id: "d2", name: "残", url: "u2", at: 100 }]);
+// ★核心: 削除後に再追加(at>削除ts)は墓標を越えて残る
+eq("セールURL再追加(at>削除ts)は残す",
+   JSON.parse(S.applyTombstone('[{"id":"d3","name":"復活","url":"u3","at":300}]', { d3: 200 }, "id", "at")),
+   [{ id: "d3", name: "復活", url: "u3", at: 300 }]);
+
 // ── ①-B ドラフトの画像ミラー(stock:imgs:)＝IDB同期レールに乗る/動画blobは乗らない(2026-07-31) ──
 ok("stock:imgs は同期IDBキー", S.isSyncIdbKey("stock:imgs:stk123"));
 ok("既存の同期IDBキーは維持", S.isSyncIdbKey("ref:abc") && S.isSyncIdbKey("bsky:1") && S.isSyncIdbKey("post:9"));
