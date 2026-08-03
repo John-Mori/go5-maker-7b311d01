@@ -1008,7 +1008,8 @@ textarea:focus{border-color:var(--accent);}
 .disc-url-item input[type=radio]{accent-color:var(--accent);flex-shrink:0;width:16px;height:16px;margin:0;}
 .disc-url-name{display:block;color:var(--ink);font-weight:700;}
 .disc-url-url{display:block;color:var(--sub);font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.disc-url-del{flex-shrink:0;background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:6px;
+.disc-url-start{display:block;color:var(--sub);font-size:.68rem;margin-top:2px;}
+.disc-url-date,.disc-url-del{flex-shrink:0;background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:6px;
   padding:5px 10px;font-size:12px;width:auto;margin-top:0;}
 .disc-url-add{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
 .disc-url-add input{flex:1 1 140px;min-width:0;font-size:14px;padding:8px 10px;border-radius:8px;

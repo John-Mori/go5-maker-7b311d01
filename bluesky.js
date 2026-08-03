@@ -739,6 +739,18 @@
   }
   function recomposePcText_() { if (els.pcText) els.pcText.value = composePostText(); }
 
+  // 記載開始日(=そのセールURLを登録した日 e.at)の表示。未設定は「(未設定)」。JSTローカル日付で出す。
+  function fmtDiscStart_(ms) { if (!ms) return '(未設定)'; var d = new Date(ms); return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate(); }
+  // 「2026/8/1」等の入力を、その日の0時(端末ローカル)のミリ秒へ。認識できなければ null。
+  function parseDiscStart_(s) {
+    var m = String(s || '').trim().match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+    if (!m) return null;
+    var y = +m[1], mo = +m[2], d = +m[3];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    var ts = new Date(y, mo - 1, d, 0, 0, 0, 0).getTime();
+    return (ts > 0) ? ts : null;
+  }
+
   // ---- UI: セール案内URL一覧(選択・追加・削除)の描画・配線 ----
   function renderDiscUrlList_() {
     var wrap = $('discUrlList'); if (!wrap) return;
@@ -748,10 +760,12 @@
       var checked = (e.id === sel) ? ' checked' : '';
       return '<label class="disc-url-item">' +
         '<input type="radio" name="discUrlSel" value="' + escapeHtml(e.id) + '"' + checked + '>' +
-        '<span style="flex:1;min-width:0;">' +
+        '<span style="flex:1;min-width:0;overflow:hidden;">' +
           '<span class="disc-url-name">' + escapeHtml(e.name || '(無題)') + '</span>' +
           '<span class="disc-url-url">' + escapeHtml(e.url) + '</span>' +
+          '<span class="disc-url-start">記載開始:' + escapeHtml(fmtDiscStart_(e.at)) + '</span>' +
         '</span>' +
+        '<button type="button" class="ghost disc-url-date" data-id="' + escapeHtml(e.id) + '" title="記載開始日を直す">📅</button>' +
         '<button type="button" class="ghost disc-url-del" data-id="' + escapeHtml(e.id) + '">🗑</button>' +
         '</label>';
     }).join('');
@@ -774,6 +788,27 @@
         discUrlsSave_(arr2);
         discTombstone_(id); // 削除を全端末へ伝播(他端末の同一URLから復活させない)
         if (discSelectedId_() === id) discSetSelectedId_(arr2.length ? arr2[0].id : '');
+        renderDiscUrlList_();
+        renderPreview();
+        if (els.pcModal && !els.pcModal.hidden) recomposePcText_();
+      });
+    });
+    // 📅 記載開始日を直す。★id は変えずに at だけ書き換える=墓標も再追加も起こさないので
+    //   「消えて→復活」の連鎖に乗らず、その場で日付だけ直る。保存で全端末へ同期(discKickSync_)。
+    Array.prototype.forEach.call(wrap.querySelectorAll('.disc-url-date'), function (b) {
+      b.addEventListener('click', function (ev) {
+        ev.preventDefault(); // ラベル内ボタン=クリックでラジオが切り替わるのを止める
+        var id = b.getAttribute('data-id');
+        var arr3 = discUrlsLoad_(), target = null;
+        arr3.forEach(function (x) { if (x.id === id) target = x; });
+        if (!target) return;
+        var cur = target.at ? fmtDiscStart_(target.at) : '';
+        var input = window.prompt('記載開始日を入れてください(例 2026/8/1)。\nセールを使い始めた日に直せます。', cur);
+        if (input == null) return;               // キャンセル
+        var ts = parseDiscStart_(input);
+        if (ts == null) { window.alert('日付は 2026/8/1 のように入れてください。'); return; }
+        target.at = ts;
+        discUrlsSave_(arr3);                      // 保存＋全端末へ同期
         renderDiscUrlList_();
         renderPreview();
         if (els.pcModal && !els.pcModal.hidden) recomposePcText_();
