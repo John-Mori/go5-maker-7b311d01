@@ -9,7 +9,16 @@ window.SCH = window.SCH || {};
 
   // アカウント別オフセットのヘルパ
   function curAccount_() { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } }
-  function accOffsetMin_(config) { var m = (config && config.accountOffsetMin) || {}; var v = m[curAccount_()]; return (typeof v === 'number') ? v : 0; }
+  // baseTime(テンプレ生時刻)ごとに個別オフセットがあればそれを、無ければ既定(accountOffsetMin)を返す。
+  function accOffsetMin_(config, baseTime) {
+    var acc = curAccount_();
+    var byTime = (config && config.accountOffsetByTime) || {};
+    var ov = byTime[acc];
+    if (ov && typeof ov[baseTime] === 'number') return ov[baseTime];
+    var m = (config && config.accountOffsetMin) || {};
+    var v = m[acc];
+    return (typeof v === 'number') ? v : 0;
+  }
   function shiftTime_(time, min) {
     if (!min) return time;
     var p = String(time).split(':'); var total = Number(p[0]) * 60 + Number(p[1]) + min;
@@ -40,11 +49,12 @@ window.SCH = window.SCH || {};
 
   // テンプレ枠から「自動更新してよいフィールド」を作る
   function templateFields(date, tslot, dayType, config) {
-    var off = accOffsetMin_(config);
+    var off = accOffsetMin_(config, tslot.time);
     var t = shiftTime_(tslot.time, off);
     return {
       scheduled_at: computeScheduledAt(date, t),
       time: t,
+      base_time: tslot.time,   // ★表示側で両ch分の時刻を復元するためテンプレ生時刻を保持（オフセット未適用）
       day_type: dayType,
       role: tslot.role,
       genre: tslot.genre_hint,

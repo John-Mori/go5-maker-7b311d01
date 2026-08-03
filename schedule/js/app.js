@@ -123,6 +123,14 @@ window.SCH = window.SCH || {};
     return nh + ":" + String(nm).padStart(2, "0");
   }
 
+  // base時刻ごとの個別オフセット(config.accountOffsetByTime)があればそれを、無ければ既定(accountOffsetMin)を返す。
+  function acctOffAt(cfg, acc, baseTime) {
+    const byTime = (cfg.accountOffsetByTime || {})[acc];
+    if (byTime && typeof byTime[baseTime] === "number") return byTime[baseTime];
+    const m = cfg.accountOffsetMin || {};
+    return (typeof m[acc] === "number") ? m[acc] : 0;
+  }
+
   function dayTypeClass(meta) {
     return {
       "平日型": "dt-weekday", "休前日型": "dt-eve",
@@ -234,18 +242,19 @@ window.SCH = window.SCH || {};
     if (pri === 1) el.classList.add("top");
     if (s1 && s1.needs_review) el.classList.add("needs-review");
 
-    // 素の時刻(現行タブのオフセットを外す)→左右へ各chのオフセットを当てる。20分ずれを1行に並置。
+    // 素の時刻(テンプレ生時刻=base)→左右へ各chのオフセットを当てる。ch差を1行に並置。
+    // base_time があれば直接使う(オフセットが時刻ごとに異なるため逆算では復元不能)。無い旧枠は従来どおりフラットに逆算。
     const off = config.accountOffsetMin || {};
     const curOff = (typeof off[curAcc()] === "number") ? off[curAcc()] : 0;
-    const base = addMin(s1.time, -curOff);
+    const base = (s1 && s1.base_time) ? s1.base_time : addMin(s1.time, -curOff);
     const st1 = (s1 && s1.status) || "未着手";
     const st2 = (s2 && s2.status) || "未着手";
     if (st1 === "公開済" && st2 === "公開済") el.classList.add("cleared"); // 両ch済＝行ごと沈める
 
     el.innerHTML =
       `<span class="bar"></span>` +
-      chanCell("月詠み", addMin(base, (typeof off.acc1 === "number") ? off.acc1 : 0), st1) +
-      chanCell("宵桜", addMin(base, (typeof off.acc2 === "number") ? off.acc2 : 0), st2) +
+      chanCell("月詠み", addMin(base, acctOffAt(config, "acc1", base)), st1) +
+      chanCell("宵桜", addMin(base, acctOffAt(config, "acc2", base)), st2) +
       `<span class="prio">${pri === 1 ? '<span class="star"></span>本命' : "優先度" + pri}` +
       ((s1 && s1.needs_review) ? ' <span class="slot-review" title="要確認">!</span>' : "") + `</span>`;
     // 編集は現行タブのスロットに対して(従来どおり＝アクティブなアカウントの exec を編集)
