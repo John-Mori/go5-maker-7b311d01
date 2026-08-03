@@ -48,6 +48,13 @@
     //   ★promo_label_vals は同期しない=中身が{pct,priceVal,cid}の「直前の作品の値」で、端末をまたぐと古い値を持ち込むため。
     /^promo_label_(enabled|type|scale|fpos)$/, // 🏷割引/価格ラベルの表示ON/種別/倍率/位置(値valsは除外・出力の見た目設定)
     /^movie_(two_line|author_two_line)$/,      // ④コメント/①作者の2行モード(出力に効くチェック・全端末で揃える)
+    // ▼「どこからログインしても同じ状態で表示される」核(Chami指示2026-08-04・Googleドライブの発想)。
+    //   ランキングの表示条件・候補の絞り込みは「端末別の見方」ではなく「全端末で同じ状態」に揃える(旧: localで保留していた)。
+    /^rank_(metric|mode|window)$/,             // ランキングの指標/モード/集計期間=どの端末でも同じ見え方(scalar・whole-key LWW)
+    /^cand_price_max$/,                        // 候補の価格上限フィルタ=同上(scalar・whole-key LWW)
+    // 候補の投稿済み手動宣言(durable override・{acc:{cid:ts}})。端末をまたいで宣言を失わないよう
+    //   core/sync.js が per-cid の newer-ts union で統合する(whole-key LWWだと別端末の宣言を丸ごと潰す)。
+    /^cand_posted_(on|off)$/,                  // 「このchで投稿した/していない」の手動宣言=全端末で同じ投稿済み判定に連動
     // 本文・YouTube説明欄・アフィURL とその Qセーブ/元に戻す/やり直しスタック(アカウント別)：
     /^bsky_enable(__|$)/,
     /^bsky_unattended(__|$)/,

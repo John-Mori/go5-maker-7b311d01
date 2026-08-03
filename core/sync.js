@@ -228,6 +228,33 @@
   function isDiscUrlsKey(k) { return /^bsky_discount_urls(__|$)/.test(String(k)); }
   function isDiscDelKey(k) { return /^bsky_discount_del(__|$)/.test(String(k)); }
   function discDelKeyOf(urlsKey) { return String(urlsKey).replace(/^bsky_discount_urls/, "bsky_discount_del"); } // bsky_discount_urls__acc→bsky_discount_del__acc
+  // 候補の投稿済み手動宣言(cand_posted_on / cand_posted_off)＝1キーに {acc:{cid:ts}} のネスト辞書を持つ。
+  //   ★宣言は「作品ごと」に積み上がる=whole-key LWW だと別端末で立てた宣言を丸ごと上書きして消す。
+  //   → acc・cid 単位で union し、同一cidは ts(宣言時刻)の大きい方を採る=「どの端末で立てた宣言も失わない」
+  //     ＝「どこからログインしても同じ投稿済み判定」(Chami核2026-08-04)。※解除(delete)はtombstoneを持たないため
+  //     別端末に宣言が残っていれば次回同期で復活しうる(宣言の消失より復活の方が実害が小さい&稀=許容)。
+  function isPostedMapKey(k) { return /^cand_posted_(on|off)$/.test(String(k)); }
+  function mergePostedMap(olderStr, newerStr) {
+    try {
+      var older = JSON.parse(olderStr || "{}"), newer = JSON.parse(newerStr || "{}");
+      if (!older || typeof older !== "object" || Array.isArray(older)) older = {};
+      if (!newer || typeof newer !== "object" || Array.isArray(newer)) newer = {};
+      var out = {}, accs = {};
+      Object.keys(older).forEach(function (a) { accs[a] = 1; }); Object.keys(newer).forEach(function (a) { accs[a] = 1; });
+      Object.keys(accs).forEach(function (a) {
+        var oa = (older[a] && typeof older[a] === "object") ? older[a] : {};
+        var na = (newer[a] && typeof newer[a] === "object") ? newer[a] : {};
+        var m = {}, cids = {};
+        Object.keys(oa).forEach(function (c) { cids[c] = 1; }); Object.keys(na).forEach(function (c) { cids[c] = 1; });
+        Object.keys(cids).forEach(function (c) {
+          var ov = Number(oa[c]) || 0, nv = Number(na[c]) || 0;
+          var v = Math.max(ov, nv); if (v > 0) m[c] = v;   // 大きい方のts=より新しい宣言を採用
+        });
+        if (Object.keys(m).length) out[a] = m;
+      });
+      return JSON.stringify(out);
+    } catch (e) { return null; }
+  }
   // 配列キーの id フィールド名。(候補=cid / ドラフト=id / テンプレ帳=name / セール案内=id)union/墓標の両方で使う。
   function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : ((isStockArrayKey(k) || isStockArchiveKey(k) || isDiscUrlsKey(k)) ? "id" : (isTplBookKey(k) ? "name" : null)); }
   // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
@@ -511,7 +538,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -539,6 +566,16 @@
           var mergedSchedule = mergeScheduleState(olderValue, newerValue);
           if (mergedSchedule != null) mls[k] = { t: Math.max(a && a.t || 0, b && b.t || 0), v: mergedSchedule };
           else delete mls[k];
+        });
+
+        // 候補の投稿済み手動宣言({acc:{cid:ts}})は acc・cid 単位で union。(別端末の宣言を丸ごと消さない)
+        Object.keys(mls).forEach(function (k) {
+          if (!isPostedMapKey(k)) return;
+          var a = lmapLs[k], b = rls[k];
+          if (a && b && !a.d && !b.d) {
+            var u = mergePostedMap(a.v, b.v);
+            if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
+          }
         });
 
         // 墓標(cand_del / go5_stock_del / bsky_tpl_del)は両側にあれば id/name 単位で union。(片側の削除を失わない)
@@ -594,6 +631,10 @@
             // 同期中にカレンダーが編集されても、開始時点の値で上書きせずライブ値を再統合する。
             var sm = mergeScheduleState(e.v, live);
             if (sm != null) finalV = sm;
+          } else if (isPostedMapKey(k)) {
+            // 同期中に宣言が増えても、開始時点の値で上書きせずライブ値と再union。(進行中の宣言を失わない)
+            var up = mergePostedMap(e.v, live);
+            if (up != null) finalV = up;
           } else if (isCandDelKey(k) || isStockDelKey(k) || isTplDelKey(k) || isDiscDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
@@ -738,7 +779,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 
