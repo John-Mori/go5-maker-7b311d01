@@ -157,9 +157,9 @@
   // 同じ作品(cid)には1回だけ自動適用＝再描画・キャッシュヒットのたびに手動調整を上書きしない。(割引自動反映と同じ設計)
   // リロードを跨いでも尊重できるよう localStorage に記録する。
   //   ★AIはタグ(genre)に載らず「コミック・AI」等フロア名で示されるため、floor/service も判定に混ぜる(Chami依頼2026-08-02②)。
-  function autoApplyAttrsFromInfo_(info) {
+  function autoApplyAttrsFromInfo_(info, cidHint) {
     if (!info) return;
-    var cid = String(info.cid || ''); if (!cid) return;
+    var cid = String(info.cid || cidHint || ''); if (!cid) return;
     if (load('movie_auto_attrs_cid') === cid) return;
     save('movie_auto_attrs_cid', cid);
     setMovieAttrsFromTexts_((info.genres || []).concat([info.floor, info.service, info.title]));
@@ -2259,7 +2259,7 @@
     try { secret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
     if (!workerUrl || typeof window.FanzaCore === 'undefined') { if (el) { el.style.color = 'var(--sub)'; el.textContent = ''; } return; }
     // キャッシュヒット(成功情報)はそのまま反映。
-    if (movieInfoCache[cid] && movieInfoCache[cid].title) { renderMovieInfo(movieInfoCache[cid]); autofillAuthor(movieInfoCache[cid].author); return; }
+    if (movieInfoCache[cid] && movieInfoCache[cid].title) { renderMovieInfo(movieInfoCache[cid]); autofillAuthor(movieInfoCache[cid].author); autoApplyAttrsFromInfo_(movieInfoCache[cid], cid); return; }
     var seq = ++movieInfoSeq;
     renderMovieInfoLoading();
     window.FanzaCore.fetchFanzaInfo(cid, workerUrl, secret, url).then(function (info) {
@@ -2268,6 +2268,11 @@
         movieInfoCache[cid] = info;
         renderMovieInfo(info);
         autofillAuthor(info.author);
+        // ★作品情報(floor/service込み)が確定した所でカテゴリ自動チェックを正式適用する。
+        //   AIは genre に載らず「コミック・AI」等フロア名でしか判別できないため、
+        //   floor を持つこの経路で確定させないと AI が永久に自動チェックされない(#5 再発の真因＝
+        //   autoApplyAttrsFromInfo_ がどこからも呼ばれていなかった)。cid guard で1作品1回に絞る。
+        autoApplyAttrsFromInfo_(info, cid);
       } else {
         if (el) { el.style.color = 'var(--sub)'; el.textContent = '(作品情報を取得できませんでした' + (info && info.reason ? '：' + info.reason : '') + ')'; }
       }
