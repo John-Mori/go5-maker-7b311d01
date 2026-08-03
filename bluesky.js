@@ -1839,6 +1839,19 @@
     var acc = a || acctId(), out = [];
     try { out = histLoadFor_(acc) || []; } catch (e) { out = []; }
     try { var man = JSON.parse(localStorage.getItem('verify_manual__' + acc) || '[]'); if (man && man.length) out = out.concat(man); } catch (e) {}
+    // ★全端末同期される作成履歴(go5_stock_archive)も「投稿済み」の根拠に含める。short_hist__/verify_manual__ は
+    //   端末ローカルで同期しないため、別端末で投稿完了した作品は候補pillが光らなかった(Chami依頼2026-08-03「連動させて」)。
+    //   作成履歴は投稿完了(archiveStock_)で全端末へ同期される=同じ根拠を全端末が共有して pill が揃う。
+    try {
+      var arch = JSON.parse(localStorage.getItem('go5_stock_archive') || '[]');
+      if (arch && arch.length) out = out.concat(arch.filter(function (m) {
+        if (!m) return false;
+        if (m.account === 'acc1' || m.account === 'acc2') return m.account === acc; // 所属明示=そのchだけ
+        var pf = String(m.videoId || '').match(/^(acc[12])-/);
+        if (pf) return pf[1] === acc;                                                // 所属欄が空でも背骨IDのprefixで判定
+        return false; // 所属不明は含めない=別chを誤って「投稿済み」にしない(片ch誤判定の再発防止)
+      }));
+    } catch (e) {}
     return out;
   }; } catch (e) {}
   // ★保存の前に2つ確かめる。①破損中のキーへは書かない(壊れた読み取り結果で上書き＝全消しを防ぐ)

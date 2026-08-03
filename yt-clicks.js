@@ -702,10 +702,16 @@
     var CI = '<img class="emico" src="assets/icons/ic-link.png" alt="">';         // 導線1(Bsky投稿クリック)
     var WI = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="">'; // 導線2(作品クリック)
     var todayPosted = postedTodayOf_(tsMs);
+    // 投稿からの経過時間。「投稿したて＝日次スナップがまだ回っていない」を「記録欠損(⚠)」と区別する用(Chami依頼2026-08-03)。
+    var ageMs = tsMs ? (Date.now() - Number(tsMs)) : -1;
+    var freshPost = ageMs >= 0 && ageMs < 36 * 3600 * 1000; // 36時間以内=投稿したて→値が無いのは「まだ記録待ち」
     function cell(v, allowDash) {
       if (v != null) return num(v);
       // 投稿前(YouTube未公開=投稿予定)/スナップ前(記録待ち)は「記録欠損」ではなく元々データが無いだけなので ⚠ ではなく – を出す(Chami指示2026-07-28/2026-07-30)
-      return (allowDash || prePost || pending) ? '–' : '<span title="記録欠損: 追跡開始前の期間か、その回の取得失敗。(YT APIクォータ等)以後の期間は正常に記録されます">⚠</span>';
+      if (allowDash || prePost || pending) return '–';
+      // 投稿したて(36h以内)でまだスナップが取れていないだけ=欠損ではないので ⚠ ではなく「未」(=未計測・毎時の自動記録で数値に変わる。Chami依頼2026-08-03)
+      if (freshPost) return '<span title="投稿したてで、まだ計測記録が取れていません(毎時の自動記録で数値に変わります)。⚠は追跡開始前の期間か取得失敗を表し、これとは別です">未</span>';
+      return '<span title="記録欠損: 追跡開始前の期間(この計測機能の導入前に投稿)か、その回の取得失敗。(YT APIクォータ等)以後の期間は正常に記録されます">⚠</span>';
     }
     // 作品短縮URLがある投稿だけ導線2(ピンク矢印)の増分を併記する。(Chami依頼2026-07-14)
     function seg(lbl, v, c, wc, allowDash) {
