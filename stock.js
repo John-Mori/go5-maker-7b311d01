@@ -19,11 +19,23 @@
   // 説明欄の短縮URLは「タップで実際に遷移できるリンク」だけで表示(Chami 2026-07-28指示=短縮URLのみの
   //   テキストボックスは不要・リンクだけでいい)。★短縮URLの実体はリンク要素の dataset.url に保持し、
   //   保存とコピーはそこから読む(readonlyボックスは撤去)。空なら隠す。リンク先頭は textarea の左縦線に揃える。
+  // 自前短縮ドメイン(5mgl/yoz2)なら true。(link-workerが払い出す計測リンクだけ ?nc=1 を足す判定用)
+  function isOurShort_(u) {
+    try { var og = window.Go5Short; if (og && og.ourBase) return !!og.ourBase(u); } catch (e) {}
+    return /\/\/(?:5mgl\.com|yoz2\.com)\//.test(String(u || ''));
+  }
   function setDescUrlSlot_(url) {
     var lk = $('draftYtDescUrlLink');
     var ok = url && /^https?:\/\//.test(url);
     if (lk) {
-      if (ok) { lk.href = url; lk.textContent = url; lk.dataset.url = url; lk.style.display = 'inline-block'; }
+      if (ok) {
+        // ★アプリ内から自分の計測リンクをタップしても加算しない(Chami依頼2026-08-03③)。
+        //   href(=このサイト内でのタップ先)にだけ ?nc=1 を付ける。初回タップで worker が go5nc Cookie を
+        //   立て、以後この端末の同ドメインへのアクセスは全て除外される(link-ledger と同方式)。
+        //   表示テキスト/コピー元(dataset.url)/概要欄本文は素のURLのまま=YouTube視聴者の実クリックは数える。
+        var href = (isOurShort_(url) && !/[?&]nc=1(?:&|$)/.test(url)) ? (url + (url.indexOf('?') < 0 ? '?nc=1' : '&nc=1')) : url;
+        lk.href = href; lk.textContent = url; lk.dataset.url = url; lk.style.display = 'inline-block';
+      }
       else { lk.removeAttribute('href'); lk.textContent = ''; lk.dataset.url = ''; lk.style.display = 'none'; }
     }
     // ★短縮URLを概要欄テキストボックス(draftYtDescText)の最上段にも入れる(Chami指示2026-07-29)。
@@ -820,17 +832,18 @@
           '<textarea id="draftYtTitleText" readonly rows="2" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' + // ②2行の幅に(rows3→2・Chami依頼2026-08-02)
           '<div style="display:flex;align-items:center;gap:8px;' + fL + '"><span style="white-space:nowrap;">タグ(半角スペース区切り)</span><button type="button" id="draftCopyYtTags" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
-          '<div style="' + fL + '">' +
-            '<svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)' +
+          // 見出し行に作品遷移リンク(作品↗)を右寄せで同居させる(Chami依頼2026-08-03①=作品↗が
+          //   下段へ改行落ちして無駄な余白ができるのを解消。見出しと同じ行の右端に置く)。
+          '<div style="' + fL + 'display:flex;align-items:center;gap:8px;">' +
+            '<span style="min-width:0;"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> YouTube説明欄(コピーして概要欄に貼り付け)</span>' +
+            '<a id="draftWorkLink" target="_blank" rel="noopener" style="' + lnkR + 'margin-left:auto;white-space:nowrap;flex:0 0 auto;display:none;">作品↗</a>' +
           '</div>' +
-          // 説明欄の行(Chami依頼2026-08-02③)=左から「説明欄をコピー」「動画DL」／右端に作品遷移リンク(作品↗)。
+          // 説明欄の行(Chami依頼2026-08-02③)=左から「説明欄をコピー」「動画DL」。
           //   短縮URLリンク(draftYtDescUrlLink)は説明欄コピーの直後(表示は短縮URL確定時のみ)。動画DLは説明欄コピーの右横へ移動。
           '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
             '<button type="button" id="draftCopyYtDesc" style="' + btnW + '">説明欄をコピー</button>' +
             '<button type="button" id="draftDlVideo" style="' + btnW + '">動画DL</button>' +
             '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkR + 'display:none;"></a>' +
-            '<span style="flex:1;min-width:8px;"></span>' +
-            '<a id="draftWorkLink" target="_blank" rel="noopener" style="' + lnkR + 'display:none;">作品↗</a>' +
           '</div>' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
