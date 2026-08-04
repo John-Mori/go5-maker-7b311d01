@@ -63,6 +63,26 @@
     });
   }
 
+  // ★入力を正規化した重複判定キー(2026-08-04・Chami依頼msg1531770421769404557)。
+  //   以前は raw 文字列の完全一致だけで弾いていたため、同じチャンネルでも
+  //   youtube.com/@Foo ／ youtube.com/channel/UC… ／ @foo など表記が違うと二重登録できた。
+  //   parseInput の解決結果(種別+値)を小文字化した1本の鍵にして、表記ゆれを跨いで同一視する。
+  function normKey_(raw) {
+    var p = parseInput(raw);
+    if (!p) return '';
+    return p.by + ':' + String(p.v || '').toLowerCase();
+  }
+  // 既存リストにこの入力が(表記ゆれ込みで)既にあるか。あれば一致した登録名を返す(無ければ '')。
+  function findDup_(arr, raw, channelId) {
+    var nk = normKey_(raw);
+    for (var i = 0; i < arr.length; i++) {
+      var c = arr[i] || {};
+      if (channelId && c.channelId && c.channelId === channelId) return c.name || c.input || 'このチャンネル';
+      if (nk && normKey_(c.input) === nk) return c.name || c.input || 'このチャンネル';
+    }
+    return '';
+  }
+
   function status(msg, isErr) { var el = $('compStatus'); if (el) { el.textContent = msg || ''; el.style.color = isErr ? '#dc465a' : 'var(--sub)'; } }
   // ISO日時 → 表示用の日付(YYYY-MM-DD)。パース失敗時は原文。
   function fmtDate(iso) {
@@ -123,8 +143,9 @@
     var raw = (inp.value || '').trim();
     if (!raw) { status('チャンネルのURLか@ハンドルを入れてください。', true); return; }
     var arr = load();
-    // 既に同じ入力があれば弾く(重複登録防止)
-    if (arr.some(function (c) { return (c.input || '') === raw; })) { status('もう登録されています。', true); return; }
+    // 既に同じチャンネルがあれば弾く(表記ゆれ込みで判定・重複登録防止)。ポップアップで明示。
+    var dup0 = findDup_(arr, raw, '');
+    if (dup0) { alert('このチャンネルは既に登録されています。\n(' + dup0 + ')'); status('既に登録されています：' + dup0, true); return; }
     if (!apiKey()) {
       // キーが無くても登録自体はできる(名称は後で取得)。入力をそのまま保存。
       var e0 = { input: raw, channelId: '', name: '', addedAt: new Date().toISOString() };
@@ -134,8 +155,9 @@
     }
     status('チャンネルを確認中…');
     resolve(raw).then(function (r) {
-      // 解決したchannelIdの重複も弾く
-      if (r.channelId && arr.some(function (c) { return c.channelId === r.channelId; })) { status('そのチャンネルはもう登録されています。', true); return; }
+      // 解決したchannelIdの重複も弾く(別表記のURLが同じchへ解決したケース)。ポップアップで明示。
+      var dup1 = findDup_(arr, raw, r.channelId || '');
+      if (dup1) { alert('このチャンネルは既に登録されています。\n(' + dup1 + ')'); status('既に登録されています：' + dup1, true); return; }
       var e1 = { input: raw, channelId: r.channelId || '', name: r.name || '', addedAt: new Date().toISOString() };
       arr.push(e1); save(arr); inp.value = ''; render(); syncToGas(e1);
       status('登録しました：' + (r.name || r.channelId || raw));
