@@ -241,6 +241,12 @@
       r.readAsDataURL(blob);
     } catch (e) { cb(''); }
   }
+  // dataURL → Blob。同期ミラー(stock:imgs:)の .prev/.src は dataURL なので、Blobが要る経路
+  //   (Drive アップロード等)へ渡す前にこれで実体へ戻す。取れなければ null。
+  function durlToBlob_(durl) {
+    if (!durl || typeof durl !== 'string' || durl.indexOf('data:') !== 0) return Promise.resolve(null);
+    return fetch(durl).then(function (r) { return r.blob(); }).catch(function () { return null; });
+  }
 
   // ── 保存 ──
   var _draftMode = false;
@@ -427,20 +433,30 @@
         // 元画像＋仕上がりプレビュー(保存時にIDBへ退避したもの)も一緒にDriveへ。取れなくても動画だけは必ず上げる。
         Promise.all([
           store.get('stock_img_' + id).catch(function () { return null; }),
-          store.get('stock_prev_' + id).catch(function () { return null; })
+          store.get('stock_prev_' + id).catch(function () { return null; }),
+          store.get('stock:imgs:' + id).catch(function () { return null; }) // 同期ミラー(別端末で作った動画の画像)
         ]).then(function (r) {
-          var img = r[0], prev = r[1];
-          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, img ? [img] : [], prev || null);
-          // ★投稿履歴の使用画像1ページ目に仕上がりプレビューを差し込む(videoIdで紐付く・Chami依頼2026-07-30)。
-          if (prev && meta.videoId && window.Go5Cand && window.Go5Cand.usedImgSave && window.Go5Cand.usedImgs) {
-            blobToDataUrl_(prev, function (durl) {
-              if (!durl) return;
-              var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
-              if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
-              // 先頭1枚=投稿プレビュー画像(拡大表示の見出しを「投稿プレビュー画像」に分ける・Chami依頼2026-07-30)
-              window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
-            });
-          }
+          var img = r[0], prev = r[1], mirror = r[2] || {};
+          // ★サブ端末(=この動画を作っていない端末)では stock_prev_/stock_img_(Blob)が無いので、
+          //   同期ミラー stock:imgs: の dataURL(.prev/.src)から実体へ戻して補う
+          //   (Chami 2026-08-04「サブ端末で投稿すると投稿履歴の画像に動画投稿プレビューが表示されない」)。
+          //   これが無いと下の prev ガードが常に false になり、投稿履歴・Drive の双方でプレビューが欠落する。
+          var imgP  = img  ? Promise.resolve(img)  : durlToBlob_(mirror.src);
+          var prevP = prev ? Promise.resolve(prev) : durlToBlob_(mirror.prev);
+          Promise.all([imgP, prevP]).then(function (bs) {
+            var imgB = bs[0], prevB = bs[1];
+            window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null);
+            // ★投稿履歴の使用画像1ページ目に仕上がりプレビューを差し込む(videoIdで紐付く・Chami依頼2026-07-30)。
+            if (prevB && meta.videoId && window.Go5Cand && window.Go5Cand.usedImgSave && window.Go5Cand.usedImgs) {
+              blobToDataUrl_(prevB, function (durl) {
+                if (!durl) return;
+                var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
+                if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
+                // 先頭1枚=投稿プレビュー画像(拡大表示の見出しを「投稿プレビュー画像」に分ける・Chami依頼2026-07-30)
+                window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
+              });
+            }
+          });
         }).catch(function () {
           window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, []);
         });
@@ -545,6 +561,31 @@
         '</div>' +
       '</div>' +
     '</div>';
+  }
+
+  // ★既に投稿完了したぶんの遡及補完(Chami 2026-08-04)。
+  //   サブ端末で投稿完了した過去分は、投稿履歴の使用画像1ページ目に仕上がりプレビューが入っていない
+  //   (完了時に stock_prev_ が無くガードで弾かれたため)。同期ミラー stock:imgs:<id> の .prev(dataURL)が
+  //   届いている今なら後から差し込める。videoId単位・プレビュー未挿入のものだけ・冪等。
+  var _prevBackfilled = {}; // このセッションで補完済み/確認済みの videoId(再走査を抑える)
+  function backfillUsedPreview_() {
+    var store = idb(); if (!store) return;
+    if (!(window.Go5Cand && window.Go5Cand.usedImgs && window.Go5Cand.usedImgSave)) return;
+    loadMeta().concat(loadArchive()).forEach(function (m) {
+      if (!m || !m.id || !m.videoId || _prevBackfilled[m.videoId]) return;
+      var prevN = window.Go5Cand.usedPrevCount ? (window.Go5Cand.usedPrevCount(m.videoId) || 0) : 0;
+      if (prevN > 0) { _prevBackfilled[m.videoId] = 1; return; } // 既にプレビュー有り=触らない
+      store.get('stock:imgs:' + m.id).then(function (mir) {
+        var du = mir && mir.prev;
+        if (!du) return; // ミラーがまだ来ていない/そもそもプレビュー無し=次の機会に
+        _prevBackfilled[m.videoId] = 1;
+        var cur = window.Go5Cand.usedImgs(m.videoId) || [];
+        if (cur[0] === du) return; // 既に先頭=冪等
+        window.Go5Cand.usedImgSave(m.videoId, [du].concat(cur.filter(function (u) { return u !== du; })), 1);
+        // 投稿履歴(ランキングタブ)を開いていれば即反映。閉じていても保存済みなので次に開けば出る。
+        try { if (window.YtRank && window.YtRank.renderRank && $('pageRank') && !$('pageRank').hidden) window.YtRank.renderRank(); } catch (e) {}
+      }).catch(function () {});
+    });
   }
 
   function render() {
@@ -1019,9 +1060,14 @@
     //   無条件で反応すると、往復のたびに一覧を作り直して画面が一瞬白くチラつく(Chami 2026-08-04)。
     document.addEventListener('go5-synced', function (e) {
       if (!e || !e.detail || !e.detail.pulled) return;
+      // 別端末で作った動画のミラー(.prev)が届いたら、過去の投稿完了ぶんへプレビューを遡及補完(タブ表示に依らず)。
+      try { backfillUsedPreview_(); } catch (_) {}
       var page = $('pageStock');
       if (page && !page.hidden) render();
     });
+
+    // 起動直後にも一度、過去分のプレビュー遡及補完を試す(既に同期済みミラーがあれば即補完)。
+    setTimeout(function () { try { backfillUsedPreview_(); } catch (_) {} }, 1500);
 
     // ドラフトタブのボタン操作(event delegation)
     var page = $('pageStock');
