@@ -145,6 +145,31 @@
     });
   }
 
+  // ★取得失敗の残骸(空スロット)判定：画像レコードの画像欄が "" になっているもの。
+  //   refImgSave/usedImgSave は保存前に imgs を filter(Boolean) する＝正規の保存では画像欄に "" は入らない。
+  //   よって画像欄(img/imgs要素/th/prev/src)に "" があるのは「R2から本体を取れず空で書かれた残骸」だけと断定できる。
+  //   (ref のテキストのみ保存＝imgs:[] は空要素を持たないので誤検知しない。prev は used では枚数=数値なので "" にならない)
+  //   th/src/prev(stock:imgs のデータURL欄)の "" は残骸。imgs 配列内の "" も残骸。
+  //   scalar img は imgs[0] のミラー＝imgs があればそちらが正なので、img:"" は「imgs 欄が無い」時(bsky)だけ残骸扱い。
+  var IMG_FIELDS = { th: 1, src: 1, prev: 1 };
+  function hasEmptyImgSlot(v) {
+    if (!v || typeof v !== "object") return false;
+    var bad = false;
+    (function walk(x) {
+      if (bad || !x || typeof x !== "object") return;
+      if (Array.isArray(x)) { for (var i = 0; i < x.length; i++) { if (x[i] === "") { bad = true; return; } walk(x[i]); } return; }
+      for (var k in x) {
+        if (!has(x, k)) continue;
+        var val = x[k];
+        if (IMG_FIELDS[k] && val === "") { bad = true; return; }
+        if (k === "img" && val === "" && !has(x, "imgs")) { bad = true; return; } // bsky系(imgsを持たない)のみ
+        if (k === "imgs" && Array.isArray(val)) { for (var j = 0; j < val.length; j++) { if (val[j] === "") { bad = true; return; } } if (bad) return; }
+        if (val && typeof val === "object") walk(val);
+      }
+    })(v);
+    return bad;
+  }
+
   // ── ローカル状態 ──
   function loadSnap() { try { return JSON.parse(LS.getItem("sync2_snap") || "{}") || {}; } catch (e) { return {}; } }
   function saveSnap(s) { try { LS.setItem("sync2_snap", JSON.stringify(s)); } catch (e) {} }
@@ -542,6 +567,18 @@
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
+        // ★画像レコードは「実体あり」を「取得失敗の残骸(空スロット)」より優先する。
+        //   R2未反映のタイミングで pull すると本体が空で書かれ、その空レコードの ts が新しくなって
+        //   LWW で勝ち続け、サブ端末で画像が永久に表示されない事故になる(特に直近の画像=まさに未反映になりやすい)。
+        //   残骸(hasEmptyImgSlot=true)は ts を無視して実体側を採用＝次の受信で R2 から取り直させる(自己回復)。
+        Object.keys(midb).forEach(function (k) {
+          if (!isSyncIdbKey(k)) return;
+          var a = lmapIdb[k], b = ridb[k];
+          if (!(a && b) || a.d || b.d) return;
+          var aBad = hasEmptyImgSlot(a.v), bBad = hasEmptyImgSlot(b.v);
+          if (aBad && !bBad) midb[k] = b;       // ローカルが残骸→リモート(実体)を採用し取り直す
+          else if (bBad && !aBad) midb[k] = a;  // リモートが残骸→ローカル(実体)を守る
+        });
         // 候補・ドラフトの配列は両側にあれば id で union。(消さない)
         Object.keys(mls).forEach(function (k) {
           var idf = arrIdField_(k);
@@ -658,8 +695,14 @@
             return Idb.get(kk).catch(function () { return undefined; }).then(function (prev) {
               return downloadImagesIn(e.v).then(function (res) {
                 // ★R2から画像本体が取れなかった時、既存のローカル画像を空で潰さない(サムネ/参照画像の消失防止・INC 2026-07-15)。
-                //   既存が無い(初回)なら部分的にでも書く。
-                if (res.failed > 0 && prev !== undefined && prev !== null) return;
+                if (res.failed > 0) {
+                  if (prev !== undefined && prev !== null) return; // 既存は保持(潰さない)
+                  // 初回で本体が取れない＝R2未反映の可能性。空で書くと「空画像」で固定され再取得されない。
+                  //   書かず・スナップにも載せない＝次回同期で midb に再登場して取り直す(自己回復)。載せると
+                  //   snap有り×IDB無しで tombstone 化し雲から画像を消しかねない。
+                  delete newSnapIdb[k];
+                  return;
+                }
                 return Idb.set(kk, res.val);
               });
             }).catch(function () {}).then(function () { setProg("画像を受信", ++dlDone, dlKeys.length); });
