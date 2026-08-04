@@ -495,6 +495,13 @@
       var liveWorkUrl = (($('movieWorkUrl') || {}).value || '').trim();
       var liveAffi = (($('movieWorkAffi') || {}).value || '').trim();
       var histWorkUrl = meta.workUrl || meta.affiliateUrl || liveWorkUrl || liveAffi || '';
+      // 公開設定(即時/予約)＋選んだカレンダー公開枠を1回読む(履歴へ渡す予定時刻＆枠書き戻しの両方で使う)。
+      var pd = {}; try { pd = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); } catch (e2) {}
+      var ps = pd.pubSlot;
+      // 予約投稿でカレンダー枠を選んでいたら、その枠の公開予定時刻を投稿履歴の「投稿予定」時刻として渡す。
+      //   Chamiの運用=Xは前日/朝に手動投稿、YouTube動画だけカレンダー指定時刻に遅らせて公開(2026-08-04)。
+      //   YouTube API が予約公開のpublishAtを返す前でも、履歴に予定時刻を出せる(DEF#4の穴埋め)。
+      var plannedAt = (pd.pubMode === 'scheduled' && ps && ps.scheduled_at) ? String(ps.scheduled_at).replace(' ', 'T') : '';
       try {
         if (window.Go5History && typeof window.Go5History.addCompletedPost === 'function') {
           window.Go5History.addCompletedPost({
@@ -504,6 +511,7 @@
             title: meta.title || '',
             workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
             videoId: meta.videoId || '',
+            scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
             attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
           });
         }
@@ -512,8 +520,6 @@
       //   ・整合の正本はカレンダーiframe側。ここは integration.js 経由で slot-writeback を送るだけ。
       //   ・即時=「公開済」、予約(YouTube側で予約公開)=「予約登録済」。枠未選択なら何もしない(必須ではない)。
       try {
-        var pd = {}; try { pd = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); } catch (e2) {}
-        var ps = pd.pubSlot;
         if (ps && ps.id) {
           if (pd.pubMode === 'scheduled') {
             document.dispatchEvent(new CustomEvent('bluesky-reserved', { detail: { slotId: ps.id, account: meta.account || 'acc1' } }));

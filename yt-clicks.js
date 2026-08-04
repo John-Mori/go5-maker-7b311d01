@@ -1637,12 +1637,17 @@
       // YouTube動画が紐付いていない投稿(Bluesky単体投稿等)は、YouTube公開日時が原理的に存在しない。
       //   sendSync_()と同じ考え方(実投稿時刻(ts)を正とする)でit.tsにフォールバックする＝
       //   「投稿日時不明」のまま放置しない。(シート復元直後のvid無し投稿で顕在化)
+      // カレンダー公開枠の予定時刻(予約投稿)。YouTube側のpublishAtが観測される前に「投稿予定 時刻」を出す下限。
+      var plannedHtml = (pub == null && it.plannedAt)
+        ? ('<b>' + fmtPostDate(it.plannedAt) + '</b> <span class="vtag vtag-scheduled">投稿予定</span>') : '';
       var dateHtml = sched
         ? ((sched.publishAt ? '<b>' + fmtPostDate(sched.publishAt) + '</b> ' : '') + '<span class="vtag vtag-scheduled">投稿予定</span>')
         : (pub != null
           ? '<b>' + fmtPostDate(pub) + '</b>'
-          : (vid ? '<b class="vdate-pending">…</b>'
-            : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>' : '<b class="vdate-unknown">投稿日時不明</b>')));
+          : (plannedHtml
+            ? plannedHtml
+            : (vid ? '<b class="vdate-pending">…</b>'
+              : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>' : '<b class="vdate-unknown">投稿日時不明</b>'))));
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
       var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
@@ -2087,6 +2092,8 @@
     if (opts.videoId) entry.videoId = opts.videoId;
     else if (window.IdGen && window.IdGen.makeVideoId) entry.videoId = window.IdGen.makeVideoId(acc, new Date(), {});
     entry.workState = opts.workState || '旧作';
+    // カレンダー公開枠の予定時刻(予約投稿)。YouTube APIのpublishAtが返る前でも「投稿予定 時刻」を出せる。
+    if (opts.scheduledAt) entry.plannedAt = opts.scheduledAt;
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
     if (opts.attrs) attrDefs_().forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
     manual.push(entry);
