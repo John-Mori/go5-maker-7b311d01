@@ -161,15 +161,27 @@
   function ensureBlobMirror_(id) {
     var store = idb(); if (!store) return;
     store.get('stock:imgs:' + id).then(function (existing) {
-      if (existing && existing.th) return; // 既にミラー済み=再送しない
-      return Promise.all([store.get('stock_t_' + id), store.get('stock_prev_' + id), store.get('stock_img_' + id)]).then(function (bs) {
-        if (!bs[0] && !bs[1] && !bs[2]) return; // 実体が無い端末=作らない(同期で降ってくる側)
+      existing = existing || {};
+      // ★既存ミラーに「欠けているフィールドだけ」を後追いで足す(非破壊・冪等)。
+      //   以前は th さえ有れば skip していたため、プレビュー撮影(stock_prev_)より前に th だけで
+      //   作られた古いミラーが永遠に .prev を持てず、2台目の投稿履歴に仕上がりプレビューが出なかった
+      //   (Chami 2026-08-04「今までのGoogleドライブに入ってて表示していない履歴を反映して」)。
+      var needTh = !existing.th, needPrev = !existing.prev, needSrc = !existing.src;
+      if (!needTh && !needPrev && !needSrc) return; // 全部そろっている=触らない
+      return Promise.all([
+        needTh   ? store.get('stock_t_' + id)    : Promise.resolve(null),
+        needPrev ? store.get('stock_prev_' + id) : Promise.resolve(null),
+        needSrc  ? store.get('stock_img_' + id)  : Promise.resolve(null)
+      ]).then(function (bs) {
+        if (!bs[0] && !bs[1] && !bs[2]) return; // 足せる実体がこの端末に無い=同期で降ってくる側
         return Promise.all([blobToDataUrlP_(bs[0]), blobToDataUrlP_(bs[1]), blobToDataUrlP_(bs[2])]).then(function (du) {
-          var rec = {};
-          if (du[0]) rec.th = du[0];
-          if (du[1]) rec.prev = du[1];
-          if (du[2]) rec.src = du[2];
-          if (rec.th || rec.prev || rec.src) return store.set('stock:imgs:' + id, rec).then(kickSync_);
+          // 既存フィールドは温存し、欠けていたものだけ上書きせず追加する。
+          var rec = {}; if (existing.th) rec.th = existing.th; if (existing.prev) rec.prev = existing.prev; if (existing.src) rec.src = existing.src;
+          var added = false;
+          if (needTh   && du[0]) { rec.th = du[0];   added = true; }
+          if (needPrev && du[1]) { rec.prev = du[1]; added = true; }
+          if (needSrc  && du[2]) { rec.src = du[2];  added = true; }
+          if (added) return store.set('stock:imgs:' + id, rec).then(kickSync_);
         });
       });
     }).catch(function () {});
@@ -199,8 +211,12 @@
   //   (Chami依頼2026-07-31「わざわざドラフトタブをタップしなくても雲に上がるように」)。
   function sweepVideoMirror_() {
     try {
-      loadMeta().forEach(function (m) { ensureVideoMirror_(m.id); });
-      loadArchive().forEach(function (m) { ensureVideoMirror_(m.id); });
+      // 動画本体(②)＋画像ミラー(①-B:サムネ/プレビュー/元画像)の両方を裏で雲へ。
+      //   ★ドラフトタブを開かなくても、アプリが開いてさえいれば実体を持つ端末が
+      //     欠けているミラー(特に古い履歴の .prev)を後追いで上げる=2台目の投稿履歴に
+      //     過去分プレビューが自動反映される(Chami依頼2026-08-04「今までの履歴を反映して」)。
+      loadMeta().forEach(function (m) { ensureVideoMirror_(m.id); ensureBlobMirror_(m.id); });
+      loadArchive().forEach(function (m) { ensureVideoMirror_(m.id); ensureBlobMirror_(m.id); });
     } catch (e) {}
   }
 
