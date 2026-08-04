@@ -400,16 +400,18 @@
     return !it || !it.title || it.title === '(タイトル未取得)' || !it.date;
   }
   function infoBackfillTtl_(it, rec) {
-    // タイトル等が揃い、レビュー数だけ薄い時は1日1回で十分。核(タイトル/発売日)が欠けている間は素早く追う。
+    // タイトル等が揃い、レビュー数だけ薄い時は1日1回で十分。
+    // ★核(タイトル/発売日)が欠けている間は、回数で20分間隔へ落とさず一定間隔で追い続ける
+    //   (諦めない・Chami 2026-08-04「引き続き取得するようにして諦めないで」)。実際に叩くのは
+    //   候補タブを見ている間の再描画時だけ(scheduleInfoTick_)なので、離席中はworkerを叩かない。
     if (!coreInfoMissing_(it)) return 24 * 3600 * 1000;
-    return (rec && rec.n >= INFOMISS_FAST_TRIES) ? INFOMISS_RETRY_TTL : INFOMISS_FAST_TTL;
+    return INFOMISS_FAST_TTL;
   }
-  // まだ「素早い再取得」フェーズに居る未取得候補が残っているか(=タブを見ている間に自動で追う対象)。
+  // 核(タイトル/発売日)がまだ欠けている候補が残っているか(=タブを見ている間に自動で追う対象)。
+  //   ★回数上限(INFOMISS_FAST_TRIES)では止めない=情報が揃うか、タブを離れるまで追い続ける(諦めない)。
   function hasFastPendingInfo_(items) {
-    var miss = lsGet(K_INFOMISS, '{}');
     return (items || []).some(function (it) {
-      if (!needsInfoBackfill_(it) || !coreInfoMissing_(it)) return false;
-      var rec = missRec_(miss, it.cid); return !rec || rec.n < INFOMISS_FAST_TRIES;
+      return needsInfoBackfill_(it) && coreInfoMissing_(it);
     });
   }
   function backfillMissingInfo_(key, items, cb) {
@@ -3332,7 +3334,11 @@
         // 新作/同人バッジと同じ行にチャンネル表記を並べる(バッジ＝左／チャンネル＝右寄せ。投稿済み＝pillボタン／未投稿＝淡色表記)
         //   投稿済みなら Books 等と pill の間に「投稿日 ✔」をチャンネルテーマ色で表示。
         '<div class="cand-badges-row">' + badgesHtml + '<span class="cand-acct-group">' + postedDatesHtml_(it) + acctBadgesHtml_(it) + '</span></div>' +
-        '<div class="cand-title">' + esc(it.title || '(無題)') + '</div>' +
+        // ★タイトルがまだ来ていない(未取得/プレースホルダ)FANZA作品は「取得中です」を出す=
+        //   追加直後に閉じても裏で追い続けている事を見せる(諦めない・Chami 2026-08-04)。
+        '<div class="cand-title">' + ((isInfoTarget_(it) && (!it.title || it.title === '(タイトル未取得)'))
+          ? '<span class="cand-title-fetching">⏳ 取得中です…</span>'
+          : esc(it.title || '(無題)')) + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
         ((it.price != null || it.listPrice != null) ? '<div class="cand-price">' + priceHtml + '</div>' : '') +
