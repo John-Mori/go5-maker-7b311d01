@@ -667,6 +667,21 @@
   var deltaCache = (function () { try { return JSON.parse(localStorage.getItem('delta_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {tv,yv,wv,tc,yc,wc}
   var peakCache = (function () { try { return JSON.parse(localStorage.getItem('peak_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {vRate,vWin,cRate,cWin}
   var tpCache = (function () { try { return JSON.parse(localStorage.getItem('tp_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,c,age},..} GASサーバー時点記録(公開起点・端末未起動でも記録)
+  // ★負のデルタは無意味(期間内にクリック/再生が減ることは無い)。GASが短縮コード切替やaf_id変更で
+  //   カウンタがリセットされた区間を跨ぐと (now − weekAgo) が負になり「週:-16」のような表示になる
+  //   (Chami報告 msg1532109479103955026「累計0なのに先週-16」)。期間デルタは 0 を下限に丸める。
+  //   null(記録欠損=「–」表示)は触らない=Chami仕様の「今日投稿の昨日だけ–」を壊さない。
+  function sanitizeDeltas_(dc) {
+    if (!dc || typeof dc !== 'object') return dc;
+    Object.keys(dc).forEach(function (k) {
+      var d = dc[k]; if (!d || typeof d !== 'object') return;
+      ['tv', 'yv', 'wv', 'tc', 'yc', 'wc'].forEach(function (f) {
+        if (typeof d[f] === 'number' && d[f] < 0) d[f] = 0;
+      });
+    });
+    return dc;
+  }
+  sanitizeDeltas_(deltaCache); // 起動時にlocalStorageから読んだ旧キャッシュ内の負値も丸める
   var _deltaFetched = false;
   function gasUrl_() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
   // JSONP。(GASのGETをCORS回避で読む。キャッシュバスターcb付き)
@@ -734,7 +749,7 @@
     var url = gasUrl_(); if (!url) { applyDeltas_(); if (cb) cb(); return; }
     jsonp_(url, { action: 'deltas' }, function (res) {
       if (res && res.ok && res.deltas) {
-        deltaCache = res.deltas; _deltaFetched = true;
+        deltaCache = sanitizeDeltas_(res.deltas); _deltaFetched = true; // GAS由来の負デルタも0下限へ
         try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); } catch (e) {}
         if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
         if (res.timepoints) { tpCache = res.timepoints; try { localStorage.setItem('tp_cache', JSON.stringify(tpCache)); } catch (e) {} }
