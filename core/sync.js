@@ -170,6 +170,16 @@
     return bad;
   }
 
+  // 画像レコードのマージ判定(純関数=テスト可能)。片側だけが「空スロット残骸」なら実体側を返す。
+  // 両方実体/両方残骸/dあり/欠落は null=通常のLWWに委ねる。v=638 の自己回復ルールをここに固定。
+  function preferImgRecord_(a, b) {
+    if (!(a && b) || a.d || b.d) return null;
+    var aBad = hasEmptyImgSlot(a.v), bBad = hasEmptyImgSlot(b.v);
+    if (aBad && !bBad) return b;   // ローカルが残骸→リモート(実体)を採用し取り直す
+    if (bBad && !aBad) return a;   // リモートが残骸→ローカル(実体)を守る
+    return null;
+  }
+
   // ── ローカル状態 ──
   function loadSnap() { try { return JSON.parse(LS.getItem("sync2_snap") || "{}") || {}; } catch (e) { return {}; } }
   function saveSnap(s) { try { LS.setItem("sync2_snap", JSON.stringify(s)); } catch (e) {} }
@@ -573,11 +583,8 @@
         //   残骸(hasEmptyImgSlot=true)は ts を無視して実体側を採用＝次の受信で R2 から取り直させる(自己回復)。
         Object.keys(midb).forEach(function (k) {
           if (!isSyncIdbKey(k)) return;
-          var a = lmapIdb[k], b = ridb[k];
-          if (!(a && b) || a.d || b.d) return;
-          var aBad = hasEmptyImgSlot(a.v), bBad = hasEmptyImgSlot(b.v);
-          if (aBad && !bBad) midb[k] = b;       // ローカルが残骸→リモート(実体)を採用し取り直す
-          else if (bBad && !aBad) midb[k] = a;  // リモートが残骸→ローカル(実体)を守る
+          var win = preferImgRecord_(lmapIdb[k], ridb[k]);
+          if (win) midb[k] = win;
         });
         // 候補・ドラフトの配列は両側にあれば id で union。(消さない)
         Object.keys(mls).forEach(function (k) {
@@ -840,7 +847,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 
