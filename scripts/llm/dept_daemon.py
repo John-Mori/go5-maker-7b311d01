@@ -1040,7 +1040,7 @@ DEPT_CONF = {
         #   「品質を落とした節約」になり規約違反(Chami「品質を落とさないことが最重要」2026-07-21)。
         #   ★引き継ぎの生成(_write_handoff)と交代後の自己確認も**同じモデル**で走る
         #     (安いモデルで引き継ぎを書くと、1週間の連鎖の**最弱点がそこになる**)。
-        "relay_model": "opus",
+        "relay_model": "claude-opus-5",  # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。研究室HQのrelay=この司令塔セッションをOpus5へ。旧"opus"(=pinで4-8)から明示のopus5へ
         "boot_note": (
             "■この部屋の性格(必ず守る)\n"
             "- **ここは研究室HQ=全プロジェクト横断の司令塔**だ。主はシャビ・アロンソ(GL・敬語なし)。\n"
@@ -1629,7 +1629,8 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "aegis-gl.jsonl"),
         "persona": "ケヴィン・デ・ブライネ",
         "port": 18814,
-        "work_model": "opus",    # 2026-07-31 Chami直命令「Opusにしておいて」。人格の呼称精度(アロンソコーチ/監督)がsonnetで守れず「アロンソさん」に落ちた実害=DEF-hr-room-e23a84e918。C-014既定opusの適用漏れ補正(hr)
+        "work_model": "claude-opus-5",    # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。旧"opus"(=2026-07-31 Chami直命令・pinで4-8)から明示opus5へ
+        "relay_model": "claude-opus-5",   # 2026-08-04 同号令。イージス研究室のGL relayセッション(旧: 未指定=sonnet既定)をopus5へ引き上げ
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "personas": [
             {"persona": "ケヴィン・デ・ブライネ",
@@ -1787,6 +1788,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "research-room.jsonl"),
         "persona": "アメス",
         "port": 18815,
+        "relay_model": "claude-opus-5",  # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。AD研究室のGL relayセッション(旧: 未指定=sonnet既定)をopus5へ
         "forward_all": True,   # 総括本部なので全便を研究室(Vol.9セッション)へ回す=hqと同じ理由
         # ★2026-07-26 relay化(最後の1部屋)。Chami「**デーモンが処理するのはもうやめたい。
         #   こういう放置が治らないから**」「止めて良いよ、そっちも最も改善して欲しい」。
@@ -2252,12 +2254,17 @@ DEPT_CONF = {
              "role": "担当(構成・演出)", "aliases": ("verxina", "シーナ", "ヴィルシーナ")},
             {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
              "role": "補佐", "aliases": ("ames", "アメス")},
+            # ★カスミ追加(2026-08-03 Chami指示 msg 1533840385355419688「カスミが入ってない指示で
+            #   立ち上がってる、正常にしてくれ」)。原典を推理と調査の目で深掘りする探偵=漫画の作品分析が
+            #   この部屋の本丸(漫画紹介)に直結する。実在= hr/characters/kasumi.md。
+            {"persona": "カスミ", "character": os.path.join(_CHAR, "kasumi.md"),
+             "role": "担当(漫画の原典読み・作品分析)", "aliases": ("kasumi", "カスミ")},
         ],
         "boot_note": (
             "■この部屋の性格(必ず守る)\n"
             "- ここは **1分shorts漫画紹介部門**(working title)。本丸=漫画→1分以内のShortで"
             "漫画を紹介する動画作り(旧 MangaShortCreateForYMM4 の復活)。\n"
-            "- 担当は**中野五月・ヴィルシーナ**、補佐が**アメス**。誰として答えるかは話題で選ぶ"
+            "- 担当は**中野五月・ヴィルシーナ・カスミ**、補佐が**アメス**。誰として答えるかは話題で選ぶ"
             "(名指しがあればその人)。\n"
             "- ★これは立ち上げ直後の**会話が立つだけ**の状態。実作業(動画生成)を回す専用セッションは"
             "まだ無い=作れるかの相談・企画・段取りはこの場で答え切る(存在しない先へ回送しない)。\n"
