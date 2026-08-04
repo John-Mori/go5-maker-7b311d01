@@ -2561,6 +2561,25 @@
       renderAddSlots_();
     }
   }
+  // iOS Safariでは入力欄にフォーカス(=ソフトキーボード表示)がある状態でボタンを押すと、
+  //   最初のタップがキーボードを閉じる動作に消費され click が発火せず「一度押しても反応しない=
+  //   二度押しが要る」状態になる(Chami 2026-08-04・候補追加の「追加して閉じる」で発生)。
+  //   → touchend で拾えば初回タップで発火する(スクロール中の誤爆は移動量で弾き、preventDefaultで
+  //   後続のゴーストclickを抑止=二重実行しない)。デスクトップは touch が無いので click 経路で動く。
+  function onTap_(el, fn) {
+    if (!el) return;
+    var lock = false, sx = 0, sy = 0, moved = false;
+    function run(e) { if (lock) return; lock = true; setTimeout(function () { lock = false; }, 500); fn(e); }
+    el.addEventListener('touchstart', function (e) {
+      var t = e.touches && e.touches[0]; sx = t ? t.clientX : 0; sy = t ? t.clientY : 0; moved = false;
+    }, { passive: true });
+    el.addEventListener('touchmove', function (e) {
+      var t = e.touches && e.touches[0];
+      if (t && (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10)) moved = true;
+    }, { passive: true });
+    el.addEventListener('touchend', function (e) { if (moved) return; e.preventDefault(); run(e); }, { passive: false });
+    el.addEventListener('click', run);
+  }
   var _addOverlay = null;
   function openAddModal_(tabId, isMain) {
     var ov = _addOverlay;
@@ -2575,9 +2594,9 @@
     var body = ov.querySelector('.fz-body');
     _addModalImgs = []; // 開くたびにスロットを白紙に
     body.innerHTML = addFormHtml_(isMain);
-    $('candAdd').addEventListener('click', function () { addCandidate(tabId); }); // 追加して続ける(開いたまま)
-    $('candAddClose').addEventListener('click', function () { ov.hidden = true; addCandidate(tabId); }); // 追加して閉じる(即閉→バックグラウンド処理)
-    $('candBulkAdd').addEventListener('click', function () { bulkAddCircle(tabId); });
+    onTap_($('candAdd'), function () { addCandidate(tabId); }); // 追加して続ける(開いたまま)
+    onTap_($('candAddClose'), function () { ov.hidden = true; addCandidate(tabId); }); // 追加して閉じる(即閉→バックグラウンド処理・iOSの二度押しを解消)
+    onTap_($('candBulkAdd'), function () { bulkAddCircle(tabId); });
     // 「画像を選ぶ」(複数可): ファイルからもスロットへ左詰めで追加。(1枚ずつ順に処理=メモリ圧迫回避)
     var addFile = $('candAddImgFile');
     if (addFile) addFile.addEventListener('change', function () {
@@ -2615,6 +2634,11 @@
       if (!window.FanzaCore || !cfg2.url) return;
       var cidPre = rPre.cid, urlPre = urlN;
       _prefetchTimer = setTimeout(function () {
+        // ★入れた瞬間(入力が落ち着いたら)にアフィリンクを素の作品URLへ無効化=見た目にも反映する
+        //   (Chami 2026-08-04・al.fanza.co.jp/?lurl=… や計測パラメータ付きを素URLへ)。素URLと同じなら触らない。
+        var rawNow = urlInp.value.trim();
+        var urlNow = window.normalizeWorkUrl ? window.normalizeWorkUrl(rawNow) : rawNow;
+        if (urlNow && urlNow !== rawNow) { urlInp.value = urlNow; }
         if (_prefetchCache[cidPre]) return; // 取得中または完了
         _prefetchCache[cidPre] = { done: false };
         var pm = $('candMsg'); if (pm) pm.textContent = '⏳ 作品情報を先読み中…';
