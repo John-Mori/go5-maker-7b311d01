@@ -508,6 +508,20 @@
           });
         }
       } catch (e) {}
+      // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
+      //   ・整合の正本はカレンダーiframe側。ここは integration.js 経由で slot-writeback を送るだけ。
+      //   ・即時=「公開済」、予約(YouTube側で予約公開)=「予約登録済」。枠未選択なら何もしない(必須ではない)。
+      try {
+        var pd = {}; try { pd = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); } catch (e2) {}
+        var ps = pd.pubSlot;
+        if (ps && ps.id) {
+          if (pd.pubMode === 'scheduled') {
+            document.dispatchEvent(new CustomEvent('bluesky-reserved', { detail: { slotId: ps.id, account: meta.account || 'acc1' } }));
+          } else {
+            document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { slotId: ps.id, account: meta.account || 'acc1', post_url: ytUrl || '', short_url: shortUrl || '' } }));
+          }
+        }
+      } catch (e) {}
       // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。youtubeUrl保存の後に行う。
       archiveStock_(id);
       render();
@@ -659,6 +673,7 @@
   // ── 投稿モード モーダル ──
   var _modalMeta = null;
   var _ytTitleDirty = false; // ユーザーが題名を手編集したかどうか(trueの間はタグ変更で上書きしない)
+  var _pickedSlot = null;    // 予約投稿で選んだカレンダーの公開枠(slot-picked で受ける){id,date,time,role,genre,scheduled_at}
 
   function copyText_(text, btn) {
     function flash() { var o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(function () { btn.textContent = o; }, 2000); }
@@ -682,6 +697,74 @@
     el.value = title + (title && tags.trim() ? ' ' : '') + tags.trim();
   }
 
+  // ---- 公開設定(即時/予約)＋公開枠ピッカー ----
+  function curPubMode_() { var r = $('draftPubSched'); return (r && r.checked) ? 'scheduled' : 'now'; }
+  // ラジオの状態に合わせて「公開枠を選ぶ」行の表示/非表示を切り替える。
+  function syncPubModeUI_() {
+    var row = $('draftSchedRow'); if (row) row.style.display = (curPubMode_() === 'scheduled') ? 'block' : 'none';
+    renderPickedSlot_();
+  }
+  // 選んだ枠のラベル表示。未選択なら「解除」を隠す。
+  function renderPickedSlot_() {
+    var lab = $('draftPickedSlot'), clr = $('draftClearSlot');
+    if (!lab) return;
+    if (_pickedSlot && _pickedSlot.date) {
+      lab.textContent = '選択中：' + _pickedSlot.date + (_pickedSlot.time ? ' ' + _pickedSlot.time : '') + (_pickedSlot.role ? '／' + _pickedSlot.role : '');
+      if (clr) clr.style.display = '';
+    } else {
+      lab.textContent = '(枠は未選択)';
+      if (clr) clr.style.display = 'none';
+    }
+  }
+  // カレンダーを上から降ろす。schedule/ を pick=1 で埋め込み、枠タップ→slot-picked を受ける。
+  function openSlotPicker_() {
+    var pk = $('draftSlotPicker');
+    if (!pk) {
+      pk = document.createElement('div');
+      pk.id = 'draftSlotPicker';
+      // 上から降りてくる=固定オーバーレイ＋transformでスライドイン。z-indexは投稿モーダル(9999)より上。
+      pk.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:10000;background:var(--card);border-bottom:1px solid var(--line);' +
+        'box-shadow:0 12px 32px rgba(0,0,0,.5);transform:translateY(-100%);transition:transform .28s ease;' +
+        'display:flex;flex-direction:column;max-height:82vh;';
+      pk.innerHTML =
+        '<div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;">' +
+          '<div style="font-size:.9rem;font-weight:800;color:var(--accent);flex:1;">公開枠を選ぶ</div>' +
+          '<div style="font-size:.74rem;color:var(--sub);">枠をタップ→「この枠を公開枠に選ぶ」</div>' +
+          '<button type="button" id="draftPickerClose" style="background:none;border:none;color:var(--sub);font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;width:auto;margin:0;">✕</button>' +
+        '</div>' +
+        '<iframe id="draftPickerFrame" title="公開枠カレンダー" style="border:0;width:100%;flex:1;min-height:60vh;background:var(--bg,#0e1422);"></iframe>';
+      document.body.appendChild(pk);
+      $('draftPickerClose').addEventListener('click', closeSlotPicker_);
+    }
+    var f = $('draftPickerFrame');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&v=33');
+    // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
+    pk.style.display = 'flex';
+    requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });
+    var send = function () { try { f.contentWindow.postMessage({ target: 'sch-calendar', type: 'enter-pick' }, '*'); } catch (e) {} };
+    if (f.contentWindow && f.dataset.loaded === '1') send();
+    else { f.addEventListener('load', function () { f.dataset.loaded = '1'; send(); }, { once: true }); }
+  }
+  function closeSlotPicker_() {
+    var pk = $('draftSlotPicker'); if (!pk) return;
+    var f = $('draftPickerFrame');
+    if (f && f.contentWindow) { try { f.contentWindow.postMessage({ target: 'sch-calendar', type: 'exit-pick' }, '*'); } catch (e) {} }
+    pk.style.transform = 'translateY(-100%)';
+    setTimeout(function () { pk.style.display = 'none'; }, 280);
+  }
+  // カレンダーiframe(pick=1)からの枠選択を受ける。投稿モーダルが開いている時だけ取り込む。
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || d.source !== 'sch-calendar' || d.type !== 'slot-picked' || !d.slot) return;
+    var s = d.slot;
+    _pickedSlot = { id: s.id || '', date: s.date || '', time: s.time || '', role: s.role || '', genre: s.genre || '', scheduled_at: s.scheduled_at || '' };
+    // 予約が選ばれた=ラジオも予約へ寄せる(即時のまま枠だけ持つ矛盾を避ける)。
+    var r = $('draftPubSched'); if (r) { r.checked = true; syncPubModeUI_(); }
+    renderPickedSlot_();
+    saveDraftPost_();
+    closeSlotPicker_();
+  });
+
   function saveDraftPost_() {
     if (!_modalMeta) return;
     var slotEl = $('draftYtDescUrlLink');
@@ -693,6 +776,8 @@
       ytDesc:  ($('draftYtDescText')  || {}).value || '',
       xPostUrl:  ($('draftXPostUrl')  || {}).value || '',
       xShortUrl: (slotEl && slotEl.dataset.url) || '',
+      pubMode:   curPubMode_(),          // 'now' | 'scheduled'(YouTube公開のタイミング)
+      pubSlot:   _pickedSlot || null,    // 予約投稿で選んだカレンダー公開枠(任意)
     };
     try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
     kickSync_(); // 投稿編集も全端末へ運ぶ
@@ -839,6 +924,13 @@
       if (/^https?:\/\//.test(waff)) { wl.href = waff; wl.style.display = 'inline-block'; }
       else { wl.removeAttribute('href'); wl.style.display = 'none'; }
     }
+    // 公開設定(即時/予約)＋選択済みの公開枠を復元。
+    _pickedSlot = (saved.pubSlot && saved.pubSlot.date) ? saved.pubSlot : null;
+    var wantSched = (saved.pubMode === 'scheduled') || !!_pickedSlot;
+    var rn = $('draftPubNow'), rs = $('draftPubSched');
+    if (rn) rn.checked = !wantSched;
+    if (rs) rs.checked = wantSched;
+    syncPubModeUI_();
     renderAffCheck_(meta);
     m.style.display = 'flex';
   }
@@ -944,6 +1036,23 @@
             '<a id="draftYtDescUrlLink" target="_blank" rel="noopener" style="' + lnkR + 'white-space:nowrap;flex:0 0 auto;margin-left:auto;display:none;"></a>' +
           '</div>' +
           '<textarea id="draftYtDescText" rows="11" style="' + iS + 'resize:vertical;"></textarea>' +
+          // 公開設定(Chami依頼2026-08-04)=YouTube動画をいつ公開するか。即時/予約をラジオで選び、
+          //   予約なら「公開枠を選ぶ」でカレンダーが上から降りてくる→枠を選ぶと投稿履歴/カレンダー/予約が結びつく。
+          //   ★予約でもカレンダー登録は必須にしない(枠未選択のまま予約でも保存できる)。Xは手動運用=ここはYouTube公開の話。
+          '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
+          '<div style="' + sH + 'margin-bottom:10px;">公開設定(YouTube)</div>' +
+          '<div style="display:flex;gap:18px;align-items:center;margin-bottom:6px;font-size:.86rem;">' +
+            '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="draftPubMode" id="draftPubNow" value="now" checked style="accent-color:var(--accent);width:auto;margin:0;">即時投稿</label>' +
+            '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="draftPubMode" id="draftPubSched" value="scheduled" style="accent-color:var(--accent);width:auto;margin:0;">予約投稿</label>' +
+          '</div>' +
+          '<div id="draftSchedRow" style="display:none;margin-bottom:2px;">' +
+            '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+              '<button type="button" id="draftPickSlot" style="' + btnW + '">📅 公開枠を選ぶ</button>' +
+              '<span id="draftPickedSlot" style="font-size:.82rem;color:var(--ink);min-width:0;"></span>' +
+              '<button type="button" id="draftClearSlot" style="' + btnW + 'display:none;">解除</button>' +
+            '</div>' +
+            '<div style="font-size:.72rem;color:var(--sub);margin-top:5px;">カレンダー登録は必須ではありません(枠なしの予約でも保存できます)。</div>' +
+          '</div>' +
           '<div style="' + fL + '">YouTube URL(投稿後に貼る)</div>' +
           '<div style="' + rowWrap + '">' +
             '<input type="url" id="draftYtUrl" size="1" placeholder="https://www.youtube.com/shorts/..." style="' + rowIn + '">' +
@@ -967,6 +1076,12 @@
       saveDraftPost_();
     });
     $('draftYtUrl').addEventListener('input', saveDraftPost_);
+    // 公開設定：即時/予約ラジオ。予約のときだけ「公開枠を選ぶ」行を表示。
+    function onPubModeChange_() { syncPubModeUI_(); saveDraftPost_(); }
+    $('draftPubNow').addEventListener('change', onPubModeChange_);
+    $('draftPubSched').addEventListener('change', onPubModeChange_);
+    $('draftPickSlot').addEventListener('click', openSlotPicker_);
+    $('draftClearSlot').addEventListener('click', function () { _pickedSlot = null; renderPickedSlot_(); saveDraftPost_(); });
     $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
     $('draftCopyYtTags').addEventListener('click', function () { copyText_(($('draftYtTagsInput') || {}).value || '', this); }); // タグ欄をコピー(Chami依頼2026-07-30③)

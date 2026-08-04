@@ -16,6 +16,9 @@ window.SCH = window.SCH || {};
   let verificationMode = false;
   let lastRender = null;    // { slots, dayMetas }
   let editingId = null;
+  // 枠ピックモード：ドラフト投稿モードの「公開枠を選ぶ」から enter-pick で入る。
+  //   ONの間は編集モーダルに「この枠を公開枠に選ぶ」ボタンを出し、押すと slot-picked を親へ返す。
+  let pickMode = (function () { try { return /[?&]pick=1(?:&|$)/.test(location.search); } catch (e) { return false; } })();
 
   // 現在チャンネルを取得（localStorage から。acc1/acc2）
   function curAcc() {
@@ -349,7 +352,11 @@ window.SCH = window.SCH || {};
     m.querySelector(".modal-body").innerHTML = `
       <h3>${s.date}（${s.day_type}） ${s.time} / ${s.role}</h3>
       <div class="ch-badge">チャンネル: <strong>${accDisplayName}</strong>（${acc}）の実行記録を編集</div>
-      ${inFrame ? `<div class="integ-actions">
+      ${inFrame && pickMode ? `<div class="integ-actions">
+        <button type="button" id="integ-pick">🗓️ この枠を公開枠に選ぶ</button>
+        <div class="integ-hint">ドラフトの公開予約枠にこの日時を結びつけます。</div>
+      </div>` : ""}
+      ${inFrame && !pickMode ? `<div class="integ-actions">
         <button type="button" id="integ-make">🎬 この枠で動画を作る</button>
         <button type="button" id="integ-post">🦋 この枠を投稿する</button>
         <div class="integ-hint">枠の情報を「動画作成／投稿」へ引き継ぎます。</div>
@@ -368,6 +375,8 @@ window.SCH = window.SCH || {};
     `;
     m.classList.add("open");
     if (inFrame) {
+      const pk = document.getElementById("integ-pick");
+      if (pk) pk.addEventListener("click", () => { sendToParent("slot-picked", s); closeEditor(); });
       const mk = document.getElementById("integ-make");
       const ps = document.getElementById("integ-post");
       if (mk) mk.addEventListener("click", () => { sendToParent("slot-create", s); closeEditor(); });
@@ -381,6 +390,8 @@ window.SCH = window.SCH || {};
     if (!d || d.target !== "sch-calendar") return;
     // 親がカレンダータブを表示した合図。iframeは再ロードされないので、開くたびに今日へ寄せる。
     if (d.type === "show") { requestAnimationFrame(function () { scrollToToday(false); }); return; }
+    if (d.type === "enter-pick") { pickMode = true; if (editingId) closeEditor(); requestAnimationFrame(function () { scrollToToday(false); }); return; }
+    if (d.type === "exit-pick") { pickMode = false; if (editingId) closeEditor(); return; }
     if (d.type === "recompute") { recomputeAndRender(); return; }
     if (d.type === "sync-refresh") {
       store.init()
