@@ -1015,7 +1015,10 @@
     });
 
     // ★全端末同期で別端末のドラフトが降ってきたら、開いていれば即再描画(タブを再タップしなくても出る)。
-    document.addEventListener('go5-synced', function () {
+    //   ただし pulled>0(実際に取り込んだ変更がある)時だけ。タブ復帰で毎回鳴る go5-synced に
+    //   無条件で反応すると、往復のたびに一覧を作り直して画面が一瞬白くチラつく(Chami 2026-08-04)。
+    document.addEventListener('go5-synced', function (e) {
+      if (!e || !e.detail || !e.detail.pulled) return;
       var page = $('pageStock');
       if (page && !page.hidden) render();
     });

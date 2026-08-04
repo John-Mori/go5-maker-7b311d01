@@ -61,7 +61,10 @@
   });
 
   // クラウド同期でlocalStorageの予定が更新されたら、iframe内のメモリ状態も読み直す。
-  document.addEventListener('go5-synced', function () {
+  // ★pulled>0(実際に取り込んだ変更)の時だけ。タブ復帰で毎回鳴る go5-synced に無条件で
+  //   反応するとカレンダーiframeを往復のたび読み直させる(チラつき源・Chami 2026-08-04)。
+  document.addEventListener('go5-synced', function (e) {
+    if (!e || !e.detail || !e.detail.pulled) return;
     var f = $('calFrame');
     if (f && f.contentWindow) f.contentWindow.postMessage({ target: 'sch-calendar', type: 'sync-refresh' }, '*');
   });

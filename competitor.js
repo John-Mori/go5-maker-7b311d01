@@ -322,8 +322,11 @@
     migrateToGas();   // 接続前に貯めたlocalStorage登録をGASへ片寄せ(一度だけ)
     loadAnalysis();   // 分析パネルをGASから充填
     var rb = $('compAnalysisRefresh'); if (rb) rb.addEventListener('click', loadAnalysis);
-    // 同期で他端末から更新が入ったら再描画(存在すれば購読)
-    try { document.addEventListener('go5-synced', render); } catch (e) {}
+    // 同期で他端末から更新が入ったら再描画(存在すれば購読)。
+    // ★実際に取り込んだ変更(pulled>0)の時だけ再描画する。タブ復帰(pageshow/focus/online)で
+    //   毎回鳴る go5-synced に無条件で反応すると、変更が無くても一覧を作り直して画面が一瞬白く
+    //   チラつく(Chami 2026-08-04「候補追加で往復するたび白くなる」)。変更ゼロなら描き直さない。
+    try { document.addEventListener('go5-synced', function (e) { if (!e || !e.detail || !e.detail.pulled) return; render(); }); } catch (e) {}
     try { document.addEventListener('account-changed', render); } catch (e) {}
   }
 
