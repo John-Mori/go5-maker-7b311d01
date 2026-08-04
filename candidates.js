@@ -3366,7 +3366,14 @@
       if (document.visibilityState !== 'visible') return;
       var el = document.getElementById('candList');
       if (!el || el.offsetParent === null) return; // 候補が画面に無い＝無駄な通信をしない
-      render(); // 先頭で kickInfoBackfill_ → backfill が即解禁される
+      // ★復帰のたび render() を呼ぶと page.innerHTML を丸ごと作り直す=画面が一瞬白くチラつく
+      //   (Chami 2026-08-04・Twitter等と往復するたび発生・モーダルを開いたままでも背後が再構築される)。
+      //   タイトル追い直しに全再描画は不要=(1)未取得の再取得フェーズを素早いへ戻し(kick)、
+      //   (2)自動追跡タイマーだけ再武装する。実際にタイトルが埋まった時だけ scheduleInfoTick_→
+      //   renderCandList が該当カードを部分更新する(チラつかない)。この handler 自体は 7/29 に
+      //   追加された=それ以前にチラつきが無かったのはこの全再描画が無かったため。
+      kickInfoBackfill_();
+      try { scheduleInfoTick_(_activeTab, lsGet(itemsKey(_activeTab), '[]')); } catch (e) {}
     });
   } catch (e) {}
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行(5MB枠を解放)
