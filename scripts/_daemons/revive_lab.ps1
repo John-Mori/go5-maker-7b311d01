@@ -59,6 +59,32 @@ if ($waiter.Count -gt 0) {
   exit 0
 }
 
+# --- 2.5) Reap stale revival shells (2026-08-01, aegis-gl, C-027). ---
+#   THE PILEUP BUG: the guards above only RATE-LIMIT spawns; nothing ever REAPED the failures.
+#   A script-launched `claude` in this env does not become a live consumer (it never arms a
+#   `inbox_waiter --name main`, so presence.py reports the Lab dead forever). So this script fired
+#   every 20 min, each time leaving a `cmd /k -> claude.exe` corpse that never exits (cmd /k keeps
+#   the window, claude sits as a ~35MB zombie). Measured 2026-08-01: 100 such corpses / ~4GB RAM.
+#   Since we only reach here when the Lab is DEAD by presence AND no main waiter is armed, any
+#   existing revival cmd window is a confirmed corpse (it never became the live Lab). Close them.
+#   Age guard (> cooldown) makes it impossible to touch a window that is still booting this cycle.
+$revCmds = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+  $_.Name -eq 'cmd.exe' -and
+  $_.CommandLine -match '\.local\\bin\\claude\.exe' -and
+  $_.CommandLine -match 'SougouStartFolder\\5SecMovieMaker'
+})
+$reaped = 0
+foreach ($rc in $revCmds) {
+  if ($null -eq $rc.CreationDate) { continue }
+  if (((Get-Date) - $rc.CreationDate).TotalSeconds -lt $cooldownSec) { continue }  # still booting - leave it
+  Get-CimInstance Win32_Process -Filter ("ParentProcessId={0}" -f $rc.ProcessId) -ErrorAction SilentlyContinue | ForEach-Object {
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+  Stop-Process -Id $rc.ProcessId -Force -ErrorAction SilentlyContinue
+  $reaped++
+}
+if ($reaped -gt 0) { Write-Log ('lab: reaped {0} stale revival shell(s) before spawn (dead+no-waiter = corpses)' -f $reaped) }
+
 # --- 3) Cooldown: do not respawn faster than every 15 min. ---
 $now = [int][double]::Parse((Get-Date -UFormat %s))
 if (Test-Path -LiteralPath $stateFile) {
@@ -83,6 +109,18 @@ try {
 } catch { Write-Log ('lab: prompt build failed: {0}' -f $_.Exception.Message) }
 if (-not $prompt) { Write-Log 'lab: empty boot prompt - cannot revive safely'; exit 1 }
 
+# --- 4.5) PROMPT TRUNCATION FIX (2026-08-04, HQ). MEASURED SYMPTOM: every revived window
+#   showed only the FIRST TOKEN of the prompt and answered "your message seems cut off",
+#   so the window NEVER became the Lab - which is exactly why presence stayed dead, revive
+#   re-fired every cycle, and cmd corpses piled up (DEF-hq-4bbc31797b).
+#   CAUSE (two walls, both here): the prompt was appended to -ArgumentList RAW.
+#     (a) unquoted -> cmd splits it on the FIRST SPACE, claude gets only that token as argv[1].
+#     (b) multi-line -> a cmd command line ends at the first CR/LF, so the rest is dropped anyway.
+#   FIX: flatten newlines to spaces (the prompt is ~1.9KB, far under cmd's 8191 limit) and pass
+#   it as ONE explicitly double-quoted element. Any inner double quote is downgraded to a
+#   single quote (inert to cmd) so python can never break the quoting from the outside.
+$promptArg = '"' + (($prompt -replace '"', "'") -replace '\s*\r?\n\s*', ' ') + '"'
+
 # --- 5) Auth: a script-launched claude is NOT logged in unless we inject the OAuth token
 #        (host auth is not inherited by a cold CLI). Token lives in local/cli_auth_token.txt
 #        (gitignored). Set it as an ENV VAR (inherited by the child), never on the command line. ---
@@ -95,6 +133,6 @@ if (Test-Path -LiteralPath $tokFile) {
 
 # --- 6) Spawn a FRESH Lab (visible window on purpose: interactive TUI + last-resort manual input
 #        path via remote desktop). No -r resume. Same shape as open_dept_window.ps1. ---
-Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', 'cd', '/d', $root, '&&', $claude, $prompt) -WorkingDirectory $root
+Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', 'cd', '/d', $root, '&&', $claude, $promptArg) -WorkingDirectory $root
 Set-Content -LiteralPath $stateFile -Value $now -Encoding ASCII
 Write-Log 'lab: revived FRESH (no resume) with boot prompt - spawned visible window'

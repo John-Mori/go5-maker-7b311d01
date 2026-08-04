@@ -32,6 +32,15 @@ if (-not (Test-Path -LiteralPath $promptFile)) { Write-Log "no prompt for $Dept"
 $prompt = (Get-Content -LiteralPath $promptFile -Raw -Encoding UTF8).Trim()
 if (-not $prompt) { Write-Log "empty prompt for $Dept"; exit 1 }
 
+# PROMPT TRUNCATION FIX (2026-08-04, HQ) - same defect as revive_lab.ps1 (see its section 4.5).
+#   The prompt went into -ArgumentList RAW: cmd split it on the first space (claude got only the
+#   first token) and a cmd command line ends at the first newline anyway. Measured symptom: the
+#   opened window shows only the prompt's first token and answers "cut off" - it never becomes
+#   the dept session. FIX: flatten newlines, downgrade inner double quotes to single quotes
+#   (inert to cmd), pass as ONE explicitly quoted element. Measured prompt size ~4.4KB UTF-8,
+#   well under cmd's command-line limit.
+$promptArg = '"' + (($prompt -replace '"', "'") -replace '\s*\r?\n\s*', ' ') + '"'
+
 $claude = 'C:\Users\chami\.local\bin\claude.exe'
 if (-not (Test-Path -LiteralPath $claude)) { Write-Log 'claude.exe not found'; exit 1 }
 
@@ -42,6 +51,6 @@ $alive = @(Get-CimInstance Win32_Process | Where-Object {
 if ($alive.Count -gt 0) { Write-Log ("$Dept : already open"); Write-Output 'ALREADY_OPEN'; exit 0 }
 
 # Visible window on purpose (interactive TUI). Pass the prompt as the first argument.
-Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', 'cd', '/d', $root, '&&', $claude, $prompt) -WorkingDirectory $root
+Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', 'cd', '/d', $root, '&&', $claude, $promptArg) -WorkingDirectory $root
 Write-Log ("$Dept : opened")
 Write-Output 'OPENED'
