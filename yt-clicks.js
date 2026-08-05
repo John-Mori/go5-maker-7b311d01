@@ -839,6 +839,7 @@
   var viewsCache = {};     // videoId -> views
   var publishedCache = {}; // videoId -> publishedAt(ms)
   var titleCache = {};     // videoId -> YouTubeタイトル
+  var _pubBackfillTried = {}; // シート補完でvidを補った投稿の公開日時を取りに行った印(セッション内で1回だけ・ループ防止)
   var lastErr = '';
 
   // ── YouTubeメタ(題名/投稿日時/視聴回数)を localStorage に永続化 ──────────────
@@ -1586,6 +1587,26 @@
     // YouTube公開前(非公開/予約公開)の動画一覧 → vidで引けるマップに(「投稿予定」バッジ表示用)
     var schedMap = {};
     try { loadYtSched_(acct()).forEach(function (y) { if (y && y.vid) schedMap[y.vid] = y; }); } catch (e) {}
+    // ★見出し日時は必ず YouTube公開日時(snippet.publishedAt)にする(Chami指示2026-08-05:
+    //   「投稿履歴の時刻は動画作成日時ではなくYouTube投稿時間が正」)。ローカル行にYT URLが結線されず
+    //   vid が空だと §1651 の実投稿時刻(it.ts=動画作成/投稿完了時刻)へ落ち、"作成日時"が見出しに出る
+    //   (宵桜艶帖・予約公開＝完了8:31／YT公開12:20 のズレで顕在化)。記録シートにある youtubeUrl を
+    //   videoId/postUri/shortUrl で引いて vid を補い(表示専用・非破壊)、公開日時を取り直す。
+    var _rawYt = { vid: {}, uri: {}, sh: {} };
+    try {
+      loadSheetRaw_(acct()).forEach(function (r) {
+        var y = String((r && r.youtubeUrl) || '').trim(); if (!y) return;
+        if (r.videoId) _rawYt.vid[String(r.videoId)] = y;
+        if (r.postUri) _rawYt.uri[String(r.postUri)] = y;
+        if (r.shortUrl) _rawYt.sh[String(r.shortUrl)] = y;
+      });
+    } catch (e) {}
+    function sheetYtFor_(it) {
+      return (it.videoId && _rawYt.vid[String(it.videoId)]) ||
+             (it.postUri && _rawYt.uri[String(it.postUri)]) ||
+             (it.shortUrl && _rawYt.sh[String(it.shortUrl)]) || '';
+    }
+    var _needPub = []; // シートから補ったが公開日時が未取得の vid（この描画の後で1回だけ取りに行く）
     // 被リビルド作品の非表示トグル。(最新の投稿カードにボタンを設置。ONで被リビルド済みを一覧から除外)
     var hideRemadeKey = 'verify_hide_remade__' + acct();
     var hideRemade = false; try { hideRemade = localStorage.getItem(hideRemadeKey) === '1'; } catch (e) {}
@@ -1601,6 +1622,15 @@
       var k = itemKey(it);
       var yt = ymap[k] || it.ytUrl || '';
       var vid = ytIdOf(yt);
+      // ローカル行にYT URLが結線されていない時だけ、記録シートの youtubeUrl で vid を補う(見出し日時を
+      //   YouTube公開日時にするため)。公開日時が未取得なら _needPub に積んで描画後に取り直す。
+      if (!vid) {
+        var _syt = sheetYtFor_(it);
+        if (_syt) {
+          yt = _syt; vid = ytIdOf(_syt);
+          if (vid && apiKey() && !(vid in publishedCache) && !_pubBackfillTried[vid]) _needPub.push(vid);
+        }
+      }
       // 【供給一本化 2026-08-03】導線1/導線2のクリックは postClicks_ で計算(ランキングと同一の1関数)。
       //   合算URLの加算・GAS日次デルタの累計下限・リビルド結合まで内包する(旧・この場のインライン計算を
       //   関数へ寄せた=履歴とランキングで計算式が二度と割れないようにする)。_dl は下の総再生数下限で再利用。
@@ -1711,6 +1741,26 @@
         '</div>' +
         '</div>';
     }).join('');
+    // シートから vid を補ったが公開日時が未取得の投稿を、描画後に1回だけ取りに行く(見出しを YouTube公開日時へ)。
+    //   通常のrefresh()はallItems(ローカル)しか照会しないため、結線が切れた行はここでしか公開日時を拾えない。
+    //   取得できたら再描画で §1646(pub)が §1651(it.ts=作成日時)に勝つ。まだ非公開(予約公開中)なら空応答＝
+    //   _pubBackfillTried で二度打ちを止める(公開後のリロード/更新で拾い直す)。
+    if (_needPub.length && apiKey()) {
+      var _pb = _needPub.filter(function (v, i, a) { return a.indexOf(v) === i; }).slice(0, 50);
+      _pb.forEach(function (v) { _pubBackfillTried[v] = 1; });
+      try {
+        fetchVideos(_pb).then(function (m) {
+          var got = false;
+          Object.keys(m || {}).forEach(function (id) {
+            if (id.indexOf('__') === 0) return; var rec = m[id] || {};
+            if (rec.views != null) viewsCache[id] = rec.views;
+            if (rec.published != null) { publishedCache[id] = rec.published; got = true; }
+            if (rec.title) titleCache[id] = rec.title;
+          });
+          if (got) { try { ytMetaPersist(m); } catch (e) {} render(); }
+        }).catch(function () {});
+      } catch (e) {}
+    }
     applyManualInfoNow_(); // 手動入力の作品情報は描画直後に即表示(フェッチ待ちで遅れない)
     fillFanzaNames();
     try { renderSaleStats_(); } catch (e) {} // セール会場統計(再描画のたびに最新表示)
