@@ -2091,12 +2091,27 @@
         (lsGet('cand_items__' + t.id, '[]') || []).forEach(pushCid_);
       });
       function done_() { syncCandidatePool_(cids); }
+      var K_MK_OK = 'cand_maker_cids_ok'; // 前回"取得成功"したサークルcid集合(端末ローカル・全滅時の代替に使う)
       // サークル分は cid のみを集めればよい(並びは同期に無関係)。キャッシュ優先=force省略。
-      //   ★全滅(err && !items)の時は同期しない=総入れ替えPOSTで登録済みサークル分をD1から削り戻すのを防ぐ
-      //     (サークル取得の失敗が「D1がmainだけの小集合に縮む」に化けていた・Fable真因追跡2026-08-05)。
+      //   ★全滅(err && !items)でも done_() は必ず呼ぶ。以前は 2098 で return し done_()=POST自体が
+      //     一度も発火しなかった(main分すら送られずD1が7/30から凍結・商品候補選定部門の実測・星南が行特定)。
+      //   ★削り戻し防止は「集合を縮めない」で担保する=全滅時は前回成功したサークルcidを端末から復元して
+      //     cidsへ足す(集合が main だけに縮まない)＝削り戻さず、かつPOSTは発火させる。
       if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items, err) {
-        if (err && !items) return; // サークル全滅=不完全集合で削り戻さない(次回リロードで再試行)
-        (items || []).forEach(pushCid_); done_();
+        if (err && !items) {
+          var saved = [];
+          try { saved = (localStorage.getItem(K_MK_OK) || '').split(',').filter(Boolean); } catch (e) {}
+          saved.forEach(function (c) { if (c && !seen[c]) { seen[c] = true; cids.push(c); } });
+          done_(); // 前回成功したサークル分を保って発火(縮めない・削り戻さない)
+          return;
+        }
+        var mkCids = [];
+        (items || []).forEach(function (it) {
+          var c = (it && it.cid) ? String(it.cid) : cidFromUrl_((it && it.url) || '');
+          if (c) { mkCids.push(c); if (!seen[c]) { seen[c] = true; cids.push(c); } }
+        });
+        try { localStorage.setItem(K_MK_OK, mkCids.join(',')); } catch (e) {} // 成功時だけ更新
+        done_();
       });
       else done_();
     }, 500);
