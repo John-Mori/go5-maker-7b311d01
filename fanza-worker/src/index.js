@@ -143,29 +143,8 @@ export default {
       if (!corsC) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
       if (!env.FANZA_DB) return json({ ok: false, error: "db_unbound" }, 500, corsC);
 
-      // 【一時診断・十王星南 2026-08-05】?selftest=N = 本番と同じ DELETE+INSERT バッチ書き込みを
-      //   throwaway テーブル _pool_selftest で実行し「N件のバッチ書き込みが D1 で成立するか」だけを測る
-      //   (candidate_pool は一切触らない)。書けなければ error を返す=書き側の問題を server 単体で確定。検証後に撤去。
-      if (url.searchParams.has("selftest")) {
-        const nReq = Math.min(parseInt(url.searchParams.get("selftest") || "0", 10) || 0, 5000);
-        const now2 = Date.now();
-        const test = [];
-        for (let i = 0; i < nReq; i++) test.push("stcid_" + String(i));
-        try {
-          await env.FANZA_DB.prepare("CREATE TABLE IF NOT EXISTS _pool_selftest (cid TEXT PRIMARY KEY, updated_at INTEGER)").run();
-          const st = [env.FANZA_DB.prepare("DELETE FROM _pool_selftest")];
-          for (let i = 0; i < test.length; i += 45) {
-            const chunk = test.slice(i, i + 45);
-            const ph = chunk.map(() => "(?, ?)").join(", ");
-            const b = [];
-            chunk.forEach((c) => { b.push(c, now2); });
-            st.push(env.FANZA_DB.prepare("INSERT INTO _pool_selftest (cid, updated_at) VALUES " + ph).bind(...b));
-          }
-          await env.FANZA_DB.batch(st);
-          const rb = await env.FANZA_DB.prepare("SELECT COUNT(*) AS n FROM _pool_selftest").first();
-          return json({ ok: true, requested: nReq, wrote: (rb && rb.n) || 0 }, 200, corsC);
-        } catch (e) { return json({ ok: false, requested: nReq, error: String((e && e.message) || e) }, 500, corsC); }
-      }
+      // (一時診断 ?selftest=N は 2026-08-06 に撤去=INC-126 の書き込み修正が実 candidate_pool へ着地
+      //   COUNT 1→243 を確認したため。真因の実測経緯は §210 付近の本番コメントに残す。)
       if (request.method === "GET") {
         // ?log=1 = 最後に着いたPOSTの観測ログを返す(着信の有無・secret照合・件数・永続化結果)。
         //   ブラウザから直接読めるようにGETへ相乗り(部門/実機どちらでも1回で「どこで死んだか」が出る)。
