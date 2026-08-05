@@ -131,55 +131,6 @@ if (Test-Path -LiteralPath $tokFile) {
   Write-Log 'lab: WARNING - local\cli_auth_token.txt missing. Revived session may not be logged in (deaf window). Run: claude setup-token'
 }
 
-# --- 5.5) AUTH PRE-WARM (2026-08-06, aegis-gl). MEASURED SYMPTOM: every revived window died with
-#   "Please run /login - API Error: 401 OAuth access token has expired" while the 30 dept_daemons
-#   kept working on --print, so "the key expired" looked true but was not.
-#   MEASURED FACTS (2026-08-06 02:42 JST, all run by hand):
-#     (a) local\cli_auth_token.txt is VALID - api.anthropic.com/v1/messages returns 200 with it
-#         (a deliberately bogus token returns 401 on the same call), and it answers pong on its
-#         own inside an isolated CLAUDE_CONFIG_DIR. The key is NOT the problem.
-#     (b) The CLI PREFERS %USERPROFILE%\.claude\.credentials.json over CLAUDE_CODE_OAUTH_TOKEN:
-#         a bogus env token still answered pong while those host creds were fresh. So section 5's
-#         premise ("a cold CLI has no host auth, inject the token") no longer holds - the cold TUI
-#         reads the same host creds, and when they are stale it stops at /login WITHOUT falling
-#         back to our perfectly good env token.
-#     (c) .credentials.json carries an ~8h expiresAt and is refreshed only when something calls
-#         the API. Every failed revive on 08-06 (01:02 / 01:22 / 01:42 / 02:02 / 02:22) sat inside
-#         such an expired window; the file was refreshed at 02:40 the instant a --print ran.
-#   FIX: force that refresh ourselves right before spawning, so the cold TUI reads live creds.
-#   fail-open: if the probe fails we still spawn (the visible window is Chami's manual path),
-#   but the log says so plainly instead of leaving a silent corpse.
-$probeOut = Join-Path $root 'local\_lab_revive_probe.out'
-$probeIn  = Join-Path $root 'local\_lab_revive_probe.in'
-Set-Content -LiteralPath $probeIn -Value '' -Encoding ASCII
-try {
-  $probe = Start-Process -FilePath $claude `
-    -ArgumentList @('--print', '--model', 'sonnet', 'ping') `
-    -NoNewWindow -PassThru -WorkingDirectory $root `
-    -RedirectStandardInput $probeIn -RedirectStandardOutput $probeOut -RedirectStandardError ($probeOut + '.err')
-  if (-not $probe.WaitForExit(90000)) {
-    try { $probe.Kill() } catch {}
-    Write-Log 'lab: AUTH PRE-WARM timed out (90s) - spawning anyway (fail-open)'
-  } else {
-    # ExitCode is NULL on a Start-Process -PassThru object that used redirection (measured on
-    # PS 5.1, 2026-08-06), so judging on it would log FAILED on every success - a guard that
-    # always misfires is a dead guard. Judge on the probe's own output instead.
-    $blob = ''
-    foreach ($f in @($probeOut, ($probeOut + '.err'))) {
-      if (Test-Path -LiteralPath $f) { $blob += (Get-Content -LiteralPath $f -Raw) }
-    }
-    if ($blob -match 'Please run /login|Not logged in|401|Invalid API key|authentication_error') {
-      Write-Log 'lab: AUTH PRE-WARM FAILED - host creds could not be refreshed. The revived window will show /login. See local\_lab_revive_probe.out'
-    } elseif ($blob.Trim().Length -gt 0) {
-      Write-Log 'lab: auth pre-warm ok (.claude\.credentials.json refreshed) - cold TUI should authenticate'
-    } else {
-      Write-Log 'lab: auth pre-warm returned nothing - treating as unknown, spawning anyway (fail-open)'
-    }
-  }
-} catch {
-  Write-Log ('lab: AUTH PRE-WARM errored: {0} - spawning anyway (fail-open)' -f $_.Exception.Message)
-}
-
 # --- 6) Spawn a FRESH Lab (visible window on purpose: interactive TUI + last-resort manual input
 #        path via remote desktop). No -r resume. Same shape as open_dept_window.ps1. ---
 Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', 'cd', '/d', $root, '&&', $claude, $promptArg) -WorkingDirectory $root
