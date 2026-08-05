@@ -70,7 +70,8 @@
   // 既定サイズ: 仕様§3「ラベル幅≈13.5%」を"視認幅"で満たす scale0.72 を、実機確認を踏まえ更に-5%(仕様§8)。
   //   0.72×0.95=0.684。視認幅≈12.6%。左の集中線・「里香さん!?」への重なりを軽減。box基準13.5%(scale0.4)は
   //   縦長PNGの透明余白で視認7%=不可読のため視認基準で管理。
-  var DEFAULT_SCALE = 0.684;
+  // ★2026-08-05 Chami指示で既定を73%(0.73)へ引き上げ(旧0.684=68%)。UI表示は Math.round(scale*100)=「73%」。
+  var DEFAULT_SCALE = 0.73;
   var SCALE_MIN = 0.35, SCALE_MAX = 2.5;
   var LABEL_OPACITY = 0.89;   // 既定不透明度(仕様§4・89%。文字が読めるよう下げすぎない)
   // 色の馴染ませ(仕様§6-8): 金光彩/光沢/彩度を弱め、ラベルだけ浮きすぎるのを抑える近似。
@@ -87,8 +88,29 @@
   var enabled = true;
   try { var _e = localStorage.getItem('promo_label_enabled'); if (_e === '0') enabled = false; } catch (e) {}
   try { var _t = localStorage.getItem('promo_label_type'); if (_t === 'price') ltype = 'price'; } catch (e) {}
-  try { var _s = parseFloat(localStorage.getItem('promo_label_scale')); if (_s >= SCALE_MIN && _s <= SCALE_MAX) scale = _s; } catch (e) {}
-  try { var _p = JSON.parse(localStorage.getItem('promo_label_fpos') || 'null'); if (_p && typeof _p.x === 'number' && typeof _p.y === 'number') fpos = _p; } catch (e) {}
+  // ★大きさ(scale)/位置(fpos)はチャンネル別(__acc1/__acc2)に保持する(Chami依頼2026-08-05
+  //   「チャンネルそれぞれで前回のタグの大きさ・位置をリセットせず保持・端末共通」)。acc1(baseW360)と
+  //   acc2(620)は実寸が1.7倍違い、共通倍率だと片chで合わせた大きさが他chでフレームからはみ出す元凶
+  //   だった=チャンネル別に分ける。旧・共通キーの値は両chへ一度だけ複製して引き継ぐ(下のmigrate)。
+  //   起動時＋アカウント切替(account-changed)で loadLabelPrefs() が現chの値を読み直す。種別(type)/表示ON
+  //   (enabled)は作品・運用に紐づくので従来どおり全ch共通(bluesky.js/stock.js が promo_label_type を読む互換維持)。
+  (function migratePromoAcctOnce() {
+    try { if (localStorage.getItem('promo_label_acct_split_migrated') === '1') return; } catch (e) { return; }
+    ['promo_label_scale', 'promo_label_fpos'].forEach(function (base) {
+      var old; try { old = localStorage.getItem(base); } catch (e) { old = null; }
+      if (old == null) return;
+      ['acc1', 'acc2'].forEach(function (a) {
+        try { if (localStorage.getItem(base + '__' + a) == null) localStorage.setItem(base + '__' + a, old); } catch (e) {}
+      });
+    });
+    try { localStorage.setItem('promo_label_acct_split_migrated', '1'); } catch (e) {}
+  })();
+  function loadLabelPrefs() {
+    scale = DEFAULT_SCALE; fpos = null;
+    try { var _s = parseFloat(localStorage.getItem(lk('promo_label_scale'))); if (_s >= SCALE_MIN && _s <= SCALE_MAX) scale = _s; } catch (e) {}
+    try { var _p = JSON.parse(localStorage.getItem(lk('promo_label_fpos')) || 'null'); if (_p && typeof _p.x === 'number' && typeof _p.y === 'number') fpos = _p; } catch (e) {}
+  }
+  loadLabelPrefs();
   // ①リロードで割引タグが消える不具合の対策(Chami依頼2026-08-02①)。
   //   pct/priceVal は notify() でしか入らず、リロード直後は作品情報を取り直すまで0=非表示になっていた。
   //   直近の値を永続化して復元し、作品替え(begin)・新規作成(clear)で正しく上書きする。
@@ -102,6 +124,8 @@
   } catch (e) {}
 
   function acct() { return window.getCurrentAccount ? window.getCurrentAccount() : 'acc1'; }
+  // 🏷ラベルの大きさ/位置はチャンネル別キー(base__acc)で保持。(Chami依頼2026-08-05)
+  function lk(base) { return base + '__' + acct(); }
   function tplAcct() { return TEMPLATES[acct()] || TEMPLATES.acc1; }
   function tplVariant() { return tplAcct()[ltype] || tplAcct().discount; }
   // 表示する数字。指示書§7: 正の整数のみ(0/負/NaN/undefinedは不正=非表示)。
@@ -269,9 +293,9 @@
   }
 
   function persist() {
-    try { localStorage.setItem('promo_label_scale', String(scale)); } catch (e) {}
-    try { localStorage.setItem('promo_label_fpos', fpos ? JSON.stringify(fpos) : ''); } catch (e) {}
-    try { localStorage.setItem('promo_label_type', ltype); } catch (e) {}
+    try { localStorage.setItem(lk('promo_label_scale'), String(scale)); } catch (e) {}       // チャンネル別
+    try { localStorage.setItem(lk('promo_label_fpos'), fpos ? JSON.stringify(fpos) : ''); } catch (e) {} // チャンネル別
+    try { localStorage.setItem('promo_label_type', ltype); } catch (e) {}                    // 全ch共通(互換)
     // ①リロード耐性：表示値も永続化(cidで作品替え時に古い値を出さない)。
     try { localStorage.setItem('promo_label_vals', JSON.stringify({ pct: pct, priceVal: priceVal, cid: lastCid })); } catch (e) {}
   }
@@ -319,6 +343,15 @@
     var pw = document.querySelector('.preview-wrap');
     if (pw) pw.classList.toggle('has-dpad', active());
   }
+
+  // アカウント切替で現チャンネルの大きさ/位置を読み直して再描画。(チャンネル別保持・2026-08-05)
+  (function wireAccountChange() {
+    var reload = function () { loadLabelPrefs(); updateRow(); redraw(); };
+    try {
+      if (window.Go5Acct && typeof window.Go5Acct.onChange === 'function') window.Go5Acct.onChange(reload);
+      else if (typeof document !== 'undefined') document.addEventListener('account-changed', reload);
+    } catch (e) {}
+  })();
 
   (function wireButtons() {
     var map = { promoPosL: [-20, 0], promoPosR: [20, 0], promoPosU: [0, -20], promoPosD: [0, 20] };
