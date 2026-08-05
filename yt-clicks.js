@@ -1646,8 +1646,10 @@
           ? '<b>' + fmtPostDate(pub) + '</b>'
           : (plannedHtml
             ? plannedHtml
-            : (vid ? '<b class="vdate-pending">…</b>'
-              : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>' : '<b class="vdate-unknown">投稿日時不明</b>'))));
+            // 予約公開の予定時刻を過ぎてもYouTube側の公開日時が観測できない時、vidが在るというだけで「…」に張り付いていた
+            //   (宵桜艶帖の1件・Chami報告2026-08-05)。上の§1637の設計意図どおり実投稿時刻(ts)を先に正とし、tsも無い時だけ「…」を出す。
+            : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>'
+              : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>'))));
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
       var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
