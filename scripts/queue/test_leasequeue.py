@@ -4,7 +4,9 @@
 
 実行: python scripts/queue/test_leasequeue.py
 """
+import json
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -164,6 +166,51 @@ def main():
         [t.join() for t in ts]
         check("並行claimで40件ちょうど1回ずつ (重複/取りこぼしゼロ)",
               len(got) == 40 and len(set(got)) == 40)
+
+        # 12) ★優先度: Chami本人の便が、先に入った自動便を追い越す (2026-08-06)
+        #     再現する事故= 08:00 に絵文字巡回便が入り、08:03 のChamiの便がその後ろに並び、
+        #     08:04 に「反応がない」。順番だけが原因だった。
+        from leasequeue import prio_of, PRIO_CHAMI, PRIO_NORMAL
+        check("prio_of: Chami本人の便は0", prio_of({"author": "chami_fusoh"}) == PRIO_CHAMI)
+        check("prio_of: author_idでも拾う",
+              prio_of({"author": "x", "author_id": "490925528367497227"}) == PRIO_CHAMI)
+        check("prio_of: 自動巡回便は通常", prio_of({"author": "絵文字監視(毎朝8時の自動巡回)"}) == PRIO_NORMAL)
+        check("prio_of: 本文にchami_fusohが出てくるだけの便は通常 (誤検知しない)",
+              prio_of({"author": "bot", "content": "投稿者: chami_fusoh"}) == PRIO_NORMAL)
+        check("prio_of: JSONでない/authorが無い便は通常へ倒す (fail-open)",
+              prio_of("これはJSONではない") == PRIO_NORMAL and prio_of({}) == PRIO_NORMAL)
+
+        q6 = LeaseQueue(os.path.join(d, "q6.db"), lease_sec=60)
+        q6.enqueue({"author": "絵文字監視(毎朝8時の自動巡回)", "content": "巡回"},
+                   msg_id="P-auto1", dept="pse")
+        q6.enqueue({"author": "ククール(人事部門)", "content": "依頼"}, msg_id="P-auto2", dept="pse")
+        q6.enqueue({"author": "chami_fusoh", "content": "可能？"}, msg_id="P-chami", dept="pse")
+        c1 = q6.claim(dept="pse", who="t")
+        check("★後から入ったChamiの便を先に掴む", c1 and c1["msg_id"] == "P-chami")
+        check("claimはprioを返す (ログで順番が追える)", c1 and c1["prio"] == PRIO_CHAMI)
+        c2 = q6.claim(dept="pse", who="t")
+        c3 = q6.claim(dept="pse", who="t")
+        check("残りは従来どおり投入順 (同prio内のFIFOは壊れていない)",
+              c2 and c3 and c2["msg_id"] == "P-auto1" and c3["msg_id"] == "P-auto2")
+
+        # 13) ★既存DBへの移行: prio列が無いDBに後から足しても、待たされている便が救われる
+        legacy = os.path.join(d, "legacy.db")
+        lc = sqlite3.connect(legacy)
+        lc.execute("""CREATE TABLE queue (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      msg_id TEXT UNIQUE, dept TEXT, body TEXT NOT NULL, enqueued_at REAL NOT NULL,
+                      lease_until REAL NOT NULL DEFAULT 0, deliveries INTEGER NOT NULL DEFAULT 0,
+                      status TEXT NOT NULL DEFAULT 'pending', claimed_by TEXT NOT NULL DEFAULT '',
+                      acked_at REAL, result TEXT NOT NULL DEFAULT '')""")
+        for mid, au in (("L-auto", "絵文字監視(毎朝8時の自動巡回)"), ("L-chami", "chami_fusoh")):
+            lc.execute("INSERT INTO queue(msg_id,dept,body,enqueued_at) VALUES(?,?,?,?)",
+                       (mid, "pse", json.dumps({"author": au}, ensure_ascii=False), time.time()))
+        lc.commit()
+        lc.close()
+        q7 = LeaseQueue(legacy, lease_sec=60)          # ← ここで移行が走る
+        cl = q7.claim(dept="pse", who="t")
+        check("★移行の瞬間に既に並んでいたChamiの便も先頭へ上がる",
+              cl and cl["msg_id"] == "L-chami")
+        q7.close()
 
         ok = all(v for _, v in results)
         print(f"\n== {sum(v for _, v in results)}/{len(results)} PASS ==")

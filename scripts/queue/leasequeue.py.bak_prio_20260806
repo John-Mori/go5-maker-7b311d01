@@ -29,12 +29,6 @@
   追加API: claim(who=)=誰が借りたか記録 / extend()=長い処理のリース延長 /
   stale_pending()=一度もclaimされない放置の検出 (部門が死んでいる時の救済・sweep相当) /
   next_counter()=INC-等の表示用連番の原子的採番 (採番衝突INC-99/100型の根治)。
-
-2026-08-06 追加 (Chami「1番困る部類の出来事。反応がない」msg 1534698574837714984):
-  7. ★**人の便が機械の便に追い越されない**。claim は prio(Chami本人=0 / それ以外=5)→id の
-     順で選ぶ。毎朝8時の自動巡回が全部門へ一斉投入された直後にChamiが喋ると、旧FIFOでは
-     必ず自動便の後ろに並んだ (実測=下の PRIO_CHAMI のコメント)。判定できない便は
-     PRIO_NORMAL へ倒す=優先度は門ではないので、誤判定で便が止まることはない。
 """
 import json
 import os
@@ -45,39 +39,6 @@ import time
 # dead は毒メッセージの隔離。done行は台帳として残す (削除は purge_done のみ)。
 DEFAULT_LEASE_SEC = 900          # 既定リース (処理猶予)。INC-94の実測(処理は数分〜十数分)より長く
 DEFAULT_MAX_DELIVERIES = 5       # これを超えたら dead-letter
-
-# --- 優先度 (2026-08-06 追加・小さいほど先に処理される) ---------------------------
-#   なぜ要るか= claim は厳密FIFO(ORDER BY id)だった。毎朝8時に自動便(絵文字巡回・日次
-#   振り返り)が全部門へ一斉投入され、部門デーモンは1件ずつしか処理しないので、その直後に
-#   Chamiが喋ると**必ず自動便の後ろに並ぶ**。実測 2026-08-06: プラットフォームSEの箱で
-#   08:00:33 に絵文字巡回便(id=2154)がclaimされ、08:03:06 のChamiの便(id=2158)は未claimの
-#   まま置かれた → 08:04:12 に「反応がない」。人の便を機械の便が追い越す構造だった。
-#   直し方= Chami本人の便だけを先頭へ寄せる。判定できない便は従来どおり(fail-open)。
-PRIO_CHAMI = 0                   # Chami本人の発言 = 常に最優先
-PRIO_NORMAL = 5                  # それ以外 (部門間のdispatch・自動巡回・機械の便)
-CHAMI_AUTHORS = ("chami_fusoh",)
-CHAMI_AUTHOR_ID = "490925528367497227"
-
-
-def prio_of(body):
-    """便の本文(JSON文字列 or dict)から優先度を決める。純粋関数=テストできる。
-
-    ★判定できない形(JSONでない・authorが無い)は **PRIO_NORMAL** に倒す。優先度は
-    「速く出す」ための仕掛けであって門ではない。誤判定で便が止まる方が事故だ。
-    """
-    if isinstance(body, str):
-        try:
-            body = json.loads(body)
-        except ValueError:
-            return PRIO_NORMAL
-    if not isinstance(body, dict):
-        return PRIO_NORMAL
-    author = (body.get("author") or "").strip()
-    if author in CHAMI_AUTHORS:
-        return PRIO_CHAMI
-    if str(body.get("author_id") or "") == CHAMI_AUTHOR_ID:
-        return PRIO_CHAMI
-    return PRIO_NORMAL
 
 
 class LeaseQueue:
@@ -108,8 +69,7 @@ class LeaseQueue:
                 status       TEXT NOT NULL DEFAULT 'pending',  -- pending | done | dead
                 claimed_by   TEXT NOT NULL DEFAULT '',
                 acked_at     REAL,
-                result       TEXT NOT NULL DEFAULT '',
-                prio         INTEGER NOT NULL DEFAULT 5   -- 小さいほど先。Chami本人=0
+                result       TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_ready ON queue(status, lease_until);
             CREATE TABLE IF NOT EXISTS counters (
@@ -118,20 +78,6 @@ class LeaseQueue:
             );
             """
         )
-        # --- 既存DBへの追加 (2026-08-06)。ALTERは「列が無い時だけ」通る=冪等。
-        #     既に走っている本番の inbox.db を壊さずに prio を足すための経路。
-        cols = [r[1] for r in self._db.execute("PRAGMA table_info(queue)").fetchall()]
-        if "prio" not in cols:
-            self._db.execute("ALTER TABLE queue ADD COLUMN prio INTEGER NOT NULL DEFAULT 5")
-            # 移行の瞬間に既に並んでいる未処理便へも効かせる (待たされている本人の便を救う)。
-            # done/dead は触らない=台帳としての過去は書き換えない。
-            for qid, body in self._db.execute(
-                    "SELECT id, body FROM queue WHERE status='pending'").fetchall():
-                p = prio_of(body)
-                if p != PRIO_NORMAL:
-                    self._db.execute("UPDATE queue SET prio=? WHERE id=?", (p, qid))
-        self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ready_prio ON queue(status, lease_until, prio, id)")
 
     # --- 書き込み ---
     def enqueue(self, body, msg_id=None, dept=None):
@@ -140,8 +86,8 @@ class LeaseQueue:
             body = json.dumps(body, ensure_ascii=False)
         try:
             cur = self._db.execute(
-                "INSERT INTO queue(msg_id, dept, body, enqueued_at, prio) VALUES(?,?,?,?,?)",
-                (msg_id, dept, body, time.time(), prio_of(body)),
+                "INSERT INTO queue(msg_id, dept, body, enqueued_at) VALUES(?,?,?,?)",
+                (msg_id, dept, body, time.time()),
             )
             return cur.rowcount == 1
         except sqlite3.IntegrityError:
@@ -151,10 +97,8 @@ class LeaseQueue:
     def claim(self, dept=None, who=""):
         """処理可能な1件を占有して返す。無ければ None。who=処理者名 (台帳に残る)。
 
-        「未処理 or リース切れ」の1件を、**優先度→投入順**で選び lease_until を延ばして掴む。
-        BEGIN IMMEDIATE で書き込みロックを取ってから RETURNING するため、同時claimでも
-        同一行は1者にしか渡らない。
-        ★prio が同じ便どうしは従来どおり厳密FIFO(id昇順)=順序の保証は壊れていない。
+        「未処理 or リース切れ」の最古を1件、lease_until を延ばして掴む。BEGIN IMMEDIATE で
+        書き込みロックを取ってから RETURNING するため、同時claimでも同一行は1者にしか渡らない。
         """
         now = time.time()
         where_dept = "AND dept = ?" if dept else ""
@@ -165,9 +109,9 @@ class LeaseQueue:
              WHERE id = (
                  SELECT id FROM queue
                   WHERE status='pending' AND lease_until < ? {where_dept}
-                  ORDER BY prio, id LIMIT 1
+                  ORDER BY id LIMIT 1
              )
-         RETURNING id, msg_id, dept, body, deliveries, prio
+         RETURNING id, msg_id, dept, body, deliveries
         """
         ordered = [now + self.lease_sec, who, now]
         if dept:
@@ -181,7 +125,7 @@ class LeaseQueue:
             return None
         if not row:
             return None
-        qid, msg_id, dept_v, body, deliveries, prio = row
+        qid, msg_id, dept_v, body, deliveries = row
         # max_deliveries 超過は毒メッセージ → dead-letter へ隔離し、次を返さない (呼び側は再claim)
         if deliveries > self.max_deliveries:
             self._db.execute("UPDATE queue SET status='dead' WHERE id=?", (qid,))
@@ -191,7 +135,7 @@ class LeaseQueue:
         except ValueError:
             parsed = {"_raw": body}
         return {"id": qid, "msg_id": msg_id, "dept": dept_v,
-                "deliveries": deliveries, "prio": prio, "body": parsed}
+                "deliveries": deliveries, "body": parsed}
 
     # --- 完了・失敗 ---
     def ack(self, qid, result=""):

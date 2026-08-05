@@ -3051,7 +3051,12 @@ def member_call(conf, content, ctx_dir=None):
 #   その結果は返信の1行目の `[名前]` に現れるので、こちら側は**それを読んで名義に反映するだけ**。
 # ★安全弁: 呼ばれるのは DEPT_CONF に "personas" がある部屋だけ(handle()側でゲート)。
 #   既存19部屋は personas を持たないので、この経路には一切入らない(挙動は旧版と完全同一)。
-_PERSONA_TAG_RE = re.compile(r"^\[([^\[\]\n]{1,24})\][ 　]*(.*)$")
+# ★2026-08-05 全角の角括弧も受ける。実測した漏れ=
+#   返信の1行目が `［ケヴィン・デ・ブライネ］` (全角)で来ると、この正規表現が半角しか見ていないため
+#   ①名義が解決されず既定人格のまま出る ②取り除かれずに `［名前］` が本文の頭に残る。
+#   起動文で半角を指示しているが、**指示だけに頼るのは心がけ**(共通規律§3)。受け側で吸収する。
+#   ★追加のみ=半角の挙動は一字も変わらない(解決できなければ従来どおり本文扱い)。
+_PERSONA_TAG_RE = re.compile(r"^[\[［]([^\[\]［］\n]{1,24})[\]］][ 　]*(.*)$")
 
 
 def split_persona_blocks(text, resolve):
@@ -4882,6 +4887,11 @@ class Daemon:
                     break
                 rec = c["body"] if isinstance(c["body"], dict) else {}
                 mid = str(rec.get("msg_id", c.get("msg_id") or ""))
+                # ★どの便を、どの順で掴んだかをログに残す(2026-08-06)。「反応がない」の調査で
+                #   毎回 inbox.db を手で照会していた。Chami本人の便(prio=0)が自動巡回便より
+                #   先に出たかは、この1行を見れば分かる。
+                log(self.dept, "claim %s prio=%s from=%s" % (
+                    mid or c.get("msg_id"), c.get("prio"), rec.get("author") or "?"))
                 if mid and mid in processed:
                     q.ack(c["id"], result="skip(処理済)")
                     continue
