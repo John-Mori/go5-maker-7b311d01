@@ -44,6 +44,18 @@ body {
 }
 .nav button:hover { border-color: var(--accent); }
 
+/* ドラフトの「公開枠を選ぶ」ピックモード：投稿先chの枠だけを、余計な説明・ボタン無しで出す(Chami依頼2026-08-05)。
+   「5週ローリング/day-type…」の説明・凡例・操作ヘルプ・検証/CSV/Export を隠し、ナビは 今日 前週 今週 翌週 を一列に。 */
+.pick-mode .app-header .sub { display: none; }
+.pick-mode .legend,
+.pick-mode .ctrl-help { display: none; }
+.pick-mode #btn-verify,
+.pick-mode #btn-verify-csv,
+.pick-mode #btn-export { display: none; }
+.pick-mode .nav { display: flex; flex-wrap: nowrap; gap: 4px; }
+.pick-mode .nav button { margin-left: 0; flex: 1 1 auto; white-space: nowrap; padding: 6px 6px; font-size: 12px; }
+.pick-mode #nav-today-center { order: -1; }  /* 今日 を先頭へ */
+
 .status-bar {
   display: flex; gap: 14px; align-items: center; padding: 6px 14px;
   background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px;

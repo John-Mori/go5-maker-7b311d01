@@ -19,9 +19,13 @@ window.SCH = window.SCH || {};
   // 枠ピックモード：ドラフト投稿モードの「公開枠を選ぶ」から enter-pick で入る。
   //   ONの間は編集モーダルに「この枠を公開枠に選ぶ」ボタンを出し、押すと slot-picked を親へ返す。
   let pickMode = (function () { try { return /[?&]pick=1(?:&|$)/.test(location.search); } catch (e) { return false; } })();
+  // ピック対象チャンネル：ドラフトの投稿先(acc1/acc2)。指定時はそのchの枠だけを表示する(Chami依頼2026-08-05)。
+  let pickAcc = (function () { try { var m = /[?&]acc=(acc1|acc2)/.exec(location.search); return m ? m[1] : null; } catch (e) { return null; } })();
+  if (pickMode && typeof document !== "undefined" && document.body) { try { document.body.classList.add("pick-mode"); } catch (e) {} }
 
-  // 現在チャンネルを取得（localStorage から。acc1/acc2）
+  // 現在チャンネルを取得（localStorage から。acc1/acc2）。ピックモードでは投稿先ch(pickAcc)を優先。
   function curAcc() {
+    if (pickMode && pickAcc) return pickAcc;
     try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; }
   }
 
@@ -254,10 +258,15 @@ window.SCH = window.SCH || {};
     const st2 = (s2 && s2.status) || "未着手";
     if (st1 === "公開済" && st2 === "公開済") el.classList.add("cleared"); // 両ch済＝行ごと沈める
 
+    // ピックモード(投稿先chを渡された時)は、そのchの列だけを出す(Chami依頼2026-08-05)。
+    const cell1 = chanCell("月詠み", addMin(base, acctOffAt(config, "acc1", base)), st1);
+    const cell2 = chanCell("宵桜", addMin(base, acctOffAt(config, "acc2", base)), st2);
+    const cells = (pickMode && pickAcc === "acc2") ? cell2
+      : (pickMode && pickAcc === "acc1") ? cell1
+      : (cell1 + cell2);
     el.innerHTML =
       `<span class="bar"></span>` +
-      chanCell("月詠み", addMin(base, acctOffAt(config, "acc1", base)), st1) +
-      chanCell("宵桜", addMin(base, acctOffAt(config, "acc2", base)), st2) +
+      cells +
       `<span class="prio">${pri === 1 ? '<span class="star"></span>本命' : "優先度" + pri}` +
       ((s1 && s1.needs_review) ? ' <span class="slot-review" title="要確認">!</span>' : "") + `</span>`;
     // 編集は現行タブのスロットに対して(従来どおり＝アクティブなアカウントの exec を編集)
@@ -390,8 +399,16 @@ window.SCH = window.SCH || {};
     if (!d || d.target !== "sch-calendar") return;
     // 親がカレンダータブを表示した合図。iframeは再ロードされないので、開くたびに今日へ寄せる。
     if (d.type === "show") { requestAnimationFrame(function () { scrollToToday(false); }); return; }
-    if (d.type === "enter-pick") { pickMode = true; if (editingId) closeEditor(); requestAnimationFrame(function () { scrollToToday(false); }); return; }
-    if (d.type === "exit-pick") { pickMode = false; if (editingId) closeEditor(); return; }
+    if (d.type === "enter-pick") {
+      pickMode = true;
+      if (d.acc === "acc1" || d.acc === "acc2") pickAcc = d.acc;   // 投稿先chを受け取り、その列だけに絞る
+      try { document.body.classList.add("pick-mode"); } catch (e) {}
+      if (editingId) closeEditor();
+      recomputeAndRender();                                        // ch絞り込みを反映して再描画
+      requestAnimationFrame(function () { scrollToToday(false); });
+      return;
+    }
+    if (d.type === "exit-pick") { pickMode = false; try { document.body.classList.remove("pick-mode"); } catch (e) {} if (editingId) closeEditor(); return; }
     if (d.type === "recompute") { recomputeAndRender(); return; }
     if (d.type === "sync-refresh") {
       store.init()

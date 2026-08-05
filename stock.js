@@ -724,16 +724,19 @@
   }
   // カレンダーを上から降ろす。schedule/ を pick=1 で埋め込み、枠タップ→slot-picked を受ける。
   function openSlotPicker_() {
+    // ドラフトの投稿先チャンネルを渡す=ピッカーはそのchの枠だけを表示する(Chami依頼2026-08-05)。
+    var acc = (_modalMeta && _modalMeta.account) || (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
     var pk = $('draftSlotPicker');
     if (!pk) {
       pk = document.createElement('div');
       pk.id = 'draftSlotPicker';
       // 上から降りてくる=固定オーバーレイ＋transformでスライドイン。z-indexは投稿モーダル(9999)より上。
-      pk.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:10000;background:var(--card);border-bottom:1px solid var(--line);' +
+      // ★背景は必ず不透明にする(--card はアカウントテーマ下で rgba(...,.06)=透けるため使わない・Chami「透明にしない」2026-08-05)。
+      pk.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:10000;background:var(--app-bg,#0e1422);border-bottom:1px solid var(--line);' +
         'box-shadow:0 12px 32px rgba(0,0,0,.5);transform:translateY(-100%);transition:transform .28s ease;' +
         'display:flex;flex-direction:column;max-height:82vh;';
       pk.innerHTML =
-        '<div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;">' +
+        '<div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:var(--app-bg,#0e1422);">' +
           '<div style="font-size:.9rem;font-weight:800;color:var(--accent);flex:1;">公開枠を選ぶ</div>' +
           '<div style="font-size:.74rem;color:var(--sub);">枠をタップ→「この枠を公開枠に選ぶ」</div>' +
           '<button type="button" id="draftPickerClose" style="background:none;border:none;color:var(--sub);font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;width:auto;margin:0;">✕</button>' +
@@ -743,11 +746,11 @@
       $('draftPickerClose').addEventListener('click', closeSlotPicker_);
     }
     var f = $('draftPickerFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&v=33');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=34');
     // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
     pk.style.display = 'flex';
     requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });
-    var send = function () { try { f.contentWindow.postMessage({ target: 'sch-calendar', type: 'enter-pick' }, '*'); } catch (e) {} };
+    var send = function () { try { f.contentWindow.postMessage({ target: 'sch-calendar', type: 'enter-pick', acc: acc }, '*'); } catch (e) {} };
     if (f.contentWindow && f.dataset.loaded === '1') send();
     else { f.addEventListener('load', function () { f.dataset.loaded = '1'; send(); }, { once: true }); }
   }
@@ -1109,6 +1112,9 @@
       }
     });
     $('draftXPostUrl').addEventListener('change', function () { applyXPostUrl_(this.value, null); });
+    // ★貼り付けた瞬間に生URLを保存＆全端末へ即push(短縮はchange時=blurで実行)。
+    //   blur前に別端末へ移っても値が渡るようにする(Chami「サブ端末で貼って保存しても反映なし」2026-08-05)。
+    $('draftXPostUrl').addEventListener('input', saveDraftPost_);
     $('draftPasteYtUrl').addEventListener('click', function () {
       var btn = this;
       if (navigator.clipboard && navigator.clipboard.readText) {
