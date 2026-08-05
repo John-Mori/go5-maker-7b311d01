@@ -154,8 +154,8 @@ export default {
         try {
           await env.FANZA_DB.prepare("CREATE TABLE IF NOT EXISTS _pool_selftest (cid TEXT PRIMARY KEY, updated_at INTEGER)").run();
           const st = [env.FANZA_DB.prepare("DELETE FROM _pool_selftest")];
-          for (let i = 0; i < test.length; i += 400) {
-            const chunk = test.slice(i, i + 400);
+          for (let i = 0; i < test.length; i += 45) {
+            const chunk = test.slice(i, i + 45);
             const ph = chunk.map(() => "(?, ?)").join(", ");
             const b = [];
             chunk.forEach((c) => { b.push(c, now2); });
@@ -206,10 +206,16 @@ export default {
       }
       const nowC = Date.now();
       try {
-        // 総入れ替え。DELETE + 複数行INSERT(400件/文=SQLite変数上限999未満)を1バッチ=原子的トランザクション。
+        // 総入れ替え。DELETE + 複数行INSERT を1バッチ=原子的トランザクション。
+        // ★D1のbind変数上限は【1文あたり100】(実測2026-08-05・十王星南 selftest=50→OK/60→"too many SQL variables"）。
+        //   旧コードは400件/文=800変数で上限突破し、候補が50件を超えると毎回バッチ全体がSQLITE_ERRORで
+        //   ロールバック→candidate_poolが最後の小さな成功書き込み(d_754842・1件)に凍結していた(=Chamiの候補241件が
+        //   一度もD1へ入らなかった真因。クライアントv647/648/656はすべて別レイヤを直しており無効)。
+        //   1文2変数=45件/文(90変数)で上限に安全マージンを取る。件数が増えてもバッチ内のINSERT文数が増えるだけ。
+        const CHUNK = 45;
         const stmts = [env.FANZA_DB.prepare("DELETE FROM candidate_pool")];
-        for (let i = 0; i < poolCids.length; i += 400) {
-          const chunk = poolCids.slice(i, i + 400);
+        for (let i = 0; i < poolCids.length; i += CHUNK) {
+          const chunk = poolCids.slice(i, i + CHUNK);
           const ph = chunk.map(() => "(?, ?)").join(", ");
           const binds = [];
           chunk.forEach((c) => { binds.push(c, nowC); });
