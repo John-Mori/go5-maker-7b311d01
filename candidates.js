@@ -36,7 +36,7 @@
   // 同期対象の候補キーが変わったら即時同期を要求。(デバウンス＋最小間隔はGo5Sync側で吸収)
   //   キャッシュ系(cand_sales/cand_mk2 等)では発火させない＝no-op同期の無駄打ちを避ける。
   function reqSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
-  function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); if (/^cand_items(__|$)/.test(k)) schedulePoolSync_(); }
+  function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); if (/^cand_(items|tabs)(__|$)/.test(k)) schedulePoolSync_(); }
   // 継続改善制度の行動ログ。(意味のある操作のみ・失敗は無害)
   function klog_(action, objType, objId, meta) { try { if (window.Go5Kaizen) window.Go5Kaizen.log('candidates', action, objType, objId, meta); } catch (e) {} }
   function workerCfg() {
@@ -2010,27 +2010,35 @@
   }
 
   var _poolSyncTimer = null;
-  // 保存済み候補(main + 独立タブ)の cid を D1 へ同期。起動時・追加・削除時に呼ぶ。
-  // サークルタブは API 非同期取得が必要なため含めない(📚全候補タブを開いた時に補完される)。
+  // 保存済み候補(main + 独立タブ + サークル(maker)タブ)の cid を D1 へ同期。起動時・追加・削除時に呼ぶ。
+  //   ★サークルタブの作品も含める(2026-08-05 修正)。以前は「API非同期取得が要る」を理由に除外し、
+  //   📚全候補タブを手で開いた時(renderAll_)しかサークル分がD1へ行かなかった。POSTは総入れ替え(fanza-worker)
+  //   なので、この自動経路が main だけの小集合を送るたびにD1をサークル抜きへ削り戻していた=Chamiの候補が
+  //   大半サークルタブだと D1 が d_754842 の1件に張り付く(商品候補選定部門の実測)。renderAll_ と同じ集合を
+  //   送ることで cand_pool_hash の食い違いによる削り合いも消える。サークル作品は fetchMakerItemsMulti が
+  //   キャッシュ(cand_mk2__)を使う(force=false)ので通常は通信なしで乗る(キャッシュ切れ時のみAPI)。
   function schedulePoolSync_() {
     if (_poolSyncTimer) clearTimeout(_poolSyncTimer);
     _poolSyncTimer = setTimeout(function () {
       _poolSyncTimer = null;
       var tabs = lsGet(K_TABS, '[]');
-      var seen = {}, cids = [];
+      var seen = {}, cids = [], makerIds = [];
       // ★cid が未解決の候補(URL追加後にcid抽出前 / Books .com 旧数字ID↔新content_id 食い違い)も
       //   その場で url から cid を解決して同期に乗せる。cidFromUrl_ は同期(通信なし・buildAffiliateLink)。
-      //   これをしないと cid が取れている作品だけが D1 candidate_pool に届き、大半が落ちていた(2026-07-30 商品候補選定部門の実測=D1が1件)。
       function pushCid_(it) {
         var c = (it && it.cid) ? String(it.cid) : cidFromUrl_((it && it.url) || '');
         if (c && !seen[c]) { seen[c] = true; cids.push(c); }
       }
       (lsGet(K_ITEMS, '[]') || []).forEach(pushCid_);
       tabs.forEach(function (t) {
-        if (t.excludeFromAll || isMakerTab_(t)) return;
+        if (t.excludeFromAll) return;
+        if (isMakerTab_(t)) { makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); }); return; }
         (lsGet('cand_items__' + t.id, '[]') || []).forEach(pushCid_);
       });
-      syncCandidatePool_(cids);
+      function done_() { syncCandidatePool_(cids); }
+      // サークル分は cid のみを集めればよい(並びは同期に無関係)。キャッシュ優先=force省略。
+      if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items) { (items || []).forEach(pushCid_); done_(); });
+      else done_();
     }, 500);
   }
 
