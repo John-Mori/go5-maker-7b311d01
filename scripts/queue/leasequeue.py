@@ -147,6 +147,33 @@ class LeaseQueue:
         except sqlite3.IntegrityError:
             return False  # msg_id 重複 = 既に入っている
 
+    # --- 優先度の自己修復 (2026-08-06) ---
+    #   実測で分かったこと= prio は enqueue した**プロセス**が書く。ところが投函側
+    #   (scripts/queue/discord_gateway.py) は 07-29 19:00 起動の常駐で、古い leasequeue を
+    #   メモリに抱えたまま走っていた。結果、claim側だけ新しくなり、08:05〜08:39 の
+    #   Chami便 5件が**全部 prio=5 のまま**入った(id=2160/2163/2169/2170/2172)。
+    #   ★「入れる側と出す側の版が揃っている」という前提に優先度を乗せていたのが誤り。
+    #   → **prio は body から導ける**ので、claim の直前に未処理行を見て食い違いを直す。
+    #     これで投函側が古かろうが順番は正しくなる(常駐の再起動に依存しない)。
+    #     書き込むのは食い違った行だけ=通常は読むだけで終わる。
+    def _repair_prio(self):
+        rows = self._db.execute(
+            "SELECT id, body FROM queue WHERE status='pending' AND prio=? LIMIT 500",
+            (PRIO_NORMAL,)).fetchall()
+        fix = []
+        for qid, body in rows:
+            p = prio_of(body)
+            if p != PRIO_NORMAL:
+                fix.append((p, qid))
+        if not fix:
+            return 0
+        try:
+            with self._db:
+                self._db.executemany("UPDATE queue SET prio=? WHERE id=?", fix)
+        except sqlite3.OperationalError:
+            return 0   # 競合したら次のclaimで直せばよい (可用性を止めない)
+        return len(fix)
+
     # --- クレーム (原子的占有) ---
     def claim(self, dept=None, who=""):
         """処理可能な1件を占有して返す。無ければ None。who=処理者名 (台帳に残る)。
@@ -156,6 +183,7 @@ class LeaseQueue:
         同一行は1者にしか渡らない。
         ★prio が同じ便どうしは従来どおり厳密FIFO(id昇順)=順序の保証は壊れていない。
         """
+        self._repair_prio()   # 投函側が古くても順番が狂わないようにする (上のコメント参照)
         now = time.time()
         where_dept = "AND dept = ?" if dept else ""
         # SQLite は UPDATE ... LIMIT を既定ビルドで許さないので、対象idを副問い合わせで1件に絞る。

@@ -4890,6 +4890,11 @@ class Daemon:
                 # ★どの便を、どの順で掴んだかをログに残す(2026-08-06)。「反応がない」の調査で
                 #   毎回 inbox.db を手で照会していた。Chami本人の便(prio=0)が自動巡回便より
                 #   先に出たかは、この1行を見れば分かる。
+                #   ★この1行が実際に効いた実例(同日 08:51 の実測)= claim側だけ新しくなり、
+                #     投函側の常駐(scripts/queue/discord_gateway.py・07-29 19:00起動)が古い
+                #     leasequeue を抱えていたため「from=chami_fusoh なのに prio=5」が並んだ。
+                #     ログが無ければ「入れたのに効かない」を目視で掴めなかった。
+                #     対策は leasequeue._repair_prio(claim直前にbodyから直す)。
                 log(self.dept, "claim %s prio=%s from=%s" % (
                     mid or c.get("msg_id"), c.get("prio"), rec.get("author") or "?"))
                 if mid and mid in processed:

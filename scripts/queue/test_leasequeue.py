@@ -212,6 +212,28 @@ def main():
               cl and cl["msg_id"] == "L-chami")
         q7.close()
 
+        # 14) ★投函側が古いままでも順番は狂わない (2026-08-06 の実物事故)
+        #     本番では claim側だけ新しくなり、投函側の常駐 (discord_gateway) が古い
+        #     leasequeue を抱えていたため Chami便が prio=5 のまま入った。
+        #     → prio は body から導けるので claim 直前に直す。ここではその状況を再現する。
+        stale = os.path.join(d, "stale_writer.db")
+        q8 = LeaseQueue(stale, lease_sec=60)
+        q8.enqueue({"author": "絵文字監視(毎朝8時の自動巡回)"}, msg_id="S-auto", dept="pse")
+        q8.enqueue({"author": "chami_fusoh"}, msg_id="S-chami", dept="pse")
+        # 古い投函側のふりをして prio を既定値へ戻す (= prio列を知らないコードの挙動)
+        q8._db.execute("UPDATE queue SET prio=?", (PRIO_NORMAL,))
+        q8._db.commit()
+        check("前提: 投函側が古いとChami便もprio=5で入っている",
+              q8._db.execute("SELECT prio FROM queue WHERE msg_id='S-chami'").fetchone()[0]
+              == PRIO_NORMAL)
+        c8 = q8.claim(dept="pse", who="t")
+        check("★投函側が古くてもChamiの便が先に出る (claim側で自己修復)",
+              c8 and c8["msg_id"] == "S-chami" and c8["prio"] == PRIO_CHAMI)
+        check("自動巡回便のprioは触られない", q8._db.execute(
+              "SELECT prio FROM queue WHERE msg_id='S-auto'").fetchone()[0] == PRIO_NORMAL)
+        check("直すものが無ければ書き込まない (0を返す)", q8._repair_prio() == 0)
+        q8.close()
+
         ok = all(v for _, v in results)
         print(f"\n== {sum(v for _, v in results)}/{len(results)} PASS ==")
         return 0 if ok else 1
