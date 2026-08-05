@@ -1664,22 +1664,36 @@
       }
       var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
       var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
+      // ★予約公開(sched)/カレンダー予定(plannedAt)の「予定時刻」が既に過ぎていたら、YouTube公開が
+      //   まだ観測できていなくても実際には投稿済み＝その予定時刻から計測を始める(Chami依頼2026-08-05
+      //   「ドラフトのまま投稿してるのに投稿予定になる。この場合も18:30から計測スタートにして」)。
+      //   schedMap.publishAtは取得時に未来だった値だけを持つ(§2643)＝リロードせずに時刻が過ぎると
+      //   「投稿予定」に張り付き、日別デルタも– のままだった。予定時刻(publishAt優先→plannedAt)を実効の
+      //   投稿時刻として、過ぎていれば投稿済み表示＋計測開始に切り替える。予定時刻が未来なら従来どおり投稿予定。
+      var plannedMs = it.plannedAt ? (Date.parse(String(it.plannedAt).replace(' ', 'T')) || NaN) : NaN;
+      var schedMs = (sched && sched.publishAt) ? Number(sched.publishAt) : plannedMs; // 予定時刻(予約公開 or カレンダー予定)
+      var schedPassed = !isNaN(schedMs) && schedMs <= Date.now(); // 予定時刻を過ぎた=実際には投稿済み
+      var stillScheduled = (!!sched || !!it.plannedAt) && !schedPassed; // 予定時刻がまだ=本当に投稿予定
+      var prePostFlag = !!(sched && !schedPassed); // 計測窓の抑止は「本当にまだ投稿前」の時だけ
+      var deltaTs = it.ts || (schedPassed ? schedMs : 0); // 実投稿時刻が無い予定過ぎ投稿は予定時刻を計測起点にする
       // YouTube動画が紐付いていない投稿(Bluesky単体投稿等)は、YouTube公開日時が原理的に存在しない。
       //   sendSync_()と同じ考え方(実投稿時刻(ts)を正とする)でit.tsにフォールバックする＝
       //   「投稿日時不明」のまま放置しない。(シート復元直後のvid無し投稿で顕在化)
       // カレンダー公開枠の予定時刻(予約投稿)。YouTube側のpublishAtが観測される前に「投稿予定 時刻」を出す下限。
-      var plannedHtml = (pub == null && it.plannedAt)
+      var plannedHtml = (pub == null && it.plannedAt && stillScheduled)
         ? ('<b>' + fmtPostDate(it.plannedAt) + '</b> <span class="vtag vtag-scheduled">投稿予定</span>') : '';
-      var dateHtml = sched
+      var dateHtml = (sched && stillScheduled)
         ? ((sched.publishAt ? '<b>' + fmtPostDate(sched.publishAt) + '</b> ' : '') + '<span class="vtag vtag-scheduled">投稿予定</span>')
         : (pub != null
           ? '<b>' + fmtPostDate(pub) + '</b>'
           : (plannedHtml
             ? plannedHtml
-            // 予約公開の予定時刻を過ぎてもYouTube側の公開日時が観測できない時、vidが在るというだけで「…」に張り付いていた
-            //   (宵桜艶帖の1件・Chami報告2026-08-05)。上の§1637の設計意図どおり実投稿時刻(ts)を先に正とし、tsも無い時だけ「…」を出す。
-            : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>'
-              : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>'))));
+            // 予定時刻を過ぎている(schedPassed)=実際には投稿済み。予定時刻を投稿時刻として太字表示。
+            : (schedPassed ? '<b class="vdate-tsonly">' + fmtPostDate(schedMs) + '</b>'
+              // 予約公開の予定時刻を過ぎてもYouTube側の公開日時が観測できない時、vidが在るというだけで「…」に張り付いていた
+              //   (宵桜艶帖の1件・Chami報告2026-08-05)。上の§1637の設計意図どおり実投稿時刻(ts)を先に正とし、tsも無い時だけ「…」を出す。
+              : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>'
+                : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>')))));
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
       var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
@@ -1732,7 +1746,7 @@
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
-          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (it.ts || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (sched ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前/スナップ前">' + (vid ? fmtDelta_(deltaCache[vid], it.ts, !!(wcode || it.workShortUrl), !!sched) : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (deltaTs || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (prePostFlag ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前/スナップ前">' + (vid ? fmtDelta_(deltaCache[vid], deltaTs, !!(wcode || it.workShortUrl), prePostFlag) : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
             (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
             ((!it._fromSheet || it.videoId) ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
