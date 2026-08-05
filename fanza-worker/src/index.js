@@ -144,6 +144,14 @@ export default {
       if (!env.FANZA_DB) return json({ ok: false, error: "db_unbound" }, 500, corsC);
 
       if (request.method === "GET") {
+        // ?log=1 = 最後に着いたPOSTの観測ログを返す(着信の有無・secret照合・件数・永続化結果)。
+        //   ブラウザから直接読めるようにGETへ相乗り(部門/実機どちらでも1回で「どこで死んだか」が出る)。
+        if (url.searchParams.get("log") === "1") {
+          try {
+            const raw = env.FANZA_KV ? await env.FANZA_KV.get("candpost:last") : null;
+            return json({ ok: true, log: raw ? JSON.parse(raw) : null }, 200, corsC);
+          } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC); }
+        }
         try {
           const rs = await env.FANZA_DB.prepare("SELECT cid FROM candidate_pool ORDER BY cid").all();
           const list = (rs.results || []).map((r) => r.cid);
@@ -151,11 +159,20 @@ export default {
         } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC); }
       }
       if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, corsC);
+      // ★着信ログ(観測点・十王星南の要請2026-08-05)：POSTがWorkerへ着いた瞬間にKV candpost:last へ1行残す。
+      //   これで「そもそも着いていない(=クライアント/URLの問題)」のか「着いたが書けていない/別物を返す」のかが
+      //   実機リロード1回で確定する(部門はKVを直読できる)。secret照合前に着信を刻む=bad_secret も観測対象。
+      const logCandPost_ = async (rec) => {
+        if (!env.FANZA_KV) return;
+        try { await env.FANZA_KV.put("candpost:last", JSON.stringify(Object.assign({ at: nowIso_(), atMs: Date.now() }, rec))); } catch (e) {}
+      };
       const secretC = request.headers.get("X-Shared-Secret") || "";
-      if (!env.SHARED_SECRET || secretC !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsC);
+      const secretOkC = !!(env.SHARED_SECRET && secretC === env.SHARED_SECRET);
+      await logCandPost_({ stage: "arrived", hasSecret: !!secretC, secretOk: secretOkC, ua: (request.headers.get("User-Agent") || "").slice(0, 80) });
+      if (!secretOkC) { await logCandPost_({ stage: "reject_bad_secret", hasSecret: !!secretC }); return json({ ok: false, error: "bad_secret" }, 401, corsC); }
       let bodyC;
       try { bodyC = await request.json(); }
-      catch (e) { return json({ ok: false, error: "bad_json" }, 400, corsC); }
+      catch (e) { await logCandPost_({ stage: "reject_bad_json" }); return json({ ok: false, error: "bad_json" }, 400, corsC); }
       // cidを厳格検証＋重複除去。安全上限5000(巨大サークル群でも収まる)。
       const seenC = {}, poolCids = [];
       for (const raw of (Array.isArray(bodyC.cids) ? bodyC.cids : [])) {
@@ -176,8 +193,12 @@ export default {
           stmts.push(env.FANZA_DB.prepare("INSERT INTO candidate_pool (cid, updated_at) VALUES " + ph).bind(...binds));
         }
         await env.FANZA_DB.batch(stmts);
+        await logCandPost_({ stage: "persist_ok", count: poolCids.length });
         return json({ ok: true, count: poolCids.length }, 200, corsC);
-      } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC); }
+      } catch (e) {
+        await logCandPost_({ stage: "persist_err", err: String((e && e.message) || e), cidsLen: poolCids.length });
+        return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC);
+      }
     }
 
     // ── サークル（maker）の作品一覧：候補タブの「サークルタブ」用 ──────────────────
