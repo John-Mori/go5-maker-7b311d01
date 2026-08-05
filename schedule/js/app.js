@@ -119,6 +119,7 @@ window.SCH = window.SCH || {};
     lastRender = { slots: result.slots, dayMetas: r1.dayMetas, review: result.review, slots1: r1.slots, slots2: r2.slots };
     await store.saveSlots(result.slots, acc);  // 自動公開は判定したチャンネルだけを更新
     render(lastRender);
+    autoSyncVisible();   // ④ 表示中の未公開枠を、同日・同時刻の投稿履歴と自動同期
   }
 
   // "HH:MM" に分を加算(generator の shiftTime_ と同一仕様＝24時以降も許容)
@@ -365,10 +366,11 @@ window.SCH = window.SCH || {};
         <button type="button" id="integ-pick">🗓️ この枠を公開枠に選ぶ</button>
         <div class="integ-hint">ドラフトの公開予約枠にこの日時を結びつけます。</div>
       </div>` : ""}
-      ${inFrame && !pickMode ? `<div class="integ-actions">
-        <button type="button" id="integ-make">🎬 この枠で動画を作る</button>
-        <button type="button" id="integ-post">🦋 この枠を投稿する</button>
-        <div class="integ-hint">枠の情報を「動画作成／投稿」へ引き継ぎます。</div>
+      ${inFrame && !pickMode ? `<div class="link-hist-box">
+        <div class="link-hist-head">投稿履歴と紐づける</div>
+        <select id="link-hist"><option value="">${escapeHtml(s.date)} の投稿履歴を読み込み中…</option></select>
+        <button type="button" id="link-apply" disabled>この投稿を紐づける</button>
+        <div class="link-hist-hint">同じ日・同じチャンネルの投稿履歴から選んで、この枠へ結びつけます。時刻が合致する投稿は自動で同期されます。</div>
       </div>` : ""}
       ${s.needs_review ? `<div class="warn">要確認：day-type変更でテンプレと差異あり。時刻は自動変更していません。</div>` : ""}
       ${s.verify_flag ? `<div class="info">検証対象枠。${s.alt_hypothesis ? "対立仮説: " + escapeHtml(s.alt_hypothesis) : ""}</div>` : ""}
@@ -386,11 +388,99 @@ window.SCH = window.SCH || {};
     if (inFrame) {
       const pk = document.getElementById("integ-pick");
       if (pk) pk.addEventListener("click", () => { sendToParent("slot-picked", s); closeEditor(); });
-      const mk = document.getElementById("integ-make");
-      const ps = document.getElementById("integ-post");
-      if (mk) mk.addEventListener("click", () => { sendToParent("slot-create", s); closeEditor(); });
-      if (ps) ps.addEventListener("click", () => { sendToParent("slot-post", s); closeEditor(); });
+      // 投稿履歴と紐づける(③)：この枠の日付の投稿履歴を親へ要求。応答は onDayPosts で受ける。
+      if (!pickMode) requestDayPosts(s);
     }
+  }
+
+  // ---- 投稿履歴の紐づけ(③④・Chami 2026-08-06) ----
+  // 親(本体アプリ)は同一オリジンだが、投稿履歴の「投稿時刻の解決」ロジックが重いので、
+  //   iframeで生データを読み直さず親の Go5History.postsForDay へ postMessage で問い合わせる。
+  let linkReqSeq = 0;
+  const autoLinkedIds = {};   // 一度自動同期した枠(ループ・過剰再送の防止)
+  // "HH:MM"(0詰め有無を問わず)を分に直して比較する。generatorのtimeは"9:00"、投稿時刻は"09:00"のことがある。
+  function hhmmToMin(t) {
+    const m = /(\d{1,2}):(\d{2})/.exec(String(t || ""));
+    return m ? (Number(m[1]) * 60 + Number(m[2])) : NaN;
+  }
+  function requestDayPosts(s) {
+    linkReqSeq++;
+    const reqId = "modal:" + linkReqSeq;
+    try { window.parent.postMessage({ source: "sch-calendar", type: "req-day-posts", dates: [s.date], reqId: reqId, slotId: s.id }, "*"); } catch (e) {}
+  }
+  // 親からの投稿履歴応答。postsByDate[日付]=[{hhmm,title,url,videoId,timeMs}]。
+  function onDayPosts(d) {
+    const byDate = d.postsByDate || {};
+    // 自動同期(④)：表示中の枠のうち、同日・同時刻の投稿があり未公開のものを黙って紐づける。
+    if (String(d.reqId || "").indexOf("auto:") === 0) {
+      Object.keys(byDate).forEach(function (date) {
+        (byDate[date] || []).forEach(function (p) {
+          const slots = (lastRender && lastRender.slots) || {};
+          Object.keys(slots).forEach(function (id) {
+            const s = slots[id];
+            if (!s || s.date !== date || s.status === "公開済" || autoLinkedIds[id]) return;
+            if (hhmmToMin(s.time) === hhmmToMin(p.hhmm)) { autoLinkedIds[id] = true; applyLink(s, p); }
+          });
+        });
+      });
+      return;
+    }
+    // モーダル用(③)：開いている枠のドロップダウンを埋める＋時刻一致は自動紐づけ。
+    if (!editingId) return;
+    const s = (lastRender && lastRender.slots[editingId]) || null;
+    if (!s) return;
+    const posts = byDate[s.date] || [];
+    const sel = document.getElementById("link-hist");
+    const btn = document.getElementById("link-apply");
+    if (!sel) return;
+    if (!posts.length) {
+      sel.innerHTML = `<option value="">${escapeHtml(s.date)} の投稿履歴はありません</option>`;
+      if (btn) btn.disabled = true;
+      return;
+    }
+    const auto = posts.filter(function (p) { return hhmmToMin(p.hhmm) === hhmmToMin(s.time); })[0];
+    if (auto && s.status !== "公開済") { applyLink(s, auto); return; }   // ④ 時刻一致は自動同期
+    sel.innerHTML = posts.map(function (p, i) {
+      return `<option value="${i}">${escapeHtml(p.hhmm + "  " + p.title)}</option>`;
+    }).join("");
+    if (auto) sel.value = String(posts.indexOf(auto));
+    if (btn) {
+      btn.disabled = false;
+      btn.onclick = function () { const p = posts[parseInt(sel.value, 10) || 0]; if (p) applyLink(s, p); };
+    }
+  }
+  // 枠へ投稿を結びつける＝現チャンネルの実行記録を「公開済」＋題名/URLで更新する。
+  //   未保存のプリスティン枠は upsertExec が空振りするので、writeback と同じく upsertSlot で種ごと保存する。
+  function applyLink(s, post) {
+    const acc = curAcc();
+    const patch = {
+      status: "公開済",
+      title: post.title || s.title || "",
+      url: post.url || "",
+      post_url: post.url || "",
+      video_id: post.videoId || s.video_id || "",
+      posted_at: post.timeMs ? new Date(post.timeMs).toISOString() : ""
+    };
+    const stored = store.getSlotData()[s.id];
+    const p = stored
+      ? store.upsertExec(s.id, acc, patch)
+      : store.upsertSlot(Object.assign({}, s, patch, { needs_review: false }), acc);
+    Promise.resolve(p).then(function () { if (editingId === s.id) closeEditor(); return recomputeAndRender(); });
+  }
+  // 表示中の枠に対する自動同期パス(④)。描画のたびに現チャンネルの未公開枠の日付をまとめて問い合わせる。
+  function autoSyncVisible() {
+    if (!inFrame || pickMode || !lastRender) return;
+    const slots = lastRender.slots || {};
+    const dateSet = {};
+    Object.keys(slots).forEach(function (id) {
+      const s = slots[id];
+      if (!s || !s.time || s.status === "公開済" || autoLinkedIds[id]) return;
+      if (s.date) dateSet[s.date] = true;
+    });
+    const dates = Object.keys(dateSet);
+    if (!dates.length) return;
+    linkReqSeq++;
+    try { window.parent.postMessage({ source: "sch-calendar", type: "req-day-posts", dates: dates, reqId: "auto:" + linkReqSeq }, "*"); } catch (e) {}
   }
 
   // 親（統合アプリ）からの書き戻し：投稿成功後に status/URL等を現在チャンネルの実行層のみ反映
@@ -409,6 +499,7 @@ window.SCH = window.SCH || {};
       return;
     }
     if (d.type === "exit-pick") { pickMode = false; try { document.body.classList.remove("pick-mode"); } catch (e) {} if (editingId) closeEditor(); return; }
+    if (d.type === "day-posts") { onDayPosts(d); return; }
     if (d.type === "recompute") { recomputeAndRender(); return; }
     if (d.type === "sync-refresh") {
       store.init()

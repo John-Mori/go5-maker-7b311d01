@@ -2180,7 +2180,48 @@
     if (acc === acct()) { try { pokeSnapshotNow_(); } catch (e) {} refresh(); }
     return true;
   }
-  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_ }; } catch (e) {}
+  // ── カレンダー枠との紐づけ用(③④・Chami 2026-08-06)：指定日(JST)に投稿された現アカウントの履歴を返す。──
+  //   投稿時刻の解決は投稿履歴カード(§1665〜)と同じ順序＝YouTube公開日時→予約/カレンダー予定→実投稿時刻(ts)。
+  //   カレンダーiframeはこの解決を持たないので、本体側で解決してから postMessage で渡す(integration.js)。
+  function effPostMs_(it, ymap, schedMap) {
+    var vid = ytIdOf((ymap && ymap[itemKey(it)]) || it.ytUrl || '');
+    var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
+    if (pub != null) return Number(pub);
+    var sched = vid && schedMap[vid];
+    var plannedMs = it.plannedAt ? (Date.parse(String(it.plannedAt).replace(' ', 'T')) || NaN) : NaN;
+    var schedMs = (sched && sched.publishAt) ? Number(sched.publishAt) : plannedMs;
+    if (!isNaN(schedMs)) return schedMs;
+    if (it.ts) return Number(it.ts);
+    return NaN;
+  }
+  function postsForDay_(dateStr) {
+    if (!dateStr) return [];
+    ensureIds();
+    var ymap = loadYtMap();
+    var schedMap = {};
+    try { loadYtSched_(acct()).forEach(function (y) { if (y && y.vid) schedMap[y.vid] = y; }); } catch (e) {}
+    var out = [];
+    displayItems_().forEach(function (it) {
+      var ms = effPostMs_(it, ymap, schedMap);
+      if (isNaN(ms)) return;
+      var dObj = new Date(ms);                     // JST端末前提(getHours等は端末ローカル=Chamiの体感と一致)
+      var y = dObj.getFullYear(), mo = ('0' + (dObj.getMonth() + 1)).slice(-2), da = ('0' + dObj.getDate()).slice(-2);
+      if ((y + '-' + mo + '-' + da) !== dateStr) return;
+      var vid = ytIdOf(ymap[itemKey(it)] || it.ytUrl || '');
+      var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
+      out.push({
+        id: it.videoId || itemKey(it),
+        videoId: it.videoId || '',
+        title: stripCommonTags(title),
+        timeMs: ms,
+        hhmm: ('0' + dObj.getHours()).slice(-2) + ':' + ('0' + dObj.getMinutes()).slice(-2),
+        url: it.shareUrl || it.shortUrl || it.postUrl || it.ytUrl || ''
+      });
+    });
+    out.sort(function (a, b) { return a.timeMs - b.timeMs; });
+    return out;
+  }
+  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_, postsForDay: postsForDay_ }; } catch (e) {}
 
   // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }

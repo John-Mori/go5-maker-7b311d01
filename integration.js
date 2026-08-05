@@ -39,7 +39,23 @@
   // iframe → 親
   window.addEventListener('message', function (ev) {
     var d = ev.data;
-    if (!d || d.source !== 'sch-calendar' || !d.slot) return;
+    if (!d || d.source !== 'sch-calendar') return;
+    // カレンダー枠と投稿履歴の紐づけ(③④・Chami 2026-08-06)：iframeが指定日の投稿履歴を要求してきたら、
+    //   本体の Go5History.postsForDay(=投稿時刻を解決済み)で日付ごとに解決して返す。投稿履歴の解決ロジックは
+    //   重く端末差もあるので、iframe側でlocalStorageを読み直さず本体に一元化して問い合わせる。
+    if (d.type === 'req-day-posts') {
+      var dates = Array.isArray(d.dates) ? d.dates : (d.date ? [d.date] : []);
+      var byDate = {};
+      try {
+        if (window.Go5History && typeof window.Go5History.postsForDay === 'function') {
+          dates.forEach(function (dt) { byDate[dt] = window.Go5History.postsForDay(dt) || []; });
+        }
+      } catch (e) {}
+      var cf = $('calFrame');
+      if (cf && cf.contentWindow) cf.contentWindow.postMessage({ target: 'sch-calendar', type: 'day-posts', reqId: d.reqId, postsByDate: byDate }, '*');
+      return;
+    }
+    if (!d.slot) return;
     if (d.type === 'slot-create' || d.type === 'slot-post') {
       activeSlot = d.slot;
       window.__activeSlot__ = d.slot;          // 他モジュールから参照可能に

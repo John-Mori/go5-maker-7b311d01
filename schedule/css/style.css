@@ -167,20 +167,29 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 /* モーダル */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 50; }
 .modal.open { display: flex; }
-.modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(440px, 92vw); max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+/* ── スロット編集モーダル：カレンダー本体と同じ生成り(クリーム)地に統一
+   (Chami 2026-08-06 ①「暗いのでカレンダー表示と同じ色合いに変更」。従来はモーダルだけダークで浮いていた) ── */
+.modal-card {
+  --m-tx: #2A2520; --m-line: rgba(42,37,32,.15); --m-field: #FFFFFF; --m-dim: rgba(42,37,32,.60);
+  background: #F8F5EE; color: var(--m-tx); border: 1px solid var(--m-line);
+  border-radius: 10px; width: min(440px, 92vw); max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
+}
 .modal-body { padding: 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.modal-body h3 { margin: 0 0 10px; font-size: 14px; }
-.modal-body label { display: block; margin: 8px 0; font-size: 12px; color: var(--muted); }
+.modal-body h3 { margin: 0 0 10px; font-size: 14px; color: var(--m-tx); }
+.modal-body label { display: block; margin: 8px 0; font-size: 12px; color: var(--m-dim); }
 .modal-body input, .modal-body select, .modal-body textarea {
-  width: 100%; margin-top: 3px; background: var(--panel-2); color: var(--text);
-  border: 1px solid var(--line); border-radius: 5px; padding: 6px; font-size: 13px;
+  width: 100%; margin-top: 3px; background: var(--m-field); color: var(--m-tx);
+  border: 1px solid var(--m-line); border-radius: 5px; padding: 6px; font-size: 13px;
 }
 .modal-body textarea { min-height: 56px; resize: vertical; }
-.modal-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.modal .muted { color: var(--m-dim); }
+.modal-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--m-line); flex: 0 0 auto; background: #EDE7DA; }
+.modal-foot button { background: #FFFFFF; color: #2A2520; border: 1px solid rgba(42,37,32,.20); }
+.modal-foot button:hover { border-color: #A66A0C; }
 .modal-foot .primary { background: var(--accent); color: #08101f; font-weight: 700; border-color: var(--accent); }
-.warn { background: rgba(255,107,107,.15); color: var(--holiday); padding: 6px 8px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; }
-.info { background: rgba(110,168,254,.12); color: var(--accent); padding: 6px 8px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; }
-.ch-badge { background: rgba(80,220,160,.12); color: #50dca0; padding: 5px 8px; border-radius: 5px; margin-bottom: 10px; font-size: 12px; border-left: 3px solid #50dca0; }
+.warn { background: rgba(180,60,60,.12); color: #b23b3b; padding: 6px 8px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; }
+.info { background: rgba(12,110,133,.12); color: #0c6e85; padding: 6px 8px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; }
+.ch-badge { background: rgba(11,126,86,.12); color: #0B7E56; padding: 5px 8px; border-radius: 5px; margin-bottom: 10px; font-size: 12px; border-left: 3px solid #0B7E56; }
 
 @media (max-width: 820px) {
   .week-grid { grid-template-columns: 1fr; }
@@ -193,6 +202,14 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
   background:#1185fe;color:#fff;font-weight:700;font-size:14px;cursor:pointer;}
 .integ-actions button:active{filter:brightness(.92);}
 .integ-actions .integ-hint{flex-basis:100%;font-size:11px;color:#8a9bb0;margin-top:2px;}
+
+/* ── 投稿履歴と紐づける(Chami 2026-08-06 ③・生成りモーダル上) ── */
+.link-hist-box{margin:2px 0 12px;}
+.link-hist-box .link-hist-head{font-size:12px;font-weight:700;color:#2A2520;margin-bottom:5px;}
+.link-hist-box select{width:100%;background:#FFFFFF;color:#2A2520;border:1px solid rgba(42,37,32,.20);border-radius:6px;padding:8px;font-size:13px;}
+.link-hist-box button{margin-top:7px;width:100%;padding:9px 10px;border-radius:7px;border:1px solid #0B7E56;background:#0B7E56;color:#fff;font-weight:700;font-size:13px;cursor:pointer;}
+.link-hist-box button:disabled{opacity:.5;cursor:default;}
+.link-hist-box .link-hist-hint{font-size:11px;color:rgba(42,37,32,.55);margin-top:5px;}
 
 /* ── 日付ボタンの説明（統合UI向け） ── */
 .ctrl-help{max-width:1100px;margin:6px auto 0;padding:8px 12px;font-size:12px;line-height:1.6;
