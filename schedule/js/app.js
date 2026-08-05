@@ -280,7 +280,7 @@ window.SCH = window.SCH || {};
     return `<span class="cell ${done ? "done" : "pending"}">` +
       `<span class="acc">${name}</span>` +
       `<span class="time">${time}</span>` +
-      `<span class="st"><span class="mk"></span></span>` +
+      `<span class="st">${done ? '<span class="done-mark">済</span>' : ''}<span class="mk"></span></span>` +
       `</span>`;
   }
 
