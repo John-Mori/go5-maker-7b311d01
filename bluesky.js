@@ -146,6 +146,9 @@
     var texts = (info.genres || []).concat([info.floor, info.service, info.title]);
     var isDigest = texts.some(function (t) { return String(t || '').indexOf('総集編') >= 0; });
     if (typeof onDigestBodyToggle === 'function') onDigestBodyToggle(isDigest); // 新作の後=既存の「の新作」に「&総集編」が積まれる
+    // 定価(セールなし)の準新作/旧作はapplyWorkStateToUi_が準新作チェックを直接立てるだけでchangeが飛ばないため、
+    //   ここで明示的に定価ステータス行(話題の準新作の総集編💕 等)を反映する。(セール時は割引行が持つのでreconcile側で消える)
+    if (typeof reflectToritageLine_ === 'function') reflectToritageLine_();
   }
   (function wireRebuildPicker_() {
     var cb = $('movieRebuild'); if (!cb) return;
@@ -564,6 +567,36 @@
   // 本文(自動投稿/今すぐ投稿で共通)側の「新作」「総集編」状態。2つのチェックボックスは同期。
   function isNewBody() { return !!(els.discountNew && els.discountNew.checked) || !!(els.discountNew2 && els.discountNew2.checked); }
   function isDigestBody() { return !!(els.discountDigest && els.discountDigest.checked) || !!(els.discountDigest2 && els.discountDigest2.checked); }
+  // ---- 定価(セールなし)用ステータス行：割引が無い時に「話題の準新作の総集編💕」等を本文へ出す ----
+  //   Chami依頼2026-08-05:「定価の場合 準新作→話題の準新作の総集編💕 / 旧作→話題の総集編💕」。
+  //   セール中は割引行(しかも今なら〜)が新作/総集編の表記を持つため定価行は出さない(二重表記を避ける)。
+  //   ★acc2(宵桜艶帖)のみ。acc1(月詠み)の定価文面は未確定なので触らない。締め絵文字は割引テンプレ(💕)に準拠。
+  //   find-by-mark→置換 or 削除 の冪等操作＝どの経路から何度呼んでも定価行が二重化しない。
+  function toritageStatusInner_() {
+    var word = isNewBody() ? '新作' : ((document.getElementById('movieJunshinsaku') || {}).checked ? '準新作' : '');
+    var dig = isDigestBody() ? '総集編' : '';
+    return (word && dig) ? (word + 'の' + dig) : (word || dig); // 例:準新作の総集編 / 総集編 / 準新作
+  }
+  function reconcileToritageLine_(ta) {
+    if (!ta || acctId() !== 'acc2') return false; // acc1(月詠み)は定価文面が未確定=対象外
+    var mark = /^話題の[^\n]*$/;
+    var lines = String(ta.value == null ? '' : ta.value).split('\n');
+    var idx = -1;
+    for (var i = 0; i < lines.length; i++) { if (mark.test(lines[i])) { idx = i; break; } }
+    var inner = (curDiscVal() !== '') ? '' : toritageStatusInner_(); // セール中は割引行が表記を持つ=定価行なし
+    var want = inner ? ('話題の' + inner + '💕') : '';
+    if (want) { if (idx >= 0) lines[idx] = want; else lines.splice(Math.min(1, lines.length), 0, want); }
+    else if (idx >= 0) lines.splice(idx, 1);
+    else return false; // 出す行も消す行も無い＝何もしない
+    ta.value = lines.join('\n');
+    return true;
+  }
+  function reflectToritageLine_() {
+    if (reconcileToritageLine_(els.text)) {
+      saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
+      try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {} // X欄も追従
+    }
+  }
   function syncNewBody(on) {
     if (els.discountNew) els.discountNew.checked = on;
     if (els.discountNew2) els.discountNew2.checked = on;
@@ -584,33 +617,38 @@
     setDiscountLine(val);
     if (els.discountSel) els.discountSel.value = val;
     if (els.discountSel2) els.discountSel2.value = val;
+    reflectToritageLine_(); // 定価⇄セール切替で定価ステータス行を出し入れ(セール時は消す)
   }
   if (els.discountSel) els.discountSel.addEventListener('change', function () { applyDiscount(els.discountSel.value); });
   if (els.discountSel2) els.discountSel2.addEventListener('change', function () { applyDiscount(els.discountSel2.value); });
   // 「新作」チェック切替：両チェックを同期し、選択中の割引文があれば版を即差し替え。
   function onNewBodyToggle(on) {
     syncNewBody(on);
-    if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; }
+    if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; } // applyDiscount内でreflectToritageも回る
     // 割引セレクト未選択(テンプレ帳に割引文を書いて運用)でも、チェックだけで本文の割引行へサフィックスを反映。
     if (retoggleDiscSuffix_(els.text, isNewBody(), isDigestBody())) {
       saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
       try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {}
     }
+    reflectToritageLine_(); // 定価時：話題の…行へ新作/準新作/総集編を反映
   }
   if (els.discountNew) els.discountNew.addEventListener('change', function () { onNewBodyToggle(els.discountNew.checked); });
   if (els.discountNew2) els.discountNew2.addEventListener('change', function () { onNewBodyToggle(els.discountNew2.checked); });
   // 「総集編」チェック切替：両チェックを同期し、選択中の割引文があれば版を即差し替え。
   function onDigestBodyToggle(on) {
     syncDigestBody(on);
-    if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; }
+    if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; } // applyDiscount内でreflectToritageも回る
     // 割引セレクト未選択でも、チェックだけで本文の割引行へサフィックスを反映(絵文字トレイルは保持)。
     if (retoggleDiscSuffix_(els.text, isNewBody(), isDigestBody())) {
       saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
       try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {}
     }
+    reflectToritageLine_(); // 定価時：話題の…行へ総集編/準新作を反映
   }
   if (els.discountDigest) els.discountDigest.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest.checked); });
   if (els.discountDigest2) els.discountDigest2.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest2.checked); });
+  // 準新作チェック(動画作成タブ)を手で切り替えた時も定価ステータス行へ反映(新作/総集編と違い割引行サフィックスは持たない)。
+  (function () { var j = document.getElementById('movieJunshinsaku'); if (j) j.addEventListener('change', reflectToritageLine_); })();
   // 動画生成タブの「タグ」種別(◯%OFF / ¥価格)が切り替わったら、割引文の単位(%オフ⇔円)も追従。
   //   Chami依頼2026-08-02: %か円かは動画生成タブのタグ(promoType)から判定する。選択中の割引文があれば即差し替え。
   (function () {
