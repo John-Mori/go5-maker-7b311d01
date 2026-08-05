@@ -2941,33 +2941,39 @@
       // 「取得できなかった場合にURLを消して登録しない」のを避ける＝欄を残し、登録済みも分かるようにする)。
       var put = function (info, errored) {
         var items = lsGet(key, '[]');
-        // 作品情報の取得中に連打・別端末同期が入っても、保存直前の再確認で同じcidを2件作らない。
-        var dupRace = null;
-        for (var ri = 0; ri < items.length; ri++) { if (items[ri] && items[ri].cid === r.cid) { dupRace = items[ri]; break; } }
-        if (dupRace) {
-          // ★破棄する側の新アイテムはurl入り。既存が作品URLを失っていたらここでも埋め戻す(症状4)。
-          if (url && !dupRace.url) { dupRace.url = url; lsSet(key, items); }
-          var memoElRace = $('candMemo');
-          showDuplicateDialog_(memoElRace && memoElRace.value, r.cid);
-          if (onDone) onDone();
-          return;
+        // 取得開始時に入れた「取得中」プレースホルダ(この追加が入れたもの)を探して、その場で中身を埋める。
+        //   ★一覧から消さない=「追加して閉じる」で閉じた後、取得が長引いても「取得中です」が並び続ける(Chami 2026-08-05)。
+        var idx = -1;
+        for (var ri = 0; ri < items.length; ri++) { if (items[ri] && items[ri].cid === r.cid && items[ri]._fetching) { idx = ri; break; } }
+        if (idx < 0) {
+          // プレースホルダが無い(プリフェッチ即確定 or 取得中に別端末同期で本物が先に入った)。
+          //   後者＝重複なので、作品URLを埋め戻して重複ダイアログ(従来動作)。
+          var exist = null;
+          for (var rj = 0; rj < items.length; rj++) { if (items[rj] && items[rj].cid === r.cid) { exist = items[rj]; break; } }
+          if (exist) {
+            if (url && !exist.url) { exist.url = url; lsSet(key, items); }
+            var memoElRace = $('candMemo');
+            showDuplicateDialog_(memoElRace && memoElRace.value, r.cid);
+            if (onDone) onDone();
+            return;
+          }
         }
-        var it = {
-          url: url, cid: r.cid,
-          title: (info && info.title) || '(タイトル未取得)',
-          author: (info && info.author) || '',
-          thumb: (info && (info.thumb || info.thumbSmall)) || '',
-          listPrice: info ? info.listPrice : null, price: info ? info.price : null,
-          discountPct: info ? (info.discountPct || 0) : 0,
-          date: (info && info.releaseDate) || '',
-          genres: (info && info.genres) || [],
-          reviewCount: info ? info.reviewCount : null,
-          reviewAvg: info ? info.reviewAvg : null,
-          addedAt: new Date().getTime()
-        };
+        var it;
+        if (idx >= 0) { it = items[idx]; } // プレースホルダをその場更新(addedAt保持=並び順不変)
+        else { it = { cid: r.cid, addedAt: new Date().getTime() }; items.unshift(it); }
+        it.url = url;
+        it.title = (info && info.title) || '(タイトル未取得)';
+        it.author = (info && info.author) || '';
+        it.thumb = (info && (info.thumb || info.thumbSmall)) || '';
+        it.listPrice = info ? info.listPrice : null; it.price = info ? info.price : null;
+        it.discountPct = info ? (info.discountPct || 0) : 0;
+        it.date = (info && info.releaseDate) || '';
+        it.genres = (info && info.genres) || [];
+        it.reviewCount = info ? info.reviewCount : null;
+        it.reviewAvg = info ? info.reviewAvg : null;
         if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
         if (twForWork.ok) it.twitterUrl = twForWork.url; // X / Bluesky の投稿URLも一緒に保存
-        items.unshift(it);
+        delete it._fetching; // 取得完了(または失敗確定)＝プレースホルダ状態を解除
         lsSet(key, items);
         attachAddImgs_(r.cid, errored); // errored=true → keepForm: URLとメモを消さず再試行を許す
         if (errored) {
@@ -2986,6 +2992,18 @@
           put(cached.info, false); return;
         }
       }
+      // ★ここから非同期取得。取得を待たずに「取得中」プレースホルダを一覧の先頭へ入れておく=
+      //   「追加して閉じる」で閉じた後、取得に時間がかかっても一覧から消えず「⏳ 取得中です…」を出し続ける
+      //   (以前は put() が取得完了まで一覧へ入れず、遅いと一覧から消えてリロードで復活＝ヒヤッとする・Chami 2026-08-05)。
+      (function () {
+        var items = lsGet(key, '[]');
+        for (var pi = 0; pi < items.length; pi++) { if (items[pi] && items[pi].cid === r.cid) return; } // 既にあれば二重に入れない
+        var ph = { url: url, cid: r.cid, title: '(タイトル未取得)', addedAt: new Date().getTime(), _fetching: true };
+        if (twForWork.ok) ph.twitterUrl = twForWork.url;
+        items.unshift(ph);
+        lsSet(key, items);
+        renderCandList(tabId);
+      })();
       // 一時的な失敗(タイムアウト/サーバー5xx等・retryable)は1回だけ即リトライしてから諦める。
       //   そもそも取得エラーになる頻度を減らす狙い(Chami指定2026-07-24)。
       var fetchOnce = function () { return window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url); };
