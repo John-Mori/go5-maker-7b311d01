@@ -45,6 +45,12 @@ jobs:
       - name: シート保存連鎖の検査
         run: node scripts/check_sheet_chain.mjs
 
+      # カレンダー iframe(schedule/)は本体とは別の独立バンプ領域で bump.mjs が触らない。
+      #   中身を変えて ?v= を上げ忘れるとスマホが古い calendar を読む「版ずれ」=「直ってない」の再発源
+      #   (2026-08-06朝レビュー: 前日24hで schedule 版を2度手バンプした型)。内容ハッシュで staleness を止める。
+      - name: カレンダー(schedule/)版ずれ検査
+        run: node scripts/check_schedule_ver.mjs
+
       # クリック集計(累計/週)の不変条件を固定する門。短縮コード差し替えで「累計0なのに週-16」等の
       #   矛盾が繰り返しChamiから再報告された型(2026-07-30朝レビュー)。積み直しロジックの静かな回帰を止める。
       - name: クリック集計の不変条件検査

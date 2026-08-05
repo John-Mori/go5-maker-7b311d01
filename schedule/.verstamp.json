@@ -1,0 +1,25 @@
+{
+  "iframe": 38,
+  "assets": {
+    "css/style.css": {
+      "v": 33,
+      "sha": "4f7f783b3b6bcc73"
+    },
+    "js/config.js": {
+      "v": 22,
+      "sha": "b911b93ebd96d8f5"
+    },
+    "js/generator.js": {
+      "v": 22,
+      "sha": "280f6dc97cbb8259"
+    },
+    "js/store.js": {
+      "v": 25,
+      "sha": "0f2f43de8cd36fd5"
+    },
+    "js/app.js": {
+      "v": 36,
+      "sha": "9f6fa593bdd3f8bf"
+    }
+  }
+}
