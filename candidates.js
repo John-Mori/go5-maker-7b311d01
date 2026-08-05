@@ -1998,14 +1998,21 @@
       var uniq = []; var seen = {};
       (cids || []).forEach(function (c) { if (c && !seen[c]) { seen[c] = true; uniq.push(c); } });
       var hash = uniq.slice().sort().join(',');
-      var last = ''; try { last = localStorage.getItem('cand_pool_hash') || ''; } catch (e) {}
-      if (hash === last) return; // 前回と同じ集合＝送らない
+      var last = '', lastAt = 0;
+      try { last = localStorage.getItem('cand_pool_hash') || ''; lastAt = parseInt(localStorage.getItem('cand_pool_hash_at') || '0', 10) || 0; } catch (e) {}
+      // 前回と同じ集合でも、最後に成功したPOSTから12hを超えたら送り直す。=D1の updated_at を「生存信号」に
+      //   する。以前は hash 一致で無音returnしていたため、初回に小集合(d_754842の1件)が入ると以後どのリロード
+      //   でも send をスキップし、D1が1件に永久に張り付いた(商品候補選定部門の実測・updated_at 6日凍結)。
+      //   cand_pool_hash_at は端末ローカル(storage-keys 未登録=既定で非同期)＝端末ごとの生存タイマー。
+      var STALE_MS = 12 * 3600 * 1000;
+      if (hash === last && lastAt && (new Date().getTime() - lastAt) < STALE_MS) return; // 集合同一かつ新鮮＝送らない
       fetch(cfg.url + '/api/candidate-pool', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
         body: JSON.stringify({ cids: uniq })
       }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-        if (j && j.ok) { try { localStorage.setItem('cand_pool_hash', hash); } catch (e) {} }
-      }).catch(function () { /* 同期失敗は表示に影響しない(次回再送) */ });
+        if (j && j.ok) { try { localStorage.setItem('cand_pool_hash', hash); localStorage.setItem('cand_pool_hash_at', String(new Date().getTime())); } catch (e) {} }
+        else { try { console.warn('[candidate-pool] 同期POSTが失敗(ok=false)'); } catch (e) {} }
+      }).catch(function () { try { console.warn('[candidate-pool] 同期POSTが通信エラー(次回再送)'); } catch (e) {} });
     } catch (e) {}
   }
 
@@ -2037,7 +2044,12 @@
       });
       function done_() { syncCandidatePool_(cids); }
       // サークル分は cid のみを集めればよい(並びは同期に無関係)。キャッシュ優先=force省略。
-      if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items) { (items || []).forEach(pushCid_); done_(); });
+      //   ★全滅(err && !items)の時は同期しない=総入れ替えPOSTで登録済みサークル分をD1から削り戻すのを防ぐ
+      //     (サークル取得の失敗が「D1がmainだけの小集合に縮む」に化けていた・Fable真因追跡2026-08-05)。
+      if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items, err) {
+        if (err && !items) return; // サークル全滅=不完全集合で削り戻さない(次回リロードで再試行)
+        (items || []).forEach(pushCid_); done_();
+      });
       else done_();
     }, 500);
   }
