@@ -585,6 +585,12 @@ def main():
             for i, part in enumerate(split_body(body)):
                 pl = dict(payload)
                 pl["content"] = part
+                # 分割連投は2通目以降を無音化する(Chami指示2026-08-06 msg=1534698298105925793:
+                # 「同じ内容を分割して送信する時は通知や通知音は最初の1通目だけに」)。
+                # 1通目=既存の通知挙動のまま / 2通目以降=SUPPRESS_NOTIFICATIONS(4096)を必ず立てる。
+                # mirror/--silentで全通無音の場合は payload["flags"] が既に4096なので影響なし。
+                if i >= 1:
+                    pl["flags"] = pl.get("flags", 0) | 4096
                 st, mid = post(pl, want_id=want_id)
                 print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})"
                       + (f" msg={mid}" if mid else "") + (f" [{i+1}通目]" if i else ""))
