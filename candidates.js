@@ -44,6 +44,11 @@
     try { u = (localStorage.getItem('fanza_worker_url') || '').trim(); s = (localStorage.getItem('fanza_shared_secret') || '').trim(); } catch (e) {}
     return { url: u.replace(/\/+$/, ''), secret: s };
   }
+  // 候補プールD1同期の「最後の結果」を端末に残す観測点。console.warnはChamiのスマホで読めないため、
+  //   📚全候補ヘッダに人が読める形で出す(どの分岐で止まったかを実機で1発観測=v=647/648が同型リトライで
+  //   直らなかったのを断ち切る・十王星南の実測要請2026-08-05)。端末ローカル(storage-keys未登録=非同期しない)。
+  function poolSyncNote_(msg) { try { localStorage.setItem('cand_pool_sync_note', fmtTs(new Date().getTime()) + ' ' + msg); } catch (e) {} }
+  function poolSyncNoteRead_() { try { return localStorage.getItem('cand_pool_sync_note') || ''; } catch (e) { return ''; } }
   function yen(n) { return (n != null && !isNaN(n)) ? '¥' + Number(n).toLocaleString('ja-JP') : '—'; }
   function fmtDate(s) { return String(s || '').slice(0, 10); }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
@@ -2036,7 +2041,7 @@
   function syncCandidatePool_(cids) {
     try {
       var cfg = workerCfg();
-      if (!cfg || !cfg.url || !cfg.secret) return; // worker未設定なら同期しない(表示は動く)
+      if (!cfg || !cfg.url || !cfg.secret) { var miss = []; if (!cfg || !cfg.url) miss.push('URL'); if (!cfg || !cfg.secret) miss.push('シークレット'); poolSyncNote_('設定なし(' + miss.join('/') + '欠)＝同期せず'); return; } // worker未設定なら同期しない(表示は動く)
       var uniq = []; var seen = {};
       (cids || []).forEach(function (c) { if (c && !seen[c]) { seen[c] = true; uniq.push(c); } });
       var hash = uniq.slice().sort().join(',');
@@ -2047,14 +2052,15 @@
       //   でも send をスキップし、D1が1件に永久に張り付いた(商品候補選定部門の実測・updated_at 6日凍結)。
       //   cand_pool_hash_at は端末ローカル(storage-keys 未登録=既定で非同期)＝端末ごとの生存タイマー。
       var STALE_MS = 12 * 3600 * 1000;
-      if (hash === last && lastAt && (new Date().getTime() - lastAt) < STALE_MS) return; // 集合同一かつ新鮮＝送らない
+      if (hash === last && lastAt && (new Date().getTime() - lastAt) < STALE_MS) { poolSyncNote_('スキップ:新鮮 ' + uniq.length + '件(前回送信から12h未満)'); return; } // 集合同一かつ新鮮＝送らない
+      poolSyncNote_('送信中… ' + uniq.length + '件');
       fetch(cfg.url + '/api/candidate-pool', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
         body: JSON.stringify({ cids: uniq })
       }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-        if (j && j.ok) { try { localStorage.setItem('cand_pool_hash', hash); localStorage.setItem('cand_pool_hash_at', String(new Date().getTime())); } catch (e) {} }
-        else { try { console.warn('[candidate-pool] 同期POSTが失敗(ok=false)'); } catch (e) {} }
-      }).catch(function () { try { console.warn('[candidate-pool] 同期POSTが通信エラー(次回再送)'); } catch (e) {} });
+        if (j && j.ok) { poolSyncNote_('送信OK ' + uniq.length + '件'); try { localStorage.setItem('cand_pool_hash', hash); localStorage.setItem('cand_pool_hash_at', String(new Date().getTime())); } catch (e) {} }
+        else { poolSyncNote_('送信NG(ok=false/HTTPエラー) ' + uniq.length + '件'); try { console.warn('[candidate-pool] 同期POSTが失敗(ok=false)'); } catch (e) {} }
+      }).catch(function () { poolSyncNote_('通信エラー(次回再送) ' + uniq.length + '件'); try { console.warn('[candidate-pool] 同期POSTが通信エラー(次回再送)'); } catch (e) {} });
     } catch (e) {}
   }
 
@@ -2117,6 +2123,7 @@
         candColsCtlHtml_() +
       '</div>' +
       '<div class="hint" style="margin-top:6px;">💡候補・独立タブ・全サークルタブの作品をまとめて表示します。タブの✏️編集で「全候補に含まない」にしたタブは除外(各部門もこの一覧の作品だけを読みます)。</div>' +
+      '<div class="hint" style="margin-top:2px;opacity:.7;">🔎D1同期の最後: ' + esc(poolSyncNoteRead_() || '(まだ実行なし)') + '</div>' +
       '</div>' +
       '<div id="candEditForm"></div>' +
       '<div id="candList"><p class="hint" style="padding:8px;">⏳ 全候補を集約中…</p></div>';
