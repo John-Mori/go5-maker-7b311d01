@@ -140,6 +140,12 @@
     save('movie_auto_ws_cid', cid);
     var ws = deriveWorkState_(info.releaseDate || info.date || '');
     if (ws) applyWorkStateToUi_(ws);
+    // 総集編(FANZAのジャンル/フロア名に「総集編」)なら本文の割引行へも反映。新作と両立で「オフの新作&総集編」になる。
+    //   (Chami依頼2026-08-05「総集編にチェックが入ってるときは総集編の記載も 新作&総集編みたいに」)
+    //   カテゴリの hidden 設定に依らず拾えるよう、割引文の総集編ラベルと同じ語「総集編」で直接判定する。
+    var texts = (info.genres || []).concat([info.floor, info.service, info.title]);
+    var isDigest = texts.some(function (t) { return String(t || '').indexOf('総集編') >= 0; });
+    if (typeof onDigestBodyToggle === 'function') onDigestBodyToggle(isDigest); // 新作の後=既存の「の新作」に「&総集編」が積まれる
   }
   (function wireRebuildPicker_() {
     var cb = $('movieRebuild'); if (!cb) return;
