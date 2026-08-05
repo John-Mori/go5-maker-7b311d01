@@ -110,6 +110,48 @@
   // ── 保存キー ──
   var K_ITEMS = 'cand_items';   // 候補リスト(共通): [{url,cid,title,author,thumb,listPrice,price,discountPct,addedAt}]
   var K_TABS = 'cand_tabs';    // サークルタブ: [{id,name,makerId,makerName}]
+  // 組込タブ(buzz/main/all)の表示名だけの上書き。{buzz,main,all}。絵文字は固定・テキストのみ差し替え。
+  //   端末ローカル(storage-keys 未登録=既定で非同期)。直接 localStorage を使い schedulePoolSync_(cand_tabs監視)を誤発火させない。
+  var K_TABLABELS = 'cand_tab_labels';
+  var BUILTIN_TAB_DEFAULTS = { buzz: 'バズ', main: '手動追加', all: '全候補' }; // ★main の既定は「手動追加」(Chami依頼)
+  var BUILTIN_TAB_EMOJI = { buzz: '🦋', main: '💡', all: '📚' };
+  function builtinTabLabels_() { try { return JSON.parse(localStorage.getItem(K_TABLABELS) || '{}') || {}; } catch (e) { return {}; } }
+  // 組込タブの表示ラベル(テキストのみ)。上書きが無ければ既定を返す。_activeTab 値や分岐には一切関与しない=表示専用。
+  function builtinTabLabel_(id) {
+    var v = builtinTabLabels_()[id];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    return BUILTIN_TAB_DEFAULTS[id] || id;
+  }
+  // 組込タブの表示ラベルを保存。空 or 既定と同じなら上書きを外す(=既定に戻す)。schedulePoolSync_ 誤発火回避で直接 setItem。
+  function setBuiltinTabLabel_(id, name) {
+    var over = builtinTabLabels_();
+    name = (name || '').trim();
+    if (name && name !== (BUILTIN_TAB_DEFAULTS[id] || id)) over[id] = name; else delete over[id];
+    try { localStorage.setItem(K_TABLABELS, JSON.stringify(over)); } catch (e) {}
+  }
+  // 組込タブ(バズ/手動追加/全候補)の表示名だけを変更する小フォーム。改名専用=削除・サークル・全候補除外は無し
+  //   (サークル/独立タブ用 showEditTabForm とは別物)。containerId の要素へ差し込み、保存で render() し直す。
+  function showEditBuiltinTabForm_(id, containerId) {
+    var f = $(containerId || 'candEditForm');
+    if (!f) return;
+    var emoji = BUILTIN_TAB_EMOJI[id] || '';
+    f.innerHTML = '<div class="card" style="margin:8px 0;">' +
+      '<div class="field-label" style="margin-top:0;">✏️ タブ名を変更</div>' +
+      '<label class="hint" style="display:block;margin-bottom:2px;">' + esc(emoji) + ' のタブ名(絵文字はそのまま・文字だけ変わります)</label>' +
+      '<input id="candBiName" type="text" autocomplete="off" value="' + esc(builtinTabLabel_(id)) + '">' +
+      '<div class="hint" style="margin-top:6px;">空にして保存すると既定(' + esc(BUILTIN_TAB_DEFAULTS[id] || id) + ')に戻ります。</div>' +
+      '<div style="display:flex;gap:8px;margin-top:8px;">' +
+      '<button id="candBiSave" type="button" class="primary" style="flex:1;font-size:.9rem;padding:10px;">保存</button>' +
+      '<button id="candBiCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">やめる</button>' +
+      '</div></div>';
+    $('candBiCancel').addEventListener('click', function () { f.innerHTML = ''; });
+    $('candBiSave').addEventListener('click', function () { setBuiltinTabLabel_(id, $('candBiName').value || ''); f.innerHTML = ''; render(); });
+  }
+  // 組込タブの「✏️ 名前」ボタン(id=candEditBuiltin)を配線。フォームは candEditForm へ出す。
+  function wireBuiltinRename_(id) {
+    var b = $('candEditBuiltin');
+    if (b) b.addEventListener('click', function () { showEditBuiltinTabForm_(id, 'candEditForm'); });
+  }
   function hiddenKey(tabId) { return 'cand_hidden__' + tabId; }
   // 削除の墓標(トゥームストーン)キー: { cid: 削除ts }。同期で他端末へ伝播し、union後に「削除ts>=addedAt」の候補を
   //   除外する＝「消したものは消えたまま」を成立させる。(再収集は addedAt が新しいので自動復活。INC 2026-07-15)
@@ -1955,9 +1997,9 @@
     if (!page) return;
     kickInfoBackfill_(); // タブへ戻ってきた時=未取得タイトルの追跡を素早いフェーズへ戻す(この後の描画でbackfillが回る)
     var tabs = lsGet(K_TABS, '[]');
-    var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 バズ</button>' +
-      '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 候補</button>' +
-      '<button class="cand-tab' + (_activeTab === 'all' ? ' active' : '') + '" data-ct="all" type="button">📚 全候補</button>' +
+    var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 ' + esc(builtinTabLabel_('buzz')) + '</button>' +
+      '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 ' + esc(builtinTabLabel_('main')) + '</button>' +
+      '<button class="cand-tab' + (_activeTab === 'all' ? ' active' : '') + '" data-ct="all" type="button">📚 ' + esc(builtinTabLabel_('all')) + '</button>' +
       tabs.map(function (t) {
         return '<button class="cand-tab' + (_activeTab === t.id ? ' active' : '') + '" data-ct="' + esc(t.id) + '" type="button">' + esc(t.name) + '</button>';
       }).join('') +
@@ -2065,7 +2107,10 @@
     body.innerHTML = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
         '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
+        '<button id="candEditBuiltin" type="button" class="ghost" title="タブ名を変更" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 名前</button>' +
       '</div>' +
+      // アカウント別「投稿済みを非表示」トグル。(全候補でも isHiddenByPosted_ を尊重=L2103)
+      candHidePostedRowHtml_() +
       '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
         priceFilterHtml_() +
@@ -2073,11 +2118,14 @@
       '</div>' +
       '<div class="hint" style="margin-top:6px;">💡候補・独立タブ・全サークルタブの作品をまとめて表示します。タブの✏️編集で「全候補に含まない」にしたタブは除外(各部門もこの一覧の作品だけを読みます)。</div>' +
       '</div>' +
+      '<div id="candEditForm"></div>' +
       '<div id="candList"><p class="hint" style="padding:8px;">⏳ 全候補を集約中…</p></div>';
     $('candSort').addEventListener('change', function () { _sort = this.value; renderAll_(); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderAll_(); });
     wirePriceFilter_(function () { renderAll_(); });
     wireCandColsCtl_();
+    wireHidePostedButtons_(function () { renderAll_(); });
+    wireBuiltinRename_('all');
 
     // 保存アイテム(main + 独立listタブ・除外でない)を集約し、サークルidを収集。
     var seen = {}, stored = [];
@@ -2419,21 +2467,24 @@
     var head = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
       '<div style="flex:1;font-weight:700;color:var(--accent);">🦋 フォロー中のバズ投稿</div>' +
+      '<button id="candEditBuiltin" type="button" class="ghost" title="タブ名を変更" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 10px;">✏️ 名前</button>' +
       '<button id="buzzReload" type="button" class="ghost" title="最新を取り直す" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '</div>' +
       '<div class="hint" style="margin-top:6px;">フォローしている人の直近' + BUZZ_RECENT_DAYS + '日の投稿を、<b>反応の多い順</b>に並べます。' +
       'Blueskyは表示回数(インプレッション)を公開していないため、<b>エンゲージメント(❤️いいね+🔁リポスト+💬返信+❝引用)</b>が唯一の勢いの指標です。</div>' +
       '</div>';
     if (!accs.length) {
-      body.innerHTML = head + '<div class="card"><div class="hint">⚠️ Blueskyのハンドルが未設定です。🦋投稿タブの⚙設定でハンドル(@…)を保存すると、そのアカウントのフォローが対象になります。</div></div>';
+      body.innerHTML = head + '<div id="candEditForm"></div>' + '<div class="card"><div class="hint">⚠️ Blueskyのハンドルが未設定です。🦋投稿タブの⚙設定でハンドル(@…)を保存すると、そのアカウントのフォローが対象になります。</div></div>';
       wireBuzzReload_();
+      wireBuiltinRename_('buzz');
       return;
     }
     var namesLabel = accs.map(function (o) { return '@' + (o.handle || o.did.slice(0, 14) + '…'); }).join(' / ');
-    body.innerHTML = head +
+    body.innerHTML = head + '<div id="candEditForm"></div>' +
       '<div class="hint" style="margin:6px 2px;">対象アカウント：' + esc(namesLabel) + '</div>' +
       '<div id="buzzList"><div class="card"><div class="hint">⏳ フォローと投稿を集計中…(初回・更新直後は少し時間がかかります)</div></div></div>';
     wireBuzzReload_();
+    wireBuiltinRename_('buzz');
     renderBuzzList_(false);
   }
   function wireBuzzReload_() {
@@ -2701,7 +2752,9 @@
       '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
       '<button id="candReload" type="button" class="ghost" title="価格・販売数を取り直す" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
-      (isMain ? '' : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
+      (isMain
+        ? '<button id="candEditBuiltin" type="button" class="ghost" title="タブ名を変更" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 名前</button>'
+        : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
       '<button id="candAddOpen" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ ' + (isMain ? '追加' : 'このタブに追加') + '</button>' +
       '</div>' +
       // アカウント別「投稿済みを非表示」トグル。(非表示リストの上段・右寄せ)両方同時ON可。
@@ -2728,7 +2781,9 @@
     $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
     bindPcRun_($('candPcRun'), 'candList');
     $('candAddOpen').addEventListener('click', function () { openAddModal_(tabId, isMain); });
-    if (!isMain) {
+    if (isMain) {
+      wireBuiltinRename_('main'); // 組込タブ(手動追加)の改名。candEditForm へフォームを出す。
+    } else {
       var tab = null; lsGet(K_TABS, '[]').forEach(function (t) { if (t.id === tabId) tab = t; });
       var eb = $('candEditTab'); if (eb && tab) eb.addEventListener('click', function () { showEditTabForm(tab); });
     }
