@@ -483,6 +483,18 @@
     };
     img.src = dataUrl;
   }
+  // リロード(iOS Safariのタブ破棄=メモリ退避を含む)後: 入力テキストを復元。前景写真(K_PHOTO_CACHE)と対で、
+  // 「戻ってきたら書いた文字が消えていた」を防ぐ。端末別の下書き状態(sync_decisions=local)。
+  function restoreTextCache_() {
+    try {
+      const a = localStorage.getItem('movie_author_text');
+      const d = localStorage.getItem('movie_detail_text');
+      const t = localStorage.getItem('movie_top_text');
+      if (a != null && els.author) els.author.value = a;
+      if (d != null && els.detail) els.detail.value = d;
+      if (t != null && els.top) els.top.value = t;
+    } catch (e) {}
+  }
   els.previewBtn.addEventListener("click", preview);
   // テキストは入力確定(フォーカスアウト/Enter)で反映＝IMEを妨げない
   for (const el of [els.author, els.detail, els.top]) {
@@ -518,6 +530,13 @@
   }
   // 作者も textarea 化＝入力中(改行含む)も即プレビュー反映。
   els.author.addEventListener("input", preview);
+
+  // 入力テキストを即localStorageへ退避(iOS Safariがタブを破棄→戻ると勝手にリロードされ、
+  // 従来は作者名/誘導文/④コメントが消えていた=「ヒヤッとする」の正体)。前景写真の退避と対で「戻っても消えない」を作る。
+  els.author.addEventListener("input", function () { try { localStorage.setItem("movie_author_text", els.author.value); } catch (e) {} });
+  els.top.addEventListener("input", function () { try { localStorage.setItem("movie_top_text", els.top.value); } catch (e) {} });
+  els.detail.addEventListener("input", function () { try { localStorage.setItem("movie_detail_text", els.detail.value); } catch (e) {} });
+  els.detail.addEventListener("change", function () { try { localStorage.setItem("movie_detail_text", els.detail.value); } catch (e) {} });
 
   function setStatus(m) { els.status.textContent = m; }
   function sanitize(t) {
@@ -797,6 +816,7 @@
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
   restorePhotoCache_(); // リロード後の前景画像復元
+  restoreTextCache_();   // リロード後の入力テキスト復元(setAccountの誘導文既定追従より前=書いた文面を尊重して残す)
   ensureFont().then(preview);
   // フォント確定後にもう一度描画(初回がフォールバックフォントの計測で描かれてしまうのを防ぐ＝
   // プレビューと書き出しで measureText 由来の自動縮小・折返しがズレないようにする保険)。
