@@ -36,16 +36,14 @@ body {
   padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 10;
 }
-.app-header .title strong { font-size: 15px; }
-.app-header .sub { color: var(--muted); margin-left: 0; font-size: 11px; display: block; line-height: 1.5; }/* 説明文は全て改行で縦積み表示(Chami依頼2026-08-05) */
+.app-header .title strong { font-size: 15px; white-space: nowrap; }/* 「投稿スケジュール」は途中で折り返さない(Chami指摘2026-08-05) */
+/* 説明文は3語(5週ローリング/day-type自動判定/祝日・長期休暇対応)を各1行で縦積み。<br>だけで改行し、語の途中では折り返さない(Chami指摘2026-08-05) */
+.app-header .sub { color: var(--muted); margin-left: 0; font-size: 11px; display: block; line-height: 1.5; white-space: nowrap; }
 .nav button, .modal-foot button {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
   border-radius: 6px; padding: 6px 10px; cursor: pointer; margin-left: 4px;
 }
 .nav button:hover { border-color: var(--accent); }
-/* ナビは折り返し、折り返した行どうし(前週の行/今日の行/CSVボタン)に縦の余白を若干開ける(Chami依頼2026-08-05) */
-.nav { display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: flex-start; row-gap: 8px; column-gap: 4px; }
-.nav button { margin-left: 0; }
 
 /* ドラフトの「公開枠を選ぶ」ピックモード：投稿先chの枠だけを、余計な説明・ボタン無しで出す(Chami依頼2026-08-05)。
    「5週ローリング/day-type…」の説明・凡例・操作ヘルプ・検証/CSV/Export を隠し、ナビは 今日 前週 今週 翌週 を一列に。 */
