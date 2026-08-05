@@ -2054,10 +2054,19 @@
       var STALE_MS = 12 * 3600 * 1000;
       if (hash === last && lastAt && (new Date().getTime() - lastAt) < STALE_MS) { poolSyncNote_('スキップ:新鮮 ' + uniq.length + '件(前回送信から12h未満)'); return; } // 集合同一かつ新鮮＝送らない
       poolSyncNote_('送信中… ' + uniq.length + '件');
-      fetch(cfg.url + '/api/candidate-pool', {
+      var bodyStr = JSON.stringify({ cids: uniq });
+      // ★iOS Safari はタブが裏に回ると in-flight fetch を中断し then/catch が一度も発火しない
+      //   (Chami がスクショのためアプリ切替する導線で「送信中…」のまま固まりD1未更新・星南の実機実測
+      //    2026-08-05・レスポンスが返らない=接続が生きていない)。keepalive でバックグラウンド化・
+      //   ページ破棄後もブラウザがリクエストを送り切る。keepalive は本文64KB制限があるため、超える
+      //   大集合(数千件)では付けない=その時は通常fetch(前面にいる間に完了する運用)。
+      var fetchOpts = {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
-        body: JSON.stringify({ cids: uniq })
-      }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+        body: bodyStr
+      };
+      var _sz = 0; try { _sz = (new Blob([bodyStr])).size; } catch (e) { _sz = bodyStr.length; }
+      if (_sz < 60000) fetchOpts.keepalive = true;
+      fetch(cfg.url + '/api/candidate-pool', fetchOpts).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
         if (j && j.ok) { poolSyncNote_('送信OK ' + uniq.length + '件'); try { localStorage.setItem('cand_pool_hash', hash); localStorage.setItem('cand_pool_hash_at', String(new Date().getTime())); } catch (e) {} }
         else { poolSyncNote_('送信NG(ok=false/HTTPエラー) ' + uniq.length + '件'); try { console.warn('[candidate-pool] 同期POSTが失敗(ok=false)'); } catch (e) {} }
       }).catch(function () { poolSyncNote_('通信エラー(次回再送) ' + uniq.length + '件'); try { console.warn('[candidate-pool] 同期POSTが通信エラー(次回再送)'); } catch (e) {} });
