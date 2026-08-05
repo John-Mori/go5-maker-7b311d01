@@ -119,6 +119,28 @@
     if (shin) { shin.checked = (ws === '新作'); try { shin.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
     renderPreview();
   }
+  // 発売日→作品状態(新作=30日以内/準新作=90日以内/旧作)。candidates.js / yt-clicks.js の deriveWorkState_ と同ロジック。
+  function deriveWorkState_(dateStr) {
+    if (!dateStr) return '';
+    var t = new Date(String(dateStr).replace(/\//g, '-')).getTime();
+    if (isNaN(t)) return '';
+    var days = (new Date().getTime() - t) / 86400000;
+    if (days <= 30) return '新作';
+    if (days <= 90) return '準新作';
+    return '旧作';
+  }
+  // 作品情報(発売日)から新作/準新作を動画作成タブのチェック＋本文へ自動反映。(Chami依頼2026-08-05「本文に新作の表記が入ってない」)
+  //   従来 applyWorkStateToUi_ はリビルド選択時しか呼ばれず、候補から/作品URL入力で作品を決めても
+  //   新作でもチェックが入らず本文の割引行に「の新作」が付かなかった。カテゴリ自動チェックと同じく
+  //   同一cidは1回だけ＝手動でチェックを外した後に再描画で戻さない。
+  function autoApplyWorkStateFromInfo_(info, cidHint) {
+    if (!info || !info.title) return;
+    var cid = String(info.cid || cidHint || info.title || ''); if (!cid) return;
+    if (load('movie_auto_ws_cid') === cid) return;
+    save('movie_auto_ws_cid', cid);
+    var ws = deriveWorkState_(info.releaseDate || info.date || '');
+    if (ws) applyWorkStateToUi_(ws);
+  }
   (function wireRebuildPicker_() {
     var cb = $('movieRebuild'); if (!cb) return;
     cb.addEventListener('change', refreshRebuildPicker_);
@@ -171,7 +193,7 @@
   //   フロア名でしか分からないカテゴリが永久に自動チェックされない(再発した不具合)。ガードは
   //   floor込みで判定する autoApplyAttrsFromInfo_ 側に一本化し、そちらが1回だけ正式適用する。
   try { window.Go5MovieAttrs = {
-    reset: function () { save('movie_auto_attrs_cid', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
+    reset: function () { save('movie_auto_attrs_cid', ''); save('movie_auto_ws_cid', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
     applyGenres: function (genres, cid) { setMovieAttrsFromTexts_(genres || []); }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
@@ -2223,6 +2245,7 @@
     el.style.color = 'var(--ink)';
     el.innerHTML = lines.join('');
     autoApplyDiscountFromInfo_(info); // 現在の割引率を投稿文へ自動反映(取得できない時だけ手動ドロップダウンが効く)
+    autoApplyWorkStateFromInfo_(info); // 発売日→新作/準新作を自動チェック＋本文へ(割引行の後=「の新作」が付くように)
     autoApplyAttrsFromInfo_(info); // ジャンル→カテゴリ自動チェック(同一cidは1回だけ＝手動調整を尊重)
     try { if (window.Go5PromoLabel) window.Go5PromoLabel.notify(info); } catch (e) {} // 販促ラベル(今なら◯%OFF)を元写真へ焼き込み
   }
@@ -2273,6 +2296,8 @@
         //   floor を持つこの経路で確定させないと AI が永久に自動チェックされない(#5 再発の真因＝
         //   autoApplyAttrsFromInfo_ がどこからも呼ばれていなかった)。cid guard で1作品1回に絞る。
         autoApplyAttrsFromInfo_(info, cid);
+        autoApplyWorkStateFromInfo_(info, cid); // 発売日→新作/準新作も同経路で確定
+
       } else {
         if (el) { el.style.color = 'var(--sub)'; el.textContent = '(作品情報を取得できませんでした' + (info && info.reason ? '：' + info.reason : '') + ')'; }
       }
