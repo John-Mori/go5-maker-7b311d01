@@ -398,6 +398,10 @@ window.SCH = window.SCH || {};
   //   iframeで生データを読み直さず親の Go5History.postsForDay へ postMessage で問い合わせる。
   let linkReqSeq = 0;
   const autoLinkedIds = {};   // 一度自動同期した枠(ループ・過剰再送の防止)
+  // ★実投稿は予定時刻ちょうどに乗らない(手動投稿は数分〜十数分ずれる)。分ぴったり一致だけだと
+  //   昼枠のように投稿済みでも◯のまま自動反映されない(Chami 2026-08-06)。予定時刻から±この幅(分)以内で
+  //   最も近い未公開枠へ寄せる。枠間隔(昼→夕は数時間・深夜は約60分)より狭く取り、隣枠への誤爆を防ぐ。
+  const LINK_WINDOW_MIN = 45;
   // "HH:MM"(0詰め有無を問わず)を分に直して比較する。generatorのtimeは"9:00"、投稿時刻は"09:00"のことがある。
   function hhmmToMin(t) {
     const m = /(\d{1,2}):(\d{2})/.exec(String(t || ""));
@@ -411,17 +415,32 @@ window.SCH = window.SCH || {};
   // 親からの投稿履歴応答。postsByDate[日付]=[{hhmm,title,url,videoId,timeMs}]。
   function onDayPosts(d) {
     const byDate = d.postsByDate || {};
-    // 自動同期(④)：表示中の枠のうち、同日・同時刻の投稿があり未公開のものを黙って紐づける。
+    // 自動同期(④)：表示中の枠のうち、投稿時刻に最も近い未公開枠(±LINK_WINDOW_MIN)へ黙って紐づける。
+    //   投稿を古い順に処理し、1枠につき1投稿だけ(usedで二重紐づけを防ぐ)。分ぴったりでなくても寄る。
     if (String(d.reqId || "").indexOf("auto:") === 0) {
       Object.keys(byDate).forEach(function (date) {
-        (byDate[date] || []).forEach(function (p) {
-          const slots = (lastRender && lastRender.slots) || {};
-          Object.keys(slots).forEach(function (id) {
-            const s = slots[id];
-            if (!s || s.date !== date || s.status === "公開済" || autoLinkedIds[id]) return;
-            if (hhmmToMin(s.time) === hhmmToMin(p.hhmm)) { autoLinkedIds[id] = true; applyLink(s, p); }
-          });
+        const slots = (lastRender && lastRender.slots) || {};
+        const cand = [];
+        Object.keys(slots).forEach(function (id) {
+          const s = slots[id];
+          if (!s || s.date !== date || s.status === "公開済" || autoLinkedIds[id]) return;
+          const sm = hhmmToMin(s.time);
+          if (!isNaN(sm)) cand.push({ s: s, min: sm });
         });
+        if (!cand.length) return;
+        const used = {};
+        (byDate[date] || []).slice().sort(function (a, b) { return hhmmToMin(a.hhmm) - hhmmToMin(b.hhmm); })
+          .forEach(function (p) {
+            const pm = hhmmToMin(p.hhmm);
+            if (isNaN(pm)) return;
+            let best = null, bestD = Infinity;
+            cand.forEach(function (c) {
+              if (used[c.s.id]) return;
+              const dd = Math.abs(c.min - pm);
+              if (dd < bestD) { bestD = dd; best = c; }
+            });
+            if (best && bestD <= LINK_WINDOW_MIN) { used[best.s.id] = true; autoLinkedIds[best.s.id] = true; applyLink(best.s, p); }
+          });
       });
       return;
     }
@@ -438,8 +457,17 @@ window.SCH = window.SCH || {};
       if (btn) btn.disabled = true;
       return;
     }
-    const auto = posts.filter(function (p) { return hhmmToMin(p.hhmm) === hhmmToMin(s.time); })[0];
-    if (auto && s.status !== "公開済") { applyLink(s, auto); return; }   // ④ 時刻一致は自動同期
+    // 分ぴったり優先、無ければ±LINK_WINDOW_MIN内で最も近い投稿を自動候補にする。
+    const sMin = hhmmToMin(s.time);
+    let auto = posts.filter(function (p) { return hhmmToMin(p.hhmm) === sMin; })[0];
+    if (!auto) {
+      let bestD = Infinity;
+      posts.forEach(function (p) {
+        const dd = Math.abs(hhmmToMin(p.hhmm) - sMin);
+        if (dd < bestD && dd <= LINK_WINDOW_MIN) { bestD = dd; auto = p; }
+      });
+    }
+    if (auto && s.status !== "公開済") { applyLink(s, auto); return; }   // ④ 時刻一致(近傍含む)は自動同期
     sel.innerHTML = posts.map(function (p, i) {
       return `<option value="${i}">${escapeHtml(p.hhmm + "  " + p.title)}</option>`;
     }).join("");
