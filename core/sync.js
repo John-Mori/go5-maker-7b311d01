@@ -637,6 +637,7 @@
 
         // マージ結果をローカルへ適用
         var applies = [], newSnapLs = {}, newSnapIdb = {};
+        var pulledLsReal = 0;   // 実際にLSへ「中身が変わった設定」を書き込んだ件数=pulled合図の真値(画像側 pulledImgReal と対)
         Object.keys(mls).forEach(function (k) {
           var e = mls[k];
           var isSec = k.indexOf(SEC_PREFIX) === 0, sk = isSec ? k.slice(SEC_PREFIX.length) : null;
@@ -693,7 +694,9 @@
             return;
           }
           newSnapLs[k] = finalV; if (finalV !== e.v) mls[k] = { t: e.t, v: finalV }; // 再union分をpush対象にも反映
-          try { if (LS.getItem(k) !== finalV) LS.setItem(k, finalV); } catch (x) {}
+          // ★ローカルの値が実際に変わった時だけ pulled を立てる=分析/カレンダー/投稿履歴タブの再描画はこの真値でだけ起こす。
+          //   (候補配列は画像側 pulledImg で再描画するので pulled からは除外＝旧実装の除外を踏襲)
+          try { if (LS.getItem(k) !== finalV) { LS.setItem(k, finalV); if (!isCandArrayKey(k)) pulledLsReal++; } } catch (x) {}
         });
         var dlKeys = Object.keys(midb).filter(function (k) { return !midb[k].d && Idb && Idb.available(); });
         var dlDone = 0; if (dlKeys.length) setProg("画像を受信", 0, dlKeys.length);
@@ -729,7 +732,11 @@
           var outState = { fmt: 2, ls: mls, idb: midb, device: deviceName(), updatedAt: new Date().toISOString() };
           var changed = JSON.stringify(stripT(mls)) !== JSON.stringify(stripT(rls)) || JSON.stringify(stripT(midb)) !== JSON.stringify(stripT(ridb));
           // クラウド側で実際に更新されたLSキー数=この端末に「反映」された設定の件数。(反映されない不安への可視化)
-          var pulledLs = 0; Object.keys(mls).forEach(function (k) { if (k.indexOf(SEC_PREFIX) !== 0 && !isCandArrayKey(k) && rls[k] && (!snapLs[k] || JSON.stringify(rls[k].v) !== JSON.stringify(snapLs[k]))) pulledLs++; });
+          //   ★真値=LSへ「中身が変わった設定」を書き込んだ件数(pulledLsReal)を使う。旧実装は「雲(rls)と前回
+          //   スナップ(snapLs)の差」で数えていたが、この端末が同期中に編集したライブ値を採り続ける等でその差が
+          //   永久に解消せず pulled>0 が毎周期(60秒)立ち続けた。→ 分析/カレンダー/投稿履歴タブが go5-synced
+          //   (pulled>0)のたびに全再描画=「候補タブだけじゃない」他タブも勝手にリロードになる真因(Chami 2026-08-06)。
+          var pulledLs = pulledLsReal;
           // 雲から実際に取り込んだ画像レコード数。(サブ端末で「後から届いた候補/ドラフト画像」を再描画させる合図)
           //   ★真値=IDBへ「中身が変わった画像」を書き込んだ件数(pulledImgReal)を使う。
           //   旧実装は「雲(ridb)と前回スナップ(snapIdb)の差」で数えていたが、雲側に空スロット残骸が
