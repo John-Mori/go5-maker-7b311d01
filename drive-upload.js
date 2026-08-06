@@ -181,7 +181,22 @@
     }
     send({ channel: channel, title: title, videoId: videoId || "", videoFile: videoFile, images: images });
   }
-  window.Go5Drive = { upload: driveUpload_ };
+  // 過去分プレビュー取り込み：Driveの[題名]フォルダから「題名_プレビュー.*」を取得して data URL を返す。
+  //   見つからなければ null(Chami「ないものはなかったでOK」)。Worker側は read-only=非破壊。
+  function fetchPreview_(channel, title) {
+    if (!configured()) return Promise.resolve(null);
+    if (channel !== "acc1" && channel !== "acc2") return Promise.resolve(null);
+    if (!title) return Promise.resolve(null);
+    var fd = new FormData();
+    fd.append("action", "fetch_preview");
+    fd.append("channel", channel);
+    fd.append("title", title);
+    return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (j) { return (j && j.ok && j.found && j.dataUrl) ? j.dataUrl : null; })
+      .catch(function () { return null; });
+  }
+  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_ };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {

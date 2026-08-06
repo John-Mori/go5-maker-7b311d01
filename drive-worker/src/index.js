@@ -34,15 +34,22 @@ export default {
       return json({ ok: false, error: "bad_secret" }, 401, cors);
     }
 
-    // ---- 簡易レート制限（KV：日次カウンタ）----
-    try {
-      if (await rateLimited(env)) return json({ ok: false, error: "rate_limited" }, 429, cors);
-    } catch (e) { /* KV未設定でも停止させない（他の防御で守る） */ }
-
-    // ---- 入力 ----
+    // ---- 入力（先にパース：読み取り専用アクションはレート制限の対象外にするため）----
     let form;
     try { form = await request.formData(); }
     catch (e) { return json({ ok: false, error: "bad_form" }, 400, cors); }
+
+    // ---- 参照アクション：過去分プレビュー取り込み（read-only・非破壊）----
+    //   [題名] フォルダ内の「題名_プレビュー.*」を探して画像を data URL で返すだけ。
+    //   作成・削除・上書きは一切しない＝アップロードのレート制限とは別枠（読み取りは数えない）。
+    if (String(form.get("action") || "") === "fetch_preview") {
+      return await handleFetchPreview(form, env, cors);
+    }
+
+    // ---- 簡易レート制限（KV：日次カウンタ・アップロード系のみ）----
+    try {
+      if (await rateLimited(env)) return json({ ok: false, error: "rate_limited" }, 429, cors);
+    } catch (e) { /* KV未設定でも停止させない（他の防御で守る） */ }
 
     const channel = String(form.get("channel") || "").trim();
     const title = String(form.get("title") || "").trim();
@@ -161,6 +168,74 @@ async function getAccessToken(env) {
 }
 
 /* ====================== 参照（read-only）====================== */
+// 過去分プレビュー取り込み：[題名]フォルダの「題名_プレビュー.*」画像を data URL で返す（無ければ found:false）。
+//   非破壊＝一切書かない。folder名は safeName(title) 換算で照合（アップロード時と同じ規則）。
+async function handleFetchPreview(form, env, cors) {
+  const channel = String(form.get("channel") || "").trim();
+  const title = String(form.get("title") || "").trim();
+  const parentId = channelToFolderId(channel, env);
+  if (!parentId) return json({ ok: false, error: "channel_unresolved", channel }, 400, cors);
+  if (!title) return json({ ok: false, error: "missing_title" }, 400, cors);
+
+  let token;
+  try { token = await getAccessToken(env); }
+  catch (e) { return json({ ok: false, error: "auth_failed", reason: e.reason || "" }, 502, cors); }
+
+  const baseName = safeName(title);
+  let folderIds;
+  try { folderIds = await findChildFolderIds(parentId, baseName, token); }
+  catch (e) { return json({ ok: false, error: "list_failed" }, 502, cors); }
+  if (!folderIds.length) return json({ ok: true, found: false, reason: "folder_not_found" }, 200, cors);
+
+  let file = null;
+  for (const fid of folderIds) { file = await findPreviewFile(fid, token); if (file) break; }
+  if (!file) return json({ ok: true, found: false, reason: "preview_not_found" }, 200, cors);
+
+  let dataUrl;
+  try { dataUrl = await downloadMediaDataUrl(file.id, file.mimeType || "image/jpeg", token); }
+  catch (e) { return json({ ok: false, error: "download_failed" }, 502, cors); }
+  return json({ ok: true, found: true, name: file.name, dataUrl }, 200, cors);
+}
+
+// 親フォルダ直下で name 完全一致のサブフォルダIDを列挙（連番 _2 等は別名なので拾えない＝題名一致のみ）。
+async function findChildFolderIds(parentId, name, token) {
+  const q = "name='" + escQ(name) + "' and '" + parentId +
+    "' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
+  const url = DRIVE_API + "?q=" + encodeURIComponent(q) + "&fields=files(id)&pageSize=20&supportsAllDrives=true&includeItemsFromAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) throw new Error("list");
+  const j = await r.json();
+  return (j.files || []).map((f) => f.id);
+}
+
+// フォルダ内で「プレビュー」を名前に含む画像ファイルを1件返す（無ければ null）。
+async function findPreviewFile(folderId, token) {
+  const q = "'" + folderId + "' in parents and name contains 'プレビュー' and mimeType contains 'image/' and trashed=false";
+  const url = DRIVE_API + "?q=" + encodeURIComponent(q) + "&fields=files(id,name,mimeType)&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) return null;
+  const j = await r.json();
+  const f = (j.files || [])[0];
+  return f && f.id ? f : null;
+}
+
+// ファイル本体を取得して data URL 化（alt=media）。
+async function downloadMediaDataUrl(id, mime, token) {
+  const url = DRIVE_API + "/" + encodeURIComponent(id) + "?alt=media&supportsAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) throw new Error("media");
+  const buf = await r.arrayBuffer();
+  return "data:" + (mime || "image/jpeg") + ";base64," + abToBase64(buf);
+}
+
+function abToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  return btoa(bin);
+}
+
 async function getFolder(id, token) {
   const url = DRIVE_API + "/" + encodeURIComponent(id) + "?fields=id,name,mimeType&supportsAllDrives=true";
   const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });

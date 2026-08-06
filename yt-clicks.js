@@ -1568,6 +1568,48 @@
     }
   }
 
+  // ── 過去分プレビュー取り込み(Drive参照) ──────────────────────────────────
+  //   Chami依頼(REQ-0bfd8d7207 / 2回目=再発): 7/30以前など、プレビュー画像がGoogleドライブへ
+  //   保存され始める前の投稿履歴について、Driveの[題名]フォルダの「題名_プレビュー.*」を探して
+  //   1ページ目に取り込む。無ければ「無かった」でスキップ(Chami「ないものはなかったでOK」)。
+  //   Worker側は read-only=既存物に一切触れない。usedImgSave(pKey, [preview]+既存, prev=1) で先頭挿入。
+  function runDrivePreviewBackfill_(items, btn) {
+    if (!window.Go5Drive || !window.Go5Drive.fetchPreview) { alert('Drive取込が未設定です。(drive_worker_url を確認してください)'); return; }
+    var cand = window.Go5Cand;
+    if (!cand || !cand.usedImgs || !cand.usedImgSave) { alert('画像ストア未対応の環境です。'); return; }
+    var ch = acct(); // 現在表示中のチャンネル
+    // 対象=題名があり、まだプレビュー(先頭prev枚)を持っていない履歴だけ。
+    var targets = (items || []).filter(function (it) {
+      if (!it || !it.title) return false;
+      var pKey = it.videoId || itemKey(it);
+      var prevN = cand.usedPrevCount ? (cand.usedPrevCount(pKey) || 0) : 0;
+      return prevN === 0;
+    });
+    if (!targets.length) { alert('取り込む対象がありません。(このチャンネルの履歴は全てプレビュー済み、または題名が空です)'); return; }
+    if (!window.confirm('このチャンネルの ' + targets.length + ' 件について、Googleドライブから過去分のプレビュー画像を探して取り込みます。よろしいですか？')) return;
+    var i = 0, ok = 0, miss = 0, origLabel = btn.textContent;
+    btn.disabled = true;
+    function step() {
+      if (i >= targets.length) {
+        btn.disabled = false; btn.textContent = origLabel;
+        alert('Drive取込 完了\n挿入: ' + ok + '件 / Driveに無し: ' + miss + '件 / 対象: ' + targets.length + '件');
+        try { refresh(); } catch (e) {}
+        return;
+      }
+      var it = targets[i++];
+      var pKey = it.videoId || itemKey(it);
+      btn.textContent = '取込中… ' + i + '/' + targets.length;
+      window.Go5Drive.fetchPreview(ch, it.title).then(function (durl) {
+        if (durl) {
+          var used = (cand.usedImgs(pKey) || []).slice();
+          cand.usedImgSave(pKey, [durl].concat(used), 1); // 先頭1枚=投稿プレビュー(prev=1)
+          ok++;
+        } else { miss++; }
+      }).catch(function () { miss++; }).then(step);
+    }
+    step();
+  }
+
   // ── render ──────────────────────────────────────────────────────────────
   function render() {
     var list = $('ytClickList');
@@ -1617,6 +1659,7 @@
       // 計測ヘルス(B-3): 正常時は目立たせない。異常時だけ赤字。追加通信はしない(既存取得の結果を映すだけ)
       '<span id="measHealth" class="meas-health" title="計測3経路の生死。短縮URL=クリック数/記録GAS=今日昨日週の日別記録/YouTube=再生数。「応答なし」の時、その数字は古い値です">' + healthHtml_() + '</span>' +
       histColsCtlHtml_() + // 列数セレクタ(PCのみCSSで表示)
+      '<button id="drivePrevBackfill" type="button" class="vhide-remade-btn" title="過去の投稿履歴について、Googleドライブに保存済みの「題名_プレビュー」画像を探して1ページ目に取り込みます(このチャンネル分・既にプレビューがある履歴は対象外)">🔁 Drive→過去分プレビュー取込</button>' +
       '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
     list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
       var k = itemKey(it);
@@ -1826,6 +1869,10 @@
       try { localStorage.setItem(hideRemadeKey, hideRemade ? '0' : '1'); } catch (e) {}
       refresh();
     });
+
+    // 過去分プレビュー取り込み(Drive参照)。このチャンネルの、まだプレビューが無い履歴だけが対象。
+    var backfillBtn = $('drivePrevBackfill');
+    if (backfillBtn) backfillBtn.addEventListener('click', function () { runDrivePreviewBackfill_(visibleItems, backfillBtn); });
 
     // サムネ → 作品詳細モーダル
     list.querySelectorAll('.vrow-thumb').forEach(function (im) {
