@@ -114,7 +114,7 @@ function fanzaGenre_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-08-02A(action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-08-06A(ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -1613,11 +1613,15 @@ function snapshotStats() {
       appends.push([nowStr, today, r.channel, r.post_id, r.vid, v == null ? '' : v, c == null ? '' : c, wc == null ? '' : wc]);
       idx[key] = -1;
     }
-    // 最大瞬間風速：前回スナップからの伸び率。(件/時)妥当な間隔(0.2〜6h)のみ採用。
+    // 最大瞬間風速：前回スナップからの伸び率。(件/時)妥当な間隔のみ採用。
+    // ★下限は 0.12h(7.2分)。旧値 0.2h(12分)は snapshotStats が毎時だった頃の較正で、
+    //   ⑤時点記録のためスナップを10分毎(=0.167h)に変えた時に更新し忘れた=区間が常に下限割れで
+    //   ピークが1件も記録されず「ピークが何も表示されない」を招いていた(Chami報告2026-08-06)。
+    //   10分間隔(±揺らぎ)を通し、事故的なサブ7分の二重発火だけを弾く下限にする。
     var prev = prevByVid[r.vid];
     if (prev && prev.tms) {
       var hrs = (nowMs - prev.tms) / 3600000;
-      if (hrs >= 0.2 && hrs <= 6) {
+      if (hrs >= 0.12 && hrs <= 6) {
         var win = String(prev.tstr).slice(5) + '〜' + nowStr.slice(11); // MM-dd HH:mm〜HH:mm
         if (v != null && prev.views != null) considerPeak_(r.vid, 'v', (v - prev.views) / hrs, win);
         if (c != null && prev.clicks != null) considerPeak_(r.vid, 'c', (c - prev.clicks) / hrs, win);
@@ -1803,7 +1807,9 @@ function setupTrigger() {
 // ============================================================
 var TIMEPOINT_SHEET = '時点記録';
 var TIMEPOINT_HEADERS = ['post_id', 'channel', '投稿日時', 'バケット', '経過分(実測)', '再生数', 'クリック数', '記録日時'];
-var TIME_BUCKETS = [[30, '30分'], [60, '1時間'], [120, '2時間'], [360, '6時間'], [1440, '24時間'], [4320, '72時間']];
+// ★12時間/48時間 を追加(Chami報告2026-08-06「全候補が記録されてるかチェック」)。旧実装はこの2窓を
+//   GAS未記録にしていた=端末スナップ頼みで常態的に空だった。8窓すべてをサーバー記録に揃える。
+var TIME_BUCKETS = [[30, '30分'], [60, '1時間'], [120, '2時間'], [360, '6時間'], [720, '12時間'], [1440, '24時間'], [2880, '48時間'], [4320, '72時間']];
 function timepointSheet_() {
   var ss = openSS_(); var sh = ss.getSheetByName(TIMEPOINT_SHEET);
   if (!sh) { sh = ss.insertSheet(TIMEPOINT_SHEET); sh.appendRow(TIMEPOINT_HEADERS); }
@@ -1812,8 +1818,8 @@ function timepointSheet_() {
 }
 // 時点記録シート → videoIdごとの {b30:{v,c,age}, b60:.., b120:.., b360:.., b1440:.., b4320:..}。
 //   ランキングタブの「窓」表示用。シートは post_id 単位なので記録シートで post_id→videoId に解決してから返す。
-//   ※GASが記録するのは 30分/1時間/2時間/6時間/24時間/72時間 の6バケット・再生数(v)と導線1クリック(c)のみ。
-//     12時間/48時間 と 導線2(作品クリック) はGAS未記録＝ここには入らない(クライアントの端末スナップ側で対応)。
+//   ※GASが記録するのは 30分/1時間/2時間/6時間/12時間/24時間/48時間/72時間 の8バケット・再生数(v)と導線1クリック(c)。
+//     導線2(作品クリック)はGAS未記録＝ここには入らない(クライアントの端末スナップ側で対応)。(2026-08-06に12h/48hを追加)
 function computeTimepoints_() {
   var sh = timepointSheet_(); var last = sh.getLastRow(); if (last < 2) return {};
   // post_id → videoId の対応表を記録シートから作る。
@@ -1828,7 +1834,7 @@ function computeTimepoints_() {
       var vid = ytIdFromUrl_(row[yc - 1]); if (vid && !pid2vid[pid]) pid2vid[pid] = vid;
     });
   });
-  var LAB = { '30分': 'b30', '1時間': 'b60', '2時間': 'b120', '6時間': 'b360', '24時間': 'b1440', '72時間': 'b4320' };
+  var LAB = { '30分': 'b30', '1時間': 'b60', '2時間': 'b120', '6時間': 'b360', '12時間': 'b720', '24時間': 'b1440', '48時間': 'b2880', '72時間': 'b4320' };
   var d = sh.getRange(2, 1, last - 1, TIMEPOINT_HEADERS.length).getValues();
   var out = {};
   d.forEach(function (r) {
