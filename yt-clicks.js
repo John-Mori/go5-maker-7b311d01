@@ -3856,7 +3856,10 @@
       });
       if (mod) saveArr(p[1], arr);
     });
-    if (changed && !_wsRenderPending) { _wsRenderPending = true; setTimeout(function () { _wsRenderPending = false; render(); }, 1500); }
+    // ★状態バッジは setFanzaPriceEls が [data-fanza-state-url] を既にDOM直更新済み＝ここで full render は不要。
+    //   価格自動取得の最中に作品状態が上がるたび render() で一覧を丸ごと作り直し「見てるだけでリロード」の一因に
+    //   なっていた(Chami 2026-08-06 投稿履歴)。永続とGAS反映は上で済んでいるので描画の再構築だけ止める。
+    void changed;
   }
 
   // ── FANZA取得の実行管理(世代トークン方式)──────────────────────────────
