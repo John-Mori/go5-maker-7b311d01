@@ -3576,7 +3576,7 @@
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
       return '現定価:<span class="fp-list">' + yen_(p.listPrice) + '</span>' +
-             ' <span class="fp-sale-lbl">セール価格:</span><span class="fp-sale">' + yen_(p.price) + '</span>' +
+             ' <span class="fp-sale-lbl">セール:</span><span class="fp-sale">' + yen_(p.price) + '</span>' +
              ' <span class="fp-off">' + p.discountPct + '%off</span>';
     }
     return '現定価:<span class="fp-cur">' + yen_(p.price) + '</span>';
@@ -3585,7 +3585,7 @@
   function fmtSnapPriceHtml(p) {
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
-      return '定価:<span class="fp-snap-list">' + yen_(p.listPrice) + '</span> セール価格:' + yen_(p.price) + ' <span class="fp-snap-off">' + p.discountPct + '%off</span>';
+      return '定価:<span class="fp-snap-list">' + yen_(p.listPrice) + '</span> セール:' + yen_(p.price) + ' <span class="fp-snap-off">' + p.discountPct + '%off</span>';
     }
     return '定価:' + yen_(p.price);
   }
@@ -3726,7 +3726,7 @@
           '<label class="vedit-field">サークル名(作者名)<input id="fzeAuthor" type="text" autocomplete="off" placeholder="サークル名"></label>' +
           '<div style="display:flex;gap:10px;">' +
             '<label class="vedit-field" style="flex:1;">定価(円)<input id="fzeList" type="text" inputmode="numeric" autocomplete="off" placeholder="1320"></label>' +
-            '<label class="vedit-field" style="flex:1;">セール価格(円・無ければ空)<input id="fzePrice" type="text" inputmode="numeric" autocomplete="off" placeholder="924"></label>' +
+            '<label class="vedit-field" style="flex:1;">セール(円・無ければ空)<input id="fzePrice" type="text" inputmode="numeric" autocomplete="off" placeholder="924"></label>' +
           '</div>' +
           '<label class="vedit-field">発売日(作品状態の自動判定に使用)<input id="fzeDate" type="date"></label>' +
           '<label class="vedit-field">ジャンル(カンマ区切り・任意)<input id="fzeGenres" type="text" autocomplete="off" placeholder="巨乳, 中出し, 学園もの"></label>' +
