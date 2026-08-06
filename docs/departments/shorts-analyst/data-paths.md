@@ -7,6 +7,9 @@
 
 - 疎通: `curl -sL "<exec>?ping=1"` → GAS_VERSION一致を確認してから使う。
 - **deltas**(増分・JSONP): `curl -sL "<exec>?action=deltas&callback=cb"` → `cb(...)`を剥がす。フィールドの意味=metric-definitions.md M-01〜M-04。
+  - ★戻り値は `{deltas, peaks, timepoints}` の**3ブロック**。`.deltas`(wv=週再生増)だけ見て `.timepoints`/`.peaks` を見落とすな(2026-08-06にこの見落としで「投稿後初速は取れない」と誤答した実例あり)。
+  - **`.timepoints`=投稿後の経過時間別スナップ(初速の正体)**: `{ videoId: { b30,b60,b120,b360,b1440,b4320: {v(再生),c(クリック),age(実経過分)} } }`。バケット=投稿後 30分/1時間/2時間/6時間/24時間/72時間。GAS10分トリガーが `captureTimepoints_` で境界+0〜9分に記録=**アプリ未起動でもサーバー側で貯まる**(computeTimepoints_・コード.gs:1817)。**wvと違い年齢正規化済み**(全動画を投稿後同経過時間で比較できる=減衰交絡が無い)。UIは🏆ランキングタブの「30分/1時間/…/72時間」がこれ(client `captureSnaps_`(snap)と `rank-core.js pickBucketRec` で合成)。
+  - **`.peaks`=最大瞬間風速**(computePeaks_)。
 - **history**(投稿履歴・JSONP): `curl -sL "<exec>?action=history&channel=acc1&limit=10&callback=cb"`(acc2も)。postUri/title/postedAt/shortUrl/videoId等。クリック数・いいね・カテゴリは**含まれない**。
 - **stats_tail**(視聴履歴末尾): `curl -sL "<exec>?action=stats_tail&n=20"`(plain JSON)。n≤20固定・totalRows付き。
 - **競合**(plain JSON・callback不要): `?action=comp_digest`(週次サマリ)・`?action=comp_titles&days=30&top=50`(速度順タイトルコーパス)。
@@ -41,6 +44,7 @@
 | 数字 | 理由 | 対処 |
 |---|---|---|
 | 記録シート全行(いいね・カテゴリ列込み) | 読み出しactionが無い | GASへrecords/stats_range追加を提案予定(**GAS無認証delete是正の完了まで凍結**=STATUS.md) |
-| 視聴履歴の時系列全量 | stats_tail n≤20 | 同上 |
+| 視聴履歴の**30分毎**時系列全量(564行超) | stats_tail n≤20 | 同上 |
+| ~~投稿後の経過時間別再生/クリック(初速)~~ | ~~取れない(と誤認)~~ | **★取れる**=`deltas` の `.timepoints`(上記経路1)。2026-08-06訂正。基盤凍結の対象外 |
 | FANZA成約(verify_fanza)・カレンダー状態(sch_state_v1) | 端末localStorage閉じ込め(同期許可リスト外) | 成約は観測不可が確定=追わない |
 | 任意videoIdの即時再生数 | YT_API_KEYはGAS側のみ | GAS間接値(deltas/stats_tail)で代替 |
