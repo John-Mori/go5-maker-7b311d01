@@ -739,6 +739,26 @@
     });
     return Promise.all(jobs);
   }
+  // ★同期で「後から届いた画像」をメモリへ取り込んで再描画する。(サブ端末の一発表示・Chami再発2026-08-06)
+  //   真因: 画像は起動時に一度だけ hydrateImages_ で _imgMem へ載る。サブ端末で後から sync-worker が
+  //   R2→IDB へ画像を書き戻しても、candidates.js の _imgMem は更新されず画面も再描画されないため、
+  //   「アクセス時は空・もう一度タブを開くと出る」状態になっていた(item9/DEF-de2408cb00 と同型)。
+  //   go5-synced の detail.pulledImg(実際に取り込んだ画像件数)>0 の時だけ IDB を読み直して描画する
+  //   =画像が来ていない同期(タブ復帰の空振り等)では再描画しない=無条件反応の白フラッシュを避ける。
+  function reHydrateFromSync_() {
+    if (!_idbOk || !window.Go5Idb || !window.Go5Idb.available()) return;
+    window.Go5Idb.entries().then(function (all) {
+      Object.keys(all || {}).forEach(function (k) {
+        var v = all[k];
+        if (k.indexOf('ref:') === 0) _imgMem.ref[k.slice(4)] = v;
+        else if (k.indexOf('bsky:') === 0) _imgMem.bsky[k.slice(5)] = v;
+        else if (k.indexOf('post:') === 0) _imgMem.post[k.slice(5)] = v;
+        else if (k.indexOf('used:') === 0) _imgMem.used[k.slice(5)] = v;
+      });
+      try { var pc = document.getElementById('pageCand'); if (pc && !pc.hidden) render(); } catch (e) {}
+    }).catch(function () {});
+  }
+  try { document.addEventListener('go5-synced', function (e) { if (e && e.detail && e.detail.pulledImg) reHydrateFromSync_(); }); } catch (e) {}
   // クリップボードの文字列を対象inputへ貼り付け。([data-paste=inputId] のボタンを配線)
   function wirePaste_(root) {
     (root || document).querySelectorAll('.paste-btn[data-paste]').forEach(function (b) {

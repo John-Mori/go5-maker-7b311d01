@@ -226,7 +226,10 @@
   var _prog = { phase: "", done: 0, total: 0 };
   function setProg(phase, done, total) { _prog = { phase: phase, done: done, total: total }; }
   // 同期完了時に発火＝各タブが localStorage の新しい値を入力欄へ読み直せる(反映されない不安の解消)。
-  function fireSynced(pulled) { try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-synced", { detail: { pulled: pulled } })); } catch (e) {} }
+  //   pulledImg=雲から実際に取り込んだ画像レコード(ref:/bsky:/post:)の件数。候補/ドラフト画面が
+  //   「後から届いた画像」で再描画すべきかを判定するために添える。0の同期(=タブ復帰の空振り等)では
+  //   再描画させない=無条件反応による画面の白フラッシュを避ける(competitor.js/candidates.js が参照)。
+  function fireSynced(pulled, pulledImg) { try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-synced", { detail: { pulled: pulled, pulledImg: pulledImg || 0 } })); } catch (e) {} }
   function status() { return { configured: configured(), busy: _busy, version: getVer(), lastError: _lastErr, lastAt: _lastAt, device: deviceName(), prog: _prog }; }
 
   // per-key マージ。(t 大きい方を採用)
@@ -723,7 +726,9 @@
           var changed = JSON.stringify(stripT(mls)) !== JSON.stringify(stripT(rls)) || JSON.stringify(stripT(midb)) !== JSON.stringify(stripT(ridb));
           // クラウド側で実際に更新されたLSキー数=この端末に「反映」された設定の件数。(反映されない不安への可視化)
           var pulledLs = 0; Object.keys(mls).forEach(function (k) { if (k.indexOf(SEC_PREFIX) !== 0 && !isCandArrayKey(k) && rls[k] && (!snapLs[k] || JSON.stringify(rls[k].v) !== JSON.stringify(snapLs[k]))) pulledLs++; });
-          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs); }
+          // 雲から実際に取り込んだ画像レコード数。(サブ端末で「後から届いた候補/ドラフト画像」を再描画させる合図)
+          var pulledImg = 0; Object.keys(midb).forEach(function (k) { if (isSyncIdbKey(k) && !midb[k].d && ridb[k] && (!snapIdb[k] || JSON.stringify(ridb[k].v) !== JSON.stringify(snapIdb[k]))) pulledImg++; });
+          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs, pulledImg); }
           if (!changed) { persist(rver); return { ok: true, version: rver, noChange: true, pulled: pulledLs }; }
           return pushState(outState, rver).then(function (pr) {
             if (pr && pr.ok) { persist(pr.version); return { ok: true, version: pr.version, pulled: pulledLs }; }
