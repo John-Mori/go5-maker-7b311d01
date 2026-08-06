@@ -3576,7 +3576,7 @@
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
       return '現定価:<span class="fp-list">' + yen_(p.listPrice) + '</span>' +
-             ' <span class="fp-sale-lbl">セール:</span><span class="fp-sale">' + yen_(p.price) + '</span>' +
+             ' <span class="fp-sale">' + yen_(p.price) + '</span>' +
              ' <span class="fp-off">' + p.discountPct + '%off</span>';
     }
     return '現定価:<span class="fp-cur">' + yen_(p.price) + '</span>';
@@ -3585,7 +3585,7 @@
   function fmtSnapPriceHtml(p) {
     if (!p || p.price == null) return '';
     if (p.listPrice != null && p.discountPct > 0 && p.listPrice > p.price) {
-      return '定価:<span class="fp-snap-list">' + yen_(p.listPrice) + '</span> セール:' + yen_(p.price) + ' <span class="fp-snap-off">' + p.discountPct + '%off</span>';
+      return '定価:<span class="fp-snap-list">' + yen_(p.listPrice) + '</span> ' + yen_(p.price) + ' <span class="fp-snap-off">' + p.discountPct + '%off</span>';
     }
     return '定価:' + yen_(p.price);
   }
