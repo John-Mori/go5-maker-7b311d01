@@ -34,8 +34,9 @@
     { key: 'gyaru',  label: 'ギャル',   color: '#cba94e', keywords: ['ギャル'] },
     { key: 'isekai', label: '異世界',   color: '#9b7ed1', keywords: ['異世界', '転生'] },
     { key: 'harem',  label: 'ハーレム', color: '#ef6da8', keywords: ['ハーレム'] },
-    // ★AI: タグ(genre)に載らず「コミック・AI」等フロア名で示される作品を拾うため、フロア名も部分一致に含める。
-    { key: 'ai',     label: 'AI',       color: '#4d9fff', keywords: ['AI生成', 'AIイラスト', 'AIグラビア', 'コミック・AI', 'AIコミック'] },
+    // ★AI: タグ(genre)に載らず「コミック(AI)」等フロア名で示される作品を拾うため、フロア名も部分一致に含める。
+    //   中黒・半角/全角カッコ・スペース違いで実ページと綴りがズレて拾えない事故があったため、実在する表記ゆれを網羅する。
+    { key: 'ai',     label: 'AI',       color: '#4d9fff', keywords: ['AI生成', 'AIイラスト', 'AIグラビア', 'AIコミック', 'AIボイス', 'AI画像', 'コミック・AI', 'コミック(AI)', 'コミック（AI）', '(AI)', '（AI）'] },
     { key: 'ol',     label: 'OL',       color: '#b56db0', keywords: ['OL'] },
     { key: 'soshu',  label: '総集編',   color: '#e0863c', keywords: ['総集編'] }
   ];
@@ -63,11 +64,17 @@
       if (!s || !s.key || seen[s.key]) return;
       seen[s.key] = 1;
       var b = builtinByKey[s.key];
+      // 組み込みは「コード側の標準キーワード」を常にunionで取り込む。
+      //   ＝過去に保存された端末では s.keywords が古い綴りのまま凍結され、コードでキーワードを直しても
+      //     load() が s.keywords を優先して既存端末へ永久に届かなかった(AI作品がAIとして読めない再発の真因)。
+      //   ユーザーがカテゴリ編集で足したキーワードは温存し、コード側の改善分だけを追加する(非破壊・重複排除)。
+      var kws = Array.isArray(s.keywords) ? s.keywords.slice() : (b ? b.keywords.slice() : []);
+      if (b) b.keywords.forEach(function (k) { if (kws.indexOf(k) < 0) kws.push(k); });
       out.push(normalize({
         key: s.key,
         label: s.label != null ? s.label : (b ? b.label : s.key),
         color: s.color || (b ? b.color : PALETTE[0]),
-        keywords: Array.isArray(s.keywords) ? s.keywords : (b ? b.keywords.slice() : []),
+        keywords: kws,
         hidden: !!s.hidden
       }, !!b));
     });
