@@ -298,6 +298,8 @@
       videoId: evDetail.videoId || '',
       // カテゴリ(ジャンル)チェックを作成時にスナップ＝投稿完了で投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
       attrs: readMovieAttrs_(),
+      // 割引%/価格も作成時にスナップ＝生キャッシュ失効・再作成の往復でも投稿モードでN%にしない(Chami依頼2026-08-06④)。
+      priceInfo: livePriceInfo_(($('movieWorkUrl') || {}).value || ($('movieWorkAffi') || {}).value || ''),
       youtubeUrl: '',
     };
     return Promise.all([captureThumb_(), capturePreview_()]).then(function (caps) {
@@ -546,8 +548,23 @@
     if (b) b.value = meta.bskyText || '';
     var w = $('movieWorkUrl');
     if (w) { w.value = meta.workUrl || ''; w.dispatchEvent(new Event('input')); }
+    // ①作成時にスナップしたカテゴリ(ジャンル)チェックを復元する(Chami依頼2026-08-06①)。
+    //   作品URLのinputで走る非同期のFANZA再取得(autoApplyAttrsFromInfo_)が後から上書きしないよう、
+    //   この作品のcidを「適用済み」に印してから復元する=再作成では手元の下書きの選択を正とする。
+    try {
+      var attrs = meta.attrs || {};
+      var cidm = String(meta.workUrl || '').match(/cid=([^/?&\s]+)/);
+      if (cidm && cidm[1]) { try { localStorage.setItem('movie_auto_attrs_cid', cidm[1]); } catch (e) {} }
+      var cats = (window.Go5Cats && window.Go5Cats.visible && window.Go5Cats.visible()) || [];
+      cats.forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = !!attrs[c.key]; });
+    } catch (e) {}
+    // ③テストモード(記録スキップの危険フラグ)は再作成では必ずOFFへ倒す(Chami依頼2026-08-06③)。
+    try { var tm = $('testMode'); if (tm && tm.checked) tm.checked = false; } catch (e) {}
     var tab = $('tabMovie');
     if (tab) tab.click();
+    // ②再作成したらこのドラフトはドラフト一覧から外す(Chami依頼2026-08-06②)。作り直しの起点なので
+    //   元の下書きは残さない=消し忘れによる二重ドラフトを防ぐ(墓標で他端末のドラフトからも消える)。
+    try { deleteStock_(meta.id); render(); } catch (e) {}
   }
 
   // ── レンダリング ──
@@ -814,17 +831,29 @@
 
   // 販促テンプレの解決に必要な値(タグ種別/割引率/実価格)を、手元のキャッシュだけで集める(ネット不使用)。
   //   ・Go5WorkInfo(取得済みキャッシュ)→ fanza_title_cache(スナップ) の順。取れなければ null(=Nのまま=誤値を貼らない)。
-  function promoInfo_(meta) {
-    var type = 'discount';
-    try { type = (localStorage.getItem('promo_label_type') === 'price') ? 'price' : 'discount'; } catch (e) {}
-    var url = (meta && (meta.workUrl || meta.affiliateUrl)) || '';
+  // 手元の生キャッシュ(取得済みFANZA情報→スナップ)から価格/割引率だけを引く(ネット不使用)。取れなければ null。
+  function livePriceInfo_(url) {
     var price = null, pct = null;
-    try { var info = window.Go5WorkInfo ? window.Go5WorkInfo(url) : null; if (info) { if (info.price != null) price = info.price; if (info.discountPct != null) pct = info.discountPct; } } catch (e) {}
+    try { var info = (url && window.Go5WorkInfo) ? window.Go5WorkInfo(url) : null; if (info) { if (info.price != null) price = info.price; if (info.discountPct != null) pct = info.discountPct; } } catch (e) {}
     if (price == null || pct == null) {
       try {
         var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[url];
         if (fc && fc.priceInfo) { if (price == null && fc.priceInfo.price != null) price = fc.priceInfo.price; if (pct == null && fc.priceInfo.discountPct != null) pct = fc.priceInfo.discountPct; }
       } catch (e) {}
+    }
+    return { price: price, pct: pct };
+  }
+  function promoInfo_(meta) {
+    var type = 'discount';
+    try { type = (localStorage.getItem('promo_label_type') === 'price') ? 'price' : 'discount'; } catch (e) {}
+    var url = (meta && (meta.workUrl || meta.affiliateUrl)) || '';
+    var live = livePriceInfo_(url);
+    var price = live.price, pct = live.pct;
+    // ★生キャッシュが失効/未取得でも、ドラフト作成時に焼いたスナップ(meta.priceInfo)へフォールバック
+    //   =再作成の往復・別端末・キャッシュ失効でも投稿モードの割引%が「N%」に落ちない(Chami依頼2026-08-06④)。
+    if (meta && meta.priceInfo) {
+      if (price == null && meta.priceInfo.price != null) price = meta.priceInfo.price;
+      if (pct == null && meta.priceInfo.pct != null) pct = meta.priceInfo.pct;
     }
     return { type: type, price: price, pct: pct };
   }

@@ -99,7 +99,15 @@
     save("field_cleanup_v1", "1");
   })();
 
+  // ★#testMode(記録スキップの危険フラグ)は保存対象外(EXCLUDE)＝アプリ側は誰も value を復元しない。
+  //   それでもブラウザのフォーム状態復元(オートフィル/bfcache戻り)が前回のチェックを勝手に戻すため、
+  //   「勝手にテストモードにチェックが入る」(Chami依頼2026-08-06③)。起動時とbfcache復帰時に明示OFFへ倒す。
+  //   =毎回のアクセスは必ずOFFで始まる(HTMLの既定=未チェックと一致)。手でONにした当セッションは触らない。
+  function forceTestModeOff_() { try { var el = document.getElementById("testMode"); if (el && el.checked) el.checked = false; } catch (e) {} }
+
   // body 末尾で読み込まれる前提。(app.js 等の初期化＝既定値投入の後に復元したい)
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", restoreAndWire);
-  else restoreAndWire();
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { restoreAndWire(); forceTestModeOff_(); });
+  else { restoreAndWire(); forceTestModeOff_(); }
+  // bfcache(戻る/進む・タブ復帰)からの復元でブラウザがチェック状態を戻すため、pageshowでも倒す。
+  try { window.addEventListener("pageshow", forceTestModeOff_); } catch (e) {}
 })();
