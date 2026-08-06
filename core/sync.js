@@ -697,6 +697,7 @@
         });
         var dlKeys = Object.keys(midb).filter(function (k) { return !midb[k].d && Idb && Idb.available(); });
         var dlDone = 0; if (dlKeys.length) setProg("画像を受信", 0, dlKeys.length);
+        var pulledImgReal = 0;   // 実際にIDBへ「中身が変わった画像」を書き込んだ件数=再描画の合図の真値
         Object.keys(midb).forEach(function (k) {
           var e = midb[k];
           if (e.d) { if (Idb && Idb.available()) applies.push(Idb.del(k).catch(function () {})); return; }
@@ -713,6 +714,9 @@
                   delete newSnapIdb[k];
                   return;
                 }
+                // ★中身が実際に変わった時だけ数える=候補タブの再描画はこの真値でだけ起こす。
+                //   (雲と自端末スナップの恒常ズレで毎周期立つ偽シグナルを混ぜない=下記 pulledImg の説明)
+                try { if (JSON.stringify(prev) !== JSON.stringify(res.val)) pulledImgReal++; } catch (x) { pulledImgReal++; }
                 return Idb.set(kk, res.val);
               });
             }).catch(function () {}).then(function () { setProg("画像を受信", ++dlDone, dlKeys.length); });
@@ -727,7 +731,12 @@
           // クラウド側で実際に更新されたLSキー数=この端末に「反映」された設定の件数。(反映されない不安への可視化)
           var pulledLs = 0; Object.keys(mls).forEach(function (k) { if (k.indexOf(SEC_PREFIX) !== 0 && !isCandArrayKey(k) && rls[k] && (!snapLs[k] || JSON.stringify(rls[k].v) !== JSON.stringify(snapLs[k]))) pulledLs++; });
           // 雲から実際に取り込んだ画像レコード数。(サブ端末で「後から届いた候補/ドラフト画像」を再描画させる合図)
-          var pulledImg = 0; Object.keys(midb).forEach(function (k) { if (isSyncIdbKey(k) && !midb[k].d && ridb[k] && (!snapIdb[k] || JSON.stringify(ridb[k].v) !== JSON.stringify(snapIdb[k]))) pulledImg++; });
+          //   ★真値=IDBへ「中身が変わった画像」を書き込んだ件数(pulledImgReal)を使う。
+          //   旧実装は「雲(ridb)と前回スナップ(snapIdb)の差」で数えていたが、雲側に空スロット残骸が
+          //   残る/この端末が preferImgRecord_ で毎回ローカル実体を採る作品があると、その差が永久に
+          //   解消せず pulledImg>0 が毎周期(60秒)立ち続けた。→ candidates.js が go5-synced(pulledImg>0)
+          //   のたびに候補タブを全再描画=「見てるだけで勝手にリロード」になる真因(Chami 2026-08-06)。
+          var pulledImg = pulledImgReal;
           function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs, pulledImg); }
           if (!changed) { persist(rver); return { ok: true, version: rver, noChange: true, pulled: pulledLs }; }
           return pushState(outState, rver).then(function (pr) {
