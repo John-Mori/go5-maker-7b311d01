@@ -203,7 +203,10 @@
   //   floor込みで判定する autoApplyAttrsFromInfo_ 側に一本化し、そちらが1回だけ正式適用する。
   try { window.Go5MovieAttrs = {
     reset: function () { save('movie_auto_attrs_cid', ''); save('movie_auto_ws_cid', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
-    applyGenres: function (genres, cid) { setMovieAttrsFromTexts_(genres || []); }
+    // ★title も判定に混ぜる：総集編は「総集編」ジャンルタグが無く作品名にだけ載る作品が多く、
+    //   ジャンルだけだと総集編カテゴリに自動チェックが入らない(Chami依頼2026-08-06「作品名に総集編と記載があったら総集編にもチェック」)。
+    //   候補は作品名を即座に持つため、FANZA再取得を待たずここで作品名も走査する。
+    applyGenres: function (genres, cid, title) { setMovieAttrsFromTexts_((genres || []).concat(title ? [title] : [])); }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
   // 前回の選択・チェックを引き継がない。狙い・コメント型は生成前の必須選択なので未設定へ戻す。(Chami指定2026-07-14)

@@ -1558,7 +1558,9 @@
     // カテゴリは候補が持つジャンルで即時自動チェック。(ジャンル未取得ならFANZA取得が後から自動チェックする)
     if (window.Go5NewMovieReset) window.Go5NewMovieReset();
     else if (window.Go5MovieAttrs) window.Go5MovieAttrs.reset();
-    if (window.Go5MovieAttrs && it.genres && it.genres.length) window.Go5MovieAttrs.applyGenres(it.genres, it.cid || '');
+    // 作品名も渡す：総集編はジャンルタグに載らず作品名にだけ「総集編」と入る作品が多いため、
+    //   ジャンルが空でも作品名に「総集編」があれば総集編カテゴリへ即チェック(Chami依頼2026-08-06)。
+    if (window.Go5MovieAttrs && ((it.genres && it.genres.length) || it.title)) window.Go5MovieAttrs.applyGenres(it.genres || [], it.cid || '', it.title || '');
     if (workUrl) setVal('movieWorkUrl', workUrl); // 作品URL(正規化済み)
     // 割引率・金額を候補が保持する実データから販促ラベルへ直接反映する(Chami依頼2026-07-18)。
     //   従来は movieWorkUrl のセット→FANZA再取得(fetchMovieWorkInfo)頼みで、worker未設定/取得失敗時は
