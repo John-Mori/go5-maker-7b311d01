@@ -420,11 +420,36 @@
     }
   }
 
+  // ---- 背景動画の再生ゲート(リロード頻発対策・2026-08-08) ----
+  //   背景動画(#bg)は「動画作成タブが前面 かつ ページが可視」の時だけ再生する。
+  //   プレビューは静止フレーム(drawFrame)なので、他タブ閲覧中やアプリ背面では bg を再生する必要が
+  //   一切ない。にもかかわらず従来は起動時から loop 再生し続けており、隠れた動画の連続デコードが
+  //   iOSのメモリ/電力を食い、タブごと破棄→「戻るたびに再読込」の主因になっていた(Chami報告)。
+  //   ★動画作成タブが前面の時の挙動は従来どおり(再生)=作成フローには一切触れない。停止するのは
+  //     他タブ/背面の“見えていない”時だけなので、見た目の変化はゼロ。
+  function bgShouldPlay_() {
+    try {
+      if (document.hidden) return false;
+      var t = document.documentElement.getAttribute('data-tab') || 'tabMovie';
+      return t === 'tabMovie';
+    } catch (e) { return true; }
+  }
+  function syncBgPlayback_() {
+    try {
+      if (bgShouldPlay_()) { bg.play().catch(function () {}); }
+      else { try { bg.pause(); } catch (e) {} }
+    } catch (e) {}
+  }
+  window.Go5SyncBgPlayback = syncBgPlayback_;
+
   // ---- プレビュー(完全表示状態の1枚) ----
   async function preview() {
     await ensureFont();
+    // 1フレームだけデコードできれば静止プレビューは描ける。可視・動画作成タブでない限り、
+    //   デコード後は即停止して連続再生に戻さない(隠れた動画を回し続けない)。
     if (bg.readyState < 2) { try { await bg.play(); } catch (e) {} }
     drawFrame(DURATION);
+    if (!bgShouldPlay_()) { try { bg.pause(); } catch (e) {} }
   }
   window.Go5Preview = preview; // 販促ラベル等がプレビュー再描画を要求するためのフック
   // 二本指ピンチ(promo-label.jsが取得)から前景画像の拡大率を操作するためのフック。
@@ -824,9 +849,17 @@
     document.fonts.ready.then(() => { fontReady = true; preview(); });
   }
   // iOSはミュート自動再生が許可されるが、念のため初回操作でも再生を促す。
-  const kick = () => { bg.play().catch(() => {}); document.removeEventListener("touchstart", kick); document.removeEventListener("click", kick); };
+  //   ★ただしゲートを尊重する=動画作成タブが前面でない/背面の時は再生しない(隠れた動画を回さない)。
+  const kick = () => { syncBgPlayback_(); document.removeEventListener("touchstart", kick); document.removeEventListener("click", kick); };
   document.addEventListener("touchstart", kick, { once: true, passive: true });
   document.addEventListener("click", kick, { once: true });
+  // タブ切替(affiliate.js が documentElement の data-tab を切替える)と可視状態の変化に追従して、
+  //   背景動画の再生/停止を同期する。これが「リロード頻発」対策の本体。
+  document.addEventListener("visibilitychange", syncBgPlayback_);
+  try {
+    var _bgTabObs = new MutationObserver(syncBgPlayback_);
+    _bgTabObs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-tab"] });
+  } catch (e) {}
 
   // ---- アカウント切替ボタン配線・起動時復元 ----
   if (els.acctBtn1) els.acctBtn1.addEventListener("click", () => setAccount("acc1"));
@@ -834,4 +867,7 @@
   let savedAcct = "acc1";
   try { savedAcct = localStorage.getItem("current_account") || "acc1"; } catch (e) {}
   setAccount(savedAcct);
+  // 起動直後に、復元されたタブ(動画作成でないこともある)に合わせて背景動画の再生要否を確定。
+  //   例:前回タブが投稿履歴なら、起動時に bg を回し始めない=最初から軽い。
+  syncBgPlayback_();
 })();
