@@ -19,6 +19,8 @@
     "movie_author_text": { "decision": "local", "why": "①作者名の入力テキスト退避=iOSのタブ破棄リロードで消えないための端末別下書き(field_*と同性質・2026-08-06)" },
     "movie_detail_text": { "decision": "local", "why": "②誘導文の入力テキスト退避=端末別下書き。誘導文はアカウント既定に追従するのでsyncしない(2026-08-06)" },
     "movie_top_text": { "decision": "local", "why": "④コメント(大タイトル)の入力テキスト退避=端末別下書き・iOSリロード対策(2026-08-06)" },
+    "movie_auto_attrs_cid": { "decision": "local", "why": "この端末でカテゴリ自動チェックを最後に適用したcid=二重適用よけの端末別マーカー。syncすると別端末で『適用済み』と誤判定され自動チェックが抑止される(2026-08-08)" },
+    "movie_auto_ws_cid": { "decision": "local", "why": "movie_auto_attrs_cid と対の端末別マーカー(セール会場の自動適用よけ)。同上の理由でsyncしない(2026-08-08)" },
     "promo_label_enabled": { "decision": "sync", "why": "🏷割引/価格ラベルの表示ON=出力の見た目設定(2026-08-04 同期漏れ発見)" },
     "promo_label_type": { "decision": "sync", "why": "🏷ラベル種別(割引/価格)=出力の見た目設定(2026-08-04 同期漏れ発見)" },
     "promo_label_scale": { "decision": "sync", "why": "🏷ラベル倍率=出力のレイアウト設定(2026-08-04 同期漏れ発見)" },
