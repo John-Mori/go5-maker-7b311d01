@@ -1,5 +1,5 @@
 {
-  "iframe": 38,
+  "iframe": 39,
   "assets": {
     "css/style.css": {
       "v": 33,
@@ -7,19 +7,19 @@
     },
     "js/config.js": {
       "v": 22,
-      "sha": "b911b93ebd96d8f5"
+      "sha": "eafac11f7d174e7c"
     },
     "js/generator.js": {
       "v": 22,
-      "sha": "280f6dc97cbb8259"
+      "sha": "2aa289f0af29484c"
     },
     "js/store.js": {
       "v": 25,
-      "sha": "0f2f43de8cd36fd5"
+      "sha": "7bdc87b5722b4694"
     },
     "js/app.js": {
-      "v": 36,
-      "sha": "9f6fa593bdd3f8bf"
+      "v": 37,
+      "sha": "cc65f568e9bd32fa"
     }
   }
 }

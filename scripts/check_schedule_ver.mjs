@@ -25,7 +25,13 @@ const STAMP = join(ROOT, 'schedule', '.verstamp.json');
 const SCH_INDEX = join(ROOT, 'schedule', 'index.html');
 const AFFILIATE = join(ROOT, 'affiliate.js');
 
-const sha = (buf) => createHash('sha256').update(buf).digest('hex').slice(0, 16);
+// ★改行コードを正規化してからハッシュする。verstamp を Windows(CRLF)で焼くと、
+//   Linux の CI(LF)は同じ中身でも別ハッシュになり「中身が変わった」と毎回誤検知していた
+//   (2026-08-08 実測=config/generator/store の3本が恒常的に赤・実際の中身は無変更)。
+//   CRLF/LF/CR を \n へ畳んでから測れば、どの OS でも同じ中身は同じ値になる。
+const sha = (buf) => createHash('sha256')
+  .update(buf.toString('utf8').replace(/\r\n?/g, '\n'), 'utf8')
+  .digest('hex').slice(0, 16);
 
 // schedule/index.html の <link>/<script ...?v=N> を全部拾う(相対パスと版)
 function scheduleAssets() {
