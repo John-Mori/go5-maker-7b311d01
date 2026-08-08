@@ -2018,6 +2018,22 @@
     }).catch(function () { cb(null, null, '通信エラー'); });
   }
 
+  // 選んだサブタブ(候補タブ内のバズ/手動追加/全候補/サークル)を横スクロール帯の中央へ寄せる。
+  //   上位のメインタブ(affiliate.js centerTab_)と同じ考え方=scrollIntoView は祖先ごと動いて
+  //   画面が飛ぶため使わず、.cand-tabs の scrollLeft だけを動かす(Chami依頼 2026-08-08)。
+  function centerActiveSubTab_() {
+    try {
+      var page = $('pageCand'); if (!page) return;
+      var bar = page.querySelector('.cand-tabs'); if (!bar) return;
+      var b = bar.querySelector('.cand-tab.active'); if (!b) return;
+      if (bar.scrollWidth <= bar.clientWidth) return; // 全部収まっていれば動かさない(PC等)
+      var barRect = bar.getBoundingClientRect();
+      var bRect = b.getBoundingClientRect();
+      var delta = (bRect.left - barRect.left) + b.offsetWidth / 2 - bar.clientWidth / 2;
+      bar.scrollLeft += delta;
+    } catch (e) {}
+  }
+
   // ── DOM ──
   function render() {
     var page = $('pageCand');
@@ -2054,6 +2070,9 @@
       else if (isMakerTab_(tab)) renderMaker(_activeTab);   // サークル作品一覧タブ(1つ以上のサークル)
       else renderMain(tab.id);                          // 独立した候補リストタブ(タブ名だけのタブ)
     }
+    // 選択中のサブタブを帯の中央へ(クリック/アクセス時ともここを通る)。画像・フォントで幅が後から
+    //   変わるので、初回レイアウト後(rAF)に寄せ直す(Chami依頼 2026-08-08)。
+    if (window.requestAnimationFrame) window.requestAnimationFrame(centerActiveSubTab_); else centerActiveSubTab_();
   }
   // 候補アイテムの保存先: メインは cand_items、独立タブは各タブ固有キー。(表示を共有しない)
   function itemsKey(tabId) { return (!tabId || tabId === 'main') ? K_ITEMS : 'cand_items__' + tabId; }
