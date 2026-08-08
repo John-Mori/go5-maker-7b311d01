@@ -29,6 +29,11 @@
   //   開く”オーバーレイ扱い。もう一度同じボタンを押すと直前の作業タブへ戻る(予約/カレンダー=Chami
   //   2026-07-31 / ランキングをタブから帯へ移設=Chami 2026-08-02)。タブバーには置かない。
   var OVERLAY_BTNS = { reserveBtn: 1, calBtn: 1, analyzeBtn: 1, rankBtn: 1 };
+  // 前面から外れた“重いタブ”はDOMを空にして常駐メモリを解放する(iOS Safariはメモリ都合でタブを
+  //   丸ごと破棄し、戻ると再読込＝「リロード頻発」に見える。resident memoryを減らせば破棄されにくい)。
+  //   ここに載せるページは showTab の入場時に innerHTML を必ず作り直すもの限定(下の renderRank 等)＝
+  //   離れる時に空にしても戻れば同じ内容が再構築される=挙動は不変。モーダルは body 直下なので消えない。
+  var HEAVY_UNMOUNT = { rankBtn: 'pageRank', tabCand: 'pageCand', tabStock: 'pageStock' };
   var currentTab = 'tabMovie';          // いま前面に出している btn id
   var prevWorkTab = 'tabMovie';         // オーバーレイを開く直前の“作業タブ”(戻り先)
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む。(遅延ロード)
@@ -37,6 +42,7 @@
     if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=39');
   }
   function showTab(activeBtnId) {
+    var outgoing = currentTab; // 直前に前面だったタブ(離れる=DOMを空にしてメモリ解放する対象の判定)
     TABS.forEach(function (t) {
       var b = document.getElementById(t.btn), p = document.getElementById(t.page);
       if (!b || !p) return;
@@ -64,6 +70,11 @@
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
     if (activeBtnId === 'reserveBtn' && window.Scheduler) window.Scheduler._renderTab();
     if (activeBtnId === 'tabStock'   && window.Go5Stock)  window.Go5Stock.render();
+    // 前面から外れた重いタブのDOMを空にして常駐メモリを解放(入場時に必ず作り直すページのみ・上の定義参照)。
+    if (outgoing && outgoing !== activeBtnId && HEAVY_UNMOUNT[outgoing]) {
+      var _op = document.getElementById(HEAVY_UNMOUNT[outgoing]);
+      if (_op) { try { _op.innerHTML = ''; } catch (e) {} }
+    }
     // 選んだタブをタブバーの中央へ寄せる(タブ選択のたび・Chami 2026-07-31)。オーバーレイ
     //   (予約/カレンダー)はタブバーに無いので centerTab_ 側の早期returnで何もしない。
     centerTab_(activeBtnId);
