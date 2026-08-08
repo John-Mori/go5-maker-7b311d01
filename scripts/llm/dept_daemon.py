@@ -165,6 +165,16 @@ QUEUE_LEASE_MARGIN = 300
 #   → 失敗した部屋だけ寝かせ、既存のmax_deliveries=5を**実時間へ散らす**(5分×5回=約20分)。
 #   ★この待機に入るのは session_relay を使う部屋が配送に失敗した時だけ。他2部屋(hq/research-room)は常に0。
 RELAY_HOLD_SEC = 300
+# ★★受信側の集約窓(coalesce・2026-08-08 イージス研究室 / 発注= 研究室HQ 8/4 07:29)。
+#   何のためか= Chamiが推敲を**小分けに連投**する部屋で、断片1つごとに走って断片1つごとに
+#   返すと、①話が途中の状態で3回も4回も応答が返る ②同じ推敲に何度もモデルを回す。
+#   → **連投が落ち着いてから、溜まった分を全部込みで1回返す。**
+#   ★効かせるのは `coalesce_sec` を持つ部門だけ(既定=無し=他29室は1ミリも変わらない。C-035)。
+#   ★安全の核= 待つ間、便は**claimしない**(queueに残したまま覗くだけ)。掴んで抱えないので
+#     デーモンが落ちても喪失しない・deliveriesも減らない=ドレインの窓を作らない(INC-100型を避ける)。
+COALESCE_MAX_SEC = 300         # 連投が止まらなくても、最初の便からこの秒数で必ず走る(待ち続けない)
+COALESCE_MAX_ITEMS = 8         # 1回に束ねる上限(超えた分は次の巡回でまた束ねる)
+COALESCE_PEEK_MAX = 20         # 覗く行数の上限
 WORK_MODEL = "sonnet"          # ★O3(裁-3): 作業agentの既定(実装の物量=sonnet・分業表準拠)
 # ★部門ごとのモデル上書き(2026-07-21 Chami指摘「デーモンの処理能力が悪かったら、
 #   作業してもらっても結局バグを作る温床。**一番重視してるのは品質を落とさないこと**」)。
@@ -1420,6 +1430,13 @@ DEPT_CONF = {
         "port": 18806,
         "work_model": "opus",    # 2026-07-30 Chami号令(C-014)=作業生成もopusで人格の演技を担保。relayは既定でopus
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
+        # ★★集約窓(2026-08-08・発注=研究室HQ 8/4 07:29 / Chamiの依頼便=1533963726984581251)。
+        #   この部屋はChamiが**推敲を小分けに連投**する。断片ごとに走らせると、話が途中の状態で
+        #   3回も4回も応答が返り、同じ推敲に何度もモデルを回す。
+        #   → Chamiの便を見てからこの秒数だけ待ち、その間に続きが来たら**溜めて1回で返す**。
+        #   ★このキーが有る部門だけ集約が効く(他29室は未設定=従来どおり即応。C-035)。
+        #   ★UIは足していない(「Word」は比喩=書き溜め欄ではない、でChami2便により確定済)。
+        "coalesce_sec": 45,
         # ★多人格モード(2026-07-26 Chami指示Cで members から統合)。この部屋の担当は三笘薫。
         "personas": [
             {"persona": "早坂芽衣",
@@ -4900,6 +4917,86 @@ class Daemon:
                 pass
         return done
 
+    # --- 集約窓(coalesce・2026-08-08 / 発注= 研究室HQ 8/4 07:29) ---
+    def _coalesce_win(self):
+        """この部門の集約窓(秒)。0=集約しない(既定・他29室はこれ)。"""
+        try:
+            return float(self.conf.get("coalesce_sec") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _coalesce_hold(self, q):
+        """まだ連投中か。Trueなら**この巡回では1件も掴まない**。
+
+        ★安全の核= 待つ間 claim しない(queueを覗くだけ)。掴んで抱えないので、
+          待機中にデーモンが落ちても便は残る・deliveries も焼かない
+          =**ドレインの窓を作らない**(INC-100型の無言の喪失を避ける)。
+        ★待つのは「Chamiの便がさっき来たばかり」の時だけ。機構の巡回便しか無い時は待たない。
+        ★最初の便から COALESCE_MAX_SEC 過ぎたら、連投が止まっていなくても走る(待ち続けない)。
+        """
+        win = self._coalesce_win()
+        if win <= 0:
+            return False
+        try:
+            rows = q.peek_ready(dept=self.dept, limit=COALESCE_PEEK_MAX)
+        except Exception:
+            return False        # 覗けない時は従来どおり即処理へ倒す(fail-open=沈黙より喋る)
+        mine = [r for r in rows
+                if self._is_from_chami(r["body"] if isinstance(r["body"], dict) else {})]
+        if not mine:
+            return False
+        now = time.time()
+        stamps = [float(r.get("enqueued_at") or 0) for r in mine]
+        newest, oldest = max(stamps), min(stamps)
+        if now - oldest >= COALESCE_MAX_SEC:
+            log(self.dept, "集約窓: 上限%d秒に達したので連投中でも走る(%d件)"
+                           % (COALESCE_MAX_SEC, len(mine)))
+            return False
+        if now - newest < win:
+            if now - getattr(self, "_coalesce_log_at", 0.0) > 20:
+                self._coalesce_log_at = now
+                log(self.dept, "集約窓: 連投中(%d件・最後の便から%.0f秒)=あと%.0f秒待つ"
+                               % (len(mine), now - newest, win - (now - newest)))
+            return True
+        return False
+
+    def _claim_next(self, q):
+        """次の1件。★束ね判定で先読みして戻した便が有れば、それを先に返す(順序を崩さない)。"""
+        carry = getattr(self, "_claim_carry", None)
+        if carry:
+            return carry.pop(0)
+        return q.claim(dept=self.dept, who=f"dept_daemon:{self.dept}")
+
+    def _coalesce_take(self, q, rec):
+        """窓が閉じた後、Chamiの連投の**続き**を掴んで返す(束ねる相手)。
+
+        ★Chami以外の便を引いたら束ねずに**手元へ戻す**(nackしない=再配達の回数を焼かない)。
+          戻した便は同じ巡回の次の周で普通に処理される=取りこぼさない。
+        """
+        if self._coalesce_win() <= 0 or not self._is_from_chami(rec):
+            return []
+        extra = []
+        while len(extra) + 1 < COALESCE_MAX_ITEMS:
+            c = q.claim(dept=self.dept, who=f"dept_daemon:{self.dept}")
+            if c is None:
+                break
+            nrec = c["body"] if isinstance(c["body"], dict) else {}
+            if not self._is_from_chami(nrec):
+                self._claim_carry = getattr(self, "_claim_carry", None) or []
+                self._claim_carry.append(c)
+                break
+            extra.append((c, nrec))
+        return extra
+
+    @staticmethod
+    def _merge_coalesced(recs):
+        """連投の断片を1便へ束ねる。★土台は**最後の便**(返信が最新の発言へ付くように)。"""
+        base = dict(recs[-1])
+        parts = [str(r.get("content") or "").strip() for r in recs]
+        base["content"] = "\n".join(p for p in parts if p)
+        base["coalesced_from"] = [str(r.get("msg_id", "")) for r in recs[:-1]]
+        return base
+
     def drain_queue(self):
         """LeaseQueue経路のドレイン(切替④の必須前提・2026-07-19)。
 
@@ -4940,8 +5037,13 @@ class Daemon:
                         continue
             except OSError:
                 pass
+            # ★★集約窓= 連投中なら**1件も掴まずに**この巡回を終える(coalesce・2026-08-08)。
+            #   掴まないので便はqueueに残る=待っている間に落ちても喪失しない。
+            if self._coalesce_hold(q):
+                return 0
+            self._claim_carry = []
             while done < 5:  # 1巡回の上限(暴走ガード)
-                c = q.claim(dept=self.dept, who=f"dept_daemon:{self.dept}")
+                c = self._claim_next(q)
                 if c is None:
                     break
                 rec = c["body"] if isinstance(c["body"], dict) else {}
@@ -4959,6 +5061,18 @@ class Daemon:
                 if mid and mid in processed:
                     q.ack(c["id"], result="skip(処理済)")
                     continue
+                # ★★Chamiの連投を1便へ束ねる(集約窓が有る部門だけ・2026-08-08)。
+                #   窓はもう閉じている(=連投が落ち着いた)ので、残っている続きを全部掴んで
+                #   **1回のhandleで返す**。断片ごとに応答を返さない。
+                extra = self._coalesce_take(q, rec)
+                frag_raws = []
+                if extra:
+                    recs = [rec] + [e[1] for e in extra]
+                    frag_raws = [json.dumps(r, ensure_ascii=False) for r in recs[:-1]]
+                    rec = self._merge_coalesced(recs)
+                    mid = str(rec.get("msg_id", "")) or mid
+                    log(self.dept, "集約: 連投%d件を1便へ束ねた(返信は最新の便へ) msg=%s"
+                                   % (len(recs), mid))
                 ok = self.handle(rec, json.dumps(rec, ensure_ascii=False))
                 # ★セッション受け渡し(パイロット2部屋)の配送失敗だけは **ack せず nack**
                 #   (2026-07-25)。ackは「処理し終えた」の意味なので、渡せていない便に押すと
@@ -4967,6 +5081,9 @@ class Daemon:
                 #   ★main箱へは回さない= この2部屋は回送しない部屋(Chami「絶対やめてくれ」)。
                 if self._relay_nack:
                     q.nack(c["id"])
+                    # ★束ねた便も**全部**キューへ返す(1本でも取り落とすと無言で消える)
+                    for e in extra:
+                        q.nack(e[0]["id"])
                     # ★同じ巡回で拾い直さない(breakして寝かせる)。nackはリースを即解放するため、
                     #   continueにすると同一ループで再claimされ、CLI連打+失敗文の連投になる(実測)。
                     self._relay_hold_until = time.time() + RELAY_HOLD_SEC
@@ -4974,11 +5091,29 @@ class Daemon:
                     done += 1
                     break
                 q.ack(c["id"], result="キャラ応答" if ok else "失敗(main回送済)")
+                for e in extra:
+                    q.ack(e[0]["id"], result="集約(1本にまとめて応答)")
                 if not ok:  # jsonl側drainと同じ安全網: 失敗はmain箱へ
                     with open(MAIN_INBOX, "a", encoding="utf-8") as f:
                         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                elif frag_raws:
+                    # ★束ねた断片も処理済み台帳へ入れる= jsonl経路が同じ便をもう一度拾って
+                    #   二重に応答するのを防ぐ(handleが書くのは束ねた後の1行だけ)。
+                    try:
+                        with open(PROCESSED, "a", encoding="utf-8") as f:
+                            for r in frag_raws:
+                                f.write(r + "\n")
+                    except OSError:
+                        pass
                 done += 1
         finally:
+            # ★先読みで掴んだまま処理しなかった便はリースを返す(消さない=遅らせるだけ)
+            for cc in (getattr(self, "_claim_carry", None) or []):
+                try:
+                    q.nack(cc["id"])
+                except Exception:
+                    pass
+            self._claim_carry = []
             q.close()
         if done:
             log(self.dept, f"queue経路 {done}件処理")

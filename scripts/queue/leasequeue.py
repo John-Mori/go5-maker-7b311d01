@@ -248,6 +248,35 @@ class LeaseQueue:
             (time.time() - older_sec,))
         return cur.rowcount
 
+    def peek_ready(self, dept=None, limit=50):
+        """★claim/ackせずに、いま取れる便を覗くだけ(2026-08-08 イージス研究室)。
+
+        claim() と**同じ並び**(prio→id)で、同じ条件(pending かつ リース失効)の行を返す。
+        リースも deliveries も**1ミリも触らない**ので、覗いただけで便が消えたり
+        再配達の回数を減らしたりしない=「掴む前に、掴むかどうかを決める」ための道具。
+        用途= 受信側の集約窓(連投が落ち着いたか判定する。dept_daemon._coalesce_hold)。
+        body は claim() と揃えて**dictへ復元して返す**(呼び側で分岐を増やさない)。
+        """
+        now = time.time()
+        sql = ("SELECT id, msg_id, dept, body, enqueued_at, prio FROM queue"
+               " WHERE status='pending' AND lease_until < ?")
+        args = [now]
+        if dept:
+            sql += " AND dept=?"
+            args.append(dept)
+        sql += " ORDER BY prio, id LIMIT ?"
+        args.append(int(limit))
+        out = []
+        for r in self._db.execute(sql, args):
+            body = r[3]
+            try:
+                body = json.loads(body) if isinstance(body, str) else body
+            except Exception:
+                pass
+            out.append({"id": r[0], "msg_id": r[1], "dept": r[2], "body": body,
+                        "enqueued_at": r[4], "prio": r[5]})
+        return out
+
     # --- 救済・採番 ---
     def stale_pending(self, older_sec, dept=None):
         """一度もclaimされずに放置されている行 (=その部門が起きていない)。
