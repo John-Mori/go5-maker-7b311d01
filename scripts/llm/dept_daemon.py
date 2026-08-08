@@ -4495,8 +4495,17 @@ class Daemon:
                         is_work = False               # 回送しない=便はここで着地(沈黙にしない)
                         if session_relay is not None:
                             try:
-                                session_relay._record(mid, self.dept, "daemon_answered",
-                                                      "relay無人=精霊がfail-openで一次応答(§3.1)")
+                                # ★検証便は台帳にも「検証便」と書く(2026-08-08)。
+                                #   `test: true` はDiscord送信を止めるだけで台帳は止めない=
+                                #   撃つたびに「要求に答えた」実績が1行増え、**存在しない要求に
+                                #   答えた記録**になる。かといって行を消すと、手で走らせた検証の
+                                #   **機械が追える唯一の痕跡**が無くなる(.logはkeeperのstdout
+                                #   リダイレクトなので手動実行の出力は入らない)。
+                                #   → 残す。ただし後から選り分けられるよう印を付ける。
+                                _note = "relay無人=精霊がfail-openで一次応答(§3.1)"
+                                if rec.get("test"):
+                                    _note = "[検証便] " + _note
+                                session_relay._record(mid, self.dept, "daemon_answered", _note)
                             except Exception:
                                 pass
                         log(self.dept,
