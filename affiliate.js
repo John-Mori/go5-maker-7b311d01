@@ -34,6 +34,10 @@
   //   ここに載せるページは showTab の入場時に innerHTML を必ず作り直すもの限定(下の renderRank 等)＝
   //   離れる時に空にしても戻れば同じ内容が再構築される=挙動は不変。モーダルは body 直下なので消えない。
   var HEAVY_UNMOUNT = { rankBtn: 'pageRank', tabCand: 'pageCand', tabStock: 'pageStock' };
+  // 投稿履歴(pageVerify)はページ全体に静的な操作ボタン群を含むので、ページごと空にはできない。
+  //   一番重いサムネの山= #ytClickList "だけ" を離脱時に空にする(入場時に Go5Verify.render() が作り直す)。
+  //   ＝btn → 空にする子要素id。上の HEAVY_UNMOUNT(ページ丸ごと)とは別枠。
+  var HEAVY_UNMOUNT_CHILD = { tabVerify: 'ytClickList' };
   var currentTab = 'tabMovie';          // いま前面に出している btn id
   var prevWorkTab = 'tabMovie';         // オーバーレイを開く直前の“作業タブ”(戻り先)
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む。(遅延ロード)
@@ -70,10 +74,24 @@
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
     if (activeBtnId === 'reserveBtn' && window.Scheduler) window.Scheduler._renderTab();
     if (activeBtnId === 'tabStock'   && window.Go5Stock)  window.Go5Stock.render();
+    // 投稿履歴タブ入場時、離脱時に空にした #ytClickList を作り直す(空の時だけ=通常入場の二重描画を避ける。
+    //   クリック入場では tabVerify のリスナが refresh() で作り直すが、タブ復元/オーバーレイからの戻りは
+    //   リスナが発火しないため、ここで空を埋めておく)。
+    if (activeBtnId === 'tabVerify' && window.Go5Verify) {
+      var _vl = document.getElementById('ytClickList');
+      if (_vl && !_vl.firstChild) { try { window.Go5Verify.render(); } catch (e) {} }
+    }
     // 前面から外れた重いタブのDOMを空にして常駐メモリを解放(入場時に必ず作り直すページのみ・上の定義参照)。
-    if (outgoing && outgoing !== activeBtnId && HEAVY_UNMOUNT[outgoing]) {
-      var _op = document.getElementById(HEAVY_UNMOUNT[outgoing]);
-      if (_op) { try { _op.innerHTML = ''; } catch (e) {} }
+    if (outgoing && outgoing !== activeBtnId) {
+      if (HEAVY_UNMOUNT[outgoing]) {
+        var _op = document.getElementById(HEAVY_UNMOUNT[outgoing]);
+        if (_op) { try { _op.innerHTML = ''; } catch (e) {} }
+      }
+      // 投稿履歴=ページ全体でなくサムネ一覧の子要素だけを空にする(上の HEAVY_UNMOUNT_CHILD 参照)。
+      if (HEAVY_UNMOUNT_CHILD[outgoing]) {
+        var _oc = document.getElementById(HEAVY_UNMOUNT_CHILD[outgoing]);
+        if (_oc) { try { _oc.innerHTML = ''; } catch (e) {} }
+      }
     }
     // 選んだタブをタブバーの中央へ寄せる(タブ選択のたび・Chami 2026-07-31)。オーバーレイ
     //   (予約/カレンダー)はタブバーに無いので centerTab_ 側の早期returnで何もしない。

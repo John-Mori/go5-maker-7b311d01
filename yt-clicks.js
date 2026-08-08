@@ -3369,6 +3369,10 @@
   }
 
   var tab = $('tabVerify'); if (tab) tab.addEventListener('click', function () { refresh(); setTimeout(maybeAutoGen, 400); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); });
+  // 投稿履歴タブへ入場した時に #ytClickList を作り直すためのフック(affiliate.js の showTab から呼ぶ)。
+  //   離脱時に #ytClickList を空にしてメモリ解放する運用のため、クリック以外の入場経路(タブ復元/
+  //   オーバーレイからの戻り)でも空のまま残らないように、render() を外から叩けるようにする。
+  try { window.Go5Verify = { render: render }; } catch (e) {}
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); fetchDeltas_(true); });
   var fd = $('ytFetchDmm'); if (fd) fd.addEventListener('click', refetchFanza_);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
