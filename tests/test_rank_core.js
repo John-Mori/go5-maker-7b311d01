@@ -101,6 +101,14 @@ function ok(cond, msg) { if (!cond) { console.error('  ✗ ' + msg); fail++; } e
   // 同点(距離同じ)はローカル据え置き
   var rt = RC.pickBucketRec({ v: 1, c: 1, w: 1, ageMin: 55 }, { v: 2, c: 2, age: 65 }, target);
   ok(rt.age === 55 && rt.v === 1, 'pick: 距離同点(±5)はローカル据え置き');
+  // ★導線2(w)もGAS時点記録から採る(2026-08-08)。端末を開いていない=ローカルwが無い投稿でGASのwが埋める
+  var rw1 = RC.pickBucketRec({ v: 100, c: 5, w: null, ageMin: 62 }, { v: 90, c: 4, w: 7, age: 63 }, target);
+  ok(rw1.w === 7, 'pick: ローカルwが無ければGAS時点記録のwを採る(端末未起動でもピンクが埋まる)');
+  var rw2 = RC.pickBucketRec(null, { v: 90, c: 4, w: 3, age: 63 }, target);
+  ok(rw2.w === 3, 'pick: ローカル無し(GASのみ)でもGASのwを返す');
+  // ローカルwが在ればローカル優先(近い側=ローカル)
+  var rw3 = RC.pickBucketRec({ v: 100, c: 5, w: 9, ageMin: 62 }, { v: 90, c: 4, w: 7, age: 69 }, target);
+  ok(rw3.w === 9, 'pick: 近い側(ローカル62)のwを採用');
 })();
 
 if (fail) { console.error('\nFAILED: ' + fail); process.exit(1); }

@@ -4157,7 +4157,7 @@
     return {
       v: (snap && snap.v != null) ? snap.v : (gtp && gtp.v != null ? gtp.v : null),
       c: (snap && snap.c != null) ? snap.c : (gtp && gtp.c != null ? gtp.c : null),
-      w: (snap && snap.w != null) ? snap.w : null,
+      w: (snap && snap.w != null) ? snap.w : (gtp && gtp.w != null ? gtp.w : null), // 導線2もGAS時点記録から採る(2026-08-08)
       age: (snap && snap.ageMin != null) ? snap.ageMin : (gtp && gtp.age != null ? gtp.age : null)
     };
   }
@@ -4284,7 +4284,7 @@
         var _pc = postClicks_(it, x.vid);
         var code = _pc.code, wcode = _pc.wcode;
         var snap = (isBucket && snapCache[x.vid]) ? snapCache[x.vid][_rankWin] : null;
-        var gtp = (isBucket && tpCache[x.vid]) ? tpCache[x.vid][_rankWin] : null; // GASサーバー時点記録(過去分・端末未起動でも記録。再生数と導線1のみ・12h/48h/導線2は非対応)
+        var gtp = (isBucket && tpCache[x.vid]) ? tpCache[x.vid][_rankWin] : null; // GASサーバー時点記録(過去分・端末未起動でも記録。再生数/導線1/導線2ピンクを毎時スナップ・2026-08-08にピンク追加)
         var bkr = (isBucket && bucketDef) ? pickBucketRec_(snap, gtp, bucketDef.min) : null; // 目標分に近い側を1組で採用(78分ズレの根治)
         var pk = pk0[x.vid] || {};
         var cats = attrDefs_().map(function (a) { return it[a.key] ? '<span class="vtag" style="color:' + esc(a.color) + ';border-color:' + esc(a.color) + ';font-weight:700;">' + esc(a.label) + '</span>' : ''; }).join('');

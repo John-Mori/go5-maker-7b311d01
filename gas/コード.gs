@@ -114,7 +114,7 @@ function fanzaGenre_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-08-06A(ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -1535,7 +1535,7 @@ function snapshotStats() {
       // 時点記録(⑤)用: vidが無くてもクリックだけ記録できるよう、YT未連携行も対象に含める。
       var pd = dc ? row[dc - 1] : '';
       var pms = pd instanceof Date ? pd.getTime() : (pd ? (new Date(String(pd).replace(/-/g, '/'))).getTime() : 0);
-      if ((vid || code) && pms) tpRecs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code, postedAtMs: pms });
+      if ((vid || code || wcode) && pms) tpRecs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code, wcode: wcode, postedAtMs: pms });
       if (!vid) return;
       recs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code, wcode: wcode });
     });
@@ -1806,7 +1806,9 @@ function setupTrigger() {
 //   ・1行=1。(post_id×バケット)分析はピボットで post_id 別に横持ち化できる
 // ============================================================
 var TIMEPOINT_SHEET = '時点記録';
-var TIMEPOINT_HEADERS = ['post_id', 'channel', '投稿日時', 'バケット', '経過分(実測)', '再生数', 'クリック数', '記録日時'];
+// ★'ピンククリック'(導線2=作品クリック)を末尾へ追加(2026-08-08)。末尾なのは既存行の列ズレを避けるため
+//   (途中挿入すると旧行の記録日時がピンク値として誤読される)。旧行は空欄=null。timepointSheet_ で冪等移行。
+var TIMEPOINT_HEADERS = ['post_id', 'channel', '投稿日時', 'バケット', '経過分(実測)', '再生数', 'クリック数', '記録日時', 'ピンククリック'];
 // ★12時間/48時間 を追加(Chami報告2026-08-06「全候補が記録されてるかチェック」)。旧実装はこの2窓を
 //   GAS未記録にしていた=端末スナップ頼みで常態的に空だった。8窓すべてをサーバー記録に揃える。
 var TIME_BUCKETS = [[30, '30分'], [60, '1時間'], [120, '2時間'], [360, '6時間'], [720, '12時間'], [1440, '24時間'], [2880, '48時間'], [4320, '72時間']];
@@ -1814,12 +1816,21 @@ function timepointSheet_() {
   var ss = openSS_(); var sh = ss.getSheetByName(TIMEPOINT_SHEET);
   if (!sh) { sh = ss.insertSheet(TIMEPOINT_SHEET); sh.appendRow(TIMEPOINT_HEADERS); }
   else if (sh.getLastRow() === 0) { sh.appendRow(TIMEPOINT_HEADERS); }
+  else {
+    // 冪等移行: 既存シートに新列(ピンククリック 等)が無ければヘッダ行へ補う。データ行は触らない
+    //   =旧行のピンク列は空欄のまま(computeが null 扱い)。列ズレを起こさないので安全(2026-08-08)。
+    var hdr = sh.getRange(1, 1, 1, TIMEPOINT_HEADERS.length).getValues()[0];
+    for (var i = 0; i < TIMEPOINT_HEADERS.length; i++) {
+      if (String(hdr[i] || '') !== TIMEPOINT_HEADERS[i]) sh.getRange(1, i + 1).setValue(TIMEPOINT_HEADERS[i]);
+    }
+  }
   return sh;
 }
-// 時点記録シート → videoIdごとの {b30:{v,c,age}, b60:.., b120:.., b360:.., b1440:.., b4320:..}。
+// 時点記録シート → videoIdごとの {b30:{v,c,w,age}, b60:.., b120:.., b360:.., b1440:.., b4320:..}。
 //   ランキングタブの「窓」表示用。シートは post_id 単位なので記録シートで post_id→videoId に解決してから返す。
-//   ※GASが記録するのは 30分/1時間/2時間/6時間/12時間/24時間/48時間/72時間 の8バケット・再生数(v)と導線1クリック(c)。
-//     導線2(作品クリック)はGAS未記録＝ここには入らない(クライアントの端末スナップ側で対応)。(2026-08-06に12h/48hを追加)
+//   ※GASが記録するのは 30分/1時間/2時間/6時間/12時間/24時間/48時間/72時間 の8バケット・再生数(v)/導線1クリック(c)/
+//     導線2(作品クリック=ピンク w)。★2026-08-08に導線2(w)を追加=端末を開いていない投稿でもピンク矢印の
+//     バケットが埋まる(Chami「ピンクのクリックが集計されてない」)。(2026-08-06に12h/48hを追加)
 function computeTimepoints_() {
   var sh = timepointSheet_(); var last = sh.getLastRow(); if (last < 2) return {};
   // post_id → videoId の対応表を記録シートから作る。
@@ -1841,9 +1852,9 @@ function computeTimepoints_() {
     var pid = String(r[0] || ''); if (!pid) return;
     var vid = pid2vid[pid]; if (!vid) return;
     var key = LAB[String(r[3])]; if (!key) return;
-    var age = r[4], v = r[5], c = r[6];
+    var age = r[4], v = r[5], c = r[6], w = r[8]; // r[7]=記録日時 / r[8]=ピンククリック(導線2・2026-08-08追加)
     if (!out[vid]) out[vid] = {};
-    if (!out[vid][key]) out[vid][key] = { v: (v === '' ? null : Number(v)), c: (c === '' ? null : Number(c)), age: (age === '' ? null : Number(age)) };
+    if (!out[vid][key]) out[vid][key] = { v: (v === '' ? null : Number(v)), c: (c === '' ? null : Number(c)), w: (w === '' || w == null ? null : Number(w)), age: (age === '' ? null : Number(age)) };
   });
   return out;
 }
@@ -1867,8 +1878,9 @@ function captureTimepoints_(tpRecs, viewsByVid, clickByCode, nowStr, tz) {
       if (seen[r.post_id + '|' + label]) return;
       var v = (r.vid && viewsByVid && viewsByVid[r.vid] != null) ? viewsByVid[r.vid] : '';
       var c = (r.code && clickByCode && clickByCode[r.code] != null) ? clickByCode[r.code] : '';
-      if (v === '' && c === '') return; // どちらも取れない行は書かない
-      added.push([r.post_id, r.channel, Utilities.formatDate(new Date(r.postedAtMs), tz, 'yyyy-MM-dd HH:mm'), label, Math.round(elapsed), v, c, nowStr]);
+      var w = (r.wcode && clickByCode && clickByCode[r.wcode] != null) ? clickByCode[r.wcode] : ''; // 導線2(ピンク)の時点値
+      if (v === '' && c === '' && w === '') return; // どれも取れない行は書かない
+      added.push([r.post_id, r.channel, Utilities.formatDate(new Date(r.postedAtMs), tz, 'yyyy-MM-dd HH:mm'), label, Math.round(elapsed), v, c, nowStr, w]);
       seen[r.post_id + '|' + label] = 1;
     });
   });

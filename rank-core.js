@@ -82,7 +82,11 @@
    */
   function pickBucketRec(snap, gtp, targetMin) {
     var s = snap ? { v: (snap.v == null ? null : snap.v), c: (snap.c == null ? null : snap.c), w: (snap.w == null ? null : snap.w), age: (snap.ageMin == null ? null : snap.ageMin) } : null;
-    var g = gtp ? { v: (gtp.v == null ? null : gtp.v), c: (gtp.c == null ? null : gtp.c), w: null, age: (gtp.age == null ? null : gtp.age) } : null;
+    // ★導線2(ピンク矢印=w)もGAS時点記録から採る(2026-08-08)。従来は w:null 固定でローカル観測のみに
+    //   していたため、公開1時間時点にアプリを開いていない投稿はピンク矢印バケットが永久に空だった
+    //   (Chami「ピンクのクリックがちゃんと集計されてない」)。GASが再生数/導線1と同様に w を毎時スナップ
+    //   するようにした(gas/コード.gs)ので、v/c と同じく「目標分に近い側→無ければ他方」で採る。
+    var g = gtp ? { v: (gtp.v == null ? null : gtp.v), c: (gtp.c == null ? null : gtp.c), w: (gtp.w == null ? null : gtp.w), age: (gtp.age == null ? null : gtp.age) } : null;
     if (!s && !g) return { v: null, c: null, w: null, age: null };
     if (!s) return g;
     if (!g) return s;
@@ -93,7 +97,7 @@
     return {
       v: primary.v != null ? primary.v : other.v,
       c: primary.c != null ? primary.c : other.c,
-      w: s.w != null ? s.w : null,                // 導線2(ピンク矢印)はローカル観測のみ
+      w: primary.w != null ? primary.w : other.w, // 導線2(ピンク矢印)=近い側→無ければ他方(GAS/ローカル両対応)
       age: primary.age != null ? primary.age : other.age
     };
   }
