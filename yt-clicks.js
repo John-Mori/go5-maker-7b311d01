@@ -2178,7 +2178,13 @@
     var acc = opts.account || acct();
     var ytUrl = (opts.ytUrl || '').trim();
     var shortUrl = (opts.shortUrl || '').trim();
-    if (!ytUrl && !shortUrl) return false; // 動画URLも計測URLも無ければ履歴に載せる意味がない
+    // ★投稿完了は明示操作(確認ダイアログ済)＝YouTube URL も 計測短縮URL もまだ無くても投稿履歴へ載せる。
+    //   予約公開／X先行投稿では完了の時点で両URLとも未確定になる。旧ガード(!ytUrl && !shortUrl で
+    //   return false)は、その場合ドラフトを作成履歴へ送るだけで投稿履歴に一切載せず=「完了したのに
+    //   履歴に出ない」の真因(Chami報告2026-08-08 宵桜艶帖でドラフト投稿完了→作成履歴には載るが投稿履歴に無し)。
+    //   背骨ID(videoId)さえあれば後からURLを追記でき、同定・重複排除もできる=載せてよい。
+    var vidId = (opts.videoId || '').trim();
+    if (!ytUrl && !shortUrl && !vidId) return false; // 同定材料が何も無い時だけ従来どおり載せない
     var vid = ytUrl ? ytIdOf(ytUrl) : '';
     var manual = loadArrFor_('verify_manual', acc);
     var hist = loadArrFor_('short_hist', acc);
@@ -2187,6 +2193,7 @@
       var y = ymap[itemKey(it)] || it.ytUrl || '';
       if (vid && ytIdOf(y) === vid) return true;
       if (shortUrl && it.shortUrl === shortUrl) return true;
+      if (vidId && it.videoId === vidId) return true; // 同じドラフト(背骨ID)の再完了で履歴を二重にしない
       return false;
     });
     if (dupe) { if (acc === acct()) refresh(); return false; }

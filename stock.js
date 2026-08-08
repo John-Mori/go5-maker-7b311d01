@@ -697,6 +697,16 @@
   var _modalMeta = null;
   var _ytTitleDirty = false; // ユーザーが題名を手編集したかどうか(trueの間はタグ変更で上書きしない)
   var _pickedSlot = null;    // 予約投稿で選んだカレンダーの公開枠(slot-picked で受ける){id,date,time,role,genre,scheduled_at}
+  // ★投稿モードを開いている間だけ、開いているドラフトidをタブセッションに覚える(Chami報告2026-08-08)。
+  //   iOS SafariはX/YouTubeアプリへ切り替えて戻ると、メモリ都合でこのタブのページを丸ごと捨てて
+  //   再読込することがある(=戻ると「リロード」に見える。JS側のlocation.reloadは存在しない=OS判断)。
+  //   sessionStorageはタブが生きている限り再読込を跨いで残る=戻ってきた瞬間に同じドラフトの投稿モードを
+  //   開き直せば、途中だった作業を失わずリロードが実質見えなくなる。ページを閉じれば消える(勝手には開かない)。
+  var OPEN_MODAL_KEY = 'go5_open_post_modal';
+  function rememberOpenModal_(id) { try { sessionStorage.setItem(OPEN_MODAL_KEY, id || ''); } catch (e) {} }
+  function forgetOpenModal_() { try { sessionStorage.removeItem(OPEN_MODAL_KEY); } catch (e) {} }
+  function modalIsOpen_() { var m = $('draftPostModal'); return !!(m && m.style.display !== 'none'); }
+  function closeModal_() { var m = $('draftPostModal'); if (m) m.style.display = 'none'; _modalMeta = null; forgetOpenModal_(); }
 
   function copyText_(text, btn) {
     function flash() { var o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(function () { btn.textContent = o; }, 2000); }
@@ -971,6 +981,7 @@
     syncPubModeUI_();
     renderAffCheck_(meta);
     m.style.display = 'flex';
+    rememberOpenModal_(meta.id); // 再読込を跨いで開き直せるよう、開いたドラフトidを覚える
   }
 
   // ⑤ アフィID入り確認(Chami依頼2026-07-30)。作品紹介・セールの短縮リンクに自分のaf_idが入っているかを表示。
@@ -1158,9 +1169,9 @@
     $('draftModalSave').addEventListener('click', function () {
       // 保存したらモーダルを閉じる(Chami指示2026-07-29「内容を保存を押したら保存してモーダルが閉じるように」)。
       saveDraftPost_();
-      m.style.display = 'none'; _modalMeta = null;
+      closeModal_();
     });
-    $('draftModalClose').addEventListener('click', function () { m.style.display = 'none'; _modalMeta = null; });
+    $('draftModalClose').addEventListener('click', function () { closeModal_(); });
     $('draftModalComplete').addEventListener('click', function () {
       if (!_modalMeta) return;
       if (!window.confirm('投稿履歴に反映します。OKを押すと正式に投稿完了になります。')) return;
@@ -1168,7 +1179,7 @@
       var slot = $('draftYtDescUrlLink');
       var shortUrl = (slot && slot.dataset && slot.dataset.url) || '';
       handleCompleteOk_(_modalMeta.id, ytUrl.trim(), shortUrl);
-      m.style.display = 'none'; _modalMeta = null;
+      closeModal_();
     });
     document.addEventListener('go5-disc-url-changed', function () {
       if (!m || m.style.display === 'none' || !_modalMeta) return;
@@ -1184,13 +1195,28 @@
         if (xtEl) xtEl.value = composeXForModal_(_modalMeta);
       }
     });
-    m.addEventListener('click', function (e) { if (e.target === m) { m.style.display = 'none'; _modalMeta = null; } });
+    m.addEventListener('click', function (e) { if (e.target === m) { closeModal_(); } });
     return m;
   }
 
   // ── 初期化 ──
   function init() {
     createModal_();
+
+    // ★iOSがアプリ復帰時にこのタブを捨てて再読込しても、投稿モードを開いていたなら開き直す
+    //   (Chami報告2026-08-08「戻るとリロードする」の実害=作業中の投稿モードが消えることを無効化する)。
+    //   sessionStorageはタブが生きている限り残る=再読込直後だけ復元し、タブを閉じれば消える(勝手には開かない)。
+    (function restoreOpenModal_() {
+      var id = '';
+      try { id = sessionStorage.getItem(OPEN_MODAL_KEY) || ''; } catch (e) {}
+      if (!id) return;
+      setTimeout(function () {
+        var meta = loadMeta().filter(function (m) { return m.id === id; })[0]
+                 || loadArchive().filter(function (m) { return m.id === id; })[0];
+        if (meta) { try { openPostModal_(meta); } catch (e) {} }
+        else forgetOpenModal_(); // ドラフトがもう無い=覚えを捨てる
+      }, 600); // 他モジュール(合成/短縮/カレンダー橋渡し)の初期化を少し待ってから開く
+    }());
 
     var draftMakeBtn = $('draftMakeBtn');
     if (draftMakeBtn) {
@@ -1234,6 +1260,9 @@
       if (!e || !e.detail || !e.detail.pulled) return;
       // 別端末で作った動画のミラー(.prev)が届いたら、過去の投稿完了ぶんへプレビューを遡及補完(タブ表示に依らず)。
       try { backfillUsedPreview_(); } catch (_) {}
+      // ★投稿モードを開いている間は一覧を作り直さない=モーダルの裏で無駄に再描画してチラつくのを止める
+      //   (Chami報告2026-08-08「コピー/アプリ往復のたびリロードする」。復帰時の同期でここが鳴っていた)。
+      if (modalIsOpen_()) return;
       var page = $('pageStock');
       if (page && !page.hidden) render();
     });
