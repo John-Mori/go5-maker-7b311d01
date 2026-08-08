@@ -10,7 +10,9 @@ keeper自身は supervise_daemons.ps1 が10分毎に生かす(=二段構え。ke
 
 使い方: python scripts/_daemons/daemon_keeper.py   (引数なし=DEPTS全部門)
 """
+import ast
 import os
+import re
 import subprocess
 import sys
 import time
@@ -348,12 +350,126 @@ def reap_orphans():
     time.sleep(2)   # ポート(18800番台)が解放されるのを待ってから自分の分を立てる
 
 
+# --- ★名簿(DEPTS)が増減したら、番人の再起動を待たずに追従する(2026-08-08 イージス研究室) --
+#
+# なぜ要るか(実測した穴):
+#   `DEPTS` はモジュールの定数なので**番人が起動した時点で写し取られる**。あとから部屋を足しても、
+#   番人を再起動するまで**その部屋は番人の管理下に入らない**。実測=
+#     ・ククール-なかま会話を名簿へ足したのは 08-05 08:26。番人は 08-04 00:06 起動のまま。
+#     ・そのため 08-08 19:53 の全体載せ替えに**この部屋だけ入らず**、手で起動した
+#       pid 50452(親=52596=既に居ない)が**番人の管理外**で走り続けていた。
+#   ★怖いのは「動いていない」ことではなく、**死んでも誰も立て直さないのに警報も出ない**ことだ。
+#   ★同じ形の対策は既に受信側にある(Discord gatewayは新設chを60秒で自動追従する)。
+#     **番人だけが手の再起動を要求していた**=そこを揃える。
+#
+# ★安全のために踏んでいる手順:
+#   ①名簿は**自分のソースから読み直す**(ast.literal_eval=実行しない)。読めない/壊れている/
+#     極端に短い名簿は**採用しない**(編集途中のファイルを掴んで全部落とすのを防ぐ)。
+#   ②増えた部門は、立てる前に**その部門の孤児プロセスだけ**を落とす(全体のreapはしない=
+#     無関係な29体を巻き込まない)。二重化=同じ便に2つが応答する穴を作らない。
+#   ③減った部門は、**便を処理中なら落とさない**(次の周回へ回す)。
+ROSTER_RECHECK_SEC = 60      # 名簿の読み直し間隔(1分)
+ROSTER_SETTLE_SEC = 30       # 編集が落ち着いたとみなすまで
+ROSTER_MIN = 5               # これ未満の名簿は「壊れている」とみなして採用しない
+
+
+def _read_depts_file(path=None):
+    """自分のソースから DEPTS を読み直す。読めない/怪しい時は None(=今の名簿のまま)。"""
+    src_path = path or os.path.abspath(__file__)
+    try:
+        if time.time() - os.path.getmtime(src_path) < ROSTER_SETTLE_SEC:
+            return None                      # まだ編集中かもしれない
+        with open(src_path, "r", encoding="utf-8") as f:
+            src = f.read()
+        m = re.search(r"^DEPTS = (\[[^\]]*\])\s*$", src, re.M)
+        if not m:
+            return None
+        want = ast.literal_eval(m.group(1))
+    except Exception:
+        return None
+    if not isinstance(want, list) or len(want) < ROSTER_MIN:
+        return None
+    if not all(isinstance(x, str) and x for x in want):
+        return None
+    seen, out = set(), []
+    for d in want:                           # 重複は1つに畳む(二重化の芽を潰す)
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
+
+
+def _kill_orphans_for(dept):
+    """その部門だけの孤児dept_daemonを落とす(全体のreapはしない)。落とした数を返す。"""
+    if os.name != "nt":
+        return 0
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+             "Where-Object { $_.CommandLine -match 'dept_daemon' -and "
+             "$_.CommandLine -match '--dept\\s+%s(\\s|$)' } | "
+             "ForEach-Object { $_.ProcessId }" % re.escape(dept)],
+            capture_output=True, text=True, timeout=30)
+        pids = [p.strip() for p in (out.stdout or "").split() if p.strip().isdigit()]
+    except Exception:
+        return 0
+    for pid in pids:
+        try:
+            subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True, timeout=15)
+        except Exception:
+            pass
+    return len(pids)
+
+
+def maybe_adopt(slots, state):
+    """名簿の増減に追従する。★立て直すのは tick() の仕事(経路を2本持たない)。"""
+    now = time.time()
+    if now - (state.get("roster_at") or 0) < ROSTER_RECHECK_SEC:
+        return
+    state["roster_at"] = now
+    want = _read_depts_file()
+    if want is None:
+        return
+    have = [s.dept for s in slots]
+    for d in want:
+        if d in have:
+            continue
+        killed = _kill_orphans_for(d)         # 手で起動された同じ部門を先に落とす
+        slots.append(Slot(d))
+        log(f"★名簿に増えた部門を採用: {d}(番人の再起動を待たない"
+            f"{f' / 孤児{killed}件を先に掃除' if killed else ''})")
+    drop = [s for s in slots if s.dept not in want]
+    if drop:
+        busy = _inflight_depts()
+        if busy is None:
+            return                            # 判定不能=落とさない(fail-closed)
+        for s in drop:
+            if s.dept in set(busy):
+                log(f"名簿から外れたが便を処理中なので落とさない: {s.dept}")
+                continue
+            if s.proc is not None and s.proc.poll() is None:
+                try:
+                    s.proc.kill()
+                except Exception:
+                    pass
+            slots.remove(s)
+            wave = state.get("wave")
+            if wave:
+                wave["pending"] = [d for d in wave["pending"] if d != s.dept]
+            log(f"★名簿から外れた部門を停止: {s.dept}")
+
+
 def main():
     reap_orphans()
     slots = [Slot(d) for d in DEPTS]
     log(f"起動 depts={DEPTS}")
     reload_state = {}
     while True:
+        try:
+            maybe_adopt(slots, reload_state)   # ★名簿が増減したら追従する
+        except Exception as e:
+            log(f"名簿の追従に失敗(継続) {type(e).__name__}")
         try:
             maybe_reload(slots, reload_state)   # ★コードが変わったら自動で載せ替える
         except Exception as e:
