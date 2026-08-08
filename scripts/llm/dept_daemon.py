@@ -178,6 +178,18 @@ def work_model_for(conf):
     # ★素の "opus" は明示版へ固定(2026-07-31 Chami指示)。CLIが最新へ張り替えても Opus 5 等へ
     #   黙って乗り換わらせない=単価跳ねの防止。品質の床= Opus 4.8世代。戻すなら下1行を消す。
     return "claude-opus-4-8" if (m or "").strip() == "opus" else m
+
+# ★部門ごとの reasoning effort 上書き(2026-08-08・人事REQ-hr-room-8dc9faa2f1=Chami「測っといて。
+#   適切なやつに/状況で可変できる方が確実ならそれで」)。人事の実測=同一パズルで正解は不変、
+#   出力トークンだけがエフォートで動いた(low=278/medium=445/既定=617/high=754/xhigh=3043)。
+#   `claude --print --effort <level>` が low/medium/high/xhigh/max を受けるのを実測確認済。
+#   ★opt-in設計: DEPT_CONF に "work_effort" がある部屋だけ渡す。無ければフラグを付けず CLI 既定
+#     (617相当)=従来の全部屋の挙動を変えない(名指し1箇所を全体へ広げない=C-035)。
+#   ★不正値は無視して既定へ倒す(fail-safe=判定不能なら品質側=既定へ)。品質>トークン効率(§1)。
+_VALID_EFFORT = ("low", "medium", "high", "xhigh", "max")
+def work_effort_for(conf):
+    e = ((conf or {}).get("work_effort") or "").strip().lower()
+    return e if e in _VALID_EFFORT else None
 # ★O3(裁-3・改善書P1-5): 作業agentの許可ツールを最小allowlistへ固定。旧 bypassPermissions は
 #   「何でも実行可」=プロンプトインジェクション耐性が最弱線だった。--print(headless)では未許可
 #   ツールは自動拒否(プロンプトを出せないため)=allowlist外は安全に落ちる。ファイル作業+検証に
@@ -3890,8 +3902,13 @@ class Daemon:
         #   promptはstdin(引数だと可変長フラグが飲み込む2026-07-18の実障害の回避)。
         before = _git_snapshot()          # ★作業前の状態(証跡の基準線)
         _t0 = time.time()
+        # ★part-effort: 部屋に work_effort があれば --effort を足す。無ければ付けない(既定=617相当)。
+        #   --allowedTools は可変長=直後に別フラグ(--effort/--add-dir)が来れば列はそこで区切られる。
+        _effort = work_effort_for(self.conf)
+        _effort_args = ["--effort", _effort] if _effort else []
         p = subprocess.run(
             [CLAUDE, "--print", "--model", work_model_for(self.conf),
+             *_effort_args,
              "--allowedTools", *WORK_ALLOWED_TOOLS,
              "--add-dir", HQ],
             input=prompt, cwd=ROOT, env=env, capture_output=True, text=True,
