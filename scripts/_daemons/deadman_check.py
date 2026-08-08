@@ -258,8 +258,11 @@ def check_roster(st, dry_run):
     lines = roster_lines(g)
     sig = "|".join(lines)
     prev = st.get("roster_sig")
-    st["roster_sig"] = sig
-    st["roster_at"] = _now()
+    # ★--dry-run は状態を書き換えない。書くと「もう出した」ことになり、**本番の初回通知が
+    #   黙る**(2026-08-08にここで実際に踏んだ。試しに走らせた痕跡が本番の判定を変えた)。
+    if not dry_run:
+        st["roster_sig"] = sig
+        st["roster_at"] = _now()
     if not lines:
         if prev:
             notify("✅ 部屋の取り残しは解消 — 番人の名簿%d室・稼働%d体が一致しています。"

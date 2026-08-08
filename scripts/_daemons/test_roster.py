@@ -191,13 +191,13 @@ finally:
 
 
 # ============ 4) 出し方(連投しない・解消も1回言う) ============
-def run_roster(g, prev_sig):
+def run_roster(g, prev_sig, dry=False):
     sent, orig_g, orig_n = [], dm.roster_gaps, dm.notify
     try:
         dm.roster_gaps = lambda: g
-        dm.notify = lambda text, dry: (sent.append(text), True)[1]
+        dm.notify = lambda text, _dry: (sent.append(text), True)[1]
         st = {"roster_sig": prev_sig} if prev_sig is not None else {}
-        dm.check_roster(st, False)
+        dm.check_roster(st, dry)
         return sent, st
     finally:
         dm.roster_gaps, dm.notify = orig_g, orig_n
@@ -219,6 +219,9 @@ sent, _st = run_roster(CLEAN, None)
 check("最初から取り残しゼロなら何も出さない", sent == [])
 sent, _st = run_roster(None, sig)
 check("測れなかった時は何も出さない(黙る)", sent == [])
+sent, st = run_roster(BAD, None, dry=True)
+check("★--dry-run は状態を書き換えない(試し撃ちが本番の初回通知を黙らせない)",
+      "roster_sig" not in st)
 
 print("\n%d passed / %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
