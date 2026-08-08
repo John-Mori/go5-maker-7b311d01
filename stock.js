@@ -439,6 +439,15 @@
     var metas = loadMeta();
     var meta = metas.filter(function (m) { return m.id === id; })[0];
     if (!meta) return;
+    // ★背骨ID(videoId)が無いドラフト(idgen導入前 or 作成時に未スナップ)は、投稿完了の時点で必ず発番して
+    //   meta へ保存する。これが無いと addCompletedPost のガードに落ちて投稿履歴の一覧に載らず作成履歴だけ
+    //   残り、さらに下の使用画像プレビュー紐付け(usedImgSave は meta.videoId をキーにする)も効かない
+    //   (Chami報告2026-08-08 即時投稿が一覧に出ず作成履歴のみ)。metas は meta を参照で含むので saveMeta で確定。
+    if (!meta.videoId) {
+      var _vid = '';
+      try { if (window.IdGen && window.IdGen.makeVideoId) _vid = window.IdGen.makeVideoId(meta.account || 'acc1', new Date(), {}); } catch (e0) {}
+      if (_vid) { meta.videoId = _vid; saveMeta(metas); }
+    }
     // ★X短縮URLが引数で来なかった時(短縮生成前・スロット読み取り失敗)でも、保存済みドラフトデータ
     //   (saveDraftPost_ が xShortUrl として都度保存)から補って投稿履歴へ渡す。これが無いと投稿履歴の
     //   「投稿URL(計測用の短縮URL)」欄が空になり毎回手入力になる(Chami指摘2026-07-29)。

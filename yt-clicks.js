@@ -2183,8 +2183,15 @@
     //   return false)は、その場合ドラフトを作成履歴へ送るだけで投稿履歴に一切載せず=「完了したのに
     //   履歴に出ない」の真因(Chami報告2026-08-08 宵桜艶帖でドラフト投稿完了→作成履歴には載るが投稿履歴に無し)。
     //   背骨ID(videoId)さえあれば後からURLを追記でき、同定・重複排除もできる=載せてよい。
+    // ★投稿完了は明示確定操作＝必ず投稿履歴へ載せる。背骨ID(videoId)が来ていないドラフト(idgen導入前・
+    //   未伝搬)は、ここで発番して同定材料を持たせる。旧コードは videoId のフォールバック発番(旧2213)を
+    //   このガードの"後"に置いていたため、モーダルのYouTube URL欄が空&videoId未伝搬の完了が
+    //   `!ytUrl && !shortUrl && !vidId` で return false され、作成履歴には残るが投稿履歴の一覧に出ない
+    //   取りこぼしになっていた(Chami報告2026-08-08 宵桜艶帖の即時投稿→作成履歴のみ・一覧に無し)。
+    //   stock側でも handleCompleteOk_ で meta.videoId を発番するが、ここでも発番して二重の防壁にする。
     var vidId = (opts.videoId || '').trim();
-    if (!ytUrl && !shortUrl && !vidId) return false; // 同定材料が何も無い時だけ従来どおり載せない
+    if (!vidId && window.IdGen && window.IdGen.makeVideoId) { try { vidId = window.IdGen.makeVideoId(acc, new Date(), {}); } catch (e) {} }
+    if (!ytUrl && !shortUrl && !vidId) return false; // 発番もできない(IdGen不在)時だけ従来どおり載せない
     var vid = ytUrl ? ytIdOf(ytUrl) : '';
     var manual = loadArrFor_('verify_manual', acc);
     var hist = loadArrFor_('short_hist', acc);
@@ -2209,8 +2216,7 @@
     //   そのまま入ってしまっていた(Chami指摘2026-07-31・ドラフト投稿モードで videoId 未伝搬の行が該当)。
     //   YouTube ID は entry.ytUrl / ymap に別途保持していて再生数計測はそちらで効くので、post_id には使わない。
     //   videoId が来ていればそれ(ドラフトの背骨ID)、無ければ idgen で正規IDを発番＝「今まで通り」の形式へ戻す。
-    if (opts.videoId) entry.videoId = opts.videoId;
-    else if (window.IdGen && window.IdGen.makeVideoId) entry.videoId = window.IdGen.makeVideoId(acc, new Date(), {});
+    entry.videoId = vidId; // opts.videoId(背骨ID)優先・無ければ上で発番済み＝post_id列は常に idgen形式で埋まる
     entry.workState = opts.workState || '旧作';
     // カレンダー公開枠の予定時刻(予約投稿)。YouTube APIのpublishAtが返る前でも「投稿予定 時刻」を出せる。
     if (opts.scheduledAt) entry.plannedAt = opts.scheduledAt;
