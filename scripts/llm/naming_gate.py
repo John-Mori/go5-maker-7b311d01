@@ -160,6 +160,66 @@ def _target_key_forms(rules, target_key):
     return forms
 
 
+def _is_katakana(ch):
+    """1文字がカタカナ(長音符ーを含む)か。半角カタカナも見る。"""
+    if not ch:
+        return False
+    o = ord(ch)
+    return (0x30A0 <= o <= 0x30FF) or (0xFF66 <= o <= 0xFF9F)
+
+
+def _abbrev_verdicts(text, rules):
+    """人格名の一字/短縮略称(C-021)を単語境界で捕まえる(警告のみ)。
+
+    データ(hrが用意)= rules["abbreviation_forbidden"]:
+        "<正式名>": ["ク", ...]                                # 略称形の配列、または
+        "<正式名>": {"forbidden_forms": ["ク"], "expected": ["ククール"]}
+    判定(基盤)= 略称形が本文に出て、その出現の**前後どちらもカタカナでない**時だけ違反。
+      → 「ククール」自体や「リンク」等のカタカナ連なりの一部では発火しない
+        (単独トークンとしての略称だけを拾う)。s.find の部分一致では捕まえられない
+        C-021(ククール→ク)を、境界(=前後の非カタカナ)で切り分ける。
+    reason="abbreviation"=Cゲートは警告のみ(naming_corrections は自動修正しない=
+      「ク」が必ずしもククールを指すとは限らず、full名への丸ごと置換は事故になりうるため)。
+    fail-open: データが無い/形が違う時は空リスト(=既定は無変更)。
+    """
+    out = []
+    ab = (rules or {}).get("abbreviation_forbidden") or {}
+    if not isinstance(ab, dict):
+        return out
+    s = str(text or "")
+    for full, spec in ab.items():
+        if str(full).startswith("_"):
+            continue                      # _note 等のメタキーを弾く
+        if isinstance(spec, dict):
+            forms = list(spec.get("forbidden_forms") or [])
+            expected = list(spec.get("expected") or [full])
+        elif isinstance(spec, (list, tuple)):
+            forms = list(spec)
+            expected = [full]
+        else:
+            continue
+        for form in forms:
+            form = str(form or "")
+            if not form:
+                continue
+            start = 0
+            while True:
+                i = s.find(form, start)
+                if i < 0:
+                    break
+                end = i + len(form)
+                before = s[i - 1] if i > 0 else ""
+                after = s[end] if end < len(s) else ""
+                if (not _is_katakana(before)) and (not _is_katakana(after)):
+                    out.append({
+                        "target": full, "found": form,
+                        "expected": expected, "reason": "abbreviation",
+                    })
+                    break                 # この形は便あたり1警告で十分
+                start = i + 1
+    return out
+
+
 def naming_verdicts(persona, dept, text, rules):
     """呼称違反の候補一覧を返す(純関数)。
 
@@ -255,6 +315,8 @@ def naming_verdicts(persona, dept, text, rules):
                 "expected": allowed,
                 "reason": "honorific_required",
             })
+        # ★人格名の一字略(C-021・ククール→ク)を単語境界で捕まえる(警告のみ)。
+        out.extend(_abbrev_verdicts(s, rules))
         return out
     except Exception:
         return []               # fail-open=ゲートは配送を殺さない

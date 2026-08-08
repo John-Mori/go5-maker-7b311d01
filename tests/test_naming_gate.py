@@ -189,7 +189,30 @@ def _run():
         if not ok:
             print(f"      期待 applied={'有' if exp_applied else '無'} fixed={exp_fixed!r}")
 
-    total = len(cases) + len(fix_cases)
+    # ==== 一字略(C-021・ククール→ク)を単語境界で捕まえる(2026-08-09・警告のみ) ====
+    #   hrの本番データ(abbreviation_forbidden)が来る前でも回帰を固定するため、
+    #   ここはインラインの rules で判定ロジックだけを検査する。
+    abbrev_rules = {"abbreviation_forbidden": {
+        "ククール": {"forbidden_forms": ["ク"], "expected": ["ククール"]}}}
+    abbrev_cases = [
+        ("ククールに聞いてくれ", False, "正式名のみ→鳴らない"),
+        ("クに聞いてくれ",       True,  "文頭の単独ク→鳴る"),
+        ("あれはクだ",           True,  "ひらがな挟みの単独ク→鳴る"),
+        ("[ク]タグで呼んだ",     True,  "括弧内の単独ク→鳴る"),
+        ("リンクを貼る",         False, "カタカナ連なりの一部→鳴らない"),
+        ("サクッとやる",         False, "サクッ→鳴らない"),
+        ("最後はク",             True,  "文末の単独ク→鳴る"),
+    ]
+    for j, (text, exp_fire, desc) in enumerate(abbrev_cases, 1):
+        v = naming_verdicts("三笘薫", "report-notify", text, abbrev_rules)
+        fired = any(x.get("reason") == "abbreviation" for x in v)
+        ok = fired == exp_fire
+        if not ok:
+            failed += 1
+        print(f"{'PASS' if ok else 'FAIL'} A2-{j}: fired={fired!s:5} "
+              f"exp={exp_fire!s:5}  {desc} | {text}")
+
+    total = len(cases) + len(fix_cases) + len(abbrev_cases)
     print("-" * 60)
     if failed:
         print(f"{failed} 件 FAIL / {total} 件")
