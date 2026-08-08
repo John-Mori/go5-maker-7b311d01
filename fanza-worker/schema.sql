@@ -65,6 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_market_day ON market_snapshot(day);
 -- 「全候補タブに出ている作品だけ」を読む。除外タブ(excludeFromAll)を反映済みの集合がフロントから来る。
 CREATE TABLE IF NOT EXISTS candidate_pool (
   cid         TEXT PRIMARY KEY,
-  updated_at  INTEGER
+  updated_at  INTEGER,
+  source      TEXT            -- 出所タブ 'main'(手動追加💡)|'circle'(サークル)|'list'(独立タブ)・2026-08-09
 );
 CREATE INDEX IF NOT EXISTS idx_candpool_cid ON candidate_pool(cid);

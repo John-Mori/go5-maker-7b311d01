@@ -135,6 +135,7 @@ export default {
 
     // ── 全候補プール：📚全候補タブの作品cid集合を保存/参照 ──────────────────
     //   POST /api/candidate-pool { cids:[...] } = プールを総入れ替え(除外タブ反映済みの集合をフロントが送る)。
+    //     cids 要素は "cid"(旧) でも {cid,source}(source='main'|'circle'|'list') でも可。source は出所タブの区別用。
     //   GET  /api/candidate-pool               = { ok, count, cids } (部門・検証用)。
     //   部門は go5_fanza を candidate_pool でJOINして「全候補タブに出ている作品だけ」を読む。
     if (path === "/api/candidate-pool") {
@@ -176,12 +177,18 @@ export default {
       try { bodyC = await request.json(); }
       catch (e) { await logCandPost_({ stage: "reject_bad_json" }); return json({ ok: false, error: "bad_json" }, 400, corsC); }
       // cidを厳格検証＋重複除去。安全上限5000(巨大サークル群でも収まる)。
-      const seenC = {}, poolCids = [];
+      //   ★2026-08-09: 出所タグ source を受ける。cids 要素は文字列(旧・source無)でも
+      //     {cid,source} でも可(後方互換)。source は 'main'|'circle'|'list' のみ許可、他はnull。
+      //     初出勝ち=同一cidが複数タブに在ってもフロントが main を先に送る(手動追加の帰属を保つ)。
+      const seenC = {}, poolRows = [];
       for (const raw of (Array.isArray(bodyC.cids) ? bodyC.cids : [])) {
-        const cid = String(raw || "").trim();
+        const isObj = raw && typeof raw === "object";
+        const cid = String((isObj ? raw.cid : raw) || "").trim();
+        let src = isObj ? String(raw.source || "").trim() : "";
+        if (src !== "main" && src !== "circle" && src !== "list") src = null;
         if (!/^[0-9A-Za-z_-]{1,64}$/.test(cid) || seenC[cid]) continue;
-        seenC[cid] = true; poolCids.push(cid);
-        if (poolCids.length >= 5000) break;
+        seenC[cid] = true; poolRows.push({ cid, source: src });
+        if (poolRows.length >= 5000) break;
       }
       const nowC = Date.now();
       try {
@@ -190,21 +197,21 @@ export default {
         //   旧コードは400件/文=800変数で上限突破し、候補が50件を超えると毎回バッチ全体がSQLITE_ERRORで
         //   ロールバック→candidate_poolが最後の小さな成功書き込み(d_754842・1件)に凍結していた(=Chamiの候補241件が
         //   一度もD1へ入らなかった真因。クライアントv647/648/656はすべて別レイヤを直しており無効)。
-        //   1文2変数=45件/文(90変数)で上限に安全マージンを取る。件数が増えてもバッチ内のINSERT文数が増えるだけ。
-        const CHUNK = 45;
+        //   ★source列追加で1行3変数(cid,updated_at,source)=CHUNK 30で90変数(上限100に安全マージン)。
+        const CHUNK = 30;
         const stmts = [env.FANZA_DB.prepare("DELETE FROM candidate_pool")];
-        for (let i = 0; i < poolCids.length; i += CHUNK) {
-          const chunk = poolCids.slice(i, i + CHUNK);
-          const ph = chunk.map(() => "(?, ?)").join(", ");
+        for (let i = 0; i < poolRows.length; i += CHUNK) {
+          const chunk = poolRows.slice(i, i + CHUNK);
+          const ph = chunk.map(() => "(?, ?, ?)").join(", ");
           const binds = [];
-          chunk.forEach((c) => { binds.push(c, nowC); });
-          stmts.push(env.FANZA_DB.prepare("INSERT INTO candidate_pool (cid, updated_at) VALUES " + ph).bind(...binds));
+          chunk.forEach((r) => { binds.push(r.cid, nowC, r.source); });
+          stmts.push(env.FANZA_DB.prepare("INSERT INTO candidate_pool (cid, updated_at, source) VALUES " + ph).bind(...binds));
         }
         await env.FANZA_DB.batch(stmts);
-        await logCandPost_({ stage: "persist_ok", count: poolCids.length });
-        return json({ ok: true, count: poolCids.length }, 200, corsC);
+        await logCandPost_({ stage: "persist_ok", count: poolRows.length });
+        return json({ ok: true, count: poolRows.length }, 200, corsC);
       } catch (e) {
-        await logCandPost_({ stage: "persist_err", err: String((e && e.message) || e), cidsLen: poolCids.length });
+        await logCandPost_({ stage: "persist_err", err: String((e && e.message) || e), cidsLen: poolRows.length });
         return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC);
       }
     }

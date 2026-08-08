@@ -2083,9 +2083,16 @@
     try {
       var cfg = workerCfg();
       if (!cfg || !cfg.url || !cfg.secret) { var miss = []; if (!cfg || !cfg.url) miss.push('URL'); if (!cfg || !cfg.secret) miss.push('シークレット'); poolSyncNote_('設定なし(' + miss.join('/') + '欠)＝同期せず'); return; } // worker未設定なら同期しない(表示は動く)
+      // 引数は cid の配列(旧)でも {cid,source} の配列(新)でも可。初出勝ちで重複排除。
+      //   source='main'(手動追加💡)/'circle'(サークル)/'list'(独立タブ)。部門が WHERE source='main' で手動追加だけを再スライスできる(2026-08-09)。
       var uniq = []; var seen = {};
-      (cids || []).forEach(function (c) { if (c && !seen[c]) { seen[c] = true; uniq.push(c); } });
-      var hash = uniq.slice().sort().join(',');
+      (cids || []).forEach(function (e) {
+        var c = (e && typeof e === 'object') ? e.cid : e;
+        var src = (e && typeof e === 'object') ? (e.source || null) : null;
+        if (c && !seen[c]) { seen[c] = true; uniq.push({ cid: String(c), source: src }); }
+      });
+      // hashにsourceも含める=出所の付け替えが起きたら12h未満でも送り直す。
+      var hash = uniq.map(function (u) { return u.cid + '~' + (u.source || ''); }).sort().join(',');
       var last = '', lastAt = 0;
       try { last = localStorage.getItem('cand_pool_hash') || ''; lastAt = parseInt(localStorage.getItem('cand_pool_hash_at') || '0', 10) || 0; } catch (e) {}
       // 前回と同じ集合でも、最後に成功したPOSTから12hを超えたら送り直す。=D1の updated_at を「生存信号」に
@@ -2130,15 +2137,16 @@
       var seen = {}, cids = [], makerIds = [];
       // ★cid が未解決の候補(URL追加後にcid抽出前 / Books .com 旧数字ID↔新content_id 食い違い)も
       //   その場で url から cid を解決して同期に乗せる。cidFromUrl_ は同期(通信なし・buildAffiliateLink)。
-      function pushCid_(it) {
+      // ★source: main(手動追加💡=K_ITEMS)を最初に走査=初出勝ちで手動追加の帰属を保つ(2026-08-09)。
+      function pushCid_(it, src) {
         var c = (it && it.cid) ? String(it.cid) : cidFromUrl_((it && it.url) || '');
-        if (c && !seen[c]) { seen[c] = true; cids.push(c); }
+        if (c && !seen[c]) { seen[c] = true; cids.push({ cid: c, source: src }); }
       }
-      (lsGet(K_ITEMS, '[]') || []).forEach(pushCid_);
+      (lsGet(K_ITEMS, '[]') || []).forEach(function (it) { pushCid_(it, 'main'); });
       tabs.forEach(function (t) {
         if (t.excludeFromAll) return;
         if (isMakerTab_(t)) { makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); }); return; }
-        (lsGet('cand_items__' + t.id, '[]') || []).forEach(pushCid_);
+        (lsGet('cand_items__' + t.id, '[]') || []).forEach(function (it) { pushCid_(it, 'list'); });
       });
       function done_() { syncCandidatePool_(cids); }
       var K_MK_OK = 'cand_maker_cids_ok'; // 前回"取得成功"したサークルcid集合(端末ローカル・全滅時の代替に使う)
@@ -2151,14 +2159,14 @@
         if (err && !items) {
           var saved = [];
           try { saved = (localStorage.getItem(K_MK_OK) || '').split(',').filter(Boolean); } catch (e) {}
-          saved.forEach(function (c) { if (c && !seen[c]) { seen[c] = true; cids.push(c); } });
+          saved.forEach(function (c) { if (c && !seen[c]) { seen[c] = true; cids.push({ cid: c, source: 'circle' }); } });
           done_(); // 前回成功したサークル分を保って発火(縮めない・削り戻さない)
           return;
         }
         var mkCids = [];
         (items || []).forEach(function (it) {
           var c = (it && it.cid) ? String(it.cid) : cidFromUrl_((it && it.url) || '');
-          if (c) { mkCids.push(c); if (!seen[c]) { seen[c] = true; cids.push(c); } }
+          if (c) { mkCids.push(c); if (!seen[c]) { seen[c] = true; cids.push({ cid: c, source: 'circle' }); } }
         });
         try { localStorage.setItem(K_MK_OK, mkCids.join(',')); } catch (e) {} // 成功時だけ更新
         done_();
@@ -2200,23 +2208,24 @@
     wireBuiltinRename_('all');
 
     // 保存アイテム(main + 独立listタブ・除外でない)を集約し、サークルidを収集。
-    var seen = {}, stored = [];
-    function addItems(a) { (a || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; stored.push(it); } }); }
-    addItems(lsGet(K_ITEMS, '[]')); // 💡候補(main)は常に含む
+    // ★srcByCid: cidの出所を初出勝ちで記録(main→list→circle)。D1同期のsource付与に使う(2026-08-09)。
+    var seen = {}, stored = [], srcByCid = {};
+    function addItems(a, src) { (a || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; stored.push(it); srcByCid[it.cid] = src; } }); }
+    addItems(lsGet(K_ITEMS, '[]'), 'main'); // 💡候補(main)は常に含む
     var makerIds = [];
     tabs.forEach(function (t) {
       if (t.excludeFromAll) return; // このタブを全候補に含まない
       if (isMakerTab_(t)) makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); });
-      else addItems(lsGet('cand_items__' + t.id, '[]')); // 独立した候補リストタブ
+      else addItems(lsGet('cand_items__' + t.id, '[]'), 'list'); // 独立した候補リストタブ
     });
 
     function finish(makerItems) {
       var el = $('candList');
       if (!el || _activeTab !== 'all') return; // 集約中にタブが変わっていたら破棄
       var all = stored.slice();
-      (makerItems || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; all.push(it); } });
-      // 部門ブリッジ: 除外反映後の全候補cid(表示フィルタ前=キュレート集合)をD1へ同期。
-      syncCandidatePool_(all.map(function (it) { return it.cid; }));
+      (makerItems || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; all.push(it); srcByCid[it.cid] = 'circle'; } });
+      // 部門ブリッジ: 除外反映後の全候補cid(表示フィルタ前=キュレート集合)をD1へ同期。source付き=部門が手動追加だけを再スライスできる。
+      syncCandidatePool_(all.map(function (it) { return { cid: it.cid, source: srcByCid[it.cid] || null }; }));
       var arr = sortItems(all, _sort).filter(function (it) {
         if (_filterSale && !isOnSale_(it)) return false;
         if (!passPrice_(it)) return false;
