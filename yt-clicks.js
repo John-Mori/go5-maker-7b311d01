@@ -2219,6 +2219,12 @@
     manual.push(entry);
     saveArrFor_('verify_manual', acc, manual);
     if (ytUrl) { ymap[id] = ytUrl; saveYtMapFor_(acc, ymap); }
+    // ★投稿完了と同時に記録シート(=分析の元)へ即upsert。従来は下の workUrl 分岐の中でしか
+    //   pushItemToGas_ を呼んでおらず、作品URL未入力の即時投稿は完了時にシートへ載らず、後追いの
+    //   reconcileYtToSheet_(1回12件上限・署名台帳)が回るまで分析に出なかった(Chami報告2026-08-08 ①
+    //   宵桜艶帖で即時投稿→投稿完了しても分析に反映されない)。videoId をキーに upsert は冪等なので
+    //   ここで無条件に押す=作品URLの有無・チャンネル(acc1/acc2)を問わず完了と同時にシートへ載る。
+    try { pushItemToGas_(entry); } catch (e) {}
     // 作品クリック計測URL(導線2)を作品URLから自動発行＝編集→保存を待たずに一発で埋める(Chami依頼2026-07-30)。
     //   ★投稿完了は"新規発行してよい"経路なので mintWorkShortAtPost_ を使う。autoMeasureWorkShort_(編集保存用)は
     //   空欄を作品URLへフォールバックしない仕様のため、ここで呼ぶと workShortUrl が空のままシート/サブ端末へ
