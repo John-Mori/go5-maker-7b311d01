@@ -220,12 +220,26 @@ def _inflight_depts(db_path=None, now=None):
 
 
 def maybe_reload(slots, state):
-    """コードが変わって RELOAD_DEBOUNCE_SEC 落ち着いたら、全部の子を載せ替える。
+    """コードが変わって RELOAD_DEBOUNCE_SEC 落ち着いたら、**暇な部門から順に**載せ替える。
 
     ★落とすだけ。**立て直すのは tick() の仕事**(=既存の再起動経路を使う。2本持たない)。
     ★事故ではないので backoff/fails を積まない(積むとサーキットが開いて逆に止まる)。
     ★処理中の便はkillしない。再配達できても、最大25分のlease待ち・子Claudeの孤児化・
       同一セッション二重実行が起きるため、「後で戻る」は安全の根拠にならない。
+
+    ★★2026-08-08 変更= **全体一括 → 部門ごと(波)**。
+      なぜ= 旧実装は「**30体全部が同時に暇**な瞬間」を待っていた。ところが対話の部屋
+      (イージス研究室・研究室HQ等)は1便につき17〜25分leaseを握るので、Chamiや部屋どうしの
+      やり取りが続いている間はその瞬間が来ない。**busyな1部屋が、無関係な29体の載せ替えを
+      人質に取る**構造だった(実測 2026-08-08 09:34= 処理中3部門/27部門は暇)。
+      → 便を握っている部門だけ次の周回へ回し、暇な部門はその場で載せ替える。
+      **「便を握っている子はkillしない」という安全の核は1ミリも緩めていない。**
+    ★版の混在について= dept_daemon は部門ごとに独立したプロセスで、共有しているのは
+      SQLiteのqueueとファイルだけ。数分〜数十分の混在は元々起きている(起動のばらつき)。
+      **古い版のまま何日も走る方が害が大きい**(fail-openは6日間1体も抱えないまま眠っていた)。
+    ★波(wave)= 「この版を全員に配る」1回の作業。途中で新しい版が出たら波を張り直す
+      (RELOAD_MIN_INTERVAL_SEC は**波の開始/張り直し**にだけ効かせる=連続改修中の
+      再起動地獄は防いだまま、**始まった波は最後まで配りきる**)。
     """
     now = time.time()
     stamp = _watch_stamp()
@@ -234,14 +248,24 @@ def maybe_reload(slots, state):
     if state.get("stamp") is None:          # 起動直後=今のコードで走っている
         state["stamp"] = stamp
         return
-    if stamp <= state["stamp"]:
+    wave = state.get("wave")                # 進行中の波(未配布の部門が残っている)
+
+    # --- 1) 新しい版を検知したら、波を開始する(または新しい版で張り直す) ---
+    known = wave["stamp"] if wave else state["stamp"]
+    if stamp > known:
+        if now - stamp < RELOAD_DEBOUNCE_SEC:   # まだ編集中かもしれない
+            return
+        last = state.get("last_reload") or 0
+        if last and now - last < RELOAD_MIN_INTERVAL_SEC:
+            return                          # ★連続改修中の再起動地獄を防ぐ(上のコメント参照)
+        wave = {"stamp": stamp, "pending": [s.dept for s in slots], "started": now}
+        state["wave"] = wave
+        log(f"★コードの更新を検知({time.strftime('%H:%M:%S', time.localtime(stamp))})= "
+            f"全{len(slots)}体を、暇な部門から順に載せ替える")
+    if not wave:
         return
-    if now - stamp < RELOAD_DEBOUNCE_SEC:   # まだ編集中かもしれない
-        return
-    last = state.get("last_reload") or 0
-    if last and now - last < RELOAD_MIN_INTERVAL_SEC:
-        return                              # ★連続改修中の再起動地獄を防ぐ(上のコメント参照)
-    # ★処理中の便が在る間は載せ替えない(2026-07-29。上の _inflight_depts の説明を読め)。
+
+    # --- 2) 処理中の便を握っている部門は飛ばす(2026-07-29。_inflight_depts の説明を読め) ---
     busy = _inflight_depts()
     if busy is None:
         # fail-closed: 判定不能時は絶対にkillしない。ログは5分に1回へ抑える。
@@ -249,22 +273,9 @@ def maybe_reload(slots, state):
             state["last_unknown_log"] = now
             log("コードの更新を検知したが、queueの処理中判定ができないので載せ替えを延期する")
         return
-    waited = now - (state.get("first_seen") or now)
-    if busy:
-        if not state.get("first_seen"):
-            state["first_seen"] = now
-        if now - (state.get("last_busy_log") or 0) > 300:
-            state["last_busy_log"] = now
-            waited = now - state["first_seen"]
-            if waited >= RELOAD_FORCE_AFTER_SEC:
-                log(f"★コード更新を{int(waited // 60)}分待っているが、処理中の便を守るため"
-                    f"載せ替えを延期し続ける: {','.join(busy[:6])}")
-            else:
-                log(f"コードの更新を検知したが、処理中の便が在るので待つ: {','.join(busy[:6])}")
-        return
-    state.pop("first_seen", None)
-    log(f"★コードの更新を検知({time.strftime('%H:%M:%S', time.localtime(stamp))})= 全{len(slots)}体を載せ替える")
-    for s in slots:
+    busy_set = set(busy)
+    targets = [s for s in slots if s.dept in wave["pending"] and s.dept not in busy_set]
+    for s in targets:
         if s.proc is not None and s.proc.poll() is None:
             try:
                 s.proc.kill()
@@ -275,8 +286,32 @@ def maybe_reload(slots, state):
         s.open_until = 0.0
         s.next_start = 0.0
         s.started = 0.0
-    state["stamp"] = stamp
-    state["last_reload"] = now
+    if targets:
+        done = [s.dept for s in targets]
+        wave["pending"] = [d for d in wave["pending"] if d not in set(done)]
+        log(f"載せ替えた{len(done)}体: {','.join(done[:8])}"
+            f"{'…' if len(done) > 8 else ''} / 残り{len(wave['pending'])}体")
+        state["last_reload"] = now
+
+    # --- 3) 全員に配り終えたら波を閉じる。残っているなら待ち時間をログへ ---
+    if not wave["pending"]:
+        state["stamp"] = wave["stamp"]
+        state.pop("wave", None)
+        state.pop("first_seen", None)
+        log(f"★載せ替え完了= 全{len(slots)}体が"
+            f"{time.strftime('%H:%M:%S', time.localtime(wave['stamp']))}の版になった")
+        return
+    if not state.get("first_seen"):
+        state["first_seen"] = wave["started"]
+    if now - (state.get("last_busy_log") or 0) > 300:
+        state["last_busy_log"] = now
+        waited = now - state["first_seen"]
+        rest = ",".join(wave["pending"][:6])
+        if waited >= RELOAD_FORCE_AFTER_SEC:
+            log(f"★載せ替えを{int(waited // 60)}分続けているが、処理中の便を守るため"
+                f"この部門は待ち続ける: {rest}")
+        else:
+            log(f"処理中の便が在るので、この部門は次の周回へ回す: {rest}")
 
 
 def reap_orphans():
