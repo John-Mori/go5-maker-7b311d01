@@ -2191,6 +2191,8 @@
     //   stock側でも handleCompleteOk_ で meta.videoId を発番するが、ここでも発番して二重の防壁にする。
     var vidId = (opts.videoId || '').trim();
     if (!vidId && window.IdGen && window.IdGen.makeVideoId) { try { vidId = window.IdGen.makeVideoId(acc, new Date(), {}); } catch (e) {} }
+    // ★この“載せる/捨てる”と下の重複判定は tests/test_completed_post.js に純関数ミラーがあり
+    //   CI(smoke.yml が全pushで tests/test_*.js を実行)で固定している。どちらかを変えたら両方揃えること。
     if (!ytUrl && !shortUrl && !vidId) return false; // 発番もできない(IdGen不在)時だけ従来どおり載せない
     var vid = ytUrl ? ytIdOf(ytUrl) : '';
     var manual = loadArrFor_('verify_manual', acc);
