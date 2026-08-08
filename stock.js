@@ -454,96 +454,94 @@
     if (!shortUrl) {
       try { var sv = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); shortUrl = (sv.xShortUrl || '').trim(); } catch (e) {}
     }
-    resolveVideoBlob_(id).then(function (blob) {
-      if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。'); return; }
-      if (window.Go5Drive && typeof window.Go5Drive.upload === 'function') {
-        // 元画像＋仕上がりプレビュー(保存時にIDBへ退避したもの)も一緒にDriveへ。取れなくても動画だけは必ず上げる。
-        Promise.all([
-          store.get('stock_img_' + id).catch(function () { return null; }),
-          store.get('stock_prev_' + id).catch(function () { return null; }),
-          store.get('stock:imgs:' + id).catch(function () { return null; }) // 同期ミラー(別端末で作った動画の画像)
-        ]).then(function (r) {
-          var img = r[0], prev = r[1], mirror = r[2] || {};
-          // ★サブ端末(=この動画を作っていない端末)では stock_prev_/stock_img_(Blob)が無いので、
-          //   同期ミラー stock:imgs: の dataURL(.prev/.src)から実体へ戻して補う
-          //   (Chami 2026-08-04「サブ端末で投稿すると投稿履歴の画像に動画投稿プレビューが表示されない」)。
-          //   これが無いと下の prev ガードが常に false になり、投稿履歴・Drive の双方でプレビューが欠落する。
-          var imgP  = img  ? Promise.resolve(img)  : durlToBlob_(mirror.src);
-          var prevP = prev ? Promise.resolve(prev) : durlToBlob_(mirror.prev);
-          Promise.all([imgP, prevP]).then(function (bs) {
-            var imgB = bs[0], prevB = bs[1];
-            window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null);
-            // ★投稿履歴の使用画像1ページ目に仕上がりプレビューを差し込む(videoIdで紐付く・Chami依頼2026-07-30)。
-            if (prevB && meta.videoId && window.Go5Cand && window.Go5Cand.usedImgSave && window.Go5Cand.usedImgs) {
-              blobToDataUrl_(prevB, function (durl) {
-                if (!durl) return;
-                var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
-                if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
-                // 先頭1枚=投稿プレビュー画像(拡大表示の見出しを「投稿プレビュー画像」に分ける・Chami依頼2026-07-30)
-                window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
-              });
-            }
-          });
-        }).catch(function () {
-          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, []);
+    // ★投稿履歴への記録は「動画blobの有無」から完全に切り離す(Chami報告2026-08-08: 作成履歴から復元→
+    //   即時投稿で投稿完了しても投稿履歴に載らない/Fable5工数で真因追跡の指示)。真因=記録(addCompletedPost)・
+    //   URL保存・枠書き戻し・作成履歴退避・再描画が resolveVideoBlob_().then の中に入れ子で、動画blobが
+    //   保存期限切れ/未検出だと先頭の `if(!blob) return` で"記録ごと"素通りしていた。復元したドラフトは
+    //   metaは戻るが動画blobは期限切れのことがあり、そこで完了しても履歴に一切載らなかった(根治)。
+    //   記録系は blob に依存しないので下で"先に同期実行"する。archiveStock_ は当該idのblobを消さない
+    //   (復元用に保持)ので、後段の Drive アップロード(blob依存)より前に呼んでも動画/画像UPは壊れない。
+    if (ytUrl) {
+      metas.forEach(function (m) { if (m.id === id) m.youtubeUrl = ytUrl; });
+      saveMeta(metas);
+    }
+    // ★投稿完了の時点で拾い直す：作成時スナップ(meta)が空でも、動画作成タブのライブ値から
+    //   ジャンル・作品URLを補う(Chami指摘2026-07-31 msg1532858293440090163)。meta優先・空の時だけライブ補完。
+    var liveAttrs = readMovieAttrs_();
+    var histAttrs = (meta.attrs && Object.keys(meta.attrs).length) ? meta.attrs
+      : (Object.keys(liveAttrs).length ? liveAttrs : null);
+    var liveWorkUrl = (($('movieWorkUrl') || {}).value || '').trim();
+    var liveAffi = (($('movieWorkAffi') || {}).value || '').trim();
+    var histWorkUrl = meta.workUrl || meta.affiliateUrl || liveWorkUrl || liveAffi || '';
+    // 公開設定(即時/予約)＋選んだカレンダー公開枠を1回読む(履歴へ渡す予定時刻＆枠書き戻しの両方で使う)。
+    var pd = {}; try { pd = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); } catch (e2) {}
+    var ps = pd.pubSlot;
+    // 予約投稿でカレンダー枠を選んでいたら、その枠の公開予定時刻を投稿履歴の「投稿予定」時刻として渡す(DEF#4)。
+    var plannedAt = (pd.pubMode === 'scheduled' && ps && ps.scheduled_at) ? String(ps.scheduled_at).replace(' ', 'T') : '';
+    // ①投稿完了 → 投稿履歴へ1件記録(既存の投稿履歴機構=Go5History)。blobの有無に関わらず必ず実行。
+    try {
+      if (window.Go5History && typeof window.Go5History.addCompletedPost === 'function') {
+        window.Go5History.addCompletedPost({
+          account: meta.account || 'acc1',
+          ytUrl: ytUrl || '',
+          shortUrl: shortUrl || '',
+          title: meta.title || '',
+          workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
+          videoId: meta.videoId || '',
+          scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
+          attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
         });
-      } else {
-        alert('Drive連携が未設定です。動画作成タブのDriveStatus欄を確認してください。');
       }
-      if (ytUrl) {
-        metas.forEach(function (m) { if (m.id === id) m.youtubeUrl = ytUrl; });
-        saveMeta(metas);
-      }
-      // ①投稿完了 → 投稿履歴へ1件記録(既存の投稿履歴機構=Go5History)。載れば予約公開の動画は
-      //   既存の updateYtScheduled_ が予約タブへ拾う(②は自動達成)。ytUrl も shortUrl も無ければ載せない。
-      // ★投稿完了の時点で拾い直す：作成時スナップ(meta)が空でも、動画作成タブのライブ値から
-      //   ジャンル・作品URLを補う。動画を"作った瞬間"はまだ未入力で、Chamiは後からFANZA自動反映や
-      //   手入力で埋めるため、meta が空のまま履歴へ渡り「ジャンル未チェック・導線2URL空」になっていた
-      //   (Chami指摘2026-07-31 msg1532858293440090163)。meta を優先し、空の時だけライブUIで補完する。
-      var liveAttrs = readMovieAttrs_();
-      var histAttrs = (meta.attrs && Object.keys(meta.attrs).length) ? meta.attrs
-        : (Object.keys(liveAttrs).length ? liveAttrs : null);
-      var liveWorkUrl = (($('movieWorkUrl') || {}).value || '').trim();
-      var liveAffi = (($('movieWorkAffi') || {}).value || '').trim();
-      var histWorkUrl = meta.workUrl || meta.affiliateUrl || liveWorkUrl || liveAffi || '';
-      // 公開設定(即時/予約)＋選んだカレンダー公開枠を1回読む(履歴へ渡す予定時刻＆枠書き戻しの両方で使う)。
-      var pd = {}; try { pd = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); } catch (e2) {}
-      var ps = pd.pubSlot;
-      // 予約投稿でカレンダー枠を選んでいたら、その枠の公開予定時刻を投稿履歴の「投稿予定」時刻として渡す。
-      //   Chamiの運用=Xは前日/朝に手動投稿、YouTube動画だけカレンダー指定時刻に遅らせて公開(2026-08-04)。
-      //   YouTube API が予約公開のpublishAtを返す前でも、履歴に予定時刻を出せる(DEF#4の穴埋め)。
-      var plannedAt = (pd.pubMode === 'scheduled' && ps && ps.scheduled_at) ? String(ps.scheduled_at).replace(' ', 'T') : '';
-      try {
-        if (window.Go5History && typeof window.Go5History.addCompletedPost === 'function') {
-          window.Go5History.addCompletedPost({
-            account: meta.account || 'acc1',
-            ytUrl: ytUrl || '',
-            shortUrl: shortUrl || '',
-            title: meta.title || '',
-            workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
-            videoId: meta.videoId || '',
-            scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
-            attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
-          });
+    } catch (e) {}
+    // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
+    try {
+      if (ps && ps.id) {
+        if (pd.pubMode === 'scheduled') {
+          document.dispatchEvent(new CustomEvent('bluesky-reserved', { detail: { slotId: ps.id, account: meta.account || 'acc1' } }));
+        } else {
+          document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { slotId: ps.id, account: meta.account || 'acc1', post_url: ytUrl || '', short_url: shortUrl || '' } }));
         }
-      } catch (e) {}
-      // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
-      //   ・整合の正本はカレンダーiframe側。ここは integration.js 経由で slot-writeback を送るだけ。
-      //   ・即時=「公開済」、予約(YouTube側で予約公開)=「予約登録済」。枠未選択なら何もしない(必須ではない)。
-      try {
-        if (ps && ps.id) {
-          if (pd.pubMode === 'scheduled') {
-            document.dispatchEvent(new CustomEvent('bluesky-reserved', { detail: { slotId: ps.id, account: meta.account || 'acc1' } }));
-          } else {
-            document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { slotId: ps.id, account: meta.account || 'acc1', post_url: ytUrl || '', short_url: shortUrl || '' } }));
+      }
+    } catch (e) {}
+    // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。記録の後に行う(blob非依存)。
+    archiveStock_(id);
+    render();
+    // ── Drive アップロード(動画/画像・blob依存)。失敗しても投稿履歴の記録は上で確定済み ─────────
+    resolveVideoBlob_(id).then(function (blob) {
+      if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済みです。Google Driveへの動画保存だけスキップしました。'); return; }
+      if (!(window.Go5Drive && typeof window.Go5Drive.upload === 'function')) {
+        alert('Drive連携が未設定です。動画作成タブのDriveStatus欄を確認してください。(投稿履歴には記録済み)');
+        return;
+      }
+      // 元画像＋仕上がりプレビュー(保存時にIDBへ退避したもの)も一緒にDriveへ。取れなくても動画だけは必ず上げる。
+      Promise.all([
+        store.get('stock_img_' + id).catch(function () { return null; }),
+        store.get('stock_prev_' + id).catch(function () { return null; }),
+        store.get('stock:imgs:' + id).catch(function () { return null; }) // 同期ミラー(別端末で作った動画の画像)
+      ]).then(function (r) {
+        var img = r[0], prev = r[1], mirror = r[2] || {};
+        // ★サブ端末では stock_prev_/stock_img_(Blob)が無いので、同期ミラー stock:imgs: の dataURL から実体へ戻す
+        //   (Chami 2026-08-04「サブ端末で投稿すると投稿履歴の画像に動画投稿プレビューが表示されない」)。
+        var imgP  = img  ? Promise.resolve(img)  : durlToBlob_(mirror.src);
+        var prevP = prev ? Promise.resolve(prev) : durlToBlob_(mirror.prev);
+        Promise.all([imgP, prevP]).then(function (bs) {
+          var imgB = bs[0], prevB = bs[1];
+          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null);
+          // ★投稿履歴の使用画像1ページ目に仕上がりプレビューを差し込む(videoIdで紐付く・Chami依頼2026-07-30)。
+          if (prevB && meta.videoId && window.Go5Cand && window.Go5Cand.usedImgSave && window.Go5Cand.usedImgs) {
+            blobToDataUrl_(prevB, function (durl) {
+              if (!durl) return;
+              var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
+              if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
+              window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
+            });
           }
-        }
-      } catch (e) {}
-      // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。youtubeUrl保存の後に行う。
-      archiveStock_(id);
-      render();
+        });
+      }).catch(function () {
+        window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, []);
+      });
     }).catch(function (err) {
-      alert('動画データの取得に失敗しました: ' + (err ? err.message || String(err) : '不明'));
+      alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
     });
   }
 
