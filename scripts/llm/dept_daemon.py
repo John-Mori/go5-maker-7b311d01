@@ -5073,6 +5073,21 @@ class Daemon:
                     mid = str(rec.get("msg_id", "")) or mid
                     log(self.dept, "集約: 連投%d件を1便へ束ねた(返信は最新の便へ) msg=%s"
                                    % (len(recs), mid))
+                    # ★実物確認を「誰かがログを見張る」に任せない(規律§3=機構に載せる)。
+                    #   .log は keeper の標準出力リダイレクトなので流れて消える/手動実行では
+                    #   残らない(8/8にHQから指摘された穴)。→ **耐久台帳へ1行**残し、
+                    #   `grep coalesced local/llm/request_log.jsonl` だけで後から突き合わせられる。
+                    if session_relay is not None:
+                        try:
+                            # ★検証便は台帳にもそう書く(8e69404と同じ作法)。印が無いと
+                            #   「実際にChamiの連投を束ねた」実績とテストの痕跡が混ざる。
+                            _ev = ("連投%d件を1便へ束ねた(元=%s)"
+                                   % (len(recs), ",".join(rec.get("coalesced_from") or [])))
+                            session_relay._record(
+                                mid, self.dept, "coalesced",
+                                ("[検証便] " + _ev) if rec.get("test") else _ev)
+                        except Exception:
+                            pass
                 ok = self.handle(rec, json.dumps(rec, ensure_ascii=False))
                 # ★セッション受け渡し(パイロット2部屋)の配送失敗だけは **ack せず nack**
                 #   (2026-07-25)。ackは「処理し終えた」の意味なので、渡せていない便に押すと

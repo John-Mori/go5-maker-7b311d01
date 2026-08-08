@@ -133,6 +133,10 @@ q.close()
 d.LOCAL = tmp
 d.PROCESSED = os.path.join(tmp, "processed.jsonl")
 d.MAIN_INBOX = os.path.join(tmp, "main.jsonl")
+# ★テストは本番の台帳(local/llm/request_log.jsonl)へ1行も書かない。
+#   初版で書いてしまい "request_id":"k2" が本番へ1行残った(2026-08-08・自分で同じ穴を踏んだ)。
+if getattr(d, "session_relay", None) is not None:
+    d.session_relay.REQUEST_LOG = os.path.join(tmp, "request_log.jsonl")
 seen = []
 dm = _daemon(win=45)
 dm.handle = lambda rec, raw: (seen.append(rec), True)[1]
