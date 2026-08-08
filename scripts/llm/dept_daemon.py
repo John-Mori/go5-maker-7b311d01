@@ -289,6 +289,31 @@ def failopen_enabled(dept, rec):
         return False
 
 
+def failopen_inject(rec):
+    """fail-open を**安全に1回通す**ための注入点(2026-08-08 イージス研究室)。
+
+    なぜ要るか= fail-open の発火条件は `_relay_ok=False`(=部屋の永続セッションが返せない)だけ。
+      これを自然に待つと**生きた部屋が事故を起こすまで一生確認できない**(実測= 2026-08-02 06:53に
+      armedしてから 8/8 まで6日間、発火ログ0件)。かといって確認のために生きた消費者を殺すのは
+      **事故の自作**で、§3「本番の部屋でテストしない」に反する。
+      → 消費者には一切触れず、**この便に限って relay を呼ばずに「失敗した」ことにする**。
+
+    安全性= 門が2枚ある。**両方**満たさないと絶対に True にならない。
+      1 `test: true`= 検証便であること。本番便には付かない(付ければ**送信そのものが止まる**=
+        既存の実弾検証と同じ守り・行4552)。
+      2 `relay_fail_inject: true`= この検証のための明示の合図。既定の便には存在しないキー。
+    ★片方だけでは効かない=本番の配送は1バイトも変わらない。★例外は False(fail-safe)。
+    """
+    try:
+        if not isinstance(rec, dict):
+            return False
+        if not rec.get("test"):
+            return False            # 本番便では絶対に発火しない(1枚目の門)
+        return bool(rec.get("relay_fail_inject"))
+    except Exception:
+        return False
+
+
 # ★恒久対処(2026-07-20 組織層GL室): 「回します/やっておく」と言って何も起きない事故の真因は
 #   **返信を書く判断者(キャラLLM)と、回送/作業を起こす判断者(キーワード正規表現)が別人**だったこと。
 #   キャラが約束してもコードは約束を知らないので裏切りが構造的に発生する。
@@ -4393,8 +4418,16 @@ class Daemon:
                 #     (「実作業と見た/違えば会話でよい」)だけ=全部fail-open側で無害。
                 #   ★キーワードは増やさない(自然文では必ず再発・2026-07-20実測)。部屋の性質で倒す。
                 _is_work = kw_work or bool(self.conf.get("work_scope"))
-                reply, _relay_ok = session_relay.relay(self.dept, rec, self.conf, self._token(),
-                                                       is_work=_is_work, on_slow=_on_slow)
+                if failopen_inject(rec):
+                    # ★検証用の注入(failopen_inject の docstring 参照)。**relayを呼ばない**=
+                    #   生きた消費者に一切触れずに `_relay_ok=False` の枝だけを1回通す。
+                    #   ここから先は本番と同じ経路(詫び文の決定→fail-open→出口ゲート)を素通りする。
+                    reply, _relay_ok = "", False
+                    log(self.dept,
+                        f"★fail-open検証: relay不成立を注入した(実セッションは呼んでいない) msg={mid}")
+                else:
+                    reply, _relay_ok = session_relay.relay(self.dept, rec, self.conf, self._token(),
+                                                           is_work=_is_work, on_slow=_on_slow)
                 # ★成功した時だけ「本人が答えた」印を立てる(送信名義から(精霊)を外すため)。
                 #   失敗して精霊の口で詫びる時は立てない=印の意味を保つ。
                 self._relay_answered = bool(_relay_ok)

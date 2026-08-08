@@ -168,5 +168,28 @@ check("壊れたファイル→envで判定継続(対象True)",
 os.remove(_fd)
 
 _env()  # 後片付け
+
+# ---- 5) failopen_inject の門(2026-08-08 イージス研究室) ----
+#   6日待って自然発火0だったので「安全に1回通す」注入点を足した。
+#   ★守りの核= 門は2枚(test + relay_fail_inject)。**片方だけでは絶対に効かない**
+#     =本番の便は1バイトも変わらない。ここが崩れると生きた部屋の配送が止まる。
+print("[5] failopen_inject の門(検証用の注入点)")
+check("両方あり→True", d.failopen_inject({"test": True, "relay_fail_inject": True}), True)
+check("test だけ→False", d.failopen_inject({"test": True}), False)
+check("inject だけ(本番便)→False", d.failopen_inject({"relay_fail_inject": True}), False)
+check("素の本番便→False", d.failopen_inject({"content": "こんにちは"}), False)
+check("空dict→False", d.failopen_inject({}), False)
+check("dictでない→False(fail-safe)", d.failopen_inject(None), False)
+check("inject が偽値→False", d.failopen_inject({"test": True, "relay_fail_inject": False}), False)
+# ★注入と fail-open の噛み合わせ。注入便は test:true なので allowlist は迂回するが、
+#   **kill-switch は迂回しない**= fail-open 自体がOFFなら注入しても精霊は喋らない。
+#   ここが逆だと「検証のつもりで沈黙を作る」事故になるので、両方向を固定する。
+_inj = {"test": True, "relay_fail_inject": True}
+_env(failopen="on", depts="")     # ON・allowlistは空
+check("ON+注入便→allowlist外でも許可(test特例)", d.failopen_enabled("copy-director", _inj), True)
+_env()                            # 全部OFF(kill-switch相当)
+check("OFF+注入便→許可しない(注入はkill-switchを迂回しない)",
+      d.failopen_enabled("copy-director", _inj), False)
+
 print(f"\n{PASS} passed / {FAIL} failed")
 sys.exit(1 if FAIL else 0)
