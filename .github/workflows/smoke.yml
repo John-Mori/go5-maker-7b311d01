@@ -9,8 +9,10 @@ on:
     paths:
       - 'index.html'
       - '**/*.js'
+      - '**/*.mjs'        # ★門番スクリプト(scripts/check_*.mjs 等)自身の変更も検査する=門を直しても未検査で素通りしていた穴(2026-08-08)
       - '**/*.css'
       - 'assets/**'
+      - 'schedule/**'     # ★カレンダー iframe の資産変更でもスモークを回す(版ずれ検査の対象領域そのもの)
       - '.github/workflows/smoke.yml'
   workflow_dispatch: {}
 
