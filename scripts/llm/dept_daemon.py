@@ -4719,6 +4719,9 @@ class Daemon:
                 if (not _is_notice and not conv_only
                         and not getattr(self, "_relay_answered", False)):
                     send_argv += ["--suffix", "(精霊)"]
+                # ★学習部屋の色線＋文字拡大モードは廃止(Chami依頼2026-08-09 msg=1536100162924183633
+                #   「良い感じだけどやっぱこのシステム廃止で。普通に見たい」)。仕様上どうしても普通の
+                #   embed表示と変わるため。→ learning-coach も他部門と同じ素の返信へ戻す(特別扱いなし)。
                 send_argv += ["--body-file", body]
                 r = subprocess.run(send_argv,
                                    capture_output=True, text=True, encoding="utf-8",
