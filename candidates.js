@@ -1330,7 +1330,7 @@
       // ★動画生成へは右端から離す(padding-right)＝右上の✕との誤タップ防止(Chami依頼2026-08-09)
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding-right:40px;">' +
         '<span class="hint" style="margin:0;flex:1;">動画生成用の画像</span>' +
-        '<button id="refImgToMovie" type="button" class="primary" style="width:auto;margin:0;flex:0 0 auto;font-size:13px;padding:7px 14px;">動画生成へ</button>' +
+        '<button id="refImgToMovie" type="button" class="primary" style="width:auto;margin:0;flex:0 0 auto;font-size:13px;padding:7px 14px;display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1;">動画生成へ</button>' +
       '</div>' +
       '<div id="refImgPreview" class="cand-refimg-preview"></div>' +
       '<div class="cand-img-btnrow">' +
