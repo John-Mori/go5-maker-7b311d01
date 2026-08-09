@@ -1327,7 +1327,8 @@
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
       '<div class="fz-title refimg-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 6px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + esc(it.title || it.cid) + '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+      // ★動画生成へは右端から離す(padding-right)＝右上の✕との誤タップ防止(Chami依頼2026-08-09)
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding-right:40px;">' +
         '<span class="hint" style="margin:0;flex:1;">動画生成用の画像</span>' +
         '<button id="refImgToMovie" type="button" class="primary" style="width:auto;margin:0;flex:0 0 auto;font-size:13px;padding:7px 14px;">動画生成へ</button>' +
       '</div>' +
@@ -1337,9 +1338,8 @@
         '<button id="refImgPaste" type="button" class="ghost" style="background:#fffef9;color:#111;border-color:#d8d2bf;">画像を貼り付け</button>' +
         '<button id="refImgClear" type="button" class="ghost cand-img-clear" style="background:#fffef9;color:#111;border-color:#d8d2bf;">消す</button>' +
       '</div>' +
-      // メモ(コメントの上・Chami依頼2026-08-09)。コメントが無い時にカードへ水色で表示。全サイズで本文内に直接表示。
-      '<label class="hint" style="display:block;margin:8px 0 2px;">メモ</label>' +
-      '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)">' +
+      // メモ欄は「メモ追加」ボタンで生成(既存メモがあれば開いた時に自動表示)。コメントが無い時にカードへ水色で表示。
+      '<div id="refImgMemoWrap"></div>' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">コメント</label>' +
       '<input id="refImgComment" type="text" class="cand-refimg-line" autocomplete="off" placeholder="コメント">' +
       '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL</label>' +
@@ -1347,17 +1347,19 @@
         '<input id="refImgTwitter" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
-      // 2つ目以降のURL(カードに X2↗ / B2↗ / Web2↗ で表示)。「URL追加」で欄が下に増える(1モーダル完結)。
+      // 2つ目以降のURL(カードに X2↗ / B2↗ / Web2↗ で表示)。下の「URL追加」ボタンで欄が増える(1モーダル完結)。
       '<div id="refImgUrls2Wrap"></div>' +
-      '<button id="refUrlAdd" type="button" class="ghost" style="margin:6px 0 0;padding:6px 12px;font-size:12px;white-space:nowrap;width:auto;">＋ URL追加</button>' +
       '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;white-space:nowrap;">アフィリンク付き作品URLを貼ると、正式な作品URLに自動変換</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgWorkUrl" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
-      '<div style="display:flex;gap:8px;margin-top:10px;align-items:stretch;">' +
-        '<button id="refImgSave" type="button" class="primary" style="flex:2;padding:9px;">保存</button>' +
-        '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:9px 14px;">閉じる</button>' +
+      // 保存を小さくし、空いた枠にメモ追加・URL追加ボタン(押下でそれぞれの欄を生成)。狭ければ折り返す(Chami依頼2026-08-09)。
+      '<div style="display:flex;gap:8px;margin-top:10px;align-items:stretch;flex-wrap:wrap;">' +
+        '<button id="refImgSave" type="button" class="primary" style="flex:1 1 auto;padding:9px 16px;">保存</button>' +
+        '<button id="refMemoAdd" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:9px 10px;font-size:12px;white-space:nowrap;">メモ追加</button>' +
+        '<button id="refUrlAdd" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:9px 10px;font-size:12px;white-space:nowrap;">URL追加</button>' +
+        '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:9px 12px;">閉じる</button>' +
       '</div><div id="refImgMsg" class="hint" style="min-height:1.2em;"></div>';
     var previewEl = body.querySelector('#refImgPreview');
     function navTo(i) { var n = pending.imgs.length; if (!n) return; pending.idx = (i + n) % n; drawPreview(); }
@@ -1370,8 +1372,9 @@
           '<img src="' + esc(pending.imgs[pending.idx]) + '" alt="" class="fz-zoomable" style="max-width:100%;max-height:40vh;border-radius:8px;border:1px solid var(--line);display:block;margin:0 auto;">' +
           (n > 1 ? '<button type="button" class="cand-refimg-nav prev" aria-label="前へ">‹</button><button type="button" class="cand-refimg-nav next" aria-label="次へ">›</button>' : '') +
         '</div>' +
-        '<div class="hint" style="text-align:center;margin-top:3px;">' +
-          (n > 1 ? '🖼 複数あり ' + (pending.idx + 1) + ' / ' + n + '(スワイプで切替・<b>表示中の画像が「動画生成へ」で使われます</b>)' : '画像 1枚') +
+        // ★1行固定・絵文字なし(Chami依頼2026-08-09)。長い時ははみ出さず省略。
+        '<div class="hint" style="text-align:center;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;">' +
+          (n > 1 ? (pending.idx + 1) + '/' + n + '(スワイプで切替/表示中の画像が動画生成で使用)' : '画像 1枚') +
         '</div>';
       previewEl.querySelector('img').addEventListener('click', function () {
         openImgZoom_(pending.imgs.slice(), pending.idx, {
@@ -1403,7 +1406,26 @@
     drawPreview();
     body.querySelector('#refImgComment').value = pending.comment;
     body.querySelector('#refImgTwitter').value = pending.twitterUrl;
-    body.querySelector('#refImgMemoInline').value = pending.memo || '';
+    // メモ欄は「メモ追加」ボタンで生成する単一欄。既存メモがあれば開いた時に自動表示。✕で欄ごと消せる。
+    var memoWrap = body.querySelector('#refImgMemoWrap');
+    function collectMemo_() {
+      var el = body.querySelector('#refImgMemoInline');
+      return el ? (el.value || '') : (pending.memo || '');
+    }
+    function addMemoBox_(val) {
+      var el = body.querySelector('#refImgMemoInline');
+      if (el) { el.focus(); return; } // 既にあれば増やさずフォーカス(メモは1欄)
+      memoWrap.innerHTML =
+        '<label class="hint" style="display:block;margin:8px 0 2px;">メモ</label>' +
+        '<div class="refimg-url2-row" style="margin-top:0;">' +
+          '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)" style="flex:1;min-width:0;">' +
+          '<button type="button" class="cand-url2-del" title="メモ欄を消す">✕</button>' +
+        '</div>';
+      memoWrap.querySelector('input').value = val || '';
+      memoWrap.querySelector('.cand-url2-del').addEventListener('click', function () { pending.memo = ''; memoWrap.innerHTML = ''; });
+    }
+    if (pending.memo) addMemoBox_(pending.memo);
+    body.querySelector('#refMemoAdd').addEventListener('click', function () { addMemoBox_(''); });
     // 2つ目以降のURL欄を pending.urls2 から描く。「URL追加」で空欄を1つ足す。各欄に貼り付け＋✕(欄を消す)。
     var urls2Wrap = body.querySelector('#refImgUrls2Wrap');
     function collectUrls2_() {
@@ -1470,10 +1492,9 @@
       drawPreview();
       body.querySelector('#refImgMsg').textContent = '画像を削除しました(保存で確定・残り' + pending.imgs.length + '枚)';
     });
-    // メモ・2つ目以降URLを本文欄から pending へ取り込む(全サイズ・1モーダル完結・Chami依頼2026-08-09)。
+    // メモ・2つ目以降URLを(生成済みなら)欄から pending へ取り込む(1モーダル完結・Chami依頼2026-08-09)。
     function syncPcMemoInline_() {
-      var memoEl = body.querySelector('#refImgMemoInline');
-      if (memoEl) pending.memo = memoEl.value || '';
+      pending.memo = collectMemo_();
       pending.urls2 = collectUrls2_();
     }
     // 動画生成へ：このモーダルの作品データを動画作成タブへ引き継いで移動する。
