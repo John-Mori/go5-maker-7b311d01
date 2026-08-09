@@ -178,12 +178,24 @@ async function handleRedirect(code, env, ctx, request) {
   const cookie = request.headers.get("Cookie") || "";
   const optedOut = /(?:^|;\s*)go5nc=1(?:;|$)/.test(cookie);
   const markSelf = reqUrl.searchParams.get("nc") === "1";
-  // 既知クローラは数えない（X投稿時の Twitterbot カード生成クロール等）。リダイレクト自体は返す。
+  // 既知クローラは数えない（X投稿時の Twitterbot カード生成クロール等）。
   const ua = request.headers.get("User-Agent") || "";
   const isBot = isBotUA(ua);
+  // ★SNSクローラ(Twitterbot等)には 302 で FANZA へ通さず、OGP/カード用メタを一切持たない空HTMLを返す。
+  //   → X等の投稿にリンクプレビュー(埋め込みカード)を出さない(Chami依頼2026-08-09「最悪出ても埋め込みは表示しないように・冗長」)。
+  //   これまでは 302→FANZA を辿らせていたので FANZA の OGP がカード化して冗長に見えていた。
+  //   ★実ユーザー(非ボット)は下の従来どおり 302 で即リダイレクト＝導線もクリック計測も不変。ボットは元々数えない。
+  //   ★UAが空/無しの時は「クローラ確定」ではない(計測から外すだけの保守判定)ので、カード抑止せず従来どおり302で通す
+  //   =UAを送らない稀な実ユーザーが空白ページで詰まらないようにする。空HTMLを返すのはUAが実在するクローラだけ。
+  if (ua && isBot) {
+    return new Response(
+      "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title></title></head><body></body></html>",
+      { status: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
+    );
+  }
   const headers = { Location: urlStr, "Cache-Control": "no-store" };
   if (markSelf) headers["Set-Cookie"] = "go5nc=1; Max-Age=63072000; Path=/; Secure; SameSite=Lax";
-  if (!optedOut && !markSelf && !isBot) {
+  if (!optedOut && !markSelf) {
     // クリックを概算カウント（リダイレクトはブロックしない）。自分(除外対象)/ボットなら数えない。
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(bumpClick(env, code));
   }
