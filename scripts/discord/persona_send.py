@@ -67,6 +67,36 @@ def split_body(text, limit=LIMIT):
         parts.append(cur)
     return parts
 
+
+def enlarge_headings(text, mark="**"):
+    """embed descriptionの本文を読みやすくする(Chami指示2026-08-09・学習部屋だけ)。
+
+    Discordの embed description は通常メッセージ本文より一段小さく描画される。
+    文字を大きくする手段は見出し(`# `/`## `/`### `)しか無いが、最小のH3ですら
+    Chamiに「まだ大きい」(msg=1536098736755834993・2026-08-09)=H3と普通の中間サイズは
+    Discordに存在しない。よって★既定は太字(`**…**`)=大きさは普通のままだが、細い既定より
+    はっきり読める(H2→H3→太字と一段ずつ下げてきた到達点)。もっと大きくしたい時は
+    mark に "### "/"## " を渡せば見出し化する余地は残す。
+    ★見出しカード化・全文の過剰装飾はしない(C-035)。
+    既に見出し/引用/箇条書き等の構造行(先頭が # > - *、または番号付き "1." )や
+    既に太字(`**`)を含む行は二重装飾で崩れるので触らない。空行も触らない(段落間隔を保つ)。
+    ★字数は足す前提で呼び側が split_body(…, 4000) すること(4096上限の安全域)。
+    """
+    # mark が見出し(末尾スペース付き)なら行頭付与、そうでなければ太字で行を包む
+    heading = mark.endswith(" ")
+    out = []
+    for ln in text.split("\n"):
+        s = ln.lstrip()
+        if not s:
+            out.append(ln)                       # 空行=段落の切れ目。触らない
+        elif s[0] in "#>-*" or re.match(r"\d+\.\s", s) or "**" in ln:
+            out.append(ln)                       # 構造行/既に太字の行は素通し(二重装飾で崩れる)
+        elif heading:
+            out.append(mark + ln)                # 見出しモード=行頭に `### ` 等
+        else:
+            out.append(f"{mark}{ln}{mark}")      # 太字モード=行を `**…**` で包む
+    return "\n".join(out)
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     # stdin もUTF-8に。Windowsの既定stdin=cp932のままだと `echo 日本語 | persona_send`
@@ -381,7 +411,7 @@ COLORS = {"red": 0xED4245, "orange": 0xE67E22, "yellow": 0xFEE75C, "green": 0x57
 # --print-id: 投稿の実Discord message_idを stdout に `msg=<id>` で出す(?wait=true を強制)。
 #   C-023(2026-07-30)で dispatch の実依頼を表投稿する時、そのIDでリアクションを着弾させるため。
 #   通常のdept投稿はwait無しでIDを返さないので、この口を足した(mirror名義以外でもIDを取れる)。
-_BARE_FLAGS = ("--nobold", "--silent", "--print-id")
+_BARE_FLAGS = ("--nobold", "--silent", "--print-id", "--plain", "--big")
 # 「未知のオプション」らしさの判定。`---`(Markdownの区切り線)や `--` 単体は本文なので除く。
 _UNKNOWN_FLAG_RE = re.compile(r"^--[A-Za-z][A-Za-z0-9-]*$")
 
@@ -405,7 +435,7 @@ def sanitize_rest(rest):
         return rest
     print(f"[persona_send] ★警告: 未知の引数 {unknown} を本文として受け取った。"
           f"綴り間違い/未対応オプションの可能性がある(既知= --channel/--dept/--persona/"
-          f"--suffix/--avatar/--color/--etitle/--body/--body-file/--nobold/--silent)。",
+          f"--suffix/--avatar/--color/--etitle/--body/--body-file/--nobold/--silent/--plain/--big)。",
           file=sys.stderr)
     out = list(rest)
     dropped = []
@@ -500,6 +530,8 @@ def main():
     #     解決・アバター・色・webhookは**素の人格名**で行い、最後にusernameだけへ足す。
     display = f"{persona}{suffix}" if suffix else persona
     payload = {"username": display[:80]}
+    plain = "--plain" in sys.argv   # 素の色モード= 左に色線だけ・本文は普通の文字(見出し化/太字化しない)
+    plain_color = None              # embedは投稿段で本文チャンク毎に組む(長文で黙って切らないため)
     if color == "auto":
         # 話者のテーマカラー(local/persona_colors.json)で送る。未定義なら通常メッセージにフォールバック
         try:
@@ -513,7 +545,13 @@ def main():
                 c = int(color.lstrip("#"), 16)
             except ValueError:
                 c = COLORS["blue"]
-        if etitle:
+        if plain:
+            # 素の色モード(Chami指定2026-08-09 msg=1536092125127508029・学習部屋だけ):
+            #   embed の左カラーバーだけ人格色。本文は description にそのまま=見出しにも太字にもしない。
+            #   title無し=大文字の見出しカードにならない。長文は投稿段で split_body(4000) して連投
+            #   (embed description上限4096字に対する安全域)=黙って切らない(INC-92を再発させない)。
+            plain_color = c
+        elif etitle:
             # 明示見出しモード: 見出し+太字本文(--nobold で太字解除)
             desc = body[:3900]
             if "--nobold" not in sys.argv:
@@ -573,7 +611,30 @@ def main():
             return r.status, ""
 
     try:
-        if "embeds" in payload:
+        if plain_color is not None:
+            # 素の色モード= embed{description:本文, color:人格色}(title無し/太字無し)を
+            # 本文チャンク毎に1通ずつ。分割時の無音化・username変更は content 経路と同じ作法。
+            base_silent = 4096 if (mirror or "--silent" in sys.argv) else 0
+            # --big= 本文を"少し大きい普通の文字"にする(各行頭に `## `・Chami指示2026-08-09
+            #   msg=1536095016634679307「標準だと字が小さくなるから大きくするように」・学習部屋だけ)。
+            #   ★見出しカード化/全文太字化はしない(C-035)。分割は付与後の字数で行い黙って切らない。
+            src = enlarge_headings(body) if "--big" in sys.argv else body
+            for i, part in enumerate(split_body(src, 4000)):
+                pl = {"username": display[:80],
+                      "embeds": [{"description": part, "color": plain_color}]}
+                if avatar:
+                    pl["avatar_url"] = avatar
+                fl = base_silent
+                if i >= 1:
+                    fl |= 4096  # 2通目以降は無音(1通目だけ通知・Chami指示2026-08-06)
+                    pl["username"] = f"{display}(続き{i + 1})"[:80]  # 畳み解除でアイコン再表示
+                if fl:
+                    pl["flags"] = fl
+                st, mid = post(pl, want_id=want_id)
+                print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})"
+                      + (f" msg={mid}" if mid else "") + (f" [{i+1}通目]" if i else ""))
+                time.sleep(0.4)
+        elif "embeds" in payload:
             st, mid = post(payload, want_id=want_id)
             print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})" + (f" msg={mid}" if mid else ""))
         else:
@@ -591,6 +652,13 @@ def main():
                 # mirror/--silentで全通無音の場合は payload["flags"] が既に4096なので影響なし。
                 if i >= 1:
                     pl["flags"] = pl.get("flags", 0) | 4096
+                    # 2通目以降は username を変える(Chami指摘2026-08-06 msg=1534626915787472926:
+                    # 「連投するとアイコンが見えなくてよくわからない」)。
+                    # Discordは"同一webhook+同一username+同一avatar"が連続すると2通目以降の
+                    # ヘッダー(名前とアイコン)を畳む。誰が喋っているか分からなくなるのはこれが原因。
+                    # usernameを1文字でも変えると畳みが解けてアイコンが再表示される。
+                    # avatar_urlは据え置き=同じ顔のまま「(続き2)」だけが付く。
+                    pl["username"] = f"{display}(続き{i + 1})"[:80]
                 st, mid = post(pl, want_id=want_id)
                 print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})"
                       + (f" msg={mid}" if mid else "") + (f" [{i+1}通目]" if i else ""))
