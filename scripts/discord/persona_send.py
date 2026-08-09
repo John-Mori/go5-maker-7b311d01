@@ -95,7 +95,9 @@ def enlarge_headings(text, mark="**"):
             out.append(mark + ln)                # 見出しモード=行頭に `### ` 等
         else:
             out.append(f"{mark}{ln}{mark}")      # 太字モード=行を `**…**` で包む
-    return "\n".join(out)
+    # ★空行(=文の代わりの余白)が大きいとChami(msg=1536099144203108412・2026-08-09)。
+    #   連続する空行を1つの改行へ畳んで縦の隙間を詰める(段落の大きな余白を出さない)。
+    return re.sub(r"\n(?:[ \t]*\n)+", "\n", "\n".join(out))
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
