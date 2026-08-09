@@ -1357,8 +1357,8 @@
       // 保存を小さくし、空いた枠にメモ追加・URL追加ボタン(押下でそれぞれの欄を生成)。狭ければ折り返す(Chami依頼2026-08-09)。
       '<div style="display:flex;gap:8px;margin-top:10px;align-items:stretch;flex-wrap:wrap;">' +
         '<button id="refImgSave" type="button" class="primary" style="flex:1 1 auto;padding:9px 16px;">保存</button>' +
-        '<button id="refMemoAdd" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:9px 10px;font-size:12px;white-space:nowrap;">メモ追加</button>' +
-        '<button id="refUrlAdd" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:9px 10px;font-size:12px;white-space:nowrap;">URL追加</button>' +
+        '<button id="refMemoAdd" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:6px 9px;font-size:12px;white-space:normal;line-height:1.15;text-align:center;">メモ<br>追加</button>' +
+        '<button id="refUrlAdd" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:6px 9px;font-size:12px;white-space:normal;line-height:1.15;text-align:center;">URL<br>追加</button>' +
         '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:9px 12px;">閉じる</button>' +
       '</div><div id="refImgMsg" class="hint" style="min-height:1.2em;"></div>';
     var previewEl = body.querySelector('#refImgPreview');

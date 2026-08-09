@@ -849,7 +849,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-refimg-stage{position:relative;}
 /* ★左右送りの○＝正円で固定。.fz-modal button{width:max-content}(特異度0,1,1)に負けて楕円化するのを、
    2クラス(特異度0,2,0)+min/max-width+aspect-ratioで恒久的に封じる(Chami依頼2026-08-09) */
-.cand-refimg-stage .cand-refimg-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(14,20,34,.72);color:#fff;border:1px solid var(--line);border-radius:50%;box-sizing:border-box;width:34px;min-width:34px;max-width:34px;height:34px;aspect-ratio:1/1;font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;}
+.cand-refimg-stage .cand-refimg-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(14,20,34,.72);color:#fff;border:1px solid var(--line);border-radius:50%;box-sizing:border-box;width:34px;min-width:34px;max-width:34px;height:34px;aspect-ratio:1/1;font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0 0 3px;flex:0 0 auto;}
 .cand-refimg-nav.prev{left:6px;}
 .cand-refimg-nav.next{right:6px;}
 /* 複数画像あり＝サムネをアンバー枠で表現（旧「🖼複数あり×N」バッジは廃止） */
