@@ -434,10 +434,29 @@
       return t === 'tabMovie';
     } catch (e) { return true; }
   }
+  // ★他タブ/背面では「止める」だけでなく背景動画のデコードバッファ自体を解放する(2026-08-10)。
+  //   pause しても src が付いたままだと iOS は復号済みデータを保持し続け、これがタブ丸ごと破棄→
+  //   「アプリから戻ると再読込」を誘発するメモリ圧の主因になる。src を外して load() で手放し、
+  //   動画作成タブへ戻った瞬間に当該アカウントの背景を貼り直して再生する=作成フロー・見た目は不変。
+  function bgReleaseSrc_() {
+    try {
+      if (!bg.getAttribute("src")) return;
+      try { bg.pause(); } catch (e) {}
+      bg.removeAttribute("src");
+      try { bg.load(); } catch (e) {}   // バッファ解放
+    } catch (e) {}
+  }
+  function bgRestoreSrc_() {
+    try {
+      var want = (ACCOUNTS[curAccount] && ACCOUNTS[curAccount].bg) || ACCOUNTS.acc1.bg;
+      var cur = bg.getAttribute("src") || "";
+      if (!cur.endsWith(want)) { bg.src = want; try { bg.load(); } catch (e) {} }
+    } catch (e) {}
+  }
   function syncBgPlayback_() {
     try {
-      if (bgShouldPlay_()) { bg.play().catch(function () {}); }
-      else { try { bg.pause(); } catch (e) {} }
+      if (bgShouldPlay_()) { bgRestoreSrc_(); bg.play().catch(function () {}); }
+      else { bgReleaseSrc_(); }
     } catch (e) {}
   }
   window.Go5SyncBgPlayback = syncBgPlayback_;
@@ -799,10 +818,15 @@
     }
     if (els.acctBtn1) els.acctBtn1.classList.toggle("active", id === "acc1");
     if (els.acctBtn2) els.acctBtn2.classList.toggle("active", id === "acc2");
+    // ★背景動画は「動画作成タブが前面の時」だけメモリに載せる(2026-08-10・リロード緩和)。
+    //   他タブ閲覧中にアカウントを切替えても動画は読み込まない=そのページを軽いままにする。
+    //   動画作成タブへ入る時に bgRestoreSrc_ が当該アカウントの背景を貼り直す。
     const want = ACCOUNTS[id].bg;
-    const cur = bg.getAttribute("src") || "";
-    if (!cur.endsWith(want)) { bg.src = want; try { bg.load(); } catch (e) {} }
-    bg.play().catch(() => {});
+    if (bgShouldPlay_()) {
+      const cur = bg.getAttribute("src") || "";
+      if (!cur.endsWith(want)) { bg.src = want; try { bg.load(); } catch (e) {} }
+      bg.play().catch(() => {});
+    }
     if (typeof loadOffsets === "function") loadOffsets(false); // このアカウントのレイアウト設定を反映
     preview();
     document.dispatchEvent(new CustomEvent("account-changed", { detail: { id } }));
