@@ -474,16 +474,11 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;box-sizing:border-box;overflow:auto;}
 .fz-overlay[hidden]{display:none;}
 .fz-modal{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:16px;width:100%;max-width:520px;box-sizing:border-box;margin:auto;}
-/* 候補「投稿編集」モーダル：PC(広い画面)ではメモ・2つ目URLを左列に常時表示し、ボタンを押さず
-   保存/動画生成へで一緒に反映できるようにする。スマホは従来どおり非表示＝「メモ・URL追加」ボタンから小モーダル。 */
-.refimg-pc-memo{display:none;}
-@media (min-width:1024px){
-  .refimg-modal{max-width:860px;}
-  .refimg-modal .fz-body{display:grid;grid-template-columns:260px 1fr;gap:0 24px;align-items:start;}
-  .refimg-modal .refimg-pc-memo{display:block;grid-column:1;grid-row:1/-1;border-right:1px solid var(--line);padding-right:20px;}
-  .refimg-modal .fz-body > :not(.refimg-pc-memo){grid-column:2;}
-  .refimg-modal #refMemoAdd{display:none;} /* PCでは左列に常時表示済み＝ボタン不要 */
-}
+/* 候補「投稿編集」モーダル：メモ・URLは全サイズで本文内に直接表示(1モーダル完結・Chami依頼2026-08-09)。
+   旧PC専用の左列グリッド/スマホ用「メモ・URL追加」小モーダルは廃止。長い時は .fz-overlay(overflow:auto)がスクロール。 */
+.refimg-url2-row{display:flex;gap:6px;align-items:stretch;margin-top:6px;}
+.refimg-url2-row .cand-url2-del{flex:0 0 auto;width:auto;padding:0 10px;font-size:13px;color:#f2a0a0;background:#1a1420;border:1px solid #3a2a34;border-radius:8px;cursor:pointer;white-space:nowrap;}
+.refimg-url2-row .cand-url2-del:active{opacity:.75;}
 /* 【恒久ルール】ボタンの横幅はテキスト長に自動追従（固定値・全幅にしない）。全幅は主要CTA(button.primary等)のみ。
    モーダル内はグローバル button{width:100%} を打ち消してテキスト幅に。flex:1 指定のボタン（保存/コピー等）は
    flex-basis が優先されるため従来どおり flex で伸びる。 */

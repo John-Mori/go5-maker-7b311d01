@@ -587,16 +587,22 @@
   function refImgHas(cid) {
     var r = refImgOf(cid); if (!r) return false; // 1回の読みで判定(フォールバック時の多重JSON.parse回避)
     var has = Array.isArray(r.imgs) ? r.imgs.some(Boolean) : !!r.img;
-    return !!(has || r.comment || r.memo || r.twitterUrl || r.twitterUrl2);
+    return !!(has || r.comment || r.memo || r.twitterUrl || r.twitterUrl2 || (r.urls2 && r.urls2.length));
   }
   function refImgSave(cid, data) {
     // data.imgs(配列・新)または data.img(単発・旧)を受け付け、{imgs, img:先頭} で保存。(img は旧読み手互換用)
     var imgs = data ? (Array.isArray(data.imgs) ? data.imgs.filter(Boolean) : (data.img ? [data.img] : [])) : [];
-    var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl && !data.twitterUrl2);
+    // 2つ目以降のURLは配列 urls2 を正とし、旧 twitterUrl2(単発)からも取り込む(後方互換)。
+    var urls2 = [];
+    if (data) {
+      if (Array.isArray(data.urls2)) urls2 = data.urls2.map(function (s) { return String(s || '').trim(); }).filter(Boolean);
+      else if (data.twitterUrl2) urls2 = [String(data.twitterUrl2).trim()].filter(Boolean);
+    }
+    var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl && !urls2.length);
     // ★展開前(_imgMemが空)の「空データ=削除」は、読めていないだけの既存データを消す事故になる。
     //   未展開のうちは破壊的な空保存を拒否する。(明示削除はUIから展開後に行われるので実害なし)
     if (empty && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
-    var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: data.twitterUrl2 || '', at: new Date().getTime() };
+    var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: urls2[0] || '', urls2: urls2, at: new Date().getTime() };
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
       // IDB書込みのPromiseを返す(常にtruthy=従来のtrueと同じ扱いで既存の if(okRef)/if(!refImgSave()) と互換)。
@@ -1279,6 +1285,17 @@
     });
   }
 
+  // ── X/Bluesky/その他URLの種別判定＆カードのリンク札(Chami依頼2026-08-09: X以外も表示・非SNSは Web)──
+  function urlKind_(u) { u = String(u || ''); if (/bsky\.app\//.test(u)) return 'b'; if (/(?:x\.com|twitter\.com)\//.test(u)) return 'x'; return 'web'; }
+  function candUrlLink_(su, n) {
+    var k = urlKind_(su);
+    var color = k === 'b' ? '#1185fe' : (k === 'x' ? '#1d9bf0' : '#2bb3c0');
+    var base = k === 'b' ? 'B' : (k === 'x' ? 'X' : 'Web');
+    return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + color + ';">' + base + (n ? String(n) : '') + '↗</a>';
+  }
+  // refimgレコードの「2つ目以降のURL」を配列で返す(旧 twitterUrl2 単発から移行・後方互換)。
+  function refUrls2_(rec) { if (!rec) return []; if (Array.isArray(rec.urls2)) return rec.urls2.filter(Boolean); return rec.twitterUrl2 ? [rec.twitterUrl2] : []; }
+
   // ── 投稿画像モーダル(複数画像＋メモを保存)──
   var _refOverlay = null;
   var _refOpenSeq = 0; // モーダルを開くたびに増える通し番号(遅い非同期処理が古いpendingへ書き込むのを防ぐ)
@@ -1302,7 +1319,7 @@
     // pending.imgs=保存候補の画像列(複数可・37ページ級の連続貼り付けOK)・idx=表示中(「動画生成へ」で採用される1枚)
     // X/Bluesky URL は refimg 側に無ければ候補アイテム側(it.twitterUrl=カードのXリンクの出所)からフォールバック
     //   。(カードにXリンクが出ているのにモーダルの欄が空になる不一致を防ぐ)
-    var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || it.twitterUrl || '', memo: cur.memo || '', twitterUrl2: cur.twitterUrl2 || '' };
+    var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || it.twitterUrl || '', memo: cur.memo || '', urls2: refUrls2_(cur).slice() };
     var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補(埋め込みポストURLあり)
     // 作品URLのプレフィル：候補が実際に作品URLを持つ(!isTwitter かつ it.url がDMM/book等)なら、
     //   twitterUrl の有無に関わらずそのまま欄に表示。(＝カードの「作品↗」と同じ判定)X起点(it.url=ポストURL)は空。
@@ -1310,20 +1327,9 @@
     var body = ov.querySelector('.fz-body');
     body.innerHTML =
       '<div class="fz-title refimg-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 6px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + esc(it.title || it.cid) + '</div>' +
-      // PC(広い画面)専用：メモ・2つ目URLをボタンを押さず直接編集できる列。(CSSで左列に配置・保存ボタンで一緒に反映)
-      // スマホはCSSで非表示のまま＝従来どおり「メモ・URL追加」ボタンから小モーダルで編集。
-      '<div class="refimg-pc-memo">' +
-        '<label class="hint" style="display:block;margin-bottom:2px;">メモ</label>' +
-        '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)">' +
-        '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL(2つ目・カードに X2↗ / B2↗ で表示)</label>' +
-        '<div style="display:flex;gap:6px;align-items:stretch;">' +
-          '<input id="refImgUrl2Inline" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
-          '<button type="button" class="ghost paste-btn" data-paste="refImgUrl2Inline" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
-        '</div>' +
-      '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
         '<span class="hint" style="margin:0;flex:1;">動画生成用の画像</span>' +
-        '<button id="refImgToMovie" type="button" class="primary" style="width:auto;margin:0;flex:0 0 auto;font-size:13px;padding:8px 14px;">動画生成へ</button>' +
+        '<button id="refImgToMovie" type="button" class="primary" style="width:auto;margin:0;flex:0 0 auto;font-size:13px;padding:7px 14px;">動画生成へ</button>' +
       '</div>' +
       '<div id="refImgPreview" class="cand-refimg-preview"></div>' +
       '<div class="cand-img-btnrow">' +
@@ -1331,22 +1337,27 @@
         '<button id="refImgPaste" type="button" class="ghost" style="background:#fffef9;color:#111;border-color:#d8d2bf;">画像を貼り付け</button>' +
         '<button id="refImgClear" type="button" class="ghost cand-img-clear" style="background:#fffef9;color:#111;border-color:#d8d2bf;">消す</button>' +
       '</div>' +
-      '<label class="hint" style="display:block;margin-bottom:2px;">コメント</label>' +
+      // メモ(コメントの上・Chami依頼2026-08-09)。コメントが無い時にカードへ水色で表示。全サイズで本文内に直接表示。
+      '<label class="hint" style="display:block;margin:8px 0 2px;">メモ</label>' +
+      '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)">' +
+      '<label class="hint" style="display:block;margin:8px 0 2px;">コメント</label>' +
       '<input id="refImgComment" type="text" class="cand-refimg-line" autocomplete="off" placeholder="コメント">' +
-      '<label class="hint" style="display:block;margin:8px 0 2px;">X / Bluesky URL</label>' +
+      '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgTwitter" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
+      // 2つ目以降のURL(カードに X2↗ / B2↗ / Web2↗ で表示)。「URL追加」で欄が下に増える(1モーダル完結)。
+      '<div id="refImgUrls2Wrap"></div>' +
+      '<button id="refUrlAdd" type="button" class="ghost" style="margin:6px 0 0;padding:6px 12px;font-size:12px;white-space:nowrap;width:auto;">＋ URL追加</button>' +
       '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;white-space:nowrap;">アフィリンク付き作品URLを貼ると、正式な作品URLに自動変換</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgWorkUrl" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;min-width:0;">' +
         '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:10px;align-items:stretch;">' +
-        '<button id="refImgSave" type="button" class="primary" style="flex:2;">保存</button>' +
-        '<button id="refMemoAdd" type="button" class="cand-memo-addbtn" style="flex:1;" title="メモとX/Bluesky URLを追加"><span class="cma-stack"><span>メモ</span><span>URL</span></span><span class="cma-add">追加</span></button>' +
-        '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
+        '<button id="refImgSave" type="button" class="primary" style="flex:2;padding:9px;">保存</button>' +
+        '<button id="refImgCancel" type="button" class="ghost" style="flex:0 0 auto;width:auto;padding:9px 14px;">閉じる</button>' +
       '</div><div id="refImgMsg" class="hint" style="min-height:1.2em;"></div>';
     var previewEl = body.querySelector('#refImgPreview');
     function navTo(i) { var n = pending.imgs.length; if (!n) return; pending.idx = (i + n) % n; drawPreview(); }
@@ -1393,7 +1404,29 @@
     body.querySelector('#refImgComment').value = pending.comment;
     body.querySelector('#refImgTwitter').value = pending.twitterUrl;
     body.querySelector('#refImgMemoInline').value = pending.memo || '';
-    body.querySelector('#refImgUrl2Inline').value = pending.twitterUrl2 || '';
+    // 2つ目以降のURL欄を pending.urls2 から描く。「URL追加」で空欄を1つ足す。各欄に貼り付け＋✕(欄を消す)。
+    var urls2Wrap = body.querySelector('#refImgUrls2Wrap');
+    function collectUrls2_() {
+      var out = [];
+      urls2Wrap.querySelectorAll('input.refimg-url2-input').forEach(function (el) { var v = (el.value || '').trim(); if (v) out.push(v); });
+      return out;
+    }
+    var _url2Seq = 0;
+    function addUrl2Row_(val) {
+      var id = 'refImgUrl2_' + (_url2Seq++);
+      var row = document.createElement('div');
+      row.className = 'refimg-url2-row';
+      row.innerHTML =
+        '<input id="' + id + '" size="1" type="text" inputmode="url" class="cand-refimg-line refimg-url2-input" autocomplete="off" placeholder="2つ目以降のX/Bluesky/その他URL" style="flex:1;min-width:0;">' +
+        '<button type="button" class="ghost paste-btn" data-paste="' + id + '" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
+        '<button type="button" class="cand-url2-del" title="このURL欄を消す">✕</button>';
+      urls2Wrap.appendChild(row);
+      row.querySelector('input').value = val || '';
+      row.querySelector('.cand-url2-del').addEventListener('click', function () { if (row.parentNode) row.parentNode.removeChild(row); });
+      wirePaste_(body);
+    }
+    (pending.urls2 || []).forEach(function (u) { addUrl2Row_(u); });
+    body.querySelector('#refUrlAdd').addEventListener('click', function () { addUrl2Row_(''); });
     body.querySelector('#refImgFile').addEventListener('change', function () {
       var files = [], fl = this.files || [], fi;
       for (fi = 0; fi < fl.length; fi++) files.push(fl[fi]);
@@ -1437,13 +1470,11 @@
       drawPreview();
       body.querySelector('#refImgMsg').textContent = '画像を削除しました(保存で確定・残り' + pending.imgs.length + '枚)';
     });
-    // PC専用インライン欄(メモ・2つ目URL)を pending へ取り込む。(ボタンを押さず保存/動画生成へで一緒に反映)
-    //   スマホはCSSでこの欄自体を表示しない＝値は常に空文字のまま→pending.memo/twitterUrl2を上書きしない
-    //   。(非表示要素の空値でモバイル利用中の「メモ・URL追加」小モーダルの内容を消さないための安全策)
+    // メモ・2つ目以降URLを本文欄から pending へ取り込む(全サイズ・1モーダル完結・Chami依頼2026-08-09)。
     function syncPcMemoInline_() {
-      var memoEl = body.querySelector('#refImgMemoInline'), url2El = body.querySelector('#refImgUrl2Inline');
-      if (memoEl && memoEl.offsetParent !== null) pending.memo = memoEl.value || '';
-      if (url2El && url2El.offsetParent !== null) pending.twitterUrl2 = (url2El.value || '').trim();
+      var memoEl = body.querySelector('#refImgMemoInline');
+      if (memoEl) pending.memo = memoEl.value || '';
+      pending.urls2 = collectUrls2_();
     }
     // 動画生成へ：このモーダルの作品データを動画作成タブへ引き継いで移動する。
     body.querySelector('#refImgToMovie').addEventListener('click', function () {
@@ -1462,12 +1493,6 @@
       });
     });
     body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
-    // メモ・URL追加：親の入力を pending に取り込んでから小モーダルを開く。(親の未保存入力を失わない)
-    body.querySelector('#refMemoAdd').addEventListener('click', function () {
-      pending.comment = body.querySelector('#refImgComment').value || '';
-      pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
-      openMemoUrlModal_(it.cid, pending, body, onSaved);
-    });
     body.querySelector('#refImgSave').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
@@ -1494,49 +1519,7 @@
     ov.hidden = false;
   }
 
-  // ── メモ＋X/Bluesky URL 追加モーダル(投稿編集モーダルから開く小モーダル・縦は内容に応じて短め)──
-  //   メモはコメントが無い時にカードへ水色で表示。URLは「2つ目のURL」(twitterUrl2)＝親の1つ目とは別枠。
-  //   記録するとカードで1つ目リンクの横に X2↗ / B2↗(Blueskyは B)が出る。既存URLはここには入れない。(空欄)
-  var _memoOverlay = null;
-  function openMemoUrlModal_(cid, pending, mainBody, onSaved) {
-    var ov = _memoOverlay;
-    if (!ov) {
-      ov = document.createElement('div'); ov.className = 'fz-overlay memo-overlay'; ov.hidden = true;
-      ov.innerHTML = '<div class="fz-modal memo-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
-      document.body.appendChild(ov);
-      ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
-      ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
-      _memoOverlay = ov;
-    }
-    var body = ov.querySelector('.fz-body');
-    body.innerHTML =
-      '<div class="fz-title" style="background:none;color:#fff;padding:0 36px 0 0;margin:0 0 10px;font-weight:700;">メモ・URLを追加</div>' +
-      '<label class="hint" style="display:block;margin-bottom:2px;">メモ</label>' +
-      '<input id="memoText" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)">' +
-      '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL(2つ目・カードに X2↗ / B2↗ で表示)</label>' +
-      '<div style="display:flex;gap:6px;align-items:stretch;">' +
-        '<input id="memoUrl" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="2つ目のX/Bluesky URLを貼り付け" style="flex:1;min-width:0;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="memoUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
-      '</div>' +
-      '<div style="display:flex;gap:8px;margin-top:14px;">' +
-        '<button id="memoSave" type="button" class="primary" style="flex:1;">保存</button>' +
-        '<button id="memoClose" type="button" class="ghost" style="flex:0 0 auto;width:auto;">閉じる</button>' +
-      '</div><div id="memoMsg" class="hint" style="min-height:1.2em;"></div>';
-    body.querySelector('#memoText').value = pending.memo || '';
-    body.querySelector('#memoUrl').value = pending.twitterUrl2 || ''; // ★2つ目のURL＝既存(1つ目)は入れず空欄で開始
-    wirePaste_(body);
-    body.querySelector('#memoClose').addEventListener('click', function () { ov.hidden = true; });
-    body.querySelector('#memoSave').addEventListener('click', function () {
-      pending.memo = body.querySelector('#memoText').value || '';
-      pending.twitterUrl2 = (body.querySelector('#memoUrl').value || '').trim(); // 2つ目のURLとして保存(親の1つ目には触れない)
-      if (!refImgSave(cid, pending)) { body.querySelector('#memoMsg').textContent = '保存できません(保存枠不足)'; return; }
-      body.querySelector('#memoMsg').textContent = '保存しました';
-      if (onSaved) onSaved();
-      try { if (_activeTab) render(); } catch (e) {}
-      setTimeout(function () { ov.hidden = true; }, 600);
-    });
-    ov.hidden = false;
-  }
+  // (メモ＋X/Bluesky URL の小モーダル openMemoUrlModal_ は廃止=投稿編集モーダル本体に統合・Chami依頼2026-08-09)
   // 動画作成タブへ切替え、候補の作品データ(前景画像/作者/コメント/作品URL)を各入力欄へ埋め込む。
   //   ※drafts.js の applyDraft_ と同じ手法：#author/#top/#movieWorkUrl を値+イベントで設定、
   //     前景画像は data-URL→File にして window.Go5SetForegroundFile() で #photo に反映。
@@ -3493,8 +3476,8 @@
     // 作品リンク群。(作品↗ / X↗ / X2↗ / 投稿編集 / 🦋)無コメント時は全幅行で非表示/🗑と同列に置くため変数化。
     var _actionsInner =
       ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
-      (it.twitterUrl ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B↗' : 'X↗') + '</a>'; })(it.twitterUrl) : '') +
-      (_refRec.twitterUrl2 ? (function (su) { var isB = /bsky\.app\//.test(su); return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + (isB ? '#1185fe' : '#1d9bf0') + ';">' + (isB ? 'B2↗' : 'X2↗') + '</a>'; })(_refRec.twitterUrl2) : '') +
+      ((_refRec.twitterUrl || it.twitterUrl) ? candUrlLink_(_refRec.twitterUrl || it.twitterUrl) : '') +
+      refUrls2_(_refRec).map(function (su, i) { return candUrlLink_(su, i + 2); }).join('') +
       '<button type="button" class="cand-refimg-btn' + (hasRef ? ' has-img' : '') + '" data-refimg="' + esc(it.cid) + '">投稿編集</button>' +
       // 🦋(Bluesky添付画像)ボタンは全く使っていないため撤去(Chami依頼2026-07-29)。跡地へ「作品情報リロード」を配置。
       //   FANZA作品のみ対象(X/Bluesky候補にはFANZA情報が無い)。押すと単発でworkerから取り直し=サムネ未表示等を埋める。
