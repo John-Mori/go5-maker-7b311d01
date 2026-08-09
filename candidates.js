@@ -1418,7 +1418,7 @@
       memoWrap.innerHTML =
         '<label class="hint" style="display:block;margin:8px 0 2px;">メモ</label>' +
         '<div class="refimg-url2-row" style="margin-top:0;">' +
-          '<input id="refImgMemoInline" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)" style="flex:1;min-width:0;">' +
+          '<input id="refImgMemoInline" size="1" type="text" class="cand-refimg-line" autocomplete="off" placeholder="メモ(コメントが無い時にカードへ水色で表示)" style="flex:1;min-width:0;">' +
           '<button type="button" class="cand-url2-del" title="メモ欄を消す">✕</button>' +
         '</div>';
       memoWrap.querySelector('input').value = val || '';
