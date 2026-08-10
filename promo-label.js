@@ -259,8 +259,19 @@
     var pad = zw * 0.04;
     while (fs > zh * 0.4 && ctx.measureText(text).width > zw - pad * 2) { fs -= Math.max(1, fs * 0.04); setF(); }
     var cx = zx + zw / 2, cy = zy + zh / 2;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    var grad = ctx.createLinearGradient(0, cy - fs / 2, 0, cy + fs / 2);
+    ctx.textAlign = 'center';
+    // ★数字の縦位置は「字面(ink box)の中心」で合わせる(2026-08-10 Chami「宵桜も10の数字が浮いてる」)。
+    //   textBaseline='middle' はフォントのem箱中心=Didot/Bodoni系はアクセント用に上余白が広く、
+    //   数字(ライニング数字)がem中心より上へ来る→iPhone実機で「10が上に浮く」原因だった。
+    //   measureTextの実測字面(actualBoundingBoxAscent/Descent)で中心を取り直すと書体非依存で
+    //   ¥の高さにピタリ揃う(PILの字面中心プレビューと一致)。未対応環境はmiddleへフォールバック。
+    ctx.textBaseline = 'alphabetic';
+    var _m = ctx.measureText(text);
+    var _asc = _m.actualBoundingBoxAscent, _desc = _m.actualBoundingBoxDescent;
+    var _hasBox = (typeof _asc === 'number' && typeof _desc === 'number' && isFinite(_asc) && isFinite(_desc));
+    var by = _hasBox ? cy + (_asc - _desc) / 2 : cy;
+    if (!_hasBox) ctx.textBaseline = 'middle';
+    var grad = ctx.createLinearGradient(0, by - fs / 2, 0, by + fs / 2);
     grad.addColorStop(0, ink.top); grad.addColorStop(1, ink.bottom);
     ctx.lineJoin = 'round'; ctx.miterLimit = 2;
     // 1) 濃い輪郭を「下地」に敷く=明るい札から数字を持ち上げる(かすみ防止)。
@@ -268,15 +279,15 @@
     //   コントラストが立たなかったこと。下に濃色の縁＋弱い落ち影を敷いてから本体を重ねる。
     var contour = ink.contour || 'rgba(60,30,20,.9)';
     ctx.shadowColor = 'rgba(0,0,0,.30)'; ctx.shadowBlur = fs * 0.05; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = fs * 0.015;
-    ctx.lineWidth = Math.max(1.5, fs * 0.075); ctx.strokeStyle = contour; ctx.strokeText(text, cx, cy);
+    ctx.lineWidth = Math.max(1.5, fs * 0.075); ctx.strokeStyle = contour; ctx.strokeText(text, cx, by);
     ctx.shadowColor = 'transparent';
     // 2) 本体グラデ(くっきり=光彩なしで一度置く)
-    ctx.fillStyle = grad; ctx.fillText(text, cx, cy);
+    ctx.fillStyle = grad; ctx.fillText(text, cx, by);
     // 3) 細い縁で輪郭を締める
-    ctx.lineWidth = Math.max(1, fs * 0.024); ctx.strokeStyle = ink.edge; ctx.strokeText(text, cx, cy);
+    ctx.lineWidth = Math.max(1, fs * 0.024); ctx.strokeStyle = ink.edge; ctx.strokeText(text, cx, by);
     // 4) ごく控えめな光彩(にじませ過ぎない=0.07)を最後に本体へ重ねる
     ctx.shadowColor = ink.glow; ctx.shadowBlur = fs * 0.07; ctx.shadowOffsetY = 0;
-    ctx.fillStyle = grad; ctx.fillText(text, cx, cy);
+    ctx.fillStyle = grad; ctx.fillText(text, cx, by);
     ctx.shadowColor = 'transparent';
     ctx.restore();
   }
