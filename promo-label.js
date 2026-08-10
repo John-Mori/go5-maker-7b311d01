@@ -16,6 +16,15 @@
  */
 (function () {
   'use strict';
+  // ★テンプレPNGはindex.htmlの<script src>ではなくJSからsrc指定で読むため bump.mjs の ?v= が乗らない。
+  //   同名PNGの中身を差し替えても(2026-08-10 月詠み価格札の再生成など)キャッシュで古い絵が出る。
+  //   → 自分のscriptに付いた ?v=N を拾って画像URLへ引き継ぐ=版バンプでPNGも必ずキャッシュ更新される。
+  //   currentScriptは同期実行中のみ有効なのでIIFE先頭で捕まえる(index.htmlのref検査には出ない=smoke無影響)。
+  var _ASSET_VER = (function () {
+    try { var s = (document.currentScript && document.currentScript.src) || ''; var m = s.match(/[?&]v=(\d+)/); return m ? m[1] : ''; }
+    catch (e) { return ''; }
+  })();
+  function _bust(url) { return _ASSET_VER && url ? url + (url.indexOf('?') < 0 ? '?' : '&') + 'v=' + _ASSET_VER : url; }
   var FRAME_W = 1080, FRAME_H = 1920;
   // 帯フォールバック用の基本寸法(テンプレPNGが読めない間のみ使用・フレーム基準)。
   var LBL = { w: 335, h: 79, font: 46, radius: 18 };
@@ -34,12 +43,12 @@
       discount: { src: 'assets/promo/tsukuyomi-discount-base.png',
                   slot: { x: 0.332, y: 0.306, w: 0.342, h: 0.189 } },
       price:    { src: 'assets/promo/tsukuyomi-price-base.png',
-                  // ★数字は大きくしない(Chami訂正2026-08-09)。前版(v=693)で幅を広げ数字を大きくしたが、Chamiの
-                  //   本意は「数字ではなく 月影に綴る/¥/作品 の焼き込み文字を大きく」+「10を真ん中に」だった。
-                  //   月影に綴る/¥/作品 は基材PNGに焼き込み済み=コードでは拡大できない(テンプレ画像の再生成が必要)。
-                  //   コードで出来るのは数字の大きさ・位置だけ。よって数字は元サイズ(w0.233/h0.140)へ戻し、
-                  //   ¥中心y≈0.588へ縦中央を合わせた(旧y0.505=中心0.575で¥より上に浮いていた→y0.518)。桁は中央揃え。
-                  slot: { x: 0.440, y: 0.518, w: 0.233, h: 0.140 } }
+                  // ★2026-08-10 札PNG再生成(Chami)= 焼き込み文字 月影に/綴る/¥/作品 を1.3〜1.5倍へ拡大した新素材へ差し替え。
+                  //   ¥が大きくなり縦中心が 0.588→0.557 へ上がり、¥の上下に走る飾り罫の間隔も詰まった(新: 罫y0.492/0.618・
+                  //   旧: 0.490/0.661)。数字の空きは y[0.492-0.618]=高さ0.126 に縮小。よって数字slotを その帯の中央
+                  //   (¥中心y≈0.557と一致)へ寄せ、罫に被らない高さへ調整= 旧{y0.518,h0.140}→{y0.503,h0.103}。
+                  //   画素解析で確定(¥は旧比1.50倍・new_slot プレビューで550/1980が¥と縦中央一致・罫に非接触を実測)。xとwは据え置き。
+                  slot: { x: 0.440, y: 0.503, w: 0.233, h: 0.103 } }
     },
     acc2: {
       baseW: 620, aspect: 2172 / 724,
@@ -64,7 +73,7 @@
         else { done(); }
       };
       im.onerror = function () { im._failed = true; };
-      im.src = src;
+      im.src = _bust(src);
       _imgCache[src] = im;
     }
     return im._failed ? null : im;
