@@ -268,8 +268,9 @@
   //   ★表示だけ。localStorage/シートへは一切書かない(INC-112 防壁を維持)。
   //   狙い(Chami報告2026-07-29): 同じ題名が両チャンネルの投稿履歴に出る=正本がどちらのストアにも
   //   居る状態でも、短縮URLドメイン/投稿者DID/背骨ID接頭辞で正しい側のタブにだけ出す。
-  function filterOtherChannel_(items) {
-    var cur = acct();
+  function filterOtherChannel_(items) { return filterOtherChannelFor_(items, acct()); }
+  // 現在ch(acct())固定だった他ch除外を、任意chで判定できるよう切り出し(カレンダーの押下ch用・Chami2026-08-10)。
+  function filterOtherChannelFor_(items, cur) {
     return items.filter(function (it) {
       if (!it) return false;
       // ★シート由来行(_fromSheet)は「そのチャンネルのシート(記録_ch1/ch2)」から channel=<cur> 指定で
@@ -2262,27 +2263,56 @@
     if (it.ts) return Number(it.ts);
     return NaN;
   }
-  function postsForDay_(dateStr) {
+  // ── ↑の displayItems_()/loadYtMap() は「現在ch(acct())固定」。カレンダーは両ch同時表示で、押したchの
+  //   投稿履歴を出したい(Chami依頼2026-08-10)ので、指定chで同じ解決をする版を用意する。現在ch経路は無改変。
+  function displayItemsForAcc_(a) {
+    var local = loadArr('short_hist__' + a).filter(function (it) { return !it.manualOnly; })
+      .concat(loadArr('verify_manual__' + a));
+    var c = _sheetExtraCache[a];
+    var extra = (c && c.items && c.items.length) ? c.items
+      : ((window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(local, loadSheetRaw_(a)) : []);
+    var items = (extra && extra.length) ? local.concat(extra) : local;
+    return filterOtherChannelFor_(applySheetOverlays_(items, a), a);
+  }
+  // 深夜投稿(翌0〜3時)は暦日では翌日だが、カレンダーでは前日の深夜枠(24:xx〜27:xx)として扱う。
+  //   その日(dateStr)の枠へ紐づけ候補にするため、翌日の3時以前も含める(Chami依頼2026-08-10)。
+  var NIGHT_CARRY_MAX_MIN = 3 * 60; // 翌3:00まで
+  function ymdOf_(dObj) {
+    return dObj.getFullYear() + '-' + ('0' + (dObj.getMonth() + 1)).slice(-2) + '-' + ('0' + dObj.getDate()).slice(-2);
+  }
+  // ms が dateStr の枠に属するか。属するなら「その日の何分か(深夜は24h繰り上げ)」を返す。属さなければ null。
+  function dayBucketMin_(ms, dateStr, includeNightCarry) {
+    var d = new Date(ms);
+    var mins = d.getHours() * 60 + d.getMinutes();
+    if (ymdOf_(d) === dateStr) return mins;
+    if (includeNightCarry && mins <= NIGHT_CARRY_MAX_MIN) {
+      var prev = new Date(d.getTime()); prev.setDate(prev.getDate() - 1);
+      if (ymdOf_(prev) === dateStr) return mins + 24 * 60; // 24:xx〜27:xx として前日枠に寄せる
+    }
+    return null;
+  }
+  function postsForDay_(dateStr, accArg, includeNightCarry) {
     if (!dateStr) return [];
     ensureIds();
-    var ymap = loadYtMap();
+    var a = (accArg === 'acc1' || accArg === 'acc2') ? accArg : acct();
+    var ymap = loadYtMapFor_(a);
     var schedMap = {};
-    try { loadYtSched_(acct()).forEach(function (y) { if (y && y.vid) schedMap[y.vid] = y; }); } catch (e) {}
+    try { loadYtSched_(a).forEach(function (y) { if (y && y.vid) schedMap[y.vid] = y; }); } catch (e) {}
     var out = [];
-    displayItems_().forEach(function (it) {
+    displayItemsForAcc_(a).forEach(function (it) {
       var ms = effPostMs_(it, ymap, schedMap);
       if (isNaN(ms)) return;
-      var dObj = new Date(ms);                     // JST端末前提(getHours等は端末ローカル=Chamiの体感と一致)
-      var y = dObj.getFullYear(), mo = ('0' + (dObj.getMonth() + 1)).slice(-2), da = ('0' + dObj.getDate()).slice(-2);
-      if ((y + '-' + mo + '-' + da) !== dateStr) return;
+      var bucket = dayBucketMin_(ms, dateStr, includeNightCarry);   // JST端末前提(getHours等=端末ローカル)
+      if (bucket == null) return;
       var vid = ytIdOf(ymap[itemKey(it)] || it.ytUrl || '');
       var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
+      var hh = Math.floor(bucket / 60), mm = bucket % 60;           // 深夜繰上げ分は24:xx〜として枠時刻と揃える
       out.push({
         id: it.videoId || itemKey(it),
         videoId: it.videoId || '',
         title: stripCommonTags(title),
         timeMs: ms,
-        hhmm: ('0' + dObj.getHours()).slice(-2) + ':' + ('0' + dObj.getMinutes()).slice(-2),
+        hhmm: ('0' + hh).slice(-2) + ':' + ('0' + mm).slice(-2),
         url: it.shareUrl || it.shortUrl || it.postUrl || it.ytUrl || ''
       });
     });

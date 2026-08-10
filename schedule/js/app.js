@@ -16,6 +16,16 @@ window.SCH = window.SCH || {};
   let verificationMode = false;
   let lastRender = null;    // { slots, dayMetas }
   let editingId = null;
+  // 開いている編集モーダルが「どのチャンネルの枠か」。両ch同時表示で月詠み/宵桜のセルを個別に押した時、
+  //   そのchの投稿履歴を出す・そのchへ保存するために使う(Chami依頼2026-08-10)。null=現在ch(curAcc)。
+  let editingAcc = null;
+  function effAcc() { return (editingAcc === "acc1" || editingAcc === "acc2") ? editingAcc : curAcc(); }
+  // id と ch から、その ch 用に合成済みのフラット枠を返す(左=slots1=月詠み / 右=slots2=宵桜)。
+  function slotForAcc(id, acc) {
+    if (!lastRender) return null;
+    const m = acc === "acc2" ? lastRender.slots2 : lastRender.slots1;
+    return (m && m[id]) || (lastRender.slots && lastRender.slots[id]) || null;
+  }
   // 枠ピックモード：ドラフト投稿モードの「公開枠を選ぶ」から enter-pick で入る。
   //   ONの間は編集モーダルに「この枠を公開枠に選ぶ」ボタンを出し、押すと slot-picked を親へ返す。
   let pickMode = (function () { try { return /[?&]pick=1(?:&|$)/.test(location.search); } catch (e) { return false; } })();
@@ -260,8 +270,8 @@ window.SCH = window.SCH || {};
     if (st1 === "公開済" && st2 === "公開済") el.classList.add("cleared"); // 両ch済＝行ごと沈める
 
     // ピックモード(投稿先chを渡された時)は、そのchの列だけを出す(Chami依頼2026-08-05)。
-    const cell1 = chanCell("月詠み", addMin(base, acctOffAt(config, "acc1", base)), st1);
-    const cell2 = chanCell("宵桜", addMin(base, acctOffAt(config, "acc2", base)), st2);
+    const cell1 = chanCell("月詠み", addMin(base, acctOffAt(config, "acc1", base)), st1, "acc1");
+    const cell2 = chanCell("宵桜", addMin(base, acctOffAt(config, "acc2", base)), st2, "acc2");
     const cells = (pickMode && pickAcc === "acc2") ? cell2
       : (pickMode && pickAcc === "acc1") ? cell1
       : (cell1 + cell2);
@@ -270,15 +280,23 @@ window.SCH = window.SCH || {};
       cells +
       `<span class="prio">${pri === 1 ? '<span class="star"></span>本命' : "優先度" + pri}` +
       ((s1 && s1.needs_review) ? ' <span class="slot-review" title="要確認">!</span>' : "") + `</span>`;
-    // 編集は現行タブのスロットに対して(従来どおり＝アクティブなアカウントの exec を編集)
+    // セルを押した ch の枠を開く(月詠み=左/宵桜=右)。両ch同時表示でも押したchの投稿履歴が出る(Chami2026-08-10)。
+    el.querySelectorAll(".cell[data-acc]").forEach(function (cellEl) {
+      cellEl.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        const a = cellEl.getAttribute("data-acc");
+        openEditor(slotForAcc(s1.id, a) || s1, a);
+      });
+    });
+    // セル以外(優先度ラベル等)を押した時は従来どおり＝アクティブなアカウントの枠を開く。
     el.addEventListener("click", () => openEditor(lastRender.slots[s1.id] || s1));
     return el;
   }
 
   // 片チャンネルのセル：バッジ(38px固定・無彩色)＋時刻＋状態マーク。公開済=done、それ以外=pending
-  function chanCell(name, time, status) {
+  function chanCell(name, time, status, acc) {
     const done = status === "公開済";
-    return `<span class="cell ${done ? "done" : "pending"}">` +
+    return `<span class="cell ${done ? "done" : "pending"}" data-acc="${acc || ""}">` +
       `<span class="acc">${name}</span>` +
       `<span class="time">${time}</span>` +
       `<span class="st">${done ? '<span class="done-mark">済</span>' : ''}<span class="mk"></span></span>` +
@@ -352,9 +370,10 @@ window.SCH = window.SCH || {};
   }
 
   // ---- スロット編集モーダル ----
-  function openEditor(s) {
+  function openEditor(s, forceAcc) {
     editingId = s.id;
-    const acc = curAcc();
+    editingAcc = (forceAcc === "acc1" || forceAcc === "acc2") ? forceAcc : null;
+    const acc = effAcc();
     // s はフラット（現チャンネルの exec が合成済み）なのでそのまま使う
     const m = document.getElementById("modal");
     const accNames = { acc1: "月詠み色恋劇場", acc2: "宵桜艶帖" };
@@ -410,7 +429,8 @@ window.SCH = window.SCH || {};
   function requestDayPosts(s) {
     linkReqSeq++;
     const reqId = "modal:" + linkReqSeq;
-    try { window.parent.postMessage({ source: "sch-calendar", type: "req-day-posts", dates: [s.date], reqId: reqId, slotId: s.id }, "*"); } catch (e) {}
+    // acc=押したchの投稿履歴だけを親に解決させる。親は day を跨いだ深夜投稿(翌3時まで)も含めて返す(Chami2026-08-10)。
+    try { window.parent.postMessage({ source: "sch-calendar", type: "req-day-posts", dates: [s.date], reqId: reqId, slotId: s.id, acc: effAcc() }, "*"); } catch (e) {}
   }
   // 親からの投稿履歴応答。postsByDate[日付]=[{hhmm,title,url,videoId,timeMs}]。
   function onDayPosts(d) {
@@ -439,14 +459,14 @@ window.SCH = window.SCH || {};
               const dd = Math.abs(c.min - pm);
               if (dd < bestD) { bestD = dd; best = c; }
             });
-            if (best && bestD <= LINK_WINDOW_MIN) { used[best.s.id] = true; autoLinkedIds[best.s.id] = true; applyLink(best.s, p); }
+            if (best && bestD <= LINK_WINDOW_MIN) { used[best.s.id] = true; autoLinkedIds[best.s.id] = true; applyLink(best.s, p, curAcc()); }
           });
       });
       return;
     }
-    // モーダル用(③)：開いている枠のドロップダウンを埋める＋時刻一致は自動紐づけ。
+    // モーダル用(③)：開いている枠のドロップダウンを埋める＋時刻一致は自動紐づけ。押したchの枠を対象にする。
     if (!editingId) return;
-    const s = (lastRender && lastRender.slots[editingId]) || null;
+    const s = slotForAcc(editingId, effAcc());
     if (!s) return;
     const posts = byDate[s.date] || [];
     const sel = document.getElementById("link-hist");
@@ -467,20 +487,20 @@ window.SCH = window.SCH || {};
         if (dd < bestD && dd <= LINK_WINDOW_MIN) { bestD = dd; auto = p; }
       });
     }
-    if (auto && s.status !== "公開済") { applyLink(s, auto); return; }   // ④ 時刻一致(近傍含む)は自動同期
+    if (auto && s.status !== "公開済") { applyLink(s, auto, effAcc()); return; }   // ④ 時刻一致(近傍含む)は自動同期
     sel.innerHTML = posts.map(function (p, i) {
       return `<option value="${i}">${escapeHtml(p.hhmm + "  " + p.title)}</option>`;
     }).join("");
     if (auto) sel.value = String(posts.indexOf(auto));
     if (btn) {
       btn.disabled = false;
-      btn.onclick = function () { const p = posts[parseInt(sel.value, 10) || 0]; if (p) applyLink(s, p); };
+      btn.onclick = function () { const p = posts[parseInt(sel.value, 10) || 0]; if (p) applyLink(s, p, effAcc()); };
     }
   }
   // 枠へ投稿を結びつける＝現チャンネルの実行記録を「公開済」＋題名/URLで更新する。
   //   未保存のプリスティン枠は upsertExec が空振りするので、writeback と同じく upsertSlot で種ごと保存する。
-  function applyLink(s, post) {
-    const acc = curAcc();
+  function applyLink(s, post, accArg) {
+    const acc = (accArg === "acc1" || accArg === "acc2") ? accArg : curAcc();
     const patch = {
       status: "公開済",
       title: post.title || s.title || "",
@@ -508,7 +528,7 @@ window.SCH = window.SCH || {};
     const dates = Object.keys(dateSet);
     if (!dates.length) return;
     linkReqSeq++;
-    try { window.parent.postMessage({ source: "sch-calendar", type: "req-day-posts", dates: dates, reqId: "auto:" + linkReqSeq }, "*"); } catch (e) {}
+    try { window.parent.postMessage({ source: "sch-calendar", type: "req-day-posts", dates: dates, reqId: "auto:" + linkReqSeq, acc: curAcc() }, "*"); } catch (e) {}
   }
 
   // 親（統合アプリ）からの書き戻し：投稿成功後に status/URL等を現在チャンネルの実行層のみ反映
@@ -586,9 +606,9 @@ window.SCH = window.SCH || {};
 
   async function saveEditor() {
     if (!editingId) return;
-    const s = lastRender.slots[editingId];
+    const acc = effAcc();
+    const s = slotForAcc(editingId, acc);
     if (!s) return;
-    const acc = curAcc();
     const g = (id) => document.getElementById(id).value;
     // プラン側フィールド（共通）
     s.title = g("f-title");
@@ -607,6 +627,7 @@ window.SCH = window.SCH || {};
   }
   function closeEditor() {
     editingId = null;
+    editingAcc = null;
     document.getElementById("modal").classList.remove("open");
   }
 
