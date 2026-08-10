@@ -53,7 +53,10 @@
     },
     acc2: {
       baseW: 620, aspect: 2172 / 724,
-      ink: { top: '#ffffff', bottom: '#ffeaf1', edge: 'rgba(150,40,80,.9)', glow: 'rgba(255,190,210,.55)', contour: 'rgba(74,30,58,.94)' },
+      // ★2026-08-10 数字を金の焼き込み文字テンプレへ合わせる(Chami「数字のテンプレ、過去に貼ったよね。適応して」)。
+      //   宵桜の新PNGは割引/価格とも焼き込み文字が金セリフ=旧の白インクだと数字だけ白く浮く。¥/作品案内と同じ
+      //   クリーム金(月詠みと同系)へ。contourは札の緋色から数字を持ち上げる濃プラムのまま維持。
+      ink: { top: '#fff6d8', bottom: '#f0cf8a', edge: 'rgba(210,168,90,.85)', glow: 'rgba(255,224,150,.9)', contour: 'rgba(74,30,58,.94)' },
       discount: { src: 'assets/promo/yoizakura-discount-base.png',
                   slot: { x: 0.364, y: 0.260, w: 0.211, h: 0.490 } },
       price:    { src: 'assets/promo/yoizakura-price-base.png',
