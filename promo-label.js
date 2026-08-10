@@ -57,7 +57,9 @@
       discount: { src: 'assets/promo/yoizakura-discount-base.png',
                   slot: { x: 0.364, y: 0.260, w: 0.211, h: 0.490 } },
       price:    { src: 'assets/promo/yoizakura-price-base.png',
-                  slot: { x: 0.405, y: 0.260, w: 0.175, h: 0.490 } }
+                  // 2026-08-10 焼き込み文字拡大の新PNGへ差し替え(Chami)。新¥は字面中心0.474・右端0.404・高さ0.283。
+                  //   ¥の右〜作品案内(左端0.608)の空きへ数字を置く=中心x0.502/縦中心0.474・高さは¥へ揃う。
+                  slot: { x: 0.410, y: 0.272, w: 0.185, h: 0.405 } }
     }
   };
   var _imgCache = {};
