@@ -721,8 +721,8 @@
       return migrateLocalImages_();
     }).then(function () {
       markHydrated_(); // ここから先は _imgMem が真値=空保存の拒否を解除し、待たせていたモーダルを進める
-      // 画像がメモリに載ったので、候補タブ表示中なら描画し直す。(サムネ・✓バッジを反映)
-      try { var pc = document.getElementById('pageCand'); if (pc && !pc.hidden) render(); } catch (e) {}
+      // 画像がメモリに載ったので、候補タブ表示中なら描画し直す。(サムネ・✓バッジを反映)入力中は保留。
+      bgRender_();
     }).catch(function (e) {
       // オープン/読み取りに失敗＝この環境ではIDB不可。localStorageフォールバックへ切り替え。(旧データはそのまま読める)
       _idbOk = false; try { console.warn('[go5 idb] 利用不可のためlocalStorageで継続', e); } catch (_) {}
@@ -745,6 +745,35 @@
     });
     return Promise.all(jobs);
   }
+  // ★候補を入力中は「背景由来の全再描画」で pageCand を組み直さない=打ちかけの入力が消えるのを根治。
+  //   (Chami 2026-08-11「候補に入れてる途中でリロードが入るからもうアカン」)。真因はページ遷移ではなく、
+  //   60秒オートsync(core/sync.js)の go5-synced→render() と 画像ハイドレート完了時の render() が、
+  //   追加フォーム(candUrl/candTwitter/candMemo=addFormHtml_)ごとリストを作り直していたこと=リロードに見えた。
+  //   入力中(フォーカス中/打ちかけの文字あり/追加モーダル表示中)は再描画を保留し、追加確定やタブ再入場の
+  //   通常render()で反映する(新着サムネは少し遅れて出るだけ=非破壊)。render()冒頭で保留フラグは必ず解除。
+  var _bgRerenderPending = false;
+  function _entryInProgress_() {
+    try {
+      if (document.querySelector('.add-modal')) return true;   // 追加モーダルが開いている
+      var ids = ['candUrl', 'candTwitter', 'candMemo'];
+      for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (!el) continue;
+        if (document.activeElement === el) return true;        // 入力欄にフォーカス中
+        if ((el.value || '').trim() !== '') return true;       // 打ちかけの文字が残っている
+      }
+    } catch (e) {}
+    return false;
+  }
+  // 背景(オートsync・画像ハイドレート)由来の再描画。候補タブ表示中のみ・入力中は保留。
+  function bgRender_() {
+    try {
+      var pc = document.getElementById('pageCand');
+      if (!pc || pc.hidden) return;
+      if (_entryInProgress_()) { _bgRerenderPending = true; return; }
+      render();
+    } catch (e) {}
+  }
   // ★同期で「後から届いた画像」をメモリへ取り込んで再描画する。(サブ端末の一発表示・Chami再発2026-08-06)
   //   真因: 画像は起動時に一度だけ hydrateImages_ で _imgMem へ載る。サブ端末で後から sync-worker が
   //   R2→IDB へ画像を書き戻しても、candidates.js の _imgMem は更新されず画面も再描画されないため、
@@ -761,7 +790,7 @@
         else if (k.indexOf('post:') === 0) _imgMem.post[k.slice(5)] = v;
         else if (k.indexOf('used:') === 0) _imgMem.used[k.slice(5)] = v;
       });
-      try { var pc = document.getElementById('pageCand'); if (pc && !pc.hidden) render(); } catch (e) {}
+      bgRender_();   // 入力中は保留(打ちかけの候補入力を消さない)
     }).catch(function () {});
   }
   try { document.addEventListener('go5-synced', function (e) { if (e && e.detail && e.detail.pulledImg) reHydrateFromSync_(); }); } catch (e) {}
@@ -2042,6 +2071,7 @@
   function render() {
     var page = $('pageCand');
     if (!page) return;
+    _bgRerenderPending = false; // どの経路の描画でも保留は解消(追加確定・タブ再入場で最新へ追いつく)
     kickInfoBackfill_(); // タブへ戻ってきた時=未取得タイトルの追跡を素早いフェーズへ戻す(この後の描画でbackfillが回る)
     var tabs = lsGet(K_TABS, '[]');
     var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 ' + esc(builtinTabLabel_('buzz')) + '</button>' +
