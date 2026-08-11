@@ -541,11 +541,16 @@
   //   opts.silent=true のときは成否のalertを出さない(裏経路/一括保存用)。
   function driveSaveForCompleted_(meta, opts) {
     opts = opts || {};
-    if (!meta || !meta.id) return;
+    // ★手押し(作成履歴カードの☁️ Drive保存)は「押したのに何も起きない」に見えないよう、
+    //   終着点で必ず onDone(ok,msg) を呼ぶ。作成時に即保存済み(folderIdあり)だと従来は無反応で返っていた=
+    //   これが Chami 報告「drive保存のボタンが押せない」の正体(2026-08-12)。
+    var done = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
+    if (!meta || !meta.id) { done(false, 'メタ情報がありません'); return; }
     var store = idb();
-    if (!store) { if (!opts.silent) alert('IndexedDB未対応のためDrive保存できません。(投稿履歴には記録済み)'); return; }
+    if (!store) { if (!opts.silent) alert('IndexedDB未対応のためDrive保存できません。(投稿履歴には記録済み)'); done(false, 'IDB未対応'); return; }
     if (!(window.Go5Drive && typeof window.Go5Drive.upload === 'function')) {
       if (!opts.silent) alert('Drive連携が未設定です。動画作成タブのDriveStatus欄を確認してください。(投稿履歴には記録済み)');
+      done(false, 'Drive未設定');
       return;
     }
     var id = meta.id;
@@ -572,13 +577,14 @@
         prevP.then(function (prevB) {
           if (prevB && window.Go5Drive.appendImage) window.Go5Drive.appendImage(meta.account, meta.title, folderId, prevB, null);
           applyPreview(prevB);
+          done(true, '作成時に保存済み(プレビュー追記)');
         });
       });
       return;
     }
     // ── フォールバック：作成時にDrive未保存。動画blobを取り直してフル保存(動画+元画像+プレビュー)。
     resolveVideoBlob_(id).then(function (blob) {
-      if (!blob) { if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済みです。Google Driveへの動画保存だけスキップしました。'); return; }
+      if (!blob) { if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済みです。Google Driveへの動画保存だけスキップしました。'); done(false, '動画データ無し'); return; }
       Promise.all([
         store.get('stock_img_' + id).catch(function () { return null; }),
         store.get('stock_prev_' + id).catch(function () { return null; }),
@@ -593,12 +599,15 @@
           var imgB = bs[0], prevB = bs[1];
           window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null);
           applyPreview(prevB);
+          done(true, 'Driveへ保存開始');
         });
       }).catch(function () {
         window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, []);
+        done(true, 'Driveへ保存開始');
       });
     }).catch(function (err) {
       if (!opts.silent) alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
+      done(false, '取得失敗');
     });
   }
 
@@ -663,7 +672,10 @@
     var id = meta.id;
     var acctLabel = meta.account === 'acc2' ? '宵桜艶帖' : '月詠み';
     var hasYt = !!(meta.youtubeUrl);
-    var btnBase = 'width:auto;margin:0;padding:5px 10px;font-size:.76rem;border-radius:6px;cursor:pointer;white-space:nowrap;';
+    // ★4ボタン(復元/動画DL/Drive保存/完全削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
+    //   幅の狭いスマホでも1行に入るよう padding/フォントを詰め、万一入り切らない端末では横スクロールへ逃がす
+    //   (完全削除まで必ず到達できる=改行で隠れない)。
+    var btnBase = 'width:auto;margin:0;padding:4px 7px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto;';
     return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
@@ -671,11 +683,11 @@
         '<div style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
         '<div style="font-size:.72rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · 完了 ' + esc(fmtTs(meta.completedTs || meta.ts)) + '</div>' +
         (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
-        '<div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;">' +
+        '<div style="display:flex;gap:4px;margin-top:7px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;">' +
           '<button type="button" class="stk-restore" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;">↩ 復元</button>' +
           '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">⬇ 動画DL</button>' +
           '<button type="button" class="stk-drive" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">☁️ Drive保存</button>' +
-          '<button type="button" class="stk-arch-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #5a2a2a;background:transparent;color:#c77;padding:5px 8px;">🗑 完全削除</button>' +
+          '<button type="button" class="stk-arch-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #5a2a2a;background:transparent;color:#c77;">🗑 完全削除</button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -1357,7 +1369,16 @@
         } else if (btn.classList.contains('stk-drive')) {
           // ☁️ Drive保存(作成履歴カード)=作成時にDriveへ上がっていない過去分を後から保存する。
           //   素材(動画)が端末にまだ残っていればフル保存、既に作成時に上がっていればプレビュー追記(冪等)。
-          if (meta) { driveSaveForCompleted_(meta, { silent: false }); }
+          //   ★押した瞬間から結果までボタンで状態を見せる(作成時に保存済みだと従来は無反応で「押せない」に見えた)。
+          if (meta && !btn.disabled) {
+            var _orig = btn.textContent;
+            btn.textContent = '☁️ 保存中…'; btn.disabled = true;
+            driveSaveForCompleted_(meta, { silent: false, onDone: function (ok) {
+              btn.disabled = false;
+              btn.textContent = ok ? '✅ 保存済み' : _orig;
+              if (ok) setTimeout(function () { if (btn.textContent === '✅ 保存済み') btn.textContent = _orig; }, 4000);
+            } });
+          }
 
         } else if (btn.classList.contains('stk-mode')) {
           if (meta) openPostModal_(meta);
