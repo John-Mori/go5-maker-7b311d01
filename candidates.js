@@ -1574,7 +1574,7 @@
   //   ※drafts.js の applyDraft_ と同じ手法：#author/#top/#movieWorkUrl を値+イベントで設定、
   //     前景画像は data-URL→File にして window.Go5SetForegroundFile() で #photo に反映。
   function transferToMovie_(it, imgDataUrl, comment, workUrl) {
-    // 候補専用ページ(candidates.html)には動画作成タブのDOMが無い=そこから「動画を作る」を押したら、
+    // 候補専用ページ(KouhoLists.html)には動画作成タブのDOMが無い=そこから「動画を作る」を押したら、
     //   選択内容を sessionStorage で持ち越して index.html へ遷移し、あちらで同じ流し込みを再実行する
     //   (同一オリジン・同一タブなので sessionStorage は遷移後も残る。クラウド同期もしない)。
     if (!document.getElementById('author')) {
@@ -3610,7 +3610,7 @@
     refImgsSet: function (cid, arr) { if (!cid) return false; var cur = refImgOf(cid) || {}; return refImgSave(cid, { imgs: (arr || []).filter(Boolean), comment: cur.comment || '', memo: cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' }); }, // 動画で使った画像(配列)を差し替え保存(コメント等は保持)
     bskyImgSet: function (cid, durl) { if (!cid) return false; return bskyImgSave(cid, durl || ''); } // Bluesky添付画像(単発)を設定/クリア
   }; } catch (e) {}
-  // 候補専用ページ(candidates.html)から持ち越された「動画を作る」選択を、動画作成タブのある index.html 側で拾って実行する。
+  // 候補専用ページ(KouhoLists.html)から持ち越された「動画を作る」選択を、動画作成タブのある index.html 側で拾って実行する。
   //   (transferToMovie_ が movie DOM 不在時に sessionStorage へ退避→index.html へ遷移。ここが受け取り口)
   try {
     var _resumeCandToMovie = function () {

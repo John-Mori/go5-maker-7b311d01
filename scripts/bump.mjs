@@ -18,7 +18,7 @@
  *
  * 出力: 新しい版数を最終行に `V=<N>` で出す(スクリプトから拾えるように)。
  * 対象: アセット参照(?v=)を持つフロントHTML=index.html + 分割ページ(候補/分析ランキング)。
- *   ★分割ページ(candidates.html / analytics.html)も index.html と同じ ?v= を共有するため対象に含める
+ *   ★分割ページ(KouhoLists.html / analytics.html)も index.html と同じ ?v= を共有するため対象に含める
  *     (2026-08-11 別ページ化。ここに足し忘れると分割ページだけ古いJSがキャッシュされ静かに事故る)。
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -27,7 +27,7 @@ import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // ?v= を持つフロントHTMLを全部対象にする。存在するものだけ拾う(将来ページが増えてもここへ足す)。
-const TARGETS = ["index.html", "candidates.html", "analytics.html"]
+const TARGETS = ["index.html", "KouhoLists.html", "analytics.html"]
   .map((f) => join(ROOT, f))
   .filter((p) => existsSync(p));
 const RE = /\?v=(\d+)/g;
