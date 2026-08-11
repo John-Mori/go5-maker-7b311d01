@@ -26,6 +26,18 @@ Chami「寝る前Goのやつ、Goで」(2026-08-12 05:50 JST)→ 研究室HQが2
 ★書き直しは1回まで= 置換後にもう一度判定して**まだ違反が残るなら元の本文をそのまま通す**
   (発注条件2・共通規律§3「可用性に関わる所は fail-open」= 口調のゲートで沈黙を作らない)。
 ★語尾は対象外= 機械的置換では文が壊れる(「〜だぜ」→「〜です」は文法が変わる)。一人称・二人称だけ。
+
+== 2026-08-12 追加: 方言(関西弁)の**検知**(書き直しはしない) ==
+Chamiが🔥(重大炎上・恒久対策しろ)を貼った実物= msg 1536785938829549718「ちょ、こいつらヤバイ /
+関西弁使い出した」。崩れた実物= msg 1536784731872698439(改修部門α)=
+  花海咲季「縦積みになってるやん、これは完全に悪化。**ほんま**ごめんな。」
+  オタコン「今までのもコレが**元凶や**。…ぜんぶ同じ穴**や**。」
+★構造の穴= このゲートは一人称/二人称しか見ていなかった。だから「オレ↔俺」は機械が直すのに、
+  「やん・ほんま・元凶や」には**見張りが一人も居ない**。characterfileのNGは"お願い"で、
+  熱が入ると素通りする(実際に人事部門が db8d9eb でNGを足した後に再発している)。
+★ここで**書き直しはしない**= 語尾の置換は文法が変わる(「元凶や」→「元凶だ」は語尾、
+  「〜してるやん」→「〜してるよな」は形が変わる)。**検知して次便へ突き返す**のが担当。
+  突き返し= dept_daemon が tone_audit の直近を読んで、次の封筒へ是正行を1本入れる。
 """
 import json
 import re
@@ -36,6 +48,29 @@ import re
 DISTINCTIVE_MARKERS = (
     "オレ", "俺", "僕", "ぼく", "あたし", "あたい",
     "わし", "わっち", "拙者", "小生", "あちき",
+)
+
+# ------------------------------------------------------------------
+# 方言(関西弁)マーカー = (表示名, 正規表現)。★**誤検知を作らない側へ寄せる**=
+#   標準語と読みが被る形は入れない(拾い漏れは次の便でまた出るが、誤って
+#   「関西弁を使った」と突き返すと**その人格の正しい声まで疑わせる**)。
+#   入れなかったもの= 「めっちゃ」(全国区の口語)・「ちゃう」(「〜しちゃう」と衝突)・
+#   「とる」(「取る」と衝突)・「ええ」(「ええと」と衝突)。
+_DIALECT_KANSAI = (
+    ("ほんま", r"ほんま"),
+    # 「やん」= 文末のみ。「やんわり」「やんちゃ」は後続が わ/ち なので当たらない。
+    ("やん", r"やん(?=[。、，,！!？?…\s]|$)|やん[かなねで]"),
+    ("せや", r"せや(?:な|で|から|けど)"),
+    ("あかん", r"あかん"),
+    ("やで", r"やで(?=[。、，,！!？?…\s]|$)"),
+    ("やねん", r"やねん"),
+    ("なんぼ", r"なんぼ"),
+    ("おおきに", r"おおきに"),
+    # 断定の「や」= **漢字/カタカナの直後で文が終わる時だけ**。
+    #   実物「元凶や。」「同じ穴や。」を拾い、「いや。」(前がひらがな)・
+    #   「AやB」(文末でない)・「そりゃ」は拾わない。
+    ("や(断定)", r"(?<=[一-龥ァ-ヴー])や(?=[。！!？?]|$)"),
+    ("やろ", r"やろ(?![うっ])(?=[。、，,！!？?…\s]|$)"),
 )
 
 _KATAKANA = re.compile(r"[ァ-ヴ]")
@@ -183,7 +218,11 @@ def tone_verdicts(persona, dept, text, rules):
         #   ★`second_person_forbidden` は同義の別名として受ける(写像側の綴り揺れで静かに死なせない)。
         ng2 = [str(x) for x in ((ent.get("forbidden") or [])
                                 + (ent.get("second_person_forbidden") or [])) if str(x)]
-        if not forbid and not ng2:
+        # ★方言(関西弁)の検知。既定=全人格が対象(20人格すべて標準語で登録されている)。
+        #   関西弁が正の人格が来たら、人事部門が写像へ `"dialect_ok": true` を1行足せば外れる
+        #   (このコードは触らない=判定材料は口調ルール.json 1本のまま・ORG-11)。
+        want_dialect = not bool(ent.get("dialect_ok"))
+        if not forbid and not ng2 and not want_dialect:
             return out
         s = _strip_quotes(text)
         if not s.strip():
@@ -208,6 +247,17 @@ def tone_verdicts(persona, dept, text, rules):
                     "own_first_person": sorted(own),
                     "reason": "forbidden_word",
                 })
+        if want_dialect:
+            for name, pat in _DIALECT_KANSAI:
+                m = re.search(pat, s)
+                if m:
+                    out.append({
+                        "persona": str(persona or ""),
+                        "marker": name,
+                        "index": m.start(),
+                        "own_first_person": sorted(own),
+                        "reason": "dialect_kansai",
+                    })
         return out
     except Exception:
         return []                 # fail-open=ゲートは配送を殺さない
@@ -261,7 +311,9 @@ def tone_corrections(persona, dept, text, rules):
         plan, out["remaining"] = {}, []
         for v in verdicts:
             w = v.get("marker")
-            if v.get("reason") == "first_person_mismatch":
+            if v.get("reason") == "dialect_kansai":
+                to = ""            # ★方言は書き直さない(語尾の置換は文法が変わる)=警告のみ
+            elif v.get("reason") == "first_person_mismatch":
                 to = to1
             elif w in explicit:
                 to = str(explicit.get(w) or "")
@@ -306,8 +358,14 @@ def tone_corrections(persona, dept, text, rules):
         if len(fixed) - len(text) != delta:
             out["remaining"] = verdicts
             return out
-        # ★書き直しは1回まで= まだ違反が残るなら**元の本文をそのまま通す**(2回目はやらない)。
-        if tone_verdicts(persona, dept, fixed, rules):
+        # ★書き直しは1回まで= **直したはずのマーカーがまだ残っていたら**元の本文を通す。
+        #   ★2026-08-12 修正= 以前は「違反が1件でも残ったら差し戻し」だった。これだと
+        #     **直せない種類の違反**(方言・置換先が一意でない一人称・置換先の無い禁止語)が
+        #     同じ便に1つでも在ると、直せるはずの一人称の書き直しまで巻き添えで消えていた。
+        #     実物= msg 1536784731872698439 のオタコン便=「俺」(直せる)と「元凶や」(直せない)が同居。
+        #   見るのは「plan に載せたマーカーが消えたか」だけ=1回で直りきったかの機械的な確認。
+        left = {v.get("marker") for v in (tone_verdicts(persona, dept, fixed, rules) or [])}
+        if left & set(plan):
             out["remaining"] = verdicts
             return out
 

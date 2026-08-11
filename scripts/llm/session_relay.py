@@ -632,6 +632,108 @@ def quote_block(rec):
                 "★何への返信かは分からない。推測で埋めるな。\n")
 
 
+# ----------------------------------------------------------------------------
+# 口調の突き返し(2026-08-12・Chamiの🔥= msg 1536785938829549718「関西弁使い出した」)
+# ----------------------------------------------------------------------------
+# 口調ゲートD(tone_gate)は**送信直前**に検知する。一人称/二人称は機械が書き直せるが、
+# **方言・語尾は書き直せない**(「元凶や」→「元凶だ」は語尾、置換すると文が壊れる)。
+# 直せない分は tone_audit.jsonl に event="tone" で貯まるだけ=**誰も読まない**。
+#   実測でそれが証明されている= 「俺」の食い違いが 8/9・8/10・8/11・8/12 と4日連続、
+#   警告だけ残して素通りした。**警告のみは素通りする**——だから機構をもう一段足す。
+# ここでやること= 検知された崩れを、**その部門の次の封筒へ突き返す**。
+#   characterfileのNGは"お願い"(書き手が思い出さないと効かない)だが、これは
+#   **崩れた時にだけ機械が目の前に出す**=思い出す必要がない。
+# ★同じ検知は1回しか突き返さない(state ファイルで既送を覚える)= 毎便の小言にしない。
+# ★fail-open= 何が起きても封筒は組み立てる(口調の世話で配送を殺さない)。
+TONE_AUDIT_FILE = os.path.join(LOCAL, "llm", "tone_audit.jsonl")
+TONE_FEEDBACK_STATE = os.path.join(LOCAL, "llm", "tone_feedback_state.json")
+_TONE_REASON_JA = {
+    "dialect_kansai": "関西弁(方言)",
+    "first_person_mismatch": "一人称が他人格のもの",
+    "forbidden_word": "この人格の禁止語",
+}
+
+
+def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
+    """直前の便で検知され**機械が直せなかった**口調の崩れを、次の封筒へ1ブロックで返す。
+
+    返り値: 封筒へ足す文字列(何も無ければ "")。
+    ★突き返すのは event="tone"(=直せず警告のみで送った分)だけ。
+      event="tone_fix"(機械が書き直して送った分)は既に解決済み=突き返さない。
+    """
+    try:
+        if not dept or not os.path.exists(TONE_AUDIT_FILE):
+            return ""
+        with open(TONE_AUDIT_FILE, "rb") as f:            # 末尾だけ読む(全部は読まない)
+            try:
+                f.seek(-65536, os.SEEK_END)
+                f.readline()                              # 途中で切れた行は捨てる
+            except OSError:
+                f.seek(0)
+            rows = []
+            for raw in f.read().decode("utf-8", "replace").splitlines():
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    r = json.loads(raw)
+                except Exception:
+                    continue
+                if str(r.get("dept") or "") == str(dept):
+                    rows.append(r)
+        if not rows:
+            return ""
+        last = rows[-1]
+        if str(last.get("event") or "") != "tone":         # 直近が機械修正済み/別種なら黙る
+            return ""
+        key = f"{last.get('ts','')}|{last.get('msg_id','')}"
+        # 同じ便の検知は複数行に分かれる(マーカーごとに1行)ので、同じ ts+msg_id をまとめる。
+        group = [r for r in rows
+                 if f"{r.get('ts','')}|{r.get('msg_id','')}" == key
+                 and str(r.get("event") or "") == "tone"]
+        try:
+            t = time.mktime(time.strptime(str(last.get("ts") or ""), "%Y-%m-%dT%H:%M:%S"))
+            if (now or time.time()) - t > max_age_sec:     # 古い崩れを蒸し返さない
+                return ""
+        except Exception:
+            return ""
+        try:
+            with open(TONE_FEEDBACK_STATE, encoding="utf-8") as f:
+                sent = json.load(f)
+        except Exception:
+            sent = {}
+        if not isinstance(sent, dict):
+            sent = {}
+        if sent.get(str(dept)) == key:
+            return ""                                      # 既に突き返した=繰り返さない
+        sent[str(dept)] = key
+        try:
+            os.makedirs(os.path.dirname(TONE_FEEDBACK_STATE), exist_ok=True)
+            with open(TONE_FEEDBACK_STATE, "w", encoding="utf-8") as f:
+                json.dump(sent, f, ensure_ascii=False)
+        except Exception:
+            pass          # 覚えられなくても突き返しはする(二度言う方が、黙るよりマシ)
+        lines = []
+        for r in group:
+            why = _TONE_REASON_JA.get(str(r.get("reason") or ""), str(r.get("reason") or ""))
+            lines.append(f"  - 「{r.get('marker','')}」= {why}"
+                         + (f" / この人格の正しい一人称= {'・'.join(r.get('own_first_person') or [])}"
+                            if r.get("own_first_person") else ""))
+        who = str(last.get("persona") or "?")
+        return ("=== ★前の便で口調が崩れた(送信直前の機械検知) ===\n"
+                f"話者: {who} / 崩れた便: msg_id={last.get('msg_id','')} ({last.get('ts','')})\n"
+                + "\n".join(lines) + "\n"
+                "★機械はこれを**書き直していない**(語尾・方言は置換すると文が壊れる／"
+                "一人称は写像が一意でない)=そのまま送られた。**この便はあなたが直せ。**\n"
+                "★characterfileの§声の型どおりに書く。"
+                + ("方言(関西弁)は使わない。"
+                   if any(str(r.get("reason") or "") == "dialect_kansai" for r in group) else "")
+                + "同じ部屋の相方の声に引っ張られていないかも見ろ。\n"
+                "★これは口調の話だ。**事実・数字・ファイル名は1文字も曖昧にするな**(共通規律§4.55)。\n\n")
+    except Exception:
+        return ""         # fail-open= 口調の世話で封筒を壊さない
+
+
 def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_fp=""):
     """新着1件を「原文のまま」の封筒にする(提案書§5.2)。
 
@@ -681,6 +783,9 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         # ★セッション状態(2026-07-26)。**封筒に入れる**理由は共通規律と同じ=
         #   起動文は最初の1回しか読まれないが、状態は**毎便変わる**ので毎便渡す必要がある。
         + str(state or "")
+        # ★前の便で口調が崩れていたら、その実物を突き返す(2026-08-12・Chamiの🔥)。
+        #   崩れていない時は**1文字も足さない**(封筒を毎便太らせない)。
+        + _tone_feedback_block(dept)
         + "=== Discord新着(原文。要約も改変もしていない) ===\n"
         f"投稿者: {rec.get('author','')}\n"
         f"msg_id: {rec.get('msg_id','')}\n"
