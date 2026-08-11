@@ -3435,6 +3435,10 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None):
                 entry.update({"active_session_id": new_sid_r,
                               "status": "ready", "last_used_at": now,
                               "boot_hash": boot_hash})
+                # ★★2026-08-12 手動交代(rotate_now)で引き継げなかった時の**繰り越しの一言**。
+                #   あちらにはChamiへ返す便が無いので旗だけ置いてある。ここで1回だけ回収する。
+                #   pop してから save_room するので、**次の便には残らない**(毎便言わない)。
+                _handoff_missing = bool(entry.pop("handoff_missing_notice", 0))
                 # ★読み直しを送った/不要だった便で人格ファイルの指紋を確定する(2026-07-31)。
                 #   空("")では上書きしない=読めなかった便で健全な指紋を消さない(fail-open)。
                 if char_fp:
@@ -3468,6 +3472,12 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None):
                 #   ここでスレッドを起こしてから return するので、Chamiの返事は1秒も遅れない。
                 _schedule_maintenance(dept, conf, token, entry["active_session_id"],
                                       generation, ctx, entry)
+                if _handoff_missing:
+                    # ★世代の数字も「更新した」も言わない= 告知は消す、警告は残す(2026-08-12)。
+                    reply = (reply.rstrip() + "\n\n"
+                             "(★前の記憶を引き継げなかった。記憶ファイルから復元しているので、"
+                             "抜けていたら遠慮なく言ってくれ)")
+                    _log(dept, "手動交代の引き継ぎ欠落を、この便の末尾で1回だけ伝えた")
                 return reply, True
             if _looks_like_auth_failure(out):
                 # ★認証失敗=**やり直さない**(INC-109)。世代交代もしない(窓を増やさない)。
@@ -3658,9 +3668,21 @@ def rotate_now(dept, conf, token, reason="manual"):
     new_entry["refresh_rotated_at_compacts"] = int(new_entry.get("compact_count") or 0)
     if handoff_path:
         new_entry["handoff_from_prev"] = handoff_path
+    else:
+        # ★★2026-08-12 手動交代でも**引き継げなかった事実だけは黙らない**。
+        #   ここにはChamiへ返す便が無い(自己確認はDiscordへ出さない)ので、その場では言えない。
+        #   → 旗を対応表へ置き、**次にこの部屋がChamiへ返す便の末尾**で1行だけ添える(下の relay())。
+        #   自動交代側は返信そのものに添えているが、経路が違うと持ち物が違う=同じ穴になる。
+        new_entry["handoff_missing_notice"] = 1
     table[dept] = new_entry
     # ★2026-07-28 手動交代も同じ経路(この部屋の1行だけを書き戻す)。
     save_room(dept, new_entry)
+    # ★★2026-08-12 自動交代と**同じ1行**をここにも残す(研究室HQの指摘・穴を塞ぐ)。
+    #   旧= この印は relay() の `if rotated_to:` の中にしか無く、手動交代を通ると
+    #   「宣言を貼らなかった」実測が1件も出ない=**直っているのに『まだ』と読める**検査になっていた。
+    #   ★検査の言葉を経路ごとに変えない(grepが片方を数え落とすのが、静かに壊れる型だ)。
+    _log(dept, f"交代 gen={new_gen}: 世代の宣言は貼らない(2026-08-12 Chami / 手動交代)"
+               + ("" if handoff_path else " ※引き継ぎ無し=次の便で欠落を1行添える"))
     _record(rid, dept, "completed",
             f"手動交代 gen={generation}→{new_gen} new={new_sid} "
             f"handoff={handoff_path or 'なし'} 自己確認={_reply_of(data)[:300]!r}")
