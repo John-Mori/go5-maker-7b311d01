@@ -179,6 +179,7 @@
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
   var _workSearchByTab = {};
+  var _memoSearchByTab = {}; // メモ/コメント検索の入力をタブ別に保持(Chami依頼2026-08-11)
   var DUPLICATE_WORK_NOTICE = '同じ作品が既に追加されているので統合';
   // 重複追加は分かりにくいinline通知ではなくダイアログで明示する(Chami指定2026-07-24)。
   //   重複した時「だけ」出す。今回入力していたメモがあれば改行して2行目に表示する。
@@ -3202,36 +3203,54 @@
   }
   function workSearchHtml_(tabId) {
     return '<div class="cand-work-search" style="padding:2px 6px 10px;">' +
-      '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品を検索（部分一致）</label>' +
+      '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品検索(部分一致)</label>' +
       '<div style="display:flex;gap:6px;align-items:center;">' +
-      '<input id="candWorkSearch" size="1" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品を検索（部分一致）" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
+      '<input id="candWorkSearch" size="1" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品検索(部分一致)" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
       '<button id="candWorkSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
+      '</div>' +
+      // メモ/コメント検索(部分一致)=作品検索の下に同形で並べる(Chami依頼2026-08-11)。両欄はAND(両方に一致した作品だけ表示)。
+      '<label for="candMemoSearch" class="hint" style="display:block;margin:8px 0 4px;">メモ/コメント検索(部分一致)</label>' +
+      '<div style="display:flex;gap:6px;align-items:center;">' +
+      '<input id="candMemoSearch" size="1" type="search" value="' + esc(_memoSearchByTab[tabId] || '') + '" placeholder="メモ・コメントの中身" aria-label="メモ/コメント検索(部分一致)" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
+      '<button id="candMemoSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
       '</div><div id="candWorkSearchResult" class="hint" aria-live="polite" style="min-height:1.4em;margin-top:3px;"></div></div>';
   }
   function wireWorkSearch_(root, tabId) {
     var input = root && root.querySelector('#candWorkSearch');
     if (!input) return;
+    var memoInput = root.querySelector('#candMemoSearch');
     var clear = root.querySelector('#candWorkSearchClear');
+    var memoClear = root.querySelector('#candMemoSearchClear');
     var result = root.querySelector('#candWorkSearchResult');
     var apply = function () {
       var query = normalizeWorkSearch_(input.value);
+      var mQuery = normalizeWorkSearch_(memoInput ? memoInput.value : '');
       _workSearchByTab[tabId] = input.value || '';
+      _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
       var shown = 0, total = 0;
       root.querySelectorAll('.cand-card[data-work-search]').forEach(function (card) {
         total++;
-        var matches = !query || (card.getAttribute('data-work-search') || '').indexOf(query) >= 0;
+        var okWork = !query || (card.getAttribute('data-work-search') || '').indexOf(query) >= 0;
+        var okMemo = !mQuery || (card.getAttribute('data-memo-search') || '').indexOf(mQuery) >= 0;
+        var matches = okWork && okMemo;
         card.style.display = matches ? '' : 'none';
         if (matches) shown++;
       });
-      if (result) result.textContent = query ? shown + '件表示 / ' + total + '件中' : '';
+      if (result) result.textContent = (query || mQuery) ? shown + '件表示 / ' + total + '件中' : '';
     };
     input.addEventListener('input', apply);
+    if (memoInput) memoInput.addEventListener('input', apply);
     if (clear) clear.addEventListener('click', function () {
       input.value = '';
       apply();
       // ★preventScroll: クリアを押しただけで画面が動かないようにする(Chami指定2026-07-26)。
       //   font-size:16px と併せて、iOSのフォーカス時オートズームも起きない。
       try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
+    });
+    if (memoClear) memoClear.addEventListener('click', function () {
+      if (memoInput) memoInput.value = '';
+      apply();
+      try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); }
     });
     apply();
   }
@@ -3546,7 +3565,7 @@
       // 🦋(Bluesky添付画像)ボタンは全く使っていないため撤去(Chami依頼2026-07-29)。跡地へ「作品情報リロード」を配置。
       //   FANZA作品のみ対象(X/Bluesky候補にはFANZA情報が無い)。押すと単発でworkerから取り直し=サムネ未表示等を埋める。
       (isInfoTarget_(it) ? '<button type="button" class="cand-reload-btn" data-reloadinfo="' + esc(it.cid) + '" title="作品情報(サムネ・タイトル・価格等)を取得し直す">🔁作品情報</button>' : '');
-    return '<div class="cand-card' + _postCls + '" data-work-search="' + esc(workSearchText_(it)) + '">' +
+    return '<div class="cand-card' + _postCls + '" data-work-search="' + esc(workSearchText_(it)) + '" data-memo-search="' + esc(normalizeWorkSearch_((refCmt || '') + ' ' + (refMemo || ''))) + '">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
         refImgHtml +
