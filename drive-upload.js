@@ -76,6 +76,11 @@
           var link = res.j.folderLink || "#";
           setStatus('✅ Driveに保存しました(' + channelLabel(payload.channel) + ') ' +
             '<a href="' + link + '" target="_blank" rel="noopener">フォルダを開く</a>');
+          // ★背骨ID→フォルダIDを端末に控える(drive_up_<videoId>)。動画作成時に即保存した後、
+          //   投稿完了側はこれを見て「動画は保存済み」と判断し、仕上がりプレビューだけ追記する(二重保存しない)。
+          if (payload.videoId && res.j.folderId) {
+            try { localStorage.setItem("drive_up_" + payload.videoId, res.j.folderId); } catch (e3) {}
+          }
           // フォルダIDを控える＝Bsky添付画像の後追い保存先。待ち画像があれば今すぐ送る。
           if (payload.videoId && payload.videoId === lastCtx.videoId) {
             lastCtx.folderId = res.j.folderId || "";
@@ -149,15 +154,30 @@
     statusEl().appendChild(b);
   }
 
-  // Drive保存は「投稿完了」まで延期。video-created では Bsky添付画像の後追い用に文脈のみ記録する。
+  // ★動画作成の瞬間にDriveへ即保存する(2026-08-11 Chami「以前の設定を復活させて」)。
+  //   経緯：2026-07-27(f94f1ec)にDrive保存を「投稿完了」まで延期したが、iOS Safariが容量都合で
+  //   IndexedDBの動画blobを捨てた後は、投稿完了時にblobが取れず「投稿履歴には載るのにDriveには無い」
+  //   状態が8/6以降常態化した(Chami: 先生、最低です 以降Driveに保存されていない)。動画blobが確実に
+  //   メモリにある"今この瞬間"に上げれば、blob寿命問題から構造的に独立する=これが「以前の挙動」。
+  //   投稿完了側(stock.js)は drive_up_<videoId> でこのフォルダを見つけ、仕上がりプレビューだけ追記する。
   document.addEventListener("video-created", function (e) {
     var d = (e && e.detail) || {};
     if (!d.blob || d.test) return;
     var name = d.name || "video.mp4";
     var title = (d.title || "").trim() || name.replace(/\.[^.]+$/, "");
-    var channel = (typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "";
+    // チャンネルは作成イベントが載せた account を優先(getCurrentAccountの取り違え防止)。
+    var channel = (d.account === "acc1" || d.account === "acc2") ? d.account
+      : ((typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "");
     if (channel !== "acc1" && channel !== "acc2") return;
-    lastCtx = { videoId: d.videoId || "", title: title, channel: channel, folderId: "", queuedImage: null };
+    lastCtx = { videoId: d.videoId || "", title: title, channel: channel, folderId: "", queuedImage: lastCtx.queuedImage };
+    // 既にこの背骨IDで保存済みなら二重に上げない(作成イベントが複数回来る/リビルド等の保険)。
+    try {
+      var already = d.videoId && localStorage.getItem("drive_up_" + d.videoId);
+      if (!already) {
+        var imgs = d.sourceImageFile ? [d.sourceImageFile] : [];
+        driveUpload_(d.blob, name, title, channel, d.videoId || "", imgs, null);
+      }
+    } catch (e2) {}
   });
 
   // ドラフトタブの「投稿完了」から呼ばれる。blob を受け取って Drive へアップロードする。
@@ -196,7 +216,22 @@
       .then(function (j) { return (j && j.ok && j.found && j.dataUrl) ? j.dataUrl : null; })
       .catch(function () { return null; });
   }
-  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_ };
+  // 背骨ID→動画作成時に保存したDriveフォルダID(無ければ空)。投稿完了側が「もう保存済みか」を判定する。
+  function folderIdFor_(videoId) {
+    try { return videoId ? (localStorage.getItem("drive_up_" + videoId) || "") : ""; } catch (e) { return ""; }
+  }
+  // 既存の動画フォルダ(folderId)へ画像1枚だけ追記する。(投稿完了時の仕上がりプレビュー追記に使う)
+  //   ★動画/元画像は作成時に保存済み=ここでは上げ直さない。プレビューだけ「動画名_プレビュー.拡張子」で足す。
+  function appendImageToFolder_(channel, title, folderId, imgBlob, fileName) {
+    if (!configured() || !folderId || !imgBlob) return;
+    if (channel !== "acc1" && channel !== "acc2") return;
+    var safeTitle = String(title || "動画").replace(/[\\/:"*?<>|]/g, '_');
+    var name = fileName || (safeTitle + "_プレビュー." + imgExt(imgBlob));
+    var f = (imgBlob instanceof File) ? imgBlob : new File([imgBlob], name, { type: imgBlob.type || "image/jpeg" });
+    lastCtx.channel = channel; lastCtx.title = title; lastCtx.folderId = folderId;
+    sendAppend(f, 0);
+  }
+  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_ };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {

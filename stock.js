@@ -529,14 +529,56 @@
     // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。記録の後に行う(blob非依存)。
     archiveStock_(id);
     render();
-    // ── Drive アップロード(動画/画像・blob依存)。失敗しても投稿履歴の記録は上で確定済み ─────────
-    resolveVideoBlob_(id).then(function (blob) {
-      if (!blob) { alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済みです。Google Driveへの動画保存だけスキップしました。'); return; }
-      if (!(window.Go5Drive && typeof window.Go5Drive.upload === 'function')) {
-        alert('Drive連携が未設定です。動画作成タブのDriveStatus欄を確認してください。(投稿履歴には記録済み)');
-        return;
+    // ── Drive 保存。動画作成時に即保存済みならプレビューだけ追記、未保存の旧ドラフト等はフル保存にフォールバック ──
+    driveSaveForCompleted_(meta, { silent: false });
+  }
+
+  // 投稿完了(または作成履歴カードの「☁️ Drive保存」)から呼ぶDrive保存。
+  //   ★動画作成の瞬間に即保存済み(drive_up_<videoId>あり)なら、動画/元画像は上げ直さず仕上がりプレビューだけ追記する。
+  //     iOSがIDBの動画blobを容量都合で捨てた後でも、作成時に上げてあるのでDriveには残る=「履歴に載るのにDriveに無い」の根治。
+  //   ★未保存(旧ドラフト・作成時の即保存に失敗・サブ端末完了)なら従来どおり動画blobを取り直してフル保存する。
+  //   仕上がりプレビューは Driveの有無に関わらず「使用画像1ページ目」へ差し込む(REQ-716a4bf46f・冪等)。
+  //   opts.silent=true のときは成否のalertを出さない(裏経路/一括保存用)。
+  function driveSaveForCompleted_(meta, opts) {
+    opts = opts || {};
+    if (!meta || !meta.id) return;
+    var store = idb();
+    if (!store) { if (!opts.silent) alert('IndexedDB未対応のためDrive保存できません。(投稿履歴には記録済み)'); return; }
+    if (!(window.Go5Drive && typeof window.Go5Drive.upload === 'function')) {
+      if (!opts.silent) alert('Drive連携が未設定です。動画作成タブのDriveStatus欄を確認してください。(投稿履歴には記録済み)');
+      return;
+    }
+    var id = meta.id;
+    var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
+    // 仕上がりプレビューを「使用画像1ページ目」へ差し込む(videoIdで紐付く・Chami依頼2026-07-30・冪等)。
+    var applyPreview = function (prevB) {
+      if (prevB && meta.videoId && window.Go5Cand && window.Go5Cand.usedImgSave && window.Go5Cand.usedImgs) {
+        blobToDataUrl_(prevB, function (durl) {
+          if (!durl) return;
+          var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
+          if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
+          window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
+        });
       }
-      // 元画像＋仕上がりプレビュー(保存時にIDBへ退避したもの)も一緒にDriveへ。取れなくても動画だけは必ず上げる。
+    };
+    // ── 既にDriveへフォルダがある=動画/元画像は作成時に保存済み。プレビューだけ追記する(blob不要=blob寿命に依存しない)。
+    if (folderId) {
+      Promise.all([
+        store.get('stock_prev_' + id).catch(function () { return null; }),
+        store.get('stock:imgs:' + id).catch(function () { return null; })
+      ]).then(function (r) {
+        var prev = r[0], mirror = r[1] || {};
+        var prevP = prev ? Promise.resolve(prev) : durlToBlob_(mirror.prev);
+        prevP.then(function (prevB) {
+          if (prevB && window.Go5Drive.appendImage) window.Go5Drive.appendImage(meta.account, meta.title, folderId, prevB, null);
+          applyPreview(prevB);
+        });
+      });
+      return;
+    }
+    // ── フォールバック：作成時にDrive未保存。動画blobを取り直してフル保存(動画+元画像+プレビュー)。
+    resolveVideoBlob_(id).then(function (blob) {
+      if (!blob) { if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済みです。Google Driveへの動画保存だけスキップしました。'); return; }
       Promise.all([
         store.get('stock_img_' + id).catch(function () { return null; }),
         store.get('stock_prev_' + id).catch(function () { return null; }),
@@ -550,21 +592,13 @@
         Promise.all([imgP, prevP]).then(function (bs) {
           var imgB = bs[0], prevB = bs[1];
           window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null);
-          // ★投稿履歴の使用画像1ページ目に仕上がりプレビューを差し込む(videoIdで紐付く・Chami依頼2026-07-30)。
-          if (prevB && meta.videoId && window.Go5Cand && window.Go5Cand.usedImgSave && window.Go5Cand.usedImgs) {
-            blobToDataUrl_(prevB, function (durl) {
-              if (!durl) return;
-              var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
-              if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
-              window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
-            });
-          }
+          applyPreview(prevB);
         });
       }).catch(function () {
         window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, []);
       });
     }).catch(function (err) {
-      alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
+      if (!opts.silent) alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
     });
   }
 
@@ -640,6 +674,7 @@
         '<div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;">' +
           '<button type="button" class="stk-restore" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;">↩ 復元</button>' +
           '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">⬇ 動画DL</button>' +
+          '<button type="button" class="stk-drive" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">☁️ Drive保存</button>' +
           '<button type="button" class="stk-arch-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #5a2a2a;background:transparent;color:#c77;padding:5px 8px;">🗑 完全削除</button>' +
         '</div>' +
       '</div>' +
@@ -1318,6 +1353,11 @@
 
         if (btn.classList.contains('stk-dl')) {
           if (meta) downloadStock_(id, meta.videoName);
+
+        } else if (btn.classList.contains('stk-drive')) {
+          // ☁️ Drive保存(作成履歴カード)=作成時にDriveへ上がっていない過去分を後から保存する。
+          //   素材(動画)が端末にまだ残っていればフル保存、既に作成時に上がっていればプレビュー追記(冪等)。
+          if (meta) { driveSaveForCompleted_(meta, { silent: false }); }
 
         } else if (btn.classList.contains('stk-mode')) {
           if (meta) openPostModal_(meta);
