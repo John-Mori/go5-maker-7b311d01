@@ -1233,13 +1233,18 @@
         if (wasChecked) bskyEnable.checked = false;
         _restoreBskyEl = wasChecked ? bskyEnable : null;
         _draftMode = true;
+        // ★「これはドラフト作成だ」を作成イベントに載せる(app.js make()が消費→detail.draft)。
+        //   bskyEnableを外すだけでは、自動投稿ON/OFFに関わらず走る maybeInheritRebuild_(リビルド引き継ぎの確認/投稿)
+        //   等の投稿系フローへ漏れて「今すぐ投稿の挙動」になっていた(Chami報告2026-08-11)。フラグで全購読者に抑止を効かせる。
+        window.__go5DraftPending = true;
         var makeBtn = $('makeBtn');
         if (makeBtn) makeBtn.click();
       });
     }
 
     document.addEventListener('video-created', function (e) {
-      if (!_draftMode) return;
+      // detail.draft(app.jsが確定した権威)を主に見る。_draftMode は保険(万一の取りこぼし対策)。
+      if (!_draftMode && !(e && e.detail && e.detail.draft)) return;
       _draftMode = false;
       if (_restoreBskyEl) { _restoreBskyEl.checked = true; _restoreBskyEl = null; }
       var detail = (e && e.detail) || {};

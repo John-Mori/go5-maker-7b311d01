@@ -615,6 +615,11 @@
 
   // ---- 動画作成 ----
   async function make() {
+    // ★ドラフトで作成の意図を「作成イベント」に載せる(Chami報告2026-08-11「ドラフトで作成が今すぐ投稿の挙動になる」)。
+    //   従来は draftMakeBtn が bskyEnable を外すだけで、Bluesky側の maybeInheritRebuild_(自動投稿ON/OFFに
+    //   関わらず走るリビルド引き継ぎ)や他の購読者へは「これはドラフトだ」が伝わらず、投稿/確認フローへ漏れていた。
+    //   ここで一度だけフラグを消費して detail.draft に確定=購読者全員が確実に投稿を抑止できる(早期returnでも滞留しない)。
+    var isDraft = !!window.__go5DraftPending; window.__go5DraftPending = false;
     if (!fgImg) { setStatus("先に写真を選んでください。"); return; }
     if (!window.MediaRecorder) { setStatus("この端末は動画書き出しに未対応です。(iOS15以降のSafari推奨)"); return; }
     // 狙い・コメント型は生成前の必須選択＝未設定のまま投稿されると分析を汚すため入口で止める。(Chami指定2026-07-14)
@@ -685,7 +690,7 @@
       //   Bluesky alt / GAS記録のtitle / 端末予約 / Drive のフォルダ名・ファイル名。
       //   ★空白に置換しない=詰めて連結する(Chami明示「改行や空白を挟まない」)。
       //   ここ1箇所で潰すことで購読側6経路すべてに効く(個別対処だと足し忘れが必ず出る)。
-      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest, sourceImageFile: fgFile } }));
+      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest, sourceImageFile: fgFile, draft: isDraft } }));
     } catch (e) {
       setStatus("作成に失敗しました：" + e.message);
     } finally {

@@ -2568,6 +2568,9 @@
   }
 
   function handleVideoCreated(ev) {
+    // ★ドラフトで作成は「あとで投稿」=ここでは一切投稿/引き継ぎしない(Chami報告2026-08-11「ドラフトで作成が
+    //   今すぐ投稿の挙動になる」)。maybeInheritRebuild_ は自動投稿ON/OFFに関わらず走るため、この最上段で断ち切る。
+    if (ev && ev.detail && ev.detail.draft) return;
     if (maybeInheritRebuild_(ev)) return; // 🔁同一作品のリビルド＝前回のBluesky投稿を引き継ぎ(再投稿しない)
     if (!els.enable || !els.enable.checked) return;
     var c = creds();
