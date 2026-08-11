@@ -66,3 +66,54 @@ test.describe('go5-maker 公開URL スモーク', () => {
     await expect(fileInput).toHaveCount(1);
   });
 });
+test.describe('候補ページの画像・投稿編集', () => {
+  test('閉じた追加モーダル後も同期画像が出て、DOM差し替え後も投稿編集が開く', async ({ page }) => {
+    const cid = 'tw_codex_candidate_ui';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate((candidateCid) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid: candidateCid,
+        title: '候補UI回帰テスト',
+        isTwitter: true,
+        twitterUrl: 'https://x.com/test/status/1',
+        addedAt: Date.now(),
+      }]));
+    }, cid);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    const editButton = page.locator('[data-refimg="' + cid + '"]');
+    await expect(editButton).toBeVisible();
+
+    // 一度開いて閉じると .add-modal 自体はDOMに残る。この状態でも背景同期を止めてはいけない。
+    await page.locator('#candAddOpen').click();
+    await page.locator('.add-modal .fz-close').click();
+    await expect(page.locator('.fz-overlay:has(.add-modal)')).toBeHidden();
+
+    const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.evaluate(async ({ candidateCid, imageData }) => {
+      await new Promise((resolve, reject) => {
+        const req = indexedDB.open('go5store', 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
+        };
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put({ imgs: [imageData], comment: '同期画像', memo: '', at: Date.now() }, 'ref:' + candidateCid);
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+      document.dispatchEvent(new CustomEvent('go5-synced', { detail: { pulledImg: 1 } }));
+    }, { candidateCid: cid, imageData: image });
+
+    await expect(page.locator('[data-refimgview="' + cid + '"]')).toBeVisible();
+
+    // 非同期描画によるinnerHTML差し替えを模擬。複製ボタンには個別listenerが無くても親の委譲で動く。
+    await editButton.evaluate((el) => el.replaceWith(el.cloneNode(true)));
+    await page.locator('[data-refimg="' + cid + '"]').click();
+    await expect(page.locator('.refimg-modal')).toBeVisible();
+    await expect(page.locator('#refImgPreview img')).toBeVisible();
+  });
+});

@@ -23,10 +23,19 @@
     return !!(cached && cached.done && cached.info && cached.info.title && !cached.errored);
   }
 
+  // モーダル本体は再利用のためDOMに残す。祖先overlayが hidden なら「開いている」と扱わない。
+  // documentに依存しない形にして、回帰テストからも判定規則を固定できるようにする。
+  function modalIsOpen_(modal) {
+    if (!modal) return false;
+    var overlay = null;
+    try { overlay = modal.closest ? modal.closest('.fz-overlay') : modal.parentNode; } catch (e) {}
+    return !(overlay && overlay.hidden);
+  }
+
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -762,14 +771,12 @@
   var _bgRerenderPending = false;
   function _entryInProgress_() {
     try {
-      if (document.querySelector('.add-modal')) return true;   // 追加モーダルが開いている
-      var ids = ['candUrl', 'candTwitter', 'candMemo'];
-      for (var i = 0; i < ids.length; i++) {
-        var el = document.getElementById(ids[i]);
-        if (!el) continue;
-        if (document.activeElement === el) return true;        // 入力欄にフォーカス中
-        if ((el.value || '').trim() !== '') return true;       // 打ちかけの文字が残っている
-      }
+      // ★.add-modal は初回作成後ずっとDOMに残り、閉じる時は祖先 .fz-overlay を hidden にするだけ。
+      //   存在だけで判定すると、一度でも「追加」を開いた後は永久に入力中扱いとなり、同期/IDB展開後の
+      //   再描画が止まる。その結果「画像が出ず、ページを移動し直すと出る」になっていた。
+      //   開いているoverlayだけを入力中とみなす。閉じたモーダル内に残ったURL/メモも判定対象外。
+      var addModal = document.querySelector('.add-modal');
+      if (modalIsOpen_(addModal)) return true;
     } catch (e) {}
     return false;
   }
@@ -1849,31 +1856,77 @@
       while (el.scrollWidth > cw + 1 && px > 7 && guard < 12) { px -= 1; el.style.fontSize = px + 'px'; guard++; }
     }
   }
+  // カード一覧は同期・画像展開・作品情報取得でinnerHTMLが差し替わる。
+  // pageCand(不変の親)でクリックを受けるイベント委譲にし、差し替え直後の新しいボタンも必ず動かす。
+  function dataTarget_(node, attr, root) {
+    var cur = node;
+    while (cur && cur !== root) {
+      try { if (cur.nodeType === 1 && cur.hasAttribute && cur.hasAttribute(attr)) return cur; } catch (e) {}
+      cur = cur.parentNode;
+    }
+    return null;
+  }
+  // 通常は描画時の索引を使う。非同期描画の境界だけ索引が入れ替わっていても、保存済み候補から復元する。
+  function durableItemByCid_(cid) {
+    var hit = itemByCid_(cid);
+    if (hit) return hit;
+    var groups = [lsGet(itemsKey(_activeTab), '[]')];
+    if (_activeTab !== 'main') groups.push(lsGet(K_ITEMS, '[]'));
+    var tabs = lsGet(K_TABS, '[]');
+    tabs.forEach(function (t) { if (!isMakerTab_(t)) groups.push(lsGet(itemsKey(t.id), '[]')); });
+    for (var gi = 0; gi < groups.length; gi++) {
+      for (var ii = 0; ii < groups[gi].length; ii++) {
+        if (groups[gi][ii] && String(groups[gi][ii].cid) === String(cid)) return groups[gi][ii];
+      }
+    }
+    return null;
+  }
+  function liveRefButton_(page, cid) {
+    var found = null;
+    page.querySelectorAll('[data-refimg]').forEach(function (b) {
+      if (!found && String(b.getAttribute('data-refimg')) === String(cid)) found = b;
+    });
+    return found;
+  }
+  function ensureCardDelegation_(page) {
+    if (!page || page._go5CardDelegated) return;
+    page._go5CardDelegated = true;
+    page.addEventListener('click', function (e) {
+      var refBtn = dataTarget_(e.target, 'data-refimg', page);
+      if (refBtn) {
+        e.preventDefault();
+        var cid = refBtn.getAttribute('data-refimg');
+        var it = durableItemByCid_(cid);
+        if (!it) {
+          // 索引の切替境界なら同期描画で索引を作り直し、このクリック内でそのまま開く。
+          render();
+          it = durableItemByCid_(cid);
+        }
+        if (!it) return;
+        openRefImgModal_(it, function () {
+          var live = liveRefButton_(page, cid);
+          if (!live) return;
+          var has = refImgHas(cid);
+          live.classList.toggle('has-img', has);
+          live.textContent = '投稿編集';
+          updateCardRefThumb_(live.closest ? live.closest('.cand-card') : null, cid);
+        });
+        return;
+      }
+      var refView = dataTarget_(e.target, 'data-refimgview', page);
+      if (refView) {
+        var rc = refView.getAttribute('data-refimgview'), imgs = refImgsOf_(rc);
+        if (imgs.length) openImgZoom_(imgs, 0, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } });
+        return;
+      }
+      var thumb = dataTarget_(e.target, 'data-thumbcid', page);
+      if (thumb) openThumbModal_(durableItemByCid_(thumb.getAttribute('data-thumbcid')));
+    });
+  }
   // カード共通の配線：サムネのタップで画像モーダル／🖼投稿画像ボタン。
   function wireCardCommon_(el) {
     wireAcctRow_(el); // カード右上のチャンネル切替＋投稿済み表示
     fitOneLineTexts_(el); // コメント/メモを1行に収める(可変フォント)
-    el.querySelectorAll('[data-thumbcid]').forEach(function (im) {
-      im.addEventListener('click', function () { openThumbModal_(itemByCid_(im.getAttribute('data-thumbcid'))); });
-    });
-    // 保存済みの動画生成用画像(サムネ下の縦長画像)：タップで拡大プレビュー。
-    el.querySelectorAll('[data-refimgview]').forEach(function (im) {
-      im.addEventListener('click', function () { var rc = im.getAttribute('data-refimgview'); var imgs = refImgsOf_(rc); if (imgs.length) openImgZoom_(imgs, 0, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } }); }); // 複数あればスワイプ＋1ページ目にする＋貼り付け新規追加
-    });
-    el.querySelectorAll('[data-refimg]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var cid = b.getAttribute('data-refimg'), it = itemByCid_(cid); if (!it) return;
-        openRefImgModal_(it, function () {
-          var has = refImgHas(cid);
-          b.classList.toggle('has-img', has);
-          // 文言は常に「投稿編集」。★保存後だけ🖼/✓が付いて初期描画(2459行)と食い違っていたため
-          //   統一した(Chami依頼2026-07-17「🖼️と✅は必要ない。編集投稿のままにしといて」)。
-          //   画像の有無は has-img クラス(枠色)で示すのでバッジは不要。
-          b.textContent = '投稿編集';
-          updateCardRefThumb_(b.closest ? b.closest('.cand-card') : null, cid); // 保存直後に一覧のサムネへ反映(リロード不要)
-        });
-      });
-    });
     el.querySelectorAll('[data-reloadinfo]').forEach(function (b) {
       b.addEventListener('click', function () {
         var cid = b.getAttribute('data-reloadinfo'); if (!cid) return;
@@ -2116,6 +2169,7 @@
   function render() {
     var page = $('pageCand');
     if (!page) return;
+    ensureCardDelegation_(page); // page自体は再描画で交換されないため、カード差し替え後も操作を受け続ける
     _bgRerenderPending = false; // どの経路の描画でも保留は解消(追加確定・タブ再入場で最新へ追いつく)
     kickInfoBackfill_(); // タブへ戻ってきた時=未取得タイトルの追跡を素早いフェーズへ戻す(この後の描画でbackfillが回る)
     var tabs = lsGet(K_TABS, '[]');
