@@ -479,9 +479,14 @@
     // 予約投稿でカレンダー枠を選んでいたら、その枠の公開予定時刻を投稿履歴の「投稿予定」時刻として渡す(DEF#4)。
     var plannedAt = (pd.pubMode === 'scheduled' && ps && ps.scheduled_at) ? String(ps.scheduled_at).replace(' ', 'T') : '';
     // ①投稿完了 → 投稿履歴へ1件記録(既存の投稿履歴機構=Go5History)。blobの有無に関わらず必ず実行。
+    //   ★戻り値を"正"にする(2026-08-12)。以前は戻り値を捨て、verify_manual を videoId 完全一致で読み直して
+    //     診断していたため、videoId無し既存行にYouTube/短縮URL一致で当たった重複を「記録が全て空で拒否」と
+    //     誤報していた(Chami報告2026-08-11・スクショはURL埋まりなのに"全て空"表示)。addCompletedPost が
+    //     測った理由(ok/dupe/no-id/例外)だけを出す＝でっち上げない・黙って落とさない(fail-open)。
+    var _res = null;
     try {
       if (window.Go5History && typeof window.Go5History.addCompletedPost === 'function') {
-        window.Go5History.addCompletedPost({
+        _res = window.Go5History.addCompletedPost({
           account: meta.account || 'acc1',
           ytUrl: ytUrl || '',
           shortUrl: shortUrl || '',
@@ -492,28 +497,20 @@
           attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
         });
       }
-    } catch (e) {}
-    // ★診断(非破壊・確認待ち)：投稿完了で投稿履歴へ1件載るはずが「この作品のデータが丸ごと出ない」再発
-    //   (Chami報告2026-08-11)。手動エントリは必ず日付＋『(手動追加)』を描くので"空カード"は原理上あり得ず、
-    //   =症状は「行が丸ごと不在」。書き戻し直後に verify_manual__<acc> を読み直し、この背骨IDの行が居るかを
-    //   確認する。居なければ"静かに落ちた"ので、なぜ載らなかったかをその場で画面に出す(不可視の失敗を可視化)。
+    } catch (e) { _res = { ok: false, reason: 'exception', message: (e && e.message) || String(e) }; }
+    // ★測った理由だけを出す。成功=無言(従来どおり)。dupe=エラーでなく「既に載っています」の情報表示。
     try {
-      var _dacc = meta.account || 'acc1';
-      var _darr = []; try { _darr = JSON.parse(localStorage.getItem('verify_manual__' + _dacc) || '[]'); } catch (e3) {}
-      var _dhere = meta.videoId && Array.isArray(_darr) && _darr.some(function (x) { return x && x.videoId === meta.videoId; });
-      if (!_dhere) {
-        var _dother = _dacc === 'acc1' ? 'acc2' : 'acc1', _dupOther = false;
-        try {
-          ['verify_manual__', 'short_hist__'].forEach(function (b) {
-            var a2 = JSON.parse(localStorage.getItem(b + _dother) || '[]');
-            if (Array.isArray(a2) && a2.some(function (x) { return x && x.videoId === meta.videoId; })) _dupOther = true;
-          });
-        } catch (e4) {}
-        alert('投稿履歴にこの作品が載りませんでした。\n理由=' +
-          (!meta.videoId ? 'この動画に識別ID(背骨ID)が無い' :
-           _dupOther ? '同じ動画IDの履歴が別チャンネル(' + _dother + ')側に既にある(重複判定で弾かれた)' :
-           '記録の書き込みが拒否された(YouTube URL・短縮URL・IDが全て空)') +
-          '\n(Chami報告2026-08-11の原因特定用の診断です。videoId=' + (meta.videoId || 'なし') + ' / チャンネル=' + _dacc + ')');
+      var _dacc2 = meta.account || 'acc1';
+      if (_res && _res.ok === false) {
+        if (_res.reason === 'dupe') {
+          var _byJa = _res.matchedBy === 'ytUrl' ? 'YouTube URL一致' : _res.matchedBy === 'shortUrl' ? '短縮URL一致' : '同じ動画ID';
+          var _ex = _res.existing || {};
+          alert('この作品は既に投稿履歴に載っています(' + _byJa + ')。二重登録を防ぎました。\n既存: ' + (_ex.title || '(題名なし)') + (_ex.videoId ? ' / ' + _ex.videoId : ''));
+        } else if (_res.reason === 'no-id') {
+          alert('投稿履歴に載せられませんでした。\n理由=この動画に識別ID(背骨ID)が無く、YouTube URL・短縮URLも空でした。\n(videoId=' + (meta.videoId || 'なし') + ' / チャンネル=' + _dacc2 + ')');
+        } else if (_res.reason === 'exception') {
+          alert('投稿履歴への記録で問題が起きました。\n' + (_res.message || '(詳細不明)') + '\n(videoId=' + (meta.videoId || 'なし') + ' / チャンネル=' + _dacc2 + ')');
+        }
       }
     } catch (e5) {}
     // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
@@ -974,7 +971,16 @@
       else if (window.BlueskyCore && window.BlueskyCore.hasWorkLinkPlaceholder && window.BlueskyCore.hasWorkLinkPlaceholder(v)) {
         nv = window.BlueskyCore.fillWorkLinkPlaceholder(v, share, ''); // プレースホルダを短縮で埋める
       }
-      if (nv !== v) el.value = nv; // 表示だけ更新(手編集扱いにしない=saveDraftPost_は呼ばない)
+      if (nv !== v) {
+        el.value = nv; // 表示だけ更新(未編集なら手編集扱いにしない=saveDraftPost_は呼ばない)
+        // ★保存済みの投稿編集(saved.xText)が生アフィリンクのまま凍結されているのを短縮版へ更新する。
+        //   これが無いと復元→再度開くたびに生リンクへ戻る(Chami報告2026-08-11「復活させたら短縮化されてない」)。
+        //   saved.xText が無い(未編集)場合は保存しない=「空=未編集」ロジック(openPostModal_)を壊さない。
+        try {
+          var _sv = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}');
+          if (_sv && _sv.xText) saveDraftPost_();
+        } catch (e) {}
+      }
     }
     if (_shortMintCache[aff]) { applyShare_(_shortMintCache[aff]); return; }
     try {
@@ -1005,8 +1011,11 @@
     $('draftXText').value = composedXText;
     // ①短縮URL置換：この作品のアフィリンクの短縮を発番し、本文に残る生アフィリンク/プレースホルダを短縮へ差し替える。
     //   ★短縮は draft の作品に対して非同期で発番する(live UIの作品とは別・workShortCache_は使わない)。
-    //   手編集の保存(saved.xText)を開いている時は尊重して触らない。完了までは生リンク/プレースホルダのまま。
-    if (!saved.xText) mintDraftWorkShort_(meta);
+    //   ★保存済み(saved.xText)でも生アフィリンク完全一致/プレースホルダは短縮へ置換する(2026-08-12)。
+    //     復元ドラフトは saved.xText が残るため以前はmintを丸ごとスキップし、X用アフィリンクが生のまま
+    //     凍結されていた(Chami報告2026-08-11)。mintDraftWorkShort_ は生リンク/プレースホルダ以外は触らない
+    //     ので手編集文は壊れない(既に短縮済みなら no-op)。置換が起きて保存済み本文があった時だけ保存も更新。
+    mintDraftWorkShort_(meta);
     var tags = saved.ytTags !== undefined ? saved.ytTags : null;
     if (tags === null) { try { tags = localStorage.getItem('yt_tags_shared') || ''; } catch (e) { tags = ''; } }
     if (!tags) { var te = $('ytTags'); tags = te ? te.value : '#Shorts #マンガ #漫画紹介 #anime'; }

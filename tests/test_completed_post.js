@@ -7,7 +7,9 @@
  *   毎回、別の“黙って捨てるガード”が真因だった(URL両空でreturn / videoId発番がガードの後 / blob依存)。
  *   直したが機械の歯止めが無い=次の改修で黙って再発しうる。ここで「載せる/捨てる/重複」の3判定を
  *   純関数のミラーとして固定し、CI(smoke.yml が tests/test_*.js を全push実行)で毎回撃つ。
- * ※ yt-clicks.js:addCompletedPost_(2192〜2206)と「同一仕様」。どちらかを変えたら両方を揃えること。
+ * ※ yt-clicks.js:addCompletedPost_ と「同一仕様」。どちらかを変えたら両方を揃えること。
+ *   2026-08-12: 戻り値を bare boolean → 理由付きオブジェクト({ok}/{ok:false,reason:'dupe'|'no-id',matchedBy,existing})へ。
+ *   併せて dupe時は既存行の"空欄だけ"を非破壊バックフィル(記録の統合＝削除でない)。下に backfillRow ミラーを追加。
  *
  * 実行: node tests/test_completed_post.js
  */
@@ -38,6 +40,18 @@ function isDupe(existingList, incoming) {
     if (incoming.videoId && it.videoId === incoming.videoId) return true;
     return false;
   });
+}
+
+// --- dupe時の非破壊バックフィルのミラー(yt-clicks.js: matched行の"空欄だけ"を今回値で埋める) ---
+//   videoId無し既存行(手動追加/リビルド前)にYouTube/短縮URL一致で当たったら、空の videoId/ytUrl/shortUrl を
+//   今回値で埋める=次回から videoId で照合が揃い「行は在るのに載らなかった」誤報が構造的に消える。
+//   既に値のある欄は上書きしない(統合＝削除でない・破壊しない)。
+function backfillRow(matched, incoming) {
+  const out = Object.assign({}, matched);
+  if (!out.videoId && incoming.videoId) out.videoId = incoming.videoId;
+  if (!out.ytUrl && incoming.ytUrl) out.ytUrl = incoming.ytUrl;
+  if (!out.shortUrl && incoming.shortUrl) out.shortUrl = incoming.shortUrl;
+  return out;
 }
 
 let passed = 0, failed = 0;
@@ -78,6 +92,20 @@ test('D-3: 同形式の同一YouTube IDは重複', function () {
 test('D-4: 別の背骨ID/別URLなら重複ではない=ちゃんと新規で載る', function () {
   const list = [{ videoId: 'acc1-A', shortUrl: 'https://5mgl.com/a' }];
   assert.strictEqual(isDupe(list, { videoId: 'acc1-B', shortUrl: 'https://5mgl.com/b' }), false);
+});
+
+// ── dupe時の非破壊バックフィル ────────────────────────────
+test('B-1: videoId無しの既存行(手動追加)へYouTube URL一致で当たったら videoId を埋める(誤報の根治)', function () {
+  const matched = { ytUrl: 'https://youtube.com/shorts/abc123', title: '実は女の子も焦ってる' };
+  const out = backfillRow(matched, { videoId: 'acc1-20260811-1708-3yqv', ytUrl: 'https://youtube.com/shorts/abc123', shortUrl: 'https://5mgl.com/8dpUu' });
+  assert.strictEqual(out.videoId, 'acc1-20260811-1708-3yqv');
+  assert.strictEqual(out.shortUrl, 'https://5mgl.com/8dpUu');
+});
+test('B-2: 既に値のある欄は上書きしない(統合＝削除でない・破壊しない)', function () {
+  const matched = { videoId: 'acc1-OLD', shortUrl: 'https://5mgl.com/keep' };
+  const out = backfillRow(matched, { videoId: 'acc1-NEW', shortUrl: 'https://5mgl.com/new' });
+  assert.strictEqual(out.videoId, 'acc1-OLD');
+  assert.strictEqual(out.shortUrl, 'https://5mgl.com/keep');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

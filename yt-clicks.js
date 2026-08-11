@@ -2238,19 +2238,40 @@
     if (!vidId && window.IdGen && window.IdGen.makeVideoId) { try { vidId = window.IdGen.makeVideoId(acc, new Date(), {}); } catch (e) {} }
     // ★この“載せる/捨てる”と下の重複判定は tests/test_completed_post.js に純関数ミラーがあり
     //   CI(smoke.yml が全pushで tests/test_*.js を実行)で固定している。どちらかを変えたら両方揃えること。
-    if (!ytUrl && !shortUrl && !vidId) return false; // 発番もできない(IdGen不在)時だけ従来どおり載せない
+    if (!ytUrl && !shortUrl && !vidId) return { ok: false, reason: 'no-id' }; // 発番もできない(IdGen不在)時だけ従来どおり載せない
     var vid = ytUrl ? ytIdOf(ytUrl) : '';
     var manual = loadArrFor_('verify_manual', acc);
     var hist = loadArrFor_('short_hist', acc);
     var ymap = loadYtMapFor_(acc);
-    var dupe = manual.concat(hist).some(function (it) {
-      var y = ymap[itemKey(it)] || it.ytUrl || '';
-      if (vid && ytIdOf(y) === vid) return true;
-      if (shortUrl && it.shortUrl === shortUrl) return true;
-      if (vidId && it.videoId === vidId) return true; // 同じドラフト(背骨ID)の再完了で履歴を二重にしない
-      return false;
-    });
-    if (dupe) { if (acc === acct()) refresh(); return false; }
+    // ★重複判定は「どの行に・何のキーで当たったか」まで拾う(2026-08-12)。以前は bare boolean を
+    //   return false していたため、stock側の診断が理由を測れず固定文言「(URL・IDが)全て空」を誤報していた
+    //   (Chami報告2026-08-11・スクショはURL埋まりなのに"全て空"表示)。matchedBy と既存行を返す。
+    var matched = null, matchedBy = '', matchedStore = '';
+    var pools = [{ arr: manual, base: 'verify_manual' }, { arr: hist, base: 'short_hist' }];
+    for (var pi = 0; pi < pools.length && !matched; pi++) {
+      var arr = pools[pi].arr;
+      for (var ii = 0; ii < arr.length && !matched; ii++) {
+        var it = arr[ii];
+        var y = ymap[itemKey(it)] || it.ytUrl || '';
+        if (vid && ytIdOf(y) === vid) { matched = it; matchedBy = 'ytUrl'; matchedStore = pools[pi].base; }
+        else if (shortUrl && it.shortUrl === shortUrl) { matched = it; matchedBy = 'shortUrl'; matchedStore = pools[pi].base; }
+        else if (vidId && it.videoId === vidId) { matched = it; matchedBy = 'videoId'; matchedStore = pools[pi].base; } // 同じドラフト(背骨ID)の再完了で履歴を二重にしない
+      }
+    }
+    if (matched) {
+      // ★二重登録はしない(D-1〜D-3)。ただし既存行の"空欄だけ"を今回の同定材料で埋める非破壊バックフィル。
+      //   videoId無し既存行(手動追加/リビルド前の旧完了行)にYouTube/短縮URL一致で当たると、行は在るのに
+      //   videoIdが揃わず「載らなかった」と診断が誤報していた=空欄を埋めれば次回から videoId で照合が揃い
+      //   構造的に消える(記録の統合＝削除でない・MEMORY: 記録シートの重複は削除でなく統合)。
+      //   ★GASへは push しない(videoIdキーの upsert が新IDでシート新規行を作り二重行になる=ローカル統合のみ)。
+      var changed = false;
+      if (!matched.videoId && vidId) { matched.videoId = vidId; changed = true; }
+      if (!matched.ytUrl && ytUrl) { matched.ytUrl = ytUrl; changed = true; }
+      if (!matched.shortUrl && shortUrl) { matched.shortUrl = shortUrl; changed = true; }
+      if (changed) { try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {} }
+      if (acc === acct()) refresh();
+      return { ok: false, reason: 'dupe', matchedBy: matchedBy, existing: { title: matched.title || '', videoId: matched.videoId || '', ts: matched.ts || 0 } };
+    }
     var id = 'm:' + new Date().getTime();
     var entry = { manual: true, id: id, ts: opts.ts || new Date().getTime() };
     if (ytUrl) entry.ytUrl = ytUrl;
@@ -2291,7 +2312,7 @@
       } catch (e) {}
     }
     if (acc === acct()) { try { pokeSnapshotNow_(); } catch (e) {} refresh(); }
-    return true;
+    return { ok: true };
   }
   // ── カレンダー枠との紐づけ用(③④・Chami 2026-08-06)：指定日(JST)に投稿された現アカウントの履歴を返す。──
   //   投稿時刻の解決は投稿履歴カード(§1665〜)と同じ順序＝YouTube公開日時→予約/カレンダー予定→実投稿時刻(ts)。
