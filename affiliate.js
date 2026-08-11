@@ -46,6 +46,12 @@
     if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=41');
   }
   function showTab(activeBtnId) {
+    // ドラフトはiOS Safariのメモリ圧を避ける軽量専用ページへ。保存タブの復元時も本体内の旧sectionを開かない。
+    if (activeBtnId === 'tabStock' && !window.__go5StockStandalone) {
+      try { localStorage.setItem('go5_active_tab', 'tabStock'); } catch (e) {}
+      location.href = 'Stock.html';
+      return;
+    }
     var outgoing = currentTab; // 直前に前面だったタブ(離れる=DOMを空にしてメモリ解放する対象の判定)
     TABS.forEach(function (t) {
       var b = document.getElementById(t.btn), p = document.getElementById(t.page);

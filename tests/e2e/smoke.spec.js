@@ -117,3 +117,45 @@ test.describe('候補ページの画像・投稿編集', () => {
     await expect(page.locator('#refImgPreview img')).toBeVisible();
   });
 });
+
+test.describe('ドラフト軽量ページ', () => {
+  test('iPhone幅で重い動画DOMを持たず、ドラフト投稿モードまで開ける', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+    await expect(page).toHaveTitle(/ドラフト.*5秒動画メーカー/);
+
+    await page.evaluate(() => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('go5_stock_meta', JSON.stringify([{
+        id: 'stk_e2e_light', ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        label: 'ドラフト軽量ページ回帰', title: 'ドラフト軽量ページ回帰', author: 'test',
+        bskyText: 'テスト本文', affiliateUrl: '', workUrl: '', videoName: 'test.mp4', videoId: 'vid_e2e_light', attrs: {}
+      }]));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await expect(page.locator('[data-item-id="stk_e2e_light"]')).toBeVisible();
+    const metrics = await page.evaluate(() => ({
+      canvas: document.querySelectorAll('canvas').length,
+      video: document.querySelectorAll('video').length,
+      nodes: document.querySelectorAll('*').length,
+      overflowX: document.documentElement.scrollWidth > window.innerWidth,
+    }));
+    expect(metrics.canvas).toBe(0);
+    expect(metrics.video).toBe(0);
+    expect(metrics.nodes, '専用ページへ本体DOMが混入している').toBeLessThan(300);
+    expect(metrics.overflowX, 'iPhone幅で横にはみ出している').toBeFalsy();
+
+    await page.locator('.stk-mode[data-id="stk_e2e_light"]').click();
+    await expect(page.locator('#draftPostModal')).toBeVisible();
+    await expect(page.locator('#draftXText')).toHaveValue('テスト本文');
+    expect(errors, '軽量ドラフトのロード/投稿モードで例外').toEqual([]);
+  });
+
+  test('本体のドラフトボタンは専用ページへ遷移する', async ({ page }) => {
+    await page.goto('index.html', { waitUntil: 'domcontentloaded' });
+    await page.locator('#tabStock').click();
+    await expect(page).toHaveURL(/\/Stock\.html$/);
+  });
+});

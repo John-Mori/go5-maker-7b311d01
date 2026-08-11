@@ -2,47 +2,42 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<!-- 候補専用ページ(2026-08-11 新設)。動画作成タブの重いCanvas/背景動画を積まない軽量ページ=
-     iOS Safari のメモリ都合によるタブ破棄・打ちかけ入力の消失を根から避ける。
-     データは localStorage/IndexedDB を index.html と共有(同一オリジン)=中身は分かれない。
-     ★UI構造は index.html の候補タブと完全同一に保つ(Chami指示 2026-08-11「変わらないUI構造にして」)=
-       アカウント帯・⏰予約/📅カレンダー/📊分析/🏆ランキング 行・フルのタブバーをそのまま置く。
-       他タブを押したら index.html の該当タブへ、予約/カレンダーは index.html のオーバーレイを開いて遷移。 -->
+<!-- ドラフト専用の軽量ページ(2026-08-12)。index.html の動画Canvas/背景動画/候補全画像を積まず、
+     iOS Safariのメモリ都合によるページ破棄(戻ると勝手に再読込)を避ける。
+     localStorage/IndexedDBは同一オリジンのindex.htmlと共有するため、ドラフト実データは分割・移動しない。 -->
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="候補">
+<meta name="apple-mobile-web-app-title" content="ドラフト">
 <meta name="theme-color" content="#0b0f17">
 <link rel="manifest" href="manifest.webmanifest?v=735">
 <link rel="apple-touch-icon" href="assets/icons/app-180.png?v=735">
 <link rel="icon" type="image/png" href="assets/icons/app-192.png?v=735">
-<title>候補 — 5秒動画メーカー</title>
+<title>ドラフト — 5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css?v=735">
 <script>
-/* 背景フック(data-tab=候補=クリーム封鎖)とアカウント色を描画前に確定=継ぎ目/色チラつき対策。 */
+window.__go5StockStandalone = true;
 try {
-  document.documentElement.setAttribute('data-tab', 'tabCand');
+  document.documentElement.setAttribute('data-tab', 'tabStock');
   var _a0 = localStorage.getItem('current_account') || 'acc1';
   document.documentElement.setAttribute('data-account', _a0 === 'acc2' ? 'acc2' : 'acc1');
+  localStorage.setItem('go5_active_tab', 'tabStock');
 } catch (e) {}
 </script>
 </head>
 <body>
-<header>
-  <h1>5秒動画メーカー</h1>
-</header>
+<header><h1>5秒動画メーカー</h1></header>
 
 <div class="acct-bar">
   <span class="acct-bar-label">アカウント</span>
   <button id="acctBtn1" class="acct-btn active" type="button">月詠み色恋劇場</button>
   <button id="acctBtn2" class="acct-btn" type="button">宵桜艶帖～Yoizakura Tsuyacho～</button>
-  <!-- ⏰予約 と 📅カレンダー は同じ行に揃える(アカウント帯の次の行で横並び・Chami 2026-07-31)。 -->
   <div class="acct-launch-row">
     <button id="reserveBtn" class="cal-launch-btn" type="button" data-overlay="reserveBtn">⏰ 予約</button>
     <button id="calBtn" class="cal-launch-btn" type="button" data-overlay="calBtn">📅 カレンダー</button>
@@ -52,20 +47,18 @@ try {
   <span class="acct-bar-note">アカウントごとに背景・Bluesky設定(ハンドル/アプリPW/本文/YouTube説明欄等)が切替わります。記録用GASは共通。</span>
 </div>
 
-<!-- タブバーは index.html と同一構造。候補だけこのページで前面。他タブ・予約/カレンダーは index.html へ遷移して開く。 -->
 <nav class="tabbar">
-  <button id="tabCand"    class="tab active">💡 候補</button>
+  <button id="tabCand" class="tab" data-nav="KouhoLists.html">💡 候補</button>
   <button id="tabVerify" class="tab" data-go="tabVerify">📋 投稿履歴</button>
   <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=735" alt=""> 動画作成</button>
-  <button id="tabStock" class="tab" onclick="location.href='Stock.html'">📦 ドラフト</button>
-  <button id="tabYT"    class="tab" data-go="tabYT"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
-  <button id="tabPost"  class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=735" alt=""> 投稿</button>
-  <button id="tabAffi"  class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=735" alt=""> AFIリンク</button>
+  <button id="tabStock" class="tab active">📦 ドラフト</button>
+  <button id="tabYT" class="tab" data-go="tabYT"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
+  <button id="tabPost" class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=735" alt=""> 投稿</button>
+  <button id="tabAffi" class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=735" alt=""> AFIリンク</button>
   <button id="tabSettings" class="tab" data-go="tabSettings">⚙️ 詳細設定</button>
 </nav>
 
-<!-- 候補画面(candidates.js が Go5Cand.render() で描画) -->
-<section id="pageCand"></section>
+<section id="pageStock"></section>
 
 <script src="core/util.js?v=735"></script>
 <script src="core/account.js?v=735"></script>
@@ -75,13 +68,20 @@ try {
 <script src="core/sync.js?v=735"></script>
 <script src="core/kaizen-log.js?v=735"></script>
 <script src="idgen.js?v=735"></script>
+<script src="promo-label.js?v=735"></script>
 <script src="affiliate-core.js?v=735"></script>
 <script src="fanza-core.js?v=735"></script>
-<!-- 投稿済み判定の読み取り専用ソース(bluesky.jsを積まない候補ページ用)。candidates.jsより前=Go5PostedItemsを供給。 -->
-<script src="posted-source.js?v=735"></script>
-<script src="candidates.js?v=735"></script>
+<script src="bluesky-core.js?v=735"></script>
+<script src="scheduler.js?v=735"></script>
+<script src="bluesky.js?v=735"></script>
+<script src="drive-upload.js?v=735"></script>
+<script src="verify-core.js?v=735"></script>
+<script src="schedule/data/holidays.js?v=735"></script>
+<script src="hist-merge-core.js?v=735"></script>
+<script src="rank-core.js?v=735"></script>
+<script src="yt-clicks.js?v=735"></script>
+<script src="stock.js?v=735"></script>
 <script>
-/* 候補ページのブート: アカウント帯の配線 + タブバー配線 + 初回描画。動画作成タブの重い app.js は積まない。 */
 (function () {
   'use strict';
   function reflect(id) {
@@ -93,9 +93,7 @@ try {
   function setAcct(id) {
     try { localStorage.setItem('current_account', id); } catch (e) {}
     reflect(id);
-    // 既存アプリと同じイベントを投げる(購読側が居れば追従。候補データはアカウント非依存だが背景等のため)。
     try { document.dispatchEvent(new CustomEvent('account-changed', { detail: { account: id } })); } catch (e) {}
-    if (window.Go5Cand && window.Go5Cand.render) { try { window.Go5Cand.render(); } catch (e) {} }
   }
   var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
   if (b1) b1.addEventListener('click', function () { setAcct('acc1'); });
@@ -103,20 +101,18 @@ try {
   var cur = 'acc1'; try { cur = localStorage.getItem('current_account') || 'acc1'; } catch (e) {}
   reflect(cur);
 
-  // タブバー配線: 候補は自ページで再描画、他タブは index.html の該当タブを開いて遷移。
-  //   index.html の restoreActiveTab_ は localStorage 'go5_active_tab' を読んで復元するので、そこへ渡す。
   document.querySelectorAll('.tabbar .tab[data-go]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       try { localStorage.setItem('go5_active_tab', btn.getAttribute('data-go')); } catch (e) {}
       location.href = 'index.html';
     });
   });
-  var tc = document.getElementById('tabCand');
-  if (tc) tc.addEventListener('click', function () {
-    if (window.Go5Cand && window.Go5Cand.render) { try { window.Go5Cand.render(); } catch (e) {} }
+  document.querySelectorAll('.tabbar .tab[data-nav]').forEach(function (btn) {
+    btn.addEventListener('click', function () { location.href = btn.getAttribute('data-nav'); });
   });
+  var ts = document.getElementById('tabStock');
+  if (ts) ts.addEventListener('click', function () { if (window.Go5Stock) window.Go5Stock.render(); });
 
-  // 予約/カレンダーは index.html のオーバーレイ。sessionStorage に希望を残して遷移し、index側で開かせる。
   document.querySelectorAll('.acct-launch-row [data-overlay]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       try { sessionStorage.setItem('go5_open_overlay', btn.getAttribute('data-overlay')); } catch (e) {}
@@ -124,8 +120,8 @@ try {
     });
   });
 
-  if (window.Go5Cand && window.Go5Cand.render) { try { window.Go5Cand.render(); } catch (e) {} }
-})();
+  if (window.Go5Stock) { try { window.Go5Stock.render(); } catch (e) {} }
+}());
 </script>
 </body>
 </html>
