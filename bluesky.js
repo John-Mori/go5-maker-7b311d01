@@ -1089,6 +1089,13 @@
   })();
 
   // ---- 初期化(移行→applyAccount の順) ----
+  // ★リロードのたびに『今作っている作品』のジャンルを出し直す(Chami依頼2026-08-11①)。
+  //   カテゴリのチェック状態は persist-fields で保存しなくなった=リロード直後は全部OFF。
+  //   autoApplyAttrsFromInfo_ は同一cidを1回だけに絞る cid ガード(movie_auto_attrs_cid)を持ち、
+  //   これが localStorage でリロードを跨いで残るため、そのままだと復元した作品URLからの自動チェックが
+  //   抑止されOFFのままになる。ページ読み込みごとに1回だけガードを解いて、applyAccount() が復元する
+  //   作品URLからの自動チェックを効かせる=前回作成の作品ではなく今の作品のジャンルが入る。
+  try { save('movie_auto_attrs_cid', ''); } catch (e) {}
   applyAccount();
 
   function setBskyStatus(m, html) { if (!els.bskyStatus) return; if (html) els.bskyStatus.innerHTML = m; else els.bskyStatus.textContent = m || ''; }

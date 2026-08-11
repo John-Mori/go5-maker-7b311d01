@@ -52,6 +52,10 @@
   // 保存対象か判定。(ファイル/パスワード/カラー/ボタン等は除外)
   function persistable(el) {
     if (!el || !el.id || EXCLUDE[el.id]) return false;
+    // ★カテゴリ(ジャンル)チェックは「作品ごとに毎回導出する派生値」＝スナップショット保存しない
+    //   (Chami依頼2026-08-11①)。保存すると『前回作成した作品のジャンル』がリロードで復元され、
+    //   今作っている作品と食い違う。チェックの導出は bluesky.js の 作品URL→FANZA情報 経路が担う。
+    if (el.dataset && el.dataset.catKey) return false;
     var tag = el.tagName;
     if (tag === "TEXTAREA" || tag === "SELECT") return true;
     if (tag === "INPUT") {
@@ -97,6 +101,23 @@
     if (load("field_cleanup_v1") === "1") return;
     Object.keys(EXCLUDE).forEach(function (id) { try { localStorage.removeItem(key(id)); } catch (e) {} });
     save("field_cleanup_v1", "1");
+  })();
+
+  // ★カテゴリ(ジャンル)チェックを保存対象外にした(2026-08-11①)ため、それ以前に保存された
+  //   field_movieAttr*(＝前回作成作品のジャンルのチェック状態)が端末に残り続けると、上の除外は
+  //   これ以降の保存/復元を止めるだけで既存の保存値は消えない=リロード時にブラウザのフォーム復元経路で
+  //   拾われうる。一度だけ掃除して『前回作成のジャンルが復活する』の芽を断つ。
+  (function cleanupCatCheckboxLeftovers_() {
+    if (load("field_catcb_cleanup_v1") === "1") return;
+    try {
+      var kill = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(PREFIX + "movieAttr") === 0) kill.push(k);
+      }
+      kill.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+    } catch (e) {}
+    save("field_catcb_cleanup_v1", "1");
   })();
 
   // ★#testMode(記録スキップの危険フラグ)は保存対象外(EXCLUDE)＝アプリ側は誰も value を復元しない。
