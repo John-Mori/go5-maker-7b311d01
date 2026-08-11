@@ -414,9 +414,12 @@
     // 販促ラベル(今なら◯%OFF)=動画フレームへ重ね描き(写真に焼き込まない=Bluesky添付に入らない・Chami2026-07-15)。
     // フレーム基準(W×H)で描くので画像の外(黒帯・余白)にも自由に置ける。
     if (window.Go5PromoLabel && window.Go5PromoLabel.drawOverlay) {
-      // 画像と同じ"浮き出てくる"演出のため、前景画像と同じreveal進捗(0..1)を渡す(Chami依頼2026-07-18)。
-      var promoReveal = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - REVEAL_START) / REVEAL_DUR)); // 漫画と同一進捗・同一イージング(§6)
-      try { window.Go5PromoLabel.drawOverlay(ctx, W, H, promoReveal); } catch (e) {}
+      // ★セール札は先頭フレームから即・満額で出す(Chami報告2026-08-11「最新の投稿の左のやつ(=セール札)が出ない」)。
+      //   旧実装は漫画画像と同じreveal(0.5s開始→2.9s完成)に同調させていた(Chami依頼2026-07-18の"浮き出てくる"演出)。
+      //   結果、5秒ループShortsでは頭〜約0.5sは完全に不可視・約1sまで半透明=自動再生の頭やループ切替の瞬間に
+      //   「札が出ていない」ように見えていた(サムネ=静止フレームには焼き込まれているのに)。セール札は"最初から見える"のが
+      //   本来の役目なので、漫画のフェードとは切り離して常に満額表示にする。位置調整・種別・onSale判定は不変。
+      try { window.Go5PromoLabel.drawOverlay(ctx, W, H, 1); } catch (e) {}
     }
   }
 
