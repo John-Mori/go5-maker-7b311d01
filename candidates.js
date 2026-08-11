@@ -2008,8 +2008,8 @@
   // 価格絞り込み入力のHTML(セール絞込の隣に置く・両render共通)。
   function priceFilterHtml_() {
     return '<label class="cand-filter-price" style="margin:0;display:inline-flex;align-items:center;gap:4px;">' +
-      '<input id="candPriceMax" type="number" inputmode="numeric" min="0" step="100" placeholder="円以下" value="' + (_priceMax ? _priceMax : '') + '" style="width:88px;">' +
-      '<span>円以下</span></label>';
+      '<input id="candPriceMax" type="number" inputmode="numeric" min="0" step="100" placeholder="円以下" value="' + (_priceMax ? _priceMax : '') + '" style="width:88px;"></label>';
+      // 外側の「円以下」ラベルは廃止。テキストボックスの placeholder="円以下" に記載があるため重複(Chami 2026-08-11)。
   }
   // 価格絞り込み入力を配線(値変更で保存＋再描画)。rerenderは各タブの再描画関数。
   function wirePriceFilter_(rerender) {

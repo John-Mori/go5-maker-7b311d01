@@ -844,6 +844,11 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 /* アカウント別「投稿済みを非表示」トグル：OFF=クリーム地の枠線 / ON=オレンジ地・黒文字 */
 .cand-hidep-toggle{width:auto;margin:0;flex:0 0 auto;font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid #d8c9a6;background:#fffef9;color:#5a4a2a;font-weight:700;cursor:pointer;line-height:1.1;white-space:nowrap;}
 .cand-hidep-toggle.active{background:#e8892b;border-color:#e8892b;color:#111;}
+/* 「◯◯✔非表示」トグルも各chのテーマ色。縁取り=そのch色 / ON=そのchの塗り(Chami 2026-08-11)。 */
+#candHidePosted1{border-color:#2C4C8F;color:#2C4C8F;}
+#candHidePosted1.active{background:#2C4C8F;border-color:#2C4C8F;color:#FFD65C;}
+#candHidePosted2{border-color:#7A3F8F;color:#7A3F8F;}
+#candHidePosted2.active{background:#4A2A6B;border-color:#4A2A6B;color:#FF7BA8;}
 .cand-hidep-toggle:active{transform:scale(.96);}
 /* 投稿編集モーダル：複数画像のプレビュー切替（‹›ボタン＋スワイプ）と「複数あり」表示 */
 .cand-refimg-stage{position:relative;}
@@ -1139,6 +1144,13 @@ textarea:focus{border-color:var(--accent);}
   border:1px solid var(--line);border-radius:999px;padding:6px 10px;min-height:30px;cursor:pointer;width:auto;margin:0;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;}
 .acct-btn.active{background:var(--accent);color:#04222a;border-color:var(--accent);}
+/* アカウント帯のch名ボタンは各チャンネルのテーマ色で塗る(Chami 2026-08-11)。どのタブ(候補=クリーム含む)でも
+   月詠み=瑠璃群青×月光金 / 宵桜=宵紫×花桃 で一目で識別できるよう --accent 依存をやめID固定色にする。
+   非アクティブ=そのchの縁取り / アクティブ=そのchの塗り。色は既存の .acct-cta 対と同系。 */
+#acctBtn1{background:transparent;color:#2C4C8F;border-color:#2C4C8F;}
+#acctBtn1.active{background:#2C4C8F;color:#FFD65C;border-color:#2C4C8F;}
+#acctBtn2{background:transparent;color:#7A3F8F;border-color:#7A3F8F;}
+#acctBtn2.active{background:#4A2A6B;color:#FF7BA8;border-color:#4A2A6B;}
 .acct-bar-note{font-size:10.5px;color:var(--sub);flex-basis:100%;line-height:1.5;}
 /* ⏰予約 / 📅カレンダー 起動ボタン(旧タブを廃してアカウント帯の宵桜艶帖の右横へ移設。予約が左・カレンダーが右)。
    ★白字・白枠で囲む(Chami 2026-07-31)。作業タブの上に“重ねて開く”オーバーレイで、開いている間だけ薄い塗り(.active)。 */
