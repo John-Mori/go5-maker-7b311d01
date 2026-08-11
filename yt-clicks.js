@@ -271,6 +271,31 @@
   function filterOtherChannel_(items) { return filterOtherChannelFor_(items, acct()); }
   // 現在ch(acct())固定だった他ch除外を、任意chで判定できるよう切り出し(カレンダーの押下ch用・Chami2026-08-10)。
   function filterOtherChannelFor_(items, cur) {
+    // ★別ch側の"実ストア"の存在確認(遅延構築・別ch確定の行が出て初めて読む)。ローカル行の所在＝それが
+    //   入っているストアのチャンネルが権威。videoId接頭辞/短縮ドメインが別chを指しても、もう片方のストアに
+    //   実在しない=二重化ではない=このタブに出してよい(fail-open)。両ストアに居る"本物の二重化"だけ隠す。
+    var _otherKeys = {};
+    function otherKeys_(a) {
+      if (_otherKeys[a]) return _otherKeys[a];
+      var set = { vid: {}, su: {}, pu: {}, yid: {} };
+      loadArrFor_('short_hist', a).concat(loadArrFor_('verify_manual', a)).forEach(function (x) {
+        if (!x) return;
+        if (x.videoId) set.vid[String(x.videoId)] = 1;
+        if (x.shortUrl) set.su[String(x.shortUrl)] = 1;
+        if (x.postUri) set.pu[String(x.postUri)] = 1;
+        var y = ytIdOf(x.ytUrl || ''); if (y) set.yid[y] = 1;
+      });
+      return (_otherKeys[a] = set);
+    }
+    function existsInStore_(it, a) {
+      if (a !== 'acc1' && a !== 'acc2') return false;
+      var set = otherKeys_(a);
+      if (it.videoId && set.vid[String(it.videoId)]) return true;
+      if (it.shortUrl && set.su[String(it.shortUrl)]) return true;
+      if (it.postUri && set.pu[String(it.postUri)]) return true;
+      var y = ytIdOf(it.ytUrl || ''); if (y && set.yid[y]) return true;
+      return false;
+    }
     return items.filter(function (it) {
       if (!it) return false;
       // ★シート由来行(_fromSheet)は「そのチャンネルのシート(記録_ch1/ch2)」から channel=<cur> 指定で
@@ -290,7 +315,11 @@
         return true;
       }
       var ch = ownerOf_(it) || acctByShort_(it);
-      return !ch || ch === cur; // 他chと確定した行のみ隠す。不明はそのまま出す
+      if (!ch || ch === cur) return true;               // 不明/このch確定=出す
+      // ★ch(videoId接頭辞/短縮ドメイン)が別chを指しても、その別ch側の実ストアにこの行が居なければ隠さない。
+      //   ドラフト作成時のchと投稿完了時のchがズレると videoId が acc2- のまま acc1 のストアへ載り、従来は
+      //   自分のタブからも消えていた(Chami報告2026-08-11「メイン端末のみで完結したのに投稿履歴に何も出ない」)。
+      return !existsInStore_(it, ch);                   // 両ストアに居る"本物の二重化"の時だけ隠す
     });
   }
   // 【恒久・供給一本化 2026-08-03】シート由来行(_fromSheet)への上塗り(保持patch＋合算URLストア)を
