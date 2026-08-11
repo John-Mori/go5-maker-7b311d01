@@ -85,6 +85,7 @@
 | 全幅 primary ボタン(モーダル完了) | `width:100%; padding:13px; border-radius:10px; background:#2bb3c0; color:#04222a` | draftModalComplete v=427 |
 | セクション間 horizontal divider | `height:1px; background:#1e2d42; margin:18px 0` | draftPostModal v=427 |
 | フォントサイズ階層 | タイトル `.95rem` / 本文 `.84rem` / field-label `.76rem` / section-header `.72rem` | draftPostModal v=427 |
+| ★**行内に複数並ぶボタン(一覧の操作ボタン列)の幅** | **中身なり=`flex:0 1 auto;min-width:0`**。★**`flex:1`/`flex:1 1 0`で横幅いっぱいに引き伸ばすな**(Chami🔥 msg1536774712519163914「横幅を無闇に広げるな・前のサイズで良かった」)。収まらない時は横スクロールでなく縮小(shrink)で収める。横paddingは既定`4px 8px`前後から無闇に増やさない | 作成履歴4ボタン v=732 / 🔥恒久対策 |
 
 > ★**実装確定の意味**: Chami指示で入った後に「直された」という記録が無い = 暗黙の通過。Chami明示確定とは強度が違う。形が変わったら都度更新する。
 
@@ -313,4 +314,5 @@ Claude系UIは**見出しを極端に太く(800)、本文を軽く(400)** する
 - (2026-07-28) **★v=435 背景実装方針の確定**: `body::before{z-index:-1}`がiOS Safariで効かなかった(HTML背景より後ろに落ちる)ため`html{background:gradient}`直接設定に変更。§2.5実装方針を更新済み。★`body::before`は今後使わない(既存コードにも残っていない)。
 - (2026-08-03) **★Anthropic/Claude公式ブランドの実値(web調査で確定)**: 紙色 `#faf9f5` / 墨 `#141413` / 署名色クレイ橙 `#d97757`(補助=青`#6a9bcc`・緑`#788c5d`)。見出しPoppins・本文Lora(代替Arial/Georgia)。→ §5.95ヒント①〜④の"実際の値"がこれ。暖色シフトの具体解。
 - (2026-08-11) **★参照PNGを渡されたら目分量で寄せるな=先に実測ピクセルを取る(手数削減の一手)**: 8/10-11のセール札の数字合わせが v696→701 で6往復した真因は「Chami提供の数字テンプレ/焼き込みPNGを参照せず目分量で位置・大きさ・色を寄せた」こと(commit ad0559eのログに自白「前回は目分量で寄せた=テンプレ未参照だった」)。**Chamiが数字・色・書体の見本画像を渡した時の作法**=①その画像のコア色/縁色/字面高(ink box高)を**実測してから**slot値・ink色を決める(promo-label.jsのdrawDigits系) ②「参照できたか」を先回りで報告に1行入れる。**目分量スタートは往復を生む。**
+- (2026-08-12) **🔥恒久対策=一覧の操作ボタンは中身なり幅から広げない(msg1536774712519163914にChami🔥)**: 作成履歴の4ボタンで v=730 に `flex:1 1 0`(4等分でfull幅へ引き伸ばし)を入れて叱られた。Chamiのボタン幅の好みは**何度も言われている恒久ルール=中身なり幅・引き伸ばし禁止**(§4.5 実装確定表へ登録)。**「気をつける」では再発するので機構化**= `tests/test_button_width.js`(CI smoke で毎push実行)が **stock.js の renderArchItem_ btnBase に成長flex(`flex:1`/`flex:1 1`/`flex-grow:1`)が入ったら fail**。次に誰かが横幅を引き伸ばしたら赤で止まる。★止血=v=732で中身なり幅(`flex:0 1 auto`)へ戻し+動画DL/Drive保存の枠を可視化+中央揃え。実物確認待ち。
 - (2026-08-03) **カテゴリ編集モーダルをClaude意匠で全面刷新(v=600→601・確認待ち)**: Chami「ほとんど変わってない。Claude Design/Anthropic公式みたいにオシャレに、webで調べて」。適用パターン(気に入られたら確立済みへ昇格):**紙色ペーパーモーダル**(card`#faf9f5`/border`#e8e4d9`/radius18/soft shadow)+暖色scrim`rgba(24,22,19,.58)`+`backdrop-filter:blur(4px)`。操作は**裸グリフを廃止し丸い当たり判定のアイコンボタン**(30px円・hover薄面・:focus はクレイ橙リング`0 0 0 3px rgba(217,119,87,.16)`・境界は`disabled`で淡色)。主ボタン=クレイ橙`#d97757`。**インライン地獄をやめ scoped `<style>` で:hover/:focus/:disabled を表現**(状態が無いと"生フォーム感"=センスなく見える主因)。★これがChami評価待ちの最初の"Claude意匠"実適用=反応を見て他モーダルへ展開するか判断。
