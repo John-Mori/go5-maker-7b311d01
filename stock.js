@@ -728,9 +728,11 @@
     // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
     //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。
     //   ★横幅は前のサイズ(中身なり=padding:4px 8px/.72rem)を維持し、引き伸ばさない(Chami指摘2026-08-11 msg1536774712519163914)。
-    //   flex:0 1 auto=通常は中身なりの幅・左詰め、収まらない時だけ縮む。full幅への均等引き伸ばし(旧flex:1 1 0)はしない。
+    //   flex:0 0 auto=各ボタンは常に中身なりの幅(文字量で可変)。伸ばさない(旧flex:1 1 0)し、縮ませもしない。
+    //     ★縮み(旧flex:0 1 auto)をやめた理由=収まらない時に短い復元/削除まで縮んで横幅を食い合い「文字量なり」に見えない(Chami指摘 msg1536781919541399602)。
+    //     収まらない時は縮小でなく折り返す(下の flex-wrap:wrap)=各ボタンは文字ぶんの幅を保つ。
     //   inline-flex+justify-content:center=絵文字+文字を枠の中央に置く(Drive保存の中央揃えズレ=msg1536776216986779729③の根治)。
-    var btnBase = 'margin:0;padding:4px 8px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:3px;';
+    var btnBase = 'margin:0;padding:4px 8px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:3px;';
     return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
@@ -738,7 +740,7 @@
         '<div style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
         '<div style="font-size:.72rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · 完了 ' + esc(fmtTs(meta.completedTs || meta.ts)) + '</div>' +
         (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
-        '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:nowrap;">' +
+        '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap;">' +
           '<button type="button" class="stk-restore" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;">↩ 復元</button>' +
           '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #46586e;background:#151d2c;color:#dfe6ef;">⬇ 動画DL</button>' +
           '<button type="button" class="stk-drive" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #46586e;background:#151d2c;color:#dfe6ef;">☁️ Drive保存</button>' +

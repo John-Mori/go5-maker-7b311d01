@@ -51,9 +51,10 @@ test('BW-1: 作成履歴ボタンの btnBase は成長flexを含まない(横幅
     'btnBase に成長flex(flex:1 / flex:1 1 0 / flex-grow:1)が入っている=横幅が引き伸ばされる。中身なり幅 flex:0 1 auto にすること。btnBase=' + btnBase);
 });
 
-test('BW-2: btnBase は中身なり幅(flex:0 1 auto)を明示している', function () {
-  assert.ok(/flex\s*:\s*0\s+1\s+auto/.test(btnBase),
-    'btnBase に flex:0 1 auto が無い(中身なり幅の明示が消えた)。btnBase=' + btnBase);
+test('BW-2: btnBase は中身なり幅(flex:0 0 auto / flex:0 1 auto=grow0・basis auto)を明示している', function () {
+  // grow=0・basis=auto=文字量なりの幅。shrink は 0(折り返す)でも 1(縮む)でも「引き伸ばさない」条件は満たす。
+  assert.ok(/flex\s*:\s*0\s+[01]\s+auto/.test(btnBase),
+    'btnBase に flex:0 0 auto / 0 1 auto が無い(中身なり幅の明示が消えた)。btnBase=' + btnBase);
 });
 
 // 検知ロジック自身の自己テスト(将来この判定を緩めた時に気づけるように)
