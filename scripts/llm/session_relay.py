@@ -1063,9 +1063,11 @@ def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False
             + defects_block(dept, head=False) + "\n"
             "★**『直した』では閉じられない。**閉じられるのは"
             "**壊れた実物と同じ場面で、直っている実物を見た**時だけだ。"
-            f"その時は台帳 {DEFECTS_FILE} へ "
-            '{"op":"confirm","id":..,"dept":..,"fixed":<直った実物の在りか>,"scene":<どの場面>}'
-            " を1行追記しろ(追記のみ)。\n"
+            "その時は**生JSONを手打ちせず**次を実行しろ(★2026-08-12・手打ちの `\\` で"
+            "行が壊れ、confirmが黙って消えた実話がある):\n"
+            f'   python scripts/llm/close_item.py --id <上のID> --dept {dept} '
+            '--fixed "<直った実物の在りか>" --scene "<どの場面で見たか>" --by "<誰>"\n'
+            f"  (中身は台帳 {DEFECTS_FILE} への1行追記。受理/不受理はその場で表示される)\n"
             "★**commitのhashは実物として受理されない**"
             "(『封じた』と書いたcommitの4〜19分後に同じ再発が5回来た、という実測がある)。")
     # ★★まだ終わっていないChamiの依頼(2026-07-29 新設。改善書§6 第1手)。
@@ -1085,6 +1087,16 @@ def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False
             "聞いて待つと、Chamiが答えるまでこの部屋は止まる"
             "(実測: 2026-07-29 12:07に『どちらから行くか教えてくれ』と返して**3.5時間停止**した)。\n"
             + close_request_note(dept))
+    # ★★台帳そのものの健康診断(2026-08-12 新設・イージス研究室。発注= 研究室HQ)。
+    #   上の2ブロックは台帳が**正しく読めている**前提で作られている。
+    #   読めない行を黙って飛ばすと、上の一覧は**嘘のまま自信満々で**毎便配られる。
+    #   → 飛ばした行があった便だけ、ここで受け手へ言う。★0行なら1文字も足さない。
+    try:
+        _alarm = defect_ledger_alarm()
+    except Exception:                                # noqa: BLE001
+        _alarm = ""
+    if _alarm:
+        lines.append(_alarm)
     return "\n".join(lines)
 
 
@@ -1664,26 +1676,87 @@ def defect_id(dept, broken, symptom="", kind=DEFECT_KIND_DEFECT):
     return "%s-%s-%s" % (head, dept, hashlib.sha1(seed.encode("utf-8", "replace")).hexdigest()[:10])
 
 
+# ★飛ばした行の行番号(直近の読み取り時点)。**捨てた事実をここに残す**。
+#   2026-08-12・イージス研究室。発注= 研究室HQ(シャビ・アロンソ) DISPATCH-aegis-gl-1786467265180。
+#   実話: `"fixed":"D:\\Sougou..."` の `\` を素で書いた行が2行あり、どちらも op:"confirm" だった。
+#   → 読み取りが黙って飛ばす → confirm が消える →
+#     **終わった依頼が永久に「まだ終わっていない」として全部屋の起動文に出続ける。**
+#   飛ばす設計(fail-open)は正しい。**間違っていたのは「飛ばしたと誰にも言わない」ことだ。**
+_DEFECT_BAD_LINES = []
+# ★意図して積まれる op(警報の対象外)。note= 訂正/恒久の注記(実測2行)。
+_DEFECT_OPS_BENIGN = tuple(DEFECT_OPS) + ("note",)
+
+
 def _defect_read_rows():
-    """台帳を1行ずつ読む。★壊れた行は飛ばす(1行壊れても全体を止めない=沈黙を作らない)。"""
+    """台帳を1行ずつ読む。★壊れた行は飛ばす(1行壊れても全体を止めない=沈黙を作らない)。
+
+    ★飛ばした行は捨てずに `_DEFECT_BAD_LINES` へ残す(受け手が読む場所へ出すため)。
+    """
+    global _DEFECT_BAD_LINES
     rows = []
+    bad = []
     try:
         if not os.path.exists(DEFECTS_FILE):
+            _DEFECT_BAD_LINES = bad
             return rows
         with open(DEFECTS_FILE, encoding="utf-8", errors="replace") as f:
-            for line in f:
+            for lineno, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     r = json.loads(line)
-                except Exception:                    # noqa: BLE001
+                except Exception as e:               # noqa: BLE001
+                    bad.append((lineno, str(e)[:80], line[:60]))
                     continue
                 if isinstance(r, dict) and r.get("op") in DEFECT_OPS and r.get("id"):
                     rows.append(r)
+                else:
+                    # ★opの綴り違い・id落ちも「黙って落ちる」= 同じ事故。行番号を残す。
+                    #   ただし op:"note"(意図して積む注記・実測2行)は**警報にしない**
+                    #   = 0件の日に鳴らない警報にしておかないと、誰も読まなくなる。
+                    _op = str(r.get("op") or "") if isinstance(r, dict) else ""
+                    if not isinstance(r, dict):
+                        bad.append((lineno, "JSONだが辞書ではない", line[:60]))
+                    elif _op not in _DEFECT_OPS_BENIGN:
+                        bad.append((lineno, "opが台帳の語彙にない(op=%r)" % r.get("op"),
+                                    line[:60]))
+                    elif _op in DEFECT_OPS and not r.get("id"):
+                        bad.append((lineno, "idが無い(op=%r)" % r.get("op"), line[:60]))
     except OSError:
+        _DEFECT_BAD_LINES = bad
         return rows
+    _DEFECT_BAD_LINES = bad
     return rows
+
+
+def defect_ledger_bad_lines():
+    """台帳を読み直して、**読めなかった行**を返す。 [(行番号, 理由, 行頭60字), ...]"""
+    _defect_read_rows()
+    return list(_DEFECT_BAD_LINES)
+
+
+def defect_ledger_alarm(limit=5):
+    """読めない行があれば**受け手が読む場所へ出す警報**を1本作る。無ければ空文字。
+
+    ★ここが今回の恒久の本体だ= 「飛ばした」を沈黙にしない。0行の時は1文字も足さない。
+    """
+    try:
+        bad = defect_ledger_bad_lines()
+    except Exception:                                # noqa: BLE001
+        return ""
+    if not bad:
+        return ""
+    head = ("★★**台帳 %s に『機械が読めない行』が %d 行ある。**\n"
+            "  読めない行は**黙って飛ばされる**= その行が op:\"confirm\" なら、"
+            "**終わった依頼が永久に未完了として出続ける**(上の一覧が嘘になる)。\n"
+            "  よくある原因= Windowsパスの `\\` を素で書いた(`\"D:\\Sougou...\"`)。"
+            "`\\\\` へ直すか、**手打ちをやめて `python scripts/llm/close_item.py` を使え**。\n"
+            % (DEFECTS_FILE, len(bad)))
+    rows = ["  - %d行目: %s | %s" % (n, why, head60) for n, why, head60 in bad[:limit]]
+    if len(bad) > limit:
+        rows.append("  - …ほか %d行" % (len(bad) - limit))
+    return head + "\n".join(rows)
 
 
 def append_defect(rec):
@@ -1905,10 +1978,12 @@ def requests_block(dept, head=True, limit=DEFECT_BLOCK_MAX):
 def close_request_note(dept):
     """依頼を閉じる時の掟(★不具合と**同じ厳しさ**。「やりました」で閉じさせない)。"""
     return (
-        f"★**依頼は『やりました』では閉じられない。**閉じるには台帳 {DEFECTS_FILE} へ\n"
-        '   {"op":"confirm","id":"<上のID>","dept":"' + dept + '",'
-        '"fixed":"<終わった実物の在りか>","scene":"<どの場面で確かめたか>","by":"<誰>"}\n'
-        "   を**1行追記**しろ(追記のみ・既存行を書き換えるな)。\n"
+        "★**依頼は『やりました』では閉じられない。**閉じるには**次を実行**しろ\n"
+        f'   python scripts/llm/close_item.py --id <上のID> --dept {dept} '
+        '--fixed "<終わった実物の在りか>" --scene "<どの場面で確かめたか>" --by "<誰>"\n'
+        f"   (台帳 {DEFECTS_FILE} へ1行追記される。追記のみ・既存行は書き換えない)\n"
+        "★**生JSONを手で書くな**(2026-08-12実測= 手打ちのWindowsパスの `\\` で行が壊れ、"
+        "**confirm 2件が黙って消えて**その依頼が永久に未完了として出続けていた)。\n"
         "★`fixed` は**機械が解決できる在りか**でなければ受理されない= "
         "Discordのmsg_id/リンク・実在するファイルのパス・URL のどれか。\n"
         "★★**commitのhashだけでは受理されない**(『commitに封じたと書いてある』は台帳であって、"
@@ -2396,9 +2471,9 @@ def _handoff_defect_note(dept):
         + ("     未確認: " + " / ".join(ids) + "\n" if ids
            else "     未確認: **無い**(この部屋の未確認は0件)\n")
         + "  ★『直した』では項目9から**消せない**。消せるのは"
-        "**同じ場面で直った実物を見た**時だけで、その時は台帳へ "
-        '{"op":"confirm",...}'
-        " を1行追記しろ(★commitのhashは受理されない)。\n")
+        "**同じ場面で直った実物を見た**時だけで、その時は "
+        "`python scripts/llm/close_item.py --id <ID> --dept %s --fixed .. --scene ..` "
+        "を実行しろ(★生JSONを手打ちするな・commitのhashは受理されない)。\n" % dept)
 
 
 def _handoff_request_note(dept):
