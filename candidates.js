@@ -563,7 +563,14 @@
   //     展開を待ってから開く、の二段で防ぐ。
   var _hydrated = false;
   var _hydrateWaiters = [];
-  function markHydrated_() { _hydrated = true; _hydrateWaiters.splice(0).forEach(function (f) { try { f(); } catch (e) {} }); }
+  function markHydrated_() {
+    _hydrated = true; _hydrateWaiters.splice(0).forEach(function (f) { try { f(); } catch (e) {} });
+    // ★画像がメモリに載った合図を全ページへ発火する。投稿履歴/ランキング(yt-clicks.js)は起動直後に一度だけ
+    //   Go5Cand.usedImgs()を同期で読んで「動画で使った画像」を描くが、その時点でハイドレート未了だと空になり、
+    //   タブをもう一度タップするまで画像が出なかった(Chami「動画に使った画像が表示されない・すぐ表示して」
+    //   2026-08-11 / DEF-de2408cb00と同型)。ハイドレート完了をイベントで知らせ、履歴側が自動で描き直す。
+    try { document.dispatchEvent(new CustomEvent('go5-images-hydrated')); } catch (e) {}
+  }
   function whenImagesReady_(cb) {                 // 展開済みなら即時、未了なら完了時に呼ぶ(最大3秒で諦めて続行)
     if (_hydrated || !_idbOk) { cb(); return; }
     var done = false, fire = function () { if (done) return; done = true; cb(); };

@@ -748,19 +748,34 @@
   function fetchDeltas_(force, cb) {
     if (_deltaFetched && !force) { applyDeltas_(); if (cb) cb(); return; }
     var url = gasUrl_(); if (!url) { applyDeltas_(); if (cb) cb(); return; }
-    jsonp_(url, { action: 'deltas' }, function (res) {
-      if (res && res.ok && res.deltas) {
-        deltaCache = sanitizeDeltas_(res.deltas); _deltaFetched = true; // GAS由来の負デルタも0下限へ
-        try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); } catch (e) {}
-        if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
-        if (res.timepoints) { tpCache = res.timepoints; try { localStorage.setItem('tp_cache', JSON.stringify(tpCache)); } catch (e) {} }
-        _health.gas = true; _health.gasAt = new Date().getTime(); // 既存取得の結果を記録(追加通信ゼロ)
-      } else { _health.gas = false; }
-      try { renderHealth_(); } catch (e) {}
-      applyDeltas_();
-      try { repairMissing_(); } catch (e) {} // 「記録待ち」「クリック⚠」を実データ基点で自己修復
-      if (cb) cb();
-    });
+    // ★記録GASは Apps Script のコールドスタート/一過性の遅延で1発落ちることがあり、そのたびに「応答なし(赤)」が
+    //   出ていた(Chami「応答なしになりがち・何回言わせんの・恒久防止」2026-08-11)。恒久策=1発の失敗で赤にせず
+    //   自動で最大3回まで再試行し、リトライを使い切って初めて _health.gas=false にする。追加のGAS改修は不要で、
+    //   一過性のゆらぎを画面に出さない(=既存のjsonp_タイムアウト20sの内側で、間隔を空けて叩き直すだけ)。
+    var attempt = 0, MAX = 3;
+    (function tryOnce() {
+      jsonp_(url, { action: 'deltas' }, function (res) {
+        if (res && res.ok && res.deltas) {
+          deltaCache = sanitizeDeltas_(res.deltas); _deltaFetched = true; // GAS由来の負デルタも0下限へ
+          try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); } catch (e) {}
+          if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
+          if (res.timepoints) { tpCache = res.timepoints; try { localStorage.setItem('tp_cache', JSON.stringify(tpCache)); } catch (e) {} }
+          _health.gas = true; _health.gasAt = new Date().getTime(); // 既存取得の結果を記録(追加通信ゼロ)
+          try { renderHealth_(); } catch (e) {}
+          applyDeltas_();
+          try { repairMissing_(); } catch (e) {} // 「記録待ち」「クリック⚠」を実データ基点で自己修復
+          if (cb) cb();
+          return;
+        }
+        // 一過性失敗(timeout/blocked)=まだ回数が残っていれば黙って間隔を空けて再試行(バナーは赤にしない)。
+        attempt++;
+        if (attempt < MAX) { setTimeout(tryOnce, 1500 * attempt); return; } // 1.5s, 3.0s のバックオフ
+        _health.gas = false; // ★3回とも落ちて初めて「応答なし」
+        try { renderHealth_(); } catch (e) {}
+        applyDeltas_();
+        if (cb) cb();
+      });
+    })();
   }
   // サーバーのデルタを見て、シートに計測URLが取りこぼされた投稿を後追い反映して治す。(Chami報告2026-07-14)
   //   ①「記録待ち」= deltaCache[vid] 不在 = サーバーがこのvidを知らない = YouTube動画URLがシート未反映。
@@ -3510,6 +3525,13 @@
   }
   // アカウント切替：投稿履歴を表示中なら再生数・クリック数も取得。(renderだけだと「…」のままになる)
   document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeRestoreYt_(); } else render(); });
+  // ★画像ハイドレート完了で「動画で使った画像」を描き直す(Chami「動画に使った画像が表示されない・すぐ表示して」2026-08-11)。
+  //   起動直後の初回描画は Go5Cand._imgMem がまだ空でサムネが出ず、タブ再タップまで欠けていた(DEF-de2408cb00同型)。
+  //   candidates.js が markHydrated_ で go5-images-hydrated を発火する=表示中の履歴/ランキングだけ再描画する(空振り時は無反応)。
+  document.addEventListener('go5-images-hydrated', function () {
+    try { var pv = $('pageVerify'); if (pv && !pv.hidden) render(); } catch (e) {}
+    try { var pr = $('pageRank'); if (pr && !pr.hidden) renderRank(); } catch (e) {}
+  });
   // ★すぐ表示(Chami依頼2026-07-29「リロードで毎回全部読み込み直して遅い/毎回要る物と要らない物を分けて」):
   //   リロード直後はまず localStorage の永続キャッシュ(yt_meta_cache=題名/再生数/日付・clicks_cache=クリック数)
   //   から即描画し、シート由来行だけ先に取りに行く。重い再取得(YouTube再生数・クリックの再フェッチ/自動生成/
