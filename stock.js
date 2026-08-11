@@ -493,6 +493,29 @@
         });
       }
     } catch (e) {}
+    // ★診断(非破壊・確認待ち)：投稿完了で投稿履歴へ1件載るはずが「この作品のデータが丸ごと出ない」再発
+    //   (Chami報告2026-08-11)。手動エントリは必ず日付＋『(手動追加)』を描くので"空カード"は原理上あり得ず、
+    //   =症状は「行が丸ごと不在」。書き戻し直後に verify_manual__<acc> を読み直し、この背骨IDの行が居るかを
+    //   確認する。居なければ"静かに落ちた"ので、なぜ載らなかったかをその場で画面に出す(不可視の失敗を可視化)。
+    try {
+      var _dacc = meta.account || 'acc1';
+      var _darr = []; try { _darr = JSON.parse(localStorage.getItem('verify_manual__' + _dacc) || '[]'); } catch (e3) {}
+      var _dhere = meta.videoId && Array.isArray(_darr) && _darr.some(function (x) { return x && x.videoId === meta.videoId; });
+      if (!_dhere) {
+        var _dother = _dacc === 'acc1' ? 'acc2' : 'acc1', _dupOther = false;
+        try {
+          ['verify_manual__', 'short_hist__'].forEach(function (b) {
+            var a2 = JSON.parse(localStorage.getItem(b + _dother) || '[]');
+            if (Array.isArray(a2) && a2.some(function (x) { return x && x.videoId === meta.videoId; })) _dupOther = true;
+          });
+        } catch (e4) {}
+        alert('投稿履歴にこの作品が載りませんでした。\n理由=' +
+          (!meta.videoId ? 'この動画に識別ID(背骨ID)が無い' :
+           _dupOther ? '同じ動画IDの履歴が別チャンネル(' + _dother + ')側に既にある(重複判定で弾かれた)' :
+           '記録の書き込みが拒否された(YouTube URL・短縮URL・IDが全て空)') +
+          '\n(Chami報告2026-08-11の原因特定用の診断です。videoId=' + (meta.videoId || 'なし') + ' / チャンネル=' + _dacc + ')');
+      }
+    } catch (e5) {}
     // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
     try {
       if (ps && ps.id) {
