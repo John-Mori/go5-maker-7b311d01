@@ -786,7 +786,8 @@ def _reading_items(conf):
     return out
 
 
-def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False):
+def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False,
+                 announce_rotation=False):
     """新規セッションの起動文(★最小限)。
 
     handoff_path / handoff_failed(2026-07-26 事前交代):
@@ -1038,7 +1039,15 @@ def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False
         #   **文言の在りかがこのファイルだったので誰も触っていなかった**。
         #   → ここで本人に言わせる。言えていれば機械は貼らない(下で実測して判定する)。
         #   ★情報は落とさない= 言い忘れたら従来どおり機械の固定文が付く(fail-open)。
-        lines.append(
+        #   ★★2026-08-12 追補(自分で入れた物の再発を自分で止める・C-038)。
+        #     初版はこの指示を**起動文を作る度に**渡していた= 圧縮直後の起動文の作り直し
+        #     (_boot_prompt を resend 経路でも呼ぶ)でも渡ってしまい、
+        #     **同じ世代の更新宣言を2回言わせる**。Chamiから見れば「またそれ言ってる」だ。
+        #     → 実際に世代が変わった便(新規セッション作成・交代)だけ announce_rotation=True。
+        #     ★hash に影響しない= 対応表用の boot_plain は announce なしで作っており、
+        #       resend 経路の起動文も announce なし= 両者は今までどおり一致する。
+        if announce_rotation:
+            lines.append(
             "★**この便の返信の最後に1行、『セッションを第%d世代へ更新した』ことを"
             "あなた自身の口調で言え。**(Chami指示2026-08-03=C-032。機械の定型文で"
             "済ませずに、その人が喋る。1言でよい・長くしなくていい)\n"
@@ -3522,7 +3531,8 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None):
         boot_hash = hashlib.sha256(boot_plain.encode("utf-8")).hexdigest()[:16]
         boot = _boot_prompt(dept, conf, generation,
                             handoff_path=handoff_path,
-                            handoff_failed=bool(pre_rotating and not handoff_path))
+                            handoff_failed=bool(pre_rotating and not handoff_path),
+                            announce_rotation=True)   # ★実際に世代が変わる便だけ言わせる
         prompt = boot + "\n\n" + envelope
         _record(rid, dept, "running", f"new session gen={generation}")
         data, rc, out = _run_audited(prompt)
@@ -3651,7 +3661,8 @@ def rotate_now(dept, conf, token, reason="manual"):
     boot_plain = _boot_prompt(dept, conf, new_gen)
     boot_hash = hashlib.sha256(boot_plain.encode("utf-8")).hexdigest()[:16]
     boot = _boot_prompt(dept, conf, new_gen, handoff_path=handoff_path,
-                        handoff_failed=not handoff_path)
+                        handoff_failed=not handoff_path,
+                        announce_rotation=True)       # ★手動交代も「実際に変わる便」だ
     # ★便が無いので、最初の1便を**そのまま自己確認**にする(提案書§7.2 手順5)。
     #   ここでの応答はDiscordへ出さない=ログにだけ残す。
     prompt = (boot + "\n\n【システム: 交代直後の自己確認】これはChamiからの便ではない。"
