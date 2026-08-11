@@ -774,11 +774,28 @@
     return false;
   }
   // 背景(オートsync・画像ハイドレート)由来の再描画。候補タブ表示中のみ・入力中は保留。
+  var _bgRetryTimer = null;
   function bgRender_() {
     try {
       var pc = document.getElementById('pageCand');
       if (!pc || pc.hidden) return;
-      if (_entryInProgress_()) { _bgRerenderPending = true; return; }
+      if (_entryInProgress_()) {
+        // ★入力中は打ちかけを消さないよう保留するが、そのまま放置すると「もう一度💡候補を叩くまで
+        //   画像が出ない」状態が残る(item8/DEF-de2408cb00と同型)。入力が終わったら自動で追いつくよう
+        //   軽いポーリングで再試行を予約する=手でタブを叩き直さなくても画像が出る。self-clearなので誤発火しない。
+        _bgRerenderPending = true;
+        if (!_bgRetryTimer) {
+          _bgRetryTimer = setInterval(function () {
+            if (!_entryInProgress_()) {
+              try { clearInterval(_bgRetryTimer); } catch (e) {}
+              _bgRetryTimer = null;
+              if (_bgRerenderPending) { try { bgRender_(); } catch (e) {} }
+            }
+          }, 1200);
+        }
+        return;
+      }
+      if (_bgRetryTimer) { try { clearInterval(_bgRetryTimer); } catch (e) {} _bgRetryTimer = null; }
       render();
     } catch (e) {}
   }
@@ -802,6 +819,11 @@
     }).catch(function () {});
   }
   try { document.addEventListener('go5-synced', function (e) { if (e && e.detail && e.detail.pulledImg) reHydrateFromSync_(); }); } catch (e) {}
+  // ★画像がIDBからメモリへ載った合図(markHydrated_ が発火)でも候補ページを描き直す。hydrateImages_ の
+  //   直接呼び(bgRender_)に加えた独立経路=各イベントlistenerは独立実行なので、他ページのlistenerが投げても・
+  //   初回renderとの順序がズレても確実に追いつく(item8/DEF-de2408cb00と同型・Chami 2026-08-11「出た。OK」で再現確認)。
+  //   bgRender_ が「候補タブ表示中・入力中は保留」を守るので非破壊。
+  try { document.addEventListener('go5-images-hydrated', function () { bgRender_(); }); } catch (e) {}
   // クリップボードの文字列を対象inputへ貼り付け。([data-paste=inputId] のボタンを配線)
   function wirePaste_(root) {
     (root || document).querySelectorAll('.paste-btn[data-paste]').forEach(function (b) {
