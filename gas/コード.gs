@@ -114,7 +114,7 @@ function fanzaGenre_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-08-11A(ピークを早く記録=snapshotStatsを10分毎→5分毎に短縮し、最大瞬間風速の採用下限も0.12h[7.2分]→0.06h[3.6分]を対で更新[間隔だけ縮めて下限を残すと5分区間が常に下限割れでピークが1件も記録されない=2026-08-06と同型の事故になるため必ず対で変える]。公開直後からピークが早く埋まる・時点記録も5分毎で「バケット+0〜5分」に確定=旧10分毎より早い[Chami「ピークを早く記録できるように」2026-08-11]。★反映後は ?action=admin_setup でトリガー再設定が要る[間隔変更をGASへ効かせるため]。以下は前版=2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -1614,14 +1614,14 @@ function snapshotStats() {
       idx[key] = -1;
     }
     // 最大瞬間風速：前回スナップからの伸び率。(件/時)妥当な間隔のみ採用。
-    // ★下限は 0.12h(7.2分)。旧値 0.2h(12分)は snapshotStats が毎時だった頃の較正で、
-    //   ⑤時点記録のためスナップを10分毎(=0.167h)に変えた時に更新し忘れた=区間が常に下限割れで
-    //   ピークが1件も記録されず「ピークが何も表示されない」を招いていた(Chami報告2026-08-06)。
-    //   10分間隔(±揺らぎ)を通し、事故的なサブ7分の二重発火だけを弾く下限にする。
+    // ★下限は 0.06h(3.6分)。snapshotStats を5分毎(=0.083h)に縮めた(ピークを早く記録・Chami2026-08-11)ため、
+    //   5分間隔(±揺らぎ)を通す下限へ下げた。旧0.12h(7.2分)のままだと5分区間が常に下限割れで
+    //   ピークが1件も記録されない(=10分毎に変えた際に下限0.2hを残して起きた2026-08-06の事故と同型)。
+    //   事故的なサブ3.6分の二重発火だけを弾く。上限6hは据置(公開直後の急増だけをピークに採る)。
     var prev = prevByVid[r.vid];
     if (prev && prev.tms) {
       var hrs = (nowMs - prev.tms) / 3600000;
-      if (hrs >= 0.12 && hrs <= 6) {
+      if (hrs >= 0.06 && hrs <= 6) {
         var win = String(prev.tstr).slice(5) + '〜' + nowStr.slice(11); // MM-dd HH:mm〜HH:mm
         if (v != null && prev.views != null) considerPeak_(r.vid, 'v', (v - prev.views) / hrs, win);
         if (c != null && prev.clicks != null) considerPeak_(r.vid, 'c', (c - prev.clicks) / hrs, win);
@@ -1790,8 +1790,11 @@ function setupTrigger() {
   });
   ScriptApp.newTrigger('refreshClicks').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('refreshEngagement').timeBased().everyHours(1).create();
-  // ⑤時点記録の精度確保のためスナップを10分毎に。許容窓9分と組み合わせて「バケット+0〜9分」以内に記録。
-  ScriptApp.newTrigger('snapshotStats').timeBased().everyMinutes(10).create();
+  // ⑤時点記録の精度確保＋ピークを早く記録するためスナップを5分毎に(Chami依頼2026-08-11「ピークを早く記録できるように」)。
+  //   許容窓9分と組み合わせ「バケット+0〜5分」以内に確定記録=旧10分毎より時点もピークも早く埋まる。
+  //   ★下限0.06h(3.6分)と対で運用(下の considerPeak_ 区間判定)。間隔を縮める時は下限も必ず一緒に下げる
+  //     (10分毎時に下限0.2hのまま残しピークが1件も記録されなかった事故=2026-08-06 の再発防止)。
+  ScriptApp.newTrigger('snapshotStats').timeBased().everyMinutes(5).create();
   // 競合サーチ(gas/競合.gs): 日次スナップ=毎日4時台 / 発見=日曜4時台。watch対象0件の間は無害に空回り
   ScriptApp.newTrigger('runCompetitorDaily').timeBased().everyDays(1).atHour(4).create();
   ScriptApp.newTrigger('runCompetitorDiscovery').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(4).create();
