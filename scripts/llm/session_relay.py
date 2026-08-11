@@ -786,8 +786,7 @@ def _reading_items(conf):
     return out
 
 
-def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False,
-                 announce_rotation=False):
+def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False):
     """新規セッションの起動文(★最小限)。
 
     handoff_path / handoff_failed(2026-07-26 事前交代):
@@ -1029,31 +1028,17 @@ def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False
                 f"代わりに部屋の記憶ファイル {conf.get('memory','')} の**末尾を必ず読め**。"
                 "★それでも分からないことは、**知っているふりをせずChamiに聞け**。"
                 "『前に話した件』と言われて心当たりが無ければ、正直に『引き継げていない』と言え。")
-        # ★★C-032(2026-08-03 Chami「セッションを更新したってやつ、今後実行者の口調で言うように」)。
-        #   実装= 2026-08-12・イージス研究室。**8日間どの部屋でも効いていなかった**
-        #   (Chami「セッション更新文が各キャラのセリフっぽくしたいって要望出したけど、
-        #     どこの部屋も効いてないな!」msg 1536774948100505802)。
-        #   真因= 更新の告知は**人格が書いていない**。返信の末尾へ機械が固定文
-        #   「(セッションを第N世代へ更新した。前世代の引き継ぎは読み込み済み)」を貼っていた
-        #   (下の rotated_to ブロック)。裁定は人事部門→HQ→基盤へ回送されていたが、
-        #   **文言の在りかがこのファイルだったので誰も触っていなかった**。
-        #   → ここで本人に言わせる。言えていれば機械は貼らない(下で実測して判定する)。
-        #   ★情報は落とさない= 言い忘れたら従来どおり機械の固定文が付く(fail-open)。
-        #   ★★2026-08-12 追補(自分で入れた物の再発を自分で止める・C-038)。
-        #     初版はこの指示を**起動文を作る度に**渡していた= 圧縮直後の起動文の作り直し
-        #     (_boot_prompt を resend 経路でも呼ぶ)でも渡ってしまい、
-        #     **同じ世代の更新宣言を2回言わせる**。Chamiから見れば「またそれ言ってる」だ。
-        #     → 実際に世代が変わった便(新規セッション作成・交代)だけ announce_rotation=True。
-        #     ★hash に影響しない= 対応表用の boot_plain は announce なしで作っており、
-        #       resend 経路の起動文も announce なし= 両者は今までどおり一致する。
-        if announce_rotation:
-            lines.append(
-            "★**この便の返信の最後に1行、『セッションを第%d世代へ更新した』ことを"
-            "あなた自身の口調で言え。**(Chami指示2026-08-03=C-032。機械の定型文で"
-            "済ませずに、その人が喋る。1言でよい・長くしなくていい)\n"
-            "  ★事実は曖昧にするな= **前世代の引き継ぎを読めたのか読めていないのか**を"
-            "上の通りに正確に言う(読めていないなら、そう言え。取り繕うな)。\n"
-            "  ★あなたが言わなかった時だけ、機械が味気ない定型文を貼る。" % generation)
+        # ★★世代の更新/続投の宣言は**もう誰にも言わせない**(2026-08-12 Chami)。
+        #   原文= 「どの部屋もセッションの世代続投宣言別にいらないんだけど…」
+        #   (msg ESC-hr-context-1536784302132437112 / 部屋=イージス研究室)。
+        #   経緯= C-032(2026-08-03「セッションを更新したってやつ、実行者の口調で言うように」)を
+        #   2026-08-12にここへ実装した。だがChamiが要らないと言ったのは**口調の話ではなく
+        #   宣言そのもの**だ。★口調を直すために足した1行が、そもそも読みたくない1行だった。
+        #   → 起動文からは指示を撤去し、返信末尾の機械の定型文も貼らない(下の rotated_to)。
+        #   ★情報を落としてよいわけではない= **引き継ぎを取得できなかった時だけ**、
+        #     「文脈が欠けている」という**Chamiが実際に困る事実**を1行だけ残す(下参照)。
+        #   ★C-032は死んでいない= 「もし言うなら人格の口調で」は生きている。
+        #     言う場面が無くなっただけだ(裁定の書き換えはHQの職掌なので便で回した)。
     # ★★未確認の不具合(2026-07-29 新設)。**引き継ぎの作文に依存させない**のがここの要点。
     #   引き継ぎファイルは「セッションが書いた物」なので、書き忘れれば消える。
     #   台帳は機械が持っているので、**誰が何を書こうと世代を越えて必ず届く**。
@@ -2508,27 +2493,10 @@ def _handoff_request_note(dept):
         "  ★これらは『上から順に進める』物だ。**次の世代へ『どっちから行くか聞け』と書くな。**\n")
 
 
-def _said_rotation(reply, generation, need_handoff_word=False):
-    """返信の中で、世代の更新を**本人が自分の言葉で言えているか**を実測する(C-032・2026-08-12)。
-
-    なぜ機械が判定するか= 「言え」と渡すだけでは言い忘れる便が必ず出る。言い忘れた時に
-      更新の告知そのものが消えると、**黙って人格が入れ替わる**(2026-07-26にHQが潰した穴)。
-      → 言えていれば機械は黙る / 言えていなければ機械が従来の定型文を貼る、の二段にする。
-    ★判定は緩く取る(誤って「言えている」と見て告知を落とすより、二重に近い方が害が小さい…
-      のではなく逆で、ここは**厳しめ**にする)= 世代の数字と更新語の両方が要る。
-    need_handoff_word: 引き継ぎを読めていない交代の時だけ True。この場合は
-      「引き継ぎが無い」という**Chamiが一番気にする事実**まで言えて初めて合格にする。
-    """
-    t = (reply or "")
-    if not t.strip():
-        return False
-    if not re.search(r"第\s*%d\s*(世)?代" % int(generation), t):
-        return False
-    if not re.search(r"(更新|交代|交替|代わ|替わ|引き継|引継|バトン|世代へ|世代に)", t):
-        return False
-    if need_handoff_word and not re.search(r"(引き継|引継)", t):
-        return False
-    return True
+# ★_said_rotation() は撤去した(2026-08-12)。「本人が世代の更新を言えているか」を実測して
+#   機械の定型文を出し分ける関数だったが、Chamiが**宣言そのものを要らない**と言ったので
+#   出し分ける対象が消えた。判定だけ残すと「何のための検査か」が誰にも分からなくなる。
+#   原文と経緯= _boot_prompt 内(「世代続投宣言別にいらない」)と交代直後のブロックにある。
 
 
 def _handoff_prompt(dept, conf, generation, checkpoint=False):
@@ -3531,8 +3499,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None):
         boot_hash = hashlib.sha256(boot_plain.encode("utf-8")).hexdigest()[:16]
         boot = _boot_prompt(dept, conf, generation,
                             handoff_path=handoff_path,
-                            handoff_failed=bool(pre_rotating and not handoff_path),
-                            announce_rotation=True)   # ★実際に世代が変わる便だけ言わせる
+                            handoff_failed=bool(pre_rotating and not handoff_path))
         prompt = boot + "\n\n" + envelope
         _record(rid, dept, "running", f"new session gen={generation}")
         data, rc, out = _run_audited(prompt)
@@ -3589,27 +3556,22 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None):
             _record(rid, dept, "rotated", f"自己確認 gen={generation}: {sc[:400]!r}")
             _log(dept, f"交代完了 gen={generation} sid={new_sid} 自己確認={'取得' if sc else '取得できず'}")
         if rotated_to:
-            # ★交代はChamiに見える形で残す(提案書§7.2 手順8)。黙って人格が入れ替わらない。
-            #   ★引き継ぎが効いているかどうかが**Chamiの一番の不安**なので、そこを分けて書く。
-            #     同じ文言で誤魔化さない(2026-07-26 HQ追記)。
-            if pre_rotating and handoff_path:
-                tail = f"(セッションを第{rotated_to}世代へ更新した。前世代の引き継ぎは読み込み済み)"
-            elif pre_rotating:
-                tail = (f"(セッションを第{rotated_to}世代へ更新した。"
-                        f"★前世代の引き継ぎは取得できず、記憶ファイルから復元した)")
+            # ★★2026-08-12 Chami「どの部屋もセッションの世代続投宣言別にいらないんだけど…」
+            #   (msg ESC-hr-context-1536784302132437112)。→ **世代の宣言は貼らない。**
+            #   旧= 交代の度に「(セッションを第N世代へ更新した。前世代の引き継ぎは読み込み済み)」。
+            #   2026-07-26に「黙って人格が入れ替わらないため」として入れた物だが、
+            #   Chamiにとっては**毎回同じことを言われるだけの行**だった。裁定より本人の言葉が上だ。
+            #   ★ただし**引き継げなかった時は黙らない**= あれは「更新しました」の告知ではなく、
+            #     **文脈が欠けている**という警告で、Chamiが実際に困る(『前に話した件』が通じない)。
+            #     世代の数字も「更新した」も言わず、欠けている事実だけを1行にする。
+            if not handoff_path:
+                reply = (reply.rstrip() + "\n\n"
+                         "(★前の記憶を引き継げなかった。記憶ファイルから復元しているので、"
+                         "抜けていたら遠慮なく言ってくれ)")
+                _log(dept, f"交代 gen={rotated_to}: 引き継ぎ無し=欠落の一言だけ添えた"
+                           f"(世代の宣言は貼らない・2026-08-12 Chami)")
             else:
-                # 事後の交代(resume失敗)= 相手のセッションが居ないので引き継ぎを作れない。
-                # ★既存の文言をそのまま残す(既存動作を壊さない)。
-                tail = f"(セッションを第{rotated_to}世代へ更新)"
-            # ★★C-032(2026-08-12 実装・イージス研究室)。本人が自分の口調で更新を言えていたら、
-            #   機械の定型文は**貼らない**(二重に言うことになる=声を殺す)。
-            #   起動文の側で「あなたの口調で1行言え」と渡している(上の generation>1 ブロック)。
-            #   ★言い忘れ・時間切れで言えなかった時は従来どおり貼る= 更新の告知は落とさない。
-            if _said_rotation(reply, rotated_to, need_handoff_word=not handoff_path):
-                _log(dept, f"C-032: 第{rotated_to}世代への更新を本人の口調で言えている"
-                           f"=機械の定型文は貼らない")
-            else:
-                reply = reply.rstrip() + "\n\n" + tail
+                _log(dept, f"交代 gen={rotated_to}: 世代の宣言は貼らない(2026-08-12 Chami)")
         return reply, True
     except subprocess.TimeoutExpired:
         # ★★2026-07-27 文面を直した。旧= 「Claude CLIが300秒で応答しなかった」。
@@ -3661,8 +3623,7 @@ def rotate_now(dept, conf, token, reason="manual"):
     boot_plain = _boot_prompt(dept, conf, new_gen)
     boot_hash = hashlib.sha256(boot_plain.encode("utf-8")).hexdigest()[:16]
     boot = _boot_prompt(dept, conf, new_gen, handoff_path=handoff_path,
-                        handoff_failed=not handoff_path,
-                        announce_rotation=True)       # ★手動交代も「実際に変わる便」だ
+                        handoff_failed=not handoff_path)
     # ★便が無いので、最初の1便を**そのまま自己確認**にする(提案書§7.2 手順5)。
     #   ここでの応答はDiscordへ出さない=ログにだけ残す。
     prompt = (boot + "\n\n【システム: 交代直後の自己確認】これはChamiからの便ではない。"
