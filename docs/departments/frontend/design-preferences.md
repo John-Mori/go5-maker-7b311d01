@@ -85,7 +85,7 @@
 | 全幅 primary ボタン(モーダル完了) | `width:100%; padding:13px; border-radius:10px; background:#2bb3c0; color:#04222a` | draftModalComplete v=427 |
 | セクション間 horizontal divider | `height:1px; background:#1e2d42; margin:18px 0` | draftPostModal v=427 |
 | フォントサイズ階層 | タイトル `.95rem` / 本文 `.84rem` / field-label `.76rem` / section-header `.72rem` | draftPostModal v=427 |
-| ★**行内に複数並ぶボタン(一覧の操作ボタン列)の幅** | **中身なり=`flex:0 1 auto;min-width:0`**。★**`flex:1`/`flex:1 1 0`で横幅いっぱいに引き伸ばすな**(Chami🔥 msg1536774712519163914「横幅を無闇に広げるな・前のサイズで良かった」)。収まらない時は横スクロールでなく縮小(shrink)で収める。横paddingは既定`4px 8px`前後から無闇に増やさない | 作成履歴4ボタン v=732 / 🔥恒久対策 |
+| ★**行内に複数並ぶボタン(一覧の操作ボタン列)の幅** | **中身なり=`flex:0 0 auto`(縮まない・文字量なりの幅)+コンテナ`flex-wrap:wrap`**。★**`flex:1`/`flex:1 1 0`で横幅いっぱいに引き伸ばすな**(Chami🔥 msg1536774712519163914「横幅を無闇に広げるな・前のサイズで良かった」)。★**縮み(`flex:0 1 auto`+`nowrap`)も不可**=収まらない時にshrinkで短いボタン(復元/削除)まで縮んで横幅を食い合い「文字量なり」に見えない(Chami msg1536781919541399602「復元も削除もそんなに横幅いらん・可変でいい・文字量に応じて」)。**収まらない時は縮小でなく折り返す**(`flex-wrap:wrap`)。横paddingは既定`4px 8px`前後から無闇に増やさない | 作成履歴4ボタン v=736 / 🔥恒久対策 |
 
 > ★**実装確定の意味**: Chami指示で入った後に「直された」という記録が無い = 暗黙の通過。Chami明示確定とは強度が違う。形が変わったら都度更新する。
 
