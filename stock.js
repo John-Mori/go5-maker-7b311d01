@@ -669,10 +669,11 @@
     var id = meta.id;
     var acctLabel = meta.account === 'acc2' ? '宵桜艶帖' : '月詠み';
     var hasYt = !!(meta.youtubeUrl);
-    // ★4ボタン(復元/動画DL/Drive保存/完全削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
-    //   幅の狭いスマホでも1行に入るよう padding/フォントを詰め、万一入り切らない端末では横スクロールへ逃がす
-    //   (完全削除まで必ず到達できる=改行で隠れない)。
-    var btnBase = 'width:auto;margin:0;padding:4px 7px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto;';
+    // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
+    //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。
+    //   flex:1 1 0 で4等分し、フォントは幅追従(min(.72rem,2.2vw))で狭い端末ほど小さくなり、SE級でも改行/スクロール無しに4つ入る。
+    //   ※このvwはUIボタンの応答的サイズ調整であって、動画Canvasの座標系(1080×1920)とは無関係=§3規約の対象外。
+    var btnBase = 'margin:0;padding:4px 4px;font-size:min(.72rem,2.2vw);border-radius:6px;cursor:pointer;white-space:nowrap;flex:1 1 0;min-width:0;overflow:hidden;text-align:center;';
     return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
@@ -680,11 +681,11 @@
         '<div style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
         '<div style="font-size:.72rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · 完了 ' + esc(fmtTs(meta.completedTs || meta.ts)) + '</div>' +
         (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
-        '<div style="display:flex;gap:4px;margin-top:7px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;">' +
+        '<div style="display:flex;gap:4px;margin-top:7px;flex-wrap:nowrap;">' +
           '<button type="button" class="stk-restore" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;">↩ 復元</button>' +
           '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">⬇ 動画DL</button>' +
           '<button type="button" class="stk-drive" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">☁️ Drive保存</button>' +
-          '<button type="button" class="stk-arch-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #5a2a2a;background:transparent;color:#c77;">🗑 完全削除</button>' +
+          '<button type="button" class="stk-arch-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #5a2a2a;background:transparent;color:#c77;">削除</button>' +
         '</div>' +
       '</div>' +
     '</div>';
