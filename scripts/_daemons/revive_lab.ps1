@@ -87,13 +87,23 @@ if ($reaped -gt 0) { Write-Log ('lab: reaped {0} stale revival shell(s) before s
 
 # --- 3) Cooldown: do not respawn faster than every 15 min. ---
 $now = [int][double]::Parse((Get-Date -UFormat %s))
+$last = 0
 if (Test-Path -LiteralPath $stateFile) {
-  $last = 0
   [int]::TryParse((Get-Content -LiteralPath $stateFile -Raw).Trim(), [ref]$last) | Out-Null
   if (($now - $last) -lt $cooldownSec) {
     Write-Log ('lab: dead but within cooldown ({0}s since last spawn) - skip' -f ($now - $last))
     exit 0
   }
+}
+
+# --- 3.5) Window lifetime (2026-08-12, aegis-gl). Revival works, but nothing ever recorded HOW LONG
+#   a window lived before dying, so "how often / why does the Lab window die" could only be
+#   hand-counted out of this log (measured by hand 2026-08-12: 70 revivals on 08-07 vs 1 on 08-12).
+#   Record it where the fact is known: seconds since the previous spawn = the dead window's
+#   lifetime (upper bound - death happened somewhere between the last 'ok' line and now).
+#   Log only; no behaviour change, so a bad number can never block a revival.
+if ($last -gt 0) {
+  Write-Log ('lab: previous window lifetime {0} min (last spawn epoch {1}) - dying window, respawning' -f [int](($now - $last) / 60), $last)
 }
 
 # --- 4) Build the self-contained boot prompt (python owns the Japanese text). ---

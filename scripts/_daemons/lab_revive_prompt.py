@@ -31,6 +31,47 @@ from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 BOOT_STATE = os.path.join(ROOT, "local", "_boot_report_state.json")
+REGISTRY = os.path.normpath(os.path.join(ROOT, "..", "00_AI-HQ", "org_registry.yml"))
+
+
+def identity_fact():
+    """復活した本人の**名義と報告先**を名簿から引いて1行で返す(2026-08-12・イージス研究室)。
+
+    なぜ要るか(実測):
+      この文は「研究室chで報告する」としか書いておらず、**誰として/どの部屋へ**を渡していなかった。
+      「研究室」は3つある(研究室HQ / AD研究室 / イージス研究室)=C-020。その結果、同じ復活報告が
+        2026-08-09 00:53 → 名義 シャビ・アロンソ / 部屋 AD研究室(msg 1535677375151349851)
+        2026-08-12 01:13 → 名義 花海咲季     / 部屋 AD研究室(msg 1536769584798113873)
+      と**毎回ちがう名義**で、しかもHQ本人の部屋ではない所へ出た。名義が混ざる=誰の報告か分からない
+      =偽受領(ORG-39)と同じ害。Chamiはこれを転送してHQへ持ち込み「重大インシデント」になった。
+      → 名義も部屋も**渡す側が名簿(org_registry.yml の hq:)から引いて渡す**。受け手に選ばせない。
+    ★ここは人格を決めていない(人格・呼び名の正本は人事部門)。名簿の値をそのまま渡すだけ=
+      名簿が変われば次の復活から自動で追従する。
+    """
+    vals = {}
+    try:
+        with io.open(REGISTRY, encoding="utf-8") as f:
+            text = f.read()
+        import re
+        blk = re.search(r"^  hq:\s*$(.*?)(?=^  [a-z0-9_-]+:\s*$)", text, re.S | re.M)
+        if blk:
+            for key in ("display_ja", "room", "gl"):
+                m = re.search(r"^\s{4}%s:\s*(.+?)\s*(?:#.*)?$" % key, blk.group(1), re.M)
+                if m:
+                    vals[key] = m.group(1).strip()
+    except Exception:
+        vals = {}
+    persona, room, ja = vals.get("gl"), vals.get("room"), vals.get("display_ja")
+    if not (persona and room):
+        return ("★あなたの名義と報告先を**名簿から引けなかった**"
+                "(`00_AI-HQ/org_registry.yml` の hq:)。★**推測で名乗るな**="
+                "自分で名簿を開いて確認してから報告しろ。適当な人格で出すと誤報になる。")
+    return ("★あなたの名義= **%s**(%s)。報告先は**%sの部屋だけ**"
+            "(AD研究室・イージス研究室へ出すな=「研究室」は3つある・C-020)。\n"
+            "   出し方= `python scripts/discord/persona_send.py --dept hq --persona \"%s\" \"本文\"`\n"
+            "   ★**他の人格を名乗るな。**過去2回の復活報告が別々の名義(8/9=シャビ・アロンソ / "
+            "8/12=花海咲季)で、しかも%sではない部屋へ出た=誰の報告か分からなくなり誤報になった。"
+            % (persona, ja or "研究室HQ", ja or "研究室HQ", persona, ja or "研究室HQ"))
 
 
 def boot_fact():
@@ -84,7 +125,8 @@ PROMPT = """あなたは go5-maker AI組織の「研究室」セッションで�
    起床の正順: ①mvで `local/_work/` へ退避(inbox内へ退避するとsweepに食われる=INC-86) → ②即waiter再武装 → ③読んだら既読を押す → ④処理(本格着手時に着手印)。
    印: `python scripts/discord/react.py --channel <ch名かID> --msg <msg_id> --emoji 既読` / `--emoji 着手`
 3. **機微部屋(dream-care/past-room/health-log)の滞留は最優先**。その部屋のキャラで応対すること(夢と回復=ククール名義・応対の正本は local/dreams/PROTOCOL.md)。内容はDiscordとlocal/以外へ複製しない。
-4. 落ち着いたら、研究室chで「自動復活した」と一言報告する(Chamiが復活を確認できるように)。
+4. 落ち着いたら「自動復活した」と一言報告する(Chamiが復活を確認できるように)。
+   {identity_fact}
    ★報告に書いてよい原因は**上の実測1行の通りだけ**。測っていない原因(PC再起動・クラッシュ・電源断)を足すな。
    ★自分が実際に確認した項目だけを書く(点検していない箱を「クリーン」と書かない)。
 
@@ -98,7 +140,7 @@ def main() -> int:
     if len(sys.argv) < 2:
         print("usage: lab_revive_prompt.py <out-path>")
         return 2
-    text = PROMPT.format(boot_fact=boot_fact()).strip() + "\n"
+    text = PROMPT.format(boot_fact=boot_fact(), identity_fact=identity_fact()).strip() + "\n"
     io.open(sys.argv[1], "w", encoding="utf-8").write(text)
     return 0
 
