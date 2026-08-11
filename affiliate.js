@@ -74,12 +74,15 @@
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
     if (activeBtnId === 'reserveBtn' && window.Scheduler) window.Scheduler._renderTab();
     if (activeBtnId === 'tabStock'   && window.Go5Stock)  window.Go5Stock.render();
-    // 投稿履歴タブ入場時、離脱時に空にした #ytClickList を作り直す(空の時だけ=通常入場の二重描画を避ける。
-    //   クリック入場では tabVerify のリスナが refresh() で作り直すが、タブ復元/オーバーレイからの戻りは
-    //   リスナが発火しないため、ここで空を埋めておく)。
+    // 投稿履歴タブ入場時は #ytClickList を必ず作り直す(=その時点の localStorage を正として描き直す)。
+    //   ★旧コードは「空の時だけ」に絞り、別に居るはずの tabVerify リスナ(refresh())に本描画を任せていたが、
+    //     その購読リスナは実在しない(コメントだけ残存)。結果、即時投稿で投稿完了したドラフトの1件を
+    //     addCompletedPost が verify_manual__<acc> に足しても、入場時に空でなければ描き直されず
+    //     「投稿履歴が表示されない/新しい1件が出ない」になっていた(Chami報告2026-08-11・C-038)。
+    //   render() は localStorage から作る冪等処理=毎入場で1回描くだけ。離脱時は下で #ytClickList を空にするので
+    //     二重描画にはならない(通信を伴う metrics 取得は render では走らない=軽い)。
     if (activeBtnId === 'tabVerify' && window.Go5Verify) {
-      var _vl = document.getElementById('ytClickList');
-      if (_vl && !_vl.firstChild) { try { window.Go5Verify.render(); } catch (e) {} }
+      try { window.Go5Verify.render(); } catch (e) {}
     }
     // 前面から外れた重いタブのDOMを空にして常駐メモリを解放(入場時に必ず作り直すページのみ・上の定義参照)。
     if (outgoing && outgoing !== activeBtnId) {
