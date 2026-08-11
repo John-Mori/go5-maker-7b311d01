@@ -158,9 +158,11 @@
   //   ★動画本体(stock_v_)は重いので載せない(②で on-demand 取り寄せにする)。実体はR2、同期台帳には参照だけ=積んでも軽い。
   function blobToDataUrlP_(blob) { return new Promise(function (res) { if (!blob) return res(''); blobToDataUrl_(blob, function (du) { res(du || ''); }); }); }
   // この端末が blob 実体を持つドラフトだけ、未作成ならミラーを1回作って雲へ送る(冪等)。既存ドラフトも開けば自動で運ばれる。
+  var _blobMirrorBusy = {}; // 同じドラフトを render/定期sweep/保存直後から重複処理しない
   function ensureBlobMirror_(id) {
-    var store = idb(); if (!store) return;
-    store.get('stock:imgs:' + id).then(function (existing) {
+    var store = idb(); if (!store) return Promise.resolve();
+    if (_blobMirrorBusy[id]) return _blobMirrorBusy[id];
+    var job = store.get('stock:imgs:' + id).then(function (existing) {
       existing = existing || {};
       // ★既存ミラーに「欠けているフィールドだけ」を後追いで足す(非破壊・冪等)。
       //   以前は th さえ有れば skip していたため、プレビュー撮影(stock_prev_)より前に th だけで
@@ -185,6 +187,8 @@
         });
       });
     }).catch(function () {});
+    _blobMirrorBusy[id] = job.then(function (v) { delete _blobMirrorBusy[id]; return v; }, function () { delete _blobMirrorBusy[id]; });
+    return _blobMirrorBusy[id];
   }
 
   // ── ② 動画本体を全端末でDLできるようにする(2026-08-01・Chami依頼)──
@@ -196,31 +200,74 @@
   //   実体を持つ端末だけが未アップ時に1回上げる(冪等)。手元マーカー(_vidUp)で二重PUTを避ける。
   var VIDNAME = function (id) { return 'go5vid:' + id; };
   var _vidUp = {}; // このセッションでアップ済みID(再PUT抑止・ローカルのみ)
+  var _vidMirrorBusy = {}; // 保存直後と定期sweepが重なって同じ動画を二重PUTしない
   function ensureVideoMirror_(id) {
-    var store = idb(); if (!store) return;
-    if (_vidUp[id]) return;
-    if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return;
-    store.get('stock_v_' + id).then(function (blob) {
+    var store = idb(); if (!store) return Promise.resolve();
+    if (_vidUp[id]) return Promise.resolve();
+    if (_vidMirrorBusy[id]) return _vidMirrorBusy[id];
+    if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return Promise.resolve();
+    var job = store.get('stock_v_' + id).then(function (blob) {
       if (!blob) return; // 実体が無い端末=上げない(取り寄せる側)
       return Go5Sync.putBlobR2At(VIDNAME(id), blob).then(function (key) {
         if (key) _vidUp[id] = 1; // 成功=このセッションでは再送しない。失敗時は次のsweepでまた試す(非破壊)
       });
     }).catch(function () {});
+    _vidMirrorBusy[id] = job.then(function (v) { delete _vidMirrorBusy[id]; return v; }, function () { delete _vidMirrorBusy[id]; });
+    return _vidMirrorBusy[id];
   }
   // ★ドラフトタブを開かなくても、アプリが開いてさえいれば裏で全ドラフト/作成履歴の動画を雲へ上げる
   //   (Chami依頼2026-07-31「わざわざドラフトタブをタップしなくても雲に上がるように」)。
+  var _mirrorSweepBusy = false, _mirrorSweepAgain = false;
   function sweepVideoMirror_() {
-    try {
-      // 動画本体(②)＋画像ミラー(①-B:サムネ/プレビュー/元画像)の両方を裏で雲へ。
-      //   ★ドラフトタブを開かなくても、アプリが開いてさえいれば実体を持つ端末が
-      //     欠けているミラー(特に古い履歴の .prev)を後追いで上げる=2台目の投稿履歴に
-      //     過去分プレビューが自動反映される(Chami依頼2026-08-04「今までの履歴を反映して」)。
-      loadMeta().forEach(function (m) { ensureVideoMirror_(m.id); ensureBlobMirror_(m.id); });
-      loadArchive().forEach(function (m) { ensureVideoMirror_(m.id); ensureBlobMirror_(m.id); });
-    } catch (e) {}
+    // 旧実装は最大50件×(動画+画像)を同時発火していた。動画blob・dataURL変換が一瞬に重なると
+    // iOS Safariがメモリ都合でページを丸ごと破棄するため、1件ずつ処理してイベントループへ返す。
+    // 新規ドラフトは saveStock_ 直後にも即送信するので、ここは旧データ/失敗分の静かな後追い担当。
+    if (document.hidden) return;
+    if (_mirrorSweepBusy) { _mirrorSweepAgain = true; return; }
+    var items = [];
+    try { items = loadMeta().concat(loadArchive()); } catch (e) { return; }
+    _mirrorSweepBusy = true;
+    var i = 0;
+    function finish_() {
+      _mirrorSweepBusy = false;
+      if (_mirrorSweepAgain) { _mirrorSweepAgain = false; setTimeout(sweepVideoMirror_, 5000); }
+    }
+    function next_() {
+      if (document.hidden || i >= items.length) { finish_(); return; }
+      var m = items[i++];
+      if (!m || !m.id) { setTimeout(next_, 0); return; }
+      Promise.resolve(ensureVideoMirror_(m.id))
+        .then(function () { return ensureBlobMirror_(m.id); })
+        .catch(function () {})
+        .then(function () { setTimeout(next_, 80); }); // 1件ごとに描画/入力へ時間を返す
+    }
+    next_();
   }
 
   function idb() { return window.Go5Idb; }
+
+  // 投稿履歴の「動画で使用した画像」は candidates.js の巨大な全画像ハイドレートを経由せず、
+  // 必要な videoId の used:<id> だけをIDBから読む。ドラフト専用の軽量ページでも同じ正データを扱える。
+  function usedImagesRead_(key) {
+    if (!key) return Promise.resolve({ imgs: [], prev: 0 });
+    var store = idb();
+    if (store) return store.get('used:' + key).then(function (r) { return r || { imgs: [], prev: 0 }; }).catch(function () { return { imgs: [], prev: 0 }; });
+    try { return Promise.resolve(JSON.parse(localStorage.getItem('hist_usedimg__' + key) || 'null') || { imgs: [], prev: 0 }); }
+    catch (e) { return Promise.resolve({ imgs: [], prev: 0 }); }
+  }
+  function usedImagesSave_(key, imgs, prevCount) {
+    if (!key) return Promise.resolve(false);
+    imgs = (imgs || []).filter(Boolean);
+    // 本体ページでは candidates.js のメモリキャッシュも同時更新。軽量ページではIDBへ直接保存する。
+    if (window.Go5Cand && window.Go5Cand.usedImgSave) {
+      try { return Promise.resolve(window.Go5Cand.usedImgSave(key, imgs, prevCount)); } catch (e) {}
+    }
+    var rec = { imgs: imgs, at: Date.now(), prev: prevCount | 0 };
+    var store = idb();
+    if (store) return store.set('used:' + key, rec).then(function () { try { kickSync_(); } catch (_) {} return true; }).catch(function () { return false; });
+    try { localStorage.setItem('hist_usedimg__' + key, JSON.stringify(rec)); kickSync_(); return Promise.resolve(true); }
+    catch (e) { return Promise.resolve(false); }
+  }
 
   // ── サムネ取得(canvas最終フレームを小さいJPEGに) ──
   function captureThumb_() {
@@ -554,14 +601,15 @@
     var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
     // 仕上がりプレビューを「使用画像1ページ目」へ差し込む(videoIdで紐付く・Chami依頼2026-07-30・冪等)。
     var applyPreview = function (prevB) {
-      if (prevB && meta.videoId && window.Go5Cand && window.Go5Cand.usedImgSave && window.Go5Cand.usedImgs) {
-        blobToDataUrl_(prevB, function (durl) {
-          if (!durl) return;
-          var cur = window.Go5Cand.usedImgs(meta.videoId) || [];
+      if (!prevB || !meta.videoId) return;
+      blobToDataUrl_(prevB, function (durl) {
+        if (!durl) return;
+        usedImagesRead_(meta.videoId).then(function (rec) {
+          var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
           if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
-          window.Go5Cand.usedImgSave(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
+          usedImagesSave_(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
         });
-      }
+      });
     };
     // ── 既にDriveへフォルダがある=動画/元画像は作成時に保存済み。プレビューだけ追記する(blob不要=blob寿命に依存しない)。
     if (folderId) {
@@ -609,7 +657,15 @@
   }
 
   // ── 再作成(ドラフトデータを動画作成タブに復元) ──
+  var REMAKE_PENDING_KEY = 'go5_stock_remake_pending';
   function remakeStock_(meta) {
+    // ドラフト専用ページには動画作成DOMを積まない。IDだけsessionStorageへ渡し、本体で同じ関数を再開する。
+    // ここでは元ドラフトを消さない=遷移失敗/タブ破棄があってもデータを失わない。本体で復元完了後にだけ削除する。
+    if (!$('author')) {
+      try { sessionStorage.setItem(REMAKE_PENDING_KEY, meta && meta.id || ''); localStorage.setItem('go5_active_tab', 'tabMovie'); } catch (e) {}
+      location.href = 'index.html';
+      return;
+    }
     var a = $('author');
     if (a) { a.value = meta.author || ''; a.dispatchEvent(new Event('input')); }
     var t = $('top');
@@ -671,9 +727,10 @@
     var hasYt = !!(meta.youtubeUrl);
     // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
     //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。
-    //   ★横幅は前のサイズ(中身なり=padding:4px 7px/.72rem)を維持し、引き伸ばさない(Chami指摘2026-08-11 msg1536774712519163914)。
-    //   flex:0 1 auto=通常は中身なりの幅、収まらない時だけ縮む。full幅への均等引き伸ばし(旧flex:1 1 0)はしない。
-    var btnBase = 'margin:0;padding:4px 7px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-align:center;';
+    //   ★横幅は前のサイズ(中身なり=padding:4px 8px/.72rem)を維持し、引き伸ばさない(Chami指摘2026-08-11 msg1536774712519163914)。
+    //   flex:0 1 auto=通常は中身なりの幅・左詰め、収まらない時だけ縮む。full幅への均等引き伸ばし(旧flex:1 1 0)はしない。
+    //   inline-flex+justify-content:center=絵文字+文字を枠の中央に置く(Drive保存の中央揃えズレ=msg1536776216986779729③の根治)。
+    var btnBase = 'margin:0;padding:4px 8px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:3px;';
     return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
@@ -681,10 +738,10 @@
         '<div style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
         '<div style="font-size:.72rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · 完了 ' + esc(fmtTs(meta.completedTs || meta.ts)) + '</div>' +
         (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
-        '<div style="display:flex;gap:4px;margin-top:7px;flex-wrap:nowrap;">' +
+        '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:nowrap;">' +
           '<button type="button" class="stk-restore" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;">↩ 復元</button>' +
-          '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">⬇ 動画DL</button>' +
-          '<button type="button" class="stk-drive" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #3a4a5e;background:transparent;color:#ccc;">☁️ Drive保存</button>' +
+          '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #46586e;background:#151d2c;color:#dfe6ef;">⬇ 動画DL</button>' +
+          '<button type="button" class="stk-drive" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #46586e;background:#151d2c;color:#dfe6ef;">☁️ Drive保存</button>' +
           '<button type="button" class="stk-arch-del" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #5a2a2a;background:transparent;color:#c77;">削除</button>' +
         '</div>' +
       '</div>' +
@@ -696,32 +753,50 @@
   //   (完了時に stock_prev_ が無くガードで弾かれたため)。同期ミラー stock:imgs:<id> の .prev(dataURL)が
   //   届いている今なら後から差し込める。videoId単位・プレビュー未挿入のものだけ・冪等。
   var _prevBackfilled = {}; // このセッションで補完済み/確認済みの videoId(再走査を抑える)
+  var _prevBackfillBusy = false;
   function backfillUsedPreview_() {
-    var store = idb(); if (!store) return;
-    if (!(window.Go5Cand && window.Go5Cand.usedImgs && window.Go5Cand.usedImgSave)) return;
-    loadMeta().concat(loadArchive()).forEach(function (m) {
-      if (!m || !m.id || !m.videoId || _prevBackfilled[m.videoId]) return;
-      var prevN = window.Go5Cand.usedPrevCount ? (window.Go5Cand.usedPrevCount(m.videoId) || 0) : 0;
-      if (prevN > 0) { _prevBackfilled[m.videoId] = 1; return; } // 既にプレビュー有り=触らない
-      store.get('stock:imgs:' + m.id).then(function (mir) {
-        var du = mir && mir.prev;
-        if (!du) return; // ミラーがまだ来ていない/そもそもプレビュー無し=次の機会に
-        _prevBackfilled[m.videoId] = 1;
-        var cur = window.Go5Cand.usedImgs(m.videoId) || [];
-        if (cur[0] === du) return; // 既に先頭=冪等
-        window.Go5Cand.usedImgSave(m.videoId, [du].concat(cur.filter(function (u) { return u !== du; })), 1);
-        // 投稿履歴(ランキングタブ)を開いていれば即反映。閉じていても保存済みなので次に開けば出る。
-        try { if (window.YtRank && window.YtRank.renderRank && $('pageRank') && !$('pageRank').hidden) window.YtRank.renderRank(); } catch (e) {}
-      }).catch(function () {});
-    });
+    var store = idb(); if (!store || _prevBackfillBusy) return;
+    var items = loadMeta().concat(loadArchive()).filter(function (m) { return m && m.id && m.videoId && !_prevBackfilled[m.videoId]; });
+    _prevBackfillBusy = true;
+    var i = 0;
+    function done_() { _prevBackfillBusy = false; }
+    function next_() {
+      if (i >= items.length) { done_(); return; }
+      var m = items[i++];
+      usedImagesRead_(m.videoId).then(function (rec) {
+        var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
+        var prevN = (rec && rec.prev) ? (rec.prev | 0) : 0;
+        if (prevN > 0) { _prevBackfilled[m.videoId] = 1; return null; }
+        return store.get('stock:imgs:' + m.id).then(function (mir) {
+          var du = mir && mir.prev;
+          if (!du) return; // ミラーがまだ来ていない=次の同期機会に再試行
+          _prevBackfilled[m.videoId] = 1;
+          if (cur[0] === du) return;
+          return usedImagesSave_(m.videoId, [du].concat(cur.filter(function (u) { return u !== du; })), 1).then(function () {
+            try { if (window.YtRank && window.YtRank.renderRank && $('pageRank') && !$('pageRank').hidden) window.YtRank.renderRank(); } catch (e) {}
+          });
+        });
+      }).catch(function () {}).then(function () { setTimeout(next_, 30); });
+    }
+    next_();
   }
 
+  var _renderSeq = 0, _lastRenderedStockSig = '', _missingThumbs = {}, _stockBgPending = false;
+  function stockViewSig_(acct) {
+    try {
+      var m = loadMeta().filter(function (x) { return (x.account || 'acc1') === acct; });
+      var a = loadArchive().filter(function (x) { return (x.account || 'acc1') === acct; });
+      return JSON.stringify([m, a]);
+    } catch (e) { return ''; }
+  }
   function render() {
     var page = $('pageStock');
     if (!page || page.hidden) return;
+    _stockBgPending = false;
     var curAcct = window.getCurrentAccount ? window.getCurrentAccount() : 'acc1';
     var metas = loadMeta().filter(function (m) { return (m.account || 'acc1') === curAcct; });
     var arch = loadArchive().filter(function (m) { return (m.account || 'acc1') === curAcct; });
+    var sig = stockViewSig_(curAcct), seq = ++_renderSeq;
 
     var store = idb();
     var all = metas.concat(arch);
@@ -731,8 +806,6 @@
       return store.get('stock_t_' + m.id).then(function (blob) {
         if (blob) {
           _thumbCache[m.id] = URL.createObjectURL(blob);
-          ensureBlobMirror_(m.id); // 実体を持つ端末=未送なら雲へミラー(①-B・既存ドラフトの後追い同期)
-          ensureVideoMirror_(m.id); // 実体を持つ端末=未送なら動画本体もR2へ(②・既存ドラフトの後追い)
           return _thumbCache[m.id];
         }
         // 実体が無い端末(2台目)=同期で来た stock:imgs ミラーの dataURL からサムネを出す(①-B)
@@ -745,8 +818,14 @@
     });
 
     Promise.all(thumbPs).then(function (thumbUrls) {
-      var thumbFor = {};
-      all.forEach(function (m, i) { thumbFor[m.id] = thumbUrls[i]; });
+      // 非同期サムネ読込中にアカウント/同期データが変わった古い描画は捨てる。古いPromiseが後勝ちしない。
+      var nowAcct = window.getCurrentAccount ? window.getCurrentAccount() : 'acc1';
+      if (seq !== _renderSeq || page.hidden || nowAcct !== curAcct || stockViewSig_(curAcct) !== sig) {
+        if (!page.hidden && !modalIsOpen_()) setTimeout(render, 0);
+        return;
+      }
+      var thumbFor = {}; _missingThumbs = {};
+      all.forEach(function (m, i) { thumbFor[m.id] = thumbUrls[i]; if (!thumbUrls[i]) _missingThumbs[m.id] = 1; });
       var html = '<div class="card">';
       if (metas.length) {
         html += '<div style="font-size:.95rem;font-weight:700;color:var(--accent);margin-bottom:10px;">📦 ドラフト(' + metas.length + '件)</div>' +
@@ -765,9 +844,9 @@
           '</div></details>';
       }
       page.innerHTML = html;
+      _lastRenderedStockSig = sig;
     });
   }
-
   // ── 投稿モード モーダル ──
   var _modalMeta = null;
   var _ytTitleDirty = false; // ユーザーが題名を手編集したかどうか(trueの間はタグ変更で上書きしない)
@@ -781,7 +860,7 @@
   function rememberOpenModal_(id) { try { sessionStorage.setItem(OPEN_MODAL_KEY, id || ''); } catch (e) {} }
   function forgetOpenModal_() { try { sessionStorage.removeItem(OPEN_MODAL_KEY); } catch (e) {} }
   function modalIsOpen_() { var m = $('draftPostModal'); return !!(m && m.style.display !== 'none'); }
-  function closeModal_() { var m = $('draftPostModal'); if (m) m.style.display = 'none'; _modalMeta = null; forgetOpenModal_(); }
+  function closeModal_() { var m = $('draftPostModal'); if (m) m.style.display = 'none'; _modalMeta = null; forgetOpenModal_(); if (_stockBgPending) setTimeout(render, 0); }
 
   function copyText_(text, btn) {
     function flash() { var o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(function () { btn.textContent = o; }, 2000); }
@@ -1290,6 +1369,19 @@
   function init() {
     createModal_();
 
+    // 軽量ドラフトページの「再作成」から来た時だけ、本体の動画作成DOMへ流し込んでから元ドラフトを外す。
+    // sessionStorageなので別タブ/別端末とは混ざらず、成功前削除もしない。
+    (function resumeRemakeFromSplit_() {
+      if (!$('author')) return;
+      var id = ''; try { id = sessionStorage.getItem(REMAKE_PENDING_KEY) || ''; } catch (e) {}
+      if (!id) return;
+      try { sessionStorage.removeItem(REMAKE_PENDING_KEY); } catch (e) {}
+      setTimeout(function () {
+        var meta = loadMeta().filter(function (m) { return m.id === id; })[0];
+        if (meta) { try { remakeStock_(meta); } catch (e) {} }
+      }, 350);
+    }());
+
     // ★iOSがアプリ復帰時にこのタブを捨てて再読込しても、投稿モードを開いていたなら開き直す
     //   (Chami報告2026-08-08「戻るとリロードする」の実害=作業中の投稿モードが消えることを無効化する)。
     //   sessionStorageはタブが生きている限り残る=再読込直後だけ復元し、タブを閉じれば消える(勝手には開かない)。
@@ -1345,18 +1437,21 @@
       if (page && !page.hidden) render();
     });
 
-    // ★全端末同期で別端末のドラフトが降ってきたら、開いていれば即再描画(タブを再タップしなくても出る)。
-    //   ただし pulled>0(実際に取り込んだ変更がある)時だけ。タブ復帰で毎回鳴る go5-synced に
-    //   無条件で反応すると、往復のたびに一覧を作り直して画面が一瞬白くチラつく(Chami 2026-08-04)。
+    // 全端末同期の「何かが変わった」だけでは一覧を作り直さない。同期対象は数百キーあるため、
+    // ドラフト以外の設定変更でも pulled>0 となる=60秒ごと/アプリ復帰ごとの全DOM交換がリロードに見えていた。
+    // ドラフト配列の署名が変わった時、または未表示サムネがあり画像が届いた時だけ更新する。
     document.addEventListener('go5-synced', function (e) {
-      if (!e || !e.detail || !e.detail.pulled) return;
-      // 別端末で作った動画のミラー(.prev)が届いたら、過去の投稿完了ぶんへプレビューを遡及補完(タブ表示に依らず)。
-      try { backfillUsedPreview_(); } catch (_) {}
-      // ★投稿モードを開いている間は一覧を作り直さない=モーダルの裏で無駄に再描画してチラつくのを止める
-      //   (Chami報告2026-08-08「コピー/アプリ往復のたびリロードする」。復帰時の同期でここが鳴っていた)。
-      if (modalIsOpen_()) return;
+      var d = e && e.detail;
+      if (!d || (!d.pulled && !d.pulledImg)) return;
+      if (d.pulledImg) { try { backfillUsedPreview_(); } catch (_) {} }
       var page = $('pageStock');
-      if (page && !page.hidden) render();
+      if (!page || page.hidden) return;
+      var curAcct = window.getCurrentAccount ? window.getCurrentAccount() : 'acc1';
+      var dataChanged = !!d.pulled && stockViewSig_(curAcct) !== _lastRenderedStockSig;
+      var imageChanged = !!d.pulledImg && Object.keys(_missingThumbs).length > 0;
+      if (!dataChanged && !imageChanged) return;
+      if (modalIsOpen_()) { _stockBgPending = true; return; } // 入力・コピー中はDOMを触らず、閉じた後に1回だけ反映
+      render();
     });
 
     // 起動直後にも一度、過去分のプレビュー遡及補完を試す(既に同期済みミラーがあれば即補完)。
@@ -1415,13 +1510,12 @@
 
     window.Go5Stock = { render: render };
 
-    // ★動画を雲へ上げるのを「ドラフトタブを開いたら」から「アプリが開いていれば裏で」へ格上げ
-    //   (Chami依頼2026-07-31: わざわざドラフトタブをタップしなくても上がるように)。
-    //   起動直後・タブが前面に戻った時・以後は45秒ごとに、実体を持つ端末が未アップの動画を運ぶ。
+    // 動画・画像ミラーは保存直後に即送信し、ここでは旧データ/一時失敗ぶんだけを静かに再試行する。
+    // 最大50件を同時発火していた旧30秒sweepはiOSのメモリ圧を上げるため、逐次処理＋2分周期へ変更。
     setTimeout(sweepVideoMirror_, 1000);  // 起動直後(sync設定の読み込みを少し待つ・追いつきを速く)
-    setTimeout(sweepVideoMirror_, 6000);  // 1本目でsync未設定だった時の取りこぼしを拾う二度目
+    setTimeout(sweepVideoMirror_, 6000);  // 1本目でsync未設定だった時の取りこぼしを拾う二度目(重複はbusyガード)
     document.addEventListener('visibilitychange', function () { if (!document.hidden) sweepVideoMirror_(); });
-    setInterval(sweepVideoMirror_, 30000);
+    setInterval(sweepVideoMirror_, 120000);
 
     // 初回アクセスでドラフトが空表示になる穴の根治(Chami 2026-07-29):
     //   affiliate.js の restoreActiveTab_ が「このモジュールより先」に走ると、ドラフトタブへ
