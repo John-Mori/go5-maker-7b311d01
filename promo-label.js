@@ -492,6 +492,12 @@
       lastCid = String(info.cid || info.title || '');
       pct = onSale ? pctFanza_(info.listPrice, info.price) : 0; // ⑤FANZA表記の丸めで揃える
       priceVal = onSale ? Math.round(info.price) : 0;
+      // ★セール価格が99円以下なら自動で「¥価格」表示へ切替(Chami依頼2026-08-11
+      //   「セール価格が99円以下なら自動で表示を円表示に。基本そっちをアピールするから」)。
+      //   99円以下=二桁円の格安セール=%OFFの数字より実額の安さが刺さる=価格ラベルを主役にする。
+      //   価格テンプレも元々「99円以下の二桁円のみ運用」設計(TEMPLATES acc1/acc2 のコメント参照)=整合。
+      //   100円以上は従来どおり=既定%OFFと手動切替(promoType/⑥タップ切替)を尊重して触らない。
+      if (onSale && priceVal > 0 && priceVal <= 99) { ltype = 'price'; }
       persist(); updateRow(); redraw(); // ①値も永続化してリロードで消えないように
     },
     // 別作品の取得開始(前作の値を残さない)。
