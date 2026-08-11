@@ -276,17 +276,16 @@
     while (fs > zh * 0.4 && ctx.measureText(text).width > zw - pad * 2) { fs -= Math.max(1, fs * 0.04); setF(); }
     var cx = zx + zw / 2, cy = zy + zh / 2;
     ctx.textAlign = 'center';
-    // ★数字の縦位置は「字面(ink box)の中心」で合わせる(2026-08-10 Chami「宵桜も10の数字が浮いてる」)。
-    //   textBaseline='middle' はフォントのem箱中心=Didot/Bodoni系はアクセント用に上余白が広く、
-    //   数字(ライニング数字)がem中心より上へ来る→iPhone実機で「10が上に浮く」原因だった。
-    //   measureTextの実測字面(actualBoundingBoxAscent/Descent)で中心を取り直すと書体非依存で
-    //   ¥の高さにピタリ揃う(PILの字面中心プレビューと一致)。未対応環境はmiddleへフォールバック。
+    // ★数字の縦位置(2026-08-11 Chami「数字だけラベル内の位置が高い」= 色でなく位置。3度目)。
+    //   前実装は measureText の actualBoundingBoxAscent/Descent で字面中心を取っていたが、
+    //   iOS Safari は下ヒゲの無いライニング数字("10"/"99")でも Descent にフォントのディセンダ量
+    //   (≈0.2fs)を算入して返す。すると by=cy+(asc-desc)/2 の desc が水増しされ baseline が上へ→
+    //   字が cy より約0.10fs 高く浮く=まさに「位置が高い」の主因だった(PILで基材の焼込文字中心を
+    //   実測: 価格0.480/割引0.504=slot中心0.475/0.505とほぼ一致=slotは正しく、浮きは字組み側)。
+    //   → 実測字面を捨て、セリフ体ライニング数字の字面高(≈0.66fs)から幾何中心を固定式で置く=端末非依存。
+    //   baseline を cy + figH/2 に置くと字面中心が cy に乗る。figH/2≈0.33fs、浮き再発を断つため気持ち下へ(0.34)。
     ctx.textBaseline = 'alphabetic';
-    var _m = ctx.measureText(text);
-    var _asc = _m.actualBoundingBoxAscent, _desc = _m.actualBoundingBoxDescent;
-    var _hasBox = (typeof _asc === 'number' && typeof _desc === 'number' && isFinite(_asc) && isFinite(_desc));
-    var by = _hasBox ? cy + (_asc - _desc) / 2 : cy;
-    if (!_hasBox) ctx.textBaseline = 'middle';
+    var by = cy + fs * 0.34;
     var grad = ctx.createLinearGradient(0, by - fs / 2, 0, by + fs / 2);
     grad.addColorStop(0, ink.top); grad.addColorStop(1, ink.bottom);
     ctx.lineJoin = 'round'; ctx.miterLimit = 2;
