@@ -732,7 +732,10 @@
     //     ★縮み(旧flex:0 1 auto)をやめた理由=収まらない時に短い復元/削除まで縮んで横幅を食い合い「文字量なり」に見えない(Chami指摘 msg1536781919541399602)。
     //     収まらない時は縮小でなく折り返す(下の flex-wrap:wrap)=各ボタンは文字ぶんの幅を保つ。
     //   inline-flex+justify-content:center=絵文字+文字を枠の中央に置く(Drive保存の中央揃えズレ=msg1536776216986779729③の根治)。
-    var btnBase = 'margin:0;padding:4px 8px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:3px;';
+    //   ★★width:auto が必須=グローバル button{width:100%}(style.css:846)を打ち消す。これが無いと flex-basis:auto が
+    //     width:100% を読み、flex:0 0 auto+wrap で各ボタンが全幅→縦積みになる(Chami msg1536784731872698439「余計に悪くなってる」の真因)。
+    //     ドラフト側btnBase(703行)や draftPostModal(1206行コメント)と同じ既知の罠=INC-47系。ここが幅騒動の元凶だった。
+    var btnBase = 'width:auto;margin:0;padding:4px 8px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:3px;';
     return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +

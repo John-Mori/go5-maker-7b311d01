@@ -57,6 +57,13 @@ test('BW-2: btnBase は中身なり幅(flex:0 0 auto / flex:0 1 auto=grow0・bas
     'btnBase に flex:0 0 auto / 0 1 auto が無い(中身なり幅の明示が消えた)。btnBase=' + btnBase);
 });
 
+// ★これが幅騒動の真因だった(2026-08-12 msg1536784731872698439)。グローバル button{width:100%}(style.css:846)を
+//   打ち消す width:auto が無いと、flex-basis:auto が 100% を読み、ボタンが全幅→縦積みになる。flex 指定だけでは防げない。
+test('BW-4: btnBase は width:auto を明示している(グローバル button{width:100%} の打ち消し・全幅化の根治)', function () {
+  assert.ok(/width\s*:\s*auto/.test(btnBase),
+    'btnBase に width:auto が無い=グローバル button{width:100%} が勝ってボタンが全幅・縦積みになる。btnBase=' + btnBase);
+});
+
 // 検知ロジック自身の自己テスト(将来この判定を緩めた時に気づけるように)
 test('BW-3: 検知ロジックの自己テスト(flex:1 1 0 は禁止・flex:0 1 auto は許可)', function () {
   assert.strictEqual(hasGrowingFlex('padding:4px;flex:1 1 0;min-width:0;'), true);
