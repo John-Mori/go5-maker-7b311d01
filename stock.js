@@ -671,9 +671,9 @@
     var hasYt = !!(meta.youtubeUrl);
     // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
     //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。
-    //   flex:1 1 0 で4等分し、フォントは幅追従(min(.72rem,2.2vw))で狭い端末ほど小さくなり、SE級でも改行/スクロール無しに4つ入る。
-    //   ※このvwはUIボタンの応答的サイズ調整であって、動画Canvasの座標系(1080×1920)とは無関係=§3規約の対象外。
-    var btnBase = 'margin:0;padding:4px 4px;font-size:min(.72rem,2.2vw);border-radius:6px;cursor:pointer;white-space:nowrap;flex:1 1 0;min-width:0;overflow:hidden;text-align:center;';
+    //   ★横幅は前のサイズ(中身なり=padding:4px 7px/.72rem)を維持し、引き伸ばさない(Chami指摘2026-08-11 msg1536774712519163914)。
+    //   flex:0 1 auto=通常は中身なりの幅、収まらない時だけ縮む。full幅への均等引き伸ばし(旧flex:1 1 0)はしない。
+    var btnBase = 'margin:0;padding:4px 7px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-align:center;';
     return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
