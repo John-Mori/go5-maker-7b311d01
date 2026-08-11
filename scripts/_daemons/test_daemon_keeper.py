@@ -4,6 +4,7 @@
 
 実行: python scripts/_daemons/test_daemon_keeper.py
 """
+import ast
 import importlib.util
 import os
 import sqlite3
@@ -99,7 +100,63 @@ def exercise_wave(busy_seq, depts=("hq",), first_seen=None):
         keeper.log = original_log
 
 
+# ★C-042(2026-08-12 HQ裁定)= 「常駐が読むものを足したら、載せ替えの経路も同時に決めろ」。
+#   dept_daemon が import する自作モジュールは**起動時に1回**解決されるだけなので、
+#   WATCH_FILES に無い物だけを直した日は1体も載せ替わらない=「入れたのに効かない」。
+#   実際に leasequeue / tone_gate / naming_gate / persona_send / dept_names の5本が
+#   後から見つかっている=**人が気をつける方法では止まらない**(C-038)。だから機械が数える。
+_IMPORT_DIRS = [("scripts", "llm"), ("scripts", "_common"), ("scripts", "discord"),
+                ("scripts", "queue"), ("scripts", "_daemons"), ("scripts", "report")]
+
+
+def _local_imports(path, root):
+    """path が import している「このリポジトリ内の .py」を {名前: 絶対パス} で返す。
+
+    ★実行せず ast で読むだけ(副作用ゼロ)。解決できない名前(stdlib・外部)は黙って捨てる。
+    """
+    try:
+        tree = ast.parse(open(path, encoding="utf-8").read())
+    except Exception:                                  # noqa: BLE001
+        return {}
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.add(node.module.split(".")[0])
+    found = {}
+    for name in sorted(names):
+        for parts in _IMPORT_DIRS:
+            cand = os.path.join(root, *parts, name + ".py")
+            if os.path.exists(cand):
+                found[name] = os.path.normpath(cand)
+                break
+    return found
+
+
+def unwatched_imports():
+    """dept_daemon から辿れる自作モジュールのうち、WATCH_FILES に無いものを返す。
+
+    ★直接importだけでなく**推移的に**辿る(session_relay が読む物も起動時に固定されるため)。
+    """
+    root = keeper.ROOT
+    watched = {os.path.normpath(p).lower() for p in keeper.WATCH_FILES}
+    seen, stack = {}, [keeper.DAEMON]
+    while stack:
+        for name, path in _local_imports(stack.pop(), root).items():
+            if name not in seen:
+                seen[name] = path
+                stack.append(path)
+    return sorted(os.path.relpath(p, root) for n, p in seen.items()
+                  if p.lower() not in watched)
+
+
 def main():
+    check("dept_daemon が読む自作モジュールは全部 WATCH_FILES に載っている(C-042)",
+          unwatched_imports() == [])
+    if unwatched_imports():
+        print("    載っていない: " + " / ".join(unwatched_imports()))
     with tempfile.TemporaryDirectory(prefix="qa_keeper_") as d:
         db = os.path.join(d, "inbox.db")
         con = make_db(db)

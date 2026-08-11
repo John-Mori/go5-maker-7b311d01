@@ -154,13 +154,24 @@ class Slot:
 #     ゲートだけを直した日は**このリストに無いと1体も載せ替わらない**=「入れたのに効かない」。
 #     ★口調ゲートDは 2026-08-12 に「警告のみ→違反便だけ書き直す」へ格上げした=
 #       本文を触る側になった以上、載せ忘れの窓を残さない。
+#   ★2026-08-12 追加(C-042・HQ msg 1536851276933890078)= scripts/discord/persona_send.py と
+#     scripts/_common/dept_names.py。dept_daemon が import する自作モジュール8本のうち、
+#     この2本だけが監視外だった。**import は起動時に1回解決されるだけ**なので
+#     (`from persona_send import split_body` は sys.modules に載って以後固定)、
+#     この2本だけを直した日は1体も載せ替わらない=「入れたのに効かない」。
+#     - persona_send.py = 送信そのもの(本文の分割 split_body が正本・ORG-11)
+#     - dept_names.py   = 部門名の日本語化の正本(Chamiの画面に出る文字列)
+#     ★どちらも**コード**なので C-042①の (B)都度読み は採れない=(A)監視対象に入れる。
+#     ★載せ忘れの再発は `test_daemon_keeper.py` の「import と WATCH_FILES の突合」で機械が数える。
 WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "llm", "session_relay.py"),
                os.path.join(ROOT, "scripts", "llm", "session_rooms.py"),
                os.path.join(ROOT, "scripts", "llm", "tone_gate.py"),
                os.path.join(ROOT, "scripts", "llm", "naming_gate.py"),
                os.path.join(ROOT, "scripts", "queue", "leasequeue.py"),
-               os.path.join(ROOT, "scripts", "_common", "session_presence.py")]
+               os.path.join(ROOT, "scripts", "_common", "session_presence.py"),
+               os.path.join(ROOT, "scripts", "discord", "persona_send.py"),
+               os.path.join(ROOT, "scripts", "_common", "dept_names.py")]
 RELOAD_DEBOUNCE_SEC = 90   # 変更が「落ち着いた」とみなすまで。編集の途中で載せ替えない
 # ★2026-07-29 追加。実測した事故=
 #   HQと実装エージェントが**何時間も連続で改修**した結果、90秒の間引きを何度も抜けて
