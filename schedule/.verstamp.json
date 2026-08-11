@@ -1,5 +1,5 @@
 {
-  "iframe": 40,
+  "iframe": 41,
   "assets": {
     "css/style.css": {
       "v": 33,
@@ -10,16 +10,16 @@
       "sha": "eafac11f7d174e7c"
     },
     "js/generator.js": {
-      "v": 22,
-      "sha": "2aa289f0af29484c"
+      "v": 23,
+      "sha": "ea61f74a7447e6f2"
     },
     "js/store.js": {
       "v": 25,
       "sha": "7bdc87b5722b4694"
     },
     "js/app.js": {
-      "v": 38,
-      "sha": "96ab1ac41d4bbf8f"
+      "v": 39,
+      "sha": "fea5c97973814af0"
     }
   }
 }

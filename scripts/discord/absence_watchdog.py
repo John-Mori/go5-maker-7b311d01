@@ -18,6 +18,7 @@ inbox_poller.py / local_responder.py / 司令塔)。heartbeat(local/llm/claude_a
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -39,6 +40,23 @@ FOR_CLAUDE_FILE = os.path.join(LOCAL, "discord_inbox_for_claude.jsonl")
 CLAUDE_ACTIVE = os.path.join(LOCAL, "llm", "claude_active.txt")
 POLLER_ACTIVE = os.path.join(LOCAL, "llm", "poller_active.txt")  # inbox_pollerの死活脈(巡回毎に更新)
 STATE_FILE = os.path.join(LOCAL, "discord_watchdog_state.json")
+# ★部門名の日本語化(2026-07-27 Chami原文=「用語が難しい、結論が見えないかな。
+#   たとえば部門は日本語表記にして欲しいな。hqは研究室HQでsystems engineerは改修部門 みたいに」)。
+#   変換の正本は scripts/_common/dept_names.py の1本だけ(ORG-11)。
+#   ★警報が出なくなるのが最悪なので、読めなければ変換だけ諦める(fail-safe)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from dept_names import dept_ja
+except Exception:                                      # noqa: BLE001
+    def dept_ja(slug, with_slug=False):
+        return slug or ""
+try:
+    from session_presence import window_age as _window_age
+except Exception:                                      # noqa: BLE001
+    # ★fail-safe: 判定できない時は None(=判定不能)。**死んだ扱いにしない。**
+    def _window_age(dept, now=None):
+        return None
+
 BOT_SEND = os.path.join(ROOT, "scripts", "discord", "bot_send.py")
 PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
 MACHINE_PERSONA = "メタルギアMk.II"  # 機械的アナウンスの担当(Chami指定2026-07-14・report-notifyの配送役)
@@ -284,19 +302,47 @@ CI_DEPT = "system-engineer"
 CI_GATE_SEC = 15 * 60            # 15分毎(GitHub APIへ礼儀的な頻度)
 CI_REPO = "John-Mori/go5-maker-7b311d01"
 
+# --- ★通知の間引き (2026-08-11 Chami msg 1536743924939628695) ---
+#   Chami原文=「CLがおちてます通知が多すぎる。特に改修α。で、特に問題ないことしかない。無駄な通知要らない」
+#
+#   実測(2026-08-11 23:2x JST・gh run list --limit 40):
+#     Frontend deploy smoke (恒久-3) = failure 17 / success 2、pages build and deployment = success 21。
+#     落ちている理由は**全部同じ1件**= `check_schedule_ver.mjs` の verstamp 焼き直し漏れ
+#     (本物の版ずれ=中身が変わったのに ?v= 据え置き、は 0件)。
+#
+#   何が悪かったか: 旧実装は **run_id(=pushごと)** で新着を判定していた。赤が続いている間は
+#     pushのたびに新しいrun_idが生まれるので、**同じ1つの故障で何通も鳴る**。
+#     共通規律§3「常に誤発火する安全網は無視される」の典型で、実際Chamiに無視されるどころか邪魔になった。
+#
+#   直し方: 単位を run_id から **検査(ワークフロー)ごとの状態遷移** へ変える。
+#     緑→赤の**1回だけ**鳴らす。赤のまま続く間は黙る。緑に戻ったら状態を静かに戻すだけ(復旧通知も出さない
+#     =通知を増やさないのが今回の目的だから)。★導入時に既に赤いものは鳴らさない(初回は現状を黙って記録)。
+CI_JUDGED = ("success", "failure", "timed_out")   # cancelled/skipped等は判定に使わない(赤にも緑にもしない)
 
-def _gh_recent_failures(limit=5):
-    """gh CLIで直近の失敗runを取る。ghが無い/未認証なら**黙って空**(fail-open)。"""
+
+def _gh_latest_per_workflow(limit=40):
+    """gh CLIで直近runを取り、**検査(ワークフロー)ごとの最新の結論**を返す。
+
+    ghが無い/未認証なら**黙って空**(fail-open)=監視のために本体を止めない。
+    """
     try:
         p = subprocess.run(
-            ["gh", "run", "list", "--repo", CI_REPO, "--status", "failure",
-             "--limit", str(limit), "--json", "databaseId,name,displayTitle,url,createdAt"],
+            ["gh", "run", "list", "--repo", CI_REPO, "--limit", str(limit),
+             "--json", "databaseId,name,displayTitle,url,createdAt,conclusion,status"],
             capture_output=True, timeout=45, text=True, encoding="utf-8", errors="replace")
         if p.returncode != 0:
-            return []
-        return json.loads(p.stdout or "[]")
+            return {}
+        runs = json.loads(p.stdout or "[]")
     except Exception:
-        return []
+        return {}
+    latest = {}
+    for r in runs:                       # ghは新しい順。各名前で最初に出たものが最新
+        if r.get("status") != "completed" or r.get("conclusion") not in CI_JUDGED:
+            continue                     # 実行中・中止は判定しない
+        name = r.get("name") or ""
+        if name and name not in latest:
+            latest[name] = r
+    return latest
 
 
 def check_ci_health(state, dry_run):
@@ -304,26 +350,32 @@ def check_ci_health(state, dry_run):
     if now_epoch - state.get("last_ci_check", 0) < CI_GATE_SEC:
         return
     state["last_ci_check"] = now_epoch
-    seen = state.setdefault("ci_seen", [])
-    seen_set = set(seen)
-    fresh = []
-    for r in _gh_recent_failures():
-        rid = str(r.get("databaseId") or "")
-        if not rid or rid in seen_set:
-            continue
-        fresh.append(r)
-        seen_set.add(rid)
-        seen.append(rid)
-    state["ci_seen"] = seen[-100:]
+    latest = _gh_latest_per_workflow()
+    if not latest:
+        return
+    cur = {n: ("red" if r.get("conclusion") != "success" else "green")
+           for n, r in latest.items()}
+    prev = state.get("ci_status")
+    if prev is None:                     # ★移行(初回)= 今の姿を黙って覚えるだけ。既知の赤で鳴らさない
+        state["ci_status"] = cur
+        return
+    fresh = [latest[n] for n, v in cur.items() if v == "red" and prev.get(n) != "red"]
+    state["ci_status"] = cur
     if not fresh:
         return
     lines = []
     for r in fresh[:3]:
-        lines.append(f"・**{r.get('name','')}** — {str(r.get('displayTitle',''))[:70]}\n  {r.get('url','')}")
+        # ★URLは <> で囲む= Discordの自動埋め込み(GitHubのリポジトリカード)を出さない。
+        #   Chami指示 2026-08-11(msg 1536582235602296957)「この機能必要っていうのは良いとして、
+        #   埋め込みは表示しないようにして」= 1件の通知にカードが2枚積まれて画面を潰していた。
+        #   リンク自体は残る(タップで飛べる)。
+        lines.append(f"・**{r.get('name','')}** — {str(r.get('displayTitle',''))[:70]}\n  <{r.get('url','')}>")
     more = f"\n(他 {len(fresh) - 3} 件)" if len(fresh) > 3 else ""
     msg = ("🚨 **CIが落ちています**(GitHub Actions)\n" + "\n".join(lines) + more +
            "\n\n★`?v=` は必ず `node scripts/bump.mjs` で**一括**バンプすること"
            "(個別に手で上げるとスモークが即赤になる=ORG-09)。"
+           "\n★この通知は**緑→赤に変わった時の1回だけ**です(赤のまま続く間は鳴りません)。"
+           "つまり出た時は『新しく落ちた』。直したら緑に戻してください。"
            "\n原因が分からない/範囲外なら研究室HQへ上げてください。")
     bot_send(CI_DEPT, msg, dry_run, by_dept=True)
 
@@ -346,12 +398,192 @@ CHIME_COOLDOWN_SEC = 20 * 60      # 同じ部屋への再通知は20分に1回(�
 
 
 def _waiter_armed(name):
-    """その部屋のチャイムが武装中か。lockのmtimeで見る(waiterが生存中だけ更新される)。"""
+    """【★死んだセンサー・2026-07-27に用途を降格】その部屋のチャイムが武装中か。
+
+    ★実装は1文字も変えていない。**残す**理由= 鳩(inbox_waiter)が復活したら再び有効な信号
+      になるから。だが**今は必ずFalseを返す**(lockファイルは実測0件)ので、これ単独を
+      ガードに使ってはいけない。判定の正本は下の `_receiver_alive()`。
+
+    検死(Chami原文=「これ対応中なんだからいらんでしょこの通知」msg 1531001024427327542):
+      この関数が見る `local/llm/waiter_<部屋>.lock` は **inbox_waiter(鳩)** が生きている間だけ
+      更新されるファイル。鳩は **2026-07-19に退役** し、lockは1つも存在しない(実測: 0件)。
+      = ガードが常にFalse → 「便が5分残れば必ず鳴る」。実際 2026-07-27 02:49 / 03:11 に
+      「チャイム線が落ちています」「デーモン側も止まっている疑い」が鳴ったが、その時間帯
+      HQの対話セッションは 02:50/02:56/03:03/03:04 とDiscordへ返信し続けていた=**誤報**。
+
+    ★同じ形の穴がこの日だけで3つ見つかった(全部HQが実測):
+      「鳩:★停止疑い」(poller_active.txt を見ていた) /
+      「印が付かない」(inbox_waiter信号を探していた・progress_mark.py) /
+      この警報(waiter_*.lock を見ていた)。
+      **退役した機械のセンサーだけが残り、空を見て鳴っていた。**
+      → 教訓: 信号を出す主体を退役させる時は、**その信号を読んでいる側を全部数える**。
+    """
     p = os.path.join(LOCAL, "llm", f"waiter_{name}.lock")
     try:
         return (time.time() - os.path.getmtime(p)) < 120
     except OSError:
         return False
+
+
+# --- ★生きている信号で「受け手が居るか」を判定する (2026-07-27・_waiter_armedの代替) ---
+#
+# 3つのどれか1つでも真なら「受け手は生きている」= 鳴らさない。
+#   ① その部屋へ直近に返信/処理が出ている … 一番強い証拠(答えが出ているなら警報は不要)
+#   ② 対話セッションが在席している        … 在席の刻み(下の SESSION_PRESENCE_SEC 参照)
+#   ③ 留守番デーモンが生きている **かつ** 直近に処理を出している
+#
+# ★判定不能(信号が1つも取れない)なら鳴らす側へ倒す(沈黙が最悪=規律§3)。
+#   ただし**常時鳴るなら、それは死んだ警報**(ORG-42)なので、生きている信号だけを使う。
+SESSION_PRESENCE_SEC = 10 * 60    # 在席ファイルがこれ以内=対話セッションが居る
+# ★session_rooms.PRESENCE_TTL(150秒)より広く取る理由:
+#   あちらは「デーモンが箱を譲るか」の判定で、譲りすぎない=可用性のため短くて正しい。
+#   こちらは「受け手が居るか」の判定。1本のBashが5分回るターンでは刻みが数分空くので、
+#   150秒だと**働いている最中に誤報**する(これが直そうとしている事故そのもの)。
+#   窓を閉じれば10分で枯れる=自然に警報が戻るので「常時黙る」にはならない。
+ANSWER_PROOF_SEC = 15 * 60        # 返信/処理の実績がこれ以内なら受け手は生きている
+# ★15分は既存の STALE_MIN(=このwatchdogが「司令塔不在の可能性」と呼ぶ閾値)と同じ値に揃えた。
+#   新しい物差しを増やさない(ORG-11)。
+DAEMON_PROOF_SEC = 15 * 60        # ③でデーモンに要求する「実際に処理を出した」実績の鮮度
+REQUEST_LOG_WD = os.path.join(LOCAL, "llm", "request_log.jsonl")
+REQUEST_LOG_TAIL = 256 * 1024     # 末尾だけ読む(全部読むと60秒巡回が重くなる)
+# session_relay._record が書く state のうち「答えが出た」を意味するもの。
+# answered_by_session = 対話セッションが窓で答えた分(2026-07-27 mirror_to_discord.py が書く)。
+ANSWER_STATES = ("completed", "replied", "replied_unverified", "answered_by_session", "recovered")
+
+
+def _request_log_tail():
+    """request_log.jsonl の末尾だけを読んで dict のリストにする。壊れた行は捨てる(fail-open)。"""
+    try:
+        size = os.path.getsize(REQUEST_LOG_WD)
+        with open(REQUEST_LOG_WD, "rb") as f:
+            if size > REQUEST_LOG_TAIL:
+                f.seek(size - REQUEST_LOG_TAIL)
+                f.readline()                    # 途中で切れた1行目は捨てる
+            raw = f.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    out = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
+def _log_ts_age(rec, now_epoch):
+    """1行の ts からの経過秒。_record は**ローカル時刻**で書くのでローカルとして解釈する。"""
+    try:
+        t = time.mktime(time.strptime(str(rec.get("ts", ""))[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, OverflowError):
+        return None
+    return now_epoch - t
+
+
+def _last_answer_age(dept):
+    """その部屋で最後に「答えが出た」ことの経過秒。証拠が無ければ None。
+
+    2つの独立した台帳を見て新しい方を採る:
+      (a) queue の done行(acked_at)   … 便が処理済みになった実測
+      (b) request_log.jsonl の遷移行  … completed/replied/answered_by_session 等
+    """
+    ages = []
+    now_epoch = time.time()
+    if os.path.exists(QUEUE_DB_WD):
+        try:
+            import sqlite3
+            con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
+            try:
+                con.execute("PRAGMA busy_timeout=1000")
+                row = con.execute(
+                    "select max(acked_at) from queue where dept=? and status='done'",
+                    (dept,)).fetchone()
+            finally:
+                con.close()
+            if row and row[0]:
+                ages.append(now_epoch - float(row[0]))
+        except Exception:
+            pass
+    for rec in _request_log_tail():
+        if rec.get("dept") != dept or rec.get("state") not in ANSWER_STATES:
+            continue
+        a = _log_ts_age(rec, now_epoch)
+        if a is not None:
+            ages.append(a)
+    return min(ages) if ages else None
+
+
+def _daemon_work_age(dept):
+    """その部屋の**留守番デーモン**が最後に便を掴んだ/処理した経過秒。証拠が無ければ None。
+
+    ★portが開いているだけでは「生きている」と言えない(INC-107= プロセスとTCPは生存、
+      処理ループだけ停止)。実際に仕事を出していることまで要求する。
+    """
+    now_epoch = time.time()
+    tag = f"dept_daemon:{dept}"
+    ages = []
+    for rec in _request_log_tail():
+        if rec.get("dept") != dept:
+            continue
+        if not str(rec.get("evidence", "")).startswith(tag):
+            continue
+        a = _log_ts_age(rec, now_epoch)
+        if a is not None:
+            ages.append(a)
+    return min(ages) if ages else None
+
+
+def _session_present(dept):
+    """対話セッションが在席しているか(★2026-07-27に実測して正本を確かめた信号)。
+
+    ★正本は `local/llm/interactive_presence_<部屋>.txt`。
+      hook(progress_mark.py / mirror_to_discord.py)が `session_rooms.touch_presence()` で刻む。
+    ★**`claude_active_<部屋>.txt` ではない**(実測 2026-07-27 03:18):
+        interactive_presence_hq.txt …  0.1分前(HQは作業中=正しい)
+        claude_active_hq.txt        … 48.4分前
+      `claude_active_<部屋>.txt` を書くのは **留守番デーモンの touch_pulse()** で、しかも
+      `dept_daemon.run()` の `else:` 側=**在席で譲っていない時だけ**呼ばれる。
+      つまり対話セッションが働いている間は**書き手が意図的に黙る**ファイルで、
+      「セッションが生きているか」の信号としては構造的に使えない
+      (もう1人の書き手だった inbox_waiter は2026-07-19に退役済み)。
+    ★置き場の正本は session_rooms.presence_path() から引く(パスを2箇所に書かない=ORG-11)。
+      鮮度の閾値だけはこちらの都合(SESSION_PRESENCE_SEC)で持つ。
+    """
+    p = None
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        import session_rooms
+        p = session_rooms.presence_path(dept)
+    except Exception:
+        p = os.path.join(LOCAL, "llm", f"interactive_presence_{dept}.txt")
+    try:
+        return (time.time() - os.path.getmtime(p)) < SESSION_PRESENCE_SEC
+    except OSError:
+        return False
+
+
+def _receiver_alive(dept):
+    """その部屋の受け手が生きているか。(bool, 理由) を返す。理由はログに出して後から追える形。
+
+    ★偽陽性(受け手が居ないのに居ると言う)より、偽陰性(居るのに鳴る)の方が今は害が大きい。
+      理由= 誤報は**警報全体を無視させる**(狼少年)。本当の不在は他の警報
+      (check_orphan_pending=15分/未配送・check_dead_windows・DLQ監視)でも拾える。
+    """
+    ans = _last_answer_age(dept)
+    if ans is not None and ans < ANSWER_PROOF_SEC:
+        return (True, f"直近{int(ans // 60)}分前に返信/処理の実績あり")
+    if _session_present(dept):
+        return (True, "対話セッションが在席(interactive_presence)")
+    if _daemon_alive(dept):
+        work = _daemon_work_age(dept)
+        if work is not None and work < DAEMON_PROOF_SEC:
+            return (True, f"留守番デーモンが生存かつ{int(work // 60)}分前に処理あり")
+    return (False, "生きている信号なし(返信実績・在席・デーモン処理のいずれも無し)")
 
 
 def _daemon_alive(dept):
@@ -400,7 +632,32 @@ def check_chime_health(state, dry_run):
     now_epoch = time.time()
     for dept in SESSION_OWNED_DEPTS_WD:
         age = _pending_age(dept)
-        if age < CHIME_STALE_SEC or _waiter_armed(dept):
+        if age < CHIME_STALE_SEC:
+            continue
+        if _waiter_armed(dept):
+            continue                # 旧信号(鳩)。今は必ずFalse=実質無効。復活したら効く
+        # ★2026-07-27: ここが「常に鳴る」の真因だった。旧ガードは _waiter_armed だけで、
+        #   その信号は退役済み=常にFalse → 便が5分残れば必ず鳴っていた。
+        #   生きている信号で判定し直す(_receiver_alive の docstring 参照)。
+        # ★2026-07-27(2度目の是正) Chami=「これちゃんと研究室動いているならいらないアラートだよね?」
+        #   1度目の是正でも鳴った。理由= `_receiver_alive` の在席判定が**10分の時間窓**で、
+        #   セッションが長考中・サブエージェント待ちの間は hook が動かず脈が止まるため。
+        #   → **窓のプロセスが生きているか**という実体で先に見る(時間ではない)。
+        #   ★さらに今日から、この4室は**デーモンが答えない設計**になった(1部屋1所有者)。
+        #     便が数十分 pending なのは**窓が答えている最中という正常な姿**であって異常ではない。
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+            from session_presence import window_present
+            present, pwhy = window_present(dept)
+        except Exception:
+            present, pwhy = (False, "")
+        if present:
+            print(f"[chime] {dept}: 便が{int(age // 60)}分滞留しているが窓が在る — {pwhy}")
+            continue
+        alive, why = _receiver_alive(dept)
+        if alive:
+            # 警報は出さないが、判断の跡はログに残す(黙って握り潰すと次の調査で困る)。
+            print(f"[chime] {dept}: 便が{int(age // 60)}分滞留しているが受け手は生存 — {why}")
             continue
         if now_epoch - st.get(dept, 0) < CHIME_COOLDOWN_SEC:
             continue
@@ -414,19 +671,94 @@ def check_chime_health(state, dry_run):
         #   「セッションを開かないと拾えません」と出すのは**事実と違う**。
         #   デーモンが居るのに便が5分溜まっているなら、それは**デーモンも止まっている**という
         #   より重い異常で、案内すべき対処が正反対になる。
+        # ★部屋名は日本語+スラッグ(2026-07-27)。転送されても意味が保たれる形はORG-28で確定済み。
+        #   スラッグを残すのは、この警報の対処(status.ps1・DEPT_CONF)で実際に要るため。
+        room = dept_ja(dept, with_slug=True)
         if _daemon_alive(dept):
-            tail = (f"★`{dept}` には留守番デーモンが居ます。**それでも便が滞留している**＝"
-                    "デーモン側も止まっている疑いがあります(通常は数秒で拾います)。\n"
-                    "→ 艦隊の状態を確認してください: `scripts\\_daemons\\status.ps1`")
+            # ★2026-07-27 文面を事実に合わせた。この4室は**デーモンが答えない設計**へ変わったので
+            #   「デーモンも止まっている疑い」は**嘘になる**(黙っているのが正常な姿)。
+            #   ここに来た時点で分かっているのは「窓が無い」「relayも答えていない」の2つだけだ。
+            tail = (f"★{room} は**あなたの窓が答える部屋**です(留守番デーモンは答えません)。\n"
+                    "窓が見つからず、代わりのセッションも答えていません。\n"
+                    "→ その部屋のClaude Codeセッションを開くか、艦隊を確認: "
+                    "`scripts\\_daemons\\status.ps1`")
         else:
-            tail = (f"★`{dept}` は対話セッション本人が担当する部屋で、留守番デーモンが居ません。\n"
+            tail = (f"★{room} は対話セッション本人が担当する部屋で、留守番デーモンが居ません。\n"
                     "**その部屋のClaude Codeセッションを開かないと拾えません**。")
         bot_send(dept, (
-            f"⚠ **`{dept}` のチャイム線が落ちています**(約{int(age // 60)}分前の依頼が未受信)。\n"
+            f"⚠ **{room} のチャイム線が落ちています**(約{int(age // 60)}分前の依頼が未受信)。\n"
             "依頼は消えていません。queueに保持されていて、担当が起きれば必ず読まれます。\n"
             f"{tail}\n"
             "(この文を別の部屋へ転送する場合は、上の部屋名がどこを指すかご注意ください)"),
             dry_run, by_dept=True)
+
+
+# --- ★取りこぼし便の定期回収 (2026-07-25 gatewayにcatch-upが無い穴・HQ発注2026-07-26) ---
+#
+# 何が起きたか: scripts/queue/discord_gateway.py は **Discord Gateway(WebSocket)の push受信**
+#   しか持たず、catch-up / last_seen / backfill に相当する仕組みが1つも無い。
+#   gatewayが受信していない間にChamiが書いた便は、gatewayが復帰しても永久に取り込まれない。
+#   queueに行が生まれないので未配送監視(check_orphan_pending)にもDLQにも引っかからない
+#   =完全な沈黙になる。2026-07-25に実際に2件が失われていたのを検出し手で回収した。
+#
+# ★なぜ「gateway起動時に1回」ではなく「定期実行」なのか(この設計の理由):
+#   gatewayが**再起動する**ケースだけなら起動時catch-upで足りる。しかし
+#   **プロセスは生きているのに受信だけが止まる**ケースがある(INC-107: プロセスとTCPは
+#   生存していたが処理ループ停止)。ゾンビは再起動しないので起動時catch-upは永久に走らない。
+#   定期実行なら「再起動した」も「生きたまま黙った」も**両方**拾える。
+#
+# ★回収ロジックをここへ写さない(ORG-11: 同じ判定を2箇所に持たない)。
+#   取りこぼしの判定の正本は relay_health.collect_missing()、回収の正本は relay_repair.py。
+#   watchdogは「定期的に叩く起動係」に徹する。窓72時間・最大20件も relay_repair の既定のまま。
+RELAY_REPAIR_PY = os.path.normpath(
+    os.path.join(ROOT, "..", "00_AI-HQ", "scripts", "relay_repair.py"))
+RELAY_REPAIR_GATE_SEC = 15 * 60    # 15分に1回だけ(毎巡回=60秒毎に叩くとDiscord APIの無駄打ち)
+RELAY_REPAIR_TIMEOUT_SEC = 180     # ★止まったサブプロセスでwatchdogの巡回を詰まらせない
+
+
+def _relay_repair_recovered(out):
+    """relay_repair の出力から「実際にqueueへ入れ直した件数」を読む。
+
+    正本は最終行の `結果: 回収 N件 / ...`。この行が無い(=取りこぼし0件で早期return等)
+    ときは0件。★自前で行を数え直さない: relay_repair 自身が出した結論の数字だけを信じる。
+    """
+    m = re.search(r"結果: 回収 (\d+)件", out or "")
+    return int(m.group(1)) if m else 0
+
+
+def check_relay_repair(state, dry_run, now_epoch=None):
+    """gatewayの取りこぼしを15分に1回 subprocess で回収する(理由は上のブロックコメント)。
+
+    ★0件なら何も出さない。1件以上のときだけwatchdogログへ1行。
+      **Discordへは通知しない**(ORG-03/42: 鳴らし過ぎない)。回収された便そのものが
+      該当部屋へ流れて処理されるので、そこで自然にChamiの目に入る。通知を重ねると
+      同じ事を2回鳴らすことになる。
+    ★どんな失敗でもwatchdogを止めない(例外は握り潰してログ1行)。watchdogが死ぬのが最悪。
+    """
+    now_epoch = time.time() if now_epoch is None else now_epoch
+    if now_epoch - state.get("last_relay_repair", 0) < RELAY_REPAIR_GATE_SEC:
+        return
+    # ★先に時刻を進める。失敗しても60秒毎に叩き直さない(外部APIを殴り続けない)。
+    state["last_relay_repair"] = now_epoch
+    if dry_run:
+        print(f"[dry-run] relay_repair --repair は実行しない({RELAY_REPAIR_PY})")
+        return
+    try:
+        r = subprocess.run(
+            [sys.executable, RELAY_REPAIR_PY, "--repair"],
+            capture_output=True, timeout=RELAY_REPAIR_TIMEOUT_SEC,
+            text=True, encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            tail = (r.stderr or r.stdout or "").strip().splitlines()
+            print(f"取りこぼし回収に失敗(rc={r.returncode}): "
+                  f"{tail[-1] if tail else '(出力なし)'}")
+            return
+        n = _relay_repair_recovered(r.stdout)
+        if n > 0:
+            print(f"★取りこぼし{n}件を回収した(gateway停止中の便)")
+    except Exception as e:
+        # タイムアウト(TimeoutExpired)・実行不能・その他すべてここで止める。
+        print(f"取りこぼし回収の起動に失敗: {type(e).__name__}")
 
 
 # --- ★O1 DLQ監視 (改善書P0-5: 5回配送失敗→dead に隔離された毒メッセージを誰も見ていない) ---
@@ -498,7 +830,10 @@ def check_orphan_pending(state, dry_run):
     now_epoch = time.time()
     if now_epoch - state.get("last_orphan_alert", 0) < ORPHAN_ALERT_COOLDOWN_SEC:
         return
-    detail = "、".join(f"{d}={n}件/最古{m}分" for d, (n, m) in orphans.items())
+    # ★日本語名(スラッグ)の形。ここは直す手順に**スラッグそのものが要る**(DEPT_CONFを引く)ため
+    #   両方出す。Chamiが読むだけの行は日本語だけにしてある(2026-07-27)。
+    detail = "、".join(f"{dept_ja(d, with_slug=True)}={n}件/最古{m}分"
+                       for d, (n, m) in orphans.items())
     msg = (f"🕳 **未配送のまま滞留**: {detail}。"
            "一度も配送されていない(deliveries=0)=宛先部門に**消費者プロセスが存在しない**疑いです。"
            "確認: dept_daemon.py の DEPT_CONF に該当deptが登録されているか / "
@@ -519,7 +854,7 @@ def check_dead_letters(state, dry_run):
     now_epoch = time.time()
     if now_epoch - state.get("last_dead_alert", 0) < DEAD_ALERT_COOLDOWN_SEC:
         return
-    detail = "、".join(f"{d}={n}" for d, n in by.items()) or "(内訳不明)"
+    detail = "、".join(f"{dept_ja(d, with_slug=True)}={n}" for d, n in by.items()) or "(内訳不明)"
     msg = (f"⚠デッドレター{total}件(前回{last}件から増加): {detail}。"
            "5回配送しても処理できずキューに隔離されたメッセージです。"
            "毒メッセージ(壊れた本文/対応不能な依頼)か、宛先部門の長期不在が原因。"
@@ -546,16 +881,21 @@ def check_dead_windows(state, dry_run):
         dept = os.path.basename(p)[len("claude_active_"):-len(".txt")]
         if not dept or dept in WINDOW_SKIP_DEPTS:
             continue
-        try:
-            age = now_epoch - os.path.getmtime(p)
-        except OSError:
+        # ★2026-07-27 脈の取り方を差し替えた。旧実装は claude_active_<部屋>.txt の mtime だけを見ており、
+        #   **対話セッションが在席している間はこのファイルが更新されない**ため
+        #   「働いている窓」を「死んだ窓」と判定していた(研究室HQが46分前と出た実測)。
+        #   → 2つの脈(デーモン側 claude_active / セッション側 interactive_presence)の
+        #     **新しい方**を採る。正本= scripts/_common/session_presence.py(判定は1本だけ=ORG-11)。
+        age = _window_age(dept, now=now_epoch)
+        if age is None:
             continue
         if WINDOW_STALE_SEC <= age < WINDOW_RECENT_SEC:
             if now_epoch - alerts.get(dept, 0) >= WINDOW_ALERT_COOLDOWN_SEC:
                 dead.append((dept, int(age // 60)))
     if not dead:
         return
-    parts = "・".join(f"{d}(脈{m}分前)" for d, m in dead)
+    # ★Chamiが読んで動くだけの行なので日本語名だけ(スラッグは足さない=情報を増やさない)
+    parts = "・".join(f"{dept_ja(d)}(脈{m}分前)" for d, m in dead)
     msg = (
         f"⚠部門窓の停止を検知(自動監視): {parts}。"
         "この部屋宛ての新着はmain箱へ迂回し、研究室の直列キュー(遅い)になります。"
@@ -613,7 +953,9 @@ def check_busy_notices(state, dry_run):
             n_items = sum(1 for l in open(p, encoding="utf-8", errors="replace") if l.strip())
         except OSError:
             n_items = 0
-        label = "研究室" if dept == "main" else f"{dept}部門"
+        # ★日本語名は既に「〜部門/〜の部屋」まで含む(正本=display_ja)ので「部門」を足さない。
+        #   旧実装は f"{dept}部門" で「system-engineer部門」と出ていた(2026-07-27 Chami指摘)。
+        label = "研究室" if dept == "main" else dept_ja(dept)
         msg = (
             f"⏳{label}は前の案件を対応中だよ(処理中{n_items}件・着手から{int(work_age // 60)}分・生存確認済み)。"
             "順番に片付けているから、少し時間をもらえると助かる。完了したら本人から報告が行くよ。"
@@ -646,6 +988,7 @@ def run_once(dry_run=False):
     check_link_health(state, dry_run)    # ★2026-07-20: 収益導線(自前ドメイン/r2)の死活監視
     check_ci_health(state, dry_run)      # ★2026-07-21: CI失敗をDiscordへ(ORG-09=メールは読まれない)
     check_chime_health(state, dry_run)   # ★2026-07-21: チャイム線が落ちた部屋を可視化(ORG-14)
+    check_relay_repair(state, dry_run)   # ★2026-07-26: gatewayの取りこぼしを15分毎に回収(catch-up欠落)
     save_state(state)
     rows = read_inbox_rows()
     if rows is None:
