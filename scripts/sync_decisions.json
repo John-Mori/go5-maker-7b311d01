@@ -36,6 +36,7 @@
     "competitor_channels": { "decision": "sync", "why": "競合監視の登録リスト=PCで登録しスマホでも見える" },
     "sch_state_v1": { "decision": "sync", "why": "カレンダー予定・実行状態=枠単位で安全に統合して共有" },
     "posted_sheet_v1": { "decision": "local", "why": "投稿済みシートの取り込みキャッシュ=正本はスプレッドシート" },
+    "drive_up_": { "decision": "local", "why": "drive_up_<videoId>=この端末でDriveへ即保存した時の videoId→フォルダID の控え。投稿完了側(stock.js)が同じフォルダへ仕上がりプレビューを追記するために引く端末別キャッシュ。別端末へ同期すると未アップロードの端末が『保存済み』と誤判定し即保存が飛ぶので同期しない(v=725 Drive即保存で追加・2026-08-12)" },
     "bsky_did__<acc>": { "decision": "local", "why": "BlueskyのDIDキャッシュ=ハンドルから引ける・端末別" },
     "bsky_handle__<acc>": { "decision": "sync", "why": "Blueskyハンドル(非秘密)=設定・アカウント別" },
     "bsky_text__<acc>": { "decision": "sync", "why": "投稿本文とQセーブ/undo/redo=アカウント別の設定" },

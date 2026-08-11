@@ -22,6 +22,7 @@
  *     (2026-08-11 別ページ化。ここに足し忘れると分割ページだけ古いJSがキャッシュされ静かに事故る)。
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -101,4 +102,24 @@ for (const f of files) {
 for (const w of writes) writeFileSync(w.path, w.out);
 const total = writes.reduce((s, w) => s + w.count, 0);
 console.log(`v=${cur} → v=${next} (${total} 箇所 / ${writes.length} ファイルを更新)`);
+
+// ★恒久(C-038 2026-08-12): 本体版を上げたら schedule/(カレンダーiframe)の verstamp も同じ入口で焼き直す。
+//   これまで schedule/ の版上げ後に `check_schedule_ver.mjs --stamp` を手で打ち忘れ、CIの
+//   「schedule版ずれ門」が緑→赤になる焼き直し漏れが再発していた(HQ実測2026-08-11・run 31505669288系)。
+//   bump を1コマンドの入口にして「版を上げたら自動で焼く」を機構化する。
+//   ・schedule資産が無変更 → 同一内容を焼き直すだけ(差分ゼロ・無害)。
+//   ・schedule資産を変えたのに ?v= 据え置き → --stamp が exit 1 で止める=CIの20分後ではなく
+//     bump の瞬間に気付ける(=先に schedule/index.html の版を上げてくれ、というCIと同じ指示)。
+const stampScript = join(dirname(fileURLToPath(import.meta.url)), "check_schedule_ver.mjs");
+if (existsSync(stampScript)) {
+  const r = spawnSync(process.execPath, [stampScript, "--stamp"], { encoding: "utf8" });
+  if (r.stdout) process.stdout.write(r.stdout);
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.status !== 0) {
+    console.error("⚠ schedule/ の verstamp 焼き直しに失敗(schedule資産を変えたのに ?v= が据え置きの可能性)。");
+    console.error("  本体の ?v= は上げ済み。上の指示どおり schedule/index.html の版を上げてから再実行すること。");
+    process.exit(7);
+  }
+  console.log("↳ schedule/.verstamp.json も焼き直した(差分があれば同じコミットに含めること)");
+}
 console.log("V=" + next);
