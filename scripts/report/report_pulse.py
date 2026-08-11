@@ -210,6 +210,13 @@ def _post(dept, persona, text, tag):
         return False
 
 
+# ★部屋別の押し出し(②)は既定OFF(2026-08-11 Chami指示 msg_id=1536639654760284220
+#   「これ各部門のチャットで進捗表示されるけど別にいらないんだけど。」)。
+#   ①報告通知部門への全体ダイジェストは従来どおり出す(監査証跡・マーカー前進の条件)。
+#   復活させたい時は --push-rooms を付けて起動する(コードは消していない)。
+ROOM_PUSH = "--push-rooms" in sys.argv
+
+
 def main():
     send = "--send" in sys.argv
     text, advance_ts, state, groups = build(send=send)
@@ -219,11 +226,15 @@ def main():
     print("----")
     print(text)
     now = datetime.now(JST)
-    for slug, items in groups.items():       # ★検証用に印字は --send 無しでも出す
-        head = (f"■進捗 {now.month}/{now.day:02d}({WEEK[now.weekday()]}) {now:%H:%M}"
-                f" — {dept_ja(slug)}宛 {len(items)}件")
-        print(f"---- → {slug}")
-        print(_digest(items, head))
+    if ROOM_PUSH:
+        for slug, items in groups.items():   # ★検証用に印字は --send 無しでも出す
+            head = (f"■進捗 {now.month}/{now.day:02d}({WEEK[now.weekday()]}) {now:%H:%M}"
+                    f" — {dept_ja(slug)}宛 {len(items)}件")
+            print(f"---- → {slug}")
+            print(_digest(items, head))
+    elif groups:
+        print(f"[report_pulse] 部屋別の押し出しは停止中(--push-rooms で復活): "
+              + " / ".join(f"{dept_ja(k)}{len(v)}件" for k, v in groups.items()))
     if not send:
         return 0
     # ① 全体ダイジェスト(report-notify)= 監査証跡。★マーカー前進の条件はこちらだけ。
@@ -232,6 +243,8 @@ def main():
         _save_marker(advance_ts)
         print(f"マーカー前進: {advance_ts.isoformat()}")
     # ② 依頼元部屋への押し出し。失敗してもマーカーには触らない=致命にしない。
+    if not ROOM_PUSH:                        # ★既定OFF(Chami 2026-08-11・上のROOM_PUSH参照)
+        return 0 if ok else 1
     sent = _load_sent()
     changed = False
     for slug, items in groups.items():
