@@ -2247,7 +2247,14 @@
     //   return false していたため、stock側の診断が理由を測れず固定文言「(URL・IDが)全て空」を誤報していた
     //   (Chami報告2026-08-11・スクショはURL埋まりなのに"全て空"表示)。matchedBy と既存行を返す。
     var matched = null, matchedBy = '', matchedStore = '';
-    var pools = [{ arr: manual, base: 'verify_manual' }, { arr: hist, base: 'short_hist' }];
+    // ★重複判定の母集団は「投稿履歴の一覧に実際に出る行」だけにする(2026-08-12・Chami報告2026-08-11②)。
+    //   short_hist の manualOnly=true は"手動短縮URL履歴"で、一覧表示(allItems/displayItems_ は !manualOnly で除外)
+    //   には出ない台帳行。これを重複と見なすと、当たった瞬間 return dupe で新規行を作らず、しかし当たった行は
+    //   一覧に出ない=「作成履歴には在るのに投稿履歴に永久に出ない」不可視dupeになる(実は女の子も焦ってる=
+    //   復元→投稿完了しても載らない の真因)。不可視な短縮URL台帳行は本物の投稿記録を塞いではいけない。
+    //   filter は参照を保つので、当たった行への非破壊バックフィル(下)＋保存(full hist)はそのまま効く。
+    var histVisible = hist.filter(function (it) { return it && !it.manualOnly; });
+    var pools = [{ arr: manual, base: 'verify_manual' }, { arr: histVisible, base: 'short_hist' }];
     for (var pi = 0; pi < pools.length && !matched; pi++) {
       var arr = pools[pi].arr;
       for (var ii = 0; ii < arr.length && !matched; ii++) {

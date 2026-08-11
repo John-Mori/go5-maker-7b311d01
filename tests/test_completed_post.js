@@ -42,6 +42,14 @@ function isDupe(existingList, incoming) {
   });
 }
 
+// --- 重複判定の母集団のミラー(yt-clicks.js: manualOnly=手動短縮URL履歴は重複母集団から除外) ---
+//   manualOnly の行は投稿履歴の一覧に出ない(allItems/displayItems_ が !manualOnly で除外)。それを重複と
+//   見なすと「作成履歴に在るのに投稿履歴に永久に出ない」不可視dupeになる(Chami報告2026-08-11②
+//   実は女の子も焦ってる)。一覧に出る行だけを重複判定の母集団にする。
+function visibleForDupe(existingList) {
+  return (existingList || []).filter(function (it) { return it && !it.manualOnly; });
+}
+
 // --- dupe時の非破壊バックフィルのミラー(yt-clicks.js: matched行の"空欄だけ"を今回値で埋める) ---
 //   videoId無し既存行(手動追加/リビルド前)にYouTube/短縮URL一致で当たったら、空の videoId/ytUrl/shortUrl を
 //   今回値で埋める=次回から videoId で照合が揃い「行は在るのに載らなかった」誤報が構造的に消える。
@@ -92,6 +100,15 @@ test('D-3: 同形式の同一YouTube IDは重複', function () {
 test('D-4: 別の背骨ID/別URLなら重複ではない=ちゃんと新規で載る', function () {
   const list = [{ videoId: 'acc1-A', shortUrl: 'https://5mgl.com/a' }];
   assert.strictEqual(isDupe(list, { videoId: 'acc1-B', shortUrl: 'https://5mgl.com/b' }), false);
+});
+test('D-5: manualOnly(手動短縮URL履歴)は重複母集団に入れない=不可視dupeで投稿履歴に永久に出ない事故の根治(実は女の子も焦ってる)', function () {
+  const list = [{ videoId: 'acc1-X', manualOnly: true }, { shortUrl: 'https://5mgl.com/w', manualOnly: true }];
+  // manualOnly を除くと母集団が空=重複ではない=新規で投稿履歴へ載る
+  assert.strictEqual(isDupe(visibleForDupe(list), { videoId: 'acc1-X', shortUrl: 'https://5mgl.com/w' }), false);
+});
+test('D-6: 一覧に出る行(非manualOnly)なら従来どおり重複を弾く=二重登録はしない', function () {
+  const list = [{ videoId: 'acc1-X' }, { shortUrl: 'https://5mgl.com/w', manualOnly: true }];
+  assert.strictEqual(isDupe(visibleForDupe(list), { videoId: 'acc1-X' }), true);
 });
 
 // ── dupe時の非破壊バックフィル ────────────────────────────

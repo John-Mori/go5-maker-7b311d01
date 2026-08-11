@@ -436,10 +436,15 @@
       if (blob) return blob;
       // ★手元に実体が無い=キーを ID から算出して R2 から直接取り寄せ(vidHash不要=KV非依存)。
       if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
-        return Go5Sync.fetchBlobR2At('go5vid:' + id).then(function (b) {
+        var fetchP = Go5Sync.fetchBlobR2At('go5vid:' + id).then(function (b) {
           if (b) { try { store.set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即使える
           return b;
-        });
+        }).catch(function () { return null; });
+        // ★R2取り寄せが無応答だと、これを await する Drive保存/DL が永久に返らず「☁️ 保存中…」が固まる
+        //   (Chami報告2026-08-11①「いつまで経っても保存中」)。45秒で null に倒す=fail-open。取れなければ
+        //   「見つかりません」で終える方が、黙って固まるより良い(§3 可用性は喋る側へ倒す)。
+        var toP = new Promise(function (res) { setTimeout(function () { res(null); }, 45000); });
+        return Promise.race([fetchP, toP]);
       }
       return null;
     });
@@ -1483,11 +1488,18 @@
           if (meta && !btn.disabled) {
             var _orig = btn.textContent;
             btn.textContent = '☁️ 保存中…'; btn.disabled = true;
-            driveSaveForCompleted_(meta, { silent: false, onDone: function (ok) {
+            // ★終着点で必ずボタンを戻す=二重発火(onDoneとwatchdogの両方)しても1回だけ効かせる。
+            var _settled = false;
+            var _finish = function (ok, errText) {
+              if (_settled) return; _settled = true;
               btn.disabled = false;
-              btn.textContent = ok ? '✅ 保存済み' : _orig;
+              btn.textContent = ok ? '✅ 保存済み' : (errText || _orig);
               if (ok) setTimeout(function () { if (btn.textContent === '✅ 保存済み') btn.textContent = _orig; }, 4000);
-            } });
+            };
+            // ★「保存中…」のまま返らない事故を機構で塞ぐ=90秒で必ず戻す(Chami報告2026-08-11①・押せない/固まるの根治)。
+            //   driveSaveForCompleted_ 内の各分岐は done() を呼ぶが、万一どれかが無応答でも UI は自力で回復する(fail-open)。
+            var _wd = setTimeout(function () { _finish(false, '⏱ 中断(再度お試しください)'); }, 90000);
+            driveSaveForCompleted_(meta, { silent: false, onDone: function (ok) { clearTimeout(_wd); _finish(ok); } });
           }
 
         } else if (btn.classList.contains('stk-mode')) {
