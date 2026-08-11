@@ -666,7 +666,7 @@
   // ── 今日/昨日/直近1週間の再生・クリック増加(GASが毎時サーバー側で記録した差分)──
   // localStorageに前回値を保持し、開いた瞬間に即表示→GAS取得で最新化。
   var deltaCache = (function () { try { return JSON.parse(localStorage.getItem('delta_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {tv,yv,wv,tc,yc,wc}
-  var peakCache = (function () { try { return JSON.parse(localStorage.getItem('peak_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {vRate,vWin,cRate,cWin}
+  var peakCache = (function () { try { return JSON.parse(localStorage.getItem('peak_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {vRate,vWin,cRate,cWin,wRate,wWin} ★wRate/wWin=導線2ピンクのピーク(2026-08-11)
   var tpCache = (function () { try { return JSON.parse(localStorage.getItem('tp_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,c,age},..} GASサーバー時点記録(公開起点・端末未起動でも記録)
   // ★負のデルタは無意味(期間内にクリック/再生が減ることは無い)。GASが短縮コード切替やaf_id変更で
   //   カウンタがリセットされた区間を跨ぐと (now − weekAgo) が負になり「週:-16」のような表示になる
@@ -4329,7 +4329,6 @@
       var isBucket = _rankWin.charAt(0) === 'b';
       var isPeak = _rankWin === 'peak';
       var bucketDef = isBucket ? SNAP_BUCKETS.filter(function (b) { return b.key === _rankWin; })[0] : null;
-      var c2PeakUnsupported = isPeak && _rankMetric === 'c2'; // 導線2(ピンク矢印)のピークはGAS未対応=データ無し
       var pk0 = peakCache || {};
       var rows = uniq.map(function (x) {
         var it = x.it;
@@ -4353,6 +4352,7 @@
           snapV: bkr ? bkr.v : null, snapC: bkr ? bkr.c : null, snapW: bkr ? bkr.w : null, snapAge: bkr ? bkr.age : null,
           peakV: pk.vRate != null ? pk.vRate : null, peakVWin: pk.vWin || '',
           peakC: pk.cRate != null ? pk.cRate : null, peakCWin: pk.cWin || '',
+          peakW: pk.wRate != null ? pk.wRate : null, peakWWin: pk.wWin || '', // 導線2(ピンク矢印)ピーク・2026-08-11
           ts: it.ts || (publishedCache[x.vid] || 0),
           bskyHref: it.shareUrl || it.shortUrl || it.postUrl || '',
           bskyIsX: isXLink_(it.shareUrl || it.shortUrl || it.postUrl || '', it),
@@ -4362,7 +4362,7 @@
       // 指標(v/c1/c2)×窓(total/peak/bXX)でソート対象の値を決める。
       function metricVal(r) {
         if (_rankWin === 'total') return _rankMetric === 'v' ? r.views : (_rankMetric === 'c1' ? r.clicks : r.wclicks);
-        if (isPeak) return _rankMetric === 'v' ? r.peakV : (_rankMetric === 'c1' ? r.peakC : null); // 導線2ピークは未対応
+        if (isPeak) return _rankMetric === 'v' ? r.peakV : (_rankMetric === 'c1' ? r.peakC : r.peakW); // 導線2(ピンク)ピークも対応・2026-08-11
         // バケット窓: 公開からの経過時点で固定した各指標
         return _rankMetric === 'v' ? r.snapV : (_rankMetric === 'c1' ? r.snapC : r.snapW);
       }
@@ -4387,9 +4387,7 @@
         return '<button class="rank-tab rank-win-tab' + (w.key === _rankWin ? ' active' : '') + '" data-win="' + w.key + '" type="button">' + w.label + '</button>';
       }).join('') + '</div>';
       var tabsHtml = metricRow + winRow;
-      var noteHtml = c2PeakUnsupported
-        ? '<div class="rank-note">ピンク矢印(導線2)のピークはまだ集計していません(GAS側の対応待ち)。総合や各時間(30分〜72時間)の窓は表示できます。</div>'
-        : (isBucket
+      var noteHtml = (isBucket
           ? '<div class="rank-note">' + metricName + 'の「公開から約' + bucketDef.label + '」ランキング。YouTube公開時刻を起点に自動記録(この機能導入後の投稿が対象・未記録は非表示)。「(◯後)」は実記録時刻。<b>·参考</b>付き=目標時刻を大きく外れた旧記録の参考値(そのまま残しています)。</div>'
           : (isPeak
             ? '<div class="rank-note">' + metricName + 'の最大瞬間風速ランキング(1時間あたりの伸びが最大の区間。GAS自動記録・未記録は非表示)。</div>'
@@ -4426,8 +4424,8 @@
           // 目標時刻を大きく外れた記録(旧・緩い許容窓)は"参考値"(Chami裁定2・2026-08-02)。行にも「参考」を明示。
           var snapRef = isBucket && bucketDef && snapIsRef_(bucketDef.min, r.snapAge);
           var mBucket = (isBucket && snapVal != null) ? '<span class="rank-main' + (snapRef ? ' rank-ref' : '') + '" title="公開から約' + bucketDef.label + 'の' + metricName + (snapRef ? '（参考値:記録時刻が目標から外れた旧記録です）' : '') + '">⏱ ' + METRIC_IC + ' ' + num(snapVal) + '<span class="rank-sub">(' + fmtAge_(r.snapAge) + (snapRef ? ' ·参考' : '') + ')</span></span>' : '';
-          var peakVal = _rankMetric === 'v' ? r.peakV : (_rankMetric === 'c1' ? r.peakC : null);
-          var peakWin = _rankMetric === 'v' ? r.peakVWin : r.peakCWin;
+          var peakVal = _rankMetric === 'v' ? r.peakV : (_rankMetric === 'c1' ? r.peakC : r.peakW);
+          var peakWin = _rankMetric === 'v' ? r.peakVWin : (_rankMetric === 'c1' ? r.peakCWin : r.peakWWin);
           var mPeak = (isPeak && peakVal != null) ? '<span class="rank-main" title="最大瞬間風速">🌀 ' + METRIC_IC + ' ' + num(peakVal) + '/時<span class="rank-sub">(' + esc(peakWin || '') + ')</span></span>' : '';
           return '<div class="rank-row' + topCls + '">' +
             '<span class="rank-num">' + rank + '</span>' +
