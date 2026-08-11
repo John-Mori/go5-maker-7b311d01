@@ -43,7 +43,7 @@
   // カレンダーは重い(holidays等)ため、初回表示時にだけ iframe を読み込む。(遅延ロード)
   function lazyLoadCalendar() {
     var f = document.getElementById('calFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=40');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?v=41');
   }
   function showTab(activeBtnId) {
     var outgoing = currentTab; // 直前に前面だったタブ(離れる=DOMを空にしてメモリ解放する対象の判定)

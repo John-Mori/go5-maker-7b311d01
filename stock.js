@@ -780,7 +780,7 @@
       $('draftPickerClose').addEventListener('click', closeSlotPicker_);
     }
     var f = $('draftPickerFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=36');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=37');
     // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
     pk.style.display = 'flex';
     requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });

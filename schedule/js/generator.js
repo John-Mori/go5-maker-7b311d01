@@ -10,8 +10,11 @@ window.SCH = window.SCH || {};
   // アカウント別オフセットのヘルパ
   function curAccount_() { try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; } }
   // baseTime(テンプレ生時刻)ごとに個別オフセットがあればそれを、無ければ既定(accountOffsetMin)を返す。
-  function accOffsetMin_(config, baseTime) {
-    var acc = curAccount_();
+  // ★acc を明示指定する(呼び出し元が生成対象のchを渡す)。未指定時のみ現在タブのchで代替=旧挙動。
+  //   ここを curAccount_() 固定にしていたのが「宵桜の18:30が18:00で保存される」バグの真因
+  //   (両ch生成なのに常に現在タブのオフセットを両方へ当てていた・2026-08-11)。
+  function accOffsetMin_(config, baseTime, acc) {
+    if (acc !== 'acc1' && acc !== 'acc2') acc = curAccount_();
     var byTime = (config && config.accountOffsetByTime) || {};
     var ov = byTime[acc];
     if (ov && typeof ov[baseTime] === 'number') return ov[baseTime];
@@ -48,8 +51,8 @@ window.SCH = window.SCH || {};
   }
 
   // テンプレ枠から「自動更新してよいフィールド」を作る
-  function templateFields(date, tslot, dayType, config) {
-    var off = accOffsetMin_(config, tslot.time);
+  function templateFields(date, tslot, dayType, config, acc) {
+    var off = accOffsetMin_(config, tslot.time, acc);
     var t = shiftTime_(tslot.time, off);
     return {
       scheduled_at: computeScheduledAt(date, t),
@@ -74,9 +77,9 @@ window.SCH = window.SCH || {};
   // 1枠を生成 or マージ（§7.5 データ保全）
   //  - 既存が無い／空き枠（autoUpdatableStatuses）：新テンプレを反映
   //  - 予約登録済/公開済：時刻・role を変えず、テンプレと差異があれば needs_review=true
-  function mergeSlot(date, tslot, dayType, existing, config) {
+  function mergeSlot(date, tslot, dayType, existing, config, acc) {
     const id = slotId(date, tslot.slot_index);
-    const tpl = templateFields(date, tslot, dayType, config);
+    const tpl = templateFields(date, tslot, dayType, config, acc);
 
     if (!existing) {
       return applyAutoPublish({ id, date, slot_index: tslot.slot_index, ...tpl, ...emptyUserFields(),
@@ -117,7 +120,7 @@ window.SCH = window.SCH || {};
   // 指定範囲を生成/再計算（冪等）。classify が D-1/D/D+1 を見るため、
   // 範囲を丸ごと再生成すれば近傍連動カスケードが自動的に満たされる（§7.5）。
   // 返り値：{ slots: {id->slot}, dayMetas: [...], review: [要確認slot...] }
-  function generateRange(startDate, endDate, master, config, overrides, existingById) {
+  function generateRange(startDate, endDate, master, config, overrides, existingById, acc) {
     existingById = existingById || {};
     const slots = {};
     const dayMetas = [];
@@ -132,7 +135,7 @@ window.SCH = window.SCH || {};
       if (template) {
         for (const tslot of template.slots) {
           const id = slotId(d, tslot.slot_index);
-          const merged = mergeSlot(d, tslot, meta.dayType, existingById[id], config);
+          const merged = mergeSlot(d, tslot, meta.dayType, existingById[id], config, acc);
           slots[id] = merged;
           if (merged.needs_review) review.push(merged);
         }

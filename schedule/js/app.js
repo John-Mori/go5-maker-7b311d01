@@ -123,8 +123,10 @@ window.SCH = window.SCH || {};
     const acc = curAcc();                 // ヘッダ・タブ用。カレンダー本体は両ch同時＝アカウント非連動(指示書v0.1 §1)
     const { genStart, genEnd } = genWindow();
     // 両チャンネルを1画面へ統合。左=月詠み(acc1)固定・右=宵桜(acc2)固定。優先度・尺は両者同一、時刻のみ20分ずれ。
-    const r1 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc1"));
-    const r2 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc2"));
+    // ★各chのオフセットは「そのch」で計算する。generateRange に acc を明示で渡す
+    //   (渡さないと generator が現在タブのchを両方へ当て、宵桜18:30が18:00で保存される・2026-08-11)。
+    const r1 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc1"), "acc1");
+    const r2 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc2"), "acc2");
     const result = acc === "acc2" ? r2 : r1;   // 保存は現行タブの結果のみ(既存の永続化挙動を保つ)
     lastRender = { slots: result.slots, dayMetas: r1.dayMetas, review: result.review, slots1: r1.slots, slots2: r2.slots };
     await store.saveSlots(result.slots, acc);  // 自動公開は判定したチャンネルだけを更新
