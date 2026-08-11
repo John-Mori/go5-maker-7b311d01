@@ -222,6 +222,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .comp-an-kpis{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;}
 .comp-an-kpi{background:#0e1422;border:1px solid var(--line);border-radius:6px;padding:3px 8px;color:var(--sub);}
 .comp-an-kpi b{color:var(--accent);font-size:14px;}
+/* 分析ページ(クリーム面)は #0e1422 の暗色がテキストボックス・KPIタイルで浮く=クリーム面へ寄せる(Chami 2026-08-11③)。
+   #pageAnalyze 配下に限定＝動画作成タブ(暗色UI)の入力欄・タイルには影響しない。 */
+#pageAnalyze #compInput{background:#fffef9;color:var(--ink);}
+#pageAnalyze .comp-an-kpi{background:#fbf5e4;border-color:#e6d6ad;color:var(--ink);}
 .comp-an-row{margin:2px 0;word-break:break-word;}
 .comp-an-k{color:var(--accent);font-weight:700;margin-right:6px;}
 .comp-an-top-title{margin-top:10px;}
