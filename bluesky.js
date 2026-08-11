@@ -1038,7 +1038,21 @@
   })();
 
   // ---- アカウント切替で再読込 ----
-  document.addEventListener('account-changed', function () { applyAccount(); tplSelRefresh_(); });
+  document.addEventListener('account-changed', function () {
+    // ★案内リンクの短縮キャッシュを落として、新チャンネルの独自ドメイン(月詠み=5mgl / 宵桜=yoz2)で
+    //   作り直す。キャッシュキーが生アフィリンクのみ=アカウントを含まないため、両chで同一作品だと
+    //   切替後も旧chのドメインが再利用され「案内が前回のリンクのまま」になっていた(Chami報告2026-08-11)。
+    //   applyAccount() より前に落とす=直後の updateMovieWorkLink/renderPreview が新ドメインで再発行する。
+    workShortCache_ = { forLink: '', shareUrl: '', _pendingFor: '' };
+    applyAccount(); tplSelRefresh_();
+    // 新チャンネルに作品URLが無い場合、前チャンネルの作品の派生表示(カテゴリのチェック・セールタグ)が
+    //   画面に残る。fetchMovieWorkInfo は空URLで早期return し何も消さないため、ここで明示的にクリアする。
+    var wvNow = (loadA('bsky_work_url') || '').trim();
+    if (!wvNow) {
+      try { if (window.Go5MovieAttrs) window.Go5MovieAttrs.reset(); } catch (e) {}   // カテゴリ全OFF＋自動適用ガード解除
+      try { if (window.Go5PromoLabel) window.Go5PromoLabel.begin(''); } catch (e) {} // セールタグの割引%を0へ=非表示
+    }
+  });
 
   // ---- テンプレ更新の一回限り移行(2026Q2)：旧テンプレ保存値を新テンプレへ。独自文(旧マーカー無し)は保持。----
   (function migrateTemplates2026q2() {
