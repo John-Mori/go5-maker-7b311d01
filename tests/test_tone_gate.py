@@ -14,7 +14,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
 
-from tone_gate import load_tone_rules, tone_verdicts  # noqa: E402
+from tone_gate import (  # noqa: E402
+    load_tone_rules, tone_verdicts, tone_corrections)
 
 RULES_PATH = os.path.join(
     r"D:\SougouStartFolder\00_AI-HQ",
@@ -103,6 +104,102 @@ def _run():
         print("[FAIL] fail-open: rules=None で発火してはいけない")
     else:
         print("[PASS] fail-open: rules=None は空(発火しない)")
+
+    # ================================================================
+    # 書き直し(2026-08-12 格上げ= 違反した便だけ直す)。
+    #   (話者, 本文, 期待する書き直し後, 期待する置換件数, 説明)
+    #   ★期待が本文と同じ=「触らない」ことの検査。
+    # ================================================================
+    rw = [
+        ("オタコン", "俺がやる。あとで測る。", "僕がやる。あとで測る。", 1,
+         "R-1 他人格の一人称『俺』→本人の正『僕』へ置換(発注の本体)"),
+
+        ("オタコン", "俺が見る。俺が直す。", "僕が見る。僕が直す。", 2,
+         "R-2 同じ便の複数出現を全部直す(件数が測れる=C-041)"),
+
+        ("早坂芽衣",
+         '題名は"俺だけじゃない"がいい',
+         '題名は"俺だけじゃない"がいい', 0,
+         "R-3 引用の中のコピー案は**書き換えない**(訴求を壊さない)"),
+
+        ("早坂芽衣", "俺が余計に難しくした。", "私が余計に難しくした。", 1,
+         "R-4 名前呼び(芽衣)より代名詞(私)を置換先に選ぶ=文が壊れにくい"),
+
+        ("ケヴィン・デ・ブライネ", "俺がやる。", "俺がやる。", 0,
+         "R-5 デブライネは僕/俺/オレ全部が正=**違反ではないので触らない**"
+         "(一律禁止で実装すると本人の声を壊す)"),
+
+        ("オタコン", "`俺` は変数名だ。僕が直す。", "`俺` は変数名だ。僕が直す。", 0,
+         "R-6 インラインコードの中は触らない"
+         "(★このケースは地の文が正しいので置換対象そのものが無い)"),
+
+        ("オタコン", "```\nprint('俺')\n```\n俺が直す。",
+         "```\nprint('俺')\n```\n僕が直す。", 1,
+         "R-7 コードフェンスの中は触らず、地の文だけ直す"),
+
+        ("オタコン", "> オレがやる\nと言っていた。僕が確認した。",
+         "> オレがやる\nと言っていた。僕が確認した。", 0,
+         "R-8 行頭『>』の引用=他人の便の証拠。書き換えたら台帳が嘘になる"),
+
+        ("オタコン", "docs/俺のメモ.md を見た。俺が書いた。",
+         "docs/俺のメモ.md を見た。僕が書いた。", 1,
+         "R-9 ファイル名・パスには触らない(発注条件4)。地の文だけ直す"),
+
+        ("オタコン", "改修α/基盤/両方に俺が入る。", "改修α/基盤/両方に僕が入る。", 1,
+         "R-10 日本語の『A/B』はパス扱いしない=文ごと保護されて検知漏れになるのを防ぐ"),
+
+        ("オタコン", "オレンジを買った。俺が食べる。", "オレンジを買った。僕が食べる。", 1,
+         "R-11 カタカナ後続ガードは置換側でも効く(オレンジを壊さない)"),
+
+        ("アメス", "あたしが記録する。", "あたしが記録する。", 0,
+         "R-12 違反が無ければ1文字も変えない"),
+    ]
+    for persona, text, want, want_n, desc in rw:
+        res = tone_corrections(persona, "aegis-gl", text, rules)
+        got = res.get("fixed")
+        n = sum(a.get("count", 0) for a in (res.get("applied") or []))
+        good = (got == want and n == want_n)
+        if not good:
+            ok = False
+        print(f"[{'PASS' if good else 'FAIL'}] {desc}"
+              + ("" if good else f" -> fixed={got!r} 件数={n} (期待={want!r}/{want_n})"))
+
+    # 禁止語(forbidden)= 人事部門が写像へ入れた実データを引く(commit be37d68)。
+    #   オタコン= {"first_person":["僕"],"second_person":["君"],"forbidden":["お前","あんた","すまん"]}
+    r13 = tone_corrections("オタコン", "aegis-gl", "お前がやれ。僕は見る。", rules)
+    if r13.get("fixed") == "君がやれ。僕は見る。":
+        print("[PASS] R-13 禁止の二人称『お前』→写像の second_person『君』へ直る"
+              "(判定材料は口調ルール.json 1本=ORG-11)")
+    else:
+        ok = False
+        print(f"[FAIL] R-13 二人称の書き直し -> {r13.get('fixed')!r}")
+
+    r14 = tone_corrections("オタコン", "aegis-gl", "すまん、僕が間違えた。", rules)
+    if (r14.get("fixed") == "すまん、僕が間違えた。"
+            and [v.get("marker") for v in (r14.get("remaining") or [])] == ["すまん"]):
+        print("[PASS] R-14 二人称でない禁止語(すまん)は**置換先が写像に無い**="
+              "本文を変えず警告のみで通す(勝手な言い換えをしない)")
+    else:
+        ok = False
+        print(f"[FAIL] R-14 すまん -> fixed={r14.get('fixed')!r} remaining={r14.get('remaining')}")
+
+    fake = {"personas": {"オタコン": {
+        "first_person": ["僕"], "second_person": ["君"],
+        "forbidden": ["すまん"], "forbidden_to": {"すまん": "ごめん"}}}}
+    r14b = tone_corrections("オタコン", "aegis-gl", "すまん、僕が間違えた。", fake)
+    if r14b.get("fixed") == "ごめん、僕が間違えた。":
+        print("[PASS] R-14b 人事部門が forbidden_to に置換先を足せば"
+              "『すまん』→『ごめん』もコード変更ゼロで直る")
+    else:
+        ok = False
+        print(f"[FAIL] R-14b forbidden_to -> {r14b.get('fixed')!r}")
+
+    r15 = tone_corrections("オタコン", "aegis-gl", "俺がやる。", None)
+    if r15.get("fixed") == "俺がやる。" and not r15.get("applied"):
+        print("[PASS] R-15 fail-open: 写像が読めない時は元の本文をそのまま返す(沈黙を作らない)")
+    else:
+        ok = False
+        print(f"[FAIL] R-15 fail-open -> {r15}")
 
     print("=== 全PASS ===" if ok else "=== FAIL あり ===")
     return 0 if ok else 1

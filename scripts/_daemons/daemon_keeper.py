@@ -149,9 +149,16 @@ class Slot:
 #   ★2026-08-06 追加= scripts/queue/leasequeue.py。**便をどの順で掴むかを決めている本体**
 #     なのに監視外だった=直しても載らない。実測: 優先度(Chami本人の便を先頭へ)を入れた日、
 #     このリストに無かったため dept_daemon 30体は古いclaimのまま走り続けた。
+#   ★2026-08-12 追加= scripts/llm/tone_gate.py・naming_gate.py。**送信直前に本文を書き換える**
+#     出力ゲート本体(C=呼称 / D=口調)。dept_daemon が import しているだけなので、
+#     ゲートだけを直した日は**このリストに無いと1体も載せ替わらない**=「入れたのに効かない」。
+#     ★口調ゲートDは 2026-08-12 に「警告のみ→違反便だけ書き直す」へ格上げした=
+#       本文を触る側になった以上、載せ忘れの窓を残さない。
 WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "llm", "session_relay.py"),
                os.path.join(ROOT, "scripts", "llm", "session_rooms.py"),
+               os.path.join(ROOT, "scripts", "llm", "tone_gate.py"),
+               os.path.join(ROOT, "scripts", "llm", "naming_gate.py"),
                os.path.join(ROOT, "scripts", "queue", "leasequeue.py"),
                os.path.join(ROOT, "scripts", "_common", "session_presence.py")]
 RELOAD_DEBOUNCE_SEC = 90   # 変更が「落ち着いた」とみなすまで。編集の途中で載せ替えない

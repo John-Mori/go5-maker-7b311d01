@@ -2606,9 +2606,21 @@ _TONE_RULES_CACHE = {"loaded": False, "rules": None}
 
 
 def _tone_rules():
-    """口調ルール.json を1度だけ読んでキャッシュ(読めなければ None=ゲートは無効化)。"""
-    if not _TONE_RULES_CACHE["loaded"]:
+    """口調ルール.json を読む(読めなければ None=ゲートは無効化)。
+
+    ★2026-08-12 変更= 「1度だけ」→ **mtimeが変わったら読み直す**。
+      理由= 写像は人事部門が育てるファイルだ。プロセス起動時の1回だけだと、
+      ククールが `second_person_forbidden` を足しても**常駐を落とすまで効かない**=
+      「入れたのに効かない」の窓(daemon_keeper が台帳をWATCHしないのは都度読み前提だから)。
+      毎便 os.path.getmtime を1回叩くだけ=中身の読み直しは変わった時だけ。
+    """
+    try:
+        mt = os.path.getmtime(TONE_RULES_PATH)
+    except OSError:
+        mt = None
+    if not _TONE_RULES_CACHE["loaded"] or _TONE_RULES_CACHE.get("mtime") != mt:
         _TONE_RULES_CACHE["loaded"] = True
+        _TONE_RULES_CACHE["mtime"] = mt
         try:
             if _tone_gate is not None:
                 _TONE_RULES_CACHE["rules"] = _tone_gate.load_tone_rules(TONE_RULES_PATH)
@@ -2618,37 +2630,56 @@ def _tone_rules():
 
 
 def audit_tone(dept, persona, text, rec=None):
-    """出力ゲートD: ブロック本文の口調ドリフト(一人称の食い違い)を **警告のみ** 記録する。
+    """出力ゲートD: 口調違反(一人称/二人称の食い違い)を **その便だけ書き直す**。
 
-    ★本文は変えない・送信は止めない(警告のみ段階=HQ裁定①)。返り値=違反候補 list。
-    ★検査中の例外は握り潰す(fail-open)=ゲート自身が配送を殺さない。
+    ★2026-08-12 格上げ= 「警告のみ」→「違反した便だけ書き直す」(Chami Go 05:50 JST →
+      研究室HQ裁定 msg 1536843049408270336 → 人事部門の発注 msg 1536843250646646854)。
+      理由= 警告だけでは素通りする。実測で「俺」が 8/9・8/10・8/11・8/12 と4日連続そのまま出た。
+    ★書き直しは**機械的置換**(再生成しない)=送信直前に往復を足さない。数字・版・ファイル名に触らない。
+    ★書き直しは1回まで/残ったら元の本文を通す= tone_gate.tone_corrections が保証(fail-open)。
+    ★何件書き直したかを測れる形で残す(C-041)= event="tone_fix"(count付き)。直せなかった分は従来の
+      event="tone"(警告のみ)。同じ tone_audit.jsonl に貯める=記録先を2つ持たない(§4)。
+    返り値: (fixed_text, applied, remaining)。ゲート無効/例外時は (元text, [], [])。
     """
     try:
         if _tone_gate is None:
-            return []
+            return text, [], []
         rules = _tone_rules()
         if not rules:
-            return []
-        verdicts = _tone_gate.tone_verdicts(persona, dept, text, rules) or []
-        if verdicts:
+            return text, [], []
+        res = _tone_gate.tone_corrections(persona, dept, text, rules) or {}
+        applied = res.get("applied") or []
+        remaining = res.get("remaining") or []
+        if applied or remaining:
             os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")   # JST(常駐はJSTで動く)
             mid = str((rec or {}).get("msg_id", ""))
             with open(TONE_AUDIT, "a", encoding="utf-8") as f:
-                for v in verdicts:
+                for a in applied:
+                    f.write(json.dumps({
+                        "ts": ts, "dept": dept, "event": "tone_fix",
+                        "persona": str(persona or ""),
+                        "marker": a.get("marker", ""),          # 本文に出た他人格の一人称
+                        "to": a.get("to", ""),                  # 直した先(本人の正)
+                        "count": a.get("count", 0),             # 直した出現数
+                        "reason": a.get("reason", ""),
+                        "msg_id": mid,
+                        "excerpt": str(text or "")[:200],       # ★書き直し**前**の抜粋
+                    }, ensure_ascii=False) + "\n")
+                for v in remaining:
                     f.write(json.dumps({
                         "ts": ts, "dept": dept, "event": "tone",
                         "persona": str(persona or ""),
-                        "marker": v.get("marker", ""),          # 本文に出た他人格の一人称
+                        "marker": v.get("marker", ""),
                         "own_first_person": v.get("own_first_person", []),
                         "index": v.get("index", -1),
                         "reason": v.get("reason", ""),
                         "msg_id": mid,
                         "excerpt": str(text or "")[:200],
                     }, ensure_ascii=False) + "\n")
-        return verdicts
+        return res.get("fixed", text), applied, remaining
     except Exception:
-        return []               # 監査の失敗で応答を巻き添えにしない(fail-safe)
+        return text, [], []     # 監査の失敗で応答を巻き添えにしない(fail-safe)
 
 
 def _naming_rules():
@@ -4705,15 +4736,22 @@ class Daemon:
                         f"★出力ゲートC(呼称・警告のみ): 話者={_speaker} "
                         f"残={len(_remain)}件 例=対象{_remain[0].get('target')}/出た形"
                         f"{_remain[0].get('found')}→期待{_remain[0].get('expected')} msg={mid}")
-                # ★★出力ゲート ルールD(口調ドリフト=一人称の食い違い)= 警告のみ(2026-08-03 HQ裁定①)。
-                #   同じブロックの (話者=persona, 部屋=dept, 本文) を見る兄弟チェック。
-                #   ★本文は変えない・送信は止めない=event=tone を tone_audit.jsonl に貯めるだけ。
-                #   ★fail-open=検査例外は握り潰す(audit_tone が保証)。★_part は口調ゲートでは書き換えない。
-                _tone = audit_tone(self.dept, _speaker, _part, rec)
+                # ★★出力ゲート ルールD(口調ドリフト=一人称/二人称の食い違い)。
+                #   同じブロックの (話者=persona, 部屋=dept, 本文) を見る呼称ゲートCの兄弟チェック。
+                #   ★2026-08-12 格上げ= 警告のみ → **違反した便だけ書き直す**(人事部門の発注・HQ裁定)。
+                #     呼称ゲートCと同じ形= 直した分で _part を差し替え、下の送信ループがそれを送る。
+                #   ★書き直しは1回まで/直しきれなければ元の本文を通す=fail-open(audit_tone が保証)。
+                _new_tone, _tfix, _tone = audit_tone(self.dept, _speaker, _part, rec)
+                if _tfix:
+                    log(self.dept,
+                        f"★出力ゲートD(口調・書き直し): 話者={_speaker} "
+                        f"書き直し={sum(a.get('count', 0) for a in _tfix)}箇所 "
+                        f"例=「{_tfix[0].get('marker')}」→「{_tfix[0].get('to')}」 msg={mid}")
+                    _part = _new_tone
                 if _tone:
                     log(self.dept,
                         f"★出力ゲートD(口調・警告のみ): 話者={_speaker} "
-                        f"食い違い={len(_tone)}件 例=本文に他人格の一人称"
+                        f"残={len(_tone)}件 例=本文に他人格の一人称"
                         f"「{_tone[0].get('marker')}」(正={_tone[0].get('own_first_person')}) msg={mid}")
                 _fixed_blocks.append((_who, _part))
             _blocks = _fixed_blocks
