@@ -865,6 +865,80 @@ def check_dead_letters(state, dry_run):
         state["last_dead_count"] = total
 
 
+# --- ★★2026-08-12 dead が「増えない限り二度と鳴らない」穴を塞ぐ(イージス研究室/KPI A1) ---
+# 実測(2026-08-12 02:45): status='dead' が3件、**2026-07-30 05:03〜05:11 から13日間**残っていた。
+#   中身は3件ともChami本人の便で、うち1件は「この部屋、応答できる?」(イージス研究室宛)。
+#   誰にも掴まれず、誰にも警報されないまま沈黙した= まさに A1 無警報滞留。
+# 真因は上の check_dead_letters の形にある= **増分でしか鳴らない**(total<=last で即return)。
+#   一度鳴った(あるいは基準が追いついた)時点でその滞留は永久に見えなくなる。
+#   ★「鳴った」と「片付いた」は別物なのに、片方の記録で両方を代表させていた。
+# → 増分とは別に**滞留の年齢**を見る。手当ての印が付くまで1日1回だけ言い続ける。
+STALE_DEAD_MIN_SEC = 6 * 60 * 60        # dead になって6時間、まだ手当ての印が無ければ滞留
+STALE_DEAD_COOLDOWN_SEC = 24 * 60 * 60  # 1日1回まで(毎周期鳴らすと無視される安全網になる)
+
+
+def stale_dead_summary():
+    """手当ての印が無いまま残っている dead 行。読み取り専用・fail-open(DB不在/ロックで空)。
+
+    手当て済みの印= result 列が空でない(scripts/queue/dlq_tool.py --ack が書く)。
+    ★status は 'dead' のまま動かさない= 既存の件数・台帳の意味を変えないため。
+    戻り値: (件数, {dept: 件数}, 最古の滞留秒数, Chami発の件数)
+    """
+    if not os.path.exists(QUEUE_DB_WD):
+        return 0, {}, 0, 0
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
+        try:
+            con.execute("PRAGMA busy_timeout=1000")
+            rows = con.execute(
+                "SELECT dept, enqueued_at, body FROM queue "
+                "WHERE status='dead' AND (result IS NULL OR result='')").fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return 0, {}, 0, 0
+    now_epoch = time.time()
+    by, oldest, from_chami = {}, 0, 0
+    for dept, enq, body in rows:
+        try:
+            age = now_epoch - float(enq)
+        except (TypeError, ValueError):
+            continue
+        if age < STALE_DEAD_MIN_SEC:
+            continue
+        by[dept or "?"] = by.get(dept or "?", 0) + 1
+        oldest = max(oldest, age)
+        # ★Chami本人の便かどうかは重大度が違う(返事を待っている人間が居る)。
+        #   本文はDiscordの生JSON。author名を素朴に見るだけ=判定不能なら鳴らす側へ倒す。
+        if body and '"author": "chami' in str(body):
+            from_chami += 1
+    return sum(by.values()), by, int(oldest), from_chami
+
+
+def check_stale_dead(state, dry_run):
+    """dead に落ちたまま手当てされていない便を、片付くまで1日1回だけ言い続ける。"""
+    total, by, oldest_sec, from_chami = stale_dead_summary()
+    if not total:
+        return
+    now_epoch = time.time()
+    if now_epoch - state.get("last_stale_dead_alert", 0) < STALE_DEAD_COOLDOWN_SEC:
+        return
+    detail = "、".join(f"{dept_ja(d, with_slug=True)}={n}件" for d, n in by.items())
+    head = "🕳 **配送に失敗したまま放置されている便**"
+    if from_chami:
+        head = f"🔥 **Chamiの便が{from_chami}件、配送に失敗したまま放置されています**"
+    msg = (f"{head}: 計{total}件({detail})、最古は**{int(oldest_sec // 3600)}時間前**。"
+           "5回配送しても処理できずキューへ隔離された行が、手当ての印が付かないまま残っています。"
+           "★この警報はデッドレターの**増分**ではなく**滞留**を見ています"
+           "(増分監視は一度鳴ると二度と鳴らないため、13日間見えなかった実例がある)。"
+           "中身を見る: `python scripts/queue/dlq_tool.py --list`。"
+           "手当てしたら印を付ける(これで鳴り止む): "
+           "`python scripts/queue/dlq_tool.py --ack <id> --by \"<誰>\" --note \"<どう片付けたか>\"`。")
+    if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
+        state["last_stale_dead_alert"] = now_epoch
+
+
 def check_dead_windows(state, dry_run):
     """最近まで生きていた部門窓の脈が途絶えたら、incident chへまとめて1通で可視化する(P2)。
 
@@ -984,6 +1058,7 @@ def run_once(dry_run=False):
     check_dead_windows(state, dry_run)   # P2: 死んだ部門窓の可視化(応答性改善書2026-07-18)
     check_busy_notices(state, dry_run)   # ⏳対応中(生存)通知: Chami直要望2026-07-18・4段目の進捗信号
     check_dead_letters(state, dry_run)   # ★O1(P0-5): DLQ(毒メッセージ)が黙って消えるのを検知
+    check_stale_dead(state, dry_run)     # ★2026-08-12: 増分でしか鳴らない穴(13日間の無警報滞留)を塞ぐ
     check_orphan_pending(state, dry_run)  # ★INC-110: 消費者不在のdept宛が無警報で沈む穴を塞ぐ
     check_link_health(state, dry_run)    # ★2026-07-20: 収益導線(自前ドメイン/r2)の死活監視
     check_ci_health(state, dry_run)      # ★2026-07-21: CI失敗をDiscordへ(ORG-09=メールは読まれない)
