@@ -148,6 +148,19 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreActiveTab_);
   else restoreActiveTab_();
 
+  // 分割ページ(候補=KouhoLists.html)から「予約/カレンダー」を押して来た場合、そのオーバーレイを開く。
+  //   go5_active_tab は作業タブしか復元しない(オーバーレイは除外)ため、別枠 sessionStorage で受ける。
+  function openOverlayFromSplit_() {
+    var want = '';
+    try { want = sessionStorage.getItem('go5_open_overlay') || ''; } catch (e) {}
+    if (!want) return;
+    try { sessionStorage.removeItem('go5_open_overlay'); } catch (e) {}
+    var b = document.getElementById(want);
+    if (b && OVERLAY_BTNS[want]) b.click();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', openOverlayFromSplit_);
+  else openOverlayFromSplit_();
+
   /* ── アフィID永続化 ── */
   const afIdEl = document.getElementById('afId');
   const affiUrlsEl = document.getElementById('affiUrls');
