@@ -1327,8 +1327,10 @@
   function candUrlLink_(su, n) {
     var k = urlKind_(su);
     var color = k === 'b' ? '#1185fe' : (k === 'x' ? '#1d9bf0' : '#2bb3c0');
-    var base = k === 'b' ? 'B' : (k === 'x' ? 'X' : 'Web');
-    return '<a class="vlink" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + color + ';">' + base + (n ? String(n) : '') + '↗</a>';
+    var base = k === 'b' ? 'Bsky' : (k === 'x' ? 'X' : 'Web'); // ★BlueskyはB→Bsky(Chami依頼2026-08-11・Bだけだと分かりにくい)
+    // vlink-sns=X/Bsky札は誤タップ防止で左右に少し余白＋タップ域を広げる(Chami依頼2026-08-11「横のリンクやボタンと少し幅を開けて」)。
+    var cls = 'vlink' + ((k === 'b' || k === 'x') ? ' vlink-sns' : '');
+    return '<a class="' + cls + '" href="' + esc(su) + '" target="_blank" rel="noopener" style="color:' + color + ';">' + base + (n ? String(n) : '') + '↗</a>';
   }
   // refimgレコードの「2つ目以降のURL」を配列で返す(旧 twitterUrl2 単発から移行・後方互換)。
   function refUrls2_(rec) { if (!rec) return []; if (Array.isArray(rec.urls2)) return rec.urls2.filter(Boolean); return rec.twitterUrl2 ? [rec.twitterUrl2] : []; }

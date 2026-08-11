@@ -95,7 +95,23 @@
     });
   }
 
-  var API = { available: available, get: get, set: set, del: del, entries: entries };
+  // ★恒久対策(2026-08-11 Chami「候補の画像・コメント・メモが消えた」の再発クラス／C-038)：
+  //   iOS Safari は「7日間サイトに触れないと script-writable storage(IndexedDB/localStorage)を全消去」する
+  //   (ITPのstorage cap)。これで保存した動画生成用画像・コメント・メモが一斉に消える=今回の症状。
+  //   navigator.storage.persist() で永続化を要求すると、この自動退避の対象から外れる(付与はブラウザのヒューリスティック)。
+  //   完全に非破壊(feature-detect＋try/catch・既存APIは不変)。既に付与済みなら二重要求しない。
+  function requestPersist() {
+    try {
+      if (!navigator.storage || !navigator.storage.persist) return;
+      navigator.storage.persisted().then(function (already) {
+        if (already) return;
+        navigator.storage.persist().catch(function () {});
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  try { requestPersist(); } catch (e) {}
+
+  var API = { available: available, get: get, set: set, del: del, entries: entries, requestPersist: requestPersist };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Idb = API;
 })(typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : this));

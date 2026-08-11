@@ -371,6 +371,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-off{background:#c0392b;color:#fff8ee;border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;}
 .cand-actions{display:flex;gap:5px;align-items:center;margin-top:6px;flex-wrap:nowrap;min-width:0;} /* 作品↗/X↗/X2↗/投稿編集/🦋 を1列で（改行しない） */
 .cand-actions .vlink{white-space:nowrap;flex:0 0 auto;font-size:12px;}
+/* X/Bsky札は隣のリンク・ボタンと少し離してタップ域も広げる＝誤タップ防止（Chami依頼2026-08-11） */
+.cand-actions .vlink-sns{margin:0 3px;padding:3px 5px;border-radius:6px;}
+.cand-card.cand-nocomment .cand-actions .vlink-sns{margin:0 2px;padding:2px 4px;}
 .cand-actions-mspacer{flex:1 1 auto;min-width:4px;} /* 無コメント時：作品リンク行の右端へ非表示/🗑を寄せる伸縮スペーサ */
 .cand-actions .cand-hide-btn{flex:0 0 auto;}
 /* 無コメント時：作品リンク群＋非表示/🗑 を cand-info内の1行に収めるためコンパクト化（gap/padding/font） */
