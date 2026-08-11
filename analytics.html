@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- 分析 ･ ランキング専用ページ(2026-08-11 新設)。動画作成タブの重いCanvas/背景動画を積まない軽量ページ。
+     ランキング(yt-clicks.js の renderRank)と競合分析(competitor.js)を1枚に同居し、上部トグルで切替。
+     データは localStorage を index.html と共有(同一オリジン)。 -->
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="分析･ランキング">
+<meta name="theme-color" content="#0b0f17">
+<link rel="manifest" href="manifest.webmanifest?v=706">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=706">
+<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=706">
+<title>分析 ･ ランキング — 5秒動画メーカー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=706">
+<script>
+/* 背景フック(ランキング/分析=クリーム封鎖)とアカウント色を描画前に確定。保存された表示(rank/analyze)を尊重。 */
+try {
+  var _v0 = localStorage.getItem('analytics_view') || 'rank';
+  document.documentElement.setAttribute('data-tab', _v0 === 'analyze' ? 'analyzeBtn' : 'rankBtn');
+  var _a0 = localStorage.getItem('current_account') || 'acc1';
+  document.documentElement.setAttribute('data-account', _a0 === 'acc2' ? 'acc2' : 'acc1');
+} catch (e) {}
+</script>
+<style>
+.split-nav{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:520px;margin:6px auto 0;padding:0 10px;}
+.split-nav a{flex:0 0 auto;font-family:inherit;font-size:12px;font-weight:700;text-decoration:none;
+  padding:7px 12px;border-radius:9px;border:1px solid var(--line,#e6d6ad);
+  background:var(--card,#fffdf6);color:var(--ink,#4b3f2c);}
+.split-nav a.active{background:#2bb3c0;color:#04222a;border-color:#2bb3c0;}
+/* ランキング/分析の切替トグル。 */
+.an-toggle{display:flex;gap:8px;justify-content:center;max-width:520px;margin:10px auto 0;padding:0 10px;}
+.an-toggle button{flex:1 1 0;max-width:200px;font-family:inherit;font-size:14px;font-weight:800;cursor:pointer;
+  padding:9px 12px;border-radius:10px;border:1px solid var(--line,#e6d6ad);
+  background:var(--card,#fffdf6);color:var(--ink,#4b3f2c);}
+.an-toggle button.active{background:#2bb3c0;color:#04222a;border-color:#2bb3c0;}
+</style>
+</head>
+<body>
+<header>
+  <h1>5秒動画メーカー</h1>
+</header>
+
+<div class="acct-bar">
+  <span class="acct-bar-label">アカウント</span>
+  <button id="acctBtn1" class="acct-btn active" type="button">月詠み色恋劇場</button>
+  <button id="acctBtn2" class="acct-btn" type="button">宵桜艶帖～Yoizakura Tsuyacho～</button>
+  <nav class="split-nav">
+    <a href="index.html">🎬 動画作成</a>
+    <a href="candidates.html">💡 候補</a>
+    <a href="analytics.html" class="active">📊 分析 ･ 🏆 ランキング</a>
+  </nav>
+</div>
+
+<div class="an-toggle">
+  <button id="anViewRank" type="button">🏆 ランキング</button>
+  <button id="anViewAnalyze" type="button">📊 分析</button>
+</div>
+
+<!-- ランキング画面(両アカウント合算・再生数順。yt-clicks.js の renderRank が描画) -->
+<section id="pageRank" hidden></section>
+
+<!-- 分析画面(競合チャンネル監視。competitor.js が #compList/#compAnalysis を充填) -->
+<section id="pageAnalyze" hidden>
+<main>
+  <section class="card">
+    <div class="field-label">🎯 競合チャンネル監視</div>
+    <div class="hint">同ジャンル(FANZA同人アフィリのショート等)の競合YouTubeチャンネルを登録します。登録したチャンネルの<b>直近動画・投稿時刻・再生数</b>を毎日スプレッドシートへ記録し、伸びてる型・扱う作品・タイトルの傾向を分析部門が見ます。(PCで登録→スマホでも同じリストが見えます)</div>
+    <div class="comp-add-row">
+      <input id="compInput" type="text" inputmode="url" autocomplete="off" placeholder="YouTubeチャンネルのURL か @ハンドル を貼る (例: https://www.youtube.com/@example)">
+      <button id="compAdd" class="ghost" type="button">＋ 登録</button>
+    </div>
+    <div class="status" id="compStatus" style="text-align:left;margin-top:4px;"></div>
+    <div class="comp-analysis-wrap">
+      <div id="compAnalysis" class="comp-analysis"></div>
+      <button id="compAnalysisRefresh" class="ghost" type="button" title="分析を再取得">↻ 分析を更新</button>
+    </div>
+    <div id="compList" class="comp-list"></div>
+    <div class="hint" style="margin-top:6px;">※チャンネル名は登録時にYouTube APIで自動取得します(取得には ⚙️詳細設定 のAPIキーが必要)。毎日の監視をアプリを閉じても動かすには、記録用GASにYouTube APIキーの設定が必要です(手順は別途)。</div>
+  </section>
+</main>
+</section>
+
+<!-- yt-clicks.js の初期化ゲート(#ytClickList が無いと window.YtRank が定義されない)を満たすスタブ。 -->
+<div id="ytClickList" hidden style="display:none"></div>
+
+<script src="core/util.js?v=706"></script>
+<script src="core/account.js?v=706"></script>
+<script src="core/storage-keys.js?v=706"></script>
+<script src="core/categories.js?v=706"></script>
+<script src="core/idb-store.js?v=706"></script>
+<script src="core/sync.js?v=706"></script>
+<script src="core/kaizen-log.js?v=706"></script>
+<script src="idgen.js?v=706"></script>
+<script src="affiliate-core.js?v=706"></script>
+<script src="fanza-core.js?v=706"></script>
+<script src="candidates.js?v=706"></script>
+<script src="hist-merge-core.js?v=706"></script>
+<script src="rank-core.js?v=706"></script>
+<script src="yt-clicks.js?v=706"></script>
+<script src="competitor.js?v=706"></script>
+<script>
+/* 分析･ランキングページのブート: アカウント帯 + ランキング/分析トグル + 初回描画。 */
+(function () {
+  'use strict';
+  function reflectAcct(id) {
+    var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
+    if (b1) b1.classList.toggle('active', id === 'acc1');
+    if (b2) b2.classList.toggle('active', id === 'acc2');
+    document.documentElement.setAttribute('data-account', id === 'acc2' ? 'acc2' : 'acc1');
+  }
+  function currentView() {
+    var v = 'rank'; try { v = localStorage.getItem('analytics_view') || 'rank'; } catch (e) {}
+    return v === 'analyze' ? 'analyze' : 'rank';
+  }
+  function showView(v) {
+    var onRank = (v !== 'analyze');
+    var r = document.getElementById('pageRank'), a = document.getElementById('pageAnalyze');
+    if (r) r.hidden = !onRank;
+    if (a) a.hidden = onRank;
+    document.documentElement.setAttribute('data-tab', onRank ? 'rankBtn' : 'analyzeBtn');
+    try { localStorage.setItem('analytics_view', onRank ? 'rank' : 'analyze'); } catch (e) {}
+    var br = document.getElementById('anViewRank'), ba = document.getElementById('anViewAnalyze');
+    if (br) br.classList.toggle('active', onRank);
+    if (ba) ba.classList.toggle('active', !onRank);
+    // ランキングは開くたびに renderRank で作り直す(index.html の showTab と同じ挙動)。分析は competitor.js が自動充填済み。
+    if (onRank && window.YtRank && window.YtRank.renderRank) { try { window.YtRank.renderRank(); } catch (e) {} }
+  }
+  function setAcct(id) {
+    try { localStorage.setItem('current_account', id); } catch (e) {}
+    reflectAcct(id);
+    try { document.dispatchEvent(new CustomEvent('account-changed', { detail: { account: id } })); } catch (e) {}
+    // ランキング表示中ならアカウント切替で再描画(分析は account-changed を competitor.js が購読して自動再描画)。
+    if (currentView() === 'rank' && window.YtRank && window.YtRank.renderRank) { try { window.YtRank.renderRank(); } catch (e) {} }
+  }
+  var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
+  if (b1) b1.addEventListener('click', function () { setAcct('acc1'); });
+  if (b2) b2.addEventListener('click', function () { setAcct('acc2'); });
+  var br = document.getElementById('anViewRank'), ba = document.getElementById('anViewAnalyze');
+  if (br) br.addEventListener('click', function () { showView('rank'); });
+  if (ba) ba.addEventListener('click', function () { showView('analyze'); });
+
+  var cur = 'acc1'; try { cur = localStorage.getItem('current_account') || 'acc1'; } catch (e) {}
+  reflectAcct(cur);
+  showView(currentView());
+})();
+</script>
+</body>
+</html>

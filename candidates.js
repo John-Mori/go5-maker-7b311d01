@@ -1574,6 +1574,19 @@
   //   ※drafts.js の applyDraft_ と同じ手法：#author/#top/#movieWorkUrl を値+イベントで設定、
   //     前景画像は data-URL→File にして window.Go5SetForegroundFile() で #photo に反映。
   function transferToMovie_(it, imgDataUrl, comment, workUrl) {
+    // 候補専用ページ(candidates.html)には動画作成タブのDOMが無い=そこから「動画を作る」を押したら、
+    //   選択内容を sessionStorage で持ち越して index.html へ遷移し、あちらで同じ流し込みを再実行する
+    //   (同一オリジン・同一タブなので sessionStorage は遷移後も残る。クラウド同期もしない)。
+    if (!document.getElementById('author')) {
+      try {
+        sessionStorage.setItem('cand_to_movie_pending', JSON.stringify({ it: it, imgDataUrl: imgDataUrl || '', comment: comment || '', workUrl: workUrl || '' }));
+      } catch (e) {
+        // 画像が大きくて容量超過した時は画像抜きで持ち越す(動画作成タブで元画像を入れ直せる)。
+        try { sessionStorage.setItem('cand_to_movie_pending', JSON.stringify({ it: it, imgDataUrl: '', comment: comment || '', workUrl: workUrl || '' })); } catch (e2) {}
+      }
+      try { location.href = 'index.html'; } catch (e) {}
+      return;
+    }
     var mv = document.getElementById('tabMovie'); if (mv) mv.click(); // affiliate.js の showTab へ委譲
     // input と change の両方を発火：キャンバス再描画は change を、YouTube題名(ytTitle)の再構築は input を聴くため、
     // 片方だけだと題名が前作のまま更新されない。(コメント→題名の反映漏れ)両方投げて確実に上書きする。
@@ -3597,6 +3610,22 @@
     refImgsSet: function (cid, arr) { if (!cid) return false; var cur = refImgOf(cid) || {}; return refImgSave(cid, { imgs: (arr || []).filter(Boolean), comment: cur.comment || '', memo: cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' }); }, // 動画で使った画像(配列)を差し替え保存(コメント等は保持)
     bskyImgSet: function (cid, durl) { if (!cid) return false; return bskyImgSave(cid, durl || ''); } // Bluesky添付画像(単発)を設定/クリア
   }; } catch (e) {}
+  // 候補専用ページ(candidates.html)から持ち越された「動画を作る」選択を、動画作成タブのある index.html 側で拾って実行する。
+  //   (transferToMovie_ が movie DOM 不在時に sessionStorage へ退避→index.html へ遷移。ここが受け取り口)
+  try {
+    var _resumeCandToMovie = function () {
+      if (!document.getElementById('author')) return; // 動画作成タブが無いページでは何もしない(退避側の担当)
+      var raw = ''; try { raw = sessionStorage.getItem('cand_to_movie_pending') || ''; } catch (e) {}
+      if (!raw) return;
+      try { sessionStorage.removeItem('cand_to_movie_pending'); } catch (e) {}
+      var p; try { p = JSON.parse(raw); } catch (e) { return; }
+      if (!p || !p.it) return;
+      // app.js/affiliate.js のタブ復元が落ち着いてから流し込む(タブ切替→入力欄の描画が先)。
+      setTimeout(function () { try { transferToMovie_(p.it, p.imgDataUrl || '', p.comment || '', p.workUrl || ''); } catch (e) {} }, 300);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _resumeCandToMovie);
+    else _resumeCandToMovie();
+  } catch (e) {}
   // アプリを他アプリ/他タブから前面へ戻した時、候補パネルが表示中なら未取得タイトルを追い直す。
   //   (Chamiが候補追加→別アプリで確認→戻ってくる導線＝再操作なしで埋める。画面に無ければ何もしない)
   try {

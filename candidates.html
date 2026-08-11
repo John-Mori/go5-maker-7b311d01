@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- 候補専用ページ(2026-08-11 新設)。動画作成タブの重いCanvas/背景動画を積まない軽量ページ=
+     iOS Safari のメモリ都合によるタブ破棄・打ちかけ入力の消失を根から避ける。
+     データは localStorage/IndexedDB を index.html と共有(同一オリジン)=中身は分かれない。 -->
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="候補">
+<meta name="theme-color" content="#0b0f17">
+<link rel="manifest" href="manifest.webmanifest?v=706">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=706">
+<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=706">
+<title>候補 — 5秒動画メーカー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=706">
+<script>
+/* 背景フック(data-tab=候補=クリーム封鎖)とアカウント色を描画前に確定=継ぎ目/色チラつき対策。 */
+try {
+  document.documentElement.setAttribute('data-tab', 'tabCand');
+  var _a0 = localStorage.getItem('current_account') || 'acc1';
+  document.documentElement.setAttribute('data-account', _a0 === 'acc2' ? 'acc2' : 'acc1');
+} catch (e) {}
+</script>
+<style>
+/* このページ専用ナビ。クリーム背景でも読める色で明示(白文字だと沈むため)。 */
+.split-nav{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:520px;margin:6px auto 0;padding:0 10px;}
+.split-nav a{flex:0 0 auto;font-family:inherit;font-size:12px;font-weight:700;text-decoration:none;
+  padding:7px 12px;border-radius:9px;border:1px solid var(--line,#e6d6ad);
+  background:var(--card,#fffdf6);color:var(--ink,#4b3f2c);}
+.split-nav a.active{background:#2bb3c0;color:#04222a;border-color:#2bb3c0;}
+</style>
+</head>
+<body>
+<header>
+  <h1>5秒動画メーカー</h1>
+</header>
+
+<div class="acct-bar">
+  <span class="acct-bar-label">アカウント</span>
+  <button id="acctBtn1" class="acct-btn active" type="button">月詠み色恋劇場</button>
+  <button id="acctBtn2" class="acct-btn" type="button">宵桜艶帖～Yoizakura Tsuyacho～</button>
+  <nav class="split-nav">
+    <a href="index.html">🎬 動画作成</a>
+    <a href="candidates.html" class="active">💡 候補</a>
+    <a href="analytics.html">📊 分析 ･ 🏆 ランキング</a>
+  </nav>
+</div>
+
+<!-- 候補画面(candidates.js が Go5Cand.render() で描画) -->
+<section id="pageCand"></section>
+
+<script src="core/util.js?v=706"></script>
+<script src="core/account.js?v=706"></script>
+<script src="core/storage-keys.js?v=706"></script>
+<script src="core/categories.js?v=706"></script>
+<script src="core/idb-store.js?v=706"></script>
+<script src="core/sync.js?v=706"></script>
+<script src="core/kaizen-log.js?v=706"></script>
+<script src="idgen.js?v=706"></script>
+<script src="affiliate-core.js?v=706"></script>
+<script src="fanza-core.js?v=706"></script>
+<script src="candidates.js?v=706"></script>
+<script>
+/* 候補ページのブート: アカウント帯の配線 + 初回描画。動画作成タブの重い app.js は積まない。 */
+(function () {
+  'use strict';
+  function reflect(id) {
+    var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
+    if (b1) b1.classList.toggle('active', id === 'acc1');
+    if (b2) b2.classList.toggle('active', id === 'acc2');
+    document.documentElement.setAttribute('data-account', id === 'acc2' ? 'acc2' : 'acc1');
+  }
+  function setAcct(id) {
+    try { localStorage.setItem('current_account', id); } catch (e) {}
+    reflect(id);
+    // 既存アプリと同じイベントを投げる(購読側が居れば追従。候補データはアカウント非依存だが背景等のため)。
+    try { document.dispatchEvent(new CustomEvent('account-changed', { detail: { account: id } })); } catch (e) {}
+    if (window.Go5Cand && window.Go5Cand.render) { try { window.Go5Cand.render(); } catch (e) {} }
+  }
+  var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
+  if (b1) b1.addEventListener('click', function () { setAcct('acc1'); });
+  if (b2) b2.addEventListener('click', function () { setAcct('acc2'); });
+  var cur = 'acc1'; try { cur = localStorage.getItem('current_account') || 'acc1'; } catch (e) {}
+  reflect(cur);
+  if (window.Go5Cand && window.Go5Cand.render) { try { window.Go5Cand.render(); } catch (e) {} }
+})();
+</script>
+</body>
+</html>
