@@ -570,27 +570,92 @@
   //   残っていたためChamiの「多分治ってない」は正しかった)
   //   → 展開の完了フラグと待ち合わせを持ち、(1)未展開のうちは破壊的な空保存を拒否 (2)モーダルは
   //     展開を待ってから開く、の二段で防ぐ。
-  var _hydrated = false;
+  var _hydrated = false;                          // ref/bsky/post/used の全種類が展開済み
+  var _candidateHydrated = false;                 // 候補ページに必要な ref/bsky が展開済み
   var _hydrateWaiters = [];
+  var _refLoaded = Object.create(null);           // 全体展開前でも作品単位で安全に読めたcid
+  var _refLoadJobs = Object.create(null);
+  function markCandidateHydrated_() {
+    if (_candidateHydrated) return;
+    _candidateHydrated = true;
+    _hydrateWaiters.splice(0).forEach(function (f) { try { f(); } catch (e) {} });
+    try { document.dispatchEvent(new CustomEvent('go5-candidate-images-hydrated')); } catch (e) {}
+  }
   function markHydrated_() {
-    _hydrated = true; _hydrateWaiters.splice(0).forEach(function (f) { try { f(); } catch (e) {} });
+    markCandidateHydrated_();
+    if (_hydrated) return;
+    _hydrated = true;
     // ★画像がメモリに載った合図を全ページへ発火する。投稿履歴/ランキング(yt-clicks.js)は起動直後に一度だけ
     //   Go5Cand.usedImgs()を同期で読んで「動画で使った画像」を描くが、その時点でハイドレート未了だと空になり、
     //   タブをもう一度タップするまで画像が出なかった(Chami「動画に使った画像が表示されない・すぐ表示して」
     //   2026-08-11 / DEF-de2408cb00と同型)。ハイドレート完了をイベントで知らせ、履歴側が自動で描き直す。
     try { document.dispatchEvent(new CustomEvent('go5-images-hydrated')); } catch (e) {}
   }
-  function whenImagesReady_(cb) {                 // 展開済みなら即時、未了なら完了時に呼ぶ(最大3秒で諦めて続行)
-    if (_hydrated || !_idbOk) { cb(); return; }
+  function whenImagesReady_(cb) {                 // 候補用(ref/bsky)が展開済みなら即時、未了なら完了時に呼ぶ
+    if (_candidateHydrated || !_idbOk) { cb(); return; }
     var done = false, fire = function () { if (done) return; done = true; cb(); };
     _hydrateWaiters.push(fire);
-    setTimeout(fire, 3000);                       // 保険(展開が異常に遅い/失敗しても操作は止めない)
+    setTimeout(fire, 3000);                       // 保険(追加処理側は未完了なら保存せず案内する)
   }
   function refImgKey(cid) { return 'cand_refimg__' + cid; }   // localStorage互換キー(フォールバック/移行用)
   function bskyImgKey(cid) { return 'cand_bskyimg__' + cid; }
   function idbKey(kind, cid) { return kind + ':' + cid; }     // IDBキー 'ref:<cid>' / 'bsky:<cid>'
   function idbFail_(e) { try { console.warn('[go5 idb] 画像保存に失敗(メモリには保持)', e); } catch (_) {} }
 
+  function mergeImageEntries_(all) {
+    function putLatest_(bucket, key, val) {
+      var cur = bucket[key];
+      // 全体cursorが走っている間に投稿編集で保存した新しいメモリ値を、古い読取結果で巻き戻さない。
+      if (!cur || !cur.at || !val || !val.at || Number(val.at) >= Number(cur.at)) bucket[key] = val;
+    }
+    Object.keys(all || {}).forEach(function (k) {
+      var v = all[k];
+      if (k.indexOf('ref:') === 0) { putLatest_(_imgMem.ref, k.slice(4), v); _refLoaded[k.slice(4)] = true; }
+      else if (k.indexOf('bsky:') === 0) putLatest_(_imgMem.bsky, k.slice(5), v);
+      else if (k.indexOf('post:') === 0) putLatest_(_imgMem.post, k.slice(5), v);
+      else if (k.indexOf('used:') === 0) putLatest_(_imgMem.used, k.slice(5), v);
+    });
+  }  function readImageEntries_(prefixes) {
+    // 新APIはIDBKeyRangeで必要な画像だけ読む。旧キャッシュ時だけ従来の全件走査へフォールバック。
+    if (window.Go5Idb.entriesByPrefixes) return window.Go5Idb.entriesByPrefixes(prefixes);
+    return window.Go5Idb.entries();
+  }
+  function legacyRefOf_(cid) {
+    try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
+  }
+  // 全体ハイドレートを待たず、押された作品1件だけを直接復元する。
+  // 候補画像が多い/iOSが低メモリでも「投稿編集」の入口を全体走査から切り離す。
+  function ensureRefLoaded_(cid) {
+    cid = String(cid || '');
+    if (!cid || !_idbOk || _candidateHydrated || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
+      if (cid && Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) _refLoaded[cid] = true;
+      return Promise.resolve(true);
+    }
+    if (_refLoadJobs[cid]) return _refLoadJobs[cid];
+    var job = window.Go5Idb.get(idbKey('ref', cid)).then(function (rec) {
+      if (rec) {
+        _imgMem.ref[cid] = rec;
+      } else {
+        // 旧localStorage形式が残っている端末は、この1件も移行完了前に安全に拾う。
+        var legacy = legacyRefOf_(cid);
+        if (legacy) {
+          _imgMem.ref[cid] = legacy;
+          window.Go5Idb.set(idbKey('ref', cid), legacy).then(function () {
+            try { localStorage.removeItem(refImgKey(cid)); } catch (e) {}
+          }).catch(idbFail_);
+        }
+      }
+      _refLoaded[cid] = true; // 「存在しない」ことも直接確認済み
+      return true;
+    }).catch(function (e) {
+      idbFail_(e);
+      var legacy = legacyRefOf_(cid);
+      if (legacy) { _imgMem.ref[cid] = legacy; _refLoaded[cid] = true; return true; }
+      return false;           // 読めていない状態で空保存を許可しない
+    });
+    _refLoadJobs[cid] = job.then(function (ok) { delete _refLoadJobs[cid]; return ok; }, function () { delete _refLoadJobs[cid]; return false; });
+    return _refLoadJobs[cid];
+  }
   function refImgOf(cid) {
     if (_idbOk) return _imgMem.ref[cid] || null;
     try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
@@ -618,7 +683,7 @@
     var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl && !urls2.length);
     // ★展開前(_imgMemが空)の「空データ=削除」は、読めていないだけの既存データを消す事故になる。
     //   未展開のうちは破壊的な空保存を拒否する。(明示削除はUIから展開後に行われるので実害なし)
-    if (empty && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
+    if (empty && _idbOk && !_candidateHydrated && !_refLoaded[cid]) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
     var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: urls2[0] || '', urls2: urls2, at: new Date().getTime() };
     if (_idbOk) {
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
@@ -642,7 +707,7 @@
   }
   function bskyImgHas(cid) { var r = bskyImgOf(cid); return !!(r && r.img); }
   function bskyImgSave(cid, img) {
-    if (!img && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; } // refImgSaveと同じ理由
+    if (!img && _idbOk && !_candidateHydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; } // refImgSaveと同じ理由
     var rec = img ? { img: img, at: new Date().getTime() } : null;
     if (_idbOk) {
       if (rec) _imgMem.bsky[cid] = rec; else delete _imgMem.bsky[cid];
@@ -724,26 +789,31 @@
     } catch (e) { return false; }
   }
 
-  // 起動時：IDBから全画像をメモリへ + localStorageの旧画像をIDBへ移行して5MB枠を解放。
+  // 起動時：候補ページに必要なref/bskyだけを最優先で展開する。
+  // 従来のentries()全件走査は同じDB内のドラフト動画Blobまで値として復元し、iPhoneで画像表示と
+  // 投稿編集の両方を長時間止めていた。候補用が描けた後、統合ページだけpost/usedを裏で読む。
+  function hydrateHistoryImages_(retry) {
+    readImageEntries_(['post:', 'used:']).then(function (all) {
+      mergeImageEntries_(all);
+      markHydrated_();
+    }).catch(function (e) {
+      if (retry) { setTimeout(function () { hydrateHistoryImages_(false); }, 1200); return; }
+      try { console.warn('[go5 idb] 投稿履歴画像の展開を保留(候補画像は利用可能)', e); } catch (_) {}
+    });
+  }
   function hydrateImages_() {
     if (!_idbOk) return;
-    window.Go5Idb.entries().then(function (all) {
-      Object.keys(all || {}).forEach(function (k) {
-        var v = all[k];
-        if (k.indexOf('ref:') === 0) _imgMem.ref[k.slice(4)] = v;
-        else if (k.indexOf('bsky:') === 0) _imgMem.bsky[k.slice(5)] = v;
-        else if (k.indexOf('post:') === 0) _imgMem.post[k.slice(5)] = v;
-        else if (k.indexOf('used:') === 0) _imgMem.used[k.slice(5)] = v;
-      });
+    readImageEntries_(['ref:', 'bsky:']).then(function (all) {
+      mergeImageEntries_(all);
       return migrateLocalImages_();
     }).then(function () {
-      markHydrated_(); // ここから先は _imgMem が真値=空保存の拒否を解除し、待たせていたモーダルを進める
-      // 画像がメモリに載ったので、候補タブ表示中なら描画し直す。(サムネ・✓バッジを反映)入力中は保留。
-      bgRender_();
+      markCandidateHydrated_(); // 候補画像・コメントの空保存拒否をここで解除
+      bgRender_();              // サムネ・コメント・✓バッジをすぐ反映
+      if (!window.__go5CandidateStandalone) hydrateHistoryImages_(true);
     }).catch(function (e) {
-      // オープン/読み取りに失敗＝この環境ではIDB不可。localStorageフォールバックへ切り替え。(旧データはそのまま読める)
+      // 候補画像のオープン/読み取り自体に失敗＝この環境ではIDB不可。localStorageへ切替。
       _idbOk = false; try { console.warn('[go5 idb] 利用不可のためlocalStorageで継続', e); } catch (_) {}
-      markHydrated_(); // localStorageは同期で読める=以後は待たせない・拒否もしない
+      markHydrated_();
     });
   }
   // localStorage の cand_refimg__* / cand_bskyimg__* を IDB へ移して localStorage から削除。(冪等・IDB書込成功後にのみ削除＝データロス防止)
@@ -814,14 +884,10 @@
   //   =画像が来ていない同期(タブ復帰の空振り等)では再描画しない=無条件反応の白フラッシュを避ける。
   function reHydrateFromSync_() {
     if (!_idbOk || !window.Go5Idb || !window.Go5Idb.available()) return;
-    window.Go5Idb.entries().then(function (all) {
-      Object.keys(all || {}).forEach(function (k) {
-        var v = all[k];
-        if (k.indexOf('ref:') === 0) _imgMem.ref[k.slice(4)] = v;
-        else if (k.indexOf('bsky:') === 0) _imgMem.bsky[k.slice(5)] = v;
-        else if (k.indexOf('post:') === 0) _imgMem.post[k.slice(5)] = v;
-        else if (k.indexOf('used:') === 0) _imgMem.used[k.slice(5)] = v;
-      });
+    // 同期で増えた画像だけの4名前空間を再読込。stock動画Blob等は候補描画へ持ち込まない。
+    var prefixes = window.__go5CandidateStandalone ? ['ref:', 'bsky:'] : ['ref:', 'bsky:', 'post:', 'used:'];
+    readImageEntries_(prefixes).then(function (all) {
+      mergeImageEntries_(all);
       bgRender_();   // 入力中は保留(打ちかけの候補入力を消さない)
     }).catch(function () {});
   }
@@ -1367,21 +1433,61 @@
   // ── 投稿画像モーダル(複数画像＋メモを保存)──
   var _refOverlay = null;
   var _refOpenSeq = 0; // モーダルを開くたびに増える通し番号(遅い非同期処理が古いpendingへ書き込むのを防ぐ)
-  function openRefImgModal_(it, onSaved) {
-    if (!it) return;
-    // ★画像の展開(IDB→メモリ)が終わる前に開くと、pendingが空で作られ「動画生成へ/保存」で
-    //   既存の画像・コメントを消してしまう。展開を待ってから開く。(Chami報告2026-07-17の真因)
-    if (_idbOk && !_hydrated) { whenImagesReady_(function () { openRefImgModal_(it, onSaved); }); return; }
-    var mySeq = ++_refOpenSeq;
-    var ov = _refOverlay;
-    if (!ov) {
-      ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
-      ov.innerHTML = '<div class="fz-modal refimg-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
-      document.body.appendChild(ov);
-      ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
-      ov.querySelector('.fz-close').addEventListener('click', function () { ov.hidden = true; });
-      _refOverlay = ov;
+  function closeRefOverlay_() {
+    _refOpenSeq++;
+    if (_refOverlay) _refOverlay.hidden = true;
+  }
+  function ensureRefOverlay_() {
+    if (_refOverlay && _refOverlay.isConnected) return _refOverlay;
+    var ov = document.createElement('div'); ov.className = 'fz-overlay'; ov.hidden = true;
+    ov.innerHTML = '<div class="fz-modal refimg-modal"><button class="fz-close" type="button" aria-label="閉じる">✕</button><div class="fz-body"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function (e) { if (e.target === ov) closeRefOverlay_(); });
+    ov.querySelector('.fz-close').addEventListener('click', closeRefOverlay_);
+    _refOverlay = ov;
+    return ov;
+  }
+  function showRefLoadState_(ov, it, failed, onSaved) {
+    var body = ov.querySelector('.fz-body');
+    body.innerHTML =
+      '<div class="fz-title refimg-title" style="padding-right:36px;">' + esc(it.title || it.cid) + '</div>' +
+      '<div class="hint" aria-live="polite" style="padding:22px 8px;text-align:center;">' +
+        (failed ? '⚠️ 保存済みデータを読み込めませんでした。通信状態を確認して、もう一度お試しください。' : '⏳ 保存済みの画像・コメントを読み込み中…') +
+      '</div>' +
+      (failed ? '<div style="text-align:center;"><button type="button" class="ghost refimg-load-retry">もう一度読み込む</button></div>' : '');
+    if (failed) {
+      var retry = body.querySelector('.refimg-load-retry');
+      if (retry) retry.addEventListener('click', function () { openRefImgModal_(it, onSaved); });
     }
+    ov.hidden = false; // クリックした瞬間から反応を見せる。透明な待ち時間を作らない。
+  }
+  function openRefImgModal_(it, onSaved, refReady) {
+    if (!it) return;
+    var ov = ensureRefOverlay_();
+    // 全体の候補画像展開が遅くても、押された作品のrefレコード1件だけを直接読む。
+    // 読み取り確認前に空モーダルを作って保存可能にすると既存画像を消し得るため、読込中UIを先に出す。
+    var cid = String(it.cid || '');
+    var known = _candidateHydrated || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
+    if (_idbOk && !known && !refReady) {
+      var loadSeq = ++_refOpenSeq;
+      showRefLoadState_(ov, it, false, onSaved);
+      var slowTimer = setTimeout(function () {
+        if (loadSeq === _refOpenSeq && !ov.hidden) showRefLoadState_(ov, it, false, onSaved);
+      }, 4000);
+      ensureRefLoaded_(cid).then(function (ok) {
+        clearTimeout(slowTimer);
+        if (loadSeq !== _refOpenSeq) return; // 閉じた/別作品を開いた後なら古い結果を出さない
+        if (!ok) { showRefLoadState_(ov, it, true, onSaved); return; }
+        // 直接読めた1件は全体ハイドレートを待たずカード側にも即時反映する。
+        try {
+          var page = document.getElementById('pageCand'), live = page && liveRefButton_(page, cid);
+          if (live) updateCardRefThumb_(live.closest ? live.closest('.cand-card') : null, cid);
+        } catch (e) {}
+        openRefImgModal_(it, onSaved, true);
+      });
+      return;
+    }
+    var mySeq = ++_refOpenSeq;
     var cur = refImgOf(it.cid) || {};
     var curImgs = Array.isArray(cur.imgs) ? cur.imgs.filter(Boolean) : (cur.img ? [cur.img] : []);
     // pending.imgs=保存候補の画像列(複数可・37ページ級の連続貼り付けOK)・idx=表示中(「動画生成へ」で採用される1枚)
@@ -1578,10 +1684,10 @@
       Promise.resolve(refImgSave(it.cid, pending)).then(function () {
         transferToMovie_(it, pending.imgs[pending.idx] || '', pending.comment, workUrl); // ★表示中の画像を採用
         if (onSaved) onSaved();
-        ov.hidden = true;
+        closeRefOverlay_();
       });
     });
-    body.querySelector('#refImgCancel').addEventListener('click', function () { ov.hidden = true; });
+    body.querySelector('#refImgCancel').addEventListener('click', closeRefOverlay_);
     body.querySelector('#refImgSave').addEventListener('click', function () {
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
@@ -1595,14 +1701,14 @@
           body.querySelector('#refImgMsg').textContent = isTw ? '作品候補に変換しました' : '作品URLを更新しました';
           if (onSaved) onSaved();
           if (_activeTab) render();
-          setTimeout(function () { ov.hidden = true; }, 700);
+          setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 700);
         });
         return;
       }
       if (!refImgSave(it.cid, pending)) { body.querySelector('#refImgMsg').textContent = '保存できません(このブラウザの保存枠が不足。古い候補の画像を「消す」で減らしてください)'; return; }
       body.querySelector('#refImgMsg').textContent = '保存しました';
       if (onSaved) onSaved();
-      setTimeout(function () { ov.hidden = true; }, 600);
+      setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
     });
     wirePaste_(body);
     ov.hidden = false;
@@ -3049,13 +3155,13 @@
     var inp = $('candUrl'), twInp = $('candTwitter'), msg = $('candMsg');
     // 候補の画像・メモはIndexedDBから非同期で展開される。重複作品への追記も既存内容との
     // マージなので、展開前の空メモリを正として上書きしないよう読込み完了後に開始する。
-    if (_idbOk && !_hydrated) {
+    if (_idbOk && !_candidateHydrated) {
       if (msg) msg.textContent = '⏳ 保存済みの候補データを確認中…';
       if (_candAddHydrationPending) return; // 連打で待機処理を増やさない
       _candAddHydrationPending = true;
       whenImagesReady_(function () {
         _candAddHydrationPending = false;
-        if (!_hydrated) {
+        if (!_candidateHydrated) {
           if (msg) msg.textContent = '⚠️ 保存済みデータの確認に時間がかかっています。少し待って、もう一度押してください';
           return; // 未展開のままマージすると既存画像・メモを失うため進めない
         }

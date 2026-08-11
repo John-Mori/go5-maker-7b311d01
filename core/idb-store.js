@@ -95,6 +95,45 @@
     });
   }
 
+  // 指定した接頭辞のキーだけを読む。候補ページが起動時に全KV(ドラフト動画Blobを含む)を
+  // 展開してiOS Safariを圧迫しないため、IDBKeyRangeで対象範囲そのものを絞る。
+  function entriesPrefix(prefix, retry) {
+    if (retry === undefined) retry = true;
+    prefix = String(prefix || "");
+    if (!prefix) return Promise.resolve({});
+    return open().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var out = {}, t, st, c, range;
+        try {
+          t = db.transaction(STORE, "readonly");
+          st = t.objectStore(STORE);
+          range = IDBKeyRange.bound(prefix, prefix + "\uffff", false, false);
+          c = st.openCursor(range);
+        } catch (e) {
+          if (retry && isClosingErr(e)) { _dbP = null; resolve(entriesPrefix(prefix, false)); return; }
+          reject(e); return;
+        }
+        c.onsuccess = function () { var cur = c.result; if (cur) { out[cur.key] = cur.value; cur.continue(); } else resolve(out); };
+        c.onerror = function () { reject(c.error || new Error("idb-prefix-cursor-error")); };
+        t.onerror = function () { reject(t.error || new Error("idb-prefix-tx-error")); };
+        t.onabort = function () { reject(t.error || new Error("idb-prefix-abort")); };
+      });
+    });
+  }
+
+  // 複数prefixは1範囲ずつ逐次取得する。大画像が多いiPhoneで同時に複数cursorを走らせず、
+  // 呼び出し側には従来entries()と同じ {key:value} で返す。
+  function entriesByPrefixes(prefixes) {
+    var uniq = [], seen = {};
+    (prefixes || []).forEach(function (p) { p = String(p || ""); if (p && !seen[p]) { seen[p] = true; uniq.push(p); } });
+    var out = {}, chain = Promise.resolve();
+    uniq.forEach(function (p) {
+      chain = chain.then(function () { return entriesPrefix(p); }).then(function (part) {
+        Object.keys(part || {}).forEach(function (k) { out[k] = part[k]; });
+      });
+    });
+    return chain.then(function () { return out; });
+  }
   // ★恒久対策(2026-08-11 Chami「候補の画像・コメント・メモが消えた」の再発クラス／C-038)：
   //   iOS Safari は「7日間サイトに触れないと script-writable storage(IndexedDB/localStorage)を全消去」する
   //   (ITPのstorage cap)。これで保存した動画生成用画像・コメント・メモが一斉に消える=今回の症状。
@@ -111,7 +150,7 @@
   }
   try { requestPersist(); } catch (e) {}
 
-  var API = { available: available, get: get, set: set, del: del, entries: entries, requestPersist: requestPersist };
+  var API = { available: available, get: get, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, requestPersist: requestPersist };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Idb = API;
 })(typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : this));

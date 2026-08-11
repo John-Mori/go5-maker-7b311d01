@@ -67,10 +67,31 @@ test.describe('go5-maker 公開URL スモーク', () => {
   });
 });
 test.describe('候補ページの画像・投稿編集', () => {
-  test('閉じた追加モーダル後も同期画像が出て、DOM差し替え後も投稿編集が開く', async ({ page }) => {
+  test('候補画像の全体展開が遅くても、作品単位で投稿編集が開き、画像も自動表示される', async ({ page }) => {
     const cid = 'tw_codex_candidate_ui';
+    // iPhoneで候補画像の全体ハイドレートが遅い状態を決定的に再現する。
+    // 押した作品1件のGo5Idb.getは遅延させないため、モーダルが全体処理から独立していることも検証できる。
+    await page.route('**/candidates.js*', async (route) => {
+      const response = await route.fetch();
+      const original = await response.text();
+      const delayedHydration = [
+        '(function () {',
+        '  var originalEntriesByPrefixes = Go5Idb.entriesByPrefixes.bind(Go5Idb);',
+        '  window.__go5HydratePrefixes = [];',
+        '  Go5Idb.entriesByPrefixes = function (prefixes) {',
+        '    window.__go5HydratePrefixes.push((prefixes || []).slice());',
+        '    return new Promise(function (resolve, reject) {',
+        '      setTimeout(function () { originalEntriesByPrefixes(prefixes).then(resolve, reject); }, 1800);',
+        '    });',
+        '  };',
+        '}());'
+      ].join('\n');
+      await route.fulfill({ response, body: delayedHydration + '\n' + original });
+    });
+
     await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate((candidateCid) => {
+    const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.evaluate(async ({ candidateCid, imageData }) => {
       localStorage.setItem('cand_items', JSON.stringify([{
         cid: candidateCid,
         title: '候補UI回帰テスト',
@@ -78,19 +99,6 @@ test.describe('候補ページの画像・投稿編集', () => {
         twitterUrl: 'https://x.com/test/status/1',
         addedAt: Date.now(),
       }]));
-    }, cid);
-    await page.reload({ waitUntil: 'domcontentloaded' });
-
-    const editButton = page.locator('[data-refimg="' + cid + '"]');
-    await expect(editButton).toBeVisible();
-
-    // 一度開いて閉じると .add-modal 自体はDOMに残る。この状態でも背景同期を止めてはいけない。
-    await page.locator('#candAddOpen').click();
-    await page.locator('.add-modal .fz-close').click();
-    await expect(page.locator('.fz-overlay:has(.add-modal)')).toBeHidden();
-
-    const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-    await page.evaluate(async ({ candidateCid, imageData }) => {
       await new Promise((resolve, reject) => {
         const req = indexedDB.open('go5store', 1);
         req.onupgradeneeded = () => {
@@ -101,23 +109,38 @@ test.describe('候補ページの画像・投稿編集', () => {
           const db = req.result;
           const tx = db.transaction('kv', 'readwrite');
           tx.objectStore('kv').put({ imgs: [imageData], comment: '同期画像', memo: '', at: Date.now() }, 'ref:' + candidateCid);
+          // 候補ページには不要な大きなドラフトBlob。同じDBに在っても候補ハイドレートの範囲外であることが重要。
+          tx.objectStore('kv').put(new Blob([new Uint8Array(2 * 1024 * 1024)]), 'stock_v_candidate_regression');
           tx.oncomplete = () => { db.close(); resolve(); };
           tx.onerror = () => reject(tx.error);
         };
       });
-      document.dispatchEvent(new CustomEvent('go5-synced', { detail: { pulledImg: 1 } }));
     }, { candidateCid: cid, imageData: image });
+    await page.reload({ waitUntil: 'domcontentloaded' });
 
-    await expect(page.locator('[data-refimgview="' + cid + '"]')).toBeVisible();
+    const editButton = page.locator('[data-refimg="' + cid + '"]');
+    await expect(editButton).toBeVisible();
 
-    // 非同期描画によるinnerHTML差し替えを模擬。複製ボタンには個別listenerが無くても親の委譲で動く。
+    // 一度開いて閉じた追加モーダルがDOMに残っていても、画像反映を止めない。
+    await page.locator('#candAddOpen').click();
+    await page.locator('.add-modal .fz-close').click();
+    await expect(page.locator('.fz-overlay:has(.add-modal)')).toBeHidden();
+
+    // innerHTML差し替え後のlistener無しボタンでも親の委譲で動き、全体展開(1.8秒)を待たず直接1件を読む。
     await editButton.evaluate((el) => el.replaceWith(el.cloneNode(true)));
     await page.locator('[data-refimg="' + cid + '"]').click();
     await expect(page.locator('.refimg-modal')).toBeVisible();
-    await expect(page.locator('#refImgPreview img')).toBeVisible();
+    await expect(page.locator('#refImgPreview img')).toBeVisible({ timeout: 1200 });
+    await expect(page.locator('[data-refimgview="' + cid + '"]')).toBeVisible({ timeout: 1200 });
+
+    // 全体展開が後から完了したら、ページ移動や候補タブの押し直し無しでカード画像も出る。
+    await page.locator('#refImgCancel').click();
+    await expect(page.locator('[data-refimgview="' + cid + '"]')).toBeVisible({ timeout: 5000 });
+    const prefixes = await page.evaluate(() => window.__go5HydratePrefixes);
+    expect(prefixes[0]).toEqual(['ref:', 'bsky:']);
+    expect(prefixes.flat()).not.toContain('stock_v_');
   });
 });
-
 test.describe('ドラフト軽量ページ', () => {
   test('iPhone幅で重い動画DOMを持たず、ドラフト投稿モードまで開ける', async ({ page }) => {
     const errors = [];
