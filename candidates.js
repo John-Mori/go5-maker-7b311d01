@@ -92,10 +92,16 @@
   function salesTargetCids_(items) {
     return (items || []).filter(isSalesTarget_).map(function (it) { return it.cid; });
   }
-  // ジャンルタグに「AI」を含むものがあれば AI 作品とみなす。(わかる範囲のベストエフォート判定)
-  // AI作品の判定。★AIは genre タグに載らず「コミック・AI」等の floor 名でしか示されない作品があるため、
-  //   floor も /AI/ 走査に混ぜる(候補が floor を保持するようになったので badge も floor で拾える・2026-08-12)。
-  function isAiWork_(genres, floor) { return (genres || []).concat(floor ? [String(floor)] : []).some(function (g) { return /AI/i.test(String(g || '')); }); }
+  // 全角英字→半角(ＡＩ→AI)。FANZAのタグ表記ゆれで /AI/ が素通りするのを防ぐ。
+  function toHalfWidth_(s) { return String(s == null ? '' : s).replace(/[Ａ-Ｚａ-ｚ]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }); }
+  // AI作品の判定。★同人AIは genre タグにも floor 名にも「AI」が載らない作品がある(実測 d_748630=
+  //   ジャンルは巨乳/制服等・floor は「同人」)。そのため worker がページのFANZA必須開示文「AI生成」から
+  //   立てた明示フラグ it.ai を最優先で見る。フラグが無い作品は従来どおり genre/floor を /AI/ 走査
+  //   (全角ＡＩも半角化して拾う)でベストエフォート判定する。
+  function isAiWork_(genres, floor, ai) {
+    if (ai) return true;
+    return (genres || []).concat(floor ? [String(floor)] : []).some(function (g) { return /AI/i.test(toHalfWidth_(g)); });
+  }
 
   // サークルを表すアイコン。旧「🏷」絵文字の置き換え＝グレーの人物シルエット(添付画像)をSVG化。
   //   白背景は描かない＝透過。width/height=1em で文字サイズに追従。inline-blockで前後の文字と揃う。
@@ -567,6 +573,39 @@
       });
       if (changed) lsSet(K_INFOMISS, miss);
     } catch (e) {}
+  }
+
+  // 同人候補のAI生成判定を「一度だけ」確定する。★AIはジャンルタグにも floor 名にも載らず、FANZAの
+  //   必須開示文(作品説明の「AI生成」)にしか出ない作品がある(実測 d_748630)。worker に checkAi を渡して
+  //   ページ由来のAIフラグを取りに行き、it.ai を立てる。1候補につき一度きり(it.aiChecked)＝取れなくても
+  //   「確認済み」にして二度は叩かない(DMMへの無駄打ち・無限ポーリングを防ぐ)。タブ表示中のみ・12件ずつ。
+  //   ★既存候補(=追加済み)にも判定が後から届く(Chami 2026-08-12「追加されてる候補に判定が入るように」)。
+  function aiRecheck_(key, items, cb) {
+    if (!window.FanzaCore) { cb(false); return; }
+    var cfg = workerCfg(); if (!cfg.url) { cb(false); return; }
+    var targets = (items || []).filter(function (it) {
+      return isSalesTarget_(it) && it.title && it.title !== '(タイトル未取得)' && !it.ai && !it.aiChecked;
+    }).slice(0, 12);
+    if (!targets.length) { cb(false); return; }
+    var pending = targets.length, updates = {};
+    targets.forEach(function (it) {
+      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url, { checkAi: true }).then(function (info) {
+        if (info && info.title) updates[it.cid] = { ai: !!info.ai };
+        if (--pending === 0) finish();
+      }).catch(function () { if (--pending === 0) finish(); });
+    });
+    // 書き戻しは現在のlocalStorage配列に対して差分だけ当てる(他の変更を巻き戻さない・backfillと同じ考え方)。
+    function finish() {
+      var cids = Object.keys(updates); if (!cids.length) { cb(false); return; }
+      var cur = lsGet(key, '[]'), changed = false;
+      cur.forEach(function (it) {
+        if (!it || it.cid == null || !(it.cid in updates)) return;
+        if (updates[it.cid].ai && !it.ai) { it.ai = true; changed = true; }
+        if (!it.aiChecked) { it.aiChecked = true; changed = true; } // AI無しでも「確認済み」で二度叩かない
+      });
+      if (changed) lsSet(key, cur);
+      cb(changed);
+    }
   }
 
   // ── 現在描画中カードの cid→item 索引(サムネ/投稿画像モーダルが item を引くため)──
@@ -3385,13 +3424,14 @@
     if (!targets.length) { done(); return; }
     var pending = targets.length;
     targets.forEach(function (it) {
-      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url).then(function (info) {
+      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url, { checkAi: true }).then(function (info) {
         if (info && info.title) {
           it.title = info.title; if (info.author) it.author = info.author;
           it.listPrice = info.listPrice; it.price = info.price; it.discountPct = info.discountPct || 0;
           if (info.releaseDate) it.date = info.releaseDate;
           if (info.genres && info.genres.length) it.genres = info.genres;
           if (info.floor) it.floor = info.floor; if (info.service) it.service = info.service; // AI判定用(floor名でしか分からない作品)
+          if (info.ai) it.ai = true; it.aiChecked = true; // 🔁でAI生成判定も確定(ページ由来のAIフラグ・一度きり)
           if (info.thumb || info.thumbSmall) it.thumb = info.thumb || info.thumbSmall;
           if (info.samples && info.samples.length) it.samples = info.samples;
           if (info.reviewCount != null) it.reviewCount = info.reviewCount;
@@ -3516,6 +3556,8 @@
     fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
     // タイトル/発売日が未取得の候補を控えめに再取得。(追加直後の一時的な部分取得を自動で埋める)
     backfillMissingInfo_(key, arr, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
+    // 同人候補のAI生成判定を一度だけ確定(既存候補にも後から判定が届く)。取れたら再描画でAIバッジが出る。
+    aiRecheck_(key, arr, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
     // 追加直後の未取得は、タブを開いている間だけ自動で追いかける(ユーザーの再操作/再オープンを待たない)。
     // 素早い再取得フェーズの未取得が残る間のみ、短い間隔で1回だけ再描画を予約する(TTLが無駄打ちを抑える)。
     scheduleInfoTick_(tabId, arr);
@@ -3724,7 +3766,7 @@
     if (it.date) sub.push('発売 ' + esc(fmtDate(it.date)));
     if (it.addedAt) sub.push('<span class="cand-added">追加 ' + esc(fmtTs(it.addedAt)) + '</span>');
     var ws = deriveWorkState_(it.date);
-    var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres, it.floor) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '');
+    var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres, it.floor, it.ai) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '');
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';

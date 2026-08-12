@@ -121,6 +121,16 @@ export default {
         }
       }
 
+      // ③‴ 同人のAI生成判定：APIで解決した同人(d_)はAIがiteminfo.genreに載らない(実測)ため、
+      //    クライアントが checkAi を立てた時だけ作品ページを1回見てAIフラグを付ける。routine の
+      //    情報取得には乗せない=DMMへの余計なスクレイプを増やさない(候補1件につきクライアント側で一度きり)。
+      if (item && item.title && !item.ai && body.checkAi === true && /^d_/i.test(cid)) {
+        try {
+          const aiRes = await fetchDmmPage(DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/");
+          if (aiRes && aiRes.ok) { const aiHtml = await aiRes.text(); if (aiFromHtml_(aiHtml)) item.ai = true; }
+        } catch (e) { /* best-effort: 判定できなくても本体情報は返す */ }
+      }
+
       // フル情報が取れなかった作品は「PC取得依頼キュー」へ記録（PCのバッチが拾ってスクレイプ→ov:へ保存）。
       //   book等のsrcUrlがあれば一緒に保存し、PC側がそのURL（同人以外）を正しくスクレイプできるようにする。
       // フル情報が取れなかった作品は取得依頼キューへ（dedup+Books用URL enrich はstQueueInfoPut内蔵）。
@@ -849,6 +859,11 @@ async function fetchDmmPage(url, trace) {
   }
   return null;
 }
+// AI生成作品の判定：FANZA同人はAIをジャンルタグに載せず、作品説明の必須開示文でのみ示す
+//   (実測 d_748630=ジャンルは巨乳/制服/中出し等でAI無し・説明に「＊本作品はAI生成で作成しています」)。
+//   カテゴリchrome(コミック・AI / CG・AI / ボイス・一部AI)は全ページ共通で紛れるが、素の「AI生成」
+//   「生成AI」は非AI作品4件の実測でpage全体0件＝作品固有の信号として使える(誤検知しない)。
+function aiFromHtml_(html) { return /AI生成|生成AI/.test(String(html || "")); }
 async function scrapeFanzaItem(cid, srcUrl) {
   // srcUrl（FANZA Books等の実ページURL・呼び出し元で許可ドメイン検証済み）があればそちらを優先。
   const isBook = /book\.dmm\./.test(srcUrl); // FANZAブックス判定（同人ページとは価格の出方が異なる＝下記価格ブロックで分岐）
@@ -999,6 +1014,7 @@ async function scrapeFanzaItem(cid, srcUrl) {
 
   return {
     content_id: cid,
+    ai:         aiFromHtml_(html),   // ページ由来のAI生成判定(ジャンルタグに載らない同人AI作品を拾う)
     title:      title,
     date:       dateStr,
     service_name: isBook ? "FANZAブックス" : "同人",

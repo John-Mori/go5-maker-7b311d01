@@ -47,6 +47,7 @@ function parseFanzaItem(item) {
   return {
     cid: item.content_id || '',
     title: item.title || '',
+    ai: !!item.ai,             // AI生成作品(workerがページのFANZA必須開示文から判定。ジャンルタグに載らない同人AI用)
     partial: !!item.partial,   // 画像のみの部分情報(API未収録＋ページ取得不能の作品)
     author: author,
     authorId: authorId,
@@ -99,18 +100,22 @@ function fanzaRetryable_(status, data) {
 // 成功時は parseFanzaItem の結果(title を持つ)を返す。失敗時は { __error:true, reason } を返す。
 // ※呼び出し側は「info && info.title」で成功判定できる。(従来どおり)reason で失敗内容が分かる。
 // srcUrl(任意・第4引数): 作品ページの元URL。FANZA Books等、同人以外のスクレイプフォールバック先として worker が使う。
-function fetchFanzaInfo(cid, workerUrl, sharedSecret, srcUrl) {
+// opts(任意・第5引数): { checkAi:true } で同人のAI生成判定(worker がページを1回見て ai フラグを付ける)を依頼する。
+//   ★routine の情報取得では渡さない=DMMへの余計なスクレイプを増やさない(候補1件につき一度だけ確認する用途)。
+function fetchFanzaInfo(cid, workerUrl, sharedSecret, srcUrl, opts) {
   if (!cid || !workerUrl) return Promise.resolve({ __error: true, reason: '作品URL/ワーカーURLが未設定' });
   // タイムアウト。(スマホ回線での無限待ちを防ぎ、呼び出し側のリトライを効かせる)
   var ctrl = null, timer = null, timedOut = false;
   try { ctrl = new AbortController(); timer = setTimeout(function () { timedOut = true; try { ctrl.abort(); } catch (e) {} }, 9000); } catch (e) { ctrl = null; }
-  var opts = {
+  var payload = srcUrl ? { cid: cid, url: srcUrl } : { cid: cid };
+  if (opts && opts.checkAi) payload.checkAi = true;
+  var reqOpts = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': sharedSecret || '' },
-    body: JSON.stringify(srcUrl ? { cid: cid, url: srcUrl } : { cid: cid })
+    body: JSON.stringify(payload)
   };
-  if (ctrl) opts.signal = ctrl.signal;
-  return fetch(workerUrl + '/api/fanza-item', opts)
+  if (ctrl) reqOpts.signal = ctrl.signal;
+  return fetch(workerUrl + '/api/fanza-item', reqOpts)
   .then(function (r) {
     return r.json().catch(function () { return null; }).then(function (data) {
       if (timer) clearTimeout(timer);
