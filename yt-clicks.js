@@ -2232,7 +2232,8 @@
   // ── 投稿完了(ドラフトの投稿モード)から1件を投稿履歴へ記録する。account指定で正しいアカウント側へ書く。──
   //   ①「投稿完了を押しても投稿履歴に載らない」の対処。ここに載れば、既存の updateYtScheduled_ が
   //   予約公開(公開前)の動画を yt_scheduled__ へ拾い、scheduler.js が予約タブへ「公開待ち」表示する(②は自動達成)。
-  //   同じ動画(videoId)or同じ計測URL(shortUrl)が既にあれば重複追加しない。表示中アカウントなら即反映。
+  //   同じ動画(videoId or YouTube動画ID)が既にあれば重複追加しない。★shortUrlは投稿ごとに一意でない
+  //   (セール会場短縮URLは別作品の投稿が共有する)ので、強キーの無い旧行同士の同定にしか使わない。表示中アカウントなら即反映。
   function addCompletedPost_(opts) {
     opts = opts || {};
     var acc = opts.account || acct();
@@ -2276,8 +2277,14 @@
         var it = arr[ii];
         var y = ymap[itemKey(it)] || it.ytUrl || '';
         if (vid && ytIdOf(y) === vid) { matched = it; matchedBy = 'ytUrl'; matchedStore = pools[pi].base; }
-        else if (shortUrl && it.shortUrl === shortUrl) { matched = it; matchedBy = 'shortUrl'; matchedStore = pools[pi].base; }
         else if (vidId && it.videoId === vidId) { matched = it; matchedBy = 'videoId'; matchedStore = pools[pi].base; } // 同じドラフト(背骨ID)の再完了で履歴を二重にしない
+        // ★shortUrl(=説明欄の短縮URL)は「投稿ごとに一意」ではない。セール会場リンク(例 5mgl.com/8dpUu＝
+        //   「今だけ¥10のセール作品をご紹介」)は同一セール期間中の別作品の投稿が全て共有する。強いキー
+        //   (videoId / YouTube動画ID)がどちらかにある時に shortUrl 一致だけで畳むと、別作品が同じセール会場
+        //   リンクを持つだけで dupe 扱いされ「投稿完了しても載らない＋既存の別題名(先生、最低です)へ固定」に
+        //   なる(Chami再発2026-08-12・実は女の子も焦ってる)。findDup_(下・3269付近)は既にこの理由でshortUrlを
+        //   postUri/videoIdの無い"薄い"行に限定済み=完了側もそれに揃える。両側に強キーが無い旧行同士の同定に限る。
+        else if (shortUrl && it.shortUrl === shortUrl && !vid && !vidId && !it.videoId && !ytIdOf(y)) { matched = it; matchedBy = 'shortUrl'; matchedStore = pools[pi].base; }
       }
     }
     if (matched) {

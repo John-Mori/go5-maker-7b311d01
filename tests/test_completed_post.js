@@ -29,15 +29,20 @@ function shouldRecordCompleted(ytUrl, shortUrl, vidId, hasIdGen) {
   return true;
 }
 
-// --- 重複判定のミラー(yt-clicks.js:2199-2205) ---
-//   同じ YouTube動画ID / 同じ短縮URL / 同じ背骨ID(videoId) の完了は履歴を二重にしない。
+// --- 重複判定のミラー(yt-clicks.js:addCompletedPost_ の pools ループ) ---
+//   同じ YouTube動画ID / 同じ背骨ID(videoId) の完了は履歴を二重にしない。
+//   ★shortUrl は「投稿ごとに一意」ではない=セール会場短縮URL(5mgl.com/8dpUu 等)は同一セール中の別作品の
+//   投稿が全て共有する。強キー(videoId / YouTube動画ID)がどちらかにある時に shortUrl だけで畳むと、別作品が
+//   同じセール会場リンクを持つだけで dupe 扱いされ「投稿完了しても載らない＋別題名へ固定」になる
+//   (Chami再発2026-08-12・実は女の子も焦ってる→先生、最低ですに固定)。両側に強キーが無い旧行同士に限定する。
 function ytIdOf(u) { const m = String(u || '').match(/[?&]v=([^&]+)|shorts\/([^/?]+)/); return m ? (m[1] || m[2]) : ''; }
 function isDupe(existingList, incoming) {
   const vid = incoming.ytUrl ? ytIdOf(incoming.ytUrl) : '';
   return existingList.some(function (it) {
     if (vid && ytIdOf(it.ytUrl || '') === vid) return true;
-    if (incoming.shortUrl && it.shortUrl === incoming.shortUrl) return true;
     if (incoming.videoId && it.videoId === incoming.videoId) return true;
+    if (incoming.shortUrl && it.shortUrl === incoming.shortUrl
+        && !vid && !incoming.videoId && !it.videoId && !ytIdOf(it.ytUrl || '')) return true;
     return false;
   });
 }
@@ -87,9 +92,19 @@ test('D-1: 同じ背骨ID(videoId)の再完了は重複=二重に載せない(�
   const list = [{ videoId: 'acc1-20260808-2200-zz99' }];
   assert.strictEqual(isDupe(list, { videoId: 'acc1-20260808-2200-zz99' }), true);
 });
-test('D-2: 同じ短縮URLの再完了は重複', function () {
+test('D-2: 同じ短縮URLの再完了は重複(両側に強キーが無い旧行同士に限る)', function () {
   const list = [{ shortUrl: 'https://5mgl.com/x1' }];
   assert.strictEqual(isDupe(list, { shortUrl: 'https://5mgl.com/x1' }), true);
+});
+test('D-7: 別作品が同じセール会場短縮URLを共有していても、各自に背骨IDがあれば重複でない=新規で載る(実は女の子も焦ってる→先生、最低ですに固定 の根治)', function () {
+  const list = [{ videoId: 'acc1-20260809-0033-wk9z', ytUrl: 'https://youtube.com/shorts/OTHER111aaa', shortUrl: 'https://5mgl.com/8dpUu', title: '先生、最低です' }];
+  const incoming = { videoId: 'acc1-20260812-2119-xyz0', ytUrl: 'https://youtube.com/shorts/GT8OLSB8mtE', shortUrl: 'https://5mgl.com/8dpUu', title: '実は女の子も焦ってる' };
+  assert.strictEqual(isDupe(list, incoming), false);
+});
+test('D-8: 強キーが片方にでも在れば shortUrl 共有で畳まない(既存に videoId・今回はYouTube IDのみ)', function () {
+  const list = [{ videoId: 'acc1-OLD', shortUrl: 'https://5mgl.com/8dpUu' }];
+  const incoming = { ytUrl: 'https://youtube.com/shorts/GT8OLSB8mtE', shortUrl: 'https://5mgl.com/8dpUu' };
+  assert.strictEqual(isDupe(list, incoming), false);
 });
 // ※ URL形式違い(shorts/ vs ?v=)の同一ID判定は本体 yt-clicks.js:ytIdOf の守備範囲。
 //   ここのミラーは簡易版なので同形式で重複を担保する(下)。
