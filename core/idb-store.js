@@ -79,8 +79,13 @@
         function finish(cb) { if (settled) return; settled = true; if (wd) { try { clearTimeout(wd); } catch (e) {} wd = null; } cb(); }
         try {
           wd = setTimeout(function () {
-            if (_dbP) _dbP = null; // 無応答=死んだ接続とみなしキャッシュを捨てる(次回アクセスで再オープン)。
-            finish(function () { reject(new Error("idb-timeout")); });
+            _dbP = null; // 無応答=死んだ接続とみなしキャッシュを捨てる(次回アクセスで再オープン)。
+            // ★番犬で落ちたら1回だけ接続を張り直して再試行する(2026-08-13・Chami報告「ドラフト保存が
+            //   idb-timeoutで失敗」「候補の読込が五分五分」)。iOS Safariはメモリ圧・バックグラウンド化で
+            //   transaction が無言で死ぬ=張り直せば通ることが多い。旧実装は即rejectで一発勝負だった。
+            //   retry=false の2周目まで死んだ時だけ idb-timeout を投げる(fail-open・§3 可用性)。
+            if (retry) finish(function () { resolve(withStore(mode, fn, false)); });
+            else finish(function () { reject(new Error("idb-timeout")); });
           }, TX_TIMEOUT_MS);
         } catch (e) {}
         var t, req;
@@ -95,6 +100,11 @@
         t.onerror = function () { finish(function () { reject(t.error || new Error("idb-tx-error")); }); };
         t.onabort = function () { finish(function () { reject(t.error || new Error("idb-abort")); }); };
       });
+    }, function (openErr) {
+      // ★open() 自体が番犬(idb-open-timeout)や onblocked で落ちた時も1回だけ張り直す。
+      //   iOS Safari は indexedDB.open() が無言で固まることがあり、これも「五分五分」ハングの一経路。
+      if (retry) return withStore(mode, fn, false);
+      throw openErr;
     });
   }
 
