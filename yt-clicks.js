@@ -2988,9 +2988,14 @@
       var yt = ymap[k] || it.ytUrl || '';
       var vid = ytIdOf(yt);
       var code = codeOf(it.shortUrl || '');
-      // 投稿日時：実投稿時刻(ts)を最優先。無ければYouTube公開日時を使う。(→朝ばかり/今日になる問題を解消)
+      // 投稿日時：YouTube公開日時(publishedAt)を最優先＝見出し表示(§1692・Chami 2026-08-05「投稿履歴の時刻は
+      //   動画作成日時ではなくYouTube投稿時間が正」)と永続化(シート)を揃える。旧はts(=投稿完了ボタンを押した
+      //   時刻)を優先していたため、表示はYouTube時刻・シートは完了ボタン時刻でズレ(Chami報告2026-08-12
+      //   「投稿日＝即時投稿を押した時ではなく、YouTubeでの投稿時間を参照する」)。pubMsはAPIから実取得した
+      //   publishedAtのみ(null厳格判定)＝旧懸念の「今日/now に落ちる」ことは無い。YouTube未連携の投稿(vid無し=
+      //   Bluesky単体等)は原理的にYouTube公開日時が無いのでts(実投稿時刻)へフォールバックする。
       var pubMs = (vid && publishedCache[vid] != null) ? publishedCache[vid] : null;
-      var postedMs = (it.ts && it.ts > 0) ? it.ts : pubMs;
+      var postedMs = (pubMs != null) ? pubMs : ((it.ts && it.ts > 0) ? it.ts : null);
       var rec = {
         videoId: it.videoId || '',
         title: it.title || '',                                          // 題名(コメント)＝アプリの④コメント
