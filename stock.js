@@ -823,39 +823,17 @@
     var page = $('pageStock');
     if (!page || page.hidden) return;
     _stockBgPending = false;
-    var curAcct = window.getCurrentAccount ? window.getCurrentAccount() : 'acc1';
+    var curAcct = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
     var metas = loadMeta().filter(function (m) { return (m.account || 'acc1') === curAcct; });
     var arch = loadArchive().filter(function (m) { return (m.account || 'acc1') === curAcct; });
     var sig = stockViewSig_(curAcct), seq = ++_renderSeq;
 
     var store = idb();
     var all = metas.concat(arch);
-    var thumbPs = all.map(function (m) {
-      if (_thumbCache[m.id]) return Promise.resolve(_thumbCache[m.id]);
-      if (!store) return Promise.resolve(null);
-      return store.get('stock_t_' + m.id).then(function (blob) {
-        if (blob) {
-          _thumbCache[m.id] = URL.createObjectURL(blob);
-          return _thumbCache[m.id];
-        }
-        // 実体が無い端末(2台目)=同期で来た stock:imgs ミラーの dataURL からサムネを出す(①-B)
-        return store.get('stock:imgs:' + m.id).then(function (mir) {
-          var du = mir && mir.th;
-          if (du) { _thumbCache[m.id] = du; return du; }
-          return null;
-        }).catch(function () { return null; });
-      }).catch(function () { return null; });
-    });
 
-    Promise.all(thumbPs).then(function (thumbUrls) {
-      // 非同期サムネ読込中にアカウント/同期データが変わった古い描画は捨てる。古いPromiseが後勝ちしない。
-      var nowAcct = window.getCurrentAccount ? window.getCurrentAccount() : 'acc1';
-      if (seq !== _renderSeq || page.hidden || nowAcct !== curAcct || stockViewSig_(curAcct) !== sig) {
-        if (!page.hidden && !modalIsOpen_()) setTimeout(render, 0);
-        return;
-      }
-      var thumbFor = {}; _missingThumbs = {};
-      all.forEach(function (m, i) { thumbFor[m.id] = thumbUrls[i]; if (!thumbUrls[i]) _missingThumbs[m.id] = 1; });
+    // 一覧HTMLを thumbFor(id→サムネURL/null)から組み立てて描画する。(サムネの有無に依らず同じ骨格)
+    function paint_(thumbFor) {
+      if (seq !== _renderSeq || page.hidden) return;
       var html = '<div class="card">';
       if (metas.length) {
         html += '<div style="font-size:.95rem;font-weight:700;color:var(--accent);margin-bottom:10px;">📦 ドラフト(' + metas.length + '件)</div>' +
@@ -875,6 +853,44 @@
       }
       page.innerHTML = html;
       _lastRenderedStockSig = sig;
+    }
+
+    // ★まず同期で即描画する=IDBサムネ読込を待たずに一覧の文字(件数/空メッセージ/作成履歴)を必ず出す。
+    //   従来は Promise.all(thumbPs) の解決を待って初めて innerHTML を入れていたため、iOS SafariでIDB get が
+    //   無言ハングすると Promise が永久に未解決=ページが真っ白のまま(リロードでたまたま復帰)。=「8割
+    //   何も表示されない/リロードで直る」の根治(Chami報告2026-08-12)。サムネはキャッシュ分だけ即出し、
+    //   残りは下の非同期取り込みで差し替える。
+    var cachedFor = {}; _missingThumbs = {};
+    all.forEach(function (m) { var u = _thumbCache[m.id] || null; cachedFor[m.id] = u; if (!u) _missingThumbs[m.id] = 1; });
+    paint_(cachedFor);
+
+    var thumbPs = all.map(function (m) {
+      if (_thumbCache[m.id]) return Promise.resolve(_thumbCache[m.id]);
+      if (!store) return Promise.resolve(null);
+      return store.get('stock_t_' + m.id).then(function (blob) {
+        if (blob) {
+          _thumbCache[m.id] = URL.createObjectURL(blob);
+          return _thumbCache[m.id];
+        }
+        // 実体が無い端末(2台目)=同期で来た stock:imgs ミラーの dataURL からサムネを出す(①-B)
+        return store.get('stock:imgs:' + m.id).then(function (mir) {
+          var du = mir && mir.th;
+          if (du) { _thumbCache[m.id] = du; return du; }
+          return null;
+        }).catch(function () { return null; });
+      }).catch(function () { return null; });
+    });
+
+    Promise.all(thumbPs).then(function (thumbUrls) {
+      // 非同期サムネ読込中にアカウント/同期データが変わった古い描画は捨てる。古いPromiseが後勝ちしない。
+      var nowAcct = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
+      if (seq !== _renderSeq || page.hidden || nowAcct !== curAcct || stockViewSig_(curAcct) !== sig) {
+        if (!page.hidden && !modalIsOpen_()) setTimeout(render, 0);
+        return;
+      }
+      var thumbFor = {}; _missingThumbs = {};
+      all.forEach(function (m, i) { thumbFor[m.id] = thumbUrls[i]; if (!thumbUrls[i]) _missingThumbs[m.id] = 1; });
+      paint_(thumbFor); // サムネが揃ったら差し替え描画(即描画の骨格を上書き)
     });
   }
   // ── 投稿モード モーダル ──
@@ -1472,7 +1488,7 @@
       if (d.pulledImg) { try { backfillUsedPreview_(); } catch (_) {} }
       var page = $('pageStock');
       if (!page || page.hidden) return;
-      var curAcct = window.getCurrentAccount ? window.getCurrentAccount() : 'acc1';
+      var curAcct = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
       var dataChanged = !!d.pulled && stockViewSig_(curAcct) !== _lastRenderedStockSig;
       var imageChanged = !!d.pulledImg && Object.keys(_missingThumbs).length > 0;
       if (!dataChanged && !imageChanged) return;
