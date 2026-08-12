@@ -141,6 +141,7 @@
   const K_PHOTO_CACHE = 'movie_photo_cache'; // リロード後の前景画像復元用キャッシュ
   let fontReady = false;
   let lastBlob = null, lastName = "video.mp4";
+  let _making = false; // 作成中の再入防止。★見た目のdisabledに依存しない=押されたボタンだけを busy 表示できる
 
   // ---- フォント読み込み(Canvas描画前に必須) ----
   function ensureFont() {
@@ -639,9 +640,17 @@
       return;
     }
     await ensureFont();
-    els.makeBtn.disabled = true;
+    // ★「押されたボタンだけ」を作成中の見た目にする(Chami報告2026-08-12「ドラフトで作成が今すぐ作成・投稿の
+    //   ボタンが押されたような挙動になる」)。従来は isDraft でも常に els.makeBtn(＝今すぐ作成・投稿)を disabled に
+    //   していたため、ドラフトを押しても隣の「今すぐ作成・投稿」が灰色化＝押された見た目になっていた。
+    //   再入防止は _making フラグで持ち、ボタンの disabled 表示と切り離す(ドラフト中に makeBtn を触っても _making で弾く)。
+    if (_making) return;
+    _making = true;
+    var activeBtn = isDraft ? document.getElementById("draftMakeBtn") : els.makeBtn;
+    var activeLabel = activeBtn ? activeBtn.textContent : "";
+    if (activeBtn) { activeBtn.disabled = true; activeBtn.textContent = isDraft ? "📦 作成中…" : "作成中…"; }
     els.resultArea.hidden = true;
-    setStatus("動画を作成中…(約5秒録画します。画面はそのままで)");
+    setStatus(isDraft ? "ドラフトを作成中…(約5秒録画します。画面はそのままで)" : "動画を作成中…(約5秒録画します。画面はそのままで)");
 
     try {
       bg.currentTime = 0;
@@ -676,7 +685,7 @@
       els.result.src = url;
       els.dl.href = url; els.dl.download = lastName;
       els.resultArea.hidden = false;
-      setStatus("✅ 完成しました：" + lastName + (ext === "webm" ? "(この端末ではwebm形式)" : ""));
+      setStatus((isDraft ? "✅ ドラフトを作成しました：" : "✅ 完成しました：") + lastName + (ext === "webm" ? "(この端末ではwebm形式)" : ""));
       els.resultArea.scrollIntoView({ behavior: "smooth" });
       // 完成を通知。(Bluesky自動投稿などが購読)この時点で Canvas は最終フレームを保持している。
       // 一本道運用の背骨＝安定動画IDを“作成時(投稿前)”に発番し、購読側(Drive保存・記録)へ串刺しで渡す。
@@ -694,7 +703,8 @@
     } catch (e) {
       setStatus("作成に失敗しました：" + e.message);
     } finally {
-      els.makeBtn.disabled = false;
+      _making = false;
+      if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = activeLabel; }
     }
   }
 
