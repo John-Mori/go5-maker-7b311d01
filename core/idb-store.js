@@ -53,23 +53,39 @@
     return n === "InvalidStateError" || /closing|closed|not allowed in the current state/i.test(m);
   }
 
+  // ★無応答トランザクションの番犬(2026-08-13)：iOS Safari は db.transaction() が throw せず「生きている
+  //   接続」に見えても、その直後の transaction が oncomplete/onerror/onabort を一切発火せず無言で固まることが
+  //   ある(バックグラウンド化・メモリ圧で接続が in-flight のまま死ぬ)。この時 withStore の Promise は永久に
+  //   settle せず、await している呼び出し側(候補モーダルの ensureRefLoaded_ →「⏳ 読み込み中…」)が固まる。
+  //   Chami報告2026-08-13「候補タブでコメントやメモが読み込まれない・五分五分」の真因はこれ。isClosingErr の
+  //   throw 経路(→再オープン)では拾えない=throwしない無言ハングだから。一定時間で reject に倒し、キャッシュを
+  //   捨てて次回は接続を張り直す(fail-open=固まるより「読めなかった」と喋る側へ倒す・§3 可用性)。
+  var TX_TIMEOUT_MS = 8000; // 単一キーの get/set/del は本来ミリ秒級。8秒は「明らかに死んでいる」判定の安全域。
   // トランザクション1つで fn(store) を実行し、oncomplete で解決。(get は req.result を返す)
   //   retry=true の初回のみ、transaction 生成が「閉じかけ」で throw したら再オープンして1回だけやり直す。
   function withStore(mode, fn, retry) {
     if (retry === undefined) retry = true;
     return open().then(function (db) {
       return new Promise(function (resolve, reject) {
+        var settled = false, wd = null;
+        function finish(cb) { if (settled) return; settled = true; if (wd) { try { clearTimeout(wd); } catch (e) {} wd = null; } cb(); }
+        try {
+          wd = setTimeout(function () {
+            if (_dbP) _dbP = null; // 無応答=死んだ接続とみなしキャッシュを捨てる(次回アクセスで再オープン)。
+            finish(function () { reject(new Error("idb-timeout")); });
+          }, TX_TIMEOUT_MS);
+        } catch (e) {}
         var t, req;
         try { t = db.transaction(STORE, mode); }
         catch (e) {
-          if (retry && isClosingErr(e)) { _dbP = null; resolve(withStore(mode, fn, false)); return; }
-          reject(e); return;
+          if (retry && isClosingErr(e)) { _dbP = null; finish(function () { resolve(withStore(mode, fn, false)); }); return; }
+          finish(function () { reject(e); }); return;
         }
         var st = t.objectStore(STORE);
-        try { req = fn(st); } catch (e) { reject(e); return; }
-        t.oncomplete = function () { resolve(req ? req.result : undefined); };
-        t.onerror = function () { reject(t.error || new Error("idb-tx-error")); };
-        t.onabort = function () { reject(t.error || new Error("idb-abort")); };
+        try { req = fn(st); } catch (e) { finish(function () { reject(e); }); return; }
+        t.oncomplete = function () { finish(function () { resolve(req ? req.result : undefined); }); };
+        t.onerror = function () { finish(function () { reject(t.error || new Error("idb-tx-error")); }); };
+        t.onabort = function () { finish(function () { reject(t.error || new Error("idb-abort")); }); };
       });
     });
   }
