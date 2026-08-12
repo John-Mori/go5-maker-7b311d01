@@ -201,7 +201,9 @@
     var cid = String(info.cid || cidHint || ''); if (!cid) return;
     if (load('movie_auto_attrs_cid') === cid) return;
     save('movie_auto_attrs_cid', cid);
-    setMovieAttrsFromTexts_((info.genres || []).concat([info.floor, info.service, info.title]), looseAiFromGenres_(info.genres));
+    //   ★info.ai=workerがページのFANZA開示文から立てた明示フラグ(同人AIは genre/floor に「AI」が載らない)。
+    //   これを最優先に混ぜないと、applyGenres で一旦入れたAIチェックをこの正式適用が外してしまう(#5再発の穴)。
+    setMovieAttrsFromTexts_((info.genres || []).concat([info.floor, info.service, info.title]), !!info.ai || looseAiFromGenres_(info.genres));
   }
   // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=候補の持つジャンルでの即時チェック。
   //   ★applyGenres は「暫定チェック」に徹し、cidガード(movie_auto_attrs_cid)は張らない。
@@ -217,9 +219,12 @@
     //   ★floor/service も渡す：AIは genre に載らず「コミック・AI」等の floor 名でしか判別できないため、
     //   候補が floor を保持していれば FANZA再取得(autoApplyAttrsFromInfo_)を待たず即チェックできる
     //   (候補→作成でAIカテゴリが空振りする再発の根治・Chami依頼2026-08-12「拾えてない」)。
-    applyGenres: function (genres, cid, title, floor, service) {
+    //   ★ai(第6引数)＝候補が持つ明示フラグ。同人AIは genre にも floor 名にも「AI」が載らない作品があり
+    //   (実測 d_748630=ジャンルは巨乳/制服…、floorは「同人」)、workerがページのFANZA必須開示文から立てた
+    //   it.ai を最優先で見ないとAIカテゴリが永久に空振りする(Chami報告2026-08-12「カテゴリのAIにチェック入らない」)。
+    applyGenres: function (genres, cid, title, floor, service, ai) {
       var texts = (genres || []).concat(title ? [title] : []).concat(floor ? [floor] : []).concat(service ? [service] : []);
-      setMovieAttrsFromTexts_(texts, looseAiFromGenres_(genres) || /AI/i.test(String(floor || '')));
+      setMovieAttrsFromTexts_(texts, !!ai || looseAiFromGenres_(genres) || /AI/i.test(String(floor || '')));
     }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
@@ -2367,7 +2372,10 @@
     if (movieInfoCache[cid] && movieInfoCache[cid].title) { renderMovieInfo(movieInfoCache[cid]); autofillAuthor(movieInfoCache[cid].author); autoApplyAttrsFromInfo_(movieInfoCache[cid], cid); return; }
     var seq = ++movieInfoSeq;
     renderMovieInfoLoading();
-    window.FanzaCore.fetchFanzaInfo(cid, workerUrl, secret, url).then(function (info) {
+    // ★checkAi:true＝同人(d_)のAI生成をworkerがページ開示文から判定して info.ai を返す。
+    //   これが無いとAPI解決の同人はAIが載らず、動画生成カテゴリのAIチェックが永久に空振りする
+    //   (Chami報告2026-08-12。編集中の1作品だけのスクレイプで負荷は限定的)。
+    window.FanzaCore.fetchFanzaInfo(cid, workerUrl, secret, url, { checkAi: true }).then(function (info) {
       if (seq !== movieInfoSeq) return; // 途中でURLが変わった＝破棄
       if (info && info.title) {
         movieInfoCache[cid] = info;

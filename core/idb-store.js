@@ -28,8 +28,16 @@
     if (_dbP) return _dbP;
     var thisP = _dbP = new Promise(function (resolve, reject) {
       if (!hasIdb()) { reject(new Error("no-indexeddb")); return; }
+      // ★オープンの番犬(2026-08-13)：iOS Safari は indexedDB.open() が onsuccess/onerror/onblocked を
+      //   一切発火せず無言で固まることがある(バックグラウンド化・メモリ圧)。この時 open() の Promise が
+      //   永久に settle せず、withStore の TX番犬は open().then の後=一生張られない。呼び出し側
+      //   (候補モーダルの ensureRefLoaded_ →「⏳ 読み込み中…」)が永久に固まる真因はこの穴。TX番犬と同じ
+      //   時間で reject へ倒し、キャッシュを捨てて次回オープンをやり直せるようにする(fail-open・§3 可用性)。
+      var settled = false, wd = null;
+      function done(fn) { if (settled) return; settled = true; if (wd) { try { clearTimeout(wd); } catch (e) {} wd = null; } fn(); }
+      try { wd = setTimeout(function () { if (_dbP === thisP) _dbP = null; done(function () { reject(new Error("idb-open-timeout")); }); }, TX_TIMEOUT_MS); } catch (e) {}
       var req;
-      try { req = indexedDB.open(DB, VER); } catch (e) { reject(e); return; }
+      try { req = indexedDB.open(DB, VER); } catch (e) { done(function () { reject(e); }); return; }
       req.onupgradeneeded = function () { try { if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE); } catch (e) {} };
       req.onsuccess = function () {
         var db = req.result;
@@ -37,10 +45,10 @@
         try { db.onversionchange = function () { try { db.close(); } catch (e) {} if (_dbP === thisP) _dbP = null; }; } catch (e) {}
         // ブラウザが接続を閉じた(iOS Safari のメモリ圧・バックグラウンド)時もキャッシュを捨てる。
         try { db.onclose = function () { if (_dbP === thisP) _dbP = null; }; } catch (e) {}
-        resolve(db);
+        done(function () { resolve(db); });
       };
-      req.onerror = function () { if (_dbP === thisP) _dbP = null; reject(req.error || new Error("idb-open-failed")); };
-      req.onblocked = function () { if (_dbP === thisP) _dbP = null; reject(new Error("idb-blocked")); };
+      req.onerror = function () { if (_dbP === thisP) _dbP = null; done(function () { reject(req.error || new Error("idb-open-failed")); }); };
+      req.onblocked = function () { if (_dbP === thisP) _dbP = null; done(function () { reject(new Error("idb-blocked")); }); };
     });
     // オープンが失敗で終わったらキャッシュを残さない(次回やり直せるように)。
     thisP.catch(function () { if (_dbP === thisP) _dbP = null; });
