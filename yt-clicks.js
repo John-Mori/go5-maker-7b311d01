@@ -1731,9 +1731,14 @@
         var _syt = sheetYtFor_(it);
         if (_syt) {
           yt = _syt; vid = ytIdOf(_syt);
-          if (vid && apiKey() && !(vid in publishedCache) && !_pubBackfillTried[vid]) _needPub.push(vid);
         }
       }
+      // ★見出し日時をYouTube公開日時にするため、公開日時が未取得の vid は描画後に1回だけ取りに行く。
+      //   従来は _needPub をシート補完(!vid)側だけに積んでいたので、ローカルにYouTube URLを貼った行は
+      //   30分間引き(metricsDue_)が明けるまで fetchData_ が回らず、見出しが投稿完了時刻(it.ts)に張り付いた
+      //   (Chami報告2026-08-12「YouTube URL貼ってるのに投稿日が即時投稿を押した時刻のまま」)。vidが最初から
+      //   在る行(結線済み)も同じ backfill 経路に載せて、間引き窓の中でも公開日時を先取りする(表示専用・1発)。
+      if (vid && apiKey() && !(vid in publishedCache) && !_pubBackfillTried[vid]) _needPub.push(vid);
       // 【供給一本化 2026-08-03】導線1/導線2のクリックは postClicks_ で計算(ランキングと同一の1関数)。
       //   合算URLの加算・GAS日次デルタの累計下限・リビルド結合まで内包する(旧・この場のインライン計算を
       //   関数へ寄せた=履歴とランキングで計算式が二度と割れないようにする)。_dl は下の総再生数下限で再利用。
