@@ -312,8 +312,6 @@
   }
 
   // ── 保存 ──
-  var _draftMode = false;
-  var _restoreBskyEl = null;
   var _thumbCache = {}; // id → ObjectURL
 
   // 動画作成タブのカテゴリ(ジャンル)チェックを読む。投稿完了時に投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
@@ -1421,14 +1419,12 @@
     var draftMakeBtn = $('draftMakeBtn');
     if (draftMakeBtn) {
       draftMakeBtn.addEventListener('click', function () {
-        var bskyEnable = $('bskyEnable');
-        var wasChecked = !!(bskyEnable && bskyEnable.checked);
-        if (wasChecked) bskyEnable.checked = false;
-        _restoreBskyEl = wasChecked ? bskyEnable : null;
-        _draftMode = true;
-        // ★「これはドラフト作成だ」を作成イベントに載せる(app.js make()が消費→detail.draft)。
-        //   bskyEnableを外すだけでは、自動投稿ON/OFFに関わらず走る maybeInheritRebuild_(リビルド引き継ぎの確認/投稿)
-        //   等の投稿系フローへ漏れて「今すぐ投稿の挙動」になっていた(Chami報告2026-08-11)。フラグで全購読者に抑止を効かせる。
+        // ★「これはドラフト作成だ」を作成イベントに載せるだけ=app.js make()が入口で一度消費し detail.draft に確定、
+        //   bluesky.js handleVideoCreated は detail.draft を最上段で見て投稿/引き継ぎを断ち切る(Chami報告2026-08-11)。
+        //   ★bskyEnableは触らない/_draftMode等の状態も持たない(2026-08-13)。旧実装は投機的にbskyEnableを外し
+        //     _draftMode/_restoreBskyElを持たせたが、make()が入口ガード(写真未選択・狙い/コメント型未選択)で
+        //     早期returnするとこの状態が復元されず、①自動投稿が黙って外れたまま ②後続の「今すぐ作成」が
+        //     _draftMode残留でドラフト扱いに化ける——というドラフト/投稿の取り違えを生んでいた。権威フラグ一本に統一する。
         window.__go5DraftPending = true;
         var makeBtn = $('makeBtn');
         if (makeBtn) makeBtn.click();
@@ -1436,11 +1432,9 @@
     }
 
     document.addEventListener('video-created', function (e) {
-      // detail.draft(app.jsが確定した権威)を主に見る。_draftMode は保険(万一の取りこぼし対策)。
-      if (!_draftMode && !(e && e.detail && e.detail.draft)) return;
-      _draftMode = false;
-      if (_restoreBskyEl) { _restoreBskyEl.checked = true; _restoreBskyEl = null; }
-      var detail = (e && e.detail) || {};
+      // detail.draft(app.jsがmake()入口で__go5DraftPendingを消費して確定した権威)だけで判定する。
+      if (!(e && e.detail && e.detail.draft)) return;
+      var detail = e.detail;
       saveStock_(detail).then(function () {
         var tabBtn = $('tabStock');
         if (tabBtn) tabBtn.click();
