@@ -347,7 +347,17 @@
       priceInfo: livePriceInfo_(($('movieWorkUrl') || {}).value || ($('movieWorkAffi') || {}).value || ''),
       youtubeUrl: '',
     };
-    return Promise.all([captureThumb_(), capturePreview_()]).then(function (caps) {
+    // ★サムネ/プレビューは「今のCanvas」に依存するので、タブ遷移・再描画より前に取得を開始しておく。
+    var capP = Promise.all([captureThumb_(), capturePreview_()]).catch(function () { return [null, null]; });
+    // ★★メタ(localStorage)は最優先で即保存する=IDB blob 保存の成否に一覧の在否を依存させない
+    //   (Chami報告2026-08-12「ドラフトに情報が行かない」の根治)。従来は Promise.all(ops)=IDBへの
+    //   動画/サムネ書込が成功して初めて saveMeta していたため、iOS Safariが接続を無言で殺して idb-timeout
+    //   (2周とも死)になると saveMeta まで到達せず、ドラフトが一覧に一切載らなかった。一覧は軽い
+    //   localStorage に確実に載せ、重い blob 保存は best-effort(失敗しても握り潰す=一覧は残る)に分離する。
+    var arr = loadMeta();
+    arr.unshift(meta);
+    saveMeta(arr); // ← ここで一覧に載る(=自動遷移で必ず見える)。以降の blob 失敗は一覧を消さない。
+    return capP.then(function (caps) {
       var thumbBlob = caps[0], prevBlob = caps[1];
       var store = idb();
       var ops = [];
@@ -360,10 +370,11 @@
         // 仕上がりプレビューも投稿完了まで退避(使用画像1ページ目＋Drive行き)。
         if (prevBlob) ops.push(store.set('stock_prev_' + id, prevBlob));
       }
-      return Promise.all(ops).then(function () {
-        var arr = loadMeta();
-        arr.unshift(meta);
-        saveMeta(arr);
+      // ★blob 保存が2周とも死んでも reject しない=メタは既に保存済みなので一覧には出る。
+      //   動画DL/サムネは mirror(雲)や後続の backfill で追って効かせる(fail-open)。
+      return Promise.all(ops).catch(function (e) {
+        try { if (window.console && console.warn) console.warn('[stock] draft blob save failed (meta kept in list):', e && (e.message || e)); } catch (_) {}
+      }).then(function () {
         ensureBlobMirror_(id); // ①-B サムネ/プレビュー/元画像を雲へ(2台目でも出す)
         ensureVideoMirror_(id); // ② 動画本体もR2へ(2台目でDLできるように)
         return id;
