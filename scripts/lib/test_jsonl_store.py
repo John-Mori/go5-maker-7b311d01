@@ -93,5 +93,20 @@ check("T16 日付だけは読めない扱い", ts_epoch("2026-08-13") is None)
 check("T17 defaultを指定できる", ts_epoch("こわれ", default=-1) == -1)
 check("T18 数値はそのまま通す", ts_epoch(1234.5) == 1234.5)
 
+# ---- T19〜: BOM付き行(実測= change_log.jsonl 1行目・2026-08-13 イージス研究室) ----
+tmp2 = os.path.join(tempfile.gettempdir(), "go5_test_jsonl_bom.jsonl")
+with io.open(tmp2, "w", encoding="utf-8") as f:
+    f.write("﻿" + json.dumps(good, ensure_ascii=False) + "\n")   # 1行目にBOM
+    f.write(json.dumps(dict(good, msg_id="9"), ensure_ascii=False) + "\n")
+rows, bad = read_jsonl(tmp2, SCHEMAS["corpus"], on_bad="skip")
+check("T19 ★1行目のBOMを落として読める(壊れ扱いにしない)", len(rows) == 2 and not bad)
+
+with io.open(tmp2, "w", encoding="utf-8") as f:                      # 途中の行にBOM
+    f.write(json.dumps(good, ensure_ascii=False) + "\n")
+    f.write("﻿" + json.dumps(dict(good, msg_id="9"), ensure_ascii=False) + "\n")
+rows, bad = read_jsonl(tmp2, SCHEMAS["corpus"], on_bad="skip")
+check("T20 追記で途中に混ざったBOMも落とせる", len(rows) == 2 and not bad)
+os.remove(tmp2)
+
 print(f"\n{ok_count}/{ok_count + len(fail)} passed")
 sys.exit(1 if fail else 0)

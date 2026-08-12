@@ -135,7 +135,13 @@ def read_jsonl(path, schema=None, on_bad="skip"):
         return rows, bad
     with io.open(path, encoding="utf-8") as f:
         for i, line in enumerate(f, 1):
-            line = line.strip()
+            # ★BOM(﻿)を落とす(2026-08-13 実測・イージス研究室)=
+            #   change_log.jsonl の**1行目**に BOM が付いていて、json.loads が
+            #   「Expecting value」で落ち、**dept=system-engineer の実記録1件が
+            #   どの読み手からも永久に見えなかった**(commit 1b4aa38 / 2026-07-22)。
+            #   PowerShell の Out-File/`>` は既定でBOM付きUTF-8を書く=**また起きる**。
+            #   行ごとに落とすので、追記で途中に混ざった場合も拾える。
+            line = line.strip().lstrip("﻿").strip()
             if not line:
                 continue
             try:
