@@ -32,6 +32,7 @@
 """
 import argparse
 import ast
+import datetime as _dt
 import json
 import os
 import re
@@ -77,6 +78,82 @@ ROSTER_OTHER_OWNER = {
     "meeting-a":   "会議部屋(セッションが直接入る)",
     "meeting-b":   "会議部屋(セッションが直接入る)",
 }
+
+
+# ★★朝5時の自己振り返りが「発火したのに何も出さなかった」を検知する(2026-08-12 platform-se)。
+#   実依頼= アメス(現在と未来)/ C-038(再発は恒久対策)・C-041(一度の観測を状態の代理にするな)。
+#   なぜ deadman が持つか= これは常駐/定刻タスクの「静かな空振り」であり、既に15分毎に回って
+#   状態遷移でのみ鳴らす check_roster と同じレールに載せるのが最小で誤検知が少ない。
+#   トリガー側(daily_reflection_trigger.py)は毎発火の結末を _trigger_state.json へ残す=①、
+#   ここは その台帳＋実ファイルを突き合わせ「期待日の振り返りが期限を過ぎても無い」を鳴らす=fail-open。
+REFLECT_DIR = os.path.join(ROOT, "local", "llm", "daily_reflection")
+REFLECT_STATE = os.path.join(REFLECT_DIR, "_trigger_state.json")
+REFLECT_MIN_BYTES = 40   # トリガー側 MIN_VALID_BYTES と同値・存在だけでは正としない
+REFLECT_GRACE_H = 3      # 05:00発火→future-roomが非同期生成する猶予。越えて未生成なら「何も出ていない」
+_JST = _dt.timezone(_dt.timedelta(hours=9))
+
+
+def _reflection_valid(day):
+    """対象日 day(YYYY-MM-DD)の振り返りが実在するか=存在＋非空。"""
+    try:
+        with open(os.path.join(REFLECT_DIR, day + ".md"), "r", encoding="utf-8") as f:
+            return len(f.read().strip()) >= REFLECT_MIN_BYTES
+    except OSError:
+        return False
+
+
+def reflection_gap(now=None):
+    """朝5時の振り返りの空振りを見る。測れない/まだ猶予内 なら異常0で返す(黙る=狼少年回避)。
+    期待日= 直近に「D+1 05:00＋猶予」を過ぎて生成されているべき対象日 D。返り: {expected, lines}。"""
+    now = now or _dt.datetime.now(_JST)
+    grace = now.replace(hour=5, minute=0, second=0, microsecond=0) + _dt.timedelta(hours=REFLECT_GRACE_H)
+    # 今日の 05:00＋猶予 を過ぎていれば昨日分を期待、まだなら一昨日分(それは十分前に出ているはず)。
+    expected = (now.date() - _dt.timedelta(days=1)) if now >= grace else (now.date() - _dt.timedelta(days=2))
+    eday = expected.strftime("%Y-%m-%d")
+    try:
+        with open(REFLECT_STATE, "r", encoding="utf-8") as f:
+            st = json.load(f)
+    except Exception:
+        st = {}
+    lines = []
+    if not _reflection_valid(eday):
+        lines.append("朝5時の自己振り返り %s.md が期限(本日%s頃)を過ぎても未生成=発火しても何も出ていない"
+                     % (eday, grace.strftime("%H:%M")))
+    skips = int(st.get("consecutive_skips", 0))
+    if skips >= 2:
+        lines.append("定刻トリガーの連続空振り=%d回(発火はしたが新しい振り返りを投函していない)最後の投函=%s"
+                     % (skips, st.get("last_post_day", "不明")))
+    if st.get("last_outcome") == "fail":
+        lines.append("直近の定刻トリガーが投函に失敗(last_fire=%s)" % st.get("last_fire_at", "不明"))
+    return {"expected": eday, "lines": lines}
+
+
+def check_reflection(st, dry_run, now=None):
+    """朝5時の振り返りの空振りを、**変化した時だけ**出す(check_roster と同じ作法=連投しない)。"""
+    g = reflection_gap(now=now)
+    lines = g["lines"]
+    sig = "|".join(lines)
+    prev = st.get("reflect_sig")
+    if not dry_run:
+        st["reflect_sig"] = sig
+        st["reflect_at"] = _now()
+    if not lines:
+        if prev:
+            notify("✅ 朝5時の自己振り返りは正常化 — 期待する対象日分が生成されています。", dry_run)
+            print("[reflect] 解消を通知")
+        else:
+            print("[reflect] 正常(期待日=%s の振り返りが在る)" % g["expected"])
+        return
+    print("[reflect] " + " / ".join(lines))
+    if sig == prev:
+        print("[reflect] 前回と同じなので通知しない(連投回避)")
+        return
+    notify("🟠 **朝5時の自己振り返りが出ていない** — 定刻発火が「何も出さずに終わった」疑い。\n"
+           + "\n".join("・" + x for x in lines)
+           + "\n※旧: os.path.exists→黙ってskip の fail-silent を塞いだ検知です(2026-08-12)。"
+             "\n対処: local/daily_reflection.log と local/llm/daily_reflection/_trigger_state.json を確認、"
+             "必要なら `python scripts/llm/daily_reflection_trigger.py --force`。", dry_run)
+    print("[reflect] 変化したので通知した")
 
 
 def _dept_procs():
@@ -292,9 +369,10 @@ def run_once(stale_min, dry_run):
     try:
         st = _load_state()
         check_roster(st, dry_run)
+        check_reflection(st, dry_run)   # ★朝5時の振り返りの空振り検知(2026-08-12 platform-se)
         _save_state(st)
     except Exception as e:
-        print("[roster] 点検に失敗(dead-man本体は続行) %s" % type(e).__name__)
+        print("[roster/reflect] 点検に失敗(dead-man本体は続行) %s" % type(e).__name__)
     return rc
 
 
