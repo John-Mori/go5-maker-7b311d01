@@ -73,5 +73,25 @@ rows, bad = read_jsonl(tmp, SCHEMAS["corpus"], on_bad="skip")
 check("T8 read_jsonlは正常1行/壊れ2件を分離", len(rows) == 1 and len(bad) == 2)
 
 os.remove(tmp)
+
+# ---- T9〜: ts_epoch(帯の有無で9時間ずれる穴・2026-08-13 イージス研究室) ----
+from jsonl_store import ts_epoch                                        # noqa: E402
+
+JST_NOON = ts_epoch("2026-08-13T12:00:00+09:00")
+check("T9 帯つき(+09:00)を読む", JST_NOON is not None)
+check("T10 帯なしはJSTとみなす= 帯つきと同じ値",
+      ts_epoch("2026-08-13T12:00:00") == JST_NOON)
+check("T11 ★Zは UTC として扱う= JST正午とは9時間ずれる",
+      ts_epoch("2026-08-13T03:00:00Z") == JST_NOON)
+check("T12 空白区切りも受ける", ts_epoch("2026-08-13 12:00:00") == JST_NOON)
+check("T13 秒が無くても読める", ts_epoch("2026-08-13T12:00") == JST_NOON)
+check("T14 ミリ秒つきも読める",
+      abs(ts_epoch("2026-08-13T12:00:00.500000") - JST_NOON) < 1.0)
+check("T15 ★読めない値は0ではなくNone(1970年で集計に混ざるのを防ぐ)",
+      ts_epoch("t") is None and ts_epoch("") is None and ts_epoch(None) is None)
+check("T16 日付だけは読めない扱い", ts_epoch("2026-08-13") is None)
+check("T17 defaultを指定できる", ts_epoch("こわれ", default=-1) == -1)
+check("T18 数値はそのまま通す", ts_epoch(1234.5) == 1234.5)
+
 print(f"\n{ok_count}/{ok_count + len(fail)} passed")
 sys.exit(1 if fail else 0)

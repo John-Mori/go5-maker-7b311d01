@@ -86,6 +86,44 @@ def append_jsonl(path, rec, schema=None):
     return True
 
 
+_JST = dt.timezone(dt.timedelta(hours=9))
+
+
+def ts_epoch(v, default=None):
+    """台帳の ts を**epoch秒**にする。帯(タイムゾーン)の有無を取り違えない。
+
+    なぜ要るか(2026-08-13 実測・イージス研究室)=
+      同じ台帳の中で ts の書き方が割れている。`change_log.jsonl` 707行の内訳は
+      帯つき`+09:00` 664 / 帯なし 29 / **`Z`(UTC) 6** / 空白区切り等 7 / 壊れ 1。
+      ★`Z` の6行は**9時間ずれる**= 「直近24時間」の集計で別の日に落ちる。
+      各所が自前の `_parse_ts` を持つと**読み方が3通りに割れる**ので、ここ1本に寄せる。
+
+    - 帯つき(`+09:00` / `Z`)= その帯で解釈する(Zは+9してJSTへ揃う)。
+    - 帯なし= **JSTとみなす**(このプロジェクトの記録は全部JSTで書かれている)。
+    - `T` の代わりに空白のもの・秒が無いものも受ける。
+    - 読めない値は `default` を返す(★黙って0にしない= 1970年扱いで集計に混ざるのを防ぐ)。
+    """
+    if isinstance(v, (int, float)):
+        return float(v)
+    if not isinstance(v, str):
+        return default
+    s = v.strip().replace(" ", "T", 1)
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    if not _ISO.match(s):        # 日付だけ・'t' 等は弾く(_is_iso_ts と同じ厳しさに揃える)
+        return default
+    try:
+        d = dt.datetime.fromisoformat(s)
+    except ValueError:
+        try:                                    # 秒やミリ秒の端が汚れている時の救済
+            d = dt.datetime.fromisoformat(s[:19])
+        except ValueError:
+            return default
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=_JST)
+    return d.timestamp()
+
+
 def read_jsonl(path, schema=None, on_bad="skip"):
     """JSONLを読む。schema指定時は不正行を on_bad で扱う('skip'=飛ばす/'raise'=例外)。
 
