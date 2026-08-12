@@ -93,7 +93,9 @@
     return (items || []).filter(isSalesTarget_).map(function (it) { return it.cid; });
   }
   // ジャンルタグに「AI」を含むものがあれば AI 作品とみなす。(わかる範囲のベストエフォート判定)
-  function isAiWork_(genres) { return (genres || []).some(function (g) { return /AI/i.test(String(g || '')); }); }
+  // AI作品の判定。★AIは genre タグに載らず「コミック・AI」等の floor 名でしか示されない作品があるため、
+  //   floor も /AI/ 走査に混ぜる(候補が floor を保持するようになったので badge も floor で拾える・2026-08-12)。
+  function isAiWork_(genres, floor) { return (genres || []).concat(floor ? [String(floor)] : []).some(function (g) { return /AI/i.test(String(g || '')); }); }
 
   // サークルを表すアイコン。旧「🏷」絵文字の置き換え＝グレーの人物シルエット(添付画像)をSVG化。
   //   白背景は描かない＝透過。width/height=1em で文字サイズに追従。inline-blockで前後の文字と揃う。
@@ -496,6 +498,7 @@
             title: info.title, author: info.author || undefined,
             date: info.releaseDate || undefined, listPrice: info.listPrice, price: info.price,
             discountPct: info.discountPct || undefined, genres: (info.genres && info.genres.length) ? info.genres : undefined,
+            floor: info.floor || undefined, service: info.service || undefined,
             thumb: info.thumb || info.thumbSmall || undefined, reviewCount: info.reviewCount, reviewAvg: info.reviewAvg
           };
         }
@@ -1751,7 +1754,7 @@
     else if (window.Go5MovieAttrs) window.Go5MovieAttrs.reset();
     // 作品名も渡す：総集編はジャンルタグに載らず作品名にだけ「総集編」と入る作品が多いため、
     //   ジャンルが空でも作品名に「総集編」があれば総集編カテゴリへ即チェック(Chami依頼2026-08-06)。
-    if (window.Go5MovieAttrs && ((it.genres && it.genres.length) || it.title)) window.Go5MovieAttrs.applyGenres(it.genres || [], it.cid || '', it.title || '');
+    if (window.Go5MovieAttrs && ((it.genres && it.genres.length) || it.title || it.floor)) window.Go5MovieAttrs.applyGenres(it.genres || [], it.cid || '', it.title || '', it.floor || '', it.service || '');
     if (workUrl) setVal('movieWorkUrl', workUrl); // 作品URL(正規化済み)
     // 割引率・金額を候補が保持する実データから販促ラベルへ直接反映する(Chami依頼2026-07-18)。
     //   従来は movieWorkUrl のセット→FANZA再取得(fetchMovieWorkInfo)頼みで、worker未設定/取得失敗時は
@@ -1880,6 +1883,7 @@
         x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
         x.listPrice = info.listPrice; x.price = info.price; x.discountPct = info.discountPct || 0;
         x.date = info.releaseDate || ''; x.genres = info.genres || [];
+        x.floor = info.floor || ''; x.service = info.service || ''; // AI判定用(floor名でしか分からない作品を候補→作成へ運ぶ)
         x.reviewCount = info.reviewCount; x.reviewAvg = info.reviewAvg;
         if (info.samples && info.samples.length) x.samples = info.samples;
       });
@@ -2064,6 +2068,7 @@
         x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
         x.listPrice = info.listPrice; x.price = info.price; x.discountPct = info.discountPct || 0;
         x.date = info.releaseDate || ''; x.genres = info.genres || [];
+        x.floor = info.floor || ''; x.service = info.service || ''; // AI判定用(floor名でしか分からない作品を候補→作成へ運ぶ)
         x.reviewCount = info.reviewCount; x.reviewAvg = info.reviewAvg;
         if (info.samples && info.samples.length) x.samples = info.samples;
         changed = true;
@@ -3258,6 +3263,7 @@
         it.discountPct = info ? (info.discountPct || 0) : 0;
         it.date = (info && info.releaseDate) || '';
         it.genres = (info && info.genres) || [];
+        it.floor = (info && info.floor) || ''; it.service = (info && info.service) || ''; // AI判定用
         it.reviewCount = info ? info.reviewCount : null;
         it.reviewAvg = info ? info.reviewAvg : null;
         if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
@@ -3344,7 +3350,7 @@
     works.forEach(function (w) {
       if (!w || !w.cid) return;
       if (have[w.cid]) { dup++; return; }
-      items.push({ url: w.url, cid: w.cid, title: w.title, author: w.makerName || w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], reviewCount: w.reviewCount, reviewAvg: w.reviewAvg, addedAt: new Date().getTime() });
+      items.push({ url: w.url, cid: w.cid, title: w.title, author: w.makerName || w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', reviewCount: w.reviewCount, reviewAvg: w.reviewAvg, addedAt: new Date().getTime() });
       have[w.cid] = true; added++;
     });
     lsSet(key, items); recordReviewSnapshots(items);
@@ -3371,6 +3377,7 @@
           it.listPrice = info.listPrice; it.price = info.price; it.discountPct = info.discountPct || 0;
           if (info.releaseDate) it.date = info.releaseDate;
           if (info.genres && info.genres.length) it.genres = info.genres;
+          if (info.floor) it.floor = info.floor; if (info.service) it.service = info.service; // AI判定用(floor名でしか分からない作品)
           if (info.thumb || info.thumbSmall) it.thumb = info.thumb || info.thumbSmall;
           if (info.samples && info.samples.length) it.samples = info.samples;
           if (info.reviewCount != null) it.reviewCount = info.reviewCount;
@@ -3703,7 +3710,7 @@
     if (it.date) sub.push('発売 ' + esc(fmtDate(it.date)));
     if (it.addedAt) sub.push('<span class="cand-added">追加 ' + esc(fmtTs(it.addedAt)) + '</span>');
     var ws = deriveWorkState_(it.date);
-    var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '');
+    var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres, it.floor) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '');
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';

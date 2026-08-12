@@ -214,7 +214,13 @@
     // ★title も判定に混ぜる：総集編は「総集編」ジャンルタグが無く作品名にだけ載る作品が多く、
     //   ジャンルだけだと総集編カテゴリに自動チェックが入らない(Chami依頼2026-08-06「作品名に総集編と記載があったら総集編にもチェック」)。
     //   候補は作品名を即座に持つため、FANZA再取得を待たずここで作品名も走査する。
-    applyGenres: function (genres, cid, title) { setMovieAttrsFromTexts_((genres || []).concat(title ? [title] : []), looseAiFromGenres_(genres)); }
+    //   ★floor/service も渡す：AIは genre に載らず「コミック・AI」等の floor 名でしか判別できないため、
+    //   候補が floor を保持していれば FANZA再取得(autoApplyAttrsFromInfo_)を待たず即チェックできる
+    //   (候補→作成でAIカテゴリが空振りする再発の根治・Chami依頼2026-08-12「拾えてない」)。
+    applyGenres: function (genres, cid, title, floor, service) {
+      var texts = (genres || []).concat(title ? [title] : []).concat(floor ? [floor] : []).concat(service ? [service] : []);
+      setMovieAttrsFromTexts_(texts, looseAiFromGenres_(genres) || /AI/i.test(String(floor || '')));
+    }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
   // 前回の選択・チェックを引き継がない。狙い・コメント型は生成前の必須選択なので未設定へ戻す。(Chami指定2026-07-14)
