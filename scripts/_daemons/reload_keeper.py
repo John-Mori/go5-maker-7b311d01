@@ -21,7 +21,15 @@
   (deliveries が1増えるだけ)。それでも「握っている最中に落とさない」を1で守る。
 
 使い方=
-  python scripts/_daemons/reload_keeper.py [--wait-min 120] [--dry-run]
+  python scripts/_daemons/reload_keeper.py --detach [--wait-min 120] [--dry-run]
+
+★★**自室のセッションから前景で走らせるな。永久に待つ**(2026-08-13 実測・2回続けて失敗)。
+  1 の「暇な窓」は**全部門が便を握っていない瞬間**だ。ところが自室(便を処理している部屋)は
+  **自分のターンが終わるまで inflight のまま**=待っている側が待たれている側でもある。
+  さらにハーネスの背景タスクは**ターンが終わると一緒に落ちる**ので、暇になった瞬間には
+  もう誰も待っていない。実測= 08:20 と 08:58 の2回とも `待機中(処理中=aegis-gl)` で止まった。
+  → **`--detach` を付けろ。**自分を隠しプロセスとして産み直して即座に戻るので、
+    ターンが終わって自室が便を離した瞬間に、生き残った子が窓を掴む。
 """
 import argparse
 import importlib.util
@@ -40,6 +48,8 @@ SPEC.loader.exec_module(keeper)
 
 KEEPER_REL = r"scripts\_daemons\daemon_keeper.py"
 KEEPER_LOG = r"local\_daemon_keeper.log"
+SELF_REL = r"scripts\_daemons\reload_keeper.py"
+SELF_LOG = r"local\_reload_keeper.log"
 
 
 def say(msg):
@@ -68,14 +78,36 @@ def start_keeper():
         "$sh.Run('%s', 0, $false)" % cmd.replace("'", "''"))
 
 
+def detach(argv):
+    """自分自身を隠しプロセスとして産み直す(呼び出し側のターンが終わっても生き残る)。
+
+    ★keeper の start_keeper() と**同じ形**で起動する(起動経路を2本持たない)。
+    """
+    args = " ".join('"%s"' % x if " " in x else x for x in argv)
+    cmd = ('cmd /c cd /d "%s" && python "%s" %s >> "%s" 2>&1'
+           % (ROOT, SELF_REL, args, os.path.join(ROOT, SELF_LOG)))
+    _ps("$sh = New-Object -ComObject WScript.Shell; "
+        "$sh.Run('%s', 0, $false)" % cmd.replace("'", "''"))
+
+
 def main():
     ap = argparse.ArgumentParser(description="keeperを暇な瞬間に載せ替える")
+    ap.add_argument("--detach", action="store_true",
+                    help="★自分を隠しプロセスへ産み直して即座に戻る"
+                         "(自室のセッションから呼ぶ時は必須=docstring参照)")
     ap.add_argument("--wait-min", type=float, default=120.0,
                     help="暇な窓をこの分数だけ待つ(既定120分)")
     ap.add_argument("--poll-sec", type=float, default=5.0)
     ap.add_argument("--dry-run", action="store_true",
                     help="窓を待って、落とす直前で止める(何もkillしない)")
     a = ap.parse_args()
+
+    if a.detach:
+        rest = [x for x in sys.argv[1:] if x != "--detach"]
+        detach(rest)
+        say("隠しプロセスへ産み直した。経過は %s を見ろ(このターンが終わってから窓を掴む)"
+            % SELF_LOG)
+        return 0
 
     before = procs("daemon_keeper")
     say("いまのkeeper pid=%s / dept_daemon=%d体" % (before, len(procs("dept_daemon"))))
