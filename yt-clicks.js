@@ -1365,6 +1365,15 @@
     // 作品クリック計測URL(導線2)も、手入力がr2でなければ自動で計測キー(r2)へ確定させる。
     //   これをしないと codeOf() がコードを取れず、ピンクの矢印(作品クリック数)が表示されない。(Chami報告2026-07-14)
     if (saved) autoMeasureWorkShort_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); pushItemToGas_(saved); });
+    // ★作品URLが入っていて導線2(作品クリック計測URL)がまだ空なら、編集保存でも投稿完了と同じく作品URLから
+    //   発行する(Chami再依頼2026-08-12「YouTube URL貼ってあるのに作品計測用URLが入らない・空欄のまま」)。
+    //   投稿完了の時点で作品URLが未入力だった投稿は mintWorkShortAtPost_ が発火せず空のまま=後から編集で
+    //   作品URLを入れても autoMeasureWorkShort_ は"空欄を作品URLへフォールバックしない"仕様のため永遠に空
+    //   だった(=毎回「自動生成」を手押しする必要があった)。意図的クリア(workShortNone)は尊重し、手入力
+    //   (workShortVal)がある時は触らない。既に発行済みなら mint 側が return(冪等・二重発行しない)。
+    if (saved && !saved.workShortNone && !((workShortVal || '').trim()) && !((saved.workShortUrl || '').trim()) && /^https?:\/\//.test((saved.workUrl || '').trim())) {
+      mintWorkShortAtPost_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); pushItemToGas_(saved); });
+    }
     refresh();
   }
 
