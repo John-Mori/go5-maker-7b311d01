@@ -181,10 +181,18 @@
   // 作品が決まったら(候補から/作品URL入力/ウィザード)、取得済みジャンル名で該当カテゴリへ自動チェック。
   // 全カテゴリを一旦外してから該当だけON＝前回のチェックを引き継がない。
   //   キーワードと部分一致判定は Go5Cats.matchText に集約(「姉」→「姉・妹」も拾う部分一致・Chami依頼2026-08-02③)。
-  function setMovieAttrsFromTexts_(texts) {
+  function setMovieAttrsFromTexts_(texts, aiHint) {
     var hits = (window.Go5Cats && window.Go5Cats.matchText(texts)) || {};
+    // AIの緩い救済：AIは正式には floor名(コミック・AI 等)でしか判別できないが、候補は floor を持たず
+    //   ジャンルしか無いことがある(＝候補から作成へ飛んだ瞬間はフロア未取得)。呼び出し側が候補バッジ
+    //   isAiWork_ と同じ /AI/ 規則でジャンルからAIと判定したら、フロア未取得でもAIカテゴリへチェックを
+    //   入れる(Chami依頼2026-08-12「候補から作成に飛んだ時、AIのカテゴリも判定に入るように」)。
+    //   ★title は英単語の"ai"(rainy/maid等)誤検出を避けるため呼び出し側でも判定対象にしない。
+    if (aiHint && window.Go5Cats && window.Go5Cats.byKey('ai')) hits.ai = true;
     movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = !!hits[c.key]; });
   }
+  // ジャンル配列に緩く「AI」を含むか(候補バッジ isAiWork_ と同一規則)。floorは正本キーワードが拾うので対象外。
+  function looseAiFromGenres_(genres) { return (genres || []).some(function (g) { return /AI/i.test(String(g || '')); }); }
   // 同じ作品(cid)には1回だけ自動適用＝再描画・キャッシュヒットのたびに手動調整を上書きしない。(割引自動反映と同じ設計)
   // リロードを跨いでも尊重できるよう localStorage に記録する。
   //   ★AIはタグ(genre)に載らず「コミック・AI」等フロア名で示されるため、floor/service も判定に混ぜる(Chami依頼2026-08-02②)。
@@ -193,7 +201,7 @@
     var cid = String(info.cid || cidHint || ''); if (!cid) return;
     if (load('movie_auto_attrs_cid') === cid) return;
     save('movie_auto_attrs_cid', cid);
-    setMovieAttrsFromTexts_((info.genres || []).concat([info.floor, info.service, info.title]));
+    setMovieAttrsFromTexts_((info.genres || []).concat([info.floor, info.service, info.title]), looseAiFromGenres_(info.genres));
   }
   // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=候補の持つジャンルでの即時チェック。
   //   ★applyGenres は「暫定チェック」に徹し、cidガード(movie_auto_attrs_cid)は張らない。
@@ -206,7 +214,7 @@
     // ★title も判定に混ぜる：総集編は「総集編」ジャンルタグが無く作品名にだけ載る作品が多く、
     //   ジャンルだけだと総集編カテゴリに自動チェックが入らない(Chami依頼2026-08-06「作品名に総集編と記載があったら総集編にもチェック」)。
     //   候補は作品名を即座に持つため、FANZA再取得を待たずここで作品名も走査する。
-    applyGenres: function (genres, cid, title) { setMovieAttrsFromTexts_((genres || []).concat(title ? [title] : [])); }
+    applyGenres: function (genres, cid, title) { setMovieAttrsFromTexts_((genres || []).concat(title ? [title] : []), looseAiFromGenres_(genres)); }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
   // 前回の選択・チェックを引き継がない。狙い・コメント型は生成前の必須選択なので未設定へ戻す。(Chami指定2026-07-14)
