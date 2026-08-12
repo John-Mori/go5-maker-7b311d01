@@ -438,24 +438,33 @@
   // ── 動画本体の取得(実体が手元に無い2台目は ID→R2キー算出で取り寄せ・②2026-08-01)──
   //   DL・投稿完了(Driveアップロード)の両方がこれを通す=片方だけ直して片方が「動画が見つかりません」で
   //   止まる事故を防ぐ(Chami指摘2026-07-31: 2台目で投稿完了が動画未検出で失敗)。
+  // ★手元(IDB)に無い動画本体を、キーを ID から算出して R2 から直接取り寄せる(vidHash不要=KV非依存)。
+  //   R2取り寄せが無応答だと、これを await する Drive保存/DL が永久に返らず「☁️ 保存中…」が固まる
+  //   (Chami報告2026-08-11①「いつまで経っても保存中」)。45秒で null に倒す=fail-open。取れなければ
+  //   「見つかりません」で終える方が、黙って固まるより良い(§3 可用性は喋る側へ倒す)。
+  function resolveVideoFromR2_(id) {
+    if (!(window.Go5Sync && Go5Sync.fetchBlobR2At)) return Promise.resolve(null);
+    var store = idb();
+    var fetchP = Go5Sync.fetchBlobR2At('go5vid:' + id).then(function (b) {
+      if (b && store) { try { store.set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即使える
+      return b;
+    }).catch(function () { return null; });
+    var toP = new Promise(function (res) { setTimeout(function () { res(null); }, 45000); });
+    return Promise.race([fetchP, toP]);
+  }
   function resolveVideoBlob_(id) {
     var store = idb();
-    if (!store) return Promise.resolve(null);
+    if (!store) return resolveVideoFromR2_(id);
     return store.get('stock_v_' + id).then(function (blob) {
       if (blob) return blob;
-      // ★手元に実体が無い=キーを ID から算出して R2 から直接取り寄せ(vidHash不要=KV非依存)。
-      if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
-        var fetchP = Go5Sync.fetchBlobR2At('go5vid:' + id).then(function (b) {
-          if (b) { try { store.set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即使える
-          return b;
-        }).catch(function () { return null; });
-        // ★R2取り寄せが無応答だと、これを await する Drive保存/DL が永久に返らず「☁️ 保存中…」が固まる
-        //   (Chami報告2026-08-11①「いつまで経っても保存中」)。45秒で null に倒す=fail-open。取れなければ
-        //   「見つかりません」で終える方が、黙って固まるより良い(§3 可用性は喋る側へ倒す)。
-        var toP = new Promise(function (res) { setTimeout(function () { res(null); }, 45000); });
-        return Promise.race([fetchP, toP]);
-      }
-      return null;
+      return resolveVideoFromR2_(id); // 手元に無い=R2の控えから取り寄せ
+    }, function () {
+      // ★IDB get が iOS Safari で idb-timeout / idb-open-timeout 等で reject した時も R2 へ倒す(2026-08-13)。
+      //   従来は reject が .then を素通りして downloadStock_ の catch(「動画データの取得に失敗しました」)へ
+      //   直行し、作成直後に ensureVideoMirror_ で R2 へ上げた実体があっても一切取りに行けなかった
+      //   (Chami報告2026-08-12①「動画データの取得に失敗。3回くらい出た」の根治)。拒否=手元が無応答なので
+      //   雲の控えを見に行く=これが可用性を喋る側へ倒す fail-open。
+      return resolveVideoFromR2_(id);
     });
   }
 

@@ -1224,12 +1224,18 @@
       if (discountListOn_()) {
         var dlink = cachedDiscountLink_();
         var SPH = (window.BlueskyCore && window.BlueskyCore.SALE_LINK_PLACEHOLDER) || 'セール中短縮リンク';
+        // ★セール短縮リンクが未キャッシュなら発番だけ開始し、出来次第モーダルへ再合成通知(go5-disc-url-changed)。
+        //   これが無いと投稿モードでは「(セール紹介短縮用URL)」のプレースホルダが永久に埋まらなかった
+        //   (Chami報告2026-08-12②「短縮URLが表示されない」の根治)。ライブ側 composePostText と同じ作法に揃える。
+        var _notifyDisc = function () { try { document.dispatchEvent(new CustomEvent('go5-disc-url-changed')); } catch (e) {} };
         if (hasSalePH_(out)) {
           if (dlink) out = fillSalePH_(out, dlink); // テンプレ側が位置指定=置換のみ・自動追記しない
+          else ensureDiscountLink_(_notifyDisc);
         } else {
           // 本文に同じセール短縮URLが既にある時(https有無どちらでも)は二重に足さない(Chami報告2026-07-31②)。
           var dbare = String(dlink || '').replace(/^https?:\/\//, '');
-          if (dlink && out.indexOf(dlink) < 0 && (!dbare || out.indexOf(dbare) < 0)) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink;
+          if (dlink) { if (out.indexOf(dlink) < 0 && (!dbare || out.indexOf(dbare) < 0)) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink; }
+          else ensureDiscountLink_(_notifyDisc);
         }
       }
       if (link && out.indexOf(link) >= 0) {
