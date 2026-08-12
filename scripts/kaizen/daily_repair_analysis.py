@@ -32,7 +32,12 @@ from lib.jsonl_store import read_jsonl, ts_epoch  # noqa: E402
 CHANGE_LOG = os.path.join(ROOT, "local", "llm", "change_log.jsonl")
 STORE = os.path.join(ROOT, "local", "llm", "kaizen_repair_analysis.jsonl")  # 貯め先1本
 
-DEPT = "system-engineer"  # 改修α=5秒動画メーカー本体
+# 改修α=5秒動画メーカー本体。★deptの綴りが割れている(イージス研究室 実測):
+#   system-engineer / system-engineer-alpha(2026-07-26の1行)= どちらも改修α。両方拾う。
+#   ★system-engineer-b は改修部門β=別の部屋。入れない(C-035=Chamiが言ったのは改修α)。
+DEPTS = ("system-engineer", "system-engineer-alpha")
+DEPT_B = "system-engineer-b"  # 改修部門β(別部屋)=明示除外
+DEPT_LABEL = "system-engineer"  # 貯め先の記録キー(従来互換)
 
 # クラスタ= (表示名, [キーワード])。上から順に、最初に当たったものへ振る。
 # ★増やす時はここへ1行。判定は change_log の「何」フィールド(日本語1文)に対する部分一致。
@@ -60,9 +65,18 @@ def classify(text):
 def build(now, hours):
     since = now - hours * 3600
     rows, bad = read_jsonl(CHANGE_LOG)
-    picked, undated = [], 0
+    picked, undated, unknown_dept = [], 0, 0
     for r in rows:
-        if r.get("dept") != DEPT:
+        dept = r.get("dept")
+        if dept == DEPT_B:
+            continue  # 改修部門β=別部屋。改修αの集計には入れない
+        if not dept:
+            # dept欠落=どのフィルタにも掛からない。黙って0にせず別に数えて出す
+            e = ts_epoch(r.get("ts"))
+            if e is not None and since <= e <= now:
+                unknown_dept += 1
+            continue
+        if dept not in DEPTS:
             continue
         e = ts_epoch(r.get("ts"))
         if e is None:
@@ -71,15 +85,18 @@ def build(now, hours):
         if since <= e <= now:
             picked.append(r)
     by_cluster = Counter(classify(r.get("何") or r.get("what") or "") for r in picked)
-    return picked, by_cluster.most_common(), bad, undated
+    return picked, by_cluster.most_common(), bad, undated, unknown_dept
 
 
-def render_md(now, hours, picked, ranked, bad, undated):
-    d = datetime.datetime.fromtimestamp(now)
-    wd = "月火水木金土日"[d.weekday()]
-    date_s = f"{d.month}/{d.day}({wd})"
+def render_md(now, hours, picked, ranked, bad, undated, unknown_dept):
+    to_d = datetime.datetime.fromtimestamp(now)
+    from_d = datetime.datetime.fromtimestamp(now - hours * 3600)
+    wd = "月火水木金土日"[to_d.weekday()]
+    # ★件数は走らせた時刻で動く=窓の「いつからいつまで」を必ず併記(イージス研究室の指摘)
+    span = (f"{from_d.month}/{from_d.day} {from_d.hour:02d}:{from_d.minute:02d}"
+            f" 〜 {to_d.month}/{to_d.day}({wd}) {to_d.hour:02d}:{to_d.minute:02d} JST")
     total = len(picked)
-    out = [f"◆改修α 直近{hours:.0f}h集計({date_s} 時点)= 本体改修 {total}件"]
+    out = [f"◆改修α 直近{hours:.0f}h集計({span})= 本体改修 {total}件"]
     if ranked:
         top_label, top_n = ranked[0]
         for label, n in ranked:
@@ -92,7 +109,9 @@ def render_md(now, hours, picked, ranked, bad, undated):
     if bad:
         out.append(f"※台帳に読めない行 {len(bad)}件=要手当て")
     if undated:
-        out.append(f"※ts不明で除外 {undated}件")
+        out.append(f"※改修αだがts不明で除外 {undated}件")
+    if unknown_dept:
+        out.append(f"※dept欠落で改修α判定不能 {unknown_dept}件(窓内・別数え)")
     return "\n".join(out)
 
 
@@ -104,8 +123,8 @@ def main():
     args = ap.parse_args()
 
     now = args.now if args.now is not None else time.time()
-    picked, ranked, bad, undated = build(now, args.hours)
-    md = render_md(now, args.hours, picked, ranked, bad, undated)
+    picked, ranked, bad, undated, unknown_dept = build(now, args.hours)
+    md = render_md(now, args.hours, picked, ranked, bad, undated, unknown_dept)
     print(md)
 
     if not args.no_store:
@@ -113,12 +132,14 @@ def main():
         rec = {
             "ts": d.isoformat(timespec="seconds"),
             "window_h": args.hours,
-            "dept": DEPT,
+            "dept": DEPT_LABEL,
+            "depts": list(DEPTS),
             "total": len(picked),
             "by_cluster": dict(ranked),
             "top": (ranked[0][0] if ranked else None),
             "bad_lines": len(bad),
             "undated": undated,
+            "unknown_dept": unknown_dept,
         }
         with open(STORE, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
