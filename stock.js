@@ -487,10 +487,10 @@
   // ── 投稿完了処理 ──
   function handleCompleteOk_(id, ytUrl, shortUrl) {
     var store = idb();
-    if (!store) { alert('IndexedDB未対応のため動画データを取得できません。'); return; }
+    if (!store) { alert('IndexedDB未対応のため動画データを取得できません。'); return false; }
     var metas = loadMeta();
     var meta = metas.filter(function (m) { return m.id === id; })[0];
-    if (!meta) return;
+    if (!meta) return false;
     // ★背骨ID(videoId)が無いドラフト(idgen導入前 or 作成時に未スナップ)は、投稿完了の時点で必ず発番して
     //   meta へ保存する。これが無いと addCompletedPost のガードに落ちて投稿履歴の一覧に載らず作成履歴だけ
     //   残り、さらに下の使用画像プレビュー紐付け(usedImgSave は meta.videoId をキーにする)も効かない
@@ -548,6 +548,9 @@
           scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
           attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
         });
+      } else {
+        // ドラフト専用ページで履歴モジュールが未起動でも、完了扱いにしてドラフトだけ消してはいけない。
+        _res = { ok: false, reason: 'unavailable' };
       }
     } catch (e) { _res = { ok: false, reason: 'exception', message: (e && e.message) || String(e) }; }
     // ★測った理由だけを出す。成功=無言(従来どおり)。dupe=エラーでなく「既に載っています」の情報表示。
@@ -560,11 +563,18 @@
           alert('この作品は既に投稿履歴に載っています(' + _byJa + ')。二重登録を防ぎました。\n既存: ' + (_ex.title || '(題名なし)') + (_ex.videoId ? ' / ' + _ex.videoId : ''));
         } else if (_res.reason === 'no-id') {
           alert('投稿履歴に載せられませんでした。\n理由=この動画に識別ID(背骨ID)が無く、YouTube URL・短縮URLも空でした。\n(videoId=' + (meta.videoId || 'なし') + ' / チャンネル=' + _dacc2 + ')');
+        } else if (_res.reason === 'unavailable') {
+          alert('投稿履歴の登録機能を読み込めませんでした。\nドラフトは残してあるので、ページを再読み込みしてもう一度「投稿完了」を押してください。');
+        } else if (_res.reason === 'persist-failed') {
+          alert('投稿履歴をこの端末へ保存できませんでした。\nドラフトは残してあります。空き容量を確認してから、もう一度「投稿完了」を押してください。');
         } else if (_res.reason === 'exception') {
           alert('投稿履歴への記録で問題が起きました。\n' + (_res.message || '(詳細不明)') + '\n(videoId=' + (meta.videoId || 'なし') + ' / チャンネル=' + _dacc2 + ')');
         }
       }
     } catch (e5) {}
+    // 投稿履歴へ「新規保存できた」または「既に載っている」と確認できた時だけ完了を進める。
+    // API未起動/識別不能/保存失敗/例外でドラフトを作成履歴へ移すと再試行手段を失うため、ここで止める。
+    if (!_res || (_res.ok === false && _res.reason !== 'dupe')) return false;
     // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
     try {
       if (ps && ps.id) {
@@ -580,6 +590,7 @@
     render();
     // ── Drive 保存。動画作成時に即保存済みならプレビューだけ追記、未保存の旧ドラフト等はフル保存にフォールバック ──
     driveSaveForCompleted_(meta, { silent: false });
+    return true;
   }
 
   // 投稿完了(または作成履歴カードの「☁️ Drive保存」)から呼ぶDrive保存。
@@ -1354,8 +1365,8 @@
       var ytUrl = ($('draftYtUrl') || {}).value || '';
       var slot = $('draftYtDescUrlLink');
       var shortUrl = (slot && slot.dataset && slot.dataset.url) || '';
-      handleCompleteOk_(_modalMeta.id, ytUrl.trim(), shortUrl);
-      closeModal_();
+      // 履歴への保存を確認できた時だけ閉じる。失敗時はドラフトとモーダルを残して再試行可能にする。
+      if (handleCompleteOk_(_modalMeta.id, ytUrl.trim(), shortUrl)) closeModal_();
     });
     document.addEventListener('go5-disc-url-changed', function () {
       if (!m || m.style.display === 'none' || !_modalMeta) return;

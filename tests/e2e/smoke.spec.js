@@ -176,6 +176,93 @@ test.describe('ドラフト軽量ページ', () => {
     expect(errors, '軽量ドラフトのロード/投稿モードで例外').toEqual([]);
   });
 
+  test('ドラフト投稿モードの即時投稿完了が投稿履歴へ実保存される', async ({ page }) => {
+    const draftId = 'stk_e2e_complete_now';
+    const videoId = 'acc1-20260812-1200-e2e1';
+    const ytUrl = 'https://www.youtube.com/shorts/AbCdEfGhI12';
+    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ draftId, videoId }) => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('verify_manual__acc1', '[]');
+      localStorage.setItem('short_hist__acc1', '[]');
+      localStorage.setItem('go5_stock_archive', '[]');
+      localStorage.setItem('go5_stock_meta', JSON.stringify([{
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        label: '即時投稿完了の回帰', title: '即時投稿完了の回帰', author: 'test',
+        bskyText: 'テスト本文', affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
+        videoId, attrs: {}
+      }]));
+    }, { draftId, videoId });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect.poll(() => page.evaluate(() => (
+      typeof window.Go5History?.addCompletedPost
+    ))).toBe('function');
+
+    await page.locator(`.stk-mode[data-id="${draftId}"]`).click();
+    await expect(page.locator('#draftPostModal')).toBeVisible();
+    await expect(page.locator('#draftPubNow')).toBeChecked();
+    await page.locator('#draftYtUrl').fill(ytUrl);
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.locator('#draftModalComplete').click();
+
+    await expect.poll(async () => page.evaluate(({ draftId, videoId, ytUrl }) => {
+      const hist = JSON.parse(localStorage.getItem('verify_manual__acc1') || '[]');
+      const drafts = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
+      const archive = JSON.parse(localStorage.getItem('go5_stock_archive') || '[]');
+      return {
+        history: hist.some((x) => x.videoId === videoId && x.ytUrl === ytUrl),
+        draftRemoved: !drafts.some((x) => x.id === draftId),
+        archived: archive.some((x) => x.id === draftId),
+      };
+    }, { draftId, videoId, ytUrl })).toEqual({ history: true, draftRemoved: true, archived: true });
+
+    await page.locator('#tabVerify').click();
+    await expect(page).toHaveURL(/\/index\.html$/);
+    await expect(page.locator('.vrow-title').filter({ hasText: '即時投稿完了の回帰' })).toHaveCount(1);
+  });
+
+  test('投稿履歴APIが未準備ならドラフトを消さず再試行できる', async ({ page }) => {
+    const draftId = 'stk_e2e_complete_failclosed';
+    const videoId = 'acc1-20260812-1201-e2e2';
+    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ draftId, videoId }) => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('verify_manual__acc1', '[]');
+      localStorage.setItem('short_hist__acc1', '[]');
+      localStorage.setItem('go5_stock_archive', '[]');
+      localStorage.setItem('go5_stock_meta', JSON.stringify([{
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        label: '履歴未準備fail-closed', title: '履歴未準備fail-closed', author: 'test',
+        bskyText: 'テスト本文', affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
+        videoId, attrs: {}
+      }]));
+    }, { draftId, videoId });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('.stk-mode[data-id="' + draftId + '"]').click();
+    await expect(page.locator('#draftPostModal')).toBeVisible();
+    await page.evaluate(() => { window.Go5History = null; });
+
+    const messages = [];
+    page.on('dialog', async (dialog) => {
+      if (dialog.type() === 'confirm') await dialog.accept();
+      else { messages.push(dialog.message()); await dialog.accept(); }
+    });
+    await page.locator('#draftModalComplete').click();
+
+    await expect.poll(async () => page.evaluate(({ draftId, videoId }) => {
+      const hist = JSON.parse(localStorage.getItem('verify_manual__acc1') || '[]');
+      const drafts = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
+      const archive = JSON.parse(localStorage.getItem('go5_stock_archive') || '[]');
+      return {
+        history: hist.some((x) => x.videoId === videoId),
+        draftKept: drafts.some((x) => x.id === draftId),
+        archived: archive.some((x) => x.id === draftId),
+      };
+    }, { draftId, videoId })).toEqual({ history: false, draftKept: true, archived: false });
+    await expect(page.locator('#draftPostModal')).toBeVisible();
+    expect(messages.join('\n')).toContain('投稿履歴の登録機能を読み込めませんでした');
+  });
+
   test('本体のドラフトボタンは専用ページへ遷移する', async ({ page }) => {
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
     await page.locator('#tabStock').click();

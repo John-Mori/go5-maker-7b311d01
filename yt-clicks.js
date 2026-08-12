@@ -2314,6 +2314,10 @@
     if (opts.attrs) attrDefs_().forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
     manual.push(entry);
     saveArrFor_('verify_manual', acc, manual);
+    // saveArrFor_ は履歴消失防止のため例外を握る設計だが、投稿完了だけは「保存できた」と確認してから
+    // ドラフトを退避させる必要がある。QuotaExceeded等で実保存されなければ失敗を返し、stock側がドラフトを残す。
+    var persisted = loadArrFor_('verify_manual', acc).some(function (x) { return x && x.id === id; });
+    if (!persisted) return { ok: false, reason: 'persist-failed' };
     if (ytUrl) { ymap[id] = ytUrl; saveYtMapFor_(acc, ymap); }
     // ★投稿完了と同時に記録シート(=分析の元)へ即upsert。従来は下の workUrl 分岐の中でしか
     //   pushItemToGas_ を呼んでおらず、作品URL未入力の即時投稿は完了時にシートへ載らず、後追いの
