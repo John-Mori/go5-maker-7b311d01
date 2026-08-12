@@ -453,7 +453,14 @@
     return { at: r.at || 0, n: r.n || 0 };
   }
   function needsInfoBackfill_(it) {
-    return isInfoTarget_(it) && (!it.title || it.title === '(タイトル未取得)' || !it.date || it.reviewCount == null);
+    return isInfoTarget_(it) && (
+      !it.title || it.title === '(タイトル未取得)' || !it.date || it.reviewCount == null ||
+      // ★AI判定に使う genre/floor が未取得の既存候補も追う=genre/floor を保存するようになる前に
+      //   追加された作品は title/価格が揃っていてもタグが空のまま=AIバッジが出ない(Chami 2026-08-12
+      //   「追加済みの候補に判定が入るようにして」)。floor は取得成功で doujin なら「同人」等が必ず入る
+      //   ため、一度取れれば下の条件は false になり追跡は止まる(無限再取得にはならない)。
+      (!(it.genres && it.genres.length) && !it.floor)
+    );
   }
   function coreInfoMissing_(it) {
     return !it || !it.title || it.title === '(タイトル未取得)' || !it.date;
@@ -463,14 +470,21 @@
     // ★核(タイトル/発売日)が欠けている間は、回数で20分間隔へ落とさず一定間隔で追い続ける
     //   (諦めない・Chami 2026-08-04「引き続き取得するようにして諦めないで」)。実際に叩くのは
     //   候補タブを見ている間の再描画時だけ(scheduleInfoTick_)なので、離席中はworkerを叩かない。
-    if (!coreInfoMissing_(it)) return 24 * 3600 * 1000;
+    if (!coreInfoMissing_(it)) {
+      // 核(タイトル/発売日)は揃っているが genre/floor が未取得＝AI判定に要る＝素早く1回取りに行く。
+      //   取得成功で floor が埋まり needsInfoBackfill_ の対象から外れる＝無限再取得にはならない。
+      if (!(it.genres && it.genres.length) && !it.floor) return INFOMISS_FAST_TTL;
+      return 24 * 3600 * 1000;
+    }
     return INFOMISS_FAST_TTL;
   }
   // 核(タイトル/発売日)がまだ欠けている候補が残っているか(=タブを見ている間に自動で追う対象)。
   //   ★回数上限(INFOMISS_FAST_TRIES)では止めない=情報が揃うか、タブを離れるまで追い続ける(諦めない)。
   function hasFastPendingInfo_(items) {
     return (items || []).some(function (it) {
-      return needsInfoBackfill_(it) && coreInfoMissing_(it);
+      // 核(タイトル/発売日)未取得に加え、genre/floor 未取得(AI判定用)もタブ表示中は素早く追う。
+      //   review数だけ薄い候補は従来どおり fast 対象外(24hに1回)のまま。
+      return needsInfoBackfill_(it) && (coreInfoMissing_(it) || (!(it.genres && it.genres.length) && !it.floor));
     });
   }
   function backfillMissingInfo_(key, items, cb) {
