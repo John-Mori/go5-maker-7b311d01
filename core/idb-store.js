@@ -108,7 +108,14 @@
     });
   }
 
-  function get(key) { return withStore("readonly", function (st) { return st.get(key); }); }
+  // ★読み取りは源で fail-open(2026-08-13・C-038 恒久対策)：iOS Safari の idb-timeout / idb-open-timeout /
+  //   接続閉じ 等で withStore が reject しても、get は「キーが無い(null)」として返す。全ての get 呼び出し元
+  //   (stock.js のドラフト動画/サムネ読み・candidates.js:691・core/sync.js:709)は既に null/reject を R2・
+  //   ミラー・同期フォールバックへ倒す作りで、reject と null を区別している所は1つも無い(全数確認済)。
+  //   これで「get の reject が可視エラーへ直行する」再発クラス(resolveVideoBlob_ の『動画データの取得に
+  //   失敗しました』= v=757 で個別に塞いだのと同型)を、呼び出し元ごとに catch を足さずとも源で断つ。
+  //   ★書き込み(set/del)は従来どおり reject する=保存の失敗を握り潰すと saveStock_ の再試行が空回りするため。
+  function get(key) { return withStore("readonly", function (st) { return st.get(key); }).catch(function () { return null; }); }
   function set(key, val) { return withStore("readwrite", function (st) { return st.put(val, key); }); }
   function del(key) { return withStore("readwrite", function (st) { return st.delete(key); }); }
 
