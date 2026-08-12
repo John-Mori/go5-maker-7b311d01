@@ -119,6 +119,22 @@
     return { price: price, listPrice: lp, discountPct: pct != null ? pct : 0, at: String(x.fanzaFetchedAt || '') };
   }
 
+  // YouTube URL/IDを「11文字の動画ID」へ正規化する同一性キー。★idgen.youtubeId と同一仕様。
+  //   youtu.be/x ・ youtube.com/watch?v=x ・ youtube.com/shorts/x は URL文字列は違うが同じ動画=1投稿。
+  //   以前は生URLの完全一致で畳んでいたため、端末や経路でURL形式が違うと同じ投稿がシート分裂行として
+  //   2枚に並んだ(Chami報告2026-08-12「MacBookに同期したら同じ投稿履歴が2つ」の一因)。11文字IDに揃える。
+  //   IdGen があればそれを正本に使い、モジュール単体(テスト)では同じ抽出をフォールバックで持つ。
+  function ytKey_(url) {
+    var s = String(url || '').trim();
+    if (!s) return '';
+    var id = (root && root.IdGen && root.IdGen.youtubeId) ? (root.IdGen.youtubeId(s) || '') : '';
+    if (!id) {
+      if (/^[A-Za-z0-9_-]{11}$/.test(s)) id = s;
+      else { var m = s.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/); id = m ? m[1] : ''; }
+    }
+    return id || s; // 11文字IDに正規化できない値は生文字列で従来どおり完全一致
+  }
+
   // localItems(allItems()相当) と sheetItems(GAS action=history の items) から、
   // 「ローカルに無い行だけ」を表示専用アイテムに変換して返す。ローカルにあれば出さない。
   function mergeSheetExtras(localItems, sheetItems) {
@@ -130,7 +146,7 @@
       // ★YouTube動画URLも同一性キーに使う。1動画=1投稿なので、videoId/postUriが食い違っても
       //   同じytUrlならローカルとシートは同じ投稿=二重表示させない(Chami報告2026-07-29「シート由来か
       //   そうでないかで分裂」。短縮リンク再入力で背骨IDが割れても、同じYT動画なら1枚に畳む)。
-      var yt = String(it.ytUrl || it.youtubeUrl || '').trim();
+      var yt = ytKey_(it.ytUrl || it.youtubeUrl);
       if (yt) haveYt[yt] = true;
     });
     var seenUri = {}, seenVid = {}, seenYt = {};
@@ -139,7 +155,7 @@
       if (!x) return;
       var uri = String(x.postUri || '').trim();
       var vid = String(x.videoId || '').trim();
-      var yt = String(x.youtubeUrl || x.ytUrl || '').trim();
+      var yt = ytKey_(x.youtubeUrl || x.ytUrl);
       // YouTube動画URL一致=ローカルに同じ投稿が既にある(または同一シート内の重複)=畳む。
       //   ★これは postUri/videoId の前に効かせる(背骨IDが割れていても同じYT動画なら1枚)。
       if (yt) {
@@ -188,6 +204,7 @@
     workCidFromUrl: workCidFromUrl,
     workUrlFromCid: workUrlFromCid,
     historyHasEdit: historyHasEdit,
+    ytKey: ytKey_, // YouTube同一性キー(11文字ID正規化)・テスト用に露出
     _toDisplayItem: toDisplayItem_ // テスト用に露出
   };
   if (typeof window !== 'undefined') root.HistMerge = api;

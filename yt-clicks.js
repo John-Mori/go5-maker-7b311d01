@@ -278,7 +278,12 @@
     function otherKeys_(a) {
       if (_otherKeys[a]) return _otherKeys[a];
       var set = { vid: {}, su: {}, pu: {}, yid: {} };
-      loadArrFor_('short_hist', a).concat(loadArrFor_('verify_manual', a)).forEach(function (x) {
+      // ★manualOnly=true の short_hist 行は"手動短縮URL台帳"で一覧に出ない(allItems/displayItems_ が
+      //   !manualOnly で除外)。これを「相手chストアに実在」の証拠にすると、当該行は自分のタブでは隠され・
+      //   相手タブにも出ない=どのタブにも出ないのに存在扱い=不可視dupe(v=738と同型がフィルタ層に残存)。
+      //   復元→投稿完了が addCompletedPost_ でこの隠れ行に一致→dupeで新規行を作らず「載らない」(症状②)。
+      //   台帳行は実在の証拠にしない=非manualOnlyだけを相手ストアの存在キーに積む(Chami報告2026-08-12)。
+      loadArrFor_('short_hist', a).filter(function (x) { return x && !x.manualOnly; }).concat(loadArrFor_('verify_manual', a)).forEach(function (x) {
         if (!x) return;
         if (x.videoId) set.vid[String(x.videoId)] = 1;
         if (x.shortUrl) set.su[String(x.shortUrl)] = 1;
@@ -387,7 +392,17 @@
         if (cb) cb(_sheetExtraCache[a].items); return;
       }
       persistSheetRaw_(a, res.items); // 成功した生行を退避(次の失敗/リロードで復元できる)
-      var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(allItems(), res.items) : [];
+      // ★ローカル行のYouTube URLは多くが verify_yt__ マップ側にあり、生の行(allItems)には載っていない
+      //   ことがある。マージのYouTube同一性判定(ytKey)が効くよう、ymap解決済みの ytUrl を載せた複製を渡す
+      //   (Chami報告2026-08-12・シート分裂行がローカル行に吸収されず2枚に並ぶ症状①の一因)。非破壊=複製に載せる。
+      var _ym = loadYtMap();
+      var _localResolved = allItems().map(function (it) {
+        if (!it) return it;
+        var y = _ym[itemKey(it)] || it.ytUrl || it.youtubeUrl || '';
+        if (y && y !== it.ytUrl) { var c = {}; for (var p in it) if (Object.prototype.hasOwnProperty.call(it, p)) c[p] = it[p]; c.ytUrl = y; return c; }
+        return it;
+      });
+      var extra = (window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(_localResolved, res.items) : [];
       _sheetExtraCache[a] = { at: now, items: extra };
       reconcilePend_(a, res.items); // シートが編集を反映済みなら保持を落とす(リロード後の自己清掃)
       if (cb) cb(extra);

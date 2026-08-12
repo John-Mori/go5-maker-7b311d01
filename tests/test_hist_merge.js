@@ -170,6 +170,39 @@ test('H-20: 同じYouTube動画URLならvideoId/postUriが割れてもシート�
   assert.strictEqual(HM.mergeSheetExtras([], dup).length, 1, 'シート内の同一YT動画重複も畳む');
 });
 
+// ★2026-08-12 Chami報告「MacBookに同期したら同じ投稿履歴が2つ」の一因=URL形式違いで畳めていなかった。
+//   ローカルとシートで同じ動画でも youtu.be / watch?v= / shorts で文字列が違うと別物扱いになっていた。
+//   ytKey_(11文字ID正規化)で揃える(idgen.youtubeId 同一仕様)。
+test('H-22: ytKey は youtu.be / watch?v= / shorts / 生ID を同じ11文字IDへ正規化する', function () {
+  assert.strictEqual(HM.ytKey('https://youtu.be/AAAAAAAAAAA'), 'AAAAAAAAAAA');
+  assert.strictEqual(HM.ytKey('https://www.youtube.com/watch?v=AAAAAAAAAAA'), 'AAAAAAAAAAA');
+  assert.strictEqual(HM.ytKey('https://www.youtube.com/shorts/AAAAAAAAAAA'), 'AAAAAAAAAAA');
+  assert.strictEqual(HM.ytKey('AAAAAAAAAAA'), 'AAAAAAAAAAA');
+  assert.strictEqual(HM.ytKey(''), '');
+  assert.strictEqual(HM.ytKey('https://5mgl.com/xyz'), 'https://5mgl.com/xyz', '11文字IDを取れない値は生文字列で従来どおり');
+});
+
+test('H-23: URL形式が違っても同じYT動画ならシート由来を畳む(MacBook同期の2重表示・症状①)', function () {
+  // ローカルは shorts 形式、シートは youtu.be 形式=同じ動画。旧実装(生URL完全一致)は畳めず2枚並んだ。
+  var local = [{ videoId: 'acc1-A', ytUrl: 'https://www.youtube.com/shorts/ZZZZZZZZZZZ', title: '同じ投稿' }];
+  var sheet = [{ videoId: 'acc1-B', youtubeUrl: 'https://youtu.be/ZZZZZZZZZZZ', title: '同じ投稿' }];
+  assert.deepStrictEqual(HM.mergeSheetExtras(local, sheet), [], 'URL形式違いでも同一動画=1枚に畳む');
+  // watch?v= 形式のシート内自己重複も畳む。
+  var dup = [
+    { videoId: 'acc1-D', youtubeUrl: 'https://www.youtube.com/watch?v=YYYYYYYYYYY' },
+    { videoId: 'acc1-E', youtubeUrl: 'https://youtu.be/YYYYYYYYYYY' }
+  ];
+  assert.strictEqual(HM.mergeSheetExtras([], dup).length, 1, 'シート内の同一動画(URL形式違い)も1枚');
+});
+
+test('H-24: ローカル行のytUrlがymapから解決されて渡れば、シート分裂行を吸収する', function () {
+  // 実際の呼び出し側(yt-clicks.js fetchSheetExtra_)は、ymap解決済みの ytUrl を載せた複製を渡す。
+  //   ここではその複製が渡ってきた前提=ローカル行がYT動画URLを供出できればシート由来を畳める、を固定。
+  var localResolved = [{ videoId: 'acc1-X', ytUrl: 'https://youtu.be/WWWWWWWWWWW', title: 'ローカル(ymap解決済)' }];
+  var sheet = [{ videoId: 'acc1-Y', youtubeUrl: 'https://www.youtube.com/shorts/WWWWWWWWWWW', title: 'シート分裂行' }];
+  assert.strictEqual(HM.mergeSheetExtras(localResolved, sheet).length, 0, 'ymap解決でローカルが吸収=シート由来を出さない');
+});
+
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);
