@@ -767,21 +767,31 @@ DEAD_ALERT_COOLDOWN_SEC = 60 * 60  # デッドレター通知は1時間に1回�
 
 
 def dead_letter_summary():
-    """DLQ(status='dead')の総数とdept内訳。読み取り専用・fail-open(DB不在/ロックで0)。"""
+    """DLQ(status='dead')の総数・dept内訳・**最大id**。読み取り専用・fail-open(DB不在/ロックで0)。
+
+    ★max_id を足した(2026-08-13 一ノ瀬怜)= check_dead_letters が「件数の増分」で鳴る形だと、
+      古いdeadが1件手当て/purgeされた同じ周期に新しいdeadが1件落ちると **total が増えず**
+      (net-zero)警報が黙る穴があった。dead行のidは単調増加=**過去の最大idより大きいdead**が
+      現れたら「新しい隔離が起きた」と確実に言える(件数の増減に一切左右されない)。
+    """
     if not os.path.exists(QUEUE_DB_WD):
-        return 0, {}
+        return 0, {}, 0
     try:
         import sqlite3
         con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
         try:
             con.execute("PRAGMA busy_timeout=1000")
             rows = con.execute(
-                "SELECT dept, COUNT(*) FROM queue WHERE status='dead' GROUP BY dept").fetchall()
+                "SELECT dept, COUNT(*), MAX(id) FROM queue WHERE status='dead' GROUP BY dept"
+            ).fetchall()
         finally:
             con.close()
-        return sum(r[1] for r in rows), {(r[0] or "?"): r[1] for r in rows}
+        total = sum(r[1] for r in rows)
+        by = {(r[0] or "?"): r[1] for r in rows}
+        max_id = max((r[2] or 0) for r in rows) if rows else 0
+        return total, by, max_id
     except Exception:
-        return 0, {}
+        return 0, {}, 0
 
 
 # --- ★2026-07-20 未配送pending監視 (INC-110: 消費者不在のdept宛が無警報で永久に沈む) ---
@@ -844,25 +854,54 @@ def check_orphan_pending(state, dry_run):
 
 
 def check_dead_letters(state, dry_run):
-    """毒メッセージ(max_deliveries超過でdead隔離)が黙って消えるのを防ぐ。
-    dead件数が前回より増えたらincidentへ1通(1hクールダウン)。減ったら基準を追従し再発報しない。"""
-    total, by = dead_letter_summary()
-    last = state.get("last_dead_count", 0)
-    if total <= last:
-        state["last_dead_count"] = total  # 手当て済(dead→purge等)で減ったら基準を下げる
+    """毒メッセージ(max_deliveries超過でdead隔離)が黙って消えるのを防ぐ=**遷移時**の速報(60s周期)。
+
+    ★2026-08-13 一ノ瀬怜 2点直した(HQ便 1537339495504936980「この辺の通知大丈夫?」の依頼2):
+      (1) 判定を件数ではなく**最大idの前進**にした。旧= total<=last で即return=古いdead1件が
+          手当て/purgeされた同周期に新規dead1件が落ちると net-zero で黙る穴があった。dead行の
+          idは単調増加なので「前回見た最大idより大きいdeadが在る」ことだけを見れば、件数の
+          増減に一切左右されずに**新しい隔離**を必ず捕まえる。
+      (2) 宛先に **hq を足した**。旧= incident部屋だけ=**動ける人(研究室HQ)が読まない場所**へ
+          しか出ておらず、実測(2026-08-13)で速報は 08:32 に鳴っていたのにHQは「完全サイレント」と
+          判断しsqliteを直接見に行った。滞留警報(check_stale_dead)は同日hqを足したが、こちらの
+          **速報(60s)**が hq に届いていなかった=遷移時に気づける経路が塞がっていた核心。
+    """
+    total, by, max_id = dead_letter_summary()
+    # ★last_dead_count は weekly_metrics.py が現在のdead件数として読む=毎周期同期させておく
+    #   (判定には使わない。判定は下の max_id の前進のみ)。
+    state["last_dead_count"] = total
+    if total == 0:
+        return
+    if "last_dead_max_id" not in state:
+        # ★新コードの初回=既存deadを**基準として黙って取り込む**(告知しない)。
+        #   デプロイ時点で既に隔離済みの行は「新しい隔離」ではないため。以後 id>基準 だけ鳴らす。
+        state["last_dead_max_id"] = max_id
+        return
+    last_id = state.get("last_dead_max_id", 0)
+    if max_id <= last_id:
+        # 新しい隔離は無い。★基準idは下げない(purgeで一時的にmax_idが下がっても、
+        #   既に告知済みの古いdeadを新規と誤認して二度鳴らさないため)。
         return
     now_epoch = time.time()
     if now_epoch - state.get("last_dead_alert", 0) < DEAD_ALERT_COOLDOWN_SEC:
         return
     detail = "、".join(f"{dept_ja(d, with_slug=True)}={n}" for d, n in by.items()) or "(内訳不明)"
-    msg = (f"⚠デッドレター{total}件(前回{last}件から増加): {detail}。"
+    msg = (f"⚠デッドレターが新たに発生(現在計{total}件): {detail}。"
            "5回配送しても処理できずキューに隔離されたメッセージです。"
-           "毒メッセージ(壊れた本文/対応不能な依頼)か、宛先部門の長期不在が原因。"
-           "確認: `powershell scripts\\_daemons\\status.ps1`(dead数)。中身は "
-           "LeaseQueue.dead_letters() で参照できます。")
-    if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
+           "毒メッセージ(壊れた本文/対応不能な依頼)か、宛先部門の長期不在・配送処理の例外が原因。"
+           "中身を見る: `python scripts/queue/dlq_tool.py --list`。"
+           "手当てしたら印を付ける: "
+           "`python scripts/queue/dlq_tool.py --ack <id> --by \"<誰>\" --note \"<どう片付けたか>\"`。")
+    # ★宛先= incident + hq + 該当dept。不明な宛先(dept='router'等)は bot_send が False を
+    #   返すだけ=fail-open・他の宛先は届く(check_stale_dead と同じ形に揃えた)。
+    targets = [SUMMARY_DEPT, "hq"] + [d for d in by if d not in (SUMMARY_DEPT, "hq")]
+    sent = False
+    for dept in targets:
+        if bot_send(dept, msg, dry_run, by_dept=True):
+            sent = True
+    if sent:
         state["last_dead_alert"] = now_epoch
-        state["last_dead_count"] = total
+        state["last_dead_max_id"] = max_id
 
 
 # --- ★★2026-08-12 dead が「増えない限り二度と鳴らない」穴を塞ぐ(イージス研究室/KPI A1) ---
