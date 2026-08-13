@@ -1352,6 +1352,41 @@ def _looks_like_session_missing(text):
             or "invalid session" in t)
 
 
+# ★★2026-08-14 「rc=0なのに返信本文が無い」= 第3の箱(イージス研究室・研究室HQ発注)。
+#   これを口座エラーと同じ箱に入れていたのが穴だった。**形が違う**=
+#     口座/上限 : rc=1 / is_error:true / api_error_status=429 / result にエラー文が載る
+#     この箱   : rc=0 / is_error:false / stop_reason:end_turn / **課金は発生している**
+#   実測(local/llm/request_log.jsonl)= 08-13 に llm-qa 10回・future-room 1回。llm-qa の
+#   10回だけで total_cost_usd 合計 $9.19 を払って本文ゼロ。しかも同じセッションへ resume
+#   する限り**毎回ここに落ちる**(10/10)ので、再配達は金を燃やすだけで絶対に抜けない。
+#   → 6回で dead(2便が実際に死んだ: DISPATCH-llm-qa-1786558097396 / -1786602372875)。
+EMPTY_REPLY_NUDGE = (
+    "=== システム: 直前の便への返信が空だった(部屋には何も出ていない) ===\n"
+    "★これはChamiの発言ではない。機械の催促だ。この文への感想は要らない。\n"
+    "直前に渡した便に対する**返信本文だけ**を、今すぐもう一度出せ。\n"
+    "★『No response requested.』のような機械の返事にするな= あの便はDiscordの部屋へ"
+    "配るための実際の便だ(空のまま返すと、依頼した相手には沈黙として届く)。\n"
+    "★返す物が無いと判断したなら、その理由を1行で書け。**沈黙が最悪の事故**だ。\n"
+    "=== ここまで ===")
+
+
+def looks_like_empty_reply(rc, data, out):
+    """rc=0 で正常に終わったのに**返信本文が無い**便か(=第3の箱)。
+
+    ★口座・上限・認証・セッション不明は**ここに含めない**(それぞれ従来の枝が正しい)。
+      含めてしまうと、口座が空の時に世代交代して健全な旧セッションを捨てる
+      =2026-07-25 に実弾で踏んだ穴を踏み直すことになる。
+    """
+    if rc != 0:
+        return False                     # 口座・上限・認証は rc=1 で来る(実測)
+    if _reply_of(data):
+        return False                     # 本文がある=正常
+    t = out or ""
+    if _looks_like_auth_failure(t) or _looks_like_session_missing(t):
+        return False                     # 先に見るべき枝がある
+    return True
+
+
 def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY_TIMEOUT,
                 hard_timeout=None, on_soft=None):
     """`claude -p` を**1回だけ**起動する。戻り値 (data, rc, combined_output, waited_sec)。
@@ -3894,6 +3929,31 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
             _record(rid, dept, "running", f"resume session={sid} gen={generation}")
             data, rc, out = _run_audited(prompt, session_id=sid)
             reply = _reply_of(data)
+            # ★★2026-08-14 第3の箱= rc=0なのに本文が空(定義とコメントは looks_like_empty_reply)。
+            #   ここで**まず同じセッションへ1回だけ催促する**= 一過性ならこれで返る。
+            #   交代を先に打たない理由は「会話の記憶を捨てるのは最後の手」だから。
+            #   ★実物の中身(2026-08-13 15:33:06 の llm-qa)= セッションは
+            #     「No response requested.」(出力7トークン)と答えていた=**便を機械の通知だと
+            #     読んで返事を省いていた**。だから催促の文はそこを名指しで潰してある。
+            _empty_nudged = False
+            if looks_like_empty_reply(rc, data, out):
+                _empty_nudged = True
+                _log(dept, "rc=0だが返信本文が空= 同じセッションへ1回だけ催促する(記憶は捨てない)")
+                _record(rid, dept, "running", f"空返答→催促 session={sid}")
+                try:
+                    data2, rc2, out2 = _run_audited(
+                        EMPTY_REPLY_NUDGE,
+                        session_id=str((data or {}).get("session_id") or sid))
+                except subprocess.TimeoutExpired:
+                    # ★催促が返らないのも「答えられない」の一種=交代へ倒す(便を殺さない)。
+                    data2, rc2, out2 = None, -1, ""
+                    _log(dept, "催促が時間内に返らなかった=交代へ倒す")
+                reply2 = _reply_of(data2)
+                if rc2 == 0 and reply2:
+                    data, rc, out, reply = data2, rc2, out2, reply2
+                    _log(dept, "催促で本文が返った=この便はそのまま配る(交代しない)")
+                else:
+                    _log(dept, "催促しても本文が空= このセッションは答えを返せない状態と見る")
             if rc == 0 and reply:
                 new_sid_r = str((data or {}).get("session_id") or sid)
                 entry.update({"active_session_id": new_sid_r,
@@ -3966,13 +4026,25 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
             #   健全な旧セッション(会話の記憶)を捨てる危険だけが残る(実弾で gen=1 を捨てかけた。
             #   対応表の原子的更新=成功時のみ、が偶然守った)。
             #   交代するのは**セッションが見つからない時だけ**。それ以外は失敗として正直に返す。
-            if not _looks_like_session_missing(out):
+            # ★★2026-08-14 空返答は**交代してよい唯一の失敗**として切り出す。
+            #   上の注記(2026-07-25)は**口座エラーの箱**の話だ= 交代しても新セッションが同じ
+            #   理由で落ちるから交代しない。空返答は形が違う: 口座は生きていて課金も通っており、
+            #   落ちているのは**そのセッション1本**だ。実測(08-13)= 15:39:44 まで10連敗した便が、
+            #   15:42:43 に**人が手で世代交代**させた直後、15:45:46 の次便は1回目の配達で通り
+            #   15:48:48 に部屋へ着いた(discord 1537352198785208410)。人がやったのと同じ手を機械にやらせる。
+            #   ★引き継ぎ(handoff)は作らない= 引き継ぎ文を書かせる相手が、まさに答えを返せない
+            #     セッションだからだ。新セッションは起動文+台帳+直前の便(recent)から立ち上がる。
+            if not _looks_like_session_missing(out) and not _empty_nudged:
                 LAST_ERROR[dept] = f"Claude CLIがエラーを返した(rc={rc}): {str((data or {}).get('result') or '')[:80]}"
                 _record(rid, dept, "failed", f"resume失敗(交代せず) rc={rc} out={(out or '')[:300]!r}")
                 _log(dept, f"resume失敗(rc={rc})=口座/一時異常の疑い。世代交代せず1回で諦める")
                 return None, False
-            _log(dept, f"resume失敗(セッション不明)→世代交代")
-            _record(rid, dept, "rotated", f"resume失敗 old={sid} rc={rc}")
+            if _empty_nudged:
+                _log(dept, "空返答(催促も空)→世代交代=このセッション1本だけが答えを返せない")
+                _record(rid, dept, "rotated", f"空返答(rc=0・本文なし) old={sid}")
+            else:
+                _log(dept, f"resume失敗(セッション不明)→世代交代")
+                _record(rid, dept, "rotated", f"resume失敗 old={sid} rc={rc}")
             sid = ""
 
         # --- 初回、または世代交代 ---
