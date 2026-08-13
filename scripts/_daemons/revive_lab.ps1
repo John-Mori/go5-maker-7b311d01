@@ -4,7 +4,7 @@
 #   The Lab session is the single always-open catch-all. If the PC reboots (Windows Update,
 #   power loss) or the session dies while Chami is away, nothing answers in-character until he
 #   opens it by hand - which he cannot do remotely. This restores it automatically.
-#   (Availability itself is already floored by claude_responder.py's unmanned 代打; this brings
+#   (Availability itself is already floored by claude_responder.py's unmanned stand-in; this brings
 #    back a FULL character-capable Lab, which is strictly better than mechanical acks.)
 #
 # LIVENESS DETECTION (rewritten 2026-07-18, INC-104):
@@ -47,6 +47,8 @@ $py = 'python'
 $labAlive = ($LASTEXITCODE -eq 0)
 if ($labAlive) {
   Write-Log 'lab: ok (presence.lab_alive)'
+  # presence recovered -> whatever we were sparing is vindicated, reset the counter (section 2.5)
+  try { Remove-Item -LiteralPath (Join-Path $root 'local\_lab_revive_spare.txt') -Force -ErrorAction SilentlyContinue } catch {}
   exit 0
 }
 
@@ -68,22 +70,156 @@ if ($waiter.Count -gt 0) {
 #   Since we only reach here when the Lab is DEAD by presence AND no main waiter is armed, any
 #   existing revival cmd window is a confirmed corpse (it never became the live Lab). Close them.
 #   Age guard (> cooldown) makes it impossible to touch a window that is still booting this cycle.
+#   *** 2026-08-13, aegis-gl: THE PREMISE ABOVE EXPIRED ON 2026-08-06 - AUTOPSY + GUARD ADDED ***
+#   "any existing revival cmd window is a confirmed corpse (it never became the live Lab)" was
+#   true only while a script-launched claude could not log in. The AUTH PRE-WARM fix in section
+#   5.5 (2026-08-06) removed exactly that, so revived windows DO become the live Lab now - and
+#   this block kept the old licence to kill. Measured on 2026-08-13 for the 08:42:07 reap:
+#     - the Lab window spawned 04:02:09 (transcript 7dbacd77-...jsonl, first entry 04:02:10)
+#     - its last assistant/tool line is 08:10:41, and it was STILL ALIVE at 08:31:01 (the
+#       harness wrote a `queue-operation: enqueue` line at that second) = mid-turn, not dead
+#     - presence still called it dead, because lab_alive() has degenerated to readiness-only:
+#       the liveness pulse local/llm/lab_tool_pulse.txt has not moved since 2026-07-20 19:22
+#       (23.9 days), so the "busy, ear paused" branch of presence.py can never fire. During a
+#       long turn no `inbox_waiter --name main` exists either, so section 2's guard misses too.
+#   => presence dead + no waiter + a BUSY claude.exe = this loop kills the living commander.
+#   FIX (two parts, both here):
+#     (a) AUTOPSY: log what the shell's children actually were. This line is written only when a
+#         reap happens, so it can never become background noise.
+#     (b) FRATRICIDE GUARD: measure CPU over 5s. A working claude.exe burns CPU; the deaf
+#         zombies of 2026-08-01 (stuck on "your message seems cut off") burn none. Only reap
+#         when claude.exe is absent or provably idle. If the measurement itself fails we SPARE
+#         the window: a pileup is slow, visible and recoverable, killing the commander is
+#         silent and is the accident this whole file exists to prevent.
 $revCmds = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
   $_.Name -eq 'cmd.exe' -and
   $_.CommandLine -match '\.local\\bin\\claude\.exe' -and
   $_.CommandLine -match 'SougouStartFolder\\5SecMovieMaker'
 })
-$reaped = 0
-foreach ($rc in $revCmds) {
-  if ($null -eq $rc.CreationDate) { continue }
-  if (((Get-Date) - $rc.CreationDate).TotalSeconds -lt $cooldownSec) { continue }  # still booting - leave it
-  Get-CimInstance Win32_Process -Filter ("ParentProcessId={0}" -f $rc.ProcessId) -ErrorAction SilentlyContinue | ForEach-Object {
-    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+#   Newest first. Only ONE window can be the Lab, and it is always the most recently spawned
+#   one (a hand-opened Lab does not carry claude.exe on the cmd command line, so it is not even
+#   in this set). Everything older than the newest is therefore superseded and is reaped without
+#   the working-check - that is what keeps the 2026-08-01 pileup from coming back through the
+#   guard below.
+$aged = @($revCmds | Where-Object {
+  $null -ne $_.CreationDate -and ((Get-Date) - $_.CreationDate).TotalSeconds -ge $cooldownSec
+} | Sort-Object CreationDate -Descending)
+# One CPU snapshot pair for ALL claude.exe, so the 5s cost is paid once no matter how many
+# shells are candidates (and zero times when there is nothing to reap).
+$cpu1 = @{}; $cpu2 = @{}
+if ($aged.Count -gt 0) {
+  try {
+    Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction Stop | ForEach-Object {
+      $cpu1[[string]$_.ProcessId] = [int64]$_.KernelModeTime + [int64]$_.UserModeTime
+    }
+    Start-Sleep -Seconds 5
+    Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction Stop | ForEach-Object {
+      $cpu2[[string]$_.ProcessId] = [int64]$_.KernelModeTime + [int64]$_.UserModeTime
+    }
+  } catch {
+    Write-Log ('lab: CPU probe failed ({0}) - sparing every candidate shell this pass' -f $_.Exception.Message)
+    $cpu1 = $null
   }
+}
+#   AND bound the sparing. An idle-but-live TUI burns about the same trickle of CPU as a wedged
+#   one (measured 2026-08-13 on the live Lab while it sat at an armed waiter: +16ms over 5s), so
+#   "burning CPU" cannot by itself tell a working Lab from the deaf zombies of 2026-08-01. If the
+#   SAME shell is spared pass after pass without presence ever going ok again, it is not working,
+#   it is stuck - and sparing forever would leave the Lab unrevived, which is the accident on the
+#   other side. Count consecutive spares per pid and give up after SPARE_MAX passes (~3 hours at
+#   10 min/pass). Every spare is logged, so this trips only after ~18 visible warnings.
+$spareStateFile = Join-Path $root 'local\_lab_revive_spare.txt'
+$SPARE_MAX = 18
+$sparePrevPid = ''
+$sparePrevCount = 0
+if (Test-Path -LiteralPath $spareStateFile) {
+  $parts = ((Get-Content -LiteralPath $spareStateFile -Raw).Trim() -split '\s+')
+  if ($parts.Count -ge 2) { $sparePrevPid = $parts[0]; [int]::TryParse($parts[1], [ref]$sparePrevCount) | Out-Null }
+}
+$spareNewPid = ''
+$spareNewCount = 0
+
+$reaped = 0
+$spared = 0
+$busyShells = 0   # positively measured as still working (not just "unmeasurable")
+$idx = -1
+foreach ($rc in $aged) {
+  $idx++
+  if ($idx -gt 0) {
+    # superseded window: cannot be the current Lab, reap without ceremony
+    Write-Log ('lab: cmd pid {0} is an older duplicate revival shell (newest is pid {1}) - reaping' -f $rc.ProcessId, $aged[0].ProcessId)
+    Get-CimInstance Win32_Process -Filter ("ParentProcessId={0}" -f $rc.ProcessId) -ErrorAction SilentlyContinue | ForEach-Object {
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Stop-Process -Id $rc.ProcessId -Force -ErrorAction SilentlyContinue
+    $reaped++
+    continue
+  }
+  if ($null -eq $cpu1) { $spared++; continue }   # probe failed -> never kill on an unknown
+  $kids = $null
+  try {
+    $kids = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId={0}" -f $rc.ProcessId) -ErrorAction Stop)
+  } catch {
+    Write-Log ('lab: autopsy failed for cmd pid {0} ({1}) - sparing it' -f $rc.ProcessId, $_.Exception.Message)
+    $spared++
+    continue
+  }
+  $claudeKids = @($kids | Where-Object { $_.Name -eq 'claude.exe' })
+  if ($claudeKids.Count -eq 0) {
+    Write-Log ('lab: cmd pid {0}: children [{1}] - no claude.exe = confirmed corpse, reaping' -f `
+      $rc.ProcessId, (($kids | ForEach-Object { $_.Name }) -join ','))
+  } else {
+    $working = $false
+    $busy = $false
+    $desc = ''
+    foreach ($ck in $claudeKids) {
+      $k = [string]$ck.ProcessId
+      $ws = [int]($ck.WorkingSetSize / 1MB)
+      if ($cpu1.ContainsKey($k) -and $cpu2.ContainsKey($k)) {
+        $cpuMs = [int]((($cpu2[$k] - $cpu1[$k])) / 10000)
+        $desc += ('claude pid={0} ws={1}MB cpu+{2}ms; ' -f $k, $ws, $cpuMs)
+        if ($cpuMs -gt 0) { $working = $true; $busy = $true }
+      } else {
+        $desc += ('claude pid={0} ws={1}MB cpu=UNMEASURED; ' -f $k, $ws)
+        $working = $true   # cannot prove it is idle -> treat as alive (fail-open, do not kill)
+      }
+    }
+    if ($working) {
+      $n = 1
+      if ($sparePrevPid -eq [string]$rc.ProcessId) { $n = $sparePrevCount + 1 }
+      if ($n -gt $SPARE_MAX) {
+        Write-Log ('lab: cmd pid {0} spared {1} passes in a row and presence never recovered [{2}] - treating it as stuck, reaping' -f $rc.ProcessId, $sparePrevCount, $desc)
+      } else {
+        Write-Log ('lab: cmd pid {0} has a WORKING claude.exe [{1}] - NOT reaping (spare {2}/{3}). presence says dead but the process is busy = the ear (waiter/liveness pulse) is what died, not the Lab' -f $rc.ProcessId, $desc, $n, $SPARE_MAX)
+        $spareNewPid = [string]$rc.ProcessId
+        $spareNewCount = $n
+        $spared++
+        if ($busy) { $busyShells++ }
+        continue
+      }
+    } else {
+      Write-Log ('lab: cmd pid {0}: claude.exe alive but 0 CPU over 5s [{1}] - deaf zombie, reaping' -f $rc.ProcessId, $desc)
+    }
+  }
+  foreach ($k in $kids) { Stop-Process -Id $k.ProcessId -Force -ErrorAction SilentlyContinue }
   Stop-Process -Id $rc.ProcessId -Force -ErrorAction SilentlyContinue
   $reaped++
 }
 if ($reaped -gt 0) { Write-Log ('lab: reaped {0} stale revival shell(s) before spawn (dead+no-waiter = corpses)' -f $reaped) }
+if ($spared -gt 0) { Write-Log ('lab: spared {0} shell(s) that were still working or unmeasurable' -f $spared) }
+# Persist the consecutive-spare counter (or clear it the moment we stop sparing that pid).
+try {
+  if ($spareNewPid) { Set-Content -LiteralPath $spareStateFile -Value ('{0} {1}' -f $spareNewPid, $spareNewCount) -Encoding ASCII }
+  elseif (Test-Path -LiteralPath $spareStateFile) { Remove-Item -LiteralPath $spareStateFile -Force -ErrorAction SilentlyContinue }
+} catch {}
+#   And do not stack a SECOND Lab on top of one we just proved is working: two commanders in
+#   one inbox is the double-answer race this fleet has fought before. Only a POSITIVE CPU
+#   measurement stops the spawn ($busyShells); an unmeasurable shell still allows revival, so a
+#   broken probe can never leave the Lab unrevived.
+if ($busyShells -gt 0) {
+  Write-Log ('lab: {0} working Lab window(s) present - presence is blind, not the Lab dead. Skipping spawn.' -f $busyShells)
+  exit 0
+}
 
 # --- 3) Cooldown: do not respawn faster than every 15 min. ---
 $now = [int][double]::Parse((Get-Date -UFormat %s))
@@ -192,6 +328,18 @@ try {
 
 # --- 6) Spawn a FRESH Lab (visible window on purpose: interactive TUI + last-resort manual input
 #        path via remote desktop). No -r resume. Same shape as open_dept_window.ps1. ---
-Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', 'cd', '/d', $root, '&&', $claude, $promptArg) -WorkingDirectory $root
+#   WITNESS WRAPPER (2026-08-13, aegis-gl): go through scripts\_daemons\lab_window.cmd so the
+#   parent shell records claude's exit code the moment it dies (see that file for why a batch
+#   file is the only place %errorlevel% survives). $claude stays ON the command line as arg 1,
+#   so the corpse filter in section 2.5 still matches these windows - do not move it inside.
+#   fail-open: if the wrapper is missing we spawn exactly the way we did before, and say so.
+$wrapper = Join-Path $root 'scripts\_daemons\lab_window.cmd'
+if (Test-Path -LiteralPath $wrapper) {
+  Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', $wrapper, $claude, $promptArg) -WorkingDirectory $root
+  Write-Log 'lab: revived FRESH (no resume) with boot prompt - spawned visible window via lab_window.cmd (exit code will be logged to local\_lab_claude_exit.log)'
+} else {
+  Write-Log 'lab: lab_window.cmd missing - falling back to direct spawn (no exit-code witness)'
+  Start-Process -FilePath 'cmd.exe' -ArgumentList @('/k', 'cd', '/d', $root, '&&', $claude, $promptArg) -WorkingDirectory $root
+  Write-Log 'lab: revived FRESH (no resume) with boot prompt - spawned visible window'
+}
 Set-Content -LiteralPath $stateFile -Value $now -Encoding ASCII
-Write-Log 'lab: revived FRESH (no resume) with boot prompt - spawned visible window'
