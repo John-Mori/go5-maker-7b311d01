@@ -46,6 +46,18 @@ import time
 DEFAULT_LEASE_SEC = 900          # 既定リース (処理猶予)。INC-94の実測(処理は数分〜十数分)より長く
 DEFAULT_MAX_DELIVERIES = 5       # これを超えたら dead-letter
 
+# ★2026-08-14 追加 (研究室HQ DISPATCH-aegis-gl-1786643264450 / 実測 01:04〜02:44 JST)。
+#   何が起きたか= Claude CLI の**セッション上限**(You've hit your session limit)に当たると
+#   relay が rc=1 で即座に返る。今の作りは「相手が一時的に受けられない」と「この便自体が
+#   毒」を**同じ deliveries カウンタ**で数えていたため、外部要因の数十分で正常な便が
+#   max_deliveries に達して dead へ落ちた。実害= Chamiの便 msg 1537508993923154042 が
+#   deliveries=6 / status=dead。**dead は二度と拾われない=黙って消える。**
+#   → 外部要因と分かっている失敗は `nack(refund=True)` で回数を**返金**し、
+#     `retry_after` でリセット時刻まで寝かせる (共通規律§3「可用性は fail-open」)。
+#   ★返金にも打ち止めが要る= 「外部要因」の名を借りた無限ループを作らないため。
+#     60回 = 上限の窓が数時間続いても足りる幅で、かつ永久には回らない。
+DEFAULT_MAX_REFUNDS = 60
+
 # --- 優先度 (2026-08-06 追加・小さいほど先に処理される) ---------------------------
 #   なぜ要るか= claim は厳密FIFO(ORDER BY id)だった。毎朝8時に自動便(絵文字巡回・日次
 #   振り返り)が全部門へ一斉投入され、部門デーモンは1件ずつしか処理しないので、その直後に
@@ -81,10 +93,16 @@ def prio_of(body):
 
 
 class LeaseQueue:
-    def __init__(self, path, lease_sec=DEFAULT_LEASE_SEC, max_deliveries=DEFAULT_MAX_DELIVERIES):
+    def __init__(self, path, lease_sec=DEFAULT_LEASE_SEC, max_deliveries=DEFAULT_MAX_DELIVERIES,
+                 max_refunds=DEFAULT_MAX_REFUNDS):
         self.path = path
         self.lease_sec = lease_sec
         self.max_deliveries = max_deliveries
+        self.max_refunds = max_refunds
+        # ★dead へ落ちる瞬間に呼ばれるフック(既定 None=誰も設定しなければ従来と1バイト差なし)。
+        #   呼び側(dept_daemon)が「Chamiが読む場所へ1行出す」ために使う。
+        #   フックが例外を投げてもキューは止めない(通知の失敗で配送機構を殺さない)。
+        self.on_dead = None
         d = os.path.dirname(path)
         if d:
             os.makedirs(d, exist_ok=True)
@@ -130,6 +148,10 @@ class LeaseQueue:
                 p = prio_of(body)
                 if p != PRIO_NORMAL:
                     self._db.execute("UPDATE queue SET prio=? WHERE id=?", (p, qid))
+        # --- 既存DBへの追加 (2026-08-14)。返金した回数=「外部要因で数えなかった」回数。
+        #     ALTERは列が無い時だけ通る=冪等。既存行は0で始まる(過去は書き換えない)。
+        if "refunds" not in cols:
+            self._db.execute("ALTER TABLE queue ADD COLUMN refunds INTEGER NOT NULL DEFAULT 0")
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_ready_prio ON queue(status, lease_until, prio, id)")
 
@@ -213,6 +235,7 @@ class LeaseQueue:
         # max_deliveries 超過は毒メッセージ → dead-letter へ隔離し、次を返さない (呼び側は再claim)
         if deliveries > self.max_deliveries:
             self._db.execute("UPDATE queue SET status='dead' WHERE id=?", (qid,))
+            self._announce_dead(qid, msg_id, dept_v, body, deliveries)
             return None
         try:
             parsed = json.loads(body)
@@ -230,9 +253,66 @@ class LeaseQueue:
             (time.time(), str(result)[:2000], qid))
         return cur.rowcount == 1
 
-    def nack(self, qid):
-        """処理失敗・手放す。lease を即時解放して他ワーカーが拾えるようにする (再配布は次のclaimで)。"""
-        self._db.execute("UPDATE queue SET lease_until=0 WHERE id=? AND status='pending'", (qid,))
+    def nack(self, qid, retry_after=None, refund=False):
+        """処理失敗・手放す。lease を即時解放して他ワーカーが拾えるようにする (再配布は次のclaimで)。
+
+        ★2026-08-14 追加の2引数(既定は従来と完全に同じ挙動)=
+          retry_after: この**エポック秒まで**再配達しない(lease_until をそこまで伸ばす)。
+                       Claude CLIの上限エラーは `resets 2:40am` と復帰時刻を教えてくれるので、
+                       それまで叩かない=無駄な試行で回数を溶かさない。
+          refund:      この試行を**無かったことにする**(deliveries を1つ戻す)。
+                       「相手が一時的に受けられない」を毒メッセージと同じ数え方にしないため。
+                       ★返金は max_refunds 回まで。使い切ったら普通の失敗として数える
+                         (外部要因を名乗る無限ループを作らない)。
+        戻り値= {"refunded": bool, "retry_after": float, "refunds": int}
+        """
+        until = float(retry_after or 0)
+        if not refund:
+            self._db.execute("UPDATE queue SET lease_until=? WHERE id=? AND status='pending'",
+                             (until, qid))
+            return {"refunded": False, "retry_after": until, "refunds": None}
+        row = self._db.execute(
+            "SELECT deliveries, refunds FROM queue WHERE id=? AND status='pending'", (qid,)).fetchone()
+        if not row:
+            return {"refunded": False, "retry_after": until, "refunds": None}
+        deliveries, refunds = row[0], row[1] or 0
+        if refunds >= self.max_refunds:
+            # ★打ち止め。ここから先は普通に数える=いつかは dead になり、通知が出る(黙らない)。
+            self._db.execute("UPDATE queue SET lease_until=? WHERE id=? AND status='pending'",
+                             (until, qid))
+            return {"refunded": False, "retry_after": until, "refunds": refunds}
+        self._db.execute(
+            "UPDATE queue SET lease_until=?, deliveries=MAX(deliveries-1,0), refunds=refunds+1"
+            " WHERE id=? AND status='pending'", (until, qid))
+        return {"refunded": True, "retry_after": until, "refunds": refunds + 1}
+
+    def _announce_dead(self, qid, msg_id, dept, body, deliveries):
+        """★dead へ落ちた瞬間に「落ちた」を残す(2026-08-14)。
+
+        なぜ要るか= 今までは dead になっても**どこにも出なかった**。Chamiから見ると
+        「返事が来ない」だけで、消えたことすら分からない(共通規律§4「警報は受け手が読む
+        場所へ出す」)。ここでは2つやる:
+          ① DBの隣に `dead_letters.jsonl` を1行(**通知が失敗しても消えない記録**)。
+          ② on_dead フックがあれば呼ぶ(呼び側が部屋へ出す)。
+        ★どちらが失敗してもキューは止めない= 通知の不調で配送機構を殺さない。
+        """
+        try:
+            rec = json.loads(body) if isinstance(body, str) else (body or {})
+        except Exception:
+            rec = {"_raw": str(body)[:500]}
+        info = {"ts": time.time(), "id": qid, "msg_id": msg_id, "dept": dept,
+                "deliveries": deliveries, "body": rec}
+        try:
+            d = os.path.dirname(self.path)
+            with open(os.path.join(d, "dead_letters.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(info, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        if self.on_dead:
+            try:
+                self.on_dead(info)
+            except Exception:
+                pass
 
     def extend(self, qid, lease_sec=None):
         """長い処理のリース延長 (SQSのハートビート相当)。処理中の行のみ有効。"""

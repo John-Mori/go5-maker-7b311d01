@@ -208,6 +208,50 @@ BUSY_DIR = os.path.join(LOCAL, "llm", "busy")
 #   → 失敗した部屋だけ寝かせ、既存のmax_deliveries=5を**実時間へ散らす**(5分×5回=約20分)。
 #   ★この待機に入るのは session_relay を使う部屋が配送に失敗した時だけ。他2部屋(hq/research-room)は常に0。
 RELAY_HOLD_SEC = 300
+# ★★Claude CLI のセッション上限だけは「再配達の回数を消費しない」(2026-08-14)。
+#   発注= 研究室HQ DISPATCH-aegis-gl-1786643264450。実測 2026-08-14 01:04〜02:44 JST:
+#   `You've hit your session limit · resets 2:40am (Etc/GMT-9)` で 21件 / 5部門が rc=1・2秒で
+#   即死し、**Chamiの便(msg 1537508993923154042)が deliveries=6 で dead へ落ちた**。
+#   deadは二度と拾われない=黙って消える=最悪の事故。
+#   原因は判定の粗さ= 「相手が一時的に受けられない」と「この便自体が毒」を同じカウンタで
+#   数えていた。上限は数十分で明ける外部要因なので、**回数を数えず、明ける時刻まで寝る**。
+#   ★上限エラーは復帰時刻を本文で教えてくれる(`resets 2:40am`)ので、それをそのまま使う。
+#     読めなければ既定の待ち(RELAY_LIMIT_FALLBACK_SEC)へ倒す=判定不能でも便は死なせない。
+RELAY_LIMIT_FALLBACK_SEC = 900
+RE_SESSION_LIMIT = re.compile(r"session limit|usage limit|rate limit|resets\s+\d", re.I)
+RE_LIMIT_RESET = re.compile(r"resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.I)
+
+
+def session_limit_retry_after(why, now=None):
+    """上限エラーなら「いつ再開してよいか」のエポック秒を返す。上限でなければ None。
+
+    `why` は session_relay.LAST_ERROR の文字列(例:
+      `Claude CLIがエラーを返した(rc=1): You've hit your session limit · resets 2:40am (Etc/GMT-9)`)。
+    ★時刻の解釈= このPCのローカル時刻(JST)として読む。CLIが併記する `Etc/GMT-9` は
+      POSIX式の符号反転で **UTC+9=JST** であり、ローカルと一致する(2026-08-14 実測)。
+    ★過ぎている時刻(例 02:40 を 03:00 に読んだ)は**翌日ではなく直後**とみなす=
+      既に明けているのに1日寝る、という最悪の取り違えをしない。
+    ★1分だけ余裕を足す(境界ちょうどに叩いてもう1回弾かれるのを避ける)。
+    """
+    if not why or not RE_SESSION_LIMIT.search(why):
+        return None
+    now = now or time.time()
+    m = RE_LIMIT_RESET.search(why)
+    if not m:
+        return now + RELAY_LIMIT_FALLBACK_SEC
+    hh, mm, ap = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower()
+    if ap == "pm" and hh != 12:
+        hh += 12
+    elif ap == "am" and hh == 12:
+        hh = 0
+    if hh > 23 or mm > 59:
+        return now + RELAY_LIMIT_FALLBACK_SEC
+    t = time.localtime(now)
+    target = time.mktime((t.tm_year, t.tm_mon, t.tm_mday, hh, mm, 0, 0, 0, -1))
+    if target <= now:
+        # 既に過ぎている= もう明けている(または直後)。長く寝かせない。
+        return now + 60
+    return min(target + 60, now + 6 * 3600)   # 誤読で半日寝ないための天井
 # ★★受信側の集約窓(coalesce・2026-08-08 イージス研究室 / 発注= 研究室HQ 8/4 07:29)。
 #   何のためか= Chamiが推敲を**小分けに連投**する部屋で、断片1つごとに走って断片1つごとに
 #   返すと、①話が途中の状態で3回も4回も応答が返る ②同じ推敲に何度もモデルを回す。
@@ -4490,6 +4534,7 @@ class Daemon:
         ch = rec.get("channel", "")
         mid = str(rec.get("msg_id", ""))
         self._relay_nack = False        # 便ごとに必ず初期化(前の便の失敗を持ち越さない)
+        self._relay_retry_after = None  # 同上(前の便の上限エラーで次の便を寝かせない)
         self._relay_answered = False    # 同上(前の便の成功で(精霊)が消えたままにならないように)
         self._wip = False               # 同上(前の便の <<WIP>> を次の便へ持ち越さない)
         if not self.dry_run and ch and mid:
@@ -4685,6 +4730,13 @@ class Daemon:
                                  "この便は完了扱いにせず残してある。"
                                  f"理由= {why or '不明(local/llm/request_log.jsonl を参照)'}")
                     log(self.dept, f"セッション配送失敗 msg={mid} kind={kind or '-'} 理由={why}")
+                    # ★★上限エラーだけは「相手が一時的に受けられない」= この便の落ち度ではない。
+                    #   再配達の回数を消費させず(下の drain_queue で refund)、明ける時刻まで寝る。
+                    self._relay_retry_after = session_limit_retry_after(why)
+                    if self._relay_retry_after:
+                        log(self.dept,
+                            "★セッション上限= 再配達の回数を消費しない(返金)。%s まで寝かせる msg=%s"
+                            % (time.strftime("%H:%M:%S", time.localtime(self._relay_retry_after)), mid))
                     # ★★2026-07-28 1回目・2回目の失敗では**告知を出さない**(Chami「精霊に喋らせるな」)。
                     #   便は queue に残り、**最大5回まで自動で再配達**される(leasequeue)。
                     #   毎回詫びると**同じ部屋へ最大5連投**になる=「トーク履歴が汚れる」そのもの。
@@ -5284,6 +5336,42 @@ class Daemon:
         base["coalesced_from"] = [str(r.get("msg_id", "")) for r in recs[:-1]]
         return base
 
+    def _dead_letter_notice(self, info):
+        """★便が dead へ落ちた= **その便はもう誰も拾わない**。それを部屋へ1行出す(2026-08-14)。
+
+        なぜ部屋か= 待っているのはその部屋のChamiだ(共通規律§4「警報は受け手が読む場所へ出す」)。
+        内部の報告通知室へ出しても、待っている本人の画面には何も出ない=沈黙のままになる。
+        なぜ機械名義か= これは人格の発言ではなく機械の状態表示だ(2026-07-28 Chami指摘。
+        キャラ名義+(精霊)で機械の話をしない)。
+        ★この通知が失敗しても例外は外へ出さない(呼び側=leasequeue が握り潰す設計)。
+        """
+        body = info.get("body") or {}
+        if not isinstance(body, dict):
+            body = {}
+        mid = str(info.get("msg_id") or "?")
+        who = str(body.get("author") or body.get("from") or "不明")
+        content = re.sub(r"\s+", " ", str(body.get("content") or "")).strip()[:180]
+        text = ("★**この部屋へ来た便を配れなかった**(%s回試して諦めた=dead)。\n"
+                "便= `msg %s` / 差出人= %s\n"
+                "> %s\n"
+                "**この便は自動では二度と拾われない。** 中身= `local/queue/dead_letters.jsonl` / "
+                "一覧= `python scripts/queue/dlq_tool.py --list`"
+                % (info.get("deliveries"), mid, who, content or "(本文なし)"))
+        log(self.dept, f"★dead-letter= 配れなかった便を通知する msg={mid}")
+        if self.dry_run:
+            return
+        try:
+            p = os.path.join(LOCAL, "_work", "dead_letter_notice_%s.txt" % self.dept)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(text)
+            subprocess.run([sys.executable, PERSONA_SEND, "--dept", self.dept,
+                            "--persona", MACHINE_PERSONA, "--body-file", p],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60)
+        except Exception as e:
+            log(self.dept, f"dead-letterの通知に失敗({type(e).__name__})= 記録は残っている msg={mid}")
+
     def drain_queue(self):
         """LeaseQueue経路のドレイン(切替④の必須前提・2026-07-19)。
 
@@ -5309,6 +5397,10 @@ class Daemon:
                                                + QUEUE_LEASE_MARGIN))
             else:
                 q = LeaseQueue(qdb)
+            # ★★dead へ落ちる瞬間に黙らせない(2026-08-14・発注= 研究室HQ)。
+            #   今までは dead になっても**どこにも出ず**、Chamiからは「返事が来ない」だけで、
+            #   消えたことすら分からなかった(実物= 8/14 のChami便が deliveries=6 で dead)。
+            q.on_dead = self._dead_letter_notice
         except Exception:
             return 0
         done = 0
@@ -5397,18 +5489,30 @@ class Daemon:
                 #   (max_deliveries=5の既存の枠内。超えれば dead-letter へ隔離される)。
                 #   ★main箱へは回さない= この2部屋は回送しない部屋(Chami「絶対やめてくれ」)。
                 if self._relay_nack:
-                    q.nack(c["id"])
+                    # ★★上限エラー(=相手が一時的に受けられない)なら、この試行を**返金**して
+                    #   明ける時刻まで寝かせる(2026-08-14)。返金しないと、外部要因の数十分で
+                    #   正常な便が max_deliveries(5) を使い切って dead へ落ち、黙って消える。
+                    _ra = getattr(self, "_relay_retry_after", None)
+                    _rf = bool(_ra)
+                    _r = q.nack(c["id"], retry_after=_ra, refund=_rf)
                     # ★束ねた便も**全部**キューへ返す(1本でも取り落とすと無言で消える)
                     for e in extra:
-                        q.nack(e[0]["id"])
+                        q.nack(e[0]["id"], retry_after=_ra, refund=_rf)
                     # ★返す直前に掴んだ続きの便も返す(2026-08-13。配送に失敗した=誰にも答えていない)
                     for cc in (getattr(self, "_post_coalesced", None) or []):
-                        q.nack(cc["id"])
+                        q.nack(cc["id"], retry_after=_ra, refund=_rf)
                     self._post_coalesced, self._post_coalesced_raw = [], []
                     # ★同じ巡回で拾い直さない(breakして寝かせる)。nackはリースを即解放するため、
                     #   continueにすると同一ループで再claimされ、CLI連打+失敗文の連投になる(実測)。
-                    self._relay_hold_until = time.time() + RELAY_HOLD_SEC
-                    log(self.dept, f"配送失敗→nack(キューに残す)・{RELAY_HOLD_SEC}秒待つ msg={mid}")
+                    #   ★上限中は**明けるまで**寝る(5分ごとに叩いてもどうせ弾かれる)。
+                    self._relay_hold_until = max(time.time() + RELAY_HOLD_SEC, float(_ra or 0))
+                    if _ra:
+                        log(self.dept,
+                            "配送失敗(セッション上限)→nack・返金=%s(累計%s回)・%s まで寝かせる msg=%s"
+                            % (_r.get("refunded"), _r.get("refunds"),
+                               time.strftime("%H:%M:%S", time.localtime(_ra)), mid))
+                    else:
+                        log(self.dept, f"配送失敗→nack(キューに残す)・{RELAY_HOLD_SEC}秒待つ msg={mid}")
                     done += 1
                     break
                 q.ack(c["id"], result="キャラ応答" if ok else "失敗(main回送済)")
