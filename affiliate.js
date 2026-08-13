@@ -137,6 +137,17 @@
   function restoreActiveTab_() {
     var saved = '';
     try { saved = localStorage.getItem('go5_active_tab') || ''; } catch (e) {}
+    // 分割ページ(ドラフト/候補)から⏰予約/📅カレンダーを開くために来た時は、保存タブの復元を走らせない。
+    //   ★go5_active_tab='tabStock' を復元すると showTab('tabStock') が index.html では標準ページへ戻す
+    //     ため(location.href='Stock.html')、直後に openOverlayFromSplit_ が開いたオーバーレイごと
+    //     Stock.html へ跳ね返され「一瞬開いてすぐ閉じる」になる(Chami報告2026-08-13)。この時は下地を
+    //     動画作成(HTML既定=pageMovie表示)のまま index.html に留め、openOverlayFromSplit_ に開かせる。
+    var pendingOverlay = '';
+    try { pendingOverlay = sessionStorage.getItem('go5_open_overlay') || ''; } catch (e) {}
+    if (pendingOverlay && OVERLAY_BTNS[pendingOverlay]) {
+      document.documentElement.setAttribute('data-tab', 'tabMovie');
+      return; // 復元(=リダイレクト)はしない。オーバーレイ表示は openOverlayFromSplit_ が担う。
+    }
     // ★オーバーレイ(予約/カレンダー)は復元対象にしない＝再アクセス時は下の作業タブへ戻す。
     var ok = saved && !OVERLAY_BTNS[saved] && TABS.some(function (t) { return t.btn === saved; }) && document.getElementById(saved);
     var activeId;
