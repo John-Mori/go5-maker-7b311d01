@@ -1802,18 +1802,23 @@
       if (toMovieBtn.disabled) return;
       toMovieBtn.disabled = true;
       body.querySelector('#refImgMsg').textContent = '保存中…';
-      Promise.resolve(refImgSave(it.cid, pending)).then(function (ok) {
-        if (!ok) {
-          toMovieBtn.disabled = false;
-          body.querySelector('#refImgMsg').textContent = '保存できませんでした。通信状態を確認して、もう一度お試しください';
-          return;
-        }
+      // ★遷移はIDB保存の成否に依存させない。動画作成タブへ渡すデータは、この場のメモリ(it/pending)から
+      //   直接運ぶ(transferToMovie_)ため、候補の永続保存が失敗しても遷移は必ず続行する。
+      //   v=764(e24bb57)で保存失敗時に `if(!ok) return` で遷移を止めたところ、iOS SafariのIDB書込が
+      //   無言失敗すると refImgSave が false を返し「押しても動画作成タブに移動しない」再発になった
+      //   (Chami実機報告2026-08-13・恒久対策C-038=遷移と保存を切り離す)。
+      var go_ = function () {
         transferToMovie_(it, pending.imgs[pending.idx] || '', pending.comment, workUrl); // ★表示中の画像を採用
         if (onSaved) onSaved();
         closeRefOverlay_();
+      };
+      Promise.resolve(refImgSave(it.cid, pending)).then(function (ok) {
+        // 保存失敗はログにだけ残し、遷移は止めない(渡すデータはメモリ側=無傷)。
+        if (!ok) { try { console.warn('[go5 cand] 動画生成へ: 候補の永続保存に失敗したが遷移は続行', it.cid); } catch (e) {} }
+        go_();
       }).catch(function () {
-        toMovieBtn.disabled = false;
-        body.querySelector('#refImgMsg').textContent = '保存できませんでした。もう一度お試しください';
+        try { console.warn('[go5 cand] 動画生成へ: 保存で例外。遷移は続行', it.cid); } catch (e) {}
+        try { go_(); } catch (e) { toMovieBtn.disabled = false; body.querySelector('#refImgMsg').textContent = '移動できませんでした。もう一度お試しください'; }
       });
     });
     body.querySelector('#refImgCancel').addEventListener('click', closeRefOverlay_);
