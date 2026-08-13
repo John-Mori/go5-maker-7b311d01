@@ -154,6 +154,28 @@ def main():
             }, ensure_ascii=False) + "\n")
             added += 1
 
+    # --emit: 部屋へ流せる短いDiscord向けサマリだけを stdout に出す(毎朝の常駐が拾う用)
+    if "--emit" in sys.argv:
+        top = ts_sorted[0]
+        lead = ch_rank[0]
+        E = []
+        E.append("競合ランキング %s(登録競合%dch/上位%d本・速度=1日再生・新規%d/既出%d)"
+                 % (snap, len(ch), len(ts), len(new_items), len(known_items)))
+        E.append("伸び頭=%s(登録%d・%d本・中央%s・最大%d「%s」)"
+                 % (lead[0], lead[1][0]["subscriberCount"], len(lead[1]),
+                    median([x["speed"] for x in lead[1]]), max(x["speed"] for x in lead[1]),
+                    strip_tags(max(lead[1], key=lambda x: x["speed"])["title"])[:20]))
+        E.append("伸びてない=%s(中央%s)・%s(中央%s)"
+                 % (ch_rank[-1][0], median([x["speed"] for x in ch_rank[-1][1]]),
+                    ch_rank[-2][0], median([x["speed"] for x in ch_rank[-2][1]])))
+        E.append("数字型: ②スパン中央%s / ③固有中央%s / 数字なし中央%s"
+                 % (median(bytype.get("②経過年月スパン型", [0])),
+                    median(bytype.get("③固有数字型", [0])),
+                    median(bytype.get("数字なし", [0]))))
+        E.append("詳細=docs/departments/shorts-analyst/competitor_daily/%s.md" % snap)
+        print("\n".join(E))
+        return
+
     print("OUT:", out)
     print("new=%d known=%d added_to_ledger=%d" % (len(new_items), len(known_items), added))
     # 標準出力にもチャンネル別と型別サマリ
