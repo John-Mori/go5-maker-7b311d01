@@ -3972,14 +3972,12 @@
         '<div class="cand-actions">' + _actionsInner + (_noComment ? '<span class="cand-actions-mspacer"></span>' + actionHtml : '') + '</div>' +
       '</div>' +
       // ★コメント・メモ両方ある時は、メモをコメントの上の行に独立表示する(Chami指定2026-07-24)。
-      //   下のcand-manage-rowは非表示/🗑ボタンの置き場を保つため、この場合はメモを二重に出さない。
       ((refCmt && refMemo) ? '<div class="cand-comment-row cand-memo-above"><span class="cand-manage-memo">' + esc(refMemo) + '</span></div>' : '') +
-      // コメント(黒・全幅・必ず1行＝可変縮小)＝独立行。
-      (refCmt ? '<div class="cand-comment-row"><span class="cand-manage-comment">' + esc(refCmt) + '</span></div>' : '') +
-      // メモ(水色・左・必ず1行)＋ 非表示/🗑(右)を同じ行に統合＝余白節約。コメント/メモ無し時は作品リンク行に統合済み。
-      //   コメントもある時はメモを上で出し済みなのでここは空(スペーサー)にする。
-      (_noComment ? '' :
-        '<div class="cand-manage-row">' + ((refMemo && !refCmt) ? '<span class="cand-manage-memo">' + esc(refMemo) + '</span>' : '<span class="cand-manage-spacer"></span>') + actionHtml + '</div>') +
+      // コメント(黒字)がある時＝黒字コメントと同じ行の右端へ 非表示/🗑 を統合し、間の余白を省く(Chami依頼2026-08-13)。
+      //   旧: コメント行の下にボタン専用行をもう1本置いていたため、黒字とボタンの間に空白の帯ができていた。
+      (refCmt ? '<div class="cand-comment-row cand-manage-row"><span class="cand-manage-comment">' + esc(refCmt) + '</span>' + actionHtml + '</div>' : '') +
+      // コメント無し・メモのみ＝メモ(左)＋非表示/🗑(右)を同じ行に統合＝余白節約。コメント/メモ両無し時は作品リンク行に統合済み。
+      ((!refCmt && refMemo) ? '<div class="cand-manage-row"><span class="cand-manage-memo">' + esc(refMemo) + '</span>' + actionHtml + '</div>' : '') +
       '</div>';
   }
 
