@@ -360,3 +360,87 @@ test.describe('ドラフト軽量ページ', () => {
     await expect(page).toHaveURL(/\/Stock\.html$/);
   });
 });
+
+test.describe('ドラフト投稿モードの短縮URL置換', () => {
+  for (const accountCase of [
+    { account: 'acc1', domain: '5mgl.com', suffix: 'tsukuyomi' },
+    { account: 'acc2', domain: 'yoz2.com', suffix: 'yoizakura' },
+  ]) {
+    test('保存済みX本文の作品・セールURLを' + accountCase.domain + 'へ置換する', async ({ page }) => {
+      const draftId = 'stk_e2e_short_' + accountCase.suffix;
+      const workCode = 'work-' + accountCase.suffix;
+      const saleCode = 'sale-' + accountCase.suffix;
+      const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_e2e_short/';
+      const saleUrl = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/';
+      const placeholderText = [
+        '続きが気になっちゃう一冊、みつけた📚', '', '(商品紹介短縮URL)', '',
+        '🔥 大幅割引セール中の同人祭ページ 🔥', '(セール紹介短縮用URL)',
+      ].join('\n');
+      await page.route('https://' + accountCase.domain + '/api/shorten', async (route) => {
+        let body = decodeURIComponent((route.request().postData() || '').replace(/^url=/, ''));
+        try { body = decodeURIComponent(body); } catch (_) {}
+        const code = body.includes('/campaign=') ? saleCode : workCode;
+        await route.fulfill({
+          status: 200, contentType: 'application/json',
+          body: JSON.stringify({ short: 'https://' + accountCase.domain + '/' + code }),
+        });
+      });
+      await page.addInitScript(({ account }) => {
+        localStorage.setItem('current_account', account);
+      }, { account: accountCase.account });
+      await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+      await page.evaluate(({ account, draftId, workUrl, saleUrl, placeholderText }) => {
+        localStorage.setItem('current_account', account);
+        localStorage.setItem('fanza_af_id', 'e2e-affiliate-001');
+        localStorage.setItem('disc_urls_seeded__' + account, '1');
+        localStorage.setItem('bsky_discount_urls__' + account, JSON.stringify([{
+          id: 'sale-' + account, name: 'E2Eセール', url: saleUrl, at: Date.now(),
+        }]));
+        localStorage.setItem('bsky_discount_selected__' + account, 'sale-' + account);
+        localStorage.removeItem('bsky_discount_link_cache');
+        localStorage.setItem('go5_stock_meta', JSON.stringify([{
+          id: draftId, ts: Date.now(), addedAt: Date.now(), account,
+          label: '短縮URL置換回帰', title: '短縮URL置換回帰', author: 'test',
+          bskyText: placeholderText, affiliateUrl: '', workUrl, videoName: 'test.mp4',
+          videoId: account + '-20260813-1835-short', attrs: {},
+        }]));
+        localStorage.setItem('go5_draft_post_' + draftId, JSON.stringify({ xText: placeholderText }));
+      }, { account: accountCase.account, draftId, workUrl, saleUrl, placeholderText });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('.stk-mode[data-id="' + draftId + '"]').click();
+      await expect(page.locator('#draftPostModal')).toBeVisible();
+      const diagnostics = await page.evaluate(() => ({
+        account: localStorage.getItem('current_account'),
+        af: localStorage.getItem('fanza_af_id'),
+        go5MakeShort: typeof window.Go5MakeShort,
+        saleFill: typeof window.__go5FillSalePlaceholderInText,
+        workPH: window.BlueskyCore && window.BlueskyCore.hasWorkLinkPlaceholder('(商品紹介短縮URL)'),
+        salePH: window.BlueskyCore && window.BlueskyCore.hasSaleLinkPlaceholder('(セール紹介短縮用URL)'),
+        discUrls: localStorage.getItem('bsky_discount_urls__' + localStorage.getItem('current_account')),
+      }));
+      expect(diagnostics, JSON.stringify(diagnostics)).toMatchObject({
+        account: accountCase.account, af: 'e2e-affiliate-001',
+        go5MakeShort: 'function', saleFill: 'function', workPH: true, salePH: true,
+      });
+      await expect.poll(async () => {
+        const value = await page.locator('#draftXText').inputValue();
+        return {
+          workPlaceholder: value.includes('(商品紹介短縮URL)'),
+          salePlaceholder: value.includes('(セール紹介短縮用URL)'),
+          domainCount: value.split('https://' + accountCase.domain + '/').length - 1,
+        };
+      }).toEqual({ workPlaceholder: false, salePlaceholder: false, domainCount: 2 });
+      const replacedText = await page.locator('#draftXText').inputValue();
+      expect(replacedText).toContain('https://' + accountCase.domain + '/' + workCode);
+      expect(replacedText).toContain('https://' + accountCase.domain + '/' + saleCode);
+
+      const persistedFinal = await page.evaluate((id) => {
+        const saved = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}');
+        return saved.xText || '';
+      }, draftId);
+      expect(persistedFinal).not.toContain('(商品紹介短縮URL)');
+      expect(persistedFinal).not.toContain('(セール紹介短縮用URL)');
+      expect(persistedFinal.split('https://' + accountCase.domain + '/').length - 1).toBe(2);
+    });
+  }
+});

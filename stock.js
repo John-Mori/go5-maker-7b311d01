@@ -1047,7 +1047,9 @@
     try {
       var cur = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
       var b = $('bskyText');
-      if (b && cur === acc && b.value) return b.value;
+      // Stock.htmlの#bskyTextは共通短縮モジュールを起動する非表示ホストであり、
+      // 投稿本文の入力欄ではない。非表示ホストの既定文でドラフト当時の本文を上書きしない。
+      if (b && !b.hidden && cur === acc && b.value) return b.value;
     } catch (e) {}
     try {
       var k = (window.Go5Acct && Go5Acct.key) ? Go5Acct.key('bsky_text', acc) : ('bsky_text__' + acc);
@@ -1158,6 +1160,12 @@
     var applySale_ = function (nv) {
       if (_modalMeta !== meta) return;
       var cur = $('draftXText'); if (!cur || !nv || nv === cur.value) return;
+      var saleLink = arguments[1] || '';
+      // 非同期発番の間に作品URL側が先に置換されることがある。nvは開始時点の古い本文なので、
+      // 発番済みURLだけを「今の本文」へ適用し、2処理の完了順による巻き戻しを防ぐ。
+      if (saleLink && window.BlueskyCore && window.BlueskyCore.fillSaleLinkPlaceholder) {
+        nv = window.BlueskyCore.fillSaleLinkPlaceholder(cur.value, saleLink);
+      }
       cur.value = nv;
       try {
         var _sv = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}');

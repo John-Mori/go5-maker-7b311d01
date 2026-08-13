@@ -1270,7 +1270,9 @@
       var dlink = cachedDiscountLink_();
       if (dlink) return fillSalePH_(s, dlink);
       ensureDiscountLink_(function (link) {
-        if (link && typeof onFilled === 'function') onFilled(fillSalePH_(s, link));
+        // linkも渡す。ドラフト側は非同期中に作品URL置換が進むため、開始時点のsではなく
+        // 完了時点の最新textareaへセールURLだけを差し込む。(古い本文による巻き戻し防止)
+        if (link && typeof onFilled === 'function') onFilled(fillSalePH_(s, link), link);
       });
       return s; // まだ未発番=プレースホルダのまま返し、発番完了後に onFilled で差し替える
     };
