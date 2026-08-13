@@ -1673,6 +1673,8 @@
   //   usedImgSave(pKey, [preview]+既存, prev=1) で先頭挿入(冪等=既に先頭が同じなら触らない)。
   var PREVBF_JOB_KEY = 'prevbf_job_'; // + channel
   var _prevbfBusy = {};               // channel → このタブでの二重起動ガード
+  var _prevbfTally = {};              // channel → { ins, had, skip } 今回の処理内訳(完了時にChamiへ結果を出す)
+  var _prevbfAnnounce = {};           // channel → ボタン押下起点なら true(完了サマリのalertを出す。裏の自動再開は静かに)
   function prevbfLoadJob_(ch) { try { return JSON.parse(localStorage.getItem(PREVBF_JOB_KEY + ch) || 'null'); } catch (e) { return null; } }
   function prevbfSaveJob_(ch, job) {
     try {
@@ -1692,6 +1694,7 @@
     if (!start || !start.remaining || !start.remaining.length) { prevbfSaveJob_(ch, null); return; }
     _prevbfBusy[ch] = true;
     prevbfSetBusy_(true);
+    if (!_prevbfTally[ch]) _prevbfTally[ch] = { ins: 0, had: 0, skip: 0 }; // 今回の処理内訳(完了時にChamiへ出す)
     function step() {
       if (acct() !== ch) { _prevbfBusy[ch] = false; return; } // チャンネルを切り替えたら手を止める(戻れば再開)
       var j = prevbfLoadJob_(ch);
@@ -1701,6 +1704,19 @@
         prevbfSetBusy_(false);
         prevbfSetLabel_('🔁 Drive→過去分プレビュー取込');
         try { refresh(); } catch (e) {}
+        // ★「押したのに何も起きない」に見えないよう、押下起点の時だけ結果を1枚で返す(裏の自動再開は静かに)。
+        var tl = _prevbfTally[ch]; _prevbfTally[ch] = null;
+        if (_prevbfAnnounce[ch]) {
+          _prevbfAnnounce[ch] = false;
+          if (tl && (tl.ins || tl.had || tl.skip)) {
+            var msg = 'プレビュー取込 完了\n・新たに挿入: ' + (tl.ins | 0) + '件';
+            if (tl.had) msg += '\n・既に挿入済み: ' + tl.had + '件';
+            if (tl.skip) msg += '\n・生成できず: ' + tl.skip + '件\n　(この端末に動画の控えが無く、Driveにもプレビュー画像が無い作品です＝別端末で作成 or 保存期間切れ。作成した端末で開くか、動画を作り直すと入ります)';
+            alert(msg);
+          } else {
+            alert('プレビューが無い履歴はありませんでした。(このチャンネルは全て挿入済みです)');
+          }
+        }
         return;
       }
       var t = j.remaining[0];
@@ -1708,14 +1724,15 @@
       var doneN = total - j.remaining.length + 1;
       prevbfSetLabel_('プレビュー生成中… ' + doneN + '/' + total);
       var pKey = t.pKey;
-      var finishItem = function () {
+      var finishItem = function (outcome) {
+        if (outcome && _prevbfTally[ch]) _prevbfTally[ch][outcome] = (_prevbfTally[ch][outcome] | 0) + 1;
         var jj = prevbfLoadJob_(ch);
         if (jj && jj.remaining) { jj.remaining = jj.remaining.filter(function (x) { return x.pKey !== pKey; }); prevbfSaveJob_(ch, jj); }
         setTimeout(step, 30); // イベントループへ返す(UIを固めない)
       };
       // 既に別経路でプレビューが入っていたら生成不要(冪等)。
       var prevN = cand.usedPrevCount ? (cand.usedPrevCount(pKey) || 0) : 0;
-      if (prevN > 0) { finishItem(); return; }
+      if (prevN > 0) { finishItem('had'); return; }
       // ①Driveを先に見る → 無ければ②動画の先頭フレームから生成。
       var driveP = (window.Go5Drive && window.Go5Drive.fetchPreview && (ch === 'acc1' || ch === 'acc2'))
         ? window.Go5Drive.fetchPreview(ch, t.title || '').catch(function () { return null; })
@@ -1727,12 +1744,14 @@
         }
         return null;
       }).then(function (durl) {
+        var inserted = false;
         if (durl) {
           var used = (cand.usedImgs(pKey) || []).slice();
           if (used[0] !== durl) cand.usedImgSave(pKey, [durl].concat(used.filter(function (u) { return u !== durl; })), 1);
+          inserted = true;
         }
-        finishItem();
-      }).catch(function () { finishItem(); });
+        finishItem(inserted ? 'ins' : 'skip'); // durlが取れなければ「この端末では生成不可」= skip として数える
+      }).catch(function () { finishItem('skip'); });
     }
     step();
   }
@@ -1757,12 +1776,14 @@
       var add = targets.filter(function (x) { return !have[x.pKey]; });
       var merged = cur.concat(add);
       prevbfSaveJob_(ch, { remaining: merged, total: merged.length, startedAt: (existing && existing.startedAt) || Date.now() });
+      _prevbfAnnounce[ch] = true; // 押下起点=完了時に結果サマリを出す
       if (!_prevbfBusy[ch]) prevbfRunJob_(ch);
       alert('プレビュー生成を継続中です(残り ' + merged.length + '件)。\nページを離れても、投稿履歴を開き直すと自動で続きを流します。');
       return;
     }
     if (!targets.length) { alert('プレビューが無い履歴はありません。(このチャンネルは全て挿入済みです)'); return; }
     if (!window.confirm('このチャンネルの ' + targets.length + ' 件について、まずGoogleドライブから探し、無ければ動画の先頭フレームからプレビューを生成して投稿履歴へ挿入します。\nページを離れても、開き直すと続きを自動で流します。よろしいですか？')) return;
+    _prevbfAnnounce[ch] = true; // 押下起点=完了時に結果サマリ(挿入/既済/生成不可の内訳)を出す
     prevbfSaveJob_(ch, { remaining: targets, total: targets.length, startedAt: Date.now() });
     prevbfRunJob_(ch);
   }
