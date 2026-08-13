@@ -1843,19 +1843,34 @@
         return;
       }
       body.querySelector('#refImgMsg').textContent = '保存中…';
-      Promise.resolve(refImgSave(it.cid, pending)).then(function (ok) {
-        if (!ok) {
+      // ★候補モーダルの保存は端末内(IndexedDB)への書込であって通信ではない。iOS Safari はメモリ圧/バックグラウンド
+      //   化で IDB の書込が無言タイムアウト(idb-timeout)して「五分五分」で false を返す(番犬が接続はリセット済=
+      //   張り直せば通ることが多い)。そこで数回だけ自動リトライしてから諦める。★失敗メッセージから「通信状態を確認して」を
+      //   削除する=これは端末内保存の失敗で通信は無関係(Chami報告2026-08-13「チャットが遅れてない=ネットワークに問題ない」)。
+      var refSaveAttempt = 0;
+      var trySaveRef_ = function () {
+        refSaveAttempt++;
+        Promise.resolve(refImgSave(it.cid, pending)).then(function (ok) {
+          if (!ok) {
+            if (refSaveAttempt < 3) {
+              body.querySelector('#refImgMsg').textContent = '保存中…(再試行' + refSaveAttempt + ')';
+              setTimeout(trySaveRef_, 500 * refSaveAttempt);
+              return;
+            }
+            saveBtn.disabled = false;
+            body.querySelector('#refImgMsg').textContent = 'この端末への保存に失敗しました。少し時間をおいて、もう一度お試しください(通信は関係ありません)';
+            return;
+          }
+          body.querySelector('#refImgMsg').textContent = '保存しました';
+          if (onSaved) onSaved();
+          setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
+        }).catch(function () {
+          if (refSaveAttempt < 3) { setTimeout(trySaveRef_, 500 * refSaveAttempt); return; }
           saveBtn.disabled = false;
-          body.querySelector('#refImgMsg').textContent = '保存できませんでした。通信状態を確認して、もう一度お試しください';
-          return;
-        }
-        body.querySelector('#refImgMsg').textContent = '保存しました';
-        if (onSaved) onSaved();
-        setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
-      }).catch(function () {
-        saveBtn.disabled = false;
-        body.querySelector('#refImgMsg').textContent = '保存できませんでした。もう一度お試しください';
-      });
+          body.querySelector('#refImgMsg').textContent = 'この端末への保存に失敗しました。もう一度お試しください';
+        });
+      };
+      trySaveRef_();
     });
     wirePaste_(body);
     ov.hidden = false;
