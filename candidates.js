@@ -633,6 +633,10 @@
   var _hydrateWaiters = [];
   var _refLoaded = Object.create(null);           // 全体展開前でも作品単位で安全に読めたcid
   var _refLoadJobs = Object.create(null);
+  var _candidateHydrateInFlight = false;
+  var _candidateHydrateRetryTimer = null;
+  var _candidateHydrateFailures = 0;
+  var _syncRehydrateRetryTimer = null;
   function markCandidateHydrated_() {
     if (_candidateHydrated) return;
     _candidateHydrated = true;
@@ -690,7 +694,21 @@
       return Promise.resolve(true);
     }
     if (_refLoadJobs[cid]) return _refLoadJobs[cid];
-    var job = window.Go5Idb.get(idbKey('ref', cid)).then(function (rec) {
+    var readP = (typeof window.Go5Idb.getResult === 'function')
+      ? window.Go5Idb.getResult(idbKey('ref', cid))
+      : window.Go5Idb.get(idbKey('ref', cid)).then(function (value) {
+          return { ok: true, value: value };
+        }, function (error) {
+          return { ok: false, value: null, error: error };
+        });
+    var job = readP.then(function (result) {
+      if (!result || !result.ok) {
+        idbFail_(result && result.error ? result.error : new Error('idb-read-failed'));
+        var old = legacyRefOf_(cid);
+        if (old) { _imgMem.ref[cid] = old; _refLoaded[cid] = true; return true; }
+        return false; // 読取失敗を「存在しない」と誤認せず、空の上書きを許可しない
+      }
+      var rec = result.value;
       if (rec) {
         _imgMem.ref[cid] = rec;
       } else {
@@ -703,13 +721,10 @@
           }).catch(idbFail_);
         }
       }
-      _refLoaded[cid] = true; // 「存在しない」ことも直接確認済み
+      _refLoaded[cid] = true; // 読取成功時だけ「存在しない」ことも確認済みにする
       return true;
     }).catch(function (e) {
-      idbFail_(e);
-      var legacy = legacyRefOf_(cid);
-      if (legacy) { _imgMem.ref[cid] = legacy; _refLoaded[cid] = true; return true; }
-      return false;           // 読めていない状態で空保存を許可しない
+      idbFail_(e); return false;
     });
     _refLoadJobs[cid] = job.then(function (ok) { delete _refLoadJobs[cid]; return ok; }, function () { delete _refLoadJobs[cid]; return false; });
     return _refLoadJobs[cid];
@@ -744,13 +759,20 @@
     if (empty && _idbOk && !_candidateHydrated && !_refLoaded[cid]) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
     var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: urls2[0] || '', urls2: urls2, at: new Date().getTime() };
     if (_idbOk) {
+      var hadPrev = Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
+      var prev = _imgMem.ref[cid];
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
-      // IDB書込みのPromiseを返す(常にtruthy=従来のtrueと同じ扱いで既存の if(okRef)/if(!refImgSave()) と互換)。
-      // 呼び出し元が画面遷移の前に書込み完了を確認したい場合は await/.then() できる(例: #refImgToMovie)。
-      var p = (rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid))).catch(idbFail_);
-      reqSync_(); // 参照画像(動画生成用)の保存直後に即時同期＝他端末で即反映(画像はR2へ)
-      if (rec) klog_('ref_image_saved', 'work', cid, { imgs: imgs.length });
-      return p; // IDBは容量に余裕。非同期失敗は稀(メモリ保持＋ログ)
+      var write = rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid));
+      return write.then(function () {
+        _refLoaded[cid] = true;
+        reqSync_(); // 永続保存が成功した内容だけを同期へ送る
+        if (rec) klog_('ref_image_saved', 'work', cid, { imgs: imgs.length });
+        return true;
+      }, function (e) {
+        if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid];
+        idbFail_(e);
+        return false;
+      });
     }
     try {
       if (!rec) { localStorage.removeItem(refImgKey(cid)); return true; }
@@ -768,10 +790,18 @@
     if (!img && _idbOk && !_candidateHydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; } // refImgSaveと同じ理由
     var rec = img ? { img: img, at: new Date().getTime() } : null;
     if (_idbOk) {
+      var hadPrev = Object.prototype.hasOwnProperty.call(_imgMem.bsky, cid);
+      var prev = _imgMem.bsky[cid];
       if (rec) _imgMem.bsky[cid] = rec; else delete _imgMem.bsky[cid];
-      (rec ? window.Go5Idb.set(idbKey('bsky', cid), rec) : window.Go5Idb.del(idbKey('bsky', cid))).catch(idbFail_);
-      reqSync_(); // Bluesky添付画像の保存直後にも即時同期
-      return true;
+      var write = rec ? window.Go5Idb.set(idbKey('bsky', cid), rec) : window.Go5Idb.del(idbKey('bsky', cid));
+      return write.then(function () {
+        reqSync_();
+        return true;
+      }, function (e) {
+        if (hadPrev) _imgMem.bsky[cid] = prev; else delete _imgMem.bsky[cid];
+        idbFail_(e);
+        return false;
+      });
     }
     try {
       if (!rec) { localStorage.removeItem(bskyImgKey(cid)); return true; }
@@ -859,19 +889,32 @@
       try { console.warn('[go5 idb] 投稿履歴画像の展開を保留(候補画像は利用可能)', e); } catch (_) {}
     });
   }
+  function scheduleCandidateHydrateRetry_() {
+    if (!_idbOk || _candidateHydrated || _candidateHydrateRetryTimer) return;
+    var delay = Math.min(15000, 1000 * Math.pow(2, Math.min(4, Math.max(0, _candidateHydrateFailures - 1))));
+    _candidateHydrateRetryTimer = setTimeout(function () {
+      _candidateHydrateRetryTimer = null;
+      hydrateImages_();
+    }, delay);
+  }
   function hydrateImages_() {
-    if (!_idbOk) return;
+    if (!_idbOk || _candidateHydrated || _candidateHydrateInFlight) return;
+    _candidateHydrateInFlight = true;
     readImageEntries_(['ref:', 'bsky:']).then(function (all) {
       mergeImageEntries_(all);
       return migrateLocalImages_();
     }).then(function () {
+      _candidateHydrateInFlight = false;
+      _candidateHydrateFailures = 0;
       markCandidateHydrated_(); // 候補画像・コメントの空保存拒否をここで解除
       bgRender_();              // サムネ・コメント・✓バッジをすぐ反映
       if (!window.__go5CandidateStandalone) hydrateHistoryImages_(true);
     }).catch(function (e) {
-      // 候補画像のオープン/読み取り自体に失敗＝この環境ではIDB不可。localStorageへ切替。
-      _idbOk = false; try { console.warn('[go5 idb] 利用不可のためlocalStorageで継続', e); } catch (_) {}
-      markHydrated_();
+      _candidateHydrateInFlight = false;
+      _candidateHydrateFailures++;
+      // 一時的なSafariの接続死を「IDB非対応」と確定して空表示へ落とさない。張り直しを継続する。
+      try { console.warn('[go5 idb] 候補画像の展開を再試行します', e); } catch (_) {}
+      scheduleCandidateHydrateRetry_();
     });
   }
   // localStorage の cand_refimg__* / cand_bskyimg__* を IDB へ移して localStorage から削除。(冪等・IDB書込成功後にのみ削除＝データロス防止)
@@ -946,10 +989,24 @@
     var prefixes = window.__go5CandidateStandalone ? ['ref:', 'bsky:'] : ['ref:', 'bsky:', 'post:', 'used:'];
     readImageEntries_(prefixes).then(function (all) {
       mergeImageEntries_(all);
+      _candidateHydrateFailures = 0;
+      if (!_candidateHydrated) markCandidateHydrated_();
       bgRender_();   // 入力中は保留(打ちかけの候補入力を消さない)
-    }).catch(function () {});
+    }).catch(function (e) {
+      try { console.warn('[go5 idb] 同期画像の再読込を再試行します', e); } catch (_) {}
+      if (!_syncRehydrateRetryTimer) {
+        _syncRehydrateRetryTimer = setTimeout(function () {
+          _syncRehydrateRetryTimer = null;
+          reHydrateFromSync_();
+        }, 1500);
+      }
+    });
   }
-  try { document.addEventListener('go5-synced', function (e) { if (e && e.detail && e.detail.pulledImg) reHydrateFromSync_(); }); } catch (e) {}
+  try { document.addEventListener('go5-synced', function (e) {
+    var d = e && e.detail || {};
+    if (d.pulledCand) bgRender_();
+    if (d.pulledImg) reHydrateFromSync_();
+  }); } catch (e) {}
   // ★画像がIDBからメモリへ載った合図(markHydrated_ が発火)でも候補ページを描き直す。hydrateImages_ の
   //   直接呼び(bgRender_)に加えた独立経路=各イベントlistenerは独立実行なので、他ページのlistenerが投げても・
   //   初回renderとの順序がズレても確実に追いつく(item8/DEF-de2408cb00と同型・Chami 2026-08-11「出た。OK」で再現確認)。
@@ -1131,9 +1188,13 @@
       if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
       var cur = refImgOf(cid) || {}, imgs = refImgsOf_(cid);
       imgs.unshift(durl); // 先頭＝1ページ目
-      refImgSave(cid, { imgs: imgs, comment: cur.comment, memo: cur.memo, twitterUrl: cur.twitterUrl, twitterUrl2: cur.twitterUrl2 });
-      try { if (_activeTab) render(); } catch (e) {}
-      done(imgs.slice(), null);
+      Promise.resolve(refImgSave(cid, { imgs: imgs, comment: cur.comment, memo: cur.memo, twitterUrl: cur.twitterUrl, twitterUrl2: cur.twitterUrl2 })).then(function (ok) {
+        if (!ok) { done(null, '画像を保存できませんでした。もう一度お試しください'); return; }
+        try { if (_activeTab) render(); } catch (e) {}
+        done(imgs.slice(), null);
+      }).catch(function () {
+        done(null, '画像を保存できませんでした。もう一度お試しください');
+      });
     });
   }
   // refimg(投稿編集の保存画像)の並べ替え：cidの画像配列で i 番目を先頭へ移動＋保存＋一覧再描画。返り値＝新配列。
@@ -1737,16 +1798,29 @@
       var workVal = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
       if (!workVal && !it.isTwitter && it.url) workVal = it.url; // 欄が空でも候補が作品URLを持つなら使う(動画側へ確実に反映)
       var workUrl = workVal ? (window.normalizeWorkUrl ? window.normalizeWorkUrl(workVal) : workVal) : '';
-      // 画像・コメントの保存完了を待ってから遷移(IDB書込みがfire-and-forgetのまま画面遷移で
-      // 取りこぼされないように・完了確認)。okでもエラーでもPromiseは必ず解決するため待ち逃げしない。
-      Promise.resolve(refImgSave(it.cid, pending)).then(function () {
+      var toMovieBtn = this;
+      if (toMovieBtn.disabled) return;
+      toMovieBtn.disabled = true;
+      body.querySelector('#refImgMsg').textContent = '保存中…';
+      Promise.resolve(refImgSave(it.cid, pending)).then(function (ok) {
+        if (!ok) {
+          toMovieBtn.disabled = false;
+          body.querySelector('#refImgMsg').textContent = '保存できませんでした。通信状態を確認して、もう一度お試しください';
+          return;
+        }
         transferToMovie_(it, pending.imgs[pending.idx] || '', pending.comment, workUrl); // ★表示中の画像を採用
         if (onSaved) onSaved();
         closeRefOverlay_();
+      }).catch(function () {
+        toMovieBtn.disabled = false;
+        body.querySelector('#refImgMsg').textContent = '保存できませんでした。もう一度お試しください';
       });
     });
     body.querySelector('#refImgCancel').addEventListener('click', closeRefOverlay_);
     body.querySelector('#refImgSave').addEventListener('click', function () {
+      var saveBtn = this;
+      if (saveBtn.disabled) return;
+      saveBtn.disabled = true;
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
       syncPcMemoInline_();
@@ -1755,7 +1829,7 @@
       if (workRaw && workRaw !== workUrlPrefill) {
         body.querySelector('#refImgMsg').textContent = isTw ? '作品候補に変換中…' : '作品URLを更新中…';
         applyWorkUrl_(it, workRaw, pending, function (ok, err) {
-          if (!ok) { body.querySelector('#refImgMsg').textContent = (err || '変換できません'); return; }
+          if (!ok) { saveBtn.disabled = false; body.querySelector('#refImgMsg').textContent = (err || '変換できません'); return; }
           body.querySelector('#refImgMsg').textContent = isTw ? '作品候補に変換しました' : '作品URLを更新しました';
           if (onSaved) onSaved();
           if (_activeTab) render();
@@ -1763,10 +1837,20 @@
         });
         return;
       }
-      if (!refImgSave(it.cid, pending)) { body.querySelector('#refImgMsg').textContent = '保存できません(このブラウザの保存枠が不足。古い候補の画像を「消す」で減らしてください)'; return; }
-      body.querySelector('#refImgMsg').textContent = '保存しました';
-      if (onSaved) onSaved();
-      setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
+      body.querySelector('#refImgMsg').textContent = '保存中…';
+      Promise.resolve(refImgSave(it.cid, pending)).then(function (ok) {
+        if (!ok) {
+          saveBtn.disabled = false;
+          body.querySelector('#refImgMsg').textContent = '保存できませんでした。通信状態を確認して、もう一度お試しください';
+          return;
+        }
+        body.querySelector('#refImgMsg').textContent = '保存しました';
+        if (onSaved) onSaved();
+        setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
+      }).catch(function () {
+        saveBtn.disabled = false;
+        body.querySelector('#refImgMsg').textContent = '保存できませんでした。もう一度お試しください';
+      });
     });
     wirePaste_(body);
     ov.hidden = false;
@@ -1920,32 +2004,59 @@
     if (!r || !r.ok) { cb(false, 'FANZAの作品URLではないようです'); return; }
     var tabId = _activeTab, key = itemsKey(tabId), items = lsGet(key, '[]'), oldCid = oldItem.cid;
     if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'この作品は既に追加されています(重複追加しません)'); return; }
-    // 画像・コメント・メモ・Twitter URL(1つ目/2つ目)を新cidへ移す(★memo/twitterUrl2も引き継ぐ・旧実装は落としていた)
-    var okRef = refImgSave(r.cid, { imgs: Array.isArray(refData.imgs) ? refData.imgs : (refData.img ? [refData.img] : []), comment: refData.comment || '', memo: refData.memo || '', twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '', twitterUrl2: refData.twitterUrl2 || '' });
-    var bimg = (bskyImgOf(oldCid) || {}).img;
-    var okB = bimg ? bskyImgSave(r.cid, bimg) : true;
-    // 新cidへの保存が成功した時だけ旧cidを消す(localStorageフォールバック時の容量超過で唯一のコピーを失わない)
-    if (oldCid !== r.cid && okRef && okB) { refImgSave(oldCid, null); bskyImgSave(oldCid, null); }
-    var newItem = { url: url, cid: r.cid, twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '', title: '(タイトル未取得)', addedAt: oldItem.addedAt || new Date().getTime() };
-    var idx = -1; items.forEach(function (x, i) { if (x.cid === oldCid) idx = i; });
-    if (idx >= 0) items[idx] = newItem; else items.unshift(newItem);
-    lsSet(key, items);
-    var cfg = workerCfg();
-    var finish = function (info) {
-      var arr = lsGet(key, '[]');
-      arr.forEach(function (x) {
-        if (x.cid !== r.cid || !info || !info.title) return;
-        x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
-        x.listPrice = info.listPrice; x.price = info.price; x.discountPct = info.discountPct || 0;
-        x.date = info.releaseDate || ''; x.genres = info.genres || [];
-        x.floor = info.floor || ''; x.service = info.service || ''; // AI判定用(floor名でしか分からない作品を候補→作成へ運ぶ)
-        x.reviewCount = info.reviewCount; x.reviewAvg = info.reviewAvg;
-        if (info.samples && info.samples.length) x.samples = info.samples;
-      });
-      lsSet(key, arr); recordReviewSnapshots(arr); cb(true);
+    // 新cidへの永続保存を確認するまで候補本体を書き換えず、旧cidも消さない。
+    var refPayload = {
+      imgs: Array.isArray(refData.imgs) ? refData.imgs : (refData.img ? [refData.img] : []),
+      comment: refData.comment || '',
+      memo: refData.memo || '',
+      twitterUrl: refData.twitterUrl || oldItem.twitterUrl || '',
+      urls2: Array.isArray(refData.urls2) ? refData.urls2 : (refData.twitterUrl2 ? [refData.twitterUrl2] : [])
     };
-    if (window.FanzaCore && cfg.url) window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) { finish(info && info.title ? info : null); }).catch(function () { finish(null); });
-    else finish(null);
+    var bimg = (bskyImgOf(oldCid) || {}).img;
+    Promise.all([
+      Promise.resolve(refImgSave(r.cid, refPayload)),
+      bimg ? Promise.resolve(bskyImgSave(r.cid, bimg)) : Promise.resolve(true)
+    ]).then(function (saved) {
+      if (!saved[0] || !saved[1]) {
+        cb(false, '画像・URL情報を保存できませんでした。もう一度お試しください');
+        return;
+      }
+      // 新しいコピーが確定してから旧キーを掃除する。掃除失敗は重複が残るだけで、唯一のコピーは失わない。
+      if (oldCid !== r.cid) {
+        Promise.resolve(refImgSave(oldCid, null)).catch(function () {});
+        Promise.resolve(bskyImgSave(oldCid, null)).catch(function () {});
+      }
+      var liveItems = lsGet(key, '[]');
+      var newItem = Object.assign({}, oldItem, {
+        url: url,
+        cid: r.cid,
+        isTwitter: false,
+        twitterUrl: refPayload.twitterUrl,
+        title: '(タイトル未取得)',
+        addedAt: oldItem.addedAt || new Date().getTime()
+      });
+      var idx = -1; liveItems.forEach(function (x, i) { if (x.cid === oldCid) idx = i; });
+      if (idx >= 0) liveItems[idx] = newItem; else liveItems.unshift(newItem);
+      lsSet(key, liveItems);
+      var cfg = workerCfg();
+      var finish = function (info) {
+        var arr = lsGet(key, '[]');
+        arr.forEach(function (x) {
+          if (x.cid !== r.cid || !info || !info.title) return;
+          x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
+          x.listPrice = info.listPrice; x.price = info.price; x.discountPct = info.discountPct || 0;
+          x.date = info.releaseDate || ''; x.genres = info.genres || [];
+          x.floor = info.floor || ''; x.service = info.service || '';
+          x.reviewCount = info.reviewCount; x.reviewAvg = info.reviewAvg;
+          if (info.samples && info.samples.length) x.samples = info.samples;
+        });
+        lsSet(key, arr); recordReviewSnapshots(arr); cb(true);
+      };
+      if (window.FanzaCore && cfg.url) window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) { finish(info && info.title ? info : null); }).catch(function () { finish(null); });
+      else finish(null);
+    }).catch(function () {
+      cb(false, '画像・URL情報を保存できませんでした。もう一度お試しください');
+    });
   }
 
   // ── Bluesky添付画像モーダル(1枚を保存。投稿画像とは別枠)──
@@ -1997,10 +2108,23 @@
     body.querySelector('#bskyImgClear').addEventListener('click', function () { pending.img = ''; drawPreview(); body.querySelector('#bskyImgMsg').textContent = '画像を消しました(保存で確定)'; });
     body.querySelector('#bskyImgCancel').addEventListener('click', function () { ov.hidden = true; });
     body.querySelector('#bskyImgSave').addEventListener('click', function () {
-      if (!bskyImgSave(it.cid, pending.img)) { body.querySelector('#bskyImgMsg').textContent = '⚠️ 保存できません(このブラウザの保存枠が不足。古い候補の画像を減らしてください)'; return; }
-      body.querySelector('#bskyImgMsg').textContent = '✅ 保存しました';
-      if (onSaved) onSaved();
-      setTimeout(function () { ov.hidden = true; }, 600);
+      var btn = this;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      body.querySelector('#bskyImgMsg').textContent = '保存中…';
+      Promise.resolve(bskyImgSave(it.cid, pending.img)).then(function (ok) {
+        if (!ok) {
+          btn.disabled = false;
+          body.querySelector('#bskyImgMsg').textContent = '⚠️ 保存できませんでした。もう一度お試しください';
+          return;
+        }
+        body.querySelector('#bskyImgMsg').textContent = '✅ 保存しました';
+        if (onSaved) onSaved();
+        setTimeout(function () { ov.hidden = true; }, 600);
+      }).catch(function () {
+        btn.disabled = false;
+        body.querySelector('#bskyImgMsg').textContent = '⚠️ 保存できませんでした。もう一度お試しください';
+      });
     });
     ov.hidden = false;
   }

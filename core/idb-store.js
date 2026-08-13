@@ -68,7 +68,12 @@
   //   Chami報告2026-08-13「候補タブでコメントやメモが読み込まれない・五分五分」の真因はこれ。isClosingErr の
   //   throw 経路(→再オープン)では拾えない=throwしない無言ハングだから。一定時間で reject に倒し、キャッシュを
   //   捨てて次回は接続を張り直す(fail-open=固まるより「読めなかった」と喋る側へ倒す・§3 可用性)。
-  var TX_TIMEOUT_MS = 8000; // 単一キーの get/set/del は本来ミリ秒級。8秒は「明らかに死んでいる」判定の安全域。
+  var _timeoutOverride = Number(root && root.__GO5_IDB_TIMEOUT_MS);
+  var TX_TIMEOUT_MS = (_timeoutOverride > 0 && isFinite(_timeoutOverride)) ? _timeoutOverride : 8000;
+  function resetDb_(db) {
+    _dbP = null;
+    try { if (db) db.close(); } catch (e) {}
+  }
   // トランザクション1つで fn(store) を実行し、oncomplete で解決。(get は req.result を返す)
   //   retry=true の初回のみ、transaction 生成が「閉じかけ」で throw したら再オープンして1回だけやり直す。
   function withStore(mode, fn, retry) {
@@ -115,51 +120,71 @@
   //   これで「get の reject が可視エラーへ直行する」再発クラス(resolveVideoBlob_ の『動画データの取得に
   //   失敗しました』= v=757 で個別に塞いだのと同型)を、呼び出し元ごとに catch を足さずとも源で断つ。
   //   ★書き込み(set/del)は従来どおり reject する=保存の失敗を握り潰すと saveStock_ の再試行が空回りするため。
-  function get(key) { return withStore("readonly", function (st) { return st.get(key); }).catch(function () { return null; }); }
+  function getResult(key) {
+    return withStore("readonly", function (st) { return st.get(key); }).then(function (value) {
+      return { ok: true, value: value === undefined ? null : value, error: null };
+    }).catch(function (error) {
+      return { ok: false, value: null, error: error };
+    });
+  }
+  function get(key) { return getResult(key).then(function (r) { return r.ok ? r.value : null; }); }
   function set(key, val) { return withStore("readwrite", function (st) { return st.put(val, key); }); }
   function del(key) { return withStore("readwrite", function (st) { return st.delete(key); }); }
 
   // 全エントリを {key: value} で返す。(起動時のハイドレート用)閉じかけなら1回だけ再オープンして張り直す。
-  function entries(retry) {
+  function readEntries_(prefix, retry) {
     if (retry === undefined) retry = true;
     return open().then(function (db) {
       return new Promise(function (resolve, reject) {
-        var out = {}, t, st, c;
-        try { t = db.transaction(STORE, "readonly"); st = t.objectStore(STORE); c = st.openCursor(); }
-        catch (e) {
-          if (retry && isClosingErr(e)) { _dbP = null; resolve(entries(false)); return; }
-          reject(e); return;
+        var out = {}, t, st, c, range, settled = false, wd = null;
+        var label = prefix === null ? "idb-cursor" : "idb-prefix";
+        function finish(cb) {
+          if (settled) return;
+          settled = true;
+          if (wd) { try { clearTimeout(wd); } catch (e) {} wd = null; }
+          cb();
         }
-        c.onsuccess = function () { var cur = c.result; if (cur) { out[cur.key] = cur.value; cur.continue(); } else resolve(out); };
-        c.onerror = function () { reject(c.error || new Error("idb-cursor-error")); };
+        function failOrRetry(err) {
+          resetDb_(db);
+          if (retry) finish(function () { resolve(readEntries_(prefix, false)); });
+          else finish(function () { reject(err); });
+        }
+        try {
+          wd = setTimeout(function () { failOrRetry(new Error(label + "-timeout")); }, TX_TIMEOUT_MS);
+          t = db.transaction(STORE, "readonly");
+          st = t.objectStore(STORE);
+          if (prefix === null) c = st.openCursor();
+          else {
+            range = IDBKeyRange.bound(prefix, prefix + "\uffff", false, false);
+            c = st.openCursor(range);
+          }
+        } catch (e) {
+          if (retry && isClosingErr(e)) { failOrRetry(e); return; }
+          finish(function () { reject(e); }); return;
+        }
+        c.onsuccess = function () {
+          if (settled) return;
+          var cur = c.result;
+          if (cur) { out[cur.key] = cur.value; cur.continue(); }
+          else finish(function () { resolve(out); });
+        };
+        c.onerror = function () { finish(function () { reject(c.error || new Error(label + "-cursor-error")); }); };
+        t.onerror = function () { finish(function () { reject(t.error || new Error(label + "-tx-error")); }); };
+        t.onabort = function () { finish(function () { reject(t.error || new Error(label + "-abort")); }); };
       });
+    }, function (openErr) {
+      if (retry) { resetDb_(); return readEntries_(prefix, false); }
+      throw openErr;
     });
   }
+  function entries(retry) { return readEntries_(null, retry); }
 
   // 指定した接頭辞のキーだけを読む。候補ページが起動時に全KV(ドラフト動画Blobを含む)を
   // 展開してiOS Safariを圧迫しないため、IDBKeyRangeで対象範囲そのものを絞る。
   function entriesPrefix(prefix, retry) {
-    if (retry === undefined) retry = true;
     prefix = String(prefix || "");
     if (!prefix) return Promise.resolve({});
-    return open().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var out = {}, t, st, c, range;
-        try {
-          t = db.transaction(STORE, "readonly");
-          st = t.objectStore(STORE);
-          range = IDBKeyRange.bound(prefix, prefix + "\uffff", false, false);
-          c = st.openCursor(range);
-        } catch (e) {
-          if (retry && isClosingErr(e)) { _dbP = null; resolve(entriesPrefix(prefix, false)); return; }
-          reject(e); return;
-        }
-        c.onsuccess = function () { var cur = c.result; if (cur) { out[cur.key] = cur.value; cur.continue(); } else resolve(out); };
-        c.onerror = function () { reject(c.error || new Error("idb-prefix-cursor-error")); };
-        t.onerror = function () { reject(t.error || new Error("idb-prefix-tx-error")); };
-        t.onabort = function () { reject(t.error || new Error("idb-prefix-abort")); };
-      });
-    });
+    return readEntries_(prefix, retry);
   }
 
   // 複数prefixは1範囲ずつ逐次取得する。大画像が多いiPhoneで同時に複数cursorを走らせず、
@@ -191,7 +216,7 @@
   }
   try { requestPersist(); } catch (e) {}
 
-  var API = { available: available, get: get, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, requestPersist: requestPersist };
+  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, requestPersist: requestPersist };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Idb = API;
 })(typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : this));

@@ -140,6 +140,53 @@ test.describe('候補ページの画像・投稿編集', () => {
     expect(prefixes[0]).toEqual(['ref:', 'bsky:']);
     expect(prefixes.flat()).not.toContain('stock_v_');
   });
+
+  test('文字情報だけ同期された時もFANZA作品URLとX URLを再読込なしで表示する', async ({ page }) => {
+    const cid = 'd_candidate_sync_text';
+    const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_candidate_sync_text/';
+    const xUrl = 'https://x.com/go5_test/status/22';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ cid }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: '文字同期回帰テスト', isTwitter: false, url: '', addedAt: Date.now()
+      }]));
+    }, { cid });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('[data-refimg="' + cid + '"]')).toBeVisible();
+    await expect(page.locator('a.vlink-work')).toHaveCount(0);
+
+    await page.evaluate(({ cid, workUrl, xUrl }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: '文字同期回帰テスト', isTwitter: false, url: workUrl, twitterUrl: xUrl, addedAt: Date.now()
+      }]));
+      document.dispatchEvent(new CustomEvent('go5-synced', { detail: { pulled: 0, pulledImg: 0, pulledCand: 1 } }));
+    }, { cid, workUrl, xUrl });
+
+    await expect(page.locator('a.vlink-work')).toHaveAttribute('href', workUrl);
+    await expect(page.locator('a.vlink-sns')).toHaveAttribute('href', xUrl);
+  });
+
+  test('IndexedDB保存失敗を成功扱いせず投稿編集を開いたまま再試行できる', async ({ page }) => {
+    const cid = 'tw_candidate_save_failure';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ cid }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: '保存失敗回帰テスト', isTwitter: true, twitterUrl: '', addedAt: Date.now()
+      }]));
+    }, { cid });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('[data-refimg="' + cid + '"]').click();
+    await expect(page.locator('.refimg-modal')).toBeVisible();
+    await page.evaluate(() => {
+      Go5Idb.set = function () { return Promise.reject(new Error('forced-save-fail')); };
+    });
+    await page.locator('#refImgTwitter').fill('https://x.com/go5_test/status/33');
+    await page.locator('#refImgSave').click();
+
+    await expect(page.locator('.refimg-modal')).toBeVisible();
+    await expect(page.locator('#refImgMsg')).toContainText('保存できません');
+    await expect(page.locator('#refImgTwitter')).toHaveValue('https://x.com/go5_test/status/33');
+  });
 });
 test.describe('ドラフト軽量ページ', () => {
   test('iPhone幅で重い動画DOMを持たず、ドラフト投稿モードまで開ける', async ({ page }) => {

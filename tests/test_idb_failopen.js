@@ -16,7 +16,9 @@
 'use strict';
 
 var assert = require('assert');
+var fs = require('fs');
 var path = require('path');
+var vm = require('vm');
 
 // ── 偽の indexedDB：open() は必ず失敗する(onerror を次tickで撃つ)。set/get どちらも open で詰まる ──
 global.indexedDB = {
@@ -52,6 +54,68 @@ function ng(name, e) { fails++; console.log('  FAIL ' + name + ' — ' + (e && e
     assert.strictEqual(rejected, true, 'set() は失敗時 reject すべき(保存の再試行が回るように)');
     ok('T-2 set() still rejects on failure');
   } catch (e) { ng('T-2 set() still rejects on failure', e); }
+
+  // T-3 呼び出し側が「キー無し」と「読取失敗」を区別したい時は getResult() で判定できる。
+  try {
+    var result = await Idb.getResult('ref:anything');
+    assert.strictEqual(result.ok, false, 'open失敗は ok:false であるべき');
+    assert.strictEqual(result.value, null, '失敗時の値は null');
+    assert.ok(result.error, '原因エラーを保持するべき');
+    ok('T-3 getResult() preserves read failure');
+  } catch (e) { ng('T-3 getResult() preserves read failure', e); }
+
+  // T-4 cursor/transaction がイベントを一切返さないSafari型ハングでも、番犬→再接続1回で reject する。
+  try {
+    var source = fs.readFileSync(path.join(__dirname, '..', 'core', 'idb-store.js'), 'utf8');
+    var closes = 0;
+    var sandbox = {
+      console: console,
+      setTimeout: setTimeout,
+      clearTimeout: clearTimeout,
+      navigator: {},
+      module: { exports: {} },
+      exports: {},
+      __GO5_IDB_TIMEOUT_MS: 15,
+      IDBKeyRange: { bound: function () { return {}; } }
+    };
+    sandbox.globalThis = sandbox;
+    sandbox.indexedDB = {
+      open: function () {
+        var req = { onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null, result: null, error: null };
+        var db = {
+          objectStoreNames: { contains: function () { return true; } },
+          close: function () { closes++; },
+          transaction: function () {
+            return {
+              oncomplete: null, onerror: null, onabort: null, error: null,
+              objectStore: function () {
+                return { openCursor: function () { return { onsuccess: null, onerror: null, result: null, error: null }; } };
+              }
+            };
+          }
+        };
+        req.result = db;
+        setTimeout(function () { if (typeof req.onsuccess === 'function') req.onsuccess(); }, 0);
+        return req;
+      }
+    };
+    vm.runInNewContext(source, sandbox, { filename: 'idb-store.cursor-hang.js' });
+    var HangIdb = sandbox.module.exports;
+    var cursorRejected = false;
+    try {
+      await Promise.race([
+        HangIdb.entriesPrefix('ref:'),
+        new Promise(function (_, reject) { setTimeout(function () { reject(new Error('test-race-timeout')); }, 300); })
+      ]);
+    } catch (e) {
+      cursorRejected = true;
+      assert.notStrictEqual(e && e.message, 'test-race-timeout', 'cursor読取が永久停止している');
+      assert.ok(/idb-prefix-timeout/.test(String(e && e.message || e)), '番犬のエラーを返すべき');
+    }
+    assert.strictEqual(cursorRejected, true, '無言cursorはrejectすべき');
+    assert.ok(closes >= 1, '停止したDB接続を閉じて張り直すべき');
+    ok('T-4 cursor hang times out and reconnects once');
+  } catch (e) { ng('T-4 cursor hang times out and reconnects once', e); }
 
   if (fails) { console.log('FAIL: ' + fails + ' 件'); process.exit(1); }
   console.log('OK: test_idb_failopen.js 全緑');

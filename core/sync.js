@@ -48,6 +48,12 @@
   // ★stock:imgs:<id> ＝ ドラフトのサムネ/プレビュー/元画像を dataURL でまとめた同期用ミラー(①-B・2026-07-31)。
   //   重い動画本体(stock_v_)は載せない=積み上がっても同期は軽いまま(実体はR2にhashで、台帳には参照だけ)。
   function isSyncIdbKey(k) { return /^(ref:|bsky:|post:|stock:imgs:)/.test(String(k)); }
+  var SYNC_IDB_PREFIXES = ["ref:", "bsky:", "post:", "stock:imgs:"];
+  function readSyncIdbEntries_(idb) {
+    if (!idb || !idb.available()) return Promise.resolve({});
+    if (typeof idb.entriesByPrefixes === "function") return idb.entriesByPrefixes(SYNC_IDB_PREFIXES.slice());
+    return idb.entries();
+  }
 
   // ── 暗号(WebCrypto AES-GCM / PBKDF2)──
   var subtle = (root.crypto && root.crypto.subtle) || null;
@@ -226,10 +232,11 @@
   var _prog = { phase: "", done: 0, total: 0 };
   function setProg(phase, done, total) { _prog = { phase: phase, done: done, total: total }; }
   // 同期完了時に発火＝各タブが localStorage の新しい値を入力欄へ読み直せる(反映されない不安の解消)。
-  //   pulledImg=雲から実際に取り込んだ画像レコード(ref:/bsky:/post:)の件数。候補/ドラフト画面が
-  //   「後から届いた画像」で再描画すべきかを判定するために添える。0の同期(=タブ復帰の空振り等)では
-  //   再描画させない=無条件反応による画面の白フラッシュを避ける(competitor.js/candidates.js が参照)。
-  function fireSynced(pulled, pulledImg) { try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-synced", { detail: { pulled: pulled, pulledImg: pulledImg || 0 } })); } catch (e) {} }
+  //   pulledImg=雲から実際に取り込んだ画像レコード(ref:/bsky:/post:)の件数。「後から届いた画像」の再読込用。
+  //   pulledCand=候補配列の作品URL・X URL・題名等が実際に変わった件数。画像が0件でも候補だけ再描画する。
+  //   どちらも0の同期(=タブ復帰の空振り等)では再描画させない。
+  //   無条件反応による画面の白フラッシュを避けるため、変化の種類を分けて通知する。
+  function fireSynced(pulled, pulledImg, pulledCand) { try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-synced", { detail: { pulled: pulled, pulledImg: pulledImg || 0, pulledCand: pulledCand || 0 } })); } catch (e) {} }
   function status() { return { configured: configured(), busy: _busy, version: getVer(), lastError: _lastErr, lastAt: _lastAt, device: deviceName(), prog: _prog }; }
 
   // per-key マージ。(t 大きい方を採用)
@@ -332,6 +339,13 @@
     } catch (e) { return null; }
   }
   function unionCand(olderStr, newerStr) { return unionByField(olderStr, newerStr, "cid"); }
+  function mergeLiveArray_(mergedStr, liveStr, startStr, idField) {
+    // 同期開始後にローカルが変わった時だけliveを最後に重ねる。未変更の古いliveを常にnewer扱いすると、
+    // 雲から届いた新しい作品URLを同期開始時の古いURLへ巻き戻してしまう。
+    if (liveStr === startStr) return mergedStr;
+    var updated = unionByField(mergedStr, liveStr, idField);
+    return updated == null ? mergedStr : updated;
+  }
 
   // カレンダー予定は1キーに全日・全枠を持つ。whole-key LWWでは、スマホの公開済みと
   // PCの古い予約状態が互いを丸ごと消すため、日付/枠/アカウント単位で統合する。
@@ -489,7 +503,7 @@
     //   TTLを設けるのは、R2から画像実体が消える既知症状(②)を最長24hで再検出して再アップするため
     //   (恒久キャッシュにすると「消えたのに存在扱い」で二度と直らなくなる)。
     var curIdb = {};
-    var idbStep = (Idb && Idb.available()) ? Idb.entries().then(function (all) {
+    var idbStep = readSyncIdbEntries_(Idb).then(function (all) {
       var keys = Object.keys(all).filter(isSyncIdbKey);
       if (!keys.length) return;
       var bag = []; keys.forEach(function (k) { collectDataUrls(all[k], bag); });
@@ -540,7 +554,7 @@
         //   → 何が起きても curIdb は必ず埋める(hByUrlが空ならdataURLのまま=無変換で送る=データは死なない)。
         try { root.console && root.console.warn("[go5 sync] 画像のhash化に失敗。無変換で継続(削除誤爆を防止)", e); } catch (x) {}
       }).then(toRef);
-    }) : Promise.resolve();
+    });
 
     return Promise.all([secStep, idbStep]).then(function () {
       // pass無し(skip)の端末は、雲側の sec: キーを消さない。(削除判定から除外)
@@ -638,10 +652,21 @@
         // マージ結果をローカルへ適用
         var applies = [], newSnapLs = {}, newSnapIdb = {};
         var pulledLsReal = 0;   // 実際にLSへ「中身が変わった設定」を書き込んだ件数=pulled合図の真値(画像側 pulledImgReal と対)
+        var pulledCandReal = 0; // 候補配列の文字情報(URL/題名等)だけが変わった時の候補ページ再描画合図
         Object.keys(mls).forEach(function (k) {
           var e = mls[k];
           var isSec = k.indexOf(SEC_PREFIX) === 0, sk = isSec ? k.slice(SEC_PREFIX.length) : null;
-          if (e.d) { if (isSec) { return; } /* ★鍵は tombstone でもローカル削除しない(既存の誤tombstoneから鍵を守る) */ newSnapLs[k] = undefined; try { if (isSyncLsKey(k)) LS.removeItem(k); } catch (x) {} return; }
+          if (e.d) {
+            if (isSec) { return; } /* ★鍵は tombstone でもローカル削除しない(既存の誤tombstoneから鍵を守る) */
+            newSnapLs[k] = undefined;
+            try {
+              if (isSyncLsKey(k) && LS.getItem(k) !== null) {
+                LS.removeItem(k);
+                if (isCandArrayKey(k)) pulledCandReal++; else pulledLsReal++;
+              }
+            } catch (x) {}
+            return;
+          }
           if (isSec) {
             newSnapLs[k] = e.v;
             // 自分の暗号文が採用＝復号不要。(PBKDF2の無駄打ち回避)remote勝ち(別の値)の時だけ復号して反映。
@@ -657,9 +682,8 @@
           var live = LS.getItem(k), finalV = e.v;
           var idf2 = arrIdField_(k);
           if (idf2) {
-            // 配列は「ライブ値」ともう一度id unionしてから書く＝進行中に増えた分を絶対に失わない。
-            var u2 = unionByField(e.v, live, idf2);
-            if (u2 != null) finalV = u2;
+            // 同期開始後にライブ値が変わった時だけ再unionし、進行中に増えた分を失わない。
+            finalV = mergeLiveArray_(e.v, live, curLs[k], idf2);
             // ★墓標を適用：削除済みid/nameをunion結果から除外し復活を防ぐ。マージ済み墓標とライブ墓標の両方を効かせる。
             //   候補/ドラフト=id/addedAt。テンプレ帳=name/at(削除後に再保存したものは at>削除ts で残る)。作成履歴は墓標を適用しない。
             if (isCandArrayKey(k) || isStockArrayKey(k)) {
@@ -694,9 +718,14 @@
             return;
           }
           newSnapLs[k] = finalV; if (finalV !== e.v) mls[k] = { t: e.t, v: finalV }; // 再union分をpush対象にも反映
-          // ★ローカルの値が実際に変わった時だけ pulled を立てる=分析/カレンダー/投稿履歴タブの再描画はこの真値でだけ起こす。
-          //   (候補配列は画像側 pulledImg で再描画するので pulled からは除外＝旧実装の除外を踏襲)
-          try { if (LS.getItem(k) !== finalV) { LS.setItem(k, finalV); if (!isCandArrayKey(k)) pulledLsReal++; } } catch (x) {}
+          // ★ローカルの値が実際に変わった時だけ合図を立てる。候補配列はpulledCand、それ以外はpulledへ分離し、
+          //   URL等の文字だけ届いた時も候補を更新しつつ、無関係なタブの再描画は起こさない。
+          try {
+            if (LS.getItem(k) !== finalV) {
+              LS.setItem(k, finalV);
+              if (isCandArrayKey(k)) pulledCandReal++; else pulledLsReal++;
+            }
+          } catch (x) {}
         });
         var dlKeys = Object.keys(midb).filter(function (k) { return !midb[k].d && Idb && Idb.available(); });
         var dlDone = 0; if (dlKeys.length) setProg("画像を受信", 0, dlKeys.length);
@@ -744,10 +773,11 @@
           //   解消せず pulledImg>0 が毎周期(60秒)立ち続けた。→ candidates.js が go5-synced(pulledImg>0)
           //   のたびに候補タブを全再描画=「見てるだけで勝手にリロード」になる真因(Chami 2026-08-06)。
           var pulledImg = pulledImgReal;
-          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs, pulledImg); }
-          if (!changed) { persist(rver); return { ok: true, version: rver, noChange: true, pulled: pulledLs }; }
+          var pulledCand = pulledCandReal;
+          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs, pulledImg, pulledCand); }
+          if (!changed) { persist(rver); return { ok: true, version: rver, noChange: true, pulled: pulledLs, pulledCand: pulledCand }; }
           return pushState(outState, rver).then(function (pr) {
-            if (pr && pr.ok) { persist(pr.version); return { ok: true, version: pr.version, pulled: pulledLs }; }
+            if (pr && pr.ok) { persist(pr.version); return { ok: true, version: pr.version, pulled: pulledLs, pulledCand: pulledCand }; }
             if (pr && pr.conflict && !retry) { _busy = false; return syncOnce(true); } // 再pull→マージ→再push
             _busy = false; _lastErr = (pr && pr.error) || "push失敗"; setProg("", 0, 0); return { ok: false, error: _lastErr };
           });
@@ -870,6 +900,9 @@
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
     _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
+  root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_;
+  root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_;
+  root.Go5Sync._test.syncIdbPrefixes = SYNC_IDB_PREFIXES.slice();
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 
   // ── ⚙詳細設定 UI 配線＋自動同期の起動 ──
