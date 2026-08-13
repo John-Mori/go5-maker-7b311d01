@@ -2019,8 +2019,28 @@ def defect_id(dept, broken, symptom="", kind=DEFECT_KIND_DEFECT):
 #     **終わった依頼が永久に「まだ終わっていない」として全部屋の起動文に出続ける。**
 #   飛ばす設計(fail-open)は正しい。**間違っていたのは「飛ばしたと誰にも言わない」ことだ。**
 _DEFECT_BAD_LINES = []
-# ★意図して積まれる op(警報の対象外)。note= 訂正/恒久の注記(実測2行)。
+# ★意図して積まれる op(警報の対象外)。note= 訂正/恒久の注記(実測2行)+ 催促の再掲(C-046)。
 _DEFECT_OPS_BENIGN = tuple(DEFECT_OPS) + ("note",)
+
+# ★★台帳の実ファイルは**この関数1本を通す**(2026-08-14・C-046)。
+#   理由= 検査が「起票されるか」を**実行で**見るには、本番の台帳を汚さずに書き先を差し替えられる
+#   必要がある。共通規律§3「ソースの文字列一致は検査ではない」への手当て。
+#   手本= absence_watchdog.queue_db_path() / session_relay._run_claude(読む先・叩く先の切り出し)。
+#   ★切り出しただけで本番の挙動は1ミリも変えていない(既定は DEFECTS_FILE)。
+_DEFECTS_PATH_OVERRIDE = None
+
+
+def defects_path():
+    """台帳(open_defects.jsonl)の実ファイル。★本番では DEFECTS_FILE そのもの。"""
+    return _DEFECTS_PATH_OVERRIDE or DEFECTS_FILE
+
+
+def set_defects_path(path):
+    """台帳の書き先/読み先を差し替える(戻り値=差し替える前の値)。★検査からだけ呼ぶ。"""
+    global _DEFECTS_PATH_OVERRIDE
+    old = _DEFECTS_PATH_OVERRIDE
+    _DEFECTS_PATH_OVERRIDE = path or None
+    return old
 
 
 def _defect_read_rows():
@@ -2031,11 +2051,12 @@ def _defect_read_rows():
     global _DEFECT_BAD_LINES
     rows = []
     bad = []
+    path = defects_path()
     try:
-        if not os.path.exists(DEFECTS_FILE):
+        if not os.path.exists(path):
             _DEFECT_BAD_LINES = bad
             return rows
-        with open(DEFECTS_FILE, encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for lineno, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
@@ -2045,7 +2066,9 @@ def _defect_read_rows():
                 except Exception as e:               # noqa: BLE001
                     bad.append((lineno, str(e)[:80], line[:60]))
                     continue
-                if isinstance(r, dict) and r.get("op") in DEFECT_OPS and r.get("id"):
+                # ★note も読み込む(2026-08-14・C-046 の催促の再掲)。
+                #   ★読むだけ= 畳む側(fold_defects)が op ごとに明示で分岐する。
+                if isinstance(r, dict) and r.get("op") in _DEFECT_OPS_BENIGN and r.get("id"):
                     rows.append(r)
                 else:
                     # ★opの綴り違い・id落ちも「黙って落ちる」= 同じ事故。行番号を残す。
@@ -2101,10 +2124,11 @@ def append_defect(rec):
     ★失敗しても例外を外へ出さない= この台帳のせいで便や交代が止まることは無い(fail-open)。
     """
     try:
-        os.makedirs(os.path.dirname(DEFECTS_FILE), exist_ok=True)
+        path = defects_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         rec = dict(rec)
         rec.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%S"))
-        with open(DEFECTS_FILE, "a", encoding="utf-8") as f:
+        with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
@@ -2114,26 +2138,43 @@ def append_defect(rec):
 
 
 def open_defect(dept, symptom, broken, noticed_at="", source="", did=None,
-                kind=DEFECT_KIND_DEFECT):
+                kind=DEFECT_KIND_DEFECT, close_when=""):
     """「まだ終わっていない生きた項目」を1件積む。戻り値 (id, 新規に積んだか)。
 
     ★同じ id が既に台帳に在れば**積まない**(冪等)。reaction_watch を二度流しても増えない。
     ★kind 既定は defect= **呼び出し側を1箇所も変えなくても従来と同じ行が出る**。
+    ★close_when(2026-08-14・C-046②)= 「何が起きたら閉じるか」を1行。空でも積めるが、
+      **依頼(kind=request)を積む側は空を渡さない**(dept_daemon._stack_open_request が門番)。
     """
     kind = kind if kind in DEFECT_KINDS else DEFECT_KIND_DEFECT
     did = did or defect_id(dept, broken, symptom, kind)
     for r in _defect_read_rows():
         if r.get("id") == did and r.get("op") == "open":
             return did, False
-    ok = append_defect({"op": "open", "id": did, "dept": dept, "kind": kind,
-                        "symptom": str(symptom or "")[:2000],
-                        "broken": str(broken or "")[:1000],
-                        "noticed_at": str(noticed_at or ""),
-                        "source": str(source or "")})
+    row = {"op": "open", "id": did, "dept": dept, "kind": kind,
+           "symptom": str(symptom or "")[:2000],
+           "broken": str(broken or "")[:1000],
+           "noticed_at": str(noticed_at or ""),
+           "source": str(source or "")}
+    if str(close_when or "").strip():        # ★空の時は欄そのものを足さない(古い行と同じ形)
+        row["close_when"] = str(close_when)[:300]
+    ok = append_defect(row)
     return did, ok
 
 
-def open_request(dept, ask, where, noticed_at="", source=""):
+def nudge_request(dept, did, msg_id="", text=""):
+    """催促(「まだ?」「進捗は?」)を**既存の依頼の再掲**として積む(2026-08-14・C-046③)。
+
+    ★新しいIDは発行しない= 催促で件数が増える台帳は「遅い部門ほど数字が悪化する」。
+      原因ではなく結果を測ってしまうので、待ち時間だけを更新する。
+    ★op は "note"= 畳んだ時に**状態を変えない**(未確認のまま。閉じるのは C-024 のまま人の手)。
+    """
+    return append_defect({"op": "note", "id": str(did), "dept": dept, "note_kind": "nudge",
+                          "nudge": " ".join(str(text or "").split())[:300],
+                          "where": str(msg_id or "")})
+
+
+def open_request(dept, ask, where, noticed_at="", source="", close_when=""):
     """「Chamiが頼んだのに、その便の中で終わらなかった依頼」を1件積む。 (id, 新規か)
 
     ★改善書§5の実話がこれだ:
@@ -2150,7 +2191,7 @@ def open_request(dept, ask, where, noticed_at="", source=""):
     """
     return open_defect(dept=dept, symptom=ask, broken=where,
                        noticed_at=noticed_at, source=source,
-                       kind=DEFECT_KIND_REQUEST)
+                       kind=DEFECT_KIND_REQUEST, close_when=close_when)
 
 
 def confirm_defect(dept, did, fixed, scene="", by=""):
@@ -2194,8 +2235,17 @@ def fold_defects(dept=None):
                               "noticed_at": str(r.get("noticed_at") or r.get("ts") or ""),
                               "source": str(r.get("source") or ""),
                               "opened_at": str(r.get("ts") or ""),
+                              "close_when": str(r.get("close_when") or ""),
                               "status": DEFECT_OPEN, "fixed": "", "scene": "",
-                              "confirmed_at": "", "rejected": []}
+                              "confirmed_at": "", "rejected": [], "nudges": []}
+            continue
+        if r.get("op") == "note":
+            # ★催促の再掲(C-046③)。**状態は動かさない**= 待ち時間の更新だけ。
+            #   note_kind が nudge 以外の注記(訂正・恒久の覚書)は従来どおり素通り。
+            d = state.get(did)
+            if d is not None and str(r.get("note_kind") or "") == "nudge":
+                d.setdefault("nudges", []).append(
+                    f"{r.get('ts','')} {r.get('where','')} {r.get('nudge','')}".strip())
             continue
         # --- confirm ---
         d = state.get(did)
@@ -2303,6 +2353,11 @@ def requests_block(dept, head=True, limit=DEFECT_BLOCK_MAX):
         lines.append(f"     依頼の便の在りか= {d['broken'] or '(無い★)'}"
                      f" / 頼まれた= {d['noticed_at'] or '不明'}"
                      f"{' / 出所= ' + d['source'] if d['source'] else ''}")
+        if d.get("close_when"):
+            lines.append(f"     ★閉じる条件= {d['close_when']}")
+        if d.get("nudges"):
+            lines.append(f"     ★Chamiからの催促 {len(d['nudges'])}件"
+                         f"(最新= {d['nudges'][-1]})")
         if d["rejected"]:
             lines.append(f"     ★閉じようとして**弾かれた記録** {len(d['rejected'])}件: "
                          + d["rejected"][-1])

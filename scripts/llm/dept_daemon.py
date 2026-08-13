@@ -743,6 +743,77 @@ REQUEST_PREFIX = "REQF-"
 # 台帳に生きた依頼が在っても、部屋がまだ動いていれば撃たない(=止まっている時だけ押す)。
 REQUEST_STACK_SOURCE = "dept_daemon(その便の中で終わらなかった)"
 
+# ============================================================================
+# ★★C-046(2026-08-14 HQ裁定・種= イージス研究室)= 起票の引き金に「返信側の状態」を使うな
+# ============================================================================
+# HQが request_log.jsonl で1件を頭から追跡した実測(便 1537384908530393109):
+#     Chami便「**直った**」 → 部門はちゃんと返信(discord_msg 1537388201839427604)
+#     → **その返信に `<<WIP>>` が付いていた**(別件の作業継続) → working_detected
+#     → **依頼を1つも含まない便が REQ として起票**され、最長12日 台帳に立っていた。
+#     生きた REQ 143件のうち **17件が依頼ですらない**(「直った」「出た。OK!」「進捗は?」「まだ?」)。
+# ★真因= **起票の中身は「元の便」なのに、引き金は「返信側の状態」**という非対称。
+#   `<<WIP>>` は**閉じ忘れの検出器であって、依頼の検出器ではない。**
+# ★直し方(受け入れ条件)=
+#   ① 起票の判定は「**元の便に依頼が含まれるか**」で行う。返信側の状態は**追撃便の引き金だけ**に使う。
+#   ② 起票する時に `close_when`(何が起きたら閉じるか)を1行持たせる。書けないなら起票しない。
+#   ③ 催促(「まだ?」「進捗は?」)は**新規起票しない**。既存REQの再掲として待ち時間を更新する。
+#      ★催促で件数が増える台帳は、遅い部門ほど数字が悪化する=**原因ではなく結果を測ってしまう**。
+#   ④ 自動closeはしない(C-024据え置き)。
+# ★★倒す向きは「起票する側」だ= 迷ったら request(取りこぼし0=イージス研究室のKPI A1)。
+#   落とすのは**言い切れる形だけ**(催促・相槌・完了報告)。
+_ASK_RE = re.compile(
+    r"(して|しといて|しておいて|下さい|ください|お願い|頼む|頼み|やって|やろう"
+    r"|直し|直せ|進めて|再開|着手|対応|作って|入れて|外して|消して|止めて|閉じ|開け"
+    r"|やっといて|調べ|見て|見といて|確認して|教えて|出して|変えて|付けて|足して|試して|回して"
+    r"|欲しい|ほしい|したい|できる[?？]|できます|任せ|よろしく|検討|実装|修正|追加)")
+# 催促(=既存の依頼の再掲)。★「答えは返信そのもの」型(HQ ④)。
+_NUDGE_RE = re.compile(
+    r"(まだ|進捗|どうなった|どうなってる|どうなりました|遅い|いつまで|いつになったら"
+    r"|何時間|時間経|経ってます|経ちました|終わった[?？]|終わってる[?？]|返事)")
+# 完了報告・相槌。★これ**だけ**の便は依頼を含まない。
+_DONE_RE = re.compile(
+    r"(直った|直りました|治った|出た|出ました|出てる|出るように|できた|できてる|動いた"
+    r"|反映され|表示され|うまくいっ|成功|問題ない|問題なし|大丈夫|解決|良さそう|いい感じ)")
+_ACK_RE = re.compile(
+    r"(ok|okay|おk|了解|承知|ありがとう|あざす|thx|thanks|なるほど|そうか|そうだね|はい"
+    r"|うん|把握|お疲れ|おつかれ|おはよう|おやすみ)", re.I)
+_ASK_TRIM_RE = re.compile(r"[\s。、,.!！?？…‥・~〜\-—:：;；\"'`()（）\[\]「」『』【】★☆♪笑w]+")
+# 語尾だけの残りかす。★「残りかす」を数える時にだけ落とす(判定の合図には使わない)。
+_ACK_TAIL_RE = re.compile(r"(ございます|でした|ですね|です|ました|ます|だね|だよ|みたい|そう"
+                          r"|ので|から|けど|よかった|かな|わ|よ|ね|な|ぞ|ぜ)")
+# 催促と見なす上限(字)。★長い便は「催促の後ろに実依頼が付いている」ことがある(HQ §4の実測)。
+NUDGE_MAX_CHARS = 60
+# 相槌と見なす残りかす(字)。★「OK。①割引が…」のような**相槌+実依頼**を落とさないための門。
+#   実測で決めた= 「出たのでok」の残り「ので」=2字は落としたいが、「OK。①割引が」の
+#   残り「①割引が」=4字は**落としてはいけない**(HQ §4=相槌の後ろに実依頼が付いている)。
+ACK_RESIDUE_MAX = 3
+
+CLOSE_WHEN_REQUEST = "頼まれた物の実物(変更したファイル/実行結果/Discordの返答便)を、その場面で確認できた時"
+CLOSE_WHEN_QUESTION = "この問いへ返した返答便(discord_msg)を実物ポインタとして確認できた時"
+CLOSE_WHEN_NUDGE = "催促が指す作業の実物を、Chamiが催促した場面で確認できた時"
+
+
+def classify_ask(text):
+    """**元の便の中身だけ**を見て種別を決める。戻り値 (種別, close_when)。
+
+    種別= "request"(起票する) / "nudge"(既存へ寄せる) / "ack"(何もしない)。
+    ★純粋関数(副作用なし)。判定はここ1箇所だけに置く=二重の判定を作らない(ORG-11)。
+    """
+    t = " ".join(str(text or "").split())
+    if not t:
+        return "ack", ""
+    if _ASK_RE.search(t):                       # ①依頼の合図が在れば、他に何が書いてあっても起票
+        return "request", (CLOSE_WHEN_QUESTION if t.rstrip().endswith(("?", "？"))
+                           else CLOSE_WHEN_REQUEST)
+    if _NUDGE_RE.search(t) and len(t) <= NUDGE_MAX_CHARS:
+        return "nudge", CLOSE_WHEN_NUDGE        # ②催促だけ(短い便に限る)
+    residue = _ASK_TRIM_RE.sub("", _NUDGE_RE.sub("", _ACK_RE.sub("", _DONE_RE.sub("", t))))
+    residue = _ASK_TRIM_RE.sub("", _ACK_TAIL_RE.sub("", residue))
+    if (_DONE_RE.search(t) or _ACK_RE.search(t)) and len(residue) <= ACK_RESIDUE_MAX:
+        return "ack", ""                        # ③相槌・完了報告だけ(残りかすが無い時だけ)
+    return "request", (CLOSE_WHEN_QUESTION if t.rstrip().endswith(("?", "？"))
+                       else CLOSE_WHEN_REQUEST)  # ④既定は起票(取りこぼしを作らない)
+
 
 def request_followup_text(items, quiet_sec):
     """暇な部屋への催促(★改善書§6 第1手の文面指定=「上から順に進めろ。向きを聞くな」)。
@@ -4240,6 +4311,11 @@ class Daemon:
           機構の追撃便・他部門からの回送・定期便では積まない。
         ★在りか= その依頼の便の msg_id(evidence_locator が snowflake として解決できる形)。
         ★何が失敗しても本体(応答)を巻き添えにしない(fail-open)。
+
+        ★★2026-08-14 C-046= **ここに中身の門を1枚足した**(classify_ask を参照)。
+          呼ばれるきっかけは今までどおり `working_detected`/`waiting_detected` だが、
+          **それだけでは積まない**= 元の便に依頼が含まれる時だけ積む。
+          催促は既存REQへ寄せ、相槌・完了報告は積まない。
         """
         try:
             if not self._is_from_chami(rec):
@@ -4248,18 +4324,53 @@ class Daemon:
             ask = " ".join(str(rec.get("content") or "").split())[:600]
             if not ask:
                 return None                  # 本文が無い便(画像だけ等)は依頼として積まない
+            kind, close_when = classify_ask(ask)
+            if kind == "ack":                # ★「直った」「出た。OK!」で台帳が太らない(C-046①)
+                log(self.dept, f"起票しない(依頼を含まない便) msg={mid} 中身={ask[:40]!r}")
+                return None
+            if kind == "nudge":
+                folded = self._nudge_open_request(rec, ch, ask)
+                if folded:
+                    return folded            # ★既存REQの再掲として待ち時間だけ更新(C-046③)
+                # 寄せる先が1件も無い催促=**この部屋は追う物を見失っている**。
+                # 沈黙より起票の方が安全なので、催促そのものを起票へ落とす(倒す向きは可視化)。
+                close_when = CLOSE_WHEN_NUDGE
+            if not str(close_when or "").strip():
+                log(self.dept, f"起票しない(閉じ方が書けない) msg={mid}")
+                return None                  # ★C-046②「書けないなら起票しない」
             where = f"msg_id={mid} / 部屋={ch}"
             rid, is_new = session_relay.open_request(
                 dept=self.dept, ask=ask, where=where,
                 noticed_at=str(rec.get("ts") or time.strftime("%Y-%m-%d %H:%M:%S")),
-                source=REQUEST_STACK_SOURCE)
+                source=REQUEST_STACK_SOURCE, close_when=close_when)
             if is_new:
                 log(self.dept, f"★未完了の依頼を台帳へ積んだ {rid} 元msg={mid} "
-                               f"(その便の中で終わらなかった: {word!r})")
+                               f"(その便の中で終わらなかった: {word!r} / 閉じ方= {close_when})")
             return rid
         except Exception as e:                  # noqa: BLE001
             log(self.dept, f"未完了の依頼を積めなかった({type(e).__name__})=本体は続行")
             return None
+
+    def _nudge_open_request(self, rec, ch, ask):
+        """催促を**既存の依頼の再掲**として寄せる(2026-08-14・C-046③)。戻り値= 寄せた先のID/None。
+
+        ★寄せる先= その部屋の**一番古い未完了**。理由= 部屋への指示が
+          「上から順に進めろ」(request_followup_text)であり、催促が押しているのは常にその先頭だ。
+        ★新しいIDを発行しない= 催促で件数が増える台帳は、遅い部門ほど数字が悪化する。
+        ★寄せる先が無い時は None を返す(呼び出し側が起票へ落とす=催促を沈黙させない)。
+        """
+        items = session_relay.open_request_list(self.dept)
+        if not items:
+            return None
+        rid = str(items[0].get("id") or "")
+        if not rid:
+            return None
+        mid = str(rec.get("msg_id", ""))
+        session_relay.nudge_request(self.dept, rid, msg_id=f"msg_id={mid}", text=ask)
+        session_relay._record(mid, self.dept, "request_nudged",
+                             f"部屋={ch} 寄せた先={rid} 元msg={mid}")
+        log(self.dept, f"催促を既存の依頼へ寄せた {rid} 元msg={mid}(新規起票はしない・C-046③)")
+        return rid
 
     def _note_waiting(self, rec, reply, ch):
         """返信が「止まり」を宣言していたら台帳へ1行だけ残す(waiting / working の両方)。
@@ -4294,6 +4405,9 @@ class Daemon:
             #   「その便の中で終わらなかった」= Chamiの依頼なら、生きている台帳へ積む。
             #   ここで積んでおかないと、その未完了は**引き継ぎの作文の中にしか存在しなくなる**
             #   (=書かれた瞬間に安全に死蔵される。§5)。
+            # ★★2026-08-14 C-046= **この検出だけでは積まない**。積むかどうかは
+            #   `_stack_open_request` の中で**元の便の中身**(classify_ask)が決める。
+            #   ここ(返信側の状態)は**追撃便の引き金のまま**=上の `_record` までが役目。
             self._stack_open_request(rec, ch, w)
             return w
         except Exception as e:                      # noqa: BLE001
