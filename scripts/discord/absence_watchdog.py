@@ -935,7 +935,18 @@ def check_stale_dead(state, dry_run):
            "中身を見る: `python scripts/queue/dlq_tool.py --list`。"
            "手当てしたら印を付ける(これで鳴り止む): "
            "`python scripts/queue/dlq_tool.py --ack <id> --by \"<誰>\" --note \"<どう片付けたか>\"`。")
-    if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
+    # ★2026-08-13 宛先を足した(イージス研究室・HQ便 1537344368124366889 の依頼3への回答)。
+    #   実測= 2026-08-13 の 🔥digest 消失で、増分警報 08:32・滞留警報 15:25 の**2本とも鳴っていた**。
+    #   それでも研究室HQは「完全サイレント」と判断し、sqliteを直接見て真因へ辿り着いた。
+    #   = 穴は「鳴らない」ではなく「**鳴っている場所を、動ける人が読んでいない**」(共通規律§4)。
+    #   → 3本目の警報を作らず、既存の1本の**宛先**を足す。1日1回の上限は変えない=増音しない。
+    #   ★不明な宛先(dept='router' 等)は bot_send が False を返すだけ=fail-open・他の宛先は届く。
+    targets = [SUMMARY_DEPT, "hq"] + [d for d in by if d not in (SUMMARY_DEPT, "hq")]
+    sent = False
+    for dept in targets:
+        if bot_send(dept, msg, dry_run, by_dept=True):
+            sent = True
+    if sent:
         state["last_stale_dead_alert"] = now_epoch
 
 
