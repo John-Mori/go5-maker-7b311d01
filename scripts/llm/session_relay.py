@@ -52,16 +52,8 @@ import subprocess
 import threading
 import time
 
-try:
-    # ★長すぎるpromptをargvから逃がす止血(2026-08-13 研究室HQ)。同ディレクトリ。
-    #   読めなければ**何もしない素通し**へ退化する(止血が本体を巻き添えにしない)。
-    import prompt_spill
-except Exception:                                # pragma: no cover
-    class _NoSpill:
-        @staticmethod
-        def guard(prompt, tag="relay"):
-            return prompt, None
-    prompt_spill = _NoSpill()
+#   ★prompt_spill(長すぎるpromptをargvから逃がす止血)は _run_claude から外した
+#     =promptは stdin で渡すので長さの上限が無い(2026-08-13・詳細は _run_claude 内の注記)。
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -1252,14 +1244,13 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
       ★communicate() は TimeoutExpired の後に**もう一度呼べる**(出力は失われない)=公式仕様。
         だから soft で捨てずに続きを待てる。
     """
-    # ★★2026-08-13 止血(研究室HQ): promptが長すぎるとここで**起動そのものが失敗する**。
-    #   Windowsのコマンドライン上限(32,767字)を超えると CreateProcess が WinError 206 を返し、
-    #   Pythonは FileNotFoundError として投げる=呼び元は「配送処理の例外(FileNotFoundError)」しか
-    #   見えず、「受け口のファイルが無い」に見えていた。実測= 36,298字の便が6回とも落ちて
-    #   queue で status='dead'(DISPATCH-system-engineer-1786575652694・2026-08-13 08:08〜08:29)。
-    #   → 上限を超える時だけ**全文をファイルへ逃がし、「読め」の短いpromptに差し替える**。
-    #     上限以下では1文字も挙動が変わらない。恒久対策=プラットフォームSE/イージス研究室。
-    prompt, _spill = prompt_spill.guard(prompt, tag="relay")
+    # ★2026-08-13 ここに研究室HQが止血(prompt_spill=長すぎるpromptをファイルへ逃がす)を
+    #   一時的に入れていたが、**外した**。理由= 直後に一ノ瀬怜(platform-se)が下の stdin 化
+    #   (恒久対策・commit 3f5ac58)を入れたため、長さの上限そのものが消えた。
+    #   止血を残すと28,000字超の便を無用にファイルへ逃がし、セッションに余分なReadを1回強いる
+    #   =恒久対策の劣化になる。**同じ穴を2つの機構で塞がない**(ORG-11と同じ話)。
+    #   ★prompt_spill.py 自体は残す= dept_daemon.generate() と persona_render.py が
+    #     まだ positional argv で prompt を渡しており、そちらの止血として現役だ。
     argv = [CLAUDE, "-p"]
     if session_id:
         argv += ["--resume", session_id]

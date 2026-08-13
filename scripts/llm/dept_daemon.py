@@ -124,6 +124,17 @@ try:
 except Exception:
     session_relay = None
 
+try:
+    # ★長すぎるpromptをargvから逃がす止血(2026-08-13 研究室HQ)。同ディレクトリ。
+    #   読めなければ**何もしない素通し**へ退化する(止血が本体を巻き添えにしない)。
+    import prompt_spill
+except Exception:
+    class _NoSpill:
+        @staticmethod
+        def guard(prompt, tag=""):
+            return prompt, None
+    prompt_spill = _NoSpill()
+
 POLL_SEC = 3                    # 箱の見張り間隔(waiterの2秒に準拠した軽さ)
 # ★2026-07-21 Chami裁定「常時2秒でやる」= **集中ウィンドウ(可変間隔)は廃止した**。
 #   同日の午前に「寝てる時は遅くていい」の要望で 2秒/12秒 の切替を入れたが、
@@ -3915,6 +3926,11 @@ class Daemon:
         )
         env = dict(os.environ)
         env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
+        # ★2026-08-13 止血(研究室HQ): promptがWindowsのコマンドライン上限(32,767字)を超えると
+        #   CreateProcessが WinError 206 を返し、Pythonは**FileNotFoundError**として投げる
+        #   =「ファイルが無い」に見える起動失敗になる(session_relay側で実害を実測)。
+        #   上限を超える時だけ全文をファイルへ逃がす。上限以下では1文字も変わらない。
+        prompt, _spill = prompt_spill.guard(prompt, tag=f"daemon_{self.dept}")
         p = subprocess.run([CLAUDE, "--print", prompt], cwd=ROOT, env=env,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=PRINT_TIMEOUT)

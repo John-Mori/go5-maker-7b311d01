@@ -25,6 +25,18 @@ import os
 import re
 import time
 
+try:
+    # ★長すぎるpromptをargvから逃がす止血(2026-08-13 研究室HQ)。同ディレクトリ。
+    #   Windowsのコマンドライン上限(32,767字)超過は WinError 206 = FileNotFoundError で落ちる。
+    #   読めなければ**何もしない素通し**へ退化する。
+    import prompt_spill
+except Exception:
+    class _NoSpill:
+        @staticmethod
+        def guard(prompt, tag=""):
+            return prompt, None
+    prompt_spill = _NoSpill()
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
 VOICE_MAX_AGE = 1800        # 秒。これより古いvoiceは前のターンの残骸とみなして使わない
@@ -200,6 +212,7 @@ def persona_rewrite(dept, text, persona=None):
             f"=== characterfile ===\n{character}\n\n"
             f"=== 報告 ===\n{body}"
         )
+        prompt, _spill = prompt_spill.guard(prompt, tag="persona_render")
         p = subprocess.run([CLAUDE, "--print", prompt], cwd=ROOT, env=env,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=REWRITE_TIMEOUT)

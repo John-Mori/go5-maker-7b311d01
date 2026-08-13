@@ -163,8 +163,12 @@ class Slot:
 #     - dept_names.py   = 部門名の日本語化の正本(Chamiの画面に出る文字列)
 #     ★どちらも**コード**なので C-042①の (B)都度読み は採れない=(A)監視対象に入れる。
 #     ★載せ忘れの再発は `test_daemon_keeper.py` の「import と WATCH_FILES の突合」で機械が数える。
+#   ★2026-08-13 追加(C-042)= scripts/llm/prompt_spill.py。dept_daemon と session_relay が
+#     import する新規モジュール(長すぎるpromptをargvから逃がす止血)。**起動時に1回解決される
+#     コード**なので都度読みは採れない=(A)監視対象に入れる。
 WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "llm", "session_relay.py"),
+               os.path.join(ROOT, "scripts", "llm", "prompt_spill.py"),
                os.path.join(ROOT, "scripts", "llm", "session_rooms.py"),
                os.path.join(ROOT, "scripts", "llm", "tone_gate.py"),
                os.path.join(ROOT, "scripts", "llm", "naming_gate.py"),
