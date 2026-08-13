@@ -142,6 +142,7 @@
   let fontReady = false;
   let lastBlob = null, lastName = "video.mp4";
   let _making = false; // 作成中の再入防止。★見た目のdisabledに依存しない=押されたボタンだけを busy 表示できる
+  let _makingAt = 0;   // 作成開始時刻(performance.now)。異常終了で _making が立ったまま固着した時に奪い返す判定に使う
 
   // ---- フォント読み込み(Canvas描画前に必須) ----
   function ensureFont() {
@@ -644,8 +645,20 @@
     //   ボタンが押されたような挙動になる」)。従来は isDraft でも常に els.makeBtn(＝今すぐ作成・投稿)を disabled に
     //   していたため、ドラフトを押しても隣の「今すぐ作成・投稿」が灰色化＝押された見た目になっていた。
     //   再入防止は _making フラグで持ち、ボタンの disabled 表示と切り離す(ドラフト中に makeBtn を触っても _making で弾く)。
-    if (_making) return;
-    _making = true;
+    // ★再入は弾くが「黙って」弾かない=最悪の事故は沈黙(§3 可用性は喋る側へ倒す)。前回の作成が異常終了して
+    //   _making が立ったまま(MediaRecorderのonstop不達など)固着すると、以後「ドラフトで作成」を押しても
+    //   ここで無言 return され、動画も出ず遷移もしない=「動画が生成されない/遷移しない」に化ける
+    //   (Chami報告2026-08-13・月詠みで再現)。①busyなら理由を必ず画面に出す ②20秒(録画5秒+書出の数倍)を
+    //   超えて立ったままなら stale とみなし奪い返す=固着で永久に無反応にならないようにする。
+    if (_making) {
+      if (!_makingAt || (performance.now() - _makingAt) < 20000) {
+        setStatus(isDraft ? "前の作成がまだ終わっていません。数秒待ってから、もう一度「ドラフトで作成」を押してください。"
+                          : "前の作成がまだ終わっていません。数秒お待ちください。");
+        return;
+      }
+      try { if (window.console && console.warn) console.warn("[go5] _making が20秒以上固着=stale。作成を奪い返す"); } catch (e) {}
+    }
+    _making = true; _makingAt = performance.now();
     var activeBtn = isDraft ? document.getElementById("draftMakeBtn") : els.makeBtn;
     var activeLabel = activeBtn ? activeBtn.textContent : "";
     if (activeBtn) { activeBtn.disabled = true; activeBtn.textContent = isDraft ? "📦 作成中…" : "作成中…"; }

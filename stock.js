@@ -1530,10 +1530,18 @@
         try { location.href = 'Stock.html'; }
         catch (e2) { var tb = $('tabStock'); if (tb) tb.click(); else render(); }
       };
-      saveStock_(detail).then(goDraft_).catch(function (err) {
-        alert('ドラフト保存に失敗しました: ' + (err ? err.message || String(err) : '不明なエラー'));
-        goDraft_(); // メタは saveStock_ 内で先に保存済み=一覧には出るので、blob 保存が転んでも遷移はする
-      });
+      // ★saveStock_ が「同期例外」を投げた場合、.then/.catch のどちらにも乗らず遷移が黙って消える
+      //   (=動画は録れているのにドラフトタブへ移らない・Chami報告2026-08-13 月詠み)。try で囲い、
+      //   同期例外でも必ず goDraft_ へ抜ける=生成後の自動遷移をどんな失敗でも止めない(§3 沈黙が最悪)。
+      try {
+        saveStock_(detail).then(goDraft_).catch(function (err) {
+          alert('ドラフト保存に失敗しました: ' + (err ? err.message || String(err) : '不明なエラー'));
+          goDraft_(); // メタは saveStock_ 内で先に保存済み=一覧には出るので、blob 保存が転んでも遷移はする
+        });
+      } catch (err2) {
+        try { if (window.console && console.warn) console.warn('[stock] saveStock_ 同期例外・遷移は続行:', err2 && (err2.message || err2)); } catch (_) {}
+        goDraft_();
+      }
     });
 
     var tabStockBtn = $('tabStock');
