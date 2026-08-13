@@ -94,11 +94,12 @@
   }
   // 全角英字→半角(ＡＩ→AI)。FANZAのタグ表記ゆれで /AI/ が素通りするのを防ぐ。
   function toHalfWidth_(s) { return String(s == null ? '' : s).replace(/[Ａ-Ｚａ-ｚ]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }); }
-  // AI作品の判定。★同人AIは genre タグにも floor 名にも「AI」が載らない作品がある(実測 d_748630=
-  //   ジャンルは巨乳/制服等・floor は「同人」)。そのため worker がページのFANZA必須開示文「AI生成」から
-  //   立てた明示フラグ it.ai を最優先で見る。フラグが無い作品は従来どおり genre/floor を /AI/ 走査
-  //   (全角ＡＩも半角化して拾う)でベストエフォート判定する。
+  // AI作品の判定。★判定式は core/movie-attrs-core.js(Go5MovieAttrsCore.aiHint)が唯一の正本＝候補バッジも
+  //   動画作成タブのAIチェックも同一規則で判定し、「バッジはAI・でもチェックは入らない」の食い違いを封じる。
+  //   同人AIは genre/floor に「AI」が載らない作品があるため worker明示フラグ ai を最優先で見る。
+  //   フラグが無ければ genre/floor を /AI/ 走査(全角ＡＩも半角化)でベストエフォート判定(core内で同処理)。
   function isAiWork_(genres, floor, ai) {
+    if (window.Go5MovieAttrsCore) return window.Go5MovieAttrsCore.aiHint({ genres: genres, floor: floor, ai: ai });
     if (ai) return true;
     return (genres || []).concat(floor ? [String(floor)] : []).some(function (g) { return /AI/i.test(toHalfWidth_(g)); });
   }

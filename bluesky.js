@@ -180,30 +180,32 @@
   // ---- カテゴリ自動チェック(FANZAジャンル名/フロア名→該当カテゴリ) ----
   // 作品が決まったら(候補から/作品URL入力/ウィザード)、取得済みジャンル名で該当カテゴリへ自動チェック。
   // 全カテゴリを一旦外してから該当だけON＝前回のチェックを引き継がない。
-  //   キーワードと部分一致判定は Go5Cats.matchText に集約(「姉」→「姉・妹」も拾う部分一致・Chami依頼2026-08-02③)。
-  function setMovieAttrsFromTexts_(texts, aiHint) {
-    var hits = (window.Go5Cats && window.Go5Cats.matchText(texts)) || {};
-    // AIの緩い救済：AIは正式には floor名(コミック・AI 等)でしか判別できないが、候補は floor を持たず
-    //   ジャンルしか無いことがある(＝候補から作成へ飛んだ瞬間はフロア未取得)。呼び出し側が候補バッジ
-    //   isAiWork_ と同じ /AI/ 規則でジャンルからAIと判定したら、フロア未取得でもAIカテゴリへチェックを
-    //   入れる(Chami依頼2026-08-12「候補から作成に飛んだ時、AIのカテゴリも判定に入るように」)。
-    //   ★title は英単語の"ai"(rainy/maid等)誤検出を避けるため呼び出し側でも判定対象にしない。
-    if (aiHint && window.Go5Cats && window.Go5Cats.byKey('ai')) hits.ai = true;
+  //   ★判定式(matchText＋AI救済)は core/movie-attrs-core.js(Go5MovieAttrsCore.resolve)が唯一の正本。
+  //   候補→作成(applyGenres)も 作品URLフェッチ(autoApplyAttrsFromInfo_)も 候補バッジ(candidates.js)も
+  //   必ずこの resolve を通す=2経路が判定式を各自持って食い違い、片方でAIチェックが空振りする再発を封じる
+  //   (kaizen実依頼 2026-08-13・Chami Go / tests/test_categories_ai.js が本物の resolve を直接検証する)。
+  //   フォールバック: 万一 core 未ロードでも matchText だけは通す(AI救済のみ欠ける)。
+  function resolveAttrs_(input) {
+    if (window.Go5MovieAttrsCore) return window.Go5MovieAttrsCore.resolve(input, window.Go5Cats);
+    var texts = (input.genres || []).concat(input.title ? [input.title] : []).concat(input.floor ? [input.floor] : []).concat(input.service ? [input.service] : []);
+    return (window.Go5Cats && window.Go5Cats.matchText(texts)) || {};
+  }
+  // 判定結果をチェックボックスへ反映する唯一の適用口。候補→作成 も URLフェッチ も必ずここへ集約する。
+  function applyAttrsInput_(input) {
+    var hits = resolveAttrs_(input || {});
     movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = !!hits[c.key]; });
   }
-  // ジャンル配列に緩く「AI」を含むか(候補バッジ isAiWork_ と同一規則)。floorは正本キーワードが拾うので対象外。
-  function looseAiFromGenres_(genres) { return (genres || []).some(function (g) { return /AI/i.test(String(g || '')); }); }
   // 同じ作品(cid)には1回だけ自動適用＝再描画・キャッシュヒットのたびに手動調整を上書きしない。(割引自動反映と同じ設計)
   // リロードを跨いでも尊重できるよう localStorage に記録する。
   //   ★AIはタグ(genre)に載らず「コミック・AI」等フロア名で示されるため、floor/service も判定に混ぜる(Chami依頼2026-08-02②)。
+  //   ★info.ai=workerがページのFANZA開示文から立てた明示フラグ(同人AIは genre/floor に「AI」が載らない)。
+  //   これも resolve が最優先で見る=applyGenres で一旦入れたAIチェックをこの正式適用が外してしまう穴を封じる。
   function autoApplyAttrsFromInfo_(info, cidHint) {
     if (!info) return;
     var cid = String(info.cid || cidHint || ''); if (!cid) return;
     if (load('movie_auto_attrs_cid') === cid) return;
     save('movie_auto_attrs_cid', cid);
-    //   ★info.ai=workerがページのFANZA開示文から立てた明示フラグ(同人AIは genre/floor に「AI」が載らない)。
-    //   これを最優先に混ぜないと、applyGenres で一旦入れたAIチェックをこの正式適用が外してしまう(#5再発の穴)。
-    setMovieAttrsFromTexts_((info.genres || []).concat([info.floor, info.service, info.title]), !!info.ai || looseAiFromGenres_(info.genres));
+    applyAttrsInput_({ genres: info.genres || [], floor: info.floor, service: info.service, title: info.title, ai: info.ai });
   }
   // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=候補の持つジャンルでの即時チェック。
   //   ★applyGenres は「暫定チェック」に徹し、cidガード(movie_auto_attrs_cid)は張らない。
@@ -223,8 +225,7 @@
     //   (実測 d_748630=ジャンルは巨乳/制服…、floorは「同人」)、workerがページのFANZA必須開示文から立てた
     //   it.ai を最優先で見ないとAIカテゴリが永久に空振りする(Chami報告2026-08-12「カテゴリのAIにチェック入らない」)。
     applyGenres: function (genres, cid, title, floor, service, ai) {
-      var texts = (genres || []).concat(title ? [title] : []).concat(floor ? [floor] : []).concat(service ? [service] : []);
-      setMovieAttrsFromTexts_(texts, !!ai || looseAiFromGenres_(genres) || /AI/i.test(String(floor || '')));
+      applyAttrsInput_({ genres: genres || [], title: title, floor: floor, service: service, ai: ai });
     }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
