@@ -61,12 +61,34 @@
     return hits;
   }
 
+  // 発売日 → 作品状態(新作=30日以内 / 準新作=90日以内 / 旧作)。唯一の正本。
+  //   ★源を1本化(2026-08-13・C-038・Chami報告「新作判定が漏れる」)。以前 bluesky.js / candidates.js /
+  //   yt-clicks.js に別実装があり、新作チェック(discountNew2)を実際に立てる bluesky.js版だけ日付パースが
+  //     new Date(String(dateStr).replace(/\//g,'-'))  ← スラッシュ→ハイフンのみ・スペース区切りはそのまま
+  //   だった。FANZA/DMM API の date は "YYYY-MM-DD HH:mm:ss"(スペース区切り・T無し)で来る=この非ISO形式は
+  //   iOS Safari(WebKit)が Invalid Date にし(V8は寛容で気づけない)、isNaN→'' で新作でもチェックが立たず
+  //   本文に「の新作」が入らなかった。candidates.js/yt-clicks.js は .replace(' ','T') で正規化済みだったが
+  //   起点の bluesky.js だけ抜けていた。3経路をこの1本へ集約して食い違いを封じる(AIカテゴリと同型の恒久対策)。
+  //   nowMs は試験用(省略時は現在時刻)。
+  function deriveWorkState(dateStr, nowMs) {
+    if (!dateStr) return '';
+    var s = String(dateStr);
+    var t = Date.parse(s.replace(' ', 'T'));         // "YYYY-MM-DD HH:mm:ss" を ISO(T区切り)へ正規化
+    if (isNaN(t)) t = new Date(s.replace(/\//g, '-')).getTime(); // 保険:スラッシュ表記("YYYY/MM/DD")
+    if (isNaN(t)) return '';
+    var days = ((nowMs == null ? Date.now() : nowMs) - t) / 86400000;
+    if (days <= 30) return '新作';
+    if (days <= 90) return '準新作';
+    return '旧作';
+  }
+
   var API = {
     toHalfWidth: toHalfWidth,
     looseAiFromGenres: looseAiFromGenres,
     aiHint: aiHint,
     composeTexts: composeTexts,
-    resolve: resolve
+    resolve: resolve,
+    deriveWorkState: deriveWorkState
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   if (root) root.Go5MovieAttrsCore = API;

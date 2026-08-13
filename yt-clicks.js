@@ -3733,8 +3733,9 @@
       else { el.textContent = ''; el.style.display = 'none'; }
     });
   }
-  // 発売日(YYYY-MM-DD…)→現在の作品状態。新作=30日以内 / 準新作=90日以内 / それ以降=旧作。取得不可は''。
+  // 発売日(YYYY-MM-DD…)→現在の作品状態。判定は core/movie-attrs-core.js に一本化(2026-08-13・C-038)。core未ロード時は同ロジックで代替。
   function deriveWorkState_(dateStr) {
+    if (window.Go5MovieAttrsCore && window.Go5MovieAttrsCore.deriveWorkState) return window.Go5MovieAttrsCore.deriveWorkState(dateStr);
     if (!dateStr) return '';
     var t = Date.parse(String(dateStr).replace(' ', 'T'));
     if (isNaN(t)) return '';

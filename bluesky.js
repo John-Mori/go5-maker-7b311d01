@@ -119,10 +119,14 @@
     if (shin) { shin.checked = (ws === '新作'); try { shin.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
     renderPreview();
   }
-  // 発売日→作品状態(新作=30日以内/準新作=90日以内/旧作)。candidates.js / yt-clicks.js の deriveWorkState_ と同ロジック。
+  // 発売日→作品状態(新作=30日以内/準新作=90日以内/旧作)。判定は core/movie-attrs-core.js に一本化(2026-08-13・C-038)。
+  //   ★以前この版だけ日付パースが new Date(str.replace('/','-')) で、FANZA APIの "YYYY-MM-DD HH:mm:ss"
+  //   (スペース区切り・T無し)を iOS Safari が Invalid Date にし、新作でも discountNew2 が立たなかった。
+  //   core が未ロードの時のフォールバックも candidates.js/yt-clicks.js と同じ正しいパース(.replace(' ','T'))に揃える。
   function deriveWorkState_(dateStr) {
+    if (window.Go5MovieAttrsCore && window.Go5MovieAttrsCore.deriveWorkState) return window.Go5MovieAttrsCore.deriveWorkState(dateStr);
     if (!dateStr) return '';
-    var t = new Date(String(dateStr).replace(/\//g, '-')).getTime();
+    var t = Date.parse(String(dateStr).replace(' ', 'T'));
     if (isNaN(t)) return '';
     var days = (new Date().getTime() - t) / 86400000;
     if (days <= 30) return '新作';
@@ -137,9 +141,11 @@
     if (!info || !info.title) return;
     var cid = String(info.cid || cidHint || info.title || ''); if (!cid) return;
     if (load('movie_auto_ws_cid') === cid) return;
-    save('movie_auto_ws_cid', cid);
     var ws = deriveWorkState_(info.releaseDate || info.date || '');
-    if (ws) applyWorkStateToUi_(ws);
+    // ★ws が空(発売日が未取得/パース不能)の間はガードを立てない=作品情報が後から揃ったら再判定できる。
+    //   先にガードを立てると、Invalid Date の一度きりで cid がロックされ、発売日が揃っても二度と新作を
+    //   拾えなくなる(Chami報告2026-08-13「新作判定が漏れる」の副次要因)。ws が確定した時だけ1回で固定する。
+    if (ws) { save('movie_auto_ws_cid', cid); applyWorkStateToUi_(ws); }
     // 総集編(FANZAのジャンル/フロア名に「総集編」)なら本文の割引行へも反映。新作と両立で「オフの新作&総集編」になる。
     //   (Chami依頼2026-08-05「総集編にチェックが入ってるときは総集編の記載も 新作&総集編みたいに」)
     //   カテゴリの hidden 設定に依らず拾えるよう、割引文の総集編ラベルと同じ語「総集編」で直接判定する。
@@ -858,17 +864,22 @@
     var entry = discCurrentEntry_(); if (!entry) return '';
     return discCacheGet_(discCacheKeyFor_(entry, af));
   }
-  function ensureDiscountLink_(onReady) {
+  function ensureDiscountLink_(onReady, _try) {
     var af = curAfId_(); if (!af) return;
     var entry = discCurrentEntry_(); if (!entry) return;
     var cached = cachedDiscountLink_();
     if (cached) { if (onReady) onReady(cached); return; }
+    _try = _try || 1;
     // 依頼2の自動解決(af_id欠落/未短縮のどちらも自動補完・既に短縮済みならそのまま)を利用。
+    // ★短縮発番(link-worker)が一度失敗すると、以前は無言returnで onReady が呼ばれず go5-disc-url-changed も
+    //   発火せず、投稿モードの「(セール紹介短縮用URL)」プレースホルダが永久に埋まらなかった(Chami報告2026-08-13②)。
+    //   一過性の失敗を数回リトライ(指数バックオフ)して自己回復する。3回で諦める(構成起因なら回数を積んでも無駄)。
+    var retry_ = function () { if (_try < 3) setTimeout(function () { ensureDiscountLink_(onReady, _try + 1); }, _try * 1500); };
     resolvePromoUrl(entry.url).then(function (r) {
-      if (!r || !r.ok) return;
+      if (!r || !r.ok) { retry_(); return; }
       discCacheSet_(discCacheKeyFor_(entry, af), r.link);
       if (onReady) onReady(r.link);
-    });
+    }, retry_);
   }
   function recomposePcText_() { if (els.pcText) els.pcText.value = composePostText(); }
 

@@ -201,12 +201,21 @@
   var VIDNAME = function (id) { return 'go5vid:' + id; };
   var _vidUp = {}; // このセッションでアップ済みID(再PUT抑止・ローカルのみ)
   var _vidMirrorBusy = {}; // 保存直後と定期sweepが重なって同じ動画を二重PUTしない
-  function ensureVideoMirror_(id) {
-    var store = idb(); if (!store) return Promise.resolve();
+  function ensureVideoMirror_(id, blobHint) {
+    var store = idb();
     if (_vidUp[id]) return Promise.resolve();
     if (_vidMirrorBusy[id]) return _vidMirrorBusy[id];
     if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return Promise.resolve();
-    var job = store.get('stock_v_' + id).then(function (blob) {
+    // ★作成直後は blobHint(メモリ上の動画)を直接R2へ上げる=手元IDB書き込み(stock_v_)の成否からミラーを切り離す。
+    //   iOS Safari は idb-timeout 等で set が無言失敗しうる(idb-store.js:119 は set を意図的に reject)。その時
+    //   IDBを読み直しても実体が無く、R2にもローカルにも動画が一切残らず「動画DL」が永久に落ちていた
+    //   (Chami報告2026-08-13①「ドラフトで作成も動画DLできず」。v=757/758 は読み出し側のfail-openだけで、
+    //   "書き込みが一度も成功していない=読む対象が存在しない" ケースは未対応だった)。blobHint 経由なら
+    //   ローカル保存が死んでもR2に控えが残り、resolveVideoBlob_ が雲から取り寄せてDLできる(fail-open)。
+    //   sweep(後追い)からは blobHint 無し=従来どおりIDBを読んで上げる。
+    var pick = blobHint ? Promise.resolve(blobHint)
+                        : (store ? store.get('stock_v_' + id) : Promise.resolve(null));
+    var job = Promise.resolve(pick).then(function (blob) {
       if (!blob) return; // 実体が無い端末=上げない(取り寄せる側)
       return Go5Sync.putBlobR2At(VIDNAME(id), blob).then(function (key) {
         if (key) _vidUp[id] = 1; // 成功=このセッションでは再送しない。失敗時は次のsweepでまた試す(非破壊)
@@ -376,7 +385,7 @@
         try { if (window.console && console.warn) console.warn('[stock] draft blob save failed (meta kept in list):', e && (e.message || e)); } catch (_) {}
       }).then(function () {
         ensureBlobMirror_(id); // ①-B サムネ/プレビュー/元画像を雲へ(2台目でも出す)
-        ensureVideoMirror_(id); // ② 動画本体もR2へ(2台目でDLできるように)
+        ensureVideoMirror_(id, evDetail.blob); // ② 動画本体もR2へ=メモリのblobを直接渡す(ローカル保存が死んでもDL可能に)
         return id;
       });
     });
@@ -1118,12 +1127,22 @@
       }
     }
     if (_shortMintCache[aff]) { applyShare_(_shortMintCache[aff]); return; }
-    try {
-      window.Go5MakeShort(aff).then(function (r) {
-        var share = (r && (r.shareUrl || r.shortUrl)) || '';
-        if (share) { _shortMintCache[aff] = share; applyShare_(share); }
-      }).catch(function () {});
-    } catch (e) {}
+    // ★短縮発番(link-worker=Go5MakeShort)が一度失敗すると、以前は無言catchで諦め「(商品紹介短縮URL)」が
+    //   埋まらないまま固まった(Chami報告2026-08-13②)。一過性の失敗を数回リトライ(指数バックオフ)して自己回復する。
+    //   別作品へ切り替わったら止める。3回で諦める。
+    var tries = 0;
+    (function attempt_() {
+      if (_modalMeta !== meta) return;
+      tries++;
+      var retry_ = function () { if (tries < 3 && _modalMeta === meta) setTimeout(attempt_, tries * 1500); };
+      try {
+        window.Go5MakeShort(aff).then(function (r) {
+          var share = (r && (r.shareUrl || r.shortUrl)) || '';
+          if (share) { _shortMintCache[aff] = share; applyShare_(share); return; }
+          retry_();
+        }).catch(retry_);
+      } catch (e) {}
+    })();
   }
 
   function openPostModal_(meta) {
