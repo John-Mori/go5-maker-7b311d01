@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate } = require('../bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate } = require('../js/bluesky-core.js');
 
 let passed = 0;
 let failed = 0;

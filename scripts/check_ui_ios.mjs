@@ -24,16 +24,23 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RECIPE = '安全レシピ= 入力は flex:1;min-width:0 / ボタンは flex:0 0 auto / basis に%を使わない';
-const JS_FILES = ['stock.js', 'app.js', 'affiliate.js', 'bluesky.js', 'candidates.js', 'scheduler.js', 'integration.js'];
+// ★2026-08-14 直下の .js を js/ へ集約した(整理フェーズ3)。ここのパスも一緒に動かす。
+const JS_FILES = ['js/stock.js', 'js/app.js', 'js/affiliate.js', 'js/bluesky.js', 'js/candidates.js', 'js/scheduler.js', 'js/integration.js'];
 
 const findings = [];
 const add = (file, line, rule, msg) => findings.push({ file, line, rule, msg });
 
 function lineOf(text, index) { return text.slice(0, index).split('\n').length; }
 
+// ★2026-08-14 追加(イージス研究室)。以前はここが `catch { continue; }` で、
+//   ファイルが見つからないと**黙って飛ばして「指摘0=緑」**を返していた。
+//   つまり .js を移動した日、この検査は何も見ていないのに合格を出す=静かに壊れる。
+//   → 読めなかった数を数えて、1本でもあれば落とす(検査が仕事をしていないことを可視化する)。
+const missing = [];
+
 for (const f of JS_FILES) {
   let src;
-  try { src = readFileSync(join(ROOT, f), 'utf8'); } catch { continue; }
+  try { src = readFileSync(join(ROOT, f), 'utf8'); } catch { missing.push(f); continue; }
 
   // R1: <input>/<textarea> タグ(> まで・改行跨ぎ可)を取り、inline style に flex: があって min-width:0 が無いもの。
   const tagRe = /<(input|textarea)\b[^>]*?>/gis;
@@ -83,6 +90,11 @@ try {
   }
 } catch { /* style.css 無しは無視 */ }
 
+if (missing.length) {
+  console.error('✗ 検査対象が読めなかった ' + missing.length + ' 本: ' + missing.join(', '));
+  console.error('  → ファイルを移動したなら、この JS_FILES のパスも一緒に直すこと(黙って飛ばすと「指摘0=緑」になる)。');
+  process.exit(2);
+}
 if (findings.length) {
   console.error('✗ iOS Safari レイアウト検査で ' + findings.length + ' 件:');
   for (const x of findings) console.error(`  [${x.rule}] ${x.file}:${x.line}  ${x.msg}`);

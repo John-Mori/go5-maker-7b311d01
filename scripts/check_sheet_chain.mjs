@@ -32,9 +32,9 @@ import { dirname, join } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const require = createRequire(import.meta.url);
-const HM = require(join(root, 'hist-merge-core.js'));
+const HM = require(join(root, 'js', 'hist-merge-core.js'));
 const gas = readFileSync(join(root, 'gas', 'コード.gs'), 'utf8');
-const yt = readFileSync(join(root, 'yt-clicks.js'), 'utf8');
+const yt = readFileSync(join(root, 'js', 'yt-clicks.js'), 'utf8');
 
 // シート由来行で「保存したらリロード後も残る」ことを保証する編集項目。
 //   col     = GAS のシート列名(ヘッダ配列・putIf・historyItems_ の map キー)

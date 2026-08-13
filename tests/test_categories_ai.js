@@ -58,7 +58,7 @@ check('2経路一致(明示フラグ 同人AI)', jump(dojinAi.genres, dojinAi.ti
 // ── 3) 配線ガード(bluesky.js の両経路が本物の core を通っているか) ─────────────────
 //   判定式のインライン再実装が再び忍び込むのを防ぐ。両関数が applyAttrsInput_(=resolve集約)を通ること、
 //   かつ古い分岐(setMovieAttrsFromTexts_ の直呼び)が残っていないことを固定する。
-var bsky = fs.readFileSync(path.join(__dirname, '..', 'bluesky.js'), 'utf8');
+var bsky = fs.readFileSync(path.join(__dirname, '..', 'js', 'bluesky.js'), 'utf8');
 check('bluesky.js が Go5MovieAttrsCore を参照', bsky.indexOf('Go5MovieAttrsCore') >= 0);
 check('applyGenres が applyAttrsInput_ を通る', /applyGenres:\s*function[\s\S]{0,220}applyAttrsInput_\(/.test(bsky));
 check('autoApplyAttrsFromInfo_ が applyAttrsInput_ を通る', /function autoApplyAttrsFromInfo_[\s\S]{0,400}applyAttrsInput_\(/.test(bsky));

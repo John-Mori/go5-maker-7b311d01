@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { parseFanzaItem } = require('../fanza-core.js');
+const { parseFanzaItem } = require('../js/fanza-core.js');
 
 let passed = 0;
 let failed = 0;

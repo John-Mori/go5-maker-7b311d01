@@ -1,6 +1,6 @@
 // tests/test_rank_core.js — Go5RankCore.mergeByVid の field-level 統合を検証(Codex監査 §8 T1/T2/T11)。
 // 実行: node tests/test_rank_core.js
-var RC = require('../rank-core.js');
+var RC = require('../js/rank-core.js');
 var fail = 0;
 function ok(cond, msg) { if (!cond) { console.error('  ✗ ' + msg); fail++; } else { console.log('  ✓ ' + msg); } }
 

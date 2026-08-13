@@ -12,8 +12,8 @@
 'use strict';
 
 const assert = require('assert');
-const { isShortenedUrl, hasRealAffiliateId, classifyPromoUrl, ensureAffiliateLink } = require('../affiliate-core.js');
-const { buildDiscountCacheKey } = require('../bluesky-core.js');
+const { isShortenedUrl, hasRealAffiliateId, classifyPromoUrl, ensureAffiliateLink } = require('../js/affiliate-core.js');
+const { buildDiscountCacheKey } = require('../js/bluesky-core.js');
 
 let passed = 0;
 let failed = 0;

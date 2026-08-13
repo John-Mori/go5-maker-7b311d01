@@ -23,7 +23,7 @@ const kv = new MemoryKv();
 const env = { FANZA_KV: kv, USE_D1: "off", SHARED_SECRET: "public-test", ADMIN_SECRET: "admin-test", ALLOWED_ORIGIN: origin };
 
 // candidates.js内の実関数を直接評価し、FANZA作品へSNS URLを併記した通常候補を対象外にしないことを固定する。
-const candidateSource = fs.readFileSync(new URL("../candidates.js", import.meta.url), "utf8");
+const candidateSource = fs.readFileSync(new URL("../js/candidates.js", import.meta.url), "utf8");
 const helperStart = candidateSource.indexOf("  function isInfoTarget_");
 const helperEnd = candidateSource.indexOf("  function salesTargetCids_", helperStart);
 assert.ok(helperStart >= 0 && helperEnd > helperStart, "candidate target helpers should exist");

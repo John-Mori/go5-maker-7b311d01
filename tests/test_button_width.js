@@ -42,7 +42,7 @@ function hasGrowingFlex(style) {
   return false;
 }
 
-const stockPath = path.join(__dirname, '..', 'stock.js');
+const stockPath = path.join(__dirname, '..', 'js', 'stock.js');
 const src = fs.readFileSync(stockPath, 'utf8');
 const btnBase = extractArchBtnBase(src);
 

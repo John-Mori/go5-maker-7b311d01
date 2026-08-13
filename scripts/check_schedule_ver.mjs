@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STAMP = join(ROOT, 'schedule', '.verstamp.json');
 const SCH_INDEX = join(ROOT, 'schedule', 'index.html');
-const AFFILIATE = join(ROOT, 'affiliate.js');
+const AFFILIATE = join(ROOT, 'js', 'affiliate.js');
 
 // ★改行コードを正規化してからハッシュする。verstamp を Windows(CRLF)で焼くと、
 //   Linux の CI(LF)は同じ中身でも別ハッシュになり「中身が変わった」と毎回誤検知していた

@@ -5,7 +5,7 @@
  */
 'use strict';
 const assert = require('assert');
-const { makeVideoId, youtubeId, youtubeWatchUrl, rand4, accOfId, isTestId } = require('../idgen.js');
+const { makeVideoId, youtubeId, youtubeWatchUrl, rand4, accOfId, isTestId } = require('../js/idgen.js');
 
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); console.log('PASS: ' + name); passed++; } catch (e) { console.log('FAIL: ' + name); console.log('      ' + e.message); failed++; } }

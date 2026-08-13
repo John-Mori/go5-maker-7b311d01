@@ -7,7 +7,7 @@ const vm = require('node:vm');
 global.window = { Go5Util: {} };
 global.localStorage = { getItem() { return null; }, setItem() {} };
 global.document = { readyState: 'loading', addEventListener() {}, getElementById() { return null; } };
-const { analysisHtml } = require('../competitor.js');
+const { analysisHtml } = require('../js/competitor.js');
 const titles = Array.from({ length: 25 }, (_, i) => ({
   videoId: 'vid' + String(i).padStart(8, '0'),
   channelName: i === 24 ? '<script>危険</script>' : 'チャンネル' + i,

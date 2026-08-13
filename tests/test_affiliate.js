@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl } = require('../affiliate-core.js');
+const { buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl } = require('../js/affiliate-core.js');
 
 let passed = 0;
 let failed = 0;

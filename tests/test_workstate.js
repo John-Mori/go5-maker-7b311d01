@@ -40,7 +40,8 @@ check('パース不能 → ""', ws('のちほど') === '');
 // ── 2) 配線ガード(bluesky.js/candidates.js/yt-clicks.js が本物の core を通すか) ──────────
 //   3ファイルの deriveWorkState_ に別パース実装が再び忍び込むのを防ぐ。core 委譲行が在ることを固定する。
 function guard(file) {
-  var src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  // ★2026-08-14 直下の .js を js/ へ集約した(整理フェーズ3)。読めなければ落とす=黙って飛ばさない。
+  var src = fs.readFileSync(path.join(__dirname, '..', 'js', file), 'utf8');
   check(file + ' が Go5MovieAttrsCore.deriveWorkState へ委譲', src.indexOf('Go5MovieAttrsCore.deriveWorkState') >= 0);
   // 起点(bluesky.js)に旧バグの素の new Date(...replace('/','-')) が残っていないこと。
   check(file + ' に旧パース new Date(replace(/\\//)) が無い', !/new Date\(String\(dateStr\)\.replace\(\/\\\/\/g/.test(src));

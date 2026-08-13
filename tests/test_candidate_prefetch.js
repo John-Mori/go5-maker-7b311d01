@@ -1,7 +1,7 @@
 'use strict';
 
 var assert = require('assert');
-var mod = require('../candidates.js');
+var mod = require('../js/candidates.js');
 var usable = mod.usableCandidatePrefetch_;
 var modalIsOpen = mod.modalIsOpen_;
 

@@ -4,7 +4,7 @@
  */
 'use strict';
 const assert = require('assert');
-const VC = require('../verify-core.js');
+const VC = require('../js/verify-core.js');
 
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); console.log('PASS: ' + name); passed++; } catch (e) { console.log('FAIL: ' + name); console.log('      ' + e.message); failed++; } }

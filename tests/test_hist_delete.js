@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const yt = fs.readFileSync(path.join(root, 'yt-clicks.js'), 'utf8');
+const yt = fs.readFileSync(path.join(root, 'js', 'yt-clicks.js'), 'utf8');
 const gas = fs.readFileSync(path.join(root, 'gas', 'コード.gs'), 'utf8');
 
 let passed = 0;

@@ -12,7 +12,7 @@
  */
 'use strict';
 var assert = require('assert');
-var mod = require('../candidates.js');
+var mod = require('../js/candidates.js');
 var buildPostedIndex_ = mod.buildPostedIndex_;
 
 // このテストでは workUrl/w を「そのまま cid」とみなす恒等関数で再計算を代用する(実装は buildAffiliateLink 依存で別途検証済)。

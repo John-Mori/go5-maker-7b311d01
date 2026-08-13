@@ -4,7 +4,7 @@
  */
 'use strict';
 const assert = require('assert');
-const HM = require('../hist-merge-core.js');
+const HM = require('../js/hist-merge-core.js');
 
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); console.log('PASS: ' + name); passed++; } catch (e) { console.log('FAIL: ' + name); console.log('      ' + e.message); failed++; } }

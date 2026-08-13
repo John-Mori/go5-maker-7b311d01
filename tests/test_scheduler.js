@@ -5,7 +5,7 @@
  */
 'use strict';
 const assert = require('assert');
-const { dueItems } = require('../scheduler.js');
+const { dueItems } = require('../js/scheduler.js');
 
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); console.log('PASS: ' + name); passed++; } catch (e) { console.log('FAIL: ' + name); console.log('      ' + e.message); failed++; } }
