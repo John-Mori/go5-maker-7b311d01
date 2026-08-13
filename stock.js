@@ -934,107 +934,30 @@
     next_();
   }
 
-  // ── 未作成プレビューの一括復元(Chami依頼2026-08-13「プレビュー画像が作られてないものがあるから参照して
-  //   自動で作成するようなプログラムとボタンを作ってほしい」)。★動画さえ手元(またはR2控え)にあれば
-  //   videoFirstFramePreview_ で同じ絵を後から復元できる。ボタン1発・冪等・直列処理(iOSのメモリ圧回避)。
-  var _genMissingState = { busy: false, i: 0, total: 0 };
-  function genMissingLabel_() {
-    return _genMissingState.busy
-      ? ('⏳ 作成中…(' + _genMissingState.i + '/' + _genMissingState.total + ')')
-      : '未作成のプレビュー画像を作る';
-  }
-  // ローカル(IDBの stock_prev_ と 使用画像1ページ目の先頭)にプレビューが在るか+既存blob を返す。
-  //   欠けている側だけ後で埋める(冪等)。既存blobが在れば動画をデコードし直さず再利用できる。
-  function checkLocalPreview_(m) {
+  // ── 投稿履歴からの過去分プレビュー生成に使う公開API(Chami依頼2026-08-13「投稿履歴の🔁ボタンに統合」)。
+  //   videoId(投稿履歴のキー)→ 対応するドラフト/作成履歴の stock id を引き、動画(手元 or R2の控え)の
+  //   先頭フレームで仕上がりプレビューを起こして dataURL を返す。呼び出し側(yt-clicks.js)が投稿履歴の
+  //   使用画像1ページ目へ挿入する。動画の在りかを引けない(この端末に stock 記録が無い)/動画が手元にも
+  //   雲にも無い時は null(=この端末では生成不可)。生成できたら端末内 stock_prev_ にも控える(次回は速い)。
+  function previewForVideoId_(videoId) {
+    if (!videoId) return Promise.resolve(null);
+    var all = loadMeta().concat(loadArchive());
+    var m = null;
+    for (var i = 0; i < all.length; i++) { if (all[i] && all[i].videoId === videoId) { m = all[i]; break; } }
+    if (!m) return Promise.resolve(null); // この端末に stock 記録が無い=動画の在りかを引けない
     var store = idb();
-    var p1 = store ? store.get('stock_prev_' + m.id).catch(function () { return null; }) : Promise.resolve(null);
-    var p2 = usedImagesRead_(m.videoId);
-    return Promise.all([p1, p2]).then(function (r) {
-      return { prevBlob: r[0] || null, hasIdb: !!r[0], hasUsed: !!(r[1] && (r[1].prev | 0) > 0) };
-    });
-  }
-  // Driveに「[題名]_プレビュー.*」が既に在るか。fetchPreview は題名でフォルダを探す(folderId不要)ので、
-  //   別端末で作った過去分でも「Driveに在るか」は判定できる(=Chamiの画面「Driveにプレビューが無い」を拾える)。
-  //   ★判定不能(未設定/失敗)は 'has' に倒す=確信が持てない時に二重アップロードを避ける安全側
-  //   (Driveは同名を _2 として重複作成してしまうため。§18の非破壊仕様)。
-  function driveState_(m) {
-    if (!(window.Go5Drive && window.Go5Drive.fetchPreview)) return Promise.resolve('has');
-    if (m.account !== 'acc1' && m.account !== 'acc2') return Promise.resolve('has');
-    return window.Go5Drive.fetchPreview(m.account, m.title || '')
-      .then(function (du) { return du ? 'has' : 'missing'; })
-      .catch(function () { return 'has'; });
-  }
-  // 復元したプレビューをローカル2箇所へ保存(IDB stock_prev_ / 使用画像1ページ目)。Drive追記は呼び出し側で
-  //   「Driveに無い かつ この端末に folderId 記録が有る」時だけ行う(重複作成・別端末分の誤爆を防ぐ)。
-  function saveLocalPreview_(m, prevBlob) {
-    var store = idb();
-    var idbP = store ? store.set('stock_prev_' + m.id, prevBlob).catch(function () {}) : Promise.resolve();
-    var usedP = blobToDataUrlP_(prevBlob).then(function (durl) {
-      if (!durl) return;
-      return usedImagesRead_(m.videoId).then(function (rec) {
-        var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
-        if (cur[0] === durl) return; // 既に同じ先頭=冪等・触らない
-        return usedImagesSave_(m.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
-      });
-    }).catch(function () {});
-    return Promise.all([idbP, usedP]);
-  }
-  // loadMeta()+loadArchive() の各item(videoId必須)を直列に処理する。二重起動は _genMissingState.busy で防ぐ。
-  //   欠けている先(端末内/使用画像1ページ目/Drive)だけを埋める=冪等。動画は「ローカルに既存プレビューが
-  //   無い時」だけデコードして先頭フレームを起こす(在れば再利用=速い)。
-  function generateMissingPreviews_(opts) {
-    opts = opts || {};
-    if (_genMissingState.busy) return Promise.resolve({ done: false, made: 0, skipped: 0, failed: 0, driveSkipped: 0 });
-    var items = loadMeta().concat(loadArchive()).filter(function (m) { return m && m.id && m.videoId; });
-    _genMissingState.busy = true; _genMissingState.i = 0; _genMissingState.total = items.length;
-    var made = 0, skipped = 0, failed = 0, driveSkipped = 0;
-    function wait_(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
-    function next_(idx) {
-      if (idx >= items.length) {
-        _genMissingState.busy = false;
-        return Promise.resolve({ done: true, made: made, skipped: skipped, failed: failed, driveSkipped: driveSkipped });
-      }
-      _genMissingState.i = idx + 1;
-      if (opts.onProgress) { try { opts.onProgress(_genMissingState.i, _genMissingState.total); } catch (e) {} }
-      var m = items[idx];
-      return Promise.all([checkLocalPreview_(m), driveState_(m)]).then(function (rr) {
-        var loc = rr[0], drv = rr[1];
-        var folderId = (window.Go5Drive && window.Go5Drive.folderIdFor) ? (window.Go5Drive.folderIdFor(m.videoId) || '') : '';
-        var canAppend = !!folderId && !!(window.Go5Drive && window.Go5Drive.appendImage);
-        var needLocal = !loc.hasIdb || !loc.hasUsed;
-        var driveMissing = (drv === 'missing');
-        var needDriveAppend = driveMissing && canAppend;
-        if (!needLocal && !needDriveAppend) {
-          // 全部揃っている=skip。ただしDriveに無いのに folderId 記録がこの端末に無くて追記できない分は driveSkipped。
-          if (driveMissing && !canAppend) driveSkipped++; else skipped++;
-          return null;
-        }
-        // プレビューblobを用意=ローカルに既存があれば再利用、無ければ動画の先頭フレームから起こす。
-        var ensureBlob = loc.prevBlob
-          ? Promise.resolve(loc.prevBlob)
-          : resolveVideoBlob_(m.id).then(function (vBlob) {
-              if (!vBlob) return null;                 // 手元にも雲(R2)にも動画が無い=復元不可
-              return videoFirstFramePreview_(vBlob);   // 先頭フレーム抽出(番犬付き=nullで安全に落ちる)
-            });
-        return ensureBlob.then(function (prevBlob) {
-          if (!prevBlob) { failed++; return null; }
-          var ops = [];
-          if (needLocal) ops.push(saveLocalPreview_(m, prevBlob));
-          if (needDriveAppend) {
-            try { window.Go5Drive.appendImage(m.account || 'acc1', m.title || '', folderId, prevBlob, null); } catch (e) {} // fire-and-forget(既存sendAppendが自動リトライ)
-          } else if (driveMissing && !canAppend) {
-            driveSkipped++; // ローカルは埋めたがDriveは追記できず(別端末で作った動画=次段の申し送り)
-          }
-          return Promise.all(ops).then(function () { made++; });
+    var existP = store ? store.get('stock_prev_' + m.id).catch(function () { return null; }) : Promise.resolve(null);
+    return existP.then(function (pb) {
+      if (pb) return blobToDataUrlP_(pb); // 既にローカルに控えがある=動画デコードを省く
+      return resolveVideoBlob_(m.id).then(function (vBlob) {
+        if (!vBlob) return null;                       // 手元にも雲(R2)にも動画が無い=復元不可
+        return videoFirstFramePreview_(vBlob).then(function (prevBlob) {
+          if (!prevBlob) return null;
+          try { if (store) store.set('stock_prev_' + m.id, prevBlob).catch(function () {}); } catch (e) {} // 次回のために控える(冪等)
+          return blobToDataUrlP_(prevBlob);
         });
-      }).catch(function () { failed++; })
-        .then(function () { return wait_(50); }) // 1件ごとにイベントループへ返す(UIを固めない)
-        .then(function () { return next_(idx + 1); });
-    }
-    return next_(0).catch(function () {
-      _genMissingState.busy = false;
-      return { done: false, made: made, skipped: skipped, failed: failed, driveSkipped: driveSkipped };
-    });
+      });
+    }).catch(function () { return null; });
   }
 
   var _renderSeq = 0, _lastRenderedStockSig = '', _missingThumbs = {}, _stockBgPending = false;
@@ -1063,13 +986,9 @@
     // 一覧HTMLを thumbFor(id→サムネURL/null)から組み立てて描画する。(サムネの有無に依らず同じ骨格)
     function paint_(thumbFor) {
       if (seq !== _renderSeq || page.hidden) return;
-      // ★未作成プレビューの一括復元ボタン(Chami依頼2026-08-13)。一覧の先頭(📦ドラフト見出しの上)に置く。
-      //   render()のたびにDOMごと作り直されるので、進行中の状態(busy/件数)は _genMissingState から都度読む。
-      var genBtnHtml = '<button type="button" id="stkGenMissingPrevBtn"' + (_genMissingState.busy ? ' disabled' : '') +
-        ' style="width:100%;margin:0 0 10px;padding:10px 14px;font-size:.84rem;font-weight:700;border-radius:10px;' +
-        'cursor:pointer;border:1px solid var(--accent);background:transparent;color:var(--accent);">' +
-        esc(genMissingLabel_()) + '</button>';
-      var html = genBtnHtml + '<div class="card">';
+      // ★過去分プレビューの一括復元は「投稿履歴の🔁ボタン」へ統合した(Chami依頼2026-08-13)。
+      //   ドラフトタブのこのボタンは撤去(Chami「ドラフトタブにそのボタンは不要・削除で」)。
+      var html = '<div class="card">';
       if (metas.length) {
         html += '<div style="font-size:.95rem;font-weight:700;color:var(--accent);margin-bottom:10px;">📦 ドラフト(' + metas.length + '件)</div>' +
           metas.map(function (m) { return renderItem_(m, thumbFor[m.id]); }).join('');
@@ -1852,39 +1771,6 @@
       }, true);
       page.addEventListener('click', function (e) {
         var btn = e.target;
-        // ★未作成プレビューの一括復元ボタン(data-id無し=通常の一覧ボタンとは別枝)。
-        if (btn && btn.id === 'stkGenMissingPrevBtn') {
-          if (_genMissingState.busy) return; // 二重起動ガード
-          var updateGenBtn_ = function () {
-            var b = $('stkGenMissingPrevBtn');
-            if (b) { b.textContent = genMissingLabel_(); b.disabled = _genMissingState.busy; }
-          };
-          // ★万一 generateMissingPreviews_ 内部で無応答になっても、ボタンが「作成中…」のまま固まらないよう
-          //   機構で戻す(driveSaveForCompleted_ の90秒watchdogと同じ作法)。件数が多い時のための猶予は長め。
-          var _genWd = setTimeout(function () { _genMissingState.busy = false; updateGenBtn_(); }, 10 * 60 * 1000);
-          generateMissingPreviews_({ onProgress: updateGenBtn_ }).then(function (r) {
-            clearTimeout(_genWd);
-            render(); // 一覧(サムネ・使用画像)を最新化。ボタンも genMissingLabel_() で既定表示に戻る
-            try { if (window.YtRank && window.YtRank.renderRank && $('pageRank') && !$('pageRank').hidden) window.YtRank.renderRank(); } catch (e2) {}
-            var msg;
-            if (r.made === 0 && r.failed === 0 && r.driveSkipped === 0) {
-              msg = '未作成のプレビューはありませんでした(全て作成済みです)。';
-            } else {
-              msg = (r.made ? ('✅ ' + r.made + '件のプレビューを作成しました。') : 'この端末で作れる未作成のプレビューはありませんでした。');
-              if (r.driveSkipped) msg += '\n(Drive未保存 ' + r.driveSkipped + '件=別の端末で作った動画のためこの端末からDriveへ追記できません。手元とプレビュー欄には反映済み)';
-              if (r.skipped) msg += '\n既に作成済み(そのまま): ' + r.skipped + '件';
-              if (r.failed) msg += '\n失敗: ' + r.failed + '件(動画データを取得できませんでした)';
-            }
-            alert(msg);
-          }).catch(function () {
-            clearTimeout(_genWd);
-            _genMissingState.busy = false;
-            updateGenBtn_();
-            alert('プレビュー作成中にエラーが発生しました。');
-          });
-          updateGenBtn_(); // busy状態を即座に反映(進行中表示への切り替え)
-          return;
-        }
         if (!btn || !btn.dataset || !btn.dataset.id) return;
         var id = btn.dataset.id;
         // meta はドラフト本体・作成履歴のどちらにあるか分からない(動画DLは両方から押せる)ので両方から探す。
@@ -1938,7 +1824,7 @@
       });
     }
 
-    window.Go5Stock = { render: render };
+    window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_ };
 
     // 動画・画像ミラーは保存直後に即送信し、ここでは旧データ/一時失敗ぶんだけを静かに再試行する。
     // 最大50件を同時発火していた旧30秒sweepはiOSのメモリ圧を上げるため、逐次処理＋2分周期へ変更。

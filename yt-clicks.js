@@ -1662,46 +1662,109 @@
     }
   }
 
-  // ── 過去分プレビュー取り込み(Drive参照) ──────────────────────────────────
-  //   Chami依頼(REQ-0bfd8d7207 / 2回目=再発): 7/30以前など、プレビュー画像がGoogleドライブへ
-  //   保存され始める前の投稿履歴について、Driveの[題名]フォルダの「題名_プレビュー.*」を探して
-  //   1ページ目に取り込む。無ければ「無かった」でスキップ(Chami「ないものはなかったでOK」)。
-  //   Worker側は read-only=既存物に一切触れない。usedImgSave(pKey, [preview]+既存, prev=1) で先頭挿入。
+  // ── 過去分プレビュー取り込み/生成(Drive参照＋動画から生成・統合版) ──────────────
+  //   Chami依頼(2026-08-13): 投稿履歴でプレビュー画像が入っていない履歴だけを対象に、
+  //   ①まずDriveの[題名]フォルダの「題名_プレビュー.*」を探し、在れば1ページ目へ挿入して完了
+  //     (=「Driveに在るのに挿入されてないだけ」を拾う。Worker側は read-only=既存物に触れない)。
+  //   ②Driveに無ければ、動画(手元 or R2の控え)の先頭フレームから仕上がりプレビューを生成して挿入
+  //     (window.Go5Stock.previewForVideoId=stock.jsの生成器。動画が引けない別端末分だけはスキップ)。
+  //   ★ページを離れても続くよう、未処理リストを localStorage(prevbf_job_<ch>)へ永続化し、
+  //     投稿履歴を開き直すと確認なしで続きを自動再開する(下の render 末尾で kick)。
+  //   usedImgSave(pKey, [preview]+既存, prev=1) で先頭挿入(冪等=既に先頭が同じなら触らない)。
+  var PREVBF_JOB_KEY = 'prevbf_job_'; // + channel
+  var _prevbfBusy = {};               // channel → このタブでの二重起動ガード
+  function prevbfLoadJob_(ch) { try { return JSON.parse(localStorage.getItem(PREVBF_JOB_KEY + ch) || 'null'); } catch (e) { return null; } }
+  function prevbfSaveJob_(ch, job) {
+    try {
+      if (job && job.remaining && job.remaining.length) localStorage.setItem(PREVBF_JOB_KEY + ch, JSON.stringify(job));
+      else localStorage.removeItem(PREVBF_JOB_KEY + ch);
+    } catch (e) {}
+  }
+  function prevbfSetLabel_(t) { var b = $('drivePrevBackfill'); if (b) { b.textContent = t; } }
+  function prevbfSetBusy_(on) { var b = $('drivePrevBackfill'); if (b) b.disabled = !!on; }
+  // 未処理ジョブを1件ずつ直列で流す。各件を処理し終えた瞬間に remaining から外して保存する
+  //   =途中でページを閉じても、次回は残りだけを続きから流せる(裏で続ける の実体)。
+  function prevbfRunJob_(ch) {
+    if (_prevbfBusy[ch]) return;
+    var cand = window.Go5Cand;
+    if (!cand || !cand.usedImgs || !cand.usedImgSave) return;
+    var start = prevbfLoadJob_(ch);
+    if (!start || !start.remaining || !start.remaining.length) { prevbfSaveJob_(ch, null); return; }
+    _prevbfBusy[ch] = true;
+    prevbfSetBusy_(true);
+    function step() {
+      if (acct() !== ch) { _prevbfBusy[ch] = false; return; } // チャンネルを切り替えたら手を止める(戻れば再開)
+      var j = prevbfLoadJob_(ch);
+      if (!j || !j.remaining || !j.remaining.length) {
+        _prevbfBusy[ch] = false;
+        prevbfSaveJob_(ch, null);
+        prevbfSetBusy_(false);
+        prevbfSetLabel_('🔁 Drive→過去分プレビュー取込');
+        try { refresh(); } catch (e) {}
+        return;
+      }
+      var t = j.remaining[0];
+      var total = j.total || j.remaining.length;
+      var doneN = total - j.remaining.length + 1;
+      prevbfSetLabel_('プレビュー生成中… ' + doneN + '/' + total);
+      var pKey = t.pKey;
+      var finishItem = function () {
+        var jj = prevbfLoadJob_(ch);
+        if (jj && jj.remaining) { jj.remaining = jj.remaining.filter(function (x) { return x.pKey !== pKey; }); prevbfSaveJob_(ch, jj); }
+        setTimeout(step, 30); // イベントループへ返す(UIを固めない)
+      };
+      // 既に別経路でプレビューが入っていたら生成不要(冪等)。
+      var prevN = cand.usedPrevCount ? (cand.usedPrevCount(pKey) || 0) : 0;
+      if (prevN > 0) { finishItem(); return; }
+      // ①Driveを先に見る → 無ければ②動画の先頭フレームから生成。
+      var driveP = (window.Go5Drive && window.Go5Drive.fetchPreview && (ch === 'acc1' || ch === 'acc2'))
+        ? window.Go5Drive.fetchPreview(ch, t.title || '').catch(function () { return null; })
+        : Promise.resolve(null);
+      driveP.then(function (durl) {
+        if (durl) return durl;
+        if (window.Go5Stock && window.Go5Stock.previewForVideoId && t.videoId) {
+          return window.Go5Stock.previewForVideoId(t.videoId).catch(function () { return null; });
+        }
+        return null;
+      }).then(function (durl) {
+        if (durl) {
+          var used = (cand.usedImgs(pKey) || []).slice();
+          if (used[0] !== durl) cand.usedImgSave(pKey, [durl].concat(used.filter(function (u) { return u !== durl; })), 1);
+        }
+        finishItem();
+      }).catch(function () { finishItem(); });
+    }
+    step();
+  }
+  // ボタン押下=対象(プレビュー未挿入の履歴)を集めてジョブに積み、走らせる。既に走っていれば差分だけ足す。
   function runDrivePreviewBackfill_(items, btn) {
-    if (!window.Go5Drive || !window.Go5Drive.fetchPreview) { alert('Drive取込が未設定です。(drive_worker_url を確認してください)'); return; }
     var cand = window.Go5Cand;
     if (!cand || !cand.usedImgs || !cand.usedImgSave) { alert('画像ストア未対応の環境です。'); return; }
-    var ch = acct(); // 現在表示中のチャンネル
-    // 対象=題名があり、まだプレビュー(先頭prev枚)を持っていない履歴だけ。
+    var ch = acct();
     var targets = (items || []).filter(function (it) {
       if (!it || !it.title) return false;
       var pKey = it.videoId || itemKey(it);
       var prevN = cand.usedPrevCount ? (cand.usedPrevCount(pKey) || 0) : 0;
-      return prevN === 0;
-    });
-    if (!targets.length) { alert('取り込む対象がありません。(このチャンネルの履歴は全てプレビュー済み、または題名が空です)'); return; }
-    if (!window.confirm('このチャンネルの ' + targets.length + ' 件について、Googleドライブから過去分のプレビュー画像を探して取り込みます。よろしいですか？')) return;
-    var i = 0, ok = 0, miss = 0, origLabel = btn.textContent;
-    btn.disabled = true;
-    function step() {
-      if (i >= targets.length) {
-        btn.disabled = false; btn.textContent = origLabel;
-        alert('Drive取込 完了\n挿入: ' + ok + '件 / Driveに無し: ' + miss + '件 / 対象: ' + targets.length + '件');
-        try { refresh(); } catch (e) {}
-        return;
-      }
-      var it = targets[i++];
-      var pKey = it.videoId || itemKey(it);
-      btn.textContent = '取込中… ' + i + '/' + targets.length;
-      window.Go5Drive.fetchPreview(ch, it.title).then(function (durl) {
-        if (durl) {
-          var used = (cand.usedImgs(pKey) || []).slice();
-          cand.usedImgSave(pKey, [durl].concat(used), 1); // 先頭1枚=投稿プレビュー(prev=1)
-          ok++;
-        } else { miss++; }
-      }).catch(function () { miss++; }).then(step);
+      return prevN === 0; // プレビューが挿入されていない履歴だけ
+    }).map(function (it) { return { pKey: it.videoId || itemKey(it), videoId: it.videoId || '', title: it.title || '' }; });
+    var existing = prevbfLoadJob_(ch);
+    var running = _prevbfBusy[ch] || !!(existing && existing.remaining && existing.remaining.length);
+    if (running) {
+      // 走行中=止めずに、まだ積んでいない対象だけ足す。
+      var have = {};
+      var cur = (existing && existing.remaining) ? existing.remaining : [];
+      cur.forEach(function (x) { have[x.pKey] = 1; });
+      var add = targets.filter(function (x) { return !have[x.pKey]; });
+      var merged = cur.concat(add);
+      prevbfSaveJob_(ch, { remaining: merged, total: merged.length, startedAt: (existing && existing.startedAt) || Date.now() });
+      if (!_prevbfBusy[ch]) prevbfRunJob_(ch);
+      alert('プレビュー生成を継続中です(残り ' + merged.length + '件)。\nページを離れても、投稿履歴を開き直すと自動で続きを流します。');
+      return;
     }
-    step();
+    if (!targets.length) { alert('プレビューが無い履歴はありません。(このチャンネルは全て挿入済みです)'); return; }
+    if (!window.confirm('このチャンネルの ' + targets.length + ' 件について、まずGoogleドライブから探し、無ければ動画の先頭フレームからプレビューを生成して投稿履歴へ挿入します。\nページを離れても、開き直すと続きを自動で流します。よろしいですか？')) return;
+    prevbfSaveJob_(ch, { remaining: targets, total: targets.length, startedAt: Date.now() });
+    prevbfRunJob_(ch);
   }
 
   // ── render ──────────────────────────────────────────────────────────────
@@ -1753,7 +1816,7 @@
       // 計測ヘルス(B-3): 正常時は目立たせない。異常時だけ赤字。追加通信はしない(既存取得の結果を映すだけ)
       '<span id="measHealth" class="meas-health" title="計測3経路の生死。短縮URL=クリック数/記録GAS=今日昨日週の日別記録/YouTube=再生数。「応答なし」の時、その数字は古い値です">' + healthHtml_() + '</span>' +
       histColsCtlHtml_() + // 列数セレクタ(PCのみCSSで表示)
-      '<button id="drivePrevBackfill" type="button" class="vhide-remade-btn" title="過去の投稿履歴について、Googleドライブに保存済みの「題名_プレビュー」画像を探して1ページ目に取り込みます(このチャンネル分・既にプレビューがある履歴は対象外)">🔁 Drive→過去分プレビュー取込</button>' +
+      '<button id="drivePrevBackfill" type="button" class="vhide-remade-btn" title="プレビューが入っていない投稿履歴について、まずGoogleドライブの「題名_プレビュー」画像を探し、無ければ動画の先頭フレームから生成して1ページ目へ挿入します(このチャンネル分・既にプレビューがある履歴は対象外・ページを離れても開き直すと続きを自動で流します)">🔁 Drive→過去分プレビュー取込</button>' +
       '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
     list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
       var k = itemKey(it);
@@ -1969,9 +2032,19 @@
       refresh();
     });
 
-    // 過去分プレビュー取り込み(Drive参照)。このチャンネルの、まだプレビューが無い履歴だけが対象。
+    // 過去分プレビュー取り込み/生成。このチャンネルの、まだプレビューが無い履歴だけが対象。
     var backfillBtn = $('drivePrevBackfill');
-    if (backfillBtn) backfillBtn.addEventListener('click', function () { runDrivePreviewBackfill_(visibleItems, backfillBtn); });
+    if (backfillBtn) {
+      backfillBtn.addEventListener('click', function () { runDrivePreviewBackfill_(visibleItems, backfillBtn); });
+      // ★ページを離れて戻った時の自動再開(Chami依頼2026-08-13「離れても裏で処理を続ける」)。
+      //   未処理ジョブが残っていれば確認なしで続きを流す(二重起動は _prevbfBusy でガード)。
+      try {
+        var _jch = acct();
+        var _jb = prevbfLoadJob_(_jch);
+        if (_jb && _jb.remaining && _jb.remaining.length && !_prevbfBusy[_jch]) prevbfRunJob_(_jch);
+        else if (_prevbfBusy[_jch]) prevbfSetBusy_(true);
+      } catch (e) {}
+    }
 
     // サムネ → 作品詳細モーダル
     list.querySelectorAll('.vrow-thumb').forEach(function (im) {
