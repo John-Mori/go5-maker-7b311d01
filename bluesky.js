@@ -1931,7 +1931,14 @@
         if (!USE_DAGD_CHAIN) return { shortUrl: r2, shareUrl: r2 };
         return shortenShare(r2).then(function (sh) { return { shortUrl: r2, shareUrl: (sh || r2) }; });
       }
-      return shortenShare(longUrl).then(function (s) { var u = s || longUrl; return { shortUrl: u, shareUrl: u }; });
+      // ★2026-08-13 恒久策(Chami「またda.gdの短縮リンク出してくんの、やめろ」・2度目=C-038):
+      //   ワーカーが一過性に落ちた瞬間だけ、以前はここで da.gd/TinyURL(外部・計測不能・Chami禁止)へ
+      //   フォールバックして短縮リンクを"発行"していた=これが唯一の da.gd 発生源だった。実測(2026-08-13)で
+      //   live ワーカーは x.com/dmm/fanza を正しく 5mgl.com・yoz2.com へ短縮できている(=拒否ではなく瞬断)。
+      //   → 保険で da.gd を新規発番することを完全にやめる。ワーカー失敗時は"生URLのまま"返す。
+      //   生URLはそのまま踏めて壊れない(計測できないだけ)=Chamiが二度禁止した da.gd を機構として二度と出さない。
+      //   (shortenShare/SHARE_SHORTENERS/USE_DAGD_CHAIN は既存の resolve 側フォールバック等の互換で残置・normal path では未使用)
+      return Promise.resolve({ shortUrl: longUrl, shareUrl: longUrl });
     });
   }
   // 後方互換：表示用(da.gd優先)の1本を返す薄いラッパ。(手動短縮などで使用)
