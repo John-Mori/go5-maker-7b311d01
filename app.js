@@ -684,9 +684,13 @@
       const url = URL.createObjectURL(lastBlob);
       els.result.src = url;
       els.dl.href = url; els.dl.download = lastName;
-      els.resultArea.hidden = false;
+      // ★ドラフト作成時は動画作成タブに結果(プレビュー＋動画DL)を出さない(Chami依頼2026-08-13)。
+      //   ドラフトタブ内で動画をDLできるので動画作成タブ側の導線は不要＝生成後はドラフトタブへ自動遷移する(stock.js)。
+      if (!isDraft) {
+        els.resultArea.hidden = false;
+      }
       setStatus((isDraft ? "✅ ドラフトを作成しました：" : "✅ 完成しました：") + lastName + (ext === "webm" ? "(この端末ではwebm形式)" : ""));
-      els.resultArea.scrollIntoView({ behavior: "smooth" });
+      if (!isDraft) els.resultArea.scrollIntoView({ behavior: "smooth" });
       // 完成を通知。(Bluesky自動投稿などが購読)この時点で Canvas は最終フレームを保持している。
       // 一本道運用の背骨＝安定動画IDを“作成時(投稿前)”に発番し、購読側(Drive保存・記録)へ串刺しで渡す。
       var account = (typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "acc1";

@@ -1148,6 +1148,26 @@
     })();
   }
 
+  // ①-B セール短縮URL置換：X本文の「(セール紹介短縮用URL)」を短縮セールリンクへ“その場で”埋める。
+  //   ★作品側 mintDraftWorkShort_ と対。openPostModal_ の saved.xText 分岐は composeXForModal_ を通らないため、
+  //     セール側だけが日本語プレースホルダのまま凍結して残っていた(Chami報告2026-08-13「まだ短縮URLリンクが置換されない」)。
+  //   本文全体は作り直さない(＝手編集を壊さない)。別作品へ切り替わっていたら書かない。未発番なら発番完了後に差し替える。
+  function mintDraftSaleShort_(meta) {
+    if (!window.__go5FillSalePlaceholderInText) return;
+    var el = $('draftXText'); if (!el) return;
+    var applySale_ = function (nv) {
+      if (_modalMeta !== meta) return;
+      var cur = $('draftXText'); if (!cur || !nv || nv === cur.value) return;
+      cur.value = nv;
+      try {
+        var _sv = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}');
+        if (_sv && _sv.xText) saveDraftPost_(); // 保存済み本文があった時だけ短縮版で更新(未編集は保存しない=「空=未編集」を壊さない)
+      } catch (e) {}
+    };
+    var filled = window.__go5FillSalePlaceholderInText(el.value, applySale_);
+    if (filled && filled !== el.value) applySale_(filled);
+  }
+
   function openPostModal_(meta) {
     _modalMeta = meta;
     _ytTitleDirty = false;
@@ -1173,6 +1193,7 @@
     //     凍結されていた(Chami報告2026-08-11)。mintDraftWorkShort_ は生リンク/プレースホルダ以外は触らない
     //     ので手編集文は壊れない(既に短縮済みなら no-op)。置換が起きて保存済み本文があった時だけ保存も更新。
     mintDraftWorkShort_(meta);
+    mintDraftSaleShort_(meta); // ①-B セール側も同様に置換(saved.xText分岐でも凍結プレースホルダを埋める・2026-08-13)
     var tags = saved.ytTags !== undefined ? saved.ytTags : null;
     if (tags === null) { try { tags = localStorage.getItem('yt_tags_shared') || ''; } catch (e) { tags = ''; } }
     if (!tags) { var te = $('ytTags'); tags = te ? te.value : '#Shorts #マンガ #漫画紹介 #anime'; }
@@ -1493,12 +1514,17 @@
       // detail.draft(app.jsがmake()入口で__go5DraftPendingを消費して確定した権威)だけで判定する。
       if (!(e && e.detail && e.detail.draft)) return;
       var detail = e.detail;
-      saveStock_(detail).then(function () {
-        var tabBtn = $('tabStock');
-        if (tabBtn) tabBtn.click();
-        else render();
-      }).catch(function (err) {
+      // 生成完了で動画作成タブ→ドラフトタブへ自動遷移(Chami依頼2026-08-13「前は遷移してた、戻して」)。
+      //   ★ボタンの click 経由(tabStock.click)に依存せず、ドラフトページ(Stock.html)へ明示遷移する=
+      //     配線変更や他ハンドラの割り込みで遷移が黙って止まらないようにする。既にドラフトページ上なら再描画のみ。
+      var goDraft_ = function () {
+        if (window.__go5StockStandalone) { render(); return; }
+        try { location.href = 'Stock.html'; }
+        catch (e2) { var tb = $('tabStock'); if (tb) tb.click(); else render(); }
+      };
+      saveStock_(detail).then(goDraft_).catch(function (err) {
         alert('ドラフト保存に失敗しました: ' + (err ? err.message || String(err) : '不明なエラー'));
+        goDraft_(); // メタは saveStock_ 内で先に保存済み=一覧には出るので、blob 保存が転んでも遷移はする
       });
     });
 

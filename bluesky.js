@@ -1258,6 +1258,24 @@
     };
   } catch (e) {}
 
+  // ドラフトモーダル用: 保存済みX本文(saved.xText)に「(セール紹介短縮用URL)」が凍結されたまま残るのを、
+  //   本文全体を作り直さず“その場で”短縮セールリンクへ埋める(Chami報告2026-08-13「まだ短縮URLリンクが置換されない」)。
+  //   ★openPostModal_ の saved.xText 分岐は composeXForModal_(=セール置換を含む)を通らないため、以前はセール側だけが
+  //     日本語プレースホルダのまま残っていた(作品側は mintDraftWorkShort_ が別途その場置換していたので埋まっていた)。
+  //   未キャッシュなら発番だけ開始し、出来次第 onFilled(埋めた本文) を返す。af_id/セール未選択・非該当なら素通し。手編集は壊さない。
+  try {
+    window.__go5FillSalePlaceholderInText = function (text, onFilled) {
+      var s = String(text == null ? '' : text);
+      if (!discountListOn_() || !hasSalePH_(s)) return s;
+      var dlink = cachedDiscountLink_();
+      if (dlink) return fillSalePH_(s, dlink);
+      ensureDiscountLink_(function (link) {
+        if (link && typeof onFilled === 'function') onFilled(fillSalePH_(s, link));
+      });
+      return s; // まだ未発番=プレースホルダのまま返し、発番完了後に onFilled で差し替える
+    };
+  } catch (e) {}
+
   // ドラフトモーダル用⑤: 作品紹介・セールの短縮リンクに「自分のaf_id」が入っているかを判定(Chami依頼2026-07-30)。
   //   ・投稿作品 = 渡された作品アフィリンク(meta.affiliateUrl)。短縮済みは302素通しでaf_id保持=OK扱い。生FANZA URLでaf_id無しなら🆖。
   //   ・セールURL = 現在選択中のセール案内URLを buildFanzaListLink(af_id) で包んだ結果にaf_idが乗るか(＝af_id未設定なら🆖)。未選択なら「未使用」。
