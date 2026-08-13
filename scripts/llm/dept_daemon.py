@@ -192,6 +192,15 @@ WORK_TIMEOUT = 600             # ツール付き作業(work_generate)の上限
 #   ★2つを二重に塞いだままにしない(片方だけ直されて食い違うのを防ぐ・HQの指示)。
 #   ★戻した副作用= デーモンが本当に死んだ時の再配達が最大35分→最大25分へ縮む(良い方向)。
 QUEUE_LEASE_MARGIN = 300
+# ★★処理中マーカー(2026-08-13 イージス研究室 / 設計= 研究室HQ・Fable 5 / 裁定 C-041)。
+#   なぜ要るか= 番人(daemon_keeper)の「暇か」の判定は今まで **queueのリース**だけを見ていた。
+#   リースは「掴んだ瞬間の予告」であって**実占有の申告ではない**。extend が SQLite の混雑で
+#   失敗した便(`_on_main_start` は fail-open)はリース切れのまま裸で走り、載せ替えに殺される。
+#   → **働き手自身が「いま抱えている」をディスクへ申告する**。番人は「リース ∪ 有効なマーカー」で
+#     暇を判定する= 経路(載せ替え / 名簿削除 / 孤児掃除)ごとにバラバラだった述語が1本になる。
+#   ★マーカーは**「殺さない」方向にしか働かない**(和集合)。読めなければ何も足さない=今日と同等。
+#   ★pidが死ねば自動失効・mtimeが古すぎても失効= 消し忘れが永久の人質にならない。
+BUSY_DIR = os.path.join(LOCAL, "llm", "busy")
 # ★セッション配送(session_relay)が失敗した部屋を、次の試行まで寝かせる秒数(2026-07-25)。
 #   なぜ要るか= nackした便はリースが即解放されるので、2秒間隔のポーリングだと**同じ巡回の中で**
 #   何度も再claimされ、CLIを連打して失敗文をChamiへ連投し、10秒でmax_deliveries(5)を使い切って
@@ -5271,6 +5280,9 @@ class Daemon:
                 #     共用の入口だからだ(向こうはキューを持たない=空のまま=何も起きない)。
                 self._lease_q = q
                 self._lease_qids = [c["id"]] + [e[0]["id"] for e in extra]
+                # ★実占有の申告(リースは予告でしかない・BUSY_DIR の説明)。
+                #   ここは ack より前=**ackが終わるまでマーカーは生きている**(外側finallyで消す)。
+                self._busy_write(mid)
                 try:
                     ok = self.handle(rec, json.dumps(rec, ensure_ascii=False))
                 finally:
@@ -5316,9 +5328,35 @@ class Daemon:
                     pass
             self._claim_carry = []
             q.close()
+            self._busy_clear()   # ★申告を降ろす(ackは上で済んでいる=保護は最後まで効いた)
         if done:
             log(self.dept, f"queue経路 {done}件処理")
         return done
+
+    # ---- ★処理中マーカー(2026-08-13・BUSY_DIR の説明を読め) --------------------
+    #   番人へ「この部門はいま便を抱えている」を**自分で申告する**。
+    #   ★どちらも fail-open= 書けなくても消せなくても本走は止めない(申告は保険であって
+    #     便の処理そのものではない)。書けなければ番人は今日と同じ判定に戻るだけだ。
+    def _busy_write(self, mid):
+        try:
+            os.makedirs(BUSY_DIR, exist_ok=True)
+            path = os.path.join(BUSY_DIR, self.dept + ".json")
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"pid": os.getpid(), "msg_id": mid,
+                           "since": time.strftime("%Y-%m-%dT%H:%M:%S")}, f, ensure_ascii=False)
+            os.replace(tmp, path)      # ★原子的に置く= 番人が半端な中身を読まない
+        except OSError as e:
+            log(self.dept, f"処理中マーカーを書けなかった({type(e).__name__})=判定は従来どおり続行")
+
+    def _busy_clear(self):
+        try:
+            os.remove(os.path.join(BUSY_DIR, self.dept + ".json"))
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            log(self.dept, f"処理中マーカーを消せなかった({type(e).__name__})"
+                           f"=pid死/期限で自動失効する")
 
     def recover_inflight(self):
         """前回killの取り残し(inflight)を起動時に箱へ戻す=喪失を遅延に変える。"""

@@ -75,6 +75,13 @@ def exercise_wave(busy_seq, depts=("hq",), first_seen=None):
     original_debounce = keeper.RELOAD_DEBOUNCE_SEC
     original_min = keeper.RELOAD_MIN_INTERVAL_SEC
     original_log = keeper.log
+    # ★実機の処理中マーカー/プロセス列挙を波の検査へ持ち込まない(2026-08-13)。
+    #   本物を見ると「その瞬間 hq が便を抱えていたか」で結果が変わる=たまに落ちる検査になる。
+    #   マーカー単体の判定は下の _marker_busy の3分岐で見る(役割を分ける)。
+    original_marker = keeper._marker_busy
+    original_alive = keeper._alive_dept_pids
+    keeper._marker_busy = lambda *a, **k: set()
+    keeper._alive_dept_pids = lambda: (set(), {})
     try:
         stamp = time.time() - 120
         keeper._watch_stamp = lambda: stamp
@@ -98,6 +105,8 @@ def exercise_wave(busy_seq, depts=("hq",), first_seen=None):
         keeper.RELOAD_DEBOUNCE_SEC = original_debounce
         keeper.RELOAD_MIN_INTERVAL_SEC = original_min
         keeper.log = original_log
+        keeper._marker_busy = original_marker
+        keeper._alive_dept_pids = original_alive
 
 
 # ★C-042(2026-08-12 HQ裁定)= 「常駐が読むものを足したら、載せ替えの経路も同時に決めろ」。
@@ -231,6 +240,58 @@ def main():
             [[], [], []], depts=["hq", "copy-director"])
         check("同じ波では各部門を1回しかkillしない",
               hist[-1] == {"hq": 1, "copy-director": 1})
+
+        # --- ★処理中マーカー _marker_busy の3分岐(2026-08-13 イージス研究室・HQ穴2/穴3) ---
+        #   守りたい規則= ①有効なら busy に入る ②mtimeが期限切れなら入らない
+        #   ③pidが死んでいれば入らない。★和集合でしか使わないので「入らない=今日と同等」。
+        import json as _json
+        busy_dir = os.path.join(d, "busy")
+        os.makedirs(busy_dir, exist_ok=True)
+        _orig_dir, _orig_max = keeper.BUSY_DIR, keeper.BUSY_MARKER_MAX_SEC
+        keeper.BUSY_DIR = busy_dir
+        try:
+            def _put(dept, pid, age_sec=0):
+                p = os.path.join(busy_dir, dept + ".json")
+                with open(p, "w", encoding="utf-8") as f:
+                    _json.dump({"pid": pid, "msg_id": "M-" + dept, "since": "t"}, f)
+                if age_sec:
+                    old = time.time() - age_sec
+                    os.utime(p, (old, old))
+                return p
+
+            _put("hq", 4242)
+            check("有効なマーカーはbusyに入る(pid生存・期限内)",
+                  keeper._marker_busy({4242}) == {"hq"})
+
+            _put("hq", 4242, age_sec=keeper.BUSY_MARKER_MAX_SEC + 60)
+            check("mtimeが期限切れのマーカーは無視する(消し忘れが永久の人質にならない)",
+                  keeper._marker_busy({4242}) == set())
+
+            _put("hq", 4242)
+            check("pidが死んでいるマーカーは無視する(プロセス死で自動失効)",
+                  keeper._marker_busy(set()) == set())
+
+            # ★列挙できなかった時(alive=None)は「生きている扱い」へ倒す= 殺さない側
+            check("プロセス列挙に失敗した時は生存扱いにする(殺さない方へ倒す)",
+                  keeper._marker_busy(None) == {"hq"})
+
+            # ★書きかけ(.tmp)と壊れたJSONで判定を落とさない
+            with open(os.path.join(busy_dir, "broken.json"), "w", encoding="utf-8") as f:
+                f.write("{壊れている")
+            with open(os.path.join(busy_dir, "half.json.tmp"), "w", encoding="utf-8") as f:
+                f.write('{"pid": 1}')
+            check("壊れた1件や書きかけの.tmpで判定ごと落ちない",
+                  keeper._marker_busy({4242}) == {"hq"})
+
+            os.remove(os.path.join(busy_dir, "hq.json"))
+            check("マーカーが無ければ何も足さない(=今日と同等)",
+                  keeper._marker_busy({4242}) == set())
+
+            keeper.BUSY_DIR = os.path.join(d, "存在しない")
+            check("マーカー置き場ごと読めなくても例外を投げず空を返す",
+                  keeper._marker_busy({4242}) == set())
+        finally:
+            keeper.BUSY_DIR, keeper.BUSY_MARKER_MAX_SEC = _orig_dir, _orig_max
 
     ok = all(v for _, v in results)
     print(f"\n== {sum(v for _, v in results)}/{len(results)} PASS ==")

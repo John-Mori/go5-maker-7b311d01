@@ -11,6 +11,7 @@ keeper自身は supervise_daemons.ps1 が10分毎に生かす(=二段構え。ke
 使い方: python scripts/_daemons/daemon_keeper.py   (引数なし=DEPTS全部門)
 """
 import ast
+import json
 import os
 import re
 import subprocess
@@ -203,6 +204,86 @@ def _watch_stamp():
     return max(ts) if ts else 0.0
 
 
+# ★★処理中マーカー(2026-08-13 イージス研究室 / 設計= 研究室HQ・Fable 5 / 裁定 C-041)。
+#   `_inflight_depts` が見ている **リースは「掴んだ瞬間の予告」**であって実占有の申告ではない。
+#   dept_daemon 側の extend は fail-open なので、SQLiteが混んで張り直しに失敗した便は
+#   リース切れのまま裸で走る。そこを働き手自身の申告(`local/llm/busy/<dept>.json`)で埋める。
+#   ★和集合でしか使わない= **殺さない方向にしか働かない**。読めなければ何も足さず今日と同等。
+BUSY_DIR = os.path.join(ROOT, "local", "llm", "busy")
+BUSY_MARKER_MAX_SEC = 3600     # ★デーモン自身が永久ハングしても1時間で自動失効(永久の人質を作らない)
+
+
+def _pid_alive_win(pid, alive_pids):
+    """pidが生きているか。alive_pids(列挙済み集合)が在ればそれで見る。
+
+    ★列挙できていない時に「死んでいる」と決めない= 分からない時は**生きている扱い**
+      (マーカーは殺さない方向にしか働かないので、こちらへ倒すのが安全側)。
+    """
+    if alive_pids is None:
+        return True
+    return pid in alive_pids
+
+
+def _marker_busy(alive_pids=None, now=None):
+    """有効な処理中マーカーを持つ部門の集合を返す。
+
+    有効の条件は3つ**全部**= ①読める ②pidが生きている ③mtimeが BUSY_MARKER_MAX_SEC 以内。
+    ★読めない/ディレクトリが無い時は **空集合**(=何も足さない)。例外を投げない。
+    """
+    now = now or time.time()
+    out = set()
+    try:
+        names = os.listdir(BUSY_DIR)
+    except OSError:
+        return out                            # まだ誰も申告していない/読めない= 今日と同等
+    for name in names:
+        if not name.endswith(".json"):
+            continue                          # .tmp(書きかけ)は読まない
+        path = os.path.join(BUSY_DIR, name)
+        try:
+            age = now - os.path.getmtime(path)
+            if age > BUSY_MARKER_MAX_SEC:
+                continue                      # 期限切れ= 消し忘れとみなす
+            with open(path, "r", encoding="utf-8") as f:
+                rec = json.load(f)
+            pid = int(rec.get("pid") or 0)
+        except (OSError, ValueError, TypeError):
+            continue                          # 壊れた1行で判定を落とさない
+        if pid <= 0 or not _pid_alive_win(pid, alive_pids):
+            continue                          # プロセスが死んだ= 申告は自動失効
+        out.add(name[:-5])
+    return out
+
+
+def _alive_dept_pids():
+    """走っている dept_daemon の (pidの集合, {pid: dept}) を返す。測れなければ (None, {})。
+
+    ★戻り値のNoneは「測れなかった」= マーカーのpid条件を**生きている扱い**へ倒す合図。
+    """
+    if os.name != "nt":
+        return None, {}
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+             "Where-Object { $_.CommandLine -match 'dept_daemon' } | "
+             "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+            capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None, {}
+    pids, by_pid = set(), {}
+    for ln in (out.stdout or "").splitlines():
+        parts = ln.split("\t", 1)
+        if not parts or not parts[0].strip().isdigit():
+            continue
+        pid = int(parts[0].strip())
+        pids.add(pid)
+        m = re.search(r"--dept\s+([A-Za-z0-9_\-]+)", parts[1] if len(parts) > 1 else "")
+        if m:
+            by_pid[pid] = m.group(1)
+    return pids, by_pid
+
+
 def _inflight_depts(db_path=None, now=None):
     """いま処理中の便が在る部門を返す。読み取り専用。
 
@@ -297,7 +378,10 @@ def maybe_reload(slots, state):
             state["last_unknown_log"] = now
             log("コードの更新を検知したが、queueの処理中判定ができないので載せ替えを延期する")
         return
-    busy_set = set(busy)
+    # ★2026-08-13: リース(予告)だけでなく**働き手自身の申告**も足す(和集合・C-041)。
+    #   extend が fail-open で失敗した便はリース切れのまま走っている=ここで拾う。
+    alive, _ = _alive_dept_pids()
+    busy_set = set(busy) | _marker_busy(alive)
     targets = [s for s in slots if s.dept in wave["pending"] and s.dept not in busy_set]
     for s in targets:
         if s.proc is not None and s.proc.poll() is None:
@@ -347,29 +431,52 @@ def reap_orphans():
     dept_daemonの所有者はkeeper唯一(RULES §3 1領域1オーナー)なので、
     **起動時点で走っているdept_daemonは全て前世代の残骸**とみなして落としてよい。
     ※supervise_daemons.ps1 の重複排除はkeeper/gateway等が対象で、その子までは見ない。
+
+    ★2026-08-13(イージス研究室・HQ恒久依頼/穴3): **暇判定が1つも無かった**。
+      実測= 15:40:15「起動前の孤児dept_daemonを掃除: 30件」が、その**39秒前(15:39:36)に
+      載せ替え側が正しく守ったばかりの hq / aegis-gl / platform-se を巻き込んで殺した**。
+      片方の経路だけ述語を持っていて、もう片方が持っていない=経路ごとにバラバラだった。
+      → ここも「リース ∪ 有効な処理中マーカー」の**同じ述語**を差す。守った部門は返り値で返し、
+        呼び元が自分のspawnを少し遅らせる(二重化を作らないため)。
     """
     if os.name != "nt":
-        return
-    try:
-        out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-             "Where-Object { $_.CommandLine -match 'dept_daemon' } | "
-             "ForEach-Object { $_.ProcessId }"],
-            capture_output=True, text=True, timeout=30)
-        pids = [p.strip() for p in (out.stdout or "").split() if p.strip().isdigit()]
-    except Exception as e:
-        log(f"孤児掃除スキップ({type(e).__name__})=現行動作のまま続行")
-        return
+        return set()
+    alive, by_pid = _alive_dept_pids()
+    if alive is None:
+        log("孤児掃除スキップ(プロセス列挙に失敗)=現行動作のまま続行")
+        return set()
+    pids = sorted(alive)
     if not pids:
-        return
-    log(f"起動前の孤児dept_daemonを掃除: {len(pids)}件 pids={','.join(pids)}")
+        return set()
+    # ★守る対象= 有効なマーカーを持ち、そのマーカーのpidが実在の孤児と一致する部門だけ。
+    #   (マーカーが在っても別pidを指しているなら、その孤児は前世代の残骸=落としてよい)
+    busy = _marker_busy(alive)
+    guarded, guarded_depts = set(), set()
     for pid in pids:
+        dept = by_pid.get(pid)
+        if not dept or dept not in busy:
+            continue
         try:
-            subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True, timeout=15)
+            with open(os.path.join(BUSY_DIR, dept + ".json"), "r", encoding="utf-8") as f:
+                if int(json.load(f).get("pid") or 0) == pid:
+                    guarded.add(pid)
+                    guarded_depts.add(dept)
+        except (OSError, ValueError, TypeError):
+            pass
+    kill = [p for p in pids if p not in guarded]
+    if guarded:
+        log("処理中マーカーが有るので孤児を守る pid=%s(部門= %s)"
+            % (",".join(str(p) for p in sorted(guarded)), ",".join(sorted(guarded_depts))))
+    if not kill:
+        return guarded_depts
+    log(f"起動前の孤児dept_daemonを掃除: {len(kill)}件 pids={','.join(str(p) for p in kill)}")
+    for pid in kill:
+        try:
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=15)
         except Exception:
             pass
     time.sleep(2)   # ポート(18800番台)が解放されるのを待ってから自分の分を立てる
+    return guarded_depts
 
 
 # --- ★名簿(DEPTS)が増減したら、番人の再起動を待たずに追従する(2026-08-08 イージス研究室) --
@@ -466,8 +573,10 @@ def maybe_adopt(slots, state):
         busy = _inflight_depts()
         if busy is None:
             return                            # 判定不能=落とさない(fail-closed)
+        alive, _ = _alive_dept_pids()
+        busy_all = set(busy) | _marker_busy(alive)   # ★載せ替えと同じ述語(2026-08-13)
         for s in drop:
-            if s.dept in set(busy):
+            if s.dept in busy_all:
                 log(f"名簿から外れたが便を処理中なので落とさない: {s.dept}")
                 continue
             if s.proc is not None and s.proc.poll() is None:
@@ -482,12 +591,44 @@ def maybe_adopt(slots, state):
             log(f"★名簿から外れた部門を停止: {s.dept}")
 
 
+def _tend_guarded(slots, guarded):
+    """守った孤児を見張る。申告が失効したら落として通常運用へ戻す(2026-08-13)。
+
+    ★守っている間は自分のspawnを止める= 孤児と番人の子で**二重化を作らない**。
+    ★マーカーが消える/pidが死ぬ= その便は終わった or デーモンごと死んだ。どちらでも
+      孤児を落として(残っていれば)通常の立て直しへ返す。★3600秒で自動失効するので、
+      守り続けて永久に立て直さない、という詰み方はしない。
+    """
+    if not guarded:
+        return
+    alive, _ = _alive_dept_pids()
+    still = _marker_busy(alive)
+    by_dept = {s.dept: s for s in slots}
+    for dept in sorted(guarded):
+        s = by_dept.get(dept)
+        if dept in still:
+            if s is not None:
+                s.next_start = time.time() + 30   # 守っている間は立てない(延期し続ける)
+            continue
+        killed = _kill_orphans_for(dept)
+        guarded.discard(dept)
+        if s is not None:
+            s.next_start = 0.0
+        log(f"守っていた孤児の処理中マーカーが失効: {dept}"
+            f"(孤児{killed}件を落として通常運用へ戻す)")
+
+
 def main():
-    reap_orphans()
+    guarded = set(reap_orphans() or ())
     slots = [Slot(d) for d in DEPTS]
-    log(f"起動 depts={DEPTS}")
+    log(f"起動 depts={DEPTS}"
+        + (f" / ★処理中で守った部門= {','.join(sorted(guarded))}" if guarded else ""))
     reload_state = {}
     while True:
+        try:
+            _tend_guarded(slots, guarded)      # ★守った孤児の後始末(先にやる=立てる前に判定)
+        except Exception as e:
+            log(f"守った孤児の見張りに失敗(継続) {type(e).__name__}")
         try:
             maybe_adopt(slots, reload_state)   # ★名簿が増減したら追従する
         except Exception as e:
