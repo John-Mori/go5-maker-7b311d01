@@ -1,13 +1,19 @@
 /**
  * 5秒動画メーカー → Google Drive 自動保存 中継 Worker
  *
- * ★非破壊設計（最重要）★
- *   このWorkerが行うのは次の3種だけ：
+ * ★破壊面の不変条件（最重要・2026-08-13にChami指示で「同題名の上書き」を追加）★
+ *   このWorkerが行うのは次の4種だけ：
  *     1) フォルダの新規作成（create）
  *     2) ファイルの新規アップロード（create / resumable）
  *     3) 参照（list / get）= 読み取りのみ
- *   既存物の削除・上書き・移動・改名・ゴミ箱送りに相当するAPIは一切実装しない。
- *   同名があっても既存には触れず _2, _3… の別名で新規作成する。
+ *     4) ★フォルダのゴミ箱送り（trashed=true の PATCH）ただ1種のみ
+ *        — 発動は「overwrite=1（フロント明示）かつ env.ALLOW_OVERWRITE='1'（サーバ側キルスイッチ）」の
+ *          二重ロック時だけ。完全削除（files.delete）・改名（name update）・移動（parents update）の
+ *          破壊APIは今回も一切実装しない（=grep検証の対象は "trashed" ただ1語）。
+ *   上書きは「新フォルダを先に作って全部上げ、成功後に旧フォルダをtrash」＝どの時点で落ちても両方失う状態が
+ *   存在しない。trashは30日間Drive側で復元可能（完全削除はしない）。1ヶ月判定はDriveの createdTime を正とし、
+ *   trash直前に「そのチャンネル親の直下・フォルダ・trashed=false・題名完全一致・窓内」を全て再検証する。
+ *   窓外/同名なし/フラグ無しなら従来どおり _2, _3… の別名で新規作成（既存挙動を温存）。
  *
  * 認証情報（client_id / client_secret / refresh_token / 共有シークレット）は
  * Cloudflare Worker Secrets にのみ保持し、レスポンス・ログには出力しない。
@@ -16,6 +22,8 @@
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const DRIVE_API = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
+const OVERWRITE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 「1ヶ月」=30日固定（暦月の28〜31日曖昧性を排除）
+const OVERWRITE_MAX_TRASH = 3;                        // 窓内の同名候補がこれ超なら上書き全面中止（異常サイン）
 
 export default {
   async fetch(request, env) {
@@ -99,10 +107,29 @@ export default {
       return json({ ok: true, appended: true, folderId: appendFolderId, files: added.map((f) => ({ id: f.id, name: f.name })) }, 200, cors);
     }
 
-    // ---- [動画名]フォルダを衝突回避で新規作成（既存には触れない）----
+    // ---- 上書きモード判定（二重ロック：フロント明示 overwrite=1 ＆ env.ALLOW_OVERWRITE='1'）----
+    //   safeName で "video" に潰れた題名（元題名≠video）はフォールバック名での誤爆源なので上書きしない。
     const baseName = safeName(title);
+    const wantOverwrite = String(form.get("overwrite") || "") === "1"
+      && env.ALLOW_OVERWRITE === "1"
+      && !(baseName === "video" && title !== "video");
+    // 窓内（30日以内作成）の同名フォルダを「新フォルダ作成の前」に確定させる（read-only）。
+    let candidates = [];
+    if (wantOverwrite) {
+      try { candidates = await findOverwriteCandidates(parentId, baseName, token); }
+      catch (e) { candidates = []; } // 列挙失敗＝消さない側へ倒す（従来経路で新規作成）
+    }
+    const doOverwrite = wantOverwrite && candidates.length > 0 && candidates.length <= OVERWRITE_MAX_TRASH;
+
+    // ---- [動画名]フォルダを作成 ----
+    //   上書き時は exact-name で作る（Driveは同名重複を許容＝改名API不要で穴が無い）。
+    //   非上書き時は従来どおり衝突回避で _2, _3… の別名。
     let folder;
-    try { folder = await createUniqueChildFolder(parentId, baseName, token); }
+    try {
+      folder = doOverwrite
+        ? await createChildFolderExact(parentId, baseName, token)
+        : await createUniqueChildFolder(parentId, baseName, token);
+    }
     catch (e) { return json({ ok: false, error: "folder_create_failed" }, 502, cors); }
 
     // ---- アップロード（新規作成のみ。同名は連番で別名）----
@@ -122,6 +149,17 @@ export default {
       return json({ ok: false, error: "upload_failed", folderId: folder.id }, 502, cors);
     }
 
+    // ---- 全アップロード成功後：旧フォルダをゴミ箱へ（唯一の破壊操作・trash直前に全条件を再検証）----
+    //   先に新規を上げてからここへ来る＝どの時点で落ちても喪失ゼロ。trash失敗は一時的な重複で済み、
+    //   次回の上書きで自分も窓内候補として回収される（自己修復）。
+    const trashed = [], trashFailed = [];
+    if (doOverwrite) {
+      for (const c of candidates) {
+        const ok = await trashFolderGuarded(c.id, { parentId, baseName, newFolderId: folder.id }, token);
+        (ok ? trashed : trashFailed).push({ id: c.id, name: c.name });
+      }
+    }
+
     return json({
       ok: true,
       channel,
@@ -130,6 +168,10 @@ export default {
       folderName: folder.name,
       folderLink: folder.webViewLink || ("https://drive.google.com/drive/folders/" + folder.id),
       files: uploaded.map((f) => ({ id: f.id, name: f.name, link: f.webViewLink || "" })),
+      overwritten: trashed.length > 0,
+      ...(trashed.length ? { trashedFolders: trashed } : {}),
+      ...(trashFailed.length ? { warning: "trash_failed", trashFailed } : {}),
+      ...(wantOverwrite && !doOverwrite ? { overwriteSkipped: candidates.length ? "too_many" : "no_recent_match" } : {}),
     }, 200, cors);
   },
 };
@@ -270,6 +312,56 @@ async function childFileExists(parentId, name, token) {
   if (!r.ok) return false;
   const j = await r.json();
   return !!(j.files && j.files.length);
+}
+
+/* ====================== 上書き（overwrite=1 ＆ env.ALLOW_OVERWRITE 時のみ）====================== */
+// 窓内（createdTime が30日以内）の exact-name サブフォルダを列挙。findChildFolderIds の createdTime 付き版。
+//   createdTime は Drive サーバの正＝フロントの時計/申告に依存しない。境界（ちょうど30日）は含む（<=）。
+async function findOverwriteCandidates(parentId, name, token) {
+  const q = "name='" + escQ(name) + "' and '" + parentId +
+    "' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
+  const url = DRIVE_API + "?q=" + encodeURIComponent(q) +
+    "&fields=files(id,name,createdTime)&pageSize=20&supportsAllDrives=true&includeItemsFromAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) throw new Error("list");
+  const j = await r.json();
+  const now = Date.now();
+  return (j.files || []).filter((f) =>
+    f.createdTime && (now - Date.parse(f.createdTime)) <= OVERWRITE_WINDOW_MS);
+}
+
+// exact-name でフォルダ作成（同名existsチェックを意図的にしない。Driveは同一親内の同名フォルダを許容）。
+async function createChildFolderExact(parentId, name, token) {
+  const meta = { name, mimeType: "application/vnd.google-apps.folder", parents: [parentId] };
+  const r = await fetch(DRIVE_API + "?fields=id,name,webViewLink&supportsAllDrives=true", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json; charset=UTF-8" },
+    body: JSON.stringify(meta),
+  });
+  if (!r.ok) throw new Error("folder_create");
+  return await r.json();
+}
+
+// ★このWorker唯一の破壊操作。trash直前に全条件を再検証し、1つでも満たさなければ何もしない（消さない側へ）。
+//   完全削除はしない＝trashed=true の PATCH のみ（30日間Drive側で復元可能）。
+async function trashFolderGuarded(id, ctx, token) {
+  if (!id || id === ctx.parentId || id === ctx.newFolderId) return false;
+  const url = DRIVE_API + "/" + encodeURIComponent(id) +
+    "?fields=id,name,mimeType,parents,trashed,createdTime&supportsAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) return false;
+  const m = await r.json();
+  if (m.mimeType !== "application/vnd.google-apps.folder") return false; // ファイルは絶対にtrashしない
+  if (m.trashed) return false;
+  if (!(m.parents || []).includes(ctx.parentId)) return false;          // チャンネル親の直下限定
+  if (m.name !== ctx.baseName) return false;                            // 題名完全一致
+  if (!m.createdTime || (Date.now() - Date.parse(m.createdTime)) > OVERWRITE_WINDOW_MS) return false; // 窓内
+  const p = await fetch(DRIVE_API + "/" + encodeURIComponent(id) + "?supportsAllDrives=true", {
+    method: "PATCH",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json; charset=UTF-8" },
+    body: JSON.stringify({ trashed: true }),
+  });
+  return p.ok;
 }
 
 /* ====================== 新規作成（create のみ）====================== */

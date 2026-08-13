@@ -62,6 +62,10 @@
     var fd = new FormData();
     fd.append("channel", payload.channel);
     fd.append("title", payload.title);
+    // ★同題名は上書き(Chami依頼2026-08-13)。Worker側の二重ロック(env.ALLOW_OVERWRITE='1')が揃った時だけ発動し、
+    //   窓内(作成30日以内)の同名フォルダを新規保存の"後"にゴミ箱送りする。日付はWorkerがDriveのcreatedTimeを正とする
+    //   ので、ここからは送らない。追記(sendAppend)には付けない=既存フォルダをtrashしない。
+    fd.append("overwrite", "1");
     fd.append("video", payload.videoFile, payload.videoFile.name);
     (payload.images || []).forEach(function (img) { if (img) fd.append("image", img, img.name); });
 
@@ -74,7 +78,10 @@
       .then(function (res) {
         if (res.ok && res.j && res.j.ok) {
           var link = res.j.folderLink || "#";
-          setStatus('✅ Driveに保存しました(' + channelLabel(payload.channel) + ') ' +
+          // 上書きの結果を文言に反映：旧フォルダをゴミ箱へ送れた/整理に失敗(重複が残るがデータは無事)。
+          var owNote = res.j.overwritten ? '(旧フォルダをゴミ箱へ・30日間復元可)'
+            : (res.j.warning === 'trash_failed' ? '(旧フォルダの整理に失敗・重複が残っていますがデータは無事)' : '');
+          setStatus('✅ Driveに保存しました(' + channelLabel(payload.channel) + ')' + owNote + ' ' +
             '<a href="' + link + '" target="_blank" rel="noopener">フォルダを開く</a>');
           // ★背骨ID→フォルダIDを端末に控える(drive_up_<videoId>)。動画作成時に即保存した後、
           //   投稿完了側はこれを見て「動画は保存済み」と判断し、仕上がりプレビューだけ追記する(二重保存しない)。
@@ -154,30 +161,24 @@
     statusEl().appendChild(b);
   }
 
-  // ★動画作成の瞬間にDriveへ即保存する(2026-08-11 Chami「以前の設定を復活させて」)。
-  //   経緯：2026-07-27(f94f1ec)にDrive保存を「投稿完了」まで延期したが、iOS Safariが容量都合で
-  //   IndexedDBの動画blobを捨てた後は、投稿完了時にblobが取れず「投稿履歴には載るのにDriveには無い」
-  //   状態が8/6以降常態化した(Chami: 先生、最低です 以降Driveに保存されていない)。動画blobが確実に
-  //   メモリにある"今この瞬間"に上げれば、blob寿命問題から構造的に独立する=これが「以前の挙動」。
-  //   投稿完了側(stock.js)は drive_up_<videoId> でこのフォルダを見つけ、仕上がりプレビューだけ追記する。
+  // ★Drive保存は「ドラフトの投稿完了」でまとめて行う(2026-08-13 Chami「保存タイミングは投稿モードから
+  //   投稿完了を押した時に全て保存するタイミングにして」)。作成の瞬間には保存しない=ここでは lastCtx を
+  //   控えるだけ(Bsky後追い画像の宛先題名/チャンネルの保険)で Drive へは書かない。
+  //   《なぜ作成時保存を外して安全か》以前(2026-08-11)作成時に上げていた理由は「iOSが投稿完了までに
+  //   IDBの動画blobを捨てると投稿完了時にblobが取れずDriveに動画が残らない」ため。だが現在は作成直後に
+  //   ensureVideoMirror_ が動画blobを R2 へ控え、投稿完了側の resolveVideoBlob_ が手元IDBに無ければ R2 から
+  //   取り寄せる(stock.js)。=投稿完了の時点でも動画blobは確実に手に入る=作成時保存に頼らなくてよい。
+  //   投稿完了(stock.js driveSaveForCompleted_)が動画+元画像+仕上がりプレビューを1度に upload する。
   document.addEventListener("video-created", function (e) {
     var d = (e && e.detail) || {};
     if (!d.blob || d.test) return;
     var name = d.name || "video.mp4";
     var title = (d.title || "").trim() || name.replace(/\.[^.]+$/, "");
-    // チャンネルは作成イベントが載せた account を優先(getCurrentAccountの取り違え防止)。
     var channel = (d.account === "acc1" || d.account === "acc2") ? d.account
       : ((typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "");
     if (channel !== "acc1" && channel !== "acc2") return;
+    // 宛先の題名/チャンネルだけ控える。folderId は投稿完了時に確定するのでここでは空のまま。
     lastCtx = { videoId: d.videoId || "", title: title, channel: channel, folderId: "", queuedImage: lastCtx.queuedImage };
-    // 既にこの背骨IDで保存済みなら二重に上げない(作成イベントが複数回来る/リビルド等の保険)。
-    try {
-      var already = d.videoId && localStorage.getItem("drive_up_" + d.videoId);
-      if (!already) {
-        var imgs = d.sourceImageFile ? [d.sourceImageFile] : [];
-        driveUpload_(d.blob, name, title, channel, d.videoId || "", imgs, null);
-      }
-    } catch (e2) {}
   });
 
   // ドラフトタブの「投稿完了」から呼ばれる。blob を受け取って Drive へアップロードする。

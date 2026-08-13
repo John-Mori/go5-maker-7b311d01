@@ -11,6 +11,9 @@ FOLDER_ID_ACC1 = "1B8444oTjKfvEEx6Wcb3BTUqW5TcKn1M-"   # 月詠み色恋劇場
 FOLDER_ID_ACC2 = "12OnAu286z8Z0pCDz0bZb1khS3ydmmtwa"   # 宵桜艶帖～Yoizakura Tsuyacho～
 # 1日あたりのアップロード上限（レート制限）
 DAILY_LIMIT = "100"
+# 同題名の上書きを有効化（Chami指示2026-08-13）。'1' の時だけ、フロントが overwrite=1 を送った保存で
+# 窓内(作成30日以内)の同名フォルダを新規保存の"後"にゴミ箱送りする。空/他値なら従来どおり _2 連番で非破壊。
+ALLOW_OVERWRITE = "1"
 # 予備：ラベル一致用（任意。IDが主。未設定でも可）
 LABEL_ACC1 = "月詠み色恋劇場"
 LABEL_ACC2 = "宵桜艶帖～Yoizakura Tsuyacho～"
