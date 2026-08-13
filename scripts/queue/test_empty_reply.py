@@ -60,6 +60,69 @@ CREDIT = {"type": "result", "subtype": "success", "is_error": True,
           "session_id": "a14edd36-72f7-4bb4-86ec-a4e559176e8c"}
 OK = {"type": "result", "subtype": "success", "is_error": False, "num_turns": 1,
       "result": "こっちで測って直しておいたよ。", "session_id": "x"}
+OK2 = {"type": "result", "subtype": "success", "is_error": False, "num_turns": 1,
+       "result": "作り直した方から返す。", "session_id": "S2-new"}
+
+
+def drive(seq, entry=None, dept="qa-empty-test"):
+    """relay() を**本物のまま**1便回し、外へ出る手だけ偽物に差し替える(2026-08-14)。
+
+    差し替えるのは ①claudeの起動(`_run_claude`) ②ファイル/スレッドを触る周辺だけ。
+    ★判定側(`looks_like_empty_reply` / `_looks_like_session_missing` / `_reply_of`)と
+      催促・交代の枝は**一切差し替えない**= ここが検査したい本体だからだ。
+    seq= `_run_claude` が順に返す (data, rc, out)。戻り値 (reply, ok, 呼び出しの記録, 保存された entry)。
+    """
+    calls = []
+    saved = {}
+
+    def fake_run(prompt, token, session_id=None, model=None, timeout=None,
+                 hard_timeout=None, on_soft=None):
+        calls.append({"prompt": prompt, "sid": session_id})
+        d, rc, out = seq[len(calls) - 1]
+        return d, rc, out, 1.0
+
+    ent = {"active_session_id": "S1", "generation": 3, "char_fp": "cf",
+           "status": "ready", "context_tokens": 1000}
+    if entry:
+        ent.update(entry)
+    table = {dept: ent}
+    patches = {
+        "_run_claude": fake_run,
+        "load_sessions": lambda: table,
+        "save_sessions": lambda t: None,
+        "save_room": lambda d, e: saved.update({"entry": dict(e)}),
+        "_record": lambda *a, **k: None,
+        "_log": lambda *a, **k: None,
+        "_boot_prompt": lambda *a, **k: "BOOT",
+        "build_envelope": lambda *a, **k: "ENV",
+        "discipline_fingerprint": lambda: "fp",
+        "_char_fingerprint": lambda conf: "cf",
+        "_char_parts": lambda conf: {},
+        "_ledger_lines": lambda d: [],
+        "_join_maintenance": lambda d, timeout=None: 0,
+        "_schedule_maintenance": lambda *a, **k: None,
+        "_work_snapshot": lambda: None,
+        "_work_audit": lambda *a, **k: None,
+        "_write_handoff": lambda *a, **k: (None, ""),
+        "_self_check": lambda *a, **k: "",
+        "run_compact": lambda *a, **k: (True, ""),
+        "_measure_context_now": lambda sid: (0, False),
+        "_note_usage": lambda *a, **k: 0,
+        "_recent_append": lambda *a, **k: None,
+        "_should_rotate": lambda e: (False, "", ""),
+        "_refresh_deferred": lambda e: (False, ""),
+        "_refresh_hold": lambda e, r, n: (False, ""),
+        "relay_model": lambda c: "sonnet",
+    }
+    orig = {k: getattr(sr, k) for k in patches}
+    for k, v in patches.items():
+        setattr(sr, k, v)
+    try:
+        reply, ok = sr.relay(dept, {"msg_id": "M-flow", "content": "テスト便"}, {}, "TOK")
+    finally:
+        for k, v in orig.items():
+            setattr(sr, k, v)
+    return reply, ok, calls, (saved.get("entry") or {})
 
 
 def main():
@@ -100,6 +163,50 @@ def main():
           "空返答(催促も空)→世代交代" in src)
     check("★空返答**以外**は従来どおり交代せず1回で諦める(条件が残っている)",
           "if not _looks_like_session_missing(out) and not _empty_nudged:" in src)
+
+    # --- ★②' 経路そのものを**実行で**通す(2026-08-14 追加) --------------------
+    #   注文= 研究室HQ DISPATCH-aegis-gl-1786645062923 §2。
+    #     「上の3項目はソース文字列の一致=**動作ではなく文面**の検査だ。行を書き直したら
+    #       偽陰性になるし、**催促→交代の経路そのものを通す検査が無い**。
+    #       この作りだと**本番の初発火が実質の初検証**になる」。
+    #   → `_run_claude` を偽物に差し替えて **relay() を本物のまま**回し、
+    #     「催促が1回だけ飛ぶ / 2回目も空なら新セッションで作り直す」を**実行で**見る。
+    for name, seq, want in (
+        ("催促で返った=交代しない",
+         [(EMPTY, 0, EMPTY_OUT), (OK, 0, json.dumps(OK))], 2),
+        ("催促も空=世代交代して作り直す",
+         [(EMPTY, 0, EMPTY_OUT), (EMPTY, 0, EMPTY_OUT),
+          (OK2, 0, json.dumps(OK2))], 3),
+        ("★口座エラー(rc=1)は催促も交代もせず1回で諦める",
+         [(CREDIT, 1, json.dumps(CREDIT, ensure_ascii=False))], 1),
+    ):
+        reply, ok, calls, ent = drive(seq)
+        print(f"  [{name}] _run_claude {len(calls)}回 / ok={ok} / 世代={ent.get('generation')}")
+        check(f"{name}= claudeを{want}回だけ回す", len(calls) == want)
+        if want == 2:
+            check("★催促は1回だけ・文面は EMPTY_REPLY_NUDGE そのもの",
+                  calls[1]["prompt"] == sr.EMPTY_REPLY_NUDGE)
+            check("★催促は**同じセッション**へ投げる(記憶を捨てない)",
+                  calls[1]["sid"] == EMPTY["session_id"])
+            check("催促で返った便はそのまま配る(世代は上がらない)",
+                  ok is True and reply == OK["result"] and ent.get("generation") == 3)
+        elif want == 3:
+            check("★2回目も空→3回目は session_id 無し=**新セッション**で作り直す",
+                  calls[2]["sid"] is None)
+            # ★空返答の交代では引き継ぎを作らない(引き継ぎ文を書かせる相手が、
+            #   まさに答えを返せないセッションだからだ)= 欠落の一言が末尾に付くのが正しい。
+            check("★交代後の返信がChamiへ返る(便を殺さない)",
+                  ok is True and (reply or "").startswith(OK2["result"]))
+            check("引き継げなかったことを1行で告げている(黙って記憶を落とさない)",
+                  "引き継げなかった" in (reply or ""))
+            check("世代が1つ上がり、対応表が新しいセッションを指す",
+                  ent.get("generation") == 4
+                  and ent.get("active_session_id") == OK2["session_id"])
+        else:
+            check("★口座エラーは催促を投げない(2026-07-25の枝のまま・箱が混ざっていない)",
+                  all(c["prompt"] != sr.EMPTY_REPLY_NUDGE for c in calls))
+            check("★口座エラーは交代せず ok=False で諦める(新セッションを作らない)",
+                  ok is False and reply is None)
 
     # --- ② dead になった時に通知が出ること(9325c04 のBが効く経路) -------------
     sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
