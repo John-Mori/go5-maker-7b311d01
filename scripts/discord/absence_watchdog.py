@@ -38,7 +38,15 @@ LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 INBOX_FILE = os.path.join(LOCAL, "discord_inbox.jsonl")
 FOR_CLAUDE_FILE = os.path.join(LOCAL, "discord_inbox_for_claude.jsonl")
 CLAUDE_ACTIVE = os.path.join(LOCAL, "llm", "claude_active.txt")
-POLLER_ACTIVE = os.path.join(LOCAL, "llm", "poller_active.txt")  # inbox_pollerの死活脈(巡回毎に更新)
+# ★2026-08-13 イージス研究室: 受信の死活を「退役済みのinbox_poller」から
+#   **現行の受信= discord_gateway** の脈へ張り替えた。
+#   実測(incidentの直近400件・08-06 10:42〜08-13 16:22)= そのうち **341件(85%)** が
+#   「⚠inbox_poller 停止の可能性」の同一文だった。inbox_poller は 2026-07-20 に退役済み
+#   (deadman_check.py の EXPECTED から外れている)で、脈ファイル local/llm/poller_active.txt は
+#   **2026-07-19 14:55 で更新が止まっている**= 以後25日間、30分ごとに鳴り続けていた。
+#   狼少年の実害= 8/13 の🔥digest消失で本物の警報がこの山に埋まり「完全サイレント」と誤診された。
+#   ★規律§3「常に誤発火する安全網は無視される」の実例。閾値ではなく**見る先**が間違っていた。
+GATEWAY_PULSE = os.path.join(LOCAL, "queue", "_gateway_pulse.txt")  # discord_gatewayの死活脈(イベントループが回る度に更新)
 STATE_FILE = os.path.join(LOCAL, "discord_watchdog_state.json")
 # ★部門名の日本語化(2026-07-27 Chami原文=「用語が難しい、結論が見えないかな。
 #   たとえば部門は日本語表記にして欲しいな。hqは研究室HQでsystems engineerは改修部門 みたいに」)。
@@ -76,8 +84,10 @@ STALE_MIN = 15                 # これ以上未処理なら「司令塔不在�
 # 2026-07-16: 120秒だと誤検知が頻発した(実測の発報は121〜166秒=閾値のわずかな超過ばかり)。
 # 原因はch数の増加(27ch)で1巡回のAPI往復が伸び、脈の更新間隔が120秒を超えるようになったため。
 # ポーラーは生きているのに鳴る=狼少年になり、本当の停止を見落とす。実態に合わせ5分へ。
+# ★2026-08-13: 対象を discord_gateway の脈へ張り替え。gatewayは _touch_pulse() を
+#   高頻度(実測24秒前)で叩くので、5分の鮮度で十分に「詰まり」を捉えられる。
 POLLER_STALE_SEC = 300
-POLLER_ALERT_COOLDOWN_SEC = 30 * 60  # ポーラー停止アラートは30分に1回まで
+POLLER_ALERT_COOLDOWN_SEC = 30 * 60  # 状態遷移で鳴らすので実質バックストップ(連投の最終防波堤)
 
 # --- P2 死んだ窓の検知 (2026-07-18 応答性改善書P2・Chami承認「全て承認」) ---
 # 部門窓の死をちゃみが手動発見する状態(hr-context実例)を根絶する。
@@ -124,10 +134,12 @@ def load_state():
             data.setdefault("sent_ts", [])
             data.setdefault("last_summary", 0)
             data.setdefault("last_poller_alert", 0)
+            data.setdefault("poller_down", False)  # 受信停止の状態遷移(2026-08-13)
             return data
         except Exception:
             pass
-    return {"announced": [], "sent_ts": [], "last_summary": 0, "last_poller_alert": 0}
+    return {"announced": [], "sent_ts": [], "last_summary": 0, "last_poller_alert": 0,
+            "poller_down": False}
 
 
 def save_state(state):
@@ -207,33 +219,52 @@ def bot_send(channel, body, dry_run, by_dept=False):
 
 
 def poller_age_sec():
-    """inbox_pollerの死活脈の古さ(秒)。ファイルが無ければNone(=一度も動いていない/停止)。"""
-    if not os.path.exists(POLLER_ACTIVE):
+    """受信(discord_gateway)の死活脈の古さ(秒)。ファイルが無ければNone(=未起動/停止)。"""
+    if not os.path.exists(GATEWAY_PULSE):
         return None
-    return time.time() - os.path.getmtime(POLLER_ACTIVE)
+    return time.time() - os.path.getmtime(GATEWAY_PULSE)
 
 
 def check_poller_health(state, dry_run):
-    """ポーラー停止を単独で検知して通知する(受付箱の滞留とは独立)。
+    """受信の停止を単独で検知して通知する(受付箱の滞留とは独立)。
 
-    ポーラーが死ぬと新着が一切配達されず、受付箱は空のまま=滞留検知は永久に発火しない。
+    受信が死ぬと新着が一切配達されず、受付箱は空のまま=滞留検知は永久に発火しない。
     そのためチャイム全体の単一障害点として、ここで死活脈の鮮度を直接見る。
-    30分に1回までincidentへ通知(暴走ガード)。State(last_poller_alert)を更新する。
+
+    ★2026-08-13 イージス研究室: 2つ直した。
+      ① 見る先= 退役済み inbox_poller → 現行の discord_gateway(GATEWAY_PULSE)。
+      ② 鳴らし方= 「異常な間ずっと30分毎」→ **状態遷移で1回だけ**(check_prompt_bloat /
+         check_roster と同じレール)。復旧したら ✅ を1回出して状態を戻す。
+         クールダウンは連投の最終防波堤として残す。
+      ★これが無いと「ずっと鳴っている警報」になり、誰も読まなくなって本物が埋まる(規律§3)。
     """
     age = poller_age_sec()
-    if age is not None and age < POLLER_STALE_SEC:
-        return  # 正常
     now_epoch = time.time()
+    down = (age is None) or (age >= POLLER_STALE_SEC)
+    was_down = bool(state.get("poller_down"))
+    if not down:
+        if was_down:
+            # 復旧= 1回だけ知らせて状態を戻す(黙って直ると「まだ壊れている」と思われ続ける)
+            if bot_send(SUMMARY_DEPT,
+                        "✅受信(discord_gateway)は復旧しました — 死活脈が"
+                        f"{int(age)}秒前まで戻っています(自動監視)。", dry_run, by_dept=True):
+                state["poller_down"] = False
+        else:
+            state["poller_down"] = False
+        return
+    if was_down:
+        return  # 既に報告済みの継続中の停止では鳴らさない(狼少年にしない)
     if now_epoch - state.get("last_poller_alert", 0) < POLLER_ALERT_COOLDOWN_SEC:
-        return  # クールダウン中
+        return  # クールダウン中(バックストップ)
     when = "脈ファイルなし(未起動/停止)" if age is None else f"最終更新{int(age)}秒前"
     msg = (
-        f"⚠inbox_poller 停止の可能性(自動監視): Discord受信ポーラーの死活脈が{when}。"
-        "ポーラーが止まると新着が一切受付箱へ届かず、Discordの呼びかけに誰も気づけません。"
-        "司令塔は `scripts\\discord\\start_discord_inbox.bat` で再起動を(二重起動に注意=既存cmd窓を閉じてから)。"
+        f"⚠受信(discord_gateway)停止の可能性(自動監視): Discord受信の死活脈が{when}。"
+        "受信が止まると新着が一切キューへ届かず、Discordの呼びかけに誰も気づけません。"
+        "確認= `powershell scripts\\_daemons\\status.ps1`(番人=daemon_keeperが常時立て直す対象です)。"
     )
     if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
         state["last_poller_alert"] = now_epoch
+        state["poller_down"] = True
 
 
 # --- ★リンク死活監視 (2026-07-20 da.gd障害インシデント対応・緊急Chami指示) ---
