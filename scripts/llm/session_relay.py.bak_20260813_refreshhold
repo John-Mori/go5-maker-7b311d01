@@ -193,30 +193,6 @@ COMPACT_REFRESH_ROTATIONS = 5
 #   HANDOFF_CHECKPOINT_AT_TOKENS と同じ線に揃える方針は不変(両方100,000)。
 REFRESH_MIN_CONTEXT_TOKENS = 100000
 
-# ★★2026-08-13(イージス研究室)**定期リフレッシュは「Chamiが会話の途中」なら見送る。**
-#   発注= 研究室HQ DISPATCH 1537458828541698139 論点2。
-#   Chamiの原文(msg 1537450341426266162 の要旨)= コピー部門とローカルllm教育部門が
-#   「急に文脈読まなくなった」。実測すると 22:01:54(llm-edu)と 22:08:15(copy-director)で
-#   定期リフレッシュの事前交代が起きており、**その便を新世代が答えていた**。
-#
-# ★HQは「発火タイミングの分散(ずらし)」を案として挙げたが、実測はそれを支持しない。
-#   (local/llm/request_log.jsonl の rotated 92件・2026-07-29〜08-13。全部数え直した)
-#     ・別部門の定期リフレッシュが前後15分以内にあった発火 = 30/92(33%)
-#     ・**Chamiが直前15分にどこかの部屋へ便を出していた発火 = 73/92(79%)**
-#     ・**その部屋でChamiが会話の途中だった(直前15分に同じ部屋へ別のChami便)= 55/92(60%)**
-#   → 部屋どうしが揃うのは時計の位相のせいではない。**Chamiが一気に喋る**という
-#     共通の駆動源があるからだ。位相をずらしても駆動源は残る=誰かが必ず当たる。
-#     しかも「同時多発」は33%しかなく、残り67%は**単独で**同じ被害を出している。
-#   → だから見るのは時計ではなく**その部屋の会話の状態**にした。
-#
-# ★見送ってよい理由= 定期リフレッシュは3つの交代条件のうち**唯一の選択的な交代**だ
-#   (圧縮失敗・185,000超は退避=止められない)。文脈100,000〜140,000は保険の線
-#   185,000まで十分な余裕があり、1〜数便遅らせても何も壊れない。
-# ★★見送りを永久にしない(2026-07-29に「条件を足したつもりで廃止した」事故がある)。
-#   ①Chamiが15分黙れば次の便で普通に発火する ②それでも溜まったら REFRESH_HOLD_MAX_SEC で必ず発火。
-REFRESH_QUIET_SEC = 900          # この秒数以内に同じ部屋へChami便が来ていたら「会話の途中」
-REFRESH_HOLD_MAX_SEC = 4 * 3600  # 見送りっぱなしにしない保険。これを超えたら会話中でも交代する
-
 # `/compact` の待ち(秒)。実測102.5秒(hr-room)/ 自動圧縮は各140秒。倍以上の余裕を取る。
 # ★ここはChamiの便を返した**後**に走るので、長めでも誰も待たない。
 COMPACT_TIMEOUT = 420
@@ -942,11 +918,7 @@ def _recent_append(dept, rec, reply):
     ★失敗しても便は落とさない(記録の失敗で返信を殺さない)。★localの中だけ・外へ出さない。
     """
     try:
-        # ★便に ts が無い形(機構の便・回送便)がある。空のまま置くと新世代の目に
-        #   「--- / 相手 /」と時刻無しで並び、**どれが直前か**が読めない(実測=
-        #   local/llm/recent_llm-edu.jsonl の2行が両方 ts 空だった)。受信時刻で埋める。
-        row = {"ts": rec.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%S"),
-               "msg_id": str(rec.get("msg_id", "") or ""),
+        row = {"ts": rec.get("ts", ""), "msg_id": str(rec.get("msg_id", "") or ""),
                "author": rec.get("author", ""),
                "body": (rec.get("content", "") or "")[:RECENT_CHARS],
                "reply": (reply or "")[:RECENT_CHARS]}
@@ -1762,55 +1734,6 @@ def _refresh_deferred(entry):
                       f"文脈{ctx:,}が{REFRESH_MIN_CONTEXT_TOKENS:,}未満なので**見送る**"
                       f"(捨てるほどの中身が無い。重くなった便で交代する)")
     return False, ""
-
-
-def is_from_chami(rec):
-    """この便がChami本人か。★判定はここ1箇所(dept_daemon._is_from_chami と同じ式)。
-
-    ★同じ判定を2つ持たない(ORG-11)。dept_daemon 側は session_relay を import しているので、
-      こちらから import すると循環する= **式をここに置き、あちらが将来こちらを借りる**形にする。
-    """
-    try:
-        return "chami" in str((rec or {}).get("author") or "").lower()
-    except Exception:                            # noqa: BLE001 判定不能は「Chamiではない」へ倒す
-        return False
-
-
-def _refresh_hold(entry, rec, now):
-    """定期リフレッシュを**この便では見送る**か(2026-08-13 イージス研究室)。戻り値 (bool, 理由)。
-
-    発注= 研究室HQ DISPATCH 1537458828541698139 論点2(Chami「急に文脈読まなくなった」)。
-    ★見るのは時計ではなく**その部屋の会話の状態**だ。理由と実測は REFRESH_QUIET_SEC の注記。
-
-    見送る条件= 直前 REFRESH_QUIET_SEC 以内に**同じ部屋へChamiの便が来ていた**こと。
-      ★「今この便がChamiか」ではなく「**その前に**Chamiが喋っていたか」を見る。
-        - 3時間黙っていた部屋へChamiが新しい話題を出した便 → 見送らない(ここが一番安全な交代点)
-        - 2分前の続きの便 → 見送る(ここで世代を替えると話の筋が落ちる=今回の事故)
-        - 会話中に届いた機構便・他部門からの回送 → 見送る(替えればChamiの次の便が新世代に当たる)
-    ★永久に見送らない保険が2つ= ①Chamiが15分黙れば次の便で普通に発火する
-      ②見送りが REFRESH_HOLD_MAX_SEC 続いたら会話中でも交代する(2026-07-29の
-        「条件を足したつもりで廃止した」事故を二度とやらないため)。
-    ★何が壊れても False(=従来どおり交代)へ倒す。ここで例外を出して便を落とさない。
-    """
-    try:
-        prev = float(entry.get("last_chami_at") or 0)
-    except (TypeError, ValueError):
-        prev = 0.0
-    if prev <= 0 or (now - prev) > REFRESH_QUIET_SEC:
-        return False, ""                         # 会話の途中ではない=一番安全な交代点
-    try:
-        since = float(entry.get("refresh_hold_since") or 0)
-    except (TypeError, ValueError):
-        since = 0.0
-    if since > 0 and (now - since) >= REFRESH_HOLD_MAX_SEC:
-        return False, (f"見送りが{(now - since) / 3600:.1f}時間続いた"
-                       f"(上限{REFRESH_HOLD_MAX_SEC // 3600}時間)=会話中でも交代する")
-    n = int(entry.get("refresh_hold_n") or 0) + 1
-    return True, (f"直前{int(now - prev)}秒前に同じ部屋へChamiの便が来ている"
-                  f"(会話の途中={REFRESH_QUIET_SEC}秒以内)。定期リフレッシュは選択的な交代なので"
-                  f"見送る。{n}便目の見送り"
-                  f"(Chamiが{REFRESH_QUIET_SEC // 60}分黙れば次の便で交代する / "
-                  f"上限{REFRESH_HOLD_MAX_SEC // 3600}時間で必ず交代する)")
 
 
 def _measure_context_now(sid):
@@ -3604,47 +3527,6 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         _record(rid, dept, "running", f"★定期リフレッシュの交代を見送った {_defer_why}")
         _log(dept, f"★定期リフレッシュを見送った(文脈{_ctx_now:,})")
 
-    # --- ★★2026-08-13(イージス研究室)**Chamiが会話の途中なら定期リフレッシュを見送る** ---
-    #   発注= 研究室HQ DISPATCH 1537458828541698139 論点2。
-    #   実測(rotated 92件)= 60%が「その部屋でChamiが会話の途中」に発火していた。
-    #   Chamiに見えていた症状はこれだ= 続きの便を、引き継ぎしか持たない新世代が答えていた。
-    #   ★触るのは "refresh" の枝**だけ**。圧縮失敗(compact_failed)と185,000超(over_line)は
-    #     退避であって選択ではないので、会話中だろうと**必ず交代する**(沈黙を作らない側が優先)。
-    #   ★見送りは取り消しではない= 回数条件も文脈条件もそのまま残るので、
-    #     Chamiが15分黙った次の便でそのまま交代する。上限4時間の保険つき。
-    _now_ts = time.time()
-    _hold_changed = False
-    if _rot and _rot_kind == "refresh":
-        _hold, _hold_why = _refresh_hold(entry, rec, _now_ts)
-        if _hold:
-            _hold_changed = True
-            _rot, _rot_kind = False, ""
-            entry["refresh_hold_n"] = int(entry.get("refresh_hold_n") or 0) + 1
-            entry.setdefault("refresh_hold_since", _now_ts)
-            _record(rid, dept, "running",
-                    f"★定期リフレッシュを**会話の途中なので**見送った {_hold_why} "
-                    f"tokens={_ctx_now} compacts={entry.get('compact_count')}")
-            _log(dept, f"★定期リフレッシュを見送った(Chamiと会話の途中・文脈{_ctx_now:,})")
-        elif entry.get("refresh_hold_n"):
-            # ★見送っていた分をここで清算する(次の世代へ持ち越さない)。
-            _record(rid, dept, "running",
-                    f"★見送っていた定期リフレッシュをここで実行する"
-                    f"(見送り{entry.get('refresh_hold_n')}便 {_hold_why or 'Chamiが会話の途中ではない'})")
-            entry.pop("refresh_hold_n", None)
-            entry.pop("refresh_hold_since", None)
-            _hold_changed = True
-    # ★この部屋でChamiが最後に喋った時刻を残す(次の便の「会話の途中か」の判定材料)。
-    #   ★台帳を増やさない= 既にある対応表の1行に置く(§4「記録先を2つ持たない」)。
-    #   ★**交代の判定より後**に更新する。先に更新すると自分自身と比べて必ず「会話の途中」になる。
-    if is_from_chami(rec):
-        entry["last_chami_at"] = _now_ts
-    # ★保存は普段しない= 便の終わりで entry ごと保存される既存の経路に乗せる(書き込みを増やさない)。
-    #   見送りを決めた便だけはここで確定させる(その便が落ちても見送りの事実は残す)。
-    #   ★便が落ちて last_chami_at が残らなかった時は、次の便は**見送らない**=従来どおり交代する
-    #     (判定不能を「交代しない」へ倒すと定期リフレッシュが静かに死ぬ。fail-open は交代の側)。
-    if _hold_changed and sid:
-        save_room(dept, entry)
-
     # ★★窓を超えている便の観測(2026-07-29・判定には使わない)。
     #   実測 07:13:12 ctx=202,754 で便は成功していた=**落ちてはいない**。
     #   だが古い会話は静かに落ちている可能性が高いので、見えるように1行だけ残す。
@@ -4029,12 +3911,6 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         new_entry.pop("compact_failed", None)
         new_entry.pop("resend_boot", None)
         new_entry["refresh_rotated_at_compacts"] = int(new_entry.get("compact_count") or 0)
-        # ★「Chamiが最後に喋った時刻」は**部屋の性質**であってセッションの持ち物ではない。
-        #   世代を跨いで引き継ぐ(2026-08-13。捨てると交代直後の1便だけ判定材料を失う)。
-        if entry.get("last_chami_at"):
-            new_entry["last_chami_at"] = entry.get("last_chami_at")
-        if is_from_chami(rec):
-            new_entry["last_chami_at"] = _now_ts     # ★now は文字列の時刻。epochはこちら
         if handoff_path:
             new_entry["handoff_from_prev"] = handoff_path
         table[dept] = new_entry
