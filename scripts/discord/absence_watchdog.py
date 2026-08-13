@@ -985,9 +985,13 @@ def check_dead_letters(state, dry_run):
            "中身を見る: `python scripts/queue/dlq_tool.py --list`。"
            "手当てしたら印を付ける: "
            "`python scripts/queue/dlq_tool.py --ack <id> --by \"<誰>\" --note \"<どう片付けたか>\"`。")
-    # ★宛先= incident + hq + 該当dept。不明な宛先(dept='router'等)は bot_send が False を
-    #   返すだけ=fail-open・他の宛先は届く(check_stale_dead と同じ形に揃えた)。
-    targets = [SUMMARY_DEPT, "hq"] + [d for d in by if d not in (SUMMARY_DEPT, "hq")]
+    # ★2026-08-14 宛先を **incident + hq の2室に固定**(HQ裁定 DISPATCH-aegis-gl-1786644517490。
+    #   出典= Chami msg 1537520749349310605「これ送られる部屋が多すぎて邪魔かな」)。
+    #   直前の実発火(02:37:45)は by が5部門= incident+hq+5部門の**7室**へ同一の長文が出ていた。
+    #   当該部門へ1件ずつ出す仕事は 9325c04 の on_dead フック(dept_daemon の _dead_letter_notice)が
+    #   持っている= 同じ事実を「集計の長文で全室へ」と「個別に当該室へ」で二重に配っていた。
+    #   ★内訳(detail)は本文に残る=どの部門で詰まっているかは2室で読める。判定・頻度・本文は変えない。
+    targets = [SUMMARY_DEPT, "hq"]
     sent = False
     for dept in targets:
         if bot_send(dept, msg, dry_run, by_dept=True):
@@ -1073,7 +1077,11 @@ def check_stale_dead(state, dry_run):
     #   = 穴は「鳴らない」ではなく「**鳴っている場所を、動ける人が読んでいない**」(共通規律§4)。
     #   → 3本目の警報を作らず、既存の1本の**宛先**を足す。1日1回の上限は変えない=増音しない。
     #   ★不明な宛先(dept='router' 等)は bot_send が False を返すだけ=fail-open・他の宛先は届く。
-    targets = [SUMMARY_DEPT, "hq"] + [d for d in by if d not in (SUMMARY_DEPT, "hq")]
+    # ★2026-08-14 **当該部門への横展開だけを外す**(HQ裁定 DISPATCH-aegis-gl-1786644517490)。
+    #   2026-08-13 に hq を足したのは正しい(動ける人が読む場所へ出す)=そこは残す。
+    #   デッドレターの手当てはHQ/基盤の仕事で、ackも dlq_tool.py で一括だ=各部門は自室の1件で動かない。
+    #   増音の巻き戻しであって警報の弱体化ではない(滞留の判定・1日1回の上限・本文はそのまま)。
+    targets = [SUMMARY_DEPT, "hq"]
     sent = False
     for dept in targets:
         if bot_send(dept, msg, dry_run, by_dept=True):
