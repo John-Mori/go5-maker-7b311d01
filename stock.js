@@ -1093,7 +1093,10 @@
   // 投稿モードのX本文を組む＝bluesky側の合成(短縮URL置換等)→販促テンプレ解決 の順で通す。
   function composeXForModal_(meta) {
     var base;
-    if (window.__go5ComposeXTextForBskyText) base = window.__go5ComposeXTextForBskyText(masterBody_(meta), (meta && meta.affiliateUrl) || '');
+    // ★作品リンクは affiliateUrl を第一に、空なら workUrl へ倒す(mintDraftWorkShort_ の meta.affiliateUrl||meta.workUrl と揃える)。
+    //   これが affiliateUrl だけだと、affiliateUrl 未設定のドラフトで作品プレースホルダ「(商品紹介短縮URL)」が
+    //   置換対象リンクを得られず literal のまま残っていた(Chami報告2026-08-13「短縮URLが反映されない」)。
+    if (window.__go5ComposeXTextForBskyText) base = window.__go5ComposeXTextForBskyText(masterBody_(meta), (meta && (meta.affiliateUrl || meta.workUrl)) || '');
     else base = masterBody_(meta);
     return applyPromo_(base, meta);
   }
