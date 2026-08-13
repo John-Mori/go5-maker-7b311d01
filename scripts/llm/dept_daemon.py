@@ -4641,6 +4641,13 @@ class Daemon:
                 # ★成功した時だけ「本人が答えた」印を立てる(送信名義から(精霊)を外すため)。
                 #   失敗して精霊の口で詫びる時は立てない=印の意味を保つ。
                 self._relay_answered = bool(_relay_ok)
+                # ★★返す直前にもう一度受信箱を覗く(2026-08-13・発注= 研究室HQ
+                #   DISPATCH-aegis-gl-1786628907518)。走る前の45秒窓は5日間0回だった=
+                #   Chamiの推敲は2〜5分刻みで、窓の外を通っていた。CLIの60秒は既に無料の
+                #   待ち時間なので、そこで拾う=**追加の遅延ゼロ**。詳細は _coalesce_after_run。
+                #   ★`coalesce_sec` を持つ部門だけ通る(既定=無し=他29室は1バイト差なし・C-035)。
+                if _relay_ok:
+                    reply = self._coalesce_after_run(rec, mid, reply)
                 # ★申告マーカーの回収(2026-07-26に意味が変わった)。
                 #   旧= 「これは作業依頼だ」の申告を拾って work_generate/回送へ二段昇格させる合図。
                 #   新= relayが作業も担うので**昇格の意味は消えた**。残っている用途は1つだけ:
@@ -5174,6 +5181,100 @@ class Daemon:
             extra.append((c, nrec))
         return extra
 
+    def _coalesce_after_run(self, rec, mid, reply):
+        """★**返す直前に**もう一度受信箱を覗いて束ねる(2026-08-13 イージス研究室)。
+
+        発注= 研究室HQ DISPATCH-aegis-gl-1786628907518。HQの実測がこうだった:
+          ・8/8に入れた「走る前に45秒待つ」窓は **5日間・本番0回**しか束ねていない
+            (`集約窓: 連投中(N件)` 全84回のうち82回が『1件』・`state:"coalesced"` は検証便2行だけ)
+          ・理由は窓が短いからではない= **Chamiの推敲の刻みが2〜5分**だ
+            (コピー部門 8/8以降29組: 45秒以内 **0** / 45〜120秒 2 / 120〜300秒 8)
+          ・だから窓を伸ばすのは損= 45→120秒で拾えるのは29便中2便、代わりに**全29便が最大2分遅くなる**
+
+        → **待つ場所を「走る前」から「返す直前」へ移す。**
+          CLIの実行は中央値60秒(HQ実測・直近40件)。**その60秒は今も何も返していない**=
+          既に無料で確保されている待ち時間だ。返す直前に覗けば、**追加の遅延ゼロで**
+          実効の窓が 45→105秒(中央値)へ伸びる。
+        ★それでも120〜300秒帯は拾えない。**拾えないと認めて残す**(窓を伸ばして全便を遅くしない)。
+
+        ★安全(HQが名指しで釘を刺した2点):
+          ・**二重応答**= 掴んだ続きの便は ack と `PROCESSED` の両方へ入れる(下の drain_queue)。
+            束ね直した返事は**1本だけ**送る=断片ごとには返さない。
+          ・**ドレインの窓**(INC-100)= 束ね直しに失敗したら掴んだ便を `_claim_carry` へ戻す
+            =リースが返り、同じ巡回の次の周で**普通の便として処理される**(消さない・遅らせるだけ)。
+            元の返事はそのまま送る=**沈黙にはしない**(規律§3 fail-open)。
+        ★戻り値= 送るべき本文(束ねられなければ渡された reply のまま=既存と1バイト差なし)。
+        """
+        q = getattr(self, "_lease_q", None)
+        if q is None or self._coalesce_win() <= 0 or not self._is_from_chami(rec):
+            return reply
+        if not (reply or "").strip() or session_relay is None:
+            return reply
+        try:
+            rows = q.peek_ready(dept=self.dept, limit=COALESCE_PEEK_MAX)
+        except Exception:
+            return reply                    # 覗けない=従来どおり(fail-open)
+        if not [r for r in rows
+                if self._is_from_chami(r["body"] if isinstance(r["body"], dict) else {})]:
+            return reply
+        taken = []
+        while len(taken) + 1 < COALESCE_MAX_ITEMS:
+            c = q.claim(dept=self.dept, who=f"dept_daemon:{self.dept}")
+            if c is None:
+                break
+            nrec = c["body"] if isinstance(c["body"], dict) else {}
+            if not self._is_from_chami(nrec):
+                self._claim_carry = getattr(self, "_claim_carry", None) or []
+                self._claim_carry.append(c)     # Chami以外は束ねない=手元へ戻す
+                break
+            taken.append((c, nrec))
+        if not taken:
+            return reply
+        log(self.dept, "★返す直前に受信箱を覗いた= Chamiの続きが%d件来ていた"
+                       "(返事はまだ送っていない)=1本にまとめ直す msg=%s" % (len(taken), mid))
+        # ★リースを張り直す対象へ足す(本走が続いている扱い。1本でも落ちると無言で消える)
+        self._lease_qids = list(getattr(self, "_lease_qids", None) or []) + [t[0]["id"] for t in taken]
+        merged = dict(taken[-1][1])
+        _add = "\n".join(s for s in (str(n.get("content") or "").strip() for _, n in taken) if s)
+        merged["content"] = (
+            "=== ★さっき書いた返事は、まだChamiに送っていない(手元で止めてある) ===\n"
+            "その間にChamiが続けてこう言った。**1本にまとめて返せ**"
+            "(さっきの返事のうち要る内容は入れ直す。2通に割るな)。\n"
+            "--- 続きの便 ---\n" + _add + "\n=== ここまで ===")
+        merged["coalesced_from"] = ([str(rec.get("msg_id", "") or mid)]
+                                    + [str(n.get("msg_id", "")) for _, n in taken[:-1]])
+        try:
+            reply2, ok2 = session_relay.relay(self.dept, merged, self.conf, self._token())
+        except Exception as e:                                          # noqa: BLE001
+            reply2, ok2 = "", False
+            log(self.dept, f"★束ね直しが落ちた({type(e).__name__})=元の返事をそのまま送る")
+        if not ok2 or not (reply2 or "").strip():
+            # ★掴んだ便を手元へ戻す= 次の周で普通の便として処理される(取りこぼさない)
+            self._claim_carry = (getattr(self, "_claim_carry", None) or []) + [t[0] for t in taken]
+            for t in taken:
+                try:
+                    self._lease_qids.remove(t[0]["id"])
+                except ValueError:
+                    pass
+            log(self.dept, "★束ね直しが不成立=元の返事を送り、続きの便は次の周へ戻した")
+            return reply
+        # ★内容が落ちた疑い(極端に短い)なら**両方**出す。束ねの都合で答えを失わせない。
+        if len(reply2) < 200 and len(reply2) * 3 < len(reply):
+            log(self.dept, "★束ね直しの本文が短すぎる(%d字<元%d字)=元の返事も残して1本で送る"
+                           % (len(reply2), len(reply)))
+            reply2 = reply.rstrip() + "\n\n" + reply2
+        self._post_coalesced = [t[0] for t in taken]
+        self._post_coalesced_raw = [json.dumps(n, ensure_ascii=False) for _, n in taken]
+        try:
+            _ev = ("返す直前に連投%d件を1本へ束ねた(元=%s)"
+                   % (len(taken) + 1, ",".join(merged.get("coalesced_from") or [])))
+            session_relay._record(mid, self.dept, "coalesced",
+                                  ("[検証便] " + _ev) if rec.get("test") else _ev)
+        except Exception:
+            pass
+        log(self.dept, "★1本にまとめ直した(%d件・%d字)msg=%s" % (len(taken) + 1, len(reply2), mid))
+        return reply2
+
     @staticmethod
     def _merge_coalesced(recs):
         """連投の断片を1便へ束ねる。★土台は**最後の便**(返信が最新の発言へ付くように)。"""
@@ -5280,6 +5381,9 @@ class Daemon:
                 #     共用の入口だからだ(向こうはキューを持たない=空のまま=何も起きない)。
                 self._lease_q = q
                 self._lease_qids = [c["id"]] + [e[0]["id"] for e in extra]
+                # ★返す直前の束ね(_coalesce_after_run)がここへ結果を置く(2026-08-13)。
+                #   毎回まっさらにする=前の便の掴みかけを持ち越して二重ackしない。
+                self._post_coalesced, self._post_coalesced_raw = [], []
                 # ★実占有の申告(リースは予告でしかない・BUSY_DIR の説明)。
                 #   ここは ack より前=**ackが終わるまでマーカーは生きている**(外側finallyで消す)。
                 self._busy_write(mid)
@@ -5297,6 +5401,10 @@ class Daemon:
                     # ★束ねた便も**全部**キューへ返す(1本でも取り落とすと無言で消える)
                     for e in extra:
                         q.nack(e[0]["id"])
+                    # ★返す直前に掴んだ続きの便も返す(2026-08-13。配送に失敗した=誰にも答えていない)
+                    for cc in (getattr(self, "_post_coalesced", None) or []):
+                        q.nack(cc["id"])
+                    self._post_coalesced, self._post_coalesced_raw = [], []
                     # ★同じ巡回で拾い直さない(breakして寝かせる)。nackはリースを即解放するため、
                     #   continueにすると同一ループで再claimされ、CLI連打+失敗文の連投になる(実測)。
                     self._relay_hold_until = time.time() + RELAY_HOLD_SEC
@@ -5306,6 +5414,12 @@ class Daemon:
                 q.ack(c["id"], result="キャラ応答" if ok else "失敗(main回送済)")
                 for e in extra:
                     q.ack(e[0]["id"], result="集約(1本にまとめて応答)")
+                # ★返す直前に束ねた続きの便(2026-08-13)。1本の返信で答え済み=ackする。
+                #   ★raw は下の PROCESSED へも入れる(jsonl経路が同じ便へ二重に返さないため)。
+                for cc in (getattr(self, "_post_coalesced", None) or []):
+                    q.ack(cc["id"], result="集約(返す直前に1本へ束ねた)")
+                if getattr(self, "_post_coalesced_raw", None):
+                    frag_raws = list(frag_raws) + list(self._post_coalesced_raw)
                 if not ok:  # jsonl側drainと同じ安全網: 失敗はmain箱へ
                     with open(MAIN_INBOX, "a", encoding="utf-8") as f:
                         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
