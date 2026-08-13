@@ -859,6 +859,19 @@ QUEUE_DB_WD = os.path.join(LOCAL, "queue", "inbox.db")
 DEAD_ALERT_COOLDOWN_SEC = 60 * 60  # デッドレター通知は1時間に1回まで(暴走ガード)
 
 
+def queue_db_path():
+    """DLQ系の警報が読むキューDBの在りか。**差し替え点**(2026-08-14 イージス研究室)。
+
+    ★これは検査のための継ぎ目だ。理由= 滞留(stale)の警報は「滞留が0件だと発火しない」ため、
+      本番DBをそのまま読む形では**入力を作れず**、検査がソースの文字列一致へ落ちていた
+      (共通規律§3= それは検査ではなく保険。本番の初発火が実質の初検証になる)。
+      → 読む先を1関数に切り出し、検査側が**滞留が在る状態の偽DB**を渡して
+        判定・本文・宛先を**実行で**通せるようにする(HQ裁定 2026-08-14・2部門で連続2回の指摘)。
+    ★本番の挙動は変わらない(既定は従来どおり local/queue/inbox.db)。
+    """
+    return QUEUE_DB_WD
+
+
 def dead_letter_summary():
     """DLQ(status='dead')の総数・dept内訳・**最大id**。読み取り専用・fail-open(DB不在/ロックで0)。
 
@@ -867,11 +880,12 @@ def dead_letter_summary():
       (net-zero)警報が黙る穴があった。dead行のidは単調増加=**過去の最大idより大きいdead**が
       現れたら「新しい隔離が起きた」と確実に言える(件数の増減に一切左右されない)。
     """
-    if not os.path.exists(QUEUE_DB_WD):
+    db = queue_db_path()
+    if not os.path.exists(db):
         return 0, {}, 0
     try:
         import sqlite3
-        con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         try:
             con.execute("PRAGMA busy_timeout=1000")
             rows = con.execute(
@@ -898,11 +912,12 @@ ORPHAN_ALERT_COOLDOWN_SEC = 60 * 60
 
 def orphan_pending_summary():
     """一度も配送されていないpending行のdept内訳と最古の滞留秒数。読み取り専用・fail-open。"""
-    if not os.path.exists(QUEUE_DB_WD):
+    db = queue_db_path()
+    if not os.path.exists(db):
         return {}
     try:
         import sqlite3
-        con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         try:
             con.execute("PRAGMA busy_timeout=1000")
             rows = con.execute(
@@ -1020,11 +1035,12 @@ def stale_dead_summary():
     ★status は 'dead' のまま動かさない= 既存の件数・台帳の意味を変えないため。
     戻り値: (件数, {dept: 件数}, 最古の滞留秒数, Chami発の件数)
     """
-    if not os.path.exists(QUEUE_DB_WD):
+    db = queue_db_path()
+    if not os.path.exists(db):
         return 0, {}, 0, 0
     try:
         import sqlite3
-        con = sqlite3.connect(f"file:{QUEUE_DB_WD}?mode=ro", uri=True, timeout=2)
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         try:
             con.execute("PRAGMA busy_timeout=1000")
             rows = con.execute(
