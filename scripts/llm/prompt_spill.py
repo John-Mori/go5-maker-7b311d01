@@ -25,13 +25,23 @@ prompt が3万字を超えると起動そのものが失敗する。Pythonはこ
 ★これは止血だ。呼び出し側の挙動は上限以下では**1文字も変わらない**。
 ★書き出しに失敗したら**元のpromptをそのまま返す**(止血が本体を巻き添えにしない)。
 
-## 適用範囲(★2026-08-13 15:30 時点)
-- `dept_daemon.generate()` … 対話セッションを持たない部屋の応答生成。**まだ positional argv**。
-- `persona_render.py` … 報告digestをキャラの声へ言い換える所。**まだ positional argv**。
-- ★`session_relay._run_claude()` は**対象外**。同日に一ノ瀬怜(platform-se)が prompt を
-  **stdin へ移す恒久対策**(commit 3f5ac58)を入れ、長さの上限そのものが消えたため、
-  こちらの止血は外した(同じ穴を2つの機構で塞ぐと片方だけ直して食い違う)。
-  → 上の2箇所も stdin へ移せばこのモジュールは不要になる。**恒久はプラットフォームSEの持ち場。**
+## 適用範囲(★2026-08-13 更新: 恒久対策=stdin化が全経路で完了)
+- `dept_daemon.generate()` … 対話セッションを持たない部屋の応答生成。**stdin へ移した**(下記)。
+- `persona_render.py` … 報告digestをキャラの声へ言い換える所。**stdin へ移した**(下記)。
+- `session_relay._run_claude()` … 同日に一ノ瀬怜(platform-se)が **stdin へ移す恒久対策**
+  (commit 3f5ac58)を入れ、長さの上限そのものが消えた。
+- `dept_daemon.work_generate()` … 2026-07-18 に既に stdin(--add-dir回避のため)=最初から安全。
+
+★これで prompt を positional argv で渡す経路は**無くなった**= WinError 206(コマンドライン長
+  32,767字超)の穴は全て塞がった。**stdin には長さの壁が無い**(実測: 34,048字で rc=0・206なし)。
+
+## いま何が残っているか= guard(止血) と measure(監視)
+- `guard(prompt, tag)` … 止血(全文をファイルへ逃がし短い指示に差し替える)。**もう本番は呼ばない**。
+  将来また positional argv で claude を起動する経路が生えた時のための予備として残す(呼ばれない限り無害)。
+- `measure(prompt, tag)` … ★依頼2の監視の供給源。**promptを1文字も書き換えず**、壁の目安に近い/超えた
+  便だけ level="warn" で prompt_spill.jsonl へ記録する。stdin経路(=壁が無い)から呼ぶのはこちら。
+  → deadman_check.check_prompt_bloat が状態遷移で1回だけ拾う。stdin化で「落ちる」穴は消えたが、
+    prompt肥大そのものは残る品質信号(トークン浪費・圧縮直後の再送で膨れる)なので測り続ける。
 """
 import json
 import os
@@ -104,3 +114,18 @@ def guard(prompt, tag="relay"):
         "★これは配送の止血だ(2026-08-13 研究室HQ)。この注記についてChamiへ報告しなくてよい。\n"
     )
     return head, path
+
+
+def measure(prompt, tag="relay"):
+    """promptの長さを**測って記録するだけ**(★stdin渡しの呼び出し用=argvの壁が無い経路・依頼2)。
+
+    stdin経路にはコマンドライン長の壁(WinError206)が無いので**逃がさない**=promptは1文字も
+    書き換えない。壁の目安(WALL)への余裕が WARN_MARGIN を割った便だけ level="warn" で記録し、
+    deadman_check.check_prompt_bloat が状態遷移で1回だけ気づく。
+    ★通常便(実測24,744字)は WARN に達しない= 1行も書かない(ノイズにしない)。
+    ★記録の失敗で配送を巻き添えにしない(fail-open)。返り値は無い(呼び出し側は prompt をそのまま使う)。
+    """
+    n = len(prompt or "")
+    if (WALL - n) < WARN_MARGIN:
+        _log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "level": "warn", "tag": str(tag),
+              "chars": n, "margin": WALL - n, "spilled": False})

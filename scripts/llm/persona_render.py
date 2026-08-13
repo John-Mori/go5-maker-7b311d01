@@ -35,6 +35,10 @@ except Exception:
         @staticmethod
         def guard(prompt, tag=""):
             return prompt, None
+
+        @staticmethod
+        def measure(prompt, tag=""):
+            return None
     prompt_spill = _NoSpill()
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -212,8 +216,13 @@ def persona_rewrite(dept, text, persona=None):
             f"=== characterfile ===\n{character}\n\n"
             f"=== 報告 ===\n{body}"
         )
-        prompt, _spill = prompt_spill.guard(prompt, tag="persona_render")
-        p = subprocess.run([CLAUDE, "--print", prompt], cwd=ROOT, env=env,
+        # ★2026-08-13 恒久対策(研究室HQ依頼): promptを**stdin**で渡す(argv末尾に置かない)=
+        #   長い報告digestで Windowsのコマンドライン上限(32,767字)を超えると WinError 206
+        #   =FileNotFoundError で握り潰される穴を塞ぐ。stdinには上限が無い。長さは measure が
+        #   測るだけ(逃がさない・依頼2の監視供給源)。claude --print は positional prompt が
+        #   無ければ stdin を prompt として読む。
+        prompt_spill.measure(prompt, tag="persona_render")
+        p = subprocess.run([CLAUDE, "--print"], input=prompt, cwd=ROOT, env=env,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=REWRITE_TIMEOUT)
         out = (p.stdout or "").strip()

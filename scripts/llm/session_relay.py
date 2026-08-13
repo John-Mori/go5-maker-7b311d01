@@ -3209,7 +3209,7 @@ def _char_fingerprint(conf):
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
-def relay(dept, rec, conf, token, is_work=False, on_slow=None):
+def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=None):
     """新着1件を、その部屋の永続セッションへ**原文のまま**渡す。
 
     戻り値 (reply_text, ok)。
@@ -3223,6 +3223,15 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None):
         判定を2箇所に置くと必ず片方が古くなる(ORG-11)。
       ★on_slow が失敗しても**待ちは続く**(通知の失敗で便を落とさない)。
       ★on_slow を渡さなくても `slow` の記録(request_log.jsonl)は残る=黙って消えない。
+
+    on_main_start(2026-08-13・省略可): **前処理(事前圧縮・引き継ぎ生成)が全部終わり、
+      これから本走の _run_claude を回す**という瞬間に**1便につき1回だけ**呼ばれる
+      `f(hard_sec)`。呼び元(dept_daemon)がキューのリースを張り直すために使う。
+      ★なぜ要るか= リースは relay の hard しか見ておらず、同じ claim の中で走る前処理を
+        1秒も数えていない。前処理が長い便だけリースが先に切れて「暇」に見え、
+        daemon_keeper の載せ替えに殺される(2026-08-13 15:27:49 の実測。詳細は下の呼び出し地点)。
+      ★渡さなくても挙動は1ミリも変わらない(キューを使わない呼び元のため)。
+      ★ここで例外が出ても本走は続ける(通知の失敗で便を落とさない)。
 
     is_work(2026-07-26): デーモンの一次判定が「作業依頼」と見た便。
       - 封筒の末尾へ短い注記が付く(build_envelope)
@@ -3510,6 +3519,24 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None):
 
     boot = _boot_prompt(dept, conf, generation or 1)
     boot_hash = hashlib.sha256(boot.encode("utf-8")).hexdigest()[:16]
+
+    # ★★ここが「前処理の終わり=本走の始まり」だ(2026-08-13 イージス研究室・HQ恒久依頼1)。
+    #   この行より上で走るのは前処理= ①事前圧縮(実測 約200秒) ②事前交代の引き継ぎ生成
+    #   (上限 HANDOFF_TIMEOUT=420秒) ③封筒・起動文の組み立て。
+    #   下は本走= _run_claude を hard(会話600/作業1200秒)まで待つ区間。
+    #   ★2026-08-13 の事故= 呼び元(dept_daemon)のキューのリースは **relayのhardしか見ていない**ため、
+    #     前処理に1,619秒中419秒を使った便が走行中に「暇」へ戻り、daemon_keeper の載せ替え波に
+    #     15:27:49 killされた(20分ぶんの返信が送信の1秒前に消えた)。
+    #   → **前処理の長さをリースに食わせない**= 本走に入る瞬間に呼び元へ「今から本走だ」と伝え、
+    #     呼び元が LeaseQueue.extend() でリースを張り直す。これで「便が重いほど殺される」が消える。
+    #   ★ここでキューを直接触らない理由= session_relay はキューを知らない(呼び元だけが qid を持つ)。
+    #     知らせるだけにしておけば、jsonl経路など**キューを使わない呼び元でも1ミリも変わらない**。
+    #   ★失敗しても本走は続ける(通知の失敗で便を落とさない= on_slow と同じ作法)。
+    if on_main_start is not None:
+        try:
+            on_main_start(hard)
+        except Exception as e:
+            _log(dept, f"本走の合図に失敗({type(e).__name__})=本走はそのまま続ける")
 
     try:
         if sid:

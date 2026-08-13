@@ -133,6 +133,10 @@ except Exception:
         @staticmethod
         def guard(prompt, tag=""):
             return prompt, None
+
+        @staticmethod
+        def measure(prompt, tag=""):
+            return None
     prompt_spill = _NoSpill()
 
 POLL_SEC = 3                    # 箱の見張り間隔(waiterの2秒に準拠した軽さ)
@@ -168,6 +172,25 @@ WORK_TIMEOUT = 600             # ツール付き作業(work_generate)の上限
 #   (発注の「リトライを増やさない」に真っ向から反する)。
 #   → session_relay を使う部屋の claim だけ「hard + この余白」までリースを伸ばす。
 #   ★伸ばす副作用= デーモンが死んだ時の再配達が その分だけ遅れる。二重作業より遅延の方が軽い。
+# ★★2026-08-13 300 → 900(研究室HQの止血)。実測した事故=
+#   `DISPATCH-hq-1786600848694` は 15:00:50 に claim され、リースは hard(1200)+300= **1500秒**
+#   = 15:25:50 まで。ところが**便の占有は1,619秒**だった=
+#     交代の判定 → **引き継ぎの生成 420秒**(15:00:52→15:07:52) → 本走 1,197秒(→15:27:49)。
+#   リースが**便より119秒短い**ので、走っている最中に「暇」へ戻り、
+#   daemon_keeper の載せ替え波が **15:27:49 に hq をkill**(keeperの記録=
+#   `local/_daemon_keeper.log`「載せ替えた27体: hq,…」「処理中の便が在るので次の周回へ回す:
+#   aegis-gl,system-engineer,platform-se」= hqだけ暇に見えていた)。
+#   結果= 20分かけた返信が**送信の1秒前に消えた**(便自体は status='pending' で残るので再配達される)。
+#   ★穴の形= このリースは **relayのhardしか見ていない**。交代の引き継ぎ生成・事前圧縮は
+#     同じclaimの中で走るのに1秒も数えられていない。→ 余白でその前処理を包む。
+#   900の根拠= 前処理の最悪(事前圧縮 約200秒 + 引き継ぎ生成の上限 420秒 ≒ 650秒)+ 余裕250秒。
+# ★★2026-08-13(同日)900 → **300へ戻した**(イージス研究室。HQ恒久依頼1の恒久策を入れたため)。
+#   恒久策= **本走を始める瞬間にリースを張り直す**(session_relay.relay の `on_main_start` →
+#   下の `_on_main_start` → `LeaseQueue.extend()`)。リースの起点が前処理の後ろへ動くので、
+#   **前処理の長さがリースを食わない**=余白で前処理を包む必要そのものが消えた。
+#   ★余白の意味はここで 2026-07-27 の元の意味へ戻る= 「hard(1200秒)を跨がせないための余白」。
+#   ★2つを二重に塞いだままにしない(片方だけ直されて食い違うのを防ぐ・HQの指示)。
+#   ★戻した副作用= デーモンが本当に死んだ時の再配達が最大35分→最大25分へ縮む(良い方向)。
 QUEUE_LEASE_MARGIN = 300
 # ★セッション配送(session_relay)が失敗した部屋を、次の試行まで寝かせる秒数(2026-07-25)。
 #   なぜ要るか= nackした便はリースが即解放されるので、2秒間隔のポーリングだと**同じ巡回の中で**
@@ -3926,12 +3949,15 @@ class Daemon:
         )
         env = dict(os.environ)
         env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
-        # ★2026-08-13 止血(研究室HQ): promptがWindowsのコマンドライン上限(32,767字)を超えると
-        #   CreateProcessが WinError 206 を返し、Pythonは**FileNotFoundError**として投げる
-        #   =「ファイルが無い」に見える起動失敗になる(session_relay側で実害を実測)。
-        #   上限を超える時だけ全文をファイルへ逃がす。上限以下では1文字も変わらない。
-        prompt, _spill = prompt_spill.guard(prompt, tag=f"daemon_{self.dept}")
-        p = subprocess.run([CLAUDE, "--print", prompt], cwd=ROOT, env=env,
+        # ★2026-08-13 恒久対策(研究室HQ依頼): promptを**stdinで渡す**(argv末尾に置かない)。
+        #   argvに置くと長い便で Windowsのコマンドライン上限(32,767字)を超え CreateProcess が
+        #   WinError 206 を返し、Pythonは**FileNotFoundError**として投げる=「ファイルが無い」に
+        #   見える起動失敗で便が握り潰される(実障害=DISPATCH-system-engineer-1786575652694)。
+        #   stdinにはこの上限が無い(実測: 34,048字で rc=0・206なし)。claude --print は positional
+        #   prompt が無ければ stdin を prompt として読む(同dept_daemon.work_generate と同じ形)。
+        #   長さは prompt_spill.measure が測るだけ(逃がさない=書き換えない・依頼2の監視供給源)。
+        prompt_spill.measure(prompt, tag=f"daemon_{self.dept}")
+        p = subprocess.run([CLAUDE, "--print"], input=prompt, cwd=ROOT, env=env,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=PRINT_TIMEOUT)
         raw = (p.stdout or "").strip()
@@ -4561,6 +4587,37 @@ class Daemon:
                 #     (「実作業と見た/違えば会話でよい」)だけ=全部fail-open側で無害。
                 #   ★キーワードは増やさない(自然文では必ず再発・2026-07-20実測)。部屋の性質で倒す。
                 _is_work = kw_work or bool(self.conf.get("work_scope"))
+
+                # ★★本走に入る瞬間にリースを張り直す(2026-08-13 イージス研究室・HQ恒久依頼1)。
+                #   事故= `DISPATCH-hq-1786600848694` は 15:00:50 claim・リース1500秒(hard1200+余白300)
+                #     だったが、**便の実占有は1,619秒**(交代の判定→引き継ぎ生成419秒→本走1,197秒)。
+                #     リースが便より119秒短く、走行中に「暇」へ戻って daemon_keeper の載せ替えに
+                #     15:27:49 killされた=20分ぶんの返信が送信の1秒前に消えた。
+                #   ★穴の形= リースは relay の hard しか見ておらず、**同じclaimの中で走る前処理
+                #     (事前圧縮・引き継ぎ生成)を1秒も数えていない**。だから重い便ほど殺される。
+                #   → 前処理が終わって本走へ入る所で `LeaseQueue.extend()` を1回呼び、
+                #     リースの起点を**本走の開始時刻**へ動かす。前処理の長さがリースを食わなくなるので、
+                #     余白(QUEUE_LEASE_MARGIN)を前処理ぶん膨らませる必要そのものが消える(=止血を外せる)。
+                #   ★束ねた便(coalesce)も**全部**張り直す。1本でも切れると、その行だけ
+                #     再配達されて同じ連投へ二度応答する。
+                #   ★キューが無い経路(jsonl drain・手動実行)は `_lease_qids` が空=**何もしない**。
+                #   ★失敗しても本走は止めない(リースの更新に失敗しただけで便を落とさない= fail-open)。
+                def _on_main_start(hard_sec, _mid=mid):
+                    q = getattr(self, "_lease_q", None)
+                    qids = list(getattr(self, "_lease_qids", None) or [])
+                    if q is None or not qids:
+                        return
+                    okn = 0
+                    for _qid in qids:
+                        try:
+                            if q.extend(_qid):
+                                okn += 1
+                        except Exception as e:
+                            log(self.dept, f"リース張り直しに失敗({type(e).__name__}) qid={_qid}")
+                    log(self.dept,
+                        "本走の開始でリースを張り直した: %d/%d件 (hard=%s秒・リース=%s秒) msg=%s"
+                        % (okn, len(qids), int(hard_sec), int(getattr(q, "lease_sec", 0)), _mid))
+
                 if failopen_inject(rec):
                     # ★検証用の注入(failopen_inject の docstring 参照)。**relayを呼ばない**=
                     #   生きた消費者に一切触れずに `_relay_ok=False` の枝だけを1回通す。
@@ -4570,7 +4627,8 @@ class Daemon:
                         f"★fail-open検証: relay不成立を注入した(実セッションは呼んでいない) msg={mid}")
                 else:
                     reply, _relay_ok = session_relay.relay(self.dept, rec, self.conf, self._token(),
-                                                           is_work=_is_work, on_slow=_on_slow)
+                                                           is_work=_is_work, on_slow=_on_slow,
+                                                           on_main_start=_on_main_start)
                 # ★成功した時だけ「本人が答えた」印を立てる(送信名義から(精霊)を外すため)。
                 #   失敗して精霊の口で詫びる時は立てない=印の意味を保つ。
                 self._relay_answered = bool(_relay_ok)
@@ -5207,7 +5265,16 @@ class Daemon:
                                 ("[検証便] " + _ev) if rec.get("test") else _ev)
                         except Exception:
                             pass
-                ok = self.handle(rec, json.dumps(rec, ensure_ascii=False))
+                # ★本走の開始でリースを張り直すために、いま抱えている行のidを handle へ渡す
+                #   (2026-08-13・上の `_on_main_start` が読む。束ねた便も全部入れる)。
+                #   ★引数を増やさずインスタンス変数にしているのは、handle() が jsonl経路とも
+                #     共用の入口だからだ(向こうはキューを持たない=空のまま=何も起きない)。
+                self._lease_q = q
+                self._lease_qids = [c["id"]] + [e[0]["id"] for e in extra]
+                try:
+                    ok = self.handle(rec, json.dumps(rec, ensure_ascii=False))
+                finally:
+                    self._lease_q, self._lease_qids = None, []
                 # ★セッション受け渡し(パイロット2部屋)の配送失敗だけは **ack せず nack**
                 #   (2026-07-25)。ackは「処理し終えた」の意味なので、渡せていない便に押すと
                 #   偽の完了になる。nackならリースが解放され、LeaseQueueの再配達に乗る
