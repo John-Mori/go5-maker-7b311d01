@@ -2333,7 +2333,11 @@
     if (opts.scheduledAt) entry.plannedAt = opts.scheduledAt;
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
     if (opts.attrs) attrDefs_().forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
-    manual.push(entry);
+    // ★新規完了行は必ず先頭へ置く。末尾へpushすると、既存200件時にsaveArrFor_のslice(0,200)が
+    // 今追加した201件目そのものを捨て、投稿完了しても履歴に載らなかった(2026-08-13・INC-131)。
+    // 記録の正はシートなので、上限時は最古のローカルキャッシュだけを押し出し、最新行を確実に残す。
+    // この境界はtests/e2e/smoke.spec.jsの200件実導線テストで固定する。
+    manual.unshift(entry);
     saveArrFor_('verify_manual', acc, manual);
     // saveArrFor_ は履歴消失防止のため例外を握る設計だが、投稿完了だけは「保存できた」と確認してから
     // ドラフトを退避させる必要がある。QuotaExceeded等で実保存されなければ失敗を返し、stock側がドラフトを残す。
