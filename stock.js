@@ -279,6 +279,26 @@
   }
 
   // ── サムネ取得(canvas最終フレームを小さいJPEGに) ──
+  // ★canvas.toBlob は iOS Safari で「コールバックを一度も呼ばない」ことがある(メモリ逼迫・タブ非活性・
+  //   巨大canvas等)。その時この Promise は永久に settle せず、saveStock_ も settle しない=生成後の
+  //   .then(goDraft_) が発火せず「✅ドラフトを作成しました は出るのにドラフトタブへ遷移しない」に化ける
+  //   (Chami報告2026-08-13・月詠みで再現。※アカウント分岐は無い=どのchでも起こりうる沈黙経路)。
+  //   必ずタイムアウトで null に倒す=可用性は喋る側へ(§3 最悪の事故は沈黙)。サムネ/プレビューが取れない時は
+  //   一覧・遷移を止めず、画像は mirror(雲)/backfill で後追いする(既存のfail-open設計と同じ握り)。
+  function toBlobSafe_(canvas, type, quality, timeoutMs) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var finish = function (b) { if (done) return; done = true; resolve(b || null); };
+      var timer = setTimeout(function () {
+        try { if (window.console && console.warn) console.warn('[stock] canvas.toBlob がタイムアウト=nullで続行(遷移は止めない)'); } catch (_) {}
+        finish(null);
+      }, timeoutMs || 6000);
+      try {
+        canvas.toBlob(function (b) { clearTimeout(timer); finish(b); }, type, quality);
+      } catch (e) { clearTimeout(timer); finish(null); }
+    });
+  }
+
   function captureThumb_() {
     try {
       var cv = $('cv');
@@ -287,9 +307,7 @@
       var W = 90, H = Math.round(90 * cv.height / cv.width);
       c.width = W; c.height = H;
       c.getContext('2d').drawImage(cv, 0, 0, W, H);
-      return new Promise(function (resolve) {
-        c.toBlob(function (b) { resolve(b); }, 'image/jpeg', 0.5);
-      });
+      return toBlobSafe_(c, 'image/jpeg', 0.5, 6000);
     } catch (e) { return Promise.resolve(null); }
   }
 
@@ -300,9 +318,7 @@
     try {
       var cv = $('cv');
       if (!cv || !cv.width) return Promise.resolve(null);
-      return new Promise(function (resolve) {
-        cv.toBlob(function (b) { resolve(b); }, 'image/jpeg', 0.85);
-      });
+      return toBlobSafe_(cv, 'image/jpeg', 0.85, 6000);
     } catch (e) { return Promise.resolve(null); }
   }
   function blobToDataUrl_(blob, cb) {
@@ -1525,7 +1541,9 @@
       // 生成完了で動画作成タブ→ドラフトタブへ自動遷移(Chami依頼2026-08-13「前は遷移してた、戻して」)。
       //   ★ボタンの click 経由(tabStock.click)に依存せず、ドラフトページ(Stock.html)へ明示遷移する=
       //     配線変更や他ハンドラの割り込みで遷移が黙って止まらないようにする。既にドラフトページ上なら再描画のみ。
+      var _navigated = false;
       var goDraft_ = function () {
+        if (_navigated) return; _navigated = true; // 保険のタイマとsaveStock_完了で二重遷移しない
         if (window.__go5StockStandalone) { render(); return; }
         try { location.href = 'Stock.html'; }
         catch (e2) { var tb = $('tabStock'); if (tb) tb.click(); else render(); }
@@ -1533,12 +1551,21 @@
       // ★saveStock_ が「同期例外」を投げた場合、.then/.catch のどちらにも乗らず遷移が黙って消える
       //   (=動画は録れているのにドラフトタブへ移らない・Chami報告2026-08-13 月詠み)。try で囲い、
       //   同期例外でも必ず goDraft_ へ抜ける=生成後の自動遷移をどんな失敗でも止めない(§3 沈黙が最悪)。
+      // ★さらに saveStock_ 内の非同期処理(toBlob/IDB書込)が「settleしない」で固着しても遷移が消える。
+      //   メタは saveStock_ 冒頭で同期保存済み(一覧には必ず出る)ので、8秒以内に完了しなければ遷移を先行する
+      //   =生成後の遷移をどんな沈黙でも止めない。blob/サムネは mirror/backfill が後追いで効かせる。
+      var navTimer = setTimeout(function () {
+        try { if (window.console && console.warn) console.warn('[stock] saveStock_ が8秒以内に完了せず=遷移を先行(メタは保存済み)'); } catch (_) {}
+        goDraft_();
+      }, 8000);
       try {
-        saveStock_(detail).then(goDraft_).catch(function (err) {
+        saveStock_(detail).then(function () { clearTimeout(navTimer); goDraft_(); }).catch(function (err) {
+          clearTimeout(navTimer);
           alert('ドラフト保存に失敗しました: ' + (err ? err.message || String(err) : '不明なエラー'));
           goDraft_(); // メタは saveStock_ 内で先に保存済み=一覧には出るので、blob 保存が転んでも遷移はする
         });
       } catch (err2) {
+        clearTimeout(navTimer);
         try { if (window.console && console.warn) console.warn('[stock] saveStock_ 同期例外・遷移は続行:', err2 && (err2.message || err2)); } catch (_) {}
         goDraft_();
       }
