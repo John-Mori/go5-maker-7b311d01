@@ -1456,6 +1456,16 @@
       if (pv) { pv.workShortUrl = edited.workShortUrl || ''; pv.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm); }
       try { pushItemToGas_(edited); } catch (e) {}
     });
+    // ★シート由来行でも、作品URLがあって導線2が空なら投稿完了と同じく作品URLから発行する(サブ端末の自己修復)。
+    //   この経路は従来 autoMeasureWorkShort_(空欄no-op)だけで mint が無く、サブ端末では編集保存しても
+    //   導線2が永久に空だった(空欄再発の一因)。ローカル行編集の :1374 と同条件。意図的クリア/手入力は尊重。
+    if (!edited.workShortNone && !((workShortVal || '').trim()) && !((edited.workShortUrl || '').trim()) && /^https?:\/\//.test((edited.workUrl || '').trim())) {
+      mintWorkShortAtPost_(edited, function () {
+        var pm2 = _pendingSheetEdits[curAcct]; var pv2 = pm2 && pm2[String(edited.videoId)];
+        if (pv2) { pv2.workShortUrl = edited.workShortUrl || ''; pv2.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm2); }
+        try { pushItemToGas_(edited); } catch (e) {}
+      });
+    }
 
     // ── ここから裏方(非ブロッキング): GASへupsert→履歴再読込で反映を確認。失敗時だけ静かに通知する。──
     var finished = false, verifyStarted = false;
@@ -1562,12 +1572,23 @@
         var aff = window.buildAffiliateLink(wurl, afId);
         if (aff && aff.ok && aff.link) toShorten = aff.link;
       }
-      window.Go5MakeShort(toShorten).then(function (res) {
-        if (!(res && res.shortUrl && isR2(res.shortUrl))) return;
-        it.workShortUrl = res.shortUrl; it.workShareUrl = res.shareUrl || res.shortUrl;
-        if (typeof persist === 'function') persist();
-        if (acct() === chForItem_(it)) refresh(); // 作品クリック(ピンク矢印)がこの再描画で出る
-      });
+      // ★一発勝負をやめ、一過性の失敗(コールドスタート/瞬断/429)を3回・指数バックオフで自己回復する
+      //   (draft側 mintDraftWorkShort_ と対称)。この保険mintが無言で落ちると欄が空のまま=空欄再発の一因。
+      //   既に埋まっていたら再試行しない。account=その行の所属chドメインで発行(取り違え防止)。
+      var acc2 = chForItem_(it), tries = 0;
+      (function attempt_() {
+        if (it.workShortUrl || it.workShortNone) return;
+        tries++;
+        var retry_ = function () { if (tries < 3) setTimeout(attempt_, tries * 1500); };
+        try {
+          window.Go5MakeShort(toShorten, { account: acc2 }).then(function (res) {
+            if (!(res && res.shortUrl && isR2(res.shortUrl))) { retry_(); return; }
+            it.workShortUrl = res.shortUrl; it.workShareUrl = res.shareUrl || res.shortUrl;
+            if (typeof persist === 'function') persist();
+            if (acct() === chForItem_(it)) refresh(); // 作品クリック(ピンク矢印)がこの再描画で出る
+          }).catch(retry_);
+        } catch (e) {}
+      })();
     } catch (e) {}
   }
 
@@ -2311,7 +2332,27 @@
       if (!matched.videoId && vidId) { matched.videoId = vidId; changed = true; }
       if (!matched.ytUrl && ytUrl) { matched.ytUrl = ytUrl; changed = true; }
       if (!matched.shortUrl && shortUrl) { matched.shortUrl = shortUrl; changed = true; }
+      // ★復元→再完了/二度押しの完了(=dupe)でも導線2欄を埋める。従来はここでworkUrl/workShortUrlを
+      //   一切埋めず・mintも呼ばず return していたため、再完了経路では欄が構造的に永久に空だった(空欄再発の一因)。
+      //   空欄のみ非破壊で埋め、意図的クリア(workShortNone)は尊重。r2(計測キー)のみ採用。
+      if (!matched.workUrl && opts.workUrl) { matched.workUrl = opts.workUrl; changed = true; }
+      var _go5d = window.Go5Short || {};
+      if (!matched.workShortUrl && !matched.workShortNone && opts.workShortUrl && _go5d.ourBase && _go5d.ourBase(opts.workShortUrl)) {
+        matched.workShortUrl = String(opts.workShortUrl);
+        matched.workShareUrl = String(opts.workShareUrl || opts.workShortUrl);
+        changed = true;
+      }
       if (changed) { try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {} }
+      // 値で埋まらず、作品URLはあるのに導線2が空なら、この行の作品URLから発行して埋める(離脱に強い保険)。
+      //   persist は matched の所属ストアへ保存し、matched自身のvideoIdキーでシートへupsert(新規行は作らない)。
+      if (matched.workUrl && !matched.workShortUrl && !matched.workShortNone) {
+        try {
+          mintWorkShortAtPost_(matched, function () {
+            try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {}
+            try { pushItemToGas_(matched); } catch (e) {}
+          });
+        } catch (e) {}
+      }
       if (acc === acct()) refresh();
       return { ok: false, reason: 'dupe', matchedBy: matchedBy, existing: { title: matched.title || '', videoId: matched.videoId || '', ts: matched.ts || 0 } };
     }
@@ -2322,6 +2363,17 @@
     if (opts.workUrl) entry.workUrl = opts.workUrl;
     if (shortUrl) entry.shortUrl = shortUrl;
     if (opts.shareUrl) entry.shareUrl = opts.shareUrl;
+    // ★導線2(作品クリック計測用短縮URL)を"値として"受ける=投稿モーダルで発行済みの短縮URLがここへ渡る。
+    //   保存(unshift/saveArrFor_)＆1回目 pushItemToGas_ より前に entry へ載せる=シート初回upsertで
+    //   work_short_url 列が埋まり、サブ端末へも「投げっぱなし再発行」に依存せず届く。計測キー(r2)の時だけ採用
+    //   (fallbackは下の mintWorkShortAtPost_ に委ねる)。これが導線2空欄の恒久対策(REQ-65c7897f2f他)。
+    if (opts.workShortUrl) {
+      var _go5w = window.Go5Short || {};
+      if (_go5w.ourBase && _go5w.ourBase(opts.workShortUrl)) {
+        entry.workShortUrl = String(opts.workShortUrl);
+        entry.workShareUrl = String(opts.workShareUrl || opts.workShortUrl);
+      }
+    }
     // post_id(=背骨ID)は idgen形式 `acc-YYYYMMDD-HHMM-rand` を正本にする。以前はここで opts.videoId が
     //   空だと YouTube動画ID(vid)を videoId＝post_id へ流用しており、シートの post_id 列に YouTube ID が
     //   そのまま入ってしまっていた(Chami指摘2026-07-31・ドラフト投稿モードで videoId 未伝搬の行が該当)。

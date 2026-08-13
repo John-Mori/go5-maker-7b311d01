@@ -1810,9 +1810,9 @@
   // ★短縮URL設定(var SHORT)はIIFE先頭へ移設した(2026-08-03・初期化中の use-before-assign 即死を根治)。
   //   workerBase/ourShortBase 等の関数はここに残す(関数宣言は巻き上げ済みで参照位置は不問)。
   // 投稿用ベースURL: 端末上書き(short_worker_url)が最優先→現アカウント別→既定。
-  function workerBase() {
+  function workerBase(account) {
     try { var ov = localStorage.getItem('short_worker_url'); if (ov) return ov; } catch (e) {}
-    var acc = (typeof acctId === 'function') ? acctId() : 'acc1';
+    var acc = account || ((typeof acctId === 'function') ? acctId() : 'acc1');
     return SHORT.URL_BY_ACCT[acc] || SHORT.WORKER_URL;
   }
   // 「そのURLは自前の短縮ドメインか?」一致したベースを返す(両ドメイン+旧r2+端末上書きに対応)。
@@ -1854,13 +1854,16 @@
   //   従来はワーカーfetchが①タイムアウト無し(ブラウザ既定まで待つ)②失敗即あきらめ で、コールドスタート/瞬断/429の
   //   一瞬のブレでも da.gd(計測不能・外部依存)が「確定リンク」として保存されていた。→ 6秒タイムアウト＋1回だけ再試行。
   //   400(host_not_allowed)/401(bad_secret)/403(origin)は宛先・鍵・オリジンの確定的な拒否＝再試行しても同じなので即あきらめる。
-  function shortenViaWorker(longUrl, _tries) {
+  //   ★第3引数 account を足した(2026-08-13・導線2の空欄恒久対策)。別チャンネルのドラフトを開いた状態で
+  //     短縮すると、従来は現UIアカウントのドメイン(5mgl.com/yoz2.com)で発行され、そのドラフトの所属chと
+  //     ドメインが食い違い=別々に計測できない。account 指定時はそのchのドメインで発行する(未指定=従来どおり現ch)。
+  function shortenViaWorker(longUrl, _tries, account) {
     if (!shortWorkerReady()) return Promise.resolve('');
     _tries = _tries || 0;
     var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 6000) : null;
-    function retryOr(v) { return (_tries >= 1) ? v : shortenViaWorker(longUrl, _tries + 1); }
-    return fetch(workerBase().replace(/\/+$/, '') + '/api/shorten', {
+    function retryOr(v) { return (_tries >= 1) ? v : shortenViaWorker(longUrl, _tries + 1, account); }
+    return fetch(workerBase(account).replace(/\/+$/, '') + '/api/shorten', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Shared-Secret': SHORT.SHARED_SECRET },
       body: 'url=' + encodeURIComponent(longUrl),
@@ -1919,9 +1922,11 @@
   // 最終URL → { shortUrl(r2・計測用), shareUrl(短い共有・表示用) } を返す。
   //   r2成功時：shortUrl=r2、shareUrl=プロバイダで短縮したr2URL。計測は常にr2側で行う。
   //   全プロバイダ失敗時：shareUrl=r2。(長いが有効)r2失敗時：従来フォールバックで計測不可。(shortUrl=shareUrl)
-  function makeShortAndShare(longUrl) {
+  //   ★opts.account 指定時はそのチャンネルのドメインで r2 短縮を発行する(未指定=現UIアカウント・従来動作)。
+  function makeShortAndShare(longUrl, opts) {
     if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '' });
-    return shortenViaWorker(longUrl).then(function (r2) {
+    var account = opts && opts.account;
+    return shortenViaWorker(longUrl, 0, account).then(function (r2) {
       if (r2) {
         if (!USE_DAGD_CHAIN) return { shortUrl: r2, shareUrl: r2 };
         return shortenShare(r2).then(function (sh) { return { shortUrl: r2, shareUrl: (sh || r2) }; });

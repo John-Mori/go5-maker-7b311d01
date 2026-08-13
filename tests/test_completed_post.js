@@ -55,15 +55,38 @@ function visibleForDupe(existingList) {
   return (existingList || []).filter(function (it) { return it && !it.manualOnly; });
 }
 
+// --- 自前短縮ドメイン判定のミラー(yt-clicks.js: Go5Short.ourBase=5mgl.com/yoz2.com/旧r2) ---
+//   導線2(作品クリック計測URL)は「計測キー=自前短縮(r2)」の時だけ採用する。da.gd/tinyurl 等の
+//   フォールバックは計測不能なので採らず、完了時mint(リトライ付)へ委ねる。
+function isOurShort(u) { return /^https?:\/\/(5mgl\.com|yoz2\.com)\//i.test(String(u || '')); }
+
+// --- 新規完了行への導線2ハンドオフのミラー(yt-clicks.js: opts.workShortUrl を"値として"entryへ載せる) ---
+//   投稿モーダルで発行済みの導線2短縮URLが渡ってくる=シート初回upsertより前にentryへ載る=空欄の恒久対策。
+//   計測キー(r2)の時だけ採用。
+function adoptWorkShortForEntry(entry, opts) {
+  const out = Object.assign({}, entry);
+  if (opts.workShortUrl && isOurShort(opts.workShortUrl)) {
+    out.workShortUrl = String(opts.workShortUrl);
+    out.workShareUrl = String(opts.workShareUrl || opts.workShortUrl);
+  }
+  return out;
+}
+
 // --- dupe時の非破壊バックフィルのミラー(yt-clicks.js: matched行の"空欄だけ"を今回値で埋める) ---
 //   videoId無し既存行(手動追加/リビルド前)にYouTube/短縮URL一致で当たったら、空の videoId/ytUrl/shortUrl を
 //   今回値で埋める=次回から videoId で照合が揃い「行は在るのに載らなかった」誤報が構造的に消える。
+//   ★導線2の workUrl/workShortUrl も空欄のみ埋める(復元→再完了でも欄が埋まる)。意図的クリア(workShortNone)は尊重。
 //   既に値のある欄は上書きしない(統合＝削除でない・破壊しない)。
 function backfillRow(matched, incoming) {
   const out = Object.assign({}, matched);
   if (!out.videoId && incoming.videoId) out.videoId = incoming.videoId;
   if (!out.ytUrl && incoming.ytUrl) out.ytUrl = incoming.ytUrl;
   if (!out.shortUrl && incoming.shortUrl) out.shortUrl = incoming.shortUrl;
+  if (!out.workUrl && incoming.workUrl) out.workUrl = incoming.workUrl;
+  if (!out.workShortUrl && !out.workShortNone && incoming.workShortUrl && isOurShort(incoming.workShortUrl)) {
+    out.workShortUrl = String(incoming.workShortUrl);
+    out.workShareUrl = String(incoming.workShareUrl || incoming.workShortUrl);
+  }
   return out;
 }
 
@@ -138,6 +161,29 @@ test('B-2: 既に値のある欄は上書きしない(統合＝削除でない�
   const out = backfillRow(matched, { videoId: 'acc1-NEW', shortUrl: 'https://5mgl.com/new' });
   assert.strictEqual(out.videoId, 'acc1-OLD');
   assert.strictEqual(out.shortUrl, 'https://5mgl.com/keep');
+});
+
+// ── 導線2(作品クリック計測URL)の空欄恒久対策 ──────────────
+test('W-1: 新規完了行に、モーダル発行済みの導線2短縮URL(r2)が値として載る=シート初回から埋まる', function () {
+  const out = adoptWorkShortForEntry({ id: 'm:1', videoId: 'acc1-A' }, { workShortUrl: 'https://5mgl.com/wk9z', workShareUrl: 'https://5mgl.com/wk9z' });
+  assert.strictEqual(out.workShortUrl, 'https://5mgl.com/wk9z');
+  assert.strictEqual(out.workShareUrl, 'https://5mgl.com/wk9z');
+});
+test('W-2: 計測不能なフォールバック短縮(da.gd等)は導線2に採らない=完了時mint(リトライ)へ委ねる', function () {
+  const out = adoptWorkShortForEntry({ id: 'm:1' }, { workShortUrl: 'https://da.gd/abcd' });
+  assert.strictEqual(out.workShortUrl, undefined);
+});
+test('W-3: 復元→再完了(dupe)でも、空だった導線2欄を今回の短縮URL(r2)で埋める', function () {
+  const out = backfillRow({ videoId: 'acc1-A', workUrl: 'https://book.dmm.co.jp/product/x/' }, { workShortUrl: 'https://yoz2.com/pp7', workShareUrl: 'https://yoz2.com/pp7' });
+  assert.strictEqual(out.workShortUrl, 'https://yoz2.com/pp7');
+});
+test('W-4: 意図的に消した行(workShortNone)は dupe バックフィルで復活させない', function () {
+  const out = backfillRow({ videoId: 'acc1-A', workShortNone: true }, { workShortUrl: 'https://5mgl.com/zz' });
+  assert.strictEqual(out.workShortUrl, undefined);
+});
+test('W-5: 既に導線2が入っている行は上書きしない(統合＝破壊しない)', function () {
+  const out = backfillRow({ videoId: 'acc1-A', workShortUrl: 'https://5mgl.com/keep' }, { workShortUrl: 'https://5mgl.com/new' });
+  assert.strictEqual(out.workShortUrl, 'https://5mgl.com/keep');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

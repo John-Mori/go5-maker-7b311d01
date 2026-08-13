@@ -587,6 +587,10 @@
           shortUrl: shortUrl || '',
           title: meta.title || '',
           workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
+          // ★投稿モーダルで既に発行・保存済みの導線2短縮URL(X本文に実際に貼ったコード)を"値として"渡す。
+          //   これで完了時の非同期再発行(離脱で消える)に頼らず一発で欄が埋まる=空欄の恒久対策(REQ-65c7897f2f他)。
+          workShortUrl: (pd.workShortUrl || '').trim(),
+          workShareUrl: (pd.workShareUrl || '').trim(),
           videoId: meta.videoId || '',
           scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
           attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
@@ -1049,8 +1053,29 @@
       pubMode:   curPubMode_(),          // 'now' | 'scheduled'(YouTube公開のタイミング)
       pubSlot:   _pickedSlot || null,    // 予約投稿で選んだカレンダー公開枠(任意)
     };
+    // ★導線2の計測用短縮URL(mintDraftWorkShort_ が発行して残す正本フィールド)は、この本文保存で
+    //   握り潰さないよう既存レコードから引き継ぐ(dataに項目が無いとJSON全置換で消える=空欄再発の穴)。
+    try {
+      var _ex0 = JSON.parse(localStorage.getItem('go5_draft_post_' + _modalMeta.id) || '{}') || {};
+      ['workShortUrl', 'workShareUrl', 'workShortFor'].forEach(function (f) { if (_ex0[f] && !data[f]) data[f] = _ex0[f]; });
+    } catch (e) {}
     try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
     kickSync_(); // 投稿編集も全端末へ運ぶ
+  }
+
+  // 導線2(作品クリック計測用短縮URL)の発行結果だけを go5_draft_post_ へ非破壊マージ保存する。
+  //   ★saveDraftPost_ は呼ばない=モーダルDOM全体を読み直して未編集の xText='' で上書きし「空=未編集」
+  //   ロジックを壊すため。この専用ヘルパで該当3フィールドだけ書き、既存の本文編集には触れない。
+  function saveDraftWorkShortField_(id, obj) {
+    try {
+      var k = 'go5_draft_post_' + id;
+      var sv = JSON.parse(localStorage.getItem(k) || '{}') || {};
+      var changed = false;
+      ['workShortUrl', 'workShareUrl', 'workShortFor'].forEach(function (f) {
+        if (obj[f] && sv[f] !== obj[f]) { sv[f] = obj[f]; changed = true; }
+      });
+      if (changed) { localStorage.setItem(k, JSON.stringify(sv)); kickSync_(); }
+    } catch (e) {}
   }
 
   // ★投稿本文の「正」= 投稿タブのテキストボックス(テンプレ帳の本文・アカウント別)。Chami指定2026-07-31:
@@ -1124,11 +1149,23 @@
   // ①短縮URL置換：このドラフトの作品アフィリンクの短縮を発番し、X本文の生リンク/プレースホルダを短縮へ差し替える。
   //   ・発番は非同期(Go5MakeShort=makeShortAndShare)。302素通しでaf_idは保持=クリック計測は壊れない。
   //   ・モーダルが別作品へ切り替わっていたら書かない(_modalMeta !== meta)。失敗時は生リンク/プレースホルダのまま(何も壊さない)。
-  var _shortMintCache = {}; // aff → shareUrl(同一作品の二重発番を避ける)
+  var _shortMintCache = {}; // aff → { shortUrl(r2・計測用), shareUrl(表示用) }(同一作品の二重発番を避ける)
   function mintDraftWorkShort_(meta) {
     var aff = (meta && (meta.affiliateUrl || meta.workUrl) || '').trim();
     if (!aff || !window.Go5MakeShort) return;
-    function applyShare_(share) {
+    // ★発行結果(r2)を go5_draft_post_ の正本フィールドとして残す=これが導線2空欄の恒久対策の核心。
+    //   従来は短縮URLをX本文とメモリ内キャッシュにしか書かず、投稿完了時はyt-clicks側の"投げっぱなし再発行"
+    //   だけが頼りで、ページ離脱/一過性失敗で無言に落ちると欄が永久に空になっていた(REQ-65c7897f2f他)。
+    //   ここでX本文に実際に貼るコードそのものを保存する=完了時に値として渡り、本文/履歴/シートが三点一致する。
+    function persistWorkShort_(res) {
+      if (_modalMeta !== meta || !res) return;
+      var go5 = window.Go5Short || {};
+      if (!(go5.ourBase && res.shortUrl && go5.ourBase(res.shortUrl))) return; // 計測キー(r2)のみ永続化。fallbackは完了時mint(リトライ付)へ委ねる
+      saveDraftWorkShortField_(meta.id, { workShortUrl: res.shortUrl, workShareUrl: res.shareUrl || res.shortUrl, workShortFor: aff });
+    }
+    function applyShare_(res) {
+      persistWorkShort_(res);
+      var share = (res && (res.shareUrl || res.shortUrl)) || '';
       if (!share || _modalMeta !== meta) return;
       var el = $('draftXText'); if (!el) return;
       var v = el.value, nv = v;
@@ -1150,16 +1187,16 @@
     if (_shortMintCache[aff]) { applyShare_(_shortMintCache[aff]); return; }
     // ★短縮発番(link-worker=Go5MakeShort)が一度失敗すると、以前は無言catchで諦め「(商品紹介短縮URL)」が
     //   埋まらないまま固まった(Chami報告2026-08-13②)。一過性の失敗を数回リトライ(指数バックオフ)して自己回復する。
-    //   別作品へ切り替わったら止める。3回で諦める。
+    //   別作品へ切り替わったら止める。3回で諦める。account=そのドラフトのchドメインで発行(取り違え防止)。
     var tries = 0;
     (function attempt_() {
       if (_modalMeta !== meta) return;
       tries++;
       var retry_ = function () { if (tries < 3 && _modalMeta === meta) setTimeout(attempt_, tries * 1500); };
       try {
-        window.Go5MakeShort(aff).then(function (r) {
+        window.Go5MakeShort(aff, { account: meta.account }).then(function (r) {
           var share = (r && (r.shareUrl || r.shortUrl)) || '';
-          if (share) { _shortMintCache[aff] = share; applyShare_(share); return; }
+          if (share) { _shortMintCache[aff] = { shortUrl: (r && r.shortUrl) || '', shareUrl: (r && r.shareUrl) || '' }; applyShare_(_shortMintCache[aff]); return; }
           retry_();
         }).catch(retry_);
       } catch (e) {}
