@@ -225,13 +225,14 @@ def main():
             print("%.0f\t%s" % (os.path.getmtime(p), os.path.relpath(p, ROOT)))
         return 0
 
-    # ★ps1が読む形= name<TAB>最新mtime<TAB>最新file<TAB>sha1<TAB>最終コミットepoch。1行1常駐。
-    #   mtime=「編集が落ち着いたか」/ sha1=「版が変わったか」/ コミット時刻=「記録が無い相手」用。
+    # ★ps1が読む形= name / 最新mtime / 最新file / sha1 / 最終コミットepoch / 未コミットの最新mtime。
+    #   mtime=「編集が落ち着いたか」/ sha1=「版が変わったか」/ 後ろ2つ=「控えが無い相手」の判定用。
     for name, rel in SUPERVISED:
         epoch, who = version_of(rel)
-        print("%s\t%.0f\t%s\t%s\t%.0f" % (name, epoch,
-                                          os.path.relpath(who, ROOT) if who else "-",
-                                          code_hash(rel), git_commit_epoch(rel)))
+        print("%s\t%.0f\t%s\t%s\t%.0f\t%.0f" % (name, epoch,
+                                                os.path.relpath(who, ROOT) if who else "-",
+                                                code_hash(rel), git_commit_epoch(rel),
+                                                dirty_mtime(rel)))
     return 0
 
 

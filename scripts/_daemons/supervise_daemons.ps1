@@ -77,9 +77,9 @@ try {
   $verLines = & python (Join-Path $root 'scripts\_daemons\daemon_code_version.py')
   foreach ($ln in $verLines) {
     $parts = "$ln".Split("`t")
-    if ($parts.Count -ge 5) {
+    if ($parts.Count -ge 6) {
       $codeVer[$parts[0]] = @{ Epoch = [double]$parts[1]; File = $parts[2]; Hash = $parts[3]
-                               Commit = [double]$parts[4] }
+                               Commit = [double]$parts[4]; Dirty = [double]$parts[5] }
     }
   }
 } catch { Write-SupLog ("code version: error ({0})" -f $_.Exception.Message) }
@@ -112,6 +112,11 @@ foreach ($d in $daemons) {
       if ($cv.Commit -gt 0 -and $cv.Commit -gt $startEpoch) {
         $stale = $true
         $why = ('no record; closure committed {0}s after this pid started' -f [int]($cv.Commit - $startEpoch))
+      } elseif ($cv.Dirty -gt $startEpoch) {
+        # Uncommitted edit written after this pid started: commit time cannot see it.
+        # Measured 2026-08-13: office_daily (up 14.9 days) was wrongly adopted this way.
+        $stale = $true
+        $why = ('no record; uncommitted edit {0}s after this pid started' -f [int]($cv.Dirty - $startEpoch))
       } else {
         Set-Content -LiteralPath $verFile -Value $cv.Hash -Encoding ASCII
         Write-SupLog ("{0}: adopted running pid {1} at code version {2}" -f $d.Name, $procs[0].ProcessId, $cv.Hash)
@@ -119,6 +124,12 @@ foreach ($d in $daemons) {
     } elseif ($loaded -ne $cv.Hash) {
       $stale = $true
       $why = ('loaded {0}, now {1}, newest {2}' -f $loaded, $cv.Hash, $cv.File)
+    }
+    if ($stale -and (($nowEpoch - $cv.Epoch) -lt $codeDebounceSec `
+        -or ($nowEpoch - $startEpoch) -lt $codeMinAgeSec)) {
+      # Say so. A floor that holds silently is indistinguishable from a check that never ran -
+      # that confusion is the whole reason this mechanism exists.
+      Write-SupLog ("{0}: stale code held by floor (edit {1}s ago, pid up {2}s)" -f $d.Name, [int]($nowEpoch - $cv.Epoch), ($nowEpoch - $startEpoch))
     }
     if ($stale -and ($nowEpoch - $cv.Epoch) -ge $codeDebounceSec `
         -and ($nowEpoch - $startEpoch) -ge $codeMinAgeSec) {

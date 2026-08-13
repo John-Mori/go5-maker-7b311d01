@@ -90,7 +90,11 @@ def main():
     # 8.5) 配線= 控えが無い相手は5列目(最終コミット時刻)で判定する。ここが繋がっていないと
     #      「この機構より前から走っているプロセス」= まさに今回の14.9日組が素通りする。
     check("ps1 が控え無しの判定に $cv.Commit(5列目)を使っている",
-          "$cv.Commit" in src and "$parts.Count -ge 5" in src)
+          "$cv.Commit" in src and "$parts.Count -ge 6" in src)
+
+    # 8.6) 控えが無い相手の2つ目の物差し= **未コミットの編集**。コミット時刻だけだと
+    #      「未コミットのまま14.9日走っている」を現行扱いで採用してしまう(office_daily で実測)。
+    check("ps1 が控え無しの判定に $cv.Dirty(6列目)も使っている", "$cv.Dirty" in src)
 
     # 9) 間引き= 連続改修で再起動が便を食い潰した 7/29 の事故を繰り返さない。
     #    daemon_keeper と同じ2つの下限(落ち着き90秒 / 同じ常駐は600秒に1回)を持つこと。
@@ -103,20 +107,28 @@ def main():
     out = subprocess.run([sys.executable, os.path.join(HERE, "daemon_code_version.py")],
                          capture_output=True, text=True, encoding="utf-8")
     lines = [l for l in out.stdout.splitlines() if l.strip()]
-    cols_ok = len(lines) == len(dcv.SUPERVISED) and all(len(l.split("\t")) >= 5 for l in lines)
-    check("出力が 1常駐1行・5列(name/mtime/file/sha1/commit)", cols_ok,
+    cols_ok = len(lines) == len(dcv.SUPERVISED) and all(len(l.split("\t")) >= 6 for l in lines)
+    check("出力が 1常駐1行・6列(name/mtime/file/sha1/commit/dirty)", cols_ok,
           "rc=%s 行=%d 例=%r" % (out.returncode, len(lines), lines[0] if lines else ""))
     if cols_ok:
-        name, _e, _f, sha, commit = lines[0].split("\t")[:5]
+        name, _e, _f, sha, commit, _dirty = lines[0].split("\t")[:6]
         check("4列目が閉包のsha1と一致する",
               sha == dcv.code_hash(dict(dcv.SUPERVISED)[name]), "出力=%s" % sha)
         # 11) 記録の無いプロセス用の物差し。0だと ps1 は「判定できない」として載せ替えない=
         #     ここが黙って0になると、15日古いプロセスを永久に見逃す(実際に5本居た)。
         check("5列目(最終コミットepoch)が取れている", float(commit) > 0, "出力=%s" % commit)
 
-    # 12) 配線= 記録の無いプロセスを最終コミット時刻で判定する経路が ps1 に在る
-    check("ps1 に「記録が無い相手」の判定(Commit)が在る",
-          "$cv.Commit" in src and "Commit = [double]$parts[4]" in src)
+    # 12) 配線= 記録の無いプロセスを最終コミット時刻＋未コミット編集で判定する経路が ps1 に在る
+    check("ps1 に「記録が無い相手」の判定(Commit/Dirty)が在る",
+          "Commit = [double]$parts[4]" in src and "Dirty = [double]$parts[5]" in src)
+
+    # 13) 未コミット判定そのもの= 汚れたファイルが1本も無ければ 0.0(=判定に使わない)
+    with tempfile.TemporaryDirectory(prefix="qa_dcv2_") as d:
+        os.makedirs(os.path.join(d, "scripts", "llm"))
+        a2 = os.path.join(d, "scripts", "llm", "a_entry.py")
+        open(a2, "w", encoding="utf-8").write("x = 1\n")
+        check("git管理外(status不能)なら未コミットmtimeは0=載せ替えの根拠にしない",
+              dcv.dirty_mtime(a2, root=d, import_dirs=[("scripts", "llm")]) == 0.0)
 
     print(("NG %d" % NG) if NG else "OK 全PASS")
     return 1 if NG else 0
