@@ -41,6 +41,7 @@
     if (/^go5_stock_meta$/.test(k)) return true;         // ドラフト一覧(id単位union・Chami依頼2026-07-31)
     if (/^go5_stock_archive$/.test(k)) return true;      // 作成履歴(投稿完了ぶん・id単位union・墓標なし・Chami依頼2026-08-03)
     if (/^go5_stock_del$/.test(k)) return true;          // ドラフト削除の墓標(端末をまたぐ削除の伝播)
+    if (/^go5_stock_arch_del$/.test(k)) return true;     // 作成履歴のpurge墓標(明示削除の伝播・cand_delと同型・2026-08-13)
     if (/^go5_draft_post_/.test(k)) return true;         // 下書きの投稿編集(per-id・LWW)
     if (Keys && Keys.syncAllowed(k)) return true;        // 本物の設定(レイアウト/本文/説明欄/af_id 等)
     return false;
@@ -254,10 +255,13 @@
   // 下書き(ドラフト)一覧＝1キーに配列を持つ。候補と同じく id 単位 union で「端末をまたいだ下書きを失わない」。
   function isStockArrayKey(k) { return /^go5_stock_meta$/.test(String(k)); }
   // 作成履歴(投稿完了ぶん)＝1キーに配列。id 単位 union で端末をまたいで完了作品を失わない。
-  //   ★墓標(go5_stock_del)は適用しない=完了作品は「meta から外れ archive に居る」状態が正しいので、
+  //   ★投稿完了の墓標(go5_stock_del)は適用しない=完了作品は「meta から外れ archive に居る」状態が正しいので、
   //     墓標で archive からも消すと2台目で完了作品が丸ごと消える(Chami依頼2026-08-03)。復活許容はテンプレ帳と同型。
+  //   ★ただし「ユーザーが明示削除(purge)」だけは go5_stock_arch_del(purge専用墓標)で completedTs 比較の上
+  //     適用し、削除を全端末へ伝播する=「削除しても union で復活する」を根治(Chami報告2026-08-13②)。
   function isStockArchiveKey(k) { return /^go5_stock_archive$/.test(String(k)); }
   function isStockDelKey(k) { return /^go5_stock_del$/.test(String(k)); }
+  function isArchDelKey(k) { return /^go5_stock_arch_del$/.test(String(k)); } // 作成履歴のpurge墓標(明示削除のみ)
   // 📝テンプレ帳(本文定型文・アカウント別)＝1キーに配列を持つ。候補/ドラフトと同じく union で
   //   「端末をまたいだ・空の端末で上書きした時に保存済みテンプレを失わない」(Chami依頼2026-08-02
   //   「保存した内容を消さずどの端末でも共有」)。id が無く name が実質の一意キーなので name で union。
@@ -590,7 +594,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -641,7 +645,7 @@
 
         // 墓標(cand_del / go5_stock_del / bsky_tpl_del)は両側にあれば id/name 単位で union。(片側の削除を失わない)
         Object.keys(mls).forEach(function (k) {
-          if (!isCandDelKey(k) && !isStockDelKey(k) && !isTplDelKey(k) && !isDiscDelKey(k)) return;
+          if (!isCandDelKey(k) && !isStockDelKey(k) && !isTplDelKey(k) && !isDiscDelKey(k) && !isArchDelKey(k)) return;
           var a = lmapLs[k], b = rls[k];
           if (a && b && !a.d && !b.d) {
             var u = mergeDelMap(a.v, b.v);
@@ -698,6 +702,13 @@
               var ddk = discDelKeyOf(k);
               var ddmerged = (mls[ddk] && !mls[ddk].d) ? mls[ddk].v : LS.getItem(ddk);
               finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(ddmerged || "{}", LS.getItem(ddk) || "{}")), "id", "at");
+            } else if (isStockArchiveKey(k)) {
+              // ★作成履歴は purge墓標(go5_stock_arch_del)だけを union の後に適用する。投稿完了の墓標(go5_stock_del)は
+              //   ここでも適用しない(2026-08-03 の2台目消失を再発させない)。completedTs>削除ts なら残す=purge後に
+              //   作り直して再度投稿完了した正当な復活は許す(cand_del の addedAt 越えと同流儀)。
+              var adk = "go5_stock_arch_del";
+              var admerged = (mls[adk] && !mls[adk].d) ? mls[adk].v : LS.getItem(adk);
+              finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(admerged || "{}", LS.getItem(adk) || "{}")), "id", "completedTs");
             }
           } else if (isScheduleStateKey(k)) {
             // 同期中にカレンダーが編集されても、開始時点の値で上書きせずライブ値を再統合する。
@@ -707,7 +718,7 @@
             // 同期中に宣言が増えても、開始時点の値で上書きせずライブ値と再union。(進行中の宣言を失わない)
             var up = mergePostedMap(e.v, live);
             if (up != null) finalV = up;
-          } else if (isCandDelKey(k) || isStockDelKey(k) || isTplDelKey(k) || isDiscDelKey(k)) {
+          } else if (isCandDelKey(k) || isStockDelKey(k) || isTplDelKey(k) || isDiscDelKey(k) || isArchDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
             if (u3 != null) finalV = u3;
@@ -898,7 +909,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_;

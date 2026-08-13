@@ -147,6 +147,24 @@
     } catch (e) {}
     kickSync_();
   }
+  // 作成履歴の「完全削除(purge)」専用墓標。(id→削除ts)★ユーザーが明示削除した時だけ打つ=全端末で復活させない。
+  //   作成履歴(go5_stock_archive)は「墓標なし・id単位union」で同期する設計(完了作品が2台目で消えない優先)。
+  //   その裏返しで purgeArchived_ が墓標を打たないと、削除しても次の同期で他端末/雲から union 復活する
+  //   =「削除を押しても消えない」(Chami報告2026-08-13②)。cand_del と同型の専用墓標で根治する。
+  //   ★投稿完了(archiveStock_)・ARCHIVE_MAX溢れでは絶対に打たない=容量都合の消滅は2台目で復活してよい
+  //     (2026-08-03「完了作品が消えない優先」を壊さないため)。適用は sync 側で completedTs>削除ts なら残す
+  //     =purge後に作り直して再度投稿完了した正当な復活は許す(cand_del の addedAt 越えと同流儀)。
+  var ARCH_DEL_TTL_MS = 180 * 24 * 3600 * 1000; // 180日で墓標をGC(archiveは30件で回転=復活源になる現実経路がほぼ無い)
+  function writeArchDel_(id) {
+    try {
+      var m = JSON.parse(localStorage.getItem('go5_stock_arch_del') || '{}') || {};
+      m[id] = Date.now();
+      var cut = Date.now() - ARCH_DEL_TTL_MS;
+      Object.keys(m).forEach(function (k) { if ((m[k] || 0) < cut) delete m[k]; }); // 追記のついでに古い墓標を掃除
+      localStorage.setItem('go5_stock_arch_del', JSON.stringify(m));
+    } catch (e) {}
+    kickSync_();
+  }
   function delBlobs_(id) {
     var store = idb();
     if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); store.del('stock_img_' + id).catch(function () {}); store.del('stock_prev_' + id).catch(function () {}); store.del('stock:imgs:' + id).catch(function () {}); }
@@ -307,6 +325,12 @@
       var W = 90, H = Math.round(90 * cv.height / cv.width);
       c.width = W; c.height = H;
       c.getContext('2d').drawImage(cv, 0, 0, W, H);
+      // ★90pxと軽いので、まず同期の toDataURL でサムネを確実に得る=iOS Safari の canvas.toBlob
+      //   コールバック不達で stock_t_ が保存されず「サムネが黒箱」になる沈黙経路を根絶(Chami報告2026-08-13①)。
+      //   同一オリジン(背景mp4＋ユーザー画像)なので toDataURL は taint で投げない。取れなければ従来の toBlob へ。
+      var durl = ''; try { durl = c.toDataURL('image/jpeg', 0.5); } catch (e) { durl = ''; }
+      var b = durl ? durlToBlobSync_(durl) : null;
+      if (b) return Promise.resolve(b);
       return toBlobSafe_(c, 'image/jpeg', 0.5, 6000);
     } catch (e) { return Promise.resolve(null); }
   }
@@ -334,6 +358,20 @@
   function durlToBlob_(durl) {
     if (!durl || typeof durl !== 'string' || durl.indexOf('data:') !== 0) return Promise.resolve(null);
     return fetch(durl).then(function (r) { return r.blob(); }).catch(function () { return null; });
+  }
+  // dataURL → Blob(同期・fetch非依存)。canvas.toDataURL の結果を非同期経路を一切通さずBlob化する
+  //   =iOS Safari の toBlob/fetch の沈黙経路を避けてサムネを確実に得る(Chami報告2026-08-13①の根治)。
+  function durlToBlobSync_(durl) {
+    try {
+      if (!durl || durl.indexOf('data:') !== 0) return null;
+      var i = durl.indexOf(','); if (i < 0) return null;
+      var head = durl.slice(0, i), body = durl.slice(i + 1);
+      var mime = (head.match(/data:([^;]+)/) || [])[1] || 'image/jpeg';
+      if (head.indexOf('base64') < 0) return null;
+      var bin = atob(body), n = bin.length, u8 = new Uint8Array(n);
+      for (var j = 0; j < n; j++) u8[j] = bin.charCodeAt(j);
+      return new Blob([u8], { type: mime });
+    } catch (e) { return null; }
   }
 
   // ── 保存 ──
@@ -384,6 +422,9 @@
     saveMeta(arr); // ← ここで一覧に載る(=自動遷移で必ず見える)。以降の blob 失敗は一覧を消さない。
     return capP.then(function (caps) {
       var thumbBlob = caps[0], prevBlob = caps[1];
+      // ★サムネが取れなかった時(canvas由来の取得が全滅)でも黒箱にしない=前景の元画像を代替サムネにする。
+      //   sourceImageFile は toBlob を通さず直接保存する実体なので沈黙経路が無い(Chami報告2026-08-13①の保険)。
+      if (!thumbBlob && evDetail.sourceImageFile) thumbBlob = evDetail.sourceImageFile;
       var store = idb();
       var ops = [];
       if (store) {
@@ -455,9 +496,15 @@
   }
 
   // 作成履歴から完全に削除(復元不可)。blob も消す。
+  //   ★墓標(go5_stock_arch_del)+作成履歴の書換を1トランザクションにして、揃った状態で1回だけ即時 push する
+  //     (archiveStock_ と同型。途中 push だと墓標だけ or archive だけ渡り、相手端末で復活/消失が割れる)。
+  //     これで「削除しても同期unionで復活する」を根治(Chami報告2026-08-13②)。
   function purgeArchived_(id) {
-    saveArchive(loadArchive().filter(function (m) { return m.id !== id; }));
-    delBlobs_(id);
+    batchSync_(function () {
+      writeArchDel_(id); // purge専用墓標=全端末で復活させない(cand_del と同型)
+      saveArchive(loadArchive().filter(function (m) { return m.id !== id; }));
+      delBlobs_(id);
+    });
   }
 
   // ── 動画本体の取得(実体が手元に無い2台目は ID→R2キー算出で取り寄せ・②2026-08-01)──
@@ -850,6 +897,9 @@
   }
 
   var _renderSeq = 0, _lastRenderedStockSig = '', _missingThumbs = {}, _stockBgPending = false;
+  // 作成履歴(details)の開閉状態を再描画をまたいで保持する。render毎に<details>を作り直すと
+  //   open属性が消えて閉じる=「削除を押すと作成履歴が閉じる」の真因(Chami報告2026-08-13③)。
+  var _archOpen = false;
   function stockViewSig_(acct) {
     try {
       var m = loadMeta().filter(function (x) { return (x.account || 'acc1') === acct; });
@@ -883,7 +933,7 @@
       html += '</div>';
       // ④作成履歴=投稿完了ぶんの退避リスト。ドラフト本体の下に折りたたみで置く(初期は閉じ・タップで開く)。
       if (arch.length) {
-        html += '<details style="margin-top:12px;">' +
+        html += '<details id="stkArchDetails"' + (_archOpen ? ' open' : '') + ' style="margin-top:12px;">' +
           '<summary style="cursor:pointer;font-size:.86rem;font-weight:700;color:var(--sub);padding:11px 14px;background:var(--card);border:1px solid var(--line);border-radius:12px;">🗂 作成履歴(投稿完了ぶん・' + arch.length + '件) — タップで開く/復元</summary>' +
           '<div class="card" style="margin-top:8px;">' +
           arch.map(function (m) { return renderArchItem_(m, thumbFor[m.id]); }).join('') +
@@ -912,9 +962,17 @@
         }
         // 実体が無い端末(2台目)=同期で来た stock:imgs ミラーの dataURL からサムネを出す(①-B)
         return store.get('stock:imgs:' + m.id).then(function (mir) {
-          var du = mir && mir.th;
+          var du = mir && (mir.th || mir.prev || mir.src);
           if (du) { _thumbCache[m.id] = du; return du; }
-          return null;
+          // ★サムネ(stock_t_)もミラーも無い=過去に toBlob 不達で黒箱になったカードを、
+          //   仕上がりプレビュー→元画像 の順に拾って救う(既存の黒箱も開くだけで埋まる・Chami報告2026-08-13①)。
+          return store.get('stock_prev_' + m.id).then(function (pb) {
+            if (pb) { _thumbCache[m.id] = URL.createObjectURL(pb); return _thumbCache[m.id]; }
+            return store.get('stock_img_' + m.id).then(function (ib) {
+              if (ib) { _thumbCache[m.id] = URL.createObjectURL(ib); return _thumbCache[m.id]; }
+              return null;
+            }).catch(function () { return null; });
+          }).catch(function () { return null; });
         }).catch(function () { return null; });
       }).catch(function () { return null; });
     });
@@ -1639,6 +1697,12 @@
     // ドラフトタブのボタン操作(event delegation)
     var page = $('pageStock');
     if (page) {
+      // 作成履歴(details)の開閉をユーザー操作から拾って保持する(toggleはbubbleしないのでcaptureで拾う)。
+      //   これで再描画(削除/復元など)後もrenderが open を復元し、開いたまま維持できる。
+      page.addEventListener('toggle', function (e) {
+        var d = e.target;
+        if (d && d.id === 'stkArchDetails') _archOpen = !!d.open;
+      }, true);
       page.addEventListener('click', function (e) {
         var btn = e.target;
         if (!btn || !btn.dataset || !btn.dataset.id) return;

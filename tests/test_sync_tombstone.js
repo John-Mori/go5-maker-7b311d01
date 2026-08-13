@@ -92,6 +92,22 @@ eq("archive union で両端末の完了作品を保持",
 //   (sync本体の墓標適用は isStockArrayKey/isCandArrayKey に限定=archiveは対象外なので、ここでは分類のみ検証)
 ok("archiveは墓標適用の分類に含めない", !S.isStockArrayKey("go5_stock_archive") && !S.isCandArrayKey("go5_stock_archive"));
 
+// ── 作成履歴の purge墓標(go5_stock_arch_del)＝明示削除だけ全端末へ伝播(Chami報告2026-08-13②) ──
+ok("isArchDelKey", S.isArchDelKey("go5_stock_arch_del") && !S.isArchDelKey("go5_stock_del") && !S.isArchDelKey("go5_stock_archive"));
+// completedTs<=削除ts の完了作品は purge墓標で除外する(=削除が同期unionで復活しない)。
+var archUni = S.unionByField('[{"id":"h1","completedTs":100}]', '[{"id":"h2","completedTs":100}]', "id");
+ok("archive unionで一旦両方復活", JSON.parse(archUni).length === 2);
+eq("purge墓標で h1 だけ除外(completedTs<=削除ts)",
+   JSON.parse(S.applyTombstone(archUni, { h1: 150 }, "id", "completedTs")),
+   [{ id: "h2", completedTs: 100 }]);
+// purge後に作り直して再投稿完了(completedTs>削除ts)は残す=正当な復活を許す。
+eq("purge後の再投稿完了は残る(completedTs>削除ts)",
+   JSON.parse(S.applyTombstone(JSON.stringify([{ id: "h1", completedTs: 999 }]), { h1: 150 }, "id", "completedTs")),
+   [{ id: "h1", completedTs: 999 }]);
+// 両端末の purge墓標は union して片側の削除を失わない。
+eq("purge墓標を両端末でunion(ts大きい方)",
+   JSON.parse(S.mergeDelMap('{"h1":150}', '{"h1":120,"h2":300}')), { h1: 150, h2: 300 });
+
 // ── unionCand フィールド統合: newer に欠けた作品URLは older から保持する(作品URL消失の根治) ──
 eq("union newerにurl無→olderのurlを保持",
    JSON.parse(S.unionCand('[{"cid":"a","url":"https://x/works/a/","price":500}]', '[{"cid":"a","price":400}]')),
