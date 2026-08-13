@@ -100,12 +100,22 @@ def make_db(rows):
         """
     )
     now = time.time()
-    for i, (dept, status, age_sec, result, body) in enumerate(rows):
-        con.execute(
-            "INSERT INTO queue (msg_id, dept, body, enqueued_at, deliveries, status, result) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (f"M-{i}", dept, body, now - age_sec, 5, status, result),
-        )
+    for i, row in enumerate(rows):
+        # ★6つ目に id を書くと、その id で入る(=**投函順と死ぬ順がずれた状態**を作れる)。
+        dept, status, age_sec, result, body = row[:5]
+        rid = row[5] if len(row) > 5 else None
+        if rid is None:
+            con.execute(
+                "INSERT INTO queue (msg_id, dept, body, enqueued_at, deliveries, status, result) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (f"M-{i}", dept, body, now - age_sec, 5, status, result),
+            )
+        else:
+            con.execute(
+                "INSERT INTO queue (id, msg_id, dept, body, enqueued_at, deliveries, status, result) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (rid, f"M-{i}", dept, body, now - age_sec, 5, status, result),
+            )
     con.commit()
     con.close()
     return path
@@ -176,6 +186,38 @@ def main():
           all(d not in depts4 for d in ["aegis-gl", "llm-qa", "platform-se"]))
     check("基準idが前進していなければ鳴らない(二度鳴りしない)",
           fire(aw.check_dead_letters, dict(st4, last_dead_alert=0), db=db) == [])
+    check("告知した id が集合として残る(次の周回の判定材料)",
+          sorted(st4.get("dead_announced_ids") or []) == sorted(with_db(db, aw.dead_ids)))
+
+    # --- A-3b ★順序の穴(HQ発注 msg 1537539162083823732)。
+    #     id は**投函順**に振られ、dead は**5回失敗した後**に落ちる= 先に入った便が
+    #     後から入った便より遅れて死ぬと、その id は基準より小さく、高水位1本では永久に黙る。
+    db3 = make_db([
+        ("aegis-gl", "dead", 2 * H, "", '{"author": "someone"}', 10),   # 既に告知済みの古いdead
+        ("llm-qa", "dead", 2 * H, "", '{"author": "someone"}', 50),     # ★後から死んだ**小さいid**
+        ("router", "pending", 1 * H, "", '{"author": "someone"}', 120),  # 基準を押し上げた新しい便
+    ])
+    print(f"  偽DBの実測(順序の穴): dead id= {sorted(with_db(db3, aw.dead_ids))} / 基準は100")
+    st5 = {"dead_announced_ids": [10], "last_dead_max_id": 100, "last_dead_alert": 0}
+    sent5 = fire(aw.check_dead_letters, st5, db=db3)
+    body5 = sent5[0][1] if sent5 else ""
+    check("★★基準(100)より小さい id=50 の dead でも鳴る(順序の穴が塞がっている)",
+          [c for c, _ in sent5] == [aw.SUMMARY_DEPT, "hq"])
+    check("本文に新規idが出る(どの便が死んだかを2室で読める)", "新規id 50" in body5)
+    check("鳴った後は id=50 も告知済みに入る(二度鳴りしない)",
+          50 in (st5.get("dead_announced_ids") or [])
+          and fire(aw.check_dead_letters, dict(st5, last_dead_alert=0), db=db3) == [])
+    check("★基準idは下げない(purgeで二度鳴りしない従来の性質を保つ)",
+          int(st5.get("last_dead_max_id") or 0) == 100)
+    check("既に告知済みの古い dead(id=10)だけなら鳴らない",
+          fire(aw.check_dead_letters,
+               {"dead_announced_ids": [10, 50], "last_dead_max_id": 100, "last_dead_alert": 0},
+               db=db3) == [])
+    # ★移行(1回だけ)= 集合がまだ無い本番の state を、旧い高水位から**翻訳**して引き継ぐ。
+    st6 = {"last_dead_max_id": 100, "last_dead_alert": 0}
+    check("移行= 集合が無くても、基準以下の現deadは告知済みとして黙る(過去分で鳴らない)",
+          fire(aw.check_dead_letters, st6, db=db3) == []
+          and sorted(st6.get("dead_announced_ids") or []) == [10, 50])
 
     # --- A-4 DB不在は fail-open で黙る(監視自体が落ちない) ---
     check("キューDBが無くても例外を投げず黙る(fail-open)",

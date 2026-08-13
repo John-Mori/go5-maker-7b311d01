@@ -961,6 +961,32 @@ def check_orphan_pending(state, dry_run):
         state["last_orphan_alert"] = now_epoch
 
 
+def dead_ids():
+    """dead 行の **id の集合**。読み取り専用・fail-open(DB不在/ロックで空集合)。
+
+    ★2026-08-14 イージス研究室(HQ発注 msg 1537539162083823732)。
+      なぜ「集合」が要るか= 高水位(last_dead_max_id)1本では**順序の穴**が塞げない。
+      id は**投函順**に振られるが、dead に落ちるのは**5回配送に失敗した後**だ。
+      = 先に入った便が後から入った便より**遅れて死ぬ**と、その id は基準より小さく、
+        `max_id <= last_id` で**永久に黙る**(基準は purge 対策で下げない設計のため)。
+      「告知済みの id を持つ」形にすれば、基準を下げずに順序の穴も塞げる。
+    """
+    db = queue_db_path()
+    if not os.path.exists(db):
+        return set()
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        try:
+            con.execute("PRAGMA busy_timeout=1000")
+            rows = con.execute("SELECT id FROM queue WHERE status='dead'").fetchall()
+        finally:
+            con.close()
+        return {int(r[0]) for r in rows if r[0] is not None}
+    except Exception:
+        return set()
+
+
 def check_dead_letters(state, dry_run):
     """毒メッセージ(max_deliveries超過でdead隔離)が黙って消えるのを防ぐ=**遷移時**の速報(60s周期)。
 
@@ -976,25 +1002,39 @@ def check_dead_letters(state, dry_run):
     """
     total, by, max_id = dead_letter_summary()
     # ★last_dead_count は weekly_metrics.py が現在のdead件数として読む=毎周期同期させておく
-    #   (判定には使わない。判定は下の max_id の前進のみ)。
+    #   (判定には使わない。判定は下の「告知済みidの集合」のみ)。
     state["last_dead_count"] = total
     if total == 0:
         return
-    if "last_dead_max_id" not in state:
-        # ★新コードの初回=既存deadを**基準として黙って取り込む**(告知しない)。
-        #   デプロイ時点で既に隔離済みの行は「新しい隔離」ではないため。以後 id>基準 だけ鳴らす。
+    ids = dead_ids()
+    if not ids:
+        return                       # 集合が引けない(DBロック等)=fail-open で黙る
+    # ★★2026-08-14 判定を「最大idの前進」から**「告知済みidの集合」**へ替えた(順序の穴・上の dead_ids)。
+    #   ★集合は**現に dead な行だけ**を毎回書き戻す= 際限なく太らない(purge済みの id は自然に落ちる)。
+    if "dead_announced_ids" in state:
+        known = {int(x) for x in (state.get("dead_announced_ids") or [])}
+    elif "last_dead_max_id" in state:
+        # 移行(1回だけ)= 旧い高水位を**集合へ翻訳する**。基準以下の現dead行は「告知済み」とみなす。
+        #   ★以後 last_dead_max_id は判定に使わない(互換のため書き続けるだけ)。
+        known = {i for i in ids if i <= int(state.get("last_dead_max_id") or 0)}
+        # ★★翻訳した結果を**その場で凍結する**。ここを毎周回やり直すと
+        #   「基準より小さい id は常に告知済み」= **順序の穴がそのまま残る**(直す意味が消える)。
+        state["dead_announced_ids"] = sorted(known)
+    else:
+        # ★新コードの初回=既存deadを**黙って取り込む**(告知しない)。
+        #   デプロイ時点で既に隔離済みの行は「新しい隔離」ではないため。
+        state["dead_announced_ids"] = sorted(ids)
         state["last_dead_max_id"] = max_id
         return
-    last_id = state.get("last_dead_max_id", 0)
-    if max_id <= last_id:
-        # 新しい隔離は無い。★基準idは下げない(purgeで一時的にmax_idが下がっても、
-        #   既に告知済みの古いdeadを新規と誤認して二度鳴らさないため)。
-        return
+    fresh = sorted(i for i in ids if i not in known)
+    if not fresh:
+        return                       # 新しい隔離は無い(★件数にも id の大小にも左右されない)
     now_epoch = time.time()
     if now_epoch - state.get("last_dead_alert", 0) < DEAD_ALERT_COOLDOWN_SEC:
         return
     detail = "、".join(f"{dept_ja(d, with_slug=True)}={n}" for d, n in by.items()) or "(内訳不明)"
-    msg = (f"⚠デッドレターが新たに発生(現在計{total}件): {detail}。"
+    newly = "・".join(str(i) for i in fresh[:10]) + ("…" if len(fresh) > 10 else "")
+    msg = (f"⚠デッドレターが新たに発生(現在計{total}件・新規id {newly}): {detail}。"
            "5回配送しても処理できずキューに隔離されたメッセージです。"
            "毒メッセージ(壊れた本文/対応不能な依頼)か、宛先部門の長期不在・配送処理の例外が原因。"
            "中身を見る: `python scripts/queue/dlq_tool.py --list`。"
@@ -1013,7 +1053,9 @@ def check_dead_letters(state, dry_run):
             sent = True
     if sent:
         state["last_dead_alert"] = now_epoch
-        state["last_dead_max_id"] = max_id
+        # ★告知できた時だけ更新する(送信に失敗した便は次の周回で必ずもう一度拾う)。
+        state["dead_announced_ids"] = sorted(ids)
+        state["last_dead_max_id"] = max(max_id, int(state.get("last_dead_max_id") or 0))
 
 
 # --- ★★2026-08-12 dead が「増えない限り二度と鳴らない」穴を塞ぐ(イージス研究室/KPI A1) ---
