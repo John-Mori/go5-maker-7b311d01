@@ -86,6 +86,41 @@ def touch(name):
         f.write(now + "\n")
 
 
+LAB_OWNER_PID = os.path.join(LOCAL, "llm", "lab_owner_pid.txt")
+
+
+def claim_lab_owner(name):
+    """`--name main` で武装した時、**自分を起こした claude.exe のPID**を1行だけ残す。
+
+    なぜ(2026-08-13 イージス研究室・C-044の2件目):
+      presence hook(pulse_touch.py)は「自分が研究室(main)か」を判定できないと liveness の脈を
+      打てない。旧実装はそれを**手で名乗る札**(lab_session_id.txt)に頼っており、部屋の
+      作り替えで名乗りが途切れた 2026-07-20 19:22 以降 **23.9日間、脈が黙って止まっていた**
+      (コードは1行も壊れていない=条件が切れただけで機能が消えた)。
+    なぜPIDか:
+      司令塔の定義は「耳を `--name main` で武装している窓」だ。その武装をしたのは私であり、
+      私の先祖の claude.exe こそが司令塔本体。**文字列ではなく親子関係**なので、
+      他の部屋のセッションが真似できない(★transcriptの文字列で判定する案を実際に走らせたら、
+      この機能をデバッグしていた aegis-gl のセッションが自分を司令塔と誤認した=実測で棄却した)。
+      待ち受けは配達のたびに自了するので、**生きている間の一度だけ書いて置いていく**形にする。
+    fail-open: 解決できなければ何も書かない(=hook側は打たない=従来動作へ退化)。
+    """
+    if name != "main":
+        return 0
+    try:
+        sys.path.insert(0, HERE)
+        from session_rooms import owner_session_pid
+        pid = owner_session_pid()
+        if not pid:
+            return 0
+        os.makedirs(os.path.dirname(LAB_OWNER_PID), exist_ok=True)
+        with open(LAB_OWNER_PID, "w", encoding="utf-8") as f:
+            f.write("%d\n" % pid)
+        return pid
+    except Exception:
+        return 0
+
+
 def count_lines(path):
     """箱の非空行数。無い/読めないは0。行数ベースなので部分ドレインでも壊れない。"""
     try:
@@ -235,10 +270,12 @@ def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     box = box_path(args.name)
 
+    owner = claim_lab_owner(args.name)   # ★司令塔の身元をPIDで残す(pulse_touchが読む・上の説明参照)
+
     if args.once:
         touch(args.name)
         n = count_lines(box) + count_queue_ready(args.name)
-        print(f"WAITER:ONCE name={args.name} total={n}")
+        print(f"WAITER:ONCE name={args.name} total={n} lab_owner_pid={owner or '-'}")
         return 0
 
     acquire_singleton(args.name)         # ★単一化: 同名の生きた重複waiterを引き継ぐ(P0-4)

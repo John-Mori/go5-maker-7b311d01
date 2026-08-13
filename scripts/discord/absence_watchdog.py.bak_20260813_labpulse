@@ -89,20 +89,6 @@ STALE_MIN = 15                 # これ以上未処理なら「司令塔不在�
 POLLER_STALE_SEC = 300
 POLLER_ALERT_COOLDOWN_SEC = 30 * 60  # 状態遷移で鳴らすので実質バックストップ(連投の最終防波堤)
 
-# --- ★司令塔のliveness脈の死活 (2026-08-13 イージス研究室・裁定C-044⑤) ---
-# なぜ: presence.lab_alive() の2信号目 lab_tool_pulse.txt が **2026-07-20 19:22 で止まり、
-#   23.9日間 誰も気づかなかった**。打ち手(hook pulse_touch.py)のコードは1行も壊れていない。
-#   「自分が司令塔か」を判定する条件(手で名乗る札)が部屋の作り替えで切れただけで機能が消えた。
-#   実害= 判定が readiness 1本へ退行し、司令塔が長いターンを処理している最中に
-#   代打が出る条件(INC-94)が復活。さらに revive_lab.ps1 が「死亡」と読んで生きた窓を掃除した。
-# ★C-044⑤=「条件付きで打つ脈は、その条件が切れた時に気づく手を同時に置く」の実装がここ。
-#   鳴らす条件は **2つ揃った時だけ**= ①脈が24時間以上古い ②なのに司令塔の耳は動いている。
-#   ②を要求する理由= 司令塔が単に閉じている夜間に鳴らしても行動が変わらない(狼少年になる)。
-LAB_TOOL_PULSE = os.path.join(LOCAL, "llm", "lab_tool_pulse.txt")
-LAB_PULSE_STALE_SEC = 24 * 3600      # これ以上古い=打ち手の条件が切れている
-LAB_TRAFFIC_SEC = 30 * 60            # 司令塔の耳(readiness)がこの新しさなら「便は流れている」
-LAB_PULSE_ALERT_COOLDOWN_SEC = 6 * 3600
-
 # --- P2 死んだ窓の検知 (2026-07-18 応答性改善書P2・Chami承認「全て承認」) ---
 # 部門窓の死をちゃみが手動発見する状態(hr-context実例)を根絶する。
 # 「最近まで生きていた脈が途絶えた」窓だけを検知する(開いたことの無い部屋は対象外=
@@ -279,54 +265,6 @@ def check_poller_health(state, dry_run):
     if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
         state["last_poller_alert"] = now_epoch
         state["poller_down"] = True
-
-
-def _age_or_none(path):
-    if not os.path.exists(path):
-        return None
-    return time.time() - os.path.getmtime(path)
-
-
-def check_lab_pulse(state, dry_run):
-    """司令塔のliveness脈が死んだまま放置されるのを検知する(裁定C-044⑤)。
-
-    鳴らす条件= 脈が24時間以上古い **かつ** 司令塔の耳(readiness)は動いている。
-    ★片方だけでは鳴らさない: 司令塔が閉じているだけの夜間に鳴らしても行動が変わらず、
-      「常に鳴っている警報」= 誰も読まない警報を自分で作ることになる(規律§3)。
-    状態遷移で1回だけ鳴らし、戻ったら✅を1回出す(check_poller_health と同じレール)。
-    """
-    live = _age_or_none(LAB_TOOL_PULSE)
-    ready = _age_or_none(CLAUDE_ACTIVE)
-    traffic = (ready is not None) and (ready < LAB_TRAFFIC_SEC)
-    stale = (live is None) or (live >= LAB_PULSE_STALE_SEC)
-    down = bool(traffic and stale)
-    was_down = bool(state.get("lab_pulse_down"))
-    now_epoch = time.time()
-    if not down:
-        if was_down and not stale:
-            # 復旧= 脈が戻った時だけ✅(司令塔が閉じて traffic が消えただけの時は黙る)
-            if bot_send(SUMMARY_DEPT,
-                        "✅司令塔のliveness脈は復旧しました — lab_tool_pulse.txt が"
-                        f"{int(live)}秒前まで戻っています(自動監視・C-044⑤)。", dry_run, by_dept=True):
-                state["lab_pulse_down"] = False
-        elif not stale:
-            state["lab_pulse_down"] = False
-        return
-    if was_down:
-        return
-    if now_epoch - state.get("last_lab_pulse_alert", 0) < LAB_PULSE_ALERT_COOLDOWN_SEC:
-        return
-    when = "脈ファイルなし" if live is None else f"最終更新{live / 3600.0:.1f}時間前"
-    msg = (
-        f"⚠司令塔のliveness脈が止まっています(自動監視・C-044⑤): lab_tool_pulse.txt が{when}。"
-        f"耳(readiness)は{int(ready)}秒前まで動いているので、司令塔は居ます。"
-        "この脈が死ぬと生存判定が readiness 1本へ退行し、長い作業の最中に代打が出ます"
-        "(INC-94の再来)。打ち手= hook `scripts/hooks/pulse_touch.py`、"
-        "身元= `local/llm/lab_owner_pid.txt`(耳の武装時に書かれる)。"
-    )
-    if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
-        state["last_lab_pulse_alert"] = now_epoch
-        state["lab_pulse_down"] = True
 
 
 # --- ★リンク死活監視 (2026-07-20 da.gd障害インシデント対応・緊急Chami指示) ---
@@ -1198,7 +1136,6 @@ def run_once(dry_run=False):
         return
     state = load_state()
     check_poller_health(state, dry_run)  # ポーラー死活は受付箱の滞留と独立に監視(単一障害点)
-    check_lab_pulse(state, dry_run)      # ★C-044⑤: 司令塔のliveness脈が黙って死ぬのを検知
     check_dead_windows(state, dry_run)   # P2: 死んだ部門窓の可視化(応答性改善書2026-07-18)
     check_busy_notices(state, dry_run)   # ⏳対応中(生存)通知: Chami直要望2026-07-18・4段目の進捗信号
     check_dead_letters(state, dry_run)   # ★O1(P0-5): DLQ(毒メッセージ)が黙って消えるのを検知
