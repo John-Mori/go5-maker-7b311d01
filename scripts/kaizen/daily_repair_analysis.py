@@ -75,6 +75,22 @@ CLUSTERS = [
 #   直す相手が違う(90日窓で3件実在)。沈黙を可視化する=別ラベルで数える。
 EMPTY_LABEL = "★「何」が空欄(台帳の穴)"
 
+# ==== 2026-08-14 追加(イージス研究室)=「毎朝出るのに永久に0にならない※」を消す ====
+# 実測= 毎朝の便に `※改修αだがts不明で除外 2件` が出続けていた。中身を見たら
+#   行70 ts='2026-07-29T'(Tで切れている) / 行86 ts='2026-07-29'(日付だけ) の**2行だけ**で、
+#   どちらも `ts_source='self(機構導入前・未検証)'`= session_relay の時刻機構が入る**前**の
+#   履歴だ。あれは「本人の申告のまま触らない」と決めて残してある行(session_relay.
+#   normalize_change_log の初回分岐)なので、**未来永劫この2件は直らないし減らない**。
+# なぜ直すか= 24時間の窓の報告に、7/29の履歴2件が「除外した」と毎朝並ぶ。読む側には
+#   「今日の集計から2件こぼれた」に見える。**常に鳴る警報は無視される**(共通規律§3)。
+# どう分けるか= mtime のような当てずっぽうは使わない。**台帳に実在する印**で切る=
+#   `ts_source` が下の値の行は機構導入前と機械が判定した行= 24hの窓には**構造上入り得ない**。
+#   印が無いのに ts が読めない行は**新しい穴**なので、従来どおり本文へ出す(むしろ強く出す)。
+# ★黙って捨てはしない= 本文から外すだけで、貯め先(STORE)には `undated_legacy` で残す。
+# ★正本は session_relay.CHANGE_TS_LEGACY。import はしない(重い常駐側を巻き込まないため)
+#   代わりに **検査で突き合わせる**(test_daily_repair_analysis.py)。綴りがズレたら検査が落ちる。
+LEGACY_TS_SOURCE = "self(機構導入前・未検証)"
+
 
 def classify(text):
     if not (text or "").strip():
@@ -87,10 +103,11 @@ def classify(text):
     return "その他"
 
 
-def build(now, hours):
+def build(now, hours, path=None):
+    """★path= 読む台帳の差し替え点(検査で本番の台帳を触らないため。既定=本番)。"""
     since = now - hours * 3600
-    rows, bad = read_jsonl(CHANGE_LOG)
-    picked, undated, unknown_dept = [], 0, 0
+    rows, bad = read_jsonl(path or CHANGE_LOG)
+    picked, undated, unknown_dept, undated_legacy = [], 0, 0, 0
     for r in rows:
         dept = r.get("dept")
         if dept == DEPT_B:
@@ -105,12 +122,16 @@ def build(now, hours):
             continue
         e = ts_epoch(r.get("ts"))
         if e is None:
-            undated += 1
+            # ★機構導入前の履歴は「今日こぼれた分」ではない= 本文に出さず別に数える
+            if r.get("ts_source") == LEGACY_TS_SOURCE:
+                undated_legacy += 1
+            else:
+                undated += 1
             continue
         if since <= e <= now:
             picked.append(r)
     by_cluster = Counter(classify(r.get("何") or r.get("what") or "") for r in picked)
-    return picked, by_cluster.most_common(), bad, undated, unknown_dept
+    return picked, by_cluster.most_common(), bad, undated, unknown_dept, undated_legacy
 
 
 def render_md(now, hours, picked, ranked, bad, undated, unknown_dept):
@@ -134,7 +155,8 @@ def render_md(now, hours, picked, ranked, bad, undated, unknown_dept):
     if bad:
         out.append(f"※台帳に読めない行 {len(bad)}件=要手当て")
     if undated:
-        out.append(f"※改修αだがts不明で除外 {undated}件")
+        # ★ここに出るのは機構導入**後**に書かれた読めない ts= 新しい穴。出たら直す対象。
+        out.append(f"※改修αだがtsが読めず除外 {undated}件(★新しい穴=書いた行のtsを直す)")
     if unknown_dept:
         out.append(f"※dept欠落で改修α判定不能 {unknown_dept}件(窓内・別数え)")
     return "\n".join(out)
@@ -148,7 +170,7 @@ def main():
     args = ap.parse_args()
 
     now = args.now if args.now is not None else time.time()
-    picked, ranked, bad, undated, unknown_dept = build(now, args.hours)
+    picked, ranked, bad, undated, unknown_dept, undated_legacy = build(now, args.hours)
     md = render_md(now, args.hours, picked, ranked, bad, undated, unknown_dept)
     print(md)
 
@@ -164,6 +186,8 @@ def main():
             "top": (ranked[0][0] if ranked else None),
             "bad_lines": len(bad),
             "undated": undated,
+            # ★本文には出さないが黙って捨てない(機構導入前の履歴で ts が読めない行の数)
+            "undated_legacy": undated_legacy,
             "unknown_dept": unknown_dept,
         }
         with open(STORE, "a", encoding="utf-8") as f:

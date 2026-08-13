@@ -11,10 +11,15 @@
 """
 import os
 import sys
+import json
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))   # …/5SecMovieMaker
 sys.path.insert(0, HERE)
-from daily_repair_analysis import classify  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+from daily_repair_analysis import (classify, build, render_md,   # noqa: E402
+                                   LEGACY_TS_SOURCE)
 
 # (実際に change_log に在った「何」の文, 期待クラスタ)
 CASES = [
@@ -40,6 +45,78 @@ CASES = [
 ]
 
 
+# ==== 2026-08-14 追加(イージス研究室)= 毎朝出る「※ts不明で除外」の切り分け ====
+# なぜ要るか= 実測で毎朝の便に `※改修αだがts不明で除外 2件` が出続けていた。中身は
+#   7/29の履歴2行(`ts_source=self(機構導入前・未検証)`)だけで、**永久に0にならない**。
+#   24hの窓の報告に16日前の履歴が「除外」と並ぶ=読む側には今日こぼれたように見える。
+# ★ここは classify と違い**実行で通す**(共通規律§3=文字列一致は検査ではない)。
+#   外へ出る手(読む台帳)だけ差し替え、判定と分岐は本物のまま build() を回す。
+import time                                                    # noqa: E402
+import datetime                                                # noqa: E402
+
+_JST = datetime.timezone(datetime.timedelta(hours=9))
+
+
+def _row(ts, extra=None):
+    r = {"ts": ts, "dept": "system-engineer", "何": "候補→作成のカテゴリ判定を修正",
+         "なぜ": "検査用", "触った": "app.js", "commit": "dummy"}
+    r.update(extra or {})
+    return r
+
+
+def _ledger(rows):
+    fd, p = tempfile.mkstemp(prefix="repairwin_", suffix=".jsonl")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    return p
+
+
+def build_cases():
+    """(名前, 判定) のリストを返す。"""
+    out = []
+    now = time.time()
+    in_win = datetime.datetime.fromtimestamp(now - 3600, _JST).isoformat(timespec="seconds")
+
+    # 機構導入前の履歴(実物と同じ形)= 本文から消す。ただし数は残す
+    p = _ledger([_row(in_win),
+                 _row("2026-07-29T", {"ts_source": LEGACY_TS_SOURCE}),
+                 _row("2026-07-29", {"ts_source": LEGACY_TS_SOURCE})])
+    picked, ranked, bad, undated, unk, legacy = build(now, 24.0, path=p)
+    md = render_md(now, 24.0, picked, ranked, bad, undated, unk)
+    out.append(("窓内の1件は拾う", len(picked) == 1))
+    out.append(("★機構導入前の読めないts 2件は undated に数えない", undated == 0))
+    out.append(("★その2件は undated_legacy として残る(黙って捨てない)", legacy == 2))
+    out.append(("★毎朝の本文に『ts が読めず除外』の※行が出ない", "読めず除外" not in md))
+    os.unlink(p)
+
+    # 機構導入**後**に書かれた読めない ts= 新しい穴。従来どおり本文へ出す
+    p = _ledger([_row(in_win), _row("2026-08-14T", {"ts_source": "machine"})])
+    picked, ranked, bad, undated, unk, legacy = build(now, 24.0, path=p)
+    md = render_md(now, 24.0, picked, ranked, bad, undated, unk)
+    out.append(("印の無い読めないtsは undated に数える", undated == 1))
+    out.append(("★新しい穴は本文へ出る", "★新しい穴" in md))
+    out.append(("それは legacy に混ぜない", legacy == 0))
+    os.unlink(p)
+
+    # 回帰= 改修部門βは入れない / dept欠落は別数え(既存の振る舞いを動かしていない)
+    p = _ledger([_row(in_win), _row(in_win, {"dept": "system-engineer-b"}),
+                 _row(in_win, {"dept": None})])
+    picked, ranked, bad, undated, unk, legacy = build(now, 24.0, path=p)
+    out.append(("回帰: 改修部門βは集計に入らない", len(picked) == 1))
+    out.append(("回帰: dept欠落は unknown_dept で別数え", unk == 1))
+    os.unlink(p)
+
+    # ★綴りの正本合わせ= session_relay が印を変えたらここで落ちる(黙ってすり抜けない)
+    try:
+        import session_relay as SR
+        out.append(("★印の綴りが session_relay.CHANGE_TS_LEGACY と一致",
+                    SR.CHANGE_TS_LEGACY == LEGACY_TS_SOURCE))
+    except Exception as e:                                     # noqa: BLE001
+        out.append((f"session_relay を読めない({type(e).__name__})", False))
+    return out
+
+
 def main():
     ng = 0
     for text, expect in CASES:
@@ -47,7 +124,12 @@ def main():
         if got != expect:
             ng += 1
             print(f"FAIL: {(text or '(空)')[:36]!r}\n      期待={expect} / 実際={got}")
-    total = len(CASES)
+    extra = build_cases()
+    for name, ok in extra:
+        if not ok:
+            ng += 1
+            print(f"FAIL: {name}")
+    total = len(CASES) + len(extra)
     if ng:
         print(f"\nNG {ng}/{total}")
         return 1
