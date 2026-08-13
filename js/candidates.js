@@ -35,7 +35,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -664,6 +664,83 @@
   function idbKey(kind, cid) { return kind + ':' + cid; }     // IDBキー 'ref:<cid>' / 'bsky:<cid>'
   function idbFail_(e) { try { console.warn('[go5 idb] 画像保存に失敗(メモリには保持)', e); } catch (_) {} }
 
+  // ── 候補テキストの正本 cand_text(同期LS単一マップ)──────────────────────────────────
+  // ★INC-127→129→132 の恒久対策(断定1)。コメント・メモ・X URL・URL2 は従来 IDB(_imgMem.ref)に
+  //   持っていたが、IDB→メモリ展開(hydrateImages_)が非同期のため「ハイドレート完了前に描画されて空に見える」
+  //   構造が残っていた(ページ移動/再読込で直る=描画時に読めていないだけ)。テキストは容量が小さいので、
+  //   localStorage の単一マップ cand_text = { "<cid>": {comment,memo,twitterUrl,twitterUrl2,urls2,at} } を
+  //   正本へ昇格＝同期read/writeで初回描画から必ず読める。画像(imgs)は容量的にLS不可なので従来のIDB経路のまま。
+  //   同期は core/sync.js が cand_text を cid 単位フィールドマージで扱う(whole-key LWWにしない=別端末の消失防止)。
+  function candTextKey_() { return 'cand_text'; }             // hoisted=Node(テスト)から順序非依存で参照可
+  var _candTextCache = { raw: null, map: {} };                // LS文字列が同一なら再parseしない軽量キャッシュ
+  function candTextMap_() {
+    var raw; try { raw = localStorage.getItem(candTextKey_()) || ''; } catch (e) { raw = ''; }
+    if (_candTextCache && raw === _candTextCache.raw) return _candTextCache.map;
+    var m = {};
+    try { var p = JSON.parse(raw || '{}'); if (p && typeof p === 'object' && !Array.isArray(p)) m = p; } catch (e) {}
+    _candTextCache = { raw: raw, map: m };
+    return m;
+  }
+  function candTextOf_(cid) {                                 // 1件を同期で返す(無ければ null)
+    var m = candTextMap_(), v = m[String(cid)];
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : null;
+  }
+  // read-modify-write。空項目は空として保存(=正当な全消しを許す)。全項目が空なら該当cidを削除。
+  // at 明示可(移行バックフィルは元recのatを保つ=古い値が新しいatで同期の勝者になるのを防ぐ)。戻り値=真の成否。
+  function candTextWrite_(cid, data, at) {
+    cid = String(cid || ''); if (!cid) return false;
+    var map;
+    try { map = JSON.parse(localStorage.getItem(candTextKey_()) || '{}'); if (!map || typeof map !== 'object' || Array.isArray(map)) map = {}; } catch (e) { map = {}; }
+    var comment = (data && data.comment) || '';
+    var memo = (data && data.memo) || '';
+    var twitterUrl = (data && data.twitterUrl) || '';
+    var urls2 = [];
+    if (data) {
+      if (Array.isArray(data.urls2)) urls2 = data.urls2.map(function (s) { return String(s || '').trim(); }).filter(Boolean);
+      else if (data.twitterUrl2) urls2 = [String(data.twitterUrl2).trim()].filter(Boolean);
+    }
+    var allEmpty = !comment && !memo && !twitterUrl && !urls2.length;
+    if (allEmpty) {
+      if (!Object.prototype.hasOwnProperty.call(map, cid)) return true; // 既に無い=何もしない(成功扱い)
+      delete map[cid];
+    } else {
+      map[cid] = { comment: comment, memo: memo, twitterUrl: twitterUrl, twitterUrl2: urls2[0] || '', urls2: urls2, at: at || new Date().getTime() };
+    }
+    try {
+      localStorage.setItem(candTextKey_(), JSON.stringify(map));
+      _candTextCache = { raw: null, map: {} }; // 次回読みで再parse(自分の書きでキャッシュ無効化)
+      reqSync_();                              // 永続保存できた内容だけを同期へ送る
+      return true;
+    } catch (e) { return false; } // 容量超過など
+  }
+  function candTextSave_(cid, data) { return candTextWrite_(cid, data, new Date().getTime()); }
+  // 移行バックフィル(冪等・空で非空を上書きしない): _imgMem.ref(旧正本)のテキストを cand_text へフィールド単位で埋め戻す。
+  //   cand_text 側が既に非空ならそれを優先。何も足せなければ書かない(同期の無駄打ち防止)。at は元recのatを保つ。
+  function backfillCandText_(cid, rec) {
+    if (!rec || typeof rec !== 'object') return false;
+    cid = String(cid || ''); if (!cid) return false;
+    var cur = candTextOf_(cid) || {};
+    var recUrls2 = Array.isArray(rec.urls2) ? rec.urls2.filter(Boolean) : (rec.twitterUrl2 ? [String(rec.twitterUrl2).trim()].filter(Boolean) : []);
+    var curUrls2 = Array.isArray(cur.urls2) ? cur.urls2.filter(Boolean) : (cur.twitterUrl2 ? [String(cur.twitterUrl2).trim()].filter(Boolean) : []);
+    var next = {
+      comment: cur.comment || rec.comment || '',
+      memo: cur.memo || rec.memo || '',
+      twitterUrl: cur.twitterUrl || rec.twitterUrl || '',
+      urls2: curUrls2.length ? curUrls2 : recUrls2
+    };
+    var same = next.comment === (cur.comment || '') && next.memo === (cur.memo || '')
+      && next.twitterUrl === (cur.twitterUrl || '') && next.urls2.join('\n') === curUrls2.join('\n');
+    if (same) return false; // cand_text に既に反映済み=何も足さない
+    if (!(next.comment || next.memo || next.twitterUrl || next.urls2.length)) return false; // 全空は書かない
+    var at = Math.max(Number(cur.at) || 0, Number(rec.at) || 0) || new Date().getTime();
+    return candTextWrite_(cid, next, at);
+  }
+  var _candTextBackfilled = false;
+  function backfillAllCandText_() {                          // ハイドレート完了時に一度だけ全cidを埋め戻す
+    if (_candTextBackfilled) return; _candTextBackfilled = true;
+    try { Object.keys(_imgMem.ref).forEach(function (cid) { backfillCandText_(cid, _imgMem.ref[cid]); }); } catch (e) {}
+  }
+
   function mergeImageEntries_(all) {
     function putLatest_(bucket, key, val) {
       var cur = bucket[key];
@@ -672,7 +749,7 @@
     }
     Object.keys(all || {}).forEach(function (k) {
       var v = all[k];
-      if (k.indexOf('ref:') === 0) { putLatest_(_imgMem.ref, k.slice(4), v); _refLoaded[k.slice(4)] = true; }
+      if (k.indexOf('ref:') === 0) { putLatest_(_imgMem.ref, k.slice(4), v); _refLoaded[k.slice(4)] = true; backfillCandText_(k.slice(4), _imgMem.ref[k.slice(4)]); }
       else if (k.indexOf('bsky:') === 0) putLatest_(_imgMem.bsky, k.slice(5), v);
       else if (k.indexOf('post:') === 0) putLatest_(_imgMem.post, k.slice(5), v);
       else if (k.indexOf('used:') === 0) putLatest_(_imgMem.used, k.slice(5), v);
@@ -684,6 +761,39 @@
   }
   function legacyRefOf_(cid) {
     try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
+  }
+  // ── 候補テキストの正本 cand_text(同期localStorage)──
+  //   コメント/メモ/X URL/URL2 を非同期IDB(_imgMem.ref)ではなく同期LSに持つ=IDBハイドレート待ちで
+  //   空表示になる構造を消す。INC-127/129/132(保存済みテキストが初回描画で出ず、ページ移動で直る)の恒久対策。
+  //   画像(imgs)は容量的にLS不可なので従来どおりIDBのまま。形= { "<cid>": {comment,memo,twitterUrl,twitterUrl2,urls2,at} }。
+  var K_CAND_TEXT = 'cand_text';
+  function candTextMap_() { try { return JSON.parse(localStorage.getItem(K_CAND_TEXT) || '{}') || {}; } catch (e) { return {}; } }
+  function candTextOf_(cid) { var r = candTextMap_()[String(cid)]; return r || null; }
+  function candTextNonEmpty_(r) { return !!(r && (r.comment || r.memo || r.twitterUrl || r.twitterUrl2 || (r.urls2 && r.urls2.length))); }
+  function candTextSave_(cid, f) {
+    cid = String(cid || ''); if (!cid) return false;
+    f = f || {};
+    var comment = String(f.comment || ''), memo = String(f.memo || ''), tw = String(f.twitterUrl || '');
+    var urls2 = Array.isArray(f.urls2) ? f.urls2.map(function (s) { return String(s || '').trim(); }).filter(Boolean)
+      : (f.twitterUrl2 ? [String(f.twitterUrl2).trim()].filter(Boolean) : []);
+    var tw2 = String(f.twitterUrl2 || urls2[0] || '');
+    var allEmpty = !comment && !memo && !tw && !tw2 && !urls2.length;
+    try {
+      var m = candTextMap_();
+      if (allEmpty) { if (!Object.prototype.hasOwnProperty.call(m, cid)) return true; delete m[cid]; }
+      else m[cid] = { comment: comment, memo: memo, twitterUrl: tw, twitterUrl2: tw2, urls2: urls2, at: new Date().getTime() };
+      localStorage.setItem(K_CAND_TEXT, JSON.stringify(m));
+      if (typeof reqSync_ === 'function') reqSync_(); // 同期対象(sync.js isSyncLsKey)。デバウンス済なので連投は畳まれる
+      return true;
+    } catch (e) { return false; } // 容量超過など=LSが書けない時だけ(数百件×数百Bで通常起きない)
+  }
+  // 移行: IDB(_imgMem.ref)側のテキストを同期LSへ昇格。cand_textが既に非空ならそれを優先=空で非空を潰さない・冪等。
+  function backfillCandText_(cid, rec) {
+    if (!rec) return;
+    cid = String(cid || ''); if (!cid) return;
+    if (candTextNonEmpty_(candTextOf_(cid))) return;
+    if (!(rec.comment || rec.memo || rec.twitterUrl || rec.twitterUrl2 || (rec.urls2 && rec.urls2.length))) return;
+    candTextSave_(cid, { comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2 });
   }
   // 全体ハイドレートを待たず、押された作品1件だけを直接復元する。
   // 候補画像が多い/iOSが低メモリでも「投稿編集」の入口を全体走査から切り離す。
@@ -711,6 +821,7 @@
       var rec = result.value;
       if (rec) {
         _imgMem.ref[cid] = rec;
+        backfillCandText_(cid, rec); // 直読1件も同期LSへ昇格
       } else {
         // 旧localStorage形式が残っている端末は、この1件も移行完了前に安全に拾う。
         var legacy = legacyRefOf_(cid);
@@ -730,8 +841,17 @@
     return _refLoadJobs[cid];
   }
   function refImgOf(cid) {
-    if (_idbOk) return _imgMem.ref[cid] || null;
-    try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
+    // 画像(imgs)はIDB/_imgMem由来、テキストは同期LSの正本 cand_text 由来を第一とする(ハイドレート未了でも読める)。
+    var base = _idbOk ? (_imgMem.ref[cid] || null) : legacyRefOf_(cid);
+    var txt = candTextOf_(cid);
+    if (!base && !txt) return null;
+    if (!txt) return base; // 移行前の端末=IDB/旧LSの値をそのまま(cand_textはハイドレート後にbackfillされる)
+    var b = base || {};
+    return {
+      imgs: b.imgs, img: b.img, at: b.at,
+      comment: txt.comment || '', memo: txt.memo || '',
+      twitterUrl: txt.twitterUrl || '', twitterUrl2: txt.twitterUrl2 || '', urls2: txt.urls2 || []
+    };
   }
   // 保存画像を常に配列で返す。(旧形式 {img:単発} → [img] に正規化・新形式は {imgs:[...]}. 37ページ級の複数コマ保持に対応)
   function refImgsOf_(cid) {
@@ -757,6 +877,9 @@
     // ★展開前(_imgMemが空)の「空データ=削除」は、読めていないだけの既存データを消す事故になる。
     //   未展開のうちは破壊的な空保存を拒否する。(明示削除はUIから展開後に行われるので実害なし)
     if (empty && _idbOk && !_candidateHydrated && !_refLoaded[cid]) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
+    // ★テキストは同期LSの正本 cand_text へ先に確定保存(戻り値=真の成否)。IDB書込の成否・ハイドレート状態に依存せず、
+    //   次の描画で必ずコメント/メモ/X URLが読める。ここを通る=空でも正当な削除(展開後)なので cand_text も更新する。
+    candTextSave_(cid, { comment: data && data.comment, memo: data && data.memo, twitterUrl: data && data.twitterUrl, twitterUrl2: urls2[0] || (data && data.twitterUrl2) || '', urls2: urls2 });
     var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: urls2[0] || '', urls2: urls2, at: new Date().getTime() };
     if (_idbOk) {
       var hadPrev = Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);

@@ -38,6 +38,7 @@
     if (/^cand_del(__|$)/.test(k)) return true;          // 削除の墓標(候補復活の恒久対策・INC 2026-07-15)
     if (/^cand_hidden__/.test(k)) return true;           // 非表示リスト
     if (k === "cand_hide_posted") return true;
+    if (k === "cand_text") return true;                  // 候補テキストの正本(コメント/メモ/X URL/URL2・cid単位フィールドマージ・INC-127/129/132恒久対策)
     if (/^go5_stock_meta$/.test(k)) return true;         // ドラフト一覧(id単位union・Chami依頼2026-07-31)
     if (/^go5_stock_archive$/.test(k)) return true;      // 作成履歴(投稿完了ぶん・id単位union・墓標なし・Chami依頼2026-08-03)
     if (/^go5_stock_del$/.test(k)) return true;          // ドラフト削除の墓標(端末をまたぐ削除の伝播)
@@ -300,6 +301,37 @@
           var v = Math.max(ov, nv); if (v > 0) m[c] = v;   // 大きい方のts=より新しい宣言を採用
         });
         if (Object.keys(m).length) out[a] = m;
+      });
+      return JSON.stringify(out);
+    } catch (e) { return null; }
+  }
+  // 候補テキストの正本 cand_text ＝ { "<cid>": {comment,memo,twitterUrl,twitterUrl2,urls2,at} } を1キーに持つ。
+  //   非同期IDB(ref:)へ依存すると「ハイドレート完了前に描画されて空に見える」構造(INC-127/129/132)が消えないため、
+  //   同期read/writeのLS単一マップへ正本を昇格した。whole-key LWWにすると別端末のコメント/URLを丸ごと消す事故になるので、
+  //   cid 単位でフィールドマージする(mergeCandItem_ と同流儀＝空で非空を消さない＋at の新しい側を優先)。
+  function isCandTextKey(k) { return String(k) === "cand_text"; }
+  function mergeCandTextRec_(older, newer) {
+    older = (older && typeof older === "object" && !Array.isArray(older)) ? older : {};
+    newer = (newer && typeof newer === "object" && !Array.isArray(newer)) ? newer : {};
+    var ot = Number(older.at) || 0, nt = Number(newer.at) || 0;
+    var base = nt >= ot ? newer : older, fill = nt >= ot ? older : newer; // at の大きい側を base(優先)に
+    var out = mergeCandItem_(fill, base);                                  // base優先・base側で空(欠け)のフィールドは fill の非空で補う
+    out.at = Math.max(ot, nt);                                            // 統合後の at は新しい方(＝以後の比較で正しく効く)
+    return out;
+  }
+  function mergeCandText_(olderStr, newerStr) {
+    try {
+      var older = JSON.parse(olderStr || "{}"), newer = JSON.parse(newerStr || "{}");
+      if (!older || typeof older !== "object" || Array.isArray(older)) older = {};
+      if (!newer || typeof newer !== "object" || Array.isArray(newer)) newer = {};
+      var out = {}, cids = {};
+      Object.keys(older).forEach(function (c) { cids[c] = 1; });
+      Object.keys(newer).forEach(function (c) { cids[c] = 1; });
+      Object.keys(cids).forEach(function (c) {
+        var o = older[c], n = newer[c];
+        if (o == null) { out[c] = n; return; }   // 片側のみのcidはそのまま保持(=集めたテキストを失わない)
+        if (n == null) { out[c] = o; return; }
+        out[c] = mergeCandTextRec_(o, n);
       });
       return JSON.stringify(out);
     } catch (e) { return null; }
@@ -594,7 +626,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -643,6 +675,16 @@
           }
         });
 
+        // 候補テキスト(cand_text)は両側にあれば cid 単位でフィールドマージ。(別端末のコメント/URLを丸ごと消さない)
+        Object.keys(mls).forEach(function (k) {
+          if (!isCandTextKey(k)) return;
+          var a = lmapLs[k], b = rls[k];
+          if (a && b && !a.d && !b.d) {
+            var u = mergeCandText_(a.v, b.v);
+            if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
+          }
+        });
+
         // 墓標(cand_del / go5_stock_del / bsky_tpl_del)は両側にあれば id/name 単位で union。(片側の削除を失わない)
         Object.keys(mls).forEach(function (k) {
           if (!isCandDelKey(k) && !isStockDelKey(k) && !isTplDelKey(k) && !isDiscDelKey(k) && !isArchDelKey(k)) return;
@@ -666,7 +708,7 @@
             try {
               if (isSyncLsKey(k) && LS.getItem(k) !== null) {
                 LS.removeItem(k);
-                if (isCandArrayKey(k)) pulledCandReal++; else pulledLsReal++;
+                if (isCandArrayKey(k) || isCandTextKey(k)) pulledCandReal++; else pulledLsReal++;
               }
             } catch (x) {}
             return;
@@ -718,6 +760,10 @@
             // 同期中に宣言が増えても、開始時点の値で上書きせずライブ値と再union。(進行中の宣言を失わない)
             var up = mergePostedMap(e.v, live);
             if (up != null) finalV = up;
+          } else if (isCandTextKey(k)) {
+            // 同期中に候補テキストが編集されても、開始時点の値で上書きせずライブ値と cid 単位で再統合。(進行中の編集を失わない)
+            var uc = mergeCandText_(e.v, live);
+            if (uc != null) finalV = uc;
           } else if (isCandDelKey(k) || isStockDelKey(k) || isTplDelKey(k) || isDiscDelKey(k) || isArchDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
@@ -734,7 +780,7 @@
           try {
             if (LS.getItem(k) !== finalV) {
               LS.setItem(k, finalV);
-              if (isCandArrayKey(k)) pulledCandReal++; else pulledLsReal++;
+              if (isCandArrayKey(k) || isCandTextKey(k)) pulledCandReal++; else pulledLsReal++;
             }
           } catch (x) {}
         });
@@ -756,6 +802,15 @@
                   //   snap有り×IDB無しで tombstone 化し雲から画像を消しかねない。
                   delete newSnapIdb[k];
                   return;
+                }
+                // ★同期サイクル(画像のupload/pullで数秒〜数十秒)進行中に、ユーザーが投稿編集で保存した
+                //   新しいローカル値を、開始時点のマージ結果(古い at)で巻き戻さない。LS側には INC-132 で
+                //   このガードが入ったが IDB側は素通しで、候補の X URL/コメント/画像が「翌日リロードで消える」
+                //   再発(INC-127/129/132系)の未修正経路だった。at を両方持つ時だけ比較=動画blob等 at 無しの
+                //   レコードは従来どおり適用。上書きせず newSnapIdb からも落とし、次サイクルで live を読み直して
+                //   正しく再マージさせる(LS側 725-729 と同じ「次回に委ねる」流儀)。
+                if (prev && prev.at && res.val && res.val.at && Number(res.val.at) < Number(prev.at)) {
+                  delete newSnapIdb[kk]; return;
                 }
                 // ★中身が実際に変わった時だけ数える=候補タブの再描画はこの真値でだけ起こす。
                 //   (雲と自端末スナップの恒常ズレで毎周期立つ偽シグナルを混ぜない=下記 pulledImg の説明)
@@ -909,7 +964,7 @@
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
+    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_;

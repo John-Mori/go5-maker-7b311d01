@@ -90,6 +90,8 @@
     "competitor_gas_migrated": { "decision": "local", "why": "競合GAS移行済みフラグ=一度きり移行フラグ" },
     "layout_acct_split_migrated": { "decision": "local", "why": "レイアウトのアカウント分割移行フラグ=一度きり移行フラグ" },
     "kaizen_log_off": { "decision": "local", "why": "改善ログのON/OFF=端末別の運用フラグ" },
-    "yt_sheet_synced": { "decision": "local", "why": "YTシート同期済みフラグ=一度きり移行フラグ" }
+    "yt_sheet_synced": { "decision": "local", "why": "YTシート同期済みフラグ=一度きり移行フラグ" },
+    "go5_stock_arch_del": { "decision": "sync", "why": "作成履歴のpurge墓標=明示削除を全端末へ伝播(cand_delと同型・2026-08-13)。isSyncLsKey/storage-keys許可リストに登録済み" },
+    "cand_text": { "decision": "sync", "why": "候補テキストの正本(コメント/メモ/X URL/URL2)=同期LSへ昇格しcid単位フィールドマージ。INC-127/129/132恒久対策・2026-08-14" }
   }
 }
