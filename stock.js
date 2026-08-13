@@ -941,7 +941,7 @@
   function genMissingLabel_() {
     return _genMissingState.busy
       ? ('⏳ 作成中…(' + _genMissingState.i + '/' + _genMissingState.total + ')')
-      : '🖼 未作成のプレビュー画像を作る';
+      : '未作成のプレビュー画像を作る';
   }
   // ローカル(IDBの stock_prev_ と 使用画像1ページ目の先頭)にプレビューが在るか+既存blob を返す。
   //   欠けている側だけ後で埋める(冪等)。既存blobが在れば動画をデコードし直さず再利用できる。
