@@ -52,6 +52,17 @@ import subprocess
 import threading
 import time
 
+try:
+    # ★長すぎるpromptをargvから逃がす止血(2026-08-13 研究室HQ)。同ディレクトリ。
+    #   読めなければ**何もしない素通し**へ退化する(止血が本体を巻き添えにしない)。
+    import prompt_spill
+except Exception:                                # pragma: no cover
+    class _NoSpill:
+        @staticmethod
+        def guard(prompt, tag="relay"):
+            return prompt, None
+    prompt_spill = _NoSpill()
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
@@ -1241,14 +1252,32 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
       ★communicate() は TimeoutExpired の後に**もう一度呼べる**(出力は失われない)=公式仕様。
         だから soft で捨てずに続きを待てる。
     """
+    # ★★2026-08-13 止血(研究室HQ): promptが長すぎるとここで**起動そのものが失敗する**。
+    #   Windowsのコマンドライン上限(32,767字)を超えると CreateProcess が WinError 206 を返し、
+    #   Pythonは FileNotFoundError として投げる=呼び元は「配送処理の例外(FileNotFoundError)」しか
+    #   見えず、「受け口のファイルが無い」に見えていた。実測= 36,298字の便が6回とも落ちて
+    #   queue で status='dead'(DISPATCH-system-engineer-1786575652694・2026-08-13 08:08〜08:29)。
+    #   → 上限を超える時だけ**全文をファイルへ逃がし、「読め」の短いpromptに差し替える**。
+    #     上限以下では1文字も挙動が変わらない。恒久対策=プラットフォームSE/イージス研究室。
+    prompt, _spill = prompt_spill.guard(prompt, tag="relay")
     argv = [CLAUDE, "-p"]
     if session_id:
         argv += ["--resume", session_id]
     argv += ["--output-format", "json",
              "--allowedTools", *_allowed_tools(),
              "--add-dir", HQ,
-             "--model", model,
-             prompt]
+             "--model", model]
+    # ★★2026-08-13 promptは**stdinで渡す**(argvの末尾に置かない)。一ノ瀬怜(platform-se)。
+    #   実障害= DISPATCH-system-engineer-1786575652694(絵文字監視の毎朝8時digest=炎上/再発
+    #   スタンプ各11件)が 08:08〜08:29 に6回とも配送失敗し dead 隔離。request_log.jsonl の実体は
+    #   「FileNotFoundError: [WinError 206] ファイル名または拡張子が長すぎます。」。
+    #   受け口パスの欠落ではない= Windows の CreateProcess はコマンドライン全体が 32,767 文字を
+    #   超えると WinError 206 を投げ、Python はそれを FileNotFoundError として出す。封筒(共通規律
+    #   全文 約28KB + digest本文)が長い便でだけ argv長がこの上限を超えていた=長い便ほど死ぬ穴。
+    #   → prompt を positional argv から外し stdin へ。stdin にはこの上限が無い(実測: 短文prompt
+    #     を stdin で渡し is_error:false の JSON を確認済 2026-08-13)。claude -p は positional prompt
+    #     が無ければ stdin を prompt として読む(--input-format 既定=text)。挙動は同一。
+    _stdin_input = prompt
     # ★2026-07-26 親の環境を継がない(実弾で特定した穴)。
     #   デーモンはHQセッションから再起動したkeeperの子になることがあり、その場合
     #   ハーネスの環境変数(ANTHROPIC_BASE_URL / CLAUDE_CODE_* 等)を相続する。
@@ -1268,11 +1297,14 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
         hard = None                      # 2段になっていない指定は旧版と同じ1段として扱う
     t0 = time.time()
     p = subprocess.Popen(argv, cwd=ROOT, env=env,
+                         stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          text=True, encoding="utf-8", errors="replace")
     try:
         try:
-            stdout, stderr = p.communicate(timeout=soft)
+            # ★input は最初の communicate() でのみ渡す。TimeoutExpired 後の再communicate()には
+            #   渡さない(stdin は最初の呼びで書き切っている=公式仕様。二重に渡すと壊れる)。
+            stdout, stderr = p.communicate(input=_stdin_input, timeout=soft)
         except subprocess.TimeoutExpired:
             if hard is None:
                 # 旧版と同じ= softで打ち切る。**必ず殺してから**投げる(孤児プロセスを残さない)。
