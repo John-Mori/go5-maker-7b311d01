@@ -48,6 +48,13 @@ SPILL_LOG = os.path.join(LOCAL, "llm", "prompt_spill.jsonl")
 #   28,000で切る= 4,000字以上の余裕。ここを超える便は元々ほぼ無い(通常便の実測=24,744字)。
 LIMIT = 28000
 
+# ★依頼2(2026-08-13 一ノ瀬怜/WinError206 恒久対策)= 壁に達する手前で気づく。
+#   「余裕(=WALL-len)が閾値を割ったら記録」。spill(LIMIT超過=データをファイルへ逃がす)より
+#   手前の WARN 域を残しておくと、deadman_check が状態遷移で1回だけ鳴らせる=壊れる前に気づく。
+#   ★通常便(実測24,744字)は WARN に達しない= 1行も書かない(ノイズにしない)。
+WALL = 32700               # argv固定分込みの実測の壁(これを超えると WinError 206)
+WARN_MARGIN = 6000         # 余裕がこれを割る= len > 26,700 で WARN(spill の LIMIT=28,000 より手前)
+
 
 def _log(rec):
     try:
@@ -59,9 +66,17 @@ def _log(rec):
 
 
 def guard(prompt, tag="relay"):
-    """(prompt, spill_path) を返す。上限以下なら (prompt, None) で**何もしない**。"""
+    """(prompt, spill_path) を返す。上限以下なら (prompt, None) で**何もしない**。
+
+    ★上限以下でも「壁に近い便」(余裕 < WARN_MARGIN)は level="warn" で記録する=依頼2。
+      挙動(返り値)は旧版と1文字も変わらない。記録の失敗は配送を巻き添えにしない(fail-open)。
+    """
     text = prompt or ""
-    if len(text) <= LIMIT:
+    n = len(text)
+    if n <= LIMIT:
+        if (WALL - n) < WARN_MARGIN:
+            _log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "level": "warn", "tag": str(tag),
+                  "chars": n, "margin": WALL - n, "spilled": False})
         return prompt, None
     ts = time.strftime("%Y%m%d_%H%M%S")
     safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(tag))[:40]
@@ -72,11 +87,12 @@ def guard(prompt, tag="relay"):
             f.write(text)
     except OSError as e:
         # ★書けなかった= 止血できない。**元のpromptをそのまま返す**(挙動を旧版と同じにする)。
-        _log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "tag": str(tag),
-              "chars": len(text), "spilled": False, "error": f"{type(e).__name__}: {e}"})
+        _log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "level": "spill", "tag": str(tag),
+              "chars": len(text), "margin": WALL - len(text), "spilled": False,
+              "error": f"{type(e).__name__}: {e}"})
         return prompt, None
-    _log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "tag": str(tag),
-          "chars": len(text), "spilled": True, "path": path})
+    _log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "level": "spill", "tag": str(tag),
+          "chars": len(text), "margin": WALL - len(text), "spilled": True, "path": path})
     head = (
         "=== ★この便は長すぎてコマンドラインに載らない"
         f"(Windowsの上限32,767字・実測{len(text):,}字)。全文をファイルへ書き出した ===\n"

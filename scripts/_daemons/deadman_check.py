@@ -92,6 +92,15 @@ REFLECT_MIN_BYTES = 40   # トリガー側 MIN_VALID_BYTES と同値・存在だ
 REFLECT_GRACE_H = 3      # 05:00発火→future-roomが非同期生成する猶予。越えて未生成なら「何も出ていない」
 _JST = _dt.timezone(_dt.timedelta(hours=9))
 
+# ★★prompt長が壁(WinError 206=32,767字)に近づいた便を状態遷移で1回だけ鳴らす
+#   (2026-08-13 platform-se/一ノ瀬怜 = WinError206 恒久依頼2)。
+#   記録側= scripts/llm/prompt_spill.py の guard() が warn/spill を下の台帳へ残す(余裕<6,000字で warn、
+#   28,000字超で spill)。ここは その台帳を読み「前回鳴らして以降に出た新しい warn/spill」を集約して1回出す。
+#   C-041=一度の観測を状態の代理にしない= 毎周期 台帳を読み直し、新イベントの ts で判定する(連投しない)。
+SPILL_LOG = os.path.join(ROOT, "local", "llm", "prompt_spill.jsonl")
+BLOAT_RECENT_H = 24      # これより古いイベントは対象にしない(初回導入時に過去分で誤爆しないため)
+BLOAT_WARN_MARGIN = 6000  # prompt_spill.WARN_MARGIN と同値(メッセージ表示用・依存は張らない)
+
 
 def _reflection_valid(day):
     """対象日 day(YYYY-MM-DD)の振り返りが実在するか=存在＋非空。"""
@@ -154,6 +163,68 @@ def check_reflection(st, dry_run, now=None):
              "\n対処: local/daily_reflection.log と local/llm/daily_reflection/_trigger_state.json を確認、"
              "必要なら `python scripts/llm/daily_reflection_trigger.py --force`。", dry_run)
     print("[reflect] 変化したので通知した")
+
+
+def _bloat_events(now=None):
+    """prompt_spill.jsonl の末尾から、直近 BLOAT_RECENT_H 内の warn/spill を新しい順で返す。
+
+    読めなければ [](=台帳が無い/まだ一度もbloatが無い= 正常)。★測れない時は黙る(fail-open寄り)。
+    """
+    now = now or _dt.datetime.now(_JST)
+    cutoff = now - _dt.timedelta(hours=BLOAT_RECENT_H)
+    evs = []
+    for ln in _tail(SPILL_LOG, 200):
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            e = json.loads(ln)
+        except Exception:
+            continue                       # 壊れた1行で判定を落とさない
+        try:
+            when = _dt.datetime.fromisoformat(e.get("ts", "")).replace(tzinfo=_JST)
+        except Exception:
+            continue
+        if when >= cutoff:
+            evs.append(e)
+    evs.sort(key=lambda e: e.get("ts", ""), reverse=True)
+    return evs
+
+
+def check_prompt_bloat(st, dry_run, now=None):
+    """prompt長が壁に近づいた便を、**新しく出た時だけ**鳴らす(check_roster と同じ状態遷移レール)。
+
+    ★ts の辞書順=時系列順(ISO・同一書式)。前回鳴らした ts 超のイベントだけを「新規」とする。
+    ★--dry-run は状態を書かない(書くと本番の初回通知が黙る・roster/reflect と同じ作法)。
+    """
+    evs = _bloat_events(now=now)
+    last = st.get("bloat_last_ts", "")
+    fresh = [e for e in evs if e.get("ts", "") > last]
+    newest = evs[0].get("ts") if evs else last
+    if not dry_run:
+        st["bloat_last_ts"] = newest or last
+        st["bloat_at"] = _now()
+    if not fresh:
+        print("[bloat] 新しい warn/spill 無し(直近%dh・台帳%d件)" % (BLOAT_RECENT_H, len(evs)))
+        return
+    def _is_spill(e):
+        return e.get("level") == "spill" or e.get("spilled")
+    n_spill = sum(1 for e in fresh if _is_spill(e))
+    n_warn = len(fresh) - n_spill
+    lines = []
+    for e in fresh[:6]:
+        lv = "spill" if _is_spill(e) else "warn"
+        lines.append("・%s %s %s字(余裕%s字)tag=%s"
+                     % (e.get("ts", "?"), lv, e.get("chars", "?"),
+                        e.get("margin", "?"), e.get("tag", "?")))
+    notify("🟠 **配送promptが壁(WinError206=32,767字)に接近** — 新規 %d件(spill %d / warn %d)。\n"
+           % (len(fresh), n_spill, n_warn)
+           + "\n".join(lines)
+           + "\n※spill=長すぎてargvに載らずファイルへ退避(配送は保たれるがReadが1回増える)。"
+             "warn=まだ載るが余裕が%d字を割った。" % BLOAT_WARN_MARGIN
+           + "\n対処: 肥大している経路(tag)の封筒/boot/本文を減らす。恒久はstdin化(session_relayは対応済)。"
+             "\n記録: local/llm/prompt_spill.jsonl", dry_run)
+    print("[bloat] 新規%d件を通知(spill%d/warn%d)" % (len(fresh), n_spill, n_warn))
 
 
 def _dept_procs():
@@ -370,9 +441,10 @@ def run_once(stale_min, dry_run):
         st = _load_state()
         check_roster(st, dry_run)
         check_reflection(st, dry_run)   # ★朝5時の振り返りの空振り検知(2026-08-12 platform-se)
+        check_prompt_bloat(st, dry_run) # ★prompt長が壁に接近した便の検知(2026-08-13 platform-se・依頼2)
         _save_state(st)
     except Exception as e:
-        print("[roster/reflect] 点検に失敗(dead-man本体は続行) %s" % type(e).__name__)
+        print("[roster/reflect/bloat] 点検に失敗(dead-man本体は続行) %s" % type(e).__name__)
     return rc
 
 
