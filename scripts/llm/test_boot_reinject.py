@@ -145,6 +145,70 @@ def main():
           sr._boot_prompt("no-such-room", conf, 5),
           sr._boot_prompt("no-such-room", conf, 5, ledger=False))
 
+    print("[7] C-045 人格の中身に手を伸ばしていない(2026-08-13 Chami裁定)")
+    # ★Chami原文(2026-08-13 22:40)= 「部屋を跨いで記憶を持たすキャラとかの設定は変えないでほしい」。
+    #   直してよいのは**送り方**だけで、**中身**(§配置・記憶・声・呼称)は1字も削らない。
+    #   ここを"覚えておく"に任せると次の軽量化で必ず削られる= 機械で止める(C-038の作法)。
+    #   ★この検査が守るのは2つ:
+    #     ①軽量な便には characterfile の**本文が1行も入らない**(=パスだけを渡し、中身はセッションが
+    #       自分で読む=C-007「生のmdを直渡し」。要約に差し替える設計になった瞬間ここが落ちる)
+    #     ②部屋を跨ぐ共有記憶の指示が、起動文から消えていない(アメスは10部屋に出るので被害が最大)
+    leaked, checked_rooms = [], 0
+    for d, c in sorted(DEPT_CONF.items()):
+        names = sorted(sr._char_parts(c))
+        if not names:
+            continue
+        checked_rooms += 1
+        light = ("=== ★この部屋の人格ファイル(characterfile)が更新された(以後はファイルの中身が正) ===\n"
+                 + "".join(f"- {p}\n" for p in names) + "=== ここまで ===\n")
+        for p in names:
+            try:
+                body = open(p, encoding="utf-8", errors="replace").read().splitlines()
+            except OSError:
+                continue
+            for ln in body:
+                s = ln.strip()
+                if len(s) >= 12 and s in light:          # 本文の1行が便に写っている=中身に触った
+                    leaked.append((d, os.path.basename(p), s[:40]))
+    if DEPT_CONF:
+        check(f"実在{checked_rooms}部屋: 軽量な便に人格ファイルの本文が1行も入らない(パスだけ)",
+              len(leaked), 0)
+        for d, b, s in leaked[:3]:
+            print(f"        ★混入 {d}/{b}: {s}")
+        shared = [d for d, c in sorted(DEPT_CONF.items())
+                  if "_shared.jsonl" in sr._boot_prompt(d, c, 5)]
+        check("部屋を跨ぐ共有記憶(*_shared.jsonl)の指示を持つ部屋が実在する(検査が空振りしていない)",
+              bool(shared))
+        intact = all("答える前にそのファイルの末尾を読め" in sr._boot_prompt(d, DEPT_CONF[d], 5)
+                     for d in shared)
+        check(f"その{len(shared)}部屋すべてで『跨いで記憶を持つ』指示が起動文に残っている", intact)
+    # ★機構そのものが人格ファイル・共有記憶へ**書かない**こと。
+    #   grepでは足りない(_recent_append の open(p,"w") が変数名だけで引っかかる=一度それで誤検知した)。
+    #   → 実物のmtime/sizeを控えてから機構を一周走らせ、**1バイトも動いていない**ことを見る(挙動で見る)。
+    watched = {}
+    for d, c in sorted(DEPT_CONF.items()):
+        for p in sr._char_parts(c):
+            try:
+                st = os.stat(p)
+                watched[p] = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                pass
+    if os.path.exists(sr.AMES_SHARED_MEMORY):
+        _st = os.stat(sr.AMES_SHARED_MEMORY)
+        watched[sr.AMES_SHARED_MEMORY] = (_st.st_mtime_ns, _st.st_size)
+    for d, c in sorted(DEPT_CONF.items()):          # 機構を一周させる
+        sr._char_parts(c); sr._char_fingerprint(c)
+        sr._boot_prompt(d, c, 5); sr._boot_prompt(d, c, 5, ledger=False)
+        sr._ledger_lines(d)
+    moved = [p for p, v in watched.items()
+             if (os.stat(p).st_mtime_ns, os.stat(p).st_size) != v]
+    check(f"機構を一周させても人格ファイル・共有記憶({len(watched)}本)は1バイトも動かない",
+          moved, [])
+    check("見張った実物が実際にある(検査が空振りしていない)", len(watched) > 0)
+    src = open(os.path.join(HERE, "session_relay.py"), encoding="utf-8").read()
+    check("共有記憶(ames_shared)は起動文で参照するだけ=登場は定義1+参照1のみ",
+          src.count("AMES_SHARED_MEMORY"), 2)
+
     shutil.rmtree(tmp, ignore_errors=True)
     print()
     if FAILED:
