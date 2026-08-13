@@ -960,6 +960,16 @@
     }).catch(function () { return null; });
   }
 
+  // 動画Blob(Driveから取り寄せた別端末作成分など)→先頭フレームで仕上がりプレビューを起こし dataURL を返す。
+  //   stock記録に依らない=videoIdが引けない投稿でも、動画さえ渡されれば生成できる(Chami指摘2026-08-14)。
+  function previewFromVideoBlob_(vBlob) {
+    if (!vBlob) return Promise.resolve(null);
+    return videoFirstFramePreview_(vBlob).then(function (prevBlob) {
+      if (!prevBlob) return null;
+      return blobToDataUrlP_(prevBlob);
+    }).catch(function () { return null; });
+  }
+
   var _renderSeq = 0, _lastRenderedStockSig = '', _missingThumbs = {}, _stockBgPending = false;
   // 作成履歴(details)の開閉状態を再描画をまたいで保持する。render毎に<details>を作り直すと
   //   open属性が消えて閉じる=「削除を押すと作成履歴が閉じる」の真因(Chami報告2026-08-13③)。
@@ -1824,7 +1834,7 @@
       });
     }
 
-    window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_ };
+    window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_ };
 
     // 動画・画像ミラーは保存直後に即送信し、ここでは旧データ/一時失敗ぶんだけを静かに再試行する。
     // 最大50件を同時発火していた旧30秒sweepはiOSのメモリ圧を上げるため、逐次処理＋2分周期へ変更。

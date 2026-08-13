@@ -217,6 +217,25 @@
       .then(function (j) { return (j && j.ok && j.found && j.dataUrl) ? j.dataUrl : null; })
       .catch(function () { return null; });
   }
+  // 過去分プレビュー生成の最終手段：この端末に動画の控えが無い(別端末で作成)時、Driveの[題名]フォルダから
+  //   動画本体を取り寄せて Blob で返す。無ければ null。Worker側は read-only=非破壊(既存物に触れない)。
+  //   ★Chami指摘2026-08-14「別端末とか関係なく保存先のGoogleドライブの動画参照すればできる」への対応。
+  function fetchVideo_(channel, title) {
+    if (!configured()) return Promise.resolve(null);
+    if (channel !== "acc1" && channel !== "acc2") return Promise.resolve(null);
+    if (!title) return Promise.resolve(null);
+    var fd = new FormData();
+    fd.append("action", "fetch_video");
+    fd.append("channel", channel);
+    fd.append("title", title);
+    return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+      .then(function (r) {
+        var ct = (r.headers.get("Content-Type") || "").toLowerCase();
+        if (r.ok && ct.indexOf("video/") === 0) return r.blob(); // 見つかった=動画バイト列
+        return null;                                             // JSON(found:false)や失敗は null
+      })
+      .catch(function () { return null; });
+  }
   // 背骨ID→動画作成時に保存したDriveフォルダID(無ければ空)。投稿完了側が「もう保存済みか」を判定する。
   function folderIdFor_(videoId) {
     try { return videoId ? (localStorage.getItem("drive_up_" + videoId) || "") : ""; } catch (e) { return ""; }
@@ -232,7 +251,7 @@
     lastCtx.channel = channel; lastCtx.title = title; lastCtx.folderId = folderId;
     sendAppend(f, 0);
   }
-  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_ };
+  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_ };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {

@@ -53,6 +53,13 @@ export default {
     if (String(form.get("action") || "") === "fetch_preview") {
       return await handleFetchPreview(form, env, cors);
     }
+    // ---- 参照アクション：過去分プレビュー生成用に、[題名]フォルダの動画本体を返す（read-only・非破壊）----
+    //   別端末で作った投稿は手元にもR2にも動画blobが無い。だがDriveには投稿完了時に動画が保存されている＝
+    //   そこから取り寄せて先頭フレームでプレビューを起こせる（Chami指摘2026-08-14「別端末とか関係なくDriveの
+    //   動画を参照すればできる」）。作成・削除・上書きは一切しない＝アップロードのレート制限とは別枠。
+    if (String(form.get("action") || "") === "fetch_video") {
+      return await handleFetchVideo(form, env, cors);
+    }
 
     // ---- 簡易レート制限（KV：日次カウンタ・アップロード系のみ）----
     try {
@@ -237,6 +244,48 @@ async function handleFetchPreview(form, env, cors) {
   try { dataUrl = await downloadMediaDataUrl(file.id, file.mimeType || "image/jpeg", token); }
   catch (e) { return json({ ok: false, error: "download_failed" }, 502, cors); }
   return json({ ok: true, found: true, name: file.name, dataUrl }, 200, cors);
+}
+
+// 過去分プレビュー生成の最終手段：[題名]フォルダの動画本体をそのまま返す（非破壊）。
+//   動画は大きいので data URL(base64)化せず、Driveの応答ボディをそのままストリームで中継する
+//   （フロントは Content-Type が video/ なら r.blob() で受ける）。見つからなければ found:false のJSON。
+async function handleFetchVideo(form, env, cors) {
+  const channel = String(form.get("channel") || "").trim();
+  const title = String(form.get("title") || "").trim();
+  const parentId = channelToFolderId(channel, env);
+  if (!parentId) return json({ ok: false, error: "channel_unresolved", channel }, 400, cors);
+  if (!title) return json({ ok: false, error: "missing_title" }, 400, cors);
+
+  let token;
+  try { token = await getAccessToken(env); }
+  catch (e) { return json({ ok: false, error: "auth_failed", reason: e.reason || "" }, 502, cors); }
+
+  const baseName = safeName(title);
+  let folderIds;
+  try { folderIds = await findChildFolderIds(parentId, baseName, token); }
+  catch (e) { return json({ ok: false, error: "list_failed" }, 502, cors); }
+  if (!folderIds.length) return json({ ok: true, found: false, reason: "folder_not_found" }, 200, cors);
+
+  let file = null;
+  for (const fid of folderIds) { file = await findVideoFile(fid, token); if (file) break; }
+  if (!file) return json({ ok: true, found: false, reason: "video_not_found" }, 200, cors);
+
+  const url = DRIVE_API + "/" + encodeURIComponent(file.id) + "?alt=media&supportsAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok || !r.body) return json({ ok: false, error: "download_failed" }, 502, cors);
+  const headers = Object.assign({ "Content-Type": file.mimeType || "video/mp4" }, cors || {});
+  return new Response(r.body, { status: 200, headers });
+}
+
+// フォルダ内の動画ファイルを1件返す（無ければ null）。仕上がりプレビュー等の画像は mimeType で除外。
+async function findVideoFile(folderId, token) {
+  const q = "'" + folderId + "' in parents and mimeType contains 'video/' and trashed=false";
+  const url = DRIVE_API + "?q=" + encodeURIComponent(q) + "&fields=files(id,name,mimeType)&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) return null;
+  const j = await r.json();
+  const f = (j.files || [])[0];
+  return f && f.id ? f : null;
 }
 
 // 親フォルダ直下で name 完全一致のサブフォルダIDを列挙（連番 _2 等は別名なので拾えない＝題名一致のみ）。

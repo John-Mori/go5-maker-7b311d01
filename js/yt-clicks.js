@@ -1667,7 +1667,9 @@
   //   ①まずDriveの[題名]フォルダの「題名_プレビュー.*」を探し、在れば1ページ目へ挿入して完了
   //     (=「Driveに在るのに挿入されてないだけ」を拾う。Worker側は read-only=既存物に触れない)。
   //   ②Driveに無ければ、動画(手元 or R2の控え)の先頭フレームから仕上がりプレビューを生成して挿入
-  //     (window.Go5Stock.previewForVideoId=stock.jsの生成器。動画が引けない別端末分だけはスキップ)。
+  //     (window.Go5Stock.previewForVideoId=stock.jsの生成器)。
+  //   ③手元にもR2にも動画が無い別端末作成分は、Driveに保存された動画本体を取り寄せて生成(Go5Drive.fetchVideo
+  //     →Go5Stock.previewFromVideoBlob)。Driveにも動画が無い(Drive保存前の古い投稿)分だけスキップ。
   //   ★ページを離れても続くよう、未処理リストを localStorage(prevbf_job_<ch>)へ永続化し、
   //     投稿履歴を開き直すと確認なしで続きを自動再開する(下の render 末尾で kick)。
   //   usedImgSave(pKey, [preview]+既存, prev=1) で先頭挿入(冪等=既に先頭が同じなら触らない)。
@@ -1711,7 +1713,7 @@
           if (tl && (tl.ins || tl.had || tl.skip)) {
             var msg = 'プレビュー取込 完了\n・新たに挿入: ' + (tl.ins | 0) + '件';
             if (tl.had) msg += '\n・既に挿入済み: ' + tl.had + '件';
-            if (tl.skip) msg += '\n・生成できず: ' + tl.skip + '件\n　(この端末に動画の控えが無く、Driveにもプレビュー画像が無い作品です＝別端末で作成 or 保存期間切れ。作成した端末で開くか、動画を作り直すと入ります)';
+            if (tl.skip) msg += '\n・生成できず: ' + tl.skip + '件\n　(この端末にもGoogleドライブにも動画・プレビューが見つからない作品です＝Drive保存が始まる前の古い投稿。作成した端末で開くか、動画を作り直すと入ります)';
             alert(msg);
           } else {
             alert('プレビューが無い履歴はありませんでした。(このチャンネルは全て挿入済みです)');
@@ -1739,8 +1741,22 @@
         : Promise.resolve(null);
       driveP.then(function (durl) {
         if (durl) return durl;
+        // ②手元 or R2の控えの動画から生成(この端末に stock 記録がある投稿)。
         if (window.Go5Stock && window.Go5Stock.previewForVideoId && t.videoId) {
           return window.Go5Stock.previewForVideoId(t.videoId).catch(function () { return null; });
+        }
+        return null;
+      }).then(function (durl) {
+        if (durl) return durl;
+        // ③別端末で作った投稿=この端末に動画の控えが無い。だがDriveには投稿完了時に動画が保存されている
+        //   →Driveの[題名]フォルダから動画本体を取り寄せ、先頭フレームからプレビューを起こす
+        //   (Chami指摘2026-08-14「別端末とか関係なくDriveの動画を参照すればできる」)。
+        if (window.Go5Drive && window.Go5Drive.fetchVideo &&
+            window.Go5Stock && window.Go5Stock.previewFromVideoBlob && (ch === 'acc1' || ch === 'acc2')) {
+          return window.Go5Drive.fetchVideo(ch, t.title || '').then(function (vb) {
+            if (!vb) return null;
+            return window.Go5Stock.previewFromVideoBlob(vb);
+          }).catch(function () { return null; });
         }
         return null;
       }).then(function (durl) {
@@ -1782,7 +1798,7 @@
       return;
     }
     if (!targets.length) { alert('プレビューが無い履歴はありません。(このチャンネルは全て挿入済みです)'); return; }
-    if (!window.confirm('このチャンネルの ' + targets.length + ' 件について、まずGoogleドライブから探し、無ければ動画の先頭フレームからプレビューを生成して投稿履歴へ挿入します。\nページを離れても、開き直すと続きを自動で流します。よろしいですか？')) return;
+    if (!window.confirm('このチャンネルの ' + targets.length + ' 件について、まずGoogleドライブのプレビュー画像を探し、無ければ動画(この端末 or Googleドライブ)の先頭フレームからプレビューを生成して投稿履歴へ挿入します。\nページを離れても、開き直すと続きを自動で流します。よろしいですか？')) return;
     _prevbfAnnounce[ch] = true; // 押下起点=完了時に結果サマリ(挿入/既済/生成不可の内訳)を出す
     prevbfSaveJob_(ch, { remaining: targets, total: targets.length, startedAt: Date.now() });
     prevbfRunJob_(ch);
