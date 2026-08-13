@@ -894,7 +894,144 @@ def _reading_items(conf):
     return out
 
 
-def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False):
+# --- ★★直近の便そのものを次の世代へ渡す(2026-08-13 イージス研究室・HQ論点3) ---
+#   Chamiの一次情報= 「急に文脈読まなくなった」。だが実測では引き継ぎ書は**両方の部屋で
+#   採られていた**(llm-edu 見出し8/8・13,988B / copy-director 見出し8/8・7,311B)。
+#   → 穴は「引き継ぎが無い」ではなく **「引き継ぎが要約だから、直前の会話そのものが消える」**。
+#   人間が読めば分かる= 前の便で何を頼まれ何と答えたかは、要約では必ず落ちる粒度だ。
+#   だから**生のやり取りを数往復だけ**、新世代の最初のプロンプトに添える。
+#   ★入れる先は「引き継ぎがある時=世代交代の時」だけ。boot_hash は `boot_plain`
+#     (handoff無しの呼び出し)から取っているので、**この塊は hash に入らない**=
+#     圧縮直後の再送や運用更新の同送で毎回積み直されることはない(そこが今回の主題だから)。
+RECENT_KEEP = 6                 # ファイルに残す往復の数
+RECENT_IN_BOOT = 3              # 新世代へ渡す往復の数
+RECENT_CHARS = 700              # 1件あたりの上限(本文・返信それぞれ)
+
+
+def _recent_path(dept):
+    return os.path.join(LOCAL, "llm", f"recent_{dept}.jsonl")
+
+
+def _recent_append(dept, rec, reply):
+    """1便ぶんの生のやり取りを、部屋ごとの短い巻物に足す(末尾 RECENT_KEEP 件だけ残す)。
+
+    ★失敗しても便は落とさない(記録の失敗で返信を殺さない)。★localの中だけ・外へ出さない。
+    """
+    try:
+        row = {"ts": rec.get("ts", ""), "msg_id": str(rec.get("msg_id", "") or ""),
+               "author": rec.get("author", ""),
+               "body": (rec.get("content", "") or "")[:RECENT_CHARS],
+               "reply": (reply or "")[:RECENT_CHARS]}
+        p = _recent_path(dept)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        rows = []
+        if os.path.exists(p):
+            with open(p, encoding="utf-8", errors="replace") as f:
+                rows = [ln for ln in f.read().splitlines() if ln.strip()]
+        rows.append(json.dumps(row, ensure_ascii=False))
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("\n".join(rows[-RECENT_KEEP:]) + "\n")
+    except Exception:
+        pass
+
+
+def _recent_block(dept, n=RECENT_IN_BOOT):
+    """新世代へ渡す「直前の会話そのもの」。無ければ空文字(=旧版と1文字も変わらない)。"""
+    try:
+        p = _recent_path(dept)
+        if not os.path.exists(p):
+            return ""
+        with open(p, encoding="utf-8", errors="replace") as f:
+            rows = [ln for ln in f.read().splitlines() if ln.strip()]
+        items = []
+        for ln in rows[-n:]:
+            try:
+                items.append(json.loads(ln))
+            except Exception:
+                continue
+        if not items:
+            return ""
+        out = ["=== ★直前の会話(要約ではない・生のやり取り。古い順) ===",
+               "★引き継ぎ書は要約だ。**ここに在るのが実際の直前の便**で、"
+               "Chamiが『さっきの話』と言った時に指しているのはこちらだ。"
+               "矛盾したらこちらを事実として採れ。"]
+        for it in items:
+            out.append(f"--- {it.get('ts','')} / {it.get('author','')} "
+                       f"/ msg_id={it.get('msg_id','')}")
+            out.append(f"[相手] {it.get('body','')}")
+            out.append(f"[前の世代の返信] {it.get('reply','')}")
+        out.append("=== 直前の会話ここまで ===")
+        return "\n".join(out)
+    except Exception:
+        return ""             # 読めなくても交代は止めない(fail-open)
+
+
+def _ledger_lines(dept):
+    """起動文のうち**台帳から作られる部分**(未確認の不具合 / 未完了の依頼 / 台帳の健康診断)。
+
+    ★★2026-08-13(イージス研究室・HQ msg 1537452059643740302)ここを関数へ切り出した。
+      理由は「読みやすさ」ではない= **boot_hash からこの塊を外すため**だ。
+      実測(local/llm/dept_daemon_*.log の全期間・「同送」の行を理由別に数えた):
+        system-engineer 圧縮直後の再送160 / 起動文の更新53 / 人格ファイルの更新6
+        copy-director   圧縮直後の再送 14 / 人格ファイルの更新6 / 起動文の更新5
+        llm-edu         圧縮直後の再送 15 / 起動文の更新9 / 人格ファイルの更新2
+      = **「起動文の更新」が人格の更新より多い**。そしてその中身の多くは運用の変更ではなく、
+        **台帳が1行増えた/1行閉じた**だけだ(この塊が起動文の中に在るので hash が動く)。
+        台帳は毎日動く。動くたびに生きている全セッションへ起動文を丸ごと積んでいた。
+      → 台帳の部分を hash から外し、**変わったのが台帳だけなら台帳だけを送る**。
+        運用(規律・人格・部屋の役割)が本当に変わった時は、今までどおり全文を送る。
+    ★0件の部屋では1行も返さない(=起動文は既存と完全に同一)。
+    """
+    led = []
+    try:
+        _open = open_defect_list(dept)
+    except Exception:                                # noqa: BLE001
+        _open = []
+    if _open:
+        led.append(
+            "★★**この部屋には『まだ直ったと確認できていない不具合』が"
+            f"{len(_open)}件ある。**あなたが引き継いだ仕事だ。\n"
+            + defects_block(dept, head=False) + "\n"
+            "★**『直した』では閉じられない。**閉じられるのは"
+            "**壊れた実物と同じ場面で、直っている実物を見た**時だけだ。"
+            "その時は**生JSONを手打ちせず**次を実行しろ(★2026-08-12・手打ちの `\\` で"
+            "行が壊れ、confirmが黙って消えた実話がある):\n"
+            f'   python scripts/llm/close_item.py --id <上のID> --dept {dept} '
+            '--fixed "<直った実物の在りか>" --scene "<どの場面で見たか>" --by "<誰>"\n'
+            f"  (中身は台帳 {DEFECTS_FILE} への1行追記。受理/不受理はその場で表示される)\n"
+            "★**commitのhashは実物として受理されない**"
+            "(『封じた』と書いたcommitの4〜19分後に同じ再発が5回来た、という実測がある)。")
+    # ★★まだ終わっていないChamiの依頼(2026-07-29 新設。改善書§6 第1手)。
+    #   §5の実話= 引き継ぎには「未着手」と**正しく**書かれていたのに、誰も実行に変換しなかった。
+    #   → 起動した瞬間に「あなたが引き継いだ**仕事**だ」と機械が名指しで渡す。
+    #   ★0件の部屋では1行も増えない(既存の起動文と完全に同一)。
+    try:
+        _req = requests_block(dept)
+    except Exception:                                # noqa: BLE001
+        _req = ""
+    if _req:
+        led.append(
+            "★★**この部屋にはChamiが頼んだまま終わっていない依頼がある。**"
+            "**あなたが引き継いだ仕事だ。**\n"
+            + _req + "\n"
+            "★**上から順に進めろ。着手の向き(どっちから)をChamiに聞くな。**"
+            "聞いて待つと、Chamiが答えるまでこの部屋は止まる"
+            "(実測: 2026-07-29 12:07に『どちらから行くか教えてくれ』と返して**3.5時間停止**した)。\n"
+            + close_request_note(dept))
+    # ★★台帳そのものの健康診断(2026-08-12 新設・イージス研究室。発注= 研究室HQ)。
+    #   上の2ブロックは台帳が**正しく読めている**前提で作られている。
+    #   読めない行を黙って飛ばすと、上の一覧は**嘘のまま自信満々で**毎便配られる。
+    #   → 飛ばした行があった便だけ、ここで受け手へ言う。★0行なら1文字も足さない。
+    try:
+        _alarm = defect_ledger_alarm()
+    except Exception:                                # noqa: BLE001
+        _alarm = ""
+    if _alarm:
+        led.append(_alarm)
+    return led
+
+
+def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False, ledger=True):
     """新規セッションの起動文(★最小限)。
 
     handoff_path / handoff_failed(2026-07-26 事前交代):
@@ -1154,51 +1291,16 @@ def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False
     #     「次のセッションは『commitに封じたと書いてある』(台帳)を継ぐが
     #       『Chamiの画面で消える』(現物)を継がない」= だから毎回『封じた』を再宣言していた。
     #   ★未確認が0件の部屋では**1行も増えない**(既存の起動文と完全に同一)。
-    try:
-        _open = open_defect_list(dept)
-    except Exception:                                # noqa: BLE001
-        _open = []
-    if _open:
-        lines.append(
-            "★★**この部屋には『まだ直ったと確認できていない不具合』が"
-            f"{len(_open)}件ある。**あなたが引き継いだ仕事だ。\n"
-            + defects_block(dept, head=False) + "\n"
-            "★**『直した』では閉じられない。**閉じられるのは"
-            "**壊れた実物と同じ場面で、直っている実物を見た**時だけだ。"
-            "その時は**生JSONを手打ちせず**次を実行しろ(★2026-08-12・手打ちの `\\` で"
-            "行が壊れ、confirmが黙って消えた実話がある):\n"
-            f'   python scripts/llm/close_item.py --id <上のID> --dept {dept} '
-            '--fixed "<直った実物の在りか>" --scene "<どの場面で見たか>" --by "<誰>"\n'
-            f"  (中身は台帳 {DEFECTS_FILE} への1行追記。受理/不受理はその場で表示される)\n"
-            "★**commitのhashは実物として受理されない**"
-            "(『封じた』と書いたcommitの4〜19分後に同じ再発が5回来た、という実測がある)。")
-    # ★★まだ終わっていないChamiの依頼(2026-07-29 新設。改善書§6 第1手)。
-    #   §5の実話= 引き継ぎには「未着手」と**正しく**書かれていたのに、誰も実行に変換しなかった。
-    #   → 起動した瞬間に「あなたが引き継いだ**仕事**だ」と機械が名指しで渡す。
-    #   ★0件の部屋では1行も増えない(既存の起動文と完全に同一)。
-    try:
-        _req = requests_block(dept)
-    except Exception:                                # noqa: BLE001
-        _req = ""
-    if _req:
-        lines.append(
-            "★★**この部屋にはChamiが頼んだまま終わっていない依頼がある。**"
-            "**あなたが引き継いだ仕事だ。**\n"
-            + _req + "\n"
-            "★**上から順に進めろ。着手の向き(どっちから)をChamiに聞くな。**"
-            "聞いて待つと、Chamiが答えるまでこの部屋は止まる"
-            "(実測: 2026-07-29 12:07に『どちらから行くか教えてくれ』と返して**3.5時間停止**した)。\n"
-            + close_request_note(dept))
-    # ★★台帳そのものの健康診断(2026-08-12 新設・イージス研究室。発注= 研究室HQ)。
-    #   上の2ブロックは台帳が**正しく読めている**前提で作られている。
-    #   読めない行を黙って飛ばすと、上の一覧は**嘘のまま自信満々で**毎便配られる。
-    #   → 飛ばした行があった便だけ、ここで受け手へ言う。★0行なら1文字も足さない。
-    try:
-        _alarm = defect_ledger_alarm()
-    except Exception:                                # noqa: BLE001
-        _alarm = ""
-    if _alarm:
-        lines.append(_alarm)
+    if ledger:
+        lines.extend(_ledger_lines(dept))
+    # ★★直前の会話そのもの(2026-08-13・HQ論点3)。**世代交代の便だけ**に付ける。
+    #   ここで付けたぶんは boot_hash に入らない(hashは handoff無しの `boot_plain` から取る)ので、
+    #   運用更新の同送・圧縮直後の再送で毎回積み直されることはない。
+    #   ★引き継ぎが取れなかった時ほど効く(handoff_failed 側にも付ける)。
+    if handoff_path or handoff_failed:
+        _rb = _recent_block(dept)
+        if _rb:
+            lines.append(_rb)
     return "\n".join(lines)
 
 
@@ -3189,6 +3291,20 @@ def _char_fingerprint(conf):
     ★fail-open: 読めないファイルは飛ばす。1枚も読めなければ "" を返し、呼び元は
       **発火させない・指紋を上書きしない**(沈黙も停止も作らない)。
     """
+    parts = [f"{p}:{v}" for p, v in sorted(_char_parts(conf).items())]
+    if not parts:
+        return ""
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _char_parts(conf):
+    """characterfileごとの {パス: "mtime:size"}(2026-08-13 イージス研究室)。
+
+    ★なぜ分けたか= 指紋(1本のhash)では「**どれが**変わったか」が分からない。
+      変わった1枚を名指しできれば、再注入は「そのファイルを読み直せ」の数行で済む
+      =起動文11,448字を積まずに済む(HQ実測・msg 1537452059643740302)。
+    ★fail-open: 読めないファイルは飛ばす(1枚も読めなければ空dict=呼び元は発火させない)。
+    """
     paths = []
     c = conf.get("character")
     if c:
@@ -3197,16 +3313,14 @@ def _char_fingerprint(conf):
         cp = p.get("character")
         if cp:
             paths.append(cp)
-    parts = []
+    out = {}
     for p in sorted(set(paths)):
         try:
             st = os.stat(p)
         except OSError:
             continue
-        parts.append(f"{p}:{int(st.st_mtime)}:{st.st_size}")
-    if not parts:
-        return ""
-    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+        out[p] = f"{int(st.st_mtime)}:{st.st_size}"
+    return out
 
 
 def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=None):
@@ -3267,6 +3381,11 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
     #     いま古い台帳で動いている全部屋を1便で救う(移行の入口)。
     char_fp = _char_fingerprint(conf)
     char_changed = bool(sid) and bool(char_fp) and (entry.get("char_fp") != char_fp)
+    # ★2026-08-13 **どの人格ファイルが変わったか**を名指しできるようにする。
+    #   前回の内訳が無い(移行の入口・旧セッション)なら空= 下では全部を挙げる。
+    char_parts = _char_parts(conf)
+    _prev_parts = entry.get("char_parts") or {}
+    char_changed_paths = [p for p, v in sorted(char_parts.items()) if _prev_parts.get(p) != v]
     rotated_to = 0
     timeout = RELAY_WORK_TIMEOUT if is_work else RELAY_TIMEOUT     # ★soft(ここでは殺さない)
     hard = hard_limit(is_work)                                     # ★hard(ここで初めて殺す)
@@ -3518,7 +3637,17 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         return data, rc, out
 
     boot = _boot_prompt(dept, conf, generation or 1)
-    boot_hash = hashlib.sha256(boot.encode("utf-8")).hexdigest()[:16]
+    # ★★2026-08-13 boot_hash は**台帳の部分を外した起動文**から取る(HQ論点1の本体)。
+    #   台帳(未確認の不具合・未完了の依頼)は毎日動く。実測で aegis-gl は起動文10,267字のうち
+    #   7,312字・system-engineer は11,574字のうち9,028字が台帳だ。旧版はこれを hash に含めて
+    #   いたので、**台帳が1行動くたびに「運用が更新された」として起動文を丸ごと再注入**していた。
+    #   → hash から外し、動いたのが台帳だけなら**台帳だけ**を送る(下の3枝)。
+    #   ★入れ替えの初回だけ、全部屋で hash が食い違って全文が1回飛ぶ(そこは正しい=機構が変わった)。
+    boot_plain = _boot_prompt(dept, conf, generation or 1, ledger=False)
+    boot_hash = hashlib.sha256(boot_plain.encode("utf-8")).hexdigest()[:16]
+    ledger_text = "\n".join(_ledger_lines(dept))
+    ledger_hash = hashlib.sha256(ledger_text.encode("utf-8")).hexdigest()[:16]
+    ledger_changed = bool(sid) and (entry.get("ledger_hash") != ledger_hash)
 
     # ★★ここが「前処理の終わり=本走の始まり」だ(2026-08-13 イージス研究室・HQ恒久依頼1)。
     #   この行より上で走るのは前処理= ①事前圧縮(実測 約200秒) ②事前交代の引き継ぎ生成
@@ -3555,7 +3684,67 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
             #   ここが**圧縮運用の品質保険の本体**であり、これを省くなら圧縮を入れてはいけない
             #   (改善書 第2手の「品質判定」= (b)と(d)をセットで入れることが条件)。
             #   ★既にある boot_hash 更新通知と**同じ枠**を使う(通知の経路を2本作らない)。
-            if entry.get("boot_hash") != boot_hash or _resend or char_changed:
+            # ★★2026-08-13(イージス研究室・HQ msg 1537452059643740302)——
+            #   **人格ファイルだけが変わった便で、起動文の全文(実測11,448字)を積むのをやめた。**
+            #   Chamiの一次情報= 「なんかした?他の各部屋(全部ではない)で、急に文脈読まなくなった」
+            #   HQが測った構造=
+            #     ・この枝は char_changed でも `_head + boot(11,448字) + envelope` を送っていた。
+            #     ・人事部門が口調を直すほど発火する(本日 characters|personas へのコミット14件・
+            #       のべ25ファイル。直近1,500行のログでの同送= copy-director 5 / llm-edu 9 /
+            #       hq 13 / system-engineer 14)。
+            #     ・結果、文脈が押し出されて圧縮が早く回り、圧縮5〜6回+文脈10万超で
+            #       **定期リフレッシュの世代交代**まで前倒しになった(22:01:54 llm-edu /
+            #       22:08:15 copy-director。名指しの2部屋とも、Chamiの便の10〜17分前に交代)。
+            #     → **「人格を磨くほど全部屋の文脈が減る」**。誰も悪くないのに劣化する形なので
+            #       機構側で吸う(HQ論点1「再注入を軽くする」を採用)。
+            #   ★なぜ全文が要らないか= この枝に来るのは `boot_hash` が**一致している**便だけ=
+            #     起動文はそのセッションが既に受け取っている。char_changed で本当に必要なのは
+            #     「台帳が編集されたから読み直せ」の指示と**変わったファイルのパス**だけだ。
+            #     (起動文自体が古い= boot_hash 不一致 / 圧縮で要約が薄まった= _resend は
+            #      どちらも下の全文枝へ落ちる。**品質保険の2本はそのまま残している**)。
+            #   ★HQ論点2(次の交代まで注入を遅らせる)は**採らない**。人格の修正が最長1世代
+            #     届かなくなる= Chamiが口調を直した時に「まだ直ってない」が続く方が損だ。
+            #     軽くすれば、即時に届けたまま文脈も食わない。
+            if (ledger_changed and entry.get("boot_hash") == boot_hash and not _resend):
+                # ★台帳だけが動いた便= 台帳だけを送る(起動文の本体は既にそのセッションに在る)。
+                #   ★人格も同時に変わっていたら、読み直しの指示をこの便に**同居**させる
+                #     (2便に割らない= 便の数を増やすと、それはそれで文脈を食う)。
+                _extra = ""
+                if char_changed:
+                    _names = char_changed_paths or sorted(char_parts)
+                    _extra = ("\n=== ★人格ファイル(characterfile)も更新された"
+                              "(以後はファイルの中身が正) ===\n"
+                              "★記憶の中の口調ではなく、下のファイルを今すぐ読み直して、その声で書け。\n"
+                              + "".join(f"- {p}\n" for p in _names))
+                prompt = ("=== ★この部屋の台帳が更新された(未確認の不具合 / 未完了の依頼)。"
+                          "**以後はこちらが正**。前に渡した一覧はこれで置き換えろ ===\n"
+                          "★運用(規律・役割・人格の名簿)は変わっていない=起動文は前のままで正。\n"
+                          + (ledger_text or "★この部屋の台帳は現在0件だ(未確認の不具合も未完了の依頼も無い)。")
+                          + _extra
+                          + "\n=== ここまで ===\n\n") + envelope
+                _log(dept, f"台帳の更新→**台帳だけ**を送る(起動文{len(boot):,}字は積まない"
+                           f"・台帳{len(ledger_text):,}字"
+                           f"{'・人格の読み直しも同居' if char_changed else ''})")
+                _record(rid, dept, "running",
+                        f"台帳の更新(軽量) 台帳={len(ledger_text)}字 節約={len(boot) - len(ledger_text)}字 "
+                        f"人格同居={'yes' if char_changed else 'no'} "
+                        f"規律={'全文' if disc_full else '3行'}({_disc_why or '変更なし'})")
+            elif char_changed and entry.get("boot_hash") == boot_hash and not _resend:
+                _names = char_changed_paths or sorted(char_parts)
+                prompt = ("=== ★この部屋の人格ファイル(characterfile)が更新された"
+                          "(以後はファイルの中身が正) ===\n"
+                          "★セッション起動後に台帳が編集されている。**記憶の中の口調ではなく、"
+                          "下のファイルを今すぐ読み直して**、その声で書け。\n"
+                          + "".join(f"- {p}\n" for p in _names)
+                          + "★これは運用の変更ではない(起動文は前のままで正)。"
+                          "読み直すのはこのファイルだけでよい。\n"
+                          "=== ここまで ===\n\n") + envelope
+                _log(dept, f"人格ファイルの更新→**読み直しの指示だけ**を送る"
+                           f"(起動文{len(boot):,}字は積まない・更新{len(_names)}枚)")
+                _record(rid, dept, "running",
+                        f"人格ファイルの更新(軽量) 枚数={len(_names)} 節約={len(boot)}字 "
+                        f"規律={'全文' if disc_full else '3行'}({_disc_why or '変更なし'})")
+            elif entry.get("boot_hash") != boot_hash or _resend or char_changed:
                 if _resend:
                     _head = ("=== ★直前に会話の履歴が圧縮された(要約に畳まれた)。"
                              "起動文と規律を**もう一度**渡す。以後はこちらが正 ===\n"
@@ -3566,6 +3755,8 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                              "前の指示と矛盾する所はこちらを採れ) ===\n")
                     _why_resend = "起動文の更新"
                 else:
+                    # ★2026-08-13以降、この枝には来ない(人格だけの更新は上の軽量枝が拾う)。
+                    #   消さずに残す=C-003。上の条件を戻したい時の元の文面がここに在る。
                     # ★人格ファイルだけが変わった便(2026-07-31 REQ-hr-room-74346481c4)。
                     #   起動文の本文は同じだが、起動文はcharacterfileの**パス**を列挙して
                     #   「読め」と言うので、再送すればセッションはファイルを読み直す。
@@ -3598,6 +3789,10 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                 #   空("")では上書きしない=読めなかった便で健全な指紋を消さない(fail-open)。
                 if char_fp:
                     entry["char_fp"] = char_fp
+                    # ★内訳も残す=次に変わった時に「どの1枚か」を名指しできる(2026-08-13)。
+                    entry["char_parts"] = char_parts
+                # ★台帳の指紋(2026-08-13)。渡し終えた便で確定する=次に動いた時だけ台帳を送る。
+                entry["ledger_hash"] = ledger_hash
                 # ★2026-07-29 規律の指紋の帳簿(改善書 第3手)。
                 #   全文を渡した便で指紋を更新し、数え直す。3行の便は数を1つ進めるだけ。
                 #   ★数え方= **全文を送った便も1便と数える**(=1にリセット)。0にすると
@@ -3640,6 +3835,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                     #     新世代の起動文に handoff_failed の一節が入っていて、そちらは文脈に残り続ける。
                     _log(dept, "手動交代の引き継ぎ欠落を、この便の末尾に添えて返した"
                                "(配達の成否はこの時点では分からない)")
+                _recent_append(dept, rec, reply)    # ★次の世代へ渡す「生の直前の便」(2026-08-13)
                 return reply, True
             if _looks_like_auth_failure(out):
                 # ★認証失敗=**やり直さない**(INC-109)。世代交代もしない(窓を増やさない)。
@@ -3667,7 +3863,9 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         # ★対応表へ残す boot_hash は**引き継ぎの行を含まない素の起動文**から取る。
         #   理由= 引き継ぎの行は「この交代の時だけ」の一時的な指示なので、これを混ぜると
         #   次の便の resume で hash が食い違い、**毎回「運用が更新された」通知が飛ぶ**。
-        boot_plain = _boot_prompt(dept, conf, generation)   # 世代番号が入るので作り直す
+        # ★台帳を外して取る(2026-08-13)。上の resume 側と**同じ取り方**でなければ、
+        #   交代した次の便で必ず hash が食い違って全文が飛ぶ。
+        boot_plain = _boot_prompt(dept, conf, generation, ledger=False)   # 世代番号が入るので作り直す
         boot_hash = hashlib.sha256(boot_plain.encode("utf-8")).hexdigest()[:16]
         boot = _boot_prompt(dept, conf, generation,
                             handoff_path=handoff_path,
@@ -3700,7 +3898,9 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                      "created_at": entry.get("created_at") or now,
                      "last_used_at": now,
                      # ★新セッションは起動文でcharacterfileを読んだので指紋を確定(2026-07-31)。
-                     "char_fp": char_fp,
+                     "char_fp": char_fp, "char_parts": char_parts,
+                     # ★新セッションは台帳を起動文で受け取っている=指紋を確定(2026-08-13)。
+                     "ledger_hash": ledger_hash,
                      # ★2026-07-29 新セッションは規律を全文で渡している(disc_full=True)。
                      #   指紋を置いて、次の便から3行に切り替わるようにする(改善書 第3手)。
                      "disc_hash": _disc_fp, "disc_since_full": 1}
@@ -3744,6 +3944,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                            f"(世代の宣言は貼らない・2026-08-12 Chami)")
             else:
                 _log(dept, f"交代 gen={rotated_to}: 世代の宣言は貼らない(2026-08-12 Chami)")
+        _recent_append(dept, rec, reply)            # ★次の世代へ渡す「生の直前の便」(2026-08-13)
         return reply, True
     except subprocess.TimeoutExpired:
         # ★★2026-07-27 文面を直した。旧= 「Claude CLIが300秒で応答しなかった」。
@@ -3792,7 +3993,7 @@ def rotate_now(dept, conf, token, reason="manual"):
     _record(rid, dept, "rotated", f"手動交代 reason={reason} old={sid} gen={generation}")
     handoff_path, head = _write_handoff(dept, conf, token, sid, generation or 1)
     new_gen = (generation or 1) + 1
-    boot_plain = _boot_prompt(dept, conf, new_gen)
+    boot_plain = _boot_prompt(dept, conf, new_gen, ledger=False)   # ★台帳を外して取る(2026-08-13)
     boot_hash = hashlib.sha256(boot_plain.encode("utf-8")).hexdigest()[:16]
     boot = _boot_prompt(dept, conf, new_gen, handoff_path=handoff_path,
                         handoff_failed=not handoff_path)
@@ -3823,6 +4024,11 @@ def rotate_now(dept, conf, token, reason="manual"):
                  # ★2026-07-29 手動交代も同じ帳簿を持つ(経路ごとに持ち物が違うと必ずズレる)。
                  #   ★手動交代の最初の1便(自己確認)には封筒が無い=規律の全文はまだ渡っていない。
                  #     だから指紋は**置かない**。次のChamiの便が全文を渡して指紋を置く。
+                 # ★台帳は起動文に載せて渡している=ここで確定する(2026-08-13)。
+                 #   置かないと、交代の直後の1便で台帳をもう一度送ることになる。
+                 "ledger_hash": hashlib.sha256(
+                     "\n".join(_ledger_lines(dept)).encode("utf-8")).hexdigest()[:16],
+                 "char_fp": _char_fingerprint(conf), "char_parts": _char_parts(conf),
                  "disc_since_full": 0}
     _note_usage(new_entry, data, now, sid=new_sid)
     new_entry.pop("compact_failed", None)
