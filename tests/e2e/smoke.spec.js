@@ -221,6 +221,50 @@ test.describe('ドラフト軽量ページ', () => {
     await expect(page.locator('.vrow-title').filter({ hasText: '即時投稿完了の回帰' })).toHaveCount(1);
   });
 
+  test('history cap 200 keeps the newest completed draft', async ({ page }) => {
+    const draftId = 'stk_e2e_complete_at_cap';
+    const videoId = 'acc1-20260813-1200-cap1';
+    const ytUrl = 'https://www.youtube.com/shorts/ZyXwVuTsR98';
+    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ draftId, videoId }) => {
+      const fullHistory = Array.from({ length: 200 }, (_, i) => ({
+        manual: true,
+        id: 'm:old-' + i,
+        ts: Date.now() - (i + 1) * 60000,
+        title: 'old post ' + i,
+        videoId: 'acc1-20260101-0000-old' + i
+      }));
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('verify_manual__acc1', JSON.stringify(fullHistory));
+      localStorage.setItem('short_hist__acc1', '[]');
+      localStorage.setItem('go5_stock_archive', '[]');
+      localStorage.setItem('go5_stock_meta', JSON.stringify([{
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        label: 'history cap latest post', title: 'history cap latest post', author: 'test',
+        bskyText: 'test body', affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
+        videoId, attrs: {}
+      }]));
+    }, { draftId, videoId });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect.poll(() => page.evaluate(() => typeof window.Go5History?.addCompletedPost)).toBe('function');
+
+    await page.locator(`.stk-mode[data-id="${draftId}"]`).click();
+    await expect(page.locator('#draftPostModal')).toBeVisible();
+    await page.locator('#draftYtUrl').fill(ytUrl);
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.locator('#draftModalComplete').click();
+
+    await expect.poll(async () => page.evaluate(({ draftId, videoId, ytUrl }) => {
+      const hist = JSON.parse(localStorage.getItem('verify_manual__acc1') || '[]');
+      const drafts = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
+      return {
+        count: hist.length,
+        newestPersisted: hist.some((x) => x.videoId === videoId && x.ytUrl === ytUrl),
+        draftRemoved: !drafts.some((x) => x.id === draftId)
+      };
+    }, { draftId, videoId, ytUrl })).toEqual({ count: 200, newestPersisted: true, draftRemoved: true });
+  });
+
   test('投稿履歴APIが未準備ならドラフトを消さず再試行できる', async ({ page }) => {
     const draftId = 'stk_e2e_complete_failclosed';
     const videoId = 'acc1-20260812-1201-e2e2';
