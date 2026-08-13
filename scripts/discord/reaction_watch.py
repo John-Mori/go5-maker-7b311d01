@@ -582,10 +582,21 @@ def stack_open_defects(items, guild_id, dry_run):
 
     戻り値 (積んだ件数, 既にあった件数, 失敗の理由 or "")。
     ★冪等= 同じ投稿から作る id は同じなので、二度流しても増えない(session_relay側で判定)。
+
+    ★★2026-08-14(イージス研究室)= **重い方を先に積む**。
+      同じ投稿にChamiが🔥と再発を**両方**押すことがある(実測 2026-08-14= 14投稿中11件)。
+      台帳は msg_id で1件に畳むので、**先に処理した方のスタンプだけが source に残る**。
+      並びが来た順のままだと再発が先に当たり、実測で **11件中10件から🔥が消えていた**。
+      🔥は「恒久対策まで行け」= 再発より重い(C-038/C-040)。消えると重さが下がる。
+      → ①KIND_ORDER(enjo が先頭)で並べ替えてから積む
+        ②それでも既に再発として積まれている古い行には `mark_defect_enjo` で後から印を足す
+      巡回の本文が「★3種類は別物だ。混ぜて数えるな」と言っている以上、**台帳の側でも混ぜない**。
     """
     targets = [it for it in items if it.get("kind") in DEFECT_KINDS]
     if not targets:
         return 0, 0, ""
+    targets.sort(key=lambda it: KIND_ORDER.index(it.get("kind"))
+                 if it.get("kind") in KIND_ORDER else len(KIND_ORDER))
     if dry_run:
         return 0, 0, "dry-run(台帳は汚さない)"
     try:
@@ -593,7 +604,7 @@ def stack_open_defects(items, guild_id, dry_run):
         import session_relay
     except Exception as e:                            # noqa: BLE001
         return 0, 0, f"session_relay を読めない({type(e).__name__}: {e})"
-    added = dup = 0
+    added = dup = upgraded = 0
     for it in targets:
         try:
             # ★「壊れた実物の在りか」= Chamiがスタンプを押した**その投稿**。
@@ -617,10 +628,18 @@ def stack_open_defects(items, guild_id, dry_run):
                 added += 1
             else:
                 dup += 1
+                # ★既に在る行が「再発」として積まれていて、今回の便が🔥なら**重さだけ足す**。
+                #   これで過去に積まれた行も、次の巡回で自然に🔥へ上がる(取りこぼしを残さない)。
+                if it.get("kind") == "enjo" and session_relay.mark_defect_enjo(
+                        it.get("dept", ""), _did, where=str(it.get("msg_id", ""))):
+                    upgraded += 1
         except Exception as e:                        # noqa: BLE001
             # ★1件失敗しても残りは積む。巡回そのものは絶対に止めない
             print(f"   ★未確認台帳へ積めなかった msg_id={it.get('msg_id')} "
                   f"({type(e).__name__}: {e})")
+    if upgraded:
+        print(f"   ★既存の {upgraded}件へ🔥(炎上)の印を足した"
+              "(再発として積まれていたが、Chamiは🔥も押していた)")
     return added, dup, ""
 
 

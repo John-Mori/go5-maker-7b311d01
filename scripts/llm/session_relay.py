@@ -2174,6 +2174,30 @@ def nudge_request(dept, did, msg_id="", text=""):
                           "where": str(msg_id or "")})
 
 
+def mark_defect_enjo(dept, did, where=""):
+    """既に積んである不具合に **🔥(炎上)の重さ**を後から足す(2026-08-14 イージス研究室)。
+
+    なぜ要るか= 同じ投稿にChamiが🔥と再発を**両方**押した時、台帳は msg_id で1件に畳まれるので
+      **先に処理された方のスタンプだけが source に残る**。実測(2026-08-14の巡回)= 両方押された
+      11件のうち **10件が「再発」として積まれ、🔥が消えていた**。
+      🔥は「恒久対策まで行け」(C-038/C-040)= 再発より重い合図なので、消えると重さが下がる。
+      巡回の本文は「★3種類は別物だ。混ぜて数えるな」と言っているのに、**台帳の側で混ざっていた**。
+
+    ★op は "note"= **状態を動かさない**(未確認のまま。閉じるのは C-024 のまま人の手)。
+    ★冪等= 既に🔥として積まれている / 既に印が在る時は**書かない**(False を返す)。
+    """
+    did = str(did)
+    for r in _defect_read_rows():
+        if str(r.get("id")) != did:
+            continue
+        if r.get("op") == "open" and "炎上" in str(r.get("source") or ""):
+            return False                      # 起票時から🔥= 足すものが無い
+        if r.get("op") == "note" and str(r.get("note_kind") or "") == "enjo":
+            return False                      # 既に印が在る
+    return append_defect({"op": "note", "id": did, "dept": dept, "note_kind": "enjo",
+                          "where": str(where or "")})
+
+
 def open_request(dept, ask, where, noticed_at="", source="", close_when=""):
     """「Chamiが頼んだのに、その便の中で終わらなかった依頼」を1件積む。 (id, 新規か)
 
@@ -2237,15 +2261,24 @@ def fold_defects(dept=None):
                               "opened_at": str(r.get("ts") or ""),
                               "close_when": str(r.get("close_when") or ""),
                               "status": DEFECT_OPEN, "fixed": "", "scene": "",
-                              "confirmed_at": "", "rejected": [], "nudges": []}
+                              "confirmed_at": "",
+                              # ★🔥(炎上)か= 「恒久対策まで行け」の重さ(C-038/C-040)。
+                              #   起票時の source から読む。**後から note で上書きできる**(下)。
+                              "enjo": ("炎上" in str(r.get("source") or "")),
+                              "rejected": [], "nudges": []}
             continue
         if r.get("op") == "note":
             # ★催促の再掲(C-046③)。**状態は動かさない**= 待ち時間の更新だけ。
             #   note_kind が nudge 以外の注記(訂正・恒久の覚書)は従来どおり素通り。
             d = state.get(did)
-            if d is not None and str(r.get("note_kind") or "") == "nudge":
+            _nk = str(r.get("note_kind") or "")
+            if d is not None and _nk == "nudge":
                 d.setdefault("nudges", []).append(
                     f"{r.get('ts','')} {r.get('where','')} {r.get('nudge','')}".strip())
+            elif d is not None and _nk == "enjo":
+                # ★同じ投稿に🔥と再発が両方付いた時、先に処理された方が source を取る。
+                #   後から来た🔥を**落とさず**ここで重さだけ上げる(状態は動かさない)。
+                d["enjo"] = True
             continue
         # --- confirm ---
         d = state.get(did)
@@ -2291,6 +2324,18 @@ def open_defect_list(dept, kind=DEFECT_KIND_DEFECT):
         return []
 
 
+def _enjo_first(items):
+    """🔥(炎上)を先頭へ。それ以外の並びは**1件も動かさない**(安定ソート)。
+
+    なぜ要るか(2026-08-14 イージス研究室の実測)= 改修部門αの未確認は100件、起動文に出るのは
+      先頭12件(DEFECT_BLOCK_MAX)。🔥は後から押される=台帳では新しい=**末尾に沈む**。
+      実測でも🔥24件が起動文に1件も出ていなかった。**印を足しても、読まれる場所に無ければ届かない**。
+    ★C-040=🔥は「重大炎上案件・恒久対策しろ」。巡回の本文も「★最優先」と言っている。
+      = 順番を変えるのは新しい方針ではなく、**既にある裁定の執行**。
+    """
+    return sorted(items, key=lambda d: 0 if d.get("enjo") else 1)
+
+
 def defects_block(dept, head=True):
     """引き継ぎ/起動文へ差し込む本文。**空なら『無い』と書く**(書き忘れと区別するため)。
 
@@ -2300,15 +2345,23 @@ def defects_block(dept, head=True):
         items = open_defect_list(dept)
     except Exception:                                # noqa: BLE001
         items = []
+    items = _enjo_first(items)
     lines = []
     if head:
         lines.append(f"★**まだ直ったと確認できていない不具合**(機械の台帳 {DEFECTS_FILE} の実測):")
     if not items:
         lines.append("  **無い**(この部屋の未確認は0件)。")
         return "\n".join(lines)
+    _n_fire = sum(1 for d in items if d.get("enjo"))
+    if _n_fire:
+        lines.append(f"  ★**🔥(炎上)が {_n_fire}件ある。先頭に出してある**"
+                     "= Chamiが「これは事故だ・恒久対策まで行け」と押した印(C-038/C-040)。")
     for i, d in enumerate(items[:DEFECT_BLOCK_MAX], 1):
         sym = " ".join(d["symptom"].split())[:DEFECT_SYMPTOM_MAX]
-        lines.append(f"  {i}. [{d['id']}] {sym or '(症状の記録なし)'}")
+        # ★🔥= Chamiが炎上スタンプを押した= **恒久対策まで行け**(C-038/C-040)。
+        #   再発と同じ見た目で並べると重さが伝わらないので、頭に印を出す。
+        _fire = "🔥【炎上=恒久対策まで行け】 " if d.get("enjo") else ""
+        lines.append(f"  {i}. [{d['id']}] {_fire}{sym or '(症状の記録なし)'}")
         lines.append(f"     壊れた実物の在りか= {d['broken'] or '(無い★)'}"
                      f" / 気づいた= {d['noticed_at'] or '不明'}"
                      f"{' / 出所= ' + d['source'] if d['source'] else ''}")
@@ -2343,13 +2396,20 @@ def requests_block(dept, head=True, limit=DEFECT_BLOCK_MAX):
         items = []
     if not items:
         return ""
+    items = _enjo_first(items)
     lines = []
     if head:
         lines.append(f"★**まだ終わっていないChamiの依頼**(機械の台帳 {DEFECTS_FILE} の実測。"
                      "上から順に進めろ):")
+    _n_fire = sum(1 for d in items if d.get("enjo"))
+    if _n_fire:
+        lines.append(f"  ★**🔥(炎上)の {_n_fire}件を先頭に置いた**"
+                     "= Chamiが「これは事故だ・恒久対策まで行け」と押した印(C-038/C-040)。"
+                     "残りは従来どおり古い順。")
     for i, d in enumerate(items[:limit], 1):
         sym = " ".join(d["symptom"].split())[:DEFECT_SYMPTOM_MAX]
-        lines.append(f"  {i}. [{d['id']}] {sym or '(依頼の本文なし。元の便を見ること)'}")
+        _fire = "🔥【炎上=恒久対策まで行け】 " if d.get("enjo") else ""
+        lines.append(f"  {i}. [{d['id']}] {_fire}{sym or '(依頼の本文なし。元の便を見ること)'}")
         lines.append(f"     依頼の便の在りか= {d['broken'] or '(無い★)'}"
                      f" / 頼まれた= {d['noticed_at'] or '不明'}"
                      f"{' / 出所= ' + d['source'] if d['source'] else ''}")
