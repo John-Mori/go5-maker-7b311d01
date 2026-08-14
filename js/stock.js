@@ -490,9 +490,17 @@
       //   sourceImageFile は toBlob を通さず直接保存する実体なので沈黙経路が無い(Chami報告2026-08-13①の保険)。
       if (!thumbBlob && evDetail.sourceImageFile) thumbBlob = evDetail.sourceImageFile;
       var store = idb();
+      // ★動画の雲ミラー(R2)は capP 解決直後に「即」発火する＝IDB書込(ops)の settle を待たない。
+      //   真因(Chami報告2026-08-14「候補から作り直し→動画が全滅」):IDB間欠死の端末では store.set の
+      //   番犬タイムアウト+リトライで reject まで約16秒かかる。従来 ensureVideoMirror_ は
+      //   Promise.all(ops).then の中＝ops が settle して初めて呼ばれていたため、その前に video-created 側の
+      //   navTimer(旧8秒 < 16秒)が location.href='Stock.html' でJSコンテキストを破棄し、R2ミラーが
+      //   一度も走らなかった→動画がIDBにもR2にも残らず全滅していた。メモリ上の blob を先にR2へ送る。
+      var mirrorV = ensureVideoMirror_(id, evDetail.blob); // ② 動画本体をR2へ(メモリのblob直渡し=ローカル保存が死んでもDL可能に)
       var ops = [];
+      var vidWrite = Promise.reject(new Error('no-idb-or-blob')); // IDBへの動画書込(健全端末の「手元に動画」判定に使う)
       if (store) {
-        if (evDetail.blob) ops.push(store.set('stock_v_' + id, evDetail.blob));
+        if (evDetail.blob) { vidWrite = store.set('stock_v_' + id, evDetail.blob); ops.push(vidWrite); }
         if (thumbBlob)      ops.push(store.set('stock_t_' + id, thumbBlob));
         // 元画像(前景)もIDBへ保存＝投稿完了(別セッションのこともある)まで残し、Driveへ動画と一緒に上げる。
         //   これが無いと handleCompleteOk_ の時点で元画像が手元に無く、Driveに動画だけが保存される(Chami指摘2026-07-29)。
@@ -500,14 +508,21 @@
         // 仕上がりプレビューも投稿完了まで退避(使用画像1ページ目＋Drive行き)。
         if (prevBlob) ops.push(store.set('stock_prev_' + id, prevBlob));
       }
-      // ★blob 保存が2周とも死んでも reject しない=メタは既に保存済みなので一覧には出る。
-      //   動画DL/サムネは mirror(雲)や後続の backfill で追って効かせる(fail-open)。
-      return Promise.all(ops).catch(function (e) {
+      vidWrite.catch(function () {}); // 未ハンドル reject の警告抑止(成否の判定は videoSafe 側で行う)
+      ensureBlobMirror_(id); // ①-B サムネ/プレビュー/元画像も雲へ(IDB健全端末で有効・2台目対策)
+      // ★blob 保存が2周とも死んでも reject しない=メタは既に保存済みなので一覧には出る(fail-open)。
+      Promise.all(ops).catch(function (e) {
         try { if (window.console && console.warn) console.warn('[stock] draft blob save failed (meta kept in list):', e && (e.message || e)); } catch (_) {}
-      }).then(function () {
-        ensureBlobMirror_(id); // ①-B サムネ/プレビュー/元画像を雲へ(2台目でも出す)
-        ensureVideoMirror_(id, evDetail.blob); // ② 動画本体もR2へ=メモリのblobを直接渡す(ローカル保存が死んでもDL可能に)
-        return id;
+      });
+      // ★遷移(=呼び元 video-created が location.href で行う)は「動画が確実に載った」時点まで待たせる。
+      //   動画が 手元(IDB stock_v_) か 雲(R2ミラー成功=_vidUp) の"どちらか"に着地したら解決＝そこで遷移してよい。
+      //   両方失敗(IDB死かつR2失敗=動画は原理的にどこにも残せない)の時だけ解決しない→呼び元の navTimer が
+      //   最終エスケープで遷移する。これで「遷移が録れたばかりの動画を殺す」レースを断つ。
+      return new Promise(function (resolve) {
+        var settled = false;
+        var ok = function () { if (!settled) { settled = true; resolve(id); } };
+        vidWrite.then(ok, function () {});                 // IDB書込成功=手元に動画あり(健全端末は即)
+        mirrorV.then(function () { if (_vidUp[id]) ok(); }, function () {}); // R2 PUT成功(_vidUp[id]=1)時だけ=雲に控えあり
       });
     });
   }
@@ -1771,13 +1786,16 @@
       // ★saveStock_ が「同期例外」を投げた場合、.then/.catch のどちらにも乗らず遷移が黙って消える
       //   (=動画は録れているのにドラフトタブへ移らない・Chami報告2026-08-13 月詠み)。try で囲い、
       //   同期例外でも必ず goDraft_ へ抜ける=生成後の自動遷移をどんな失敗でも止めない(§3 沈黙が最悪)。
-      // ★さらに saveStock_ 内の非同期処理(toBlob/IDB書込)が「settleしない」で固着しても遷移が消える。
-      //   メタは saveStock_ 冒頭で同期保存済み(一覧には必ず出る)ので、8秒以内に完了しなければ遷移を先行する
-      //   =生成後の遷移をどんな沈黙でも止めない。blob/サムネは mirror/backfill が後追いで効かせる。
+      // ★さらに saveStock_ 内の非同期処理(toBlob/IDB書込/R2ミラー)が「settleしない」で固着しても遷移が消える。
+      //   メタは saveStock_ 冒頭で同期保存済み(一覧には必ず出る)ので、上限内に完了しなければ遷移を先行する。
+      //   ★上限は旧8秒→25秒に延長。saveStock_ は「動画が IDB か R2 のどちらかに載る」まで解決を遅らせる
+      //     設計に変えた(2026-08-14 動画全滅の根治)。IDBの番犬タイムアウトは約16秒あり、旧8秒だと
+      //     R2ミラー成功を待たずに location.href で遷移してアップロードを殺していた。25秒=16秒+R2 PUTの余裕。
+      //     ここが鳴るのは「IDB死かつR2失敗」の二重故障時だけ=その時は動画を原理的に残せないので遷移で妥協する。
       var navTimer = setTimeout(function () {
-        try { if (window.console && console.warn) console.warn('[stock] saveStock_ が8秒以内に完了せず=遷移を先行(メタは保存済み)'); } catch (_) {}
+        try { if (window.console && console.warn) console.warn('[stock] saveStock_ が25秒以内に完了せず=遷移を先行(メタは保存済み)'); } catch (_) {}
         goDraft_();
-      }, 8000);
+      }, 25000);
       try {
         saveStock_(detail).then(function () { clearTimeout(navTimer); goDraft_(); }).catch(function (err) {
           clearTimeout(navTimer);
