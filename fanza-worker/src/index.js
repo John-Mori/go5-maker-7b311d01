@@ -69,8 +69,13 @@ export default {
         try {
           const ov = await stGetOverride(env, cid);
           if (ov && ov.title) {
-            const age = Date.now() - (Date.parse(ov.scrapedAt || "") || 0);
-            if (age > 30 * 86400000) {
+            // ★scrapedAt が空/不正だと Date.parse は NaN → 従来は (NaN||0)=0 で「約56年前」と誤判定し、
+            //   価格を毎回 null 化していた（scrapedAt 未設定の override で価格が恒久的に消える真因）。
+            //   「30日以上前」と確定できる時だけ価格を無効化。年齢不明は価格を保ったまま再取得だけ依頼する。
+            const scrapedMs = Date.parse(ov.scrapedAt || "");
+            if (!isFinite(scrapedMs)) {
+              await stQueueInfoPut(env, cid, ""); // 年齢不明=再取得依頼（既存なら書かない=dedup内蔵）
+            } else if (Date.now() - scrapedMs > 30 * 86400000) {
               ov.prices = { list_price: null, price: null };
               await stQueueInfoPut(env, cid, ""); // 30日超=再取得依頼（既存なら書かない=dedup内蔵）
             }
@@ -222,6 +227,18 @@ export default {
         if (!/^[0-9A-Za-z_-]{1,64}$/.test(cid) || seenC[cid]) continue;
         seenC[cid] = true; poolRows.push({ cid, source: src });
         if (poolRows.length >= 5000) break;
+      }
+      // ★空/不正ボディで candidate_pool を全消去しない安全弁（誤爆でプールを飛ばさない=INC-126系の再発防止）。
+      //   cids が配列でない（POST {} 等）＝明確な不正 → DBに触れず 400。
+      //   有効cidが1件も無い配列 → 総入れ替えは必ず現行候補を積んで送られるので、空替えは誤爆の可能性が高い。
+      //   ここで DELETE を走らせずに no-op で返す（プールは前回の内容を保持）。
+      if (!Array.isArray(bodyC.cids)) {
+        await logCandPost_({ stage: "reject_no_cids" });
+        return json({ ok: false, error: "cids_required" }, 400, corsC);
+      }
+      if (poolRows.length === 0) {
+        await logCandPost_({ stage: "skip_empty_no_wipe" });
+        return json({ ok: true, count: 0, skipped: "empty_no_wipe" }, 200, corsC);
       }
       const nowC = Date.now();
       try {
@@ -1488,6 +1505,7 @@ function corsHeaders(origin, allowed) {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Shared-Secret",
     "Access-Control-Max-Age":       "86400",
+    "Vary":                         "Origin", // ★具体Origin反射時に前段キャッシュが別Origin向けACAOを再利用しない（link/drive worker と実装統一）
   };
 }
 
