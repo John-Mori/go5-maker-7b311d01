@@ -195,6 +195,27 @@ def do_check(verbose=True):
             "elevated": is_elevated()}
 
 
+def crd_events(minutes=3):
+    """chromoting の接続(1)/切断(2)を新しい順に返す。
+
+    ★なぜイベントログを引くか= CRDは切れた理由をどこにも書かない。
+      唯一の実物が Application ログの Id 1/2 の時刻だ。ここと
+      アドレスの状態を**同じ時間軸に並べる**のがこの計測の全部。
+    """
+    cmd = ("Get-WinEvent -FilterHashtable @{LogName='Application';"
+           "ProviderName='chromoting';Id=1,2;StartTime=(Get-Date).AddMinutes(-%d)} "
+           "-ErrorAction SilentlyContinue | ForEach-Object "
+           "{ '{0}|{1}' -f $_.TimeCreated.ToString('HH:mm:ss'),$_.Id }" % minutes)
+    rc, out = ps(cmd)
+    evs = []
+    for line in out.splitlines():
+        p = line.strip().split("|")
+        if len(p) == 2 and p[1] in ("1", "2"):
+            evs.append({"key": line.strip(), "at": p[0],
+                        "what": "接続" if p[1] == "1" else "★切断"})
+    return evs
+
+
 def _secs(v):
     """'00:04:49' / '1.02:03:04' を秒に。読めなければ None。"""
     if not v:
@@ -244,7 +265,19 @@ def do_watch(every, minutes):
         with io.open(WATCH_JSONL, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
+    seen_ev = set()
     while dt.datetime.now() < end:
+        # ★CRDの接続/切断を同じ時間軸に並べる。これが無いと「切れた瞬間に何が変わったか」
+        #   が永久に分からず、理屈の言い合いになる(2026-08-14 17:30 に実際そうなった)。
+        for ev in crd_events(minutes=3):
+            if ev["key"] in seen_ev:
+                continue
+            seen_ev.add(ev["key"])
+            log("CRD %s %s" % (ev["at"], ev["what"]))
+            put("crd", at=ev["at"], what=ev["what"],
+                preferred_now=sorted([r["addr"] for r in wifi_v6()
+                                      if r["state"].lower() == "preferred"]))
+
         rows = wifi_v6()
         pref = sorted([r["addr"] for r in rows if r["state"].lower() == "preferred"])
         key = ",".join(pref)
@@ -260,10 +293,12 @@ def do_watch(every, minutes):
             if gap:
                 ra_gaps.append(gap)
                 log("RA到着: 前回から %d秒 (寿命 %s秒 → %s秒)" % (gap, last_left, left))
+            else:
+                # ★1本目は「計測を始めてから」の値になり、RAの間隔ではない。
+                #   間隔として数えない(測っていない数を語らないため)。
+                log("RA到着(1本目=ここを基準にする / 寿命 %s秒)" % left)
             ra_at = now
             put("ra", gap_sec=gap, valid_sec=left)
-        elif ra_at is None:
-            ra_at = dt.datetime.now()
 
         if key != last_key:
             if last_key is not None:
