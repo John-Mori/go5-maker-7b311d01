@@ -812,6 +812,7 @@
           try { renderHealth_(); } catch (e) {}
           applyDeltas_();
           try { repairMissing_(); } catch (e) {} // 「記録待ち」「クリック⚠」を実データ基点で自己修復
+          try { mintMissingWorkShorts_(); } catch (e) {} // 作品短縮URL(導線2)が空の行を、開き直しだけで自己発行(REQ-28ef251ba4)
           if (cb) cb();
           return;
         }
@@ -1628,6 +1629,33 @@
     payload.workState = it.workState || '旧作'; // 作品状態列
     if (it.platform === 'x' || it.platform === 'bsky') payload.platform = it.platform; // 投稿先(X/Bsky)列
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
+  }
+
+  // 起動時バックフィル: 作品URLは有るのに作品短縮URL(導線2)が空の履歴を、link-worker瞬断等で発行に
+  //   失敗したまま固まったもの(REQ-28ef251ba4/65c7897f2f)として、"開き直すだけ"で自己回復させる。
+  //   従来 mintWorkShortAtPost_ の発火はユーザー操作起点(投稿完了/編集保存/照合)だけで、失敗後に
+  //   再発行するロード時パスが無く空欄が恒久化していた。mintWorkShortAtPost_ は r2のみ採用・3回リトライ・
+  //   冪等・workShortNone復活なし=安全。1回の走行で上限5件(過負荷防止)。allItemsは複製を返すため、
+  //   ロードした実配列を直接持ってmintで変異→persistで同じ配列を保存(1347-1379の既存パターンと同型)。
+  var _workBackfillDone = {};
+  function mintMissingWorkShorts_() {
+    if (typeof window.Go5MakeShort !== 'function') return;
+    var budget = { n: 0 };
+    [{ arr: loadHist(), key: histKey() }, { arr: loadManual(), key: manualKey() }].forEach(function (grp) {
+      grp.arr.forEach(function (it) {
+        if (budget.n >= 5) return;
+        if (!it || !it.videoId) return;
+        if (it.workShortUrl || it.workShortNone) return;                 // 既に有る/意図的に空 は対象外(冪等)
+        if (!/^https?:\/\//.test((it.workUrl || '').trim())) return;     // 作品URLが無ければ発行できない
+        if (_workBackfillDone[it.videoId]) return;
+        _workBackfillDone[it.videoId] = true;
+        budget.n++;
+        mintWorkShortAtPost_(it, function () {
+          try { saveArr(grp.key, grp.arr); } catch (e) {}                // 発行できた値をローカル台帳へ
+          try { pushItemToGas_(it); } catch (e) {}                       // シートへも後追い反映(putIf経由・非破壊)
+        });
+      });
+    });
   }
 
   // 自己修復: 端末が持つ計測URL(YouTube動画URL・短縮URL=r2)がシートへ未反映だと、サーバーが
@@ -3197,6 +3225,7 @@
         shortUrl: it.shortUrl || '',
         shareUrl: it.shareUrl || '',
         workUrl: it.workUrl || '',
+        workShortUrl: it.workShortUrl || '', // 導線2(作品クリック)計測URL=手動同期でも空欄をバックフィル(syncHistory_が受信・GAS無改修)
         youtubeUrl: yt,
         postedAt: postedMs ? new Date(postedMs).toISOString() : ''
       };

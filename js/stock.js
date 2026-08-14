@@ -1393,8 +1393,15 @@
       var retry_ = function () { if (tries < 3 && _modalMeta === meta) setTimeout(attempt_, tries * 1500); };
       try {
         window.Go5MakeShort(aff, { account: meta.account }).then(function (r) {
-          var share = (r && (r.shareUrl || r.shortUrl)) || '';
-          if (share) { _shortMintCache[aff] = { shortUrl: (r && r.shortUrl) || '', shareUrl: (r && r.shareUrl) || '' }; applyShare_(_shortMintCache[aff]); return; }
+          // ★成功=計測キー(r2/独自ドメイン)が取れた時だけ。2026-08-13の da.gd 全廃以降、makeShortAndShare は
+          //   worker瞬断時に"生アフィリンク"を shortUrl/shareUrl として返す(bluesky.js:1950)。生URLを成功と
+          //   誤認すると①_shortMintCache が汚れてリトライが二度と走らず欄が永久に空(REQ-28ef251ba4/65c7897f2f)
+          //   ②X本文プレースホルダへ生アフィリンクが充填される(§6.1のP0作法違反)。r2以外はキャッシュせずリトライへ。
+          var go5 = window.Go5Short || {};
+          if (r && r.shortUrl && go5.ourBase && go5.ourBase(r.shortUrl)) {
+            _shortMintCache[aff] = { shortUrl: r.shortUrl, shareUrl: (r.shareUrl || r.shortUrl) };
+            applyShare_(_shortMintCache[aff]); return;
+          }
           retry_();
         }).catch(retry_);
       } catch (e) {}
