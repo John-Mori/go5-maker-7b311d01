@@ -1626,9 +1626,23 @@
       fanzaInfo: fanzaInfoForWorkUrl_(workUrl) || null  // シート記録用(価格/レビュー)
     };
   }
+  // 動画作成タブのカテゴリ属性キー一覧。★以前はローカルの MOVIE_ATTRS 配列だったが、カテゴリを
+  //   Go5Cats(core/categories.js)へ集約(2026-08-02 v=597 / commit 62fbc80)した際に定義だけ消え、
+  //   参照(この下 3 箇所)が残って ReferenceError になり、histAdd/recordToSheet が
+  //   「投稿履歴の保存・シート記録」に到達する前に落ちていた(自動投稿経路の履歴欠落の温床)。
+  //   Go5Cats から現在のカテゴリキーを引く(動的追加カテゴリにも追従)。未ロード時は旧・組み込み8属性へフォールバック。
+  function movieAttrKeys_() {
+    try {
+      if (window.Go5Cats && window.Go5Cats.list) {
+        var ks = window.Go5Cats.list().map(function (c) { return c.key; });
+        if (ks.length) return ks;
+      }
+    } catch (e) {}
+    return ['chara', 'jk', 'gyaru', 'isekai', 'harem', 'ai', 'ol', 'soshu'];
+  }
   // 履歴アイテムから meta を復元。(過去データのアカウント矯正で使う)
   function metaFromHistItem_(it) {
-    var attrs = {}; MOVIE_ATTRS.forEach(function (p) { attrs[p[0]] = !!it[p[0]]; });
+    var attrs = {}; movieAttrKeys_().forEach(function (k) { attrs[k] = !!it[k]; });
     return { videoId: it.videoId || '', workUrl: it.workUrl || '', attrs: attrs, workState: it.workState || '', rebuild: !!it.rebuild, rebuildOf: it.rebuildOf || '', goal: it.goal || '', cmtType: it.cmtType || '', fanzaSnap: it.fanzaSnap || null, fanzaInfo: null };
   }
 
@@ -1655,7 +1669,7 @@
       work_short_url: record.workShortUrl || '' // 導線2(作品クリック計測URL)＝アカウント移送/再記録でも欠落させない
     };
     if (record.postedAt) payload.postedAt = record.postedAt; // 過去データ矯正時は当時の投稿時刻を保持
-    MOVIE_ATTRS.forEach(function (p) { payload[p[0]] = !!attrs[p[0]]; });
+    movieAttrKeys_().forEach(function (k) { payload[k] = !!attrs[k]; });
     payload.workState = workState;
     payload.rebuild = rebuild;
     if (rebuildOf) payload.rebuildOf = rebuildOf;
@@ -2185,7 +2199,7 @@
     // 動画作成タブのカテゴリ属性・作品状態を引き継ぐ(manualOnly=手動短縮のときは付けない)
     if (!rec.manualOnly) {
       var attrs = meta ? meta.attrs : (uiSame ? readMovieAttrs() : {});
-      MOVIE_ATTRS.forEach(function (p) { if (attrs[p[0]]) entry[p[0]] = true; });
+      movieAttrKeys_().forEach(function (k) { if (attrs[k]) entry[k] = true; });
       entry.workState = meta ? meta.workState : (uiSame ? readWorkState() : '旧作'); // 投稿時の作品状態
       var rb = meta ? meta.rebuild : (uiSame ? readRebuild() : false); if (rb) entry.rebuild = true;
       var rbOf = meta ? meta.rebuildOf : (uiSame ? readRebuildTarget() : ''); if (rb && rbOf) entry.rebuildOf = rbOf;
