@@ -1666,7 +1666,7 @@
   //   Chami依頼(2026-08-13): 投稿履歴でプレビュー画像が入っていない履歴だけを対象に、
   //   ①まずDriveの[題名]フォルダの「題名_プレビュー.*」を探し、在れば1ページ目へ挿入して完了
   //     (=「Driveに在るのに挿入されてないだけ」を拾う。Worker側は read-only=既存物に触れない)。
-  //   ②Driveに無ければ、動画(手元 or R2の控え)の先頭フレームから仕上がりプレビューを生成して挿入
+  //   ②Driveに無ければ、動画(手元 or R2の控え)の末尾(約5秒)フレームから仕上がりプレビューを生成して挿入
   //     (window.Go5Stock.previewForVideoId=stock.jsの生成器)。
   //   ③手元にもR2にも動画が無い別端末作成分は、Driveに保存された動画本体を取り寄せて生成(Go5Drive.fetchVideo
   //     →Go5Stock.previewFromVideoBlob)。Driveにも動画が無い(Drive保存前の古い投稿)分だけスキップ。
@@ -1735,7 +1735,7 @@
       // 既に別経路でプレビューが入っていたら生成不要(冪等)。
       var prevN = cand.usedPrevCount ? (cand.usedPrevCount(pKey) || 0) : 0;
       if (prevN > 0) { finishItem('had'); return; }
-      // ①Driveを先に見る → 無ければ②動画の先頭フレームから生成。
+      // ①Driveを先に見る → 無ければ②動画の末尾(約5秒)フレームから生成。
       var driveP = (window.Go5Drive && window.Go5Drive.fetchPreview && (ch === 'acc1' || ch === 'acc2'))
         ? window.Go5Drive.fetchPreview(ch, t.title || '').catch(function () { return null; })
         : Promise.resolve(null);
@@ -1749,7 +1749,7 @@
       }).then(function (durl) {
         if (durl) return durl;
         // ③別端末で作った投稿=この端末に動画の控えが無い。だがDriveには投稿完了時に動画が保存されている
-        //   →Driveの[題名]フォルダから動画本体を取り寄せ、先頭フレームからプレビューを起こす
+        //   →Driveの[題名]フォルダから動画本体を取り寄せ、末尾(約5秒)フレームからプレビューを起こす
         //   (Chami指摘2026-08-14「別端末とか関係なくDriveの動画を参照すればできる」)。
         if (window.Go5Drive && window.Go5Drive.fetchVideo &&
             window.Go5Stock && window.Go5Stock.previewFromVideoBlob && (ch === 'acc1' || ch === 'acc2')) {
@@ -1798,7 +1798,7 @@
       return;
     }
     if (!targets.length) { alert('プレビューが無い履歴はありません。(このチャンネルは全て挿入済みです)'); return; }
-    if (!window.confirm('このチャンネルの ' + targets.length + ' 件について、まずGoogleドライブのプレビュー画像を探し、無ければ動画(この端末 or Googleドライブ)の先頭フレームからプレビューを生成して投稿履歴へ挿入します。\nページを離れても、開き直すと続きを自動で流します。よろしいですか？')) return;
+    if (!window.confirm('このチャンネルの ' + targets.length + ' 件について、まずGoogleドライブのプレビュー画像を探し、無ければ動画(この端末 or Googleドライブ)の末尾(約5秒)フレームからプレビューを生成して投稿履歴へ挿入します。\nページを離れても、開き直すと続きを自動で流します。よろしいですか？')) return;
     _prevbfAnnounce[ch] = true; // 押下起点=完了時に結果サマリ(挿入/既済/生成不可の内訳)を出す
     prevbfSaveJob_(ch, { remaining: targets, total: targets.length, startedAt: Date.now() });
     prevbfRunJob_(ch);
@@ -1853,7 +1853,7 @@
       // 計測ヘルス(B-3): 正常時は目立たせない。異常時だけ赤字。追加通信はしない(既存取得の結果を映すだけ)
       '<span id="measHealth" class="meas-health" title="計測3経路の生死。短縮URL=クリック数/記録GAS=今日昨日週の日別記録/YouTube=再生数。「応答なし」の時、その数字は古い値です">' + healthHtml_() + '</span>' +
       histColsCtlHtml_() + // 列数セレクタ(PCのみCSSで表示)
-      '<button id="drivePrevBackfill" type="button" class="vhide-remade-btn" title="プレビューが入っていない投稿履歴について、まずGoogleドライブの「題名_プレビュー」画像を探し、無ければ動画の先頭フレームから生成して1ページ目へ挿入します(このチャンネル分・既にプレビューがある履歴は対象外・ページを離れても開き直すと続きを自動で流します)">🔁 Drive→過去分プレビュー取込</button>' +
+      '<button id="drivePrevBackfill" type="button" class="vhide-remade-btn" title="プレビューが入っていない投稿履歴について、まずGoogleドライブの「題名_プレビュー」画像を探し、無ければ動画の末尾(約5秒)フレームから生成して1ページ目へ挿入します(このチャンネル分・既にプレビューがある履歴は対象外・ページを離れても開き直すと続きを自動で流します)">🔁 Drive→過去分プレビュー取込</button>' +
       '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
     list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
       var k = itemKey(it);

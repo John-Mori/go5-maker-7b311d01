@@ -346,17 +346,20 @@
     } catch (e) { return Promise.resolve(null); }
   }
 
-  // ── 過去分プレビュー復元：動画blobの先頭フレームをJPEGへ(Chami依頼2026-08-13「作られてないプレビューを
-  //   自動で作成」)。仕上がりプレビュー=動画の先頭フレームなので、動画さえ手元にあれば後からでも同じ絵を
-  //   復元できる。iOS Safariの沈黙ハング(loadeddata/seeked が来ない・canvas.toBlobが呼ばれない等)に備え、
-  //   8秒の番犬で必ず resolve(null) に倒す(toBlobSafe_ と同じ fail-open の作法。ここでは reject しない)。
-  function videoFirstFramePreview_(blob) {
+  // ── 過去分プレビュー復元：動画blobを「再生し終えた画=末尾(約5秒)フレーム」でJPEGへ
+  //   (Chami依頼2026-08-14「動画投稿プレビューは先頭の画像ではなく、再生して5秒後のシーンを」)。
+  //   ★仕上がりプレビュー(動画作成タブの capturePreview_ が撮る #cv)は t=DURATION=5秒=ズーム完了後の絵。
+  //   だから復元も先頭(0秒・ズーム前)ではなく末尾に寄せないと live と絵が食い違う(先頭だと引きの構図で別物)。
+  //   iOS Safariの沈黙ハング(loadeddata/seeked が来ない・canvas.toBlobが呼ばれない等)に備え、8秒の番犬で
+  //   必ず resolve(null) に倒す(toBlobSafe_ と同じ fail-open の作法。ここでは reject しない)。
+  function videoEndFramePreview_(blob) {
     return new Promise(function (resolve) {
       if (!blob) { resolve(null); return; }
       var url = null;
       try { url = URL.createObjectURL(blob); } catch (e) { resolve(null); return; }
       var done = false;
       var timer = null;
+      var durationFixed = false;   // ★実尺が確定済みか(MediaRecorder製webmは duration=Infinity のことがある)
       var finish = function (b) {
         if (done) return; done = true;
         clearTimeout(timer);
@@ -375,10 +378,28 @@
           c.toBlob(function (b) { finish(b); }, 'image/jpeg', 0.85);
         } catch (e) { finish(null); }
       };
-      v.onloadeddata = function () {
-        try { v.currentTime = 0.03; } catch (e) { capture_(); }
+      var seekEnd_ = function () {
+        var d = v.duration;
+        // 末尾ちょうどは真っ黒/デコード未了になりやすいので数十ms手前を取る。
+        //   実尺が取れなければ既定5秒-εへ(この動画は常に約5秒)。
+        var target = (isFinite(d) && d > 0) ? Math.max(0, d - 0.05) : 4.95;
+        try { v.currentTime = target; } catch (e) { capture_(); }
       };
-      v.onseeked = capture_;
+      v.onloadeddata = function () {
+        // ★MediaRecorder製のwebmは尺がヘッダに無く duration=Infinity のことがある。
+        //   一度巨大値へシークさせると実尺が確定するので、その onseeked で末尾へ寄せ直す。
+        if (!isFinite(v.duration) || v.duration <= 0) {
+          durationFixed = false;
+          try { v.currentTime = 1e101; } catch (e) { durationFixed = true; seekEnd_(); }
+        } else {
+          durationFixed = true;
+          seekEnd_();
+        }
+      };
+      v.onseeked = function () {
+        if (!durationFixed) { durationFixed = true; seekEnd_(); return; } // 巨大値シークで実尺が入った直後
+        capture_();
+      };
       v.onerror = function () { finish(null); };
       try { v.src = url; v.load(); } catch (e) { finish(null); }
     });
@@ -936,7 +957,7 @@
 
   // ── 投稿履歴からの過去分プレビュー生成に使う公開API(Chami依頼2026-08-13「投稿履歴の🔁ボタンに統合」)。
   //   videoId(投稿履歴のキー)→ 対応するドラフト/作成履歴の stock id を引き、動画(手元 or R2の控え)の
-  //   先頭フレームで仕上がりプレビューを起こして dataURL を返す。呼び出し側(yt-clicks.js)が投稿履歴の
+  //   末尾(約5秒)フレームで仕上がりプレビューを起こして dataURL を返す。呼び出し側(yt-clicks.js)が投稿履歴の
   //   使用画像1ページ目へ挿入する。動画の在りかを引けない(この端末に stock 記録が無い)/動画が手元にも
   //   雲にも無い時は null(=この端末では生成不可)。生成できたら端末内 stock_prev_ にも控える(次回は速い)。
   function previewForVideoId_(videoId) {
@@ -951,7 +972,7 @@
       if (pb) return blobToDataUrlP_(pb); // 既にローカルに控えがある=動画デコードを省く
       return resolveVideoBlob_(m.id).then(function (vBlob) {
         if (!vBlob) return null;                       // 手元にも雲(R2)にも動画が無い=復元不可
-        return videoFirstFramePreview_(vBlob).then(function (prevBlob) {
+        return videoEndFramePreview_(vBlob).then(function (prevBlob) {
           if (!prevBlob) return null;
           try { if (store) store.set('stock_prev_' + m.id, prevBlob).catch(function () {}); } catch (e) {} // 次回のために控える(冪等)
           return blobToDataUrlP_(prevBlob);
@@ -960,11 +981,11 @@
     }).catch(function () { return null; });
   }
 
-  // 動画Blob(Driveから取り寄せた別端末作成分など)→先頭フレームで仕上がりプレビューを起こし dataURL を返す。
+  // 動画Blob(Driveから取り寄せた別端末作成分など)→末尾(約5秒)フレームで仕上がりプレビューを起こし dataURL を返す。
   //   stock記録に依らない=videoIdが引けない投稿でも、動画さえ渡されれば生成できる(Chami指摘2026-08-14)。
   function previewFromVideoBlob_(vBlob) {
     if (!vBlob) return Promise.resolve(null);
-    return videoFirstFramePreview_(vBlob).then(function (prevBlob) {
+    return videoEndFramePreview_(vBlob).then(function (prevBlob) {
       if (!prevBlob) return null;
       return blobToDataUrlP_(prevBlob);
     }).catch(function () { return null; });
