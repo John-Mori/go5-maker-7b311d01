@@ -1070,6 +1070,15 @@
 
   // ---- アカウント切替で再読込 ----
   document.addEventListener('account-changed', function () {
+    // 動画作成中のチャンネル切替は「同じ作品をどちらのチャンネルで作るか」の変更。
+    // 切替先に残っていた別作品/空URLで、編集中の作品URLとセールラベルを上書きしない。
+    var movieWorkCarry = '';
+    try {
+      var movieTabActive = document.documentElement.getAttribute('data-tab') === 'tabMovie';
+      if (movieTabActive && els.movieWorkUrl) movieWorkCarry = (els.movieWorkUrl.value || '').trim();
+    } catch (e) {}
+    // account-changed発火時点ではacctId()は切替後。現在作品を切替先の作業値として先に確定してからapplyAccountする。
+    if (movieWorkCarry) saveA('bsky_work_url', movieWorkCarry);
     // ★案内リンクの短縮キャッシュを落として、新チャンネルの独自ドメイン(月詠み=5mgl / 宵桜=yoz2)で
     //   作り直す。キャッシュキーが生アフィリンクのみ=アカウントを含まないため、両chで同一作品だと
     //   切替後も旧chのドメインが再利用され「案内が前回のリンクのまま」になっていた(Chami報告2026-08-11)。

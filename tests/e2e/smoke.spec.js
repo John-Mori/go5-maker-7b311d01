@@ -67,6 +67,41 @@ test.describe('go5-maker 公開URL スモーク', () => {
   });
 });
 test.describe('候補ページの画像・投稿編集', () => {
+  test('全体読込後にIDBへ届いた候補画像も、動画生成へ移動して消えない', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__candidateHydratedSeen = false;
+      document.addEventListener('go5-candidate-images-hydrated', () => { window.__candidateHydratedSeen = true; });
+    });
+    const cid = 'tw_candidate_late_idb_keep';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await expect.poll(() => page.evaluate(() => window.__candidateHydratedSeen), { timeout: 10000 }).toBe(true);
+    await page.evaluate(async ({ cid }) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 8; canvas.height = 8;
+      canvas.getContext('2d').fillStyle = '#ff00ff';
+      canvas.getContext('2d').fillRect(0, 0, 8, 8);
+      const selectedData = canvas.toDataURL('image/png');
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: '遅れて届いた候補画像の保持テスト', isTwitter: true,
+        twitterUrl: 'https://x.com/go5_test/status/78', addedAt: Date.now()
+      }]));
+      // 全体ハイドレート後にIDBだけへ届いた状態を再現。candidates.jsのメモリにはまだ無い。
+      await Go5Idb.set('ref:' + cid, { imgs: [selectedData], img: selectedData, comment: '保持', memo: '', at: Date.now() });
+      Go5Cand.render();
+    }, { cid });
+
+    await page.locator('[data-refimg="' + cid + '"]').click();
+    await expect(page.locator('#refImgPreview img')).toBeVisible();
+    await page.locator('#refImgToMovie').click();
+    await page.waitForURL(/index\.html/);
+    await expect.poll(() => page.evaluate(() => !!window.Go5PhotoRect?.()), { timeout: 10000 }).toBe(true);
+    const kept = await page.evaluate(async ({ cid }) => {
+      const rec = await Go5Idb.get('ref:' + cid);
+      return { count: rec && rec.imgs ? rec.imgs.length : 0, comment: rec && rec.comment };
+    }, { cid });
+    expect(kept.count).toBe(1);
+    expect(kept.comment).toBe('保持');
+  });
   test('候補画像の全体展開が遅くても、作品単位で投稿編集が開き、画像も自動表示される', async ({ page }) => {
     const cid = 'tw_codex_candidate_ui';
     // iPhoneで候補画像の全体ハイドレートが遅い状態を決定的に再現する。
@@ -304,6 +339,29 @@ test.describe('候補ページの画像・投稿編集', () => {
     expect(state.inputFiles).toBe(0);
     expect(state.foregroundName).toBe('candidate.jpg');
     expect(state.label).not.toBe('未選択');
+  });
+});
+test.describe('動画作成中のチャンネル切替', () => {
+  test('月詠みから宵桜へ切り替えても作品URLとセールラベルを維持する', async ({ page }) => {
+    const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_sale_switch_test/';
+    await page.goto('index.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ workUrl }) => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.removeItem('bsky_work_url__acc2');
+      sessionStorage.setItem('cand_to_movie_pending', JSON.stringify({
+        it: { cid: 'd_sale_switch_test', title: 'セール作品の切替テスト', author: 'テスト作者', listPrice: 1000, price: 500, discountPct: 50 },
+        imgDataUrl: '', comment: 'セール作品', workUrl, imageCid: '', imageIndex: 0
+      }));
+    }, { workUrl });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await expect(page.locator('#movieWorkUrl')).toHaveValue(workUrl);
+    await expect(page.locator('#promoPosRow')).toBeVisible();
+    await page.locator('#acctBtn2').click();
+    await expect(page.locator('#acctBtn2')).toHaveClass(/active/);
+    await expect(page.locator('#movieWorkUrl')).toHaveValue(workUrl);
+    await expect(page.locator('#promoPosRow')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('bsky_work_url__acc2'))).toBe(workUrl);
   });
 });
 test.describe('ドラフト軽量ページ', () => {

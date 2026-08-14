@@ -768,7 +768,9 @@
   // 候補画像が多い/iOSが低メモリでも「投稿編集」の入口を全体走査から切り離す。
   function ensureRefLoaded_(cid) {
     cid = String(cid || '');
-    if (!cid || !_idbOk || _candidateHydrated || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
+    // 全体ハイドレート完了は「このcidも読めた」証明ではない。同期などで完了後にIDBへ入った
+    // 作品はメモリに無いことがあるため、cid単位の既知フラグ/実体が無ければ直接getする。
+    if (!cid || !_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
       if (cid && Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) _refLoaded[cid] = true;
       return Promise.resolve(true);
     }
@@ -1710,7 +1712,9 @@
     // 全体の候補画像展開が遅くても、押された作品のrefレコード1件だけを直接読む。
     // 読み取り確認前に空モーダルを作って保存可能にすると既存画像を消し得るため、読込中UIを先に出す。
     var cid = String(it.cid || '');
-    var known = _candidateHydrated || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
+    // 全体走査が終わった後に同期・別ページから追加された画像もあるため、この作品を実際に
+    // 読んだかだけで判定する。全体完了だけで空モーダルを開くと、遷移時の保存で画像を消し得る。
+    var known = _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
     if (_idbOk && !known && !refReady) {
       var loadSeq = ++_refOpenSeq;
       showRefLoadState_(ov, it, false, onSaved);
@@ -1737,6 +1741,9 @@
     // X/Bluesky URL は refimg 側に無ければ候補アイテム側(it.twitterUrl=カードのXリンクの出所)からフォールバック
     //   。(カードにXリンクが出ているのにモーダルの欄が空になる不一致を防ぐ)
     var pending = { imgs: curImgs.slice(), idx: 0, comment: cur.comment || '', twitterUrl: cur.twitterUrl || it.twitterUrl || '', memo: cur.memo || '', urls2: refUrls2_(cur).slice() };
+    // 「動画生成へ」は遷移ボタンでもある。画像を触っていないのに保存画像列を書き直さない。
+    // 明示的な追加・並べ替え・削除があった時だけ画像IDBを更新する。
+    var imagesDirty = false;
     var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補(埋め込みポストURLあり)
     // 作品URLのプレフィル：候補が実際に作品URLを持つ(!isTwitter かつ it.url がDMM/book等)なら、
     //   twitterUrl の有無に関わらずそのまま欄に表示。(＝カードの「作品↗」と同じ判定)X起点(it.url=ポストURL)は空。
@@ -1797,13 +1804,13 @@
         openImgZoom_(pending.imgs.slice(), pending.idx, {
           onReorder: function (i) {
             if (i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
-            var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; drawPreview(); // 旧1枚目は2枚目へずれる(保存で確定)
+            var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; imagesDirty = true; drawPreview(); // 旧1枚目は2枚目へずれる(保存で確定)
             return pending.imgs.slice();
           },
           onPasteAdd: function (done) {
             pasteImageFromClipboard_(function (durl, err) {
               if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
-              pending.imgs.unshift(durl); pending.idx = 0; drawPreview(); // 先頭＝1ページ目(保存で確定)
+              pending.imgs.unshift(durl); pending.idx = 0; imagesDirty = true; drawPreview(); // 先頭＝1ページ目(保存で確定)
               done(pending.imgs.slice(), null);
             });
           }
@@ -1877,7 +1884,7 @@
       (function step(i) {
         if (mySeq !== _refOpenSeq) return; // モーダルが開き直された＝この処理結果は破棄
         if (i >= files.length) {
-          if (added) { pending.imgs = batch.concat(pending.imgs); pending.idx = 0; } // ★追加画像を先頭(1枚目)へ(標準)
+          if (added) { pending.imgs = batch.concat(pending.imgs); pending.idx = 0; imagesDirty = true; } // ★追加画像を先頭(1枚目)へ(標準)
           drawPreview();
           body.querySelector('#refImgMsg').textContent = added
             ? (added + '枚を追加しました(先頭＝1枚目に配置)' + (failed ? '(' + failed + '枚は読み込めず)' : '') + '(計' + pending.imgs.length + '枚・保存で確定)')
@@ -1896,7 +1903,7 @@
       pasteImageFromClipboard_(function (durl, err) {
         if (mySeq !== _refOpenSeq) return; // モーダルが開き直された＝破棄
         if (err) { body.querySelector('#refImgMsg').textContent = err; return; }
-        pending.imgs.unshift(durl); pending.idx = 0; drawPreview(); // ★追加画像を先頭(1枚目)へ(置換せず追加・複数枚OK)
+        pending.imgs.unshift(durl); pending.idx = 0; imagesDirty = true; drawPreview(); // ★追加画像を先頭(1枚目)へ(置換せず追加・複数枚OK)
         body.querySelector('#refImgMsg').textContent = '貼り付けました。(1枚目に追加・計' + pending.imgs.length + '枚)続けて貼り付けできます(保存で確定)';
       });
     });
@@ -1905,6 +1912,7 @@
       if (!n) { drawPreview(); return; }
       if (!window.confirm(n > 1 ? ('表示中の画像(' + (pending.idx + 1) + '/' + n + ')を削除しますか？') : '本当に画像を削除しますか？')) return;
       pending.imgs.splice(pending.idx, 1);
+      imagesDirty = true;
       if (pending.idx >= pending.imgs.length) pending.idx = Math.max(0, pending.imgs.length - 1);
       drawPreview();
       body.querySelector('#refImgMsg').textContent = '画像を削除しました(保存で確定・残り' + pending.imgs.length + '枚)';
@@ -1939,7 +1947,12 @@
         if (onSaved) onSaved();
         closeRefOverlay_();
       };
-      Promise.resolve(refImgSave(it.cid, pending)).then(function (ok) {
+      // 画像未編集なら、小さい文字正本(cand_text)だけを保存する。候補画像IDBを再保存しないため、
+      // メモリ未反映・iOS遷移中断があっても「動画生成へ」が保存画像を消す操作にならない。
+      var saveForMove = imagesDirty
+        ? Promise.resolve(refImgSave(it.cid, pending))
+        : Promise.resolve(candTextSave_(it.cid, pending));
+      saveForMove.then(function (ok) {
         // 保存失敗はログにだけ残し、遷移は止めない(渡すデータはメモリ側=無傷)。
         if (!ok) { try { console.warn('[go5 cand] 動画生成へ: 候補の永続保存に失敗したが遷移は続行', it.cid); } catch (e) {} }
         go_();
