@@ -465,6 +465,11 @@
       videoId: evDetail.videoId || '',
       // カテゴリ(ジャンル)チェックを作成時にスナップ＝投稿完了で投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
       attrs: readMovieAttrs_(),
+      // ★狙い・コメント型も作成時にスナップ。これを保存しないと remakeStock_(再作成)で復元できず、
+      //   make()(app.js)の「狙い/コメント型は生成前の必須」ガードで毎回弾かれ、作り直し直後の
+      //   「ドラフトで作成」が『未選択です』で止まる=「動画が生成されなかった」に見える(Chami 2026-08-14②)。
+      goal: ($('movieGoal') || {}).value || '',
+      cmtType: ($('movieCmtType') || {}).value || '',
       // 割引%/価格も作成時にスナップ＝生キャッシュ失効・再作成の往復でも投稿モードでN%にしない(Chami依頼2026-08-06④)。
       priceInfo: livePriceInfo_(($('movieWorkUrl') || {}).value || ($('movieWorkAffi') || {}).value || ''),
       youtubeUrl: '',
@@ -861,6 +866,11 @@
     if (b) b.value = meta.bskyText || '';
     var w = $('movieWorkUrl');
     if (w) { w.value = meta.workUrl || ''; w.dispatchEvent(new Event('input')); }
+    // ★狙い・コメント型を復元する。無いと make()(app.js)の必須ガードで弾かれ、作り直し直後の
+    //   「ドラフトで作成」が毎回『狙い/コメント型が未選択です』で止まる(Chami 2026-08-14②)。
+    //   ※これより前に保存された下書き(meta.goal 無し)は''のまま=その1件だけ再選択が要る(移行の宿命)。
+    var g = $('movieGoal'); if (g) { g.value = meta.goal || ''; try { g.dispatchEvent(new Event('change')); } catch (e) {} }
+    var ct = $('movieCmtType'); if (ct) { ct.value = meta.cmtType || ''; try { ct.dispatchEvent(new Event('change')); } catch (e) {} }
     // ①作成時にスナップしたカテゴリ(ジャンル)チェックを復元する(Chami依頼2026-08-06①)。
     //   作品URLのinputで走る非同期のFANZA再取得(autoApplyAttrsFromInfo_)が後から上書きしないよう、
     //   この作品のcidを「適用済み」に印してから復元する=再作成では手元の下書きの選択を正とする。
