@@ -9,6 +9,12 @@ rem  ASCII only on purpose: .bat is read with the ANSI codepage, so any
 rem  Japanese written here would be mojibake. The reasoning in Japanese
 rem  lives in crd_ipv6_fix.py (utf-8).
 rem
+rem  *** 2026-08-15: DO NOT RUN. The premise behind this fix was refuted by
+rem  *** measurement (same host IPv6 used by every session incl. the 41-min
+rem  *** clean one, still alive 13.5h later; RA every 40s vs 300s lifetime =
+rem  *** 7.5 misses of margin). crd_ipv6_fix.py --apply now stops by itself.
+rem  *** Read the "2026-08-15 no hansho" block at the top of crd_ipv6_fix.py.
+rem
 rem  What it does (see crd_ipv6_fix.py header for why):
 rem    1. backs up the current IPv6 / service state under local\_work\
 rem    2. netsh interface ipv6 set privacy state=disabled store=persistent
@@ -31,10 +37,20 @@ chcp 65001 >nul
 set PYTHONIOENCODING=utf-8
 cd /d "%~dp0..\.."
 python "scripts\_daemons\crd_ipv6_fix.py" --apply
+if %errorlevel% equ 3 (
+  echo.
+  echo ---------------------------------------------------------------
+  echo NOTHING WAS CHANGED. The premise was refuted - see above.
+  echo Measure instead (no admin needed):
+  echo   python scripts\_daemons\ra_lifetime_watch.py --minutes 40
+  echo ---------------------------------------------------------------
+  pause
+  exit /b 3
+)
 echo.
 echo ---------------------------------------------------------------
 echo Done applying. This is "applied", NOT yet "fixed".
 echo To prove it, run (no admin needed):
-echo   python scripts\_daemons\crd_ipv6_fix.py --watch 30 --minutes 20
+echo   python scripts\_daemons\ra_lifetime_watch.py --minutes 40
 echo ---------------------------------------------------------------
 pause
