@@ -226,6 +226,50 @@ test.describe('候補ページの画像・投稿編集', () => {
     await expect(page.locator('#refImgTwitter')).toHaveValue('https://x.com/go5_test/status/44');
     await expect(page.locator('#refImgSave')).toBeEnabled();
   });
+
+  test('動画生成へ移動すると容量超過時も選択画像を復元し、前作品の画像を残さない', async ({ page }) => {
+    const cid = 'tw_candidate_to_movie_image';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    const oldImage = await page.evaluate(async ({ cid }) => {
+      const makeImage = (color) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 8; canvas.height = 8;
+        canvas.getContext('2d').fillStyle = color;
+        canvas.getContext('2d').fillRect(0, 0, 8, 8);
+        return canvas.toDataURL('image/png');
+      };
+      const oldData = makeImage('#ff0000');
+      const selectedData = makeImage('#00ff00');
+      localStorage.setItem('movie_photo_cache', oldData);
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: '候補から動画画像引継ぎ回帰テスト', isTwitter: true,
+        twitterUrl: 'https://x.com/go5_test/status/55', addedAt: Date.now()
+      }]));
+      await Go5Idb.set('ref:' + cid, { imgs: [selectedData], img: selectedData, comment: '', memo: '', at: Date.now() });
+      return oldData;
+    }, { cid });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('[data-refimg="' + cid + '"]').click();
+    await expect(page.locator('#refImgPreview img')).toBeVisible();
+
+    // sessionStorage容量超過を強制し、軽いcid参照から同じ画像を復元できることを確認する。
+    await page.evaluate(() => {
+      const originalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (this === sessionStorage && key === 'cand_to_movie_pending' && String(value).includes('"imgDataUrl":"data:image')) {
+          throw new DOMException('forced quota', 'QuotaExceededError');
+        }
+        return originalSetItem.call(this, key, value);
+      };
+    });
+    await page.locator('#refImgToMovie').click();
+    await page.waitForURL(/index\.html/);
+
+    await expect.poll(() => page.locator('#photo').evaluate((el) => el.files.length), { timeout: 10000 }).toBe(1);
+    expect(await page.locator('#photo').evaluate((el) => el.files[0] && el.files[0].name)).toBe('candidate.jpg');
+    await expect.poll(() => page.evaluate((oldData) => localStorage.getItem('movie_photo_cache') !== oldData, oldImage)).toBe(true);
+    expect(await page.evaluate(() => sessionStorage.getItem('cand_to_movie_pending'))).toBeNull();
+  });
 });
 test.describe('ドラフト軽量ページ', () => {
   test('iPhone幅で重い動画DOMを持たず、ドラフト投稿モードまで開ける', async ({ page }) => {

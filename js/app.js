@@ -138,6 +138,7 @@
 
   let fgImg = null;               // 前景画像
   let fgFile = null;              // 実際に動画生成へ使った元ファイル(投稿履歴の使用画像を候補画像と分離して記録)
+  let fgLoadSeq = 0;
   const K_PHOTO_CACHE = 'movie_photo_cache'; // リロード後の前景画像復元用キャッシュ
   let fontReady = false;
   let lastBlob = null, lastName = "video.mp4";
@@ -495,12 +496,22 @@
   els.photo.addEventListener("change", () => {
     const f = els.photo.files[0];
     if (!f) return;
+    const loadSeq = ++fgLoadSeq;
     fgFile = f;
     els.photoName.textContent = anonPhotoLabel_(f);
     const url = URL.createObjectURL(f);
     const img = new Image();
-    img.onload = () => { fgImg = img; cachePhotoToStorage_(img); preview(); };
-    img.onerror = () => { setStatus("画像を読み込めませんでした(形式をご確認ください)"); };
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      if (loadSeq !== fgLoadSeq) return;
+      fgImg = img;
+      cachePhotoToStorage_(img);
+      preview();
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      if (loadSeq === fgLoadSeq) setStatus("画像を読み込めませんでした(形式をご確認ください)");
+    };
     img.src = url;
   });
 
@@ -520,11 +531,15 @@
     let dataUrl;
     try { dataUrl = localStorage.getItem(K_PHOTO_CACHE); } catch (e) {}
     if (!dataUrl) return;
+    const restoreSeq = ++fgLoadSeq;
     const img = new Image();
     img.onload = () => {
+      if (restoreSeq !== fgLoadSeq) return;
       fgImg = img;
       // fgFileも復元: Blob変換(動画生成後のDrive/Bluesky添付用。失敗しても描画は動く)。
-      try { fetch(dataUrl).then(r => r.blob()).then(b => { fgFile = new File([b], 'restored.jpg', { type: 'image/jpeg' }); }).catch(() => {}); } catch (e) {}
+      try { fetch(dataUrl).then(r => r.blob()).then(b => {
+        if (restoreSeq === fgLoadSeq) fgFile = new File([b], 'restored.jpg', { type: 'image/jpeg' });
+      }).catch(() => {}); } catch (e) {}
       preview();
     };
     img.src = dataUrl;
@@ -868,8 +883,23 @@
   // 下書き機能(drafts.js)向け：Fileを #photo の実際のFileListにセットし、通常の写真選択と
   // 同じ経路(changeイベント)で反映する。こうすることで、以後のBluesky添付/Drive保存等が
   // 参照する photo.files[0] も正しく更新される。(プレビューだけを書き換えるより確実)
-  window.Go5SetForegroundFile = (file) => {
+  window.Go5ClearForeground = () => {
+    const clearSeq = ++fgLoadSeq;
+    fgImg = null;
+    fgFile = null;
+    if (els.photo) {
+      try { els.photo.value = ''; } catch (e) {}
+    }
+    if (els.photoName) els.photoName.textContent = '未選択';
+    try { localStorage.removeItem(K_PHOTO_CACHE); } catch (e) {}
+    preview();
+    return clearSeq;
+  };
+
+  window.Go5SetForegroundFile = (file, expectedSeq) => {
     if (!file || !els.photo) return false;
+    // Reject a delayed candidate fetch if the user already selected another image.
+    if (expectedSeq != null && expectedSeq !== fgLoadSeq) return false;
     try {
       const dt = new DataTransfer();
       dt.items.add(file);

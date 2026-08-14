@@ -1932,7 +1932,10 @@
       //   無言失敗すると refImgSave が false を返し「押しても動画作成タブに移動しない」再発になった
       //   (Chami実機報告2026-08-13・恒久対策C-038=遷移と保存を切り離す)。
       var go_ = function () {
-        transferToMovie_(it, pending.imgs[pending.idx] || '', pending.comment, workUrl); // ★表示中の画像を採用
+        var selectedIndex = pending.idx;
+        transferToMovie_(it, pending.imgs[selectedIndex] || '', pending.comment, workUrl, {
+          cid: it.cid || '', index: selectedIndex
+        }); // ★表示中の画像を採用。容量超過時はcid+順番からIDBへ取り直せるようにする
         if (onSaved) onSaved();
         closeRefOverlay_();
       };
@@ -1996,16 +1999,21 @@
   // 動画作成タブへ切替え、候補の作品データ(前景画像/作者/コメント/作品URL)を各入力欄へ埋め込む。
   //   ※drafts.js の applyDraft_ と同じ手法：#author/#top/#movieWorkUrl を値+イベントで設定、
   //     前景画像は data-URL→File にして window.Go5SetForegroundFile() で #photo に反映。
-  function transferToMovie_(it, imgDataUrl, comment, workUrl) {
+  function transferToMovie_(it, imgDataUrl, comment, workUrl, imageRef) {
     // 候補専用ページ(KouhoLists.html)には動画作成タブのDOMが無い=そこから「動画を作る」を押したら、
     //   選択内容を sessionStorage で持ち越して index.html へ遷移し、あちらで同じ流し込みを再実行する
     //   (同一オリジン・同一タブなので sessionStorage は遷移後も残る。クラウド同期もしない)。
     if (!document.getElementById('author')) {
+      var imageCid = (imageRef && imageRef.cid) || it.cid || '';
+      var imageIndex = imageRef && Number.isFinite(Number(imageRef.index)) ? Math.max(0, Number(imageRef.index)) : 0;
+      var carry = { it: it, imgDataUrl: imgDataUrl || '', comment: comment || '', workUrl: workUrl || '', imageCid: imageCid, imageIndex: imageIndex };
       try {
-        sessionStorage.setItem('cand_to_movie_pending', JSON.stringify({ it: it, imgDataUrl: imgDataUrl || '', comment: comment || '', workUrl: workUrl || '' }));
+        sessionStorage.setItem('cand_to_movie_pending', JSON.stringify(carry));
       } catch (e) {
-        // 画像が大きくて容量超過した時は画像抜きで持ち越す(動画作成タブで元画像を入れ直せる)。
-        try { sessionStorage.setItem('cand_to_movie_pending', JSON.stringify({ it: it, imgDataUrl: '', comment: comment || '', workUrl: workUrl || '' })); } catch (e2) {}
+        // data URLがsessionStorageの容量を超えても、軽い参照情報を残して遷移先でIDBから同じ画像を復元する。
+        carry.imgDataUrl = '';
+        try { sessionStorage.removeItem('cand_to_movie_pending'); } catch (e1) {}
+        try { sessionStorage.setItem('cand_to_movie_pending', JSON.stringify(carry)); } catch (e2) {}
       }
       try { location.href = 'index.html'; } catch (e) {}
       return;
@@ -2044,10 +2052,13 @@
         window.Go5PromoLabel.notify({ cid: _pcid, title: it.title || '作品', listPrice: it.listPrice, price: it.price, discountPct: it.discountPct || 0 });
       }
     } catch (e) {}
+    // 候補を開いた時点で前作品の画像を破棄する。新画像の変換失敗時にも旧画像を誤表示しない。
+    var imageApplySeq = null;
+    if (window.Go5ClearForeground) imageApplySeq = window.Go5ClearForeground();
     if (imgDataUrl && window.Go5SetForegroundFile) {
       fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
-        window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }));
-      }).catch(function () {});
+        window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }), imageApplySeq);
+      }).catch(function (e) { try { console.warn('[go5 cand] 候補画像を動画作成へ変換できませんでした', e); } catch (e2) {} });
     }
     // 作品データを流し込んだら、動画タブの「上部」に着地させる(Chami依頼2026-07-29：
     //   投稿編集→動画生成で最下段の作成ボタンへ強制スクロールしていたのをやめ、上から順に確認できるように)。
@@ -4150,11 +4161,25 @@
       if (!document.getElementById('author')) return; // 動画作成タブが無いページでは何もしない(退避側の担当)
       var raw = ''; try { raw = sessionStorage.getItem('cand_to_movie_pending') || ''; } catch (e) {}
       if (!raw) return;
-      try { sessionStorage.removeItem('cand_to_movie_pending'); } catch (e) {}
       var p; try { p = JSON.parse(raw); } catch (e) { return; }
       if (!p || !p.it) return;
       // app.js/affiliate.js のタブ復元が落ち着いてから流し込む(タブ切替→入力欄の描画が先)。
-      setTimeout(function () { try { transferToMovie_(p.it, p.imgDataUrl || '', p.comment || '', p.workUrl || ''); } catch (e) {} }, 300);
+      setTimeout(function () {
+        var consume_ = function (imgDataUrl) {
+          try { sessionStorage.removeItem('cand_to_movie_pending'); } catch (e) {}
+          try { transferToMovie_(p.it, imgDataUrl || '', p.comment || '', p.workUrl || '', { cid: p.imageCid || '', index: p.imageIndex || 0 }); } catch (e) {}
+        };
+        if (p.imgDataUrl) { consume_(p.imgDataUrl); return; }
+        if (p.imageCid) {
+          Promise.resolve(ensureRefLoaded_(p.imageCid)).then(function () {
+            var imgs = refImgsOf_(p.imageCid);
+            var idx = Math.max(0, Number(p.imageIndex) || 0);
+            consume_(imgs[idx] || imgs[0] || '');
+          }, function () { consume_(''); });
+          return;
+        }
+        consume_('');
+      }, 300);
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _resumeCandToMovie);
     else _resumeCandToMovie();
