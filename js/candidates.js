@@ -895,9 +895,24 @@
         if (rec) klog_('ref_image_saved', 'work', cid, { imgs: imgs.length });
         return true;
       }, function (e) {
-        if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid];
         idbFail_(e);
-        return false;
+        // ★IDB書込が落ちても、テキスト(コメント/URL)は既に cand_text へ確定保存済み。画像も
+        //   localStorage(cand_refimg__<cid>)へ退避すれば喪失しない=migrateLocalImages_ がIDB復帰時に
+        //   LS→IDBへ移し、reqSync_ が裏でR2へも送る。退避できたら成功扱いにしてモーダルを閉じさせる
+        //   ＝「この端末へ保存できませんでした」で閉じ込めない(Chami 2026-08-14「すぐ保存して閉じさせて」)。
+        //   iOS SafariのIDBは一時的に接続死するがLS書込は通ることが多い=fail-openで前へ進める。
+        //   LSも容量超過等で落ちた時だけ本当の失敗として false を返す(モーダル保持・再操作可)。
+        try {
+          if (rec) localStorage.setItem(refImgKey(cid), JSON.stringify(rec));
+          else localStorage.removeItem(refImgKey(cid));
+          // メモリ(_imgMem.ref[cid])は line 890 で既に新しい画像/削除済み=そのまま保持(idbFail_ の注記どおり)。
+          _refLoaded[cid] = true;
+          reqSync_();
+          return true;
+        } catch (e2) {
+          if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid];
+          return false;
+        }
       });
     }
     try {
