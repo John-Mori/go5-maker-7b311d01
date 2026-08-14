@@ -162,7 +162,10 @@ async function scrapePage(cid) {
     if (genres.length >= 16) break;
   }
 
-  return { title, author, price, listPrice, releaseDate, genres, reviewCount: ld.reviewCount, reviewAvg: ld.reviewAvg };
+  // AI生成判定：FANZA同人はAIをジャンルタグに載せず作品説明の必須開示文でのみ示す(worker aiFromHtml_ と同一規則)。
+  //   日本IPで作品ページ全文を読めているのでここでの判定は検証済み(aiChecked:true として登録する)。
+  const ai = /AI生成|生成AI/.test(html);
+  return { title, author, price, listPrice, releaseDate, genres, ai, reviewCount: ld.reviewCount, reviewAvg: ld.reviewAvg };
 }
 
 // ── 画像CDN（NOW PRINTINGプレースホルダを指紋で除外） ────────────────────────
@@ -244,6 +247,8 @@ async function cdnImages(cid) {
         items.push({
           content_id: cid,
           title: page.title,
+          ai: !!page.ai,        // 日本IPで全文判定した検証済みAIフラグ(壁で読めないworkerの代わりにここが正を生産する)
+          aiChecked: true,      // 検証済み=フロントはこれを信頼して恒久確定してよい(未確認falseで凍結する事故を断つ)
           date: page.releaseDate ? page.releaseDate + " 00:00:00" : "",
           service_name: "同人",
           floor_name: "同人",

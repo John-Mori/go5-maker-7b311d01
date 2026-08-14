@@ -61,8 +61,17 @@ check('2経路一致(明示フラグ 同人AI)', jump(dojinAi.genres, dojinAi.ti
 var bsky = fs.readFileSync(path.join(__dirname, '..', 'js', 'bluesky.js'), 'utf8');
 check('bluesky.js が Go5MovieAttrsCore を参照', bsky.indexOf('Go5MovieAttrsCore') >= 0);
 check('applyGenres が applyAttrsInput_ を通る', /applyGenres:\s*function[\s\S]{0,220}applyAttrsInput_\(/.test(bsky));
-check('autoApplyAttrsFromInfo_ が applyAttrsInput_ を通る', /function autoApplyAttrsFromInfo_[\s\S]{0,400}applyAttrsInput_\(/.test(bsky));
+check('autoApplyAttrsFromInfo_ が applyAttrsInput_ を通る', /function autoApplyAttrsFromInfo_[\s\S]{0,900}applyAttrsInput_\(/.test(bsky));
 check('旧 setMovieAttrsFromTexts_ の直呼びが無い', bsky.indexOf('setMovieAttrsFromTexts_(') < 0);
 
+// ── 4) verified-ai: 壁で未確認(aiUnknown)ならAIチェックを外さない配線を固定する(REQ-3babd19ddb) ──
+//   worker が壁で作品ページを読めず ai:false/aiChecked無し を返した時、フロントが「未確認」を「非AI」と
+//   誤認して既にAIチェック済みの作品の AI を外し恒久凍結する再発を封じる。DOM操作のため判定式ではなく
+//   applyAttrsInput_ の非チェック保持ロジックを持つ=配線で固定する(この節が消えたら再発の穴が空く)。
+check('applyAttrsInput_ が aiUnknown でAIを外さない', /function applyAttrsInput_[\s\S]{0,700}aiUnknown[\s\S]{0,60}el\.checked[\s\S]{0,20}return;/.test(bsky));
+check('autoApplyAttrsFromInfo_ が aiUnknown を渡す', /function autoApplyAttrsFromInfo_[\s\S]{0,900}aiUnknown:/.test(bsky));
+// 遅着AI判定(壁で最初は未判定→後からtrue)を、cidガード後でもAIだけ後追いチェックする配線。
+check('autoApplyAttrsFromInfo_ が遅着AIを後追いチェック', /movie_auto_attrs_cid'\) === cid\)\s*\{[\s\S]{0,220}aiEl\.checked = true/.test(bsky));
+
 if (fails) { console.log('\nFAIL: ' + fails + '件'); process.exit(1); }
-console.log('\nALL PASS (' + '17 checks' + ')');
+console.log('\nALL PASS (' + '19 checks' + ')');

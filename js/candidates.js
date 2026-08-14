@@ -577,6 +577,8 @@
     } catch (e) {}
   }
 
+  // 壁で未判定のまま aiChecked が付かない候補のハンマリング防止(cid→最終試行ms・10分TTL)。
+  var _aiTried = {}, AI_TRY_TTL_MS = 10 * 60 * 1000;
   // 同人候補のAI生成判定を「一度だけ」確定する。★AIはジャンルタグにも floor 名にも載らず、FANZAの
   //   必須開示文(作品説明の「AI生成」)にしか出ない作品がある(実測 d_748630)。worker に checkAi を渡して
   //   ページ由来のAIフラグを取りに行き、it.ai を立てる。1候補につき一度きり(it.aiChecked)＝取れなくても
@@ -585,14 +587,20 @@
   function aiRecheck_(key, items, cb) {
     if (!window.FanzaCore) { cb(false); return; }
     var cfg = workerCfg(); if (!cfg.url) { cb(false); return; }
+    var now = Date.now();
+    // ★未検証(壁でworkerが読めず aiChecked が付かない)候補は次回リロードで再挑戦できるよう it.aiChecked を立てない。
+    //   ただし毎描画で叩き続けると壁作品にハンマリングするため、_aiTried で10分間は同cidを再叩きしない。
     var targets = (items || []).filter(function (it) {
-      return isSalesTarget_(it) && it.title && it.title !== '(タイトル未取得)' && !it.ai && !it.aiChecked;
+      return isSalesTarget_(it) && it.title && it.title !== '(タイトル未取得)' && !it.ai && !it.aiChecked
+        && (!_aiTried[it.cid] || (now - _aiTried[it.cid]) >= AI_TRY_TTL_MS);
     }).slice(0, 12);
     if (!targets.length) { cb(false); return; }
     var pending = targets.length, updates = {};
     targets.forEach(function (it) {
+      _aiTried[it.cid] = now;
       window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url, { checkAi: true }).then(function (info) {
-        if (info && info.title) updates[it.cid] = { ai: !!info.ai };
+        // verified=判定が確定した時だけ(AI開示ヒット or 検証済みfalse)。壁で未判定(!ai && !aiChecked)は凍結しない。
+        if (info && info.title) updates[it.cid] = { ai: !!info.ai, verified: !!(info.ai || info.aiChecked) };
         if (--pending === 0) finish();
       }).catch(function () { if (--pending === 0) finish(); });
     });
@@ -603,7 +611,7 @@
       cur.forEach(function (it) {
         if (!it || it.cid == null || !(it.cid in updates)) return;
         if (updates[it.cid].ai && !it.ai) { it.ai = true; changed = true; }
-        if (!it.aiChecked) { it.aiChecked = true; changed = true; } // AI無しでも「確認済み」で二度叩かない
+        if (updates[it.cid].verified && !it.aiChecked) { it.aiChecked = true; changed = true; } // 検証済みの時だけ確定(未確認は次回リトライ可)
       });
       if (changed) lsSet(key, cur);
       cb(changed);
@@ -3737,7 +3745,8 @@
           if (info.releaseDate) it.date = info.releaseDate;
           if (info.genres && info.genres.length) it.genres = info.genres;
           if (info.floor) it.floor = info.floor; if (info.service) it.service = info.service; // AI判定用(floor名でしか分からない作品)
-          if (info.ai) it.ai = true; it.aiChecked = true; // 🔁でAI生成判定も確定(ページ由来のAIフラグ・一度きり)
+          if (info.ai) it.ai = true;
+          if (info.ai || info.aiChecked) it.aiChecked = true; // 🔁でも検証済み(AI開示ヒット or 確定false)の時だけ確定。壁で未判定なら次回リトライ可のまま
           if (info.thumb || info.thumbSmall) it.thumb = info.thumb || info.thumbSmall;
           if (info.samples && info.samples.length) it.samples = info.samples;
           if (info.reviewCount != null) it.reviewCount = info.reviewCount;

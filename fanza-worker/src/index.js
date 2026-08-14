@@ -121,14 +121,37 @@ export default {
         }
       }
 
-      // ③‴ 同人のAI生成判定：APIで解決した同人(d_)はAIがiteminfo.genreに載らない(実測)ため、
+      // ③‴ 同人のAI生成判定(verified-ai)：APIで解決した同人(d_)はAIがiteminfo.genreに載らない(実測)ため、
       //    クライアントが checkAi を立てた時だけ作品ページを1回見てAIフラグを付ける。routine の
       //    情報取得には乗せない=DMMへの余計なスクレイプを増やさない(候補1件につきクライアント側で一度きり)。
-      if (item && item.title && !item.ai && body.checkAi === true && /^d_/i.test(cid)) {
+      //    ★三値判定=「AI開示文ヒット=確定true(aiChecked)」「og:titleあり+壁マーカー無し=本物のページを読めた=確定false(aiChecked)」
+      //      「壁(age_check/ログイン)で読めない=未判定(aiChecked付けない)」。壁で読めなかったHTMLから ai:false を配ると、
+      //      フロントが「未確認」を「非AI」と誤認して既存のAIチェックを外し恒久凍結する(REQ-3babd19ddb の真因)。
+      if (item && item.title && body.checkAi === true && /^d_/i.test(cid) && !item.aiChecked) {
+        if (item.ai) {
+          item.aiChecked = true; // 既にAI確定(scrape/override由来)なら全文判定済み=検証済み扱い
+        } else {
+          try {
+            const aiRes = await fetchDmmPage(DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/");
+            if (aiRes && aiRes.ok) {
+              const aiHtml = await aiRes.text();
+              const hasOg = aiHtml.includes("og:title");
+              const walled = !hasOg && (aiHtml.includes("age_check") || /ログイン/.test(aiHtml)); // scrapeFanzaItem L877 と同一基準+ログイン
+              if (aiFromHtml_(aiHtml)) { item.ai = true; item.aiChecked = true; }       // AI開示文=確定true
+              else if (hasOg && !walled) item.aiChecked = true;                          // 本物のページを読めた=確定false
+              // それ以外(壁)は aiChecked を付けない=未判定のまま(下でoverride引き当て/PC取得依頼へ)
+            }
+          } catch (e) { /* best-effort: 判定できなくても本体情報は返す */ }
+        }
+      }
+      // 未判定(壁で読めなかった)なら、PCバッチが日本IPで検証済みの override を引き当てる。無ければ取得依頼キューへ
+      //   積んでPC(日本IP)に検証させる(dedup=read-before-write は stQueueInfoPut 内蔵)。
+      if (item && item.title && body.checkAi === true && /^d_/i.test(cid) && !item.aiChecked) {
         try {
-          const aiRes = await fetchDmmPage(DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/");
-          if (aiRes && aiRes.ok) { const aiHtml = await aiRes.text(); if (aiFromHtml_(aiHtml)) item.ai = true; }
-        } catch (e) { /* best-effort: 判定できなくても本体情報は返す */ }
+          const ov = await stGetOverride(env, cid);
+          if (ov && ov.aiChecked) { item.ai = !!ov.ai; item.aiChecked = true; }
+          else await stQueueInfoPut(env, cid, srcUrl);
+        } catch (e) {}
       }
 
       // フル情報が取れなかった作品は「PC取得依頼キュー」へ記録（PCのバッチが拾ってスクレイプ→ov:へ保存）。
@@ -1015,6 +1038,7 @@ async function scrapeFanzaItem(cid, srcUrl) {
   return {
     content_id: cid,
     ai:         aiFromHtml_(html),   // ページ由来のAI生成判定(ジャンルタグに載らない同人AI作品を拾う)
+    aiChecked:  true,                // 作品ページ全文を実読して判定した=検証済み(壁ならこの関数はnullを返す=ここに来ない)
     title:      title,
     date:       dateStr,
     service_name: isBook ? "FANZAブックス" : "同人",
@@ -1389,6 +1413,10 @@ function sanitizeOverride(raw) {
   return {
     content_id: cid,
     title,
+    // verified-ai: PCバッチ(日本IP)が作品ページ全文から立てたAI判定。ホワイトリスト再構築で落とさず通す
+    //   (これが無いと ai/aiChecked がsanitizeで消え、検証済みフラグが override に永久保存されない)。
+    ai: !!raw.ai,
+    aiChecked: !!raw.aiChecked,
     date: String(raw.date || "").slice(0, 32),
     service_name: String(raw.service_name || "同人").slice(0, 32),
     floor_name: String(raw.floor_name || "同人").slice(0, 32),

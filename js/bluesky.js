@@ -198,8 +198,16 @@
   }
   // 判定結果をチェックボックスへ反映する唯一の適用口。候補→作成 も URLフェッチ も必ずここへ集約する。
   function applyAttrsInput_(input) {
-    var hits = resolveAttrs_(input || {});
-    movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = !!hits[c.key]; });
+    input = input || {};
+    var hits = resolveAttrs_(input);
+    movieCatList_().forEach(function (c) {
+      var el = $(window.Go5Cats.elId(c.key)); if (!el) return;
+      // ★verified-ai: 壁でAI判定が確定できない(aiUnknown)作品は、既にAIチェック済みならAIだけは外さない。
+      //   workerが壁で読めず ai:false/aiChecked無し を返した時、それを「非AI」と誤認して既存のAIチェックを
+      //   外し恒久凍結する再発(REQ-3babd19ddb)を断つ。他カテゴリは従来どおり hits で上書きする。
+      if (c.key === 'ai' && input.aiUnknown && el.checked) return;
+      el.checked = !!hits[c.key];
+    });
   }
   // 同じ作品(cid)には1回だけ自動適用＝再描画・キャッシュヒットのたびに手動調整を上書きしない。(割引自動反映と同じ設計)
   // リロードを跨いでも尊重できるよう localStorage に記録する。
@@ -209,9 +217,16 @@
   function autoApplyAttrsFromInfo_(info, cidHint) {
     if (!info) return;
     var cid = String(info.cid || cidHint || ''); if (!cid) return;
-    if (load('movie_auto_attrs_cid') === cid) return;
+    if (load('movie_auto_attrs_cid') === cid) {
+      // 既に本作品へ一度適用済み。ただしAI判定は壁で遅れて届くことがある(初回は未判定→PC/再取得で後からtrue)。
+      //   その遅着だけはAIチェックを後追いで入れる(他カテゴリの手動調整は温存＝全体再適用はしない)。
+      if (info.ai) { var aiEl = $(window.Go5Cats.elId('ai')); if (aiEl && !aiEl.checked) aiEl.checked = true; }
+      return;
+    }
     save('movie_auto_attrs_cid', cid);
-    applyAttrsInput_({ genres: info.genres || [], floor: info.floor, service: info.service, title: info.title, ai: info.ai });
+    // aiUnknown=同人(d_)でAIが未確定(明示フラグ無し&検証未済)＝壁で読めていない可能性。AIチェックは外さない。
+    applyAttrsInput_({ genres: info.genres || [], floor: info.floor, service: info.service, title: info.title, ai: info.ai,
+      aiUnknown: /^d_/i.test(cid) && !info.ai && !info.aiChecked });
   }
   // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=候補の持つジャンルでの即時チェック。
   //   ★applyGenres は「暫定チェック」に徹し、cidガード(movie_auto_attrs_cid)は張らない。
