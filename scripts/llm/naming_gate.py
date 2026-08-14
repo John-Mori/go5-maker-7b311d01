@@ -148,13 +148,40 @@ def _appears_as_allowed(text, bare, allowed):
 
 
 def _target_key_forms(rules, target_key):
-    """対象キーの bare_forms(裸の姓)を honorific_required_targets から引く。無ければ空。"""
-    hrt = (rules or {}).get("honorific_required_targets") or {}
+    """対象キーの「本文中でその人を指す形」を集める。無ければキー名そのもの。
+
+    材料は2つ(どちらも同じ写像=呼称ルール.json の中・ORG-11):
+      ① honorific_required_targets[key].bare_forms  … **さん付け必須**の対象の裸の姓
+      ② target_detect_forms[key]                    … ★検出専用(2026-08-15 追加)
+
+    ★②が要る理由(2026-08-15・人事部門ククールが実測して回してきた発注):
+      検出formsを①に相乗りさせると「さん付け必須」の意味まで付いてくる。
+      一ノ瀬怜は override を持つ話者だけが呼び方を決められる対象(男連中は『怜』呼び捨て・
+      芽衣は『怜ちゃん』・ヴィルシーナは『怜さん』)で、**既定でさん付け必須ではない**。
+      なのに①へ入れると override を持たない話者が裸の『怜』を出した瞬間に
+      honorific_required で誤爆する。だから **検出だけの表** を別に持つ。
+      それまでは怜の検出候補がキー名「一ノ瀬怜」だけ=誰もフル表記では呼ばないので、
+      怜宛ての override(ククール/デブライネ/ヴィルシーナ/芽衣)が**全部空振り**していた。
+
+    ★②は判定を増やさない。②だけを持つ対象は honorific_required_targets に居ない=
+      allowed が無い= override を持たない話者は「判定不能=不問」で必ず素通りする
+      (下の naming_verdicts 末尾の分岐)。効くのは **override を書いたペアだけ**(C-035)。
+    """
+    rules = rules or {}
+    hrt = rules.get("honorific_required_targets") or {}
     ent = hrt.get(target_key)
     if not isinstance(ent, dict):
         ent = {}                # ★_note 等のメタ文字列キーを弾く
-    forms = list(ent.get("bare_forms") or [])
-    # bare_forms が無い対象(override 専用対象)はキー名そのものを候補にする
+    detect = rules.get("target_detect_forms") or {}
+    extra = detect.get(target_key) if isinstance(detect, dict) else None
+    if not isinstance(extra, (list, tuple)):
+        extra = []
+    forms = []
+    for f in list(ent.get("bare_forms") or []) + list(extra):
+        f = str(f or "")
+        if f and f not in forms:
+            forms.append(f)
+    # どちらも無い対象(override 専用対象)はキー名そのものを候補にする
     if not forms:
         forms = [target_key]
     return forms

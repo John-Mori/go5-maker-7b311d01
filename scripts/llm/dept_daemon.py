@@ -2905,9 +2905,22 @@ def audit_tone(dept, persona, text, rec=None):
 
 
 def _naming_rules():
-    """呼称ルール.json を1度だけ読んでキャッシュ(読めなければ None=ゲートは無効化)。"""
-    if not _NAMING_RULES_CACHE["loaded"]:
+    """呼称ルール.json を読む(読めなければ None=ゲートは無効化)。
+
+    ★2026-08-15 変更= 「1度だけ」→ **mtimeが変わったら読み直す**(口調側 _tone_rules と同じ)。
+      理由= 呼称ルール.json も人事部門が毎日育てる写像だ。起動時1回だけだと、
+      ククールが呼び名を1行足しても**常駐を落とすまで効かない**=「入れたのに効かない」窓が開く。
+      口調側は2026-08-12にmtime化済みで、呼称側だけ取り残されていた(C-042=常駐が読む物を
+      足したら載せ替えの経路も同時に決めろ、の宿題が片肺だった)。
+      毎便 os.path.getmtime を1回叩くだけ=中身の読み直しは変わった時だけ。
+    """
+    try:
+        mt = os.path.getmtime(NAMING_RULES_PATH)
+    except OSError:
+        mt = None
+    if not _NAMING_RULES_CACHE["loaded"] or _NAMING_RULES_CACHE.get("mtime") != mt:
         _NAMING_RULES_CACHE["loaded"] = True
+        _NAMING_RULES_CACHE["mtime"] = mt
         try:
             if _naming_gate is not None:
                 _NAMING_RULES_CACHE["rules"] = _naming_gate.load_naming_rules(NAMING_RULES_PATH)

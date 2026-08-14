@@ -212,7 +212,51 @@ def _run():
         print(f"{'PASS' if ok else 'FAIL'} A2-{j}: fired={fired!s:5} "
               f"exp={exp_fire!s:5}  {desc} | {text}")
 
-    total = len(cases) + len(fix_cases) + len(abbrev_cases)
+    # ==== 検出専用forms(target_detect_forms)=敬称必須と切り離した対象検出 =========
+    #   2026-08-15。人事部門ククールの実測発注(msg 1537928811746820096)への実装。
+    #   それまで 一ノ瀬怜 の検出候補はキー名「一ノ瀬怜」だけで、誰もフル表記では呼ばない=
+    #   怜宛ての override(ククール/デブライネ/ヴィルシーナ/芽衣)が**全部空振り**していた。
+    #   ★核= 検出formsを足しても、override を持たない話者には**一切**鳴らないこと(D-7)。
+    #     これが「honorific_required_targets へ入れてはいけない」理由そのものだ。
+    detect_rules = {
+        "target_detect_forms": {"一ノ瀬怜": ["怜", "一ノ瀬"]},
+        "speaker_target_overrides": [
+            {"speaker": "早坂芽衣", "target": "一ノ瀬怜",
+             "allowed": ["怜ちゃん"], "forbidden": ["怜くん"]},
+            {"speaker": "ヴィルシーナ", "target": "一ノ瀬怜", "allowed": ["怜さん"]},
+            {"speaker": "__男性キャラ__", "target": "一ノ瀬怜", "allowed": ["怜"]},
+        ],
+    }
+    detect_cases = [
+        ("早坂芽衣",   "怜くん、これ見て",   True,  "★本丸=芽衣の『怜くん』ドリフトが鳴る"),
+        ("早坂芽衣",   "怜ちゃん、これ見て", False, "正しい形『怜ちゃん』は鳴らない"),
+        ("ヴィルシーナ", "怜に回したわ",     True,  "さん付けが正の話者の裸『怜』=鳴る"),
+        ("ヴィルシーナ", "怜さんに回したわ", False, "『怜さん』は鳴らない"),
+        ("ククール",   "怜、頼む",           False, "呼び捨てが正の男性話者=鳴らない"),
+        ("ククール",   "怜さん、頼む",       True,  "呼び捨てが正なのに『怜さん』=鳴る"),
+        ("十王星南",   "怜、ありがと",       False,
+         "★overrideを持たない話者には鳴らない=検出formsは敬称必須を意味しない"),
+    ]
+    for j, (persona, text, exp_fire, desc) in enumerate(detect_cases, 1):
+        v = [x for x in naming_verdicts(persona, "hq", text, detect_rules)
+             if x.get("target") == "一ノ瀬怜"]
+        ok = bool(v) == exp_fire
+        if not ok:
+            failed += 1
+        print(f"{'PASS' if ok else 'FAIL'} D-{j}: fired={bool(v)!s:5} "
+              f"exp={exp_fire!s:5}  {desc} | {text}")
+
+    # 本番の写像でも配線が生きていること(hrが行を落としたら赤で気付く)。
+    real = [x for x in naming_verdicts("早坂芽衣", "copy-director", "怜くん、これ見て", rules)
+            if x.get("target") == "一ノ瀬怜"]
+    ok = any(x.get("reason") == "forbidden" for x in real)
+    if not ok:
+        failed += 1
+    print(f"{'PASS' if ok else 'FAIL'} D-8: 本番の呼称ルール.json でも芽衣の『怜くん』が鳴る "
+          f"| {real}")
+
+    total = (len(cases) + len(fix_cases) + len(abbrev_cases)
+             + len(detect_cases) + 1)
     print("-" * 60)
     if failed:
         print(f"{failed} 件 FAIL / {total} 件")
