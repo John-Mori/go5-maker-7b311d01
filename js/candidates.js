@@ -813,7 +813,12 @@
   }
   function refImgOf(cid) {
     // 画像(imgs)はIDB/_imgMem由来、テキストは同期LSの正本 cand_text 由来を第一とする(ハイドレート未了でも読める)。
-    var base = _idbOk ? (_imgMem.ref[cid] || null) : legacyRefOf_(cid);
+    // ★_idbOk が真でも _imgMem が空なら localStorage 退避(cand_refimg__<cid>)も読む。iOS SafariでIDBが
+    //   間欠的に接続死する端末では、保存は v=791 の fail-open で LS へ退避して成功していても、表示側は
+    //   hydrateImages_/migrateLocalImages_ が「IDB読みの成功」に依存するため、IDB読みが落ち続ける端末では
+    //   LS退避画像が一生メモリへ載らず「保存できたのに何度リロードしても画像が出ない」が残っていた
+    //   (Chami 2026-08-14①)。ここでLSも読めば、IDBが死んでいても同期で画像が出る=非破壊の追加読み。
+    var base = (_idbOk ? (_imgMem.ref[cid] || null) : null) || legacyRefOf_(cid) || null;
     var txt = candTextOf_(cid);
     if (!base && !txt) return null;
     if (!txt) return base; // 移行前の端末=IDB/旧LSの値をそのまま(cand_textはハイドレート後にbackfillされる)
