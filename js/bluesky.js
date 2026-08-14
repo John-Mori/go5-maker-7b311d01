@@ -1157,7 +1157,7 @@
     try { if (typeof Intl !== 'undefined' && Intl.Segmenter) { var seg = new Intl.Segmenter('ja', { granularity: 'grapheme' }); var n = 0, it = seg.segment(s)[Symbol.iterator](); while (!it.next().done) n++; return n; } } catch (e) {}
     return Array.from(s).length;
   }
-  function photoFile() { var p = $('photo'); return p && p.files && p.files[0]; }
+  function photoFile() { var p = $('photo'), f = p && p.files && p.files[0]; return f || (window.Go5ForegroundFile && window.Go5ForegroundFile()) || null; }
 
   // ---- アフィリンク自動付与・本文合成 ----
   function resolveAffLink() {

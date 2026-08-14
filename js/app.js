@@ -493,9 +493,8 @@
     for (let i = 0; i < 10; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
     return s + ext;
   }
-  els.photo.addEventListener("change", () => {
-    const f = els.photo.files[0];
-    if (!f) return;
+  function loadForegroundFile_(f) {
+    if (!f) return false;
     const loadSeq = ++fgLoadSeq;
     fgFile = f;
     els.photoName.textContent = anonPhotoLabel_(f);
@@ -513,6 +512,11 @@
       if (loadSeq === fgLoadSeq) setStatus("画像を読み込めませんでした(形式をご確認ください)");
     };
     img.src = url;
+    return true;
+  }
+  els.photo.addEventListener("change", () => {
+    const f = els.photo.files[0];
+    if (f) loadForegroundFile_(f);
   });
 
   // 前景画像をlocalStorageへ圧縮保存(リロード後に復元するため)。失敗は無害。
@@ -896,17 +900,24 @@
     return clearSeq;
   };
 
+  // iOS SafariなどでDataTransfer/FileList代入が使えない場合も、内部の前景FileとCanvasへ直接反映する。
+  window.Go5ForegroundFile = () => fgFile;
   window.Go5SetForegroundFile = (file, expectedSeq) => {
     if (!file || !els.photo) return false;
     // Reject a delayed candidate fetch if the user already selected another image.
     if (expectedSeq != null && expectedSeq !== fgLoadSeq) return false;
     try {
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      els.photo.files = dt.files;
-      els.photo.dispatchEvent(new Event("change", { bubbles: true }));
-      return true;
-    } catch (e) { return false; }
+      if (typeof DataTransfer !== "undefined") {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        els.photo.files = dt.files;
+        if (els.photo.files && els.photo.files.length) {
+          els.photo.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        }
+      }
+    } catch (e) {}
+    return loadForegroundFile_(file);
   };
 
   // 販促ラベル(promo-label.js)向け: プレビュー完全表示時(t=DURATION・ズーム完了)の前景写真の

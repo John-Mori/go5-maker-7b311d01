@@ -95,7 +95,7 @@
     var authorTwo = !!($('authorTwoLine') || {}).checked;
     var attrs = currentAttrs_();
     var photoInput = $('photo');
-    var pf = (photoInput && photoInput.files && photoInput.files[0]) ? photoInput.files[0] : null;
+    var pf = (photoInput && photoInput.files && photoInput.files[0]) ? photoInput.files[0] : ((window.Go5ForegroundFile && window.Go5ForegroundFile()) || null);
 
     function finish(photoDataUrl, photoName) {
       // 作品URLからDMM作品情報(作品名/作者)をスナップショット。(取得済みキャッシュのみ・通信しない)

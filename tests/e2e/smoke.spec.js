@@ -270,6 +270,41 @@ test.describe('候補ページの画像・投稿編集', () => {
     await expect.poll(() => page.evaluate((oldData) => localStorage.getItem('movie_photo_cache') !== oldData, oldImage)).toBe(true);
     expect(await page.evaluate(() => sessionStorage.getItem('cand_to_movie_pending'))).toBeNull();
   });
+
+  test('DataTransferが使えないiPhoneでも候補画像を前景へ反映する', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'DataTransfer', { configurable: true, writable: true, value: undefined });
+    });
+    const cid = 'tw_candidate_to_movie_ios_fallback';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(async ({ cid }) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 8; canvas.height = 8;
+      canvas.getContext('2d').fillStyle = '#00ff00';
+      canvas.getContext('2d').fillRect(0, 0, 8, 8);
+      const selectedData = canvas.toDataURL('image/png');
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: 'iPhone候補画像引継ぎ回帰テスト', isTwitter: true,
+        twitterUrl: 'https://x.com/go5_test/status/56', addedAt: Date.now()
+      }]));
+      await Go5Idb.set('ref:' + cid, { imgs: [selectedData], img: selectedData, comment: '', memo: '', at: Date.now() });
+    }, { cid });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('[data-refimg="' + cid + '"]').click();
+    await expect(page.locator('#refImgPreview img')).toBeVisible();
+    await page.locator('#refImgToMovie').click();
+    await page.waitForURL(/index\.html/);
+
+    await expect.poll(() => page.evaluate(() => !!window.Go5PhotoRect?.()), { timeout: 10000 }).toBe(true);
+    const state = await page.evaluate(() => ({
+      inputFiles: document.getElementById('photo').files.length,
+      foregroundName: window.Go5ForegroundFile?.()?.name || '',
+      label: document.getElementById('photoName').textContent
+    }));
+    expect(state.inputFiles).toBe(0);
+    expect(state.foregroundName).toBe('candidate.jpg');
+    expect(state.label).not.toBe('未選択');
+  });
 });
 test.describe('ドラフト軽量ページ', () => {
   test('iPhone幅で重い動画DOMを持たず、ドラフト投稿モードまで開ける', async ({ page }) => {
