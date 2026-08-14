@@ -685,6 +685,7 @@
     var m = candTextMap_(), v = m[String(cid)];
     return (v && typeof v === 'object' && !Array.isArray(v)) ? v : null;
   }
+  function candTextNonEmpty_(r) { return !!(r && (r.comment || r.memo || r.twitterUrl || r.twitterUrl2 || (r.urls2 && r.urls2.length))); }
   // read-modify-write。空項目は空として保存(=正当な全消しを許す)。全項目が空なら該当cidを削除。
   // at 明示可(移行バックフィルは元recのatを保つ=古い値が新しいatで同期の勝者になるのを防ぐ)。戻り値=真の成否。
   function candTextWrite_(cid, data, at) {
@@ -762,39 +763,7 @@
   function legacyRefOf_(cid) {
     try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
   }
-  // ── 候補テキストの正本 cand_text(同期localStorage)──
-  //   コメント/メモ/X URL/URL2 を非同期IDB(_imgMem.ref)ではなく同期LSに持つ=IDBハイドレート待ちで
-  //   空表示になる構造を消す。INC-127/129/132(保存済みテキストが初回描画で出ず、ページ移動で直る)の恒久対策。
-  //   画像(imgs)は容量的にLS不可なので従来どおりIDBのまま。形= { "<cid>": {comment,memo,twitterUrl,twitterUrl2,urls2,at} }。
-  var K_CAND_TEXT = 'cand_text';
-  function candTextMap_() { try { return JSON.parse(localStorage.getItem(K_CAND_TEXT) || '{}') || {}; } catch (e) { return {}; } }
-  function candTextOf_(cid) { var r = candTextMap_()[String(cid)]; return r || null; }
-  function candTextNonEmpty_(r) { return !!(r && (r.comment || r.memo || r.twitterUrl || r.twitterUrl2 || (r.urls2 && r.urls2.length))); }
-  function candTextSave_(cid, f) {
-    cid = String(cid || ''); if (!cid) return false;
-    f = f || {};
-    var comment = String(f.comment || ''), memo = String(f.memo || ''), tw = String(f.twitterUrl || '');
-    var urls2 = Array.isArray(f.urls2) ? f.urls2.map(function (s) { return String(s || '').trim(); }).filter(Boolean)
-      : (f.twitterUrl2 ? [String(f.twitterUrl2).trim()].filter(Boolean) : []);
-    var tw2 = String(f.twitterUrl2 || urls2[0] || '');
-    var allEmpty = !comment && !memo && !tw && !tw2 && !urls2.length;
-    try {
-      var m = candTextMap_();
-      if (allEmpty) { if (!Object.prototype.hasOwnProperty.call(m, cid)) return true; delete m[cid]; }
-      else m[cid] = { comment: comment, memo: memo, twitterUrl: tw, twitterUrl2: tw2, urls2: urls2, at: new Date().getTime() };
-      localStorage.setItem(K_CAND_TEXT, JSON.stringify(m));
-      if (typeof reqSync_ === 'function') reqSync_(); // 同期対象(sync.js isSyncLsKey)。デバウンス済なので連投は畳まれる
-      return true;
-    } catch (e) { return false; } // 容量超過など=LSが書けない時だけ(数百件×数百Bで通常起きない)
-  }
-  // 移行: IDB(_imgMem.ref)側のテキストを同期LSへ昇格。cand_textが既に非空ならそれを優先=空で非空を潰さない・冪等。
-  function backfillCandText_(cid, rec) {
-    if (!rec) return;
-    cid = String(cid || ''); if (!cid) return;
-    if (candTextNonEmpty_(candTextOf_(cid))) return;
-    if (!(rec.comment || rec.memo || rec.twitterUrl || rec.twitterUrl2 || (rec.urls2 && rec.urls2.length))) return;
-    candTextSave_(cid, { comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2 });
-  }
+
   // 全体ハイドレートを待たず、押された作品1件だけを直接復元する。
   // 候補画像が多い/iOSが低メモリでも「投稿編集」の入口を全体走査から切り離す。
   function ensureRefLoaded_(cid) {
@@ -865,6 +834,7 @@
     return !!(has || r.comment || r.memo || r.twitterUrl || r.twitterUrl2 || (r.urls2 && r.urls2.length));
   }
   function refImgSave(cid, data) {
+    cid = String(cid || ''); if (!cid) return false;
     // data.imgs(配列・新)または data.img(単発・旧)を受け付け、{imgs, img:先頭} で保存。(img は旧読み手互換用)
     var imgs = data ? (Array.isArray(data.imgs) ? data.imgs.filter(Boolean) : (data.img ? [data.img] : [])) : [];
     // 2つ目以降のURLは配列 urls2 を正とし、旧 twitterUrl2(単発)からも取り込む(後方互換)。
@@ -879,11 +849,42 @@
     if (empty && _idbOk && !_candidateHydrated && !_refLoaded[cid]) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
     // ★テキストは同期LSの正本 cand_text へ先に確定保存(戻り値=真の成否)。IDB書込の成否・ハイドレート状態に依存せず、
     //   次の描画で必ずコメント/メモ/X URLが読める。ここを通る=空でも正当な削除(展開後)なので cand_text も更新する。
-    candTextSave_(cid, { comment: data && data.comment, memo: data && data.memo, twitterUrl: data && data.twitterUrl, twitterUrl2: urls2[0] || (data && data.twitterUrl2) || '', urls2: urls2 });
-    var rec = empty ? null : { imgs: imgs, img: imgs[0] || '', comment: data.comment || '', memo: data.memo || '', twitterUrl: data.twitterUrl || '', twitterUrl2: urls2[0] || '', urls2: urls2, at: new Date().getTime() };
+    var textSaved = candTextSave_(cid, { comment: data && data.comment, memo: data && data.memo, twitterUrl: data && data.twitterUrl, twitterUrl2: urls2[0] || (data && data.twitterUrl2) || '', urls2: urls2 });
+    if (!textSaved) return false; // LS容量超過等を成功扱いにしない。モーダルは開いたまま再操作できる。
+
+    // IDB/旧LSは画像専用。テキストも旧版との後方互換用に同梱するが、画像ゼロならレコード自体を削除して cand_text だけ残す。
+    var rec = imgs.length ? {
+      imgs: imgs, img: imgs[0] || '', comment: (data && data.comment) || '', memo: (data && data.memo) || '',
+      twitterUrl: (data && data.twitterUrl) || '', twitterUrl2: urls2[0] || '', urls2: urls2, at: new Date().getTime()
+    } : null;
+
+    // ★画像が変わっていない保存は、cand_text 確定時点でUI上の保存完了とする。画像なし/メモ等だけの編集で
+    //   IndexedDB を待つ必要はない。iOS Safari のIDBタイムアウト(内部8秒×再接続1回)へ入り「保存中…」が
+    //   長時間続く真因を切り離す。旧IDBレコードのテキストが再移行されないよう、既存レコードだけは裏で更新/掃除する。
+    var prev = _idbOk ? (_imgMem.ref[cid] || null) : legacyRefOf_(cid);
+    var prevImgs = prev ? (Array.isArray(prev.imgs) ? prev.imgs.filter(Boolean) : (prev.img ? [prev.img] : [])) : [];
+    var imageChanged = prevImgs.length !== imgs.length;
+    if (!imageChanged) {
+      for (var ii = 0; ii < imgs.length; ii++) { if (prevImgs[ii] !== imgs[ii]) { imageChanged = true; break; } }
+    }
+    if (!imageChanged) {
+      _refLoaded[cid] = true;
+      if (_idbOk && prev) {
+        if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
+        try {
+          var mirrorWrite = rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid));
+          Promise.resolve(mirrorWrite).then(function () { reqSync_(); }, idbFail_);
+        } catch (e) { idbFail_(e); }
+      } else if (!_idbOk && prev) {
+        try {
+          if (rec) localStorage.setItem(refImgKey(cid), JSON.stringify(rec)); else localStorage.removeItem(refImgKey(cid));
+        } catch (e) { idbFail_(e); }
+      }
+      return true;
+    }
     if (_idbOk) {
       var hadPrev = Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
-      var prev = _imgMem.ref[cid];
+      prev = _imgMem.ref[cid];
       if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
       var write = rec ? window.Go5Idb.set(idbKey('ref', cid), rec) : window.Go5Idb.del(idbKey('ref', cid));
       return write.then(function () {
@@ -1966,34 +1967,26 @@
         return;
       }
       body.querySelector('#refImgMsg').textContent = '保存中…';
-      // ★候補モーダルの保存は端末内(IndexedDB)への書込であって通信ではない。iOS Safari はメモリ圧/バックグラウンド
-      //   化で IDB の書込が無言タイムアウト(idb-timeout)して「五分五分」で false を返す(番犬が接続はリセット済=
-      //   張り直せば通ることが多い)。そこで数回だけ自動リトライしてから諦める。★失敗メッセージから「通信状態を確認して」を
-      //   削除する=これは端末内保存の失敗で通信は無関係(Chami報告2026-08-13「チャットが遅れてない=ネットワークに問題ない」)。
-      var refSaveAttempt = 0;
-      var trySaveRef_ = function () {
-        refSaveAttempt++;
-        Promise.resolve(refImgSave(it.cid, pending)).then(function (ok) {
-          if (!ok) {
-            if (refSaveAttempt < 3) {
-              body.querySelector('#refImgMsg').textContent = '保存中…(再試行' + refSaveAttempt + ')';
-              setTimeout(trySaveRef_, 500 * refSaveAttempt);
-              return;
-            }
-            saveBtn.disabled = false;
-            body.querySelector('#refImgMsg').textContent = 'この端末への保存に失敗しました。少し時間をおいて、もう一度お試しください(通信は関係ありません)';
-            return;
-          }
-          body.querySelector('#refImgMsg').textContent = '保存しました';
-          if (onSaved) onSaved();
-          setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
-        }).catch(function () {
-          if (refSaveAttempt < 3) { setTimeout(trySaveRef_, 500 * refSaveAttempt); return; }
+      // Go5Idb側が既に「接続し直して1回再試行」するため、画面側でさらに3回繰り返すと最長約48秒になる。
+      // UI側の多重再試行は廃止し、20秒の終端番犬だけ置く。失敗時も入力とモーダルを保持し、保存ボタンを戻す。
+      var refSaveSettled = false;
+      var finishRefSave_ = function (ok) {
+        if (refSaveSettled) return;
+        refSaveSettled = true;
+        clearTimeout(refSaveGuard);
+        if (!ok) {
           saveBtn.disabled = false;
-          body.querySelector('#refImgMsg').textContent = 'この端末への保存に失敗しました。もう一度お試しください';
-        });
+          body.querySelector('#refImgMsg').textContent = pending.imgs.length
+            ? '画像をこの端末へ保存できませんでした。入力は残っています。もう一度お試しください'
+            : 'この端末へ保存できませんでした。入力は残っています。もう一度お試しください';
+          return;
+        }
+        body.querySelector('#refImgMsg').textContent = '保存しました';
+        if (onSaved) onSaved();
+        setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
       };
-      trySaveRef_();
+      var refSaveGuard = setTimeout(function () { finishRefSave_(false); }, 20000);
+      Promise.resolve(refImgSave(it.cid, pending)).then(finishRefSave_, function () { finishRefSave_(false); });
     });
     wirePaste_(body);
     ov.hidden = false;

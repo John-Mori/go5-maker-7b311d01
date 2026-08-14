@@ -3,6 +3,10 @@
 // 狙い: 「保存済みのコメント/メモ/X URL が初回描画で空に見える」INC-127/129/132 の恒久対策=
 //       テキストを非同期IDBでなく同期LSに持つ設計が、保存/削除/別端末マージで壊れないことを回帰で守る。
 var assert = require('assert');
+var fs = require('fs');
+var source = fs.readFileSync(require.resolve('../js/candidates.js'), 'utf8');
+assert.strictEqual((source.match(/function candTextSave_\s*\(/g) || []).length, 1,
+  'candTextSave_ は1定義だけにする(後勝ちの重複定義で改善版を上書きしない)');
 
 // --- localStorage シム(Node には無いので最小実装)---
 var store = {};

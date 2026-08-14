@@ -166,26 +166,65 @@ test.describe('候補ページの画像・投稿編集', () => {
     await expect(page.locator('a.vlink-sns')).toHaveAttribute('href', xUrl);
   });
 
-  test('IndexedDB保存失敗を成功扱いせず投稿編集を開いたまま再試行できる', async ({ page }) => {
-    const cid = 'tw_candidate_save_failure';
+  test('画像なしの文字保存は停止したIndexedDBを待たず即時完了する', async ({ page }) => {
+    const cid = 'tw_candidate_text_only_save';
     await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await page.evaluate(({ cid }) => {
       localStorage.setItem('cand_items', JSON.stringify([{
-        cid, title: '保存失敗回帰テスト', isTwitter: true, twitterUrl: '', addedAt: Date.now()
+        cid, title: '文字だけ保存回帰テスト', isTwitter: true, twitterUrl: '', addedAt: Date.now()
       }]));
     }, { cid });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator('[data-refimg="' + cid + '"]').click();
     await expect(page.locator('.refimg-modal')).toBeVisible();
     await page.evaluate(() => {
-      Go5Idb.set = function () { return Promise.reject(new Error('forced-save-fail')); };
+      window.__go5IdbSetCalls = 0;
+      Go5Idb.set = function () {
+        window.__go5IdbSetCalls++;
+        return new Promise(function () {}); // iOSでIDBが停止した状態を再現
+      };
     });
     await page.locator('#refImgTwitter').fill('https://x.com/go5_test/status/33');
+    await page.locator('#refImgComment').fill('文字だけなら待たずに保存');
+    await page.locator('#refImgSave').click();
+
+    await expect(page.locator('#refImgMsg')).toHaveText('保存しました', { timeout: 1500 });
+    const saved = await page.evaluate(({ cid }) => ({
+      text: JSON.parse(localStorage.getItem('cand_text') || '{}')[cid],
+      idbSetCalls: window.__go5IdbSetCalls
+    }), { cid });
+    expect(saved.text.comment).toBe('文字だけなら待たずに保存');
+    expect(saved.text.twitterUrl).toBe('https://x.com/go5_test/status/33');
+    expect(saved.idbSetCalls).toBe(0);
+  });
+
+  test('画像保存失敗時は入力を残し保存ボタンを再操作できる', async ({ page }) => {
+    const cid = 'tw_candidate_image_save_failure';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ cid }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: '画像保存失敗回帰テスト', isTwitter: true, twitterUrl: '', addedAt: Date.now()
+      }]));
+    }, { cid });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('[data-refimg="' + cid + '"]').click();
+    await expect(page.locator('.refimg-modal')).toBeVisible();
+    await page.locator('#refImgFile').setInputFiles({
+      name: 'tiny.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLzWQAAAABJRU5ErkJggg==', 'base64')
+    });
+    await expect(page.locator('#refImgPreview img')).toBeVisible();
+    await page.evaluate(() => {
+      Go5Idb.set = function () { return Promise.reject(new Error('forced-save-fail')); };
+    });
+    await page.locator('#refImgTwitter').fill('https://x.com/go5_test/status/44');
     await page.locator('#refImgSave').click();
 
     await expect(page.locator('.refimg-modal')).toBeVisible();
     await expect(page.locator('#refImgMsg')).toContainText('保存できません');
-    await expect(page.locator('#refImgTwitter')).toHaveValue('https://x.com/go5_test/status/33');
+    await expect(page.locator('#refImgTwitter')).toHaveValue('https://x.com/go5_test/status/44');
+    await expect(page.locator('#refImgSave')).toBeEnabled();
   });
 });
 test.describe('ドラフト軽量ページ', () => {
