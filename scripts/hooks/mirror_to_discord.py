@@ -54,6 +54,26 @@ HQ = os.path.join(os.path.dirname(ROOT), "00_AI-HQ")
 MEM_DIR = os.path.join(HQ, "departments", "hr", "memory")
 MEM_OF = {"hq": os.path.join(MEM_DIR, "hq.jsonl")}
 
+# --- ★セッションが答えた便を処理済みにする (2026-07-27) ---
+#
+# Chami原文=「これ対応中なんだからいらんでしょこの通知」(msg 1531001024427327542・03:11)。
+#
+# 何が起きていたか(HQ実測):
+#   02:49 と 03:11 に「研究室HQ(hq) のチャイム線が落ちています」「デーモン側も止まっている疑い」
+#   が鳴った。**嘘である**。その時間帯 HQ の対話セッションは 02:50/02:56/03:03/03:04 と
+#   Discordへ返信し続けていた。
+#
+# ★なぜ pending が5分残るのか(帳簿と現実のズレ):
+#   在席中は dept_daemon が箱を譲る(`if self.interactive_alive(): ...` = 便をclaimしない)。
+#   だから**対話セッションが答えても queue の行は pending のまま**で、誰も「答えた」と書かない。
+#   実測: 2026-07-27 の hq 行 564/565/566/568/571 は deliveries=0(=デーモンが一度も触っていない)
+#   のまま17分 pending で、03:00:24 に**HQが手で**処理済みにした。手作業は仕組みではない。
+#
+# → ミラーが返信をDiscordへ出せた時だけ、**このターンが始まる前に届いていた** pending便を
+#   ack する。ターン中に届いた便は ack しない(まだ答えていない=嘘の完了を作らない)。
+QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
+ACK_MAX_ROWS = 20                   # 1ターンで処理済みにする上限(暴走ガード)
+
 
 def memory_append(dept, who, body):
     """デーモンの記憶ストアへ直接追記する(キューを経由しないため)。"""
@@ -163,22 +183,161 @@ def text_of(entry):
     return "\n\n".join(out).strip()
 
 
+def gate_body(dept, persona, body):
+    """出力ゲートC(呼称)・D(口調)をこの経路にも当てる(2026-08-15・人事部門依頼 案B)。
+
+    ★なぜここか: ゲートは `dept_daemon` の中にしか無く、**この経路(ミラー)には1つも無かった**。
+      研究室HQ(シャビ・アロンソ)の発言はここを通るので、口調ルール.json に指紋を足しても
+      機械が一度も見ていなかった。判定材料は写像2本のまま(ORG-11)、実装は output_gates。
+    ★Chamiの発言(CHAMI_NAME 名義)には当てない。**人の言葉を機械が書き換えることは無い**。
+    ★fail-open: import 失敗・例外の何が起きても元の本文をそのまま返す(沈黙ゼロ)。
+    """
+    try:
+        if persona == CHAMI_NAME:
+            return body
+        import output_gates                       # scripts/llm は sys.path に入っている
+        fixed, _summary = output_gates.apply_gates(dept, persona, body, source="mirror")
+        return fixed if str(fixed or "").strip() else body
+    except Exception:
+        return body
+
+
 def send(dept, persona, body):
+    """1発言をDiscordへ出す。**実際に投稿できたか**を (ok, msg_ids) で返す。
+
+    ★2026-07-27 戻り値を足した理由: ackの前提が「ミラーが本当に投稿できたこと」だから。
+      投稿に失敗しているのに便を処理済みにすると、**Chamiの依頼が誰にも見られないまま
+      台帳だけ完了になる**(=沈黙より悪い)。成功の証拠が取れた時だけ ack する。
+    ★msg_id が取れるのは `Chami(from Claude)` 名義だけ(persona_send の `mirror` フラグが
+      その名義でのみ ?wait=true を付けるため)。本人名義の投稿IDは取得できない=証拠には
+      「送信OK」の実測と、取れた分のmsg_idだけを書く(取れないものを書いたことにしない)。
+    """
     if not body:
-        return
+        return (False, [])
+    body = gate_body(dept, persona, body)
     if len(body) > MAX_CHARS:
         body = body[:MAX_CHARS] + "\n\n…(長いのでここまで。全文はClaude Code側にあります)"
-    if os.environ.get("MIRROR_DRY"):   # 検証用: 送らず何を送るかだけ出す
+    dry = os.environ.get("MIRROR_DRY")
+    if dry:                            # 検証用: 送らず何を送るかだけ出す
         print(f"[DRY] dept={dept} persona={persona} chars={len(body)}\n  {body[:160]}...")
-        return
+        # ★オフライン試験③(投稿失敗ではackしない)を実機なしで回すための口。
+        #   MIRROR_DRY=fail のときだけ「投稿できなかった」を再現する。
+        return (dry != "fail", ["DRY"] if dry != "fail" else [])
     try:
         p = subprocess.run(
             [sys.executable, PERSONA_SEND, "--dept", dept, "--persona", persona, body],
             capture_output=True, timeout=60, text=True, encoding="utf-8", errors="replace")
         if persona == CHAMI_NAME:
             record_mirror_id(dept, dept, p.stdout or "")
+        out = p.stdout or ""
+        ok = (p.returncode == 0) and ("送信OK" in out)
+        return (ok, re.findall(r"msg=(\d+)", out))
     except Exception:
-        pass
+        return (False, [])
+
+
+def _iso_utc_to_epoch(s):
+    """transcriptのtimestamp("2026-07-26T18:14:23.254Z"=UTC)をepoch秒へ。駄目ならNone。"""
+    import calendar
+    m = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)", str(s or ""))
+    if not m:
+        return None
+    try:
+        return calendar.timegm(tuple(int(x) for x in m.groups()) + (0, 0, 0))
+    except (ValueError, OverflowError):
+        return None
+
+
+def turn_started_at(entries):
+    """**このターンが始まった時刻**(epoch秒)。= 直近の「人の発言」のtimestamp。
+
+    ★これが ack の境界線。ここより前に届いていた便＝セッションが見た上で答えた便。
+      ここより後に届いた便＝ターンの最中に届いた分で、**まだ答えていない**ので ack しない。
+    ★引けなければ None を返し、呼び側は ack を諦める(境界が分からない時に ack すると、
+      答えていない便まで完了にする=嘘の完了)。
+    """
+    for e in reversed(entries):
+        if e.get("type") != "user" or e.get("isSidechain"):
+            continue                    # サブエージェント(Task)の行は人の発言ではない
+        body = text_of(e)
+        if not body:
+            continue                    # tool_result等
+        # ★2026-07-27 監視チャイム経由の便を**境界として認める**。
+        #   実測でこの穴が見つかった= 研究室HQでは**Chamiの発言が「人の発言」として届かない**。
+        #   監視チャイムが `<task-notification>…<event>★HQ宛 差出=chami_fusoh : …</event>` の形で
+        #   user行として入れる。旧実装は「`<` で始まる=ハーネス注入」として**捨てていた**ので、
+        #   境界が10時間前(セッション開始時のChami発言)のまま動かず、**ackが1件も起きなかった**。
+        #   → 便が延々 pending で積み上がり、それを見た watchdog が
+        #     「チャイム線が落ちている/デーモンが止まっている疑い」と誤報した(11:05 Chami指摘)。
+        #   ★これは**便が届いた合図**であって注入物ではない。ターンはここから始まっている。
+        if body.startswith("<task-notification") or "<task-notification" in body[:80]:
+            return _iso_utc_to_epoch(e.get("timestamp"))
+        if body.startswith("<") or "system-reminder" in body[:200]:
+            continue                    # ハーネス注入(system-reminder等)は境界にしない
+        if body.startswith("[SYSTEM NOTIFICATION"):
+            # ★ハーネスが整形した同じもの。★中に Chami の便が入っている時だけ境界にする
+            #   (純粋な背景タスクの完了通知は「答えるべき便」ではない)。
+            if "差出=chami" in body or "Monitor event" in body:
+                return _iso_utc_to_epoch(e.get("timestamp"))
+            continue
+        return _iso_utc_to_epoch(e.get("timestamp"))
+    return None
+
+
+def ack_answered(dept, cutoff, evidence):
+    """このターンが始まる前に届いていた pending便を「セッションが答えた」として ack する。
+
+    ★ackの正本は LeaseQueue.ack() を使う(同じ更新を2箇所に書かない=ORG-11)。
+      done行は消えない=台帳としてそのまま残る(INC-103)。
+    ★fail-open: 何が失敗してもセッションは止めない。ackできなくても従来どおり
+      pending が残るだけで、便は消えない。
+    返り値= 処理済みにした (id, msg_id) の一覧。
+    """
+    if not cutoff or not os.path.exists(QUEUE_DB):
+        return []
+    import sqlite3
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % QUEUE_DB, uri=True, timeout=5)
+        try:
+            con.execute("PRAGMA busy_timeout=3000")
+            rows = con.execute(
+                "SELECT id, msg_id FROM queue"
+                " WHERE dept=? AND status='pending' AND enqueued_at<=?"
+                " ORDER BY id LIMIT ?", (dept, cutoff, ACK_MAX_ROWS)).fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return []
+    if not rows:
+        return []
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+        from leasequeue import LeaseQueue
+        q = LeaseQueue(QUEUE_DB)
+    except Exception:
+        return []
+    done = []
+    try:
+        for qid, msg_id in rows:
+            try:
+                if q.ack(qid, evidence):
+                    done.append((qid, msg_id))
+            except Exception:
+                continue
+    finally:
+        try:
+            q.close()               # ★開けっ放しにしない(WALのロックを残さない)
+        except Exception:
+            pass
+    # ★後から追える形で1行残す(遷移台帳=local/llm/request_log.jsonl)。
+    #   state は既存のどれでもない **answered_by_session**(誰が答えたかが後で分かる)。
+    for qid, msg_id in done:
+        try:
+            from session_relay import _record
+            _record(msg_id or qid, dept, "answered_by_session", evidence)
+        except Exception:
+            break                       # session_relayが読めない環境ではackだけで済ませる
+    return done
 
 
 def main():
@@ -249,6 +408,9 @@ def main():
     #   (アメスの文脈は細かい方が効くので、Discordの見た目とは別扱いにする)。
     newest = None
     mine = []
+    # ★ミラーが**実際に投稿できたか**の実測(2026-07-27)。ackはこれが真の時だけ行う。
+    #   ok= 自分の返信を1通以上出せた / ids= 取れたDiscord msg_id(Chami名義の分のみ)
+    posted = {"ok": False, "ids": []}
 
     def flush_mine():
         """溜めた自分の発言のうち**最後の1つ(=結論)だけ**を送る。既送なら送らない。
@@ -275,7 +437,10 @@ def main():
             return
         sent_set.add(k)
         sent.append(k)
-        send(dept, my_name, persona_render.render(dept, [joined], persona=my_name))
+        ok, ids = send(dept, my_name, persona_render.render(dept, [joined], persona=my_name))
+        if ok:
+            posted["ok"] = True
+            posted["ids"] += ids
 
     for e in entries[start:]:
         t = e.get("type")
@@ -301,7 +466,8 @@ def main():
                 continue
             sent_set.add(k)
             sent.append(k)
-            send(dept, CHAMI_NAME, body)
+            _ok, _ids = send(dept, CHAMI_NAME, body)
+            posted["ids"] += _ids       # ★Chami名義のミラーだけがmsg_idを返す(証拠に使う)
             memory_append(dept, "chami", body)
         else:
             mine.append(body)
@@ -310,6 +476,27 @@ def main():
 
     st[sid] = {"last_uuid": newest or last_uuid, "sent": sent[-SENT_KEEP:]}
     save_state(st)
+
+    # --- ★答えた便を処理済みにする(帳簿を現実に合わせる・2026-07-27) ---
+    # 条件は3つとも必須:
+    #   (a) ミラーが**実際に投稿できた**(posted["ok"]) … 投稿失敗で完了にしない
+    #   (b) ターンの開始時刻が引けた(cutoff)         … 境界不明なら諦める
+    #   (c) その便が cutoff **以前**に届いていた      … ターン中に届いた分は答えていない
+    # ★fail-open: ここで何が起きてもセッションは止めない(例外は握り潰してexit 0)。
+    try:
+        cutoff = turn_started_at(entries)
+        if posted["ok"] and cutoff:
+            import time as _t
+            ev = ("対話セッションが窓で回答 dept=%s persona=%s discord_msg=%s "
+                  "turn_start=%s ts=%s session=%s" % (
+                      dept, my_name, ",".join(posted["ids"]) or "-",
+                      _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(cutoff)),
+                      _t.strftime("%Y-%m-%dT%H:%M:%S"), sid))
+            acked = ack_answered(dept, cutoff, ev)
+            if os.environ.get("MIRROR_DRY") and acked:
+                print("[DRY] ack %d件: %s" % (len(acked), acked))
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

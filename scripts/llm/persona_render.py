@@ -61,6 +61,40 @@ REWRITE_TIMEOUT = 120       # 口調変換の上限。超えたらdigestで届�
 CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
 
 
+# ============================================================================
+# 有音化(2026-08-15・人事部門依頼 案C)
+# ----------------------------------------------------------------------------
+# なぜ要るか: 下の persona_rewrite は**5通りの理由で黙って素のdigestへ落ちる**
+#   (認証失効/returncode≠0/空応答/タイムアウト120秒/0.75倍未満に縮んだ)。
+#   落ちた結果は「アロンソ名義でClaude標準体が出た」という同じ見た目になるので、
+#   事後に (a)言い換えが失敗して素通しした (b)言い換えたが崩れた (c)voice自筆が報告体
+#   のどれなのか**切り分ける手段が無かった**= C-041(一度の観測を状態の代理にするな)違反。
+# ★成功時も1行書く。失敗だけ記録すると「分母」が分からず率が出せない。
+# ★fail-open: 記録に失敗しても言い換えの結果には一切影響させない。
+RENDER_AUDIT = os.path.join(
+    os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local"),
+    "llm", "persona_render_audit.jsonl")
+
+
+def _audit(dept, persona, outcome, detail="", chars_in=0, chars_out=0):
+    """言い換えの結末を1行残す。outcome= ok / voice / cli_fail / shrunk / timeout ..."""
+    try:
+        import json
+        os.makedirs(os.path.dirname(RENDER_AUDIT), exist_ok=True)
+        with open(RENDER_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),   # JST
+                "dept": str(dept or ""),
+                "persona": str(persona or ""),
+                "outcome": outcome,
+                "detail": str(detail or ""),
+                "chars_in": int(chars_in or 0),
+                "chars_out": int(chars_out or 0),
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def voice_path(dept):
     return os.path.join(os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local"),
                         f"_voice_{dept}.txt")
@@ -182,7 +216,9 @@ def persona_rewrite(dept, text, persona=None):
         (上のdocstring参照)。ここでは claude を使うので事実保持の精度が違う。
       - 環境変数 `GO5_PERSONA_REWRITE=0` で即座に無効化できる(事故時の逃げ道)。
     """
+    asked = persona                             # 記録用=**名乗るはずだった人格**
     if os.environ.get("GO5_PERSONA_REWRITE") == "0":
+        _audit(dept, asked, "disabled", "GO5_PERSONA_REWRITE=0", len(text or ""), len(text or ""))
         return text
     body = (text or "").strip()
     if not body:
@@ -193,6 +229,9 @@ def persona_rewrite(dept, text, persona=None):
     if not character:
         character, persona = _character_of(dept)
     if not character:
+        # ★characterfileが引けない=**この便は最初から口調が当たらない**。
+        #   名乗りの表記ゆれ(見出し `# characterfile: <名前>` との不一致)がここに出る。
+        _audit(dept, asked, "no_character", "characterfile未解決", len(body), len(body))
         return text                             # 人格が無い部屋はそのまま出す
     try:
         import subprocess
@@ -227,6 +266,9 @@ def persona_rewrite(dept, text, persona=None):
                            errors="replace", timeout=REWRITE_TIMEOUT)
         out = (p.stdout or "").strip()
         if p.returncode != 0 or not out:
+            _audit(dept, asked, "cli_fail",
+                   "rc=%s stderr=%s" % (p.returncode, (p.stderr or "").strip()[:200]),
+                   len(body), len(out))
             return text                         # 認証失効・失敗 → 素のdigestで届ける
         # ★欠落ガード(2026-07-21・ORG-16): 規則3「情報を削らない」を書いても**LLMは実際に削る**。
         #   実測= 2800字の報告が1314字で返り、**末尾の質問(「直しとくか?」)が丸ごと消えた**。
@@ -234,11 +276,16 @@ def persona_rewrite(dept, text, persona=None):
         #   口調は"あると良い"もの、内容は"必須"のもの。**削られたと分かったら口調を捨てて内容を取る**。
         #   ★プロンプトの強化では直せない(禁じても起きたのが実測)。だから機構で判定する。
         if len(out) < len(body) * LOSS_RATIO:
+            _audit(dept, asked, "shrunk", "ratio=%.2f" % (len(out) / float(len(body) or 1)),
+                   len(body), len(out))
             return text                         # 縮みすぎ=情報が落ちた → 素のdigestを届ける
         if len(out) > MAX_CHARS:
             out = out[:MAX_CHARS] + "\n…(続きはClaude Code側)"
+        _audit(dept, asked, "ok", "", len(body), len(out))
         return out
-    except Exception:
+    except Exception as e:
+        # ★タイムアウト(120秒)もここに来る。**理由の型だけ**残す(本文は残さない)。
+        _audit(dept, asked, "exception", type(e).__name__, len(body), 0)
         return text                             # タイムアウト含め、何が起きても届ける
 
 
@@ -252,6 +299,9 @@ def render(dept, bodies, persona=None):
     """
     voice = take_voice(dept)
     if voice:
+        # ★voice経由は言い換えを通らない=**本人が書いた文がそのまま出る**。
+        #   ここで報告体が出たなら原因は「自筆が報告体」であって言い換えの失敗ではない(切り分け)。
+        _audit(dept, persona, "voice", "自筆", len(voice), len(voice))
         return voice                            # 本人が書いた一言が最優先(タダで速い)
     joined = "\n\n".join(b for b in bodies if b and b.strip())
     return persona_rewrite(dept, digest(joined), persona=persona)

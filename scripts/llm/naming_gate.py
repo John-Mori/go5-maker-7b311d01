@@ -288,6 +288,21 @@ def naming_verdicts(persona, dept, text, rules):
                 continue
 
             if ov is not None:
+                # ★話者×対象の override が持つ forbidden も消費する(2026-08-15・人事部門依頼 案E)。
+                #   それまでは honorific_required_targets.forbidden しか読んでおらず、
+                #   写像に書かれた override 側の forbidden は**静かに無視**されていた
+                #   (実在例= 三笘薫→三笘薫 の自称 forbidden:["三笘さん"])。
+                #   reason="forbidden" = 警告のみ(naming_corrections は自動修正しない)。
+                #   abbreviation_forbidden と同じ扱い= 置換先が一意に決まらないものは直さない。
+                #   ★yobisute_ok より先に見る= 呼び捨て可の話者でも禁止形は禁止。
+                ov_fb = _find_forms(s, [str(x) for x in (ov.get("forbidden") or []) if str(x)])
+                if ov_fb is not None:
+                    out.append({
+                        "target": tk, "found": ov_fb[1],
+                        "expected": list(ov.get("allowed") or ent.get("allowed") or []),
+                        "reason": "forbidden",
+                    })
+                    continue
                 # 話者本人がトップ等で「呼び捨てOK」→この対象は不問
                 if ov.get("yobisute_ok"):
                     continue
