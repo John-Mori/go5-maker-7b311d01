@@ -2388,6 +2388,10 @@
     var acc = opts.account || acct();
     var ytUrl = (opts.ytUrl || '').trim();
     var shortUrl = (opts.shortUrl || '').trim();
+    // ★投稿完了で dupe と判定されても、Chamiが「これは別の新規作品だ」と確認した時だけ重複判定を飛ばして
+    //   新規挿入する。明示確定操作(投稿完了)を黙って捨てないための逃げ道＝沈黙が最悪の事故(REQ 2026-08-15
+    //   「新規なのに既存とYouTube URL一致で弾かれ投稿履歴に載らない」)。既定はfalse＝従来どおり二重登録防止。
+    var forceNew = !!opts.forceNew;
     // ★投稿完了は明示操作(確認ダイアログ済)＝YouTube URL も 計測短縮URL もまだ無くても投稿履歴へ載せる。
     //   予約公開／X先行投稿では完了の時点で両URLとも未確定になる。旧ガード(!ytUrl && !shortUrl で
     //   return false)は、その場合ドラフトを作成履歴へ送るだけで投稿履歴に一切載せず=「完了したのに
@@ -2436,7 +2440,7 @@
         else if (shortUrl && it.shortUrl === shortUrl && !vid && !vidId && !it.videoId && !ytIdOf(y)) { matched = it; matchedBy = 'shortUrl'; matchedStore = pools[pi].base; }
       }
     }
-    if (matched) {
+    if (matched && !forceNew) {
       // ★二重登録はしない(D-1〜D-3)。ただし既存行の"空欄だけ"を今回の同定材料で埋める非破壊バックフィル。
       //   videoId無し既存行(手動追加/リビルド前の旧完了行)にYouTube/短縮URL一致で当たると、行は在るのに
       //   videoIdが揃わず「載らなかった」と診断が誤報していた=空欄を埋めれば次回から videoId で照合が揃い
@@ -2468,7 +2472,9 @@
         } catch (e) {}
       }
       if (acc === acct()) refresh();
-      return { ok: false, reason: 'dupe', matchedBy: matchedBy, existing: { title: matched.title || '', videoId: matched.videoId || '', ts: matched.ts || 0 } };
+      // ★衝突相手の"自身のYouTube URL/短縮URL"も返す＝Chamiに「何と重複扱いされたか」を実物で見せ、
+      //   別作品なら forceNew で上書きできる材料にする(黙って弾かない・沈黙が最悪の事故)。
+      return { ok: false, reason: 'dupe', matchedBy: matchedBy, existing: { title: matched.title || '', videoId: matched.videoId || '', ts: matched.ts || 0, ytUrl: (ymap[itemKey(matched)] || matched.ytUrl || ''), shortUrl: matched.shortUrl || '' } };
     }
     var id = 'm:' + new Date().getTime();
     var entry = { manual: true, id: id, ts: opts.ts || new Date().getTime() };

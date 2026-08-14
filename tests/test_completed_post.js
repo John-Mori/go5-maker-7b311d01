@@ -90,6 +90,15 @@ function backfillRow(matched, incoming) {
   return out;
 }
 
+// --- forceNew override のミラー(yt-clicks.js: dupe でも forceNew の時だけ新規挿入する) ---
+//   投稿完了は明示確定操作。dupe と判定されても Chami が「別の新規作品だ」と確認したら重複判定を飛ばして
+//   必ず投稿履歴へ新規追加する=明示操作を黙って捨てない(沈黙が最悪の事故・REQ 2026-08-15)。
+//   既定(forceNew無し)は従来どおり dupe を弾く=二重登録防止は無改変。
+function insertsDespiteDupe(isDupeResult, forceNew) {
+  if (!isDupeResult) return true;   // そもそも重複でない=載る
+  return !!forceNew;                // 重複でも forceNew の時だけ載る
+}
+
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); console.log('PASS: ' + name); passed++; } catch (e) { console.log('FAIL: ' + name); console.log('      ' + e.message); failed++; } }
 
@@ -184,6 +193,17 @@ test('W-4: 意図的に消した行(workShortNone)は dupe バックフィルで
 test('W-5: 既に導線2が入っている行は上書きしない(統合＝破壊しない)', function () {
   const out = backfillRow({ videoId: 'acc1-A', workShortUrl: 'https://5mgl.com/keep' }, { workShortUrl: 'https://5mgl.com/new' });
   assert.strictEqual(out.workShortUrl, 'https://5mgl.com/keep');
+});
+
+// ── forceNew override ─────────────────────────────────────
+test('F-1: 既定は dupe を弾く(二重登録防止は無改変)', function () {
+  assert.strictEqual(insertsDespiteDupe(true, false), false);
+});
+test('F-2: dupe でも forceNew=Chami確認で必ず新規挿入=明示操作を黙って捨てない', function () {
+  assert.strictEqual(insertsDespiteDupe(true, true), true);
+});
+test('F-3: そもそも重複でなければ forceNew の有無に関わらず載る', function () {
+  assert.strictEqual(insertsDespiteDupe(false, false), true);
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

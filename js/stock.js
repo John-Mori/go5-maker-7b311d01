@@ -685,22 +685,25 @@
     //     誤報していた(Chami報告2026-08-11・スクショはURL埋まりなのに"全て空"表示)。addCompletedPost が
     //     測った理由(ok/dupe/no-id/例外)だけを出す＝でっち上げない・黙って落とさない(fail-open)。
     var _res = null;
+    // ★addCompletedPost へ渡す引数は1つの変数にまとめる=dupe時に forceNew を足して"同じ引数で"再挿入できるように
+    //   する(下の確認ダイアログ経路)。
+    var _hpOpts = {
+      account: meta.account || 'acc1',
+      ytUrl: ytUrl || '',
+      shortUrl: shortUrl || '',
+      title: meta.title || '',
+      workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
+      // ★投稿モーダルで既に発行・保存済みの導線2短縮URL(X本文に実際に貼ったコード)を"値として"渡す。
+      //   これで完了時の非同期再発行(離脱で消える)に頼らず一発で欄が埋まる=空欄の恒久対策(REQ-65c7897f2f他)。
+      workShortUrl: (pd.workShortUrl || '').trim(),
+      workShareUrl: (pd.workShareUrl || '').trim(),
+      videoId: meta.videoId || '',
+      scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
+      attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
+    };
     try {
       if (window.Go5History && typeof window.Go5History.addCompletedPost === 'function') {
-        _res = window.Go5History.addCompletedPost({
-          account: meta.account || 'acc1',
-          ytUrl: ytUrl || '',
-          shortUrl: shortUrl || '',
-          title: meta.title || '',
-          workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
-          // ★投稿モーダルで既に発行・保存済みの導線2短縮URL(X本文に実際に貼ったコード)を"値として"渡す。
-          //   これで完了時の非同期再発行(離脱で消える)に頼らず一発で欄が埋まる=空欄の恒久対策(REQ-65c7897f2f他)。
-          workShortUrl: (pd.workShortUrl || '').trim(),
-          workShareUrl: (pd.workShareUrl || '').trim(),
-          videoId: meta.videoId || '',
-          scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
-          attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
-        });
+        _res = window.Go5History.addCompletedPost(_hpOpts);
       } else {
         // ドラフト専用ページで履歴モジュールが未起動でも、完了扱いにしてドラフトだけ消してはいけない。
         _res = { ok: false, reason: 'unavailable' };
@@ -711,9 +714,24 @@
       var _dacc2 = meta.account || 'acc1';
       if (_res && _res.ok === false) {
         if (_res.reason === 'dupe') {
+          // ★黙って弾かない。「何と重複扱いされたか(既存の題名・背骨ID・そのYouTube URL)」を実物で見せ、
+          //   別の新規作品なら forceNew で投稿履歴へ新規追加できる逃げ道を出す(明示操作を黙って捨てない
+          //   =沈黙が最悪の事故。REQ 2026-08-15「新規なのにYouTube URL一致で弾かれ履歴に載らない」の恒久対策)。
           var _byJa = _res.matchedBy === 'ytUrl' ? 'YouTube URL一致' : _res.matchedBy === 'shortUrl' ? '短縮URL一致' : '同じ動画ID';
           var _ex = _res.existing || {};
-          alert('この作品は既に投稿履歴に載っています(' + _byJa + ')。二重登録を防ぎました。\n既存: ' + (_ex.title || '(題名なし)') + (_ex.videoId ? ' / ' + _ex.videoId : ''));
+          var _exLines = '既存: ' + (_ex.title || '(題名なし)')
+            + (_ex.videoId ? '\n背骨ID: ' + _ex.videoId : '')
+            + (_ex.ytUrl ? '\nそのYouTube URL: ' + _ex.ytUrl : '');
+          var _proceed = confirm('この動画は投稿履歴の別の1件と同じ動画として弾かれました(' + _byJa + ')。\nこのままでは投稿履歴に載りません。\n\n' + _exLines + '\n\n別の新規作品なら「OK」で投稿履歴へ新規追加します。\n同じ動画なら「キャンセル」。');
+          if (_proceed) {
+            try {
+              _hpOpts.forceNew = true; // 重複判定を飛ばして必ず新規挿入
+              _res = window.Go5History.addCompletedPost(_hpOpts);
+            } catch (e6) { _res = { ok: false, reason: 'exception', message: (e6 && e6.message) || String(e6) }; }
+            if (_res && _res.ok === false && _res.reason && _res.reason !== 'dupe') {
+              alert('新規追加もできませんでした(理由=' + _res.reason + (_res.message ? ' / ' + _res.message : '') + ')。\nドラフトは残してあります。');
+            }
+          }
         } else if (_res.reason === 'no-id') {
           alert('投稿履歴に載せられませんでした。\n理由=この動画に識別ID(背骨ID)が無く、YouTube URL・短縮URLも空でした。\n(videoId=' + (meta.videoId || 'なし') + ' / チャンネル=' + _dacc2 + ')');
         } else if (_res.reason === 'unavailable') {
