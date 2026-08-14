@@ -132,7 +132,14 @@ talk = sorted(k for k, v in D.DEPT_CONF.items()
 #   実在の部屋を書き足しただけで、期待値の意味は変えていない。
 #   ★新しい部屋を足したらこの一覧も足すこと=足さないとこの検査が常に赤くなり、
 #     一緒に並んでいる**本物の退行が埋まる**(HQ指摘 2026-08-13)。
-eq(talk, ["dream-care", "future-room", "health-log", "incident", "kaizen-analyst",
+# ★2026-08-14 kaizen-analyst を**外した**(イージス研究室)。名簿の追従ではなく**期待値の変更**=
+#   改善提案部門に work_scope を付与したため、この一覧から出るのが正しい。理由は DEPT_CONF 側の注記。
+#   要点= Chamiが2度「ここでやってよ・任せるよ」(8/13)「skill化始めよ、忘れてた」(8/14)と
+#   同じ部屋へ直接言っているのに、配線が実作業を全部 <<WORK>> で回送していた(C-003/§3.7=
+#   Chamiの直接指示が最上位)。実測= 8/14 08:59 アスナが「今から回すね」と言った便が
+#   そのまま部門長へ上申された(dept_daemon_kaizen-analyst.log)。aegis-gl が 8/5 に受けた是正と同型。
+#   ★境目は動かしていない= 型・仕様を書くのは自室 / 5秒動画メーカー本体のコードは改修部門α(C-015)。
+eq(talk, ["dream-care", "future-room", "health-log", "incident",
           # ★2026-07-27 report-notify 追加。一方通行だった報告通知部屋を双方向にした
           #   (Chamiが3回頼んだ件)。通知の出力経路には触らないので conversation_only。
           "keiei-kikaku", "kukuru-nakama", "llm-qa", "manga-shorts", "past-room",
