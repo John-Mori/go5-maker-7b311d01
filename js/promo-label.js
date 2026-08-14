@@ -225,6 +225,7 @@
     octx.clearRect(0, 0, off.width, off.height);
     octx.drawImage(img, 0, 0);                             // 本体+装飾+三日月+固定文言(PNGに焼込済)
     drawDigits(octx, tplAcct().ink, v.slot, 0, 0, off.width, off.height, String(val())); // 数字も同じ1枚へ
+    runPreflight_(octx, off.width, off.height, v.slot, acct(), ltype); // 作成時プリフライト(既定OFF・警告のみ)
     _composite = off; _compKey = key;
     return off;
   }
@@ -308,6 +309,148 @@
     ctx.fillStyle = grad; ctx.fillText(text, cx, by);
     ctx.shadowColor = 'transparent';
     ctx.restore();
+  }
+
+  // ── プリフライト用の純粋関数(検査専用・描画へは一切使わない・副作用なし) ──
+  //   仕様= docs/departments/kaizen-analyst/preflight_digit-on-badge.md
+  //   ImageData風の入力 {data:Uint8ClampedArray, width, height} を受け取り、数値だけで完結する
+  //   (canvas非依存)。Node からも require() できるよう module.exports/window の両対応で末尾に公開する。
+
+  // sRGB相対輝度(WCAG式・ガンマ展開込み)。r/g/b は 0..255。返り値は 0..1。
+  function relLuminance(r, g, b) {
+    function ch(c) {
+      var s = c / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    }
+    return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+  }
+  // WCAGコントラスト比。l1/l2は relLuminance の返り値(どちらが明/暗でも可・順不同で同じ結果)。
+  function contrastRatio(l1, l2) {
+    var hi = Math.max(l1, l2), lo = Math.min(l1, l2);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  // 指定region(画像全体に対する比率 x,y,w,h)内で「インク」(=不透明かつ背景と輝度差のある画素)の
+  //   最小内包矩形を、画像全体に対する比率 {x,y,w,h} で返す。インクが無ければ null。
+  //   opts.alphaMin(既定24/255)= これ未満のalphaは透明として除外。
+  //   opts.lumaDiffMin(既定0.12)= 背景輝度とこの差以上ある画素だけをインクとみなす。
+  //   opts.bgLuma を渡せばその値を背景輝度として使う。未指定ならregion内の不透明画素の平均輝度で近似
+  //   (数字はregionの少数派である前提=既存slot設計と整合)。
+  function inkBoxOf(pixels, w, h, region, opts) {
+    opts = opts || {};
+    region = region || { x: 0, y: 0, w: 1, h: 1 };
+    var alphaMin = (typeof opts.alphaMin === 'number') ? opts.alphaMin : 24;
+    var lumaDiffMin = (typeof opts.lumaDiffMin === 'number') ? opts.lumaDiffMin : 0.12;
+    var rx0 = Math.max(0, Math.round(region.x * w));
+    var ry0 = Math.max(0, Math.round(region.y * h));
+    var rx1 = Math.min(w, Math.round((region.x + region.w) * w));
+    var ry1 = Math.min(h, Math.round((region.y + region.h) * h));
+    if (rx1 <= rx0 || ry1 <= ry0) return null;
+    var data = pixels.data;
+    var bgLuma = opts.bgLuma;
+    if (typeof bgLuma !== 'number') {
+      var sum = 0, n = 0;
+      for (var by = ry0; by < ry1; by++) {
+        for (var bx = rx0; bx < rx1; bx++) {
+          var bi = (by * w + bx) * 4;
+          if (data[bi + 3] < alphaMin) continue;
+          sum += relLuminance(data[bi], data[bi + 1], data[bi + 2]);
+          n++;
+        }
+      }
+      bgLuma = n > 0 ? sum / n : 0;
+    }
+    var minX = null, minY = null, maxX = null, maxY = null;
+    for (var y = ry0; y < ry1; y++) {
+      for (var x = rx0; x < rx1; x++) {
+        var idx = (y * w + x) * 4;
+        if (data[idx + 3] < alphaMin) continue;
+        var luma = relLuminance(data[idx], data[idx + 1], data[idx + 2]);
+        if (Math.abs(luma - bgLuma) < lumaDiffMin) continue;
+        if (minX === null || x < minX) minX = x;
+        if (minY === null || y < minY) minY = y;
+        if (maxX === null || x > maxX) maxX = x;
+        if (maxY === null || y > maxY) maxY = y;
+      }
+    }
+    if (minX === null) return null;
+    return { x: minX / w, y: minY / h, w: (maxX - minX + 1) / w, h: (maxY - minY + 1) / h };
+  }
+  // インク矩形(画像全体比率)の外周リング(既定6px幅)の平均輝度。インク矩形の内部は含めない。
+  //   透明画素(alpha<8)は下地が無い=背景として数えない。リングに有効画素が無ければ null。
+  function localBgLuminance(pixels, w, h, inkBoxRel, ringPx) {
+    if (!inkBoxRel) return null;
+    ringPx = (typeof ringPx === 'number') ? ringPx : 6;
+    var data = pixels.data;
+    var x0 = Math.round(inkBoxRel.x * w), y0 = Math.round(inkBoxRel.y * h);
+    var x1 = Math.round((inkBoxRel.x + inkBoxRel.w) * w), y1 = Math.round((inkBoxRel.y + inkBoxRel.h) * h);
+    var ox0 = Math.max(0, x0 - ringPx), oy0 = Math.max(0, y0 - ringPx);
+    var ox1 = Math.min(w, x1 + ringPx), oy1 = Math.min(h, y1 + ringPx);
+    var sum = 0, n = 0;
+    for (var y = oy0; y < oy1; y++) {
+      for (var x = ox0; x < ox1; x++) {
+        if (x >= x0 && x < x1 && y >= y0 && y < y1) continue; // インク矩形の内部は除外
+        var idx = (y * w + x) * 4;
+        if (data[idx + 3] < 8) continue;
+        sum += relLuminance(data[idx], data[idx + 1], data[idx + 2]);
+        n++;
+      }
+    }
+    return n > 0 ? sum / n : null;
+  }
+
+  // 作成時プリフライト(仕様§1 P1〜P3相当・警告のみ・fail-open)。
+  //   drawDigitsで数字を焼いた直後のオフスクリーンcanvasを読み、(a)実インクboxがslotをはみ出していないか
+  //   (b)コントラスト比が閾値以上かをconsole.warnで知らせるだけ。★throw/return/作成停止は絶対にしない
+  //   (可用性=喋る側。検査失敗も握りつぶす)。既定OFF=window.GO5_PREFLIGHT か localStorage
+  //   'promo_preflight'='1' の時だけ動く(本番の毎回描画では走らせない)。
+  var PREFLIGHT_CONTRAST_MIN = 4.5;
+  function preflightEnabled_() {
+    try { if (typeof window !== 'undefined' && window.GO5_PREFLIGHT) return true; } catch (e) {}
+    try { if (typeof localStorage !== 'undefined' && localStorage.getItem('promo_preflight') === '1') return true; } catch (e) {}
+    return false;
+  }
+  function runPreflight_(ctx, cw, ch, slot, accId, type) {
+    try {
+      if (!preflightEnabled_()) return;
+      var img = ctx.getImageData(0, 0, cw, ch);          // 読むだけ=既存描画のピクセルは変えない
+      var pixels = { data: img.data, width: cw, height: ch };
+      // 探索範囲=slotを一回り広げた領域(はみ出しを検出できるように)。画像端でクランプ。
+      var padX = slot.w * 0.5, padY = slot.h * 0.5;
+      var rx0 = Math.max(0, slot.x - padX), ry0 = Math.max(0, slot.y - padY);
+      var rx1 = Math.min(1, slot.x + slot.w + padX), ry1 = Math.min(1, slot.y + slot.h + padY);
+      var region = { x: rx0, y: ry0, w: rx1 - rx0, h: ry1 - ry0 };
+      var ink = inkBoxOf(pixels, cw, ch, region);
+      if (!ink) { console.warn('[promo-preflight] インク未検出', { acct: accId, type: type, slot: slot }); return; }
+      var eps = 1e-6;
+      var fits = ink.x >= slot.x - eps && ink.y >= slot.y - eps &&
+        (ink.x + ink.w) <= (slot.x + slot.w) + eps && (ink.y + ink.h) <= (slot.y + slot.h) + eps;
+      if (!fits) {
+        console.warn('[promo-preflight] 実インクboxが宣言slotをはみ出し', { acct: accId, type: type, slot: slot, ink: ink });
+      }
+      // インク実測輝度=inkBox内のインク画素の平均輝度(1点測りより頑健)。
+      var data = pixels.data;
+      var ix0 = Math.round(ink.x * cw), iy0 = Math.round(ink.y * ch);
+      var ix1 = Math.round((ink.x + ink.w) * cw), iy1 = Math.round((ink.y + ink.h) * ch);
+      var sum = 0, n = 0;
+      for (var yy = iy0; yy < iy1; yy++) {
+        for (var xx = ix0; xx < ix1; xx++) {
+          var idx = (yy * cw + xx) * 4;
+          if (data[idx + 3] < 24) continue;
+          sum += relLuminance(data[idx], data[idx + 1], data[idx + 2]);
+          n++;
+        }
+      }
+      var inkLuma = n > 0 ? sum / n : null;
+      var bgLuma = localBgLuminance(pixels, cw, ch, ink);
+      if (inkLuma != null && bgLuma != null) {
+        var ratio = contrastRatio(inkLuma, bgLuma);
+        if (ratio < PREFLIGHT_CONTRAST_MIN) {
+          console.warn('[promo-preflight] コントラスト比が低い', { acct: accId, type: type, ratio: ratio, threshold: PREFLIGHT_CONTRAST_MIN });
+        }
+      }
+    } catch (e) {
+      try { console.warn('[promo-preflight] 検査失敗(無視・fail-open)', e && e.message); } catch (e2) {}
+    }
   }
 
   // 従来の帯(テンプレPNGが読めない間のフォールバック)。
@@ -397,7 +540,10 @@
     } catch (e) {}
   })();
 
-  (function wireButtons() {
+  // ★以下のwireButtons/wirePointerはdocument前提。Node(require時のプリフライトテスト)で
+  //   本ファイルを安全に読み込めるよう呼び出しだけをtypeof documentでガードする(ブラウザは常に
+  //   documentがあるため挙動は無変化)。
+  function wireButtons() {
     var map = { promoPosL: [-20, 0], promoPosR: [20, 0], promoPosU: [0, -20], promoPosD: [0, 20] };
     Object.keys(map).forEach(function (id) {
       var el = document.getElementById(id);
@@ -439,13 +585,14 @@
       if (el) el.addEventListener('click', function () { setScale(sizeBtns[id]); });
     });
     updateSizeLabel();
-  })();
+  }
+  if (typeof document !== 'undefined') wireButtons();
 
   // ---- プレビュー上の操作 ----
   // 一本指 = ラベルのドラッグで移動。
   //   ★二本指ピンチ(画像の拡大縮小)は廃止(Chami依頼2026-07-30「二本指ズームは使いにくい」)。
   //     画像の拡大縮小・上下移動はプレビュー横の±ボタン(app.js CONTROLS: imgScale/imgY)で操作する。
-  (function wirePointer() {
+  function wirePointer() {
     var cv = document.getElementById('cv');
     if (!cv || !window.PointerEvent) return;
     var drag = null;        // ラベルドラッグ {gx,gy}=掴んだ点とラベル左上のずれ(フレーム比)
@@ -477,12 +624,13 @@
     }
     cv.addEventListener('pointerup', endPointer);
     cv.addEventListener('pointercancel', endPointer);
-  })();
+  }
+  if (typeof document !== 'undefined') wirePointer();
 
   // アカウント切替=テンプレ(月詠み⇔宵桜)が変わるため再描画。
-  document.addEventListener('account-changed', function () { redraw(); });
+  if (typeof document !== 'undefined') document.addEventListener('account-changed', function () { redraw(); });
 
-  window.Go5PromoLabel = {
+  if (typeof window !== 'undefined') window.Go5PromoLabel = {
     drawOverlay: drawOverlay,     // app.js drawFrame から呼ぶ(フレームへ重ね描き)
     // 作品情報が確定した時に呼ぶ(bluesky.js renderMovieInfo)。セール中のみ値を保持(定価=0=非表示)。
     notify: function (info) {
@@ -546,5 +694,17 @@
     }
   };
 
-  updateRow();
+  if (typeof document !== 'undefined') updateRow();
+
+  // ── Node向け公開(プリフライトの純粋関数のみ・テスト専用) ──
+  //   ブラウザ側は window.Go5PromoLabel(上)経由。ここは tests/test_promo_preflight.js が
+  //   require('../js/promo-label.js') する入口。
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      inkBoxOf: inkBoxOf,
+      relLuminance: relLuminance,
+      contrastRatio: contrastRatio,
+      localBgLuminance: localBgLuminance
+    };
+  }
 })();
