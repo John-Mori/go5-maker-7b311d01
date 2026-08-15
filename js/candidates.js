@@ -2172,29 +2172,24 @@
     if (!cardEl) return;
     var col = cardEl.querySelector('.cand-thumbcol');
     if (col) {
-      var imgs = refImgsOf_(cid), src = imgs[0] || '';
-      var thumb = col.querySelector('.cand-refimg-thumb');
-      var badge = col.querySelector('.cand-refimg-multi');
-      if (src) {
-        if (!thumb) {
-          thumb = document.createElement('img');
-          thumb.className = 'cand-refimg-thumb';
-          thumb.setAttribute('data-refimgview', cid);
-          thumb.setAttribute('loading', 'lazy');
-          thumb.alt = '動画生成用の画像(タップで拡大)';
-          thumb.title = '動画生成用の画像(タップで拡大)';
-          thumb.addEventListener('click', function () { var a = refImgsOf_(cid); if (a.length) openImgZoom_(a, 0, { onReorder: function (i) { return reorderRefImgToFirst_(cid, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(cid, done); } }); });
-          col.appendChild(thumb);
-        }
-        thumb.src = src;
-        thumb.classList.toggle('multi', imgs.length > 1); // 複数あり＝アンバー枠で表現(バッジ表記は廃止)
-        if (badge && badge.parentNode) badge.parentNode.removeChild(badge); // 旧バッジの掃除
-      } else {
-        if (thumb && thumb.parentNode) thumb.parentNode.removeChild(thumb);
-        if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
+      var imgs = refImgsOf_(cid);
+      var settled = !_idbOk || _candidateHydrated || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
+      var rr0 = refImgOf(cid) || {};
+      var worked = !!(rr0.comment || rr0.memo);
+      // ★スロットは候補カードと同じ refSlotHtml_ で全枚数を組み直す(先頭1枚だけ更新する旧実装を廃止)。
+      //   タップ拡大は pageCand 委任(data-refimgview)が拾うためノード個別のリスナーは不要。
+      var slot = col.querySelector('.cand-refimgs');
+      if (!slot) {
+        slot = document.createElement('div');
+        slot.className = 'cand-refimgs';
+        slot.setAttribute('data-refslot', cid);
+        col.appendChild(slot);
       }
-      var stray = col.querySelector('.cand-refimg-comment'); // 旧構造(サムネ列に折り返すコメント)の名残を掃除
-      if (stray && stray.parentNode) stray.parentNode.removeChild(stray);
+      slot.innerHTML = refSlotHtml_(cid, imgs, settled, worked);
+      // 旧構造(スロット外に直接置いた単体サムネ/バッジ/折り返しコメント)の名残を掃除(:scopeは使わず親で判定)
+      [].slice.call(col.querySelectorAll('.cand-refimg-thumb, .cand-refimg-multi, .cand-refimg-comment')).forEach(function (n) {
+        if (n.parentNode === col) col.removeChild(n); // slot内の正規サムネは親がslotなので残す
+      });
     }
     syncCardLower_(cardEl, cid);
   }
@@ -2441,7 +2436,9 @@
       var refView = dataTarget_(e.target, 'data-refimgview', page);
       if (refView) {
         var rc = refView.getAttribute('data-refimgview'), imgs = refImgsOf_(rc);
-        if (imgs.length) openImgZoom_(imgs, 0, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } });
+        var start = parseInt(refView.getAttribute('data-refidx'), 10); // タップした画像から開く(全枚数表示に対応)
+        if (!(start >= 0 && start < imgs.length)) start = 0;
+        if (imgs.length) openImgZoom_(imgs, start, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } });
         return;
       }
       var thumb = dataTarget_(e.target, 'data-thumbcid', page);
@@ -4238,6 +4235,21 @@
     });
   }
 
+  // 動画生成用画像スロットのHTML。★保存画像は全枚数を出す(1枚だけにしない・Chami 2026-08-15「全部表示してくれ」)。
+  //   0枚の時は空欄にせず状態札を出す=「まだ読込前(⏳)」と「(コメント等はあるのに)画像なし(⚠)」を区別可能にする
+  //   =Chami「消えてるのか表示されてないのか分からん」への恒久対策。単枚=従来どおり全幅・複数=2列グリッドで全枚。
+  function refSlotHtml_(cid, imgs, settled, worked) {
+    if (imgs && imgs.length) {
+      var multi = imgs.length > 1;
+      return imgs.map(function (src, i) {
+        var cap = '動画生成用の画像 ' + (i + 1) + '/' + imgs.length + '(タップで拡大' + (multi ? '・全' + imgs.length + '枚' : '') + ')';
+        return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-refimgview="' + esc(cid) + '" data-refidx="' + i + '" src="' + esc(src) + '" loading="lazy" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
+      }).join('');
+    }
+    if (!settled) return '<div class="cand-refimg-ph cand-refimg-loading" title="動画生成用の画像を読み込み中です">⏳ 画像読込中…</div>';
+    if (worked) return '<div class="cand-refimg-ph cand-refimg-missing" data-refimg="' + esc(cid) + '" title="この端末に動画生成用の画像が見つかりません(タップで投稿編集から確認・再登録)">⚠ 画像なし</div>';
+    return '';
+  }
   // 作品カード。(候補/サークル共通・縦並び)actionHtml=右下のボタン。(削除/非表示/再表示)
   function candCard(it, actionHtml) {
     var sale = isOnSale_(it);
@@ -4281,12 +4293,14 @@
     var salesHtml = '<div class="cand-sales">' + salesPart + ' ・ ' + reviewPart + '</div>';
     var hasRef = refImgHas(it.cid);
     var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像(複数可)
-    var refImgSrc = refImgs[0] || '';
     var _refRec = refImgOf(it.cid) || {};
     var refCmt = _refRec.comment || ''; // 保存済みコメント(動画生成用画像の真下に全文表示)
     var refMemo = _refRec.memo || '';   // メモ(コメントが無い時にカードへ水色で代替表示)
-    // 動画生成用の画像は作品サムネの真下(左の画像列)に少し余白を開けて縦積み。点線の区切りは廃止。
-    var refImgHtml = refImgSrc ? '<img class="cand-refimg-thumb' + (refImgs.length > 1 ? ' multi' : '') + '" data-refimgview="' + esc(it.cid) + '" src="' + esc(refImgSrc) + '" loading="lazy" alt="動画生成用の画像(タップで拡大)" title="動画生成用の画像(タップで拡大' + (refImgs.length > 1 ? '・複数あり' : '') + ')">' : '';
+    // 動画生成用の画像=作品サムネの真下(左の画像列)に★全枚数を並べる(旧「先頭1枚のみ」を廃止・Chami 2026-08-15)。
+    //   このcidの画像展開が済んでいるか(settled)を見て、未展開なら「⏳読込中」・展開済みで痕跡ありなら「⚠画像なし」を出す。
+    var refSettled = !_idbOk || _candidateHydrated || _refLoaded[it.cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, it.cid);
+    var refWorked = !!(refCmt || refMemo); // コメント/メモがある=動画を作った痕跡→画像が在るべき(空欄でなく警告を出す)
+    var refImgHtml = '<div class="cand-refimgs" data-refslot="' + esc(it.cid) + '">' + refSlotHtml_(it.cid, refImgs, refSettled, refWorked) + '</div>';
     // メモ(コメントの上・水色)とコメント(🙈/🗑と同じ管理行の左)は下の return 内で直接組み立てる。
     // 投稿済み作品はカード大枠をチャンネルのイメージカラーで太線囲み。両channel投稿は月詠み(外)＋宵桜(内)の二重。
     var _pAcc1 = !!postedMatchForCand_(it, 'acc1'), _pAcc2 = !!postedMatchForCand_(it, 'acc2');
