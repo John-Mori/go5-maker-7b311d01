@@ -987,6 +987,46 @@
     _bgTabObs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-tab"] });
   } catch (e) {}
 
+  // ---- プレビューを「YouTube実機の見え方」に合わせる(左右各9%が切れる=中央82%幅・全高だけを表示) ----
+  //   YouTube Shortsは縦長端末で動画を画面高いっぱいに拡大表示し、左右各約9%を切り落とす(cover)。
+  //   そのため実機の再生では中央82%幅・全高だけが見え、全画面のプレビューより"拡大して"見える。
+  //   ここではプレビューの「表示」だけを実機の可視域に合わせる=書き出す動画・キャンバス実体(1080×1920)は
+  //   一切変えない(captureStreamは実体を録るためCSSの表示加工は録画に影響しない=§3のプレビュー/書き出し一致は不変)。
+  //   Chami依頼2026-08-15「実際の動画に動画作成タブ内のプレビューを合わせたい」。
+  function applyYtFrame_(on) {
+    var box = document.querySelector('.canvas-box');
+    if (!box || !cv) return;
+    // まず前回の適用分を必ず解除してから素の表示サイズを測る(解除→測定→適用=回転/リサイズでも安定)。
+    cv.style.position = ''; cv.style.left = ''; cv.style.top = ''; cv.style.transform = '';
+    cv.style.width = ''; cv.style.height = ''; cv.style.maxWidth = ''; cv.style.maxHeight = '';
+    box.style.position = ''; box.style.overflow = ''; box.style.width = ''; box.style.height = '';
+    if (!on) return;
+    var r = cv.getBoundingClientRect();
+    var w = r.width, h = r.height;
+    if (!w || !h) return; // 動画作成タブが非表示など未レイアウト時は何もしない(戻った時に再適用)。
+    // キャンバスの表示サイズを固定して絶対配置し、外側(左右各9%)を枠でクリップ=中央82%幅・全高が見える。
+    cv.style.width = w + 'px'; cv.style.height = h + 'px'; cv.style.maxWidth = 'none'; cv.style.maxHeight = 'none';
+    cv.style.position = 'absolute'; cv.style.left = '50%'; cv.style.top = '0'; cv.style.transform = 'translateX(-50%)';
+    box.style.position = 'relative'; box.style.overflow = 'hidden';
+    box.style.width = (w * FG_SAFE_W_RATIO) + 'px'; box.style.height = h + 'px';
+  }
+  var _ytFrameCb = $('pvYtFrame');
+  if (_ytFrameCb) {
+    var _ytSaved = null; try { _ytSaved = localStorage.getItem('preview_yt_frame'); } catch (e) {}
+    _ytFrameCb.checked = (_ytSaved === null) ? true : (_ytSaved === '1'); // 既定ON(実機の見え方を初期表示)
+    var _ytApply = function () { applyYtFrame_(_ytFrameCb.checked); };
+    _ytFrameCb.addEventListener('change', function () {
+      try { localStorage.setItem('preview_yt_frame', _ytFrameCb.checked ? '1' : '0'); } catch (e) {}
+      _ytApply();
+    });
+    window.addEventListener('resize', function () { if (_ytFrameCb.checked) { applyYtFrame_(false); applyYtFrame_(true); } });
+    window.addEventListener('orientationchange', function () { if (_ytFrameCb.checked) setTimeout(function () { applyYtFrame_(false); applyYtFrame_(true); }, 200); });
+    // タブ復帰(data-tab→tabMovie)でキャンバスが再レイアウトされたら測り直す。
+    try { new MutationObserver(function () { if (_ytFrameCb.checked) { applyYtFrame_(false); applyYtFrame_(true); } }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-tab"] }); } catch (e) {}
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { setTimeout(_ytApply, 0); });
+    setTimeout(_ytApply, 60);
+  }
+
   // ---- アカウント切替ボタン配線・起動時復元 ----
   if (els.acctBtn1) els.acctBtn1.addEventListener("click", () => setAccount("acc1"));
   if (els.acctBtn2) els.acctBtn2.addEventListener("click", () => setAccount("acc2"));
