@@ -1908,21 +1908,25 @@ DEPT_CONF = {
     #     (main箱は研究室HQの箱であって、GLの箱ではない)。加えて実作業依頼は
     #     WORK_MARKER(キャラ申告)+申告漏れ救済で従来どおり回送される=取りこぼしは塞がれたまま。
     # ★2026-07-28 人事異動(Chami)。原文=「**デブライネをイージス研究所のGLに異動。(昇格!)**」
-    #   → この部屋のGL(部門長)= ケヴィン・デ・ブライネ。アメスは補佐として残す(元の常駐)。
+    #   → この部屋のGL(部門長)= ケヴィン・デブライネ。アメスは補佐として残す(元の常駐)。
     #   ★改修部門αからは外れる(下の system-engineer 参照)。
+    #   ★2026-08-15 表記を中黒なしへ統一(人事部門裁定・共通規律§5)。ここは**毎便の起動プロンプトへ
+    #     人格一覧として注入される値**=旧綴りのままだと「一覧の表記をそのまま名乗れ」の指示ごと
+    #     旧綴りを配り続ける(=上流を直しても名義が戻る側の口)。旧綴りは aliases に残す。
     "aegis-gl": {
         "character": os.path.join(_CHAR, "debruyne.md"),
         "memory": os.path.join(_MEM, "aegis-gl.jsonl"),
-        "persona": "ケヴィン・デ・ブライネ",
+        "persona": "ケヴィン・デブライネ",
         "port": 18814,
         "work_model": "claude-opus-5",    # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。旧"opus"(=2026-07-31 Chami直命令・pinで4-8)から明示opus5へ
         "relay_model": "claude-opus-5",   # 2026-08-04 同号令。イージス研究室のGL relayセッション(旧: 未指定=sonnet既定)をopus5へ引き上げ
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "personas": [
-            {"persona": "ケヴィン・デ・ブライネ",
+            {"persona": "ケヴィン・デブライネ",
              "character": os.path.join(_CHAR, "debruyne.md"),
              "role": "GL(部門長)。2026-07-28 改修部門αから昇格・異動",
-             "aliases": ("デブライネ", "デ・ブライネ", "ケヴィン", "debruyne")},
+             "aliases": ("デブライネ", "デ・ブライネ", "ケヴィン・デ・ブライネ",
+                         "ケヴィン", "debruyne")},
             {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
              "role": "補佐(この部屋の元の常駐。即応を担う)",
              "aliases": ("ames", "アメス")},
