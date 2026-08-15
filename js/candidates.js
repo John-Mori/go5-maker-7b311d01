@@ -1288,6 +1288,9 @@
     z.innerHTML = '<button class="fz-zoom-close" type="button" aria-label="閉じる">✕</button>' +
       '<button class="fz-zoom-tofirst" type="button" hidden>この画像を1ページ目にする</button>' +
       '<button class="fz-zoom-add" type="button" hidden>＋ 画像を貼り付けて新規追加</button>' +
+      // ★PCはスワイプできないので左右の矢印で切替(スマホはスワイプも従来通り効く)。2枚以上の時だけ表示。
+      '<button class="fz-zoom-nav prev" type="button" aria-label="前へ" hidden>‹</button>' +
+      '<button class="fz-zoom-nav next" type="button" aria-label="次へ" hidden>›</button>' +
       '<div class="fz-zoom-cap" hidden></div><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div><div class="fz-zoom-msg"></div>';
     document.body.appendChild(z);
     z.addEventListener('click', function (e) { if (e.target === z) z.hidden = true; });
@@ -1314,6 +1317,15 @@
       if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) zoomGo_(dx < 0 ? 1 : -1);
       sx = sy = null;
     }, { passive: true });
+    // ★PC用の切替：左右矢印ボタン＋キーボード(←→で移動・Escで閉じる)。スマホのスワイプは上で維持。
+    z.querySelector('.fz-zoom-nav.prev').addEventListener('click', function (e) { e.stopPropagation(); zoomGo_(-1); });
+    z.querySelector('.fz-zoom-nav.next').addEventListener('click', function (e) { e.stopPropagation(); zoomGo_(1); });
+    document.addEventListener('keydown', function (e) {
+      if (!_zoom || _zoom.hidden) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); zoomGo_(1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); zoomGo_(-1); }
+      else if (e.key === 'Escape') { _zoom.hidden = true; }
+    });
     _zoom = z; return z;
   }
   function zoomShow_() {
@@ -1324,6 +1336,9 @@
     if (cap) { var ct = (_zoomCaps && _zoomCaps[_zi]) || ''; cap.textContent = ct; cap.hidden = !ct; }
     var tf = z.querySelector('.fz-zoom-tofirst'); if (tf) tf.hidden = !(_zoomReorder && _zi > 0); // 2ページ目以降だけ表示
     var ab = z.querySelector('.fz-zoom-add'); if (ab) ab.hidden = !_zoomAdd; // 貼り付け追加が可能な文脈でのみ表示
+    var multi = _zoomList.length > 1; // ★2枚以上の時だけ左右矢印を出す(PCの切替手段)
+    var np = z.querySelector('.fz-zoom-nav.prev'), nn = z.querySelector('.fz-zoom-nav.next');
+    if (np) np.hidden = !multi; if (nn) nn.hidden = !multi;
     z.hidden = false;
   }
   function zoomGo_(d) { if (!_zoomList.length) return; _zi = (_zi + d + _zoomList.length) % _zoomList.length; zoomShow_(); }
