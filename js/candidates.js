@@ -32,10 +32,25 @@
     return !(overlay && overlay.hidden);
   }
 
+  // ★動画生成用画像スロットの状態判定(純関数=Nodeテストで真値表を固定できる)。DOM/ストレージに触らない。
+  //   has=保存画像が1枚以上あるか / worked=コメントかメモがあるか(=動画を作った痕跡→画像が在るべき) /
+  //   idbOk=IDB使用可 / refLoaded=このcidをIDBから実際に読んだか(===true) / inMem=_imgMem.refにこのcidの実体があるか /
+  //   candidateHydrated=一括展開が完了したか。戻り値=images/loading/checking/missing/none。
+  //   ★⚠(missing)は per-cid の陽性確認(refLoaded===true か inMem)でのみ返す=一括展開の完了(candidateHydrated)だけでは
+  //     「無い」と断定しない。同期/別タブで後から届く画像を「消えた」と誤表示しないため(C-041=一度の観測を状態の代理に
+  //     するな。Chami 2026-08-15「画像あるはずなのよ、消えてるってこと」)。checking の作品は端末内を能動確認して確定する。
+  function refSlotDecide_(has, worked, idbOk, refLoaded, inMem, candidateHydrated) {
+    if (has) return 'images';
+    if (!worked) return 'none';                       // コメント/メモも無い=触っていない作品は空欄のまま
+    if (!idbOk || refLoaded === true || inMem === true) return 'missing'; // 実際に読んだ結果0枚=正当な「画像なし」
+    if (!candidateHydrated) return 'loading';         // まだ一括展開の途中=読込中(まだ何も断定しない)
+    return 'checking';                                // 展開は済んだがこのcidは未確認=端末内を能動確認してから判定
+  }
+
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -2172,11 +2187,7 @@
     if (!cardEl) return;
     var col = cardEl.querySelector('.cand-thumbcol');
     if (col) {
-      var imgs = refImgsOf_(cid);
-      var settled = !_idbOk || _candidateHydrated || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
-      var rr0 = refImgOf(cid) || {};
-      var worked = !!(rr0.comment || rr0.memo);
-      // ★スロットは候補カードと同じ refSlotHtml_ で全枚数を組み直す(先頭1枚だけ更新する旧実装を廃止)。
+      // ★スロットは候補カードと同じ refSlotHtml_ で全枚数(0枚時は状態札)を組み直す。判定は refSlotState_ に集約。
       //   タップ拡大は pageCand 委任(data-refimgview)が拾うためノード個別のリスナーは不要。
       var slot = col.querySelector('.cand-refimgs');
       if (!slot) {
@@ -2185,7 +2196,7 @@
         slot.setAttribute('data-refslot', cid);
         col.appendChild(slot);
       }
-      slot.innerHTML = refSlotHtml_(cid, imgs, settled, worked);
+      slot.innerHTML = refSlotHtml_(cid);
       // 旧構造(スロット外に直接置いた単体サムネ/バッジ/折り返しコメント)の名残を掃除(:scopeは使わず親で判定)
       [].slice.call(col.querySelectorAll('.cand-refimg-thumb, .cand-refimg-multi, .cand-refimg-comment')).forEach(function (n) {
         if (n.parentNode === col) col.removeChild(n); // slot内の正規サムネは親がslotなので残す
@@ -4235,19 +4246,52 @@
     });
   }
 
+  // このcidの動画生成用画像スロットの状態を1箇所で判定する(candCard/updateCardRefThumb_で式が割れないよう集約)。
+  //   'images'=保存画像あり / 'loading'=一括展開がまだ(⏳) / 'checking'=展開済みだがこのcidだけ未確認(🔍・端末内を能動確認) /
+  //   'missing'=この端末で確認済みだが0枚(⚠) / 'none'=痕跡も無い(空欄)。
+  //   ★⚠(missing)は per-cid の陽性確認(_refLoaded[cid]===true か _imgMem.ref に実体)でのみ出す。一括展開の完了フラグ
+  //     (_candidateHydrated)だけで「無い」と断定しない=同期/別タブで後から届く画像を「消えた」と誤表示しない
+  //     (C-041=一度の観測を状態の代理にするな。Chami 2026-08-15「画像あるはずなのよ、消えてるってこと」)。
+  function refSlotState_(cid) {
+    var rr = refImgOf(cid);
+    var has = refImgsOf_(cid).length > 0;
+    var worked = !!(rr && (rr.comment || rr.memo));
+    var inMem = Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
+    return refSlotDecide_(has, worked, _idbOk, _refLoaded[cid] === true, inMem, _candidateHydrated);
+  }
+  // 展開済みだがこのcidだけ未確認の作品を、端末内(IDB/旧LS)から能動的に取り寄せて確定する。
+  //   成功したら(画像が在れば表示・端末内に無ければ「確認済み0枚=⚠」へ)そのカードだけ差分更新=全再描画しない。
+  //   読取失敗(IDB接続死等)は「無い」と断定せず確認中のまま裏の再試行(reHydrateFromSync_)へ委ねる。
+  //   ★ok===false時は再描画しない=render→probe→render の環が閉じ、無限ループを作らない。多重発射は
+  //     _refLoadJobs(ensureRefLoaded_が冪等)＋_refLoaded で二重ガード。
+  function ensureRefProbe_(cid) {
+    if (!_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid) || _refLoadJobs[cid]) return;
+    ensureRefLoaded_(cid).then(function (ok) {
+      if (!ok) return;
+      try {
+        var page = document.getElementById('pageCand');
+        var btn = page && liveRefButton_(page, cid);
+        var card = btn && (btn.closest ? btn.closest('.cand-card') : null);
+        if (card) updateCardRefThumb_(card, cid);
+      } catch (e) {}
+    });
+  }
   // 動画生成用画像スロットのHTML。★保存画像は全枚数を出す(1枚だけにしない・Chami 2026-08-15「全部表示してくれ」)。
-  //   0枚の時は空欄にせず状態札を出す=「まだ読込前(⏳)」と「(コメント等はあるのに)画像なし(⚠)」を区別可能にする
-  //   =Chami「消えてるのか表示されてないのか分からん」への恒久対策。単枚=従来どおり全幅・複数=2列グリッドで全枚。
-  function refSlotHtml_(cid, imgs, settled, worked) {
-    if (imgs && imgs.length) {
+  //   0枚の時は空欄にせず状態札で「まだ読込前(⏳)」「端末内を確認中(🔍)」「確認済みで画像なし(⚠)」を区別する
+  //   =Chami「消えてるのか表示されてないのか分からん」への対策。単枚=従来どおり全幅・複数=2列グリッドで全枚。
+  function refSlotHtml_(cid) {
+    var imgs = refImgsOf_(cid);
+    if (imgs.length) {
       var multi = imgs.length > 1;
       return imgs.map(function (src, i) {
         var cap = '動画生成用の画像 ' + (i + 1) + '/' + imgs.length + '(タップで拡大' + (multi ? '・全' + imgs.length + '枚' : '') + ')';
         return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-refimgview="' + esc(cid) + '" data-refidx="' + i + '" src="' + esc(src) + '" loading="lazy" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
       }).join('');
     }
-    if (!settled) return '<div class="cand-refimg-ph cand-refimg-loading" title="動画生成用の画像を読み込み中です">⏳ 画像読込中…</div>';
-    if (worked) return '<div class="cand-refimg-ph cand-refimg-missing" data-refimg="' + esc(cid) + '" title="この端末に動画生成用の画像が見つかりません(タップで投稿編集から確認・再登録)">⚠ 画像なし</div>';
+    var state = refSlotState_(cid);
+    if (state === 'loading') return '<div class="cand-refimg-ph cand-refimg-loading" title="動画生成用の画像を読み込み中です">⏳ 画像読込中…</div>';
+    if (state === 'checking') { ensureRefProbe_(cid); return '<div class="cand-refimg-ph cand-refimg-checking" title="この作品の動画生成用画像を端末内から確認しています">🔍 画像を確認中…</div>'; }
+    if (state === 'missing') return '<div class="cand-refimg-ph cand-refimg-missing" data-refimg="' + esc(cid) + '" title="この端末に動画生成用の画像が見つかりません(タップで投稿編集から確認・再登録)">⚠ 画像なし</div>';
     return '';
   }
   // 作品カード。(候補/サークル共通・縦並び)actionHtml=右下のボタン。(削除/非表示/再表示)
@@ -4292,15 +4336,13 @@
       : ((rc != null) ? ('レビュー ' + num(rc) + '件' + avg) : 'レビュー 取得不可');
     var salesHtml = '<div class="cand-sales">' + salesPart + ' ・ ' + reviewPart + '</div>';
     var hasRef = refImgHas(it.cid);
-    var refImgs = refImgsOf_(it.cid);          // 動画生成用に保存した画像(複数可)
     var _refRec = refImgOf(it.cid) || {};
     var refCmt = _refRec.comment || ''; // 保存済みコメント(動画生成用画像の真下に全文表示)
     var refMemo = _refRec.memo || '';   // メモ(コメントが無い時にカードへ水色で代替表示)
     // 動画生成用の画像=作品サムネの真下(左の画像列)に★全枚数を並べる(旧「先頭1枚のみ」を廃止・Chami 2026-08-15)。
-    //   このcidの画像展開が済んでいるか(settled)を見て、未展開なら「⏳読込中」・展開済みで痕跡ありなら「⚠画像なし」を出す。
-    var refSettled = !_idbOk || _candidateHydrated || _refLoaded[it.cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, it.cid);
-    var refWorked = !!(refCmt || refMemo); // コメント/メモがある=動画を作った痕跡→画像が在るべき(空欄でなく警告を出す)
-    var refImgHtml = '<div class="cand-refimgs" data-refslot="' + esc(it.cid) + '">' + refSlotHtml_(it.cid, refImgs, refSettled, refWorked) + '</div>';
+    //   0枚時の札(⏳読込中/🔍確認中/⚠画像なし)は refSlotHtml_→refSlotState_ が per-cid で判定する
+    //   =一括展開の完了だけで「消えた」と断定しない(Chami 2026-08-15「画像あるはずなのよ」)。
+    var refImgHtml = '<div class="cand-refimgs" data-refslot="' + esc(it.cid) + '">' + refSlotHtml_(it.cid) + '</div>';
     // メモ(コメントの上・水色)とコメント(🙈/🗑と同じ管理行の左)は下の return 内で直接組み立てる。
     // 投稿済み作品はカード大枠をチャンネルのイメージカラーで太線囲み。両channel投稿は月詠み(外)＋宵桜(内)の二重。
     var _pAcc1 = !!postedMatchForCand_(it, 'acc1'), _pAcc2 = !!postedMatchForCand_(it, 'acc2');
