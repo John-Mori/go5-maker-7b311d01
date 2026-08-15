@@ -394,6 +394,15 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-bsky-btn.has-img{border-color:#1185fe;color:#1185fe;font-weight:700;}
 .cand-reload-btn:active{opacity:.75;}
 .cand-card.cand-nocomment .cand-actions .cand-reload-btn{padding:4px 6px;font-size:10.5px;}
+/* PC(Mac含む):作品リンク行の余白を「作品↗–X↗」の間隔(8px)で統一する。
+   X札の誤タップ用マージン(margin:0 3px)はPCでは不要なので0にし、gapだけで等間隔にする。
+   モバイルの誤タップ用マージンはそのまま残す(Chami依頼2026-08-15)。 */
+@media (min-width:1024px){
+  .cand-actions{gap:8px;}
+  .cand-actions .vlink-sns{margin:0;}
+  /* 検索ボックスが長すぎたので画面の約1/3幅に収める(Chami依頼2026-08-15) */
+  .cand-work-search{max-width:min(420px,34vw);}
+}
 .paste-btn{font-size:12px;border-radius:8px;border:1px solid var(--line);background:#fffef9;color:var(--sub);cursor:pointer;}
 /* 投稿画像モーダル内（.fz-modal＝ダーク）の入力要素 */
 .cand-refimg-preview{text-align:center;}

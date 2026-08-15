@@ -116,7 +116,7 @@
 
   // ── PC(広い画面)向け：候補カードの列数(ユーザーが選べる・スマホでは無効) ──
   var K_PCCOLS = 'cand_pc_cols';
-  var PCCOLS_MIN = 1, PCCOLS_MAX = 5, PCCOLS_DEF = 2;
+  var PCCOLS_MIN = 1, PCCOLS_MAX = 5, PCCOLS_DEF = 4; // 既定4列(Chami依頼2026-08-15)
   function candCols_() { var n = parseInt(lsGet(K_PCCOLS, String(PCCOLS_DEF)), 10); return (n >= PCCOLS_MIN && n <= PCCOLS_MAX) ? n : PCCOLS_DEF; }
   function applyCandCols_(n) { try { document.documentElement.style.setProperty('--cand-cols', String(n)); } catch (e) {} }
   applyCandCols_(candCols_()); // モジュール読み込み時に一度反映(以後は選択時のみ更新)
@@ -3813,7 +3813,16 @@
       root.querySelectorAll('.cand-card[data-work-search]').forEach(function (card) {
         total++;
         var okWork = !query || (card.getAttribute('data-work-search') || '').indexOf(query) >= 0;
-        var okMemo = !mQuery || (card.getAttribute('data-memo-search') || '').indexOf(mQuery) >= 0;
+        // メモ/コメントは遅延読み込み(IDB/backfill)で描画されるため、初回bake時の data-memo-search が
+        //   空のまま残ることがある(→検索が一切ヒットしない・Chami 2026-08-15)。表示中の実テキストを
+        //   正本にして「見えているメモは必ず検索できる」に直す。span無し(メモ無し)なら属性へフォールバック。
+        var okMemo = true;
+        if (mQuery) {
+          var live = '';
+          card.querySelectorAll('.cand-manage-comment, .cand-manage-memo').forEach(function (s) { live += ' ' + (s.textContent || ''); });
+          var memoText = live.trim() ? normalizeWorkSearch_(live) : (card.getAttribute('data-memo-search') || '');
+          okMemo = memoText.indexOf(mQuery) >= 0;
+        }
         var matches = okWork && okMemo;
         card.style.display = matches ? '' : 'none';
         if (matches) shown++;
