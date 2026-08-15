@@ -115,7 +115,7 @@ def discord_upload(image_path, channel, persona, caption=""):
 
 def main():
     args = sys.argv[1:]
-    neg, out, channel, persona, caption = NEG_DEFAULT, None, None, None, ""
+    neg, out, channel, persona, caption, ckpt = NEG_DEFAULT, None, None, None, "", None
     rest = []
     i = 0
     while i < len(args):
@@ -130,11 +130,16 @@ def main():
             persona = args[i + 1]; i += 2
         elif a == "--caption":
             caption = args[i + 1]; i += 2
+        elif a == "--ckpt":
+            ckpt = args[i + 1]; i += 2
         else:
             rest.append(a); i += 1
     if not rest:
         print("プロンプトを指定してください")
         sys.exit(1)
+    global CKPT
+    if ckpt:
+        CKPT = ckpt
     path = generate(" ".join(rest), neg, out)
     if channel and persona:
         discord_upload(path, channel, persona, caption)
