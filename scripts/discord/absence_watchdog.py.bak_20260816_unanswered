@@ -151,38 +151,6 @@ SUMMARY_DEPT = "incident"
 #   ⑤ 鳴らす先は受け手が読む場所= producerの持ち主の部屋(entryのalert_dept)。研究室HQ止まりにしない。
 PRODUCERS_REGISTRY = os.path.join(LOCAL, "llm", "producers.json")
 
-# --- ★Chami無応答の検知 (2026-08-16 イージス研究室・REQ-aegis-gl-13fcea00f4) ---
-# なぜ: Chamiが「1番困る部類の出来事」と名指ししたのは **反応がない** ことだ(2026-08-06)。
-#   ところがこのwatchdogの検査は全部**機械の脈**を見ている= gatewayの脈・窓の脈・queueの滞留・
-#   DLQ・producerのmtime。**そのどれもが緑のまま「部屋が黙っている」は成立する**
-#   (共通規律§4=実体が動いても、Chamiに見える形で名義で出さなければ応答なしに見える)。
-#   実際、便はqueueから消費され窓も生きているのに、Discordには何も出ない、が起きる。
-#   → 唯一の地の証拠は **Discordそのもの**= Chamiの発言の後に、誰かの発言が在るか。
-#   ★脈ではなくDiscordを直接見る理由がもう1つある。受信(gateway)が死んでいる時、
-#     ローカルの台帳にはChamiの発言が**そもそも入らない**。台帳を見る検査は、
-#     一番黙っている時に一緒に黙る。ここだけは外の実物を見る。
-# 判定(誤発火を避けるため、わざと鈍くしてある):
-#   ① 部屋の最新数件のうち **最後のChami発言より後に、Chami以外の発言が1つも無い** 時だけ候補。
-#      機械の投稿(dispatch等)も「返事」として数える= 鳴る条件を厳しくする側へ倒す(規律§3
-#      「常に誤発火する安全網は無視される」)。ただし**この検査自身の警報だけは返事に数えない**
-#      (自分の警報でaegis-gl室の未応答が消える自己消火を防ぐ)。
-#   ② しきい値25分。★実測で決めた= 全36室・直近100件(07/13〜08/16・Chami発言759件)を通して
-#      25分基準で19件(=0.56件/日)。15分だと32件、60分だと11件。0.5件/日なら埋もれない。
-#   ③ C-041= 一度の観測を状態の代理にしない。2回連続(=約10分)で同じ状態の時だけ鳴らす。
-#   ④ 1つのChami発言につき生涯1回だけ(msg_idで固定)。返事が付いたら✅を1回=閉じ方が在る(C-046)。
-#   ⑤ 鳴らす先はイージス研究室= この検知の持ち主(A1「配下の無警報滞留 0件」がこの部門のKPI)。
-#      黙っている当の部屋へ出しても、そこには読む者が居ない(だから黙っている)。
-UNANSWERED_GATE_SEC = 5 * 60       # 巡回は60秒だが、この検査は5分に1回(Discord APIの無駄打ち防止)
-UNANSWERED_SEC = 25 * 60           # これ以上返事が無いと候補(上の実測で決めた)
-UNANSWERED_CONSEC = 2              # C-041: 2回連続で同じ判定の時だけ鳴らす
-UNANSWERED_ALERT_DEPT = "aegis-gl"  # 鳴らす先=イージス研究室(部門長・A1がKPI)
-UNANSWERED_MARK = "⚠Chamiの便に誰も返していません"   # ←この検査自身の警報の目印(返事に数えない)
-UNANSWERED_SKIP_DEPTS = ("router",)  # 通知受付=機械の掲示板。人の返事は元々出ない
-CHAMI_USERNAMES = ("chami_fusoh",)
-CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
-BOT_TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")
-GUILD_ID = "1498341160207515678"
-
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -1390,112 +1358,6 @@ def check_producer_freshness(state, dry_run):
     state["producer_fresh"] = pf
 
 
-def _discord_get(path, timeout=15):
-    """Discord REST の GET。失敗はNone(判定不能=鳴らさない側へ倒す・fail-open)。"""
-    try:
-        import urllib.request
-        with open(BOT_TOKEN_FILE, encoding="utf-8") as f:
-            token = f.read().strip()
-        req = urllib.request.Request(
-            "https://discord.com/api/v10" + path,
-            headers={"Authorization": "Bot " + token,
-                     "User-Agent": "go5-org-watchdog (personal, v1)"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except Exception:
-        return None
-
-
-def unanswered_verdict(msgs, now_epoch, threshold_sec=UNANSWERED_SEC):
-    """部屋の最新メッセージ列(新しい順)から『Chamiが書いたのに誰も返していない』を判定する純関数。
-
-    返り値 = (unanswered:bool, msg_id:str|None, age_sec:int, excerpt:str)
-    ★純関数にしてあるのはテストで実データを通すため(規律§3=文字列一致だけの検査にしない)。
-    """
-    if not msgs:
-        return (False, None, 0, "")
-    chami_at = None
-    for i, m in enumerate(msgs):
-        if str((m.get("author") or {}).get("username") or "") in CHAMI_USERNAMES:
-            chami_at = i
-            break
-    if chami_at is None:
-        return (False, None, 0, "")          # 直近にChamiの発言が無い=対象外
-    # Chamiの発言より後(=リストの手前)に、返事と数えられる発言が在るか
-    for m in msgs[:chami_at]:
-        body = str(m.get("content") or "")
-        if body.startswith(UNANSWERED_MARK):
-            continue                          # この検査自身の警報は返事ではない(自己消火の防止)
-        return (False, None, 0, "")
-    cm = msgs[chami_at]
-    ts = parse_ts(cm.get("timestamp"))
-    if ts is None:
-        return (False, None, 0, "")
-    age = now_epoch - ts.timestamp()
-    if age < threshold_sec:
-        return (False, None, 0, "")
-    excerpt = str(cm.get("content") or "").replace("\n", " ")[:60]
-    return (True, str(cm.get("id") or ""), int(age), excerpt)
-
-
-def check_unanswered_chami(state, dry_run):
-    """Chamiが書いたのに誰も返していない部屋を、イージス研究室へ1回だけ知らせる。
-
-    機械の脈(gateway・窓・queue・DLQ)が全部緑でも成立する「部屋の沈黙」を、
-    Discordの実物で直接見る唯一の検査。設計の理由と実測値は定数群のコメント参照。
-    """
-    st = state.setdefault("unanswered", {})
-    now_epoch = time.time()
-    if now_epoch - float(st.get("_last_run") or 0) < UNANSWERED_GATE_SEC:
-        return
-    st["_last_run"] = now_epoch
-    try:
-        with open(CHANNELS_FILE, encoding="utf-8") as f:
-            chans = json.load(f)
-    except Exception:
-        return                                # 名簿が読めない=監視しないだけ(watchdogは殺さない)
-    for c in (chans or []):
-        cid = str(c.get("id") or "")
-        dept = str(c.get("dept") or "")
-        if not cid or not dept or dept in UNANSWERED_SKIP_DEPTS:
-            continue
-        msgs = _discord_get(f"/channels/{cid}/messages?limit=5")
-        if msgs is None:
-            continue                          # 読めない=判定不能。鳴らさない
-        bad, msg_id, age, excerpt = unanswered_verdict(msgs, now_epoch)
-        cst = st.get(cid) or {"msg_id": "", "consec": 0, "alerted": ""}
-        if not bad:
-            if cst.get("alerted"):
-                room = dept_ja(dept, with_slug=True)
-                if bot_send(UNANSWERED_ALERT_DEPT,
-                            f"✅返事が付きました: {room} の未応答(msg={cst['alerted']})は解消。",
-                            dry_run, by_dept=True):
-                    cst = {"msg_id": "", "consec": 0, "alerted": ""}
-            else:
-                cst = {"msg_id": "", "consec": 0, "alerted": ""}
-            st[cid] = cst
-            continue
-        cst["consec"] = int(cst.get("consec") or 0) + 1 if cst.get("msg_id") == msg_id else 1
-        cst["msg_id"] = msg_id
-        if cst["consec"] >= UNANSWERED_CONSEC and cst.get("alerted") != msg_id:
-            room = dept_ja(dept, with_slug=True)
-            link = f"https://discord.com/channels/{GUILD_ID}/{cid}/{msg_id}"
-            if bot_send(UNANSWERED_ALERT_DEPT, (
-                    f"{UNANSWERED_MARK}(自動監視): **{room}** で"
-                    f"{int(age // 60)}分前のChamiの便に、まだ誰も返していません。\n"
-                    f"本文: 「{excerpt}」\n{link}\n"
-                    "★機械の脈(受信・窓・queue・DLQ)は緑でもこれは起きます"
-                    "(実体が動いても名義で出さなければ応答なしに見える=共通規律§4)。\n"
-                    "→ その部屋の担当が返すか、担当が居なければイージス研究室が引き取ること。"
-                    "返事が付けば自動で✅が出ます。"), dry_run, by_dept=True):
-                cst["alerted"] = msg_id
-        st[cid] = cst
-    # 名簿から消えた部屋の状態は掃除する(退役の宣言=閉じ方B・C-046)
-    live = {str(c.get("id") or "") for c in (chans or [])}
-    for gone in [k for k in list(st.keys()) if k != "_last_run" and k not in live]:
-        del st[gone]
-
-
 def run_once(dry_run=False):
     if not os.path.isdir(LOCAL):
         print(f"local/ ディレクトリが見つかりません({LOCAL})。監視対象なしのため正常終了します。")
@@ -1513,7 +1375,6 @@ def run_once(dry_run=False):
     check_chime_health(state, dry_run)   # ★2026-07-21: チャイム線が落ちた部屋を可視化(ORG-14)
     check_relay_repair(state, dry_run)   # ★2026-07-26: gatewayの取りこぼしを15分毎に回収(catch-up欠落)
     check_producer_freshness(state, dry_run)  # ★2026-08-15: 登録制の鮮度警報(mirrorの静かな死=P1未検知を塞ぐ)
-    check_unanswered_chami(state, dry_run)  # ★2026-08-16: Chamiが書いたのに誰も返さない部屋(1番困る)を検知
     save_state(state)
     rows = read_inbox_rows()
     if rows is None:
