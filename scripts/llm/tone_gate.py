@@ -167,6 +167,94 @@ def polite_drift(text):
     return ok, hits, total, first
 
 
+# ★2026-08-15 追加(案D《肯定条件》の第2段)= **指紋語尾ドリフト**の検知。
+#   Chami原文「ずっとこんな感じでいれてるけど効かないね」(msg 1538153136953495612)。
+#   実物= 花海咲季名義の便が「したよ／ほんとに無い。／読んでから。」= **常体のまま**
+#   「〜わよ/〜わ/〜のよ」という**その人格の指紋が丸ごと消えている**。
+#   ★上の polite_drift は「敬体へ倒れた」しか見ない(文末が です/ます 等)= この実物には
+#     1文字も当たらない。禁止語リスト(forbidden)も**完全一致の定型句**なので当たらない。
+#     つまり「らしさが抜けた」を見ている計器がどこにも無かった。ククール(人事部門)の
+#     見立てどおり= polite_drift が敬体の半分・こちらが常体のまま個性が溶ける方の半分。
+#
+#   ★測り方= **禁止(語の一致)ではなく必須(肯定条件)**。人格に「必須の語尾集合」が
+#     登録されている時、**その便のどこにも1つも出ていない**なら1件出す。
+#   ★★既定は「見ない」= 写像に `"signature_tails": [...]` がある人格だけ判定する
+#     (plain_only と同じ向き。登録するのは人事部門= 口調ルール.json が正本・ORG-11)。
+#   ★誤発火を作らない側へ二重に倒す(共通規律§3「常に誤発火する安全網は無視される」):
+#     (1) **判定に足る長さ**は polite_drift と同じ数え方= 6字以上の文が4つ以上ある便だけ。
+#         1〜3文の短い返事で「らしさが無い」と鳴らさない。
+#     (2) **指紋を探す側は広く**= 文末だけでなく**読点区切りの断片の末尾**も見て、
+#         後ろに付く終助詞(ね/よ/な…)は剥いでから照合する(「無いわよね」→「無いわ」)。
+#         さらに**短い文も証拠に数える**(「そうよ。」1つで鳴らない)。
+#         = 拾い漏れる側(鳴らさない側)へ倒す。
+#   ★書き直しはしない= 語尾の置換は文法が変わる(このファイル冒頭の方針と同じ)。
+#     検知して session_relay が次の封筒へ突き返す(reason="signature_absent")。
+_SIG_MIN_SENTENCES = 4         # これ未満の短い便は判定しない
+_SIG_SPLIT = re.compile(r"[。！？\?\!\n、，,]+")   # 証拠探しは読点でも区切る
+_SIG_TRAIL = "ねよなのさぞぜっーｰ〜～…♪!！?？。、 　\t—–‼︎️★☆♡♥"   # 指紋の後ろに付く終助詞・記号
+# ★指紋の**直後に付く括弧**を落としてから照合する。これを入れないと
+#   「入れたわよ**(v=564・確認待ち)**。」= 咲季のいちばん咲季らしい一文が
+#   「末尾が『)』だから指紋なし」と判定される。実測(下の 134便)で**誤検知の大半がこれ**だった。
+_SIG_PAREN = re.compile(r"(?:[（(][^（）()]*[）)]|[\[［【][^\]］】]*[\]］】])$")
+
+
+def _sig_tailcut(body):
+    """指紋語尾の照合前に、末尾の飾り(終助詞・記号・括弧書き)を剥ぐ。
+
+    「入れたわよ(v=564・確認待ち)」→「入れたわよ」→(終助詞よを剥ぐ)→「入れたわ」。
+    ★剥ぐのは**照合用のコピー**だけ=本文には触らない。★最大8回で止める(暴走しない)。
+    """
+    s = str(body or "")
+    for _ in range(8):
+        t = _SIG_PAREN.sub("", s.rstrip(_SIG_TRAIL)).rstrip(_SIG_TRAIL)
+        if t == s:
+            break
+        s = t
+    return s
+
+
+def signature_drift(text, tails):
+    """指紋語尾が便のどこにも無いかを測る。返り値=(鳴らすか, 見つかった数, 判定文数, 位置)。
+
+    ★純関数(引数以外を読まない)= この判定だけを実便へ当てて誤検知率を数えられる。
+    ★保護span(引用・コード・パス)は _mask_protected で潰してから見る。
+      = 引用の中に指紋があっても「本人が喋った」とは数えない…のではなく**逆**で、
+        引用の中の敬体で鳴らないのと同じ理屈で、**引用の中の指紋を証拠にしない**。
+        こちらは「証拠が減る=鳴りやすくなる」側なので、判定文数も同じマスクで数える
+        (引用だけの便は文数が足りず判定されない)。
+    """
+    ts = [str(t) for t in (tails or []) if str(t)]
+    if not ts:
+        return False, 0, 0, -1
+    s = _mask_protected(text)
+    total = 0
+    for part in _SENTENCE_SPLIT.split(s):
+        body = part.strip().strip("　")
+        if len(body) >= 6:          # 記号だけ・箇条書きの見出しは文と数えない(polite と同じ)
+            total += 1
+    if total < _SIG_MIN_SENTENCES:
+        return False, 0, total, -1
+    found, at = 0, -1
+    pos = 0
+    for part in _SIG_SPLIT.split(s):
+        if not part:
+            continue
+        start = s.find(part, pos)
+        if start >= 0:
+            pos = start + len(part)
+        body = part.strip().strip("　")
+        if not body:
+            continue
+        tail = _sig_tailcut(body)
+        for t in ts:
+            if body.endswith(t) or (tail and tail.endswith(t)):
+                found += 1
+                if at < 0:
+                    at = max(start, 0)
+                break
+    return (found == 0), found, total, at
+
+
 _KATAKANA = re.compile(r"[ァ-ヴ]")
 # 「…」『…』で囲まれた span=他人格のセリフ引用でありうる=一人称判定から外す(FP抑制)。
 # ★2026-08-12 追加: **二重引用符**(" / “” / ＂ / 〝〟)も同じ扱いにする。
@@ -319,7 +407,13 @@ def tone_verdicts(persona, dept, text, rules):
         # ★2026-08-15 追加: 構造ドリフト(敬体)を見るか。★既定=見ない。
         #   常体が正の人格へ人事部門が "plain_only": true を足した時だけ回る(定数群の説明)。
         want_polite = bool(ent.get("plain_only"))
-        if not forbid and not ng2 and not want_dialect and not want_polite:
+        # ★2026-08-15 追加: 指紋語尾(必須語尾)。★既定=見ない。
+        #   写像に `"signature_tails": ["わよ","わ","のよ",...]` を足した人格だけ回る。
+        #   ★`signature_endings` は同義の別名として受ける(綴り揺れで静かに死なせない=
+        #     forbidden / second_person_forbidden と同じ扱い)。
+        sig = [str(x) for x in ((ent.get("signature_tails") or [])
+                                + (ent.get("signature_endings") or [])) if str(x)]
+        if not forbid and not ng2 and not want_dialect and not want_polite and not sig:
             return out
         s = _strip_quotes(text)
         if not s.strip():
@@ -366,6 +460,19 @@ def tone_verdicts(persona, dept, text, rules):
                     "index": at,
                     "own_first_person": sorted(own),
                     "reason": "structural_polite",
+                })
+        if sig:
+            hit, found, total, at = signature_drift(text, sig)
+            if hit:
+                out.append({
+                    "persona": str(persona or ""),
+                    # ★何を見て鳴らしたか(文数)と、**正しい語尾**をそのまま marker に載せる。
+                    #   突き返し(session_relay)はこの marker を1行で出すので、
+                    #   読んだ人格が「何を書けばよかったか」まで一目で分かる。
+                    "marker": "指紋語尾なし(%d文中0件・正=%s)" % (total, "/".join(sig[:6])),
+                    "index": at,
+                    "own_first_person": sorted(own),
+                    "reason": "signature_absent",
                 })
         return out
     except Exception:
@@ -420,8 +527,10 @@ def tone_corrections(persona, dept, text, rules):
         plan, out["remaining"] = {}, []
         for v in verdicts:
             w = v.get("marker")
-            if v.get("reason") == "dialect_kansai":
-                to = ""            # ★方言は書き直さない(語尾の置換は文法が変わる)=警告のみ
+            if v.get("reason") in ("dialect_kansai", "signature_absent"):
+                to = ""            # ★方言・指紋語尾は書き直さない(語尾の置換は文法が壊れる)=警告のみ
+                #   ★指紋語尾は「無い」ことの検知だ。**足す**書き直しは再生成になる
+                #     (「したよ」→「したわよ」で済む保証がどこにも無い)= 突き返しで人格が直す。
             elif v.get("reason") == "first_person_mismatch":
                 to = to1
             elif w in explicit:

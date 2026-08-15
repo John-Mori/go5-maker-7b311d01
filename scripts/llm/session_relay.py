@@ -702,6 +702,11 @@ _TONE_REASON_JA = {
     #   敬体へ倒れた便。tone_gate.polite_drift が「敬体N/M文」の marker で出す。
     #   ここに無いと英語の reason がそのまま封筒へ出る(=突き返しが読めない)。
     "structural_polite": "地の文が敬体(です・ます)へ倒れている=この人格は常体",
+    # ★2026-08-15 追加。structural_polite の**裏側**= 敬体へは倒れていない(常体のまま)が、
+    #   この人格の指紋語尾が便のどこにも1つも無い= らしさだけが溶けた便。
+    #   Chami原文「ずっとこんな感じでいれてるけど効かないね」(msg 1538153136953495612)。
+    #   tone_gate.signature_drift が「指紋語尾なし(N文中0件・正=…)」の marker で出す。
+    "signature_absent": "常体のままだが、この人格の指紋語尾が1つも出ていない=らしさが抜けている",
 }
 
 
@@ -779,6 +784,11 @@ def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
                 "★characterfileの§声の型どおりに書く。"
                 + ("方言(関西弁)は使わない。"
                    if any(str(r.get("reason") or "") == "dialect_kansai" for r in group) else "")
+                # ★指紋語尾は「足りない」検知だ= 語尾だけ機械的に付け替えても直らない。
+                #   marker に**正しい語尾**が入っているので、それを見て地の文ごと書き直す。
+                + ("上の「正=」がこの人格の指紋語尾だ。語尾を1つ足して済ませず、"
+                   "地の文の熱量ごとその声で書き直す。"
+                   if any(str(r.get("reason") or "") == "signature_absent" for r in group) else "")
                 + "同じ部屋の相方の声に引っ張られていないかも見ろ。\n"
                 "★これは口調の話だ。**事実・数字・ファイル名は1文字も曖昧にするな**(共通規律§4.55)。\n\n")
     except Exception:
