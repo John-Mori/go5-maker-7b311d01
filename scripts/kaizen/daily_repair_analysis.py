@@ -174,6 +174,15 @@ def main():
     md = render_md(now, args.hours, picked, ranked, bad, undated, unknown_dept)
     print(md)
 
+    # ★毎朝の便に「新規skill化」を1行足す(Chami依頼 2026-08-15)。
+    #   別モジュールに閉じ、失敗しても改修α集計(上のmd)は絶対に壊さない=try/except。
+    try:
+        import daily_skill_report as _skill
+        print()
+        print(_skill.render(now, args.hours))
+    except Exception as _e:  # noqa: BLE001  黙って落とさない=何が起きたか出す(§2)
+        print("\n◆新規skill化= 集計に失敗(%s)。scripts/kaizen/daily_skill_report.py を見てくれ。" % _e)
+
     if not args.no_store:
         d = datetime.datetime.fromtimestamp(now)
         rec = {
