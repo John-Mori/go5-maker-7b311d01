@@ -446,7 +446,37 @@
     return o;
   }
 
-  function saveStock_(evDetail) {
+  // ★保存の「保留(hold)」バナー(I4)。動画が手元にも雲にも着地できなかった時、黙って遷移して
+  //   全滅させず「この端末に残せていない=まだ手元に動画は生きている」を明示し、リトライを出す。
+  //   遷移(location.href)で JSコンテキストを壊さない限りメモリ上の動画blobは生きている=救える。
+  //   配色はアプリ(ティール#2bb3c0/ダーク面#0e1422)。紫・絵文字は使わない。
+  function showSaveHold_() {
+    var box = document.getElementById('go5SaveHold');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'go5SaveHold';
+      box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;max-width:520px;margin:0 auto;background:#0e1422;border:1px solid #2bb3c0;border-radius:12px;padding:14px 16px;color:#e8f1f2;box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:14px;line-height:1.55';
+      var msg = document.createElement('div');
+      msg.style.cssText = 'margin-bottom:10px';
+      msg.textContent = '動画をこの端末に保存できませんでした(通信が不安定な可能性があります)。動画はまだ手元に残っています。もう一度保存すると消えずに済みます。';
+      var b1 = document.createElement('button');
+      b1.textContent = 'もう一度保存';
+      b1.style.cssText = 'background:#2bb3c0;color:#04222a;border:0;border-radius:8px;padding:8px 14px;font-weight:700;margin-right:8px;cursor:pointer';
+      b1.onclick = function () { if (typeof window.__go5RetrySave === 'function') window.__go5RetrySave(); };
+      var b2 = document.createElement('button');
+      b2.textContent = 'このまま履歴へ';
+      b2.style.cssText = 'background:transparent;color:#9fb3b8;border:1px solid #35505a;border-radius:8px;padding:8px 14px;cursor:pointer';
+      // ★遷移はユーザーの明示選択でのみ=黙って全滅させない(自動経路は決して未着地で遷移しない)。
+      b2.onclick = function () { hideSaveHold_(); if (typeof window.__go5HoldGoDraft === 'function') window.__go5HoldGoDraft(); };
+      box.appendChild(msg); box.appendChild(b1); box.appendChild(b2);
+      document.body.appendChild(box);
+    }
+    box.style.display = 'block';
+  }
+  function hideSaveHold_() { var box = document.getElementById('go5SaveHold'); if (box) box.style.display = 'none'; }
+
+  function saveStock_(evDetail, hooks) {
+    hooks = hooks || {}; // {onLocal(id), onCloud(id), onBothFailed(id)} — 単一着地権威(Go5SaveGate)へ着地シグナルを配る
     var ts = Date.now();
     var id = 'stk' + ts;
     var title = evDetail.title || '';
@@ -520,9 +550,18 @@
       //   最終エスケープで遷移する。これで「遷移が録れたばかりの動画を殺す」レースを断つ。
       return new Promise(function (resolve) {
         var settled = false;
+        var localOk = false;
         var ok = function () { if (!settled) { settled = true; resolve(id); } };
-        vidWrite.then(ok, function () {});                 // IDB書込成功=手元に動画あり(健全端末は即)
-        mirrorV.then(function () { if (_vidUp[id]) ok(); }, function () {}); // R2 PUT成功(_vidUp[id]=1)時だけ=雲に控えあり
+        vidWrite.then(function () { localOk = true; if (hooks.onLocal) hooks.onLocal(id); ok(); }, function () {}); // IDB書込成功=手元に動画あり
+        mirrorV.then(function () { if (_vidUp[id]) { if (hooks.onCloud) hooks.onCloud(id); ok(); } }, function () {}); // R2 PUT成功(_vidUp[id]=1)時だけ=雲に控えあり
+        // ★I4: 手元にも雲にも着地できずに「両方が決着」した時だけ、着地不能を呼び元へ知らせる。
+        //   呼び元(video-created)は Go5SaveGate.decide が hold を返す=黙って遷移せず明示保留+リトライへ倒す。
+        var bothDone = (typeof Promise.allSettled === 'function')
+          ? Promise.allSettled([vidWrite, mirrorV])
+          : Promise.all([vidWrite.catch(function () {}), mirrorV.catch(function () {})]);
+        bothDone.then(function () {
+          if (!localOk && !_vidUp[id] && hooks.onBothFailed) hooks.onBothFailed(id);
+        });
       });
     });
   }
@@ -1790,29 +1829,58 @@
         try { location.href = 'Stock.html'; }
         catch (e2) { var tb = $('tabStock'); if (tb) tb.click(); else render(); }
       };
-      // ★saveStock_ が「同期例外」を投げた場合、.then/.catch のどちらにも乗らず遷移が黙って消える
-      //   (=動画は録れているのにドラフトタブへ移らない・Chami報告2026-08-13 月詠み)。try で囲い、
-      //   同期例外でも必ず goDraft_ へ抜ける=生成後の自動遷移をどんな失敗でも止めない(§3 沈黙が最悪)。
-      // ★さらに saveStock_ 内の非同期処理(toBlob/IDB書込/R2ミラー)が「settleしない」で固着しても遷移が消える。
-      //   メタは saveStock_ 冒頭で同期保存済み(一覧には必ず出る)ので、上限内に完了しなければ遷移を先行する。
-      //   ★上限は旧8秒→25秒に延長。saveStock_ は「動画が IDB か R2 のどちらかに載る」まで解決を遅らせる
-      //     設計に変えた(2026-08-14 動画全滅の根治)。IDBの番犬タイムアウトは約16秒あり、旧8秒だと
-      //     R2ミラー成功を待たずに location.href で遷移してアップロードを殺していた。25秒=16秒+R2 PUTの余裕。
-      //     ここが鳴るのは「IDB死かつR2失敗」の二重故障時だけ=その時は動画を原理的に残せないので遷移で妥協する。
-      var navTimer = setTimeout(function () {
-        try { if (window.console && console.warn) console.warn('[stock] saveStock_ が25秒以内に完了せず=遷移を先行(メタは保存済み)'); } catch (_) {}
-        goDraft_();
-      }, 25000);
+
+      // ★単一着地権威(Go5SaveGate)。遷移は「動画が 手元(IDB) か 雲(R2) に着地した」時だけ。
+      //   タイマーは"進む"既定を持たない=期限が来て未着地なら黙って遷移せず『保留(hold)』へ倒す。
+      //   従来 navTimer は 25秒で無条件に goDraft_ していたため、IDB死かつR2失敗/タブ破棄の二重故障で
+      //   「動画がどこにも無いのに遷移=全滅」していた(8/15朝 5031ddb の再発の芯・改善提案部門の型§1)。
+      var gate = { localLanded: false, cloudLanded: false, timerFired: false };
+      var draftId = null;
+      var navTimer = null;
+      function decideNav_() {
+        var act = (window.Go5SaveGate && Go5SaveGate.decide)
+          ? Go5SaveGate.decide(gate)
+          : (gate.localLanded || gate.cloudLanded ? 'navigate' : (gate.timerFired ? 'hold' : 'wait'));
+        if (act === 'navigate') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } hideSaveHold_(); goDraft_(); }
+        else if (act === 'hold') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } showSaveHold_(); }
+      }
+      // 期限=旧25秒。着地していれば .then 経路で既に遷移済み。ここへ来る=まだ未着地。
+      //   着地済みなら navigate(保険)、未着地なら hold(明示保留)=黙って全滅しない。
+      navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 25000);
+
+      var hooks = {
+        onLocal: function (id) { draftId = id; gate.localLanded = true; decideNav_(); },
+        onCloud: function (id) { draftId = id; gate.cloudLanded = true; decideNav_(); },
+        // 両方が「着地できずに」決着=着地不能が確定。25秒を待たず今すぐ hold へ倒す。
+        onBothFailed: function (id) { draftId = id; gate.timerFired = true; decideNav_(); }
+      };
+
+      window.__go5HoldGoDraft = goDraft_; // 「このまま履歴へ」=ユーザーの明示選択でのみ遷移
+      // 保留(hold)からのリトライ=メモリ上の動画blobをR2へ再度上げる。着地したら遷移(I4のリトライ)。
+      //   遷移(location.href)でJSコンテキストを壊さない限り detail.blob は生きている=ここで救える。
+      window.__go5RetrySave = function () {
+        hideSaveHold_();
+        gate.timerFired = false;
+        if (!draftId || !detail.blob || !(window.Go5Sync && Go5Sync.putBlobR2At)) { goDraft_(); return; } // 材料が無ければ閉じ込めない
+        navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 20000);
+        try {
+          ensureVideoMirror_(draftId, detail.blob).then(function () {
+            if (_vidUp[draftId]) { gate.cloudLanded = true; }
+            decideNav_();
+          }).catch(function () { decideNav_(); });
+        } catch (e3) { decideNav_(); }
+      };
+
+      // ★saveStock_ が「同期例外」を投げた場合、.then/.catch のどちらにも乗らず遷移が黙って消える。
+      //   try で囲い、同期例外でも黙って全滅させない=着地不能扱いで hold(リトライで救える)。
       try {
-        saveStock_(detail).then(function () { clearTimeout(navTimer); goDraft_(); }).catch(function (err) {
-          clearTimeout(navTimer);
+        saveStock_(detail, hooks).then(function () { decideNav_(); }).catch(function (err) {
           alert('ドラフト保存に失敗しました: ' + (err ? err.message || String(err) : '不明なエラー'));
-          goDraft_(); // メタは saveStock_ 内で先に保存済み=一覧には出るので、blob 保存が転んでも遷移はする
+          gate.timerFired = true; decideNav_(); // 黙って遷移せず hold へ(材料が有ればリトライで救える)
         });
       } catch (err2) {
-        clearTimeout(navTimer);
-        try { if (window.console && console.warn) console.warn('[stock] saveStock_ 同期例外・遷移は続行:', err2 && (err2.message || err2)); } catch (_) {}
-        goDraft_();
+        try { if (window.console && console.warn) console.warn('[stock] saveStock_ 同期例外・着地不能扱い:', err2 && (err2.message || err2)); } catch (_) {}
+        gate.timerFired = true; decideNav_();
       }
     });
 
