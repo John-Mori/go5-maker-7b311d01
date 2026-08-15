@@ -1850,7 +1850,10 @@
   function wireRegenButton_(k, it) {
     var btn = $('veditRegen');
     if (!btn) return;
-    btn.addEventListener('click', function () { regenRecordData_(k, it, btn); });
+    // ★モーダル(veditOverlay)は1回だけ生成して使い回す設計(§1049)＝このボタン要素は永続。
+    //   addEventListener だと編集を開くたびにlistenerが積み増され、1クリックでconfirmが複数回出る
+    //   (Chami実測2026-08-15「同じダイアログが複数回表示される」)。onclick代入なら毎回置き換わり重複しない。
+    btn.onclick = function () { regenRecordData_(k, it, btn); };
   }
   function regenRecordData_(k, it, btn) {
     var cand = window.Go5Cand;
