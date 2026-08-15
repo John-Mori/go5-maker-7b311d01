@@ -1374,6 +1374,53 @@ DEPT_CONF = {
         "session_relay": True,          # 会話便を部屋の永続セッションへ
         "conversation_only": True,      # 回送しない・作業判定もしない。その場で答え切る
     },
+    # ★2026-08-16 新設「軍議」= ADAFI事業全体を部門横断で共有・相談する会議部屋。
+    #   Chami直接指示「配線よろしく」(AD研究室・8/15(金))→ AD-GL=ルカ・モドリッチが裁定して
+    #   プラットフォームSE=一ノ瀬怜へ直送(msg_id=1538220046642450503)→ 一ノ瀬怜が配線。
+    #   ★これは単一部門の部屋ではない=**横断の多人格会話部屋**(past-room/dream-care と同じ形)。
+    #   進行=三笘薫とアーモンドアイ(アイ)。内容に応じて各分野の担当人格が名指しで前に出る。
+    #   ★characterfileは全員**既存を参照するだけ**=人格の新規作成(人事部門の管轄)は1つもしていない。
+    #   ★conversation_only= 横断部屋では議論・共有だけ。実装は各部門が自室で行う(ここから発注しない)。
+    #   受信配線= local/discord_channels.json(id=1538219100566716528・dept=gunji)+ daemon_keeper.DEPTS。
+    "gunji": {
+        "character": os.path.join(_CHAR, "mitoma.md"),
+        "memory": os.path.join(_MEM, "gunji.jsonl"),
+        "persona": "三笘薫",               # 既定の名乗り=進行役。lead_persona は置かない(past-room等と同形)
+        "port": 18830,                     # 18829(kukuru-nakama)まで使用済=実測で次の空き
+        "work_model": "opus",              # 横断の事業判断=人格の演技担保(C-014・hq/llm-edu と同形)
+        "session_relay": True,             # 会話便を部屋の永続セッションへ
+        "conversation_only": True,         # 横断共有=その場で答え切る・作業回送しない(実装は各自室)
+        "personas": [
+            {"persona": "三笘薫", "character": os.path.join(_CHAR, "mitoma.md"),
+             "role": "進行(議事進行・この部屋の主)", "aliases": ("三笘", "みとま", "ミトマ", "mitoma")},
+            {"persona": "アーモンドアイ", "character": os.path.join(_CHAR, "almond-eye.md"),
+             "role": "進行(共同進行・分析)", "aliases": ("アイ", "アーモンドアイ", "almond-eye")},
+            {"persona": "ルカ・モドリッチ", "character": os.path.join(_CHAR, "modric.md"),
+             "role": "AD研究室GL(内部KPI・全体設計)", "aliases": ("モドリッチ", "ルカ", "modric")},
+            {"persona": "オタコン", "character": os.path.join(_CHAR, "otacon.md"),
+             "role": "改修(技術・実装の見立て)", "aliases": ("オタコン", "otacon")},
+            {"persona": "花海咲季", "character": os.path.join(_CHAR, "saki.md"),
+             "role": "改修/フロント", "aliases": ("咲季", "さき", "saki", "花海咲季")},
+            {"persona": "早坂芽衣", "character": os.path.join(_CHAR, "mei.md"),
+             "role": "コピー(訴求・タイトル)", "aliases": ("芽衣", "早坂", "mei")},
+            {"persona": "十王星南", "character": os.path.join(_CHAR, "sena.md"),
+             "role": "商品候補選定", "aliases": ("星南", "十王", "sena")},
+            {"persona": "クラウディア", "character": os.path.join(_CHAR, "claudia.md"),
+             "role": "商品候補選定", "aliases": ("クラウディア", "claudia")},
+        ],
+        "boot_note": (
+            "■この部屋の性格(必ず守る)\n"
+            "- **ここは『軍議』=ADAFI事業全体を部門を超えて共有・相談する横断部屋**だ。"
+            "進行は三笘薫とアーモンドアイ(アイ)。\n"
+            "- 参加人格= 三笘薫 / アーモンドアイ / ルカ・モドリッチ / オタコン / 花海咲季 / "
+            "早坂芽衣 / 十王星南 / クラウディア(＋Chami)。\n"
+            "- **内容に応じて、その分野の担当人格が前に出て答える。**名指しがあればその人格で答える"
+            "(返信の1行目に `[名前]` を置く)。名指しが無い時の既定は進行役の三笘薫。\n"
+            "- ★**ここは議論と共有の場**だ。実装・改修が要るなら、それは各部門が自室で行う"
+            "(この横断部屋から勝手に作業を発注しない)。\n"
+            "- ★人格を騙らない。自分が担当でない分野は、担当人格へ振る(『これは〇〇の領分ね』)。"
+        ),
+    },
     # ククールのもう一つの部屋(キャラ背景の聞き取り)。記憶は部屋別。
     # ★work_scopeを付与(2026-07-20 Chami指示「そこの部屋で配線までしてほしいという意味だった。
     #   ちゃんと配線する権限を与えてほしい。人事部ってそうでしょ」)。

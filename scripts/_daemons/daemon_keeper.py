@@ -71,7 +71,7 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 # ★2026-07-27 report-notify を追加(26→27体)。Chamiが**3回**頼んで8日間実装されなかった件。
 #   「報告について改善していきたいから話せるようにして欲しい」= 一方通行の部屋を双方向にする。
 #   自動通知の出力経路には触っていない(bot/webhookはgatewayが弾くので反応しない)。
-DEPTS = ["hq", "research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama"]
+DEPTS = ["hq", "research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット
