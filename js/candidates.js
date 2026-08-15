@@ -2491,7 +2491,7 @@
       if (changed) { lsSet(key, arr); recordReviewSnapshots(arr); }
       // 取り直せたら未取得フェーズの記録も掃除(再取得の追跡対象から外す)。
       try { var miss = lsGet(K_INFOMISS, '{}'); if (miss[cid] != null) { delete miss[cid]; lsSet(K_INFOMISS, miss); } } catch (e) {}
-      renderCandList(_activeTab); // サムネ含め即反映(リロード不要)
+      repaintCand_(_activeTab); // サムネ含め即反映(リロード不要)。差分更新=他カードの画像はチラつかせない
     }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = '⚠️ 失敗'; setTimeout(function () { btn.innerHTML = label; }, 2200); } });
   }
   // 「▶今すぐ取得」ボタンの共通配線。(notceParentId=通知メッセージを差し込む要素id)
@@ -3885,6 +3885,20 @@
     });
     apply();
   }
+  // 文字列の軽量ハッシュ(djb2)。カードの「署名」=描画に効く全内容から作り、前回と同じならDOMを作り直さない。
+  function hashStr_(s) {
+    var h = 5381; s = String(s);
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return h.toString(36);
+  }
+  // 現在タブの軽量再描画(外枠は壊さずカード群だけを差分更新)への参照。★非同期の取得完了・自動追跡から
+  //   これを呼べば、変化の無いカード(=画像)を作り直さない=チラつかない(Chami依頼2026-08-15
+  //   「画像とサムネのチラつきが激しすぎる」の恒久対策)。C-038。
+  var _candRepaint_ = null, _candRepaintTab_ = null;
+  function repaintCand_(tabId) {
+    if (_candRepaint_ && _candRepaintTab_ === tabId && document.getElementById('candCardList')) _candRepaint_();
+    else renderCandList(tabId);
+  }
   function renderCandList(tabId) {
     tabId = tabId || 'main';
     invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
@@ -3894,34 +3908,79 @@
     var all = lsGet(key, '[]');
     if (!all.length) { el.innerHTML = '<p class="hint" style="padding:4px 6px;">まだ候補がありません。上の欄に作品URLを入れて追加してください。</p>'; return; }
     var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
-    var arr = sortItems(all, _sort).filter(function (it) {
+    var filt_ = function (it) {
       if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
       if (_filterSale && !isOnSale_(it)) return false;
       if (!passPrice_(it)) return false;
       if (!_showHidden && isHiddenByPosted_(it)) return false; // アカウント別「投稿済みを非表示」
       return true;
-    });
+    };
+    var arr = sortItems(all, _sort).filter(filt_);
     _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
-    if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる候補がありません。') + '</p>'; return; }
-    var salesCids = salesTargetCids_(arr);
-    var salesMiss = missingCount(salesCids);
-    var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件') +
-      (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
-    // ★検索欄・ページ数セレクタは固定の外枠に置き、カード群は #candPageWrap の中だけを描き替える
-    //   =検索入力中にフォーカスが飛ばない/ページ送りで検索欄が作り直されない(Chami依頼2026-08-15)。
-    el.innerHTML = head + workSearchHtml_(tabId) + candPageSizeHtml_() + '<div id="candPageWrap"></div>';
+    if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる候補がありません。') + '</p>'; el._go5CandState = null; return; }
     var actOf_ = function (cid) {
       return _showHidden
         ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(cid) + '" title="削除" aria-label="削除">🗑️</button>'
         : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(cid) + '">非表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(cid) + '" title="削除" aria-label="削除">🗑️</button>';
     };
-    // 現在ページ(＋検索・ページ数)ぶんのカードだけを #candPageWrap へ描く。検索はDOM非表示でなく
-    //   実データで絞り込む=全ページ横断で検索できる(ページ分けと両立)。
+    // 1枚のカードだけを配線する(＝差分更新で「新しく作った」カードにのみ呼ぶ=二重配線しない)。
+    //   サムネ/生成画像のタップは pageCand への委任(ensureCardDelegation_)で拾うため、ここでは扱わない。
+    var wireOneCard_ = function (node) {
+      wireCardCommon_(node); // 🔁作品情報ボタン・チャンネル切替行・コメント/メモの1行フィット
+      node.querySelectorAll('[data-hidecid]').forEach(function (b) {
+        b.addEventListener('click', function () { if (!window.confirm('非表示にしますか？')) return; var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); el._go5CandState = null; renderCandList(tabId); });
+      });
+      node.querySelectorAll('[data-unhide]').forEach(function (b) {
+        b.addEventListener('click', function () { var c = b.getAttribute('data-unhide'); lsSet(hiddenKey(tabId), lsGet(hiddenKey(tabId), '[]').filter(function (x) { return x !== c; })); el._go5CandState = null; renderCandList(tabId); });
+      });
+      node.querySelectorAll('[data-delcid]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var c = b.getAttribute('data-delcid'), items2 = lsGet(key, '[]');
+          var it = items2.filter(function (x) { return x.cid === c; })[0];
+          if (!it || !window.confirm('「' + (it.title || c) + '」をこのタブから削除しますか？')) return;
+          lsSet(key, items2.filter(function (x) { return x.cid !== c; }));
+          tombstoneCid_(tabId, c); // ★削除を墓標に記録＝同期で他端末にも伝播し復活を防ぐ(INC 2026-07-15)
+          el._go5CandState = null; renderCandList(tabId);
+        });
+      });
+    };
+    // ★カード群を cid＋署名で差分更新する=前回と同じ内容のカードは既存DOMを使い回し、画像/サムネの
+    //   <img> を作り直さない(=再デコードによるチラつきが起きない)。変化したカードだけ作り直す。
+    var reconcile_ = function (listEl, slice) {
+      var byCid = {};
+      Array.prototype.forEach.call(listEl.children, function (n) { var c = n.getAttribute && n.getAttribute('data-cid'); if (c) byCid[c] = n; });
+      var used = {}, fresh = [];
+      slice.forEach(function (it, idx) {
+        var html = candCard(it, actOf_(it.cid)), sig = hashStr_(html), cur = byCid[it.cid], node;
+        if (cur && cur.getAttribute('data-sig') === sig) { node = cur; } // 内容不変=そのまま使い回す(画像は再デコードされない)
+        else {
+          var tmp = document.createElement('div'); tmp.innerHTML = html; node = tmp.firstElementChild;
+          node.setAttribute('data-cid', it.cid); node.setAttribute('data-sig', sig); fresh.push(node);
+        }
+        used[it.cid] = true;
+        if (listEl.children[idx] !== node) listEl.insertBefore(node, listEl.children[idx] || null);
+      });
+      Array.prototype.slice.call(listEl.children).forEach(function (n) { var c = n.getAttribute && n.getAttribute('data-cid'); if (!c || !used[c]) listEl.removeChild(n); });
+      fresh.forEach(wireOneCard_); // 新規カードだけ配線(DOM挿入後=レイアウト確定後なので1行フィット計測も効く)
+    };
+    // 現在ページ(＋検索・ページ数)ぶんだけを描く。検索はDOM非表示でなく実データで絞り込む=全ページ横断。
     var paintPage_ = function () {
       var wrap = document.getElementById('candPageWrap'); if (!wrap) return;
+      if (!document.getElementById('candCardList')) wrap.innerHTML = '<div id="candPageHead"></div><div id="candCardList"></div><div id="candPageFoot"></div>';
+      var headEl = document.getElementById('candPageHead'), listEl = document.getElementById('candCardList'), footEl = document.getElementById('candPageFoot');
+      // ★非同期取得(タイトル/販売数/AI判定)が後から届いても最新で描くため、都度LSを読み直して絞り込む。
+      var fresh2 = lsGet(key, '[]'), hs2 = {}; lsGet(hiddenKey(tabId), '[]').forEach(function (c) { hs2[c] = true; });
+      var arr2 = sortItems(fresh2, _sort).filter(function (it) {
+        if (!(_showHidden ? hs2[it.cid] : !hs2[it.cid])) return false;
+        if (_filterSale && !isOnSale_(it)) return false;
+        if (!passPrice_(it)) return false;
+        if (!_showHidden && isHiddenByPosted_(it)) return false;
+        return true;
+      });
+      _cardIndex = {}; arr2.forEach(function (it) { _cardIndex[it.cid] = it; });
       var qi = document.getElementById('candWorkSearch'), mi = document.getElementById('candMemoSearch');
       var q = normalizeWorkSearch_(qi ? qi.value : ''), mq = normalizeWorkSearch_(mi ? mi.value : '');
-      var view = arr.filter(function (it) {
+      var view = arr2.filter(function (it) {
         var okW = !q || workSearchText_(it).indexOf(q) >= 0;
         var okM = !mq || candMemoText_(it).indexOf(mq) >= 0;
         return okW && okM;
@@ -3933,59 +3992,57 @@
       var startI = (page - 1) * size, slice = view.slice(startI, startI + size);
       var pager = candPagerHtml_(page, pages, view.length, startI, slice.length);
       var resultLine = (q || mq) ? '<div class="hint" style="padding:2px 6px;">' + view.length + '件が条件に一致</div>' : '';
-      var emptyMsg = slice.length ? '' : '<p class="hint" style="padding:8px;">条件に一致する候補がありません。</p>';
-      wrap.innerHTML = resultLine + pager + emptyMsg + slice.map(function (it) { return candCard(it, actOf_(it.cid)); }).join('') + (pages > 1 ? pager : '');
+      headEl.innerHTML = resultLine + pager;      // ページャは画像を含まない=作り直しても軽い/チラつかない
+      footEl.innerHTML = (pages > 1 ? pager : '');
+      if (!slice.length) listEl.innerHTML = '<p class="hint" style="padding:8px;">条件に一致する候補がありません。</p>';
+      else reconcile_(listEl, slice);             // カードは差分更新(使い回し)=チラつかない
       var resEl = document.getElementById('candWorkSearchResult');
-      if (resEl) resEl.textContent = (q || mq) ? view.length + '件表示 / ' + arr.length + '件中' : '';
-      wireCardCommon_(wrap);
-      wrap.querySelectorAll('[data-hidecid]').forEach(function (b) {
-        b.addEventListener('click', function () { if (!window.confirm('非表示にしますか？')) return; var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); renderCandList(tabId); });
-      });
-      wrap.querySelectorAll('[data-unhide]').forEach(function (b) {
-        b.addEventListener('click', function () { var c = b.getAttribute('data-unhide'); lsSet(hiddenKey(tabId), lsGet(hiddenKey(tabId), '[]').filter(function (x) { return x !== c; })); renderCandList(tabId); });
-      });
-      wrap.querySelectorAll('[data-delcid]').forEach(function (b) {
-        b.addEventListener('click', function () {
-          var c = b.getAttribute('data-delcid'), items2 = lsGet(key, '[]');
-          var it = items2.filter(function (x) { return x.cid === c; })[0];
-          if (!it || !window.confirm('「' + (it.title || c) + '」をこのタブから削除しますか？')) return;
-          lsSet(key, items2.filter(function (x) { return x.cid !== c; }));
-          tombstoneCid_(tabId, c); // ★削除を墓標に記録＝同期で他端末にも伝播し復活を防ぐ(INC 2026-07-15)
-          renderCandList(tabId);
-        });
-      });
-      wrap.querySelectorAll('[data-candpage]').forEach(function (b) {
-        b.addEventListener('click', function () {
-          var p = parseInt(b.getAttribute('data-candpage'), 10); if (!p || p < 1 || p > pages) return;
-          _candPageByTab[tabId] = p; paintPage_();
-          try { var sb = document.getElementById('candWorkSearch'); if (sb) sb.scrollIntoView({ block: 'start' }); } catch (e) {}
+      if (resEl) resEl.textContent = (q || mq) ? view.length + '件表示 / ' + arr2.length + '件中' : '';
+      [headEl, footEl].forEach(function (z) {
+        z.querySelectorAll('[data-candpage]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var p = parseInt(b.getAttribute('data-candpage'), 10); if (!p || p < 1 || p > pages) return;
+            _candPageByTab[tabId] = p; paintPage_();
+            try { var sb = document.getElementById('candWorkSearch'); if (sb) sb.scrollIntoView({ block: 'start' }); } catch (e) {}
+          });
         });
       });
     };
-    // 検索欄の配線(このタブはページ分けのため実データで絞り込む=wireWorkSearch_ のDOM非表示は使わない)。
-    var searchInput = el.querySelector('#candWorkSearch'), memoInput = el.querySelector('#candMemoSearch');
-    var onSearch_ = function () {
-      _workSearchByTab[tabId] = searchInput ? (searchInput.value || '') : '';
-      _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
-      _candPageByTab[tabId] = 1; // 条件が変わったら1ページ目へ
-      paintPage_();
-    };
-    if (searchInput) searchInput.addEventListener('input', onSearch_);
-    if (memoInput) memoInput.addEventListener('input', onSearch_);
-    var swClear = el.querySelector('#candWorkSearchClear'), smClear = el.querySelector('#candMemoSearchClear');
-    if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; onSearch_(); try { if (searchInput) searchInput.focus({ preventScroll: true }); } catch (e) { if (searchInput) searchInput.focus(); } });
-    if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; onSearch_(); try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); } });
-    var sizeSel = el.querySelector('#candPageSizeSel');
-    if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab[tabId] = 1; paintPage_(); });
+    _candRepaint_ = paintPage_; _candRepaintTab_ = tabId;
+    // ★外枠(件数見出し・検索欄・表示数セレクタ・ページ入れ物)は、並び順/絞り込み/表示数が変わらない限り
+    //   作り直さない=検索フォーカスもカードのDOMも保つ。並び順や非表示切替など見出しが変わる操作の時だけ組み直す。
+    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + _priceMax;
+    var shellReady = (el._go5CandState === stateSig && document.getElementById('candCardList'));
+    if (!shellReady) {
+      var salesMiss = missingCount(salesTargetCids_(arr));
+      var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件') +
+        (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
+      el.innerHTML = head + workSearchHtml_(tabId) + candPageSizeHtml_() + '<div id="candPageWrap"></div>';
+      el._go5CandState = stateSig;
+      // 検索欄の配線(このタブはページ分けのため実データで絞り込む=wireWorkSearch_ のDOM非表示は使わない)。
+      var searchInput = el.querySelector('#candWorkSearch'), memoInput = el.querySelector('#candMemoSearch');
+      var onSearch_ = function () {
+        _workSearchByTab[tabId] = searchInput ? (searchInput.value || '') : '';
+        _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
+        _candPageByTab[tabId] = 1; // 条件が変わったら1ページ目へ
+        paintPage_();
+      };
+      if (searchInput) searchInput.addEventListener('input', onSearch_);
+      if (memoInput) memoInput.addEventListener('input', onSearch_);
+      var swClear = el.querySelector('#candWorkSearchClear'), smClear = el.querySelector('#candMemoSearchClear');
+      if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; onSearch_(); try { if (searchInput) searchInput.focus({ preventScroll: true }); } catch (e) { if (searchInput) searchInput.focus(); } });
+      if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; onSearch_(); try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); } });
+      var sizeSel = el.querySelector('#candPageSizeSel');
+      if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab[tabId] = 1; paintPage_(); });
+    }
     paintPage_();
-    // 候補作品の実売本数を取得。(未取得はPC取得キューへ)反映されたら再描画。
-    fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
-    // タイトル/発売日が未取得の候補を控えめに再取得。(追加直後の一時的な部分取得を自動で埋める)
-    backfillMissingInfo_(key, arr, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
-    // 同人候補のAI生成判定を一度だけ確定(既存候補にも後から判定が届く)。取れたら再描画でAIバッジが出る。
-    aiRecheck_(key, arr, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
-    // 追加直後の未取得は、タブを開いている間だけ自動で追いかける(ユーザーの再操作/再オープンを待たない)。
-    // 素早い再取得フェーズの未取得が残る間のみ、短い間隔で1回だけ再描画を予約する(TTLが無駄打ちを抑える)。
+    var salesCids = salesTargetCids_(arr);
+    // 以下の非同期取得は、届いたら repaintCand_ で「カードの差分更新だけ」する=外枠も不変カードも壊さない=チラつかない。
+    fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === tabId) repaintCand_(tabId); });
+    backfillMissingInfo_(key, arr, function (changed) { if (changed && _activeTab === tabId) repaintCand_(tabId); });
+    aiRecheck_(key, arr, function (changed) { if (changed && _activeTab === tabId) repaintCand_(tabId); });
+    // 追加直後の未取得は、タブを開いている間だけ自動で追いかける(scheduleInfoTick_→renderCandListだが
+    //   外枠は使い回されカードは差分更新のためチラつかない。backfillの再実行もこの経路で継続する)。
     scheduleInfoTick_(tabId, arr);
   }
 
