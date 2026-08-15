@@ -144,6 +144,7 @@
   let lastBlob = null, lastName = "video.mp4";
   let _making = false; // 作成中の再入防止。★見た目のdisabledに依存しない=押されたボタンだけを busy 表示できる
   let _makingAt = 0;   // 作成開始時刻(performance.now)。異常終了で _making が立ったまま固着した時に奪い返す判定に使う
+  let _makeRunSeq = 0; // stale奪回後に旧MediaRecorderが遅れて完了しても、古い動画を通知しない世代番号
 
   // ---- フォント読み込み(Canvas描画前に必須) ----
   function ensureFont() {
@@ -678,6 +679,7 @@
       try { if (window.console && console.warn) console.warn("[go5] _making が20秒以上固着=stale。作成を奪い返す"); } catch (e) {}
     }
     _making = true; _makingAt = performance.now();
+    const runId = ++_makeRunSeq;
     var activeBtn = isDraft ? document.getElementById("draftMakeBtn") : els.makeBtn;
     var activeLabel = activeBtn ? activeBtn.textContent : "";
     if (activeBtn) { activeBtn.disabled = true; activeBtn.textContent = isDraft ? "📦 作成中…" : "作成中…"; }
@@ -692,10 +694,16 @@
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8_000_000 } : undefined);
       const chunks = [];
       rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-      const stopped = new Promise((r) => { rec.onstop = r; });
+      let stopError = null;
+      const stopped = new Promise((resolve, reject) => {
+        rec.onstop = resolve;
+        rec.onerror = (e) => { stopError = (e && e.error) || new Error("MediaRecorder error"); reject(stopError); };
+      });
 
       const t0 = performance.now();
-      rec.start();
+      // 1秒ごとにチャンクを確保する。stop時の最後のdataavailable 1回だけに依存すると、
+      // iOS Safariの間欠不達で空Blobになっても気付けなかった。
+      rec.start(1000);
       await new Promise((resolve) => {
         const loop = () => {
           const t = (performance.now() - t0) / 1000;
@@ -705,11 +713,29 @@
         };
         loop();
       });
-      rec.stop();
-      await stopped;
+      try { if (rec.state === "recording") rec.requestData(); } catch (e) {}
+      if (rec.state !== "inactive") rec.stop();
+      let stopTimer = null;
+      const stopTimeout = new Promise((resolve, reject) => {
+        stopTimer = setTimeout(() => reject(new Error("動画書き出しの完了応答がありません。もう一度お試しください。")), 12000);
+      });
+      try { await Promise.race([stopped, stopTimeout]); } finally { if (stopTimer) clearTimeout(stopTimer); }
+      if (stopError) throw stopError;
+      if (runId !== _makeRunSeq) throw new Error("古い作成処理の完了を破棄しました。もう一度お試しください。");
 
       const type = mime || "video/webm";
-      lastBlob = new Blob(chunks, { type });
+      const candidateBlob = new Blob(chunks, { type });
+      const integrity = window.Go5VideoIntegrity;
+      const sizeOk = integrity && integrity.isUsableBlob
+        ? integrity.isUsableBlob(candidateBlob)
+        : candidateBlob.size >= 16 * 1024;
+      if (!sizeOk) throw new Error("動画データが空または不完全でした。ドラフトには保存していません。もう一度お試しください。");
+      const playable = integrity && integrity.probePlayable
+        ? await integrity.probePlayable(candidateBlob, { timeoutMs: 10000 })
+        : true;
+      if (!playable) throw new Error("動画を再生確認できなかったため、壊れたドラフトは保存しませんでした。もう一度お試しください。");
+      if (runId !== _makeRunSeq) throw new Error("古い作成処理の完了を破棄しました。もう一度お試しください。");
+      lastBlob = candidateBlob;
       const ext = type.includes("mp4") ? "mp4" : "webm";
       lastName = sanitize(titleForBurn(els.top.value)) + "." + ext;
 
@@ -739,8 +765,11 @@
     } catch (e) {
       setStatus("作成に失敗しました：" + e.message);
     } finally {
-      _making = false;
-      if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = activeLabel; }
+      // stale奪回で新しい作成が始まっている場合、旧処理のfinallyが新処理のbusy表示を解除しない。
+      if (runId === _makeRunSeq) {
+        _making = false;
+        if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = activeLabel; }
+      }
     }
   }
 

@@ -16,6 +16,14 @@
   var ARCHIVE_MAX = 30;
   var PH_URL_ = '(X投稿リンクを入力後、ここに短縮URLが入る)';
 
+  // 動画の「存在」ではなく、最低限使える実体かを全保存境界で同じ規則にする。
+  // core/video-integrity.js がキャッシュ不整合で未読込でも、空/極小Blobだけは必ず拒否する。
+  function isUsableVideoBlob_(blob) {
+    var vi = window.Go5VideoIntegrity;
+    if (vi && vi.isUsableBlob) return vi.isUsableBlob(blob);
+    return !!(blob && typeof blob.size === 'number' && blob.size >= 16 * 1024);
+  }
+
   // 説明欄の短縮URLは「タップで実際に遷移できるリンク」だけで表示(Chami 2026-07-28指示=短縮URLのみの
   //   テキストボックスは不要・リンクだけでいい)。★短縮URLの実体はリンク要素の dataset.url に保持し、
   //   保存とコピーはそこから読む(readonlyボックスは撤去)。空なら隠す。リンク先頭は textarea の左縦線に揃える。
@@ -113,6 +121,32 @@
 
   function loadMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || '[]') || []; } catch (e) { return []; } }
   function saveMeta(arr) { try { localStorage.setItem(META_KEY, JSON.stringify(arr.slice(0, MAX))); } catch (e) {} kickSync_(); }
+
+  // ドラフトは「動画が手元または雲へ着地した後」にだけ一覧へ確定する二相コミット。
+  // 失敗中のメタを先に go5_stock_meta へ入れると、黒いサムネ/DL不能の幽霊カードが残るため禁止する。
+  var _pendingDraftMeta = {};
+  var _pendingDraftCommit = {};
+  function commitPendingDraft_(id) {
+    var existing = loadMeta().filter(function (m) { return m && m.id === id; })[0];
+    if (existing) return Promise.resolve(existing);
+    if (_pendingDraftCommit[id]) return _pendingDraftCommit[id];
+    var meta = _pendingDraftMeta[id];
+    if (!meta) return Promise.reject(new Error('pending-draft-meta-missing'));
+    var job = Promise.resolve().then(function () {
+      var arr = loadMeta().filter(function (m) { return m && m.id !== id; });
+      arr.unshift(meta);
+      saveMeta(arr);
+      var saved = loadMeta().filter(function (m) { return m && m.id === id; })[0];
+      if (!saved) throw new Error('draft-meta-readback-failed');
+      return saved;
+    });
+    _pendingDraftCommit[id] = job.then(function (saved) {
+      delete _pendingDraftCommit[id]; delete _pendingDraftMeta[id]; return saved;
+    }, function (err) {
+      delete _pendingDraftCommit[id]; throw err;
+    });
+    return _pendingDraftCommit[id];
+  }
   function loadArchive() { try { return JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]') || []; } catch (e) { return []; } }
   function saveArchive(arr) { try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(arr.slice(0, ARCHIVE_MAX))); } catch (e) {} }
   // 全端末同期(Go5Sync)へ即時反映を促す。(未設定・未ロードなら何もしない)ドラフトを保存したら他端末へ運ぶ。
@@ -221,6 +255,8 @@
   var _vidMirrorBusy = {}; // 保存直後と定期sweepが重なって同じ動画を二重PUTしない
   function ensureVideoMirror_(id, blobHint) {
     var store = idb();
+    // 空/極小/画像BlobをR2へ上げて「雲に着地済み」と誤認しない。
+    if (blobHint && !isUsableVideoBlob_(blobHint)) return Promise.resolve();
     if (_vidUp[id]) return Promise.resolve();
     if (_vidMirrorBusy[id]) return _vidMirrorBusy[id];
     if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return Promise.resolve();
@@ -234,7 +270,7 @@
     var pick = blobHint ? Promise.resolve(blobHint)
                         : (store ? store.get('stock_v_' + id) : Promise.resolve(null));
     var job = Promise.resolve(pick).then(function (blob) {
-      if (!blob) return; // 実体が無い端末=上げない(取り寄せる側)
+      if (!isUsableVideoBlob_(blob)) return; // 壊れたローカル実体は雲へ昇格させない
       return Go5Sync.putBlobR2At(VIDNAME(id), blob).then(function (key) {
         if (key) _vidUp[id] = 1; // 成功=このセッションでは再送しない。失敗時は次のsweepでまた試す(非破壊)
       });
@@ -450,16 +486,17 @@
   //   全滅させず「この端末に残せていない=まだ手元に動画は生きている」を明示し、リトライを出す。
   //   遷移(location.href)で JSコンテキストを壊さない限りメモリ上の動画blobは生きている=救える。
   //   配色はアプリ(ティール#2bb3c0/ダーク面#0e1422)。紫・絵文字は使わない。
-  function showSaveHold_() {
+  function showSaveHold_(message, canRetry) {
     var box = document.getElementById('go5SaveHold');
     if (!box) {
       box = document.createElement('div');
       box.id = 'go5SaveHold';
       box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;max-width:520px;margin:0 auto;background:#0e1422;border:1px solid #2bb3c0;border-radius:12px;padding:14px 16px;color:#e8f1f2;box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:14px;line-height:1.55';
       var msg = document.createElement('div');
+      msg.id = 'go5SaveHoldMsg';
       msg.style.cssText = 'margin-bottom:10px';
-      msg.textContent = '動画をこの端末に保存できませんでした(通信が不安定な可能性があります)。動画はまだ手元に残っています。もう一度保存すると消えずに済みます。';
       var b1 = document.createElement('button');
+      b1.id = 'go5SaveRetry';
       b1.textContent = 'もう一度保存';
       b1.style.cssText = 'background:#2bb3c0;color:#04222a;border:0;border-radius:8px;padding:8px 14px;font-weight:700;margin-right:8px;cursor:pointer';
       b1.onclick = function () { if (typeof window.__go5RetrySave === 'function') window.__go5RetrySave(); };
@@ -471,18 +508,53 @@
       box.appendChild(msg); box.appendChild(b1); box.appendChild(b2);
       document.body.appendChild(box);
     }
+    var msgEl = document.getElementById('go5SaveHoldMsg');
+    if (msgEl) msgEl.textContent = message || '動画をこの端末に保存できませんでした(通信が不安定な可能性があります)。動画はまだ手元に残っています。もう一度保存すると消えずに済みます。';
+    var retryEl = document.getElementById('go5SaveRetry');
+    if (retryEl) retryEl.style.display = canRetry === false ? 'none' : 'inline-block';
     box.style.display = 'block';
   }
   function hideSaveHold_() { var box = document.getElementById('go5SaveHold'); if (box) box.style.display = 'none'; }
 
+  // IDBの set() 解決だけでは成功扱いにしない。同じキーを読み戻し、使える動画Blobであることまで確認する。
+  function verifyLocalVideoWrite_(id, blob) {
+    var store = idb();
+    if (!store || !isUsableVideoBlob_(blob)) return Promise.reject(new Error('local-video-unavailable'));
+    return store.set('stock_v_' + id, blob).then(function () {
+      return store.get('stock_v_' + id);
+    }).then(function (saved) {
+      if (!isUsableVideoBlob_(saved)) throw new Error('local-video-readback-invalid');
+      return 'local';
+    });
+  }
+  function verifyCloudVideoWrite_(id, blob) {
+    if (!isUsableVideoBlob_(blob)) return Promise.reject(new Error('cloud-video-invalid'));
+    return ensureVideoMirror_(id, blob).then(function () {
+      if (!_vidUp[id]) throw new Error('cloud-video-not-landed');
+      return 'cloud';
+    });
+  }
+  function firstVideoLanding_(id, blob) {
+    var attempts = [verifyLocalVideoWrite_(id, blob), verifyCloudVideoWrite_(id, blob)];
+    return new Promise(function (resolve, reject) {
+      var left = attempts.length, errors = [];
+      attempts.forEach(function (p) {
+        Promise.resolve(p).then(resolve, function (err) {
+          errors.push(err); left--;
+          if (!left) reject(errors[0] || new Error('video-not-landed'));
+        });
+      });
+    });
+  }
+
   function saveStock_(evDetail, hooks) {
-    hooks = hooks || {}; // {onLocal(id), onCloud(id), onBothFailed(id)} — 単一着地権威(Go5SaveGate)へ着地シグナルを配る
+    hooks = hooks || {}; // {onStart(id), onLocal(id), onCloud(id), onBothFailed(id)} — 検証済みシグナルだけを配る
     var ts = Date.now();
     var id = 'stk' + ts;
     var title = evDetail.title || '';
     var meta = {
       id: id, ts: ts,
-      addedAt: ts, // 墓標(go5_stock_del)を越えて残すための追加時刻。復元時は now で打ち直す(全端末同期)。
+      addedAt: ts,
       account: evDetail.account || 'acc1',
       label: title.length > 22 ? title.slice(0, 22) + '…' : (title || '(無題)'),
       title: title,
@@ -491,81 +563,85 @@
       affiliateUrl: ($('movieWorkAffi') || {}).value || '',
       workUrl: ($('movieWorkUrl') || {}).value || '',
       videoName: evDetail.name || (title.replace(/[\\/:"*?<>|]/g, '_') + '.mp4'),
-      // ★動画IDを保持＝投稿完了時に投稿履歴↔使用画像(usedImgSaveはvideoIdキー)を紐付ける。(Chami依頼2026-07-30)
       videoId: evDetail.videoId || '',
-      // カテゴリ(ジャンル)チェックを作成時にスナップ＝投稿完了で投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
       attrs: readMovieAttrs_(),
-      // ★狙い・コメント型も作成時にスナップ。これを保存しないと remakeStock_(再作成)で復元できず、
-      //   make()(app.js)の「狙い/コメント型は生成前の必須」ガードで毎回弾かれ、作り直し直後の
-      //   「ドラフトで作成」が『未選択です』で止まる=「動画が生成されなかった」に見える(Chami 2026-08-14②)。
       goal: ($('movieGoal') || {}).value || '',
       cmtType: ($('movieCmtType') || {}).value || '',
-      // 割引%/価格も作成時にスナップ＝生キャッシュ失効・再作成の往復でも投稿モードでN%にしない(Chami依頼2026-08-06④)。
       priceInfo: livePriceInfo_(($('movieWorkUrl') || {}).value || ($('movieWorkAffi') || {}).value || ''),
-      youtubeUrl: '',
+      youtubeUrl: ''
     };
-    // ★サムネ/プレビューは「今のCanvas」に依存するので、タブ遷移・再描画より前に取得を開始しておく。
+
+    // Phase 0: メタはメモリ上の pending に置くだけ。一覧へは動画の着地検証後に commitPendingDraft_ が確定する。
+    _pendingDraftMeta[id] = meta;
+    if (hooks.onStart) hooks.onStart(id); // タイムアウトより前から、保留リトライが同じpending IDを指せるようにする
+
+    // サムネ/プレビューは今の最終Canvasに依存するため、画面遷移より前に取得する。
     var capP = Promise.all([captureThumb_(), capturePreview_()]).catch(function () { return [null, null]; });
-    // ★★メタ(localStorage)は最優先で即保存する=IDB blob 保存の成否に一覧の在否を依存させない
-    //   (Chami報告2026-08-12「ドラフトに情報が行かない」の根治)。従来は Promise.all(ops)=IDBへの
-    //   動画/サムネ書込が成功して初めて saveMeta していたため、iOS Safariが接続を無言で殺して idb-timeout
-    //   (2周とも死)になると saveMeta まで到達せず、ドラフトが一覧に一切載らなかった。一覧は軽い
-    //   localStorage に確実に載せ、重い blob 保存は best-effort(失敗しても握り潰す=一覧は残る)に分離する。
-    var arr = loadMeta();
-    arr.unshift(meta);
-    saveMeta(arr); // ← ここで一覧に載る(=自動遷移で必ず見える)。以降の blob 失敗は一覧を消さない。
     return capP.then(function (caps) {
       var thumbBlob = caps[0], prevBlob = caps[1];
-      // ★サムネが取れなかった時(canvas由来の取得が全滅)でも黒箱にしない=前景の元画像を代替サムネにする。
-      //   sourceImageFile は toBlob を通さず直接保存する実体なので沈黙経路が無い(Chami報告2026-08-13①の保険)。
+      // Canvas取得が失敗しても、元画像を端末側サムネの最終保険にする。
       if (!thumbBlob && evDetail.sourceImageFile) thumbBlob = evDetail.sourceImageFile;
-      var store = idb();
-      // ★動画の雲ミラー(R2)は capP 解決直後に「即」発火する＝IDB書込(ops)の settle を待たない。
-      //   真因(Chami報告2026-08-14「候補から作り直し→動画が全滅」):IDB間欠死の端末では store.set の
-      //   番犬タイムアウト+リトライで reject まで約16秒かかる。従来 ensureVideoMirror_ は
-      //   Promise.all(ops).then の中＝ops が settle して初めて呼ばれていたため、その前に video-created 側の
-      //   navTimer(旧8秒 < 16秒)が location.href='Stock.html' でJSコンテキストを破棄し、R2ミラーが
-      //   一度も走らなかった→動画がIDBにもR2にも残らず全滅していた。メモリ上の blob を先にR2へ送る。
-      var mirrorV = ensureVideoMirror_(id, evDetail.blob); // ② 動画本体をR2へ(メモリのblob直渡し=ローカル保存が死んでもDL可能に)
-      var ops = [];
-      var vidWrite = Promise.reject(new Error('no-idb-or-blob')); // IDBへの動画書込(健全端末の「手元に動画」判定に使う)
-      if (store) {
-        if (evDetail.blob) { vidWrite = store.set('stock_v_' + id, evDetail.blob); ops.push(vidWrite); }
-        if (thumbBlob)      ops.push(store.set('stock_t_' + id, thumbBlob));
-        // 元画像(前景)もIDBへ保存＝投稿完了(別セッションのこともある)まで残し、Driveへ動画と一緒に上げる。
-        //   これが無いと handleCompleteOk_ の時点で元画像が手元に無く、Driveに動画だけが保存される(Chami指摘2026-07-29)。
-        if (evDetail.sourceImageFile) ops.push(store.set('stock_img_' + id, evDetail.sourceImageFile));
-        // 仕上がりプレビューも投稿完了まで退避(使用画像1ページ目＋Drive行き)。
-        if (prevBlob) ops.push(store.set('stock_prev_' + id, prevBlob));
-      }
-      vidWrite.catch(function () {}); // 未ハンドル reject の警告抑止(成否の判定は videoSafe 側で行う)
-      ensureBlobMirror_(id); // ①-B サムネ/プレビュー/元画像も雲へ(IDB健全端末で有効・2台目対策)
-      // ★blob 保存が2周とも死んでも reject しない=メタは既に保存済みなので一覧には出る(fail-open)。
-      Promise.all(ops).catch(function (e) {
-        try { if (window.console && console.warn) console.warn('[stock] draft blob save failed (meta kept in list):', e && (e.message || e)); } catch (_) {}
-      });
-      // ★遷移(=呼び元 video-created が location.href で行う)は「動画が確実に載った」時点まで待たせる。
-      //   動画が 手元(IDB stock_v_) か 雲(R2ミラー成功=_vidUp) の"どちらか"に着地したら解決＝そこで遷移してよい。
-      //   両方失敗(IDB死かつR2失敗=動画は原理的にどこにも残せない)の時だけ解決しない→呼び元の navTimer が
-      //   最終エスケープで遷移する。これで「遷移が録れたばかりの動画を殺す」レースを断つ。
-      return new Promise(function (resolve) {
-        var settled = false;
-        var localOk = false;
-        var ok = function () { if (!settled) { settled = true; resolve(id); } };
-        vidWrite.then(function () { localOk = true; if (hooks.onLocal) hooks.onLocal(id); ok(); }, function () {}); // IDB書込成功=手元に動画あり
-        mirrorV.then(function () { if (_vidUp[id]) { if (hooks.onCloud) hooks.onCloud(id); ok(); } }, function () {}); // R2 PUT成功(_vidUp[id]=1)時だけ=雲に控えあり
-        // ★I4: 手元にも雲にも着地できずに「両方が決着」した時だけ、着地不能を呼び元へ知らせる。
-        //   呼び元(video-created)は Go5SaveGate.decide が hold を返す=黙って遷移せず明示保留+リトライへ倒す。
-        var bothDone = (typeof Promise.allSettled === 'function')
-          ? Promise.allSettled([vidWrite, mirrorV])
-          : Promise.all([vidWrite.catch(function () {}), mirrorV.catch(function () {})]);
-        bothDone.then(function () {
-          if (!localOk && !_vidUp[id] && hooks.onBothFailed) hooks.onBothFailed(id);
+
+      // 90pxサムネはメタにも小さなdataURLとして同梱する。IDBが丸ごと死んでR2動画だけが着地した場合でも、
+      // ドラフトカードが黒い無言箱にならない。元画像そのもののような大Blobはメタ肥大防止で入れない。
+      var thumbMetaP = (thumbBlob && thumbBlob.size > 0 && thumbBlob.size <= 160 * 1024)
+        ? blobToDataUrlP_(thumbBlob)
+        : Promise.resolve('');
+      return thumbMetaP.then(function (thumbDataUrl) {
+        if (/^data:image\//.test(thumbDataUrl || '')) meta.thumbDataUrl = thumbDataUrl;
+        meta.videoBytes = evDetail.blob && evDetail.blob.size || 0;
+
+        var store = idb();
+        var auxOps = [];
+        if (store) {
+          if (thumbBlob) auxOps.push(store.set('stock_t_' + id, thumbBlob));
+          if (evDetail.sourceImageFile) auxOps.push(store.set('stock_img_' + id, evDetail.sourceImageFile));
+          if (prevBlob) auxOps.push(store.set('stock_prev_' + id, prevBlob));
+        }
+        // 補助画像の失敗は動画の着地判定と分離する。成功分はIDBへ残し、後続sweepで同期ミラー化する。
+        var auxDone = (typeof Promise.allSettled === 'function')
+          ? Promise.allSettled(auxOps)
+          : Promise.all(auxOps.map(function (p) { return Promise.resolve(p).catch(function () {}); }));
+        auxDone.then(function () { ensureBlobMirror_(id); }).catch(function () {});
+
+        // Phase 1: 動画を手元/雲へ並列着地。手元は set 解決ではなく、同じキーの読み戻しまで検証する。
+        var localLand = verifyLocalVideoWrite_(id, evDetail.blob).then(function () {
+          meta.videoReadyAt = Date.now();
+          return commitPendingDraft_(id);
+        }).then(function () {
+          if (hooks.onLocal) hooks.onLocal(id);
+          return 'local';
+        });
+        var cloudLand = verifyCloudVideoWrite_(id, evDetail.blob).then(function () {
+          meta.videoReadyAt = Date.now();
+          return commitPendingDraft_(id);
+        }).then(function () {
+          if (hooks.onCloud) hooks.onCloud(id);
+          return 'cloud';
+        });
+
+        // Phase 2: どちらかが着地し、メタの書込み/読み戻しも成功して初めて正常ドラフトとして完了する。
+        return new Promise(function (resolve) {
+          var resolved = false, localOk = false, cloudOk = false;
+          function landed(kind) {
+            if (kind === 'local') localOk = true; else cloudOk = true;
+            if (!resolved) { resolved = true; resolve(id); }
+          }
+          localLand.then(landed, function () {});
+          cloudLand.then(landed, function () {});
+          var bothDone = (typeof Promise.allSettled === 'function')
+            ? Promise.allSettled([localLand, cloudLand])
+            : Promise.all([localLand.catch(function () {}), cloudLand.catch(function () {})]);
+          bothDone.then(function () {
+            if (!localOk && !cloudOk) {
+              if (hooks.onBothFailed) hooks.onBothFailed(id);
+              if (!resolved) { resolved = true; resolve(id); }
+            }
+          });
         });
       });
     });
   }
-
   // ── 削除 ──
   function deleteStock_(id) {
     writeStockDel_(id); // 墓標＝他端末でも消す(復活防止)
@@ -636,7 +712,8 @@
     if (!(window.Go5Sync && Go5Sync.fetchBlobR2At)) return Promise.resolve(null);
     var store = idb();
     var fetchP = Go5Sync.fetchBlobR2At('go5vid:' + id).then(function (b) {
-      if (b && store) { try { store.set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即使える
+      if (!isUsableVideoBlob_(b)) return null; // R2に空/破損実体があっても正常動画として返さない
+      if (store) { try { store.set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即使える
       return b;
     }).catch(function () { return null; });
     var toP = new Promise(function (res) { setTimeout(function () { res(null); }, 45000); });
@@ -646,8 +723,9 @@
     var store = idb();
     if (!store) return resolveVideoFromR2_(id);
     return store.get('stock_v_' + id).then(function (blob) {
-      if (blob) return blob;
-      return resolveVideoFromR2_(id); // 手元に無い=R2の控えから取り寄せ
+      if (isUsableVideoBlob_(blob)) return blob;
+      // オブジェクト自体がtruthyでも空/破損なら手元成功にしない。雲の正常な控えへフォールバックする。
+      return resolveVideoFromR2_(id);
     }, function () {
       // ★IDB get が iOS Safari で idb-timeout / idb-open-timeout 等で reject した時も R2 へ倒す(2026-08-13)。
       //   従来は reject が .then を素通りして downloadStock_ の catch(「動画データの取得に失敗しました」)へ
@@ -844,7 +922,6 @@
       return;
     }
     var id = meta.id;
-    var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
     // 仕上がりプレビューを「使用画像1ページ目」へ差し込む(videoIdで紐付く・Chami依頼2026-07-30・冪等)。
     var applyPreview = function (prevB) {
       if (!prevB || !meta.videoId) return;
@@ -857,39 +934,48 @@
         });
       });
     };
+    // ★symptom恒久対策(Chami報告2026-08-15「それに伴って投稿履歴の画像もあるべき画像が設定されていない」)：
+    //   投稿履歴1ページ目のプレビュー差し込みを「動画blobの有無」から完全に切り離す。従来は下の
+    //   resolveVideoBlob_().then の中(=blobが取れた時だけ)で applyPreview を呼んでいたため、iOSがIDBの動画blobを
+    //   捨て R2ミラーも未着だと『Driveに動画が来ない』と『投稿履歴の画像が設定されない』が"一緒に"起きていた。
+    //   プレビュー実体は stock_prev_(Blob)/ 同期ミラー stock:imgs:.prev(dataURL)から取れる=動画に一切依存しない。
+    //   ここで先に確定させ、下のDrive保存(blob依存)の成否に関わらず投稿履歴へは必ず入る。
+    var previewReady = Promise.all([
+      store.get('stock_prev_' + id).catch(function () { return null; }),
+      store.get('stock:imgs:' + id).catch(function () { return null; })
+    ]).then(function (r) {
+      var prev = r[0], mirror = r[1] || {};
+      return prev ? prev : durlToBlob_(mirror.prev); // .then が Promise を自動で解く
+    }).then(function (prevB) { applyPreview(prevB); return prevB; }, function () { return null; });
+
+    var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
     // ── 既にDriveへフォルダがある=動画/元画像は作成時に保存済み。プレビューだけ追記する(blob不要=blob寿命に依存しない)。
     if (folderId) {
-      Promise.all([
-        store.get('stock_prev_' + id).catch(function () { return null; }),
-        store.get('stock:imgs:' + id).catch(function () { return null; })
-      ]).then(function (r) {
-        var prev = r[0], mirror = r[1] || {};
-        var prevP = prev ? Promise.resolve(prev) : durlToBlob_(mirror.prev);
-        prevP.then(function (prevB) {
-          if (prevB && window.Go5Drive.appendImage) window.Go5Drive.appendImage(meta.account, meta.title, folderId, prevB, null);
-          applyPreview(prevB);
-          done(true, '作成時に保存済み(プレビュー追記)');
-        });
+      previewReady.then(function (prevB) {
+        if (prevB && window.Go5Drive.appendImage) window.Go5Drive.appendImage(meta.account, meta.title, folderId, prevB, null);
+        done(true, '作成時に保存済み(プレビュー追記)');
       });
       return;
     }
     // ── フォールバック：作成時にDrive未保存。動画blobを取り直してフル保存(動画+元画像+プレビュー)。
     resolveVideoBlob_(id).then(function (blob) {
-      if (!blob) { if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済みです。Google Driveへの動画保存だけスキップしました。'); done(false, '動画データ無し'); return; }
+      if (!blob) {
+        // ★動画は取れなくても、上の previewReady が投稿履歴1ページ目のプレビューを既に設定済み。
+        if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済み・使用画像のプレビューも設定済みです。Google Driveへの動画保存だけスキップしました。');
+        done(false, '動画データ無し(プレビューは設定済み)');
+        return;
+      }
       Promise.all([
         store.get('stock_img_' + id).catch(function () { return null; }),
-        store.get('stock_prev_' + id).catch(function () { return null; }),
         store.get('stock:imgs:' + id).catch(function () { return null; }) // 同期ミラー(別端末で作った動画の画像)
       ]).then(function (r) {
-        var img = r[0], prev = r[1], mirror = r[2] || {};
-        // ★サブ端末では stock_prev_/stock_img_(Blob)が無いので、同期ミラー stock:imgs: の dataURL から実体へ戻す
+        var img = r[0], mirror = r[1] || {};
+        // ★サブ端末では stock_img_(Blob)が無いので、同期ミラー stock:imgs: の dataURL から実体へ戻す
         //   (Chami 2026-08-04「サブ端末で投稿すると投稿履歴の画像に動画投稿プレビューが表示されない」)。
         var imgP  = img  ? Promise.resolve(img)  : durlToBlob_(mirror.src);
-        var prevP = prev ? Promise.resolve(prev) : durlToBlob_(mirror.prev);
-        Promise.all([imgP, prevP]).then(function (bs) {
+        Promise.all([imgP, previewReady]).then(function (bs) {
           var imgB = bs[0], prevB = bs[1];
           window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null);
-          applyPreview(prevB);
           done(true, 'Driveへ保存開始');
         });
       }).catch(function () {
@@ -954,7 +1040,7 @@
     var btnBase = 'width:auto;margin:0;padding:5px 10px;font-size:.76rem;border-radius:6px;cursor:pointer;white-space:nowrap;';
     return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:48px;height:85px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
-                : '<div style="width:48px;height:85px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
+                : '<div title="サムネイル未取得" style="width:48px;height:85px;border-radius:5px;background:linear-gradient(160deg,#17243a,#0e1422);border:1px solid #31405a;display:flex;align-items:center;justify-content:center;color:#7a8fa3;font-size:.6rem;line-height:1.2;text-align:center;flex:0 0 auto;">確認中</div>') +
       '<div style="flex:1 1 0;min-width:0;">' +
         '<div style="font-size:.86rem;font-weight:700;color:#eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
         '<div style="font-size:.74rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · ' + esc(fmtTs(meta.ts)) + '</div>' +
@@ -1128,11 +1214,12 @@
     //   何も表示されない/リロードで直る」の根治(Chami報告2026-08-12)。サムネはキャッシュ分だけ即出し、
     //   残りは下の非同期取り込みで差し替える。
     var cachedFor = {}; _missingThumbs = {};
-    all.forEach(function (m) { var u = _thumbCache[m.id] || null; cachedFor[m.id] = u; if (!u) _missingThumbs[m.id] = 1; });
+    all.forEach(function (m) { var u = _thumbCache[m.id] || m.thumbDataUrl || null; cachedFor[m.id] = u; if (!u) _missingThumbs[m.id] = 1; });
     paint_(cachedFor);
 
     var thumbPs = all.map(function (m) {
       if (_thumbCache[m.id]) return Promise.resolve(_thumbCache[m.id]);
+      if (m.thumbDataUrl) return Promise.resolve(m.thumbDataUrl);
       if (!store) return Promise.resolve(null);
       return store.get('stock_t_' + m.id).then(function (blob) {
         if (blob) {
@@ -1819,6 +1906,11 @@
       // detail.draft(app.jsがmake()入口で__go5DraftPendingを消費して確定した権威)だけで判定する。
       if (!(e && e.detail && e.detail.draft)) return;
       var detail = e.detail;
+      var blobUsable = isUsableVideoBlob_(detail.blob);
+      var holdMessage = blobUsable
+        ? '動画をこの端末にも雲にも確認できませんでした。ページは移動せず動画を保持しています。「もう一度保存」で再確認します。'
+        : '生成された動画データが空または不完全でした。壊れたドラフトは一覧へ保存していません。動画作成タブで、もう一度「ドラフトで作成」を押してください。';
+      var retryPossible = blobUsable;
       // 生成完了で動画作成タブ→ドラフトタブへ自動遷移(Chami依頼2026-08-13「前は遷移してた、戻して」)。
       //   ★ボタンの click 経由(tabStock.click)に依存せず、ドラフトページ(Stock.html)へ明示遷移する=
       //     配線変更や他ハンドラの割り込みで遷移が黙って止まらないようにする。既にドラフトページ上なら再描画のみ。
@@ -1842,13 +1934,14 @@
           ? Go5SaveGate.decide(gate)
           : (gate.localLanded || gate.cloudLanded ? 'navigate' : (gate.timerFired ? 'hold' : 'wait'));
         if (act === 'navigate') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } hideSaveHold_(); goDraft_(); }
-        else if (act === 'hold') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } showSaveHold_(); }
+        else if (act === 'hold') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } showSaveHold_(holdMessage, retryPossible); }
       }
       // 期限=旧25秒。着地していれば .then 経路で既に遷移済み。ここへ来る=まだ未着地。
       //   着地済みなら navigate(保険)、未着地なら hold(明示保留)=黙って全滅しない。
       navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 25000);
 
       var hooks = {
+        onStart: function (id) { draftId = id; },
         onLocal: function (id) { draftId = id; gate.localLanded = true; decideNav_(); },
         onCloud: function (id) { draftId = id; gate.cloudLanded = true; decideNav_(); },
         // 両方が「着地できずに」決着=着地不能が確定。25秒を待たず今すぐ hold へ倒す。
@@ -1861,14 +1954,27 @@
       window.__go5RetrySave = function () {
         hideSaveHold_();
         gate.timerFired = false;
-        if (!draftId || !detail.blob || !(window.Go5Sync && Go5Sync.putBlobR2At)) { goDraft_(); return; } // 材料が無ければ閉じ込めない
+        if (!draftId || !isUsableVideoBlob_(detail.blob)) {
+          retryPossible = false;
+          gate.timerFired = true;
+          decideNav_();
+          return;
+        }
         navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 20000);
+        // リトライはR2だけでなくIDB書込み+読み戻しも再実行する。同期未設定端末でも手元保存の復帰で救える。
         try {
-          ensureVideoMirror_(draftId, detail.blob).then(function () {
-            if (_vidUp[draftId]) { gate.cloudLanded = true; }
+          firstVideoLanding_(draftId, detail.blob).then(function (kind) {
+            var pending = _pendingDraftMeta[draftId];
+            if (pending) { pending.videoReadyAt = Date.now(); pending.videoBytes = detail.blob.size; }
+            return commitPendingDraft_(draftId).then(function () { return kind; });
+          }).then(function (kind) {
+            if (kind === 'local') gate.localLanded = true; else gate.cloudLanded = true;
             decideNav_();
-          }).catch(function () { decideNav_(); });
-        } catch (e3) { decideNav_(); }
+          }).catch(function () {
+            gate.timerFired = true;
+            decideNav_();
+          });
+        } catch (e3) { gate.timerFired = true; decideNav_(); }
       };
 
       // ★saveStock_ が「同期例外」を投げた場合、.then/.catch のどちらにも乗らず遷移が黙って消える。
