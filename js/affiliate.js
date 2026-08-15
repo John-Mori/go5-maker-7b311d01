@@ -52,6 +52,14 @@
       location.href = 'Stock.html';
       return;
     }
+    // 投稿履歴も同じく軽量専用ページ(StockLists.html)へ。index.html の重い app.js/Canvas と同居させない
+    //   =iOS Safari のメモリ都合で履歴画像blobが落ちるのを避ける(Chami指示2026-08-16「投稿履歴も別ページで分離」)。
+    //   復元(go5_active_tab='tabVerify')でここへ来た時も本体内の旧pageVerifyは開かず専用ページへ寄せる。
+    if (activeBtnId === 'tabVerify' && !window.__go5VerifyStandalone) {
+      try { localStorage.setItem('go5_active_tab', 'tabVerify'); } catch (e) {}
+      location.href = 'StockLists.html';
+      return;
+    }
     var outgoing = currentTab; // 直前に前面だったタブ(離れる=DOMを空にしてメモリ解放する対象の判定)
     TABS.forEach(function (t) {
       var b = document.getElementById(t.btn), p = document.getElementById(t.page);

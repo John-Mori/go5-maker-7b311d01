@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- 投稿履歴 専用ページ(2026-08-16 新設)。index.html の動画Canvas/背景動画/app.js を積まない中量ページ=
+     iOS Safari のメモリ都合によるページ破棄・画像blobの取りこぼし(「動画で使った画像が出ない」)を軽くする。
+     ★候補(KouhoLists.html)・ドラフト(Stock.html)に続く3枚目の分離。データは localStorage/IndexedDB を
+       index.html と共有(同一オリジン)=中身は分かれない。
+     ★★重要: このページは __go5CandidateStandalone を立てない。candidates.js は standalone 時に
+       履歴画像(used:/post:)のハイドレートをスキップする(candidates.js hydrateImages_・行1237)ため、
+       立てると「投稿履歴の画像が出ない」を自ら再現してしまう。ここでは index.html と同じ全ハイドレートを回す。 -->
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="投稿履歴">
+<meta name="theme-color" content="#0b0f17">
+<link rel="manifest" href="manifest.webmanifest?v=815">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=815">
+<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=815">
+<title>投稿履歴 — 5秒動画メーカー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=815">
+<script>
+/* 背景フック(data-tab)とアカウント色を描画前に確定=継ぎ目/色チラつき対策。
+   ★standalone フラグは立てない(履歴画像の全ハイドレートを回すため=上のコメント参照)。 */
+try {
+  // このページが投稿履歴の専用ページ本体である印。affiliate.js を積まないので実害は無いが、
+  //   将来ここで affiliate.js が読まれても showTab('tabVerify') の StockLists.html への
+  //   跳ね返し(リダイレクトループ)を防ぐ(tabStock の __go5StockStandalone と同じ役割)。
+  window.__go5VerifyStandalone = true;
+  document.documentElement.setAttribute('data-tab', 'tabVerify');
+  var _a0 = localStorage.getItem('current_account') || 'acc1';
+  document.documentElement.setAttribute('data-account', _a0 === 'acc2' ? 'acc2' : 'acc1');
+  localStorage.setItem('go5_active_tab', 'tabVerify');
+} catch (e) {}
+</script>
+</head>
+<body>
+<header><h1>5秒動画メーカー</h1></header>
+
+<div class="acct-bar">
+  <span class="acct-bar-label">アカウント</span>
+  <button id="acctBtn1" class="acct-btn active" type="button">月詠み色恋劇場</button>
+  <button id="acctBtn2" class="acct-btn" type="button">宵桜艶帖～Yoizakura Tsuyacho～</button>
+  <div class="acct-launch-row">
+    <button id="reserveBtn" class="cal-launch-btn" type="button" data-overlay="reserveBtn">⏰ 予約</button>
+    <button id="calBtn" class="cal-launch-btn" type="button" data-overlay="calBtn">📅 カレンダー</button>
+    <button id="analyzeBtn" class="cal-launch-btn" type="button" onclick="try{localStorage.setItem('analytics_view','analyze')}catch(e){}location.href='analytics.html'">📊 分析</button>
+    <button id="rankBtn" class="cal-launch-btn" type="button" onclick="try{localStorage.setItem('analytics_view','rank')}catch(e){}location.href='analytics.html'">🏆 ランキング</button>
+  </div>
+  <span class="acct-bar-note">アカウントごとに背景・Bluesky設定(ハンドル/アプリPW/本文/YouTube説明欄等)が切替わります。記録用GASは共通。</span>
+</div>
+
+<!-- タブバーは index.html と同一構造。投稿履歴だけこのページで前面。他タブは index.html の該当タブへ、
+     候補/ドラフトは各専用ページへ、予約/カレンダーは index.html のオーバーレイを開いて遷移。 -->
+<nav class="tabbar">
+  <button id="tabCand"    class="tab" data-nav="KouhoLists.html">💡 候補</button>
+  <button id="tabVerify" class="tab active">📋 投稿履歴</button>
+  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=815" alt=""> 動画作成</button>
+  <button id="tabStock" class="tab" data-nav="Stock.html">📦 ドラフト</button>
+  <button id="tabYT"    class="tab" data-go="tabYT"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
+  <button id="tabPost"  class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=815" alt=""> 投稿</button>
+  <button id="tabAffi"  class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=815" alt=""> AFIリンク</button>
+  <button id="tabSettings" class="tab" data-go="tabSettings">⚙️ 詳細設定</button>
+</nav>
+
+<!-- 検証画面(Phase4：Bluesky指標ダッシュボード)。index.html の pageVerify をそのまま移設(hidden を外して常時表示)。
+     描画は yt-clicks.js(#ytClickList・自身が readyState で paintCachedNow_→render)/ verify.js(#verifyList)/
+     link-ledger.js(#linkLedgerList)。履歴の画像は candidates.js(Go5Cand)がIDBからハイドレートして供給する。 -->
+<section id="pageVerify">
+<main>
+  <!-- 再生数・クリック数(投稿別・このアカウント) -->
+  <section class="card">
+    <div class="field-label">▶<img class="emico" src="assets/icons/ic-link.png?v=815" alt="リンク"> 再生数・クリック数(投稿別・このアカウント)</div>
+    <div class="hint">投稿した<b>短縮URLのクリック数</b>と、説明欄に載せた<b>YouTube動画の再生数</b>を一覧します。各行の「YouTube URL」を入れると、その動画の<b>再生数</b>と<b>YouTube投稿日時</b>を取得します。(取得には ⚙️詳細設定 のAPIキーが必要)<br>日時は<b>YouTubeに投稿した時刻</b>を表示し、新しい順に並びます。URL未入力で投稿日時が不明なものは下にまとめます。</div>
+    <details class="tools-fold">
+      <summary>⚙ 管理・診断ツール(手動追加/同期/整理/修復)</summary>
+      <div class="tools-fold-body">
+        <div class="yt-updrow">
+          <button id="ytFetchDmm" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico fico" src="assets/icons/ic-fanza.png?v=815" alt="F"> DMM</span><span class="ub-l2">作品情報を取得</span></button>
+          <button id="ytClickRefresh" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico" src="assets/icons/ic-link.png?v=815" alt=""> &amp; 🔄</span><span class="ub-l2">更新</span></button>
+        </div>
+        <div class="status" id="ytDmmStatus" style="text-align:left;margin-top:6px;"></div>
+        <div class="status" id="ytClickStatus" style="text-align:left;margin-top:6px;"></div>
+        <div class="vlist-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="ytAddManual" class="ghost" type="button" style="flex:1 1 44%;background:#dc465a;border-color:#dc465a;color:#fff;font-weight:700;">➕ つべ動画を手動追加</button>
+          <button id="ytPruneSheet" class="ghost" type="button" style="flex:1 1 44%;" hidden>🧹 履歴を整理</button>
+          <button id="ytSyncSheet" class="ghost" type="button">📤 スプレッドシートへ同期</button>
+          <button id="ytRepairAcct" class="ghost" type="button">🩺 アカウント検証・修復</button>
+          <button id="ytLossEvidence" class="ghost" type="button" title="投稿履歴が減った瞬間に自動記録された証拠を表示します(消えた時の原因調査用)">🕵 履歴消失の証拠を見る</button>
+          <button id="ytRepairLinks" class="ghost" type="button">🔧 YT情報を診断・修復</button>
+          <button id="ytRestoreHist" class="ghost" type="button">📥 シートから投稿履歴を復元</button>
+          <button id="ytBulkGen" class="ghost" type="button" style="font-size:11px;padding:4px 8px;opacity:.7;"><img class="emico" src="assets/icons/ic-link.png?v=815" alt="リンク"> 計測リンク再生成</button>
+        </div>
+        <div class="hint">投稿履歴を開くと、未生成の投稿に<b>計測用の短縮リンクが自動生成</b>されます。(各行の「Bsky↗」が計測用URL。長押しでコピー→YouTube概要欄に貼り替え)「<img class="emico" src="assets/icons/ic-link.png?v=815" alt="リンク"> 計測リンク再生成」は手動でやり直したいときだけ使います。</div>
+        <div class="hint">「📤 スプレッドシートへ同期」＝この投稿履歴を正として、ID・投稿日時・題名・視聴回数・短縮URL・クリック数・作品cid・キャラ属性を記録シートへまとめて反映します。(押すと最新の再生数等を取得してから送信。記録用GAS設定時のみ)<br>「🧹 履歴を整理」＝この投稿履歴に無い行を記録シートから消去します。(このアカウントのタブのみ)</div>
+      </div>
+    </details>
+    <div id="ytClickList" class="vlist"></div>
+  </section>
+
+  <!-- 短縮リンク台帳(手動作成分も含む全計測リンクのクリック数を一覧) -->
+  <section class="card" id="linkLedger">
+    <div class="field-label">🔗 短縮リンク台帳</div>
+    <div class="hint">このワーカーが払い出した<b>全短縮リンク</b>(手動短縮・セール会場リンク含む)とクリック数の一覧。🏮=セール会場 / 🛒=FANZA作品(投稿→FANZA・導線2) / 🦋=Bsky投稿。(YT→投稿・導線1)</div>
+    <button id="linkLedgerLoad" class="ghost" type="button">🔄 読み込む</button>
+    <div id="linkLedgerList" style="margin-top:8px;"></div>
+  </section>
+
+  <section class="card">
+    <div class="field-label">🧪 検証ダッシュボード(Bluesky指標)</div>
+    <div class="hint">公開済み投稿の <b>いいね/リポスト/返信</b>(Bluesky公開APIから取得)＋<b>Bitlyクリック</b>＋<b>FANZA成約(手入力)</b>を day-type 別に集計。アフィリンクの実クリック数は FANZA 管理画面が正で、ここは到達/反応の代理指標です。</div>
+    <button id="verifyRefresh" class="ghost">🔄 エンゲージメント更新</button>
+    <div class="status" id="verifyStatus"></div>
+  </section>
+  <section class="card">
+    <div class="field-label">day-type 別サマリ</div>
+    <div id="verifySummary"></div>
+  </section>
+  <section class="card">
+    <div class="field-label">公開済み投稿</div>
+    <div id="verifyList"></div>
+  </section>
+</main>
+</section>
+
+<!-- bluesky.js は #bskyText を起動条件にしている。投稿履歴ページでは投稿UIは持たないが、
+     計測用短縮リンクの自動生成(measureWorkLink_ 等)を yt-clicks から使うため、非表示の処理ホストを置く。
+     表示UI・自動投稿ボタンは無いので、投稿そのものが発火することはない(Stock.html と同じ作法)。 -->
+<textarea id="bskyText" hidden aria-hidden="true"></textarea>
+<input id="bskyWorkUrl" type="hidden" aria-hidden="true">
+<input id="bskyHandle" type="hidden" aria-hidden="true">
+<div id="pvImgWrap" hidden aria-hidden="true"><img id="pvImg" alt=""></div>
+
+<!-- ── core 層 ── -->
+<script src="core/util.js?v=815"></script>
+<script src="core/account.js?v=815"></script>
+<script src="core/storage-keys.js?v=815"></script>
+<script src="core/categories.js?v=815"></script>
+<script src="core/movie-attrs-core.js?v=815"></script>
+<script src="core/idb-store.js?v=815"></script>
+<script src="core/sync.js?v=815"></script>
+<script src="core/kaizen-log.js?v=815"></script>
+<script src="core/operation-gate.js?v=815"></script>
+<!-- ── 機能層(投稿履歴の描画に要るものだけ。app.js/affiliate.js/stock.js は積まない) ── -->
+<script src="js/idgen.js?v=815"></script>
+<script src="js/promo-label.js?v=815"></script>
+<script src="js/affiliate-core.js?v=815"></script>
+<script src="js/fanza-core.js?v=815"></script>
+<script src="js/bluesky-core.js?v=815"></script>
+<script src="js/scheduler.js?v=815"></script>
+<script src="js/bluesky.js?v=815"></script>
+<script src="js/drive-upload.js?v=815"></script>
+<script src="js/verify-core.js?v=815"></script>
+<script src="js/verify.js?v=815"></script>
+<script src="schedule/data/holidays.js?v=815"></script>
+<script src="js/hist-merge-core.js?v=815"></script>
+<script src="js/rank-core.js?v=815"></script>
+<script src="js/yt-clicks.js?v=815"></script>
+<script src="js/link-ledger.js?v=815"></script>
+<!-- ★candidates.js は「投稿履歴の画像」供給源(Go5Cand.usedImgs/postImgs/refImgs)。必ず standalone フラグ無しで読む。 -->
+<script src="js/candidates.js?v=815"></script>
+<script>
+(function () {
+  'use strict';
+  function reflect(id) {
+    var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
+    if (b1) b1.classList.toggle('active', id === 'acc1');
+    if (b2) b2.classList.toggle('active', id === 'acc2');
+    document.documentElement.setAttribute('data-account', id === 'acc2' ? 'acc2' : 'acc1');
+  }
+  function setAcct(id) {
+    try { localStorage.setItem('current_account', id); } catch (e) {}
+    reflect(id);
+    // account-changed を投げると yt-clicks が「表示中の投稿履歴」を refresh する(yt-clicks 行3920)。
+    try { document.dispatchEvent(new CustomEvent('account-changed', { detail: { account: id } })); } catch (e) {}
+  }
+  var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
+  if (b1) b1.addEventListener('click', function () { setAcct('acc1'); });
+  if (b2) b2.addEventListener('click', function () { setAcct('acc2'); });
+  var cur = 'acc1'; try { cur = localStorage.getItem('current_account') || 'acc1'; } catch (e) {}
+  reflect(cur);
+
+  // 他タブ(index.html の該当タブ)へ遷移。restoreActiveTab_ が go5_active_tab を読む。
+  document.querySelectorAll('.tabbar .tab[data-go]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      try { localStorage.setItem('go5_active_tab', btn.getAttribute('data-go')); } catch (e) {}
+      location.href = 'index.html';
+    });
+  });
+  // 候補/ドラフトの専用ページへ直接遷移。
+  document.querySelectorAll('.tabbar .tab[data-nav]').forEach(function (btn) {
+    btn.addEventListener('click', function () { location.href = btn.getAttribute('data-nav'); });
+  });
+  // 投稿履歴タブ(自ページの前面)を押したら再描画。(yt-clicks 側の #tabVerify クリックで refresh も走る)
+  var tv = document.getElementById('tabVerify');
+  if (tv) tv.addEventListener('click', function () { if (window.Go5Verify && window.Go5Verify.render) { try { window.Go5Verify.render(); } catch (e) {} } });
+
+  // 予約/カレンダーは index.html のオーバーレイ。希望を残して遷移し index 側で開かせる。
+  document.querySelectorAll('.acct-launch-row [data-overlay]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      try { sessionStorage.setItem('go5_open_overlay', btn.getAttribute('data-overlay')); } catch (e) {}
+      location.href = 'index.html';
+    });
+  });
+
+  // yt-clicks 自身が readyState で paintCachedNow_→render() を回すが、念のため描画を叩く(冪等)。
+  if (window.Go5Verify && window.Go5Verify.render) { try { window.Go5Verify.render(); } catch (e) {} }
+}());
+</script>
+</body>
+</html>
