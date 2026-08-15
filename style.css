@@ -622,7 +622,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .vedit-field-plat{margin-top:0;}
 .vedit-field input,.vedit-field select{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);width:100%;box-sizing:border-box;}
 /* 作品状態：ドロップダウンを1/3幅にし、右に「データ再作成」ボタン(反映されてない履歴の回復用・Chami依頼2026-08-15) */
-.vedit-ws-row{display:flex;gap:8px;align-items:stretch;justify-content:flex-start;}
+.vedit-ws-row{display:flex;gap:20px;align-items:stretch;justify-content:flex-start;}
 .vedit-ws-row .vedit-ws-select{flex:0 0 33%;width:33%;min-width:0;}
 .vedit-regen-btn{flex:0 0 auto;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;cursor:pointer;white-space:nowrap;}
 .vedit-regen-btn:active{background:#10203033;}
