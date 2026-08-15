@@ -842,6 +842,7 @@
       if (!result || !result.ok) {
         idbFail_(result && result.error ? result.error : new Error('idb-read-failed'));
         var old = legacyRefOf_(cid);
+        if (isR2Marker_(old)) { resolveR2IntoMem_(cid, old); return false; } // マーカーはR2から実体化(メモリ/IDBへ生で入れない)
         if (old) { _imgMem.ref[cid] = old; _refLoaded[cid] = true; return true; }
         return false; // 読取失敗を「存在しない」と誤認せず、空の上書きを許可しない
       }
@@ -852,7 +853,9 @@
       } else {
         // 旧localStorage形式が残っている端末は、この1件も移行完了前に安全に拾う。
         var legacy = legacyRefOf_(cid);
-        if (legacy) {
+        if (isR2Marker_(legacy)) {
+          resolveR2IntoMem_(cid, legacy); // マーカーはR2から実体化=生のマーカーをIDB/同期へ流さない
+        } else if (legacy) {
           _imgMem.ref[cid] = legacy;
           window.Go5Idb.set(idbKey('ref', cid), legacy).then(function () {
             try { localStorage.removeItem(refImgKey(cid)); } catch (e) {}
@@ -875,6 +878,9 @@
     //   LS退避画像が一生メモリへ載らず「保存できたのに何度リロードしても画像が出ない」が残っていた
     //   (Chami 2026-08-14①)。ここでLSも読めば、IDBが死んでいても同期で画像が出る=非破壊の追加読み。
     var base = (_idbOk ? (_imgMem.ref[cid] || null) : null) || legacyRefOf_(cid) || null;
+    // LSがR2マーカー(base64を持たない枚数印)なら、実体をR2から取り寄せてメモリへ載せる(裏で・冪等)。
+    //   表示側にはマーカーの内部(__r2n)を渡さず、テキストだけ持つ空画像レコードとして扱う=解決後の再描画で画像が出る。
+    if (isR2Marker_(base)) { resolveR2IntoMem_(cid, base); base = { comment: base.comment, memo: base.memo, twitterUrl: base.twitterUrl, twitterUrl2: base.twitterUrl2, urls2: base.urls2, at: base.at }; }
     var txt = candTextOf_(cid);
     if (!base && !txt) return null;
     if (!txt) return base; // 移行前の端末=IDB/旧LSの値をそのまま(cand_textはハイドレート後にbackfillされる)
@@ -896,6 +902,113 @@
     var has = Array.isArray(r.imgs) ? r.imgs.some(Boolean) : !!r.img;
     return !!(has || r.comment || r.memo || r.twitterUrl || r.twitterUrl2 || (r.urls2 && r.urls2.length));
   }
+
+  // ── R2 退避フォールバック(2026-08-15・C-038 恒久対策/Fable5根本解析)──────────────────────
+  //   真因: v=791 は「IDB書込失敗→画像base64をlocalStorage(cand_refimg__)へ退避」で fail-open したが、
+  //   iOS Safari の LS は1オリジン約5MB固定で、テキスト正本 cand_text と同じ枠を食い合う。IDBが慢性的に
+  //   間欠死する端末では退避が積もる一方(掃除役 migrateLocalImages_ はIDB復帰時しか消せない)＝5MB枯渇→
+  //   candTextSave_ すら QuotaExceeded で落ち「保存できませんでした」が毎回・決定的に出ていた。退避画像は
+  //   周期同期(isSyncIdbKey=IDBのみ読む)にもLS同期(cand_はlegacyNoSync)にも乗らず出口ゼロだった。
+  //   → 退避先を LS(base64) から R2(論理名アドレス putBlobR2At=sha256hex(名前)がキー)へ移し、LSには
+  //   ハッシュを持たず枚数マーカー {__r2n} だけ置く=cand_text の容量を奪わない。読み側は go5ref:<cid>:<idx>
+  //   から取り寄せてメモリへ実体化する。★不変条件: _imgMem.ref と IDB ref: には常に dataURL だけを入れる
+  //   (マーカーは決してメモリ/IDB/同期へ漏らさない=解決してから載せる)。R2不可(オフライン等)の時だけ従来の
+  //   base64 LS退避へ落ちる(双方向fail-open)。
+  var R2_REF_PREFIX = 'go5ref:';
+  function r2RefName_(cid, idx) { return R2_REF_PREFIX + String(cid) + ':' + idx; }
+  function r2Ready_() {
+    try { return !!(window.Go5Sync && window.Go5Sync.configured && window.Go5Sync.configured() && window.Go5Sync.putBlobR2At && window.Go5Sync.fetchBlobR2At); } catch (e) { return false; }
+  }
+  function isR2Marker_(rec) {
+    return !!(rec && typeof rec === 'object' && !Array.isArray(rec) && rec.__r2n > 0 &&
+      !(Array.isArray(rec.imgs) && rec.imgs.some(Boolean)) && !rec.img);
+  }
+  function dataUrlToBlob_(u) {
+    try {
+      var m = /^data:([^;,]*?)(;base64)?,([\s\S]*)$/.exec(String(u || '')); if (!m) return null;
+      var mime = m[1] || 'image/jpeg', isB64 = !!m[2], data = m[3], bytes;
+      if (isB64) { var bin = atob(data); bytes = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); }
+      else { var dec = decodeURIComponent(data); bytes = new Uint8Array(dec.length); for (var j = 0; j < dec.length; j++) bytes[j] = dec.charCodeAt(j); }
+      return new Blob([bytes], { type: mime });
+    } catch (e) { return null; }
+  }
+  function blobToDataUrl_(blob) {
+    return new Promise(function (resolve) {
+      try { var fr = new FileReader(); fr.onload = function () { resolve(fr.result); }; fr.onerror = function () { resolve(null); }; fr.readAsDataURL(blob); } catch (e) { resolve(null); }
+    });
+  }
+  // imgs(dataURL配列) を go5ref:<cid>:<idx> で R2 へ。全枚成功で true、1枚でも失敗で false(=部分退避で縮小しない)。
+  function pushRefToR2_(cid, imgs) {
+    if (!r2Ready_() || !imgs || !imgs.length) return Promise.resolve(false);
+    return imgs.reduce(function (p, u, i) {
+      return p.then(function (okAll) {
+        if (!okAll) return false;
+        var blob = dataUrlToBlob_(u); if (!blob) return false;
+        return window.Go5Sync.putBlobR2At(r2RefName_(cid, i), blob).then(function (key) { return !!key; }, function () { return false; });
+      });
+    }, Promise.resolve(true)).catch(function () { return false; });
+  }
+  // go5ref:<cid>:0..n-1 → dataURL配列。全枚取れたら配列、1枚でも欠けたら null(消えたと誤判定せずマーカーを残す)。
+  function resolveRefFromR2_(cid, n) {
+    if (!r2Ready_() || !(n > 0)) return Promise.resolve(null);
+    var idxs = []; for (var i = 0; i < n; i++) idxs.push(i);
+    var out = [];
+    return idxs.reduce(function (p, i) {
+      return p.then(function () {
+        if (out === null) return;
+        return window.Go5Sync.fetchBlobR2At(r2RefName_(cid, i)).then(function (blob) {
+          if (!blob) { out = null; return; }
+          return blobToDataUrl_(blob).then(function (u) { if (!u) out = null; else if (out) out.push(u); });
+        }, function () { out = null; });
+      });
+    }, Promise.resolve()).then(function () { return out; }).catch(function () { return null; });
+  }
+  var _r2ResolveJobs = {};
+  // LSのR2マーカーをR2から実体化して _imgMem.ref[cid] へ dataURL で載せる。冪等(多重発射・既に実体あり=no-op)。
+  function resolveR2IntoMem_(cid, marker) {
+    cid = String(cid || '');
+    if (!cid || _r2ResolveJobs[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) return;
+    if (!isR2Marker_(marker)) return;
+    _r2ResolveJobs[cid] = true;
+    resolveRefFromR2_(cid, marker.__r2n).then(function (imgs) {
+      delete _r2ResolveJobs[cid];
+      if (!imgs || !imgs.length) return; // 取れなければマーカーのまま=次回再試行(「無い」と断定しない)
+      _imgMem.ref[cid] = {
+        imgs: imgs, img: imgs[0] || '', comment: marker.comment || '', memo: marker.memo || '',
+        twitterUrl: marker.twitterUrl || '', twitterUrl2: marker.twitterUrl2 || '', urls2: marker.urls2 || [], at: marker.at || 0
+      };
+      _refLoaded[cid] = true;
+      try {
+        var page = document.getElementById('pageCand');
+        var btn = page && liveRefButton_(page, cid);
+        var card = btn && (btn.closest ? btn.closest('.cand-card') : null);
+        if (card) updateCardRefThumb_(card, cid);
+      } catch (e) {}
+    }, function () { delete _r2ResolveJobs[cid]; });
+  }
+  // 起動時の解毒: LSに積もった base64 退避(v=791の毒)をR2へ逃がして枚数マーカーへ縮小し、cand_textと
+  //   食い合う5MBを解放する。既にマーカーの物はR2から実体をメモリへ載せる。★confirm-before-shrink=
+  //   R2 PUT成功を確認してからLSを縮める(唯一のコピーを先に消さない)。IDBが生きていれば migrateLocalImages_ が
+  //   先にIDBへ移す=ここは「IDB間欠死の端末で退避がLSに積もり続ける」経路にだけ効く(冪等)。
+  function hydrateR2Refs_() {
+    if (!r2Ready_()) return;
+    var keys = [];
+    try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('cand_refimg__') === 0) keys.push(k); } } catch (e) {}
+    keys.forEach(function (k) {
+      var cid = k.slice('cand_refimg__'.length);
+      var val; try { val = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { val = null; }
+      if (!val) return;
+      if (isR2Marker_(val)) { resolveR2IntoMem_(cid, val); return; }
+      var imgs = Array.isArray(val.imgs) ? val.imgs.filter(Boolean) : (val.img ? [val.img] : []);
+      if (!imgs.length) return;
+      pushRefToR2_(cid, imgs).then(function (ok) {
+        if (!ok) return; // R2不可=そのまま(migrateがIDBへ移す機会を待つ)
+        var marker = { __r2n: imgs.length, comment: val.comment || '', memo: val.memo || '', twitterUrl: val.twitterUrl || '', twitterUrl2: val.twitterUrl2 || '', urls2: val.urls2 || [], at: val.at || 0 };
+        try { if (localStorage.getItem(k) != null) { localStorage.setItem(k, JSON.stringify(marker)); klog_('ref_image_detox_r2', 'work', cid, { n: imgs.length }); } } catch (e) {}
+      });
+    });
+  }
+
   function refImgSave(cid, data) {
     cid = String(cid || ''); if (!cid) return false;
     // data.imgs(配列・新)または data.img(単発・旧)を受け付け、{imgs, img:先頭} で保存。(img は旧読み手互換用)
@@ -957,23 +1070,33 @@
         return true;
       }, function (e) {
         idbFail_(e);
-        // ★IDB書込が落ちても、テキスト(コメント/URL)は既に cand_text へ確定保存済み。画像も
-        //   localStorage(cand_refimg__<cid>)へ退避すれば喪失しない=migrateLocalImages_ がIDB復帰時に
-        //   LS→IDBへ移し、reqSync_ が裏でR2へも送る。退避できたら成功扱いにしてモーダルを閉じさせる
-        //   ＝「この端末へ保存できませんでした」で閉じ込めない(Chami 2026-08-14「すぐ保存して閉じさせて」)。
-        //   iOS SafariのIDBは一時的に接続死するがLS書込は通ることが多い=fail-openで前へ進める。
-        //   LSも容量超過等で落ちた時だけ本当の失敗として false を返す(モーダル保持・再操作可)。
-        try {
-          if (rec) localStorage.setItem(refImgKey(cid), JSON.stringify(rec));
-          else localStorage.removeItem(refImgKey(cid));
-          // メモリ(_imgMem.ref[cid])は line 890 で既に新しい画像/削除済み=そのまま保持(idbFail_ の注記どおり)。
-          _refLoaded[cid] = true;
-          reqSync_();
-          return true;
-        } catch (e2) {
-          if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid];
-          return false;
+        // ★IDB書込が落ちても、テキスト(コメント/URL)は既に cand_text へ確定保存済み。画像は「まずR2へ退避し、
+        //   LSにはハッシュを持たない枚数マーカー {__r2n} だけ置く」=cand_text と食い合う5MBを奪わない
+        //   (v=791の base64 LS退避が5MBを枯らして"毎回保存できませんでした"を起こしていた真因の恒久対策・
+        //   Fable5根本解析2026-08-15/C-038)。R2成功で成功扱いにしてモーダルを閉じさせる。
+        //   R2不可(オフライン/未設定)の時だけ従来どおり base64 をLSへ退避(双方向fail-open)。
+        //   両方落ちた時だけ本当の失敗として false(モーダル保持・再操作可)。メモリ(_imgMem.ref[cid])は
+        //   既に新しい画像/削除済み=表示は無傷。削除(rec=null)はR2を触らずマーカー/退避を消すだけ。
+        if (!rec) {
+          try { localStorage.removeItem(refImgKey(cid)); _refLoaded[cid] = true; reqSync_(); return true; }
+          catch (e2) { if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid]; return false; }
         }
+        return pushRefToR2_(cid, imgs).then(function (r2ok) {
+          if (r2ok) {
+            var marker = { __r2n: imgs.length, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
+            try { localStorage.setItem(refImgKey(cid), JSON.stringify(marker)); _refLoaded[cid] = true; reqSync_(); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length }); return true; } catch (e3) {}
+          }
+          // R2に載らなかった=従来の base64 LS退避へ(img複製は落として足跡を半減=P1-3)。
+          try {
+            var recLs = { imgs: imgs, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
+            localStorage.setItem(refImgKey(cid), JSON.stringify(recLs));
+            _refLoaded[cid] = true; reqSync_(); return true;
+          } catch (e2) {
+            if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid];
+            klog_('ref_image_save_failed', 'work', cid, { cause: (e2 && e2.name) || 'quota', r2: r2ok ? 1 : 0, imgs: imgs.length });
+            return false;
+          }
+        });
       });
     }
     try {
@@ -1106,6 +1229,7 @@
       mergeImageEntries_(all);
       return migrateLocalImages_();
     }).then(function () {
+      try { hydrateR2Refs_(); } catch (e) {} // IDBへ移せなかった退避画像をR2へ逃がして解毒(冪等)
       _candidateHydrateInFlight = false;
       _candidateHydrateFailures = 0;
       markCandidateHydrated_(); // 候補画像・コメントの空保存拒否をここで解除
@@ -1128,6 +1252,8 @@
       var cid = k.slice(isRef ? 'cand_refimg__'.length : 'cand_bskyimg__'.length);
       var val; try { val = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { val = null; }
       if (!val) { try { localStorage.removeItem(k); } catch (e) {} return Promise.resolve(); }
+      // R2マーカーはIDB/同期へ生で流さない=R2から実体化してメモリへ載せ、LSにはマーカーを残す(冪等)。
+      if (isRef && isR2Marker_(val)) { resolveR2IntoMem_(cid, val); return Promise.resolve(); }
       if (isRef) _imgMem.ref[cid] = val; else _imgMem.bsky[cid] = val;
       return window.Go5Idb.set(idbKey(isRef ? 'ref' : 'bsky', cid), val)
         .then(function () { try { localStorage.removeItem(k); } catch (e) {} })
@@ -4274,8 +4400,13 @@
   //     (_candidateHydrated)だけで「無い」と断定しない=同期/別タブで後から届く画像を「消えた」と誤表示しない
   //     (C-041=一度の観測を状態の代理にするな。Chami 2026-08-15「画像あるはずなのよ、消えてるってこと」)。
   function refSlotState_(cid) {
-    var rr = refImgOf(cid);
     var has = refImgsOf_(cid).length > 0;
+    // R2マーカー(base64を持たず実体はR2)なら「画像あり・取り寄せ中」=⏳ loading にし、⚠(消えた)と誤表示しない。
+    if (!has && !Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
+      var lg = legacyRefOf_(cid);
+      if (isR2Marker_(lg)) { resolveR2IntoMem_(cid, lg); return 'loading'; }
+    }
+    var rr = refImgOf(cid);
     var worked = !!(rr && (rr.comment || rr.memo));
     var inMem = Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
     return refSlotDecide_(has, worked, _idbOk, _refLoaded[cid] === true, inMem, _candidateHydrated);
@@ -4489,6 +4620,8 @@
     });
   } catch (e) {}
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行(5MB枠を解放)
+  // IDBが使えない/展開が走らない端末でも、LSに積もった退避画像をR2へ逃がす解毒を一度は必ず動かす(冪等・非破壊)。
+  try { setTimeout(function () { try { hydrateR2Refs_(); } catch (e) {} }, 2500); } catch (e) {}
   // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ(登録済みはフラグでスキップ＝通信は初回のみ)
   ensureTrackedAll();
   schedulePoolSync_(); // 起動時: 📚タブを開かなくても保存済み候補を D1 へ同期(部門が読める)
