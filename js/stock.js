@@ -1158,6 +1158,17 @@
       return blobToDataUrlP_(prevBlob);
     }).catch(function () { return null; });
   }
+  // videoId→この端末(IDB)or 雲(R2)の動画Blobを取り寄せる。無ければ null。
+  //   ★投稿履歴の「データ再作成」(yt-clicks.js)がDriveへ一式保存し直す時、端末側の動画本体が要るため公開する
+  //   (Driveからも取れるが、端末に生きていれば再ダウンロード不要=こちらを先に試す・Chami依頼2026-08-15)。
+  function videoBlobForId_(videoId) {
+    if (!videoId) return Promise.resolve(null);
+    var all = loadMeta().concat(loadArchive());
+    var m = null;
+    for (var i = 0; i < all.length; i++) { if (all[i] && all[i].videoId === videoId) { m = all[i]; break; } }
+    if (!m) return Promise.resolve(null); // この端末に stock 記録が無い=動画の在りかを引けない
+    return resolveVideoBlob_(m.id).catch(function () { return null; });
+  }
 
   var _renderSeq = 0, _lastRenderedStockSig = '', _missingThumbs = {}, _stockBgPending = false;
   // 作成履歴(details)の開閉状態を再描画をまたいで保持する。render毎に<details>を作り直すと
@@ -2078,7 +2089,7 @@
       });
     }
 
-    window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_ };
+    window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_, videoBlobForId: videoBlobForId_ };
 
     // 動画・画像ミラーは保存直後に即送信し、ここでは旧データ/一時失敗ぶんだけを静かに再試行する。
     // 最大50件を同時発火していた旧30秒sweepはiOSのメモリ圧を上げるため、逐次処理＋2分周期へ変更。

@@ -1837,6 +1837,92 @@
     prevbfRunJob_(ch);
   }
 
+  // ── 「🔄 データ再作成」(編集モーダル・単一レコード) ────────────────────────────────
+  //   Chami依頼(2026-08-15): 反映されていない履歴を回復する。編集中の作品について、動画(この端末→R2の
+  //   控え→Driveの保存本体 の順に取り寄せ)から仕上がりプレビューを起こし直し、①Googleドライブへ保存し直し
+  //   ②投稿履歴カードの1ページ目へ反映する。動画そのものの再合成はしない(元動画をそのまま使う＝
+  //   狙い/コメント型の再選択やタップが要る"作り直し"はリビルド作成の担当)。上のチャンネル一括版
+  //   (runDrivePreviewBackfill_)と同じ生成経路を、この1件だけへ・既存プレビューがあっても作り直す。
+  function dataUrlToBlobP_(u) {
+    try { return fetch(u).then(function (r) { return r.blob(); }).catch(function () { return null; }); }
+    catch (e) { return Promise.resolve(null); }
+  }
+  function wireRegenButton_(k, it) {
+    var btn = $('veditRegen');
+    if (!btn) return;
+    btn.addEventListener('click', function () { regenRecordData_(k, it, btn); });
+  }
+  function regenRecordData_(k, it, btn) {
+    var cand = window.Go5Cand;
+    if (!cand || !cand.usedImgs || !cand.usedImgSave) { alert('画像ストア未対応の環境です。'); return; }
+    var ch = acct();
+    var videoId = it.videoId || '';
+    var title = it.title || '';
+    var pKey = videoId || itemKey(it);
+    if (!title) { alert('この履歴には作品名がないため再作成できません。'); return; }
+    if (!window.confirm('この作品のデータを再作成しますか？\n\n動画からプレビュー画像を作り直し、Googleドライブへ保存し直して、投稿履歴の1ページ目へ反映します。\n(反映されていない履歴を回復するための機能です)')) return;
+    var orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '再作成中…'; }
+    function done(msg) {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+      try { refresh(); } catch (e) {}
+      alert(msg);
+    }
+    var canDrive = (ch === 'acc1' || ch === 'acc2') && !!window.Go5Drive;
+    // ① Driveに既存のプレビューがあるか(あれば＝既にDrive保存済み。これを使い、再アップロードしない)。
+    var pDrivePrev = (canDrive && window.Go5Drive.fetchPreview)
+      ? window.Go5Drive.fetchPreview(ch, title).catch(function () { return null; })
+      : Promise.resolve(null);
+    pDrivePrev.then(function (drivePrevUrl) {
+      // ② 動画本体を取り寄せる(端末/R2 を先に、無ければDrive)。フル保存し直しに使う。
+      var pVideo = (window.Go5Stock && window.Go5Stock.videoBlobForId)
+        ? window.Go5Stock.videoBlobForId(videoId).catch(function () { return null; })
+        : Promise.resolve(null);
+      return pVideo.then(function (vbLocal) {
+        var pv2 = vbLocal ? Promise.resolve(vbLocal)
+          : ((canDrive && window.Go5Drive.fetchVideo) ? window.Go5Drive.fetchVideo(ch, title).catch(function () { return null; }) : Promise.resolve(null));
+        return pv2.then(function (videoBlob) {
+          // ③ プレビュー dataURL を決める：Drive既存 → 無ければ動画末尾フレームから生成。
+          var pPrev = drivePrevUrl ? Promise.resolve(drivePrevUrl)
+            : (videoBlob && window.Go5Stock && window.Go5Stock.previewFromVideoBlob
+                ? window.Go5Stock.previewFromVideoBlob(videoBlob).catch(function () { return null; })
+                : Promise.resolve(null));
+          return pPrev.then(function (previewUrl) {
+            if (!previewUrl && !videoBlob) {
+              done('動画もプレビューも見つかりませんでした。\n(この端末にもR2の控えにもGoogleドライブにも、この作品の動画がありません＝Drive保存が始まる前の古い投稿です。作成した端末で開くか、リビルド作成で作り直すと入ります)');
+              return;
+            }
+            if (!previewUrl) { done('動画は見つかりましたが、プレビュー生成に失敗しました。もう一度お試しください。'); return; }
+            // 反映：仕上がりプレビューを投稿履歴の1ページ目へ(再作成＝既存プレビューも置き換える)。
+            var used = (cand.usedImgs(pKey) || []).slice();
+            var prevN = cand.usedPrevCount ? (cand.usedPrevCount(pKey) || 0) : 0;
+            var srcImgs = used.slice(prevN); // 「動画で使った画像」(元画像)＝プレビューの後ろ
+            cand.usedImgSave(pKey, [previewUrl].concat(srcImgs.filter(function (u) { return u !== previewUrl; })), 1);
+            // Driveへ保存し直す(Drive既存なら不要)。
+            if (drivePrevUrl || !canDrive) {
+              done('データを再作成しました。\n・仕上がりプレビューを投稿履歴の1ページ目へ反映' + (drivePrevUrl ? '\n・Googleドライブには既に保存済み(既存プレビューを使用)' : ''));
+              return;
+            }
+            var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(videoId) : '';
+            if (folderId && window.Go5Drive.appendImage) {
+              dataUrlToBlobP_(previewUrl).then(function (pb) { if (pb) window.Go5Drive.appendImage(ch, title, folderId, pb); });
+              done('データを再作成しました。\n・仕上がりプレビューを投稿履歴の1ページ目へ反映\n・Googleドライブの同フォルダへプレビューを保存');
+            } else if (videoBlob && window.Go5Drive.upload) {
+              // フォルダの紐付けが端末に無い＝一式(動画＋元画像＋プレビュー)をDriveへ保存し直す(上書き・非破壊)。
+              Promise.all([dataUrlToBlobP_(previewUrl)].concat(srcImgs.map(dataUrlToBlobP_))).then(function (blobs) {
+                var pv = blobs[0], srcs = blobs.slice(1).filter(Boolean);
+                window.Go5Drive.upload(videoBlob, '', title, ch, videoId, srcs, pv);
+              });
+              done('データを再作成しました。\n・仕上がりプレビューを投稿履歴の1ページ目へ反映\n・一連のデータ(動画・元画像・プレビュー)をGoogleドライブへ保存し直し(上書き・非破壊)');
+            } else {
+              done('プレビューを投稿履歴の1ページ目へ反映しました。\n※Googleドライブへの保存は、この端末にフォルダの紐付けが無いため行えませんでした(作成した端末で開くと保存されます)。');
+            }
+          });
+        });
+      });
+    }).catch(function () { done('再作成中にエラーが発生しました。もう一度お試しください。'); });
+  }
+
   // ── render ──────────────────────────────────────────────────────────────
   function render() {
     var list = $('ytClickList');
@@ -2181,6 +2267,7 @@
           // シート由来行(別端末で作成)は「動画で使った画像」が欠けるので、ここでも後付け添付できるようにする。
           // 画像はvideoId単位の別ストア(write-through)＝localStorageの履歴配列には書き戻さない(INC-112防壁は無関係)。
           addPostImagesToModal_(k, it, 'used');
+          wireRegenButton_(k, it); // 「🔄 データ再作成」を配線(反映されてない履歴の回復・Chami依頼2026-08-15)
         } else {
           openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
             closeModal_();
@@ -2189,6 +2276,7 @@
           addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
           addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
           addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
+          wireRegenButton_(k, it); // 「🔄 データ再作成」を配線(反映されてない履歴の回復・Chami依頼2026-08-15)
         }
       });
     });
