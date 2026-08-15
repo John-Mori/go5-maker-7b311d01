@@ -370,6 +370,90 @@ def _scan_marker(s, marker):
 
 
 # ============================================================================
+# ★2026-08-16 追加(2件目)= **便の途中で声が入れ替わる**型を、1点だけ機械で掴む。
+# ----------------------------------------------------------------------------
+# 実物(軍議 msg 1538228314689376330・2026-08-16 01:50):
+#   花海咲季の名義で出た便が、前半は咲季の声(「〜のよ」「〜わ」)で、末尾だけ書き手の地の声へ
+#   落ち、**「わたしか咲季が答えるから」**= 自分を三人称で呼ぶ文になった。
+# ★なぜ既存のゲートで掴めないか:
+#   - 一人称ゲート(first_person_mismatch)= 「わたし」は咲季の正規一人称なので当たらない。
+#   - 指紋ゲート(signature_absent)= 指紋語尾が**便全体でゼロ**の時しか鳴らない。前半に在れば黙る。
+#   - 名義ゲートF(misattributed_speaker)= 便まるごとの取り違えを見る。**途中から**は対象外。
+#   → 「自分の名前を三人称の主語に使う」は、どの人格でも成立しない**構造の矛盾**だ。
+#     声の良し悪し(主観)を測らずに、途中交代を1点で掴める。
+# ★警告のみ(applied には入れない)。名前を機械が別の語へ置換すると文が壊れる=直す先は生成側。
+# ★既定=全人格が対象。外すのは写像へ `"self_name_ok": true` を足した人格だけ(方言と同じ形)。
+_SELF_PARTICLES = ("が", "は", "も")
+_KANJI4 = re.compile(r"^[一-鿿]{4}$")
+_SENT_SPLIT = re.compile(r"[。\n!?！？]")
+
+
+def _self_name_forms(persona, ent=None):
+    """話者自身を指す呼び名の候補(フルネーム＋姓/名)を機械的に作る。
+
+    ★増やしすぎない= 中黒で割る(ルカ・モドリッチ→ルカ/モドリッチ)か、
+      **漢字4文字**を2+2で割る(花海咲季→花海/咲季)だけ。別名表は持たない
+      (持てば20人格ぶんの保守が増え、判定材料が2本になる=ORG-11)。
+    ★カタカナ名は割らない。実測した誤検知= ククール→「クク」「ール」で
+      本文の「ル**ールは**」に当たった(2026-08-16・実データ1,443便の走査で4件)。
+    ★**その人格の一人称に入っている名前は候補にしない**(早坂芽衣の一人称は
+      ["芽衣","私"]= 「芽衣は〜」は自称であって三人称ではない。同走査で14件)。
+    ★`forbidden` に既に載っている名前も外す(モドリッチの自称「ルカ」は
+      既存の禁止語ゲートの担当= 二重に数えない)。
+    """
+    n = str(persona or "").strip()
+    if not n:
+        return []
+    forms = [n]
+    if "・" in n:
+        forms += [p for p in n.split("・") if p]
+    elif _KANJI4.match(n):
+        forms += [n[:2], n[2:]]
+    own = {str(x) for x in ((ent or {}).get("first_person") or [])}
+    ng = {str(x) for x in ((ent or {}).get("forbidden") or [])}
+    out = []
+    for f in dict.fromkeys(forms):
+        if len(f) >= 2 and f not in out and f not in own and f not in ng:
+            out.append(f)
+    return out
+
+
+def self_third_person(persona, text, ent=None):
+    """話者が**自分を三人称の他者として並べている**箇所を返す ((marker, index) or (None,-1))。
+
+    ★条件は2つ**同じ文の中で**揃った時だけ= ①自分の一人称 ②自分の名前＋主語の助詞。
+      「わたしか咲季が答えるから」= わたし(自分)と咲季(自分)が別人として並ぶ=構造の矛盾。
+    ★名前を出すだけでは鳴らさない(「ククールが持つぜ」は自称のニュアンスで正常。
+      実データ1,443便で、この「同じ文で併記」条件を足すと検知は 34件→数件へ落ちる)。
+    ★判定は保護span(引用・コード・パス)を潰した本文で行う= 他人の発言の引用に
+      自分の名前が出るのは正常なので数えない。
+    """
+    try:
+        s = _mask_protected(text)
+        if not s.strip():
+            return (None, -1)
+        own = [str(x) for x in ((ent or {}).get("first_person") or []) if str(x)]
+        if not own:
+            return (None, -1)          # 一人称が写像に無い人格は判定しない(fail-open)
+        forms = _self_name_forms(persona, ent)
+        if not forms:
+            return (None, -1)
+        base = 0
+        for sent in _SENT_SPLIT.split(s):
+            if sent and any(w in sent for w in own):
+                for f in forms:
+                    for p in _SELF_PARTICLES:
+                        for cand in (f + p, f + "さん" + p):
+                            i = sent.find(cand)
+                            if i >= 0:
+                                return (cand, base + i)
+            base += len(sent) + 1
+        return (None, -1)
+    except Exception:
+        return (None, -1)
+
+
+# ============================================================================
 # ★2026-08-16 追加= **名義の取り違え**(話者そのものが違う)を、口調の崩れと切り分ける。
 # ----------------------------------------------------------------------------
 # 実物(軍議 msg 1538227900598190230・2026-08-16 01:49:43):
@@ -494,7 +578,9 @@ def tone_verdicts(persona, dept, text, rules):
         #     forbidden / second_person_forbidden と同じ扱い)。
         sig = [str(x) for x in ((ent.get("signature_tails") or [])
                                 + (ent.get("signature_endings") or [])) if str(x)]
-        if not forbid and not ng2 and not want_dialect and not want_polite and not sig:
+        want_self = not bool(ent.get("self_name_ok"))     # ★2026-08-16 追加(既定=見る)
+        if (not forbid and not ng2 and not want_dialect and not want_polite
+                and not sig and not want_self):
             return out
         s = _strip_quotes(text)
         if not s.strip():
@@ -541,6 +627,19 @@ def tone_verdicts(persona, dept, text, rules):
                     "index": at,
                     "own_first_person": sorted(own),
                     "reason": "structural_polite",
+                })
+        if want_self:
+            # ★2026-08-16 追加(便の途中で声が入れ替わる型・上の self_third_person の説明)。
+            #   警告のみ= 名前を機械が置換すると文が壊れる。突き返し(session_relay)へ載せて
+            #   **次の便の生成側**へ返すのが正しい直し方。
+            _sf, _si = self_third_person(persona, text, ent)
+            if _sf:
+                out.append({
+                    "persona": str(persona or ""),
+                    "marker": "自分を三人称で呼んでいる(「%s」)" % _sf,
+                    "index": _si,
+                    "own_first_person": sorted(own),
+                    "reason": "self_third_person",
                 })
         if sig:
             hit, found, total, at = signature_drift(text, sig)
