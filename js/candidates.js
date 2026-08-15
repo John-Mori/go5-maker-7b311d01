@@ -1270,15 +1270,36 @@
     fr.readAsDataURL(file);
   }
   // クリップボードにコピーされた画像を取り出して縮小dataURLで返す。cb。(dataUrl, err)
+  //   ★認識を高める(Chami 2026-08-15「画像はコピーしてるのに"画像がない"と出る」):
+  //     ①全ClipboardItem・全typeを走査(先頭item/先頭typeだけで諦めない) ②type一致は大小文字を無視
+  //     ③getTypeが1候補で失敗しても次の候補へ(在るのに取り出せず"画像なし"にしない)
+  //     ④画像typeが無い時は「何かはコピーされていたか」を見て理由を出し分ける
+  //       =iOSでWeb上の画像を長押しコピーするとURL/テキストになり画像bytesが入らない典型を言い当てる。
   function pasteImageFromClipboard_(cb) {
     if (!(navigator.clipboard && navigator.clipboard.read)) { cb(null, 'この端末では画像の貼り付けに未対応です(「画像を選ぶ」をお使いください)'); return; }
     navigator.clipboard.read().then(function (items) {
+      items = items || [];
+      var cands = [], sawAnyType = false;
       for (var i = 0; i < items.length; i++) {
-        var t = (items[i].types || []).filter(function (x) { return /^image\//.test(x); })[0];
-        if (t) { items[i].getType(t).then(function (blob) { fileToScaledDataUrl(blob, cb); }).catch(function () { cb(null, '画像を取り出せませんでした'); }); return; }
+        var types = items[i].types || [];
+        for (var j = 0; j < types.length; j++) {
+          sawAnyType = true;
+          if (/image\//i.test(types[j])) cands.push({ item: items[i], type: types[j] });
+        }
       }
-      cb(null, 'クリップボードに画像がありません(先に画像をコピーしてください)');
-    }).catch(function () { cb(null, 'クリップボードを読み取れませんでした(貼り付けの許可が必要です)'); });
+      if (!cands.length) {
+        cb(null, sawAnyType
+          ? 'コピーされていたのは画像ではなくリンク/文字でした。画像そのものを長押しして「写真をコピー」するか、「画像を選ぶ」からお選びください'
+          : 'クリップボードに画像がありません(先に画像をコピーしてください)');
+        return;
+      }
+      var k = 0;
+      (function tryNext() {
+        if (k >= cands.length) { cb(null, 'クリップボードの画像を取り出せませんでした(「画像を選ぶ」をお使いください)'); return; }
+        var c = cands[k++];
+        c.item.getType(c.type).then(function (blob) { fileToScaledDataUrl(blob, cb); }).catch(tryNext);
+      })();
+    }).catch(function () { cb(null, 'クリップボードを読み取れませんでした(表示される「ペースト」をタップして許可してください)'); });
   }
 
   // ── サンプル画像キャッシュ(サムネモーダル用。cid毎にサンプルURL配列を保持)──
@@ -4276,17 +4297,17 @@
       } catch (e) {}
     });
   }
-  // 動画生成用画像スロットのHTML。★保存画像は全枚数を出す(1枚だけにしない・Chami 2026-08-15「全部表示してくれ」)。
+  // 動画生成用画像スロットのHTML。★表示は先頭1枚だけ・全幅で大きく出す(2列グリッドの全枚表示は見にくい=元の見せ方へ戻す・
+  //   Chami 2026-08-15「画像表示の方法は見にくいので元に戻して」)。全枚数はサムネをタップ→ズームで左右送りして見られる
+  //   (openImgZoom_ が data-refidx から開き全枚を順に表示)。複数ある時は枠をアンバー(.multi)で明示する。
   //   0枚の時は空欄にせず状態札で「まだ読込前(⏳)」「端末内を確認中(🔍)」「確認済みで画像なし(⚠)」を区別する
-  //   =Chami「消えてるのか表示されてないのか分からん」への対策。単枚=従来どおり全幅・複数=2列グリッドで全枚。
+  //   =Chami「消えてるのか表示されてないのか分からん」への対策(こちらは維持)。
   function refSlotHtml_(cid) {
     var imgs = refImgsOf_(cid);
     if (imgs.length) {
       var multi = imgs.length > 1;
-      return imgs.map(function (src, i) {
-        var cap = '動画生成用の画像 ' + (i + 1) + '/' + imgs.length + '(タップで拡大' + (multi ? '・全' + imgs.length + '枚' : '') + ')';
-        return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-refimgview="' + esc(cid) + '" data-refidx="' + i + '" src="' + esc(src) + '" loading="lazy" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
-      }).join('');
+      var cap = multi ? ('動画生成用の画像(全' + imgs.length + '枚・タップで拡大)') : '動画生成用の画像(タップで拡大)';
+      return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-refimgview="' + esc(cid) + '" data-refidx="0" src="' + esc(imgs[0]) + '" loading="lazy" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
     }
     var state = refSlotState_(cid);
     if (state === 'loading') return '<div class="cand-refimg-ph cand-refimg-loading" title="動画生成用の画像を読み込み中です">⏳ 画像読込中…</div>';

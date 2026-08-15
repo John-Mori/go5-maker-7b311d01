@@ -368,8 +368,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 /* 動画生成用の画像＝作品サムネの真下（左の画像列）に少し余白を開けて配置。コメントはその真下に全文表示。点線区切りは廃止。 */
 /* 動画生成用の画像スロット＝全枚数を表示(Chami 2026-08-15「全部表示してくれ」)。単枚=全幅／複数=2列グリッド。 */
 .cand-refimgs{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;}
-.cand-refimg-thumb{width:100%;height:auto;border-radius:8px;border:none;background:#0b1019;cursor:zoom-in;display:block;flex:0 0 auto;margin-top:0;} /* 単枚＝全幅・枠線なし */
-.cand-refimgs .cand-refimg-thumb.multi{width:calc(50% - 2px);} /* 複数＝2列で全枚数を並べる(隠さない) */
+.cand-refimg-thumb{width:100%;height:auto;border-radius:8px;border:none;background:#0b1019;cursor:zoom-in;display:block;flex:0 0 auto;margin-top:0;} /* 先頭1枚を全幅で表示(見やすさ優先・元の見せ方) */
+/* ★2列グリッドの全枚表示は見にくいため撤去(Chami 2026-08-15「元に戻して」)。全枚はタップ→ズームで送る。複数は枠を.multiで明示(下部908行) */
 .cand-refimg-thumb:active{opacity:.85;}
 /* 0枚時の状態札＝空欄にせず「読込前」と「画像なし」を区別可能にする。ダーク面＋点線枠(紫は使わない)。 */
 .cand-refimg-ph{width:100%;box-sizing:border-box;min-height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10.5px;line-height:1.25;padding:6px 4px;}
