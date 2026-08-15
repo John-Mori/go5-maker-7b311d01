@@ -131,6 +131,38 @@
     if (sel) sel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PCCOLS_DEF; lsSet(K_PCCOLS, n); applyCandCols_(n); });
   }
 
+  // ── 候補一覧のページ分け(1ページの表示数で分割・Chami依頼2026-08-15) ──
+  //   スマホで候補が数百件になると、全カードの作品サムネ＋動画生成用画像を一度に描く→iOS Safariが
+  //   画像デコードを間引いて「サムネや追加画像が表示されない」状態になる。1ページ分だけ描くことで
+  //   同時描画点数を抑える(=Chami「画像や作品サムネが表示されない」の主因への対策も兼ねる)。
+  var K_PAGESIZE = 'cand_page_size';
+  var PAGESIZE_DEF = 30, PAGESIZE_OPTS = [20, 30, 50, 100];
+  function candPageSize_() { var n = parseInt(lsGet(K_PAGESIZE, String(PAGESIZE_DEF)), 10); return (PAGESIZE_OPTS.indexOf(n) >= 0) ? n : PAGESIZE_DEF; }
+  function candPageSizeHtml_() {
+    var cur = candPageSize_(), opts = PAGESIZE_OPTS.map(function (n) { return '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + '件</option>'; }).join('');
+    return '<div class="cand-pagesize-ctl"><label class="hint" style="margin:0;white-space:nowrap;">1ページの表示数</label><select id="candPageSizeSel">' + opts + '</select></div>';
+  }
+  // ページ番号の窓(先頭・末尾・現在±1を残し、間は … で省略)。0=省略記号のしるし。
+  function pageWindow_(page, pages) {
+    var want = [1, page - 1, page, page + 1, pages], res = [];
+    want.sort(function (a, b) { return a - b; });
+    want.forEach(function (n) { if (n < 1 || n > pages) return; if (res.length && n === res[res.length - 1]) return; res.push(n); });
+    var out = [];
+    for (var i = 0; i < res.length; i++) { if (i > 0 && res[i] - res[i - 1] > 1) out.push(0); out.push(res[i]); }
+    return out;
+  }
+  function candPagerHtml_(page, pages, total, startI, count) {
+    if (pages <= 1) return '';
+    var b = '<button type="button" class="cand-page-btn" data-candpage="' + (page - 1) + '"' + (page <= 1 ? ' disabled' : '') + '>‹ 前</button>';
+    pageWindow_(page, pages).forEach(function (n) {
+      if (n === 0) { b += '<span class="cand-page-ellip">…</span>'; return; }
+      b += '<button type="button" class="cand-page-btn' + (n === page ? ' active' : '') + '" data-candpage="' + n + '">' + n + '</button>';
+    });
+    b += '<button type="button" class="cand-page-btn" data-candpage="' + (page + 1) + '"' + (page >= pages ? ' disabled' : '') + '>次 ›</button>';
+    var from = total ? startI + 1 : 0, to = startI + count;
+    return '<div class="cand-pager">' + b + '</div><div class="cand-pager-info hint">' + from + '–' + to + '件 / 全' + total + '件(' + page + '/' + pages + 'ページ)</div>';
+  }
+
   // ── 保存キー ──
   var K_ITEMS = 'cand_items';   // 候補リスト(共通): [{url,cid,title,author,thumb,listPrice,price,discountPct,addedAt}]
   var K_TABS = 'cand_tabs';    // サークルタブ: [{id,name,makerId,makerName}]
@@ -199,6 +231,7 @@
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
   var _workSearchByTab = {};
   var _memoSearchByTab = {}; // メモ/コメント検索の入力をタブ別に保持(Chami依頼2026-08-11)
+  var _candPageByTab = {};   // 候補一覧の現在ページをタブ別に保持(ページ分け・Chami依頼2026-08-15)
   var DUPLICATE_WORK_NOTICE = '同じ作品が既に追加されているので統合';
   // 重複追加は分かりにくいinline通知ではなくダイアログで明示する(Chami指定2026-07-24)。
   //   重複した時「だけ」出す。今回入力していたメモがあれば改行して2行目に表示する。
@@ -3783,6 +3816,13 @@
       it && it.cid
     ].filter(Boolean).join(' '));
   }
+  // メモ/コメント検索の照合テキスト(実データ由来)。cand_text(同期LSの正本)から読むので
+  //   ページ分けで画面に出ていない作品も横断して検索できる=全ページ検索。DOMに依存しない。
+  function candMemoText_(it) {
+    if (!it || !it.cid) return '';
+    var r = refImgOf(it.cid) || {};
+    return normalizeWorkSearch_(((r.comment || '') + ' ' + (r.memo || '')).trim());
+  }
   function workSearchHtml_(tabId) {
     return '<div class="cand-work-search" style="padding:2px 6px 10px;">' +
       '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品検索(部分一致)</label>' +
@@ -3867,30 +3907,77 @@
     var salesMiss = missingCount(salesCids);
     var head = '<p class="hint" style="padding:2px 6px;">' + (_showHidden ? '🙈 非表示中 ' : '') + arr.length + '件' + (_showHidden ? '(「再表示」で戻せます)' : ' / 非表示 ' + hidden.length + '件') +
       (!_showHidden && salesMiss > 0 ? '<br>💰 販売数(実売)は' + salesMiss + '件がPC取得待ち。「▶今すぐ取得」を押すか、自動取得を待って🔁で反映されます。(PCの電源が必要)' : '') + '</p>';
-    el.innerHTML = head + workSearchHtml_(tabId) + arr.map(function (it) {
-      var act = _showHidden
-        ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(it.cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>'
-        : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(it.cid) + '">非表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(it.cid) + '" title="削除" aria-label="削除">🗑️</button>';
-      return candCard(it, act);
-    }).join('');
-    wireWorkSearch_(el, tabId);
-    wireCardCommon_(el);
-    el.querySelectorAll('[data-hidecid]').forEach(function (b) {
-      b.addEventListener('click', function () { if (!window.confirm('非表示にしますか？')) return; var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); renderCandList(tabId); });
-    });
-    el.querySelectorAll('[data-unhide]').forEach(function (b) {
-      b.addEventListener('click', function () { var c = b.getAttribute('data-unhide'); lsSet(hiddenKey(tabId), lsGet(hiddenKey(tabId), '[]').filter(function (x) { return x !== c; })); renderCandList(tabId); });
-    });
-    el.querySelectorAll('[data-delcid]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var c = b.getAttribute('data-delcid'), items2 = lsGet(key, '[]');
-        var it = items2.filter(function (x) { return x.cid === c; })[0];
-        if (!it || !window.confirm('「' + (it.title || c) + '」をこのタブから削除しますか？')) return;
-        lsSet(key, items2.filter(function (x) { return x.cid !== c; }));
-        tombstoneCid_(tabId, c); // ★削除を墓標に記録＝同期で他端末にも伝播し復活を防ぐ(INC 2026-07-15)
-        renderCandList(tabId);
+    // ★検索欄・ページ数セレクタは固定の外枠に置き、カード群は #candPageWrap の中だけを描き替える
+    //   =検索入力中にフォーカスが飛ばない/ページ送りで検索欄が作り直されない(Chami依頼2026-08-15)。
+    el.innerHTML = head + workSearchHtml_(tabId) + candPageSizeHtml_() + '<div id="candPageWrap"></div>';
+    var actOf_ = function (cid) {
+      return _showHidden
+        ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(cid) + '" title="削除" aria-label="削除">🗑️</button>'
+        : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(cid) + '">非表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(cid) + '" title="削除" aria-label="削除">🗑️</button>';
+    };
+    // 現在ページ(＋検索・ページ数)ぶんのカードだけを #candPageWrap へ描く。検索はDOM非表示でなく
+    //   実データで絞り込む=全ページ横断で検索できる(ページ分けと両立)。
+    var paintPage_ = function () {
+      var wrap = document.getElementById('candPageWrap'); if (!wrap) return;
+      var qi = document.getElementById('candWorkSearch'), mi = document.getElementById('candMemoSearch');
+      var q = normalizeWorkSearch_(qi ? qi.value : ''), mq = normalizeWorkSearch_(mi ? mi.value : '');
+      var view = arr.filter(function (it) {
+        var okW = !q || workSearchText_(it).indexOf(q) >= 0;
+        var okM = !mq || candMemoText_(it).indexOf(mq) >= 0;
+        return okW && okM;
       });
-    });
+      var size = candPageSize_();
+      var pages = Math.max(1, Math.ceil(view.length / size));
+      var page = _candPageByTab[tabId] || 1; if (page > pages) page = pages; if (page < 1) page = 1;
+      _candPageByTab[tabId] = page;
+      var startI = (page - 1) * size, slice = view.slice(startI, startI + size);
+      var pager = candPagerHtml_(page, pages, view.length, startI, slice.length);
+      var resultLine = (q || mq) ? '<div class="hint" style="padding:2px 6px;">' + view.length + '件が条件に一致</div>' : '';
+      var emptyMsg = slice.length ? '' : '<p class="hint" style="padding:8px;">条件に一致する候補がありません。</p>';
+      wrap.innerHTML = resultLine + pager + emptyMsg + slice.map(function (it) { return candCard(it, actOf_(it.cid)); }).join('') + (pages > 1 ? pager : '');
+      var resEl = document.getElementById('candWorkSearchResult');
+      if (resEl) resEl.textContent = (q || mq) ? view.length + '件表示 / ' + arr.length + '件中' : '';
+      wireCardCommon_(wrap);
+      wrap.querySelectorAll('[data-hidecid]').forEach(function (b) {
+        b.addEventListener('click', function () { if (!window.confirm('非表示にしますか？')) return; var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); renderCandList(tabId); });
+      });
+      wrap.querySelectorAll('[data-unhide]').forEach(function (b) {
+        b.addEventListener('click', function () { var c = b.getAttribute('data-unhide'); lsSet(hiddenKey(tabId), lsGet(hiddenKey(tabId), '[]').filter(function (x) { return x !== c; })); renderCandList(tabId); });
+      });
+      wrap.querySelectorAll('[data-delcid]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var c = b.getAttribute('data-delcid'), items2 = lsGet(key, '[]');
+          var it = items2.filter(function (x) { return x.cid === c; })[0];
+          if (!it || !window.confirm('「' + (it.title || c) + '」をこのタブから削除しますか？')) return;
+          lsSet(key, items2.filter(function (x) { return x.cid !== c; }));
+          tombstoneCid_(tabId, c); // ★削除を墓標に記録＝同期で他端末にも伝播し復活を防ぐ(INC 2026-07-15)
+          renderCandList(tabId);
+        });
+      });
+      wrap.querySelectorAll('[data-candpage]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var p = parseInt(b.getAttribute('data-candpage'), 10); if (!p || p < 1 || p > pages) return;
+          _candPageByTab[tabId] = p; paintPage_();
+          try { var sb = document.getElementById('candWorkSearch'); if (sb) sb.scrollIntoView({ block: 'start' }); } catch (e) {}
+        });
+      });
+    };
+    // 検索欄の配線(このタブはページ分けのため実データで絞り込む=wireWorkSearch_ のDOM非表示は使わない)。
+    var searchInput = el.querySelector('#candWorkSearch'), memoInput = el.querySelector('#candMemoSearch');
+    var onSearch_ = function () {
+      _workSearchByTab[tabId] = searchInput ? (searchInput.value || '') : '';
+      _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
+      _candPageByTab[tabId] = 1; // 条件が変わったら1ページ目へ
+      paintPage_();
+    };
+    if (searchInput) searchInput.addEventListener('input', onSearch_);
+    if (memoInput) memoInput.addEventListener('input', onSearch_);
+    var swClear = el.querySelector('#candWorkSearchClear'), smClear = el.querySelector('#candMemoSearchClear');
+    if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; onSearch_(); try { if (searchInput) searchInput.focus({ preventScroll: true }); } catch (e) { if (searchInput) searchInput.focus(); } });
+    if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; onSearch_(); try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); } });
+    var sizeSel = el.querySelector('#candPageSizeSel');
+    if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab[tabId] = 1; paintPage_(); });
+    paintPage_();
     // 候補作品の実売本数を取得。(未取得はPC取得キューへ)反映されたら再描画。
     fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === tabId) renderCandList(tabId); });
     // タイトル/発売日が未取得の候補を控えめに再取得。(追加直後の一時的な部分取得を自動で埋める)

@@ -344,6 +344,16 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
   .cand-cols-ctl{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
   .cand-cols-ctl select{width:auto;padding:6px 8px;font-size:13px;}
 }
+/* 候補ページの「1ページの表示数」コントロール：スマホ・PC両方で表示（ページ分けは両方で効くため）。 */
+.cand-pagesize-ctl{display:flex;align-items:center;gap:6px;flex:0 0 auto;padding:2px 6px 6px;font-size:12.5px;}
+.cand-pagesize-ctl select{width:auto;padding:6px 8px;font-size:13px;margin:0;}
+/* 候補一覧のページ送り（前/番号/次）。ボタンは中身なり幅・折り返し可・アクティブはティール。 */
+.cand-pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;padding:8px 6px;}
+.cand-page-btn{width:auto;flex:0 0 auto;margin:0;padding:6px 11px;font-size:13px;min-width:38px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);cursor:pointer;}
+.cand-page-btn.active{background:var(--accent);color:#04222a;border-color:var(--accent);font-weight:700;}
+.cand-page-btn:disabled{opacity:.4;cursor:default;}
+.cand-page-ellip{color:var(--sub);padding:0 2px;align-self:center;}
+.cand-pager-info{text-align:center;padding:0 6px 6px;}
 .cand-card.cand-nocomment{padding-bottom:5px;} /* コメント/メモ無し＝下部余白を最小化 */
 .cand-card.cand-nocomment .cand-manage-row{margin-top:-1px;} /* 非表示/🗑列を上に詰める */
 /* 投稿済み作品＝カード大枠をチャンネルのイメージカラーで太線囲み（月詠み=紫 / 宵桜艶帖=葡萄）。
