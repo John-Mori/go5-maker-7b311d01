@@ -67,6 +67,64 @@ test.describe('go5-maker 公開URL スモーク', () => {
   });
 });
 test.describe('候補ページの画像・投稿編集', () => {
+  test('PC画像モーダルの矢印は左右対称の20%位置・2倍サイズで表示する', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 8; canvas.height = 8;
+      canvas.getContext('2d').fillRect(0, 0, 8, 8);
+      const image = canvas.toDataURL('image/png');
+      window.Go5Cand.zoomImages([image, image], 0);
+    });
+
+    const prev = page.locator('.fz-zoom-nav.prev');
+    const next = page.locator('.fz-zoom-nav.next');
+    await expect(prev).toBeVisible();
+    await expect(next).toBeVisible();
+    const boxes = await page.evaluate(() => {
+      const rect = (selector) => {
+        const r = document.querySelector(selector).getBoundingClientRect();
+        return { left: r.left, top: r.top, width: r.width, height: r.height, cx: r.left + r.width / 2 };
+      };
+      return {
+        viewport: innerWidth,
+        prev: rect('.fz-zoom-nav.prev'),
+        next: rect('.fz-zoom-nav.next'),
+        prevFont: getComputedStyle(document.querySelector('.fz-zoom-nav.prev')).fontSize,
+        nextFont: getComputedStyle(document.querySelector('.fz-zoom-nav.next')).fontSize
+      };
+    });
+    expect(boxes.prev.width).toBe(92);
+    expect(boxes.prev.height).toBe(92);
+    expect(boxes.next.width).toBe(92);
+    expect(boxes.next.height).toBe(92);
+    expect(boxes.prevFont).toBe('56px');
+    expect(boxes.nextFont).toBe('56px');
+    expect(Math.abs(boxes.prev.cx - boxes.viewport * 0.2)).toBeLessThanOrEqual(1);
+    expect(Math.abs(boxes.next.cx - boxes.viewport * 0.8)).toBeLessThanOrEqual(1);
+    expect(Math.abs(boxes.prev.cx + boxes.next.cx - boxes.viewport)).toBeLessThanOrEqual(1);
+
+    // スマホは従来どおり、邪魔にならない46px・左右端10pxを維持する。
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 8; canvas.height = 8;
+      canvas.getContext('2d').fillRect(0, 0, 8, 8);
+      const image = canvas.toDataURL('image/png');
+      window.Go5Cand.zoomImages([image, image], 0);
+    });
+    const mobile = await page.evaluate(() => {
+      const read = (selector) => {
+        const r = document.querySelector(selector).getBoundingClientRect();
+        return { left: r.left, right: innerWidth - r.right, width: r.width, height: r.height };
+      };
+      return { prev: read('.fz-zoom-nav.prev'), next: read('.fz-zoom-nav.next') };
+    });
+    expect(mobile.prev).toEqual({ left: 10, right: 334, width: 46, height: 46 });
+    expect(mobile.next).toEqual({ left: 334, right: 10, width: 46, height: 46 });
+  });
   test('全体読込後にIDBへ届いた候補画像も、動画生成へ移動して消えない', async ({ page }) => {
     await page.addInitScript(() => {
       window.__candidateHydratedSeen = false;
@@ -251,7 +309,13 @@ test.describe('候補ページの画像・投稿編集', () => {
     });
     await expect(page.locator('#refImgPreview img')).toBeVisible();
     await page.evaluate(() => {
+      // 現仕様はIDB失敗時にlocalStorageへ画像を退避できれば成功扱い。真の保存失敗を作るため両方を止める。
       Go5Idb.set = function () { return Promise.reject(new Error('forced-save-fail')); };
+      const realSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (String(key).indexOf('cand_refimg__') === 0) throw new DOMException('forced-fallback-fail', 'QuotaExceededError');
+        return realSetItem.call(this, key, value);
+      };
     });
     await page.locator('#refImgTwitter').fill('https://x.com/go5_test/status/44');
     await page.locator('#refImgSave').click();
