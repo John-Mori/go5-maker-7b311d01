@@ -2791,6 +2791,27 @@ HANGUL_AUDIT = os.path.join(LOCAL, "llm", "hangul_audit.jsonl")
 _HANGUL_RE = re.compile(r"[가-힣ᄀ-ᇿㄱ-ㆎ]")
 
 # ============================================================================
+# 出力ゲート ルールE(本文へ混じった内部の手続きメタを剥ぐ) 2026-08-15 イージス研究室
+# ----------------------------------------------------------------------------
+# 依頼= Chami指示③(msg 1538151871464865813)「画像のように不要な文字列を出さないように対策。」
+#   人事部門(ククール)が①②(口調ルールの写像)を締め、**③は配線=基盤**として回してきた。
+# 壊れた実物= local/llm/recent_copy-director.jsonl の msg=DISPATCH-copy-director-1786794044539。
+#   返信本文が「No response requested — this is a backchannel …§4.7に従い…返信はしない。」
+#   の1行だけ= **セッションが自分の規律遵守の判断を本文に書き出した**(§4.8違反が出力へ抜けた)。
+# ★これは人格の癖ではない= どのセッションでも起きる。だから口調ゲートD(話者別)では拾えない。
+# ★判定は純関数 meta_strip(高確度マーカー・末尾ブロックのみ・引用/コードは除外)。
+#   実測(2026-08-15)= local/ と 00_AI-HQ/ の jsonl 198本・本文 8,890件へ通して
+#   **剥ぎが起きたのは1件だけ=その実物**(誤爆0)。だから警告のみに留めず最初から剥ぐ。
+#   ★ゲートC/Dが「警告のみ→実測→格上げ」を踏んだのと同じ手順を、先に踏んだ形。
+# ★剥いだ結果が空= その便は**答えを産んでいない**。下の「生成失敗」へ落として便を閉じない
+#   (空文を送るのでも、黙って捨てるのでもない=既存の設計に合流させる)。
+META_AUDIT = os.path.join(LOCAL, "llm", "meta_strip_audit.jsonl")
+try:
+    import meta_strip as _meta_strip        # 純関数モジュール(同じ scripts/llm 配下)
+except Exception:
+    _meta_strip = None                      # import 失敗でもデーモンは起動する(fail-open)
+
+# ============================================================================
 # 出力ゲート ルールC(呼称違反チェック)  2026-07-30 … 人事部門依頼(基盤コード)
 # ----------------------------------------------------------------------------
 # 設計書= 00_AI-HQ/設計_出力ゲート_呼称スラッグ非日本語スクリプト_2026-07-30.md §1-C/§2-C/§3/§6。
@@ -3035,6 +3056,43 @@ def audit_hangul(dept, rec, reply):
         return hit
     except Exception:
         return None          # 監査の失敗で応答を巻き添えにしない(fail-safe)
+
+
+def strip_meta(dept, rec, reply):
+    """出力ゲートE= 本文末尾の内部メタを剥ぎ、剥いだ分を監査へ残す(剥いだ後の本文を返す)。
+
+    ★何が起きても例外を外へ出さない。判定不能なら**元の本文をそのまま返す**(fail-open)。
+    ★本文が空になる場合もそのまま返す= 呼び出し側(合流点)が「生成失敗」として扱う。
+    """
+    try:
+        if _meta_strip is None:
+            return reply
+        body, hits = _meta_strip.strip_meta_tail(reply)
+        if not hits:
+            return reply
+        log(dept, f"★出力ゲートE(内部メタ剥ぎ): {len(hits)}行を除去 "
+                  f"マーカー={hits[0].get('marker')} 残り本文={len(str(body or ''))}字 "
+                  f"msg={str((rec or {}).get('msg_id', ''))}"
+                  + ("  ※本文が空になった=この便は答えを産んでいない" if not str(body or "").strip() else ""))
+        try:
+            os.makedirs(os.path.dirname(META_AUDIT), exist_ok=True)
+            with open(META_AUDIT, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "dept": dept,
+                    "event": "meta_strip",
+                    "source": "daemon",
+                    "msg_id": str((rec or {}).get("msg_id", "")),
+                    "markers": [h.get("marker") for h in hits],
+                    "stripped": [h.get("line") for h in hits],
+                    "emptied": not str(body or "").strip(),
+                    "before": str(reply or "")[:400],
+                }, ensure_ascii=False) + "\n")
+        except Exception:
+            pass             # 監査の失敗で本文を巻き添えにしない
+        return body
+    except Exception:
+        return reply         # 剥ぎで転んだら元の本文で送る(沈黙ゼロ)
 
 
 # ============================================================================
@@ -5037,6 +5095,11 @@ class Daemon:
         #   ★落とした結果が空になったら、すぐ下の「生成失敗」で拾われる
         #     (=空文を送って壊すより、失敗として残して回送する方へ倒す)。
         reply, self._wip = split_wip_marker(reply)
+        # ★★出力ゲートE(内部メタ剥ぎ)= `<<WIP>>` と**同じ層・同じ理由**でここに置く
+        #   (2026-08-15 Chami指示③)。マーカーの除去と同じで「Chamiの目に触れたら事故」の類だ。
+        #   ★順番はWIPの**後**= 先に機械の合図を落としてから、残った本文の末尾を見る。
+        #   ★剥いで空になったら、すぐ下の「生成失敗」が拾う(=空文を送らず、便も閉じない)。
+        reply = strip_meta(self.dept, rec, reply)
         if not reply:
             log(self.dept, f"生成失敗 msg={mid}")
             return False

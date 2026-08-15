@@ -215,7 +215,16 @@ def gate_body(dept, persona, body):
             return body
         import output_gates                       # scripts/llm は sys.path に入っている
         fixed, _summary = output_gates.apply_gates(dept, persona, body, source="mirror")
-        return fixed if str(fixed or "").strip() else body
+        if str(fixed or "").strip():
+            return fixed
+        # ★空になった時の分岐(2026-08-15 ゲートE)。
+        #   ゲートEが**全部メタだと判定して空にした**時だけ空を返す= 送らない
+        #   (中身が「返事は要らない」という手続きの説明しかない便を部屋へ出さない)。
+        #   ★便は ack されないので消えはしない= 未回答として残り、督促の対象になる。
+        #   それ以外の理由で空になった時は従来どおり**元の本文で送る**(沈黙ゼロ)。
+        if (_summary or {}).get("meta_emptied"):
+            return ""
+        return body
     except Exception:
         return body
 

@@ -167,12 +167,17 @@ class Slot:
 #   ★2026-08-13 追加(C-042)= scripts/llm/prompt_spill.py。dept_daemon と session_relay が
 #     import する新規モジュール(長すぎるpromptをargvから逃がす止血)。**起動時に1回解決される
 #     コード**なので都度読みは採れない=(A)監視対象に入れる。
+#   ★2026-08-15 追加(C-042)= scripts/llm/meta_strip.py。出力ゲートE(本文末尾の内部メタ剥ぎ)の
+#     純関数本体。dept_daemon が合流点で import する**本文を削る側**のコードなので、
+#     tone_gate/naming_gate と同じ理由でここに要る(マーカーを1つ足した日に載らないと、
+#     「入れたのに漏れ続ける」= 直したはずの事故がそのまま再演される)。
 WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "llm", "session_relay.py"),
                os.path.join(ROOT, "scripts", "llm", "prompt_spill.py"),
                os.path.join(ROOT, "scripts", "llm", "session_rooms.py"),
                os.path.join(ROOT, "scripts", "llm", "tone_gate.py"),
                os.path.join(ROOT, "scripts", "llm", "naming_gate.py"),
+               os.path.join(ROOT, "scripts", "llm", "meta_strip.py"),
                os.path.join(ROOT, "scripts", "queue", "leasequeue.py"),
                os.path.join(ROOT, "scripts", "_common", "session_presence.py"),
                os.path.join(ROOT, "scripts", "discord", "persona_send.py"),

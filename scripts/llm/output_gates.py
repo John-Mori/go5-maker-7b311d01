@@ -36,6 +36,9 @@ HQ = os.path.join(os.path.dirname(ROOT), "00_AI-HQ")
 
 NAMING_AUDIT = os.path.join(LOCAL, "llm", "naming_audit.jsonl")
 TONE_AUDIT = os.path.join(LOCAL, "llm", "tone_audit.jsonl")
+# ★ゲートE(内部メタ剥ぎ)の監査。常駐側(dept_daemon.META_AUDIT)と**同じ1本**へ書く
+#   (§4「記録先を2つ持たない」)。どちらの経路かは "source" で分ける。
+META_AUDIT = os.path.join(LOCAL, "llm", "meta_strip_audit.jsonl")
 NAMING_RULES_PATH = os.path.join(HQ, "departments", "hr", "personas", "呼称ルール.json")
 TONE_RULES_PATH = os.path.join(HQ, "departments", "hr", "personas", "口調ルール.json")
 
@@ -50,6 +53,10 @@ try:
     import tone_gate as _tone_gate
 except Exception:
     _tone_gate = None
+try:
+    import meta_strip as _meta_strip
+except Exception:
+    _meta_strip = None
 
 # ルールは **mtime が変わったら読み直す**(常駐の _tone_rules と同じ思想)。
 #   人事部門が写像へ1行足した時に、ミラー側だけ古い規則で動くのを防ぐ。
@@ -121,12 +128,37 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
     ★何が起きても例外を外へ出さない。壊れたら元の text をそのまま返す。
     """
     do_fix = _fix_enabled() if fix is None else bool(fix)
-    summary = {"naming_fix": 0, "naming_warn": 0, "tone_fix": 0, "tone_warn": 0}
+    summary = {"naming_fix": 0, "naming_warn": 0, "tone_fix": 0, "tone_warn": 0,
+               "meta_strip": 0, "meta_emptied": False}
     s = str(text or "")
     if not s.strip() or not str(persona or "").strip():
         return text, summary
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")       # JST(この端末はJSTで動く)
     excerpt_before = s[:200]
+
+    # --- ゲートE(内部の手続きメタ剥ぎ) ----------------------------------
+    # ★2026-08-15 Chami指示③。常駐経路(dept_daemon)と**同じ純関数**を当てる。
+    #   ここだけは「警告のみ」にしない= 実測(jsonl 198本・本文8,890件)で
+    #   剥ぎが起きたのは**壊れた実物1件のみ・誤爆0**。判定材料は本文だけで話者に依存しない。
+    # ★全部メタで空になったら **空を返す**(下の「最後の砦」の対象外にする)=
+    #   呼び出し側(mirror)が「送らない」を選べるようにする。中身ゼロの便を出す方が事故だ。
+    try:
+        if _meta_strip is not None:
+            stripped, hits = _meta_strip.strip_meta_tail(s)
+            if hits:
+                summary["meta_strip"] = len(hits)
+                summary["meta_emptied"] = not str(stripped or "").strip()
+                _append(META_AUDIT, [{
+                    "ts": ts, "dept": dept, "event": "meta_strip", "source": source,
+                    "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                    "markers": [h.get("marker") for h in hits],
+                    "stripped": [h.get("line") for h in hits],
+                    "emptied": summary["meta_emptied"], "before": excerpt_before}])
+                if summary["meta_emptied"]:
+                    return "", summary
+                s = stripped
+    except Exception:
+        pass            # 剥ぎで転んでも以降のゲートは当てる(本文は直前の状態のまま)
 
     # --- ゲートC(呼称) --------------------------------------------------
     try:
