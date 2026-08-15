@@ -43,6 +43,12 @@ jobs:
       - name: iOS Safari レイアウト検査
         run: node scripts/check_ui_ios.mjs
 
+      # ボタンを「無闇に横へ引き伸ばす」CSS(flex:1 等)を出す前に止める門。
+      #   前日24hの言い直し最多型=ボタンの幅(肥大化)の再発(🔥DEF-c7f98afd62/132b05c4b4 と同型が
+      #   データ再作成ボタンで再発した・2026-08-16朝レビュー)。design-preferences §4.5 の🔥恒久対策を機構化。
+      - name: ボタン幅(引き伸ばし)検査
+        run: node scripts/check_button_width.mjs
+
       # シート由来行の編集値がリロードで消える型(作品URL/投稿先等)を、繋ぎの欠落として出す前に止める門。
       - name: シート保存連鎖の検査
         run: node scripts/check_sheet_chain.mjs
