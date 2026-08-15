@@ -138,6 +138,19 @@ ANNOUNCE_TEXT = "司令塔が不在です。このメッセージは受付済み
 # 未登録の間はbot_sendが失敗し次周期で再試行(取りこぼしなし)。総合受付でなくここへ集約(Chami指定2026-07-14)。
 SUMMARY_DEPT = "incident"
 
+# --- ★producer鮮度警報 (2026-08-15 プラットフォームSE・一ノ瀬怜/イージス研究室②の実装) ---
+# なぜ: mirror_to_discord.py が 7/30 05:16 に静かに死に、状態ファイルが約2週間 mtime 凍結したのに
+#   **どの検査もそれを見ていなかった**(persona_render_audit=0件・mirrorの生死を見る物も無し)。
+#   producer が黙って死んで検知ゼロ=P1未検知障害の本体。登録制の鮮度警報でこれを塞ぐ。
+# 設計(イージス研究室②の縛りをそのまま実装):
+#   ① 登録制。local/llm/producers.json に「名前/見るファイル/期待更新間隔/鳴らす先/N」を1件ずつ。
+#      ★自動発見はしない(自動で拾うと必ず誤発火し、誤発火する安全網は無視される=規律§3)。
+#   ② 判定は age(最終更新からの経過)。増分ではない(増分は滞留を見逃す=check_stale_deadと同じ教訓)。
+#   ③ 一度の観測を状態の代理にしない(C-041)= consecutive N回連続で古い時だけ鳴らす。
+#   ④ 閉じ方は2つだけ(C-046)= (A)ageが戻る→✅を1回 (B)producers.jsonから外す=退役の宣言→状態ごと掃除。
+#   ⑤ 鳴らす先は受け手が読む場所= producerの持ち主の部屋(entryのalert_dept)。研究室HQ止まりにしない。
+PRODUCERS_REGISTRY = os.path.join(LOCAL, "llm", "producers.json")
+
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -1264,6 +1277,87 @@ def check_busy_notices(state, dry_run):
     state["busy_notified"] = sent_keys[-BUSY_KEEP:]
 
 
+def load_producers():
+    """登録制レジストリを読む。★読めなければ空=監視しないだけ(警報デーモン自体は殺さない・fail-safe)。"""
+    try:
+        with open(PRODUCERS_REGISTRY, encoding="utf-8") as f:
+            data = json.load(f)
+        out = []
+        for p in (data.get("producers") or []):
+            name = str(p.get("name") or "").strip()
+            path = str(p.get("path") or "").strip()
+            if not name or not path:
+                continue
+            out.append({
+                "name": name,
+                "path": path if os.path.isabs(path) else os.path.join(ROOT, path),
+                "max_age_sec": int(p.get("max_age_sec") or 0),
+                "consecutive": max(1, int(p.get("consecutive") or 2)),
+                "alert_dept": str(p.get("alert_dept") or SUMMARY_DEPT).strip() or SUMMARY_DEPT,
+                "owner": str(p.get("owner") or ""),
+                "note": str(p.get("note") or ""),
+            })
+        return out
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []   # 壊れたJSONで watchdog 全体を止めない(fail-safe)
+
+
+def check_producer_freshness(state, dry_run):
+    """登録した producer の最終更新が期待間隔を超えたら、持ち主の部屋へ1回だけ知らせる。
+
+    死んだ mirror が約2週間 気づかれなかった穴(P1未検知障害)を塞ぐ登録制の鮮度警報。
+    状態遷移で1回だけ鳴らし、ageが戻ったら✅を1回(check_poller_health と同じレール)。
+    レジストリから外された producer は状態ごと掃除する(退役の宣言=閉じ方B・C-046)。
+    """
+    producers = load_producers()
+    pf = state.get("producer_fresh") or {}
+    now_epoch = time.time()
+    active = set()
+    for p in producers:
+        name = p["name"]
+        active.add(name)
+        st = pf.get(name) or {"consec": 0, "down": False, "last_alert": 0}
+        age = _age_or_none(p["path"])
+        stale = (age is None) or (p["max_age_sec"] > 0 and age >= p["max_age_sec"])
+        if not stale:
+            if st.get("down"):
+                # 復旧= 1回だけ✅して状態を戻す(黙って直ると「まだ壊れている」と思われ続ける)
+                if bot_send(p["alert_dept"],
+                            f"✅producer鮮度 復旧: {name} の更新が {int(age)}秒前まで戻りました(自動監視)。",
+                            dry_run, by_dept=True):
+                    st["down"] = False
+                    st["consec"] = 0
+            else:
+                st["consec"] = 0
+            pf[name] = st
+            continue
+        # 古い= C-041: 一度の観測では鳴らさない。N回連続を待つ
+        st["consec"] = int(st.get("consec", 0)) + 1
+        if st.get("down"):
+            pf[name] = st
+            continue                       # 継続中の停止では鳴らさない(狼少年にしない)
+        if st["consec"] < p["consecutive"]:
+            pf[name] = st
+            continue                       # まだN回連続に満たない
+        when = "更新ファイルなし(未起動/停止)" if age is None \
+            else f"最終更新{int(age)}秒前(期待更新間隔の目安{p['max_age_sec']}秒)"
+        owner = f" 持ち主={p['owner']}。" if p["owner"] else ""
+        note = f" {p['note']}" if p["note"] else ""
+        reg = os.path.basename(PRODUCERS_REGISTRY)
+        msg = (f"⚠producerが黙って停止した可能性(自動監視): {name} が{when}。{owner}{note} "
+               f"復旧の筋道= (A)更新が戻れば自動で✅ (B)退役なら {reg} から外す(=退役の宣言)。")
+        if bot_send(p["alert_dept"], msg, dry_run, by_dept=True):
+            st["down"] = True
+            st["last_alert"] = now_epoch
+        pf[name] = st
+    # (B)退役=レジストリから外したら状態ごと掃除する(古い"down"を残さない・C-046の閉じ方B)
+    for gone in [k for k in list(pf.keys()) if k not in active]:
+        del pf[gone]
+    state["producer_fresh"] = pf
+
+
 def run_once(dry_run=False):
     if not os.path.isdir(LOCAL):
         print(f"local/ ディレクトリが見つかりません({LOCAL})。監視対象なしのため正常終了します。")
@@ -1280,6 +1374,7 @@ def run_once(dry_run=False):
     check_ci_health(state, dry_run)      # ★2026-07-21: CI失敗をDiscordへ(ORG-09=メールは読まれない)
     check_chime_health(state, dry_run)   # ★2026-07-21: チャイム線が落ちた部屋を可視化(ORG-14)
     check_relay_repair(state, dry_run)   # ★2026-07-26: gatewayの取りこぼしを15分毎に回収(catch-up欠落)
+    check_producer_freshness(state, dry_run)  # ★2026-08-15: 登録制の鮮度警報(mirrorの静かな死=P1未検知を塞ぐ)
     save_state(state)
     rows = read_inbox_rows()
     if rows is None:
