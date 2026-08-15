@@ -145,6 +145,15 @@ _CHAR_DIR = os.path.join(r"D:\SougouStartFolder\00_AI-HQ",
                          "departments", "hr", "characters")
 
 
+def _name_key(s):
+    """人格名を照合用の形へ潰す(中黒・全角/半角スペースを落とすだけ)。
+
+    ★落とすのは区切り記号だけで、文字そのものは変えない=別人が同じ形へ潰れにくい。
+      実測(2026-08-15・全22キャラ)で衝突ゼロを確認した上で使っている。
+    """
+    return re.sub(r"[・･\s　]", "", str(s or "")).strip()
+
+
 def _character_by_persona(persona):
     """**名乗る人格名**からcharacterfileを引く(取れなければ空)。
 
@@ -160,11 +169,21 @@ def _character_by_persona(persona):
     照合は characters/*.md の見出し `# characterfile: <名前>(...` を読む。
     DEPT_CONFのpersonaに載らない人格(アロンソ等=デーモンが居ない部屋の演者)も
     これなら引ける。ファイル名の命名規則に依存しないのも狙い。
+
+    ★2026-08-15 追加= **完全一致で外れたら「中黒・空白を落とした形」で照合し直す**。
+      それまでは完全一致1本で、名乗りと見出しが1文字でも違うと `no_character` へ落ち、
+      **その便は口調変換を通らず素通しで部屋へ出ていた**(黙って落ちるので誰も気付かない)。
+      実測(2026-08-15)= 名乗り「ケヴィン・デ・ブライネ」に対し見出しは「ケヴィン・デブライネ」
+      =中黒1つ違いで解決0字。イージス研究室のミラー便は全部この穴を通っていた。
+      ★これは**表記の裁定ではない**(どちらが正しい綴りかは人事部門の管轄)。どちらで名乗っても
+      同じ人に辿り着く、という配線側の受け皿だ。完全一致を先に見るので優先順位は変わらない。
+      正規化後に2人が同じ形へ潰れると人違いになるため、**衝突したら採らない**(素通しのまま)。
     """
     name = (persona or "").strip()
     if not name:
         return ""
     try:
+        entries = []                            # [(見出しの名前, path)]
         for fn in sorted(os.listdir(_CHAR_DIR)):
             if not fn.endswith(".md"):
                 continue
@@ -174,8 +193,16 @@ def _character_by_persona(persona):
             except OSError:
                 continue
             m = re.match(r"#\s*characterfile:\s*([^(（\n]+)", head)
-            if m and m.group(1).strip() == name:
+            if m:
+                entries.append((m.group(1).strip(), path))
+        for nm, path in entries:                # ①完全一致(従来どおり)
+            if nm == name:
                 return open(path, encoding="utf-8").read()
+        key = _name_key(name)                   # ②中黒・空白を落として照合
+        if key:
+            hit = [p for nm, p in entries if _name_key(nm) == key]
+            if len(hit) == 1:                   # ★2人以上へ当たったら人違い=採らない
+                return open(hit[0], encoding="utf-8").read()
     except OSError:
         pass
     return ""
