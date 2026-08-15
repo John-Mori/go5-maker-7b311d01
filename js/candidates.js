@@ -2203,46 +2203,68 @@
     body.querySelector('#refImgSave').addEventListener('click', function () {
       var saveBtn = this;
       if (saveBtn.disabled) return;
-      saveBtn.disabled = true;
+      var saveMsg = body.querySelector('#refImgMsg');
+      function showSaveFailure_(custom) {
+        saveMsg.textContent = custom || (pending.imgs.length
+          ? '画像をこの端末へ保存できませんでした。入力は残っています。もう一度お試しください'
+          : 'この端末へ保存できませんでした。入力は残っています。もう一度お試しください');
+      }
+      // ★候補保存も共通の単一終端権威へ接続。成功/失敗/時間切れ/遅着の最初の1件だけを採用し、
+      //   どの経路でもボタンを必ず再操作可能へ戻す。候補とドラフトで別々の番犬を持たない。
+      var saveOp = window.Go5OperationGate && window.Go5OperationGate.armButton
+        ? window.Go5OperationGate.armButton(saveBtn, {
+            pendingLabel: saveBtn.textContent,
+            successLabel: saveBtn.textContent,
+            timeoutLabel: saveBtn.textContent,
+            timeoutMs: 20000,
+            onSettle: function (ok, reason) {
+              if (!ok && reason === 'timeout') showSaveFailure_('保存処理が時間内に完了しませんでした。入力は残っています。もう一度お試しください');
+            }
+          })
+        : null;
+      if (!saveOp) {
+        showSaveFailure_('保存制御の読込に失敗しました。ページを再読込してもう一度お試しください');
+        return;
+      }
       pending.comment = body.querySelector('#refImgComment').value || '';
       pending.twitterUrl = (body.querySelector('#refImgTwitter').value || '').trim();
       syncPcMemoInline_();
       var workRaw = (body.querySelector('#refImgWorkUrl') && body.querySelector('#refImgWorkUrl').value || '').trim();
       // 作品URL欄が空、またはプレフィル値から変更が無ければ何もしない。(無駄なAPI呼び出し/意図しないaddedAtリセットを防止)
       if (workRaw && workRaw !== workUrlPrefill) {
-        body.querySelector('#refImgMsg').textContent = isTw ? '作品候補に変換中…' : '作品URLを更新中…';
-        applyWorkUrl_(it, workRaw, pending, function (ok, err) {
-          if (!ok) { saveBtn.disabled = false; body.querySelector('#refImgMsg').textContent = (err || '変換できません'); return; }
-          body.querySelector('#refImgMsg').textContent = isTw ? '作品候補に変換しました' : '作品URLを更新しました';
-          if (onSaved) onSaved();
-          if (_activeTab) render();
-          setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 700);
-        });
+        saveMsg.textContent = isTw ? '作品候補に変換中…' : '作品URLを更新中…';
+        try {
+          applyWorkUrl_(it, workRaw, pending, function (ok, err) {
+            if (!saveOp.finish(ok)) return; // 時間切れ後の遅着結果で画面を閉じない
+            if (!ok) { showSaveFailure_(err || '変換できません'); return; }
+            saveMsg.textContent = isTw ? '作品候補に変換しました' : '作品URLを更新しました';
+            if (onSaved) onSaved();
+            if (_activeTab) render();
+            setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 700);
+          });
+        } catch (e) {
+          if (saveOp.fail()) showSaveFailure_('作品URLを更新できませんでした。入力は残っています。もう一度お試しください');
+        }
         return;
       }
-      body.querySelector('#refImgMsg').textContent = '保存中…';
-      // Go5Idb側が既に「接続し直して1回再試行」するため、画面側でさらに3回繰り返すと最長約48秒になる。
-      // UI側の多重再試行は廃止し、20秒の終端番犬だけ置く。失敗時も入力とモーダルを保持し、保存ボタンを戻す。
-      var refSaveSettled = false;
-      var finishRefSave_ = function (ok) {
-        if (refSaveSettled) return;
-        refSaveSettled = true;
-        clearTimeout(refSaveGuard);
-        if (!ok) {
-          saveBtn.disabled = false;
-          body.querySelector('#refImgMsg').textContent = pending.imgs.length
-            ? '画像をこの端末へ保存できませんでした。入力は残っています。もう一度お試しください'
-            : 'この端末へ保存できませんでした。入力は残っています。もう一度お試しください';
-          return;
-        }
-        body.querySelector('#refImgMsg').textContent = '保存しました';
+      saveMsg.textContent = '保存中…';
+      var saveResult;
+      try {
+        saveResult = refImgSave(it.cid, pending);
+      } catch (e) {
+        if (saveOp.fail()) showSaveFailure_();
+        return;
+      }
+      Promise.resolve(saveResult).then(function (ok) {
+        if (!saveOp.finish(ok)) return; // 時間切れ後の遅着結果で画面を閉じない
+        if (!ok) { showSaveFailure_(); return; }
+        saveMsg.textContent = '保存しました';
         if (onSaved) onSaved();
         setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
-      };
-      var refSaveGuard = setTimeout(function () { finishRefSave_(false); }, 20000);
-      Promise.resolve(refImgSave(it.cid, pending)).then(finishRefSave_, function () { finishRefSave_(false); });
-    });
-    wirePaste_(body);
+      }, function () {
+        if (saveOp.fail()) showSaveFailure_();
+      });
+    });    wirePaste_(body);
     ov.hidden = false;
   }
 

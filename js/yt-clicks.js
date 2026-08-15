@@ -134,7 +134,9 @@
   function loadYtMap() { try { return JSON.parse(localStorage.getItem(ytMapKey()) || '{}') || {}; } catch (e) { return {}; } }
   function saveYtMap(m) { try { localStorage.setItem(ytMapKey(), JSON.stringify(m)); } catch (e) {} }
   function apiKey() { try { return (localStorage.getItem('yt_api_key') || '').trim(); } catch (e) { return ''; } }
-  function itemKey(it) { return (window.HistMerge && window.HistMerge.historyItemKey) ? window.HistMerge.historyItemKey(it) : (it.manual ? it.id : (it.postUri ? ('u:' + it.postUri) : (it.shortUrl ? ('s:' + it.shortUrl) : ('v:' + (it.videoId || ''))))); }
+  function itemKey(it) { return (window.HistMerge && window.HistMerge.historyItemKey) ? window.HistMerge.historyItemKey(it) : (it.manual ? it.id : (it.postUri ? ('u:' + it.postUri) : (it.videoId ? ('v:' + it.videoId) : (it.shortUrl ? ('s:' + it.shortUrl) : '')))); }
+  // verify_yt旧データの短縮URLキーも読みつつ、新規操作は強いcanonicalキーへ寄せる。
+  function itemYt_(map, it) { return (window.HistMerge && window.HistMerge.historyMapValue) ? window.HistMerge.historyMapValue(map, it) : ((map && map[itemKey(it)]) || ''); }
   function num(n) { try { return Number(n).toLocaleString(); } catch (e) { return String(n); } }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
   // 祝日セット。(内閣府データ window.__HOLIDAYS__)土=青/日祝=赤 の判定に使う。
@@ -398,7 +400,7 @@
       var _ym = loadYtMap();
       var _localResolved = allItems().map(function (it) {
         if (!it) return it;
-        var y = _ym[itemKey(it)] || it.ytUrl || it.youtubeUrl || '';
+        var y = itemYt_(_ym, it) || it.ytUrl || it.youtubeUrl || '';
         if (y && y !== it.ytUrl) { var c = {}; for (var p in it) if (Object.prototype.hasOwnProperty.call(it, p)) c[p] = it[p]; c.ytUrl = y; return c; }
         return it;
       });
@@ -839,7 +841,7 @@
       if (pushed >= 20) return;
       if (!it.videoId) return;
       var k = itemKey(it);
-      var yt = ymap[k] || it.ytUrl || '';
+      var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
       if (!vid || _repairDone[vid]) return;
       var d = deltaCache[vid];
@@ -941,7 +943,7 @@
   function sortItems(items, ymap) {
     var arr = items.map(function (it, i) {
       var k = itemKey(it);
-      var yt = ymap[k] || it.ytUrl || '';
+      var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
       var hasUrl = !!vid;
       var pub = (vid && (vid in publishedCache)) ? publishedCache[vid] : null;
@@ -1093,12 +1095,15 @@
             return '<label class="vedit-attr"><input id="veditAttr_' + a.key + '" type="checkbox"><span class="vatt" style="color:' + esc(a.color) + ';border-color:' + esc(a.color) + ';">' + esc(a.label) + '</span></label>';
           }).join('') +
         '</div>' +
-        '<label class="vedit-field">作品状態(投稿当時の状態・後から変更可)' +
-          '<select id="veditWorkState">' +
-            '<option value="新作">新作</option>' +
-            '<option value="準新作">準新作</option>' +
-            '<option value="旧作">旧作</option>' +
-          '</select>' +
+        '<label class="vedit-field">作品状態(投稿時の状態)' +
+          '<div class="vedit-ws-row">' +
+            '<select id="veditWorkState" class="vedit-ws-select">' +
+              '<option value="新作">新作</option>' +
+              '<option value="準新作">準新作</option>' +
+              '<option value="旧作">旧作</option>' +
+            '</select>' +
+            '<button id="veditRegen" type="button" class="vedit-regen-btn" title="この作品の一連のデータ(動画・元画像・仕上がりプレビュー)を作り直してGoogleドライブに保存し、投稿履歴へ反映します(反映されていない履歴の回復用)">🔄 データ再作成</button>' +
+          '</div>' +
         '</label>' +
         '<div class="vedit-actions">' +
           '<button id="veditGenShort" type="button" class="vedit-gen">短縮リンク<br>再生成</button>' +
@@ -1671,7 +1676,7 @@
     var pushed = 0;
     allItems().forEach(function (it) {
       var k = itemKey(it);
-      var yt = ymap[k] || it.ytUrl || '';
+      var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var short = it.shortUrl || '';
       if ((!yt && !short) || !it.videoId) return;
       var sig = yt + '' + short;            // YT URL＋短縮URLの複合署名=どちらが欠けていても治す
@@ -1885,7 +1890,7 @@
       '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
     list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
       var k = itemKey(it);
-      var yt = ymap[k] || it.ytUrl || '';
+      var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
       // ローカル行にYT URLが結線されていない時だけ、記録シートの youtubeUrl で vid を補う(見出し日時を
       //   YouTube公開日時にするため)。公開日時が未取得なら _needPub に積んで描画後に取り直す。
@@ -2159,7 +2164,7 @@
         var it = null;
         for (var i = 0; i < rawItems.length; i++) { if (itemKey(rawItems[i]) === k) { it = rawItems[i]; break; } }
         if (!it) return;
-        var ytCur = ymap[k] || it.ytUrl || '';
+        var ytCur = itemYt_(ymap, it) || it.ytUrl || '';
         // 合算済み(mergeUrls有・shortUrlが自前ドメイン)=合算後の代表(自前短縮)を投稿URL欄へ置き換えて表示(Chami依頼2026-07-31)
         var _g = window.Go5Short;
         var bskyCur = (it.mergeUrls && it.mergeUrls.length && it.shortUrl && _g && _g.ourBase && _g.ourBase(it.shortUrl))
@@ -2376,7 +2381,7 @@
       .map(function (it) {
         // 題名は投稿履歴一覧と同じ解決順。(YouTubeタイトルがあれば優先→なければ記録タイトル)#タグは除去。
         var k = itemKey(it);
-        var vid = ytIdOf(ymap[k] || it.ytUrl || '');
+        var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
         var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
         return { videoId: it.videoId, title: stripCommonTags(title), ts: it.ts || 0, workUrl: it.workUrl || '', workState: it.workState || '' };
       })
@@ -2433,8 +2438,8 @@
     //   stock側でも handleCompleteOk_ で meta.videoId を発番するが、ここでも発番して二重の防壁にする。
     var vidId = (opts.videoId || '').trim();
     if (!vidId && window.IdGen && window.IdGen.makeVideoId) { try { vidId = window.IdGen.makeVideoId(acc, new Date(), {}); } catch (e) {} }
-    // ★この“載せる/捨てる”と下の重複判定は tests/test_completed_post.js に純関数ミラーがあり
-    //   CI(smoke.yml が全pushで tests/test_*.js を実行)で固定している。どちらかを変えたら両方揃えること。
+    // ★この“載せる/捨てる”は tests/test_completed_post.js で固定し、重複判定は下とテストが
+    //   HistMerge.findDuplicate という同じ正本を直接実行する。
     if (!ytUrl && !shortUrl && !vidId) return { ok: false, reason: 'no-id' }; // 発番もできない(IdGen不在)時だけ従来どおり載せない
     var vid = ytUrl ? ytIdOf(ytUrl) : '';
     var manual = loadArrFor_('verify_manual', acc);
@@ -2452,20 +2457,15 @@
     //   filter は参照を保つので、当たった行への非破壊バックフィル(下)＋保存(full hist)はそのまま効く。
     var histVisible = hist.filter(function (it) { return it && !it.manualOnly; });
     var pools = [{ arr: manual, base: 'verify_manual' }, { arr: histVisible, base: 'short_hist' }];
+    // ★重複判定は HistMerge.findDuplicate が唯一の正本。投稿完了とアカウント移送で同じ規則を通す。
+    if (!(window.HistMerge && window.HistMerge.findDuplicate)) return { ok: false, reason: 'identity-unavailable' };
+    var incomingIdentity = { postUri: opts.postUri || '', videoId: vidId, ytUrl: ytUrl, shortUrl: shortUrl };
     for (var pi = 0; pi < pools.length && !matched; pi++) {
-      var arr = pools[pi].arr;
-      for (var ii = 0; ii < arr.length && !matched; ii++) {
-        var it = arr[ii];
-        var y = ymap[itemKey(it)] || it.ytUrl || '';
-        if (vid && ytIdOf(y) === vid) { matched = it; matchedBy = 'ytUrl'; matchedStore = pools[pi].base; }
-        else if (vidId && it.videoId === vidId) { matched = it; matchedBy = 'videoId'; matchedStore = pools[pi].base; } // 同じドラフト(背骨ID)の再完了で履歴を二重にしない
-        // ★shortUrl(=説明欄の短縮URL)は「投稿ごとに一意」ではない。セール会場リンク(例 5mgl.com/8dpUu＝
-        //   「今だけ¥10のセール作品をご紹介」)は同一セール期間中の別作品の投稿が全て共有する。強いキー
-        //   (videoId / YouTube動画ID)がどちらかにある時に shortUrl 一致だけで畳むと、別作品が同じセール会場
-        //   リンクを持つだけで dupe 扱いされ「投稿完了しても載らない＋既存の別題名(先生、最低です)へ固定」に
-        //   なる(Chami再発2026-08-12・実は女の子も焦ってる)。findDup_(下・3269付近)は既にこの理由でshortUrlを
-        //   postUri/videoIdの無い"薄い"行に限定済み=完了側もそれに揃える。両側に強キーが無い旧行同士の同定に限る。
-        else if (shortUrl && it.shortUrl === shortUrl && !vid && !vidId && !it.videoId && !ytIdOf(y)) { matched = it; matchedBy = 'shortUrl'; matchedStore = pools[pi].base; }
+      var dup = window.HistMerge.findDuplicate(pools[pi].arr, incomingIdentity, function (x) { return itemYt_(ymap, x); });
+      if (dup.index >= 0) {
+        matched = pools[pi].arr[dup.index];
+        matchedBy = dup.matchedBy;
+        matchedStore = pools[pi].base;
       }
     }
     if (matched && !forceNew) {
@@ -2502,7 +2502,7 @@
       if (acc === acct()) refresh();
       // ★衝突相手の"自身のYouTube URL/短縮URL"も返す＝Chamiに「何と重複扱いされたか」を実物で見せ、
       //   別作品なら forceNew で上書きできる材料にする(黙って弾かない・沈黙が最悪の事故)。
-      return { ok: false, reason: 'dupe', matchedBy: matchedBy, existing: { title: matched.title || '', videoId: matched.videoId || '', ts: matched.ts || 0, ytUrl: (ymap[itemKey(matched)] || matched.ytUrl || ''), shortUrl: matched.shortUrl || '' } };
+      return { ok: false, reason: 'dupe', matchedBy: matchedBy, existing: { title: matched.title || '', videoId: matched.videoId || '', ts: matched.ts || 0, ytUrl: (itemYt_(ymap, matched) || matched.ytUrl || ''), shortUrl: matched.shortUrl || '' } };
     }
     var id = 'm:' + new Date().getTime();
     var entry = { manual: true, id: id, ts: opts.ts || new Date().getTime() };
@@ -2569,7 +2569,7 @@
   //   投稿時刻の解決は投稿履歴カード(§1665〜)と同じ順序＝YouTube公開日時→予約/カレンダー予定→実投稿時刻(ts)。
   //   カレンダーiframeはこの解決を持たないので、本体側で解決してから postMessage で渡す(integration.js)。
   function effPostMs_(it, ymap, schedMap) {
-    var vid = ytIdOf((ymap && ymap[itemKey(it)]) || it.ytUrl || '');
+    var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
     var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
     if (pub != null) return Number(pub);
     var sched = vid && schedMap[vid];
@@ -2620,7 +2620,7 @@
       if (isNaN(ms)) return;
       var bucket = dayBucketMin_(ms, dateStr, includeNightCarry);   // JST端末前提(getHours等=端末ローカル)
       if (bucket == null) return;
-      var vid = ytIdOf(ymap[itemKey(it)] || it.ytUrl || '');
+      var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
       var title = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var hh = Math.floor(bucket / 60), mm = bucket % 60;           // 深夜繰上げ分は24:xx〜として枠時刻と揃える
       out.push({
@@ -3056,7 +3056,7 @@
       .concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); }))
       .concat(mergeCodes)
       .filter(Boolean).filter(function (v, i, a) { return a.indexOf(v) === i; });
-    var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
+    var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(itemYt_(ymap, it) || it.ytUrl || ''); }).filter(Boolean);
     var uniqVids = vids.filter(function (v, i, a) { return a.indexOf(v) === i; }); // 重複動画IDは1回だけ照会
     if (!codes.length && !uniqVids.length) return Promise.resolve(false);
     var jobs = [];
@@ -3105,7 +3105,7 @@
     var qset = {}; (queried || []).forEach(function (id) { qset[id] = true; });
     var seen = {}; var out = [];
     items.forEach(function (it) {
-      var k = itemKey(it); var url = ymap[k] || it.ytUrl || ''; var vid = ytIdOf(url);
+      var k = itemKey(it); var url = itemYt_(ymap, it) || it.ytUrl || ''; var vid = ytIdOf(url);
       if (!vid || !qset[vid] || seen[vid]) return; // 照会していないID(>50件時)は判定対象外＝誤検知防止
       var rec = m[vid];
       var returned = !!rec;
@@ -3168,7 +3168,7 @@
     }
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); })).filter(Boolean);
-    var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(ymap[k] || it.ytUrl || ''); }).filter(Boolean);
+    var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(itemYt_(ymap, it) || it.ytUrl || ''); }).filter(Boolean);
     if (!codes.length && !vids.length) {
       if (announce) setStatus('更新対象がありません(各行にYouTube URLを入れる／⚙️詳細設定でAPIキー設定が必要です)' + note, !!note);
       else setStatus((apiKey() ? '' : '※YouTube再生数・投稿日時は⚙️詳細設定でAPIキーを設定し、各行にYouTube URLを入れると表示されます') + note, !!note);
@@ -3203,7 +3203,7 @@
     var ymap = loadYtMap();
     var items = allItems().map(function (it) {
       var k = itemKey(it);
-      var yt = ymap[k] || it.ytUrl || '';
+      var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
       var code = codeOf(it.shortUrl || '');
       // 投稿日時：YouTube公開日時(publishedAt)を最優先＝見出し表示(§1692・Chami 2026-08-05「投稿履歴の時刻は
@@ -3498,13 +3498,8 @@
   // 到着先の重複検出：強キー(postUri>videoId)優先。shortUrl はリビルド引継ぎで新旧2件が正当共有するため、
   //   postUri/videoId 両方が無い“薄い”アイテムに限定して照合する。
   function findDup_(arr, it) {
-    var i;
-    for (i = 0; i < arr.length; i++) {
-      if (it.postUri && arr[i].postUri && arr[i].postUri === it.postUri) return i;
-      if (it.videoId && arr[i].videoId && arr[i].videoId === it.videoId) return i;
-    }
-    if (!it.postUri && !it.videoId && it.shortUrl) { for (i = 0; i < arr.length; i++) { if (arr[i].shortUrl === it.shortUrl) return i; } }
-    return -1;
+    if (!(window.HistMerge && window.HistMerge.findDuplicate)) return -1;
+    return window.HistMerge.findDuplicate(arr, it).index;
   }
   function sanitizeOwnership_() { // 冪等・O(n)・ローカルのみ
     try {
@@ -3578,7 +3573,7 @@
     var all = hist.concat(man);
     var keyset = {}; all.forEach(function (it) { keyset[itemKey(it)] = 1; });
     // 既にYT URLが引けている動画IDは候補・対象の両方から除外
-    var usedVids = {}; all.forEach(function (it) { var v = ytIdOf(m[itemKey(it)] || it.ytUrl || ''); if (v) usedVids[v] = 1; });
+    var usedVids = {}; all.forEach(function (it) { var v = ytIdOf(itemYt_(m, it) || it.ytUrl || ''); if (v) usedVids[v] = 1; });
     // 候補URL: 現アカウントの迷子マップ ＋ 直近シート照会のYT URL
     var vidToUrl = {};
     function addCand(u) { var v = ytIdOf(u); if (v && !usedVids[v] && !vidToUrl[v]) vidToUrl[v] = u; }
@@ -3600,7 +3595,7 @@
       var matched = 0, ambiguous = 0, histDirty = false, manDirty = false;
       // 新しい順で処理(同名投稿が複数ある場合、各行が時刻の近い動画から順に取る)
       all.slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); }).forEach(function (it) {
-        if (ytIdOf(m[itemKey(it)] || it.ytUrl || '')) return; // 解決済み
+        if (ytIdOf(itemYt_(m, it) || it.ytUrl || '')) return; // 解決済み
         var nt = norm(it.title); if (!nt) return;
         var hits = vids.filter(function (v) { return !usedVids[v] && meta[v] && meta[v].title && norm(meta[v].title) === nt; });
         if (!hits.length) return;
@@ -3628,7 +3623,7 @@
     ['acc1', 'acc2'].forEach(function (a) {
       var items = loadArrFor_('short_hist', a).concat(loadArrFor_('verify_manual', a));
       var map = loadYtMapFor_(a), withYt = 0, vids = {}, keys = {};
-      items.forEach(function (it) { var k = itemKey(it); keys[k] = 1; var v = ytIdOf(map[k] || it.ytUrl || ''); if (v) { withYt++; vids[v] = 1; } });
+      items.forEach(function (it) { var k = itemKey(it); keys[k] = 1; var v = ytIdOf(itemYt_(map, it) || it.ytUrl || ''); if (v) { withYt++; vids[v] = 1; } });
       // 迷子＝マップにあるがitemに紐づかず、かつその動画がどの行にも表示されていないURL。(復元済みは数えない)
       var orphan = Object.keys(map).filter(function (k) { return !keys[k] && !vids[ytIdOf(map[k] || '')]; }).length;
       lines.push(acctName_(a) + '：履歴' + items.length + '件／YT URL付き' + withYt + '件／動画ID' + Object.keys(vids).length + '種／迷子のYT URL ' + orphan + '件');
@@ -4585,7 +4580,7 @@
       items.forEach(function (it) {
         if (it.remade) return; // 被リビルド(リビルド版に置き換え済み)はランキングに出さない＝新しい方だけ載る
         var k = itemKey(it);
-        var yt = ymap[k] || it.ytUrl || '';
+        var yt = itemYt_(ymap, it) || it.ytUrl || '';
         var vid = ytIdOf(yt);
         if (!vid) return;
         combined.push({ it: it, vid: vid, yt: yt, acct: a });

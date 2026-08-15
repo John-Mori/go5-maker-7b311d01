@@ -2043,20 +2043,16 @@
           //   素材(動画)が端末にまだ残っていればフル保存、既に作成時に上がっていればプレビュー追記(冪等)。
           //   ★押した瞬間から結果までボタンで状態を見せる(作成時に保存済みだと従来は無反応で「押せない」に見えた)。
           if (meta && !btn.disabled) {
-            var _orig = btn.textContent;
-            btn.textContent = '☁️ 保存中…'; btn.disabled = true;
-            // ★終着点で必ずボタンを戻す=二重発火(onDoneとwatchdogの両方)しても1回だけ効かせる。
-            var _settled = false;
-            var _finish = function (ok, errText) {
-              if (_settled) return; _settled = true;
-              btn.disabled = false;
-              btn.textContent = ok ? '✅ 保存済み' : (errText || _orig);
-              if (ok) setTimeout(function () { if (btn.textContent === '✅ 保存済み') btn.textContent = _orig; }, 4000);
-            };
-            // ★「保存中…」のまま返らない事故を機構で塞ぐ=90秒で必ず戻す(Chami報告2026-08-11①・押せない/固まるの根治)。
-            //   driveSaveForCompleted_ 内の各分岐は done() を呼ぶが、万一どれかが無応答でも UI は自力で回復する(fail-open)。
-            var _wd = setTimeout(function () { _finish(false, '⏱ 中断(再度お試しください)'); }, 90000);
-            driveSaveForCompleted_(meta, { silent: false, onDone: function (ok) { clearTimeout(_wd); _finish(ok); } });
+            // ★処理中UIの終端は core/operation-gate.js が唯一の正本。
+            //   本番コードをコピーしたテストではなく、同じ状態機械を本番とNodeテストの双方が直接使う。
+            var _op = window.Go5OperationGate && window.Go5OperationGate.armButton
+              ? window.Go5OperationGate.armButton(btn, {
+                  pendingLabel: '☁️ 保存中…', successLabel: '✅ 保存済み',
+                  timeoutLabel: '⏱ 中断(再度お試しください)', timeoutMs: 90000, restoreDelayMs: 4000
+                })
+              : null;
+            if (!_op) { alert('保存制御の読込に失敗しました。ページを再読込してもう一度お試しください。'); return; }
+            driveSaveForCompleted_(meta, { silent: false, onDone: function (ok) { _op.finish(ok); } });
           }
 
         } else if (btn.classList.contains('stk-mode')) {

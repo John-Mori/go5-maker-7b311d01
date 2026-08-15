@@ -187,18 +187,67 @@
     return legacy.length ? [legacy[0]] : [];
   }
 
-  // 投稿履歴カードの安定キー。通常は投稿URI/短縮URL、どちらも欠けたシート行は動画IDで識別する。
+  // 投稿履歴カードの同一性キー。共有され得る短縮URLより、投稿URI/背骨ID/YouTube IDを優先する。
+  // 旧版は postUri→shortUrl→videoId の順だったため、セール会場URLを共有した別作品が同じDOM/編集キーに
+  // なり得た。canonical は強キー優先、historyItemKeys は旧短縮キーも後方互換の読取候補として返す。
+  function historyItemKeys(it) {
+    if (!it) return [];
+    var out = [], seen = {};
+    function push(k) { k = String(k || ''); if (k && !seen[k]) { seen[k] = 1; out.push(k); } }
+    if (it.manual) push(it.id || '');
+    if (it.postUri) push('u:' + String(it.postUri));
+    if (it.videoId) push('v:' + String(it.videoId));
+    var yt = ytKey_(it.ytUrl || it.youtubeUrl || '');
+    if (yt) push('y:' + yt);
+    if (it.shortUrl) push('s:' + String(it.shortUrl)); // 旧行の読取互換・強キーが無い時だけcanonical
+    return out;
+  }
+
   function historyItemKey(it) {
-    if (!it) return '';
-    if (it.manual) return String(it.id || '');
-    if (it.postUri) return 'u:' + String(it.postUri);
-    if (it.shortUrl) return 's:' + String(it.shortUrl);
-    if (it.videoId) return 'v:' + String(it.videoId);
+    var keys = historyItemKeys(it);
+    return keys.length ? keys[0] : '';
+  }
+
+  // verify_yt等の旧マップは shortUrl キーで保存済みのことがある。canonical変更後も値を失わない読取。
+  function historyMapValue(map, it) {
+    map = map || {};
+    var keys = historyItemKeys(it);
+    for (var i = 0; i < keys.length; i++) {
+      if (Object.prototype.hasOwnProperty.call(map, keys[i])) return map[keys[i]];
+    }
     return '';
+  }
+
+  // 投稿完了・アカウント移送・表示マージが同じ重複判定を使うための単一権威。
+  // shortUrl一致は、両側とも投稿URI/背骨ID/YouTube IDを持たない旧い「薄い行」同士に限定する。
+  function findDuplicate(arr, incoming, getYt) {
+    incoming = incoming || {};
+    function ytOf(x) {
+      var supplied = '';
+      try { supplied = typeof getYt === 'function' ? (getYt(x) || '') : ''; } catch (_) {}
+      return ytKey_(supplied || (x && (x.ytUrl || x.youtubeUrl)) || '');
+    }
+    var inYt = ytOf(incoming);
+    var inStrong = !!(incoming.postUri || incoming.videoId || inYt);
+    for (var i = 0; i < (arr || []).length; i++) {
+      var cur = arr[i] || {};
+      if (incoming.postUri && cur.postUri && String(incoming.postUri) === String(cur.postUri)) return { index: i, matchedBy: 'postUri' };
+      if (incoming.videoId && cur.videoId && String(incoming.videoId) === String(cur.videoId)) return { index: i, matchedBy: 'videoId' };
+      var curYt = ytOf(cur);
+      if (inYt && curYt && inYt === curYt) return { index: i, matchedBy: 'ytUrl' };
+      var curStrong = !!(cur.postUri || cur.videoId || curYt);
+      if (!inStrong && !curStrong && incoming.shortUrl && cur.shortUrl && String(incoming.shortUrl) === String(cur.shortUrl)) {
+        return { index: i, matchedBy: 'shortUrl' };
+      }
+    }
+    return { index: -1, matchedBy: '' };
   }
 
   var api = {
     mergeSheetExtras: mergeSheetExtras,
+    findDuplicate: findDuplicate,
+    historyItemKeys: historyItemKeys,
+    historyMapValue: historyMapValue,
     historyItemKey: historyItemKey,
     historyUsedImages: historyUsedImages,
     workCidFromUrl: workCidFromUrl,

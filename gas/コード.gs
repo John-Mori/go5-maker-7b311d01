@@ -4,7 +4,7 @@
  * 役割：
  *   1) クライアント(bluesky.js)から {op,videoId,channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri,shortUrl,testMode} を受け取る(doPost)
  *   2) videoId(背骨ID)をキーに「記録_ch1 / 記録_ch2」へ upsert。(重複行を作らない・列名マッピング)
- *      短縮URLはフロント生成(da.gd/link-worker)を優先、無い経路のみ GAS が da.gd で短縮。
+ *      短縮URLはフロントの独自link-worker生成だけを採用。無い時は投稿URLをそのまま共有URLとして記録。
  *   3) refreshEngagement()(毎時)で Bluesky反応(いいね/リポスト)を更新
  *   4) Phase5：無人予約投稿(runReservations / 5分トリガー)
  *   ※ Bitly は全廃。(無料枠オーバーの主因かつ冗長＝共有されず計測不能)クリック計測は link-worker(KV) に一本化する方針。
@@ -114,7 +114,7 @@ function fanzaGenre_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-08-15A(投稿日時をYouTube公開時刻へ自動収束[Chami依頼REQ-2f4520e4d7=投稿日は投稿完了ボタンを押した時刻でなくYouTubeの実公開時刻を参照する]。真因=投稿完了と同時のupsert(pushItemToGas_)がpostedAtを送らずwriteRecord_の新規行フォールバックが投稿日時列にnow[押下時刻]を確定していた。対策=5分毎snapshotStatsに相乗り。ytViews_に第2引数pubOutを追加しpart=statistics,snippetでpublishedAtも回収[追加クォータ0=既存videos.list呼び出しのpart拡張のみ]、snapshotStatsが各CH行の投稿日時列を走査しpublishedAtと±60秒超ズレ or 空欄の行だけsetValue[new Date]で修正、修正シートをsortByDate_で1回整列[冪等=一致行は無操作]。新規投稿は公開後最大5分で自動修正・既存の誤記録もYouTube URL持ち全行を自動バックフィル・列追加なし・フロント無改修。以下は前版=2026-08-11B(全部のピークが要る[Chami2026-08-11]=導線2(作品クリック=ピンク矢印 w)の最大瞬間風速ピークをGASが記録するよう追加。従来ピーク記録シートは再生(v)と導線1(c)の2種だけで作品クリックのピークは未対応=ランキングのピーク窓でピンクを選ぶと「GAS側の対応待ち」の注記で空だった。PEAK_HEADERSへ「作品クリックピーク(件/時)」「作品クリックピーク時間帯」を末尾追加(既存のv/c/更新日時の列位置は不変=timepointSheet_と同じ冪等ヘッダ移行で旧シートも無停止で拡張・旧行のw列は空欄)、snapshotStatsのconsiderPeak_をw対応(prevByVidに作品クリック累計wclicksを持たせ区間伸び率を採用・下限0.06h上限6hはv/cと共通)、computePeaks_がwRate/wWinを返す→フロントyt-clicks.jsがr.peakW/peakWWinで描画・c2PeakUnsupportedの分岐と注記を撤去。過去分は遡及不可(サーバーに作品クリックの区間履歴が無いため)・以後のsnapshotから積む。以下は前版=2026-08-11A(ピークを早く記録=snapshotStatsを10分毎→5分毎に短縮し、最大瞬間風速の採用下限も0.12h[7.2分]→0.06h[3.6分]を対で更新[間隔だけ縮めて下限を残すと5分区間が常に下限割れでピークが1件も記録されない=2026-08-06と同型の事故になるため必ず対で変える]。公開直後からピークが早く埋まる・時点記録も5分毎で「バケット+0〜5分」に確定=旧10分毎より早い[Chami「ピークを早く記録できるように」2026-08-11]。★反映後は ?action=admin_setup でトリガー再設定が要る[間隔変更をGASへ効かせるため]。以下は前版=2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-08-15B(外部短縮の新規発番を完全撤去。フロントで独自link-worker URLが無い時はpostUrlを共有URLへ保存し、da.gd APIを呼ばない。再発防止テストで外部短縮API文字列の復活を禁止。以下は前版=2026-08-15A(投稿日時をYouTube公開時刻へ自動収束[Chami依頼REQ-2f4520e4d7=投稿日は投稿完了ボタンを押した時刻でなくYouTubeの実公開時刻を参照する]。真因=投稿完了と同時のupsert(pushItemToGas_)がpostedAtを送らずwriteRecord_の新規行フォールバックが投稿日時列にnow[押下時刻]を確定していた。対策=5分毎snapshotStatsに相乗り。ytViews_に第2引数pubOutを追加しpart=statistics,snippetでpublishedAtも回収[追加クォータ0=既存videos.list呼び出しのpart拡張のみ]、snapshotStatsが各CH行の投稿日時列を走査しpublishedAtと±60秒超ズレ or 空欄の行だけsetValue[new Date]で修正、修正シートをsortByDate_で1回整列[冪等=一致行は無操作]。新規投稿は公開後最大5分で自動修正・既存の誤記録もYouTube URL持ち全行を自動バックフィル・列追加なし・フロント無改修。以下は前版=2026-08-11B(全部のピークが要る[Chami2026-08-11]=導線2(作品クリック=ピンク矢印 w)の最大瞬間風速ピークをGASが記録するよう追加。従来ピーク記録シートは再生(v)と導線1(c)の2種だけで作品クリックのピークは未対応=ランキングのピーク窓でピンクを選ぶと「GAS側の対応待ち」の注記で空だった。PEAK_HEADERSへ「作品クリックピーク(件/時)」「作品クリックピーク時間帯」を末尾追加(既存のv/c/更新日時の列位置は不変=timepointSheet_と同じ冪等ヘッダ移行で旧シートも無停止で拡張・旧行のw列は空欄)、snapshotStatsのconsiderPeak_をw対応(prevByVidに作品クリック累計wclicksを持たせ区間伸び率を採用・下限0.06h上限6hはv/cと共通)、computePeaks_がwRate/wWinを返す→フロントyt-clicks.jsがr.peakW/peakWWinで描画・c2PeakUnsupportedの分岐と注記を撤去。過去分は遡及不可(サーバーに作品クリックの区間履歴が無いため)・以後のsnapshotから積む。以下は前版=2026-08-11A(ピークを早く記録=snapshotStatsを10分毎→5分毎に短縮し、最大瞬間風速の採用下限も0.12h[7.2分]→0.06h[3.6分]を対で更新[間隔だけ縮めて下限を残すと5分区間が常に下限割れでピークが1件も記録されない=2026-08-06と同型の事故になるため必ず対で変える]。公開直後からピークが早く埋まる・時点記録も5分毎で「バケット+0〜5分」に確定=旧10分毎より早い[Chami「ピークを早く記録できるように」2026-08-11]。★反映後は ?action=admin_setup でトリガー再設定が要る[間隔変更をGASへ効かせるため]。以下は前版=2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -153,7 +153,7 @@ function doGet(e) {
   //   再デプロイが成功していれば下の GAS_VERSION が返る。古い値や別物なら未反映。
   if (p.ping) {
     return jsonOut_({ ok: true, version: GAS_VERSION, now: new Date().toISOString(),
-      bitly: 'removed', features: ['upsert', 'testMode', 'da.gd', 'link-worker-clicks', 'fanza-snapshot'] });
+      bitly: 'removed', features: ['upsert', 'testMode', 'managed-short-only', 'link-worker-clicks', 'fanza-snapshot'] });
   }
   // 一回限りのヘッダ移行: <exec URL>?action=migrate_headers で既存シートに FANZA 列を追加する。
   if (p.action === 'migrate_headers') {
@@ -1012,7 +1012,7 @@ function doPost(e) {
       rebuildOf: body.rebuildOf || '',     // リビルド元の投稿videoId(送っているのに未記録だった取りこぼしを回収・D-1)
       goal: body.goal || '', cmtType: body.cmtType || '', // 狙い(成約/集客)・コメント型(①〜⑧)＝勝ちパターン集計用
       shortUrl: body.shortUrl || '',       // r2計測用短縮URL(短縮URL列)
-      shareUrl: body.shareUrl || '',       // da.gd共有URL(共有URL列)
+      shareUrl: body.shareUrl || '',       // 共有URL(独自短縮、無ければwriteRecord_がpostUrlを使用)
       youtubeUrl: body.youtube_url || '',  // ウィザードのYouTube手動ゲートから(同IDの行へ後追いupsert)
       workShortUrl: body.work_short_url || '', // 導線2(作品クリック)の計測URL
       workShortClear: body.work_short_clear === true || body.work_short_clear === 'true', // ★意図的クリア=空でも確定(putIfの空スキップを越えてセルを消す)
@@ -1096,14 +1096,10 @@ function writeRecord_(channel, f) {
   //   move_row は writeRecord_ を通らないため影響なし。test- 接頭辞も考慮。
   var _pm = String(f.videoId || '').match(/^(?:test-)?(acc[12])-/);
   if (_pm && _pm[1] !== channel) channel = _pm[1];
-  // 短縮URL：フロントが生成済みなら優先。(da.gd/link-worker＝実際に共有するURL)
-  // 無い経路(無人予約・旧クライアント)だけ GAS が da.gd で短縮。(1投稿1回・トークン不要・軽量)
-  // ※Bitlyは無料枠オーバーの主因かつ冗長(共有されず計測不能)なため全廃。
+  // 短縮URLはフロントの独自link-workerが生成した計測キーだけを採る。
+  // 生成できない時は外部短縮へ逃がさず、共有URL列に生の投稿URLを残す(リンクは生存・計測不能を隠さない)。
   var shortUrl = f.shortUrl || '';
-  // ★短縮URL列は計測キー(r2)専用。(2026-07-12・①)GAS側のda.gd代替は共有URL列へのみ入れ、
-  //   計測キー列にda.gd/生URLを混ぜない。(投稿履歴の「クリック–」化の根絶)
-  var fbShare = '';
-  if (!shortUrl && f.postUrl && !f.noShorten) fbShare = daGdShorten_(f.postUrl);
+  var shareUrl = f.shareUrl || f.postUrl || '';
   var sh = getChannelSheet_(channel);
   var map = headerMap_(sh);
   var dcol = map['投稿日時'] || 2;
@@ -1151,7 +1147,7 @@ function writeRecord_(channel, f) {
   putIf('短縮URL', shortUrl);                                   // r2＝計測用(codeFromShort_対象・r2以外は入れない)
   if (f.workShortClear) put('作品短縮URL', '');                  // ★ユーザーが意図的に消した=空で確定(導線2導入前の履歴に誤挿入された短縮URLを除去・Chami 2026-07-29)
   else putIf('作品短縮URL', f.workShortUrl || '');               // 導線2(作品クリック)の計測URL=作品クリック数の日次スナップ元
-  putIf('共有URL', f.shareUrl || fbShare || '');                // da.gd＝実際に概要欄へ貼る短いURL(GAS代替はこちらへ)
+  putIf('共有URL', shareUrl);                                // 独自短縮URL、無ければ生の投稿URL
   putIf('YouTube動画URL', f.youtubeUrl || '');
   putIf('視聴回数', (f.views !== undefined && f.views !== null && f.views !== '') ? f.views : '');   // YouTube再生数
   putIf(clickColName_(map), (f.clicks !== undefined && f.clicks !== null && f.clicks !== '') ? f.clicks : ''); // 短縮URLクリック数
@@ -1292,18 +1288,6 @@ function sortByDate_(sh, dcol) {
   var last = sh.getLastRow();
   if (last < 3) return; // データ行が0〜1件なら並べ替え不要
   sh.getRange(2, 1, last - 1, sh.getLastColumn()).sort({ column: dcol, ascending: false });
-}
-
-// ---- 短縮URL(da.gd・トークン不要・1投稿1回だけ。失敗時は空＝長いURLのまま記録) ----
-//   ※Bitlyは全廃。(無料枠オーバーの主因かつ冗長)クリック計測は link-worker(KV) 側に一本化する方針。
-function daGdShorten_(longUrl) {
-  if (!longUrl) return '';
-  try {
-    var res = UrlFetchApp.fetch('https://da.gd/s?url=' + encodeURIComponent(longUrl), { muteHttpExceptions: true });
-    if (res.getResponseCode() >= 300) return '';
-    var t = String(res.getContentText() || '').trim();
-    return /^https?:\/\//.test(t) ? t : '';
-  } catch (e) { return ''; }
 }
 
 // ---- link-worker 開封数の取り込み(①計測の見える化) ----

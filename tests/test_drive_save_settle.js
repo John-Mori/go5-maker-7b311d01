@@ -7,7 +7,7 @@
  *   onDone が呼ばれずボタンが「☁️ 保存中…」+disabled のまま固まっていた(=fail-openの逆=沈黙)。
  *   v=738で ①resolveVideoBlob_ に45秒タイムアウト ②ボタンに90秒ウォッチドッグ を入れて機構で塞いだ。
  *   直したが機械の歯止めが無いと次の改修で黙って再発しうる。ここで stk-drive の"終端保証"の状態機械を
- *   純関数のミラーとして固定し、CI(smoke.yml が tests/test_*.js を全push実行)で毎回撃つ。
+ *   本番と同じ共通モジュールを直接実行して固定し、CI(smoke.yml が tests/test_*.js を全push実行)で毎回撃つ。
  * ※ stock.js:1489-1502(stk-drive クリックハンドラの _settled/_finish/_wd)と「同一仕様」。
  *   どちらかを変えたら両方を揃えること。
  *
@@ -15,26 +15,26 @@
  */
 'use strict';
 const assert = require('assert');
+const { armButton } = require('../core/operation-gate.js');
 
-// --- stk-drive の"終端保証"状態機械のミラー(stock.js:1490-1502) ---
+// --- stk-drive の"終端保証"状態機械の正本(core/operation-gate.js) ---
 //   押した瞬間に「保存中…」+disabled にし、_finish が呼ばれるまで待つ。_finish は最初の1回だけ効き、
 //   ①onDone(ok)(正常終了) ②ウォッチドッグ(90秒・中で何が詰まっても必ず戻す) のどちらから来ても
 //   ボタンを enabled に戻す。二度目以降は _settled で無視=表示が二重に飛ばない。
 function armDriveSave(btn) {
-  const _orig = btn.textContent;
-  btn.textContent = '☁️ 保存中…';
-  btn.disabled = true;
-  let _settled = false;
-  function _finish(ok, errText) {
-    if (_settled) return;      // ★二重確定を弾く=遅れて来た onDone で表示が飛ばない
-    _settled = true;
-    btn.disabled = false;      // ★どの経路でも必ず押せる状態へ戻す=固着の根治
-    btn.textContent = ok ? '✅ 保存済み' : (errText || _orig);
-  }
+  let watchdog = null;
+  const c = armButton(btn, {
+    pendingLabel: '☁️ 保存中…',
+    successLabel: '✅ 保存済み',
+    timeoutLabel: '⏱ 中断(再度お試しください)',
+    timeoutMs: 90000,
+    setTimeoutFn: function (fn) { watchdog = fn; return 1; },
+    clearTimeoutFn: function () {}
+  });
   return {
-    onDone: function (ok) { _finish(ok); },                        // 実コードは clearTimeout(_wd) してから呼ぶ
-    fireWatchdog: function () { _finish(false, '⏱ 中断(再度お試しください)'); },
-    settled: function () { return _settled; }
+    onDone: function (ok) { c.finish(ok); },
+    fireWatchdog: function () { watchdog(); },
+    settled: function () { return c.isSettled(); }
   };
 }
 

@@ -5,9 +5,9 @@
  * ★背景(なぜ要るか)：yt-clicks.js の addCompletedPost_ は 2026-08-08〜09 の一晩で
  *   v=679→681→682→683 と4連続で同じ症状「投稿完了を押したのに投稿履歴に載らない」を直した。
  *   毎回、別の“黙って捨てるガード”が真因だった(URL両空でreturn / videoId発番がガードの後 / blob依存)。
- *   直したが機械の歯止めが無い=次の改修で黙って再発しうる。ここで「載せる/捨てる/重複」の3判定を
- *   純関数のミラーとして固定し、CI(smoke.yml が tests/test_*.js を全push実行)で毎回撃つ。
- * ※ yt-clicks.js:addCompletedPost_ と「同一仕様」。どちらかを変えたら両方を揃えること。
+ *   直したが機械の歯止めが無い=次の改修で黙って再発しうる。ここで「載せる/捨てる」を固定し、
+ *   重複判定は本番と同じ hist-merge-core.js を直接実行してCIで毎回撃つ。
+ *
  *   2026-08-12: 戻り値を bare boolean → 理由付きオブジェクト({ok}/{ok:false,reason:'dupe'|'no-id',matchedBy,existing})へ。
  *   併せて dupe時は既存行の"空欄だけ"を非破壊バックフィル(記録の統合＝削除でない)。下に backfillRow ミラーを追加。
  *
@@ -15,6 +15,7 @@
  */
 'use strict';
 const assert = require('assert');
+const HistMerge = require('../js/hist-merge-core.js');
 
 // --- addCompletedPost_ の“載せる/捨てる”判定のミラー(yt-clicks.js:2192-2194) ---
 //   投稿完了は明示確定操作なので、YouTube URL も計測短縮URL もまだ無くても載せる。
@@ -29,22 +30,14 @@ function shouldRecordCompleted(ytUrl, shortUrl, vidId, hasIdGen) {
   return true;
 }
 
-// --- 重複判定のミラー(yt-clicks.js:addCompletedPost_ の pools ループ) ---
+// --- 重複判定の正本(hist-merge-core.js。yt-clicks.js:addCompletedPost_ と同じ関数) ---
 //   同じ YouTube動画ID / 同じ背骨ID(videoId) の完了は履歴を二重にしない。
 //   ★shortUrl は「投稿ごとに一意」ではない=セール会場短縮URL(5mgl.com/8dpUu 等)は同一セール中の別作品の
 //   投稿が全て共有する。強キー(videoId / YouTube動画ID)がどちらかにある時に shortUrl だけで畳むと、別作品が
 //   同じセール会場リンクを持つだけで dupe 扱いされ「投稿完了しても載らない＋別題名へ固定」になる
 //   (Chami再発2026-08-12・実は女の子も焦ってる→先生、最低ですに固定)。両側に強キーが無い旧行同士に限定する。
-function ytIdOf(u) { const m = String(u || '').match(/[?&]v=([^&]+)|shorts\/([^/?]+)/); return m ? (m[1] || m[2]) : ''; }
 function isDupe(existingList, incoming) {
-  const vid = incoming.ytUrl ? ytIdOf(incoming.ytUrl) : '';
-  return existingList.some(function (it) {
-    if (vid && ytIdOf(it.ytUrl || '') === vid) return true;
-    if (incoming.videoId && it.videoId === incoming.videoId) return true;
-    if (incoming.shortUrl && it.shortUrl === incoming.shortUrl
-        && !vid && !incoming.videoId && !it.videoId && !ytIdOf(it.ytUrl || '')) return true;
-    return false;
-  });
+  return HistMerge.findDuplicate(existingList, incoming).index >= 0;
 }
 
 // --- 重複判定の母集団のミラー(yt-clicks.js: manualOnly=手動短縮URL履歴は重複母集団から除外) ---
@@ -138,11 +131,9 @@ test('D-8: 強キーが片方にでも在れば shortUrl 共有で畳まない(�
   const incoming = { ytUrl: 'https://youtube.com/shorts/GT8OLSB8mtE', shortUrl: 'https://5mgl.com/8dpUu' };
   assert.strictEqual(isDupe(list, incoming), false);
 });
-// ※ URL形式違い(shorts/ vs ?v=)の同一ID判定は本体 yt-clicks.js:ytIdOf の守備範囲。
-//   ここのミラーは簡易版なので同形式で重複を担保する(下)。
-test('D-3: 同形式の同一YouTube IDは重複', function () {
-  const list = [{ ytUrl: 'https://www.youtube.com/shorts/abc123' }];
-  assert.strictEqual(isDupe(list, { ytUrl: 'https://www.youtube.com/shorts/abc123' }), true);
+test('D-3: URL形式が違っても同一YouTube IDは重複', function () {
+  const list = [{ ytUrl: 'https://www.youtube.com/shorts/AAAAAAAAAAA' }];
+  assert.strictEqual(isDupe(list, { ytUrl: 'https://www.youtube.com/watch?v=AAAAAAAAAAA' }), true);
 });
 test('D-4: 別の背骨ID/別URLなら重複ではない=ちゃんと新規で載る', function () {
   const list = [{ videoId: 'acc1-A', shortUrl: 'https://5mgl.com/a' }];

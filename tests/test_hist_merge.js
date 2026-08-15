@@ -120,9 +120,9 @@ test('H-13: 投稿URI・短縮URLが無いシート行も動画IDで一意に識
   assert.strictEqual(HM.historyItemKey({ videoId: 'acc1-20260723-1200-abcd' }), 'v:acc1-20260723-1200-abcd');
 });
 
-test('H-14: 履歴キーは投稿URI→短縮URL→動画IDの優先順を守る', function () {
+test('H-14: 履歴キーは投稿URI→動画ID→短縮URLの強い順を守る', function () {
   assert.strictEqual(HM.historyItemKey({ postUri: 'at://post/1', shortUrl: 'https://s/1', videoId: 'vid-1' }), 'u:at://post/1');
-  assert.strictEqual(HM.historyItemKey({ shortUrl: 'https://s/1', videoId: 'vid-1' }), 's:https://s/1');
+  assert.strictEqual(HM.historyItemKey({ shortUrl: 'https://s/1', videoId: 'vid-1' }), 'v:vid-1');
 });
 
 test('H-15: シート由来行に投稿当時の価格スナップを復元する(セール)', function () {
@@ -203,6 +203,26 @@ test('H-24: ローカル行のytUrlがymapから解決されて渡れば、シ�
   assert.strictEqual(HM.mergeSheetExtras(localResolved, sheet).length, 0, 'ymap解決でローカルが吸収=シート由来を出さない');
 });
 
+test('H-25: 共有短縮URLが同じ別作品でもcanonicalキーは背骨IDで分離する', function () {
+  var a = { videoId: 'acc1-work-A', shortUrl: 'https://5mgl.com/shared' };
+  var b = { videoId: 'acc1-work-B', shortUrl: 'https://5mgl.com/shared' };
+  assert.strictEqual(HM.historyItemKey(a), 'v:acc1-work-A');
+  assert.strictEqual(HM.historyItemKey(b), 'v:acc1-work-B');
+  assert.notStrictEqual(HM.historyItemKey(a), HM.historyItemKey(b));
+});
+
+test('H-26: 旧shortUrlキーのYouTube値はcanonical変更後も読める', function () {
+  var it = { videoId: 'acc1-work-A', shortUrl: 'https://5mgl.com/legacy' };
+  var map = { 's:https://5mgl.com/legacy': 'https://youtu.be/AAAAAAAAAAA' };
+  assert.strictEqual(HM.historyMapValue(map, it), 'https://youtu.be/AAAAAAAAAAA');
+});
+
+test('H-27: 重複判定は強キー優先で、短縮URL一致だけの別作品を畳まない', function () {
+  var rows = [{ videoId: 'acc1-work-A', shortUrl: 'https://5mgl.com/shared', ytUrl: 'https://youtu.be/AAAAAAAAAAA' }];
+  assert.strictEqual(HM.findDuplicate(rows, { videoId: 'acc1-work-B', shortUrl: 'https://5mgl.com/shared', ytUrl: 'https://youtu.be/BBBBBBBBBBB' }).index, -1);
+  assert.strictEqual(HM.findDuplicate(rows, { videoId: 'acc1-work-A' }).matchedBy, 'videoId');
+  assert.strictEqual(HM.findDuplicate([{ shortUrl: 'https://5mgl.com/old' }], { shortUrl: 'https://5mgl.com/old' }).matchedBy, 'shortUrl');
+});
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);
