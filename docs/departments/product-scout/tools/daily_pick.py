@@ -93,16 +93,22 @@ def main():
     for x in withimg[:5]: w.write("- " + line(x) + "\n")
     noimg = len(mainrows) - len(withimg)
     if noimg: w.write(f"(画像なし{noimg}件は動画化の素材が無いので手動追加からは外した)\n")
-    # 全候補=全ソース(main+list+circle)から。画像の有無は問わない
-    allrows = parse(d1("SELECT cp.cid, cp.source, w.title, w.info_json, w.sales_n FROM candidate_pool cp JOIN works w ON w.cid=cp.cid "
-                       "WHERE w.info_json IS NOT NULL AND w.info_json<>''"))
+    # 全候補=全ソース(main+list+circle)から。★動画生成用の画像(sampleImageURL.sample_l=作品のコマ)が
+    #   あるものだけに限定(Chami 2026-08-15「ソース集団はサンプル画像じゃなくて動画生成用の画像があるもののみ」)。
+    #   ここで数える imgs は sample_l のコマ枚数=そのまま5秒動画の素材。imgs=0(表紙しか無い)は動画化できないので除外。
+    allparsed = parse(d1("SELECT cp.cid, cp.source, w.title, w.info_json, w.sales_n FROM candidate_pool cp JOIN works w ON w.cid=cp.cid "
+                         "WHERE w.info_json IS NOT NULL AND w.info_json<>''"))
+    allrows = [x for x in allparsed if x.get("imgs")]
     for x in allrows: x["score"] = score(x)
     allrows.sort(key=lambda x: -x["score"])
     invis = []
     for s in ("list", "circle"):
         tot, vis = covmap.get(s, (0, 0))
         if tot - vis > 0: invis.append(f"{s} {tot-vis}件")
-    w.write(f"\n**■ 全候補おすすめ5**(全ソース・母集団{len(allrows)}件)\n")
+    dropimg = len(allparsed) - len(allrows)
+    w.write(f"\n**■ 全候補おすすめ5**(全ソース・動画生成用の画像ありに限定・母集団{len(allrows)}/{len(allparsed)}件)\n")
+    if dropimg:
+        w.write(f"(画像なし{dropimg}件=表紙しか無く動画化の素材が無いので除外)\n")
     if invis:
         w.write(f"(★{' / '.join(invis)} はまだ情報未取得=評価不可。改修αへ依頼中)\n")
     for x in allrows[:5]: w.write("- " + line(x) + "\n")
