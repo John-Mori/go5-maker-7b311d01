@@ -255,8 +255,22 @@ def _run():
     print(f"{'PASS' if ok else 'FAIL'} D-8: 本番の呼称ルール.json でも芽衣の『怜くん』が鳴る "
           f"| {real}")
 
+    # 本番の写像で『ルカ』検出が生きていること(2026-08-15 Chami=オタコンがルカと呼ぶ→基本モドリッチ)。
+    # target_detect_forms へ『ルカ』を足したので、override を持たない話者(オタコン)の裸『ルカ』が鳴る。
+    luka = [x for x in naming_verdicts("オタコン", "hr", "ルカに聞いてみる", rules)
+            if x.get("target") == "ルカ・モドリッチ"]
+    luka_ok = bool(luka)
+    # override を持つ話者(アイ)の『ルカさん』は鳴らない=検出formsが敬称必須を意味しない担保。
+    luka_fp = [x for x in naming_verdicts("アーモンドアイ", "hr", "ルカさんに聞く", rules)
+               if x.get("target") == "ルカ・モドリッチ"]
+    luka_ok = luka_ok and not luka_fp
+    if not luka_ok:
+        failed += 1
+    print(f"{'PASS' if luka_ok else 'FAIL'} D-9: オタコンの裸『ルカ』が鳴る/アイの『ルカさん』は鳴らない "
+          f"| fire={luka} fp={luka_fp}")
+
     total = (len(cases) + len(fix_cases) + len(abbrev_cases)
-             + len(detect_cases) + 1)
+             + len(detect_cases) + 2)
     print("-" * 60)
     if failed:
         print(f"{failed} 件 FAIL / {total} 件")
