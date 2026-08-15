@@ -55,7 +55,8 @@ def parse(rows):
         it = (info.get("iteminfo") or {}).get("author") or []
         author = (it[0].get("name", "") if it else "")
         out.append(dict(cid=r["cid"], title=r["title"], price=price, disc=disc, rc=rc,
-                        avg=avg, sales=r.get("sales_n"), author=author, imgs=sample_n(info)))
+                        avg=avg, sales=r.get("sales_n"), author=author, imgs=sample_n(info),
+                        src=r.get("source")))
     return out
 
 def score(x):
@@ -73,7 +74,9 @@ def line(x):
     sl = f" 実売{x['sales']}" if x["sales"] else ""
     au = f"({x['author']})" if x["author"] else ""
     im = f" 画像{x['imgs']}枚" if x.get("imgs") else " 画像なし"
-    return f"{x['cid']} {x['title']}{au} / {p}{dd}{rr}{sl}{im}"
+    tab = {"main": "手動", "list": "リスト", "circle": "サークル"}.get(x.get("src"), "")
+    tg = f" [{tab}]" if tab else ""
+    return f"{x['cid']} {x['title']}{au} / {p}{dd}{rr}{sl}{im}{tg}"
 
 def main():
     w = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -81,25 +84,28 @@ def main():
     cov = d1("SELECT cp.source src, COUNT(*) tot, SUM(CASE WHEN w.info_json IS NOT NULL AND w.info_json<>'' THEN 1 ELSE 0 END) vis "
              "FROM candidate_pool cp LEFT JOIN works w ON w.cid=cp.cid GROUP BY cp.source")
     covmap = {r["src"]: (r["tot"], r["vis"]) for r in cov}
-    rows = parse(d1("SELECT cp.cid, w.title, w.info_json, w.sales_n FROM candidate_pool cp JOIN works w ON w.cid=cp.cid "
-                    "WHERE cp.source='main' AND w.info_json IS NOT NULL AND w.info_json<>''"))
-    for x in rows: x["score"] = score(x)
-    rows.sort(key=lambda x: -x["score"])
-    # 手動追加=動画生成用のサンプル画像があるもの限定(Chami 2026-08-15「画像もあるやつをチョイスして」)
-    withimg = [x for x in rows if x.get("imgs")]
-    w.write(f"**■ 手動追加(💡)おすすめ5**(画像ありに限定・母集団{len(withimg)}/{len(rows)}件)\n")
+    # 手動追加=source='main'のうち動画生成用サンプル画像があるもの限定(Chami 2026-08-15「画像もあるやつをチョイスして」)
+    mainrows = parse(d1("SELECT cp.cid, cp.source, w.title, w.info_json, w.sales_n FROM candidate_pool cp JOIN works w ON w.cid=cp.cid "
+                        "WHERE cp.source='main' AND w.info_json IS NOT NULL AND w.info_json<>''"))
+    for x in mainrows: x["score"] = score(x)
+    withimg = sorted([x for x in mainrows if x.get("imgs")], key=lambda x: -x["score"])
+    w.write(f"**■ 手動追加(💡)おすすめ5**(画像ありに限定・母集団{len(withimg)}/{len(mainrows)}件)\n")
     for x in withimg[:5]: w.write("- " + line(x) + "\n")
-    noimg = len(rows) - len(withimg)
+    noimg = len(mainrows) - len(withimg)
     if noimg: w.write(f"(画像なし{noimg}件は動画化の素材が無いので手動追加からは外した)\n")
+    # 全候補=全ソース(main+list+circle)から。画像の有無は問わない
+    allrows = parse(d1("SELECT cp.cid, cp.source, w.title, w.info_json, w.sales_n FROM candidate_pool cp JOIN works w ON w.cid=cp.cid "
+                       "WHERE w.info_json IS NOT NULL AND w.info_json<>''"))
+    for x in allrows: x["score"] = score(x)
+    allrows.sort(key=lambda x: -x["score"])
     invis = []
     for s in ("list", "circle"):
         tot, vis = covmap.get(s, (0, 0))
         if tot - vis > 0: invis.append(f"{s} {tot-vis}件")
-    w.write("\n**■ 全候補おすすめ5**\n")
+    w.write(f"\n**■ 全候補おすすめ5**(全ソース・母集団{len(allrows)}件)\n")
     if invis:
-        w.write(f"(★{' / '.join(invis)} は works に情報未取得=評価不可で、評価できる母集団が手動追加と同一。"
-                f"よって現状の全候補は手動追加と中身が重なる。分離には改修αのバックフィルが要る=依頼中)\n")
-    for x in rows[:5]: w.write("- " + line(x) + "\n")
+        w.write(f"(★{' / '.join(invis)} はまだ情報未取得=評価不可。改修αへ依頼中)\n")
+    for x in allrows[:5]: w.write("- " + line(x) + "\n")
     w.flush()
 
 if __name__ == "__main__":
