@@ -50,7 +50,7 @@
   //   ・YT説明欄に貼る用途なのでURL長は問題にならない＝計測できる link-worker を最優先。
   //   ・WORKER_URL は go5-short の払い出しURL。SHARED_SECRET は Worker 側と同値。(公開可＝ソフト鍵)
   //   ・端末ごとに localStorage short_worker_url / short_shared_secret で上書き可。
-  //   ・未設定/失敗時は da.gd→TinyURL→長いURL に安全フォールバック。(計測できないだけで壊れない)
+  //   ・未設定/失敗時は生URLへ縮退。(計測できない状態を外部短縮で隠さず、リンク自体は壊さない)
   // ★2026-08-03(真因): この定義は元はファイル下部(workerBase 直前)に在ったが、`var SHORT` の宣言巻き上げで
   //   初期化中は undefined のまま。applyAccount()初回同期→renderPreview→discCacheKeyFor_ が同期的に
   //   workerBase()を呼ぶと `SHORT.URL_BY_ACCT` で TypeError(undefined is not an object)を投げ、IIFE全体が
@@ -137,6 +137,7 @@
   //   従来 applyWorkStateToUi_ はリビルド選択時しか呼ばれず、候補から/作品URL入力で作品を決めても
   //   新作でもチェックが入らず本文の割引行に「の新作」が付かなかった。カテゴリ自動チェックと同じく
   //   同一cidは1回だけ＝手動でチェックを外した後に再描画で戻さない。
+  var _wsClearedCid = ''; // 作品が替わった時に前作の新作/準新作チェックを一度だけクリアしたcid
   function autoApplyWorkStateFromInfo_(info, cidHint) {
     if (!info || !info.title) return;
     var cid = String(info.cid || cidHint || info.title || ''); if (!cid) return;
@@ -146,6 +147,13 @@
     //   先にガードを立てると、Invalid Date の一度きりで cid がロックされ、発売日が揃っても二度と新作を
     //   拾えなくなる(Chami報告2026-08-13「新作判定が漏れる」の副次要因)。ws が確定した時だけ1回で固定する。
     if (ws) { save('movie_auto_ws_cid', cid); applyWorkStateToUi_(ws); }
+    else if (_wsClearedCid !== cid) {
+      // ★発売日が取れず作品状態を判定できない作品に替わった。前作の新作/準新作チェックが居残ると
+      //   準新作の作品でもX投稿本文プレビューに前作の「の新作」が残り、準新作が新作として表示される
+      //   (Chami報告2026-08-15・場面3)。作品が替わった最初の一度だけ状態をクリアする=手動調整も
+      //   再描画では消さない。ガード(movie_auto_ws_cid)は立てない=発売日が後から届けば上の枝で正しく上書きできる。
+      _wsClearedCid = cid; applyWorkStateToUi_('');
+    }
     // 総集編(FANZAのジャンル/フロア名に「総集編」)なら本文の割引行へも反映。新作と両立で「オフの新作&総集編」になる。
     //   (Chami依頼2026-08-05「総集編にチェックが入ってるときは総集編の記載も 新作&総集編みたいに」)
     //   カテゴリの hidden 設定に依らず拾えるよう、割引文の総集編ラベルと同じ語「総集編」で直接判定する。
@@ -262,6 +270,14 @@
     if (rbSel) rbSel.value = ''; if (rbRow) rbRow.hidden = true;
     // 2行モード(コメント/作者)もOFFへ。change発火で保存値・行数・プレビューまで通常経路で同期させる。
     ['topTwoLine', 'authorTwoLine'].forEach(function (id) {
+      var el = $(id);
+      if (el && el.checked) { el.checked = false; try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
+    });
+    // ★新作/準新作/総集編の作品状態チェックも前作を引き継がない=新規作成はまっさらから始める。
+    //   これらは作品ごとに発売日から導出する派生値。居残ると準新作の作品でもX投稿本文プレビューに
+    //   前作の「の新作」が残り、準新作が新作として表示された(Chami報告2026-08-15・場面3=本文プレビュー)。
+    //   change発火でX本文の割引行サフィックス・定価ステータス行(話題の準新作💕 等)まで通常経路で同期。
+    ['discountNew', 'discountNew2', 'movieJunshinsaku', 'discountDigest', 'discountDigest2'].forEach(function (id) {
       var el = $(id);
       if (el && el.checked) { el.checked = false; try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
     });
@@ -716,7 +732,7 @@
   //   ・★セール会場リンクはここで事前に短縮してキャッシュする。(作品リンクも無改変ではなく、
   //     投稿直前にmeasureWorkLink_が同じ経路で短縮リンクへ差し替える＝どちらも最終投稿文では短縮リンク。
   //     訂正2026-07-20: 旧コメント「作品リンクは生のまま」は誤り)
-  //     短縮は makeShortAndShare。(自前worker[チャンネル別ドメイン]→da.gd→TinyURL、全滅時はフルURL)302素通しなので af_id は保持。
+  //     短縮は makeShortAndShare。(自前worker[チャンネル別ドメイン]、失敗時はフルURL)302素通しなので af_id は保持。
   //   ・ON/OFFは端末に永続化＋composePostText()が最後に付け足す＝「案内する作品URL」より必ず後ろに来る。
   //     動画作成後の自動投稿(投稿確認モーダル)もcomposePostText()で本文を作るため自動的に反映される。
   var DISCOUNT_LIST_URL = 'https://www.dmm.co.jp/dc/doujin/-/list/=/campaign=gain/section=mens/'; // 初回だけの既定シード(下のensureDiscUrlsSeeded_)
@@ -1916,75 +1932,33 @@
       return retryOr('');   // ネットワーク例外/タイムアウト＝1回だけ再試行
     });
   }
-  // 外部サービス短縮。(GET・テキスト返却)da.gd → TinyURL の順で保険に使う。
-  //   ★6秒タイムアウト付き(2026-07-20 da.gd障害の教訓): da.gdが「拒否」でなく「無限タイムアウト」型で
-  //   死ぬと(実測: 522/応答なし)、タイムアウト無しのfetchはブラウザ既定(数十秒〜)まで待ち、投稿UIが
-  //   フリーズ同然になる。6秒で諦めて次のプロバイダ(TinyURL→r2)へ即フォールバックする。
-  function shortenVia(api, longUrl) {
-    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 6000) : null;
-    return fetch(api + encodeURIComponent(longUrl), ctl ? { signal: ctl.signal } : undefined)
-      .then(function (r) { return r.ok ? r.text() : ''; })
-      .then(function (t) {
-        if (timer) clearTimeout(timer);
-        t = String(t || '').trim(); return /^https?:\/\//.test(t) ? t : '';
-      })
-      .catch(function () { if (timer) clearTimeout(timer); return ''; });
-  }
-  // 案A(da.gdチェーン)：true でr2短縮を da.gd でさらに短縮して“表示用の短いURL”にする。
-  //   false にすると r2(=5mgl.com)URL をそのまま表示。(＝ワンフラグで即ロールバック)
-  //   ★2026-07-20: 独自ドメイン5mgl.com化により表示URL自体が短い(5mgl.com/xxxxx≈14字)ため
-  //   false に。da.gd/tinyurlは normal path から外れ、worker障害時の深いフォールバックにのみ残す。
-  var USE_DAGD_CHAIN = false;
-  // ── 表示用の短縮プロバイダ(da.gd代替策)──────────────────────────────
-  //   上から順に試し、最初に成功した短縮URLを「共有URL」に採用する。
-  //   ★da.gd が消えた/不調になったら、この配列を並べ替える or 差し替えるだけで置換できる。
-  //   ブラウザからのCORS確認済み：da.gd(Access-Control-Allow-Origin:*)・tinyurl。(OK)
-  //   予備候補(復活・CORS確認後に配列へ追加可)：is.gd '/create.php?format=simple&url=' / cleanuri 等。
-  //   将来の本命：独自ドメインを r2 に Custom Domain 割当(docs/設計・調査 参照)＝この配列に依存しない。
-  var SHARE_SHORTENERS = [
-    function (u) { return shortenVia('https://da.gd/s?url=', u); },                    // 1) da.gd(最短・16字前後)
-    function (u) { return shortenVia('https://tinyurl.com/api-create.php?url=', u); }  // 2) tinyurl(保険)
-  ];
-  function shortenShare(u) {
-    var i = 0;
-    function next() {
-      if (i >= SHARE_SHORTENERS.length) return Promise.resolve('');
-      var fn = SHARE_SHORTENERS[i++];
-      return Promise.resolve().then(function () { return fn(u); })
-        .then(function (s) { return /^https?:\/\//.test(s || '') ? s : next(); })
-        .catch(function () { return next(); });
-    }
-    return next();
-  }
+  // 外部短縮サービスへの新規発番経路は撤去済み。独自link-workerだけを使用し、
+  // 失敗時は生URLへ明示的に縮退する(計測不能でもリンク自体は壊さない)。
   // 最終URL → { shortUrl(r2・計測用), shareUrl(短い共有・表示用) } を返す。
-  //   r2成功時：shortUrl=r2、shareUrl=プロバイダで短縮したr2URL。計測は常にr2側で行う。
-  //   全プロバイダ失敗時：shareUrl=r2。(長いが有効)r2失敗時：従来フォールバックで計測不可。(shortUrl=shareUrl)
+  //   独自worker成功時：shortUrl/shareUrlは同じ管理ドメインURL。計測は常にworker側で行う。
+  //   worker失敗時：shortUrl/shareUrlは生URL。(長いが有効・計測不能を隠さない)
   //   ★opts.account 指定時はそのチャンネルのドメインで r2 短縮を発行する(未指定=現UIアカウント・従来動作)。
   function makeShortAndShare(longUrl, opts) {
     if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '' });
     var account = opts && opts.account;
     return shortenViaWorker(longUrl, 0, account).then(function (r2) {
-      if (r2) {
-        if (!USE_DAGD_CHAIN) return { shortUrl: r2, shareUrl: r2 };
-        return shortenShare(r2).then(function (sh) { return { shortUrl: r2, shareUrl: (sh || r2) }; });
-      }
+      if (r2) return { shortUrl: r2, shareUrl: r2 };
       // ★2026-08-13 恒久策(Chami「またda.gdの短縮リンク出してくんの、やめろ」・2度目=C-038):
-      //   ワーカーが一過性に落ちた瞬間だけ、以前はここで da.gd/TinyURL(外部・計測不能・Chami禁止)へ
+      //   ワーカーが一過性に落ちた瞬間だけ、旧実装は外部短縮(計測不能・Chami禁止)へ
       //   フォールバックして短縮リンクを"発行"していた=これが唯一の da.gd 発生源だった。実測(2026-08-13)で
       //   live ワーカーは x.com/dmm/fanza を正しく 5mgl.com・yoz2.com へ短縮できている(=拒否ではなく瞬断)。
       //   → 保険で da.gd を新規発番することを完全にやめる。ワーカー失敗時は"生URLのまま"返す。
       //   生URLはそのまま踏めて壊れない(計測できないだけ)=Chamiが二度禁止した da.gd を機構として二度と出さない。
-      //   (shortenShare/SHARE_SHORTENERS/USE_DAGD_CHAIN は既存の resolve 側フォールバック等の互換で残置・normal path では未使用)
+      //   発番器そのものを削除し、将来のフラグ変更でも外部短縮が復活しない構造にした。
       return Promise.resolve({ shortUrl: longUrl, shareUrl: longUrl });
     });
   }
-  // 後方互換：表示用(da.gd優先)の1本を返す薄いラッパ。(手動短縮などで使用)
+  // 後方互換：表示用の1本を返す薄いラッパ。(手動短縮などで使用)
   function shortenUrl(longUrl) {
     if (!longUrl) return Promise.resolve('');
     return makeShortAndShare(longUrl).then(function (r) { return r.shareUrl || r.shortUrl || ''; });
   }
-  // 投稿履歴タブ(yt-clicks.js)から、過去投稿URLの計測用短縮リンク(r2+da.gd)を生成するために公開。
+  // 投稿履歴タブ(yt-clicks.js)から、過去投稿URLの独自計測リンクを生成するために公開。
   try { window.Go5MakeShort = makeShortAndShare; } catch (e) {}
 
   // ---- 🔁 URL自動解決：af_id欠落/未短縮のどちらも自動で補い、最終的に「短縮済みアフィリンク」にする ----
@@ -2010,7 +1984,7 @@
   try { window.Go5ResolvePromoUrl = resolvePromoUrl; } catch (e) {}
 
   // ---- 導線2: 投稿本文の作品リンクを計測付き短縮へ置換 ----
-  //   本文中の生のFANZA系リンク(al.fanza/dmm)を投稿直前に r2計測リンク(表示はda.gd)へ差し替える。
+  //   本文中の生のFANZA系リンク(al.fanza/dmm)を投稿直前に独自ドメイン計測リンクへ差し替える。
   //   手動運用の本文でも自動で効く。r2が取れない時は本文を変えず null。(安全側・投稿は止めない)
   //   これで「YT→投稿」(導線1=投稿URLの短縮・既存)と「投稿→FANZA」(導線2=本リンク)を別コードで計測できる。
   var WORK_LINK_RE = /https?:\/\/(?:al\.fanza\.co\.jp|www\.dmm\.co\.jp|book\.dmm\.co\.jp|book\.dmm\.com)\/[^\s]+/;
@@ -2058,7 +2032,7 @@
       var done = false;
       // リンク無し=プレースホルダ語を消して投稿(literal投稿を回避)。sentinelで置換→除去し、
       //   プレースホルダ箇所だけを消す(本文中の空白等は触らない)。
-      function fin(link) { if (done) return; done = true; resolve(link ? fillSalePH_(s, link) : fillSalePH_(s, ' ').split(' ').join('')); }
+      function fin(link) { if (done) return; done = true; resolve(link ? fillSalePH_(s, link) : fillSalePH_(s, '\u0000').split('\u0000').join('')); }
       ensureDiscountLink_(function (link) { fin(link); });
       setTimeout(function () { fin(cachedDiscountLink_()); }, 4000); // 取れなければプレースホルダ文字を消して投稿(literal投稿を回避)
     });
@@ -2075,7 +2049,7 @@
     if (els.shortUrlOut) els.shortUrlOut.textContent = '短縮URLを作成中…';
     makeShortAndShare(longUrl).then(function (res) {
       var short = res.shortUrl || '';                  // r2(計測用)
-      var share = res.shareUrl || short || longUrl;    // da.gd(表示・概要欄・コピー用)
+      var share = res.shareUrl || short || longUrl;    // 表示・概要欄・コピー用(独自短縮、失敗時は生URL)
       // 表示・概要欄への反映は「今のUIと同じアカウントの投稿」のときだけ。(別アカウントの記録でUIを書き換えない)
       if (!account || account === acctId()) setShareOutputs(share, longUrl);
       histAdd({ account: account, meta: meta, title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: (meta && meta.videoId) || (!account || account === acctId() ? currentVideoId : '') || '', workShortUrl: (workShort && workShort.shortUrl) || '', workShareUrl: (workShort && workShort.shareUrl) || '' });
@@ -2244,7 +2218,7 @@
     if (!items.length) { els.histList.innerHTML = '<p class="hint">このアカウントの履歴はまだありません。(投稿して短縮URLが出ると、ここに自動で貯まります)</p>'; return; }
     if (!view.length) { els.histList.innerHTML = '<p class="hint">表示できる履歴がありません。(すべて破棄済み)「🗂 破棄も表示」で確認できます。</p>'; return; }
     els.histList.innerHTML = view.map(function (it) {
-      var short = it.shareUrl || it.shortUrl || ''; // コピー・概要欄へは短い共有URL(da.gd)を優先
+      var short = it.shareUrl || it.shortUrl || ''; // コピー・概要欄へは独自短縮URLを優先(無ければ保存済みURL)
       var t = (it.title || '').trim();
       var badges = (it.adopted ? '<span class="hist-badge adopt">⭐本採用</span>' : '') +
         (dup[t] ? '<span class="hist-badge dup">重複</span>' : '') +
