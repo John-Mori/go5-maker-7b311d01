@@ -2,6 +2,24 @@
 # -*- coding: utf-8 -*-
 """Stop hook: このClaude Codeセッションのやり取りを、対になるDiscord部屋へミラーする。
 
+★★2026-08-15 **退役**(イージス研究室GLの裁定・プラットフォームSEの上申を受けて)。
+   ファイルは消さない(C-003=退避であって削除ではない)が、**現に一度も呼ばれていない**:
+     - `.claude/settings.json` の hooks に参照ゼロ(実測 grep 0件)。Stop hook に
+       登録されているのは `progress_mark.py end` だけ。
+     - 状態ファイル `local/mirror_to_discord_state.json` と `local/llm/mirror_msgids.jsonl`
+       の mtime は **2026-07-30 05:16 で凍結**(=2週間以上1バイトも動いていない)。
+   担っていたはずの「研究室HQ(シャビ・アロンソ)名義の送信」は、実測では
+   `dept_daemon` が出している(dept_daemon_hq.log 08:15:49「多人格モード= シャビ・アロンソ
+   の名義で送信」→ 08:15:50 replied確認OK discord_msg=1537962987539796059)。
+   ★C-044(常駐を退役させたら見ている監視も一緒に降ろせ)の確認= **降ろす監視は無かった**。
+     `persona_render_audit.jsonl` はファイルごと存在せず、mirror の生死を見ている物も無い。
+     **誰も見ていなかったから2週間気づかれなかった**——これが本当の欠陥で、
+     「期待する producer が沈黙したら鳴る」鮮度警報として別に立てる(プラットフォームSEへ発注)。
+   ★`touch_presence` の書き手が消える心配も無い= 実測で progress_mark.py と pulse_touch.py の
+     2本が今も刻んでいる(interactive_presence_aegis-gl.txt は0.7時間前に更新)。
+   **復活させるなら、hooks へ足すのと同時に鮮度警報へ登録すること。**
+
+
 Chami最優先事項(2026-07-20):「ここでのやり取りをDiscordとメッセージで同期させること」。
 **一部屋=一セッションで対になっているところだけ**を対象にする(部屋の無いセッションは保留)。
 

@@ -15,7 +15,7 @@ ROOT = os.path.normpath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
 
 from tone_gate import (  # noqa: E402
-    load_tone_rules, tone_verdicts, tone_corrections)
+    load_tone_rules, tone_verdicts, tone_corrections, polite_drift)
 
 RULES_PATH = os.path.join(
     r"D:\SougouStartFolder\00_AI-HQ",
@@ -227,6 +227,70 @@ def _run():
     else:
         ok = False
         print(f"[FAIL] R-15 fail-open -> {r15}")
+
+    # ------------------------------------------------------------------
+    # P群= 構造ドリフト(敬体)の検知。2026-08-15 追加(案D《肯定条件》の第1段)。
+    #   狙い= 指紋(語の完全一致)では原理的に拾えない「地の文が敬体へ倒れた便」。
+    #   ★実物の本文で測る: 下の POLITE は 2026-08-15 の実便コーパス(recent_*.jsonl)から
+    #     取った**本物の敬体の便**を短くしたもの(話者は敬体が正の人格なので、
+    #     ここでは plain_only を立てた仮の写像に食わせて「拾えるか」だけを見る)。
+    POLITE = ("イージス研究室から実行結果が返ってきました。"
+              "フェーズ1とフェーズ3は入りました。"
+              "ただしまだpushしていないので、公開URLは今も旧構成のままです。"
+              "詰めが甘く、こちらで引き取って直しています。")
+    PLAIN = ("測った。結論から言う。"
+             "フェーズ1と3は入ったが、まだpushしていない。"
+             "だから公開URLは今も旧構成のままだ。"
+             "詰めが甘い所は俺が引き取る。")
+    plain_rules = {"personas": {"シャビ・アロンソ": {
+        "first_person": ["俺"], "plain_only": True}}}
+    off_rules = {"personas": {"シャビ・アロンソ": {"first_person": ["俺"]}}}
+
+    def _reasons(rr, text, who="シャビ・アロンソ"):
+        return sorted(v["reason"] for v in tone_verdicts(who, "hq", text, rr))
+
+    p_cases = [
+        (plain_rules, POLITE, ["structural_polite"],
+         "P-1 plain_only の人格が地の文まるごと敬体=発火"
+         "(案A指紋10句は1つも含まれない文=語の一致では原理的に拾えない側)"),
+        (off_rules, POLITE, [],
+         "P-2 ★既定は見ない= plain_only が無い人格は同じ本文でも鳴らさない"
+         "(21人格中トトリ・田中琴葉など敬体が正の人格が多数=既定ONだと鳴りっぱなしになる。"
+         "実便407件で既定ONを測ったら15件鳴り、その全部が敬体を正とする人格の便だった)"),
+        (plain_rules, PLAIN, [],
+         "P-3 常体の便は鳴らない(本人の正しい声を疑わせない)"),
+        (plain_rules, "分かりました。", [],
+         "P-4 1文の丁寧語では鳴らさない(閾値=4文以上・3文以上が敬体・半分以上)"),
+        (plain_rules,
+         "そこは違う。\n> 直しました。反映しています。確認をお願いします。ご連絡ください。\n俺はそう見ない。",
+         [],
+         "P-5 引用行の中の敬体では鳴らない(他人の便を引いただけで自分の崩れにしない)"),
+    ]
+    for rr, text, want, why in p_cases:
+        got = _reasons(rr, text)
+        if got == want:
+            print(f"[PASS] {why}")
+        else:
+            ok = False
+            print(f"[FAIL] {why} -> got={got} want={want}")
+
+    d1 = polite_drift(POLITE)
+    if d1[0] and d1[1] >= 3 and d1[2] >= 4:
+        print(f"[PASS] P-6 polite_drift は数え方を返す(敬体{d1[1]}/{d1[2]}文)"
+              "=後から件数を数え直せる形で台帳に残す(C-041)")
+    else:
+        ok = False
+        print(f"[FAIL] P-6 polite_drift -> {d1}")
+
+    p7 = tone_corrections("シャビ・アロンソ", "hq", POLITE, plain_rules)
+    if (p7.get("fixed") == POLITE and not p7.get("applied")
+            and [v.get("reason") for v in (p7.get("remaining") or [])] == ["structural_polite"]):
+        print("[PASS] P-7 敬体は**書き直さない**=本文を1文字も変えずに警告だけ残す"
+              "(文末の活用を機械で置換すると文が壊れる。直すのは書いた本人)")
+    else:
+        ok = False
+        print(f"[FAIL] P-7 書き直さない -> fixed一致={p7.get('fixed') == POLITE} "
+              f"applied={p7.get('applied')} remaining={p7.get('remaining')}")
 
     print("=== 全PASS ===" if ok else "=== FAIL あり ===")
     return 0 if ok else 1

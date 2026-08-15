@@ -541,6 +541,8 @@ REQUEST_LOG_WD = os.path.join(LOCAL, "llm", "request_log.jsonl")
 REQUEST_LOG_TAIL = 256 * 1024     # 末尾だけ読む(全部読むと60秒巡回が重くなる)
 # session_relay._record が書く state のうち「答えが出た」を意味するもの。
 # answered_by_session = 対話セッションが窓で答えた分(2026-07-27 mirror_to_discord.py が書く)。
+#   ★2026-08-15: その mirror_to_discord.py は**退役**した(hooksに参照ゼロ・状態は7/30で凍結)。
+#     この状態名を書く者はもう居ない=ここは「過去の行を読むため」に残す(消すと台帳が読めなくなる)。
 ANSWER_STATES = ("completed", "replied", "replied_unverified", "answered_by_session", "recovered")
 
 
@@ -635,7 +637,11 @@ def _session_present(dept):
     """対話セッションが在席しているか(★2026-07-27に実測して正本を確かめた信号)。
 
     ★正本は `local/llm/interactive_presence_<部屋>.txt`。
-      hook(progress_mark.py / mirror_to_discord.py)が `session_rooms.touch_presence()` で刻む。
+      hook(progress_mark.py / pulse_touch.py)が `session_rooms.touch_presence()` で刻む。
+      ★2026-08-15 訂正= 旧記述は書き手を「progress_mark.py / mirror_to_discord.py」としていたが、
+        mirror は退役済(hooksに参照ゼロ)。**実測した現在の書き手は progress_mark.py と
+        pulse_touch.py の2本**(interactive_presence_aegis-gl.txt が0.7時間前に更新されている)。
+        =mirrorの退役で在席信号が死ぬことは無い。
     ★**`claude_active_<部屋>.txt` ではない**(実測 2026-07-27 03:18):
         interactive_presence_hq.txt …  0.1分前(HQは作業中=正しい)
         claude_active_hq.txt        … 48.4分前

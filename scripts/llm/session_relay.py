@@ -698,6 +698,10 @@ _TONE_REASON_JA = {
     "dialect_kansai": "関西弁(方言)",
     "first_person_mismatch": "一人称が他人格のもの",
     "forbidden_word": "この人格の禁止語",
+    # ★2026-08-15 追加。指紋(語の一致)では原理的に拾えない**構造ドリフト**=地の文が
+    #   敬体へ倒れた便。tone_gate.polite_drift が「敬体N/M文」の marker で出す。
+    #   ここに無いと英語の reason がそのまま封筒へ出る(=突き返しが読めない)。
+    "structural_polite": "地の文が敬体(です・ます)へ倒れている=この人格は常体",
 }
 
 

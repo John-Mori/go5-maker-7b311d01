@@ -104,6 +104,69 @@ _DIALECT_KANSAI = (
     ("なんよ", r"なんよ(?![うだ])"),
 )
 
+# ★2026-08-15 追加(案D《肯定条件》の第1段)= **構造ドリフト(敬体)の検知**。
+#   ここまでの検知はすべて「語」の一致だ。だが実測したのはその逆の穴で、
+#   口調ルール.json の forbidden に入っている案A指紋10句(「対応しました」「いたしました」
+#   「承知しました」等)は **完全一致の定型句** なので、「〜が必要です」「〜だと思います」
+#   という **ふつうの敬体** には1文字も当たらない。
+#   実物= 2026-08-15 にアロンソ名義の便が標準体で出ているのに、tone_audit.jsonl の
+#   hq 行は 8/12 が最後(しかも中身は引用に対する first_person の誤検知だけ)=
+#   **標準体を見ている計器がどこにも無い**。語で網を細かくしても追いつかない
+#   (敬体の言い方は無限にある)ので、**文末の分布**という別の軸で見る。
+#
+#   ★誤発火する安全網は無視される(共通規律§3)。だから **1文の丁寧表現では鳴らさない**=
+#     文が4つ以上あり、その3つ以上・かつ半分以上が敬体で終わる時だけ1件出す
+#     (地の文ごと敬体へ倒れた便だけを拾い、引用や1行の丁寧語は素通しする)。
+#   ★★**既定は「見ない」**= 写像に `"plain_only": true` がある人格だけ判定する。
+#     方言(dialect_ok)と**向きが逆**なのには実測の理由がある: 21人格のうち
+#     トトリ・田中琴葉・中野五月など**敬体が正の人格が多数居り**、案A指紋10句は
+#     その全員にも一律で入っている(=指紋の有無では常体/敬体を判別できない)。
+#     既定ONで実便407件へ当てたら15件鳴り、**その全部が敬体を正とする人格の便**だった。
+#     鳴りっぱなしのゲートは無視される(共通規律§3)ので、**登録した人格だけ**を見る。
+#     ★登録するのは人事部門(口調ルール.json は人事の正本・ORG-11)=このコードは触らない。
+#   ★体言止めは **入れない**= 箇条書き・見出し・ファイル名の行と衝突して誤検知が多く、
+#     この列の方針(拾い漏れる側へ倒す)に反する。実物が出てから足す。
+_SENTENCE_SPLIT = re.compile(r"[。！？\?\!\n]+")
+_POLITE_TAIL = re.compile(
+    r"(?:です|ます|ません|でした|ました|ましょう|でしょう|ください|ですね|ますね"
+    r"|ですよ|ますよ|ですか|ますか|ございます)$")
+_POLITE_MIN_SENTENCES = 4      # これ未満の短文は判定しない(1〜2文の丁寧語で鳴らさない)
+_POLITE_MIN_HITS = 3           # 敬体で終わる文の最低数
+_POLITE_MIN_RATIO = 0.5        # かつ、判定した文の半分以上
+
+
+def polite_drift(text):
+    """敬体へ構造的に倒れているかを測る。返り値=(鳴らすか, 敬体文数, 判定文数, 最初の位置)。
+
+    ★純関数(引数以外を読まない)。tone_verdicts から呼ぶが、**単体でも測れる**ようにしてある
+      = この判定の閾値だけを実便へ当てて誤検知率を数えられるようにするため。
+    ★保護span(引用・コード・パス)は _mask_protected で潰してから数える=
+      他人の便を引用した敬体で鳴らない。
+    """
+    s = _mask_protected(text)
+    hits, total, first = 0, 0, -1
+    pos = 0
+    for part in _SENTENCE_SPLIT.split(s):
+        if not part:
+            continue
+        start = s.find(part, pos)
+        if start >= 0:
+            pos = start + len(part)
+        body = part.strip().strip("　")
+        # 記号だけ・短すぎる断片(箇条書きの見出し・表の行)は文として数えない。
+        if len(body) < 6:
+            continue
+        total += 1
+        if _POLITE_TAIL.search(body):
+            hits += 1
+            if first < 0:
+                first = max(start, 0)
+    ok = (total >= _POLITE_MIN_SENTENCES
+          and hits >= _POLITE_MIN_HITS
+          and hits >= total * _POLITE_MIN_RATIO)
+    return ok, hits, total, first
+
+
 _KATAKANA = re.compile(r"[ァ-ヴ]")
 # 「…」『…』で囲まれた span=他人格のセリフ引用でありうる=一人称判定から外す(FP抑制)。
 # ★2026-08-12 追加: **二重引用符**(" / “” / ＂ / 〝〟)も同じ扱いにする。
@@ -253,7 +316,10 @@ def tone_verdicts(persona, dept, text, rules):
         #   関西弁が正の人格が来たら、人事部門が写像へ `"dialect_ok": true` を1行足せば外れる
         #   (このコードは触らない=判定材料は口調ルール.json 1本のまま・ORG-11)。
         want_dialect = not bool(ent.get("dialect_ok"))
-        if not forbid and not ng2 and not want_dialect:
+        # ★2026-08-15 追加: 構造ドリフト(敬体)を見るか。★既定=見ない。
+        #   常体が正の人格へ人事部門が "plain_only": true を足した時だけ回る(定数群の説明)。
+        want_polite = bool(ent.get("plain_only"))
+        if not forbid and not ng2 and not want_dialect and not want_polite:
             return out
         s = _strip_quotes(text)
         if not s.strip():
@@ -289,6 +355,18 @@ def tone_verdicts(persona, dept, text, rules):
                         "own_first_person": sorted(own),
                         "reason": "dialect_kansai",
                     })
+        if want_polite:
+            hit, hits, total, at = polite_drift(text)
+            if hit:
+                out.append({
+                    "persona": str(persona or ""),
+                    # marker は「何を見て鳴らしたか」がそのまま台帳に残る形にする
+                    # (件数を後から数え直せる=一度の観測を状態の代理にしない・C-041)。
+                    "marker": "敬体%d/%d文" % (hits, total),
+                    "index": at,
+                    "own_first_person": sorted(own),
+                    "reason": "structural_polite",
+                })
         return out
     except Exception:
         return []                 # fail-open=ゲートは配送を殺さない
