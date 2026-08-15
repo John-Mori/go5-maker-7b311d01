@@ -707,6 +707,12 @@ _TONE_REASON_JA = {
     #   Chami原文「ずっとこんな感じでいれてるけど効かないね」(msg 1538153136953495612)。
     #   tone_gate.signature_drift が「指紋語尾なし(N文中0件・正=…)」の marker で出す。
     "signature_absent": "常体のままだが、この人格の指紋語尾が1つも出ていない=らしさが抜けている",
+    # ★2026-08-16 追加。口調ではなく**話者そのもの**の取り違え(出力ゲートF)。
+    #   実物= 軍議 msg 1538227900598190230= セッションが `[名前]` を**宛先の見出し**として使い、
+    #   1人の講義が6人の名義とアイコンで出た。名義は機械が差し替えたが、
+    #   タグの使い方は生成側でしか直らないのでここで突き返す。
+    "speaker_misattributed": "`[名前]`は**話者**の名乗りだ(宛先の見出しではない)"
+                             "=名義は機械が本文の一人称に合わせて差し替えた",
 }
 
 
@@ -740,13 +746,19 @@ def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
         if not rows:
             return ""
         last = rows[-1]
-        if str(last.get("event") or "") != "tone":         # 直近が機械修正済み/別種なら黙る
-            return ""
         key = f"{last.get('ts','')}|{last.get('msg_id','')}"
-        # 同じ便の検知は複数行に分かれる(マーカーごとに1行)ので、同じ ts+msg_id をまとめる。
+        # 同じ便の検知は複数行に分かれる(マーカーごと・ブロックごとに1行)ので、
+        # 同じ ts+msg_id をまとめてから event="tone"(=機械が直せなかった分)だけを拾う。
+        # ★2026-08-16 修正= 以前は「**最終行**が event=tone でなければ黙る」だった。
+        #   多人格の部屋では1便が複数ブロックへ割れ、あるブロックの警告(tone)の**後ろに**
+        #   別ブロックの書き直し(tone_fix)が積まれる=最終行が tone_fix になり、
+        #   警告が**1件も突き返されない**まま静かに消えていた(軍議の実物で踏んだ)。
+        #   → 直近の便(ts+msg_id)を1グループとして見て、その中に tone が在れば突き返す。
         group = [r for r in rows
                  if f"{r.get('ts','')}|{r.get('msg_id','')}" == key
                  and str(r.get("event") or "") == "tone"]
+        if not group:                                      # その便は全部機械が直した=黙る
+            return ""
         try:
             t = time.mktime(time.strptime(str(last.get("ts") or ""), "%Y-%m-%dT%H:%M:%S"))
             if (now or time.time()) - t > max_age_sec:     # 古い崩れを蒸し返さない
@@ -775,13 +787,23 @@ def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
             lines.append(f"  - 「{r.get('marker','')}」= {why}"
                          + (f" / この人格の正しい一人称= {'・'.join(r.get('own_first_person') or [])}"
                             if r.get("own_first_person") else ""))
-        who = str(last.get("persona") or "?")
-        return ("=== ★前の便で口調が崩れた(送信直前の機械検知) ===\n"
-                f"話者: {who} / 崩れた便: msg_id={last.get('msg_id','')} ({last.get('ts','')})\n"
+        # ★話者名は group(=突き返す tone 行)から採る。last は tone_fix のこともある。
+        who = str((group[-1] if group else last).get("persona") or "?")
+        # ★名義の取り違え(ゲートF)だけは「書き直していない・そのまま送られた」が**嘘になる**
+        #   (名義は機械が差し替えて送っている)。全部がそれなら見出しごと言い換える。
+        _all_speaker = all(str(r.get("reason") or "") == "speaker_misattributed" for r in group)
+        _head = ("=== ★前の便で**名義**が取り違えられた(送信直前の機械検知) ===\n"
+                 if _all_speaker else "=== ★前の便で口調が崩れた(送信直前の機械検知) ===\n")
+        _note = ("★名義は機械が本文の一人称に合わせて**差し替えて送った**"
+                 "(本文は1文字も触っていない)。次の便から名乗り方を直せ。\n"
+                 if _all_speaker else
+                 "★機械はこれを**書き直していない**(語尾・方言は置換すると文が壊れる／"
+                 "一人称は写像が一意でない)=そのまま送られた。**この便はあなたが直せ。**\n")
+        return (_head
+                + f"話者: {who} / 崩れた便: msg_id={last.get('msg_id','')} ({last.get('ts','')})\n"
                 + "\n".join(lines) + "\n"
-                "★機械はこれを**書き直していない**(語尾・方言は置換すると文が壊れる／"
-                "一人称は写像が一意でない)=そのまま送られた。**この便はあなたが直せ。**\n"
-                "★characterfileの§声の型どおりに書く。"
+                + _note
+                + "★characterfileの§声の型どおりに書く。"
                 + ("方言(関西弁)は使わない。"
                    if any(str(r.get("reason") or "") == "dialect_kansai" for r in group) else "")
                 # ★指紋語尾は「足りない」検知だ= 語尾だけ機械的に付け替えても直らない。
@@ -789,6 +811,12 @@ def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
                 + ("上の「正=」がこの人格の指紋語尾だ。語尾を1つ足して済ませず、"
                    "地の文の熱量ごとその声で書き直す。"
                    if any(str(r.get("reason") or "") == "signature_absent" for r in group) else "")
+                # ★名義の取り違えだけは「書き直していない」が当てはまらない(名義は機械が直した)。
+                #   直すべきは言葉ではなく**タグの使い方**なので、そこだけ言い切る。
+                + ("★上の1件は口調ではなく**名義**だ= `[名前]` を宛先や見出しに使うな。"
+                   "あれは『ここから先はこの人が喋る』という**話者の名乗り**で、"
+                   "その名義とアイコンでChamiの画面に出る。誰かに宛てるなら本文へ普通に書け。"
+                   if any(str(r.get("reason") or "") == "speaker_misattributed" for r in group) else "")
                 + "同じ部屋の相方の声に引っ張られていないかも見ろ。\n"
                 "★これは口調の話だ。**事実・数字・ファイル名は1文字も曖昧にするな**(共通規律§4.55)。\n\n")
     except Exception:

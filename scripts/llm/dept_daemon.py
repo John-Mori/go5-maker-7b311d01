@@ -2976,6 +2976,54 @@ def audit_tone(dept, persona, text, rec=None):
         return text, [], []     # 監査の失敗で応答を巻き添えにしない(fail-safe)
 
 
+def audit_speaker(dept, persona, text, roster, rec=None):
+    """出力ゲートF= **名義の取り違え**を、書き直しの手前で名義側に直す(2026-08-16)。
+
+    ★これは口調ゲートDの**手前**に置く。順番が本質だ。
+      Dは「本文に他人格の一人称が出た」を**言葉の側**で直す(僕→俺)。
+      だが本当は話者そのものが違う時、Dが先に走ると**取り違えの証拠を消して**
+      それらしい別人の声に仕立ててしまう(軍議 msg 1538227900598190230 の実物=
+      オタコンの講義が 僕→俺/僕→わたし と置換され、6人の名義とアイコンで出た)。
+    ★動かすのは**名義だけ**。本文は1文字も触らない。
+    ★動かすのは `[名前]` で明示的に名乗った便だけ(who あり)。既定の名義で出る部屋は対象外。
+    ★決められない時は None が返る=従来どおりDへ落ちる(fail-open)。
+    返り値: 取り違えを直したなら本当の話者(str)、そうでなければ None。
+    """
+    try:
+        if _tone_gate is None or not persona or not roster:
+            return None
+        rules = _tone_rules()
+        if not rules:
+            return None
+        true_who = _tone_gate.misattributed_speaker(persona, text, rules, roster)
+        if not true_who or true_who == persona:
+            return None
+        log(dept, f"★出力ゲートF(名義の取り違え): [{persona}]と名乗ったが本文の一人称は"
+                  f"{true_who}のもの=**名義を{true_who}へ差し替えて送る**(本文は触らない) "
+                  f"msg={str((rec or {}).get('msg_id', ''))}")
+        try:
+            os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+            with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    # ★event は "tone"= session_relay が次の封筒へ突き返す対象にする。
+                    #   名義は機械が直せても、**タグを宛先の見出しに使う癖**は生成側でしか直らない。
+                    #   ここで黙ると同じ便が毎回出る(共通規律§3「心がけに任せない。機構に載せる」)。
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "dept": dept, "event": "tone",
+                    "persona": str(persona or ""),      # タグで名乗っていた方(誤)
+                    "to": str(true_who),                # 本文の一人称から決まった本当の話者
+                    "marker": "[%s]と名乗ったが本文は%sの一人称" % (persona, true_who),
+                    "reason": "speaker_misattributed",
+                    "msg_id": str((rec or {}).get("msg_id", "")),
+                    "excerpt": str(text or "")[:200],
+                }, ensure_ascii=False) + "\n")
+        except Exception:
+            pass                 # 監査の失敗で名義の修正を巻き添えにしない
+        return true_who
+    except Exception:
+        return None              # fail-open= 転んだら従来どおり
+
+
 def _naming_rules():
     """呼称ルール.json を読む(読めなければ None=ゲートは無効化)。
 
@@ -3532,6 +3580,26 @@ def member_call(conf, content, ctx_dir=None):
 _PERSONA_TAG_RE = re.compile(r"^[\[［]([^\[\]［］\n]{1,24})[\]］][ 　]*(.*)$")
 
 
+def _peel_extra_tags(rest, resolve, limit=4):
+    """名乗りタグの**同じ行に続く2つ目以降**のタグを剥ぐ(話者は最初のタグのまま)。
+
+    ★2026-08-16 実物(軍議 msg 1538228236499034143)= セッションが
+      `[十王星南][クラウディア] **商品候補選定** → …` と1行に2つ並べたため、
+      正規表現が最初の1つだけを食い、**本文の冒頭に `[クラウディア]` がそのまま出た**
+      (webhook名=十王星南 / 本文=「[クラウディア] 商品候補選定 →…」)。
+    ★誰が喋るかは**変えない**(最初のタグのまま)= 2つ並んだ時にどちらが話者かは
+      機械には決められない。ここで直すのは「リテラルのタグがChamiの画面へ出る」defect だけ。
+    ★剥ぐのは**解決できる名前のタグだけ**= `[検証]` `[1]` のような本文は1文字も触らない。
+    """
+    s = str(rest or "")
+    for _ in range(limit):
+        mm = _PERSONA_TAG_RE.match(s.strip())
+        if not mm or not resolve(mm.group(1)):
+            break
+        s = mm.group(2)
+    return s
+
+
 def split_persona_blocks(text, resolve):
     """`[名前] 本文` のブロック列へ割る。戻り値 [(正式名 or None, 本文), ...]。
 
@@ -3570,13 +3638,14 @@ def split_persona_blocks(text, resolve):
     if not m:
         return [(None, t)]                  # 名乗りが1つも無い=従来どおり1通
     pre = [l for l in lines[:head] if l.strip()]
-    first_body = ([m.group(2)] if not pre else pre + [m.group(2)])
+    first_body = ([_peel_extra_tags(m.group(2), resolve)] if not pre
+                  else pre + [_peel_extra_tags(m.group(2), resolve)])
     blocks = [[who, first_body]]
     for ln in lines[head + 1:]:
         m2 = _PERSONA_TAG_RE.match(ln.strip())
         who2 = resolve(m2.group(1)) if m2 else None
         if who2:
-            blocks.append([who2, [m2.group(2)]])
+            blocks.append([who2, [_peel_extra_tags(m2.group(2), resolve)]])
         else:
             blocks[-1][1].append(ln)
     out = []
@@ -5215,8 +5284,18 @@ class Daemon:
             #   ★A/B(話者非依存)とは層が違う=ここ(ブロック解決後)が正しい合流点(設計§3)。
             #   ★fail-open=検査例外は握り潰して元ブロックを使う(audit_naming が保証)。
             _fixed_blocks = []
+            _roster = [str(p.get("persona") or "")
+                       for p in (self.conf.get("personas") or ()) if p.get("persona")]
             for _who, _part in _blocks:
                 _speaker = _who or self.effective_persona()
+                # ★★出力ゲートF(名義の取り違え)= C/Dより**先**に走らせる(audit_speaker の説明参照)。
+                #   `[名前]` で名乗った便だけが対象。名義を差し替えてから C/D に渡すので、
+                #   下のゲートは**正しい話者**の写像で判定する=誤った書き直しが起きない。
+                if _who:
+                    _true_who = audit_speaker(self.dept, _speaker, _part, _roster, rec)
+                    if _true_who:
+                        _who = _true_who
+                        _speaker = _true_who
                 _new_part, _applied, _remain = audit_naming(self.dept, _speaker, _part, rec)
                 if _applied:
                     log(self.dept,

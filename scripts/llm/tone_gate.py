@@ -369,6 +369,87 @@ def _scan_marker(s, marker):
         return i
 
 
+# ============================================================================
+# ★2026-08-16 追加= **名義の取り違え**(話者そのものが違う)を、口調の崩れと切り分ける。
+# ----------------------------------------------------------------------------
+# 実物(軍議 msg 1538227900598190230・2026-08-16 01:49:43):
+#   改修αのセッションが1便の中で各部門へ向けた講義を書き、`[名前]` を**宛先の見出し**として
+#   使った。機構は `[名前]` を**話者**として読むので、オタコンの言葉が
+#   十王星南/早坂芽衣/アーモンドアイ/ルカ・モドリッチ/三笘薫/花海咲季 の名義とアイコンで出た。
+#   さらに悪いことに、出力ゲートD(書き直し)が本文の「僕」を各名義の一人称へ**機械的に置換**し
+#   (tone_audit の tone_fix 3件= 僕→俺 / 僕→俺 / 僕→わたし)、
+#   **取り違えの証拠を消して"それらしい別人の声"に仕立てて**しまった。
+#   実害= 花海咲季名義の便が「**わたしか咲季が答えるから**」= 自分を三人称で呼ぶ文になった。
+#
+# ★切り分けの原則= 「一人称が1つ違う」は口調の崩れだが、
+#   **自分の一人称がどこにも無く、同じ部屋の"別の1人"の一人称だけが在る**なら、
+#   それは崩れではなく **話者の取り違え**だ。直す先は言葉ではなく**名義**。
+# ★決められない時は必ず None を返す(=従来どおりの書き直しへ倒す)。
+#   曖昧なまま名義を動かす方が事故が大きい(名義はChamiの画面でそのまま人格に見える)。
+def misattributed_speaker(persona, text, rules, roster):
+    """名義の取り違えなら「本当の話者」を返す。決められなければ None。
+
+    引数:
+      persona : `[名前]` で解決された話者(正式名)。
+      text    : そのブロックの本文。
+      rules   : load_tone_rules() の戻り(dict) or None。
+      roster  : **その部屋に居る人格の正式名**の列(dept_daemon の conf["personas"])。
+                ★部屋の名簿の外へは絶対に出さない= resolve_persona_tag と同じ閉じた集合。
+
+    返り値: 別人格の正式名(str) or None。
+
+    None を返す条件(=判定しない):
+      - rules 未ロード / persona が写像に無い / persona に first_person が無い
+      - 本文に persona 自身の一人称が**1つでも**在る(=ただの口調の揺れ)
+      - 他人格の一人称が **0人ぶん** or **2人以上ぶん** 見つかる(誰の言葉か決められない)
+    """
+    try:
+        if not rules or not roster:
+            return None
+        ent = _persona_entry(rules, persona)
+        if not ent:
+            return None
+        own = [str(x) for x in (ent.get("first_person") or []) if str(x)]
+        if not own:
+            return None
+        s = _strip_quotes(text)          # 引用・コード・パスは数えない(誤爆の本命)
+        if not s.strip():
+            return None
+        for m in own:
+            if _scan_marker(s, m) >= 0:
+                return None              # 自分の一人称が在る=取り違えではない
+        # ★指紋語尾を持つ人格は、それが1つでも在れば**タグを信じる**。
+        #   実物(軍議 msg 1538228314689376330)= 花海咲季のブロックは第1段落が
+        #   「足しておく**わ**／描くの**よ**／鉄則**ね**」= 紛れもなく咲季の声で、
+        #   最終段落だけが相方(オタコン)の声へ落ちていた=**便の途中で崩れた**形。
+        #   これを丸ごとオタコン名義へ振り替えると、咲季の言葉をオタコンの口へ移してしまう。
+        #   名義を動かす誤りは「他人のアイコンで別人の言葉を出す」=最も害が大きいので、
+        #   証拠が割れている便は動かさない(=従来どおり口調ゲートDへ落とす)。
+        sig = [str(x) for x in ((ent.get("signature_tails") or [])
+                                + (ent.get("signature_endings") or [])) if str(x)]
+        if sig:
+            hit, found, _total, _at = signature_drift(s, sig)
+            if found:
+                return None              # 本人の指紋が在る=タグは正しい(途中で崩れただけ)
+        cands = set()
+        for name in roster:
+            if _norm(name) == _norm(persona):
+                continue
+            e2 = _persona_entry(rules, name)
+            if not e2:
+                continue
+            for m in (str(x) for x in (e2.get("first_person") or []) if str(x)):
+                # ★「私」のように複数の人格が共有する一人称では決められない= 除外。
+                #   distinctive(誰か1人の指紋になる一人称)だけを証拠に使う。
+                if m in DISTINCTIVE_MARKERS and _scan_marker(s, m) >= 0:
+                    cands.add(str(name))
+        if len(cands) == 1:
+            return cands.pop()
+        return None                      # 0人=証拠なし / 2人以上=決められない
+    except Exception:
+        return None                      # fail-open= 判定に転んだら従来どおり
+
+
 def tone_verdicts(persona, dept, text, rules):
     """口調違反(=一人称の食い違い)の候補一覧を返す(純関数・警告のみ)。
 
