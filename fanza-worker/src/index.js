@@ -266,6 +266,42 @@ export default {
       }
     }
 
+    // ── 投稿履歴ミラー：作品cid×チャンネル別のYouTube最終投稿日を保存(product-scout daily_pick 用)──
+    //   POST /posted { cid, channel, posted_at, yt_url } = 投稿完了(client stock.js archiveStock_)が1件POST。
+    //     UPSERT(PK=cid,channel)。posted_at が現行より新しい時だけ更新=古い履歴で上書きしない。
+    //   認証=公開ソフト鍵(X-Shared-Secret)+Origin(他フロント向けAPIと同型)。書き込み先=D1 go5_fanza(FANZA_DB)。
+    //   部門は SELECT posted_at FROM posted_log WHERE cid=? AND channel=? で「両CHの最終投稿日」を読む。
+    if (path === "/posted") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      const corsP = corsHeaders(origin, allowed);
+      if (!corsP) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, corsP);
+      const secP = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || secP !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsP);
+      if (!env.FANZA_DB) return json({ ok: false, error: "db_unbound" }, 500, corsP);
+      let pbody;
+      try { pbody = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, corsP); }
+      const pcid = String((pbody && pbody.cid) || "").trim();
+      const pch = String((pbody && pbody.channel) || "").trim();
+      if (!/^[0-9A-Za-z_-]{1,64}$/.test(pcid)) return json({ ok: false, error: "missing_cid" }, 400, corsP);
+      if (pch !== "acc1" && pch !== "acc2") return json({ ok: false, error: "bad_channel" }, 400, corsP);
+      // posted_at は ISO8601 想定。空/不正は現在時刻で埋めず 400=投稿日が正データなので取り違えを黙認しない。
+      const pat = String((pbody && pbody.posted_at) || "").trim();
+      if (!pat || !Number.isFinite(Date.parse(pat))) return json({ ok: false, error: "bad_posted_at" }, 400, corsP);
+      let pyt = String((pbody && pbody.yt_url) || "").trim().slice(0, 300);
+      if (pyt && !/^https?:\/\//.test(pyt)) pyt = "";
+      try {
+        await env.FANZA_DB.prepare(
+          "INSERT INTO posted_log(cid,channel,posted_at,yt_url,updated_at) VALUES(?,?,?,?,?) " +
+          "ON CONFLICT(cid,channel) DO UPDATE SET posted_at=excluded.posted_at, yt_url=excluded.yt_url, updated_at=excluded.updated_at " +
+          "WHERE excluded.posted_at > posted_log.posted_at"
+        ).bind(pcid, pch, pat, pyt || null, nowIso_()).run();
+        return json({ ok: true, cid: pcid, channel: pch }, 200, corsP);
+      } catch (e) {
+        return json({ ok: false, error: String((e && e.message) || e) }, 500, corsP);
+      }
+    }
+
     // ── サークル（maker）の作品一覧：候補タブの「サークルタブ」用 ──────────────────
     //   POST /api/fanza-maker-list { makerId, sort? }
     //   sort: "date"(既定・発売日新しい順) | "rank"(人気=直近の売れ行きに近い動的ランキング) | "review"

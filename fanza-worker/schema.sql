@@ -69,3 +69,17 @@ CREATE TABLE IF NOT EXISTS candidate_pool (
   source      TEXT            -- 出所タブ 'main'(手動追加💡)|'circle'(サークル)|'list'(独立タブ)・2026-08-09
 );
 CREATE INDEX IF NOT EXISTS idx_candpool_cid ON candidate_pool(cid);
+
+-- 投稿履歴ミラー（作品cid×チャンネル別のYouTube最終投稿日・2026-08-16）。
+--   client localStorage go5_stock_archive の投稿完了(archiveStock_)が1件POST /posted で書く。
+--   product-scout daily_pick.py が「両CHで直近3週間以内に投稿した作品を外す」ために
+--   SELECT posted_at FROM posted_log WHERE cid=? AND channel=? で最終投稿日を読む(トークン無し・wrangler認証のみ)。
+--   PK=(cid,channel)。UPSERTは posted_at が新しい時だけ更新(古い履歴で上書きしない)。書き込みは追加のみ・既存表に非波及。
+CREATE TABLE IF NOT EXISTS posted_log (
+  cid        TEXT NOT NULL,
+  channel    TEXT NOT NULL,   -- 'acc1'(月詠み) | 'acc2'(宵桜艶帖)
+  posted_at  TEXT NOT NULL,   -- 投稿完了時刻 ISO8601(≒YouTube投稿日)
+  yt_url     TEXT,            -- YouTube URL(任意)
+  updated_at TEXT,
+  PRIMARY KEY (cid, channel)
+);

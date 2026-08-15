@@ -650,6 +650,52 @@
     delBlobs_(id);
   }
 
+  // ── 投稿履歴ミラー(product-scout daily_pick 用・2026-08-16) ──
+  //   投稿完了した作品の cid×チャンネル別 最終投稿日を fanza-worker(D1 posted_log)へ1件POST。
+  //   fire-and-forget=失敗しても投稿完了は成功のまま(fail-open)。URL/鍵は他フロントAPIと同じlocalStorageキー。
+  function postedWorkerCfg_() {
+    var u = '', s = '';
+    try { u = (localStorage.getItem('fanza_worker_url') || '').trim(); s = (localStorage.getItem('fanza_shared_secret') || '').trim(); } catch (e) {}
+    return { url: u.replace(/\/+$/, ''), secret: s };
+  }
+  // meta の作品URL(workUrl優先→affiliateUrl)から cid= を取り出す(render の cidm 抽出式と同一)。
+  function cidFromMeta_(meta) {
+    var m = String((meta && (meta.workUrl || meta.affiliateUrl)) || '').match(/cid=([^/?&\s]+)/);
+    var cid = m ? m[1] : '';
+    return /^[0-9A-Za-z_-]{1,64}$/.test(cid) ? cid : '';
+  }
+  function mirrorPostedLog_(meta) {
+    try {
+      if (!meta) return;
+      var cid = cidFromMeta_(meta);
+      if (!cid) return; // cidが取れない=daily_pickが引けるキーが無いので送らない
+      var cfg = postedWorkerCfg_();
+      if (!cfg.url) return; // Worker未設定=送らない(投稿完了は成功のまま)
+      var ch = (meta.account === 'acc2') ? 'acc2' : 'acc1';
+      var postedAt = new Date(meta.completedTs || meta.ts || Date.now()).toISOString();
+      fetch(cfg.url + '/posted', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
+        body: JSON.stringify({ cid: cid, channel: ch, posted_at: postedAt, yt_url: meta.youtubeUrl || '' })
+      }).catch(function () {}); // fail-open: 通信失敗でも投稿完了は成功のまま
+    } catch (e) {}
+  }
+  // 一度きりのバックフィル：既存 go5_stock_archive の完了作品を posted_log へ流す(cid or ytUrl 無しはスキップ)。
+  //   localStorageフラグ go5_posted_log_backfilled で二重送信防止。fire-and-forget=失敗は次回に持ち越す。
+  function backfillPostedLog_() {
+    try {
+      if (localStorage.getItem('go5_posted_log_backfilled') === '1') return;
+      var cfg = postedWorkerCfg_();
+      if (!cfg.url) return; // Worker未設定=フラグを立てず次回起動へ持ち越す
+      loadArchive().forEach(function (meta) {
+        if (!meta) return;
+        if (!cidFromMeta_(meta) || !meta.youtubeUrl) return; // cid or ytUrl が無い要素はスキップ
+        mirrorPostedLog_(meta);
+      });
+      localStorage.setItem('go5_posted_log_backfilled', '1');
+    } catch (e) {}
+  }
+
   // ③投稿完了=作成完了 → ドラフト本体から外して作成履歴へ退避(④復元できるよう blob は残す)。
   //   上限を超えて作成履歴から溢れた古い分だけ、blob ごと本当に削除する。
   function archiveStock_(id) {
@@ -668,6 +714,8 @@
       dropped.forEach(function (m) { delBlobs_(m.id); });
       saveArchive(arch);
     });
+    // 投稿履歴ミラー(product-scout daily_pick 用)へ1件POST。fire-and-forget=失敗しても投稿完了は成功のまま。
+    mirrorPostedLog_(meta);
   }
 
   // ④作成履歴からドラフト本体へ戻す。ドラフトが満杯なら溢れる最古の1件は作成履歴へ送り返す(=消さない)。
@@ -2028,6 +2076,9 @@
 
     // 起動直後にも一度、過去分のプレビュー遡及補完を試す(既に同期済みミラーがあれば即補完)。
     setTimeout(function () { try { backfillUsedPreview_(); } catch (_) {} }, 1500);
+
+    // 一度きり：既存の作成履歴を投稿履歴ミラー(D1 posted_log)へ流す(daily_pick 用・二重送信はフラグで防止)。
+    setTimeout(function () { try { backfillPostedLog_(); } catch (_) {} }, 3000);
 
     // ドラフトタブのボタン操作(event delegation)
     var page = $('pageStock');
