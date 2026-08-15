@@ -602,6 +602,26 @@ def _state_block(generation, context_tokens):
             f"交代は{ROTATE_AT_TOKENS:,}超で圧縮が効かない時だけ\n")
 
 
+def _note_block(rec):
+    """回送の**申し送り**(`note`)を本文とは別の枠で返す。無ければ空文字。
+
+    ★2026-08-15 イージス研究室。`note` は前から積まれていたのに封筒が描画しておらず、
+      「上げ元が何を頼みたいのか」も「その後に取り消しが来ているか」も受け取り側に
+      届いていなかった(ESC-… の本文は元の便そのままなので、受け手は自分でDiscordを
+      引かない限り発注内容が分からない)。**本文より先に読ませる**位置に置く。
+    ★例外は空文字へ倒す(封筒そのものを壊さない)。
+    """
+    try:
+        n = str((rec or {}).get("note") or "").strip()
+    except Exception:
+        return ""
+    if not n:
+        return ""
+    return ("--- 申し送り(この便を回した部屋が書いた。★本文より先に読め) ---\n"
+            f"{n[:2000]}\n"
+            "--- 申し送りここまで ---\n")
+
+
 def quote_block(rec):
     """Discordの**返信(リプライ)**の引用元を、本文とは**別の枠**にして返す。返信でなければ空文字。
 
@@ -818,6 +838,12 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         f"msg_id: {rec.get('msg_id','')}\n"
         f"部屋: {rec.get('channel','')}\n"
         f"受信時刻: {rec.get('ts','')}\n"
+        # ★2026-08-15 回送の申し送りを封筒へ出す(イージス研究室)。
+        #   dept_daemon._escalate_to_head は前から note を積んでいたが、**封筒がそれを
+        #   1文字も描画していなかった**=上げ元の判断も、後続便(取り消し)も、受け取った
+        #   セッションには届かない。実害= Chamiが22秒後に取り消した画像加工の依頼が
+        #   取り消しごと落ちて上申され、無効な依頼に着手した(8/15)。
+        f"{_note_block(rec)}"
         f"{quote}"
         "--- 本文ここから ---\n"
         f"{rec.get('content','')}\n"

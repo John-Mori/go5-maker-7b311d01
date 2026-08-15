@@ -4264,7 +4264,42 @@ class Daemon:
             return None, True  # 失敗=安全側(回送)へ
         return reply, escalate
 
-    def _escalate_to_head(self, rec, raw_line):
+    def _pending_after(self, rec):
+        """上げ元の部屋で**この便より後に届いていて、まだ処理されていない**便を短く並べる。
+
+        ★2026-08-15 実害(これを作った理由)= Chamiが 10:46 に画像加工を人事部門へ投げ、
+          **22秒後に「間違えてChatGPTに貼った。無視して」と取り消した**。だが人事部門が
+          その取り消しを処理し終える前(10:52)に回送が組まれ、イージス研究室には
+          **取り消しの存在を1文字も伝えないまま**上申された。受け取った側は無効な依頼を
+          正規の依頼として着手できてしまう(実際に着手した)。
+        ★取り消しの「意味」を機械が判定するのは無理でよい。**「後続の便がある」という事実**
+          さえ運べば、読む側が自分で判断できる。判定を足さずに材料だけ足す。
+        ★fail-open: 覗けない/壊れていたら空文字(回送そのものは絶対に止めない)。
+        """
+        cur = str(rec.get("msg_id", "") or "")
+        if not cur.isdigit():
+            return ""            # ESC-… や DISPATCH-… は時刻順に比較できない=足さない
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+            from leasequeue import LeaseQueue
+            q = LeaseQueue(os.path.join(LOCAL, "queue", "inbox.db"))
+            rows = q.peek_ready(dept=self.dept, limit=30)   # claimもackもしない(覗くだけ)
+            q.close()
+        except Exception:
+            return ""
+        out = []
+        for r in rows:
+            b = r.get("body") if isinstance(r.get("body"), dict) else {}
+            m = str(b.get("msg_id") or r.get("msg_id") or "")
+            # Discordのmsg_idは時刻順の雪片ID=数が大きい方が後の便
+            if not m.isdigit() or int(m) <= int(cur):
+                continue
+            txt = " ".join(str(b.get("content") or "").split())[:200]
+            if txt:
+                out.append(f"- msg_id={m}「{txt}」")
+        return "\n".join(out[:5])
+
+    def _escalate_to_head(self, rec, raw_line, reply=""):
         """回送を**部門長のキュー**へ入れる。入れられたら True。
 
         ★3階梯(RULES §6.4)を上り方向でも守るための経路(ORG-36)。
@@ -4288,9 +4323,20 @@ class Daemon:
                     ch = c.get("name", "")
                     break
             mid = f"ESC-{self.dept}-{rec.get('msg_id', '')}"
+            # ★申し送り(note)= 上げ元の判断と、上げ元の部屋の後続便。
+            #   従来は1行の定型文だけで、**上げた部屋が何を考えて上げたのかが載っていなかった**
+            #   =受け取り側はDiscordの実物を自分で引かないと発注内容が分からなかった。
+            note = [f"{self.dept} から部門長へ上申(元の部屋= {rec.get('channel', '')})。"
+                    "扱えるならそちらで処理し、手に余る時だけ研究室HQへ上げてください。"]
+            if reply:
+                note.append("■上げ元がこの便へ返した内容(=何が範囲外で、何を頼みたいか)\n"
+                            + str(reply)[:1200])
+            after = self._pending_after(rec)
+            if after:
+                note.append("★上げ元の部屋には、この便の**後に届いた未処理の便**がある"
+                            "(取り消し・訂正の可能性=着手の前にこちらを読め)\n" + after)
             body = dict(rec, dept=head, channel=ch, msg_id=mid, via="escalate",
-                        note=f"{self.dept} から部門長へ上申(元の部屋= {rec.get('channel', '')})。"
-                             "扱えるならそちらで処理し、手に余る時だけ研究室HQへ上げてください。")
+                        note="\n\n".join(note))
             q = LeaseQueue(os.path.join(LOCAL, "queue", "inbox.db"))
             q.enqueue(json.dumps(body, ensure_ascii=False), msg_id=mid, dept=head)
             q.close()
@@ -5216,7 +5262,7 @@ class Daemon:
                 #   ★従来は全部門が MAIN_INBOX(HQ)へ直行しており、**②の部門長を飛ばしていた**
                 #     =ORG-34(上から下)の裏返し。上りも下りも部門長を通っていなかった。
                 #   部門長が居ない(部門長自身・最上位)場合だけ従来どおりHQのmain箱へ。
-                if not self._escalate_to_head(rec, raw_line):
+                if not self._escalate_to_head(rec, raw_line, reply or ""):
                     with open(MAIN_INBOX, "a", encoding="utf-8") as f:
                         f.write(raw_line.rstrip("\n") + "\n")
             # ★総括本部4室は「自分の箱」にも写す(2026-07-24 ORG-24)。
