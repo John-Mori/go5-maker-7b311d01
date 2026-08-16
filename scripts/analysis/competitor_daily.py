@@ -289,10 +289,10 @@ def main():
         L.append("| %s | %d | %d | %s | %d |" %
                  (name, vs[0]["subscriberCount"], len(vs), median([x["speed"] for x in vs]), max(x["speed"] for x in vs)))
     L.append("")
-    L.append("## 伸びた上位15(新規のみ深掘り・既出は既出印)")
+    L.append("## 伸びた上位10(新規のみ深掘り・既出は既出印)")
     L.append("| # | 速度 | 型(数字) | 断/問 | ch | 題名 | 状態 |")
     L.append("|---|---|---|---|---|---|---|")
-    for i, t in enumerate(ts_sorted[:15], 1):
+    for i, t in enumerate(ts_sorted[:10], 1):
         L.append("| %d | %d | %s | %s | %s | %s | %s |" %
                  (i, t["speed"], t["numType"], t["qType"], t["channelName"],
                   strip_tags(t["title"])[:32], "既出" if t["known"] else "新規"))
