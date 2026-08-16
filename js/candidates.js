@@ -2385,13 +2385,27 @@
         window.Go5PromoLabel.notify({ cid: _pcid, title: it.title || '作品', listPrice: it.listPrice, price: it.price, discountPct: it.discountPct || 0 });
       }
     } catch (e) {}
-    // 候補を開いた時点で前作品の画像を破棄する。新画像の変換失敗時にも旧画像を誤表示しない。
+    // 候補を開いた時点で前作品の画像を破棄する(新画像の変換失敗時にも旧画像を誤表示しないため)。
     var imageApplySeq = null;
     if (window.Go5ClearForeground) imageApplySeq = window.Go5ClearForeground();
+    // ★破棄したあと再適用が失敗すると fgImg=null のまま残り、make() が「写真未選択」ガードで無反応に見える沈黙に
+    //   落ちる=「動画が生成されない」の芯(Chami報告2026-08-16・恒久対策C-038)。失敗経路は以下の3つ:
+    //   ①持ち越しに画像が無い(sessionStorage容量超過→IDBからも復元不可・iOSのIDB無言死) ②fetch/decode失敗。
+    //   どの経路でも黙って終えず、status に理由を出して写真の入れ直しへ導く(REQ-e145da61c0「無理なら手動で入れる」)。
+    //   写真欄は動画作成タブ上部=直後の landAtMovieTop_ が最上部へ運ぶので、ここではスクロールしない。
+    var candPhotoFail_ = function (reason) {
+      var st = document.getElementById('status');
+      if (st) st.textContent = '⚠ 候補の写真を読み込めませんでした(' + reason + ')。上の写真欄から選び直してから作成してください。';
+    };
     if (imgDataUrl && window.Go5SetForegroundFile) {
       fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
         window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }), imageApplySeq);
-      }).catch(function (e) { try { console.warn('[go5 cand] 候補画像を動画作成へ変換できませんでした', e); } catch (e2) {} });
+      }).catch(function (e) {
+        try { console.warn('[go5 cand] 候補画像を動画作成へ変換できませんでした', e); } catch (e2) {}
+        candPhotoFail_('取得に失敗');
+      });
+    } else {
+      candPhotoFail_('画像が持ち越されていません');
     }
     // 作品データを流し込んだら、動画タブの「上部」に着地させる(Chami依頼2026-07-29：
     //   投稿編集→動画生成で最下段の作成ボタンへ強制スクロールしていたのをやめ、上から順に確認できるように)。
@@ -4661,8 +4675,10 @@
       if (!document.getElementById('author')) return; // 動画作成タブが無いページでは何もしない(退避側の担当)
       var raw = ''; try { raw = sessionStorage.getItem('cand_to_movie_pending') || ''; } catch (e) {}
       if (!raw) return;
-      var p; try { p = JSON.parse(raw); } catch (e) { return; }
-      if (!p || !p.it) return;
+      // ★壊れた/不完全な持ち越しはキーごと捨てる。残すと、affiliate.js のタブ復元ガード(b0d392c)が
+      //   pending 有りと見て index.html を tabMovie に固定し続け、投稿履歴/ドラフトへ切り替わらなくなる。
+      var p; try { p = JSON.parse(raw); } catch (e) { try { sessionStorage.removeItem('cand_to_movie_pending'); } catch (e1) {} return; }
+      if (!p || !p.it) { try { sessionStorage.removeItem('cand_to_movie_pending'); } catch (e2) {} return; }
       // app.js/affiliate.js のタブ復元が落ち着いてから流し込む(タブ切替→入力欄の描画が先)。
       setTimeout(function () {
         var consume_ = function (imgDataUrl) {

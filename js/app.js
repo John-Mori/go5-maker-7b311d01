@@ -642,8 +642,18 @@
     //   関わらず走るリビルド引き継ぎ)や他の購読者へは「これはドラフトだ」が伝わらず、投稿/確認フローへ漏れていた。
     //   ここで一度だけフラグを消費して detail.draft に確定=購読者全員が確実に投稿を抑止できる(早期returnでも滞留しない)。
     var isDraft = !!window.__go5DraftPending; window.__go5DraftPending = false;
-    if (!fgImg) { setStatus("先に写真を選んでください。"); return; }
-    if (!window.MediaRecorder) { setStatus("この端末は動画書き出しに未対応です。(iOS15以降のSafari推奨)"); return; }
+    // ★入口ガードは「必ず押されたボタン自身にも反応を返す」。status(画面下の一言)だけだと、ボタンを見ている
+    //   Chamiには「押しても無反応」に見える沈黙になる(Chami報告2026-08-16「動画が生成されない/直ってない」の
+    //   芯の一つ・恒久対策C-038)。どのガードで止めても押されたボタンが一瞬だけ理由ラベルへ変わる=「無反応で
+    //   終わる」クラスを構造的に根絶する(個別ガードへの後追い足し忘れも防ぐ)。作成中で既に "作成中…" 表示が
+    //   出ているボタン(disabled)は既にフィードバックがあるので二重に触らない。
+    var guardBtn_ = isDraft ? document.getElementById("draftMakeBtn") : els.makeBtn;
+    function guardStop_(statusMsg, btnLabel) {
+      setStatus(statusMsg);
+      if (guardBtn_ && !guardBtn_.disabled) flashBtn(guardBtn_, btnLabel);
+    }
+    if (!fgImg) { guardStop_("先に写真を選んでください。(候補から来た場合は写真が読み込めていません=上の写真欄から選び直してください)", "⚠ 写真が必要"); return; }
+    if (!window.MediaRecorder) { guardStop_("この端末は動画書き出しに未対応です。(iOS15以降のSafari推奨)", "⚠ 端末未対応"); return; }
     // 狙い・コメント型は生成前の必須選択＝未設定のまま投稿されると分析を汚すため入口で止める。(Chami指定2026-07-14)
     // ★テストモード時は必須にしない(Chami指定2026-07-19)。テストは記録シートに残らない
     //   (bluesky.js の testMode 分岐で除外される)ので、そもそも分析を汚さない。
@@ -655,7 +665,7 @@
     if (!isTestRun && goalSel && !goalSel.value) missSel.push("狙い");
     if (!isTestRun && cmtSel && !cmtSel.value) missSel.push("コメント型");
     if (missSel.length) {
-      setStatus("⚠ " + missSel.join("と") + "が未選択です。選択してから動画を作成してください。(生成前の必須項目)");
+      guardStop_("⚠ " + missSel.join("と") + "が未選択です。選択してから動画を作成してください。(生成前の必須項目)", "⚠ " + missSel.join("・") + "が未選択");
       const tgt = (goalSel && !goalSel.value) ? goalSel : cmtSel;
       try { tgt.scrollIntoView({ behavior: "smooth", block: "center" }); tgt.focus(); } catch (e) {}
       return;
@@ -672,8 +682,8 @@
     //   超えて立ったままなら stale とみなし奪い返す=固着で永久に無反応にならないようにする。
     if (_making) {
       if (!_makingAt || (performance.now() - _makingAt) < 20000) {
-        setStatus(isDraft ? "前の作成がまだ終わっていません。数秒待ってから、もう一度「ドラフトで作成」を押してください。"
-                          : "前の作成がまだ終わっていません。数秒お待ちください。");
+        guardStop_(isDraft ? "前の作成がまだ終わっていません。数秒待ってから、もう一度「ドラフトで作成」を押してください。"
+                          : "前の作成がまだ終わっていません。数秒お待ちください。", "⏳ 前の作成中");
         return;
       }
       try { if (window.console && console.warn) console.warn("[go5] _making が20秒以上固着=stale。作成を奪い返す"); } catch (e) {}
