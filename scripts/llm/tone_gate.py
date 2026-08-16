@@ -327,6 +327,37 @@ def _mask_protected(s):
 _strip_quotes = _mask_protected
 
 
+def _mask_persona_names(masked, text, rules):
+    """レジストリに載っている**人格の氏名そのもの**を判定・書き直しから外す(長さ保存)。
+
+    なぜ: 「ルカ・モドリッチ」の中の「ルカ」を禁止語として書き換えると
+      『【実依頼 / from ルカ・モドリッチ】』→『from 俺・モドリッチ』になる
+      (2026-08-16 の実測 msg 1538149223348834345 ほか。FP監査で最多の誤爆だった)。
+      **氏名は呼称ゲートCの管轄**だ。口調ゲートDは名前の中に手を入れない。
+    ★氏名の中だけを潰す= 単独で出た「ルカ」は今までどおり検知・書き直しの対象。
+    ★masked と text は同じ長さである前提(_mask_protected が長さ保存だから成り立つ)。
+    """
+    try:
+        if len(masked) != len(text):
+            return masked
+        names = [str(k) for k in ((rules or {}).get("personas") or {}) if len(str(k)) >= 3]
+        if not names:
+            return masked
+        buf = list(masked)
+        for nm in sorted(names, key=len, reverse=True):
+            start = 0
+            while True:
+                i = text.find(nm, start)
+                if i < 0:
+                    break
+                for j in range(i, i + len(nm)):
+                    buf[j] = "　"
+                start = i + len(nm)
+        return "".join(buf)
+    except Exception:
+        return masked           # fail-open= マスクに失敗しても判定は従来どおり回す
+
+
 def _persona_entry(rules, persona):
     """人格エントリを中黒無視で引く。無ければ None(=判定対象外=スキップ)。"""
     personas = (rules or {}).get("personas") or {}
@@ -582,7 +613,7 @@ def tone_verdicts(persona, dept, text, rules):
         if (not forbid and not ng2 and not want_dialect and not want_polite
                 and not sig and not want_self):
             return out
-        s = _strip_quotes(text)
+        s = _mask_persona_names(_strip_quotes(text), text, rules)
         if not s.strip():
             return out
         for m in forbid:
@@ -726,7 +757,8 @@ def tone_corrections(persona, dept, text, rules):
         if not plan:
             return out
 
-        masked = _mask_protected(text)          # 長さ保存=添字はそのまま元テキストの添字
+        # 長さ保存=添字はそのまま元テキストの添字。氏名の中(=呼称ゲートCの管轄)も外す。
+        masked = _mask_persona_names(_mask_protected(text), text, rules)
         markers = sorted(plan, key=len, reverse=True)   # 長いマーカーを先に見る
         buf, counts, i, n = [], {}, 0, len(text)
         while i < n:
