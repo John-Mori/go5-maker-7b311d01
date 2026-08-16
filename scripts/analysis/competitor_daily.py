@@ -12,7 +12,7 @@
  - 新規 videoId を台帳へ追記(次回から既出扱い)
 数字は測って出す(捏造しない)。速度=当日スナップの velocity 代理値(views/measurementDays)。
 """
-import json, re, sys, os, subprocess, glob
+import json, re, sys, os, subprocess, glob, math
 from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -74,6 +74,52 @@ def spearman(xs, ys):
     sy = (sum((v-my)**2 for v in ry))**0.5
     if sx == 0 or sy == 0: return None
     return round(cov/(sx*sy), 2)
+
+def _norm_cdf(x):
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+def mannwhitney(a, b):
+    """2群の速度差の有意性(Mann-Whitney U・タイ補正つき正規近似・両側p)。
+    n<3 は None。中央値の見かけの差が『本物か・サンプル薄の偶然か』を分ける。"""
+    na, nb = len(a), len(b)
+    if na < 3 or nb < 3: return None
+    comb = sorted([(v, 0) for v in a] + [(v, 1) for v in b])
+    N = len(comb)
+    ranks = [0.0] * N
+    i = 0
+    while i < N:  # タイは平均順位
+        j = i
+        while j + 1 < N and comb[j + 1][0] == comb[i][0]: j += 1
+        avg = (i + j) / 2.0 + 1
+        for k in range(i, j + 1): ranks[k] = avg
+        i = j + 1
+    Ra = sum(ranks[k] for k in range(N) if comb[k][1] == 0)
+    Ua = Ra - na * (na + 1) / 2.0
+    U = min(Ua, na * nb - Ua)
+    mu = na * nb / 2.0
+    counts = defaultdict(int)
+    for v, _ in comb: counts[v] += 1
+    tie = sum(t ** 3 - t for t in counts.values())
+    sigma = math.sqrt(na * nb / 12.0 * ((N + 1) - tie / (N * (N - 1)))) if N > 1 else 0
+    if sigma == 0: return None
+    z = (U - mu) / sigma
+    return [round(U, 1), round(2 * (1 - _norm_cdf(abs(z))), 4)]
+
+def within_channel_norm(ts, keyfn):
+    """チャンネル内zスコアで正規化してから特徴量別に平均する=『勝者チャンネルに偏っているだけ』を除く。
+    各chの速度を平均0/分散1へ揃え、特徴量ごとにzの平均を出す(n>=3・分散>0のchのみ)。"""
+    by_ch = defaultdict(list)
+    for t in ts: by_ch[t["channelName"]].append(t)
+    z_by = defaultdict(list)
+    for name, items in by_ch.items():
+        if len(items) < 3: continue
+        sp = [x["speed"] for x in items]
+        m = sum(sp) / len(sp)
+        sd = (sum((v - m) ** 2 for v in sp) / len(sp)) ** 0.5
+        if sd == 0: continue
+        for x in items:
+            z_by[keyfn(x)].append((x["speed"] - m) / sd)
+    return {k: [len(v), round(sum(v) / len(v), 2)] for k, v in z_by.items()}
 
 def fetch():
     cfg = json.load(open(os.path.join(ROOT, "scripts", "gas_deploy_config.json")))
@@ -179,6 +225,28 @@ def shoken(rows, snap):
         else:
             L.append("・今日は断定(%s)≧問いかけ(%s)。連勝が止まった=？型の優位はサンプル次第。断定を主軸に戻す。"
                      % (dan[1], toi[1]))
+    # 1b) 見かけの差は有意か(Mann-Whitney)=n薄の偶然と本物を分ける
+    mw = today.get("mwQ")
+    if mw:
+        p = mw[1]
+        if p < 0.05:
+            L.append("・その？型優位はMann-Whitney検定で有意(p=%s<0.05)=本数が薄くても偶然ではない。動かしてよい。" % p)
+        elif p < 0.10:
+            L.append("・ただし検定はp=%s(0.05に未達・傾向どまり)=断言はまだ。次バッチで本数を足して再検定。" % p)
+        else:
+            L.append("・ただしMann-Whitney検定ではp=%s=有意でない=中央値の差はサンプルのブレの範囲。全面採用は待つ。" % p)
+    # 1c) チャンネル交絡を除いても？型は効くか(チャンネル内zスコア)
+    znq = today.get("znQ") or {}
+    if "断定" in znq and "問いかけ" in znq:
+        zt, zd = znq["問いかけ"][1], znq["断定"][1]
+        if zt - zd >= 0.15:
+            L.append("・チャンネル差を補正(各ch内zスコア)しても？型z=%s>断定z=%s=勝者chの偏りでなく型そのものが効いている。" % (zt, zd))
+        elif zd - zt >= 0.15:
+            L.append("・チャンネル補正すると？型z=%s<断定z=%s=見えていた差の実体は"
+                     "『？型を使うchが元々強い』=型でなくch効果。素材選びの方を見直す。" % (zt, zd))
+        else:
+            L.append("・チャンネル補正すると？型z=%s≒断定z=%s=差はほぼ消える。検定のp値と合わせ"
+                     "『？型に初速の押し上げ効果はほぼ無い』と読む。優先度は下げる。" % (zt, zd))
 
     # 2) 数字は効くか(固有の上振れ・曖昧煽りの沈み)
     bt = today.get("byType", {})
@@ -195,9 +263,19 @@ def shoken(rows, snap):
         koyu = bt.get("③固有数字型", [0, 0])[1]
         edge = round(koyu/base, 2) if base else 0
         vague = bt.get("保留(曖昧数量)", [0, 0])[1]
-        L.append("・数字は初速のレバーになっていない。固有数字%s÷数字なし%s=%s倍(≒等倍=上乗せ無し)。"
+        L.append("・数字は初速のレバーになっていない(中央値ベース)。固有数字%s÷数字なし%s=%s倍(≒等倍=上乗せ無し)。"
                  "曖昧な数量煽りは%s(数字なしの%d%%)で%d日連続の最下位圏。○選・たった○週間・ランキングは不要。"
                  % (koyu, base, edge, vague, int(vague/base*100) if base else 0, low_streak))
+        # 2b) チャンネル補正zで検算=中央値が交絡で隠していた符号を拾う
+        znt = today.get("znType") or {}
+        zk = znt.get("③固有数字型", [0, 0])[1]
+        zn = znt.get("数字なし", [0, 0])[1]
+        zv = znt.get("保留(曖昧数量)", [0, 0])[1]
+        if "③固有数字型" in znt and zk >= 0.15 and zk > zn:
+            L.append("・ただしチャンネル補正zで見ると固有数字z=%s>数字なしz=%s=中央値が隠していたが"
+                     "『歳・回・円・番』等の固有数字は自ch平均より速い=交絡を除くと効く。数量煽りとは別物として扱う。" % (zk, zn))
+        if "保留(曖昧数量)" in znt and zv <= -0.15:
+            L.append("・曖昧数量煽りはチャンネル補正zでも%s(最下位)=中央値と符号一致=どの角度からも効かない。確定で外す。" % zv)
 
     # 3) 負けテンプレ(当日実測がある時のみ)
     tw = today.get("templateWaru")
@@ -261,6 +339,10 @@ def main():
         "templateWaru": [len(waru), median(waru)] if waru else None,
         "spearmanSubsSpeed": spearman([c[1] for c in chans if c[2] >= 3],
                                       [c[3] for c in chans if c[2] >= 3]),
+        # 多角的検証(Chami指示2026-08-16「多角的視点で」)=見かけの差の有意性とチャンネル交絡の除去
+        "mwQ": mannwhitney(byq.get("問いかけ", []), byq.get("断定", [])),
+        "znQ": within_channel_norm(ts, lambda x: x["qType"]),
+        "znType": within_channel_norm(ts, lambda x: x["numType"]),
     }
     save_metrics(metrics)
     sho = shoken(metrics, snap)
@@ -318,6 +400,30 @@ def main():
     for k in ["断定", "問いかけ"]:
         if k in byq:
             L.append("| %s | %d | %s |" % (k, len(byq[k]), median(byq[k])))
+    L.append("")
+    # 多角的検証(Chami指示2026-08-16)=中央値の見かけを、有意性とチャンネル交絡で二重に検算する
+    m = metrics[snap]
+    L.append("## 多角的検証(有意差・チャンネル補正)")
+    if m.get("mwQ"):
+        L.append("- 問いかけ vs 断定 の速度差 Mann-Whitney U=%s / p=%s(両側・タイ補正)"
+                 "%s" % (m["mwQ"][0], m["mwQ"][1], "=有意(p<0.05)" if m["mwQ"][1] < 0.05 else
+                         ("=傾向(p<0.10)" if m["mwQ"][1] < 0.10 else "=有意でない")))
+    L.append("")
+    L.append("### チャンネル内zスコア平均(各ch内で平均0・分散1に揃えてから比較=規模/勝者chの偏りを除去)")
+    L.append("| 断/問 | 本数(補正対象) | z平均 |")
+    L.append("|---|---|---|")
+    for k in ["断定", "問いかけ"]:
+        if k in m.get("znQ", {}):
+            L.append("| %s | %d | %s |" % (k, m["znQ"][k][0], m["znQ"][k][1]))
+    L.append("")
+    L.append("| 数字型 | 本数(補正対象) | z平均 |")
+    L.append("|---|---|---|")
+    for k in NUMTYPES:
+        if k in m.get("znType", {}):
+            L.append("| %s | %d | %s |" % (k, m["znType"][k][0], m["znType"][k][1]))
+    L.append("")
+    L.append("> z平均>0=そのchの平均より速い / <0=遅い。中央値表と符号が食い違う型は"
+             "『チャンネル効果を型の効果と見間違えていた』サイン。")
 
     open(out, "w", encoding="utf-8").write("\n".join(L) + "\n")
 
