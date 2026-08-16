@@ -49,8 +49,11 @@
   }
   // ★stock:imgs:<id> ＝ ドラフトのサムネ/プレビュー/元画像を dataURL でまとめた同期用ミラー(①-B・2026-07-31)。
   //   重い動画本体(stock_v_)は載せない=積み上がっても同期は軽いまま(実体はR2にhashで、台帳には参照だけ)。
-  function isSyncIdbKey(k) { return /^(ref:|bsky:|post:|stock:imgs:)/.test(String(k)); }
-  var SYNC_IDB_PREFIXES = ["ref:", "bsky:", "post:", "stock:imgs:"];
+  //   ★used:<id> ＝「動画で使用した画像」(縮小dataURL・容量は ref: と同等)。従来これだけ同期レールから漏れており、
+  //   別端末で投稿履歴/候補を見ると挿入画像の第1候補(usedImgArr[0])が常に空で「画像が表示されない」多発の主因だった
+  //   (Chami報告2026-08-16⑤)。ref:/post: と同じ R2 content-hash 画像レールに乗せて端末間で行き渡らせる。
+  function isSyncIdbKey(k) { return /^(ref:|bsky:|post:|used:|stock:imgs:)/.test(String(k)); }
+  var SYNC_IDB_PREFIXES = ["ref:", "bsky:", "post:", "used:", "stock:imgs:"];
   function readSyncIdbEntries_(idb) {
     if (!idb || !idb.available()) return Promise.resolve({});
     if (typeof idb.entriesByPrefixes === "function") return idb.entriesByPrefixes(SYNC_IDB_PREFIXES.slice());
