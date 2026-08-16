@@ -503,8 +503,10 @@ test.describe('ドラフト軽量ページ', () => {
       };
     }, { draftId, videoId, ytUrl })).toEqual({ history: true, draftRemoved: true, archived: true });
 
+    // ★投稿履歴は軽量ページ化で専用ページ StockLists.html へ分離済(Stock.html #tabVerify=data-nav)。
+    //   旧アサートは index.html を期待していて 24h 全pushで赤=スモーク門が死んでいた(検証の妥当性側の穴)。
     await page.locator('#tabVerify').click();
-    await expect(page).toHaveURL(/\/index\.html$/);
+    await expect(page).toHaveURL(/\/StockLists\.html$/);
     await expect(page.locator('.vrow-title').filter({ hasText: '即時投稿完了の回帰' })).toHaveCount(1);
   });
 
