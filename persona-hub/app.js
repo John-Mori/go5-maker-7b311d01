@@ -27,13 +27,17 @@
 
   function init() {
     els.list = document.getElementById("personaList");
-    els.search = document.getElementById("searchInput");
     els.detail = document.getElementById("detailPane");
     els.count = document.getElementById("personaCount");
     els.error = document.getElementById("errorBanner");
 
-    els.search.addEventListener("input", onSearch);
-
+    // 公開ページ(GitHub Pages)では data.js が window.PERSONA_HUB_DATA を焼き込んでいる。
+    // local/ はgitignore配下でPagesに配信されないため、まず埋め込みを使い、無い時だけ
+    // fetch へフォールバック(=ローカルの python -m http.server で開いた時用)。
+    if (window.PERSONA_HUB_DATA && window.PERSONA_HUB_DATA.personas) {
+      onData(window.PERSONA_HUB_DATA);
+      return;
+    }
     fetch(DATA_URL, { cache: "no-store" })
       .then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -58,16 +62,6 @@
       "先に <code>python scripts/hr/persona_settings_index.py</code> を実行して集約JSONを生成してください" +
       "(<code>local/persona_settings_index.json</code>)。<span class=\"error-detail\"></span>";
     try { els.error.querySelector(".error-detail").textContent = String((err && err.message) || err || ""); } catch (e) {}
-  }
-
-  function onSearch() {
-    var q = (els.search.value || "").trim().toLowerCase();
-    state.filtered = !q ? state.names.slice() : state.names.filter(function (name) {
-      var entry = state.personas[name] || {};
-      var dept = String(entry.所属部門 || "");
-      return name.toLowerCase().indexOf(q) >= 0 || dept.toLowerCase().indexOf(q) >= 0;
-    });
-    renderList();
   }
 
   // ── 一覧 ──
