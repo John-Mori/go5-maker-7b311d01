@@ -1461,6 +1461,23 @@
     } catch (e) {}
   }
 
+  // 投稿完了の直前に、導線2「作品計測用短縮URL」の非同期発番(openPostModal_ が蹴った mintDraftWorkShort_)が
+  //   go5_draft_post_ へ着地するのを短時間だけ待ってから done() を呼ぶ。着地済み/発番対象なし/上限到達なら即 done()。
+  //   ★これで「発番が終わる前に投稿完了を押す→履歴の計測URL欄が空」の競合を塞ぐ(REQ-65c7897f2f 恒久対策の穴埋め)。
+  //   非破壊：待っても取れなければ従来どおり進む=投稿完了は決してブロックしない。判定は workshort-gate-core.js。
+  function waitWorkShortSettle_(id, maxMs, done) {
+    var gate = (window.Go5WorkShortGate && window.Go5WorkShortGate.step)
+      || function () { return 'record'; }; // coreが未ロードでも完了は止めない(従来=待たず記録)
+    var meta = null;
+    try { meta = loadMeta().filter(function (m) { return m.id === id; })[0] || null; } catch (e) {}
+    function sv_() { try { return JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}') || {}; } catch (e) { return {}; } }
+    var t0 = Date.now();
+    (function tick_() {
+      if (gate(sv_(), meta, Date.now() - t0, maxMs) === 'record') { done(); return; }
+      setTimeout(tick_, 200);
+    })();
+  }
+
   // ★投稿本文の「正」= 投稿タブのテキストボックス(テンプレ帳の本文・アカウント別)。Chami指定2026-07-31:
   //   「今までどれが正かわからなかった」→ 投稿モードもここを参照し、この本文が唯一の正となる。
   //   ・同一アカウントなら未保存の編集も反映するため生のテキストボックスを優先。
@@ -1890,11 +1907,19 @@
     $('draftModalComplete').addEventListener('click', function () {
       if (!_modalMeta) return;
       if (!window.confirm('投稿履歴に反映します。OKを押すと正式に投稿完了になります。')) return;
+      var id = _modalMeta.id;
       var ytUrl = ($('draftYtUrl') || {}).value || '';
       var slot = $('draftYtDescUrlLink');
       var shortUrl = (slot && slot.dataset && slot.dataset.url) || '';
-      // 履歴への保存を確認できた時だけ閉じる。失敗時はドラフトとモーダルを残して再試行可能にする。
-      if (handleCompleteOk_(_modalMeta.id, ytUrl.trim(), shortUrl)) closeModal_();
+      // ★導線2の作品計測用短縮URLがまだ発番中(link-worker往復・非同期)なら、投稿完了で履歴の計測URL欄が
+      //   空に化けないよう、着地を最大2.5秒だけ待ってから記録する(REQ-65c7897f2f)。取れなければ従来どおり進む。
+      var btn = this, origLabel = btn.textContent;
+      btn.disabled = true; btn.textContent = '記録中…';
+      waitWorkShortSettle_(id, 2500, function () {
+        btn.disabled = false; btn.textContent = origLabel;
+        // 履歴への保存を確認できた時だけ閉じる。失敗時はドラフトとモーダルを残して再試行可能にする。
+        if (handleCompleteOk_(id, ytUrl.trim(), shortUrl)) closeModal_();
+      });
     });
     document.addEventListener('go5-disc-url-changed', function () {
       if (!m || m.style.display === 'none' || !_modalMeta) return;
