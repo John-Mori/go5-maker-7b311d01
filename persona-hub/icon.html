@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>アイコン整形</title>
+<link rel="stylesheet" href="icon.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>アイコン整形</h1>
+    <p class="sub">Discordのアイコンは円形に切り抜かれて表示されます。ここで角度・拡大・位置を決めて、円の中に入る範囲を確認しながら1枚を書き出します。</p>
+  </header>
+
+  <div class="card">
+    <p class="notice">
+      <b>このページは完結型のツールです。</b>画像のアップロードやR2への送信は一切行いません。
+      書き出したPNGはChamiが受け取り、実際の登録(R2への保存・台帳への追記)は別の作業として
+      <b>scripts/discord/migrate_avatars_to_r2.py</b> で行います。
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="drop-zone" id="iconDrop">
+      画像を選ぶ、またはここへドラッグ&ドロップ
+      <small>JPEG / PNG など。端末内だけで処理します。</small>
+    </div>
+    <input type="file" id="iconFile" accept="image/*">
+  </div>
+
+  <div class="card">
+    <div class="canvas-wrap">
+      <div class="canvas-box">
+        <canvas id="iconCanvas" width="512" height="512"></canvas>
+      </div>
+    </div>
+    <p class="canvas-hint">円の内側=実際にDiscordで見える範囲。円の外は暗く表示(書き出しには含まれません)。画像はドラッグでも動かせます。</p>
+
+    <div class="ctl-row">
+      <label for="rotRange">回転</label>
+      <input type="range" id="rotRange" min="-180" max="180" step="1" value="0">
+      <span class="ctl-val" id="rotVal">0°</span>
+    </div>
+    <div class="ctl-row">
+      <label for="zoomRange">拡大縮小</label>
+      <input type="range" id="zoomRange" min="20" max="400" step="1" value="100">
+      <span class="ctl-val" id="zoomVal">100%</span>
+    </div>
+    <div class="ctl-row">
+      <label for="xRange">位置X</label>
+      <input type="range" id="xRange" min="-512" max="512" step="1" value="0">
+      <span class="ctl-val" id="xVal">0px</span>
+    </div>
+    <div class="ctl-row">
+      <label for="yRange">位置Y</label>
+      <input type="range" id="yRange" min="-512" max="512" step="1" value="0">
+      <span class="ctl-val" id="yVal">0px</span>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" id="resetBtn">リセット</button>
+      <button type="button" id="exportBtn">この切り方で書き出す</button>
+    </div>
+
+    <p id="iconStatus">画像を選んでください。</p>
+    <p class="filename-preview">書き出しファイル名: <code id="fileNamePreview">persona_icon_r0_z100_x0_y0.png</code></p>
+  </div>
+</main>
+<script src="icon.js"></script>
+</body>
+</html>

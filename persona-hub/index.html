@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f17">
+<title>人格設定ハブ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="hub-header">
+  <h1>人格設定ハブ</h1>
+  <p class="hub-sub">AI組織のキャラクター設定を1枚で確認する一覧ビューア(読み取り専用・書き戻しはしません)</p>
+</header>
+
+<div id="errorBanner" class="error-banner" hidden></div>
+
+<main class="hub-main">
+  <aside class="hub-list-pane">
+    <input id="searchInput" type="search" class="search-input" placeholder="キャラ名/所属部門で検索...">
+    <div id="personaCount" class="persona-count"></div>
+    <ul id="personaList" class="persona-list"><li class="persona-empty">読み込み中...</li></ul>
+  </aside>
+  <section id="detailPane" class="detail-pane">
+    <div class="detail-empty">左の一覧からキャラクターを選んでください。</div>
+  </section>
+</main>
+
+<script src="../core/util.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

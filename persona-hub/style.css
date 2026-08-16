@@ -1,0 +1,112 @@
+/* persona-hub/style.css — 人格設定ハブの見た目。
+   配色は本体アプリのダークUI(--card/#0e1422・アクセントteal #2bb3c0)を踏襲する。
+   紫(#5b3f8e/#2a1a4e/#d4b3ff等)は使わない。UI文言の括弧は半角()のみ。
+   (docs/departments/frontend/design-preferences.md 準拠) */
+:root{
+  --bg:#0b0f17; --card:#0e1422; --card2:#131b2c; --ink:#eef2f7; --sub:#9fb0c3;
+  --accent:#2bb3c0; --accent-ink:#04222a; --line:#2a3346; --warn:#e8b31f;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+  font-family:"Noto Sans JP",system-ui,sans-serif;min-height:100vh;min-height:100dvh;}
+
+.hub-header{padding:18px 16px 8px;text-align:center;}
+.hub-header h1{margin:0;font-size:21px;font-weight:900;letter-spacing:.02em;}
+.hub-sub{margin:6px 0 0;color:var(--sub);font-size:12.5px;}
+
+.error-banner{margin:10px 16px;padding:12px 14px;border:1px solid #6a4a1e;border-radius:10px;
+  background:#241a0c;color:#f2c98a;font-size:13px;line-height:1.6;}
+.error-banner code{background:#1a1206;border:1px solid #6a4a1e;border-radius:5px;padding:1px 6px;font-size:12px;}
+.error-detail{display:block;margin-top:4px;color:#c9a06a;font-size:11.5px;word-break:break-all;}
+
+.hub-main{max-width:1200px;margin:0 auto;padding:10px 16px 48px;display:flex;gap:16px;align-items:flex-start;}
+
+/* ── 左：一覧ペイン ── */
+.hub-list-pane{flex:0 0 300px;position:sticky;top:10px;max-height:calc(100vh - 20px);
+  display:flex;flex-direction:column;gap:8px;}
+.search-input{width:100%;font-size:15px;padding:10px 12px;border-radius:10px;
+  border:1px solid var(--line);background:var(--card);color:var(--ink);outline:none;}
+.search-input:focus{border-color:var(--accent);}
+.persona-count{font-size:11.5px;color:var(--sub);padding:0 2px;}
+.persona-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1 1 auto;
+  display:flex;flex-direction:column;gap:6px;padding-right:2px;}
+.persona-item{background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:9px 11px;cursor:pointer;transition:border-color .15s,background .15s;}
+.persona-item:hover{border-color:var(--accent);}
+.persona-item.is-active{border-color:var(--accent);background:var(--card2);
+  box-shadow:0 0 0 1px var(--accent) inset;}
+.persona-item-name{font-size:14.5px;font-weight:700;color:var(--ink);}
+.persona-item-dept{font-size:11px;color:var(--sub);margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.persona-item-badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.persona-empty{padding:16px 8px;text-align:center;color:var(--sub);font-size:12.5px;list-style:none;}
+
+.badge{font-size:10.5px;font-weight:700;border:1px solid var(--line);border-radius:6px;
+  padding:1px 7px;color:var(--sub);white-space:nowrap;}
+.badge-icon{color:var(--accent);border-color:var(--accent);}
+.badge-on{color:var(--accent);border-color:var(--accent);}
+.badge-off{color:var(--sub);border-color:var(--line);}
+.badge-naming{color:#c9a3e0;border-color:#5a4a72;} /* 呼称=個別ルールの目印。派手な紫は使わず落ち着いた色調 */
+
+/* ── 右：詳細ペイン ── */
+.detail-pane{flex:1 1 auto;min-width:0;}
+.detail-empty{padding:40px 16px;text-align:center;color:var(--sub);font-size:13.5px;}
+.detail-head{margin-bottom:10px;}
+.detail-head h2{margin:0;font-size:19px;font-weight:900;color:var(--ink);}
+.detail-dept{margin-top:3px;font-size:12.5px;color:var(--accent);}
+
+.detail-section{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:13px 14px;margin-bottom:10px;}
+.section-title{margin:0 0 9px;font-size:13px;font-weight:700;color:var(--accent);
+  letter-spacing:.02em;}
+.section-count{color:var(--sub);font-weight:400;font-size:11.5px;}
+.section-empty{color:var(--sub);font-size:12.5px;}
+.section-raw{color:var(--sub);font-size:11.5px;background:#0a0f19;border:1px solid var(--line);
+  border-radius:6px;padding:5px 8px;margin:3px 0 8px;word-break:break-all;}
+
+/* アイコン差分：Discord風の丸サムネ */
+.avatar-grid{display:flex;flex-wrap:wrap;gap:8px;}
+.avatar-thumb{width:52px;height:52px;border-radius:50%;object-fit:cover;
+  border:1px solid var(--line);background:#0a0f19;}
+
+/* 口調 */
+.tone-sub-label{font-size:11.5px;color:var(--sub);font-weight:700;margin:8px 0 4px;}
+.tone-sub-label:first-child{margin-top:0;}
+.tone-flag{font-size:12.5px;color:var(--ink);margin:6px 0;}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;}
+.chip{font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid var(--accent);
+  color:var(--accent);background:rgba(43,179,192,.08);white-space:nowrap;}
+/* 禁止表現も赤系ではなくティール系(輪郭破線)で区別する(design-preferences準拠) */
+.chip-forbidden{border-style:dashed;color:#7fd6de;border-color:#3a7c84;background:rgba(43,179,192,.04);}
+.chip-forbidden::before{content:"✕ ";}
+.chip-swap{border-style:solid;color:var(--warn);border-color:#8a6a1e;background:rgba(232,179,31,.08);}
+
+/* 呼称テーブル */
+.naming-meta{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px;font-size:12.5px;}
+.naming-meta .meta-k{color:var(--sub);margin-right:6px;}
+.val-empty{color:var(--sub);opacity:.75;}
+.rule-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px;}
+.rule-table th{text-align:left;color:var(--sub);font-weight:700;font-size:11px;
+  padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap;}
+.rule-table td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--ink);
+  vertical-align:top;}
+.rule-table tr:last-child td{border-bottom:none;}
+.rule-table .rule-note{color:var(--sub);font-size:11.5px;min-width:160px;}
+
+/* 設定所在 */
+.source-list{display:flex;flex-direction:column;gap:7px;}
+.source-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font-size:12.5px;}
+.source-k{flex:0 0 108px;color:var(--sub);}
+.path-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;
+  color:var(--ink);background:#0a0f19;border:1px solid var(--line);border-radius:6px;
+  padding:2px 7px;cursor:pointer;word-break:break-all;}
+.path-code:hover{border-color:var(--accent);color:var(--accent);}
+.path-code:active{opacity:.7;}
+
+/* ── モバイル：縦積みへフォールバック ── */
+@media (max-width:860px){
+  .hub-main{flex-direction:column;}
+  .hub-list-pane{position:static;max-height:none;flex:1 1 auto;width:100%;}
+  .persona-list{max-height:44vh;}
+  .source-k{flex-basis:100%;}
+}
