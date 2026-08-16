@@ -339,6 +339,73 @@ def load_tone_rules(path):
         return None
 
 
+# ------------------------------------------------------------------
+# ★2026-08-17 追加(C-038/C-042・人事部門ククールの提案をイージス研究室で実装)
+#   構造の穴= 関西弁のパターン列 `_DIALECT_KANSAI` は**基盤コードにハードコード**されていた。
+#   だから1形足すたびに (1)基盤コードの編集 (2)全デーモンの載せ替え が要る=**検知の正本は
+#   人事部門(ORG-11)なのに、実体は人事部門が触れない場所に在った**。これが「穴が埋まらない
+#   構造の摩擦」の正体で、実測= 8/17 に「やなく」1形を足すのに commit + 31体の再起動が要った。
+#   → 口調ルール.json の任意キー `dialect_kansai_extra` も読む。**都度読み**(C-042①(B))なので
+#     人事部門がデータとして足せば**次の便から効く**(再起動不要・基盤コードを触らない)。
+#   ★書ける形は2つ:
+#     "やなく"                                  … 文字列= そのまま**リテラル**として扱う(re.escape)
+#     {"name": "やなく", "pattern": "(?<![いゃ])やなく"}  … 正規表現で細かく絞りたい時
+#   ★壊れた正規表現は**その1件だけ捨てる**(ゲート全体を落とさない=共通規律§3 fail-open)。
+#   ★既存のハードコード列は消さない= 足すだけ(C-010)。データ側は**追加専用**で、
+#     組み込みの形をデータから無効化する口は作らない(黙って検知が消える方が害が大きい)。
+_EXTRA_CACHE = {}
+
+
+def _extra_dialect(rules):
+    """口調ルール.json の `dialect_kansai_extra` を (表示名, 正規表現) の列にして返す。
+
+    ★実測できる形で失敗する= 壊れた1件は捨てるが、捨てたことは戻り値の欠落として
+      `dialect_extra_names()` で数えられる(黙って全部消えない)。
+    """
+    if not isinstance(rules, dict):
+        return ()
+    raw = rules.get("dialect_kansai_extra")
+    if not isinstance(raw, (list, tuple)) or not raw:
+        return ()
+    try:
+        key = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return ()
+    hit = _EXTRA_CACHE.get(key)
+    if hit is not None:
+        return hit
+    out = []
+    for item in raw:
+        if isinstance(item, str):
+            name, pat = item, re.escape(item)
+        elif isinstance(item, dict):
+            name = str(item.get("name") or item.get("pattern") or "")
+            pat = item.get("pattern")
+            pat = re.escape(name) if not isinstance(pat, str) or not pat else pat
+        else:
+            continue
+        if not name:
+            continue
+        try:
+            re.compile(pat)
+        except re.error:
+            continue          # 壊れた正規表現は**この1件だけ**捨てる
+        out.append((name, pat))
+    out = tuple(out)
+    _EXTRA_CACHE[key] = out
+    return out
+
+
+def dialect_patterns(rules):
+    """実際に判定へ使う関西弁マーカーの全列= 組み込み + 口調ルール.json のデータ側。"""
+    return tuple(_DIALECT_KANSAI) + _extra_dialect(rules)
+
+
+def dialect_extra_names(rules):
+    """データ側で足されている形の表示名(検査・報告用。何が載っているかを機械で数える)。"""
+    return [n for n, _ in _extra_dialect(rules)]
+
+
 def _norm(s):
     """人格名の表記ゆれ(中黒・空白)を吸収して突き合わせる(naming_gate と同じ思想)。"""
     return re.sub(r"[・\s]", "", str(s or "")).lower()
@@ -672,7 +739,8 @@ def tone_verdicts(persona, dept, text, rules):
                     "reason": "forbidden_word",
                 })
         if want_dialect:
-            for name, pat in _DIALECT_KANSAI:
+            # ★組み込み列 + 口調ルール.json の `dialect_kansai_extra`(都度読み=再起動不要)。
+            for name, pat in dialect_patterns(rules):
                 m = re.search(pat, s)
                 if m:
                     out.append({
