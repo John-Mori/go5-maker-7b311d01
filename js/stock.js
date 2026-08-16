@@ -785,12 +785,23 @@
   }
 
   // ── 動画DL ──
-  function downloadStock_(id, videoName) {
+  //   ★押した瞬間に反応が要る(Chami報告2026-08-16「押してからすぐではなく5秒くらい時差があって反応がある」)。
+  //   時差の芯＝動画blobの取り寄せが非同期(手元IDBのread、手元に無ければR2からネット取得=数秒)で、その間ボタンが
+  //   無反応=死んで見える。core/operation-gate.js の armButton で「押した瞬間から」処理中表示に切り替え、共有シートを
+  //   出す/取得失敗の瞬間に戻す=手元に有る動画は即・雲から取り寄せる動画も「準備中…」で反応が返る(stk-driveと同型)。
+  function downloadStock_(id, videoName, btn) {
     var store = idb();
-    if (!store) { alert('IndexedDB未対応のため再DLできません。'); return; }
+    var _op = (btn && window.Go5OperationGate && window.Go5OperationGate.armButton)
+      ? window.Go5OperationGate.armButton(btn, {
+          pendingLabel: '⬇ 準備中…', timeoutLabel: '⏱ 再試行', timeoutMs: 60000
+        })
+      : null;
+    function settle(ok) { if (_op) _op.finish(ok); }
+    if (!store) { settle(false); alert('IndexedDB未対応のため再DLできません。'); return; }
     resolveVideoBlob_(id).then(function (blob) {
       if (!blob) {
         // 手元にも雲にも無い=作った端末からまだ上がっていない(その端末でアプリを開けば数十秒で上がる)。
+        settle(false);
         alert('動画がまだ雲に届いていません。動画を作成した端末でこのアプリを開いていれば数十秒で自動的に上がります。少し待ってもう一度お試しください。');
         return;
       }
@@ -803,11 +814,13 @@
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
         // ★共有シートを出せたらキャンセル/完了に関わらずここで完結する。<a download>へ落とすと
         //   iOSで共有シートの後に「ダウンロードしますか?」が二重に出て邪魔(Chami指摘2026-07-29・スクショ実物)。
+        settle(true); // 共有シートを出す=ボタンは操作可能へ戻す
         navigator.share({ files: [file], title: name }).catch(function () {});
         return;
       }
+      settle(true);
       anchorDownload_(blob, name);
-    }).catch(function () { alert('動画データの取得に失敗しました。'); });
+    }).catch(function () { settle(false); alert('動画データの取得に失敗しました。'); });
   }
   // 共有が使えない/キャンセル時のフォールバック=従来の <a download>(PC・非対応ブラウザはこちら)。
   function anchorDownload_(blob, name) {
@@ -1964,7 +1977,7 @@
     $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
     $('draftCopyYtTags').addEventListener('click', function () { copyText_(($('draftYtTagsInput') || {}).value || '', this); }); // タグ欄をコピー(Chami依頼2026-07-30③)
-    $('draftDlVideo').addEventListener('click', function () { if (_modalMeta) downloadStock_(_modalMeta.id, _modalMeta.videoName); }); // 動画DL(Chami依頼2026-07-30④)
+    $('draftDlVideo').addEventListener('click', function () { if (_modalMeta) downloadStock_(_modalMeta.id, _modalMeta.videoName, this); }); // 動画DL(Chami依頼2026-07-30④)。this=押した瞬間に「準備中…」表示
     $('draftCopyYtDesc').addEventListener('click', function () {
       // 短縮URLは概要欄テキストボックスの最上段に既に入っている(setDescUrlSlot_)ので、
       //   テキストボックスの中身をそのままコピーする(先頭URLを二重に足さない)。
@@ -2242,7 +2255,7 @@
                  || loadArchive().filter(function (m) { return m.id === id; })[0];
 
         if (btn.classList.contains('stk-dl')) {
-          if (meta) downloadStock_(id, meta.videoName);
+          if (meta) downloadStock_(id, meta.videoName, btn); // btn=押した瞬間に「準備中…」表示(無反応を断つ)
 
         } else if (btn.classList.contains('stk-drive')) {
           // ☁️ Drive保存(作成履歴カード)=作成時にDriveへ上がっていない過去分を後から保存する。
