@@ -966,6 +966,15 @@
     }, Promise.resolve()).then(function () { return out; }).catch(function () { return null; });
   }
   var _r2ResolveJobs = {};
+  // マーカー(テキスト等のメタ)+ R2から取れた imgs から、メモリ/表示が期待する ref レコードを組む。
+  //   ★resolveR2IntoMem_ と resolveRefImgsAwaited_ の2経路で同じ形を作る=リテラル二重化(片方だけ直すと割れる)を避けて共用。
+  function refRecordFromMarker_(marker, imgs) {
+    marker = marker || {};
+    return {
+      imgs: imgs, img: (imgs && imgs[0]) || '', comment: marker.comment || '', memo: marker.memo || '',
+      twitterUrl: marker.twitterUrl || '', twitterUrl2: marker.twitterUrl2 || '', urls2: marker.urls2 || [], at: marker.at || 0
+    };
+  }
   // LSのR2マーカーをR2から実体化して _imgMem.ref[cid] へ dataURL で載せる。冪等(多重発射・既に実体あり=no-op)。
   function resolveR2IntoMem_(cid, marker) {
     cid = String(cid || '');
@@ -975,10 +984,7 @@
     resolveRefFromR2_(cid, marker.__r2n).then(function (imgs) {
       delete _r2ResolveJobs[cid];
       if (!imgs || !imgs.length) return; // 取れなければマーカーのまま=次回再試行(「無い」と断定しない)
-      _imgMem.ref[cid] = {
-        imgs: imgs, img: imgs[0] || '', comment: marker.comment || '', memo: marker.memo || '',
-        twitterUrl: marker.twitterUrl || '', twitterUrl2: marker.twitterUrl2 || '', urls2: marker.urls2 || [], at: marker.at || 0
-      };
+      _imgMem.ref[cid] = refRecordFromMarker_(marker, imgs);
       _refLoaded[cid] = true;
       try {
         var page = document.getElementById('pageCand');
@@ -987,6 +993,27 @@
         if (card) updateCardRefThumb_(card, cid);
       } catch (e) {}
     }, function () { delete _r2ResolveJobs[cid]; });
+  }
+  // 候補→動画作成の写真ハンドオフ用: 画像を「待って」取り出す。メモリ/LSに実体があれば即返し、無くて
+  //   R2退避マーカーだけがある時は resolveRefFromR2_ を await してから返す。★resolveR2IntoMem_ は裏で
+  //   メモリへ載せるだけ=呼び側は await できず、遷移直後の consume_ が空を掴んで写真ガードで止まる
+  //   =「ドラフトに遷移しない(acc2=候補起点)」の芯(Chami報告2026-08-16・Fable5診断④-1)。ここは明示的に待つ。
+  //   マーカーが無い作品は従来と完全に同じ(refImgsOf_ の結果をそのまま返す)=非破壊の追加経路。
+  function resolveRefImgsAwaited_(cid) {
+    cid = String(cid || '');
+    var have = refImgsOf_(cid);
+    if (have && have.length) return Promise.resolve(have);
+    var raw = legacyRefOf_(cid);
+    if (isR2Marker_(raw) && r2Ready_()) {
+      return resolveRefFromR2_(cid, raw.__r2n).then(function (imgs) {
+        if (imgs && imgs.length) {
+          if (!Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) { _imgMem.ref[cid] = refRecordFromMarker_(raw, imgs); _refLoaded[cid] = true; }
+          return imgs;
+        }
+        return refImgsOf_(cid); // 取れなければ現状(空でもマーカーは残す=「無い」と断定しない)
+      }, function () { return refImgsOf_(cid); });
+    }
+    return Promise.resolve(have || []);
   }
   // 起動時の解毒: LSに積もった base64 退避(v=791の毒)をR2へ逃がして枚数マーカーへ縮小し、cand_textと
   //   食い合う5MBを解放する。既にマーカーの物はR2から実体をメモリへ載せる。★confirm-before-shrink=
@@ -4688,9 +4715,10 @@
         if (p.imgDataUrl) { consume_(p.imgDataUrl); return; }
         if (p.imageCid) {
           Promise.resolve(ensureRefLoaded_(p.imageCid)).then(function () {
-            var imgs = refImgsOf_(p.imageCid);
+            return resolveRefImgsAwaited_(p.imageCid); // ★R2退避画像も"待って"から取り出す(acc2の「遷移しない」根治・④-1)
+          }).then(function (imgs) {
             var idx = Math.max(0, Number(p.imageIndex) || 0);
-            consume_(imgs[idx] || imgs[0] || '');
+            consume_((imgs && (imgs[idx] || imgs[0])) || '');
           }, function () { consume_(''); });
           return;
         }

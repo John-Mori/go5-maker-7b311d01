@@ -2107,13 +2107,14 @@
         //     _draftMode/_restoreBskyElを持たせたが、make()が入口ガード(写真未選択・狙い/コメント型未選択)で
         //     早期returnするとこの状態が復元されず、①自動投稿が黙って外れたまま ②後続の「今すぐ作成」が
         //     _draftMode残留でドラフト扱いに化ける——というドラフト/投稿の取り違えを生んでいた。権威フラグ一本に統一する。
-        window.__go5DraftPending = true;
+        window.__go5DraftPending = true; // ★後方互換の保険。第一の権威は直接口の引数 {draft:true}(app.js make(opts))
         // ★make() を直接呼ぶ。従来の makeBtn.click() は、makeBtn が disabled(前回作成の固着など)だと
         //   click イベントが発火せず make() に入らない=「押しても無反応」に落ちていた(Chami報告2026-08-16)。
         //   直接口 __go5RequestMake なら disabled を跨いで make() の入口(再入判定・stale奪回)へ到達する。
-        //   直接口が未定義の古い読み込み順のときだけ従来の click() へフォールバック。
+        //   ★ドラフト意図は引数 {draft:true} で明示的に運ぶ=グローバルフラグ消費レースの根絶(Chami報告2026-08-16
+        //     「ドラフトに遷移しない」)。古い読み込み順で直接口が未定義のときだけ従来の click()(グローバルフラグ)へ。
         if (typeof window.__go5RequestMake === 'function') {
-          try { window.__go5RequestMake(); }
+          try { window.__go5RequestMake({ draft: true }); }
           catch (e) { var mb0 = $('makeBtn'); if (mb0) mb0.click(); }
         } else {
           var makeBtn = $('makeBtn');

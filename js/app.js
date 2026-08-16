@@ -644,12 +644,15 @@
   }
 
   // ---- 動画作成 ----
-  async function make() {
+  async function make(opts) {
     // ★ドラフトで作成の意図を「作成イベント」に載せる(Chami報告2026-08-11「ドラフトで作成が今すぐ投稿の挙動になる」)。
     //   従来は draftMakeBtn が bskyEnable を外すだけで、Bluesky側の maybeInheritRebuild_(自動投稿ON/OFFに
     //   関わらず走るリビルド引き継ぎ)や他の購読者へは「これはドラフトだ」が伝わらず、投稿/確認フローへ漏れていた。
     //   ここで一度だけフラグを消費して detail.draft に確定=購読者全員が確実に投稿を抑止できる(早期returnでも滞留しない)。
-    var isDraft = !!window.__go5DraftPending; window.__go5DraftPending = false;
+    // ★ドラフト意図は「引数」で運ぶのを第一とし、グローバル一発フラグ(__go5DraftPending)は後方互換の保険に降格
+    //   (Chami報告2026-08-16「ドラフトに遷移しない」の芯の一つ=呼び出し口とmake()の間でフラグ消費レースが起きると
+    //   ドラフトなのに通常作成として処理され遷移導線に乗らない)。stock.js は __go5RequestMake({draft:true}) で呼ぶ。
+    var isDraft = !!(opts && opts.draft) || !!window.__go5DraftPending; window.__go5DraftPending = false;
     // ★入口ガードは「必ず押されたボタン自身にも反応を返す」。status(画面下の一言)だけだと、ボタンを見ている
     //   Chamiには「押しても無反応」に見える沈黙になる(Chami報告2026-08-16「動画が生成されない/直ってない」の
     //   芯の一つ・恒久対策C-038)。どのガードで止めても押されたボタンが一瞬だけ理由ラベルへ変わる=「無反応で
@@ -686,17 +689,21 @@
     // ★再入は弾くが「黙って」弾かない=最悪の事故は沈黙(§3 可用性は喋る側へ倒す)。前回の作成が異常終了して
     //   _making が立ったまま(MediaRecorderのonstop不達など)固着すると、以後「ドラフトで作成」を押しても
     //   ここで無言 return され、動画も出ず遷移もしない=「動画が生成されない/遷移しない」に化ける
-    //   (Chami報告2026-08-13・月詠みで再現)。①busyなら理由を必ず画面に出す ②20秒(録画5秒+書出の数倍)を
+    //   (Chami報告2026-08-13・月詠みで再現)。①busyなら理由を必ず画面に出す ②正規の最長処理時間を
     //   超えて立ったままなら stale とみなし奪い返す=固着で永久に無反応にならないようにする。
+    // ★閾値は正規runの実測最長へ合わせる=録画約5.6秒+stop番犬12秒(742行)+再生確認10秒(754行)≒28秒。
+    //   旧20秒は正規runより短く、処理中の再押下が生きているrunを stale と誤認して奪い返し=二重録画で
+    //   「遅い/行かない」を増幅していた(Chami報告2026-08-16「ドラフトに遷移しない」の芯の一つ)。35秒へ広げる。
     if (_making) {
-      if (!_makingAt || (performance.now() - _makingAt) < 20000) {
+      if (!_makingAt || (performance.now() - _makingAt) < 35000) {
         guardStop_(isDraft ? "前の作成がまだ終わっていません。数秒待ってから、もう一度「ドラフトで作成」を押してください。"
                           : "前の作成がまだ終わっていません。数秒お待ちください。", "⏳ 前の作成中");
         return;
       }
-      try { if (window.console && console.warn) console.warn("[go5] _making が20秒以上固着=stale。作成を奪い返す"); } catch (e) {}
+      try { if (window.console && console.warn) console.warn("[go5] _making が35秒以上固着=stale。作成を奪い返す"); } catch (e) {}
     }
     _making = true; _makingAt = performance.now();
+    var makeFailed_ = false; // 失敗で終わったか(finallyで押されたボタンへ一瞬「失敗」を出すための印)
     const runId = ++_makeRunSeq;
     var activeBtn = isDraft ? document.getElementById("draftMakeBtn") : els.makeBtn;
     var activeLabel = activeBtn ? activeBtn.textContent : "";
@@ -783,6 +790,7 @@
       //   ここ1箇所で潰すことで購読側6経路すべてに効く(個別対処だと足し忘れが必ず出る)。
       document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest, sourceImageFile: fgFile, draft: isDraft } }));
     } catch (e) {
+      makeFailed_ = true;
       setStatus("作成に失敗しました：" + e.message);
     } finally {
       // ★_making(再入ロック)は最新runだけが解除する=stale奪回で始まった新runのロックを旧runが解かない。
@@ -795,11 +803,15 @@
         activeBtn.disabled = false;
         activeBtn.textContent = activeLabel;
         try { delete activeBtn.dataset.makeRun; } catch (e) { activeBtn.dataset.makeRun = ""; }
+        // ★失敗で終わった時は、押されたボタン自身にも一瞬だけ「失敗」を出す。status(画面下の一言)だけだと
+        //   ボタンを見ているChamiには「押したのに無反応」に見える(Chami報告2026-08-16の芯)。復元の"後"に
+        //   flash=最後にボタンへ触る側が勝つので、この警告表示が残る(1.5秒で元ラベルへ戻る・flashBtn)。
+        if (makeFailed_) { try { flashBtn(activeBtn, "⚠ 作成失敗(もう一度)"); } catch (e) {} }
       }
     }
   }
 
-  els.makeBtn.addEventListener("click", make);
+  els.makeBtn.addEventListener("click", function () { make(); }); // ★clickのEventをopts扱いしない(make(opts)化・引数でドラフト意図を運ぶため)
   // ★ドラフト等の他モジュールが make() を確実に起動できる直接口。従来 stock.js は makeBtn.click() で
   //   代理発火していたが、makeBtn が disabled(前回作成の固着など)だと click イベントは発火せず、
   //   make() に一切入らない=動画も出ず遷移もせずステータスすら出ない「完全な沈黙」に落ちていた
