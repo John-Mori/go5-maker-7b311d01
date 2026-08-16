@@ -535,9 +535,14 @@
   //   題名も控えIDも無いとURLは空=その時はアイコンを出さない(切れリンクを作らない)。
   function driveLinkHtml_(it) {
     if (!(window.Go5Drive && Go5Drive.folderUrl)) return '';
-    var url = Go5Drive.folderUrl(chForItem_(it), it.title || '', it.videoId || '');
-    if (!url) return '';
-    return '<a class="vlink vlink-drive" href="' + esc(url) + '" target="_blank" rel="noopener" title="この作品のGoogleドライブ保存先を開く">' + DRIVE_ICON_SVG + '</a>';
+    var ch = chForItem_(it), title = it.title || '', vid = it.videoId || '';
+    var url = Go5Drive.folderUrl(ch, title, vid); // hrefの初期値(控えがあれば直リンク・無ければ題名検索)
+    if (!url && !title) return '';
+    // クリック時に delegated handler が「この作品のフォルダそのもの」を解決して開く(検索ではなくフォルダ内へ)。
+    //   data-* に宛先を持たせ、href は同期フォールバック(JS無効/解決失敗時)として残す。
+    return '<a class="vlink vlink-drive" href="' + esc(url || '#') + '" target="_blank" rel="noopener"' +
+      ' data-drive-ch="' + esc(ch) + '" data-drive-title="' + esc(title) + '" data-drive-vid="' + esc(vid) + '"' +
+      ' title="この作品のGoogleドライブ保存先フォルダを開く">' + DRIVE_ICON_SVG + '</a>';
   }
   // 編集モーダルのX/Bskyラジオ用：この行の現在の投稿先。明示指定＞URL判定＞既定X(Chami:これから原則X投稿)。
   function platOf_(it) {
@@ -2193,6 +2198,26 @@
     // 作り直し(削除の代わりに「被リビルド」の印を付ける／取り消す)
     list.querySelectorAll('.vremake').forEach(function (b) {
       b.addEventListener('click', function () { toggleRemade(b.getAttribute('data-k')); });
+    });
+
+    // Googleドライブ・アイコン → その作品の保存先「フォルダそのもの」を開く(検索ではない・Chami依頼2026-08-16②)。
+    //   iOS Safariのポップアップブロック回避のため、クリック内で同期的に空タブを開いてから解決後に遷移させる。
+    list.querySelectorAll('.vlink-drive').forEach(function (a) {
+      a.addEventListener('click', function (e) {
+        if (!(window.Go5Drive && Go5Drive.resolveFolderUrl)) return; // 解決関数が無ければhrefのフォールバックに任せる
+        e.preventDefault();
+        var ch = a.getAttribute('data-drive-ch'), title = a.getAttribute('data-drive-title'), vid = a.getAttribute('data-drive-vid');
+        var fallback = a.getAttribute('href'); if (fallback === '#') fallback = '';
+        var win = window.open('', '_blank'); // 同期で開く=ユーザー操作直下なのでブロックされない
+        Go5Drive.resolveFolderUrl(ch, title, vid).then(function (u) {
+          var dest = u || fallback; // フォルダ解決できなければ題名検索(hrefの初期値)へ
+          if (!dest) { if (win) win.close(); return; }
+          if (win) { try { win.opener = null; } catch (e2) {} win.location.href = dest; }
+          else window.location.href = dest;
+        }).catch(function () {
+          if (win) { if (fallback) win.location.href = fallback; else win.close(); }
+        });
+      });
     });
 
     // 🔁リビルドで作る：この投稿をリビルド元にして動画作成タブへ(bluesky.jsのGo5Rebuildが対象選択＋作品データ反映まで実施)

@@ -307,21 +307,57 @@
     root: "AFI5秒動画",                                   // マイドライブ直下の親フォルダ名(保存先の頂点)
     channels: { acc1: "月詠み色恋劇場", acc2: "宵桜艶帖" }, // チャンネル→フォルダ名(表示・照合用の控え)
   };
-  // この作品のGoogleドライブ保存先を開くURLを組む。実フォルダIDの控えがあれば直リンク、無ければ題名でDrive検索。
-  //   title 空 かつ 控えID無し のときは "" を返す(呼び出し側はリンクを出さない=切れリンクを作らない)。
-  function driveFolderUrl_(channel, title, videoId) {
-    // 直リンク：この端末で保存した作品は drive_up_<videoId> に実フォルダIDを控えてある(あれば最優先)。
+  function folderLink_(fid) { return "https://drive.google.com/drive/folders/" + encodeURIComponent(fid); }
+  // 題名ベースの控えキー(videoIdが無い過去投稿でも実フォルダIDを覚えておける)。
+  function folderCacheKey_(channel, title) { return "drive_folder_" + channel + "_" + String(title || "").trim(); }
+  // 端末に控えた実フォルダIDを返す(videoId優先→題名キャッシュ)。無ければ ""。
+  function cachedFolderId_(channel, title, videoId) {
     try {
       var fid = videoId && localStorage.getItem("drive_up_" + videoId);
-      if (fid) return "https://drive.google.com/drive/folders/" + encodeURIComponent(fid);
+      if (fid) return fid;
+      var fid2 = localStorage.getItem(folderCacheKey_(channel, title));
+      if (fid2) return fid2;
     } catch (e) {}
-    // フォールバック：題名でDrive内を検索して開く。アカウント非依存(＝ログイン中のDriveで開く)。
+    return "";
+  }
+  // この作品のGoogleドライブ保存先を開く「同期の」URLを組む(hrefの初期値用)。実フォルダIDの控えがあれば直リンク、
+  //   無ければ題名でDrive検索。title 空 かつ 控えID無し のときは "" を返す(呼び出し側はリンクを出さない=切れリンクを作らない)。
+  function driveFolderUrl_(channel, title, videoId) {
+    var fid = cachedFolderId_(channel, title, videoId);
+    if (fid) return folderLink_(fid);
     var t = String(title || "").trim();
     if (!t) return "";
     return "https://drive.google.com/drive/search?q=" + encodeURIComponent(t);
   }
+  // ★クリック時に「その作品のフォルダそのもの」を解決して直リンクURLを返す(非同期・Chami依頼2026-08-16②
+  //   「検索じゃなくこの作品のフォルダ内に移動して」)。①端末の控えがあれば即・直リンク ②無ければWorkerの
+  //   read-onlyアクション folder_link で[チャンネル]/[題名]フォルダのIDを引き当て、控えて直リンク ③見つからなければ ""
+  //   (呼び出し側は題名検索へフォールバック)。サーバー側完走ジョブ(queueSave)はfolderIdをクライアントへ返さないため、
+  //   このオンデマンド解決が「作成時に控えていない作品」でも実フォルダへ入るための唯一の経路。
+  function resolveFolderUrl_(channel, title, videoId) {
+    var fid = cachedFolderId_(channel, title, videoId);
+    if (fid) return Promise.resolve(folderLink_(fid));
+    if (!configured() || (channel !== "acc1" && channel !== "acc2") || !title) return Promise.resolve("");
+    var fd = new FormData();
+    fd.append("action", "folder_link");
+    fd.append("channel", channel);
+    fd.append("title", title);
+    return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (j) {
+        if (j && j.ok && j.found && j.folderId) {
+          try {
+            localStorage.setItem(folderCacheKey_(channel, title), j.folderId);
+            if (videoId) localStorage.setItem("drive_up_" + videoId, j.folderId);
+          } catch (e2) {}
+          return j.link || folderLink_(j.folderId);
+        }
+        return "";
+      })
+      .catch(function () { return ""; });
+  }
 
-  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, queueSave: queueSave_, checkSaved: checkSaved_, folderUrl: driveFolderUrl_, pathConfig: DRIVE_PATH };
+  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, queueSave: queueSave_, checkSaved: checkSaved_, folderUrl: driveFolderUrl_, resolveFolderUrl: resolveFolderUrl_, pathConfig: DRIVE_PATH };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {

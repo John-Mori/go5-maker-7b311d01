@@ -69,6 +69,12 @@ export default {
     if (String(form.get("action") || "") === "check_saved") {
       return await handleCheckSaved(form, env, cors);
     }
+    // ---- 参照アクション：作品フォルダの直リンク解決（read-only・非破壊）----
+    //   投稿履歴のGoogleドライブ・アイコンを押した時、[チャンネル]/[題名] フォルダのIDと webViewLink を返す。
+    //   これで題名検索ではなく「その作品のフォルダそのもの」を開ける（Chami依頼2026-08-16②）。作成・削除・上書きはしない。
+    if (String(form.get("action") || "") === "folder_link") {
+      return await handleFolderLink(form, env, cors);
+    }
 
     // ---- 簡易レート制限（KV：日次カウンタ・アップロード系のみ）----
     try {
@@ -431,6 +437,31 @@ async function handleCheckSaved(form, env, cors) {
     if (v) return json({ ok: true, saved: true }, 200, cors);
   }
   return json({ ok: true, saved: false }, 200, cors);
+}
+
+// 作品フォルダの直リンク解決（read-only）：[チャンネル]/[題名] の実フォルダIDと webViewLink を返す。
+//   複数の同名候補（連番等は別名なので基本1件）があれば「作成が新しい」ものを優先＝直近の投稿先に合わせる。
+//   作成・削除・上書きは一切しない＝アップロードのレート制限とは別枠。見つからなければ {found:false}。
+async function handleFolderLink(form, env, cors) {
+  const channel = String(form.get("channel") || "").trim();
+  const title = String(form.get("title") || "").trim();
+  const parentId = channelToFolderId(channel, env);
+  if (!parentId) return json({ ok: false, error: "channel_unresolved" }, 400, cors);
+  if (!title) return json({ ok: false, error: "missing_title" }, 400, cors);
+  let token;
+  try { token = await getAccessToken(env); } catch (e) { return json({ ok: false, error: "auth_failed" }, 502, cors); }
+  const baseName = safeName(title);
+  const q = "name='" + escQ(baseName) + "' and '" + parentId +
+    "' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
+  const url = DRIVE_API + "?q=" + encodeURIComponent(q) +
+    "&fields=files(id,webViewLink,createdTime)&orderBy=createdTime desc&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true";
+  let f = null;
+  try {
+    const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+    if (r.ok) { const j = await r.json(); f = (j.files || [])[0] || null; }
+  } catch (e) { f = null; }
+  if (!f || !f.id) return json({ ok: true, found: false }, 200, cors);
+  return json({ ok: true, found: true, folderId: f.id, link: f.webViewLink || ("https://drive.google.com/drive/folders/" + f.id) }, 200, cors);
 }
 
 // フォルダ内の動画ファイルを1件返す（無ければ null）。仕上がりプレビュー等の画像は mimeType で除外。
