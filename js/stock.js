@@ -120,7 +120,32 @@
   }
 
   function loadMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || '[]') || []; } catch (e) { return []; } }
-  function saveMeta(arr) { try { localStorage.setItem(META_KEY, JSON.stringify(arr.slice(0, MAX))); } catch (e) {} kickSync_(); }
+  // ★localStorage逼迫でメタ書込みが無言失敗すると、commitPendingDraft_ の読み戻しが draft-meta-readback-failed で
+  //   落ち、ドラフトが一覧に載らず遷移もしない(蓄積の多い月詠み=acc1で顕在化。実機の保留バナー内訳=
+  //   手元:idb-timeout / 雲:draft-meta-readback-failed・Chami報告2026-08-16 msg1538578410564096130/第1弾計測で確証)。
+  //   thumbDataUrl はメタ内で唯一の重い項目(≤160KB)で、IDB(stock_t_<id>)の複製=カードは resolveThumb_ が
+  //   IDBからも引ける。枠が溢れたら古い順に thumbDataUrl を剥がして必ず書き切る(非破壊=サムネはIDBから復元)。
+  //   ★元の meta オブジェクトは壊さず、localStorage へ落とす直列化用の複製だけを痩せさせる。
+  function writeMetaResilient_(arr) {
+    var full = (arr || []).slice(0, MAX);
+    try { localStorage.setItem(META_KEY, JSON.stringify(full)); return true; } catch (e) {}
+    var lean = full.map(function (m) { return m; }); // 永続化用の別列(要素は共有=剥がす時だけ複製へ差し替える)
+    for (var i = lean.length - 1; i >= 0; i--) {      // 古い順(末尾から)にthumbDataUrlを剥がす=最新の今作ったドラフトは最後まで残す
+      var m = lean[i];
+      if (m && m.thumbDataUrl) {
+        var c = {};
+        for (var k in m) { if (Object.prototype.hasOwnProperty.call(m, k) && k !== 'thumbDataUrl') c[k] = m[k]; }
+        lean[i] = c;
+        try { localStorage.setItem(META_KEY, JSON.stringify(lean)); return true; } catch (e2) {}
+      }
+    }
+    while (lean.length > 1) {                          // 全thumbを剥がしても入らない=古い件から件数を削り、最新は必ず残す
+      lean.pop();
+      try { localStorage.setItem(META_KEY, JSON.stringify(lean)); return true; } catch (e3) {}
+    }
+    return false;
+  }
+  function saveMeta(arr) { writeMetaResilient_(arr); kickSync_(); }
 
   // ドラフトは「動画が手元または雲へ着地した後」にだけ一覧へ確定する二相コミット。
   // 失敗中のメタを先に go5_stock_meta へ入れると、黒いサムネ/DL不能の幽霊カードが残るため禁止する。
