@@ -1010,14 +1010,29 @@
     }).then(function (prevB) { applyPreview(prevB); return prevB; }, function () { return null; });
 
     var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
-    // ── 既にDriveへフォルダがある=動画/元画像は作成時に保存済み。プレビューだけ追記する(blob不要=blob寿命に依存しない)。
-    if (folderId) {
-      previewReady.then(function (prevB) {
-        if (prevB && window.Go5Drive.appendImage) window.Go5Drive.appendImage(meta.account, meta.title, folderId, prevB, null);
-        done(true, '作成時に保存済み(プレビュー追記)');
-      });
-      return;
-    }
+    // ── 控えフォルダ(drive_up_<videoId>)が在っても「実際に動画が在るか」を必ず確かめてから信じる。
+    //   ★静かな取りこぼしの根治(Chami報告2026-08-16「Driveに投稿保存しても動画が保存されない」)。従来は控えが
+    //   在るだけで「動画は保存済み」と決めつけ、仕上がりプレビューだけ追記して動画本体を一切上げなかった。だが
+    //   この控えは今日足したDriveアイコンの解決(resolveFolderUrl_)でも題名一致で書かれる=空/プレビューだけの
+    //   フォルダを"保存済み"と誤認しうる。checkSaved(read-only)で[題名]フォルダに動画実体が在る時だけプレビュー
+    //   追記で済ませ、無ければ本当の保存(realSaveNow_)へ倒す(判定不能も保存側へ倒す=fail-open・沈黙より保存)。
+    var verifyFolder = folderId
+      ? Go5Drive.checkSaved(meta.account, meta.title).then(function (saved) { return saved ? folderId : ''; }, function () { return ''; })
+      : Promise.resolve('');
+    verifyFolder.then(function (okFolderId) {
+      if (okFolderId) {
+        previewReady.then(function (prevB) {
+          if (prevB && window.Go5Drive.appendImage) window.Go5Drive.appendImage(meta.account, meta.title, okFolderId, prevB, null);
+          done(true, '保存済みを実物確認・プレビュー追記');
+        });
+        return;
+      }
+      realSaveNow_(); // 控えが在っても動画が無い/確かめられない=本当に保存する
+    });
+    return;
+
+    // ── 本当のDrive保存(動画本体を上げる)。控えフォルダに動画実体が無い時/控えが無い時に呼ぶ。
+    function realSaveNow_() {
     // ── ★フォールバック：作成時にDrive未保存 → サーバー側完走ジョブ(2026-08-16 Chami「途中で閉じても裏で完結」)。
     //   従来はここでこのページ内で動画をフルアップロードしていた=スマホ回線で数秒〜十数秒。その最中にSafariが
     //   タブをbg破棄/閉じるとfetchが切れて中断し、積み直す永続キューも無く「黙って消える」(Chami再発報告
@@ -1073,6 +1088,7 @@
       if (!opts.silent) alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
       done(false, '取得失敗');
     });
+    } // realSaveNow_
   }
 
   // ── ★save_job 永続pending(2026-08-16 Chami「途中で閉じても裏で完結」の取りこぼし対策)──
