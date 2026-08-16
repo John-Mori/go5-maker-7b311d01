@@ -2896,10 +2896,6 @@ try:
     import tone_gate as _tone_gate          # 純関数モジュール(同じ scripts/llm 配下)
 except Exception:
     _tone_gate = None                       # import 失敗でもデーモンは起動する(fail-open)
-try:
-    import tone_rewrite as _tone_rewrite    # 出力ゲートD-2(案F)= 送信直前の書き直し
-except Exception:
-    _tone_rewrite = None                    # import 失敗でもデーモンは起動する(fail-open)
 _TONE_RULES_CACHE = {"loaded": False, "rules": None}
 
 
@@ -2978,56 +2974,6 @@ def audit_tone(dept, persona, text, rec=None):
         return res.get("fixed", text), applied, remaining
     except Exception:
         return text, [], []     # 監査の失敗で応答を巻き添えにしない(fail-safe)
-
-
-def audit_tone_rewrite(dept, persona, text, remaining, rec=None):
-    """出力ゲートD-2(案F)= **機械が直せなかった崩れを、送信直前に1回だけ書き直す**。 2026-08-16
-
-    ★なぜ足したか= ゲートD(audit_tone)が直せるのは置換先が一意に決まる分だけで、
-      **方言・敬体・指紋語尾**は `remaining` へ落ちる。落ちた分は tone_audit.jsonl に貯まり
-      session_relay が**次の封筒**へ突き返すが、**突き返しは事後の機構だ**=
-      その便はもうChamiの画面に出ている(実物= 2026-08-16 14:08:34 の咲季便 msg 1538408581752426526)。
-      → 出る前に直す段が要る。Chami Go= msg 1538456711378243715「goいらんでしょ、goするからやって」。
-    ★書き直しは**1回だけ**・通らなければ**元の本文をそのまま送る**(fail-open= 沈黙にしない)。
-      採否の判定は tone_rewrite.accept= 数字/識別子/URLの不変 → 長さの帯 → 崩れが全部消えたか。
-    ★**突き返しは殺さない**= audit_tone が既に書いた event="tone" 行はそのまま残す。
-      書き直しで**その便**は綺麗になるが、**生成側の癖は直っていない**からだ。
-      ここが書くのは event="tone_rewrite"(何件通って何件弾かれたかを測る行)だけ。
-    ★止め方= 環境変数 `GO5_TONE_REWRITE=0`(往復を足したくない時のキルスイッチ)。
-    返り値: (送るべき本文, 結果dict)。ゲート無効/例外時は (元text, {})。
-    """
-    try:
-        if _tone_rewrite is None or not remaining:
-            return text, {}
-        if str(os.environ.get("GO5_TONE_REWRITE", "1")).strip().lower() in ("0", "off", "false"):
-            return text, {}
-        rules = _tone_rules()
-        if not rules:
-            return text, {}
-        res = _tone_rewrite.rewrite_once(persona, dept, text, remaining, rules) or {}
-        if not res.get("attempted"):
-            return text, res              # 対象なし/鍵なし/写像なし= 静かに従来どおり
-        try:
-            os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
-            with open(TONE_AUDIT, "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    "dept": dept, "event": "tone_rewrite",
-                    "persona": str(persona or ""),
-                    "ok": bool(res.get("ok")),
-                    "targets": res.get("targets") or [],     # 狙った崩れ
-                    "after": res.get("after") or [],         # 書き直し後に残った崩れ
-                    "why": res.get("why") or "",             # 不採用の理由(採用なら空)
-                    "elapsed_ms": res.get("elapsed_ms", 0),
-                    "msg_id": str((rec or {}).get("msg_id", "")),
-                    "excerpt": str(text or "")[:200],        # ★書き直し**前**
-                    "excerpt_after": str(res.get("text") or "")[:200],
-                }, ensure_ascii=False) + "\n")
-        except Exception:
-            pass                          # 監査の失敗で書き直しを巻き添えにしない
-        return (res.get("text") or text), res
-    except Exception:
-        return text, {}                   # この段が配送を殺さない
 
 
 def audit_speaker(dept, persona, text, roster, rec=None):
@@ -5379,20 +5325,6 @@ class Daemon:
                         f"★出力ゲートD(口調・警告のみ): 話者={_speaker} "
                         f"残={len(_tone)}件 例=本文に他人格の一人称"
                         f"「{_tone[0].get('marker')}」(正={_tone[0].get('own_first_person')}) msg={mid}")
-                    # ★★出力ゲートD-2(案F)= **警告のみで通っていた分を、出る前に1回だけ書き直す**。
-                    #   ここが「検知したのに崩れたまま出る」窓を閉じる最後の1点だ。
-                    #   ★突き返し(session_relay)は上の event="tone" 行で従来どおり効く=生成側も直る。
-                    _new_rw, _rw = audit_tone_rewrite(self.dept, _speaker, _part, _tone, rec)
-                    if _rw.get("ok"):
-                        log(self.dept,
-                            f"★出力ゲートD-2(案F・書き直し採用): 話者={_speaker} "
-                            f"狙い={'/'.join(_rw.get('targets') or [])} "
-                            f"{_rw.get('elapsed_ms', 0)}ms msg={mid}")
-                        _part = _new_rw
-                    elif _rw.get("attempted"):
-                        log(self.dept,
-                            f"★出力ゲートD-2(案F・不採用→元の本文で送る): 話者={_speaker} "
-                            f"理由={_rw.get('why')} msg={mid}")
                 _fixed_blocks.append((_who, _part))
             _blocks = _fixed_blocks
             body = os.path.join(LOCAL, f"_daemon_reply_{self.dept}.txt")

@@ -171,13 +171,8 @@ class Slot:
 #     純関数本体。dept_daemon が合流点で import する**本文を削る側**のコードなので、
 #     tone_gate/naming_gate と同じ理由でここに要る(マーカーを1つ足した日に載らないと、
 #     「入れたのに漏れ続ける」= 直したはずの事故がそのまま再演される)。
-#   ★2026-08-16 追加(C-042)= scripts/llm/tone_rewrite.py。出力ゲートD-2(案F=送信直前に
-#     1回だけ書き直す段)の本体。dept_daemon が起動時に import する**本文を差し替える側**の
-#     コードだから、tone_gate と同じ理由でここに要る(採否の条件を1つ直した日に載らないと、
-#     「入れたのに崩れたまま出る」= 案Fを作った理由そのものが再演される)。
 WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "llm", "session_relay.py"),
-               os.path.join(ROOT, "scripts", "llm", "tone_rewrite.py"),
                os.path.join(ROOT, "scripts", "llm", "prompt_spill.py"),
                os.path.join(ROOT, "scripts", "llm", "session_rooms.py"),
                os.path.join(ROOT, "scripts", "llm", "tone_gate.py"),
