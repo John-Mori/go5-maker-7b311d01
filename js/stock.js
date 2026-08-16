@@ -1005,7 +1005,33 @@
       });
       return;
     }
-    // ── フォールバック：作成時にDrive未保存。動画blobを取り直してフル保存(動画+元画像+プレビュー)。
+    // ── ★フォールバック：作成時にDrive未保存 → サーバー側完走ジョブ(2026-08-16 Chami「途中で閉じても裏で完結」)。
+    //   従来はここでこのページ内で動画をフルアップロードしていた=スマホ回線で数秒〜十数秒。その最中にSafariが
+    //   タブをbg破棄/閉じるとfetchが切れて中断し、積み直す永続キューも無く「黙って消える」(Chami再発報告
+    //   2026-08-16「月詠みの2本がDriveに保存されていない」)。動画は作成直後にR2へ控えてある(ensureVideoMirror_)ので、
+    //   その在り処(videoKey)だけを軽く渡し→Workerが即202→R2→Driveをサーバー側で完走させる=閉じても続く。
+    //   届かなかった場合に備え localStorage(go5_drive_savejob_<id>)へpendingを記録し、次回起動のsweepで再送(冪等)。
+    if (window.Go5Drive && typeof window.Go5Drive.queueSave === 'function' && meta.account) {
+      Promise.resolve(ensureVideoMirror_(id)).catch(function () {}) // R2へ確実に上げてから(既出なら即返る)
+        .then(function () { return previewReady; })
+        .then(function (prevB) {
+          // 仕上がりプレビューも小さくR2へ控えてkeyを添える(Workerが1ページ目プレビューとして保存)。任意=失敗しても続行。
+          var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
+            ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
+            : Promise.resolve('');
+          return mirrorPrev.then(function (prevKey) {
+            recordSaveJobPending_(id, meta);
+            return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: prevKey || '', overwrite: true });
+          });
+        })
+        .then(function (res) {
+          var ok = !!(res && res.ok);
+          done(ok, ok ? 'Driveへ保存(裏で完走)' : '今は送れず・次回起動で自動再送(投稿履歴は記録済み)');
+        })
+        .catch(function () { done(false, '保存予約に失敗・次回起動で自動再送(投稿履歴は記録済み)'); });
+      return;
+    }
+    // ── 最後の砦：queueSave が使えない旧環境のみ、従来のこのページ内フル保存(動画+元画像+プレビュー)。
     resolveVideoBlob_(id).then(function (blob) {
       if (!blob) {
         // ★動画は取れなくても、上の previewReady が投稿履歴1ページ目のプレビューを既に設定済み。
@@ -1034,6 +1060,48 @@
       if (!opts.silent) alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
       done(false, '取得失敗');
     });
+  }
+
+  // ── ★save_job 永続pending(2026-08-16 Chami「途中で閉じても裏で完結」の取りこぼし対策)──
+  //   投稿完了で queueSave を投げた瞬間に pending を記録する。keepalive送信が届かなかった(オフライン/
+  //   送信途中でタブ破棄)場合でも、次回アプリ起動の sweep が「Driveにもう在るか」を照会(read-only)し、
+  //   無ければ動画をR2へ上げ直して save_job を再送する。Worker側は冪等=再送で二重フォルダにならない。
+  var SAVEJOB_PENDING_PREFIX = 'go5_drive_savejob_';
+  var SAVEJOB_MAX_TRIES = 8;
+  function recordSaveJobPending_(id, meta) {
+    try {
+      var prev = JSON.parse(localStorage.getItem(SAVEJOB_PENDING_PREFIX + id) || 'null') || {};
+      localStorage.setItem(SAVEJOB_PENDING_PREFIX + id, JSON.stringify({
+        id: id, title: meta.title, channel: meta.account, ts: prev.ts || Date.now(), tries: (prev.tries | 0)
+      }));
+    } catch (e) {}
+  }
+  var _saveJobSweepBusy = false;
+  function sweepSaveJobs_() {
+    if (document.hidden || _saveJobSweepBusy) return;
+    if (!(window.Go5Drive && Go5Drive.queueSave && Go5Drive.checkSaved)) return;
+    var keys = [];
+    try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf(SAVEJOB_PENDING_PREFIX) === 0) keys.push(k); } } catch (e) { return; }
+    if (!keys.length) return;
+    _saveJobSweepBusy = true;
+    var idx = 0;
+    function done_() { _saveJobSweepBusy = false; }
+    function nextK() {
+      if (document.hidden || idx >= keys.length) { done_(); return; }
+      var k = keys[idx++], rec = null;
+      try { rec = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { rec = null; }
+      if (!rec || !rec.id || !rec.title || !rec.channel) { try { localStorage.removeItem(k); } catch (e) {} setTimeout(nextK, 0); return; }
+      Go5Drive.checkSaved(rec.channel, rec.title).then(function (saved) {
+        if (saved) { try { localStorage.removeItem(k); } catch (e) {} setTimeout(nextK, 40); return; } // 確認できた=畳む
+        if ((rec.tries | 0) >= SAVEJOB_MAX_TRIES) { setTimeout(nextK, 40); return; }                  // 打ち切り(痕跡は残す)
+        rec.tries = (rec.tries | 0) + 1;
+        try { localStorage.setItem(k, JSON.stringify(rec)); } catch (e) {}
+        Promise.resolve(ensureVideoMirror_(rec.id)).catch(function () {}) // R2に無ければ上げ直す(手元blobが在る端末のみ)
+          .then(function () { return Go5Drive.queueSave({ videoId: rec.id, title: rec.title, channel: rec.channel, overwrite: true }); })
+          .catch(function () {}).then(function () { setTimeout(nextK, 150); });
+      }).catch(function () { setTimeout(nextK, 150); });
+    }
+    nextK();
   }
 
   // ── 再作成(ドラフトデータを動画作成タブに復元) ──
@@ -2194,6 +2262,13 @@
     setTimeout(sweepVideoMirror_, 6000);  // 1本目でsync未設定だった時の取りこぼしを拾う二度目(重複はbusyガード)
     document.addEventListener('visibilitychange', function () { if (!document.hidden) sweepVideoMirror_(); });
     setInterval(sweepVideoMirror_, 120000);
+
+    // ★save_job 永続pending の再送(2026-08-16)。前回投稿完了でqueueSaveが届かなかったぶんを、
+    //   起動時と復帰時・定期に「Driveにもう在るか」照会して畳む/再送する(sync設定の読込を少し待つ)。
+    setTimeout(sweepSaveJobs_, 3000);
+    setTimeout(sweepSaveJobs_, 12000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) sweepSaveJobs_(); });
+    setInterval(sweepSaveJobs_, 180000);
 
     // 初回アクセスでドラフトが空表示になる穴の根治(Chami 2026-07-29):
     //   affiliate.js の restoreActiveTab_ が「このモジュールより先」に走ると、ドラフトタブへ

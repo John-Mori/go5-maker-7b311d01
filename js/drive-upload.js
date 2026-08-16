@@ -251,7 +251,52 @@
     lastCtx.channel = channel; lastCtx.title = title; lastCtx.folderId = folderId;
     sendAppend(f, 0);
   }
-  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_ };
+  // ── ★サーバー側完走ジョブ(2026-08-16 Chami「途中で閉じても裏で完結」)──
+  //   投稿完了で「重い動画アップロード」をこのページ内で走らせず、動画は既にR2に控えてある(ensureVideoMirror_)ので
+  //   その在り処(videoKey)だけを軽いFormDataでWorkerへ渡す→Workerが即202を返し、あとはR2→Driveをサーバー側で完走。
+  //   本体が軽い(数百バイト)ので keepalive:true が確実に効く=送信の途中でタブを閉じてもブラウザが送り切る。
+  //   opts = { videoId(R2キー算出に使う下書きID), title, channel, previewKey?, overwrite? }
+  function queueSave_(opts) {
+    opts = opts || {};
+    var channel = opts.channel, title = opts.title, videoId = opts.videoId;
+    if (!configured()) return Promise.resolve({ ok: false, error: "not_configured" });
+    if (channel !== "acc1" && channel !== "acc2") return Promise.resolve({ ok: false, error: "channel_unresolved" });
+    if (!title || !videoId) return Promise.resolve({ ok: false, error: "missing_fields" });
+    if (!(window.Go5Sync && Go5Sync.keyForName && Go5Sync.getConfig)) return Promise.resolve({ ok: false, error: "no_sync" });
+    var r2Base = (Go5Sync.getConfig() || {}).url || "";
+    if (!/^https?:\/\//.test(r2Base)) return Promise.resolve({ ok: false, error: "no_r2_base" });
+    setStatus("☁️ Driveへ保存を予約…(" + channelLabel(channel) + "・裏で完走)");
+    return Go5Sync.keyForName("go5vid:" + videoId).then(function (videoKey) {
+      var fd = new FormData();
+      fd.append("action", "save_job");
+      fd.append("channel", channel);
+      fd.append("title", title);
+      fd.append("videoId", videoId);
+      fd.append("r2Base", r2Base);
+      fd.append("videoKey", videoKey);
+      if (opts.previewKey) fd.append("previewKey", opts.previewKey);
+      if (opts.overwrite) fd.append("overwrite", "1"); // 上書きはWorker側の env.ALLOW_OVERWRITE と二重ロック
+      return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd, keepalive: true })
+        .then(function (r) {
+          if (r.status === 202 || r.ok) { setStatus("✅ Driveへ保存を受け付けました(" + channelLabel(channel) + "・裏で完走中)"); return { ok: true }; }
+          return r.json().then(function (j) { return { ok: false, error: (j && j.error) || ("http_" + r.status) }; }).catch(function () { return { ok: false, error: "http_" + r.status }; });
+        })
+        .catch(function () { return { ok: false, error: "network" }; });
+    }).catch(function () { return { ok: false, error: "keygen" }; });
+  }
+  // 完走確認(read-only)：[題名]フォルダに動画が在れば true。永続pendingを畳めるかの照会に使う。
+  function checkSaved_(channel, title) {
+    if (!configured() || (channel !== "acc1" && channel !== "acc2") || !title) return Promise.resolve(false);
+    var fd = new FormData();
+    fd.append("action", "check_saved");
+    fd.append("channel", channel);
+    fd.append("title", title);
+    return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (j) { return !!(j && j.ok && j.saved); })
+      .catch(function () { return false; });
+  }
+  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, queueSave: queueSave_, checkSaved: checkSaved_ };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {

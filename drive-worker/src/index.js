@@ -24,9 +24,12 @@ const DRIVE_API = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
 const OVERWRITE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 「1ヶ月」=30日固定（暦月の28〜31日曖昧性を排除）
 const OVERWRITE_MAX_TRASH = 3;                        // 窓内の同名候補がこれ超なら上書き全面中止（異常サイン）
+const SAVE_JOB_VIDEO_KEY_RE = /^[a-f0-9]{16,64}$/;    // R2キー(sha256hex)の形式
+const SAVE_JOB_R2_BASE_RE = /^https?:\/\//;
+const SAVE_JOB_RETRY_DELAYS_MS = [500, 1500, 4000];   // 動画バイトのR2取得：最大3回・指数バックオフ
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const origin = request.headers.get("Origin") || "";
     const allowed = env.ALLOWED_ORIGIN || "";
 
@@ -60,11 +63,24 @@ export default {
     if (String(form.get("action") || "") === "fetch_video") {
       return await handleFetchVideo(form, env, cors);
     }
+    // ---- 参照アクション：save_jobの完走確認（read-only・非破壊）----
+    //   [題名]フォルダ内に動画ファイルが既に在るか(=保存済みか)だけを返す。フロントの永続pending sweepが
+    //   「もうDriveに在る」と確認できたらpendingを畳むための軽い照会。作成・削除・上書きは一切しない。
+    if (String(form.get("action") || "") === "check_saved") {
+      return await handleCheckSaved(form, env, cors);
+    }
 
     // ---- 簡易レート制限（KV：日次カウンタ・アップロード系のみ）----
     try {
       if (await rateLimited(env)) return json({ ok: false, error: "rate_limited" }, 429, cors);
     } catch (e) { /* KV未設定でも停止させない（他の防御で守る） */ }
+
+    // ---- サーバー側完走ジョブ：save_job（軽いFormData→即202→ctx.waitUntilで裏完走。閉じても続く）----
+    //   2026-08-16 Chami依頼「途中で閉じても裏で完結」。動画バイトはこのリクエストに乗せず、
+    //   R2上の在り処(videoKey)だけを受け取り、ここから先はサーバー側でR2→Driveを完走させる。
+    if (String(form.get("action") || "") === "save_job") {
+      return await handleSaveJob(form, env, cors, ctx);
+    }
 
     const channel = String(form.get("channel") || "").trim();
     const title = String(form.get("title") || "").trim();
@@ -277,6 +293,146 @@ async function handleFetchVideo(form, env, cors) {
   return new Response(r.body, { status: 200, headers });
 }
 
+/* ====================== save_job（軽いジョブ→サーバー側完走）====================== */
+// 入力検証（純関数・envも副作用なしの参照のみ）。channel未解決/title欠落/videoKey・r2Baseの形式不正は400。
+function validateSaveJobInput(fields, env) {
+  const parentId = channelToFolderId(fields.channel, env);
+  if (!parentId) return { ok: false, error: "channel_unresolved" };
+  if (!fields.title) return { ok: false, error: "missing_title" };
+  if (!SAVE_JOB_VIDEO_KEY_RE.test(fields.videoKey || "")) return { ok: false, error: "bad_video_key" };
+  if (!SAVE_JOB_R2_BASE_RE.test(fields.r2Base || "")) return { ok: false, error: "bad_r2_base" };
+  return { ok: true, parentId };
+}
+
+async function handleSaveJob(form, env, cors, ctx) {
+  const fields = {
+    channel: String(form.get("channel") || "").trim(),
+    title: String(form.get("title") || "").trim(),
+    videoId: String(form.get("videoId") || "").trim(),
+    r2Base: String(form.get("r2Base") || "").trim(),
+    videoKey: String(form.get("videoKey") || "").trim(),
+    previewKey: String(form.get("previewKey") || "").trim(), // 任意・R2上の仕上がりプレビュー(小)の在り処
+    overwrite: String(form.get("overwrite") || "") === "1",
+  };
+  const v = validateSaveJobInput(fields, env);
+  if (!v.ok) return json({ ok: false, error: v.error }, 400, cors);
+
+  // ★即202：フロントはこれを見て投稿完了UIを止めない。以降はサーバー側（ctx.waitUntil）で完走させる。
+  const job = runSaveJob(env, fields, v.parentId).catch(() => {}); // waitUntil内=呼び出し元へ返す手段が無い（静かに終える）
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(job);
+  else await job; // ctx未提供（ローカル実行等）でも取りこぼさない
+  return json({ ok: true, queued: true }, 202, cors);
+}
+
+// R2から動画バイトを取得→Driveへ保存する本体。失敗は全て「静かに終了」（フロントのpending再送に委ねる＝
+//   ここで例外を投げても誰も受け取れない）。既存の破壊面不変条件（create/upload/reference/trashの4種のみ）を厳守。
+async function runSaveJob(env, fields, parentId) {
+  const vid = await fetchR2Bytes(fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS);
+  const buf = vid ? vid.buf : null;
+  const mime = (vid && vid.mime) || "video/mp4";
+  if (!buf || !buf.byteLength) return; // R2にまだ届いていない/取得不能＝静かに終了（フロントの再送に委ねる）
+
+  let token;
+  try { token = await getAccessToken(env); } catch (e) { return; }
+  const parent = await getFolder(parentId, token);
+  if (!parent) return;
+
+  const baseName = safeName(fields.title);
+
+  // ---- 冪等：同題名フォルダに動画が既に在れば「もう保存済み」として作らず終了（二重フォルダ防止）----
+  let existingIds = [];
+  try { existingIds = await findChildFolderIds(parentId, baseName, token); } catch (e) { existingIds = []; }
+  for (const fid of existingIds) {
+    const v = await findVideoFile(fid, token);
+    if (v) return;
+  }
+
+  // ---- フォルダ作成（overwriteは二重ロック時のみ既存overwrite経路を踏襲）----
+  const wantOverwrite = !!fields.overwrite && env.ALLOW_OVERWRITE === "1"
+    && !(baseName === "video" && fields.title !== "video");
+  let candidates = [];
+  if (wantOverwrite) {
+    try { candidates = await findOverwriteCandidates(parentId, baseName, token); } catch (e) { candidates = []; }
+  }
+  const doOverwrite = wantOverwrite && candidates.length > 0 && candidates.length <= OVERWRITE_MAX_TRASH;
+
+  let folder;
+  try {
+    folder = doOverwrite
+      ? await createChildFolderExact(parentId, baseName, token)
+      : await createUniqueChildFolder(parentId, baseName, token);
+  } catch (e) { return; }
+
+  // ---- 動画アップロード（新規のみ・失敗したら旧フォルダはtrashしない＝どの時点で落ちても喪失ゼロ）----
+  try {
+    const vext = extOf(mime) || "mp4";
+    const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
+    await uploadNewBuffer(folder.id, vname, buf, mime, token);
+  } catch (e) { return; }
+
+  // ---- プレビュー（任意・R2から取り寄せ・小さい）。付随物なので失敗しても動画保存の成功は覆さない ----
+  if (SAVE_JOB_VIDEO_KEY_RE.test(fields.previewKey || "")) {
+    try {
+      const pv = await fetchR2Bytes(fields.r2Base, fields.previewKey, [500, 1500]);
+      if (pv && pv.buf && pv.buf.byteLength) {
+        const pname = await uniqueFileName(folder.id, baseName + "_プレビュー." + (extOf(pv.mime) || "jpg"), token);
+        await uploadNewBuffer(folder.id, pname, pv.buf, pv.mime || "image/jpeg", token);
+      }
+    } catch (e) { /* プレビューは付随物。失敗は無視 */ }
+  }
+
+  // ---- 動画保存が成功した後にだけ旧フォルダをtrash（唯一の破壊操作・全条件を再検証）----
+  if (doOverwrite) {
+    for (const c of candidates) {
+      try { await trashFolderGuarded(c.id, { parentId, baseName, newFolderId: folder.id }, token); } catch (e) {}
+    }
+  }
+}
+
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+// R2公開GETのURLを組む（純関数・DOM非依存）。sync-worker の /img/<key> と同じ経路。
+function r2ObjectUrl(r2Base, key) {
+  return String(r2Base || "").replace(/\/$/, "") + "/img/" + String(key || "");
+}
+
+// R2から <key> のバイト列を取得→{buf,mime}。取れなければ null。delaysMs の回数だけ指数バックオフで再試行
+//   （R2ミラー未着＝アップロード直後のレースに耐える）。外へ出る手はここ1箇所（fetch）だけ。
+async function fetchR2Bytes(r2Base, key, delaysMs) {
+  const url = r2ObjectUrl(r2Base, key);
+  const delays = Array.isArray(delaysMs) ? delaysMs : [];
+  for (let i = 0; i <= delays.length; i++) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) {
+        const buf = await r.arrayBuffer();
+        if (buf && buf.byteLength) return { buf, mime: r.headers.get("Content-Type") || "" };
+      }
+    } catch (e) { /* 次の試行へ */ }
+    if (i < delays.length) await sleep(delays[i]);
+  }
+  return null;
+}
+
+// save_jobの完走確認（read-only）：[題名]フォルダに動画が在れば {saved:true}。作成/削除は一切しない。
+async function handleCheckSaved(form, env, cors) {
+  const channel = String(form.get("channel") || "").trim();
+  const title = String(form.get("title") || "").trim();
+  const parentId = channelToFolderId(channel, env);
+  if (!parentId) return json({ ok: false, error: "channel_unresolved" }, 400, cors);
+  if (!title) return json({ ok: false, error: "missing_title" }, 400, cors);
+  let token;
+  try { token = await getAccessToken(env); } catch (e) { return json({ ok: false, error: "auth_failed" }, 502, cors); }
+  const baseName = safeName(title);
+  let ids = [];
+  try { ids = await findChildFolderIds(parentId, baseName, token); } catch (e) { ids = []; }
+  for (const fid of ids) {
+    const v = await findVideoFile(fid, token);
+    if (v) return json({ ok: true, saved: true }, 200, cors);
+  }
+  return json({ ok: true, saved: false }, 200, cors);
+}
+
 // フォルダ内の動画ファイルを1件返す（無ければ null）。仕上がりプレビュー等の画像は mimeType で除外。
 async function findVideoFile(folderId, token) {
   const q = "'" + folderId + "' in parents and mimeType contains 'video/' and trashed=false";
@@ -438,6 +594,13 @@ async function uniqueFileName(parentId, base, token) {
 
 // 新規アップロード（resumable：大きさに依らず安全。常に新規作成）
 async function uploadNew(parentId, name, fileObj, token) {
+  const buf = await fileObj.arrayBuffer();
+  return await uploadNewBuffer(parentId, name, buf, fileObj.type || "application/octet-stream", token);
+}
+
+// uploadNew のバイト列直接版（save_job用：R2から取得済みのArrayBufferをFileObjへ包み直さずそのまま上げる）。
+//   行う操作は uploadNew と同じ2種（resumable create → PUT）のみ＝破壊面の不変条件は変わらない。
+async function uploadNewBuffer(parentId, name, buf, mime, token) {
   const meta = { name, parents: [parentId] };
   const start = await fetch(DRIVE_UPLOAD + "?uploadType=resumable&fields=id,name,webViewLink&supportsAllDrives=true", {
     method: "POST",
@@ -447,10 +610,9 @@ async function uploadNew(parentId, name, fileObj, token) {
   if (!start.ok) throw new Error("upload_init");
   const session = start.headers.get("Location");
   if (!session) throw new Error("no_session");
-  const buf = await fileObj.arrayBuffer();
   const put = await fetch(session, {
     method: "PUT",
-    headers: { "Content-Type": fileObj.type || "application/octet-stream" },
+    headers: { "Content-Type": mime || "application/octet-stream" },
     body: buf,
   });
   if (!put.ok) throw new Error("upload_put");
@@ -515,3 +677,16 @@ function json(obj, status, cors) {
   const headers = Object.assign({ "Content-Type": "application/json; charset=utf-8" }, cors || {});
   return new Response(JSON.stringify(obj), { status, headers });
 }
+
+/* ====================== テスト用（named export・default外の副次公開。Worker実行には影響なし）======================
+ * tests/test_drive_savejob.js が save_job の「判定と分岐」を実行で検証するための純関数エクスポート。
+ * fetch/Drive API等の「外へ出る手」は含まない（それらは runSaveJob 内でのみ呼ぶ）。 */
+export {
+  validateSaveJobInput,
+  r2ObjectUrl,
+  safeName,
+  channelToFolderId,
+  SAVE_JOB_VIDEO_KEY_RE,
+  SAVE_JOB_R2_BASE_RE,
+  SAVE_JOB_RETRY_DELAYS_MS,
+};

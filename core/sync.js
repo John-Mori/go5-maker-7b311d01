@@ -962,6 +962,9 @@
       } catch (e) {}
     },
     getConfig: function () { var c = cfg(); return { url: c.url, token: c.token, hasPass: !!c.pass }; },
+    // 論理名→R2キー(sha256hex)を返す。putBlobR2At/fetchBlobR2At と同じ鍵=drive-workerの save_job が
+    //   この鍵で R2 の動画/プレビューを取り寄せてDriveへ完走させる(2026-08-16「閉じても裏で完結」)。
+    keyForName: function (name) { return sha256hex(String(name)); },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
     _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
