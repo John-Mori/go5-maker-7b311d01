@@ -522,6 +522,23 @@
     var x = isXLink_(href, it);
     return '<a class="vlink ' + (x ? 'vlink-x' : 'vlink-bsky') + '" href="' + esc(href) + '" target="_blank" rel="noopener">' + (x ? 'X↗' : 'Bsky↗') + '</a>';
   }
+  // GoogleドライブのロゴSVG(Chami提供の三色ロゴ準拠)。矢印は付けない(Chami依頼2026-08-16「矢印は不要」)。
+  var DRIVE_ICON_SVG = '<svg viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>' +
+    '<path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0-1.2 4.5h27.5z" fill="#00ac47"/>' +
+    '<path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>' +
+    '<path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>' +
+    '<path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>' +
+    '<path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>';
+  // 投稿履歴の「作品↗」の右隣に置くGoogleドライブの保存先リンク。押すとこの作品が保存されたDriveの場所を開く。
+  //   ★リンクの組み立ては Go5Drive.folderUrl() に一本化=保存先パスの設計はそこ1箇所(将来アカウントが変わっても追従)。
+  //   題名も控えIDも無いとURLは空=その時はアイコンを出さない(切れリンクを作らない)。
+  function driveLinkHtml_(it) {
+    if (!(window.Go5Drive && Go5Drive.folderUrl)) return '';
+    var url = Go5Drive.folderUrl(chForItem_(it), it.title || '', it.videoId || '');
+    if (!url) return '';
+    return '<a class="vlink vlink-drive" href="' + esc(url) + '" target="_blank" rel="noopener" title="この作品のGoogleドライブ保存先を開く">' + DRIVE_ICON_SVG + '</a>';
+  }
   // 編集モーダルのX/Bskyラジオ用：この行の現在の投稿先。明示指定＞URL判定＞既定X(Chami:これから原則X投稿)。
   function platOf_(it) {
     if (it && it.platform === 'x') return 'x';
@@ -2098,6 +2115,7 @@
             postLinkHtml_(bskyHref, it) +
             (yt ? '<a class="vlink vlink-yt" href="' + esc(yt) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +
             (it.workUrl ? '<a class="vlink vlink-work" href="' + esc(it.workUrl) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
+            driveLinkHtml_(it) + // ★作品↗の右横にGoogleドライブの保存先リンク(矢印なし・Chami依頼2026-08-16)
             // セール会場(導線3): この投稿に添えたセール案内会場を名前つきで表示(Chami依頼DEF-a57e596842「どの会場を貼ったか出す所がない」)。
             //   投稿時に histAdd が saleName/saleUrl を刻む=以後の投稿で出る。過去投稿は未保存のため出ない。
             (it.saleUrl ? '<a class="vlink vlink-sale" href="' + esc(it.saleUrl) + '" target="_blank" rel="noopener" title="この投稿に添えたセール会場(導線3)">🏮' + esc(it.saleName || 'セール会場') + '↗</a>' : '') +

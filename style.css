@@ -474,6 +474,8 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .vmetrics .vlink-yt{color:#ff4d4d;}        /* YouTube イメージの赤 */
 .vmetrics .vlink-work{color:#ff79b0;}      /* 作品＝ピンク */
 .vmetrics .vlink-sale{color:#e6b422;}      /* セール会場＝金（ic-sale-goldと同系・導線3） */
+.vmetrics .vlink-drive{display:inline-flex;align-items:center;flex-shrink:0;}  /* 作品↗の右横＝Googleドライブ保存先(矢印なし) */
+.vmetrics .vlink-drive svg{height:1.2em;width:auto;display:block;}
 /* 曜日の色：土=青 / 日祝=赤（曜日の括弧だけ着色） */
 .dow-sat{color:#4aa3ff;}
 .dow-sun{color:#ff5a5a;}

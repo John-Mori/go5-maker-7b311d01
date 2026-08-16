@@ -296,7 +296,32 @@
       .then(function (j) { return !!(j && j.ok && j.saved); })
       .catch(function () { return false; });
   }
-  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, queueSave: queueSave_, checkSaved: checkSaved_ };
+  // ── ★保存先パスの設計を一箇所に集約(2026-08-16 Chami「将来アカウントが変わってもパスを一括で柔軟に変えられるよう設計」)──
+  //   保存先の実体= マイドライブ/[DRIVE_ROOT]/[チャンネル名]/[題名]/。チャンネル別ルートフォルダIDの正本は
+  //   Worker Secrets(env.FOLDER_ID_ACC1/ACC2)＝フロント(公開repo)にはIDを置かない。ここではその「パスの形」だけを
+  //   宣言し、リンクの組み立てをこの1関数へ集約する。将来アカウント(Googleドライブ)が変わっても、
+  //   ・検索リンク=ログイン中のDriveをそのまま検索するのでコード変更ゼロで追従
+  //   ・直リンク=手元に控えた実フォルダID(drive_up_<videoId>)がある時だけ使う=別アカウントの古いIDは使わない
+  //   ので、パスまわりを直したい時はこのブロック1箇所を見ればよい。
+  var DRIVE_PATH = {
+    root: "AFI5秒動画",                                   // マイドライブ直下の親フォルダ名(保存先の頂点)
+    channels: { acc1: "月詠み色恋劇場", acc2: "宵桜艶帖" }, // チャンネル→フォルダ名(表示・照合用の控え)
+  };
+  // この作品のGoogleドライブ保存先を開くURLを組む。実フォルダIDの控えがあれば直リンク、無ければ題名でDrive検索。
+  //   title 空 かつ 控えID無し のときは "" を返す(呼び出し側はリンクを出さない=切れリンクを作らない)。
+  function driveFolderUrl_(channel, title, videoId) {
+    // 直リンク：この端末で保存した作品は drive_up_<videoId> に実フォルダIDを控えてある(あれば最優先)。
+    try {
+      var fid = videoId && localStorage.getItem("drive_up_" + videoId);
+      if (fid) return "https://drive.google.com/drive/folders/" + encodeURIComponent(fid);
+    } catch (e) {}
+    // フォールバック：題名でDrive内を検索して開く。アカウント非依存(＝ログイン中のDriveで開く)。
+    var t = String(title || "").trim();
+    if (!t) return "";
+    return "https://drive.google.com/drive/search?q=" + encodeURIComponent(t);
+  }
+
+  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, queueSave: queueSave_, checkSaved: checkSaved_, folderUrl: driveFolderUrl_, pathConfig: DRIVE_PATH };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {
