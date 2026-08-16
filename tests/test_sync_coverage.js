@@ -27,7 +27,7 @@ function listJs(dir, acc) {
   fs.readdirSync(dir, { withFileTypes: true }).forEach(function (e) {
     var p = path.join(dir, e.name);
     if (e.isDirectory()) {
-      if (/^(node_modules|tests|schedule|\.git)$/.test(e.name)) return;
+      if (/^(node_modules|tests|schedule|local|\.git)$/.test(e.name)) return; // local/=gitignore済スクラッチ(GAS作業ファイル等)=アプリの別ランタイム・CIには存在しない
       if (/-worker$/.test(e.name) || e.name === "drive-worker") return; // Cloudflare Worker=別localStorage無し
       listJs(p, acc);
     } else if (/\.js$/.test(e.name)) acc.push(p);

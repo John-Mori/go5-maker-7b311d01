@@ -56,6 +56,10 @@
   // 保存対象か判定。(ファイル/パスワード/カラー/ボタン等は除外)
   function persistable(el) {
     if (!el || !el.id || EXCLUDE[el.id]) return false;
+    // ★data-derived="1" の入力は「発売日から作品ごとに毎回導出する派生値」＝スナップショット保存しない。
+    //   idをEXCLUDEへ足し忘れても、この属性一つで一律除外される(準新作で4回目になった登録漏れをクラスごと封じる)。
+    //   属性の有無は check_persist_derived.mjs が index.html×persist-fields で機械照合する。
+    if (el.dataset && el.dataset.derived === "1") return false;
     // ★カテゴリ(ジャンル)チェックは「作品ごとに毎回導出する派生値」＝スナップショット保存しない
     //   (Chami依頼2026-08-11①)。保存すると『前回作成した作品のジャンル』がリロードで復元され、
     //   今作っている作品と食い違う。チェックの導出は bluesky.js の 作品URL→FANZA情報 経路が担う。

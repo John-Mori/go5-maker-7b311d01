@@ -72,6 +72,13 @@ jobs:
       - name: シート保存連鎖の検査
         run: node scripts/check_sheet_chain.mjs
 
+      # 作品ごとに導出する派生チェック(新作/準新作)を汎用persistが保存し、リロードで前作の値が残る型を止める門。
+      #   準新作チェックが「翌日消えて二度と入らない」=EXCLUDE登録忘れ(4回目)の再発源(Chami報告2026-08-16①/
+      #   改善提案部門アスナ analysis)。persistable()を抽出実行し data-derived の除外を実挙動で確認+
+      #   割引/作品状態クラスの新規checkboxが未分類なら落とす。型=proposal_2026-08-16_movie-attrs-5recur.md。
+      - name: 派生チェックのpersist分類検査
+        run: node scripts/check_persist_derived.mjs
+
       # カレンダー iframe(schedule/)は本体とは別の独立バンプ領域で bump.mjs が触らない。
       #   中身を変えて ?v= を上げ忘れるとスマホが古い calendar を読む「版ずれ」=「直ってない」の再発源
       #   (2026-08-06朝レビュー: 前日24hで schedule 版を2度手バンプした型)。内容ハッシュで staleness を止める。

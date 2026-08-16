@@ -17,7 +17,7 @@ var Sync = require('../core/sync.js')._test;
     }
   };
   var out = await Sync.readSyncIdbEntries_(fake);
-  assert.deepStrictEqual(calls, [['ref:', 'bsky:', 'post:', 'stock:imgs:']]);
+  assert.deepStrictEqual(calls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:']]);
   assert.ok(out['ref:a']);
 
   var start = JSON.stringify([{ cid: 'd_test', url: 'https://old.example/', title: 'old' }]);
