@@ -56,6 +56,18 @@ jobs:
       - name: 全称スタイル波及(裸セレクタ)検査
         run: node scripts/check_css_global_scope.mjs
 
+      # 「外へ出る待ちに時限が無い」新規コードを止める門《番犬》。fetch/IndexedDB を AbortController/番犬タイマー
+      #   無しで新規に書くと応答が返らない時「保存中…」が永久固着する(INC-108/116/125/132/134 の再発源)。
+      #   既存はベースライン凍結し新規の裸待ちだけ弾く。型=preflight_net-wait-watchdog.md(アスナ依頼2026-08-16)。
+      - name: 時限無しの待ち(番犬)検査
+        run: node scripts/check_net_wait.mjs
+
+      # 同名ヘルパを中身違いでコピーする新規の乖離を止める門《複製判断》。片方だけ直すと「直したのに再発」する
+      #   (js/yt-clicks.js の isR2 4定義2変種・INC-112/134/140 の再発源)。既存の重複は凍結し新規の乖離だけ弾く。
+      #   型=preflight_duplicate-helper.md(アスナ依頼2026-08-16)。
+      - name: 同名ヘルパの乖離コピー検査
+        run: node scripts/check_dup_helper.mjs
+
       # シート由来行の編集値がリロードで消える型(作品URL/投稿先等)を、繋ぎの欠落として出す前に止める門。
       - name: シート保存連鎖の検査
         run: node scripts/check_sheet_chain.mjs
