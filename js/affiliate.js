@@ -156,6 +156,17 @@
       document.documentElement.setAttribute('data-tab', 'tabMovie');
       return; // 復元(=リダイレクト)はしない。オーバーレイ表示は openOverlayFromSplit_ が担う。
     }
+    // ★候補ページ(KouhoLists.html)の「動画生成へ」で index.html へ来た時は、保存タブの復元を走らせない。
+    //   go5_active_tab が 'tabVerify'(投稿履歴)/'tabStock'(ドラフト)だと showTab がその専用ページ
+    //   (StockLists.html / Stock.html)へリダイレクトし、「候補→動画生成を押したら投稿履歴に飛ぶ」に
+    //   なる(Chami報告2026-08-16 msg 1538426859535204412)。この時は下地を動画作成のまま留め、
+    //   candidates.js の _resumeCandToMovie が持ち越した候補を流し込む。
+    var pendingCandToMovie = '';
+    try { pendingCandToMovie = sessionStorage.getItem('cand_to_movie_pending') || ''; } catch (e) {}
+    if (pendingCandToMovie) {
+      document.documentElement.setAttribute('data-tab', 'tabMovie');
+      return; // 復元(=リダイレクト)はしない。候補の流し込みは _resumeCandToMovie が担う。
+    }
     // ★オーバーレイ(予約/カレンダー)は復元対象にしない＝再アクセス時は下の作業タブへ戻す。
     var ok = saved && !OVERLAY_BTNS[saved] && TABS.some(function (t) { return t.btn === saved; }) && document.getElementById(saved);
     var activeId;
