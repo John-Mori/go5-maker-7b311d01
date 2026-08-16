@@ -49,6 +49,13 @@ jobs:
       - name: ボタン幅(引き伸ばし)検査
         run: node scripts/check_button_width.mjs
 
+      # 「全称スタイルの波及」を出す前に止める門。器のクラスへスコープしていない裸の要素セレクタ
+      #   (グローバル button{width:100%} 型)に far-reaching プロパティを新規追加すると、後から足す部品が
+      #   黙って継いで壊れる(INC-37/47・🔥ボタン幅 の再発源)。既存はBASELINEに退避し新規混入だけ弾く。
+      #   型=docs/departments/kaizen-analyst/preflight_global-css-scope-bleed.md(改善提案部門アスナ依頼2026-08-16)。
+      - name: 全称スタイル波及(裸セレクタ)検査
+        run: node scripts/check_css_global_scope.mjs
+
       # シート由来行の編集値がリロードで消える型(作品URL/投稿先等)を、繋ぎの欠落として出す前に止める門。
       - name: シート保存連鎖の検査
         run: node scripts/check_sheet_chain.mjs
