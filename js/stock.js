@@ -516,6 +516,27 @@
   }
   function hideSaveHold_() { var box = document.getElementById('go5SaveHold'); if (box) box.style.display = 'none'; }
 
+  // ★着地失敗の実因を貫通させる小道具(Fable5診断2026-08-16・沈黙経路の根治=第1弾)。
+  //   従来は verify/commit の reject が全て function(){} に吸われ、hold文面は原因に関わらず
+  //   「動画を端末にも雲にも確認できませんでした」と“動画のせい”に見せていた(実際は localStorage逼迫の
+  //   メタ書込み失敗=draft-meta-readback-failed でも同じ文面)。「月詠み(acc1)だけ遷移もドラフト確定もしない」の
+  //   芯が acc分岐の無いコードのどこで落ちているかを、次の再現1回で確定させる=表示と記録のみ。
+  //   ★遷移/ドラフト確定の判定は一切変えない(8/15の全滅回帰を招く gate ロジックには触れない)。
+  function errMsg_(e) {
+    if (!e) return '';
+    var m = (e && (e.message || e.name)) || String(e);
+    return String(m).slice(0, 80);
+  }
+  function logLanding_(id, account, kind, extra) {
+    try {
+      var arr = JSON.parse(localStorage.getItem('go5_landing_log') || '[]') || [];
+      var rec = { ts: Date.now(), id: id || '', account: account || '', kind: kind || '' };
+      if (extra) { rec.local = extra.local || ''; rec.cloud = extra.cloud || ''; rec.videoBytes = extra.videoBytes || 0; }
+      arr.unshift(rec);
+      localStorage.setItem('go5_landing_log', JSON.stringify(arr.slice(0, 12)));
+    } catch (e) {}
+  }
+
   // IDBの set() 解決だけでは成功扱いにしない。同じキーを読み戻し、使える動画Blobであることまで確認する。
   function verifyLocalVideoWrite_(id, blob) {
     var store = idb();
@@ -605,26 +626,31 @@
         auxDone.then(function () { ensureBlobMirror_(id); }).catch(function () {});
 
         // Phase 1: 動画を手元/雲へ並列着地。手元は set 解決ではなく、同じキーの読み戻しまで検証する。
+        //   ★各レーンの reject 理由(idb-timeout / QuotaExceeded / draft-meta-readback-failed=localStorage逼迫 /
+        //     cloud-video-not-landed=Go5Sync未設定 等)を握り潰さず errL/errC に保持=hold文面と go5_landing_log へ
+        //     実因を通す(Fable5診断2026-08-16・沈黙経路の根治)。判定(landed/onBothFailed)は従来どおり。
+        var errL = null, errC = null;
         var localLand = verifyLocalVideoWrite_(id, evDetail.blob).then(function () {
           meta.videoReadyAt = Date.now();
           return commitPendingDraft_(id);
         }).then(function () {
           if (hooks.onLocal) hooks.onLocal(id);
           return 'local';
-        });
+        }, function (e) { errL = e; throw e; });
         var cloudLand = verifyCloudVideoWrite_(id, evDetail.blob).then(function () {
           meta.videoReadyAt = Date.now();
           return commitPendingDraft_(id);
         }).then(function () {
           if (hooks.onCloud) hooks.onCloud(id);
           return 'cloud';
-        });
+        }, function (e) { errC = e; throw e; });
 
         // Phase 2: どちらかが着地し、メタの書込み/読み戻しも成功して初めて正常ドラフトとして完了する。
         return new Promise(function (resolve) {
           var resolved = false, localOk = false, cloudOk = false;
           function landed(kind) {
             if (kind === 'local') localOk = true; else cloudOk = true;
+            logLanding_(id, meta.account, 'landed:' + kind, null);
             if (!resolved) { resolved = true; resolve(id); }
           }
           localLand.then(landed, function () {});
@@ -634,7 +660,9 @@
             : Promise.all([localLand.catch(function () {}), cloudLand.catch(function () {})]);
           bothDone.then(function () {
             if (!localOk && !cloudOk) {
-              if (hooks.onBothFailed) hooks.onBothFailed(id);
+              var reasons = { local: errMsg_(errL), cloud: errMsg_(errC), account: meta.account, videoBytes: meta.videoBytes || 0 };
+              logLanding_(id, meta.account, 'both-failed', reasons);
+              if (hooks.onBothFailed) hooks.onBothFailed(id, reasons);
               if (!resolved) { resolved = true; resolve(id); }
             }
           });
@@ -2128,9 +2156,12 @@
       if (!(e && e.detail && e.detail.draft)) return;
       var detail = e.detail;
       var blobUsable = isUsableVideoBlob_(detail.blob);
-      var holdMessage = blobUsable
+      // ★holdMessage は「実因が判明したら上書きできる」よう可変にする(Fable5診断2026-08-16)。
+      //   従来は原因に関わらず“動画のせい”に見せる固定文で、localStorage逼迫のメタ書込み失敗も同じ文面だった。
+      var holdMessageBase = blobUsable
         ? '動画をこの端末にも雲にも確認できませんでした。ページは移動せず動画を保持しています。「もう一度保存」で再確認します。'
         : '生成された動画データが空または不完全でした。壊れたドラフトは一覧へ保存していません。動画作成タブで、もう一度「ドラフトで作成」を押してください。';
+      var holdMessage = holdMessageBase;
       var retryPossible = blobUsable;
       // 生成完了で動画作成タブ→ドラフトタブへ自動遷移(Chami依頼2026-08-13「前は遷移してた、戻して」)。
       //   ★ボタンの click 経由(tabStock.click)に依存せず、ドラフトページ(Stock.html)へ明示遷移する=
@@ -2166,7 +2197,15 @@
         onLocal: function (id) { draftId = id; gate.localLanded = true; decideNav_(); },
         onCloud: function (id) { draftId = id; gate.cloudLanded = true; decideNav_(); },
         // 両方が「着地できずに」決着=着地不能が確定。25秒を待たず今すぐ hold へ倒す。
-        onBothFailed: function (id) { draftId = id; gate.timerFired = true; decideNav_(); }
+        //   ★実因(手元/雲それぞれの失敗理由)を hold文面へ差し込む=“動画のせい”の誤誘導を止め、
+        //     メタ書込み失敗(localStorage逼迫)と動画着地失敗を切り分けて見せる(Fable5診断2026-08-16)。
+        onBothFailed: function (id, reasons) {
+          draftId = id;
+          if (reasons && (reasons.local || reasons.cloud)) {
+            holdMessage = holdMessageBase + ' 内訳=手元:' + (reasons.local || 'ok') + ' / 雲:' + (reasons.cloud || 'ok') + '。';
+          }
+          gate.timerFired = true; decideNav_();
+        }
       };
 
       window.__go5HoldGoDraft = goDraft_; // 「このまま履歴へ」=ユーザーの明示選択でのみ遷移

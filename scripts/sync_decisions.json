@@ -40,6 +40,7 @@
     "drive_up_": { "decision": "local", "why": "drive_up_<videoId>=この端末でDriveへ即保存した時の videoId→フォルダID の控え。投稿完了側(stock.js)が同じフォルダへ仕上がりプレビューを追記するために引く端末別キャッシュ。別端末へ同期すると未アップロードの端末が『保存済み』と誤判定し即保存が飛ぶので同期しない(v=725 Drive即保存で追加・2026-08-12)" },
     "preview_yt_frame": { "decision": "sync", "why": "プレビューをYouTubeの実機の見え方(左右9%切れ・中央82%幅)で表示するトグル=preview_ プレフィックス許可(storage-keys)に合致し実ゲートで既に同期。preview_台帳(=どの端末でも同じ仕上がり)と同性質。書き出しは不変(v=816で追加)" },
     "go5_posted_log_backfilled": { "decision": "local", "why": "投稿ログのD1バックフィルを端末ごとに一度だけ実行するためのガードフラグ=端末別の一度きり移行マーカー(syncすると別端末でバックフィルが飛ぶ・stock.js)" },
+    "go5_landing_log": { "decision": "local", "why": "ドラフト着地(手元IDB/雲R2/メタcommit)の成否と失敗理由の直近12件リングバッファ=端末別の診断ログ。acc1だけ遷移/確定しない件の実因特定用(Fable5診断2026-08-16・stock.js)。同期不要=各端末で自分の着地を記録する" },
     "bsky_did__<acc>": { "decision": "local", "why": "BlueskyのDIDキャッシュ=ハンドルから引ける・端末別" },
     "bsky_handle__<acc>": { "decision": "sync", "why": "Blueskyハンドル(非秘密)=設定・アカウント別" },
     "bsky_text__<acc>": { "decision": "sync", "why": "投稿本文とQセーブ/undo/redo=アカウント別の設定" },
