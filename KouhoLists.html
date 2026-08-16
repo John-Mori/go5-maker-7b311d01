@@ -16,14 +16,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="候補">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=822">
-<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=822">
-<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=822">
+<link rel="manifest" href="manifest.webmanifest?v=823">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=823">
+<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=823">
 <title>候補 — 5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=822">
+<link rel="stylesheet" href="style.css?v=823">
 <script>
 /* 背景フック(data-tab=候補=クリーム封鎖)とアカウント色を描画前に確定=継ぎ目/色チラつき対策。 */
 try {
@@ -58,32 +58,32 @@ try {
 <nav class="tabbar">
   <button id="tabCand"    class="tab active">💡 候補</button>
   <button id="tabVerify" class="tab" onclick="location.href='StockLists.html'">📋 投稿履歴</button>
-  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=822" alt=""> 動画作成</button>
+  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=823" alt=""> 動画作成</button>
   <button id="tabStock" class="tab" onclick="location.href='Stock.html'">📦 ドラフト</button>
   <button id="tabYT"    class="tab" data-go="tabYT"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
-  <button id="tabPost"  class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=822" alt=""> 投稿</button>
-  <button id="tabAffi"  class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=822" alt=""> AFIリンク</button>
+  <button id="tabPost"  class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=823" alt=""> 投稿</button>
+  <button id="tabAffi"  class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=823" alt=""> AFIリンク</button>
   <button id="tabSettings" class="tab" data-go="tabSettings">⚙️ 詳細設定</button>
 </nav>
 
 <!-- 候補画面(candidates.js が Go5Cand.render() で描画) -->
 <section id="pageCand"></section>
 
-<script src="core/util.js?v=822"></script>
-<script src="core/account.js?v=822"></script>
-<script src="core/storage-keys.js?v=822"></script>
-<script src="core/categories.js?v=822"></script>
-<script src="core/movie-attrs-core.js?v=822"></script>
-<script src="core/idb-store.js?v=822"></script>
-<script src="core/sync.js?v=822"></script>
-<script src="core/kaizen-log.js?v=822"></script>
-<script src="core/operation-gate.js?v=822"></script>
-<script src="js/idgen.js?v=822"></script>
-<script src="js/affiliate-core.js?v=822"></script>
-<script src="js/fanza-core.js?v=822"></script>
+<script src="core/util.js?v=823"></script>
+<script src="core/account.js?v=823"></script>
+<script src="core/storage-keys.js?v=823"></script>
+<script src="core/categories.js?v=823"></script>
+<script src="core/movie-attrs-core.js?v=823"></script>
+<script src="core/idb-store.js?v=823"></script>
+<script src="core/sync.js?v=823"></script>
+<script src="core/kaizen-log.js?v=823"></script>
+<script src="core/operation-gate.js?v=823"></script>
+<script src="js/idgen.js?v=823"></script>
+<script src="js/affiliate-core.js?v=823"></script>
+<script src="js/fanza-core.js?v=823"></script>
 <!-- 投稿済み判定の読み取り専用ソース(bluesky.jsを積まない候補ページ用)。candidates.jsより前=Go5PostedItemsを供給。 -->
-<script src="js/posted-source.js?v=822"></script>
-<script src="js/candidates.js?v=822"></script>
+<script src="js/posted-source.js?v=823"></script>
+<script src="js/candidates.js?v=823"></script>
 <script>
 /* 候補ページのブート: アカウント帯の配線 + タブバー配線 + 初回描画。動画作成タブの重い app.js は積まない。 */
 (function () {

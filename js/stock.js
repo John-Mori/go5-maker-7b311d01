@@ -1141,9 +1141,39 @@
     try { var tm = $('testMode'); if (tm && tm.checked) tm.checked = false; } catch (e) {}
     var tab = $('tabMovie');
     if (tab) tab.click();
-    // ②再作成したらこのドラフトはドラフト一覧から外す(Chami依頼2026-08-06②)。作り直しの起点なので
-    //   元の下書きは残さない=消し忘れによる二重ドラフトを防ぐ(墓標で他端末のドラフトからも消える)。
-    try { deleteStock_(meta.id); render(); } catch (e) {}
+    // ★前景画像の復元(Chami依頼2026-08-16②「作り直しを選ぶと画像が消えている・作った時と同じ状態に戻して」)。
+    //   従来はテキスト系(作者/コメント/作品URL/狙い/カテゴリ)だけ戻し、肝心の前景画像を戻していなかった=
+    //   作り直すたびに写真だけ空欄になっていた。候補→動画作成と同じ実績のある経路 window.Go5SetForegroundFile で
+    //   #photo へ流し込む。手元Blob(stock_img_)優先、無ければ同期ミラー(stock:imgs:.src)から復元。
+    //   ★元ドラフトの一覧からの除去(deleteStock_)は delBlobs_ で画像も消すため、画像の読み取りが終わってから行う
+    //     (先に消すと復元用のBlobを取りこぼす)。読み取りに失敗しても除去は必ず走らせる。
+    restoreRemakeForeground_(meta).catch(function () {}).then(function () {
+      // ②再作成したらこのドラフトはドラフト一覧から外す(Chami依頼2026-08-06②)。作り直しの起点なので
+      //   元の下書きは残さない=消し忘れによる二重ドラフトを防ぐ(墓標で他端末のドラフトからも消える)。
+      try { deleteStock_(meta.id); render(); } catch (e) {}
+    });
+  }
+  // 作り直し時に、作成に使った前景画像を動画作成タブ(#photo)へ戻す。常に解決するPromiseを返す(呼び出し側が
+  //   これを待ってから元ドラフトを消せるように)。画像が取れなくても投げない=deleteStock_ は必ず走る。
+  function restoreRemakeForeground_(meta) {
+    var store = idb();
+    if (!store || !meta || !meta.id || !window.Go5SetForegroundFile) return Promise.resolve();
+    var setFg = function (blob) {
+      if (!blob) return;
+      try {
+        var name = (meta.title || 'photo').replace(/[\\/:"*?<>|]/g, '_') + '.jpg';
+        var f = (blob instanceof File) ? blob : new File([blob], name, { type: blob.type || 'image/jpeg' });
+        window.Go5SetForegroundFile(f);
+      } catch (e) {}
+    };
+    return Promise.all([
+      store.get('stock_img_' + meta.id).catch(function () { return null; }),
+      store.get('stock:imgs:' + meta.id).catch(function () { return null; })
+    ]).then(function (r) {
+      var img = r[0], mirror = r[1] || {};
+      if (img) { setFg(img); return; }
+      if (mirror.src) return durlToBlob_(mirror.src).then(setFg); // サブ端末で作った=同期ミラーから戻す
+    }).catch(function () {});
   }
 
   // ── レンダリング ──
