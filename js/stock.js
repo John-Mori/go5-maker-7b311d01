@@ -1956,8 +1956,17 @@
         //     早期returnするとこの状態が復元されず、①自動投稿が黙って外れたまま ②後続の「今すぐ作成」が
         //     _draftMode残留でドラフト扱いに化ける——というドラフト/投稿の取り違えを生んでいた。権威フラグ一本に統一する。
         window.__go5DraftPending = true;
-        var makeBtn = $('makeBtn');
-        if (makeBtn) makeBtn.click();
+        // ★make() を直接呼ぶ。従来の makeBtn.click() は、makeBtn が disabled(前回作成の固着など)だと
+        //   click イベントが発火せず make() に入らない=「押しても無反応」に落ちていた(Chami報告2026-08-16)。
+        //   直接口 __go5RequestMake なら disabled を跨いで make() の入口(再入判定・stale奪回)へ到達する。
+        //   直接口が未定義の古い読み込み順のときだけ従来の click() へフォールバック。
+        if (typeof window.__go5RequestMake === 'function') {
+          try { window.__go5RequestMake(); }
+          catch (e) { var mb0 = $('makeBtn'); if (mb0) mb0.click(); }
+        } else {
+          var makeBtn = $('makeBtn');
+          if (makeBtn) makeBtn.click();
+        }
       });
     }
 
@@ -2072,6 +2081,18 @@
       if (!dataChanged && !imageChanged) return;
       if (modalIsOpen_()) { _stockBgPending = true; return; } // 入力・コピー中はDOMを触らず、閉じた後に1回だけ反映
       render();
+    });
+
+    // ★IDBが無言死(iOS Safariのメモリ圧・バックグラウンド化)から回復した合図で、未表示サムネが
+    //   残っていれば描き直す。従来サムネは起動時の一発読みだけで、IDBが後から回復しても「閉じて開き直す」
+    //   まで黒箱のままだった(Chami報告2026-08-16「更新では直らない・閉じて開くと出る」の一因)。
+    document.addEventListener('go5-idb-recovered', function () {
+      try {
+        var page = $('pageStock');
+        if (!page || page.hidden) return;
+        if (modalIsOpen_()) { _stockBgPending = true; return; } // 入力・コピー中はDOMを触らない
+        if (Object.keys(_missingThumbs).length > 0) render();
+      } catch (e) {}
     });
 
     // 起動直後にも一度、過去分のプレビュー遡及補完を試す(既に同期済みミラーがあれば即補完)。

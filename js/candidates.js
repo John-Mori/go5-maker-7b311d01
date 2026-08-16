@@ -693,6 +693,8 @@
   var _candidateHydrateRetryTimer = null;
   var _candidateHydrateFailures = 0;
   var _syncRehydrateRetryTimer = null;
+  var _histHydrateFailures = 0;                    // 投稿履歴画像(post:/used:)の展開失敗回数
+  var _histHydrateRetryTimer = null;              // 同・張り直し予約(同時に1本だけ)
   function markCandidateHydrated_() {
     if (_candidateHydrated) return;
     _candidateHydrated = true;
@@ -1205,13 +1207,25 @@
   // 起動時：候補ページに必要なref/bskyだけを最優先で展開する。
   // 従来のentries()全件走査は同じDB内のドラフト動画Blobまで値として復元し、iPhoneで画像表示と
   // 投稿編集の両方を長時間止めていた。候補用が描けた後、統合ページだけpost/usedを裏で読む。
-  function hydrateHistoryImages_(retry) {
+  function hydrateHistoryImages_() {
+    if (_hydrated) return;
     readImageEntries_(['post:', 'used:']).then(function (all) {
+      _histHydrateFailures = 0;
       mergeImageEntries_(all);
-      markHydrated_();
+      markHydrated_();  // go5-images-hydrated を発火→StockLists/ランキング(yt-clicks.js)が自動で描き直す
     }).catch(function (e) {
-      if (retry) { setTimeout(function () { hydrateHistoryImages_(false); }, 1200); return; }
-      try { console.warn('[go5 idb] 投稿履歴画像の展開を保留(候補画像は利用可能)', e); } catch (_) {}
+      _histHydrateFailures++;
+      try { console.warn('[go5 idb] 投稿履歴画像の展開を再試行します', e); } catch (_) {}
+      // ★一発で諦めない(旧: 1.2秒後に1回だけ→以後 markHydrated_ が呼ばれず go5-images-hydrated が
+      //   永久に不発=StockLists のプレビューが空のまま固定されていた・Chami報告2026-08-16「更新では直らない」)。
+      //   scheduleCandidateHydrateRetry_ と同型の無限バックオフ(上限15秒)で、IDBが後から回復したら追いつく。
+      if (!_hydrated && !_histHydrateRetryTimer) {
+        var delay = Math.min(15000, 1000 * Math.pow(2, Math.min(4, Math.max(0, _histHydrateFailures - 1))));
+        _histHydrateRetryTimer = setTimeout(function () {
+          _histHydrateRetryTimer = null;
+          hydrateHistoryImages_();
+        }, delay);
+      }
     });
   }
   function scheduleCandidateHydrateRetry_() {
@@ -1234,14 +1248,46 @@
       _candidateHydrateFailures = 0;
       markCandidateHydrated_(); // 候補画像・コメントの空保存拒否をここで解除
       bgRender_();              // サムネ・コメント・✓バッジをすぐ反映
-      if (!window.__go5CandidateStandalone) hydrateHistoryImages_(true);
+      if (!window.__go5CandidateStandalone) hydrateHistoryImages_();
     }).catch(function (e) {
       _candidateHydrateInFlight = false;
       _candidateHydrateFailures++;
       // 一時的なSafariの接続死を「IDB非対応」と確定して空表示へ落とさない。張り直しを継続する。
       try { console.warn('[go5 idb] 候補画像の展開を再試行します', e); } catch (_) {}
+      // ★張り直しを一定回数(約1分)超えても回復しない=WebKitのプロセス単位のIDB死(アプリからは治せない)。
+      //   この時だけ「閉じて開き直すと直る(再読み込みでは直らない)」正しい復旧手順を1回だけ案内する。
+      if (_candidateHydrateFailures > 4) showIdbRecoveryHint_();
       scheduleCandidateHydrateRetry_();
     });
+  }
+  // ★IDBがプロセス単位で死んでいる時の最終防衛(アプリでは治せない=ユーザーに正しい手順を伝える)。
+  //   リロードでは直らず、タブ/PWAを閉じて開き直すとプロセスごと破棄されて直る。アプリ配色(ティール
+  //   #2bb3c0 / ダーク #0e1422・半角括弧・紫禁止)。回復(go5-idb-recovered)で自動的に消える。
+  var _idbHintEl = null;
+  function showIdbRecoveryHint_() {
+    if (_idbHintEl) return;
+    try {
+      if (!document.body) return;
+      var bar = document.createElement('div');
+      bar.id = 'idbRecoveryHint';
+      bar.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;background:#0e1422;color:#e8eef7;border:1px solid #2bb3c0;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;box-shadow:0 4px 16px rgba(0,0,0,.4);';
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '×';
+      x.setAttribute('aria-label', '閉じる');
+      x.style.cssText = 'float:right;background:transparent;border:0;color:#2bb3c0;font-size:16px;line-height:1;cursor:pointer;margin-left:8px;';
+      x.addEventListener('click', function () { hideIdbRecoveryHint_(); });
+      var msg = document.createElement('span');
+      msg.textContent = '画像の読み込みに失敗しています。このページを一度閉じて開き直すと直ります(再読み込みでは直りません)。';
+      bar.appendChild(x);
+      bar.appendChild(msg);
+      document.body.appendChild(bar);
+      _idbHintEl = bar;
+    } catch (e) {}
+  }
+  function hideIdbRecoveryHint_() {
+    try { if (_idbHintEl && _idbHintEl.parentNode) _idbHintEl.parentNode.removeChild(_idbHintEl); } catch (e) {}
+    _idbHintEl = null;
   }
   // localStorage の cand_refimg__* / cand_bskyimg__* を IDB へ移して localStorage から削除。(冪等・IDB書込成功後にのみ削除＝データロス防止)
   function migrateLocalImages_() {
@@ -1340,6 +1386,20 @@
   //   初回renderとの順序がズレても確実に追いつく(item8/DEF-de2408cb00と同型・Chami 2026-08-11「出た。OK」で再現確認)。
   //   bgRender_ が「候補タブ表示中・入力中は保留」を守るので非破壊。
   try { document.addEventListener('go5-images-hydrated', function () { bgRender_(); }); } catch (e) {}
+  // ★IDBが無言死(iOS Safariのメモリ圧・バックグラウンド化)から回復した合図で、未展開の画像を今すぐ読み直す。
+  //   従来は起動時の一発ハイドレートに依存し、IDBが後から回復しても「閉じて開き直す」まで空表示のままだった
+  //   (Chami報告2026-08-16「更新では直らない・閉じて開くと出る」)。回復案内バーも消す。
+  try { document.addEventListener('go5-idb-recovered', function () {
+    if (!_idbOk) return;
+    try {
+      _candidateHydrateFailures = 0;
+      _histHydrateFailures = 0;
+      if (!_candidateHydrated) hydrateImages_();
+      if (!_hydrated && !window.__go5CandidateStandalone) hydrateHistoryImages_();
+      bgRender_();
+    } catch (e) {}
+    hideIdbRecoveryHint_();
+  }); } catch (e) {}
   // クリップボードの文字列を対象inputへ貼り付け。([data-paste=inputId] のボタンを配線)
   function wirePaste_(root) {
     (root || document).querySelectorAll('.paste-btn[data-paste]').forEach(function (b) {

@@ -21,6 +21,25 @@
   var DB = "go5store", STORE = "kv", VER = 1;
   var _dbP = null;
 
+  // ★IDBの健康状態(2026-08-16・C-038 恒久対策)：iOS Safari(WebKit)は open()/transaction が無言で固まる
+  //   ことがあり(このファイルの番犬コメント群が実測を記録)、その間は get が fail-open で null を返すため
+  //   「画像が空表示のまま固定」になる。従来はページを閉じて開き直す(WebContentプロセス破棄)まで直らず、
+  //   リロード(同一プロセス再利用)では治らなかった(Chami報告2026-08-16)。ここに健康状態の唯一の正本を置く：
+  //   失敗で _unhealthy=true、その後の成功で「回復した」を1回だけ知らせる(go5-idb-recovered)。購読側
+  //   (candidates.js の画像ハイドレート / stock.js のサムネ)が、閉じ直さなくても自動で読み直せるようにする。
+  var _unhealthy = false;
+  function _emitRecovered() {
+    try {
+      if (root && root.document && typeof root.document.dispatchEvent === "function" && typeof root.CustomEvent === "function") {
+        root.document.dispatchEvent(new root.CustomEvent("go5-idb-recovered"));
+      }
+    } catch (e) {}
+  }
+  function markHealthy_() { if (_unhealthy) { _unhealthy = false; _emitRecovered(); } }
+  function markUnhealthy_() { _unhealthy = true; }
+  // Promise の成否を健康状態へ写す(値/例外は素通し=既存の挙動を一切変えない)。
+  function tap_(p) { return p.then(function (v) { markHealthy_(); return v; }, function (e) { markUnhealthy_(); throw e; }); }
+
   function hasIdb() { try { return typeof indexedDB !== "undefined" && !!indexedDB; } catch (e) { return false; } }
   function available() { return hasIdb(); }
 
@@ -122,14 +141,16 @@
   //   ★書き込み(set/del)は従来どおり reject する=保存の失敗を握り潰すと saveStock_ の再試行が空回りするため。
   function getResult(key) {
     return withStore("readonly", function (st) { return st.get(key); }).then(function (value) {
+      markHealthy_();
       return { ok: true, value: value === undefined ? null : value, error: null };
     }).catch(function (error) {
+      markUnhealthy_();
       return { ok: false, value: null, error: error };
     });
   }
   function get(key) { return getResult(key).then(function (r) { return r.ok ? r.value : null; }); }
-  function set(key, val) { return withStore("readwrite", function (st) { return st.put(val, key); }); }
-  function del(key) { return withStore("readwrite", function (st) { return st.delete(key); }); }
+  function set(key, val) { return tap_(withStore("readwrite", function (st) { return st.put(val, key); })); }
+  function del(key) { return tap_(withStore("readwrite", function (st) { return st.delete(key); })); }
 
   // 全エントリを {key: value} で返す。(起動時のハイドレート用)閉じかけなら1回だけ再オープンして張り直す。
   function readEntries_(prefix, retry) {
@@ -177,14 +198,14 @@
       throw openErr;
     });
   }
-  function entries(retry) { return readEntries_(null, retry); }
+  function entries(retry) { return tap_(readEntries_(null, retry)); }
 
   // 指定した接頭辞のキーだけを読む。候補ページが起動時に全KV(ドラフト動画Blobを含む)を
   // 展開してiOS Safariを圧迫しないため、IDBKeyRangeで対象範囲そのものを絞る。
   function entriesPrefix(prefix, retry) {
     prefix = String(prefix || "");
     if (!prefix) return Promise.resolve({});
-    return readEntries_(prefix, retry);
+    return tap_(readEntries_(prefix, retry));
   }
 
   // 複数prefixは1範囲ずつ逐次取得する。大画像が多いiPhoneで同時に複数cursorを走らせず、
@@ -216,7 +237,25 @@
   }
   try { requestPersist(); } catch (e) {}
 
-  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, requestPersist: requestPersist };
+  // ★不健康な間だけ、タブが前面に戻った/BFキャッシュから復帰した時に接続を1発叩いて回復を確かめる。
+  //   死んだ接続はキャッシュ破棄済み(_dbP=null)なので、この get が新規オープンを試みる=成功すれば
+  //   markHealthy_ が go5-idb-recovered を発火し、購読側が閉じ直さずに画像を読み直せる。健康時は撃たない。
+  function probeIfUnhealthy_() {
+    if (!_unhealthy) return;
+    try { get("__go5_probe__").catch(function () {}); } catch (e) {}
+  }
+  try {
+    if (root && root.document && typeof root.document.addEventListener === "function") {
+      root.document.addEventListener("visibilitychange", function () {
+        try { if (!root.document.hidden) probeIfUnhealthy_(); } catch (e) {}
+      });
+    }
+    if (root && typeof root.addEventListener === "function") {
+      root.addEventListener("pageshow", function () { probeIfUnhealthy_(); });
+    }
+  } catch (e) {}
+
+  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, requestPersist: requestPersist, isHealthy: function () { return !_unhealthy; } };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Idb = API;
 })(typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : this));

@@ -682,7 +682,9 @@
     const runId = ++_makeRunSeq;
     var activeBtn = isDraft ? document.getElementById("draftMakeBtn") : els.makeBtn;
     var activeLabel = activeBtn ? activeBtn.textContent : "";
-    if (activeBtn) { activeBtn.disabled = true; activeBtn.textContent = isDraft ? "📦 作成中…" : "作成中…"; }
+    // ★どの run がこのボタンを押さえているかを刻む。finally の復元はこの印を見る(runId ではない)=
+    //   stale奪回で別runが始まっても、旧runは自分が押さえていたボタンだけを確実に元へ戻せる。
+    if (activeBtn) { activeBtn.disabled = true; activeBtn.textContent = isDraft ? "📦 作成中…" : "作成中…"; try { activeBtn.dataset.makeRun = String(runId); } catch (e) {} }
     els.resultArea.hidden = true;
     setStatus(isDraft ? "ドラフトを作成中…(約5秒録画します。画面はそのままで)" : "動画を作成中…(約5秒録画します。画面はそのままで)");
 
@@ -765,15 +767,27 @@
     } catch (e) {
       setStatus("作成に失敗しました：" + e.message);
     } finally {
-      // stale奪回で新しい作成が始まっている場合、旧処理のfinallyが新処理のbusy表示を解除しない。
-      if (runId === _makeRunSeq) {
-        _making = false;
-        if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = activeLabel; }
+      // ★_making(再入ロック)は最新runだけが解除する=stale奪回で始まった新runのロックを旧runが解かない。
+      if (runId === _makeRunSeq) _making = false;
+      // ★ボタン表示の復元は runId ではなく「そのボタンを今も自分が押さえているか(dataset.makeRun)」で判定する。
+      //   旧実装は runId!==_makeRunSeq だと旧runがボタンを一切復元せず、ドラフトrunがハング→通常作成で奪回した
+      //   ケースで draftMakeBtn が永久 disabled に固着していた(Chami報告2026-08-16「作成を押しても無反応」の一因)。
+      //   新runが同じボタンを押さえ直した時(dataset.makeRunが自分の値でない)だけ復元しない=表示は新runが持つ。
+      if (activeBtn && activeBtn.dataset && activeBtn.dataset.makeRun === String(runId)) {
+        activeBtn.disabled = false;
+        activeBtn.textContent = activeLabel;
+        try { delete activeBtn.dataset.makeRun; } catch (e) { activeBtn.dataset.makeRun = ""; }
       }
     }
   }
 
   els.makeBtn.addEventListener("click", make);
+  // ★ドラフト等の他モジュールが make() を確実に起動できる直接口。従来 stock.js は makeBtn.click() で
+  //   代理発火していたが、makeBtn が disabled(前回作成の固着など)だと click イベントは発火せず、
+  //   make() に一切入らない=動画も出ず遷移もせずステータスすら出ない「完全な沈黙」に落ちていた
+  //   (Chami報告2026-08-16「ドラフトで作成を押しても何も起きない」の主因)。直接呼びなら disabled を
+  //   跨いで make() の入口ガード(再入は _making で判定・stale奪回・busy表示)へ確実に到達する。
+  window.__go5RequestMake = make;
 
   // ---- 保存 / 共有 ----
   els.saveBtn.addEventListener("click", async () => {
