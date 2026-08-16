@@ -27,6 +27,10 @@
     // affiliate.js(afId は fanza_af_id で保存済み)／割引セレクト・新作チェック(アカウント切替でリセット運用)
     afId: 1, discountSel: 1, discountSel2: 1, discountSelPc: 1,
     discountNew: 1, discountNew2: 1, discountNewPc: 1,
+    // ★準新作チェックは発売日から毎回導出する派生値(新作/総集編と同じ)＝スナップショット保存しない。
+    //   保存すると翌日/リロードで前作の値が復元され、自動導出のガードと相まって「二度と入らない」決定機に
+    //   なった(Chami報告2026-08-16①)。導出は bluesky.js の 作品URL→FANZA情報→autoApplyWorkStateFromInfo_ が担う。
+    movieJunshinsaku: 1,
     // X(Twitter)欄の本文(xTweetText)は常にBlueskyの本文/作品URL/割引URLから機械的に組み立て直す
     // 完全な派生値(bluesky.js:refreshXTweet)。読み取り専用を解除(2026-07-23)した際、この汎用復元に
     // 拾われてしまい、bluesky.js側で正しく組み立てた直後の値をここが古い値で上書きしていた
@@ -98,9 +102,10 @@
   //   (EXCLUDEはこれ以降の保存/復元を止めるだけで、既存の保存値は消えない)。
   //   一度だけ掃除する。xTweetText はEXCLUDE追加時点(2026-07-23)で汚染が実際に確認されたため対象。
   (function cleanupExcludedLeftovers_() {
-    if (load("field_cleanup_v1") === "1") return;
+    // v2: movieJunshinsaku を EXCLUDE へ追加(2026-08-16)。v1既済端末にも残る field_movieJunshinsaku を掃除するため版を上げて再走。
+    if (load("field_cleanup_v2") === "1") return;
     Object.keys(EXCLUDE).forEach(function (id) { try { localStorage.removeItem(key(id)); } catch (e) {} });
-    save("field_cleanup_v1", "1");
+    save("field_cleanup_v2", "1");
   })();
 
   // ★カテゴリ(ジャンル)チェックを保存対象外にした(2026-08-11①)ため、それ以前に保存された

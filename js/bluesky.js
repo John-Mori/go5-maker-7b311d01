@@ -115,8 +115,13 @@
   // 作品状態(新作/準新作/旧作)を動画作成タブのチェックへ反映。新作は本文にも波及させる。
   function applyWorkStateToUi_(ws) {
     var shin = $('discountNew2'), jun = $('movieJunshinsaku');
+    // ★両方を先に確定してから change を発火する。以前は jun(準新作)に change を投げていなかったため、
+    //   準新作の割引文サフィックス反映(③)と永続化が通常経路を通らなかった(Chami依頼2026-08-16①③)。
+    //   新作/準新作は排他(readWorkState は新作優先)。プログラム発火=isTrusted:false なので手動保護には記録されない。
+    if (shin) shin.checked = (ws === '新作');
     if (jun) jun.checked = (ws === '準新作');
-    if (shin) { shin.checked = (ws === '新作'); try { shin.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
+    if (shin) { try { shin.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
+    if (jun) { try { jun.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
     renderPreview();
   }
   // 発売日→作品状態(新作=30日以内/準新作=90日以内/旧作)。判定は core/movie-attrs-core.js に一本化(2026-08-13・C-038)。
@@ -137,22 +142,28 @@
   //   従来 applyWorkStateToUi_ はリビルド選択時しか呼ばれず、候補から/作品URL入力で作品を決めても
   //   新作でもチェックが入らず本文の割引行に「の新作」が付かなかった。カテゴリ自動チェックと同じく
   //   同一cidは1回だけ＝手動でチェックを外した後に再描画で戻さない。
-  var _wsClearedCid = ''; // 作品が替わった時に前作の新作/準新作チェックを一度だけクリアしたcid
+  var _wsClearedCid = ''; // 発売日が取れず状態不明の作品に替わった時、前作の残りを一度だけ消した cid
+  var _wsCurCid = '';     // いま動画作成タブが対象にしている作品 cid(手動上書き保護の記録キー・recordManualWs_ が使う)
   function autoApplyWorkStateFromInfo_(info, cidHint) {
     if (!info || !info.title) return;
     var cid = String(info.cid || cidHint || info.title || ''); if (!cid) return;
-    if (load('movie_auto_ws_cid') === cid) return;
-    var ws = deriveWorkState_(info.releaseDate || info.date || '');
-    // ★ws が空(発売日が未取得/パース不能)の間はガードを立てない=作品情報が後から揃ったら再判定できる。
-    //   先にガードを立てると、Invalid Date の一度きりで cid がロックされ、発売日が揃っても二度と新作を
-    //   拾えなくなる(Chami報告2026-08-13「新作判定が漏れる」の副次要因)。ws が確定した時だけ1回で固定する。
-    if (ws) { save('movie_auto_ws_cid', cid); applyWorkStateToUi_(ws); }
-    else if (_wsClearedCid !== cid) {
-      // ★発売日が取れず作品状態を判定できない作品に替わった。前作の新作/準新作チェックが居残ると
-      //   準新作の作品でもX投稿本文プレビューに前作の「の新作」が残り、準新作が新作として表示される
-      //   (Chami報告2026-08-15・場面3)。作品が替わった最初の一度だけ状態をクリアする=手動調整も
-      //   再描画では消さない。ガード(movie_auto_ws_cid)は立てない=発売日が後から届けば上の枝で正しく上書きできる。
-      _wsClearedCid = cid; applyWorkStateToUi_('');
+    _wsCurCid = cid;
+    // ★作品状態(新作/準新作/旧作)は「発売日から毎回導出する派生値」＝once-guardで固定しない。
+    //   以前は movie_auto_ws_cid に1回だけ適用+無期限記録していたが、準新作チェック(movieJunshinsaku)は
+    //   永続保存されない(persist-fields EXCLUDE漏れ+applyWorkStateToUi_ が jun に change を投げていなかった)ため、
+    //   翌日/リロードで同じ作品を開くと「チェックが消えたのに再適用も塞がれて二度と入らない」決定機になっていた
+    //   (Chami報告2026-08-16①)。カテゴリ自動チェックと同じ哲学=毎回導出し、ガードは「手で変えた選択の保護」だけに限定。
+    if (load('movie_ws_manual_cid') === cid) {
+      applyWorkStateToUi_(load('movie_ws_manual_val') || ''); // 手で変えた作品はその選択をリロード跨ぎで復元
+    } else {
+      var ws = deriveWorkState_(info.releaseDate || info.date || '');
+      if (ws) applyWorkStateToUi_(ws);
+      else if (_wsClearedCid !== cid) {
+        // 発売日が取れず状態不明の作品に替わった。前作の新作/準新作が居残ると準新作の作品でも本文プレビューに
+        //   前作の「の新作」が残る(Chami報告2026-08-15・場面3)。替わった最初の一度だけクリア=発売日が
+        //   後から届けば次回この関数で上の枝が正しく上書きする(guardを立てないので回復できる)。
+        _wsClearedCid = cid; applyWorkStateToUi_('');
+      }
     }
     // 総集編(FANZAのジャンル/フロア名に「総集編」)なら本文の割引行へも反映。新作と両立で「オフの新作&総集編」になる。
     //   (Chami依頼2026-08-05「総集編にチェックが入ってるときは総集編の記載も 新作&総集編みたいに」)
@@ -243,7 +254,7 @@
   //   フロア名でしか分からないカテゴリが永久に自動チェックされない(再発した不具合)。ガードは
   //   floor込みで判定する autoApplyAttrsFromInfo_ 側に一本化し、そちらが1回だけ正式適用する。
   try { window.Go5MovieAttrs = {
-    reset: function () { save('movie_auto_attrs_cid', ''); save('movie_auto_ws_cid', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
+    reset: function () { save('movie_auto_attrs_cid', ''); save('movie_ws_manual_cid', ''); save('movie_ws_manual_val', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
     // ★title も判定に混ぜる：総集編は「総集編」ジャンルタグが無く作品名にだけ載る作品が多く、
     //   ジャンルだけだと総集編カテゴリに自動チェックが入らない(Chami依頼2026-08-06「作品名に総集編と記載があったら総集編にもチェック」)。
     //   候補は作品名を即座に持つため、FANZA再取得を待たずここで作品名も走査する。
@@ -555,9 +566,11 @@
   // acc2：本文テンプレに含まれる「しかも今なら〇%オフ💕」の数字を差し替え／なしで〇に戻す。
   // 割引文の末尾サフィックス(「オフ」と締め絵文字の間)。Chami指定2026-08-02:
   //   新作のみ=「の新作」／総集編のみ=「の総集編」／両方=「の新作&総集編」／どちらも無し=空。
-  function discSuffix_(isNew, isDigest) {
-    if (isNew && isDigest) return 'の新作&総集編';
-    if (isNew) return 'の新作';
+  function discSuffix_(isNew, isJun, isDigest) {
+    if (window.Go5DiscLine) return window.Go5DiscLine.discSuffix(isNew, isJun, isDigest);
+    var head = isNew ? '新作' : (isJun ? '準新作' : '');   // フォールバック(core未ロード時のみ・排他=新作優先)
+    if (head && isDigest) return 'の' + head + '&総集編';
+    if (head) return 'の' + head;
     if (isDigest) return 'の総集編';
     return '';
   }
@@ -578,16 +591,16 @@
   var DISC = {
     acc1: {
       // acc1 は「〜おトク作品！」で締める。サフィックスがある時は & で繋いで従来の読みを保つ(の新作&おトク作品！)。
-      build: function (n, isNew, isDigest) { var s = discSuffix_(isNew, isDigest); return 'なんと今なら' + n + discUnit_() + (s ? s + '&' : 'の') + 'おトク作品！✨'; },
+      build: function (n, isNew, isJun, isDigest) { var s = discSuffix_(isNew, isJun, isDigest); return 'なんと今なら' + n + discUnit_() + (s ? s + '&' : 'の') + 'おトク作品！✨'; },
       placeholder: 'なんと今なら〇%オフのおトク作品！✨', mark: /(?:しかも|なんと)今なら[^\n]*(?:オフ|円)/, persistent: false
     },
     acc2: {
-      build: function (n, isNew, isDigest) { return 'しかも今なら' + n + discUnit_() + discSuffix_(isNew, isDigest) + '💕'; },
+      build: function (n, isNew, isJun, isDigest) { return 'しかも今なら' + n + discUnit_() + discSuffix_(isNew, isJun, isDigest) + '💕'; },
       placeholder: 'しかも今なら〇%オフ💕', mark: /(?:しかも|なんと)今なら[^\n]*(?:オフ|円)/, persistent: false
     }
   };
   // 割引文の挿入/差し替え/削除を行う純粋関数。(対象テキストを受け取り新テキストを返す)isNew=新作用/isDigest=総集編用の文面。
-  function discApply(text, val, isNew, isDigest) {
+  function discApply(text, val, isNew, isJun, isDigest) {
     var cfg = DISC[acctId()] || DISC.acc1;
     var lines = String(text == null ? '' : text).split('\n');
     var idx = -1;
@@ -596,7 +609,7 @@
       if (cfg.persistent) { if (idx >= 0) lines[idx] = cfg.placeholder; else lines.splice(Math.min(1, lines.length), 0, cfg.placeholder); }
       else if (idx >= 0) lines.splice(idx, 1);
     } else {
-      var nl = cfg.build(val === 'custom' ? '' : val, isNew, isDigest);  // custom は数字なし(ユーザーが入力)
+      var nl = cfg.build(val === 'custom' ? '' : val, isNew, isJun, isDigest);  // custom は数字なし(ユーザーが入力)
       if (idx >= 0) lines[idx] = nl; else lines.splice(Math.min(1, lines.length), 0, nl);
     }
     return lines.join('\n');
@@ -604,29 +617,32 @@
   // 既存の割引行に「の新作/総集編」サフィックスだけを差し込む純粋関数。数字・単位・末尾の絵文字はそのまま保持する。
   //   Chami依頼2026-08-04:「💕は勝手につけない=テンプレ帳に書いた絵文字を尊重する」。割引セレクトが未選択でも、
   //   新作/総集編チェックだけで本文の割引行へ反映できるようにするための土台(トグルで積み上がらないよう既存サフィックスは除去)。
-  function respliceDiscLine_(line, isNew, isDigest) {
+  function respliceDiscLine_(line, isNew, isJun, isDigest) {
+    if (window.Go5DiscLine) return window.Go5DiscLine.respliceDiscLine(line, isNew, isJun, isDigest);
     var s = String(line == null ? '' : line);
     var m = s.match(/^(.*?(?:オフ|円))(.*)$/);       // 「…N%オフ / …N円」まで(head)と、その後ろの装飾(tail)
     if (!m) return s;
-    var tail = m[2].replace(/^の(?:新作(?:&総集編)?|総集編)/, '');  // 既存の新作/総集編サフィックスは一旦剥がす(再トグルで重ならない)
-    return m[1] + discSuffix_(isNew, isDigest) + tail;
+    var tail = m[2].replace(/^の(?:準?新作(?:&総集編)?|総集編)/, '');  // 既存の新作/準新作/総集編サフィックスは一旦剥がす(再トグルで重ならない)
+    return m[1] + discSuffix_(isNew, isJun, isDigest) + tail;
   }
   try { window.__go5RespliceDiscLine = respliceDiscLine_; } catch (e) {} // 検証用フック
   // 割引セレクト未選択でも、テキストエリア内に既にある割引行へ新作/総集編サフィックスを反映(絵文字トレイルは保持・行が無ければ何もしない)。
-  function retoggleDiscSuffix_(ta, isNew, isDigest) {
+  function retoggleDiscSuffix_(ta, isNew, isJun, isDigest) {
     if (!ta) return false;
     var cfg = DISC[acctId()] || DISC.acc1;
     var lines = String(ta.value == null ? '' : ta.value).split('\n');
     var idx = -1;
     for (var i = 0; i < lines.length; i++) { if (cfg.mark.test(lines[i])) { idx = i; break; } }
     if (idx < 0) return false;
-    lines[idx] = respliceDiscLine_(lines[idx], isNew, isDigest);
+    lines[idx] = respliceDiscLine_(lines[idx], isNew, isJun, isDigest);
     ta.value = lines.join('\n');
     return true;
   }
   // 本文(自動投稿/今すぐ投稿で共通)側の「新作」「総集編」状態。2つのチェックボックスは同期。
   function isNewBody() { return !!(els.discountNew && els.discountNew.checked) || !!(els.discountNew2 && els.discountNew2.checked); }
   function isDigestBody() { return !!(els.discountDigest && els.discountDigest.checked) || !!(els.discountDigest2 && els.discountDigest2.checked); }
+  // 準新作(動画作成タブ movieJunshinsaku)。新作とは排他=discSuffix/readWorkState が新作優先で吸収する。
+  function isJunBody() { var j = document.getElementById('movieJunshinsaku'); return !!(j && j.checked); }
   // ---- 定価(セールなし)用ステータス行：割引が無い時に「話題の準新作の総集編💕」等を本文へ出す ----
   //   Chami依頼2026-08-05:「定価の場合 準新作→話題の準新作の総集編💕 / 旧作→話題の総集編💕」。
   //   セール中は割引行(しかも今なら〜)が新作/総集編の表記を持つため定価行は出さない(二重表記を避ける)。
@@ -668,7 +684,7 @@
   function curDiscVal() { return (els.discountSel && els.discountSel.value) || (els.discountSel2 && els.discountSel2.value) || ''; }
   function setDiscountLine(val) {
     if (!els.text) return;
-    els.text.value = discApply(els.text.value, val, isNewBody(), isDigestBody());
+    els.text.value = discApply(els.text.value, val, isNewBody(), isJunBody(), isDigestBody());
     saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
     try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {} // X欄も追従(input未発火の補完)
   }
@@ -686,7 +702,7 @@
     syncNewBody(on);
     if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; } // applyDiscount内でreflectToritageも回る
     // 割引セレクト未選択(テンプレ帳に割引文を書いて運用)でも、チェックだけで本文の割引行へサフィックスを反映。
-    if (retoggleDiscSuffix_(els.text, isNewBody(), isDigestBody())) {
+    if (retoggleDiscSuffix_(els.text, isNewBody(), isJunBody(), isDigestBody())) {
       saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
       try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {}
     }
@@ -699,7 +715,7 @@
     syncDigestBody(on);
     if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; } // applyDiscount内でreflectToritageも回る
     // 割引セレクト未選択でも、チェックだけで本文の割引行へサフィックスを反映(絵文字トレイルは保持)。
-    if (retoggleDiscSuffix_(els.text, isNewBody(), isDigestBody())) {
+    if (retoggleDiscSuffix_(els.text, isNewBody(), isJunBody(), isDigestBody())) {
       saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
       try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {}
     }
@@ -707,8 +723,29 @@
   }
   if (els.discountDigest) els.discountDigest.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest.checked); });
   if (els.discountDigest2) els.discountDigest2.addEventListener('change', function () { onDigestBodyToggle(els.discountDigest2.checked); });
-  // 準新作チェック(動画作成タブ)を手で切り替えた時も定価ステータス行へ反映(新作/総集編と違い割引行サフィックスは持たない)。
-  (function () { var j = document.getElementById('movieJunshinsaku'); if (j) j.addEventListener('change', reflectToritageLine_); })();
+  // 「準新作」チェック(動画作成タブ)切替：割引行サフィックスへ「の準新作」を反映＋定価ステータス行へも反映。
+  //   ★以前は定価行(reflectToritageLine_)にしか繋がっておらず、セール中の割引文に準新作の語が入らなかった。
+  //   Chami依頼2026-08-16③で方針変更＝新作(onNewBodyToggle)と同じ構造で割引行にも反映する。
+  function onJunBodyToggle() {
+    if (curDiscVal() !== '') { applyDiscount(curDiscVal()); return; } // applyDiscount 内で reflectToritage も回る
+    if (retoggleDiscSuffix_(els.text, isNewBody(), isJunBody(), isDigestBody())) {
+      saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus();
+      try { document.dispatchEvent(new CustomEvent('go5-body-changed')); } catch (e) {}
+    }
+    reflectToritageLine_();
+  }
+  // 手で新作/準新作を切り替えた作品(cid)は、その選択をリロード跨ぎで保護する(自動導出で上書きしない・①の恒久対策)。
+  //   ★プログラム発火(applyWorkStateToUi_ の dispatch)は isTrusted=false なので手動扱いしない=自動導出の保護には記録されない。
+  function recordManualWs_(e) {
+    if (!e || !e.isTrusted || !_wsCurCid) return;
+    save('movie_ws_manual_cid', _wsCurCid); save('movie_ws_manual_val', readWorkState());
+  }
+  (function () {
+    var j = document.getElementById('movieJunshinsaku');
+    if (j) { j.addEventListener('change', onJunBodyToggle); j.addEventListener('change', recordManualWs_); }
+    var n2 = document.getElementById('discountNew2'); if (n2) n2.addEventListener('change', recordManualWs_);
+    var n1 = document.getElementById('discountNew'); if (n1) n1.addEventListener('change', recordManualWs_);
+  })();
   // 動画生成タブの「タグ」種別(◯%OFF / ¥価格)が切り替わったら、割引文の単位(%オフ⇔円)も追従。
   //   Chami依頼2026-08-02: %か円かは動画生成タブのタグ(promoType)から判定する。選択中の割引文があれば即差し替え。
   (function () {
@@ -721,7 +758,8 @@
   })();
   // 投稿確認モーダル内：この投稿のテキスト(pcText)にだけ割引文を反映。(保存はしない)新作・総集編チェックも独立。
   function applyDiscountPc() {
-    if (els.pcText) els.pcText.value = discApply(els.pcText.value, (els.discountSelPc && els.discountSelPc.value) || '', !!(els.discountNewPc && els.discountNewPc.checked), !!(els.discountDigestPc && els.discountDigestPc.checked));
+    var junPc = document.getElementById('movieJunshinsaku'); // PCモーダルに準新作チェックは増設せず、動画作成タブの状態を引き継ぐ
+    if (els.pcText) els.pcText.value = discApply(els.pcText.value, (els.discountSelPc && els.discountSelPc.value) || '', !!(els.discountNewPc && els.discountNewPc.checked), !!(junPc && junPc.checked), !!(els.discountDigestPc && els.discountDigestPc.checked));
   }
   if (els.discountSelPc) els.discountSelPc.addEventListener('change', applyDiscountPc);
   if (els.discountNewPc) els.discountNewPc.addEventListener('change', applyDiscountPc);
