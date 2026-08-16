@@ -9,6 +9,11 @@
   // プレビューも書き出しも同じ Canvas(=この解像度) に描くため、画面幅に関係なく完全に一致する。
   const W = 1080, H = 1920;         // 基準フレーム解像度(ここを変えれば出力解像度が変わる／レイアウトは比率維持)
   const DURATION = 5, FPS = 30;
+  // 録画の実尺(見た目の尺=DURATIONとは別)。iOS SafariのMediaRecorderは末尾を約1秒取りこぼし、
+  // 5.0秒ぴったりで止めると符号化尺が4秒台へ縮む(Chami報告2026-08-16 msg1538489722781831209)。
+  // 見た目(ズーム/浮き上がり)はDURATION=5のまま=最終フレームを保持しつつ余白を録り、
+  // 取りこぼしがあっても出来上がりが5秒台に着地するようにする(bgは録画中もloop再生=末尾も動画フレームが変化し続ける)。
+  const REC_SECONDS = 6.2;
   const REVEAL_START = 0.5, REVEAL_DUR = 2.4;   // 浮き上がり: 0.5s開始→2.9s完成(以後2.1s保持)。Chami依頼2026-07-18で0.7s遅らせた
   const FG_MAX_RATIO = 0.92, FG_ZOOM = 0.04, FG_CENTER_Y = 0.55;
   // YouTube Shorts が縦長端末で左右各約9%を切り落とす(cover)。前景画像の"幅"だけは
@@ -696,7 +701,7 @@
     //   stale奪回で別runが始まっても、旧runは自分が押さえていたボタンだけを確実に元へ戻せる。
     if (activeBtn) { activeBtn.disabled = true; activeBtn.textContent = isDraft ? "📦 作成中…" : "作成中…"; try { activeBtn.dataset.makeRun = String(runId); } catch (e) {} }
     els.resultArea.hidden = true;
-    setStatus(isDraft ? "ドラフトを作成中…(約5秒録画します。画面はそのままで)" : "動画を作成中…(約5秒録画します。画面はそのままで)");
+    setStatus(isDraft ? "ドラフトを作成中…(約6秒録画します。画面はそのままで)" : "動画を作成中…(約6秒録画します。画面はそのままで)");
 
     try {
       bg.currentTime = 0;
@@ -720,7 +725,7 @@
         const loop = () => {
           const t = (performance.now() - t0) / 1000;
           drawFrame(Math.min(t, DURATION));
-          if (t >= DURATION) return resolve();
+          if (t >= REC_SECONDS) return resolve();
           requestAnimationFrame(loop);
         };
         loop();
