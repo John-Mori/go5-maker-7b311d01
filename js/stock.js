@@ -854,22 +854,40 @@
   //   R2取り寄せが無応答だと、これを await する Drive保存/DL が永久に返らず「☁️ 保存中…」が固まる
   //   (Chami報告2026-08-11①「いつまで経っても保存中」)。45秒で null に倒す=fail-open。取れなければ
   //   「見つかりません」で終える方が、黙って固まるより良い(§3 可用性は喋る側へ倒す)。
+  // ★動画のセッション内メモリ層(②即DL・Fable5設計2026-08-17)。iOSはIDBが数MBの動画を持続保存できず
+  //   退避しがちで、DLのたびにR2から十数秒かけて取り寄せていた。その十数秒の非同期の間に navigator.share の
+  //   ユーザー操作有効期限(transient activation)が切れ、共有シートが無言で拒否される(=「準備中→無反応」)。
+  //   作成直後/一度取得後の動画をメモリに持てば、DLはタップ即応=activation内でshareが確実に出る。最大2件。
+  var _vidMem = {};
+  var _vidMemOrder = [];
+  var _persisted = null; // navigator.storage.persisted() の実値(C-1・DL診断へ載せる)
+  function putVidMem_(id, blob) {
+    if (!id || !isUsableVideoBlob_(blob)) return;
+    if (!_vidMem[id]) _vidMemOrder.push(id);
+    _vidMem[id] = blob;
+    while (_vidMemOrder.length > 2) {
+      var drop = _vidMemOrder.shift();
+      if (drop !== id) { delete _vidMem[drop]; }
+    }
+  }
   function resolveVideoFromR2_(id) {
     if (!(window.Go5Sync && Go5Sync.fetchBlobR2At)) return Promise.resolve(null);
     var store = idb();
     var fetchP = Go5Sync.fetchBlobR2At('go5vid:' + id).then(function (b) {
       if (!isUsableVideoBlob_(b)) return null; // R2に空/破損実体があっても正常動画として返さない
       if (store) { try { store.set('stock_v_' + id, b); } catch (e) {} } // 取り寄せた実体は手元にも保存=次回は即使える
+      putVidMem_(id, b); // メモリにも置く=IDBが持続しない端末でも「次のタップ」は即
       return b;
     }).catch(function () { return null; });
     var toP = new Promise(function (res) { setTimeout(function () { res(null); }, 45000); });
     return Promise.race([fetchP, toP]);
   }
   function resolveVideoBlob_(id) {
+    if (_vidMem[id] && isUsableVideoBlob_(_vidMem[id])) return Promise.resolve(_vidMem[id]); // 第1層=メモリ(IDB非依存)
     var store = idb();
     if (!store) return resolveVideoFromR2_(id);
     return store.get('stock_v_' + id).then(function (blob) {
-      if (isUsableVideoBlob_(blob)) return blob;
+      if (isUsableVideoBlob_(blob)) { putVidMem_(id, blob); return blob; }
       // オブジェクト自体がtruthyでも空/破損なら手元成功にしない。雲の正常な控えへフォールバックする。
       return resolveVideoFromR2_(id);
     }, function () {
@@ -897,8 +915,8 @@
       _dlWarm[m.id] = 1;
       chain = chain.then(function () {
         return store.get('stock_v_' + m.id).then(function (b) {
-          if (isUsableVideoBlob_(b)) return; // 手元に有る=先読み不要
-          return resolveVideoFromR2_(m.id);   // 無い時だけR2→取得後にIDBへ書き戻す
+          if (isUsableVideoBlob_(b)) { putVidMem_(m.id, b); return; } // 手元に有る=メモリへ載せて先読み完了
+          return resolveVideoFromR2_(m.id);   // 無い時だけR2→取得後にIDB+メモリへ
         }).catch(function () {});
       });
     });
@@ -911,13 +929,17 @@
   //   出す/取得失敗の瞬間に戻す=手元に有る動画は即・雲から取り寄せる動画も「準備中…」で反応が返る(stk-driveと同型)。
   function downloadStock_(id, videoName, btn) {
     var store = idb();
+    // ボタンの素のラベルを1度だけ退避=再タップ後もボタンが正しい表記へ戻る(Fable5設計2026-08-17)。
+    if (btn && !btn.getAttribute('data-dl-label')) btn.setAttribute('data-dl-label', btn.textContent || '⬇ 動画DL');
     var _op = (btn && window.Go5OperationGate && window.Go5OperationGate.armButton)
       ? window.Go5OperationGate.armButton(btn, {
+          originalLabel: (btn && btn.getAttribute('data-dl-label')) || '⬇ 動画DL',
           pendingLabel: '⬇ 準備中…', timeoutLabel: '⏱ 再試行', timeoutMs: 60000
         })
       : null;
-    function settle(ok) { if (_op) _op.finish(ok); }
-    if (!store) { settle(false); alert('IndexedDB未対応のため再DLできません。'); return; }
+    function settle(ok, label) { if (_op) _op.finish(ok, label); }
+    if (!store && !(_vidMem[id] && isUsableVideoBlob_(_vidMem[id]))) { settle(false); alert('IndexedDB未対応のため再DLできません。'); return; }
+    var tapTs = Date.now();
     resolveVideoBlob_(id).then(function (blob) {
       if (!blob) {
         // 手元にも雲にも無い=作った端末からまだ上がっていない(その端末でアプリを開けば数十秒で上がる)。
@@ -930,12 +952,14 @@
           var log = JSON.parse(localStorage.getItem('go5_landing_log') || '[]') || [];
           var ent = null; for (var li = 0; li < log.length; li++) { if (log[li] && log[li].id === id) { ent = log[li]; break; } }
           diag = '\n\n[診断] 雲同期=' + (cfgd ? '設定済' : '未設定') +
+                 ' / 永続化=' + (_persisted || '未取得') +
                  (ent ? (' / 作成時の着地=' + (ent.kind || '?') + (ent.local ? ' 手元:' + ent.local : '') + (ent.cloud ? ' 雲:' + ent.cloud : '')) : ' / 着地記録なし') +
                  '\nid=' + id;
         } catch (_) {}
         alert('動画がまだ雲に届いていません。動画を作成した端末でこのアプリを開いていれば数十秒で自動的に上がります。少し待ってもう一度お試しください。' + diag);
         return;
       }
+      putVidMem_(id, blob); // 次のタップは通信なしで即(再タップ経路の要)
       var name = videoName || 'video.mp4';
       // ★iPhoneはカメラロール(アルバム)へ直接入れたい(Chami指示2026-07-29)。<a download>だと「ファイル」アプリ止まりで
       //   写真アルバムに入らない。Web共有シート(navigator.share)には「ビデオを保存」があり、そこからアルバムへ入る=
@@ -943,10 +967,25 @@
       var file = null;
       try { file = new File([blob], name, { type: blob.type || 'video/mp4' }); } catch (e) {}
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-        // ★共有シートを出せたらキャンセル/完了に関わらずここで完結する。<a download>へ落とすと
-        //   iOSで共有シートの後に「ダウンロードしますか?」が二重に出て邪魔(Chami指摘2026-07-29・スクショ実物)。
-        settle(true); // 共有シートを出す=ボタンは操作可能へ戻す
-        navigator.share({ files: [file], title: name }).catch(function () {});
+        // ★navigator.share は「直近のユーザー操作(transient activation)」が生きている間しか許されない。
+        //   タップから blob 取得に時間がかかると(R2から十数秒)activationが切れ、share() は NotAllowedError で
+        //   無言拒否される=「準備中→何も起きずポップアップも無し」の芯(Fable5診断2026-08-17・確定)。
+        //   →取得が速かった(≒activation内)時だけ即share。遅かった時は share を呼ばず「もう一度タップ」へ倒し、
+        //     メモリ層(putVidMem_)から2度目のタップを即応させる=activation内で確実に共有シートが出る。
+        var elapsed = Date.now() - tapTs;
+        if (elapsed <= 3000) {
+          settle(true); // 共有シートを出す=ボタンは操作可能へ戻す
+          navigator.share({ files: [file], title: name }).catch(function (err) {
+            // ★共有シートを出せたらキャンセル/完了に関わらずここで完結する。<a download>へ落とすと
+            //   iOSで共有シートの後に「ダウンロードしますか?」が二重に出て邪魔(Chami指摘2026-07-29・スクショ実物)。
+            if (err && err.name === 'AbortError') return; // ユーザーが共有シートを閉じた=無言でよい(現行維持)
+            // activation切れ等でシートが出せなかった=無言にせず、もう一度タップで確実に出せるよう案内する。
+            if (btn) { try { btn.textContent = '⬇ もう一度タップで保存'; } catch (_) {} }
+          });
+          return;
+        }
+        // 取得に時間がかかった=activationは切れている。share を呼ばず「準備完了→再タップ」で無言終了を断つ。
+        settle(true, '✅ 準備完了→もう一度タップで保存');
         return;
       }
       settle(true);
@@ -2243,6 +2282,20 @@
   function init() {
     createModal_();
 
+    // ★永続化ストレージを要求(C-1・Fable5設計2026-08-17)。iOSはIDBの動画(数MB)を容量都合で退避しがちで、
+    //   それが「DLのたびにR2まで取りに行く/自動遷移が雲待ちで遅い」の根。persist() は退役確率を下げ、
+    //   結果(persisted())をDL診断へ載せて「端末実測が要る(推測で埋めない)」を満たす。コスト1行・失敗無害。
+    try {
+      if (navigator.storage && navigator.storage.persist && navigator.storage.persisted) {
+        navigator.storage.persisted().then(function (already) {
+          _persisted = already ? 'yes' : 'no';
+          if (!already) {
+            try { navigator.storage.persist().then(function (g) { _persisted = g ? 'granted' : 'denied'; }, function () {}); } catch (e) {}
+          }
+        }).catch(function () {});
+      }
+    } catch (e) {}
+
     // 軽量ドラフトページの「再作成」から来た時だけ、本体の動画作成DOMへ流し込んでから元ドラフトを外す。
     // sessionStorageなので別タブ/別端末とは混ざらず、成功前削除もしない。
     (function resumeRemakeFromSplit_() {
@@ -2347,7 +2400,8 @@
       navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 75000);
 
       var hooks = {
-        onStart: function (id) { draftId = id; },
+        // 作成直後の動画blobをメモリ層へ即載せる=生成→即DLがタップ即応(②即DL・Fable5設計2026-08-17)。
+        onStart: function (id) { draftId = id; if (blobUsable) putVidMem_(id, detail.blob); },
         onLocal: function (id) { draftId = id; gate.localLanded = true; decideNav_(); },
         onCloud: function (id) { draftId = id; gate.cloudLanded = true; decideNav_(); },
         // 両方が「着地できずに」決着=着地不能が確定。25秒を待たず今すぐ hold へ倒す。
