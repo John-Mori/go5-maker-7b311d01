@@ -70,7 +70,11 @@ def behop_answer(channel, content):
     (persona_sendは使わない=資格情報の束をホイミンと分けるbehop.pyの設計を踏襲)。
     戻り値: 投稿できたか(False=呼び出し側が通常のエスカレへフォールバックする)。"""
     try:
-        r = subprocess.run([sys.executable, BEHOP_CLI, "--ask", content, "--to", channel],
+        # ★--tag room= 部屋の実応対 (2026-08-18)。付けないと behop.py の既定 "cli" になり、
+        #   俺たちが手で叩いた --ask と同じ札で記録される= 実測の「何に効いたか」が割れない。
+        #   (ホイミン側の ask(content, tag="room") と同じ理由・研究室HQ ②と同型)
+        r = subprocess.run([sys.executable, BEHOP_CLI, "--ask", content, "--to", channel,
+                            "--tag", "room"],
                            capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=150)
         return r.returncode == 0

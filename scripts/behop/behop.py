@@ -427,6 +427,7 @@ def main():
     args = sys.argv[1:]
     prompt = model = to = ask_file = None
     images = []
+    tag = "cli"                     # 既定= 手打ち。実務は --tag で名乗る
     ping = "--ping" in args
     i = 0
     while i < len(args):
@@ -441,6 +442,11 @@ def main():
             to = args[i + 1]; i += 2
         elif a == "--model" and i + 1 < len(args):
             model = args[i + 1]; i += 2
+        elif a == "--tag" and i + 1 < len(args):
+            # ★用途のラベル (2026-08-18)。既定の "cli" は**俺が手で叩いた分**の意味だ。
+            #   実務から呼ぶ側は必ず名乗ること= さもないと手打ちと実務が同じ札で混ざり、
+            #   1週間貯めても「何に効いたか」で割れない (研究室HQ ②と同型の穴)。
+            tag = (args[i + 1] or "").strip() or "cli"; i += 2
         else:
             i += 1
     key = _read(KEY_FILE, "ベホップ用APIキー")
@@ -449,10 +455,11 @@ def main():
     if ask_file:
         prompt = open(ask_file, encoding="utf-8").read().strip()
     if not prompt:
-        print("使い方: behop.py --ping | --ask <文|--ask-file p> [--image p]... [--to <ch名|ID>] [--model m]")
+        print("使い方: behop.py --ping | --ask <文|--ask-file p> [--image p]... "
+              "[--to <ch名|ID>] [--model m] [--tag <用途>]")
         return 1
     m, avail = pick_model(key, model)
-    text, used = ask(key, m, prompt, images, avail)
+    text, used = ask(key, m, prompt, images, avail, tag=tag)
     print(f"--- ベホップ ({used or '失敗'}) ---")
     print(text)
     if to and used:

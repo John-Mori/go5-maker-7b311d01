@@ -238,6 +238,52 @@ def main():
     chk("target_frames が tag/who を渡す", 'tag="target_frames"' in tf_src and "who=behop.bundle_of" in tf_src)
     chk("gemini_responder の実応対が tag=room", 'ask(content, tag="room")' in gr_src)
 
+    print("== ⑨CLI経由の実務も用途で割れる (2026-08-18 イージス研究室) ==")
+    # なぜ在るか= 研究室HQは ask_gemini 側 (ホイミンの応対) に tag="room" を通したが、
+    #   **ベホップの部屋応対は behop.py を subprocess で叩く経路**で、CLIにtagの口が無く
+    #   既定の "cli" のまま記録されていた= 手打ちの --ask と実務が同じ札に混ざる (②と同型)。
+    # ★上の237-239行のような「ソースに文字列が在るか」では、口が実際に効くかは分からない。
+    #   ここは main() を実行で通し、台帳に落ちた行を見る。
+    orig3, orig_read, orig_lm, orig_argv = behop._gen_once, behop._read, behop.list_models, sys.argv
+    try:
+        behop._gen_once = lambda key, model, payload: "OK"
+        behop._read = lambda *a, **k: "K"                      # 本物の鍵を読まない
+        behop.list_models = lambda key: list(AVAIL)
+        sys.argv = ["behop.py", "--ask", "q", "--tag", "room"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = behop.main()
+        last = gemini_usage_rows()[-1]
+        chk("★CLIに--tagの口が在り、台帳までtagが届く", rc == 0 and last.get("tag") == "room")
+        sys.argv = ["behop.py", "--ask", "q"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            behop.main()
+        chk("--tag無しは既定のcli(手打ちの意味)のまま", gemini_usage_rows()[-1].get("tag") == "cli")
+    finally:
+        behop._gen_once, behop._read = orig3, orig_read
+        behop.list_models, sys.argv = orig_lm, orig_argv
+
+    sys.path.insert(0, os.path.join(_root, "scripts", "llm"))
+    import subprocess as _sp                                    # noqa: E402
+    import gemini_responder as _gr                              # noqa: E402
+    seen = {}
+
+    class _R:
+        returncode = 0
+
+    def _fake_run(argv, **kw):
+        seen["argv"] = argv
+        return _R()
+    orig_run = _sp.run
+    try:
+        _gr.subprocess.run = _fake_run                          # 外へ出る手だけ偽物
+        ok = _gr.behop_answer("イージス研究室", "こんにちは")
+        av = seen.get("argv") or []
+        chk("★ベホップの部屋応対が実際に--tag roomを渡す(実行で確認)",
+            ok and "--tag" in av and av[av.index("--tag") + 1] == "room")
+        chk("応対の中身と宛先は壊していない", "--ask" in av and "--to" in av)
+    finally:
+        _gr.subprocess.run = orig_run
+
     print("\n== %d/%d PASS ==" % (_ok, _ok + _ng))
     return 1 if _ng else 0
 
