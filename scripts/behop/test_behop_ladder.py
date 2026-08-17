@@ -228,15 +228,88 @@ def main():
     finally:
         behop._gen_once = orig2
 
-    # 実際の呼び出し側が tag/who を渡していること (既定のまま=用途が混ざる、を防ぐ)
-    import io as _io
+    # -----------------------------------------------------------------------
+    # ★ここは元々ソースの文字列一致で見ていた (研究室HQ 2026-08-18 初版)。**あれは検査ではない。**
+    #   実例= gemini_responder.py に 'ask(content, tag="room")' は在り検査は緑だったが、
+    #   それはホイミンの行で、**ベホップの経路は同じファイルの別の行**で "cli" のまま漏れていた
+    #   (イージス研究室が e1cc39e で発見)。緑の検査の下で穴が生きていた。
+    #   → 呼び出し側を**実行で通す**。外へ出る手 (HTTP・GAS・yt-dlp・Discord) だけ偽物にし、
+    #     キーの切り替えと引数の受け渡しは本物のまま回して、**実際に渡った値**を見る。
     _root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-    cf_src = _io.open(os.path.join(_root, "scripts", "comp_frames.py"), encoding="utf-8").read()
-    tf_src = _io.open(os.path.join(_root, "scripts", "comp", "target_frames.py"), encoding="utf-8").read()
-    gr_src = _io.open(os.path.join(_root, "scripts", "llm", "gemini_responder.py"), encoding="utf-8").read()
-    chk("comp_frames が tag/who を渡す", 'tag="comp_frames"' in cf_src and "who=behop.bundle_of" in cf_src)
-    chk("target_frames が tag/who を渡す", 'tag="target_frames"' in tf_src and "who=behop.bundle_of" in tf_src)
-    chk("gemini_responder の実応対が tag=room", 'ask(content, tag="room")' in gr_src)
+
+    def drive_frames(modname):
+        """comp_frames / target_frames を実際に main() まで走らせ、ask_pro に渡った引数を集める。
+        ★1件目で429を返して**キーを跨がせる**= 束(who)の取り違えはこの瞬間にしか出ない。"""
+        sys.path.insert(0, os.path.join(_root, "scripts"))
+        sys.path.insert(0, os.path.join(_root, "scripts", "comp"))
+        import importlib
+        cf = importlib.import_module("comp_frames")
+        mod = cf if modname == "comp_frames" else importlib.import_module("target_frames")
+
+        tmp = tempfile.mkdtemp(prefix="drv_")
+        os.makedirs(os.path.join(tmp, "local"), exist_ok=True)
+        with open(os.path.join(tmp, "local", "gemini_api_key.txt"), "w", encoding="utf-8") as f:
+            f.write("HOMINKEY")                       # ★ベホップのキーと別物にする=跨いだのが見える
+        seen = []
+
+        def fake_ask_pro(key, prompt, image_paths=(), model="", tag="", who=""):
+            seen.append({"key": key, "tag": tag, "who": who})
+            if len(seen) == 1:
+                return None, "quota"                  # 1本目=無料枠が尽きた→次のキーへ
+            return '{"frameText":"あ","panelDesc":"い"}', "ok"
+
+        saved = {"ask_pro": behop.ask_pro, "read": behop._read, "lm": behop.list_models,
+                 "get": cf.gas_get, "write": cf.gas_write, "grab": cf.grab_frame,
+                 "yt": cf.have_ytdlp, "which": cf.shutil.which, "root": cf.ROOT,
+                 "sleep": cf.time.sleep, "argv": sys.argv}
+        try:
+            behop.ask_pro = fake_ask_pro
+            behop._read = lambda p, w: "BEHOPKEY"
+            behop.list_models = lambda k: [cf.BASE_MODEL]
+            cf.gas_get = lambda q, tries=3: {"ok": True, "count": 1,
+                                             "pending": [{"videoId": "vid1", "durationSec": 5}]}
+            cf.gas_write = lambda items, tries=3: {"ok": True, "written": len(items)}
+            cf.grab_frame = lambda vid, dur, work: os.path.join(work, "f.png")
+            cf.have_ytdlp = lambda: True
+            cf.shutil.which = lambda x: "/usr/bin/" + x
+            cf.ROOT = tmp
+            cf.time.sleep = lambda s: None
+            sys.argv = ["x", "--dry"] if modname == "comp_frames" else ["x", "--dry", "vid1"]
+            mod.main()
+        finally:
+            behop.ask_pro, behop._read, behop.list_models = saved["ask_pro"], saved["read"], saved["lm"]
+            cf.gas_get, cf.gas_write, cf.grab_frame = saved["get"], saved["write"], saved["grab"]
+            cf.have_ytdlp, cf.shutil.which, cf.ROOT = saved["yt"], saved["which"], saved["root"]
+            cf.time.sleep, sys.argv = saved["sleep"], saved["argv"]
+        return seen
+
+    for name, want_tag in (("comp_frames", "comp_frames"), ("target_frames", "target_frames")):
+        got = drive_frames(name)
+        chk(f"★{name}: 実行して2キーを跨ぐ (429→次キー)", len(got) == 2)
+        chk(f"★{name}: 用途タグが実際に渡る (既定のask_proに落ちていない)",
+            len(got) == 2 and all(g["tag"] == want_tag for g in got))
+        chk(f"★{name}: 私用キーへ跨いだ行の束が homin になる",
+            len(got) == 2 and got[0] == {"key": "BEHOPKEY", "tag": want_tag, "who": "behop"}
+            and got[1] == {"key": "HOMINKEY", "tag": want_tag, "who": "homin"})
+
+    # ホイミンの部屋応対= handle() を実行し、ask() に実際に渡った tag を見る (送信は偽物)
+    sys.path.insert(0, os.path.join(_root, "scripts", "llm"))
+    import importlib
+    gr = importlib.import_module("gemini_responder")
+    seen_room = []
+    saved_gr = {"ask": gr.ask, "send": gr.send, "log": gr.log, "app": gr.append_line,
+                "be": gr.behop_enabled}
+    try:
+        gr.ask = lambda q, model=None, system_extra="", tag="cli": seen_room.append(tag) or "はい"
+        gr.send = lambda ch, t: True
+        gr.log = lambda rec: None
+        gr.append_line = lambda p, l: None
+        gr.behop_enabled = lambda: False              # ベホップ経路は⑨で別に見ている
+        gr.handle({"channel": "研究室hq", "content": "こんにちは"}, "{}")
+    finally:
+        gr.ask, gr.send, gr.log = saved_gr["ask"], saved_gr["send"], saved_gr["log"]
+        gr.append_line, gr.behop_enabled = saved_gr["app"], saved_gr["be"]
+    chk("★ホイミンの部屋応対が実際に tag=room で呼ばれる", seen_room == ["room"])
 
     print("== ⑨CLI経由の実務も用途で割れる (2026-08-18 イージス研究室) ==")
     # なぜ在るか= 研究室HQは ask_gemini 側 (ホイミンの応対) に tag="room" を通したが、
