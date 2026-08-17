@@ -9,81 +9,9 @@ window.PERSONA_HUB_DATA = {
    "アイコン": "local\\persona_avatars.json",
    "原典": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md"
   },
-  "_count": 35
+  "_count": 25
  },
  "personas": {
-  "Chami(from Claude Code)": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/bb4f1c8197c84d3aa9f212acb198305b590dfa1b21f2cf56d20cbcf41227cc32"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
-   }
-  },
-  "Chami(音声入力)": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/bb4f1c8197c84d3aa9f212acb198305b590dfa1b21f2cf56d20cbcf41227cc32"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
-   }
-  },
-  "Mk.II": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/55163a948ff9cedb160f7135d1cda3b1ddf1da29b48210cf0f9be27165fcd9db"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
-   }
-  },
   "アスナ": {
    "所属部門": "kaizen-analyst / incident-recovery",
    "設定所在": {
@@ -306,8 +234,10 @@ window.PERSONA_HUB_DATA = {
     }
    },
    "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/7cb569a1aa701f1acf1652b26c89cedbbf422245c6f18e4cb9b6304599f4d590"
+    "枚数": 1,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/7cb569a1aa701f1acf1652b26c89cedbbf422245c6f18e4cb9b6304599f4d590"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
@@ -334,30 +264,6 @@ window.PERSONA_HUB_DATA = {
       "note": "オタコンは三笘を『三笘くん』と呼ぶ(呼び捨てでもさん付けでもない・Chami 08-02)"
      }
     ]
-   }
-  },
-  "オタコン(ハル・エメリッヒ)": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/7cb569a1aa701f1acf1652b26c89cedbbf422245c6f18e4cb9b6304599f4d590"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
    }
   },
   "カスミ": {
@@ -486,49 +392,21 @@ window.PERSONA_HUB_DATA = {
     ]
    }
   },
-  "クラウディア": {
-   "所属部門": null,
+  "クラウディア・バレンツ": {
+   "所属部門": "product-scout",
    "設定所在": {
-    "原典_characterfile": null,
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\claudia.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
     "アイコン差分": "local\\persona_avatars.json",
     "スプライト": null,
-    "文脈": null
+    "文脈": "local\\persona_context\\claudia_context.md"
    },
    "口調": {
     "first_person": [
      "私"
     ]
    },
-   "アイコン": {
-    "枚数": 3,
-    "url": [
-     "https://go5-sync.trustsignalbot.workers.dev/img/0c8df4639d4445e55f8a543db2f0848cbae379d42637d4e5d4d2184f1528634c",
-     "https://go5-sync.trustsignalbot.workers.dev/img/0a52e6f847225af86be116b4e539cf5897b5ef4dbd9d6cb2f02b89932034e0f2",
-     "https://go5-sync.trustsignalbot.workers.dev/img/5fe777c25578535ec6254426c1015b8c62e7841a44af0d29380b6f2d2e568a9d"
-    ]
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
-   }
-  },
-  "クラウディア・バレンツ": {
-   "所属部門": "product-scout",
-   "設定所在": {
-    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\claudia.md",
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": "local\\persona_context\\claudia_context.md"
-   },
-   "口調": null,
    "アイコン": {
     "枚数": 3,
     "url": [
@@ -574,8 +452,10 @@ window.PERSONA_HUB_DATA = {
     ]
    },
    "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/5068172a928d22e2ce49a02e8b3a51c8df955f6f93502152b6386fec8d3ab8ca"
+    "枚数": 1,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/5068172a928d22e2ce49a02e8b3a51c8df955f6f93502152b6386fec8d3ab8ca"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
@@ -655,30 +535,6 @@ window.PERSONA_HUB_DATA = {
       "note": "デブライネは女性の作品キャラ(咲季・アメス・芽衣・トトリ・ドンナ・アーモンドアイ等)にさん付けしない=名前のまま(Chami 08-02)。実在人物モチーフへのさん付けは据え置き"
      }
     ]
-   }
-  },
-  "ケヴィン・デ・ブライネ": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/5068172a928d22e2ce49a02e8b3a51c8df955f6f93502152b6386fec8d3ab8ca"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
    }
   },
   "シャビ・アロンソ": {
@@ -892,54 +748,6 @@ window.PERSONA_HUB_DATA = {
     ]
    }
   },
-  "デブライネ": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/5068172a928d22e2ce49a02e8b3a51c8df955f6f93502152b6386fec8d3ab8ca"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
-   }
-  },
-  "デ・ブライネ": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/5068172a928d22e2ce49a02e8b3a51c8df955f6f93502152b6386fec8d3ab8ca"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
-   }
-  },
   "トトリ": {
    "所属部門": "kaizen-analyst/llm-edu",
    "設定所在": {
@@ -1042,44 +850,15 @@ window.PERSONA_HUB_DATA = {
    },
    "口調": null,
    "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/55163a948ff9cedb160f7135d1cda3b1ddf1da29b48210cf0f9be27165fcd9db"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": "Chami",
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
-   }
-  },
-  "モドリッチ": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 6,
+    "枚数": 1,
     "url": [
-     "https://go5-sync.trustsignalbot.workers.dev/img/92d616dc4012935a8104956928f91fb9b374f7bae0f4f52aba62cb4a711a44e0",
-     "https://go5-sync.trustsignalbot.workers.dev/img/4b54a918ce154790b30edc0b34f780dd2cf69cb9e000594b8621097e3ae3bc8e",
-     "https://go5-sync.trustsignalbot.workers.dev/img/135b39d8214a180b5ebae09af0bafcbbb4a86179ef5f5cbce3b938a2a8367292",
-     "https://go5-sync.trustsignalbot.workers.dev/img/c5c46bd969736ec0dfb2920d03e59df21def180c00cd49c734f1bc4b935aa7d2",
-     "https://go5-sync.trustsignalbot.workers.dev/img/ad10c073ab19d5efb3c706adc8a1559ab823d398bf0121ec226a77d4a098e6d9",
-     "https://go5-sync.trustsignalbot.workers.dev/img/ab1a8c72aaf83d8125ea3c570d05a7c8b4dd212640e2b4d7890a63ec4b5abace"
+     "https://go5-sync.trustsignalbot.workers.dev/img/55163a948ff9cedb160f7135d1cda3b1ddf1da29b48210cf0f9be27165fcd9db"
     ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
+     "Chami宛の例外": "Chami",
      "自分を対象にした個別ルール": []
     },
     "この人が誰をどう呼ぶか": []
@@ -1880,35 +1659,6 @@ window.PERSONA_HUB_DATA = {
       "note": "咲季の個別設定=『ルカさん』も可(Chami 08-06 msg 1534721531526119505『芽衣、咲季もルカさんで』)。既定は『モドリッチさん』(allowed先頭=自動補完はモドリッチさんへ倒す)。フルネームは不可(honorific_required_targets.forbidden で担保)"
      }
     ]
-   }
-  },
-  "芽衣": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 4,
-    "url": [
-     "https://go5-sync.trustsignalbot.workers.dev/img/c3d0a55ef45363cd7f7155df762cbc03867f80aa50f307cea41feb5bc4e5a133",
-     "https://go5-sync.trustsignalbot.workers.dev/img/6e1828879b7b9c4fb0af8251d18357dd2894d55b4314e3b40bd5d30ed8e20fc5",
-     "https://go5-sync.trustsignalbot.workers.dev/img/afc6a3139885ee95d634498c57a5b35ff8f66f2d031717da4d535517c9d8a5cd",
-     "https://go5-sync.trustsignalbot.workers.dev/img/ad003253aab2c00e78854c4734fb337930020a18f2da377a6b78420b8ca1c1a7"
-    ]
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
    }
   },
   "黒川あかね": {

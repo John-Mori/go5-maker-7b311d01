@@ -57,6 +57,28 @@ def _roster_map():
         print(f"[warn] ROSTER: {e}", file=sys.stderr)
     return m
 
+def _avatar_groups(avatars, roster_set, tone_set):
+    """アバターURLが同一のキー(=表記ゆれ・別名)を1人へ畳む。水増し重複の除去。
+    - Chami本人の入力別名(Chami(...))はAI人格ではないので一覧から外す。
+    - 正典名の優先: ①ROSTERにあるキー ②口調にあるキー ③最長表記(より正式)。
+    戻り: (canon_members: 正典名->[別名キー...], alias_to_canon: 別名キー->正典名)"""
+    groups = {}
+    for k, v in avatars.items():
+        if k.startswith("_") or k.startswith("Chami("):
+            continue
+        urls = v if isinstance(v, list) else [v]
+        sig = tuple(sorted(str(u) for u in urls))
+        groups.setdefault(sig, []).append(k)
+    canon_members, alias_to_canon = {}, {}
+    for keys in groups.values():
+        c = (next((k for k in keys if k in roster_set), None)
+             or next((k for k in keys if k in tone_set), None)
+             or sorted(keys, key=lambda s: (-len(s), s))[0])
+        canon_members[c] = keys
+        for k in keys:
+            alias_to_canon[k] = c
+    return canon_members, alias_to_canon
+
 def build():
     roster   = _roster_map()
     tone     = _load_json(os.path.join(PERS, "口調ルール.json")).get("personas", {})
@@ -68,25 +90,40 @@ def build():
     sto = [x for x in sto if isinstance(x, dict) and "speaker" in x]
     hrt = {k: v for k, v in yobi.get("honorific_required_targets", {}).items() if not k.startswith("_")}
 
-    # 全キャラ集合 = ROSTER ∪ 口調 ∪ アイコン
-    names = set(roster) | set(tone) | {k for k in avatars if not k.startswith("_")}
+    # 表記ゆれ・別名を正典へ畳む。正本(ROSTER/口調/アイコン)がどの表記でも二重に出さない。
+    canon_members, alias_to_canon = _avatar_groups(avatars, set(roster), set(tone))
+    def members_of(name):
+        return canon_members.get(name, [name])
+    def _first(d, name):
+        for m in members_of(name):
+            if m in d:
+                return d[m]
+        return None
+
+    # 全キャラ集合 = アバター正典 ∪ (ROSTER・口調の名を正典へ寄せたもの)
+    names = set(canon_members)
+    for n in set(roster) | set(tone):
+        names.add(alias_to_canon.get(n, n))
 
     out = {}
     for name in sorted(names):
-        r = roster.get(name, {})
+        r = _first(roster, name) or {}
         base = r.get("base")
-        av = avatars.get(name, [])
+        av = _first(avatars, name)
+        av = av if isinstance(av, list) else ([av] if av else [])  # 単一URL(文字列)も配列化=枚数を正しく数える
+        has_tone = _first(tone, name) is not None
+        has_av = _first(avatars, name) is not None
         entry = {
             "所属部門": r.get("dept"),
             "設定所在": {
                 "原典_characterfile": r.get("characterfile"),
-                "口調ルール": (os.path.join(PERS, "口調ルール.json") if name in tone else None),
+                "口調ルール": (os.path.join(PERS, "口調ルール.json") if has_tone else None),
                 "呼称ルール": os.path.join(PERS, "呼称ルール.json"),
-                "アイコン差分": (AVATARS if name in avatars else None),
+                "アイコン差分": (AVATARS if has_av else None),
                 "スプライト": (os.path.join(SPRITES, base) if base and os.path.isdir(os.path.join(SPRITES, base)) else None),
                 "文脈": (os.path.join(CONTEXT, base + "_context.md") if base and os.path.isfile(os.path.join(CONTEXT, base + "_context.md")) else None),
             },
-            "口調": tone.get(name),  # 一人称/語尾/禁止語(verbatim・正本のまま)
+            "口調": _first(tone, name),  # 一人称/語尾/禁止語(verbatim・正本のまま)
             "アイコン": {
                 "枚数": len(av),
                 "url": av,
