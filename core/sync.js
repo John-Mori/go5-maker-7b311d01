@@ -394,6 +394,41 @@
     } catch (e) { return null; }
   }
   function unionCand(olderStr, newerStr) { return unionByField(olderStr, newerStr, "cid"); }
+  // ★作成履歴(go5_stock_archive)の thumbDataUrl 恒久detox=「決定的正規化(thumb budget)」の純関数。
+  //   設計正本=docs/設計・調査/診断_作成履歴サムネ同期detox_2026-08-18.md(Fable5案C・C-043)。
+  //   作成履歴は item ごとに thumbDataUrl(≤160KB)を抱え最大約4.8MB、さらに sync2_snap に複製で実効ほぼ2倍=
+  //   iOS約5MB箱に張り付く最後の要因。局所剥がし(writeArchiveResilient_)は union(空で非空を消さない)で
+  //   remote から60秒以内に巻き戻る=根治にならない。
+  //   → 雲は whole-blob CAS 置換なので、全端末が「新しい keepN件だけ thumb を残す」同じ規則で正規化すれば
+  //     不動点 slim(union(slim(x), x)) === slim(x) に収束し、台帳もsentinelも要らずに古い thumb が雲から消える。
+  //   不変条件: item の追加/削除/並び替えは一切しない=消すのは古い item の thumbDataUrl フィールド1個だけ。
+  //     「完了作品を1件も失わない」(2026-08-03裁定・墓標なしunion)を構造的に侵さない。
+  //   fail-open: parse失敗/非配列は入力文字列をそのまま返す(nullを返さない=LSへnullが入る事故を封じる)。
+  //   ★まだどこからも呼ばない純関数(S1・挙動変更ゼロ)。書き込み側(S2)・マージ側(S3)の配線は別スライス。
+  function slimStockArchive(arrStr, keepN) {
+    keepN = (keepN == null) ? 3 : keepN;
+    var arr;
+    try { arr = JSON.parse(arrStr || "[]"); } catch (e) { return arrStr; }
+    if (!Array.isArray(arr)) return arrStr;
+    // 新しい順(completedTs||ts の降順・同値は id 降順で決定的タイブレーク)で thumb を残す keepN件を選ぶ。
+    //   ★元配列の順序・要素は保持する=順位付けは「どの item の thumb を残すか」の判定にのみ使う別列で行う。
+    var ranked = arr.map(function (m, i) { return { i: i, m: m }; });
+    ranked.sort(function (a, b) {
+      var ta = (a.m && (a.m.completedTs || a.m.ts)) || 0, tb = (b.m && (b.m.completedTs || b.m.ts)) || 0;
+      if (tb !== ta) return tb - ta;                                   // 新しい方を前へ
+      var ia = String((a.m && a.m.id) || ""), ib = String((b.m && b.m.id) || "");
+      return ia < ib ? 1 : (ia > ib ? -1 : 0);                        // 同時刻は id 降順で決定的に
+    });
+    var keep = {};
+    for (var r = 0; r < ranked.length && r < keepN; r++) keep[ranked[r].i] = 1;
+    var out = arr.map(function (m, i) {
+      if (!m || typeof m !== "object" || keep[i] || !m.thumbDataUrl) return m; // 残す/thumb無しはそのまま(同一参照)
+      var c = {};                                                     // 剥がす時だけ複製へ差し替え(thumbDataUrl だけ落とす)
+      for (var k in m) { if (Object.prototype.hasOwnProperty.call(m, k) && k !== "thumbDataUrl") c[k] = m[k]; }
+      return c;
+    });
+    return JSON.stringify(out);
+  }
   function mergeLiveArray_(mergedStr, liveStr, startStr, idField) {
     // 同期開始後にローカルが変わった時だけliveを最後に重ねる。未変更の古いliveを常にnewer扱いすると、
     // 雲から届いた新しい作品URLを同期開始時の古いURLへ巻き戻してしまう。
@@ -1009,6 +1044,7 @@
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_;
+  root.Go5Sync._test.slimStockArchive = slimStockArchive;
   root.Go5Sync._test.syncIdbPrefixes = SYNC_IDB_PREFIXES.slice();
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 
