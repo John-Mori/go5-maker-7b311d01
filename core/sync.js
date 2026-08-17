@@ -89,13 +89,29 @@
   var API_RETRY_DELAYS = [0, 500, 1200];
   function api(path, opts) {
     var c = cfg(), src = opts || {};
+    // ★opt-in タイムアウト(2026-08-17・P1/Fable5診断)。既定=undefined=従来どおり無期限
+    //   (state同期 pull/push は不変)。putBlobR2At など「着地判定を待たせるPUT」だけが timeoutMs を渡す。
+    //   iOS Safariの root.fetch は既定タイムアウトが無く、細い上りで PUT が無期限ハング→cloudLandが
+    //   永遠にsettleしない→ドラフト自動遷移が25秒で hold に落ちる(①の芯)。AbortでPUTを必ず決着させる。
+    var timeoutMs = src.timeoutMs;
     var init = Object.assign({}, src, {
       mode: "cors",
       cache: "no-store",
       headers: Object.assign({ "X-Sync-Token": c.token }, src.headers || {})
     });
+    delete init.timeoutMs; // fetch init へは渡さない
     function attempt(n) {
-      return root.fetch(c.url + path, init).catch(function (cause) {
+      var ctl = null, timer = null, fInit = init;
+      if (timeoutMs && typeof root.AbortController === "function") {
+        ctl = new root.AbortController();
+        fInit = Object.assign({}, init, { signal: ctl.signal });
+        timer = root.setTimeout(function () { try { ctl.abort(); } catch (e) {} }, timeoutMs);
+      }
+      return root.fetch(c.url + path, fInit).then(function (r) {
+        if (timer) root.clearTimeout(timer);
+        return r;
+      }, function (cause) {
+        if (timer) root.clearTimeout(timer);
         if (n + 1 < API_RETRY_DELAYS.length) {
           return new Promise(function (resolve) { root.setTimeout(resolve, API_RETRY_DELAYS[n + 1]); }).then(function () { return attempt(n + 1); });
         }
@@ -941,7 +957,7 @@
     if (!configured() || !blob || !subtle || !blob.arrayBuffer) return Promise.resolve("");
     return sha256hex(String(name)).then(function (key) {
       return blob.arrayBuffer().then(function (buf) {
-        return api("/api/img/" + key, { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: buf })
+        return api("/api/img/" + key, { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: buf, timeoutMs: 60000 })
           .then(function (r) { return r && r.ok ? key : ""; }).catch(function () { return ""; });
       });
     }).catch(function () { return ""; });

@@ -561,6 +561,22 @@
   }
   function hideSaveHold_() { var box = document.getElementById('go5SaveHold'); if (box) box.style.display = 'none'; }
 
+  // ★保存の「進捗」トースト(P2・Fable5診断2026-08-17)。hold と違い判定に一切関与しない表示だけ=ボタン無し。
+  //   z-index は hold(99999)より下=万一同時表示でも hold が勝つ。配色はアプリ準拠(紫不使用・ティール系)。
+  //   飛行中のレーンを「失敗」に見せず「保存中」と正しく伝える=①「自動遷移しない(実は保存成功中)」の体感を治す。
+  function showSaveWait_(message) {
+    var box = document.getElementById('go5SaveWait');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'go5SaveWait';
+      box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99998;max-width:520px;margin:0 auto;background:#0e1422;border:1px solid #35505a;border-radius:12px;padding:12px 16px;color:#e8f1f2;box-shadow:0 8px 24px rgba(0,0,0,.5);font-size:14px;line-height:1.55';
+      document.body.appendChild(box);
+    }
+    box.textContent = message || '動画を保存中です…';
+    box.style.display = 'block';
+  }
+  function hideSaveWait_() { var box = document.getElementById('go5SaveWait'); if (box) box.style.display = 'none'; }
+
   // ★着地失敗の実因を貫通させる小道具(Fable5診断2026-08-16・沈黙経路の根治=第1弾)。
   //   従来は verify/commit の reject が全て function(){} に吸われ、hold文面は原因に関わらず
   //   「動画を端末にも雲にも確認できませんでした」と“動画のせい”に見せていた(実際は localStorage逼迫の
@@ -863,6 +879,28 @@
       //   (Chami報告2026-08-12①「動画データの取得に失敗。3回くらい出た」の根治)。拒否=手元が無応答なので
       //   雲の控えを見に行く=これが可用性を喋る側へ倒す fail-open。
       return resolveVideoFromR2_(id);
+    });
+  }
+
+  // ★最新ドラフトの動画を先読み(②即DL・Fable5診断2026-08-17)。手元IDBに実体が有ればそのまま=何もしない。
+  //   IDBが病んで実体が無い時だけR2から取り寄せ、resolveVideoFromR2_ が取得後にIDBへ書き戻す(stock.js内)
+  //   =次のDLタップは手元から即出る。最新2件のみ・逐次・非表示タブでは動かない(iOSメモリ/帯域の配慮)。
+  //   失敗しても何も起きない(fail-open)。遷移/ゲートには一切触れない=純粋な追加。
+  var _dlWarm = {};
+  function warmNewestVideos_() {
+    if (document.hidden) return;
+    var store = idb(); if (!store) return;
+    var metas = []; try { metas = loadMeta().slice(0, 2); } catch (e) { return; }
+    var chain = Promise.resolve();
+    metas.forEach(function (m) {
+      if (!m || !m.id || _dlWarm[m.id]) return;
+      _dlWarm[m.id] = 1;
+      chain = chain.then(function () {
+        return store.get('stock_v_' + m.id).then(function (b) {
+          if (isUsableVideoBlob_(b)) return; // 手元に有る=先読み不要
+          return resolveVideoFromR2_(m.id);   // 無い時だけR2→取得後にIDBへ書き戻す
+        }).catch(function () {});
+      });
     });
   }
 
@@ -2288,16 +2326,25 @@
       var gate = { localLanded: false, cloudLanded: false, timerFired: false };
       var draftId = null;
       var navTimer = null;
+      var waitTimer = null;
       function decideNav_() {
         var act = (window.Go5SaveGate && Go5SaveGate.decide)
           ? Go5SaveGate.decide(gate)
           : (gate.localLanded || gate.cloudLanded ? 'navigate' : (gate.timerFired ? 'hold' : 'wait'));
-        if (act === 'navigate') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } hideSaveHold_(); goDraft_(); }
-        else if (act === 'hold') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } showSaveHold_(holdMessage, retryPossible); }
+        if (act === 'navigate') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } hideSaveWait_(); hideSaveHold_(); goDraft_(); }
+        else if (act === 'hold') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } hideSaveWait_(); showSaveHold_(holdMessage, retryPossible); }
       }
-      // 期限=旧25秒。着地していれば .then 経路で既に遷移済み。ここへ来る=まだ未着地。
-      //   着地済みなら navigate(保険)、未着地なら hold(明示保留)=黙って全滅しない。
-      navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 25000);
+      // ★飛行中のレーンは失敗ではない(Fable5診断2026-08-17・P2)。旧25秒は無条件に hold へ倒していたが、
+      //   iPhoneの細い上りでは動画のR2 PUTが25秒を普通に超える=保存が成功しつつある最中に
+      //   「確認できませんでした」を見せていた(①「自動遷移しない(実は保存成功中)」の芯)。
+      //   25秒=進捗表示のみ(判定は変えない)。hold は onBothFailed(両レーン失敗確定)か 75秒の最終期限だけ。
+      //   P1(core/sync.js api timeoutMs=60s)により雲レーンは必ず決着する=75秒は沈黙ハングの最終安全網。
+      //   ★遷移は従来どおり localLanded/cloudLanded(実物の着地検証済)の時だけ=8/15の全滅回帰は構造的に不可。
+      waitTimer = setTimeout(function () {
+        if (gate.localLanded || gate.cloudLanded || gate.timerFired) return;
+        showSaveWait_('動画を保存中です…このままお待ちください(電波が細いと1分ほどかかることがあります)');
+      }, 25000);
+      navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 75000);
 
       var hooks = {
         onStart: function (id) { draftId = id; },
@@ -2327,7 +2374,8 @@
           decideNav_();
           return;
         }
-        navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 20000);
+        showSaveWait_('もう一度保存しています…このままお待ちください(最大1分ほど)');
+        navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 75000); // 20秒は同じ早すぎhold病=75秒へ(P2)
         // リトライはR2だけでなくIDB書込み+読み戻しも再実行する。同期未設定端末でも手元保存の復帰で救える。
         try {
           firstVideoLanding_(draftId, detail.blob).then(function (kind) {
@@ -2380,6 +2428,7 @@
       if (!dataChanged && !imageChanged) return;
       if (modalIsOpen_()) { _stockBgPending = true; return; } // 入力・コピー中はDOMを触らず、閉じた後に1回だけ反映
       render();
+      if (dataChanged) setTimeout(warmNewestVideos_, 0); // 新しいドラフトが同期で増えたら動画を先読み(②即DL)
     });
 
     // ★IDBが無言死(iOS Safariのメモリ圧・バックグラウンド化)から回復した合図で、未表示サムネが
@@ -2482,6 +2531,7 @@
     //   タブは開いているのに中身が空のまま(再タップで直る)になっていた。読み込み順に依存せず、
     //   init 時点でドラフトタブが既に表示中なら自分で描画して穴を塞ぐ。
     if (page && !page.hidden) render();
+    setTimeout(warmNewestVideos_, 1500); // ②最新ドラフト動画をR2から先読み=即DL(sync設定の読込を少し待つ)
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
