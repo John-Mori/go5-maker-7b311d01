@@ -303,6 +303,25 @@
     _vidMirrorBusy[id] = job.then(function (v) { delete _vidMirrorBusy[id]; return v; }, function () { delete _vidMirrorBusy[id]; });
     return _vidMirrorBusy[id];
   }
+  // ★元画像(前景写真)も作成直後にメモリから直接R2へ控える(2026-08-17・Chami報告 msg1538754754824507473③
+  //   「再作成を押すと使用した画像が消える」)。動画(ensureVideoMirror_)と違い、元画像はこれまで
+  //   「IDBへ書く→IDBから mirror(stock:imgs:.src)を作る」経路しか無かった=iOS SafariがIDB書込みを黙って失敗、
+  //   または後から容量都合でIDBを退避すると、元画像がどこにも残らず 再作成の復元(restoreRemakeForeground_)も
+  //   Drive保存の元画像(go5src)も空になる。動画と同じく「作成時のメモリ実体(blobHint)」を go5src:<id> で
+  //   R2へ直接上げる=IDBが死んでも元画像が雲に残り、再作成・Drive保存の両方で拾える(fail-open・冪等)。
+  var SRCNAME = function (id) { return 'go5src:' + id; };
+  var _srcUp = {}, _srcMirrorBusy = {};
+  function ensureSrcMirror_(id, blobHint) {
+    if (!blobHint || !blobHint.size) return Promise.resolve();
+    if (_srcUp[id]) return Promise.resolve();
+    if (_srcMirrorBusy[id]) return _srcMirrorBusy[id];
+    if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return Promise.resolve();
+    var job = Go5Sync.putBlobR2At(SRCNAME(id), blobHint).then(function (key) {
+      if (key) _srcUp[id] = 1; // 成功=このセッションで再送しない。失敗時は次のsweepでまた試す(非破壊)
+    }).catch(function () {});
+    _srcMirrorBusy[id] = job.then(function (v) { delete _srcMirrorBusy[id]; return v; }, function () { delete _srcMirrorBusy[id]; });
+    return _srcMirrorBusy[id];
+  }
   // ★ドラフトタブを開かなくても、アプリが開いてさえいれば裏で全ドラフト/作成履歴の動画を雲へ上げる
   //   (Chami依頼2026-07-31「わざわざドラフトタブをタップしなくても雲に上がるように」)。
   var _mirrorSweepBusy = false, _mirrorSweepAgain = false;
@@ -649,6 +668,9 @@
           ? Promise.allSettled(auxOps)
           : Promise.all(auxOps.map(function (p) { return Promise.resolve(p).catch(function () {}); }));
         auxDone.then(function () { ensureBlobMirror_(id); }).catch(function () {});
+        // ★元画像はIDBの成否と無関係に、メモリ実体から直接R2へ控える(2026-08-17③)。IDB書込み(stock_img_)が
+        //   iOSで黙って失敗/後で退避されても、go5src:<id> がR2に残る=再作成・Drive保存が空にならない。
+        if (evDetail.sourceImageFile) { try { ensureSrcMirror_(id, evDetail.sourceImageFile); } catch (e) {} }
 
         // Phase 1: 動画を手元/雲へ並列着地。手元は set 解決ではなく、同じキーの読み戻しまで検証する。
         //   ★各レーンの reject 理由(idb-timeout / QuotaExceeded / draft-meta-readback-failed=localStorage逼迫 /
@@ -1026,7 +1048,13 @@
     ]).then(function (r) {
       var img = r[0], mirror = r[1] || {};
       if (img) return img;
-      return mirror.src ? durlToBlob_(mirror.src) : null; // .then が Promise を自動で解く
+      if (mirror.src) return durlToBlob_(mirror.src); // .then が Promise を自動で解く
+      // ★手元IDBにも同期ミラーにも無い=作成直後にR2へ控えた元画像 go5src:<id> を取り寄せる(2026-08-17③)。
+      //   これでIDB退避後でもDrive保存の「元画像」が空にならない。
+      if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
+        return Go5Sync.fetchBlobR2At('go5src:' + id).then(function (b) { return (b && b.size) ? b : null; }).catch(function () { return null; });
+      }
+      return null;
     }, function () { return null; });
   }
 
@@ -1276,6 +1304,11 @@
       var img = r[0], mirror = r[1] || {};
       if (img) { setFg(img); return; }
       if (mirror.src) return durlToBlob_(mirror.src).then(setFg); // サブ端末で作った=同期ミラーから戻す
+      // ★手元IDBにも同期ミラーにも無い(iOSがIDBを退避した等)=作成直後にR2へ控えた元画像 go5src:<id> から
+      //   最後の復元(2026-08-17③)。これが無いと「再作成で画像が消える」が残る。
+      if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
+        return Go5Sync.fetchBlobR2At('go5src:' + meta.id).then(function (b) { if (b && b.size) setFg(b); }).catch(function () {});
+      }
     }).catch(function () {});
   }
 
