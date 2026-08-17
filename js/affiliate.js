@@ -47,7 +47,9 @@
   }
   function showTab(activeBtnId) {
     // ドラフトはiOS Safariのメモリ圧を避ける軽量専用ページへ。保存タブの復元時も本体内の旧sectionを開かない。
-    if (activeBtnId === 'tabStock' && !window.__go5StockStandalone) {
+    //   ★保存窓の間(__go5SaveInFlight=true)だけは Stock.html へ飛ばさず #pageStock をページ内表示する
+    //     (B・Fable5設計2026-08-17)=着地前の破壊遷移(全消し窓)を塞ぐ。窓の外では従来どおり専用ページへ。
+    if (activeBtnId === 'tabStock' && !window.__go5StockStandalone && !window.__go5SaveInFlight) {
       try { localStorage.setItem('go5_active_tab', 'tabStock'); } catch (e) {}
       location.href = 'Stock.html';
       return;
@@ -114,6 +116,8 @@
     //   (予約/カレンダー)はタブバーに無いので centerTab_ 側の早期returnで何もしない。
     centerTab_(activeBtnId);
   }
+  // ★stock.js のページ内表示(B)から単一の切替権威として呼べるよう公開する(保存窓中のみ inline へ倒れる)。
+  try { window.showTab = showTab; } catch (e) {}
   TABS.forEach(function (t) {
     var b = document.getElementById(t.btn);
     if (!b) return;

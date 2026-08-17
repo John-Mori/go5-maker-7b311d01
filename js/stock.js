@@ -1434,6 +1434,25 @@
     '</div>';
   }
 
+  // ★保存中(未着地)ドラフトの1行。着地までのページ内表示(B・Fable5設計2026-08-17)用。
+  //   まだ手元/雲に着地していない=操作ボタンは出さない(DL/投稿は着地後の通常カードで)。
+  function renderPendingItem_(meta) {
+    var acctLabel = meta.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+    var thumbUrl = meta.thumbDataUrl || '';
+    var status = meta._failed
+      ? '<span style="color:#e6a23c;font-weight:700;">⚠ 保存に失敗。下の「もう一度保存」で再確認できます</span>'
+      : '<span style="color:var(--accent);">⏳ 保存中…(この端末と雲へ確認しています)</span>';
+    return '<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
+      (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:48px;height:85px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
+                : '<div style="width:48px;height:85px;border-radius:5px;background:linear-gradient(160deg,#17243a,#0e1422);border:1px solid #31405a;display:flex;align-items:center;justify-content:center;color:#7a8fa3;font-size:.6rem;text-align:center;flex:0 0 auto;">保存中</div>') +
+      '<div style="flex:1 1 0;min-width:0;">' +
+        '<div style="font-size:.86rem;font-weight:700;color:#eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
+        '<div style="font-size:.74rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · ' + esc(fmtTs(meta.ts)) + '</div>' +
+        '<div style="font-size:.74rem;margin-top:4px;">' + status + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
   // 作成履歴(退避済み)の1行。復元・動画DL(blobは残してある)・完全削除。
   function renderArchItem_(meta, thumbUrl) {
     var id = meta.id;
@@ -1565,6 +1584,11 @@
     var curAcct = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
     var metas = loadMeta().filter(function (m) { return (m.account || 'acc1') === curAcct; });
     var arch = loadArchive().filter(function (m) { return (m.account || 'acc1') === curAcct; });
+    // ★保存中(未着地)ドラフト=メモリ上の pending だけ。着地(commitPendingDraft_)で metas 側へ移るので、
+    //   既に metas に居る id は除外して重複を防ぐ(B・Fable5設計2026-08-17)。
+    var _metaIds = {}; metas.forEach(function (m) { _metaIds[m.id] = 1; });
+    var pendingList = Object.keys(_pendingDraftMeta).map(function (k) { return _pendingDraftMeta[k]; })
+      .filter(function (m) { return m && (m.account || 'acc1') === curAcct && !_metaIds[m.id]; });
     var sig = stockViewSig_(curAcct), seq = ++_renderSeq;
 
     var store = idb();
@@ -1575,7 +1599,15 @@
       if (seq !== _renderSeq || page.hidden) return;
       // ★過去分プレビューの一括復元は「投稿履歴の🔁ボタン」へ統合した(Chami依頼2026-08-13)。
       //   ドラフトタブのこのボタンは撤去(Chami「ドラフトタブにそのボタンは不要・削除で」)。
-      var html = '<div class="card">';
+      var html = '';
+      // ★保存中カード(ページ内表示中に生成直後のドラフトを「保存中…」で先頭表示・B)。
+      if (pendingList.length) {
+        html += '<div class="card" style="border:1px solid var(--accent);">' +
+          '<div style="font-size:.95rem;font-weight:700;color:var(--accent);margin-bottom:10px;">⏳ 保存中(' + pendingList.length + '件)</div>' +
+          pendingList.map(function (m) { return renderPendingItem_(m); }).join('') +
+        '</div>';
+      }
+      html += '<div class="card">';
       if (metas.length) {
         html += '<div style="font-size:.95rem;font-weight:700;color:var(--accent);margin-bottom:10px;">📦 ドラフト(' + metas.length + '件)</div>' +
           metas.map(function (m) { return renderItem_(m, thumbFor[m.id]); }).join('');
@@ -1653,6 +1685,26 @@
       paint_(thumbFor); // サムネが揃ったら差し替え描画(即描画の骨格を上書き)
     });
   }
+
+  // ★ページ内でドラフト一覧を前面に出す(B・Fable5設計2026-08-17)。破壊遷移(location.href='Stock.html')を
+  //   使わず #pageStock を表示=生成直後に一覧が出て「自動遷移が遅い/手動タブの方が速い」を解消し、かつ
+  //   手動タブの全消し窓(8/15の全滅=着地前に location.href でblobを殺す)も塞ぐ。保存窓の間だけ有効
+  //   (__go5SaveInFlight=true)。affiliate.js の showTab を単一の切替権威として使い、その tabStock 早期return
+  //   (Stock.htmlへ)は __go5SaveInFlight で無効化される=一覧表示+render() は showTab 側が担う。
+  function showStockInline_() {
+    window.__go5SaveInFlight = true;
+    if (typeof window.showTab === 'function') { try { window.showTab('tabStock'); return; } catch (e) {} }
+    // フォールバック(affiliate.js 未ロード時のみ): 手動で #pageStock を前面へ。
+    try {
+      var secs = document.querySelectorAll('section[id^="page"]');
+      for (var i = 0; i < secs.length; i++) secs[i].hidden = (secs[i].id !== 'pageStock');
+      var ps = $('pageStock'); if (ps) ps.hidden = false;
+      document.documentElement.setAttribute('data-tab', 'tabStock');
+      try { localStorage.setItem('go5_active_tab', 'tabStock'); } catch (e2) {}
+    } catch (e3) {}
+    render();
+  }
+
   // ── 投稿モード モーダル ──
   var _modalMeta = null;
   var _ytTitleDirty = false; // ユーザーが題名を手編集したかどうか(trueの間はタグ変更で上書きしない)
@@ -2354,6 +2406,11 @@
       if (!(e && e.detail && e.detail.draft)) return;
       var detail = e.detail;
       var blobUsable = isUsableVideoBlob_(detail.blob);
+      // ★①「自動遷移が遅い/手動タブの方が速い」の解消(B・Fable5設計2026-08-17)。
+      //   生成完了で即ドラフト一覧をページ内表示=着地(navigate)を待たずに一覧が出る。新ドラフトは下の
+      //   onStart で pending の「保存中…」カードとして先頭に出る。破壊遷移(location.href)は着地検証後 or
+      //   保存窓外のみ=8/15の全滅の不変条件(未着地で遷移しない)は維持。standalone(Stock.html単独)では不要。
+      if (!window.__go5StockStandalone) { try { showStockInline_(); } catch (_e) {} }
       // ★holdMessage は「実因が判明したら上書きできる」よう可変にする(Fable5診断2026-08-16)。
       //   従来は原因に関わらず“動画のせい”に見せる固定文で、localStorage逼迫のメタ書込み失敗も同じ文面だった。
       var holdMessageBase = blobUsable
@@ -2367,7 +2424,11 @@
       var _navigated = false;
       var goDraft_ = function () {
         if (_navigated) return; _navigated = true; // 保険のタイマとsaveStock_完了で二重遷移しない
+        window.__go5SaveInFlight = false; // 着地決着=以後の手動タブ/リロードは通常どおり Stock.html へ
         if (window.__go5StockStandalone) { render(); return; }
+        // ページ内表示(B)中は既に #pageStock が前面=再描画で pending を通常カードへ置換して終わり(遷移しない)。
+        var ps = $('pageStock');
+        if (ps && !ps.hidden) { render(); return; }
         try { location.href = 'Stock.html'; }
         catch (e2) { var tb = $('tabStock'); if (tb) tb.click(); else render(); }
       };
@@ -2401,7 +2462,7 @@
 
       var hooks = {
         // 作成直後の動画blobをメモリ層へ即載せる=生成→即DLがタップ即応(②即DL・Fable5設計2026-08-17)。
-        onStart: function (id) { draftId = id; if (blobUsable) putVidMem_(id, detail.blob); },
+        onStart: function (id) { draftId = id; if (blobUsable) putVidMem_(id, detail.blob); render(); /* pending「保存中…」カードを先頭へ */ },
         onLocal: function (id) { draftId = id; gate.localLanded = true; decideNav_(); },
         onCloud: function (id) { draftId = id; gate.cloudLanded = true; decideNav_(); },
         // 両方が「着地できずに」決着=着地不能が確定。25秒を待たず今すぐ hold へ倒す。
@@ -2409,6 +2470,7 @@
         //     メタ書込み失敗(localStorage逼迫)と動画着地失敗を切り分けて見せる(Fable5診断2026-08-16)。
         onBothFailed: function (id, reasons) {
           draftId = id;
+          var _pf = _pendingDraftMeta[id]; if (_pf) { _pf._failed = true; render(); } // pendingカードを「保存に失敗」表記へ
           if (reasons && (reasons.local || reasons.cloud)) {
             holdMessage = holdMessageBase + ' 内訳=手元:' + (reasons.local || 'ok') + ' / 雲:' + (reasons.cloud || 'ok') + '。';
           }
@@ -2428,6 +2490,7 @@
           decideNav_();
           return;
         }
+        var _pr = _pendingDraftMeta[draftId]; if (_pr) { _pr._failed = false; render(); } // pendingカードを「保存中…」表記へ戻す
         showSaveWait_('もう一度保存しています…このままお待ちください(最大1分ほど)');
         navTimer = setTimeout(function () { gate.timerFired = true; decideNav_(); }, 75000); // 20秒は同じ早すぎhold病=75秒へ(P2)
         // リトライはR2だけでなくIDB書込み+読み戻しも再実行する。同期未設定端末でも手元保存の復帰で救える。
