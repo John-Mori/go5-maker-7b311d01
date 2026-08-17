@@ -12,6 +12,9 @@ CHECKS = [
     "check_inbox_hygiene.py",
     "check_manifest_coverage.py",
     "replay_sweep_trap.py",
+    "check_dept_firing.py",
+    "check_version_consistency.py",
+    "check_skills_installed.py",
 ]
 
 
