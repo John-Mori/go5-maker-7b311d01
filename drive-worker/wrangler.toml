@@ -2,6 +2,11 @@ name = "go5-drive-saver"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
+# ── 観測（Workers Logs）──★save_job 完走本体の各終端ログ(console.warn/log)を Cloudflare 側で保持し、
+#    `wrangler tail` / ダッシュボードで「保存がどの段で落ちたか」を実測できるようにする(2026-08-17 オタコン)。
+[observability]
+enabled = true
+
 # ── 非秘密の設定（ここに秘密は書かない。秘密は wrangler secret put で登録）──
 [vars]
 # フロント(GitHub Pages)のOriginだけ許可（ワイルドカード不可）
