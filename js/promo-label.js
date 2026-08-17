@@ -39,6 +39,19 @@
   var TEMPLATES = {
     acc1: {
       baseW: 360, aspect: 1024 / 1536,
+      // ★2026-08-18 acc2(宵桜)はお手本シート切り出し方式(digitSheet)へ切替済みだが、acc1(月詠み)は
+      //   digitSheetを持たせていない=意図的(下のdrawDigits/フォント描画のまま)。理由: Chami提供の
+      //   月詠み数字シート(local/promo-ref/tsukuyomi-digits.png・添付1539030477833506816_0.png)は
+      //   どちらもPILで実測するとRGB(アルファチャンネル無し)＝市松柄が"透過"ではなく画素として
+      //   焼き込み済み。チャンネル(彩度)閾値で背景除去を試みたが、金属ストロークの中を走る白い
+      //   スペキュラーハイライト筋(例: 0の左脚 x≈48,y≈360 付近=RGB(255,254,255)・彩度0)が、
+      //   "0"の輪の内側にある本物の穴(カウンター・同じく彩度0)と色だけでは区別不能(実測: 輪の穴の
+      //   連結成分11283px vs ハイライト筋の連結成分3006px=サイズでの安全な閾値も引けない)。
+      //   どちらの単純手法(閾値のみ/連結成分のみ)を選んでも、片方に必ず見た目の欠陥が出る
+      //   (ハイライトを消す=筋に穴が開く／連結成分だけ塞ぐ="0"の中が不透明な円盤になる)。
+      //   → 正しい透過版シートが来るまで、acc1はここに手を入れず現状の描画(フォント)を維持する。
+      //   詳細は改修部からの報告(local/llm/change_log.jsonl 2026-08-18・promo-label digit sheet)参照。
+
       // ★2026-08-18 Chami提供のお手本(local/promo-ref/tsukuyomi-digits.png=金の数字シート0〜9)へ実合わせ
       //   (AD研究室ルカ代行発注「77の数字が重く角ばる」)。PILで実ピクセルを採色:
       //   核の最明部≈#fffdf5(ほぼ白のハイライト)/最暗部(下1%)≈#e99b23(濃い金アンバー)。
@@ -82,6 +95,29 @@
              //   contourはacc1(0.020)よりわずかに残して持ち上げを確保。edge/glowはお手本の細い銅の縁・
              //   柔らかい桜光彩に合わせacc1相当まで細める。
              contourW: 0.028, edgeW: 0.013, glowW: 0.058 },
+      // ★2026-08-18 Chami依頼「お手本シートの数字を切り出して貼る」方式(AD研究室ルカ代行発注)。
+      //   宵桜はChami添付シート(local/attachments/1539030477833506816_1.png)が実測で正真のRGBA
+      //   透過(四隅・字間alpha=0を確認済み)なので、上のink/drawDigits(フォント描画)は使わず
+      //   このシートから直接グリフを切り出してdrawImageで貼る(=字形がお手本と完全一致・端末フォント非依存)。
+      //   glyphs[n]は sheet画像の幅/高さに対する比率。y/hは10桁共通の帯(cellY/cellH)=全桁が同じ
+      //   基準線に揃うよう共有(桁ごとに独立させると微妙な高さ差でガタつく)。座標はPIL実測(下記算出根拠は
+      //   引き継ぎ/報告に記載)。assets/promo/yoizakura-digits.pngへ複製済み(?v=はtplImgが自動付与)。
+      digitSheet: {
+        src: 'assets/promo/yoizakura-digits.png',
+        cellY: 0.39160, cellH: 0.18848,
+        glyphs: [
+          { x: 0.01367, w: 0.09375 }, // 0
+          { x: 0.11719, w: 0.06510 }, // 1
+          { x: 0.20247, w: 0.09701 }, // 2
+          { x: 0.30729, w: 0.09245 }, // 3
+          { x: 0.40885, w: 0.08984 }, // 4
+          { x: 0.51172, w: 0.09180 }, // 5
+          { x: 0.60938, w: 0.09701 }, // 6
+          { x: 0.71615, w: 0.07812 }, // 7 (「7」「8」がシート上で接していたため谷間x=1219/1536で分割)
+          { x: 0.79427, w: 0.09635 }, // 8
+          { x: 0.89518, w: 0.09180 }  // 9
+        ]
+      },
       discount: { src: 'assets/promo/yoizakura-discount-base.png',
                   slot: { x: 0.364, y: 0.260, w: 0.211, h: 0.490 } },
       price:    { src: 'assets/promo/yoizakura-price-base.png',
@@ -244,7 +280,17 @@
     var octx = off.getContext('2d');
     octx.clearRect(0, 0, off.width, off.height);
     octx.drawImage(img, 0, 0);                             // 本体+装飾+三日月+固定文言(PNGに焼込済)
-    drawDigits(octx, tplAcct().ink, v.slot, 0, 0, off.width, off.height, String(val())); // 数字も同じ1枚へ
+    // ★2026-08-18 digitSheet(お手本切り出し)があればそちらを優先。シート画像が未読込/デコード前や
+    //   layoutDigitGlyphsが空を返した(数字以外の文字等)場合は、その回だけ従来のフォント描画へ自動退避
+    //   (シート読込完了時はtplImgのonloadが_composite=nullで作り直すため、次フレームでシート版に更新される)。
+    var tpl = tplAcct(), digitSheet = tpl.digitSheet, usedSheet = false;
+    if (digitSheet) {
+      var sheetImg = tplImg(digitSheet.src);
+      if (sheetImg && !sheetImg._failed && sheetImg.complete && sheetImg.naturalWidth) {
+        usedSheet = drawDigitsFromSheet(octx, sheetImg, digitSheet, 0, 0, off.width, off.height, v.slot, String(val()));
+      }
+    }
+    if (!usedSheet) drawDigits(octx, tpl.ink, v.slot, 0, 0, off.width, off.height, String(val())); // 数字も同じ1枚へ
     runPreflight_(octx, off.width, off.height, v.slot, acct(), ltype); // 作成時プリフライト(既定OFF・警告のみ)
     _composite = off; _compKey = key;
     return off;
@@ -336,6 +382,70 @@
     ctx.fillStyle = grad; ctx.fillText(text, cx, by);
     ctx.shadowColor = 'transparent';
     ctx.restore();
+  }
+
+  // ── お手本シート切り出し合成(2026-08-18・Chami依頼): システムフォント(drawDigits)をやめ、
+  //   お手本の数字シート(0〜9)から実ピクセルを切り出して貼る。字形がシートと完全一致し端末フォント非依存。
+  //   layoutDigitGlyphs は純粋関数(canvas非依存・数値だけ)＝Nodeテスト可。実描画は drawDigitsFromSheet が
+  //   その結果を ctx.drawImage で1文字ずつ焼くだけ(副作用はここだけに閉じ込める)。
+  //   sheet = { cellY, cellH, glyphs:[{x,w},...] }(すべてシート画像サイズに対する比率・0〜9の10要素)。
+  //   natural = { w, h }(シート画像の実画素サイズ)。box = { x, y, w, h }(貼り先の矩形・出力先ピクセル空間)。
+  //   text = 数字文字列。gap = 字間(グリフ高さに対する比率・既定0.06)。
+  //   戻り値 = [{sx,sy,sw,sh,dx,dy,dw,dh}, ...](drawImageへそのまま渡せる9引数の後半8個)。
+  //   text中に0-9以外の文字がある/glyphsに該当が無い場合は空配列を返す(呼び出し側はdrawDigitsへフォールバック)。
+  function layoutDigitGlyphs(sheet, natural, box, text, gap) {
+    gap = (typeof gap === 'number') ? gap : 0.06;
+    var nw = natural.w, nh = natural.h;
+    var cellHpx = sheet.cellH * nh;
+    var chars = String(text).split('');
+    var glyphs = [];
+    for (var i = 0; i < chars.length; i++) {
+      var idx = chars[i].charCodeAt(0) - 48; // '0'=48
+      var g = (idx >= 0 && idx <= 9) ? sheet.glyphs[idx] : null;
+      if (!g) return []; // 数字以外/未定義グリフ=呼び出し側でフォールバック
+      glyphs.push(g);
+    }
+    if (!glyphs.length || !cellHpx) return [];
+    function totalWidthAt(scale) {
+      var tw = 0;
+      for (var i = 0; i < glyphs.length; i++) {
+        tw += glyphs[i].w * nw * scale;
+        if (i < glyphs.length - 1) tw += cellHpx * scale * gap;
+      }
+      return tw;
+    }
+    var pad = box.w * 0.04;
+    var scale = box.h / cellHpx; // まず高さ基準(slot高さいっぱい)で試す
+    var tw = totalWidthAt(scale);
+    if (tw > box.w - pad * 2 && tw > 0) scale *= (box.w - pad * 2) / tw; // 幅に収まらなければ縮小
+    var drawH = cellHpx * scale;
+    tw = totalWidthAt(scale);
+    var cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    var curX = cx - tw / 2;
+    var topY = cy - drawH / 2;
+    var out = [];
+    for (var i = 0; i < glyphs.length; i++) {
+      var g = glyphs[i];
+      var sw = g.w * nw, sh = cellHpx, dw = sw * scale, dh = drawH;
+      out.push({ sx: g.x * nw, sy: sheet.cellY * nh, sw: sw, sh: sh, dx: curX, dy: topY, dw: dw, dh: dh });
+      curX += dw + cellHpx * scale * gap;
+    }
+    return out;
+  }
+  // 実描画(ctx依存)。placementsが空(=layoutDigitGlyphsがフォールバック要求)ならfalseを返し、
+  //   呼び出し側(compositeReady_)が従来のdrawDigits(フォント描画)へ切り替える。
+  function drawDigitsFromSheet(ctx, sheetImg, sheet, x, y, bw, bh, slot, text) {
+    var zx = x + slot.x * bw, zy = y + slot.y * bh, zw = slot.w * bw, zh = slot.h * bh;
+    var natural = { w: sheetImg.naturalWidth, h: sheetImg.naturalHeight };
+    var placements = layoutDigitGlyphs(sheet, natural, { x: zx, y: zy, w: zw, h: zh }, text);
+    if (!placements.length) return false;
+    ctx.save();
+    for (var i = 0; i < placements.length; i++) {
+      var p = placements[i];
+      ctx.drawImage(sheetImg, p.sx, p.sy, p.sw, p.sh, p.dx, p.dy, p.dw, p.dh);
+    }
+    ctx.restore();
+    return true;
   }
 
   // ── プリフライト用の純粋関数(検査専用・描画へは一切使わない・副作用なし) ──
@@ -715,7 +825,14 @@
         var c = canvas.getContext('2d');
         c.clearRect(0, 0, canvas.width, canvas.height);
         c.drawImage(img, 0, 0);
-        drawDigits(c, t.ink, v.slot, 0, 0, canvas.width, canvas.height, String(value));
+        var used = false;
+        if (t.digitSheet) {
+          var sheetImg = tplImg(t.digitSheet.src);
+          if (sheetImg && sheetImg.complete && sheetImg.naturalWidth) {
+            used = drawDigitsFromSheet(c, sheetImg, t.digitSheet, 0, 0, canvas.width, canvas.height, v.slot, String(value));
+          }
+        }
+        if (!used) drawDigits(c, t.ink, v.slot, 0, 0, canvas.width, canvas.height, String(value));
         return true;
       }
     }
@@ -731,7 +848,8 @@
       inkBoxOf: inkBoxOf,
       relLuminance: relLuminance,
       contrastRatio: contrastRatio,
-      localBgLuminance: localBgLuminance
+      localBgLuminance: localBgLuminance,
+      layoutDigitGlyphs: layoutDigitGlyphs
     };
   }
 })();
