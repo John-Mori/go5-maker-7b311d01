@@ -39,7 +39,20 @@
   var TEMPLATES = {
     acc1: {
       baseW: 360, aspect: 1024 / 1536,
-      ink: { top: '#fff6d8', bottom: '#f0cf8a', edge: 'rgba(210,168,90,.85)', glow: 'rgba(255,224,150,.9)', contour: 'rgba(92,58,16,.92)' },
+      // ★2026-08-18 Chami提供のお手本(local/promo-ref/tsukuyomi-digits.png=金の数字シート0〜9)へ実合わせ
+      //   (AD研究室ルカ代行発注「77の数字が重く角ばる」)。PILで実ピクセルを採色:
+      //   核の最明部≈#fffdf5(ほぼ白のハイライト)/最暗部(下1%)≈#e99b23(濃い金アンバー)。
+      //   旧(top #fff6d8 / bottom #f0cf8a)は白寄りでなく彩度も低い"ベージュ"止まりで、
+      //   金属的な明→暗の階調(ハイライト→アンバー)が原画より弱かった=そのまま質感の差に直結。
+      //   縁/輪郭は色よりも「太さ」が主犯(下記contourW/edgeW参照)。ここでは色だけ暖色金へ寄せ、
+      //   contourのアルファも.92→.55へ下げ黒すぎる下地を薄める(縁取りでなく"わずかな浮かせ"に留める)。
+      ink: { top: '#fffdf5', bottom: '#f0a83e', edge: 'rgba(224,158,52,.9)', glow: 'rgba(255,224,150,.85)', contour: 'rgba(120,68,18,.55)',
+             // ★太さの主犯対策: 旧一律 contour=fs*0.075 / edge=fs*0.024 は、Didone体本来の
+             //   「縦太・横極細」のコントラストを均一な太い縁取りで塗り潰し、"重く角ばる"の主因だった
+             //   (Windows実機Bodoni MTフォールバック描画と添付screenshotの実機ともに同一の団子状"7"を確認=
+             //   フォント差ではなくstroke量が主因と切り分け済み)。acc1だけ大幅に薄く=お手本相当の繊細さへ。
+             //   acc2は未指定=下のdrawDigitsの既定値(旧仕様のまま)を使うため無変更。
+             contourW: 0.020, edgeW: 0.012, glowW: 0.055 },
       discount: { src: 'assets/promo/tsukuyomi-discount-base.png',
                   slot: { x: 0.332, y: 0.306, w: 0.342, h: 0.189 } },
       price:    { src: 'assets/promo/tsukuyomi-price-base.png',
@@ -297,15 +310,20 @@
     //   数字が明るい札(特に宵桜の桜ピンク)に溶けて霞む主因は「明色の数字＋明色の光彩」で
     //   コントラストが立たなかったこと。下に濃色の縁＋弱い落ち影を敷いてから本体を重ねる。
     var contour = ink.contour || 'rgba(60,30,20,.9)';
+    // ★太さは ink.contourW/edgeW/glowW で account別に上書き可能(既定=旧数値のまま=無指定なら無変更)。
+    //   2026-08-18 acc1のみ薄く指定(お手本寄せ・drawDigits冒頭コメント参照)。acc2は無指定=旧仕様通り。
+    var contourW = (typeof ink.contourW === 'number') ? ink.contourW : 0.075;
+    var edgeW = (typeof ink.edgeW === 'number') ? ink.edgeW : 0.024;
+    var glowW = (typeof ink.glowW === 'number') ? ink.glowW : 0.07;
     ctx.shadowColor = 'rgba(0,0,0,.30)'; ctx.shadowBlur = fs * 0.05; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = fs * 0.015;
-    ctx.lineWidth = Math.max(1.5, fs * 0.075); ctx.strokeStyle = contour; ctx.strokeText(text, cx, by);
+    ctx.lineWidth = Math.max(1.5, fs * contourW); ctx.strokeStyle = contour; ctx.strokeText(text, cx, by);
     ctx.shadowColor = 'transparent';
     // 2) 本体グラデ(くっきり=光彩なしで一度置く)
     ctx.fillStyle = grad; ctx.fillText(text, cx, by);
     // 3) 細い縁で輪郭を締める
-    ctx.lineWidth = Math.max(1, fs * 0.024); ctx.strokeStyle = ink.edge; ctx.strokeText(text, cx, by);
-    // 4) ごく控えめな光彩(にじませ過ぎない=0.07)を最後に本体へ重ねる
-    ctx.shadowColor = ink.glow; ctx.shadowBlur = fs * 0.07; ctx.shadowOffsetY = 0;
+    ctx.lineWidth = Math.max(1, fs * edgeW); ctx.strokeStyle = ink.edge; ctx.strokeText(text, cx, by);
+    // 4) ごく控えめな光彩(にじませ過ぎない)を最後に本体へ重ねる
+    ctx.shadowColor = ink.glow; ctx.shadowBlur = fs * glowW; ctx.shadowOffsetY = 0;
     ctx.fillStyle = grad; ctx.fillText(text, cx, by);
     ctx.shadowColor = 'transparent';
     ctx.restore();
