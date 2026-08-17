@@ -1,0 +1,178 @@
+# -*- coding: utf-8 -*-
+"""べホップの降格ラダーと --ping の検査 (2026-08-18 イージス研究室・研究室HQ依頼の恒久対策)。
+
+なぜ在るか= 2026-08-17、ベホップが「生成失敗」で止まった。実測の道筋は
+  gemini-2.5-pro=404 → gemini-flash-latest=503 → **中断**。下に生きている
+  gemini-flash-lite-latest(200) へ降りずに終わっていた。しかも **--ping は緑のまま**だった
+  (pingがListModelsしか叩かず、generateContent を一度も通していなかったため)。
+
+★この検査の作り (共通規律§3):
+  ソースの文字列一致では検査にならない=**外へ出る手 (_gen_once / list_models / Discord) だけ偽物**にし、
+  **判定と分岐 (ラダーの構築・降格・終了コード) は本物のまま**実行で通す。
+  「今その状態が無いから試せない」ものは、**その状態を作って渡す** (404/503/429を返す偽の_gen_once)。
+
+★本番の記録を汚さない= import の前に GO5_LOCAL_DIR を一時フォルダへ向ける
+  (gemini_usage は import 時に書き込み先を決めるため、この順序でないと本番の
+   local/llm/gemini_usage.jsonl へ検査の行が混ざる)。
+
+走らせ方= python scripts/behop/test_behop_ladder.py
+"""
+import os
+import sys
+import tempfile
+import urllib.error
+
+os.environ["GO5_LOCAL_DIR"] = tempfile.mkdtemp(prefix="behop_test_")   # ★import より前
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import behop  # noqa: E402
+
+_ok = 0
+_ng = 0
+
+
+def chk(label, cond):
+    global _ok, _ng
+    if cond:
+        _ok += 1
+        print("  PASS", label)
+    else:
+        _ng += 1
+        print("  FAIL", label)
+
+
+def http(code):
+    return urllib.error.HTTPError("http://x", code, "e", {}, None)
+
+
+def fake_gen(codes):
+    """モデル名→(例外 or 返す文字列) の台本を持つ偽の _gen_once。叩かれた順も記録する。"""
+    calls = []
+
+    def _f(key, model, payload):
+        calls.append(model)
+        v = codes.get(model, http(404))
+        if isinstance(v, Exception):
+            raise v
+        return v
+    return _f, calls
+
+
+# ★2026-08-18 に本番キーの ListModels が実際に返した37種から採った一覧 (作り話ではない)。
+# 画像/音声/別製品/gemma が混ざっているのが実態で、そこが梯子を汚していた。
+AVAIL = ["gemini-2.5-pro", "gemini-pro-latest", "gemini-flash-latest", "gemini-2.5-flash",
+         "gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-3.7-flash",
+         "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview",
+         "gemini-3-pro-image", "gemini-3.1-flash-image-preview", "nano-banana-pro-preview",
+         "gemini-2.5-flash-preview-tts", "lyria-3-pro-preview", "deep-research-pro-preview-12-2025",
+         "antigravity-preview-05-2026", "gemini-robotics-er-2-preview", "gemma-4-31b-it",
+         "gemini-2.5-computer-use-preview-10-2025"]
+
+
+def main():
+    behop.time.sleep = lambda *_a, **_k: None      # 検査で1.5秒×段数を待たない
+
+    print("== ①序列: 名前から強さを読む ==")
+    chk("pro > flash > flash-lite", behop.model_tier("gemini-2.5-pro") == 3
+        and behop.model_tier("gemini-flash-latest") == 2
+        and behop.model_tier("gemini-flash-lite-latest") == 1)
+    chk("latestは同階層で番号付きより先",
+        behop.model_score("gemini-pro-latest") > behop.model_score("gemini-2.5-pro"))
+    chk("previewは同階層で安定版より後",
+        behop.model_score("gemini-2.5-pro-preview-06-05") < behop.model_score("gemini-2.5-pro"))
+    chk("★未知の新世代も名前だけで上位に来る(世代交代に追随)",
+        behop.model_score("gemini-4-pro-latest") > behop.model_score("gemini-2.5-pro"))
+    chk("読めない名前も捨てない(tier=0で残る)", behop.model_tier("nanika-999") == 0)
+    chk("★日付を世代番号と読まない(12-2025の12を掴まない)",
+        behop.model_gen("deep-research-pro-preview-12-2025") == 0.0)
+    chk("世代番号は正しく読む(3.7 / 2.5)",
+        behop.model_gen("gemini-3.7-flash") == 3.7 and behop.model_gen("gemini-2.5-pro") == 2.5)
+
+    print("== ②テキストを返さないモデルを外す ==")
+    for bad in ("gemini-3-pro-image", "nano-banana-pro-preview", "gemini-2.5-flash-preview-tts",
+                "lyria-3-pro-preview", "deep-research-pro-preview-12-2025",
+                "gemini-robotics-er-2-preview", "gemma-4-31b-it",
+                "gemini-2.5-computer-use-preview-10-2025", "antigravity-preview-05-2026"):
+        chk("梯子に入れない: %s" % bad, not behop.is_text_model(bad))
+    for good in ("gemini-2.5-pro", "gemini-pro-latest", "gemini-3.7-flash", "gemini-flash-lite-latest"):
+        chk("梯子に入れる: %s" % good, behop.is_text_model(good))
+
+    print("== ③ラダー構築 ==")
+    lad = behop.build_ladder(AVAIL)
+    chk("先頭はproの段", behop.model_tier(lad[0]) == 3)
+    chk("★先頭は latest エイリアス(世代交代をGoogle側が面倒みる段)", lad[0] == "gemini-pro-latest")
+    chk("★末尾は必ず最軽量の段(下に降りきることを構造で保証)", behop.model_tier(lad[-1]) == 1)
+    chk("★テキスト以外が1つも混ざらない", all(behop.is_text_model(m) for m in lad))
+    chk("上限を超えない", len(lad) <= behop.LADDER_LIMIT)
+    chk("重複しない", len(lad) == len(set(lad)))
+    chk("★proだけで埋め尽くさずflashの段も通る", any(behop.model_tier(m) == 2 for m in lad))
+    lad2 = behop.build_ladder(AVAIL, first="gemini-2.5-flash")
+    chk("明示指定は先頭に来る", lad2[0] == "gemini-2.5-flash")
+    chk("明示指定しても最軽量の段は末尾に残る", behop.model_tier(lad2[-1]) == 1)
+    chk("★存在しない名前を固定で持たない(旧PREFERRED先頭2つが梯子に湧かない)",
+        "gemini-3-pro-latest" not in lad and "gemini-3-pro" not in lad)
+    chk("★未来のモデルは書き換えなしで先頭へ来る",
+        behop.build_ladder(AVAIL + ["gemini-5-pro-latest"])[0] == "gemini-5-pro-latest")
+    chk("★ListModelsが落ちて空でも梯子は空にならない(fail-open)",
+        len(behop.build_ladder([])) >= 1)
+    chk("非テキストしか無くても梯子は空にならない",
+        len(behop.build_ladder(["nano-banana-pro-preview"])) >= 1)
+
+    print("== ④降格: 8/17に実際に起きた並び (404→503→200) ==")
+    orig = behop._gen_once
+    try:
+        f, calls = fake_gen({"gemini-2.5-pro": http(404), "gemini-pro-latest": http(429),
+                             "gemini-flash-latest": http(503), "gemini-2.5-flash": http(503),
+                             "gemini-flash-lite-latest": "こんにちは"})
+        behop._gen_once = f
+        text, used = behop.ask("K", "gemini-2.5-pro", "しつもん", (), AVAIL)
+        chk("★下に生きている段まで降りて生成が通る(8/17の再演)", text == "こんにちは")
+        chk("使われたモデルを返す", used == "gemini-flash-lite-latest")
+        chk("上の段を飛ばさず順に叩いている", calls[0] == "gemini-2.5-pro" and len(calls) >= 3)
+
+        fe, _ = fake_gen({"gemini-2.5-pro": "   ", "gemini-flash-lite-latest": "本文"})
+        behop._gen_once = fe
+        te, ue = behop.ask("K", "gemini-2.5-pro", "q", (), AVAIL)
+        chk("★空応答を成功扱いにせず次の段へ降りる", te == "本文" and ue == "gemini-flash-lite-latest")
+
+        f2, calls2 = fake_gen({m: http(503) for m in AVAIL})
+        behop._gen_once = f2
+        text2, used2 = behop.ask("K", "gemini-2.5-pro", "しつもん", (), AVAIL)
+        chk("全段ダメでも例外で落ちない", used2 is None and isinstance(text2, str))
+        chk("★失敗文に全段の内訳が出る(最後の1つだけ見せない)",
+            "gemini-flash-lite-latest=HTTP 503" in text2 and "gemini-2.5-pro=HTTP 503" in text2)
+
+        f3, _ = fake_gen({"gemini-flash-lite-latest": "OK"})
+        behop._gen_once = f3
+        t3, u3 = behop.ask("K", "gemini-2.5-pro", "q", (), [])
+        chk("availが空(ListModels死)でも最後の綱で通る", u3 == "gemini-flash-lite-latest" and t3 == "OK")
+
+        print("== ⑤--ping: ListModelsが緑でも実生成がダメなら非0 ==")
+        behop.list_models = lambda key: list(AVAIL)
+        f4, _ = fake_gen({m: http(503) for m in AVAIL})
+        behop._gen_once = f4
+        chk("★本番経路が死んでいれば ping は緑にならない",
+            behop.do_ping("K", check_bot=False) != 0)
+        f5, _ = fake_gen({"gemini-flash-lite-latest": "OK"})
+        behop._gen_once = f5
+        chk("降格してでも1発通れば ping は0", behop.do_ping("K", check_bot=False) == 0)
+        behop.list_models = lambda key: (_ for _ in ()).throw(RuntimeError("net"))
+        chk("ListModelsが落ちてもpingは例外で死なず判定を返す",
+            behop.do_ping("K", check_bot=False) in (0, 6))
+    finally:
+        behop._gen_once = orig
+
+    print("== ⑥使用量の記録を壊していない ==")
+    import gemini_usage                                        # noqa: E402
+    rows = gemini_usage.read_all()
+    chk("1呼び出し1行が残っている", len(rows) >= 5)
+    chk("成功行にモデル名が入る", any(r.get("ok") and r.get("model") for r in rows))
+    chk("★pingはtagで見分けられる(用途を混ぜない)", any(r.get("tag") == "ping" for r in rows))
+    chk("失敗行にも理由が残る", any((not r.get("ok")) and r.get("err") for r in rows))
+    chk("★本番の記録先へ書いていない", "behop_test_" in gemini_usage.USAGE_FILE)
+
+    print("\n== %d/%d PASS ==" % (_ok, _ok + _ng))
+    return 1 if _ng else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
