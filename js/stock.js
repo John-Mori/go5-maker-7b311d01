@@ -191,7 +191,40 @@
     return _pendingDraftCommit[id];
   }
   function loadArchive() { try { return JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]') || []; } catch (e) { return []; } }
-  function saveArchive(arr) { try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(arr.slice(0, ARCHIVE_MAX))); } catch (e) {} }
+  // ★作成履歴(最大30件)は 1件ごとに thumbDataUrl(≤160KB)を抱える=最大約4.8MB。iOS Safariの約5MBの箱に
+  //   張り付く「最後の要因」で、ここが埋まると saveMeta(下書き)も saveArchive 自身も無言失敗して
+  //   「保存に失敗/遷移しない/画像が消える」を再燃させる(localStorage逼迫=①②③の共通根・Fable5診断2026-08-17)。
+  //   旧 saveArchive は setItem 1発で、QuotaExceeded を握り潰して更新ごと失っていた=止血が無い。
+  //   → writeMetaResilient_ と同型の段階縮退にする:①素で書く→②古い順に thumbDataUrl を剥がす(サムネは
+  //   IDB stock_t_<id> / R2 stock:imgs から resolveThumb_ が復元=非破壊)→③それでも入らなければ古い件から
+  //   件数を削り最新は必ず残す(作成履歴は id単位 union 同期=ローカルで落ちても他端末/雲から復活する非破壊)。
+  //   ★元の meta オブジェクトは壊さず、直列化用の複製だけを痩せさせる(表示中カードのサムネを消さない)。
+  //   ※これは「箱を溢れさせない止血」。同期越しに thumb が remote から union 復活する分の根治(PUSH payload
+  //     サニタイズ)は別スライス(Fable5案2・寝る前Go候補)。ここは容量逼迫時に必ず書き切ることだけを保証する。
+  function writeArchiveResilient_(arr) {
+    var full = (arr || []).slice(0, ARCHIVE_MAX);
+    try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(full)); return true; } catch (e) {}
+    var lean = full.map(function (m) { return m; }); // 直列化用の別列(要素は共有=剥がす時だけ複製へ差し替える)
+    for (var i = lean.length - 1; i >= 0; i--) {      // 古い順(末尾から)に thumbDataUrl を剥がす=最新は最後まで残す
+      var m = lean[i];
+      if (m && m.thumbDataUrl) {
+        var c = {};
+        for (var k in m) { if (Object.prototype.hasOwnProperty.call(m, k) && k !== 'thumbDataUrl') c[k] = m[k]; }
+        lean[i] = c;
+        try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(lean)); return true; } catch (e2) {}
+      }
+    }
+    while (lean.length > 1) {                          // 全 thumb を剥がしても入らない=古い件から件数を削り最新は残す
+      lean.pop();
+      try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(lean)); return true; } catch (e3) {}
+    }
+    return false;
+  }
+  function saveArchive(arr) {
+    var ok = writeArchiveResilient_(arr);
+    if (!ok && purgeableSweep_() > 0) ok = writeArchiveResilient_(arr); // 再取得可能なキャッシュだけ緊急退避して再挑戦
+    return ok;
+  }
   // 全端末同期(Go5Sync)へ即時反映を促す。(未設定・未ロードなら何もしない)ドラフトを保存したら他端末へ運ぶ。
   // ドラフト作成/投稿完了/編集は頻度が低くユーザー操作＝即時push(flushSync)で相手端末へ渡す。
   //   これで相手は「今すぐ同期」を押さずとも、アプリを開いた時の自動pullだけで最新が出る(Chami依頼2026-08-03)。
