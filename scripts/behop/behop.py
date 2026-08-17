@@ -210,12 +210,29 @@ def _gen_once(key, model, payload):
     return "".join(pt.get("text", "") for pt in data["candidates"][0]["content"]["parts"])
 
 
-def _usage(tag, model, prompt, images, out="", ok=True, err="", t0=None):
-    """使用量を1行残す (2026-08-18)。失敗しても呼び出し側へ影響させない。"""
+def _usage(tag, model, prompt, images, out="", ok=True, err="", t0=None, who="behop"):
+    """使用量を1行残す (2026-08-18)。失敗しても呼び出し側へ影響させない。
+
+    ★who= どちらのキーで叩いたか ("behop"=事業用 / "homin"=私用)。
+      既定は "behop" だが、**呼び出し側がキーを跨ぐ経路では必ず明示すること**。
+      comp_frames.py は429でホイミンのキーへ切り替えて続行する=そこで who を渡さないと
+      私用キーの消費が事業用として記録され、集計の「束」が嘘になる (研究室HQ 2026-08-18)。
+    """
     if not gemini_usage:
         return
-    gemini_usage.log("behop", tag, model, len(prompt or ""), len(out or ""),
+    gemini_usage.log(who, tag, model, len(prompt or ""), len(out or ""),
                      len(images or ()), ok, err, (time.time() - t0) if t0 else 0.0)
+
+
+#: キーの表示名 → 使用量ログの束名 (2026-08-18 研究室HQ)。
+#  comp_frames/target_frames は ("ベホップ", key) / ("ホイミン", homin) の2枠束ねで回す。
+BUNDLE = {"ベホップ": "behop", "ホイミン": "homin"}
+
+
+def bundle_of(kname):
+    """キーの表示名から束名を引く。★知らない名前は "unknown" に落とす。
+    事業用 (behop) として黙って混ぜると、集計が「私用キーは使っていない」という嘘をつくため。"""
+    return BUNDLE.get(kname, "unknown")
 
 
 def ask(key, model, prompt, image_paths=(), avail=(), tag="cli"):
@@ -286,10 +303,13 @@ def ask(key, model, prompt, image_paths=(), avail=(), tag="cli"):
     return f"(生成失敗: 試した{len(trail)}段すべて不通 [{detail}]。時間を置くか--modelで明示指定を)", None
 
 
-def ask_pro(key, prompt, image_paths=(), model="gemini-2.5-pro", tag="ask_pro"):
+def ask_pro(key, prompt, image_paths=(), model="gemini-2.5-pro", tag="ask_pro", who="behop"):
     """pro単一モデルで生成。flashへ降格しない (認識の質を落とさないための専用経路)。
     共有の ask() とは別物: ask() は無料proの割当が尽きるとflashへ落として粘るが、
     こちらは「proの無料枠で読めるだけ読み、尽きたら打ち切る」用途 (競合フレーム日次収集)。
+
+    ★who= どちらのキーで叩いたか。**キーを跨いで呼ぶ側は必ず渡すこと** ("homin"=私用キー)。
+      既定の "behop" のままホイミンのキーを渡すと、集計の「束」が事業用として嘘をつく。
 
     戻り値 (text, status):
       ("...", "ok")             成功
@@ -306,19 +326,19 @@ def ask_pro(key, prompt, image_paths=(), model="gemini-2.5-pro", tag="ask_pro"):
     t0 = time.time()
     try:
         text = _gen_once(key, model, payload)
-        _usage(tag, model, prompt, image_paths, text, True, "", t0)
+        _usage(tag, model, prompt, image_paths, text, True, "", t0, who)
         return text, "ok"
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            _usage(tag, model, prompt, image_paths, "", False, "HTTP 429", t0)
+            _usage(tag, model, prompt, image_paths, "", False, "HTTP 429", t0, who)
             return None, "quota"
-        _usage(tag, model, prompt, image_paths, "", False, f"HTTP {e.code}", t0)
+        _usage(tag, model, prompt, image_paths, "", False, f"HTTP {e.code}", t0, who)
         return None, f"error:HTTP {e.code}"
     except (KeyError, IndexError):
-        _usage(tag, model, prompt, image_paths, "", False, "応答形式が想定外", t0)
+        _usage(tag, model, prompt, image_paths, "", False, "応答形式が想定外", t0, who)
         return None, "error:応答形式が想定外"
     except Exception as e:
-        _usage(tag, model, prompt, image_paths, "", False, type(e).__name__, t0)
+        _usage(tag, model, prompt, image_paths, "", False, type(e).__name__, t0, who)
         return None, f"error:{type(e).__name__}"
 
 

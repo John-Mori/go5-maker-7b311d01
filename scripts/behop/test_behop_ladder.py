@@ -209,6 +209,35 @@ def main():
     chk("失敗行にも理由が残る", any((not r.get("ok")) and r.get("err") for r in rows))
     chk("★本番の記録先へ書いていない", "behop_test_" in gemini_usage.USAGE_FILE)
 
+    # -----------------------------------------------------------------------
+    print("== ⑧束(who)と用途(tag)の取り違えを止める (研究室HQ 2026-08-18) ==")
+    # なぜ在るか= comp_frames は429でホイミンの私用キーへ切り替えて続行する。
+    #   _usage が "behop" 固定だった間、その行は事業用として記録されていた=集計の「束」が嘘をつく。
+    #   ★キーを跨ぐ場面こそ課金判断の主役なので、そこが嘘だと数字ごと無意味になる。
+    orig2 = behop._gen_once
+    try:
+        behop._gen_once = lambda key, model, payload: "OK"
+        for kname in ("ベホップ", "ホイミン", "しらない名前"):
+            behop.ask_pro("K", "q", (), "gemini-flash-latest",
+                          tag="whocheck", who=behop.bundle_of(kname))
+        w = [r for r in gemini_usage.read_all() if r.get("tag") == "whocheck"]
+        chk("★私用キーで叩いた行が homin として残る",
+            [r.get("who") for r in w] == ["behop", "homin", "unknown"])
+        chk("★知らないキー名を behop に混ぜない", len(w) == 3 and w[2].get("who") == "unknown")
+        chk("ask_pro もtagで用途を分けられる", all(r.get("tag") == "whocheck" for r in w))
+    finally:
+        behop._gen_once = orig2
+
+    # 実際の呼び出し側が tag/who を渡していること (既定のまま=用途が混ざる、を防ぐ)
+    import io as _io
+    _root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    cf_src = _io.open(os.path.join(_root, "scripts", "comp_frames.py"), encoding="utf-8").read()
+    tf_src = _io.open(os.path.join(_root, "scripts", "comp", "target_frames.py"), encoding="utf-8").read()
+    gr_src = _io.open(os.path.join(_root, "scripts", "llm", "gemini_responder.py"), encoding="utf-8").read()
+    chk("comp_frames が tag/who を渡す", 'tag="comp_frames"' in cf_src and "who=behop.bundle_of" in cf_src)
+    chk("target_frames が tag/who を渡す", 'tag="target_frames"' in tf_src and "who=behop.bundle_of" in tf_src)
+    chk("gemini_responder の実応対が tag=room", 'ask(content, tag="room")' in gr_src)
+
     print("\n== %d/%d PASS ==" % (_ok, _ok + _ng))
     return 1 if _ng else 0
 

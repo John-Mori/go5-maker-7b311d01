@@ -237,7 +237,8 @@ def main():
             text, status = None, None
             while kidx < len(keys):
                 kname, kval = keys[kidx]
-                text, status = behop.ask_pro(kval, VISION_PROMPT, [frame], BASE_MODEL)
+                text, status = behop.ask_pro(kval, VISION_PROMPT, [frame], BASE_MODEL,
+                                             tag="comp_frames", who=behop.bundle_of(kname))
                 if status == "quota":
                     print(f"  {vid}: {kname}のflash無料枠が尽きた(429)→次のキーへ切替")
                     kidx += 1
