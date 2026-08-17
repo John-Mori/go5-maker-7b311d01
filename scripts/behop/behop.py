@@ -220,7 +220,17 @@ def _usage(tag, model, prompt, images, out="", ok=True, err="", t0=None):
 
 def ask(key, model, prompt, image_paths=(), avail=(), tag="cli"):
     """生成。429 (割当超過)/404は下位モデルへ自動降格して粘る (無料枠のproは割当が極小のため)。
-    トレースバックで落とさない=部品として使う側 (セッション/将来のresponder) を巻き込まない。"""
+    トレースバックで落とさない=部品として使う側 (セッション/将来のresponder) を巻き込まない。
+
+    ★戻り値= **(text, used_model) のタプル** (2026-08-18に単独の text から変更した)。
+      used_model= 実際に生成が通った段の名前。**全段ダメだった時は None** で、
+      text 側に「(生成失敗: …)」という人向けの文が入る。
+      → **成否の判定は text の中身ではなく used_model の None かどうかで見ること**
+        (失敗時も text は空にならないので、`if text:` では死んでいるのに生きて見える)。
+      ★model 引数は「先頭に置きたい段」であって、返ってくる段とは限らない (降格するため)。
+
+    model=None を渡してよい。その時は ListModels の実物から build_ladder() が先頭を決める。
+    """
     parts = [{"text": prompt}]
     for p in image_paths:
         ext = os.path.splitext(p)[1].lower()
@@ -229,6 +239,10 @@ def ask(key, model, prompt, image_paths=(), avail=(), tag="cli"):
                                           "data": base64.b64encode(f.read()).decode("ascii")}})
     payload = {"contents": [{"parts": parts}]}
     ladder = build_ladder(avail, first=model)
+    # ★実際に最初に叩く段。model=None (無指定) の時、降格の注記や失敗行に "None" と出ていた
+    #   (2026-08-18 研究室HQ指摘)。Noneは割当超過していない=指定が無かっただけで、
+    #   ログを読む人が「Noneというモデルが落ちた」と誤解する。先頭の実名で言う。
+    head = model or (ladder[0] if ladder else None)
     trail = []                      # ★どの段が何で落ちたかを全部持つ (最後の1つだけ見せない)
     last_err = "?"
     t0 = time.time()
@@ -241,9 +255,12 @@ def ask(key, model, prompt, image_paths=(), avail=(), tag="cli"):
                 last_err = "空応答"
                 trail.append(f"{m}={last_err}")
                 continue
-            if m != model:
-                print(f"(注: {model}が割当超過等のため {m} へ降格して生成)")
-            _usage(tag, m, prompt, image_paths, text, True, "", t0)
+            if m != head:
+                print(f"(注: {head}が割当超過等のため {m} へ降格して生成)")
+            # ★2026-08-18 研究室HQ: 成功時も「降りてくる途中で何が落ちたか」を残す。
+            #   ここを空にしていたため、proが429で空振りしても最終的に成功すれば記録が
+            #   err="" になり、課金判断の軸(429の件数)が実測 0件 という嘘になっていた。
+            _usage(tag, m, prompt, image_paths, text, True, " / ".join(trail), t0)
             return text, m
         except urllib.error.HTTPError as e:
             last_err = f"HTTP {e.code}"
@@ -264,7 +281,7 @@ def ask(key, model, prompt, image_paths=(), avail=(), tag="cli"):
             trail.append(f"{m}={last_err}")
             break
     detail = " / ".join(trail) or last_err
-    _usage(tag, model, prompt, image_paths, "", False, detail[:200], t0)
+    _usage(tag, head, prompt, image_paths, "", False, detail[:200], t0)
     # ★全段の内訳を出す= 「梯子が降りた結果ダメだった」のか「1段目で門前払い」なのかを見分けるため。
     return f"(生成失敗: 試した{len(trail)}段すべて不通 [{detail}]。時間を置くか--modelで明示指定を)", None
 

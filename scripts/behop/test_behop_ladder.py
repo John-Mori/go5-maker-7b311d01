@@ -17,6 +17,8 @@
 
 走らせ方= python scripts/behop/test_behop_ladder.py
 """
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -38,6 +40,11 @@ def chk(label, cond):
     else:
         _ng += 1
         print("  FAIL", label)
+
+
+def gemini_usage_rows():
+    import gemini_usage
+    return gemini_usage.read_all()
 
 
 def http(code):
@@ -158,6 +165,38 @@ def main():
         behop.list_models = lambda key: (_ for _ in ()).throw(RuntimeError("net"))
         chk("ListModelsが落ちてもpingは例外で死なず判定を返す",
             behop.do_ping("K", check_bot=False) in (0, 6))
+
+        print("== ⑦model無指定(None)の見え方と戻り値の約束 ==")
+        # ★研究室HQ指摘(2026-08-18)= 降格の注記に「None が割当超過」と出ていた。
+        #   Noneは割当超過していない=指定が無かっただけ。ログを読む人が誤解する。
+        f6, _ = fake_gen({"gemini-pro-latest": http(429), "gemini-flash-lite-latest": "本文"})
+        behop._gen_once = f6
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            t6, u6 = behop.ask("K", None, "q", (), AVAIL)
+        note = buf.getvalue()
+        chk("★注記に None と出さない(モデル無指定でも実名で言う)", "None" not in note)
+        chk("降格元は梯子の先頭の実名", "gemini-pro-latest" in note and u6 == "gemini-flash-lite-latest")
+        chk("無指定でも生成は通る", t6 == "本文")
+
+        f7, _ = fake_gen({m: http(503) for m in AVAIL})
+        behop._gen_once = f7
+        rows_before = len(gemini_usage_rows())
+        t7, u7 = behop.ask("K", None, "q", (), AVAIL, tag="nonecheck")
+        row = [r for r in gemini_usage_rows() if r.get("tag") == "nonecheck"][-1]
+        chk("★失敗行のモデル名も None ではなく実名", row.get("model") == "gemini-pro-latest")
+        chk("1呼び出しで1行だけ増える", len(gemini_usage_rows()) == rows_before + 1)
+        # ★docstringに書いた約束を検査で固定する= 成否は text ではなく used(None)で見る。
+        chk("★全段ダメなら used は None (textは空にならない)", u7 is None and bool(t7))
+
+        # ★研究室HQが入れた止血の回帰止め= 成功しても降りてくる途中の内訳を err に残す。
+        #   ここが空に戻ると「429は0件」という嘘の集計に逆戻りし、課金判断の軸が壊れる。
+        f8, _ = fake_gen({"gemini-pro-latest": http(429), "gemini-flash-lite-latest": "OK"})
+        behop._gen_once = f8
+        behop.ask("K", None, "q", (), AVAIL, tag="trailcheck")
+        row8 = [r for r in gemini_usage_rows() if r.get("tag") == "trailcheck"][-1]
+        chk("★降格して成功した行にも429の内訳が残る(集計の軸を空にしない)",
+            row8.get("ok") is True and "429" in (row8.get("err") or ""))
     finally:
         behop._gen_once = orig
 
