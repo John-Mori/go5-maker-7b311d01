@@ -21,7 +21,47 @@
   function acctId() { try { return (typeof window.getCurrentAccount === 'function') ? window.getCurrentAccount() : 'acc1'; } catch (e) { return 'acc1'; } }
   function draftsKey() { return 'movie_drafts__' + acctId(); }
   function loadDrafts() { try { return JSON.parse(localStorage.getItem(draftsKey()) || '[]') || []; } catch (e) { return []; } }
-  function saveDrafts(arr) { try { localStorage.setItem(draftsKey(), JSON.stringify(arr.slice(0, MAX_DRAFTS))); return true; } catch (e) { return false; } }
+
+  // 素の書き込み(容量オーバーで throw→false)。
+  function tryWrite_(arr) {
+    try { localStorage.setItem(draftsKey(), JSON.stringify(arr.slice(0, MAX_DRAFTS))); return true; }
+    catch (e) { return false; }
+  }
+  // 再取得できるキャッシュだけを退避して空きを作る(Go5Keys.isPurgeable=正本/唯一コピーには触れない)。
+  //   ★下書きの写真・作成履歴・候補の退避画像などは決して消さない(C-041)。
+  function purgeableSweep_() {
+    var n = 0;
+    try {
+      if (!(window.Go5Keys && window.Go5Keys.isPurgeable)) return 0;
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (k && window.Go5Keys.isPurgeable(k)) { localStorage.removeItem(k); n++; }
+      }
+    } catch (e) {}
+    return n;
+  }
+  // ★localStorage逼迫でも「下書きの本文は必ず残す」ための段階縮退つき保存。
+  //   Chami依頼2026-08-17「下書きも以前はできてたのに失敗になる。どうにかして」=保存が全か無かで
+  //   容量不足だと丸ごと失敗していた。以前できていたのは store がまだ空いていたから(archiveのサムネ・
+  //   候補base64・写真キャッシュが月日で積もり iOS の約5MB壁に達した)。
+  //   ①素で書く → ②再取得可能キャッシュを退避して再試行 → ③古い下書きを削って再試行(新しい方を守る)
+  //   → ④最新も含め写真を落として本文だけでも残す。返り値で縮退の度合いを伝える。
+  //   返り値: '' 失敗 / 'ok' 素で成功 / 'purged'|'trimmed'|'nophoto' 縮退して成功(本文は保存済み)。
+  function saveDrafts(arr) {
+    if (tryWrite_(arr)) return 'ok';
+    if (purgeableSweep_() > 0 && tryWrite_(arr)) return 'purged';
+    // 古い下書きを新しい順に守りつつ末尾(古い)から削る(最低3件までは写真つきで残そうと試みる)。
+    for (var keep = arr.length - 1; keep >= 3; keep--) {
+      if (tryWrite_(arr.slice(0, keep))) { arr.splice(keep); return 'trimmed'; }
+    }
+    // 最終手段: 写真を全部落として本文だけでも残す(写真は下書き呼び出し時に選び直せる)。
+    var lean = arr.map(function (d) { var c = {}; for (var kk in d) { if (Object.prototype.hasOwnProperty.call(d, kk)) c[kk] = d[kk]; } c.photo = null; c.photoName = ''; return c; });
+    if (tryWrite_(lean)) {
+      for (var m = 0; m < arr.length; m++) { arr[m].photo = null; arr[m].photoName = ''; }
+      return 'nophoto';
+    }
+    return '';
+  }
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   // サークルを表すアイコン。(旧「🏷」の置き換え＝グレー人物シルエットのSVG・白背景は透過・文字サイズに追従)
@@ -115,8 +155,14 @@
       };
       var arr = loadDrafts();
       arr.unshift(draft);
-      var ok = saveDrafts(arr);
-      if (btn) flashBtn_(btn, ok ? ('✅ 保存しました(' + Math.min(arr.length, MAX_DRAFTS) + '件)') : '⚠️ 保存に失敗(容量不足?)');
+      var st = saveDrafts(arr);
+      var msg = {
+        'ok': '✅ 保存しました(' + Math.min(arr.length, MAX_DRAFTS) + '件)',
+        'purged': '✅ 保存(空き容量を整理しました)',
+        'trimmed': '✅ 保存(古い下書きを一部整理して容量を確保)',
+        'nophoto': '✅ 本文を保存(容量不足のため写真は付けられません)'
+      }[st] || '⚠️ 保存に失敗(容量不足)。他タブを閉じるなど空きを作って再試行';
+      if (btn) flashBtn_(btn, msg);
     }
     if (pf) {
       compressForDraft_(pf).then(function (dataUrl) { finish(dataUrl, pf.name); });
