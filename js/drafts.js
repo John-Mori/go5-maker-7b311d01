@@ -63,6 +63,55 @@
     return '';
   }
 
+  // ── 下書きの写真は IndexedDB へ逃がす(恒久対策・Fable5設計案3 2026-08-18)。
+  //   movie_drafts__ は同期対象外(core/storage-keys.js の許可リストに無い)なので、写真を localStorage から
+  //   IDBへ移しても別端末から復活しない=iOSの約5MB壁に張り付く最大の要因(写真dataURL×最大20件×2ch)を根絶できる。
+  //   ★verify-then-strip(C-041): IDBへ書いて読み戻せた時だけ localStorage の photo を外す。読み戻せなければ
+  //   dataURLをそのまま localStorage に据え置く=唯一のコピーを先に消さない。IDB未対応/不健康なら触らない。
+  var IDB_PREFIX = 'draftimg:';
+  function idbUsable_() { try { return !!(window.Go5Idb && window.Go5Idb.available()); } catch (e) { return false; } }
+  // dataURLをIDBへ退避し、読み戻せたら true(=LSから外してよい)。失敗/未対応は false(=LSに据え置き)。
+  function stashPhotoIdb_(id, dataUrl) {
+    if (!dataUrl || !id || !idbUsable_()) return Promise.resolve(false);
+    return window.Go5Idb.set(IDB_PREFIX + id, dataUrl)
+      .then(function () { return window.Go5Idb.get(IDB_PREFIX + id); }) // 読み戻し検証(get はfail-openでnull)
+      .then(function (v) { return typeof v === 'string' && v.length > 0; })
+      .catch(function () { return false; });
+  }
+  function loadPhotoIdb_(id) {
+    if (!id || !idbUsable_()) return Promise.resolve(null);
+    try { return window.Go5Idb.get(IDB_PREFIX + id).catch(function () { return null; }); }
+    catch (e) { return Promise.resolve(null); }
+  }
+  function delPhotoIdb_(id) {
+    try { if (id && idbUsable_()) window.Go5Idb.del(IDB_PREFIX + id).catch(function () {}); } catch (e) {}
+  }
+  // 起動時ワンタイム移行: 既存下書きのインライン写真をIDBへ寄せる(両アカウント)。読み戻せた分だけLSから外す。
+  //   IDBが不健康な起動では一切触らない(一度のget失敗を不在と断定しない・C-041。次回起動でやり直す=冪等)。
+  function migrateDraftPhotosToIdb_() {
+    try {
+      if (!idbUsable_() || (window.Go5Idb.isHealthy && !window.Go5Idb.isHealthy())) return;
+      ['acc1', 'acc2'].forEach(function (acc) {
+        var key = 'movie_drafts__' + acc, arr;
+        try { arr = JSON.parse(localStorage.getItem(key) || '[]') || []; } catch (e) { return; }
+        var pending = arr.filter(function (d) { return d && d.photo && !d.photoIdb && d.id; });
+        if (!pending.length) return;
+        var chain = Promise.resolve(), moved = false;
+        pending.forEach(function (d) {
+          chain = chain.then(function () {
+            return stashPhotoIdb_(d.id, d.photo).then(function (ok) {
+              if (ok) { d.photo = null; d.photoIdb = true; moved = true; }
+            });
+          });
+        });
+        chain.then(function () {
+          if (!moved) return;                          // 1件も外せなければ書き戻さない(無変更)
+          try { localStorage.setItem(key, JSON.stringify(arr.slice(0, MAX_DRAFTS))); } catch (e) {}
+        });
+      });
+    } catch (e) {}
+  }
+
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   // サークルを表すアイコン。(旧「🏷」の置き換え＝グレー人物シルエットのSVG・白背景は透過・文字サイズに追従)
   var CIRCLE_ICON = '<svg viewBox="0 0 100 100" width="1em" height="1em" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:-0.15em;">' +
@@ -153,16 +202,20 @@
         topTwoLine: topTwo, authorTwoLine: authorTwo,
         label: makeLabel_(top, author)
       };
-      var arr = loadDrafts();
-      arr.unshift(draft);
-      var st = saveDrafts(arr);
-      var msg = {
-        'ok': '✅ 保存しました(' + Math.min(arr.length, MAX_DRAFTS) + '件)',
-        'purged': '✅ 保存(空き容量を整理しました)',
-        'trimmed': '✅ 保存(古い下書きを一部整理して容量を確保)',
-        'nophoto': '✅ 本文を保存(容量不足のため写真は付けられません)'
-      }[st] || '⚠️ 保存に失敗(容量不足)。他タブを閉じるなど空きを作って再試行';
-      if (btn) flashBtn_(btn, msg);
+      // ★写真は先にIDBへ逃がす(読み戻せたらdataURLをLSから外す=容量を食わない)。IDB不可/失敗ならdataURL同梱のまま。
+      stashPhotoIdb_(draft.id, photoDataUrl).then(function (stashed) {
+        if (stashed) { draft.photo = null; draft.photoIdb = true; }
+        var arr = loadDrafts();
+        arr.unshift(draft);
+        var st = saveDrafts(arr);
+        var msg = {
+          'ok': '✅ 保存しました(' + Math.min(arr.length, MAX_DRAFTS) + '件)',
+          'purged': '✅ 保存(空き容量を整理しました)',
+          'trimmed': '✅ 保存(古い下書きを一部整理して容量を確保)',
+          'nophoto': '✅ 本文を保存(容量不足のため写真は付けられません)'
+        }[st] || '⚠️ 保存に失敗(容量不足)。他タブを閉じるなど空きを作って再試行';
+        if (btn) flashBtn_(btn, msg);
+      });
     }
     if (pf) {
       compressForDraft_(pf).then(function (dataUrl) { finish(dataUrl, pf.name); });
@@ -203,12 +256,18 @@
     attrKeys_().forEach(function (a) { var el = $(a[1]); if (el) el.checked = !!(draft.attrs && draft.attrs[a[0]]); });
 
     function done() { showRecallToast_('✅ 下書き「' + draft.label + '」を呼び出しました'); }
-    if (draft.photo) {
-      dataUrlToFile_(draft.photo, draft.photoName).then(function (file) {
+    function restorePhoto_(dataUrl) {
+      if (!dataUrl) { showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)写真は選び直してください。'); return; }
+      dataUrlToFile_(dataUrl, draft.photoName).then(function (file) {
         var ok = window.Go5SetForegroundFile && window.Go5SetForegroundFile(file);
         if (!ok) showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)写真は選び直してください。');
         else done();
       }).catch(function () { showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)'); });
+    }
+    if (draft.photoIdb) {
+      loadPhotoIdb_(draft.id).then(restorePhoto_);   // IDBへ逃がした写真
+    } else if (draft.photo) {
+      restorePhoto_(draft.photo);                     // 旧い下書き(インラインdataURL)= 後方互換
     } else {
       done();
     }
@@ -278,8 +337,14 @@
       var line2html = d.workAuthor ? (CIRCLE_ICON + ' ' + esc(d.workAuthor)) : (d.workTitle ? esc(d.label) : '');
       // 幅が足りない時は flex-wrap でボタン行が下段へ落ちる。(スマホはみ出し対策)
       // ※ボタンは width:auto 明示＝グローバル button{width:100%} の波及ではみ出す事故(INC-47系)の再発防止。
+      // サムネ: 旧い下書きはインラインdataURL / IDBへ逃がした写真は空箱を出してから非同期で背景に差し込む(壊れ画像アイコンを避ける)。
+      var thumbHtml = d.photo
+        ? '<img src="' + d.photo + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:0 0 auto;">'
+        : (d.photoIdb
+          ? '<div data-thumbidb="' + esc(d.id) + '" style="width:44px;height:44px;border-radius:6px;background:#0e1422 center/cover no-repeat;flex:0 0 auto;"></div>'
+          : '<div style="width:44px;height:44px;border-radius:6px;background:#0e1422;flex:0 0 auto;"></div>');
       return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #2a3346;">' +
-        (d.photo ? '<img src="' + d.photo + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:0 0 auto;">' : '<div style="width:44px;height:44px;border-radius:6px;background:#0e1422;flex:0 0 auto;"></div>') +
+        thumbHtml +
         '<div style="flex:1 1 160px;min-width:0;">' +
           '<div style="font-size:.88rem;color:#eef2f7;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(line1) + '</div>' +
           (line2html ? '<div style="font-size:.76rem;color:#9fb0c3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + line2html + '</div>' : '') +
@@ -291,6 +356,12 @@
         '</div>' +
       '</div>';
     }).join('');
+    // IDBへ逃がした写真のサムネを非同期で差し込む(空箱→背景画像)。読めなければ空箱のまま(fail-open)。
+    list.querySelectorAll('[data-thumbidb]').forEach(function (el) {
+      loadPhotoIdb_(el.getAttribute('data-thumbidb')).then(function (dataUrl) {
+        if (dataUrl && el) el.style.backgroundImage = 'url("' + dataUrl + '")';
+      });
+    });
     list.querySelectorAll('[data-recall]').forEach(function (b) {
       b.addEventListener('click', function () {
         var idx = parseInt(b.getAttribute('data-recall'), 10);
@@ -304,6 +375,7 @@
         var idx = parseInt(b.getAttribute('data-del'), 10);
         var d = arr[idx]; if (!d) return;
         if (!window.confirm('下書き「' + d.label + '」を削除しますか？')) return;
+        delPhotoIdb_(d.id);   // IDBへ逃がした写真も一緒に消す(孤児を残さない)
         arr.splice(idx, 1); saveDrafts(arr); renderPickerList_();
       });
     });
@@ -319,6 +391,7 @@
     var saveBtn = $('draftSaveBtn');
     if (saveBtn) saveBtn.addEventListener('click', function () { saveCurrentAsDraft(saveBtn); });
     window.Go5Drafts = { openPicker: openPicker, closePicker: closePicker };
+    try { migrateDraftPhotosToIdb_(); } catch (e) {}   // 起動時ワンタイム: 既存下書きの写真をLS→IDBへ(空きを作る)
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
