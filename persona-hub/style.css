@@ -64,6 +64,9 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 /* 差分モーダル */
 .diff-modal{position:fixed;inset:0;background:rgba(4,10,18,.72);display:flex;
   align-items:center;justify-content:center;padding:16px;z-index:50;}
+/* display:flex は [hidden] のUA規定(display:none)と同格で勝ってしまう=閉じられなくなる。
+   属性セレクタを1つ重ねて特異度で確実に隠す(✕/背景タップの hidden=true を効かせる)。 */
+.diff-modal[hidden]{display:none;}
 .diff-box{background:var(--card);border:1px solid var(--accent);border-radius:14px;
   width:100%;max-width:560px;max-height:86vh;display:flex;flex-direction:column;padding:14px 16px;}
 .diff-head{display:flex;justify-content:space-between;align-items:center;font-weight:700;
