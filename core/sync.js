@@ -944,10 +944,29 @@
       });
     }).catch(function () { return ""; });
   }
+  // ★blob GET(公開/img/…・トークン不要)にも AbortController タイムアウトを付ける(2026-08-18・Fable5診断F)。
+  //   iOS Safariの root.fetch は既定タイムアウトが無く、GETが無言ハングすると呼び元の
+  //   resolveRefFromR2_ が永久に settle せず _r2ResolveJobs[cid] が立ちっぱなし→候補画像が⏳のまま
+  //   固着(通信回復後も直らない)。abort で必ず決着させ、失敗は null(=マーカー温存で次回再試行)へ倒す。
+  function fetchBlobTimed_(url, timeoutMs) {
+    var ctl = null, timer = null, fInit;
+    if (timeoutMs && typeof root.AbortController === "function") {
+      ctl = new root.AbortController();
+      fInit = { signal: ctl.signal };
+      timer = root.setTimeout(function () { try { ctl.abort(); } catch (e) {} }, timeoutMs);
+    }
+    return root.fetch(url, fInit).then(function (r) {
+      if (timer) root.clearTimeout(timer);
+      return r && r.ok ? r.blob() : null;
+    }, function () {
+      if (timer) root.clearTimeout(timer);
+      return null;
+    });
+  }
   function fetchBlobR2(hash) {
     var c = cfg();
     if (!/^https?:\/\//.test(c.url) || !/^[a-f0-9]{16,64}$/.test(String(hash || ""))) return Promise.resolve(null);
-    return root.fetch(c.url + "/img/" + hash).then(function (r) { return r && r.ok ? r.blob() : null; }).catch(function () { return null; });
+    return fetchBlobTimed_(c.url + "/img/" + hash, 60000);
   }
   // ── 論理名アドレスの blob 経路(KV非依存・2026-08-01)──
   //   R2キー = sha256hex(論理名)。両端末が「同じ論理名」から同じ鍵を算出できる=
@@ -966,7 +985,7 @@
     var c = cfg();
     if (!/^https?:\/\//.test(c.url) || !subtle) return Promise.resolve(null);
     return sha256hex(String(name)).then(function (key) {
-      return root.fetch(c.url + "/img/" + key).then(function (r) { return r && r.ok ? r.blob() : null; }).catch(function () { return null; });
+      return fetchBlobTimed_(c.url + "/img/" + key, 60000);
     }).catch(function () { return null; });
   }
 

@@ -111,7 +111,19 @@
     return "local";
   }
 
-  var API = { isSecret: isSecret, syncAllowed: syncAllowed, classify: classify, legacySynced: legacySynced, legacyNoSync: legacyNoSync };
+  // ── purgeable(緊急削除可)：localStorage逼迫でドラフトのメタが書けない(draft-meta-readback-failed)時に、
+  //    「最新ドラフトを必ず書き切る」ため一時的に空けてよいキー。★条件=ネットワーク/シートから作り直せる
+  //    キャッシュだけ。正本・唯一コピー(go5_stock_meta / go5_stock_archive の中身 / cand_refimg__ の base64退避 /
+  //    short_hist__ / verify_manual__ / cand_text 等)は絶対に含めない(C-041=一度の欠落で「無い」と断定しない)。
+  //    2026-08-18 Fable5診断B-1(逼迫源のうち再取得可能な分だけを退避=「保存中…」固着の脱出)。
+  function isPurgeable(k) {
+    k = String(k);
+    return /^(delta_cache|peak_cache|clicks_cache|yt_meta_cache|fanza_title_cache)$/.test(k) // 分析系キャッシュ(YT/FANZAから再取得)
+      || k === "movie_photo_cache"      // リロード復元用の前景画像キャッシュ(消えても再選択で復旧・app.js)
+      || k === "posted_sheet_v1";       // 投稿済みシートのスナップ(記録GASから再取得・candidates.js)
+  }
+
+  var API = { isSecret: isSecret, syncAllowed: syncAllowed, classify: classify, legacySynced: legacySynced, legacyNoSync: legacyNoSync, isPurgeable: isPurgeable };
 
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Keys = API;

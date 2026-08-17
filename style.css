@@ -364,6 +364,9 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-thumbcol{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;width:74px;} /* 本文列を広げてバッジ行が1行に収まるよう画像列は控えめに */
 .cand-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#eee2c5;border:1px solid var(--line);}
 .cand-thumb-ph{display:block;}
+/* サムネのCDN読込がN回失敗した後の「タップで再取得」札(必ず何か出す・2026-08-17)。配色はアプリ準拠(紫は使わない)。 */
+.cand-thumb-reload{display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;color:var(--sub);}
+.cand-thumb-reload:active{opacity:.7;}
 /* 投稿予定プレビュー：カード下段に全幅で。動画生成用の画像を少し大きく（縦にスペース）＋右に一行コメント。 */
 /* 動画生成用の画像＝作品サムネの真下（左の画像列）に少し余白を開けて配置。コメントはその真下に全文表示。点線区切りは廃止。 */
 /* 動画生成用の画像スロット＝全枚数を表示(Chami 2026-08-15「全部表示してくれ」)。単枚=全幅／複数=2列グリッド。 */

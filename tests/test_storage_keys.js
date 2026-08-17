@@ -92,6 +92,23 @@ test('DIFF-1: legacySynced は反転前の同期集合（差分ログの基礎�
   assert.strictEqual(Keys.legacySynced('view_snaps') && !Keys.syncAllowed('view_snaps'), true);
 });
 
+test('PURGE-1: isPurgeable は再取得可能なキャッシュだけ true（緊急退避の対象）', function () {
+  ['delta_cache', 'peak_cache', 'clicks_cache', 'yt_meta_cache', 'fanza_title_cache',
+   'movie_photo_cache', 'posted_sheet_v1'].forEach(function (k) {
+    assert.strictEqual(Keys.isPurgeable(k), true, k + ' は緊急退避可のはず');
+  });
+});
+
+test('PURGE-2: 正本・唯一コピーは絶対に purgeable でない（画像/ドラフト喪失の禁止）', function () {
+  // ドラフト/作成履歴/生成用画像/履歴/手動宣言 は消したら復元できない＝緊急でも触らない。
+  ['go5_stock_meta', 'go5_stock_archive', 'go5_stock_arch_del',
+   'cand_refimg__abc123', 'cand_bskyimg__abc123', 'cand_text', 'cand_items',
+   'short_hist__acc1', 'verify_manual__acc1', 'view_snaps',
+   'bsky_app_pw__acc1', 'movie_drafts__acc1', 'go5_draft_post_xyz'].forEach(function (k) {
+    assert.strictEqual(Keys.isPurgeable(k), false, k + ' は緊急でも消してはいけない');
+  });
+});
+
 test('ESC-1: Go5Util.esc は " を必ずエスケープする（危険な系統の統一）', function () {
   assert.strictEqual(Util.esc('a<b>&"c"'), 'a&lt;b&gt;&amp;&quot;c&quot;');
   assert.strictEqual(Util.esc('"onclick"'), '&quot;onclick&quot;');

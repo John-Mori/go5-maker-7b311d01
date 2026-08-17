@@ -145,7 +145,25 @@
     }
     return false;
   }
-  function saveMeta(arr) { writeMetaResilient_(arr); kickSync_(); }
+  // ★localStorage逼迫で「最新1件のlean metaすら入らない」時、再取得可能なキャッシュ(Go5Keys.isPurgeable)
+  //   だけを緊急退避して1回だけ書き直す=最新ドラフトを必ず書き切る(draft-meta-readback-failed の根治・
+  //   Fable5診断B-1・2026-08-18)。正本・唯一コピー(画像base64/履歴/手動宣言)は絶対に消さない。
+  function purgeableSweep_() {
+    if (!(window.Go5Keys && window.Go5Keys.isPurgeable)) return 0;
+    var keys = [];
+    try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && window.Go5Keys.isPurgeable(k)) keys.push(k); } } catch (e) {}
+    var freed = 0;
+    keys.forEach(function (k) { try { localStorage.removeItem(k); freed++; } catch (e) {} });
+    return freed;
+  }
+  // ★戻り値=書けたか(bool)。書けた時だけ同期をkickする——書けていないのに kickSync すると、新ドラフトを
+  //   含まない旧metaを雲へpushして「雲の台帳からも新ドラフトが消える」二重事故になる(旧コードのバグ)。
+  function saveMeta(arr) {
+    var ok = writeMetaResilient_(arr);
+    if (!ok && purgeableSweep_() > 0) ok = writeMetaResilient_(arr);
+    if (ok) kickSync_();
+    return ok;
+  }
 
   // ドラフトは「動画が手元または雲へ着地した後」にだけ一覧へ確定する二相コミット。
   // 失敗中のメタを先に go5_stock_meta へ入れると、黒いサムネ/DL不能の幽霊カードが残るため禁止する。
@@ -234,6 +252,28 @@
   //   サムネ/プレビュー/元画像を dataURL でまとめ stock:imgs:<id> に置く=Go5Syncの画像レール(R2 content-hash)に乗る。
   //   ★動画本体(stock_v_)は重いので載せない(②で on-demand 取り寄せにする)。実体はR2、同期台帳には参照だけ=積んでも軽い。
   function blobToDataUrlP_(blob) { return new Promise(function (res) { if (!blob) return res(''); blobToDataUrl_(blob, function (du) { res(du || ''); }); }); }
+  // 画像blobを90px級サムネblobへ縮小する(失敗時 null)。canvasキャプチャが落ちた端末で「元画像フルをメタへ
+  //   焼く→localStorage逼迫→draft-meta-readback-failed」を防ぐ最終保険(Fable5診断A-2・2026-08-18)。
+  //   元画像そのものは stock_img_/go5src: に別途残す=喪失しない(このサムネはメタ/表示用の軽い複製)。
+  function scaleBlobToThumb_(blob) {
+    return new Promise(function (res) {
+      try {
+        if (!blob || !blob.size || typeof URL === 'undefined' || !URL.createObjectURL) return res(null);
+        var url = URL.createObjectURL(blob), img = new Image();
+        img.onload = function () {
+          try {
+            var iw = img.naturalWidth || img.width || 1, ih = img.naturalHeight || img.height || 1;
+            var W = 90, H = Math.max(1, Math.round(90 * ih / iw));
+            var c = document.createElement('canvas'); c.width = W; c.height = H;
+            c.getContext('2d').drawImage(img, 0, 0, W, H);
+            c.toBlob(function (b) { try { URL.revokeObjectURL(url); } catch (e) {} res(b || null); }, 'image/jpeg', 0.6);
+          } catch (e) { try { URL.revokeObjectURL(url); } catch (_) {} res(null); }
+        };
+        img.onerror = function () { try { URL.revokeObjectURL(url); } catch (e) {} res(null); };
+        img.src = url;
+      } catch (e) { res(null); }
+    });
+  }
   // この端末が blob 実体を持つドラフトだけ、未作成ならミラーを1回作って雲へ送る(冪等)。既存ドラフトも開けば自動で運ばれる。
   var _blobMirrorBusy = {}; // 同じドラフトを render/定期sweep/保存直後から重複処理しない
   function ensureBlobMirror_(id) {
@@ -661,12 +701,23 @@
     var capP = Promise.all([captureThumb_(), capturePreview_()]).catch(function () { return [null, null]; });
     return capP.then(function (caps) {
       var thumbBlob = caps[0], prevBlob = caps[1];
-      // Canvas取得が失敗しても、元画像を端末側サムネの最終保険にする。
-      if (!thumbBlob && evDetail.sourceImageFile) thumbBlob = evDetail.sourceImageFile;
+      // Canvas取得が失敗しても、元画像を端末側サムネの最終保険にする。★ただし元画像フルをそのままメタへ
+      //   焼くと localStorage を逼迫させ draft-meta-readback-failed の主因になる(Fable5診断A-2)。90px級へ縮小し、
+      //   縮小できなかった時だけ raw を保険に使う(その場合はメタ同梱上限を厳しくする=下の thumbMetaCap)。
+      var usedRawSource = false;
+      var thumbReadyP = thumbBlob
+        ? Promise.resolve(thumbBlob)
+        : (evDetail.sourceImageFile
+          ? scaleBlobToThumb_(evDetail.sourceImageFile).then(function (t) { if (t) return t; usedRawSource = true; return evDetail.sourceImageFile; })
+          : Promise.resolve(null));
+      return thumbReadyP.then(function (tb) {
+      thumbBlob = tb;
 
       // 90pxサムネはメタにも小さなdataURLとして同梱する。IDBが丸ごと死んでR2動画だけが着地した場合でも、
-      // ドラフトカードが黒い無言箱にならない。元画像そのもののような大Blobはメタ肥大防止で入れない。
-      var thumbMetaP = (thumbBlob && thumbBlob.size > 0 && thumbBlob.size <= 160 * 1024)
+      // ドラフトカードが黒い無言箱にならない。縮小済みサムネは小さい=同梱してよいが、縮小不能で元画像フルに
+      // 落ちた時は24KB以下でだけ同梱する(逼迫防止・Fable5診断A-2)。
+      var thumbMetaCap = usedRawSource ? 24 * 1024 : 160 * 1024;
+      var thumbMetaP = (thumbBlob && thumbBlob.size > 0 && thumbBlob.size <= thumbMetaCap)
         ? blobToDataUrlP_(thumbBlob)
         : Promise.resolve('');
       return thumbMetaP.then(function (thumbDataUrl) {
@@ -737,6 +788,7 @@
             }
           });
         });
+      });
       });
     });
   }
@@ -2531,7 +2583,14 @@
           draftId = id;
           var _pf = _pendingDraftMeta[id]; if (_pf) { _pf._failed = true; render(); } // pendingカードを「保存に失敗」表記へ
           if (reasons && (reasons.local || reasons.cloud)) {
-            holdMessage = holdMessageBase + ' 内訳=手元:' + (reasons.local || 'ok') + ' / 雲:' + (reasons.cloud || 'ok') + '。';
+            // ★draft-meta-readback-failed は verifyCloudVideoWrite_ 成功後にだけ出る=動画は雲(R2)へ着地済みで、
+            //   失敗したのは端末localStorageの台帳書込みだけ。旧文面「雲にも確認できませんでした」は実態と逆の
+            //   誤誘導だった。動画は喪失していないと明言し、原因(端末の空き容量)を言う(Fable5診断C-2・2026-08-18)。
+            if (reasons.cloud === 'draft-meta-readback-failed') {
+              holdMessage = '動画は雲(クラウド)へ保存済みです(消えていません)。ただしこの端末の保存領域が満杯で、ドラフト一覧の台帳に載せられませんでした。ほかのタブを閉じるなどで空き容量を作ってから「もう一度保存」を押してください。';
+            } else {
+              holdMessage = holdMessageBase + ' 内訳=手元:' + (reasons.local || 'ok') + ' / 雲:' + (reasons.cloud || 'ok') + '。';
+            }
           }
           gate.timerFired = true; decideNav_();
         }

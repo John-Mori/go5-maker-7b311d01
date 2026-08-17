@@ -511,6 +511,10 @@
   function needsInfoBackfill_(it) {
     return isInfoTarget_(it) && (
       !it.title || it.title === '(タイトル未取得)' || !it.date || it.reviewCount == null ||
+      // ★「情報は取れたがサムネだけ空」も追う(Chami 2026-08-17「候補で画像読み込まない時多すぎ」・Fable5診断C)。
+      //   核(title/date)とgenre/floorが揃った thumb 欠けは infoBackfillTtl_ で24hに1回=fast追跡には乗らない
+      //   ので無限再取得にはならない。取得成功で it.thumb が埋まれば対象から外れる。
+      !it.thumb ||
       // ★AI判定に使う genre/floor が未取得の既存候補も追う=genre/floor を保存するようになる前に
       //   追加された作品は title/価格が揃っていてもタグが空のまま=AIバッジが出ない(Chami 2026-08-12
       //   「追加済みの候補に判定が入るようにして」)。floor は取得成功で doujin なら「同人」等が必ず入る
@@ -2722,9 +2726,46 @@
         if (imgs.length) openImgZoom_(imgs, start, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } });
         return;
       }
+      // ★サムネ再取得プレースホルダ(下の error ハンドラが差し込む札)のタップ=作品情報ごと取り直す。
+      //   既存の per-card 配線(wireCardCommon_)は描画時のノードにしか付かないため、動的差替え分は委任で拾う。
+      var reload = dataTarget_(e.target, 'data-reloadinfo', page);
+      if (reload) { var rcid = reload.getAttribute('data-reloadinfo'); if (rcid) reloadWorkInfo_(rcid, reload); return; }
       var thumb = dataTarget_(e.target, 'data-thumbcid', page);
       if (thumb) openThumbModal_(durableItemByCid_(thumb.getAttribute('data-thumbcid')));
     });
+    // ★候補サムネ(FANZA CDN)/Buzzサムネは onerror が無く、一過性のネット断・iOSのlazy-load中断・省データで
+    //   壊れ画像のまま固着していた(reconcile_ がノードを署名一致で使い回す=同一セッション中はもう再要求されない
+    //   =「候補で画像読み込まない時多すぎ」の主犯・Fable5診断案1/A・B・2026-08-17)。error はバブルしないので
+    //   capture で1本拾い、同一URLを数回だけ静かに再要求→上限でタップ再取得の札へ差し替える(必ず何か出す)。
+    page.addEventListener('error', function (e) {
+      var img = e.target;
+      if (!img || img.tagName !== 'IMG' || !img.classList) return;
+      if (!(img.classList.contains('cand-thumb') || img.classList.contains('buzz-thumb') || img.classList.contains('cand-refimg-thumb'))) return;
+      if (img.classList.contains('cand-thumb-ph')) return;
+      var url = img.getAttribute('src') || '';
+      if (!/^https?:\/\//.test(url)) return; // dataURL/相対(=手元の生成用画像等)は対象外。外部CDN URLだけ再取得する。
+      var n = parseInt(img.getAttribute('data-imgretry') || '0', 10) || 0;
+      if (n < 2) {
+        img.setAttribute('data-imgretry', String(n + 1));
+        setTimeout(function () {
+          if (!img.isConnected) return;                         // 既に外れたノードは触らない
+          if (img.complete && img.naturalWidth > 0) return;     // その後ロードに成功していれば何もしない
+          var u = img.getAttribute('src') || url;
+          img.removeAttribute('src'); img.setAttribute('src', u); // 同一URLを空→再設定で再ロードを促す(クエリを足さない=CDNキャッシュを割らない)
+        }, n === 0 ? 1200 : 4000);
+      } else {
+        // 上限到達=作品情報ごと取り直せるタップ札へ差し替える(cand-thumb のみ。buzz/refは静かに枠のまま)。
+        var cid = img.getAttribute('data-thumbcid') || '';
+        if (cid && img.parentNode) {
+          var ph = document.createElement('div');
+          ph.className = 'cand-thumb cand-thumb-ph cand-thumb-reload';
+          ph.setAttribute('data-reloadinfo', cid);
+          ph.setAttribute('title', 'タップで画像を再取得');
+          ph.textContent = '🔁';
+          img.parentNode.replaceChild(ph, img);
+        }
+      }
+    }, true);
   }
   // カード共通の配線：サムネのタップで画像モーダル／🖼投稿画像ボタン。
   function wireCardCommon_(el) {
