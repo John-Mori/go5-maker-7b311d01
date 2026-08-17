@@ -109,10 +109,25 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 .path-code:hover{border-color:var(--accent);color:var(--accent);}
 .path-code:active{opacity:.7;}
 
-/* ── モバイル：縦積みへフォールバック ── */
+/* ── モバイル(iPhone等)：縦積みへフォールバック ── */
 @media (max-width:860px){
-  .hub-main{flex-direction:column;}
+  .hub-main{flex-direction:column;gap:12px;padding:8px 12px 40px;}
   .hub-list-pane{position:static;max-height:none;flex:1 1 auto;width:100%;}
   .persona-list{max-height:44vh;}
   .source-k{flex-basis:100%;}
+  .detail-section{padding:12px 12px;}
+  .naming-meta{gap:8px 14px;}
+
+  /* 表を「見出し付きカード」へ組み替える(★添付の縦長=狭い列で1文字ずつ改行される潰れの根治)。
+     thead を隠し、各セルの上に data-label の見出しを出す=値は横幅いっぱいに素直に流れる。 */
+  .rule-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);}
+  .rule-table,.rule-table tbody,.rule-table tr,.rule-table td{display:block;width:auto;}
+  .rule-table tr{border:1px solid var(--line);border-radius:9px;margin-bottom:8px;
+    background:var(--sink);overflow:hidden;}
+  .rule-table tr:last-child{margin-bottom:0;}
+  .rule-table td{padding:6px 11px;border-bottom:1px solid var(--line);white-space:normal;}
+  .rule-table tr td:last-child{border-bottom:none;}
+  .rule-table td::before{content:attr(data-label);display:block;color:var(--sub);
+    font-size:10.5px;font-weight:700;margin-bottom:2px;letter-spacing:.02em;}
+  .rule-table .rule-note{min-width:0;font-size:12px;}
 }

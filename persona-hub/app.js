@@ -188,12 +188,14 @@
       var forbidden = (r.forbidden || []).map(esc).join(" / ") || '<span class="val-empty">-</span>';
       var yobisute = r.yobisute === true ? "呼び捨て" : (r.yobisute === false ? "呼び捨て禁止" : "-");
       var note = r.note ? esc(r.note) : "";
+      // data-label= スマホで表が縦潰れするのを防ぐため、各セルへ見出しを持たせて
+      // (CSS側で thead を隠し、セルの上に見出しを出す=1文字ずつ改行される縦長を解消)。
       return "<tr>" +
-        "<td>" + esc(r[keyField] || "") + "</td>" +
-        "<td>" + allowed + "</td>" +
-        "<td>" + forbidden + "</td>" +
-        "<td>" + yobisute + "</td>" +
-        '<td class="rule-note">' + note + "</td>" +
+        '<td data-label="' + esc(head) + '">' + esc(r[keyField] || "") + "</td>" +
+        '<td data-label="許可">' + allowed + "</td>" +
+        '<td data-label="禁止">' + forbidden + "</td>" +
+        '<td data-label="呼び捨て">' + yobisute + "</td>" +
+        '<td class="rule-note" data-label="備考">' + note + "</td>" +
       "</tr>";
     }).join("");
     return '<table class="rule-table"><thead><tr><th>' + head + "</th><th>許可</th><th>禁止</th><th>呼び捨て</th><th>備考</th></tr></thead>" +
