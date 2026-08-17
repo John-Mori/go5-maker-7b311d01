@@ -74,7 +74,14 @@
       //   実ピクセルを採色: 真珠コア#fdfef8 / ローズ字面#e0a093 / 銅ローズゴールド縁#ab5148 / 濃緋輪郭#861a18。
       //   前回(#f3b3a6/edge#c87856/glow#ffaa96)は淡い桜＋橙寄りの縁＋暖光でスケール縮小時に金へ寄って見えた。
       //   字面を実測ローズ#e0a093に濃くし縁を銅赤#ab5148へ、暖光を弱め輪郭を紫#4a1e3a→緋赤系#4a1a16へ=金くすみを断つ。
-      ink: { top: '#fdfef8', bottom: '#e0a093', edge: 'rgba(171,81,72,.92)', glow: 'rgba(224,160,147,.5)', contour: 'rgba(74,26,22,.94)' },
+      ink: { top: '#fdfef8', bottom: '#e0a093', edge: 'rgba(171,81,72,.92)', glow: 'rgba(224,160,147,.5)', contour: 'rgba(74,26,22,.94)',
+             // ★2026-08-18 acc1と同根の「重く角ばる」対策(AD研究室ルカ代行発注)。色は2026-08-11実測済みで
+             //   正しいまま据置き、太さだけacc1と同じ理屈で薄める(旧・下のdrawDigits既定値
+             //   contourW0.075/edgeW0.024がDidoneの縦太・横極細コントラストを塗り潰していた=同一の主犯)。
+             //   ただし宵桜は緋色の札の上に乗る(acc1のグレー地手本と違い下地が明るく数字が沈みやすい)ため、
+             //   contourはacc1(0.020)よりわずかに残して持ち上げを確保。edge/glowはお手本の細い銅の縁・
+             //   柔らかい桜光彩に合わせacc1相当まで細める。
+             contourW: 0.028, edgeW: 0.013, glowW: 0.058 },
       discount: { src: 'assets/promo/yoizakura-discount-base.png',
                   slot: { x: 0.364, y: 0.260, w: 0.211, h: 0.490 } },
       price:    { src: 'assets/promo/yoizakura-price-base.png',
@@ -311,7 +318,9 @@
     //   コントラストが立たなかったこと。下に濃色の縁＋弱い落ち影を敷いてから本体を重ねる。
     var contour = ink.contour || 'rgba(60,30,20,.9)';
     // ★太さは ink.contourW/edgeW/glowW で account別に上書き可能(既定=旧数値のまま=無指定なら無変更)。
-    //   2026-08-18 acc1のみ薄く指定(お手本寄せ・drawDigits冒頭コメント参照)。acc2は無指定=旧仕様通り。
+    //   2026-08-18 acc1・acc2ともお手本寄せで薄く指定済み(各TEMPLATESのinkコメント参照)。
+    //   このフォールバック既定値(0.075/0.024/0.07)は現在どのアカウントからも使われないが、
+    //   将来テンプレ追加時の安全側デフォルトとして残す。
     var contourW = (typeof ink.contourW === 'number') ? ink.contourW : 0.075;
     var edgeW = (typeof ink.edgeW === 'number') ? ink.edgeW : 0.024;
     var glowW = (typeof ink.glowW === 'number') ? ink.glowW : 0.07;
