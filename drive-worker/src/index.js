@@ -318,6 +318,7 @@ async function handleSaveJob(form, env, cors, ctx) {
     r2Base: String(form.get("r2Base") || "").trim(),
     videoKey: String(form.get("videoKey") || "").trim(),
     previewKey: String(form.get("previewKey") || "").trim(), // 任意・R2上の仕上がりプレビュー(小)の在り処
+    srcKey: String(form.get("srcKey") || "").trim(),         // 任意・R2上の元画像(動画に使った写真)の在り処
     overwrite: String(form.get("overwrite") || "") === "1",
   };
   const v = validateSaveJobInput(fields, env);
@@ -375,6 +376,19 @@ async function runSaveJob(env, fields, parentId) {
     const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
     await uploadNewBuffer(folder.id, vname, buf, mime, token);
   } catch (e) { return; }
+
+  // ---- 元画像（任意・R2から取り寄せ）。★投稿完了と同じ「動画+元画像+プレビュー」を揃える(Chami 2026-08-17
+  //   「投稿完了した時の挙動と同じファイルを保存して」)。save_job導入時に元画像だけ渡し忘れていた回帰の根治。
+  //   付随物なので失敗しても動画保存の成功は覆さない（フロントの再送/データ再作成で後追いできる）。----
+  if (SAVE_JOB_VIDEO_KEY_RE.test(fields.srcKey || "")) {
+    try {
+      const sv = await fetchR2Bytes(fields.r2Base, fields.srcKey, [500, 1500]);
+      if (sv && sv.buf && sv.buf.byteLength) {
+        const sname = await uniqueFileName(folder.id, baseName + "_元画像." + (extOf(sv.mime) || "jpg"), token);
+        await uploadNewBuffer(folder.id, sname, sv.buf, sv.mime || "image/jpeg", token);
+      }
+    } catch (e) { /* 元画像は付随物。失敗は無視 */ }
+  }
 
   // ---- プレビュー（任意・R2から取り寄せ・小さい）。付随物なので失敗しても動画保存の成功は覆さない ----
   if (SAVE_JOB_VIDEO_KEY_RE.test(fields.previewKey || "")) {

@@ -255,7 +255,7 @@
   //   投稿完了で「重い動画アップロード」をこのページ内で走らせず、動画は既にR2に控えてある(ensureVideoMirror_)ので
   //   その在り処(videoKey)だけを軽いFormDataでWorkerへ渡す→Workerが即202を返し、あとはR2→Driveをサーバー側で完走。
   //   本体が軽い(数百バイト)ので keepalive:true が確実に効く=送信の途中でタブを閉じてもブラウザが送り切る。
-  //   opts = { videoId(R2キー算出に使う下書きID), title, channel, previewKey?, overwrite? }
+  //   opts = { videoId(R2キー算出に使う下書きID), title, channel, previewKey?, srcKey?, overwrite? }
   function queueSave_(opts) {
     opts = opts || {};
     var channel = opts.channel, title = opts.title, videoId = opts.videoId;
@@ -275,6 +275,7 @@
       fd.append("r2Base", r2Base);
       fd.append("videoKey", videoKey);
       if (opts.previewKey) fd.append("previewKey", opts.previewKey);
+      if (opts.srcKey) fd.append("srcKey", opts.srcKey); // 元画像(動画に使った写真)のR2在り処。投稿完了と同じ一式を揃える
       if (opts.overwrite) fd.append("overwrite", "1"); // 上書きはWorker側の env.ALLOW_OVERWRITE と二重ロック
       return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd, keepalive: true })
         .then(function (r) {

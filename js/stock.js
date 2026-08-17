@@ -1015,6 +1015,21 @@
     return true;
   }
 
+  // 動画に使った元画像のBlobを解決する。手元Blob(stock_img_)優先、無ければ同期ミラー(stock:imgs:.src)の
+  //   dataURLから実体へ戻す(別端末で作った分)。どちらも無ければ null(=元画像はスキップ・非致命)。
+  function resolveSrcImageBlob_(id) {
+    var store = idb();
+    if (!store) return Promise.resolve(null);
+    return Promise.all([
+      store.get('stock_img_' + id).catch(function () { return null; }),
+      store.get('stock:imgs:' + id).catch(function () { return null; })
+    ]).then(function (r) {
+      var img = r[0], mirror = r[1] || {};
+      if (img) return img;
+      return mirror.src ? durlToBlob_(mirror.src) : null; // .then が Promise を自動で解く
+    }, function () { return null; });
+  }
+
   // 投稿完了(または作成履歴カードの「☁️ Drive保存」)から呼ぶDrive保存。
   //   ★動画作成の瞬間に即保存済み(drive_up_<videoId>あり)なら、動画/元画像は上げ直さず仕上がりプレビューだけ追記する。
   //     iOSがIDBの動画blobを容量都合で捨てた後でも、作成時に上げてあるのでDriveには残る=「履歴に載るのにDriveに無い」の根治。
@@ -1094,15 +1109,21 @@
     //   届かなかった場合に備え localStorage(go5_drive_savejob_<id>)へpendingを記録し、次回起動のsweepで再送(冪等)。
     if (window.Go5Drive && typeof window.Go5Drive.queueSave === 'function' && meta.account) {
       Promise.resolve(ensureVideoMirror_(id)).catch(function () {}) // R2へ確実に上げてから(既出なら即返る)
-        .then(function () { return previewReady; })
-        .then(function (prevB) {
-          // 仕上がりプレビューも小さくR2へ控えてkeyを添える(Workerが1ページ目プレビューとして保存)。任意=失敗しても続行。
+        .then(function () { return Promise.all([previewReady, resolveSrcImageBlob_(id)]); })
+        .then(function (bs) {
+          var prevB = bs[0], srcB = bs[1];
+          // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
+          //   ★元画像を渡すのは「投稿完了と同じ一式(動画+元画像+プレビュー)」を揃えるため(Chami 2026-08-17)。
+          //   save_job導入時に元画像だけ渡し忘れていた回帰=ここで controllerへ srcKey を添えて根治。
           var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
             ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
             : Promise.resolve('');
-          return mirrorPrev.then(function (prevKey) {
+          var mirrorSrc = (srcB && window.Go5Sync && Go5Sync.putBlobR2At)
+            ? Go5Sync.putBlobR2At('go5src:' + id, srcB).catch(function () { return ''; })
+            : Promise.resolve('');
+          return Promise.all([mirrorPrev, mirrorSrc]).then(function (keys) {
             recordSaveJobPending_(id, meta);
-            return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: prevKey || '', overwrite: true });
+            return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: keys[0] || '', srcKey: keys[1] || '', overwrite: true });
           });
         })
         .then(function (res) {
