@@ -515,6 +515,7 @@
 
   // ── 保存 ──
   var _thumbCache = {}; // id → ObjectURL
+  var _r2ThumbTried = {}; // id → 1(R2 go5srcサムネ取得を1回試した=null連打防止)
 
   // 動画作成タブのカテゴリ(ジャンル)チェックを読む。投稿完了時に投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
   //   これが無いと下書き→投稿完了で履歴にジャンルのチェックが渡らず、毎回手で入れ直しになる。
@@ -670,7 +671,13 @@
         auxDone.then(function () { ensureBlobMirror_(id); }).catch(function () {});
         // ★元画像はIDBの成否と無関係に、メモリ実体から直接R2へ控える(2026-08-17③)。IDB書込み(stock_img_)が
         //   iOSで黙って失敗/後で退避されても、go5src:<id> がR2に残る=再作成・Drive保存が空にならない。
-        if (evDetail.sourceImageFile) { try { ensureSrcMirror_(id, evDetail.sourceImageFile); } catch (e) {} }
+        //   ★ただし作成直後は動画のR2 PUT(ensureVideoMirror_)が上り帯域を使い、iPhoneの細い回線では同時PUTが
+        //     動画の着地を遅らせ「ドラフトへ自動遷移しない/DL準備中」を悪化させうる(Fable5診断2026-08-17)。
+        //     →元画像PUTは数秒遅らせ、動画の着地を先に通す(IDB退避は分〜日単位=数秒の遅延はdurabilityに無害)。
+        if (evDetail.sourceImageFile) {
+          var _srcHint = evDetail.sourceImageFile;
+          setTimeout(function () { try { ensureSrcMirror_(id, _srcHint); } catch (e) {} }, 6000);
+        }
 
         // Phase 1: 動画を手元/雲へ並列着地。手元は set 解決ではなく、同じキーの読み戻しまで検証する。
         //   ★各レーンの reject 理由(idb-timeout / QuotaExceeded / draft-meta-readback-failed=localStorage逼迫 /
@@ -877,7 +884,18 @@
       if (!blob) {
         // 手元にも雲にも無い=作った端末からまだ上がっていない(その端末でアプリを開けば数十秒で上がる)。
         settle(false);
-        alert('動画がまだ雲に届いていません。動画を作成した端末でこのアプリを開いていれば数十秒で自動的に上がります。少し待ってもう一度お試しください。');
+        // ★このalertを診断に変える(2026-08-17・Fable5診断)。次の1枚のスクショで「雲同期の設定状態」と
+        //   「この動画が作成時に着地したか(go5_landing_log)」が読める=再発の芯(雲PUT失敗かIDB退避か)を切り分ける。
+        var diag = '';
+        try {
+          var cfgd = !!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured());
+          var log = JSON.parse(localStorage.getItem('go5_landing_log') || '[]') || [];
+          var ent = null; for (var li = 0; li < log.length; li++) { if (log[li] && log[li].id === id) { ent = log[li]; break; } }
+          diag = '\n\n[診断] 雲同期=' + (cfgd ? '設定済' : '未設定') +
+                 (ent ? (' / 作成時の着地=' + (ent.kind || '?') + (ent.local ? ' 手元:' + ent.local : '') + (ent.cloud ? ' 雲:' + ent.cloud : '')) : ' / 着地記録なし') +
+                 '\nid=' + id;
+        } catch (_) {}
+        alert('動画がまだ雲に届いていません。動画を作成した端末でこのアプリを開いていれば数十秒で自動的に上がります。少し待ってもう一度お試しください。' + diag);
         return;
       }
       var name = videoName || 'video.mp4';
@@ -1529,6 +1547,16 @@
             if (pb) { _thumbCache[m.id] = URL.createObjectURL(pb); return _thumbCache[m.id]; }
             return store.get('stock_img_' + m.id).then(function (ib) {
               if (ib) { _thumbCache[m.id] = URL.createObjectURL(ib); return _thumbCache[m.id]; }
+              // ★手元のサムネ系が全滅(iOSがIDBを退避)=作成時にR2へ控えた元画像 go5src:<id> をサムネ代わりに
+              //   「1回だけ」取り寄せて「確認中」を絵に戻す(2026-08-17・Fable5診断P3)。null時は _r2ThumbTried で
+              //   再取得を止め、毎描画のfetch連打を防ぐ。
+              if (!_r2ThumbTried[m.id] && window.Go5Sync && Go5Sync.fetchBlobR2At) {
+                _r2ThumbTried[m.id] = 1;
+                return Go5Sync.fetchBlobR2At('go5src:' + m.id).then(function (rb) {
+                  if (rb && rb.size) { _thumbCache[m.id] = URL.createObjectURL(rb); return _thumbCache[m.id]; }
+                  return null;
+                }).catch(function () { return null; });
+              }
               return null;
             }).catch(function () { return null; });
           }).catch(function () { return null; });
