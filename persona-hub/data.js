@@ -9,34 +9,10 @@ window.PERSONA_HUB_DATA = {
    "アイコン": "local\\persona_avatars.json",
    "原典": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md"
   },
-  "_count": 36
+  "_count": 35
  },
  "personas": {
   "Chami(from Claude Code)": {
-   "所属部門": null,
-   "設定所在": {
-    "原典_characterfile": null,
-    "口調ルール": null,
-    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": null,
-    "文脈": null
-   },
-   "口調": null,
-   "アイコン": {
-    "枚数": 112,
-    "url": "https://go5-sync.trustsignalbot.workers.dev/img/bb4f1c8197c84d3aa9f212acb198305b590dfa1b21f2cf56d20cbcf41227cc32"
-   },
-   "呼称": {
-    "この人をどう呼ぶか": {
-     "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
-     "自分を対象にした個別ルール": []
-    },
-    "この人が誰をどう呼ぶか": []
-   }
-  },
-  "Chami(from Claude)": {
    "所属部門": null,
    "設定所在": {
     "原典_characterfile": null,

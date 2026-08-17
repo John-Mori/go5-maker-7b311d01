@@ -13,10 +13,30 @@
 <body>
 <header class="hub-header">
   <h1>人格設定ハブ</h1>
-  <p class="hub-sub">AI組織のキャラクター設定を1枚で確認する一覧ビューア(読み取り専用・書き戻しはしません)</p>
+  <p class="hub-sub">AI組織のキャラクター設定を1枚で確認・編集する一覧ビューア</p>
+  <div id="hubControls" class="hub-controls">
+    <button id="editToggle" class="ctrl-btn" type="button">✎ 編集モード</button>
+    <button id="diffBtn" class="ctrl-btn ctrl-diff" type="button" hidden>差分を見る<span id="diffCount" class="diff-count" hidden>0</span></button>
+  </div>
+  <p id="editHint" class="edit-hint" hidden>編集/削除はこの端末に保存されます。正本(常駐が読む設定)へ反映するには「差分を見る → 差分をコピー」で出た内容を人事部門へ渡してください。</p>
 </header>
 
 <div id="errorBanner" class="error-banner" hidden></div>
+
+<div id="diffModal" class="diff-modal" hidden>
+  <div class="diff-box">
+    <div class="diff-head">
+      <span>この端末の差分(正本との違い)</span>
+      <button id="diffClose" class="diff-x" type="button" aria-label="閉じる">✕</button>
+    </div>
+    <div id="diffDeleted" class="diff-deleted"></div>
+    <textarea id="diffText" class="diff-text" readonly spellcheck="false"></textarea>
+    <div class="diff-actions">
+      <button id="diffCopy" class="ctrl-btn ctrl-diff" type="button">差分をコピー</button>
+      <button id="diffReset" class="ctrl-btn ctrl-reset" type="button">全ての編集を取り消す</button>
+    </div>
+  </div>
+</div>
 
 <main class="hub-main">
   <aside class="hub-list-pane">
