@@ -1212,6 +1212,7 @@
       : Promise.resolve('');
     verifyFolder.then(function (okFolderId) {
       if (okFolderId) {
+        setDriveSavedState_(id, 'verified', meta); try { render(); } catch (e) {} // checkSavedで実物確認済み＝verified
         previewReady.then(function (prevB) {
           if (prevB && window.Go5Drive.appendImage) window.Go5Drive.appendImage(meta.account, meta.title, okFolderId, prevB, null);
           done(true, '保存済みを実物確認・プレビュー追記');
@@ -1224,6 +1225,9 @@
 
     // ── 本当のDrive保存(動画本体を上げる)。控えフォルダに動画実体が無い時/控えが無い時に呼ぶ。
     function realSaveNow_() {
+      // ★ここから先は実際に保存を試みる=カードに「確認中…」を出し、実物確認ループを起動する(queueSave/レガシー両経路を1箇所で被覆)。
+      setDriveSavedState_(id, 'pending', meta); try { render(); } catch (e) {}
+      verifyDriveLanded_(id);
     // ── ★フォールバック：作成時にDrive未保存 → サーバー側完走ジョブ(2026-08-16 Chami「途中で閉じても裏で完結」)。
     //   従来はここでこのページ内で動画をフルアップロードしていた=スマホ回線で数秒〜十数秒。その最中にSafariが
     //   タブをbg破棄/閉じるとfetchが切れて中断し、積み直す永続キューも無く「黙って消える」(Chami再発報告
@@ -1328,6 +1332,48 @@
       }).catch(function () { setTimeout(nextK, 150); });
     }
     nextK();
+  }
+
+  // ── ★Drive保存の「実物確認」状態(2026-08-17 オタコン)──
+  //   投稿完了/手押しでDrive保存に入ったら go5_drive_saved_<id> に pending を記録し、Go5Drive.checkSaved
+  //   ([題名]フォルダに動画実体が在るか＝read-only)で実物を確認できた時だけ verified へ上げる。Workerの202受理を
+  //   成功と読み替えない=「裏で完走と出るのにDriveに動画が来ない」の沈黙を、カードで見える状態(確認中/実物確認)に変える。
+  var DRIVE_SAVED_PREFIX = 'go5_drive_saved_';
+  function driveSavedState_(id) {
+    try { return JSON.parse(localStorage.getItem(DRIVE_SAVED_PREFIX + id) || 'null'); } catch (e) { return null; }
+  }
+  function setDriveSavedState_(id, state, meta) {
+    try {
+      var prev = driveSavedState_(id) || {};
+      localStorage.setItem(DRIVE_SAVED_PREFIX + id, JSON.stringify({
+        state: state, ts: Date.now(),
+        title: (meta && meta.title) || prev.title || '',
+        channel: (meta && meta.account) || prev.channel || '',
+        videoId: (meta && meta.videoId) || prev.videoId || ''
+      }));
+    } catch (e) {}
+  }
+  var _driveVerifyBusy = {};
+  function verifyDriveLanded_(id) {
+    if (_driveVerifyBusy[id]) return;
+    var st = driveSavedState_(id);
+    if (!st || st.state === 'verified') return;
+    if (!(window.Go5Drive && Go5Drive.checkSaved) || !st.channel || !st.title) return;
+    _driveVerifyBusy[id] = true;
+    var delays = [20000, 60000, 180000]; // 20秒→60秒→180秒(サーバー側完走を待って実物照会)
+    var i = 0;
+    function schedule() {
+      if (i >= delays.length) { _driveVerifyBusy[id] = false; return; } // 打ち切り=pendingのまま(嘘をつかない・次回起動で再照会)
+      setTimeout(tryOnce, delays[i++]);
+    }
+    function tryOnce() {
+      if (document.hidden) { schedule(); return; } // 隠れている間は数えず復帰で再試行
+      Go5Drive.checkSaved(st.channel, st.title).then(function (saved) {
+        if (saved) { setDriveSavedState_(id, 'verified', null); _driveVerifyBusy[id] = false; try { render(); } catch (e) {} return; }
+        schedule();
+      }).catch(function () { schedule(); });
+    }
+    schedule();
   }
 
   // ── 再作成(ドラフトデータを動画作成タブに復元) ──
@@ -1458,6 +1504,16 @@
     var id = meta.id;
     var acctLabel = meta.account === 'acc2' ? '宵桜艶帖' : '月詠み';
     var hasYt = !!(meta.youtubeUrl);
+    // ★Drive保存の実物確認状態を1行で見せる(ボタンではなくテキスト行=幅レイアウトに触れない)。
+    var _dsv = driveSavedState_(id);
+    var driveLine = '';
+    if (_dsv && _dsv.state === 'verified') {
+      var _durl = (window.Go5Drive && Go5Drive.folderUrl) ? Go5Drive.folderUrl(meta.account, meta.title, meta.videoId) : '';
+      driveLine = '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">☁️ Drive保存済み(実物確認)' +
+        (_durl ? ' · <a href="' + esc(_durl) + '" target="_blank" rel="noopener" style="color:var(--accent);">Driveで開く</a>' : '') + '</div>';
+    } else if (_dsv && _dsv.state === 'pending') {
+      driveLine = '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ Drive保存 確認中…</div>';
+    }
     // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
     //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。
     //   ★横幅は前のサイズ(中身なり=padding:4px 8px/.72rem)を維持し、引き伸ばさない(Chami指摘2026-08-11 msg1536774712519163914)。
@@ -1476,6 +1532,7 @@
         '<div style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
         '<div style="font-size:.72rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · 完了 ' + esc(fmtTs(meta.completedTs || meta.ts)) + '</div>' +
         (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
+        driveLine +
         '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap;">' +
           '<button type="button" class="stk-restore" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid var(--accent);background:transparent;color:var(--accent);font-weight:700;">↩ 復元</button>' +
           '<button type="button" class="stk-dl" data-id="' + esc(id) + '" style="' + btnBase + 'border:1px solid #46586e;background:#151d2c;color:#dfe6ef;">⬇ 動画DL</button>' +
@@ -1593,6 +1650,8 @@
 
     var store = idb();
     var all = metas.concat(arch);
+    // ★保存中(pending)のDrive保存は、この端末が開くたびに実物照会を再起動する=前回タブを閉じた後に着地した分も拾って確認中→実物確認へ上げる。
+    all.forEach(function (m) { if (m && m.id) { var _ds = driveSavedState_(m.id); if (_ds && _ds.state === 'pending') verifyDriveLanded_(m.id); } });
 
     // 一覧HTMLを thumbFor(id→サムネURL/null)から組み立てて描画する。(サムネの有無に依らず同じ骨格)
     function paint_(thumbFor) {

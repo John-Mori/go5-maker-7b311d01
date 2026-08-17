@@ -265,7 +265,7 @@
     if (!(window.Go5Sync && Go5Sync.keyForName && Go5Sync.getConfig)) return Promise.resolve({ ok: false, error: "no_sync" });
     var r2Base = (Go5Sync.getConfig() || {}).url || "";
     if (!/^https?:\/\//.test(r2Base)) return Promise.resolve({ ok: false, error: "no_r2_base" });
-    setStatus("☁️ Driveへ保存を予約…(" + channelLabel(channel) + "・裏で完走)");
+    setStatus("☁️ Driveへ保存中…(" + channelLabel(channel) + ")");
     return Go5Sync.keyForName("go5vid:" + videoId).then(function (videoKey) {
       var fd = new FormData();
       fd.append("action", "save_job");
@@ -279,7 +279,7 @@
       if (opts.overwrite) fd.append("overwrite", "1"); // 上書きはWorker側の env.ALLOW_OVERWRITE と二重ロック
       return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd, keepalive: true })
         .then(function (r) {
-          if (r.status === 202 || r.ok) { setStatus("✅ Driveへ保存を受け付けました(" + channelLabel(channel) + "・裏で完走中)"); return { ok: true }; }
+          if (r.status === 202 || r.ok) { setStatus("☁️ Driveへ保存中(" + channelLabel(channel) + ")…確認でき次第、作成履歴カードに『保存済み(実物確認)』が付きます"); return { ok: true }; }
           return r.json().then(function (j) { return { ok: false, error: (j && j.error) || ("http_" + r.status) }; }).catch(function () { return { ok: false, error: "http_" + r.status }; });
         })
         .catch(function () { return { ok: false, error: "network" }; });
