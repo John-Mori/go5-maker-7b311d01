@@ -83,8 +83,6 @@ relay = sorted(k for k, v in D.DEPT_CONF.items() if v.get("forward_all"))
 #     research-room 事業層(ad研究室 Vol.9セッションが受ける)=**他オーナーにつき変更しない**
 eq(relay, ["hq", "research-room"],
    "★forward_allはmain箱を読む対話セッションが居る部屋のみ(組織層の部門には付けない)")
-# ★talk は 2026-08-18 まで literal 一致の期待値だった(下の履歴コメントはその時代のもの=消さない)。
-#   いまは下の WORK_ROOMS / UNDECLARED_TALK による判定に置き換わっている。参考値として残す。
 talk = sorted(k for k, v in D.DEPT_CONF.items()
               if not v.get("forward_all") and not v.get("work_scope"))
 # ★hr-contextを外した(2026-07-20 Chami指示・RULES §7.6): 人事の部屋で人事の作業ができないのは
@@ -141,47 +139,17 @@ talk = sorted(k for k, v in D.DEPT_CONF.items()
 #   Chamiの直接指示が最上位)。実測= 8/14 08:59 アスナが「今から回すね」と言った便が
 #   そのまま部門長へ上申された(dept_daemon_kaizen-analyst.log)。aegis-gl が 8/5 に受けた是正と同型。
 #   ★境目は動かしていない= 型・仕様を書くのは自室 / 5秒動画メーカー本体のコードは改修部門α(C-015)。
-# ★★2026-08-18 (イージス研究室) この検査の**形**を変えた。名簿の literal 一致をやめた。
-#   理由= 上の履歴のとおり **manga-shorts(8/5)・kukuru-nakama(8/13)・gunji(8/16)** と
-#   3回続けて「実在の部屋を書き足すだけ」の赤が出た。gunji は 8/16 の配線以来ずっと赤で、
-#   その赤の隣に本物の退行が並んでも埋もれる(HQ指摘 2026-08-13 と同じ穴)。C-038=再発は恒久策。
-#   ★何が本当の期待値か= 部屋が会話専用「である」ことではなく、**それを人が宣言したか**だ。
-#     DEPT_CONF には 3つの状態がある:
-#       A work_scope 持ち          … 自室で手を動かせる(=権限を与える側。ここが登録制)
-#       B conversation_only: True … その場で答え切る。回送もしない(宣言済み)
-#       C どちらも無い            … 会話はするが作業依頼は <<WORK>> で部門長へ回送される
-#     事故が起きたのは常に C だ= aegis-gl(8/5)・kaizen-analyst(8/14) は「対話セッションが
-#     やる前提」で C に置かれ、実際には誰も手を動かさない部屋になっていた。
-#   → **B は宣言そのものを期待値として認める**(新設の会話部屋で名簿を触らなくてよい=赤が出ない)。
-#     **A と C は登録制**にして、権限の増減と「宣言なき無権限」を人の目に通す。
-WORK_ROOMS = sorted([  # A= work_scope を持つ部屋。増減はどちらも期待値の変更(要登録)
-    "aegis-gl", "ai-office", "consult-intel", "copy-director", "data-org", "frontend",
-    "hq", "hr-context", "hr-room", "imagegen", "kaizen-analyst", "learning-coach",
-    "llm-edu", "platform-se", "product-scout", "qa-reviewer", "research-room",
-    "shorts-analyst", "system-engineer",
-])
-UNDECLARED_TALK = sorted([  # C= 権限も宣言も無い部屋。**増やすな**(aegis-gl 8/5 と同型になる)
-    "incident",          # 切り分けと引き渡しが仕事。復旧の実作業は担当部門が持つ
-    "keiei-kikaku",      # 部門の設立・改廃は台帳と艦隊を触る=対話セッションが責任を持つ
-    "system-engineer-b",  # 改修βに実装権は与えない(2026-07-21 ORG-32)
-])
-eq(sorted(k for k, v in D.DEPT_CONF.items() if v.get("work_scope")), WORK_ROOMS,
-   "★work_scope を持つ部屋の登録簿(権限の増減=期待値の変更。ここだけは人が登録する)")
-eq(sorted(k for k, v in D.DEPT_CONF.items()
-          if not v.get("work_scope") and not v.get("conversation_only")), UNDECLARED_TALK,
-   "★work_scopeも conversation_only 宣言も無い部屋(aegis-gl 8/5・kaizen-analyst 8/14 の穴の形)")
-# conversation_only を宣言済みの部屋は名簿を要求しない=新設のたびに赤くならない。
-# ただし**宣言と権限の同居**は意味が衝突するので、既知の1件以外は許さない。
-#   learning-coach だけは両方持つ(work_scope は起動文の capability note として使い、
-#   回送は conversation_only で止めている。dept_daemon.py:5163 が conversation_only を優先)。
-eq(sorted(k for k, v in D.DEPT_CONF.items()
-          if v.get("work_scope") and v.get("conversation_only")), ["learning-coach"],
-   "work_scopeと conversation_only の同居は learning-coach のみ(他は設定の取り違え)")
-# forward_all 持ちは main箱を読む対話セッションが居る部屋=上の relay 検査で固定済み。
+eq(talk, ["dream-care", "future-room", "health-log", "incident",
+          # ★2026-07-27 report-notify 追加。一方通行だった報告通知部屋を双方向にした
+          #   (Chamiが3回頼んだ件)。通知の出力経路には触らないので conversation_only。
+          "keiei-kikaku", "kukuru-nakama", "llm-qa", "manga-shorts", "past-room",
+          "report-notify", "system-engineer-b"],
+   "会話専用の部屋(実作業は対話セッション側が担う)")
+# 残りは全て work_scope 持ち=マーカー申告でwork_generateへ二段昇格する
 for name, conf in D.DEPT_CONF.items():
-    if name not in relay and not conf.get("work_scope") and not conf.get("conversation_only") \
-            and name not in UNDECLARED_TALK:
-        fails.append(f"{name}: work_scopeも forward_all も conversation_only 宣言も無い(消費者不在の穴)")
+    if name not in relay and name not in talk:
+        if not conf.get("work_scope"):
+            fails.append(f"{name}: work_scopeも forward_all も無い(消費者不在の穴)")
 
 # --- 6. 申告漏れの監査と救済(2026-07-20 Chami「着手して」) ---
 #     残る唯一の再発経路=キャラが約束したのに申告を書き漏らす便。出力側の事後監査で拾う。
