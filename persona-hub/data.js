@@ -41,15 +41,14 @@ window.PERSONA_HUB_DATA = {
     ]
    },
    "アイコン": {
-    "枚数": 7,
+    "枚数": 6,
     "url": [
      "https://go5-sync.trustsignalbot.workers.dev/img/48239941a6a084626516ea088d776490708eb6a96a19056a73bd41f3fa7de0f2",
      "https://go5-sync.trustsignalbot.workers.dev/img/893be3480c8189b2591668f294e8b318c294f05c78c8a6c831aa68dd7ac33f90",
      "https://go5-sync.trustsignalbot.workers.dev/img/549dc7d37f31c329d4b0e881c8d94d6d55442698a2ad6b01a82c4314e7319404",
      "https://go5-sync.trustsignalbot.workers.dev/img/e6b3726eb0820290219367a4b70a098eacedce4b9627e5fd9a03f40448ef2fe3",
      "https://go5-sync.trustsignalbot.workers.dev/img/294ab43f436258dfef8ff57ff2fef7ccc67f69cb31ff5926673480b2c0a05c77",
-     "https://go5-sync.trustsignalbot.workers.dev/img/a2a646ea4f6492df111e86ddb41c97ceecb3009c9ab47dd5dc47926880d371b5",
-     "https://go5-sync.trustsignalbot.workers.dev/img/c8e84e30658a6ab2d751fd7b72c24bf0b5142bf3895bcf24ec18d9fc179c00ab"
+     "https://go5-sync.trustsignalbot.workers.dev/img/a2a646ea4f6492df111e86ddb41c97ceecb3009c9ab47dd5dc47926880d371b5"
     ]
    },
    "呼称": {
