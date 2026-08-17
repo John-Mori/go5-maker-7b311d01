@@ -701,6 +701,8 @@
           if (a && b && !a.d && !b.d) {
             var localNewer = (a.t || 0) >= (b.t || 0);
             var u = unionByField(localNewer ? b.v : a.v, localNewer ? a.v : b.v, idf);
+            // ★S3=作成履歴はこの push スナップショットも thumb 正規化してから雲へ送る(pull適用側で上書きされない経路の穴を塞ぐ)。
+            if (u != null && isStockArchiveKey(k)) u = slimStockArchive(u, 3);
             if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
           }
         });
@@ -805,6 +807,11 @@
               var adk = "go5_stock_arch_del";
               var admerged = (mls[adk] && !mls[adk].d) ? mls[adk].v : LS.getItem(adk);
               finalV = applyTombstone(finalV, parseDelMap(mergeDelMap(admerged || "{}", LS.getItem(adk) || "{}")), "id", "completedTs");
+              // ★S3=同期越しの thumb 再肥大の根治。union は空(剥がし済)で非空(remote旧thumb)を消さないので、
+              //   ここで決定的正規化(新しい keepN件だけ thumb を残す)を掛ける。全端末が同じ規則で正規化する=
+              //   不動点 slim(union(slim(x),x))===slim(x) に収束し、雲の blob からも古い thumb が消える(item は失わない)。
+              //   この finalV は下で LS へ書かれ(836)、push 対象 mls[k] にも反映される(831)=書き込みと送信の両方が痩せる。
+              finalV = slimStockArchive(finalV, 3);
             }
           } else if (isScheduleStateKey(k)) {
             // 同期中にカレンダーが編集されても、開始時点の値で上書きせずライブ値を再統合する。
@@ -1039,6 +1046,8 @@
     //   この鍵で R2 の動画/プレビューを取り寄せてDriveへ完走させる(2026-08-16「閉じても裏で完結」)。
     keyForName: function (name) { return sha256hex(String(name)); },
     resetLocalSyncState: function () { ["sync2_snap", "sync2_ts", "sync2_ver"].forEach(function (k) { try { LS.removeItem(k); } catch (e) {} }); },
+    // 作成履歴(go5_stock_archive)の thumbDataUrl detox 純関数を公開。(stock.js の保存側=S2 が呼ぶ。副作用なし・fail-open)
+    slimStockArchive: function (arrStr, keepN) { return slimStockArchive(arrStr, keepN); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
     _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };

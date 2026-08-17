@@ -220,9 +220,23 @@
     }
     return false;
   }
+  // ★S2=保存側の thumb detox。同期を待たずこの端末のLSを即痩せさせ、次の同期までの「肥大の窓」を潰す
+  //   (窓の間の候補/下書き書込が容量で落ちる=再作成で画像が消える の残り火を断つ)。新しい keepN件だけ
+  //   inline thumb を残し、古い分は剥がす(サムネは IDB stock_t_<id> / R2 stock:imgs から resolveThumb_ が復元=非破壊)。
+  //   剥がすのは直列化する配列だけ=表示中カードの meta.thumbDataUrl は触らない(Go5Sync.slimStockArchive は複製を返す)。
+  //   Go5Sync 未ロード/純関数無しの古いJSでは素通し(fail-open)=従来動作。雲越しの根治は core/sync.js の S3。
+  function slimArchiveForWrite_(arr) {
+    try {
+      if (!(window.Go5Sync && typeof window.Go5Sync.slimStockArchive === 'function')) return arr;
+      var slimStr = window.Go5Sync.slimStockArchive(JSON.stringify(arr || []), 3);
+      var slim = JSON.parse(slimStr);
+      return Array.isArray(slim) ? slim : arr;
+    } catch (e) { return arr; }
+  }
   function saveArchive(arr) {
-    var ok = writeArchiveResilient_(arr);
-    if (!ok && purgeableSweep_() > 0) ok = writeArchiveResilient_(arr); // 再取得可能なキャッシュだけ緊急退避して再挑戦
+    var lean = slimArchiveForWrite_(arr);
+    var ok = writeArchiveResilient_(lean);
+    if (!ok && purgeableSweep_() > 0) ok = writeArchiveResilient_(lean); // 再取得可能なキャッシュだけ緊急退避して再挑戦
     return ok;
   }
   // 全端末同期(Go5Sync)へ即時反映を促す。(未設定・未ロードなら何もしない)ドラフトを保存したら他端末へ運ぶ。
