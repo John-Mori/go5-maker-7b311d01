@@ -54,6 +54,17 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 .badge-off{color:var(--sub);border-color:var(--line);}
 .badge-naming{color:var(--sage);border-color:#4f583b;} /* 呼称=個別ルールの目印。紫を廃しセージ(緑)に */
 
+/* ── 手元編集バー(未反映の変更・localStorageスクラッチパッド) ── */
+.edit-bar{background:var(--card2);border:1px solid var(--accent);border-radius:11px;
+  padding:9px 11px;display:flex;flex-direction:column;gap:8px;}
+.edit-bar-head{font-size:12.5px;font-weight:700;color:var(--ink);}
+.edit-bar-sub{color:var(--accent);font-weight:400;font-size:11px;}
+.edit-bar-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.eb-btn{font-size:12px;font-weight:700;border-radius:8px;padding:6px 12px;cursor:pointer;}
+.eb-copy{background:var(--accent);color:var(--accent-ink);border:none;}
+.eb-reset{background:transparent;color:var(--sub);border:1px solid var(--line);}
+.badge-edit{color:var(--accent);border-color:var(--accent);}
+
 /* ── 右：詳細ペイン ── */
 .detail-pane{flex:1 1 auto;min-width:0;}
 .detail-empty{padding:40px 16px;text-align:center;color:var(--sub);font-size:13.5px;}
@@ -74,6 +85,30 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 .avatar-grid{display:flex;flex-wrap:wrap;gap:8px;}
 .avatar-thumb{width:52px;height:52px;border-radius:50%;object-fit:cover;
   border:1px solid var(--line);background:var(--sink);}
+
+/* 差分の一覧＋手元編集(#番号・id で指せる化＋追加/削除) */
+.av-grid{flex-direction:column;gap:8px;}
+.av-cell{display:flex;align-items:center;gap:10px;background:var(--sink);
+  border:1px solid var(--line);border-radius:10px;padding:7px 9px;}
+.av-cell .avatar-thumb{width:44px;height:44px;flex:0 0 44px;}
+.av-label{flex:1 1 auto;min-width:0;font-size:12.5px;color:var(--ink);font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.av-id{color:var(--sub);font-weight:400;font-family:ui-monospace,Consolas,monospace;font-size:11px;}
+.av-btn{flex:0 0 auto;font-size:12px;font-weight:700;border-radius:8px;padding:5px 10px;
+  cursor:pointer;background:transparent;}
+.av-del{color:var(--accent);border:1px solid var(--accent);}
+.av-undo{color:var(--sage);border:1px solid #4f583b;}
+.av-cell.is-removed{opacity:.55;}
+.av-cell.is-removed .avatar-thumb{filter:grayscale(1);}
+.av-cell.is-added{border-color:var(--sage);}
+.av-tag{flex:0 0 auto;font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;}
+.av-tag-del{color:var(--accent);border:1px solid var(--accent);}
+.av-tag-add{color:var(--sage);border:1px solid #4f583b;}
+.av-actions{margin-top:10px;}
+.av-add-btn{font-size:12.5px;font-weight:700;border-radius:9px;padding:7px 14px;
+  cursor:pointer;background:var(--accent);color:var(--accent-ink);border:none;}
+.av-hint{margin:9px 0 0;font-size:11px;color:var(--sub);line-height:1.6;}
+.av-hint b{color:var(--ink);}
 
 /* 口調 */
 .tone-sub-label{font-size:11.5px;color:var(--sub);font-weight:700;margin:8px 0 4px;}
