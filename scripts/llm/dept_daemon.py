@@ -2852,6 +2852,12 @@ HANGUL_AUDIT = os.path.join(LOCAL, "llm", "hangul_audit.jsonl")
 # ハングル音節(가-힣)+ 字母(ᄀ-ᇿ)+ 互換字母(ㄱ-ㆎ)
 _HANGUL_RE = re.compile(r"[가-힣ᄀ-ᇿㄱ-ㆎ]")
 
+# ★英文ダンプ(Claude原文の英語がそのまま日本語の部屋へ出る事故)の監査。ハングルと同じ置き場・作法。
+ENGLISH_AUDIT = os.path.join(LOCAL, "llm", "english_audit.jsonl")
+# 日本語スクリプト= ひらがな + カタカナ + 漢字 + 半角カナ。ラテン文字= 英字。
+_JP_RE = re.compile(r"[぀-ヿ一-鿿ｦ-ﾟ]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+
 # ============================================================================
 # 出力ゲート ルールE(本文へ混じった内部の手続きメタを剥ぐ) 2026-08-15 イージス研究室
 # ----------------------------------------------------------------------------
@@ -3332,6 +3338,135 @@ def _append_hangul_warn(text):
     if HANGUL_WARN in s:
         return s
     return s + "\n\n" + HANGUL_WARN
+
+
+# ============================================================================
+# 出力ゲート(英文ダンプ)= 日本語話者の部屋に**本文まるごと英語**が出る事故  2026-08-18
+# ----------------------------------------------------------------------------
+# Chami原文(2026-08-18・msg 1539153227491180624)=「謎英文の表示無駄だからやめて」。
+# 同じ苦情は2026-07-21にも出ていた(ORG-23・mirror_to_discord.flush_mine の docstring=
+#   「この謎の英文はディスコードには要らない、無駄、読みにくい…アイアムジャパニーズ」)。
+#   前回の恒久策はミラー経路(flush_mine)に載っていたが、そのミラーは2026-08-15に退役=
+#   別経路(dept_daemon の返信)で英語が復活した=**再発**(P4/C-038)。だから合流点へ載せ直す。
+#
+# 位置づけ: ハングル(ルールA)と同クラスの**非日本語スクリプト混入**。送信直前の合流点
+#   (audit_hangul/hangul_gate と同じ地点)に兄弟として置く=全経路の返信が必ず通る1点。
+#
+# 終端だけハングルと変える(★意図的な反転):
+#   ハングルは「一部混入」だから元文へ警告を付けて送る=沈黙を避ける(救う日本語が残っている)。
+#   英文ダンプは**本文の全部が英語**で救う日本語が無い=警告付きで送っても英語を晒すだけ。
+#   Chamiは「英語の表示そのものが無駄=害」と2度明言した=この類だけ「沈黙<英語ノイズ」が逆転する。
+#   よって: ①1回だけ再生成 → ②なお英語なら日本語へ言い換え(claude 1回) → ③どちらも駄目なら
+#   **送らず便を戻す**(保留=沈黙だが、便は消えず再送される=次の生成で日本語になり得る)。
+def detect_english_dump(text):
+    """日本語話者の部屋に**本文まるごと英語**(Claude原文ダンプ)が出ていれば info を返す。
+
+    ★正当な日本語本文に英語の固有名詞・URL・コード識別子・規約番号が混じる普通の返信では鳴らない。
+      判定前にコード柵・インラインコード・URLを除く(そこに英字が多いのは正当=誤検知の芽を摘む)。
+    ★閾値=英字が散文の量(40字以上)あり、かつ日本語がほぼ無い(英字数の15%未満)時だけ。
+      実測(花海咲季の英文 msg 1539153227491180624)= 英字≈290/日本語≈9=2%で確実に発火。
+      普通の混在返信(オタコン実便=日本語数百字+英単語数十字)は英字<40 or 日本語多数で鳴らない。
+    ★**検知するだけ**(自動置換はしない)。空/None/非文字列でも例外を出さない(fail-safe)。
+    """
+    try:
+        s = str(text or "")
+        core = re.sub(r"```.*?```", " ", s, flags=re.S)   # コード柵は判定から除く
+        core = re.sub(r"`[^`]*`", " ", core)              # インラインコード
+        core = re.sub(r"https?://\S+", " ", core)         # URL
+        latin = len(_LATIN_RE.findall(core))
+        jp = len(_JP_RE.findall(core))
+        if latin >= 40 and jp <= latin * 0.15:
+            return {"latin": latin, "jp": jp,
+                    "ratio": round(jp / float(latin or 1), 3), "excerpt": s[:120]}
+        return None
+    except Exception:
+        return None          # 検査が落ちても応答は続ける(fail-safe)
+
+
+def audit_english(dept, rec, reply):
+    """返信直前の英文ダンプ検知をログと監査ファイルへ残す(ここでは送信可否は決めない)。"""
+    try:
+        hit = detect_english_dump(reply)
+        if not hit:
+            return None
+        log(dept, f"★英文ダンプを検知 英字={hit['latin']}/日本語={hit['jp']}(比{hit['ratio']}) "
+                  f"冒頭=…{hit['excerpt']}… ※ORG-23再発。日本語化を試みる")
+        os.makedirs(os.path.dirname(ENGLISH_AUDIT), exist_ok=True)
+        with open(ENGLISH_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "dept": dept, "event": "english_dump", "ref": "ORG-23",
+                "latin": hit["latin"], "jp": hit["jp"], "ratio": hit["ratio"],
+                "msg_id": str((rec or {}).get("msg_id", "")),
+                "reply": str(reply or "")[:400],
+            }, ensure_ascii=False) + "\n")
+        return hit
+    except Exception:
+        return None          # 監査の失敗で応答を巻き添えにしない(fail-safe)
+
+
+def english_gate(text, regen=None, translate=None, strip_marker=None):
+    """英文ダンプ検知→①再生成→②日本語へ言い換え→③どちらも駄目なら保留(純関数・テスト可)。
+
+    引数:
+      text        : 1回目の本文(split_wip_marker 済みが渡る想定)。
+      regen       : 無引数callable=再生成後の本文を返す(None なら再生成しない)。
+      translate   : text→日本語 の言い換えを返す callable(None なら言い換えない)。
+      strip_marker: 再生成/言い換え本文から <<WIP>> 等を落とす callable(任意)。
+
+    返り値: (out_text, info)
+      out_text : 送るべき本文。**空文字 "" は「保留=送らない」の合図**(呼び出し側が便を戻す)。
+      info     : {"hit1","regenerated","translated","suppressed"} 監査/ログ用。
+
+    挙動(通常返信=英文ダンプでない本文は1ミリも変わらない):
+      - 1回目に英文ダンプが無ければ text をそのまま返す(hit1=False)。
+      - regen が日本語の本文を返せば、それへ差し替える(regenerated=True)。
+      - なお英語なら translate で日本語へ言い換え、日本語になれば採用(translated=True)。
+      - 両方とも英語のまま/使えない → "" を返す(suppressed=True)= 送らず便を戻す。
+    """
+    info = {"hit1": False, "regenerated": False, "translated": False, "suppressed": False}
+    try:
+        base = str(text or "")
+        if detect_english_dump(base) is None:
+            return base, info                # 通常経路=何もしない
+        info["hit1"] = True
+
+        def _clean(t):
+            c = str(t or "")
+            if strip_marker is not None:
+                try:
+                    c, _ = strip_marker(c)
+                except Exception:
+                    c = str(t or "")
+            return c
+
+        # ① 1回だけ再生成(ハングルと同じ=グリッチなら再ロールで日本語に戻ることが多い)
+        if regen is not None:
+            try:
+                rt = _clean(regen())
+            except Exception:
+                rt = ""
+            if rt.strip() and detect_english_dump(rt) is None:
+                info["regenerated"] = True
+                return rt, info
+
+        # ② 日本語へ言い換え(claude 1回)。事実を変えない前提の翻訳=claudeが得意な種類
+        if translate is not None:
+            try:
+                tt = _clean(translate(base))
+            except Exception:
+                tt = ""
+            if tt.strip() and detect_english_dump(tt) is None:
+                info["translated"] = True
+                return tt, info
+
+        # ③ どちらも英語のまま/使えない → 保留(Chami指示=英語を晒すより送らない)
+        info["suppressed"] = True
+        return "", info
+    except Exception:
+        # ゲート自身が配送を殺さない(fail-safe)。ただし空を返すと保留になって沈黙するので、
+        # 例外時は**元文をそのまま返す**(=ゲートのバグで便を握り潰さない)。
+        return str(text or ""), info
 
 
 # ============================================================================
@@ -4417,6 +4552,42 @@ class Daemon:
             return (reply, False)        # ★会話専用=作業判定は常にFalse(回送もwork_generateも起きない)
         return (reply, kw_work or declared or rescued)
 
+    def translate_to_ja(self, text):
+        """英文ダンプ(本文まるごと英語)を、その部屋の話者の口調の自然な日本語へ言い換える。
+
+        ★出力ゲート(英文ダンプ)の②段=再生成でも英語が残った時の日本語化。事実は1つも変えない。
+        ★失敗したら None(english_gate 側が fail-open で扱う=保留へ倒す)。送信は止めない。
+        ★固有名詞・コード識別子・URL・規約番号(C-043/§4.55)はそのまま残す=情報を壊さない。
+        """
+        body = str(text or "").strip()
+        if not body:
+            return None
+        try:
+            character = self.effective_character()
+            prompt = (
+                "以下の【本文】を、characterfileの人物の口調の自然な日本語へ言い換えてください。\n"
+                "■絶対規則\n"
+                "1. 事実を1つも変えない(数値・固有名詞・記号 C-043/§4.55/URL・結論はそのまま)。\n"
+                "2. 情報を足さない・削らない。\n"
+                "3. 英単語は日本語に訳す。ただし固有名詞・コード識別子・URL・規約番号はそのまま残す。\n"
+                "4. 出力は言い換えた日本語本文のみ。前置き・見出し・箇条書きの記号・メタ発言は書かない。\n"
+                "5. 括弧は半角()を使う。\n\n"
+                f"=== characterfile ===\n{character}\n\n"
+                f"=== 本文 ===\n{body}"
+            )
+            env = dict(os.environ)
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
+            prompt_spill.measure(prompt, tag=f"english_ja_{self.dept}")
+            p = subprocess.run([CLAUDE, "--print"], input=prompt, cwd=ROOT, env=env,
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=PRINT_TIMEOUT)
+            out = (p.stdout or "").strip()
+            if p.returncode != 0 or not out:
+                return None
+            return out
+        except Exception:
+            return None          # 言い換えで転んでも送信は止めない(english_gate が保留へ倒す)
+
     def work_generate(self, rec):
         """作業依頼をツール付きagentで部屋の中で完結させる(hr範囲=work_scope)。
 
@@ -5308,6 +5479,29 @@ class Daemon:
                 f"2回目混入={'有' if _hg.get('hit2') else '無'} "
                 f"警告付与={'有' if _hg.get('warned') else '無(再生成で解消)'} msg={mid}")
         reply = _reply2
+        # ★★出力ゲート(英文ダンプ)= 日本語話者の部屋にClaude原文の英語がそのまま出る事故
+        #   (2026-08-18 Chami「謎英文の表示無駄だからやめて」・2026-07-21 ORG-23の再発)。
+        #   ハングル(ルールA)と同クラスの非日本語混入。同じ合流点に兄弟として置く=全経路が通る1点。
+        #   ★終端だけハングルと変える(意図的な反転): 全文英語は救う日本語が無く、警告付きで送っても
+        #     英語を晒すだけ。Chamiが「英語の表示=無駄」と2度明言=この類だけ「沈黙<英語ノイズ」が逆転。
+        #     ①1回だけ再生成 → ②なお英語なら日本語へ言い換え(claude 1回) → ③どちらも駄目なら保留。
+        #   ★通常の日本語返信(英字は固有名詞/URL/コードだけ)は detect_english_dump が鳴らない=不変。
+        #   ★regen は hangul と同じ thunk を共有(英文ダンプにハングルは無いので hangul_gate は消費しない)。
+        audit_english(self.dept, rec, reply)
+        _reply3, _en = english_gate(
+            reply, regen=regen,
+            translate=lambda t: self.translate_to_ja(t),
+            strip_marker=split_wip_marker)
+        if _en.get("hit1"):
+            log(self.dept,
+                f"★出力ゲート(英文ダンプ): 再生成={'採用' if _en.get('regenerated') else '無'} "
+                f"言い換え={'採用' if _en.get('translated') else '無'} "
+                f"保留={'有' if _en.get('suppressed') else '無'} msg={mid}")
+        if _en.get("suppressed"):
+            # 日本語化できず=英語を晒すより送らない(Chami指示)。便は ack されず残る=再送で拾い直す。
+            log(self.dept, f"英文ダンプを日本語化できず=送らず便を戻す msg={mid}")
+            return False
+        reply = _reply3
         # ★★所有者の再確認(出口・**ここが二重応答を構造的に不可能にする最後の1点**)。
         #   relayの1便は実測で60〜200秒かかる。その最中にChamiが窓を開け直すと、
         #   「渡した時は窓が居なかったが、返事を出す時には窓が居る」状態が起きうる。
