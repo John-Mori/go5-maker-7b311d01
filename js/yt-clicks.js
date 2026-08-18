@@ -1885,21 +1885,33 @@
     var title = it.title || '';
     if (!title) { alert('この履歴には作品名がないため再生成できません。'); return; }
     if (!(window.Go5Stock && window.Go5Stock.regenDataset)) { alert('データ再生成の土台(Go5Stock)が読み込まれていません。ページを再読み込みしてもう一度お試しください。'); return; }
-    if (!window.confirm('この作品のデータを再生成しますか？\n\n一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだGoogleドライブに無いものだけを作って保存し、投稿履歴の1ページ目へプレビューを反映します。\n(既に揃っていれば作り直しません＝足りていないものだけを補います)')) return;
+    if (!window.confirm('この作品のデータを再生成しますか？\n\n一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだGoogleドライブに無いものだけを作って保存し、投稿履歴の1ページ目へプレビューを反映します。\n(既に揃っていれば作り直しません＝足りていないものだけを補います)\n\n★開始したら、この編集画面を閉じても裏で生成を続けます。')) return;
     var orig = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = '再生成中…'; }
+    if (btn) { btn.disabled = true; btn.textContent = '生成中(裏で継続)…'; }
     // ★実処理はドラフト編集モーダルと同一の Go5Stock.regenDataset(→driveSaveForCompleted_)へ委譲=同じデータを作る。
     //   locator は投稿履歴の it から。stock.js 側が手元metas/archiveから実metaを引き当て(無ければ背骨IDで合成)、
     //   冪等/gap-fill で保存＋投稿履歴カード1ページ目のプレビュー反映(applyPreview)まで面倒を見る。
+    // ★Chami依頼(2026-08-18 msg1539245974717993050)=押したら手を離させる。処理はJSの非同期チェーンで走るので
+    //   編集モーダル(veditOverlay)を閉じても止まらない。押下直後に「裏で走る」ことを知らせ、待たせない。
+    //   完了時: 成功はrefreshで1ページ目に反映が見えるので静かに。失敗だけ正直に伝える(「素直にギブアップ」)。
+    var settled = false;
     window.Go5Stock.regenDataset({ videoId: videoId, title: title, account: ch }, {
       silent: true,
       onDone: function (ok, msg) {
+        settled = true;
         if (btn) { btn.disabled = false; btn.textContent = orig; }
         try { refresh(); } catch (e) {}
-        alert(ok ? ('データを再生成しました。\n・' + (msg || '足りていないデータをGoogleドライブへ保存') + '\n・仕上がりプレビューを投稿履歴の1ページ目へ反映')
-                 : ('再生成できませんでした。\n' + (msg || 'この端末にもR2にもGoogleドライブにもこの作品の動画がない可能性があります(作成した端末で開くか、リビルド作成で作り直すと入ります)。')));
+        if (!ok) {
+          alert('再生成できませんでした。\n' + (msg || 'この端末にもR2にもGoogleドライブにもこの作品の動画がない可能性があります(作成した端末で開くか、リビルド作成で作り直すと入ります)。'));
+        } else {
+          alert('データを再生成しました。\n・' + (msg || '足りていないデータをGoogleドライブへ保存') + '\n・仕上がりプレビューを投稿履歴の1ページ目へ反映');
+        }
       }
     });
+    // ★同期的に失敗結着した場合(settled=true)はackを出さない=矛盾表示の防止。
+    if (!settled) {
+      alert('生成を裏で開始しました。この編集画面を閉じても続きます。\n完了すると投稿履歴の1ページ目へプレビューが反映されます(反映まで数十秒〜数分)。');
+    }
   }
 
   // ── render ──────────────────────────────────────────────────────────────
