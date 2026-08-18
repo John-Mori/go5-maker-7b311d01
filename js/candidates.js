@@ -50,7 +50,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, shouldShowIdbHint_: shouldShowIdbHint_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -696,9 +696,20 @@
   var _candidateHydrateInFlight = false;
   var _candidateHydrateRetryTimer = null;
   var _candidateHydrateFailures = 0;
+  var _hydrateFailSince = 0;                        // 現在の失敗連鎖の開始時刻。案内バーは「持続」を確かめてから出す(誤発火防止)。
   var _syncRehydrateRetryTimer = null;
   var _histHydrateFailures = 0;                    // 投稿履歴画像(post:/used:)の展開失敗回数
   var _histHydrateRetryTimer = null;              // 同・張り直し予約(同時に1本だけ)
+  // 展開成功/回復のたびに失敗連鎖をゼロへ戻す(件数と開始時刻を対で戻す=案内バーの持続ゲートが正しく効く)。
+  function resetCandidateHydrateFailures_() { _candidateHydrateFailures = 0; _hydrateFailSince = 0; }
+  // ★「閉じて開き直せ」案内バーを出してよいかの唯一の判定(純関数=tests/test_idb_hint_gate.js で検証)。
+  //   短い接続死では出さず、5回以上連続で失敗し かつ 連鎖が60秒以上続いた(=回復せず本当にプロセス単位で
+  //   死んでいる)時だけ true。sinceMs=連鎖開始時刻(0=連鎖なし)。Chami報告2026-08-18「案内がめちゃくちゃ出る」対策。
+  //   ★60000(=60秒)は関数内リテラルで持つ。Node(テスト)では上の module.exports で早期returnするため、
+  //   var の代入行(このブロックより後)は実行されず undefined になる=定数を外の var に置くと壊れる。
+  function shouldShowIdbHint_(failures, sinceMs, nowMs) {
+    return failures > 4 && !!sinceMs && (nowMs - sinceMs) >= 60000; // 60秒=持続死のしきい
+  }
   function markCandidateHydrated_() {
     if (_candidateHydrated) return;
     _candidateHydrated = true;
@@ -1276,18 +1287,24 @@
     }).then(function () {
       try { hydrateR2Refs_(); } catch (e) {} // IDBへ移せなかった退避画像をR2へ逃がして解毒(冪等)
       _candidateHydrateInFlight = false;
-      _candidateHydrateFailures = 0;
+      resetCandidateHydrateFailures_();
+      hideIdbRecoveryHint_();   // 展開できた=「失敗案内」はもう嘘。回復イベント頼みにせず直接消す
       markCandidateHydrated_(); // 候補画像・コメントの空保存拒否をここで解除
       bgRender_();              // サムネ・コメント・✓バッジをすぐ反映
       if (!window.__go5CandidateStandalone) hydrateHistoryImages_();
     }).catch(function (e) {
       _candidateHydrateInFlight = false;
       _candidateHydrateFailures++;
+      if (_candidateHydrateFailures === 1) _hydrateFailSince = Date.now(); // 連鎖の起点を刻む
       // 一時的なSafariの接続死を「IDB非対応」と確定して空表示へ落とさない。張り直しを継続する。
       try { console.warn('[go5 idb] 候補画像の展開を再試行します', e); } catch (_) {}
-      // ★張り直しを一定回数(約1分)超えても回復しない=WebKitのプロセス単位のIDB死(アプリからは治せない)。
-      //   この時だけ「閉じて開き直すと直る(再読み込みでは直らない)」正しい復旧手順を1回だけ案内する。
-      if (_candidateHydrateFailures > 4) showIdbRecoveryHint_();
+      // ★案内バーは「持続死」だけに絞る(誤発火の恒久対策・Chami報告2026-08-18「案内がめちゃくちゃ出る」)。
+      //   旧: 5回連続失敗(≒15秒)で即表示 → iOSのタブ退避/一時的メモリ圧など数秒で回復する接続死でも
+      //   「閉じて開き直せ(再読込では直らない)」という強い案内が頻発していた。今は go5-idb-recovered で
+      //   自動的に画像を読み直せる(閉じ直し不要)ため、この案内は「回復せず一定時間(60秒)以上続く=本当に
+      //   WebKitのプロセス単位のIDB死」の時だけ1回出す。回復すれば resetCandidateHydrateFailures_ で連鎖が
+      //   切れ、以後は出ない。genuine死は失敗し続けるので60秒後に必ず出る=案内の意味は失わない。
+      if (shouldShowIdbHint_(_candidateHydrateFailures, _hydrateFailSince, Date.now())) showIdbRecoveryHint_();
       scheduleCandidateHydrateRetry_();
     });
   }
@@ -1394,7 +1411,7 @@
     var prefixes = window.__go5CandidateStandalone ? ['ref:', 'bsky:'] : ['ref:', 'bsky:', 'post:', 'used:'];
     readImageEntries_(prefixes).then(function (all) {
       mergeImageEntries_(all);
-      _candidateHydrateFailures = 0;
+      resetCandidateHydrateFailures_();
       if (!_candidateHydrated) markCandidateHydrated_();
       bgRender_();   // 入力中は保留(打ちかけの候補入力を消さない)
     }).catch(function (e) {
@@ -1423,7 +1440,7 @@
   try { document.addEventListener('go5-idb-recovered', function () {
     if (!_idbOk) return;
     try {
-      _candidateHydrateFailures = 0;
+      resetCandidateHydrateFailures_();
       _histHydrateFailures = 0;
       if (!_candidateHydrated) hydrateImages_();
       if (!_hydrated && !window.__go5CandidateStandalone) hydrateHistoryImages_();
