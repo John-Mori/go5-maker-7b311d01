@@ -5179,6 +5179,42 @@ class Daemon:
         text = (text or "").strip()
         return text or None
 
+    def _mark_bundled(self, ch, msg_ids, why):
+        """束ねて取り込んだ便へ「既読✅/着手👀」を押す(2026-08-18・イージス研究室)。
+
+        ★塞ぐ穴(REQ-aegis-gl-13fcea00f4「反応がない」の実体):
+          handle() は**自分が受け取った1件**にしか印を押さない。ところが連投は2経路で
+          束ねられ、束ねられた側の便は handle() を通らない=
+            ①走る前の集約(`集約: 連投N件を1便へ束ねた`)… 最後の便以外
+            ②返す直前の覗き(`★返す直前に受信箱を覗いた`)… 掴んだ続きの便**全部**
+          その便は**答えは返っているのに、Chamiの画面では印が1つも付かない**。
+          Chamiは最後に書いた便を見ているので、そこが無印だと「反応がない」に見える。
+        ★実測(2026-08-18 23:02・`scripts/discord/audit_marks.py` で Discord を直読み):
+          直近48時間のChami便127件のうち**生存の合図が無いのは5件、全部コピー部門**。
+          内訳= ②で取り込まれた3件(08/17 23:54・08/18 06:38・08/18 16:56)、
+          ①で束ねられた1件(08/18 19:49:08)、残り1件は測定した時点で処理中(直後に付いた)。
+          = 無印の便は**全部この穴**だった。他部門・他経路の無印はゼロ。
+        ★押すのは既読と着手の両方= この便はもう「読まれ、いま処理されている」からだ。
+          react.py は同じ印を二度押しても害が無い(既に在れば Discord 側が無視する)。
+        ★fail-open: 何が失敗しても配送を巻き込まない(印は表示であって応答ではない)。
+        """
+        ids = [str(m) for m in (msg_ids or []) if str(m or "").strip()]
+        if self.dry_run or not ch or not ids:
+            return
+        done = 0
+        for m in ids[:COALESCE_MAX_ITEMS]:
+            for kind in ("既読", "着手"):
+                try:
+                    p = subprocess.run([sys.executable, REACT, "--channel", ch, "--msg", m,
+                                        "--emoji", kind], capture_output=True, timeout=30)
+                    done += 1 if p.returncode == 0 else 0
+                except Exception:
+                    pass                    # 1つ落ちても残りは押す
+        # ★押した事実をログに残す(旧実装は印の成否をどこにも書かず、後から
+        #   「付かなかった」を追えなかった。実物の確認は audit_marks.py が別に行う)。
+        log(self.dept, "束ねた便へ進捗印を押した(%s): %d/%d msg=%s"
+                       % (why, done, len(ids) * 2, ",".join(ids)))
+
     def handle(self, rec, raw_line):
         ch = rec.get("channel", "")
         mid = str(rec.get("msg_id", ""))
@@ -5985,6 +6021,12 @@ class Daemon:
             return reply
         log(self.dept, "★返す直前に受信箱を覗いた= Chamiの続きが%d件来ていた"
                        "(返事はまだ送っていない)=1本にまとめ直す msg=%s" % (len(taken), mid))
+        # ★掴んだ続きの便へ、ここで印を押す(2026-08-18・_mark_bundled の説明を読め)。
+        #   この下の relay は中央値60秒かかる=その間この便は無印のまま画面に残っていた。
+        #   検証便(test)はChamiの部屋を汚さないので押さない(ORG-25)。
+        if not rec.get("test"):
+            self._mark_bundled(rec.get("channel", ""),
+                               [n.get("msg_id") for _, n in taken], "返す直前の覗き")
         # ★リースを張り直す対象へ足す(本走が続いている扱い。1本でも落ちると無言で消える)
         self._lease_qids = list(getattr(self, "_lease_qids", None) or []) + [t[0]["id"] for t in taken]
         merged = dict(taken[-1][1])
@@ -6153,6 +6195,11 @@ class Daemon:
                     mid = str(rec.get("msg_id", "")) or mid
                     log(self.dept, "集約: 連投%d件を1便へ束ねた(返信は最新の便へ) msg=%s"
                                    % (len(recs), mid))
+                    # ★束ねられた側(最後の便以外)へ印を押す(2026-08-18)。handle() は
+                    #   土台の便にしか押さないので、ここが無いと断片は無印のまま残る。
+                    if not rec.get("test"):
+                        self._mark_bundled(rec.get("channel", ""),
+                                           rec.get("coalesced_from") or [], "走る前の集約")
                     # ★実物確認を「誰かがログを見張る」に任せない(規律§3=機構に載せる)。
                     #   .log は keeper の標準出力リダイレクトなので流れて消える/手動実行では
                     #   残らない(8/8にHQから指摘された穴)。→ **耐久台帳へ1行**残し、
