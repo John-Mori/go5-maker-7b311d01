@@ -1,0 +1,15 @@
+{
+  "_doc": "世代トークン(共有状態へ非同期で書く時の stale-guard)の登録簿。型=docs/departments/kaizen-analyst/preflight_generation-token-on-shared-write.md。検査=scripts/check_gen_token.mjs。counters の各カウンタは『採番(=++X を local へ控える)』と『照合(myGen!==X 等で古い世代を破棄)』の両方を本文に持つことをassertする。id_counter_allow は一意ID採番用の連番で stale判定ではない=照合不要。新規の *Seq/*Gen カウンタが増えたら『stale-guardなら counters へ / 一意ID採番なら id_counter_allow へ登録せよ』と赤で止める。更新は DUMP=1 node scripts/check_gen_token.mjs で現状を吐いて追記する。",
+  "counters": [
+    { "file": "js/app.js", "name": "fgLoadSeq", "state": "前景画像の読込/復元/クリア。遅い変換・旧復元が新しい画像を上書きするのを拒否(INC-135)" },
+    { "file": "js/app.js", "name": "_makeRunSeq", "state": "動画作成run/録画Blobの着地。旧MediaRecorderの遅着が新runを上書き=黒サムネを拒否(INC-139)" },
+    { "file": "js/bluesky.js", "name": "movieInfoSeq", "state": "作品情報の行。URL連続変更で古い取得結果が別作品の行を上書きするのを拒否(INC-15)" },
+    { "file": "js/candidates.js", "name": "_refOpenSeq", "state": "参照モーダルの非同期書き込み。閉じた/別作品を開いた後の遅着を破棄" },
+    { "file": "js/stock.js", "name": "_renderSeq", "state": "ドラフト一覧DOMの描画。古い描画系列が最新DOM/サムネを上書きするのを拒否" },
+    { "file": "js/yt-clicks.js", "name": "_rankGen", "state": "ランキング描画。古い非同期描画が最新DOMを上書きするのを拒否" },
+    { "file": "js/yt-clicks.js", "name": "_fanzaGen", "state": "FANZA取得ジョブ。手動実行が進行中を乗っ取り旧実行を静かに停止(INC-07・取得中固着)" }
+  ],
+  "id_counter_allow": [
+    { "file": "js/candidates.js", "name": "_url2Seq", "why": "一意な要素ID生成(refImgUrl2_ の連番)。stale判定ではないので照合は不要" }
+  ]
+}

@@ -68,6 +68,15 @@ jobs:
       - name: 同名ヘルパの乖離コピー検査
         run: node scripts/check_dup_helper.mjs
 
+      # 共有状態へ非同期で書く時の「世代トークン(stale-guard)」の欠落を止める門《世代トークン》。
+      #   古い応答が新しい状態を上書きする型(前の画像が残る/別作品に化ける/黒い無言箱)を作成時に止める。
+      #   登録簿 scripts/check_gen_token.baseline.json の各カウンタに「採番(++X控え)＋照合(myGen!==X)」の
+      #   両方が在ることをassertし、新規の未登録 *Seq/*Gen カウンタ(世代照合なしの共有書き込み)を落とす。
+      #   同一「世代番号」解法を4回別実装した再発源(INC-07/15/135/139・INC-140の芯)。
+      #   型=preflight_generation-token-on-shared-write.md(改善提案部門アスナ/AD研究室2026-08-18発注)。
+      - name: 世代トークン(共有状態のstale-guard)検査
+        run: node scripts/check_gen_token.mjs
+
       # シート由来行の編集値がリロードで消える型(作品URL/投稿先等)を、繋ぎの欠落として出す前に止める門。
       - name: シート保存連鎖の検査
         run: node scripts/check_sheet_chain.mjs
