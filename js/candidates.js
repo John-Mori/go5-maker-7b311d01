@@ -1844,11 +1844,14 @@
     var removed = 0;
     ['short_hist__', 'verify_manual__'].forEach(function (pre) {
       var key = pre + account, arr;
-      try { arr = JSON.parse(localStorage.getItem(key) || '[]') || []; } catch (e) { arr = []; }
+      // ★Go5Hist(IDB正本)経由=直LS読み書きだとyt-clicksのミラーを迂回し「手動で外しても復活する」退行(A-1)。
+      try { arr = window.Go5Hist ? window.Go5Hist.read(key) : (JSON.parse(localStorage.getItem(key) || '[]') || []); } catch (e) { arr = []; }
+      if (!Array.isArray(arr)) arr = [];
       var kept = arr.filter(function (x) { return cidKeysOfHistItem_(x).indexOf(cid) < 0; });
       if (kept.length !== arr.length) {
         removed += (arr.length - kept.length);
-        try { localStorage.setItem(key, JSON.stringify(kept)); } catch (e) {}
+        if (window.Go5Hist) { try { window.Go5Hist.write(key, kept); } catch (e) {} }
+        else { try { localStorage.setItem(key, JSON.stringify(kept)); } catch (e) {} }
       }
     });
     invalidatePostedIndex_();

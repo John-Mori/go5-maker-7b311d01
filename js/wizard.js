@@ -515,9 +515,11 @@
         if (url) {
           var acc = W.account || 'acc1';
           var mk = 'verify_yt__' + acc;
-          var m = JSON.parse(localStorage.getItem(mk) || '{}') || {};
+          // ★Go5Hist(IDB正本)経由=直LS書きだと次のyt-clicks書き戻しで消え、検証タブに再生数が出ない退行(A-1)。
+          var m = window.Go5Hist ? window.Go5Hist.read(mk) : (JSON.parse(localStorage.getItem(mk) || '{}') || {});
+          if (!(m && typeof m === 'object' && !Array.isArray(m))) m = {};
           m[W.postUri ? ('u:' + W.postUri) : ('s:' + (W.shortUrl || ''))] = url;
-          localStorage.setItem(mk, JSON.stringify(m));
+          if (window.Go5Hist) { window.Go5Hist.write(mk, m); } else { localStorage.setItem(mk, JSON.stringify(m)); }
         }
       } catch (e) {}
       recordBtn.disabled = true;

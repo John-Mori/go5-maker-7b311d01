@@ -1816,12 +1816,14 @@
         try {
           var mk = mv.item.postUri ? ('u:' + mv.item.postUri) : ('s:' + (mv.item.shortUrl || ''));
           var fk = 'verify_yt__' + mv.from, tk = 'verify_yt__' + mv.to;
-          var fmap = JSON.parse(localStorage.getItem(fk) || '{}') || {};
-          if (fmap[mk]) {
-            var tmap = JSON.parse(localStorage.getItem(tk) || '{}') || {};
+          // ★verify_ytもGo5Hist(IDB正本)経由=直LS書きだと次のyt-clicks書き戻しで消える(移動先で再生数/題名が出ない退行)。
+          var fmap = window.Go5Hist ? window.Go5Hist.read(fk) : (JSON.parse(localStorage.getItem(fk) || '{}') || {});
+          if (fmap && typeof fmap === 'object' && !Array.isArray(fmap) && fmap[mk]) {
+            var tmap = window.Go5Hist ? window.Go5Hist.read(tk) : (JSON.parse(localStorage.getItem(tk) || '{}') || {});
+            if (!(tmap && typeof tmap === 'object' && !Array.isArray(tmap))) tmap = {};
             tmap[mk] = fmap[mk]; delete fmap[mk];
-            localStorage.setItem(fk, JSON.stringify(fmap));
-            localStorage.setItem(tk, JSON.stringify(tmap));
+            if (window.Go5Hist) { window.Go5Hist.write(fk, fmap); window.Go5Hist.write(tk, tmap); }
+            else { localStorage.setItem(fk, JSON.stringify(fmap)); localStorage.setItem(tk, JSON.stringify(tmap)); }
           }
         } catch (e) {}
       });
@@ -2120,6 +2122,9 @@
   function histBrokenGet_(k) { return histBrokenMap_()[k] || null; }
   function histLoadFor_(a) {
     var k = histKeyFor_(a), raw = null;
+    // ★v851でyt-clicksが履歴をGo5Hist(IDB正本)へ移行。同一タブの直LS読みはミラーを迂回し「古い/消えた行」を
+    //   出してしまう(A-1退行)。履歴系はGo5Hist経由へ揃える(未ロード時のみ従来のLS直読みへフォールバック)。
+    if (window.Go5Hist) { try { var mv = window.Go5Hist.read(k); if (Array.isArray(mv)) { histBrokenSet_(k, null); return mv; } } catch (e) {} }
     try { raw = localStorage.getItem(k); } catch (e) { histBrokenSet_(k, 'localStorage読み取り不可'); return []; }
     if (raw == null || raw === '') { histBrokenSet_(k, null); return []; }
     try {
@@ -2141,7 +2146,7 @@
   try { window.Go5PostedItems = function (a) {
     var acc = a || acctId(), out = [];
     try { out = histLoadFor_(acc) || []; } catch (e) { out = []; }
-    try { var man = JSON.parse(localStorage.getItem('verify_manual__' + acc) || '[]'); if (man && man.length) out = out.concat(man); } catch (e) {}
+    try { var man = (window.Go5Hist ? window.Go5Hist.read('verify_manual__' + acc) : JSON.parse(localStorage.getItem('verify_manual__' + acc) || '[]')); if (Array.isArray(man) && man.length) out = out.concat(man); } catch (e) {}
     // ★全端末同期される作成履歴(go5_stock_archive)も「投稿済み」の根拠に含める。short_hist__/verify_manual__ は
     //   端末ローカルで同期しないため、別端末で投稿完了した作品は候補pillが光らなかった(Chami依頼2026-08-03「連動させて」)。
     //   作成履歴は投稿完了(archiveStock_)で全端末へ同期される=同じ根拠を全端末が共有して pill が揃う。
@@ -2169,6 +2174,8 @@
         try { window.Go5HistLoss && window.Go5HistLoss.record(k, before, arr); } catch (e) {}
       }
     } catch (e) {}
+    // ★Go5Hist(IDB正本)経由で書く=yt-clicks側のミラーと食い違わない(直LS書きは書き戻しで消えるA-1退行)。未ロード時のみLS直書き。
+    if (window.Go5Hist) { try { window.Go5Hist.write(k, arr); return; } catch (e) {} }
     try { localStorage.setItem(k, JSON.stringify(arr.slice(0, 200))); } catch (e) {
       try { console.warn('[go5 hist] 履歴の保存に失敗(容量超過の可能性):', k); } catch (e2) {}
     }
