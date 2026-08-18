@@ -390,6 +390,23 @@
     _vidMirrorBusy[id] = job.then(function (v) { delete _vidMirrorBusy[id]; return v; }, function () { delete _vidMirrorBusy[id]; });
     return _vidMirrorBusy[id];
   }
+  // ★save_job(サーバー側完走)を投げる前に「R2に動画実体が確実に在る」ことを保証する。
+  //   ensureVideoMirror_ は IDB実体が消えていると"無言でスキップ"する=その後 queueSave を投げても Worker は
+  //   R2に動画が無く r2_video_missing で約6秒後に黙って諦め、バッジが永遠に「保存中」のまま残る(炎上①の一因)。
+  //   → 実体(IDB or 既にR2)を取り寄せてR2へ確実にPUTし、置けたら true。どこにも実体が無ければ false=save_jobは
+  //   無駄撃ちなので呼び出し側は在ページ保存(legacy)へ倒し、"見える失敗"を出す(沈黙にしない・fail-open)。
+  //   ★このセッションで作成直後に上げ済み(_vidUp)なら即 true=通常の投稿完了は追加コストゼロで従来と同一挙動。
+  function ensureVideoOnR2_(id) {
+    if (_vidUp[id]) return Promise.resolve(true);
+    if (!(window.Go5Sync && Go5Sync.putBlobR2At && Go5Sync.configured && Go5Sync.configured())) return Promise.resolve(false);
+    return Promise.resolve(resolveVideoBlob_(id)).then(function (blob) {
+      if (!isUsableVideoBlob_(blob)) return false; // 実体がどこにも無い=queueSaveは死ぬ
+      return Go5Sync.putBlobR2At(VIDNAME(id), blob).then(function (key) {
+        if (key) { _vidUp[id] = 1; return true; }
+        return false;
+      }).catch(function () { return false; });
+    }).catch(function () { return false; });
+  }
   // ★元画像(前景写真)も作成直後にメモリから直接R2へ控える(2026-08-17・Chami報告 msg1538754754824507473③
   //   「再作成を押すと使用した画像が消える」)。動画(ensureVideoMirror_)と違い、元画像はこれまで
   //   「IDBへ書く→IDBから mirror(stock:imgs:.src)を作る」経路しか無かった=iOS SafariがIDB書込みを黙って失敗、
@@ -1352,32 +1369,38 @@
     //   その在り処(videoKey)だけを軽く渡し→Workerが即202→R2→Driveをサーバー側で完走させる=閉じても続く。
     //   届かなかった場合に備え localStorage(go5_drive_savejob_<id>)へpendingを記録し、次回起動のsweepで再送(冪等)。
     if (window.Go5Drive && typeof window.Go5Drive.queueSave === 'function' && meta.account) {
-      Promise.resolve(ensureVideoMirror_(id)).catch(function () {}) // R2へ確実に上げてから(既出なら即返る)
-        .then(function () { return Promise.all([previewReady, resolveSrcImageBlob_(id)]); })
-        .then(function (bs) {
-          var prevB = bs[0], srcB = bs[1];
-          // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
-          //   ★元画像を渡すのは「投稿完了と同じ一式(動画+元画像+プレビュー)」を揃えるため(Chami 2026-08-17)。
-          //   save_job導入時に元画像だけ渡し忘れていた回帰=ここで controllerへ srcKey を添えて根治。
-          var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
-            ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
-            : Promise.resolve('');
-          var mirrorSrc = (srcB && window.Go5Sync && Go5Sync.putBlobR2At)
-            ? Go5Sync.putBlobR2At('go5src:' + id, srcB).catch(function () { return ''; })
-            : Promise.resolve('');
-          return Promise.all([mirrorPrev, mirrorSrc]).then(function (keys) {
-            recordSaveJobPending_(id, meta);
-            return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: keys[0] || '', srcKey: keys[1] || '', overwrite: true });
-          });
-        })
-        .then(function (res) {
-          var ok = !!(res && res.ok);
-          done(ok, ok ? 'Driveへ保存(裏で完走)' : '今は送れず・次回起動で自動再送(投稿履歴は記録済み)');
-        })
-        .catch(function () { done(false, '保存予約に失敗・次回起動で自動再送(投稿履歴は記録済み)'); });
+      // ★save_jobを投げる前にR2へ動画実体を確実に置く。置けない(実体喪失)なら在ページ保存(legacy)へ倒す=
+      //   Workerが r2_video_missing で黙って諦めて「永遠に保存中」になる沈黙経路を封じる(炎上①・B-1)。
+      ensureVideoOnR2_(id).then(function (onR2) {
+        if (!onR2) { legacyRealSave_(); return; } // R2に動画が無い=save_jobは無駄撃ち→在ページ保存で救うか"見える失敗"を出す
+        Promise.all([previewReady, resolveSrcImageBlob_(id)])
+          .then(function (bs) {
+            var prevB = bs[0], srcB = bs[1];
+            // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
+            //   ★元画像を渡すのは「投稿完了と同じ一式(動画+元画像+プレビュー)」を揃えるため(Chami 2026-08-17)。
+            //   save_job導入時に元画像だけ渡し忘れていた回帰=ここで controllerへ srcKey を添えて根治。
+            var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
+              ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
+              : Promise.resolve('');
+            var mirrorSrc = (srcB && window.Go5Sync && Go5Sync.putBlobR2At)
+              ? Go5Sync.putBlobR2At('go5src:' + id, srcB).catch(function () { return ''; })
+              : Promise.resolve('');
+            return Promise.all([mirrorPrev, mirrorSrc]).then(function (keys) {
+              recordSaveJobPending_(id, meta);
+              return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: keys[0] || '', srcKey: keys[1] || '', overwrite: true });
+            });
+          })
+          .then(function (res) {
+            var ok = !!(res && res.ok);
+            done(ok, ok ? 'Driveへ保存(裏で完走)' : '今は送れず・次回起動で自動再送(投稿履歴は記録済み)');
+          })
+          .catch(function () { done(false, '保存予約に失敗・次回起動で自動再送(投稿履歴は記録済み)'); });
+      });
       return;
     }
-    // ── 最後の砦：queueSave が使えない旧環境のみ、従来のこのページ内フル保存(動画+元画像+プレビュー)。
+    legacyRealSave_();
+    // ── 最後の砦：queueSave が使えない旧環境 / R2に実体が無い時のみ、従来のこのページ内フル保存(動画+元画像+プレビュー)。
+    function legacyRealSave_() {
     resolveVideoBlob_(id).then(function (blob) {
       if (!blob) {
         // ★動画は取れなくても、上の previewReady が投稿履歴1ページ目のプレビューを既に設定済み。
@@ -1406,6 +1429,7 @@
       if (!opts.silent) alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
       done(false, '取得失敗');
     });
+    } // legacyRealSave_
     } // realSaveNow_
   }
 
