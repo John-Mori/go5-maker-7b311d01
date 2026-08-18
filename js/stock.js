@@ -1308,6 +1308,60 @@
       return;
     }
     var id = meta.id;
+    // ── ★最後の砦=「動画生成で使用した画像」(used:<videoId>)から素材を拾う ─────────────────
+    //   Chami報告2026-08-18 msg1539277864371748965「全部データが見つからないと出たが、投稿履歴にちゃんと二つ
+    //   画像データがあるやないか」。原因=退避/再生成は素材を stock_*(ドラフト由来)と R2 からしか探していなかった。
+    //   だが投稿履歴の「動画生成で使用した画像」は別の器 used:<videoId> に在る(Go5Cand のhydrateメモリ／IDB)。
+    //   iOSがドラフト側blobを捨てても、投稿履歴表示のため used: は生きている=モーダルには映るのに退避は空、が起きる。
+    //   ここでモーダルと同じ源(Go5Cand.usedImgs=メモリ)を最優先で読み、無ければ usedImagesRead_(IDB)へ倒す。
+    //   used レコード= { imgs:[仕上がりプレビュー×prev枚, 元画像…], prev }。先頭prev枚がプレビュー・残りが元画像。
+    function usedRec_() {
+      var vids = [];
+      if (meta.videoId) vids.push(meta.videoId);
+      if (meta.id && meta.id !== meta.videoId) vids.push(meta.id);
+      // ① 投稿履歴モーダルと同一の源(Go5Cand のメモリ)。IDBに used: が無くてもR2/シート由来でここには居る事がある。
+      for (var i = 0; i < vids.length; i++) {
+        var key = vids[i];
+        if (window.Go5Cand && typeof window.Go5Cand.usedImgs === 'function') {
+          var imgs = window.Go5Cand.usedImgs(key) || [];
+          if (imgs.length) {
+            var pn = (typeof window.Go5Cand.usedPrevCount === 'function') ? (window.Go5Cand.usedPrevCount(key) || 0) : 0;
+            return Promise.resolve({ imgs: imgs.filter(Boolean), prev: pn | 0 });
+          }
+        }
+      }
+      // ② IDB直読み(軽量ページ/メモリ未hydrate時)。videoId→id の順で最初に中身のある方を採る。
+      var chain = Promise.resolve({ imgs: [], prev: 0 });
+      vids.forEach(function (key) {
+        chain = chain.then(function (acc) {
+          if (acc.imgs && acc.imgs.length) return acc;
+          return usedImagesRead_(key).then(function (r) {
+            return (r && r.imgs && r.imgs.length) ? { imgs: r.imgs.filter(Boolean), prev: (r.prev | 0) } : acc;
+          }).catch(function () { return acc; });
+        });
+      });
+      return chain;
+    }
+    // used: の先頭prev枚=仕上がりプレビュー。その次(prev番目)以降=元画像(生の写真)。dataURL→Blob化して返す。
+    function usedPrevBlob_() {
+      return usedRec_().then(function (r) {
+        var imgs = (r && r.imgs) || [], prev = (r && r.prev) | 0;
+        if (prev >= 1 && imgs[0]) return durlToBlob_(imgs[0]);
+        return null;
+      }).catch(function () { return null; });
+    }
+    function usedSrcBlob_() {
+      return usedRec_().then(function (r) {
+        var imgs = (r && r.imgs) || [], prev = (r && r.prev) | 0;
+        var idx = (imgs.length > prev) ? prev : (imgs.length ? 0 : -1); // 先頭prev枚を飛ばした最初の元画像
+        if (idx >= 0 && imgs[idx]) return durlToBlob_(imgs[idx]);
+        return null;
+      }).catch(function () { return null; });
+    }
+    // 元画像の解決を used: まで延長(ドラフト由来 stock_img_/同期ミラー/R2 で取れなければ used: の元画像へ倒す)。
+    function resolveSrcImageBlob2_() {
+      return resolveSrcImageBlob_(id).then(function (b) { return b || usedSrcBlob_(); }).catch(function () { return usedSrcBlob_(); });
+    }
     // 仕上がりプレビューを「使用画像1ページ目」へ差し込む(videoIdで紐付く・Chami依頼2026-07-30・冪等)。
     var applyPreview = function (prevB) {
       if (!prevB || !meta.videoId) return;
@@ -1341,6 +1395,11 @@
       if (window.Go5Drive && Go5Drive.fetchPreview && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title)
         return Go5Drive.fetchPreview(meta.account, meta.title).then(function (du) { return du ? durlToBlob_(du) : null; }, function () { return null; });
       return null;
+    }).then(function (prevB) {
+      // ★ドラフト側にもDriveにも無い時の最後の砦=投稿履歴が表示している仕上がりプレビュー(used:<videoId>)。
+      //   これで「モーダルには映るのに再生成すると全部見つからない」(Chami報告2026-08-18)を塞ぐ。
+      if (prevB) return prevB;
+      return usedPrevBlob_();
     }).then(function (prevB) { applyPreview(prevB); return prevB; }, function () { return null; });
 
     var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
@@ -1413,7 +1472,7 @@
           //   12秒で切り上げて null(＝復元不能扱い=正直に手動追加を案内)。
           if (hasSrc) { finish(null); return; }
           var timed = new Promise(function (res) { setTimeout(function () { res(null); }, 12000); });
-          Promise.race([resolveSrcImageBlob_(id).catch(function () { return null; }), timed]).then(finish);
+          Promise.race([resolveSrcImageBlob2_().catch(function () { return null; }), timed]).then(finish);
         });
         return;
       }
@@ -1440,7 +1499,7 @@
         : Promise.resolve(null);
       // 元画像は"元の写真そのもの"=手元(IDB/同期ミラー/R2)に残っていれば拾う。12秒で切り上げ(ハング防止)。
       var srcTimed = new Promise(function (res) { setTimeout(function () { res(null); }, 12000); });
-      var srcP = Promise.race([resolveSrcImageBlob_(id).catch(function () { return null; }), srcTimed]);
+      var srcP = Promise.race([resolveSrcImageBlob2_().catch(function () { return null; }), srcTimed]);
       Promise.all([previewReady, srcP, stateP]).then(function (arr) {
         var prevB = arr[0], srcB = arr[1], st = arr[2];
         var hasPrev = st ? !!st.hasPreview : false;
@@ -1488,7 +1547,7 @@
       //   Workerが r2_video_missing で黙って諦めて「永遠に保存中」になる沈黙経路を封じる(炎上①・B-1)。
       ensureVideoOnR2_(id).then(function (onR2) {
         if (!onR2) { legacyRealSave_(); return; } // R2に動画が無い=save_jobは無駄撃ち→在ページ保存で救うか"見える失敗"を出す
-        Promise.all([previewReady, resolveSrcImageBlob_(id)])
+        Promise.all([previewReady, resolveSrcImageBlob2_()])
           .then(function (bs) {
             var prevB = bs[0], srcB = bs[1];
             // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
