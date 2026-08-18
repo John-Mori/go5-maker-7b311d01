@@ -1926,7 +1926,7 @@
       //   押下直後もこの状態行が受領を語る(realSaveNow_のrender()でボタン自体は作り直されて押下感が消えるため)。
       driveLine = _stuck
         ? '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;white-space:normal;">☁️ まだDrive保存を確認できていません(開いている間は自動で再確認を続けます) · 急ぐ場合は下の「☁️ Drive保存」で再試行</div>'
-        : '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ 保存を受け付けました · 実物を確認中…(最大3分)</div>';
+        : '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ 保存を受け付けました · 実物を確認中…(ふつうは数秒・最大3分)</div>';
     }
     // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
     //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。
