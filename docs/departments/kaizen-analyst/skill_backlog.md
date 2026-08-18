@@ -19,6 +19,7 @@
 
 ## 済み(型を書き上げて渡した= 報告に出た分)
 - ✅ **実物着地(記録列を直したの実データ確認)**(運用時検査・Z2) `preflight_claimed-fix-realdata-assert.md`(ピーク列3回改修8/2・8/6・8/11でも8/15に🔥/候補0・8/18アスナ書き上げ→研究室HQ経由で改修αへ渡す)= Z2運用化の1本目。
+- ✅ **時間予算(硬い制限下の行数比例ループは打ち切り枠とセット)**(細粒度・コード面) `preflight_hard-limit-time-budget.md`(INC-116でsnapshotStatsだけ予算導入も兄弟トリガー3本 refreshClicks/refreshEngagement/runReservations が予算無しで残存=実読確認/8/18アスナ書き上げ・Fable棚卸し5位→改修αへdispatch)= 細粒度skillの5本目。
 - ✅ **世代トークン(共有状態への非同期書込は世代照合してから)**(細粒度・コード面) `preflight_generation-token-on-shared-write.md`(同一解法を4回別実装 INC-07/15/135/139・INC-140が「同じ判断をコピーするな」/8/18アスナ書き上げ・Fable棚卸し4位→改修αへdispatch)= 細粒度skillの4本目。
 - ✅ **番犬(外へ出る待ちの時限)**(細粒度・コード面) `preflight_net-wait-watchdog.md`(裸fetch62箇所中番犬付き3箇所のみ/INC-108/116/125/132/134・8/16書き上げ・Fable棚卸し1位)= 細粒度skillの2本目。
 - ✅ **複製判断(同名ヘルパの中身違いコピー)**(細粒度・コード面) `preflight_duplicate-helper.md`(`js/yt-clicks.js` isR2が4定義2変種/INC-112/134/140・8/16書き上げ・Fable棚卸し2位)= 細粒度skillの3本目。
@@ -49,9 +50,9 @@
    save-path型が効いてから、残る差分だけを型化(先に出すと二重になる)。
 
 ## 候補(細粒度・コード面・8/16巡回とインシデント.md/Fable棚卸しから採掘)
-- ★次に書く順(Fable棚卸し 2026-08-16)= 番犬✅→複製判断✅→**世代トークン✅(8/18)** の次は **C時間予算(5位)**。
+- ★次に書く順(Fable棚卸し 2026-08-16)= 番犬✅→複製判断✅→**世代トークン✅(8/18)→時間予算✅(8/18)**。細粒度の主要5本すべて書き上げ済。
 - D. 《世代トークン》→ ✅8/18アスナ書き上げ=`preflight_generation-token-on-shared-write.md`(済みへ移動)。同一解法4回別実装 INC-07/15/135/139 を実読確認(backlog旧記の「5回・eee46dc」は実読で4件INC＋INC-140教訓に精密化)。
-- C. 《硬い制限下の重い定期処理は時間予算で頭打ち》(INC-116 教訓2/3・Fable 5位)= GAS6分・cron間隔のような硬い制限へ重い処理を足す時は**時間予算とセット**。完走しない処理は「たまに失敗」でなく「全滅→自動停止」になる(INC-116=snapshotStatsが全履歴バックフィルで6分超→Google自動停止→ピーク全滅)。検査=トリガー配下関数へ `Date.now()-t0` 系の頭打ちが在ることをassert+新規ループ追加commitで警告。証拠INCは1本のため頻度根拠では4位までに劣後。
+- C. 《時間予算》→ ✅8/18アスナ書き上げ=`preflight_hard-limit-time-budget.md`(済みへ移動)。Chami「ログ見て必要なら」を受け実読=snapshotStatsだけ予算導入・兄弟3本(refreshClicks/refreshEngagement/runReservations)が予算無しで残存を確認=justification成立で起票。
 - B. 《採用値でイベントを渡す》(INC-04)= 保存/記録は**入力の候補**(selectedPostFile)でなく**処理が最終採用した値**(pcSelectedFile‖元写真)をペイロードに載せる。→ **保留維持**(Fable D)= save-path型の効果確認(8/22測り直し)より先に出すと二重。
 - A. 《手前で殺す二段障害》(INC-116)= 1つ直して同じ症状が再発したら「今の症状の直接原因」を実行結果で切り分ける。→ **skill化保留**(Fable D)= これは作成時プリフライトでなく**障害調査の手順**。インシデント.md §3 への1行追記(調査規律)で足り、preflightにすると空箱になる。
 
