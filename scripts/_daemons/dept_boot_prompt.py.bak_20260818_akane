@@ -34,9 +34,7 @@ DEPTS = {
                        "docs/departments/learning-coach/BOOT.md", "姫崎莉波"),
     "llm-edu": ("ローカルllm教育部門", "中野五月(メイン)/ヴィルシーナ/姫崎莉波/田中琴葉(記録)/アメス/ホイミン(Gemini)",
                 "docs/departments/llm-qa/BOOT.md", "中野五月"),
-    # ★2026-08-18 黒川あかねを外した(Chami「黒川あかね消していいよ、予定無くなった」
-    #   msg 1539137791173066813)。DEPT_CONF['data-org'] の personas と同時に外している。
-    "data-org": ("データ整理部門", "田中琴葉(記録)/オタコン/アメス(補佐)/ホイミン(Gemini)",
+    "data-org": ("データ整理部門", "田中琴葉(記録)/黒川あかね/オタコン/アメス(補佐)/ホイミン(Gemini)",
                  "docs/departments/00_common/BOOT_TEMPLATE.md", "田中琴葉"),
     "kaizen-analyst": ("改善提案部門", "アスナ(専任)/アメス(補佐)",
                        "docs/departments/00_common/BOOT_TEMPLATE.md", "アスナ"),
