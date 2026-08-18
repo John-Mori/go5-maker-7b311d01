@@ -1035,7 +1035,10 @@ def working_followup_text(_matched=None):
 #   lead_persona(任意): personas の中で**既定で前に立つ人**。起動文の「迷ったら〜が答えてよい」
 #     がこの名前になる。★キーが無い部屋は従来どおり "persona" が使われる=**既存19部屋は不変**。
 #   relay_model(任意): relay(留守番セッション)が使うモデル。無ければ session_relay.RELAY_MODEL
-#     (= sonnet)のまま=**既存19部屋は不変**。★引き継ぎの生成と交代後の自己確認も同じ値を使う。
+#     (= **opus**・_pin_model で claude-opus-4-8)のまま。★引き継ぎの生成と交代後の自己確認も同じ値。
+#     ★2026-08-18 訂正: 旧記述は「(= sonnet)のまま=既存19部屋は不変」。2026-07-29にrelayの既定が
+#       sonnet→opus へ上がった(Chami直接指示・session_relay.py L267)のに、この行だけ取り残されていた。
+#       **キー無しの部屋も opus を使っている**=「relayは安い」と読める書き方をここに残さない。
 #   boot_reading(任意): 新セッションの起動時に「読んでから答えろ」と渡す資料の並び。
 #     要素は {"path": 絶対パス} か {"glob": パターン}(=**最新の1本を動的に選ぶ**)。任意で "note"。
 #     ★session_relay 側で**実在するものだけに絞る**(存在しないパスを読ませない)。
@@ -1987,7 +1990,7 @@ DEPT_CONF = {
         "persona": "ケヴィン・デブライネ",
         "port": 18814,
         "work_model": "claude-opus-5",    # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。旧"opus"(=2026-07-31 Chami直命令・pinで4-8)から明示opus5へ
-        "relay_model": "claude-opus-5",   # 2026-08-04 同号令。イージス研究室のGL relayセッション(旧: 未指定=sonnet既定)をopus5へ引き上げ
+        "relay_model": "claude-opus-5",   # 2026-08-04 同号令。イージス研究室のGL relayセッション(旧: 未指定=RELAY_MODEL既定。★2026-07-29以降その既定はopus・pinで4-8。「sonnet既定」と書いていたのは誤り・2026-08-18訂正)をopus5へ引き上げ
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "personas": [
             {"persona": "ケヴィン・デブライネ",
@@ -2207,7 +2210,7 @@ DEPT_CONF = {
         "memory": os.path.join(_MEM, "research-room.jsonl"),
         "persona": "アメス",
         "port": 18815,
-        "relay_model": "claude-opus-5",  # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。AD研究室のGL relayセッション(旧: 未指定=sonnet既定)をopus5へ
+        "relay_model": "claude-opus-5",  # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。AD研究室のGL relayセッション(旧: 未指定=RELAY_MODEL既定。★2026-07-29以降その既定はopus・pinで4-8。「sonnet既定」と書いていたのは誤り・2026-08-18訂正)をopus5へ
         "forward_all": True,   # 総括本部なので全便を研究室(Vol.9セッション)へ回す=hqと同じ理由
         # ★2026-07-26 relay化(最後の1部屋)。Chami「**デーモンが処理するのはもうやめたい。
         #   こういう放置が治らないから**」「止めて良いよ、そっちも最も改善して欲しい」。
