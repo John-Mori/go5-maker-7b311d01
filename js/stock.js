@@ -1704,7 +1704,14 @@
       driveLine = '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">☁️ Drive保存済み(実物確認)' +
         (_durl ? ' · <a href="' + esc(_durl) + '" target="_blank" rel="noopener" style="color:var(--accent);">Driveで開く</a>' : '') + '</div>';
     } else if (_dsv && _dsv.state === 'pending') {
-      driveLine = '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ Drive保存 確認中…</div>';
+      // ★確認できるまでは「確認中…」。ただし実物照会ループ(20→60→180秒)を尽くしても着地を確認できない時、
+      //   いつまでも「確認中…」のままだと「保存中が終わらない」に見える(DEF-8f75「いつまで経っても保存中」の真因)。
+      //   → verify窓(約5分)を過ぎても未確認なら「確認できず・再試行」へ切替え、下の「☁️ Drive保存」で押し直せると示す
+      //   (次回アプリ起動時の再照会=1846行 でも自動で確認中→実物確認へ上がる)。
+      var _stuck = _dsv.ts && (Date.now() - _dsv.ts) > 5 * 60 * 1000;
+      driveLine = _stuck
+        ? '<div style="font-size:.71rem;color:#d8a24a;margin-top:2px;">☁️ Drive保存を確認できず · 下の「☁️ Drive保存」で再試行</div>'
+        : '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ Drive保存 確認中…</div>';
     }
     // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
     //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。
