@@ -60,8 +60,12 @@ function toTarget(a) {
 
 // ── FANZAブックス(book.dmm.com)ページのスクレイプ（日本IPなら読める。同人ページとは構造が別） ──
 async function scrapeBookPage(url) {
+  // ★新フロント book.dmm.co.jp は Next.js の"空の器"で価格・JSON-LDがHTMLに載らない（全部JSで後描画）。
+  //   旧フロント book.dmm.com は同じ商品パスをサーバー側で組み立てる＝価格が取れる。Booksは com を読む
+  //   （co.jpのままだと listPrice/price が両方nullになり overrideに元値が入らない・2026-08-18）。
+  const ssrUrl = String(url || "").replace("://book.dmm.co.jp/", "://book.dmm.com/");
   let res;
-  try { res = await fetch(url, { headers: { "Cookie": "age_check_done=1", "User-Agent": UA, "Accept-Language": "ja,en-US;q=0.7", "Referer": "https://book.dmm.com/" } }); }
+  try { res = await fetch(ssrUrl, { headers: { "Cookie": "age_check_done=1", "User-Agent": UA, "Accept-Language": "ja,en-US;q=0.7", "Referer": "https://book.dmm.com/" } }); }
   catch (e) { return { error: "network" }; }
   if (!res.ok) return { error: "HTTP " + res.status };
   if (res.url && /accounts\.dmm|\/login\//.test(res.url)) return { error: "login_wall(このPCのIPが海外扱い?)" };

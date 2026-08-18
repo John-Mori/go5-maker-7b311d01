@@ -126,6 +126,31 @@ export default {
         }
       }
 
+      // ③⁗ FANZAブックスの元値(list_price)補完：DMM公式APIはebook(Books)の prices を
+      //    「price 一つだけ・list_price/deliveries 無し」で返す（実測2026-08-18 b915awnmg04393→{price:"1430"}）。
+      //    つまりAPI経由のBooksは"元値330円"が構造的に取れない（Chami報告2026-08-18）。しかも商品ページは
+      //    海外IP(=このWorker=Cloudflare)だとログイン壁で価格が読めない（実測2026-08-18・PCスクレイプが在る理由）。
+      //    ＝元値は「PC(日本IP)がSSRから拾って override(ov:) に入れた list_price」だけが真値。
+      //    そこで①API結果に list_price が欠け ②override が list_price を持っていれば その元値を採用し、
+      //    ③override にも無ければ PC取得依頼キューへ積む（PCがSSRから元値を埋める）。Books系cidのみ・追加のみ。
+      if (item && item.title && (/^(?:b\d|\d+$)/.test(cid) || /book\.dmm\./.test(srcUrl))) {
+        const hasList = !!(item.prices && item.prices.list_price != null && item.prices.list_price !== "");
+        if (!hasList) {
+          try {
+            const ov = await stGetOverride(env, cid);
+            const ovList = ov && ov.prices && ov.prices.list_price;
+            if (ovList != null && ovList !== "") {
+              item.prices = item.prices || {};
+              item.prices.list_price = ovList; // PCがSSRから拾った元値
+              const ovPrice = ov.prices.price;
+              if (ovPrice != null && ovPrice !== "") item.prices.price = ovPrice; // 割引後もoverride側を正とする
+            } else if (infoCidSupported_(cid)) {
+              await stQueueInfoPut(env, cid, srcUrl); // 元値をPCに埋めさせる（dedup内蔵）
+            }
+          } catch (e) {}
+        }
+      }
+
       // ③‴ 同人のAI生成判定(verified-ai)：APIで解決した同人(d_)はAIがiteminfo.genreに載らない(実測)ため、
       //    クライアントが checkAi を立てた時だけ作品ページを1回見てAIフラグを付ける。routine の
       //    情報取得には乗せない=DMMへの余計なスクレイプを増やさない(候補1件につきクライアント側で一度きり)。
@@ -943,9 +968,18 @@ function aiFromHtml_(html) { return /AI生成|生成AI/.test(String(html || ""))
 async function scrapeFanzaItem(cid, srcUrl) {
   // srcUrl（FANZA Books等の実ページURL・呼び出し元で許可ドメイン検証済み）があればそちらを優先。
   const isBook = /book\.dmm\./.test(srcUrl); // FANZAブックス判定（同人ページとは価格の出方が異なる＝下記価格ブロックで分岐）
-  const pageUrl = srcUrl || (DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/");
+  // ★新フロント book.dmm.co.jp は Next.js の"空の器"を返す（値段・JSON-LDが1つもHTMLに載らず、
+  //   全部あとからJSで描く＝実測2026-08-18）。旧フロント book.dmm.com は同じ商品パスをサーバー側で
+  //   組み立てる（JSON-LD offers.price=定価＋◯%OFFバッジが載る）ので、Booksは com を読みにいく。
+  //   これが「Booksで元値330円が取れない」の根本原因（co.jpを読んでも価格文字がゼロだった）。
+  const ssrUrl = srcUrl ? srcUrl.replace("://book.dmm.co.jp/", "://book.dmm.com/") : "";
+  const pageUrl = ssrUrl || (DMM_DOUJIN_BASE + encodeURIComponent(cid) + "/");
   let res;
-  try { res = await fetchDmmPage(pageUrl); } catch (e) { return null; }
+  try { res = await fetchDmmPage(pageUrl); } catch (e) { res = null; }
+  // com が404等で読めなかった時だけ、元のURL（co.jp）へフォールバック（回帰ゼロ＝従来動作以上）。
+  if ((!res || !res.ok) && ssrUrl && ssrUrl !== srcUrl) {
+    try { res = await fetchDmmPage(srcUrl); } catch (e) { res = null; }
+  }
   if (!res || !res.ok) return null;
   const html = await res.text();
 
