@@ -900,6 +900,7 @@ export {
   r2ObjectUrl,
   safeName,
   channelToFolderId,
+  fetchR2Bytes,
   SAVE_JOB_VIDEO_KEY_RE,
   SAVE_JOB_R2_BASE_RE,
   SAVE_JOB_RETRY_DELAYS_MS,
