@@ -2096,6 +2096,9 @@
     _stockBgPending = false;
     var curAcct = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
     var metas = loadMeta().filter(function (m) { return (m.account || 'acc1') === curAcct; });
+    // ★表示順=日付が昔(古い)を一番上へ(Chami依頼2026-08-19「ドラフトの履歴は日付が昔が一番上に来るように」)。
+    //   これは表示専用の並べ替え=metasはloadMeta()のフィルタ済みコピーなので、保存側(unshiftで新しい順・MAX_DRAFTS間引き)は不変。
+    metas.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
     var arch = loadArchive().filter(function (m) { return (m.account || 'acc1') === curAcct; });
     // ★保存中(未着地)ドラフト=メモリ上の pending だけ。着地(commitPendingDraft_)で metas 側へ移るので、
     //   既に metas に居る id は除外して重複を防ぐ(B・Fable5設計2026-08-17)。
