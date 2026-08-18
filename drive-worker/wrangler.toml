@@ -23,6 +23,15 @@ ALLOW_OVERWRITE = "1"
 LABEL_ACC1 = "月詠み色恋劇場"
 LABEL_ACC2 = "宵桜艶帖～Yoizakura Tsuyacho～"
 
+# ── 動画/画像の R2 バケット（sync-worker と共有）──★真因対策(2026-08-18 実測)：go5-drive-saver から
+#    go5-sync.workers.dev への「同一アカウント workers.dev 間 fetch」は、外部curlが 200/8.7MB を返す同一URLでも
+#    404 を返す(Cloudflareの既知の落とし穴)＝save_job が r2_video_missing で静死し「保存中のまま来ない」の真因。
+#    → sync-worker が動画バイトを置く R2 バケットを drive-worker へ直バインドし、HTTP/クロスWorker を跨がず
+#    env.SYNC_IMAGES.get(key) で in-process 直読みする。バケット名は sync-worker/wrangler.toml と同一。
+[[r2_buckets]]
+binding = "SYNC_IMAGES"
+bucket_name = "go5-sync-images"
+
 # ── レート制限用 KV（任意）──
 # ※ CI(GitHub Actions)デプロイ時、この namespace id がアカウントに見つからず失敗したため一旦無効化。
 #    Worker は RL バインディング不在でも安全に動作（rateLimited は env.RL 無しなら制限せず通す）。

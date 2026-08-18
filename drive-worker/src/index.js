@@ -427,7 +427,7 @@ async function runSaveJob(env, fields, parentId) {
   const fail = function (why) { try { console.warn(tag + " FAIL:" + why); } catch (_) {} return { ok: false, error: why }; };
   try { console.log(tag + " START"); } catch (_) {} // ★どこまで進んだかを実測する起点(cancelされた時に「入口までは来た」が分かる)
 
-  const vid = await fetchR2Bytes(fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS);
+  const vid = await fetchR2Bytes(env, fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS);
   const buf = vid ? vid.buf : null;
   const mime = (vid && vid.mime) || "video/mp4";
   if (!buf || !buf.byteLength) return fail("r2_video_missing"); // R2にまだ届いていない/取得不能＝再送に委ねる
@@ -482,7 +482,7 @@ async function runSaveJob(env, fields, parentId) {
   //   付随物なので失敗しても動画保存の成功は覆さない（フロントの再送/データ再作成で後追いできる）。----
   if (SAVE_JOB_VIDEO_KEY_RE.test(fields.srcKey || "")) {
     try {
-      const sv = await fetchR2Bytes(fields.r2Base, fields.srcKey, [500, 1500]);
+      const sv = await fetchR2Bytes(env, fields.r2Base, fields.srcKey, [500, 1500]);
       if (sv && sv.buf && sv.buf.byteLength) {
         const sname = await uniqueFileName(folder.id, baseName + "_元画像." + (extOf(sv.mime) || "jpg"), token);
         await uploadNewBuffer(folder.id, sname, sv.buf, sv.mime || "image/jpeg", token);
@@ -493,7 +493,7 @@ async function runSaveJob(env, fields, parentId) {
   // ---- プレビュー（任意・R2から取り寄せ・小さい）。付随物なので失敗しても動画保存の成功は覆さない ----
   if (SAVE_JOB_VIDEO_KEY_RE.test(fields.previewKey || "")) {
     try {
-      const pv = await fetchR2Bytes(fields.r2Base, fields.previewKey, [500, 1500]);
+      const pv = await fetchR2Bytes(env, fields.r2Base, fields.previewKey, [500, 1500]);
       if (pv && pv.buf && pv.buf.byteLength) {
         const pname = await uniqueFileName(folder.id, baseName + "_プレビュー." + (extOf(pv.mime) || "jpg"), token);
         await uploadNewBuffer(folder.id, pname, pv.buf, pv.mime || "image/jpeg", token);
@@ -519,18 +519,49 @@ function r2ObjectUrl(r2Base, key) {
 }
 
 // R2から <key> のバイト列を取得→{buf,mime}。取れなければ null。delaysMs の回数だけ指数バックオフで再試行
-//   （R2ミラー未着＝アップロード直後のレースに耐える）。外へ出る手はここ1箇所（fetch）だけ。
-async function fetchR2Bytes(r2Base, key, delaysMs) {
-  const url = r2ObjectUrl(r2Base, key);
+//   （R2ミラー未着＝アップロード直後のレースに耐える）。
+//   ★真因(2026-08-18 実測・wrangler tailで確定): 動画バイトは R2 に確実に在る(外部curlで GET 200 / 8.7MB・
+//     ?cbバスター付きでも200)のに、この Worker からの fetch だけが 404 を返し r2_video_missing で静死していた。
+//     go5-drive-saver → go5-sync.workers.dev は「同一アカウント workers.dev 間の fetch」で、Cloudflare が
+//     外部とは違う経路へ回し sync-worker の R2.get が null を返す既知の落とし穴。キャッシュバスターでも直らない
+//     (キャッシュではなくルーティングの問題)。→ ★HTTP を跨がず、sync-worker と同じ R2 バケット
+//     (go5-sync-images)を drive-worker へ直バインド(env.SYNC_IMAGES)し in-process で直読みするのが根本解。
+//   フォールバック: 直バインドが無い環境(別アカウント運用等)では従来の公開HTTP GET を残す(cf.cacheTtl=0＋?cbバスター)。
+async function fetchR2Bytes(env, r2Base, key, delaysMs) {
+  const k = String(key || "");
   const delays = Array.isArray(delaysMs) ? delaysMs : [];
+  // ── 最優先: 同一アカウントの R2 を直バインドで in-process 読み(HTTP/クロスWorker/エッジキャッシュを一切経由しない) ──
+  if (env && env.SYNC_IMAGES && typeof env.SYNC_IMAGES.get === "function" && /^[a-f0-9]{16,64}$/.test(k)) {
+    for (let i = 0; i <= delays.length; i++) {
+      try {
+        const obj = await env.SYNC_IMAGES.get(k);
+        if (obj) {
+          const buf = await obj.arrayBuffer();
+          if (buf && buf.byteLength) {
+            const mime = (obj.httpMetadata && obj.httpMetadata.contentType) || "";
+            return { buf, mime };
+          }
+        }
+      } catch (e) { try { console.warn("[fetchR2Bytes] r2get throw try=" + i + " msg=" + (e && e.message || e)); } catch (_) {} }
+      if (i < delays.length) await sleep(delays[i]);
+    }
+    try { console.warn("[fetchR2Bytes] r2bind_miss key=" + k.slice(0, 12)); } catch (_) {}
+    return null; // 直バインドが権威=バケットに無ければ本当に無い(壊れたHTTP経路へは倒さない)
+  }
+  // ── フォールバック(直バインド不在時のみ): 公開HTTP GET ──
+  const base = r2ObjectUrl(r2Base, key);
+  const bust = () => (base.indexOf("?") >= 0 ? "&" : "?") + "cb=" + Date.now() + "-" + Math.random().toString(36).slice(2);
+  const noCache = { cf: { cacheTtl: 0, cacheEverything: false } }; // ★Workersは fetch の 'cache' フィールド未実装=throwする。cf指定＋?cbバスターだけで素通す
   for (let i = 0; i <= delays.length; i++) {
     try {
-      const r = await fetch(url);
+      const r = await fetch(base + bust(), noCache);
       if (r.ok) {
         const buf = await r.arrayBuffer();
         if (buf && buf.byteLength) return { buf, mime: r.headers.get("Content-Type") || "" };
+      } else {
+        try { console.warn("[fetchR2Bytes] status=" + r.status + " try=" + i + " key=" + String(key).slice(0, 12)); } catch (_) {}
       }
-    } catch (e) { /* 次の試行へ */ }
+    } catch (e) { try { console.warn("[fetchR2Bytes] throw try=" + i + " msg=" + (e && e.message || e) + " url=" + base.slice(0, 60)); } catch (_) {} }
     if (i < delays.length) await sleep(delays[i]);
   }
   return null;
