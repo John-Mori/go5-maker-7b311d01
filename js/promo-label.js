@@ -39,18 +39,16 @@
   var TEMPLATES = {
     acc1: {
       baseW: 360, aspect: 1024 / 1536,
-      // ★2026-08-18 acc2(宵桜)はお手本シート切り出し方式(digitSheet)へ切替済みだが、acc1(月詠み)は
-      //   digitSheetを持たせていない=意図的(下のdrawDigits/フォント描画のまま)。理由: Chami提供の
-      //   月詠み数字シート(local/promo-ref/tsukuyomi-digits.png・添付1539030477833506816_0.png)は
-      //   どちらもPILで実測するとRGB(アルファチャンネル無し)＝市松柄が"透過"ではなく画素として
-      //   焼き込み済み。チャンネル(彩度)閾値で背景除去を試みたが、金属ストロークの中を走る白い
-      //   スペキュラーハイライト筋(例: 0の左脚 x≈48,y≈360 付近=RGB(255,254,255)・彩度0)が、
-      //   "0"の輪の内側にある本物の穴(カウンター・同じく彩度0)と色だけでは区別不能(実測: 輪の穴の
-      //   連結成分11283px vs ハイライト筋の連結成分3006px=サイズでの安全な閾値も引けない)。
-      //   どちらの単純手法(閾値のみ/連結成分のみ)を選んでも、片方に必ず見た目の欠陥が出る
-      //   (ハイライトを消す=筋に穴が開く／連結成分だけ塞ぐ="0"の中が不透明な円盤になる)。
-      //   → 正しい透過版シートが来るまで、acc1はここに手を入れず現状の描画(フォント)を維持する。
-      //   詳細は改修部からの報告(local/llm/change_log.jsonl 2026-08-18・promo-label digit sheet)参照。
+      // ★2026-08-18(2) 月詠みもお手本シート切り出し方式(digitSheet)へ切替(AD研究室ルカ代行発注・
+      //   REQ-research-room-43292a14fc「7がへにょへにょ」の月詠み側恒久対策)。長らく保留していた理由は
+      //   「Chami提供の旧シート(local/promo-ref/tsukuyomi-digits.png)がRGB焼込=金属ハイライト筋と"0"の
+      //   カウンター穴を色で区別できず背景除去できなかった」ため。→ Chamiが背景抜きの正しい透過版
+      //   (local/promo-ref/tsukuyomi-digits-rgba.png・2172x724 RGBA)を提供。AD研で実測確認済み
+      //   (透明81.1%/不透明8.9%=宵桜と同格・四隅alpha=0・"0"の中央穴alpha=0で左右ストロークalpha=253,249
+      //   =カウンター穴が正しく開いている)。→ assets/promo/tsukuyomi-digits.png へ複製し下記digitSheetを
+      //   参照。フォント描画(下のink/drawDigits)は端末フォント依存の退避経路として残す(シート未読込/
+      //   デコード前のみ使う)。座標はこのシートをPIL実測(下記glyphsコメント)=acc2(1536x1024)と寸法が
+      //   違う(2172x724)ため座標は流用せず本シート専用に採寸。
 
       // ★2026-08-18 Chami提供のお手本(local/promo-ref/tsukuyomi-digits.png=金の数字シート0〜9)へ実合わせ
       //   (AD研究室ルカ代行発注「77の数字が重く角ばる」)。PILで実ピクセルを採色:
@@ -66,6 +64,29 @@
              //   フォント差ではなくstroke量が主因と切り分け済み)。acc1だけ大幅に薄く=お手本相当の繊細さへ。
              //   acc2は未指定=下のdrawDigitsの既定値(旧仕様のまま)を使うため無変更。
              contourW: 0.020, edgeW: 0.012, glowW: 0.055 },
+      // ★2026-08-18(2) お手本シート切り出し(acc2と同方式・上の切替コメント参照)。
+      //   シート=assets/promo/tsukuyomi-digits.png(2172x724 RGBA)。glyphs[n]はシート画素サイズに対する比率。
+      //   PIL実測(alpha>32でインク列を検出→10桁がすべて非接触に分離。宵桜と違い7/8の谷間分割は不要):
+      //     桁ごとのx0..x1(px)= 0:37-225 / 1:299-399 / 2:470-644 / 3:692-862 / 4:903-1094 /
+      //                        5:1140-1308 / 6:1351-1528 / 7:1560-1729 / 8:1760-1936 / 9:1972-2147。
+      //   cellY/cellHは10桁共通の帯(全桁のtop最小209〜bot最大505px)=全桁が同じ基準線に揃う(桁別にすると
+      //   微小な高さ差でガタつく)。y/hはこの帯、x/wは桁ごと。
+      digitSheet: {
+        src: 'assets/promo/tsukuyomi-digits.png',
+        cellY: 0.28867, cellH: 0.41022,
+        glyphs: [
+          { x: 0.01703, w: 0.08702 }, // 0
+          { x: 0.13766, w: 0.04650 }, // 1
+          { x: 0.21639, w: 0.08057 }, // 2
+          { x: 0.31860, w: 0.07873 }, // 3
+          { x: 0.41575, w: 0.08840 }, // 4
+          { x: 0.52486, w: 0.07781 }, // 5
+          { x: 0.62201, w: 0.08195 }, // 6
+          { x: 0.71823, w: 0.07827 }, // 7
+          { x: 0.81031, w: 0.08149 }, // 8
+          { x: 0.90792, w: 0.08103 }  // 9
+        ]
+      },
       discount: { src: 'assets/promo/tsukuyomi-discount-base.png',
                   slot: { x: 0.332, y: 0.306, w: 0.342, h: 0.189 } },
       price:    { src: 'assets/promo/tsukuyomi-price-base.png',
@@ -849,7 +870,8 @@
       relLuminance: relLuminance,
       contrastRatio: contrastRatio,
       localBgLuminance: localBgLuminance,
-      layoutDigitGlyphs: layoutDigitGlyphs
+      layoutDigitGlyphs: layoutDigitGlyphs,
+      TEMPLATES: TEMPLATES   // テスト用(tests/test_promo_digit_sheet.js が実テンプレのdigitSheetを検査)
     };
   }
 })();

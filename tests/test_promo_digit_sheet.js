@@ -12,7 +12,7 @@
 'use strict';
 
 const assert = require('assert');
-const { layoutDigitGlyphs } = require('../js/promo-label.js');
+const { layoutDigitGlyphs, TEMPLATES } = require('../js/promo-label.js');
 
 let passed = 0;
 let failed = 0;
@@ -110,6 +110,59 @@ test('D-9: 複数桁はdx(描画x)が左から右へ単調増加(重ならず並
   for (var i = 1; i < out.length; i++) {
     assert.ok(out[i].dx >= out[i - 1].dx + out[i - 1].dw, '桁' + i + 'が前の桁と重ならない');
   }
+});
+
+// ── 月詠み(acc1)の実テンプレ検査 ────────────────────────────────
+//   2026-08-18 AD研究室ルカ代行発注(REQ-research-room-43292a14fc「7がへにょへにょ」)で月詠みも
+//   digitSheet化。ここは実際に配線した TEMPLATES.acc1.digitSheet を検査する=空PASS禁止:
+//   ①未配線なら M-1 で落ちる ②座標を打ち間違え/acc2(1536x1024)の座標を流用すると
+//   桁が重なる or シートからはみ出す→ M-3/M-5 で落ちる。
+// 月詠みシート実画素サイズ(assets/promo/tsukuyomi-digits.png・PIL実測)。
+const TSU_SHEET_NATURAL = { w: 2172, h: 724 };
+
+test('M-1: acc1にdigitSheet(0〜9の10グリフ)が配線されている', function () {
+  assert.ok(TEMPLATES && TEMPLATES.acc1, 'TEMPLATES.acc1 が公開されている');
+  var ds = TEMPLATES.acc1.digitSheet;
+  assert.ok(ds, 'acc1.digitSheet が存在する(未配線ならここで落ちる)');
+  assert.strictEqual(ds.src, 'assets/promo/tsukuyomi-digits.png');
+  assert.strictEqual(ds.glyphs.length, 10, '0〜9の10グリフ');
+});
+
+test('M-2: cellY/cellH とグリフ座標がすべて 0..1 の範囲に収まる', function () {
+  var ds = TEMPLATES.acc1.digitSheet;
+  assert.ok(ds.cellY >= 0 && ds.cellH > 0 && ds.cellY + ds.cellH <= 1, '帯がシート内に収まる');
+  ds.glyphs.forEach(function (g, i) {
+    assert.ok(g.x >= 0 && g.w > 0 && g.x + g.w <= 1, '桁' + i + ' がシート幅内に収まる');
+  });
+});
+
+test('M-3: グリフは左→右へ重ならず単調に並ぶ(座標の打ち間違い/流用を検出)', function () {
+  var gs = TEMPLATES.acc1.digitSheet.glyphs;
+  for (var i = 1; i < gs.length; i++) {
+    assert.ok(gs[i].x >= gs[i - 1].x + gs[i - 1].w,
+      '桁' + i + ' の左端(' + gs[i].x + ')が前の桁の右端(' + (gs[i - 1].x + gs[i - 1].w) + ')以降にある');
+  }
+});
+
+test('M-4: "1"が最も細い(月詠みシートの実測特徴=誤テンプレ検出の目印)', function () {
+  var gs = TEMPLATES.acc1.digitSheet.glyphs;
+  var one = gs[1].w;
+  for (var i = 0; i < gs.length; i++) {
+    if (i === 1) continue;
+    assert.ok(gs[i].w > one, '桁' + i + '(' + gs[i].w + ') は "1"(' + one + ') より太い');
+  }
+});
+
+test('M-5: 実テンプレ+実画素サイズで切り出すと source矩形がシート内に収まる("70"で検証)', function () {
+  var ds = TEMPLATES.acc1.digitSheet;
+  var box = { x: 100, y: 200, w: 400, h: 120 };
+  var out = layoutDigitGlyphs(ds, TSU_SHEET_NATURAL, box, '70');
+  assert.strictEqual(out.length, 2);
+  out.forEach(function (p) {
+    assert.ok(p.sx >= 0 && p.sx + p.sw <= TSU_SHEET_NATURAL.w + 1e-6, 'sx+sw がシート幅(2172)内');
+    assert.ok(p.sy >= 0 && p.sy + p.sh <= TSU_SHEET_NATURAL.h + 1e-6, 'sy+sh がシート高(724)内');
+  });
+  assert.ok(out[1].dx >= out[0].dx + out[0].dw, '"7""0"が重ならず並ぶ');
 });
 
 console.log('');
