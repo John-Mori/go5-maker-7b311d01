@@ -114,7 +114,7 @@ function fanzaGenre_(url) {
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
 var CH_SHEETS = ['月詠み','宵桜艶帖'];
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-08-16D(ピーク記録が埋まらない核心の一因を根治=ytViews_のバッチに不正ID(SALE擬似vid"SALE"/"SALE:code"のコロン混入・壊れURL由来)が1つ混ざるとvideos.listがバッチ全体を400で弾き、同バッチの実在vidの再生数まで丸ごと欠落していた(実測DIAG viewsKeys=0=views全滅→ピーク算出の材料ゼロ)。対策=各バッチをYouTube動画IDの形/^[A-Za-z0-9_-]{11}$/に一致する物だけへ絞ってから叩く(不正IDは1つも渡さない)。注:診断中に当プロジェクトのUrlFetchApp日次クォータを消費したため反映直後は一時的にfetchが例外になり得る(回復後にトリガーが自動で埋める)。C2〜C5の一時診断(DIAG/yt_probe)は確認後に除去予定。以下は前版=2026-08-16C5(一時診断=yt_probeがytViews_のバッチ経路を実物で通す[実vid+SALE:コロンid]。以下は前版=2026-08-16C4(一時診断=ytViews_の各バッチのHTTP応答をDIAG.ytに記録(viewsが全nullの真因=どのバッチが400かの特定)。以下は前版=2026-08-16C3(一時診断=yt_probe追加。YT_API_KEYの有無とYouTube Data APIの実HTTP応答を返す(viewsが全nullの切り分け)。以下は前版=2026-08-16C2(一時診断=snapshot_nowがpeakUpdatesの内訳counts[recs/views非null/prev/hrs範囲内/consider呼数]を返す。ピークが0のままの切り分け用・確認後に除去。以下は前版=2026-08-16C(ピーク永続化が実行終端に間に合っていなかった=16Bの時間予算(日時2分+クリック4分)だと本体upsertループの後にあるピーク書き込みへ6分内に到達できず、スナップ行は書けてもピークは0のままだった(実測23:25の便)。配分を前詰め(日時90秒+クリック通算3分)+本体upsert/ピーク算出ループ自体も通算5分で頭打ち=打ち切っても溜めたピークは必ず永続化へ抜ける。以下は前版=2026-08-16B(ピーク記録が埋まらない"現"真因=snapshotStatsがGASの6分実行制限を超えて毎回時間切れ→Googleがトリガーを自動停止し2026-08-15 19:51Zを最後にスナップ完全停止していた[実測]。膨張源は①投稿日時のYouTube公開時刻バックフィル(dateFix・08-15Aで追加=全履歴行をsetValue)②全コードのクリック取得(1コードずつ+80ms待機)。恒久対策=重い2ループを時間予算で頭打ち[dateFix2分/クリック通算4分]にし必ず書込み・ピーク算出へ到達=機構で6分を超えさせない。打ち切り分は冪等で次回続行・数回で定常。反映後 admin_setup でトリガー再設定要。以下は前版=2026-08-16A(ピーク記録の全滅を根治[Chami再発指摘=ランキングのピーク窓が常に空]。真因=snapshotStatsのprevByVid構築が記録日時セルを生文字列前提でDate.parse[String(Date)は"Sat Aug 16 2026…"形式のため先頭空白のT置換で常にNaN]→tms=0→considerPeak_が一度も呼ばれずピーク記録シートが0行のまま[deltasはymd_正規化済みで生存=ピークだけ全滅]。2026-08-06/08-11の下限調整では直らなかった理由もこれ[rateの手前で死んでいた]。対策①=記録日時をDate/文字列両対応で正規化[instanceof Date→getTime/formatDate]。対策②恒久=増加ゼロ区間でも未記録の作品へ0(件/時)を種まき[SALE擬似行除く]=低速動画も必ず行が付き、シート0行=即異常と構造で判別可能に。列順/PEAK_HEADERS/冪等移行/v・c・w3系統は不変。以下は前版=2026-08-15B(外部短縮の新規発番を完全撤去。フロントで独自link-worker URLが無い時はpostUrlを共有URLへ保存し、da.gd APIを呼ばない。再発防止テストで外部短縮API文字列の復活を禁止。以下は前版=2026-08-15A(投稿日時をYouTube公開時刻へ自動収束[Chami依頼REQ-2f4520e4d7=投稿日は投稿完了ボタンを押した時刻でなくYouTubeの実公開時刻を参照する]。真因=投稿完了と同時のupsert(pushItemToGas_)がpostedAtを送らずwriteRecord_の新規行フォールバックが投稿日時列にnow[押下時刻]を確定していた。対策=5分毎snapshotStatsに相乗り。ytViews_に第2引数pubOutを追加しpart=statistics,snippetでpublishedAtも回収[追加クォータ0=既存videos.list呼び出しのpart拡張のみ]、snapshotStatsが各CH行の投稿日時列を走査しpublishedAtと±60秒超ズレ or 空欄の行だけsetValue[new Date]で修正、修正シートをsortByDate_で1回整列[冪等=一致行は無操作]。新規投稿は公開後最大5分で自動修正・既存の誤記録もYouTube URL持ち全行を自動バックフィル・列追加なし・フロント無改修。以下は前版=2026-08-11B(全部のピークが要る[Chami2026-08-11]=導線2(作品クリック=ピンク矢印 w)の最大瞬間風速ピークをGASが記録するよう追加。従来ピーク記録シートは再生(v)と導線1(c)の2種だけで作品クリックのピークは未対応=ランキングのピーク窓でピンクを選ぶと「GAS側の対応待ち」の注記で空だった。PEAK_HEADERSへ「作品クリックピーク(件/時)」「作品クリックピーク時間帯」を末尾追加(既存のv/c/更新日時の列位置は不変=timepointSheet_と同じ冪等ヘッダ移行で旧シートも無停止で拡張・旧行のw列は空欄)、snapshotStatsのconsiderPeak_をw対応(prevByVidに作品クリック累計wclicksを持たせ区間伸び率を採用・下限0.06h上限6hはv/cと共通)、computePeaks_がwRate/wWinを返す→フロントyt-clicks.jsがr.peakW/peakWWinで描画・c2PeakUnsupportedの分岐と注記を撤去。過去分は遡及不可(サーバーに作品クリックの区間履歴が無いため)・以後のsnapshotから積む。以下は前版=2026-08-11A(ピークを早く記録=snapshotStatsを10分毎→5分毎に短縮し、最大瞬間風速の採用下限も0.12h[7.2分]→0.06h[3.6分]を対で更新[間隔だけ縮めて下限を残すと5分区間が常に下限割れでピークが1件も記録されない=2026-08-06と同型の事故になるため必ず対で変える]。公開直後からピークが早く埋まる・時点記録も5分毎で「バケット+0〜5分」に確定=旧10分毎より早い[Chami「ピークを早く記録できるように」2026-08-11]。★反映後は ?action=admin_setup でトリガー再設定が要る[間隔変更をGASへ効かせるため]。以下は前版=2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
+var GAS_VERSION = '2026-08-18A(action=backfill_probe を新設=「後埋まり列」(ピーク値/クリック数/いいね/リポスト等、改修後N時間で毎時トリガーが実データで初めて埋める列)の実データ着地プローブ(読み取り専用)。各列の非空行数と最終更新時刻を返し、改善提案部門の Z2運用ツール(b面)が「直したと言った後、実データが本当に埋まったか」を外から突き合わせられる口=型《実物着地》の読取口。書き込み無し・列追加無し・既存挙動不変。作成時プリフライトは scripts/check_backfill_assert.mjs(CI門)が登録簿 backfill_columns.json と照合。以下は前版=2026-08-16D(ピーク記録が埋まらない核心の一因を根治=ytViews_のバッチに不正ID(SALE擬似vid"SALE"/"SALE:code"のコロン混入・壊れURL由来)が1つ混ざるとvideos.listがバッチ全体を400で弾き、同バッチの実在vidの再生数まで丸ごと欠落していた(実測DIAG viewsKeys=0=views全滅→ピーク算出の材料ゼロ)。対策=各バッチをYouTube動画IDの形/^[A-Za-z0-9_-]{11}$/に一致する物だけへ絞ってから叩く(不正IDは1つも渡さない)。注:診断中に当プロジェクトのUrlFetchApp日次クォータを消費したため反映直後は一時的にfetchが例外になり得る(回復後にトリガーが自動で埋める)。C2〜C5の一時診断(DIAG/yt_probe)は確認後に除去予定。以下は前版=2026-08-16C5(一時診断=yt_probeがytViews_のバッチ経路を実物で通す[実vid+SALE:コロンid]。以下は前版=2026-08-16C4(一時診断=ytViews_の各バッチのHTTP応答をDIAG.ytに記録(viewsが全nullの真因=どのバッチが400かの特定)。以下は前版=2026-08-16C3(一時診断=yt_probe追加。YT_API_KEYの有無とYouTube Data APIの実HTTP応答を返す(viewsが全nullの切り分け)。以下は前版=2026-08-16C2(一時診断=snapshot_nowがpeakUpdatesの内訳counts[recs/views非null/prev/hrs範囲内/consider呼数]を返す。ピークが0のままの切り分け用・確認後に除去。以下は前版=2026-08-16C(ピーク永続化が実行終端に間に合っていなかった=16Bの時間予算(日時2分+クリック4分)だと本体upsertループの後にあるピーク書き込みへ6分内に到達できず、スナップ行は書けてもピークは0のままだった(実測23:25の便)。配分を前詰め(日時90秒+クリック通算3分)+本体upsert/ピーク算出ループ自体も通算5分で頭打ち=打ち切っても溜めたピークは必ず永続化へ抜ける。以下は前版=2026-08-16B(ピーク記録が埋まらない"現"真因=snapshotStatsがGASの6分実行制限を超えて毎回時間切れ→Googleがトリガーを自動停止し2026-08-15 19:51Zを最後にスナップ完全停止していた[実測]。膨張源は①投稿日時のYouTube公開時刻バックフィル(dateFix・08-15Aで追加=全履歴行をsetValue)②全コードのクリック取得(1コードずつ+80ms待機)。恒久対策=重い2ループを時間予算で頭打ち[dateFix2分/クリック通算4分]にし必ず書込み・ピーク算出へ到達=機構で6分を超えさせない。打ち切り分は冪等で次回続行・数回で定常。反映後 admin_setup でトリガー再設定要。以下は前版=2026-08-16A(ピーク記録の全滅を根治[Chami再発指摘=ランキングのピーク窓が常に空]。真因=snapshotStatsのprevByVid構築が記録日時セルを生文字列前提でDate.parse[String(Date)は"Sat Aug 16 2026…"形式のため先頭空白のT置換で常にNaN]→tms=0→considerPeak_が一度も呼ばれずピーク記録シートが0行のまま[deltasはymd_正規化済みで生存=ピークだけ全滅]。2026-08-06/08-11の下限調整では直らなかった理由もこれ[rateの手前で死んでいた]。対策①=記録日時をDate/文字列両対応で正規化[instanceof Date→getTime/formatDate]。対策②恒久=増加ゼロ区間でも未記録の作品へ0(件/時)を種まき[SALE擬似行除く]=低速動画も必ず行が付き、シート0行=即異常と構造で判別可能に。列順/PEAK_HEADERS/冪等移行/v・c・w3系統は不変。以下は前版=2026-08-15B(外部短縮の新規発番を完全撤去。フロントで独自link-worker URLが無い時はpostUrlを共有URLへ保存し、da.gd APIを呼ばない。再発防止テストで外部短縮API文字列の復活を禁止。以下は前版=2026-08-15A(投稿日時をYouTube公開時刻へ自動収束[Chami依頼REQ-2f4520e4d7=投稿日は投稿完了ボタンを押した時刻でなくYouTubeの実公開時刻を参照する]。真因=投稿完了と同時のupsert(pushItemToGas_)がpostedAtを送らずwriteRecord_の新規行フォールバックが投稿日時列にnow[押下時刻]を確定していた。対策=5分毎snapshotStatsに相乗り。ytViews_に第2引数pubOutを追加しpart=statistics,snippetでpublishedAtも回収[追加クォータ0=既存videos.list呼び出しのpart拡張のみ]、snapshotStatsが各CH行の投稿日時列を走査しpublishedAtと±60秒超ズレ or 空欄の行だけsetValue[new Date]で修正、修正シートをsortByDate_で1回整列[冪等=一致行は無操作]。新規投稿は公開後最大5分で自動修正・既存の誤記録もYouTube URL持ち全行を自動バックフィル・列追加なし・フロント無改修。以下は前版=2026-08-11B(全部のピークが要る[Chami2026-08-11]=導線2(作品クリック=ピンク矢印 w)の最大瞬間風速ピークをGASが記録するよう追加。従来ピーク記録シートは再生(v)と導線1(c)の2種だけで作品クリックのピークは未対応=ランキングのピーク窓でピンクを選ぶと「GAS側の対応待ち」の注記で空だった。PEAK_HEADERSへ「作品クリックピーク(件/時)」「作品クリックピーク時間帯」を末尾追加(既存のv/c/更新日時の列位置は不変=timepointSheet_と同じ冪等ヘッダ移行で旧シートも無停止で拡張・旧行のw列は空欄)、snapshotStatsのconsiderPeak_をw対応(prevByVidに作品クリック累計wclicksを持たせ区間伸び率を採用・下限0.06h上限6hはv/cと共通)、computePeaks_がwRate/wWinを返す→フロントyt-clicks.jsがr.peakW/peakWWinで描画・c2PeakUnsupportedの分岐と注記を撤去。過去分は遡及不可(サーバーに作品クリックの区間履歴が無いため)・以後のsnapshotから積む。以下は前版=2026-08-11A(ピークを早く記録=snapshotStatsを10分毎→5分毎に短縮し、最大瞬間風速の採用下限も0.12h[7.2分]→0.06h[3.6分]を対で更新[間隔だけ縮めて下限を残すと5分区間が常に下限割れでピークが1件も記録されない=2026-08-06と同型の事故になるため必ず対で変える]。公開直後からピークが早く埋まる・時点記録も5分毎で「バケット+0〜5分」に確定=旧10分毎より早い[Chami「ピークを早く記録できるように」2026-08-11]。★反映後は ?action=admin_setup でトリガー再設定が要る[間隔変更をGASへ効かせるため]。以下は前版=2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -538,6 +538,11 @@ function doGet(e) {
   if (p.action === 'diagnose') {
     return jsonOut_(diagnose_());
   }
+  // 後埋まり列の実データ着地プローブ: <exec URL>?action=backfill_probe で、ピーク値/クリック数/いいね等
+  //   「N時間後に埋まる列」の非空行数と最終更新時刻を返す。(読み取りのみ)型《実物着地》の読取口。
+  if (p.action === 'backfill_probe') {
+    try { return jsonOut_(backfillProbe_()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); }
+  }
   // 行分類と件数: <exec URL>?action=sheet_audit で各記録シートの行を分類して返す。(読み取りのみ)
   //   complete=postUri+YT両方あり / no_yt=postUriのみ / no_uri=YTのみ / minimal=どちらも無 / empty=post_id空
   //   ヘッダー一覧とCANONICALとの差分(missing/extra)も同時に返す。
@@ -914,6 +919,55 @@ function diagnose_() {
     channels[name] = info;
   });
   return { ok: true, version: GAS_VERSION, spreadsheet: ss.getName(), allTabs: allTabs, channels: channels };
+}
+
+// 「後埋まり列」の実データ着地プローブ(読み取り専用)。型《実物着地》の読取口。
+//   ピーク値・クリック数・いいね/リポスト等、改修後N時間経って毎時トリガーが実データで初めて埋める列が
+//   「本当に非空になったか」を外から(改善提案部門アスナのZ2運用ツール=b面)突き合わせるための口。
+//   各列の非空行数(nonEmpty)と、対の更新日時列から拾った最終更新時刻(latest)を返す。書き込みはしない。
+//   ★列名は scripts/backfill_columns.json の登録簿と一致させる(check_backfill_assert.mjs ③がここを照合する)。
+function backfillProbe_() {
+  var ss = openSS_();
+  function grp(sheetName, cols, tsCol) {
+    var sh = ss.getSheetByName(sheetName);
+    if (!sh) return { exists: false };
+    var map = headerMap_(sh), last = sh.getLastRow();
+    function nonEmpty(col) {
+      if (!col || last < 2) return 0;
+      var vals = sh.getRange(2, col, last - 1, 1).getValues(), n = 0;
+      for (var i = 0; i < vals.length; i++) { var v = vals[i][0]; if (v !== '' && v !== null) n++; }
+      return n;
+    }
+    function latest(col) {
+      if (!col || last < 2) return '';
+      var vals = sh.getRange(2, col, last - 1, 1).getValues(), mx = 0;
+      for (var i = 0; i < vals.length; i++) {
+        var v = vals[i][0]; if (!v) continue;
+        var t = (v instanceof Date) ? v.getTime() : Date.parse(String(v));
+        if (isFinite(t) && t > mx) mx = t;
+      }
+      return mx ? new Date(mx).toISOString() : '';
+    }
+    var out = { exists: true, lastRow: last, latest: tsCol ? latest(map[tsCol]) : '', cols: {} };
+    cols.forEach(function (name) {
+      // 記録シートのクリック列は旧名(開封数/Bitlyクリック)互換=clickColName_ で解決してから数える。
+      var col = (name === '短縮URLクリック数' && sheetName !== '視聴履歴') ? map[clickColName_(map)] : map[name];
+      out.cols[name] = nonEmpty(col);
+    });
+    return out;
+  }
+  var res = { ok: true, version: GAS_VERSION, at: new Date().toISOString(), sheets: {} };
+  // 記録シート(月詠み/宵桜艶帖)= refreshClicks / refreshEngagement が埋める。
+  CH_SHEETS.forEach(function (name) {
+    res.sheets[name] = grp(name, ['短縮URLクリック数', 'いいね', 'リポスト'], '反応更新日時');
+  });
+  // ピーク記録 = snapshotStats が埋める。
+  res.sheets['ピーク記録'] = grp('ピーク記録', ['再生ピーク(件/時)', 'クリックピーク(件/時)', '作品クリックピーク(件/時)'], '更新日時');
+  // 視聴履歴 = snapshotStats が埋める。
+  res.sheets['視聴履歴'] = grp('視聴履歴', ['再生数', '短縮URLクリック数', '作品クリック数'], '記録日時');
+  // 時点記録 = captureTimepoints_ が埋める。
+  res.sheets['時点記録'] = grp('時点記録', ['再生数', 'クリック数', 'ピンククリック'], '記録日時');
+  return res;
 }
 
 // 行分類と件数。(読み取りのみ・削除しない)

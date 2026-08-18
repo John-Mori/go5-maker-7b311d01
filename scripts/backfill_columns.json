@@ -1,0 +1,24 @@
+{
+  "_note": "後埋まり列(改修後N時間経って実データで初めて埋まる列)の唯一の登録簿。型《実物着地》=docs/departments/kaizen-analyst/preflight_claimed-fix-realdata-assert.md。ここに登録した列だけが『改修後N時間で非空になるか』を実データで確かめる対象=改修を『入れた』でなく『効いた/直った』にできる列(§4.55)。新しい後埋まり列を GAS へ足したら、必ずここへ1行足す(足さないと check_backfill_assert.mjs が新規混入として落とす)。読み手= (a) scripts/check_backfill_assert.mjs(作成時プリフライト) (b) 改善提案部門アスナの Z2運用ツール scripts/kaizen/…(運用時assert・GAS action=backfill_probe で外から非空を突き合わせる)。",
+  "_probe_action": "GAS の <exec URL>?action=backfill_probe が、下の各列の非空行数と最終更新時刻を返す(読み取り専用)。b面ツールはこれで N時間後の着地を外から検証する。",
+  "assert_default_hours": 24,
+  "identity_or_timestamp_allow": {
+    "PEAK_HEADERS": ["videoId", "更新日時", "再生ピーク時間帯", "クリックピーク時間帯", "作品クリックピーク時間帯"],
+    "STATS_HEADERS": ["記録日時", "日付", "channel", "post_id", "videoId"],
+    "TIMEPOINT_HEADERS": ["post_id", "channel", "投稿日時", "バケット", "経過分(実測)", "記録日時"]
+  },
+  "columns": [
+    { "col": "再生ピーク(件/時)",       "sheet": "ピーク記録", "header_array": "PEAK_HEADERS",      "writer": "snapshotStats",      "window_hours": 72 },
+    { "col": "クリックピーク(件/時)",   "sheet": "ピーク記録", "header_array": "PEAK_HEADERS",      "writer": "snapshotStats",      "window_hours": 72 },
+    { "col": "作品クリックピーク(件/時)", "sheet": "ピーク記録", "header_array": "PEAK_HEADERS",      "writer": "snapshotStats",      "window_hours": 72 },
+    { "col": "再生数",                 "sheet": "視聴履歴",   "header_array": "STATS_HEADERS",     "writer": "snapshotStats",      "window_hours": 24 },
+    { "col": "短縮URLクリック数",       "sheet": "視聴履歴",   "header_array": "STATS_HEADERS",     "writer": "snapshotStats",      "window_hours": 24 },
+    { "col": "作品クリック数",           "sheet": "視聴履歴",   "header_array": "STATS_HEADERS",     "writer": "snapshotStats",      "window_hours": 24 },
+    { "col": "再生数",                 "sheet": "時点記録",   "header_array": "TIMEPOINT_HEADERS", "writer": "captureTimepoints_", "window_hours": 6 },
+    { "col": "クリック数",             "sheet": "時点記録",   "header_array": "TIMEPOINT_HEADERS", "writer": "captureTimepoints_", "window_hours": 6 },
+    { "col": "ピンククリック",           "sheet": "時点記録",   "header_array": "TIMEPOINT_HEADERS", "writer": "captureTimepoints_", "window_hours": 6 },
+    { "col": "短縮URLクリック数",       "sheet": "記録",       "header_array": null,                 "writer": "refreshClicks",      "window_hours": 24 },
+    { "col": "いいね",                 "sheet": "記録",       "header_array": null,                 "writer": "refreshEngagement",  "window_hours": 24 },
+    { "col": "リポスト",               "sheet": "記録",       "header_array": null,                 "writer": "refreshEngagement",  "window_hours": 24 }
+  ]
+}

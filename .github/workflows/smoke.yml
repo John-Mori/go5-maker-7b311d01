@@ -72,6 +72,15 @@ jobs:
       - name: シート保存連鎖の検査
         run: node scripts/check_sheet_chain.mjs
 
+      # 「後埋まり列を直したと言うが実データで埋まるのを見ていない」型《実物着地》を止める門。
+      #   ピーク値/クリック数/いいね等の後埋まり列(改修後N時間で毎時トリガーが埋める列)を、
+      #   ソース文字列一致や「入れた」だけで閉じさせない。登録簿 scripts/backfill_columns.json を正に
+      #   ①ヘッダ在②writer書込③読取口(action=backfill_probe)報告 を照合し、後埋まり列を新規に足したのに
+      #   実データassert未登録の commit を新規混入として落とす。ピーク列は3回改修→8/15🔥(C-038/C-040)の型。
+      #   型=preflight_claimed-fix-realdata-assert.md(改善提案部門アスナ/AD研究室2026-08-18発注)。
+      - name: 後埋まり列の実データassert検査
+        run: node scripts/check_backfill_assert.mjs
+
       # 作品ごとに導出する派生チェック(新作/準新作)を汎用persistが保存し、リロードで前作の値が残る型を止める門。
       #   準新作チェックが「翌日消えて二度と入らない」=EXCLUDE登録忘れ(4回目)の再発源(Chami報告2026-08-16①/
       #   改善提案部門アスナ analysis)。persistable()を抽出実行し data-derived の除外を実挙動で確認+
