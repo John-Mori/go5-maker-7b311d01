@@ -75,6 +75,14 @@ export default {
     if (String(form.get("action") || "") === "folder_link") {
       return await handleFolderLink(form, env, cors);
     }
+    // ---- 参照アクション：作品フォルダの中身の在り無し（read-only・非破壊）----
+    //   [題名]フォルダに 動画 / 仕上がりプレビュー / 元画像 がそれぞれ在るかを1回で返す。データ再生成が
+    //   「Driveに無いものだけ補う（既にあるものは上げ直さない）」判定に使う＝プレビューの重複生成を止め、
+    //   足りない元画像だけを補う（Chami報告2026-08-18「元画像だけがない場合でデータ再生成してもプレビューが
+    //   もう一つできるだけ。意味なし」）。check_saved(動画の有無だけ・sweepが多用)とは別アクション＝hot pathを重くしない。
+    if (String(form.get("action") || "") === "folder_state") {
+      return await handleFolderState(form, env, cors);
+    }
 
     // ---- 簡易レート制限（KV：日次カウンタ・アップロード系のみ）----
     try {
@@ -466,6 +474,29 @@ async function handleCheckSaved(form, env, cors) {
   return json({ ok: true, saved: false }, 200, cors);
 }
 
+// 作品フォルダの中身の在り無し（read-only）：[題名]フォルダに 動画/プレビュー/元画像 が在るかを返す。
+//   データ再生成の「足りないものだけ補う」判定用。作成・削除・上書きは一切しない＝非破壊。
+async function handleFolderState(form, env, cors) {
+  const channel = String(form.get("channel") || "").trim();
+  const title = String(form.get("title") || "").trim();
+  const parentId = channelToFolderId(channel, env);
+  if (!parentId) return json({ ok: false, error: "channel_unresolved" }, 400, cors);
+  if (!title) return json({ ok: false, error: "missing_title" }, 400, cors);
+  let token;
+  try { token = await getAccessToken(env); } catch (e) { return json({ ok: false, error: "auth_failed" }, 502, cors); }
+  const baseName = safeName(title);
+  let ids = [];
+  try { ids = await findChildFolderIds(parentId, baseName, token); } catch (e) { return json({ ok: false, error: "list_failed" }, 502, cors); }
+  let saved = false, hasPreview = false, hasSrc = false;
+  for (const fid of ids) {
+    if (!saved && await findVideoFile(fid, token)) saved = true;
+    if (!hasPreview && await findPreviewFile(fid, token)) hasPreview = true;
+    if (!hasSrc && await findSrcImageFile(fid, token)) hasSrc = true;
+    if (saved && hasPreview && hasSrc) break;
+  }
+  return json({ ok: true, saved, hasPreview, hasSrc }, 200, cors);
+}
+
 // 作品フォルダの直リンク解決（read-only）：[チャンネル]/[題名] の実フォルダIDと webViewLink を返す。
 //   複数の同名候補（連番等は別名なので基本1件）があれば「作成が新しい」ものを優先＝直近の投稿先に合わせる。
 //   作成・削除・上書きは一切しない＝アップロードのレート制限とは別枠。見つからなければ {found:false}。
@@ -516,6 +547,19 @@ async function findChildFolderIds(parentId, name, token) {
 // フォルダ内で「プレビュー」を名前に含む画像ファイルを1件返す（無ければ null）。
 async function findPreviewFile(folderId, token) {
   const q = "'" + folderId + "' in parents and name contains 'プレビュー' and mimeType contains 'image/' and trashed=false";
+  const url = DRIVE_API + "?q=" + encodeURIComponent(q) + "&fields=files(id,name,mimeType)&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true";
+  const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) return null;
+  const j = await r.json();
+  const f = (j.files || [])[0];
+  return f && f.id ? f : null;
+}
+
+// フォルダ内で「元画像」を名前に含む画像ファイルを1件返す（無ければ null）。データ再生成が
+//   「Driveに元画像が既に在るか」を判定するのに使う（在れば重複アップロードしない）。命名規則＝
+//   アップロード時の "題名_元画像(_2,_3…).*"（driveUpload_/handleSaveJob と一致）。
+async function findSrcImageFile(folderId, token) {
+  const q = "'" + folderId + "' in parents and name contains '元画像' and mimeType contains 'image/' and trashed=false";
   const url = DRIVE_API + "?q=" + encodeURIComponent(q) + "&fields=files(id,name,mimeType)&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true";
   const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
   if (!r.ok) return null;

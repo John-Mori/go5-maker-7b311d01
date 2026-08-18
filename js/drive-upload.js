@@ -254,6 +254,21 @@
       })
       .catch(function () { return null; });
   }
+  // 作品フォルダに 動画/仕上がりプレビュー/元画像 がそれぞれ在るかを read-only で問い合わせる(非破壊)。
+  //   データ再生成が「Driveに無いものだけ補う(既にあるものは上げ直さない)」判定に使う=プレビューの重複生成を止め、
+  //   足りない元画像だけを補う(Chami報告2026-08-18)。返り= {saved,hasPreview,hasSrc} / 判定不能は null
+  //   (呼び出し側は null を「不明」として重複防止側=追記しない へ倒す)。
+  function folderState_(channel, title) {
+    if (!configured() || (channel !== "acc1" && channel !== "acc2") || !title) return Promise.resolve(null);
+    var fd = new FormData();
+    fd.append("action", "folder_state");
+    fd.append("channel", channel);
+    fd.append("title", title);
+    return fetchT_(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd }, 15000)
+      .then(function (r) { return r.json().catch(function () { return null; }); })
+      .then(function (j) { return (j && j.ok) ? { saved: !!j.saved, hasPreview: !!j.hasPreview, hasSrc: !!j.hasSrc } : null; })
+      .catch(function () { return null; });
+  }
   // 背骨ID→動画作成時に保存したDriveフォルダID(無ければ空)。投稿完了側が「もう保存済みか」を判定する。
   function folderIdFor_(videoId) {
     try { return videoId ? (localStorage.getItem("drive_up_" + videoId) || "") : ""; } catch (e) { return ""; }
@@ -383,7 +398,7 @@
       .catch(function () { return ""; });
   }
 
-  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, queueSave: queueSave_, checkSaved: checkSaved_, folderUrl: driveFolderUrl_, resolveFolderUrl: resolveFolderUrl_, pathConfig: DRIVE_PATH };
+  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, queueSave: queueSave_, checkSaved: checkSaved_, folderState: folderState_, folderUrl: driveFolderUrl_, resolveFolderUrl: resolveFolderUrl_, pathConfig: DRIVE_PATH };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {

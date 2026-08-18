@@ -1369,9 +1369,51 @@
     verifyFolder.then(function (okFolderId) {
       if (okFolderId) {
         setDriveSavedState_(id, 'verified', meta); try { render(); } catch (e) {} // checkSavedで実物確認済み＝verified
-        previewReady.then(function (prevB) {
-          if (prevB && window.Go5Drive.appendImage) window.Go5Drive.appendImage(meta.account, meta.title, okFolderId, prevB, null);
-          done(true, '保存済みを実物確認・プレビュー追記');
+        // ★重複生成の根治(Chami報告2026-08-18 msg1539252539571052544「元画像だけがない場合でデータ再生成しても
+        //   プレビューがもう一つできるだけ。意味なし」)。動画は既にDriveに在る(=okFolderId)。従来はここで有無を見ずに
+        //   appendImage(プレビュー)を毎回打っていた=Driveに「_プレビュー」が増殖。folder_state(read-only)で
+        //   動画/プレビュー/元画像の有無を1回で引き、"Driveに無いものだけ補う"。既にあるものは上げ直さない(冪等)。
+        var stateP = (window.Go5Drive.folderState)
+          ? window.Go5Drive.folderState(meta.account, meta.title).catch(function () { return null; })
+          : Promise.resolve(null);
+        Promise.all([previewReady, stateP]).then(function (arr) {
+          var prevB = arr[0], st = arr[1];
+          // 状態不明(st===null)は「在る」とみなす=重複防止側へ倒す(余計に作らない)。
+          var hasPrev = st ? !!st.hasPreview : true;
+          var hasSrc  = st ? !!st.hasSrc     : true;
+          var added = [];
+          // プレビュー: Driveに無い時だけ追記(冪等)。
+          if (prevB && !hasPrev && window.Go5Drive.appendImage) {
+            window.Go5Drive.appendImage(meta.account, meta.title, okFolderId, prevB, null);
+            added.push('プレビュー');
+          }
+          var finish = function (srcB) {
+            // 元画像: Driveに無く、この端末(またはR2/同期ミラー)に元画像が残っている時だけ復元。
+            //   命名は投稿完了時と同じ "題名_元画像.拡張子"(Worker findSrcImageFile と一致)。
+            if (!hasSrc && srcB && window.Go5Drive.appendImage) {
+              var ext = (srcB.type && srcB.type.indexOf('png') >= 0) ? 'png' : 'jpg';
+              var sname = String(meta.title || '動画').replace(/[\\/:"*?<>|]/g, '_') + '_元画像.' + ext;
+              window.Go5Drive.appendImage(meta.account, meta.title, okFolderId, srcB, sname);
+              added.push('元画像');
+            }
+            var msg;
+            if (added.length) {
+              msg = 'Driveへ ' + added.join('・') + ' を補いました(動画は既に保存済み)';
+            } else if (st === null) {
+              msg = '既にDriveへ保存済みの作品です。状態を確認できなかったため、重複を避けて今回は追記していません。';
+            } else if (!hasSrc) {
+              // ★正直に(Chami「素直にギブアップとか言ってくれ」)。元画像は"元の写真そのもの"＝この端末に残っていなければ復元不能。
+              msg = '動画と仕上がりプレビューは既にDriveにあります。足りないのは元画像だけで、これは元の写真そのものなので、この端末に残っていないと自動では復元できません。元画像だけGoogleドライブへ手動で追加してください。';
+            } else {
+              msg = 'すでに動画・元画像・プレビューが揃っています(新たに補うものはありません)。';
+            }
+            done(true, msg);
+          };
+          // 元画像がDriveに在るなら読む必要なし(無駄なR2取り寄せとハングを避ける)。無い時だけ手元素材を探す=
+          //   12秒で切り上げて null(＝復元不能扱い=正直に手動追加を案内)。
+          if (hasSrc) { finish(null); return; }
+          var timed = new Promise(function (res) { setTimeout(function () { res(null); }, 12000); });
+          Promise.race([resolveSrcImageBlob_(id).catch(function () { return null; }), timed]).then(finish);
         });
         return;
       }
