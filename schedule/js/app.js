@@ -428,6 +428,24 @@ window.SCH = window.SCH || {};
     const m = /(\d{1,2}):(\d{2})/.exec(String(t || ""));
     return m ? (Number(m[1]) * 60 + Number(m[2])) : NaN;
   }
+  // ★1作品1スケジュール(Chami依頼2026-08-18)：同じ作品(投稿)を2つの枠へ二重に紐づけない。
+  //   投稿の同一性キー=動画ID優先、無ければURL。どちらも無ければ空=識別不能なので重複判定しない。
+  function postKey_(p) { return String((p && (p.videoId || p.url)) || ""); }
+  // その acc で既に他の枠に紐づいている投稿キーの集合(exceptId は現在編集中の枠=自分は除外)。
+  function usedPostKeys_(acc, exceptId) {
+    const used = {};
+    try {
+      const all = store.getSlotDataForAccount(acc) || {};
+      Object.keys(all).forEach(function (id) {
+        if (id === exceptId) return;
+        const sl = all[id];
+        if (!sl) return;
+        const k = String(sl.video_id || sl.url || "");   // applyLink が書くのは video_id / url
+        if (k) used[k] = true;
+      });
+    } catch (e) {}
+    return used;
+  }
   function requestDayPosts(s) {
     linkReqSeq++;
     const reqId = "modal:" + linkReqSeq;
@@ -440,6 +458,8 @@ window.SCH = window.SCH || {};
     // 自動同期(④)：表示中の枠のうち、投稿時刻に最も近い未公開枠(±LINK_WINDOW_MIN)へ黙って紐づける。
     //   投稿を古い順に処理し、1枠につき1投稿だけ(usedで二重紐づけを防ぐ)。分ぴったりでなくても寄る。
     if (String(d.reqId || "").indexOf("auto:") === 0) {
+      // 既に他の枠へ紐づいた投稿は自動同期でも二重紐づけしない(1作品1スケジュール・Chami2026-08-18)。
+      const usedKeys = usedPostKeys_(curAcc(), null);
       Object.keys(byDate).forEach(function (date) {
         const slots = (lastRender && lastRender.slots) || {};
         const cand = [];
@@ -453,6 +473,7 @@ window.SCH = window.SCH || {};
         const used = {};
         (byDate[date] || []).slice().sort(function (a, b) { return hhmmToMin(a.hhmm) - hhmmToMin(b.hhmm); })
           .forEach(function (p) {
+            if (usedKeys[postKey_(p)]) return;   // 既に別の枠が使っている作品は飛ばす
             const pm = hhmmToMin(p.hhmm);
             if (isNaN(pm)) return;
             let best = null, bestD = Infinity;
@@ -461,7 +482,7 @@ window.SCH = window.SCH || {};
               const dd = Math.abs(c.min - pm);
               if (dd < bestD) { bestD = dd; best = c; }
             });
-            if (best && bestD <= LINK_WINDOW_MIN) { used[best.s.id] = true; autoLinkedIds[best.s.id] = true; applyLink(best.s, p, curAcc()); }
+            if (best && bestD <= LINK_WINDOW_MIN) { used[best.s.id] = true; autoLinkedIds[best.s.id] = true; usedKeys[postKey_(p)] = true; applyLink(best.s, p, curAcc()); }
           });
       });
       return;
@@ -470,7 +491,11 @@ window.SCH = window.SCH || {};
     if (!editingId) return;
     const s = slotForAcc(editingId, effAcc());
     if (!s) return;
-    const posts = byDate[s.date] || [];
+    const allPosts = byDate[s.date] || [];
+    // ★1作品1スケジュール(Chami2026-08-18)：既に他の枠へ紐づいた作品は候補から外す=二重選択を防ぐ。
+    //   キーを持たない投稿(動画ID/URL不明)は識別できないので候補には残す。
+    const usedKeys = usedPostKeys_(effAcc(), s.id);
+    const posts = allPosts.filter(function (p) { const k = postKey_(p); return !k || !usedKeys[k]; });
     const sel = document.getElementById("link-hist");
     const btn = document.getElementById("link-apply");
     if (!sel) return;

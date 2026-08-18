@@ -2702,7 +2702,13 @@
   function dayBucketMin_(ms, dateStr, includeNightCarry) {
     var d = new Date(ms);
     var mins = d.getHours() * 60 + d.getMinutes();
-    if (ymdOf_(d) === dateStr) return mins;
+    if (ymdOf_(d) === dateStr) {
+      // ★深夜0〜3時の投稿は暦上は当日でも「前日の深夜枠(24:xx〜27:xx)」に属す。
+      //   例=8/18の3時までに投稿したものは8/17の枠へ回す。よって自分の暦日(dateStr)の
+      //   投稿候補には出さない=前日側にだけ寄せる(Chami依頼2026-08-18)。
+      if (includeNightCarry && mins <= NIGHT_CARRY_MAX_MIN) return null;
+      return mins;
+    }
     if (includeNightCarry && mins <= NIGHT_CARRY_MAX_MIN) {
       var prev = new Date(d.getTime()); prev.setDate(prev.getDate() - 1);
       if (ymdOf_(prev) === dateStr) return mins + 24 * 60; // 24:xx〜27:xx として前日枠に寄せる
@@ -2737,7 +2743,7 @@
     out.sort(function (a, b) { return a.timeMs - b.timeMs; });
     return out;
   }
-  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_, postsForDay: postsForDay_ }; } catch (e) {}
+  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_, postsForDay: postsForDay_, _dayBucketMin: dayBucketMin_ }; } catch (e) {}
 
   // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }
