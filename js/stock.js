@@ -1332,6 +1332,15 @@
     ]).then(function (r) {
       var prev = r[0], mirror = r[1] || {};
       return prev ? prev : durlToBlob_(mirror.prev); // .then が Promise を自動で解く
+    }).then(function (prevB) {
+      if (prevB) return prevB;
+      // ★手元にプレビュー実体が無い(別端末で作った投稿履歴の回復・編集モーダルからの再生成)＝Driveに既にある
+      //   仕上がりプレビューを取り寄せて使う。無ければ null のまま(何も壊さない)。これで yt-clicks.js の旧
+      //   regenRecordData_(分岐コピー)が持っていた「Drive既存プレビューで回復」を driveSaveForCompleted_ 一本へ
+      //   畳み込む=データ再生成の経路を1つに保つ(Chami依頼2026-08-18・単一化)。
+      if (window.Go5Drive && Go5Drive.fetchPreview && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title)
+        return Go5Drive.fetchPreview(meta.account, meta.title).then(function (du) { return du ? durlToBlob_(du) : null; }, function () { return null; });
+      return null;
     }).then(function (prevB) { applyPreview(prevB); return prevB; }, function () { return null; });
 
     var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
@@ -1341,9 +1350,22 @@
     //   この控えは今日足したDriveアイコンの解決(resolveFolderUrl_)でも題名一致で書かれる=空/プレビューだけの
     //   フォルダを"保存済み"と誤認しうる。checkSaved(read-only)で[題名]フォルダに動画実体が在る時だけプレビュー
     //   追記で済ませ、無ければ本当の保存(realSaveNow_)へ倒す(判定不能も保存側へ倒す=fail-open・沈黙より保存)。
-    var verifyFolder = folderId
-      ? Go5Drive.checkSaved(meta.account, meta.title).then(function (saved) { return saved ? folderId : ''; }, function () { return ''; })
-      : Promise.resolve('');
+    //   ★控えが端末に無くても、Driveに既に動画が在るなら フォルダIDを引き当てて「プレビュー追記だけ」で済ませる
+    //     =別端末で作成/保存済みの投稿履歴を編集モーダルから再生成しても動画を上げ直さない(gap-fill・Chami
+    //     依頼2026-08-18「既に作られてたら再作成の必要はない・足りてないものだけ」)。read-onlyの照会のみ・非破壊。
+    function resolveOkFolder_() {
+      if (folderId)
+        return Go5Drive.checkSaved(meta.account, meta.title).then(function (saved) { return saved ? folderId : ''; }, function () { return ''; });
+      if (!(Go5Drive.checkSaved && Go5Drive.resolveFolderUrl && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title))
+        return Promise.resolve('');
+      return Go5Drive.checkSaved(meta.account, meta.title).then(function (saved) {
+        if (!saved) return ''; // Driveに動画がまだ無い＝本当の保存(全部)へ倒す
+        return Go5Drive.resolveFolderUrl(meta.account, meta.title, meta.videoId).then(function () {
+          return (window.Go5Drive.folderIdFor && meta.videoId) ? window.Go5Drive.folderIdFor(meta.videoId) : '';
+        }, function () { return ''; });
+      }, function () { return ''; });
+    }
+    var verifyFolder = resolveOkFolder_();
     verifyFolder.then(function (okFolderId) {
       if (okFolderId) {
         setDriveSavedState_(id, 'verified', meta); try { render(); } catch (e) {} // checkSavedで実物確認済み＝verified
@@ -1431,6 +1453,35 @@
     });
     } // legacyRealSave_
     } // realSaveNow_
+  }
+
+  // ── 編集モーダル(ドラフト履歴/投稿履歴)からの「データ再生成」(Chami依頼2026-08-18) ──────────────
+  //   一連のデータ(動画・元画像・仕上がりプレビュー)を"投稿完了と同じ"経路=driveSaveForCompleted_ で作り直す。
+  //   ★この一本に集約=「同じデータを作れる」の担保。冪等/gap-fill：Driveに既に在れば動画は上げ直さずプレビュー
+  //     追記のみ、投稿履歴1ページ目のプレビューも重複差し込みしない(既にあれば作り直さない・足りないものだけ)。
+  //   yt-clicks.js の旧regenRecordData_(分岐コピー)もこの経路へ寄せた=データ再生成のロジックは1つ(単一化)。
+  //   locator = 完全なmeta(.id あり) か {videoId,title,account}(後者は手元metas/archiveから実metaを引く)。
+  function regenDataset_(locator, opts) {
+    opts = opts || {};
+    var done = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
+    var meta = null;
+    if (locator && locator.id) {
+      meta = locator; // ドラフトモーダル=openPostModal_ が持つ実meta(id/videoId/IDB素材あり)
+    } else if (locator && (locator.videoId || locator.title)) {
+      // 投稿履歴モーダル=click-listの it から locator が来る。手元のドラフト/作成履歴に実metaが在れば引く
+      //   (=正しい id/videoName/IDBキーで素材を読める)。
+      var all = loadMeta().concat(loadArchive());
+      for (var i = 0; i < all.length; i++) {
+        if (!all[i]) continue;
+        if (locator.videoId && all[i].videoId === locator.videoId) { meta = all[i]; break; }
+        if (!locator.videoId && locator.title && all[i].title === locator.title) { meta = all[i]; break; }
+      }
+      // 手元に無い(別端末で作成した投稿履歴)＝背骨IDを id として合成。IDBに素材が無くても driveSaveForCompleted_
+      //   側が Driveの既存プレビュー(fetchPreview)を取り寄せて回復し、動画がDriveに在れば追記だけで済ませる。
+      if (!meta) meta = { id: locator.videoId || '', videoId: locator.videoId || '', title: locator.title || '', account: locator.account || '', videoName: '' };
+    }
+    if (!meta || !meta.id) { done(false, 'この履歴のデータを特定できませんでした(背骨IDが空=Drive保存が始まる前の古い投稿)'); return; }
+    driveSaveForCompleted_(meta, opts);
   }
 
   // ── ★save_job 永続pending(2026-08-16 Chami「途中で閉じても裏で完結」の取りこぼし対策)──
@@ -2432,6 +2483,9 @@
           '</div>' +
           // アフィID入り確認(Chami依頼2026-07-30⑤)。作品紹介・セールの短縮リンクに自分のaf_idが入っているか。
           '<div id="draftAffCheck" style="font-size:.78rem;margin-top:10px;line-height:1.65;"></div>' +
+          // 🔄 データ再生成(Chami依頼2026-08-18): 一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだ
+          //   Googleドライブに無いものだけを"投稿完了と同じ経路"で作って保存する(既にあれば作り直さない・gap-fill)。
+          '<div style="margin-top:14px;"><button type="button" id="draftRegenData" style="' + btnW + '" title="この作品の一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだGoogleドライブに無いものだけを作って保存します(既にあれば作り直しません)">🔄 データ再生成</button></div>' +
           '<div style="display:flex;gap:8px;margin-top:20px;">' +
             '<button type="button" id="draftModalComplete" style="flex:1;padding:13px;font-size:.88rem;font-weight:700;border-radius:10px;border:none;' + ctaS + 'cursor:pointer;">投稿完了</button>' +
             '<button type="button" id="draftModalSave" style="flex:1;padding:13px;font-size:.88rem;font-weight:600;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;">内容を保存</button>' +
@@ -2495,6 +2549,24 @@
       closeModal_();
     });
     $('draftModalClose').addEventListener('click', function () { closeModal_(); });
+    // 🔄 データ再生成=投稿完了と同じ経路(Go5Stock.regenDataset→driveSaveForCompleted_)で足りないデータだけ作る。
+    var _regenBtn = $('draftRegenData');
+    if (_regenBtn) _regenBtn.addEventListener('click', function () {
+      var btn = this;
+      if (!_modalMeta) return;
+      if (!(window.Go5Stock && Go5Stock.regenDataset)) { alert('データ再生成の土台(Go5Stock)が読み込まれていません。ページを再読み込みしてもう一度お試しください。'); return; }
+      if (!window.confirm('この作品のデータを再生成しますか?\n\n一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだGoogleドライブに無いものだけを作って保存します。\n(既に揃っていれば作り直しません)')) return;
+      var orig = btn.textContent;
+      btn.disabled = true; btn.textContent = '再生成中…';
+      Go5Stock.regenDataset(_modalMeta, {
+        silent: true,
+        onDone: function (ok, msg) {
+          btn.disabled = false; btn.textContent = orig;
+          alert(ok ? ('データ再生成が完了しました。\n・' + (msg || '足りていないデータをGoogleドライブへ保存'))
+                   : ('再生成できませんでした。\n' + (msg || 'もう一度お試しください。')));
+        }
+      });
+    });
     $('draftModalComplete').addEventListener('click', function () {
       if (!_modalMeta) return;
       if (!window.confirm('投稿履歴に反映します。OKを押すと正式に投稿完了になります。')) return;
@@ -2833,7 +2905,7 @@
       });
     }
 
-    window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_, videoBlobForId: videoBlobForId_ };
+    window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_, videoBlobForId: videoBlobForId_, regenDataset: regenDataset_ };
 
     // 動画・画像ミラーは保存直後に即送信し、ここでは旧データ/一時失敗ぶんだけを静かに再試行する。
     // 最大50件を同時発火していた旧30秒sweepはiOSのメモリ圧を上げるため、逐次処理＋2分周期へ変更。

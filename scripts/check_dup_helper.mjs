@@ -59,11 +59,14 @@ function listJs(dir) {
 }
 
 // 各ファイルから { name → [{line, body}] } を収集(function NAME(...) と NAME = function(...) の2形)。
+//   ★NAME = function の形は「裸の識別子への代入」に限る=直前が '.' の メンバ代入(img.onload = function 等の
+//     イベントハンドラ)は"同名ヘルパ"ではないので除外する(否定後読み)。これが無いと img.onload / r.onload を
+//     name='onload' の重複ヘルパと誤検知して赤くなる(false positive・2026-08-18に stock.js で観測)。
 function defsOf(rel) {
   const src = readFileSync(join(ROOT, rel), 'utf8');
   const san = sanitize(src);
   const defs = [];
-  const re = /(?:\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|\b([A-Za-z_$][\w$]*)\s*=\s*function\s*\()/g;
+  const re = /(?:\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|(?<![.\w$])([A-Za-z_$][\w$]*)\s*=\s*function\s*\()/g;
   let m;
   while ((m = re.exec(san)) !== null) {
     const name = m[1] || m[2];
