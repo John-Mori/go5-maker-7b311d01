@@ -1547,23 +1547,35 @@
       //   Workerが r2_video_missing で黙って諦めて「永遠に保存中」になる沈黙経路を封じる(炎上①・B-1)。
       ensureVideoOnR2_(id).then(function (onR2) {
         if (!onR2) { legacyRealSave_(); return; } // R2に動画が無い=save_jobは無駄撃ち→在ページ保存で救うか"見える失敗"を出す
-        Promise.all([previewReady, resolveSrcImageBlob2_()])
-          .then(function (bs) {
-            var prevB = bs[0], srcB = bs[1];
-            // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
-            //   ★元画像を渡すのは「投稿完了と同じ一式(動画+元画像+プレビュー)」を揃えるため(Chami 2026-08-17)。
-            //   save_job導入時に元画像だけ渡し忘れていた回帰=ここで controllerへ srcKey を添えて根治。
-            var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
-              ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
-              : Promise.resolve('');
-            var mirrorSrc = (srcB && window.Go5Sync && Go5Sync.putBlobR2At)
-              ? Go5Sync.putBlobR2At('go5src:' + id, srcB).catch(function () { return ''; })
-              : Promise.resolve('');
-            return Promise.all([mirrorPrev, mirrorSrc]).then(function (keys) {
-              recordSaveJobPending_(id, meta);
-              return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: keys[0] || '', srcKey: keys[1] || '', overwrite: true });
-            });
-          })
+        // ★動画のsave_job(サーバー側完走)を「任意の付随画像(プレビュー/元画像)の解決・R2ミラー」に絶対ブロック
+        //   させない(Chami報告2026-08-18 msg1539278578913509416「投稿完了しても結局Googleドライブに保存できてない」)。
+        //   真因=このブロックの前段が3つとも網へ伸びる無時限待ち: previewReady(手元に無いと fetchPreview=網)/
+        //   resolveSrcImageBlob2_(R2取り寄せ)/ putBlobR2At(プレビュー・元画像のR2ミラー)。iOS Safariでどれか1つが
+        //   返らないと queueSave が発火せず、動画本体が一度も送られないまま「確認中…」で固まる=投稿完了したのに
+        //   Driveに動画が来ない、が起きる。動画実体は既にR2に在る(直上の ensureVideoOnR2_=true)ので、付随画像は
+        //   12秒だけ待って"取れた分のkeyだけ"添え、必ず save_job を投げる(動画が最優先。プレビューは used:1ページ目
+        //   への差し込みと、次回開いた時の okFolder/salvage の gap-fill でも後から揃う=取りこぼしゼロ)。
+        //   okFolder枝・salvage枝が既に使っている12秒Promise.raceと同じ型に揃える(この主経路だけ無防備だった)。
+        var enrich = Promise.all([
+          Promise.resolve(previewReady).catch(function () { return null; }),
+          resolveSrcImageBlob2_().catch(function () { return null; })
+        ]).then(function (bs) {
+          var prevB = bs[0], srcB = bs[1];
+          // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
+          //   ★元画像を渡すのは「投稿完了と同じ一式(動画+元画像+プレビュー)」を揃えるため(Chami 2026-08-17)。
+          var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
+            ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
+            : Promise.resolve('');
+          var mirrorSrc = (srcB && window.Go5Sync && Go5Sync.putBlobR2At)
+            ? Go5Sync.putBlobR2At('go5src:' + id, srcB).catch(function () { return ''; })
+            : Promise.resolve('');
+          return Promise.all([mirrorPrev, mirrorSrc]);
+        }).catch(function () { return ['', '']; });
+        var enrichTimed = new Promise(function (res) { setTimeout(function () { res(['', '']); }, 12000); });
+        Promise.race([enrich, enrichTimed]).then(function (keys) {
+          recordSaveJobPending_(id, meta);
+          return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: keys[0] || '', srcKey: keys[1] || '', overwrite: true });
+        })
           .then(function (res) {
             var ok = !!(res && res.ok);
             done(ok, ok ? 'Driveへ保存(裏で完走)' : '今は送れず・次回起動で自動再送(投稿履歴は記録済み)');
