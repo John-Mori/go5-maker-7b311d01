@@ -292,10 +292,17 @@
     fd.append("action", "check_saved");
     fd.append("channel", channel);
     fd.append("title", title);
-    return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+    // ★15秒でabort(iOS Safariのfetchは無応答で永久保留になりうる=照会Promiseが未解決のまま
+    //   verifyDriveLanded_/sweepの次段が黙って止まる穴を塞ぐ。判定不能は false=「まだ確認できず」へ倒す
+    //   =read-onlyなので保存を壊さない・自動再確認が続く。failopen-guardの型)。
+    var ctl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var tid = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 15000) : 0;
+    var opt = { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd };
+    if (ctl) opt.signal = ctl.signal;
+    return fetch(CFG.WORKER_URL, opt)
       .then(function (r) { return r.json().catch(function () { return {}; }); })
-      .then(function (j) { return !!(j && j.ok && j.saved); })
-      .catch(function () { return false; });
+      .then(function (j) { if (tid) clearTimeout(tid); return !!(j && j.ok && j.saved); })
+      .catch(function () { if (tid) clearTimeout(tid); return false; });
   }
   // ── ★保存先パスの設計を一箇所に集約(2026-08-16 Chami「将来アカウントが変わってもパスを一括で柔軟に変えられるよう設計」)──
   //   保存先の実体= マイドライブ/[DRIVE_ROOT]/[チャンネル名]/[題名]/。チャンネル別ルートフォルダIDの正本は

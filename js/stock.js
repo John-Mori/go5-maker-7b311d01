@@ -1552,7 +1552,7 @@
     if (!st || st.state === 'verified') return;
     if (!(window.Go5Drive && Go5Drive.checkSaved) || !st.channel || !st.title) return;
     _driveVerifyBusy[id] = true;
-    var delays = [20000, 60000, 180000]; // 20秒→60秒→180秒(サーバー側完走を待って実物照会)
+    var delays = [4000, 20000, 60000, 180000]; // 4秒→20秒→60秒→180秒(初回を4秒に=既にDrive着地済み/軽い保存は数秒で「実物確認」へ上がる。Chami「押して30秒無反応」2026-08-18)
     var i = 0;
     function schedule() {
       if (i >= delays.length) { _driveVerifyBusy[id] = false; return; } // 打ち切り=pendingのまま(嘘をつかない・次回起動で再照会)
@@ -1709,9 +1709,13 @@
       //   → verify窓(約5分)を過ぎても未確認なら「確認できず・再試行」へ切替え、下の「☁️ Drive保存」で押し直せると示す
       //   (次回アプリ起動時の再照会=1846行 でも自動で確認中→実物確認へ上がる)。
       var _stuck = _dsv.ts && (Date.now() - _dsv.ts) > 5 * 60 * 1000;
+      // ★どちらも「失敗宣告」に読ませない(Chami報告2026-08-18「何も押してないのに勝手にエラーが出てる」)。
+      //   実態=開いている間は毎描画で自動再照会(1846行)・180秒毎にsweepSaveJobs_が自動再送する=裏で粘っている。
+      //   だから「確認中/確認できていないだけ・自動で粘っている・急ぐなら手動でも押せる」と読める中立表現にする。
+      //   押下直後もこの状態行が受領を語る(realSaveNow_のrender()でボタン自体は作り直されて押下感が消えるため)。
       driveLine = _stuck
-        ? '<div style="font-size:.71rem;color:#d8a24a;margin-top:2px;">☁️ Drive保存を確認できず · 下の「☁️ Drive保存」で再試行</div>'
-        : '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ Drive保存 確認中…</div>';
+        ? '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;white-space:normal;">☁️ まだDrive保存を確認できていません(開いている間は自動で再確認を続けます) · 急ぐ場合は下の「☁️ Drive保存」で再試行</div>'
+        : '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ 保存を受け付けました · 実物を確認中…(最大3分)</div>';
     }
     // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
     //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。
@@ -1931,16 +1935,39 @@
       }).catch(function () { return null; });
     });
 
-    Promise.all(thumbPs).then(function (thumbUrls) {
-      // 非同期サムネ読込中にアカウント/同期データが変わった古い描画は捨てる。古いPromiseが後勝ちしない。
+    // ★サムネは「解決したカードから1枚ずつ即差し替え」る(2026-08-18 Fable5診断/Chami「サムネが遅すぎる」)。
+    //   旧実装は Promise.all(thumbPs) で全カードの解決を待ってから一括 paint_ していたため、iOS SafariでIDB read が
+    //   1件でも数秒ハングすると、既に揃っている他カードまで最遅の1件に道連れで待たされた=「全員が確認中のまま遅い」。
+    //   個別差し替えなら最遅1件は自分のカードだけを待つ。全innerHTML交換をしないので開いている作成履歴も閉じない。
+    function _stillCurrent_() {
       var nowAcct = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
-      if (seq !== _renderSeq || page.hidden || nowAcct !== curAcct || stockViewSig_(curAcct) !== sig) {
+      return !(seq !== _renderSeq || page.hidden || nowAcct !== curAcct || stockViewSig_(curAcct) !== sig);
+    }
+    thumbPs.forEach(function (p, idx) {
+      var m = all[idx];
+      p.then(function (url) {
+        if (!url || !_stillCurrent_()) return;
+        var sel = (window.CSS && CSS.escape) ? CSS.escape(m.id) : m.id;
+        var card = page.querySelector('[data-item-id="' + sel + '"]');
+        if (!card) return;
+        var cur = card.firstElementChild; // カードの先頭要素=サムネ(img)or プレースホルダ(div)
+        if (!cur) return;
+        if (cur.tagName === 'IMG' && cur.getAttribute('src') === url) return; // 既に同じ絵=何もしない
+        var img = document.createElement('img');
+        img.src = url; img.alt = '';
+        img.style.cssText = 'width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;';
+        card.replaceChild(img, cur);
+        delete _missingThumbs[m.id];
+      }).catch(function () {});
+    });
+    // 古い描画(アカウント/同期切替)の後始末だけは全解決後に一度。ここでは全交換paintをしない(個別差し替え済み)。
+    Promise.all(thumbPs).then(function (thumbUrls) {
+      if (!_stillCurrent_()) {
         if (!page.hidden && !modalIsOpen_()) setTimeout(render, 0);
         return;
       }
-      var thumbFor = {}; _missingThumbs = {};
-      all.forEach(function (m, i) { thumbFor[m.id] = thumbUrls[i]; if (!thumbUrls[i]) _missingThumbs[m.id] = 1; });
-      paint_(thumbFor); // サムネが揃ったら差し替え描画(即描画の骨格を上書き)
+      _missingThumbs = {};
+      all.forEach(function (m, i) { if (!thumbUrls[i]) _missingThumbs[m.id] = 1; });
     });
   }
 
@@ -2912,7 +2939,9 @@
       });
     }
 
-    window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_, videoBlobForId: videoBlobForId_, regenDataset: regenDataset_ };
+    // ★window.Go5Stock の露出は init() の外(モジュールスコープ・下の init 呼び出し直前)へ前出し済み。
+    //   ここ(init 末尾)で公開する旧設計は、init 途中がiOSで転ぶと土台ごと未定義になる脆さがあった
+    //   =「データ再生成の土台(Go5Stock)が読み込まれていません」の一因(Chami報告2026-08-18)。
 
     // 動画・画像ミラーは保存直後に即送信し、ここでは旧データ/一時失敗ぶんだけを静かに再試行する。
     // 最大50件を同時発火していた旧30秒sweepはiOSのメモリ圧を上げるため、逐次処理＋2分周期へ変更。
@@ -2936,6 +2965,11 @@
     if (page && !page.hidden) render();
     setTimeout(warmNewestVideos_, 1500); // ②最新ドラフト動画をR2から先読み=即DL(sync設定の読込を少し待つ)
   }
+
+  // ★土台(Go5Stock)はモジュールスコープで即公開する=init()を待たない/init()が途中で転んでも生きる。
+  //   参照する5関数は全てモジュールスコープの関数宣言(巻き上げ済み)で、依存するモジュール変数も宣言時初期化
+  //   =init時セットアップに依存しない(検証済み)。投稿履歴ページ(StockLists.html)からも regenDataset を確実に呼べる。
+  window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_, videoBlobForId: videoBlobForId_, regenDataset: regenDataset_ };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
