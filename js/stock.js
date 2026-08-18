@@ -1421,6 +1421,57 @@
     });
     return;
 
+    // ── ★退避保存(Chami依頼2026-08-18 msg1539252929222017124「動画がないとつくれないなら仕方ない。にしても
+    //   フォルダくらい作ってくれ、あとプレビュー画像や元画像はあるならそれを取得して名前変えて保存すればいいだろ」)。
+    //   動画本体がこの端末にもR2にも無く復元不能な時、従来は「動画データが見つかりません」で全部あきらめていた=
+    //   フォルダも作られず、手元にあるプレビュー/元画像すら保存されなかった。ここで全か無かをやめる=フォルダを確保し、
+    //   手元にあるプレビュー/元画像だけ Worker(ensure_folder) で退避保存する。動画は正直に「見つからず保存できない・
+    //   手動で追加して」と返す(素直にギブアップ)。Driveに既に在るものは上げ直さない(冪等・重複プレビューを再演しない)。
+    function salvageWithoutVideo_() {
+      if (!(window.Go5Drive && typeof window.Go5Drive.ensureFolder === 'function') || (meta.account !== 'acc1' && meta.account !== 'acc2') || !meta.title) {
+        if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済み・使用画像のプレビューも設定済みです。Google Driveへの動画保存だけスキップしました。');
+        done(false, '動画データ無し(プレビューは設定済み)');
+        return;
+      }
+      // Driveの現状(プレビュー/元画像の有無)。判定不能(null)は「無い」とみなす=退避を試みる側へ倒す
+      //   (Worker側が役割ごとに冪等なので、実際に既にあれば skipped になり二重にはならない)。
+      var stateP = window.Go5Drive.folderState
+        ? window.Go5Drive.folderState(meta.account, meta.title).catch(function () { return null; })
+        : Promise.resolve(null);
+      // 元画像は"元の写真そのもの"=手元(IDB/同期ミラー/R2)に残っていれば拾う。12秒で切り上げ(ハング防止)。
+      var srcTimed = new Promise(function (res) { setTimeout(function () { res(null); }, 12000); });
+      var srcP = Promise.race([resolveSrcImageBlob_(id).catch(function () { return null; }), srcTimed]);
+      Promise.all([previewReady, srcP, stateP]).then(function (arr) {
+        var prevB = arr[0], srcB = arr[1], st = arr[2];
+        var hasPrev = st ? !!st.hasPreview : false;
+        var hasSrc  = st ? !!st.hasSrc     : false;
+        var imgs = [];
+        if (prevB && !hasPrev) imgs.push({ blob: prevB, role: 'preview' });
+        if (srcB && !hasSrc)   imgs.push({ blob: srcB, role: 'src' });
+        window.Go5Drive.ensureFolder(meta.account, meta.title, imgs).then(function (res) {
+          if (!(res && res.ok)) {
+            if (!opts.silent) alert('動画データが見つからず、フォルダの用意にも失敗しました(投稿履歴には記録済み)。通信状況を変えてもう一度お試しください。');
+            done(false, 'フォルダ確保に失敗(動画も無し)');
+            return;
+          }
+          var saved = res.added || [];
+          var savedPrev = saved.some(function (n) { return String(n).indexOf('プレビュー') >= 0; });
+          var savedSrc  = saved.some(function (n) { return String(n).indexOf('元画像') >= 0; });
+          var parts = [];
+          if (savedPrev) parts.push('プレビュー');
+          if (savedSrc)  parts.push('元画像');
+          var msg;
+          if (parts.length) {
+            msg = '動画は元データが見つからず保存できませんでしたが、フォルダを作成し ' + parts.join('・') + ' を保存しました。動画だけ手動でGoogleドライブへ追加してください。';
+          } else if (hasPrev || hasSrc) {
+            msg = '動画は元データが見つからず保存できません。フォルダは用意済みで、プレビュー/元画像は既にDriveにあります。動画だけ手動で追加してください。';
+          } else {
+            msg = '動画は元データが見つからず保存できません。フォルダは作成しましたが、プレビューも元画像もこの端末に残っていないため入れられませんでした。動画を手動でGoogleドライブへ追加してください。';
+          }
+          done(true, msg);
+        });
+      });
+    }
     // ── 本当のDrive保存(動画本体を上げる)。控えフォルダに動画実体が無い時/控えが無い時に呼ぶ。
     function realSaveNow_() {
       // ★ここから先は実際に保存を試みる=カードに「確認中…」を出し、実物確認ループを起動する(queueSave/レガシー両経路を1箇所で被覆)。
@@ -1468,8 +1519,9 @@
     resolveVideoBlob_(id).then(function (blob) {
       if (!blob) {
         // ★動画は取れなくても、上の previewReady が投稿履歴1ページ目のプレビューを既に設定済み。
-        if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済み・使用画像のプレビューも設定済みです。Google Driveへの動画保存だけスキップしました。');
-        done(false, '動画データ無し(プレビューは設定済み)');
+        //   さらに「動画が無いなら仕方ない、でもフォルダくらい作って・プレビュー/元画像はあるなら名前変えて保存して」
+        //   (Chami依頼2026-08-18 msg1539252929222017124)へ応える=全か無かにせず、フォルダを作り手元の画像だけ退避する。
+        salvageWithoutVideo_();
         return;
       }
       Promise.all([

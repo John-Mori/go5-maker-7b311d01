@@ -269,6 +269,31 @@
       .then(function (j) { return (j && j.ok) ? { saved: !!j.saved, hasPreview: !!j.hasPreview, hasSrc: !!j.hasSrc } : null; })
       .catch(function () { return null; });
   }
+  // 退避保存：動画本体が復元不能でも、せめて[チャンネル]/[題名]フォルダを作り、手元にあるプレビュー/元画像だけ
+  //   名前を付けて保存する(Chami依頼2026-08-18「動画がないなら仕方ない。フォルダくらい作って、プレビュー画像や
+  //   元画像はあるなら取得して名前変えて保存すればいい」)。imgs = [{blob, role:'preview'|'src'}]。
+  //   Worker側(action=ensure_folder)が既存フォルダ再利用＋同役割の重複を上げない(冪等)。命名は投稿完了時と同じ
+  //   "題名_プレビュー.拡張子"/"題名_元画像.拡張子"。返り= {ok,folderId,folderLink,created,added,skipped} / 失敗は{ok:false}。
+  function ensureFolderSave_(channel, title, imgs) {
+    if (!configured() || (channel !== "acc1" && channel !== "acc2") || !title) return Promise.resolve({ ok: false, error: "not_ready" });
+    var safeTitle = String(title || "動画").replace(/[\\/:"*?<>|]/g, '_');
+    var fd = new FormData();
+    fd.append("action", "ensure_folder");
+    fd.append("channel", channel);
+    fd.append("title", title);
+    (imgs || []).forEach(function (it) {
+      if (!it || !it.blob) return;
+      var name = (it.role === "src")
+        ? (safeTitle + "_元画像." + imgExt(it.blob))
+        : (safeTitle + "_プレビュー." + imgExt(it.blob));
+      fd.append("image", new File([it.blob], name, { type: it.blob.type || "image/jpeg" }), name);
+    });
+    // フォルダ作成＋画像アップロードは秒がかかりうる=30秒。返らなければ {ok:false} へ倒す(failopen-guard)。
+    return fetchT_(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd }, 30000)
+      .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
+      .then(function (j) { return j || { ok: false }; })
+      .catch(function () { return { ok: false, error: "network" }; });
+  }
   // 背骨ID→動画作成時に保存したDriveフォルダID(無ければ空)。投稿完了側が「もう保存済みか」を判定する。
   function folderIdFor_(videoId) {
     try { return videoId ? (localStorage.getItem("drive_up_" + videoId) || "") : ""; } catch (e) { return ""; }
@@ -398,7 +423,7 @@
       .catch(function () { return ""; });
   }
 
-  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, queueSave: queueSave_, checkSaved: checkSaved_, folderState: folderState_, folderUrl: driveFolderUrl_, resolveFolderUrl: resolveFolderUrl_, pathConfig: DRIVE_PATH };
+  window.Go5Drive = { upload: driveUpload_, fetchPreview: fetchPreview_, fetchVideo: fetchVideo_, folderIdFor: folderIdFor_, appendImage: appendImageToFolder_, ensureFolder: ensureFolderSave_, queueSave: queueSave_, checkSaved: checkSaved_, folderState: folderState_, folderUrl: driveFolderUrl_, resolveFolderUrl: resolveFolderUrl_, pathConfig: DRIVE_PATH };
 
   // ファイルの拡張子を推定。(MIME優先、無ければ元ファイル名から)
   function imgExt(file) {

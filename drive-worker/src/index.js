@@ -96,6 +96,15 @@ export default {
       return await handleSaveJob(form, env, cors, ctx);
     }
 
+    // ---- 退避保存：ensure_folder（write・動画が無くても最低限フォルダを作り、手元の画像だけ退避）----
+    //   Chami依頼2026-08-18「動画がないとつくれないなら仕方ない。にしてもフォルダくらい作ってくれ、あと
+    //   プレビュー画像や元画像はあるならそれを取得して名前変えて保存すればいいだろ」。動画本体が復元不能でも
+    //   全か無かにせず、[チャンネル]/[題名]フォルダを確保し、渡された画像(プレビュー/元画像)だけ保存する。
+    //   破壊面の不変条件は不変＝フォルダ新規作成・ファイル新規アップロードのみ（削除/改名/移動/trashは一切しない）。
+    if (String(form.get("action") || "") === "ensure_folder") {
+      return await handleEnsureFolder(form, env, cors);
+    }
+
     const channel = String(form.get("channel") || "").trim();
     const title = String(form.get("title") || "").trim();
     const video = form.get("video");
@@ -244,6 +253,64 @@ async function getAccessToken(env) {
     throw e;
   }
   return j.access_token;
+}
+
+/* ====================== 退避保存（ensure_folder・write）====================== */
+// 動画本体が復元不能でも、せめて[チャンネル]/[題名]フォルダを作り、渡された画像だけ退避保存する。
+//   冪等：同題名フォルダが既に在れば再利用（連番 _2 を作らない）、同じ役割（プレビュー/元画像）が既に在れば
+//   上げ直さない（＝データ再生成で「_プレビュー」が増殖する事故を再演しない）。行う操作は create/upload の
+//   2種だけ＝破壊面の不変条件（削除/改名/移動/trashなし）は変わらない。フロントは folder_state で不足分だけ
+//   送る想定だが、ここでも役割ごとに存在確認して二重を防ぐ（サーバ側でも冪等を保証）。
+async function handleEnsureFolder(form, env, cors) {
+  const channel = String(form.get("channel") || "").trim();
+  const title = String(form.get("title") || "").trim();
+  const images = form.getAll("image"); // 0〜N枚（プレビュー/元画像）。0枚でもフォルダは作る（Chami「フォルダくらい作って」）。
+  const parentId = channelToFolderId(channel, env);
+  if (!parentId) return json({ ok: false, error: "channel_unresolved", channel }, 400, cors);
+  if (!title) return json({ ok: false, error: "missing_title" }, 400, cors);
+
+  let token;
+  try { token = await getAccessToken(env); }
+  catch (e) { return json({ ok: false, error: "auth_failed", reason: e.reason || "" }, 502, cors); }
+
+  const parent = await getFolder(parentId, token);
+  if (!parent) return json({ ok: false, error: "parent_folder_not_found", parentId }, 400, cors);
+
+  const baseName = safeName(title);
+  // ── フォルダ確保：既存があれば再利用、無ければ exact-name で新規作成（連番にしない＝1作品1フォルダ）──
+  let folderId = "", created = false;
+  try {
+    const ids = await findChildFolderIds(parentId, baseName, token);
+    if (ids.length) { folderId = ids[0]; }
+    else { const f = await createChildFolderExact(parentId, baseName, token); folderId = f.id; created = true; }
+  } catch (e) { return json({ ok: false, error: "folder_create_failed" }, 502, cors); }
+  if (!folderId) return json({ ok: false, error: "folder_create_failed" }, 502, cors);
+
+  // ── 渡された画像を役割ごとに冪等保存（同役割が既に在れば上げ直さない）──
+  const added = [], skipped = [];
+  try {
+    for (const image of images) {
+      if (!(image && typeof image.arrayBuffer === "function")) continue;
+      const nm = safeName(image.name || ("image." + (extOf(image.type) || "jpg")));
+      const isPreview = nm.indexOf("プレビュー") >= 0;
+      const isSrc = nm.indexOf("元画像") >= 0;
+      if (isPreview && await findPreviewFile(folderId, token)) { skipped.push(nm); continue; }
+      if (isSrc && await findSrcImageFile(folderId, token)) { skipped.push(nm); continue; }
+      const iname = await uniqueFileName(folderId, nm, token);
+      const up = await uploadNew(folderId, iname, image, token);
+      added.push(up.name || iname);
+    }
+  } catch (e) { return json({ ok: false, error: "upload_failed", folderId }, 502, cors); }
+
+  return json({
+    ok: true,
+    channel,
+    folderId,
+    created,
+    folderLink: "https://drive.google.com/drive/folders/" + folderId,
+    added,
+    skipped,
+  }, 200, cors);
 }
 
 /* ====================== 参照（read-only）====================== */
