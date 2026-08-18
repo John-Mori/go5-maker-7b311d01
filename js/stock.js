@@ -1481,7 +1481,53 @@
       if (!meta) meta = { id: locator.videoId || '', videoId: locator.videoId || '', title: locator.title || '', account: locator.account || '', videoName: '' };
     }
     if (!meta || !meta.id) { done(false, 'この履歴のデータを特定できませんでした(背骨IDが空=Drive保存が始まる前の古い投稿)'); return; }
-    driveSaveForCompleted_(meta, opts);
+    // ★成否の真の基準は「投稿履歴1ページ目に仕上がりプレビューが入ったか」(Chami「戻すだけ・前はプレビューが入ってた」
+    //   2026-08-18)。driveSaveForCompleted_ は動画がDriveに在るだけで done(true,'プレビュー追記') と返しうる=
+    //   プレビュー素材がどこにも無ければ実際は1ページ目に何も入らないのに「生成しました」と出る("結局できてない"の真因)。
+    //   → 完了時に usedImagesRead_ で1ページ目プレビューの実在を確かめ、入った時だけ成功と報告する。素材が無い時は
+    //     「動画は在るがプレビュー素材がこの端末にもDriveにも無い=生成不可(元動画/プレビューを手動で入れて)」と正直に返す。
+    var vid = meta.videoId || '';
+    var settled = false;
+    var wrapped = function (ok, msg) {
+      if (settled) return; settled = true;
+      if (wd) { clearTimeout(wd); wd = 0; }
+      done(ok, msg);
+    };
+    // ★ウォッチドッグ：どの経路が固まっても40秒で必ず一度だけ結着させる=ボタンが「再生成中…」のまま
+    //   永久に固まらない(Chami報告2026-08-18「再生成中から待たされる」)。この時点の1ページ目プレビューで判定。
+    var wd = setTimeout(function () {
+      if (settled) return;
+      if (!vid) { wrapped(false, '時間内に完了できませんでした(通信が返りません)。もう一度お試しください'); return; }
+      usedImagesRead_(vid).then(function (rec) {
+        var prevN = (rec && rec.prev) ? (rec.prev | 0) : 0;
+        wrapped(prevN > 0, prevN > 0 ? 'プレビューを1ページ目へ反映(保存は裏で継続)' : '時間内に完了できませんでした。通信状況を変えてもう一度お試しください');
+      }).catch(function () { wrapped(false, '時間内に完了できませんでした。もう一度お試しください'); });
+    }, 40000);
+    driveSaveForCompleted_(meta, {
+      silent: opts.silent,
+      onDone: function (ok, msg) {
+        if (settled) return;
+        if (!vid) { wrapped(ok, msg); return; } // videoId無し=1ページ目の紐付けキーが無い(旧投稿)=素の結果を返す
+        // 実在確認：1ページ目にプレビューが入っていれば成功。入っていなければ、動画保存は進んでいても「生成」としては未達。
+        //   ★applyPreview の書き込みは fire-and-forget(driveSaveForCompleted_ は待たずに done する)ので、読むのが
+        //     早すぎると未反映=偽の失敗になる。1度だけ1.2秒待って読み直してから正直な結論を出す。
+        var verdict = function () {
+          usedImagesRead_(vid).then(function (rec) {
+            var prevN = (rec && rec.prev) ? (rec.prev | 0) : 0;
+            if (prevN > 0) { wrapped(true, msg || 'プレビューを1ページ目へ反映'); return; }
+            setTimeout(function () {
+              if (settled) return;
+              usedImagesRead_(vid).then(function (rec2) {
+                var p2 = (rec2 && rec2.prev) ? (rec2.prev | 0) : 0;
+                wrapped(p2 > 0, p2 > 0 ? (msg || 'プレビューを1ページ目へ反映')
+                  : 'この作品の仕上がりプレビュー素材が、この端末にもGoogleドライブにも見つかりませんでした。動画(または仕上がりプレビュー画像)を手動で入れると1ページ目に反映できます。');
+              }).catch(function () { wrapped(false, 'この作品の仕上がりプレビュー素材が見つかりませんでした。動画を手動で入れてお試しください。'); });
+            }, 1200);
+          }).catch(function () { wrapped(ok, msg); });
+        };
+        verdict();
+      }
+    });
   }
 
   // ── ★save_job 永続pending(2026-08-16 Chami「途中で閉じても裏で完結」の取りこぼし対策)──

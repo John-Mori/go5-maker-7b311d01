@@ -30,6 +30,23 @@
       CFG.WORKER_URL.indexOf("PASTE_") !== 0 && CFG.SHARED_SECRET.indexOf("PASTE_") !== 0;
   }
 
+  // ★タイムアウト付きfetch(iOS Safariの無応答fetch=永久保留を断つ)。ms経過でabortし、reject(拒否)で返す。
+  //   呼び出し側は .catch でフォールバック(null/""/{ok:false})へ倒す=判定不能でも必ず前へ進む(failopen-guardの型)。
+  //   ★これが無いと fetchPreview/fetchVideo/resolveFolderUrl/queueSave が1つでもハングした時、
+  //     driveSaveForCompleted_ のPromise鎖が done() へ到達せず「再生成中…」のまま永久に固まる
+  //     (Chami報告2026-08-18「再生成中から待たされる」の真因)。
+  function fetchT_(url, opt, ms) {
+    opt = opt || {};
+    var ctl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    if (ctl) opt.signal = ctl.signal;
+    var tid = 0;
+    var timed = new Promise(function (_resolve, reject) {
+      tid = setTimeout(function () { try { if (ctl) ctl.abort(); } catch (e) {} reject(new Error("timeout")); }, ms || 15000);
+    });
+    var run = fetch(url, opt).then(function (r) { clearTimeout(tid); return r; }, function (e) { clearTimeout(tid); throw e; });
+    return Promise.race([run, timed]);
+  }
+
   // ステータス表示用の小さな領域を結果エリア付近に用意(無ければ作る)
   function statusEl() {
     var el = document.getElementById("driveStatus");
@@ -212,7 +229,7 @@
     fd.append("action", "fetch_preview");
     fd.append("channel", channel);
     fd.append("title", title);
-    return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+    return fetchT_(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd }, 15000)
       .then(function (r) { return r.json().catch(function () { return {}; }); })
       .then(function (j) { return (j && j.ok && j.found && j.dataUrl) ? j.dataUrl : null; })
       .catch(function () { return null; });
@@ -228,7 +245,8 @@
     fd.append("action", "fetch_video");
     fd.append("channel", channel);
     fd.append("title", title);
-    return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+    // 動画本体のDL=数MBありうる=長め(45秒)。それでも返らなければabortしてnull(この端末では生成不可)。
+    return fetchT_(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd }, 45000)
       .then(function (r) {
         var ct = (r.headers.get("Content-Type") || "").toLowerCase();
         if (r.ok && ct.indexOf("video/") === 0) return r.blob(); // 見つかった=動画バイト列
@@ -277,7 +295,7 @@
       if (opts.previewKey) fd.append("previewKey", opts.previewKey);
       if (opts.srcKey) fd.append("srcKey", opts.srcKey); // 元画像(動画に使った写真)のR2在り処。投稿完了と同じ一式を揃える
       if (opts.overwrite) fd.append("overwrite", "1"); // 上書きはWorker側の env.ALLOW_OVERWRITE と二重ロック
-      return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd, keepalive: true })
+      return fetchT_(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd, keepalive: true }, 20000)
         .then(function (r) {
           if (r.status === 202 || r.ok) { setStatus("☁️ Driveへ保存中(" + channelLabel(channel) + ")…確認でき次第、作成履歴カードに『保存済み(実物確認)』が付きます"); return { ok: true }; }
           return r.json().then(function (j) { return { ok: false, error: (j && j.error) || ("http_" + r.status) }; }).catch(function () { return { ok: false, error: "http_" + r.status }; });
@@ -350,7 +368,7 @@
     fd.append("action", "folder_link");
     fd.append("channel", channel);
     fd.append("title", title);
-    return fetch(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd })
+    return fetchT_(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd }, 15000)
       .then(function (r) { return r.json().catch(function () { return {}; }); })
       .then(function (j) {
         if (j && j.ok && j.found && j.folderId) {
