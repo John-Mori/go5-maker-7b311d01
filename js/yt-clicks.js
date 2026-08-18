@@ -62,7 +62,12 @@
   function histKey() { return 'short_hist__' + acct(); }
   function manualKey() { return 'verify_manual__' + acct(); }
   function ytMapKey() { return 'verify_yt__' + acct(); }
-  function loadArr(k) { try { var a = JSON.parse(localStorage.getItem(k) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  // ★履歴系の読み書きは core/hist-store.js(Go5Hist)へ一元委譲(IDB正本＋メモリミラー＋LS後追いコピー)。
+  //   同期リーダの署名・同期性は不変=呼び出し元は無改修。Go5Hist未ロード時は従来のLS直読み直書きへフォールバック。
+  function loadArr(k) {
+    if (window.Go5Hist) { try { var v = window.Go5Hist.read(k); return Array.isArray(v) ? v : []; } catch (e) {} }
+    try { var a = JSON.parse(localStorage.getItem(k) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  }
 
   // ── 履歴消失の自動証拠採取(INC 宵桜③・Chami承認2026-07-17) ────────────────
   // 背景: 「宵桜(acc2)の投稿履歴だけが消える」が唯一の未解決INC。静的解析では犯人を断定できず、
@@ -107,6 +112,7 @@
   // 監視対象=消失が報告されているキーだけ(他キーの正常な削除に反応しない)
   function watched_(k) { return /^(short_hist__|verify_manual__)/.test(String(k)); }
   function saveArr(k, a) {
+    if (window.Go5Hist) { try { window.Go5Hist.write(k, a); return; } catch (e) {} }
     try {
       if (watched_(k)) {
         var before = loadArr(k);
@@ -131,8 +137,8 @@
       saveArr(storeKey, cur);
     } catch (e) {}
   }
-  function loadYtMap() { try { return JSON.parse(localStorage.getItem(ytMapKey()) || '{}') || {}; } catch (e) { return {}; } }
-  function saveYtMap(m) { try { localStorage.setItem(ytMapKey(), JSON.stringify(m)); } catch (e) {} }
+  function loadYtMap() { if (window.Go5Hist) { try { var m = window.Go5Hist.read(ytMapKey()); return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {}; } catch (e) {} } try { return JSON.parse(localStorage.getItem(ytMapKey()) || '{}') || {}; } catch (e) { return {}; } }
+  function saveYtMap(m) { if (window.Go5Hist) { try { window.Go5Hist.write(ytMapKey(), m); return; } catch (e) {} } try { localStorage.setItem(ytMapKey(), JSON.stringify(m)); } catch (e) {} }
   function apiKey() { try { return (localStorage.getItem('yt_api_key') || '').trim(); } catch (e) { return ''; } }
   function itemKey(it) { return (window.HistMerge && window.HistMerge.historyItemKey) ? window.HistMerge.historyItemKey(it) : (it.manual ? it.id : (it.postUri ? ('u:' + it.postUri) : (it.videoId ? ('v:' + it.videoId) : (it.shortUrl ? ('s:' + it.shortUrl) : '')))); }
   // verify_yt旧データの短縮URLキーも読みつつ、新規操作は強いcanonicalキーへ寄せる。
@@ -185,8 +191,8 @@
   //   シート由来行が“また消えた”ように見えていた。v=574は「隠す(フィルタ)」だけをfail-openにしたが、
   //   「取れなかった時に空へ倒れる」経路が残っていた。→ 取得成功時に生行を保存し、失敗/取得前は
   //   前回の生行から復元して表示する(取れない時ほど旧データを見せる=fail-open)。次の成功で最新化。
-  function persistSheetRaw_(a, rows) { try { localStorage.setItem('sheet_hist_raw__' + a, JSON.stringify(Array.isArray(rows) ? rows : [])); } catch (e) {} }
-  function loadSheetRaw_(a) { try { var r = JSON.parse(localStorage.getItem('sheet_hist_raw__' + a) || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+  function persistSheetRaw_(a, rows) { var v = Array.isArray(rows) ? rows : []; if (window.Go5Hist) { try { window.Go5Hist.write('sheet_hist_raw__' + a, v); return; } catch (e) {} } try { localStorage.setItem('sheet_hist_raw__' + a, JSON.stringify(v)); } catch (e) {} }
+  function loadSheetRaw_(a) { if (window.Go5Hist) { try { var v = window.Go5Hist.read('sheet_hist_raw__' + a); return Array.isArray(v) ? v : []; } catch (e) {} } try { var r = JSON.parse(localStorage.getItem('sheet_hist_raw__' + a) || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
   function mergeRawVsLocal_(rows) { return (rows && rows.length && window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(allItems(), rows) : []; }
   function mergeRawSheetOnly_(rows) { return (rows && rows.length && window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras([], rows) : []; }
   // ★ランキング専用のシート履歴キャッシュ。acct -> {at, items}。
@@ -2672,32 +2678,46 @@
     // 記録の正はシートなので、上限時は最古のローカルキャッシュだけを押し出し、最新行を確実に残す。
     // この境界はtests/e2e/smoke.spec.jsの200件実導線テストで固定する。
     manual.unshift(entry);
-    saveArrFor_('verify_manual', acc, manual);
-    // saveArrFor_ は履歴消失防止のため例外を握る設計だが、投稿完了だけは「保存できた」と確認してから
-    // ドラフトを退避させる必要がある。QuotaExceeded等で実保存されなければ失敗を返し、stock側がドラフトを残す。
-    var persisted = loadArrFor_('verify_manual', acc).some(function (x) { return x && x.id === id; });
-    if (!persisted) return { ok: false, reason: 'persist-failed' };
-    if (ytUrl) { ymap[id] = ytUrl; saveYtMapFor_(acc, ymap); }
-    // ★投稿完了と同時に記録シート(=分析の元)へ即upsert。従来は下の workUrl 分岐の中でしか
-    //   pushItemToGas_ を呼んでおらず、作品URL未入力の即時投稿は完了時にシートへ載らず、後追いの
-    //   reconcileYtToSheet_(1回12件上限・署名台帳)が回るまで分析に出なかった(Chami報告2026-08-08 ①
-    //   宵桜艶帖で即時投稿→投稿完了しても分析に反映されない)。videoId をキーに upsert は冪等なので
-    //   ここで無条件に押す=作品URLの有無・チャンネル(acc1/acc2)を問わず完了と同時にシートへ載る。
-    try { pushItemToGas_(entry); } catch (e) {}
-    // 作品クリック計測URL(導線2)を作品URLから自動発行＝編集→保存を待たずに一発で埋める(Chami依頼2026-07-30)。
-    //   ★投稿完了は"新規発行してよい"経路なので mintWorkShortAtPost_ を使う。autoMeasureWorkShort_(編集保存用)は
-    //   空欄を作品URLへフォールバックしない仕様のため、ここで呼ぶと workShortUrl が空のままシート/サブ端末へ
-    //   載っていた(Chami再発②2026-08-03)。
-    if (entry.workUrl && !entry.workShortUrl) {
-      try {
-        mintWorkShortAtPost_(entry, function () {
-          saveArrFor_('verify_manual', acc, loadArrFor_('verify_manual', acc).map(function (x) { return x.id === id ? entry : x; }));
-          pushItemToGas_(entry);
-        });
-      } catch (e) {}
+    // ★履歴の保存先は IDB(数百MB)＋LS後追いコピー。receipt で「LS着地 or IDB着地」を判定する(hist-store)。
+    //   従来は LS 一本で、満杯だと QuotaExceeded→persist-failed で投稿完了ごと中断していた(炎上の真因)。
+    var receipt = saveArrFor_('verify_manual', acc, manual);
+    // 完了の"後始末"(ymap保存/シートupsert/導線2発行/再描画)を関数化＝LS着地でもIDB着地でも同じ処理を通す。
+    function tail_() {
+      if (ytUrl) { ymap[id] = ytUrl; saveYtMapFor_(acc, ymap); }
+      // ★投稿完了と同時に記録シート(=分析の元)へ即upsert(videoId キーで冪等)。
+      try { pushItemToGas_(entry); } catch (e) {}
+      // 作品クリック計測URL(導線2)を作品URLから自動発行＝編集→保存を待たずに一発で埋める(Chami依頼2026-07-30)。
+      if (entry.workUrl && !entry.workShortUrl) {
+        try {
+          mintWorkShortAtPost_(entry, function () {
+            saveArrFor_('verify_manual', acc, loadArrFor_('verify_manual', acc).map(function (x) { return x.id === id ? entry : x; }));
+            pushItemToGas_(entry);
+          });
+        } catch (e) {}
+      }
+      if (acc === acct()) { try { pokeSnapshotNow_(); } catch (e) {} refresh(); }
+      return { ok: true };
     }
-    if (acc === acct()) { try { pokeSnapshotNow_(); } catch (e) {} refresh(); }
-    return { ok: true };
+    // ★persist 失敗確定時のロールバック＝ミラー/LS から今回 entry を除去し「失敗=記録なし」を保つ。
+    //   残すと「UIには見えるが未永続」になり、再試行が dupe 扱いで混乱する。
+    function rollback_() {
+      try { saveArrFor_('verify_manual', acc, loadArrFor_('verify_manual', acc).filter(function (x) { return x && x.id !== id; })); } catch (e) {}
+    }
+    // ★LS そのものを直読みして今回 entry が載ったか見る(ミラーでなく LS を見る＝速い同期パス・今日と同一挙動)。
+    var lsLanded = lsHasEntry_('verify_manual__' + acc, id);
+    if (lsLanded) { return tail_(); }
+    // LS に載らなかった(quota満杯等)＝IDB着地を待つ。着地したら成功、両方失敗なら persist-failed でドラフト残置。
+    return {
+      ok: false, reason: 'persist-pending',
+      wait: receipt.idb.then(function (landed) {
+        if (landed) { return tail_(); }
+        rollback_(); return { ok: false, reason: 'persist-failed' };
+      }, function () { rollback_(); return { ok: false, reason: 'persist-failed' }; })
+    };
+  }
+  // localStorage を直読みして id を持つ entry が載っているか。(ミラーでなく LS そのものを見る=persist 判定用)
+  function lsHasEntry_(key, id) {
+    try { var a = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(a) && a.some(function (x) { return x && x.id === id; }); } catch (e) { return false; }
   }
   // ── カレンダー枠との紐づけ用(③④・Chami 2026-08-06)：指定日(JST)に投稿された現アカウントの履歴を返す。──
   //   投稿時刻の解決は投稿履歴カード(§1665〜)と同じ順序＝YouTube公開日時→予約/カレンダー予定→実投稿時刻(ts)。
@@ -2773,20 +2793,27 @@
 
   // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }
-  function loadArrFor_(base, a) { try { var x = JSON.parse(localStorage.getItem(base + '__' + a) || '[]'); return Array.isArray(x) ? x : []; } catch (e) { return []; } }
+  function loadArrFor_(base, a) {
+    if (window.Go5Hist) { try { var v = window.Go5Hist.read(base + '__' + a); return Array.isArray(v) ? v : []; } catch (e) {} }
+    try { var x = JSON.parse(localStorage.getItem(base + '__' + a) || '[]'); return Array.isArray(x) ? x : []; } catch (e) { return []; }
+  }
+  // ★receipt {lsOk, idb} を返す(投稿完了の persist 判定＝LS着地 or IDB着地 に使う)。他の呼び出し元は戻り値を無視するだけ。
   function saveArrFor_(base, a, arr) {
     // saveArr と並ぶ もう一方の書き込み出口。ここを塞がないとサニタイザ等の移動系がすり抜ける。
     var k = base + '__' + a;
+    if (window.Go5Hist) { try { return window.Go5Hist.write(k, arr); } catch (e) {} }
     try {
       if (watched_(k)) {
         var before = loadArrFor_(base, a), after = (arr || []).slice(0, 200);
         if (before.length && after.length < before.length) recordLoss_(k, before, after);
       }
     } catch (e) {}
-    try { localStorage.setItem(k, JSON.stringify(arr.slice(0, 200))); } catch (e) {}
+    var lsOk = false;
+    try { localStorage.setItem(k, JSON.stringify(arr.slice(0, 200))); lsOk = true; } catch (e) {}
+    return { lsOk: lsOk, idb: Promise.resolve(false) };
   }
-  function loadYtMapFor_(a) { try { return JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { return {}; } }
-  function saveYtMapFor_(a, m) { try { localStorage.setItem('verify_yt__' + a, JSON.stringify(m)); } catch (e) {} }
+  function loadYtMapFor_(a) { if (window.Go5Hist) { try { var m = window.Go5Hist.read('verify_yt__' + a); return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {}; } catch (e) {} } try { return JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { return {}; } }
+  function saveYtMapFor_(a, m) { if (window.Go5Hist) { try { window.Go5Hist.write('verify_yt__' + a, m); return; } catch (e) {} } try { localStorage.setItem('verify_yt__' + a, JSON.stringify(m)); } catch (e) {} }
   // 1件をアカウント間で移動。(ローカルの base 配列＋verify_yt＋シート行)表示更新はしない。
   function moveOne_(base, it, from, to) {
     if (from === to || !it) return;
@@ -3794,7 +3821,7 @@
     var keys = ['short_hist__acc1', 'verify_manual__acc1', 'short_hist__acc2', 'verify_manual__acc2'];
     var store = {}, jobs = [];
     keys.forEach(function (k) {
-      var arr; try { arr = JSON.parse(localStorage.getItem(k) || '[]') || []; } catch (e) { arr = []; }
+      var arr = loadArr(k); // ★ラッパ経由(Go5Hist ミラー)＝直読みでミラーを迂回しない
       store[k] = arr;
       arr.forEach(function (it, idx) { if (it && it.postUri) jobs.push({ key: k, idx: idx, uri: String(it.postUri) }); });
     });
@@ -3822,7 +3849,7 @@
     }
     function step() {
       if (i >= jobs.length) {
-        keys.forEach(function (k) { try { localStorage.setItem(k, JSON.stringify(store[k])); } catch (e) {} });
+        keys.forEach(function (k) { try { saveArr(k, store[k]); } catch (e) {} }); // ★ラッパ経由でミラーへ反映
         _restoreBusy = false;
         if (updated) setStatus('✅ 投稿文から当時の割引/新作を反映：' + updated + '件。(記載なし ' + skipped + '件・両ch)');
         render();
@@ -3967,6 +3994,16 @@
   document.addEventListener('go5-images-hydrated', function () {
     try { var pv = $('pageVerify'); if (pv && !pv.hidden) render(); } catch (e) {}
     try { var pr = $('pageRank'); if (pr && !pr.hidden) renderRank(); } catch (e) {}
+  });
+  // ★履歴が IDB からメモリミラーへ載った合図(hist-store)で、表示中の検証タブを1回だけ描き直す。
+  //   起動直後の初回描画はミラー未了で LS を読む=完了後に最新へ追いつく。6キー分の連発は 50ms で1回へ集約。
+  var _histHydrateRefreshT = null;
+  document.addEventListener('go5-hist-hydrated', function () {
+    if (_histHydrateRefreshT) return;
+    _histHydrateRefreshT = setTimeout(function () {
+      _histHydrateRefreshT = null;
+      try { var pv = $('pageVerify'); if (pv && !pv.hidden) refresh(); } catch (e) {}
+    }, 50);
   });
   // ★すぐ表示(Chami依頼2026-07-29「リロードで毎回全部読み込み直して遅い/毎回要る物と要らない物を分けて」):
   //   リロード直後はまず localStorage の永続キャッシュ(yt_meta_cache=題名/再生数/日付・clicks_cache=クリック数)

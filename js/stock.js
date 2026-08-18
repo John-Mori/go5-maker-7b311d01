@@ -1210,9 +1210,28 @@
         }
       }
     } catch (e5) {}
+    // ★persist-pending＝端末のlocalStorageは満杯だが履歴の正本(IDB)へ書込中(hist-store)。IDB着地を待って
+    //   から完了可否を決める＝満杯でも投稿完了が「いつまでも保存中」で止まらない(炎上①の恒久対策)。
+    //   handleCompleteOk_ は同期 true/false 契約(呼び元が closeModal_ を判断)なので、ここでは false を返し、
+    //   着地後の完了処理とモーダル閉じは wait の continuation 側で行う(_res は差し替え済＝二重完了しない)。
+    if (_res && _res.ok === false && _res.reason === 'persist-pending' && _res.wait && typeof _res.wait.then === 'function') {
+      var _pfMsg = '投稿履歴をこの端末へ保存できませんでした。\nドラフトは残してあります。空き容量を確認してから、もう一度「投稿完了」を押してください。';
+      _res.wait.then(function (r) {
+        if (r && (r.ok || r.reason === 'dupe')) { finishComplete_(id, meta, ytUrl, shortUrl, ps, pd); try { closeModal_(); } catch (e7) {} }
+        else { try { alert(_pfMsg); } catch (e8) {} }
+      }, function () { try { alert(_pfMsg); } catch (e9) {} });
+      return false; // 同期経路では未確定＝モーダルは閉じない(着地後に continuation が閉じる)
+    }
     // 投稿履歴へ「新規保存できた」または「既に載っている」と確認できた時だけ完了を進める。
     // API未起動/識別不能/保存失敗/例外でドラフトを作成履歴へ移すと再試行手段を失うため、ここで止める。
     if (!_res || (_res.ok === false && _res.reason !== 'dupe')) return false;
+    finishComplete_(id, meta, ytUrl, shortUrl, ps, pd);
+    return true;
+  }
+
+  // 投稿完了の"後半"(枠書き戻し→作成履歴退避→再描画→Drive保存)。同期で載った時も、persist-pending の
+  //   IDB着地後も同じ処理を通す。★closeModal_ はここでは呼ばない=同期経路は呼び元が返り値 true で閉じる。
+  function finishComplete_(id, meta, ytUrl, shortUrl, ps, pd) {
     // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
     try {
       if (ps && ps.id) {
@@ -1228,7 +1247,6 @@
     render();
     // ── Drive 保存。動画作成時に即保存済みならプレビューだけ追記、未保存の旧ドラフト等はフル保存にフォールバック ──
     driveSaveForCompleted_(meta, { silent: false });
-    return true;
   }
 
   // 動画に使った元画像のBlobを解決する。手元Blob(stock_img_)優先、無ければ同期ミラー(stock:imgs:.src)の
