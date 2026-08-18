@@ -396,16 +396,33 @@
   //   → 実体(IDB or 既にR2)を取り寄せてR2へ確実にPUTし、置けたら true。どこにも実体が無ければ false=save_jobは
   //   無駄撃ちなので呼び出し側は在ページ保存(legacy)へ倒し、"見える失敗"を出す(沈黙にしない・fail-open)。
   //   ★このセッションで作成直後に上げ済み(_vidUp)なら即 true=通常の投稿完了は追加コストゼロで従来と同一挙動。
+  //   ★2026-08-18 Fable5診断で根本再設計: 旧実装は「このセッションでPUT成功(_vidUp)なら即true」だった=
+  //   PUTが実は着地していない/別セッションでミラーが黙って失敗した端末で、R2に実体が無いのに true を返し、
+  //   queueSave→Worker fetchが r2_video_missing で静死→「保存中のまま来ない」の主因。→ メモを信じず
+  //   「今この瞬間 R2にHEADで実在するか」を毎回実測し、無ければ実体を取り寄せて再PUT→PUT後にもう一度HEADで
+  //   着地確認してから true を返す(真に置けた時だけ save_job を撃つ)。HEADは本体を落とさず約100ms。
+  //   hasBlobR2At が古いキャッシュのsync.jsに無い端末は従来の memo/PUT 経路へ安全に退避(fail-open)。
   function ensureVideoOnR2_(id) {
-    if (_vidUp[id]) return Promise.resolve(true);
     if (!(window.Go5Sync && Go5Sync.putBlobR2At && Go5Sync.configured && Go5Sync.configured())) return Promise.resolve(false);
-    return Promise.resolve(resolveVideoBlob_(id)).then(function (blob) {
-      if (!isUsableVideoBlob_(blob)) return false; // 実体がどこにも無い=queueSaveは死ぬ
-      return Go5Sync.putBlobR2At(VIDNAME(id), blob).then(function (key) {
-        if (key) { _vidUp[id] = 1; return true; }
-        return false;
+    var reput = function () {
+      return Promise.resolve(resolveVideoBlob_(id)).then(function (blob) {
+        if (!isUsableVideoBlob_(blob)) return false; // 実体がどこにも無い=queueSaveは死ぬ
+        return Go5Sync.putBlobR2At(VIDNAME(id), blob).then(function (key) {
+          if (!key) return false;
+          // PUT成功後に「実際にGET/HEADで読める」ことをもう一度実測してから true(冪等PUTの200を鵜呑みにしない)
+          if (!Go5Sync.hasBlobR2At) { _vidUp[id] = 1; return true; }
+          return Go5Sync.hasBlobR2At(VIDNAME(id)).then(function (ok2) { if (ok2) { _vidUp[id] = 1; return true; } return false; });
+        }).catch(function () { return false; });
       }).catch(function () { return false; });
-    }).catch(function () { return false; });
+    };
+    if (!Go5Sync.hasBlobR2At) { // 旧sync.js(HEAD未実装)の端末=従来挙動へ退避
+      if (_vidUp[id]) return Promise.resolve(true);
+      return reput();
+    }
+    return Go5Sync.hasBlobR2At(VIDNAME(id)).then(function (present) {
+      if (present) { _vidUp[id] = 1; return true; } // R2に実在を実測=追加コストなしで従来同等
+      return reput();                                // 無い→実体を取り寄せて再PUT→再HEADで着地確認
+    }).catch(function () { return reput(); });
   }
   // ★元画像(前景写真)も作成直後にメモリから直接R2へ控える(2026-08-17・Chami報告 msg1538754754824507473③
   //   「再作成を押すと使用した画像が消える」)。動画(ensureVideoMirror_)と違い、元画像はこれまで
@@ -1587,6 +1604,10 @@
     legacyRealSave_();
     // ── 最後の砦：queueSave が使えない旧環境 / R2に実体が無い時のみ、従来のこのページ内フル保存(動画+元画像+プレビュー)。
     function legacyRealSave_() {
+    // ★この直アップロード経路も pending を記録する(2026-08-18 Fable5診断)。送信がiOS背景化で黙って死んでも、
+    //   次回起動の sweepSaveJobs_ が「Driveに在るか」を実測し、無ければ実体を取り寄せて再送=直アップロードの
+    //   取りこぼしも自己修復させる(旧実装はlegacyだけpending未記録=一度死ぬと二度と拾えなかった)。
+    recordSaveJobPending_(id, meta);
     resolveVideoBlob_(id).then(function (blob) {
       if (!blob) {
         // ★動画は取れなくても、上の previewReady が投稿履歴1ページ目のプレビューを既に設定済み。
@@ -1700,7 +1721,7 @@
   //   送信途中でタブ破棄)場合でも、次回アプリ起動の sweep が「Driveにもう在るか」を照会(read-only)し、
   //   無ければ動画をR2へ上げ直して save_job を再送する。Worker側は冪等=再送で二重フォルダにならない。
   var SAVEJOB_PENDING_PREFIX = 'go5_drive_savejob_';
-  var SAVEJOB_MAX_TRIES = 8;
+  var SAVEJOB_MAX_TRIES = 12; // R2に実体が在る前提での「再送」上限。超えても記録は残しcheckSavedは継続(嘘の完了にしない)
   function recordSaveJobPending_(id, meta) {
     try {
       var prev = JSON.parse(localStorage.getItem(SAVEJOB_PENDING_PREFIX + id) || 'null') || {};
@@ -1725,13 +1746,30 @@
       try { rec = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { rec = null; }
       if (!rec || !rec.id || !rec.title || !rec.channel) { try { localStorage.removeItem(k); } catch (e) {} setTimeout(nextK, 0); return; }
       Go5Drive.checkSaved(rec.channel, rec.title).then(function (saved) {
-        if (saved) { try { localStorage.removeItem(k); } catch (e) {} setTimeout(nextK, 40); return; } // 確認できた=畳む
-        if ((rec.tries | 0) >= SAVEJOB_MAX_TRIES) { setTimeout(nextK, 40); return; }                  // 打ち切り(痕跡は残す)
-        rec.tries = (rec.tries | 0) + 1;
-        try { localStorage.setItem(k, JSON.stringify(rec)); } catch (e) {}
-        Promise.resolve(ensureVideoMirror_(rec.id)).catch(function () {}) // R2に無ければ上げ直す(手元blobが在る端末のみ)
-          .then(function () { return Go5Drive.queueSave({ videoId: rec.id, title: rec.title, channel: rec.channel, overwrite: true }); })
-          .catch(function () {}).then(function () { setTimeout(nextK, 150); });
+        if (saved) { // 確認できた=畳む。saved後にnovideo等の暫定失敗表示が残っていたら実物確認へ格上げ
+          try { localStorage.removeItem(k); } catch (e) {}
+          var _ds = driveSavedState_(rec.id);
+          if (_ds && _ds.state !== 'verified') { setDriveSavedState_(rec.id, 'verified', { title: rec.title, account: rec.channel }); try { render(); } catch (e) {} }
+          setTimeout(nextK, 40); return;
+        }
+        // ★まだDriveに無い→「R2に動画実体が今この瞬間 在るか」をHEADで実測してから撃つ(ensureVideoMirror_=IDB直読み
+        //   だけの旧処置は、IDBを退役した端末で毎回無言スキップ→r2_video_missingの保証された失敗を8回撃って諦めていた。
+        //   Fable5診断・2026-08-18)。実体がどこにも無い時はsave_jobは無駄撃ち=沈黙で終わらせず「見える失敗(novideo)」にする。
+        Promise.resolve(ensureVideoOnR2_(rec.id)).then(function (onR2) {
+          if (!onR2) {
+            // 動画がこの端末にもクラウドにも無い=save_jobを投げても静死するだけ。カードに見える失敗を出す(沈黙ゼロ)。
+            setDriveSavedState_(rec.id, 'novideo', { title: rec.title, account: rec.channel });
+            try { render(); } catch (e) {}
+            var ageMs = Date.now() - (rec.ts || Date.now());
+            if (ageMs > 14 * 24 * 3600 * 1000) { try { localStorage.removeItem(k); } catch (e) {} } // 14日粘っても実体が戻らなければ記録は掃除(表示は残る)
+            setTimeout(nextK, 60); return;
+          }
+          if ((rec.tries | 0) >= SAVEJOB_MAX_TRIES) { setTimeout(nextK, 40); return; } // 再送は打ち切るが記録は残す=次回以降もcheckSavedで確認は続ける
+          rec.tries = (rec.tries | 0) + 1;
+          try { localStorage.setItem(k, JSON.stringify(rec)); } catch (e) {}
+          Go5Drive.queueSave({ videoId: rec.id, title: rec.title, channel: rec.channel, overwrite: true })
+            .catch(function () {}).then(function () { setTimeout(nextK, 150); });
+        }).catch(function () { setTimeout(nextK, 150); });
       }).catch(function () { setTimeout(nextK, 150); });
     }
     nextK();
@@ -1927,6 +1965,10 @@
       driveLine = _stuck
         ? '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;white-space:normal;">☁️ まだDrive保存を確認できていません(開いている間は自動で再確認を続けます) · 急ぐ場合は下の「☁️ Drive保存」で再試行</div>'
         : '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ 保存を受け付けました · 実物を確認中…(ふつうは数秒・最大3分)</div>';
+    } else if (_dsv && _dsv.state === 'novideo') {
+      // ★動画の実体がこの端末にもクラウド(R2)にも見つからず、Driveへ保存できない=沈黙で諦めず「見える失敗」にする
+      //   (Fable5診断2026-08-18。旧実装は無言で8回再送して静かに諦めていた)。「復元」して作り直すか手動投入を促す。
+      driveLine = '<div style="font-size:.71rem;color:#e6a23c;margin-top:2px;white-space:normal;">⚠ 動画の元データがこの端末にもクラウドにも見つからず、Driveへ保存できません · 「復元」で作り直すか、動画を手動で入れてください</div>';
     }
     // ★4ボタン(復元/動画DL/Drive保存/削除)を折り返さず一列に収める(Chami依頼2026-08-12)。
     //   ★横スクロールをやめ「収まらなければ縮小して収める」方式へ(Chami依頼2026-08-11 msg1536769222108119050)。

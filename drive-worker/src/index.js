@@ -26,7 +26,9 @@ const OVERWRITE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 「1ヶ月」=30日固�
 const OVERWRITE_MAX_TRASH = 3;                        // 窓内の同名候補がこれ超なら上書き全面中止（異常サイン）
 const SAVE_JOB_VIDEO_KEY_RE = /^[a-f0-9]{16,64}$/;    // R2キー(sha256hex)の形式
 const SAVE_JOB_R2_BASE_RE = /^https?:\/\//;
-const SAVE_JOB_RETRY_DELAYS_MS = [500, 1500, 4000];   // 動画バイトのR2取得：最大3回・指数バックオフ
+const SAVE_JOB_RETRY_DELAYS_MS = [2000, 5000, 10000, 20000]; // 動画バイトのR2取得：最大4回・指数バックオフ(計約37秒)。
+//   フロントはHEADでR2着地を確認してからsave_jobを撃つ(2026-08-18)ので通常は初回で取れるが、R2の反映レース/公開GETの
+//   一時的な不整合に備えて窓を広げる。waitUntil内の待機はCPUを消費しない=Workers上限内。
 
 export default {
   async fetch(request, env, ctx) {

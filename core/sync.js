@@ -1030,10 +1030,30 @@
       return fetchBlobTimed_(c.url + "/img/" + key, 60000);
     }).catch(function () { return null; });
   }
+  // ★論理名の実体がR2に「今この瞬間 在るか」をHEADで実測する(2026-08-18・Fable5診断=保存の根本再設計)。
+  //   drive-workerのsave_jobは r2Base+"/img/"+key から動画を取り寄せてDriveへ完走させる=その前提「R2に実体が在る」を
+  //   ローカルのメモ(_vidUp)や善意で信じると、iOSでミラーPUTが黙って失敗した端末で save_job が r2_video_missing で
+  //   静死し「保存中のまま来ない」になる。HEADは本体を落とさず約100msで在/無を返す(headOnly対応=sync-worker:37)。
+  //   トークン不要の公開/img/経路。失敗(網/timeout)は false=「無い側」へ倒して次の手段(再PUT/legacy)へ進ませる。
+  function hasBlobR2At(name) {
+    var c = cfg();
+    if (!/^https?:\/\//.test(c.url) || !subtle) return Promise.resolve(false);
+    return sha256hex(String(name)).then(function (key) {
+      var url = c.url + "/img/" + key, ctl = null, timer = null, fInit = { method: "HEAD" };
+      if (typeof root.AbortController === "function") {
+        ctl = new root.AbortController(); fInit.signal = ctl.signal;
+        timer = root.setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 8000);
+      }
+      return root.fetch(url, fInit).then(function (r) {
+        if (timer) root.clearTimeout(timer);
+        return !!(r && r.ok);
+      }, function () { if (timer) root.clearTimeout(timer); return false; });
+    }).catch(function () { return false; });
+  }
 
   root.Go5Sync = {
     configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, flushSync: flushSync, status: status, startAuto: startAuto,
-    putBlobR2: putBlobR2, fetchBlobR2: fetchBlobR2, putBlobR2At: putBlobR2At, fetchBlobR2At: fetchBlobR2At,
+    putBlobR2: putBlobR2, fetchBlobR2: fetchBlobR2, putBlobR2At: putBlobR2At, fetchBlobR2At: fetchBlobR2At, hasBlobR2At: hasBlobR2At,
     setConfig: function (o) {
       try {
         if (o.url != null) LS.setItem("sync2_url", String(o.url).trim());
