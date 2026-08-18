@@ -26,7 +26,7 @@ const OVERWRITE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 「1ヶ月」=30日固�
 const OVERWRITE_MAX_TRASH = 3;                        // 窓内の同名候補がこれ超なら上書き全面中止（異常サイン）
 const SAVE_JOB_VIDEO_KEY_RE = /^[a-f0-9]{16,64}$/;    // R2キー(sha256hex)の形式
 const SAVE_JOB_R2_BASE_RE = /^https?:\/\//;
-const SAVE_JOB_RETRY_DELAYS_MS = [2000, 5000, 10000, 20000]; // 動画バイトのR2取得：最大4回・指数バックオフ(計約37秒)。
+const SAVE_JOB_RETRY_DELAYS_MS = [1500, 4000]; // 動画バイトのR2取得：最大3回(計約5.5秒)。★フロントが投稿完了前にHEADでR2着地を実測してから撃つ(ensureVideoOnR2_)=初回GETで取れるのが通常。長い窓(旧37秒)はrunSaveJobをリクエスト時間予算から溢れさせ、waitUntilのアップロードを途中でCloudflareに殺させていた真因(2026-08-18 wrangler tailで実測=「waitUntil() tasks…cancelled」)。窓はR2の結果整合レースの保険だけに絞る。
 //   フロントはHEADでR2着地を確認してからsave_jobを撃つ(2026-08-18)ので通常は初回で取れるが、R2の反映レース/公開GETの
 //   一時的な不整合に備えて窓を広げる。waitUntil内の待機はCPUを消費しない=Workers上限内。
 
@@ -401,11 +401,20 @@ async function handleSaveJob(form, env, cors, ctx) {
   const v = validateSaveJobInput(fields, env);
   if (!v.ok) return json({ ok: false, error: v.error }, 400, cors);
 
-  // ★即202：フロントはこれを見て投稿完了UIを止めない。以降はサーバー側（ctx.waitUntil）で完走させる。
-  const job = runSaveJob(env, fields, v.parentId).catch(() => {}); // waitUntil内=呼び出し元へ返す手段が無い（静かに終える）
-  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(job);
-  else await job; // ctx未提供（ローカル実行等）でも取りこぼさない
-  return json({ ok: true, queued: true }, 202, cors);
+  // ★根本修正(2026-08-18 wrangler tailで実測)：旧実装は即202を返してから重いアップロードを ctx.waitUntil に丸投げ
+  //   していた=「応答後」の待機はCloudflareの予算が小さく、動画アップロード完走前に "waitUntil() tasks…cancelled"
+  //   で黙って殺され、Driveに何も残らないのに投稿完了UIは成功に見えた(=保存されない事故の真因)。
+  //   直し方：重い処理は「リクエスト実行中(=大きい予算)」に await して本物の結果を返す。同時に waitUntil にも
+  //   同じジョブを載せる=クライアント(タブ)が途中で切れても、Cloudflareがそのジョブを保持して完走させる
+  //   (＝「閉じても裏で完結」Chami 2026-08-16 も維持)。フロント queueSave_ は 202/200 どちらも成功扱い・失敗(502)は
+  //   error を拾える=結果が見える。破壊面の不変条件(create/upload/reference/trashの4種)は不変。
+  const job = runSaveJob(env, fields, v.parentId).catch((e) => ({ ok: false, error: "exception:" + (e && e.message || e) }));
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(job); // タブが切れても保持=完走
+  const result = await job; // ★リクエスト実行中に本体を回す=応答後waitUntilの狭い予算で殺されない
+  if (result && result.ok) {
+    return json({ ok: true, saved: true, folderId: result.folderId || "", skipped: !!result.skipped }, 200, cors);
+  }
+  return json({ ok: false, error: (result && result.error) || "save_failed" }, 502, cors);
 }
 
 // R2から動画バイトを取得→Driveへ保存する本体。失敗は全て「静かに終了」（フロントのpending再送に委ねる＝
@@ -415,17 +424,19 @@ async function runSaveJob(env, fields, parentId) {
   //   「アプリは"裏で完走"と出すのにDriveに動画が来ない」を事後に診断できなかった(H5)。各終端に構造化ログを
   //   残す=wrangler tail / Workers Logs で「どの段で落ちたか」を実測できる。ログのみ＝破壊面は不変。
   const tag = "[save_job] " + (fields.videoId || "?") + " / " + (fields.title || "?") + " / " + (fields.channel || "?");
-  const fail = function (why) { try { console.warn(tag + " FAIL:" + why); } catch (_) {} };
+  const fail = function (why) { try { console.warn(tag + " FAIL:" + why); } catch (_) {} return { ok: false, error: why }; };
+  try { console.log(tag + " START"); } catch (_) {} // ★どこまで進んだかを実測する起点(cancelされた時に「入口までは来た」が分かる)
 
   const vid = await fetchR2Bytes(fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS);
   const buf = vid ? vid.buf : null;
   const mime = (vid && vid.mime) || "video/mp4";
-  if (!buf || !buf.byteLength) { fail("r2_video_missing"); return; } // R2にまだ届いていない/取得不能＝再送に委ねる
+  if (!buf || !buf.byteLength) return fail("r2_video_missing"); // R2にまだ届いていない/取得不能＝再送に委ねる
+  try { console.log(tag + " r2_ok bytes=" + buf.byteLength); } catch (_) {}
 
   let token;
-  try { token = await getAccessToken(env); } catch (e) { fail("auth_failed"); return; }
+  try { token = await getAccessToken(env); } catch (e) { return fail("auth_failed"); }
   const parent = await getFolder(parentId, token);
-  if (!parent) { fail("parent_folder_missing"); return; }
+  if (!parent) return fail("parent_folder_missing");
 
   const baseName = safeName(fields.title);
 
@@ -447,7 +458,7 @@ async function runSaveJob(env, fields, parentId) {
     try { existingIds = await findChildFolderIds(parentId, baseName, token); } catch (e) { existingIds = []; }
     for (const fid of existingIds) {
       const v = await findVideoFile(fid, token);
-      if (v) { try { console.log(tag + " SKIP:already_saved"); } catch (_) {} return; }
+      if (v) { try { console.log(tag + " SKIP:already_saved"); } catch (_) {} return { ok: true, folderId: fid, skipped: true }; }
     }
   }
 
@@ -457,14 +468,14 @@ async function runSaveJob(env, fields, parentId) {
     folder = doOverwrite
       ? await createChildFolderExact(parentId, baseName, token)
       : await createUniqueChildFolder(parentId, baseName, token);
-  } catch (e) { fail("folder_create_failed:" + (e && e.message || e)); return; }
+  } catch (e) { return fail("folder_create_failed:" + (e && e.message || e)); }
 
   // ---- 動画アップロード（新規のみ・失敗したら旧フォルダはtrashしない＝どの時点で落ちても喪失ゼロ）----
   try {
     const vext = extOf(mime) || "mp4";
     const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
     await uploadNewBuffer(folder.id, vname, buf, mime, token);
-  } catch (e) { fail("video_upload_failed:" + (e && e.message || e)); return; }
+  } catch (e) { return fail("video_upload_failed:" + (e && e.message || e)); }
 
   // ---- 元画像（任意・R2から取り寄せ）。★投稿完了と同じ「動画+元画像+プレビュー」を揃える(Chami 2026-08-17
   //   「投稿完了した時の挙動と同じファイルを保存して」)。save_job導入時に元画像だけ渡し忘れていた回帰の根治。
@@ -497,6 +508,7 @@ async function runSaveJob(env, fields, parentId) {
     }
   }
   try { console.log(tag + " OK folderId=" + folder.id + (doOverwrite ? " (overwrote " + candidates.length + ")" : "")); } catch (_) {}
+  return { ok: true, folderId: folder.id };
 }
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
