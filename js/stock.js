@@ -2100,6 +2100,10 @@
     //   これは表示専用の並べ替え=metasはloadMeta()のフィルタ済みコピーなので、保存側(unshiftで新しい順・MAX_DRAFTS間引き)は不変。
     metas.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
     var arch = loadArchive().filter(function (m) { return (m.account || 'acc1') === curAcct; });
+    // ★作成履歴(🗂投稿完了ぶん)も同じく日付が昔(古い)を一番上へ(Chami依頼2026-08-19「ドラフトの作成履歴も！」)。
+    //   並べる鍵はカードに出している「完了」日時(completedTs)＝見えている日付と一致させる(無ければ ts)。
+    //   これも表示専用=archはloadArchive()のフィルタ済みコピーなので、保存側(unshiftで新しい順・ARCHIVE_MAX間引き・id単位union同期)は不変。
+    arch.sort(function (a, b) { return ((a.completedTs || a.ts || 0) - (b.completedTs || b.ts || 0)); });
     // ★保存中(未着地)ドラフト=メモリ上の pending だけ。着地(commitPendingDraft_)で metas 側へ移るので、
     //   既に metas に居る id は除外して重複を防ぐ(B・Fable5設計2026-08-17)。
     var _metaIds = {}; metas.forEach(function (m) { _metaIds[m.id] = 1; });
