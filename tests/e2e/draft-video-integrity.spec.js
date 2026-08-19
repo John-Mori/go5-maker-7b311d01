@@ -65,7 +65,15 @@ test.describe('ドラフト動画の完全性ゲート', () => {
       }));
     });
 
-    await page.waitForURL(/Stock\.html/, { timeout: 10000 });
+    // ★2026-08-17のB設計で着地後はページ内ドラフト表示(#pageStock)へ切替=破壊遷移(location.href='Stock.html')は
+    //   しない(8/15の未着地遷移=全滅の再発防止)。よって「ドラフトページへ進む」の実物は URL遷移ではなく
+    //   「メタが videoReadyAt で確定し、ページ内ドラフト面が前面に出る」こと。旧 waitForURL(/Stock.html/) は
+    //   この変更に取り残されて永久タイムアウトしていた(スモーク15連赤の唯一因・版ずれ検知を覆い隠していた)。
+    await page.waitForFunction(() => {
+      const list = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
+      return !!(list[0] && list[0].videoReadyAt);
+    }, { timeout: 10000 });
+    await expect(page.locator('#pageStock')).toBeVisible();
     const saved = await page.evaluate(async () => {
       const list = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
       const meta = list[0] || null;
