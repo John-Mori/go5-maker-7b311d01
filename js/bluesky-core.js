@@ -474,9 +474,41 @@
     return w + urls.length * X_URL_WEIGHT;
   }
 
+  /**
+   * X欄用：短縮していない生リンクを本文から一掃する純粋関数(Chami依頼2026-08-19③
+   *   「X(Twitter)用投稿テキストは短縮してないリンクを記載しないで」・msg1539576234491510876)。
+   * text 中の http(s) URL のうち「短縮済みホスト」でないもの(＝生リンク)を、
+   *   - workRaw と一致し workShort があれば workShort(計測付き短縮URL)へ、
+   *   - それ以外(前に作った作品の生リンクが残っている等)は pending(取得中の目印)へ
+   * 差し替える。短縮済みホストのURLはそのまま残す。
+   * ★従来のX欄ガードは「現在の resolveAffLink() と完全一致する生リンク」しか差し替えず、
+   *   前作の残りリンク等(現在の作品と一致しない生リンク)を素通ししていた。ここは一致に依らず
+   *   「短縮済みホストでない全URL」を落とすので、どの経路で紛れ込んだ生リンクも表示から消える。
+   * @param {string} text
+   * @param {{isShort?:function(string):boolean, workRaw?:string, workShort?:string, pending?:string}} [opts]
+   *   isShort(url)=そのURLが短縮済みホストかを返す関数(ホスト判定は呼び出し側が注入する)。
+   * @returns {{text:string, replacedRaw:boolean}} replacedRaw=生リンクをpendingへ落とした(＝短縮取得が要る)
+   */
+  function sanitizeXLinks(text, opts) {
+    opts = opts || {};
+    var isShort = typeof opts.isShort === 'function' ? opts.isShort : function () { return false; };
+    var workRaw = opts.workRaw || '';
+    var workShort = opts.workShort || '';
+    var pending = opts.pending || '';
+    var replacedRaw = false;
+    var out = String(text == null ? '' : text).replace(/https?:\/\/[^\s]+/g, function (u) {
+      if (isShort(u)) return u;                                   // 既に短縮済み＝触らない
+      if (workShort && workRaw && u === workRaw) return workShort; // 現作品の短縮版へ差し替え
+      replacedRaw = true;
+      return pending;                                            // 生リンクは一切出さない
+    });
+    return { text: out, replacedRaw: replacedRaw };
+  }
+
   var api = {
     DEFAULT_SERVICE: DEFAULT_SERVICE,
     buildBlueskyPost: buildBlueskyPost,
+    sanitizeXLinks: sanitizeXLinks,
     stripAutoBlocks: stripAutoBlocks,
     WORK_LINK_PLACEHOLDER: WORK_LINK_PLACEHOLDER,
     fillWorkLinkPlaceholder: fillWorkLinkPlaceholder,

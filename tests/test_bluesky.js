@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate } = require('../js/bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate, sanitizeXLinks } = require('../js/bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -496,6 +496,49 @@ test('P-19: ★作品置換はセール語を食わない(「セール紹介短�
   assert.strictEqual(hasWorkLinkPlaceholder('(セール紹介短縮用URL)'), false);
   assert.strictEqual(fillWorkLinkPlaceholder('(セール紹介短縮用URL)', 'https://yoz2.com/WORK', ''),
     '(セール紹介短縮用URL)');
+});
+
+// SX-1〜SX-6  sanitizeXLinks：X欄には短縮していないリンクを一切出さない(Chami依頼2026-08-19③・
+//   msg1539576234491510876「前に作った作品の生リンクが残ってて表示されてる」)。
+//   ★従来のX欄ガードは「現在の作品リンクと完全一致する生リンク」しか差し替えなかったため、前作の
+//     残りリンク等(一致しない生リンク)が生のままX欄に出ていた。sanitizeは一致に依らず生リンクを落とす。
+const _isShort = (u) => /^https?:\/\/(5mgl\.com|yoz2\.com|da\.gd|tinyurl\.com)\//.test(u);
+test('SX-1: ★前作の残り生リンク(現作品と不一致)も取得中の目印へ落とす=生を出さない', function () {
+  const raw = 'https://al.fanza.co.jp/?lurl=x&af_id=rrriiias-055&ch=toolbar';
+  const t = '本文\n\n↓詳しくはこちらから🌙 #PR #漫画\n' + raw;
+  const r = sanitizeXLinks(t, { isShort: _isShort, workRaw: 'https://al.fanza.co.jp/?lurl=OTHER&af_id=z', workShort: 'https://yoz2.com/NEW', pending: '(短縮リンク取得中…)' });
+  assert.strictEqual(r.text.indexOf('al.fanza.co.jp'), -1, '生リンクは残ってはいけない');
+  assert.strictEqual(r.text, '本文\n\n↓詳しくはこちらから🌙 #PR #漫画\n(短縮リンク取得中…)');
+  assert.strictEqual(r.replacedRaw, true);
+});
+test('SX-2: 現作品の生リンク＋短縮キャッシュ有り=短縮版へ差し替え', function () {
+  const raw = 'https://al.fanza.co.jp/?lurl=x&af_id=y';
+  const r = sanitizeXLinks('見出し\n' + raw, { isShort: _isShort, workRaw: raw, workShort: 'https://5mgl.com/AB1', pending: '(短縮リンク取得中…)' });
+  assert.strictEqual(r.text, '見出し\nhttps://5mgl.com/AB1');
+  assert.strictEqual(r.replacedRaw, false, '短縮へ差し替えた=取得は不要');
+});
+test('SX-3: 既に短縮済み(短縮ホスト)のURLはそのまま残す', function () {
+  const t = '本文\nhttps://5mgl.com/AB1\nおわり';
+  const r = sanitizeXLinks(t, { isShort: _isShort, workRaw: '', workShort: '', pending: '(短縮リンク取得中…)' });
+  assert.strictEqual(r.text, t);
+  assert.strictEqual(r.replacedRaw, false);
+});
+test('SX-4: URLを含まない本文は無変化', function () {
+  const t = 'おすすめ漫画見つけた💕\n\n↓詳しくはこちらから🌙 #PR #漫画';
+  const r = sanitizeXLinks(t, { isShort: _isShort, pending: '(短縮リンク取得中…)' });
+  assert.strictEqual(r.text, t);
+  assert.strictEqual(r.replacedRaw, false);
+});
+test('SX-5: 生リンクと短縮リンクが混在=生だけ落とし短縮は残す', function () {
+  const raw = 'https://al.fanza.co.jp/?lurl=x&af_id=y';
+  const t = raw + '\n\n⭐セールはこちら\nhttps://yoz2.com/S1';
+  const r = sanitizeXLinks(t, { isShort: _isShort, workRaw: '', workShort: '', pending: '(短縮リンク取得中…)' });
+  assert.strictEqual(r.text, '(短縮リンク取得中…)\n\n⭐セールはこちら\nhttps://yoz2.com/S1');
+  assert.strictEqual(r.replacedRaw, true);
+});
+test('SX-6: isShort未指定なら安全側=全URLを短縮扱いせず落とす(生を出さない)', function () {
+  const r = sanitizeXLinks('x https://al.fanza.co.jp/?a=1 y', { pending: '(短縮リンク取得中…)' });
+  assert.strictEqual(r.text, 'x (短縮リンク取得中…) y');
 });
 test('P-20: ★セール置換は作品語を食わない(「商品紹介短縮URL」をセールにしない)', function () {
   assert.strictEqual(hasSaleLinkPlaceholder('(商品紹介短縮URL)'), false);

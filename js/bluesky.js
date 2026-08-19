@@ -2928,18 +2928,29 @@
       // 短縮URLオーバーライド時：本文内の生リンクを差し替え(手動プレビュー用。実際のコピー時は
       // measureWorkLink_ が同じ計測付き短縮へ差し替えるため、押し忘れても生リンクのままにはならない)
       if (_xOverrideShort && rawLink && base.indexOf(rawLink) >= 0) {
-        return base.replace(rawLink, _xOverrideShort);
-      }
-      // ★composePostTextは実送信時の安全網として生の長いリンクへフォールバックすることがある
-      //   (紹介用短縮リンクの取得が間に合わなかった場合)。表示欄には生リンクを一切出さない
-      //   (Chami指定2026-07-23・Blueskyプレビューと同じ方針)ので、ここで短縮版か取得中の目印へ
-      //   差し替える。取得中ならensureWorkShortLink_を起動し、出来次第X欄も再構成する
-      //   (go5-work-short-readyイベント経由・composePostText側と二重発火しない共有キャッシュ)。
-      if (rawLink && base.indexOf(rawLink) >= 0) {
+        base = base.split(rawLink).join(_xOverrideShort);
+      } else if (rawLink && base.indexOf(rawLink) >= 0) {
+        // ★composePostTextは実送信時の安全網として生の長いリンクへフォールバックすることがある
+        //   (紹介用短縮リンクの取得が間に合わなかった場合)。現在の作品の生リンクは短縮版か取得中の目印へ。
         var short = cachedWorkShortLink_();
-        if (short) return base.split(rawLink).join(short);
-        ensureWorkShortLink_(function () {}); // composePostText側と同じキャッシュ・二重取得はしない
-        return base.split(rawLink).join(X_LINK_PENDING);
+        if (short) base = base.split(rawLink).join(short);
+        else { ensureWorkShortLink_(function () {}); base = base.split(rawLink).join(X_LINK_PENDING); }
+      }
+      // ★最終の安全網(Chami依頼2026-08-19③・msg1539576234491510876「前に作った作品の生リンクが残ってる」)。
+      //   上の差し替えは「現在の resolveAffLink() と完全一致する生リンク」しか拾わないため、前作の残り等
+      //   一致しない生リンクは素通りしてX欄に生のまま出ていた。ここで一致に依らず「短縮済みホストでない
+      //   http(s)URL」を全て短縮版(あれば)か取得中の目印へ落とす=X欄には短縮していないリンクを一切出さない。
+      if (window.BlueskyCore && window.BlueskyCore.sanitizeXLinks) {
+        var _san = window.BlueskyCore.sanitizeXLinks(base, {
+          isShort: function (u) { return !!(window.isShortenedUrl && window.isShortenedUrl(u, shortHostList_())); },
+          workRaw: rawLink,
+          workShort: cachedWorkShortLink_(),
+          pending: X_LINK_PENDING
+        });
+        base = _san.text;
+        // 生リンクを目印へ落とし、かつ現在の作品リンクがある＝短縮を取りに行けば埋まる。取れれば
+        //   go5-work-short-ready で refreshXTweet が再構成する(前作の残りで取れない時は目印のまま=生は出ない)。
+        if (_san.replacedRaw && rawLink && !cachedWorkShortLink_()) { try { ensureWorkShortLink_(function () {}); } catch (e) {} }
       }
       return base;
     }
