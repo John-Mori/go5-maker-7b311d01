@@ -65,6 +65,19 @@ JP_WITH_CODE = (
     "直したよ。差分はこれ。\n```js\nfunction resolveWorkLink(url){ return shorten(url) }\n```\n"
     "これで作品リンクは投稿直前に短縮へ差し替わる。"
 )
+# ★英語前置き+日本語本文の混在(実物 オタコン msg 1540768290568409130 を模した形)。
+#   detect_english_dump は日本語が多くて鳴らない=strip_english_preamble が剥がすべき対象。
+PREAMBLE_JP = (
+    "Confirmed at line 1408: applyPreview early-returns when prevB is null, and the "
+    "previewReady chain yields null exactly when the preview was never captured. So the "
+    "black history thumbnails are the downstream of the same capturePreview bug I fixed "
+    "today. Reporting honestly:\n"
+    "追えたよ。これ、別々の壊れ方が2つ重なってる——分けて話す。"
+    "(1)履歴サムネが真っ黒: これは今日直した capturePreview_ の穴の下流だ。"
+    "投稿完了時にプレビュー実体が撮れてないと applyPreview が早期returnして画像を1枚も書かない。"
+)
+# 先頭が固有名詞だけの短い英字=通常返信。剥がしてはいけない。
+LEADING_NOUN = "GitHub Pages に v=879 を反映した。プレビューは効いてる。確認済み。"
 
 
 def test_detect():
@@ -112,8 +125,41 @@ def test_gate_ladder():
     _check("strip_markerで再生成本文の印を除去", out == "直したよ。保存は効いてる。" and info["regenerated"])
 
 
+def test_strip_preamble():
+    # C-1 英語前置き+日本語本文 → 前置きを剥がし、日本語本文が頭から残る(実物パターン)
+    out, info = d.strip_english_preamble(PREAMBLE_JP)
+    _check("C-1 英語前置きを剥離(stripped=True)", info["stripped"])
+    _check("C-1 剥離後は日本語本文から始まる", out.startswith("追えたよ。"))
+    _check("C-1 英語前置きが本文から消えている",
+           ("Confirmed" not in out) and ("Reporting honestly" not in out))
+    _check("C-1 日本語本文は保全(履歴サムネの説明が残る)", "履歴サムネが真っ黒" in out)
+
+    # C-2 頭から日本語(固有名詞混じり)→ 剥がさない(通常返信は不変)
+    out, info = d.strip_english_preamble(LEADING_NOUN)
+    _check("C-2 頭から日本語は不変(stripped=False)", (not info["stripped"]) and out == LEADING_NOUN)
+
+    # C-2' 既存の混在サンプル(頭から日本語)も不変=誤って剥がさない
+    out, info = d.strip_english_preamble(MIXED)
+    _check("C-2' 混在(頭から日本語)は不変", (not info["stripped"]) and out == MIXED)
+
+    # C-3 まるごと英語(日本語が薄い)→ 剥がさない=english_gate の suppress/翻訳へ委ねる
+    out, info = d.strip_english_preamble(ENGLISH)
+    _check("C-3 まるごと英語は剥がさず後段へ委ねる(stripped=False)",
+           (not info["stripped"]) and out == ENGLISH)
+
+    # コード柵で始まる本文は剥がさない(コードを誤除去しない・安全側)
+    code_head = "```js\nfunction f(){ return doSomethingEnglishAndLong(x) }\n```\n直したよ。これで動く。効いてる。"
+    out, info = d.strip_english_preamble(code_head)
+    _check("先頭コード柵は剥がさない", (not info["stripped"]) and out == code_head)
+
+    # fail-safe: None/空でも例外を出さず不変
+    out, info = d.strip_english_preamble(None)
+    _check("Noneは例外を出さず不変", (not info["stripped"]) and out == "")
+
+
 if __name__ == "__main__":
     test_detect()
     test_gate_ladder()
+    test_strip_preamble()
     print("\n%d PASS / %d FAIL" % (_PASS, _FAIL))
     sys.exit(1 if _FAIL else 0)

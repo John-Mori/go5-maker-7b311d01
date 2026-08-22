@@ -3481,6 +3481,63 @@ def english_gate(text, regen=None, translate=None, strip_marker=None):
         return str(text or ""), info
 
 
+# ----------------------------------------------------------------------------
+# 出力ゲート(英語前置きの剥離)= 英語の段落が頭に付き、そのあと日本語本文が続く混在  2026-08-23
+# ----------------------------------------------------------------------------
+# Chami原文(2026-08-23・msg 1540768290568409130)=「英文要らんって言ってんのにずっと治らない
+#   から防止策を考えて実装して」。実物= オタコン便が
+#   "Confirmed at line 1408: applyPreview early-returns … Reporting honestly:" と英語の分析段落を
+#   頭に置き、そのあと「追えたよ。これ、別々の壊れ方が…」と日本語本文へ移った。
+#
+# なぜ detect_english_dump(まるごと英語)が見逃したか(真因):
+#   あのゲートの閾値は latin>=40 かつ jp<=latin*0.15 =**本文の全部が英語**の時だけ鳴る。
+#   混在(英語段落数百字+日本語本文数百字)は日本語が多く jp<=latin*0.15 を満たさない=素通り。
+#   前回(83f5256)は「日本語+英単語数十字」を誤検知しないよう**わざと混在を除外**した。その除外の
+#   縁に、今回の「英語段落が頭に付く」パターンがはまった=別形の再発(C-038)。
+#
+# 直しの向き(suppress とは分ける・意図的):
+#   まるごと英語=救う日本語が無い→english_gate が再生成/言い換え/保留で処理する(従来どおり)。
+#   混在=**日本語本文は良い**→英語前置きだけ外科的に剥がして本文を残す(握り潰さない)。
+#   だから english_gate の**手前**に置き、剥がした残り(日本語本文)を後段へ渡す。
+#
+# 安全弁(通常返信を1ミリも変えない):
+#   ・頭から日本語なら触らない(前置き無し)。日本語がゼロ(まるごと非日本語)も触らない→suppressへ委ねる。
+#   ・先頭の英字が散文量(40字)未満=固有名詞/URL/短い前置き→触らない。
+#   ・先頭にコード柵``` があれば触らない(コードを誤って剥がさない・安全側)。
+#   ・剥がした残りの日本語が薄い(20字未満)=実質まるごと英語→触らない→suppress/翻訳へ委ねる。
+def strip_english_preamble(text):
+    """先頭の英語前置き(段落)だけを剥がし、日本語本文を残す(純関数・テスト可・fail-safe)。
+
+    返り値: (out_text, {"stripped":bool, "removed_latin":int})
+      stripped=False のとき out_text は入力と同一(通常返信は不変)。
+    """
+    info = {"stripped": False, "removed_latin": 0}
+    try:
+        s = str(text or "")
+        m = _JP_RE.search(s)
+        if not m:
+            return s, info                     # 日本語ゼロ=まるごと非日本語→suppressへ委ねる
+        cut = m.start()
+        if cut == 0:
+            return s, info                     # 頭から日本語=前置き無し
+        head = s[:cut]
+        if "```" in head:
+            return s, info                     # 先頭コード柵は剥がさない(安全側)
+        core = re.sub(r"`[^`]*`", " ", head)   # インラインコード/URLを除いて散文の英字量を測る
+        core = re.sub(r"https?://\S+", " ", core)
+        head_latin = len(_LATIN_RE.findall(core))
+        if head_latin < 40:
+            return s, info                     # 固有名詞/短い前置き=通常返信、触らない
+        body = s[cut:].lstrip(" \t\r\n")       # 日本語本文の頭から採用
+        if len(_JP_RE.findall(body)) < 20:
+            return s, info                     # 残りが薄い=実質まるごと英語→suppress/翻訳へ委ねる
+        info["stripped"] = True
+        info["removed_latin"] = head_latin
+        return body, info
+    except Exception:
+        return str(text or ""), info           # fail-safe: ゲートで配送を殺さない
+
+
 # ============================================================================
 # replied の確認 (提案書§6/§12・2026-07-27実装)
 # ----------------------------------------------------------------------------
@@ -5527,6 +5584,16 @@ class Daemon:
                 f"2回目混入={'有' if _hg.get('hit2') else '無'} "
                 f"警告付与={'有' if _hg.get('warned') else '無(再生成で解消)'} msg={mid}")
         reply = _reply2
+        # ★★出力ゲート(英語前置きの剥離)= 英語の分析段落が頭に付き、そのあと日本語本文が続く混在
+        #   (2026-08-23 Chami「英文要らんって言ってんのにずっと治らない」・msg 1540768290568409130)。
+        #   detect_english_dump(まるごと英語)は日本語が多くて鳴らない穴=別形の再発(C-038)。
+        #   ★english_gate の**手前**で先頭の英語段落だけ外科的に剥がし、良い日本語本文は残す
+        #     (まるごと英語は剥がさず下の english_gate の suppress/翻訳へ委ねる=住み分け)。
+        #   ★通常返信(頭から日本語/固有名詞だけ/薄い日本語)は strip_english_preamble が触らない=不変。
+        _reply_pre, _pre = strip_english_preamble(reply)
+        if _pre.get("stripped"):
+            log(self.dept, f"★出力ゲート(英語前置き剥離): 英字{_pre['removed_latin']}字の前置きを除去 msg={mid}")
+            reply = _reply_pre
         # ★★出力ゲート(英文ダンプ)= 日本語話者の部屋にClaude原文の英語がそのまま出る事故
         #   (2026-08-18 Chami「謎英文の表示無駄だからやめて」・2026-07-21 ORG-23の再発)。
         #   ハングル(ルールA)と同クラスの非日本語混入。同じ合流点に兄弟として置く=全経路が通る1点。
