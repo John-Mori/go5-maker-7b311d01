@@ -456,6 +456,26 @@ def _run():
         ok = False
         print(f"[FAIL] H-10 session_relay を読めない ({type(e).__name__})")
 
+    # ★H-11= 突き放し句カテゴリ(2026-08-23 人事部門が先置きした5語)を**刃として拾えること**。
+    #   ハ4は JSON を都度読みするだけでカテゴリを増やせる=コード側は変えない。
+    #   だからこそ「語が登録から落ちても誰も気づかない」= それをここで赤くする。
+    push_away = ["どうでもいい", "自業自得", "勝手にしろ", "勝手にすれば", "もう知らない"]
+    _ames = (rules.get("personas") or {}).get("アメス") or {}
+    harsh_all = [str(x) for x in (_ames.get("harsh_edge_markers") or [])]
+    care_all = [str(x) for x in (_ames.get("care_markers") or [])]
+    gone = [w for w in push_away if w not in harsh_all]
+    t11 = ("もう知らない。あたしは言うだけ言ったわ。あとは勝手にしろ。"
+           "どうでもいいことに時間を使うのはアンタの自由よ。")
+    fired = harshness_drift(t11, harsh_all, care_all)[0]
+    # must-fail= 5語を抜いたら**鳴らなくなる**こと(=この判定が5語で立っている証拠)
+    without = harshness_drift(t11, [w for w in harsh_all if w not in push_away], care_all)[0]
+    if not gone and fired and not without:
+        print("[PASS] H-11 突き放し句5語が刃として効いている"
+              "(抜くと鳴らない=この検査が空PASSでない証拠)")
+    else:
+        ok = False
+        print(f"[FAIL] H-11 未登録={gone} / 発火={fired} / 5語を抜いた時={without}")
+
     print("=== 全PASS ===" if ok else "=== FAIL あり ===")
     return 0 if ok else 1
 
