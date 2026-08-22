@@ -1946,6 +1946,50 @@ def _apply_transcript(entry, tr):
     return ctx
 
 
+def _bump_peak(entry, ctx):
+    """その世代の**山**(context_peak_tokens)を更新する唯一の場所。山は定義上下がらない。
+
+    ★ORG-46 の教訓= 同じ写像を2か所に置くと必ず片方だけ直る。写す先は1本にする。
+    """
+    try:
+        c = int(ctx or 0)
+    except (TypeError, ValueError):
+        return entry
+    if c <= 0:
+        return entry
+    try:
+        if c > int(entry.get("context_peak_tokens") or 0):
+            entry["context_peak_tokens"] = c
+    except (TypeError, ValueError):
+        entry["context_peak_tokens"] = c
+    return entry
+
+
+def _remeasure(entry, sid):
+    """**便の外で走った重い呼び出しの後**に記録ファイルを読み直し、台帳へ写す。戻り値= ctx。
+
+    ★★2026-08-22(研究室HQ msg 1540668457220186163 §5 の実測)。台帳の山と記録ファイルの
+      実測が食い違っていた= aegis-gl 台帳 156,108 / 実物 206,448。差の中身は
+      **引き継ぎのチェックポイント便そのもの**だった:
+        18:23:29〜18:29:14 普通の便       → relayが測って 156,108 を台帳へ
+        18:31:19〜18:37:17 チェックポイント便 → 166,712 から 206,448 へ(+39,736)。台帳は無反応
+      `_handoff_checkpoint` は `_write_handoff`(=同じセッションへ重い便を1本撃つ)を呼ぶのに
+      **その後に測り直していなかった**。結果、台帳はこの世代で一番重かった瞬間を構造的に
+      見落とす=山で判定する定期リフレッシュがまた谷を見る(ORG-46 第2形の再演)。
+      ★C-048= 機械の値は**書いた後の実物を読み直して**言う。撃った後に測り直すのが正。
+    """
+    tr = read_transcript(sid) if sid else None
+    if not tr or not tr.get("context_tokens"):
+        return 0
+    ctx = _apply_transcript(entry, tr)
+    if not ctx:
+        return 0
+    entry["context_tokens"] = ctx
+    entry["last_usage_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    _bump_peak(entry, ctx)
+    return ctx
+
+
 def _note_usage(entry, data, now, sid=None):
     """対応表の1部屋分へ使用量を記録する(★保存は呼び元の save_room=既存の原子的更新)。
 
@@ -1998,11 +2042,7 @@ def _note_usage(entry, data, now, sid=None):
         #   「文脈が軽いので見送る」を8回くり返していた=**見送りの理由文が嘘になっていた**。
         #   → 山(peak)で判定する。軽いセッションを無駄に交代させないという趣旨は生きる
         #     (本当に軽い部屋は山も 100,000 に届かない)。
-        try:
-            if ctx > int(entry.get("context_peak_tokens") or 0):
-                entry["context_peak_tokens"] = ctx
-        except (TypeError, ValueError):
-            entry["context_peak_tokens"] = ctx
+        _bump_peak(entry, ctx)                   # ★山を書くのは _bump_peak 1か所だけ
     # ★turnsは自前で+1する。CLIの num_turns は**そのセッションの内部ステップ数**であって
     #   「Chamiと何往復したか」ではない(道具を使うと1便で何回も増える)。参考値として別名で残す。
     try:
@@ -3762,9 +3802,14 @@ def _handoff_checkpoint(dept, conf, token, sid, generation, ctx):
     entry["handoff_ckpt_ctx"] = int(ctx or 0)
     entry["handoff_ckpt_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     entry["handoff_ckpt_ok"] = bool(path)
+    # ★★チェックポイント便は**この世代で一番重い便**になりうる(実測 aegis-gl= +39,736)。
+    #   撃ちっぱなしにすると台帳が谷のまま止まる= 山で判定する定期リフレッシュが嘘をつく。
+    #   撃った後に記録ファイルを読み直して写す(C-048)。詳細は `_remeasure` の説明。
+    after = _remeasure(entry, sid)
     save_room(dept, entry)
     return bool(path), (f"引き継ぎのチェックポイント {'成功' if path else '失敗'} "
-                        f"path={path or 'なし'} 冒頭={head[:60]!r}")
+                        f"path={path or 'なし'} 冒頭={head[:60]!r}"
+                        + (f" 撃った後の実測={after:,}(撃つ前 {int(ctx or 0):,})" if after else ""))
 
 
 def _need_handoff_checkpoint(entry, ctx):

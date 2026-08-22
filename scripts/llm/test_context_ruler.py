@@ -200,6 +200,48 @@ try:
 finally:
     sr.read_transcript = real_rt
 
+print("== 引き継ぎのチェックポイントの後も測り直す(研究室HQ msg 1540668457220186163 §5) ==")
+# ★実測(aegis-gl 2026-08-22)= 台帳の山 156,108 に対し記録ファイルの実測は 206,448。
+#   差の中身は**引き継ぎのチェックポイント便そのもの**だった=
+#     18:23:29〜18:29:14 が普通の便(relayが測って 156,108 を台帳へ)
+#     18:31:19〜18:37:17 がチェックポイント便(166,712 → 206,448 まで +39,736)
+#   `_handoff_checkpoint` は `_write_handoff` を撃つが**その後に測り直していなかった**ので、
+#   台帳は「この世代で一番重かった瞬間」を構造的に見落とす。山で判定する定期リフレッシュが
+#   また谷を見る=C-048(書いた後の実物を読み直して言え)の同じ穴。
+_real = (sr._write_handoff, sr.load_sessions, sr.save_room, sr.read_transcript)
+_saved = {}
+try:
+    sr._write_handoff = lambda *a, **k: ("/tmp/handoff.md", "冒頭")   # 外へ出る手だけ偽物
+    _entry = {"generation": 20, "context_tokens": 156108,
+              "context_peak_tokens": 156108, "floor_tokens": FLOOR}
+    sr.load_sessions = lambda: {"aegis-gl": _entry}
+    sr.save_room = lambda dept, e: _saved.update({dept: e})
+    # チェックポイント便が終わった直後の記録ファイル= 206,448 まで伸びている
+    sr.read_transcript = lambda sid, cwd=None: {
+        "context_tokens": 206448, "carry_tokens": 0, "floor_tokens": FLOOR,
+        "post_compact": False, "compact_count": 1, "last_compact": None}
+    ok_ck, info = sr._handoff_checkpoint("aegis-gl", {}, "tok", "19eecdb8", 20, 156108)
+finally:
+    (sr._write_handoff, sr.load_sessions, sr.save_room, sr.read_transcript) = _real
+
+_e = _saved.get("aegis-gl") or {}
+check("チェックポイントの後に文脈を測り直して台帳へ書く",
+      int(_e.get("context_tokens") or 0) == 206448, str(_e.get("context_tokens")))
+check("★山が実測へ追いつく(谷のまま置き去りにしない)",
+      int(_e.get("context_peak_tokens") or 0) == 206448, str(_e.get("context_peak_tokens")))
+check("チェックポイントの記録(撃った文脈・時刻・成否)は従来どおり残る",
+      _e.get("handoff_ckpt_ok") is True and int(_e.get("handoff_ckpt_ctx") or 0) == 156108,
+      str({k: _e.get(k) for k in ("handoff_ckpt_ok", "handoff_ckpt_ctx")}))
+check("★変異: 測り直しを外すと山は谷(156,108)のまま",
+      156108 < 206448 and int(_e.get("context_peak_tokens") or 0) != 156108,
+      "測り直しが効いていない")
+check("★山の更新は1か所を通す(_bump_peak)", hasattr(sr, "_bump_peak"))
+_pe = {"context_peak_tokens": 300}
+sr._bump_peak(_pe, 100)
+check("★_bump_peak: 山は下がらない", _pe["context_peak_tokens"] == 300, str(_pe))
+sr._bump_peak(_pe, 400)
+check("★_bump_peak: 山は上がる", _pe["context_peak_tokens"] == 400, str(_pe))
+
 print("== 変異検査(旧仕様へ戻したら落ちること) ==")
 old = POST                                   # 旧: postTokens をそのまま文脈とした
 check("★変異: 旧仕様なら床込みの値と一致しない", old != POST + FLOOR)
