@@ -1698,11 +1698,10 @@ DEPT_CONF = {
             {"persona": "田中琴葉", "character": os.path.join(_CHAR, "kotoha.md"),
              "role": "講師(記録整理・復習設計)",
              "aliases": ("kotoha", "琴葉", "田中琴葉")},
-            # ★姫崎莉波は専用characterfileが**未作成**(hr/characters/ に無い=実測)。
-            #   manifest の本人の項が原典だと manifest 自身が書いているので、そこを指す。
-            {"persona": "姫崎莉波",
-             "character": os.path.join(HQ, "departments", "hr", "personas",
-                                       "learning-coach", "persona_manifest.yml"),
+            # ★2026-08-23 人事部門が専用characterfileを編纂(rinami.md・commit 4a90254)。
+            #   旧= persona_manifest.yml を指していた(characterfile未作成だったため)。
+            #   manifest は tone正本として rinami.md 側から参照される=ここは rinami.md が正。
+            {"persona": "姫崎莉波", "character": os.path.join(_CHAR, "rinami.md"),
              "role": "講師(実務・演習)",
              "aliases": ("rinami", "莉波", "姫崎莉波")},
         ],
@@ -2429,6 +2428,63 @@ DEPT_CONF = {
             "- **ぼかすな**(裁定C-013)。健康・特性も**はっきり言ってよい**。"
             "Chami原文=「遠回しに表現を避けるとか煩わしい」「はっきり言ってもらった方が助かる」。\n"
             "- ★**ネットへ出すな**= GitHub・D1・外部サービス・Web検索。**local/ の中だけで完結させる。**"
+        ),
+    },
+    # ==== 2026-08-23 配線=「何でも相談ルーム」(Chami指示・経営企画ジェンティルドンナ経由 =
+    #      msg 1540765670780960880 / 1540766748574490694 / 依頼便 1540767234551709756)====
+    # ★用途= Chamiが直近の出来事を**内容・カテゴリー問わず何でも**打ち込む相談チャット。
+    # ★構成= past-room / future-room と同じ多人格モード(session_relay + conversation_only)。
+    #   誰として答えるかは**セッション本人が選ぶ**(判定を外部へ出さない)。返信1行目 `[名前]`。
+    # ★名簿(Chami指定)= 「過去の整理と共有」と同じ5人 + 学習室の講師陣3人 + カスミ + ククール。
+    #   過去の整理と共有 = アメス / ヴィルシーナ / ジェンティルドンナ / オタコン / 十王星南
+    #   講師陣(=学習と癒しのルームの講師)= ヴィルシーナ(重複) / 田中琴葉 / 姫崎莉波
+    #   → 重複を畳んだ9人。★全員 characterfile と原典(persona_source_exists)と
+    #     persona_avatars.json を2026-08-23に実測して入れた(原典無しは演じない=Chami 2026-07-20)。
+    #   ★「講師陣」= 学習室の講師トリオと解した。**中野五月は含めない**
+    #     (Chami 2026-08-12「彼女はローカルLLM専任」で学習室講師から外れている)。違えばChami訂正で足す。
+    #   ★ククールは past/future(機微室)には出さないがChami判断=**この部屋は機微室でなく相談室**なので
+    #     名簿どおり入れる(過去の除外は「機微室に限る」限定だった)。
+    "soudan-room": {
+        "character": os.path.join(_CHAR, "ames.md"),
+        "memory": os.path.join(_MEM, "soudan-room.jsonl"),
+        "persona": "アメス",            # 名義が引けない時のfail-safe先(既定の精霊名)
+        "port": 18831,                  # 18830まで使用済(実測 2026-08-23)
+        "work_model": "opus",           # 人格の演技担保(C-014・past-room等と同形)
+        "session_relay": True,
+        "conversation_only": True,      # 回送も作業判定もしない=その場で答え切る相談部屋
+        "personas": [
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "補佐・率直な他者視点", "aliases": ("ames", "アメス")},
+            {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
+             "role": "講師兼任", "aliases": ("verxina", "シーナ")},
+            {"persona": "ジェンティルドンナ", "character": os.path.join(_CHAR, "gentildonna.md"),
+             "role": "品質と規律(QA兼任)", "aliases": ("gentildonna", "ドンナ", "ドンちゃん")},
+            {"persona": "オタコン", "character": os.path.join(_CHAR, "otacon.md"),
+             "role": "QA兼任", "aliases": ("otacon", "ハル")},
+            {"persona": "十王星南", "character": os.path.join(_CHAR, "sena.md"),
+             "role": "選定眼", "aliases": ("sena", "星南", "十王")},
+            {"persona": "田中琴葉", "character": os.path.join(_CHAR, "kotoha.md"),
+             "role": "講師(記録整理・復習設計)", "aliases": ("kotoha", "琴葉", "田中琴葉")},
+            # ★2026-08-23 rinami.md へ差し替え(人事部門 msg 1540776424628035655)
+            {"persona": "姫崎莉波", "character": os.path.join(_CHAR, "rinami.md"),
+             "role": "講師(実務・演習)", "aliases": ("rinami", "莉波", "姫崎莉波")},
+            {"persona": "カスミ", "character": os.path.join(_CHAR, "kasumi.md"),
+             "role": "", "aliases": ("kasumi", "カスミ")},
+            {"persona": "ククール", "character": os.path.join(_CHAR, "kukuru.md"),
+             "role": "補佐・軽口", "aliases": ("kukuru", "ククール")},
+        ],
+        "boot_note": (
+            "■この部屋の性格(必ず守る。出典= Chami指示 2026-08-23・経営企画経由)\n"
+            "- **D:\\SougouStartFolder\\00_AI-HQ\\departments\\00_common\\Chami台帳.md を読め。**"
+            "Chamiの思考・好み・特性の正本だ。\n"
+            "- ここは **Chamiが直近の出来事を内容・カテゴリー問わず何でも打ち込む相談チャット**。"
+            "話題は毎回変わる=固定の役割・専属を作らない。\n"
+            "- ★**濃度(合唱にしない)**= 全員で一斉に返さない。**その話題に強く関わるキャラが1人前に出て**答える。"
+            "**観点が割れる時だけもう1人足す**(2人まで)。読みにくくしない。\n"
+            "- ★**名指しがあればそのキャラが答える**(返信1行目に `[名前]`)。名指しが無い時は"
+            "話題に応じて誰が出るかを**セッション本人が選ぶ**(固定の主は置かない)。\n"
+            "- **ぼかすな**(裁定C-013)。健康・特性も local/ の中でははっきり言ってよい。"
+            "★**ネットへ出すな**= GitHub・D1・外部サービス・Web検索。**local/ の中だけで完結。**"
         ),
     },
     # ==== 2026-07-27 配線した5部屋(研究室HQ発注)====
