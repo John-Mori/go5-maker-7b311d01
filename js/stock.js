@@ -543,7 +543,16 @@
     try {
       var cv = $('cv');
       if (!cv || !cv.width) return Promise.resolve(null);
-      return toBlobSafe_(cv, 'image/jpeg', 0.85, 6000);
+      // ★captureThumb_ と同じ握り(Chami報告2026-08-23「画像1枚しか保存されない」の真因)。
+      //   仕上がりプレビューだけ async の canvas.toBlob(toBlobSafe_)に依存していたため、iOS Safari で
+      //   toBlob のコールバックが不達だと prevBlob=null になり stock_prev_ が保存されず、投稿完了時に
+      //   動画+元画像は入るのにプレビューだけ丸ごと欠ける沈黙経路になっていた(サムネ=captureThumb_ は
+      //   2026-08-13① で toDataURL 同期化済みだったが、こちらは async のまま取り残されていた)。
+      //   #cv は同一オリジン(背景mp4＋ユーザー画像)なので toDataURL は taint で投げない=まず同期で確実に得る。
+      var durl = ''; try { durl = cv.toDataURL('image/jpeg', 0.85); } catch (e) { durl = ''; }
+      var b = durl ? durlToBlobSync_(durl) : null;
+      if (b) return Promise.resolve(b);
+      return toBlobSafe_(cv, 'image/jpeg', 0.85, 6000); // 同期が取れなかった時だけ従来の async へ
     } catch (e) { return Promise.resolve(null); }
   }
 
