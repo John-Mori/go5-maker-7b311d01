@@ -109,6 +109,24 @@ check("圧縮直後フラグは下りる", tr2.get("post_compact") is False)
 check("★relayとcontext_watchが同じ値を出す(物差しが1本)",
       tr2.get("context_tokens") == watch_last(p2),
       "relay=%s watch=%s" % (tr2.get("context_tokens"), watch_last(p2)))
+# ★★ORG-46 第4形(2026-08-22 研究室HQ msg DISPATCH-aegis-gl-1787386719471 の実測)。
+#   実測= aegis-gl `carry_tokens=157,242`。これは17:11の**文脈の最新値**で、postTokens(8,579)
+#   ではなかった。原因は `carry = last` の無条件写し= 圧縮の直後だけ名前どおりに見え、
+#   普通の便では**丸ごと文脈**が「畳んだ会話の量」の名前で台帳に載っていた。
+check("★持ち越し量は普通の便でも postTokens(文脈の実値ではない)",
+      tr2.get("carry_tokens") == POST, str(tr2.get("carry_tokens")))
+check("★旧バグの指紋(carry==文脈)が出ない",
+      tr2.get("carry_tokens") != tr2.get("context_tokens"),
+      "carry=%s ctx=%s" % (tr2.get("carry_tokens"), tr2.get("context_tokens")))
+
+print("== 圧縮を1度もしていないセッション ==")
+p2b = write(tmp, "b2.jsonl", [asst(FLOOR), asst(HEAVY)])
+sr._transcript_path = lambda sid, cwd=None: p2b         # noqa: E731
+tr2b = sr.read_transcript("dummy")
+check("畳んだ会話が無いなら持ち越しは0", not tr2b.get("carry_tokens"), str(tr2b.get("carry_tokens")))
+e0 = {"generation": 1}
+sr._apply_transcript(e0, tr2b)
+check("★0は台帳へ書かない(『畳んだ量0』と偽らない)", "carry_tokens" not in e0, str(e0))
 
 print("== サブエージェントの行は混ぜない(別の文脈) ==")
 p3 = write(tmp, "c.jsonl", [asst(FLOOR), asst(HEAVY), asst(999, side=True)])
@@ -145,13 +163,15 @@ print("== 写像は1本(ORG-46 第3形・2026-08-22 17:16 実測) ==")
 # ★実測= hq の行に ctx 137,783 は入ったが floor は None のままだった。同じ瞬間に
 #   read_transcript は floor 72,774 を返している=**測れているのに台帳から落ちていた**。
 #   犯人は「判定前の測り直し」が ctx と source しか書かなかったこと(写像が3か所にあった)。
-TR_HQ = {"context_tokens": 137783, "carry_tokens": 137783, "floor_tokens": 72774,
+# ★carry は「最後の圧縮が畳んだ会話の大きさ」= 文脈の実値とは別の量(ORG-46 第4形)。
+#   ここで carry=137,783(=ctx と同値)を置いていたのは、当時のバグをそのまま写していたからだ。
+TR_HQ = {"context_tokens": 137783, "carry_tokens": 9443, "floor_tokens": 72774,
          "post_compact": False, "compact_count": 10}
 e1 = {"generation": 16}
 c1 = sr._apply_transcript(e1, TR_HQ)
 check("写像: 文脈が返る", c1 == 137783, str(c1))
 check("写像: 床が台帳へ入る", e1.get("floor_tokens") == 72774, str(e1.get("floor_tokens")))
-check("写像: 持ち越しが台帳へ入る", e1.get("carry_tokens") == 137783)
+check("写像: 持ち越しが台帳へ入る", e1.get("carry_tokens") == 9443, str(e1.get("carry_tokens")))
 check("写像: 出所が transcript", e1.get("context_source") == "transcript", str(e1.get("context_source")))
 
 # 圧縮の直後= 記録に assistant 行が無く床が測れない。台帳が覚えている床を足す。

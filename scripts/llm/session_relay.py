@@ -1832,7 +1832,17 @@ def read_transcript(sid, cwd=None):
         #   ★2026-07-29 の事故(圧縮直後に圧縮前の重い値を返し、一番軽いセッションを捨てた)は
         #     再演しない= 床を足しても圧縮前の値より遥かに小さい(実測 81,955 対 257,835)。
         #   ★床が測れない時(新しい記録・読めない)は postTokens のまま返す= 従来動作へ退避。
-        carry = last
+        # ★★2026-08-22(研究室HQ msg DISPATCH-aegis-gl-1787386719471 の実測)ORG-46 の第4形。
+        #   ここは長らく `carry = last` だった。**圧縮の直後だけ** last == postTokens なので
+        #   説明どおりに見えていたが、**普通の便では last は文脈の実値そのもの**だ。
+        #   実測= aegis-gl `carry_tokens=157,242`(17:11に context_watch が測った最新値と一致。
+        #   その時の postTokens は 8,579)。**欄の名前は「畳んだ会話だけ」、中身は「全文脈」**=
+        #   ORG-46(同じ名前の欄が場面によって別の量になる)と完全に同じ形をしている。
+        #   → 中身を名前に合わせる= carry は**最後の圧縮の postTokens そのもの**。
+        #     圧縮が1度も無ければ 0 を返す(=台帳へは書かれない。0を「畳んだ量」と偽らない)。
+        #   ★退行しない= 圧縮の直後は last == last_compact[3] なので、以前と同じ値になる。
+        #     `context_tokens = carry + floor` の関係もその瞬間はそのまま成り立つ。
+        carry = int(last_compact[3]) if (last_compact and len(last_compact) == 4) else 0
         if post_compact and floor and last:
             last = last + floor
         return {"context_tokens": last, "carry_tokens": carry, "floor_tokens": floor,
