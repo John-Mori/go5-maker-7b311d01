@@ -2003,12 +2003,15 @@
       // ★投稿画像(編集モーダルで添付する用途'post')も履歴カードのサムネ候補に入れる。
       //   動画で使った画像/Bluesky画像が両方無い作品(投稿画像だけ添付した作品)は、モーダルにデータが在るのに
       //   カードが空表示になっていた(Chami報告2026-07-30・添付=1532357129657385031)。用途'post'の1枚目を最後の砦にする。
-      var postImgArr = (window.Go5Cand && window.Go5Cand.postImgs) ? (window.Go5Cand.postImgs(pKey) || []) : [];
-      // ★Chami依頼2026-08-22: カードのサムネも「動画生成で使用した画像」は出さない(見ない・読み込み削減)。
-      //   used レコードの先頭prevN枚=動画投稿プレビュー(Drive保存プレビューと同一blob由来=stock.js capturePreview_)だけをサムネに使う。
-      //   prevN=0(プレビュー未保存の旧履歴)は usedImgArr[0] が生成用の元画像なので採らず、投稿画像/作品サムネへ委ねる。
+      // ★Chami依頼2026-08-22(+報告2026-08-22「生成に使った画像がプレビュー扱いされる」の恒久修正):
+      //   「動画投稿プレビュー」の枠(.vrow-refimg)には、本物の仕上がりプレビューだけを出す。
+      //   =used レコードの先頭prevN枚(stock.js capturePreview_ の #cv最終フレーム=Drive保存と同一blob由来)のみ。
+      //   ★旧コードは prevN=0 の時に bskyImg / postImg へフォールバックしていたが、AI同人等では bskyImg は
+      //     生成用の元画像/添付写真であり「プレビュー」ではない=それを『動画投稿プレビュー』のラベルで出すのが
+      //     Chami報告の"生成に使った画像がプレビュー扱い"の正体。フォールバックを撤去し、本物が無ければ枠ごと出さない
+      //     (カードは作品サムネ .vrow-thumb が担う。プレビューは backfill/投稿完了で入った時だけ出る)。
       var usedPrevN_ = (window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(pKey) || 0) : 0;
-      var refThumb = (usedPrevN_ > 0 ? (usedImgArr[0] || '') : '') || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || postImgArr[0] || '';
+      var refThumb = usedPrevN_ > 0 ? (usedImgArr[0] || '') : '';
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
       //   YouTube再生数はAPI未取得/クォータ切れ/紐付け直後だと0や未取得のまま張り付き、下段の「今日▶120/週▶120」
@@ -2223,25 +2226,19 @@
       im.addEventListener('click', function () { openFanzaModal_(im.getAttribute('data-fanza-thumb-url')); });
     });
 
-    // 動画で使った画像 → 拡大ズーム。候補タブのref画像は読まず、履歴単位のusedだけを表示する。
-    //   旧履歴でused未保存の場合も、カードに表示済みの先頭1枚だけを使うため候補画像が後ろへ混ざらない。
+    // 動画投稿プレビュー → 拡大ズーム。
+    //   ★Chami依頼2026-08-22(+報告の恒久修正): この枠は本物のプレビューだけを出す。
+    //   used レコードの先頭prevN枚(=stock.js capturePreview_ の #cv最終フレーム・Drive保存と同一blob由来)のみを
+    //   開く。生成用の元画像・投稿画像・Bluesky画像は「プレビュー」ではないので開かない(refimg自体、
+    //   prevN>0 の時しか描かれない=ここに来る時点で必ずプレビューが在る)。
     list.querySelectorAll('.vrow-refimg').forEach(function (im) {
       im.addEventListener('click', function () {
-        var cid = im.getAttribute('data-refcid');
         var usedKey = im.getAttribute('data-usedkey');
-        var imgs = (usedKey && window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []).slice() : [];
-        // 動画で使った画像が無い作品は投稿画像(用途'post')を開く＝サムネがpostImgArr[0]由来のケース。
-        var fromPost = false;
-        if (!imgs.length && usedKey && window.Go5Cand && window.Go5Cand.postImgs) { imgs = (window.Go5Cand.postImgs(usedKey) || []).slice(); fromPost = imgs.length > 0; }
-        if (!imgs.length && im.getAttribute('src')) imgs = [im.getAttribute('src')];
         var prevN = (usedKey && window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
-        // ★Chami依頼2026-08-22: 投稿履歴の画像ビューから「動画生成で使用した画像」を除外し、「動画投稿プレビュー」だけ残す
-        //   (見ない・読み込み削減)。プレビュー=used レコードの先頭prevN枚。これは stock.js capturePreview_ が撮った
-        //   #cv最終フレーム(t=5秒)の同一blob由来で、Googleドライブへ保存するプレビューと内容が一致する(Chami依頼の後段)。
-        //   投稿画像(fromPost・用途'post')は「動画生成で使用した画像」ではないので従来どおり全ページ表示する。
-        //   旧Bluesky投稿用画像(bskyImg)の付加も廃止=現運用非経路かつ「動画生成/Bluesky」画像は削除対象。
-        if (!fromPost) imgs = prevN > 0 ? imgs.slice(0, prevN) : [];   // プレビュー枚のみ。プレビュー未保存の旧履歴は空(=開かない)
-        var caps = imgs.map(function () { return fromPost ? '投稿画像' : '動画投稿プレビュー'; });
+        if (prevN <= 0) return; // プレビュー未保存=何も出さない(生成画像を代わりに出さない)
+        var all = (usedKey && window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []).slice() : [];
+        var imgs = all.slice(0, prevN); // 先頭prevN枚=プレビューのみ。元画像(prevN番目以降)は出さない
+        var caps = imgs.map(function () { return '動画投稿プレビュー'; });
         if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0, { captions: caps });
       });
     });
