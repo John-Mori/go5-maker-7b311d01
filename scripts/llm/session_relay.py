@@ -351,6 +351,18 @@ def _allowed_tools():
     return list(_ALLOWED_TOOLS_FALLBACK)
 
 
+def _disallowed_tools():
+    """毎便送っても**使えない**ツールの定義文を落とす(1正本= dept_daemon.RELAY_DROP_TOOLS)。
+
+    ★読めない時は空= 何も外さない(=従来どおり)。fail-open: 節約より沈黙させないことが先。
+    """
+    try:
+        import dept_daemon
+        return list(getattr(dept_daemon, "RELAY_DROP_TOOLS", []) or [])
+    except Exception:
+        return []
+
+
 def _log(dept, msg):
     print(f"{time.strftime('%H:%M:%S')} [{dept}/relay] {msg}")
 
@@ -1625,9 +1637,15 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
     argv = [CLAUDE, "-p"]
     if session_id:
         argv += ["--resume", session_id]
+    _drop = _disallowed_tools()
     argv += ["--output-format", "json",
-             "--allowedTools", *_allowed_tools(),
-             "--add-dir", HQ,
+             "--allowedTools", *_allowed_tools()]
+    # ★2026-08-23 研究室HQ「床を削る」= 許可していないツールの**定義文**を送るのをやめる。
+    #   実測 -10,588トークン/便(素の起動 51,242 → 40,654)。能力は減らない(元々使えない7本)。
+    #   ★空なら足さない= 可変長フラグを空で置くと次の値を飲む(2026-07-18の実障害と同じ形)。
+    if _drop:
+        argv += ["--disallowedTools", *_drop]
+    argv += ["--add-dir", HQ,
              "--model", model]
     # ★★2026-08-13 promptは**stdinで渡す**(argvの末尾に置かない)。一ノ瀬怜(platform-se)。
     #   実障害= DISPATCH-system-engineer-1786575652694(絵文字監視の毎朝8時digest=炎上/再発
