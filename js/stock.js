@@ -1140,7 +1140,22 @@
     if (!store) { alert('IndexedDB未対応のため動画データを取得できません。'); return false; }
     var metas = loadMeta();
     var meta = metas.filter(function (m) { return m.id === id; })[0];
-    if (!meta) return false;
+    // ★メタが loadMeta()(localStorage META_KEY)に無い経路の無言取りこぼしを断つ(Chami報告2026-08-22
+    //   宵桜艶帖「ドン引きされた願いのドラフトが、投稿完了で保存中が一瞬走って元に戻り無視される」)。
+    //   真因=容量逼迫でメタ書込みが無言失敗する(上の writeMetaResilient_ / draft-meta-readback-failed・
+    //   蓄積の多いacc1で顕在化だがacc2でも起きる)と、ドラフトは pending/IDBサムネ由来で一覧に出るのに
+    //   loadMeta()には居ない=従来はここで黙って false を返し、ダイアログも出さずモーダルも閉じず
+    //   「投稿完了が無視される」になっていた(=Drive保存はそもそも一度も走らない)。復元元を
+    //   作成履歴(loadArchive)→保存中pending(_pendingDraftMeta)→今開いているモーダルのmeta(_modalMeta)の
+    //   順で辿り、拾えたら metas へ載せて以降の saveMeta で確定する(記録・Drive保存は在メモリのmetaで進む)。
+    if (!meta) {
+      meta = loadArchive().filter(function (m) { return m && m.id === id; })[0]
+          || _pendingDraftMeta[id]
+          || (_modalMeta && _modalMeta.id === id ? _modalMeta : null);
+      if (meta) metas.push(meta); // 下流の videoId発番/youtubeUrl更新の saveMeta(metas) で永続化を試みる
+    }
+    // それでも実体が無い=この端末にメタが残っていない。黙って捨てず正直に伝える(沈黙が最悪の事故)。
+    if (!meta) { alert('このドラフトのデータをこの端末で見つけられませんでした。\nメタ情報の保存が容量都合で失敗した可能性があります。端末の空き容量を確保し、ページを再読み込みしてからもう一度「投稿完了」を押してください。\n(ドラフトは残してあります)'); return false; }
     // ★背骨ID(videoId)が無いドラフト(idgen導入前 or 作成時に未スナップ)は、投稿完了の時点で必ず発番して
     //   meta へ保存する。これが無いと addCompletedPost のガードに落ちて投稿履歴の一覧に載らず作成履歴だけ
     //   残り、さらに下の使用画像プレビュー紐付け(usedImgSave は meta.videoId をキーにする)も効かない
