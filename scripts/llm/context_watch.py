@@ -493,6 +493,9 @@ def alert(over, compact_at, rotate_at):
     try:
         subprocess.run([sys.executable, os.path.join(HERE, "dispatch.py"),
                         "--dept", "hq", "--direct", "--from", "イージス研究室(文脈の見張り)",
+                        # ★C-050の宛先宣言(2026-08-23)= 文脈量の見張りはAI同士の内部整備。
+                        #   HQの返事はChami向けの本文ではない=表は要点まででよい。
+                        "--audience", "ai",
                         "--body", "\n".join(body)], capture_output=True, timeout=60)
     except Exception:
         return 0

@@ -47,24 +47,40 @@ check("viaが無い便は削らない", dd.is_interdept_letter({"author": "chami
 check("recがNoneでも落ちない", dd.is_interdept_letter(None), False)
 check("recが文字列でも落ちない", dd.is_interdept_letter("dispatch"), False)
 
-# ── 1.5 ★宛先で見る= 機械の起動便が頼む生成物はChami本人が読む本文(2026-08-23) ─────
+# ── 1.5 ★宛先で見る= 削ってよいのは「AI同士の便だと差出人が宣言した便」だけ ─────
 #   実物= 8/22の振り返り(1,646字)が author「定刻トリガー(朝5時)」(実物の値)・via=dispatch だったため
 #   表から削られ、Chamiが「区切ってでも全文表示してよ」と言った(msg 1540819913097351218)。
-print("=== 1.5 宛先で見る(may_trim_front) ===")
-_REAL = {"via": "dispatch", "author": "ケヴィン・デ・ブライネ(イージス研究室)"}
-_TRIG = {"via": "dispatch", "author": "定刻トリガー(朝5時)"}
-check("部門どうしの便は削ってよい", dd.may_trim_front(_REAL), True)
-check("★定刻トリガーの便は削らない", dd.may_trim_front(_TRIG), False)
-check("巡回・監視の便も削らない",
-      dd.may_trim_front({"via": "dispatch", "author": "欠席監視(毎朝8時の自動巡回)"}), False)
-check("scheduledの便も削らない",
-      dd.may_trim_front({"via": "dispatch", "author": "self (scheduled daily review)"}), False)
+#   ★2026-08-23 恒久(イージス研究室)= 止血は**差出人の名前**で当てていたが、名前の一覧に
+#     当たらない新しいトリガーが出れば同じ事故が起きる。判定を**差出人の宣言**へ移した
+#     (`dispatch.py --audience ai|chami`)。宣言が無ければ削らない(fail-open)。
+#     名前当て(CHAMI_FACING_AUTHOR_HINTS)は**削らない側の保険**としてだけ残る=下で別に検査する。
+print("=== 1.5 宛先の宣言で見る(may_trim_front) ===")
+_REAL = {"via": "dispatch", "author": "ケヴィン・デ・ブライネ(イージス研究室)", "audience": "ai"}
+_UNDECL = {"via": "dispatch", "author": "ケヴィン・デ・ブライネ(イージス研究室)"}
+_TRIG = {"via": "dispatch", "author": "定刻トリガー(朝5時)", "audience": "chami"}
+check("AI同士だと宣言した便は削ってよい", dd.may_trim_front(_REAL), True)
+check("★宣言の無い便は削らない(fail-open)", dd.may_trim_front(_UNDECL), False)
+check("★Chami向けと宣言した便は削らない", dd.may_trim_front(_TRIG), False)
+check("宣言aiと差出人が矛盾したら削らない",
+      dd.may_trim_front({"via": "dispatch", "author": "定刻トリガー(朝5時)", "audience": "ai"}), False)
 check("front_fullが立っていれば削らない",
-      dd.may_trim_front({"via": "dispatch", "author": "アメス", "front_full": True}), False)
-check("Chamiの発言は元々削らない", dd.may_trim_front({"via": "gateway"}), False)
+      dd.may_trim_front({"via": "dispatch", "author": "アメス", "front_full": True, "audience": "ai"}), False)
+check("Chamiの発言は元々削らない", dd.may_trim_front({"via": "gateway", "audience": "ai"}), False)
 check("recがNoneでも落ちない", dd.may_trim_front(None), False)
-# ★must-fail= 差出人だけを見る旧版(is_interdept_letter)は、この実物を削ってしまう
-check("must-fail: 旧版は定刻トリガーの便を削る", dd.is_interdept_letter(_TRIG), True)
+check("宣言の綴り違いは宣言なし扱い",
+      dd.may_trim_front({"via": "dispatch", "author": "x", "audience": "AI同士"}), False)
+# ★名前当ては「削らない側の保険」としてだけ生きている(消していないことをここで固定する)
+print("=== 1.5b 名前当ては削らない側の保険としてだけ残す(is_chami_facing_letter) ===")
+check("巡回・監視の名前はChami向けと見なす",
+      dd.is_chami_facing_letter({"via": "dispatch", "author": "欠席監視(毎朝8時の自動巡回)"}), True)
+check("scheduledの名前もChami向けと見なす",
+      dd.is_chami_facing_letter({"via": "dispatch", "author": "self (scheduled daily review)"}), True)
+check("宣言chamiは名前に関係なくChami向け",
+      dd.is_chami_facing_letter({"via": "dispatch", "author": "アメス", "audience": "chami"}), True)
+# ★must-fail= 差出人だけを見る旧版(is_interdept_letter)は、宣言の無い便を削ってしまう
+check("must-fail: 旧版は宣言の無い便を削る", dd.is_interdept_letter(_UNDECL), True)
+check("must-fail: 旧版は定刻トリガーの便を削る",
+      dd.is_interdept_letter({"via": "dispatch", "author": "定刻トリガー(朝5時)"}), True)
 
 # ── 2. 表へ出す形 ────────────────────────────────────────────────
 print("=== 2. 表へ出す本文(reply_front_digest・純粋関数) ===")
@@ -133,26 +149,34 @@ def decide(rec, part, thread_dir, digest=None, gate=None, writer=None, failopen=
 
 
 _t2 = tempfile.mkdtemp(prefix="c050b_")
+_AI = {"via": "dispatch", "audience": "ai"}          # AI同士だと差出人が宣言した便
 try:
-    out_hq = decide({"via": "dispatch"}, LONG, _t2)
+    out_hq = decide(_AI, LONG, _t2)
     check("他部門への長い返信は削られる", LONG in out_hq, False)
     check("その時も在りかが付く", "全文=" in out_hq, True)
     out_chami = decide({"via": "gateway"}, LONG, _t2)
     check("★Chamiへの長い返信は1字も削らない", out_chami, LONG)
-    out_short = decide({"via": "dispatch"}, SHORT, _t2)
+    out_short = decide(_AI, SHORT, _t2)
     check("他部門でも短ければそのまま", out_short, SHORT)
+    # ★恒久の核= 宣言の無い便は、合流点でも1字も削られない(2026-08-23)
+    out_undecl = decide({"via": "dispatch", "author": "定刻トリガー(朝5時)"}, LONG, _t2)
+    check("★宣言の無い便は合流点でも削られない", out_undecl, LONG)
 
     # ★must-fail A: 「Chamiかどうか」の門を壊す=全部削る版
     broken_all = decide({"via": "gateway"}, LONG, _t2, gate=lambda r: True)
     check("mustfail_門を壊すとChamiの返信まで削れる", LONG in broken_all, False)
+    # ★must-fail A2: 宣言を見ない旧版の門に戻すと、宣言の無い便が削られる(8/22の事故の再現)
+    broken_old = decide({"via": "dispatch", "author": "定刻トリガー(朝5時)"}, LONG, _t2,
+                        gate=dd.is_interdept_letter)
+    check("mustfail_旧版の門なら定刻トリガーの便が削れる", LONG in broken_old, False)
     # ★must-fail B: 切り詰めを外す=丸ごと表へ出る版
-    broken_cut = decide({"via": "dispatch"}, LONG, _t2, digest=lambda t, p, limit=LIM: t)
+    broken_cut = decide(_AI, LONG, _t2, digest=lambda t, p, limit=LIM: t)
     check("mustfail_切り詰めを外すと丸ごと出る", LONG in broken_cut, True)
     # ★fail-open が効いている実証= 裏へ書けない時は、本物は**削らない**
-    keep = decide({"via": "dispatch"}, LONG, _t2, writer=lambda *a, **k: "")
+    keep = decide(_AI, LONG, _t2, writer=lambda *a, **k: "")
     check("裏へ書けなければ削らない(fail-open)", keep, LONG)
     # ★must-fail C: その fail-open の枝を潰すと、裏無しで字が消えることを実証する
-    broken_open = decide({"via": "dispatch"}, LONG, _t2, failopen=False,
+    broken_open = decide(_AI, LONG, _t2, failopen=False,
                          writer=lambda *a, **k: "",
                          digest=lambda t, p, limit=LIM: t[:limit])
     check("mustfail_fail-openを潰すと裏無しで字が消える", len(broken_open) < len(LONG), True)

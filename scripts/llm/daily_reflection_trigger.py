@@ -163,7 +163,10 @@ def main():
     sys.path.insert(0, HERE)
     import dispatch  # noqa: E402  同じ scripts/llm 配下
 
-    ok, mid = dispatch.dispatch(TARGET_DEPT, SENDER, body, dry_run=a.dry_run)
+    # ★C-050の宛先宣言(2026-08-23)= この便が頼む生成物は**Chami本人が読む振り返り**だ。
+    #   8/22はこれが「AI同士の便」に見えて表から1,646字が削られた(Chami「区切ってでも全文表示してよ」)。
+    #   差出人がここで言い切る=受け手は名前を当てなくてよくなる。
+    ok, mid = dispatch.dispatch(TARGET_DEPT, SENDER, body, dry_run=a.dry_run, audience="chami")
     if a.dry_run:
         print("---- 便本文(dry-run) ----")
         print(body)

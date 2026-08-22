@@ -177,6 +177,45 @@ def front_digest(body, limit=FRONT_LIMIT):
     return s[:limit].rstrip() + f"…\n(以下 {len(s) - limit}字は裏の便へ。表は要点まで)"
 
 
+# ─────────────────────────────────────────────────────────────────────
+# ★★C-050の恒久= **便を出す側が宛先(誰が読む本文か)を宣言する**
+#   (2026-08-23 研究室HQ→イージス研究室 回送 msg DISPATCH-aegis-gl-1787431376034)
+#
+#   止血までの形は受け手(dept_daemon)が**差出人の名前の文字列**を見て当てていた
+#   (「トリガー」「巡回」「監視」…を含むか)。当て推量なので、新しいトリガーの名前が
+#   その一覧に当たらなければ**またChamiの字が消える**。実際に消した実物=
+#   8/22の振り返り1,646字(author「定刻トリガー(朝5時)」・via=dispatch)。
+#
+#   → 判定の材料を「名前」から「宣言」へ移す。宣言は**差出人にしか分からない事実**だ。
+#     - `--audience ai`    = AI同士の便。相手の返信は表を要点まで削ってよい。
+#     - `--audience chami` = 出来上がる本文をChami本人が読む。**1字も削らない**。
+#     - 宣言なし           = 削らない(fail-open)。★「分からないから削る」を構造から消す。
+#   ★宣言は便に必ず載せる(値が空でも key は載せる)= 台帳から「宣言の無い便が何通あるか」を
+#     数えられる形にしておく(検査= tests/test_c050_audience_declaration.py)。
+AUDIENCE_AI = "ai"
+AUDIENCE_CHAMI = "chami"
+AUDIENCE_CHOICES = (AUDIENCE_AI, AUDIENCE_CHAMI)
+AUDIENCE_WARN = (
+    "  ★宛先の宣言が無い便= 表は削らない(C-050は効かない)。\n"
+    "    AI同士の長いやり取りなら --audience ai / Chami本人が読む本文なら --audience chami")
+
+
+def audience_fields(audience):
+    """便へ載せる宛先の宣言を組み立てる。★純粋関数。
+
+    戻り値の dict をそのまま rec へ merge する。`audience` は**必ず載る**(宣言なしは "")。
+    `front_full` は研究室HQが止血で入れた掛け金= Chami向けの時だけ True で立てる
+    (受け手の古い版でも「削るな」が伝わる=載せ替えの途中でも字が消えない)。
+    """
+    a = (audience or "").strip().lower()
+    if a not in AUDIENCE_CHOICES:
+        a = ""
+    out = {"audience": a}
+    if a == AUDIENCE_CHAMI:
+        out["front_full"] = True
+    return out
+
+
 def build_work_post(sender, work, body):
     """相手部門チャンネルへ出す投稿本文=見出し + 要点(全文ではない)。"""
     return build_work_header(sender, work) + "\n\n" + front_digest(body)
@@ -213,7 +252,7 @@ def post_work_to_channel(dept, persona, post_body, timeout=90):
         return ""              # 投稿失敗は握り潰す。便はこの後(実は既に)enqueue される
 
 
-def dispatch(dept, sender, body, also_post=False, dry_run=False, work=""):
+def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience=""):
     """1部門へ指令を投函する。戻り値=(ok, msg_id)。
 
     ★C-023: work(=--workの一行)が実質値を持つ時だけ「実依頼」として相手部門チャンネルへ表投稿する。
@@ -228,6 +267,7 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work=""):
         return False, ""
     synthetic = f"DISPATCH-{dept}-{int(time.time() * 1000)}"
     is_work = is_work_request(work)
+    aud = audience_fields(audience)
 
     if dry_run:
         if is_work:
@@ -235,6 +275,9 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work=""):
             print(f"    見出し: {build_work_header(sender, work)}")
         else:
             print(f"  [dry-run] {dept} <- {len(body)}字 (ch={ch})")
+        print(f"    宛先の宣言= {aud['audience'] or '(無し)'}")
+        if not aud["audience"]:
+            print(AUDIENCE_WARN)
         return True, synthetic
 
     # ★実依頼=先に相手部門チャンネルへ表投稿し、実IDを得る(best-effort・失敗しても続行)。
@@ -256,6 +299,8 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work=""):
         "msg_id": mid,
         "via": "dispatch",           # 組織内伝達であることの目印
     }
+    # ★宛先の宣言(C-050恒久)。key は常に載せる= 宣言の無い便を後から数えられる形にする。
+    rec.update(aud)
     if is_work:
         rec["work"] = work.strip()   # 何を頼んだかを便にも残す(後追い可能に)
     try:
@@ -269,9 +314,11 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work=""):
         return False, mid
     if is_work:
         seen = "表投稿OK" if str(posted_id).isdigit() else "表投稿は失敗(便は届いた)"
-        print(f"  [{dept}] 実依頼をキューへ投函 msg={mid} (ch={ch}) [{seen}]")
+        print(f"  [{dept}] 実依頼をキューへ投函 msg={mid} (ch={ch}) [{seen}] 宛先={aud['audience'] or '(無し)'}")
     else:
-        print(f"  [{dept}] キューへ投函 msg={mid} (ch={ch})")
+        print(f"  [{dept}] キューへ投函 msg={mid} (ch={ch}) 宛先={aud['audience'] or '(無し)'}")
+    if not aud["audience"]:
+        print(AUDIENCE_WARN)
     if also_post and not is_work:
         # ★--also-post は従来どおり(任意の便の人間向け写し)。実依頼は既に表投稿済みなので
         #   二重投稿しない(--work と --also-post が両方来ても表は1回だけ)。
@@ -309,6 +356,11 @@ def main():
                     help="★C-023: 実依頼(相手が実作業をする=作業/エラー/バグ/調査/改修の引き渡し)の"
                          "一行サマリ。付けると相手部門チャンネルへ**表**投稿する(Chamiが①渡ったか"
                          "②何を頼んだかを追える)。付けなければ従来どおり裏(相槌/通達/配布)。")
+    ap.add_argument("--audience", default="", choices=["", AUDIENCE_AI, AUDIENCE_CHAMI],
+                    help="★C-050: この便が頼む本文を**誰が読むか**の宣言。"
+                         "ai=AI同士の便(相手の返信は表を要点まで削ってよい) / "
+                         "chami=Chami本人が読む本文(1字も削らない)。"
+                         "★宣言なしは削らない(fail-open)=名前で当てるのをやめた。")
     a = ap.parse_args()
 
     body = a.body or ""
@@ -356,7 +408,7 @@ def main():
 
     ok = 0
     for d in depts:
-        good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work)
+        good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience)
         ok += 1 if good else 0
     print(f"投函 {ok}/{len(depts)} 部門")
     return 0 if ok == len(depts) else 1

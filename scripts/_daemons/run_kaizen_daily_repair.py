@@ -100,7 +100,8 @@ def main():
     with io.open(BODY, "w", encoding="utf-8") as f:     # ★BOM無しで書く(上の理由)
         f.write(body + "\n")
 
-    d = run([DISPATCH, "--dept", DEPT, "--direct",
+    # ★C-050の宛先宣言(2026-08-23)= この集計から出る提案はChamiが読む=返信を削らせない。
+    d = run([DISPATCH, "--dept", DEPT, "--direct", "--audience", "chami",
              "--from", "自動(毎朝8:10の改修α集計)", "--body-file", BODY])
     log("投函 exit=%s / %s" % (d.returncode, (d.stdout or d.stderr or "").strip()[:300]))
     return d.returncode

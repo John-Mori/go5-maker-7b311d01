@@ -829,20 +829,49 @@ CHAMI_FACING_AUTHOR_HINTS = (
 def is_chami_facing_letter(rec):
     """この便が頼んでいる生成物は『Chami本人が読む本文』か(=1字も削ってはいけない)。
 
-    ①`front_full` が立っていれば無条件でそう扱う(★差出人が宛先を宣言できる口。恒久側の掛け金)。
+    ①`audience == "chami"` / `front_full` が立っていれば宣言なので無条件でそう扱う。
     ②差出人が機械(トリガー・巡回・監視・定期)なら、出来上がるのはChami向けの本文だ。
+    ★②は**削らない側にだけ効く保険**として残す(下の may_trim_front を見ろ)=
+      名前当てが外れても「削ってしまう」側へは倒れない。
     """
     if not isinstance(rec, dict):
         return False
+    if str(rec.get("audience") or "").strip().lower() == "chami":
+        return True
     if rec.get("front_full") in (True, 1, "1", "true", "True"):
         return True
     a = str(rec.get("author") or "")
     return any(h in a for h in CHAMI_FACING_AUTHOR_HINTS)
 
 
+# ★★2026-08-23 恒久(イージス研究室・研究室HQからの回送 DISPATCH-aegis-gl-1787431376034)。
+#   止血は「差出人の名前に トリガー/巡回/監視… が入っているか」で当てていた=**当て推量**。
+#   新しいトリガーの名前がその一覧に当たらなければ、また Chami の字が消える。
+#   → 判定の材料を**差出人の宣言**へ移した(`dispatch.py --audience ai|chami`)。
+#     削ってよいのは「**AI同士の便だと差出人が言い切った時だけ**」。
+#     宣言が無ければ削らない= **「分からないから削る」を構造から消す**(§3 fail-open)。
+#   ★名前当て(CHAMI_FACING_AUTHOR_HINTS)は捨てていないが、もう**削る根拠にはならない**。
+#     残してあるのは「宣言 ai なのに差出人が定刻トリガー」という**矛盾した便**を止めるため=
+#     保険は削らない側にだけ効く。
+def declared_audience(rec):
+    """便に載っている宛先の宣言を返す。"ai" / "chami" / "" (宣言なし)。★純粋関数。"""
+    if not isinstance(rec, dict):
+        return ""
+    a = str(rec.get("audience") or "").strip().lower()
+    if a in ("ai", "chami"):
+        return a
+    if rec.get("front_full") in (True, 1, "1", "true", "True"):
+        return "chami"
+    return ""
+
+
 def may_trim_front(rec):
-    """★表を削ってよいか。削ってよいのは『AI同士の便』だけ(C-050)。"""
-    return is_interdept_letter(rec) and not is_chami_facing_letter(rec)
+    """★表を削ってよいか。削ってよいのは『AI同士の便だと差出人が宣言した便』だけ(C-050)。"""
+    if not is_interdept_letter(rec):
+        return False
+    if declared_audience(rec) != "ai":
+        return False              # 宣言なし・chami宣言= 削らない(fail-open)
+    return not is_chami_facing_letter(rec)   # 宣言 ai と差出人が矛盾したら削らない
 
 
 def reply_front_digest(text, full_path, limit=REPLY_FRONT_LIMIT):
@@ -1502,7 +1531,7 @@ DEPT_CONF = {
             {"persona": "十王星南", "character": os.path.join(_CHAR, "sena.md"),
              "role": "商品候補選定", "aliases": ("星南", "十王", "sena")},
             {"persona": "クラウディア", "character": os.path.join(_CHAR, "claudia.md"),
-             "role": "商品候補選定", "aliases": ("クラウディア", "claudia")},
+             "role": "商品候補選定", "aliases": ("クラウディア", "クラウディア・バレンツ", "claudia")},
         ],
         "boot_note": (
             "■この部屋の性格(必ず守る)\n"

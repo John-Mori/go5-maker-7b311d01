@@ -651,8 +651,10 @@ def send(dept, body, dry_run):
     path = os.path.join(BODY_DIR, f"reaction_watch_body_{dept}.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(body)
+    # ★C-050の宛先宣言(2026-08-23)= 中身はChamiが押した印(再発/炎上)そのもの。
+    #   受けた部屋の返事はChamiが読む=削らせない。
     cmd = [sys.executable, DISPATCH, "--dept", dept, "--direct",
-           "--from", SENDER, "--body-file", path]
+           "--from", SENDER, "--audience", "chami", "--body-file", path]
     if dry_run:
         cmd.append("--dry-run")
     try:
