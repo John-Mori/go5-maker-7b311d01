@@ -4,8 +4,3 @@
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $root
 python scripts/kaizen/sla_report.py --send *>> (Join-Path $root 'local\sla_nightly.log')
-
-# Nightly kaizen guards (added 2026-08-22): ledger corruption + version-mix foresight.
-# Read-only checks; speak to the room via persona_send ONLY on breakage (silence = clean).
-$env:PYTHONIOENCODING = 'utf-8'
-python scripts/kaizen/nightly_guards.py *>> (Join-Path $root 'local\kaizen_guards.log')
