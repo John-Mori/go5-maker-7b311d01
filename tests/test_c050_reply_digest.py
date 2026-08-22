@@ -47,6 +47,25 @@ check("viaが無い便は削らない", dd.is_interdept_letter({"author": "chami
 check("recがNoneでも落ちない", dd.is_interdept_letter(None), False)
 check("recが文字列でも落ちない", dd.is_interdept_letter("dispatch"), False)
 
+# ── 1.5 ★宛先で見る= 機械の起動便が頼む生成物はChami本人が読む本文(2026-08-23) ─────
+#   実物= 8/22の振り返り(1,646字)が author「定刻トリガー(朝5時)」(実物の値)・via=dispatch だったため
+#   表から削られ、Chamiが「区切ってでも全文表示してよ」と言った(msg 1540819913097351218)。
+print("=== 1.5 宛先で見る(may_trim_front) ===")
+_REAL = {"via": "dispatch", "author": "ケヴィン・デ・ブライネ(イージス研究室)"}
+_TRIG = {"via": "dispatch", "author": "定刻トリガー(朝5時)"}
+check("部門どうしの便は削ってよい", dd.may_trim_front(_REAL), True)
+check("★定刻トリガーの便は削らない", dd.may_trim_front(_TRIG), False)
+check("巡回・監視の便も削らない",
+      dd.may_trim_front({"via": "dispatch", "author": "欠席監視(毎朝8時の自動巡回)"}), False)
+check("scheduledの便も削らない",
+      dd.may_trim_front({"via": "dispatch", "author": "self (scheduled daily review)"}), False)
+check("front_fullが立っていれば削らない",
+      dd.may_trim_front({"via": "dispatch", "author": "アメス", "front_full": True}), False)
+check("Chamiの発言は元々削らない", dd.may_trim_front({"via": "gateway"}), False)
+check("recがNoneでも落ちない", dd.may_trim_front(None), False)
+# ★must-fail= 差出人だけを見る旧版(is_interdept_letter)は、この実物を削ってしまう
+check("must-fail: 旧版は定刻トリガーの便を削る", dd.is_interdept_letter(_TRIG), True)
+
 # ── 2. 表へ出す形 ────────────────────────────────────────────────
 print("=== 2. 表へ出す本文(reply_front_digest・純粋関数) ===")
 check("短い返信はそのまま", dd.reply_front_digest(SHORT, "local/llm/thread/x.md"), SHORT)
@@ -98,7 +117,7 @@ def decide(rec, part, thread_dir, digest=None, gate=None, writer=None, failopen=
 
     failopen=False は **must-fail 用**= 裏へ書けていないのに削る版(本物には無い枝)。
     """
-    gate = gate or dd.is_interdept_letter
+    gate = gate or dd.may_trim_front
     digest = digest or dd.reply_front_digest
     writer = writer or dd.write_reply_full
     if gate(rec) and len((part or "").strip()) > dd.REPLY_FRONT_LIMIT:

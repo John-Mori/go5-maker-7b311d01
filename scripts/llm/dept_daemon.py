@@ -812,6 +812,39 @@ def is_interdept_letter(rec):
     return isinstance(rec, dict) and rec.get("via") == "dispatch"
 
 
+# ★★2026-08-23 05:3x 研究室HQ 止血(恒久=イージス研究室)。
+#   事故= 8/22の「Chami本人への振り返り」(1,646字)が via=dispatch だったせいで表から削られ、
+#     Chamiが「**わざわざそっちに全文読みにいかないから、区切ってでも全文表示してよ**」
+#     (2026-08-22 20:28 UTC msg 1540819913097351218・現在と未来)と言った。
+#   真因= `via == "dispatch"` は**差出人**を見ているだけで、**宛先(誰が読む文章か)**を見ていない。
+#     機械の起動便(朝トリガー/巡回/欠席監視)が頼む生成物は、便は dispatch でも
+#     **出来上がる本文の読者はChami本人**だ。そこを削ると本人の字が消える。
+#   直し方= 「AI同士の便か」を**積極的に言い切れる時だけ**削る。言い切れなければ削らない
+#     (§3 fail-open= 判定不能なら喋る側へ倒す。表が長くなる方が、字が消えるより軽い)。
+CHAMI_FACING_AUTHOR_HINTS = (
+    "トリガー", "巡回", "監視", "自動", "定期", "scheduled", "self (", "cron",
+)
+
+
+def is_chami_facing_letter(rec):
+    """この便が頼んでいる生成物は『Chami本人が読む本文』か(=1字も削ってはいけない)。
+
+    ①`front_full` が立っていれば無条件でそう扱う(★差出人が宛先を宣言できる口。恒久側の掛け金)。
+    ②差出人が機械(トリガー・巡回・監視・定期)なら、出来上がるのはChami向けの本文だ。
+    """
+    if not isinstance(rec, dict):
+        return False
+    if rec.get("front_full") in (True, 1, "1", "true", "True"):
+        return True
+    a = str(rec.get("author") or "")
+    return any(h in a for h in CHAMI_FACING_AUTHOR_HINTS)
+
+
+def may_trim_front(rec):
+    """★表を削ってよいか。削ってよいのは『AI同士の便』だけ(C-050)。"""
+    return is_interdept_letter(rec) and not is_chami_facing_letter(rec)
+
+
 def reply_front_digest(text, full_path, limit=REPLY_FRONT_LIMIT):
     """部門間の返信を表へ出す形に削る。★純粋関数(ファイルは書かない・副作用なし)。
 
@@ -5867,7 +5900,9 @@ class Daemon:
                 #   全文は先に裏(ファイル)へ落とし、表にはその在りかを書く=字は1文字も消えない。
                 #   ★Chamiの発言への返信はここを通らない(via が dispatch ではない)=無変更。
                 #   ★fail-open= 裏へ書けなかったら削らない(全文をそのまま表へ出す)。
-                if (is_interdept_letter(rec)
+                # ★2026-08-23 追加= 機械の起動便(トリガー/巡回)が頼む生成物は**Chami本人が読む本文**
+                #   なので削らない(may_trim_front)。Chamiは裏へは読みに行かない=区切って全文出す。
+                if (may_trim_front(rec)
                         and len((_part or "").strip()) > REPLY_FRONT_LIMIT):
                     _full = write_reply_full(self.dept, mid, _bi, _part)
                     if _full:
