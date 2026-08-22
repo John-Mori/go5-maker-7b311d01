@@ -22,30 +22,52 @@
  *     同じ ?v= を共有するため対象に含める(2026-08-11 別ページ化・2026-08-16 投稿履歴を StockLists.html へ分離)。
  *     ★ここに足し忘れると分割ページだけ古いJSがキャッシュされ静かに事故る(=CIスモークが版混在でfail)。
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-// ?v= を持つフロントHTMLを全部対象にする。存在するものだけ拾う(将来ページが増えてもここへ足す)。
-const TARGETS = ["index.html", "KouhoLists.html", "analytics.html", "Stock.html", "StockLists.html"]
+// ?v= を持つフロントHTMLを全部対象にする(将来ページが増えてもここへ足す)。
+// ★次の配列(名前リテラル)が「バンプ対象=正本」。孤児検出(下)も vermix_foresight.py もここ1本を読む
+//   =二重管理を作らない。vermix はこの宣言を正規表現で読むので、宣言の書式(名前=角括弧の配列リテラル)は崩さない。
+const TARGETS = ["index.html", "KouhoLists.html", "analytics.html", "Stock.html", "StockLists.html"];
+const TARGET_PATHS = TARGETS
   .map((f) => join(ROOT, f))
-  .filter((p) => existsSync(p));
+  .filter((p) => existsSync(p)); // 存在するものだけ実処理の対象にする
 const RE = /\?v=(\d+)/g;
+const HAS_VER = /\?v=\d+/; // 存在判定用(RE は /g で lastIndex を持つため test には使わない)
 
 const argv = process.argv.slice(2);
 const check = argv.includes("--check");
 const toIdx = argv.indexOf("--to");
 const explicit = toIdx >= 0 ? parseInt(argv[toIdx + 1], 10) : null;
 
-if (!TARGETS.length) {
+if (!TARGET_PATHS.length) {
   console.error("対象HTMLが1つも見つからない。ROOT を間違えている可能性がある: " + ROOT);
   process.exit(2);
 }
 
+// ★孤児検出(2026-08-23 案2=single-source-predicate / AD研究室の下り②。移植元=scripts/kaizen/vermix_foresight.py):
+//   リポジトリ直下(GitHub Pagesの配信ルート)に ?v= を持つHTMLが在るのに TARGETS 配列 に無い=
+//   バンプ対象外で古いJSが配られ続ける「孤児」。TARGETS 配列 への追記を忘れると bump も --check も
+//   素通りし、CI配信版全一致スモークが約20分後に赤で初めて気付く(上の L22-23 が自認する既知の穴)。
+//   → その載せ忘れを bump の入口で止める=判定を一本化(bump本走・--check・CI・デプロイが全部この1本を見る)。
+//   スコープは「直下のルートHTMLのみ」= schedule/ 等のサブディレクトリは別サブシステム(.verstamp で別管理)なので対象外。
+//   判定は「孤児を検出したら止める」だけ(勝手に TARGETS 配列 へ足して自動バンプはしない=バンプ対象かは人間判断へ回す・過検知は止める方向へ倒す)。
+const orphans = readdirSync(ROOT)
+  .filter((name) => name.endsWith(".html") && !TARGETS.includes(name))
+  .filter((name) => HAS_VER.test(readFileSync(join(ROOT, name), "utf8")));
+if (orphans.length) {
+  console.error(`⚠ 孤児(TARGETS 外なのに ?v= を持つ直下HTML)= ${orphans.length}件: ${orphans.join(", ")}`);
+  console.error("  バンプ対象外=このページだけ古いJSが配られ続け、CI配信版全一致スモークが約20分後に赤になる。その前に止めた。");
+  console.error("  対処①この版が本当にバンプ対象なら scripts/bump.mjs の TARGETS 配列へ追記する(人間判断)。");
+  console.error("  対処②配信面でない(退役・作業用)なら直下から移す。--check でも同じ判定で止まる。");
+  process.exit(8);
+}
+
 // 全対象ファイルの ?v= を横断で集める(混在検出は「全ファイル通し」で行う=CIスモークと同じ観点)。
-const files = TARGETS.map((path) => {
+const files = TARGET_PATHS.map((path) => {
   const src = readFileSync(path, "utf8");
   const nums = [...src.matchAll(RE)].map((m) => parseInt(m[1], 10));
   return { path, src, nums };
@@ -53,7 +75,7 @@ const files = TARGETS.map((path) => {
 const found = files.flatMap((f) => f.nums);
 
 if (!found.length) {
-  console.error("?v= の参照が1つも無い。対象を間違えている可能性がある: " + TARGETS.join(", "));
+  console.error("?v= の参照が1つも無い。対象を間違えている可能性がある: " + TARGET_PATHS.join(", "));
   process.exit(2);
 }
 
