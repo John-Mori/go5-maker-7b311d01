@@ -534,6 +534,29 @@ def _keep_from_disk(disk, entry):
     return entry, ""
 
 
+def _stamp_rotation(new_entry, old_sid):
+    """★交代の**状態そのもの**を対応表に残す(2026-08-22・研究室HQ msg 1540652585805942875)。
+
+    見張り(`context_watch.judge`)は「旧世代なのに書き込みが続いている」を **経過時間だけ**で
+    判定していた= 最後の書き込みが30分以内なら「見失い」。ところが交代は必ず
+      ① 対応表を新世代へ差し替える → ② **旧セッションが引き継ぎを書く**
+    の順で起きるので、②は必ず①の後に来る(実測 hq= 台帳17:50:06 / 引き継ぎの最終行17:57:06)。
+    → **どの部屋のどの交代でも、直後30分は正常な交代が1件『見失い』として鳴る。**
+      常に誤発火する安全網は無視される(共通規律§3)ので、本物の見失いがそこに埋まる。
+
+    経過時間は状態の代理でしかない(C-041)。**交代が終わった時刻**という状態そのものを残せば、
+    見張りは「交代の後にも書いたか」で判定できる。ここはその1組を置くだけの場所だ。
+      rotated_at      : この行を書いた時刻(epoch)。★`last_used_at` は**便の受付時刻**なので使えない
+                        (実測 hq= 受付17:50:06 に対し引き継ぎは17:57:06=受付より後に書かれる)。
+      prev_session_id : 直前の世代のセッションID(誰の残り火かを名指しできるように)。
+    ★呼ぶのは `save_room` の直前= 引き継ぎの書き出しは既に終わっている(両方の交代経路で同じ)。
+    """
+    new_entry["rotated_at"] = time.time()
+    if old_sid:
+        new_entry["prev_session_id"] = str(old_sid)
+    return new_entry
+
+
 def save_room(dept, entry):
     """★対応表のうち**この部屋の1行だけ**を、今ディスクにある表へ差し替えて保存する。
 
@@ -4600,6 +4623,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
             new_entry["last_chami_at"] = _now_ts     # ★now は文字列の時刻。epochはこちら
         if handoff_path:
             new_entry["handoff_from_prev"] = handoff_path
+        _stamp_rotation(new_entry, entry.get("active_session_id"))
         table[dept] = new_entry
         # ★2026-07-28 ここが**一番消えては困る書き込み**(交代の結果そのもの)。
         #   この部屋の1行だけを、今ディスクにある表へ差し替える。
@@ -4804,6 +4828,7 @@ def rotate_now(dept, conf, token, reason="manual"):
         #   → 旗を対応表へ置き、**次にこの部屋がChamiへ返す便の末尾**で1行だけ添える(下の relay())。
         #   自動交代側は返信そのものに添えているが、経路が違うと持ち物が違う=同じ穴になる。
         new_entry["handoff_missing_notice"] = 1
+    _stamp_rotation(new_entry, sid)
     table[dept] = new_entry
     # ★2026-07-28 手動交代も同じ経路(この部屋の1行だけを書き戻す)。
     save_room(dept, new_entry)

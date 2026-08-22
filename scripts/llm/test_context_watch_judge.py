@@ -185,6 +185,48 @@ check("★変異: 猶予を0にすると処理中は未発火になる",
 check("★変異: 中央値だけ見る旧判定なら、撃っている部屋も線超で拾われてしまう",
       healthy["median"] >= COMPACT, str(healthy["median"]))
 
+print("== 旧世代=『交代の最後の一筆』を暴走と読まない(研究室HQ msg 1540652585805942875) ==")
+# ★実データをそのまま入れる= hq 2026-08-22。
+#   台帳の差し替え(交代の完了)17:58 / 旧セッション c27eec97 の最終行 17:57:06 / 測ったのが 18:21:14。
+#   旧判定は「最後の書き込みが30分以内」だけを見ていたので 24分06秒 → **見失い**と鳴った。
+ROT = NOW - (23 * 60)                    # 交代が終わった時刻(=引き継ぎの書き出しの直後)
+LAST_HANDOFF = NOW - (24 * 60 + 6)       # 旧セッションの最終行= 交代より前(引き継ぎそのもの)
+LAST_RUNAWAY = ROT + cw.ROTATE_GRACE_SEC + 60   # 交代の後、猶予を越えてまだ書いている
+
+settled = row("c27eec97", "hq", 150000, last_epoch=LAST_HANDOFF)
+settled["managed"], settled["rotated_at"] = "relay:旧世代", ROT
+runaway = row("dead0009", "future-room", 150000, last_epoch=LAST_RUNAWAY)
+runaway["managed"], runaway["rotated_at"] = "relay:旧世代", ROT
+nomark = row("old00010", "llm-edu", 150000, last_epoch=NOW - 60)
+nomark["managed"], nomark["rotated_at"] = "relay:旧世代", 0.0   # rotated_at を持たない古い行
+
+o3 = {r["sid"]: r for r in cw.judge([settled, runaway, nomark], COMPACT, ROTATE, now=NOW)}
+check("★交代の最後の一筆は『交代済』=鳴らさない", o3["c27eec97"]["over_kind"] == "交代済",
+      o3["c27eec97"]["over_kind"] + " last=%.0f rot=%.0f" % (LAST_HANDOFF, ROT))
+check("★交代の最後の一筆は通知に載せない", o3["c27eec97"]["alert"] is False)
+check("★交代の後にも書いていれば『見失い』", o3["dead0009"]["over_kind"] == "見失い",
+      o3["dead0009"]["over_kind"])
+check("★本物の見失いは通知に載る", o3["dead0009"]["alert"] is True)
+check("rotated_atが無い行は従来どおり経過時間で判定(黙らせすぎない)",
+      o3["old00010"]["over_kind"] == "見失い", o3["old00010"]["over_kind"])
+check("★変異: 旧仕様(経過時間だけ)なら交代の最後の一筆が『見失い』になる",
+      (NOW - LAST_HANDOFF) < cw.STALE_SEC,
+      "24分06秒が30分より短い=旧判定では必ず鳴る、が再現できていない")
+check("★変異: rotated_at を消すと同じ行が『見失い』へ戻る",
+      cw._old_gen_kind(dict(settled, rotated_at=0.0), NOW) == "見失い")
+check("★変異: 猶予を0にしても交代前の書き込みは黙る(境界の向きが逆でない)",
+      cw._old_gen_kind(settled, NOW) == "交代済")
+
+# 実物の配線= relay が実際に rotated_at を残すか(名前を1か所でしか知らない状態にしない)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import session_relay as _sr          # noqa: E402
+_e = {}
+_sr._stamp_rotation(_e, "old-sid-1234")
+check("★relay側: 交代で rotated_at を残す", float(_e.get("rotated_at") or 0) > 0, str(_e))
+check("★relay側: 直前の世代のIDも残す", _e.get("prev_session_id") == "old-sid-1234", str(_e))
+check("★relay側: 見張りが読む名前と一致している(rotation_marks が拾える形)",
+      "rotated_at" in _e and isinstance(_e["rotated_at"], float), str(type(_e.get("rotated_at"))))
+
 print("== 変異検査(旧仕様へ戻したら落ちること) ==")
 real_judge = cw.judge
 

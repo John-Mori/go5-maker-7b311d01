@@ -47,6 +47,7 @@ STATE = os.path.join(LOCAL, "llm", "context_watch_state.json")
 LEDGER = os.path.join(LOCAL, "llm", "context_watch.jsonl")
 ALERT_COOLDOWN_SEC = 3600       # 同じセッションで鳴らし続けない(1時間に1回)
 STALE_SEC = 1800                # 30分書き込みが無ければ「もう走っていない」と見る
+ROTATE_GRACE_SEC = 900          # ★交代の後で旧世代が引き継ぎを書き終えるまでの猶予(実測の開き7分の倍)
 # ★relayは便の**途中**では圧縮しない。便を返してから後始末で撃つ(実測 2026-08-22:
 #   予約16:41:29→実行16:45:17=228秒 / 16:59:23→17:02:39=196秒 / 17:11:50→17:15:36=226秒)。
 #   その間に線を越えた行を見て「撃てていない」と言うと、**必ず**誤発火する。
@@ -114,6 +115,32 @@ def managed_sessions():
                 sid = str((v or {}).get("active_session_id") or "")
                 if sid:
                     out[sid] = room
+    except Exception:
+        pass
+    return out
+
+
+def rotation_marks():
+    """部屋ごとの **最後に交代が終わった時刻(epoch)**。取れない部屋は入らない。
+
+    ★2026-08-22(研究室HQ msg 1540652585805942875)。旧世代の判定に**経過時間**を使うと、
+      正常な交代のたびに30分間「見失い」が鳴る= 交代は「①台帳を差し替える →
+      ②旧セッションが引き継ぎを書く」の順なので、②は必ず①の後に来るからだ
+      (実測 hq= 台帳17:50:06 / 旧セッションの最終行17:57:06 / 18:21:14に「見失い」)。
+      → relay が `rotated_at` を残すようになった(session_relay._stamp_rotation)。
+        ここはそれを読むだけ。**無い部屋は 0 を返し、判定は従来どおり経過時間へ倒れる**
+        (=まだ1度も交代していない部屋や古い行で、黙らせすぎない側に倒す)。
+    """
+    out = {}
+    try:
+        with open(os.path.join(LOCAL, "llm", "room_sessions.json"), encoding="utf-8") as f:
+            for room, v in (json.load(f) or {}).items():
+                try:
+                    ts = float((v or {}).get("rotated_at") or 0)
+                except (TypeError, ValueError):
+                    ts = 0.0
+                if ts > 0:
+                    out[str(room)] = ts
     except Exception:
         pass
     return out
@@ -223,7 +250,7 @@ def scan(hours):
     return rows
 
 
-def mark_managed(rows, mgd):
+def mark_managed(rows, mgd, marks=None):
     """各行に「relayの管理下か」を書き込む(表示と判定で同じ値を使う=2か所で判定しない)。
 
     ★「管理下か」は room_sessions.json の一致だけで決めない。あれは**現行世代しか**
@@ -237,6 +264,8 @@ def mark_managed(rows, mgd):
         current = next((v for k, v in (mgd or {}).items() if k.startswith(r["sid"])), None)
         relay_born = r["dept"] not in ("研究室メイン", "手動セッション等", "?")
         r["managed"] = ("relay:現行" if current else "relay:旧世代") if relay_born else ""
+        # ★その部屋が最後に交代した時刻(判定で使う。無ければ0=経過時間へ倒れる)
+        r["rotated_at"] = float((marks or {}).get(r["dept"], 0.0) or 0.0)
     return rows
 
 
@@ -264,6 +293,30 @@ def _fired_since(r, compact_at, now):
     return "未発火"
 
 
+def _old_gen_kind(r, now):
+    """旧世代の行を「交代済(黙る)」と「見失い(鳴らす)」に分ける。
+
+    ★★2026-08-22(研究室HQ msg 1540652585805942875 の実測)。ここは以前
+      `now - last_epoch < STALE_SEC` の**経過時間だけ**で二分していた。
+      だが交代は必ず「①台帳を新世代へ差し替える → ②旧セッションが引き継ぎを書く」の順で、
+      ②は①の後に来る。実測 hq= 台帳17:50:06 / 旧セッションの最終行17:57:06 /
+      18:21:14に「見失い」= 24分06秒 < 30分。**交代の最後の一筆を暴走と読んでいた。**
+      同じ便の aegis-gl は最終17:33=48分前で30分を越えていたので黙った=
+      **状態は同じで、ラベルが違うのは経過時間だけ**だった。
+      → 判定の軸を「最後の書き込みの新しさ」から **「交代が終わった後にも書いたか」**へ移す。
+        経過時間は状態の代理でしかない(C-041)。交代の完了時刻という状態そのものを使う。
+    ★猶予(ROTATE_GRACE_SEC)は、引き継ぎの書き出しと台帳の書き込みの前後関係が
+      経路によって入れ替わっても黙らせるための幅。実測の開き(7分)の倍以上を取る。
+    ★`rotated_at` を持たない部屋(まだ交代していない・relayが古い)は**従来どおり経過時間**で
+      判定する= 黙らせすぎない側へ倒す(fail-open の向きはここでは「鳴る」側)。
+    """
+    rot = float(r.get("rotated_at") or 0.0)
+    last = float(r.get("last_epoch") or 0.0)
+    if rot > 0:
+        return "見失い" if last > rot + ROTATE_GRACE_SEC else "交代済"
+    return "見失い" if now - last < STALE_SEC else "交代済"
+
+
 def judge(rows, compact_at, rotate_at, now=None):
     """線を越えている行を**管理下・管理外の両方**から拾い、越え方の種類を付けて返す。
 
@@ -285,10 +338,8 @@ def judge(rows, compact_at, rotate_at, now=None):
             r["over_kind"] = "管理外"
         elif managed == "relay:現行":
             r["over_kind"] = _fired_since(r, compact_at, now)
-        elif now - float(r.get("last_epoch") or 0) < STALE_SEC:
-            r["over_kind"] = "見失い"
         else:
-            r["over_kind"] = "交代済"          # 既に交代した窓の残骸=鳴らす意味がない
+            r["over_kind"] = _old_gen_kind(r, now)
         r["alert"] = r["over_kind"] not in ("交代済", "圧縮済", "処理中")
         over.append(r)
     return over
@@ -374,7 +425,7 @@ def main():
         % (f"{compact_at:,}", f"{rotate_at:,}", src))
     out("%-10s%-18s%-9s%6s%10s%10s%10s  %s"
         % ("session", "部門/用途", "管理", "便数", "中央値", "最新", "最大", "最終"))
-    mark_managed(rows, mgd)
+    mark_managed(rows, mgd, rotation_marks())
     over = judge(rows, compact_at, rotate_at)
     for r in rows:
         flag = ("★%s(%s)" % (r["level"], r["over_kind"])) if r.get("level") else ""
