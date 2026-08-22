@@ -3233,9 +3233,15 @@
       _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
       if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">表示できる作品がありません。(💡候補やサークルタブに作品を追加してください)</p>'; return; }
       var salesCids = salesTargetCids_(arr);
+      // ★全候補にも他タブと同じ作品検索/メモ検索を付ける(Chami依頼2026-08-22「全候補にも同じような検索機能を」)。
+      //   検索UI=workSearchHtml_('all')・配線=wireWorkSearch_(el,'all')。candCard は既に data-work-search/
+      //   data-memo-search を全カードへ出しているので、他タブと同一のDOM方式(表示/非表示で絞る)がそのまま効く。
+      //   保持先は _workSearchByTab['all']/_memoSearchByTab['all']=タブ別に独立(main/サークルの入力と混ざらない)。
       el.innerHTML = '<p class="hint" style="padding:2px 6px;">📚 全候補 ' + arr.length + '件</p>' +
+        workSearchHtml_('all') +
         arr.map(function (it) { return candCard(it, ''); }).join('');
       wireCardCommon_(el);
+      wireWorkSearch_(el, 'all'); // ★入力状態はrenderAll_再実行後もworkSearchHtml_のvalue復元で維持(他タブと同挙動)
       fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === 'all') renderAll_(); });
     }
     if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items) { finish(items || []); });
