@@ -141,6 +141,45 @@ check("封筒に文脈が出る", f"{POST + FLOOR:,}" in sb, sb)
 check("封筒に床が出る", "床=" in sb and f"{FLOOR:,}" in sb, sb)
 check("床が不明なら床は書かない", "床=" not in sr._state_block(19, 100000, 0))
 
+print("== 写像は1本(ORG-46 第3形・2026-08-22 17:16 実測) ==")
+# ★実測= hq の行に ctx 137,783 は入ったが floor は None のままだった。同じ瞬間に
+#   read_transcript は floor 72,774 を返している=**測れているのに台帳から落ちていた**。
+#   犯人は「判定前の測り直し」が ctx と source しか書かなかったこと(写像が3か所にあった)。
+TR_HQ = {"context_tokens": 137783, "carry_tokens": 137783, "floor_tokens": 72774,
+         "post_compact": False, "compact_count": 10}
+e1 = {"generation": 16}
+c1 = sr._apply_transcript(e1, TR_HQ)
+check("写像: 文脈が返る", c1 == 137783, str(c1))
+check("写像: 床が台帳へ入る", e1.get("floor_tokens") == 72774, str(e1.get("floor_tokens")))
+check("写像: 持ち越しが台帳へ入る", e1.get("carry_tokens") == 137783)
+check("写像: 出所が transcript", e1.get("context_source") == "transcript", str(e1.get("context_source")))
+
+# 圧縮の直後= 記録に assistant 行が無く床が測れない。台帳が覚えている床を足す。
+e2 = {"floor_tokens": 72774}
+c2 = sr._apply_transcript(e2, {"context_tokens": 10404, "carry_tokens": 10404,
+                               "floor_tokens": 0, "post_compact": True})
+check("写像: 床が測れない便は台帳の床を足す", c2 == 10404 + 72774, str(c2))
+check("写像: 足したことが出所に残る", "床は台帳の実測" in (e2.get("context_source") or ""),
+      str(e2.get("context_source")))
+
+# 「判定の前に測り直す」経路が、床まで書くこと(=17:16の事故が二度と起きないこと)
+real_rt = sr.read_transcript
+sr.read_transcript = lambda sid, cwd=None: dict(TR_HQ)
+try:
+    e3 = {"generation": 16}
+    got, measured = sr._measure_context_now("c27eec97", e3)
+    check("測り直し: 文脈を返す", measured and got == 137783, str(got))
+    check("★測り直しの経路でも床が台帳へ入る", e3.get("floor_tokens") == 72774,
+          "ctxだけ書いて床が落ちている=17:16の事故そのもの")
+    e4 = {"generation": 16}
+    got4, _ = sr._measure_context_now("c27eec97")          # entryを渡さない旧い呼び方
+    check("測り直し: entryを渡さなければ何も書かない(後方互換)",
+          got4 == 137783 and not e4.get("floor_tokens"))
+    check("★変異: ctxだけ書く旧経路なら床はNoneのまま",
+          {"generation": 16}.get("floor_tokens") is None)
+finally:
+    sr.read_transcript = real_rt
+
 print("== 変異検査(旧仕様へ戻したら落ちること) ==")
 old = POST                                   # 旧: postTokens をそのまま文脈とした
 check("★変異: 旧仕様なら床込みの値と一致しない", old != POST + FLOOR)

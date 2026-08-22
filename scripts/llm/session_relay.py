@@ -1881,6 +1881,38 @@ def _context_tokens_of(data):
     return int(total / max(turns, 1))
 
 
+def _apply_transcript(entry, tr):
+    """記録ファイルの読み(`read_transcript`)を**台帳の列へ写す唯一の場所**。戻り値= ctx。
+
+    ★★ORG-46 の第3形(2026-08-22 17:16 実測)。同じ写像が3か所にあり、**書く列が違った**:
+        ① `_note_usage`          ctx / carry / floor / source
+        ② 圧縮の後始末            ctx / carry / floor / source
+        ③ 判定前の測り直し        **ctx と source だけ**   ← ここが最後に走ると床が消える
+      実測= hq の行に ctx 137,783 は入ったのに floor は None のままだった。
+      **同じ瞬間に read_transcript は floor 72,774 を返している**(測れているのに台帳から落ちた)。
+      床が落ちると次の圧縮の直後に台帳へ入るのは持ち越し量だけになり(実測 10,404)、
+      封筒の数字が実物の約1/9になる= **ORG-46(物差しの嘘)がそこで作り直される。**
+      → 写像は1本にする。列を足す時もここだけを直せば3経路に同時に効く。
+    ★床は**部屋の起動文の大きさ**でセッションの持ち物ではない= 測れない便は台帳の値を使う
+      (圧縮の直後は記録ファイルに assistant 行が1行も無く、床が測れない)。
+    """
+    ctx = int(tr.get("context_tokens") or 0)
+    if not ctx:
+        return 0
+    entry["context_source"] = "transcript" + ("+圧縮直後(床込み)" if tr.get("post_compact") else "")
+    _fl = int(tr.get("floor_tokens") or 0)
+    if _fl:
+        entry["floor_tokens"] = _fl
+    else:
+        _fl = int(entry.get("floor_tokens") or 0)
+        if _fl and tr.get("post_compact"):
+            ctx += _fl                           # ★read_transcript が足せなかった分をここで足す
+            entry["context_source"] = "transcript+圧縮直後(床は台帳の実測)"
+    if tr.get("carry_tokens"):
+        entry["carry_tokens"] = int(tr["carry_tokens"])
+    return ctx
+
+
 def _note_usage(entry, data, now, sid=None):
     """対応表の1部屋分へ使用量を記録する(★保存は呼び元の save_room=既存の原子的更新)。
 
@@ -1896,26 +1928,8 @@ def _note_usage(entry, data, now, sid=None):
     tr = read_transcript(sid) if sid else None
     ctx = 0
     if tr and tr.get("context_tokens"):
-        ctx = int(tr["context_tokens"])
-        entry["context_source"] = "transcript" + ("+圧縮直後(床込み)" if tr.get("post_compact") else "")
+        ctx = _apply_transcript(entry, tr)
         entry["context_tokens_est"] = est        # ★並べて残す(計器の狂いを後から追えるように)
-        # ★2026-08-22(HQ指摘2)床と持ち越しも台帳へ。**圧縮で減らせる余地**の判定に使う
-        #   (床は圧縮では1トークンも減らない= そこへ撃つのは丸損)。
-        # ★★2026-08-22(2回目)**床は台帳が覚えておく。** 圧縮が走ると記録ファイルが
-        #   新しくなり、その中には assistant 行が1行も無い=床が測れない(実測: 16:45の圧縮の
-        #   直後、台帳へ入ったのは 10,430 で床は0のままだった=直したはずの値がまた
-        #   持ち越し量だけになっていた)。床は**部屋の起動文の大きさ**であって
-        #   セッションごとの持ち物ではないので、測れない便は前に測った値を使ってよい。
-        _fl = int(tr.get("floor_tokens") or 0)
-        if _fl:
-            entry["floor_tokens"] = _fl
-        else:
-            _fl = int(entry.get("floor_tokens") or 0)
-            if _fl and tr.get("post_compact"):
-                ctx += _fl                       # ★read_transcript が足せなかった分をここで足す
-                entry["context_source"] = "transcript+圧縮直後(床は台帳の実測)"
-        if tr.get("carry_tokens"):
-            entry["carry_tokens"] = int(tr["carry_tokens"])
     elif est:
         ctx = est
         entry["context_source"] = "usage_est"    # ★記録が読めなかった日はこちら
@@ -2146,11 +2160,15 @@ def _refresh_hold(entry, rec, now):
                   f"上限{REFRESH_HOLD_MAX_SEC // 3600}時間で必ず交代する)")
 
 
-def _measure_context_now(sid):
+def _measure_context_now(sid, entry=None):
     """**今この瞬間**のセッションの文脈量を記録ファイルから測り直す。
 
     戻り値 (ctx, measured)。measured=False は「測れなかった」= 呼び元は台帳の値のまま進む
     (★fail-open。測れない日に圧縮も交代も止まると、そちらの方が高くつく)。
+
+    ★entry を渡すと、測った読みを **`_apply_transcript` で台帳の列へ全部写す**
+      (2026-08-22・ORG-46 第3形)。渡さない呼び元は数字だけ受け取る=従来どおり。
+      ここが ctx しか書かなかったせいで、測れているのに床が台帳から消えていた。
 
     ★★2026-07-29(3回目)**なぜこれが要るか(今回の真因②の本体)。**
       台帳の `context_tokens` は **前の便が終わった時点の測定値**でしかない。
@@ -2176,7 +2194,10 @@ def _measure_context_now(sid):
     if not tr:
         return 0, False
     try:
-        ctx = int(tr.get("context_tokens") or 0)
+        if entry is not None:
+            ctx = int(_apply_transcript(entry, tr) or 0)     # ★床・持ち越しも一緒に写す
+        else:
+            ctx = int(tr.get("context_tokens") or 0)
     except (TypeError, ValueError):
         return 0, False
     # ★0は「読めたが数えられなかった」= 信じない(0を信じると全部屋が『文脈ゼロ』に見える)。
@@ -4030,7 +4051,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
     # ★測れなかった時は台帳の値のまま進む(fail-open)。沈黙も停止も作らない。
     _remeasure = bool(sid) and bool(_rot or (_lost and _lost.get("need_cp")))
     if _remeasure:
-        _fresh, _measured = _measure_context_now(sid)
+        _fresh, _measured = _measure_context_now(sid, entry)   # ★床も一緒に台帳へ(ORG-46 第3形)
         if _measured and _fresh != _ctx_now:
             _record(rid, dept, "running",
                     f"★判定の前に文脈を測り直した 台帳={_ctx_now:,} → 実測={_fresh:,}"

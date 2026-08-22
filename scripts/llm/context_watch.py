@@ -47,6 +47,10 @@ STATE = os.path.join(LOCAL, "llm", "context_watch_state.json")
 LEDGER = os.path.join(LOCAL, "llm", "context_watch.jsonl")
 ALERT_COOLDOWN_SEC = 3600       # 同じセッションで鳴らし続けない(1時間に1回)
 STALE_SEC = 1800                # 30分書き込みが無ければ「もう走っていない」と見る
+# ★relayは便の**途中**では圧縮しない。便を返してから後始末で撃つ(実測 2026-08-22:
+#   予約16:41:29→実行16:45:17=228秒 / 16:59:23→17:02:39=196秒 / 17:11:50→17:15:36=226秒)。
+#   その間に線を越えた行を見て「撃てていない」と言うと、**必ず**誤発火する。
+COMPACT_LAG_SEC = 900           # 越えてからこの秒数までは「処理中」とみなす(実測の約4倍)
 
 # ★★2026-08-22 研究室HQ 指摘1(msg 1540622895687139438)= **管理下も数える**。
 #   初版は over の条件に `not managed` を入れていた。結果、線を越えていても relay管理下なら
@@ -60,10 +64,23 @@ STALE_SEC = 1800                # 30分書き込みが無ければ「もう走�
 #     未発火 = 線は効くはずなのに越えている(relayが撃てていない)
 #     見失い = 現行世代として登録されていないのに書き込みが続いている
 #     交代済 = 既に交代した旧世代が窓に残っているだけ(**鳴らさない**=誤発火にしない)
+#
+# ★★2026-08-22(2回目・イージス研究室)**「未発火」を中央値だけで決めていたのが誤りだった。**
+#   実測(17:16): hq c27eec97 を「未発火」と出したが、同じ12時間に relay は**4回**圧縮している
+#     16:30 124,149→8,114 / 16:45 171,240→10,502 / 17:02 171,799→9,039 / 17:12 129,472→10,404
+#   (出典 local/llm/dept_daemon_hq.log)。イージス研究室 2f7b8457 も 16:45 と 17:15 に撃っている。
+#   ★理由は判定の形そのものだ= **圧縮は 120,000 で撃つので、正常な部屋の記録には
+#     必ず 120,000 超の行が並ぶ。**その並びの中央値を線と比べれば、**撃てば撃つほど
+#     「未発火」に見える。**忙しい部屋では永久に消えない=常に誤発火する安全網(共通規律§3)。
+#   → 「撃てていない」は **最後の圧縮より後にまだ線を越えている**ことで測る(時系列で見る)。
+#     圧縮済 = 越えた後にちゃんと圧縮が走っている(鳴らさない)
+#     処理中 = 越えた便がまだ新しい(relayは便の終わりに撃つ)= 結果待ち(鳴らさない)
 OVER_KINDS = {
     "管理外": "relayの管理外(手で開いた窓)= 圧縮線も交代線も一切かからない",
     "未発火": "relay管理下なのに越えている= relayが撃てていない(線の物差しか、圧縮しても落ちない)",
     "見失い": "現行世代として登録されていないのに書き込みが続いている= relayが世代を見失った",
+    "圧縮済": "越えた後に圧縮が走っている= relayは撃てている(**鳴らさない**)",
+    "処理中": "越えた便がまだ新しい= relayは便の終わりに撃つので結果待ち(**鳴らさない**)",
 }
 
 RE_TS = re.compile(r'"timestamp"\s*:\s*"([0-9T:\-\.]+)Z?"')
@@ -147,13 +164,25 @@ def scan(hours):
             except OSError:
                 continue
             ctxs, model, last_ts = [], "?", None
+            stamps, bounds = [], []          # ★便ごとの時刻 / 圧縮の区切りの時刻(判定を時系列で見るため)
             try:
                 f = open(p, encoding="utf-8", errors="replace")
             except OSError:
                 continue
             with f:
                 for line in f:
-                    if '"usage"' not in line:
+                    if '"usage"' not in line and "compact_boundary" not in line:
+                        continue
+                    if "compact_boundary" in line and '"usage"' not in line:
+                        # ★圧縮の区切りには usage が無い。ここで拾わないと
+                        #   「撃てているのに未発火」を永久に出し続ける(この節の冒頭参照)。
+                        mb = RE_TS.search(line)
+                        if mb:
+                            try:
+                                bounds.append(datetime.fromisoformat(mb.group(1)).replace(
+                                    tzinfo=timezone.utc).timestamp())
+                            except ValueError:
+                                pass
                         continue
                     mts = RE_TS.search(line)
                     if not mts:
@@ -175,6 +204,7 @@ def scan(hours):
                     if ctx <= 0:
                         continue
                     ctxs.append(ctx)
+                    stamps.append(dt.timestamp())
                     mm = RE_MODEL.search(line)
                     if mm:
                         model = mm.group(1)
@@ -187,6 +217,8 @@ def scan(hours):
                 "median": int(statistics.median(ctxs)), "max": max(ctxs),
                 "last_ts": last_ts.astimezone(JST).strftime("%m/%d %H:%M") if last_ts else "?",
                 "last_epoch": last_ts.timestamp() if last_ts else 0.0,
+                "ctxs": ctxs, "stamps": stamps, "bounds": bounds,
+                "n_compact": len(bounds),
             })
     return rows
 
@@ -206,6 +238,30 @@ def mark_managed(rows, mgd):
         relay_born = r["dept"] not in ("研究室メイン", "手動セッション等", "?")
         r["managed"] = ("relay:現行" if current else "relay:旧世代") if relay_born else ""
     return rows
+
+
+def _fired_since(r, compact_at, now):
+    """relay管理下の線超を、**最後の圧縮より後にまだ越えているか**で分ける。
+
+    返す値= "未発火"(撃てていない) / "圧縮済"(越えた後に撃っている) / "処理中"(結果待ち)。
+
+    ★中央値では測れない= 圧縮は 120,000 で撃つので、**正常に撃っている部屋ほど
+      記録に 120,000 超の行が並ぶ**(その行が無ければ、そもそも撃つ理由が無い)。
+      中央値と線を比べる限り、健康な部屋が永久に「未発火」で鳴り続ける(実測 hq= 4回撃って未発火)。
+    ★時刻が読めない行(手で作った行・古い呼び出し)は **"未発火" へ倒す**=
+      判定不能を「大丈夫」の側へ倒すと、本当の穴が黙って消える(fail-open は喋る側)。
+    """
+    ctxs, stamps = r.get("ctxs") or [], r.get("stamps") or []
+    bounds = r.get("bounds")
+    if bounds is None or not stamps or len(stamps) != len(ctxs):
+        return "未発火"
+    last_b = max(bounds) if bounds else 0.0
+    overs = [t for c, t in zip(ctxs, stamps) if t > last_b and c >= compact_at]
+    if not overs:
+        return "圧縮済"
+    if now - max(overs) < COMPACT_LAG_SEC:
+        return "処理中"
+    return "未発火"
 
 
 def judge(rows, compact_at, rotate_at, now=None):
@@ -228,12 +284,12 @@ def judge(rows, compact_at, rotate_at, now=None):
         if not managed:
             r["over_kind"] = "管理外"
         elif managed == "relay:現行":
-            r["over_kind"] = "未発火"
+            r["over_kind"] = _fired_since(r, compact_at, now)
         elif now - float(r.get("last_epoch") or 0) < STALE_SEC:
             r["over_kind"] = "見失い"
         else:
             r["over_kind"] = "交代済"          # 既に交代した窓の残骸=鳴らす意味がない
-        r["alert"] = r["over_kind"] != "交代済"
+        r["alert"] = r["over_kind"] not in ("交代済", "圧縮済", "処理中")
         over.append(r)
     return over
 
@@ -329,10 +385,11 @@ def main():
         out("  (この窓に動いたセッションは無い)")
     out("")
     if over:
-        for kind in ("未発火", "見失い", "管理外", "交代済"):
+        for kind in ("未発火", "見失い", "管理外", "交代済", "圧縮済", "処理中"):
             grp = [r for r in over if r["over_kind"] == kind]
             if grp:
-                out("★%s= %d件%s" % (kind, len(grp), "" if kind != "交代済" else "(既に交代済=鳴らさない)"))
+                out("★%s= %d件%s" % (kind, len(grp),
+                                    "" if kind in ("未発火", "見失い", "管理外") else "(鳴らさない)"))
         out("  ※越え方の意味= " + " / ".join("%s: %s" % (k, v) for k, v in OVER_KINDS.items()))
     else:
         out("線を越えているセッションは無い(管理下・管理外とも)")

@@ -134,6 +134,57 @@ finally:
     cw.subprocess = real_sub
 
 
+print("== 「未発火」は時系列で測る(2026-08-22 2回目・研究室HQ msg DISPATCH-aegis-gl-1787386532882) ==")
+# ★実測の再現= hq c27eec97 は「未発火」と表示されたが、同じ12時間に relay は4回撃っていた
+#   (local/llm/dept_daemon_hq.log 16:30 / 16:45 / 17:02 / 17:12)。
+#   圧縮は 120,000 で撃つので、正常な部屋の記録には必ず 120,000 超の行が並ぶ=
+#   中央値と線を比べる形では**撃つほど未発火に見える**。
+
+
+def tl(sid, dept, samples, bounds, last_epoch=NOW):
+    """(時刻ずれ, 文脈量) の並びと圧縮の区切りから、scan() が作る行と同じ形を作る。"""
+    ctxs = [c for _, c in samples]
+    stamps = [NOW + d for d, _ in samples]
+    r = row(sid, dept, int(sorted(ctxs)[len(ctxs) // 2]), last_epoch=last_epoch, n=len(ctxs))
+    r.update({"ctxs": ctxs, "stamps": stamps, "bounds": [NOW + d for d in bounds],
+              "last": ctxs[-1], "max": max(ctxs)})
+    return r
+
+
+healthy = tl("c27eec97", "hq",
+             # 越える→撃つ→また越える→また撃つ。最後の区切りの後は軽い行しか無い。
+             [(-3600, 124149), (-3000, 171240), (-2400, 171799), (-1200, 129472), (-60, 10404)],
+             [-3300, -2700, -1500, -100])
+stuck = tl("dead0001", "future-room",
+           [(-7200, 150000), (-5000, 190000), (-3000, 191000)], [-9000])
+pending = tl("busy0002", "platform-se",
+             [(-4000, 130000), (-120, 152299)], [-3500])
+blind = row("nodata03", "kaizen-analyst", 150000)          # ctxs/stamps/bounds が無い行
+
+rows2 = cw.mark_managed([healthy, stuck, pending, blind], {
+    "c27eec97": "hq", "dead0001": "future-room",
+    "busy0002": "platform-se", "nodata03": "kaizen-analyst"})
+for r in rows2:
+    r["managed"] = "relay:現行"                            # 起動文を持たない作り物なのでここで固定
+o2 = {r["sid"]: r for r in cw.judge(rows2, COMPACT, ROTATE, now=NOW)}
+check("撃っている部屋は未発火にしない(圧縮済)", o2["c27eec97"]["over_kind"] == "圧縮済",
+      o2["c27eec97"]["over_kind"])
+check("撃っている部屋は通知に載せない", o2["c27eec97"]["alert"] is False)
+check("越えたまま撃っていない部屋は未発火のまま", o2["dead0001"]["over_kind"] == "未発火",
+      o2["dead0001"]["over_kind"])
+check("越えたまま撃っていない部屋は通知に載る", o2["dead0001"]["alert"] is True)
+check("越えた便がまだ新しい部屋は処理中", o2["busy0002"]["over_kind"] == "処理中",
+      o2["busy0002"]["over_kind"])
+check("処理中は鳴らさない", o2["busy0002"]["alert"] is False)
+check("測れない行は未発火へ倒す(黙らない)", o2["nodata03"]["over_kind"] == "未発火",
+      o2["nodata03"]["over_kind"])
+check("★変異: 圧縮の区切りを消すと同じ部屋が未発火に戻る",
+      cw._fired_since(dict(healthy, bounds=[]), COMPACT, NOW) == "未発火")
+check("★変異: 猶予を0にすると処理中は未発火になる",
+      cw._fired_since(pending, COMPACT, NOW + cw.COMPACT_LAG_SEC) == "未発火")
+check("★変異: 中央値だけ見る旧判定なら、撃っている部屋も線超で拾われてしまう",
+      healthy["median"] >= COMPACT, str(healthy["median"]))
+
 print("== 変異検査(旧仕様へ戻したら落ちること) ==")
 real_judge = cw.judge
 
