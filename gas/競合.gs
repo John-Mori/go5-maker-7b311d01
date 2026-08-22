@@ -433,45 +433,20 @@ function runCompetitorDaily() {
   var watch = compWatchChannels_();
   if (!watch.length) { Logger.log('競合日次: watch対象0件(シードURL未登録)'); return { ok: true, channels: 0, note: 'no_watch' }; }
 
-  // 1) チャンネル統計を更新し、uploadsプレイリストIDを確保
-  var chSh = compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
-  var chMap = headerMap_(chSh);
-  var ids = watch.map(function (w) { return w.channelId; });
-  var stats = ytChannels_(ids);
-  watch.forEach(function (w) {
-    var s = stats[w.channelId]; if (!s) return;
-    if (s.name) chSh.getRange(w.rowIndex, chMap['チャンネル名']).setValue(s.name);
-    if (s.hiddenSubs) chSh.getRange(w.rowIndex, chMap['登録者数']).setValue('');
-    else if (s.subs != null) chSh.getRange(w.rowIndex, chMap['登録者数']).setValue(s.subs);
-    if (s.views != null) chSh.getRange(w.rowIndex, chMap['総再生数']).setValue(s.views);
-    if (s.videos != null) chSh.getRange(w.rowIndex, chMap['動画数']).setValue(s.videos);
-    if (s.uploads) { chSh.getRange(w.rowIndex, chMap['uploads']).setValue(s.uploads); w.uploads = s.uploads; }
-    chSh.getRange(w.rowIndex, chMap['最終更新']).setValue(today);
-  });
-
-  // 2) 各チャンネルの新着動画(追跡窓内)を取り込む
+  // ★実行の時間予算(2026-08-23恒久対策・競合_日次の凍結を根治)。
+  //   GASの1実行は約6分で強制終了する。旧構成は ①チャンネル統計更新→②新着discovery(watch数ぶんのplaylist取得)→
+  //   ③meta→④統計スナップappend の順で、追跡窓の動画が増えるにつれ④の手前で6分に達して殺され、競合_日次シートへ
+  //   1行も書けないまま2026-08-18で凍結していた(実測: comp_daily_now が361秒=GoogleのタイムアウトHTMLを返す。
+  //   PC側の日次集計は毎朝"成功"に見えるが同じ8/18を再集計しているだけ=silent green)。
+  //   対策=最優先の「既存の追跡窓動画の統計スナップ→日次append」を先頭へ移し、必ず先に済ませる。
+  //   チャンネル統計更新・新着discovery は"充実"(無くてもその日の日次は成立)なので時間予算内の best-effort に後置する。
+  var RUN_T0 = Date.now();
+  var BUDGET_MS = 240000; // 充実処理は通算4分で打ち切り=残り2分で確実に終える(appendは既に先頭で完了済み)
   var cutoff = new Date().getTime() - COMP_WINDOW_DAYS * 86400000;
-  var newVideoIds = [];
-  watch.forEach(function (w) {
-    if (!w.uploads) return;
-    var items = ytPlaylistItems_(w.uploads, 50);
-    items.forEach(function (it) {
-      var t = it.publishedAt ? new Date(it.publishedAt).getTime() : 0;
-      if (t && t >= cutoff) newVideoIds.push({ videoId: it.videoId, channelId: w.channelId });
-    });
-  });
-  // 新規動画のメタを取得して台帳へ
-  var metaIds = newVideoIds.map(function (x) { return x.videoId; });
-  var meta = ytVideosMeta_(metaIds);
-  var chOf = {}; newVideoIds.forEach(function (x) { chOf[x.videoId] = x.channelId; });
-  var vrecords = [];
-  Object.keys(meta).forEach(function (vid) {
-    var m = meta[vid];
-    vrecords.push({ video_id: vid, channel_id: m.channelId || chOf[vid] || '', title: m.title, publishedAt: m.publishedAt, durationSec: m.durationSec });
-  });
-  compUpsertVideos_(vrecords);
 
-  // 3) 追跡窓内の全動画の統計をスナップ(日次append)
+  // 1) 【最優先・必ず先に実行】追跡窓内の"既存"動画(台帳に載っている分)の統計をスナップ→日次append。
+  //    windowVids は動画台帳(前回までのdiscoveryで蓄積済み)から読む=当日discovery(下の3)に依存しない。
+  //    ※当日公開の新着はこの時点では台帳に無いので翌日から対象化(速度は2点必要なので初日欠測は影響なし)。
   var vidSh = compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
   var vMap = headerMap_(vidSh);
   var vlast = vidSh.getLastRow();
@@ -493,11 +468,58 @@ function runCompetitorDaily() {
     drows.push([today, vid, vChan[vid] || '', s.views == null ? '' : s.views, s.likes == null ? '' : s.likes, s.comments == null ? '' : s.comments]);
   });
   if (drows.length) dailySh.getRange(dailySh.getLastRow() + 1, 1, drows.length, COMP_DAILY_HEADERS.length).setValues(drows);
+  var snapped = drows.length;
 
-  // 4) 日曜は週次サマリを再計算
-  if (new Date().getDay() === 0) compWeeklySummary_();
+  // 2) 【充実・予算内】チャンネル統計を更新し uploads を確保。snapped==0(YT空)なら以降は無駄なので打ち切る。
+  var chSh = compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
+  var chMap = headerMap_(chSh);
+  if (snapped && Date.now() - RUN_T0 < BUDGET_MS) {
+    var ids = watch.map(function (w) { return w.channelId; });
+    var stats = ytChannels_(ids);
+    watch.forEach(function (w) {
+      var s = stats[w.channelId]; if (!s) return;
+      if (s.name) chSh.getRange(w.rowIndex, chMap['チャンネル名']).setValue(s.name);
+      if (s.hiddenSubs) chSh.getRange(w.rowIndex, chMap['登録者数']).setValue('');
+      else if (s.subs != null) chSh.getRange(w.rowIndex, chMap['登録者数']).setValue(s.subs);
+      if (s.views != null) chSh.getRange(w.rowIndex, chMap['総再生数']).setValue(s.views);
+      if (s.videos != null) chSh.getRange(w.rowIndex, chMap['動画数']).setValue(s.videos);
+      if (s.uploads) { chSh.getRange(w.rowIndex, chMap['uploads']).setValue(s.uploads); w.uploads = s.uploads; }
+      chSh.getRange(w.rowIndex, chMap['最終更新']).setValue(today);
+    });
+  }
 
-  return { ok: true, channels: watch.length, newVideos: vrecords.length, snapped: drows.length };
+  // 3) 【充実・予算内】各チャンネルの新着動画(追跡窓内)を台帳へ(次回スナップから対象化)。
+  var newVideos = 0;
+  if (snapped && Date.now() - RUN_T0 < BUDGET_MS) {
+    var newVideoIds = [];
+    watch.forEach(function (w) {
+      if (!w.uploads || Date.now() - RUN_T0 >= BUDGET_MS) return;
+      var items = ytPlaylistItems_(w.uploads, 50);
+      items.forEach(function (it) {
+        var tt = it.publishedAt ? new Date(it.publishedAt).getTime() : 0;
+        if (tt && tt >= cutoff) newVideoIds.push({ videoId: it.videoId, channelId: w.channelId });
+      });
+    });
+    var metaIds = newVideoIds.map(function (x) { return x.videoId; });
+    var meta = ytVideosMeta_(metaIds);
+    var chOf = {}; newVideoIds.forEach(function (x) { chOf[x.videoId] = x.channelId; });
+    var vrecords = [];
+    Object.keys(meta).forEach(function (vid) {
+      var m = meta[vid];
+      vrecords.push({ video_id: vid, channel_id: m.channelId || chOf[vid] || '', title: m.title, publishedAt: m.publishedAt, durationSec: m.durationSec });
+    });
+    compUpsertVideos_(vrecords);
+    newVideos = vrecords.length;
+  }
+
+  // 4) 日曜は週次サマリを再計算(予算内のみ)
+  if (new Date().getDay() === 0 && Date.now() - RUN_T0 < BUDGET_MS) compWeeklySummary_();
+
+  // ★snapped==0(=YT統計が全空=urlfetch日次上限/APIキー/quota切れ)は「緑を返しながら書いていない」状態。
+  //   握り潰さず ok:false で返す=呼び出し口(comp_daily_now)や実行ログで可視化する(C-041/モドリッチ依頼2026-08-23)。
+  return { ok: snapped > 0, channels: watch.length, newVideos: newVideos, snapped: snapped,
+           windowVids: windowVids.length, elapsedMs: Date.now() - RUN_T0,
+           note: snapped ? '' : 'snapped_zero: YT統計が空(urlfetch日次上限/APIキー/quota要確認)' };
 }
 
 // ============================================================
