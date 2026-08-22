@@ -41,14 +41,227 @@ function Write-Log($m) {
   try { Add-Content -LiteralPath $log -Value "$ts $m" -Encoding UTF8 } catch {}
 }
 
+# ===========================================================================
+# JUDGMENT LIBRARY (2026-08-22, aegis-gl. HQ msg 1540735472282767440)
+#
+#   WHY THE JUDGMENT MOVED INTO FUNCTIONS: it used to be inline, so the ONLY way it could
+#   ever be checked was by reading it - and it was wrong. On 2026-08-22 this script killed
+#   the live commander TWICE (22:32:11 = session 0ebedfa2, whose transcript shows 5h27m of
+#   real work; 23:02:11 = the next window, 30 min old). Both times the reason logged was
+#   "claude.exe alive but 0 CPU over 5s - deaf zombie". Daily count of that line:
+#   08-13:1 / 08-14:5 / 08-15:2 / 08-22:3.
+#
+#   WHAT WAS BROKEN (C-041: one observation used as a state):
+#     - ONE 5-second CPU sample decided life or death. The same window measured cpu+31ms at
+#       22:52 (spared) and cpu+0ms at 23:02 (killed). An idle-but-live TUI and a wedged one
+#       burn the same trickle, so CPU cannot tell them apart - and the sparing side required
+#       18 consecutive passes while the KILLING side needed exactly one. Backwards: a pileup
+#       is slow, visible and recoverable; killing the commander is silent and is not.
+#
+#   WHAT REPLACES IT:
+#     (A) the killing side now needs LAB_ZOMBIE_MAX consecutive passes of 0 CPU on the SAME
+#         shell pid, with presence dead every time (we only get here when presence says dead).
+#     (B) a proof of life that is not CPU: the window's own transcript. A window that became
+#         the Lab kept writing to ~/.claude/projects/<slug>/<sid>.jsonl for minutes or hours
+#         after it opened (0ebedfa2: created 16:42:16, last write 22:09:46, 885KB); a corpse
+#         writes the boot burst and stops. The transcript is matched to the window by
+#         creation time vs the claude.exe process start (measured: 3 seconds apart).
+#     (C) the pre-warm now needs a POSITIVE proof of success (.credentials.json advanced),
+#         because "did not match my 5 failure words" logged ok for 175 windows that had died
+#         saying "Credit balance is too low".
+#
+#   Dot-source with LAB_REVIVE_LIB=1 to load these functions WITHOUT running a revival:
+#   scripts\_daemons\test_revive_lab.ps1 does exactly that and runs the real judgment and the
+#   real branching with fake inputs, with only Stop-Process replaced.
+# ===========================================================================
+$script:LAB_ZOMBIE_MAX     = 3     # consecutive 0-CPU passes before a shell may be reaped (~30 min at 10 min/pass)
+$script:LAB_SPARE_MAX      = 18    # consecutive spares of a CPU-burning shell before we call it stuck (~3 h)
+$script:LAB_WORKED_MIN_SEC = 180   # transcript span that proves the window became a working Lab
+$script:LAB_STALE_HOURS    = 6     # a worked window silent longer than this stops counting as proof
+$script:LAB_MATCH_SEC      = 180   # transcript creation vs claude.exe start, to pair them
+$script:LAB_PREWARM_FAIL   = 'Please run /login|Not logged in|401|Invalid API key|authentication_error|Credit balance'
+
+function Get-LabWindowActivity {
+  # Pair a claude.exe with its transcript by start time, and report what that transcript proves.
+  # Returns @{Matched; Worked; LastWrite; SpanSec}. Unknown -> Matched=$false (never a verdict).
+  param($Files, $StartTime, [int]$MatchSec = -1)
+  if ($MatchSec -lt 0) { $MatchSec = $script:LAB_MATCH_SEC }
+  $res = @{ Matched = $false; Worked = $false; LastWrite = $null; SpanSec = 0 }
+  if ($null -eq $Files -or $null -eq $StartTime) { return $res }
+  $best = $null
+  foreach ($f in $Files) {
+    if ($null -eq $f.CreationTime) { continue }
+    $d = [math]::Abs((New-TimeSpan -Start $StartTime -End $f.CreationTime).TotalSeconds)
+    if ($d -le $MatchSec) {
+      if ($null -eq $best -or $f.LastWriteTime -gt $best.LastWriteTime) { $best = $f }
+    }
+  }
+  if ($null -eq $best) { return $res }
+  $res.Matched   = $true
+  $res.LastWrite = $best.LastWriteTime
+  $res.SpanSec   = [int](New-TimeSpan -Start $best.CreationTime -End $best.LastWriteTime).TotalSeconds
+  $res.Worked    = ($res.SpanSec -ge $script:LAB_WORKED_MIN_SEC)
+  return $res
+}
+
+function Get-LabShellVerdict {
+  # THE decision. Action = reap | spare | watch. Busy = positively proven alive (blocks a spawn).
+  param(
+    [bool]$HasClaudeChild,
+    [bool]$CpuMeasured,
+    [int]$CpuMs,
+    $Activity,
+    $Now,
+    [int]$ZombieCount = 0,
+    [int]$SpareCount = 0
+  )
+  $v = @{ Action = 'reap'; Reason = 'corpse'; Busy = $false; Zombie = 0; Spare = 0 }
+  if (-not $HasClaudeChild) { return $v }        # no claude.exe under the shell = confirmed corpse
+  # (B) proof of life that is not CPU, and it outranks CPU because it is not a single sample.
+  if ($Activity -and $Activity.Matched -and $Activity.Worked) {
+    $ageH = 9999
+    if ($Activity.LastWrite -and $Now) { $ageH = (New-TimeSpan -Start $Activity.LastWrite -End $Now).TotalHours }
+    if ($ageH -lt $script:LAB_STALE_HOURS) {
+      $v.Action = 'spare'; $v.Reason = 'transcript'; $v.Busy = $true; return $v
+    }
+  }
+  if (-not $CpuMeasured) { $v.Action = 'spare'; $v.Reason = 'unmeasured'; return $v }  # fail-open, never kill on an unknown
+  if ($CpuMs -gt 0) {
+    $n = $SpareCount + 1
+    if ($n -gt $script:LAB_SPARE_MAX) { $v.Action = 'reap'; $v.Reason = 'stuck'; $v.Spare = $n; return $v }
+    $v.Action = 'spare'; $v.Reason = 'cpu'; $v.Busy = $true; $v.Spare = $n; return $v
+  }
+  # (A) 0 CPU over one 5s sample is ONE OBSERVATION, not a state. Count it; kill only on a streak.
+  $z = $ZombieCount + 1
+  if ($z -ge $script:LAB_ZOMBIE_MAX) { $v.Action = 'reap'; $v.Reason = 'zombie'; $v.Zombie = $z; return $v }
+  $v.Action = 'watch'; $v.Reason = 'zombie-suspect'; $v.Zombie = $z; return $v
+}
+
+function Invoke-LabReapPass {
+  # Real branching. Killer is injectable so a test can watch what WOULD have been killed.
+  param($Candidates, $Now, $State = $null, $Killer = $null, $Logger = $null)
+  if ($null -eq $Killer) { $Killer = { param($p) Stop-Process -Id $p -Force -ErrorAction SilentlyContinue } }
+  if ($null -eq $Logger) { $Logger = { param($m) Write-Log $m } }
+  if ($null -eq $State)  { $State  = @{} }
+  $out = @{ Reaped = 0; Spared = 0; Watched = 0; Busy = 0; State = @{} }
+  foreach ($c in @($Candidates)) {
+    $key = [string]$c.ShellPid
+    $ps = 0; $pz = 0
+    if ($State.ContainsKey($key)) { $ps = [int]$State[$key].Spare; $pz = [int]$State[$key].Zombie }
+    $kids       = @($c.Kids)
+    $claudeKids = @($kids | Where-Object { $_.Name -eq 'claude.exe' })
+    $desc = ''; $cpuMs = 0; $unmeasured = 0; $act = $null
+    foreach ($ck in $claudeKids) {
+      if ($ck.CpuMeasured) {
+        if ([int]$ck.CpuMs -gt $cpuMs) { $cpuMs = [int]$ck.CpuMs }
+        $desc += ('claude pid={0} ws={1}MB cpu+{2}ms; ' -f $ck.Pid, $ck.WorkingSetMB, $ck.CpuMs)
+      } else {
+        $unmeasured++
+        $desc += ('claude pid={0} ws={1}MB cpu=UNMEASURED; ' -f $ck.Pid, $ck.WorkingSetMB)
+      }
+      if ($ck.Activity -and $ck.Activity.Matched) {
+        if ($null -eq $act -or $ck.Activity.LastWrite -gt $act.LastWrite) { $act = $ck.Activity }
+      }
+    }
+    if ($act -and $act.Matched) { $desc += ('transcript span={0}s last={1}; ' -f $act.SpanSec, $act.LastWrite) }
+    $v = Get-LabShellVerdict -HasClaudeChild ($claudeKids.Count -gt 0) `
+                             -CpuMeasured ($claudeKids.Count -gt 0 -and $unmeasured -eq 0) `
+                             -CpuMs $cpuMs -Activity $act -Now $Now -ZombieCount $pz -SpareCount $ps
+    if ($v.Action -eq 'spare') {
+      if ($v.Reason -eq 'transcript') {
+        & $Logger ('lab: cmd pid {0} - transcript proves this window WORKED [{1}] - NOT reaping. presence is blind, the window is not dead' -f $c.ShellPid, $desc)
+      } elseif ($v.Reason -eq 'unmeasured') {
+        & $Logger ('lab: cmd pid {0} - CPU unmeasurable [{1}] - NOT reaping (never kill on an unknown)' -f $c.ShellPid, $desc)
+      } else {
+        & $Logger ('lab: cmd pid {0} has a WORKING claude.exe [{1}] - NOT reaping (spare {2}/{3})' -f $c.ShellPid, $desc, $v.Spare, $script:LAB_SPARE_MAX)
+      }
+      $out.Spared++
+      if ($v.Busy) { $out.Busy++ }
+      $out.State[$key] = @{ Spare = $v.Spare; Zombie = 0 }
+    }
+    elseif ($v.Action -eq 'watch') {
+      & $Logger ('lab: cmd pid {0}: 0 CPU over 5s but that is one sample [{1}] - WATCHING {2}/{3}, not reaping' -f $c.ShellPid, $desc, $v.Zombie, $script:LAB_ZOMBIE_MAX)
+      $out.Watched++
+      $out.State[$key] = @{ Spare = 0; Zombie = $v.Zombie }
+    }
+    else {
+      if ($v.Reason -eq 'corpse') {
+        & $Logger ('lab: cmd pid {0}: children [{1}] - no claude.exe = confirmed corpse, reaping' -f $c.ShellPid, (($kids | ForEach-Object { $_.Name }) -join ','))
+      } elseif ($v.Reason -eq 'stuck') {
+        & $Logger ('lab: cmd pid {0} spared {1} passes in a row and presence never recovered [{2}] - treating it as stuck, reaping' -f $c.ShellPid, $v.Spare, $desc)
+      } else {
+        & $Logger ('lab: cmd pid {0}: {1} consecutive passes at 0 CPU and presence never recovered [{2}] - deaf zombie, reaping' -f $c.ShellPid, $v.Zombie, $desc)
+      }
+      foreach ($k in $kids) { & $Killer $k.Pid }
+      & $Killer $c.ShellPid
+      $out.Reaped++
+    }
+  }
+  return $out
+}
+
+function Read-LabWatchState {
+  # lines: "<shellpid> <spareCount> <zombieCount>"
+  param($Path)
+  $st = @{}
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $st }
+  try {
+    foreach ($line in (Get-Content -LiteralPath $Path)) {
+      $p = ($line.Trim() -split '\s+')
+      if ($p.Count -ge 3) { $st[[string]$p[0]] = @{ Spare = [int]$p[1]; Zombie = [int]$p[2] } }
+    }
+  } catch {}
+  return $st
+}
+
+function Write-LabWatchState {
+  param($Path, $State)
+  try {
+    if ($null -eq $State -or $State.Keys.Count -eq 0) {
+      if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+      return
+    }
+    $lines = @()
+    foreach ($k in $State.Keys) { $lines += ('{0} {1} {2}' -f $k, [int]$State[$k].Spare, [int]$State[$k].Zombie) }
+    Set-Content -LiteralPath $Path -Value $lines -Encoding ASCII
+  } catch {}
+}
+
+function Get-LabPrewarmVerdict {
+  # FAILED = the probe said so. ok = .credentials.json actually advanced (positive proof).
+  # unverified = output but no refresh. unknown = nothing at all. Only FAILED/unverified are bad news,
+  # and none of them block the spawn (fail-open).
+  param([string]$Blob, $CredsBefore, $CredsAfter)
+  if ($Blob -and ($Blob -match $script:LAB_PREWARM_FAIL)) { return 'FAILED' }
+  if ($CredsAfter -and (-not $CredsBefore -or $CredsAfter -gt $CredsBefore)) { return 'ok' }
+  if (-not $Blob -or $Blob.Trim().Length -eq 0) { return 'unknown' }
+  return 'unverified'
+}
+
+function Format-LabPrewarmLog {
+  param([string]$Verdict)
+  if ($Verdict -eq 'FAILED') {
+    return 'lab: AUTH PRE-WARM FAILED - probe rejected (see local\_lab_revive_probe.out). The revived window will die at the same wall.'
+  } elseif ($Verdict -eq 'ok') {
+    return 'lab: auth pre-warm ok (.claude\.credentials.json mtime advanced) - cold TUI should authenticate'
+  } elseif ($Verdict -eq 'unverified') {
+    return 'lab: AUTH PRE-WARM UNVERIFIED - probe answered but .claude\.credentials.json did not advance. Not calling that ok. Spawning anyway (fail-open).'
+  }
+  return 'lab: auth pre-warm returned nothing - treating as unknown, spawning anyway (fail-open)'
+}
+
+if ($env:LAB_REVIVE_LIB -eq '1') { return }   # library mode: functions only, no revival
+
 # --- 1) Is the Lab alive? Single source of truth = presence.lab_alive (exit 0 alive / 3 dead). ---
 $py = 'python'
 & $py (Join-Path $root 'scripts\llm\presence.py') --check 2>$null | Out-Null
 $labAlive = ($LASTEXITCODE -eq 0)
 if ($labAlive) {
   Write-Log 'lab: ok (presence.lab_alive)'
-  # presence recovered -> whatever we were sparing is vindicated, reset the counter (section 2.5)
+  # presence recovered -> whatever we were sparing or watching is vindicated, reset the counters
+  # (section 2.5). Both files: the old single-pid spare file and the per-pid watch file.
   try { Remove-Item -LiteralPath (Join-Path $root 'local\_lab_revive_spare.txt') -Force -ErrorAction SilentlyContinue } catch {}
+  try { Remove-Item -LiteralPath (Join-Path $root 'local\_lab_revive_watch.txt') -Force -ErrorAction SilentlyContinue } catch {}
   exit 0
 }
 
@@ -96,11 +309,15 @@ $revCmds = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where
   $_.CommandLine -match '\.local\\bin\\claude\.exe' -and
   $_.CommandLine -match 'SougouStartFolder\\5SecMovieMaker'
 })
-#   Newest first. Only ONE window can be the Lab, and it is always the most recently spawned
-#   one (a hand-opened Lab does not carry claude.exe on the cmd command line, so it is not even
-#   in this set). Everything older than the newest is therefore superseded and is reaped without
-#   the working-check - that is what keeps the 2026-08-01 pileup from coming back through the
-#   guard below.
+#   Newest first.
+#   *** 2026-08-22, aegis-gl: THE "OLDER = SUPERSEDED, REAP WITHOUT CEREMONY" RULE IS GONE ***
+#   It used to reap every shell but the newest with no life check at all. With the streak
+#   counter below that rule would have quietly defeated the whole fix: a window we chose not to
+#   kill this pass becomes "an older duplicate" the moment we spawn the next one, and dies
+#   anyway 10 minutes later. Every candidate now goes through the SAME verdict; a corpse still
+#   dies, it just takes LAB_ZOMBIE_MAX passes instead of one. Pileup is bounded by that
+#   (cooldown 15 min per spawn vs ~30 min to reap) and it is the direction we chose on purpose:
+#   a pileup is slow, visible and recoverable - killing the commander is silent and is not.
 $aged = @($revCmds | Where-Object {
   $null -ne $_.CreationDate -and ((Get-Date) - $_.CreationDate).TotalSeconds -ge $cooldownSec
 } | Sort-Object CreationDate -Descending)
@@ -121,97 +338,53 @@ if ($aged.Count -gt 0) {
     $cpu1 = $null
   }
 }
-#   AND bound the sparing. An idle-but-live TUI burns about the same trickle of CPU as a wedged
-#   one (measured 2026-08-13 on the live Lab while it sat at an armed waiter: +16ms over 5s), so
-#   "burning CPU" cannot by itself tell a working Lab from the deaf zombies of 2026-08-01. If the
-#   SAME shell is spared pass after pass without presence ever going ok again, it is not working,
-#   it is stuck - and sparing forever would leave the Lab unrevived, which is the accident on the
-#   other side. Count consecutive spares per pid and give up after SPARE_MAX passes (~3 hours at
-#   10 min/pass). Every spare is logged, so this trips only after ~18 visible warnings.
-$spareStateFile = Join-Path $root 'local\_lab_revive_spare.txt'
-$SPARE_MAX = 18
-$sparePrevPid = ''
-$sparePrevCount = 0
-if (Test-Path -LiteralPath $spareStateFile) {
-  $parts = ((Get-Content -LiteralPath $spareStateFile -Raw).Trim() -split '\s+')
-  if ($parts.Count -ge 2) { $sparePrevPid = $parts[0]; [int]::TryParse($parts[1], [ref]$sparePrevCount) | Out-Null }
+#   Transcripts, for the non-CPU proof of life (B). One directory listing per pass, only when
+#   there is something to judge (measured 2026-08-22: 907 files, 71 ms).
+$transcripts = @()
+if ($aged.Count -gt 0) {
+  $projDir = Join-Path $env:USERPROFILE ('.claude\projects\' + ($root -replace '[^A-Za-z0-9]', '-'))
+  try {
+    $transcripts = @(Get-ChildItem -LiteralPath $projDir -Filter *.jsonl -ErrorAction Stop |
+                     Select-Object CreationTime, LastWriteTime, Name)
+  } catch { $transcripts = @() }   # unknown -> Get-LabWindowActivity returns Matched=$false
 }
-$spareNewPid = ''
-$spareNewCount = 0
-
-$reaped = 0
-$spared = 0
-$busyShells = 0   # positively measured as still working (not just "unmeasurable")
-$idx = -1
+#   Build the candidates (facts only - no judgment here), then let the library judge and act.
+$nowDt = Get-Date
+$candidates = @()
 foreach ($rc in $aged) {
-  $idx++
-  if ($idx -gt 0) {
-    # superseded window: cannot be the current Lab, reap without ceremony
-    Write-Log ('lab: cmd pid {0} is an older duplicate revival shell (newest is pid {1}) - reaping' -f $rc.ProcessId, $aged[0].ProcessId)
-    Get-CimInstance Win32_Process -Filter ("ParentProcessId={0}" -f $rc.ProcessId) -ErrorAction SilentlyContinue | ForEach-Object {
-      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-    Stop-Process -Id $rc.ProcessId -Force -ErrorAction SilentlyContinue
-    $reaped++
-    continue
-  }
-  if ($null -eq $cpu1) { $spared++; continue }   # probe failed -> never kill on an unknown
   $kids = $null
   try {
     $kids = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId={0}" -f $rc.ProcessId) -ErrorAction Stop)
   } catch {
     Write-Log ('lab: autopsy failed for cmd pid {0} ({1}) - sparing it' -f $rc.ProcessId, $_.Exception.Message)
-    $spared++
     continue
   }
-  $claudeKids = @($kids | Where-Object { $_.Name -eq 'claude.exe' })
-  if ($claudeKids.Count -eq 0) {
-    Write-Log ('lab: cmd pid {0}: children [{1}] - no claude.exe = confirmed corpse, reaping' -f `
-      $rc.ProcessId, (($kids | ForEach-Object { $_.Name }) -join ','))
-  } else {
-    $working = $false
-    $busy = $false
-    $desc = ''
-    foreach ($ck in $claudeKids) {
-      $k = [string]$ck.ProcessId
-      $ws = [int]($ck.WorkingSetSize / 1MB)
-      if ($cpu1.ContainsKey($k) -and $cpu2.ContainsKey($k)) {
-        $cpuMs = [int]((($cpu2[$k] - $cpu1[$k])) / 10000)
-        $desc += ('claude pid={0} ws={1}MB cpu+{2}ms; ' -f $k, $ws, $cpuMs)
-        if ($cpuMs -gt 0) { $working = $true; $busy = $true }
-      } else {
-        $desc += ('claude pid={0} ws={1}MB cpu=UNMEASURED; ' -f $k, $ws)
-        $working = $true   # cannot prove it is idle -> treat as alive (fail-open, do not kill)
-      }
-    }
-    if ($working) {
-      $n = 1
-      if ($sparePrevPid -eq [string]$rc.ProcessId) { $n = $sparePrevCount + 1 }
-      if ($n -gt $SPARE_MAX) {
-        Write-Log ('lab: cmd pid {0} spared {1} passes in a row and presence never recovered [{2}] - treating it as stuck, reaping' -f $rc.ProcessId, $sparePrevCount, $desc)
-      } else {
-        Write-Log ('lab: cmd pid {0} has a WORKING claude.exe [{1}] - NOT reaping (spare {2}/{3}). presence says dead but the process is busy = the ear (waiter/liveness pulse) is what died, not the Lab' -f $rc.ProcessId, $desc, $n, $SPARE_MAX)
-        $spareNewPid = [string]$rc.ProcessId
-        $spareNewCount = $n
-        $spared++
-        if ($busy) { $busyShells++ }
-        continue
-      }
-    } else {
-      Write-Log ('lab: cmd pid {0}: claude.exe alive but 0 CPU over 5s [{1}] - deaf zombie, reaping' -f $rc.ProcessId, $desc)
+  $kidRows = @()
+  foreach ($ck in $kids) {
+    $k = [string]$ck.ProcessId
+    $measured = ($null -ne $cpu1 -and $cpu1.ContainsKey($k) -and $cpu2.ContainsKey($k))
+    $ms = 0
+    if ($measured) { $ms = [int]((($cpu2[$k] - $cpu1[$k])) / 10000) }
+    $act = $null
+    if ($ck.Name -eq 'claude.exe') { $act = Get-LabWindowActivity -Files $transcripts -StartTime $ck.CreationDate }
+    $kidRows += @{
+      Pid = $ck.ProcessId; Name = $ck.Name
+      WorkingSetMB = [int]($ck.WorkingSetSize / 1MB)
+      CpuMs = $ms; CpuMeasured = $measured; Activity = $act
     }
   }
-  foreach ($k in $kids) { Stop-Process -Id $k.ProcessId -Force -ErrorAction SilentlyContinue }
-  Stop-Process -Id $rc.ProcessId -Force -ErrorAction SilentlyContinue
-  $reaped++
+  $candidates += @{ ShellPid = $rc.ProcessId; Kids = $kidRows }
 }
-if ($reaped -gt 0) { Write-Log ('lab: reaped {0} stale revival shell(s) before spawn (dead+no-waiter = corpses)' -f $reaped) }
-if ($spared -gt 0) { Write-Log ('lab: spared {0} shell(s) that were still working or unmeasurable' -f $spared) }
-# Persist the consecutive-spare counter (or clear it the moment we stop sparing that pid).
-try {
-  if ($spareNewPid) { Set-Content -LiteralPath $spareStateFile -Value ('{0} {1}' -f $spareNewPid, $spareNewCount) -Encoding ASCII }
-  elseif (Test-Path -LiteralPath $spareStateFile) { Remove-Item -LiteralPath $spareStateFile -Force -ErrorAction SilentlyContinue }
-} catch {}
+$watchStateFile = Join-Path $root 'local\_lab_revive_watch.txt'
+$pass = Invoke-LabReapPass -Candidates $candidates -Now $nowDt -State (Read-LabWatchState $watchStateFile)
+Write-LabWatchState -Path $watchStateFile -State $pass.State
+$reaped = $pass.Reaped
+$busyShells = $pass.Busy
+if ($reaped -gt 0)       { Write-Log ('lab: reaped {0} stale revival shell(s) before spawn' -f $reaped) }
+if ($pass.Spared -gt 0)  { Write-Log ('lab: spared {0} shell(s) that were still working or unmeasurable' -f $pass.Spared) }
+if ($pass.Watched -gt 0) { Write-Log ('lab: watching {0} shell(s) at 0 CPU - one sample is not a death certificate' -f $pass.Watched) }
+# The old single-pid spare file is retired by the per-pid watch file above; drop it if it lingers.
+try { Remove-Item -LiteralPath (Join-Path $root 'local\_lab_revive_spare.txt') -Force -ErrorAction SilentlyContinue } catch {}
 #   And do not stack a SECOND Lab on top of one we just proved is working: two commanders in
 #   one inbox is the double-answer race this fleet has fought before. Only a POSITIVE CPU
 #   measurement stops the spawn ($busyShells); an unmeasurable shell still allows revival, so a
@@ -295,6 +468,18 @@ if (Test-Path -LiteralPath $tokFile) {
 #   FIX: force that refresh ourselves right before spawning, so the cold TUI reads live creds.
 #   fail-open: if the probe fails we still spawn (the visible window is Chami's manual path),
 #   but the log says so plainly instead of leaving a silent corpse.
+#   *** 2026-08-22, aegis-gl: THE VERDICT BELOW WAS A LIE (HQ msg 1540735472282767440) ***
+#   The judgment was "did not match my 5 failure words AND output is not empty -> ok". The probe
+#   has been answering `Credit balance is too low` - which matches none of them - so every
+#   pre-warm line since 08-13 read `ok` while nothing was ever warmed, and 175 windows since
+#   7/24 opened, said that one sentence and died. "Output is not empty" could not save it either:
+#   local\_lab_revive_probe.out.err always carries harness warnings, so the blob is never empty.
+#   FIX (C-048): `Credit balance` joins the failure words AND the success side now needs a
+#   POSITIVE proof - .claude\.credentials.json must actually be newer after the probe than it was
+#   before. Failure words that "have not been added yet" can no longer be reported as success.
+$credsFile  = Join-Path $env:USERPROFILE '.claude\.credentials.json'
+$credsBefore = $null
+try { if (Test-Path -LiteralPath $credsFile) { $credsBefore = (Get-Item -LiteralPath $credsFile).LastWriteTimeUtc } } catch {}
 $probeOut = Join-Path $root 'local\_lab_revive_probe.out'
 $probeIn  = Join-Path $root 'local\_lab_revive_probe.in'
 Set-Content -LiteralPath $probeIn -Value '' -Encoding ASCII
@@ -314,13 +499,9 @@ try {
     foreach ($f in @($probeOut, ($probeOut + '.err'))) {
       if (Test-Path -LiteralPath $f) { $blob += (Get-Content -LiteralPath $f -Raw) }
     }
-    if ($blob -match 'Please run /login|Not logged in|401|Invalid API key|authentication_error') {
-      Write-Log 'lab: AUTH PRE-WARM FAILED - host creds could not be refreshed. The revived window will show /login. See local\_lab_revive_probe.out'
-    } elseif ($blob.Trim().Length -gt 0) {
-      Write-Log 'lab: auth pre-warm ok (.claude\.credentials.json refreshed) - cold TUI should authenticate'
-    } else {
-      Write-Log 'lab: auth pre-warm returned nothing - treating as unknown, spawning anyway (fail-open)'
-    }
+    $credsAfter = $null
+    try { if (Test-Path -LiteralPath $credsFile) { $credsAfter = (Get-Item -LiteralPath $credsFile).LastWriteTimeUtc } } catch {}
+    Write-Log (Format-LabPrewarmLog (Get-LabPrewarmVerdict -Blob $blob -CredsBefore $credsBefore -CredsAfter $credsAfter))
   }
 } catch {
   Write-Log ('lab: AUTH PRE-WARM errored: {0} - spawning anyway (fail-open)' -f $_.Exception.Message)
