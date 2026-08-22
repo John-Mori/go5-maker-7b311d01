@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """提案決定 → 軍議エコー(経路B)のポーラー(プラットフォームSE / 一ノ瀬怜 / 2026-08-23)。
 
-依頼元= イージス研究室GL(ケヴィン・デ・ブライネ) msg 1540852033240830002。
+依頼元= イージス研究室GL(ケヴィン・デ・ブライネさん) msg 1540852033240830002。
+レビュー反映= msg 1540854800458186823(返す物1〜3)。
 
 ■何をするか
   改修α(提案決定ページ)で「この作品・この④コメント・このchで投稿決定」を押すと、
@@ -17,21 +18,34 @@
   列(9)= 決定日時 / 候補日 / 候補ID / 作品cid / プラットフォーム / チャンネル /
           作品タイトル / ④コメント / 経路。
 
-■受け入れ条件(デ・ブライネ指定・C-046 / C-042)
+■受け入れ条件(デ・ブライネさん指定・C-046 / C-042)
   1. トリガーは行=実イベント。閉じ方は「その行を軍議へ配達し終えたこと」で決まる。
   2. 冪等は行番号の水位1本(teian_decide_row.txt に配達済みの最大row)。dispatch成功時だけ進める。
   3. 初回の水位は導入時点の lastRow(過去の決定を一斉に流さない)。
   4. 配達は dispatch.py --dept gunji(webhookを直接叩かない=名義・キュー・既読印が付く方)。
-     ★gunjiの部門長は research-room に解決されるため --direct を明示する
-       (これは軍議自身が決めた経路への"依頼元への配達"=飛び級ではない)。
+     ★gunjiの部門長は research-room に解決されるため --direct を明示(軍議自身が決めた経路への
+       依頼元への配達=飛び級ではない)。名義は --from-dept platform-se(返す物3)。
   5. fail-open: GASが落ちている/HTMLが返る/JSONが壊れている時は、水位を進めず静かに次周期へ。
-     連続失敗の時だけ1回鳴らす(毎周期鳴らす安全網は無視される)。
   6. 常駐にせず**5分間隔のタスクスケジューラ**で回す(register_teian_echo_task.ps1)。
      ★載せ替え経路(C-042)= タスクは毎回この .py を pythonw で新規起動する=
        コードを直せば次のtickで自動的に効く。daemon_keeper / supervise_daemons /
-       preflight_daemon_lifecycle の3集合には**足さない**(常駐ではないため触る必要が無い)。
-  7. 検査は実行で通す(test_teian_echo_poll.py)。外へ出る手(HTTP・dispatchのPopen)だけ
-     偽物にし、水位の判定と分岐は本物を回す。must-fail=「同じ行を2回渡したら2通目は出ない」。
+       preflight_daemon_lifecycle には足さない(常駐ではないため触る必要が無い)。
+  7. 検査は実行で通す(test_teian_echo_poll.py)。外へ出る手(HTTP・dispatch・部屋への警報)だけ
+     偽物にし、水位の判定と分岐は本物を回す。
+
+■警報の設計(返す物1・2の反映)
+  ・**ログは継ぎ目の内側にある**= run_once はログ先を wm_path と同じディレクトリに導出する。
+    検査は一時ディレクトリの wm_path を渡すだけで、本番ログ(local/_state/…)を一切汚さない
+    (返す物1= 検査が本番ログへ作り話を書く事故の恒久対策)。
+  ・**連続失敗カウンタは1本**(teian_decide_fail.txt)。fetch失敗も配達失敗(blocked)も同じ本数に
+    積む。「きれいに1周できた」時だけ0へ戻す。
+  ・閾値ちょうど(既定3回)で**1回だけ**鳴らす。毎周期は鳴らさない(常に誤発火する安全網は無視される)。
+  ・鳴らし先は失敗の質で分ける(返す物2):
+    - **口がまだ無い(未初期化=水位ファイル未作成)の fetch 失敗**= 既知の待ち。ローカルログに1行だけ。
+      部屋へは出さない(口の実装待ちの間に部屋で狼少年をやらない)。
+    - **初期化後の fetch 失敗(=口が生えていたのに落ちた)/ 配達失敗(blocked)**= 本物の異常。
+      **部屋へ**1回出す(イージス研究室宛)。決定は記録されているのに軍議へ届かない状態=
+      うちのKPI A1(誰にも掴まれず沈黙した依頼)そのもの=看過しない。
 
 使い方:
   python scripts/_daemons/teian_echo_poll.py            # 1周(既定・スケジューラが5分毎に呼ぶ)
@@ -67,8 +81,11 @@ COLUMNS = ["決定日時", "候補日", "候補ID", "作品cid", "プラット�
 # 連続何回失敗したら1回だけ鳴らすか(毎周期は鳴らさない=fail-open)
 ALERT_AT = 3
 
+# 初期化後の異常を出す部屋(発注元=この経路の運用者)
+ALERT_DEPT = "aegis-gl"
 
-# ---- 小さな入出力(水位・失敗カウンタ) ---------------------------------------
+
+# ---- 小さな入出力(水位・失敗カウンタ・ログ) --------------------------------
 
 def _read_int(path):
     try:
@@ -86,15 +103,23 @@ def _write_int(path, n):
     os.replace(tmp, path)
 
 
-def _log(line):
-    os.makedirs(STATE_DIR, exist_ok=True)
+def _reset(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _log(line, log_path=POLL_LOG):
+    """運用ログへ1行。★log_path を引数化してある=検査は継ぎ目の内側で逃がせる(返す物1)。"""
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    with open(POLL_LOG, "a", encoding="utf-8") as f:
+    with open(log_path, "a", encoding="utf-8") as f:
         f.write(f"{stamp} {line}\n")
     print(line)
 
 
-# ---- 外へ出る手(テストで偽物に差し替える2つの継ぎ目) ------------------------
+# ---- 外へ出る手(テストで偽物に差し替える3つの継ぎ目: fetch / deliver / alert) ----
 
 def exec_url():
     """gitignore下の gas_deploy_config.json から exec URL を読む(実体はこのPCにある)。"""
@@ -147,6 +172,7 @@ def deliver_row(row, dry_run=False):
     body = build_body(fields, row.get("row"))
     cmd = [sys.executable, DISPATCH, "--dept", "gunji",
            "--from", "提案決定→軍議エコー(プラットフォームSE)",
+           "--from-dept", "platform-se",   # 出しているのはプラットフォームSEの機構(返す物3)
            "--direct",              # gunjiの部門長=research-room に解決されるため。依頼元(軍議)への配達。
            "--audience", "ai",      # AI(部門)宛の機械エコー
            "--body", body]
@@ -158,12 +184,30 @@ def deliver_row(row, dry_run=False):
         p = subprocess.run(cmd, capture_output=True, timeout=120,
                            encoding="utf-8", errors="replace")
     except Exception as e:
-        _log(f"  [配達失敗] row={row.get('row')} {type(e).__name__}: {e}")
+        print(f"  [配達失敗] row={row.get('row')} {type(e).__name__}: {e}")
         return False
     if p.returncode != 0:
-        _log(f"  [配達失敗] row={row.get('row')} exit={p.returncode} {(p.stdout or '')[-200:]}")
+        print(f"  [配達失敗] row={row.get('row')} exit={p.returncode} {(p.stdout or '')[-200:]}")
         return False
     return True
+
+
+def alert_room(reason, dept=ALERT_DEPT):
+    """初期化後の異常を**部屋へ**1回出す。**継ぎ目#3(dispatchのPopen)**。返り値は使わない。
+
+    ★run_once が「閾値ちょうど」でしか呼ばない=毎周期は鳴らさない。
+    """
+    body = ("【提案決定→軍議エコー・警報】" + reason + "\n"
+            "(自動: teian_echo_poll / これは連続失敗が閾値に達した時だけの1回・毎周期は鳴らさない)")
+    try:
+        subprocess.run([sys.executable, DISPATCH, "--dept", dept,
+                        "--from", "提案決定→軍議エコー(プラットフォームSE)",
+                        "--from-dept", "platform-se",
+                        "--audience", "ai", "--body", body],
+                       capture_output=True, timeout=120,
+                       encoding="utf-8", errors="replace")
+    except Exception:
+        pass          # 警報の送信失敗で本体を巻き添えにしない
 
 
 # ---- 純粋な組み立て(値のマッピングと本文) ----------------------------------
@@ -196,38 +240,48 @@ def build_body(fields, rownum):
 
 # ---- 本体の判定と分岐(テストは本物を回す) ----------------------------------
 
-def run_once(fetch, deliver, wm_path=WATERMARK, fail_path=FAIL_COUNT, alert_at=ALERT_AT):
-    """1周分の水位ロジック。fetch/deliver は継ぎ目(テストで偽物を注入)。
+def run_once(fetch, deliver, alert=None, wm_path=WATERMARK, fail_path=FAIL_COUNT,
+             alert_at=ALERT_AT, log_path=None):
+    """1周分の水位ロジック。fetch/deliver/alert は継ぎ目(テストで偽物を注入)。
 
-    戻り値= {"status": "...", "watermark": int, "delivered": int, "fails": int}
-      status: "init"(初回=水位だけ置く) / "ok"(配達した/対象なし) /
+    ★log_path は既定で wm_path と同じディレクトリへ導出する=検査は一時ディレクトリの
+      wm_path を渡すだけで本番ログを汚さない(返す物1の恒久対策)。
+
+    戻り値= {"status": ..., "watermark": int, "delivered": int, "fails": int}
+      status: "init"(初回=水位だけ置く) / "ok"(配達した/対象なし・カウンタ0へ) /
               "fail-open"(GASが読めない=水位据え置き) / "blocked"(配達失敗で水位据え置き)
     """
-    first_run = not os.path.exists(wm_path)
-    since = 0 if first_run else (_read_int(wm_path) or 0)
+    if alert is None:
+        alert = alert_room
+    if log_path is None:
+        log_path = os.path.join(os.path.dirname(wm_path) or STATE_DIR, "teian_decide_poll.log")
+    logf = lambda line: _log(line, log_path)
+
+    initialized = os.path.exists(wm_path)
+    since = 0 if not initialized else (_read_int(wm_path) or 0)
 
     data = fetch(since)
     if data is None:
-        # fail-open: 水位を進めない。連続失敗が閾値ちょうどの時だけ1回鳴らす。
+        # fail-open: 水位を進めない。連続失敗カウンタに積む。
         n = (_read_int(fail_path) or 0) + 1
         _write_int(fail_path, n)
         if n == alert_at:
-            _log(f"★[fail-open] 提案決定エコー: GASの読み取り口が{n}回連続で読めない"
-                 f"(HTML/JSON壊れ/口が未実装 等)。水位={since} のまま待機。")
+            if initialized:
+                # 口は生えていたのに落ちた=本物の異常 → 部屋へ1回
+                alert(f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた/HTML/JSON壊れ 等)。"
+                      f"水位={since}のまま待機している。")
+            else:
+                # 口がまだ無い=既知の待ち。ローカルログに1行だけ(部屋では狼少年をやらない)。
+                logf(f"[fail-open] 提案決定エコー: 読み取り口がまだ無い(既知・{n}回連続)。"
+                     f"水位ファイルは作らずに待機。")
         return {"status": "fail-open", "watermark": since, "delivered": 0, "fails": n}
 
-    # 成功したら失敗カウンタを畳む(次の連続失敗を独立に数える)
-    if os.path.exists(fail_path):
-        try:
-            os.remove(fail_path)
-        except OSError:
-            pass
-
-    if first_run:
-        # 初回の水位= 導入時点の lastRow。過去の決定は一斉に流さない。
+    if not initialized:
+        # 初回の水位= 導入時点の lastRow。過去の決定は一斉に流さない。きれいに1周=カウンタ0へ。
         last = int(data["lastRow"])
         _write_int(wm_path, last)
-        _log(f"[初期化] 提案決定エコーの水位を lastRow={last} に置いた(既存の決定は配達しない)。")
+        _reset(fail_path)
+        logf(f"[初期化] 提案決定エコーの水位を lastRow={last} に置いた(既存の決定は配達しない)。")
         return {"status": "init", "watermark": last, "delivered": 0, "fails": 0}
 
     headers = data.get("headers") if isinstance(data.get("headers"), list) else None
@@ -241,12 +295,19 @@ def run_once(fetch, deliver, wm_path=WATERMARK, fail_path=FAIL_COUNT, alert_at=A
             row = dict(row, _headers=headers)
         if not deliver(row):
             # 配達に失敗した行で止める=水位をその手前に留める(再送は最大1行)。
-            _log(f"  [据え置き] row={rownum} の配達に失敗。水位={since} のまま次周期へ。")
-            return {"status": "blocked", "watermark": since, "delivered": delivered, "fails": 0}
+            # ★blocked も同じカウンタに積む(返す物2)。決定は記録されているのに軍議へ届かない=沈黙させない。
+            n = (_read_int(fail_path) or 0) + 1
+            _write_int(fail_path, n)
+            logf(f"[据え置き] row={rownum} の配達に失敗。水位={since} のまま次周期へ(連続{n}回)。")
+            if n == alert_at:
+                alert(f"決定は記録されているのに軍議へ配達できない状態が{n}回続いている(row={rownum})。"
+                      f"dispatch側を確認してほしい。水位={since}のまま。")
+            return {"status": "blocked", "watermark": since, "delivered": delivered, "fails": n}
         since = rownum
         _write_int(wm_path, since)  # ★1行ずつ進める=途中で落ちても再送は最大1行
         delivered += 1
 
+    _reset(fail_path)               # きれいに1周できた=連続失敗カウンタを畳む
     return {"status": "ok", "watermark": since, "delivered": delivered, "fails": 0}
 
 
