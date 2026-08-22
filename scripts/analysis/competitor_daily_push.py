@@ -79,6 +79,16 @@ def main():
             return 0
         return 0 if _deliver(body) else 1
 
+    # 上流スナップ停止(rc==3): 集計は"成功"に見えるが新しい数字が無い=古い日付の再集計。
+    #   silent green を止めるため、汎用メッセージでなく子が出した具体的な停止理由を部屋へ配る。
+    if r.returncode == 3 and body:
+        _log("上流停止(rc=3): %s" % body[:200])
+        if DRY:
+            _log("--dry: 上流停止のため post スキップ\n----\n%s\n----" % body)
+            return 3
+        _deliver(body)
+        return 3
+
     # 失敗: 黙らずに部屋へ知らせる(GASが4回ともJSONでない/その他の異常終了)
     err = (r.stderr or "").strip()[-400:]
     _log("集計NG rc=%d stderr=%s" % (r.returncode, err))

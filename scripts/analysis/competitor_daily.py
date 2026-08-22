@@ -12,7 +12,7 @@
  - 新規 videoId を台帳へ追記(次回から既出扱い)
 数字は測って出す(捏造しない)。速度=当日スナップの velocity 代理値(views/measurementDays)。
 """
-import json, re, sys, os, subprocess, glob, math
+import json, re, sys, os, subprocess, glob, math, datetime
 from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -297,10 +297,43 @@ def shoken(rows, snap):
 
     return L
 
+STALE_EXIT = 3  # 上流スナップ停止=push が rc==3 を特別扱いして「上流が止まっている」を部屋へ配る合図
+
+def stale_reason(snap):
+    """snap(=comp_titles snapshotDate=競合_日次シートの最終日)が古すぎないか検査する。
+    08:00運用では当日04:00のGAS日次(runCompetitorDaily)が回っていれば snap=当日になる。
+    2日以上前 or 空/不正 = 上流(GASの日次スナップ)が新規行を書けていない=静かに古い日付を再集計しているサイン。
+    ★ここが「緑を返しながら書かない」を可視化する門(2026-08-23・AD研究室モドリッチの切り分け依頼)。"""
+    if not snap or snap == "?":
+        return "snapshotDate が空=上流(GAS 競合_日次)にデータが無い"
+    try:
+        sd = datetime.date.fromisoformat(str(snap)[:10])
+    except ValueError:
+        return "snapshotDate が不正(%r)=上流の日付が読めない" % snap
+    lag = (datetime.date.today() - sd).days
+    if lag >= 2:
+        return ("上流スナップが %s で停止(本日 %s・%d日遅れ)。GAS runCompetitorDaily(04:00)が"
+                "新規行を書けていない=同じ日付を毎朝再集計しているだけ" % (snap, datetime.date.today().isoformat(), lag))
+    return None
+
 def main():
     d = fetch()
     ts = d["titles"]
     snap = ts[0]["snapshotDate"] if ts else "?"
+
+    # ★上流スナップの鮮度ゲート: 古ければ本文を分析にせず「上流が止まっている」を明示して rc=3 で返す。
+    #   沈黙して 8/18 を毎朝配り続ける(silent green)を機構で止める。1度の集計成功≠データが新しい(C-041/C-038)。
+    sr = stale_reason(snap)
+    if sr:
+        alert = ("競合日次(自動): ⚠️" + sr + "。→ 08:00の自動集計は新しい数字を運べていない。"
+                 "GAS側(urlfetch日次上限/6分実行上限/runCompetitorDailyトリガー)を要確認。"
+                 "詳細= local/competitor_daily_push.log")
+        if "--emit" in sys.argv:
+            print(alert)
+        else:
+            sys.stderr.write(alert + "\n")
+        return STALE_EXIT
+
     seen = load_ledger()
 
     for t in ts:
@@ -467,4 +500,4 @@ def main():
         if k in bytype: print("%s n=%d med=%s" % (k, len(bytype[k]), median(bytype[k])))
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
