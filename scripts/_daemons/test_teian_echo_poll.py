@@ -274,6 +274,50 @@ def t_never_touches_hq_open_items():
         f"run_once が本番 hq_open_items.md を触った: {(before, before_sz)} -> {(after, after_sz)}"
 
 
+# ---- 12. ★返す物4: 未初期化のまま滞留したら周期ちょうどで部屋へ1回escalate --------
+#   n(連続失敗数)は5分刻み=経過時間の代理。wait_alert_every=288(=約24h)ちょうどで部屋へ1回。
+#   287/289では出ない(閾値を外すと赤くなる形=must-fail)。初期化後は「時間で」escalateしない
+#   (=名指しの未初期化枝だけ・C-035)。
+
+def _run_bootstrap_with_fail(d_fail_seed, every=288):
+    """未初期化(wm無し)・fetch=None で1周回し、seed後の連続失敗数nで daily escalate するか測る。"""
+    with tempfile.TemporaryDirectory() as d:
+        p = Paths(d)
+        assert not os.path.exists(p.wm)          # 未初期化(口がまだ無い)
+        T._write_int(p.fail, d_fail_seed)        # この周で n = seed+1 になる
+        alerts, alert = _alert_recorder()
+        notes, note = _note_recorder()
+        _, deliver = _recorder()
+        res = T.run_once(lambda s: None, deliver, alert=alert, note=note,
+                         wm_path=p.wm, fail_path=p.fail, alert_at=3, wait_alert_every=every)
+        assert res["status"] == "fail-open", res
+        return alerts
+
+
+def t_bootstrap_daily_escalation_on_period():
+    # n=288(=seed 287+1)ちょうど → 部屋へ1回。時間の滞留を語る本文であること。
+    at = _run_bootstrap_with_fail(287, every=288)
+    assert len(at) == 1, f"周期ちょうど(n=288)で部屋へ1回出ていない: {len(at)}"
+    assert "24時間" in at[0], f"滞留時間(約24h)を語っていない: {at[0]}"
+    # 直前(n=287)・直後(n=289)では出ない=閾値を外すと赤くなる(must-fail)
+    assert _run_bootstrap_with_fail(286, every=288) == [], "n=287で誤発火した(狼少年)"
+    assert _run_bootstrap_with_fail(288, every=288) == [], "n=289で誤発火した(毎周期化)"
+
+
+def t_initialized_does_not_daily_escalate():
+    # 初期化後(wm有り)は「時間で」escalateしない=未初期化枝だけの仕掛け(C-035)。
+    with tempfile.TemporaryDirectory() as d:
+        p = Paths(d)
+        T._write_int(p.wm, 7)                    # 初期化済み
+        T._write_int(p.fail, 287)                # 次周で n=288
+        alerts, alert = _alert_recorder()
+        _, note = _note_recorder()
+        _, deliver = _recorder()
+        T.run_once(lambda s: None, deliver, alert=alert, note=note,
+                   wm_path=p.wm, fail_path=p.fail, alert_at=3, wait_alert_every=288)
+        assert alerts == [], f"初期化後にdaily escalateが誤発火した(未初期化枝限定のはず): {alerts}"
+
+
 def main():
     tests = [
         ("初回は水位を置くだけ・配達も警報もしない", t_init_sets_watermark_no_delivery),
@@ -287,6 +331,8 @@ def main():
         ("本文に必須項目が入る", t_body_contains_required_fields),
         ("note 追記のみで開閉が二重にならない", t_note_open_item_toggles_append_only),
         ("★返す物2 本番hq_open_itemsを触らない", t_never_touches_hq_open_items),
+        ("★返す物4 未初期化の滞留は周期ちょうどで部屋へ1回", t_bootstrap_daily_escalation_on_period),
+        ("★返す物4 初期化後は時間でescalateしない(枝限定)", t_initialized_does_not_daily_escalate),
     ]
     ok = sum(run(n, f) for n, f in tests)
     print(f"\n{ok}/{len(tests)} PASS")

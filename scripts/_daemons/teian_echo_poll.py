@@ -90,6 +90,12 @@ COLUMNS = ["決定日時", "候補日", "候補ID", "作品cid", "プラット�
 # 連続何回失敗したら1回だけ鳴らすか(毎周期は鳴らさない=fail-open)
 ALERT_AT = 3
 
+# ★返す物4= 未初期化のまま「時間で」滞留した時に部屋へ escalate する周期。
+#   タスクは5分間隔=連続失敗数nが経過時間の代理。288回=約24時間ごとに部屋へ1回だけ。
+#   増分でなく経過(滞留時間)で検知しないと「静かな死」を見逃す(HQ KPI・実例=Chami便が13日間無警報)。
+POLL_INTERVAL_MIN = 5
+WAIT_ALERT_EVERY = 288
+
 # 初期化後の異常を出す部屋(発注元=この経路の運用者)
 ALERT_DEPT = "aegis-gl"
 
@@ -301,7 +307,7 @@ def build_body(fields, rownum):
 # ---- 本体の判定と分岐(テストは本物を回す) ----------------------------------
 
 def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path=FAIL_COUNT,
-             alert_at=ALERT_AT, log_path=None):
+             alert_at=ALERT_AT, wait_alert_every=WAIT_ALERT_EVERY, log_path=None):
     """1周分の水位ロジック。fetch/deliver/alert/note は継ぎ目(テストで偽物を注入)。
 
     ★log_path は既定で wm_path と同じディレクトリへ導出する=検査は一時ディレクトリの
@@ -344,6 +350,15 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
                 note("bootstrap-wait",
                      f"経路Bは稼働中・改修αの読み取り口(?action=teian_decisions)がまだ無いため"
                      f"fail-openで静観中(連続{n}回・水位ファイルは未作成・部屋では鳴らさない)。")
+        # ★返す物4= 未初期化のまま「時間で」滞留したら部屋へ escalate する。
+        #   n==alert_at の1回きりだと、口が生えないまま忘れられても跡は最初の1行だけ=静かな死。
+        #   n は5分刻み=経過時間の代理。wait_alert_every 周期ごと(約24h,48h…)に部屋へ1回だけ。
+        #   増分でなく滞留時間で検知する(未初期化=既知の待ちなので閾値では鳴らさない=狼少年回避と両立)。
+        if not initialized and wait_alert_every and n % wait_alert_every == 0:
+            hours = n * POLL_INTERVAL_MIN // 60
+            alert(f"提案決定→軍議エコー(経路B)は改修αの読み取り口(?action=teian_decisions)が"
+                  f"無いまま約{hours}時間(連続{n}回)待ち続けている。決定は提案決定シートに溜まるのに"
+                  f"誰も『まだ届いていない』と気づけない=読み取り口の実装が忘れられていないか確認してほしい。")
         return {"status": "fail-open", "watermark": since, "delivered": 0, "fails": n}
 
     if not initialized:
