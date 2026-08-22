@@ -83,6 +83,7 @@ OVER_KINDS = {
     "圧縮済": "越えた後に圧縮が走っている= relayは撃てている(**鳴らさない**)",
     "処理中": "越えた便がまだ新しい= relayは便の終わりに撃つので結果待ち(**鳴らさない**)",
     "便待ち": "越えた便がまだ閉じていない= relayに撃つ機会が来ていない(**鳴らさない**)",
+    "停止窓": "管理外で書き込みも止まっている= 誰も畳めず、増えもしない(**鳴らさない**)",
 }
 
 RE_TS = re.compile(r'"timestamp"\s*:\s*"([0-9T:\-\.]+)Z?"')
@@ -227,7 +228,8 @@ def scan(hours):
                 continue
             p = os.path.join(d, fn)
             try:
-                if os.path.getmtime(p) < cutoff_mtime:
+                mtime = os.path.getmtime(p)
+                if mtime < cutoff_mtime:
                     continue
             except OSError:
                 continue
@@ -285,6 +287,9 @@ def scan(hours):
                 "median": int(statistics.median(ctxs)), "max": max(ctxs),
                 "last_ts": last_ts.astimezone(JST).strftime("%m/%d %H:%M") if last_ts else "?",
                 "last_epoch": last_ts.timestamp() if last_ts else 0.0,
+                # ★窓がまだ書かれているか(=生きているか)。usage行が無い書き込み
+                #   (ユーザーの入力・ツールの結果)でも進むので、last_epoch より新しくなりうる。
+                "mtime": mtime,
                 "ctxs": ctxs, "stamps": stamps, "bounds": bounds,
                 "n_compact": len(bounds),
             })
@@ -359,6 +364,33 @@ def _fired_since(r, compact_at, now):
     return "未発火"
 
 
+def _manual_kind(r, now):
+    """管理外の行を「管理外(鳴らす)」と「停止窓(黙る)」に分ける。
+
+    ★★2026-08-22(研究室HQ msg 1540683236756164702 の実測)。管理外は1つの札で
+      **打てる手がまるで違う2つ**を並べていた:
+        eb3904a8 研究室メイン= 最終書き込み 16:29:26。**4時間で一文字も書かれていない。**
+          もう誰も畳めないし、放っておいても増えない。なのに16:39/17:21/18:21/19:21/20:21 と
+          **5便連続**で鳴った。12時間の窓から落ちるまで鳴り続ける=**打つ手の無い警報**
+          (共通規律§3「常に誤発火する安全網は無視される」の形そのもの)。
+        0ebedfa2 研究室メイン= 最終書き込み 20:12:39(10分前)。`context_guard.jsonl` に
+          3時間11分で8回・48,347トークン増。交代線まで残り16,438。**本物**で、
+          畳めるのはその窓のキーボードの前に居るChamiだけ=鳴らす価値がある。
+
+    ★ここで C-041(経過時間を状態の代理にするな)を**過剰適用しない**(HQ本人の注記)。
+      見失い/未発火で禁じたのは「世代が交代したか」「relayに機会があったか」という
+      **別の事実**を経過時間で代理させたことだ。ここで問う事実は
+      **「その窓にまだ書き込みがあるか」そのもの**=経過時間は代理ではなく問いの本体。
+    ★閾値は `STALE_SEC`(30分)を使い回す= 「もう走っていない」の定義は見張りの中で1つ
+      (実データは4時間 対 10分。どこで割っても分かれるが、線を2本持たない)。
+    ★どちらの時刻も読めない行は **"管理外" へ倒す**= 黙らせすぎない側(fail-open)。
+    """
+    alive = max(float(r.get("last_epoch") or 0.0), float(r.get("mtime") or 0.0))
+    if alive <= 0:
+        return "管理外"
+    return "停止窓" if now - alive >= STALE_SEC else "管理外"
+
+
 def _old_gen_kind(r, now):
     """旧世代の行を「交代済(黙る)」と「見失い(鳴らす)」に分ける。
 
@@ -401,12 +433,12 @@ def judge(rows, compact_at, rotate_at, now=None):
         r["level"] = "交代線超" if r["median"] >= rotate_at else "圧縮線超"
         managed = r.get("managed") or ""
         if not managed:
-            r["over_kind"] = "管理外"
+            r["over_kind"] = _manual_kind(r, now)
         elif managed == "relay:現行":
             r["over_kind"] = _fired_since(r, compact_at, now)
         else:
             r["over_kind"] = _old_gen_kind(r, now)
-        r["alert"] = r["over_kind"] not in ("交代済", "圧縮済", "処理中", "便待ち")
+        r["alert"] = r["over_kind"] not in ("交代済", "圧縮済", "処理中", "便待ち", "停止窓")
         over.append(r)
     return over
 
@@ -502,7 +534,7 @@ def main():
         out("  (この窓に動いたセッションは無い)")
     out("")
     if over:
-        for kind in ("未発火", "見失い", "管理外", "交代済", "圧縮済", "処理中", "便待ち"):
+        for kind in ("未発火", "見失い", "管理外", "交代済", "圧縮済", "処理中", "便待ち", "停止窓"):
             grp = [r for r in over if r["over_kind"] == kind]
             if grp:
                 out("★%s= %d件%s" % (kind, len(grp),

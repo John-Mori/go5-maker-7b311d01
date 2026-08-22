@@ -84,7 +84,9 @@ check("管理下の線超が拾われる(未発火)", "2f7b8457" in o and o["2f7
 check("管理下の線超は通知に載る", bool(o.get("2f7b8457", {}).get("alert")))
 check("交代線を越えたら交代線超", o.get("2f7b8457", {}).get("level") == "交代線超")
 check("圧縮線だけ越えたら圧縮線超", o.get("c27eec97", {}).get("level") == "圧縮線超")
-check("管理外の線超は管理外", o.get("0351851c", {}).get("over_kind") == "管理外")
+check("管理外でも書き込みが止まっていれば鳴らさない(停止窓)",
+      o.get("0351851c", {}).get("over_kind") == "停止窓"
+      and not o.get("0351851c", {}).get("alert"), str(o.get("0351851c")))
 check("手動で稼働中の窓も拾う", o.get("eb3904a8", {}).get("over_kind") == "管理外")
 check("旧世代でも書き込みが続いていれば見失い", o.get("old01234", {}).get("over_kind") == "見失い")
 check("交代済の旧世代は鳴らさない",
@@ -119,7 +121,9 @@ try:
         argv = cw.subprocess.calls[0]
         body = argv[argv.index("--body") + 1] if "--body" in argv else ""
     check("通知は1本だけ出す", len(cw.subprocess.calls) == 1, str(len(cw.subprocess.calls)))
-    check("通知した件数=5(交代済を除く)", n == 5, str(n))
+    # 6件拾って、交代済(old56789)と停止窓(0351851c=25時間無音)の2件が黙る
+    check("通知した件数=4(交代済・停止窓を除く)", n == 4, str(n))
+    check("停止窓のセッションIDは載らない", "0351851c" not in body, body[:400])
     check("宛先はHQ", "--dept" in (cw.subprocess.calls[0] if cw.subprocess.calls else [])
           and cw.subprocess.calls[0][cw.subprocess.calls[0].index("--dept") + 1] == "hq")
     check("Discordへは出さない(--also-postを付けない)",
@@ -324,6 +328,55 @@ check("★close_marks: どちらも無い部屋は入れない(0=経過時間へ
 check("★relay側: `turn_closed_at` を実際に書いている",
       "turn_closed_at" in open(os.path.join(os.path.dirname(cw.__file__), "session_relay.py"),
                                encoding="utf-8", errors="replace").read())
+
+print("== 「管理外」を生きている窓と止まった窓へ分ける(研究室HQ msg 1540683236756164702) ==")
+# HQの実測をそのまま型にする(2026-08-22 20:21 の6便):
+#   eb3904a8 研究室メイン= 最終書き込み 08/22 16:29:26(=約4時間前で停止)なのに5便連続で鳴った
+#   0ebedfa2 研究室メイン= 最終書き込み 20:12:39(=10分前)・context_guard が8回警告・本物
+STOP_AT = NOW - 4 * 3600.0        # 止まった窓(打つ手が無い)
+LIVE_AT = NOW - 600.0             # 生きている窓(Chamiが畳める)
+
+
+def manual(sid, last_epoch, mtime=None):
+    r = row(sid, "研究室メイン", 168562, last_epoch)
+    r["mtime"] = last_epoch if mtime is None else mtime
+    return cw.mark_managed([r], {})[0]
+
+
+止まった窓 = manual("eb3904a8", STOP_AT)
+生きた窓 = manual("0ebedfa2", LIVE_AT)
+_j = {r["sid"]: r for r in cw.judge([止まった窓, 生きた窓], COMPACT, ROTATE, now=NOW)}
+check("★1: 止まった管理外(4時間無音)は鳴らさない",
+      _j["eb3904a8"]["over_kind"] == "停止窓" and not _j["eb3904a8"]["alert"], str(_j["eb3904a8"]))
+check("★2: 生きている管理外(10分前)は「管理外」のまま鳴らす",
+      _j["0ebedfa2"]["over_kind"] == "管理外" and _j["0ebedfa2"]["alert"], str(_j["0ebedfa2"]))
+check("★2: 鳴らす枝を殺していない(alertに1件は残る)",
+      len([r for r in _j.values() if r["alert"]]) == 1)
+# ★usage行が途切れていても、ファイルにまだ書かれているなら生きている側へ倒す(fail-openは鳴る側)
+check("★usage行より mtime が新しければ生きている扱い",
+      cw._manual_kind(manual("x", STOP_AT, mtime=LIVE_AT), NOW) == "管理外")
+check("★どちらも読めない行は鳴らす側へ倒す",
+      cw._manual_kind({"last_epoch": 0.0, "mtime": 0.0}, NOW) == "管理外")
+
+# ★変異(HQ仕様3)= 閾値を極端へ振ると、1と2は**両方同時には満たせない**。
+#   = 判定が本当に「最後の書き込みの新しさ」で分かれている証明。
+_real_stale = cw.STALE_SEC
+try:
+    cw.STALE_SEC = 0.0
+    _z = {r["sid"]: r for r in cw.judge([manual("eb3904a8", STOP_AT), manual("0ebedfa2", LIVE_AT)],
+                                        COMPACT, ROTATE, now=NOW)}
+    check("★変異: 閾値0だと生きている窓まで黙る(=2が落ちる)",
+          _z["0ebedfa2"]["over_kind"] == "停止窓", str(_z["0ebedfa2"]))
+    cw.STALE_SEC = 10 ** 9
+    _i = {r["sid"]: r for r in cw.judge([manual("eb3904a8", STOP_AT), manual("0ebedfa2", LIVE_AT)],
+                                        COMPACT, ROTATE, now=NOW)}
+    check("★変異: 閾値∞だと止まった窓まで鳴る(=1が落ちる)",
+          _i["eb3904a8"]["over_kind"] == "管理外" and _i["eb3904a8"]["alert"], str(_i["eb3904a8"]))
+finally:
+    cw.STALE_SEC = _real_stale
+check("★変異の後始末: 閾値が元へ戻っている", cw.STALE_SEC == _real_stale)
+check("★停止窓は alert() の見出しに載せない",
+      "停止窓" not in ("未発火", "見失い", "管理外"))
 
 print("== 変異検査(旧仕様へ戻したら落ちること) ==")
 real_judge = cw.judge
