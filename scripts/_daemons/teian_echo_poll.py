@@ -41,11 +41,16 @@
     積む。「きれいに1周できた」時だけ0へ戻す。
   ・閾値ちょうど(既定3回)で**1回だけ**鳴らす。毎周期は鳴らさない(常に誤発火する安全網は無視される)。
   ・鳴らし先は失敗の質で分ける(返す物2):
-    - **口がまだ無い(未初期化=水位ファイル未作成)の fetch 失敗**= 既知の待ち。ローカルログに1行だけ。
-      部屋へは出さない(口の実装待ちの間に部屋で狼少年をやらない)。
+    - **口がまだ無い(未初期化=水位ファイル未作成)の fetch 失敗**= 既知の待ち。部屋へは出さない
+      (口の実装待ちの間に部屋で狼少年をやらない)。
     - **初期化後の fetch 失敗(=口が生えていたのに落ちた)/ 配達失敗(blocked)**= 本物の異常。
       **部屋へ**1回出す(イージス研究室宛)。決定は記録されているのに軍議へ届かない状態=
       うちのKPI A1(誰にも掴まれず沈黙した依頼)そのもの=看過しない。
+  ・★どの質の失敗も、閾値ちょうどで **hq_open_items.md へ「入れた(確認待ち)」を1行**残す(返す物2の追い込み)。
+    ローカルログ(teian_decide_poll.log)は誰も読まない=デ・ブライネさん指摘。**受け手が読む面**は
+    §4.55の hq_open_items.md=生きた消費者(常駐/開いたセッション)が居なくても後から必ず読まれる。
+    口待ちの静観すら「入れた(確認待ち)」として可視化する(部屋では鳴らさない=狼少年にはしない)。
+    追記のみ(並行編集を壊さない)・末尾の状態印で二重に開かない/復旧時に1回だけ✅を足す。
 
 使い方:
   python scripts/_daemons/teian_echo_poll.py            # 1周(既定・スケジューラが5分毎に呼ぶ)
@@ -73,6 +78,10 @@ FAIL_COUNT = os.path.join(STATE_DIR, "teian_decide_fail.txt")
 POLL_LOG = os.path.join(STATE_DIR, "teian_decide_poll.log")
 GAS_CONFIG = os.path.join(ROOT, "scripts", "gas_deploy_config.json")
 DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
+
+# ★受け手が読む durable な面(§4.55)。00_AI-HQ は 5SecMovieMaker の隣。
+HQ_ROOT = os.path.join(os.path.dirname(ROOT), "00_AI-HQ")
+HQ_OPEN_ITEMS = os.environ.get("GO5_HQ_OPEN_ITEMS") or os.path.join(HQ_ROOT, "status", "hq_open_items.md")
 
 # 列名(headersが来ない/欠けている時のフォールバック順。改修αのHEADと同順)
 COLUMNS = ["決定日時", "候補日", "候補ID", "作品cid", "プラットフォーム",
@@ -210,6 +219,57 @@ def alert_room(reason, dept=ALERT_DEPT):
         pass          # 警報の送信失敗で本体を巻き添えにしない
 
 
+def _last_state(content, kind):
+    """teian-echo:<kind> の最後の状態を返す('OPEN'/'RESOLVED'/None)。追記のみで開閉を判定する。"""
+    state = None
+    tag = f"teian-echo:{kind} "
+    for line in content.splitlines():
+        i = line.find(tag)
+        if i < 0:
+            continue
+        rest = line[i + len(tag):].strip()
+        if rest.startswith("OPEN"):
+            state = "OPEN"
+        elif rest.startswith("RESOLVED"):
+            state = "RESOLVED"
+    return state
+
+
+def note_open_item(kind, text, resolve=False, path=HQ_OPEN_ITEMS):
+    """受け手が読む durable な面(hq_open_items.md)へ1行。**継ぎ目#4**。
+
+    ★追記のみ=HQが並行して書くファイルを壊さない(C-003 / 並行編集事故の回避)。
+      開閉は「末尾の teian-echo:<kind> 状態印」で表す=二重に開かない/復旧時に1回だけ✅。
+    - resolve=False: 直近が OPEN でなければ「入れた(確認待ち)」を追記(閾値ちょうどで1回)。
+    - resolve=True : 直近が OPEN の時だけ「✅復旧」を追記(復旧時に1回)。
+    戻り値= 追記したか(True/False)。送信失敗で本体は巻き添えにしない。
+    """
+    try:
+        content = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    except Exception:
+        content = ""
+    last = _last_state(content, kind)
+    stamp = time.strftime("%Y-%m-%d %H:%M")
+    if resolve:
+        if last != "OPEN":
+            return False
+        block = (f"\n<!-- teian-echo:{kind} RESOLVED {stamp} -->\n"
+                 f"- ✅ {stamp} 提案決定→軍議エコー(経路B) 復旧: {text}(platform-se)\n")
+    else:
+        if last == "OPEN":
+            return False
+        block = (f"\n## {stamp} 提案決定→軍議エコー(経路B) = 入れた(確認待ち) [teian-echo:{kind}]\n"
+                 f"<!-- teian-echo:{kind} OPEN {stamp} -->\n"
+                 f"- {text}(自動: teian_echo_poll / platform-se)\n")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(block)
+    except Exception:
+        return False
+    return True
+
+
 # ---- 純粋な組み立て(値のマッピングと本文) ----------------------------------
 
 def row_fields(row):
@@ -240,12 +300,14 @@ def build_body(fields, rownum):
 
 # ---- 本体の判定と分岐(テストは本物を回す) ----------------------------------
 
-def run_once(fetch, deliver, alert=None, wm_path=WATERMARK, fail_path=FAIL_COUNT,
+def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path=FAIL_COUNT,
              alert_at=ALERT_AT, log_path=None):
-    """1周分の水位ロジック。fetch/deliver/alert は継ぎ目(テストで偽物を注入)。
+    """1周分の水位ロジック。fetch/deliver/alert/note は継ぎ目(テストで偽物を注入)。
 
     ★log_path は既定で wm_path と同じディレクトリへ導出する=検査は一時ディレクトリの
       wm_path を渡すだけで本番ログを汚さない(返す物1の恒久対策)。
+    ★note は「受け手が読む durable な面(hq_open_items.md)」への追記=継ぎ目#4。
+      検査は偽物を注入するので本番の hq_open_items.md を1バイトも触らない。
 
     戻り値= {"status": ..., "watermark": int, "delivered": int, "fails": int}
       status: "init"(初回=水位だけ置く) / "ok"(配達した/対象なし・カウンタ0へ) /
@@ -253,6 +315,8 @@ def run_once(fetch, deliver, alert=None, wm_path=WATERMARK, fail_path=FAIL_COUNT
     """
     if alert is None:
         alert = alert_room
+    if note is None:
+        note = note_open_item
     if log_path is None:
         log_path = os.path.join(os.path.dirname(wm_path) or STATE_DIR, "teian_decide_poll.log")
     logf = lambda line: _log(line, log_path)
@@ -267,13 +331,19 @@ def run_once(fetch, deliver, alert=None, wm_path=WATERMARK, fail_path=FAIL_COUNT
         _write_int(fail_path, n)
         if n == alert_at:
             if initialized:
-                # 口は生えていたのに落ちた=本物の異常 → 部屋へ1回
+                # 口は生えていたのに落ちた=本物の異常 → 部屋へ1回 + 受け手が読む面へ1行
                 alert(f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた/HTML/JSON壊れ 等)。"
                       f"水位={since}のまま待機している。")
+                note("read-fail", f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた)。"
+                                  f"水位={since}のまま。")
             else:
-                # 口がまだ無い=既知の待ち。ローカルログに1行だけ(部屋では狼少年をやらない)。
+                # 口がまだ無い=既知の待ち。部屋では鳴らさないが、口待ちの静観も受け手が読む面に残す
+                # (ローカルログは誰も読まない=返す物2)。ログにも1行(継ぎ目の内側)。
                 logf(f"[fail-open] 提案決定エコー: 読み取り口がまだ無い(既知・{n}回連続)。"
                      f"水位ファイルは作らずに待機。")
+                note("bootstrap-wait",
+                     f"経路Bは稼働中・改修αの読み取り口(?action=teian_decisions)がまだ無いため"
+                     f"fail-openで静観中(連続{n}回・水位ファイルは未作成・部屋では鳴らさない)。")
         return {"status": "fail-open", "watermark": since, "delivered": 0, "fails": n}
 
     if not initialized:
@@ -282,6 +352,7 @@ def run_once(fetch, deliver, alert=None, wm_path=WATERMARK, fail_path=FAIL_COUNT
         _write_int(wm_path, last)
         _reset(fail_path)
         logf(f"[初期化] 提案決定エコーの水位を lastRow={last} に置いた(既存の決定は配達しない)。")
+        note("bootstrap-wait", f"改修αの読み取り口が生えて水位を lastRow={last} に初期化した。", resolve=True)
         return {"status": "init", "watermark": last, "delivered": 0, "fails": 0}
 
     headers = data.get("headers") if isinstance(data.get("headers"), list) else None
@@ -302,12 +373,17 @@ def run_once(fetch, deliver, alert=None, wm_path=WATERMARK, fail_path=FAIL_COUNT
             if n == alert_at:
                 alert(f"決定は記録されているのに軍議へ配達できない状態が{n}回続いている(row={rownum})。"
                       f"dispatch側を確認してほしい。水位={since}のまま。")
+                note("deliver-blocked",
+                     f"決定は記録されているのに軍議へ配達できない状態が{n}回(row={rownum})。水位={since}のまま。")
             return {"status": "blocked", "watermark": since, "delivered": delivered, "fails": n}
         since = rownum
         _write_int(wm_path, since)  # ★1行ずつ進める=途中で落ちても再送は最大1行
         delivered += 1
 
     _reset(fail_path)               # きれいに1周できた=連続失敗カウンタを畳む
+    # 開いていた警報を受け手が読む面で閉じる(復旧時に各種1回だけ✅)。
+    for k in ("read-fail", "deliver-blocked", "bootstrap-wait"):
+        note(k, "1周を正常に完了(連続失敗カウンタを畳んだ)。", resolve=True)
     return {"status": "ok", "watermark": since, "delivered": delivered, "fails": 0}
 
 
