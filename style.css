@@ -326,17 +326,20 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
    モバイルは対象外＝従来どおり縦1列。見出し/ボタン行(非.cand-card)は#candList/#candMakerListの直下
    にある全部の列をまたいで表示（並べ替えUI等が1列に押し込められないように）。 */
 @media (min-width:1024px){
-  #candList, #candMakerList{
+  /* ★#candCardList＝ページ分け(2026-08-15導入)で実際にカードが入る器。旧#candList/#candMakerListは
+     集約中/読込中の入れ物になり、通常時のカードはこちらへ入る。ここにグリッドを掛け忘れていたため
+     「4列にしても1列にしかならない」状態だった(Chami msg1540622425736347758・2026-08-22)。 */
+  #candList, #candMakerList, #candCardList{
     display:grid;
     grid-template-columns:repeat(var(--cand-cols,2), minmax(0,1fr));
     gap:8px 14px;
     align-items:start;
   }
-  #candList > :not(.cand-card), #candMakerList > :not(.cand-card){ grid-column:1/-1; }
+  #candList > :not(.cand-card), #candMakerList > :not(.cand-card), #candCardList > :not(.cand-card){ grid-column:1/-1; }
   /* width:min(640px,100%)＝カードの幅を常に一定(列が640pxより広ければ640px固定・狭ければ列いっぱい)にし
      コンテンツ量で幅がバラつかないようにする。justify-self:centerで、列に余りがある時(候補数<列数、
      特に1件だけの時)はカードを列の中央に寄せる。 */
-  #candList .cand-card, #candMakerList .cand-card{ margin-top:0; height:100%; width:min(640px,100%); justify-self:center; }
+  #candList .cand-card, #candMakerList .cand-card, #candCardList .cand-card{ margin-top:0; height:100%; width:min(640px,100%); justify-self:center; }
 }
 /* 候補ページの列数コントロール：PCのみ表示（モバイルではグリッド化しないため無意味）。 */
 .cand-cols-ctl{display:none;}
