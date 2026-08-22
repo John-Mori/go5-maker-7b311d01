@@ -456,6 +456,43 @@ def _release_sessions_lock(fd):
         pass
 
 
+def _stale_write(dept, disk, entry):
+    """★ORG-46 の恒久。**この書き戻しが、他所で終わった世代交代を消すか**を判定する。
+
+    戻り値 (消す=True, 説明)。True の時 save_room は**1文字も書かない**。
+
+    ★何が起きていたか(2026-08-22 研究室HQ実測):
+      `session_relay.py --rotate-now <部屋>` を**その部屋の便の中から**叩くと、
+      CLIは「OK 第16世代→第17世代」と表示して実際にディスクも書き換わるのに、
+      便の終わりの save_room(dept, entry) が**便の入口で読んだ古い entry**を書き戻して
+      数秒後に静かに第16世代へ戻っていた。**成功と表示して失敗している**=最悪の型。
+    ★判定に使うのは世代の数字だけにする。**世代は増える一方**で、減る書き込みは
+      定義上すべて巻き戻しだからだ(時刻やmtimeのような「たまたま当たっている値」に
+      判定を乗せない=共通規律§3「静かに壊れる推定を使わない」)。
+    ★sid だけが違うのは**巻き戻しではない**= 圧縮で自分の便の中で sid が変わるのが正常。
+      ここで止めると圧縮のたびに実測が台帳へ入らなくなる(=逆向きの静かな事故)。
+      声だけ残して書き込みは通す。
+    ★消える方の実測(turns/context_tokens)は捨てて構わない= 新しい世代の行が正で、
+      次の便の _note_usage が測り直す(古い世代の使用量を新世代の行へ混ぜる方が有害)。
+    ★grepの目印= ORG-46
+    """
+    try:
+        d_gen = int(disk.get("generation") or 0)
+        e_gen = int(entry.get("generation") or 0)
+        d_sid = str(disk.get("active_session_id") or "")
+        e_sid = str(entry.get("active_session_id") or "")
+    except (TypeError, ValueError):
+        return False, ""                         # ★判定不能なら通す(fail-open。沈黙を作らない)
+    if d_gen > e_gen:
+        return True, (f"[ORG-46] 書き戻しを**捨てた**= この便の間に交代が終わっている "
+                      f"(ディスク gen={d_gen} sid={d_sid[:8]} / 今から書く gen={e_gen} "
+                      f"sid={e_sid[:8]})。新しい世代の行をそのまま残す")
+    if d_gen == e_gen and d_sid and e_sid and d_sid != e_sid:
+        return False, (f"[ORG-46] sidが変わっているが世代は同じ= 圧縮による差し替えとみて通す "
+                       f"(ディスク {d_sid[:8]} / 今から書く {e_sid[:8]} gen={e_gen})")
+    return False, ""
+
+
 def save_room(dept, entry):
     """★対応表のうち**この部屋の1行だけ**を、今ディスクにある表へ差し替えて保存する。
 
@@ -467,6 +504,11 @@ def save_room(dept, entry):
     fd = _acquire_sessions_lock()
     try:
         table = load_sessions()                  # ★入口のスナップショットではなく「今」の表
+        _skip, _why = _stale_write(dept, table.get(dept) or {}, entry)   # ★ORG-46
+        if _why:
+            _log(dept, _why)
+        if _skip:
+            return False                         # ★交代を消さない=**書かないのが正しい保存**
         table[dept] = entry
         save_sessions(table)                     # ★原子的(tmp+os.replace)のまま
         return True
@@ -1815,8 +1857,19 @@ def _note_usage(entry, data, now, sid=None):
         entry["context_tokens_est"] = est        # ★並べて残す(計器の狂いを後から追えるように)
         # ★2026-08-22(HQ指摘2)床と持ち越しも台帳へ。**圧縮で減らせる余地**の判定に使う
         #   (床は圧縮では1トークンも減らない= そこへ撃つのは丸損)。
-        if tr.get("floor_tokens"):
-            entry["floor_tokens"] = int(tr["floor_tokens"])
+        # ★★2026-08-22(2回目)**床は台帳が覚えておく。** 圧縮が走ると記録ファイルが
+        #   新しくなり、その中には assistant 行が1行も無い=床が測れない(実測: 16:45の圧縮の
+        #   直後、台帳へ入ったのは 10,430 で床は0のままだった=直したはずの値がまた
+        #   持ち越し量だけになっていた)。床は**部屋の起動文の大きさ**であって
+        #   セッションごとの持ち物ではないので、測れない便は前に測った値を使ってよい。
+        _fl = int(tr.get("floor_tokens") or 0)
+        if _fl:
+            entry["floor_tokens"] = _fl
+        else:
+            _fl = int(entry.get("floor_tokens") or 0)
+            if _fl and tr.get("post_compact"):
+                ctx += _fl                       # ★read_transcript が足せなかった分をここで足す
+                entry["context_source"] = "transcript+圧縮直後(床は台帳の実測)"
         if tr.get("carry_tokens"):
             entry["carry_tokens"] = int(tr["carry_tokens"])
     elif est:
@@ -1837,6 +1890,20 @@ def _note_usage(entry, data, now, sid=None):
     if ctx:
         entry["context_tokens"] = ctx
         entry["last_usage_at"] = now
+        # ★★2026-08-22(研究室HQ指摘2の実害)**この世代で一番重かった時の値**を持つ。
+        #   なぜ要るか= 台帳の context_tokens は「最後に測った1点」で、圧縮が走った便では
+        #   必ず**その世代の最小値**(持ち越し量)へ落ちる。ところが定期リフレッシュの判定は
+        #   便の入口でその値を見る=**構造上いつも谷を見ている**。
+        #   実測(hq 第16世代): 圧縮8回・定期リフレッシュ0回。台帳 8,114 に対し実物 104,627、
+        #   その世代の最大は 167,667。回数条件(K=5)はとうに満たしているのに
+        #   「文脈が軽いので見送る」を8回くり返していた=**見送りの理由文が嘘になっていた**。
+        #   → 山(peak)で判定する。軽いセッションを無駄に交代させないという趣旨は生きる
+        #     (本当に軽い部屋は山も 100,000 に届かない)。
+        try:
+            if ctx > int(entry.get("context_peak_tokens") or 0):
+                entry["context_peak_tokens"] = ctx
+        except (TypeError, ValueError):
+            entry["context_peak_tokens"] = ctx
     # ★turnsは自前で+1する。CLIの num_turns は**そのセッションの内部ステップ数**であって
     #   「Chamiと何往復したか」ではない(道具を使うと1便で何回も増える)。参考値として別名で残す。
     try:
@@ -1850,6 +1917,21 @@ def _note_usage(entry, data, now, sid=None):
     except (TypeError, ValueError):
         pass
     return ctx
+
+
+def _peak_of(entry):
+    """この世代で一番重かった時の文脈量(測れていなければ直近の実測で代用)。
+
+    ★定期リフレッシュの判定はこれを見る。理由= 台帳の context_tokens は
+      **圧縮が走った便では必ずその世代の谷**になり、判定はいつもその谷を見てしまうから
+      (2026-08-22 研究室HQ実測: hq 圧縮8回でリフレッシュ0回)。
+    ★山は**世代でリセットする**(新しいセッションの持ち物ではない)。
+    """
+    try:
+        return max(int(entry.get("context_peak_tokens") or 0),
+                   int(entry.get("context_tokens") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _should_rotate(entry):
@@ -1903,11 +1985,16 @@ def _should_rotate(entry):
         #   コメントに実測2件を残してある)。
         #   ★見送りであって取り消しではない= cc は減らないので、次に文脈が
         #     REFRESH_MIN_CONTEXT_TOKENS を超えた便でそのまま交代する。趣旨は生きている。
-        if ctx >= REFRESH_MIN_CONTEXT_TOKENS:
+        # ★★2026-08-22(研究室HQ指摘2)**谷ではなく山を見る。**
+        #   圧縮が走った便の context_tokens は必ずその世代の最小値へ落ちるので、
+        #   ここで ctx だけを見ると「圧縮するほど交代しなくなる」という逆立ちになる
+        #   (実測 hq: 圧縮8回・リフレッシュ0回・台帳8,114/山167,667)。
+        peak = _peak_of(entry)
+        if peak >= REFRESH_MIN_CONTEXT_TOKENS:
             return (True,
-                    f"圧縮が{cc}回積み重なった かつ 文脈{ctx:,}が"
+                    f"圧縮が{cc}回積み重なった かつ この世代の最大文脈{peak:,}が"
                     f"{REFRESH_MIN_CONTEXT_TOKENS:,}以上=定期リフレッシュ"
-                    f"(K={COMPACT_REFRESH_ROTATIONS})",
+                    f"(K={COMPACT_REFRESH_ROTATIONS}・直近の実測は{ctx:,})",
                     "refresh")
     return False, "", ""
 
@@ -1927,10 +2014,18 @@ def _refresh_deferred(entry):
         return False, ""
     if entry.get("compact_failed") or ctx >= ROTATE_AT_TOKENS:
         return False, ""                     # ★別の理由で交代する場面。ここの話ではない
-    if cc - done >= COMPACT_REFRESH_ROTATIONS and ctx < REFRESH_MIN_CONTEXT_TOKENS:
+    peak = _peak_of(entry)
+    if cc - done >= COMPACT_REFRESH_ROTATIONS and peak < REFRESH_MIN_CONTEXT_TOKENS:
+        # ★2026-08-22 見送りの理由文に**何を見て見送ったか**を書く。
+        #   直す前は「文脈8,114が100,000未満=捨てるほどの中身が無い」と書いていたが、
+        #   その瞬間に実際に抱えていたのは104,627で、**理由文そのものが嘘だった**
+        #   (研究室HQが実測して指摘)。谷ではなく山を書くことでこの嘘は消える。
+        floor = int(entry.get("floor_tokens") or 0)
         return True, (f"定期リフレッシュの回数条件は満たしている(圧縮{cc}回)が、"
-                      f"文脈{ctx:,}が{REFRESH_MIN_CONTEXT_TOKENS:,}未満なので**見送る**"
-                      f"(捨てるほどの中身が無い。重くなった便で交代する)")
+                      f"この世代の最大文脈{peak:,}が{REFRESH_MIN_CONTEXT_TOKENS:,}未満なので"
+                      f"**見送る**(直近の実測{ctx:,}"
+                      + (f"・うち床{floor:,}" if floor else "")
+                      + "。重くなった便で交代する)")
     return False, ""
 
 
@@ -3485,7 +3580,10 @@ def run_compact(dept, conf, token, sid):
         #     1トークンも含まない。台帳と見張りが同じ 120,000 の線を見ている以上、
         #     ここで別の量を入れると片方が必ず嘘をつく(実測 台帳9,443 対 実物134,110)。
         #     → 床を足して**次の便が最低限払う量**にする。carry(会話だけ)は別名で残す。
-        _floor = int(after.get("floor_tokens") or 0)
+        #   ★2026-08-22(2回目)床は**台帳が覚えている値でも良い**。圧縮の直後の記録には
+        #     assistant 行が1行も無く床が測れない便がある(実測 16:45)。床は部屋の起動文の
+        #     大きさで、セッションごとの持ち物ではない=前に測った値で足りる。
+        _floor = int(after.get("floor_tokens") or 0) or int(entry.get("floor_tokens") or 0)
         _post = int(lc[3]) if (len(lc) == 4 and lc[3]) else 0
         if _post:
             entry["carry_tokens"] = _post
@@ -4378,6 +4476,9 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                      "status": "ready", "boot_hash": boot_hash,
                      "created_at": entry.get("created_at") or now,
                      "last_used_at": now,
+                     # ★床は部屋の起動文の大きさ=世代を跨いでも同じ。引き継ぐ(2026-08-22)。
+                     #   ★山(context_peak_tokens)は**引き継がない**=世代でリセットする。
+                     "floor_tokens": int(entry.get("floor_tokens") or 0),
                      # ★新セッションは起動文でcharacterfileを読んだので指紋を確定(2026-07-31)。
                      "char_fp": char_fp, "char_parts": char_parts,
                      # ★新セッションは台帳を起動文で受け取っている=指紋を確定(2026-08-13)。
@@ -4508,6 +4609,8 @@ def rotate_now(dept, conf, token, reason="manual"):
     new_entry = {"active_session_id": new_sid, "generation": new_gen,
                  "status": "ready", "boot_hash": boot_hash,
                  "created_at": entry.get("created_at") or now, "last_used_at": now,
+                 # ★床は世代を跨いで同じ(起動文の大きさ)=引き継ぐ。山はリセット(2026-08-22)。
+                 "floor_tokens": int(entry.get("floor_tokens") or 0),
                  # ★2026-07-29 手動交代も同じ帳簿を持つ(経路ごとに持ち物が違うと必ずズレる)。
                  #   ★手動交代の最初の1便(自己確認)には封筒が無い=規律の全文はまだ渡っていない。
                  #     だから指紋は**置かない**。次のChamiの便が全文を渡して指紋を置く。
