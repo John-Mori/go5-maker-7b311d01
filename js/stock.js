@@ -1437,10 +1437,24 @@
         return Go5Drive.fetchPreview(meta.account, meta.title).then(function (du) { return du ? durlToBlob_(du) : null; }, function () { return null; });
       return null;
     }).then(function (prevB) {
-      // ★ドラフト側にもDriveにも無い時の最後の砦=投稿履歴が表示している仕上がりプレビュー(used:<videoId>)。
+      // ★ドラフト側にもDriveにも無い時の砦=投稿履歴が表示している仕上がりプレビュー(used:<videoId>)。
       //   これで「モーダルには映るのに再生成すると全部見つからない」(Chami報告2026-08-18)を塞ぐ。
       if (prevB) return prevB;
       return usedPrevBlob_();
+    }).then(function (prevB) {
+      // ★最後の砦=Driveに保存された動画本体を取り寄せ、末尾(約5秒)フレームでプレビューを起こす
+      //   (Chami依頼2026-08-22「Googleドライブに動画があればその動画を流用して保存データを適正化＋
+      //    投稿履歴に適正化された画像を表示」)。プレビュー素材が手元にもDrive既存プレビューにもused:にも
+      //   無くても、動画さえDriveに在れば復元できる。これで yt-clicks.js の🔁Drive取込が持っていた
+      //   tier3(fetchVideo→末尾フレーム)を、編集モーダルの「データ再生成」にも合流させる=Chamiの
+      //   「ドラフトのdrive保存と編集モーダルのデータ再生成は同じ役割」を実体でも一致させる(単一化)。
+      //   結果このprevBは applyPreview(投稿履歴1ページ目)にもDrive追記(!hasPrevの時)にも使われる。
+      if (prevB) return prevB;
+      if (window.Go5Drive && Go5Drive.fetchVideo && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title)
+        return Go5Drive.fetchVideo(meta.account, meta.title).then(function (vb) {
+          return vb ? videoEndFramePreview_(vb) : null;
+        }, function () { return null; });
+      return null;
     }).then(function (prevB) { applyPreview(prevB); return prevB; }, function () { return null; });
 
     var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
