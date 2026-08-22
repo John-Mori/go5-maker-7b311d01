@@ -10,9 +10,18 @@
 - 両CHいずれか直近3週間に投稿済みの作品は除外(posted_log・fail-open)。
 - Books(cid が d_ 以外)で info_json が無い物は「未収録」=推測で埋めず books_uncovered へ cid 直書きで明示。
 """
-import json, io, os, sys, datetime
+import json, io, os, sys, math, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daily_pick as dp
+
+def revenue_rate(cid):
+    """還元率(payout)= Books 0.70 / 同人 0.35(設計書§2)。"""
+    return 0.35 if cid.startswith("d_") else 0.70
+
+def rank_score(cid, sales):
+    """★ページの並び順の正=分析(shorts-analyst)確定式 score = revenue_rate × log1p(sales_n)。
+    候補を分けるのは需要(sales_n)と還元率だけ=再生/変換は素材/導線に支配され候補を分けない(指標定義 commit 4588d7f)。"""
+    return round(revenue_rate(cid) * math.log1p(sales or 0), 4)
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "local", "teian")
 OUT_DIR = os.path.abspath(OUT_DIR)
@@ -73,10 +82,12 @@ def main():
                  rc=(rev or {}).get("count"), avg=(rev or {}).get("average"),
                  sales=r.get("sales_n"), imgs=len(imgs), src=r.get("source"),
                  _images=imgs, _review=rev, _platform=platform_of(cid))
-        x["score"] = dp.score(x)
+        x["select_score"] = dp.score(x)                       # 候補入りの選定軸(価格/割引/実売/レビュー)
+        x["rank_score"] = rank_score(cid, r.get("sales_n"))   # ★ページの並び順の正(分析確定式)
         cand.append(x)
 
-    cand.sort(key=lambda x: -x["score"])
+    # ★並び順は分析 score(revenue_rate×log1p(sales_n))を正とする(設計書§3)。
+    cand.sort(key=lambda x: (-x["rank_score"], -x["select_score"]))
     top = cand[:10]
 
     # 推奨ch=直近投稿の無い側を優先、無ければ負荷を均すため交互(★暫定=採算/テーマの本判定は分析待ち)
@@ -88,7 +99,6 @@ def main():
         elif "acc2" in recent and "acc1" not in recent: ch = "acc1"
         else:
             ch = "acc1" if alt % 2 == 0 else "acc2"; alt += 1
-        rate = 0.35 if x["_platform"] == "doujin" else 0.70
         out_candidates.append({
             "id": f"cand-{i+1:03d}",
             "cid": x["cid"],
@@ -99,11 +109,12 @@ def main():
             "images": x["_images"],
             "metrics": {
                 "sales_n": x["sales"],
-                "review": x["_review"],
+                "review": x["_review"],       # FANZA実データ(有れば)。★並び順には使わない(分析確定)
                 "price": x["price"], "discount_pct": x["disc"],
-                "revenue_rate": rate,
-                "select_score": x["score"],   # 商品選定の暫定ランキング値(価格/割引/実売/レビュー)
-                "past_similar_recovery": None # ★分析(shorts-analyst)が回収実績で後埋め=現時点は未取得
+                "revenue_rate": revenue_rate(x["cid"]),
+                "score": x["rank_score"],     # ★ページの並び順の正=分析式 revenue_rate×log1p(sales_n)
+                "select_score": x["select_score"],  # 商品選定の候補入り選定軸(価格/割引/実売/レビュー)
+                "past_similar_recovery": None # ★成約は観測不可=分析が null 固定と確定
             },
             "manual": (x["src"] == "main"),
             "comments": []                    # visionが後で3択を埋める
@@ -117,9 +128,10 @@ def main():
     doc = {
         "date": today,
         "generated_by": "product-scout/candidates_json.py",
-        "note": ("channel は暫定(採算/テーマ本判定は分析待ち・channel_provisional=true)。"
-                 "metrics.past_similar_recovery は分析(shorts-analyst)が回収実績で後埋め=現時点null。"
-                 "select_score は価格/割引/実売/レビューの暫定順。comments は vision が後埋め。"),
+        "note": ("並び順の正=分析 score(revenue_rate×log1p(sales_n))降順(設計書§3)。"
+                 "select_score は商品選定の候補入り選定軸で、並び順には使わない。"
+                 "channel は暫定(採算/テーマ本判定は分析待ち・channel_provisional=true)。"
+                 "past_similar_recovery は成約が観測不可=分析が null 固定と確定。comments は vision が後埋め。"),
         "candidates": out_candidates,
         "books_uncovered": books_uncovered,   # DB未収録のBooks cid(推測で埋めていない穴)
     }
