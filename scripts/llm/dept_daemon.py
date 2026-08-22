@@ -1488,11 +1488,20 @@ DEPT_CONF = {
             #   **1便ごとに opus 3回(引き継ぎ+新規+自己確認)**を延々と回すことになる。
             #   → **パスだけ教えて「必要になったら読め」に変える。** 未完了の全文は毎回は要らない。
             #   ★判断待ちボード(pending_decisions.md・3.5KB)は**残す**= 誰待ちかは常に要る。
+            # ★2026-08-23 分冊した(研究室HQ・イージス研究室の指摘 DISPATCH-hq-1787440416587)。
+            #   実測= 127KB → **471KB**(27日で3.7倍)。lazy は正しかったが、471KBは
+            #   「必要になった時」でも開けない=**未完了台帳そのものが沈黙の置き場**になっていた。
+            #   → `hq_open_items.md` は**索引(1件1行・30KB)**へ。本文は原文のまま
+            #     `status/archive/hq_open_items_<年-月>.md` へ移した(削除ゼロ・行の欠落ゼロを検算済み)。
+            #   ★lazy は**維持**= 索引でも30KBある。ただし下の note の「127KB」は嘘になったので直した
+            #     (嘘のまま置くと「大きいから開くな」が残り、分冊した意味が消える)。
             {"path": os.path.join(HQ, "departments", "00_common", "Chami台帳.md"),
              "note": "Chamiの思考・好み・特性の正本(毎回本人に説明させないためにある)"},
             {"path": os.path.join(HQ, "status", "hq_open_items.md"),
-             "note": "未完了台帳。★**大きい(約127KB)ので起動時に全部読むな。"
-                     "何が未完了かを知る必要が出た時に、その時だけ読め**",
+             "note": "未完了台帳の**索引**(1件1行・約30KB)。起動時に全部読むな="
+                     "何が未完了かを知る必要が出た時に、その時だけ読め。"
+                     "★**本文**は `status/archive/hq_open_items_<年-月>.md`="
+                     "索引の行末の `HQ-0000` で grep して引き当てる",
              "lazy": True},
         ),
         # ★2026-07-21 Chami裁定「hqだけに work_scope付きを置く」で復帰(ORG-15)。
@@ -3124,9 +3133,12 @@ _HANGUL_RE = re.compile(r"[가-힣ᄀ-ᇿㄱ-ㆎ]")
 
 # ★英文ダンプ(Claude原文の英語がそのまま日本語の部屋へ出る事故)の監査。ハングルと同じ置き場・作法。
 ENGLISH_AUDIT = os.path.join(LOCAL, "llm", "english_audit.jsonl")
-# 日本語スクリプト= ひらがな + カタカナ + 漢字 + 半角カナ。ラテン文字= 英字。
-_JP_RE = re.compile(r"[぀-ヿ一-鿿ｦ-ﾟ]")
-_LATIN_RE = re.compile(r"[A-Za-z]")
+# 日本語スクリプト/ラテン文字の判定と、英文ダンプ検知・英語前置き剥離は lang_gate へ一本化した
+# (2026-08-23)。同じ判定を経路ごとに持つとドリフトして片方だけ再発する(ORG-23の真因)=
+# dept_daemon も persona_send も**このモジュール1本**を引く。ここでは名前を re-export するだけ。
+from lang_gate import (  # noqa: E402  純関数のみ・単一の判定源(single-source-predicate)
+    _JP_RE, _LATIN_RE, detect_english_dump, strip_english_preamble,
+)
 
 # ============================================================================
 # 出力ゲート ルールE(本文へ混じった内部の手続きメタを剥ぐ) 2026-08-15 イージス研究室
@@ -3628,29 +3640,8 @@ def _append_hangul_warn(text):
 #   Chamiは「英語の表示そのものが無駄=害」と2度明言した=この類だけ「沈黙<英語ノイズ」が逆転する。
 #   よって: ①1回だけ再生成 → ②なお英語なら日本語へ言い換え(claude 1回) → ③どちらも駄目なら
 #   **送らず便を戻す**(保留=沈黙だが、便は消えず再送される=次の生成で日本語になり得る)。
-def detect_english_dump(text):
-    """日本語話者の部屋に**本文まるごと英語**(Claude原文ダンプ)が出ていれば info を返す。
-
-    ★正当な日本語本文に英語の固有名詞・URL・コード識別子・規約番号が混じる普通の返信では鳴らない。
-      判定前にコード柵・インラインコード・URLを除く(そこに英字が多いのは正当=誤検知の芽を摘む)。
-    ★閾値=英字が散文の量(40字以上)あり、かつ日本語がほぼ無い(英字数の15%未満)時だけ。
-      実測(花海咲季の英文 msg 1539153227491180624)= 英字≈290/日本語≈9=2%で確実に発火。
-      普通の混在返信(オタコン実便=日本語数百字+英単語数十字)は英字<40 or 日本語多数で鳴らない。
-    ★**検知するだけ**(自動置換はしない)。空/None/非文字列でも例外を出さない(fail-safe)。
-    """
-    try:
-        s = str(text or "")
-        core = re.sub(r"```.*?```", " ", s, flags=re.S)   # コード柵は判定から除く
-        core = re.sub(r"`[^`]*`", " ", core)              # インラインコード
-        core = re.sub(r"https?://\S+", " ", core)         # URL
-        latin = len(_LATIN_RE.findall(core))
-        jp = len(_JP_RE.findall(core))
-        if latin >= 40 and jp <= latin * 0.15:
-            return {"latin": latin, "jp": jp,
-                    "ratio": round(jp / float(latin or 1), 3), "excerpt": s[:120]}
-        return None
-    except Exception:
-        return None          # 検査が落ちても応答は続ける(fail-safe)
+# ★detect_english_dump は lang_gate.py へ移設(2026-08-23・上の import で re-export)。
+#   判定を1本へ寄せた=persona_send(真の合流点)も同じ関数を引く。本体はあちら。
 
 
 def audit_english(dept, rec, reply):
@@ -3763,37 +3754,7 @@ def english_gate(text, regen=None, translate=None, strip_marker=None):
 #   ・先頭の英字が散文量(40字)未満=固有名詞/URL/短い前置き→触らない。
 #   ・先頭にコード柵``` があれば触らない(コードを誤って剥がさない・安全側)。
 #   ・剥がした残りの日本語が薄い(20字未満)=実質まるごと英語→触らない→suppress/翻訳へ委ねる。
-def strip_english_preamble(text):
-    """先頭の英語前置き(段落)だけを剥がし、日本語本文を残す(純関数・テスト可・fail-safe)。
-
-    返り値: (out_text, {"stripped":bool, "removed_latin":int})
-      stripped=False のとき out_text は入力と同一(通常返信は不変)。
-    """
-    info = {"stripped": False, "removed_latin": 0}
-    try:
-        s = str(text or "")
-        m = _JP_RE.search(s)
-        if not m:
-            return s, info                     # 日本語ゼロ=まるごと非日本語→suppressへ委ねる
-        cut = m.start()
-        if cut == 0:
-            return s, info                     # 頭から日本語=前置き無し
-        head = s[:cut]
-        if "```" in head:
-            return s, info                     # 先頭コード柵は剥がさない(安全側)
-        core = re.sub(r"`[^`]*`", " ", head)   # インラインコード/URLを除いて散文の英字量を測る
-        core = re.sub(r"https?://\S+", " ", core)
-        head_latin = len(_LATIN_RE.findall(core))
-        if head_latin < 40:
-            return s, info                     # 固有名詞/短い前置き=通常返信、触らない
-        body = s[cut:].lstrip(" \t\r\n")       # 日本語本文の頭から採用
-        if len(_JP_RE.findall(body)) < 20:
-            return s, info                     # 残りが薄い=実質まるごと英語→suppress/翻訳へ委ねる
-        info["stripped"] = True
-        info["removed_latin"] = head_latin
-        return body, info
-    except Exception:
-        return str(text or ""), info           # fail-safe: ゲートで配送を殺さない
+# ★strip_english_preamble は lang_gate.py へ移設(2026-08-23・上の import で re-export)。本体はあちら。
 
 
 # ============================================================================

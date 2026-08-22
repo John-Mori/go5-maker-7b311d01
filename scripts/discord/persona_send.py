@@ -454,6 +454,64 @@ def sanitize_rest(rest):
     return out
 
 
+ENGLISH_AUDIT = os.path.join(LOCAL, "llm", "english_audit.jsonl")
+
+
+def _audit_english_suppressed(persona, channel, hit, body):
+    """英文ダンプで送信保留したことを監査へ残す(dept_daemon と同じ置き場・ORG-23)。失敗しても送信判定は変えない。"""
+    try:
+        os.makedirs(os.path.dirname(ENGLISH_AUDIT), exist_ok=True)
+        with open(ENGLISH_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "src": "persona_send", "event": "english_dump_suppressed", "ref": "ORG-23",
+                "persona": persona, "channel": channel,
+                "latin": hit.get("latin"), "jp": hit.get("jp"), "ratio": hit.get("ratio"),
+                "body": str(body or "")[:400],
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def english_backstop(body, persona, channel):
+    """Discordへ出る**最後の合流点**の言語ゲート(2026-08-23 platform-se・一ノ瀬怜)。
+
+    dept_daemon の返信は上流の english_gate を通るが、無人代打(claude_responder)や直送は
+    **persona_send が唯一の関門**=ここを通らない英語ダンプは誰も止めない(🔥 DEF-f827f07985 の残穴)。
+    判定は lang_gate 1本を引く(dept_daemon と同じ=経路が増えてもドリフトしない)。
+
+    ① 英語前置き+日本語本文 → 前置きを剥がし、日本語本文だけ送る(握り潰さない)。
+    ② 本文まるごと英語(救う日本語が無い)→ **送らない**(Chami裁定ORG-23=英語を晒すより送らない)。
+    ★fail-open: モジュールが読めない/例外は素通し=送信を殺さない(最悪の事故は沈黙)。
+    ★ミラー名義(Chami(...))はChami本人の言葉=Claudeの英文ダンプではない→対象外(触らない)。
+
+    返り値: 送るべき本文(str) / None=保留(呼び側が送信を止める)。
+    """
+    try:
+        if str(persona or "").startswith("Chami("):
+            return body                       # ミラー=Chami本人の発言。英語でも触らない
+        if os.path.join(ROOT, "scripts", "llm") not in sys.path:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        from lang_gate import detect_english_dump, strip_english_preamble
+        out, pre = strip_english_preamble(body)
+        if pre.get("stripped"):
+            print(f"[persona_send] ★英語前置きを剥離(英字{pre.get('removed_latin')})→日本語本文だけ送る",
+                  file=sys.stderr)
+            body = out
+        hit = detect_english_dump(body)
+        if hit is None:
+            return body                       # 通常返信=1ミリも変えない
+        _audit_english_suppressed(persona, channel, hit, body)
+        print(f"[persona_send] ★本文まるごと英語(英字{hit['latin']}/日本語{hit['jp']}・比{hit['ratio']})"
+              f"=送信を保留した。日本語話者の部屋にClaude原文の英語ダンプを出さない(ORG-23/Chami裁定)。"
+              f"冒頭=…{hit['excerpt']}…", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[persona_send] 言語ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
+              file=sys.stderr)
+        return body
+
+
 def main():
     args = sys.argv[1:]
     channel = dept = persona = avatar = color = etitle = body_file = None
@@ -502,6 +560,12 @@ def main():
     if not body:
         print("本文が空です。")
         sys.exit(1)
+    # ★最後の合流点の言語ゲート(2026-08-23)。無人代打・直送を含む全persona送信がここを通る。
+    #   英語前置きは剥がし、本文まるごと英語は送らない(ORG-23/🔥 DEF-f827f07985 の残穴を塞ぐ)。
+    gated = english_backstop(body, persona, channel or dept)
+    if gated is None:
+        sys.exit(4)               # 英文ダンプ=保留。webhookを叩かない=Discordに英語を出さない
+    body = gated
     with open(os.path.join(LOCAL, "discord_bot_token.txt"), "r", encoding="utf-8") as f:
         token = f.read().strip()
     with open(os.path.join(LOCAL, "discord_channels.json"), "r", encoding="utf-8") as f:
