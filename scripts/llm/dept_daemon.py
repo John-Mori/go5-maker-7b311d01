@@ -788,7 +788,67 @@ NUDGE_MAX_CHARS = 60
 #   残り「①割引が」=4字は**落としてはいけない**(HQ §4=相槌の後ろに実依頼が付いている)。
 ACK_RESIDUE_MAX = 3
 
-CLOSE_WHEN_REQUEST = "頼まれた物の実物(変更したファイル/実行結果/Discordの返答便)を、その場面で確認できた時"
+# ─────────────────────────────────────────────────────────────────────
+# ★C-050(2026-08-23 Chami指示 msg 1540775762117009438 / HQ経由 msg 1540778224659988543)=
+#   「研究室HQと各研究室の長すぎるやり取りは裏で組んでくれればいい。実際自分読んでないし」
+#   → 表(Discord)へ出す量を要点までに削る。dispatch側(実依頼の表投稿)はHQが front_digest で
+#     塞いだが、**表に出ている量の大半はそちらではなく「部門の返信そのもの」だった**。
+#   ★実測(2026-08-23 02:50・直近72時間の実チャンネル286件)=
+#       bot/webhook発 216件 133,241字 / うち【実依頼】見出しは 15件 21,427字 = **16%**
+#       残り **84%** がこの経路(dept_daemon → persona_send)。dispatch だけ塞いでも効かない。
+#   ★ただし実依頼と決定的に違う点= **返信には裏の完本が無い**。
+#     dispatch は rec["content"] に全文を載せてキューへ流すから表を削っても失われないが、
+#     返信は Discord へ出すだけで、切ったら**その字は消える**。
+#     → 先に全文をファイルへ落とし(裏)、表にはその在りかを書く。
+#       **「裏に完本を作ってから削る」が front_digest 系の適用条件**であり、ここでもそれを守る。
+#   ★削るのは**他部門からの便(via=dispatch)への返信だけ**。Chamiの発言への返信は一切削らない
+#     (C-035= 名指し1箇所の指示を全体へ広げない。Chamiが読みたいのは自分への返事だ)。
+REPLY_FRONT_LIMIT = 280
+REPLY_THREAD_DIR = os.path.join(LOCAL, "llm", "thread")
+
+
+def is_interdept_letter(rec):
+    """この便は『他部門からの便』か(=Chami本人の発言ではない)。表を削ってよいのはこの時だけ。"""
+    return isinstance(rec, dict) and rec.get("via") == "dispatch"
+
+
+def reply_front_digest(text, full_path, limit=REPLY_FRONT_LIMIT):
+    """部門間の返信を表へ出す形に削る。★純粋関数(ファイルは書かない・副作用なし)。
+
+    limit以下ならそのまま返す(短い返信を邪魔しない)。超えたら要点 + **全文の在りか**を1行。
+    ★在りかを必ず書く= 黙って落とすと「途中で切れた」に見え、受け手が全文へ辿れない。
+    """
+    s = (text or "").strip()
+    if len(s) <= limit or not full_path:
+        return s
+    return (s[:limit].rstrip()
+            + f"…\n(以下 {len(s) - limit}字は裏。全文= {full_path})")
+
+
+def write_reply_full(dept, mid, idx, text):
+    """返信の全文を裏(ファイル)へ落とし、リポジトリ相対のパスを返す。失敗したら "" を返す。
+
+    ★fail-open: 書けなかったら空を返し、呼び側は**削らずに全文を表へ出す**
+      (裏が作れていないのに表を削るのが唯一の事故=字が消える)。
+    """
+    try:
+        d = os.path.join(REPLY_THREAD_DIR, dept)
+        os.makedirs(d, exist_ok=True)
+        safe = re.sub(r"[^0-9A-Za-z_.-]", "_", str(mid))[:80]
+        p = os.path.join(d, f"{safe}_{idx}.md")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text)
+        try:
+            # ★相対の方が受け手(セッション)が開きやすい。ただし別ドライブだと relpath は
+            #   ValueError を投げる= その時は絶対パスへ落とす(在りかを失わない)。
+            return os.path.relpath(p, ROOT).replace("\\", "/")
+        except Exception:
+            return os.path.abspath(p).replace("\\", "/")
+    except Exception:
+        return ""
+
+
+CLOSE_WHEN_REQUEST ="頼まれた物の実物(変更したファイル/実行結果/Discordの返答便)を、その場面で確認できた時"
 CLOSE_WHEN_QUESTION = "この問いへ返した返答便(discord_msg)を実物ポインタとして確認できた時"
 CLOSE_WHEN_NUDGE = "催促が指す作業の実物を、Chamiが催促した場面で確認できた時"
 
@@ -5802,7 +5862,19 @@ class Daemon:
             # ★ブロックごとに送る(既存19部屋は必ず1ブロック=ループが1周するだけ)。
             #   body ファイルは使い回してよい(subprocess.run は同期=前の便を送り終えてから上書きする)。
             _last_sent = ""     # ★実在確認は「最後に送った1通」を見る(下の verify_replied)
-            for _who, _part in _blocks:
+            for _bi, (_who, _part) in enumerate(_blocks):
+                # ★★C-050= 他部門からの便(via=dispatch)への返信だけ、表を要点まで削る。
+                #   全文は先に裏(ファイル)へ落とし、表にはその在りかを書く=字は1文字も消えない。
+                #   ★Chamiの発言への返信はここを通らない(via が dispatch ではない)=無変更。
+                #   ★fail-open= 裏へ書けなかったら削らない(全文をそのまま表へ出す)。
+                if (is_interdept_letter(rec)
+                        and len((_part or "").strip()) > REPLY_FRONT_LIMIT):
+                    _full = write_reply_full(self.dept, mid, _bi, _part)
+                    if _full:
+                        _part = reply_front_digest(_part, _full)
+                        log(self.dept, f"★C-050= 部門間の返信を表は要点まで・全文は {_full} msg={mid}")
+                    else:
+                        log(self.dept, f"★C-050= 裏へ書けず削らない(全文を表へ出す) msg={mid}")
                 _last_sent = _part
                 with open(body, "w", encoding="utf-8") as f:
                     f.write(_part)

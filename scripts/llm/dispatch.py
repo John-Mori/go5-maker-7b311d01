@@ -154,9 +154,32 @@ def build_work_header(sender, work):
     return f"【実依頼 / from {who}】{line}"
 
 
+# ★2026-08-23 Chami指示(msg 1540775762117009438)=
+#   「研究室HQと各研究室の長すぎるやり取りは裏で組んでくれればいいよ、実際自分読んでないし、
+#    長すぎるから。なんか結果だけ返してくれればいいし、トーク履歴が汚れるというか長すぎるからいらん。
+#    ほんとに必要そうなもんだけ表でやりとりしといて。」
+#   → C-023(実依頼を表に出す)は**廃止しない**。「渡ったか/何を頼んだか」の1行は残す。
+#     変えるのは**表へ流す量**だけ= 見出し + 要点まで。本体の全文は便(キュー)にだけ載る=裏。
+#   ★配送は無傷: 相手部門が読むのは queue の content であって表の写しではない
+#     (dispatch() は rec["content"] に body 全文を入れて enqueue する)。表を削っても仕事は届く。
+FRONT_LIMIT = 280
+
+
+def front_digest(body, limit=FRONT_LIMIT):
+    """表(Discord)へ出す本文を要点まで削る。★純粋関数。
+
+    limit以下ならそのまま(短い便を邪魔しない)。超えたら先頭limit字で切り、
+    **何字を裏へ回したか**を1行で明示する(黙って落とすと「途中で切れた」に見えるため)。
+    """
+    s = (body or "").strip()
+    if len(s) <= limit:
+        return s
+    return s[:limit].rstrip() + f"…\n(以下 {len(s) - limit}字は裏の便へ。表は要点まで)"
+
+
 def build_work_post(sender, work, body):
-    """相手部門チャンネルへ出す投稿本文=見出し + 本体。"""
-    return build_work_header(sender, work) + "\n\n" + (body or "")
+    """相手部門チャンネルへ出す投稿本文=見出し + 要点(全文ではない)。"""
+    return build_work_header(sender, work) + "\n\n" + front_digest(body)
 
 
 def is_work_request(work):
@@ -252,9 +275,14 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work=""):
     if also_post and not is_work:
         # ★--also-post は従来どおり(任意の便の人間向け写し)。実依頼は既に表投稿済みなので
         #   二重投稿しない(--work と --also-post が両方来ても表は1回だけ)。
+        # ★2026-08-23 C-050(イージス研究室)= ここも front_digest を通す。
+        #   理由= --work の表投稿だけ削っても、**同じ全文が --also-post で表へ出る抜け道**が
+        #   残っていたら C-050 はザルになる(HQの依頼 msg 1540778224659988543 の宿題2)。
+        #   全文は上の enqueue で rec["content"] へ既に載っている=**裏に完本がある**ので
+        #   表を削っても失われない(この「裏に完本がある時だけ削る」が front_digest の適用条件)。
         try:
             subprocess.run([sys.executable, PERSONA_SEND, "--dept", dept,
-                            "--persona", sender.split("(")[0], body],
+                            "--persona", sender.split("(")[0], front_digest(body)],
                            capture_output=True, timeout=90)
         except Exception:
             pass          # 写しの失敗で本体(キュー投函)を巻き添えにしない
