@@ -292,6 +292,19 @@ def work_effort_for(conf):
 #   ツールは自動拒否(プロンプトを出せないため)=allowlist外は安全に落ちる。ファイル作業+検証に
 #   必要な範囲だけ許可。Bashのコマンド単位のさらなる絞り込みはO5の follow-up。
 WORK_ALLOWED_TOOLS = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
+# ★★2026-08-23 研究室HQ「床を削る」(Chami『任せる。セキュリティも加味して頼んだ』
+#   msg 1540826148961914930)。**許可していないツールの定義文が、毎便必ず送られていた。**
+#   --allowedTools は「使ってよいか」を決めるだけで、**スキーマ(定義文)は全部同送される**。
+#   実測(claude -p --model haiku "1" を cwd=5SecMovieMaker で起動し、記録の
+#   assistant行 input+cache_read+cache_creation の**最小値**で比較・2026-08-23 06:0x JST):
+#     素の起動                                    51,242
+#     下の7本を --disallowedTools で外す           40,654  = **-10,588/便**
+#     ★Agent/Skill/ToolSearch は外さない= 委譲(§3)と技能が死ぬ。
+#     ★ToolSearch を外すと **54,569 へ増える**(遅延ツールが全部インライン展開されるため)。
+#   ★この7本は WORK_ALLOWED_TOOLS に無い= もともと --print では自動拒否されて使えない。
+#     つまり**能力は1つも減らない。減るのは送っている字数だけ**。
+RELAY_DROP_TOOLS = ["Workflow", "PowerShell", "ScheduleWakeup",
+                    "ReportFindings", "NotebookEdit", "WebFetch", "WebSearch"]
 # 作業依頼キーワード(=main箱回送 or work_scope部門でのwork_generate起動の判定に使う)。
 # ★依頼形(〜して/〜お願い等)に限定する(2026-07-20 qa-reviewer点検・過剰回送修正=INC本文参照)。
 #   旧版は「反映」「実装」「修正」「デプロイ」等を裸の名詞で拾っており、"反映完了したら知らせて"
@@ -872,6 +885,73 @@ def may_trim_front(rec):
     if declared_audience(rec) != "ai":
         return False              # 宣言なし・chami宣言= 削らない(fail-open)
     return not is_chami_facing_letter(rec)   # 宣言 ai と差出人が矛盾したら削らない
+
+
+# ─────────────────────────────────────────────────────────────────────
+# ★★2026-08-23 06:0x 恒久・第2層(イージス研究室。プラットフォームSEからの回送
+#   DISPATCH-aegis-gl-1787432330178「同じ削りがまだ起きている」)。
+#
+#   ■ 回送元の見立てと、実測でどこが違ったか
+#   一ノ瀬怜の指摘の**設計上の芯は正しい**=
+#     「削る/削らないは *入ってきた便* の宛先ではなく *この返信が誰の目に出るか* で決まる」。
+#     `audience=ai` の便への返信でも、返信の中身が「修理の報告」ならChami本人が読む物だ。
+#     入口(rec)の宣言は**返信の宛先を決めない**。ここに穴が残っていた。
+#   一方、提案された直し方(**部屋を Chami読/AI専用 に分類する**)は**採れない**。
+#     実測(local/queue/inbox.db 全3,046件・部屋別にChami本人の発言を数えた)=
+#       system-engineer 539 / **hq 268** / copy-director 205 / hr-room 172 /
+#       **aegis-gl 100** / future-room 86 / … / **gunji 17** / soudan-room 12
+#     **Chami本人が発言していない部屋は1つも無い**(唯一 past-room が0だが総数1件)。
+#     「軍議・geminiはAI専用」も外れ= 軍議には17件、gemini部屋は3人部屋(ホイミン+ベホップ+Chami)。
+#     → **AI専用の部屋という区分は実在しない。** 部屋で分けると許可リストが空になり
+#       C-050が死ぬか、当てずっぽうの線引きになる(=名前当てを部屋名でやり直すだけ)。
+#
+#   ■ ではどうするか= **出す側が宣言する、を返信側にも適用する**
+#   同じ部屋を「Chami」と「相手のAI」が両方読んでいる以上、機械には読者を決められない。
+#   決められるのは**その返信を書いた本人**だけだ。だから削ってよいのは
+#     ①入ってきた便が `audience=ai` と宣言され(既存)、**かつ**
+#     ②**返信を書いた側が「これは表では要点でいい」と自分で印を付けた時**
+#   の二重の宣言が揃った時だけ。印が無ければ削らない(§3 fail-open)。
+#   ★これが無いまま共通規律 §3.9 に `--audience ai` が入ると、
+#     「①だけ満たす便」が一気に増える= 8/23 05:54 の苦情が**常態になる**。順番が逆にならないよう先に入れる。
+#
+#   ■ 実測した事故そのものについて(2026-08-23 05:54 UTC+9 msg 1540826605767630999)
+#   あの削りは**この直前の版で起きた物**で、今のコードでは既に起きない=
+#     05:42:46 オタコン→platform-se の便が入る(**audience は付いていない**。DB実測 aud=None)
+#     05:46:28 返信が削られる(裏 local/llm/thread/platform-se/1540823569980858488_0.md)
+#     05:47:00 宣言方式(commit a32602c)が入る → **宣言の無い便は削らない**
+#     05:51:00 platform-se の精霊が新コードで起動 / 05:54:49 Chamiの苦情
+#   つまり同じ便が今来ても削られない。ただし**①だけ満たす便**の穴は本物なので下を入れる。
+REPLY_TRIM_MARKERS = ("[表は要点]", "[表要点]", "[audience:ai]")
+
+
+def reply_wants_trim(text):
+    """返信を書いた側が『表は要点でいい』と印を付けたか。★純粋関数。
+
+    返り値= (印があるか, 印を取り除いた本文)。
+    ★印は**表に出す前に必ず取り除く**(印そのものがChamiの目に触れる意味は無い)。
+    ★印が無ければ False= 削らない。これが既定(判定不能なら喋る側へ倒す)。
+    """
+    s = (text or "")
+    hit = False
+    for m in REPLY_TRIM_MARKERS:
+        if m in s:
+            hit = True
+            s = s.replace(m, "")
+    if not hit:
+        return False, (text or "")
+    # 印だけの行が空行として残るのを掃除する(表の見た目を汚さない)
+    s = re.sub(r"\n[ \t　]*\n[ \t　]*\n+", "\n\n", s).strip()
+    return True, s
+
+
+def may_trim_reply(rec, text):
+    """★この返信の表を削ってよいか= **二重の宣言が揃った時だけ**(C-050)。
+
+    ①入ってきた便が「AI同士の便」だと差出人に宣言されている(may_trim_front)
+    ②その返信を書いた側が「表は要点でいい」と印を付けている(reply_wants_trim)
+    片方でも欠けたら削らない。★部屋では判定しない(上の実測=Chamiが居ない部屋は無い)。
+    """
+    return bool(may_trim_front(rec)) and bool(reply_wants_trim(text)[0])
 
 
 def reply_front_digest(text, full_path, limit=REPLY_FRONT_LIMIT):
@@ -4910,6 +4990,9 @@ class Daemon:
             [CLAUDE, "--print", "--model", work_model_for(self.conf),
              *_effort_args,
              "--allowedTools", *WORK_ALLOWED_TOOLS,
+             # ★2026-08-23 使えないツールの定義文を送るのをやめる(-10,588/便の実測)。
+             #   可変長フラグ同士だが、直後に固定の --add-dir が来るので列はそこで切れる。
+             "--disallowedTools", *RELAY_DROP_TOOLS,
              "--add-dir", HQ],
             input=prompt, cwd=ROOT, env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=WORK_TIMEOUT)
@@ -5931,7 +6014,13 @@ class Daemon:
                 #   ★fail-open= 裏へ書けなかったら削らない(全文をそのまま表へ出す)。
                 # ★2026-08-23 追加= 機械の起動便(トリガー/巡回)が頼む生成物は**Chami本人が読む本文**
                 #   なので削らない(may_trim_front)。Chamiは裏へは読みに行かない=区切って全文出す。
-                if (may_trim_front(rec)
+                # ★2026-08-23 06:0x 二重の宣言へ(may_trim_reply)= 入ってきた便が ai 宣言 **かつ**
+                #   返信を書いた側が「表は要点でいい」と印を付けた時だけ削る。
+                #   部屋では判定しない(実測=Chamiが発言していない部屋は1つも無い。上の注記)。
+                _trim_ok = may_trim_reply(rec, _part)
+                # ★印は削る/削らないに関わらず**必ず**落とす(印を表へ出さない)。
+                _, _part = reply_wants_trim(_part)
+                if (_trim_ok
                         and len((_part or "").strip()) > REPLY_FRONT_LIMIT):
                     _full = write_reply_full(self.dept, mid, _bi, _part)
                     if _full:
