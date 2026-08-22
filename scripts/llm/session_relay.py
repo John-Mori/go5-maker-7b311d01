@@ -131,6 +131,21 @@ ROTATE_AT_TOKENS = 185000
 #   ★これは「前倒し」であって本丸ではない= 発火そのものの不確実さ(便が177〜180kまで伸びた実測)は別途。
 COMPACT_AT_TOKENS = 120000
 
+# ★★2026-08-22(イージス研究室・研究室HQ指摘2/3 msg 1540622895687139438)
+#   **圧縮で減らせる量が COMPACT_MIN_GAIN 未満なら撃たない。**
+#   なぜ要るか= 1便の文脈は「床(毎便再送する固定費)+ 会話 + その便で読んだ物」で出来ている。
+#   床は**圧縮では1トークンも減らない**(起動文・共通規律・裁定カタログ・characterfile・
+#   道具定義は毎便そのまま再送される)。実測(2026-08-22 16:31 JST・1便あたり最小値)=
+#     aegis-gl 72,512 / hq 72,774 / system-engineer 72,413 / kaizen 67,485
+#     platform-se 65,988 / future-room 63,839 / 研究室メイン(手動) 66,245
+#   = 床だけで圧縮線120,000の**53〜61%**を占める。物差しを揃えた(指摘2の対処)結果、
+#   圧縮直後の値が「床+要約」になったため、この釘が無いと**畳んだ直後にまた圧縮を撃つ**
+#   (実測102〜140秒・その間Chamiを待たせる)無駄撃ちが起きうる。
+#   ★30,000= 圧縮1回のコスト(重い文脈を1往復読ませる)に見合う最小の削減量。
+#     これ未満しか減らせないなら、撃つ方が高くつく。★床を下げる手は圧縮ではない
+#     (固定物を小さくする=HQの持ち場・指摘3。C-045=人格の設定は削らない)。
+COMPACT_MIN_GAIN = 30000
+
 # ★★モデルの窓の目安(2026-07-29 追加)。**判定には使わない。観測と記録のためだけの線。**
 #   なぜ足したか= Chami「窓を超えている便が実在する(202,754)。溢れた時に何が起きるかも確かめろ」。
 #   実測(local/llm/request_log.jsonl・~/.claude/projects の記録・2026-07-29):
@@ -584,7 +599,7 @@ def _discipline_short(fp):
             "★変わった時・圧縮の直後・10便に1回は全文を配り直す。全文が来ない便は「変わっていない」の意味だ。\n\n")
 
 
-def _state_block(generation, context_tokens):
+def _state_block(generation, context_tokens, floor_tokens=0):
     """封筒の先頭に置く「この部屋のセッション状態」1行(2026-07-26 Chami指示)。
 
     ★なぜ要るか: Chami原文=「**自分が主導でやってる引き継ぎを自動でやって欲しい。
@@ -597,6 +612,10 @@ def _state_block(generation, context_tokens):
     """
     if context_tokens:
         amount = f"約{context_tokens:,}トークン(前便の実測)"
+        # ★2026-08-22(HQ指摘2/3)床も一緒に出す。「圧縮すれば軽くなる」と誤解させないため=
+        #   床は毎便必ず再送される固定費で、圧縮では1トークンも減らない。
+        if floor_tokens:
+            amount += f"/うち床={floor_tokens:,}(毎便の固定費・圧縮では減らない)"
     else:
         amount = "未計測(この部屋での実測がまだ無い)"
     # ★2026-07-29 表示を「交代の目安」から「圧縮の目安」へ(改善書 第2手で意味が変わったため)。
@@ -1643,6 +1662,12 @@ def read_transcript(sid, cwd=None):
     戻り値 dict:
       context_tokens : 最後の(サブエージェントでない)assistant行の
                        input + cache_read + cache_creation。= 今抱えている量の実値。
+                       ★圧縮の直後だけは実値がまだ無いので carry_tokens + floor_tokens。
+      carry_tokens   : 圧縮が畳んだ**会話だけ**の大きさ(postTokens)。固定費を含まない。
+      floor_tokens   : そのセッションの1便あたり最小値= 起動文・規律・道具定義・
+                       characterfile など**毎便必ず再送される固定費**の実測(2026-08-22 実測
+                       63,839〜72,774)。★これが圧縮線120,000の半分以上を占める。
+      post_compact   : 最後の出来事が圧縮の区切りだったか(=実値がまだ1行も無い)。
       compact_count  : `"subtype":"compact_boundary"` 行の件数。
       last_compact   : 最後の圧縮 (ts, trigger, preTokens, postTokens) or None。
 
@@ -1659,6 +1684,7 @@ def read_transcript(sid, cwd=None):
         if not os.path.exists(p):
             return None
         last, n_compact, last_compact = 0, 0, None
+        floor, post_compact = 0, False           # ★床=1便あたりの固定費 / 直近が圧縮の区切りか
         with open(p, encoding="utf-8", errors="replace") as f:
             for line in f:
                 # ★安い前濾し。1行ずつJSONに起こすと3MBの記録で無駄に重くなる。
@@ -1688,6 +1714,7 @@ def read_transcript(sid, cwd=None):
                     #   ★postTokens は「畳んだ後にモデルが抱えている量」そのものなので、
                     #     圧縮後の行が出るまでの間はこれが唯一の正しい答えになる。
                     last = int(m.get("postTokens") or 0)
+                    post_compact = True         # ★この後に assistant 行が来れば下で戻る
                     continue
                 if d.get("type") != "assistant" or d.get("isSidechain"):
                     continue
@@ -1699,7 +1726,31 @@ def read_transcript(sid, cwd=None):
                      + _sum_tokens(u.get("cache_creation_input_tokens")))
                 if t:
                     last = t
-        return {"context_tokens": last, "compact_count": n_compact,
+                    post_compact = False
+                    floor = t if not floor else min(floor, t)
+        # ★★2026-08-22(イージス研究室・研究室HQ指摘2 msg 1540622895687139438)
+        #   **物差しを1本に揃える。** それまで、この関数が返す値には2つの別の量が混ざっていた:
+        #     ① 普通の便の後 = 直前の assistant 行の input+cache読み+cache作成
+        #                     = **その便で実際にモデルへ送った量**(context_watch と同じ量)
+        #     ② 圧縮の直後   = postTokens = **畳んだ会話の要約だけの大きさ**
+        #   ②は「次の便で実際に送る量」ではない。起動文・共通規律・裁定カタログ・
+        #   characterfile・道具定義といった**毎便必ず再送される固定費**を1トークンも含まない。
+        #   ★実測(2026-08-22 16:31 JST・全セッションの1便あたり最小値=この固定費の床):
+        #       aegis-gl 72,512 / hq 72,774 / system-engineer 72,413 / kaizen 67,485
+        #       platform-se 65,988 / future-room 63,839 / 研究室メイン(手動) 66,245
+        #   実際の食い違い= 台帳 aegis-gl 9,443 に対し実物 134,110(**約14倍**)。
+        #   にも関わらず**両方を同じ 120,000 の線にぶつけていた**=片方が必ず嘘をつく。
+        #   → 正本の物差しは①(実際に送る量)。②は文脈量ではなく「持ち越し量」として別名で返す。
+        #     圧縮の直後は ①の実測がまだ存在しないので **postTokens + 床** を返す
+        #     (=次の便が最低限これだけ払う、という測定に基づく下限。推測ではない)。
+        #   ★2026-07-29 の事故(圧縮直後に圧縮前の重い値を返し、一番軽いセッションを捨てた)は
+        #     再演しない= 床を足しても圧縮前の値より遥かに小さい(実測 81,955 対 257,835)。
+        #   ★床が測れない時(新しい記録・読めない)は postTokens のまま返す= 従来動作へ退避。
+        carry = last
+        if post_compact and floor and last:
+            last = last + floor
+        return {"context_tokens": last, "carry_tokens": carry, "floor_tokens": floor,
+                "post_compact": post_compact, "compact_count": n_compact,
                 "last_compact": last_compact, "path": p}
     except Exception:                            # noqa: BLE001 ★記録が読めなくても配送は続ける
         return None
@@ -1760,8 +1811,14 @@ def _note_usage(entry, data, now, sid=None):
     ctx = 0
     if tr and tr.get("context_tokens"):
         ctx = int(tr["context_tokens"])
-        entry["context_source"] = "transcript"
+        entry["context_source"] = "transcript" + ("+圧縮直後(床込み)" if tr.get("post_compact") else "")
         entry["context_tokens_est"] = est        # ★並べて残す(計器の狂いを後から追えるように)
+        # ★2026-08-22(HQ指摘2)床と持ち越しも台帳へ。**圧縮で減らせる余地**の判定に使う
+        #   (床は圧縮では1トークンも減らない= そこへ撃つのは丸損)。
+        if tr.get("floor_tokens"):
+            entry["floor_tokens"] = int(tr["floor_tokens"])
+        if tr.get("carry_tokens"):
+            entry["carry_tokens"] = int(tr["carry_tokens"])
     elif est:
         ctx = est
         entry["context_source"] = "usage_est"    # ★記録が読めなかった日はこちら
@@ -3423,11 +3480,20 @@ def run_compact(dept, conf, token, sid):
         #   ★read_transcript() 側も compact_boundary で last をリセットするよう直したので、
         #     いまはどちらの経路でも同じ値になる。**両方直すのは、片方が将来壊れても
         #     「圧縮した直後のセッションを捨てる」が二度と起きないようにするため。**
+        #   ★★2026-08-22(HQ指摘2)**postTokens をそのまま「文脈」にしない。**
+        #     postTokens は畳んだ**会話だけ**で、毎便再送する固定費(実測 63,839〜72,774)を
+        #     1トークンも含まない。台帳と見張りが同じ 120,000 の線を見ている以上、
+        #     ここで別の量を入れると片方が必ず嘘をつく(実測 台帳9,443 対 実物134,110)。
+        #     → 床を足して**次の便が最低限払う量**にする。carry(会話だけ)は別名で残す。
+        _floor = int(after.get("floor_tokens") or 0)
         _post = int(lc[3]) if (len(lc) == 4 and lc[3]) else 0
         if _post:
-            entry["context_tokens"] = _post
+            entry["carry_tokens"] = _post
+            entry["context_tokens"] = _post + _floor if _floor else _post
         elif after.get("context_tokens"):
             entry["context_tokens"] = int(after["context_tokens"])
+        if _floor:
+            entry["floor_tokens"] = _floor
         entry["context_source"] = "transcript"
         # ★圧縮の要約は機械製。規律・人格が薄まっている可能性があるので、
         #   次の便で起動文+規律の全文を**1回だけ**配り直す(第2手(b))。
@@ -3489,6 +3555,32 @@ def _need_handoff_checkpoint(entry, ctx):
     return (ctx - last) >= HANDOFF_CHECKPOINT_STEP
 
 
+def _need_compact(entry, ctx):
+    """この文脈で圧縮を撃つべきか。戻り値 (撃つか, 見送った時の理由の文字列)。
+
+    ★2026-08-22(HQ指摘2/3)**線を越えているだけでは撃たない。**
+      圧縮が減らせるのは「床より上」だけだ(床=毎便再送される固定費。定数 COMPACT_MIN_GAIN の
+      注記に実測を置いた)。床しか無いセッションへ撃つのは、102〜140秒Chamiを待たせて
+      **何も減らない**=丸損。だから「減らせる量」で判定する。
+    ★床が測れていない時は従来どおり線だけで判定する(fail-open。判定不能で止めない)。
+    """
+    try:
+        ctx = int(ctx or 0)
+        floor = int(entry.get("floor_tokens") or 0)
+    except (TypeError, ValueError):
+        return False, ""
+    if ctx < COMPACT_AT_TOKENS:
+        return False, ""
+    if not floor:
+        return True, ""                          # ★床を知らない= 従来動作
+    gain = ctx - floor
+    if gain < COMPACT_MIN_GAIN:
+        return False, (f"圧縮を見送った(文脈{ctx:,}は線{COMPACT_AT_TOKENS:,}超だが、"
+                       f"床{floor:,}=毎便の固定費を引くと減らせるのは{gain:,}だけで"
+                       f"{COMPACT_MIN_GAIN:,}未満)。★床は圧縮では減らない=撃つ方が高くつく")
+    return True, ""
+
+
 def _schedule_maintenance(dept, conf, token, sid, generation, ctx, entry):
     """便を返した**後**に走らせる後始末を1本のスレッドで予約する(改善書 第2手)。
 
@@ -3499,7 +3591,9 @@ def _schedule_maintenance(dept, conf, token, sid, generation, ctx, entry):
     ★どちらも要らなければスレッドは作らない(既存の便は1バイトも変わらない)。
     """
     need_ck = _need_handoff_checkpoint(entry, ctx)
-    need_cp = ctx >= COMPACT_AT_TOKENS
+    need_cp, _cp_skip = _need_compact(entry, ctx)
+    if _cp_skip:
+        _log(dept, _cp_skip)                     # ★撃たなかった理由を必ず1行残す(沈黙を作らない)
     if not (need_ck or need_cp):
         return False
 
@@ -3786,7 +3880,9 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
     _need_rescue_compact = bool(
         sid and not entry.get("compact_failed")
         and (_rot_kind == "over_line"                                       # (A)
-             or (_lost and _lost.get("need_cp") and _ctx_now >= COMPACT_AT_TOKENS)))  # (B)
+             # ★(B)は回収経路。ここも「減らせる量」で見る(2026-08-22 HQ指摘2)=
+             #   床しか無いセッションへ撃っても何も減らない。(A)は185,000超なので素通り。
+             or (_lost and _lost.get("need_cp") and _need_compact(entry, _ctx_now)[0])))  # (B)
     # ★回収に入ったのに撃たなかった時は、その理由を必ず1行残す(上で「回収する」と書いた後なので、
     #   ここが無いと「回収すると言って何もしなかった」ようにしか見えない=沈黙になる)。
     if (_lost and _lost.get("need_cp") and not _need_rescue_compact
@@ -3925,7 +4021,8 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
     envelope = build_envelope(
         rec, is_work=is_work,
         state=_state_block((generation + 1) if pre_rotating else (generation or 1),
-                           0 if pre_rotating else int(entry.get("context_tokens") or 0)),
+                           0 if pre_rotating else int(entry.get("context_tokens") or 0),
+                           0 if pre_rotating else int(entry.get("floor_tokens") or 0)),
         dept=dept, disc_full=disc_full, disc_fp=_disc_fp)
 
     def _on_soft(elapsed):

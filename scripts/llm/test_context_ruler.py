@@ -1,0 +1,154 @@
+# -*- coding: utf-8 -*-
+"""文脈の**物差し**の検査(2026-08-22・研究室HQ指摘2 msg 1540622895687139438)。
+
+★何を守るか:
+  線を守る側(session_relay)と見張る側(context_watch)が、**同じ 120,000 の線に
+  別の量をぶつけていた**。実測= 台帳 aegis-gl 9,443 に対し実物 134,110(約14倍)。
+  原因は num_turns ではない(read_transcript は割っていない)。
+  **圧縮の直後だけ postTokens=畳んだ会話の大きさ を「文脈」として入れていた**からだ。
+  postTokens は毎便再送される固定費(床。実測 63,839〜72,774)を1トークンも含まない。
+  → 正本の物差し= 「その便で実際にモデルへ送った input+cache読み+cache作成」。
+    圧縮直後は実値が無いので **postTokens + 床**(測定に基づく下限)を使う。
+
+★この検査の本体は「①relayの値 == ②context_watchの値」を**同じ記録ファイルで**突き合わせること。
+★空PASSにしない= 最後に変異検査(旧仕様=postTokensをそのまま返す)を置く。
+
+走らせ方: python scripts/llm/test_context_ruler.py
+★読むだけ。一時ファイルの中で完結する(本番の台帳・記録・Discordに触らない)。
+"""
+import json
+import os
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import session_relay as sr          # noqa: E402
+import context_watch as cw          # noqa: E402
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+ok, ng = 0, 0
+
+
+def check(name, cond, detail=""):
+    global ok, ng
+    if cond:
+        ok += 1
+        print("  PASS %s" % name)
+    else:
+        ng += 1
+        print("  FAIL %s %s" % (name, detail))
+
+
+def asst(total, ts="2026-08-22T07:00:00.000Z", side=False):
+    """assistant 1行。input+cache読み+cache作成 の合計が total になるように置く。"""
+    return json.dumps({"type": "assistant", "isSidechain": side, "timestamp": ts,
+                       "message": {"usage": {"input_tokens": 3,
+                                             "cache_read_input_tokens": total - 3,
+                                             "cache_creation_input_tokens": 0}}},
+                      ensure_ascii=False)
+
+
+def boundary(pre, post, ts="2026-08-22T07:27:31.296Z"):
+    return json.dumps({"type": "system", "subtype": "compact_boundary", "timestamp": ts,
+                       "compactMetadata": {"trigger": "manual",
+                                           "preTokens": pre, "postTokens": post}},
+                      ensure_ascii=False)
+
+
+def write(tmp, name, lines):
+    p = os.path.join(tmp, name)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return p
+
+
+def watch_last(path):
+    """context_watch と**同じ式**でその記録ファイルの最新値を出す(物差しの突き合わせ用)。"""
+    last = 0
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if '"usage"' not in line:
+            continue
+        mi = cw.RE_IN.search(line)
+        if not mi:
+            continue
+        c = int(mi.group(1))
+        for rx in (cw.RE_CR, cw.RE_CC):
+            m = rx.search(line)
+            c += int(m.group(1)) if m else 0
+        if c > 0:
+            last = c
+    return last
+
+
+tmp = tempfile.mkdtemp(prefix="ctxruler_test_")
+FLOOR, HEAVY, POST, PRE = 72512, 134110, 9443, 257835
+
+print("== 圧縮の直後(実値がまだ1行も無い) ==")
+p1 = write(tmp, "a.jsonl", [asst(FLOOR), asst(HEAVY), boundary(PRE, POST)])
+sr._transcript_path = lambda sid, cwd=None: p1          # noqa: E731 記録の場所だけ偽物
+tr = sr.read_transcript("dummy")
+check("床を実測できている", tr.get("floor_tokens") == FLOOR, str(tr.get("floor_tokens")))
+check("持ち越し量=postTokens", tr.get("carry_tokens") == POST, str(tr.get("carry_tokens")))
+check("圧縮直後だと分かる", tr.get("post_compact") is True)
+check("文脈=postTokens+床", tr.get("context_tokens") == POST + FLOOR, str(tr.get("context_tokens")))
+check("★旧仕様(postTokensそのまま)ではない", tr.get("context_tokens") != POST)
+check("2026-07-29の事故(圧縮前の重い値)を再演していない",
+      tr.get("context_tokens") < PRE and tr.get("context_tokens") < HEAVY,
+      str(tr.get("context_tokens")))
+
+print("== 圧縮の後に実値が付いた ==")
+p2 = write(tmp, "b.jsonl", [asst(FLOOR), asst(HEAVY), boundary(PRE, POST), asst(81000)])
+sr._transcript_path = lambda sid, cwd=None: p2          # noqa: E731
+tr2 = sr.read_transcript("dummy")
+check("実値があるならそれを使う", tr2.get("context_tokens") == 81000, str(tr2.get("context_tokens")))
+check("圧縮直後フラグは下りる", tr2.get("post_compact") is False)
+check("★relayとcontext_watchが同じ値を出す(物差しが1本)",
+      tr2.get("context_tokens") == watch_last(p2),
+      "relay=%s watch=%s" % (tr2.get("context_tokens"), watch_last(p2)))
+
+print("== サブエージェントの行は混ぜない(別の文脈) ==")
+p3 = write(tmp, "c.jsonl", [asst(FLOOR), asst(HEAVY), asst(999, side=True)])
+sr._transcript_path = lambda sid, cwd=None: p3          # noqa: E731
+tr3 = sr.read_transcript("dummy")
+check("sidechainは文脈にしない", tr3.get("context_tokens") == HEAVY, str(tr3.get("context_tokens")))
+check("sidechainは床にもしない", tr3.get("floor_tokens") == FLOOR, str(tr3.get("floor_tokens")))
+
+print("== _need_compact: 床しか無い所へ撃たない ==")
+# ★床が線に近い時に効く釘だ(今日の床72,512では線120,000との差が47,488あるので発火しない)。
+#   だから検査は「床が育った時」を作って通す= 固定物が増えれば現実にこうなる(HQ指摘3)。
+BIG = sr.COMPACT_AT_TOKENS - 20000                       # 100,000 の床
+hit, why = sr._need_compact({"floor_tokens": BIG}, sr.COMPACT_AT_TOKENS + 5000)
+check("減らせる量が足りなければ撃たない", hit is False and "見送った" in why, why[:60])
+check("見送りの理由に床の実数が入る", "%s" % f"{BIG:,}" in why, why[:80])
+hit2, _ = sr._need_compact({"floor_tokens": BIG}, BIG + sr.COMPACT_MIN_GAIN + 1)
+check("減らせるなら撃つ", hit2 is True)
+hit2b, _ = sr._need_compact({"floor_tokens": FLOOR}, sr.COMPACT_AT_TOKENS + 1)
+check("今日の床(72,512)では従来どおり線で撃つ=釘が普段の運用を変えない", hit2b is True)
+hit3, _ = sr._need_compact({}, 200000)
+check("床が測れていない時は従来どおり線だけで撃つ(fail-open)", hit3 is True)
+hit4, _ = sr._need_compact({"floor_tokens": FLOOR}, sr.COMPACT_AT_TOKENS - 1)
+check("線の下では撃たない", hit4 is False)
+hit5, _ = sr._need_compact({"floor_tokens": FLOOR}, POST + FLOOR)
+check("★圧縮した直後の値では二度撃ちしない", hit5 is False, "81,955で再圧縮している")
+
+print("== 封筒: 床を隠さない ==")
+sb = sr._state_block(19, POST + FLOOR, FLOOR)
+check("封筒に文脈が出る", f"{POST + FLOOR:,}" in sb, sb)
+check("封筒に床が出る", "床=" in sb and f"{FLOOR:,}" in sb, sb)
+check("床が不明なら床は書かない", "床=" not in sr._state_block(19, 100000, 0))
+
+print("== 変異検査(旧仕様へ戻したら落ちること) ==")
+old = POST                                   # 旧: postTokens をそのまま文脈とした
+check("★変異: 旧仕様なら床込みの値と一致しない", old != POST + FLOOR)
+check("★変異: 旧仕様の値は圧縮線の 1/12 未満=永久に発火しない",
+      old < sr.COMPACT_AT_TOKENS / 12, str(old))
+check("★変異: 旧仕様では _need_compact が『まだ余裕がある』と答える",
+      sr._need_compact({"floor_tokens": FLOOR}, old)[0] is False)
+
+print("")
+print("PASS=%d FAIL=%d" % (ok, ng))
+sys.exit(1 if ng else 0)
