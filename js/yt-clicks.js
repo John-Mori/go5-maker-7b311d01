@@ -2004,7 +2004,11 @@
       //   動画で使った画像/Bluesky画像が両方無い作品(投稿画像だけ添付した作品)は、モーダルにデータが在るのに
       //   カードが空表示になっていた(Chami報告2026-07-30・添付=1532357129657385031)。用途'post'の1枚目を最後の砦にする。
       var postImgArr = (window.Go5Cand && window.Go5Cand.postImgs) ? (window.Go5Cand.postImgs(pKey) || []) : [];
-      var refThumb = usedImgArr[0] || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || postImgArr[0] || '';
+      // ★Chami依頼2026-08-22: カードのサムネも「動画生成で使用した画像」は出さない(見ない・読み込み削減)。
+      //   used レコードの先頭prevN枚=動画投稿プレビュー(Drive保存プレビューと同一blob由来=stock.js capturePreview_)だけをサムネに使う。
+      //   prevN=0(プレビュー未保存の旧履歴)は usedImgArr[0] が生成用の元画像なので採らず、投稿画像/作品サムネへ委ねる。
+      var usedPrevN_ = (window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(pKey) || 0) : 0;
+      var refThumb = (usedPrevN_ > 0 ? (usedImgArr[0] || '') : '') || (rImgCid && window.Go5Cand && window.Go5Cand.bskyImg ? window.Go5Cand.bskyImg(rImgCid) : '') || postImgArr[0] || '';
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
       //   YouTube再生数はAPI未取得/クォータ切れ/紐付け直後だと0や未取得のまま張り付き、下段の「今日▶120/週▶120」
@@ -2095,7 +2099,7 @@
         '</div>' + // .vrow-body
         ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
           (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
-          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画で使った画像(タップで拡大)" title="タップで拡大。Bluesky投稿画像と違えば左右フリックで両方表示" loading="lazy">' : '') +
+          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画投稿プレビュー(タップで拡大)" title="タップで拡大(動画投稿プレビュー)" loading="lazy">' : '') +
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
@@ -2230,16 +2234,14 @@
         var fromPost = false;
         if (!imgs.length && usedKey && window.Go5Cand && window.Go5Cand.postImgs) { imgs = (window.Go5Cand.postImgs(usedKey) || []).slice(); fromPost = imgs.length > 0; }
         if (!imgs.length && im.getAttribute('src')) imgs = [im.getAttribute('src')];
-        var b = (cid && window.Go5Cand && window.Go5Cand.bskyImg) ? window.Go5Cand.bskyImg(cid) : '';
-        // 先頭prevN枚は「投稿プレビュー画像」、それ以降は動画で使った画像(Chami依頼2026-07-30)。投稿画像由来なら全ページ「投稿画像」。
         var prevN = (usedKey && window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
-        var caps = imgs.map(function (_c, i) { return fromPost ? '投稿画像' : (i < prevN ? '動画投稿プレビュー' : '動画生成で使用した画像'); });
-        if (b) {
-          var bi = imgs.indexOf(b);
-          if (bi >= 0) caps[bi] = '動画生成/Bluesky投稿';             // 同一画像＝1ページに統合表記
-          else { imgs.push(b); caps.push('Bluesky投稿用画像'); }      // 異なる＝末尾ページに追加
-        }
-        if (!imgs.length && im.getAttribute('src')) { imgs = [im.getAttribute('src')]; caps = ['動画生成で使用した画像']; }
+        // ★Chami依頼2026-08-22: 投稿履歴の画像ビューから「動画生成で使用した画像」を除外し、「動画投稿プレビュー」だけ残す
+        //   (見ない・読み込み削減)。プレビュー=used レコードの先頭prevN枚。これは stock.js capturePreview_ が撮った
+        //   #cv最終フレーム(t=5秒)の同一blob由来で、Googleドライブへ保存するプレビューと内容が一致する(Chami依頼の後段)。
+        //   投稿画像(fromPost・用途'post')は「動画生成で使用した画像」ではないので従来どおり全ページ表示する。
+        //   旧Bluesky投稿用画像(bskyImg)の付加も廃止=現運用非経路かつ「動画生成/Bluesky」画像は削除対象。
+        if (!fromPost) imgs = prevN > 0 ? imgs.slice(0, prevN) : [];   // プレビュー枚のみ。プレビュー未保存の旧履歴は空(=開かない)
+        var caps = imgs.map(function () { return fromPost ? '投稿画像' : '動画投稿プレビュー'; });
         if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0, { captions: caps });
       });
     });
