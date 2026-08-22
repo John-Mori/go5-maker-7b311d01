@@ -223,6 +223,20 @@ test('H-27: 重複判定は強キー優先で、短縮URL一致だけの別作�
   assert.strictEqual(HM.findDuplicate(rows, { videoId: 'acc1-work-A' }).matchedBy, 'videoId');
   assert.strictEqual(HM.findDuplicate([{ shortUrl: 'https://5mgl.com/old' }], { shortUrl: 'https://5mgl.com/old' }).matchedBy, 'shortUrl');
 });
+test('H-28: プレビュー枠は本物の仕上がりプレビュー(prevN>0)の時だけ出す=生成に使った画像をプレビュー扱いしない', function () {
+  var prevUrl = 'data:image/jpeg;base64,PREVIEW';
+  var srcUrl = 'data:image/jpeg;base64,GENSRC';
+  // prevN>0=先頭は本物のプレビュー→imgs[0]を出す
+  assert.strictEqual(HM.historyPreviewThumb([prevUrl, srcUrl], 1), prevUrl, 'prevN=1→先頭プレビューを出す');
+  // ★回帰の芯：prevN=0(プレビュー未取得)なのに元画像が並んでいても、プレビュー枠には出さない=空
+  assert.strictEqual(HM.historyPreviewThumb([srcUrl], 0), '', 'prevN=0→元画像をプレビュー扱いで出さない(Chami報告2026-08-22の恒久ガード)');
+  assert.strictEqual(HM.historyPreviewThumb([srcUrl, srcUrl], 0), '', 'prevN=0は複数枚でも空');
+  // 空・不正入力は空へ倒す(可用性優先で描画を壊さない)
+  assert.strictEqual(HM.historyPreviewThumb([], 1), '', '画像0枚なら空');
+  assert.strictEqual(HM.historyPreviewThumb(null, 2), '', 'null入力は空');
+  assert.strictEqual(HM.historyPreviewThumb([prevUrl], -1), '', '負のprevNは空');
+});
+
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);

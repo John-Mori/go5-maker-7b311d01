@@ -2056,7 +2056,10 @@
       //     Chami報告の"生成に使った画像がプレビュー扱い"の正体。フォールバックを撤去し、本物が無ければ枠ごと出さない
       //     (カードは作品サムネ .vrow-thumb が担う。プレビューは backfill/投稿完了で入った時だけ出る)。
       var usedPrevN_ = (window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(pKey) || 0) : 0;
-      var refThumb = usedPrevN_ > 0 ? (usedImgArr[0] || '') : '';
+      // プレビュー枠に出す1枚は HistMerge.historyPreviewThumb で一元判定(prevN>0 の時だけ本物・test_hist_merge.js で縛る)。
+      var refThumb = (window.HistMerge && window.HistMerge.historyPreviewThumb)
+        ? window.HistMerge.historyPreviewThumb(usedImgArr, usedPrevN_)
+        : (usedPrevN_ > 0 ? (usedImgArr[0] || '') : '');
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
       //   YouTube再生数はAPI未取得/クォータ切れ/紐付け直後だと0や未取得のまま張り付き、下段の「今日▶120/週▶120」

@@ -187,6 +187,18 @@
     return legacy.length ? [legacy[0]] : [];
   }
 
+  // 投稿履歴カードの「動画投稿プレビュー」枠に出す1枚を決める(単一権威)。
+  // ★本物の仕上がりプレビュー(used レコード先頭 prevCount 枚=stock.js capturePreview_ の #cv 最終フレーム)が
+  //   在る時だけ imgs[0] を返す。prevCount=0(=プレビュー未取得)は空を返す=生成に使った元画像/添付写真を
+  //   「動画投稿プレビュー」のラベルで出さない(Chami報告2026-08-22「生成に使った画像がプレビュー扱いされる」の
+  //   恒久ガード。以前はここで bskyImg/postImg へフォールバックしていたのが誤ラベルの正体)。この判定を関数へ
+  //   固定しテスト(test_hist_merge.js)で縛る=render を誰かが直しても元画像フォールバックが戻らない。
+  function historyPreviewThumb(usedImages, prevCount) {
+    var imgs = Array.isArray(usedImages) ? usedImages.filter(Boolean) : [];
+    var n = prevCount | 0;
+    return (n > 0 && imgs[0]) ? imgs[0] : '';
+  }
+
   // 投稿履歴カードの同一性キー。共有され得る短縮URLより、投稿URI/背骨ID/YouTube IDを優先する。
   // 旧版は postUri→shortUrl→videoId の順だったため、セール会場URLを共有した別作品が同じDOM/編集キーに
   // なり得た。canonical は強キー優先、historyItemKeys は旧短縮キーも後方互換の読取候補として返す。
@@ -250,6 +262,7 @@
     historyMapValue: historyMapValue,
     historyItemKey: historyItemKey,
     historyUsedImages: historyUsedImages,
+    historyPreviewThumb: historyPreviewThumb,
     workCidFromUrl: workCidFromUrl,
     workUrlFromCid: workUrlFromCid,
     historyHasEdit: historyHasEdit,
