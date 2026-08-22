@@ -53,6 +53,9 @@ LEDGER = os.path.join(LOCAL, "llm", "context_guard.jsonl")
 ROOMS = os.path.join(LOCAL, "llm", "room_sessions.json")
 
 WARN_EVERY_SEC = 300            # 同じセッションへ鳴らす間隔の下限(毎ツール呼び出しでは出さない)
+# ★機械が開けた窓の親(=面倒を見る主が居る窓)。relay も部門デーモンも persona_render も
+#   Python から subprocess で `claude -p` を起こす=親は必ずこの一覧のどれかになる。
+MACHINE_LAUNCHERS = ("python.exe", "pythonw.exe", "py.exe")
 TAIL_BYTES = 400_000            # transcriptの末尾だけ読む(24MBの本体を毎回読まない)
 
 RE_IN = re.compile(r'"input_tokens"\s*:\s*(\d+)')
@@ -187,21 +190,112 @@ def decide(payload, now=None):
     return msg, ctx, level
 
 
+def launcher_exe(procs=None, my_pid=None):
+    """この窓(claude.exe)を**誰が起動したか**の実行ファイル名(小文字)。分からなければ ""。
+
+    自分(hookのpython)から親を辿って最初の claude.exe を見つけ、**その親**を返す。
+    プロセスの列挙は session_rooms.proc_table() 1本だけを使う(ORG-11=実装を2つ持たない。
+    ctypesのToolhelp32スナップショット・実測402プロセスで8ms)。
+    """
+    if procs is None:
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+            from session_rooms import proc_table
+            procs = proc_table()
+        except Exception:
+            procs = {}
+    if not procs:
+        return ""
+    pid = os.getpid() if my_pid is None else my_pid
+    for _ in range(12):                 # 深さ上限=輪になっても抜ける
+        row = procs.get(pid)
+        if not row:
+            return ""
+        if row[1] == "claude.exe":
+            parent = procs.get(row[0])
+            return parent[1] if parent else ""
+        pid = row[0]
+    return ""
+
+
+def decide_start(payload, now=None, procs=None, my_pid=None):
+    """★入口の見張り= 管理外の窓が**開いた瞬間**に1回だけ出す(SessionStart)。
+
+    発注= 研究室HQ msg 1540697888538230886。実測= 0ebedfa2(研究室メイン・手動)へ
+    4時間10分で9回 warn が出たが**一度も畳まれなかった**。誤検知ではない=正しく鳴っている。
+    問題は「越えた後には打つ手が無い」こと(hookから `/compact` は撃てない・窓の中の
+    セッション自身も撃てない・relayは自分が起動していない窓を畳めない)。
+    → **越える前・窓がまだ小さいうちに**「この窓は誰も畳まない」と知らせる方へ移す。
+
+    戻り値= (出す文字列 or None, なぜそうしたか)。理由の文字列は検査が枝を名指しできるように
+    返している(黙った理由が3つあり、どれで黙ったかを区別できないと②の検証ができない)。
+
+    黙る条件は3つ=
+      ① relayが世代管理している(=あちらが畳む)
+      ② **機械が開けた窓**(親が python)。★これが一番大事だ:
+         relayが新セッションを作る時、room_sessions.json へ sid が載るのは claude が
+         返った**後**(session_relay.py:4631→4683)。1便目の SessionStart では台帳に
+         まだ無いので、台帳だけを見ると**全部門の起動で毎回鳴る**=今より悪い警報になる。
+      ③ 同じ窓で2回目以降(SessionStart は resume / clear / compact でも鳴る)。
+    ★判定不能(プロセスが数えられない)も**黙る**。ここは可用性ではなく助言なので、
+      取りこぼし1件より「毎回鳴って無視される警報」の方が損が大きい(共通規律§3)。
+    """
+    now = now or time.time()
+    sid = str(payload.get("session_id") or "")
+    if not sid:
+        return None, "nosid"
+    if relay_managed(sid):
+        return None, "managed"
+    by = launcher_exe(procs=procs, my_pid=my_pid)
+    if not by:
+        return None, "unknown"
+    if by in MACHINE_LAUNCHERS:
+        return None, "machine"
+    st = _state()
+    key = "start:" + sid
+    if st.get(key):
+        return None, "seen"
+    ctx = context_now(payload.get("transcript_path") or "")
+    compact_at, rotate_at = lines()
+    st[key] = {"at": now, "by": by, "ctx": ctx}
+    _save(st)
+    _record(sid, ctx, "start", compact_at, rotate_at)
+    msg = ("★この窓は session_relay の**管理外**だ(%s から開かれた)。**誰も畳んでくれない。**"
+           "開いた今のうちに決めておけ= ①部門の仕事なら relay 経由で開き直す "
+           "②このまま使うなら、文脈が %s トークンを越えた時点で**Chamiに `/compact` を頼む**"
+           "(hookからも、この窓の中からもスラッシュコマンドは撃てない=**越えてからでは"
+           "打つ手が無い**。実測 2026-08-22= 越えた窓へ4時間10分で9回警告が出て、"
+           "一度も畳まれなかった)。文脈の読み直しは週間制限の71%%を占めている。"
+           % (by, f"{compact_at:,}"))
+    if ctx:
+        msg += " ★この窓の現在の文脈= %s トークン。" % f"{ctx:,}"
+    return msg, "warn"
+
+
+def _emit(payload, msg, default_event="PostToolUse"):
+    print(json.dumps({
+        "systemMessage": msg,           # 端末のChamiに見える
+        "hookSpecificOutput": {         # セッション自身が読む
+            "hookEventName": payload.get("hook_event_name") or default_event,
+            "additionalContext": msg,
+        },
+    }, ensure_ascii=False))
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
     except Exception:
         return
+    if str(payload.get("hook_event_name") or "") == "SessionStart":
+        msg, _why = decide_start(payload)
+        if msg:
+            _emit(payload, msg, "SessionStart")
+        return
     msg, _ctx, _lv = decide(payload)
     if not msg:
         return
-    print(json.dumps({
-        "systemMessage": msg,           # 端末のChamiに見える
-        "hookSpecificOutput": {         # セッション自身が読む
-            "hookEventName": payload.get("hook_event_name") or "PostToolUse",
-            "additionalContext": msg,
-        },
-    }, ensure_ascii=False))
+    _emit(payload, msg)
 
 
 if __name__ == "__main__":
