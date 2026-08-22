@@ -71,7 +71,7 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 # ★2026-07-27 report-notify を追加(26→27体)。Chamiが**3回**頼んで8日間実装されなかった件。
 #   「報告について改善していきたいから話せるようにして欲しい」= 一方通行の部屋を双方向にする。
 #   自動通知の出力経路には触っていない(bot/webhookはgatewayが弾くので反応しない)。
-DEPTS = ["hq", "research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji"]
+DEPTS = ["hq", "research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット
@@ -100,7 +100,10 @@ class Slot:
                         encoding="utf-8", errors="replace"),
             stderr=subprocess.STDOUT)
         self.started = time.time()
-        log(f"{self.dept}: spawned pid={self.proc.pid}")
+        # ★立ち上げた瞬間の版を控える(C-041。上の _record_codever の注記を読め)。
+        #   ここでしか正しく取れない= プロセスが実際に読んだコードと同じ瞬間だから。
+        _ver = _record_codever(self.dept, self.proc.pid, self.started)
+        log(f"{self.dept}: spawned pid={self.proc.pid}" + (f" ver={_ver}" if _ver else ""))
 
     def tick(self):
         now = time.time()
@@ -212,6 +215,63 @@ def _watch_stamp():
         except OSError:
             pass
     return max(ts) if ts else 0.0
+
+
+# ★★起動した版の控え(2026-08-23 イージス研究室 / C-041・C-042)。
+#   実測した穴(プラットフォームSE msg DISPATCH-aegis-gl-1787433194319 / 2026-08-23 06:13)=
+#   「今この部屋の精霊が**どの版のコードで走っているか**を私は測れていない」。
+#   その通りだった。supervise_daemons.ps1 が見ている常駐7本には
+#   `local/_daemon_codever/<name>.txt` の控えが在るのに、**keeper配下の部門常駐32体には無い**。
+#   結果、版を知りたい人間は毎回その場のワンライナー(プロセスの起動時刻を目で見る)を書くしかなく、
+#   それは共通規律 §1 が名指しで禁じている数え方だ(★毎回違う嘘をつく)。
+#   しかも起動時刻は**代理**でしかない= 「起動より後にコミットが在る」までしか言えない
+#   (未コミットの編集は見えない・gitの書き戻しでmtimeが動く)。C-041=一度の観測を状態の代理にするな。
+#   → **立ち上げた本人(keeper)が、立ち上げた瞬間の版をその場で控える。**
+#     版の定義は借り物にする= `daemon_code_version.code_hash`(閉包の中身のsha1)が正本で、
+#     ここでは持たない(同じ判定を2箇所に置かない)。読み手= `dept_code_version.py`。
+#   ★控えは**帳簿**であって機能ではない。書けなくても起動は必ず続ける(fail-open)。
+CODEVER_DIR = os.path.join(ROOT, "local", "_daemon_codever")
+_codever_cache = {"stamp": None, "hash": ""}
+
+
+def _dept_code_hash():
+    """今の dept_daemon の版。★測れなければ空文字(呼び出し元は控えを諦めるだけ)。
+
+    ★1回の載せ替えの波で32体が同時に起動するので、`_watch_stamp()` をキーに覚えておく
+      (ast で閉包を辿る処理を32回走らせない)。中身が変われば mtime も動く=キーは十分。
+    """
+    stamp = _watch_stamp()
+    if _codever_cache["stamp"] == stamp and _codever_cache["hash"]:
+        return _codever_cache["hash"]
+    try:
+        sys.path.insert(0, HERE)
+        import daemon_code_version as dcv
+        h = dcv.code_hash(DAEMON)
+    except Exception:                                   # noqa: BLE001
+        return ""
+    _codever_cache["stamp"], _codever_cache["hash"] = stamp, h
+    return h
+
+
+def _record_codever(dept, pid, started):
+    """`local/_daemon_codever/dept_<dept>.txt` へ「起動した版」を控える。
+
+    書式= `<sha1>\\t<起動epoch>\\t<pid>`(supervise_daemons.ps1 の控えと同じ並び)。
+    ★例外は全部飲む。**帳簿のせいで常駐が起動しない、が最悪の事故**(fail-open・共通規律§3)。
+    """
+    try:
+        h = _dept_code_hash()
+        if not h:
+            return ""
+        os.makedirs(CODEVER_DIR, exist_ok=True)
+        with open(os.path.join(CODEVER_DIR, f"dept_{dept}.txt"), "w",
+                  encoding="utf-8") as f:
+            # ★秒は**切り捨て**(:.0f は四捨五入で1秒進み、起動時刻との比較が1秒ずれる。
+            #   検査「控えの起動時刻はプロセスの起動時刻」が実際に落ちて見つけた・2026-08-23)
+            f.write(f"{h}\t{int(started)}\t{pid}\n")
+        return h
+    except Exception:                                   # noqa: BLE001
+        return ""
 
 
 # ★★処理中マーカー(2026-08-13 イージス研究室 / 設計= 研究室HQ・Fable 5 / 裁定 C-041)。
