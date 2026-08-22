@@ -7,6 +7,7 @@
 
 実行: python -X utf8 tests/test_tone_gate.py   (全PASSで終了コード0)
 """
+import json
 import os
 import sys
 
@@ -15,7 +16,8 @@ ROOT = os.path.normpath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
 
 from tone_gate import (  # noqa: E402
-    load_tone_rules, tone_verdicts, tone_corrections, polite_drift)
+    load_tone_rules, tone_verdicts, tone_corrections, polite_drift,
+    harshness_drift, room_tone_profile)
 
 RULES_PATH = os.path.join(
     r"D:\SougouStartFolder\00_AI-HQ",
@@ -325,8 +327,143 @@ def _run():
         print(f"[FAIL] P-7 書き直さない -> fixed一致={p7.get('fixed') == POLITE} "
               f"applied={p7.get('applied')} remaining={p7.get('remaining')}")
 
+    # ------------------------------------------------------------------
+    # H群= 威圧化(刃だけで突き放す)の検知。2026-08-23 追加(案ハ4《同じ息ゲート》)。
+    #   設計= 00_AI-HQ/departments/hr/設計_毒舌威圧化の検知_2026-08-23.md(人事部門)。
+    #   発端= Chami 🔥「人格と口調無視してない？怖い」(現在と未来 msg 1540614099749048401)。
+    # ★★検体は**実物**を使う(作り物の文で通すと、本番の初発火が初検証になる)。
+    #   ただし検体の本文は**この公開repoへ書き写さない**= Chamiの内省部屋の中身だからだ
+    #   (C-013の線=ネットへ出さない)。msg_id で HQ の台帳から**実行時に引く**。
+    #   ★引けなかったら SKIP ではなく **FAIL**= 検体が消えた検査は「常にPASSする検査」に
+    #     成り下がる(空PASS)。上の RULES_PATH が読めない時に FAIL するのと同じ扱い。
+    FUTURE_JSONL = os.path.join(
+        r"D:\SougouStartFolder\00_AI-HQ",
+        "departments", "hr", "memory", "future-room.jsonl")
+    #   ✗= 🔥を受けた威圧便 / ○= 同じ内容をアメス自身が書き直した便2つ(設計§0-1)。
+    SPECIMENS = [
+        ("1540613774719975454", True,
+         "H-1 ✗実物(2026-08-22T15:49:42・🔥を受けた威圧便)=発火"),
+        ("1540614099749048401", False,
+         "H-2 ○実物(15:51:10・アメス自身の書き直し。同じ内容・同じ結論)=鳴らない"),
+        ("1540614948105883680", False,
+         "H-3 ○実物2(15:54:28)=鳴らない"),
+    ]
+    bodies = {}
+    try:
+        with open(FUTURE_JSONL, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                r = json.loads(line)
+                bodies[str(r.get("msg_id"))] = str(r.get("reply") or "")
+    except Exception as e:
+        print(f"FAIL: 検体台帳を読めない: {FUTURE_JSONL} ({type(e).__name__})")
+        return 1
+
+    def _harsh(dept, text):
+        return [v for v in tone_verdicts("アメス", dept, text, rules)
+                if v.get("reason") == "harsh_without_care"]
+
+    for mid, want_fire, why in SPECIMENS:
+        body = bodies.get(mid)
+        if not body:
+            ok = False
+            print(f"[FAIL] {why} -> 検体 msg_id={mid} が台帳に無い"
+                  "(検体が消えると、この検査は何も検証しない空PASSになる)")
+            continue
+        hits = _harsh("future-room", body)
+        if bool(hits) == want_fire:
+            print(f"[PASS] {why}"
+                  + (f" -> {hits[0]['marker']}" if hits else ""))
+        else:
+            ok = False
+            print(f"[FAIL] {why} -> 発火={bool(hits)} 期待={want_fire}")
+
+    x_body = bodies.get("1540613774719975454") or ""
+    if x_body:
+        # ★H-4= **部屋条件**の must-fail。同じ✗本文でも、写像に載っていない実務部屋では
+        #   判定そのものを回さない(設計§5-3「癒し部屋でだけ厳しめ」は閾値ではなくON/OFF)。
+        #   これが落ちると、全部門の実務便で毒舌が鳴り始める=安全網が雑音になる。
+        if not _harsh("aegis-gl", x_body):
+            print("[PASS] H-4 同じ✗本文でも soft でない部屋(イージス研究室)では鳴らない"
+                  "=実務部屋の辛口は正当=判定ゼロ=FPゼロ")
+        else:
+            ok = False
+            print("[FAIL] H-4 soft でない部屋で発火した(部屋条件が効いていない)")
+
+        # ★H-5= 写像に部屋が無い時の fail-open(dept が空・未知の部屋)。
+        if not _harsh("", x_body) and not _harsh("no-such-room", x_body):
+            print("[PASS] H-5 fail-open: dept が空/写像に無い部屋は判定しない")
+        else:
+            ok = False
+            print("[FAIL] H-5 fail-open が効いていない(未知の部屋で鳴った)")
+
+        # ★H-6= **書き直さない**。威圧は語尾の置換では直せない(足りないのは"心配"であって
+        #   語尾ではない)。機械が書けば嘘の温度になる=永久に警告と突き返しだけ(設計§5-2)。
+        h6 = tone_corrections("アメス", "future-room", x_body, rules)
+        rem = [v.get("reason") for v in (h6.get("remaining") or [])]
+        if h6.get("fixed") == x_body and "harsh_without_care" in rem:
+            print("[PASS] H-6 威圧は本文を1文字も変えずに警告だけ残す"
+                  "(出口=tone_audit への記録と次便への突き返しの2つだけ)")
+        else:
+            ok = False
+            print(f"[FAIL] H-6 書き直さない -> 本文一致={h6.get('fixed') == x_body} "
+                  f"remaining={rem}")
+
+        # ★H-7= care語彙の入れ忘れで「刃が在れば必ず鳴る」形にならないこと(データ側の fail-open)。
+        no_care = {"personas": {"アメス": {
+            "first_person": ["あたし"],
+            "harsh_edge_markers": ["やれ。"], "care_markers": []}},
+            "room_tone_profiles": {"future-room": "soft"}}
+        if not _harsh_with(no_care, x_body):
+            print("[PASS] H-7 care_markers が空の写像では判定しない"
+                  "(データの入れ忘れが『常に鳴る安全網』に化けるのを構造で止める)")
+        else:
+            ok = False
+            print("[FAIL] H-7 care_markers 空で発火した")
+
+    # ★H-8= 短い便では鳴らない(6字以上の文が4つ未満)。刃1個の短報を毎回撃たない。
+    h8 = harshness_drift("やれ。方向は正しい。", ["やれ。"], ["心配"])
+    if not h8[0] and h8[3] < 4:
+        print(f"[PASS] H-8 短い便(判定文{h8[3]}文)は鳴らさない=閾値4文が効いている")
+    else:
+        ok = False
+        print(f"[FAIL] H-8 短便 -> {h8}")
+
+    # ★H-9= 写像(room_tone_profiles)が実在すること。**うっかり削除を機構で止める**
+    #   = この4部屋が写像から消えたら、ハ4は静かに何も判定しなくなる(誰も気づかない)。
+    want_rooms = ["future-room", "past-room", "dream-care", "health-log"]
+    missing = [d for d in want_rooms if room_tone_profile(rules, d) != "soft"]
+    if not missing:
+        print(f"[PASS] H-9 room_tone_profiles に soft の部屋が4つ在る({'/'.join(want_rooms)})"
+              "=消えたらここが赤くなる")
+    else:
+        ok = False
+        print(f"[FAIL] H-9 写像から soft が落ちている: {missing}")
+
+    # ★H-10= 新しい reason の**突き返し対訳**が session_relay に在ること(C-042=載せ替えの経路)。
+    #   これが無いと英語の reason がそのまま封筒へ出て、突き返しが読めない便になる。
+    try:
+        from session_relay import _TONE_REASON_JA        # noqa: E402
+        if "harsh_without_care" in _TONE_REASON_JA:
+            print("[PASS] H-10 突き返し対訳表に harsh_without_care が在る"
+                  "(reason を足して対訳を忘れる=読めない突き返しを機構で止める)")
+        else:
+            ok = False
+            print("[FAIL] H-10 session_relay の対訳表に harsh_without_care が無い")
+    except Exception as e:
+        ok = False
+        print(f"[FAIL] H-10 session_relay を読めない ({type(e).__name__})")
+
     print("=== 全PASS ===" if ok else "=== FAIL あり ===")
     return 0 if ok else 1
+
+
+def _harsh_with(rr, text):
+    """任意の写像で harsh_without_care だけを取り出す(H-7 用)。"""
+    return [v for v in tone_verdicts("アメス", "future-room", text, rr)
+            if v.get("reason") == "harsh_without_care"]
 
 
 if __name__ == "__main__":

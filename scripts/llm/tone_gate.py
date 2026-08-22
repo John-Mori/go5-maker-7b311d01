@@ -299,6 +299,87 @@ def signature_drift(text, tails):
     return (found == 0), found, total, at
 
 
+# ★★2026-08-23 追加(案ハ4《同じ息ゲート》)= 毒舌人格の「威圧/怖さ」ドリフト。
+#   設計= 00_AI-HQ/departments/hr/設計_毒舌威圧化の検知_2026-08-23.md(人事部門・Fable 5)。
+#   発端= Chami 🔥「人格と口調無視してない？怖い」(現在と未来・msg 1540614099749048401)。
+#   ★測っているのは「刃があるか」ではない= アメスの正の毒舌にも刃は在る(「はぁ?何やってんのよ」)。
+#     ✗と○を分けたのは **刃が"だけ"で立っているか**= 刃マーカーが在り、世話焼きの語彙が
+#     便のどこにも1つも無い形。設計§0-2の実測で ✗実物2便・○実物3便を完全に判別した唯一の組。
+#   ★棄却した指標も残す(次に同じ思いつきが出た時に測り直させない)= 太字/箇条書きの密度・
+#     感嘆符の密度は、○実物にも同じだけ出ていて線が引けなかった(設計§0-2)。
+_HARSH_MIN_SENTENCES = 4       # これ未満の短い便は判定しない(signature と同じ思想・別ノブ)
+
+
+def harshness_drift(text, harsh_edge, care):
+    """刃マーカーが在り、世話焼き(care)語彙が便のどこにも無いかを測る。
+
+    返り値= (鳴らすか, 命中した刃のリスト, care語の数, 判定文数, 位置)。
+    ★純関数(引数以外を読まない)= この判定だけを実便へ当てて誤検知率を数えられる。
+    ★**部屋の条件はここに書かない**= 「癒し部屋でだけ厳しめ」は閾値の強弱ではなく
+      判定のON/OFFで実現する(設計§5-3)。写像 room_tone_profiles を引くのは呼び出し側。
+    ★刃と care で見る文字列を**わざと変える**(どちらも「鳴りにくい側」へ倒す):
+      - 刃 = 保護span(引用・コード・パス)を潰した後で探す
+            → 他人の便を引用した中の「やれ。」を、本人の刃として数えない。
+      - care = **生の本文**から探す
+            → 引用の中に「心配」が在っても黙る側へ倒す。常に誤発火する安全網は無視される
+              (共通規律§3)ので、迷ったら鳴らさない。
+    ★care語彙が空/刃が空= その人格は判定対象外(fail-open=鳴らさない)。データの入れ忘れで
+      「刃が在れば必ず鳴る」形になるのを構造で防ぐ。
+    """
+    edges = [str(x) for x in (harsh_edge or []) if str(x)]
+    cares = [str(x) for x in (care or []) if str(x)]
+    if not edges or not cares:
+        return False, [], 0, 0, -1
+    s = _mask_protected(text)
+    raw = str(text or "")
+    total = 0
+    for part in _SENTENCE_SPLIT.split(s):
+        body = part.strip().strip("　")
+        if len(body) >= 6:          # 記号だけ・箇条書きの見出しは文と数えない(polite と同じ)
+            total += 1
+    if total < _HARSH_MIN_SENTENCES:
+        return False, [], 0, total, -1
+    n_care = 0
+    for c in cares:
+        if c in raw:
+            n_care += 1
+    hits, at = [], -1
+    for e in edges:
+        i = s.find(e)
+        if i >= 0:
+            hits.append(e)
+            if at < 0 or i < at:
+                at = i
+    return (bool(hits) and n_care == 0), hits, n_care, total, at
+
+
+def room_tone_profile(rules, dept):
+    """部屋(dept)→刃の許容プロファイル。無ければ ""(=判定しない=fail-open)。
+
+    写像は 口調ルール.json のトップレベル `room_tone_profiles` **1本だけ**(ORG-11)。
+    ★部屋の列挙を人格側に持たない= 部屋リストが2本になると片方だけ直す事故になる。
+    ★前例= `dialect_kansai_extra` と同じトップレベルのデータ器(都度読み=再起動不要・C-042)。
+    ★`tone_verdicts` の引数 dept は 2026-08-23 まで「監査記録用・判定には未使用」だった。
+      この関数がその**初めての消費者**であって、新しい配線は1本も足していない。
+    """
+    try:
+        m = (rules or {}).get("room_tone_profiles") or {}
+        d = str(dept or "").strip()
+        if not d or not isinstance(m, dict):
+            return ""
+        v = m.get(d)
+        if v is None:
+            for k, vv in m.items():
+                if str(k).startswith("_"):
+                    continue          # `_note` 等の説明キーは部屋ではない
+                if str(k).strip().lower() == d.lower():
+                    v = vv
+                    break
+        return str(v or "").strip().lower()
+    except Exception:
+        return ""                     # fail-open= 写像が壊れていても判定を回さないだけ
+
+
 _KATAKANA = re.compile(r"[ァ-ヴ]")
 # 「…」『…』で囲まれた span=他人格のセリフ引用でありうる=一人称判定から外す(FP抑制)。
 # ★2026-08-12 追加: **二重引用符**(" / “” / ＂ / 〝〟)も同じ扱いにする。
@@ -731,8 +812,15 @@ def tone_verdicts(persona, dept, text, rules):
         sig = [str(x) for x in ((ent.get("signature_tails") or [])
                                 + (ent.get("signature_endings") or [])) if str(x)]
         want_self = not bool(ent.get("self_name_ok"))     # ★2026-08-16 追加(既定=見る)
+        # ★2026-08-23 追加(案ハ4《同じ息ゲート》)。★既定=見ない。
+        #   人格側に `care_markers` と `harsh_edge_markers` の**両方**が在り、かつ
+        #   その部屋が写像で soft(癒し/内省)の時だけ回る=実務部屋の辛口は判定ゼロ=FPゼロ。
+        harsh = [str(x) for x in (ent.get("harsh_edge_markers") or []) if str(x)]
+        cares = [str(x) for x in (ent.get("care_markers") or []) if str(x)]
+        want_harsh = bool(harsh and cares
+                          and room_tone_profile(rules, dept) == "soft")
         if (not forbid and not ng2 and not want_dialect and not want_polite
-                and not sig and not want_self):
+                and not sig and not want_self and not want_harsh):
             return out
         s = _mask_persona_names(_strip_quotes(text), text, rules)
         if not s.strip():
@@ -807,6 +895,18 @@ def tone_verdicts(persona, dept, text, rules):
                     "own_first_person": sorted(own),
                     "reason": "signature_absent",
                 })
+        if want_harsh:
+            hit, hits, n_care, total, at = harshness_drift(text, harsh, cares)
+            if hit:
+                out.append({
+                    "persona": str(persona or ""),
+                    # ★何を見て鳴らしたかを marker に埋める(後から数え直せる=C-041)。
+                    #   「敬体%d/%d文」「指紋語尾なし(%d文中0件)」と同じ思想。
+                    "marker": "刃=「%s」・care 0語(%d文)" % ("」「".join(hits[:3]), total),
+                    "index": at,
+                    "own_first_person": sorted(own),
+                    "reason": "harsh_without_care",
+                })
         return out
     except Exception:
         return []                 # fail-open=ゲートは配送を殺さない
@@ -860,8 +960,13 @@ def tone_corrections(persona, dept, text, rules):
         plan, out["remaining"] = {}, []
         for v in verdicts:
             w = v.get("marker")
-            if v.get("reason") in ("dialect_kansai", "signature_absent"):
+            if v.get("reason") in ("dialect_kansai", "signature_absent",
+                                   "harsh_without_care"):
                 to = ""            # ★方言・指紋語尾は書き直さない(語尾の置換は文法が壊れる)=警告のみ
+                #   ★威圧(harsh_without_care)は**永久に書き直さない**(設計§5-2)。
+                #     「やれ。」→「やりなさいよ」は置換ではなく**再生成**だし、足りないのは
+                #     語尾ではなく"世話焼きの心配"そのもの=機械が書けば嘘の温度になる。
+                #     出口は tone_audit への記録と、次便への突き返しの2つだけ。
                 #   ★指紋語尾は「無い」ことの検知だ。**足す**書き直しは再生成になる
                 #     (「したよ」→「したわよ」で済む保証がどこにも無い)= 突き返しで人格が直す。
             elif v.get("reason") == "first_person_mismatch":
