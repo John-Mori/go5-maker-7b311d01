@@ -477,6 +477,40 @@
   }
   try { applyHistCols_(histCols_()); } catch (e) {}
 
+  // ── 投稿履歴のページ分け(1ページの表示数で分割・Chami依頼2026-08-22) ──
+  //   投稿が数百件になると、全カードの作品サムネ＋動画投稿プレビューを一度に描く→iOS Safariが画像デコードを
+  //   間引いて「下の方の作品のサムネ/プレビューが表示されない」状態になる(Chami報告「投稿量が多くなってきて
+  //   表示されない」)。候補タブと同じ方式(candidates.js candPageSize_/candPagerHtml_)で1ページ分だけ描き、
+  //   同時デコード点数を抑える。多ければページを分ける=Chamiの「多ければページを分けていい」に沿う。
+  var K_HISTPAGESIZE = 'hist_page_size';
+  var HPAGESIZE_DEF = 30, HPAGESIZE_OPTS = [20, 30, 50, 100];
+  function histPageSize_() { var n; try { n = parseInt(localStorage.getItem(K_HISTPAGESIZE) || String(HPAGESIZE_DEF), 10); } catch (e) { n = HPAGESIZE_DEF; } return (HPAGESIZE_OPTS.indexOf(n) >= 0) ? n : HPAGESIZE_DEF; }
+  function histPageSizeHtml_() {
+    var cur = histPageSize_(), opts = HPAGESIZE_OPTS.map(function (n) { return '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + '件</option>'; }).join('');
+    return '<span class="cand-pagesize-ctl"><label class="hint" style="margin:0;white-space:nowrap;">1ページの表示数</label><select id="histPageSizeSel">' + opts + '</select></span>';
+  }
+  // ページ番号の窓(先頭・末尾・現在±1を残し、間は … で省略)。0=省略記号のしるし。候補タブと同式。
+  function histPageWindow_(page, pages) {
+    var want = [1, page - 1, page, page + 1, pages], res = [];
+    want.sort(function (a, b) { return a - b; });
+    want.forEach(function (n) { if (n < 1 || n > pages) return; if (res.length && n === res[res.length - 1]) return; res.push(n); });
+    var out = [];
+    for (var i = 0; i < res.length; i++) { if (i > 0 && res[i] - res[i - 1] > 1) out.push(0); out.push(res[i]); }
+    return out;
+  }
+  function histPagerHtml_(page, pages, total, startI, count) {
+    if (pages <= 1) return '';
+    var b = '<button type="button" class="cand-page-btn" data-histpage="' + (page - 1) + '"' + (page <= 1 ? ' disabled' : '') + '>‹ 前</button>';
+    histPageWindow_(page, pages).forEach(function (n) {
+      if (n === 0) { b += '<span class="cand-page-ellip">…</span>'; return; }
+      b += '<button type="button" class="cand-page-btn' + (n === page ? ' active' : '') + '" data-histpage="' + n + '">' + n + '</button>';
+    });
+    b += '<button type="button" class="cand-page-btn" data-histpage="' + (page + 1) + '"' + (page >= pages ? ' disabled' : '') + '>次 ›</button>';
+    var from = total ? startI + 1 : 0, to = startI + count;
+    return '<div class="cand-pager">' + b + '</div><div class="cand-pager-info hint">' + from + '–' + to + '件 / 全' + total + '件(' + page + '/' + pages + 'ページ)</div>';
+  }
+  var _histPageByAcct = {}; // 投稿履歴の現在ページをアカウント別に保持(ページ分け・Chami依頼2026-08-22)
+
   // 投稿時刻(ts)等から背骨ID(videoId)を生成。idgen があれば流用、無ければ同形式で自前生成。
   function genVideoId(ts) {
     var d = (ts && ts > 0) ? new Date(ts) : new Date();
@@ -1963,9 +1997,20 @@
       // 計測ヘルス(B-3): 正常時は目立たせない。異常時だけ赤字。追加通信はしない(既存取得の結果を映すだけ)
       '<span id="measHealth" class="meas-health" title="計測3経路の生死。短縮URL=クリック数/記録GAS=今日昨日週の日別記録/YouTube=再生数。「応答なし」の時、その数字は古い値です">' + healthHtml_() + '</span>' +
       histColsCtlHtml_() + // 列数セレクタ(PCのみCSSで表示)
+      histPageSizeHtml_() + // 1ページの表示数セレクタ(全カードを一度に描かない=下の作品のサムネ/プレビューが表示されない対策)
       '<button id="drivePrevBackfill" type="button" class="vhide-remade-btn" title="プレビューが入っていない投稿履歴について、まずGoogleドライブの「題名_プレビュー」画像を探し、無ければ動画の末尾(約5秒)フレームから生成して1ページ目へ挿入します(このチャンネル分・既にプレビューがある履歴は対象外・ページを離れても開き直すと続きを自動で流します)">🔁 Drive→過去分プレビュー取込</button>' +
       '<button id="hideRemadeBtn" type="button" class="vhide-remade-btn" title="被リビルド作品を一覧から隠す/戻す">' + (hideRemade ? '👁 被リビルドを表示' : '被リビルドを非表示') + '</button></div>';
-    list.innerHTML = hideBarHtml + visibleItems.map(function (it, idx) {
+    // ページ分け：全カードを一度に描くとiOS Safariが画像デコードを間引き「下の作品のサムネ/プレビューが出ない」。
+    //   1ページ分だけ描いて同時デコード点数を抑える(Chami依頼2026-08-22)。ページ番号はアカウント別に保持。
+    var _hsize = histPageSize_();
+    var _htotal = visibleItems.length;
+    var _hpages = Math.max(1, Math.ceil(_htotal / _hsize));
+    var _hpage = _histPageByAcct[acct()] || 1; if (_hpage > _hpages) _hpage = _hpages; if (_hpage < 1) _hpage = 1;
+    _histPageByAcct[acct()] = _hpage;
+    var _hstart = (_hpage - 1) * _hsize;
+    var pageItems = visibleItems.slice(_hstart, _hstart + _hsize);
+    var pagerHtml = histPagerHtml_(_hpage, _hpages, _htotal, _hstart, pageItems.length);
+    list.innerHTML = hideBarHtml + pagerHtml + pageItems.map(function (it, idx) {
       var k = itemKey(it);
       var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
@@ -2114,7 +2159,19 @@
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
         '</div>';
-    }).join('');
+    }).join('') + pagerHtml; // 末尾にもページャ(長い一覧の下からでもページ移動できる)
+    // ページ移動ボタン・1ページ表示数セレクタの配線(上下のページャ共通)。押したら1ページ目/該当ページを描き直す。
+    list.querySelectorAll('[data-histpage]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (b.disabled) return;
+        var p = parseInt(b.getAttribute('data-histpage'), 10); if (!p || p < 1 || p > _hpages) return;
+        _histPageByAcct[acct()] = p;
+        render();
+        try { list.scrollIntoView({ block: 'start' }); } catch (e) { try { window.scrollTo(0, 0); } catch (e2) {} } // ページを変えたら一覧の先頭へ
+      });
+    });
+    var _hpss = $('histPageSizeSel');
+    if (_hpss) _hpss.addEventListener('change', function () { var n = parseInt(this.value, 10) || HPAGESIZE_DEF; try { localStorage.setItem(K_HISTPAGESIZE, String(n)); } catch (e) {} _histPageByAcct[acct()] = 1; render(); });
     // シートから vid を補ったが公開日時が未取得の投稿を、描画後に1回だけ取りに行く(見出しを YouTube公開日時へ)。
     //   通常のrefresh()はallItems(ローカル)しか照会しないため、結線が切れた行はここでしか公開日時を拾えない。
     //   取得できたら再描画で §1646(pub)が §1651(it.ts=作成日時)に勝つ。まだ非公開(予約公開中)なら空応答＝
