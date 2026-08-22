@@ -493,6 +493,47 @@ def _stale_write(dept, disk, entry):
     return False, ""
 
 
+def _keep_from_disk(disk, entry):
+    """★ORG-46 の第2形。**同じ世代のまま、進んだ数字を書き戻しで巻き戻さない。**
+
+    実測(2026-08-22 17:05)= hq の行に入れた山 198,549 が、便が終わった瞬間に消えて
+    None へ戻った。世代は16のまま(=_stale_write は通す)、圧縮回数は7→9へ増えていた。
+    つまり **便の入口で読んだ行を丸ごと書き戻している**ので、その便の間に他所が書いた列は
+    黙って消える。世代の巻き戻しだけ止めても、列の巻き戻しは残っていた。
+    ★全列をマージすると「古い値が正しい場合」まで拾ってしまう。だから対象は
+      **世代の中で増える一方だと言い切れる列**に限る:
+        context_peak_tokens = その世代の最大値(定義上減らない)
+        compact_count       = 圧縮の回数(定義上減らない)
+      と、**世代の中で変わらない列**:
+        floor_tokens        = 起動文の固定費(空の時だけディスクの実測を残す)
+    ★世代が変わる書き込み(交代)ではマージしない= 新世代は山も回数も0から数え直す。
+    戻り値 (直した entry, 説明)。
+    """
+    try:
+        if int(disk.get("generation") or 0) != int(entry.get("generation") or 0):
+            return entry, ""
+    except (TypeError, ValueError):
+        return entry, ""
+    kept = []
+    for key in ("context_peak_tokens", "compact_count"):
+        try:
+            d_v, e_v = int(disk.get(key) or 0), int(entry.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if d_v > e_v:
+            entry[key] = d_v
+            kept.append(f"{key} {e_v:,}→{d_v:,}")
+    try:
+        if int(disk.get("floor_tokens") or 0) and not int(entry.get("floor_tokens") or 0):
+            entry["floor_tokens"] = int(disk["floor_tokens"])
+            kept.append("floor_tokens(ディスクの実測を残した)")
+    except (TypeError, ValueError):
+        pass
+    if kept:
+        return entry, "[ORG-46] 書き戻しで巻き戻る列をディスクの値に戻した= " + " / ".join(kept)
+    return entry, ""
+
+
 def save_room(dept, entry):
     """★対応表のうち**この部屋の1行だけ**を、今ディスクにある表へ差し替えて保存する。
 
@@ -509,6 +550,9 @@ def save_room(dept, entry):
             _log(dept, _why)
         if _skip:
             return False                         # ★交代を消さない=**書かないのが正しい保存**
+        entry, _kept = _keep_from_disk(table.get(dept) or {}, entry)      # ★ORG-46 第2形
+        if _kept:
+            _log(dept, _kept)
         table[dept] = entry
         save_sessions(table)                     # ★原子的(tmp+os.replace)のまま
         return True
@@ -1934,6 +1978,20 @@ def _peak_of(entry):
         return 0
 
 
+def _peak_measured(entry):
+    """その山が**実際に測った値**か(=代用ではないか)。
+
+    ★C-048(2026-08-22 Chami裁定)の執行= **測り直していない数字の上に理由文を書くな。**
+      `_peak_of` は山が無い時に直近の実測で代用するので、圧縮の直後(=谷)の部屋では
+      「この世代の最大文脈は10,430だ」という**測っていない断定**になる。
+      数字は代用してよい(判定を止めない)が、**言葉の方は代用したと書く**。
+    """
+    try:
+        return int(entry.get("context_peak_tokens") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _should_rotate(entry):
     """次の便を処理する**前**に交代すべきか(★事前判定)。戻り値 (bool, 理由の文字列, 種別)。
 
@@ -2020,7 +2078,17 @@ def _refresh_deferred(entry):
         #   直す前は「文脈8,114が100,000未満=捨てるほどの中身が無い」と書いていたが、
         #   その瞬間に実際に抱えていたのは104,627で、**理由文そのものが嘘だった**
         #   (研究室HQが実測して指摘)。谷ではなく山を書くことでこの嘘は消える。
+        # ★★2026-08-22 C-048 の執行= **測っていない数字の上に見送りの理由を書かない。**
+        #   山がまだ1度も記録されていない部屋では、_peak_of は直近の実測(=圧縮直後なら谷)を
+        #   代用する。そこで「この世代の最大文脈は10,430だ」と書けば、それは測っていない断定=
+        #   Chamiが「嘘」と呼んだのと同じ形になる。→ **理由文の方を「測れていない」に倒す。**
         floor = int(entry.get("floor_tokens") or 0)
+        if not _peak_measured(entry):
+            return True, (f"定期リフレッシュの回数条件は満たしている(圧縮{cc}回)が、"
+                          f"**この世代の最大文脈をまだ測れていない**ので見送る"
+                          f"(判定に使った{peak:,}は直近の実測{ctx:,}の代用"
+                          + (f"・うち床{floor:,}" if floor else "")
+                          + "。次の便で山を1回測れば、そこで判定できる)")
         return True, (f"定期リフレッシュの回数条件は満たしている(圧縮{cc}回)が、"
                       f"この世代の最大文脈{peak:,}が{REFRESH_MIN_CONTEXT_TOKENS:,}未満なので"
                       f"**見送る**(直近の実測{ctx:,}"
@@ -4561,6 +4629,70 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         return None, False
 
 
+def _reap_stranded_rotations(dept, now=None, min_age_sec=900):
+    """★手動交代が**決着行を書かないまま死んだ**時の後始末(ORG-47・2026-08-22)。
+
+    何が起きたか= 研究室HQが `--rotate-now hq` を生きたセッションへ二重にかけ、
+    走っている途中で**手で殺した**。rotate_now は先に `rotated` を書き、最後に
+    `completed`/`failed` を書く。間で殺されると決着行が無い行だけが残り、
+    relay_health 検査11(交代を挟んだ依頼が消えていないか)が**永久に**それを数える。
+
+    ★ここで「たぶん失敗した」とは書かない(C-048)。**対応表の実物を読み直して**、
+      その交代が乗らなかったこと(世代が上がっていない かつ 旧セッションが現役のまま)を
+      確かめた行だけ `failed` で閉じる。確かめられない行は**開けたまま残す**=
+      分からないものを分かった顔で閉じる方が、検査より害が大きい。
+    戻り値= 閉じた request_id のリスト。
+    """
+    now = time.time() if now is None else now
+    closed = []
+    try:
+        rows = []
+        with open(REQUEST_LOG, encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line or "rotate-now-" not in line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        return closed
+    seen = {}
+    for r in rows:
+        if r.get("dept") != dept:
+            continue
+        rid = str(r.get("request_id") or "")
+        if not rid.startswith("rotate-now-"):
+            continue
+        seen.setdefault(rid, []).append(r)
+    entry = (load_sessions() or {}).get(dept) or {}
+    cur_gen = int(entry.get("generation") or 0)
+    cur_sid = str(entry.get("active_session_id") or "")
+    for rid, rs in seen.items():
+        if any(x.get("state") in ("completed", "failed") for x in rs):
+            continue                             # 既に決着している
+        try:
+            born = int(rid.rsplit("-", 1)[1])    # rid の中の秒(rotate-now-<epoch>)
+        except (IndexError, ValueError):
+            continue
+        if now - born < min_age_sec:
+            continue                             # まだ走っているかもしれない=触らない
+        ev = " ".join(str(x.get("evidence") or "") for x in rs)
+        m = re.search(r"gen=(\d+)", ev)
+        old = re.search(r"old=([0-9a-f-]+)", ev)
+        if not m:
+            continue                             # 世代が読めない=確かめようが無い
+        gen = int(m.group(1))
+        if cur_gen == gen and (not old or old.group(1) == cur_sid):
+            _record(rid, dept, "failed",
+                    f"[ORG-47] 決着行が無いまま終わっていた(交代の途中でプロセスが落ちた/"
+                    f"手で止められた)。**対応表の実物を読み直して**確定= 世代は第{gen}世代のまま・"
+                    f"現行セッション {cur_sid[:8]} も交代前と同じ=この交代は乗っていない")
+            closed.append(rid)
+    return closed
+
+
 def rotate_now(dept, conf, token, reason="manual"):
     """★手動の世代交代(HQが試験・緊急時に叩く口)。Discordの便を伴わずに交代する。
 
@@ -4570,6 +4702,8 @@ def rotate_now(dept, conf, token, reason="manual"):
     """
     rid = f"rotate-now-{int(time.time())}"
     LAST_ERROR.pop(dept, None)
+    for _dead in _reap_stranded_rotations(dept):   # ★ORG-47 前回の死に損ないを先に閉じる
+        _log(dept, f"[ORG-47] 決着していなかった手動交代 {_dead} を failed で閉じた")
     _join_maintenance(dept)                     # ★後始末と交代を重ねない(2026-07-29)
     table = load_sessions()
     entry = table.get(dept) or {}
@@ -4601,6 +4735,13 @@ def rotate_now(dept, conf, token, reason="manual"):
         LAST_ERROR[dept] = f"手動交代で例外({type(e).__name__})"
         _record(rid, dept, "failed", f"手動交代 {type(e).__name__}: {e}")
         return False, f"{dept}: 交代に失敗({type(e).__name__})。前の世代は残してある"
+    except BaseException as e:
+        # ★ORG-47(2026-08-22)Ctrl-C など**例外ではない止め方**でも決着行を1行残す。
+        #   ここが無いと `rotated` だけの行が台帳に残り、検査11が永久にそれを数える
+        #   (実測= 研究室HQが試験中に手で止めた2件)。★握り潰さずそのまま上げる。
+        _record(rid, dept, "failed",
+                f"手動交代が中断された({type(e).__name__})= 新しい世代は作られていない")
+        raise
     new_sid = str((data or {}).get("session_id") or "")
     if rc != 0 or not new_sid:
         LAST_ERROR[dept] = f"セッションの切り替えに失敗した(新しい世代を作れなかった rc={rc})"

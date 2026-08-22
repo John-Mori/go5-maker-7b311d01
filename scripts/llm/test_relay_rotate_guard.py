@@ -80,6 +80,35 @@ e3["context_tokens"] = 81955
 check("圧縮によるsidの差し替えは通す", sr.save_room("hq", e3) is True)
 check("差し替えが入っている", disk()["hq"]["active_session_id"] == "cmpct222")
 
+print("== ORG-46 第2形: 同じ世代のまま、進んだ列を書き戻しで巻き戻さない ==")
+# 実測(17:05)= 山198,549 が便の終わりに消えて None へ戻り、圧縮回数は7→9へ増えていた。
+sr.save_sessions({"hq": {"active_session_id": "cmpct222", "generation": 17,
+                         "context_peak_tokens": 198549, "compact_count": 9,
+                         "floor_tokens": 72774, "context_tokens": 9039}})
+stale = {"active_session_id": "cmpct222", "generation": 17, "context_tokens": 9039,
+         "compact_count": 7}                      # ★便の入口で読んだ古い行(山も床も無い)
+sr.save_room("hq", stale)
+check("山は消えない", disk()["hq"].get("context_peak_tokens") == 198549,
+      json.dumps(disk()["hq"]))
+check("圧縮回数は戻らない", disk()["hq"].get("compact_count") == 9)
+check("床も残る", disk()["hq"].get("floor_tokens") == 72774)
+check("その便が測った直近の値はちゃんと入る", disk()["hq"].get("context_tokens") == 9039)
+up = dict(disk()["hq"], context_peak_tokens=210000, compact_count=10)
+sr.save_room("hq", up)
+check("増える方向は素通し", disk()["hq"]["context_peak_tokens"] == 210000
+      and disk()["hq"]["compact_count"] == 10)
+gen_up = {"active_session_id": "n3", "generation": 18, "compact_count": 0}
+sr.save_room("hq", gen_up)
+check("世代が変わる書き込みでは混ぜない(新世代は0から数え直す)",
+      disk()["hq"].get("compact_count") == 0
+      and not disk()["hq"].get("context_peak_tokens"), json.dumps(disk()["hq"]))
+print("== 変異検査(ORG-46 第2形) ==")
+e_m, why_m = sr._keep_from_disk({"generation": 17, "context_peak_tokens": 198549},
+                                {"generation": 17})
+check("★変異: マージを外すと山がNoneのまま書かれる(=17:05に実測した消え方)",
+      e_m.get("context_peak_tokens") == 198549 and "ORG-46" in why_m, why_m)
+
+sr.save_sessions({"hq": {"active_session_id": "cmpct222", "generation": 17}})
 skip, why = sr._stale_write("hq", {"generation": 17, "active_session_id": "a"},
                             {"generation": 16, "active_session_id": "b"})
 check("判定の理由文にORG-46の目印が入る", skip is True and "ORG-46" in why, why[:60])
@@ -172,6 +201,67 @@ check("★変異: 旧仕様は 8,114 < 100,000 で永久に見送る",
       gen16["context_tokens"] < sr.REFRESH_MIN_CONTEXT_TOKENS)
 check("★変異: 山を消すと撃てなくなる",
       sr._should_rotate({k: v for k, v in gen16.items() if k != "context_peak_tokens"})[0] is False)
+
+
+print("== C-048: 測っていない数字の上に見送りの理由を書かない ==")
+# 山を1度も測れていない部屋(圧縮の直後=谷しか無い)。数字は代用してよいが、言葉は代用と書く。
+unmeasured = {"context_tokens": 10430, "compact_count": 7,
+              "refresh_rotated_at_compacts": 0, "floor_tokens": 72774}
+check("山が無ければ『測れていない』と判定される", sr._peak_measured(unmeasured) is False)
+check("山が有れば『測れている』", sr._peak_measured(dict(unmeasured, context_peak_tokens=167667)))
+udefer, uwhy = sr._refresh_deferred(unmeasured)
+check("見送りは今までどおり出る(黙らない)", udefer is True)
+check("理由文は『まだ測れていない』と言う", "まだ測れていない" in uwhy, uwhy)
+check("代用した数字だと明示する", "代用" in uwhy, uwhy)
+check("★測っていない断定をしない= 『最大文脈10,430が』とは書かない",
+      "最大文脈10,430" not in uwhy, uwhy)
+_, mwhy = sr._refresh_deferred(dict(unmeasured, context_peak_tokens=41000))
+check("測れている部屋は今までどおり山を断定してよい",
+      "41,000" in mwhy and "まだ測れていない" not in mwhy, mwhy)
+
+
+print("== ORG-47: 決着行が無い手動交代を、実物を読み直して閉じる ==")
+sr.REQUEST_LOG = os.path.join(tmp, "request_log.jsonl")     # ★本番の台帳に書かない
+OLD_SID, NEW_SID = "c27eec97-aaaa", "ffffffff-bbbb"
+
+
+def put(rid, dept, state, ev):
+    with open(sr.REQUEST_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"request_id": rid, "dept": dept, "state": state,
+                            "ts": "t", "evidence": ev}, ensure_ascii=False) + "\n")
+
+
+NOW = 1787400000
+put("rotate-now-1787384087", "hq", "rotated", "手動交代 reason=cli old=%s gen=16" % OLD_SID)
+put("rotate-now-1787384677", "hq", "rotated", "手動交代 reason=cli old=%s gen=16" % OLD_SID)
+put("rotate-now-1787384999", "hq", "rotated", "手動交代 reason=cli old=%s gen=14" % OLD_SID)
+put("rotate-now-1787384999", "hq", "completed", "手動交代 gen=14→15")
+put("rotate-now-1787399900", "hq", "rotated", "手動交代 reason=cli old=%s gen=16" % OLD_SID)
+put("rotate-now-1787384088", "other-room", "rotated", "手動交代 reason=cli old=zzz gen=2")
+sr.save_sessions({"hq": {"active_session_id": OLD_SID, "generation": 16},
+                  "other-room": {"active_session_id": "zzz", "generation": 9}})
+
+closed = sr._reap_stranded_rotations("hq", now=NOW)
+check("実物が『交代していない』と言う2件を閉じる",
+      sorted(closed) == ["rotate-now-1787384087", "rotate-now-1787384677"], str(closed))
+check("既に決着している行は触らない", "rotate-now-1787384999" not in closed)
+check("走っている最中かもしれない新しい行は触らない", "rotate-now-1787399900" not in closed)
+check("他の部屋を巻き添えにしない", sr._reap_stranded_rotations("other-room", now=NOW) == [],
+      "世代が9=交代が乗ったかもしれない行は閉じない")
+body = open(sr.REQUEST_LOG, encoding="utf-8").read()
+check("閉じ方は failed(completed と嘘をつかない)", '"state": "failed"' in body)
+check("何を読み直して決めたか理由文に残る", "対応表の実物を読み直して" in body and "ORG-47" in body)
+check("2度目は何も閉じない(冪等)", sr._reap_stranded_rotations("hq", now=NOW) == [])
+
+print("== 変異検査(ORG-47) ==")
+sr.save_sessions({"hq": {"active_session_id": NEW_SID, "generation": 17}})
+put("rotate-now-1787384100", "hq", "rotated", "手動交代 reason=cli old=%s gen=16" % OLD_SID)
+check("★変異: 世代が進んでいる=乗ったか分からない行は**開けたまま残す**",
+      sr._reap_stranded_rotations("hq", now=NOW) == [],
+      "ここで閉じる実装は『分からないものを分かった顔で閉じる』=C-048違反")
+put("rotate-now-1787384101", "hq", "rotated", "手動交代 reason=cli old=%s" % OLD_SID)
+check("★変異: 世代が読めない行も閉じない",
+      sr._reap_stranded_rotations("hq", now=NOW) == [])
 
 print("")
 print("PASS=%d FAIL=%d" % (ok, ng))
