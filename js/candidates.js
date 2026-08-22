@@ -4684,7 +4684,14 @@
       return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-refimgview="' + esc(cid) + '" data-refidx="0" src="' + esc(imgs[0]) + '" loading="lazy" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
     }
     var state = refSlotState_(cid);
-    if (state === 'loading') return '<div class="cand-refimg-ph cand-refimg-loading" title="動画生成用の画像を読み込み中です">⏳ 画像読込中…</div>';
+    // ★loadingも per-cid で能動取得する(INC-127→129→132→137の恒久対策の穴埋め)。従来「⏳読込中」は
+    //   全体ハイドレート(hydrateImages_=ref:/bsky:を一括読み)の完了だけを待ち、per-cardの復元経路が無かった。
+    //   174件級でiOS SafariのIDB一括読みが遅延/無言停止すると、全カードが⏳のまま画像が一生出なかった
+    //   (Chami再発報告2026-08-22「追加した画像が表示されない・再発まみれ」)。checkingと同じく ensureRefProbe_
+    //   (単一cidのget・冪等・_refLoadJobsで多重発射防止)を蹴り、成功したらそのカードだけ updateCardRefThumb_ で
+    //   差し替える=全体ハイドレートの完了に依存しない。v=882のページ分けで可視カードは1ページ分(≤設定件数)に
+    //   限られるため per-card 発射も有界=軽い。全体ハイドレートが後で完了すれば bgRender_ で'images'へ確定する。
+    if (state === 'loading') { ensureRefProbe_(cid); return '<div class="cand-refimg-ph cand-refimg-loading" title="動画生成用の画像を読み込み中です">⏳ 画像読込中…</div>'; }
     if (state === 'checking') { ensureRefProbe_(cid); return '<div class="cand-refimg-ph cand-refimg-checking" title="この作品の動画生成用画像を端末内から確認しています">🔍 画像を確認中…</div>'; }
     if (state === 'missing') return '<div class="cand-refimg-ph cand-refimg-missing" data-refimg="' + esc(cid) + '" title="この端末に動画生成用の画像が見つかりません(タップで投稿編集から確認・再登録)">⚠ 画像なし</div>';
     return '';
