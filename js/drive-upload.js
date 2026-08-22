@@ -307,7 +307,12 @@
     if (channel !== "acc1" && channel !== "acc2") return;
     var safeTitle = String(title || "動画").replace(/[\\/:"*?<>|]/g, '_');
     var name = fileName || (safeTitle + "_プレビュー." + imgExt(imgBlob));
-    var f = (imgBlob instanceof File) ? imgBlob : new File([imgBlob], name, { type: imgBlob.type || "image/jpeg" });
+    // ★File実体が既に別名(候補タブ由来の candidate_N.jpg 等)を持っていても、必ず意図した名前で上げ直す。
+    //   旧: `instanceof File` の時は渡されたFileの名前をそのまま使っていた=candidate_3.jpg のような誤名が
+    //   Driveへ入り、Workerの findSrcImageFile(name contains '元画像')に一致せず「元画像なし」判定になる→
+    //   データ再生成のたびに candidate_N.jpg が新規に増殖した(Chami報告2026-08-22「いらんやつ作られてまっせ」)。
+    //   常に name で包み直す=命名規則(題名_元画像/題名_プレビュー)を1箇所で強制。
+    var f = new File([imgBlob], name, { type: imgBlob.type || "image/jpeg" });
     lastCtx.channel = channel; lastCtx.title = title; lastCtx.folderId = folderId;
     sendAppend(f, 0);
   }
