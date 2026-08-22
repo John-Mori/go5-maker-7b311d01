@@ -161,10 +161,12 @@ export default {
     const wantOverwrite = String(form.get("overwrite") || "") === "1"
       && env.ALLOW_OVERWRITE === "1"
       && !(baseName === "video" && title !== "video");
-    // 窓内（30日以内作成）の同名フォルダを「新フォルダ作成の前」に確定させる（read-only）。
+    // ★正常化の明示intent(normalize=1)が二重ロックの内側で揃った時だけ30日窓を外す（save_job経路と同一の作法）。
+    const noWindow = String(form.get("normalize") || "") === "1" && wantOverwrite;
+    // 窓内（30日以内作成）の同名フォルダを「新フォルダ作成の前」に確定させる（read-only）。noWindow時は窓を外す。
     let candidates = [];
     if (wantOverwrite) {
-      try { candidates = await findOverwriteCandidates(parentId, baseName, token); }
+      try { candidates = await findOverwriteCandidates(parentId, baseName, token, noWindow); }
       catch (e) { candidates = []; } // 列挙失敗＝消さない側へ倒す（従来経路で新規作成）
     }
     const doOverwrite = wantOverwrite && candidates.length > 0 && candidates.length <= OVERWRITE_MAX_TRASH;
@@ -203,7 +205,7 @@ export default {
     const trashed = [], trashFailed = [];
     if (doOverwrite) {
       for (const c of candidates) {
-        const ok = await trashFolderGuarded(c.id, { parentId, baseName, newFolderId: folder.id }, token);
+        const ok = await trashFolderGuarded(c.id, { parentId, baseName, newFolderId: folder.id, noWindow }, token);
         (ok ? trashed : trashFailed).push({ id: c.id, name: c.name });
       }
     }
@@ -397,6 +399,10 @@ async function handleSaveJob(form, env, cors, ctx) {
     previewKey: String(form.get("previewKey") || "").trim(), // 任意・R2上の仕上がりプレビュー(小)の在り処
     srcKey: String(form.get("srcKey") || "").trim(),         // 任意・R2上の元画像(動画に使った写真)の在り処
     overwrite: String(form.get("overwrite") || "") === "1",
+    // ★正常化(手動の明示「名前を正しく保存し直す」だけ)。これが立った時だけ30日窓を外して古いフォルダも作り直し
+    //   対象にする(Chami承認2026-08-22)。自動保存(投稿完了/作成時)には絶対に付かない=誤爆で古い作品をゴミ箱送りにしない。
+    //   二重ロック(overwrite ＆ env.ALLOW_OVERWRITE)が揃った時のみ後続で有効化する(下 wantOverwrite 参照)。
+    normalize: String(form.get("normalize") || "") === "1",
   };
   const v = validateSaveJobInput(fields, env);
   if (!v.ok) return json({ ok: false, error: v.error }, 400, cors);
@@ -446,9 +452,12 @@ async function runSaveJob(env, fields, parentId) {
   //   env.ALLOW_OVERWRITE='1'。破壊操作(旧フォルダのtrash)は従来どおり「新規保存が成功した後」だけ）----
   const wantOverwrite = !!fields.overwrite && env.ALLOW_OVERWRITE === "1"
     && !(baseName === "video" && fields.title !== "video");
+  // ★正常化の明示intent(normalize=1)が、二重ロック(overwrite ＆ ALLOW_OVERWRITE)の"内側"で揃った時だけ30日窓を外す。
+  //   自動保存経路は fields.normalize が来ないので noWindow=false のまま=従来どおり窓内(30日以内)しか作り直さない。
+  const noWindow = !!fields.normalize && wantOverwrite;
   let candidates = [];
   if (wantOverwrite) {
-    try { candidates = await findOverwriteCandidates(parentId, baseName, token); } catch (e) { candidates = []; }
+    try { candidates = await findOverwriteCandidates(parentId, baseName, token, noWindow); } catch (e) { candidates = []; }
   }
   const doOverwrite = wantOverwrite && candidates.length > 0 && candidates.length <= OVERWRITE_MAX_TRASH;
 
@@ -504,7 +513,7 @@ async function runSaveJob(env, fields, parentId) {
   // ---- 動画保存が成功した後にだけ旧フォルダをtrash（唯一の破壊操作・全条件を再検証）----
   if (doOverwrite) {
     for (const c of candidates) {
-      try { await trashFolderGuarded(c.id, { parentId, baseName, newFolderId: folder.id }, token); } catch (e) {}
+      try { await trashFolderGuarded(c.id, { parentId, baseName, newFolderId: folder.id, noWindow }, token); } catch (e) {}
     }
   }
   try { console.log(tag + " OK folderId=" + folder.id + (doOverwrite ? " (overwrote " + candidates.length + ")" : "")); } catch (_) {}
@@ -736,7 +745,7 @@ async function childFileExists(parentId, name, token) {
 /* ====================== 上書き（overwrite=1 ＆ env.ALLOW_OVERWRITE 時のみ）====================== */
 // 窓内（createdTime が30日以内）の exact-name サブフォルダを列挙。findChildFolderIds の createdTime 付き版。
 //   createdTime は Drive サーバの正＝フロントの時計/申告に依存しない。境界（ちょうど30日）は含む（<=）。
-async function findOverwriteCandidates(parentId, name, token) {
+async function findOverwriteCandidates(parentId, name, token, noWindow) {
   const q = "name='" + escQ(name) + "' and '" + parentId +
     "' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
   const url = DRIVE_API + "?q=" + encodeURIComponent(q) +
@@ -745,8 +754,9 @@ async function findOverwriteCandidates(parentId, name, token) {
   if (!r.ok) throw new Error("list");
   const j = await r.json();
   const now = Date.now();
+  // noWindow=true(正常化の明示intentのみ)は30日窓を外す。それ以外は従来どおり createdTime が30日以内のものだけ。
   return (j.files || []).filter((f) =>
-    f.createdTime && (now - Date.parse(f.createdTime)) <= OVERWRITE_WINDOW_MS);
+    noWindow ? true : (f.createdTime && (now - Date.parse(f.createdTime)) <= OVERWRITE_WINDOW_MS));
 }
 
 // exact-name でフォルダ作成（同名existsチェックを意図的にしない。Driveは同一親内の同名フォルダを許容）。
@@ -774,7 +784,9 @@ async function trashFolderGuarded(id, ctx, token) {
   if (m.trashed) return false;
   if (!(m.parents || []).includes(ctx.parentId)) return false;          // チャンネル親の直下限定
   if (m.name !== ctx.baseName) return false;                            // 題名完全一致
-  if (!m.createdTime || (Date.now() - Date.parse(m.createdTime)) > OVERWRITE_WINDOW_MS) return false; // 窓内
+  // 窓内(作成30日以内)。★正常化の明示intent(ctx.noWindow)の時だけこの窓を外す。他の全ガード(フォルダ限定・
+  //   未trash・親直下・題名一致)は外さない=誤爆の面積は「同題名の古いフォルダ」に限定されたまま。復元は30日可(trashのみ)。
+  if (!ctx.noWindow && (!m.createdTime || (Date.now() - Date.parse(m.createdTime)) > OVERWRITE_WINDOW_MS)) return false;
   const p = await fetch(DRIVE_API + "/" + encodeURIComponent(id) + "?supportsAllDrives=true", {
     method: "PATCH",
     headers: { Authorization: "Bearer " + token, "Content-Type": "application/json; charset=UTF-8" },

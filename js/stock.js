@@ -1456,7 +1456,10 @@
         }, function () { return ''; });
       }, function () { return ''; });
     }
-    var verifyFolder = resolveOkFolder_();
+    // ★正常化(opts.normalize=手動の明示「名前を正しく保存し直す」)は、Driveに既に動画が在っても「追記だけ」の近道
+    //   (okFolder枝)を通さず、必ず本当の作り直し(realSaveNow_→queueSaveにnormalize:true)へ倒す。古いフォルダは
+    //   candidate.jpg 等の誤名で作られたレガシー=正しい名前で一式を作り直し、古いのはWorkerが新規保存の"後"にゴミ箱送り。
+    var verifyFolder = opts.normalize ? Promise.resolve('') : resolveOkFolder_();
     verifyFolder.then(function (okFolderId) {
       if (okFolderId) {
         setDriveSavedState_(id, 'verified', meta); try { render(); } catch (e) {} // checkSavedで実物確認済み＝verified
@@ -1606,7 +1609,7 @@
         var enrichTimed = new Promise(function (res) { setTimeout(function () { res(['', '']); }, 12000); });
         Promise.race([enrich, enrichTimed]).then(function (keys) {
           recordSaveJobPending_(id, meta);
-          return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: keys[0] || '', srcKey: keys[1] || '', overwrite: true });
+          return window.Go5Drive.queueSave({ videoId: id, title: meta.title, channel: meta.account, previewKey: keys[0] || '', srcKey: keys[1] || '', overwrite: true, normalize: !!opts.normalize });
         })
           .then(function (res) {
             var ok = !!(res && res.ok);
@@ -1641,11 +1644,11 @@
         var imgP  = img  ? Promise.resolve(img)  : durlToBlob_(mirror.src);
         Promise.all([imgP, previewReady]).then(function (bs) {
           var imgB = bs[0], prevB = bs[1];
-          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null);
+          window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null, { normalize: !!opts.normalize });
           done(true, 'Driveへ保存開始');
         });
       }).catch(function () {
-        window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, []);
+        window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, [], null, { normalize: !!opts.normalize });
         done(true, 'Driveへ保存開始');
       });
     }).catch(function (err) {
@@ -1706,6 +1709,7 @@
     }, 40000);
     driveSaveForCompleted_(meta, {
       silent: opts.silent,
+      normalize: !!opts.normalize, // ★正常化(名前を正しく保存し直す)の明示intentを保存本体へ引き継ぐ
       onDone: function (ok, msg) {
         if (settled) return;
         if (!vid) { wrapped(ok, msg); return; } // videoId無し=1ページ目の紐付けキーが無い(旧投稿)=素の結果を返す
@@ -2795,6 +2799,9 @@
           // 🔄 データ再生成(Chami依頼2026-08-18): 一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだ
           //   Googleドライブに無いものだけを"投稿完了と同じ経路"で作って保存する(既にあれば作り直さない・gap-fill)。
           '<div style="margin-top:14px;"><button type="button" id="draftRegenData" style="' + btnW + '" title="この作品の一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだGoogleドライブに無いものだけを作って保存します(既にあれば作り直しません)">🔄 データ再生成</button></div>' +
+          // 🧹 名前を正しく保存し直す(Chami依頼2026-08-22・古いフォルダのファイル名が誤名 candidate.jpg 等になっている作品の正常化)。
+          //   正しい名前で一式を作り直し、古いフォルダはGoogleドライブのゴミ箱へ(30日間復元可)。この端末に動画素材が残っている時のみ完全正常化。
+          '<div style="margin-top:8px;"><button type="button" id="draftNormalizeData" style="' + btnW + '" title="Googleドライブのファイル名が誤って保存された作品を、正しい名前(題名_元画像 / 題名_プレビュー)で作り直します。古いフォルダはゴミ箱へ(30日間復元可)。この端末に動画素材が残っている場合のみ完全に正常化できます">🧹 名前を正しく保存し直す</button></div>' +
           '<div style="display:flex;gap:8px;margin-top:20px;">' +
             '<button type="button" id="draftModalComplete" style="flex:1;padding:13px;font-size:.88rem;font-weight:700;border-radius:10px;border:none;' + ctaS + 'cursor:pointer;">投稿完了</button>' +
             '<button type="button" id="draftModalSave" style="flex:1;padding:13px;font-size:.88rem;font-weight:600;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;">内容を保存</button>' +
@@ -2873,6 +2880,27 @@
           btn.disabled = false; btn.textContent = orig;
           alert(ok ? ('データ再生成が完了しました。\n・' + (msg || '足りていないデータをGoogleドライブへ保存'))
                    : ('再生成できませんでした。\n' + (msg || 'もう一度お試しください。')));
+        }
+      });
+    });
+    // 🧹 名前を正しく保存し直す=正常化(normalize)。データ再生成と同じ経路(regenDataset→driveSaveForCompleted_)だが、
+    //   normalize:true で「もう保存済み→追記だけ」の近道を通さず必ず正しい名前で作り直し、古いフォルダはWorkerが
+    //   新規保存の"後"にゴミ箱送りする(30日復元可)。削除面に触るので明示のこのボタンだけがintentを立てる(Chami承認2026-08-22)。
+    var _normBtn = $('draftNormalizeData');
+    if (_normBtn) _normBtn.addEventListener('click', function () {
+      var btn = this;
+      if (!_modalMeta) return;
+      if (!(window.Go5Stock && Go5Stock.regenDataset)) { alert('正常化の土台(Go5Stock)が読み込まれていません。ページを再読み込みしてもう一度お試しください。'); return; }
+      if (!window.confirm('この作品を正しいファイル名で保存し直しますか?\n\n・正しい名前(題名_元画像 / 題名_プレビュー)で一式を作り直します\n・古いフォルダはGoogleドライブのゴミ箱へ移動します(30日間は復元できます)\n・この端末に動画素材が残っている場合のみ完全に正常化できます(残っていなければ古いフォルダはそのまま)')) return;
+      var orig = btn.textContent;
+      btn.disabled = true; btn.textContent = '保存し直し中…';
+      Go5Stock.regenDataset(_modalMeta, {
+        silent: true,
+        normalize: true,
+        onDone: function (ok, msg) {
+          btn.disabled = false; btn.textContent = orig;
+          alert(ok ? ('保存し直しを開始しました。\n・' + (msg || '正しい名前で作り直し、古いフォルダはゴミ箱へ(30日復元可)') + '\n\n数十秒後にGoogleドライブで新しいフォルダのファイル名をご確認ください。')
+                   : ('保存し直せませんでした。\n' + (msg || 'この端末に動画素材が残っていない可能性があります。もう一度お試しください。')));
         }
       });
     });

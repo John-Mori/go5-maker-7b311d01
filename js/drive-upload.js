@@ -83,6 +83,7 @@
     //   窓内(作成30日以内)の同名フォルダを新規保存の"後"にゴミ箱送りする。日付はWorkerがDriveのcreatedTimeを正とする
     //   ので、ここからは送らない。追記(sendAppend)には付けない=既存フォルダをtrashしない。
     fd.append("overwrite", "1");
+    if (payload.normalize) fd.append("normalize", "1"); // ★正常化(名前を正しく保存し直す)の明示intentだけ=Worker側で30日窓を外す
     fd.append("video", payload.videoFile, payload.videoFile.name);
     (payload.images || []).forEach(function (img) { if (img) fd.append("image", img, img.name); });
 
@@ -200,7 +201,8 @@
 
   // ドラフトタブの「投稿完了」から呼ばれる。blob を受け取って Drive へアップロードする。
   //   srcImages=動画に使った元画像(stock.js が投稿完了時にIDBから読み出して渡す)。動画と同じフォルダへ一緒に保存する。
-  function driveUpload_(blob, videoName, title, channel, videoId, srcImages, previewImage) {
+  function driveUpload_(blob, videoName, title, channel, videoId, srcImages, previewImage, opts) {
+    opts = opts || {};
     if (!configured()) { showError("channel_unresolved"); return; }
     if (!blob) return;
     if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
@@ -217,7 +219,7 @@
     if (previewImage) {
       images.unshift(new File([previewImage], safeTitle + "_プレビュー." + imgExt(previewImage), { type: previewImage.type || "image/jpeg" }));
     }
-    send({ channel: channel, title: title, videoId: videoId || "", videoFile: videoFile, images: images });
+    send({ channel: channel, title: title, videoId: videoId || "", videoFile: videoFile, images: images, normalize: !!opts.normalize });
   }
   // 過去分プレビュー取り込み：Driveの[題名]フォルダから「題名_プレビュー.*」を取得して data URL を返す。
   //   見つからなければ null(Chami「ないものはなかったでOK」)。Worker側は read-only=非破壊。
@@ -335,6 +337,8 @@
       if (opts.previewKey) fd.append("previewKey", opts.previewKey);
       if (opts.srcKey) fd.append("srcKey", opts.srcKey); // 元画像(動画に使った写真)のR2在り処。投稿完了と同じ一式を揃える
       if (opts.overwrite) fd.append("overwrite", "1"); // 上書きはWorker側の env.ALLOW_OVERWRITE と二重ロック
+      if (opts.normalize) fd.append("normalize", "1"); // ★正常化=手動の明示「名前を正しく保存し直す」だけ。Worker側で30日窓を外し古いフォルダも作り直し対象にする(自動保存には付かない)
+
       return fetchT_(CFG.WORKER_URL, { method: "POST", headers: { "X-Shared-Secret": CFG.SHARED_SECRET }, body: fd, keepalive: true }, 20000)
         .then(function (r) {
           if (r.status === 202 || r.ok) { setStatus("☁️ Driveへ保存中(" + channelLabel(channel) + ")…確認でき次第、作成履歴カードに『保存済み(実物確認)』が付きます"); return { ok: true }; }
