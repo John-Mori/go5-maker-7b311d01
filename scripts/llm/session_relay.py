@@ -863,7 +863,51 @@ _TONE_REASON_JA = {
     #   名前は機械が置換できない(文が壊れる)ので、直せるのは生成側だけ=ここで突き返す。
     "self_third_person": "便の途中で声が入れ替わっている"
                          "=自分の名前を、自分とは別の第三者のように書いている",
+    # ★2026-08-23 追加(案ハ5)。毒舌人格の「威圧化」= 刃が**だけ**で立っている便。
+    #   Chami原文「人格と口調無視してない？怖い」(現在と未来 msg 1540614099749048401)。
+    #   tone_gate.harshness_drift が「刃=「やれ。」・care 0語(N文)」の marker で出す。
+    #   ★ここに無いと英語の reason がそのまま封筒へ出る(=突き返しが読めない)。
+    "harsh_without_care": "刃だけで突き放している"
+                          "=キツい一言と**同じ息で**世話焼きの心配を置く(癒し/内省の部屋)",
 }
+
+
+TONE_RULES_PATH = os.path.join(HQ, "departments", "hr", "personas", "口調ルール.json")
+_ROOM_HINT_CACHE = {"mtime": None, "map": {}}
+# ★2026-08-23(案ハ6《生成側の部屋ヒント》)= 癒し/内省の部屋へ**反威圧の1行を毎便注入**する。
+#   検知(ハ4)ではなく**予防**だ。characterfile にも同じ趣旨は書いてあるが、先頭ブロックは
+#   重い分析の文脈に押し流される——封筒は**依頼文の直近**に毎便置かれる=位置の強さで残る。
+#   ★写像は 口調ルール.json の `room_tone_profiles` 1本(ORG-11)。この関数は写像を持たない。
+#   ★mtimeで都度読み(C-042)= 人事部門が部屋を1つ足せば**再起動なしで**次の便から効く。
+_ROOM_TONE_HINT = {
+    "soft": "\n★この部屋は癒し/内省の部屋だ。**刃を一段下げる**"
+            "=キツい一言を言うなとは言わない(それがこの人格の正だ)。"
+            "ただし**同じ息で世話焼きの心配を置く**こと"
+            "(命令の言い切りだけで突き放すと、Chamiには『怖い』として届く)。\n",
+}
+
+
+def _room_tone_hint(dept):
+    """部屋が soft(癒し/内省)なら反威圧の1行を返す。それ以外は ""(1文字も足さない)。
+
+    ★fail-open= 写像が読めない/部屋が載っていない/例外→ ""。封筒は必ず組み上がる。
+    """
+    try:
+        d = str(dept or "").strip()
+        if not d:
+            return ""
+        mt = os.path.getmtime(TONE_RULES_PATH)
+        if _ROOM_HINT_CACHE["mtime"] != mt:
+            with open(TONE_RULES_PATH, encoding="utf-8") as f:
+                raw = json.load(f).get("room_tone_profiles") or {}
+            _ROOM_HINT_CACHE["mtime"] = mt
+            _ROOM_HINT_CACHE["map"] = {
+                str(k): str(v or "").strip().lower()
+                for k, v in raw.items() if not str(k).startswith("_")
+            }
+        return _ROOM_TONE_HINT.get(_ROOM_HINT_CACHE["map"].get(d, ""), "")
+    except Exception:
+        return ""
 
 
 def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
@@ -1025,6 +1069,9 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         # ★前の便で口調が崩れていたら、その実物を突き返す(2026-08-12・Chamiの🔥)。
         #   崩れていない時は**1文字も足さない**(封筒を毎便太らせない)。
         + _tone_feedback_block(dept)
+        # ★2026-08-23 追加(案ハ6《生成側の部屋ヒント》)= 検知ではなく**予防**。
+        #   癒し/内省の部屋には、依頼文の直前で刃を一段下げる1行を機械が置く。
+        + _room_tone_hint(dept)
         + "=== Discord新着(原文。要約も改変もしていない) ===\n"
         f"投稿者: {rec.get('author','')}\n"
         f"msg_id: {rec.get('msg_id','')}\n"
@@ -1727,6 +1774,117 @@ def _reply_of(data):
     if not isinstance(data, dict) or data.get("is_error"):
         return ""
     return str(data.get("result") or "").strip()
+
+
+# ============================================================================
+# ★★DEF-soudan-room-0cd2f26ad7 の恒久対策(2026-08-23・一ノ瀬怜/platform-se)。
+# ----------------------------------------------------------------------------
+# 症状(実物= 何でも相談ルーム msg 1540814674319376494):
+#   人格ターンの中で [名前]ブロックの**後ろ**にツール呼び出し(記憶追記等)を置くと、
+#   返信本文([名前]ブロック)が配送されず、ツール後の**末尾の地の文(作業メモ)**だけが
+#   その人格名義でDiscordへ漏れた(猫アレルギー回答本体は不着=Chami『届いてないよ』→再発)。
+# 真因(機構):
+#   `claude -p --output-format json` の `result` は**そのターンの最後の assistant テキスト**
+#   だけを返す。assistantメッセージの境目は tool_use の往復と一致する(道具を挟まなければ
+#   1メッセージ)。だから「[名前]本文 → 道具 → 地の文メモ」の並びだと result=メモになり、
+#   前段の [名前]本文が丸ごと落ちる。_reply_of は result をそのまま採るのでこの穴を踏む。
+# 直し方(アメスの依頼①②):
+#   ① 記録ファイル(トランスクリプト)から**同ターンの assistant 本文を全部**読む。
+#   ② その中で **[名前]で名乗ったメッセージだけ**を出た順に連結して返す
+#      =[名前]の無い末尾の地の文(作業メモ)は配送しない/直前人格へ帰属させない。
+#   ★[名前]で名乗ったメッセージが1つも無ければ result へ退避(名乗り無しの素の返信=
+#     単独人格の普段の返信を1文字も壊さない。§3 fail-open= 迷ったら喋る側へ倒す)。
+#   ★これで挙動が変わるのは「[名前]付き返信 + 道具後の地の文メモ」の便だけ=最小の作用面。
+# ============================================================================
+# 行頭の [名前] タグ(persona_render/split_persona_blocks と同じ名乗りの約束)。
+_PERSONA_TAG_RE = re.compile(r"^\s*\[[^\]\n]{1,40}\]")
+
+
+def _is_human_user(content):
+    """user行の content が『人間の入力』か(=道具の戻り tool_result ではない)。
+
+    tool_result ブロックを1つでも含む user行は道具の戻り。文字列 or text/画像だけの
+    user行は人間の入力。★形が読めなければ人間扱い(=ターンの起点を早めに切る安全側)。
+    """
+    if isinstance(content, str):
+        return True
+    if isinstance(content, list):
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                return False
+        return True
+    return True
+
+
+def _turn_assistant_messages(sid, cwd=None):
+    """直近ターンの assistant メッセージ本文(textブロック連結)を出た順のリストで返す。
+
+    「直近ターン」= 最後の**人間の入力**(_is_human_user)より後ろの assistant 行。
+    読めない/無ければ []( 呼び元は result へ退避 )。★isSidechain(サブ)は混ぜない。
+    """
+    if not sid:
+        return []
+    p = _transcript_path(sid, cwd)
+    try:
+        if not os.path.exists(p):
+            return []
+        rows = []
+        with open(p, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"type"' not in line:            # 安い前濾し(3MBの記録を無駄に起こさない)
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:                   # noqa: BLE001 壊れた行は飛ばす(落とさない)
+                    continue
+                rows.append(d)
+        start = 0
+        for i in range(len(rows) - 1, -1, -1):
+            d = rows[i]
+            if d.get("type") != "user" or d.get("isSidechain"):
+                continue
+            if _is_human_user((d.get("message") or {}).get("content")):
+                start = i + 1
+                break
+        msgs = []
+        for d in rows[start:]:
+            if d.get("type") != "assistant" or d.get("isSidechain"):
+                continue
+            blocks = (d.get("message") or {}).get("content") or []
+            if not isinstance(blocks, list):
+                continue
+            texts = [b.get("text", "") for b in blocks
+                     if isinstance(b, dict) and b.get("type") == "text"]
+            t = "\n".join(x for x in texts if x).strip()
+            if t:
+                msgs.append(t)
+        return msgs
+    except Exception:                               # noqa: BLE001 ★記録が読めなくても配送は続ける
+        return []
+
+
+def _turn_spoken_reply(data, sid_hint, cwd=None):
+    """配送する返信本文を決める。基本は result、但し上の穴を踏んだ便だけ記録ファイルから復元。
+
+    ①base = _reply_of(data)(従来の result)。空なら base をそのまま返す。
+    ②記録ファイルから同ターンの assistant 本文を読み、**[名前]で名乗ったメッセージだけ**を
+      連結して返す(道具後の地の文メモを落とす)。名乗りが1つも無ければ base へ退避。
+    ★全経路 fail-open= 何が起きても最低 base は返る(配送を巻き添えにしない)。
+    """
+    base = _reply_of(data)
+    if not base:
+        return base
+    try:
+        sid = str((data or {}).get("session_id") or sid_hint or "")
+        msgs = _turn_assistant_messages(sid, cwd)
+        if not msgs:
+            return base
+        spoken = [m for m in msgs if _PERSONA_TAG_RE.match(m)]
+        if not spoken:
+            return base                             # 名乗り無し=従来どおり(素の返信を壊さない)
+        return "\n\n".join(spoken).strip() or base
+    except Exception:                               # noqa: BLE001
+        return base
 
 
 # --- 使用量(★推測ではなく実測) ---
@@ -4510,7 +4668,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                 prompt = envelope
             _record(rid, dept, "running", f"resume session={sid} gen={generation}")
             data, rc, out = _run_audited(prompt, session_id=sid)
-            reply = _reply_of(data)
+            reply = _turn_spoken_reply(data, sid)   # ★DEF-soudan-room-0cd2f26ad7= 道具後の地の文メモを配らない
             # ★★2026-08-14 第3の箱= rc=0なのに本文が空(定義とコメントは looks_like_empty_reply)。
             #   ここで**まず同じセッションへ1回だけ催促する**= 一過性ならこれで返る。
             #   交代を先に打たない理由は「会話の記憶を捨てるのは最後の手」だから。
@@ -4530,7 +4688,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                     # ★催促が返らないのも「答えられない」の一種=交代へ倒す(便を殺さない)。
                     data2, rc2, out2 = None, -1, ""
                     _log(dept, "催促が時間内に返らなかった=交代へ倒す")
-                reply2 = _reply_of(data2)
+                reply2 = _turn_spoken_reply(data2, str((data or {}).get("session_id") or sid))
                 if rc2 == 0 and reply2:
                     data, rc, out, reply = data2, rc2, out2, reply2
                     _log(dept, "催促で本文が返った=この便はそのまま配る(交代しない)")
@@ -4645,7 +4803,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         prompt = boot + "\n\n" + envelope
         _record(rid, dept, "running", f"new session gen={generation}")
         data, rc, out = _run_audited(prompt)
-        reply = _reply_of(data)
+        reply = _turn_spoken_reply(data, "")   # ★新セッション= data.session_id から記録を引く
         new_sid = str((data or {}).get("session_id") or "")
         if rc != 0 or not reply or not new_sid:
             if _looks_like_auth_failure(out):
