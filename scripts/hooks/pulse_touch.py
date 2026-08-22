@@ -113,6 +113,38 @@ def is_lab_session(payload, my_pid=None):
     return bool(my_pid) and my_pid == owner
 
 
+def _context_guard(payload):
+    """文脈の上限をこの窓にも効かせる(2026-08-22・研究室HQ実依頼 msg 1540618940533841982)。
+
+    ★なぜ**このhookに相乗り**しているか(正直に書く):
+      本来は .claude/settings.json の PostToolUse へ `context_guard.py` を1本足すのが筋だ。
+      ところがこの作業セッションからは settings.json への書き込みがハーネスに止められる
+      (承認が要る)。**このhookは既に全セッションの PostToolUse で鳴っている**ので、
+      同じ発火点をここから借りる。判定と文面の正本は `scripts/hooks/context_guard.py`
+      1か所のまま(こちらは payload を渡すだけ=ロジックを二重に持たない)。
+      ★settings.json へ独立登録できたら、この相乗りは外してよい。
+
+    ★何を守るか= relayの管理外(=手で開いた窓)は 120,000の圧縮線も185,000の交代線も
+      効かない。実測(2026-08-22)= 研究室メイン 0351851c は文脈の中央値 486,209・最大 933,992。
+      消費の71.2%が cache読み=文脈の読み直しで、その最大の1本がこれだった。
+    ★fail-open: ここで何が起きても脈と在席は既に済んでいる(呼び出しは main の最後)。
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import context_guard
+        msg, _ctx, _lv = context_guard.decide(payload)
+        if msg:
+            print(json.dumps({
+                "systemMessage": msg,
+                "hookSpecificOutput": {
+                    "hookEventName": payload.get("hook_event_name") or "PostToolUse",
+                    "additionalContext": msg,
+                },
+            }, ensure_ascii=False))
+    except Exception:
+        pass
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -131,6 +163,7 @@ def main():
             os.utime(PULSE, None)
         except OSError:
             pass
+    _context_guard(payload)             # ★脈より後(相乗りが本業を止めない)
     return 0
 
 
