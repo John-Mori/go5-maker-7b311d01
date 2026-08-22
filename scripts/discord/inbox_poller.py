@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Discord受信ポーラー (Phase DB・AI組織のIN口)。
+"""【★退役済み・2026-07-20】Discord受信ポーラー (旧・AI組織のIN口)。
+
+★★ このファイルは動いていない(2026-08-23 HQ実測で再確認) ★★
+  現行の受信は **`scripts/queue/discord_gateway.py`**。プロセスもタスク登録もそちらだけ。
+  ここは参照用に残しているだけで、**このコードの挙動を「今の仕様」として引用してはいけない。**
+  実例(2026-08-13/2026-08-23 に2回)= 「bot/webhook を弾いている行」を grep で探した者が
+  下の `if m.get("webhook_id") or ...` に当たり、退役済みのこのファイルを現行の実体として
+  台帳・監視へ書いてしまった。
+  ★仕様の出典が要る時は必ず `scripts/queue/discord_gateway.py` を見ろ(C-044の同型)。
 
 各部門チャンネルの発言をポーリングで拾い、local/discord_inbox.jsonl へ追記する。
 常駐起動: scripts/discord/start_discord_inbox.bat (または python inbox_poller.py)
