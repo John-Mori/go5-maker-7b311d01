@@ -13,10 +13,12 @@
 走らせ方: python scripts/llm/test_context_watch_judge.py
 ★読むだけ。Discordにもキューにも本番の台帳にも書かない(alertの検査は subprocess を偽物に差し替える)。
 """
+import json
 import os
 import sys
 import tempfile
 import time
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import context_watch as cw          # noqa: E402
@@ -226,6 +228,102 @@ check("★relay側: 交代で rotated_at を残す", float(_e.get("rotated_at") 
 check("★relay側: 直前の世代のIDも残す", _e.get("prev_session_id") == "old-sid-1234", str(_e))
 check("★relay側: 見張りが読む名前と一致している(rotation_marks が拾える形)",
       "rotated_at" in _e and isinstance(_e["rotated_at"], float), str(type(_e.get("rotated_at"))))
+
+print("== 「未発火」も経過時間で決めない=便が閉じたかで決める(研究室HQ msg 1540668457220186163) ==")
+# ★実データをそのまま入れる= hq 2026-08-22。
+#   越えた書き込み T=18:33 / 台帳 last_used_at L=18:21:17 / 判定時刻 now=19:21:13。
+#   L <= T = **relayはまだ便を閉じていない**=撃つ機会が無かった=「便待ち」。鳴らさない。
+#   実測: 19:21:13 に「未発火」と鳴った3分後(19:24:12)、便が入った瞬間に relay が撃って
+#   223,483 → 84,156 まで落ちた。**直ったのではなく、便が来たから撃てた**=警報が誤り。
+T_OVER = NOW - 2893.0            # 18:33:00(19:21:13 の 48分13秒前)
+L_WAIT = NOW - 3596.0            # 18:21:17 = T より **前**(便が閉じていない)
+L_CLOSED = NOW - 2473.0          # 18:40:00 = T より **後**(便が閉じたのに越えたまま)
+
+
+def over_row(sid, dept, closed_at):
+    """『最後の圧縮より後に線を越えた書き込みが1本ある』行を作る(T は共通)。"""
+    r = tl(sid, dept, [(-7000, 30000), (T_OVER - NOW, 223483)], [-7200])
+    r["closed_at"] = closed_at
+    return r
+
+
+waiting = over_row("ed37ac2f", "hq", L_WAIT)
+真の未発火 = over_row("dead0003", "future-room", L_CLOSED)
+boundary = over_row("edge0004", "platform-se", T_OVER)        # L == T ちょうど
+just_closed = over_row("edge0005", "copy-director", NOW - 300.0)  # 閉じた直後(猶予の中)
+nolegder = over_row("edge0006", "qa-reviewer", 0.0)           # 台帳が読めない行
+
+rows3 = [waiting, 真の未発火, boundary, just_closed, nolegder]
+for r in rows3:
+    r["managed"] = "relay:現行"
+o3 = {r["sid"]: r for r in cw.judge(rows3, COMPACT, ROTATE, now=NOW)}
+
+check("★実データ(T=18:33 / L=18:21:17 / now=19:21:13)は便待ち",
+      o3["ed37ac2f"]["over_kind"] == "便待ち", o3["ed37ac2f"]["over_kind"])
+check("便待ちは鳴らさない", o3["ed37ac2f"]["alert"] is False)
+check("★本物の未発火(便が閉じたのに越えたまま)は未発火のまま",
+      o3["dead0003"]["over_kind"] == "未発火", o3["dead0003"]["over_kind"])
+check("★本物の未発火は鳴る(鳴らす側を殺していない)", o3["dead0003"]["alert"] is True)
+check("境界 L==T は黙る側へ倒す", o3["edge0004"]["over_kind"] == "便待ち",
+      o3["edge0004"]["over_kind"])
+check("便を閉じた直後は猶予の中=処理中", o3["edge0005"]["over_kind"] == "処理中",
+      o3["edge0005"]["over_kind"])
+check("台帳が読めない行は従来どおり経過時間へ倒す(黙らない)",
+      o3["edge0006"]["over_kind"] == "未発火", o3["edge0006"]["over_kind"])
+check("★便待ちは OVER_KINDS に説明がある(表に出せる)", "便待ち" in cw.OVER_KINDS)
+
+# ★変異検査= 旧仕様(経過時間だけ)へ戻したら、実データが「未発火」に戻ること。
+def _old_fired_since(r, compact_at, now):
+    """旧仕様= `COMPACT_LAG_SEC` 単独で未発火を決めていた版。"""
+    ctxs, stamps = r.get("ctxs") or [], r.get("stamps") or []
+    bounds = r.get("bounds")
+    if bounds is None or not stamps or len(stamps) != len(ctxs):
+        return "未発火"
+    last_b = max(bounds) if bounds else 0.0
+    overs = [t for c, t in zip(ctxs, stamps) if t > last_b and c >= compact_at]
+    if not overs:
+        return "圧縮済"
+    if now - max(overs) < cw.COMPACT_LAG_SEC:
+        return "処理中"
+    return "未発火"
+
+
+check("★変異: 旧仕様なら実データが未発火に戻る(=この検査は穴を守っている)",
+      _old_fired_since(waiting, COMPACT, NOW) == "未発火",
+      _old_fired_since(waiting, COMPACT, NOW))
+check("★変異: 旧仕様でも本物の未発火は未発火(2件の違いは L だけ)",
+      _old_fired_since(真の未発火, COMPACT, NOW) == "未発火")
+check("★変異: 猶予を L から測っていること(L 直後を now にすると処理中)",
+      cw._fired_since(真の未発火, COMPACT, L_CLOSED + 60) == "処理中",
+      cw._fired_since(真の未発火, COMPACT, L_CLOSED + 60))
+
+# ★書く側(relay)と読む側(見張り)で名前が食い違っていないか= **実行して**確かめる。
+#   台帳を偽物へ差し替え、close_marks() が何を拾うかを見る(本番の台帳には触らない)。
+_real_local = cw.LOCAL
+try:
+    _tmp = tempfile.mkdtemp(prefix="cwtest_")
+    os.makedirs(os.path.join(_tmp, "llm"))
+    with open(os.path.join(_tmp, "llm", "room_sessions.json"), "w", encoding="utf-8") as _f:
+        _f.write(json.dumps({
+            # 正= relayが便の終わりに書く epoch
+            "roomA": {"turn_closed_at": NOW - 100.0, "last_used_at": "2026-08-22T18:23:25"},
+            # 退避= まだ turn_closed_at を持たない部屋(JSTの素の文字列)
+            "roomB": {"last_used_at": "2026-08-22T18:23:25"},
+            # どちらも無い部屋は入らない
+            "roomC": {"active_session_id": "x"},
+        }, ensure_ascii=False))
+    cw.LOCAL = _tmp
+    _cm = cw.close_marks()
+finally:
+    cw.LOCAL = _real_local
+check("★close_marks: turn_closed_at を正として拾う", _cm.get("roomA") == NOW - 100.0, str(_cm))
+check("★close_marks: 無い部屋は last_used_at(JST)へ退避する",
+      abs((_cm.get("roomB") or 0) - datetime(2026, 8, 22, 18, 23, 25,
+                                             tzinfo=cw.JST).timestamp()) < 1, str(_cm))
+check("★close_marks: どちらも無い部屋は入れない(0=経過時間へ倒す)", "roomC" not in _cm, str(_cm))
+check("★relay側: `turn_closed_at` を実際に書いている",
+      "turn_closed_at" in open(os.path.join(os.path.dirname(cw.__file__), "session_relay.py"),
+                               encoding="utf-8", errors="replace").read())
 
 print("== 変異検査(旧仕様へ戻したら落ちること) ==")
 real_judge = cw.judge

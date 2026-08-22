@@ -82,6 +82,7 @@ OVER_KINDS = {
     "見失い": "現行世代として登録されていないのに書き込みが続いている= relayが世代を見失った",
     "圧縮済": "越えた後に圧縮が走っている= relayは撃てている(**鳴らさない**)",
     "処理中": "越えた便がまだ新しい= relayは便の終わりに撃つので結果待ち(**鳴らさない**)",
+    "便待ち": "越えた便がまだ閉じていない= relayに撃つ機会が来ていない(**鳴らさない**)",
 }
 
 RE_TS = re.compile(r'"timestamp"\s*:\s*"([0-9T:\-\.]+)Z?"')
@@ -143,6 +144,46 @@ def rotation_marks():
                     out[str(room)] = ts
     except Exception:
         pass
+    return out
+
+
+def close_marks():
+    """部屋ごとの **最後に便が閉じた時刻(epoch)**= 台帳の `last_used_at`。
+
+    ★2026-08-22(研究室HQ msg 1540668457220186163)。`last_used_at` は relay が
+      **便の終わりに**書く値だ。relayは便の途中では撃たないので、この値より後に
+      線を越えた書き込みがあっても、それは「撃てていない」ではなく **「撃つ機会がまだ来ていない」**。
+      実測 hq= 越えた書き込み 18:33 / 台帳 18:21:17 / 19:21:13 に「未発火」と鳴った。
+      その3分後(19:24:12)、便が入った瞬間に relay が撃って 223,483→84,156 まで落ちた。
+      = 直したのではなく **便が来たから撃てた**。警報は最初から成立していなかった。
+    ★正は `turn_closed_at`(epoch・relayが `_note_usage` の入口=CLIが返った後に書く)。
+      `last_used_at` は**便の受付時刻**を便の終わりに書く値なので、長い便では実際の終了より
+      十数分早い(実測 aegis-gl 2026-08-22= 受付18:23:25 / 実際の終了18:37:17)。
+      → 無い部屋(まだ1便も閉じていない・relayが古い)は `last_used_at` へ退避する。
+      どちらも読めない部屋は入れない(呼び出し側で 0 = 従来の経過時間へ倒れる)。
+      ★退避側は実際より早い=「便待ち」(黙る側)へ寄る。**鳴らす枝を殺していないこと**は
+        test_context_watch_judge.py で必ず同時に見る。
+    """
+    out = {}
+    try:
+        with open(os.path.join(LOCAL, "llm", "room_sessions.json"), encoding="utf-8") as f:
+            table = json.load(f) or {}
+    except Exception:
+        return out
+    for room, v in table.items():
+        try:
+            ts = float((v or {}).get("turn_closed_at") or 0)
+        except (TypeError, ValueError):
+            ts = 0.0
+        if ts <= 0:
+            s = str((v or {}).get("last_used_at") or "")
+            if not s:
+                continue
+            try:
+                ts = datetime.fromisoformat(s).replace(tzinfo=JST).timestamp()
+            except ValueError:
+                continue
+        out[str(room)] = ts
     return out
 
 
@@ -250,7 +291,7 @@ def scan(hours):
     return rows
 
 
-def mark_managed(rows, mgd, marks=None):
+def mark_managed(rows, mgd, marks=None, closes=None):
     """各行に「relayの管理下か」を書き込む(表示と判定で同じ値を使う=2か所で判定しない)。
 
     ★「管理下か」は room_sessions.json の一致だけで決めない。あれは**現行世代しか**
@@ -266,6 +307,8 @@ def mark_managed(rows, mgd, marks=None):
         r["managed"] = ("relay:現行" if current else "relay:旧世代") if relay_born else ""
         # ★その部屋が最後に交代した時刻(判定で使う。無ければ0=経過時間へ倒れる)
         r["rotated_at"] = float((marks or {}).get(r["dept"], 0.0) or 0.0)
+        # ★その部屋の便が最後に閉じた時刻(=relayが撃つ機会を得た時刻。無ければ0)
+        r["closed_at"] = float((closes or {}).get(r["dept"], 0.0) or 0.0)
     return rows
 
 
@@ -279,6 +322,22 @@ def _fired_since(r, compact_at, now):
       中央値と線を比べる限り、健康な部屋が永久に「未発火」で鳴り続ける(実測 hq= 4回撃って未発火)。
     ★時刻が読めない行(手で作った行・古い呼び出し)は **"未発火" へ倒す**=
       判定不能を「大丈夫」の側へ倒すと、本当の穴が黙って消える(fail-open は喋る側)。
+
+    ★★2026-08-22(3回目・研究室HQ msg 1540668457220186163)**未発火も経過時間を
+      状態の代理にしていた。**`COMPACT_LAG_SEC` 単独で「古いからrelayが撃てていない」と
+      決めていたが、relayは**便の終わりにしか撃たない**。便が来ていない間は
+      「撃てていない」ではなく **「撃つ機会がまだ無い」**だ。
+      実測 hq= 越えた書き込み T=18:33 / 台帳 L=`last_used_at` 18:21:17 / 19:21:13 に未発火。
+      L < T = 18:33 以降 relay は一度も便を閉じていない。その3分後に便が入った瞬間、
+      relay は撃って 223,483→84,156 まで落ちた。**警報は最初から成立していない。**
+      → 軸を「越えてから何秒経ったか」から **「便が閉じた後にも越えたままか」**へ移す
+        (C-041。今朝 `_old_gen_kind` を `rotated_at` へ移したのと同じ形)。
+          L <= T → 便待ち(鳴らさない)  /  L > T → 本物の未発火(鳴らす)
+      ★`COMPACT_LAG_SEC` は捨てない= **L > T が成立した後**の猶予として残す
+        (便末の台帳書き込みと圧縮の実行には実測 200秒前後の開きがある)。
+      ★境界 L == T は黙る側へ倒す。ただし「本物の未発火」の枝を殺していないことは
+        検査で必ず同時に見る(test_context_watch_judge.py)。片方だけ直すと
+        **もう鳴らない見張り**になる=今より悪い。
     """
     ctxs, stamps = r.get("ctxs") or [], r.get("stamps") or []
     bounds = r.get("bounds")
@@ -288,7 +347,14 @@ def _fired_since(r, compact_at, now):
     overs = [t for c, t in zip(ctxs, stamps) if t > last_b and c >= compact_at]
     if not overs:
         return "圧縮済"
-    if now - max(overs) < COMPACT_LAG_SEC:
+    over_at = max(overs)                                   # T = 越えた書き込みの最新
+    closed_at = float(r.get("closed_at") or 0.0)           # L = 便が閉じた時刻(台帳)
+    if closed_at <= 0:
+        # 台帳が読めない=機会があったか分からない。従来どおり経過時間へ倒す(黙らない側)。
+        return "処理中" if now - over_at < COMPACT_LAG_SEC else "未発火"
+    if closed_at <= over_at:
+        return "便待ち"
+    if now - closed_at < COMPACT_LAG_SEC:
         return "処理中"
     return "未発火"
 
@@ -340,7 +406,7 @@ def judge(rows, compact_at, rotate_at, now=None):
             r["over_kind"] = _fired_since(r, compact_at, now)
         else:
             r["over_kind"] = _old_gen_kind(r, now)
-        r["alert"] = r["over_kind"] not in ("交代済", "圧縮済", "処理中")
+        r["alert"] = r["over_kind"] not in ("交代済", "圧縮済", "処理中", "便待ち")
         over.append(r)
     return over
 
@@ -425,7 +491,7 @@ def main():
         % (f"{compact_at:,}", f"{rotate_at:,}", src))
     out("%-10s%-18s%-9s%6s%10s%10s%10s  %s"
         % ("session", "部門/用途", "管理", "便数", "中央値", "最新", "最大", "最終"))
-    mark_managed(rows, mgd, rotation_marks())
+    mark_managed(rows, mgd, rotation_marks(), close_marks())
     over = judge(rows, compact_at, rotate_at)
     for r in rows:
         flag = ("★%s(%s)" % (r["level"], r["over_kind"])) if r.get("level") else ""
@@ -436,7 +502,7 @@ def main():
         out("  (この窓に動いたセッションは無い)")
     out("")
     if over:
-        for kind in ("未発火", "見失い", "管理外", "交代済", "圧縮済", "処理中"):
+        for kind in ("未発火", "見失い", "管理外", "交代済", "圧縮済", "処理中", "便待ち"):
             grp = [r for r in over if r["over_kind"] == kind]
             if grp:
                 out("★%s= %d件%s" % (kind, len(grp),
