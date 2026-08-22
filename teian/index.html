@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>投稿提案 / 決定</title>
+<style>
+  :root{
+    --bg:#0b0f1a; --card:#0e1422; --card2:#111a2b; --line:#1e2d42; --line2:#2a3346;
+    --accent:#2bb3c0; --accent-ink:#04222a; --ink:#e7eef6; --muted:#9fb0c3; --dim:#6f8296;
+    --canvas:#141419; --ok:#3fb27f; --warn:#e0a24a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    -webkit-text-size-adjust:100%}
+  a{color:var(--accent)}
+  .wrap{max-width:520px;margin:0 auto;padding:14px 14px 120px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:4px 0 12px}
+  header h1{font-size:1.05rem;font-weight:800;color:var(--accent);margin:0;letter-spacing:.01em}
+  header .date{font-size:.78rem;color:var(--muted)}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .panel .head{font-size:.72rem;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
+  label.mini{display:block;font-size:.72rem;color:var(--muted);margin:8px 0 4px}
+  input[type=text],input[type=url],input[type=password],textarea,select{
+    width:100%;background:#0b1220;border:1px solid var(--line2);color:var(--ink);
+    border-radius:8px;padding:9px 10px;font-size:.86rem;font-family:inherit}
+  textarea{resize:vertical;line-height:1.5}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button{font-family:inherit;cursor:pointer}
+  .btn{width:auto;flex:0 0 auto;background:#0e1a2b;border:1px solid #3a4a5e;color:#aabbc8;
+    border-radius:8px;padding:8px 12px;font-size:.8rem}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border:none;color:var(--accent-ink);font-weight:700}
+  .btn.primary:disabled{opacity:.4;cursor:not-allowed}
+  .btn.full{width:100%;flex:1 1 100%;padding:12px;border-radius:10px;font-size:.92rem}
+  .hint{font-size:.74rem;color:var(--dim);line-height:1.5}
+  details.cfg summary{cursor:pointer;font-size:.76rem;color:var(--muted);list-style:none}
+  details.cfg summary::-webkit-details-marker{display:none}
+  details.cfg summary::before{content:"⚙ ";}
+  /* candidate card */
+  .cand{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+  .cand.picked{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .cand .top{display:flex;gap:8px;align-items:flex-start}
+  .rank{flex:0 0 auto;width:26px;height:26px;border-radius:7px;background:#0b1220;border:1px solid var(--line2);
+    display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;color:var(--muted)}
+  .title{font-size:.9rem;font-weight:700;line-height:1.35;margin:0}
+  .meta{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px}
+  .chip{font-size:.68rem;color:var(--muted);background:#0b1220;border:1px solid var(--line2);
+    border-radius:999px;padding:3px 8px;white-space:nowrap}
+  .chip.ch{color:var(--accent-ink);background:var(--accent);border:none;font-weight:700}
+  .chip.prov{color:var(--warn);border-color:var(--warn)}
+  .thumbs{display:flex;gap:6px;overflow-x:auto;padding:6px 0 8px;-webkit-overflow-scrolling:touch}
+  .thumbs img{flex:0 0 auto;height:120px;width:auto;border-radius:8px;background:var(--canvas);
+    border:1px solid var(--line);object-fit:cover}
+  .cmts{margin:6px 0 2px}
+  .cmt{display:flex;gap:8px;align-items:flex-start;padding:7px 8px;border:1px solid var(--line);
+    border-radius:8px;margin-bottom:6px;background:#0b1220}
+  .cmt input{margin-top:3px}
+  .cmt .ctext{font-size:.86rem;line-height:1.4}
+  .cmt .caim{font-size:.66rem;color:var(--dim);margin-top:2px}
+  .noc{font-size:.76rem;color:var(--warn);margin:4px 0 8px}
+  .cand label.mini{margin-top:6px}
+  .decide-row{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .segch{display:flex;gap:0;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+  .segch button{width:auto;flex:0 0 auto;background:#0b1220;border:none;color:var(--muted);
+    padding:7px 12px;font-size:.78rem}
+  .segch button.on{background:var(--accent);color:var(--accent-ink);font-weight:700}
+  /* sticky decision bar */
+  .decbar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:rgba(9,13,22,.96);
+    border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+    backdrop-filter:blur(6px)}
+  .decbar .inner{max-width:520px;margin:0 auto}
+  .decbar .sum{font-size:.78rem;color:var(--muted);margin-bottom:8px;line-height:1.4}
+  .decbar .sum b{color:var(--ink)}
+  .status{font-size:.78rem;margin-top:8px;min-height:1em}
+  .status.ok{color:var(--ok)} .status.err{color:#e06a6a} .status.busy{color:var(--warn)}
+  .empty{color:var(--dim);text-align:center;padding:30px 10px;font-size:.86rem;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>投稿提案 / 決定</h1>
+    <span class="date" id="date">—</span>
+  </header>
+
+  <div class="panel" id="loader">
+    <div class="head">候補を読み込む</div>
+    <div class="row">
+      <input type="file" id="file" accept="application/json,.json" style="flex:1 1 auto">
+    </div>
+    <label class="mini">または JSON を貼り付け</label>
+    <textarea id="paste" rows="3" placeholder='{"date":"…","candidates":[…]}'></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="loadPaste">貼り付けを読み込む</button>
+      <button class="btn" id="loadUrl">URL から取得</button>
+    </div>
+    <div class="hint" style="margin-top:6px">URL 取得は <code>?src=</code> でも自動。前回の読み込みは端末に残ります。</div>
+  </div>
+
+  <details class="cfg panel">
+    <summary>送信先の設定 (GAS)</summary>
+    <label class="mini">GAS Web App URL</label>
+    <input type="url" id="gasUrl" placeholder="https://script.google.com/…/exec">
+    <label class="mini">共有シークレット (任意)</label>
+    <input type="password" id="gasSecret" placeholder="SHARED_SECRET">
+    <div class="hint" style="margin-top:6px">未入力なら本体アプリの設定 (bsky_gas_url / bsky_gas_secret) を使います。</div>
+  </details>
+
+  <div id="list"></div>
+</div>
+
+<div class="decbar" id="decbar" style="display:none">
+  <div class="inner">
+    <div class="sum" id="decSum"></div>
+    <button class="btn primary full" id="sendBtn" disabled>軍議へ決定を送る</button>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(s){ return document.querySelector(s); };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function num(n){ return (n==null||n==='')?'—':Number(n).toLocaleString('ja-JP'); }
+  var LS = window.localStorage;
+
+  // ---- 設定 (本体アプリと同一オリジン=localStorage共有) ----
+  function gasUrl(){ return ($('#gasUrl').value.trim()) || LS.getItem('bsky_gas_url') || ''; }
+  function gasSecret(){ var v=$('#gasSecret').value; return v!=='' ? v : (LS.getItem('bsky_gas_secret')||''); }
+  $('#gasUrl').value = LS.getItem('teian_gas_url') || LS.getItem('bsky_gas_url') || '';
+  $('#gasSecret').value = LS.getItem('teian_gas_secret') || '';
+  $('#gasUrl').addEventListener('change', function(){ LS.setItem('teian_gas_url', this.value.trim()); });
+  $('#gasSecret').addEventListener('change', function(){ LS.setItem('teian_gas_secret', this.value); });
+
+  // ---- 決定の状態 ----
+  var DATA = null;
+  var pick = { id:null, cid:null, title:null, platform:null, channel:null, comment:'' };
+
+  function renderEmpty(msg){
+    $('#list').innerHTML = '<div class="empty">'+esc(msg)+'</div>';
+    $('#decbar').style.display='none';
+  }
+
+  function candChannel(c){ return c.channel || 'acc1'; }
+
+  function render(){
+    if(!DATA || !DATA.candidates || !DATA.candidates.length){ renderEmpty('候補がありません。JSON を読み込んでください。'); return; }
+    $('#date').textContent = DATA.date || '';
+    var cands = DATA.candidates.slice().sort(function(a,b){
+      return ((b.metrics&&b.metrics.score)||0) - ((a.metrics&&a.metrics.score)||0); });
+    var html='';
+    cands.forEach(function(c, i){
+      var m = c.metrics||{};
+      var rv = m.review;
+      var meta = [];
+      meta.push('<span class="chip ch">'+esc(c.channel==='acc2'?'宵桜艶帖(acc2)':'月詠み(acc1)')+'</span>');
+      if(c.channel_provisional) meta.push('<span class="chip prov">ch暫定</span>');
+      meta.push('<span class="chip">'+esc(c.platform||'')+'</span>');
+      meta.push('<span class="chip">販売数 '+num(m.sales_n)+'</span>');
+      if(m.score!=null) meta.push('<span class="chip">score '+esc(m.score)+'</span>');
+      if(rv&&rv.average!=null) meta.push('<span class="chip">★'+esc(rv.average)+' ('+num(rv.count)+'件)</span>');
+      if(m.price!=null) meta.push('<span class="chip">'+num(m.price)+'円'+(m.discount_pct?(' -'+esc(m.discount_pct)+'%'):'')+'</span>');
+
+      var thumbs = (c.images||[]).map(function(u){
+        return '<img loading="lazy" src="'+esc(u)+'" alt="" onclick="window.open(this.src,\'_blank\')">'; }).join('');
+
+      var cmts = c.comments||[];
+      var cid_ = esc(c.id);
+      var cbody='';
+      if(cmts.length){
+        cbody = '<div class="cmts">'+cmts.map(function(cm,k){
+          return '<label class="cmt"><input type="radio" name="cmt_'+cid_+'" value="'+esc(cm.text)+'" data-cand="'+cid_+'"'+(k===0?' checked':'')+'>'+
+            '<span><span class="ctext">'+esc(cm.text)+'</span>'+
+            (cm.aim?'<div class="caim">'+esc(cm.aim)+(cm.type?(' · '+esc(cm.type)):'')+'</div>':'')+'</span></label>'; }).join('')+'</div>';
+      } else {
+        cbody = '<div class="noc">コメント未生成 (vision後埋め)。下欄に手入力してください。</div>';
+      }
+
+      html += '<div class="cand" data-cand="'+cid_+'" id="cand_'+cid_+'">'+
+        '<div class="top"><div class="rank">'+(i+1)+'</div><p class="title">'+esc(c.title||'(無題)')+'</p></div>'+
+        '<div class="meta">'+meta.join('')+'</div>'+
+        (thumbs?'<div class="thumbs">'+thumbs+'</div>':'')+
+        cbody+
+        '<label class="mini">④コメント (手直し可)</label>'+
+        '<textarea rows="2" class="cmtEdit" data-cand="'+cid_+'" placeholder="この作品のコメント">'+esc(cmts.length?cmts[0].text:'')+'</textarea>'+
+        '<div class="decide-row">'+
+          '<span class="segch" data-cand="'+cid_+'">'+
+            '<button type="button" class="chBtn'+(c.channel!=='acc2'?' on':'')+'" data-ch="acc1">月詠み</button>'+
+            '<button type="button" class="chBtn'+(c.channel==='acc2'?' on':'')+'" data-ch="acc2">宵桜</button>'+
+          '</span>'+
+          '<button type="button" class="btn primary pickBtn" data-cand="'+cid_+'" style="margin-left:auto">この作品で決定</button>'+
+        '</div>'+
+      '</div>';
+    });
+    $('#list').innerHTML = html;
+    wire(cands);
+  }
+
+  function wire(cands){
+    // radio → 手入力欄へ反映
+    document.querySelectorAll('input[name^="cmt_"]').forEach(function(r){
+      r.addEventListener('change', function(){
+        var ta = document.querySelector('textarea.cmtEdit[data-cand="'+this.dataset.cand+'"]');
+        if(ta) ta.value = this.value;
+        if(pick.id===this.dataset.cand){ pick.comment = this.value; refreshBar(); }
+      });
+    });
+    document.querySelectorAll('textarea.cmtEdit').forEach(function(ta){
+      ta.addEventListener('input', function(){ if(pick.id===this.dataset.cand){ pick.comment=this.value; refreshBar(); } });
+    });
+    // ch トグル
+    document.querySelectorAll('.segch').forEach(function(seg){
+      seg.querySelectorAll('.chBtn').forEach(function(b){
+        b.addEventListener('click', function(){
+          seg.querySelectorAll('.chBtn').forEach(function(x){ x.classList.remove('on'); });
+          this.classList.add('on');
+          if(pick.id===seg.dataset.cand){ pick.channel=this.dataset.ch; refreshBar(); }
+        });
+      });
+    });
+    // 決定
+    document.querySelectorAll('.pickBtn').forEach(function(b){
+      b.addEventListener('click', function(){
+        var id=this.dataset.cand;
+        var c = cands.filter(function(x){ return x.id===id; })[0]; if(!c) return;
+        var ta = document.querySelector('textarea.cmtEdit[data-cand="'+id+'"]');
+        var seg = document.querySelector('.segch[data-cand="'+id+'"] .chBtn.on');
+        pick = { id:c.id, cid:c.cid, title:c.title, platform:c.platform,
+          channel:(seg?seg.dataset.ch:candChannel(c)), comment:(ta?ta.value.trim():'') };
+        document.querySelectorAll('.cand').forEach(function(el){ el.classList.remove('picked'); });
+        $('#cand_'+id).classList.add('picked');
+        refreshBar();
+        $('#status').textContent=''; $('#status').className='status';
+      });
+    });
+  }
+
+  function refreshBar(){
+    if(!pick.id){ $('#decbar').style.display='none'; return; }
+    $('#decbar').style.display='block';
+    var chName = pick.channel==='acc2'?'宵桜艶帖':'月詠み';
+    $('#decSum').innerHTML = '決定: <b>'+esc(pick.title)+'</b><br>ch=<b>'+esc(chName)+'</b> / ④=<b>'+esc(pick.comment||'(未入力)')+'</b>';
+    $('#sendBtn').disabled = !(pick.comment && pick.comment.trim());
+  }
+
+  // ---- 送信 ----
+  $('#sendBtn').addEventListener('click', function(){
+    var url = gasUrl();
+    if(!url){ setStatus('err','GAS URL が未設定です (設定を開いてください)。'); return; }
+    if(!pick.id || !pick.comment.trim()){ setStatus('err','作品とコメントを選んでください。'); return; }
+    var payload = { op:'teian_decide', secret:gasSecret(),
+      date:(DATA&&DATA.date)||'', id:pick.id, cid:pick.cid, title:pick.title,
+      platform:pick.platform, channel:pick.channel, comment:pick.comment.trim(),
+      source:'teian-page', decidedAt:new Date().toISOString() };
+    setStatus('busy','送信中…');
+    $('#sendBtn').disabled=true;
+    // Content-Type 無指定 = simple request (プリフライト回避・本体アプリと同方式)
+    fetch(url, { method:'POST', body:JSON.stringify(payload) })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(j && j.ok){
+          var d = j.discord||'';
+          setStatus('ok','決定を記録しました'+(d==='sent'?' / 軍議へエコー済み':(d?(' (Discordエコー: '+d+')'):''))+'。');
+        } else { setStatus('err','失敗: '+((j&&j.error)||'不明')); $('#sendBtn').disabled=false; }
+      })
+      .catch(function(e){ setStatus('err','通信エラー: '+e); $('#sendBtn').disabled=false; });
+  });
+  function setStatus(cls,msg){ var s=$('#status'); s.className='status '+cls; s.textContent=msg; }
+
+  // ---- 読み込み ----
+  function load(obj){
+    if(!obj || !obj.candidates){ renderEmpty('候補 JSON の形式が不正です (candidates が必要)。'); return; }
+    DATA = obj; pick={ id:null,cid:null,title:null,platform:null,channel:null,comment:'' };
+    try{ LS.setItem('teian_last_json', JSON.stringify(obj)); }catch(e){}
+    render();
+  }
+  $('#file').addEventListener('change', function(){
+    var f=this.files&&this.files[0]; if(!f) return;
+    var rd=new FileReader();
+    rd.onload=function(){ try{ load(JSON.parse(rd.result)); }catch(e){ renderEmpty('JSON を解釈できません: '+e); } };
+    rd.readAsText(f);
+  });
+  $('#loadPaste').addEventListener('click', function(){
+    var t=$('#paste').value.trim(); if(!t){ return; }
+    try{ load(JSON.parse(t)); }catch(e){ renderEmpty('貼り付けを解釈できません: '+e); }
+  });
+  $('#loadUrl').addEventListener('click', function(){ fetchSrc(prompt('候補 JSON の URL')); });
+  function fetchSrc(u){ if(!u) return;
+    setStatusSafe('読み込み中…');
+    fetch(u).then(function(r){ return r.json(); }).then(load)
+      .catch(function(e){ renderEmpty('取得に失敗: '+e); });
+  }
+  function setStatusSafe(m){ $('#list').innerHTML='<div class="empty">'+esc(m)+'</div>'; }
+
+  // 起動: ?src= 優先 → 前回の読み込み → 空
+  var qs = new URLSearchParams(location.search);
+  if(qs.get('src')){ fetchSrc(qs.get('src')); }
+  else {
+    var last = LS.getItem('teian_last_json');
+    if(last){ try{ load(JSON.parse(last)); }catch(e){ renderEmpty('候補を読み込んでください。'); } }
+    else renderEmpty('候補を読み込んでください (ファイル選択 / 貼り付け / URL)。');
+  }
+})();
+</script>
+</body>
+</html>
