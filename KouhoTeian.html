@@ -67,6 +67,14 @@
   .fchk{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:var(--ink);
     background:var(--field);border:1px solid var(--line2);border-radius:999px;padding:6px 12px;cursor:pointer}
   .fchk input{margin:0}
+  /* 2グループの見出し(今すぐ投稿できる / 紹介にはアツい) */
+  .sect{margin:18px 2px 10px}
+  .sect .stitle{display:flex;align-items:baseline;gap:8px}
+  .sect .st{font-size:.95rem;font-weight:800}
+  .sect .sc{font-size:.72rem;color:var(--muted)}
+  .sect .sd{font-size:.72rem;color:var(--dim);margin-top:3px;line-height:1.5}
+  .sect.ready .st{color:var(--accent)}
+  .sect.pool .st{color:var(--warn)}
   /* 画像2枚並び: 左=動画生成用画像(素材) / 右=サンプル(FANZA・タップで全画像) */
   .imgrow{display:flex;gap:8px;align-items:flex-start;margin:6px 0 8px}
   .imgrow .hero{margin:0}
@@ -257,8 +265,29 @@
     $('#filterPanel').style.display='block';
     $('#filterCount').textContent = cands.length + ' / ' + all.length + ' 件を表示';
     if(!cands.length){ $('#list').innerHTML='<div class="empty">絞り込みに合う候補がありません。条件を外してください。</div>'; $('#decbar').style.display='none'; return; }
+    // 2グループに分ける(Chami指示2026-08-23): 今すぐ投稿できる(動画生成用画像あり) / 紹介にはアツい(画像なし)。
+    // どちらも score 降順のまま。rank はグループ内で 1 から振り直す。
+    var ready=[], pool=[];
+    cands.forEach(function(c){ ((REF[c.cid]||{}).has ? ready : pool).push(c); });
     var html='';
-    cands.forEach(function(c, i){
+    if(ready.length){
+      html += sectHtml_('ready','🎬 今すぐ投稿できる作品', ready.length, '動画生成用画像あり=そのまま動画にできる。');
+      ready.forEach(function(c,i){ html += cardHtml_(c, i+1); });
+    }
+    if(pool.length){
+      html += sectHtml_('pool','🔥 紹介にはアツい作品', pool.length, '動画生成用画像はまだ無い。サンプル画像を素材に仕込めば投稿できる (モノクロはフルカラー化)。');
+      pool.forEach(function(c,i){ html += cardHtml_(c, i+1); });
+    }
+    $('#list').innerHTML = html;
+    wire(cands);
+  }
+
+  function sectHtml_(cls, title, count, desc){
+    return '<div class="sect '+cls+'"><div class="stitle"><span class="st">'+esc(title)+'</span>'+
+      '<span class="sc">'+count+'件</span></div><div class="sd">'+esc(desc)+'</div></div>';
+  }
+
+  function cardHtml_(c, rank){
       var m = c.metrics||{};
       var rv = m.review;
       var meta = [];
@@ -298,8 +327,8 @@
       }
       if(roomsHtml) roomsHtml = '<div class="rooms">'+roomsHtml+'</div>';
 
-      html += '<div class="cand" data-cand="'+cid_+'" id="cand_'+cid_+'">'+
-        '<div class="top"><div class="rank">'+(i+1)+'</div><p class="title">'+esc(c.title||'(無題)')+'</p></div>'+
+      return '<div class="cand" data-cand="'+cid_+'" id="cand_'+cid_+'">'+
+        '<div class="top"><div class="rank">'+rank+'</div><p class="title">'+esc(c.title||'(無題)')+'</p></div>'+
         '<div class="meta">'+meta.join('')+'</div>'+
         '<div class="imgrow">'+ genImgHtml_(c) +
           (imgs.length?'<div class="hero" data-cand="'+cid_+'"><img loading="lazy" src="'+esc(imgs[0])+'" alt="サンプル">'+
@@ -318,9 +347,6 @@
           '<button type="button" class="btn primary pickBtn" data-cand="'+cid_+'" style="margin-left:auto">この作品で決定</button>'+
         '</div>'+
       '</div>';
-    });
-    $('#list').innerHTML = html;
-    wire(cands);
   }
 
   // ---- サンプル画像ライトボックス(候補ページと同じ作法=サムネ表示のみ+タップで全画像) ----
