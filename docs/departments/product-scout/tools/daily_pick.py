@@ -40,10 +40,13 @@ def sample_n(info):
             if im: return len(im)
     return 0
 
-EXCLUDE_DAYS = 3   # ★除外窓(日)。Chami 2026-08-23 裁定Aで 21→3 に緩和(下記docstring)。
+EXCLUDE_DAYS = 3      # ★除外窓(日)。Chami 2026-08-23 裁定Aで 21→3 に緩和(下記docstring)。
+EXCLUDE_RECENT_N = 10 # ★AND第2ゲート=直近この件数の投稿に含まれるcidも除外(Chami 2026-08-23)。
+                      #   実測ペース≈5本/日=直近10件は"直近ほぼ2日ぶん"。体調等で投稿が空くと日数だけでは
+                      #   3日クリアで直近作品が復活してしまう=順番として直近の物を守る安全網。
 
 def posted_recent(days=EXCLUDE_DAYS):
-    """直近 days 日にいずれかのchへ投稿済みのcid集合(除外用)。
+    """直近 days 日にいずれかのchへ投稿済みのcid集合(除外用・第1ゲート)。
     ★取得失敗時は空集合=除外しない(fail-open・可用性優先)。source=posted_log(改修α実装・commit aa30bf1)。
     ★窓は 21→3 日へ緩和(Chami 2026-08-23 裁定A)。狙い=『作品はどっちのchでも可・片chから3日経ったら
       もう片方で投稿できる物量』=投稿から3日経てば別chへ回す候補として再浮上する。旧= 2026-08-15
@@ -54,6 +57,22 @@ def posted_recent(days=EXCLUDE_DAYS):
         return {r["cid"] for r in rows if r.get("cid")}
     except Exception:
         return set()
+
+def posted_recent_by_count(n=EXCLUDE_RECENT_N):
+    """直近 n 件の投稿(post events)に含まれるcid集合(除外用・第2ゲート)。
+    ★体調不良等で投稿間隔が空いても"順番として直近"の作品を除外し続ける安全網(Chami 2026-08-23)。
+    取得失敗は空集合(fail-open)。"""
+    try:
+        rows = d1(f"SELECT cid FROM posted_log ORDER BY posted_at DESC LIMIT {int(n)}")
+        return {r["cid"] for r in rows if r.get("cid")}
+    except Exception:
+        return set()
+
+def excluded_cids():
+    """除外集合=『直近3日に投稿』∪『直近10件の投稿に含まれる』(Chami裁定=日数と件数の二重ゲート)。
+    ★候補に"表示される"のは両ゲートを通過した物だけ(=除外集合はunion=どちらかに該当すれば除外)。
+    片方が空(fail-open)でももう片方は効く。"""
+    return posted_recent() | posted_recent_by_count()
 
 def parse(rows):
     out = []
@@ -99,8 +118,8 @@ def main():
     cov = d1("SELECT cp.source src, COUNT(*) tot, SUM(CASE WHEN w.info_json IS NOT NULL AND w.info_json<>'' THEN 1 ELSE 0 END) vis "
              "FROM candidate_pool cp LEFT JOIN works w ON w.cid=cp.cid GROUP BY cp.source")
     covmap = {r["src"]: (r["tot"], r["vis"]) for r in cov}
-    # ★直近3日にいずれかのchへ投稿済みのcid=除外(Chami 2026-08-23 裁定A・21→3緩和)。取得失敗/履歴空なら空集合=除外なし。
-    posted = posted_recent()
+    # ★除外=『直近3日に投稿』∪『直近10件の投稿に含まれる』の二重ゲート(Chami 2026-08-23)。取得失敗/履歴空なら空集合=除外なし。
+    posted = excluded_cids()
     # 手動追加=source='main'のうち動画生成用サンプル画像があるもの限定(Chami 2026-08-15「画像もあるやつをチョイスして」)
     mainrows = parse(d1("SELECT cp.cid, cp.source, w.title, w.info_json, w.sales_n FROM candidate_pool cp JOIN works w ON w.cid=cp.cid "
                         "WHERE cp.source='main' AND w.info_json IS NOT NULL AND w.info_json<>''"))
@@ -112,7 +131,7 @@ def main():
     for x in withimg[:5]: w.write("- " + line(x) + "\n")
     noimg = len(mainrows) - len(withimg_all)
     if noimg: w.write(f"(画像なし{noimg}件は動画化の素材が無いので手動追加からは外した)\n")
-    if excl_main: w.write(f"(直近3日にいずれかのchへ投稿済み{excl_main}件も除外)\n")
+    if excl_main: w.write(f"(直近3日/直近10件のいずれかで投稿済み{excl_main}件も除外)\n")
     # 全候補=全ソース(main+list+circle)から。★動画生成用の画像(sampleImageURL.sample_l=作品のコマ)が
     #   あるものだけに限定(Chami 2026-08-15「ソース集団はサンプル画像じゃなくて動画生成用の画像があるもののみ」)。
     #   ここで数える imgs は sample_l のコマ枚数=そのまま5秒動画の素材。imgs=0(表紙しか無い)は動画化できないので除外。
@@ -132,7 +151,7 @@ def main():
     if dropimg:
         w.write(f"(画像なし{dropimg}件=表紙しか無く動画化の素材が無いので除外)\n")
     if excl_all:
-        w.write(f"(直近3日にいずれかのchへ投稿済み{excl_all}件も除外)\n")
+        w.write(f"(直近3日/直近10件のいずれかで投稿済み{excl_all}件も除外)\n")
     if invis:
         w.write(f"(★{' / '.join(invis)} はまだ情報未取得=評価不可。改修αへ依頼中)\n")
     for x in allrows[:5]: w.write("- " + line(x) + "\n")
