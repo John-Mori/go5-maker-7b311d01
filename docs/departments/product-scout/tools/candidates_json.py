@@ -10,7 +10,8 @@
 - 両CHいずれか直近3週間に投稿済みの作品は除外(posted_log・fail-open)。
 - Books(cid が d_ 以外)で info_json が無い物は「未収録」=推測で埋めず books_uncovered へ cid 直書きで明示。
 """
-import json, io, os, sys, math, datetime
+import json, io, os, sys, math, datetime, subprocess, re, time
+import html as _html
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daily_pick as dp
 
@@ -23,8 +24,70 @@ def rank_score(cid, sales):
     候補を分けるのは需要(sales_n)と還元率だけ=再生/変換は素材/導線に支配され候補を分けない(指標定義 commit 4588d7f)。"""
     return round(revenue_rate(cid) * math.log1p(sales or 0), 4)
 
+# ── あらすじ(作品紹介)取得 ─────────────────────────────────────────────
+# Chami 2026-08-15「あらすじ表示はいらんけど、スクレイピングで取得して内容考慮して決めて」。
+# ★あらすじ本文は vision(④コメント生成)の"判断材料"であって画面に出さない。かつ過激本文を
+#   client面へ流さないため、本文は配信されるcandidates JSONには載せず PC専用サイドカーへ書く
+#   (publish_candidates.py は candidates_<date>.json を丸ごとR2へ上げる=そこへ本文を入れると即漏れる)。
+DMM_DOUJIN_BASE = "https://www.dmm.co.jp/dc/doujin/-/detail/=/cid="
+_SCRAPE_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+def page_url_for(cid):
+    """あらすじを読む作品ページURL。同人(d_)は取得可。Books(b/k/s…)はページ構成が別で
+    cidだけでは確実に組み立てられない=Noneを返して null で続行(推測URLを叩かない)。"""
+    return (DMM_DOUJIN_BASE + cid + "/") if cid.startswith("d_") else None
+
+def _fetch_page(url):
+    """curlで1ページ取得(urllibはDMMのTLS指紋で無応答になる=curl一択・fanza-worker同型のage-gate)。
+    国内IP前提でage_checkクッキーを付与。失敗はNone。"""
+    try:
+        p = subprocess.run(
+            ["curl", "-sL", "--max-time", "25", "-A", _SCRAPE_UA,
+             "-H", "Cookie: age_check_done=1; ckcy=1; cklg=ja",
+             "-H", "Accept-Language: ja,en-US;q=0.7", url],
+            capture_output=True, shell=True)
+        if p.returncode != 0 or not p.stdout:
+            return None
+        return p.stdout.decode("utf-8", "replace")
+    except Exception:
+        return None
+
+def extract_synopsis(html):
+    """作品ページHTMLから作品紹介(あらすじ)本文を抜く純関数。同人ページは
+    <div class="summary__txt"> に全文が入る。取れなければNone(推測で埋めない)。"""
+    if not html:
+        return None
+    m = re.search(r'class="summary__txt"[^>]*>(.*?)</div>', html, re.S)
+    if not m:
+        return None
+    t = re.sub(r'<br\s*/?>', '\n', m.group(1))
+    t = re.sub(r'<[^>]+>', '', t)
+    t = _html.unescape(t)
+    t = re.sub(r'[ \t]+', ' ', t)
+    t = re.sub(r'\n{3,}', '\n\n', t).strip()
+    return t or None
+
+def synopsis_for(cid, fetch=_fetch_page, cache=None):
+    """cidのあらすじを返す(取得できなければNone)。★取得失敗は絶対に例外を投げない=
+    パイプラインを止めない(fail-open・必須依存にしない)。成功分はcacheに載せ再取得しない
+    (Noneはキャッシュせず次回リトライ=一時的な取得失敗を固定化しない)。"""
+    if cache is not None and cache.get(cid):
+        return cache[cid]
+    s = None
+    url = page_url_for(cid)
+    if url:
+        try:
+            s = extract_synopsis(fetch(url))
+        except Exception:
+            s = None
+    if cache is not None and s:
+        cache[cid] = s
+    return s
+
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "local", "teian")
 OUT_DIR = os.path.abspath(OUT_DIR)
+SYN_CACHE = None  # main() で OUT_DIR 確定後に設定
 
 def images_of(info):
     """挿入画像=フルカラーのコマ(sample_l 優先)。URL配列を返す。"""
@@ -131,7 +194,8 @@ def main():
         "note": ("並び順の正=分析 score(revenue_rate×log1p(sales_n))降順(設計書§3)。"
                  "select_score は商品選定の候補入り選定軸で、並び順には使わない。"
                  "channel は暫定(採算/テーマ本判定は分析待ち・channel_provisional=true)。"
-                 "past_similar_recovery は成約が観測不可=分析が null 固定と確定。comments は vision が後埋め。"),
+                 "past_similar_recovery は成約が観測不可=分析が null 固定と確定。comments は vision が後埋め。"
+                 "あらすじ本文は配信しない(client面へ過激本文を出さない)=PC専用サイドカー synopsis_<date>.json 側に置く。"),
         "candidates": out_candidates,
         "books_uncovered": books_uncovered,   # DB未収録のBooks cid(推測で埋めていない穴)
     }
@@ -140,7 +204,47 @@ def main():
     path = os.path.join(OUT_DIR, f"candidates_{today}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
+
+    # ── あらすじサイドカー(PC専用・配信しない) ─────────────────────────────
+    # ★候補JSON本体には本文を載せない(publishが丸ごとR2へ上げる=client漏れ)。vision(改修α)は
+    #   このサイドカーを cid で引いて判断材料にする。取得失敗は null=パイプラインは止めない(fail-open)。
+    global SYN_CACHE
+    SYN_CACHE = os.path.join(OUT_DIR, "synopsis_cache.json")
+    try:
+        with open(SYN_CACHE, encoding="utf-8") as f:
+            cache = json.load(f)
+    except Exception:
+        cache = {}
+    syn_map, got = {}, 0
+    for c in out_candidates:
+        cid = c["cid"]
+        hit = bool(cache.get(cid))
+        try:
+            s = synopsis_for(cid, cache=cache)
+        except Exception:
+            s = None                      # ★1件の失敗で候補生成全体を落とさない
+        syn_map[cid] = s
+        if s:
+            got += 1
+        if not hit and page_url_for(cid):
+            time.sleep(0.8)               # 実取得の時だけ間隔(cacheヒットは待たない)
+    try:
+        with open(SYN_CACHE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+    syn_path = os.path.join(OUT_DIR, f"synopsis_{today}.json")
+    with open(syn_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "date": today,
+            "generated_by": "product-scout/candidates_json.py",
+            "note": ("PC専用=R2/clientへは配信しない(過激本文をclient面へ出さない・表示もしない)。"
+                     "vision(改修α)が cid で引いて④コメント生成の判断材料にする。取れなければ null。"),
+            "synopsis": syn_map,          # {cid: 本文 or null}
+        }, f, ensure_ascii=False, indent=2)
+
     w.write(f"wrote {path}\n候補{len(out_candidates)}件 / Books未収録{len(books_uncovered)}件 / 母集団{len(cand)}件\n")
+    w.write(f"wrote {syn_path}\nあらすじ取得 {got}/{len(out_candidates)} 件(取れない分は null=生成は継続)\n")
     w.flush()
 
 if __name__ == "__main__":
