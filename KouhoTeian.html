@@ -60,6 +60,19 @@
   .cmt .ctext{font-size:.86rem;line-height:1.4}
   .cmt .caim{font-size:.66rem;color:var(--dim);margin-top:2px}
   .noc{font-size:.76rem;color:var(--warn);margin:4px 0 8px}
+  /* 部屋コメント (三笘薫 / 早坂芽衣) — 作品の下に2枠 */
+  .rooms{margin:10px 0 2px;display:flex;flex-direction:column;gap:7px}
+  .rmc{display:flex;gap:8px;align-items:flex-start;padding:8px 9px;border:1px solid var(--line);
+    border-radius:10px;background:#0b1220}
+  .rmc .ava{flex:0 0 auto;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-size:.74rem;font-weight:800;color:var(--accent-ink)}
+  .rmc.mi .ava{background:var(--accent)}
+  .rmc.me .ava{background:var(--warn)}
+  .rmc .body{min-width:0}
+  .rmc .who{font-size:.68rem;font-weight:700;color:var(--muted);margin-bottom:2px}
+  .rmc.mi .who{color:var(--accent)}
+  .rmc.me .who{color:var(--warn)}
+  .rmc .rtext{font-size:.82rem;line-height:1.5;color:var(--ink)}
   .cand label.mini{margin-top:6px}
   .decide-row{display:flex;gap:8px;align-items:center;margin-top:8px}
   .segch{display:flex;gap:0;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
@@ -130,6 +143,8 @@
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function num(n){ return (n==null||n==='')?'—':Number(n).toLocaleString('ja-JP'); }
+  // ④コメントは "/" が2行モードの改行位置(two_line)。表示だけ改行に開く(値・送信は生テキストのまま)。
+  function twoLineHtml(s){ return esc(s).replace(/\s*\/\s*/g,'<br>'); }
   var LS = window.localStorage;
 
   // ---- 設定 (本体アプリと同一オリジン=localStorage共有) ----
@@ -178,17 +193,33 @@
       if(cmts.length){
         cbody = '<div class="cmts">'+cmts.map(function(cm,k){
           return '<label class="cmt"><input type="radio" name="cmt_'+cid_+'" value="'+esc(cm.text)+'" data-cand="'+cid_+'"'+(k===0?' checked':'')+'>'+
-            '<span><span class="ctext">'+esc(cm.text)+'</span>'+
+            '<span><span class="ctext">'+twoLineHtml(cm.text)+'</span>'+
             (cm.aim?'<div class="caim">'+esc(cm.aim)+(cm.type?(' · '+esc(cm.type)):'')+'</div>':'')+'</span></label>'; }).join('')+'</div>';
       } else {
         cbody = '<div class="noc">コメント未生成 (vision後埋め)。下欄に手入力してください。</div>';
       }
+
+      // 部屋コメント: 三笘薫の一言 + メイン(早坂芽衣)の一言。room_comments={mitoma:"…", main:{by,text}}
+      var rc = c.room_comments||{};
+      var roomsHtml='';
+      var miText = (typeof rc.mitoma==='string') ? rc.mitoma : (rc.mitoma&&rc.mitoma.text);
+      var me = rc.main||{};
+      if(miText){
+        roomsHtml += '<div class="rmc mi"><div class="ava">三</div><div class="body">'+
+          '<div class="who">三笘薫</div><div class="rtext">'+esc(miText)+'</div></div></div>';
+      }
+      if(me&&me.text){
+        roomsHtml += '<div class="rmc me"><div class="ava">芽</div><div class="body">'+
+          '<div class="who">'+esc(me.by||'早坂芽衣')+'</div><div class="rtext">'+esc(me.text)+'</div></div></div>';
+      }
+      if(roomsHtml) roomsHtml = '<div class="rooms">'+roomsHtml+'</div>';
 
       html += '<div class="cand" data-cand="'+cid_+'" id="cand_'+cid_+'">'+
         '<div class="top"><div class="rank">'+(i+1)+'</div><p class="title">'+esc(c.title||'(無題)')+'</p></div>'+
         '<div class="meta">'+meta.join('')+'</div>'+
         (thumbs?'<div class="thumbs">'+thumbs+'</div>':'')+
         cbody+
+        roomsHtml+
         '<label class="mini">④コメント (手直し可)</label>'+
         '<textarea rows="2" class="cmtEdit" data-cand="'+cid_+'" placeholder="この作品のコメント">'+esc(cmts.length?cmts[0].text:'')+'</textarea>'+
         '<div class="decide-row">'+
