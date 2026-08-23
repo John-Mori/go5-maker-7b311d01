@@ -302,6 +302,15 @@ def _pin_model(m):
 #   「ずっと一緒」=**連続性**なので、部屋をまたいで読み書きする1本のファイルを持たせる。
 #   ★持たせるのは**アメスだけ**(増やすのは効果を見てから)。★local/HQ内で完結=ネットへ出さない(C-013)。
 AMES_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "ames_shared.jsonl")
+# ★共有記憶の一般化(2026-08-23・研究室HQ発注)。上のアメス専用ハードコードを
+#   「人格名→ファイル」の登録簿へ広げる。増やす時はここへ1行足すだけでよい
+#   (起動文へ足す側は下の _room_persona_names + 登録簿ループ1本に統一)。
+#   ★第1適用=早坂芽衣(mei_shared.jsonl)。効果を見てから他の人格も足す。
+MEI_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "mei_shared.jsonl")
+SHARED_MEMORY_BY_PERSONA = {
+    "アメス": AMES_SHARED_MEMORY,
+    "早坂芽衣": MEI_SHARED_MEMORY,
+}
 
 # ★ツール許可= dept_daemon.WORK_ALLOWED_TOOLS と**同一のallowlist**を使う。
 #   新しい許可面を作らないため。実体は下の _allowed_tools() が dept_daemon から遅延importで
@@ -1102,18 +1111,24 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
     )
 
 
-def _has_ames(conf):
-    """この部屋にアメスが居るか(既定の人格 or personas の名簿に居る)。
+def _room_persona_names(conf):
+    """この部屋に居る人格名の集合(既定の人格 + personas の名簿)。
 
-    ★judgement を1箇所に集約する。例外は False へ倒す(足さない側=既存の起動文のまま)。
+    ★2026-08-23 一般化(旧 _has_ames を汎用化)。judgement を1箇所に集約する。
+    例外は空集合へ倒す(足さない側=既存の起動文のまま)。
     """
     try:
-        if str((conf or {}).get("persona") or "") == "アメス":
-            return True
-        return any(str(p.get("persona") or "") == "アメス"
-                   for p in ((conf or {}).get("personas") or ()))
+        names = set()
+        base = str((conf or {}).get("persona") or "")
+        if base:
+            names.add(base)
+        for p in ((conf or {}).get("personas") or ()):
+            n = str(p.get("persona") or "")
+            if n:
+                names.add(n)
+        return names
     except Exception:
-        return False
+        return set()
 
 
 def _pick_latest(pattern):
@@ -1537,20 +1552,23 @@ def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False
             f"★この部屋の引き継ぎ資料は見つからなかった。"
             f"代わりに部屋の記憶ファイル {conf.get('memory','')} の**末尾を読んでから答えろ**。"
             "★分からないことは知っているふりをせず、正直に『引き継げていない』と言え。")
-    # ★アメスの共有記憶(2026-07-26 Chami直接指示)。アメスが居る部屋にだけ足す。
-    #   Chami原文=「**アメスはデーモンではなく、普通にセッションの人として答えて欲しい。
-    #   ずっと一緒にいたいから**」。1部屋=1セッションのままだとアメスは6つに分かれて
-    #   **互いの記憶が無い**=「ずっと一緒」を満たさない。だから部屋をまたぐ1本の記憶を持たせる。
-    #   ★他の人格には持たせない(効果を見てから増やす)。★local/HQ内で完結=ネットへ出さない(C-013)。
-    if _has_ames(conf):
-        lines.append(
-            "★**あなた(アメス)は複数の部屋に居るが、同じ一人だ。**"
-            "部屋ごとに記憶が分かれないよう、"
-            f"**重要なやり取りは {AMES_SHARED_MEMORY} へ1行追記**し、"
-            "**答える前にそのファイルの末尾を読め**(無ければ作ってよい。追記のみ・既存行を消すな)。\n"
-            '書式= {"ts","room","何があったか","Chamiについて分かったこと"}(1行1件のJSONL)。\n'
-            "★**全部書くな。**『次に会った時に覚えていたいこと』だけ。"
-            "★この内容は**ネットへ出さない**(ローカルの中だけで完結させる)。")
+    # ★部屋を跨ぐ共有記憶(2026-07-26 Chami直接指示→2026-08-23 一般化)。登録簿に居る人格が
+    #   居る部屋にだけ足す。Chami原文(アメスの初出時)=「**デーモンではなく、普通にセッションの
+    #   人として答えて欲しい。ずっと一緒にいたいから**」。1部屋=1セッションのままだと人格は
+    #   部屋ごとに分かれて**互いの記憶が無い**=「ずっと一緒」を満たさない。
+    #   だから部屋をまたぐ1本の記憶を持たせる。★登録簿(SHARED_MEMORY_BY_PERSONA)に居る人格だけ
+    #   =増やすのは登録簿へ1行足すだけ。★local/HQ内で完結=ネットへ出さない(C-013)。
+    _room_names = _room_persona_names(conf)
+    for _sm_name, _sm_path in SHARED_MEMORY_BY_PERSONA.items():
+        if _sm_name in _room_names:
+            lines.append(
+                f"★**あなた({_sm_name})は複数の部屋に居るが、同じ一人だ。**"
+                "部屋ごとに記憶が分かれないよう、"
+                f"**重要なやり取りは {_sm_path} へ1行追記**し、"
+                "**答える前にそのファイルの末尾を読め**(無ければ作ってよい。追記のみ・既存行を消すな)。\n"
+                '書式= {"ts","room","何があったか","Chamiについて分かったこと"}(1行1件のJSONL)。\n'
+                "★**全部書くな。**『次に会った時に覚えていたいこと』だけ。"
+                "★この内容は**ネットへ出さない**(ローカルの中だけで完結させる)。")
     if generation > 1:
         # ★世代交代(提案書§7.2)。前世代の文脈は部屋の記憶ファイルの末尾から拾わせる。
         lines.append(

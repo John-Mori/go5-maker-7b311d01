@@ -179,6 +179,44 @@ def main():
                   if "_shared.jsonl" in sr._boot_prompt(d, c, 5)]
         check("部屋を跨ぐ共有記憶(*_shared.jsonl)の指示を持つ部屋が実在する(検査が空振りしていない)",
               bool(shared))
+        # ★共有記憶の一般化(2026-08-23・アメス専用ハードコード→登録簿)。
+        #   登録簿にアメスと早坂芽衣の両方が居ること=一般化が生きている証拠。
+        #   ★登録簿から どちらかを外す/injectionを元のアメス限定へ戻す と、ここが赤になる(must-fail)。
+        #
+        # ★★2026-08-23 研究室HQの応急処置(止血・可逆・`.bak_20260823_hq_stopgap` あり)。
+        #   この4項目は `sr.SHARED_MEMORY_BY_PERSONA` / `sr._room_persona_names` を直に触っており、
+        #   **その2つが session_relay に存在しない**(実測 2026-08-23 17:2x)ため AttributeError で
+        #   検査全体が中断し、**この下にある C-045 の見張り(『跨いで記憶を持つ指示が起動文に残っているか』)
+        #   まで一緒に走らなくなっていた**= 見張りが盲になる。
+        #   → 例外を **赤(FAIL)へ変える**だけにする。**緑にはしない**(欠落は欠落として鳴らし続ける)。
+        #   一般化の実装が入れば `_missing` は空になり、元の4項目がそのまま本来の判定に戻る。
+        #   恒久= プラットフォームSE(change_log 2026-08-23T06:21:02 の再着地)。
+        _missing = [n for n in ("SHARED_MEMORY_BY_PERSONA", "_room_persona_names")
+                    if not hasattr(sr, n)]
+        if _missing:
+            check("共有記憶の登録簿にアメスと早坂芽衣の両方が居る(人格ハードコードでなく登録簿)"
+                  f" ★session_relay に {'/'.join(_missing)} が無い=一般化が未着地", False)
+        else:
+            check("共有記憶の登録簿にアメスと早坂芽衣の両方が居る(人格ハードコードでなく登録簿)",
+                  set(sr.SHARED_MEMORY_BY_PERSONA) >= {"アメス", "早坂芽衣"})
+            # ★早坂芽衣が居る部屋(copy-director/gunji)の起動文で、芽衣の共有記憶が名指しで指示される。
+            mei_rooms = [d for d, c in DEPT_CONF.items()
+                         if "早坂芽衣" in sr._room_persona_names(c)]
+            check("早坂芽衣の在室部屋が実在する(copy-director/gunji=検査が空振りしていない)",
+                  bool(mei_rooms))
+            mei_ok = all(("mei_shared.jsonl" in sr._boot_prompt(d, DEPT_CONF[d], 5)
+                          and "あなた(早坂芽衣)" in sr._boot_prompt(d, DEPT_CONF[d], 5))
+                         for d in mei_rooms)
+            check(f"早坂芽衣の{len(mei_rooms)}部屋すべてで『芽衣本人宛の共有記憶(mei_shared)』が起動文に出る",
+                  mei_ok)
+            # ★アメス限定だった頃の挙動が保たれる=アメスの在室部屋では今も名指しでアメスの記憶が出る。
+            ames_rooms = [d for d, c in DEPT_CONF.items()
+                          if "アメス" in sr._room_persona_names(c)]
+            ames_ok = all(("ames_shared.jsonl" in sr._boot_prompt(d, DEPT_CONF[d], 5)
+                           and "あなた(アメス)" in sr._boot_prompt(d, DEPT_CONF[d], 5))
+                          for d in ames_rooms)
+            check(f"アメスの{len(ames_rooms)}部屋すべてで従来どおりアメスの共有記憶が起動文に出る(退行なし)",
+                  ames_ok)
         intact = all("答える前にそのファイルの末尾を読め" in sr._boot_prompt(d, DEPT_CONF[d], 5)
                      for d in shared)
         check(f"その{len(shared)}部屋すべてで『跨いで記憶を持つ』指示が起動文に残っている", intact)
