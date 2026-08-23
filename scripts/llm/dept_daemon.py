@@ -261,18 +261,23 @@ def suppress_failure_notice(kind, delivery_count):
     handle() の relay失敗枝1つだけ。テスト= test_failure_notice.py が全分岐を回す。
 
     ★背景と分岐の根拠:
+      - 打ち切り(kind=="timeout")= **部屋へは一切出さない(常に伏せる)。**
+        いったんは無音対策で「1回目の配達で終端報告を出す」にしたが(寝る前Go案件・Chami「Goで」)、
+        実物を見たChamiが「このコメント、何の確定情報も得られなくて意味もないからいらない。削除で」
+        と判断した(2026-08-23・軍議 msg 1541136509376397422)。実際その報告は
+        「作業は進んでいる可能性がある(確認できていない)」= **確定情報ゼロ**で、Chamiには雑音。
+        → 部屋へは出さない。記録(request_log / work_audit)は残るので追える形は保つ。
+        ★無音そのものの解消は、"確定した結果"(git/work_audit を自分で読んで何が進んだか)を
+          出す形へ作り直す=別案(Chami裁定待ち)。中身の無い可能性の報告は二度と出さない。
       - 一般の配送失敗(kind!="timeout")= 便は最大5回まで自動再配達される。毎回詫びると
         同じ部屋へ最大5連投=Chami「トーク履歴が汚れる」。→ **もう後が無い時だけ**出す=
         再配達3回目(delivery_count>=3)で初めて出し、1・2回目は伏せる(2026-07-28 方針)。
-      - 打ち切り(kind=="timeout")= 症状が**無音=止まって見える**そのもの(実測 2026-08-23
-        Chami「改修αが30分以上動かなくて止まってる？」)。便は生きて再配達で戻るので、
-        **最初の配達で1度だけ**終端報告を出し、2回目以降は伏せる(寝る前Go案件・Chami「Goで」)。
-      - delivery_count が読めない(None)時は、どちらの kind でも**出す側へ倒す**(黙るより出す)。
+      - delivery_count が読めない(None)時は、一般失敗のみ**出す側へ倒す**(黙るより出す)。
     """
+    if kind == "timeout":
+        return True                    # ★2026-08-23 Chami「削除で」= 打ち切りの終端報告は部屋へ出さない
     if delivery_count is None:
         return False
-    if kind == "timeout":
-        return delivery_count >= 2      # 1回目だけ出す。2回目以降は連投しない
     return delivery_count < 3           # 再配達3回目で初めて出す(1・2回目は伏せる)
 # ★★受信側の集約窓(coalesce・2026-08-08 イージス研究室 / 発注= 研究室HQ 8/4 07:29)。
 #   何のためか= Chamiが推敲を**小分けに連投**する部屋で、断片1つごとに走って断片1つごとに
@@ -5921,17 +5926,14 @@ class Daemon:
                     try:
                         _dl = self._delivery_count(mid)
                         # ★判定の正本は suppress_failure_notice(kind, _dl) 1つだけ(単一述語)。
-                        #   timeout= 打ち切りは症状が「無音=止まって見える」ので**1回目の配達で1度だけ**
-                        #     終端報告を出す(寝る前Go案件・Chami「Goで」2026-08-23)。2回目以降は伏せる。
+                        #   timeout= 打ち切りの終端報告は「確定情報ゼロで意味がない」とChamiが判断=
+                        #     部屋へ出さない(2026-08-23「削除で」)。記録は request_log/work_audit に残る。
                         #   その他の配送失敗= 便は最大5回再配達される。毎回詫びると最大5連投=
                         #     「トーク履歴が汚れる」ので再配達3回目まで伏せる(2026-07-28 方針)。
                         if suppress_failure_notice(kind, _dl):
                             log(self.dept,
                                 f"[失敗の告知を伏せる] kind={kind or '-'} 配達{_dl}回目 msg={mid}")
                             reply = ""          # 空=送信しない(下の送信ループが回らない)
-                        elif kind == "timeout":
-                            log(self.dept,
-                                f"[timeoutの終端報告を出す] 配達{_dl}回目 msg={mid}")
                     except Exception:
                         pass                    # 判定不能なら従来どおり知らせる(黙るより出す)
                     # ★★relay無人時 fail-open(2026-08-02 イージス研究室・HQ裁定 msg=1533226514794025081)。
