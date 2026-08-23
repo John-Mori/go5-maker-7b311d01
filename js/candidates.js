@@ -57,11 +57,29 @@
   function refStallDecide_(n, sinceMs, nowMs) {
     return n >= 3 && !!sinceMs && (nowMs - sinceMs) >= 20000;
   }
+  // ★Storage v2 Phase1(2026-08-24 設計 01_STORAGE_V2_DESIGN §7.2/§8)。cand_text(候補テキストの正本)を
+  //   localStorage 単独に依存させると、iOS Safari の約5MB飽和で tiny な setItem すら throw=保存全体が弾かれる
+  //   (Chami「あかん、保存できなくなった」の真因)。IDBへ耐久ミラーを置き、起動時にLS↔IDBを cid 単位で
+  //   マージして復元する。この関数は純関数(Nodeテスト可)=どちらを勝者にするかを at(更新時刻)で決める。
+  //   ★naive実装(LS常勝/IDB常勝/丸ごと上書き)は必ず1ケース以上で誤る=must-fail の対象。
+  function candTextMergeIdb_(lsMap, idbMap) {
+    var out = {}, changed = false;
+    lsMap = (lsMap && typeof lsMap === 'object' && !Array.isArray(lsMap)) ? lsMap : {};
+    idbMap = (idbMap && typeof idbMap === 'object' && !Array.isArray(idbMap)) ? idbMap : {};
+    Object.keys(lsMap).forEach(function (k) { out[k] = lsMap[k]; });
+    Object.keys(idbMap).forEach(function (k) {
+      var iv = idbMap[k]; if (!iv || typeof iv !== 'object' || Array.isArray(iv)) return;
+      var lv = out[k];
+      // LSに無い、またはIDB側が新しい(at が大きい)時だけIDBを採用=LSが正本の通常運用ではLSを壊さない。
+      if (!lv || (Number(iv.at) || 0) > (Number(lv.at) || 0)) { out[k] = iv; changed = true; }
+    });
+    return { map: out, changed: changed };
+  }
 
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -899,8 +917,13 @@
   //   正本へ昇格＝同期read/writeで初回描画から必ず読める。画像(imgs)は容量的にLS不可なので従来のIDB経路のまま。
   //   同期は core/sync.js が cand_text を cid 単位フィールドマージで扱う(whole-key LWWにしない=別端末の消失防止)。
   function candTextKey_() { return 'cand_text'; }             // hoisted=Node(テスト)から順序非依存で参照可
+  function candTextIdbKey_() { return 'meta:cand_text'; }     // ★Storage v2 Phase1: cand_text の耐久ミラー(IDB)
   var _candTextCache = { raw: null, map: {} };                // LS文字列が同一なら再parseしない軽量キャッシュ
+  // ★LSが飽和して cand_text を setItem できない時の権威マップ。null=LSが正。非nullの間は同期読みでこれを返す
+  //   =満杯でもセッション内はコメント/メモ/URLが必ず読める(耐久はIDBミラー＋起動時 restoreCandTextFromIdb_)。
+  var _candTextMem = null;
   function candTextMap_() {
+    if (_candTextMem) return _candTextMem;                    // LSに書けない状態=メモリを正とする(LSは古い/空)
     var raw; try { raw = localStorage.getItem(candTextKey_()) || ''; } catch (e) { raw = ''; }
     if (_candTextCache && raw === _candTextCache.raw) return _candTextCache.map;
     var m = {};
@@ -937,14 +960,57 @@
     try {
       localStorage.setItem(candTextKey_(), JSON.stringify(map));
       _candTextCache = { raw: null, map: {} }; // 次回読みで再parse(自分の書きでキャッシュ無効化)
+      _candTextMem = null;                     // LSが正になった=メモリ優先を解除
+      persistCandTextIdb_(map);                // 耐久ミラーも最新化(best-effort・非同期)
       reqSync_();                              // 永続保存できた内容だけを同期へ送る
       return true;
     } catch (e) {
-      // ★localStorageが飽和して「小さなテキストすら書けない」時の無言の失敗を可視化(=(B)の計装ギャップ・Fable5診断2026-08-24)。
-      //   ここが false=refImgSave が L1231 で即 false=投稿編集の保存が丸ごと弾かれる真因の一つ。
-      try { klog_('cand_text_save_failed', 'work', cid, { cause: (e && e.name) || 'quota' }); } catch (_) {}
-      return false;
-    } // 容量超過など
+      // ★Storage v2 Phase1(2026-08-24): LSが飽和して「小さなテキストすら書けない」時、テキストを喪失させない。
+      //   メモリを権威にしてセッション内の読みを保証し、IDBへ耐久ミラーを試みる。cand_text は正本からミラーへ
+      //   格下げ(設計 §7.2/§8)=LS満杯"だけ"で保存全体を弾かない(refImgSave L1291 も画像がある限り非致命へ)。
+      //   ★残存リスク=IDBも同時に死んでいると耐久化できずメモリのみ(タブ破棄で喪失)。その両死は別系統の重大事故。
+      _candTextMem = map;
+      _candTextCache = { raw: null, map: {} };
+      try { klog_('cand_text_ls_quota_idb_fallback', 'work', cid, { cause: (e && e.name) || 'quota' }); } catch (_) {}
+      var idbP = persistCandTextIdb_(map);
+      if (idbP && typeof idbP.then === 'function') { idbP.then(function (ok) { try { klog_('cand_text_idb_fallback_result', 'work', cid, { ok: !!ok }); } catch (_) {} }, function () {}); }
+      return true; // LS満杯は非致命=テキストは(メモリ＋IDBミラーで)保持。呼び元の保存全体を落とさない
+    }
+  }
+  // cand_text マップの耐久ミラーをIDBへ書く(全件を1キーに=小さいテキストのみ)。Promise<bool>。IDB不可なら false。
+  function persistCandTextIdb_(map) {
+    if (!_idbOk || !window.Go5Idb || typeof window.Go5Idb.set !== 'function') return Promise.resolve(false);
+    try {
+      return Promise.resolve(window.Go5Idb.set(candTextIdbKey_(), map)).then(function () { return true; }, function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
+  }
+  // 起動時にIDBミラーからLSへ復元する(冪等・1回)。LS満杯で「IDBにだけ載った編集」を再読込後も見えるようにする。
+  var _candTextRestored = false;
+  function restoreCandTextFromIdb_() {
+    if (_candTextRestored || !_idbOk || !window.Go5Idb) return;
+    _candTextRestored = true;
+    try {
+      var readP = (typeof window.Go5Idb.getResult === 'function')
+        ? window.Go5Idb.getResult(candTextIdbKey_())
+        : window.Go5Idb.get(candTextIdbKey_()).then(function (v) { return { ok: true, value: v }; }, function (e) { return { ok: false, value: null, error: e }; });
+      readP.then(function (r) {
+        if (!r || !r.ok || !r.value || typeof r.value !== 'object' || Array.isArray(r.value)) return;
+        var ls = {};
+        try { ls = JSON.parse(localStorage.getItem(candTextKey_()) || '{}'); if (!ls || typeof ls !== 'object' || Array.isArray(ls)) ls = {}; } catch (e) { ls = {}; }
+        var merged = candTextMergeIdb_(ls, r.value);
+        if (!merged.changed) return; // IDBはLSと同じか古い=通常運用。何もしない
+        try {
+          localStorage.setItem(candTextKey_(), JSON.stringify(merged.map));
+          _candTextCache = { raw: null, map: {} };
+          _candTextMem = null;
+          reqSync_();                 // 復元できた内容を他端末へも波及
+        } catch (e) {
+          _candTextMem = merged.map;  // LSがまだ満杯=メモリを権威に(耐久はIDBミラー側に既にある)
+          _candTextCache = { raw: null, map: {} };
+        }
+        try { bgRender_(); } catch (e) {} // サムネ/コメントを描き直す
+      }, function () {});
+    } catch (e) {}
   }
   function candTextSave_(cid, data) { return candTextWrite_(cid, data, new Date().getTime()); }
   // 移行バックフィル(冪等・空で非空を上書きしない): _imgMem.ref(旧正本)のテキストを cand_text へフィールド単位で埋め戻す。
@@ -1288,7 +1354,10 @@
     // ★テキストは同期LSの正本 cand_text へ先に確定保存(戻り値=真の成否)。IDB書込の成否・ハイドレート状態に依存せず、
     //   次の描画で必ずコメント/メモ/X URLが読める。ここを通る=空でも正当な削除(展開後)なので cand_text も更新する。
     var textSaved = candTextSave_(cid, { comment: data && data.comment, memo: data && data.memo, twitterUrl: data && data.twitterUrl, twitterUrl2: urls2[0] || (data && data.twitterUrl2) || '', urls2: urls2 });
-    if (!textSaved) return false; // LS容量超過等を成功扱いにしない。モーダルは開いたまま再操作できる。
+    // ★Storage v2 Phase1: cand_textの保存がどうしても取れなくても、画像がある保存は下でIDB rec(テキスト同梱)へ
+    //   耐久保存する=テキストは失われない。画像も無い(imgs.length===0)場合だけ、テキストの唯一の器がcand_textなので
+    //   その失敗を致命とする。※candTextSave_ は満杯でもIDBミラーで true を返すため、ここへ来るのはIDBも死んだ両死時のみ。
+    if (!textSaved && !imgs.length) return false;
 
     // IDB/旧LSは画像専用。テキストも旧版との後方互換用に同梱するが、画像ゼロならレコード自体を削除して cand_text だけ残す。
     var rec = imgs.length ? {
@@ -1521,6 +1590,7 @@
   }
   function hydrateImages_() {
     if (!_idbOk || _candidateHydrated || _candidateHydrateInFlight) return;
+    try { restoreCandTextFromIdb_(); } catch (e) {} // ★Storage v2 Phase1: LS満杯でIDBにだけ載ったテキストを復元(冪等)
     _candidateHydrateInFlight = true;
     var __hydT0 = Date.now(), __hydCount = 0;
     window.Go5ImgDiag && Go5ImgDiag.push('hydrate_start');
