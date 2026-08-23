@@ -1336,12 +1336,39 @@ def load_producers():
         return []   # 壊れたJSONで watchdog 全体を止めない(fail-safe)
 
 
+def _in_registration_grace(st, age, max_age_sec, now_epoch):
+    """登録直後の猶予中か(=まだ鳴らしてはいけないか)を1か所で判定する(C-054執行形②)。
+
+    ★穴= producers.json へ登録した瞬間、その脈ファイルはまだ無い(age is None)。
+      本物の巡回が初めて回るまで stale と見え、登録直後から consecutive 回で誤発火する。
+      これを人手で脈を1行書いて埋めるのは、鮮度が mtime しか見ない以上「人の手」と
+      「本物のセンサー」を機械が区別できない= 死が隠れる窓を作る(C-054本体)。
+    ★猶予の向き(デブライネ発注の受け入れ条件)=
+      ① 脈が一度も来ていない(age is None かつ この state で pulsed を見ていない)間だけ。
+      ② 登録の初観測(first_seen)から max_age_sec を過ぎたら猶予は終わる(永久化しない)。
+      ③ 一度でも脈が来たら(age is not None を観測=pulsed)猶予は終わる。
+    ★fail toward 鳴らす= 判定に必要な値(first_seen)が欠ける既存stateには猶予を与えない。
+      沈黙が最悪の事故だから、迷う時は「鳴らさない」ではなく「鳴らす」側へ倒す。
+    """
+    if age is not None:
+        return False                      # 脈が現に在る=猶予の対象外(③の一部)
+    if st.get("pulsed"):
+        return False                      # 一度でも脈を見た=以後は猶予しない(③)
+    if max_age_sec <= 0:
+        return False                      # 猶予幅を測れない設定は従来どおり(即・鳴る側)
+    first = st.get("first_seen")
+    if not first:
+        return False                      # 初観測時刻が無い既存state=移行時は猶予せず鳴らす
+    return (now_epoch - first) < max_age_sec   # 登録から max_age_sec 未満なら猶予中(②)
+
+
 def check_producer_freshness(state, dry_run):
     """登録した producer の最終更新が期待間隔を超えたら、持ち主の部屋へ1回だけ知らせる。
 
     死んだ mirror が約2週間 気づかれなかった穴(P1未検知障害)を塞ぐ登録制の鮮度警報。
     状態遷移で1回だけ鳴らし、ageが戻ったら✅を1回(check_poller_health と同じレール)。
     レジストリから外された producer は状態ごと掃除する(退役の宣言=閉じ方B・C-046)。
+    ★登録直後の脈ファイル無しでは鳴らさない= _in_registration_grace(C-054執行形②)。
     """
     producers = load_producers()
     pf = state.get("producer_fresh") or {}
@@ -1350,9 +1377,19 @@ def check_producer_freshness(state, dry_run):
     for p in producers:
         name = p["name"]
         active.add(name)
-        st = pf.get(name) or {"consec": 0, "down": False, "last_alert": 0}
+        # ★first_seen は「この state に初めて現れた瞬間」だけ入れる(既存行へ後付けしない)。
+        #   後付けすると、既に停止を鳴らしている producer が猶予へ落ちて黙る=退行になる。
+        st = pf.get(name) or {"consec": 0, "down": False, "last_alert": 0,
+                              "first_seen": now_epoch}
         age = _age_or_none(p["path"])
+        if age is not None:
+            st["pulsed"] = True           # 一度でも脈を見たら記録(以後この producer は猶予しない)
         stale = (age is None) or (p["max_age_sec"] > 0 and age >= p["max_age_sec"])
+        if stale and _in_registration_grace(st, age, p["max_age_sec"], now_epoch):
+            # 登録直後の猶予中= 連続カウントも積まない(窓を抜けた瞬間に即発火させない)
+            st["consec"] = 0
+            pf[name] = st
+            continue
         if not stale:
             if st.get("down"):
                 # 復旧= 1回だけ✅して状態を戻す(黙って直ると「まだ壊れている」と思われ続ける)
