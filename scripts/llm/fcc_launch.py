@@ -393,6 +393,105 @@ def server_alive(timeout=3):
         return False
 
 
+# ★退避の上限と掃除(2026-08-23 イージス研究室・研究室HQ依頼の恒久化)
+#   HQの止血は「起こす前にコピーするだけ」= **掃除が無く無限に増える**。
+#   退避を持つ狙いは「後から往復回数と消費を検算できること」なので、
+#   主は**日数**(検算したい期間)にし、本数は**床**と**天井**として添える。
+KEEP_DAYS = 14     # これより古い退避は捨ててよい
+KEEP_MIN = 10      # ★ただし新しい方から10本は、何日経っていても残す(=床)
+#                    使用頻度が低い時に「全部14日超え=全滅」になるのを防ぐ。
+KEEP_MAX = 100     # 一日に何十回起こしても、これ以上は溜めない(=天井)
+
+# ★消してよい物の見分けは**この1本**。`server.log` 本体は形が違うので構造上当たらない。
+_ROT_RE = re.compile(r"^server\.log\.\d{8}_\d{6}$")
+
+
+def _server_log_path():
+    return os.path.join(HOME, ".fcc", "logs", "server.log")
+
+
+def _drop_list(entries, now, keep_days=None, keep_min=None, keep_max=None):
+    """捨てる退避の名前を返す**純関数**(ファイルには触らない)。
+
+    entries= [(name, mtime), ...]。判定はここ1本= 検査は実物を作らずに policy を突ける。
+    優先順位= ①新しい方から keep_min 本は無条件で残す ②keep_max 本を超えた分は
+    若くても捨てる ③残りは keep_days より古ければ捨てる。
+    """
+    kd = KEEP_DAYS if keep_days is None else keep_days
+    kn = KEEP_MIN if keep_min is None else keep_min
+    kx = KEEP_MAX if keep_max is None else keep_max
+    # 新しい順。同じ mtime は名前の降順(退避名は時刻そのものなので新しい方が大きい)。
+    rows = sorted(entries, key=lambda t: (t[1], t[0]), reverse=True)
+    drop = []
+    for i, (name, mt) in enumerate(rows):
+        if i < kn:
+            continue                      # 床= 何があっても残す
+        if i >= kx:
+            drop.append(name)             # 天井= 若くても捨てる
+            continue
+        if (now - mt) > kd * 86400.0:
+            drop.append(name)
+    return drop
+
+
+def _cleanup_old_server_logs(now=None):
+    """退避の掃除。**形が退避そのものの物だけ**消す(fail-open= 失敗しても起動は続ける)。"""
+    logdir = os.path.dirname(_server_log_path())
+    try:
+        names = [n for n in os.listdir(logdir) if _ROT_RE.match(n)]
+    except OSError:
+        return []
+    entries = []
+    for n in names:
+        try:
+            entries.append((n, os.path.getmtime(os.path.join(logdir, n))))
+        except OSError:
+            pass
+    gone = []
+    for n in _drop_list(entries, time.time() if now is None else now):
+        if not _ROT_RE.match(n):          # ★二重の錠= 本体 server.log には構造上当たらない
+            continue
+        try:
+            os.remove(os.path.join(logdir, n))
+            gone.append(n)
+        except OSError as e:
+            print("警告: 古いサーバログを掃除できなかった(起動は続ける): %s" % e)
+    if gone:
+        print("古いサーバログを%d本 掃除した(残り%d本・%d日/最低%d本/最大%d本)"
+              % (len(gone), len(entries) - len(gone), KEEP_DAYS, KEEP_MIN, KEEP_MAX))
+    return gone
+
+
+def _keep_prev_server_log():
+    """★fcc-server は logs/server.log を**起動のたびに上書き**する(2026-08-23 研究室HQ実測)。
+
+    実測= 13:29 の初実務便のログは、22:35 に起こし直した瞬間に **1行も残らず消えた**
+    (`grep -c "2026-08-23 13:" server.log` = 0)。走行の証跡が「静かに」消えるので、
+    後から消費や往復回数を数え直せない=台帳に写し忘れた回は永久に検算できない。
+    ここでは**起こす前に退避するだけ**(削除しない・上書きしない)。
+    ★2026-08-23 イージス研究室= 退避の**掃除**をこの中へ入れた(呼び出し側は変えない)。
+      退避しなかった回(空・不在)でも掃除は回す= 溜まった物が起動0回で残り続けない。
+    """
+    src = _server_log_path()
+    dst = None
+    try:
+        if os.path.getsize(src) > 0:
+            dst = src + "." + time.strftime("%Y%m%d_%H%M%S")
+            try:
+                shutil.copy2(src, dst)
+                print("前回のサーバログを退避した: %s" % dst)
+            except OSError as e:
+                print("警告: サーバログを退避できなかった(起動は続ける): %s" % e)
+                dst = None
+    except OSError:
+        pass
+    try:
+        _cleanup_old_server_logs()
+    except Exception as e:                 # ★掃除は起動を止めない(fail-open)
+        print("警告: サーバログの掃除で例外(起動は続ける): %s" % e)
+    return dst
+
+
 def start_server(wait=40):
     """★常駐にしない= 使う時だけ起こし、起動器が終わったら落とす。
 
@@ -403,6 +502,7 @@ def start_server(wait=40):
     exe = shutil.which("fcc-server")
     if not exe:
         return None
+    _keep_prev_server_log()
     p = subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(wait):
         if server_alive():
