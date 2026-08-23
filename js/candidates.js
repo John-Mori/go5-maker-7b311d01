@@ -3670,14 +3670,14 @@
   // 作品URL追加フォーム。(モーダル化＝恒常表示をやめて省スペース)入力はダーク面用の白字。(.cand-refimg-line)
   function addFormHtml_(isMain) {
     var slots = '';
-    for (var si = 0; si < 4; si++) slots += '<button type="button" class="cand-add-imgslot" data-slot="' + si + '"><span class="cand-add-slot-hint">＋<br>画像<br>貼り付け</span></button>';
+    for (var si = 0; si < 10; si++) slots += '<button type="button" class="cand-add-imgslot" data-slot="' + si + '"><span class="cand-add-slot-hint">＋<br>画像<br>貼り付け</span></button>';
     return '' +
       '<div class="fz-title" style="background:none;color:#fff;padding:0 46px 0 0;margin:0 0 6px;font-weight:700;line-height:1.3;">📥 作品URLを' + (isMain ? '候補' : 'このタブ') + 'に追加</div>' +
       '<div class="hint">アフィリンク付きURL(al.fanza.co.jp/?lurl=…)でもOK。素の作品URLに直して記録します。' + (isMain ? '' : '<br>💡候補とは別に、このタブに独立して保存されます。') + '</div>' +
       '<div style="margin-top:6px;">' + pasteRow_('<input id="candUrl" size="1" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://…(作品URL or アフィリンク)" autocomplete="off" style="flex:1;min-width:0;">', 'candUrl') + '</div>' +
       '<label class="hint" style="display:block;margin:8px 0 2px;">X / Bluesky の投稿URL(任意)— <b>これだけでも追加できます</b></label>' +
       '<div>' + pasteRow_('<input id="candTwitter" size="1" type="text" inputmode="url" class="cand-refimg-line" placeholder="https://x.com/…/status/… か https://bsky.app/profile/…/post/…" autocomplete="off" style="flex:1;min-width:0;">', 'candTwitter') + '</div>' +
-      '<label class="hint" style="display:block;margin:10px 0 2px;">動画生成用の画像(任意・最大4枚)— ボタンを押すとコピー中の画像が左から入ります</label>' +
+      '<label class="hint" style="display:block;margin:10px 0 2px;">動画生成用の画像(任意・最大10枚)— ボタンを押すとコピー中の画像が左から入ります</label>' +
       '<div class="cand-add-imgrow">' + slots + '</div>' +
       '<div style="margin-top:6px;display:flex;">' +
         '<label class="ghost cand-refimg-pick" style="width:auto;flex:0 0 auto;margin:0;">画像を選ぶ<input id="candAddImgFile" type="file" accept="image/*" multiple style="display:none;"></label>' +
@@ -3699,7 +3699,7 @@
         '<div id="candBulkMsg" class="hint" style="min-height:1.3em;"></div>' +
       '</div>';
   }
-  // 追加モーダルの画像スロット。(最大4・左詰め)候補追加時に「動画生成用の画像」として一緒に保存される。
+  // 追加モーダルの画像スロット。(最大10・左詰め)候補追加時に「動画生成用の画像」として一緒に保存される。
   var _addModalImgs = [];
   var _candAddNotice = '';
   var _candAddNoticeTimer = null;
@@ -3748,9 +3748,9 @@
         pasteImageFromClipboard_(function (durl, err) {
           if (err) { if (msg) msg.textContent = err; return; }
           if (_addModalImgs[slot]) _addModalImgs[slot] = durl;      // 充填済みスロット＝差し替え
-          else { _addModalImgs.push(durl); if (_addModalImgs.length > 4) _addModalImgs.length = 4; } // 空き＝左から詰める
+          else { _addModalImgs.push(durl); if (_addModalImgs.length > 10) _addModalImgs.length = 10; } // 空き＝左から詰める
           renderAddSlots_();
-          if (msg) msg.textContent = '画像を貼り付けました(' + _addModalImgs.filter(Boolean).length + '/4枚・追加ボタンで確定)';
+          if (msg) msg.textContent = '画像を貼り付けました(' + _addModalImgs.filter(Boolean).length + '/10枚・追加ボタンで確定)';
         });
       });
     });
@@ -3819,11 +3819,11 @@
       (function step(i) {
         if (i >= files.length) {
           renderAddSlots_();
-          if (msg) msg.textContent = added ? ('画像を追加しました(' + _addModalImgs.filter(Boolean).length + '/4枚' + (failed ? '・' + failed + '枚は読み込めず' : '') + '・追加ボタンで確定)') : '画像を読み込めませんでした';
+          if (msg) msg.textContent = added ? ('画像を追加しました(' + _addModalImgs.filter(Boolean).length + '/10枚' + (failed ? '・' + failed + '枚は読み込めず' : '') + '・追加ボタンで確定)') : '画像を読み込めませんでした';
           return;
         }
         fileToScaledDataUrl(files[i], function (durl) {
-          if (durl && _addModalImgs.length < 4) { _addModalImgs.push(durl); added++; } else if (!durl) failed++;
+          if (durl && _addModalImgs.length < 10) { _addModalImgs.push(durl); added++; } else if (!durl) failed++;
           step(i + 1);
         });
       })(0);
@@ -4023,9 +4023,9 @@
           if (!curTw) { mergedTw = newTwUrl; existItem.twitterUrl = newTwUrl; mergedAny = true; }
           else if (!curTw2) { mergedTw2 = newTwUrl; mergedAny = true; }
         }
-        // 画像: 末尾へ追加(最大8枚)
+        // 画像: 末尾へ追加(最大10枚)
         var mergedImgs = curImgs.slice();
-        newImgs.forEach(function (img) { if (mergedImgs.length < 8) { mergedImgs.push(img); mergedAny = true; } });
+        newImgs.forEach(function (img) { if (mergedImgs.length < 10) { mergedImgs.push(img); mergedAny = true; } });
         // メモ: 無ければ設定、あれば改行追記
         var mergedMemo = cur.memo || '';
         if (newMemo && newMemo !== mergedMemo) {
