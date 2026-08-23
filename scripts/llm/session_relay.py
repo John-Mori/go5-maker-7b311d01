@@ -331,9 +331,19 @@ def relay_model(conf):
       「正確性 > 安全性 > 検証可能性 > 保守性 > **トークン効率** > 速度」なので、
       **品質を落とした節約は規約違反**(Chami「品質を落とさないことが最重要」2026-07-21)。
     ★読めない値(空・非文字列)は既定へ倒す=**沈黙させない**(fail-safe)。
+    ★2026-08-23 追加: `local/_model_override.json` が在ればそちらが強い(週の課金枠が尽きかけた
+      時の一時的な引き下げ・研究室HQ発注 msg 1540938360464474273)。判定の正本は
+      **dept_daemon.model_override_for 1本**= ここには同じ判定を書かない(ORG-11)。
+      読めない時は上書き無し=従来の Opus へ倒す(安い方へ黙って落ちない)。
     """
     try:
-        m = str((conf or {}).get("relay_model") or "").strip()
+        ov = None
+        try:
+            import dept_daemon                       # 呼ばれる時点では必ずロード済み
+            ov = dept_daemon.model_override_for((conf or {}).get("dept"), "relay")
+        except Exception:
+            ov = None
+        m = str(ov or (conf or {}).get("relay_model") or "").strip()
         return _pin_model(m or RELAY_MODEL)
     except Exception:
         return _pin_model(RELAY_MODEL)

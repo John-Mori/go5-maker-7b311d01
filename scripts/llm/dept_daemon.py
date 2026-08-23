@@ -271,7 +271,10 @@ WORK_MODEL = "sonnet"          # ★O3(裁-3): 作業agentの既定(実装の物
 #   「品質を犠牲にしたトークン節約は禁止」と明記されている=**判断の部屋は上位モデルにするのが規約側の答え**。
 #   DEPT_CONF に "work_model" があればそれを使う。無ければ従来どおり WORK_MODEL。
 def work_model_for(conf):
-    m = (conf or {}).get("work_model") or WORK_MODEL
+    # ★2026-08-23: `local/_model_override.json` の方が強い(週の枠が尽きかけた時の一時的な
+    #   引き下げ。正本の定義は下の model_override_for。上書きが無ければ従来どおり)。
+    m = model_override_for((conf or {}).get("dept"), "work") \
+        or (conf or {}).get("work_model") or WORK_MODEL
     # ★素の "opus" は明示版へ固定(2026-07-31 Chami指示)。CLIが最新へ張り替えても Opus 5 等へ
     #   黙って乗り換わらせない=単価跳ねの防止。品質の床= Opus 4.8世代。戻すなら下1行を消す。
     return "claude-opus-4-8" if (m or "").strip() == "opus" else m
@@ -3028,6 +3031,75 @@ DEPT_CONF = {
         ),
     },
 }
+
+# ★自分の部門スラッグを conf 自身に入れておく(2026-08-23 イージス研究室)。
+#   なぜ= `work_model_for(conf)` / `relay_model(conf)` は **conf しか受け取らない**ので、
+#   「この部屋はどこか」を知らない=部屋別の上書きを引けなかった。呼び出し元(9か所)を
+#   全部書き換えるより、辞書のキーをそのまま値へ写す方が触る面が小さい。
+#   ★キー衝突は無い= コード中の `c.get("dept")` は全て `discord_channels.json` の要素で、
+#     DEPT_CONF の値ではない(2026-08-23 grepで4か所とも確認済)。
+#   ★setdefault= もし将来 conf 側に明示の "dept" を書いた部屋があれば、そちらを勝たせる。
+for _slug, _c in DEPT_CONF.items():
+    if isinstance(_c, dict):
+        _c.setdefault("dept", _slug)
+
+
+# ★★モデルの外付け上書き(2026-08-23 研究室HQ発注 msg 1540938360464474273)。
+#   何のためか= 週の課金枠が時間比 2.25倍で燃えていて、8/25(月) 05:30 に尽きる見込み。
+#   C-014 は「既定は Opus。安いモデルへ落とすのは**節約できる時だけの例外**」= その例外条件が
+#   いま成立している。だが DEPT_CONF はコードなので、落とす/戻すたびに常駐の載せ替えが要る。
+#   → **落とす対象と度合いを JSON 1枚に外出しし、常駐を止めずにフリップできる**形にする。
+#
+#   C-042(常駐が読む物を足したら載せ替えの経路も同時に決めろ)の答え=
+#     (A) このコード自体は dept_daemon.py / session_relay.py = 既に daemon_keeper.WATCH_FILES に
+#         載っている → keeper が拾う。
+#     (B) 中身(どの部屋を落とすか)は **都度読み(mtime キャッシュ)** → 一度コードが載れば、
+#         以後のフリップに再起動は要らない。
+#
+#   ★fail-open ではなく **fail-quality**: 読めない・壊れている・知らない値は「上書き無し」へ倒す
+#     = Opus のまま。安い方へ黙って落ちる事故を作らない(品質 > トークン効率・共通規律§1)。
+MODEL_OVERRIDE_PATH = os.path.join(LOCAL, "_model_override.json")
+_MODEL_OVERRIDE_CACHE = {"mtime": None, "data": {}}
+
+
+def _model_override_doc():
+    """`local/_model_override.json` を mtime キャッシュで読む。無ければ空dict。"""
+    try:
+        st = os.stat(MODEL_OVERRIDE_PATH)
+    except OSError:
+        _MODEL_OVERRIDE_CACHE["mtime"] = None
+        _MODEL_OVERRIDE_CACHE["data"] = {}
+        return {}
+    if _MODEL_OVERRIDE_CACHE["mtime"] != st.st_mtime:
+        try:
+            with open(MODEL_OVERRIDE_PATH, encoding="utf-8-sig") as f:
+                doc = json.load(f)
+            _MODEL_OVERRIDE_CACHE["data"] = doc if isinstance(doc, dict) else {}
+        except Exception:
+            _MODEL_OVERRIDE_CACHE["data"] = {}      # 壊れていたら上書き無し=Opusのまま
+        _MODEL_OVERRIDE_CACHE["mtime"] = st.st_mtime
+    return _MODEL_OVERRIDE_CACHE["data"]
+
+
+def model_override_for(dept, kind):
+    """この部屋のこの用途(kind="work" / "relay")に上書きが在るなら、そのモデル名。無ければ None。
+
+    JSONの形:
+      {"enabled": true,
+       "note": "なぜ落としているか。戻す条件。",
+       "work":  {"shorts-analyst": "sonnet"},
+       "relay": {"shorts-analyst": "sonnet"}}
+    ★`"enabled": false` にすれば1行で全部戻せる(部屋ごとに消して回らなくていい)。
+    """
+    try:
+        doc = _model_override_doc()
+        if not doc or not doc.get("enabled"):
+            return None
+        m = (doc.get(kind) or {}).get(str(dept or ""))
+        m = str(m or "").strip()
+        return m or None
+    except Exception:
+        return None                                  # 判定不能=上書きしない(品質側へ倒す)
 
 
 WORK_AUDIT = os.path.join(LOCAL, "llm", "work_audit.jsonl")
