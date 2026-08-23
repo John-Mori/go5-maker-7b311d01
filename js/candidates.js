@@ -3965,7 +3965,7 @@
     _addModalImgs = []; // 開くたびにスロットを白紙に
     body.innerHTML = addFormHtml_(isMain);
     onTap_($('candAdd'), function () { addCandidate(tabId); }); // 追加して続ける(開いたまま)
-    onTap_($('candAddClose'), function () { ov.hidden = true; addCandidate(tabId); }); // 追加して閉じる(即閉→バックグラウンド処理・iOSの二度押しを解消)
+    onTap_($('candAddClose'), function () { addCandidate(tabId, function () { ov.hidden = true; }); }); // 追加して閉じる(★保存がコミットされてから閉じる=onDoneで閉じる。無言喪失対策・Chami 2026-08-24)
     onTap_($('candBulkAdd'), function () { bulkAddCircle(tabId); });
     // 「画像を選ぶ」(複数可): ファイルからもスロットへ左詰めで追加。(1枚ずつ順に処理=メモリ圧迫回避)
     var addFile = $('candAddImgFile');
@@ -4275,6 +4275,10 @@
         lsSet(key, items);
         renderCandList(tabId);
       })();
+      // ★プレースホルダを保存した時点で入力はlocalStorageへ永続化済み=ここで「追加して閉じる」を閉じてよい。
+      //   以前は閉じる操作が保存の"前"に走り、hydration未了/URL無効/取得失敗だと何も保存されず無言で消えた
+      //   (Chami 2026-08-24「候補に追加/閉じるを押したら何も保存されずに消えた」)。取得はこの後バックグラウンドで続く。
+      if (onDone) onDone();
       // 一時的な失敗(タイムアウト/サーバー5xx等・retryable)は1回だけ即リトライしてから諦める。
       //   そもそも取得エラーになる頻度を減らす狙い(Chami指定2026-07-24)。
       var fetchOnce = function () { return window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url); };
