@@ -156,14 +156,25 @@ class LeaseQueue:
             "CREATE INDEX IF NOT EXISTS idx_ready_prio ON queue(status, lease_until, prio, id)")
 
     # --- 書き込み ---
-    def enqueue(self, body, msg_id=None, dept=None):
-        """1件投入。msg_id が既存なら二重投入を無視 (冪等)。投入できたら True。"""
+    def enqueue(self, body, msg_id=None, dept=None, not_before=0.0):
+        """1件投入。msg_id が既存なら二重投入を無視 (冪等)。投入できたら True。
+
+        not_before(2026-08-24 イージス研究室・C-059 の止血): **その時刻まで claim させない**
+          epoch秒。0 なら従来どおり即時に取れる(既存の呼び出しは1文字も変わらない)。
+          ★新しい仕組みを足していない= claim は既に `lease_until < now` で絞っている
+            (上の claim を参照)。だから lease_until を未来に置けば、便は**キューの中に
+            見える形で座ったまま**その時刻に自然と配れるようになる。
+          ★これは**捨てるのではなく遅らせる**ための口だ(C-048=喪失禁止)。行は最初から
+            status='pending' で存在するので、`SELECT ... WHERE lease_until > now` で
+            「今どれだけ待たされているか」を外から数えられる。
+        """
         if not isinstance(body, str):
             body = json.dumps(body, ensure_ascii=False)
         try:
             cur = self._db.execute(
-                "INSERT INTO queue(msg_id, dept, body, enqueued_at, prio) VALUES(?,?,?,?,?)",
-                (msg_id, dept, body, time.time(), prio_of(body)),
+                "INSERT INTO queue(msg_id, dept, body, enqueued_at, prio, lease_until)"
+                " VALUES(?,?,?,?,?,?)",
+                (msg_id, dept, body, time.time(), prio_of(body), float(not_before or 0.0)),
             )
             return cur.rowcount == 1
         except sqlite3.IntegrityError:

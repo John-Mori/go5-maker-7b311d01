@@ -41,6 +41,7 @@ import argparse
 import json
 import os
 import re
+import sqlite3          # ★AI便の毎時上限を数えるため(2026-08-24・キューを読むだけ)
 import subprocess
 import sys
 import time
@@ -319,6 +320,64 @@ def pick_msg_id(synthetic_id, posted_id):
 ID_COLLISION_MAX = 9          # base + -2..-9。これで足りない=時計かキューが壊れている
 
 
+# ---------------------------------------------------------------- AI便の毎時上限(C-059の止血)
+# ★2026-08-24 研究室HQ依頼(DISPATCH-aegis-gl-1787518435806)。使用量73.4%・枯渇見込み 8/24 21:45。
+#   燃料の55.1%が内部整備3室で、そのうちイージス研究室が20.6%=一番食っているのは俺の部屋だ。
+# ★上限に当たった便は**落とさない。次の窓へ座らせる**(C-048=喪失禁止)。捨てないので
+#   トークンが消えるわけではない=これは**燃やす速さの頭打ち**であって節約ではない。正直に言う。
+#   本当の節約は「同じ部門宛に溜まった便を次の窓で1本にまとめる(合流)」で、それは別便で出す。
+# ★根拠(実測 2026-08-24・`local/queue/inbox.db` の直近51時間・audience=ai だけを数えた):
+#     aegis-gl        ai便54 / 便のある時間帯は51hのうち16h / 平均1.06便/時 / 最大9便/時
+#     system-engineer ai便23 / 同 11h                      / 平均0.45便/時 / 最大5便/時
+#   上限3便/時にすると次の窓へ回るのは aegis-gl 18便(33.3%) / system-engineer 3便(13.0%)。
+#   =**平常の往復(1〜2便/時)には当たらず、山だけを削る**。2便/時では平常にも当たる(48.1%)ので採らない。
+# ★Chami本人の便・表投稿・audience未宣言の便は**対象外**(ここで絞るのはAI同士の便だけ)。
+AI_LETTER_CAP_PER_HOUR = {"aegis-gl": 3, "system-engineer": 3}
+AI_THROTTLE_WINDOW = 3600.0   # 窓=1時間(境界は epoch の時計刻み。数え方を毎回同じにするため)
+
+
+def ai_letters_in_window(db_path, dept, now, window=AI_THROTTLE_WINDOW):
+    """今の窓に、その部門宛で既に投函済みの **audience=ai** の便を数える。
+
+    ★数え方を1か所に置く(共通規律§1「数え方で答えが変わるものは、何をどう数えたかを添える」)。
+      窓= `now` を含む固定の1時間枠(now//3600)。pending も done も**両方数える**
+      =処理が速い部門だけ上限を素通りする、という不公平を作らないため。
+    ★読めない時は 0 を返す(fail-open)。上限の判定に失敗して**便が止まる方が事故として重い**。
+    """
+    start = (int(now) // int(window)) * float(window)
+    try:
+        con = sqlite3.connect(db_path)
+        try:
+            rows = con.execute(
+                "SELECT body FROM queue WHERE dept=? AND enqueued_at>=?", (dept, start)).fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return 0
+    n = 0
+    for (body,) in rows:
+        try:
+            if (json.loads(body).get("audience") or "") == AUDIENCE_AI:
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
+def ai_throttle_not_before(db_path, dept, audience, now, caps=None):
+    """上限に当たっていれば「次の窓の頭」を返す。当たっていなければ 0.0(=即時配れる)。
+
+    ★純粋に近い形にしてある(外へ出る手は数える読み取りだけ)= 検査から窓と件数を差し替えられる。
+    """
+    caps = AI_LETTER_CAP_PER_HOUR if caps is None else caps
+    cap = caps.get(dept)
+    if not cap or (audience or "") != AUDIENCE_AI:
+        return 0.0
+    if ai_letters_in_window(db_path, dept, now) < cap:
+        return 0.0
+    return ((int(now) // int(AI_THROTTLE_WINDOW)) + 1) * float(AI_THROTTLE_WINDOW)
+
+
 def enqueue_unique(enqueue, base_id, build_body, max_tries=ID_COLLISION_MAX):
     """id が被らなくなるまで投函を試す。★純粋関数(外へ出る手は引数の enqueue だけ)。
 
@@ -413,11 +472,19 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
         sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
         from leasequeue import LeaseQueue
         q = LeaseQueue(QUEUE_DB)
+        # ★C-059の止血(2026-08-24)。上限に当たったAI便は**捨てず**に次の窓へ座らせる。
+        #   claim は `lease_until < now` で絞るので、行はキューに見える形で残ったまま
+        #   窓が明けたら普通に配られる=新しい常駐も再送の仕掛けも要らない。
+        not_before = ai_throttle_not_before(QUEUE_DB, dept, aud["audience"], time.time())
         try:
             ok, mid, tries = enqueue_unique(
-                lambda b, m: q.enqueue(b, msg_id=m, dept=dept), base_mid, build_rec)
+                lambda b, m: q.enqueue(b, msg_id=m, dept=dept, not_before=not_before),
+                base_mid, build_rec)
         finally:
             q.close()
+        if ok and not_before:
+            print(f"  [{dept}] ★AI便の毎時上限({AI_LETTER_CAP_PER_HOUR.get(dept)}便/時)に当たった。"
+                  f"この便は**捨てていない**= {time.strftime('%H:%M', time.localtime(not_before))} に配られる")
     except Exception as e:
         print(f"  [{dept}] ★キュー投函に失敗: {type(e).__name__}: {e}")
         return False, base_mid
