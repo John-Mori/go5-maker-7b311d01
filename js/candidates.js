@@ -371,12 +371,42 @@
     });
     return best;
   }
+  // ★直近K件(両ch合算・投稿時刻降順)の非表示OR条件(Chami裁定A option1・2026-08-24)。
+  //   生成側 daily_pick.py の posted_recent_by_count(10)="直近3日 OR 直近10件" と同じ判定を候補ページ側にも効かせる。
+  //   K=10固定。postedIndexFor_ は権威(GASシート)+ローカル履歴を既にマージ済みの索引なのでそれを両ch分集める。
+  var RECENT_POSTED_COUNT = 10;
+  function recentPostedTopItems_(n) {
+    var seen = [], out = [];
+    ['acc1', 'acc2'].forEach(function (a) {
+      var idx = postedIndexFor_(a);
+      for (var k in idx) {
+        if (!idx.hasOwnProperty(k)) continue;
+        var item = idx[k];
+        if (!item || seen.indexOf(item) >= 0) continue; // 同一アイテムが複数cidキーで索引されるため重複除去
+        seen.push(item);
+        var ts = postedTsOf_(item);
+        if (ts) out.push({ item: item, ts: ts });
+      }
+    });
+    out.sort(function (x, y) { return y.ts - x.ts; });
+    return out.slice(0, n);
+  }
+  function isHiddenByRecentCount_(it) {
+    var top = recentPostedTopItems_(RECENT_POSTED_COUNT);
+    if (!top.length) return false;
+    var myKeys = candCidsOf_(it);
+    for (var i = 0; i < top.length; i++) {
+      var keys = cidKeysOfHistItem_(top[i].item);
+      for (var j = 0; j < keys.length; j++) { if (myKeys.indexOf(keys[j]) >= 0) return true; }
+    }
+    return false;
+  }
   function isHiddenByPosted_(it) {
     if (!it) return false;
     if (!_hidePosted.acc1 && !_hidePosted.acc2) return false; // どちらのトグルもOFF=隠さない
     var last = lastPostedTsAnyCh_(it);
-    if (!last) return false; // 未投稿 or 投稿時刻不明=隠さない(可用性は表示側へ倒す)
-    return (Date.now() - last) < POSTED_COOLDOWN_MS; // 最終投稿から3日以内=クールタイム中=隠す
+    if (last && (Date.now() - last) < POSTED_COOLDOWN_MS) return true; // 最終投稿から3日以内=クールタイム中=隠す
+    return isHiddenByRecentCount_(it); // ★OR: 両ch合算の直近10件の投稿に含まれる作品も隠す
   }
   // 「◯◯✔非表示」トグル2つ(非表示リストの上段・右寄せ)のHTML。_ACCTS は描画時に定義済み。
   function candHidePostedRowHtml_() {
