@@ -69,7 +69,7 @@ test.describe('go5-maker 公開URL スモーク', () => {
 test.describe('候補ページの画像・投稿編集', () => {
   test('PC画像モーダルの矢印は左右対称の20%位置・2倍サイズで表示する', async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       const canvas = document.createElement('canvas');
       canvas.width = 8; canvas.height = 8;
@@ -131,7 +131,7 @@ test.describe('候補ページの画像・投稿編集', () => {
       document.addEventListener('go5-candidate-images-hydrated', () => { window.__candidateHydratedSeen = true; });
     });
     const cid = 'tw_candidate_late_idb_keep';
-    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await expect.poll(() => page.evaluate(() => window.__candidateHydratedSeen), { timeout: 10000 }).toBe(true);
     await page.evaluate(async ({ cid }) => {
       const canvas = document.createElement('canvas');
@@ -182,7 +182,7 @@ test.describe('候補ページの画像・投稿編集', () => {
       await route.fulfill({ response, body: delayedHydration + '\n' + original });
     });
 
-    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
     await page.evaluate(async ({ candidateCid, imageData }) => {
       localStorage.setItem('cand_items', JSON.stringify([{
@@ -238,7 +238,7 @@ test.describe('候補ページの画像・投稿編集', () => {
     const cid = 'd_candidate_sync_text';
     const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_candidate_sync_text/';
     const xUrl = 'https://x.com/go5_test/status/22';
-    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await page.evaluate(({ cid }) => {
       localStorage.setItem('cand_items', JSON.stringify([{
         cid, title: '文字同期回帰テスト', isTwitter: false, url: '', addedAt: Date.now()
@@ -261,7 +261,7 @@ test.describe('候補ページの画像・投稿編集', () => {
 
   test('画像なしの文字保存は停止したIndexedDBを待たず即時完了する', async ({ page }) => {
     const cid = 'tw_candidate_text_only_save';
-    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await page.evaluate(({ cid }) => {
       localStorage.setItem('cand_items', JSON.stringify([{
         cid, title: '文字だけ保存回帰テスト', isTwitter: true, twitterUrl: '', addedAt: Date.now()
@@ -293,7 +293,7 @@ test.describe('候補ページの画像・投稿編集', () => {
 
   test('画像保存失敗時は入力を残し保存ボタンを再操作できる', async ({ page }) => {
     const cid = 'tw_candidate_image_save_failure';
-    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await page.evaluate(({ cid }) => {
       localStorage.setItem('cand_items', JSON.stringify([{
         cid, title: '画像保存失敗回帰テスト', isTwitter: true, twitterUrl: '', addedAt: Date.now()
@@ -328,7 +328,7 @@ test.describe('候補ページの画像・投稿編集', () => {
 
   test('動画生成へ移動すると容量超過時も選択画像を復元し、前作品の画像を残さない', async ({ page }) => {
     const cid = 'tw_candidate_to_movie_image';
-    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     const oldImage = await page.evaluate(async ({ cid }) => {
       const makeImage = (color) => {
         const canvas = document.createElement('canvas');
@@ -375,7 +375,7 @@ test.describe('候補ページの画像・投稿編集', () => {
       Object.defineProperty(window, 'DataTransfer', { configurable: true, writable: true, value: undefined });
     });
     const cid = 'tw_candidate_to_movie_ios_fallback';
-    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await page.evaluate(async ({ cid }) => {
       const canvas = document.createElement('canvas');
       canvas.width = 8; canvas.height = 8;

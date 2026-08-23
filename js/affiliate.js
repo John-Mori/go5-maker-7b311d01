@@ -160,7 +160,7 @@
       document.documentElement.setAttribute('data-tab', 'tabMovie');
       return; // 復元(=リダイレクト)はしない。オーバーレイ表示は openOverlayFromSplit_ が担う。
     }
-    // ★候補ページ(KouhoTeian.html)の「動画生成へ」で index.html へ来た時は、保存タブの復元を走らせない。
+    // ★候補ページ(KouhoLists.html)の「動画生成へ」で index.html へ来た時は、保存タブの復元を走らせない。
     //   go5_active_tab が 'tabVerify'(投稿履歴)/'tabStock'(ドラフト)だと showTab がその専用ページ
     //   (StockLists.html / Stock.html)へリダイレクトし、「候補→動画生成を押したら投稿履歴に飛ぶ」に
     //   なる(Chami報告2026-08-16 msg 1538426859535204412)。この時は下地を動画作成のまま留め、
@@ -191,7 +191,7 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreActiveTab_);
   else restoreActiveTab_();
 
-  // 分割ページ(候補=KouhoTeian.html)から「予約/カレンダー」を押して来た場合、そのオーバーレイを開く。
+  // 分割ページ(候補=KouhoLists.html)から「予約/カレンダー」を押して来た場合、そのオーバーレイを開く。
   //   go5_active_tab は作業タブしか復元しない(オーバーレイは除外)ため、別枠 sessionStorage で受ける。
   function openOverlayFromSplit_() {
     var want = '';

@@ -39,10 +39,10 @@ test('R-3: 保存中ボタンの本番とテストが同じOperationGateを使�
   assert.ok(/Go5OperationGate\.armButton/.test(stock), '本番Drive保存が共通終端制御を使っていない');
   assert.ok(/Go5OperationGate\.armButton/.test(candidates), '本番候補保存が共通終端制御を使っていない');
   assert.ok(/require\('\.\.\/core\/operation-gate\.js'\)/.test(testSrc), '回帰テストが本番状態機械ではなくコピーを検証している');
-  ['index.html', 'Stock.html', 'KouhoTeian.html'].forEach(function (rel) {
+  ['index.html', 'Stock.html', 'KouhoLists.html'].forEach(function (rel) {
     const html = read(rel);
     const gate = html.indexOf('core/operation-gate.js');
-    const featureJs = rel === 'KouhoTeian.html' ? html.indexOf('js/candidates.js') : html.indexOf('js/stock.js');
+    const featureJs = rel === 'KouhoLists.html' ? html.indexOf('js/candidates.js') : html.indexOf('js/stock.js');
     assert.ok(gate >= 0 && featureJs > gate, rel + ' の読込順が不正');
   });
 });
