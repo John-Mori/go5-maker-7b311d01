@@ -9,7 +9,7 @@
 
 入力  = local/teian/candidates_YYYY-MM-DD.json(product-scout/candidates_json.py の出力・comments 空)
 出力  = 同スキーマで comments[]={n,text,aim,type,chars,two_line} を埋めた JSON
-描画するのは text だけ(teian/index.html)。aim/type/chars/two_line は winning 学習用の付帯。
+描画するのは text だけ(KouhoTeian.html)。aim/type/chars/two_line は winning 学習用の付帯。
 
 fail-open: 1候補で vision が失敗しても comments は [] のまま残す
            =ページは「コメント未生成・手入力してください」のフォールバックを出す(可用性優先)。

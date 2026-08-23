@@ -3894,7 +3894,7 @@
         : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
       '<button id="candAddOpen" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ ' + (isMain ? '追加' : 'このタブに追加') + '</button>' +
       // 手動追加タブのコントロール行の一番右へ「提案ページを開く」導線(Chami依頼2026-08-23・REQ-gunji-f13dc8bd42)。
-      //   [✏️名前][➕追加]と同じ行・同スタイル(ghost)。押すと同オリジンの teian/index.html へ遷移。main(手動追加)限定。
+      //   [✏️名前][➕追加]と同じ行・同スタイル(ghost)。押すと同オリジンの KouhoTeian.html へ遷移。main(手動追加)限定。
       (isMain ? '<button id="candTeianOpen" type="button" class="ghost" title="提案ページを開く" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">💡 提案</button>' : '') +
       '</div>' +
       // アカウント別「投稿済みを非表示」トグル。(非表示リストの上段・右寄せ)両方同時ON可。
@@ -3924,7 +3924,7 @@
     if (isMain) {
       wireBuiltinRename_('main'); // 組込タブ(手動追加)の改名。candEditForm へフォームを出す。
       var teianBtn = $('candTeianOpen'); // 提案ページへ遷移(同オリジン・同タブ)。Chami依頼2026-08-23。
-      if (teianBtn) teianBtn.addEventListener('click', function () { location.href = 'teian/index.html'; });
+      if (teianBtn) teianBtn.addEventListener('click', function () { location.href = 'KouhoTeian.html'; });
     } else {
       var tab = null; lsGet(K_TABS, '[]').forEach(function (t) { if (t.id === tabId) tab = t; });
       var eb = $('candEditTab'); if (eb && tab) eb.addEventListener('click', function () { showEditTabForm(tab); });
