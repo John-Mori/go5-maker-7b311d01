@@ -549,7 +549,13 @@
       //   動画+元画像は入るのにプレビューだけ丸ごと欠ける沈黙経路になっていた(サムネ=captureThumb_ は
       //   2026-08-13① で toDataURL 同期化済みだったが、こちらは async のまま取り残されていた)。
       //   #cv は同一オリジン(背景mp4＋ユーザー画像)なので toDataURL は taint で投げない=まず同期で確実に得る。
-      var durl = ''; try { durl = cv.toDataURL('image/jpeg', 0.85); } catch (e) { durl = ''; }
+      // ★まず app.js に最終フレーム(drawFrame(DURATION))を撃ち直してもらう=#cv の"現在の中身"への
+      //   依存を断つ(Chami報告2026-08-23①「たまに一枚目が背景動画だけになる」の根治)。録画/遷移の
+      //   タイミングで #cv が前景画像の無いフレームを保持していても、ここで確定合成へ描き直して読む。
+      //   Go5RenderFinalPreview が空(前景無し等の異常)を返した時だけ従来の #cv 直読みへフォールバック。
+      var durl = '';
+      try { if (window.Go5RenderFinalPreview) durl = window.Go5RenderFinalPreview() || ''; } catch (e) { durl = ''; }
+      if (!durl) { try { durl = cv.toDataURL('image/jpeg', 0.85); } catch (e) { durl = ''; } }
       var b = durl ? durlToBlobSync_(durl) : null;
       if (b) return Promise.resolve(b);
       return toBlobSafe_(cv, 'image/jpeg', 0.85, 6000); // 同期が取れなかった時だけ従来の async へ

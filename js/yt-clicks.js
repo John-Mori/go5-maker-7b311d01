@@ -1920,6 +1920,10 @@
     if (!title) { alert('この履歴には作品名がないため再生成できません。'); return; }
     if (!(window.Go5Stock && window.Go5Stock.regenDataset)) { alert('データ再生成の土台(Go5Stock)が読み込まれていません。ページを再読み込みしてもう一度お試しください。'); return; }
     if (!window.confirm('この作品のデータを再生成しますか？\n\n一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだGoogleドライブに無いものだけを作って保存し、投稿履歴の1ページ目へプレビューを反映します。\n(既に揃っていれば作り直しません＝足りていないものだけを補います)\n\n★開始したら、この編集画面を閉じても裏で生成を続けます。')) return;
+    // ★Chami依頼2026-08-23②=OK後の案内(alert)は不要・編集モーダルごと閉じる。
+    //   処理はJSの非同期チェーンで走るのでモーダルを閉じても止まらない(押したら手を離させる)。
+    //   成功はrefreshで1ページ目に反映が見えるので静かに=案内を出さない。失敗だけ後で正直に伝える。
+    closeModal_();
     var orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = '生成中(裏で継続)…'; }
     // ★実処理はドラフト編集モーダルと同一の Go5Stock.regenDataset(→driveSaveForCompleted_)へ委譲=同じデータを作る。
@@ -1935,17 +1939,15 @@
         settled = true;
         if (btn) { btn.disabled = false; btn.textContent = orig; }
         try { refresh(); } catch (e) {}
+        // ★成功時の案内は出さない(Chami依頼2026-08-23②=refreshで1ページ目に反映が見える)。
+        //   失敗だけ正直に伝える(素直にギブアップ)。
         if (!ok) {
           alert('再生成できませんでした。\n' + (msg || 'この端末にもR2にもGoogleドライブにもこの作品の動画がない可能性があります(作成した端末で開くか、リビルド作成で作り直すと入ります)。'));
-        } else {
-          alert('データを再生成しました。\n・' + (msg || '足りていないデータをGoogleドライブへ保存') + '\n・仕上がりプレビューを投稿履歴の1ページ目へ反映');
         }
       }
     });
-    // ★同期的に失敗結着した場合(settled=true)はackを出さない=矛盾表示の防止。
-    if (!settled) {
-      alert('生成を裏で開始しました。この編集画面を閉じても続きます。\n完了すると投稿履歴の1ページ目へプレビューが反映されます(反映まで数十秒〜数分)。');
-    }
+    // ★Chami依頼2026-08-23②=OK直後の「生成を裏で開始しました」案内は廃止(モーダルは既に閉じ済み)。
+    void settled;
   }
 
   // ── render ──────────────────────────────────────────────────────────────
@@ -2239,6 +2241,17 @@
     list.querySelectorAll('.vlink-drive').forEach(function (a) {
       a.addEventListener('click', function (e) {
         if (!(window.Go5Drive && Go5Drive.resolveFolderUrl)) return; // 解決関数が無ければhrefのフォールバックに任せる
+        // ★スマホ(iOS等)は従来通りの挙動=<a href target=_blank> の素の遷移に任せる(Chami依頼2026-08-23③)。
+        //   空タブ先開き(window.open(''))はモバイルで about:blank の空白ページが残る/前面化する主因。
+        //   href は同期フォールバック(控えIDあれば直リンク・無ければ題名検索)=これがスマホの従来挙動。
+        //   PC(デスクトップ)だけ、フォルダそのものへ正確に着地させるため空タブ先開き→解決後に遷移を続ける。
+        var isMobile_ = false;
+        try {
+          var ua = navigator.userAgent || '';
+          isMobile_ = /Android|iPhone|iPod/i.test(ua) ||
+                      ((/iPad|Macintosh/.test(ua)) && (navigator.maxTouchPoints || 0) > 1);
+        } catch (e0) { isMobile_ = false; }
+        if (isMobile_) return; // preventDefaultしない=<a href>の素の遷移(従来挙動)
         e.preventDefault();
         var ch = a.getAttribute('data-drive-ch'), title = a.getAttribute('data-drive-title'), vid = a.getAttribute('data-drive-vid');
         var fallback = a.getAttribute('href'); if (fallback === '#') fallback = '';

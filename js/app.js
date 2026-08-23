@@ -483,6 +483,20 @@
     if (!bgShouldPlay_()) { try { bg.pause(); } catch (e) {} }
   }
   window.Go5Preview = preview; // 販促ラベル等がプレビュー再描画を要求するためのフック
+  // ---- 仕上がりプレビューの静止1枚を"今この場で最終フレームを描き直して"返す(同期・dataURL) ----
+  //   ★capturePreview_(stock.js)が #cv の"現在の中身"に依存すると、iOS のタイミングで
+  //     たまに前景画像の載っていない(背景動画だけの)フレームを掴む(Chami報告2026-08-23①
+  //     「たまに一枚目がこうなる」)。ここで drawFrame(DURATION) を撃ち直してから読む=
+  //     フェード/ズーム完了・前景 alpha=1 の確定フレーム=常に画像の載った最終合成になる。
+  //   前景画像が無い異常時は空文字を返す(呼び側は従来経路=#cv 読みへフォールバック)。
+  function renderFinalPreviewDataUrl_() {
+    try {
+      if (!fgImg) return '';
+      drawFrame(DURATION);
+      return cv.toDataURL('image/jpeg', 0.85);
+    } catch (e) { return ''; }
+  }
+  window.Go5RenderFinalPreview = renderFinalPreviewDataUrl_;
   // 二本指ピンチ(promo-label.jsが取得)から前景画像の拡大率を操作するためのフック。
   //   ★旧実装のピンチは canvas に CSS transform を掛けるだけ=プレビューの見た目が拡大するだけで
   //     書き出す動画は一切変わらなかった。Chamiの意図は「動画に使う画像自体の拡大縮小」なので、
