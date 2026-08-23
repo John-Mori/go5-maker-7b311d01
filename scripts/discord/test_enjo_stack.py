@@ -148,6 +148,22 @@ def run():
 
 
 run()
+
+# === 9) スタンプ種別の辞書の揃い(改悪追加の回帰ガード・2026-08-23 トトリ) ===
+# ★スタンプを1枚 WATCH に足して ORDERS/HEADING/KAIZEN_SECTION のどれかを忘れると、
+#   巡回本文の描画が KeyError で落ちる(dept_body/kaizen_body が kind で直参照するため)。
+#   ここが赤くなれば「辞書の足し忘れ」に翌朝の本番前に気づける=改悪そのものの回帰ガード。
+print("\n[9] スタンプ種別の辞書の揃い(改悪追加の回帰ガード)")
+for _w in RW.WATCH:
+    _k = _w["kind"]
+    check(f"kind='{_k}' が KIND_ORDER/ORDERS/HEADING/KAIZEN_SECTION に全て在る",
+          _k in RW.KIND_ORDER and _k in RW.ORDERS
+          and _k in RW.HEADING and _k in RW.KAIZEN_SECTION)
+check("改悪(kaiaku) が WATCH に登録されている",
+      any(w["kind"] == "kaiaku" for w in RW.WATCH))
+check("改悪の絵文字IDが Chami作成の 1541110670748156014",
+      next(w for w in RW.WATCH if w["kind"] == "kaiaku")["id"] == "1541110670748156014")
+
 ok = sum(1 for _, c in results if c)
 print(f"\n=== {ok}/{len(results)} PASS ===")
 for name, c in results:
