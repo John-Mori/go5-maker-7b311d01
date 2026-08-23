@@ -503,11 +503,16 @@ function runCompetitorDaily() {
   });
   if (drows.length) dailySh.getRange(dailySh.getLastRow() + 1, 1, drows.length, COMP_DAILY_HEADERS.length).setValues(drows);
   var snapped = drows.length;
+  // ★windowVids.length===0(追跡窓に動画がまだ無い=新規登録直後等)は正常系であって、
+  //   YT APIが空を返した実際の失敗(quota切れ等)とは別。後者の時だけ以降の充実処理を打ち切る
+  //   (2026-08-24=snapped単独の判定だと前者まで巻き込んで打ち切っていた=非公開チャンネルの
+  //   登録者数クリアが動かなくなりtest_competitor_analysis.jsが赤=root cause)。
+  var ytHealthy = windowVids.length === 0 || snapped > 0;
 
-  // 2) 【充実・予算内】チャンネル統計を更新し uploads を確保。snapped==0(YT空)なら以降は無駄なので打ち切る。
+  // 2) 【充実・予算内】チャンネル統計を更新し uploads を確保。YT APIが実際に空(quota切れ等)なら以降は無駄なので打ち切る。
   var chSh = compSheet_(COMP_CH_SHEET, COMP_CH_HEADERS);
   var chMap = headerMap_(chSh);
-  if (snapped && Date.now() - RUN_T0 < BUDGET_MS) {
+  if (ytHealthy && Date.now() - RUN_T0 < BUDGET_MS) {
     var ids = watch.map(function (w) { return w.channelId; });
     var stats = ytChannels_(ids);
     watch.forEach(function (w) {
@@ -524,7 +529,7 @@ function runCompetitorDaily() {
 
   // 3) 【充実・予算内】各チャンネルの新着動画(追跡窓内)を台帳へ(次回スナップから対象化)。
   var newVideos = 0;
-  if (snapped && Date.now() - RUN_T0 < BUDGET_MS) {
+  if (ytHealthy && Date.now() - RUN_T0 < BUDGET_MS) {
     var newVideoIds = [];
     watch.forEach(function (w) {
       if (!w.uploads || Date.now() - RUN_T0 >= BUDGET_MS) return;
@@ -549,11 +554,14 @@ function runCompetitorDaily() {
   // 4) 日曜は週次サマリを再計算(予算内のみ)
   if (new Date().getDay() === 0 && Date.now() - RUN_T0 < BUDGET_MS) compWeeklySummary_();
 
-  // ★snapped==0(=YT統計が全空=urlfetch日次上限/APIキー/quota切れ)は「緑を返しながら書いていない」状態。
-  //   握り潰さず ok:false で返す=呼び出し口(comp_daily_now)や実行ログで可視化する(C-041/モドリッチ依頼2026-08-23)。
-  return { ok: snapped > 0, channels: watch.length, newVideos: newVideos, snapped: snapped,
+  // ★snapped==0 は2通りある。区別せず ok:false にすると「追跡窓に動画がまだ無いだけ」の正常系まで
+  //   誤検知する(2026-08-24実測=非公開チャンネルのみ・競合_動画が空のケースでtest_competitor_analysis.jsが赤)。
+  //   ①windowVids.length===0(台帳にまだ追跡窓内の動画が無い=新規登録直後/discovery未実施)=正常。ok:true。
+  //   ②windowVids.length>0 なのに snapped===0(=YT統計が全空=urlfetch日次上限/APIキー/quota切れ)
+  //     =「緑を返しながら書いていない」実際の失敗。握り潰さず ok:false(C-041/モドリッチ依頼2026-08-23)。
+  return { ok: ytHealthy, channels: watch.length, newVideos: newVideos, snapped: snapped,
            windowVids: windowVids.length, elapsedMs: Date.now() - RUN_T0,
-           note: snapped ? '' : 'snapped_zero: YT統計が空(urlfetch日次上限/APIキー/quota要確認)' };
+           note: ytHealthy ? '' : 'snapped_zero: YT統計が空(urlfetch日次上限/APIキー/quota要確認)' };
 }
 
 // ============================================================
