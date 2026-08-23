@@ -756,9 +756,8 @@
   var _candidateHydrateFailures = 0;
   var _hydrateFailSince = 0;                        // 現在の失敗連鎖の開始時刻。案内バーは「持続」を確かめてから出す(誤発火防止)。
   var _syncRehydrateRetryTimer = null;
-  var _histHydrateFailures = 0;                    // 投稿履歴画像(post:/used:)の展開失敗回数
-  var _histHydrateRetryTimer = null;              // 同・張り直し予約(同時に1本だけ)
-  var _histHydrateInFlight = false;               // 同・実行中ガード(go5-idb-recovered/自前バックオフの二重cursor防止・Fable5診断2026-08-24)
+  // 投稿履歴画像(post:/used:)の展開状態は prefix 別に持つ(_histInFlight/_histRetryTimer/_histFails=hydrateHistPrefix_ 近傍で宣言)。
+  //   ★旧: post:/used: を1束で読み1つのフラグで守っていた=空の post: の巻き添えで used: を捨てていた(2026-08-23 実機ダンプで判明・修正)。
   // 展開成功/回復のたびに失敗連鎖をゼロへ戻す(件数と開始時刻を対で戻す=案内バーの持続ゲートが正しく効く)。
   function resetCandidateHydrateFailures_() { _candidateHydrateFailures = 0; _hydrateFailSince = 0; _refFail = Object.create(null); } // 一括展開が通った=stalledの根拠も消す(各カードは再評価で⏳→実画像へ)
   // ★「閉じて開き直せ」案内バーを出してよいかの唯一の判定(純関数=tests/test_idb_hint_gate.js で検証)。
@@ -1312,28 +1311,37 @@
   // 起動時：候補ページに必要なref/bskyだけを最優先で展開する。
   // 従来のentries()全件走査は同じDB内のドラフト動画Blobまで値として復元し、iPhoneで画像表示と
   // 投稿編集の両方を長時間止めていた。候補用が描けた後、統合ページだけpost/usedを裏で読む。
+  // ★post: と used: も「一括」で読まない(ref:/bsky: と同じ all-or-nothing の巻き添え・Chami実機ダンプ2026-08-23)。
+  //   warmダンプ: post: count=0 / used: count=91。cold時に空の post: カーソルが8秒無応答で timeout すると、
+  //   束(entriesByPrefixes)ごと reject し「読めた used: 91件(=動画で使った画像=投稿履歴のプレビュー)」を捨てて
+  //   markHydrated_ に到達せず、StockLists のプレビューが空のまま固定していた。prefix ごとに独立して読み・
+  //   読めた分は即マージ→markHydrated_ で描き直す=片方が固まってももう片方は必ず出る。
   function hydrateHistoryImages_() {
-    if (_hydrated || _histHydrateInFlight) return;
-    _histHydrateInFlight = true;
+    if (_hydrated) return;
     window.Go5ImgDiag && Go5ImgDiag.push('hist_start');
-    readImageEntries_(['post:', 'used:']).then(function (all) {
-      _histHydrateInFlight = false;
-      _histHydrateFailures = 0;
+    hydrateHistPrefix_('used:'); // 本命(動画で使った画像)。読めた瞬間に markHydrated_ で履歴プレビューを出す
+    hydrateHistPrefix_('post:'); // 併記(投稿画像・通常0件)。失敗しても used: を巻き添えにしない
+  }
+  var _histInFlight = Object.create(null), _histRetryTimer = Object.create(null), _histFails = Object.create(null);
+  function hydrateHistPrefix_(prefix) {
+    if (_hydrated || _histInFlight[prefix] || !_idbOk) return;
+    _histInFlight[prefix] = true;
+    readImageEntries_([prefix]).then(function (all) {
+      _histInFlight[prefix] = false;
+      _histFails[prefix] = 0;
       mergeImageEntries_(all);
-      window.Go5ImgDiag && Go5ImgDiag.push('hist_done', { count: Object.keys(all || {}).length });
+      window.Go5ImgDiag && Go5ImgDiag.push('hist_done', { prefix: prefix, count: Object.keys(all || {}).length });
       markHydrated_();  // go5-images-hydrated を発火→StockLists/ランキング(yt-clicks.js)が自動で描き直す
     }).catch(function (e) {
-      _histHydrateInFlight = false;
-      _histHydrateFailures++;
-      try { console.warn('[go5 idb] 投稿履歴画像の展開を再試行します', e); } catch (_) {}
-      // ★一発で諦めない(旧: 1.2秒後に1回だけ→以後 markHydrated_ が呼ばれず go5-images-hydrated が
-      //   永久に不発=StockLists のプレビューが空のまま固定されていた・Chami報告2026-08-16「更新では直らない」)。
-      //   scheduleCandidateHydrateRetry_ と同型の無限バックオフ(上限15秒)で、IDBが後から回復したら追いつく。
-      if (!_hydrated && !_histHydrateRetryTimer) {
-        var delay = Math.min(15000, 1000 * Math.pow(2, Math.min(4, Math.max(0, _histHydrateFailures - 1))));
-        _histHydrateRetryTimer = setTimeout(function () {
-          _histHydrateRetryTimer = null;
-          hydrateHistoryImages_();
+      _histInFlight[prefix] = false;
+      _histFails[prefix] = (_histFails[prefix] || 0) + 1;
+      try { console.warn('[go5 idb] 投稿履歴画像の展開を再試行します', prefix, e); } catch (_) {}
+      // ★一発で諦めない(無限バックオフ・上限15秒)。IDBが後から回復したら追いつく(Chami報告2026-08-16「更新では直らない」)。
+      if (!_hydrated && !_histRetryTimer[prefix]) {
+        var delay = Math.min(15000, 1000 * Math.pow(2, Math.min(4, Math.max(0, _histFails[prefix] - 1))));
+        _histRetryTimer[prefix] = setTimeout(function () {
+          _histRetryTimer[prefix] = null;
+          hydrateHistPrefix_(prefix);
         }, delay);
       }
     });
@@ -1351,7 +1359,13 @@
     _candidateHydrateInFlight = true;
     var __hydT0 = Date.now(), __hydCount = 0;
     window.Go5ImgDiag && Go5ImgDiag.push('hydrate_start');
-    readImageEntries_(['ref:', 'bsky:']).then(function (all) {
+    // ★ref: と bsky: を「一括(all-or-nothing)」で読まない(Chami実機ダンプ2026-08-23の真因)。
+    //   entriesByPrefixes は全prefixを1本のPromiseに束ね、どれか1つでも reject すると読めた分ごと捨てる。
+    //   cold iOS Safari のダンプでは +41673ms に「ref: を107件 読了」した直後、空(count=0)の bsky: カーソルが
+    //   8秒 無応答で idb_read_timeout → 束が reject → 読めていた107件の候補画像ごと捨てて hydrate_fail。
+    //   これが「全カードが⏳のまま2分間 出ない」の正体だった(読めているのに捨てて振り出しへ戻る自己ループ)。
+    //   本命の候補画像(ref:)だけで完了を確定し、bsky:(投稿プレビュー用・実データは通常0件)は巻き添えにしない。
+    readImageEntries_(['ref:']).then(function (all) {
       __hydCount = Object.keys(all || {}).length;
       mergeImageEntries_(all);
       return migrateLocalImages_();
@@ -1363,6 +1377,7 @@
       markCandidateHydrated_(); // 候補画像・コメントの空保存拒否をここで解除
       window.Go5ImgDiag && Go5ImgDiag.push('hydrate_done', { count: __hydCount, ms: Date.now() - __hydT0 });
       bgRender_();              // サムネ・コメント・✓バッジをすぐ反映
+      try { hydrateBskyImages_(); } catch (e) {} // bsky: は完了を人質に取らない別読み(失敗しても候補表示は確定済み)
       if (!window.__go5CandidateStandalone) hydrateHistoryImages_();
     }).catch(function (e) {
       _candidateHydrateInFlight = false;
@@ -1383,6 +1398,28 @@
       //   従来は成功時(1309)にしか hydrateHistoryImages_ を呼ばず、候補側が失敗ループに入ると投稿履歴の
       //   プレビューが一度も読まれず無言欠落していた(Fable5診断2026-08-24)。読む範囲は排他(ref/bsky↔post/used)。
       if (!window.__go5CandidateStandalone) { try { hydrateHistoryImages_(); } catch (e2) {} }
+    });
+  }
+  // ★bsky:(投稿プレビュー画像)の best-effort 読み。候補画像(ref:)の完了を待ってから別トランザクションで読む
+  //   =ref: 完了と競合させない・失敗しても候補表示を巻き添えにしない(ref:と違い hydrate_fail を起こさない)。
+  //   実データは通常0件で、失敗しても投稿プレビューが少し遅れて出るだけ=握り潰してよい。軽いバックオフで追いつく。
+  var _bskyHydrated = false, _bskyHydrateInFlight = false, _bskyHydrateRetryTimer = null, _bskyHydrateFailures = 0;
+  function hydrateBskyImages_() {
+    if (_bskyHydrated || _bskyHydrateInFlight || !_idbOk) return;
+    _bskyHydrateInFlight = true;
+    readImageEntries_(['bsky:']).then(function (all) {
+      _bskyHydrateInFlight = false;
+      _bskyHydrated = true;
+      _bskyHydrateFailures = 0;
+      mergeImageEntries_(all);
+      bgRender_();
+    }).catch(function () {
+      _bskyHydrateInFlight = false;
+      _bskyHydrateFailures++;
+      if (!_bskyHydrated && !_bskyHydrateRetryTimer) {
+        var delay = Math.min(15000, 1000 * Math.pow(2, Math.min(4, Math.max(0, _bskyHydrateFailures - 1))));
+        _bskyHydrateRetryTimer = setTimeout(function () { _bskyHydrateRetryTimer = null; hydrateBskyImages_(); }, delay);
+      }
     });
   }
   // ★IDBがプロセス単位で死んでいる時の最終防衛(アプリでは治せない=ユーザーに正しい手順を伝える)。
@@ -1518,7 +1555,7 @@
     if (!_idbOk) return;
     try {
       resetCandidateHydrateFailures_();          // _refFail もここで全消し=回復後にstalledカードが再挑戦
-      _histHydrateFailures = 0;
+      _histFails = Object.create(null); _histInFlight = Object.create(null); // 回復後に post:/used: を張り直せるよう失敗連鎖と実行中ガードを戻す
       if (!_candidateHydrated) hydrateImages_();
       if (!_hydrated && !window.__go5CandidateStandalone) hydrateHistoryImages_();
       bgRender_();
