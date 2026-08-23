@@ -939,7 +939,12 @@
       _candTextCache = { raw: null, map: {} }; // 次回読みで再parse(自分の書きでキャッシュ無効化)
       reqSync_();                              // 永続保存できた内容だけを同期へ送る
       return true;
-    } catch (e) { return false; } // 容量超過など
+    } catch (e) {
+      // ★localStorageが飽和して「小さなテキストすら書けない」時の無言の失敗を可視化(=(B)の計装ギャップ・Fable5診断2026-08-24)。
+      //   ここが false=refImgSave が L1231 で即 false=投稿編集の保存が丸ごと弾かれる真因の一つ。
+      try { klog_('cand_text_save_failed', 'work', cid, { cause: (e && e.name) || 'quota' }); } catch (_) {}
+      return false;
+    } // 容量超過など
   }
   function candTextSave_(cid, data) { return candTextWrite_(cid, data, new Date().getTime()); }
   // 移行バックフィル(冪等・空で非空を上書きしない): _imgMem.ref(旧正本)のテキストを cand_text へフィールド単位で埋め戻す。
@@ -1286,12 +1291,21 @@
         return pushRefToR2_(cid, imgs).then(function (r2ok) {
           if (r2ok) {
             var marker = { __r2n: imgs.length, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
-            try { localStorage.setItem(refImgKey(cid), JSON.stringify(marker)); _refLoaded[cid] = true; reqSync_(); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length }); return true; } catch (e3) {}
+            var markerStr = JSON.stringify(marker);
+            try { localStorage.setItem(refImgKey(cid), markerStr); _refLoaded[cid] = true; reqSync_(); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length }); return true; }
+            catch (e3) {
+              // ★実体はR2に載っている=あとは道標(数百B)のマーカーさえ書ければ成功。LS満杯なら、まさに今
+              //   上書きする同一cidの旧base64値を先に退けて1回だけ書き直す(消すのは上書き対象=喪失を増やさない)。
+              //   これを入れる前は e3 を握り潰して下の base64 退避(もっと大きい)へ落ち、R2成功なのに false を返していた(Fable5診断2026-08-24)。
+              try { localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), markerStr); _refLoaded[cid] = true; reqSync_(); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length, freed: 1 }); return true; } catch (e3b) {}
+            }
           }
           // R2に載らなかった=従来の base64 LS退避へ(img複製は落として足跡を半減=P1-3)。
           try {
             var recLs = { imgs: imgs, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
-            localStorage.setItem(refImgKey(cid), JSON.stringify(recLs));
+            var recLsStr = JSON.stringify(recLs);
+            try { localStorage.setItem(refImgKey(cid), recLsStr); }
+            catch (e2a) { localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), recLsStr); } // 同一cidの旧値を退けて1回だけ再試行(満杯時)
             _refLoaded[cid] = true; reqSync_(); return true;
           } catch (e2) {
             if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid];
@@ -2526,9 +2540,16 @@
       if (saveBtn.disabled) return;
       var saveMsg = body.querySelector('#refImgMsg');
       function showSaveFailure_(custom) {
-        saveMsg.textContent = custom || (pending.imgs.length
-          ? '画像をこの端末へ保存できませんでした。入力は残っています。もう一度お試しください'
-          : 'この端末へ保存できませんでした。入力は残っています。もう一度お試しください');
+        if (custom) { saveMsg.textContent = custom; return; }
+        // ★端末のlocalStorageが満杯=保存が焼き付かない。逃がし先(同期=R2バックアップ)が未設定だと満杯時に
+        //   退避もできず毎回失敗する(Fable5診断2026-08-24=r2Ready_ が最重要変数)。未設定なら原因ではなく打ち手を出す。
+        if (!r2Ready_()) {
+          saveMsg.textContent = 'この端末の保存領域がいっぱいです。同期(全端末バックアップ)を設定すると、満杯でも画像を逃がせて保存できるようになります。入力は残っています';
+        } else {
+          saveMsg.textContent = (pending.imgs.length
+            ? '画像をこの端末へ保存できませんでした(空き容量が不足)。入力は残っています。もう一度お試しください'
+            : 'この端末へ保存できませんでした(空き容量が不足)。入力は残っています。もう一度お試しください');
+        }
       }
       // ★候補保存も共通の単一終端権威へ接続。成功/失敗/時間切れ/遅着の最初の1件だけを採用し、
       //   どの経路でもボタンを必ず再操作可能へ戻す。候補とドラフトで別々の番犬を持たない。
