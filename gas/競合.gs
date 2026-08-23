@@ -31,6 +31,13 @@ var COMP_SEARCHLOG_HEADERS = ['日付', 'クエリ', 'ヒット数', 'candidate�
 // 背景: Chamiがアダアフィのコンサルから「コミュニティ投稿での訴求が効果高い」と教わった戦略仮説の受け皿。
 var COMP_COMMUNITY_SHEET   = '競合_コミュニティ観察';
 var COMP_COMMUNITY_HEADERS = ['記録日', 'チャンネル名', '投稿URL', '内容メモ', '効果メモ(反応/推移)', '記録者'];
+// ★自動経路(04:00トリガー)の実行結果を毎回durableに残す=silent green封じ(C-038/C-041・モドリッチ依頼2026-08-23)。
+//   04:00のトリガーは runCompetitorDaily() を直接呼び戻り値ok:falseを捨てていた=snapped==0(YT空/urlfetch枯渇)でも
+//   競合_日次へ1行も書けないまま"緑"に見え、2026-08-18の凍結が5日気づかれなかった。ここへ毎回1行残せば
+//   PC側の日次集計が「今日のok=false or 本日行が無い」を赤にできる(SpreadsheetApp書き込み=urlfetch枠に依存しない=
+//   枠枯渇でも必ず着地する)。追記のみ・既存タブに触れない=破壊面ゼロ。
+var COMP_STATUS_SHEET   = '競合_日次ステータス';
+var COMP_STATUS_HEADERS = ['実行日時', 'ok', 'snapped', 'windowVids', 'channels', 'newVideos', 'elapsedMs', 'note', 'webhook'];
 
 var COMP_WINDOW_DAYS = 30;    // 追跡窓(この日数を過ぎた動画は日次スナップの対象外)
 var COMP_QUOTA_CAP   = 2000;  // 競合ジョブの当日クォータ自主停止しきい値(標準10,000の20%)
@@ -520,6 +527,50 @@ function runCompetitorDaily() {
   return { ok: snapped > 0, channels: watch.length, newVideos: newVideos, snapped: snapped,
            windowVids: windowVids.length, elapsedMs: Date.now() - RUN_T0,
            note: snapped ? '' : 'snapped_zero: YT統計が空(urlfetch日次上限/APIキー/quota要確認)' };
+}
+
+// ============================================================
+// 04:00自動トリガーの入口(silent green封じ・モドリッチ依頼2026-08-23/B)。
+//   ★トリガーはこの関数を呼ぶ(setupTrigger)。runCompetitorDaily()の戻りを"捨てず"に必ず記録する:
+//   1) 競合_日次ステータス へ実行結果を1行append=SpreadsheetApp書き込みなのでurlfetch枠が枯れていても着地する
+//      (=枠枯渇=まさに今回の凍結原因、の時こそ確実に残る)。PC側日次集計はこの行のok=false/本日行欠で赤にできる。
+//   2) ok:false(snapped==0 or 例外)の時だけ、Discord webhook(prop COMP_ALERT_WEBHOOK)へbest-effortで鳴らす。
+//      ★webhookはurlfetchを使う=枠枯渇時は送れない(その時は上の1)がChami可視面への正)=fail-open(送れなくても記録は残る)。
+//   手動口 comp_daily_now は従来どおり runCompetitorDaily() を直接呼びJSONで返す(この入口は通さない)=挙動不変。
+function runCompetitorDailyWatched() {
+  var res;
+  try { res = runCompetitorDaily(); }
+  catch (err) { res = { ok: false, snapped: 0, error: String(err), note: 'exception: ' + String(err) }; }
+  var webhookState = 'skipped';
+  // 2) ok:false のときだけ best-effort でDiscordへ(fail-open=送れなくても続行)
+  if (!res || res.ok === false) {
+    var hook = prop_('COMP_ALERT_WEBHOOK');
+    if (hook) {
+      try {
+        var msg = '⚠️【競合_日次が自動経路で失敗】snapped=' + (res && res.snapped != null ? res.snapped : '?') +
+          ' / note= ' + String((res && (res.note || res.error)) || '') +
+          '\n(04:00自動トリガー・' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss') + ' JST)' +
+          '\n→ 競合_日次ステータス シートに実物が残っている。urlfetch日次枠の枯渇なら太平洋深夜のリセットまで載らない。';
+        var r = UrlFetchApp.fetch(hook, {
+          method: 'post', contentType: 'application/json',
+          payload: JSON.stringify({ content: msg.slice(0, 1900) }), muteHttpExceptions: true
+        });
+        var code = r.getResponseCode();
+        webhookState = (code >= 200 && code < 300) ? 'sent' : ('error:http_' + code);
+      } catch (we) { webhookState = 'error:' + String(we); } // 枠枯渇時はここに落ちる=想定内(1)で担保)
+    } else { webhookState = 'no_webhook'; }
+  } else { webhookState = 'ok_no_alert'; }
+  // 1) 実行結果をdurableに残す(最後=webhookの結果も一緒に記録)。SpreadsheetApp書き込み=urlfetch非依存で必ず着地。
+  try {
+    var sh = compSheet_(COMP_STATUS_SHEET, COMP_STATUS_HEADERS);
+    var nowJst = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+    sh.appendRow([nowJst,
+      res && res.ok === true, res && res.snapped != null ? res.snapped : '',
+      res && res.windowVids != null ? res.windowVids : '', res && res.channels != null ? res.channels : '',
+      res && res.newVideos != null ? res.newVideos : '', res && res.elapsedMs != null ? res.elapsedMs : '',
+      String((res && (res.note || res.error)) || ''), webhookState]);
+  } catch (se) { Logger.log('競合_日次ステータス append失敗: ' + String(se)); }
+  return res;
 }
 
 // ============================================================
