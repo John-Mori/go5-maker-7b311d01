@@ -51,6 +51,33 @@ function compSheet_(name, headers) {
   return sh;
 }
 
+// ---- PC側の日次赤判定用: 競合_日次ステータスの「本日(JST)行」を読み出す(読み取り専用・追記なし) ----
+//   silent green封じの"読み手"(三笘/モドリッチ依頼2026-08-23)。PC側集計が found=false(本日行が無い)or ok!=true(部分失敗)を赤にできる。
+//   SpreadsheetApp読み取りのみ=urlfetch枠に依存しない=枠枯渇時も応答する。既存タブに触れない=破壊面ゼロ。
+function compStatusToday_() {
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var ss = openSS_();
+  var sh = ss.getSheetByName(COMP_STATUS_SHEET);
+  if (!sh) return { ok: false, found: false, date: today, reason: 'no_status_sheet' };
+  var last = sh.getLastRow();
+  if (last < 2) return { ok: false, found: false, date: today, reason: 'empty' };
+  var vals = sh.getRange(2, 1, last - 1, COMP_STATUS_HEADERS.length).getValues();
+  for (var i = vals.length - 1; i >= 0; i--) { // 末尾から=本日の最新行を採る
+    var ts = vals[i][0];
+    var d = (ts instanceof Date) ? Utilities.formatDate(ts, tz, 'yyyy-MM-dd') : String(ts || '').slice(0, 10);
+    if (d !== today) continue;
+    var okv = vals[i][1];
+    return {
+      ok: (okv === true || String(okv).toLowerCase() === 'true'),
+      found: true, date: today, at: String(ts),
+      snapped: vals[i][2], windowVids: vals[i][3], channels: vals[i][4],
+      newVideos: vals[i][5], elapsedMs: vals[i][6], note: vals[i][7], webhook: vals[i][8]
+    };
+  }
+  return { ok: false, found: false, date: today, reason: 'no_row_today' };
+}
+
 // ---- クォータ会計: 当日消費に units を足す。上限超なら false(=以降のAPIを打たない) ----
 function compQuotaAdd_(units) {
   var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
