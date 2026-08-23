@@ -3140,6 +3140,48 @@ def routine_producer_model(rec):
         return None                                  # 判定不能=落とさない(Opusのまま)
 
 
+# ★★2026-08-23 イージス研究室(発注= 研究室HQ msg 1540971856662888560)。
+#   ②(`local/_model_override.json` の work 上書き)は**入れたのに1便も効いていなかった**。
+#   真因は配線ではなく**面が無いこと**=
+#     ・`work_model_for` を読むのは work agent 経路(このファイル :5061)だけ。
+#     ・ところが :5653 で「session_relay を持つ部屋は**作業便も relay へ渡す**」に変わっており
+#       (2026-07-26 Chami直接指示で旧ガード `not kw_work` を撤去)、DEPT_CONF **32室が全部
+#       session_relay=True**。= work agent 経路は現在 0本。読み口が実行経路に無い。
+#   実測(2026-08-23 16:03・`scripts/llm/work_model_check.py --hours 24`)=
+#     work便 276件 / **sonnet 0件**(改修α54=opus-4-8 / イージス53=opus-5 / HQ52=opus-5 …)
+#     = 台帳に載る model は relay のモデルと完全一致で、work_model_for の返り値とは一致しない。
+#   → **落とせる面は relay の便単位しかない**。判定はここ(述語の正本)・適用は session_relay。
+#
+#   ★名簿を新しく作らない= ②のJSON(`work` 節)を**そのまま**読む(ORG-11・単一の述語)。
+#     だから `"enabled": false` の1行で今までどおり全部戻る。戻す判断はイージス研究室が持つ。
+def work_relay_model(rec, dept, is_work):
+    """relayへ渡る便のうち「作業便 かつ 名指しの部屋」だけ安いモデル名。それ以外は None。
+
+    落とす条件(**全部**満たした時だけ):
+      ① `is_work=True`(デーモンの一次判定 classify_work が作業依頼と見た便)
+      ② `local/_model_override.json` の `work` にその部屋が載っている(=②のJSONが正本)
+      ③ Chami本人の便ではない(会話の相手がChamiなら品質を落とさない・C-014)
+      ④ 🔥/炎上/インシデント を含まない(手1と**同じ** `_KEEP_OPUS_MARKERS` を使う)
+    ★None= 落とさない。判定できない・読めない・例外は**全部 None へ倒す**
+      (§1「正確性>…>トークン効率」= 迷ったら高い方で回す。安くするために品質を賭けない)。
+    """
+    try:
+        if not is_work:
+            return None
+        m = model_override_for(dept, "work")
+        if not m:
+            return None
+        if session_relay is not None and session_relay.is_from_chami(rec):
+            return None
+        if "chami" in str((rec or {}).get("author") or "").lower():
+            return None                              # session_relay が読めない時の保険
+        if any(k in str((rec or {}).get("content") or "") for k in _KEEP_OPUS_MARKERS):
+            return None
+        return m
+    except Exception:
+        return None                                  # 判定不能=落とさない(Opusのまま)
+
+
 WORK_AUDIT = os.path.join(LOCAL, "llm", "work_audit.jsonl")
 
 

@@ -4265,6 +4265,16 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         if _cheap:
             model = _pin_model(_cheap)
             _log(dept, f"朝の定型producer便={rec.get('author','')}→{model}で回す(手1・重み1.0)")
+        # ★★2026-08-23 ②(work上書き)を**実際に効かせる**(HQ msg 1540971856662888560)。
+        #   32室すべてが session_relay=True なので作業便も**ここ**を通る=
+        #   dept_daemon.work_model_for(work agent経路)は現在0本で、上書きが読まれていなかった。
+        #   判定の正本は dept_daemon.work_relay_model 1本(is_work / 名簿 / Chami / 🔥 を全部あちらで見る)。
+        #   ★会話便は1文字も変わらない= is_work=False なら必ず None が返る(人格の演技はOpusのまま・C-045)。
+        else:
+            _wm = dept_daemon.work_relay_model(rec, dept, is_work)
+            if _wm:
+                model = _pin_model(_wm)
+                _log(dept, f"作業便(is_work)→{model}で回す(②・_model_override.json の work)")
     except Exception:
         pass                                          # 判定不能=既定のまま(Opus)
     # 事前交代の状態(★下の「初回、または世代交代」分岐と、返信末尾の1行で使う)
