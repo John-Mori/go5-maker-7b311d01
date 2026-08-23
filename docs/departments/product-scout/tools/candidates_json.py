@@ -264,6 +264,11 @@ def main():
                  "あらすじ本文は配信しない(client面へ過激本文を出さない)=PC専用サイドカー synopsis_<date>.json 側に置く。"),
         "candidates": out_candidates,
         "books_uncovered": books_uncovered,   # DB未収録のBooks cid(推測で埋めていない穴)
+        # ★除外集合を候補ページへも渡す(直近3日∪直近10件=Chami裁定・OR)。候補JSONは既にこれで
+        #   絞った物だが、候補ページ側は端末内ライブラリ(cand_items)を"今すぐ投稿できる"へ合流させる=
+        #   合流分は生成側の除外を通らない。ここで同じ除外cidを配ってページ側の合流でも弾く(single-source)。
+        #   出所=posted_log(全期間の投稿cidそのものではなく"直近窓"だけ・fail-openで空なら弾かない)。
+        "excluded_cids": sorted(posted_any),
     }
 
     os.makedirs(OUT_DIR, exist_ok=True)

@@ -288,11 +288,16 @@
     //   ★cands.length===0(絞り込みで全滅)でもここは動かす=フィルタが効いていてもライブラリ分は出す。
     var readyCids = {}; ready.forEach(function(c){ if(c.cid) readyCids[c.cid]=true; });
     var allCidMap = {}; all.forEach(function(c){ if(c.cid && !allCidMap[c.cid]) allCidMap[c.cid]=c; });
+    // ★投稿件数の縛り(Chami指示 2026-08-23・msg 1541174987971493898)=生成側の除外(直近3日∪直近10件)を
+    //   ライブラリ合流分にも効かせる。候補JSONの excluded_cids は生成側(candidates_json.py)が配る同じ集合=
+    //   ページで数え直さない(single-source)。空/未配布なら弾かない(fail-open=投稿済みが混じっても表示は続く)。
+    var EXCL = {}; (DATA.excluded_cids||[]).forEach(function(cid){ if(cid) EXCL[cid]=true; });
     var LIBMAP = loadLibMap_();
     Object.keys(REF).forEach(function(cid){
       if(readyCids[cid]) return;                 // 既にDATA由来でready入り済み
       if(!(REF[cid]||{}).has) return;             // 動画生成用画像が無いcidは対象外
       if(allCidMap[cid]) return;                  // DATAに存在=絞り込みで意図的に除外された物。合成で復活させない
+      if(EXCL[cid]) return;                        // 直近3日∪直近10件で投稿済み=合流でも復活させない(投稿件数の縛り)
       var lib = LIBMAP[cid] || {};
       var libCand = { id:'lib-'+cid, cid:cid, platform:(cid.indexOf('d_')===0?'doujin':'books'),
         title:(lib.title||cid), images:(lib.thumb?[lib.thumb]:[]),
