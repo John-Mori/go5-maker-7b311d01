@@ -71,7 +71,15 @@ from presence import lab_alive  # noqa: E402  生存判定(2信号)は全respond
 # ★session_rooms.PAIRS は引かない: PAIRSは「ミラー先が配線済みの部屋」であって
 #   「担当がセッションの部屋」ではない(実際 research-room / keiei-kikaku はPAIRSに無い)。
 #   別の目的の表を流用すると、片方を増やした時に静かにズレる(ORG-06と同型)。
-SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku")
+#
+# ★2026-07-26 `kaizen-analyst` を追加(実弾のログで見つけた穴)。
+#   Chamiが改善提案部門の窓を開けてアスナが着任したが、**あの部屋には精霊(dept_daemon)が居ない**。
+#   → `room_has_own_responder()` が False を返し、代打が「無人だ」と判断して
+#     **アスナ本人のセッション宛の便へ、使い捨ての --print で答えてしまう**。
+#   実際にログへ痕跡が残っていた= `応答 [改善提案部門-アスナ•トトリ] rc=1 "You've hit your weekly limit"`。
+#   **ORG-12(代打が本人セッション向けの便を食う)と同じ形が、別の部屋で再生していた。**
+#   ★「精霊が居ない」と「担当が居ない」は別。**セッションが担当している部屋は、精霊の有無に関わらず代打が触らない。**
+SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku", "kaizen-analyst")
 
 
 def room_is_session_owned(dept):
@@ -176,9 +184,18 @@ def handle(rec, token):
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     prompt = build_prompt(rec)
     try:
+        # ★2026-08-24 promptを**stdin**で渡す(argv末尾に置かない・イージス研究室)。
+        #   argvに置くとWindowsのコマンドライン上限(32,767字)を超えた便で CreateProcess が
+        #   WinError 206 を返し、Pythonは**FileNotFoundError**として投げる=「ファイルが無い」に
+        #   見える起動失敗で便が握り潰される(実障害= DISPATCH-system-engineer-1786575652694・
+        #   8/13 08:08〜08:29に5回連続で失敗し、その依頼は最後まで完了しなかった)。
+        #   session_relay/dept_daemon/persona_render は同日に stdin 化済み(commit 3f5ac58 ほか)。
+        #   ここだけ argv のまま残っていた= 今のところ prompt は定型+Discord本文(上限2,000字)で
+        #   上限に届かないが、**届かないのは入力の都合であって機構の保証ではない**。同じ穴を
+        #   1箇所に残さない。claude --print は positional prompt が無ければ stdin を prompt として読む。
         p = subprocess.run(
-            [CLAUDE, "--print", "--permission-mode", "bypassPermissions", prompt],
-            cwd=ROOT, env=env, capture_output=True, text=True,
+            [CLAUDE, "--print", "--permission-mode", "bypassPermissions"],
+            input=prompt, cwd=ROOT, env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=300,
         )
         ok = (p.returncode == 0)

@@ -1741,8 +1741,13 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
     #   (恒久対策・commit 3f5ac58)を入れたため、長さの上限そのものが消えた。
     #   止血を残すと28,000字超の便を無用にファイルへ逃がし、セッションに余分なReadを1回強いる
     #   =恒久対策の劣化になる。**同じ穴を2つの機構で塞がない**(ORG-11と同じ話)。
-    #   ★prompt_spill.py 自体は残す= dept_daemon.generate() と persona_render.py が
-    #     まだ positional argv で prompt を渡しており、そちらの止血として現役だ。
+    #   ★prompt_spill.py 自体は残す= ただし**用途は変わった**。2026-08-24時点で
+    #     dept_daemon.generate()(5019行)・dept_daemon の work 側(5157行)・persona_render.py(291行)・
+    #     claude_responder.handle() は**全て stdin 化済み**で、argvにpromptを載せる起動は残っていない
+    #     (grep実測 2026-08-24・イージス研究室)。prompt_spill は `guard`(逃がす)ではなく
+    #     `measure`(長さを測るだけ=監視の供給源)として呼ばれている。
+    #     ★この注記は元々「dept_daemon と persona_render はまだ argv」と書いていたが、
+    #       同じ8/13中に両方 stdin 化され**古くなっていた**。止血の要否を判断する材料なので直した。
     argv = [CLAUDE, "-p"]
     if session_id:
         argv += ["--resume", session_id]
