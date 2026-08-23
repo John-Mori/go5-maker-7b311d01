@@ -252,7 +252,7 @@
   var MAKER_REFRESH_MIN_MS = 60 * 1000; // 60秒
 
   var _activeTab = 'main'; // 'main' | サークルタブid
-  var _sort = 'added_desc';
+  var _sort = 'rank7d'; // 既定=直近1週間で売れてる順(Chami指示2026-08-24)。差分が溜まるまでは累計販売数→レビュー数へ自動フォールバック(scoreOfSort_ rank7d)
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
   var _workSearchByTab = {};
