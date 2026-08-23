@@ -87,7 +87,10 @@
 
   <div class="panel" id="loader">
     <div class="head">候補を読み込む</div>
-    <div class="row">
+    <button class="btn primary full" id="loadDaily" style="margin-bottom:10px">🔄 今日の候補を読み込む</button>
+    <div class="hint" id="dailyHint" style="margin:-4px 0 10px">端末から当日分を取り込みます (同期の設定が要ります)。</div>
+    <details class="cfg" style="margin-bottom:8px"><summary>手動で読み込む (ファイル / 貼り付け / URL)</summary>
+    <div class="row" style="margin-top:8px">
       <input type="file" id="file" accept="application/json,.json" style="flex:1 1 auto">
     </div>
     <label class="mini">または JSON を貼り付け</label>
@@ -97,6 +100,7 @@
       <button class="btn" id="loadUrl">URL から取得</button>
     </div>
     <div class="hint" style="margin-top:6px">URL 取得は <code>?src=</code> でも自動。前回の読み込みは端末に残ります。</div>
+    </details>
   </div>
 
   <details class="cfg panel">
@@ -296,13 +300,41 @@
   }
   function setStatusSafe(m){ $('#list').innerHTML='<div class="empty">'+esc(m)+'</div>'; }
 
-  // 起動: ?src= 優先 → 前回の読み込み → 空
+  // ---- 当日候補の取り込み (sync-worker /api/teian/latest ・本体アプリと同一オリジン=同期設定を共有) ----
+  //   PCの軍議が R2 へ置いた当日分を、本体アプリと同じ sync2_url/sync2_token で取り込む。
+  function syncCfg(){
+    var g=function(k){ try{ return (LS.getItem(k)||'').trim(); }catch(e){ return ''; } };
+    return { url:g('sync2_url').replace(/\/+$/,''), token:g('sync2_token') };
+  }
+  function fetchDaily(manual){
+    var c = syncCfg();
+    if(!/^https?:\/\//.test(c.url) || !c.token){
+      if(manual) renderEmpty('同期の設定が未完了です。本体アプリの ⚙同期 で URL と SYNC_TOKEN を登録してください (同じ端末なら1度で済みます)。');
+      return Promise.resolve(false);
+    }
+    setStatusSafe('今日の候補を取得中…');
+    return fetch(c.url+'/api/teian/latest', { headers:{'X-Sync-Token':c.token}, cache:'no-store' })
+      .then(function(r){ return r.json().catch(function(){ return null; }); })
+      .then(function(j){
+        if(j && j.error==='bad_token'){ renderEmpty('同期トークンが一致しません。本体アプリの設定を確認してください。'); return false; }
+        if(j && j.candidates && j.candidates.length){ load(j); return true; }
+        if(manual) renderEmpty('今日の候補はまだ配信されていません (軍議の生成待ち)。');
+        return false;
+      })
+      .catch(function(e){ if(manual) renderEmpty('取得に失敗: '+e); return false; });
+  }
+  $('#loadDaily').addEventListener('click', function(){ fetchDaily(true); });
+
+  // 起動: ?src= 優先 → 当日候補(同期) → 前回の読み込み → 空
   var qs = new URLSearchParams(location.search);
   if(qs.get('src')){ fetchSrc(qs.get('src')); }
   else {
-    var last = LS.getItem('teian_last_json');
-    if(last){ try{ load(JSON.parse(last)); }catch(e){ renderEmpty('候補を読み込んでください。'); } }
-    else renderEmpty('候補を読み込んでください (ファイル選択 / 貼り付け / URL)。');
+    fetchDaily(false).then(function(got){
+      if(got) return;
+      var last = LS.getItem('teian_last_json');
+      if(last){ try{ load(JSON.parse(last)); }catch(e){ renderEmpty('「🔄 今日の候補を読み込む」を押してください。'); } }
+      else renderEmpty('「🔄 今日の候補を読み込む」を押してください (未配信なら軍議の生成待ち)。');
+    });
   }
 })();
 </script>

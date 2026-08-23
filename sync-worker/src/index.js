@@ -14,6 +14,9 @@
  *   GET  /api/img/has?keys=a,b  → { ok, present:[...存在するkey] }（アップロード要否の判定）
  *   PUT  /api/img/:key          → 本文=画像バイト。R2 に保存（既存なら何もしない＝冪等）。{ ok, key }
  *   GET  /img/:key              → R2 から配信（トークン不要＝<img src>用・key は sha256 で推測困難・長期キャッシュ）
+ *   GET  /api/teian/latest       → 提案候補の当日JSONを配信（トークン必須）。R2 teian/latest.json。
+ *   GET  /api/teian/:date        → 指定日(YYYY-MM-DD)の提案候補JSON。R2 teian/<date>.json。未配信は {empty:true}。
+ *                                  ※書き込みは wrangler r2 object put（PC側=scripts/teian/publish_candidates.py）。
  *
  * セキュリティ：
  *   ・/api/* は X-Sync-Token（env.SYNC_TOKEN）一致必須。Origin は env.ALLOWED_ORIGINS（"*"可）。
@@ -55,6 +58,16 @@ export default {
     if (path === "/api/pull") {
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
       return statePull(env, cors);
+    }
+
+    // 提案候補(日次JSON)配信 — PCの軍議が R2 の teian/<date>.json / teian/latest.json へ置いた
+    //   当日分を、スマホの提案決定ページ(KouhoTeian.html)が取り込むための読み取り口。
+    //   PC側の書き込みは wrangler r2 object put(=アカウント資格)で行う=SYNC_TOKENをPCへ置かない。
+    //   読み取りは /api/pull と同じくトークン必須(候補リストは内部データ)。フロントは sync2_token を送る。
+    if (path === "/api/teian/latest" || path.startsWith("/api/teian/")) {
+      if (request.method !== "GET" && request.method !== "HEAD") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+      if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
+      return serveTeian(decodeURIComponent(path.slice("/api/teian/".length)), env, cors);
     }
 
     // 状態 push
@@ -145,6 +158,20 @@ async function serveImage(key, env, headOnly) {
   headers.set("Access-Control-Allow-Origin", "*");
   headers.set("etag", obj.httpEtag);
   return new Response(headOnly ? null : obj.body, { status: 200, headers });
+}
+// ── 提案候補(日次JSON) ───────────────────────────────────────
+//   キー = teian/latest.json（当日の指す先）/ teian/<YYYY-MM-DD>.json（日付固定）。
+//   未配信/無効日付は空(fail-open)= ページは「候補を読み込んでください」を出すだけで壊れない。
+async function serveTeian(name, env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  var key;
+  if (name === "latest" || name === "") key = "teian/latest.json";
+  else if (/^\d{4}-\d{2}-\d{2}$/.test(name)) key = "teian/" + name + ".json"; // 日付以外は弾く=パス横断防止
+  else return json({ ok: true, empty: true, candidates: [] }, 200, cors);
+  const obj = await env.SYNC_IMAGES.get(key);
+  if (!obj) return json({ ok: true, empty: true, candidates: [] }, 200, cors);
+  const body = await obj.text();
+  return new Response(body, { status: 200, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, cors || {}) });
 }
 async function imgHas(url, env, cors) {
   if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
