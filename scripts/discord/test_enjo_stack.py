@@ -201,6 +201,17 @@ check("改悪の絵文字IDが Chami作成の 1541110670748156014",
       next(w for w in RW.WATCH if w["kind"] == "kaiaku")["id"] == "1541110670748156014")
 check("改悪(kaiaku) が DEFECT_KINDS に在る(世代をまたぐ器へ積む=翌日振り返りの永続化)",
       "kaiaku" in RW.DEFECT_KINDS)
+# ★2026-08-24= Chamiが🔥をカスタム絵文字 enjoh(id 1541126866981752883)へ変更(意味は同じ)。
+#   Unicode🔥は取りこぼし防止で残す=enjo が2枚あるのが正。両方が id/char の索引に載ること。
+_enjo_rows = [w for w in RW.WATCH if w["kind"] == "enjo"]
+check("炎上(enjo)の絵文字が2枚在る(Unicode🔥＋カスタムenjoh・移行期の取りこぼし防止)",
+      len(_enjo_rows) == 2)
+check("カスタム炎上 enjoh の id が Chami指定の 1541126866981752883",
+      any(w["id"] == "1541126866981752883" and w["kind"] == "enjo" for w in RW.WATCH))
+check("Unicode🔥 が index に載る(id無し→char索引)", "🔥" in RW.WATCH_BY_CHAR)
+check("カスタムenjoh が index に載る(id有り→id索引)",
+      "1541126866981752883" in RW.WATCH_BY_ID
+      and RW.WATCH_BY_ID["1541126866981752883"]["kind"] == "enjo")
 
 ok = sum(1 for _, c in results if c)
 print(f"\n=== {ok}/{len(results)} PASS ===")
