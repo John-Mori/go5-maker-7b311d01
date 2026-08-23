@@ -129,6 +129,12 @@
   .segch button{width:auto;flex:0 0 auto;background:var(--field);border:none;color:var(--muted);
     padding:7px 12px;font-size:.78rem}
   .segch button.on{background:var(--accent);color:var(--accent-ink);font-weight:700}
+  /* ② チャンネルボタンは各テーマカラー準拠(月詠み=藍紫 / 宵桜=緋桜。本体のrank-acct色を踏襲)Chami指示 2026-08-23 */
+  .segch button.on[data-ch="acc1"]{background:#5A72B8;color:#fff}
+  .segch button.on[data-ch="acc2"]{background:#B25C86;color:#fff}
+  /* ③ 「この作品で決定」はオレンジ(Chami指示 2026-08-23) */
+  .pickBtn.primary{background:#e8801a;color:#fff}
+  .pickBtn.primary:hover{background:#d6720f}
   /* sticky decision bar */
   .decbar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:rgba(255,253,246,.96);
     border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));
@@ -209,11 +215,10 @@
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function num(n){ return (n==null||n==='')?'—':Number(n).toLocaleString('ja-JP'); }
-  // コメントは "/" が2行モードの改行位置(two_line)。表示だけ改行に開く(値・送信は生テキストのまま)。
-  function twoLineHtml(s){ return esc(s).replace(/\s*\/\s*/g,'<br>'); }
-  // コメント編集欄・決定値に渡す素の文字列。区切り '/' は動画メーカーの2行モードが読む
-  // 実改行(\n)へ寄せる=編集欄から '/' が消え、そのまま2行モードに貼れる(Chami指示 2026-08-24)。
-  function plainCmt(s){ return (s||'').replace(/\s*\/\s*/g,'\n'); }
+  // ★候補提案ページのコメントは全部一行表記(Chami指示 2026-08-23・msg 1541167814570672190)。
+  //   生成側の2行区切り '/' は候補ページでは開かず取り除く=表示・編集欄・決定値すべて1行。
+  function twoLineHtml(s){ return esc((s||'').replace(/\s*\/\s*/g,'')); }
+  function plainCmt(s){ return (s||'').replace(/\s*\/\s*/g,''); }
   // 技法ラベル(type)先頭の丸数字を落とす=画面に番号を出さない(選択肢1/2/3との混同回避・Chami指示 2026-08-24)。
   function deNum(s){ return (s||'').replace(/^[①-⑳㉑-㉟㊱-㊿]+\s*/,''); }
   var LS = window.localStorage;

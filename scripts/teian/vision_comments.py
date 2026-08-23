@@ -208,6 +208,15 @@ def has_ng(t):
 
 MIN_COMMENTS = 3
 MAX_COMMENTS = 3  # ★Chami訂正(2026-08-23・msg 1541032124641972304)=先の5択化(msg 1541009586331320392)は取り下げ。3択のまま据え置き。
+ONELINE_MAX = 10  # 1行(縮小なし)の上限=app.js:276-283
+
+
+def has_oneliner(coms):
+    """3案の少なくとも1つが1行言い切り(2行でなく10字以内)か。
+    仕様§4「少なくとも1案は1行でスパッと言い切る」(Chami指示2026-08-24)を
+    プロンプト任せにせず出力で検証する=全案2行の重い提案が素通りするのを止める。"""
+    return any((not c.get("two_line")) and (c.get("chars", 99) <= ONELINE_MAX)
+               for c in (coms or []))
 
 
 def parse_comments(raw):
@@ -308,17 +317,26 @@ def main():
             continue
 
         got = None
+        fallback = None   # 3案として妥当だが「全案2行」の惜しい出力=最後の保険(空配信よりマシ)
         for attempt in range(2):   # NG/形式不良は1回だけ生成し直す(§6・同型リトライ2回まで)
             try:
                 raw = call_vision(prompt, parts, title, synopsis, key, models)
             except Exception as e:
                 print(f"  vision 呼び出し失敗: {e}", file=sys.stderr)
                 break
-            got = parse_comments(raw)
-            if got:
+            cand = parse_comments(raw)
+            if cand and has_oneliner(cand):
+                got = cand
                 break
-            print(f"  出力が3案/NG語/形式で不合格→再生成({attempt + 1}/2)", file=sys.stderr)
+            if cand:
+                fallback = cand   # 妥当だが1行言い切り無し→もう一度だけ引き直す
+                print(f"  全案2行(1行言い切り無し)→引き直す({attempt + 1}/2)", file=sys.stderr)
+            else:
+                print(f"  出力が3案/NG語/形式で不合格→再生成({attempt + 1}/2)", file=sys.stderr)
             time.sleep(1)
+        if not got and fallback:   # 引き直しても揃わなければ妥当案を採用(fail-open・機械短縮はしない=品質優先)
+            got = fallback
+            print("  1行言い切りが揃わず=妥当案で採用(要確認)", file=sys.stderr)
         if got:
             c["comments"] = got
             filled += 1
