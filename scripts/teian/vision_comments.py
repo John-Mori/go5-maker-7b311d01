@@ -207,12 +207,11 @@ def has_ng(t):
 
 
 MIN_COMMENTS = 3
-MAX_COMMENTS = 5  # ★Chami追補(2026-08-23・msg 1541009586331320392)=3択→5択程度へ。
-                  #   生成側(プロンプト仕様§4)はcopy-directorの管轄=そちらが増やした分をここが受けられるよう上限だけ広げる。
+MAX_COMMENTS = 3  # ★Chami訂正(2026-08-23・msg 1541032124641972304)=先の5択化(msg 1541009586331320392)は取り下げ。3択のまま据え置き。
 
 
 def parse_comments(raw):
-    """vision の生JSONを comments[] に正規化。3〜5案・text必須・NG語なしを満たさなければ None(=要再生成)。"""
+    """vision の生JSONを comments[] に正規化。3案・text必須・NG語なしを満たさなければ None(=要再生成)。"""
     if not raw:
         return None
     # ```json フェンスが混ざっても拾えるように

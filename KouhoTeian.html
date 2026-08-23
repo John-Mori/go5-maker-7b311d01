@@ -69,15 +69,16 @@
     border-radius:10px;background:var(--card)}
   .rmc.mi{background:rgba(43,179,192,.07);border-color:rgba(43,179,192,.28)}
   .rmc.me{background:rgba(192,122,42,.08);border-color:rgba(192,122,42,.28)}
-  .rmc .ava{flex:0 0 auto;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
-    justify-content:center;font-size:.74rem;font-weight:800;color:var(--accent-ink)}
+  .rmc .ava{flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-size:.74rem;font-weight:800;color:var(--accent-ink);overflow:hidden}
+  .rmc .ava img{width:100%;height:100%;object-fit:cover;display:block}
   .rmc.mi .ava{background:var(--accent)}
   .rmc.me .ava{background:var(--warn)}
-  .rmc .body{min-width:0}
+  .rmc .body{min-width:0;flex:1 1 auto}
   .rmc .who{font-size:.68rem;font-weight:700;color:var(--muted);margin-bottom:2px}
   .rmc.mi .who{color:var(--accent)}
   .rmc.me .who{color:var(--warn)}
-  .rmc .rtext{font-size:.82rem;line-height:1.5;color:var(--ink)}
+  .rmc .rtext{font-size:.82rem;line-height:1.6;color:var(--ink);white-space:pre-wrap;word-break:break-word}
   .cand label.mini{margin-top:6px}
   .decide-row{display:flex;gap:8px;align-items:center;margin-top:8px}
   .segch{display:flex;gap:0;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
@@ -152,6 +153,22 @@
   function twoLineHtml(s){ return esc(s).replace(/\s*\/\s*/g,'<br>'); }
   var LS = window.localStorage;
 
+  // 部屋コメントのアバター(R2恒久URL・local/persona_avatars.json由来。期限切れ根絶済み=2026-07-16)。
+  var AVA_MITOMA = 'https://go5-sync.trustsignalbot.workers.dev/img/023b355179ae08bb4edcd7bb3b4bb3077f776667b29b577092c654b680f1abaa';
+  var AVA_MEI = 'https://go5-sync.trustsignalbot.workers.dev/img/c3d0a55ef45363cd7f7155df762cbc03867f80aa50f307cea41feb5bc4e5a133';
+  function avaHtml(url, letter){
+    return '<img class="avaimg" data-fallback="'+esc(letter)+'" src="'+esc(url)+'" alt="">';
+  }
+  // 画像取得に失敗しても壊れたアイコンのまま出さない(fail-open=文字アバターへ差し戻す)。errorはbubbleしないのでcapture。
+  document.addEventListener('error', function(e){
+    var t = e.target;
+    if(t && t.classList && t.classList.contains('avaimg')){
+      var span = document.createElement('span');
+      span.textContent = t.getAttribute('data-fallback') || '';
+      t.replaceWith(span);
+    }
+  }, true);
+
   // ---- 設定 (本体アプリと同一オリジン=localStorage共有) ----
   function gasUrl(){ return ($('#gasUrl').value.trim()) || LS.getItem('bsky_gas_url') || ''; }
   function gasSecret(){ var v=$('#gasSecret').value; return v!=='' ? v : (LS.getItem('bsky_gas_secret')||''); }
@@ -219,11 +236,11 @@
       var miText = (typeof rc.mitoma==='string') ? rc.mitoma : (rc.mitoma&&rc.mitoma.text);
       var me = rc.main||{};
       if(miText){
-        roomsHtml += '<div class="rmc mi"><div class="ava">三</div><div class="body">'+
+        roomsHtml += '<div class="rmc mi"><div class="ava">'+avaHtml(AVA_MITOMA,'三')+'</div><div class="body">'+
           '<div class="who">三笘薫</div><div class="rtext">'+esc(miText)+'</div></div></div>';
       }
       if(me&&me.text){
-        roomsHtml += '<div class="rmc me"><div class="ava">芽</div><div class="body">'+
+        roomsHtml += '<div class="rmc me"><div class="ava">'+avaHtml(AVA_MEI,'芽')+'</div><div class="body">'+
           '<div class="who">'+esc(me.by||'早坂芽衣')+'</div><div class="rtext">'+esc(me.text)+'</div></div></div>';
       }
       if(roomsHtml) roomsHtml = '<div class="rooms">'+roomsHtml+'</div>';
