@@ -304,18 +304,46 @@ def t_bootstrap_daily_escalation_on_period():
     assert _run_bootstrap_with_fail(288, every=288) == [], "n=289で誤発火した(毎周期化)"
 
 
-def t_initialized_does_not_daily_escalate():
-    # 初期化後(wm有り)は「時間で」escalateしない=未初期化枝だけの仕掛け(C-035)。
+def _run_initfail_with_fail(kind, d_fail_seed, every=288):
+    """初期化済み(wm有り)で異常を1周回し、seed後の連続失敗数nで周期escalateするか測る。
+    kind='read'= fetch=None(口が落ちた) / kind='blocked'= 配達失敗。返り値= 部屋への警報list。"""
     with tempfile.TemporaryDirectory() as d:
         p = Paths(d)
-        T._write_int(p.wm, 7)                    # 初期化済み
-        T._write_int(p.fail, 287)                # 次周で n=288
+        T._write_int(p.wm, 7)                    # 初期化済み(口は生えていた)
+        T._write_int(p.fail, d_fail_seed)        # この周で n = seed+1
         alerts, alert = _alert_recorder()
         _, note = _note_recorder()
-        _, deliver = _recorder()
-        T.run_once(lambda s: None, deliver, alert=alert, note=note,
-                   wm_path=p.wm, fail_path=p.fail, alert_at=3, wait_alert_every=288)
-        assert alerts == [], f"初期化後にdaily escalateが誤発火した(未初期化枝限定のはず): {alerts}"
+        if kind == "read":
+            _, deliver = _recorder()
+            res = T.run_once(lambda s: None, deliver, alert=alert, note=note,
+                             wm_path=p.wm, fail_path=p.fail, alert_at=3, wait_alert_every=every)
+            assert res["status"] == "fail-open", res
+        else:
+            def deliver(row):
+                return False                     # 常に配達失敗=blocked
+            fetch = _fetch_from(lambda s: [r for r in (_row(8),) if r["row"] > s], last_row=8)
+            res = T.run_once(fetch, deliver, alert=alert, note=note,
+                             wm_path=p.wm, fail_path=p.fail, alert_at=3, wait_alert_every=every)
+            assert res["status"] == "blocked", res
+        return alerts
+
+
+def t_initialized_read_fail_daily_escalation_on_period():
+    # ★デブライネさん 2026-08-23: 初期化後の read-fail(口が落ちた)は n==alert_at の一発だけでなく
+    #   周期ちょうど(n=288=約24h)でも部屋へ1回。287/289では出ない(閾値を外すと赤=must-fail)。
+    at = _run_initfail_with_fail("read", 287, every=288)
+    assert len(at) == 1, f"初期化後read-failが周期(n=288)で部屋へ1回出ていない: {len(at)}"
+    assert _run_initfail_with_fail("read", 286, every=288) == [], "n=287で誤発火した(狼少年)"
+    assert _run_initfail_with_fail("read", 288, every=288) == [], "n=289で誤発火した(毎周期化)"
+
+
+def t_initialized_blocked_daily_escalation_on_period():
+    # ★同上: 配達不能(blocked)が続いても周期(n=288)で部屋へ1回=静かな死を防ぐ。287/289では出ない。
+    at = _run_initfail_with_fail("blocked", 287, every=288)
+    assert len(at) == 1, f"blockedが周期(n=288)で部屋へ1回出ていない: {len(at)}"
+    assert "row=8" in at[0], f"blocked警報が対象行を語っていない: {at[0]}"
+    assert _run_initfail_with_fail("blocked", 286, every=288) == [], "n=287で誤発火した(狼少年)"
+    assert _run_initfail_with_fail("blocked", 288, every=288) == [], "n=289で誤発火した(毎周期化)"
 
 
 def main():
@@ -332,7 +360,8 @@ def main():
         ("note 追記のみで開閉が二重にならない", t_note_open_item_toggles_append_only),
         ("★返す物2 本番hq_open_itemsを触らない", t_never_touches_hq_open_items),
         ("★返す物4 未初期化の滞留は周期ちょうどで部屋へ1回", t_bootstrap_daily_escalation_on_period),
-        ("★返す物4 初期化後は時間でescalateしない(枝限定)", t_initialized_does_not_daily_escalate),
+        ("★初期化後read-failは周期でも部屋へ1回(静かな死を防ぐ)", t_initialized_read_fail_daily_escalation_on_period),
+        ("★初期化後blockedは周期でも部屋へ1回(静かな死を防ぐ)", t_initialized_blocked_daily_escalation_on_period),
     ]
     ok = sum(run(n, f) for n, f in tests)
     print(f"\n{ok}/{len(tests)} PASS")

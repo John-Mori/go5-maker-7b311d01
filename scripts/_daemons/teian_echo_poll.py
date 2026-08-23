@@ -335,30 +335,34 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
         # fail-open: 水位を進めない。連続失敗カウンタに積む。
         n = (_read_int(fail_path) or 0) + 1
         _write_int(fail_path, n)
-        if n == alert_at:
-            if initialized:
-                # 口は生えていたのに落ちた=本物の異常 → 部屋へ1回 + 受け手が読む面へ1行
+        at_threshold = (n == alert_at)
+        # n は5分刻み=経過時間の代理。周期ちょうど(約24h,48h…)を「時間で滞留」の合図に使う。
+        at_period = bool(wait_alert_every) and (n % wait_alert_every == 0)
+        if initialized:
+            # 口は生えていたのに落ちた=本物の異常。★閾値ちょうど **または** 周期(約24h)ごとに部屋へ1回。
+            #   n==alert_at の一発だけだと、口が落ちたまま続くと2度と鳴らない=静かな死
+            #   (デブライネさん指摘 2026-08-23 / C-041=一度の観測を状態の代理にするな)。
+            if at_threshold or at_period:
+                hours = n * POLL_INTERVAL_MIN // 60
                 alert(f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた/HTML/JSON壊れ 等)。"
-                      f"水位={since}のまま待機している。")
+                      f"水位={since}のまま約{hours}時間待機している。")
                 note("read-fail", f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた)。"
                                   f"水位={since}のまま。")
-            else:
-                # 口がまだ無い=既知の待ち。部屋では鳴らさないが、口待ちの静観も受け手が読む面に残す
-                # (ローカルログは誰も読まない=返す物2)。ログにも1行(継ぎ目の内側)。
+        else:
+            # 口がまだ無い=既知の待ち。閾値では部屋で鳴らさない(狼少年回避)=ログ+受け手が読む面に1回。
+            if at_threshold:
                 logf(f"[fail-open] 提案決定エコー: 読み取り口がまだ無い(既知・{n}回連続)。"
                      f"水位ファイルは作らずに待機。")
                 note("bootstrap-wait",
                      f"経路Bは稼働中・改修αの読み取り口(?action=teian_decisions)がまだ無いため"
                      f"fail-openで静観中(連続{n}回・水位ファイルは未作成・部屋では鳴らさない)。")
-        # ★返す物4= 未初期化のまま「時間で」滞留したら部屋へ escalate する。
-        #   n==alert_at の1回きりだと、口が生えないまま忘れられても跡は最初の1行だけ=静かな死。
-        #   n は5分刻み=経過時間の代理。wait_alert_every 周期ごと(約24h,48h…)に部屋へ1回だけ。
-        #   増分でなく滞留時間で検知する(未初期化=既知の待ちなので閾値では鳴らさない=狼少年回避と両立)。
-        if not initialized and wait_alert_every and n % wait_alert_every == 0:
-            hours = n * POLL_INTERVAL_MIN // 60
-            alert(f"提案決定→軍議エコー(経路B)は改修αの読み取り口(?action=teian_decisions)が"
-                  f"無いまま約{hours}時間(連続{n}回)待ち続けている。決定は提案決定シートに溜まるのに"
-                  f"誰も『まだ届いていない』と気づけない=読み取り口の実装が忘れられていないか確認してほしい。")
+            # ★返す物4= 未初期化のまま「時間で」滞留したら周期ちょうどで部屋へ1回escalate。
+            #   n==alert_at の1回きりだと、口が生えないまま忘れられても跡は最初の1行だけ=静かな死。
+            if at_period:
+                hours = n * POLL_INTERVAL_MIN // 60
+                alert(f"提案決定→軍議エコー(経路B)は改修αの読み取り口(?action=teian_decisions)が"
+                      f"無いまま約{hours}時間(連続{n}回)待ち続けている。決定は提案決定シートに溜まるのに"
+                      f"誰も『まだ届いていない』と気づけない=読み取り口の実装が忘れられていないか確認してほしい。")
         return {"status": "fail-open", "watermark": since, "delivered": 0, "fails": n}
 
     if not initialized:
@@ -385,8 +389,11 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             n = (_read_int(fail_path) or 0) + 1
             _write_int(fail_path, n)
             logf(f"[据え置き] row={rownum} の配達に失敗。水位={since} のまま次周期へ(連続{n}回)。")
-            if n == alert_at:
-                alert(f"決定は記録されているのに軍議へ配達できない状態が{n}回続いている(row={rownum})。"
+            # ★閾値ちょうど **または** 周期(約24h)ごとに部屋へ1回。配達不能が続いても
+            #   n==alert_at の一発だけだと2度と鳴らない=静かな死(デブライネさん指摘 2026-08-23 / C-041)。
+            if n == alert_at or (wait_alert_every and n % wait_alert_every == 0):
+                hours = n * POLL_INTERVAL_MIN // 60
+                alert(f"決定は記録されているのに軍議へ配達できない状態が{n}回続いている(row={rownum}・約{hours}時間)。"
                       f"dispatch側を確認してほしい。水位={since}のまま。")
                 note("deliver-blocked",
                      f"決定は記録されているのに軍議へ配達できない状態が{n}回(row={rownum})。水位={since}のまま。")
