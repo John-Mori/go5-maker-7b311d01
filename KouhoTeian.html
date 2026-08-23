@@ -209,9 +209,9 @@
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function num(n){ return (n==null||n==='')?'—':Number(n).toLocaleString('ja-JP'); }
-  // ④コメントは "/" が2行モードの改行位置(two_line)。表示だけ改行に開く(値・送信は生テキストのまま)。
+  // コメントは "/" が2行モードの改行位置(two_line)。表示だけ改行に開く(値・送信は生テキストのまま)。
   function twoLineHtml(s){ return esc(s).replace(/\s*\/\s*/g,'<br>'); }
-  // ④コメント編集欄・決定値に渡す素の文字列。区切り '/' は動画メーカーの2行モードが読む
+  // コメント編集欄・決定値に渡す素の文字列。区切り '/' は動画メーカーの2行モードが読む
   // 実改行(\n)へ寄せる=編集欄から '/' が消え、そのまま2行モードに貼れる(Chami指示 2026-08-24)。
   function plainCmt(s){ return (s||'').replace(/\s*\/\s*/g,'\n'); }
   var LS = window.localStorage;
@@ -374,7 +374,7 @@
         '</div>'+
         cbody+
         roomsHtml+
-        '<label class="mini">④コメント (手直し可)</label>'+
+        '<label class="mini">コメント (手直し可)</label>'+
         '<textarea rows="2" class="cmtEdit" data-cand="'+cid_+'" placeholder="この作品のコメント">'+esc(plainCmt(cmts.length?cmts[0].text:''))+'</textarea>'+
         '<div class="decide-row">'+
           '<span class="segch" data-cand="'+cid_+'">'+
@@ -549,7 +549,7 @@
     if(!pick.id){ $('#decbar').style.display='none'; return; }
     $('#decbar').style.display='block';
     var chName = pick.channel==='acc2'?'宵桜艶帖':'月詠み';
-    $('#decSum').innerHTML = '決定: <b>'+esc(pick.title)+'</b><br>ch=<b>'+esc(chName)+'</b> / ④=<b>'+esc(pick.comment||'(未入力)')+'</b>';
+    $('#decSum').innerHTML = '決定: <b>'+esc(pick.title)+'</b><br>ch=<b>'+esc(chName)+'</b> / コメント=<b>'+esc(pick.comment||'(未入力)')+'</b>';
     $('#sendBtn').disabled = !(pick.comment && pick.comment.trim());
   }
 
