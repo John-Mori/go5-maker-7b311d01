@@ -135,7 +135,9 @@
       var btn = root.document.createElement('button');
       btn.type = 'button';
       btn.textContent = '📋 画像診断をコピー(リロード前も記録)';
-      btn.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:100000;background:#0e1422;color:#e8eef7;border:1px solid #2bb3c0;border-radius:10px;padding:8px 12px;font-size:12px;line-height:1.4;box-shadow:0 4px 16px rgba(0,0,0,.4);cursor:pointer;';
+      // ★bottomを持ち上げる=iPhone Safariのボトムツールバーやページのボタンでbottomがpx小さいと隠れて
+      //   「どこにあんの?」になる(Chami 2026-08-24)。safe-area＋十分な余白＋大きめ・目立つ配色で必ず見える所へ。
+      btn.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 96px);z-index:2147483647;background:#2bb3c0;color:#062028;border:2px solid #0e1422;border-radius:24px;padding:12px 18px;font-size:15px;font-weight:700;line-height:1.4;box-shadow:0 6px 20px rgba(0,0,0,.5);cursor:pointer;';
       btn.addEventListener('click', function () {
         var text = dump();
         var done = function () {
