@@ -211,6 +211,9 @@
   function num(n){ return (n==null||n==='')?'—':Number(n).toLocaleString('ja-JP'); }
   // ④コメントは "/" が2行モードの改行位置(two_line)。表示だけ改行に開く(値・送信は生テキストのまま)。
   function twoLineHtml(s){ return esc(s).replace(/\s*\/\s*/g,'<br>'); }
+  // ④コメント編集欄・決定値に渡す素の文字列。区切り '/' は動画メーカーの2行モードが読む
+  // 実改行(\n)へ寄せる=編集欄から '/' が消え、そのまま2行モードに貼れる(Chami指示 2026-08-24)。
+  function plainCmt(s){ return (s||'').replace(/\s*\/\s*/g,'\n'); }
   var LS = window.localStorage;
 
   // 部屋コメントのアバター(R2恒久URL・local/persona_avatars.json由来。期限切れ根絶済み=2026-07-16)。
@@ -372,7 +375,7 @@
         cbody+
         roomsHtml+
         '<label class="mini">④コメント (手直し可)</label>'+
-        '<textarea rows="2" class="cmtEdit" data-cand="'+cid_+'" placeholder="この作品のコメント">'+esc(cmts.length?cmts[0].text:'')+'</textarea>'+
+        '<textarea rows="2" class="cmtEdit" data-cand="'+cid_+'" placeholder="この作品のコメント">'+esc(plainCmt(cmts.length?cmts[0].text:''))+'</textarea>'+
         '<div class="decide-row">'+
           '<span class="segch" data-cand="'+cid_+'">'+
             '<button type="button" class="chBtn'+(c.channel!=='acc2'?' on':'')+'" data-ch="acc1">月詠み</button>'+
@@ -507,8 +510,9 @@
     document.querySelectorAll('input[name^="cmt_"]').forEach(function(r){
       r.addEventListener('change', function(){
         var ta = document.querySelector('textarea.cmtEdit[data-cand="'+this.dataset.cand+'"]');
-        if(ta) ta.value = this.value;
-        if(pick.id===this.dataset.cand){ pick.comment = this.value; refreshBar(); }
+        var v = plainCmt(this.value);
+        if(ta) ta.value = v;
+        if(pick.id===this.dataset.cand){ pick.comment = v; refreshBar(); }
       });
     });
     document.querySelectorAll('textarea.cmtEdit').forEach(function(ta){
