@@ -45,6 +45,14 @@ chk("?=赤", bool(C.stale_reason("?")))
 chk("不正な日付=赤", bool(C.stale_reason("not-a-date")))
 
 
+# --- 1b) 純関数 status_red_reason: ②(本日行ありでも ok=false)を赤に ---
+chk("②本日行ok=true=緑(None)", C.status_red_reason({"found": True, "ok": True}) is None)
+chk("②本日行ありok=false=赤", bool(C.status_red_reason({"found": True, "ok": False, "snapped": 0, "note": "quota"})))  # ★新しい網
+chk("②no_status_sheet(移行期)=緑(None)", C.status_red_reason({"found": False, "reason": "no_status_sheet"}) is None)
+chk("②シート有だが本日行が無い=赤", bool(C.status_red_reason({"found": False, "reason": "no_row_today"})))
+chk("②status取得不能(None)=②不成立=None", C.status_red_reason(None) is None)
+
+
 # --- 2) main() 実行: 外部の手(fetch)だけ偽物・判定と分岐は本物 ---
 def fake_titles(snap):
     return {"titles": [
@@ -55,19 +63,32 @@ def fake_titles(snap):
     ]}
 
 
-# 赤: 上流が古い → main は集計へ進まず STALE_EXIT を返す(ファイル書き込み前に return)
+# 赤(①): 上流が古い → main は集計へ進まず STALE_EXIT を返す(ファイル書き込み前に return)
 C.fetch = lambda: fake_titles(dstr(3))
 sys.argv = ["competitor_daily.py"]        # --emit を含めない=stderr へ理由を出して rc を返す
 chk("main: 上流が古いと rc=STALE_EXIT(3)=赤", (C.main() or 0) == C.STALE_EXIT)
 
-# 緑: 上流が今日 → ゲートを越えて集計まで進む。出力先は temp へ退避し実データを汚さない
+# 赤(②): ①は緑(データは今日)だが comp_status が ok=false → main は STALE_EXIT を返すべき。
+#   ★must-fail の勘所= ②未配線の旧 main はここで集計まで進み rc=0(緑)=このテストが落ちる。
+#   temp へ退避=②未配線時に main が集計まで進んでも実データを汚さない。
 with tempfile.TemporaryDirectory() as td:
     C.OUTDIR = os.path.join(td, "competitor_daily")
     C.LEDGER = os.path.join(td, "ledger.jsonl")
     C.METRICS = os.path.join(td, "metrics.jsonl")
     C.fetch = lambda: fake_titles(dstr(0))
+    C.fetch_status = lambda: {"found": True, "ok": False, "snapped": 0, "note": "urlfetch quota"}
     sys.argv = ["competitor_daily.py"]
-    chk("main: 今日の行が有ると集計へ進む(rc=0)=緑", (C.main() or 0) == 0)
+    chk("main: ①緑でも②ok=falseなら rc=STALE_EXIT(3)=赤", (C.main() or 0) == C.STALE_EXIT)
+
+# 緑: 上流が今日 かつ ②ok=true → ゲートを越えて集計まで進む。出力先は temp へ退避し実データを汚さない
+with tempfile.TemporaryDirectory() as td:
+    C.OUTDIR = os.path.join(td, "competitor_daily")
+    C.LEDGER = os.path.join(td, "ledger.jsonl")
+    C.METRICS = os.path.join(td, "metrics.jsonl")
+    C.fetch = lambda: fake_titles(dstr(0))
+    C.fetch_status = lambda: {"found": True, "ok": True, "date": dstr(0)}
+    sys.argv = ["competitor_daily.py"]
+    chk("main: 今日の行が有り②okなら集計へ進む(rc=0)=緑", (C.main() or 0) == 0)
     chk("緑のとき当日レポート(.md)が書かれる",
         os.path.exists(os.path.join(C.OUTDIR, dstr(0) + ".md")))
 

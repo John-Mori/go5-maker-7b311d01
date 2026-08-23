@@ -132,6 +132,22 @@ def fetch():
         last = raw[:80]
     raise RuntimeError("comp_titles が4回とも JSON でない(GAS/Google側の障害): " + last)
 
+def fetch_status():
+    """GAS action=comp_status を GET(ゲート無し・SpreadsheetApp読みのみ=urlfetch枠非依存=枠枯渇時も応答。
+    改修α新設 GAS 2026-08-23I/commit 4fd76d7)。本日の 競合_日次ステータス行 {found,ok,reason,snapped,note,...} を返す。
+    取れない/JSONでない時は None を返す=②(部分失敗の網)は不成立=①(stale_reason)がデータ側で本命の網を張る。
+    ★②の取得失敗で誤発火(赤)させない代わりに、黙って落とさないよう stderr に1行残す。"""
+    try:
+        cfg = json.load(open(os.path.join(ROOT, "scripts", "gas_deploy_config.json")))
+        url = cfg["execUrl"] + "?action=comp_status"
+        raw = subprocess.check_output(["curl", "-sL", "--max-time", "60", url]).decode("utf-8", "replace")
+        if raw.lstrip().startswith("{"):
+            return json.loads(raw)
+        sys.stderr.write("comp_status が JSON でない(②はスキップ・①は有効): %s\n" % raw[:80])
+    except Exception as e:
+        sys.stderr.write("comp_status 取得に失敗(②はスキップ・①は有効): %s\n" % e)
+    return None
+
 def load_ledger():
     seen = {}
     if os.path.exists(LEDGER):
@@ -324,6 +340,27 @@ def stale_reason(snap):
                 "新規行を書けていない=同じ日付を毎朝再集計しているだけ" % (snap, today, lag))
     return None
 
+def status_red_reason(status):
+    """②(部分失敗の網)。comp_status(competitor_daily ステータス行)を読み、①(stale_reason=本日行が無い)を
+    越えて『データ行は在る/新しく見えるのに、その回の日次実行が失敗を自己申告している(ok=false)』を赤にする。
+    ①=総崩れ(本日行そのものが無い)/②=部分失敗(本日行は在るが ok=false)= silent green の残り穴を塞ぐ二段目
+    (AD研究室モドリッチ本命依頼・改修α comp_status GAS 2026-08-23I・C-038/§3 可用性は喋る側へ倒す)。
+    ★status=None(取得不能)=②不成立=None(①がデータ側で本命を張る=ここで誤発火させない)。
+    ★reason=='no_status_sheet' はステータスシート未作成(8/24 04:00の初回 runCompetitorDailyWatched で作られる)=
+      移行期の正常=②不成立(総崩れは①が拾う)。それ以外の found=false は本日行欠=赤。"""
+    if not status:
+        return None
+    if status.get("found") is not True:
+        if status.get("reason") == "no_status_sheet":
+            return None
+        return ("競合_日次ステータスの本日行が無い(found=false reason=%s)。"
+                "GAS runCompetitorDailyWatched が本日のステータス行を書けていない" % status.get("reason"))
+    if status.get("ok") is not True:
+        return ("競合_日次ステータスの本日行が ok=false(部分失敗: snapped=%s note=%s)。"
+                "データ行は在るが本日の日次実行が失敗を自己申告している"
+                % (status.get("snapped"), status.get("note")))
+    return None
+
 def main():
     d = fetch()
     ts = d["titles"]
@@ -340,6 +377,20 @@ def main():
             print(alert)
         else:
             sys.stderr.write(alert + "\n")
+        return STALE_EXIT
+
+    # ★② 部分失敗の網: ①(本日行が無い)を越えても「行は在るが ok=false(部分失敗)」を silent green で
+    #   見逃さない。comp_status(urlfetch枠非依存)の本日行を読み、ok=false / 本日行欠(シート有)なら赤で返す。
+    #   ①が緑=データが新しく見える時にだけ効く二段目(AD研究室モドリッチ本命依頼/改修α comp_status・C-038)。
+    sred = status_red_reason(fetch_status())
+    if sred:
+        alert2 = ("競合日次(自動): ⚠️" + sred + "。→ データ行の鮮度(①)は通ったが、本日の日次実行が"
+                  "失敗を自己申告している(②)。GAS側(runCompetitorDailyWatched の note/webhook)を要確認。"
+                  "詳細= local/competitor_daily_push.log")
+        if "--emit" in sys.argv:
+            print(alert2)
+        else:
+            sys.stderr.write(alert2 + "\n")
         return STALE_EXIT
 
     seen = load_ledger()
