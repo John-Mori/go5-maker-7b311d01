@@ -206,8 +206,13 @@ def has_ng(t):
     return any(p in t for p in NG_PHRASES)
 
 
+MIN_COMMENTS = 3
+MAX_COMMENTS = 5  # ★Chami追補(2026-08-23・msg 1541009586331320392)=3択→5択程度へ。
+                  #   生成側(プロンプト仕様§4)はcopy-directorの管轄=そちらが増やした分をここが受けられるよう上限だけ広げる。
+
+
 def parse_comments(raw):
-    """vision の生JSONを comments[] に正規化。3案・text必須・NG語なしを満たさなければ None(=要再生成)。"""
+    """vision の生JSONを comments[] に正規化。3〜5案・text必須・NG語なしを満たさなければ None(=要再生成)。"""
     if not raw:
         return None
     # ```json フェンスが混ざっても拾えるように
@@ -219,10 +224,10 @@ def parse_comments(raw):
     except Exception:
         return None
     arr = obj.get("comments") if isinstance(obj, dict) else obj
-    if not isinstance(arr, list) or len(arr) < 3:
+    if not isinstance(arr, list) or len(arr) < MIN_COMMENTS:
         return None
     out = []
-    for i, c in enumerate(arr[:3]):
+    for i, c in enumerate(arr[:MAX_COMMENTS]):
         if not isinstance(c, dict):
             return None
         text = sanitize_text(c.get("text"))

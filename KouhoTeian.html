@@ -51,8 +51,8 @@
   .meta{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px}
   .chip{font-size:.68rem;color:var(--muted);background:var(--field);border:1px solid var(--line2);
     border-radius:999px;padding:3px 8px;white-space:nowrap}
-  .chip.ch{color:var(--accent-ink);background:var(--accent);border:none;font-weight:700}
-  .chip.prov{color:var(--warn);border-color:var(--warn)}
+  .chip.lp{color:var(--muted);background:var(--field);border:1px solid var(--line2)}
+  .chip.lp.new{color:var(--accent-ink);background:var(--accent);border:none;font-weight:700}
   .thumbs{display:flex;gap:6px;overflow-x:auto;padding:6px 0 8px;-webkit-overflow-scrolling:touch}
   .thumbs img{flex:0 0 auto;height:120px;width:auto;border-radius:8px;background:var(--canvas);
     border:1px solid var(--line);object-fit:cover}
@@ -170,6 +170,16 @@
   }
 
   function candChannel(c){ return c.channel || 'acc1'; }
+  function chName(ch){ return ch==='acc2' ? '宵桜艶帖' : (ch==='acc1' ? '月詠み' : (ch||'')); }
+  // 最終投稿タグ(Chami追補【1】2026-08-23)。旧「月詠み用/宵桜用」の割当表示は廃止=作品はどちらでも可。
+  // last_posted:{date,channel} は商品候補選定部門が候補へ足す想定(未着任なら null 扱い=fail-open)。
+  function lastPostedChip(c){
+    var lp = c.last_posted;
+    if(!lp || !lp.date){ return '<span class="chip lp new">未投稿</span>'; }
+    var parts = String(lp.date).split('-');
+    var md = parts.length>=3 ? (parseInt(parts[1],10)+'/'+parseInt(parts[2],10)) : esc(lp.date);
+    return '<span class="chip lp">最終投稿 '+md+' '+esc(chName(lp.channel))+'</span>';
+  }
 
   function render(){
     if(!DATA || !DATA.candidates || !DATA.candidates.length){ renderEmpty('候補がありません。JSON を読み込んでください。'); return; }
@@ -181,8 +191,7 @@
       var m = c.metrics||{};
       var rv = m.review;
       var meta = [];
-      meta.push('<span class="chip ch">'+esc(c.channel==='acc2'?'宵桜艶帖(acc2)':'月詠み(acc1)')+'</span>');
-      if(c.channel_provisional) meta.push('<span class="chip prov">ch暫定</span>');
+      meta.push(lastPostedChip(c));
       meta.push('<span class="chip">'+esc(c.platform||'')+'</span>');
       meta.push('<span class="chip">販売数 '+num(m.sales_n)+'</span>');
       if(m.score!=null) meta.push('<span class="chip">score '+esc(m.score)+'</span>');
