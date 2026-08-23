@@ -82,10 +82,37 @@ def load_prompt():
 
 
 def latest_candidates():
-    files = sorted(glob.glob(os.path.join(TEIAN_DIR, "candidates_*.json")))
+    # ★正規名 candidates_YYYY-MM-DD.json だけを最新候補にする。candidates_*.vision-test.json 等の
+    #   変種を掴むと、その隣に synopsis_* サイドカーが無く「あらすじ永久に無」で静かに死ぬため除外する
+    #   (テスト固定を使いたい時は --in で明示)。
+    canon = re.compile(r"^candidates_\d{4}-\d{2}-\d{2}\.json$")
+    files = sorted(f for f in glob.glob(os.path.join(TEIAN_DIR, "candidates_*.json"))
+                   if canon.match(os.path.basename(f)))
     if not files:
-        raise RuntimeError(f"候補JSONが無い: {TEIAN_DIR}/candidates_*.json")
+        raise RuntimeError(f"候補JSONが無い: {TEIAN_DIR}/candidates_YYYY-MM-DD.json")
     return files[-1]
+
+
+def load_synopsis(inp):
+    """候補JSONと同ディレクトリの synopsis_<date>.json(product-scoutが置くPC専用サイドカー)を読み
+    {cid: あらすじ本文 or null} を返す。★本文は配信JSON(candidates_*.json)には載っていない=過激本文を
+    client面へ流さないため、ここでvisionへ渡すためだけに読む(docへ書き戻さない)。無い/壊れは {} =
+    従来どおり絵のみで続行(fail-open・必須依存にしない・回帰ゼロ)。"""
+    base = os.path.basename(inp)
+    if "candidates_" not in base:
+        return {}
+    side = os.path.join(os.path.dirname(os.path.abspath(inp)),
+                        base.replace("candidates_", "synopsis_", 1))
+    if not os.path.exists(side):
+        return {}
+    try:
+        with open(side, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        syn = d.get("synopsis")
+        return syn if isinstance(syn, dict) else {}
+    except Exception as e:
+        print(f"  [synopsis] 読めず {side}: {e}(絵のみで続行)", file=sys.stderr)
+        return {}
 
 
 def mime_of(url, data):
@@ -118,11 +145,14 @@ def fetch_image(url, timeout=30):
         return None
 
 
-def call_vision(prompt, image_parts, title, key, models, timeout=180):
-    """1候補ぶんの画像+プロンプトを投げて生JSON文字列を返す(候補が無ければ '')。"""
+def call_vision(prompt, image_parts, title, synopsis, key, models, timeout=180):
+    """1候補ぶんの画像+プロンプトを投げて生JSON文字列を返す(候補が無ければ '')。
+    synopsis は取得できた時だけ §4 プロンプトへ渡す任意メタ(vision仕様§1.5=画像＋あらすじ／失敗なら絵のみ)。"""
     parts = [{"text": prompt}]
     if title:
         parts.append({"text": f"\n【任意メタ】作品タイトル: {title}"})
+    if synopsis:
+        parts.append({"text": f"\n【任意メタ】あらすじ(解釈材料・題名/煽りに直接使わない): {synopsis}"})
     for ip in image_parts:
         parts.append({"inline_data": ip})
     payload = {
@@ -228,6 +258,7 @@ def main():
         doc = json.load(f)
     cands = doc.get("candidates") or []
     prompt = load_prompt()
+    syn_map = load_synopsis(inp)   # {cid: 本文 or null}・無ければ {}(絵のみ)
     models = [args.model] if args.model else list(DEFAULT_MODELS)
 
     key = "" if args.dry_run else read_key()
@@ -235,7 +266,7 @@ def main():
         print("GeminiのAPIキーが未設定(local/gemini_api_key.txt か GEMINI_API_KEY)", file=sys.stderr)
         sys.exit(2)
 
-    filled = failed = skipped = 0
+    filled = failed = skipped = syn_used = 0
     processed = 0
     for c in cands:
         if args.limit and processed >= args.limit:
@@ -249,10 +280,17 @@ def main():
             continue
         processed += 1
         title = c.get("title") or ""
-        print(f"[cand {c.get('id')}] {title[:24]} imgs={len(imgs)}", file=sys.stderr)
+        synopsis = ""
+        raw_syn = syn_map.get(c.get("cid"))
+        if isinstance(raw_syn, str) and raw_syn.strip():
+            synopsis = raw_syn.strip()[:1500]   # 保険で上限。取得できた時だけ渡す
+            syn_used += 1
+        print(f"[cand {c.get('id')}] {title[:24]} imgs={len(imgs)} あらすじ={'有' if synopsis else '無'}",
+              file=sys.stderr)
 
         if args.dry_run:
-            print(f"  (dry-run) 画像{min(len(imgs), args.images)}枚 + §4プロンプト{len(prompt)}字 を送信予定")
+            print(f"  (dry-run) 画像{min(len(imgs), args.images)}枚 + §4プロンプト{len(prompt)}字"
+                  f" + あらすじ{len(synopsis)}字 を送信予定")
             continue
 
         parts = []
@@ -268,7 +306,7 @@ def main():
         got = None
         for attempt in range(2):   # NG/形式不良は1回だけ生成し直す(§6・同型リトライ2回まで)
             try:
-                raw = call_vision(prompt, parts, title, key, models)
+                raw = call_vision(prompt, parts, title, synopsis, key, models)
             except Exception as e:
                 print(f"  vision 呼び出し失敗: {e}", file=sys.stderr)
                 break
@@ -291,10 +329,12 @@ def main():
             "generated_by": "system-engineer/scripts/teian/vision_comments.py",
             "prompt_source": "docs/departments/copy-director/vision_3択生成プロンプト仕様.md §4",
             "filled": filled, "failed": failed, "skipped": skipped,
+            "synopsis_used": syn_used,   # あらすじを渡せた候補数(本文はサイドカーのみ・docへ載せない)
         }
         with open(out, "w", encoding="utf-8") as f:
             json.dump(doc, f, ensure_ascii=False, indent=2)
-        print(f"\nwrote {out}\n埋めた {filled} / 失敗(空のまま) {failed} / 対象外 {skipped}")
+        print(f"\nwrote {out}\n埋めた {filled} / 失敗(空のまま) {failed} / 対象外 {skipped}"
+              f" / あらすじ添付 {syn_used}")
 
 
 if __name__ == "__main__":
