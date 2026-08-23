@@ -327,6 +327,32 @@ export default {
       }
     }
 
+    // ── 投稿履歴の直近読み出し：候補ページの「投稿済み非表示」ゲートを生成側(daily_pick.py)と同一のD1権威で駆動 ──
+    //   GET /posted/recent?limit=40 → posted_at 降順の直近 limit 件 {cid,channel,posted_at}。既定40=「直近3日 OR 直近10件」の
+    //   両方を賄える件数(実測≈5本/日)。候補ページのts再構築(ローカル履歴由来・欠落でゲートが素通り)を排し、
+    //   生成側 posted_recent(3d)/posted_recent_by_count(10) と同じ判定を客户端でも同一データで効かせる(Chami 2026-08-24)。
+    //   認証=公開ソフト鍵(X-Shared-Secret)+Origin(/posted と同型)。読み取り専用。
+    if (path === "/posted/recent") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      const corsR = corsHeaders(origin, allowed);
+      if (!corsR) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, corsR);
+      const secR = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || secR !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsR);
+      if (!env.FANZA_DB) return json({ ok: false, error: "db_unbound" }, 500, corsR);
+      let limR = parseInt(url.searchParams.get("limit") || "40", 10);
+      if (!Number.isFinite(limR) || limR < 1) limR = 40;
+      if (limR > 200) limR = 200;
+      try {
+        const rsR = await env.FANZA_DB.prepare(
+          "SELECT cid, channel, posted_at FROM posted_log ORDER BY posted_at DESC LIMIT ?"
+        ).bind(limR).all();
+        return json({ ok: true, items: (rsR && rsR.results) || [] }, 200, corsR);
+      } catch (e) {
+        return json({ ok: false, error: String((e && e.message) || e) }, 500, corsR);
+      }
+    }
+
     // ── サークル（maker）の作品一覧：候補タブの「サークルタブ」用 ──────────────────
     //   POST /api/fanza-maker-list { makerId, sort? }
     //   sort: "date"(既定・発売日新しい順) | "rank"(人気=直近の売れ行きに近い動的ランキング) | "review"

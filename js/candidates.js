@@ -402,9 +402,69 @@
     }
     return false;
   }
+  // ── D1 posted_log 権威の直近ゲート(生成側 daily_pick.py と同一ソース) ────────────────
+  //   候補ページのローカル履歴由来ts再構築は、ts欠落(所有スタンプ無し/シート由来薄アイテム)だと
+  //   recentPostedTopItems_ が黙って落とし「✔は付くのに直近10件で非表示にならない」素通りを起こす
+  //   (Chami 2026-08-24)。→ 生成側と同じ D1 posted_log(posted_at権威)を裏で取り寄せ、
+  //   「直近10件」と「直近3日」の cid 集合を作ってゲートへOR合流する。取得失敗/未設定は空集合=
+  //   従来のローカル判定へ完全フォールバック(fail-open・可用性優先)。
+  var K_POSTED_RECENT_D1 = 'posted_recent_d1_v1';
+  var _postedRecentD1Inflight = false;
+  function postedRecentD1Cache_() {
+    try { var v = JSON.parse(localStorage.getItem(K_POSTED_RECENT_D1) || 'null'); return (v && typeof v === 'object' && Array.isArray(v.items)) ? v : null; } catch (e) { return null; }
+  }
+  function fetchPostedRecentD1_() {
+    if (_postedRecentD1Inflight) return;
+    var cfg = workerCfg();
+    if (!cfg.url) return; // Worker未設定=フォールバック(何もしない)
+    var cache = postedRecentD1Cache_();
+    if (cache && cache.fetchedAt && (Date.now() - cache.fetchedAt) < 600000) return; // 10分TTL
+    if (typeof fetch !== 'function') return;
+    _postedRecentD1Inflight = true;
+    fetch(cfg.url + '/posted/recent?limit=40', { headers: { 'X-Shared-Secret': cfg.secret } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        _postedRecentD1Inflight = false;
+        if (!data || data.ok !== true || !Array.isArray(data.items)) return; // 失敗はキャッシュ据え置き
+        try { localStorage.setItem(K_POSTED_RECENT_D1, JSON.stringify({ fetchedAt: Date.now(), items: data.items })); } catch (e) { return; }
+        try { if (_activeTab === 'main') render(); else if (typeof renderMaker === 'function') renderMaker(_activeTab); } catch (e) {}
+      })
+      .catch(function () { _postedRecentD1Inflight = false; });
+  }
+  // D1権威の「直近10件」cid集合(両ch合算・posted_at降順の上位10。workerが降順で返す)。
+  function d1RecentTop10Cids_() {
+    var c = postedRecentD1Cache_(); if (!c) return null;
+    var set = {}, n = 0;
+    for (var i = 0; i < c.items.length && n < RECENT_POSTED_COUNT; i++) {
+      var cid = String((c.items[i] && c.items[i].cid) || ''); if (!cid) continue;
+      set[cid] = 1; n++;
+    }
+    return set;
+  }
+  // D1権威の「直近3日」cid集合。
+  function d1Within3dCids_() {
+    var c = postedRecentD1Cache_(); if (!c) return null;
+    var set = {}, now = Date.now();
+    for (var i = 0; i < c.items.length; i++) {
+      var row = c.items[i]; if (!row || !row.cid) continue;
+      var p = Date.parse(row.posted_at || ''); if (!p) continue;
+      if ((now - p) < POSTED_COOLDOWN_MS) set[String(row.cid)] = 1;
+    }
+    return set;
+  }
+  function isInD1Set_(it, set) {
+    if (!set) return false;
+    var ks = candCidsOf_(it);
+    for (var i = 0; i < ks.length; i++) { if (set[ks[i]]) return true; }
+    return false;
+  }
   function isHiddenByPosted_(it) {
     if (!it) return false;
     if (!_hidePosted.acc1 && !_hidePosted.acc2) return false; // どちらのトグルもOFF=隠さない
+    // ★D1権威(生成側と同一ソース)の直近3日/直近10件にヒットしたら隠す。取得できていれば ts再構築に依らず確実。
+    if (isInD1Set_(it, d1Within3dCids_())) return true;
+    if (isInD1Set_(it, d1RecentTop10Cids_())) return true;
+    // フォールバック(D1未取得時):従来のローカル履歴由来ts判定。
     var last = lastPostedTsAnyCh_(it);
     if (last && (Date.now() - last) < POSTED_COOLDOWN_MS) return true; // 最終投稿から3日以内=クールタイム中=隠す
     return isHiddenByRecentCount_(it); // ★OR: 両ch合算の直近10件の投稿に含まれる作品も隠す
@@ -4488,6 +4548,7 @@
     tabId = tabId || 'main';
     invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
     fetchPostedAuthority_(); // 投稿済み判定の権威索引(GASシート)を裏で更新(10分TTL・失敗時はローカル判定へフォールバック)
+    fetchPostedRecentD1_(); // 「投稿済み非表示」ゲート用の直近投稿(D1 posted_log=生成側と同一権威)を裏で更新(10分TTL・失敗時はローカルts判定へフォールバック)
     var key = itemsKey(tabId);
     var el = $('candList');
     var all = lsGet(key, '[]');
@@ -4616,6 +4677,7 @@
   function renderMaker(tabId, force) {
     invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
     fetchPostedAuthority_(); // 投稿済み判定の権威索引(GASシート)を裏で更新(10分TTL・失敗時はローカル判定へフォールバック)
+    fetchPostedRecentD1_(); // 「投稿済み非表示」ゲート用の直近投稿(D1 posted_log=生成側と同一権威)を裏で更新(10分TTL・失敗時はローカルts判定へフォールバック)
     var tabs = lsGet(K_TABS, '[]');
     var tab = null; tabs.forEach(function (t) { if (t.id === tabId) tab = t; });
     var body = $('candBody');
