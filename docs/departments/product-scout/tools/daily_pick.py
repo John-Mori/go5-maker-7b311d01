@@ -41,7 +41,7 @@ def sample_n(info):
     return 0
 
 EXCLUDE_DAYS = 3      # ★除外窓(日)。Chami 2026-08-23 裁定Aで 21→3 に緩和(下記docstring)。
-EXCLUDE_RECENT_N = 10 # ★AND第2ゲート=直近この件数の投稿に含まれるcidも除外(Chami 2026-08-23)。
+EXCLUDE_RECENT_N = 10 # ★OR第2条件=直近この件数の投稿に含まれるcidも除外(Chami 2026-08-23。K=10で確定=裁定A/option1)。
                       #   実測ペース≈5本/日=直近10件は"直近ほぼ2日ぶん"。体調等で投稿が空くと日数だけでは
                       #   3日クリアで直近作品が復活してしまう=順番として直近の物を守る安全網。
 
@@ -69,9 +69,9 @@ def posted_recent_by_count(n=EXCLUDE_RECENT_N):
         return set()
 
 def excluded_cids():
-    """除外集合=『直近3日に投稿』∪『直近10件の投稿に含まれる』(Chami裁定=日数と件数の二重ゲート)。
-    ★候補に"表示される"のは両ゲートを通過した物だけ(=除外集合はunion=どちらかに該当すれば除外)。
-    片方が空(fail-open)でももう片方は効く。"""
+    """除外集合=『直近3日に投稿』∪『直近10件の投稿に含まれる』(Chami裁定=日数 OR 件数)。
+    ★OR=どちらか一方でも該当すれば除外(Chami 2026-08-23『andじゃなくてor条件だったね』)。
+    ★候補に"表示される"のは両条件のどちらにも該当しない物だけ。片方が空(fail-open)でももう片方は効く。"""
     return posted_recent() | posted_recent_by_count()
 
 def parse(rows):
