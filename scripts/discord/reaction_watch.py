@@ -81,6 +81,9 @@ LEDGER = os.path.join(LOCAL, "llm", "reaction_seen.jsonl")
 #   同じ器にすると、実時間で拾った改悪が朝の巡回から見えなくなり、
 #   改善提案部門が読む一覧(KAIZEN_DIGEST)から**その日の改悪が丸ごと落ちる**=数え落とし。
 #   → 実時間の一報は自分の台帳で冪等を取り、朝の巡回の材料は1件も食わない。
+#   ★★**この台帳は「配達の冪等」専用。集計に使うな**(研究室HQ裁定 C-056追記・2026-08-24)。
+#     数える正本は**朝の一覧(KAIZEN_DIGEST)だけ**。ここを集計に足すと同じ改悪が2件に増える。
+#     ★同じ改悪が部屋へ2回届くのは仕様(早鐘+朝の正式便)。2回目を「再送事故」と読むな。
 REALTIME_LEDGER = os.path.join(LOCAL, "llm", "reaction_realtime_seen.jsonl")
 BODY_DIR = os.path.join(LOCAL, "llm")
 API = "https://discord.com/api/v10"

@@ -308,6 +308,33 @@ def pick_msg_id(synthetic_id, posted_id):
     return p if p.isdigit() else synthetic_id
 
 
+# ★2026-08-24 イージス研究室(発注= 研究室HQ DISPATCH-aegis-gl-1787501611568 / HQ-0208)。
+#   何が壊れていたか= `q.enqueue()` は **投入できた時だけ True** を返す(leasequeue.py 159〜170・
+#   msg_id は UNIQUE なので重複は False)。ところが**その戻り値を誰も読んでいなかった**ため、
+#   `DISPATCH-<部門>-<ミリ秒>` が被った便は**無警報で消えたまま「投函」と印字**されていた。
+#   = C-048(機械の「成功した」は書いた後の実物を読み直した値で言わせる)違反・§3「最悪の事故は沈黙」。
+#   → ①通常時のidは**1文字も変えない**(既に台帳とDiscordに引用が残っている)
+#     ②被った時だけ `-2` `-3` … で逃がす
+#     ③逃がしきれなかったら**成功と印字しない**(fail-loud。ここは可用性ではなく記録の正しさの話)。
+ID_COLLISION_MAX = 9          # base + -2..-9。これで足りない=時計かキューが壊れている
+
+
+def enqueue_unique(enqueue, base_id, build_body, max_tries=ID_COLLISION_MAX):
+    """id が被らなくなるまで投函を試す。★純粋関数(外へ出る手は引数の enqueue だけ)。
+
+    enqueue(body, msg_id) -> bool   … 投入できたら True(重複は False)
+    build_body(msg_id)    -> str    … **確定した id を載せた**本文を作り直す
+                                      (便の中の msg_id と行の msg_id を食い違わせないため)
+    戻り値= (ok, 実際に載ったid, 試した回数)。ok=False の時 id は "" (=1件も載っていない)。
+    ★1回目で通るのが通常経路= その時 id は base_id そのもの。
+    """
+    for i in range(1, max(1, int(max_tries)) + 1):
+        mid = base_id if i == 1 else f"{base_id}-{i}"
+        if enqueue(build_body(mid), mid):
+            return True, mid, i
+    return False, "", max(1, int(max_tries))
+
+
 def post_work_to_channel(dept, persona, post_body, timeout=90):
     """相手部門チャンネルへ実依頼を投稿し、**実Discord message_id を返す**(取れなければ "")。
 
@@ -362,31 +389,45 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
     if is_work:
         posted_id = post_work_to_channel(dept, sender.split("(")[0], build_work_post(sender, work, body))
 
-    mid = pick_msg_id(synthetic, posted_id)
-    rec = {
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "dept": dept,
-        "channel": ch,
-        # ★送信者を明示する。デーモンが「誰の指示か」を判断できるようにするため。
-        #   Chami本人ではないので `chami_fusoh` を騙らない(騙ると人事の記録が汚れる)。
-        "author": sender,
-        "content": body,
-        "msg_id": mid,
-        "via": "dispatch",           # 組織内伝達であることの目印
-    }
-    # ★宛先の宣言(C-050恒久)。key は常に載せる= 宣言の無い便を後から数えられる形にする。
-    rec.update(aud)
-    if is_work:
-        rec["work"] = work.strip()   # 何を頼んだかを便にも残す(後追い可能に)
+    base_mid = pick_msg_id(synthetic, posted_id)
+
+    def build_rec(mid_):
+        rec = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "dept": dept,
+            "channel": ch,
+            # ★送信者を明示する。デーモンが「誰の指示か」を判断できるようにするため。
+            #   Chami本人ではないので `chami_fusoh` を騙らない(騙ると人事の記録が汚れる)。
+            "author": sender,
+            "content": body,
+            "msg_id": mid_,
+            "via": "dispatch",           # 組織内伝達であることの目印
+        }
+        # ★宛先の宣言(C-050恒久)。key は常に載せる= 宣言の無い便を後から数えられる形にする。
+        rec.update(aud)
+        if is_work:
+            rec["work"] = work.strip()   # 何を頼んだかを便にも残す(後追い可能に)
+        return json.dumps(rec, ensure_ascii=False)
+
     try:
         sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
         from leasequeue import LeaseQueue
         q = LeaseQueue(QUEUE_DB)
-        q.enqueue(json.dumps(rec, ensure_ascii=False), msg_id=mid, dept=dept)
-        q.close()
+        try:
+            ok, mid, tries = enqueue_unique(
+                lambda b, m: q.enqueue(b, msg_id=m, dept=dept), base_mid, build_rec)
+        finally:
+            q.close()
     except Exception as e:
         print(f"  [{dept}] ★キュー投函に失敗: {type(e).__name__}: {e}")
-        return False, mid
+        return False, base_mid
+    if not ok:
+        # ★fail-loud。ここで黙ると便が1本消えたまま「投函した」と嘘をつく(=直した穴そのもの)。
+        print(f"  [{dept}] ★キュー投函に失敗: msg_id {base_mid} は -2〜-{ID_COLLISION_MAX} まで"
+              f"全て既存=**この便はキューへ入っていない**(投函していない)")
+        return False, ""
+    if tries > 1:
+        print(f"  [{dept}] ★id衝突(同じミリ秒に別便): {base_mid} は既存だったので {mid} で投函した")
     if is_work:
         seen = "表投稿OK" if str(posted_id).isdigit() else "表投稿は失敗(便は届いた)"
         print(f"  [{dept}] 実依頼をキューへ投函 msg={mid} (ch={ch}) [{seen}] 宛先={aud['audience'] or '(無し)'}")

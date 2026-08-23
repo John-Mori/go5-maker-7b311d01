@@ -115,11 +115,20 @@ def _run_dispatch(also_post, work, body):
         return _FakeProc()
 
     class _FakeQueue:                    # キューは本体=壊さず、書いた中身だけ控える
+        # ★2026-08-24 本物の契約に合わせた(イージス研究室)。本物の LeaseQueue.enqueue は
+        #   **投入できたら True・msg_id が重複したら False** を返す。ここが None を返していたため、
+        #   dispatch が戻り値を読むようになった途端この検査だけが赤くなった。
+        #   = 偽物が契約を偽っていた(§3「検証が失敗したら、まず検証の妥当性を疑う」)。
         def __init__(self, *a, **k):
             self.rows = []
+            self.ids = set()
 
-        def enqueue(self, payload, **k):
+        def enqueue(self, payload, msg_id=None, **k):
+            if msg_id in self.ids:
+                return False             # 本物と同じ冪等(msg_id は UNIQUE)
+            self.ids.add(msg_id)
             enq.append(payload)
+            return True
 
         def close(self):
             pass

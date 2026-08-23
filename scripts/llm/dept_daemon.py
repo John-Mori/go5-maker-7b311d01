@@ -5253,9 +5253,14 @@ class Daemon:
             body = dict(rec, dept=head, channel=ch, msg_id=mid, via="escalate",
                         note="\n\n".join(note))
             q = LeaseQueue(os.path.join(LOCAL, "queue", "inbox.db"))
-            q.enqueue(json.dumps(body, ensure_ascii=False), msg_id=mid, dept=head)
+            added = q.enqueue(json.dumps(body, ensure_ascii=False), msg_id=mid, dept=head)
             q.close()
-            log(self.dept, f"部門長 {head} へ上申 msg={mid}")
+            # ★2026-08-24(イージス研究室・C-048)= 戻り値を読んでから言う。
+            #   ここの id は `ESC-<部門>-<元のmsg_id>` で**決め打ち**=重複は「既に上申済み」の意味であって
+            #   便が消えたわけではない。だから True のままにするが、**印字だけは実物に合わせる**
+            #   (「上申した」と「もう上がっていた」を混ぜない)。★False を返すとHQへの二重上申になる。
+            log(self.dept, f"部門長 {head} へ上申 msg={mid}" if added
+                else f"部門長 {head} へは既に上申済み msg={mid}(重複=投函していない)")
             return True
         except Exception as e:
             log(self.dept, f"部門長への上申に失敗({type(e).__name__})→HQへ回す")

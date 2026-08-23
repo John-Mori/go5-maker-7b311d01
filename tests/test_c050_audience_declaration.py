@@ -26,7 +26,6 @@ import re
 import sqlite3
 import sys
 import tempfile
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
@@ -74,19 +73,18 @@ try:
     def sent(audience, work=""):
         """本物の dispatch() を通し、**キューへ実際に入った便**を読み戻す。
 
-        ★msg_id は `DISPATCH-<dept>-<ミリ秒>`= **同じミリ秒に2本出すと同じidになる**。
-          するとキューが重複と見て2本目を捨て、msg_idで引き戻すと**1本目の便が返る**=
-          この検査だけが赤くなる(実測 2026-08-24・9回に1回 `実依頼でも宣言が載る` が赤)。
-          製品の穴ではなく検査の都合(本番は1本ずつ・間隔が空く)。→ idが被ったら出し直す。
+        ★2026-08-24 検査側の回避を外した(イージス研究室)。以前はここで id 衝突
+          (`DISPATCH-<dept>-<ミリ秒>` が同じミリ秒で被る)を**検査側がリトライして**
+          避けていた。本体が衝突を `-2` で逃がすようになった(dispatch.enqueue_unique)ので
+          **1回出して1回読む**に戻す。回避を残すと、次に同じ穴が開いても**ここが赤くならない**。
+          衝突そのものの検査本体= tests/test_dispatch_id_collision.py。
         """
-        for _ in range(20):
-            ok, mid = dp.dispatch("hq", "検査(イージス研究室)", "本文" * 400,
-                                  audience=audience, work=work)
-            if not ok:
-                return None
-            if mid not in _mids:
-                break
-            time.sleep(0.003)          # ミリ秒が進むのを待ってから出し直す
+        ok, mid = dp.dispatch("hq", "検査(イージス研究室)", "本文" * 400,
+                              audience=audience, work=work)
+        if not ok:
+            return None
+        if mid in _mids:
+            return None        # ★同じidが2度返る=本体の衝突逃がしが壊れている(ここで赤くする)
         _mids.add(mid)
         con = sqlite3.connect(dp.QUEUE_DB)
         row = con.execute("SELECT body FROM queue WHERE msg_id=?", (mid,)).fetchone()
@@ -157,6 +155,7 @@ PRODUCERS = {
     "tests/test_c050_reply_digest.py":         ("mention", "受け手側(門と切り詰め)の検査"),
     "tests/test_dispatch_addressee.py":        ("mention", "宛先ズレ警告の純粋関数の検査(dispatchは呼ばない)"),
     "tests/test_c050_audience_declaration.py": ("test", "この検査そのもの(本物のdispatchを使い捨てDBへ通す)"),
+    "tests/test_dispatch_id_collision.py":     ("test", "id衝突の検査(時計を止めて使い捨てDBへ2本通す)"),
 }
 _PAT = re.compile(r"dispatch\.py|dispatch\.dispatch\(")
 found = []
