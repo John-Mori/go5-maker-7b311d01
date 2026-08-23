@@ -273,6 +273,90 @@ def main():
                        "https://gitlab.com/John-Mori/go5-maker-7b311d01",
                        "https://github.com/someone/go5-maker-7b311d01"]))
 
+        # ---- I. 許可リストの外出し(2026-08-23 研究室HQ msg …341105・C-049 §7-3)
+        #      ★偽物にする物は無い= 本物のクローン・本物の JSON ファイル・本物の
+        #        `published_files()` / `check_d()` を通す。見たいのは
+        #        「ファイルに在る origin だけが公開済みとして数えられるか」だ。
+        import fcc_launch as fl                                      # noqa: E402
+        oss = make_clone(tmp, "ossclone", origin="https://github.com/someone/公開OSS.git")
+        io.open(os.path.join(oss, ".env"), "w", encoding="utf-8").write("PUBLIC=1\n")
+        _git(oss, "add", "-f", ".env")
+        _git(oss, "commit", "-q", "-m", "public oss")
+        publish(oss)
+
+        listfile = os.path.join(tmp, "origins.json")
+        _prev_env = os.environ.get(fl.PUBLIC_ORIGINS_ENV)
+        os.environ[fl.PUBLIC_ORIGINS_ENV] = listfile
+        try:
+            # I-1 ファイルが無い= 既定の定数へフォールバック(=今までと同じ挙動)
+            check("I-1 許可リストのファイルが無ければ**既定の定数**へ戻る",
+                  fl.public_origins() == fl.PUBLIC_ORIGINS, fl.public_origins())
+            check("I-2 その時、許可リストに無い origin のクローンは**拒む**(名前当てのまま)",
+                  only(preflight(build_plan(oss, cfg, [])), "D")
+                  and fl.published_files(oss) == set(),
+                  preflight(build_plan(oss, cfg, [])))
+
+            # I-3 ファイルへ足すと、コードを触らずに通る(=外出しが効いている)
+            io.open(listfile, "w", encoding="utf-8").write(
+                '{"_note":"検査用","origins":["git@github.com:someone/公開OSS.git"]}')
+            check("I-3 ファイルへ足すと、コードを触らずにその origin が公開済みになる",
+                  fl.published_files(oss) and not only(preflight(build_plan(oss, cfg, [])), "D"),
+                  preflight(build_plan(oss, cfg, [])))
+            check("I-4 ファイルの表記ゆれ(ssh形式)も `_norm_origin` で当たる",
+                  "github.com/someone/公開oss" in fl.public_origins(), fl.public_origins())
+            check("I-4b 非ASCIIの origin が文字化けせず当たる(git の出口を utf-8 で読む)",
+                  fl._norm_origin(fl.origin_url(oss)) in fl.public_origins(),
+                  fl.origin_url(oss))
+
+            # 公開済みの**日本語ファイル名**が一致すること(core.quotepath の八進包み対策)
+            io.open(os.path.join(oss, "更新token.txt"), "w", encoding="utf-8").write("public\n")
+            _git(oss, "add", "-f", "更新token.txt")
+            _git(oss, "commit", "-q", "-m", "japanese name")
+            publish(oss)
+            check("I-4c 公開済みの日本語ファイル名は『秘密』に数えない(誤発火させない)",
+                  "更新token.txt" in fl.published_files(oss)
+                  and not only(preflight(build_plan(oss, cfg, [])), "D"),
+                  sorted(fl.published_files(oss)))
+
+            # I-5 壊れたファイル= 既定へ戻る(「全部許す」へは倒れない)
+            io.open(listfile, "w", encoding="utf-8").write("{壊れている")
+            check("I-5 ファイルが壊れていたら既定へ戻る(=この origin はまた拒まれる)",
+                  fl.public_origins() == fl.PUBLIC_ORIGINS
+                  and only(preflight(build_plan(oss, cfg, [])), "D"),
+                  fl.public_origins())
+
+            # I-6 空の配列= 「1つも認めない」(既定へ黙って戻さない)
+            io.open(listfile, "w", encoding="utf-8").write("[]")
+            check("I-6 空の配列は『1つも認めない』=公開repoのクローンでも公開済みは空",
+                  fl.public_origins() == frozenset() and fl.published_files(wd) == set(),
+                  fl.public_origins())
+
+            # ---- I-7 must-fail(C-053)= 壊した側は「動く別の実装」へ差し替える。
+            #      ここでの別実装= **remote が在れば公開済みと認める版**(許可リストを読まない)。
+            #      これは実際に動く(=文法は壊れていない)。それで D が黙るなら、
+            #      I-2 の緑は「許可リストが効いている」ことを本当に見ている。
+            io.open(listfile, "w", encoding="utf-8").write(
+                '["https://github.com/John-Mori/go5-maker-7b311d01"]')
+            _real_po = fl.public_origins
+            try:
+                fl.public_origins = lambda path=None: frozenset(
+                    {fl._norm_origin(fl.origin_url(oss))})     # remote在り=全部認める版
+                _regressed = (fl.published_files(oss) != set()
+                              and not only(preflight(build_plan(oss, cfg, [])), "D"))
+            finally:
+                fl.public_origins = _real_po
+            check("I-7 must-fail= 許可リストを読まない実装へ差し替えると、"
+                  "知らない origin でも通ってしまう(=I-2が赤くなる)", _regressed)
+            check("I-8 復元済み= 本物へ戻すと同じクローンをまた拒む",
+                  fl.public_origins is _real_po
+                  and fl.published_files(oss) == set()
+                  and only(preflight(build_plan(oss, cfg, [])), "D"))
+        finally:
+            if _prev_env is None:
+                os.environ.pop(fl.PUBLIC_ORIGINS_ENV, None)
+            else:
+                os.environ[fl.PUBLIC_ORIGINS_ENV] = _prev_env
+
         _git(wd, "rm", "-q", "-f", "update_token.ps1")
         _git(wd, "commit", "-q", "-m", "drop")
         publish(wd)

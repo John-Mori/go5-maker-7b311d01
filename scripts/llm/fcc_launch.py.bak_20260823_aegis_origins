@@ -21,7 +21,6 @@
 """
 import argparse
 import io
-import json
 import os
 import re
 import shutil
@@ -60,56 +59,8 @@ ANCESTOR_LOADED = ("CLAUDE.md", "MEMORY.md")   # E= cwdの祖先から自動で�
 
 # ★「既にネットに出ている」と認めてよい remote(2026-08-23 研究室HQ差し戻し・C-041)。
 #   ここに無い remote / remote無し のフォルダでは、追跡済みでも**公開の証明にならない**=
-#   名前当てのまま拒否側へ倒す。
-#   ★これは**フォールバックの既定**だ。実際の許可リストは下の `public_origins()` が
-#     ファイルから読む(2026-08-23 イージス研究室・C-049 §7-3)。
+#   名前当てのまま拒否側へ倒す。増やす時は「本当に誰でも読める公開repoか」を確かめてから。
 PUBLIC_ORIGINS = frozenset({"github.com/john-mori/go5-maker-7b311d01"})
-
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PUBLIC_ORIGINS_ENV = "FCC_PUBLIC_ORIGINS_FILE"     # 検査・別機で差し替える口
-
-
-def _origins_path():
-    """許可リストの置き場。★毎回 env を読む=import の時刻に縛られない。"""
-    p = os.environ.get(PUBLIC_ORIGINS_ENV)
-    if p:
-        return p
-    local = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
-    return os.path.join(local, "llm", "fcc_public_origins.json")
-
-
-def public_origins(path=None):
-    """「既にネットに出ている」と認めてよい origin の集合を**ファイルから**読む。
-
-    ★なぜファイルか(2026-08-23 研究室HQ msg DISPATCH-aegis-gl-1787495341105・C-049 §7-3)=
-      C-049 の範囲が広がり、公開OSSのrepoを足す運用になった。足すたびに
-      この起動器のコードを触るのは、範囲を広げる運用と噛み合わない。
-
-    ★足す時の運用条件= **ログイン無しで誰でも読めることを実際にURLで確かめてから足す。**
-      「公開のはず」で足さない(例: `curl -sI https://github.com/<owner>/<repo>` が 200)。
-      privateのrepoを足すと、その中身が「公開済み」として D の名前当てを素通りする。
-
-    ★形= JSONの配列、または {"origins": [...]} (辞書なら他のキーを注釈に使える)。
-      値は `_norm_origin` で均すので https/ssh/.git有無/末尾スラッシュ どれで書いてもよい。
-    ★無い/読めない/形が違う → **既定の `PUBLIC_ORIGINS` へフォールバック**する。
-      ファイルを消せば「今のコードの定数だけ」に戻る=fail-close の向きを壊さない
-      (ファイルが壊れている時に「全部許す」へ倒れることは無い)。
-    """
-    p = path or _origins_path()
-    try:
-        with io.open(p, encoding="utf-8-sig") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            data = data.get("origins")
-        if not isinstance(data, (list, tuple)):
-            return PUBLIC_ORIGINS
-        got = {_norm_origin(u) for u in data if isinstance(u, str)}
-        got.discard("")
-        # ★空の配列は「壊れている」ではなく「1つも認めない」と読む=そちらの方が厳しい。
-        #   既定へ戻すと、消したはずの信用が黙って生き返る。
-        return frozenset(got)
-    except Exception:
-        return PUBLIC_ORIGINS                  # 無い/壊れている= 既定へ戻す
 
 
 # ---------------------------------------------------------------- 実在検査
@@ -276,17 +227,10 @@ def _norm_origin(url):
 
 
 def origin_url(wd):
-    """作業フォルダの origin。無ければ空文字。
-
-    ★git の出口は utf-8 だと**明示して**読む(2026-08-23 イージス研究室)。
-      text=True 任せだと日本語Windowsでは cp932 で復号され、非ASCIIを含む URL が
-      文字化けして許可リストに当たらなくなる(拒否側へ倒れるので事故ではないが、
-      「ファイルへ足したのに通らない」の原因が読めなくなる)。
-    """
+    """作業フォルダの origin。無ければ空文字。"""
     try:
         out = subprocess.run(["git", "-C", wd, "remote", "get-url", "origin"],
-                             capture_output=True, text=True, timeout=60,
-                             encoding="utf-8", errors="replace")
+                             capture_output=True, text=True, timeout=60)
         return (out.stdout or "").strip() if out.returncode == 0 else ""
     except Exception:
         return ""
@@ -319,23 +263,17 @@ def published_files(wd):
       「追跡済み」になって通る**。代理が成り立つ条件(=どこへ出ているのか)を測っていなかった。
       今は remote の実体そのものを見る:
         ① origin が **許可リストの公開repo** であること(知らないremoteは公開の証明にならない)
-           ★許可リストは `public_origins()` がファイルから読む(無ければ既定の定数)
         ② そのファイルが **remote側のツリーに在る**こと(ローカルcommitだけの物は含まれない)
       どちらかが欠けたら**空集合**=名前当てがそのまま効いて拒否側へ倒れる(fail-close)。
     """
     try:
-        if _norm_origin(origin_url(wd)) not in public_origins():
+        if _norm_origin(origin_url(wd)) not in PUBLIC_ORIGINS:
             return set()                       # remote無し / 知らないremote = 公開の証明が無い
         ref = _remote_ref(wd)
         if not ref:
             return set()                       # remote側のツリーを引けない = 同上
-        # ★`-c core.quotepath=false` + utf-8= 日本語のファイル名を素のまま受け取る。
-        #   既定だと git は非ASCIIを "\350\250..." と八進で包む=公開済みの日本語ファイルが
-        #   一致せず「秘密」に数えられる(拒否側なので事故ではないが、誤発火は迂回を招く)。
-        out = subprocess.run(["git", "-C", wd, "-c", "core.quotepath=false",
-                              "ls-tree", "-r", "--name-only", ref],
-                             capture_output=True, text=True, timeout=120,
-                             encoding="utf-8", errors="replace")
+        out = subprocess.run(["git", "-C", wd, "ls-tree", "-r", "--name-only", ref],
+                             capture_output=True, text=True, timeout=120)
         if out.returncode != 0:
             return set()
         return {p.strip().replace("/", os.sep).lower()
@@ -382,16 +320,8 @@ def check_d(plan):
     hits = find_secrets(plan["workdir"])
     if not hits:
         return []
-    msg = ("D: 作業フォルダに秘密ファイルが在る(%d件): %s%s"
-           % (len(hits), " / ".join(hits[:5]), " …" if len(hits) > 5 else ""))
-    # ★本当の理由が「origin を知らない」側の時は、そう言う(2026-08-23 イージス研究室)。
-    #   知らない origin では published_files() が空集合=公開済みのファイルまで
-    #   秘密として数える。理由を言えないと「起動器が壊れた」と読まれて迂回される。
-    if _norm_origin(origin_url(plan["workdir"])) not in public_origins():
-        msg += ("\n   ★origin が許可リストに無い(=公開の証明が無い): %s"
-                "\n     許可リスト= %s(ログイン無しで読めることをURLで確かめてから足す)"
-                % (origin_url(plan["workdir"]) or "(remote無し)", _origins_path()))
-    return [msg]
+    return ["D: 作業フォルダに秘密ファイルが在る(%d件): %s%s"
+            % (len(hits), " / ".join(hits[:5]), " …" if len(hits) > 5 else "")]
 
 
 def check_e(plan):
