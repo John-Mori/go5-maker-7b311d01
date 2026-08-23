@@ -214,6 +214,8 @@
   // コメント編集欄・決定値に渡す素の文字列。区切り '/' は動画メーカーの2行モードが読む
   // 実改行(\n)へ寄せる=編集欄から '/' が消え、そのまま2行モードに貼れる(Chami指示 2026-08-24)。
   function plainCmt(s){ return (s||'').replace(/\s*\/\s*/g,'\n'); }
+  // 技法ラベル(type)先頭の丸数字を落とす=画面に番号を出さない(選択肢1/2/3との混同回避・Chami指示 2026-08-24)。
+  function deNum(s){ return (s||'').replace(/^[①-⑳㉑-㉟㊱-㊿]+\s*/,''); }
   var LS = window.localStorage;
 
   // 部屋コメントのアバター(R2恒久URL・local/persona_avatars.json由来。期限切れ根絶済み=2026-07-16)。
@@ -344,7 +346,7 @@
         cbody = '<div class="cmts">'+cmts.map(function(cm,k){
           return '<label class="cmt"><input type="radio" name="cmt_'+cid_+'" value="'+esc(cm.text)+'" data-cand="'+cid_+'"'+(k===0?' checked':'')+'>'+
             '<span><span class="ctext">'+twoLineHtml(cm.text)+'</span>'+
-            (cm.aim?'<div class="caim">'+esc(cm.aim)+(cm.type?(' · '+esc(cm.type)):'')+'</div>':'')+'</span></label>'; }).join('')+'</div>';
+            (cm.aim?'<div class="caim">'+esc(cm.aim)+(cm.type?(' · '+esc(deNum(cm.type))):'')+'</div>':'')+'</span></label>'; }).join('')+'</div>';
       } else {
         cbody = '<div class="noc">コメント未生成 (vision後埋め)。下欄に手入力してください。</div>';
       }
