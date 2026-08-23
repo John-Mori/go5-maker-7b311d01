@@ -1680,6 +1680,40 @@ def looks_like_empty_reply(rc, data, out):
     return True
 
 
+# ★子プロセス(claude CLI)へ渡す環境を1か所で組む。**呼び出し側で組み直さない。**
+#   ここを関数にしてあるのは、検査が「実際に組まれた env」を実行で確かめられるようにするため
+#   (ソースの文字列一致は検査ではない=共通規律§3)。
+def _child_env(token):
+    # ★2026-07-26 親の環境を継がない(実弾で特定した穴)。
+    #   デーモンはHQセッションから再起動したkeeperの子になることがあり、その場合
+    #   ハーネスの環境変数(ANTHROPIC_BASE_URL / CLAUDE_CODE_* 等)を相続する。
+    #   CLIがそれを拾うと別の口座経路に化け、「Credit balance is too low」で全滅した
+    #   (同時刻に素のenv+同一トークンでは rc=0 を実測)。
+    #   → 必要最小限だけを白名単で組む。誰がデーモンを産んでも挙動が変わらない。
+    _KEEP = ("SYSTEMROOT", "WINDIR", "PATH", "PATHEXT", "COMSPEC", "USERPROFILE",
+             "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "USERNAME", "HOMEDRIVE",
+             "HOMEPATH", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMDATA",
+             "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PYTHONIOENCODING",
+             "GO5_LOCAL_DIR")
+    env = {k: v for k, v in os.environ.items() if k.upper() in _KEEP}
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = token or ""
+    # ★★2026-08-23 イージス研究室。**前置きから可変物(gitStatus)を外す。**
+    #   実験(`scripts/llm/cache_prefix_probe.py`・同じセッションへ短い便を続けて撃つ)=
+    #     既定       : 無変更で2便=書込 230/394 → **間に空commitを1本挟むと 書込 29,303**
+    #                  (読込は 50,987 → 22,173 へ落ちた= そこが壊れた位置)
+    #     この変数=1 : 同じ手順で 書込 345・読込 48,075(**壊れない**)
+    #   → `claude -p --resume` は便ごとに別プロセス=システムプロンプトを毎回組み直すので、
+    #     gitStatus が前便と違うと**そこから後ろが全部書き直し**になる。この作業ツリーは
+    #     15分に1本commitが入る(実測 直近24hで99本)=踏み放題だった。
+    #   ★副作用= gitStatus と Bash の「# Git」案内が前置きから消える。能力は減らない
+    #     (`git status`/`git log` は Bash でその場で叩ける。むしろ**便の頭で固まった古い状態**を
+    #      読まされる方が §1「その場で測り直す」に反する)。
+    #   ★親の CLAUDE_CODE_* を**継ぐ**のは下の _KEEP で禁じたままだ。ここは継承ではなく
+    #     **こちらが明示的に決め打つ**1本=2026-07-26の口座事故(ANTHROPIC_BASE_URL相続)とは別物。
+    env["CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"] = "1"
+    return env
+
+
 def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY_TIMEOUT,
                 hard_timeout=None, on_soft=None):
     """`claude -p` を**1回だけ**起動する。戻り値 (data, rc, combined_output, waited_sec)。
@@ -1733,19 +1767,7 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
     #     を stdin で渡し is_error:false の JSON を確認済 2026-08-13)。claude -p は positional prompt
     #     が無ければ stdin を prompt として読む(--input-format 既定=text)。挙動は同一。
     _stdin_input = prompt
-    # ★2026-07-26 親の環境を継がない(実弾で特定した穴)。
-    #   デーモンはHQセッションから再起動したkeeperの子になることがあり、その場合
-    #   ハーネスの環境変数(ANTHROPIC_BASE_URL / CLAUDE_CODE_* 等)を相続する。
-    #   CLIがそれを拾うと別の口座経路に化け、「Credit balance is too low」で全滅した
-    #   (同時刻に素のenv+同一トークンでは rc=0 を実測)。
-    #   → 必要最小限だけを白名単で組む。誰がデーモンを産んでも挙動が変わらない。
-    _KEEP = ("SYSTEMROOT", "WINDIR", "PATH", "PATHEXT", "COMSPEC", "USERPROFILE",
-             "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "USERNAME", "HOMEDRIVE",
-             "HOMEPATH", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMDATA",
-             "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PYTHONIOENCODING",
-             "GO5_LOCAL_DIR")
-    env = {k: v for k, v in os.environ.items() if k.upper() in _KEEP}
-    env["CLAUDE_CODE_OAUTH_TOKEN"] = token or ""
+    env = _child_env(token)
     soft = float(timeout or 0) or None
     hard = float(hard_timeout) if hard_timeout else None
     if hard is not None and soft is not None and hard <= soft:
