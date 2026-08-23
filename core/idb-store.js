@@ -186,8 +186,17 @@
         c.onsuccess = function () {
           if (settled) return;
           var cur = c.result;
-          if (cur) { out[cur.key] = cur.value; cur.continue(); }
-          else finish(function () { resolve(out); });
+          if (cur) {
+            out[cur.key] = cur.value;
+            // ★番犬を1行進むたびに張り直す=「合計8秒」ではなく「8秒 無進捗」で殺す。候補174件級×複数枚base64で
+            //   一括読みが正当に8秒を超える端末でも、健康なIDBを誤って殺し永久失敗ループ(⏳吸収状態)に落とさない
+            //   (Fable5診断2026-08-24)。真のハング(1行も進まない)は従来どおり8秒で落ちる=検知力は不変。
+            if (wd) { try { clearTimeout(wd); } catch (e) {} }
+            wd = setTimeout(function () { failOrRetry(new Error(label + "-timeout")); }, TX_TIMEOUT_MS);
+            cur.continue();
+          } else {
+            finish(function () { resolve(out); });
+          }
         };
         c.onerror = function () { finish(function () { reject(c.error || new Error(label + "-cursor-error")); }); };
         t.onerror = function () { finish(function () { reject(t.error || new Error(label + "-tx-error")); }); };

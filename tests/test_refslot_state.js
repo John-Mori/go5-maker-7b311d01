@@ -40,4 +40,16 @@ t('IDB非対応・0枚', refSlotDecide_(false, true, false, false, false, false)
 // 8) refLoaded は厳密true判定(truthyな別値で誤確定しない)。
 t('refLoaded非true(0)は未確認扱い', refSlotDecide_(false, true, true, 0, false, true), 'checking');
 
+// 引数順= (has, worked, idbOk, refLoaded, inMem, candidateHydrated, stalled)
+// 9) ★永久スピナー解体: 取得が持続失敗(stalled=true)なら loading/checking の代わりに 'stalled'(⌛ タップで再試行)。
+t('展開途中でも持続失敗→stalled', refSlotDecide_(false, true, true, false, false, false, true), 'stalled');
+t('展開済み未確認でも持続失敗→stalled', refSlotDecide_(false, true, true, false, false, true, true), 'stalled');
+// 10) ★実データ(images)と陽性確認済み(missing)は stalled より優先=失敗表示で本物を隠さない・⚠を誤上書きしない(C-041)。
+t('画像あり＞stalled', refSlotDecide_(true, true, true, false, false, false, true), 'images');
+t('確認済み0枚(missing)＞stalled', refSlotDecide_(false, true, true, true, false, true, true), 'missing');
+t('痕跡なしは stalled でも none', refSlotDecide_(false, false, true, false, false, false, true), 'none');
+// 11) 第7引数省略(既存呼び出し互換)は従来通り=stalledに落ちない。
+t('stalled省略=loading', refSlotDecide_(false, true, true, false, false, false), 'loading');
+t('stalled=false=loading', refSlotDecide_(false, true, true, false, false, false, false), 'loading');
+
 console.log(`\nAll ${n} passed (refSlotDecide_).`);

@@ -39,18 +39,29 @@
   //   ★⚠(missing)は per-cid の陽性確認(refLoaded===true か inMem)でのみ返す=一括展開の完了(candidateHydrated)だけでは
   //     「無い」と断定しない。同期/別タブで後から届く画像を「消えた」と誤表示しないため(C-041=一度の観測を状態の代理に
   //     するな。Chami 2026-08-15「画像あるはずなのよ、消えてるってこと」)。checking の作品は端末内を能動確認して確定する。
-  function refSlotDecide_(has, worked, idbOk, refLoaded, inMem, candidateHydrated) {
+  function refSlotDecide_(has, worked, idbOk, refLoaded, inMem, candidateHydrated, stalled) {
     if (has) return 'images';
     if (!worked) return 'none';                       // コメント/メモも無い=触っていない作品は空欄のまま
     if (!idbOk || refLoaded === true || inMem === true) return 'missing'; // 実際に読んだ結果0枚=正当な「画像なし」
+    // ★取得(IDB読取/R2フェッチ)が一定回数/時間 持続失敗した=⏳/🔍の吸収状態(永久スピナー)へ落ちる前に、
+    //   「操作可能な失敗(⌛ タップで再試行)」へ抜けさせる。実データ(images)や陽性確認済み(missing)には影響
+    //   させない=C-041(「消えた」と誤断定しない)は維持したまま、吸収状態だけを解体する(Fable5診断2026-08-24)。
+    if (stalled === true) return 'stalled';
     if (!candidateHydrated) return 'loading';         // まだ一括展開の途中=読込中(まだ何も断定しない)
     return 'checking';                                // 展開は済んだがこのcidは未確認=端末内を能動確認してから判定
+  }
+  // ★per-cid の「持続失敗」ゲート(純関数=tests/test_ref_stall_gate.js で境界を固定)。取得が n回以上 かつ
+  //   連鎖開始から T ミリ秒以上 失敗し続けた時だけ true=⌛へ落とす。★3回/20000(=20秒)は関数内リテラルで
+  //   持つ(shouldShowIdbHint_ と同じ理由=module.exports の早期returnで外の var 代入は実行されず undefined に
+  //   なるため、定数を外の var に置くと Node テストで壊れる)。
+  function refStallDecide_(n, sinceMs, nowMs) {
+    return n >= 3 && !!sinceMs && (nowMs - sinceMs) >= 20000;
   }
 
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, shouldShowIdbHint_: shouldShowIdbHint_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -708,6 +719,8 @@
   var _hydrateWaiters = [];
   var _refLoaded = Object.create(null);           // 全体展開前でも作品単位で安全に読めたcid
   var _refLoadJobs = Object.create(null);
+  var _refFail = Object.create(null);             // cid→{n,since}: 動画生成用画像の取得(IDB/R2)の持続失敗を数える(⏳吸収状態の解体・Fable5診断2026-08-24)
+  var _refRetryTimers = Object.create(null);      // cid→timer: renderを待たない bounded(最大3回)な自走再試行
   var _candidateHydrateInFlight = false;
   var _candidateHydrateRetryTimer = null;
   var _candidateHydrateFailures = 0;
@@ -715,8 +728,9 @@
   var _syncRehydrateRetryTimer = null;
   var _histHydrateFailures = 0;                    // 投稿履歴画像(post:/used:)の展開失敗回数
   var _histHydrateRetryTimer = null;              // 同・張り直し予約(同時に1本だけ)
+  var _histHydrateInFlight = false;               // 同・実行中ガード(go5-idb-recovered/自前バックオフの二重cursor防止・Fable5診断2026-08-24)
   // 展開成功/回復のたびに失敗連鎖をゼロへ戻す(件数と開始時刻を対で戻す=案内バーの持続ゲートが正しく効く)。
-  function resetCandidateHydrateFailures_() { _candidateHydrateFailures = 0; _hydrateFailSince = 0; }
+  function resetCandidateHydrateFailures_() { _candidateHydrateFailures = 0; _hydrateFailSince = 0; _refFail = Object.create(null); } // 一括展開が通った=stalledの根拠も消す(各カードは再評価で⏳→実画像へ)
   // ★「閉じて開き直せ」案内バーを出してよいかの唯一の判定(純関数=tests/test_idb_hint_gate.js で検証)。
   //   短い接続死では出さず、5回以上連続で失敗し かつ 連鎖が60秒以上続いた(=回復せず本当にプロセス単位で
   //   死んでいる)時だけ true。sinceMs=連鎖開始時刻(0=連鎖なし)。Chami報告2026-08-18「案内がめちゃくちゃ出る」対策。
@@ -1013,16 +1027,12 @@
     _r2ResolveJobs[cid] = true;
     resolveRefFromR2_(cid, marker.__r2n).then(function (imgs) {
       delete _r2ResolveJobs[cid];
-      if (!imgs || !imgs.length) return; // 取れなければマーカーのまま=次回再試行(「無い」と断定しない)
+      if (!imgs || !imgs.length) { refFailMark_(cid); return; } // 取れなければマーカーのまま=次回再試行(「無い」と断定しない・持続失敗は⌛へ)
+      refFailClear_(cid);
       _imgMem.ref[cid] = refRecordFromMarker_(marker, imgs);
       _refLoaded[cid] = true;
-      try {
-        var page = document.getElementById('pageCand');
-        var btn = page && liveRefButton_(page, cid);
-        var card = btn && (btn.closest ? btn.closest('.cand-card') : null);
-        if (card) updateCardRefThumb_(card, cid);
-      } catch (e) {}
-    }, function () { delete _r2ResolveJobs[cid]; });
+      refRefreshCard_(cid);
+    }, function () { delete _r2ResolveJobs[cid]; refFailMark_(cid); });
   }
   // 候補→動画作成の写真ハンドオフ用: 画像を「待って」取り出す。メモリ/LSに実体があれば即返し、無くて
   //   R2退避マーカーだけがある時は resolveRefFromR2_ を await してから返す。★resolveR2IntoMem_ は裏で
@@ -1265,12 +1275,15 @@
   // 従来のentries()全件走査は同じDB内のドラフト動画Blobまで値として復元し、iPhoneで画像表示と
   // 投稿編集の両方を長時間止めていた。候補用が描けた後、統合ページだけpost/usedを裏で読む。
   function hydrateHistoryImages_() {
-    if (_hydrated) return;
+    if (_hydrated || _histHydrateInFlight) return;
+    _histHydrateInFlight = true;
     readImageEntries_(['post:', 'used:']).then(function (all) {
+      _histHydrateInFlight = false;
       _histHydrateFailures = 0;
       mergeImageEntries_(all);
       markHydrated_();  // go5-images-hydrated を発火→StockLists/ランキング(yt-clicks.js)が自動で描き直す
     }).catch(function (e) {
+      _histHydrateInFlight = false;
       _histHydrateFailures++;
       try { console.warn('[go5 idb] 投稿履歴画像の展開を再試行します', e); } catch (_) {}
       // ★一発で諦めない(旧: 1.2秒後に1回だけ→以後 markHydrated_ が呼ばれず go5-images-hydrated が
@@ -1321,6 +1334,10 @@
       //   切れ、以後は出ない。genuine死は失敗し続けるので60秒後に必ず出る=案内の意味は失わない。
       if (shouldShowIdbHint_(_candidateHydrateFailures, _hydrateFailSince, Date.now())) showIdbRecoveryHint_();
       scheduleCandidateHydrateRetry_();
+      // ★候補ref:の展開失敗で post:/used:(投稿履歴の仕上がりプレビュー)を人質に取らない=直列ゲートを断つ。
+      //   従来は成功時(1309)にしか hydrateHistoryImages_ を呼ばず、候補側が失敗ループに入ると投稿履歴の
+      //   プレビューが一度も読まれず無言欠落していた(Fable5診断2026-08-24)。読む範囲は排他(ref/bsky↔post/used)。
+      if (!window.__go5CandidateStandalone) { try { hydrateHistoryImages_(); } catch (e2) {} }
     });
   }
   // ★IDBがプロセス単位で死んでいる時の最終防衛(アプリでは治せない=ユーザーに正しい手順を伝える)。
@@ -1455,7 +1472,7 @@
   try { document.addEventListener('go5-idb-recovered', function () {
     if (!_idbOk) return;
     try {
-      resetCandidateHydrateFailures_();
+      resetCandidateHydrateFailures_();          // _refFail もここで全消し=回復後にstalledカードが再挑戦
       _histHydrateFailures = 0;
       if (!_candidateHydrated) hydrateImages_();
       if (!_hydrated && !window.__go5CandidateStandalone) hydrateHistoryImages_();
@@ -2751,6 +2768,14 @@
           live.textContent = '投稿編集';
           updateCardRefThumb_(live.closest ? live.closest('.cand-card') : null, cid);
         });
+        return;
+      }
+      var refRetry = dataTarget_(e.target, 'data-refretry', page);
+      if (refRetry) {
+        e.preventDefault();
+        var retryCid = refRetry.getAttribute('data-refretry');
+        refFailClear_(retryCid);   // 失敗台帳を消す→⏳へ戻り probe/resolve が再発射される
+        refRefreshCard_(retryCid);
         return;
       }
       var refView = dataTarget_(e.target, 'data-refimgview', page);
@@ -4662,34 +4687,83 @@
   //   ★⚠(missing)は per-cid の陽性確認(_refLoaded[cid]===true か _imgMem.ref に実体)でのみ出す。一括展開の完了フラグ
   //     (_candidateHydrated)だけで「無い」と断定しない=同期/別タブで後から届く画像を「消えた」と誤表示しない
   //     (C-041=一度の観測を状態の代理にするな。Chami 2026-08-15「画像あるはずなのよ、消えてるってこと」)。
+  // ★動画生成用画像の取得(IDB/R2)が「今」失敗したことを記帳し、bounded(最大3回)な自走再試行を1本だけ予約する
+  //   =renderが来なくてもカードだけ更新して⏳から抜ける。n回/T秒 の持続でstalled(⌛)へ落とす(refStallDecide_)。
+  function refFailMark_(cid) {
+    cid = String(cid || ''); if (!cid) return;
+    var r = _refFail[cid] || (_refFail[cid] = { n: 0, since: Date.now() });
+    r.n++; if (!r.since) r.since = Date.now();
+    if (refStallDecide_(r.n, r.since, Date.now())) { refRefreshCard_(cid); return; } // stall到達=これ以上⏳で回さず⌛へ切替(環を閉じる)
+    if (_refRetryTimers[cid]) return;                 // 予約は1本だけ(多重発射しない)
+    var delay = Math.min(12000, 3000 * Math.pow(2, Math.max(0, r.n - 1)));
+    _refRetryTimers[cid] = setTimeout(function () {
+      delete _refRetryTimers[cid];
+      refRefreshCard_(cid);                            // refSlotHtml_再評価→probe/resolveが再発射(カードがDOMに無ければno-op)
+    }, delay);
+  }
+  function refFailClear_(cid) {
+    cid = String(cid || ''); if (!cid) return;
+    if (_refRetryTimers[cid]) { try { clearTimeout(_refRetryTimers[cid]); } catch (e) {} delete _refRetryTimers[cid]; }
+    delete _refFail[cid];
+  }
+  function refStalled_(cid) {
+    var r = _refFail[String(cid || '')];
+    return !!(r && refStallDecide_(r.n, r.since, Date.now()));
+  }
+  // このcidのカードのスロットだけを組み直す(全再描画しない)。pageCand から live ボタン→カードを辿る。
+  function refRefreshCard_(cid) {
+    try {
+      var page = document.getElementById('pageCand');
+      var btn = page && liveRefButton_(page, cid);
+      var card = btn && (btn.closest ? btn.closest('.cand-card') : null);
+      if (card) updateCardRefThumb_(card, cid);
+    } catch (e) {}
+  }
   function refSlotState_(cid) {
     var has = refImgsOf_(cid).length > 0;
-    // R2マーカー(base64を持たず実体はR2)なら「画像あり・取り寄せ中」=⏳ loading にし、⚠(消えた)と誤表示しない。
+    var stalled = refStalled_(cid);
+    // R2マーカー(base64を持たず実体はR2)なら「画像あり・取り寄せ中」=⏳ loading。ただし持続失敗(stalled)なら
+    //   ⌛(操作可能な失敗)へ落とす=R2フェッチが永久に失敗し続けても⏳吸収状態に嵌らない(Fable5診断2026-08-24)。
     if (!has && !Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
       var lg = legacyRefOf_(cid);
-      if (isR2Marker_(lg)) { resolveR2IntoMem_(cid, lg); return 'loading'; }
+      if (isR2Marker_(lg)) { if (stalled) return 'stalled'; resolveR2IntoMem_(cid, lg); return 'loading'; }
     }
     var rr = refImgOf(cid);
     var worked = !!(rr && (rr.comment || rr.memo));
     var inMem = Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
-    return refSlotDecide_(has, worked, _idbOk, _refLoaded[cid] === true, inMem, _candidateHydrated);
+    return refSlotDecide_(has, worked, _idbOk, _refLoaded[cid] === true, inMem, _candidateHydrated, stalled);
   }
   // 展開済みだがこのcidだけ未確認の作品を、端末内(IDB/旧LS)から能動的に取り寄せて確定する。
   //   成功したら(画像が在れば表示・端末内に無ければ「確認済み0枚=⚠」へ)そのカードだけ差分更新=全再描画しない。
-  //   読取失敗(IDB接続死等)は「無い」と断定せず確認中のまま裏の再試行(reHydrateFromSync_)へ委ねる。
-  //   ★ok===false時は再描画しない=render→probe→render の環が閉じ、無限ループを作らない。多重発射は
-  //     _refLoadJobs(ensureRefLoaded_が冪等)＋_refLoaded で二重ガード。
-  function ensureRefProbe_(cid) {
-    if (!_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid) || _refLoadJobs[cid]) return;
+  //   読取失敗(IDB接続死等)は「無い」と断定せず、失敗を記帳して bounded 再試行→持続失敗なら⌛へ(refFailMark_)。
+  //   ★同時発射は最大 REF_PROBE_MAX 件に絞る=1ページ(≤50件)の probe が固定番犬+接続closeで殺し合う自己DoSを
+  //     止める(Fable5診断2026-08-24)。cid単位の二重キューは _refProbeQueued で防ぐ。
+  var REF_PROBE_MAX = 4;
+  var _refProbeActive = 0;
+  var _refProbeQueue = [];
+  var _refProbeQueued = Object.create(null);
+  function _pumpRefProbe_() {
+    while (_refProbeActive < REF_PROBE_MAX && _refProbeQueue.length) {
+      var cid = _refProbeQueue.shift();
+      delete _refProbeQueued[cid];
+      _runRefProbe_(cid);
+    }
+  }
+  function _runRefProbe_(cid) {
+    _refProbeActive++;
     ensureRefLoaded_(cid).then(function (ok) {
-      if (!ok) return;
-      try {
-        var page = document.getElementById('pageCand');
-        var btn = page && liveRefButton_(page, cid);
-        var card = btn && (btn.closest ? btn.closest('.cand-card') : null);
-        if (card) updateCardRefThumb_(card, cid);
-      } catch (e) {}
-    });
+      if (ok) { refFailClear_(cid); refRefreshCard_(cid); }
+      else if (!_r2ResolveJobs[cid]) refFailMark_(cid); // マーカー実体化(resolveR2IntoMem_)が走っていない=真の行き止まり
+    }, function () {
+      if (!_r2ResolveJobs[cid]) refFailMark_(cid);
+    }).then(function () { _refProbeActive--; _pumpRefProbe_(); });
+  }
+  function ensureRefProbe_(cid) {
+    cid = String(cid || '');
+    if (!cid || !_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid) || _refLoadJobs[cid] || _refProbeQueued[cid]) return;
+    _refProbeQueued[cid] = true;
+    _refProbeQueue.push(cid);
+    _pumpRefProbe_();
   }
   // 動画生成用画像スロットのHTML。★表示は先頭1枚だけ・全幅で大きく出す(2列グリッドの全枚表示は見にくい=元の見せ方へ戻す・
   //   Chami 2026-08-15「画像表示の方法は見にくいので元に戻して」)。全枚数はサムネをタップ→ズームで左右送りして見られる
@@ -4713,6 +4787,9 @@
     //   限られるため per-card 発射も有界=軽い。全体ハイドレートが後で完了すれば bgRender_ で'images'へ確定する。
     if (state === 'loading') { ensureRefProbe_(cid); return '<div class="cand-refimg-ph cand-refimg-loading" title="動画生成用の画像を読み込み中です">⏳ 画像読込中…</div>'; }
     if (state === 'checking') { ensureRefProbe_(cid); return '<div class="cand-refimg-ph cand-refimg-checking" title="この作品の動画生成用画像を端末内から確認しています">🔍 画像を確認中…</div>'; }
+    // ★取得が持続失敗した=⏳の吸収状態に嵌る前に「操作可能な失敗」へ落とす。画像が消えたわけではない(C-041維持)ので
+    //   「なし(⚠)」ではなく「読み込み失敗・タップで再試行(⌛)」と出す。タップで台帳を消し⏳へ戻して再発射する。
+    if (state === 'stalled') return '<div class="cand-refimg-ph cand-refimg-stalled" data-refretry="' + esc(cid) + '" title="動画生成用の画像の読み込みに失敗しました。通信/同期の状態を確認してタップで再試行できます(画像が消えたわけではありません)">⌛ 読み込み失敗(タップで再試行)</div>';
     if (state === 'missing') return '<div class="cand-refimg-ph cand-refimg-missing" data-refimg="' + esc(cid) + '" title="この端末に動画生成用の画像が見つかりません(タップで投稿編集から確認・再登録)">⚠ 画像なし</div>';
     return '';
   }
