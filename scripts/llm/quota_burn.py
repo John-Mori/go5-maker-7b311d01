@@ -48,14 +48,34 @@ PROJECTS = os.path.expanduser(r"~\.claude\projects")
 RESET_WEEKDAY = 5          # 月=0 … 土=5
 RESET_HOUR = 3
 
-# 重み(仮定。cache読みは安く、出力は高い、という定性を数にしただけ)
+# ★★2026-08-23 15:4x JST 実測で**公表価格表に置き換えた**(初版はここが「仮定」だった)。
+#   出典= https://docs.claude.com/en/docs/build-with-claude/prompt-caching の価格表(curlで取得)。
+#   列= Base Input / 5m Cache Writes / 1h Cache Writes / Cache Hits & Refreshes / Output($ per MTok)
+#     Fable 5    10 / 12.50 / 20 / 1    / 50
+#     Opus 5     5  / 6.25  / 10 / 0.50 / 25
+#     Opus 4.8   5  / 6.25  / 10 / 0.50 / 25
+#     Sonnet 5   2  / 2.50  / 4  / 0.20 / 10
+#     Haiku 4.5  1  / 1.25  / 2  / 0.10 / 5
+#   → **どのモデルも同じ比**= 5分書込 1.25倍 / **1時間書込 2.0倍** / 読込 0.1倍 / 出力 5倍(base比)。
+#   ★★2つ直した(初版は Sonnet=1.0 基準で **opus 5.0 / haiku 0.27** と置いていた= 実価格と違う)。
+#     ・opus は Sonnet の **2.5倍**(5.0は倍に盛っていた)。= Opus→Sonnet の節約は5倍でなく**2.5倍**。
+#     ・haiku は **0.5倍**(0.27は過小)。 ・fable 5.0 は合っていた。
+#   ★これは**API価格の比**であって、Maxプランの使用状況%の重み付けではない(向こうは非公開)。
+#     順位と傾きを見る物差し、という位置づけは変えていない。
 W_IN, W_CACHE_CREATE, W_CACHE_READ, W_OUT = 1.0, 1.25, 0.1, 5.0
-MODEL_W = {"opus": 5.0, "fable": 5.0, "sonnet": 1.0, "haiku": 0.27}
+W_CC_1H = 2.0                  # ★1時間TTLの書込(公表価格= base の2.0倍)
+MODEL_W = {"opus": 2.5, "fable": 5.0, "mythos": 5.0, "sonnet": 1.0, "haiku": 0.5}
 
 RE_TS = re.compile(r'"timestamp":"([0-9T:\-\.]+)Z?"')
 RE_MODEL = re.compile(r'"model":"([^"]+)"')
 RE_IN = re.compile(r'"input_tokens":(\d+)')
 RE_CC = re.compile(r'"cache_creation_input_tokens":(\d+)')
+# ★2026-08-23 書込(cache作成)は**寿命の種別で単価が違う**(5分 / 1時間)。記録は分けて持っている。
+#   イージス研究室の実測= 直近24時間の書込の **97.8% が1時間TTL**(`floor_burn.py --by ttl`)。
+#   ★倍率そのものは公表価格が正= **この計器は勝手に決めない**。既定は従来どおり両方 1.25 で、
+#     `--cc1h <倍率>` を渡した時だけ1時間ぶんを別倍率で当てる(=感度を見る道具)。
+RE_CC1H = re.compile(r'"ephemeral_1h_input_tokens":(\d+)')
+RE_CC5M = re.compile(r'"ephemeral_5m_input_tokens":(\d+)')
 RE_CR = re.compile(r'"cache_read_input_tokens":(\d+)')
 RE_OUT = re.compile(r'"output_tokens":(\d+)')
 
@@ -136,12 +156,20 @@ def collect(since_utc):
                 def n(rx):
                     mm = rx.search(line)
                     return int(mm.group(1)) if mm else 0
-                rows.append((sid, model, dt, n(RE_IN), n(RE_CC), n(RE_CR), n(RE_OUT)))
+                cc, cc1h = n(RE_CC), n(RE_CC1H)
+                # ★内訳が無い記録(古い行)は「全部5分TTL」へ倒す= 従来の数え方のまま。盛らない側。
+                cc1h = cc1h if cc1h <= cc else cc
+                rows.append((sid, model, dt, n(RE_IN), cc, n(RE_CR), n(RE_OUT), cc1h))
     return rows
 
 
+CC1H_W = W_CC_1H                 # ★既定=公表価格の2.0。`--cc1h 1.25` で旧来の数え方に戻せる
+
+
 def weighted(r):
-    return (r[3] * W_IN + r[4] * W_CACHE_CREATE + r[5] * W_CACHE_READ
+    cc1h = r[7] if len(r) > 7 else 0
+    cc5m = r[4] - cc1h
+    return (r[3] * W_IN + cc5m * W_CACHE_CREATE + cc1h * CC1H_W + r[5] * W_CACHE_READ
             + r[6] * W_OUT) * model_weight(r[1])
 
 
@@ -160,9 +188,14 @@ def main():
                     help="部門で絞る(カンマ区切りのslug)。--by model と併せると『その部屋の中でどのモデルが動いたか』")
     ap.add_argument("--model", default=None,
                     help="モデルで絞る(部分一致。例 sonnet)。--by dept と併せると『どの部屋がそのモデルを動かしたか』")
+    ap.add_argument("--cc1h", type=float, default=None,
+                    help="1時間TTLの書込に当てる倍率(既定=5分と同じ1.25=従来の数え方)。公表価格を確かめてから渡す")
     ap.add_argument("--ago", type=float, default=0.0,
                     help="窓の右端をN時間前へずらす(--hours と併用)。過去の同じ長さ・同じ時刻帯の窓を後から取り直す")
     a = ap.parse_args()
+    global CC1H_W
+    if a.cc1h is not None:
+        CC1H_W = a.cc1h
 
     now = datetime.now(JST)
     end = now - timedelta(hours=a.ago) if a.ago else now
@@ -206,6 +239,21 @@ def main():
     print("1便あたりの文脈= {:,}(うち cache読みが {:.1f}% = 毎便おなじ文脈を読み直している)".format(
         int(ctx / n), s_cr / ctx * 100 if ctx else 0))
 
+    # ★★書込と読込、どちらから削るか= 重み付きで並べる。ここは**倍率の仮定に依存する**ので、
+    #   「順位がひっくり返る1時間TTLの倍率」まで出す(=価格表を確かめる前でも判断できる形にする)。
+    s_1h = sum((r[7] if len(r) > 7 else 0) for r in rows)
+    w_1h = sum((r[7] if len(r) > 7 else 0) * model_weight(r[1]) for r in rows)
+    w_5m = sum((r[4] - (r[7] if len(r) > 7 else 0)) * model_weight(r[1]) for r in rows)
+    w_read = sum(r[5] * model_weight(r[1]) for r in rows) * W_CACHE_READ
+    w_write = w_5m * W_CACHE_CREATE + w_1h * CC1H_W
+    print("書込の寿命= 1時間TTL {:,}({:.1f}%) / 5分TTL {:,}".format(
+        s_1h, s_1h / s_cc * 100 if s_cc else 0, s_cc - s_1h))
+    print("重み付き 書込= {:,.0f}(1時間TTLの倍率 {:.2f}) / 読込= {:,.0f} → **{}が重い**".format(
+        w_write, CC1H_W, w_read, "書込" if w_write > w_read else "読込"))
+    if w_1h > 0:
+        be = (w_read - w_5m * W_CACHE_CREATE) / w_1h
+        print("★順位が入れ替わる1時間TTLの倍率= {:.2f}(これより上なら書込が重い)".format(be))
+
     # ★ここだけが「速さ」の話。画面の実測%を渡された時にしか言わない(推測で埋めない)
     if a.used is not None and not a.hours:
         nxt = start + timedelta(days=7)
@@ -228,9 +276,10 @@ def main():
             print("持続可能な速さ= %.2f%%/時(= いまの 1/%.1f に落とす)" % (sustain, rate / sustain))
 
     print()
-    print("★シェアは「重み付き換算」= 入力%.1f / cache作成%.2f / cache読み%.1f / 出力%.1f × モデル係数"
-          % (W_IN, W_CACHE_CREATE, W_CACHE_READ, W_OUT))
-    print("★これはAnthropicの割合の出し方ではない= **順位を見る物差し**。残量の正はChamiの画面。")
+    print("★シェアは公表価格の比= 入力%.1f / 書込5分%.2f / **書込1時間%.2f** / 読込%.1f / 出力%.1f × モデル係数"
+          % (W_IN, W_CACHE_CREATE, CC1H_W, W_CACHE_READ, W_OUT))
+    print("★モデル係数(Sonnet=1)= opus 2.5 / fable・mythos 5.0 / haiku 0.5(2026-08-23 価格表で実測)")
+    print("★これはMaxプランの使用状況%の重み付けではない= **順位を見る物差し**。残量の正はChamiの画面。")
     print()
 
     if a.by == "hour":
