@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>投稿提案 / 決定</title>
 <style>
+  /* ★白系(ホワイト)配色 — ベース=クリーム/白・文字=濃紺〜黒・アクセントはティール #2bb3c0 (Chami追補【1】2026-08-23)。
+     Claude標準の紫は不使用。候補ページ(KouhoLists.html)風に白面+淡いボーダー/シャドウ。 */
   :root{
-    --bg:#0b0f1a; --card:#0e1422; --card2:#111a2b; --line:#1e2d42; --line2:#2a3346;
-    --accent:#2bb3c0; --accent-ink:#04222a; --ink:#e7eef6; --muted:#9fb0c3; --dim:#6f8296;
-    --canvas:#141419; --ok:#3fb27f; --warn:#e0a24a;
+    --bg:#fffdf6; --card:#ffffff; --card2:#faf8f0; --field:#f4f2ea; --line:#e6e2d6; --line2:#d8d3c4;
+    --accent:#2bb3c0; --accent-ink:#04222a; --ink:#1a1a2e; --muted:#5f6675; --dim:#8b93a2;
+    --canvas:#f0eee6; --ok:#2f9e6a; --warn:#c07a2a;
+    --shadow:0 1px 2px rgba(26,26,46,.06), 0 2px 10px rgba(26,26,46,.05);
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--ink);
@@ -19,16 +22,16 @@
   header{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:4px 0 12px}
   header h1{font-size:1.05rem;font-weight:800;color:var(--accent);margin:0;letter-spacing:.01em}
   header .date{font-size:.78rem;color:var(--muted)}
-  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow)}
   .panel .head{font-size:.72rem;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
   label.mini{display:block;font-size:.72rem;color:var(--muted);margin:8px 0 4px}
   input[type=text],input[type=url],input[type=password],textarea,select{
-    width:100%;background:#0b1220;border:1px solid var(--line2);color:var(--ink);
+    width:100%;background:var(--field);border:1px solid var(--line2);color:var(--ink);
     border-radius:8px;padding:9px 10px;font-size:.86rem;font-family:inherit}
   textarea{resize:vertical;line-height:1.5}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   button{font-family:inherit;cursor:pointer}
-  .btn{width:auto;flex:0 0 auto;background:#0e1a2b;border:1px solid #3a4a5e;color:#aabbc8;
+  .btn{width:auto;flex:0 0 auto;background:var(--field);border:1px solid var(--line2);color:var(--muted);
     border-radius:8px;padding:8px 12px;font-size:.8rem}
   .btn:hover{border-color:var(--accent)}
   .btn.primary{background:var(--accent);border:none;color:var(--accent-ink);font-weight:700}
@@ -39,14 +42,14 @@
   details.cfg summary::-webkit-details-marker{display:none}
   details.cfg summary::before{content:"⚙ ";}
   /* candidate card */
-  .cand{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+  .cand{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px;box-shadow:var(--shadow)}
   .cand.picked{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
   .cand .top{display:flex;gap:8px;align-items:flex-start}
-  .rank{flex:0 0 auto;width:26px;height:26px;border-radius:7px;background:#0b1220;border:1px solid var(--line2);
+  .rank{flex:0 0 auto;width:26px;height:26px;border-radius:7px;background:var(--field);border:1px solid var(--line2);
     display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;color:var(--muted)}
   .title{font-size:.9rem;font-weight:700;line-height:1.35;margin:0}
   .meta{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px}
-  .chip{font-size:.68rem;color:var(--muted);background:#0b1220;border:1px solid var(--line2);
+  .chip{font-size:.68rem;color:var(--muted);background:var(--field);border:1px solid var(--line2);
     border-radius:999px;padding:3px 8px;white-space:nowrap}
   .chip.ch{color:var(--accent-ink);background:var(--accent);border:none;font-weight:700}
   .chip.prov{color:var(--warn);border-color:var(--warn)}
@@ -55,7 +58,7 @@
     border:1px solid var(--line);object-fit:cover}
   .cmts{margin:6px 0 2px}
   .cmt{display:flex;gap:8px;align-items:flex-start;padding:7px 8px;border:1px solid var(--line);
-    border-radius:8px;margin-bottom:6px;background:#0b1220}
+    border-radius:8px;margin-bottom:6px;background:var(--field)}
   .cmt input{margin-top:3px}
   .cmt .ctext{font-size:.86rem;line-height:1.4}
   .cmt .caim{font-size:.66rem;color:var(--dim);margin-top:2px}
@@ -63,7 +66,9 @@
   /* 部屋コメント (三笘薫 / 早坂芽衣) — 作品の下に2枠 */
   .rooms{margin:10px 0 2px;display:flex;flex-direction:column;gap:7px}
   .rmc{display:flex;gap:8px;align-items:flex-start;padding:8px 9px;border:1px solid var(--line);
-    border-radius:10px;background:#0b1220}
+    border-radius:10px;background:var(--card)}
+  .rmc.mi{background:rgba(43,179,192,.07);border-color:rgba(43,179,192,.28)}
+  .rmc.me{background:rgba(192,122,42,.08);border-color:rgba(192,122,42,.28)}
   .rmc .ava{flex:0 0 auto;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
     justify-content:center;font-size:.74rem;font-weight:800;color:var(--accent-ink)}
   .rmc.mi .ava{background:var(--accent)}
@@ -76,18 +81,18 @@
   .cand label.mini{margin-top:6px}
   .decide-row{display:flex;gap:8px;align-items:center;margin-top:8px}
   .segch{display:flex;gap:0;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
-  .segch button{width:auto;flex:0 0 auto;background:#0b1220;border:none;color:var(--muted);
+  .segch button{width:auto;flex:0 0 auto;background:var(--field);border:none;color:var(--muted);
     padding:7px 12px;font-size:.78rem}
   .segch button.on{background:var(--accent);color:var(--accent-ink);font-weight:700}
   /* sticky decision bar */
-  .decbar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:rgba(9,13,22,.96);
+  .decbar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:rgba(255,253,246,.96);
     border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));
     backdrop-filter:blur(6px)}
   .decbar .inner{max-width:520px;margin:0 auto}
   .decbar .sum{font-size:.78rem;color:var(--muted);margin-bottom:8px;line-height:1.4}
   .decbar .sum b{color:var(--ink)}
   .status{font-size:.78rem;margin-top:8px;min-height:1em}
-  .status.ok{color:var(--ok)} .status.err{color:#e06a6a} .status.busy{color:var(--warn)}
+  .status.ok{color:var(--ok)} .status.err{color:#d64545} .status.busy{color:var(--warn)}
   .empty{color:var(--dim);text-align:center;padding:30px 10px;font-size:.86rem;line-height:1.6}
 </style>
 </head>
