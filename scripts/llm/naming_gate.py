@@ -177,6 +177,65 @@ def _mask_name_tags(text, persona, rules):
         return str(text or "")
 
 
+# ==== 引用の中の名前は「呼びかけ」ではない(2026-08-23)==========================
+#   ★改善提案部門トトリの訂正便(DISPATCH-aegis-gl-1787459099442)の P1③
+#     「名前の直後が話題助詞(の/は/が/を/に)なら除外」は**こちらの実測で不採用**にした。
+#     その形だと本物の呼び捨てが道連れで黙る:
+#       「アロンソが全部喋っちゃってただけ」「デブライネは言い訳しないで」
+#       「アロンソの一人称は原典から採るの」(いずれもアメスの地の文=本物の違反)
+#     助詞は"言及か呼びかけか"を分けない。分けるのは**引用符**だ。
+#   実測(local/llm/naming_audit.jsonl 403行の excerpt を現行コードへ通した284判定):
+#       引用符の中で鳴っていた 54件(19%)。例=
+#         ククール「アロンソさん」でゲートを走らせたら…  ← ゲートの動作説明
+#         人事部門の解説文『三笘くん』を…                ← 呼称の解説
+#         **アメス→一ノ瀬怜=呼び捨て「怜」** を刻んだ    ← 台帳の値
+#     どれも「その文字列そのものの話」であって、誰かをそう呼んだのではない。
+#   ★境界の決め方(推定を置かない):
+#     - 開き/閉じが**同じ行**に在るものだけ覆う。改行を跨ぐ対は誤対応
+#       (実測: バッククォートが段落を跨いで対になり 66〜89字を巻き込んでいた=
+#        それを覆うと本物の呼び捨てまで黙る)。
+#     - 併せて長さ上限 60 字。これは意味の線ではなく**誤対応よけ**
+#       (実測で正しい引用の最長は36字)。
+_QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'), ("`", "`"))
+_QUOTE_MAX = 60
+
+
+def _mask_quoted_mentions(text):
+    """引用符の**中身**を同じ長さの覆いに差し替えた文字列を返す。
+
+    `_mask_name_tags` と同じ約束= **長さを変えない**(naming_corrections は元文の
+    位置で置換するため。判定用と置換用で2本の文字列を持たない)。
+    fail-open: 例外は元文をそのまま返す(覆えなくても配送は殺さない)。
+    ★1つの述語として名前を付けてあるのは、検査でここだけを旧仕様(恒等関数)へ
+      戻して同じ検体が鳴るのを見せるため(共通規律§3)。
+    """
+    try:
+        s = str(text or "")
+        if not s:
+            return s
+        out = None
+        for op, cl in _QUOTE_PAIRS:
+            i = 0
+            while True:
+                b = s.find(op, i)
+                if b < 0:
+                    break
+                e = s.find(cl, b + 1)
+                if e < 0:
+                    break
+                inner = s[b + 1:e]
+                i = e + 1
+                if not inner or len(inner) > _QUOTE_MAX or "\n" in inner:
+                    continue
+                if out is None:
+                    out = list(s)
+                for k in range(b + 1, e):
+                    out[k] = _MASK_CH
+        return s if out is None else "".join(out)
+    except Exception:
+        return str(text or "")
+
+
 # 裸の姓の直後に付きうる敬称/接尾(この並びが「実際に使われた形」を決める)。
 #   長い順に試す(「ちゃん」→「ちゃ」等の食い違い防止)。
 _HONORIFICS = ("さん", "さま", "ちゃん", "くん", "君", "様",
@@ -359,6 +418,8 @@ def naming_verdicts(persona, dept, text, rules):
         # ★名乗りタグ `[人格名]` は機械の構文=判定から外す(2026-08-23・上の★参照)。
         #   長さは変えない=位置は元文と1文字もずれない。
         s = _mask_name_tags(s, persona, rules)
+        # ★引用符の中身は「その文字列そのものの話」=呼びかけではない(上の★参照)。
+        s = _mask_quoted_mentions(s)
 
         hrt = rules.get("honorific_required_targets") or {}
         overrides = rules.get("speaker_target_overrides") or []
@@ -575,7 +636,7 @@ def naming_corrections(persona, dept, text, rules):
         # ★探すのは覆った文字列・書くのは元文(2026-08-23)。長さが同じなので位置は共通。
         #   これで**名乗りタグの中は絶対に書き換わらない**(`[ケヴィン・デブライネさん]`
         #   に化けて名義の解決が壊れる事故を、境界文字の運任せでなく機構で止める)。
-        masked = _mask_name_tags(s, persona, rules)
+        masked = _mask_quoted_mentions(_mask_name_tags(s, persona, rules))
         # ★呼称ルールを本文で引用/解説する部屋は自動修正しない(警告のみ)。
         if _autofix_suppressed(dept):
             result["remaining"] = list(verdicts)

@@ -379,6 +379,41 @@ def _run():
     _check("E-8b", _new["fixed"] == _both_body and not _new["applied"],
            f"★直った側: `]`が安全境界でも名乗りは1文字も変わらない | {_new['fixed']!r}")
 
+    # ★E-9〜E-12= 引用符の中の名前(2026-08-23・トトリ訂正便 P1③の差し替え)。
+    #   検体は**実物から採った形**= 人事部門の解説文『三笘くん』を勝手に化けさせた事故と同型。
+    _quo_body = "解説文の「三笘」という表記を直す。"
+    _orig_quo = _ng._mask_quoted_mentions
+
+    _v = naming_verdicts("オタコン", "aegis-gl", _quo_body, rules)
+    _check("E-9", not _v, f"引用符の中の名前は呼びかけでない(鳴らない) | {_v}")
+
+    try:
+        _ng._mask_quoted_mentions = lambda t: t          # 旧仕様=覆わない
+        _v_old = naming_verdicts("オタコン", "aegis-gl", _quo_body, rules)
+        _c_old = naming_corrections("オタコン", "aegis-gl", _quo_body, rules)
+    finally:
+        _ng._mask_quoted_mentions = _orig_quo
+    _check("E-10", any(x.get("target") == "三笘薫" for x in _v_old),
+           f"★変異: 引用の覆いを外すと同じ検体が鳴る(=穴の再現・空PASSでない) | {_v_old}")
+    _check("E-11", _c_old["fixed"] == "解説文の「三笘くん」という表記を直す。",
+           f"★変異: 旧仕様は**引用の中身を書き換えていた**(解説文が化ける) "
+           f"| {_c_old['fixed']!r}")
+
+    _c_new = naming_corrections("オタコン", "aegis-gl", _quo_body, rules)
+    _check("E-11b", _c_new["fixed"] == _quo_body and not _c_new["applied"],
+           f"★直った側: 引用の中身は1文字も変わらない | {_c_new['fixed']!r}")
+
+    # ★E-12= 黙らせすぎていないことの担保(2件)。
+    #   (a) 引用の外の裸の姓は今までどおり鳴る。
+    #   (b) **改行を跨ぐ対**は覆わない=実測で 66〜89字を巻き込んでいた誤対応
+    #       (これを覆うと地の文の本物の呼び捨てが道連れで黙る)。
+    _v = naming_verdicts("オタコン", "aegis-gl", "三笘が対応する。", rules)
+    _check("E-12a", any(x.get("target") == "三笘薫" for x in _v),
+           f"引用の外の裸の姓は鳴る | {_v}")
+    _v = naming_verdicts("オタコン", "aegis-gl", "`コード\nの中の三笘`が対応する。", rules)
+    _check("E-12b", any(x.get("target") == "三笘薫" for x in _v),
+           f"改行を跨ぐ引用対は覆わない(誤対応で黙らせない) | {_v}")
+
     failed += e_failed
 
     total = (len(cases) + len(fix_cases) + len(abbrev_cases)
