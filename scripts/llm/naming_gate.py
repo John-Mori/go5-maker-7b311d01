@@ -88,6 +88,95 @@ def _find_forms(text, forms):
     return best
 
 
+# ==== 名乗りタグ `[名前]` は「日本語の本文」ではない(2026-08-23)====================
+#   ★実測で入れた(改善提案部門トトリの提案 msg DISPATCH-aegis-gl-1787458670363 を
+#     こちらで数え直した結果)。naming_audit.jsonl の違反候補165件のうち
+#     **64件(39%)が、返信の1行目の名乗り `[ケヴィン・デブライネ]` を本文と見なして
+#     「デブライネさん と書け」と鳴らしていた**。名乗りは Discord へ出る前に
+#     dept_daemon が取り除く**機械の構文**で、日本語の呼びかけではない。
+#   ★★これは騒音であると同時に**地雷**だった= もし `]` を _SAFE_AFTER_CHARS へ足すと、
+#     自動修正が `[ケヴィン・デブライネ]` → `[ケヴィン・デブライネさん]` に書き換え、
+#     **名義の解決が壊れる**(共通規律§4.8・付録A-6)。今それを止めていたのは
+#     「`]` がたまたま安全境界の一覧に無い」ことだけ=**静かに壊れる推定**(§3)。
+#   直し方= 判定の前にタグの範囲を**同じ長さのNULで覆う**(削らない=位置がずれると
+#     naming_corrections の位置指定の置換が壊れるため)。覆うのは
+#     **中身が実在の人格名と完全一致する行頭の角括弧だけ**=「[三笘の96h]」のような
+#     普通の括弧書きは今までどおり judged のまま(取りこぼしを作らない)。
+_NAME_TAG_RE = re.compile(r"(?m)^[ \t　]*\[([^\[\]\n]{1,24})\]")
+_MASK_CH = chr(0)  # 本文に出ない=どの名前にも一致せず、安全境界(_SAFE_AFTER_CHARS)にもならない
+
+
+def _known_name_norms(persona, rules):
+    """名乗りタグの中身が『人格名』かを見分けるための正規化済み名前集合。
+
+    集めるのは**判定に使う名前だけ**= 話者本人 + 呼称ルールの対象キーとその検出形。
+    それ以外の名前は、そもそもこのゲートが違反を出さない=覆う必要がない。
+    """
+    names = set()
+    if persona:
+        names.add(_norm(persona))
+    rules = rules or {}
+    hrt = rules.get("honorific_required_targets") or {}
+    for k, v in hrt.items():
+        if str(k).startswith("_") or not isinstance(v, dict):
+            continue
+        names.add(_norm(k))
+        for f in list(v.get("bare_forms") or []) + list(v.get("allowed") or []):
+            if f:
+                names.add(_norm(f))
+    detect = rules.get("target_detect_forms") or {}
+    if isinstance(detect, dict):
+        for k, arr in detect.items():
+            if str(k).startswith("_"):
+                continue
+            names.add(_norm(k))
+            for f in (arr or []) if isinstance(arr, (list, tuple)) else []:
+                if f:
+                    names.add(_norm(f))
+    for ov in rules.get("speaker_target_overrides") or []:
+        tk = ov.get("target")
+        if tk and tk != "*":
+            names.add(_norm(tk))
+    names.discard("")
+    return names
+
+
+def _is_self(persona, target_key):
+    """話者と対象が同じ人か(中黒・空白のゆれを吸収して見る)。
+
+    ★1つの述語として名前を付けてある理由は2つ(2026-08-23):
+      ①同じ問いを2か所に書かない(ORG-11)。
+      ②検査で**この述語だけを旧仕様(常にFalse)へ戻して**、同じ検体が鳴ることを
+        見せられるようにする=must-fail(共通規律§3「入力を差し替えて経路を実行で通せ」)。
+    """
+    return _norm(persona) == _norm(target_key)
+
+
+def _mask_name_tags(text, persona, rules):
+    """行頭の名乗りタグ `[人格名]` を**同じ長さの覆い**に差し替えた文字列を返す。
+
+    長さを変えないのが要点= naming_corrections は元文の**位置**で置換するので、
+    ここでずらすと置換先が1文字ずつ狂う(判定用と置換用で2本の文字列を持たない)。
+    fail-open: 例外は元文をそのまま返す(覆えなくても配送は殺さない)。
+    """
+    try:
+        s = str(text or "")
+        if "[" not in s:
+            return s
+        known = _known_name_norms(persona, rules)
+        if not known:
+            return s
+        out = list(s)
+        for m in _NAME_TAG_RE.finditer(s):
+            if _norm(m.group(1)) not in known:
+                continue        # 人格名ではない普通の括弧書き=判定に残す
+            for i in range(m.start(), m.end()):
+                out[i] = _MASK_CH
+        return "".join(out)
+    except Exception:
+        return str(text or "")
+
+
 # 裸の姓の直後に付きうる敬称/接尾(この並びが「実際に使われた形」を決める)。
 #   長い順に試す(「ちゃん」→「ちゃ」等の食い違い防止)。
 _HONORIFICS = ("さん", "さま", "ちゃん", "くん", "君", "様",
@@ -267,6 +356,9 @@ def naming_verdicts(persona, dept, text, rules):
         s = str(text or "")
         if not s:
             return out
+        # ★名乗りタグ `[人格名]` は機械の構文=判定から外す(2026-08-23・上の★参照)。
+        #   長さは変えない=位置は元文と1文字もずれない。
+        s = _mask_name_tags(s, persona, rules)
 
         hrt = rules.get("honorific_required_targets") or {}
         overrides = rules.get("speaker_target_overrides") or []
@@ -346,6 +438,16 @@ def naming_verdicts(persona, dept, text, rules):
                 continue
 
             # --- override 無し=既定(honorific_required_targets の allowed) ---
+            # ★自分で自分を呼ぶ形に敬称を要求しない(2026-08-23)。
+            #   実測= 違反候補165件のうち **69件(42%)が「話者==対象」**、つまり
+            #   デブライネの便に出る「デブライネ」へ『デブライネさん と書け』と鳴っていた。
+            #   日本語で自称に「さん」は付かない=**この警告は原理的に常に誤り**で、
+            #   常に誤発火する安全網は無視される(共通規律§3)。
+            #   ★消すのは**既定の敬称要求だけ**= 話者×対象の override(三笘薫→三笘薫の
+            #     forbidden:["三笘さん"] のような**わざと書かれた自称の禁止形**)は
+            #     この行より上で処理済み=そのまま生きる。forbidden / abbreviation も無傷。
+            if _is_self(persona, tk):
+                continue
             allowed = list(ent.get("allowed") or [])
             if not allowed:
                 # honorific_required に載っていない対象で override も無い=判定不能=不問
@@ -470,6 +572,10 @@ def naming_corrections(persona, dept, text, rules):
         verdicts = naming_verdicts(persona, dept, s, rules)
         if not verdicts:
             return result
+        # ★探すのは覆った文字列・書くのは元文(2026-08-23)。長さが同じなので位置は共通。
+        #   これで**名乗りタグの中は絶対に書き換わらない**(`[ケヴィン・デブライネさん]`
+        #   に化けて名義の解決が壊れる事故を、境界文字の運任せでなく機構で止める)。
+        masked = _mask_name_tags(s, persona, rules)
         # ★呼称ルールを本文で引用/解説する部屋は自動修正しない(警告のみ)。
         if _autofix_suppressed(dept):
             result["remaining"] = list(verdicts)
@@ -490,11 +596,11 @@ def naming_corrections(persona, dept, text, rules):
                 continue
             fixed_n = 0
             unsafe = False
-            for i, actual, ok in _iter_occurrences(s, bare, allowed):
+            for i, actual, ok in _iter_occurrences(masked, bare, allowed):
                 if ok:
                     continue
                 end = i + len(actual)
-                if not _safe_after(s, end):
+                if not _safe_after(masked, end):
                     unsafe = True          # 姓+名(直後が漢字)等=置換すると壊れる
                     continue
                 repls.append((i, end, target_form))

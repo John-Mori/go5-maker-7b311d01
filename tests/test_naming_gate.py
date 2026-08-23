@@ -288,8 +288,101 @@ def _run():
     print(f"{'PASS' if luka_ok else 'FAIL'} D-9: オタコンの裸『ルカ』が鳴る/アイの『ルカさん』は鳴らない "
           f"| fire={luka} fp={luka_fp}")
 
+    # ================================================================
+    # E: 名乗りタグ `[人格名]` と自称は判定しない(2026-08-23・イージス研究室)
+    # ----------------------------------------------------------------
+    # 発端= 改善提案部門トトリの提案(DISPATCH-aegis-gl-1787458670363)を数え直したら、
+    #   naming_audit.jsonl の違反候補165件のうち **69件(42%)が「話者==対象」の自称**、
+    #   **64件が返信1行目の名乗り `[ケヴィン・デブライネ]`** を本文と見なしたものだった。
+    #   日本語で自称に敬称は付かない=**原理的に常に誤りの警告**(共通規律§3)。
+    # ★ここは全部「旧仕様なら鳴る/新仕様では黙る」を対で見る(空PASS禁止)。
+    #   旧仕様の再現は **直した述語1つだけを元へ戻す**(判定経路は本物のまま通す)。
+    import naming_gate as _ng                                   # noqa: E402
+
+    e_failed = 0
+    e_total = 0
+
+    def _check(tag, ok, detail):
+        nonlocal e_failed, e_total
+        e_total += 1
+        if not ok:
+            e_failed += 1
+        print(f"{'PASS' if ok else 'FAIL'} {tag}: {detail}")
+
+    # ★検体は2つの穴を**別々に**踏むものを選ぶ(片方の直しがもう片方を隠すと空PASSになる)。
+    #   E-1/E-2 = 名乗りタグだけの穴 → 話者と別人の名札(自称の除外は効かない)。
+    #   E-3/E-4 = 自称だけの穴       → 名札の無い地の文(覆いは効かない)。
+    _tag_body = "[ルカ・モドリッチ]\n見といたぞ。"
+    _self_body = "デブライネの見立てはこうだ。"
+    _both_body = "[ケヴィン・デブライネ]\nアロンソコーチ、受けた。"
+
+    _v = naming_verdicts("アメス", "aegis-gl", _tag_body, rules)
+    _check("E-1", not _v, f"★他人の名乗りタグも判定しない(鳴らない) | {_v}")
+
+    _orig_mask = _ng._mask_name_tags
+    try:
+        _ng._mask_name_tags = lambda t, p, r: t          # 旧仕様=覆わない
+        _v_old = naming_verdicts("アメス", "aegis-gl", _tag_body, rules)
+    finally:
+        _ng._mask_name_tags = _orig_mask
+    _check("E-2", any(x.get("target") == "ルカ・モドリッチ" for x in _v_old),
+           f"★変異: 覆いを外すと同じ検体が鳴る(=穴の再現・空PASSでない) | {_v_old}")
+
+    _v = naming_verdicts("ケヴィン・デブライネ", "aegis-gl", _self_body, rules)
+    _check("E-3", not _v, f"★自称に敬称を要求しない(鳴らない) | {_v}")
+
+    _orig_self = _ng._is_self
+    try:
+        _ng._is_self = lambda p, t: False                # 旧仕様=自称を素通ししない
+        _v_old = naming_verdicts("ケヴィン・デブライネ", "aegis-gl", _self_body, rules)
+    finally:
+        _ng._is_self = _orig_self
+    _check("E-4", any(x.get("reason") == "honorific_required" for x in _v_old),
+           f"★変異: 自称の除外を外すと同じ検体が鳴る | {_v_old}")
+
+    # ★E-5= 黙らせすぎていないことの担保。同じ裸の姓でも**他人が呼べば**鳴る。
+    _v = naming_verdicts("アメス", "aegis-gl", _self_body, rules)
+    _check("E-5", any(x.get("reason") == "honorific_required" for x in _v),
+           f"他人が呼ぶ裸『デブライネ』は今までどおり鳴る | {_v}")
+
+    # ★E-5b= 手書きの self-override(2026-08-18 に人事部門がモドリッチ/三笘へ個別に足した
+    #   『本人がさん無しで名乗るのは正』)と、こちらの一般形が**食い違わない**こと。
+    _v = naming_verdicts("ルカ・モドリッチ", "aegis-gl", "モドリッチが見た。", rules)
+    _check("E-5b", not _v,
+           f"手書きの自称override(モドリッチ)と一般形が同じ結論 | {_v}")
+
+    _v = naming_verdicts("三笘薫", "aegis-gl", "三笘さんが対応する。", rules)
+    _check("E-6", any(x.get("reason") == "forbidden" for x in _v),
+           f"★わざと書かれた自称の禁止形(三笘→『三笘さん』)は生きている | {_v}")
+
+    _v = naming_verdicts("ククール", "aegis-gl", "[三笘の96h]について話す。", rules)
+    _check("E-7", any(x.get("target") == "三笘薫" for x in _v),
+           f"人格名でない行頭の括弧は覆わない(取りこぼしを作っていない) | {_v}")
+
+    # ★E-8= 地雷そのもの。`]` が安全境界に入った瞬間、旧仕様は名乗りを書き換える。
+    #   今それを止めているのが「境界文字の一覧にたまたま `]` が無い」ことだけなのを、
+    #   一覧へ `]` を足した状態で新旧を並べて見せる。
+    _orig_chars = _ng._SAFE_AFTER_CHARS
+    try:
+        _ng._SAFE_AFTER_CHARS = set(_orig_chars) | {"]"}
+        _new = naming_corrections("ケヴィン・デブライネ", "aegis-gl", _both_body, rules)
+        _ng._mask_name_tags = lambda t, p, r: t
+        _ng._is_self = lambda p, t: False
+        _old = naming_corrections("ケヴィン・デブライネ", "aegis-gl", _both_body, rules)
+    finally:
+        _ng._SAFE_AFTER_CHARS = _orig_chars
+        _ng._mask_name_tags = _orig_mask
+        _ng._is_self = _orig_self
+    _check("E-8a", _old["fixed"].startswith("[ケヴィン・デブライネさん]"),
+           f"★変異: 旧仕様＋`]`が安全境界 → 名乗りが化ける(名義解決が壊れる) "
+           f"| {_old['fixed']!r}")
+    _check("E-8b", _new["fixed"] == _both_body and not _new["applied"],
+           f"★直った側: `]`が安全境界でも名乗りは1文字も変わらない | {_new['fixed']!r}")
+
+    failed += e_failed
+
     total = (len(cases) + len(fix_cases) + len(abbrev_cases)
-             + len(detect_cases) + 2)
+             + len(detect_cases) + 2 + e_total)
     print("-" * 60)
     if failed:
         print(f"{failed} 件 FAIL / {total} 件")
