@@ -14,11 +14,18 @@
   実際に鮮度警報へ通す**。外へ出る手(Discordへの送信)だけ dry_run で止め、判定と分岐は本物。
   変異(mtimeを3日前へ倒す / 書けない先を渡す)で**必ず落ちる側**も同じ経路で通す。
 
+★★C-054(2026-08-23 HQ差し戻し)= **見張っている脈を、見張り以外の手で更新しない。**
+  旧版はこの検査が**本番の** `reaction_watch_kaizen_digest.md` をそのまま書き、mtimeも倒していた。
+  = 巡回が死んだ朝にこの検査を走らせると鮮度が0へ戻り、**疑って確かめようとした手が証拠を消す**。
+  現版は脈の実体を一時ディレクトリへ差し替え、レジストリの入力(load_producers)も同じ物へ向ける
+  =**判定と分岐は本物のまま・外の脈は1バイトも触らない**。触っていないことは検査⑦が自分で測る。
+
     python tests/test_emoji_digest_pulse.py
 """
 import io
 import os
 import sys
+import tempfile
 import time
 
 try:
@@ -51,6 +58,15 @@ def freshness(state):
     return (state.get("producer_fresh") or {}).get(NAME) or {}
 
 
+def _stat(path):
+    """本番の脈の「触られていなさ」を測る値。存在しない場合も含めて1つの値にする。"""
+    try:
+        s = os.stat(path)
+        return (True, s.st_size, round(s.st_mtime, 3))
+    except OSError:
+        return (False, -1, -1)
+
+
 def main():
     # --- 登録が実際に読めているか(ここが読めないと以下は全部 空PASS になる) ---
     rows = [p for p in AW.load_producers() if p["name"] == NAME]
@@ -63,6 +79,33 @@ def main():
     ok(os.path.abspath(RW.KAIZEN_DIGEST).lower().endswith(row["path"].replace("/", os.sep).lower()),
        "書く側(reaction_watch)と登録の path が同じ物を指している")
 
+    # ★ここから先は脈の実体を一時ディレクトリへ逃がす(C-054)。本番の脈は入口の照合にしか使わない。
+    real_pulse = os.path.abspath(RW.KAIZEN_DIGEST)
+    before = _stat(real_pulse)
+    with tempfile.TemporaryDirectory() as tmp:
+        rc = _run_on(tmp, row)
+    after = _stat(real_pulse)
+    # --- ⑦ ★C-054: 検査は「見張っている脈」を1バイトも触らない(mtimeも倒さない) ---
+    ok(before == after,
+       "★検査が本番の脈を触っていない(C-054): %s -> %s" % (before, after))
+    return _finish() or rc
+
+
+def _run_on(tmp, row):
+    """脈の実体を tmp へ差し替えて本体を回す。判定と分岐(書く側/読む側/鳴らす側)は全部本物。"""
+    keep_rw, keep_rk, keep_load = RW.KAIZEN_DIGEST, RK.KAIZEN_DIGEST, AW.load_producers
+    pulse = os.path.join(tmp, "reaction_watch_kaizen_digest.md")
+    RW.KAIZEN_DIGEST = pulse          # 書く側
+    RK.KAIZEN_DIGEST = pulse          # 読む側
+    # 鳴らす側= レジストリの**入力だけ**を差し替える(name/間隔/連続回数/宛先は本番の登録のまま)
+    AW.load_producers = lambda: [dict(row, path=pulse)]
+    try:
+        return _body()
+    finally:
+        RW.KAIZEN_DIGEST, RK.KAIZEN_DIGEST, AW.load_producers = keep_rw, keep_rk, keep_load
+
+
+def _body():
     # --- ① 書く: 0件の朝でも本物の関数で実ファイルが出来る ---
     body = "%s / 実際に書けることを確かめるために書いた種であって、巡回の結果ではない。" % MARK
     ok(RW.write_kaizen_digest(body, 0, False) is True, "write_kaizen_digest が True を返す(書けた)")
@@ -104,12 +147,12 @@ def main():
     finally:
         RW.KAIZEN_DIGEST = keep
 
-    # --- 後始末= 脈を生きた状態で置いていく(登録した直後に無いと、明日の朝まで誤発火する) ---
-    RW.write_kaizen_digest(
-        "%s / 2026-08-23 に脈を起こすために書いた種。明日の朝8時の巡回が本物で上書きする。"
-        % MARK, 0, False)
-    ok(os.path.exists(RW.KAIZEN_DIGEST), "検査の後、脈は生きたまま残っている")
+    # ★旧版はここで「脈を生きた状態で置いていく」種を**本番へ**書いていた(C-054差し戻しの本体)。
+    #   検査は脈を打つ手ではない。誤発火よけは機構側(登録時刻からの猶予)が持つ=プラットフォームSE。
+    return 0
 
+
+def _finish():
     print()
     if _fails:
         print("FAIL %d件: %s" % (len(_fails), " / ".join(_fails)))
