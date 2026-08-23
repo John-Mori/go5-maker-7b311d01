@@ -1,7 +1,7 @@
 /* posted-source.js — 「投稿済み」判定の読み取り専用ソース(分割ページ用の共有土台)。
  *
  * なぜ要るか(2026-08-11 Chami「候補タブ内の投稿履歴のつながりが消えて投稿済みの演出が出なくなった」):
- *   候補ページを独立HTML(KouhoLists.html)へ分割(809ea89)した際、window.Go5PostedItems を定義する
+ *   候補ページを独立HTML(KouhoTeian.html)へ分割(809ea89)した際、window.Go5PostedItems を定義する
  *   bluesky.js が候補ページには積まれていなかった。candidates.js の postedIndexFor_ は
  *     if (typeof window.Go5PostedItems !== 'function') return {};
  *   で早期に空を返すため、投稿履歴との照合が全て外れ=投稿済みpillが一切光らなくなっていた。

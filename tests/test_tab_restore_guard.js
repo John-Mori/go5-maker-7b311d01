@@ -3,7 +3,7 @@
  *   リダイレクトしない」不変条件を固定する門。
  *
  * 背景(2026-08-16・Chami報告 msg 1538426859535204412「候補→動画生成ボタンを押すと投稿履歴に遷移する」)：
- *   候補ページ(KouhoLists.html)の「動画生成へ」は sessionStorage['cand_to_movie_pending'] に候補を退避して
+ *   候補ページ(KouhoTeian.html)の「動画生成へ」は sessionStorage['cand_to_movie_pending'] に候補を退避して
  *   index.html へ location.href で遷移する。index.html 起動時の restoreActiveTab_() が go5_active_tab を復元
  *   するが、その値が 'tabVerify'(投稿履歴)/'tabStock'(ドラフト)だと showTab がそれぞれの専用ページ
  *   (StockLists.html / Stock.html)へ location.href し、「候補→動画生成を押したら投稿履歴へ飛ぶ」になる。

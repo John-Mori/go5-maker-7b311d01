@@ -18,7 +18,7 @@
  *
  * 出力: 新しい版数を最終行に `V=<N>` で出す(スクリプトから拾えるように)。
  * 対象: アセット参照(?v=)を持つフロントHTML=index.html + 分割ページ(候補/分析ランキング/ドラフト/投稿履歴)。
- *   ★分割ページ(KouhoLists.html / analytics.html / Stock.html / StockLists.html)も index.html と
+ *   ★分割ページ(KouhoTeian.html / analytics.html / Stock.html / StockLists.html)も index.html と
  *     同じ ?v= を共有するため対象に含める(2026-08-11 別ページ化・2026-08-16 投稿履歴を StockLists.html へ分離)。
  *     ★ここに足し忘れると分割ページだけ古いJSがキャッシュされ静かに事故る(=CIスモークが版混在でfail)。
  */
@@ -31,7 +31,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // ?v= を持つフロントHTMLを全部対象にする(将来ページが増えてもここへ足す)。
 // ★次の配列(名前リテラル)が「バンプ対象=正本」。孤児検出(下)も vermix_foresight.py もここ1本を読む
 //   =二重管理を作らない。vermix はこの宣言を正規表現で読むので、宣言の書式(名前=角括弧の配列リテラル)は崩さない。
-const TARGETS = ["index.html", "KouhoLists.html", "analytics.html", "Stock.html", "StockLists.html"];
+const TARGETS = ["index.html", "KouhoTeian.html", "analytics.html", "Stock.html", "StockLists.html"];
 const TARGET_PATHS = TARGETS
   .map((f) => join(ROOT, f))
   .filter((p) => existsSync(p)); // 存在するものだけ実処理の対象にする
