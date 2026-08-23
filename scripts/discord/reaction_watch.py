@@ -703,14 +703,21 @@ def kaizen_body(items, guild_id, stats, hours):
 #   便として部屋へ出すだけだと、その部屋のセッションが交代した瞬間に消える。
 #   → **世代をまたぐ器**(local/llm/open_defects.jsonl)へも同時に積む。
 #
-# ★積むのは `再発`(saihatsu)と `炎上`(enjo)。ゴラッソは不具合ではない(混ぜたら意味が壊れる)。
+# ★積むのは `再発`(saihatsu)・`炎上`(enjo)・`改悪`(kaiaku)。ゴラッソは不具合ではない(混ぜたら意味が壊れる)。
 #   ★2026-08-12 に炎上🔥を足した= 「重大インシデント/恒久対策しろ」は**まさに世代をまたいで
 #     追い続けるべきもの**だ。便として部屋へ出すだけでは、そのセッションが交代した瞬間に消える。
 # ★正本の実装は session_relay.py 側に1つだけ置く(判定を2箇所に置くと必ず片方が古くなる=ORG-11)。
 # ★★この処理が何で失敗しても、**巡回と投函は1バイトも変えない**(沈黙を作らない)。
 DEFECT_SOURCE = "reaction_watch(再発スタンプ)"
 DEFECT_SOURCE_ENJO = "reaction_watch(炎上スタンプ🔥)"
-DEFECT_KINDS = ("saihatsu", "enjo")     # ★台帳へ積む種類。ゴラッソは積まない
+DEFECT_SOURCE_KAIAKU = "reaction_watch(改悪スタンプ)"
+# ★2026-08-24(トトリ)= 改悪も積む。Chami「翌日に**再発などと同じように**振り返って欲しい」
+#   =再発と同じく世代をまたぐ器へ載せないと、便として部屋へ出すだけでセッション交代で消える。
+#   改悪の恒久策=回帰ガード(C-056)。回帰ガードが入るまで「開いたまま数え続ける」ためには、
+#   ここに載って初めて「数え続ける」対象になる(stamp_kaiaku_2026-08-23.md §3と整合)。
+#   ★冪等: 実時間モード(--only-kind kaiaku)と朝8時の巡回の両方が stack_open_defects を通るが、
+#   同一msg_idからのidは同じ=二度積まれない(session_relay側で畳む)。
+DEFECT_KINDS = ("saihatsu", "enjo", "kaiaku")     # ★台帳へ積む種類。ゴラッソは積まない
 
 
 def stack_open_defects(items, guild_id, dry_run):
@@ -755,7 +762,10 @@ def stack_open_defects(items, guild_id, dry_run):
             #   「まだ終わっていない依頼」ではない。混ぜたら台帳の意味が壊れる。
             #   ★明示的に渡す= 既定値に頼ると、既定が変わった日に黙って意味が変わる。
             # ★どのスタンプ由来かを source に残す= 台帳を見ただけで「炎上として積まれた」と分かる
-            src = DEFECT_SOURCE_ENJO if it.get("kind") == "enjo" else DEFECT_SOURCE
+            _k = it.get("kind")
+            src = (DEFECT_SOURCE_ENJO if _k == "enjo"
+                   else DEFECT_SOURCE_KAIAKU if _k == "kaiaku"
+                   else DEFECT_SOURCE)
             _did, is_new = session_relay.open_defect(
                 dept=it.get("dept", ""), symptom=symptom, broken=broken,
                 noticed_at=it.get("detected_at", ""), source=src,
@@ -912,7 +922,7 @@ def main():
     if d_why:
         print(f"   ★積めなかった: {d_why}")
     else:
-        print(f"   炎上+再発スタンプ {sum(1 for it in items if it.get('kind') in DEFECT_KINDS)}件 → "
+        print(f"   炎上+再発+改悪スタンプ {sum(1 for it in items if it.get('kind') in DEFECT_KINDS)}件 → "
               f"新しく積んだ {d_add}件 / 既にあった {d_dup}件")
 
     print("\n--- 投函内容 ---")

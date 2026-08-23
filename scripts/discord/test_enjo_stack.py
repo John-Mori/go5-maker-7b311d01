@@ -121,6 +121,42 @@ def run():
                                           GUILD, dry_run=False)
         check("ゴラッソは1件も積まれない", a == 0 and len(opens(ledger)) == n_open)
 
+        # === 5b) 改悪は世代をまたぐ器へ積む(2026-08-24 トトリ・翌日振り返りの永続化) ===
+        #   ★便の本文に出すだけでなく open_defects へ載って初めて「回帰ガードが入るまで
+        #     開いたまま数え続ける」が成立する(stamp_kaiaku_2026-08-23.md §3)。
+        print("\n[5b] 改悪(kaiaku)を積む")
+        n_open5b = len(opens(ledger))
+        a5, _d5, w5 = RW.stack_open_defects(
+            [item("1541111145086197770", "kaiaku", "改悪の付いた投稿")],
+            GUILD, dry_run=False)
+        check("改悪は1件積まれる(再発などと同じく世代をまたぐ)", a5 == 1)
+        check("失敗理由は空", w5 == "")
+        o5 = [r for r in opens(ledger) if "1541111145086197770" in r.get("broken", "")]
+        check("★source が『改悪スタンプ』(炎上/再発と取り違えない)",
+              o5 and "改悪" in str(o5[0].get("source", "")))
+        d5 = [d for d in SR.fold_defects(DEPT) if "1541111145086197770" in d["broken"]]
+        check("改悪は enjo=False のまま(勝手に炎上へ格上げしない)",
+              d5 and d5[0].get("enjo") is False)
+        check("状態は未確認のまま(回帰ガードで閉じるまで開く・C-056)",
+              d5 and d5[0]["status"] == SR.DEFECT_OPEN)
+        # 冪等= 実時間モードで積んだ後、朝8時の巡回が同じ改悪をもう一度積んでも増えない。
+        #   ★両経路は同じDiscord投稿を読む=content(symptom)も同一=idも同一(defect_id が
+        #     dept|broken|symptom[:40] から作る)。ここも同じ本文で二度流す=本番と同じ条件。
+        n_after = len(opens(ledger))
+        RW.stack_open_defects(
+            [item("1541111145086197770", "kaiaku", "改悪の付いた投稿")], GUILD, dry_run=False)
+        check("★同じ改悪を二度積んでも増えない(実時間+朝巡回の二重通過に耐える)",
+              len(opens(ledger)) == n_after)
+        # must-fail= DEFECT_KINDS から kaiaku を抜くと積まれない(空PASSでない証明)
+        _saved = RW.DEFECT_KINDS
+        try:
+            RW.DEFECT_KINDS = tuple(k for k in RW.DEFECT_KINDS if k != "kaiaku")
+            am, _dm, _wm = RW.stack_open_defects(
+                [item("900000000000000009", "kaiaku")], GUILD, dry_run=False)
+            check("★DEFECT_KINDS から kaiaku を抜くと積まれない(この検査は本物)", am == 0)
+        finally:
+            RW.DEFECT_KINDS = _saved
+
         # === 6) 起動文に🔥が出る(部屋が重さを読める) ===
         print("\n[6] 部屋の起動文")
         block = SR.defects_block(DEPT)
@@ -163,6 +199,8 @@ check("改悪(kaiaku) が WATCH に登録されている",
       any(w["kind"] == "kaiaku" for w in RW.WATCH))
 check("改悪の絵文字IDが Chami作成の 1541110670748156014",
       next(w for w in RW.WATCH if w["kind"] == "kaiaku")["id"] == "1541110670748156014")
+check("改悪(kaiaku) が DEFECT_KINDS に在る(世代をまたぐ器へ積む=翌日振り返りの永続化)",
+      "kaiaku" in RW.DEFECT_KINDS)
 
 ok = sum(1 for _, c in results if c)
 print(f"\n=== {ok}/{len(results)} PASS ===")
