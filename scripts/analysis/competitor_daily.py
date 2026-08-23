@@ -302,18 +302,26 @@ STALE_EXIT = 3  # 上流スナップ停止=push が rc==3 を特別扱いして�
 def stale_reason(snap):
     """snap(=comp_titles snapshotDate=競合_日次シートの最終日)が古すぎないか検査する。
     08:00運用では当日04:00のGAS日次(runCompetitorDaily)が回っていれば snap=当日になる。
-    2日以上前 or 空/不正 = 上流(GASの日次スナップ)が新規行を書けていない=静かに古い日付を再集計しているサイン。
-    ★ここが「緑を返しながら書かない」を可視化する門(2026-08-23・AD研究室モドリッチの切り分け依頼)。"""
+    ★しきい値=lag>=1(今日の競合_日次行が無い=赤)。GASのsnapshotDateはJST
+      (Session.getScriptTimeZone→Asia/Tokyo)・PCのtodayもJST=時差ずれ無し。daemonは08:00起動=
+      04:00のrunCompetitorDaily後だから、本日分未着(lag=1)は真に上流が書けていないサインで誤警報でない。
+      ★ここを lag>=2 に緩めるな= 「今日は無いが昨日は在る」を緑にすると silent green の穴が復活する
+      (2026-08-23 AD研究室モドリッチの本命依頼=下流PC集計を二重の網にする・C-038/§3 可用性は喋る側へ倒す)。
+    空/不正 = 上流に日付そのものが無い/読めない=同じく赤。"""
     if not snap or snap == "?":
         return "snapshotDate が空=上流(GAS 競合_日次)にデータが無い"
     try:
         sd = datetime.date.fromisoformat(str(snap)[:10])
     except ValueError:
         return "snapshotDate が不正(%r)=上流の日付が読めない" % snap
+    today = datetime.date.today().isoformat()
     lag = (datetime.date.today() - sd).days
+    if lag == 1:
+        return ("本日分の競合_日次行が未着(最新スナップ=%s・本日=%s)。"
+                "GAS runCompetitorDaily(04:00)が本日分を書けていない" % (snap, today))
     if lag >= 2:
         return ("上流スナップが %s で停止(本日 %s・%d日遅れ)。GAS runCompetitorDaily(04:00)が"
-                "新規行を書けていない=同じ日付を毎朝再集計しているだけ" % (snap, datetime.date.today().isoformat(), lag))
+                "新規行を書けていない=同じ日付を毎朝再集計しているだけ" % (snap, today, lag))
     return None
 
 def main():
