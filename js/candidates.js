@@ -300,7 +300,7 @@
   }
   // 絞り込み：現在価格が _priceMax 円以下の作品のみ表示(0=無効)。localStorageで永続。
   var _priceMax = (function () { try { var n = parseInt(localStorage.getItem('cand_price_max') || '0', 10); return (n > 0) ? n : 0; } catch (e) { return 0; } })();
-  // アカウント別「投稿済みを非表示」トグル。(両方同時ONで、いずれかで投稿済みの作品を隠せる)localStorageで永続。
+  // 「クールタイム中を非表示」トグル。(どちらかONで、最終投稿から3日以内=クールタイム中の作品を隠す・裁定A)localStorageで永続。
   var _hidePosted = (function () { try { return JSON.parse(localStorage.getItem('cand_hide_posted') || '{}') || {}; } catch (e) { return {}; } })();
   function saveHidePosted_() { try { localStorage.setItem('cand_hide_posted', JSON.stringify(_hidePosted)); } catch (e) {} }
   // ★「このchでは投稿していない」ユーザー宣言の恒久オーバーライド。({acc:{cid:ts}})
@@ -346,20 +346,35 @@
     else delete _postedOn[account][String(cid)];
     savePostedOn_();
   }
+  // ★クールタイム除外(Chami 2026-08-23 裁定A・商品選定部門で確認): 投稿は「作品はどっちのchでも可・
+  //   片chから3日経ったらもう片方で投稿できる物量」。よって、いずれかのchへ投稿した作品は最後の投稿から
+  //   3日間はどちらのchでも再投稿しない=一覧から隠し、3日を過ぎたら再表示(=もう片方へ回す候補に再浮上)。
+  //   旧「そのchで投稿済みなら永久に隠す」は廃止。トグルは月詠み/宵桜どちらをONにしても、このch横断3日窓で隠す。
+  var POSTED_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000;
+  // この作品を最後に投稿した時刻(両ch横断の最大ts)。未投稿/時刻不明は0。
+  function lastPostedTsAnyCh_(it) {
+    var best = 0;
+    ['acc1', 'acc2'].forEach(function (a) {
+      var m = postedMatchForCand_(it, a);
+      if (m && m.item) { var t = postedTsOf_(m.item); if (t > best) best = t; }
+    });
+    return best;
+  }
   function isHiddenByPosted_(it) {
     if (!it) return false;
-    if (_hidePosted.acc1 && postedMatchForCand_(it, 'acc1')) return true;
-    if (_hidePosted.acc2 && postedMatchForCand_(it, 'acc2')) return true;
-    return false;
+    if (!_hidePosted.acc1 && !_hidePosted.acc2) return false; // どちらのトグルもOFF=隠さない
+    var last = lastPostedTsAnyCh_(it);
+    if (!last) return false; // 未投稿 or 投稿時刻不明=隠さない(可用性は表示側へ倒す)
+    return (Date.now() - last) < POSTED_COOLDOWN_MS; // 最終投稿から3日以内=クールタイム中=隠す
   }
   // 「◯◯✔非表示」トグル2つ(非表示リストの上段・右寄せ)のHTML。_ACCTS は描画時に定義済み。
   function candHidePostedRowHtml_() {
     return '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;justify-content:flex-end;">' +
-      '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="' + esc(_ACCTS[0][1]) + 'で投稿済みの作品を一覧から隠す">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
-      '<button id="candHidePosted2" type="button" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="' + esc(_ACCTS[1][1]) + 'で投稿済みの作品を一覧から隠す">' + esc(_ACCTS[1][1]) + '✔非表示</button>' +
+      '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)を一覧から隠す。3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
+      '<button id="candHidePosted2" type="button" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)を一覧から隠す。3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[1][1]) + '✔非表示</button>' +
     '</div>';
   }
-  // 上記トグルの配線。両方独立にON/OFFでき、いずれかで投稿済みなら非表示。(isHiddenByPosted_)
+  // 上記トグルの配線。どちらをONにしても、最終投稿から3日以内(クールタイム中)なら非表示。(isHiddenByPosted_)
   function wireHidePostedButtons_(rerender) {
     var b1 = $('candHidePosted1'), b2 = $('candHidePosted2');
     if (b1) b1.addEventListener('click', function () { _hidePosted.acc1 = !_hidePosted.acc1; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc1); rerender(); });
