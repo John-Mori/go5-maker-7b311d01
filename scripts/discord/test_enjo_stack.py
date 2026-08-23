@@ -157,6 +157,17 @@ def run():
         finally:
             RW.DEFECT_KINDS = _saved
 
+        # === 5c) 愛(ai)は不具合に積まない(良い知らせ・キャラのコンテキスト。2026-08-24 トトリ) ===
+        #   ★ゴラッソと同じく積まないが、意味は別=ゴラッソ=横展開する型/愛=そのキャラへの好意。
+        #     どちらも open_defects へは入れない(数える対象ではない)。
+        print("\n[5c] 愛(ai)は積まない")
+        n_open5c = len(opens(ledger))
+        a_ai, _dai, _wai = RW.stack_open_defects(
+            [item("1541128935872528434", "ai", "そのキャラの発言そのものへの愛")],
+            GUILD, dry_run=False)
+        check("愛は1件も積まれない(不具合ではない)",
+              a_ai == 0 and len(opens(ledger)) == n_open5c)
+
         # === 6) 起動文に🔥が出る(部屋が重さを読める) ===
         print("\n[6] 部屋の起動文")
         block = SR.defects_block(DEPT)
@@ -212,6 +223,14 @@ check("Unicode🔥 が index に載る(id無し→char索引)", "🔥" in RW.WAT
 check("カスタムenjoh が index に載る(id有り→id索引)",
       "1541126866981752883" in RW.WATCH_BY_ID
       and RW.WATCH_BY_ID["1541126866981752883"]["kind"] == "enjo")
+# ★2026-08-24= 愛スタンプ(SokoniAiHaArunka)。ゴラッソから分離=システムの型ではなくキャラのコンテキスト。
+#   ゴラッソと同じく DEFECT_KINDS に入れない(積まない)ことを機械で固定する=過大解釈防止の回帰ガード。
+check("愛(ai) が WATCH に登録されている",
+      any(w["kind"] == "ai" for w in RW.WATCH))
+check("愛の絵文字IDが Chami作成の 1541128143639679086",
+      next(w for w in RW.WATCH if w["kind"] == "ai")["id"] == "1541128143639679086")
+check("★愛(ai) は DEFECT_KINDS に入れない(不具合ではない・積まない)",
+      "ai" not in RW.DEFECT_KINDS)
 
 ok = sum(1 for _, c in results if c)
 print(f"\n=== {ok}/{len(results)} PASS ===")
