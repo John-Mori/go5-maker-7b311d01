@@ -15,16 +15,37 @@
   ③その便の cache_read(直前の便と比べて激減していれば「前の方が変わって以降を全部書き直した」)
   ④前便からの経過秒(5分のキャッシュ寿命切れなのか、そうでないのか)
 
+★★2026-08-23(2回目)ここで**真因の向きが変わった**ので、経緯ごと残す。
+  最初は「大書込の便が偏っている=どこか特定の部屋・特定の仕掛けが犯人」と見て探した。
+  **外れだった。**実測で潰した仮説は4つ=
+    ・キャッシュの寿命切れ  → 大書込のうち300秒超えは 10.0%(普通の便は1.0%)= 主因ではない
+    ・圧縮の直後           → 大書込のうち圧縮境界の直後は **0.6%**
+    ・サブエージェント      → **2.0%**
+    ・特定の部屋           → 改修α12.6 / イージス11.6 / HQ11.1 …と**部屋の忙しさ順に素直に散る**
+  ★つまり**どこか1か所が悪いのではなく、全部屋で同じ形で起きている構造の話**だった。
+
+★★そして本命は「量」ではなく**キャッシュの寿命の種別**だった(下の --by ttl)。
+  記録の `usage.cache_creation` は書込を2種類に分けて持っている=
+    `ephemeral_5m_input_tokens`(5分TTL)  `ephemeral_1h_input_tokens`(1時間TTL)
+  実測(08/23・直近24h)= **1時間TTLが 91,461,784 / 5分TTLが 2,053,795 = 書込の97.8%が1時間TTL。**
+  ★**1時間TTLの書込は5分TTLより高い**(Anthropicの公表値では 5分=基本の1.25倍 / 1時間=2.0倍)。
+  ところが `quota_burn.W_CACHE_CREATE` は**書込を一律1.25で数えている**。
+  → 書込側の値段を**過小に見ている**(1.25と2.0の公表値をそのまま当てるなら約58.7%の過小)。
+  ★★**この倍率だけは公表価格が正**= 週消費の式を書き換える前に必ず当日の価格表で確かめること
+    (ここに書いた 2.0 は"確かめるべき値"であって、俺が測った値ではない。measured と混ぜるな)。
+  ★俺が測った値は「97.8%が1時間TTL」の方だ。**そこは実測**。
+
 ★何を見ていないか(誤読を防ぐために先に書く)
-  ここは**どの部屋の便か**を割らない(記録の1行に部門名が無い=`quota_burn.dept_map` は
-  セッションIDの対応表であって、サブエージェントや手動セッションは載らない)。
-  「940便が書込の76%」までは言えるが、「その940便が誰か」はここでは言えない。
-  ★次の一手はそこ= 大書込の便を部屋と便の種類まで割ること。
+  `--by dept` は `quota_burn.dept_map`(= `context_watch.jsonl` の全履歴)で引く。
+  **載らない便は「?」に落ちる**(サブエージェント・手動セッション)= 実測で3.3%。
+  「?」が増えたら割り当ての方を疑え。
 
 使い方:
   python scripts/llm/floor_burn.py                  # 直近24時間
   python scripts/llm/floor_burn.py --hours 168      # 直近1週間
   python scripts/llm/floor_burn.py --big 30000      # 大書込の線を変える
+  python scripts/llm/floor_burn.py --by dept        # 大書込を部屋別に割る
+  python scripts/llm/floor_burn.py --by ttl         # ★書込を寿命の種別(5分/1時間)で割る
 """
 import argparse
 import collections
@@ -61,14 +82,119 @@ def pct(a, b):
     return 100.0 * a / b if b else 0.0
 
 
+def scan_detail(since_utc):
+    """`quota_burn.collect` より1段細かく読む= **書込の寿命の種別**と**部屋**まで持って返す。
+
+    なぜ別に読むか= `collect` は `cache_creation_input_tokens`(合計)しか返さないので、
+    5分TTLと1時間TTLの内訳が落ちる。**そこが値段の差**なので、ここでは生の記録を読む。
+    返す形= [{"sid","dept","dt","cc","cc1h","cc5m","cr","model","sub"}]
+    """
+    import glob
+    import json
+    from datetime import datetime as _dt
+
+    dm = q.dept_map()
+    out = []
+    for p in glob.glob(os.path.join(q.PROJECTS, "**", "*.jsonl"), recursive=True):
+        try:
+            if os.path.getmtime(p) < since_utc.timestamp():
+                continue
+        except OSError:
+            continue
+        sid = os.path.basename(p)[:8]
+        dept = dm.get(sid) or "?"
+        try:
+            fh = open(p, encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        with fh as f:
+            for line in f:
+                if len(line) < 3 or '"usage"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("type") != "assistant":
+                    continue
+                msg = d.get("message") or {}
+                if str(msg.get("model") or "") == "<synthetic>":
+                    continue
+                try:
+                    dt = _dt.fromisoformat(str(d.get("timestamp")).replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    continue
+                if dt < since_utc:
+                    continue
+                u = msg.get("usage") or {}
+                cd = u.get("cache_creation") or {}
+                out.append({
+                    "sid": sid, "dept": dept, "dt": dt,
+                    "cc": u.get("cache_creation_input_tokens", 0) or 0,
+                    "cc1h": cd.get("ephemeral_1h_input_tokens", 0) or 0,
+                    "cc5m": cd.get("ephemeral_5m_input_tokens", 0) or 0,
+                    "cr": u.get("cache_read_input_tokens", 0) or 0,
+                    "model": msg.get("model") or "?",
+                    "sub": bool(d.get("isSidechain")),
+                })
+    return out
+
+
+def report_ttl(rows):
+    """★書込を寿命の種別で割る。ここが値段の芯(1時間TTLは5分TTLより高い)。"""
+    h1 = sum(r["cc1h"] for r in rows)
+    h5 = sum(r["cc5m"] for r in rows)
+    n1 = len([r for r in rows if r["cc1h"]])
+    n5 = len([r for r in rows if r["cc5m"]])
+    tot = h1 + h5
+    print("\n■ キャッシュ書込の寿命の種別(★ここが値段の差)")
+    print("  1時間TTL %14d (%4.1f%%)  %6d便" % (h1, pct(h1, tot), n1))
+    print("  5分TTL   %14d (%4.1f%%)  %6d便" % (h5, pct(h5, tot), n5))
+    print("  ★`quota_burn` は書込を一律 %.2f で数えている。" % q.W_CACHE_CREATE)
+    print("    公表価格が『5分=1.25倍 / 1時間=2.0倍』のままなら、書込側を過小に見ていることになる=")
+    print("      今の式  (%d+%d)*%.2f = %d" % (h1, h5, q.W_CACHE_CREATE,
+                                             int(tot * q.W_CACHE_CREATE)))
+    print("      2.0を当てた場合 %d*2.00 + %d*1.25 = %d" % (h1, h5, int(h1 * 2.0 + h5 * 1.25)))
+    print("  ★★倍率は**公表価格が正**。この行の 2.0 は確かめるべき値であって、測った値ではない。")
+
+
+def report_dept(rows, big):
+    """★大書込の便を部屋別に割る。『どこか1部屋が犯人』かどうかを見る。"""
+    tot = sum(r["cc"] for r in rows)
+    sel = [r for r in rows if r["cc"] >= big]
+    n = collections.Counter()
+    c = collections.Counter()
+    for r in sel:
+        n[r["dept"]] += 1
+        c[r["dept"]] += r["cc"]
+    print("\n■ 大書込(>= %d)の部屋別内訳 %d本" % (big, len(sel)))
+    for d, v in c.most_common(20):
+        print("  %-22s %5d本  書込 %12d (%4.1f%%)" % (d, n[d], v, pct(v, tot)))
+    print("  ★部屋の忙しさ順に素直に散っていたら、犯人は特定の部屋ではなく**構造**だ。")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--hours", type=float, default=24)
     ap.add_argument("--big", type=int, default=30000,
                     help="これ以上の cache_creation を「大書込」として扱う")
+    ap.add_argument("--by", choices=["dept", "ttl"],
+                    help="dept= 大書込を部屋別に割る / ttl= 書込を寿命の種別で割る")
     a = ap.parse_args()
 
     since = datetime.now(timezone.utc) - timedelta(hours=a.hours)
+    if a.by:
+        det = scan_detail(since)
+        if not det:
+            print("直近 %g 時間に記録が無い。" % a.hours)
+            return 0
+        print("直近 %g 時間 / %d便" % (a.hours, len(det)))
+        if a.by == "ttl":
+            report_ttl(det)
+        else:
+            report_dept(det, a.big)
+        return 0
+
     rows = q.collect(since)
     if not rows:
         print("直近 %g 時間に記録が無い。" % a.hours)
