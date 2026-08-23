@@ -61,7 +61,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -1213,6 +1213,61 @@
         var marker = { __r2n: imgs.length, comment: val.comment || '', memo: val.memo || '', twitterUrl: val.twitterUrl || '', twitterUrl2: val.twitterUrl2 || '', urls2: val.urls2 || [], at: val.at || 0 };
         try { if (localStorage.getItem(k) != null) { localStorage.setItem(k, JSON.stringify(marker)); klog_('ref_image_detox_r2', 'work', cid, { n: imgs.length }); } } catch (e) {}
       });
+    });
+  }
+
+  // ★端末localStorage(iOS=5MB)が満杯だと、tinyな cand_text すら setItem で throw=保存全体が弾かれる
+  //   (Fable5診断2026-08-24)。飽和の毒は cand_refimg__*/cand_bskyimg__* の base64 残骸。喪失安全に回収する。
+  function refHasImageData_(rec) {
+    return !!(rec && ((Array.isArray(rec.imgs) && rec.imgs.some(function (x) { return x; })) || rec.img));
+  }
+  // 純関数(Nodeテスト可)。どのLS画像キーを退去してよいかを判定する。★順序が命=マーカーを先に守る。
+  //   'evict'=消しても失うものが無い / 'keep'=消せない(道標 or sole-copy) / 'toR2'=IDB未確認だがR2へ退避可。
+  function reclaimClassify_(rec, idbHasImage, r2Ready) {
+    if (isR2Marker_(rec)) return 'keep';        // R2実体への道標(数百B)=消したらR2への道が消える
+    if (!refHasImageData_(rec)) return 'evict'; // 読めない/画像なし=誰も読めない=失うものが無い
+    if (idbHasImage === true) return 'evict';   // 今この瞬間IDBに耐久コピー在り=LS base64は死荷重
+    if (r2Ready) return 'toR2';                 // IDB未確認だがR2退避→縮小できる(将来最適化・現状は保護扱い)
+    return 'keep';                              // sole-copyの可能性を排除できない=消さない
+  }
+  // 満杯時に喪失安全な範囲でLSを空ける。Promise<freed:bool>。マーカー/sole-copyは温存。
+  function reclaimLsQuota_() {
+    var victims = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && (k.indexOf('cand_refimg__') === 0 || k.indexOf('cand_bskyimg__') === 0)) victims.push(k);
+      }
+    } catch (e) {}
+    if (!victims.length) return Promise.resolve(false);
+    var r2 = r2Ready_(), freed = false, probe = [];
+    victims.forEach(function (k) {
+      var rec = null; try { rec = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { rec = null; }
+      var cls = reclaimClassify_(rec, undefined, r2);
+      if (cls === 'evict') { try { localStorage.removeItem(k); freed = true; klog_('ls_reclaim_evict', 'work', k, {}); } catch (e) {} }
+      else if (cls !== 'keep') probe.push(k); // base64・IDB未確認=非同期の耐久確認へ
+    });
+    if (!probe.length) return Promise.resolve(freed);
+    return probe.reduce(function (p, k) {
+      return p.then(function () {
+        var isRef = k.indexOf('cand_refimg__') === 0;
+        var cid = k.slice((isRef ? 'cand_refimg__' : 'cand_bskyimg__').length);
+        var idbK = idbKey(isRef ? 'ref' : 'bsky', cid);
+        var readP = (typeof window.Go5Idb.getResult === 'function')
+          ? window.Go5Idb.getResult(idbK)
+          : window.Go5Idb.get(idbK).then(function (v) { return { ok: true, value: v }; }, function (err) { return { ok: false, value: null, error: err }; });
+        return readP.then(function (r) {
+          // IDBに耐久コピーを実測できた時だけ退去(=sole-copyは消さない)。
+          if (r && r.ok && refHasImageData_(r.value)) { try { localStorage.removeItem(k); freed = true; klog_('ls_reclaim_evict_idb', 'work', k, {}); } catch (e) {} }
+        }, function () {});
+      });
+    }, Promise.resolve()).then(function () { return freed; });
+  }
+  // 保存が満杯で落ちたら、喪失安全に空けて1回だけ書き直す。saveFn は bool か Promise<bool> を返す保存操作。
+  function persistWithReclaim_(saveFn) {
+    return Promise.resolve(saveFn()).then(function (ok) {
+      if (ok) return true;
+      return reclaimLsQuota_().then(function (freed) { return freed ? Promise.resolve(saveFn()) : false; });
     });
   }
 
@@ -2522,9 +2577,9 @@
       };
       // 画像未編集なら、小さい文字正本(cand_text)だけを保存する。候補画像IDBを再保存しないため、
       // メモリ未反映・iOS遷移中断があっても「動画生成へ」が保存画像を消す操作にならない。
-      var saveForMove = imagesDirty
-        ? Promise.resolve(refImgSave(it.cid, pending))
-        : Promise.resolve(candTextSave_(it.cid, pending));
+      var saveForMove = persistWithReclaim_(function () {
+        return imagesDirty ? refImgSave(it.cid, pending) : candTextSave_(it.cid, pending);
+      });
       saveForMove.then(function (ok) {
         // 保存失敗はログにだけ残し、遷移は止めない(渡すデータはメモリ側=無傷)。
         if (!ok) { try { console.warn('[go5 cand] 動画生成へ: 候補の永続保存に失敗したが遷移は続行', it.cid); } catch (e) {} }
@@ -2592,7 +2647,11 @@
       saveMsg.textContent = '保存中…';
       var saveResult;
       try {
-        saveResult = refImgSave(it.cid, pending);
+        // ★画像未編集(メモ/コメント/URLだけの編集)は cand_text のみ保存し、画像レコードには一切触れない
+        //   (=マーカー削除レースを構造ごと封じる・Fable5診断2026-08-24)。満杯時は喪失安全に空けて1回だけ再試行。
+        saveResult = persistWithReclaim_(function () {
+          return imagesDirty ? refImgSave(it.cid, pending) : candTextSave_(it.cid, pending);
+        });
       } catch (e) {
         if (saveOp.fail()) showSaveFailure_();
         return;
