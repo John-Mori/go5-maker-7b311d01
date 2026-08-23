@@ -132,6 +132,55 @@ def last_posted_by_channel():
     except Exception:
         return {}
 
+def _content_store_path():
+    return os.path.join(OUT_DIR, "content_store.json")
+
+
+def carry_content(out_candidates, today):
+    """再生成しても既に埋めた④comments/room_commentsを消さない(Chami『再生成不要』2026-08-23)。
+    候補の並び/顔ぶれは毎回引き直すが、中身は cid で持ち越す。durableな出所=content_store.json
+    (cid毎)＋当日ファイル(念のため拾う)。★中身の生成はしない=空のままの新規cidは vision/軍議が後で埋める。
+    2026-08-23の事故=このツールが毎回 comments=[]・room_comments無しで丸ごと上書きし、充填済み20件を
+    毎回消していた(publishはC-038ガードで止まるがローカルは全消し)=その恒久止血。"""
+    store_path = _content_store_path()
+    try:
+        with open(store_path, encoding="utf-8") as f:
+            store = json.load(f)
+    except Exception:
+        store = {}
+    # 当日ファイルに残っている中身も store へ吸い上げる(store が空/欠けても拾える)
+    try:
+        with open(os.path.join(OUT_DIR, f"candidates_{today}.json"), encoding="utf-8") as f:
+            old = json.load(f)
+        for c in old.get("candidates", []):
+            cid = c.get("cid")
+            if not cid:
+                continue
+            cm, rc = c.get("comments") or [], c.get("room_comments") or {}
+            if cm or rc:
+                cur = store.get(cid) or {}
+                if cm:
+                    cur["comments"] = cm
+                if rc:
+                    cur["room_comments"] = rc
+                store[cid] = cur
+    except Exception:
+        pass
+    # store から今回の候補へ持ち越す(cid一致のみ・無い物は空のまま)
+    for c in out_candidates:
+        saved = store.get(c["cid"]) or {}
+        if saved.get("comments"):
+            c["comments"] = saved["comments"]
+        if saved.get("room_comments"):
+            c["room_comments"] = saved["room_comments"]
+    # store を最新化して保存(durable=当日ファイルが消えても中身が生き残る)
+    try:
+        with open(store_path, "w", encoding="utf-8") as f:
+            json.dump(store, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
 def review_of(info):
     rev = info.get("review") or {}
     c = dp.num(rev.get("count"))
@@ -195,6 +244,9 @@ def main():
             "manual": (x["src"] == "main"),
             "comments": []                    # visionが後で3択を埋める
         })
+
+    # ★再生成で消さない: 充填済みの④comments/room_comments を cid で持ち越す(Chami『再生成不要』)
+    carry_content(out_candidates, today)
 
     # Books未収録(info_jsonが無い=title/販売数が引けない)を穴として明示(推測で埋めない)
     uncov = dp.d1("SELECT cp.cid FROM candidate_pool cp LEFT JOIN works w ON w.cid=cp.cid "

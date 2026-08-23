@@ -53,9 +53,27 @@
     border-radius:999px;padding:3px 8px;white-space:nowrap}
   .chip.lp{color:var(--muted);background:var(--field);border:1px solid var(--line2)}
   .chip.lp.new{color:var(--accent-ink);background:var(--accent);border:none;font-weight:700}
-  .thumbs{display:flex;gap:6px;overflow-x:auto;padding:6px 0 8px;-webkit-overflow-scrolling:touch}
-  .thumbs img{flex:0 0 auto;height:120px;width:auto;border-radius:8px;background:var(--canvas);
-    border:1px solid var(--line);object-fit:cover}
+  /* 投稿用画像(=動画のメイン材料)= 1枚をサムネ表示。タップでサンプル画像ぜんぶをライトボックス表示。
+     候補ページ(KouhoLists)のサムネ→モーダルと同じ作法(Chami 2026-08-23)。 */
+  .hero{position:relative;display:inline-block;margin:6px 0 8px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .hero img{height:160px;width:auto;max-width:100%;border-radius:10px;background:var(--canvas);
+    border:1px solid var(--line);object-fit:cover;display:block}
+  .hero .cnt{position:absolute;right:6px;bottom:6px;font-size:.66rem;font-weight:700;color:#fff;
+    background:rgba(0,0,0,.55);border-radius:999px;padding:2px 8px;pointer-events:none}
+  .hero .tap{position:absolute;left:6px;bottom:6px;font-size:.62rem;color:#fff;
+    background:rgba(0,0,0,.45);border-radius:6px;padding:2px 6px;pointer-events:none}
+  /* サンプル画像ライトボックス(タップで全画像) */
+  .imodal{position:fixed;inset:0;z-index:80;background:rgba(20,18,12,.88);display:none;
+    overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .imodal.on{display:block}
+  .imodal .ihead{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;
+    gap:8px;padding:12px 14px;background:rgba(20,18,12,.72);backdrop-filter:blur(4px)}
+  .imodal .ihead .it{font-size:.86rem;font-weight:700;color:#fff;line-height:1.3;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .imodal .iclose{flex:0 0 auto;background:rgba(255,255,255,.16);border:none;color:#fff;
+    border-radius:999px;width:34px;height:34px;font-size:1rem;line-height:1}
+  .imodal .igal{max-width:560px;margin:0 auto;padding:10px 12px 40px}
+  .imodal .igal img{width:100%;height:auto;border-radius:10px;margin-bottom:10px;background:#000;display:block}
   .cmts{margin:6px 0 2px}
   .cmt{display:flex;gap:8px;align-items:flex-start;padding:7px 8px;border:1px solid var(--line);
     border-radius:8px;margin-bottom:6px;background:var(--field)}
@@ -215,8 +233,7 @@
       if(rv&&rv.average!=null) meta.push('<span class="chip">★'+esc(rv.average)+' ('+num(rv.count)+'件)</span>');
       if(m.price!=null) meta.push('<span class="chip">'+num(m.price)+'円'+(m.discount_pct?(' -'+esc(m.discount_pct)+'%'):'')+'</span>');
 
-      var thumbs = (c.images||[]).map(function(u){
-        return '<img loading="lazy" src="'+esc(u)+'" alt="" onclick="window.open(this.src,\'_blank\')">'; }).join('');
+      var imgs = c.images||[];
 
       var cmts = c.comments||[];
       var cid_ = esc(c.id);
@@ -248,7 +265,9 @@
       html += '<div class="cand" data-cand="'+cid_+'" id="cand_'+cid_+'">'+
         '<div class="top"><div class="rank">'+(i+1)+'</div><p class="title">'+esc(c.title||'(無題)')+'</p></div>'+
         '<div class="meta">'+meta.join('')+'</div>'+
-        (thumbs?'<div class="thumbs">'+thumbs+'</div>':'')+
+        (imgs.length?'<div class="hero" data-cand="'+cid_+'"><img loading="lazy" src="'+esc(imgs[0])+'" alt="投稿用画像">'+
+          '<span class="tap">タップでサンプル</span>'+
+          (imgs.length>1?'<span class="cnt">'+imgs.length+'枚</span>':'')+'</div>':'')+
         cbody+
         roomsHtml+
         '<label class="mini">④コメント (手直し可)</label>'+
@@ -266,7 +285,36 @@
     wire(cands);
   }
 
+  // ---- サンプル画像ライトボックス(候補ページと同じ作法=サムネ表示のみ+タップで全画像) ----
+  var _imodal = null;
+  function ensureImodal_(){
+    if(_imodal) return _imodal;
+    var m = document.createElement('div'); m.className='imodal';
+    m.innerHTML = '<div class="ihead"><span class="it"></span><button type="button" class="iclose" aria-label="閉じる">✕</button></div><div class="igal"></div>';
+    document.body.appendChild(m);
+    function close(){ m.classList.remove('on'); document.body.style.overflow=''; }
+    m.addEventListener('click', function(e){ if(e.target===m) close(); });
+    m.querySelector('.iclose').addEventListener('click', close);
+    _imodal = m; return m;
+  }
+  function openGallery_(c){
+    var m = ensureImodal_();
+    var imgs = c.images||[];
+    m.querySelector('.it').textContent = c.title||'(無題)';
+    m.querySelector('.igal').innerHTML = imgs.length
+      ? imgs.map(function(u){ return '<img loading="lazy" src="'+esc(u)+'" alt="">'; }).join('')
+      : '<div style="color:#eee;text-align:center;padding:24px">画像がありません</div>';
+    m.scrollTop = 0; m.classList.add('on'); document.body.style.overflow='hidden';
+  }
+
   function wire(cands){
+    // 投稿用画像サムネ → タップでサンプル画像ライトボックス
+    document.querySelectorAll('.hero').forEach(function(h){
+      h.addEventListener('click', function(){
+        var c = cands.filter(function(x){ return x.id===h.dataset.cand; })[0];
+        if(c) openGallery_(c);
+      });
+    });
     // radio → 手入力欄へ反映
     document.querySelectorAll('input[name^="cmt_"]').forEach(function(r){
       r.addEventListener('change', function(){
