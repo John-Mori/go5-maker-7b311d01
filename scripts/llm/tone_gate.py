@@ -602,6 +602,36 @@ def _scan_marker(s, marker):
         return i
 
 
+# ★文末と見なす字。行末・文字列末も文末に数える(箇条書きの行は「。」を打たないことが多い)。
+#   ★読点「、」も入れる= 迷ったので**実便で数えて決めた**(93ブロック・2026-08-23)。
+#     入れると芽衣の「二人で回す**のね、**了解」(msg 1540957649426845726=人事部門が
+#     『真の転落』と判定した実物)が1本増え、**偽陽性は1本も増えなかった**
+#     (「わ」= 芽衣2本/他13本のまま)。言いさしでも声は落ちている、が実測の答えだ。
+_TAIL_END = "。！？!?…‥、,」』)》\n\r"
+
+
+def _scan_tail_marker(s, marker):
+    """s 中で marker が**文末に立っている**最初の位置。無ければ -1(純関数)。
+
+    ★素の `_scan_marker`(部分一致)との違いはここだけ= **直後が文末**であることを要求する。
+      「こだわった」の『だわ』は文中=無効 / 「〜してあるわ。」の『わ』は文末=有効。
+    ★閉じ括弧・鉤括弧は文末に数える(「〜だわ」と言った、の引用は _mask_protected で
+      既に潰れているのでここへは来ない)。
+    """
+    m = str(marker or "")
+    if not m:
+        return -1
+    start = 0
+    while True:
+        i = s.find(m, start)
+        if i < 0:
+            return -1
+        after = s[i + len(m):i + len(m) + 1]
+        if after == "" or after in _TAIL_END:
+            return i
+        start = i + len(m)
+
+
 # ============================================================================
 # ★2026-08-16 追加(2件目)= **便の途中で声が入れ替わる**型を、1点だけ機械で掴む。
 # ----------------------------------------------------------------------------
@@ -811,6 +841,18 @@ def tone_verdicts(persona, dept, text, rules):
         #     forbidden / second_person_forbidden と同じ扱い)。
         sig = [str(x) for x in ((ent.get("signature_tails") or [])
                                 + (ent.get("signature_endings") or [])) if str(x)]
+        # ★2026-08-23 追加: **文末アンカー付き**の禁止語。★既定=見ない。
+        #   写像に `"forbidden_tail": ["わ"]` を足した人格だけ回る(`forbidden_endings` は別名)。
+        #   なぜ要るか= 素の `forbidden` は**部分一致**なので、1〜2字の語尾は登録できない。
+        #     実測(人事部門 2026-08-23)= 「だわ」は『こだわった』に当たって偽陽性、
+        #     「のよ/のね」は『そのように/本来のねらい』へ広く当たる。だが Chami が実際に
+        #     指した転落は **文末の「〜わ。」**(msg 1541009586331320392)で、そこだけ見れば
+        #     語は同じでも誤爆源が消える。=**判定を増やすのではなく、当てる位置を絞る。**
+        #   ★これは警告のみ= `tone_corrections` の機械置換には**絶対に載せない**(marker を
+        #     「わ(文末)」の形にしてあるので本文と一致せず、構造上そもそも置換できない)。
+        #     語尾1字の置換は文法を壊す。直すのは D-2(書き直し=再生成)と次便への突き返し。
+        ng_tail = [str(x) for x in ((ent.get("forbidden_tail") or [])
+                                    + (ent.get("forbidden_endings") or [])) if str(x)]
         want_self = not bool(ent.get("self_name_ok"))     # ★2026-08-16 追加(既定=見る)
         # ★2026-08-23 追加(案ハ4《同じ息ゲート》)。★既定=見ない。
         #   人格側に `care_markers` と `harsh_edge_markers` の**両方**が在り、かつ
@@ -819,8 +861,8 @@ def tone_verdicts(persona, dept, text, rules):
         cares = [str(x) for x in (ent.get("care_markers") or []) if str(x)]
         want_harsh = bool(harsh and cares
                           and room_tone_profile(rules, dept) == "soft")
-        if (not forbid and not ng2 and not want_dialect and not want_polite
-                and not sig and not want_self and not want_harsh):
+        if (not forbid and not ng2 and not ng_tail and not want_dialect
+                and not want_polite and not sig and not want_self and not want_harsh):
             return out
         s = _mask_persona_names(_strip_quotes(text), text, rules)
         if not s.strip():
@@ -841,6 +883,19 @@ def tone_verdicts(persona, dept, text, rules):
                 out.append({
                     "persona": str(persona or ""),
                     "marker": m,
+                    "index": i,
+                    "own_first_person": sorted(own),
+                    "reason": "forbidden_word",
+                })
+        for m in ng_tail:
+            i = _scan_tail_marker(s, m)
+            if i >= 0:
+                out.append({
+                    "persona": str(persona or ""),
+                    # ★marker に「(文末)」を付けるのは**表示のため**だけではない=
+                    #   この文字列は本文に現れないので `tone_corrections` の置換計画に
+                    #   入っても1文字も置換されない(警告のみが構造で保証される)。
+                    "marker": "%s(文末)" % m,
                     "index": i,
                     "own_first_person": sorted(own),
                     "reason": "forbidden_word",
