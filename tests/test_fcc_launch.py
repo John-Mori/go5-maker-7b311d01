@@ -38,13 +38,41 @@ def only(reasons, letter):
     return [r for r in reasons if r.startswith(letter + ":")]
 
 
-def make_clone(root, name="clone"):
-    """公開repoの別クローンの体裁(=.git を持つ実在フォルダ)を**本物で**作る。"""
+PUBLIC_URL = "https://github.com/John-Mori/go5-maker-7b311d01.git"
+
+
+def _git(p, *args):
+    return subprocess.run(["git", "-C", p] + list(args), capture_output=True,
+                          text=True, timeout=60)
+
+
+def make_clone(root, name="clone", origin=PUBLIC_URL):
+    """公開repoの別クローンの体裁を**本物で**作る。
+
+    ★2026-08-23(研究室HQ差し戻し・C-041)で変えた所=
+      旧版は `git init` だけで **remote を設定していなかった**。
+      それだと「追跡済み=公開済み」の検査が、**一度も公開されていないファイルを通す**のを
+      緑のまま見逃す(=テストが穴を証明していた)。今は既定で origin と
+      remote側の ref(refs/remotes/origin/main)まで作る=本物のクローンと同じ形。
+      `origin=None` を渡せば **remote無し**の版になる(そちらでは通ってはいけない)。
+    """
     p = os.path.join(root, name)
     os.makedirs(p, exist_ok=True)
     subprocess.run(["git", "init", "-q", p], capture_output=True, timeout=60)
+    _git(p, "config", "user.email", "test@example.invalid")
+    _git(p, "config", "user.name", "fcc gate test")
     io.open(os.path.join(p, "app.js"), "w", encoding="utf-8").write("// public\n")
+    _git(p, "add", "app.js")
+    _git(p, "commit", "-q", "-m", "public")
+    if origin:
+        _git(p, "remote", "add", "origin", origin)
+        publish(p)
     return p
+
+
+def publish(p):
+    """remote側のツリーを HEAD に合わせる(=`git push` 済みの状態を本物のrefで作る)。"""
+    _git(p, "update-ref", "refs/remotes/origin/main", "HEAD")
 
 
 def main():
@@ -150,21 +178,66 @@ def main():
               not only(preflight(build_plan(wd, cfg, [])), "D"))
         os.remove(gitobj)
 
-        # ★D の要= 「追跡済み(=既に公開されている)」と「未追跡(=持ち込み)」を分ける。
+        # ★D の要= 「既に公開されている」と「持ち込み」を分ける。
         #   実測= 公開repoには update_token.ps1 / js/secret-reveal.js 等が**7件**追跡されている。
         #   名前当てだけで拒むと C-049 が許した唯一の使い道が永久に起動できない。
         tp = os.path.join(wd, "update_token.ps1")
         io.open(tp, "w", encoding="utf-8").write("# public\n")
         fired_untracked = bool(only(preflight(build_plan(wd, cfg, [])), "D"))
-        subprocess.run(["git", "-C", wd, "add", "update_token.ps1"],
-                       capture_output=True, timeout=60)
-        fired_tracked = bool(only(preflight(build_plan(wd, cfg, [])), "D"))
-        check("G-D(追跡の別) 同じ名前でも 未追跡=拒む / 追跡済み=通す",
-              fired_untracked and not fired_tracked,
-              "未追跡=%s 追跡済み=%s" % (fired_untracked, fired_tracked))
-        subprocess.run(["git", "-C", wd, "rm", "-q", "--cached", "update_token.ps1"],
-                       capture_output=True, timeout=60)
-        os.remove(tp)
+        _git(wd, "add", "update_token.ps1")
+        _git(wd, "commit", "-q", "-m", "add token script")
+        fired_committed = bool(only(preflight(build_plan(wd, cfg, [])), "D"))
+        publish(wd)                                   # ← remote側のツリーにも載せる
+        fired_published = bool(only(preflight(build_plan(wd, cfg, [])), "D"))
+        check("G-D(公開の別) 未追跡=拒む / commitしただけ=まだ拒む / 公開済み=通す",
+              fired_untracked and fired_committed and not fired_published,
+              "未追跡=%s commitのみ=%s 公開済み=%s"
+              % (fired_untracked, fired_committed, fired_published))
+
+        # ★★C-041 の差し戻し= 「追跡済み」を「公開済み」の代理にしていた穴。
+        #   remote が無い / 知らない remote のフォルダでは、**commitされていても**
+        #   どこにも出ていない=名前当てのまま拒否側へ倒れること。
+        #   ★旧版の make_clone は remote を設定していなかったので、この形が緑のまま通っていた。
+        nr = make_clone(tmp, "noremote", origin=None)     # remote無しの本物のgitフォルダ
+        io.open(os.path.join(nr, ".env"), "w", encoding="utf-8").write("BSKY_APP_PW=x\n")
+        _git(nr, "add", "-f", ".env")
+        _git(nr, "commit", "-q", "-m", "committed but never published")
+        check("G-D(remote無し) commit済みでも remote が無ければ**公開の証明が無い**=拒む",
+              only(preflight(build_plan(nr, cfg, [])), "D"),
+              preflight(build_plan(nr, cfg, [])))
+
+        ur = make_clone(tmp, "unknownremote", origin="https://example.invalid/who/knows.git")
+        io.open(os.path.join(ur, ".env"), "w", encoding="utf-8").write("BSKY_APP_PW=x\n")
+        _git(ur, "add", "-f", ".env")
+        _git(ur, "commit", "-q", "-m", "published somewhere unknown")
+        publish(ur)
+        check("G-D(知らないremote) 許可リストに無い remote では追跡済みでも拒む",
+              only(preflight(build_plan(ur, cfg, [])), "D"),
+              preflight(build_plan(ur, cfg, [])))
+
+        check("G-D(直すと黙る) 許可リストの origin へ向け直すと同じ物が通る",
+              (_git(ur, "remote", "set-url", "origin", PUBLIC_URL) is not None
+               and not only(preflight(build_plan(ur, cfg, [])), "D")),
+              preflight(build_plan(ur, cfg, [])))
+
+        # remote URL の均し(https / ssh / .git 有無 が同じ物として当たること)
+        from fcc_launch import _norm_origin, PUBLIC_ORIGINS      # noqa: E402
+        forms = ["https://github.com/John-Mori/go5-maker-7b311d01.git",
+                 "https://github.com/John-Mori/go5-maker-7b311d01",
+                 "git@github.com:John-Mori/go5-maker-7b311d01.git",
+                 "ssh://git@github.com/John-Mori/go5-maker-7b311d01/"]
+        check("G-D(URLの形) https/ssh/.git有無 のどれでも同じ公開repoとして当たる",
+              all(_norm_origin(u) in PUBLIC_ORIGINS for u in forms),
+              [_norm_origin(u) for u in forms])
+        check("G-D(似て非なるURL) 別ホスト・別リポは当たらない",
+              not any(_norm_origin(u) in PUBLIC_ORIGINS for u in
+                      ["https://github.com/John-Mori/go5-maker-7b311d01-evil",
+                       "https://gitlab.com/John-Mori/go5-maker-7b311d01",
+                       "https://github.com/someone/go5-maker-7b311d01"]))
+
+        _git(wd, "rm", "-q", "-f", "update_token.ps1")
+        _git(wd, "commit", "-q", "-m", "drop")
+        publish(wd)
 
         # ---- E. 祖先の CLAUDE.md / MEMORY.md
         parent = os.path.join(tmp, "withctx")

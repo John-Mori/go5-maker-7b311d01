@@ -40,6 +40,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -75,6 +76,65 @@ LAYER_OF = {
     "1528674269285060731": "イージス AegisConciel",
     "1525644847346880713": "ADAFI事業部",
 }
+
+
+ORG_REGISTRY = r"D:\SougouStartFolder\00_AI-HQ\org_registry.yml"
+
+
+def display_names():
+    """スラッグ→日本語名(`org_registry.yml` の display_ja)。
+
+    ★読めなければ空を返す=**警告を出さないだけ**(fail-open)。
+      通信路を止める側へ倒さない。
+    """
+    out = {}
+    try:
+        cur = None
+        for ln in open(ORG_REGISTRY, encoding="utf-8"):
+            # ★スラッグ行には後ろにコメントが付くことがある(aegis-gl 等)=許す。
+            m = re.match(r"^  ([a-z0-9_-]+):\s*(#.*)?$", ln)
+            if m:
+                cur = m.group(1)
+                continue
+            m = re.match(r"^\s+display_ja:\s*(\S+)", ln)
+            if m and cur:
+                out[cur] = m.group(1)
+    except Exception:
+        pass
+    return out
+
+
+def addressee_warning(body, depts):
+    """本文の先頭行が名指ししている部門が、実際の投函先に居ない時の警告文(無ければ "")。
+
+    ★2026-08-23 研究室HQ発注。実際に起きた事故=
+      依頼書の見出しが `【研究室HQ → プラットフォームSE】` なのに、3階梯ガードで
+      投函先はイージス研究室だけになり、**見出しを直し忘れた**。
+      受け取った側が「宛先は向こうだ」と読めば両方が待つ=無警報滞留(KPI A1)。
+      人間の間違いだが**機械が拾える形**の間違いだった。
+    ★止めない。警告だけ(fail-open)= 誤検知で通信路を止める方が害が大きい。
+    ★見るのは**最後の矢印より後ろ**だけ= 見出し左側の「差出人」を宛先と誤読しない。
+    """
+    try:
+        head = (body.splitlines() or [""])[0]
+        if "→" not in head:
+            return ""                       # 宛先を名指ししていない見出し=対象外
+        tail = head.rsplit("→", 1)[1]
+        names = display_names()
+        sent = set(depts) | {names.get(d, "") for d in depts}
+        missed = sorted({ja for d, ja in names.items()
+                         if ja and ja in tail and ja not in sent and d not in sent})
+        if not missed:
+            return ""
+        shown = ",".join("%s(%s)" % (names.get(d, d), d) for d in depts)
+        return ("★見出しの宛先と実際の投函先が違う(投函は済んでいる・警告だけ)\n"
+                "  見出しが名指ししている宛先: %s\n"
+                "  実際に投函した先        : %s\n"
+                "  → その部門には行を作っていない。**見出しを直すか、その部門へも出す**。"
+                "放置すると受け手が『宛先は向こうだ』と読んで両方が待つ。"
+                % ("・".join(missed), shown))
+    except Exception:
+        return ""                           # 判定できない=黙る(fail-open)
 
 
 def head_of(dept):
@@ -411,6 +471,9 @@ def main():
         good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience)
         ok += 1 if good else 0
     print(f"投函 {ok}/{len(depts)} 部門")
+    warn = addressee_warning(body, depts)
+    if warn:
+        print(warn)
     return 0 if ok == len(depts) else 1
 
 

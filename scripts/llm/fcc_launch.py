@@ -22,6 +22,7 @@
 import argparse
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,11 @@ SECRET_SUBSTR = ("token", "secret")
 SECRET_SUFFIX = (".db",)
 SECRET_DIRS = {"local"}
 ANCESTOR_LOADED = ("CLAUDE.md", "MEMORY.md")   # E= cwdの祖先から自動で読まれる物
+
+# ★「既にネットに出ている」と認めてよい remote(2026-08-23 研究室HQ差し戻し・C-041)。
+#   ここに無い remote / remote無し のフォルダでは、追跡済みでも**公開の証明にならない**=
+#   名前当てのまま拒否側へ倒す。増やす時は「本当に誰でも読める公開repoか」を確かめてから。
+PUBLIC_ORIGINS = frozenset({"github.com/john-mori/go5-maker-7b311d01"})
 
 
 # ---------------------------------------------------------------- 実在検査
@@ -190,25 +196,81 @@ def _is_secret(name, isdir):
     return any(low.endswith(s) for s in SECRET_SUFFIX)
 
 
-def tracked_files(wd):
-    """公開repoに**追跡されている**ファイルの集合(相対パス・小文字)。
+def _norm_origin(url):
+    """remote の URL を突き合わせ用に均す(https / ssh / .git 有無 / 末尾スラッシュ)。
+
+    `https://github.com/John-Mori/repo.git` も `git@github.com:John-Mori/repo` も
+    同じ `github.com/john-mori/repo` になる。
+    """
+    u = str(url or "").strip().lower()
+    if not u:
+        return ""
+    u = re.sub(r"^[a-z0-9+.-]+://", "", u)     # scheme://
+    u = re.sub(r"^[^/@]+@", "", u)             # user@
+    u = re.sub(r":(?!\d)", "/", u, count=1)    # scp形式の host:path (ポート番号は残す)
+    u = re.sub(r"\.git$", "", u)
+    u = re.sub(r"/+", "/", u).rstrip("/")
+    return u
+
+
+def origin_url(wd):
+    """作業フォルダの origin。無ければ空文字。"""
+    try:
+        out = subprocess.run(["git", "-C", wd, "remote", "get-url", "origin"],
+                             capture_output=True, text=True, timeout=60)
+        return (out.stdout or "").strip() if out.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _remote_ref(wd):
+    """remote 側の実体を指す ref を1つ返す(origin/HEAD → origin/main → origin/master)。"""
+    for ref in ("origin/HEAD", "origin/main", "origin/master"):
+        try:
+            out = subprocess.run(["git", "-C", wd, "rev-parse", "--verify", "-q", ref],
+                                 capture_output=True, text=True, timeout=60)
+            if out.returncode == 0 and (out.stdout or "").strip():
+                return ref
+        except Exception:
+            pass
+    return ""
+
+
+def published_files(wd):
+    """**既にネットに出ている**ファイルの集合(相対パス・小文字)。
 
     ★なぜ要るか= 公開repoのソースには `update_token.ps1` `js/secret-reveal.js` のように
       名前が秘密っぽいだけの**公開済みのコード**が実在する(この repo で実測7件)。
       名前当てだけで拒むと、C-049 が許した唯一の使い道(公開repoの別クローン)が
-      **永久に起動できない**=規則が死ぬ。追跡されている=既にネットに出ている物なので
-      「外へ出すか」の線(C-013)には掛からない。
-    ★fail-close= git が答えなければ**空集合**を返す=名前当てがそのまま効いて拒否側になる。
+      **永久に起動できない**=規則が死ぬ。
+
+    ★★2026-08-23 差し戻し(研究室HQ・C-041)で直した所=
+      旧版は `git ls-files`(=**追跡されているか**)を「公開済み」の代理にしていた。
+      だが `git init` だけのフォルダに `.env` を置いて commit すれば、**どこにも出ていない秘密が
+      「追跡済み」になって通る**。代理が成り立つ条件(=どこへ出ているのか)を測っていなかった。
+      今は remote の実体そのものを見る:
+        ① origin が **許可リストの公開repo** であること(知らないremoteは公開の証明にならない)
+        ② そのファイルが **remote側のツリーに在る**こと(ローカルcommitだけの物は含まれない)
+      どちらかが欠けたら**空集合**=名前当てがそのまま効いて拒否側へ倒れる(fail-close)。
     """
     try:
-        out = subprocess.run(["git", "-C", wd, "ls-files"],
-                             capture_output=True, text=True, timeout=60)
+        if _norm_origin(origin_url(wd)) not in PUBLIC_ORIGINS:
+            return set()                       # remote無し / 知らないremote = 公開の証明が無い
+        ref = _remote_ref(wd)
+        if not ref:
+            return set()                       # remote側のツリーを引けない = 同上
+        out = subprocess.run(["git", "-C", wd, "ls-tree", "-r", "--name-only", ref],
+                             capture_output=True, text=True, timeout=120)
         if out.returncode != 0:
             return set()
         return {p.strip().replace("/", os.sep).lower()
                 for p in out.stdout.splitlines() if p.strip()}
     except Exception:
         return set()
+
+
+# 旧名。呼び出し元が残っていても静かに別物にならないよう、同じ物を指す。
+tracked_files = published_files
 
 
 def find_secrets(wd, limit=20):
@@ -219,7 +281,7 @@ def find_secrets(wd, limit=20):
     """
     hits = []
     wd = _real(wd)
-    tracked = tracked_files(wd)
+    tracked = published_files(wd)          # ★「追跡済み」でなく「公開済み」で見る(C-041)
     for cur, dirs, files in os.walk(wd):
         dirs[:] = [d for d in dirs if d != ".git"]
         for d in list(dirs):
