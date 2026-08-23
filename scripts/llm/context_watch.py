@@ -83,7 +83,7 @@ OVER_KINDS = {
     "圧縮済": "越えた後に圧縮が走っている= relayは撃てている(**鳴らさない**)",
     "処理中": "越えた便がまだ新しい= relayは便の終わりに撃つので結果待ち(**鳴らさない**)",
     "便待ち": "越えた便がまだ閉じていない= relayに撃つ機会が来ていない(**鳴らさない**)",
-    "停止窓": "管理外で書き込みも止まっている= 誰も畳めず、増えもしない(**鳴らさない**)",
+    "停止窓": "その窓への書き込みが止まっている= 誰も畳めず、増えもしない(**鳴らさない**)",
 }
 
 RE_TS = re.compile(r'"timestamp"\s*:\s*"([0-9T:\-\.]+)Z?"')
@@ -213,9 +213,28 @@ def scan(hours):
 
     ★文脈の大きさ= その便で実際にモデルへ送った input + cache読み + cache作成。
       Claude Code 自身が記録した usage の実測値であって推定ではない。
+
+    ★★2026-08-23(研究室HQ msg 1540926977874337802 の実測)= **窓は `now` ではなく
+      「そのセッション自身の最後の書き込み」から遡って切る。**
+      以前は `now - hours` で一律に切っていた。すると**止まった窓では時間が経つほど
+      小さい初期の便から先に外へ落ち、最後に終盤の大きい便だけが残る**=
+      **一文字も書かずに中央値が上がって線を越える。**
+      実測(89b029da・書き込みは一切増えていない。時刻だけ変えて数え直した):
+        09:21 便=78 中央値= 83,757(線の下=黙る)
+        11:21 便=55 中央値= 86,183(線の下=黙る)
+        12:21 便= 9 中央値=122,320 ← ★実際に鳴った便の値と一致
+        13:21 便= 0(行ごと消える)
+      = 「12時間の窓から落ちる直前の1時間」にだけ鳴る警報だった。
+    ★セッション基準で切れば、同じ検体を何時で数えても中央値は動かない(検査で固定)。
+      生きている窓では最後の書き込み≒now なので、従来と同じ値になる(実測で確認)。
+    ★「中央値をその世代の全便で取る」案(HQ案2)は**採らない**。実測すると relay管理下は
+      圧縮の区切りの後に便がほとんど無く、直近12時間で線を越えていた上位22本のうち
+      **hr-context 3e03904a は区切り後の便が0本=中央値0** まで落ちた。ほぼ全室が
+      自動的に線の下へ行く=**今朝と同じ silent green** になる。
+    ★どのファイルを読むかの足切り(cutoff_mtime)は今までどおり mtime でよい=
+      あれは**判定ではなく範囲**で、外すと「多めに読む」側(fail-open)へ倒れるだけ。
     """
     cutoff_mtime = time.time() - hours * 3600
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
     rows = []
     if not os.path.isdir(PROJECTS):
         return rows
@@ -262,8 +281,6 @@ def scan(hours):
                             tzinfo=timezone.utc)
                     except ValueError:
                         continue
-                    if dt < since:
-                        continue
                     mi = RE_IN.search(line)
                     if not mi:
                         continue
@@ -281,6 +298,12 @@ def scan(hours):
                     last_ts = dt
             if not ctxs:
                 continue
+            # ★窓は**そのセッションの最後の書き込み**から遡る(この関数の冒頭★参照)。
+            floor = max(stamps) - hours * 3600
+            keep = [i for i, t in enumerate(stamps) if t >= floor]
+            ctxs = [ctxs[i] for i in keep]
+            stamps = [stamps[i] for i in keep]
+            last_ts = datetime.fromtimestamp(stamps[-1], timezone.utc)
             rows.append({
                 "sid": fn[:8], "path": p, "dept": classify(p), "model": model,
                 "n": len(ctxs), "last": ctxs[-1],
@@ -364,6 +387,31 @@ def _fired_since(r, compact_at, now):
     return "未発火"
 
 
+def _stalled(r, now):
+    """その窓への**書き込みが止まっているか**。中身(last_epoch)で見る。
+
+    ★★2026-08-23(研究室HQ msg 1540926977874337802 の実測)。ここは以前
+      `max(last_epoch, mtime)` だった。**器(mtime)を第2の水源にしていた**ため、
+      中身が11時間31分前で止まっている窓が「生きている」に倒れて鳴った:
+        89b029da 研究室メイン= 中身の最終行 08/23 00:31 / mtime 08/23 12:02
+        (12:21の便で「圧縮線超・管理外」で発火。何が mtime を動かしたかは不明=中身は増えていない)
+      共通規律§3=「静かに壊れる推定を使わない。mtime のような"たまたま当たっている値"に
+      判定を乗せるな」そのままだ。**ここで問う事実は「その窓にまだ書き込みがあるか」**で、
+      それは中身であって器ではない。
+    ★mtime は捨てない= **last_epoch が読めない行だけの代役**へ落とす(fail-open の向きは維持)。
+    ★usage行(last_epoch)で足りることは実測した= 直近24時間の transcript 63本で
+      「中身の最終行の時刻 − usage の最終行の時刻」は中央値 0.00分・**最大 3.0分**。
+      STALE_SEC(30分)を跨ぐ差は出ない。器と中身が30分以上ずれたのは 63本中この1本だけ。
+    ★どちらも読めない行は **False(=止まっていない扱い)** へ倒す= 黙らせすぎない側。
+    """
+    e = float(r.get("last_epoch") or 0.0)
+    if e <= 0:
+        e = float(r.get("mtime") or 0.0)
+    if e <= 0:
+        return False
+    return now - e >= STALE_SEC
+
+
 def _manual_kind(r, now):
     """管理外の行を「管理外(鳴らす)」と「停止窓(黙る)」に分ける。
 
@@ -384,11 +432,10 @@ def _manual_kind(r, now):
     ★閾値は `STALE_SEC`(30分)を使い回す= 「もう走っていない」の定義は見張りの中で1つ
       (実データは4時間 対 10分。どこで割っても分かれるが、線を2本持たない)。
     ★どちらの時刻も読めない行は **"管理外" へ倒す**= 黙らせすぎない側(fail-open)。
+    ★「止まっているか」の判定そのものは `_stalled()` に一本化した(2026-08-23)=
+      管理下(現行)にも同じ問いが要るため。**同じ述語を2か所に書かない。**
     """
-    alive = max(float(r.get("last_epoch") or 0.0), float(r.get("mtime") or 0.0))
-    if alive <= 0:
-        return "管理外"
-    return "停止窓" if now - alive >= STALE_SEC else "管理外"
+    return "停止窓" if _stalled(r, now) else "管理外"
 
 
 def _old_gen_kind(r, now):
@@ -435,6 +482,13 @@ def judge(rows, compact_at, rotate_at, now=None):
         if not managed:
             r["over_kind"] = _manual_kind(r, now)
         elif managed == "relay:現行":
+            # ★2026-08-23= ここに「止まっていたら黙る」を**足しかけて、実測で取り下げた**。
+            #   実データ 3800efa5(プラットフォームSE・relay現行)は 121便すべてが圧縮の区切りの
+            #   後に居り、最新 219,630=**交代線超なのに relay が一度も撃っていない**。
+            #   3時間37分書き込みが無いというだけでこれを黙らせると、**盤上で一番危ない行が消える**。
+            #   管理外の「停止窓」が正しいのは、打てる手がその窓のキーボードの前のChamiにしか
+            #   無く、窓自身も増えないからだ。管理下の「未発火」は**relayの側の不具合**で、
+            #   窓が止まっていても今すぐ調べられる=手がある。**同じ札を貼ってはいけない。**
             r["over_kind"] = _fired_since(r, compact_at, now)
         else:
             r["over_kind"] = _old_gen_kind(r, now)

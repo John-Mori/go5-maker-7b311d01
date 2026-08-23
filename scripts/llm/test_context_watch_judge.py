@@ -352,11 +352,46 @@ check("★2: 生きている管理外(10分前)は「管理外」のまま鳴ら
       _j["0ebedfa2"]["over_kind"] == "管理外" and _j["0ebedfa2"]["alert"], str(_j["0ebedfa2"]))
 check("★2: 鳴らす枝を殺していない(alertに1件は残る)",
       len([r for r in _j.values() if r["alert"]]) == 1)
-# ★usage行が途切れていても、ファイルにまだ書かれているなら生きている側へ倒す(fail-openは鳴る側)
-check("★usage行より mtime が新しければ生きている扱い",
-      cw._manual_kind(manual("x", STOP_AT, mtime=LIVE_AT), NOW) == "管理外")
 check("★どちらも読めない行は鳴らす側へ倒す",
       cw._manual_kind({"last_epoch": 0.0, "mtime": 0.0}, NOW) == "管理外")
+
+print("== 生死の根拠は器(mtime)ではなく中身(研究室HQ msg 1540926977874337802) ==")
+# ★★ここは 2026-08-23 まで**逆を検査していた**= 「usage行より mtime が新しければ生きている扱い」。
+#   その1行が `alive = max(last_epoch, mtime)` を固定し、**合格しているテストが穴を守っていた**。
+#   実データ(89b029da 研究室メイン):
+#     中身の最終行 08/23 00:31 / mtime 08/23 12:02(差 691分) → 12:21 に「管理外」で発火。
+#   中身は一文字も増えていない=打つ手の無い警報。mtime は last_epoch が読めない時の代役へ落とす。
+DEAD_BODY = NOW - 691 * 60.0        # 中身の最終行= 11時間31分前
+FRESH_JAR = NOW - 19 * 60.0         # 器だけ新しい= 19分前(STALE_SEC の内側)
+実データ = manual("89b029da", DEAD_BODY, mtime=FRESH_JAR)
+check("★実データ: 中身が止まっていれば mtime が新しくても停止窓",
+      cw._manual_kind(実データ, NOW) == "停止窓", cw._manual_kind(実データ, NOW))
+_d = {r["sid"]: r for r in cw.judge([manual("89b029da", DEAD_BODY, mtime=FRESH_JAR)],
+                                    COMPACT, ROTATE, now=NOW)}
+check("★実データ: 判定まで通しても鳴らない", _d["89b029da"]["alert"] is False, str(_d["89b029da"]))
+check("★変異: 旧仕様(max(last_epoch, mtime))なら同じ行が鳴る=この検査は穴を守っている",
+      (NOW - max(DEAD_BODY, FRESH_JAR)) < cw.STALE_SEC,
+      "旧仕様でも黙る=検体が穴を再現できていない")
+# ★退避の枝を殺していない= last_epoch が読めない行では mtime を使う(fail-open の向きは維持)
+check("★last_epoch が無い行は mtime を代役に使う(新しければ鳴る)",
+      cw._manual_kind({"last_epoch": 0.0, "mtime": FRESH_JAR}, NOW) == "管理外")
+check("★last_epoch が無い行は mtime を代役に使う(古ければ黙る)",
+      cw._manual_kind({"last_epoch": 0.0, "mtime": DEAD_BODY}, NOW) == "停止窓")
+# ★★「停止窓」を管理下(現行)へ広げてはいけない= 2026-08-23 に足しかけて実測で取り下げた枝。
+#   実データ 3800efa5(プラットフォームSE・relay現行)= 121便すべてが圧縮の区切りの後・
+#   最新 219,630(交代線超)・最終書き込み 09:05(=3時間37分前)。
+#   「止まっているから黙る」を管理下へ付けると、**盤上で一番危ない行が消えた**。
+#   管理外の停止窓は「打てる手がその窓の前のChamiにしか無い」から正しいのであって、
+#   管理下の未発火は relay 側の不具合=窓が止まっていても今すぐ調べられる。
+_止まった管理下 = tl("mgd00011", "platform-se",
+                 [(-40000, 130000), (-13000, 219630)], [], last_epoch=NOW - 13000.0)
+_止まった管理下["managed"], _止まった管理下["closed_at"] = "relay:現行", NOW - 12000.0
+_m = {r["sid"]: r for r in cw.judge([_止まった管理下], COMPACT, ROTATE, now=NOW)}
+check("★止まっていても管理下の本物の未発火は鳴らし続ける(停止窓で黙らせない)",
+      _m["mgd00011"]["over_kind"] == "未発火" and _m["mgd00011"]["alert"] is True,
+      str(_m["mgd00011"]["over_kind"]))
+check("★その行は実際に『止まっている』(=止まりを理由に黙らせていないことの証明)",
+      cw._stalled(_止まった管理下, NOW) is True)
 
 # ★変異(HQ仕様3)= 閾値を極端へ振ると、1と2は**両方同時には満たせない**。
 #   = 判定が本当に「最後の書き込みの新しさ」で分かれている証明。
@@ -377,6 +412,85 @@ finally:
 check("★変異の後始末: 閾値が元へ戻っている", cw.STALE_SEC == _real_stale)
 check("★停止窓は alert() の見出しに載せない",
       "停止窓" not in ("未発火", "見失い", "管理外"))
+
+print("== 窓が滑るだけで中央値が上がらない(研究室HQ msg 1540926977874337802 穴②) ==")
+# ★★実物の transcript を1本作って、**本物の scan() を時刻だけ変えて3回**通す。
+#   HQの実測(89b029da・書き込みは一切増えていない):
+#     09:21 便=78 中央値= 83,757 / 11:21 便=55 中央値= 86,183 / 12:21 便=9 中央値=122,320
+#   = 止まった窓では小さい初期の便から先に窓の外へ落ち、**一文字も書かずに線を越える。**
+#   直した後は窓を「そのセッションの最後の書き込み」から遡って切るので、時刻をずらしても動かない。
+import statistics                                        # noqa: E402
+
+_N便, _間隔 = 78, 580.0                                   # 12.4時間ぶんの並び(12時間の窓より長い)
+_終わり = time.time() - 11.5 * 3600                       # 最後の書き込み= 11時間半前(=止まっている)
+_並び = [(_終わり - (_N便 - 1 - i) * _間隔, 20000 + int(i * (135000 - 20000) / (_N便 - 1)))
+         for i in range(_N便)]
+
+
+def _write_transcript(dirpath, name, samples):
+    """scan() が実際に読む形の transcript を作る(判定と分岐は本物のまま回す)。"""
+    p = os.path.join(dirpath, name)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "起動"},
+                            "timestamp": datetime.utcfromtimestamp(
+                                samples[0][0]).strftime("%Y-%m-%dT%H:%M:%S.000Z")}) + "\n")
+        for ts, ctx in samples:
+            f.write(json.dumps({
+                "type": "assistant",
+                "timestamp": datetime.utcfromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                "message": {"model": "claude-opus-5",
+                            "usage": {"input_tokens": ctx, "cache_read_input_tokens": 0,
+                                      "cache_creation_input_tokens": 0}}}) + "\n")
+    return p
+
+
+def _old_window_median(samples, now, hours=12.0):
+    """旧仕様= 窓を `now` から遡って切っていた版(この行が穴の本体だった)。"""
+    sel = [c for t, c in samples if t >= now - hours * 3600]
+    return int(statistics.median(sel)) if sel else 0
+
+
+class _FakeClock(object):
+    """scan() の中の `time.time()` だけを差し替える(外へ出る手ではなく**時計**を偽物にする)。"""
+
+    def __init__(self, now):
+        self.now = now
+
+    def time(self):
+        return self.now
+
+
+_proj = tempfile.mkdtemp(prefix="cwscan_")
+os.makedirs(os.path.join(_proj, "D--dummy"))
+_write_transcript(os.path.join(_proj, "D--dummy"), "aa11bb22-0000-0000-0000-000000000000.jsonl",
+                  _並び)
+
+# ★同じファイルを、時計だけ変えて3回数える(HQの 09:21 / 11:21 / 12:21 と同じ実験)
+_時計 = [_終わり, _終わり + 10 * 3600, _終わり + 11.7 * 3600]
+_real_projects, _real_time = cw.PROJECTS, cw.time
+_ずらし = []
+try:
+    cw.PROJECTS = _proj
+    for _t in _時計:
+        cw.time = _FakeClock(_t)
+        _row = cw.scan(12.0)[0]
+        _ずらし.append(_row["median"])
+finally:
+    cw.PROJECTS, cw.time = _real_projects, _real_time
+
+_旧 = [_old_window_median(_並び, _t) for _t in _時計]
+check("★変異: 旧仕様なら同じ検体が時刻だけで違う中央値を出す(穴の再現)",
+      len(set(_旧)) == 3, str(_旧))
+check("★変異: 旧仕様なら書き込み0のまま線を越える",
+      max(_旧) >= COMPACT and min(_旧) < COMPACT, str(_旧))
+check("★直った側: 本物の scan() は時刻をずらしても中央値が動かない",
+      len(set(_ずらし)) == 1, str(_ずらし))
+check("★直った側: その中央値は線の下(=鳴らない)", _ずらし[0] < COMPACT, str(_ずらし[0]))
+check("★窓は12時間ぶんだけ残す(全便をそのまま数えていない)",
+      0 < _row["n"] < _N便, "%d / %d" % (_row["n"], _N便))
+check("★止まった窓なので判定まで通しても鳴らない",
+      all(not r.get("alert") for r in cw.judge(cw.mark_managed([_row], {}), COMPACT, ROTATE)),
+      str(_row.get("over_kind")))
 
 print("== 変異検査(旧仕様へ戻したら落ちること) ==")
 real_judge = cw.judge
