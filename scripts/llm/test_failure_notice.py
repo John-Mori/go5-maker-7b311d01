@@ -40,6 +40,22 @@ def _spec():
     ]
 
 
+def _touched_spec():
+    """(touched入力, 期待するsubstantive件数, 期待する報告が空か, ラベル)。"""
+    codever = ["~local\\_daemon_codever\\dept_hr-room.txt",
+               "~local\\_daemon_codever\\dept_platform-se.txt"]
+    busy = ["~local\\llm\\busy\\gunji.json"]
+    churn_only = codever + busy + ["~local\\persona_avatars.json",
+                                   "~local\\llm\\room_sessions.json"]
+    real = ["scripts/llm/daily_report.py"] + codever
+    return [
+        ([], 0, True, "touched空= 報告は空(黙る)"),
+        (churn_only, 0, True, "churnだけ(codever/busy/脈)= 実体0=黙る"),
+        (real, 1, False, "実体1件+churn混在= 実体だけ拾って報告する"),
+        (["app.js", "app.js"], 1, False, "重複は1件に畳む"),
+    ]
+
+
 def main():
     for (kind, dl), want, label in _spec():
         got = dd.suppress_failure_notice(kind, dl)
@@ -54,6 +70,38 @@ def main():
     _ok(mutant("timeout", 3) is False
         and dd.suppress_failure_notice("timeout", 3) is True,
         "must-fail: timeout特別扱いを消した変異体は配達3回目に誤って出す(本物は伏せる)")
+
+    # --- 打ち切りの"確定結果": substantive_touched / format_timeout_result ---
+    for touched, n_want, empty_want, label in _touched_spec():
+        subst = dd.substantive_touched(touched)
+        _ok(len(subst) == n_want, f"{label} → substantive={subst}")
+        line = dd.format_timeout_result(touched)
+        _ok((line == "") is empty_want,
+            f"{label} → report_empty={line == ''}")
+    # 実体があれば触ったファイル名が本文に載る(確定事実を名指しする)。
+    _ok("daily_report.py" in dd.format_timeout_result(["scripts/llm/daily_report.py"]),
+        "実体変更のファイル名が確定結果の本文に載る")
+
+    # pick_timeout_touched: msg_id一致かつ打ち切り監査(rc==-1 / hard timeout)だけ拾う。
+    entries = [
+        {"msg_id": "M1", "rc": 0, "stdout_tail": "success", "touched": ["a.py"]},
+        {"msg_id": "M2", "rc": -1, "stdout_tail": "hard timeout(強制終了)", "touched": ["b.py"]},
+        {"msg_id": "M1", "rc": -1, "stdout_tail": "hard timeout(強制終了)", "touched": ["c.py"]},
+        {"msg_id": "M1", "rc": -1, "stdout_tail": "hard timeout(強制終了)", "touched": ["d.py"]},
+    ]
+    _ok(dd.pick_timeout_touched(entries, "M1") == ["d.py"],
+        "pick: M1の打ち切り監査を最新1件だけ拾う(成功rc=0は無視)")
+    _ok(dd.pick_timeout_touched(entries, "M2") == ["b.py"], "pick: 別msg_idは混ぜない")
+    _ok(dd.pick_timeout_touched(entries, "M9") == [], "pick: 該当なしは空")
+
+    # ★must-fail: churnを落とさない変異体(そのまま返す)なら、churnだけの入力でも
+    #   「実体あり」と誤判定して報告が非空になる=「churnだけ=黙る」の期待が壊れる。
+    churn_only = ["~local\\_daemon_codever\\dept_hr-room.txt", "~local\\llm\\busy\\gunji.json"]
+    def mutant_touched(touched):
+        return [str(p).lstrip("~") for p in (touched or [])]   # ← churn除去を消した壊れた版
+    _ok(len(mutant_touched(churn_only)) > 0
+        and dd.substantive_touched(churn_only) == [],
+        "must-fail: churn除去を消した変異体はchurnだけでも実体ありと誤る(本物は空)")
 
     print("\n" + ("ALL PASS" if not FAIL else f"{len(FAIL)} FAIL"))
     return 1 if FAIL else 0

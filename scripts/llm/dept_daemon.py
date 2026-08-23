@@ -266,9 +266,13 @@ def suppress_failure_notice(kind, delivery_count):
         実物を見たChamiが「このコメント、何の確定情報も得られなくて意味もないからいらない。削除で」
         と判断した(2026-08-23・軍議 msg 1541136509376397422)。実際その報告は
         「作業は進んでいる可能性がある(確認できていない)」= **確定情報ゼロ**で、Chamiには雑音。
-        → 部屋へは出さない。記録(request_log / work_audit)は残るので追える形は保つ。
-        ★無音そのものの解消は、"確定した結果"(git/work_audit を自分で読んで何が進んだか)を
-          出す形へ作り直す=別案(Chami裁定待ち)。中身の無い可能性の報告は二度と出さない。
+        → 部屋へは**この「可能性」の文面**を出さない(常に伏せる=この述語の役目はここまで)。
+        ★無音そのものの解消(別案・2026-08-24 Chami「1をお願いしたいけど、トークンめっちゃ
+          食うんだったら2でいい」→ トークン0で済むので1を実装)=
+          打ち切りの時だけ、この述語で伏せた**後**に `_timeout_result_line()` が
+          work_audit(この便の作業前後のファイル差分=実際に触ったファイル)を自分で読み、
+          **実体のある変更があった時だけ**その確定事実を1行で出す(無ければ黙ったまま)。
+          LLMは呼ばない=トークン0。中身の無い「進んでいる可能性」は二度と出さない。
       - 一般の配送失敗(kind!="timeout")= 便は最大5回まで自動再配達される。毎回詫びると
         同じ部屋へ最大5連投=Chami「トーク履歴が汚れる」。→ **もう後が無い時だけ**出す=
         再配達3回目(delivery_count>=3)で初めて出し、1・2回目は伏せる(2026-07-28 方針)。
@@ -279,6 +283,122 @@ def suppress_failure_notice(kind, delivery_count):
     if delivery_count is None:
         return False
     return delivery_count < 3           # 再配達3回目で初めて出す(1・2回目は伏せる)
+
+
+# ★打ち切り(timeout)の"確定した結果"だけを出すための純関数群(2026-08-24 Chami「1で」)。
+#   背景= suppress_failure_notice で「進んでいる可能性」の文面は消したが、消しただけだと
+#     Chamiが前に困った「30分止まって見える」無音が戻る。そこで**確定事実だけ**足す:
+#     打ち切った便が実際に触ったファイル(session_relay が hard timeout 時に残す
+#     work_audit の before/after 差分= その便固有・git author では無い信頼できる帰属)を
+#     デーモン自身が読んで1行にする。LLMは呼ばない=トークン0。
+#   ★churn除去= work_audit の touched には、_git_snapshot が拾いきれない常駐の脈が漏れる
+#     (実測: 1回の便で `_daemon_codever\dept_*.txt` が全室ぶん30件混じる)。これを「進んだ」と
+#     数えると偽の確定報告になる(C-041/C-048)。下の churn 判定で機械churnを落とす。
+_TIMEOUT_CHURN_MARKERS = (
+    "_daemon_codever/",     # 常駐の再起動マーカー(reload毎に全室ぶん動く)
+    "/busy/",               # 取り込み中ロック
+    "_daemon_",             # 生存脈・状態ファイル(念のための帯)
+    "_lab_revive_watch",    # 研究室復活の見張り脈
+    "absence_watchdog",     # 不在監視の脈
+)
+_TIMEOUT_CHURN_BASENAMES = frozenset({
+    "room_sessions.json", "persona_avatars.json",
+    "persona_avatar_last.json", "react_mark_state.json",
+})
+
+
+def _is_churn_path(path):
+    """常駐の脈・ロック等の「常に動くので証跡にならない」パスなら True。"""
+    p = str(path or "").replace("\\", "/").lstrip("~").lower()
+    if not p:
+        return True
+    base = p.rsplit("/", 1)[-1]
+    if base in _TIMEOUT_CHURN_BASENAMES:
+        return True
+    return any(m in p for m in _TIMEOUT_CHURN_MARKERS)
+
+
+def substantive_touched(touched):
+    """work_audit の touched から churn(常駐の脈・ロック)を除いた**実体変更**だけを返す。
+
+    ★churn を残すと「進んでいない」のに「N件書き換えた」と嘘の確定報告になる(C-048)。
+    """
+    seen, out = set(), []
+    for p in (touched or []):
+        if _is_churn_path(p):
+            continue
+        key = str(p).replace("\\", "/").lstrip("~")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(str(p).lstrip("~"))
+    return out
+
+
+def format_timeout_result(touched):
+    """打ち切った便の"確定した結果"を1行にする。実体のある変更が無ければ ""(= 黙る)。
+
+    ★"進んでいる可能性" は書かない。書くのは**実測(作業前後のファイル差分)で確定した**変更だけ。
+      churn しか無い / 何も無い → "" を返して黙る(中身の無い報告は二度と出さない)。
+    """
+    subst = substantive_touched(touched)
+    if not subst:
+        return ""            # 確定した成果なし= 黙る
+    head = "、".join(subst[:4])
+    more = f" ほか計{len(subst)}件" if len(subst) > 4 else ""
+    return (f"打ち切ったが、この便で {head}{more} を書き換えていた"
+            "(実測=作業前後のファイル差分)。完了扱いにせず残してあるから、"
+            "確かめて要れば拾い直す。")
+
+
+def pick_timeout_touched(entries, msg_id):
+    """work_audit の行(dict)群から、その msg_id の**打ち切り監査**の touched を返す。
+
+    打ち切りの監査= rc==-1 か stdout_tail に "hard timeout" を含む行(session_relay が
+    hard timeout 時に残す)。複数あれば最後(最新)。該当が無ければ []。
+    """
+    hit = []
+    for e in (entries or []):
+        try:
+            if str(e.get("msg_id", "")) != str(msg_id):
+                continue
+            tail = str(e.get("stdout_tail", "") or "")
+            if e.get("rc") == -1 or "hard timeout" in tail:
+                hit.append(e.get("touched") or [])
+        except Exception:
+            continue
+    return hit[-1] if hit else []
+
+
+def _timeout_touched_from_audit(path, msg_id, max_bytes=400000):
+    """work_audit.jsonl の末尾だけ読み、msg_id の打ち切り監査の touched を返す(I/O薄皮)。"""
+    if not msg_id:
+        return []
+    entries = []
+    needle = '"%s"' % msg_id
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            try:
+                f.seek(0, 2)
+                size = f.tell()
+                if size > max_bytes:
+                    f.seek(size - max_bytes)
+                    f.readline()          # 途中で切れた行を捨てる
+                else:
+                    f.seek(0)
+            except Exception:
+                f.seek(0)
+            for line in f:
+                line = line.strip()
+                if not line or needle not in line:
+                    continue              # json.loads の前に安い文字列で足切り
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return pick_timeout_touched(entries, msg_id)
 # ★★受信側の集約窓(coalesce・2026-08-08 イージス研究室 / 発注= 研究室HQ 8/4 07:29)。
 #   何のためか= Chamiが推敲を**小分けに連投**する部屋で、断片1つごとに走って断片1つごとに
 #   返すと、①話が途中の状態で3回も4回も応答が返る ②同じ推敲に何度もモデルを回す。
@@ -4747,6 +4867,18 @@ class Daemon:
         except Exception:
             return None
 
+    def _timeout_result_line(self, msg_id):
+        """打ち切った便が**実際に触ったファイル**を work_audit から読み、確定結果を1行にする。
+
+        読めない/実体のある変更が無ければ ""(= 黙る)。LLMは呼ばない=トークン0。
+        判定の中身は純関数(_timeout_touched_from_audit / format_timeout_result)へ委譲。
+        """
+        try:
+            touched = _timeout_touched_from_audit(WORK_AUDIT, str(msg_id))
+            return format_timeout_result(touched)
+        except Exception:
+            return ""
+
     def mark_yielded_read(self):
         """対話セッションが在席で箱を譲っている間も、届いた便へ **既読だけ** 押す。
 
@@ -5926,14 +6058,23 @@ class Daemon:
                     try:
                         _dl = self._delivery_count(mid)
                         # ★判定の正本は suppress_failure_notice(kind, _dl) 1つだけ(単一述語)。
-                        #   timeout= 打ち切りの終端報告は「確定情報ゼロで意味がない」とChamiが判断=
-                        #     部屋へ出さない(2026-08-23「削除で」)。記録は request_log/work_audit に残る。
-                        #   その他の配送失敗= 便は最大5回再配達される。毎回詫びると最大5連投=
-                        #     「トーク履歴が汚れる」ので再配達3回目まで伏せる(2026-07-28 方針)。
+                        #   timeout= 「進んでいる可能性」の文面は出さない(確定情報ゼロ・
+                        #     2026-08-23「削除で」)。その他の配送失敗= 便は最大5回再配達される。
+                        #     毎回詫びると最大5連投=「トーク履歴が汚れる」ので3回目まで伏せる(2026-07-28)。
                         if suppress_failure_notice(kind, _dl):
+                            reply = ""          # まず伏せる(空=送信しない・下の送信ループが回らない)
                             log(self.dept,
                                 f"[失敗の告知を伏せる] kind={kind or '-'} 配達{_dl}回目 msg={mid}")
-                            reply = ""          # 空=送信しない(下の送信ループが回らない)
+                            # ★打ち切り(timeout)だけは、伏せた**後**に"確定した結果"を足す
+                            #   (2026-08-24 Chami「1で」)。work_audit(この便の作業前後の
+                            #   ファイル差分=実際に触ったファイル)を自分で読み、実体のある変更が
+                            #   あった時だけ1行で出す。無ければ黙ったまま=中身の無い「進んでいる
+                            #   可能性」は二度と言わない。★LLMは呼ばない=トークン0。
+                            if kind == "timeout":
+                                _line = self._timeout_result_line(mid)
+                                if _line:
+                                    reply = _line
+                                    log(self.dept, f"[打ち切りの確定結果を出す] msg={mid}")
                     except Exception:
                         pass                    # 判定不能なら従来どおり知らせる(黙るより出す)
                     # ★★relay無人時 fail-open(2026-08-02 イージス研究室・HQ裁定 msg=1533226514794025081)。
