@@ -267,11 +267,32 @@
     var cands = all.filter(passFilter_);
     $('#filterPanel').style.display='block';
     $('#filterCount').textContent = cands.length + ' / ' + all.length + ' 件を表示';
-    if(!cands.length){ $('#list').innerHTML='<div class="empty">絞り込みに合う候補がありません。条件を外してください。</div>'; $('#groupTabs').style.display='none'; $('#decbar').style.display='none'; return; }
     // 2グループに分けて切替表示(Chami指示2026-08-23→2026-08-24 上下でなく切替ボタン):
     //   ready=今すぐ投稿できる(動画生成用画像あり) / pool=紹介にはアツい(画像なし)。どちらも score 降順のまま。
     var ready=[], pool=[];
     cands.forEach(function(c){ ((REF[c.cid]||{}).has ? ready : pool).push(c); });
+    // ★readyは「当日候補JSONに載っている物」だけでは常時0になりうる(候補が全部新規作品でREF未取得の日)。
+    //   真因対策(2026-08-24): REFで has=true の"全cid"を和集合として足す。DATA(cands)に居ない
+    //   cid = Chamiが候補タブ(cand_items)に投稿用画像だけ貼った作品 = loadLibMap_() から最低限のカードを合成する。
+    //   同一cidがDATAにも居る場合(=フィルタで除外された等)はDATA優先・ライブラリでの復活はしない。
+    //   ★cands.length===0(絞り込みで全滅)でもここは動かす=フィルタが効いていてもライブラリ分は出す。
+    var readyCids = {}; ready.forEach(function(c){ if(c.cid) readyCids[c.cid]=true; });
+    var allCidMap = {}; all.forEach(function(c){ if(c.cid && !allCidMap[c.cid]) allCidMap[c.cid]=c; });
+    var LIBMAP = loadLibMap_();
+    Object.keys(REF).forEach(function(cid){
+      if(readyCids[cid]) return;                 // 既にDATA由来でready入り済み
+      if(!(REF[cid]||{}).has) return;             // 動画生成用画像が無いcidは対象外
+      if(allCidMap[cid]) return;                  // DATAに存在=絞り込みで意図的に除外された物。合成で復活させない
+      var lib = LIBMAP[cid] || {};
+      var libCand = { id:'lib-'+cid, cid:cid, platform:(cid.indexOf('d_')===0?'doujin':'books'),
+        title:(lib.title||cid), images:(lib.thumb?[lib.thumb]:[]),
+        metrics:{price:lib.price, discount_pct:lib.discountPct}, comments:[], room_comments:null,
+        last_posted:null, _fromLibrary:true };
+      if(!passFilter_(libCand)) return;
+      ready.push(libCand); readyCids[cid]=true;
+    });
+    ready.sort(function(a,b){ return ((b.metrics&&b.metrics.score)||0) - ((a.metrics&&a.metrics.score)||0); });
+    if(!cands.length && !ready.length){ $('#list').innerHTML='<div class="empty">絞り込みに合う候補がありません。条件を外してください。</div>'; $('#groupTabs').style.display='none'; $('#decbar').style.display='none'; return; }
     var g = groupGet_();
     if(g==='ready' && !ready.length && pool.length) g='pool';       // 選択側が空なら中身のある側へ寄せる
     if(g==='pool' && !pool.length && ready.length) g='ready';
@@ -287,7 +308,7 @@
     if(active.length){ active.forEach(function(c,i){ html += cardHtml_(c, i+1); }); }
     else { html += '<div class="empty">この区分に合う候補はありません。</div>'; }
     $('#list').innerHTML = html;
-    wire(cands);
+    wire(active);  // ★activeで検索(readyはlib合成カードを含みcandsの部分集合でなくなったため=cands指定だとlib分のクリックが引けない)
   }
 
   // グループ切替(端末に保存)。ready=今すぐ投稿できる / pool=紹介にはアツい。
@@ -410,6 +431,29 @@
         }, function(){ resolve(map); });   // fail-open=読めなくても中身は出す
       } else resolve(map);
     });
+  }
+  // ---- 候補ライブラリ(候補タブでChamiが手動で貼った作品・localStorage cand_items + 独立タブ cand_items__<tabId>)----
+  //   候補JSON(DATA.candidates)には載らないが投稿用画像だけ持つ作品を拾うための読み取り専用マップ。
+  //   fail-open=壊れたJSON/読めないキーは無視して空のまま返す(取りこぼしより誤表示ゼロを優先)。
+  function loadLibMap_(){
+    var map = {};
+    try{
+      for(var i=0;i<LS.length;i++){
+        var k = LS.key(i);
+        if(!k || (k!=='cand_items' && k.indexOf('cand_items__')!==0)) continue;
+        try{
+          var arr = JSON.parse(LS.getItem(k));
+          if(!Array.isArray(arr)) continue;
+          arr.forEach(function(it){
+            if(it && it.cid && !map[it.cid]){
+              map[it.cid] = { title:it.title, thumb:it.thumb, url:it.url, price:it.price,
+                discountPct:it.discountPct, author:it.author };
+            }
+          });
+        }catch(e){}
+      }
+    }catch(e){}
+    return map;
   }
   function genImgHtml_(c){
     var info = REF[c.cid] || {imgs:[], has:false};
