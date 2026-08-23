@@ -173,15 +173,62 @@ check("上書きが無ければ既定のまま(=入れる前と1文字も変わ�
 
 # ============================================================================
 print("== C. ★must-fail: 足した配線だけを『動く別の実装』へ戻すと B が落ちること(C-053) ==")
-_orig = dd.work_relay_model
-dd.work_relay_model = lambda rec_, dept_, is_work_: None      # ← 旧仕様= 常に落とさない(文法は健全)
+# ★2026-08-23 変異させる先を `work_relay_decide` へ移した(イージス研究室)。
+#   理由= 呼び口(session_relay)が decide を呼ぶ形に変わったので、`work_relay_model` を
+#   差し替えても**もう噛まない**= 変異させても緑のまま通る「空PASS」になっていた。
+#   ★実際にこの検査が1回落ちて教えてくれた(FAIL 1)。変異の先は**呼ばれている物**でなければ
+#     ならない、という当たり前を、道具の側が守らせた形だ。
+_orig = dd.work_relay_decide
+dd.work_relay_decide = lambda rec_, dept_, is_work_: (None, "not_work")   # ← 旧仕様=常に落とさない
 mutant = relay_model_used("platform-se", True, rec(),
                           {"enabled": True, "work": {"platform-se": "sonnet"}})
-dd.work_relay_model = _orig
+dd.work_relay_decide = _orig
 check("旧仕様(配線なし)では sonnet に**ならない**= この検査は実際に見ている", mutant != "sonnet", True)
 check("配線を戻せば B は再び通る",
       relay_model_used("platform-se", True, rec(),
                        {"enabled": True, "work": {"platform-se": "sonnet"}}), "sonnet")
+
+# ============================================================================
+# ★2026-08-23 研究室HQ発注(msg DISPATCH-aegis-gl-1787469264964)。
+#   「None が全部同じ沈黙で『配線が死んでいる』と『守りが食った』が区別できない」への答え。
+#   ★理由の語が**取り違えられていない**ことを見る= 語が全部同じなら足した意味が無い。
+print("== E. ★落とさなかった理由の1語(8/24の判定を『0か4〜6割か』で切り分ける物) ==")
+write_override({"enabled": True, "work": {"platform-se": "sonnet"}})
+check("落とした時は ok", dd.work_relay_decide(rec(), "platform-se", True), ("sonnet", "ok"))
+check("会話便は not_work", dd.work_relay_decide(rec(), "platform-se", False), (None, "not_work"))
+check("名簿に無い部屋は not_listed",
+      dd.work_relay_decide(rec(), "aegis-gl", True), (None, "not_listed"))
+check("Chami本人の便は chami",
+      dd.work_relay_decide(rec(author="Chami"), "platform-se", True), (None, "chami"))
+check("🔥を含む便は marker",
+      dd.work_relay_decide(rec(content="🔥これ直して"), "platform-se", True), (None, "marker"))
+check("★理由の語が全部違う(=どれか1つに潰れていない)",
+      len({dd.work_relay_decide(rec(), "platform-se", True)[1],
+           dd.work_relay_decide(rec(), "platform-se", False)[1],
+           dd.work_relay_decide(rec(), "aegis-gl", True)[1],
+           dd.work_relay_decide(rec(author="Chami"), "platform-se", True)[1],
+           dd.work_relay_decide(rec(content="🔥直して"), "platform-se", True)[1]}), 5)
+check("★モデル名だけを返す旧い呼び口は1文字も変わっていない(既存の呼び出し元を壊さない)",
+      dd.work_relay_model(rec(), "platform-se", True), "sonnet")
+
+# ★台帳へ実際に語が載るか= 本番の work_audit.jsonl は触らず、書き先だけ写しへ向ける(C-054)。
+_audit_tmp = os.path.join(tempfile.gettempdir(), "go5_test_work_audit.jsonl")
+if os.path.exists(_audit_tmp):
+    os.remove(_audit_tmp)
+_real_audit = dd.WORK_AUDIT
+dd.WORK_AUDIT = _audit_tmp
+dd._audit_work("platform-se", "TEST-9", {}, {}, 0, 1.0, "sonnet", "", "marker")
+dd._audit_work("platform-se", "TEST-8", {}, {}, 0, 1.0, "sonnet", "", None)
+dd._audit_work("platform-se", "TEST-7", {}, {}, 0, 1.0, "sonnet", "", "でっちあげ")
+dd.WORK_AUDIT = _real_audit
+_rows = [json.loads(l) for l in open(_audit_tmp, encoding="utf-8") if l.strip()]
+check("台帳の行に理由が載る", _rows[0].get("relay_reason"), "marker")
+check("★渡さなければ今までと同じ行(キー自体が生えない=古い行と混ざらない)",
+      "relay_reason" in _rows[1], False)
+check("★知らない語は書かない(語彙は _WORK_RELAY_REASONS の6語だけ)",
+      "relay_reason" in _rows[2], False)
+os.remove(_audit_tmp)
+clear_override()
 
 # ============================================================================
 print("== D. ★C-054: この検査は本番の台帳を1バイトも触っていない ==")

@@ -3835,7 +3835,7 @@ def _self_check(dept, conf, token, sid, generation):
         return ""
 
 
-def _work_audit(dept, msg_id, before, after, rc, secs, model, tail):
+def _work_audit(dept, msg_id, before, after, rc, secs, model, tail, relay_reason=None):
     """work_audit.jsonl への記録を dept_daemon へ委譲する(正本は向こう1つ)。
 
     ★relay経由でも**触ったファイルの監査を落とさない**(2026-07-26 発注の明示要件)。
@@ -3844,7 +3844,8 @@ def _work_audit(dept, msg_id, before, after, rc, secs, model, tail):
     """
     try:
         import dept_daemon
-        dept_daemon._audit_work(dept, msg_id, before, after, rc, secs, model, tail)
+        dept_daemon._audit_work(dept, msg_id, before, after, rc, secs, model, tail,
+                                relay_reason)
     except Exception:
         pass
 
@@ -4259,6 +4260,9 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
     # ★2026-08-23 手1(研究室HQ): 朝の定型producer便だけ Sonnet へ落とす(重み5.0→1.0)。
     #   判定の正本は dept_daemon.routine_producer_model 1本(この便の author/content で決まる)。
     #   🔥/炎上/インシデント・Chamiの便は None が返る=Opusのまま。読めない時も None=落とさない。
+    # ★②の判定理由(1語)。下の _work_audit へそのまま渡す=台帳から数えられるようにする。
+    #   ★1要素のリストなのは、下の入れ子関数(_run)から**確定後の値**を読むため。
+    _relay_reason = [None]
     try:
         import dept_daemon                            # 呼ばれる時点では必ずロード済み
         _cheap = dept_daemon.routine_producer_model(rec)
@@ -4271,10 +4275,16 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         #   判定の正本は dept_daemon.work_relay_model 1本(is_work / 名簿 / Chami / 🔥 を全部あちらで見る)。
         #   ★会話便は1文字も変わらない= is_work=False なら必ず None が返る(人格の演技はOpusのまま・C-045)。
         else:
-            _wm = dept_daemon.work_relay_model(rec, dept, is_work)
+            # ★2026-08-23 研究室HQ発注= **落とさなかった理由を1語残す**
+            #   (None が全部同じ沈黙だと「配線が死んでいる」と「守りが食った」を区別できない)。
+            #   判定の正本は向こう1本のまま= こちらは返ってきた語を持ち回るだけ。
+            _wm, _relay_reason[0] = dept_daemon.work_relay_decide(rec, dept, is_work)
             if _wm:
                 model = _pin_model(_wm)
                 _log(dept, f"作業便(is_work)→{model}で回す(②・_model_override.json の work)")
+            elif is_work:
+                # ★会話便(not_work)は数が多く意味も無いので書かない= 作業便で落ちなかった時だけ。
+                _log(dept, f"作業便だが②を適用しない(理由={_relay_reason[0]})→{model}のまま")
     except Exception:
         pass                                          # 判定不能=既定のまま(Opus)
     # 事前交代の状態(★下の「初回、または世代交代」分岐と、返信末尾の1行で使う)
@@ -4551,13 +4561,15 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
             #   ★rc=-1 は「打ち切ったので終了コードが無い」の意味。
             if before is not None:
                 _work_audit(dept, rec.get("msg_id", ""), before, _work_snapshot(), -1,
-                            time.time() - _t0, model, "hard timeout(強制終了)")
+                            time.time() - _t0, model, "hard timeout(強制終了)",
+                            _relay_reason[0])
             raise
         if before is not None:
             # ★監査に残すモデル名は**実際に使った値**(定数を書くと、部屋別モデルを入れた瞬間に
             #   監査ログが嘘になる。監査は「後から追える」ことが唯一の価値なので嘘を残さない)。
             _work_audit(dept, rec.get("msg_id", ""), before, _work_snapshot(), rc,
-                        time.time() - _t0, model, (out or "")[-1500:])
+                        time.time() - _t0, model, (out or "")[-1500:],
+                        _relay_reason[0])
         return data, rc, out
 
     boot = _boot_prompt(dept, conf, generation or 1)

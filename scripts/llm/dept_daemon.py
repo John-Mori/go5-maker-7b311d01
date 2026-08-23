@@ -3172,21 +3172,42 @@ def work_relay_model(rec, dept, is_work):
       倒れた向きは高い側(安全)なので**直さない**。ただし②の効き目を数える時、
       分母から抜けている便が在ることを忘れるな(「効いていない」と読み違える元になる)。
     """
+    return work_relay_decide(rec, dept, is_work)[0]
+
+
+# ★★2026-08-23 研究室HQ発注(msg DISPATCH-aegis-gl-1787469264964)。
+#   HQ原文=「いま None は全部同じ沈黙で、**『配線が死んでいる』と『守りが食った』が区別できない。**」
+#   ★これは検査の話だ= 8/24の受け入れ判定は「sonnetが work便の4〜6割」だが、**0割だった時に
+#     ①配線が死んでいる ②守り(Chami便・🔥)が全部食った の2つが同じ顔で出る**。
+#     どちらかで打つ手が正反対(①=直す / ②=正常)なので、**理由の1語**が要る。
+#   ★判定は増やさない= 述語はここ1本のまま(ORG-11)。返り値に理由を足しただけで、
+#     `work_relay_model` は今までどおりモデル名だけを返す(既存の呼び口と検査は不変)。
+_WORK_RELAY_REASONS = ("ok", "not_work", "not_listed", "chami", "marker", "error")
+
+
+def work_relay_decide(rec, dept, is_work):
+    """②の判定を (モデル名 or None, 理由1語) で返す。**この関数が述語の正本**。
+
+    理由の語= "ok"(落とす) / "not_work"(作業便でない) / "not_listed"(②の名簿に無い部屋)
+              / "chami"(Chami本人の便) / "marker"(🔥・炎上・インシデント) / "error"(判定不能)。
+    ★"ok" 以外は全部 None= 落とさない(迷ったら高い方で回す・§1の優先順)。
+    ★理由を**記録するのは呼び口の仕事**(この関数は書かない=純粋なまま検査できる)。
+    """
     try:
         if not is_work:
-            return None
+            return (None, "not_work")
         m = model_override_for(dept, "work")
         if not m:
-            return None
+            return (None, "not_listed")
         if session_relay is not None and session_relay.is_from_chami(rec):
-            return None
+            return (None, "chami")
         if "chami" in str((rec or {}).get("author") or "").lower():
-            return None                              # session_relay が読めない時の保険
+            return (None, "chami")                   # session_relay が読めない時の保険
         if any(k in str((rec or {}).get("content") or "") for k in _KEEP_OPUS_MARKERS):
-            return None
-        return m
+            return (None, "marker")
+        return (m, "ok")
     except Exception:
-        return None                                  # 判定不能=落とさない(Opusのまま)
+        return (None, "error")                       # 判定不能=落とさない(Opusのまま)
 
 
 WORK_AUDIT = os.path.join(LOCAL, "llm", "work_audit.jsonl")
@@ -3248,7 +3269,7 @@ def _git_snapshot():
     return out
 
 
-def _audit_work(dept, msg_id, before, after, rc, secs, model, tail):
+def _audit_work(dept, msg_id, before, after, rc, secs, model, tail, relay_reason=None):
     """作業agentが**実際に何を触ったか**を記録する(2026-07-21 人事の問題報告・問題2)。
 
     ★なぜ要るか(人事の指摘をそのまま引く):
@@ -3266,6 +3287,10 @@ def _audit_work(dept, msg_id, before, after, rc, secs, model, tail):
                "msg_id": str(msg_id), "model": model, "rc": rc,
                "sec": round(secs, 1), "touched": touched,
                "touched_count": len(touched), "stdout_tail": tail}
+        # ★②の判定理由を同じ台帳へ入れる(2026-08-23・記録先を2つ持たない=§4)。
+        #   ★**追加のみ**= 渡されなかった便は今までと1バイトも変わらない(古い行も読める)。
+        if relay_reason in _WORK_RELAY_REASONS:
+            rec["relay_reason"] = relay_reason
         os.makedirs(os.path.dirname(WORK_AUDIT), exist_ok=True)
         with open(WORK_AUDIT, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")

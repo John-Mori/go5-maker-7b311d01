@@ -59,7 +59,8 @@ def load(start, end):
                 continue
             if start <= dt <= end:
                 out.append((dt, rec.get("dept") or "?", rec.get("model") or "?",
-                            rec.get("rc"), rec.get("sec") or 0))
+                            rec.get("rc"), rec.get("sec") or 0,
+                            rec.get("relay_reason")))
     return out
 
 
@@ -92,9 +93,11 @@ def main():
 
     per = collections.defaultdict(collections.Counter)
     models = collections.Counter()
-    for _dt, dept, model, _rc, _sec in rows:
+    reasons = collections.Counter()
+    for _dt, dept, model, _rc, _sec, reason in rows:
         per[dept][short(model)] += 1
         models[short(model)] += 1
+        reasons[reason or "(記録前の便)"] += 1
 
     cols = [m for m, _ in models.most_common()]
     print()
@@ -108,6 +111,38 @@ def main():
     son = sum(v for k, v in models.items() if "sonnet" in k)
     print()
     print("★sonnetのwork便= %d / %d (%.1f%%)" % (son, len(rows), son / len(rows) * 100))
+
+    # ★★2026-08-23 研究室HQ発注(msg DISPATCH-aegis-gl-1787469264964)。
+    #   「sonnetが増えた/増えない」だけでは **①配線が死んでいる ②守りが食った
+    #   ③守りが効かず落としてはいけない便まで落ちた** の3つが同じ顔で出る。
+    #   ③は品質事故なのに「大成功」に見える= **理由の内訳が要る。**
+    #   語は `dept_daemon.work_relay_decide` が返した1語をそのまま台帳へ載せた物。
+    print()
+    print("== ②を適用しなかった理由の内訳(relay_reason) ==")
+    labels = {"ok": "Sonnetへ落とした", "not_work": "作業便でない", "chami": "Chami本人の便=守った",
+              "marker": "🔥/炎上/インシデント=守った", "not_listed": "②の名簿に無い部屋",
+              "error": "判定不能=高い方で回した",
+              "(記録前の便)": "★理由を書く前の便(2026-08-23 17時より前)"}
+    for k, v in reasons.most_common():
+        print("  %-28s %5d (%.1f%%)  %s"
+              % (k, v, v / len(rows) * 100, labels.get(k, "")))
+    known = len(rows) - reasons.get("(記録前の便)", 0)
+    if known == 0:
+        print("\n★この窓は全便が『理由を書く前』= 帯の判定はできない(まだ標本が無い)。")
+        return
+    dropped = reasons.get("ok", 0)
+    pct = dropped / known * 100
+    print("\n★理由の在る便 %d 本のうち Sonnetへ落ちたのは %d 本 (%.1f%%)" % (known, dropped, pct))
+    # ★帯は研究室HQが queue経路の実測(全便225/作業便62・Chami27%・マーカー29%・落とす43.5%)
+    #   から出した予測。**分母が違う**(あちらはqueueテーブルの便だけ)ので目安として使う。
+    if pct < 10:
+        print("  → ★**ほぼ0**= まだどこかで死んでいる。上の内訳で『どの語で止まったか』を見ろ。")
+    elif pct > 90:
+        print("  → ★**ほぼ10割**= 守り(Chami便・🔥)が効いていない=**品質事故**。即差し戻し。")
+    elif 40 <= pct <= 60:
+        print("  → ★**予測帯(4〜6割)の中**= 配線は生きている。**合格。**")
+    else:
+        print("  → 帯(4〜6割)の外だが0でも10割でもない= 便の中身の偏り。内訳で説明が付くか見ろ。")
 
 
 if __name__ == "__main__":
