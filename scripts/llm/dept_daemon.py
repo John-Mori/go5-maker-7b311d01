@@ -455,6 +455,19 @@ WORK_ALLOWED_TOOLS = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
 #     つまり**能力は1つも減らない。減るのは送っている字数だけ**。
 RELAY_DROP_TOOLS = ["Workflow", "PowerShell", "ScheduleWakeup",
                     "ReportFindings", "NotebookEdit", "WebFetch", "WebSearch"]
+
+
+def ctx_args(dept):
+    """C-060(2026-08-24)= 組織層の部屋の起動に足す引数。判定の正本は session_relay 1本。
+
+    ★ここに同じ部屋の一覧を持たない(ORG-11=判定を2か所に持つと必ず片方が古くなる)。
+    ★relayを使わない一発起動(generate / work_generate)も同じ床を毎回払っているので、
+      同じ引数をここでも足す。読めなければ空= 従来どおり(fail-open)。
+    """
+    try:
+        return list(session_relay.context_args(dept)) if session_relay else []
+    except Exception:
+        return []
 # 作業依頼キーワード(=main箱回送 or work_scope部門でのwork_generate起動の判定に使う)。
 # ★依頼形(〜して/〜お願い等)に限定する(2026-07-20 qa-reviewer点検・過剰回送修正=INC本文参照)。
 #   旧版は「反映」「実装」「修正」「デプロイ」等を裸の名詞で拾っており、"反映完了したら知らせて"
@@ -1512,18 +1525,39 @@ def _verdict_block():
                     break
                 if ln.startswith("|"):
                     table.append(ln.rstrip())
-        parts = []
-        if heads:
-            parts.append("■Chamiが既に下した裁定(★該当したら『判断』ではなく『執行』。"
-                         "正本= 00_AI-HQ/裁定カタログ.md ・詳細はそこを読め)\n"
-                         + "\n".join("- " + h for h in heads))
-        if table:
-            parts.append("★発注先(C-015・毎日使うのでここに全文を置く)\n" + "\n".join(table)
-                         + "\n★改修α(system-engineer)は**5秒動画メーカー専用**だ。"
-                           "組織の仕組み・人格・常駐構成を持ち込むな。")
+        head_txt = ("■Chamiが既に下した裁定(★該当したら『判断』ではなく『執行』。"
+                    "正本= 00_AI-HQ/裁定カタログ.md ・詳細はそこを読め)\n"
+                    + "\n".join("- " + h for h in heads)) if heads else ""
+        table_txt = ("★発注先(C-015・毎日使うのでここに全文を置く)\n" + "\n".join(table)
+                     + "\n★改修α(system-engineer)は**5秒動画メーカー専用**だ。"
+                       "組織の仕組み・人格・常駐構成を持ち込むな。") if table else ""
+        parts = [p for p in (head_txt, table_txt) if p]
         _verdict_cache["text"] = ("\n\n".join(parts) + "\n\n") if parts else ""
+        # ★2026-08-24 C-060の②= 見出しを差分送付にするため、**見出しと表を別々にも渡せる**
+        #   ようにした(合成した text は1バイトも変えない=既存の呼び出しは無傷)。
+        _verdict_cache["heads"] = list(heads)
+        _verdict_cache["head_txt"] = head_txt
+        _verdict_cache["table_txt"] = table_txt
         _verdict_cache["mtime"] = m
     return _verdict_cache["text"]
+
+
+def verdict_parts():
+    """(見出しブロック, 発注先の表ブロック, 見出しの行一覧) を返す(2026-08-24・C-060)。
+
+    ★なぜ分けるか= 見出し59本(約3,700字≒2,300トークン)が**毎便・全室**に載っていた。
+      規律は既に差分送付なのに、ここだけ例外で全文だった。★**発注先の表は毎便のまま**維持する
+      (2026-07-28に表を毎便入れた理由が「C-015が届かず誤配された実害」だから。そこは触らない)。
+    ★読み込みは _verdict_block() 1本に任せる(mtimeキャッシュを2つ持たない=ORG-11)。
+    ★読めない時は ("", "", []) = 呼び側が全文へ倒せる(fail-open)。
+    """
+    try:
+        _verdict_block()                       # ← キャッシュを温める(=同じ1正本を通す)
+        return (str(_verdict_cache.get("head_txt") or ""),
+                str(_verdict_cache.get("table_txt") or ""),
+                list(_verdict_cache.get("heads") or []))
+    except Exception:
+        return ("", "", [])
 
 
 def registry_purpose(dept):
@@ -5153,7 +5187,8 @@ class Daemon:
         #   prompt が無ければ stdin を prompt として読む(同dept_daemon.work_generate と同じ形)。
         #   長さは prompt_spill.measure が測るだけ(逃がさない=書き換えない・依頼2の監視供給源)。
         prompt_spill.measure(prompt, tag=f"daemon_{self.dept}")
-        p = subprocess.run([CLAUDE, "--print"], input=prompt, cwd=ROOT, env=env,
+        p = subprocess.run([CLAUDE, "--print", *ctx_args(self.dept)],
+                           input=prompt, cwd=ROOT, env=env,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=PRINT_TIMEOUT)
         raw = (p.stdout or "").strip()
@@ -5209,7 +5244,8 @@ class Daemon:
             env = dict(os.environ)
             env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
             prompt_spill.measure(prompt, tag=f"english_ja_{self.dept}")
-            p = subprocess.run([CLAUDE, "--print"], input=prompt, cwd=ROOT, env=env,
+            p = subprocess.run([CLAUDE, "--print", *ctx_args(self.dept)],
+                               input=prompt, cwd=ROOT, env=env,
                                capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=PRINT_TIMEOUT)
             out = (p.stdout or "").strip()
@@ -5297,6 +5333,9 @@ class Daemon:
              # ★2026-08-23 使えないツールの定義文を送るのをやめる(-10,588/便の実測)。
              #   可変長フラグ同士だが、直後に固定の --add-dir が来るので列はそこで切れる。
              "--disallowedTools", *RELAY_DROP_TOOLS,
+             # ★2026-08-24 C-060(組織層は CLAUDE.md を載せない)。固定長の引数なので
+             #   直前の可変長フラグ(--disallowedTools)の列はここで切れる。
+             *ctx_args(self.dept),
              "--add-dir", HQ],
             input=prompt, cwd=ROOT, env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=WORK_TIMEOUT)
@@ -5462,6 +5501,13 @@ class Daemon:
     @staticmethod
     def _is_from_chami(rec):
         return "chami" in str(rec.get("author") or "").lower()
+
+    # ★AI同士の便かどうか(C-061・2026-08-24)。判定は dispatch.py が載せた `audience` 1本だけ。
+    #   ★ここで「差出人の名前がAIっぽいか」を推測しない= 宣言(--audience ai)が正本
+    #     (未宣言の便・Chami本人の便・表投稿は束ねない=従来どおり1本ずつ配る)。
+    @staticmethod
+    def _is_ai_letter(rec):
+        return str((rec or {}).get("audience") or "").strip().lower() == "ai"
 
     def _stack_open_request(self, rec, ch, word):
         """**その便の中で終わらなかったChamiの依頼**を、生きている台帳へ1件積む(2026-07-29)。
@@ -6626,15 +6672,36 @@ class Daemon:
         ★Chami以外の便を引いたら束ねずに**手元へ戻す**(nackしない=再配達の回数を焼かない)。
           戻した便は同じ巡回の次の周で普通に処理される=取りこぼさない。
         """
-        if self._coalesce_win() <= 0 or not self._is_from_chami(rec):
-            return []
+        if self._is_from_chami(rec):
+            if self._coalesce_win() <= 0:
+                return []
+            return self._take_same_kind(q, self._is_from_chami)
+        # ★★2026-08-24 C-061(HQ裁定・commit e330f0e。提案=この部屋)。
+        #   AI同士の便(audience=ai)も、掴めるものが同じ部門宛に溜まっていれば**1本にまとめて渡す**。
+        #   なぜ効くか(実測 2026-08-24)= 1キュー便あたりのAPI往復は平均34回・イージス研究室は54回。
+        #   床(55,465tok)+封筒(3,236tok)は**便ごとに必ず払う固定費**なので、便を1本減らすと
+        #   まるごと1回ぶん払わずに済む。中身は1文字も捨てない(全便の本文を並べて渡す)。
+        #   ★Chamiの便と違って**待たない**= 既にキューに座っていて掴める物だけを束ねる
+        #     (窓を作ると全部の便が遅くなる。8/13にHQが数字で否定した手だ)。
+        #   ★掴んだ便の後始末(ack / PROCESSED / 印 / 失敗時のnack)は drain_queue の既存経路が
+        #     そのまま面倒を見る= **新しい仕掛けを1つも足していない**。
+        if self._is_ai_letter(rec):
+            return self._take_same_kind(q, self._is_ai_letter)
+        return []
+
+    def _take_same_kind(self, q, is_kind):
+        """同じ種類の便を掴めるだけ掴む(上限 COALESCE_MAX_ITEMS)。
+
+        ★種類が違う便を引いたら束ねずに**手元へ戻す**(nackしない=再配達の回数を焼かない)。
+          戻した便は同じ巡回の次の周で普通に処理される=取りこぼさない。
+        """
         extra = []
         while len(extra) + 1 < COALESCE_MAX_ITEMS:
             c = q.claim(dept=self.dept, who=f"dept_daemon:{self.dept}")
             if c is None:
                 break
             nrec = c["body"] if isinstance(c["body"], dict) else {}
-            if not self._is_from_chami(nrec):
+            if not is_kind(nrec):
                 self._claim_carry = getattr(self, "_claim_carry", None) or []
                 self._claim_carry.append(c)
                 break
@@ -6743,8 +6810,29 @@ class Daemon:
 
     @staticmethod
     def _merge_coalesced(recs):
-        """連投の断片を1便へ束ねる。★土台は**最後の便**(返信が最新の発言へ付くように)。"""
+        """連投の断片を1便へ束ねる。★土台は**最後の便**(返信が最新の発言へ付くように)。
+
+        ★2026-08-24 C-061= **AI同士の便は差出人が別々**なので、ただ本文を繋ぐと
+          「誰がどれを言ったのか」が消える(Chamiの連投は同じ人の推敲だから繋いでよかった)。
+          → AI便だけは差出人と msg_id を付けて並べる。**本文は1文字も削らない。**
+        """
         base = dict(recs[-1])
+        if all(str((r or {}).get("audience") or "").strip().lower() == "ai" for r in recs) \
+                and len(recs) > 1:
+            blocks = []
+            for i, r in enumerate(recs, 1):
+                blocks.append(
+                    "--- 便 %d/%d 差出人=%s msg_id=%s ---\n%s"
+                    % (i, len(recs), r.get("author") or "?", r.get("msg_id") or "?",
+                       str(r.get("content") or "").strip()))
+            base["content"] = (
+                "=== ★この部門宛のAI同士の便が%d本溜まっていた。**1本にまとめて渡す** ===\n"
+                "**返事は1回で返せ**(便ごとに分けて返さない)。差出人が違う話が混ざっていたら、"
+                "それぞれに触れたうえで1本にまとめろ。★どれも読み飛ばすな。\n"
+                % len(recs)) + "\n\n".join(blocks) + "\n=== ここまで ==="
+            base["coalesced_from"] = [str(r.get("msg_id", "")) for r in recs[:-1]]
+            base["coalesced_kind"] = "ai"
+            return base
         parts = [str(r.get("content") or "").strip() for r in recs]
         base["content"] = "\n".join(p for p in parts if p)
         base["coalesced_from"] = [str(r.get("msg_id", "")) for r in recs[:-1]]
@@ -6864,8 +6952,9 @@ class Daemon:
                     frag_raws = [json.dumps(r, ensure_ascii=False) for r in recs[:-1]]
                     rec = self._merge_coalesced(recs)
                     mid = str(rec.get("msg_id", "")) or mid
-                    log(self.dept, "集約: 連投%d件を1便へ束ねた(返信は最新の便へ) msg=%s"
-                                   % (len(recs), mid))
+                    log(self.dept, "集約: %s%d件を1便へ束ねた(返信は最新の便へ) msg=%s"
+                                   % ("AI便" if rec.get("coalesced_kind") == "ai" else "連投",
+                                      len(recs), mid))
                     # ★束ねられた側(最後の便以外)へ印を押す(2026-08-18)。handle() は
                     #   土台の便にしか押さないので、ここが無いと断片は無印のまま残る。
                     if not rec.get("test"):

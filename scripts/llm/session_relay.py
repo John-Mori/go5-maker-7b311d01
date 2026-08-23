@@ -61,6 +61,49 @@ LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 HQ = r"D:\SougouStartFolder\00_AI-HQ"
 CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
 
+# ---------------------------------------------------------------- C-060 床削り(組織層の CLAUDE.md)
+# ★★2026-08-24 イージス研究室。裁定 C-060(HQ・commit e330f0e。提案=この部屋)。
+#   何が載っていたか= `claude -p` は cwd(=このrepo)の `CLAUDE.md` を**毎便**システムプロンプトへ
+#   入れる。中身は5秒動画メーカー本体の仕様書(座標系・?v=バンプ・GAS・Worker・FANZA導線)で、
+#   組織層の部屋(基盤・人格・裁定・癒し)には**1文字も要らない**のに床(毎便の固定費)の17.5%を占めていた。
+# ★実測(2026-08-24 06:1x・`claude -p --output-format json --no-session-persistence --model haiku`):
+#     既定                          : cache_creation 48,020
+#     `--setting-sources user,local`: 合計 34,135(read 24,700 + create 9,435)= **-13,885**
+#   さらに意味の側でも確かめた= CLAUDE.md にしか無い識別子 `drawTitleBlockUnified` を
+#   「文脈に在るか」と聞いて、既定=**Yes** / この引数=**No**。★数字だけでなく実物で見ている。
+#   (差の内訳= CLAUDE.md 約9,700 + project の技能/エージェントの一覧。後者もこの部屋では呼べない)
+# ★能力は減らない= cwd も --add-dir も同じままなので、要る時は `Read` でそのまま読める。
+#   落としたのは「毎便勝手に載る」ことだけだ。
+# ★hooks と deny 権限は**落とさない**= `--setting-sources` から project を外すと
+#   `.claude/settings.json`(進捗印 progress_mark / 脈 pulse_touch / 秘密の deny)まで消える。
+#   そこで**同じファイルを `--settings` で明示的に読ませる**。消すのは CLAUDE.md だけに絞る。
+# ★増やす時はこの集合へ1行足すだけ。★迷ったら**足さない**(=従来どおり全部載る)側へ倒す。
+ORG_LAYER_DEPTS = frozenset({
+    "hq", "aegis-gl", "platform-se", "keiei-kikaku",
+    "hr-room", "hr-context", "kukuru-nakama", "gunji",
+    "research-room", "past-room", "future-room", "soudan-room",
+    "dream-care", "health-log", "learning-coach", "llm-edu", "llm-qa",
+})
+PROJECT_SETTINGS = os.path.join(ROOT, ".claude", "settings.json")
+
+
+def context_args(dept):
+    """その部屋の `claude -p` に足す「文脈の源」の引数。組織層以外は空= 1バイトも変わらない。
+
+    ★fail-open= 設定ファイルが読めない時は**何もしない**(床を払うより hooks を守る)。
+    ★部屋ごとに毎便同じ値が返ることが要る= 便によって付いたり付かなかったりすると
+      システムプロンプトが揺れて**その部屋のcacheが毎回壊れる**(節約のつもりで倍払う)。
+    """
+    try:
+        if str(dept or "") not in ORG_LAYER_DEPTS:
+            return []
+        if not os.path.isfile(PROJECT_SETTINGS):
+            return []
+        return ["--setting-sources", "user,local", "--settings", PROJECT_SETTINGS]
+    except Exception:
+        return []
+
+
 SESSIONS_FILE = os.path.join(LOCAL, "llm", "room_sessions.json")   # ★対応表の正本(1つだけ)
 REQUEST_LOG = os.path.join(LOCAL, "llm", "request_log.jsonl")
 
@@ -731,6 +774,77 @@ def discipline_fingerprint():
         return ""
 
 
+# --- ★★裁定の見出しの差分送付(2026-08-24・C-060の②。裁定= HQ commit e330f0e) ---
+#
+# なぜ入れたか(実測 2026-08-24・aegis-gl の平時封筒を実行して測った):
+#   ①目的とKPI 280tok / ②共通規律 3行版 104tok / ③**裁定の見出し+発注先の表 2,850tok**。
+#   ②は2026-07-29から差分送付なのに、③だけ毎便全文だった。見出し59本で約2,300トークン。
+#   配達511便(直近51時間)で約106万トークン、cache作成側に乗るぶん実効はその2倍。
+# ★**発注先の表(C-015)は毎便のまま**= 落とすのは見出しの本文だけ(2026-07-28の誤配の実害)。
+# ★差分の取り方= 部屋ごとに「渡した見出しの一覧」を持ち、**増えた分だけ**載せる。
+#   見出しが**消えた/書き換わった**時は差分にせず全文へ倒す(取り違えるより太る方がまし)。
+VERDICT_FULL_EVERY = 10
+
+
+def verdict_parts():
+    """(見出しブロック, 発注先の表ブロック, 見出しの行一覧)。読めなければ ("","",[])。"""
+    try:
+        import dept_daemon
+        return dept_daemon.verdict_parts()
+    except Exception:
+        return ("", "", [])
+
+
+def _verdict_ids(heads):
+    """見出しの行から裁定番号(C-0xx)だけを取り出す。番号が無い行は行そのものを鍵にする。"""
+    out = []
+    for h in (heads or ()):
+        m = re.match(r"^(C-\d{3})", str(h).strip())
+        out.append(m.group(1) if m else str(h).strip()[:24])
+    return out
+
+
+def verdict_fingerprint(heads):
+    """裁定の見出し全体の指紋。読めなければ空文字(=差分をやめて全文へ倒す)。"""
+    return (hashlib.sha256("\n".join(heads).encode("utf-8")).hexdigest()[:16]
+            if heads else "")
+
+
+def verdict_plan(entry, heads, table, sid, resend):
+    """(全文で送るか, 増えた見出しの一覧) を決める**純粋関数**(2026-08-24・C-060の②)。
+
+    全文にする場面:
+      ① 新セッション(sid が空)= 履歴に見出しが1文字も無い
+      ② 見出しが**消えた/書き換わった**= 差分では追いつけない(取り違えるより太る方がまし)
+      ③ 圧縮の直後(resend)= 履歴が畳まれて消えている可能性
+      ④ VERDICT_FULL_EVERY 便に1回の保険
+      ⑤ この部屋にまだ渡した記録が無い(この改修より前から生きている部屋の初回)
+      ⑥ 読めない(見出しが取れない/表が取れない)= **安全側へ倒す**(fail-open)
+    ★増えただけなら (False, 増えた見出し) = 短い節+増えた分だけが封筒に載る。
+    """
+    ids = _verdict_ids(heads)
+    seen = [str(x) for x in ((entry or {}).get("verdict_ids") or [])]
+    added = [h for h, i in zip(heads, ids) if i not in seen]
+    lost = [i for i in seen if i not in ids]
+    since_full = int((entry or {}).get("verdict_since_full") or 0)
+    full = bool(not sid or not heads or not table or not seen or lost or resend
+                or since_full >= VERDICT_FULL_EVERY)
+    return full, ([] if full else added)
+
+
+def _verdict_short(fp, n, added):
+    """裁定の見出しを全文で送らない便に入れる短い節(増えた分だけは実物で載せる)。"""
+    body = ("■裁定: 前便から変更なし(指紋 " + (fp or "?") + f"・計{n}本)。\n"
+            "既に受け取っている裁定の見出しを引き続き守れ"
+            "(正本= 00_AI-HQ/裁定カタログ.md ・詳細はそこを読め)。\n")
+    if added:
+        body = ("■裁定: 前便から" + str(len(added)) + "本増えた(指紋 " + (fp or "?")
+                + f"・計{n}本)。**増えた分だけ**載せる(他は前便までに渡した通り)。\n"
+                + "\n".join("- " + a for a in added) + "\n"
+                "★全文の正本= 00_AI-HQ/裁定カタログ.md\n")
+    return body + "\n"
+
+
 def _discipline_short(fp):
     """規律が前便から変わっていない時に入れる3行(改善書 第3手の文面そのまま)。"""
     return ("■規律: 前便から変更なし(指紋 " + (fp or "?") + ")。\n"
@@ -1036,7 +1150,8 @@ def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
         return ""         # fail-open= 口調の世話で封筒を壊さない
 
 
-def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_fp=""):
+def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_fp="",
+                   verdict_full=True, verdict_fp="", verdict_added=()):
     """新着1件を「原文のまま」の封筒にする(提案書§5.2)。
 
     disc_full(2026-07-29・改善書 第3手): 規律を全文入れるか(False=3行の差分)。
@@ -1069,6 +1184,13 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
     quote = quote_block(rec)
     # ★2026-07-29 規律の差分送付(改善書 第3手)。裁定の見出しは**どちらの場合も**入れる。
     disc_head, verdict = _discipline_parts()
+    # ★2026-08-24 C-060の②= 裁定の**見出しだけ**差分にする。表(発注先)は毎便そのまま。
+    #   ★分けられない時(読めない/表が取れない)は `verdict` の合成済み全文へ倒す=従来と同じ封筒。
+    v_head, v_table, v_heads = verdict_parts()
+    if v_head and v_table:
+        verdict = ((v_head + "\n\n") if verdict_full
+                   else _verdict_short(verdict_fp, len(v_heads), list(verdict_added))) \
+            + v_table + "\n\n"
     disc = (disc_head if disc_full else _discipline_short(disc_fp)) + verdict
     return (
         # ★2026-07-26 共通規律を**毎便**同送する(実弾で見つけた穴)。
@@ -1715,7 +1837,7 @@ def _child_env(token):
 
 
 def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY_TIMEOUT,
-                hard_timeout=None, on_soft=None):
+                hard_timeout=None, on_soft=None, dept=""):
     """`claude -p` を**1回だけ**起動する。戻り値 (data, rc, combined_output, waited_sec)。
 
     ★引数の並びに意味がある: 可変長フラグ(--allowedTools / --add-dir)の直後に
@@ -1759,6 +1881,9 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
     #   ★空なら足さない= 可変長フラグを空で置くと次の値を飲む(2026-07-18の実障害と同じ形)。
     if _drop:
         argv += ["--disallowedTools", *_drop]
+    # ★2026-08-24 C-060= 組織層の部屋だけ project の設定源(=CLAUDE.md)を外す。
+    #   引数は固定長(値1つ)なので、可変長フラグの事故(2026-07-18)は起きない。
+    argv += context_args(dept)
     argv += ["--add-dir", HQ,
              "--model", model]
     # ★★2026-08-13 promptは**stdinで渡す**(argvの末尾に置かない)。一ノ瀬怜(platform-se)。
@@ -3818,7 +3943,7 @@ def _write_handoff(dept, conf, token, sid, generation, checkpoint=False):
         #   理由= 交代はChamiの便を処理する**前**に走るので、ここで倍待つと返信が倍遅れる。
         data, rc, out, _sec = _run_claude(
             _handoff_prompt(dept, conf, generation, checkpoint=checkpoint), token,
-            session_id=sid, model=relay_model(conf), timeout=HANDOFF_TIMEOUT)
+            session_id=sid, model=relay_model(conf), timeout=HANDOFF_TIMEOUT, dept=dept)
         body = _reply_of(data)
         if rc != 0 or not body:
             why = f"生成に失敗(rc={rc})"
@@ -3874,7 +3999,7 @@ def _self_check(dept, conf, token, sid, generation):
             "(1)この部屋は何をする部屋か (2)今の目標 (3)未完了で自分が引き取ったこと "
             "(4)引き継げていない/不明だと感じた点。\n"
             "★**分からない所は『引き継げていない』と正直に書け。**取り繕うな。",
-            token, session_id=sid, model=relay_model(conf), timeout=HANDOFF_TIMEOUT)
+            token, session_id=sid, model=relay_model(conf), timeout=HANDOFF_TIMEOUT, dept=dept)
         return _reply_of(data) if rc == 0 else ""
     except Exception:
         return ""
@@ -3945,7 +4070,8 @@ def run_compact(dept, conf, token, sid):
     rc, ok = -1, False
     try:
         data, rc, _out, _sec = _run_claude("/compact", token, session_id=sid,
-                                           model=relay_model(conf), timeout=COMPACT_TIMEOUT)
+                                           model=relay_model(conf), timeout=COMPACT_TIMEOUT,
+                                           dept=dept)
     except subprocess.TimeoutExpired:
         data = None
         _log(dept, f"/compact が{COMPACT_TIMEOUT}秒で返らなかった=★記録ファイルで効いたか見る")
@@ -4551,6 +4677,17 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                  "圧縮の直後" if _resend else
                  f"{DISC_FULL_EVERY}便に1回の保険" if _since_full >= DISC_FULL_EVERY else "")
 
+    # --- ★★裁定の見出しを全文で送るか、増えた分だけにするか(2026-08-24・C-060の②) ---
+    #   全文にする場面は規律と同じ4つ+1= ①新セッション ②見出しが**消えた/書き換わった**
+    #   ③圧縮の直後 ④VERDICT_FULL_EVERY 便に1回 ⑤この部屋にまだ渡した記録が無い(移行の初回)。
+    #   **増えただけ**なら短い節+増えた分だけを載せる(=普段の1日1〜数本の追記はここへ落ちる)。
+    _v_head, _v_table, _v_heads = verdict_parts()
+    _v_ids = _verdict_ids(_v_heads)
+    _v_fp = verdict_fingerprint(_v_heads)
+    _v_since_full = int(entry.get("verdict_since_full") or 0)
+    verdict_full, _v_added = verdict_plan(entry, _v_heads, _v_table, sid, _resend)
+    # ★指紋が同じなら「増えた分」は空になる= 短い節だけが載る(平時)。
+
     # ★封筒はここで作る(交代の判定より**後**)。理由= 封筒の先頭に載せる世代番号を、
     #   交代後の新しい世代にしないと、セッションが自分の世代を間違えて答える。
     envelope = build_envelope(
@@ -4558,7 +4695,8 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         state=_state_block((generation + 1) if pre_rotating else (generation or 1),
                            0 if pre_rotating else int(entry.get("context_tokens") or 0),
                            0 if pre_rotating else int(entry.get("floor_tokens") or 0)),
-        dept=dept, disc_full=disc_full, disc_fp=_disc_fp)
+        dept=dept, disc_full=disc_full, disc_fp=_disc_fp,
+        verdict_full=verdict_full, verdict_fp=_v_fp, verdict_added=_v_added)
 
     def _on_soft(elapsed):
         """soft を超えた時に**1回だけ**走る(2026-07-27)。
@@ -4594,7 +4732,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         try:
             data, rc, out, _sec = _run_claude(prompt, token, session_id=session_id,
                                               model=model, timeout=timeout,
-                                              hard_timeout=hard, on_soft=_on_soft)
+                                              hard_timeout=hard, on_soft=_on_soft, dept=dept)
             waited_total[0] = max(waited_total[0], _sec)
         except subprocess.TimeoutExpired:
             # ★hardで打ち切った時も**待った秒数を残す**(Chami向けの文面に入れるため)。
@@ -4808,6 +4946,13 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                     entry["disc_since_full"] = 1
                 else:
                     entry["disc_since_full"] = _since_full + 1
+                # ★2026-08-24 C-060の②= 裁定の見出しの帳簿。**渡し終えた便で確定する**
+                #   (便が落ちた時に「渡した」と記録しない=次の便でもう一度渡る側へ倒す)。
+                #   ★全文の便も「増えた分だけ」の便も、渡した以上は一覧を更新する。
+                if _v_ids:
+                    entry["verdict_ids"] = list(_v_ids)
+                    entry["verdict_hash"] = _v_fp
+                entry["verdict_since_full"] = 1 if verdict_full else (_v_since_full + 1)
                 # ★圧縮後の再送は**1回だけ**。渡し終えたのでここで下ろす(下ろさないと毎便再送になる)。
                 if _resend:
                     entry.pop("resend_boot", None)
@@ -4924,7 +5069,11 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                      "ledger_hash": ledger_hash,
                      # ★2026-07-29 新セッションは規律を全文で渡している(disc_full=True)。
                      #   指紋を置いて、次の便から3行に切り替わるようにする(改善書 第3手)。
-                     "disc_hash": _disc_fp, "disc_since_full": 1}
+                     "disc_hash": _disc_fp, "disc_since_full": 1,
+                     # ★2026-08-24 C-060の②= 新セッションは起動文で裁定の見出しも全文で
+                     #   受け取っている。一覧を置いて、次の便から差分に切り替わるようにする。
+                     "verdict_ids": list(_v_ids), "verdict_hash": _v_fp,
+                     "verdict_since_full": 1}
         # ★使用量は新世代のものを入れ直す(turns/context_tokens は世代でリセットされる)。
         #   ★compact_count も新しい記録ファイルから数え直される(世代ごとに別ファイル)。
         ctx = _note_usage(new_entry, data, now, sid=new_sid)
@@ -5102,7 +5251,7 @@ def rotate_now(dept, conf, token, reason="manual"):
         # ★手動交代も部屋別モデルで走らせる(relay()の事前交代と手順を1本に保つため)。
         # ★手動交代も1段のまま(旧版と同じ)。ここはChamiが叩く口で、待たせている相手が居ない。
         data, rc, out, _sec = _run_claude(prompt, token, model=relay_model(conf),
-                                          timeout=RELAY_TIMEOUT)
+                                          timeout=RELAY_TIMEOUT, dept=dept)
     except Exception as e:
         LAST_ERROR[dept] = f"手動交代で例外({type(e).__name__})"
         _record(rid, dept, "failed", f"手動交代 {type(e).__name__}: {e}")
