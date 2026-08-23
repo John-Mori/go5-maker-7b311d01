@@ -7,7 +7,7 @@
 ★このツールは"候補の選定と根拠(metrics)"だけを埋める。comments は空配列(visionが後で埋める)。
 採点は daily_pick.py の score/posted_recent を再利用=部門の選定軸を1本に保つ(single-source)。
 - 動画生成用の画像(sampleImageURL.sample_l のコマ)が無い作品は動画化できない=候補から除外。
-- 両CHいずれか直近3週間に投稿済みの作品は除外(posted_log・fail-open)。
+- 直近3日にいずれかのchへ投稿済みの作品は除外(posted_log・fail-open・Chami 2026-08-23 裁定A=21→3緩和)。
 - Books(cid が d_ 以外)で info_json が無い物は「未収録」=推測で埋めず books_uncovered へ cid 直書きで明示。
 """
 import json, io, os, sys, math, datetime, subprocess, re, time
@@ -155,7 +155,7 @@ def main():
         cid = r["cid"]
         imgs = images_of(info)
         if not imgs: continue                # 動画化の素材が無い=除外
-        if cid in posted_any: continue       # 直近3週間に両CHいずれか投稿済み=除外
+        if cid in posted_any: continue       # 直近3日にいずれかのchへ投稿済み=除外(裁定A)
         pr = info.get("prices") or {}
         price, lp = dp.num(pr.get("price")), dp.num(pr.get("list_price"))
         disc = round((lp - price) / lp * 100) if (price is not None and lp) else None

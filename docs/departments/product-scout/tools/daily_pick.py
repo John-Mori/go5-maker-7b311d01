@@ -40,13 +40,17 @@ def sample_n(info):
             if im: return len(im)
     return 0
 
-def posted_recent():
-    """両チャンネルのいずれかで直近3週間(21日)に投稿済みのcid集合。
+EXCLUDE_DAYS = 3   # ★除外窓(日)。Chami 2026-08-23 裁定Aで 21→3 に緩和(下記docstring)。
+
+def posted_recent(days=EXCLUDE_DAYS):
+    """直近 days 日にいずれかのchへ投稿済みのcid集合(除外用)。
     ★取得失敗時は空集合=除外しない(fail-open・可用性優先)。source=posted_log(改修α実装・commit aa30bf1)。
-    Chami 2026-08-15「紹介作品は両チャンネルで3週間以内にいずれかで投稿していないこと」。"""
+    ★窓は 21→3 日へ緩和(Chami 2026-08-23 裁定A)。狙い=『作品はどっちのchでも可・片chから3日経ったら
+      もう片方で投稿できる物量』=投稿から3日経てば別chへ回す候補として再浮上する。旧= 2026-08-15
+      『両chで3週間以内に投稿していないこと』(=物量が足りず last_posted 表示も死ぬため裁定Aで置換)。"""
     try:
         rows = d1("SELECT cid, MAX(posted_at) AS last_posted FROM posted_log "
-                  "WHERE posted_at >= datetime('now','-21 days') GROUP BY cid")
+                  f"WHERE posted_at >= datetime('now','-{int(days)} days') GROUP BY cid")
         return {r["cid"] for r in rows if r.get("cid")}
     except Exception:
         return set()
@@ -95,7 +99,7 @@ def main():
     cov = d1("SELECT cp.source src, COUNT(*) tot, SUM(CASE WHEN w.info_json IS NOT NULL AND w.info_json<>'' THEN 1 ELSE 0 END) vis "
              "FROM candidate_pool cp LEFT JOIN works w ON w.cid=cp.cid GROUP BY cp.source")
     covmap = {r["src"]: (r["tot"], r["vis"]) for r in cov}
-    # ★両チャンネルで直近3週間に投稿済みのcid=除外(Chami 2026-08-15)。取得失敗/履歴空なら空集合=除外なし。
+    # ★直近3日にいずれかのchへ投稿済みのcid=除外(Chami 2026-08-23 裁定A・21→3緩和)。取得失敗/履歴空なら空集合=除外なし。
     posted = posted_recent()
     # 手動追加=source='main'のうち動画生成用サンプル画像があるもの限定(Chami 2026-08-15「画像もあるやつをチョイスして」)
     mainrows = parse(d1("SELECT cp.cid, cp.source, w.title, w.info_json, w.sales_n FROM candidate_pool cp JOIN works w ON w.cid=cp.cid "
@@ -104,11 +108,11 @@ def main():
     withimg_all = [x for x in mainrows if x.get("imgs")]
     withimg = sorted([x for x in withimg_all if x["cid"] not in posted], key=lambda x: -x["score"])
     excl_main = len(withimg_all) - len(withimg)
-    w.write(f"**■ 手動追加(💡)おすすめ5**(画像あり・3週間内投稿除外後の母集団{len(withimg)}/{len(mainrows)}件)\n")
+    w.write(f"**■ 手動追加(💡)おすすめ5**(画像あり・3日内投稿除外後の母集団{len(withimg)}/{len(mainrows)}件)\n")
     for x in withimg[:5]: w.write("- " + line(x) + "\n")
     noimg = len(mainrows) - len(withimg_all)
     if noimg: w.write(f"(画像なし{noimg}件は動画化の素材が無いので手動追加からは外した)\n")
-    if excl_main: w.write(f"(直近3週間に両CHいずれかで投稿済み{excl_main}件も除外)\n")
+    if excl_main: w.write(f"(直近3日にいずれかのchへ投稿済み{excl_main}件も除外)\n")
     # 全候補=全ソース(main+list+circle)から。★動画生成用の画像(sampleImageURL.sample_l=作品のコマ)が
     #   あるものだけに限定(Chami 2026-08-15「ソース集団はサンプル画像じゃなくて動画生成用の画像があるもののみ」)。
     #   ここで数える imgs は sample_l のコマ枚数=そのまま5秒動画の素材。imgs=0(表紙しか無い)は動画化できないので除外。
@@ -124,11 +128,11 @@ def main():
         tot, vis = covmap.get(s, (0, 0))
         if tot - vis > 0: invis.append(f"{s} {tot-vis}件")
     dropimg = len(allparsed) - len(allrows_img)
-    w.write(f"\n**■ 全候補おすすめ5**(全ソース・動画生成用の画像ありに限定・3週間内投稿除外後の母集団{len(allrows)}/{len(allparsed)}件)\n")
+    w.write(f"\n**■ 全候補おすすめ5**(全ソース・動画生成用の画像ありに限定・3日内投稿除外後の母集団{len(allrows)}/{len(allparsed)}件)\n")
     if dropimg:
         w.write(f"(画像なし{dropimg}件=表紙しか無く動画化の素材が無いので除外)\n")
     if excl_all:
-        w.write(f"(直近3週間に両CHいずれかで投稿済み{excl_all}件も除外)\n")
+        w.write(f"(直近3日にいずれかのchへ投稿済み{excl_all}件も除外)\n")
     if invis:
         w.write(f"(★{' / '.join(invis)} はまだ情報未取得=評価不可。改修αへ依頼中)\n")
     for x in allrows[:5]: w.write("- " + line(x) + "\n")
