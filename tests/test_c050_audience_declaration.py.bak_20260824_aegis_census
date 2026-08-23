@@ -112,20 +112,8 @@ finally:
 print("=== 3. 便を出す側(producer)の全数 ===")
 
 # file → (種別, 期待する宣言 or 理由)
-#   "declare" = **本番の便を出す**。その源に --audience / audience= が要る
-#   "mention" = 文中で名前を出しているだけ(dispatch を呼ばない)
-#   "test"    = 検査。★宣言は要らない。代わりに**本番のキューへ出さないこと**が要件
-#               (§3「本番の部屋でテストしない」)= QUEUE_DB を使い捨てへ向け、
-#               表投稿(post_work_to_channel)を偽物へ差し替えていること。
-#
-# ★数え方の決着(2026-08-24 イージス研究室・研究室HQ msg DISPATCH-aegis-gl-1787498595898)=
-#   HQの指摘「tests/ まで数えて検査に宣言を要求している」は当たっていた。ただし
-#   **tests/ を数えるのをやめる**のではなく、**tests/ に課す義務を変える**方へ倒した。
-#   理由= 検査が本番のキューへ便を出す事故(=Chamiの部屋にゴミが届く)は実際に起こりうる。
-#   数えるのをやめると、その事故は**この網から永久に見えなくなる**。
-#   ★もう1つ直した= 未登録のファイルへ既定で "declare" を当てて
-#   「宣言している: <file>」まで赤くしていた= **1つの原因で2つ赤が出る**。
-#   未登録は「未登録」の1本だけ鳴らす(義務は、登録して種別が決まってから課す)。
+#   "declare" = dispatch を起動する。その行に --audience / audience= が要る
+#   "mention" = 文中で名前を出しているだけ(起動しない)
 PRODUCERS = {
     "scripts/llm/daily_reflection_trigger.py": ("declare", "chami"),   # 朝5時の振り返り=Chamiが読む
     "scripts/discord/reaction_watch.py":       ("declare", "chami"),   # Chamiの印(再発/炎上)
@@ -133,16 +121,12 @@ PRODUCERS = {
     "scripts/report/kaizen_round.ps1":         ("declare", "chami"),   # PDCAラウンド
     "scripts/_daemons/run_kaizen_daily_repair.py": ("declare", "chami"),
     "scripts/llm/context_watch.py":            ("declare", "ai"),      # 文脈量の見張り=AI同士
-    "scripts/llm/quota_alarm.py":              ("declare", "ai"),      # 残量の警報=AI同士
-    "scripts/_daemons/envelope_naming_watch.py": ("declare", "ai"),    # 封筒の名前の見張り=AI同士
-    "scripts/_daemons/teian_echo_poll.py":     ("declare", "ai"),      # 提案シート→軍議の機械エコー
     "scripts/llm/dispatch.py":                 ("mention", "本体"),
     "scripts/llm/dept_daemon.py":              ("mention", "部門プロンプトの案内文"),
     "scripts/queue/dlq_tool.py":               ("mention", "docstringで作法を書いているだけ"),
     "tests/test_dept_request_visibility.py":   ("mention", "この経路の別の検査"),
     "tests/test_c050_reply_digest.py":         ("mention", "受け手側(門と切り詰め)の検査"),
-    "tests/test_dispatch_addressee.py":        ("mention", "宛先ズレ警告の純粋関数の検査(dispatchは呼ばない)"),
-    "tests/test_c050_audience_declaration.py": ("test", "この検査そのもの(本物のdispatchを使い捨てDBへ通す)"),
+    "tests/test_c050_audience_declaration.py": ("mention", "この検査そのもの"),
 }
 _PAT = re.compile(r"dispatch\.py|dispatch\.dispatch\(")
 found = []
@@ -163,64 +147,23 @@ for base, _dirs, files in os.walk(ROOT):
         if _PAT.search(src):
             found.append((rel, src))
 
-def audit_producers(registry, files):
-    """種別ごとの義務を当てて、問題の一覧を返す(空=問題なし)。
-
-    ★関数にしてあるのは、下の must-fail が **「動く別の実装」へ差し替えて**
-      赤くなることを確かめるため(C-053)。行を消して文法を壊すのは偽の緑だ。
-    """
-    bad = []
-    for rel, src in files:
-        if rel not in registry:
-            bad.append("未登録: " + rel)          # 種別が決まるまで義務は課さない
-            continue
-        kind, want = registry[rel]
-        if kind == "mention":
-            continue
-        if kind == "declare":
-            if not (("--audience" in src) or ("audience=" in src)):
-                bad.append("宣言が無い: " + rel)
-            elif want and not ((f'"{want}"' in src) or (f"--audience {want}" in src)):
-                bad.append(f"宣言の中身が {want} でない: " + rel)
-        elif kind == "test":
-            # 検査に課すのは宣言ではなく「本番のキューへ出さないこと」
-            if "dispatch.dispatch(" in src or "dp.dispatch(" in src:
-                if "QUEUE_DB" not in src:
-                    bad.append("検査が本番のキューへ出しうる(QUEUE_DBを差し替えていない): " + rel)
-                if "post_work_to_channel" not in src:
-                    bad.append("検査が本番の部屋へ表投稿しうる: " + rel)
-        else:
-            bad.append("種別が不明(%s): %s" % (kind, rel))
-    return sorted(bad)
-
-
 check("producerを1本も見失っていない", len(found) >= len(PRODUCERS), True)
-check("★全producerが種別どおりの義務を満たしている", audit_producers(PRODUCERS, found), [])
-
-# ★must-fail①= 宣言を消した「動く写し」を混ぜると、その1本だけ赤くなる
-_ref = "scripts/llm/daily_reflection_trigger.py"
-_broken = io.open(os.path.join(ROOT, _ref), encoding="utf-8").read() \
-    .replace('audience="chami"', "").replace("--audience", "")
+_unknown = sorted(r for r, _ in found if r not in PRODUCERS)
+check("★未登録のproducerが無い(増えたらここへ登録する)", _unknown, [])
+for rel, src in found:
+    kind, want = PRODUCERS.get(rel, ("declare", ""))
+    if kind != "declare":
+        continue
+    has = ("--audience" in src) or ("audience=" in src)
+    check(f"宣言している: {rel}", has, True)
+    if want:
+        check(f"宣言の中身が {want}: {rel}",
+              (f'"{want}"' in src) or (f"--audience {want}" in src), True)
+# ★must-fail= 走査器が本当に見ているかの実証(宣言を消した写しは落ちる)
+_broken = io.open(os.path.join(ROOT, "scripts/llm/daily_reflection_trigger.py"),
+                  encoding="utf-8").read().replace('audience="chami"', "")
 check("mustfail_宣言を消した写しは検査に落ちる",
-      audit_producers(PRODUCERS, [(_ref, _broken)]), ["宣言が無い: " + _ref])
-
-# ★must-fail②= 登録から外すと「未登録」で鳴る(新しいproducerが黙って増えない)
-_less = {k: v for k, v in PRODUCERS.items() if k != _ref}
-check("mustfail_登録から外すと未登録で鳴る",
-      audit_producers(_less, [(_ref, "audience=\"chami\"")]), ["未登録: " + _ref])
-
-# ★must-fail③= **動く別の実装**= 「全部 mention 扱い」の版(=何も義務を課さない)。
-#   これに差し替えると①が緑になる= ①の緑が本当に義務を見ている証明になる。
-_all_mention = {k: ("mention", "") for k in PRODUCERS}
-check("mustfail_全部mention扱いの実装に差し替えると、宣言を消しても通ってしまう",
-      audit_producers(_all_mention, [(_ref, _broken)]), [])
-
-# ★検査に課した義務そのものの実証= 本番のキューへ出す写しは赤くなる
-_self = "tests/test_c050_audience_declaration.py"
-check("mustfail_検査がQUEUE_DBを差し替えずdispatchすると赤くなる",
-      audit_producers(PRODUCERS, [(_self, "dp.dispatch('hq', 'x', 'y')")]),
-      ["検査が本番のキューへ出しうる(QUEUE_DBを差し替えていない): " + _self,
-       "検査が本番の部屋へ表投稿しうる: " + _self])
+      ("--audience" in _broken) or ("audience=" in _broken), False)
 
 if __name__ == "__main__":
     print(f"\nFAIL — {len(fails)}件: {fails}" if fails else "\nALL PASS")
