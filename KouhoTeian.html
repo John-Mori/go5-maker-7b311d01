@@ -67,14 +67,16 @@
   .fchk{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:var(--ink);
     background:var(--field);border:1px solid var(--line2);border-radius:999px;padding:6px 12px;cursor:pointer}
   .fchk input{margin:0}
-  /* 2グループの見出し(今すぐ投稿できる / 紹介にはアツい) */
-  .sect{margin:18px 2px 10px}
-  .sect .stitle{display:flex;align-items:baseline;gap:8px}
-  .sect .st{font-size:.95rem;font-weight:800}
-  .sect .sc{font-size:.72rem;color:var(--muted)}
-  .sect .sd{font-size:.72rem;color:var(--dim);margin-top:3px;line-height:1.5}
-  .sect.ready .st{color:var(--accent)}
-  .sect.pool .st{color:var(--warn)}
+  /* 2グループの切替トグル(今すぐ投稿できる ⇄ 紹介にはアツい) */
+  .gtabs{display:flex;gap:0;border:1px solid var(--line2);border-radius:10px;overflow:hidden;margin:14px 0 4px}
+  .gtabs button{flex:1 1 0;background:var(--card);border:none;color:var(--muted);
+    padding:10px 8px;font-size:.84rem;font-weight:700;line-height:1.3;transition:background .12s}
+  .gtabs button + button{border-left:1px solid var(--line2)}
+  .gtabs button .gc{display:block;font-size:.68rem;font-weight:600;color:var(--dim);margin-top:2px}
+  .gtabs button.on.ready{background:var(--accent);color:var(--accent-ink)}
+  .gtabs button.on.pool{background:var(--warn);color:#fff}
+  .gtabs button.on .gc{color:inherit;opacity:.82}
+  .gdesc{font-size:.72rem;color:var(--dim);margin:8px 2px 10px;line-height:1.5}
   /* 画像2枚並び: 左=動画生成用画像(素材) / 右=サンプル(FANZA・タップで全画像) */
   .imgrow{display:flex;gap:8px;align-items:flex-start;margin:6px 0 8px}
   .imgrow .hero{margin:0}
@@ -176,7 +178,6 @@
   <div class="panel" id="filterPanel" style="display:none">
     <div class="head">絞り込み</div>
     <div class="filters">
-      <label class="fchk"><input type="checkbox" id="fMovieImg"><span>動画生成用画像あり</span></label>
       <label class="fchk"><input type="checkbox" id="fSale"><span>セール中</span></label>
       <label class="fchk"><input type="checkbox" id="fHideTsuku"><span>月詠み投稿済みを隠す</span></label>
       <label class="fchk"><input type="checkbox" id="fHideYoi"><span>宵桜投稿済みを隠す</span></label>
@@ -184,6 +185,7 @@
     <div class="hint" id="filterCount" style="margin-top:6px"></div>
   </div>
 
+  <div id="groupTabs" style="display:none"></div>
   <div id="list"></div>
 </div>
 
@@ -241,6 +243,7 @@
 
   function renderEmpty(msg){
     $('#list').innerHTML = '<div class="empty">'+esc(msg)+'</div>';
+    $('#groupTabs').style.display='none';
     $('#decbar').style.display='none';
   }
 
@@ -264,27 +267,37 @@
     var cands = all.filter(passFilter_);
     $('#filterPanel').style.display='block';
     $('#filterCount').textContent = cands.length + ' / ' + all.length + ' 件を表示';
-    if(!cands.length){ $('#list').innerHTML='<div class="empty">絞り込みに合う候補がありません。条件を外してください。</div>'; $('#decbar').style.display='none'; return; }
-    // 2グループに分ける(Chami指示2026-08-23): 今すぐ投稿できる(動画生成用画像あり) / 紹介にはアツい(画像なし)。
-    // どちらも score 降順のまま。rank はグループ内で 1 から振り直す。
+    if(!cands.length){ $('#list').innerHTML='<div class="empty">絞り込みに合う候補がありません。条件を外してください。</div>'; $('#groupTabs').style.display='none'; $('#decbar').style.display='none'; return; }
+    // 2グループに分けて切替表示(Chami指示2026-08-23→2026-08-24 上下でなく切替ボタン):
+    //   ready=今すぐ投稿できる(動画生成用画像あり) / pool=紹介にはアツい(画像なし)。どちらも score 降順のまま。
     var ready=[], pool=[];
     cands.forEach(function(c){ ((REF[c.cid]||{}).has ? ready : pool).push(c); });
-    var html='';
-    if(ready.length){
-      html += sectHtml_('ready','🎬 今すぐ投稿できる作品', ready.length, '動画生成用画像あり=そのまま動画にできる。');
-      ready.forEach(function(c,i){ html += cardHtml_(c, i+1); });
-    }
-    if(pool.length){
-      html += sectHtml_('pool','🔥 紹介にはアツい作品', pool.length, '動画生成用画像はまだ無い。サンプル画像を素材に仕込めば投稿できる (モノクロはフルカラー化)。');
-      pool.forEach(function(c,i){ html += cardHtml_(c, i+1); });
-    }
+    var g = groupGet_();
+    if(g==='ready' && !ready.length && pool.length) g='pool';       // 選択側が空なら中身のある側へ寄せる
+    if(g==='pool' && !pool.length && ready.length) g='ready';
+    $('#groupTabs').style.display='block';
+    $('#groupTabs').innerHTML = gtabsHtml_(ready.length, pool.length, g);
+    document.querySelectorAll('#groupTabs button[data-group]').forEach(function(b){
+      b.addEventListener('click', function(){ groupSet_(b.dataset.group); render(); });
+    });
+    var active = (g==='pool') ? pool : ready;
+    var descs = { ready:'動画生成用画像あり=そのまま動画にできる。',
+                  pool:'動画生成用画像はまだ無い。サンプル画像を素材に仕込めば投稿できる (モノクロはフルカラー化)。' };
+    var html = '<div class="gdesc">'+esc(descs[g])+'</div>';
+    if(active.length){ active.forEach(function(c,i){ html += cardHtml_(c, i+1); }); }
+    else { html += '<div class="empty">この区分に合う候補はありません。</div>'; }
     $('#list').innerHTML = html;
     wire(cands);
   }
 
-  function sectHtml_(cls, title, count, desc){
-    return '<div class="sect '+cls+'"><div class="stitle"><span class="st">'+esc(title)+'</span>'+
-      '<span class="sc">'+count+'件</span></div><div class="sd">'+esc(desc)+'</div></div>';
+  // グループ切替(端末に保存)。ready=今すぐ投稿できる / pool=紹介にはアツい。
+  function groupGet_(){ try{ return LS.getItem('teian_group')==='pool'?'pool':'ready'; }catch(e){ return 'ready'; } }
+  function groupSet_(g){ try{ LS.setItem('teian_group', g==='pool'?'pool':'ready'); }catch(e){} }
+  function gtabsHtml_(nReady, nPool, g){
+    return '<div class="gtabs">'+
+      '<button type="button" data-group="ready" class="ready'+(g==='ready'?' on':'')+'">🎬 今すぐ投稿できる<span class="gc">'+nReady+'件</span></button>'+
+      '<button type="button" data-group="pool" class="pool'+(g==='pool'?' on':'')+'">🔥 紹介にはアツい<span class="gc">'+nPool+'件</span></button>'+
+    '</div>';
   }
 
   function cardHtml_(c, rank){
@@ -408,11 +421,13 @@
   }
 
   // ---- 絞り込み(端末に保存) ----
-  var FK = { movie:'teian_f_movieimg', sale:'teian_f_sale', hideT:'teian_f_hidetsuku', hideY:'teian_f_hideyoi' };
+  // 「動画生成用画像あり」フィルタは2グループ切替へ統合(2026-08-24)=ここでは扱わない。
+  // 「投稿済みを隠す」の"直近3日 OR 直近10件"の除外は生成側(daily_pick.py/candidates_json.py)で適用済み=
+  // 候補JSONに来る時点で既に除外されている。ここのhideT/hideYは last_posted.channel(全期間)での追加絞り込み。
+  var FK = { sale:'teian_f_sale', hideT:'teian_f_hidetsuku', hideY:'teian_f_hideyoi' };
   function fget(k){ try{ return LS.getItem(k)==='1'; }catch(e){ return false; } }
   function fset(k,v){ try{ LS.setItem(k, v?'1':'0'); }catch(e){} }
   function passFilter_(c){
-    if(fget(FK.movie) && !((REF[c.cid]||{}).has)) return false;
     if(fget(FK.sale)){ var d=(c.metrics||{}).discount_pct; if(!(d>0)) return false; }
     var lp=c.last_posted||{};
     if(fget(FK.hideT) && lp.channel==='月詠み') return false;
@@ -420,7 +435,7 @@
     return true;
   }
   function initFilters_(){
-    var pairs=[['#fMovieImg',FK.movie],['#fSale',FK.sale],['#fHideTsuku',FK.hideT],['#fHideYoi',FK.hideY]];
+    var pairs=[['#fSale',FK.sale],['#fHideTsuku',FK.hideT],['#fHideYoi',FK.hideY]];
     pairs.forEach(function(p){
       var el=$(p[0]); if(!el) return;
       el.checked=fget(p[1]);
