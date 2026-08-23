@@ -101,14 +101,33 @@ def images_of(info):
 def platform_of(cid):
     return "doujin" if cid.startswith("d_") else "books"
 
-def posted_by_channel():
-    """{cid: set(channel)} 直近3週間に投稿済み。取得失敗/空なら空dict(fail-open)。"""
+# posted_log の channel 値 → 表示チャンネル名(記録_ch1/記録_ch2 と同じ2ch)。
+CH_NAME = {"acc1": "月詠み", "acc2": "宵桜艶帖"}
+
+def _posted_at_jst_date(s):
+    """posted_at(UTC ISO・末尾Z)を JST の 'YYYY-MM-DD' へ。★DiscordではなくD1のUTC=+9する。"""
     try:
-        rows = dp.d1("SELECT cid, channel FROM posted_log WHERE posted_at >= datetime('now','-21 days')")
+        base = str(s)[:19]  # '2026-08-21T14:40:18'(小数秒/Zは落とす)
+        dt = datetime.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S") + datetime.timedelta(hours=9)
+        return dt.date().isoformat()
+    except Exception:
+        return None
+
+def last_posted_by_channel():
+    """{cid: {'date':'YYYY-MM-DD'(JST), 'channel':'月詠み'|'宵桜艶帖'}} 各cidの"最新の"投稿(全期間)。
+    ★『この作品は○ch用』の割り当てをやめ(Chami『作品はどっちでも可』2026-08-23)、直近でどちら
+      のchにいつ投稿したかだけを持たせる=出所は posted_log(記録_ch1/記録_ch2 のD1形)。
+    取得失敗/空なら空dict(fail-open=最終投稿が引けなくても候補生成は止めない)。"""
+    try:
+        rows = dp.d1("SELECT cid, channel, posted_at FROM posted_log ORDER BY posted_at DESC")
         m = {}
         for r in rows:
-            if r.get("cid") and r.get("channel"):
-                m.setdefault(r["cid"], set()).add(r["channel"])
+            cid, ch, pa = r.get("cid"), r.get("channel"), r.get("posted_at")
+            if not cid or cid in m:      # ★DESC順=各cidで最初に見た行が最新
+                continue
+            d = _posted_at_jst_date(pa)
+            if d:
+                m[cid] = {"date": d, "channel": CH_NAME.get(ch, ch)}
         return m
     except Exception:
         return {}
@@ -125,7 +144,7 @@ def main():
     w = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     today = datetime.date.today().isoformat()
     posted_any = dp.posted_recent()          # 両CHまとめ(除外用)
-    posted_ch = posted_by_channel()          # CH別(推奨ch決定用)
+    last_posted = last_posted_by_channel()   # {cid:{date,channel}} 最終投稿(表示用・全期間)
 
     rows = dp.d1("SELECT cp.cid, cp.source, w.title, w.info_json, w.sales_n FROM candidate_pool cp "
                  "JOIN works w ON w.cid=cp.cid WHERE w.info_json IS NOT NULL AND w.info_json<>''")
@@ -151,24 +170,18 @@ def main():
 
     # ★並び順は分析 score(revenue_rate×log1p(sales_n))を正とする(設計書§3)。
     cand.sort(key=lambda x: (-x["rank_score"], -x["select_score"]))
-    top = cand[:10]
+    top = cand[:20]                          # ★物量=10→20(Chami 2026-08-23『3日経ったら別chで投稿できる物量』)
 
-    # 推奨ch=直近投稿の無い側を優先、無ければ負荷を均すため交互(★暫定=採算/テーマの本判定は分析待ち)
+    # ★『この作品は○ch用』の割り当ては廃止(Chami『作品はどっちでも可』)。代わりに last_posted を持たせ、
+    #   どちらのchにいつ投稿したかを表示=chの最終判断はページ側/Chami(channel_provisional も廃止)。
     out_candidates = []
-    alt = 0
     for i, x in enumerate(top):
-        recent = posted_ch.get(x["cid"], set())
-        if "acc1" in recent and "acc2" not in recent: ch = "acc2"
-        elif "acc2" in recent and "acc1" not in recent: ch = "acc1"
-        else:
-            ch = "acc1" if alt % 2 == 0 else "acc2"; alt += 1
         out_candidates.append({
             "id": f"cand-{i+1:03d}",
             "cid": x["cid"],
             "platform": x["_platform"],
             "title": x["title"],
-            "channel": ch,
-            "channel_provisional": True,      # ★暫定=採算/テーマ本判定(分析)で上書きされる
+            "last_posted": last_posted.get(x["cid"]),   # {date,channel} or None(未投稿)
             "images": x["_images"],
             "metrics": {
                 "sales_n": x["sales"],
@@ -193,7 +206,8 @@ def main():
         "generated_by": "product-scout/candidates_json.py",
         "note": ("並び順の正=分析 score(revenue_rate×log1p(sales_n))降順(設計書§3)。"
                  "select_score は商品選定の候補入り選定軸で、並び順には使わない。"
-                 "channel は暫定(採算/テーマ本判定は分析待ち・channel_provisional=true)。"
+                 "作品はどっちのchでも可=ch割り当ては廃止。last_posted={date,channel} は各作品の最終投稿"
+                 "(記録=posted_log・全期間・未投稿は null)。表示例『8/22 月詠み』。"
                  "past_similar_recovery は成約が観測不可=分析が null 固定と確定。comments は vision が後埋め。"
                  "あらすじ本文は配信しない(client面へ過激本文を出さない)=PC専用サイドカー synopsis_<date>.json 側に置く。"),
         "candidates": out_candidates,
