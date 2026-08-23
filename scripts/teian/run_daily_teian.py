@@ -123,6 +123,10 @@ def main() -> int:
                     help="candidates_json.py を回さず、現ファイルへ vision→配信(復旧向け)")
     ap.add_argument("--no-publish", action="store_true", help="配信の手前で止める")
     ap.add_argument("--vision-limit", type=int, default=0, help="vision が埋める候補数(0=全部・既定)")
+    ap.add_argument("--vision", action="store_true",
+                    help="④ vision(サンプル画像から3択)を回す。★既定OFF=Chami指示2026-08-23"
+                         "(msg 1541180961272889384): 画像なし段階のサンプル生成は投稿画像で作り直すので無駄。"
+                         "コメントは今すぐ投稿できる作品の投稿画像から作る=日次のサンプル一括生成は止める。")
     ap.add_argument("--publish-force", action="store_true", help="空配信ガードを無視して配信")
     args = ap.parse_args()
 
@@ -154,11 +158,18 @@ def main() -> int:
         print(f"③ 引継ぎ: {n} 候補へ既存の comments/room_comments を復元(空欄のみ)")
 
     # ④ vision(まだ空の④commentsだけ埋める。--force無し=引継ぎ済みは温存)
-    rc = run([py, VISION, "--in", src, "--limit", str(args.vision_limit)],
-             args.dry_run, f"④ vision_comments.py(空の候補のみ・limit={args.vision_limit})")
-    if rc != 0:
-        sys.stderr.write("vision が失敗。room_comments/引継ぎ分は残っているが④commentsが欠ける可能性。\n")
-        # fail-open: 続行はするが publish のガードが空を止める
+    # ★既定でスキップ(Chami指示2026-08-23 msg 1541180961272889384)。理由=候補JSONの作品は
+    #   ページ側でほぼ pool(紹介にはアツい=動画生成用画像なし)へ落ちる。そこへFANZAサンプルから3択を
+    #   一括生成しても、Chamiが投稿画像を貼った時点で投稿画像から作り直す=トークンの無駄。
+    #   コメントは「今すぐ投稿できる(=投稿画像あり)」作品の投稿画像から作る方針。--vision で従来動作。
+    if args.vision:
+        rc = run([py, VISION, "--in", src, "--limit", str(args.vision_limit)],
+                 args.dry_run, f"④ vision_comments.py(空の候補のみ・limit={args.vision_limit})")
+        if rc != 0:
+            sys.stderr.write("vision が失敗。room_comments/引継ぎ分は残っているが④commentsが欠ける可能性。\n")
+            # fail-open: 続行はするが publish のガードが空を止める
+    else:
+        print("④ vision: 既定スキップ(--vision で従来のサンプル一括生成。Chami指示2026-08-23)")
 
     # ⑤ 配信(空配信ガード付き)
     if args.no_publish:
