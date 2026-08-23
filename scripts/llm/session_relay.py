@@ -4256,6 +4256,17 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
     #   claude-opus-4-8)のまま。★2026-08-18 訂正(旧記述「=sonnet」は既定変更2026-07-29の取り残し)。
     #   ★引き継ぎ(_write_handoff)・自己確認(_self_check)も**同じ値**を使う(下でconfを渡している)。
     model = relay_model(conf)
+    # ★2026-08-23 手1(研究室HQ): 朝の定型producer便だけ Sonnet へ落とす(重み5.0→1.0)。
+    #   判定の正本は dept_daemon.routine_producer_model 1本(この便の author/content で決まる)。
+    #   🔥/炎上/インシデント・Chamiの便は None が返る=Opusのまま。読めない時も None=落とさない。
+    try:
+        import dept_daemon                            # 呼ばれる時点では必ずロード済み
+        _cheap = dept_daemon.routine_producer_model(rec)
+        if _cheap:
+            model = _pin_model(_cheap)
+            _log(dept, f"朝の定型producer便={rec.get('author','')}→{model}で回す(手1・重み1.0)")
+    except Exception:
+        pass                                          # 判定不能=既定のまま(Opus)
     # 事前交代の状態(★下の「初回、または世代交代」分岐と、返信末尾の1行で使う)
     handoff_path = None                 # 引き継ぎファイルのパス(生成できた時だけ)
     pre_rotating = False                # ★事前の交代か(=resume失敗による事後の交代と区別する)

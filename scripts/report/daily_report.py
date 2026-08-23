@@ -155,12 +155,24 @@ def token_health():
         return "🔑合鍵: ★空(要 claude setup-token)"
     # ★狼少年防止: タイムアウト≠失効(コールドスタートは60s超あり)。アラームは"実際の認証エラー
     #   文言"が出た時だけ。タイムアウトは「遅延・判定保留」に留める。失効は401で速く返る(遅延ではない)。
+    #
+    # ★2026-07-27 検査そのものを軽くした(Chamiが08:00便の「★応答異常」を持ち込んだ件)。
+    #   実測すると鍵は**生きていた**(rc=0)。誤報だった。原因は**検査が重すぎたこと**:
+    #   旧実装はプロジェクト直下で `claude --print "ok"` を叩いていたため、
+    #   **CLAUDE.mdを読み、requests.jsonlを開き、未完了タスク一覧まで作って26.7秒**かかっていた。
+    #   = 認証と無関係な理由(混雑・一時的な失敗・上限)でコケると「合鍵が異常」と出る。
+    #   ★**鍵は無事なのに鍵が壊れたと報告する**=ORG-42(常に疑わしい警報は読まれなくなる)。
+    #   → **中立なディレクトリ**(CLAUDE.mdが無い)で **道具を禁止**して **1ターン**だけ回す。
+    #     実測: 26.7秒 → **5.4秒**、出力は `pong` だけ。**検査が検査だけをする。**
     env = dict(os.environ)
     env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
     try:
-        p = subprocess.run([CLAUDE_BIN, "--print", "--model", "sonnet", "ok"],
+        import tempfile
+        p = subprocess.run([CLAUDE_BIN, "--print", "--model", "sonnet",
+                            "--allowed-tools", "", "--max-turns", "1", "pingとだけ返して"],
                            capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=120, env=env)
+                           errors="replace", timeout=120, env=env,
+                           cwd=tempfile.gettempdir())   # ★プロジェクト外=CLAUDE.mdを読ませない
     except subprocess.TimeoutExpired:
         return "🔑合鍵: 応答遅延(判定保留・起動が重いだけの可能性)"
     except Exception:
@@ -168,9 +180,36 @@ def token_health():
     blob = (p.stdout or "") + (p.stderr or "")
     if p.returncode == 0 and (p.stdout or "").strip():
         return "🔑合鍵: 正常"
+    # ★利用上限は「鍵の異常」ではない(鍵は生きている)。混ぜると再認証させる誤誘導になる。
+    #   Chamiは実際に上限に当たって追加費用を払ったことがある=起こりうる事象として分ける。
+    if any(k in blob.lower() for k in ("usage limit", "rate limit", "429",
+                                       "quota", "上限")):
+        return "🔑合鍵: 利用上限に当たっている(★鍵は正常。再認証は不要)"
     if any(k in blob for k in ("expired", "authenticate", "401", "Invalid")):
         return "🔑合鍵: ★失効の疑い(要 claude setup-token 再認証)"
-    return "🔑合鍵: ★応答異常(要確認)"
+    # ★ここまで来たら「認証以外の理由で失敗した」。**鍵の異常と断定しない**(それが08:00の誤報だった)。
+    return ("🔑合鍵: 応答異常だが原因不明(判定保留・鍵の失効とは限らない) rc=%s %s"
+            % (p.returncode, (blob.strip().replace("\n", " ")[:80] or "出力なし")))
+
+
+def morning_burn_line():
+    """朝の窓(5〜10時)が週の総消費に占める割合を1行で返す(研究室HQ 2026-08-23・手2の付帯)。
+
+    ★なぜ日報に吊るすか= 毎日目に入らないと、次に朝が膨らんでも気づくのが翌週になる。
+      正本の道具は scripts/llm/morning_burn.py(重みは quota_burn と同じ)。ここは1行だけ引く。
+    ★失敗しても日報を落とさない(fail-safe)= 測れない時は「照会不可」と言う。
+    """
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        import morning_burn as mb
+        per, allday = mb.burn(7)
+        total_all = sum(allday.values())
+        total_morning = sum(v["w"] for v in per.values())
+        pct = 100.0 * total_morning / total_all if total_all else 0.0
+        mark = " ★膨張(要確認)" if pct >= 40.0 else ""
+        return "🌅朝の窓(5〜10時)消費: 直近7日で全体の %.1f%%%s" % (pct, mark)
+    except Exception:
+        return "🌅朝の窓消費: 照会不可"
 
 
 def system_health():
@@ -205,6 +244,7 @@ def system_health():
     except Exception:
         lines.append("キュー: 照会不可")
     lines.append(token_health())   # ★段階1: 合鍵の事前健全性チェック
+    lines.append(morning_burn_line())   # ★2026-08-23 朝の窓の消費割合(手2の付帯・研究室HQ)
     return lines
 
 

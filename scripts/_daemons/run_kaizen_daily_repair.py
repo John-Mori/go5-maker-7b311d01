@@ -33,6 +33,26 @@ DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
 LOG = os.path.join(ROOT, "local", "_kaizen_daily_repair.log")
 BODY = os.path.join(ROOT, "local", "_work", "kaizen_daily_repair_body.txt")
 DEPT = "kaizen-analyst"          # 改善提案部門(この集計の持ち主)
+# ★2026-08-23 手2(研究室HQ): 絵文字監視(8:00)が書いた「全部屋スタンプ一覧」を、この8:10の便で
+#   一緒に読む。以前は絵文字監視が改善提案部門を**もう1回起こして**渡していた(実測 約1,600万/日)。
+#   起こすのを1つ止め、傾向を見るための一覧はファイルから取り込む。★本日ぶんが無ければ捏造せず
+#   「無い」と書く(古い一覧を今日のものとして混ぜない)。
+KAIZEN_DIGEST = os.path.join(ROOT, "local", "_work", "reaction_watch_kaizen_digest.md")
+
+
+def read_todays_emoji_digest():
+    """絵文字監視が本日書いた全部屋一覧を返す。無い/古い時は None(捏造しない)。"""
+    try:
+        if not os.path.exists(KAIZEN_DIGEST):
+            return None
+        # 本日(ローカル)書かれたものだけを採る= 古い一覧を今日の便に混ぜない。
+        mtime = dt.date.fromtimestamp(os.path.getmtime(KAIZEN_DIGEST))
+        if mtime != dt.date.today():
+            return None
+        with io.open(KAIZEN_DIGEST, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except Exception:
+        return None
 
 
 def log(msg):
@@ -90,6 +110,22 @@ def main():
         body = ("★毎朝の改修α集計は走ったが、**本文が文字化けした**(U+FFFD %d個)。\n"
                 "子プロセスの出力エンコーディングを疑え(PYTHONIOENCODING)。\n"
                 "化けた本文は捨てた= %s のログを見てくれ。" % (n, LOG))
+
+    # ★手2: 絵文字監視(8:00)が書いた本日の全部屋一覧を、この便に畳み込む(別便で起こさない)。
+    digest = read_todays_emoji_digest()
+    if digest:
+        body += ("\n\n"
+                 "======================================================\n"
+                 "■ 本日の絵文字スタンプ 全部屋一覧(絵文字監視が8時に書いた・傾向確認用)\n"
+                 "  ※これは「その場で対応」ではなく傾向を見るための一覧。個別の🔥/再発は\n"
+                 "    各部屋へ別に配られ、未確認台帳にも積まれている。\n"
+                 "======================================================\n"
+                 + digest)
+        log("絵文字一覧を畳み込んだ(%d字)" % len(digest))
+    else:
+        body += ("\n\n■ 本日の絵文字スタンプ 全部屋一覧: 無し"
+                 "(絵文字監視が本日ぶんをまだ書いていない/新規スタンプが0件)。")
+        log("絵文字一覧は本日ぶん無し= 畳み込まない")
 
     if a.dry_run:
         log("--dry-run= 投函しない。本文は以下:")

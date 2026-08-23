@@ -84,6 +84,12 @@ UA = "go5-org-reaction-watch (personal, v1)"
 SENDER = "絵文字監視(毎朝8時の自動巡回)"
 SKIP_DEPTS = {"hq"}          # ★Chamiの部屋。自分で付けたのだから報告は要らない
 KAIZEN_DEPT = "kaizen-analyst"
+# ★2026-08-23 手2(研究室HQ msg 1540947756045312121): 全部屋一覧は「傾向を見るための一覧」で
+#   **その場で部門を起こす必要が無い**。起こすのを1つ止める= 実測平均 約1,600万/日 が消える。
+#   → 一覧はここへ**ファイルで落とす**。改善提案部門は毎朝8:10の自分の便の中でこれを読む
+#     (run_kaizen_daily_repair.py が取り込む)。★止めるのは一覧の配達だけ= 個別便(🔥の本体)は
+#     1件も削っていない(上の send(dept,...) はそのまま)。
+KAIZEN_DIGEST = os.path.join(LOCAL, "_work", "reaction_watch_kaizen_digest.md")
 CHAMI_USER_ID = "490925528367497227"   # chami_fusoh(実測 2026-07-29)。判定の補助であって条件ではない
 DISCORD_EPOCH = 1420070400000
 
@@ -772,12 +778,29 @@ def main():
             failed.append(dept)
 
     kbody = kaizen_body(items, guild_id, stats, a.hours)
-    print(f"\n[{KAIZEN_DEPT}] 全部屋一覧 {len(items)}件 / 本文{len(kbody)}字")
+    print(f"\n[{KAIZEN_DEPT}] 全部屋一覧 {len(items)}件 / 本文{len(kbody)}字 "
+          "→ 配達せずファイルへ落とす(手2・改善提案部門が朝の便で読む)")
+    # ★手2(2026-08-23): 一覧は dispatch で**起こさず**、ファイルへ書く。
+    #   ★書き込みの成否が「行き先へ届いた」の判定(kok)= ここが台帳ゲート(下)を守る。
+    #     書けなければ台帳へ何も書かない=次回まるごと拾い直す(従来と同じ不変条件)。
+    #   ★dry-run は本番と同じく実ファイルは触らない(台帳も汚さない)= 中身を見せるだけ。
+    kok = True
     if a.dry_run:
-        print("---8<--- ここから本文 ---8<---")
+        print("---8<--- ここから本文(ファイルには書かない) ---8<---")
         print(kbody)
         print("---8<--- ここまで本文 ---8<---")
-    kok = send(KAIZEN_DEPT, kbody, a.dry_run)
+    else:
+        try:
+            os.makedirs(os.path.dirname(KAIZEN_DIGEST), exist_ok=True)
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            header = ("<!-- 絵文字監視(毎朝8時)が書いた全部屋一覧。改善提案部門が8:10の便で読む。 -->\n"
+                      f"<!-- 書込時刻: {stamp} / 件数: {len(items)} -->\n\n")
+            with open(KAIZEN_DIGEST, "w", encoding="utf-8") as f:
+                f.write(header + kbody + "\n")
+            print(f"   一覧を書いた: {KAIZEN_DIGEST}")
+        except Exception as e:
+            kok = False
+            print(f"   ★一覧のファイル書き込みに失敗: {type(e).__name__}: {e}")
     if not kok:
         failed.append(KAIZEN_DEPT)
 
@@ -786,12 +809,12 @@ def main():
         return 0
 
     # ★台帳へ入れるのは「行き先すべてへ届いたもの」だけ。届かなかったものは次回もう一度拾う。
-    #   行き先= ①その部屋(hqは出さないので最初から済み扱い) ②改善提案部門の一覧。
-    #   ★kaizenへの一覧が落ちた時は**何も記録しない**= 次回その部屋へ二重に出る可能性が残る。
+    #   行き先= ①その部屋(hqは出さないので最初から済み扱い) ②改善提案部門の一覧(手2以降=ファイル)。
+    #   ★一覧のファイル書き込みが落ちた時は**何も記録しない**= 次回その部屋へ二重に出る可能性が残る。
     #     それでも「拾い漏らす」より「二度出る」方を採る(合図を落とす方が害が大きい)。
-    #     dispatchはローカルのキューへ入れるだけなので、ここが落ちるのは相当な異常時に限られる。
+    #     ローカルへの書き込みなので、ここが落ちるのは相当な異常時に限られる(旧: dispatchのキュー投函)。
     if not kok:
-        print("\n★改善提案部門への一覧が投函できなかったので、台帳へは何も書かない"
+        print("\n★改善提案部門への一覧をファイルへ書けなかったので、台帳へは何も書かない"
               "(次回まるごと拾い直す)。")
         return 1
     delivered = {it["key"] for it in posted} | {it["key"] for it in items if it["dept"] in SKIP_DEPTS}

@@ -3102,6 +3102,44 @@ def model_override_for(dept, kind):
         return None                                  # 判定不能=上書きしない(品質側へ倒す)
 
 
+# ★2026-08-23 朝の定型producer便だけ Sonnet で回す(研究室HQ msg 1540947756045312121・手1)。
+#   朝の窓の便の93%が重み5.0のopus系で、その値段が週消費を押し上げている(morning_burn.py 実測)。
+#   ★対象は**定型producerの3本だけ**(下の author 完全一致)= 毎朝の定刻便。
+#     ・se_daily_review     "self (scheduled daily review)"   (毎朝8時の前日振り返り)
+#     ・kaizen_daily_0810   "自動(毎朝8:10の改修α集計)"        (24h集計)
+#     ・絵文字監視           "絵文字監視(毎朝8時の自動巡回)"      (再発スタンプの受け取り)
+#   ★対象外(=Opusのまま)= Chamiの便 / 🔥(C-040) / 炎上 / インシデント。
+#     絵文字監視の便は🔥を含みうるので、本文に下の語が1つでも在れば落とさない(品質側=Opusへ倒す)。
+#   ★判定は**この1本だけ**(単一の述語)。相当する author 文字列は各producerの `--from` の値。
+_ROUTINE_PRODUCER_AUTHORS = frozenset({
+    "self (scheduled daily review)",
+    "自動(毎朝8:10の改修α集計)",
+    "絵文字監視(毎朝8時の自動巡回)",
+})
+_KEEP_OPUS_MARKERS = ("🔥", "炎上", "インシデント", "incident")
+
+
+def routine_producer_model(rec):
+    """この便が「朝の定型producer便」かつ🔥/炎上/インシデントでない時だけ "sonnet"。
+
+    それ以外(=通常便・Chami便・🔥を含む便・判定不能)は None= 既定(Opus)のまま。
+    ★None を返す = 落とさない = 品質側へ倒す(§4.55の"効いた"は翌朝 morning_burn で確認する)。
+    """
+    try:
+        author = str((rec or {}).get("author") or "")
+        if author not in _ROUTINE_PRODUCER_AUTHORS:
+            return None
+        # producer名義に chami は来ないが、二重の保険(is_from_chami と同じ見立て=author一致)。
+        if "chami" in author.lower():
+            return None
+        content = str((rec or {}).get("content") or "")
+        if any(m in content for m in _KEEP_OPUS_MARKERS):
+            return None
+        return "sonnet"
+    except Exception:
+        return None                                  # 判定不能=落とさない(Opusのまま)
+
+
 WORK_AUDIT = os.path.join(LOCAL, "llm", "work_audit.jsonl")
 
 
