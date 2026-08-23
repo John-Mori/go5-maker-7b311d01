@@ -125,6 +125,16 @@ def _reset(path):
         pass
 
 
+def _age_text(n, minutes_per=POLL_INTERVAL_MIN):
+    """連続失敗数nを経過時間の言葉にする。★1時間未満は「約N分」(整数除算で常に「約0時間」になる穴の恒久対策)。
+
+    実害= 閾値ちょうど(n=3=15分)の警報が「約0時間待機している」と出て、受け手が滞留量を読めない
+    (2026-08-23 14:47 にイージス研究室へ実際にそう届いた便がある)。
+    """
+    m = int(n) * int(minutes_per)
+    return f"約{m // 60}時間" if m >= 60 else f"約{m}分"
+
+
 def _log(line, log_path=POLL_LOG):
     """運用ログへ1行。★log_path を引数化してある=検査は継ぎ目の内側で逃がせる(返す物1)。"""
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -207,13 +217,19 @@ def deliver_row(row, dry_run=False):
     return True
 
 
-def alert_room(reason, dept=ALERT_DEPT):
+def alert_room(reason, dept=ALERT_DEPT, recovered=False):
     """初期化後の異常を**部屋へ**1回出す。**継ぎ目#3(dispatchのPopen)**。返り値は使わない。
 
     ★run_once が「閾値ちょうど」でしか呼ばない=毎周期は鳴らさない。
+    ★recovered=True= 復旧の一報(鳴らした警報の後始末)。警報を出した部屋に「戻った」も出す
+      =片側だけだと部屋には壊れたままに見え、毎回人が測り直す羽目になる(2026-08-23の実例)。
     """
-    body = ("【提案決定→軍議エコー・警報】" + reason + "\n"
-            "(自動: teian_echo_poll / これは連続失敗が閾値に達した時だけの1回・毎周期は鳴らさない)")
+    if recovered:
+        body = ("【提案決定→軍議エコー・復旧】" + reason + "\n"
+                "(自動: teian_echo_poll / 直前に出した警報の後始末・1回だけ)")
+    else:
+        body = ("【提案決定→軍議エコー・警報】" + reason + "\n"
+                "(自動: teian_echo_poll / これは連続失敗が閾値に達した時だけの1回・毎周期は鳴らさない)")
     try:
         subprocess.run([sys.executable, DISPATCH, "--dept", dept,
                         "--from", "提案決定→軍議エコー(プラットフォームSE)",
@@ -330,6 +346,18 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
     initialized = os.path.exists(wm_path)
     since = 0 if not initialized else (_read_int(wm_path) or 0)
 
+    # ★復旧の一報の判定材料= この周に入る前の連続失敗数と、その時「部屋で実際に鳴っていたか」。
+    #   鳴っていない失敗(未初期化の既知の待ち・閾値未満)に復旧を出すと、警報より復旧の方が多くなる。
+    prev_fails = _read_int(fail_path) or 0
+    alarm_had_rung = (prev_fails >= alert_at) if initialized else \
+                     bool(wait_alert_every) and prev_fails >= wait_alert_every
+
+    def ring_recovery(what):
+        if alarm_had_rung:
+            alert(f"{what}(連続{prev_fails}回・{_age_text(prev_fails)}ぶり)。"
+                  f"読み取り口も配達も戻っている。原因は不明のまま自然復旧した=同じ形で再発したら追う。",
+                  recovered=True)
+
     data = fetch(since)
     if data is None:
         # fail-open: 水位を進めない。連続失敗カウンタに積む。
@@ -343,9 +371,8 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             #   n==alert_at の一発だけだと、口が落ちたまま続くと2度と鳴らない=静かな死
             #   (デブライネさん指摘 2026-08-23 / C-041=一度の観測を状態の代理にするな)。
             if at_threshold or at_period:
-                hours = n * POLL_INTERVAL_MIN // 60
                 alert(f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた/HTML/JSON壊れ 等)。"
-                      f"水位={since}のまま約{hours}時間待機している。")
+                      f"水位={since}のまま{_age_text(n)}待機している。")
                 note("read-fail", f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた)。"
                                   f"水位={since}のまま。")
         else:
@@ -359,9 +386,8 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             # ★返す物4= 未初期化のまま「時間で」滞留したら周期ちょうどで部屋へ1回escalate。
             #   n==alert_at の1回きりだと、口が生えないまま忘れられても跡は最初の1行だけ=静かな死。
             if at_period:
-                hours = n * POLL_INTERVAL_MIN // 60
                 alert(f"提案決定→軍議エコー(経路B)は改修αの読み取り口(?action=teian_decisions)が"
-                      f"無いまま約{hours}時間(連続{n}回)待ち続けている。決定は提案決定シートに溜まるのに"
+                      f"無いまま{_age_text(n)}(連続{n}回)待ち続けている。決定は提案決定シートに溜まるのに"
                       f"誰も『まだ届いていない』と気づけない=読み取り口の実装が忘れられていないか確認してほしい。")
         return {"status": "fail-open", "watermark": since, "delivered": 0, "fails": n}
 
@@ -372,6 +398,7 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
         _reset(fail_path)
         logf(f"[初期化] 提案決定エコーの水位を lastRow={last} に置いた(既存の決定は配達しない)。")
         note("bootstrap-wait", f"改修αの読み取り口が生えて水位を lastRow={last} に初期化した。", resolve=True)
+        ring_recovery(f"改修αの読み取り口が生えて水位を lastRow={last} に初期化した")
         return {"status": "init", "watermark": last, "delivered": 0, "fails": 0}
 
     headers = data.get("headers") if isinstance(data.get("headers"), list) else None
@@ -392,8 +419,7 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             # ★閾値ちょうど **または** 周期(約24h)ごとに部屋へ1回。配達不能が続いても
             #   n==alert_at の一発だけだと2度と鳴らない=静かな死(デブライネさん指摘 2026-08-23 / C-041)。
             if n == alert_at or (wait_alert_every and n % wait_alert_every == 0):
-                hours = n * POLL_INTERVAL_MIN // 60
-                alert(f"決定は記録されているのに軍議へ配達できない状態が{n}回続いている(row={rownum}・約{hours}時間)。"
+                alert(f"決定は記録されているのに軍議へ配達できない状態が{n}回続いている(row={rownum}・{_age_text(n)})。"
                       f"dispatch側を確認してほしい。水位={since}のまま。")
                 note("deliver-blocked",
                      f"決定は記録されているのに軍議へ配達できない状態が{n}回(row={rownum})。水位={since}のまま。")
@@ -406,6 +432,8 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
     # 開いていた警報を受け手が読む面で閉じる(復旧時に各種1回だけ✅)。
     for k in ("read-fail", "deliver-blocked", "bootstrap-wait"):
         note(k, "1周を正常に完了(連続失敗カウンタを畳んだ)。", resolve=True)
+    # ★部屋で鳴らした警報にだけ、部屋で「戻った」を返す(durable面のRESOLVEDだけだと部屋には壊れたままに見える)。
+    ring_recovery(f"1周を正常に完了した(水位={since}・この周で{delivered}行配達)")
     return {"status": "ok", "watermark": since, "delivered": delivered, "fails": 0}
 
 

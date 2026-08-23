@@ -49,9 +49,11 @@ def _recorder():
 
 
 def _alert_recorder():
-    got = []
-    def a(reason, dept=None):
-        got.append(reason)
+    """部屋への便の偽物。警報だけを got に積み、復旧の一報は recovered に分けて積む。"""
+    got, rec = [], []
+    def a(reason, dept=None, recovered=False):
+        (rec if recovered else got).append(reason)
+    a.recovered = rec
     return got, a
 
 
@@ -346,6 +348,54 @@ def t_initialized_blocked_daily_escalation_on_period():
     assert _run_initfail_with_fail("blocked", 288, every=288) == [], "n=289で誤発火した(毎周期化)"
 
 
+# ---- 15. ★復旧の一報: 部屋で鳴らした警報にだけ、部屋で「戻った」を1回返す -----------
+#   実害(2026-08-23 14:47〜15:37)= 読み取り口が12回連続で落ち、警報だけが部屋に残った。
+#   durable面(hq_open_items.md)はRESOLVEDで閉じたが**部屋には壊れたままに見え**、
+#   イージス研究室が「まだ壊れているのか」を人手で測り直す羽目になった。
+#   must-fail= 閾値未満(=部屋で鳴っていない失敗)で復旧を出したら赤。
+
+def _run_recover_after(seed, initialized=True, every=288):
+    """seed回の失敗が積まれた状態から「きれいに1周」して、部屋への復旧が何回出るかを測る。"""
+    with tempfile.TemporaryDirectory() as d:
+        p = Paths(d)
+        if initialized:
+            T._write_int(p.wm, 5)
+        T._write_int(p.fail, seed)
+        _, deliver = _recorder()
+        alerts, alert = _alert_recorder()
+        _, note = _note_recorder()
+        fetch = _fetch_from(lambda s: [], last_row=5)
+        res = T.run_once(fetch, deliver, alert=alert, note=note, wm_path=p.wm,
+                         fail_path=p.fail, alert_at=3, wait_alert_every=every)
+        assert res["status"] == ("ok" if initialized else "init"), res
+        assert not os.path.exists(p.fail), "きれいに1周したのに失敗カウンタが残っている"
+        assert alerts == [], f"復旧の周で警報を鳴らした: {alerts}"
+        return alert.recovered
+
+
+def t_recovery_notice_only_when_alarm_rang():
+    # 閾値以上(部屋で鳴っていた)→ 復旧を1回だけ出す。滞留量も語る。
+    rec = _run_recover_after(3)
+    assert len(rec) == 1, f"鳴らした警報の復旧が部屋へ1回出ていない: {rec}"
+    assert "連続3回" in rec[0] and "約15分" in rec[0], f"復旧が滞留量を語っていない: {rec[0]}"
+    assert len(_run_recover_after(12)) == 1, "12回連続の後の復旧が出ていない"
+    # ★must-fail: 閾値未満(部屋では鳴っていない)→ 復旧も出さない=警報より復旧が多くなる形を禁じる
+    assert _run_recover_after(2) == [], "部屋で鳴っていない失敗に復旧を出した(通知の水増し)"
+    assert _run_recover_after(0) == [], "失敗0回なのに復旧を出した"
+    # 未初期化(口がまだ無い既知の待ち)は閾値では鳴らさない=復旧も周期に達するまで出さない
+    assert _run_recover_after(3, initialized=False) == [], "既知の待ちに復旧を出した(狼少年の裏返し)"
+    assert len(_run_recover_after(288, initialized=False)) == 1, "周期escalate後の初期化で復旧が出ていない"
+
+
+# ---- 16. ★1時間未満の滞留を「約0時間」と言わない(実際にそう届いた便がある) -------
+
+def t_age_text_uses_minutes_under_one_hour():
+    assert T._age_text(3) == "約15分", T._age_text(3)      # 閾値ちょうど=旧実装は「約0時間」
+    assert T._age_text(11) == "約55分", T._age_text(11)
+    assert T._age_text(12) == "約1時間", T._age_text(12)
+    assert T._age_text(288) == "約24時間", T._age_text(288)
+
+
 def main():
     tests = [
         ("初回は水位を置くだけ・配達も警報もしない", t_init_sets_watermark_no_delivery),
@@ -362,6 +412,8 @@ def main():
         ("★返す物4 未初期化の滞留は周期ちょうどで部屋へ1回", t_bootstrap_daily_escalation_on_period),
         ("★初期化後read-failは周期でも部屋へ1回(静かな死を防ぐ)", t_initialized_read_fail_daily_escalation_on_period),
         ("★初期化後blockedは周期でも部屋へ1回(静かな死を防ぐ)", t_initialized_blocked_daily_escalation_on_period),
+        ("★鳴らした警報にだけ部屋へ復旧を1回返す", t_recovery_notice_only_when_alarm_rang),
+        ("★1時間未満の滞留を「約0時間」と言わない", t_age_text_uses_minutes_under_one_hour),
     ]
     ok = sum(run(n, f) for n, f in tests)
     print(f"\n{ok}/{len(tests)} PASS")
