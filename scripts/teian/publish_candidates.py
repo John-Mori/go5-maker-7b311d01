@@ -22,6 +22,7 @@
 """
 import argparse
 import datetime
+import json
 import os
 import subprocess
 import sys
@@ -32,6 +33,33 @@ BUCKET = "go5-sync-images"
 
 def jst_today() -> str:
     return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)).strftime("%Y-%m-%d")
+
+
+def guard_not_empty(path: str) -> list:
+    """空配信ガード(C-038)。④comments か room_comments が欠けた候補の cid を返す。
+    ★候補JSONが再生成されると comments=[]・room_comments無しに戻る=vision/軍議を通す前に
+      publish すると空のページが客先へ出る(2026-08-23の寸前事故)。空なら止める。
+    返り値が空リスト=全候補OK。中身有り=その cid が未充填。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+    except Exception as e:
+        return [f"__読めず__:{e}"]
+    bad = []
+    for c in doc.get("candidates", []):
+        cid = c.get("cid") or c.get("id") or "?"
+        comments = c.get("comments")
+        rc = c.get("room_comments")
+        rc_ok = isinstance(rc, dict) and bool(rc.get("mitoma")) and bool(
+            (rc.get("main") or {}).get("text") if isinstance(rc.get("main"), dict) else rc.get("main"))
+        if not comments or not rc_ok:
+            miss = []
+            if not comments:
+                miss.append("④comments")
+            if not rc_ok:
+                miss.append("room_comments")
+            bad.append(f"{cid}({'/'.join(miss)})")
+    return bad
 
 
 def put_r2(key: str, path: str, dry: bool) -> bool:
@@ -52,6 +80,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=None, help="YYYY-MM-DD(既定=今日JST)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="空配信ガードを無視して上げる(④comments/room_comments が空でも配信)")
     args = ap.parse_args()
 
     date = args.date or jst_today()
@@ -59,6 +89,17 @@ def main() -> int:
     if not os.path.exists(src):
         sys.stderr.write(f"候補JSONが無い: {src}\n(先に candidates_json.py で生成してから)\n")
         return 1
+
+    bad = guard_not_empty(src)
+    if bad and not args.force:
+        sys.stderr.write(
+            "配信を止めた(空配信ガード C-038)。次の候補が未充填のまま=客先に空ページが出る:\n"
+            + "\n".join(f"  - {b}" for b in bad)
+            + "\n先に vision_comments.py(④comments)と軍議(room_comments)を通すか、"
+              "どうしても上げるなら --force。\n")
+        return 2
+    if bad and args.force:
+        sys.stderr.write("[force] 空のまま配信する: " + ", ".join(bad) + "\n")
 
     ok1 = put_r2(f"teian/{date}.json", src, args.dry_run)
     ok2 = put_r2("teian/latest.json", src, args.dry_run)
