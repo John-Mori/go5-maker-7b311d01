@@ -70,6 +70,44 @@ def make_clone(root, name="clone", origin=PUBLIC_URL):
     return p
 
 
+SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                      "..", "scripts", "llm", "fcc_launch.py")
+
+
+def run_reject(script, enc):
+    """拒否経路を**別プロセスで実物のまま**通し、出口の符号化を enc に固定して見る。
+
+    偽物にするのは何も無い= `--dry-run` かつ workdir が本番の作業ツリー(A違反)なので、
+    判定も分岐も本物、claude は元々起動しない。見たいのは**理由が口から出るか**だけ。
+    """
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = enc
+    r = subprocess.run([sys.executable, script, "--workdir", prod_roots()[0],
+                        "--dry-run"], capture_output=True, timeout=120, env=env)
+    dec = lambda b: (b or b"").decode("utf-8", "replace")
+    return r.returncode, dec(r.stdout), dec(r.stderr)
+
+
+def strip_reconfigure(script, dst):
+    """★must-fail用の変異= `reconfigure(` の行を **同じ字下げの `pass` へ**差し替えた版。
+
+    直した所を**それだけ**戻す。他は本物のまま=「この行が効いている」の証明になる。
+    ★行を**消さない**のが肝= 消すと try が空になって IndentationError で落ち、
+      「落ちた」を must-fail の成功と読み違える(理由が消えたのではなく、文法で死んでいる)。
+    """
+    src = io.open(script, encoding="utf-8").read().splitlines(True)
+    out, hit = [], 0
+    for ln in src:
+        if "reconfigure(" in ln:
+            hit += 1
+            out.append(ln[:len(ln) - len(ln.lstrip())] + "pass  # mutated\n")
+        else:
+            out.append(ln)
+    assert hit == 2, "変異が当たっていない(差し替えた行数=%d)" % hit
+    io.open(dst, "w", encoding="utf-8", newline="").write("".join(out))
+    return dst
+
+
 def publish(p):
     """remote側のツリーを HEAD に合わせる(=`git push` 済みの状態を本物のrefで作る)。"""
     _git(p, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -291,6 +329,27 @@ def main():
         finally:
             fcc_launch.check_d = orig
             fcc_launch.CHECKS[3] = ("D", orig)
+
+        # ---- H. 拒否理由が**日本語Windowsの既定(cp932)でも口から出る**
+        #      (2026-08-23 研究室HQ差し戻し・HQ-0188。止まるだけで理由を言えない
+        #       安全網は「壊れている」と読まれて迂回される)
+        rc, out, err = run_reject(SCRIPT, "cp932")
+        check("H-1 cp932の出口でも拒否理由が出る(終了コード2・tracebackなし)",
+              rc == 2 and "起動を拒否した" in out and "A:" in out
+              and "UnicodeEncodeError" not in err,
+              "rc=%s out=%r err=%r" % (rc, out[:200], err[-200:]))
+
+        mut = strip_reconfigure(SCRIPT, os.path.join(tmp, "fcc_launch_mutated.py"))
+        mrc, mout, merr = run_reject(mut, "cp932")
+        check("H-2 must-fail= reconfigure の1行を戻すと、同じ経路で理由が消えて落ちる",
+              mrc != 2 and "UnicodeEncodeError" in merr and "A:" not in mout,
+              "rc=%s out=%r err=%r" % (mrc, mout[:200], merr[-200:]))
+
+        # ★直した側が「常に鳴る」わけではない= 通る条件では H は何も言わない
+        urc, uout, uerr = run_reject(SCRIPT, "utf-8")
+        check("H-3 出口が utf-8 の時も同じ理由が出る(符号化で判定が変わらない)",
+              urc == 2 and "A:" in uout and out.strip() == uout.strip(),
+              "rc=%s out=%r" % (urc, uout[:200]))
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

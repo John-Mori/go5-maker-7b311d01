@@ -31,6 +31,19 @@ import time
 import urllib.error
 import urllib.request
 
+# ★出口の符号化を utf-8 に固定する(2026-08-23 研究室HQ差し戻し・HQ-0188)。
+#   日本語Windowsの既定(cp932)へ拒否理由を書くと "✗" が UnicodeEncodeError で落ち、
+#   **「なぜ止めたか」が1行も出ずに traceback だけ**になっていた。
+#   起動そのものは止まる=fail-close の向きは壊れていない。だが理由を言えない安全網は
+#   「起動器が壊れた」と読まれて**迂回される**(共通規律§3「常に誤発火する安全網は無視される」)。
+#   ★記号を ASCII へ落とすのではなく**出口を直す**=後から記号や非cp932のパスが理由文へ
+#   混ざっても同じ穴が開かない。errors="replace" で、書けない字が来ても**黙らない**。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 HOME = os.path.expanduser("~")
 FCC_ENV = os.path.join(HOME, ".fcc", ".env")
 FCC_URL = "http://127.0.0.1:8082"
