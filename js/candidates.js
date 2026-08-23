@@ -252,7 +252,8 @@
   var MAKER_REFRESH_MIN_MS = 60 * 1000; // 60秒
 
   var _activeTab = 'main'; // 'main' | サークルタブid
-  var _sort = 'rank7d'; // 既定=直近1週間で売れてる順(Chami指示2026-08-24)。差分が溜まるまでは累計販売数→レビュー数へ自動フォールバック(scoreOfSort_ rank7d)
+  var _sort = 'added_desc'; // 現在表示中の並び順。タブ入場時に defaultSortForTab_ で上書きされる(下 render())。
+  var _sortTab = null;      // _sort を最後に既定へ揃えたタブ。タブが実際に変わった時だけ既定へ戻す目印(再描画では触らない)
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
   var _workSearchByTab = {};
@@ -437,6 +438,41 @@
   // 「直近1週間で売れてる順」の注記。
   var RANK7D_NOTE = '※「直近1週間で売れてる順」は、実売本数(販売数)の週次差分があればそれで、無ければレビュー件数の伸びで並べます。差分は記録が溜まる数日後から出ます。';
   var SALES_NOTE = '※DMMの販売数(実売本数)は日本IPの詳細ページにのみ有り、サーバー(海外IP)からは取得不可のため、PCで「販売数を取得.bat」を実行して取り込みます。(未取得の間はレビュー件数を代理表示)';
+
+  // ── タブ別の既定並び順(Chami指示2026-08-24) ──
+  //   組込既定=📚全候補だけ「直近1週間で売れてる順(rank7d)」・他タブは「追加日が新しい順(added_desc)」。
+  //   各タブの「★既定に」ボタンで、今の並び順をそのタブの既定として上書き保存できる(タブID別・端末ローカル)。
+  //   storage-keys 未登録=既定で非同期対象外(端末ごとの表示設定)。schedulePoolSync_ を誤発火させないため直接 localStorage。
+  var K_SORTDEF = 'cand_sort_defaults';
+  function sortDefaults_() { try { return JSON.parse(localStorage.getItem(K_SORTDEF) || '{}') || {}; } catch (e) { return {}; } }
+  function isSortKey_(k) { return SORTS.some(function (s) { return s.key === k; }); }
+  function builtinSortFor_(tabId) { return tabId === 'all' ? 'rank7d' : 'added_desc'; }
+  function defaultSortForTab_(tabId) {
+    tabId = tabId || 'main';
+    var v = sortDefaults_()[tabId];
+    return (typeof v === 'string' && isSortKey_(v)) ? v : builtinSortFor_(tabId);
+  }
+  function saveDefaultSort_(tabId, key) {
+    if (!isSortKey_(key)) return;
+    var m = sortDefaults_(); m[tabId || 'main'] = key;
+    try { localStorage.setItem(K_SORTDEF, JSON.stringify(m)); } catch (e) {}
+  }
+  // 並び順セレクト＋「★既定に」ボタンのHTML(候補全体で1組=candSort / candSortDefault)。
+  function sortControlHtml_() {
+    var sortOpts = SORTS.map(function (s) { return '<option value="' + s.key + '"' + (s.key === _sort ? ' selected' : '') + '>' + s.label + '</option>'; }).join('');
+    return '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
+      '<button id="candSortDefault" type="button" class="ghost" title="今の並び順をこのタブの既定にする" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">★既定に</button>';
+  }
+  // candSort の変更・candSortDefault のクリックを配線。rerender=そのタブの再描画関数。
+  function wireSortControl_(tabId, rerender) {
+    var sel = $('candSort'); if (sel) sel.addEventListener('change', function () { _sort = this.value; rerender(); });
+    var btn = $('candSortDefault');
+    if (btn) btn.addEventListener('click', function () {
+      saveDefaultSort_(tabId, _sort);
+      btn.textContent = '★既定にした'; btn.disabled = true;
+      setTimeout(function () { try { btn.textContent = '★既定に'; btn.disabled = false; } catch (e) {} }, 1400);
+    });
+  }
 
   // ── レビュー件数スナップショット(「直近1週間で売れてる順」の差分計算用)──
   //   cid毎に {at,c} を最大8件・45日以内で保持。12時間に1回だけ記録して肥大化を防ぐ。
@@ -3159,6 +3195,9 @@
     ensureCardDelegation_(page); // page自体は再描画で交換されないため、カード差し替え後も操作を受け続ける
     _bgRerenderPending = false; // どの経路の描画でも保留は解消(追加確定・タブ再入場で最新へ追いつく)
     kickInfoBackfill_(); // タブへ戻ってきた時=未取得タイトルの追跡を素早いフェーズへ戻す(この後の描画でbackfillが回る)
+    // タブが実際に切り替わった時だけ、そのタブの既定並び順へ揃える。並べ替え変更後の再描画では
+    //   _sortTab===_activeTab のため _sort に触れない=ユーザーがその場で選んだ順を保つ(Chami指示2026-08-24)。
+    if (_sortTab !== _activeTab) { _sort = defaultSortForTab_(_activeTab); _sortTab = _activeTab; }
     var tabs = lsGet(K_TABS, '[]');
     var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 ' + esc(builtinTabLabel_('buzz')) + '</button>' +
       '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 ' + esc(builtinTabLabel_('main')) + '</button>' +
@@ -3302,10 +3341,9 @@
     var body = $('candBody');
     if (!body) return;
     var tabs = lsGet(K_TABS, '[]');
-    var sortOpts = SORTS.map(function (s) { return '<option value="' + s.key + '"' + (s.key === _sort ? ' selected' : '') + '>' + s.label + '</option>'; }).join('');
     body.innerHTML = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-        '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
+        sortControlHtml_() +
         '<button id="candEditBuiltin" type="button" class="ghost" title="タブ名を変更" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 名前</button>' +
       '</div>' +
       // アカウント別「投稿済みを非表示」トグル。(全候補でも isHiddenByPosted_ を尊重=L2103)
@@ -3320,7 +3358,7 @@
       '</div>' +
       '<div id="candEditForm"></div>' +
       '<div id="candList"><p class="hint" style="padding:8px;">⏳ 全候補を集約中…</p></div>';
-    $('candSort').addEventListener('change', function () { _sort = this.value; renderAll_(); });
+    wireSortControl_('all', renderAll_);
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderAll_(); });
     wirePriceFilter_(function () { renderAll_(); });
     wireCandColsCtl_();
@@ -4005,10 +4043,9 @@
     tabId = tabId || 'main';
     var body = $('candBody');
     var isMain = (tabId === 'main');
-    var sortOpts = SORTS.map(function (s) { return '<option value="' + s.key + '"' + (s.key === _sort ? ' selected' : '') + '>' + s.label + '</option>'; }).join('');
     var header = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-      '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
+      sortControlHtml_() +
       '<button id="candReload" type="button" class="ghost" title="価格・販売数を取り直す" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
       (isMain
@@ -4034,7 +4071,7 @@
        '<div id="candPageMsg" class="hint" role="status" aria-live="polite"' + (_candAddNotice ? '' : ' hidden') + ' style="margin-top:7px;color:var(--accent);font-weight:700;">' + esc(_candAddNotice) + '</div>' +
       '</div>';
     body.innerHTML = header + '<div id="candEditForm"></div>' + '<div id="candList"></div>';
-    $('candSort').addEventListener('change', function () { _sort = this.value; renderCandList(tabId); });
+    wireSortControl_(tabId, function () { renderCandList(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; this.classList.toggle('active', _showHidden); this.textContent = _showHidden ? '👁 通常表示に戻す' : '非表示リスト'; renderCandList(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderCandList(tabId); });
     wirePriceFilter_(function () { renderCandList(tabId); });
@@ -4579,10 +4616,9 @@
     var tab = null; tabs.forEach(function (t) { if (t.id === tabId) tab = t; });
     var body = $('candBody');
     if (!tab) { _activeTab = 'main'; render(); return; }
-    var sortOpts = SORTS.map(function (s) { return '<option value="' + s.key + '"' + (s.key === _sort ? ' selected' : '') + '>' + s.label + '</option>'; }).join('');
     body.innerHTML = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-      '<select id="candSort" style="flex:1;min-width:140px;">' + sortOpts + '</select>' +
+      sortControlHtml_() +
       '<button id="candReload" type="button" class="ghost" title="全件を取り直す(キャッシュを無視)" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
       '<button id="candEditTab" type="button" class="ghost" title="タブ名・サークルを編集" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>' +
@@ -4602,7 +4638,7 @@
       '</div>' +
       '<div id="candEditForm"></div>' +
       '<div id="candMakerList"><p class="hint" style="padding:8px;">' + (force ? '🔁 全件を取り直しています…' : '⏳ サークルの作品を取得中…') + '</p></div>';
-    $('candSort').addEventListener('change', function () { _sort = this.value; renderMaker(tabId); });
+    wireSortControl_(tabId, function () { renderMaker(tabId); });
     $('candShowHidden').addEventListener('click', function () { _showHidden = !_showHidden; renderMaker(tabId); });
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderMaker(tabId); });
     wirePriceFilter_(function () { renderMaker(tabId); });
