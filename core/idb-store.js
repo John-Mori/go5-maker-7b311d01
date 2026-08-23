@@ -155,6 +155,7 @@
   // 全エントリを {key: value} で返す。(起動時のハイドレート用)閉じかけなら1回だけ再オープンして張り直す。
   function readEntries_(prefix, retry) {
     if (retry === undefined) retry = true;
+    try { if (root && root.Go5ImgDiag) root.Go5ImgDiag.push('idb_read_start', { prefix: prefix }); } catch (e) {}
     return open().then(function (db) {
       return new Promise(function (resolve, reject) {
         var out = {}, t, st, c, range, settled = false, wd = null;
@@ -171,7 +172,7 @@
           else finish(function () { reject(err); });
         }
         try {
-          wd = setTimeout(function () { failOrRetry(new Error(label + "-timeout")); }, TX_TIMEOUT_MS);
+          wd = setTimeout(function () { try { if (root && root.Go5ImgDiag) root.Go5ImgDiag.push('idb_read_timeout', { prefix: prefix }); } catch (e) {} failOrRetry(new Error(label + "-timeout")); }, TX_TIMEOUT_MS);
           t = db.transaction(STORE, "readonly");
           st = t.objectStore(STORE);
           if (prefix === null) c = st.openCursor();
@@ -192,9 +193,10 @@
             //   一括読みが正当に8秒を超える端末でも、健康なIDBを誤って殺し永久失敗ループ(⏳吸収状態)に落とさない
             //   (Fable5診断2026-08-24)。真のハング(1行も進まない)は従来どおり8秒で落ちる=検知力は不変。
             if (wd) { try { clearTimeout(wd); } catch (e) {} }
-            wd = setTimeout(function () { failOrRetry(new Error(label + "-timeout")); }, TX_TIMEOUT_MS);
+            wd = setTimeout(function () { try { if (root && root.Go5ImgDiag) root.Go5ImgDiag.push('idb_read_timeout', { prefix: prefix }); } catch (e) {} failOrRetry(new Error(label + "-timeout")); }, TX_TIMEOUT_MS);
             cur.continue();
           } else {
+            try { if (root && root.Go5ImgDiag) root.Go5ImgDiag.push('idb_read_done', { prefix: prefix, count: Object.keys(out).length }); } catch (e) {}
             finish(function () { resolve(out); });
           }
         };

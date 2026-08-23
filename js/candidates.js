@@ -904,9 +904,11 @@
     // 作品はメモリに無いことがあるため、cid単位の既知フラグ/実体が無ければ直接getする。
     if (!cid || !_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
       if (cid && Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) _refLoaded[cid] = true;
+      window.Go5ImgDiag && Go5ImgDiag.push('ref_hit', { cid: cid });
       return Promise.resolve(true);
     }
     if (_refLoadJobs[cid]) return _refLoadJobs[cid];
+    window.Go5ImgDiag && Go5ImgDiag.push('ref_get_start', { cid: cid });
     var readP = (typeof window.Go5Idb.getResult === 'function')
       ? window.Go5Idb.getResult(idbKey('ref', cid))
       : window.Go5Idb.get(idbKey('ref', cid)).then(function (value) {
@@ -916,6 +918,7 @@
         });
     var job = readP.then(function (result) {
       if (!result || !result.ok) {
+        window.Go5ImgDiag && Go5ImgDiag.push('ref_get_err', { cid: cid });
         idbFail_(result && result.error ? result.error : new Error('idb-read-failed'));
         var old = legacyRefOf_(cid);
         if (isR2Marker_(old)) { resolveR2IntoMem_(cid, old); return false; } // マーカーはR2から実体化(メモリ/IDBへ生で入れない)
@@ -924,9 +927,11 @@
       }
       var rec = result.value;
       if (rec) {
+        window.Go5ImgDiag && Go5ImgDiag.push('ref_get_ok', { cid: cid });
         _imgMem.ref[cid] = rec;
         backfillCandText_(cid, rec); // 直読1件も同期LSへ昇格
       } else {
+        window.Go5ImgDiag && Go5ImgDiag.push('ref_get_null', { cid: cid });
         // 旧localStorage形式が残っている端末は、この1件も移行完了前に安全に拾う。
         var legacy = legacyRefOf_(cid);
         if (isR2Marker_(legacy)) {
@@ -941,6 +946,7 @@
       _refLoaded[cid] = true; // 読取成功時だけ「存在しない」ことも確認済みにする
       return true;
     }).catch(function (e) {
+      window.Go5ImgDiag && Go5ImgDiag.push('ref_get_err', { cid: cid });
       idbFail_(e); return false;
     });
     _refLoadJobs[cid] = job.then(function (ok) { delete _refLoadJobs[cid]; return ok; }, function () { delete _refLoadJobs[cid]; return false; });
@@ -1055,14 +1061,16 @@
     if (!cid || _r2ResolveJobs[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) return;
     if (!isR2Marker_(marker)) return;
     _r2ResolveJobs[cid] = true;
+    window.Go5ImgDiag && Go5ImgDiag.push('r2_start', { cid: cid });
     resolveRefFromR2_(cid, marker.__r2n).then(function (imgs) {
       delete _r2ResolveJobs[cid];
-      if (!imgs || !imgs.length) { refFailMark_(cid); return; } // 取れなければマーカーのまま=次回再試行(「無い」と断定しない・持続失敗は⌛へ)
+      if (!imgs || !imgs.length) { window.Go5ImgDiag && Go5ImgDiag.push('r2_err', { cid: cid }); refFailMark_(cid); return; } // 取れなければマーカーのまま=次回再試行(「無い」と断定しない・持続失敗は⌛へ)
+      window.Go5ImgDiag && Go5ImgDiag.push('r2_ok', { cid: cid });
       refFailClear_(cid);
       _imgMem.ref[cid] = refRecordFromMarker_(marker, imgs);
       _refLoaded[cid] = true;
       refRefreshCard_(cid);
-    }, function () { delete _r2ResolveJobs[cid]; refFailMark_(cid); });
+    }, function () { delete _r2ResolveJobs[cid]; window.Go5ImgDiag && Go5ImgDiag.push('r2_err', { cid: cid }); refFailMark_(cid); });
   }
   // 候補→動画作成の写真ハンドオフ用: 画像を「待って」取り出す。メモリ/LSに実体があれば即返し、無くて
   //   R2退避マーカーだけがある時は resolveRefFromR2_ を await してから返す。★resolveR2IntoMem_ は裏で
@@ -1307,10 +1315,12 @@
   function hydrateHistoryImages_() {
     if (_hydrated || _histHydrateInFlight) return;
     _histHydrateInFlight = true;
+    window.Go5ImgDiag && Go5ImgDiag.push('hist_start');
     readImageEntries_(['post:', 'used:']).then(function (all) {
       _histHydrateInFlight = false;
       _histHydrateFailures = 0;
       mergeImageEntries_(all);
+      window.Go5ImgDiag && Go5ImgDiag.push('hist_done', { count: Object.keys(all || {}).length });
       markHydrated_();  // go5-images-hydrated を発火→StockLists/ランキング(yt-clicks.js)が自動で描き直す
     }).catch(function (e) {
       _histHydrateInFlight = false;
@@ -1339,7 +1349,10 @@
   function hydrateImages_() {
     if (!_idbOk || _candidateHydrated || _candidateHydrateInFlight) return;
     _candidateHydrateInFlight = true;
+    var __hydT0 = Date.now(), __hydCount = 0;
+    window.Go5ImgDiag && Go5ImgDiag.push('hydrate_start');
     readImageEntries_(['ref:', 'bsky:']).then(function (all) {
+      __hydCount = Object.keys(all || {}).length;
       mergeImageEntries_(all);
       return migrateLocalImages_();
     }).then(function () {
@@ -1348,6 +1361,7 @@
       resetCandidateHydrateFailures_();
       hideIdbRecoveryHint_();   // 展開できた=「失敗案内」はもう嘘。回復イベント頼みにせず直接消す
       markCandidateHydrated_(); // 候補画像・コメントの空保存拒否をここで解除
+      window.Go5ImgDiag && Go5ImgDiag.push('hydrate_done', { count: __hydCount, ms: Date.now() - __hydT0 });
       bgRender_();              // サムネ・コメント・✓バッジをすぐ反映
       if (!window.__go5CandidateStandalone) hydrateHistoryImages_();
     }).catch(function (e) {
@@ -1356,6 +1370,7 @@
       if (_candidateHydrateFailures === 1) _hydrateFailSince = Date.now(); // 連鎖の起点を刻む
       // 一時的なSafariの接続死を「IDB非対応」と確定して空表示へ落とさない。張り直しを継続する。
       try { console.warn('[go5 idb] 候補画像の展開を再試行します', e); } catch (_) {}
+      window.Go5ImgDiag && Go5ImgDiag.push('hydrate_fail', { fails: _candidateHydrateFailures });
       // ★案内バーは「持続死」だけに絞る(誤発火の恒久対策・Chami報告2026-08-18「案内がめちゃくちゃ出る」)。
       //   旧: 5回連続失敗(≒15秒)で即表示 → iOSのタブ退避/一時的メモリ圧など数秒で回復する接続死でも
       //   「閉じて開き直せ(再読込では直らない)」という強い案内が頻発していた。今は go5-idb-recovered で
@@ -4723,7 +4738,7 @@
     cid = String(cid || ''); if (!cid) return;
     var r = _refFail[cid] || (_refFail[cid] = { n: 0, since: Date.now() });
     r.n++; if (!r.since) r.since = Date.now();
-    if (refStallDecide_(r.n, r.since, Date.now())) { refRefreshCard_(cid); return; } // stall到達=これ以上⏳で回さず⌛へ切替(環を閉じる)
+    if (refStallDecide_(r.n, r.since, Date.now())) { window.Go5ImgDiag && Go5ImgDiag.push('stalled', { cid: cid, n: r.n }); refRefreshCard_(cid); return; } // stall到達=これ以上⏳で回さず⌛へ切替(環を閉じる)
     if (_refRetryTimers[cid]) return;                 // 予約は1本だけ(多重発射しない)
     var delay = Math.min(12000, 3000 * Math.pow(2, Math.max(0, r.n - 1)));
     _refRetryTimers[cid] = setTimeout(function () {
@@ -4781,6 +4796,7 @@
   }
   function _runRefProbe_(cid) {
     _refProbeActive++;
+    window.Go5ImgDiag && Go5ImgDiag.push('probe_start', { cid: cid, active: _refProbeActive });
     ensureRefLoaded_(cid).then(function (ok) {
       if (ok) { refFailClear_(cid); refRefreshCard_(cid); }
       else if (!_r2ResolveJobs[cid]) refFailMark_(cid); // マーカー実体化(resolveR2IntoMem_)が走っていない=真の行き止まり
@@ -4805,7 +4821,7 @@
     if (imgs.length) {
       var multi = imgs.length > 1;
       var cap = multi ? ('動画生成用の画像(全' + imgs.length + '枚・タップで拡大)') : '動画生成用の画像(タップで拡大)';
-      return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-refimgview="' + esc(cid) + '" data-refidx="0" src="' + esc(imgs[0]) + '" loading="lazy" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
+      return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-refimgview="' + esc(cid) + '" data-refidx="0" src="' + esc(imgs[0]) + '" loading="lazy" decoding="async" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
     }
     var state = refSlotState_(cid);
     // ★loadingも per-cid で能動取得する(INC-127→129→132→137の恒久対策の穴埋め)。従来「⏳読込中」は
@@ -4889,7 +4905,7 @@
       (isInfoTarget_(it) ? '<button type="button" class="cand-reload-btn" data-reloadinfo="' + esc(it.cid) + '" title="作品情報(サムネ・タイトル・価格等)を取得し直す">🔁作品情報</button>' : '');
     return '<div class="cand-card' + _postCls + '" data-work-search="' + esc(workSearchText_(it)) + '" data-memo-search="' + esc(normalizeWorkSearch_((refCmt || '') + ' ' + (refMemo || ''))) + '">' +
       '<div class="cand-thumbcol">' +
-        (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
+        (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" decoding="async" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
         refImgHtml +
       '</div>' +
       '<div class="cand-info">' +

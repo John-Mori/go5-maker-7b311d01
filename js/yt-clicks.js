@@ -2152,8 +2152,8 @@
         '</div>' +
         '</div>' + // .vrow-body
         ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
-          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" style="display:none;">' : '') +
-          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画投稿プレビュー(タップで拡大)" title="タップで拡大(動画投稿プレビュー)" loading="lazy">' : '') +
+          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" decoding="async" style="display:none;">' : '') +
+          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画投稿プレビュー(タップで拡大)" title="タップで拡大(動画投稿プレビュー)" loading="lazy" decoding="async">' : '') +
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
