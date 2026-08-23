@@ -2056,10 +2056,11 @@
       //     Chami報告の"生成に使った画像がプレビュー扱い"の正体。フォールバックを撤去し、本物が無ければ枠ごと出さない
       //     (カードは作品サムネ .vrow-thumb が担う。プレビューは backfill/投稿完了で入った時だけ出る)。
       var usedPrevN_ = (window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(pKey) || 0) : 0;
-      // プレビュー枠に出す1枚は HistMerge.historyPreviewThumb で一元判定(prevN>0 の時だけ本物・test_hist_merge.js で縛る)。
+      // プレビュー枠に出す1枚は HistMerge.historyPreviewThumb で一元判定(prevN>0 の時だけ本物・
+      //   実体は core/image-role.js の単一権威・test_hist_merge.js/test_image_role.js で縛る)。
       var refThumb = (window.HistMerge && window.HistMerge.historyPreviewThumb)
         ? window.HistMerge.historyPreviewThumb(usedImgArr, usedPrevN_)
-        : (usedPrevN_ > 0 ? (usedImgArr[0] || '') : '');
+        : ''; // HistMerge/core/image-role.jsが読めない異常時は安全側(空=枠を出さない)
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
       //   YouTube再生数はAPI未取得/クォータ切れ/紐付け直後だと0や未取得のまま張り付き、下段の「今日▶120/週▶120」
@@ -2297,7 +2298,9 @@
         var prevN = (usedKey && window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
         if (prevN <= 0) return; // プレビュー未保存=何も出さない(生成画像を代わりに出さない)
         var all = (usedKey && window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []).slice() : [];
-        var imgs = all.slice(0, prevN); // 先頭prevN枚=プレビューのみ。元画像(prevN番目以降)は出さない
+        // プレビュー枚だけ(元画像は含めない)＝ HistMerge.historyPreviewImages 一元判定(core/image-role.js)。
+        //   HistMerge/core/image-role.jsが読めない異常時は安全側(空=開かない)。
+        var imgs = (window.HistMerge && window.HistMerge.historyPreviewImages) ? window.HistMerge.historyPreviewImages(all, prevN) : [];
         var caps = imgs.map(function () { return '動画投稿プレビュー'; });
         if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0, { captions: caps });
       });
@@ -3118,15 +3121,19 @@
     var use = (defaultUse && USES.some(function (u) { return u.v === defaultUse; })) ? defaultUse
       : (prevN_() > 0 ? 'prev' : 'post');
     function useDef_() { for (var i = 0; i < USES.length; i++) { if (USES[i].v === use) return USES[i]; } return USES[0]; }
+    // プレビュー枚/使用画像枚のどちらを指すかは core/image-role.js(Go5ImageRole)の判定に一本化(2026-08-23)。
+    //   previewImages=先頭prevN枚(プレビュー)・sourceImages=それ以降(実際に動画へ使った元画像)。
     function load_() {
-      if (use === 'prev') { return usedAll_().slice(0, prevN_()); }        // 先頭プレビュー枚
-      if (use === 'used') { return usedAll_().slice(prevN_()); }           // プレビュー以降＝実際に動画へ使った画像
+      var role = window.Go5ImageRole;
+      if (use === 'prev') { return role ? role.previewImages(usedAll_(), prevN_()) : []; }
+      if (use === 'used') { return role ? role.sourceImages(usedAll_(), prevN_()) : []; }
       if (use === 'bsky') { var b = api.bskyImg ? api.bskyImg(cid) : ''; return b ? [b] : []; }
       return (api.postImgs(pKey) || []).slice();
     }
     function store_(arr) {
-      if (use === 'prev') { var restU = usedAll_().slice(prevN_()); return api.usedImgSave(pKey, arr.concat(restU), arr.length); }   // 新プレビュー＋既存の使用画像・prev=新プレビュー枚数
-      if (use === 'used') { var pv = usedAll_().slice(0, prevN_()); return api.usedImgSave(pKey, pv.concat(arr), pv.length); }        // 既存プレビューを保持したまま使用画像だけ差し替え
+      var role = window.Go5ImageRole;
+      if (use === 'prev') { var restU = role ? role.sourceImages(usedAll_(), prevN_()) : []; return api.usedImgSave(pKey, arr.concat(restU), arr.length); }   // 新プレビュー＋既存の使用画像・prev=新プレビュー枚数
+      if (use === 'used') { var pv = role ? role.previewImages(usedAll_(), prevN_()) : []; return api.usedImgSave(pKey, pv.concat(arr), pv.length); }        // 既存プレビューを保持したまま使用画像だけ差し替え
       if (use === 'bsky') return api.bskyImgSet ? api.bskyImgSet(cid, arr[0] || '') : false;
       return api.postImgSave(pKey, arr);
     }

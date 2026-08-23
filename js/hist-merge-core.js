@@ -20,6 +20,15 @@
 (function (root) {
   'use strict';
 
+  // 「プレビューか元画像か」の判定は core/image-role.js(Go5ImageRole)に一本化済み(2026-08-23)。
+  //   ブラウザでは window.Go5ImageRole(HTMLで先に読み込む)、Node(テスト)では require で同じ実体を取る＝
+  //   判定ロジックをここに二重で持たない(真の単一源)。
+  function imageRoleApi_() {
+    if (typeof window !== 'undefined' && window.Go5ImageRole) return window.Go5ImageRole;
+    if (typeof require === 'function') { try { return require('../core/image-role.js'); } catch (e) {} }
+    return null;
+  }
+
   // 記録シートは作品URLそのものではなく「作品cid」を正本として持つ。
   // URL編集後の保存確認と、シート由来行の再表示で同じ変換規則を使う。
   function workCidFromUrl(url) {
@@ -189,14 +198,22 @@
 
   // 投稿履歴カードの「動画投稿プレビュー」枠に出す1枚を決める(単一権威)。
   // ★本物の仕上がりプレビュー(used レコード先頭 prevCount 枚=stock.js capturePreview_ の #cv 最終フレーム)が
-  //   在る時だけ imgs[0] を返す。prevCount=0(=プレビュー未取得)は空を返す=生成に使った元画像/添付写真を
+  //   在る時だけ返す。prevCount=0(=プレビュー未取得)は空を返す=生成に使った元画像/添付写真を
   //   「動画投稿プレビュー」のラベルで出さない(Chami報告2026-08-22「生成に使った画像がプレビュー扱いされる」の
-  //   恒久ガード。以前はここで bskyImg/postImg へフォールバックしていたのが誤ラベルの正体)。この判定を関数へ
-  //   固定しテスト(test_hist_merge.js)で縛る=render を誰かが直しても元画像フォールバックが戻らない。
+  //   恒久ガード。以前はここで bskyImg/postImg へフォールバックしていたのが誤ラベルの正体)。
+  //   ★判定の実体は core/image-role.js(Go5ImageRole.previewImages)に一本化(2026-08-23)。ここでは
+  //   呼ぶだけ＝render を誰かが直しても元画像フォールバックが戻らない。
   function historyPreviewThumb(usedImages, prevCount) {
-    var imgs = Array.isArray(usedImages) ? usedImages.filter(Boolean) : [];
-    var n = prevCount | 0;
-    return (n > 0 && imgs[0]) ? imgs[0] : '';
+    var role = imageRoleApi_();
+    var imgs = role ? role.previewImages(usedImages, prevCount) : [];
+    return imgs.length ? imgs[0] : '';
+  }
+
+  // 投稿履歴の画像ビュー(拡大ズーム)用：used レコードの「本物のプレビュー」だけを順番通りに全部返す。
+  //   元画像(prevCount番目以降)は含めない(historyPreviewThumbと同じ単一権威=Go5ImageRole)。
+  function historyPreviewImages(usedImages, prevCount) {
+    var role = imageRoleApi_();
+    return role ? role.previewImages(usedImages, prevCount) : [];
   }
 
   // 投稿履歴カードの同一性キー。共有され得る短縮URLより、投稿URI/背骨ID/YouTube IDを優先する。
@@ -263,6 +280,7 @@
     historyItemKey: historyItemKey,
     historyUsedImages: historyUsedImages,
     historyPreviewThumb: historyPreviewThumb,
+    historyPreviewImages: historyPreviewImages,
     workCidFromUrl: workCidFromUrl,
     workUrlFromCid: workUrlFromCid,
     historyHasEdit: historyHasEdit,

@@ -285,7 +285,11 @@
     fd.append("title", title);
     (imgs || []).forEach(function (it) {
       if (!it || !it.blob) return;
-      var name = (it.role === "src")
+      // ★プレビュー/元画像どちらのファイル名にするかは core/image-role.js(Go5ImageRole)の判定を使う
+      //   (2026-08-23・単一権威化。imgs=[{blob, role:'preview'|'src'}] の role タグをここで解釈する)。
+      //   core/image-role.jsが読めない異常時は安全側(プレビュー扱い=元画像として誤って上書きしない)。
+      var role = window.Go5ImageRole ? window.Go5ImageRole.imageRole(it) : "preview";
+      var name = (role === "source")
         ? (safeTitle + "_元画像." + imgExt(it.blob))
         : (safeTitle + "_プレビュー." + imgExt(it.blob));
       fd.append("image", new File([it.blob], name, { type: it.blob.type || "image/jpeg" }), name);

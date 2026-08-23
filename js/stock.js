@@ -1383,19 +1383,27 @@
       });
       return chain;
     }
-    // used: の先頭prev枚=仕上がりプレビュー。その次(prev番目)以降=元画像(生の写真)。dataURL→Blob化して返す。
+    // used: の先頭prev枚=仕上がりプレビュー。その次(prev番目)以降=元画像(生の写真)。
+    //   どちらが仕上がり/元画像かの判定は core/image-role.js(Go5ImageRole)に一本化(2026-08-23)。
+    //   dataURL→Blob化して返す。
     function usedPrevBlob_() {
       return usedRec_().then(function (r) {
         var imgs = (r && r.imgs) || [], prev = (r && r.prev) | 0;
-        if (prev >= 1 && imgs[0]) return durlToBlob_(imgs[0]);
-        return null;
+        var role = window.Go5ImageRole;
+        var prevImgs = role ? role.previewImages(imgs, prev) : []; // core/image-role.jsが読めない異常時は安全側(空)
+        return prevImgs.length ? durlToBlob_(prevImgs[0]) : null;
       }).catch(function () { return null; });
     }
     function usedSrcBlob_() {
       return usedRec_().then(function (r) {
         var imgs = (r && r.imgs) || [], prev = (r && r.prev) | 0;
-        var idx = (imgs.length > prev) ? prev : (imgs.length ? 0 : -1); // 先頭prev枚を飛ばした最初の元画像
-        if (idx >= 0 && imgs[idx]) return durlToBlob_(imgs[idx]);
+        var role = window.Go5ImageRole;
+        var srcImgs = role ? role.sourceImages(imgs, prev) : []; // core/image-role.jsが読めない異常時は安全側(空)
+        if (srcImgs.length) return durlToBlob_(srcImgs[0]);
+        // ★元画像が1枚も保存されていない(=保存されているのは仕上がりプレビューだけ)場合の最後の砦。
+        //   本来は元画像ではないが、何も返さないよりはDriveへ何か残す方を選ぶ既存挙動を温存する
+        //   (2026-08-23 imageRole統合時に挙動を変えずここへ移設)。
+        if (imgs.length && imgs[0]) return durlToBlob_(imgs[0]);
         return null;
       }).catch(function () { return null; });
     }
@@ -1572,8 +1580,11 @@
             return;
           }
           var saved = res.added || [];
-          var savedPrev = saved.some(function (n) { return String(n).indexOf('プレビュー') >= 0; });
-          var savedSrc  = saved.some(function (n) { return String(n).indexOf('元画像') >= 0; });
+          // ★Workerが返す追加ファイル名(例:"題名_プレビュー.jpg")からどちらが保存されたかを見るのも
+          //   core/image-role.js(Go5ImageRole)の名前判定に一本化(2026-08-23)。
+          var roleApi = window.Go5ImageRole;
+          var savedPrev = !!roleApi && saved.some(function (n) { return roleApi.imageRole({ name: n }) === 'preview'; });
+          var savedSrc  = !!roleApi && saved.some(function (n) { return roleApi.imageRole({ name: n }) === 'source'; });
           var parts = [];
           if (savedPrev) parts.push('プレビュー');
           if (savedSrc)  parts.push('元画像');
