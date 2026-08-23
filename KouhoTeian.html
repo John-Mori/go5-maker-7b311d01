@@ -62,6 +62,22 @@
     background:rgba(0,0,0,.55);border-radius:999px;padding:2px 8px;pointer-events:none}
   .hero .tap{position:absolute;left:6px;bottom:6px;font-size:.62rem;color:#fff;
     background:rgba(0,0,0,.45);border-radius:6px;padding:2px 6px;pointer-events:none}
+  /* 絞り込み */
+  .filters{display:flex;flex-wrap:wrap;gap:8px}
+  .fchk{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:var(--ink);
+    background:var(--field);border:1px solid var(--line2);border-radius:999px;padding:6px 12px;cursor:pointer}
+  .fchk input{margin:0}
+  /* 画像2枚並び: 左=動画生成用画像(素材) / 右=サンプル(FANZA・タップで全画像) */
+  .imgrow{display:flex;gap:8px;align-items:flex-start;margin:6px 0 8px}
+  .imgrow .hero{margin:0}
+  .genimg{flex:0 0 auto;position:relative}
+  .genimg img{height:160px;width:auto;max-width:44vw;border-radius:10px;border:1px solid var(--line);
+    background:var(--canvas);object-fit:cover;display:block;cursor:pointer}
+  .genimg .lbl{position:absolute;left:6px;top:6px;font-size:.6rem;font-weight:700;color:#fff;
+    background:rgba(43,179,192,.92);border-radius:6px;padding:2px 6px;pointer-events:none}
+  .genimg.none{height:160px;width:118px;border:1px dashed var(--line2);border-radius:10px;background:var(--card2);
+    display:flex;align-items:center;justify-content:center;text-align:center;color:var(--dim);
+    font-size:.68rem;line-height:1.4;padding:6px}
   /* サンプル画像ライトボックス(タップで全画像) */
   .imodal{position:fixed;inset:0;z-index:80;background:rgba(20,18,12,.88);display:none;
     overflow-y:auto;-webkit-overflow-scrolling:touch}
@@ -149,6 +165,17 @@
     <div class="hint" style="margin-top:6px">未入力なら本体アプリの設定 (bsky_gas_url / bsky_gas_secret) を使います。</div>
   </details>
 
+  <div class="panel" id="filterPanel" style="display:none">
+    <div class="head">絞り込み</div>
+    <div class="filters">
+      <label class="fchk"><input type="checkbox" id="fMovieImg"><span>動画生成用画像あり</span></label>
+      <label class="fchk"><input type="checkbox" id="fSale"><span>セール中</span></label>
+      <label class="fchk"><input type="checkbox" id="fHideTsuku"><span>月詠み投稿済みを隠す</span></label>
+      <label class="fchk"><input type="checkbox" id="fHideYoi"><span>宵桜投稿済みを隠す</span></label>
+    </div>
+    <div class="hint" id="filterCount" style="margin-top:6px"></div>
+  </div>
+
   <div id="list"></div>
 </div>
 
@@ -160,6 +187,11 @@
   </div>
 </div>
 
+<!-- 動画生成用画像(=候補タブでChamiが貼る素材)を cid で読むための土台。本体アプリと同一オリジン=
+     同じ IndexedDB(go5store/kv の ref:<cid>)を読める。★?v= は付けない(このページは bump.mjs の
+     TARGETS 外=?v= を持つと孤児検出でCIが赤になる。coreは安定ファイルなので素で読む)。 -->
+<script src="core/util.js"></script>
+<script src="core/idb-store.js"></script>
 <script>
 (function(){
   "use strict";
@@ -219,8 +251,12 @@
   function render(){
     if(!DATA || !DATA.candidates || !DATA.candidates.length){ renderEmpty('候補がありません。JSON を読み込んでください。'); return; }
     $('#date').textContent = DATA.date || '';
-    var cands = DATA.candidates.slice().sort(function(a,b){
+    var all = DATA.candidates.slice().sort(function(a,b){
       return ((b.metrics&&b.metrics.score)||0) - ((a.metrics&&a.metrics.score)||0); });
+    var cands = all.filter(passFilter_);
+    $('#filterPanel').style.display='block';
+    $('#filterCount').textContent = cands.length + ' / ' + all.length + ' 件を表示';
+    if(!cands.length){ $('#list').innerHTML='<div class="empty">絞り込みに合う候補がありません。条件を外してください。</div>'; $('#decbar').style.display='none'; return; }
     var html='';
     cands.forEach(function(c, i){
       var m = c.metrics||{};
@@ -265,9 +301,11 @@
       html += '<div class="cand" data-cand="'+cid_+'" id="cand_'+cid_+'">'+
         '<div class="top"><div class="rank">'+(i+1)+'</div><p class="title">'+esc(c.title||'(無題)')+'</p></div>'+
         '<div class="meta">'+meta.join('')+'</div>'+
-        (imgs.length?'<div class="hero" data-cand="'+cid_+'"><img loading="lazy" src="'+esc(imgs[0])+'" alt="投稿用画像">'+
-          '<span class="tap">タップでサンプル</span>'+
-          (imgs.length>1?'<span class="cnt">'+imgs.length+'枚</span>':'')+'</div>':'')+
+        '<div class="imgrow">'+ genImgHtml_(c) +
+          (imgs.length?'<div class="hero" data-cand="'+cid_+'"><img loading="lazy" src="'+esc(imgs[0])+'" alt="サンプル">'+
+            '<span class="tap">タップでサンプル</span>'+
+            (imgs.length>1?'<span class="cnt">'+imgs.length+'枚</span>':'')+'</div>':'')+
+        '</div>'+
         cbody+
         roomsHtml+
         '<label class="mini">④コメント (手直し可)</label>'+
@@ -297,18 +335,83 @@
     m.querySelector('.iclose').addEventListener('click', close);
     _imodal = m; return m;
   }
-  function openGallery_(c){
+  function openImagesModal_(title, imgs){
     var m = ensureImodal_();
-    var imgs = c.images||[];
-    m.querySelector('.it').textContent = c.title||'(無題)';
-    m.querySelector('.igal').innerHTML = imgs.length
+    m.querySelector('.it').textContent = title||'(無題)';
+    m.querySelector('.igal').innerHTML = (imgs&&imgs.length)
       ? imgs.map(function(u){ return '<img loading="lazy" src="'+esc(u)+'" alt="">'; }).join('')
       : '<div style="color:#eee;text-align:center;padding:24px">画像がありません</div>';
     m.scrollTop = 0; m.classList.add('on'); document.body.style.overflow='hidden';
   }
+  function openGallery_(c){ openImagesModal_(c.title, c.images||[]); }
+
+  // ---- 動画生成用画像(候補タブでChamiが貼る素材・本体と同じ IDB go5store/kv の ref:<cid>)----
+  var REF = {};  // cid → {imgs:[dataURL], has:bool}
+  function refInfoFromRec_(rec){
+    if(!rec) return {imgs:[], has:false};
+    if(Array.isArray(rec.imgs)){ var a=rec.imgs.filter(Boolean); return {imgs:a, has:a.length>0}; }
+    if(rec.img) return {imgs:[rec.img], has:true};
+    if(rec.__r2n>0) return {imgs:[], has:true};   // 別端末に在る(この端末に未取得)
+    return {imgs:[], has:false};
+  }
+  function loadRefMap_(){
+    return new Promise(function(resolve){
+      var map={};
+      try{ // localStorage 退避も読む(IDBが間欠死する端末でも同期で拾える・本体と同じキー)
+        for(var i=0;i<LS.length;i++){ var k=LS.key(i);
+          if(k && k.indexOf('cand_refimg__')===0){
+            try{ var info=refInfoFromRec_(JSON.parse(LS.getItem(k))); if(info.imgs.length||info.has) map[k.slice(13)]=info; }catch(e){}
+          }
+        }
+      }catch(e){}
+      if(window.Go5Idb && Go5Idb.available && Go5Idb.available()){
+        Go5Idb.entriesByPrefixes(['ref:']).then(function(ent){
+          try{ Object.keys(ent||{}).forEach(function(k){ var info=refInfoFromRec_(ent[k]); if(info.imgs.length||info.has) map[k.slice(4)]=info; }); }catch(e){}
+          resolve(map);
+        }, function(){ resolve(map); });   // fail-open=読めなくても中身は出す
+      } else resolve(map);
+    });
+  }
+  function genImgHtml_(c){
+    var info = REF[c.cid] || {imgs:[], has:false};
+    if(info.imgs.length){
+      return '<div class="genimg" data-gen="'+esc(c.id)+'"><img loading="lazy" src="'+esc(info.imgs[0])+'" alt="動画生成用画像"><span class="lbl">動画生成用</span></div>';
+    }
+    if(info.has){ return '<div class="genimg none">動画生成用画像あり<br>(この端末に未取得)</div>'; }
+    return '<div class="genimg none">動画生成用画像<br>なし</div>';
+  }
+
+  // ---- 絞り込み(端末に保存) ----
+  var FK = { movie:'teian_f_movieimg', sale:'teian_f_sale', hideT:'teian_f_hidetsuku', hideY:'teian_f_hideyoi' };
+  function fget(k){ try{ return LS.getItem(k)==='1'; }catch(e){ return false; } }
+  function fset(k,v){ try{ LS.setItem(k, v?'1':'0'); }catch(e){} }
+  function passFilter_(c){
+    if(fget(FK.movie) && !((REF[c.cid]||{}).has)) return false;
+    if(fget(FK.sale)){ var d=(c.metrics||{}).discount_pct; if(!(d>0)) return false; }
+    var lp=c.last_posted||{};
+    if(fget(FK.hideT) && lp.channel==='月詠み') return false;
+    if(fget(FK.hideY) && lp.channel==='宵桜艶帖') return false;
+    return true;
+  }
+  function initFilters_(){
+    var pairs=[['#fMovieImg',FK.movie],['#fSale',FK.sale],['#fHideTsuku',FK.hideT],['#fHideYoi',FK.hideY]];
+    pairs.forEach(function(p){
+      var el=$(p[0]); if(!el) return;
+      el.checked=fget(p[1]);
+      el.addEventListener('change', function(){ fset(p[1], el.checked); render(); });
+    });
+  }
 
   function wire(cands){
-    // 投稿用画像サムネ → タップでサンプル画像ライトボックス
+    // 動画生成用画像(左)→ タップで拡大
+    document.querySelectorAll('.genimg[data-gen]').forEach(function(g){
+      g.addEventListener('click', function(){
+        var c = cands.filter(function(x){ return x.id===g.dataset.gen; })[0];
+        var info = c && REF[c.cid];
+        if(info && info.imgs.length) openImagesModal_((c.title||'')+' (動画生成用画像)', info.imgs);
+      });
+    });
+    // サンプル(右)サムネ → タップでサンプル画像ライトボックス
     document.querySelectorAll('.hero').forEach(function(h){
       h.addEventListener('click', function(){
         var c = cands.filter(function(x){ return x.id===h.dataset.cand; })[0];
@@ -434,6 +537,10 @@
       .catch(function(e){ if(manual) renderEmpty('取得に失敗: '+e); return false; });
   }
   $('#loadDaily').addEventListener('click', function(){ fetchDaily(true); });
+
+  // 絞り込みの配線 + 動画生成用画像の読み込み(非同期・揃ったら描き直す・fail-open)
+  initFilters_();
+  loadRefMap_().then(function(m){ REF=m; if(DATA) render(); });
 
   // 起動: ?src= 優先 → 当日候補(同期) → 前回の読み込み → 空
   var qs = new URLSearchParams(location.search);
