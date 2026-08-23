@@ -26,7 +26,6 @@ import re
 import sqlite3
 import sys
 import tempfile
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
@@ -69,25 +68,12 @@ try:
     dp.QUEUE_DB = os.path.join(_tmp, "inbox.db")
     dp.post_work_to_channel = lambda *a, **k: _posted.append(a) or ""   # 外へ出る手だけ止める
 
-    _mids = set()
-
     def sent(audience, work=""):
-        """本物の dispatch() を通し、**キューへ実際に入った便**を読み戻す。
-
-        ★msg_id は `DISPATCH-<dept>-<ミリ秒>`= **同じミリ秒に2本出すと同じidになる**。
-          するとキューが重複と見て2本目を捨て、msg_idで引き戻すと**1本目の便が返る**=
-          この検査だけが赤くなる(実測 2026-08-24・9回に1回 `実依頼でも宣言が載る` が赤)。
-          製品の穴ではなく検査の都合(本番は1本ずつ・間隔が空く)。→ idが被ったら出し直す。
-        """
-        for _ in range(20):
-            ok, mid = dp.dispatch("hq", "検査(イージス研究室)", "本文" * 400,
-                                  audience=audience, work=work)
-            if not ok:
-                return None
-            if mid not in _mids:
-                break
-            time.sleep(0.003)          # ミリ秒が進むのを待ってから出し直す
-        _mids.add(mid)
+        """本物の dispatch() を通し、**キューへ実際に入った便**を読み戻す。"""
+        ok, mid = dp.dispatch("hq", "検査(イージス研究室)", "本文" * 400,
+                              audience=audience, work=work)
+        if not ok:
+            return None
         con = sqlite3.connect(dp.QUEUE_DB)
         row = con.execute("SELECT body FROM queue WHERE msg_id=?", (mid,)).fetchone()
         con.close()

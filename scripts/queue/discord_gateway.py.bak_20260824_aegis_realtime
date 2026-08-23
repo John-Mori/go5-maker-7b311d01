@@ -465,65 +465,10 @@ def run_selftest():
         shutil.rmtree(d, ignore_errors=True)
 
 
-# --- 実時間のスタンプ検知 (2026-08-24 イージス研究室・研究室HQ DISPATCH-aegis-gl-1787500634078) ---
-# なぜ要るか: Chamiが `改悪` スタンプを作った時の原文=「**他と違ってすぐ認識して欲しい**」。
-#   ところがスタンプの拾い口は毎朝8時の巡回1本しか無く、深夜1時に押されたら気づくのは7時間後だった。
-#   `Intents.default().reactions` は True(privilegedではない)=Developer Portalの設定変更も
-#   新しい常駐も要らず、この口を1つ足すだけで届く。
-# ★この経路は「早鐘」であって記録係ではない。朝8時の巡回は**一切変えていない**(取りこぼし回収と
-#   一覧・集計は今までどおりそちらが正本)。実時間ぶんは専用の台帳で冪等を取る。
-REACTION_WATCH_PY = os.path.join(ROOT, "scripts", "discord", "reaction_watch.py")
-REALTIME_HOURS = "2"          # 遡り。押された直後に走るので短くてよい(取りこぼしは朝の巡回が拾う)
-_realtime_lock = None         # threading.Lock (run_gateway で作る)
-
-
-def realtime_stamp_kind(emoji_id, emoji_name):
-    """このリアクションで部屋を実時間で起こすか。起こすなら kind、違えば None。
-
-    ★判定は `reaction_watch` の正本(WATCH表)を通す。**gateway側に絵文字IDを書かない**=
-      同じ判定を2箇所に持つと片方だけ古くなる(単一の述語・§3)。
-    ★読めなかった時は None を返す(=鳴らさない)。ここだけは fail-open にしない:
-      表が読めない状態で全リアクションに反応させると、押すたびに巡回が起きて暴走する。
-      **黙って落ちるわけではない**= 朝8時の巡回という後詰めが残っているし、下でログに出す。
-    """
-    try:
-        sys.path.insert(0, os.path.join(ROOT, "scripts", "discord"))
-        import reaction_watch
-    except Exception as e:                                     # noqa: BLE001
-        log(f"★実時間スタンプ検知: 絵文字の表を読めない({type(e).__name__})。"
-            "この便は鳴らさない(朝8時の巡回が後詰め)")
-        return None
-    return reaction_watch.realtime_kind({"id": str(emoji_id or ""), "name": str(emoji_name or "")})
-
-
-def run_realtime_watch(kind):
-    """reaction_watch を実時間モードで1回走らせる(本文・台帳・投函は全部あちらの作法)。
-
-    ★直列化する= 同時に2枚押された時に2本走ると、どちらも台帳を書く前に同じ件を投函しうる。
-      鍵を取って順に走らせれば、2本目は1本目が書いた台帳を見て何もしない(冪等)。
-    """
-    import subprocess                       # ★このファイルの作法に合わせて関数内で読む
-    with _realtime_lock:
-        cmd = [sys.executable, REACTION_WATCH_PY, "--hours", REALTIME_HOURS, "--only-kind", kind]
-        try:
-            p = subprocess.run(cmd, cwd=ROOT, capture_output=True, timeout=300)
-            tail = (p.stdout or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
-            log(f"実時間スタンプ({kind}) rc={p.returncode} " + " / ".join(t.strip() for t in tail))
-            if p.returncode not in (0, 1):
-                err = (p.stderr or b"").decode("utf-8", "replace").strip()[-300:]
-                log(f"★実時間スタンプ({kind}) 異常終了: {err}")
-        except Exception as e:                                 # noqa: BLE001
-            log(f"★実時間スタンプ({kind}) 起動に失敗(朝8時の巡回が後詰め): {type(e).__name__}: {e}")
-
-
 def run_gateway():
     import asyncio
-    import threading
     import discord
     from discord.ext import tasks
-
-    global _realtime_lock
-    _realtime_lock = threading.Lock()
 
     token = open(TOKEN_FILE, encoding="utf-8").read().strip()
     chan_map = load_channel_map()
@@ -651,37 +596,6 @@ def run_gateway():
             for j in (job_ack, job_escalate, job_prune):
                 if not j.is_running():
                     j.start()
-
-    @client.event
-    async def on_raw_reaction_add(payload):
-        """Chamiが `改悪` を押した瞬間に、その投稿がある部屋を起こす(2026-08-24)。
-
-        ★raw を使う= キャッシュに無い古い投稿へ押されても届く(on_reaction_add は取りこぼす)。
-        ★対象は改悪だけ。他のスタンプは今までどおり朝8時の巡回に任せる
-          (4種類を全部実時間にすると、ゴラッソでも夜中に部屋が起きる=鳴りすぎる網は無視される)。
-        ★何があっても gateway 本体は落とさない(受信が止まる方が事故として重い)。
-        """
-        try:
-            _touch_pulse()
-            if not ACTIVE_JOBS:
-                return                       # シャドウ中は副作用を出さない(既存ジョブと同じ規律)
-            if payload.user_id == getattr(client.user, "id", None):
-                return                       # 自分が押した印
-            member = getattr(payload, "member", None)
-            if member is not None and getattr(member, "bot", False):
-                return                       # 機械が押した印。Chamiの合図ではない
-            cid = str(payload.channel_id)
-            if cid not in chan_map:
-                return                       # 台帳に無い部屋(巡回の対象外なので鳴らしても拾えない)
-            emo = getattr(payload, "emoji", None)
-            kind = realtime_stamp_kind(getattr(emo, "id", None), getattr(emo, "name", None))
-            if not kind:
-                return                       # 表に無い/実時間の対象ではない= 無視
-            log(f"★実時間スタンプ検知 [{chan_map[cid].get('name', cid)}] {kind} "
-                f"msg={payload.message_id} by={payload.user_id}")
-            await asyncio.to_thread(run_realtime_watch, kind)
-        except Exception as e:               # noqa: BLE001
-            log(f"実時間スタンプ検知に失敗(gatewayは継続): {type(e).__name__}: {e}")
 
     @client.event
     async def on_message(m):

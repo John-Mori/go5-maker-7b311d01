@@ -77,11 +77,6 @@ REGISTRY = os.path.join(SOUGOU, "00_AI-HQ", "org_registry.yml")
 CHANNELS_JSON = os.path.join(LOCAL, "discord_channels.json")     # registryからの派生物(退避用)
 DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
 LEDGER = os.path.join(LOCAL, "llm", "reaction_seen.jsonl")
-# ★実時間の一報だけの台帳(2026-08-24 イージス研究室)。**朝の巡回とは別の器**にする。
-#   同じ器にすると、実時間で拾った改悪が朝の巡回から見えなくなり、
-#   改善提案部門が読む一覧(KAIZEN_DIGEST)から**その日の改悪が丸ごと落ちる**=数え落とし。
-#   → 実時間の一報は自分の台帳で冪等を取り、朝の巡回の材料は1件も食わない。
-REALTIME_LEDGER = os.path.join(LOCAL, "llm", "reaction_realtime_seen.jsonl")
 BODY_DIR = os.path.join(LOCAL, "llm")
 API = "https://discord.com/api/v10"
 UA = "go5-org-reaction-watch (personal, v1)"
@@ -188,25 +183,6 @@ def watched(emo):
     return WATCH_BY_CHAR.get(str(emo.get("name") or ""))
 
 
-# ★実時間で部屋を起こす種類(2026-08-24 イージス研究室・研究室HQ DISPATCH-aegis-gl-1787500634078)。
-#   Chami原文(改悪)=「**他と違ってすぐ認識して欲しい**」。だから改悪だけを実時間へ回す。
-#   ★4種類を全部実時間にすると、ゴラッソでも夜中に部屋が起きる= 常に鳴る安全網は無視される(§3)。
-#   ★増やすならここへ kind を1つ足すだけ。**絵文字IDは絶対にここへ書かない**(上のWATCHが正本)。
-REALTIME_KINDS = ("kaiaku",)
-
-
-def realtime_kind(emo):
-    """このリアクションは「実時間で部屋を起こす」対象か。対象なら kind、違えば None。
-
-    ★判定は WATCH(正本)を通す= gateway 側に絵文字IDを二度書きしないための唯一の入口。
-      gateway はこの関数を呼ぶだけで、スタンプの意味を一切知らない。
-    """
-    hit = watched(emo)
-    if not hit or hit.get("kind") not in REALTIME_KINDS:
-        return None
-    return hit["kind"]
-
-
 # ---------------------------------------------------------------- Discord API
 
 class Api:
@@ -274,12 +250,11 @@ def emoji_key(emo):
 
 # ---------------------------------------------------------------- 台帳(冪等)
 
-def load_ledger(path=None):
-    path = path or LEDGER
+def load_ledger():
     seen = set()
-    if not os.path.exists(path):
+    if not os.path.exists(LEDGER):
         return seen
-    with open(path, encoding="utf-8") as f:
+    with open(LEDGER, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -291,28 +266,9 @@ def load_ledger(path=None):
     return seen
 
 
-def ledger_rows(items, posted):
-    """台帳へ書く行= **行き先すべてへ届いたものだけ**(重複は畳む)。
-
-    ★朝の巡回と実時間の一報が同じ判定を使う(判定を2箇所に置かない・§3)。
-      届かなかったものは書かない= 次回もう一度拾い直す(合図を落とさない)。
-    """
-    delivered = ({it["key"] for it in posted}
-                 | {it["key"] for it in items if it["dept"] in SKIP_DEPTS})
-    uniq, keys = [], set()
-    for it in items:
-        if it["key"] not in delivered or it["key"] in keys:
-            continue
-        keys.add(it["key"])
-        uniq.append({k: it[k] for k in
-                     ("key", "dept", "channel", "msg_id", "emoji", "by", "by_chami", "detected_at")})
-    return uniq
-
-
-def append_ledger(rows, path=None):
-    path = path or LEDGER
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
+def append_ledger(rows):
+    os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
+    with open(LEDGER, "a", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
@@ -524,18 +480,9 @@ WHY = (
 )
 
 
-REALTIME_BANNER = (
-    "■■ これは**実時間の一報**だ(スタンプが押された直後に届いている。朝8時の巡回ではない)。\n"
-    "   ★同じ件は**朝8時の巡回でもう一度届く**。そちらが正式な便(一覧・集計もそちらが正)。\n"
-    "   ここでは「今すぐ認識する」ことだけが要る= Chami原文「他と違ってすぐ認識して欲しい」。\n"
-)
-
-
-def dept_body(dept, items, guild_id, realtime=False):
+def dept_body(dept, items, guild_id):
     groups = group_by_kind(items)
     lines = []
-    if realtime:
-        lines.append(REALTIME_BANNER)
     for gi, (kind, its) in enumerate(groups):
         if gi:
             lines.append("\n" + "=" * 60 + "\n")   # ★種類の切れ目をはっきり分ける
@@ -778,16 +725,16 @@ def stack_open_defects(items, guild_id, dry_run):
 
 # ---------------------------------------------------------------- 投函
 
-def send(dept, body, dry_run, sender=None, tag=""):
+def send(dept, body, dry_run):
     """dispatch.py でその部門へ投函する。★既存2本(se_daily_review/kaizen_round)と同じ作法。"""
     os.makedirs(BODY_DIR, exist_ok=True)
-    path = os.path.join(BODY_DIR, f"reaction_watch_body_{tag}{dept}.txt")
+    path = os.path.join(BODY_DIR, f"reaction_watch_body_{dept}.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(body)
     # ★C-050の宛先宣言(2026-08-23)= 中身はChamiが押した印(再発/炎上)そのもの。
     #   受けた部屋の返事はChamiが読む=削らせない。
     cmd = [sys.executable, DISPATCH, "--dept", dept, "--direct",
-           "--from", sender or SENDER, "--audience", "chami", "--body-file", path]
+           "--from", SENDER, "--audience", "chami", "--body-file", path]
     if dry_run:
         cmd.append("--dry-run")
     try:
@@ -811,21 +758,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="中身を出すだけ。投函もせず台帳も汚さない(★本投函の前に必ず1回これを見る)")
     ap.add_argument("--hours", type=int, default=24, help="遡る時間(既定24)")
-    ap.add_argument("--only-kind", default="", choices=[""] + list(REALTIME_KINDS),
-                    help="実時間の一報用。この種類だけを部屋へ出し、"
-                         "台帳も一覧も朝の巡回とは分ける(既定=空=従来どおり朝の巡回)")
     a = ap.parse_args()
 
-    # ★実時間モード= gateway が「改悪が押された」瞬間に呼ぶ経路(2026-08-24 イージス研究室)。
-    #   朝の巡回と**共有しないもの**= ①台帳(REALTIME_LEDGER) ②一覧(書かない) ③名乗り。
-    #   共有するもの= 絵文字の表・意味・指示文・本文の組み立て(=正本は1つ)。
-    rt = a.only_kind or ""
-    ledger_path = REALTIME_LEDGER if rt else LEDGER
-    sender = (f"絵文字監視({KIND_LABEL.get(rt, rt)}スタンプの実時間検知)" if rt else SENDER)
-
     now_str = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"===== スタンプ監視 {now_str} " + ("[dry-run]" if a.dry_run else "[本番]")
-          + (f" [実時間 only-kind={rt}]" if rt else "") + " =====")
+    print(f"===== スタンプ監視 {now_str} " + ("[dry-run]" if a.dry_run else "[本番]") + " =====")
 
     marks = machine_marks()
     print("拾う対象(許可制・IDで照合):")
@@ -850,16 +786,11 @@ def main():
         info = api.get(f"/channels/{chans[0]['id']}")
         guild_id = str((info or {}).get("guild_id", "") or "")
 
-    seen = load_ledger(ledger_path)
-    print(f"台帳の既知 {len(seen)}件 ({ledger_path})")
+    seen = load_ledger()
+    print(f"台帳の既知 {len(seen)}件 ({LEDGER})")
 
     since_ms = int(time.time() * 1000) - a.hours * 3600 * 1000
     items, stats = collect(api, chans, since_ms, marks, seen, now_str)
-    if rt:
-        # ★この種類以外は**触らない**(朝の巡回の材料。ここで食うと一覧から落ちる)。
-        dropped = len(items)
-        items = [it for it in items if it.get("kind") == rt]
-        print(f"★実時間モード: {rt} 以外の {dropped - len(items)}件は朝の巡回へ残した(台帳にも書かない)")
 
     print(f"\n--- 巡回結果 ---")
     print(f"直近{a.hours}hの投稿 {stats['scanned']}件 / リアクション付き {stats['with_reaction']}件")
@@ -886,10 +817,6 @@ def main():
 
     if not items:
         print("\n新しく付いたスタンプは 0件。投函するものは無い。")
-        if rt:
-            # ★実時間モードでは一覧を書かない= 朝の脈(KAIZEN_DIGEST)を別の手で更新しない(C-054)。
-            #   ここで書くと「毎朝8時に書かれる」という鮮度警報の前提が崩れる。
-            return 1 if api.errors else 0
         # ★0件でも一覧は書く(2026-08-23 イージス研究室)。書かないと「0件の朝」と
         #   「絵文字監視が死んだ朝」が改善提案部門から**同じ「無し」に見える**。
         #   ファイルを毎朝必ず動く脈にして、producers.json の鮮度警報で死を捕まえる。
@@ -918,30 +845,16 @@ def main():
         if dept in SKIP_DEPTS:
             print(f"\n[{dept}] ★Chamiの部屋なので出さない({len(by_dept[dept])}件・一覧には載せる)")
             continue
-        body = dept_body(dept, by_dept[dept], guild_id, realtime=bool(rt))
+        body = dept_body(dept, by_dept[dept], guild_id)
         print(f"\n[{dept}] {len(by_dept[dept])}件 / 本文{len(body)}字")
         if a.dry_run:
             print("---8<--- ここから本文 ---8<---")
             print(body)
             print("---8<--- ここまで本文 ---8<---")
-        if send(dept, body, a.dry_run, sender=sender, tag=("rt_" if rt else "")):
+        if send(dept, body, a.dry_run):
             posted.extend(by_dept[dept])
         else:
             failed.append(dept)
-
-    if rt:
-        # ★実時間モードは「一報の運び屋」であって、その日の記録係ではない。
-        #   一覧は書かない=朝の巡回が同じ改悪をもう一度拾い、そちらが一覧と集計に載る。
-        print(f"\n[{KAIZEN_DEPT}] ★実時間モードでは一覧を書かない"
-              "(朝8時の巡回が正本。ここで書くと脈と数え方が二重になる)")
-        if a.dry_run:
-            print("\n[dry-run] 台帳へは書かない。")
-            return 0
-        uniq = ledger_rows(items, posted)
-        append_ledger(uniq, ledger_path)
-        print(f"\n実時間の台帳へ {len(uniq)}/{len(items)}件を記録した({ledger_path}・冪等)。"
-              f"投函できなかった部門: {','.join(failed) if failed else 'なし'}")
-        return 1 if (failed or api.errors) else 0
 
     kbody = kaizen_body(items, guild_id, stats, a.hours)
     print(f"\n[{KAIZEN_DEPT}] 全部屋一覧 {len(items)}件 / 本文{len(kbody)}字 "
@@ -968,8 +881,15 @@ def main():
         print("\n★改善提案部門への一覧をファイルへ書けなかったので、台帳へは何も書かない"
               "(次回まるごと拾い直す)。")
         return 1
-    uniq = ledger_rows(items, posted)
-    append_ledger(uniq, ledger_path)
+    delivered = {it["key"] for it in posted} | {it["key"] for it in items if it["dept"] in SKIP_DEPTS}
+    uniq, keys = [], set()
+    for it in items:
+        if it["key"] not in delivered or it["key"] in keys:
+            continue
+        keys.add(it["key"])
+        uniq.append({k: it[k] for k in
+                     ("key", "dept", "channel", "msg_id", "emoji", "by", "by_chami", "detected_at")})
+    append_ledger(uniq)
     print(f"\n台帳へ {len(uniq)}/{len(items)}件を記録した(冪等)。投函できなかった部門: "
           f"{','.join(failed) if failed else 'なし'}")
     return 1 if (failed or api.errors) else 0
