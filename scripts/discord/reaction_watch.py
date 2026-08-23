@@ -528,6 +528,36 @@ KAIZEN_SECTION = {
 }
 
 
+def write_kaizen_digest(kbody, count, dry_run):
+    """全部屋一覧をファイルへ落とす。**書けたら True**(=行き先へ届いた)。
+
+    ★2026-08-23 イージス研究室。手2(=一覧の配達をファイルへ替えた)には**静かな死**が残っていた。
+      配達だった頃は「起こされなかった」が見えたが、ファイルは**無いことが正常な日と見分けが付かない**。
+      実際、0件の日は `if not items:` で早く返るのでファイルを書かず、改善提案部門の朝の便には
+      「一覧: 無し」と出る——**絵文字監視が死んでいる日と一字一句同じ**だった。
+      → 0件でも必ず書く= このファイルが「毎朝必ず動く脈」になり、`local/llm/producers.json` の
+        鮮度警報(absence_watchdog.check_producer_freshness)で見張れる形になる。
+      ★書き口をここ1本にするのは、0件の枝と通常の枝で書式が割れないため(判定を2箇所に置かない)。
+    """
+    if dry_run:
+        print("---8<--- ここから本文(ファイルには書かない) ---8<---")
+        print(kbody)
+        print("---8<--- ここまで本文 ---8<---")
+        return True
+    try:
+        os.makedirs(os.path.dirname(KAIZEN_DIGEST), exist_ok=True)
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        header = ("<!-- 絵文字監視(毎朝8時)が書いた全部屋一覧。改善提案部門が8:10の便で読む。 -->\n"
+                  f"<!-- 書込時刻: {stamp} / 件数: {count} -->\n\n")
+        with open(KAIZEN_DIGEST, "w", encoding="utf-8") as f:
+            f.write(header + kbody + "\n")
+        print(f"   一覧を書いた: {KAIZEN_DIGEST}")
+        return True
+    except Exception as e:                                    # noqa: BLE001
+        print(f"   ★一覧のファイル書き込みに失敗: {type(e).__name__}: {e}")
+        return False
+
+
 def kaizen_body(items, guild_id, stats, hours):
     groups = group_by_kind(items)
     counts = " / ".join(f"{KIND_LABEL.get(k, k)} {len(v)}件" for k, v in groups)
@@ -743,6 +773,11 @@ def main():
 
     if not items:
         print("\n新しく付いたスタンプは 0件。投函するものは無い。")
+        # ★0件でも一覧は書く(2026-08-23 イージス研究室)。書かないと「0件の朝」と
+        #   「絵文字監視が死んだ朝」が改善提案部門から**同じ「無し」に見える**。
+        #   ファイルを毎朝必ず動く脈にして、producers.json の鮮度警報で死を捕まえる。
+        write_kaizen_digest("(本日は新しく付いたスタンプが 0件。巡回そのものは正常に終わっている)",
+                            0, a.dry_run)
         return 1 if api.errors else 0
 
     by_dept = {}
@@ -784,23 +819,8 @@ def main():
     #   ★書き込みの成否が「行き先へ届いた」の判定(kok)= ここが台帳ゲート(下)を守る。
     #     書けなければ台帳へ何も書かない=次回まるごと拾い直す(従来と同じ不変条件)。
     #   ★dry-run は本番と同じく実ファイルは触らない(台帳も汚さない)= 中身を見せるだけ。
-    kok = True
-    if a.dry_run:
-        print("---8<--- ここから本文(ファイルには書かない) ---8<---")
-        print(kbody)
-        print("---8<--- ここまで本文 ---8<---")
-    else:
-        try:
-            os.makedirs(os.path.dirname(KAIZEN_DIGEST), exist_ok=True)
-            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            header = ("<!-- 絵文字監視(毎朝8時)が書いた全部屋一覧。改善提案部門が8:10の便で読む。 -->\n"
-                      f"<!-- 書込時刻: {stamp} / 件数: {len(items)} -->\n\n")
-            with open(KAIZEN_DIGEST, "w", encoding="utf-8") as f:
-                f.write(header + kbody + "\n")
-            print(f"   一覧を書いた: {KAIZEN_DIGEST}")
-        except Exception as e:
-            kok = False
-            print(f"   ★一覧のファイル書き込みに失敗: {type(e).__name__}: {e}")
+    #   ★書き口は write_kaizen_digest 1本(0件の枝と同じ関数)= 書式を2箇所に持たない。
+    kok = write_kaizen_digest(kbody, len(items), a.dry_run)
     if not kok:
         failed.append(KAIZEN_DEPT)
 
