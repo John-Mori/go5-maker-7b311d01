@@ -498,15 +498,22 @@
     if (cache && cache.fetchedAt && (Date.now() - cache.fetchedAt) < 600000) return; // 10分TTL
     if (typeof fetch !== 'function') return;
     _postedRecentD1Inflight = true;
-    fetch(cfg.url + '/posted/recent?limit=40', { headers: { 'X-Shared-Secret': cfg.secret } })
+    // PC側workerが応答しない時も候補描画を永久に待たせない。直近投稿は補助情報なので
+    // 12秒で中止してローカル判定へfail-openし、次回TTL判定で再試行できる状態へ戻す。
+    var recentCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var recentTimer = recentCtrl ? setTimeout(function () { try { recentCtrl.abort(); } catch (e) {} }, 12000) : null;
+    var recentOpts = { headers: { 'X-Shared-Secret': cfg.secret } };
+    if (recentCtrl) recentOpts.signal = recentCtrl.signal;
+    fetch(cfg.url + '/posted/recent?limit=40', recentOpts)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
+        if (recentTimer) clearTimeout(recentTimer);
         _postedRecentD1Inflight = false;
         if (!data || data.ok !== true || !Array.isArray(data.items)) return; // 失敗はキャッシュ据え置き
         try { localStorage.setItem(K_POSTED_RECENT_D1, JSON.stringify({ fetchedAt: Date.now(), items: data.items })); } catch (e) { return; }
         try { if (_activeTab === 'main') render(); else if (typeof renderMaker === 'function') renderMaker(_activeTab); } catch (e) {}
       })
-      .catch(function () { _postedRecentD1Inflight = false; });
+      .catch(function () { if (recentTimer) clearTimeout(recentTimer); _postedRecentD1Inflight = false; });
   }
   // D1権威の「直近10件」cid集合(両ch合算・posted_at降順の上位10。workerが降順で返す)。
   function d1RecentTop10Cids_() {
