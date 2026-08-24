@@ -50,6 +50,19 @@
     if (!candidateHydrated) return 'loading';         // まだ一括展開の途中=読込中(まだ何も断定しない)
     return 'checking';                                // 展開は済んだがこのcidは未確認=端末内を能動確認してから判定
   }
+  // ★「複数画像がない=投稿できない」候補の非表示判定(純関数=tests/test_no_material_gate.js で境界を固定)。
+  //   5秒動画は複数の写真を並べて作るため、動画生成用の画像(ref)が2枚未満の作品は動画化=投稿ができない
+  //   (Chami依頼2026-08-24「投稿できる状態だとしても素材がないから投稿できないので非表示に」)。
+  //   ★fail-open が肝= n===0 でも state が未確定(loading/checking/stalled)なら隠さない。画像が「まだ読めて
+  //   いないだけ」の作品を消すと、直後に「画像あるのに消えた」の再発(C-041/投稿履歴ハイドレート事故と同型)に
+  //   なる。確定0枚(missing=読んで0/none=未着手)と 確定1枚 のときだけ隠す。
+  //   n = refImgsOf_ の枚数(読込済みならその実数)/ state = refSlotState_ の結果。
+  function noMaterialHideDecide_(n, state) {
+    if (n >= 2) return false;                         // 複数あり=投稿できる=隠さない
+    if (n === 1) return true;                         // 1枚のみ=複数画像なし=隠す(枚数は確定している)
+    // n===0: 本当に0枚(確定)か、まだ読込中/未確認(未確定)かを state で分ける。
+    return state === 'missing' || state === 'none';   // 確定0枚のときだけ隠す。loading/checking/stalled は隠さない
+  }
   // ★per-cid の「持続失敗」ゲート(純関数=tests/test_ref_stall_gate.js で境界を固定)。取得が n回以上 かつ
   //   連鎖開始から T ミリ秒以上 失敗し続けた時だけ true=⌛へ落とす。★3回/20000(=20秒)は関数内リテラルで
   //   持つ(shouldShowIdbHint_ と同じ理由=module.exports の早期returnで外の var 代入は実行されず undefined に
@@ -108,7 +121,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -505,9 +518,20 @@
     for (var i = 0; i < ks.length; i++) { if (set[ks[i]]) return true; }
     return false;
   }
+  // ★動画生成用の画像(ref)が2枚未満=複数画像がなく動画化できない=投稿できない作品を隠す(Chami 2026-08-24)。
+  //   判定式は純関数 noMaterialHideDecide_ に一本化(fail-open=未確定は隠さない)。n===0 のときだけ refSlotState_ で
+  //   確定/未確定を見分ける(0枚以外は枚数が確定しているので state 参照は不要=無駄なR2フェッチ発火を避ける)。
+  function isHiddenByNoMaterial_(it) {
+    var cid = it && it.cid; if (!cid) return false;
+    cid = String(cid);
+    var n = refImgsOf_(cid).length;
+    var st = (n === 0) ? refSlotState_(cid) : 'images';
+    return noMaterialHideDecide_(n, st);
+  }
   function isHiddenByPosted_(it) {
     if (!it) return false;
     if (!_hidePosted.acc1 && !_hidePosted.acc2) return false; // どちらのトグルもOFF=隠さない
+    if (isHiddenByNoMaterial_(it)) return true; // ★複数画像がない=投稿できない作品も、この非表示トグルON時は隠す(Chami 2026-08-24)
     // ★D1権威(生成側と同一ソース)の直近3日/直近10件にヒットしたら隠す。取得できていれば ts再構築に依らず確実。
     if (isInD1Set_(it, d1Within3dCids_())) return true;
     if (isInD1Set_(it, d1RecentTop10Cids_())) return true;
@@ -519,8 +543,8 @@
   // 「◯◯✔非表示」トグル2つ(非表示リストの上段・右寄せ)のHTML。_ACCTS は描画時に定義済み。
   function candHidePostedRowHtml_() {
     return '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;justify-content:flex-end;">' +
-      '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)を一覧から隠す。3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
-      '<button id="candHidePosted2" type="button" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)を一覧から隠す。3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[1][1]) + '✔非表示</button>' +
+      '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
+      '<button id="candHidePosted2" type="button" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[1][1]) + '✔非表示</button>' +
     '</div>';
   }
   // 上記トグルの配線。どちらをONにしても、最終投稿から3日以内(クールタイム中)なら非表示。(isHiddenByPosted_)
