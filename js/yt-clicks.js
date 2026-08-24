@@ -3155,11 +3155,10 @@
     if (!api.postImgs || !api.postImgSave || !api.usedImgs || !api.usedImgSave) return; // 画像ストア未対応環境では出さない
     var pKey = it.videoId || k;
     var cid = it.workUrl ? workCidOf_(it.workUrl) : '';
-    // 用途(保存先)。usedストア(履歴単位)の先頭prev枚が「動画投稿プレビュー画像」、それ以降が「動画で使った画像」。
-    //   ★プレビューと使用画像は1レコードを頭割りで共有する(prev=先頭何枚がプレビューか)。用途を分けて別々に編集でき、
-    //   過去の投稿履歴(prev未設定)でもプレビュー枠から追加できる(Chami依頼2026-07-30)。Bluesky添付だけは作品cid単位。
-    var USES = [{ v: 'prev', label: '動画投稿プレビュー', multi: true }, { v: 'post', label: '投稿画像', multi: true }, { v: 'used', label: '動画で使った画像', multi: false }];
-    if (cid) USES.push({ v: 'bsky', label: 'Bluesky投稿画像', multi: false });
+    // 用途は「動画投稿プレビュー」のみ(★Chami依頼2026-08-24①=画像を選ぶドロップダウンを廃止・プレビューしか要らない)。
+    //   usedストア(履歴単位)の先頭prev枚が「動画投稿プレビュー画像」。投稿画像/動画で使った画像/Bluesky投稿画像の
+    //   用途切替UIは撤去したが、store_/load_ は既存の頭割り(prev=先頭何枚がプレビューか)を壊さないよう残す。
+    var USES = [{ v: 'prev', label: '動画投稿プレビュー', multi: true }];
     // usedストアの現在の全画像(表示と同じ合成)と、先頭プレビュー枚数。
     function usedAll_() {
       var saved = (api.usedImgs(pKey) || []).slice();
@@ -3169,9 +3168,8 @@
         : (saved.length ? saved : legacy.slice(0, 1));
     }
     function prevN_() { return (api.usedPrevCount ? (api.usedPrevCount(pKey) || 0) : 0); }
-    // 初期の用途。プレビュー画像を持つ動画はプレビュー枠を最初に開く。シート由来行は「動画で使った画像」を指定して開く。
-    var use = (defaultUse && USES.some(function (u) { return u.v === defaultUse; })) ? defaultUse
-      : (prevN_() > 0 ? 'prev' : 'post');
+    // 用途は常に「動画投稿プレビュー」(defaultUseは無視・ドロップダウン廃止に伴い1択)。
+    var use = 'prev';
     function useDef_() { for (var i = 0; i < USES.length; i++) { if (USES[i].v === use) return USES[i]; } return USES[0]; }
     // プレビュー枚/使用画像枚のどちらを指すかは core/image-role.js(Go5ImageRole)の判定に一本化(2026-08-23)。
     //   previewImages=先頭prevN枚(プレビュー)・sourceImages=それ以降(実際に動画へ使った元画像)。
@@ -3191,11 +3189,9 @@
     }
     var imgs = load_(); // 作業コピー
     var wrap = document.createElement('div'); wrap.className = 'vedit-field vedit-postimg';
-    var opts = USES.map(function (u) { return '<option value="' + u.v + '">' + u.label + '</option>'; }).join('');
     wrap.innerHTML =
-      '<div class="vedit-postimg-lbl">画像を添付 <span style="font-weight:400;color:var(--sub);font-size:11px;">(用途を選び、コピー中の画像を貼り付け or ファイルから追加。1枚目が投稿履歴に表示)</span></div>' +
+      '<div class="vedit-postimg-lbl">動画投稿プレビュー <span style="font-weight:400;color:var(--sub);font-size:11px;">(コピー中の画像を貼り付け or ファイルから追加。1枚目が投稿履歴に表示)</span></div>' +
       '<div class="vedit-bsky-row" style="margin-bottom:6px;">' +
-        '<select id="veditImgUse" style="flex:1;min-width:0;">' + opts + '</select>' +
         '<button id="veditImgPaste" type="button" class="vedit-copy vedit-postimg-btn">貼り付け</button>' +
         '<label class="vedit-copy vedit-postimg-btn" style="cursor:pointer;margin:0;">＋ 選ぶ<input type="file" accept="image/*" multiple hidden></label>' +
       '</div>' +
@@ -3205,8 +3201,6 @@
     if (actions) modal.insertBefore(wrap, actions); else modal.appendChild(wrap);
     var grid = wrap.querySelector('.vedit-postimg-grid');
     var fileInp = wrap.querySelector('input[type=file]');
-    var useSel = wrap.querySelector('#veditImgUse');
-    useSel.value = use; // 初期用途を反映(シート由来行は「動画で使った画像」)
     var msg = wrap.querySelector('.vedit-postimg-msg');
     function persist() { store_(imgs); try { render(); } catch (e) {} } // 即保存＋カード再描画(画像変更なのでrender=クリック再取得を伴わない)
     function draw() {
@@ -3228,7 +3222,6 @@
       else { imgs = [urls[urls.length - 1]]; } // 単発用途(Bluesky)は最後の1枚に差し替え
       persist(); draw();
     }
-    useSel.addEventListener('change', function () { use = this.value; imgs = load_(); msg.textContent = ''; draw(); });
     wrap.querySelector('#veditImgPaste').addEventListener('click', function () {
       if (!api.pasteImage) { msg.textContent = 'この環境では貼り付けに未対応です(「＋ 選ぶ」をお使いください)'; return; }
       msg.textContent = '貼り付け中…';

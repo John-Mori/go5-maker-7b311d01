@@ -443,6 +443,25 @@
     _srcMirrorBusy[id] = job.then(function (v) { delete _srcMirrorBusy[id]; return v; }, function () { delete _srcMirrorBusy[id]; });
     return _srcMirrorBusy[id];
   }
+  // ★仕上がりプレビューも作成直後にメモリ実体から go5prev:<id> でR2へ控える(Chami依頼2026-08-24②
+  //   「投稿完了を押したら必ずGoogleドライブに投稿動画プレビュー画像を保存しろ」の恒久対策)。
+  //   従来はプレビューのR2ミラー(go5prev:)を投稿完了時のenrich(12秒Promise.race)でしか作っていなかった=
+  //   iOSでその12秒に間に合わないと previewKey が空のまま save_job が飛び、動画は保存されるのにプレビューだけ
+  //   Driveに来ない、が起きうる。元画像(ensureSrcMirror_)と同じく作成時に先出しでR2へ置く=投稿完了の
+  //   タイミング競争から切り離す。動画のR2 PUTと帯域を食い合わないよう数秒遅らせて撃つ(冪等・fail-open)。
+  var PREVNAME = function (id) { return 'go5prev:' + id; };
+  var _prevUp = {}, _prevMirrorBusy = {};
+  function ensurePrevMirror_(id, blobHint) {
+    if (!blobHint || !blobHint.size) return Promise.resolve();
+    if (_prevUp[id]) return Promise.resolve();
+    if (_prevMirrorBusy[id]) return _prevMirrorBusy[id];
+    if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return Promise.resolve();
+    var job = Go5Sync.putBlobR2At(PREVNAME(id), blobHint).then(function (key) {
+      if (key) _prevUp[id] = 1; // 成功=このセッションで再送しない。失敗時は次の投稿完了/sweepでまた試す(非破壊)
+    }).catch(function () {});
+    _prevMirrorBusy[id] = job.then(function (v) { delete _prevMirrorBusy[id]; return v; }, function () { delete _prevMirrorBusy[id]; });
+    return _prevMirrorBusy[id];
+  }
   // ★ドラフトタブを開かなくても、アプリが開いてさえいれば裏で全ドラフト/作成履歴の動画を雲へ上げる
   //   (Chami依頼2026-07-31「わざわざドラフトタブをタップしなくても雲に上がるように」)。
   var _mirrorSweepBusy = false, _mirrorSweepAgain = false;
@@ -841,6 +860,12 @@
         if (evDetail.sourceImageFile) {
           var _srcHint = evDetail.sourceImageFile;
           setTimeout(function () { try { ensureSrcMirror_(id, _srcHint); } catch (e) {} }, 6000);
+        }
+        // ★仕上がりプレビューも作成時にR2へ先出し(go5prev:<id>)=投稿完了で必ずDriveへ入る土台(Chami依頼2026-08-24②)。
+        //   動画のR2 PUTを先に通したいので元画像より少し後(8秒)に撃つ。IDB(stock_prev_)が後で退避されても雲に残る。
+        if (prevBlob) {
+          var _prevHint = prevBlob;
+          setTimeout(function () { try { ensurePrevMirror_(id, _prevHint); } catch (e) {} }, 8000);
         }
 
         // Phase 1: 動画を手元/雲へ並列着地。手元は set 解決ではなく、同じキーの読み戻しまで検証する。
@@ -1661,9 +1686,12 @@
           var prevB = bs[0], srcB = bs[1];
           // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
           //   ★元画像を渡すのは「投稿完了と同じ一式(動画+元画像+プレビュー)」を揃えるため(Chami 2026-08-17)。
+          //   ★手元にプレビュー実体が無くても、作成時に先出しした go5prev:<id>(ensurePrevMirror_)が既にR2に在れば
+          //     その決定的keyを添える=投稿完了で必ずプレビューがDriveへ入る(Chami依頼2026-08-24②)。Workerは
+          //     そのkeyがR2に無ければ黙ってスキップ(付随物・非致命)＝古い投稿でも安全。
           var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
             ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
-            : Promise.resolve('');
+            : ((window.Go5Sync && Go5Sync.keyForName) ? Go5Sync.keyForName('go5prev:' + id).catch(function () { return ''; }) : Promise.resolve(''));
           var mirrorSrc = (srcB && window.Go5Sync && Go5Sync.putBlobR2At)
             ? Go5Sync.putBlobR2At('go5src:' + id, srcB).catch(function () { return ''; })
             : Promise.resolve('');
