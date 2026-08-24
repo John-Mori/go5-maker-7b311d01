@@ -78,6 +78,11 @@ RE_CC1H = re.compile(r'"ephemeral_1h_input_tokens":(\d+)')
 RE_CC5M = re.compile(r'"ephemeral_5m_input_tokens":(\d+)')
 RE_CR = re.compile(r'"cache_read_input_tokens":(\d+)')
 RE_OUT = re.compile(r'"output_tokens":(\d+)')
+# ★2026-08-24(研究室HQ): 記録は**同じ返答を複数行に割って落とす**(contentブロックごと)。
+#   割れた行は usage を**丸ごと同じ値で持つ**ため、行のまま数えると2〜4重に数える。
+#   実測= hqのセッションで 168返答のうち **80が複数行**(同一? True・最大4行)。
+#   → `"id":"msg_..."` で1返答1回にする。部門ごとに割れ方が違うので、**順位まで入れ替わる**。
+RE_MSGID = re.compile(r'"id":"(msg_[A-Za-z0-9]+)"')
 
 
 def model_weight(model):
@@ -137,10 +142,16 @@ def collect(since_utc):
             f = open(path, encoding="utf-8", errors="replace")
         except OSError:
             continue
+        seen_ids = set()          # ★同じ返答の割れた行を1回だけ数えるため(ファイル単位)
         with f:
             for line in f:
                 if '"usage"' not in line:
                     continue
+                mid = RE_MSGID.search(line)
+                if mid:
+                    if mid.group(1) in seen_ids:
+                        continue
+                    seen_ids.add(mid.group(1))
                 mts = RE_TS.search(line)
                 if not mts:
                     continue
