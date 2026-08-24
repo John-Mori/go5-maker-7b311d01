@@ -5195,7 +5195,7 @@
       });
     };
     // 現在ページ(＋検索・ページ数)ぶんだけを描く。検索はDOM非表示でなく実データで絞り込む=全ページ横断。
-    var paintPage_ = function () {
+    var paintMainPage_ = function () {
       var wrap = document.getElementById('candPageWrap'); if (!wrap) return;
       if (!document.getElementById('candCardList')) wrap.innerHTML = '<div id="candPageHead"></div><div id="candCardList"></div><div id="candPageFoot"></div>';
       var headEl = document.getElementById('candPageHead'), listEl = document.getElementById('candCardList'), footEl = document.getElementById('candPageFoot');
@@ -5237,13 +5237,13 @@
         z.querySelectorAll('[data-candpage]').forEach(function (b) {
           b.addEventListener('click', function () {
             var p = parseInt(b.getAttribute('data-candpage'), 10); if (!p || p < 1 || p > pages) return;
-            _candPageByTab[tabId] = p; paintPage_();
+            _candPageByTab[tabId] = p; paintMainPage_();
             try { var sb = document.getElementById('candWorkSearch'); if (sb) sb.scrollIntoView({ block: 'start' }); } catch (e) {}
           });
         });
       });
     };
-    _candRepaint_ = paintPage_; _candRepaintTab_ = tabId;
+    _candRepaint_ = paintMainPage_; _candRepaintTab_ = tabId;
     // ★外枠(件数見出し・検索欄・表示数セレクタ・ページ入れ物)は、並び順/絞り込み/表示数が変わらない限り
     //   作り直さない=検索フォーカスもカードのDOMも保つ。並び順や非表示切替など見出しが変わる操作の時だけ組み直す。
     var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + _priceMax;
@@ -5256,21 +5256,21 @@
       el._go5CandState = stateSig;
       // 検索欄の配線(このタブはページ分けのため実データで絞り込む=wireWorkSearch_ のDOM非表示は使わない)。
       var searchInput = el.querySelector('#candWorkSearch'), memoInput = el.querySelector('#candMemoSearch');
-      var onSearch_ = function () {
+      var onMainSearch_ = function () {
         _workSearchByTab[tabId] = searchInput ? (searchInput.value || '') : '';
         _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
         _candPageByTab[tabId] = 1; // 条件が変わったら1ページ目へ
-        paintPage_();
+        paintMainPage_();
       };
-      if (searchInput) searchInput.addEventListener('input', onSearch_);
-      if (memoInput) memoInput.addEventListener('input', onSearch_);
+      if (searchInput) searchInput.addEventListener('input', onMainSearch_);
+      if (memoInput) memoInput.addEventListener('input', onMainSearch_);
       var swClear = el.querySelector('#candWorkSearchClear'), smClear = el.querySelector('#candMemoSearchClear');
-      if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; onSearch_(); try { if (searchInput) searchInput.focus({ preventScroll: true }); } catch (e) { if (searchInput) searchInput.focus(); } });
-      if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; onSearch_(); try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); } });
+      if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; onMainSearch_(); try { if (searchInput) searchInput.focus({ preventScroll: true }); } catch (e) { if (searchInput) searchInput.focus(); } });
+      if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; onMainSearch_(); try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); } });
       var sizeSel = el.querySelector('#candPageSizeSel');
-      if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab[tabId] = 1; paintPage_(); });
+      if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab[tabId] = 1; paintMainPage_(); });
     }
-    paintPage_();
+    paintMainPage_();
     var salesCids = salesTargetCids_(arr);
     // 以下の非同期取得は、届いたら repaintCand_ で「カードの差分更新だけ」する=外枠も不変カードも壊さない=チラつかない。
     fetchSalesFor(salesCids, function (changed) { if (changed && _activeTab === tabId) repaintCand_(tabId); });
