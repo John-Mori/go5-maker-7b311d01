@@ -3363,14 +3363,93 @@ def work_relay_model(rec, dept, is_work):
 #     どちらかで打つ手が正反対(①=直す / ②=正常)なので、**理由の1語**が要る。
 #   ★判定は増やさない= 述語はここ1本のまま(ORG-11)。返り値に理由を足しただけで、
 #     `work_relay_model` は今までどおりモデル名だけを返す(既存の呼び口と検査は不変)。
-_WORK_RELAY_REASONS = ("ok", "not_work", "not_listed", "chami", "marker", "error")
+_WORK_RELAY_REASONS = ("ok", "not_work", "not_listed", "chami", "marker", "error",
+                       "too_short", "no_history")
+
+
+# ★★2026-08-25 イージス研究室(発注= 研究室HQ `DISPATCH-aegis-gl-1787585184396` の「モデル切替の
+#   上限を決める」)。**切替の回数ではなく、1回あたりの採算に上限を置く。**
+#
+#   実測(直近24h・`local/_work/probe_model_flap_20260825.py`)= キャッシュはモデルごとなので、
+#   Opusの流れの中でSonnetへ**寄り道**すると前置きの全書き直しを**2回**払う(落ちる時+戻る時)。
+#     ・落ちる時の書込 平均 75,349(Sonnet価格)/ 戻る時の書込 平均 66,956(**Opus価格=2.5倍**)
+#     ・= 寄り道1回の固定費は重み付きで約 30万。Sonnetの節約は2.5倍ぶん(=Opus便の6割)しかない。
+#   → **その便が固定費30万を上回る仕事をしないなら、下げるほど高くつく。**
+#   24hの寄り道12件を1件ずつ採算にすると= 黒字4件(最大 +1,561,816)/ **赤字5件(合計 -1,340,314)**。
+#   ★赤字5件は**全部 37秒以下で終わった便**(10/13/18/30/37秒)。黒字は 65秒以上(65/173/404/523)。
+#     = **分水嶺は60秒あたりに綺麗に割れる**(これが既定値 min_work_sec=60 の根拠)。
+#
+#   ★予測に使えるのは「この部屋×この差出人の作業便が、過去に何秒かかったか」だけ。
+#     `work_audit.jsonl` は**モデルに関係なく全部の作業便の sec を記録している**ので、
+#     下げなかった便からも履歴は貯まる= **止めたまま二度と再開できない、にはならない。**
+#   ★履歴が無い差出人は**下げない**(fail-quality= 迷ったらOpus・§1)。1便目で履歴が付く。
+_WORK_SEC_CACHE = {"mtime": None, "size": None, "data": {}}
+_WORK_SEC_TAIL_BYTES = 400_000                   # 台帳の末尾だけ読む(全部読むと毎便で重くなる)
+
+
+def _work_sec_history(dept, author, n=5):
+    """`work_audit.jsonl` の末尾から (dept, author) の作業便の秒数を新しい順に最大n件。
+
+    ★台帳は追記のみなので、**mtimeとサイズが変わらない限り読み直さない**。
+    ★読めない・列が無い(古い行)時は空リスト= 呼び側は「履歴なし」として扱う。
+    """
+    try:
+        st = os.stat(WORK_AUDIT)
+    except OSError:
+        return []
+    if _WORK_SEC_CACHE["mtime"] != st.st_mtime or _WORK_SEC_CACHE["size"] != st.st_size:
+        data = {}
+        try:
+            with open(WORK_AUDIT, "rb") as f:
+                if st.st_size > _WORK_SEC_TAIL_BYTES:
+                    f.seek(st.st_size - _WORK_SEC_TAIL_BYTES)
+                    f.readline()                 # ★途中で切れた1行目は捨てる
+                for raw in f:
+                    try:
+                        r = json.loads(raw.decode("utf-8", "replace"))
+                    except Exception:            # noqa: BLE001
+                        continue
+                    a = r.get("author")
+                    if not a or r.get("sec") is None:
+                        continue                 # ★古い行(authorが無い)は履歴に数えない
+                    data.setdefault((str(r.get("dept") or ""), str(a)), []).append(
+                        float(r.get("sec") or 0))
+        except Exception:                        # noqa: BLE001
+            data = {}
+        _WORK_SEC_CACHE["data"] = data
+        _WORK_SEC_CACHE["mtime"] = st.st_mtime
+        _WORK_SEC_CACHE["size"] = st.st_size
+    return list(_WORK_SEC_CACHE["data"].get((str(dept or ""), str(author or "")), []))[-n:]
+
+
+def _switch_pays_off(dept, author):
+    """この部屋×この差出人の便は、モデルを下げる固定費(前置きの全書き直し2回)の元を取れるか。
+
+    戻り= (True, "ok") / (False, "no_history") / (False, "too_short")。
+    ★閾値は `_model_override.json` の `min_work_sec`(既定60秒)・見る本数は `history_n`(既定5)。
+      **0 を入れればこの上限は無効**= 8/23〜24の挙動へ1行で戻せる(戻す判断はイージス研究室)。
+    """
+    try:
+        doc = _model_override_doc() or {}
+        thr = float(doc.get("min_work_sec", 60) or 0)
+        if thr <= 0:
+            return (True, "ok")                  # ★明示的に無効化された時だけ素通し
+        hist = _work_sec_history(dept, author, int(doc.get("history_n", 5) or 5))
+        if not hist:
+            return (False, "no_history")
+        hist = sorted(hist)
+        med = hist[len(hist) // 2]
+        return (True, "ok") if med >= thr else (False, "too_short")
+    except Exception:                            # noqa: BLE001
+        return (False, "no_history")             # 判定不能=下げない(品質側へ倒す)
 
 
 def work_relay_decide(rec, dept, is_work):
     """②の判定を (モデル名 or None, 理由1語) で返す。**この関数が述語の正本**。
 
     理由の語= "ok"(落とす) / "not_work"(作業便でない) / "not_listed"(②の名簿に無い部屋)
-              / "chami"(Chami本人の便) / "marker"(🔥・炎上・インシデント) / "error"(判定不能)。
+              / "chami"(Chami本人の便) / "marker"(🔥・炎上・インシデント) / "error"(判定不能)
+              / ★"too_short"・"no_history"(2026-08-25 追加= 切替の固定費の元が取れない便)。
     ★"ok" 以外は全部 None= 落とさない(迷ったら高い方で回す・§1の優先順)。
     ★理由を**記録するのは呼び口の仕事**(この関数は書かない=純粋なまま検査できる)。
     """
@@ -3386,6 +3465,11 @@ def work_relay_decide(rec, dept, is_work):
             return (None, "chami")                   # session_relay が読めない時の保険
         if any(k in str((rec or {}).get("content") or "") for k in _KEEP_OPUS_MARKERS):
             return (None, "marker")
+        # ★2026-08-25 採算の上限(上の _switch_pays_off の説明が根拠)。
+        #   短い便に寄り道すると、切替2回ぶんの固定費が節約を食い潰して**赤字になる**。
+        ok, why = _switch_pays_off(dept, (rec or {}).get("author"))
+        if not ok:
+            return (None, why)
         return (m, "ok")
     except Exception:
         return (None, "error")                       # 判定不能=落とさない(Opusのまま)
@@ -3450,7 +3534,8 @@ def _git_snapshot():
     return out
 
 
-def _audit_work(dept, msg_id, before, after, rc, secs, model, tail, relay_reason=None):
+def _audit_work(dept, msg_id, before, after, rc, secs, model, tail, relay_reason=None,
+                author=None):
     """作業agentが**実際に何を触ったか**を記録する(2026-07-21 人事の問題報告・問題2)。
 
     ★なぜ要るか(人事の指摘をそのまま引く):
@@ -3472,6 +3557,11 @@ def _audit_work(dept, msg_id, before, after, rc, secs, model, tail, relay_reason
         #   ★**追加のみ**= 渡されなかった便は今までと1バイトも変わらない(古い行も読める)。
         if relay_reason in _WORK_RELAY_REASONS:
             rec["relay_reason"] = relay_reason
+        # ★2026-08-25 差出人も残す(**追加のみ**)。切替の採算判定(work_relay_decide の
+        #   min_work_sec)が「この部屋×この差出人の作業便は何秒で終わるか」を、この列と
+        #   既存の sec だけで数える= **新しい台帳を作らない**(§4「記録先を2つ持たない」)。
+        if author:
+            rec["author"] = str(author)[:80]
         os.makedirs(os.path.dirname(WORK_AUDIT), exist_ok=True)
         with open(WORK_AUDIT, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")

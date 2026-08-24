@@ -68,6 +68,19 @@ REAL = {
 }
 BEFORE = {k: stat(v) for k, v in REAL.items()}
 
+# ★★2026-08-25 ⑤(切替の採算・min_work_sec)が入ったので、この検査にも**履歴**が要る。
+#   本番の `work_audit.jsonl` を読ませると結果が環境で変わる(=緑が偶然になる)ので、
+#   台帳そのものを使い捨てへ差し替え、「元が取れる差出人」を1人だけ仕込む。
+#   ★C-054= 本番の台帳は読みも書きもしない。上の BEFORE を取った**後**に差し替える。
+TMP_AUDIT = os.path.join(tempfile.gettempdir(), "go5_test_work_audit.jsonl")
+with open(TMP_AUDIT, "w", encoding="utf-8") as _f:
+    for _d in ("platform-se", "aegis-gl", "hq", "system-engineer"):
+        for _i in range(3):
+            _f.write(json.dumps({"ts": "2026-08-25T00:00:00", "dept": _d,
+                                 "author": "一ノ瀬怜", "sec": 300.0}) + "\n")
+dd.WORK_AUDIT = TMP_AUDIT
+dd._WORK_SEC_CACHE["mtime"] = None
+
 
 def write_override(doc):
     with open(TMP, "w", encoding="utf-8") as f:

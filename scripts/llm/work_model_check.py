@@ -122,6 +122,8 @@ def main():
     labels = {"ok": "Sonnetへ落とした", "not_work": "作業便でない", "chami": "Chami本人の便=守った",
               "marker": "🔥/炎上/インシデント=守った", "not_listed": "②の名簿に無い部屋",
               "error": "判定不能=高い方で回した",
+              "too_short": "★切替の元が取れない短い便=止めた(2026-08-25 min_work_sec)",
+              "no_history": "★履歴がまだ無い差出人=止めた(1便目で履歴が付く)",
               "(記録前の便)": "★理由を書く前の便(2026-08-23 17時より前)"}
     for k, v in reasons.most_common():
         print("  %-28s %5d (%.1f%%)  %s"

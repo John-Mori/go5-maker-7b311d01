@@ -4005,7 +4005,8 @@ def _self_check(dept, conf, token, sid, generation):
         return ""
 
 
-def _work_audit(dept, msg_id, before, after, rc, secs, model, tail, relay_reason=None):
+def _work_audit(dept, msg_id, before, after, rc, secs, model, tail, relay_reason=None,
+                author=None):
     """work_audit.jsonl への記録を dept_daemon へ委譲する(正本は向こう1つ)。
 
     ★relay経由でも**触ったファイルの監査を落とさない**(2026-07-26 発注の明示要件)。
@@ -4015,7 +4016,7 @@ def _work_audit(dept, msg_id, before, after, rc, secs, model, tail, relay_reason
     try:
         import dept_daemon
         dept_daemon._audit_work(dept, msg_id, before, after, rc, secs, model, tail,
-                                relay_reason)
+                                relay_reason, author)
     except Exception:
         pass
 
@@ -4745,14 +4746,14 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
             if before is not None:
                 _work_audit(dept, rec.get("msg_id", ""), before, _work_snapshot(), -1,
                             time.time() - _t0, model, "hard timeout(強制終了)",
-                            _relay_reason[0])
+                            _relay_reason[0], rec.get("author"))
             raise
         if before is not None:
             # ★監査に残すモデル名は**実際に使った値**(定数を書くと、部屋別モデルを入れた瞬間に
             #   監査ログが嘘になる。監査は「後から追える」ことが唯一の価値なので嘘を残さない)。
             _work_audit(dept, rec.get("msg_id", ""), before, _work_snapshot(), rc,
                         time.time() - _t0, model, (out or "")[-1500:],
-                        _relay_reason[0])
+                        _relay_reason[0], rec.get("author"))
         return data, rc, out
 
     boot = _boot_prompt(dept, conf, generation or 1)
