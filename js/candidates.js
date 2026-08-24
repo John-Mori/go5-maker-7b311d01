@@ -108,7 +108,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, imgHash_: imgHash_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -4346,10 +4346,11 @@
     });
   }
   // 追加確定時に呼ぶ：スロット画像を候補の動画生成用画像として保存し、スロットを空にする。
-  function attachAddImgs_(cid, keepForm) {
+  function attachAddImgs_(cid, keepForm, memoOverride) {
     var imgs = _addModalImgs.filter(Boolean);
     var memoEl = $('candMemo');
-    var memo = (memoEl && memoEl.value || '').trim(); // メモ欄に入力があれば候補のメモへ保存
+    // ★ドレイン再生(モーダルが閉じていてDOMから読めない)時は memoOverride を使う。通常はメモ欄から読む。
+    var memo = (memoOverride != null) ? String(memoOverride).trim() : (memoEl && memoEl.value || '').trim();
     if (!cid) return;
     if (imgs.length || memo) {
       var cur = refImgOf(cid) || {};
@@ -4560,28 +4561,84 @@
     renderCandList(tabId);
     if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
   }
-  function addCandidate(tabId, onDone) {
+  // ── 候補追加の耐久キュー(Chami 2026-08-24「絶対に保存して裏でやって閉じさせてくれ。ページを閉じても止まるな」)──
+  //   展開(IDB→メモリ)未了で"破壊マージ"の恐れがある追加(=既存候補cidへ画像を足す)だけを localStorage
+  //   cand_pending_add へ退避し、展開後/次回起動の drainPendAdds_ が安全にマージする。URL・メモ・X は必ず残す
+  //   (LS満杯で画像だけ載らなくても、セッション内メモリ _pendImgMem で拾う)。それ以外の追加は待たず即保存する。
+  // ★退避の唯一の判定(純関数=tests/test_cand_pending_add.js で検証)。true になるのは
+  //   「IDB有効・展開未了・有効なFANZA作品・新規画像あり・既存候補に同cidがある」全て揃った時だけ=
+  //   破壊マージの一点。ここを広げると「展開待ちで保存できない」旧バグへ、狭めると重複cidの既存画像喪失へ戻る。
+  function shouldDeferCandAdd_(idbOk, hydrated, hasFanza, newImgCount, dupExists) {
+    return !!idbOk && !hydrated && !!hasFanza && (newImgCount > 0) && !!dupExists;
+  }
+  var _pendAddKey = 'cand_pending_add';
+  var _pendImgMem = Object.create(null);   // id→imgs(LSに載らなかった画像のセッション内退避)
+  var _pendDrainWaits = 0;                  // 展開を待った回数(上限で保存優先へ倒す)
+  function readPendAdds_() { try { var a = JSON.parse(localStorage.getItem(_pendAddKey) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  function writePendAdds_(a) { try { localStorage.setItem(_pendAddKey, JSON.stringify(a || [])); return true; } catch (e) { return false; } }
+  function enqueuePendAdd_(rec) {
+    var a = readPendAdds_(); a.push(rec);
+    if (!writePendAdds_(a)) {               // 画像base64でLS満杯 → 画像を外して最低限(URL/メモ/X)は必ず残す
+      _pendImgMem[rec.id] = rec.imgs || [];
+      var lite = {}; for (var k in rec) { if (k !== 'imgs') lite[k] = rec[k]; } lite.imgs = []; lite._imgInMem = true;
+      a[a.length - 1] = lite; writePendAdds_(a);
+    }
+  }
+  function drainPendAdds_() {
+    var a = readPendAdds_();
+    if (!a.length) { _pendDrainWaits = 0; return; }
+    if (_idbOk && !_candidateHydrated && _pendDrainWaits < 3) {   // 展開待ち(最大3回=約9秒)。超えたら保存優先で強行。
+      _pendDrainWaits++;
+      whenImagesReady_(function () { drainPendAdds_(); });
+      return;
+    }
+    _pendDrainWaits = 0;
+    writePendAdds_([]);                       // 先に空へ(下の再生は同期でplaceholderを耐久化=再入で二重化しない)
+    a.forEach(function (rec) {
+      if (!rec) return;
+      var imgs = (rec.imgs && rec.imgs.length) ? rec.imgs : (_pendImgMem[rec.id] || []);
+      delete _pendImgMem[rec.id];
+      try { addCandidate(rec.tabId || 'main', null, { raw: rec.raw || '', twRaw: rec.twRaw || '', memo: rec.memo || '', imgs: imgs }); }
+      catch (e) { try { console.warn('[go5 cand] 保留追加の再生に失敗', e); } catch (_) {} }
+    });
+  }
+  try { document.addEventListener('go5-candidate-images-hydrated', function () { drainPendAdds_(); }); } catch (e) {}
+  try { setTimeout(function () { drainPendAdds_(); }, 0); } catch (e) {}   // 起動時: 前回セッションの持ち越しを処理
+
+  function addCandidate(tabId, onDone, override) {
     tabId = tabId || 'main';
     var key = itemsKey(tabId);
     var inp = $('candUrl'), twInp = $('candTwitter'), msg = $('candMsg');
-    // 候補の画像・メモはIndexedDBから非同期で展開される。重複作品への追記も既存内容との
-    // マージなので、展開前の空メモリを正として上書きしないよう読込み完了後に開始する。
-    if (_idbOk && !_candidateHydrated) {
-      if (msg) msg.textContent = '⏳ 保存済みの候補データを確認中…';
-      if (_candAddHydrationPending) return; // 連打で待機処理を増やさない
-      _candAddHydrationPending = true;
-      whenImagesReady_(function () {
-        _candAddHydrationPending = false;
-        if (!_candidateHydrated) {
-          if (msg) msg.textContent = '⚠️ 保存済みデータの確認に時間がかかっています。少し待って、もう一度押してください';
-          return; // 未展開のままマージすると既存画像・メモを失うため進めない
-        }
-        addCandidate(tabId, onDone);
-      });
+    // 入力の取得元: 通常はDOM。override はドレイン再生(モーダルが閉じDOMから読めない)時の入力。
+    var raw = (override ? String(override.raw || '') : (inp && inp.value || '')).trim();
+    var twRaw = (override ? String(override.twRaw || '') : (twInp && twInp.value || '')).trim();
+    var memoIn = override ? String(override.memo || '').trim()
+                          : (function () { var e = $('candMemo'); return (e && e.value || '').trim(); })();
+    if (override) { _addModalImgs = (override.imgs || []).filter(Boolean); } // 画像も再生入力へ載せ替え
+    // ★展開未了でも「絶対に保存」する。破壊マージが起きるのは「既存候補cid(重複)へ画像を足す」時だけ=
+    //   その場合のみ耐久キューへ退避し展開後に安全マージ。それ以外(新規cid・テキストのみ・X単独)は待たず即保存。
+    var deferAdd = false;
+    if (!override && _idbOk && !_candidateHydrated) {
+      var rawU = window.normalizeWorkUrl ? window.normalizeWorkUrl(raw) : raw;
+      var rParse = (raw && rawU && window.buildAffiliateLink) ? window.buildAffiliateLink(rawU, '') : null;
+      var newImgCount = _addModalImgs.filter(Boolean).length, dupExists = false;
+      if (raw && rParse && rParse.ok && newImgCount) {
+        var items0g = candItemsRead_(key);
+        for (var dgi = 0; dgi < items0g.length; dgi++) { if (items0g[dgi] && items0g[dgi].cid === rParse.cid) { dupExists = true; break; } }
+      }
+      deferAdd = shouldDeferCandAdd_(_idbOk, _candidateHydrated, !!(raw && rParse && rParse.ok), newImgCount, dupExists);
+    }
+    if (deferAdd) {
+      enqueuePendAdd_({ id: 'pa' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), tabId: tabId, raw: raw, twRaw: twRaw, memo: memoIn, imgs: _addModalImgs.filter(Boolean) });
+      if (inp) inp.value = ''; if (twInp) twInp.value = ''; var meq = $('candMemo'); if (meq) meq.value = '';
+      _addModalImgs = []; renderAddSlots_();
+      showCandAddNotice_(msg, '✅ 候補に保存しました(展開待ちのため裏で反映します)');
+      renderCandList(tabId);
+      if (onDone) onDone();
+      drainPendAdds_();
       return;
     }
-    var raw = (inp && inp.value || '').trim();
-    var twRaw = (twInp && twInp.value || '').trim();
+    // 破壊マージの無い保存は展開を待たずに下へ進む。
     var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(raw) : raw;
     var r = (raw && url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
     // ①作品URLがFANZA作品として有効 → 従来のFANZA候補(Twitter URLがあれば紐づけて保存)
@@ -4595,7 +4652,7 @@
         var existItem = items0[dupIdx];
         var newImgs = _addModalImgs.filter(Boolean);
         var memoElDup = $('candMemo');
-        var newMemo = (memoElDup && memoElDup.value || '').trim();
+        var newMemo = memoIn; // ★DOMではなく確定済みの入力(override対応)を正とする
         var newTwUrl = twForWork.ok ? twForWork.url : '';
         var cur = refImgOf(r.cid) || {};
         var curImgs = Array.isArray(cur.imgs) ? cur.imgs.filter(Boolean) : (cur.img ? [cur.img] : []);
@@ -4676,12 +4733,12 @@
         if (twForWork.ok) it.twitterUrl = twForWork.url; // X / Bluesky の投稿URLも一緒に保存
         delete it._fetching; // 取得完了(または失敗確定)＝プレースホルダ状態を解除
         candItemsWrite_(key, items);
-        attachAddImgs_(r.cid, errored); // errored=true → keepForm: URLとメモを消さず再試行を許す
+        attachAddImgs_(r.cid, errored, override ? memoIn : null); // errored=true → keepForm: URLとメモを消さず再試行を許す(overrideはドレイン再生のメモ)
         if (errored) {
           // URLは消さない(登録はできたが情報取得は失敗＝自動バックフィルで後から埋まる)。
           showCandAddNotice_(msg, '⚠️ 作品情報の取得に失敗しましたが、URLは登録済みです(自動で再取得します)');
         } else {
-          inp.value = ''; if (twInp) twInp.value = ''; showCandAddNotice_(msg, '✅ 候補に登録しました');
+          if (inp) inp.value = ''; if (twInp) twInp.value = ''; showCandAddNotice_(msg, '✅ 候補に登録しました'); // inpガード=ドレイン再生(モーダル閉)でnull
         }
         renderCandList(tabId);
         if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
@@ -4727,7 +4784,7 @@
     var tw = parseSnsUrl_(twRaw); if (!tw.ok) tw = parseSnsUrl_(raw); // X / Bluesky どちらでも単独追加可
     if (tw.ok) { addTwitterCandidate_(tabId, tw, inp, twInp, msg, onDone); return; }
     // ③どちらでもない
-    msg.textContent = (raw || twRaw) ? '⚠️ FANZAの作品URL か X / Bluesky の投稿URLを入れてください' : '⚠️ URLを入力してください';
+    if (msg) msg.textContent = (raw || twRaw) ? '⚠️ FANZAの作品URL か X / Bluesky の投稿URLを入れてください' : '⚠️ URLを入力してください';
   }
   // サークルの全作品を、指定タブ(候補/独立タブ)へまとめて追加。(重複cidは除外・タブ名は不変)
   function bulkAddCircle(tabId) {
