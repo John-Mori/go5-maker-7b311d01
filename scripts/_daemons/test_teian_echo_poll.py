@@ -396,6 +396,97 @@ def t_age_text_uses_minutes_under_one_hour():
     assert T._age_text(288) == "約24時間", T._age_text(288)
 
 
+# ---- 17〜19. ★2026-08-25 失敗の理由を持ち回る/失敗した周は必ず1行残す(イージス研究室) ----
+#   事故= 00:52 に「3回連続で読めない」が鳴ったが、本番ログの最終行は 8/23 08:02 のまま=
+#   本物の失敗の枝が logf を1行も書いていなかった。**警報から原因を知る術が無かった。**
+
+def t_fetch_fail_reason_is_recorded():
+    """`fetch_decisions` が None を返した時、理由の1語が残ること(HTTPは実際に通す)。"""
+    import urllib.error
+
+    keep = (T.exec_url, T.urllib.request.urlopen)
+    try:
+        T.exec_url = lambda: "https://example.invalid/exec"
+
+        def raise_http(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", None, None)
+
+        T.urllib.request.urlopen = raise_http
+        assert T.fetch_decisions(2) is None
+        assert T.last_fetch_fail() == "http-404", T.last_fetch_fail()
+
+        class _R:                                   # HTMLが返る(GASのエラーページ)
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"<!DOCTYPE html><html>..."
+
+        T.urllib.request.urlopen = lambda req, timeout=None: _R()
+        assert T.fetch_decisions(2) is None
+        assert T.last_fetch_fail() == "not-json", T.last_fetch_fail()
+
+        class _R2(_R):
+            def read(self):
+                return b'{"ok":false}'
+
+        T.urllib.request.urlopen = lambda req, timeout=None: _R2()
+        assert T.fetch_decisions(2) is None
+        assert T.last_fetch_fail() == "ok-false", T.last_fetch_fail()
+
+        class _R3(_R):
+            def read(self):
+                return b'{"ok":true,"rows":[],"lastRow":5}'
+
+        T.urllib.request.urlopen = lambda req, timeout=None: _R3()
+        assert T.fetch_decisions(2) == {"ok": True, "rows": [], "lastRow": 5}
+        assert T.last_fetch_fail() == "", "成功したのに理由が残っている"
+    finally:
+        T.exec_url, T.urllib.request.urlopen = keep
+
+
+def t_read_fail_always_writes_a_log_line():
+    """★閾値で鳴らない周(1回目・4回目)でもログに1行残ること=これが今回の穴。"""
+    with tempfile.TemporaryDirectory() as d:
+        p = Paths(d)
+        T._write_int(p.wm, 7)
+        alerts, alert = _alert_recorder()
+        _, note = _note_recorder()
+        _, deliver = _recorder()
+        log = os.path.join(d, "teian_decide_poll.log")
+        for _ in range(4):
+            T.run_once(lambda s: None, deliver, alert=alert, note=note,
+                       wm_path=p.wm, fail_path=p.fail, alert_at=3)
+        assert len(alerts) == 1, alerts
+        lines = [x for x in open(log, encoding="utf-8").read().splitlines() if x.strip()]
+        assert len(lines) == 4, f"失敗4回に対しログが{len(lines)}行(鳴らない周が消えている)"
+        assert "水位=7据え置き" in lines[0], lines[0]
+        assert "4回連続" in lines[3], lines[3]
+
+
+def t_alert_text_carries_the_reason():
+    """★警報の本文に理由の1語が載ること(載らないと受け手はまた口を叩き直す羽目になる)。"""
+    with tempfile.TemporaryDirectory() as d:
+        p = Paths(d)
+        T._write_int(p.wm, 7)
+        alerts, alert = _alert_recorder()
+        _, note = _note_recorder()
+        _, deliver = _recorder()
+        keep = T.last_fetch_fail
+        T.last_fetch_fail = lambda: "http-TimeoutError"
+        try:
+            for _ in range(3):
+                T.run_once(lambda s: None, deliver, alert=alert, note=note,
+                           wm_path=p.wm, fail_path=p.fail, alert_at=3)
+        finally:
+            T.last_fetch_fail = keep
+        assert len(alerts) == 1, alerts
+        assert "http-TimeoutError" in str(alerts[0]), alerts[0]
+
+
 def main():
     tests = [
         ("初回は水位を置くだけ・配達も警報もしない", t_init_sets_watermark_no_delivery),
@@ -414,6 +505,9 @@ def main():
         ("★初期化後blockedは周期でも部屋へ1回(静かな死を防ぐ)", t_initialized_blocked_daily_escalation_on_period),
         ("★鳴らした警報にだけ部屋へ復旧を1回返す", t_recovery_notice_only_when_alarm_rang),
         ("★1時間未満の滞留を「約0時間」と言わない", t_age_text_uses_minutes_under_one_hour),
+        ("★fetchの失敗は理由の1語を残す", t_fetch_fail_reason_is_recorded),
+        ("★★鳴らない周でもログに1行残る(00:52の穴)", t_read_fail_always_writes_a_log_line),
+        ("★警報の本文に理由が載る", t_alert_text_carries_the_reason),
     ]
     ok = sum(run(n, f) for n, f in tests)
     print(f"\n{ok}/{len(tests)} PASS")

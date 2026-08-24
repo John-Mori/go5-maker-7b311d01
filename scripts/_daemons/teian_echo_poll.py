@@ -152,39 +152,69 @@ def exec_url():
         return json.load(f)["execUrl"]
 
 
+# ★★2026-08-25 イージス研究室。**警報が原因を言えなかった**ので足した。
+#   事故= 00:52 に「3回連続で読めない」が鳴ったが、`teian_decide_poll.log` の最終行は
+#   **2026-08-23 08:02**(=初期化の行)のまま。本物の失敗の枝が logf を1行も書いていなかった。
+#   受け取った側は「404なのか / タイムアウトなのか / JSONが壊れたのか」を**警報から知る術が無く**、
+#   同じ口を自分で叩き直すまで何も分からない(実測でそうなった)。
+#   → 失敗の**理由を1語**だけ持ち回る。返り値の契約(None)は変えない=呼び手は1行も変わらない。
+_LAST_FAIL = ""                              # 直近の fetch 失敗の理由(1語+補足)
+
+
+def last_fetch_fail():
+    """直近の `fetch_decisions` が None を返した理由。成功した後は空文字。
+
+    語= config(execUrlが読めない)/ http-<コード or 例外名> / not-json(HTML等)
+        / json-broken / ok-false / rows-missing / lastrow-bad。
+    ★継ぎ目の偽物(検査)を使った時は空のまま= 呼び手は「不明」として扱う。
+    """
+    return _LAST_FAIL
+
+
 def fetch_decisions(since_row, timeout=25):
     """GASの読み取り口を叩く。**継ぎ目#1(HTTP)**。
 
     正常= {ok:true, lastRow:int, rows:[...]} の dict を返す。
     HTTP失敗 / HTMLが返る / JSONが壊れている / ok!=true / 構造が欠ける = None(=fail-open)。
     ★ここで例外を投げない=呼び手(run_once)は None を「静かに次周期へ」に倒す。
+    ★None を返す時は **必ず `_LAST_FAIL` に理由を置く**(空のまま返すと警報がまた黙る)。
     """
+    global _LAST_FAIL
+
+    def fail(why):
+        global _LAST_FAIL
+        _LAST_FAIL = why
+        return None
+
     try:
         base = exec_url()
-    except Exception:
-        return None
+    except Exception as e:                  # noqa: BLE001
+        return fail(f"config-{type(e).__name__}")
     sep = "&" if "?" in base else "?"
     url = f"{base}{sep}action=teian_decisions&since_row={int(since_row)}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "go5-teian-echo/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read().decode("utf-8", errors="replace").strip()
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
-        return None
+    except urllib.error.HTTPError as e:
+        return fail(f"http-{e.code}")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return fail(f"http-{type(e).__name__}")
     if not raw or raw[0] not in "{[":       # HTMLエラーページ等はJSONで始まらない
-        return None
+        return fail("not-json")
     try:
         data = json.loads(raw)
-    except Exception:
-        return None
+    except Exception:                       # noqa: BLE001
+        return fail("json-broken")
     if not isinstance(data, dict) or data.get("ok") is not True:
-        return None
+        return fail("ok-false")
     if not isinstance(data.get("rows"), list):
-        return None
+        return fail("rows-missing")
     try:
         int(data.get("lastRow"))
     except (TypeError, ValueError):
-        return None
+        return fail("lastrow-bad")
+    _LAST_FAIL = ""
     return data
 
 
@@ -370,10 +400,17 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             # 口は生えていたのに落ちた=本物の異常。★閾値ちょうど **または** 周期(約24h)ごとに部屋へ1回。
             #   n==alert_at の一発だけだと、口が落ちたまま続くと2度と鳴らない=静かな死
             #   (デブライネさん指摘 2026-08-23 / C-041=一度の観測を状態の代理にするな)。
+            # ★★2026-08-25 イージス研究室= **失敗した周は必ず1行ログを残す**。
+            #   ここは今まで alert/note しか呼んでおらず、鳴らない周(閾値未満・閾値を跨いだ後)は
+            #   跡が1行も残らなかった= 00:52 の警報を受けた時、ログの最終行は 8/23 08:02 のまま
+            #   で「いつから・何回・何が原因で」が**警報からも台帳からも分からなかった**。
+            why = last_fetch_fail() or "不明(理由を持たない継ぎ目)"
+            logf(f"[fail-open] 提案決定エコー: 読み取り口が読めない({n}回連続・理由={why}・"
+                 f"水位={since}据え置き)。")
             if at_threshold or at_period:
-                alert(f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた/HTML/JSON壊れ 等)。"
+                alert(f"GASの読み取り口が{n}回連続で読めない(理由={why})。"
                       f"水位={since}のまま{_age_text(n)}待機している。")
-                note("read-fail", f"GASの読み取り口が{n}回連続で読めない(口は生えていたのに落ちた)。"
+                note("read-fail", f"GASの読み取り口が{n}回連続で読めない(理由={why})。"
                                   f"水位={since}のまま。")
         else:
             # 口がまだ無い=既知の待ち。閾値では部屋で鳴らさない(狼少年回避)=ログ+受け手が読む面に1回。
