@@ -406,6 +406,9 @@ window.SCH = window.SCH || {};
       ${renderVerificationSection(s)}
     `;
     m.classList.add("open");
+    // 作品(タイトル/URL/動画ID)が入っている枠だけ「この枠の作品を消す」を出す(未着手の空枠には出さない)。
+    const delBtn = document.getElementById("modal-delete");
+    if (delBtn) { const hasWork = !!(String(s.title || "").trim() || String(s.url || "").trim() || String(s.video_id || "").trim()); delBtn.hidden = !hasWork; }
     if (inFrame) {
       const pk = document.getElementById("integ-pick");
       if (pk) pk.addEventListener("click", () => { sendToParent("slot-picked", s); closeEditor(); });
@@ -652,6 +655,22 @@ window.SCH = window.SCH || {};
     closeEditor();
     await recomputeAndRender();
   }
+  // この枠の作品(タイトル/URL/動画ID)だけを消して未着手に戻す(notes/verificationは残す)。
+  async function deleteEditorWork() {
+    if (!editingId) return;
+    const acc = effAcc();
+    const s = slotForAcc(editingId, acc);
+    if (!s) return;
+    if (!window.confirm("この枠の作品(タイトル/URL/動画ID)を消して未着手に戻します。よろしいですか?")) return;
+    s.title = "";
+    s.url = "";
+    s.video_id = "";
+    s.status = (config.statusEnum && config.statusEnum[0]) || "未着手";
+    s.needs_review = false;
+    await store.upsertSlot(s, acc);
+    closeEditor();
+    await recomputeAndRender();
+  }
   function closeEditor() {
     editingId = null;
     editingAcc = null;
@@ -753,6 +772,8 @@ window.SCH = window.SCH || {};
     });
     document.getElementById("modal-save").addEventListener("click", saveEditor);
     document.getElementById("modal-close").addEventListener("click", closeEditor);
+    const _md = document.getElementById("modal-delete");
+    if (_md) _md.addEventListener("click", deleteEditorWork);
     var tsc = document.getElementById("typesheet-close");
     if (tsc) tsc.addEventListener("click", closeTypeSheet);
     var ts = document.getElementById("typesheet");

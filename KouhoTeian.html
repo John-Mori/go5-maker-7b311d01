@@ -422,6 +422,16 @@
 
   // ---- 動画生成用画像(候補タブでChamiが貼る素材・本体と同じ IDB go5store/kv の ref:<cid>)----
   var REF = {};  // cid → {imgs:[dataURL], has:bool}
+  // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
+  //   js/candidates.js と同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
+  function imgHash_(s){ s=String(s||''); var h=5381,i=s.length; while(i){ h=((h*33)^s.charCodeAt(--i))>>>0; } return h.toString(36); }
+  // 画像マーク(cand_img_marks・js/candidates.jsが書く { "<cid>": { "<hash>": "used"|"excluded" } })の読み取り専用参照。
+  function imgMarksMap_(){ try{ return JSON.parse(LS.getItem('cand_img_marks')||'{}')||{}; }catch(e){ return {}; } }
+  // used/excluded マークが付いた画像を候補から除外する。
+  function filterMarked_(cid, imgs){
+    var m = imgMarksMap_()[cid] || {};
+    return (imgs||[]).filter(function(im){ var st=m[imgHash_(im)]; return st!=='used' && st!=='excluded'; });
+  }
   function refInfoFromRec_(rec){
     if(!rec) return {imgs:[], has:false};
     if(Array.isArray(rec.imgs)){ var a=rec.imgs.filter(Boolean); return {imgs:a, has:a.length>0}; }
@@ -429,19 +439,26 @@
     if(rec.__r2n>0) return {imgs:[], has:true};   // 別端末に在る(この端末に未取得)
     return {imgs:[], has:false};
   }
+  // マーク済み(used/excluded)画像を除いた上で {imgs,has} を確定する。未取得(__r2n>0=imgs空でhas true)は
+  //   マークと無関係なので触らない。フィルタ対象はimgsが実在した時のみ・全除外なら素材無し扱い(has=false)へ落とす。
+  function applyMarkFilter_(cid, info){
+    if(!info || !info.imgs.length) return info;
+    var filtered = filterMarked_(cid, info.imgs);
+    return filtered.length ? {imgs:filtered, has:true} : {imgs:[], has:false};
+  }
   function loadRefMap_(){
     return new Promise(function(resolve){
       var map={};
       try{ // localStorage 退避も読む(IDBが間欠死する端末でも同期で拾える・本体と同じキー)
         for(var i=0;i<LS.length;i++){ var k=LS.key(i);
           if(k && k.indexOf('cand_refimg__')===0){
-            try{ var info=refInfoFromRec_(JSON.parse(LS.getItem(k))); if(info.imgs.length||info.has) map[k.slice(13)]=info; }catch(e){}
+            try{ var cid=k.slice(13); var info=applyMarkFilter_(cid, refInfoFromRec_(JSON.parse(LS.getItem(k)))); if(info.imgs.length||info.has) map[cid]=info; }catch(e){}
           }
         }
       }catch(e){}
       if(window.Go5Idb && Go5Idb.available && Go5Idb.available()){
         Go5Idb.entriesByPrefixes(['ref:']).then(function(ent){
-          try{ Object.keys(ent||{}).forEach(function(k){ var info=refInfoFromRec_(ent[k]); if(info.imgs.length||info.has) map[k.slice(4)]=info; }); }catch(e){}
+          try{ Object.keys(ent||{}).forEach(function(k){ var cid=k.slice(4); var info=applyMarkFilter_(cid, refInfoFromRec_(ent[k])); if(info.imgs.length||info.has) map[cid]=info; }); }catch(e){}
           resolve(map);
         }, function(){ resolve(map); });   // fail-open=読めなくても中身は出す
       } else resolve(map);

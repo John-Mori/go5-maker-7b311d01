@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>投稿スケジュール カレンダー（5週ローリング）</title>
-  <link rel="stylesheet" href="css/style.css?v=33">
+  <link rel="stylesheet" href="css/style.css?v=34">
 </head>
 <body>
   <header class="app-header">
@@ -43,6 +43,7 @@
   <div id="modal" class="modal">
     <div class="modal-card">
       <div class="modal-foot">
+        <button id="modal-delete" type="button" class="danger" hidden>この枠の作品を消す</button>
         <button id="modal-save" class="primary">保存</button>
         <button id="modal-close">閉じる</button>
       </div>
@@ -71,6 +72,6 @@
   <script src="js/daytype.js"></script>
   <script src="js/generator.js?v=23"></script>
   <script src="js/store.js?v=25"></script>
-  <script src="js/app.js?v=40"></script>
+  <script src="js/app.js?v=41"></script>
 </body>
 </html>

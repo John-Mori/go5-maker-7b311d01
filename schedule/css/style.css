@@ -187,6 +187,8 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 .modal-foot button { background: #FFFFFF; color: #2A2520; border: 1px solid rgba(42,37,32,.20); }
 .modal-foot button:hover { border-color: #A66A0C; }
 .modal-foot .primary { background: var(--accent); color: #08101f; font-weight: 700; border-color: var(--accent); }
+.modal-foot .danger { background: #FFFFFF; color: #b23b3b; border: 1px solid #b23b3b; font-weight: 700; margin-right: auto; }
+.modal-foot .danger:hover { background: rgba(178,59,59,.10); border-color: #b23b3b; }
 .warn { background: rgba(180,60,60,.12); color: #b23b3b; padding: 6px 8px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; }
 .info { background: rgba(12,110,133,.12); color: #0c6e85; padding: 6px 8px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; }
 .ch-badge { background: rgba(11,126,86,.12); color: #0B7E56; padding: 5px 8px; border-radius: 5px; margin-bottom: 10px; font-size: 12px; border-left: 3px solid #0B7E56; }

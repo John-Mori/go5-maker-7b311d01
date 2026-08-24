@@ -101,10 +101,14 @@
     return { arr: out, changed: changed };
   }
 
+  // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
+  //   js/candidates.js と KouhoTeian.html に同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
+  function imgHash_(s) { s = String(s || ''); var h = 5381, i = s.length; while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; } return h.toString(36); }
+
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, imgHash_: imgHash_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -1119,6 +1123,71 @@
     } catch (e) {}
   }
 
+  // ── 画像マーク(通常/使用済み/除外)の耐久化(単一グローバルmap) ─────────────────────
+  //   ★動画作成用モーダルのズームで、画像ごとに「使用済み/除外」を付けられる(候補提案ページの絞り込みに使う)。
+  //   cand_text/候補リストと同じ設計(LS正本＋IDB耐久ミラー・LS満杯でも喪失させない)。
+  //   形: { "<cid>": { "<imgHash_の値>": "used"|"excluded" } }。LSキー=cand_img_marks。IDBミラーキー=meta:imgmarks。
+  var K_IMGMARKS = 'cand_img_marks';
+  function imgMarksIdbKey_() { return 'meta:imgmarks'; }
+  var _imgMarksMem = null;      // LS書込失敗時の権威(nullなら未使用=LSが正)
+  var _imgMarksRestored = false;
+  function imgMarksRead_() {
+    var v = (_imgMarksMem != null) ? _imgMarksMem : lsGet(K_IMGMARKS, '{}');
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  }
+  function imgMarksWrite_(map) {
+    if (_idbOk && window.Go5Idb && typeof window.Go5Idb.set === 'function') {
+      try { Promise.resolve(window.Go5Idb.set(imgMarksIdbKey_(), map)).catch(function () {}); } catch (e) {}
+    }
+    try {
+      localStorage.setItem(K_IMGMARKS, JSON.stringify(map));
+      _imgMarksMem = null;
+    } catch (e) {
+      // ★LS満杯でもマークを喪失させない=メモリを権威にし、耐久はIDBミラー側に任せる(cand_text と同じ考え方)。
+      _imgMarksMem = map;
+      klog_('imgmarks_ls_quota_idb_fallback', 'work', K_IMGMARKS, {});
+    }
+  }
+  function imgMarkStateOf_(cid, img) {
+    var m = imgMarksRead_()[String(cid || '')];
+    return (m && typeof m === 'object') ? m[imgHash_(img)] : undefined;
+  }
+  function setImgMark_(cid, img, state) {
+    cid = String(cid || ''); if (!cid) return;
+    var map = imgMarksRead_();
+    var m = map[cid] || {};
+    var h = imgHash_(img);
+    if (state === 'used' || state === 'excluded') m[h] = state; else delete m[h];
+    if (Object.keys(m).length) map[cid] = m; else delete map[cid];
+    imgMarksWrite_(map);
+  }
+  // 起動時にIDBミラーからLS(またはメモリ)へ復元する(冪等・1回)。IDB優先で欠けているcid/hashを補完し、
+  //   両方にある値はLS側を残す(=Object.assign的にLSベースへIDBの未知キーだけ足す)。fail-open。
+  function restoreImgMarksFromIdb_() {
+    if (_imgMarksRestored || !_idbOk || !window.Go5Idb) return;
+    _imgMarksRestored = true;
+    try {
+      var readP = (typeof window.Go5Idb.getResult === 'function')
+        ? window.Go5Idb.getResult(imgMarksIdbKey_())
+        : window.Go5Idb.get(imgMarksIdbKey_()).then(function (v) { return { ok: true, value: v }; }, function (e) { return { ok: false, value: null, error: e }; });
+      readP.then(function (r) {
+        if (!r || !r.ok || !r.value || typeof r.value !== 'object' || Array.isArray(r.value)) return;
+        var ls = imgMarksRead_(), merged = {}, changed = false;
+        Object.keys(ls).forEach(function (cid) { merged[cid] = Object.assign({}, ls[cid]); });
+        Object.keys(r.value).forEach(function (cid) {
+          var idbInner = r.value[cid];
+          if (!idbInner || typeof idbInner !== 'object') return;
+          if (!merged[cid]) merged[cid] = {};
+          Object.keys(idbInner).forEach(function (h) {
+            if (!Object.prototype.hasOwnProperty.call(merged[cid], h)) { merged[cid][h] = idbInner[h]; changed = true; }
+          });
+          if (!Object.keys(merged[cid]).length) delete merged[cid];
+        });
+        if (changed) imgMarksWrite_(merged);
+      }, function () {});
+    } catch (e) {}
+  }
+
   function mergeImageEntries_(all) {
     function putLatest_(bucket, key, val) {
       var cur = bucket[key];
@@ -1671,6 +1740,7 @@
     if (!_idbOk || _candidateHydrated || _candidateHydrateInFlight) return;
     try { restoreCandTextFromIdb_(); } catch (e) {} // ★Storage v2 Phase1: LS満杯でIDBにだけ載ったテキストを復元(冪等)
     try { restoreCandListFromIdb_(itemsKey(_activeTab)); } catch (e) {} // ★Storage v2 Phase2: 候補リスト配列も同様に復元(冪等)
+    try { restoreImgMarksFromIdb_(); } catch (e) {} // 画像マーク(通常/使用済み/除外)もIDBミラーから復元(冪等)
     _candidateHydrateInFlight = true;
     var __hydT0 = Date.now(), __hydCount = 0;
     window.Go5ImgDiag && Go5ImgDiag.push('hydrate_start');
@@ -2013,7 +2083,7 @@
     } else { renderImgModal_(it.title, big, null, 'サンプル画像の取得にはFANZA Workerの設定が必要です。'); }
   }
   // 画像ズーム。(左右スワイプで切替).fz-zoom を流用。
-  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null, _zoomCaps = null; // _zoomCaps=各ページの見出し(画像の上に表示・投稿履歴の「動画生成で使用した画像」等)
+  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null, _zoomCaps = null, _zoomMarkCid = null; // _zoomCaps=各ページの見出し(画像の上に表示・投稿履歴の「動画生成で使用した画像」等) / _zoomMarkCid=動画生成用画像だけで使う3択マークの対象cid
   function ensureZoom_() {
     if (_zoom) return _zoom;
     var z = document.createElement('div'); z.className = 'fz-zoom'; z.hidden = true;
@@ -2023,10 +2093,21 @@
       // ★PCはスワイプできないので左右の矢印で切替(スマホはスワイプも従来通り効く)。2枚以上の時だけ表示。
       '<button class="fz-zoom-nav prev" type="button" aria-label="前へ" hidden>‹</button>' +
       '<button class="fz-zoom-nav next" type="button" aria-label="次へ" hidden>›</button>' +
-      '<div class="fz-zoom-cap" hidden></div><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div><div class="fz-zoom-msg"></div>';
+      '<div class="fz-zoom-cap" hidden></div><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div>' +
+      // 動画生成用画像だけ(_zoomMarkCid指定時)に出る「通常/使用済み/除外」3択。既定は隠す。
+      '<div class="fz-zoom-mark" hidden><button type="button" class="fz-mk" data-mk="">通常</button><button type="button" class="fz-mk" data-mk="used">使用済み</button><button type="button" class="fz-mk" data-mk="excluded">除外</button></div>' +
+      '<div class="fz-zoom-msg"></div>';
     document.body.appendChild(z);
     z.addEventListener('click', function (e) { if (e.target === z) z.hidden = true; });
     z.querySelector('.fz-zoom-close').addEventListener('click', function () { z.hidden = true; });
+    // 「通常/使用済み/除外」の3択(動画生成用画像だけ・_zoomMarkCidが無ければ無視)。
+    z.querySelectorAll('.fz-mk').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (!_zoomMarkCid) return;
+        setImgMark_(_zoomMarkCid, _zoomList[_zi], btn.getAttribute('data-mk') || '');
+        zoomShow_();
+      });
+    });
     // 「この画像を1ページ目にする」＝表示中(2ページ目以降)の画像を先頭へ。旧1ページ目は2ページ目へずれる。
     z.querySelector('.fz-zoom-tofirst').addEventListener('click', function () {
       if (!_zoomReorder || _zi <= 0) return;
@@ -2071,16 +2152,28 @@
     var multi = _zoomList.length > 1; // ★2枚以上の時だけ左右矢印を出す(PCの切替手段)
     var np = z.querySelector('.fz-zoom-nav.prev'), nn = z.querySelector('.fz-zoom-nav.next');
     if (np) np.hidden = !multi; if (nn) nn.hidden = !multi;
+    var mk = z.querySelector('.fz-zoom-mark');
+    if (mk) {
+      if (_zoomMarkCid) {
+        mk.hidden = false;
+        var st = imgMarkStateOf_(_zoomMarkCid, _zoomList[_zi]) || '';
+        mk.querySelectorAll('.fz-mk').forEach(function (b) { b.classList.toggle('is-active', (b.getAttribute('data-mk') || '') === st); });
+      } else {
+        mk.hidden = true;
+      }
+    }
     z.hidden = false;
   }
   function zoomGo_(d) { if (!_zoomList.length) return; _zi = (_zi + d + _zoomList.length) % _zoomList.length; zoomShow_(); }
   // opts.onReorder(currentIdx) で「1ページ目にする」ボタン、opts.onPasteAdd(done) で「貼り付けて新規追加」ボタンを出す。
   //   onPasteAdd はクリップボード画像を先頭へ追加・保存し done(新画像配列, err) を呼ぶ。(先頭＝新しい1ページ目)
+  //   opts.markCid を渡すと「通常/使用済み/除外」3択を表示(動画生成用画像だけで使う)。
   function openImgZoom_(images, idx, opts) {
     if (!images || !images.length) return;
     _zoomReorder = (opts && typeof opts.onReorder === 'function') ? opts.onReorder : null;
     _zoomAdd = (opts && typeof opts.onPasteAdd === 'function') ? opts.onPasteAdd : null;
     _zoomCaps = (opts && Array.isArray(opts.captions)) ? opts.captions.slice() : null; // ページ別見出し(任意)
+    _zoomMarkCid = (opts && opts.markCid) ? String(opts.markCid) : null;
     _zoomList = images.slice(); _zi = Math.min(Math.max(0, idx || 0), _zoomList.length - 1); zoomShow_();
   }
   // 「画像を貼り付けて新規追加」：クリップボード画像を cid の refimg 先頭へ追加・保存し一覧再描画。(投稿編集と同じ保存先に同期)
@@ -2580,6 +2673,7 @@
         '</div>';
       previewEl.querySelector('img').addEventListener('click', function () {
         openImgZoom_(pending.imgs.slice(), pending.idx, {
+          markCid: cid, // 動画生成用画像だけ「通常/使用済み/除外」3択を出す(他のopenImgZoom_呼び出しには付けない)
           onReorder: function (i) {
             if (i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
             var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; imagesDirty = true; drawPreview(); // 旧1枚目は2枚目へずれる(保存で確定)
