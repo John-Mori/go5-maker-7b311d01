@@ -3194,10 +3194,18 @@
       if (idx >= 0) liveItems[idx] = newItem; else liveItems.unshift(newItem);
       candItemsWrite_(key, liveItems);
       var cfg = workerCfg();
-      var finish = function (info) {
+      // ★保存確定(cb(true))は FANZA情報取得(title/thumb/価格)の完了を待たない。ここまでで画像・作品URL・
+      //   候補本体は既に永続化済み(refImgSave＋candItemsWrite_)。従来は cb(true) が fetchFanzaInfo の解決後にしか
+      //   呼ばれず、Worker遅延/不通で fetch が返らないと cb が発火せず、呼び出し側の20秒番犬が時間切れ→
+      //   「保存処理が時間内に完了しませんでした」=実際は保存できているのに失敗表示になり再試行ループに陥っていた
+      //   (Chami実機2026-08-24・DMMリンクを入れて保存すると"変換中…"のまま保存できない。DMMリンク無し=この経路を
+      //   通らないため保存できていた)。→ 保存の成否を fetch から切り離し、情報は裏で追って、届いたらタイトル等を
+      //   後追い反映して再描画する(遷移と保存を切り離す・C-038と同型の fail-open)。
+      var enrichInfo_ = function (info) {
+        if (!info || !info.title) return; // 取得できなければ「(タイトル未取得)」のまま=通常追加と同じく裏で追い続く
         var arr = candItemsRead_(key);
         arr.forEach(function (x) {
-          if (x.cid !== r.cid || !info || !info.title) return;
+          if (x.cid !== r.cid) return;
           x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
           x.listPrice = info.listPrice; x.price = info.price; x.discountPct = info.discountPct || 0;
           x.date = info.releaseDate || ''; x.genres = info.genres || [];
@@ -3205,10 +3213,11 @@
           x.reviewCount = info.reviewCount; x.reviewAvg = info.reviewAvg;
           if (info.samples && info.samples.length) x.samples = info.samples;
         });
-        candItemsWrite_(key, arr); recordReviewSnapshots(arr); cb(true);
+        candItemsWrite_(key, arr); recordReviewSnapshots(arr);
+        try { if (_activeTab) render(); } catch (e) {}
       };
-      if (window.FanzaCore && cfg.url) window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) { finish(info && info.title ? info : null); }).catch(function () { finish(null); });
-      else finish(null);
+      cb(true); // ★保存は完了(永続化済み)。モーダルを閉じてよい。以降の作品情報取得は裏で追う。
+      if (window.FanzaCore && cfg.url) { try { window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(enrichInfo_).catch(function () {}); } catch (e) {} }
     }).catch(function () {
       cb(false, '画像・URL情報を保存できませんでした。もう一度お試しください');
     });
