@@ -114,6 +114,19 @@
     return { arr: out, changed: changed };
   }
 
+  // ★「登録しましたと出てやはり保存されない=処置をしたという嘘」(Chami 2026-08-24)の根治。
+  //   これまで「✅ 候補に登録しました」は candItemsWrite_ の成否に関わらず無条件で表示していた=
+  //   iOS Safari の localStorage 約5MB飽和で setItem が throw しても「登録しました」と嘘をつく状態だった。
+  //   耐久化の"実物"を確かめてから表示を出し分ける。純関数(Nodeテスト可=tests/test_durable_verdict.js)。
+  //     'ls'  = localStorageに書けた=耐久(最短経路)
+  //     'idb' = LSは満杯だがIDBミラーに cid の実在を確認=耐久
+  //     'fail'= どちらにも無い=保存できていない(嘘をつかず正直に伝える)
+  function durableVerdict_(lsOk, idbHasCid) {
+    if (lsOk) return 'ls';
+    if (idbHasCid) return 'idb';
+    return 'fail';
+  }
+
   // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
   //   js/candidates.js と KouhoTeian.html に同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
   function imgHash_(s) { s = String(s || ''); var h = 5381, i = s.length; while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; } return h.toString(36); }
@@ -121,7 +134,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -1123,6 +1136,25 @@
     }
     reqSyncFor_(key); // lsSet と同じく成否に関わらず同期要求(失敗時は旧値の再送=無害)
     return ok;
+  }
+  // 保存が本当に耐久化できたかを確かめる。LS成功なら即'ls'。LS失敗時はIDBミラーの書込完了を待ってから
+  //   読み戻し、cidの実在を検証する(fire-and-forgetのミラーを await せず読むと未完了で誤 'fail' になるため)。
+  function confirmCandDurable_(key, cid, lsOk) {
+    if (lsOk) return Promise.resolve('ls');
+    if (!_idbOk || !window.Go5Idb) return Promise.resolve('fail');
+    // IDBミラーの書込完了を待つ(冪等=同値を再setするだけ)→ 読み戻して cid が引けるか確認。
+    return persistCandListIdb_(key, candItemsRead_(key)).then(function (setOk) {
+      if (!setOk) return 'fail';
+      var readP = (typeof window.Go5Idb.getResult === 'function')
+        ? window.Go5Idb.getResult(candListIdbKey_(key))
+        : window.Go5Idb.get(candListIdbKey_(key)).then(function (v) { return { ok: true, value: v }; }, function () { return { ok: false, value: null }; });
+      return Promise.resolve(readP).then(function (r) {
+        var arr = (r && r.ok && Array.isArray(r.value)) ? r.value : [];
+        var has = false;
+        for (var i = 0; i < arr.length; i++) { if (arr[i] && String(arr[i].cid) === String(cid)) { has = true; break; } }
+        return durableVerdict_(lsOk, has);
+      }, function () { return durableVerdict_(lsOk, false); });
+    }, function () { return 'fail'; });
   }
   // 候補リスト配列の耐久ミラーをIDBへ書く(key単位=タブごとに別レコード)。Promise<bool>。IDB不可なら false。
   function persistCandListIdb_(key, items) {
@@ -4602,10 +4634,17 @@
     var title = isB ? (tw.user ? ('🦋 @' + tw.user + ' のポスト') : '🦋 Blueskyのポスト')
                     : (tw.user ? ('X @' + tw.user + ' のポスト') : 'X X(Twitter)のポスト');
     items.unshift({ url: tw.url, cid: tw.cid, twitterUrl: tw.url, isTwitter: true, title: title, addedAt: new Date().getTime() });
-    candItemsWrite_(key, items);
+    var lsOk = candItemsWrite_(key, items); // ★戻り値=LS書込成否
     attachAddImgs_(tw.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用)
-    if (inp) inp.value = ''; if (twInp) twInp.value = '';
-    showCandAddNotice_(msg, isB ? '✅ Blueskyの投稿URLを候補に登録しました' : '✅ Twitter(X)のURLを候補に登録しました');
+    // ★「登録しました」は耐久化を実物で確かめてから出す(無条件表示=嘘の根治・Chami 2026-08-24)。
+    confirmCandDurable_(key, tw.cid, lsOk).then(function (v) {
+      if (v === 'fail') {
+        showCandAddNotice_(msg, '⚠️ 端末の保存容量が一杯で保存できませんでした。候補や不要な画像を整理してから、もう一度お試しください');
+      } else {
+        if (inp) inp.value = ''; if (twInp) twInp.value = '';
+        showCandAddNotice_(msg, isB ? '✅ Blueskyの投稿URLを候補に登録しました' : '✅ Twitter(X)のURLを候補に登録しました');
+      }
+    });
     renderCandList(tabId);
     if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
   }
@@ -4780,13 +4819,22 @@
         if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
         if (twForWork.ok) it.twitterUrl = twForWork.url; // X / Bluesky の投稿URLも一緒に保存
         delete it._fetching; // 取得完了(または失敗確定)＝プレースホルダ状態を解除
-        candItemsWrite_(key, items);
+        var lsOk = candItemsWrite_(key, items); // ★戻り値=LS書込成否(false=満杯でメモリ/IDBへ退避)
         attachAddImgs_(r.cid, errored, override ? memoIn : null); // errored=true → keepForm: URLとメモを消さず再試行を許す(overrideはドレイン再生のメモ)
         if (errored) {
           // URLは消さない(登録はできたが情報取得は失敗＝自動バックフィルで後から埋まる)。
           showCandAddNotice_(msg, '⚠️ 作品情報の取得に失敗しましたが、URLは登録済みです(自動で再取得します)');
         } else {
-          if (inp) inp.value = ''; if (twInp) twInp.value = ''; showCandAddNotice_(msg, '✅ 候補に登録しました'); // inpガード=ドレイン再生(モーダル閉)でnull
+          // ★「登録しました」は耐久化を"実物で"確かめてから出す(無条件表示=嘘の根治・Chami 2026-08-24)。
+          confirmCandDurable_(key, r.cid, lsOk).then(function (v) {
+            if (v === 'fail') {
+              // LSもIDBも書けていない=本当に保存できていない。正直に伝え、URL欄は消さない(再試行できる)。
+              showCandAddNotice_(msg, '⚠️ 端末の保存容量が一杯で保存できませんでした。候補や不要な画像を整理してから、もう一度お試しください');
+            } else {
+              if (inp) inp.value = ''; if (twInp) twInp.value = ''; // inpガード=ドレイン再生(モーダル閉)でnull
+              showCandAddNotice_(msg, '✅ 候補に登録しました');
+            }
+          });
         }
         renderCandList(tabId);
         if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
