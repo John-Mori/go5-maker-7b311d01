@@ -602,19 +602,42 @@ def _iter_occurrences(s, bare, allowed):
         start = i + len(bare)
 
 
-# ★自動修正を止める部屋(A案・2026-08-03)= 本文を一切変えず「警告のみ」に落とす。
-#   人事部門(hr-room)は このAI組織の呼称ルールそのものを本文で引用・解説する部屋だ
-#   (例:「オタコンは三笘を『三笘くん』と呼ぶ」)。話者の許容形でないからと自動置換すると
-#   解説文の呼称を化けさせる=実例「三笘くん」→「三笘さん」(化けた実物 msg
-#   1533593872004022292 / Chami指摘 msg 1533592980466827335)。この部屋では
-#   naming_corrections は fixed を変えず、違反候補は remaining(警告のみ)として監査に残す。
+# ★自動修正を「呼びかけ位置だけ」に絞る部屋(2026-08-24・A案の後継)===============
+#   人事部門(hr-room)は このAI組織の呼称ルールそのものを本文で論じる部屋だ。
+#   ここでは人格名が**呼びかけではなくデータ**として出る=①名簿の列挙
+#   (`デブライネ/モドリッチ/ククール/オタコン/三笘/星南/…`) ②設定オブジェクトの持ち主
+#   (「三笘のforbiddenへ1語追加した」) ③判定対象の識別子(「同じ文をアロンソで判定しても空」)。
+#   これらを話者の許容形へ自動置換すると、本文が化ける。
+#
+#   ★2026-08-24 実測(イージス研究室): naming_audit の hr-room 漏れ90本へ自動修正を
+#     当て直したら **46箇所が書き換わり、うち30箇所が化け**た。最悪例は
+#       「呼称ルール.json にも三笘→三笘の自己言及ルール(allowed=俺・三笘 / forbidden=三笘さん)」
+#       → 「… (allowed=俺・三笘さん / forbidden=三笘さん)」= **記述しているルールを反転させる**。
+#     引用マスク(_mask_quoted_mentions)では防げない=列挙も「Xの<設定語>」も引用符が付かない。
+#   ★2026-08-03 のA案(部屋ごと全部オフ)は結論として正しかったが、当時の説明
+#     「autofixが『三笘くん』→『三笘さん』へ化けさせた」の**向きは裏が取れていない**
+#     (msg 1533593872004022292 の生成原文はもう残っていない。人事部門ククールは
+#      2026-08-24 に「あれは自分の生成ドリフトだ」と述べている=どちらか**不明**)。
+#     向きに関わらず、上の実測により**この部屋で地の文を自動置換してはいけない**。
+#
+#   そのうえで安全に直せる場所が1つだけある= **呼びかけ位置**。
+#   ①出現が行頭から始まり ②直後が読点、の2条件が揃う所は「相手に呼びかけている」以外の
+#   読みが無い(列挙・設定キー・識別子はこの形にならない)。実測で7箇所・化け0。
+#   → この部屋は呼びかけ位置だけ直し、残りは remaining(警告のみ)として監査に残す。
 #   ★naming_verdicts(監査記録)は不変=見え方は落とさず、本文破壊だけを止める。
-NO_AUTOFIX_DEPTS = {"hr-room"}
+VOCATIVE_ONLY_DEPTS = {"hr-room"}
 
 
-def _autofix_suppressed(dept):
-    """この部屋で naming_corrections の本文自動修正を止めるか(警告のみへ落とす)。"""
-    return str(dept or "").strip().lower() in NO_AUTOFIX_DEPTS
+def _vocative_only(dept):
+    """この部屋の自動修正を「呼びかけ位置だけ」に絞るか。"""
+    return str(dept or "").strip().lower() in VOCATIVE_ONLY_DEPTS
+
+
+def _is_vocative(s, i, end):
+    """s[i:end] の出現が『呼びかけ』位置か= 行頭から始まり、直後が読点。"""
+    if i != 0 and s[i - 1:i] != "\n":
+        return False
+    return s[end:end + 1] in ("、", ",")
 
 
 def naming_corrections(persona, dept, text, rules):
@@ -623,8 +646,8 @@ def naming_corrections(persona, dept, text, rules):
     返り値: {"fixed": str, "applied": [ {target,to,reason,count} ], "remaining": [verdict...] }
       - applied  : 自動修正した違反(本文は fixed に反映済み)。
       - remaining : 自動修正しなかった違反(=警告のみ・呼び出し側で naming_audit へ残す)。
-    ★NO_AUTOFIX_DEPTS の部屋(人事部門など)は本文を一切変えず、違反候補を全部 remaining
-      へ回す(呼称ルールを解説・引用する部屋で本文が化けるのを防ぐ・2026-08-03 A案)。
+    ★VOCATIVE_ONLY_DEPTS の部屋(人事部門)は**呼びかけ位置だけ**直し、地の文の出現は
+      全部 remaining へ回す(呼称ルールを本文で論じる部屋で本文が化けるのを防ぐ)。
     fail-open: 例外時は元文と applied=[] を返す。
     """
     result = {"fixed": str(text or ""), "applied": [], "remaining": []}
@@ -637,10 +660,8 @@ def naming_corrections(persona, dept, text, rules):
         #   これで**名乗りタグの中は絶対に書き換わらない**(`[ケヴィン・デブライネさん]`
         #   に化けて名義の解決が壊れる事故を、境界文字の運任せでなく機構で止める)。
         masked = _mask_quoted_mentions(_mask_name_tags(s, persona, rules))
-        # ★呼称ルールを本文で引用/解説する部屋は自動修正しない(警告のみ)。
-        if _autofix_suppressed(dept):
-            result["remaining"] = list(verdicts)
-            return result
+        # ★呼称ルールを本文で論じる部屋は、呼びかけ位置だけ直す(地の文は警告のみ)。
+        voc_only = _vocative_only(dept)
         repls = []  # (start, end, new)
         for v in verdicts:
             reason = v.get("reason")
@@ -663,6 +684,9 @@ def naming_corrections(persona, dept, text, rules):
                 end = i + len(actual)
                 if not _safe_after(masked, end):
                     unsafe = True          # 姓+名(直後が漢字)等=置換すると壊れる
+                    continue
+                if voc_only and not _is_vocative(masked, i, end):
+                    unsafe = True          # 人事部門の地の文=名簿/設定キー/識別子=直さない
                     continue
                 repls.append((i, end, target_form))
                 fixed_n += 1
