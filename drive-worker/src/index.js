@@ -155,14 +155,16 @@ export default {
       return json({ ok: true, appended: true, folderId: appendFolderId, files: added.map((f) => ({ id: f.id, name: f.name })) }, 200, cors);
     }
 
-    // ---- 上書きモード判定（二重ロック：フロント明示 overwrite=1 ＆ env.ALLOW_OVERWRITE='1'）----
-    //   safeName で "video" に潰れた題名（元題名≠video）はフォールバック名での誤爆源なので上書きしない。
+    // ---- 上書き/trash モード判定 ----
+    //   ★Chami依頼2026-08-24「(後で足す時は)昔のやつを更新するな。足りてないものだけを足せ。2を作るな」。
+    //   自動保存(overwrite=1)でも "trashしない"＝既存フォルダを再利用し足りないものだけ足す(save_job経路と同一作法)。
+    //   旧フォルダのゴミ箱送りは手動の明示 normalize=1 の時だけ。safeName で "video" に潰れた題名は誤爆源なので除外。
     const baseName = safeName(title);
-    const wantOverwrite = String(form.get("overwrite") || "") === "1"
+    const wantOverwrite = String(form.get("normalize") || "") === "1"
+      && String(form.get("overwrite") || "") === "1"
       && env.ALLOW_OVERWRITE === "1"
       && !(baseName === "video" && title !== "video");
-    // ★正常化の明示intent(normalize=1)が二重ロックの内側で揃った時だけ30日窓を外す（save_job経路と同一の作法）。
-    const noWindow = String(form.get("normalize") || "") === "1" && wantOverwrite;
+    const noWindow = wantOverwrite; // normalize時は30日窓を外す(古いフォルダも作り直し対象)
     // 窓内（30日以内作成）の同名フォルダを「新フォルダ作成の前」に確定させる（read-only）。noWindow時は窓を外す。
     let candidates = [];
     if (wantOverwrite) {
@@ -171,28 +173,35 @@ export default {
     }
     const doOverwrite = wantOverwrite && candidates.length > 0 && candidates.length <= OVERWRITE_MAX_TRASH;
 
-    // ---- [動画名]フォルダを作成 ----
-    //   上書き時は exact-name で作る（Driveは同名重複を許容＝改名API不要で穴が無い）。
-    //   非上書き時は従来どおり衝突回避で _2, _3… の別名。
-    let folder;
+    // ---- [題名]フォルダを決定 ----
+    //   ★normalize時は exact-name で"新しく"作り成功後に旧をtrash。それ以外(自動保存)は同題名フォルダが在れば
+    //     再利用=連番 _2, _3… を作らない(Chami依頼2026-08-24「2を作るな」)。初回のみ exact-name で新規作成。
+    let existingIds = [];
+    if (!doOverwrite) { try { existingIds = await findChildFolderIds(parentId, baseName, token); } catch (e) { existingIds = []; } }
+    let folder, reused = false;
     try {
-      folder = doOverwrite
-        ? await createChildFolderExact(parentId, baseName, token)
-        : await createUniqueChildFolder(parentId, baseName, token);
+      if (doOverwrite) folder = await createChildFolderExact(parentId, baseName, token);
+      else if (existingIds.length) { folder = { id: existingIds[0] }; reused = true; }
+      else folder = await createChildFolderExact(parentId, baseName, token);
     }
     catch (e) { return json({ ok: false, error: "folder_create_failed" }, 502, cors); }
 
-    // ---- アップロード（新規作成のみ。同名は連番で別名）----
+    // ---- アップロード（動画=既に在れば上げ直さない／画像=role単位で既存なら上げ直さない＝重複を作らない）----
     const uploaded = [];
     try {
-      const vext = extOf(video.type) || extFromName(video.name) || "mp4";
-      const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
-      uploaded.push(await uploadNew(folder.id, vname, video, token));
-
+      if (!(reused && await findVideoFile(folder.id, token))) {
+        const vext = extOf(video.type) || extFromName(video.name) || "mp4";
+        const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
+        uploaded.push(await uploadNew(folder.id, vname, video, token));
+      }
       for (const image of images) {
         if (!(image && typeof image.arrayBuffer === "function")) continue;
         const fallback = "image." + (extOf(image.type) || "jpg");
-        const iname = await uniqueFileName(folder.id, safeName(image.name || fallback), token);
+        const nm = safeName(image.name || fallback);
+        // role(プレビュー/元画像)が既にフォルダに在れば上げ直さない=題名_プレビュー_2 等の増殖を止める。
+        if (nm.indexOf("プレビュー") >= 0 && await findPreviewFile(folder.id, token)) continue;
+        if (nm.indexOf("元画像") >= 0 && await findSrcImageFile(folder.id, token)) continue;
+        const iname = await uniqueFileName(folder.id, nm, token);
         uploaded.push(await uploadNew(folder.id, iname, image, token));
       }
     } catch (e) {
@@ -418,7 +427,15 @@ async function handleSaveJob(form, env, cors, ctx) {
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(job); // タブが切れても保持=完走
   const result = await job; // ★リクエスト実行中に本体を回す=応答後waitUntilの狭い予算で殺されない
   if (result && result.ok) {
-    return json({ ok: true, saved: true, folderId: result.folderId || "", skipped: !!result.skipped }, 200, cors);
+    // videoPending=true は「フォルダの床＋付随画像は作ったが動画バイトがまだR2から取れなかった」床保存。
+    //   saved は動画が載った時だけ true=フロントは checkSaved(動画有無)で pending を管理し続ける(=次回sweepで動画を再送)。
+    return json({
+      ok: true,
+      saved: !result.videoPending,
+      folderId: result.folderId || "",
+      skipped: !!result.skipped,
+      ...(result.videoPending ? { videoPending: true } : {}),
+    }, 200, cors);
   }
   return json({ ok: false, error: (result && result.error) || "save_failed" }, 502, cors);
 }
@@ -433,12 +450,10 @@ async function runSaveJob(env, fields, parentId) {
   const fail = function (why) { try { console.warn(tag + " FAIL:" + why); } catch (_) {} return { ok: false, error: why }; };
   try { console.log(tag + " START"); } catch (_) {} // ★どこまで進んだかを実測する起点(cancelされた時に「入口までは来た」が分かる)
 
-  const vid = await fetchR2Bytes(env, fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS);
-  const buf = vid ? vid.buf : null;
-  const mime = (vid && vid.mime) || "video/mp4";
-  if (!buf || !buf.byteLength) return fail("r2_video_missing"); // R2にまだ届いていない/取得不能＝再送に委ねる
-  try { console.log(tag + " r2_ok bytes=" + buf.byteLength); } catch (_) {}
-
+  // ★トークン・親フォルダを"動画バイトの取得より先"に確保する(Chami依頼2026-08-24「せめて一億歩譲ってフォルダ
+  //   だけは作れ」)。旧実装は動画バイトが R2 から取れないと即 fail("r2_video_missing") で return=フォルダも
+  //   プレビューも元画像も一切作られず「投稿完了したのにDriveに何も無い」だった。動画が取れなくても最低限
+  //   [チャンネル]/[題名]フォルダを確保し、手元にある(previewKey/srcKey=R2)プレビュー・元画像だけは保存する。
   let token;
   try { token = await getAccessToken(env); } catch (e) { return fail("auth_failed"); }
   const parent = await getFolder(parentId, token);
@@ -446,78 +461,103 @@ async function runSaveJob(env, fields, parentId) {
 
   const baseName = safeName(fields.title);
 
-  // ---- 上書きモード判定を「冪等ガードより先に」行う（★順序が逆だと下の冪等ガードが同題名の"古い"動画を
-  //   見て return し、overwrite=1 を送っても上書きが一度も実行されない＝「同題名で作り直して投稿完了しても
-  //   Driveは古い動画のまま」の直接原因。Chami報告2026-08-16。二重ロック：フロント明示 overwrite=1 ＆
-  //   env.ALLOW_OVERWRITE='1'。破壊操作(旧フォルダのtrash)は従来どおり「新規保存が成功した後」だけ）----
-  const wantOverwrite = !!fields.overwrite && env.ALLOW_OVERWRITE === "1"
+  // ---- 動画バイト取得(R2)。取れなくてもここで止めず、下でフォルダの床＋付随画像だけは作る ----
+  const vid = await fetchR2Bytes(env, fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS);
+  const buf = vid ? vid.buf : null;
+  const mime = (vid && vid.mime) || "video/mp4";
+  const haveVideo = !!(buf && buf.byteLength);
+  if (haveVideo) { try { console.log(tag + " r2_ok bytes=" + buf.byteLength); } catch (_) {} }
+  else { try { console.warn(tag + " r2_video_missing → フォルダの床だけ作る"); } catch (_) {} }
+
+  // ---- 上書き/trash モード判定 ----
+  //   ★Chami依頼2026-08-24「(後で足す時は)昔のやつを更新するな。必要な、足りてないものだけを足せ」。
+  //   自動の投稿完了/再送は overwrite=1 を送ってきても "trashしない"＝既存フォルダを再利用して足りないものだけ足す。
+  //   旧フォルダをゴミ箱送りにする破壊は、手動の明示 normalize=1(「名前を正しく保存し直す」)の時だけに限定する。
+  //   これで sweep 再送(previewKey/srcKey 無し)が floor フォルダをtrashして付随画像を失う事故を封じる。
+  //   三重ロック：normalize=1(手動明示) ＆ フロント overwrite=1 ＆ env.ALLOW_OVERWRITE='1'。動画実在も必須。
+  const wantOverwrite = haveVideo && !!fields.normalize && !!fields.overwrite && env.ALLOW_OVERWRITE === "1"
     && !(baseName === "video" && fields.title !== "video");
-  // ★正常化の明示intent(normalize=1)が、二重ロック(overwrite ＆ ALLOW_OVERWRITE)の"内側"で揃った時だけ30日窓を外す。
-  //   自動保存経路は fields.normalize が来ないので noWindow=false のまま=従来どおり窓内(30日以内)しか作り直さない。
-  const noWindow = !!fields.normalize && wantOverwrite;
+  const noWindow = wantOverwrite; // normalize時は30日窓を外す(古いフォルダも作り直し対象=既存 normalize 仕様)
   let candidates = [];
   if (wantOverwrite) {
     try { candidates = await findOverwriteCandidates(parentId, baseName, token, noWindow); } catch (e) { candidates = []; }
   }
   const doOverwrite = wantOverwrite && candidates.length > 0 && candidates.length <= OVERWRITE_MAX_TRASH;
 
-  // ---- 冪等：上書きでない時だけ「同題名フォルダに動画が既に在れば作らず終了」（二重フォルダ防止）----
-  if (!doOverwrite) {
-    let existingIds = [];
-    try { existingIds = await findChildFolderIds(parentId, baseName, token); } catch (e) { existingIds = []; }
-    for (const fid of existingIds) {
-      const v = await findVideoFile(fid, token);
-      if (v) { try { console.log(tag + " SKIP:already_saved"); } catch (_) {} return { ok: true, folderId: fid, skipped: true }; }
-    }
-  }
-
-  // ---- フォルダ作成 ----
-  let folder;
+  // ---- 保存先フォルダの決定 ----
+  //   ★上書きでない時は「同題名フォルダが在れば再利用」する(Chami依頼2026-08-24「2を作るな」)。旧実装は
+  //     createUniqueChildFolder で 題名_2, 題名_3… を量産していた=動画が無い床フォルダの後に本保存が来ると
+  //     "同題名だが動画未検出"を見て別名フォルダを新規作成→二重フォルダ、が起きていた。再利用+足りないものだけ足す。
+  //   ★上書き時だけ exact-name で"新しく"作り、成功後に旧フォルダをtrash(従来どおり)。
+  let existingIds = [];
+  try { existingIds = await findChildFolderIds(parentId, baseName, token); } catch (e) { existingIds = []; }
+  let folder, reused = false;
   try {
-    folder = doOverwrite
-      ? await createChildFolderExact(parentId, baseName, token)
-      : await createUniqueChildFolder(parentId, baseName, token);
+    if (doOverwrite) {
+      folder = await createChildFolderExact(parentId, baseName, token);
+    } else if (existingIds.length) {
+      folder = { id: existingIds[0] }; reused = true; // ★再利用=連番フォルダを作らない
+    } else {
+      folder = await createChildFolderExact(parentId, baseName, token); // 初回=exact-name(連番にしない)
+    }
   } catch (e) { return fail("folder_create_failed:" + (e && e.message || e)); }
 
-  // ---- 動画アップロード（新規のみ・失敗したら旧フォルダはtrashしない＝どの時点で落ちても喪失ゼロ）----
-  try {
-    const vext = extOf(mime) || "mp4";
-    const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
-    await uploadNewBuffer(folder.id, vname, buf, mime, token);
-  } catch (e) { return fail("video_upload_failed:" + (e && e.message || e)); }
+  // ---- 動画アップロード（有る時だけ・既に同フォルダに動画が在れば上げ直さない=足りないものだけ）----
+  let videoAlready = false;
+  if (haveVideo) {
+    try {
+      if (reused) videoAlready = !!(await findVideoFile(folder.id, token));
+      if (!videoAlready) {
+        const vext = extOf(mime) || "mp4";
+        const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
+        await uploadNewBuffer(folder.id, vname, buf, mime, token);
+      }
+    } catch (e) { return fail("video_upload_failed:" + (e && e.message || e)); }
+  }
 
-  // ---- 元画像（任意・R2から取り寄せ）。★投稿完了と同じ「動画+元画像+プレビュー」を揃える(Chami 2026-08-17
-  //   「投稿完了した時の挙動と同じファイルを保存して」)。save_job導入時に元画像だけ渡し忘れていた回帰の根治。
-  //   付随物なので失敗しても動画保存の成功は覆さない（フロントの再送/データ再作成で後追いできる）。----
+  // ---- 元画像（任意・R2から取り寄せ）。★同フォルダに「元画像」が既に在れば上げ直さない(role単位の冪等)。
+  //   旧実装は uniqueFileName で 題名_元画像_2.jpg を毎回増やしていた(Chami報告2026-08-22「いらんやつ作られてまっせ」)。
+  //   付随物なので失敗しても動画保存の成功は覆さない。----
   if (SAVE_JOB_VIDEO_KEY_RE.test(fields.srcKey || "")) {
     try {
-      const sv = await fetchR2Bytes(env, fields.r2Base, fields.srcKey, [500, 1500]);
-      if (sv && sv.buf && sv.buf.byteLength) {
-        const sname = await uniqueFileName(folder.id, baseName + "_元画像." + (extOf(sv.mime) || "jpg"), token);
-        await uploadNewBuffer(folder.id, sname, sv.buf, sv.mime || "image/jpeg", token);
+      if (!(await findSrcImageFile(folder.id, token))) {
+        const sv = await fetchR2Bytes(env, fields.r2Base, fields.srcKey, [500, 1500]);
+        if (sv && sv.buf && sv.buf.byteLength) {
+          const sname = await uniqueFileName(folder.id, baseName + "_元画像." + (extOf(sv.mime) || "jpg"), token);
+          await uploadNewBuffer(folder.id, sname, sv.buf, sv.mime || "image/jpeg", token);
+        }
       }
     } catch (e) { /* 元画像は付随物。失敗は無視 */ }
   }
 
-  // ---- プレビュー（任意・R2から取り寄せ・小さい）。付随物なので失敗しても動画保存の成功は覆さない ----
+  // ---- プレビュー（任意・R2から取り寄せ・小さい）。★同フォルダに「プレビュー」が既に在れば上げ直さない(role単位の冪等)----
   if (SAVE_JOB_VIDEO_KEY_RE.test(fields.previewKey || "")) {
     try {
-      const pv = await fetchR2Bytes(env, fields.r2Base, fields.previewKey, [500, 1500]);
-      if (pv && pv.buf && pv.buf.byteLength) {
-        const pname = await uniqueFileName(folder.id, baseName + "_プレビュー." + (extOf(pv.mime) || "jpg"), token);
-        await uploadNewBuffer(folder.id, pname, pv.buf, pv.mime || "image/jpeg", token);
+      if (!(await findPreviewFile(folder.id, token))) {
+        const pv = await fetchR2Bytes(env, fields.r2Base, fields.previewKey, [500, 1500]);
+        if (pv && pv.buf && pv.buf.byteLength) {
+          const pname = await uniqueFileName(folder.id, baseName + "_プレビュー." + (extOf(pv.mime) || "jpg"), token);
+          await uploadNewBuffer(folder.id, pname, pv.buf, pv.mime || "image/jpeg", token);
+        }
       }
     } catch (e) { /* プレビューは付随物。失敗は無視 */ }
   }
 
   // ---- 動画保存が成功した後にだけ旧フォルダをtrash（唯一の破壊操作・全条件を再検証）----
-  if (doOverwrite) {
+  if (doOverwrite && haveVideo) {
     for (const c of candidates) {
       try { await trashFolderGuarded(c.id, { parentId, baseName, newFolderId: folder.id, noWindow }, token); } catch (e) {}
     }
   }
-  try { console.log(tag + " OK folderId=" + folder.id + (doOverwrite ? " (overwrote " + candidates.length + ")" : "")); } catch (_) {}
-  return { ok: true, folderId: folder.id };
+
+  // ---- 動画が取れなかった=フォルダの床＋付随画像だけ作った。videoPending=true でフロントの再送に委ねる
+  //   (checkSaved は動画の有無で判定するので pending は畳まれず、次回 sweep が動画を載せ直す=自己修復・二重にはならない)。
+  if (!haveVideo) {
+    try { console.warn(tag + " FOLDER_ONLY folderId=" + folder.id + (reused ? " (reused)" : " (created)")); } catch (_) {}
+    return { ok: true, folderId: folder.id, videoPending: true, reused };
+  }
+  try { console.log(tag + " OK folderId=" + folder.id + (doOverwrite ? " (overwrote " + candidates.length + ")" : reused ? " (reused)" : "")); } catch (_) {}
+  return { ok: true, folderId: folder.id, skipped: videoAlready, reused };
 }
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
