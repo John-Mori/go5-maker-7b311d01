@@ -2094,17 +2094,21 @@
       '<button class="fz-zoom-nav prev" type="button" aria-label="前へ" hidden>‹</button>' +
       '<button class="fz-zoom-nav next" type="button" aria-label="次へ" hidden>›</button>' +
       '<div class="fz-zoom-cap" hidden></div><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div>' +
-      // 動画生成用画像だけ(_zoomMarkCid指定時)に出る「通常/使用済み/除外」3択。既定は隠す。
-      '<div class="fz-zoom-mark" hidden><button type="button" class="fz-mk" data-mk="">通常</button><button type="button" class="fz-mk" data-mk="used">使用済み</button><button type="button" class="fz-mk" data-mk="excluded">除外</button></div>' +
+      // 動画生成用画像だけ(_zoomMarkCid指定時)に出る「通常/使用済み/除外」ラジオ。画像の上部に横並び。既定は隠す。
+      '<div class="fz-zoom-mark" hidden role="radiogroup" aria-label="この画像の扱い">' +
+        '<label class="fz-mk"><input type="radio" name="fzImgMark" value=""><span>通常</span></label>' +
+        '<label class="fz-mk"><input type="radio" name="fzImgMark" value="used"><span>使用済み</span></label>' +
+        '<label class="fz-mk"><input type="radio" name="fzImgMark" value="excluded"><span>除外</span></label>' +
+      '</div>' +
       '<div class="fz-zoom-msg"></div>';
     document.body.appendChild(z);
     z.addEventListener('click', function (e) { if (e.target === z) z.hidden = true; });
     z.querySelector('.fz-zoom-close').addEventListener('click', function () { z.hidden = true; });
-    // 「通常/使用済み/除外」の3択(動画生成用画像だけ・_zoomMarkCidが無ければ無視)。
-    z.querySelectorAll('.fz-mk').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        if (!_zoomMarkCid) return;
-        setImgMark_(_zoomMarkCid, _zoomList[_zi], btn.getAttribute('data-mk') || '');
+    // 「通常/使用済み/除外」のラジオ(動画生成用画像だけ・_zoomMarkCidが無ければ無視)。
+    z.querySelectorAll('.fz-zoom-mark input[type=radio]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        if (!_zoomMarkCid || !r.checked) return;
+        setImgMark_(_zoomMarkCid, _zoomList[_zi], r.value || '');
         zoomShow_();
       });
     });
@@ -2157,7 +2161,12 @@
       if (_zoomMarkCid) {
         mk.hidden = false;
         var st = imgMarkStateOf_(_zoomMarkCid, _zoomList[_zi]) || '';
-        mk.querySelectorAll('.fz-mk').forEach(function (b) { b.classList.toggle('is-active', (b.getAttribute('data-mk') || '') === st); });
+        mk.querySelectorAll('.fz-mk').forEach(function (l) {
+          var inp = l.querySelector('input[type=radio]');
+          var on = inp && (inp.value || '') === st;
+          if (inp) inp.checked = on;
+          l.classList.toggle('is-active', !!on);
+        });
       } else {
         mk.hidden = true;
       }
@@ -3285,7 +3294,7 @@
         var rc = refView.getAttribute('data-refimgview'), imgs = refImgsOf_(rc);
         var start = parseInt(refView.getAttribute('data-refidx'), 10); // タップした画像から開く(全枚数表示に対応)
         if (!(start >= 0 && start < imgs.length)) start = 0;
-        if (imgs.length) openImgZoom_(imgs, start, { onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } });
+        if (imgs.length) openImgZoom_(imgs, start, { markCid: rc, onReorder: function (i) { return reorderRefImgToFirst_(rc, i); }, onPasteAdd: function (done) { pasteAddRefImgToFirst_(rc, done); } }); // markCid=rc ← 候補カードの動画作成用画像モーダルにも「通常/使用済み/除外」ラジオを出す(Chami 2026-08-24「出ないぜ」)
         return;
       }
       // ★サムネ再取得プレースホルダ(下の error ハンドラが差し込む札)のタップ=作品情報ごと取り直す。
