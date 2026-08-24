@@ -1464,6 +1464,15 @@
       if (prevB) return prevB;
       return usedPrevBlob_();
     }).then(function (prevB) {
+      // ★「必ず動画があればプレビューは作る」(Chami依頼2026-08-24)。プレビュー素材が手元にもDrive既存にも
+      //   used:にも無くても、動画実体(この端末のIDB / R2ミラー)さえ在れば末尾フレームでプレビューを起こす。
+      //   下の fetchVideo(Drive からDL)より手元/R2の方が速い=先に試す。resolveVideoBlob_ は45秒でnullへ倒す
+      //   (fail-open)ので永久待ちにならない。取れなければ次の fetchVideo(Drive)へ落ちる。
+      if (prevB) return prevB;
+      return resolveVideoBlob_(id).then(function (vb) {
+        return (vb && isUsableVideoBlob_(vb)) ? videoEndFramePreview_(vb) : null;
+      }, function () { return null; });
+    }).then(function (prevB) {
       // ★最後の砦=Driveに保存された動画本体を取り寄せ、末尾(約5秒)フレームでプレビューを起こす
       //   (Chami依頼2026-08-22「Googleドライブに動画があればその動画を流用して保存データを適正化＋
       //    投稿履歴に適正化された画像を表示」)。プレビュー素材が手元にもDrive既存プレビューにもused:にも
@@ -1630,6 +1639,12 @@
       //   Workerが r2_video_missing で黙って諦めて「永遠に保存中」になる沈黙経路を封じる(炎上①・B-1)。
       ensureVideoOnR2_(id).then(function (onR2) {
         if (!onR2) { legacyRealSave_(); return; } // R2に動画が無い=save_jobは無駄撃ち→在ページ保存で救うか"見える失敗"を出す
+        // ★並列化(Chami依頼2026-08-24「ドライブ保存は押しても並列で実行できるように」)：動画はR2に在る=保存は
+        //   必ずサーバー側(save_job)で完走する。ここでボタンを即・終端へ返す=12秒のenrich待ちにボタンを縛らず、
+        //   続けて別カードの保存を並列に走らせられる。本当の保存結果は作成履歴カードの状態行(verifyDriveLanded_→
+        //   checkSaved の実物確認)に出る。以降の done() は operation-gate が settled で無視=表示は二重に飛ばない。
+        //   動画実体は既にR2=喪失しない・Workerは冪等(再送/並列でも二重フォルダにならない)。
+        done(true, '☁️ Driveへ保存中(裏で継続)・結果はカードに出ます');
         // ★動画のsave_job(サーバー側完走)を「任意の付随画像(プレビュー/元画像)の解決・R2ミラー」に絶対ブロック
         //   させない(Chami報告2026-08-18 msg1539278578913509416「投稿完了しても結局Googleドライブに保存できてない」)。
         //   真因=このブロックの前段が3つとも網へ伸びる無時限待ち: previewReady(手元に無いと fetchPreview=網)/
