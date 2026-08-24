@@ -70,11 +70,25 @@ def one_turn(model, session=None, label="", env_extra=None):
     except ValueError:
         print("  ★JSONで返ってこなかった(%s): %s" % (label, p.stdout[:400]))
         return None
+    # ★★2026-08-25 研究室HQの実測(DISPATCH-aegis-gl-1787585184396 の①)=
+    #   `--output-format json` の**集約後の `usage` は反復ぶんが合算されている**。
+    #   道具を1回でも使った便だと床を反復回数ぶん重ねて持つ(同じお題で
+    #   iterations[0]=54,384 に対し集約後 109,243= **ちょうど2倍の嘘**)。
+    #   → 1便ぶんを測る計器はここでは `usage.iterations[0]` を読む。
+    #   ★`iterations` が無い版のCLIでは集約値へ落ちる= その時は iters を 0 にして
+    #     「1便ぶんだと確かめられていない」ことを呼び側へ渡す(黙って合算値を使わない)。
     u = d.get("usage") or {}
+    its = u.get("iterations")
+    if isinstance(its, list) and its and isinstance(its[0], dict):
+        n_iter = len(its)
+        u = its[0]
+    else:
+        n_iter = 0
     cd = u.get("cache_creation") or {}
     rec = {
         "label": label,
         "session": d.get("session_id"),
+        "iters": n_iter,
         "cr": u.get("cache_read_input_tokens", 0) or 0,
         "cc": u.get("cache_creation_input_tokens", 0) or 0,
         "cc1h": cd.get("ephemeral_1h_input_tokens", 0) or 0,
@@ -83,8 +97,10 @@ def one_turn(model, session=None, label="", env_extra=None):
         "out": u.get("output_tokens", 0) or 0,
         "sec": round(time.time() - t0, 1),
     }
-    print("  %-28s 読込 %8d / 書込 %8d (1h %d / 5m %d) %.1f秒"
-          % (label, rec["cr"], rec["cc"], rec["cc1h"], rec["cc5m"], rec["sec"]))
+    print("  %-28s 読込 %8d / 書込 %8d (1h %d / 5m %d) %.1f秒%s"
+          % (label, rec["cr"], rec["cc"], rec["cc1h"], rec["cc5m"], rec["sec"],
+             ("  ★反復%d回の1回目だけを採った" % n_iter) if n_iter > 1 else
+             ("" if n_iter == 1 else "  ★iterationsが無い=合算値(1便ぶんではない)")))
     return rec
 
 
