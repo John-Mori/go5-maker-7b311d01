@@ -142,16 +142,11 @@ def collect(since_utc):
             f = open(path, encoding="utf-8", errors="replace")
         except OSError:
             continue
-        seen_ids = set()          # ★同じ返答の割れた行を1回だけ数えるため(ファイル単位)
+        seen_idx = {}              # ★同じ返答の割れた行を1回だけ数えるため(ファイル単位・msg_id→rows内の位置)
         with f:
             for line in f:
                 if '"usage"' not in line:
                     continue
-                mid = RE_MSGID.search(line)
-                if mid:
-                    if mid.group(1) in seen_ids:
-                        continue
-                    seen_ids.add(mid.group(1))
                 mts = RE_TS.search(line)
                 if not mts:
                     continue
@@ -170,7 +165,19 @@ def collect(since_utc):
                 cc, cc1h = n(RE_CC), n(RE_CC1H)
                 # ★内訳が無い記録(古い行)は「全部5分TTL」へ倒す= 従来の数え方のまま。盛らない側。
                 cc1h = cc1h if cc1h <= cc else cc
-                rows.append((sid, model, dt, n(RE_IN), cc, n(RE_CR), n(RE_OUT), cc1h))
+                row = (sid, model, dt, n(RE_IN), cc, n(RE_CR), n(RE_OUT), cc1h)
+                mid = RE_MSGID.search(line)
+                if mid:
+                    key = mid.group(1)
+                    prev_idx = seen_idx.get(key)
+                    if prev_idx is not None:
+                        # ★割れた行はusageが丸ごと同一のはずだが、稀に片方が全部0(イージス研究室 floor_burn実測=2,725件中1件)。
+                        #   0の行を先に掴むと返答が丸ごと消えるので、大きい方を残す(commit ff02f94と同じ倒し方)。
+                        if sum(row[3:7]) > sum(rows[prev_idx][3:7]):
+                            rows[prev_idx] = row
+                        continue
+                    seen_idx[key] = len(rows)
+                rows.append(row)
     return rows
 
 
