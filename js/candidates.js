@@ -76,10 +76,35 @@
     return { map: out, changed: changed };
   }
 
+  // ★Storage v2 Phase2(2026-08-24): 候補リスト配列(itemsKey/K_ITEMS)そのものが LS飽和でsetItem失敗すると、
+  //   cand_text と違い配列全体が正本のため「登録しました」と出ても無言で書けていない(Chami「候補に追加/
+  //   閉じるを押したら何も保存されずに消えた」の真因)。cand_text と同じ設計(IDB耐久ミラー＋起動時cid単位
+  //   マージ復元)を配列にも適用する。純関数(Nodeテスト可)。addedAtが大きい方を採用(両方欠落ならLS側)。
+  //   ★naive実装(LS常勝/IDB常勝/丸ごと上書き)は必ず1ケース以上で誤る=must-fail の対象。
+  function candListMergeIdb_(lsArr, idbArr) {
+    var out = [], changed = false, idx = {};
+    lsArr = Array.isArray(lsArr) ? lsArr : [];
+    idbArr = Array.isArray(idbArr) ? idbArr : [];
+    lsArr.forEach(function (it) {
+      if (!it || typeof it !== 'object' || it.cid == null) return;
+      var cid = String(it.cid);
+      if (Object.prototype.hasOwnProperty.call(idx, cid)) return; // LS内の重複cidは初出だけ残す
+      idx[cid] = out.length; out.push(it);
+    });
+    idbArr.forEach(function (it) {
+      if (!it || typeof it !== 'object' || it.cid == null) return;
+      var cid = String(it.cid);
+      if (!Object.prototype.hasOwnProperty.call(idx, cid)) { idx[cid] = out.length; out.push(it); changed = true; return; }
+      var lv = out[idx[cid]];
+      if ((Number(it.addedAt) || 0) > (Number(lv.addedAt) || 0)) { out[idx[cid]] = it; changed = true; }
+    });
+    return { arr: out, changed: changed };
+  }
+
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -755,14 +780,14 @@
       lsSet(K_INFOMISS, miss);
       var cids = Object.keys(updates);
       if (!cids.length) { cb(false); return; }
-      var cur = lsGet(key, '[]'), changed = false;
+      var cur = candItemsRead_(key), changed = false;
       cur.forEach(function (it) {
         var u = it && it.cid != null ? updates[it.cid] : null; if (!u) return;
         Object.keys(u).forEach(function (f) {
           if (u[f] !== undefined && JSON.stringify(it[f]) !== JSON.stringify(u[f])) { it[f] = u[f]; changed = true; }
         });
       });
-      if (changed) lsSet(key, cur);
+      if (changed) candItemsWrite_(key, cur);
       cb(changed);
     }
   }
@@ -788,7 +813,7 @@
   //   取れきる/回数上限/タブ離脱で再び自然に落ち着く(無限ポーリングにならない)。
   function kickInfoBackfill_() {
     try {
-      var key = itemsKey(_activeTab), items = lsGet(key, '[]');
+      var key = itemsKey(_activeTab), items = candItemsRead_(key);
       var miss = lsGet(K_INFOMISS, '{}'), changed = false;
       items.forEach(function (it) {
         if (!needsInfoBackfill_(it) || !coreInfoMissing_(it)) return;
@@ -829,13 +854,13 @@
     // 書き戻しは現在のlocalStorage配列に対して差分だけ当てる(他の変更を巻き戻さない・backfillと同じ考え方)。
     function finish() {
       var cids = Object.keys(updates); if (!cids.length) { cb(false); return; }
-      var cur = lsGet(key, '[]'), changed = false;
+      var cur = candItemsRead_(key), changed = false;
       cur.forEach(function (it) {
         if (!it || it.cid == null || !(it.cid in updates)) return;
         if (updates[it.cid].ai && !it.ai) { it.ai = true; changed = true; }
         if (updates[it.cid].verified && !it.aiChecked) { it.aiChecked = true; changed = true; } // 検証済みの時だけ確定(未確認は次回リトライ可)
       });
-      if (changed) lsSet(key, cur);
+      if (changed) candItemsWrite_(key, cur);
       cb(changed);
     }
   }
@@ -1038,6 +1063,60 @@
   function backfillAllCandText_() {                          // ハイドレート完了時に一度だけ全cidを埋め戻す
     if (_candTextBackfilled) return; _candTextBackfilled = true;
     try { Object.keys(_imgMem.ref).forEach(function (cid) { backfillCandText_(cid, _imgMem.ref[cid]); }); } catch (e) {}
+  }
+
+  // ── 候補リスト配列(itemsKey/K_ITEMS)の耐久ミラー(IDB) ──────────────────────────────
+  //   ★Storage v2 Phase2(2026-08-24)。cand_text(_candTextMem等)と対称の設計・命名。
+  var _candListMem = {};       // itemsKey(key) -> 配列。LS書込失敗時の権威コピー(nullでなく hasOwnProperty で判定)
+  var _candListRestored = {};  // itemsKey(key) -> true(restore冪等)
+  function candListIdbKey_(key) { return 'meta:candlist:' + key; }
+  // 候補リスト配列の読み。LSに書けない状態(_candListMem[key]あり)ならメモリを正とする。
+  function candItemsRead_(key) {
+    if (Object.prototype.hasOwnProperty.call(_candListMem, key)) return _candListMem[key];
+    return lsGet(key, '[]');
+  }
+  // 候補リスト配列の書き。戻り値=LS成功可否。IDBへの耐久ミラーは常に試みる(best-effort・非同期)。
+  function candItemsWrite_(key, items) {
+    persistCandListIdb_(key, items); // 耐久ミラーは成否に関わらず毎回試みる(await しない)
+    var ok;
+    try {
+      localStorage.setItem(key, JSON.stringify(items));
+      delete _candListMem[key];
+      ok = true;
+    } catch (e) {
+      // ★LSが飽和して候補リスト配列すら書けない。メモリを権威にしてセッション内の読みを保証し、
+      //   耐久はIDBミラー側(persistCandListIdb_)に任せる(cand_text と同じ考え方)。
+      _candListMem[key] = items;
+      klog_('candlist_ls_quota_idb_fallback', 'work', key, { n: items && items.length });
+      ok = false;
+    }
+    reqSyncFor_(key); // lsSet と同じく成否に関わらず同期要求(失敗時は旧値の再送=無害)
+    return ok;
+  }
+  // 候補リスト配列の耐久ミラーをIDBへ書く(key単位=タブごとに別レコード)。Promise<bool>。IDB不可なら false。
+  function persistCandListIdb_(key, items) {
+    if (!_idbOk || !window.Go5Idb || typeof window.Go5Idb.set !== 'function') return Promise.resolve(false);
+    try {
+      return Promise.resolve(window.Go5Idb.set(candListIdbKey_(key), items)).then(function () { return true; }, function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
+  }
+  // 起動時にIDBミラーからLS(またはメモリ)へ復元する(key単位・冪等・1回)。
+  //   LS満杯で「IDBにだけ載った候補」を再読込後も見えるようにする。
+  function restoreCandListFromIdb_(key) {
+    if (!key || _candListRestored[key] || !_idbOk || !window.Go5Idb) return;
+    _candListRestored[key] = true;
+    try {
+      var readP = (typeof window.Go5Idb.getResult === 'function')
+        ? window.Go5Idb.getResult(candListIdbKey_(key))
+        : window.Go5Idb.get(candListIdbKey_(key)).then(function (v) { return { ok: true, value: v }; }, function (e) { return { ok: false, value: null, error: e }; });
+      readP.then(function (r) {
+        if (!r || !r.ok || !Array.isArray(r.value)) return;
+        var merged = candListMergeIdb_(candItemsRead_(key), r.value);
+        if (!merged.changed) return; // IDBはLSと同じか無し=通常運用。何もしない
+        candItemsWrite_(key, merged.arr);
+        try { renderCandList(_activeTab); } catch (e) {} // 復元できた候補を描き直す
+      }, function () {});
+    } catch (e) {}
   }
 
   function mergeImageEntries_(all) {
@@ -1591,6 +1670,7 @@
   function hydrateImages_() {
     if (!_idbOk || _candidateHydrated || _candidateHydrateInFlight) return;
     try { restoreCandTextFromIdb_(); } catch (e) {} // ★Storage v2 Phase1: LS満杯でIDBにだけ載ったテキストを復元(冪等)
+    try { restoreCandListFromIdb_(itemsKey(_activeTab)); } catch (e) {} // ★Storage v2 Phase2: 候補リスト配列も同様に復元(冪等)
     _candidateHydrateInFlight = true;
     var __hydT0 = Date.now(), __hydCount = 0;
     window.Go5ImgDiag && Go5ImgDiag.push('hydrate_start');
@@ -2898,7 +2978,7 @@
     var url = window.normalizeWorkUrl ? window.normalizeWorkUrl(workUrlRaw) : (workUrlRaw || '').trim();
     var r = (url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
     if (!r || !r.ok) { cb(false, 'FANZAの作品URLではないようです'); return; }
-    var tabId = _activeTab, key = itemsKey(tabId), items = lsGet(key, '[]'), oldCid = oldItem.cid;
+    var tabId = _activeTab, key = itemsKey(tabId), items = candItemsRead_(key), oldCid = oldItem.cid;
     if (r.cid !== oldCid && items.some(function (x) { return x.cid === r.cid; })) { cb(false, 'この作品は既に追加されています(重複追加しません)'); return; }
     // 新cidへの永続保存を確認するまで候補本体を書き換えず、旧cidも消さない。
     var refPayload = {
@@ -2922,7 +3002,7 @@
         Promise.resolve(refImgSave(oldCid, null)).catch(function () {});
         Promise.resolve(bskyImgSave(oldCid, null)).catch(function () {});
       }
-      var liveItems = lsGet(key, '[]');
+      var liveItems = candItemsRead_(key);
       var newItem = Object.assign({}, oldItem, {
         url: url,
         cid: r.cid,
@@ -2933,10 +3013,10 @@
       });
       var idx = -1; liveItems.forEach(function (x, i) { if (x.cid === oldCid) idx = i; });
       if (idx >= 0) liveItems[idx] = newItem; else liveItems.unshift(newItem);
-      lsSet(key, liveItems);
+      candItemsWrite_(key, liveItems);
       var cfg = workerCfg();
       var finish = function (info) {
-        var arr = lsGet(key, '[]');
+        var arr = candItemsRead_(key);
         arr.forEach(function (x) {
           if (x.cid !== r.cid || !info || !info.title) return;
           x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
@@ -2946,7 +3026,7 @@
           x.reviewCount = info.reviewCount; x.reviewAvg = info.reviewAvg;
           if (info.samples && info.samples.length) x.samples = info.samples;
         });
-        lsSet(key, arr); recordReviewSnapshots(arr); cb(true);
+        candItemsWrite_(key, arr); recordReviewSnapshots(arr); cb(true);
       };
       if (window.FanzaCore && cfg.url) window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) { finish(info && info.title ? info : null); }).catch(function () { finish(null); });
       else finish(null);
@@ -3055,10 +3135,10 @@
   function durableItemByCid_(cid) {
     var hit = itemByCid_(cid);
     if (hit) return hit;
-    var groups = [lsGet(itemsKey(_activeTab), '[]')];
-    if (_activeTab !== 'main') groups.push(lsGet(K_ITEMS, '[]'));
+    var groups = [candItemsRead_(itemsKey(_activeTab))];
+    if (_activeTab !== 'main') groups.push(candItemsRead_(K_ITEMS));
     var tabs = lsGet(K_TABS, '[]');
-    tabs.forEach(function (t) { if (!isMakerTab_(t)) groups.push(lsGet(itemsKey(t.id), '[]')); });
+    tabs.forEach(function (t) { if (!isMakerTab_(t)) groups.push(candItemsRead_(itemsKey(t.id))); });
     for (var gi = 0; gi < groups.length; gi++) {
       for (var ii = 0; ii < groups[gi].length; ii++) {
         if (groups[gi][ii] && String(groups[gi][ii].cid) === String(cid)) return groups[gi][ii];
@@ -3184,7 +3264,7 @@
     }).then(function (info) {
       if (!(info && info.title)) { if (btn) { btn.disabled = false; btn.textContent = '⚠️ 失敗'; setTimeout(function () { btn.innerHTML = label; }, 2200); } return; }
       // ★書き戻しは現在のlocalStorage配列を読み直してcidで当てる(古い参照itemsを上書きしない・backfillと同じ考え方)。
-      var key = itemsKey(_activeTab), arr = lsGet(key, '[]'), changed = false;
+      var key = itemsKey(_activeTab), arr = candItemsRead_(key), changed = false;
       arr.forEach(function (x) {
         if (!x || x.cid !== cid) return;
         x.title = info.title; x.author = info.author || ''; x.thumb = info.thumb || info.thumbSmall || '';
@@ -3195,7 +3275,7 @@
         if (info.samples && info.samples.length) x.samples = info.samples;
         changed = true;
       });
-      if (changed) { lsSet(key, arr); recordReviewSnapshots(arr); }
+      if (changed) { candItemsWrite_(key, arr); recordReviewSnapshots(arr); }
       // 取り直せたら未取得フェーズの記録も掃除(再取得の追跡対象から外す)。
       try { var miss = lsGet(K_INFOMISS, '{}'); if (miss[cid] != null) { delete miss[cid]; lsSet(K_INFOMISS, miss); } } catch (e) {}
       repaintCand_(_activeTab); // サムネ含め即反映(リロード不要)。差分更新=他カードの画像はチラつかせない
@@ -3511,11 +3591,11 @@
         var c = (it && it.cid) ? String(it.cid) : cidFromUrl_((it && it.url) || '');
         if (c && !seen[c]) { seen[c] = true; cids.push({ cid: c, source: src }); }
       }
-      (lsGet(K_ITEMS, '[]') || []).forEach(function (it) { pushCid_(it, 'main'); });
+      (candItemsRead_(K_ITEMS) || []).forEach(function (it) { pushCid_(it, 'main'); });
       tabs.forEach(function (t) {
         if (t.excludeFromAll) return;
         if (isMakerTab_(t)) { makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); }); return; }
-        (lsGet('cand_items__' + t.id, '[]') || []).forEach(function (it) { pushCid_(it, 'list'); });
+        (candItemsRead_('cand_items__' + t.id) || []).forEach(function (it) { pushCid_(it, 'list'); });
       });
       function done_() { syncCandidatePool_(cids); }
       var K_MK_OK = 'cand_maker_cids_ok'; // 前回"取得成功"したサークルcid集合(端末ローカル・全滅時の代替に使う)
@@ -3579,12 +3659,12 @@
     // ★srcByCid: cidの出所を初出勝ちで記録(main→list→circle)。D1同期のsource付与に使う(2026-08-09)。
     var seen = {}, stored = [], srcByCid = {};
     function addItems(a, src) { (a || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; stored.push(it); srcByCid[it.cid] = src; } }); }
-    addItems(lsGet(K_ITEMS, '[]'), 'main'); // 💡候補(main)は常に含む
+    addItems(candItemsRead_(K_ITEMS), 'main'); // 💡候補(main)は常に含む
     var makerIds = [];
     tabs.forEach(function (t) {
       if (t.excludeFromAll) return; // このタブを全候補に含まない
       if (isMakerTab_(t)) makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); });
-      else addItems(lsGet('cand_items__' + t.id, '[]'), 'list'); // 独立した候補リストタブ
+      else addItems(candItemsRead_('cand_items__' + t.id), 'list'); // 独立した候補リストタブ
     });
 
     function finish(makerItems) {
@@ -4323,7 +4403,7 @@
     return parseBskyUrl_(raw);
   }
   function addTwitterCandidate_(tabId, tw, inp, twInp, msg, onDone) {
-    var key = itemsKey(tabId), items = lsGet(key, '[]');
+    var key = itemsKey(tabId), items = candItemsRead_(key);
     if (items.some(function (x) { return x.twitterUrl === tw.url || x.cid === tw.cid; })) {
       showCandAddNotice_(msg, 'ℹ️ 同じ投稿がすでに候補にあるため、1件にまとめたままです');
       if (onDone) onDone();
@@ -4333,7 +4413,7 @@
     var title = isB ? (tw.user ? ('🦋 @' + tw.user + ' のポスト') : '🦋 Blueskyのポスト')
                     : (tw.user ? ('X @' + tw.user + ' のポスト') : 'X X(Twitter)のポスト');
     items.unshift({ url: tw.url, cid: tw.cid, twitterUrl: tw.url, isTwitter: true, title: title, addedAt: new Date().getTime() });
-    lsSet(key, items);
+    candItemsWrite_(key, items);
     attachAddImgs_(tw.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用)
     if (inp) inp.value = ''; if (twInp) twInp.value = '';
     showCandAddNotice_(msg, isB ? '✅ Blueskyの投稿URLを候補に登録しました' : '✅ Twitter(X)のURLを候補に登録しました');
@@ -4367,7 +4447,7 @@
     // ①作品URLがFANZA作品として有効 → 従来のFANZA候補(Twitter URLがあれば紐づけて保存)
     if (raw && r && r.ok) {
       var twForWork = parseSnsUrl_(twRaw); // X / Bluesky どちらの投稿URLでも紐づけ可
-      var items0 = lsGet(key, '[]');
+      var items0 = candItemsRead_(key);
       // 重複チェック: 同じcidが既にある場合はサブデータ(X/BlueskyURL・画像・メモ)のみ追記
       var dupIdx = -1;
       for (var di = 0; di < items0.length; di++) { if (items0[di] && items0[di].cid === r.cid) { dupIdx = di; break; } }
@@ -4402,7 +4482,7 @@
           mergedAny = true;
         }
         if (mergedAny) {
-          lsSet(key, items0);
+          candItemsWrite_(key, items0);
           refImgSave(r.cid, { imgs: mergedImgs, comment: cur.comment || '', memo: mergedMemo, twitterUrl: mergedTw, twitterUrl2: mergedTw2 });
           if (inp) inp.value = ''; if (twInp) twInp.value = ''; if (memoElDup) memoElDup.value = '';
           _addModalImgs = []; renderAddSlots_();
@@ -4420,7 +4500,7 @@
       // errored=trueなら取得失敗(placeholder登録)。この場合は入力欄を消さない(Chami指定2026-07-24：
       // 「取得できなかった場合にURLを消して登録しない」のを避ける＝欄を残し、登録済みも分かるようにする)。
       var put = function (info, errored) {
-        var items = lsGet(key, '[]');
+        var items = candItemsRead_(key);
         // 取得開始時に入れた「取得中」プレースホルダ(この追加が入れたもの)を探して、その場で中身を埋める。
         //   ★一覧から消さない=「追加して閉じる」で閉じた後、取得が長引いても「取得中です」が並び続ける(Chami 2026-08-05)。
         var idx = -1;
@@ -4431,7 +4511,7 @@
           var exist = null;
           for (var rj = 0; rj < items.length; rj++) { if (items[rj] && items[rj].cid === r.cid) { exist = items[rj]; break; } }
           if (exist) {
-            if (url && !exist.url) { exist.url = url; lsSet(key, items); }
+            if (url && !exist.url) { exist.url = url; candItemsWrite_(key, items); }
             var memoElRace = $('candMemo');
             showDuplicateDialog_(memoElRace && memoElRace.value, r.cid);
             if (onDone) onDone();
@@ -4455,7 +4535,7 @@
         if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
         if (twForWork.ok) it.twitterUrl = twForWork.url; // X / Bluesky の投稿URLも一緒に保存
         delete it._fetching; // 取得完了(または失敗確定)＝プレースホルダ状態を解除
-        lsSet(key, items);
+        candItemsWrite_(key, items);
         attachAddImgs_(r.cid, errored); // errored=true → keepForm: URLとメモを消さず再試行を許す
         if (errored) {
           // URLは消さない(登録はできたが情報取得は失敗＝自動バックフィルで後から埋まる)。
@@ -4477,12 +4557,12 @@
       //   「追加して閉じる」で閉じた後、取得に時間がかかっても一覧から消えず「⏳ 取得中です…」を出し続ける
       //   (以前は put() が取得完了まで一覧へ入れず、遅いと一覧から消えてリロードで復活＝ヒヤッとする・Chami 2026-08-05)。
       (function () {
-        var items = lsGet(key, '[]');
+        var items = candItemsRead_(key);
         for (var pi = 0; pi < items.length; pi++) { if (items[pi] && items[pi].cid === r.cid) return; } // 既にあれば二重に入れない
         var ph = { url: url, cid: r.cid, title: '(タイトル未取得)', addedAt: new Date().getTime(), _fetching: true };
         if (twForWork.ok) ph.twitterUrl = twForWork.url;
         items.unshift(ph);
-        lsSet(key, items);
+        candItemsWrite_(key, items);
         renderCandList(tabId);
       })();
       // ★プレースホルダを保存した時点で入力はlocalStorageへ永続化済み=ここで「追加して閉じる」を閉じてよい。
@@ -4535,7 +4615,7 @@
   }
   // 作品配列を保存キーへ追記。(cid重複は除外)追加数・重複数を返す。
   function appendWorks_(key, works) {
-    var items = lsGet(key, '[]'), have = {}; items.forEach(function (x) { have[x.cid] = true; });
+    var items = candItemsRead_(key), have = {}; items.forEach(function (x) { have[x.cid] = true; });
     var added = 0, dup = 0;
     works.forEach(function (w) {
       if (!w || !w.cid) return;
@@ -4543,19 +4623,19 @@
       items.push({ url: w.url, cid: w.cid, title: w.title, author: w.makerName || w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', reviewCount: w.reviewCount, reviewAvg: w.reviewAvg, addedAt: new Date().getTime() });
       have[w.cid] = true; added++;
     });
-    lsSet(key, items); recordReviewSnapshots(items);
+    candItemsWrite_(key, items); recordReviewSnapshots(items);
     if (added > 0) klog_('candidate_added', 'work', (works[0] && works[0].cid) || '', { added: added, dup: dup });
     return { added: added, dup: dup };
   }
   // 🔁: このタブの各作品の価格・販売数を最新化。(FANZA再取得＋販売数キャッシュ無効化)
   function refreshCandItems(tabId) {
-    var key = itemsKey(tabId), items = lsGet(key, '[]');
+    var key = itemsKey(tabId), items = candItemsRead_(key);
     if (!items.length) { renderCandList(tabId); return; }
     var targets = items.filter(isInfoTarget_);
     var cids = salesTargetCids_(items);
     var msgEl = $('candMsg');
     var cfg = workerCfg();
-    var done = function () { lsSet(key, items); recordReviewSnapshots(items); if (msgEl) msgEl.textContent = ''; invalidateSales_(cids); renderCandList(tabId); };
+    var done = function () { candItemsWrite_(key, items); recordReviewSnapshots(items); if (msgEl) msgEl.textContent = ''; invalidateSales_(cids); renderCandList(tabId); };
     if (!window.FanzaCore || !cfg.url) { done(); return; }
     if (msgEl) msgEl.textContent = '⏳ 価格・情報を更新中…';
     if (!targets.length) { done(); return; }
@@ -4696,12 +4776,13 @@
   }
   function renderCandList(tabId) {
     tabId = tabId || 'main';
+    try { restoreCandListFromIdb_(itemsKey(tabId)); } catch (e) {} // ★Storage v2 Phase2: LS満杯でIDBにだけ残った候補を復元(冪等)
     invalidatePostedIndex_(); // 投稿済み判定の索引を作り直す(前回描画以降の新規投稿を確実に反映)
     fetchPostedAuthority_(); // 投稿済み判定の権威索引(GASシート)を裏で更新(10分TTL・失敗時はローカル判定へフォールバック)
     fetchPostedRecentD1_(); // 「投稿済み非表示」ゲート用の直近投稿(D1 posted_log=生成側と同一権威)を裏で更新(10分TTL・失敗時はローカルts判定へフォールバック)
     var key = itemsKey(tabId);
     var el = $('candList');
-    var all = lsGet(key, '[]');
+    var all = candItemsRead_(key);
     if (!all.length) { el.innerHTML = '<p class="hint" style="padding:4px 6px;">まだ候補がありません。上の欄に作品URLを入れて追加してください。</p>'; return; }
     var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
     var filt_ = function (it) {
@@ -4731,10 +4812,10 @@
       });
       node.querySelectorAll('[data-delcid]').forEach(function (b) {
         b.addEventListener('click', function () {
-          var c = b.getAttribute('data-delcid'), items2 = lsGet(key, '[]');
+          var c = b.getAttribute('data-delcid'), items2 = candItemsRead_(key);
           var it = items2.filter(function (x) { return x.cid === c; })[0];
           if (!it || !window.confirm('「' + (it.title || c) + '」をこのタブから削除しますか？')) return;
-          lsSet(key, items2.filter(function (x) { return x.cid !== c; }));
+          candItemsWrite_(key, items2.filter(function (x) { return x.cid !== c; }));
           tombstoneCid_(tabId, c); // ★削除を墓標に記録＝同期で他端末にも伝播し復活を防ぐ(INC 2026-07-15)
           el._go5CandState = null; renderCandList(tabId);
         });
@@ -4746,7 +4827,7 @@
       if (!document.getElementById('candCardList')) wrap.innerHTML = '<div id="candPageHead"></div><div id="candCardList"></div><div id="candPageFoot"></div>';
       var headEl = document.getElementById('candPageHead'), listEl = document.getElementById('candCardList'), footEl = document.getElementById('candPageFoot');
       // ★非同期取得(タイトル/販売数/AI判定)が後から届いても最新で描くため、都度LSを読み直して絞り込む。
-      var fresh2 = lsGet(key, '[]'), hs2 = {}; lsGet(hiddenKey(tabId), '[]').forEach(function (c) { hs2[c] = true; });
+      var fresh2 = candItemsRead_(key), hs2 = {}; lsGet(hiddenKey(tabId), '[]').forEach(function (c) { hs2[c] = true; });
       var arr2 = sortItems(fresh2, _sort).filter(function (it) {
         if (!(_showHidden ? hs2[it.cid] : !hs2[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
@@ -5301,7 +5382,7 @@
       //   renderCandList が該当カードを部分更新する(チラつかない)。この handler 自体は 7/29 に
       //   追加された=それ以前にチラつきが無かったのはこの全再描画が無かったため。
       kickInfoBackfill_();
-      try { scheduleInfoTick_(_activeTab, lsGet(itemsKey(_activeTab), '[]')); } catch (e) {}
+      try { scheduleInfoTick_(_activeTab, candItemsRead_(itemsKey(_activeTab))); } catch (e) {}
     });
   } catch (e) {}
   hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行(5MB枠を解放)
