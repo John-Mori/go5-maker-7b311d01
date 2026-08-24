@@ -148,6 +148,9 @@
   // 同期対象の候補キーが変わったら即時同期を要求。(デバウンス＋最小間隔はGo5Sync側で吸収)
   //   キャッシュ系(cand_sales/cand_mk2 等)では発火させない＝no-op同期の無駄打ちを避ける。
   function reqSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
+  // 新規候補は「PCで追加→スマホで開く」の直前操作。3〜10秒のデバウンス待ちより先に雲へ着地させる。
+  // 同期中なら flushSync 側が次回同期を予約するため、取りこぼさない。
+  function flushSync_() { try { if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync(); else reqSync_(); } catch (e) { reqSync_(); } }
   function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); if (/^cand_(items|tabs)(__|$)/.test(k)) schedulePoolSync_(); }
   // 継続改善制度の行動ログ。(意味のある操作のみ・失敗は無害)
   function klog_(action, objType, objId, meta) { try { if (window.Go5Kaizen) window.Go5Kaizen.log('candidates', action, objType, objId, meta); } catch (e) {} }
@@ -155,6 +158,19 @@
     var u = '', s = '';
     try { u = (localStorage.getItem('fanza_worker_url') || '').trim(); s = (localStorage.getItem('fanza_shared_secret') || '').trim(); } catch (e) {}
     return { url: u.replace(/\/+$/, ''), secret: s };
+  }
+  // 同じcidへ、追加処理・一覧backfill・先読みが同時にFANZA Workerを叩くと1件で最大4通信になり、
+  // 複数追加時にWorker/APIを自分で詰まらせて「取得中」が数分続く。進行中の1本を共有して完了後だけ解放する。
+  var _infoFetchJobs = {};
+  function fetchInfoShared_(cid, cfg, srcUrl, opts) {
+    if (!window.FanzaCore || !cfg || !cfg.url) return Promise.resolve(null);
+    var key = [String(cid || ''), String(cfg.url || ''), String(srcUrl || ''), opts && opts.checkAi ? 'ai' : 'base'].join('|');
+    if (_infoFetchJobs[key]) return _infoFetchJobs[key];
+    var job;
+    try { job = Promise.resolve(window.FanzaCore.fetchFanzaInfo(cid, cfg.url, cfg.secret, srcUrl, opts)); }
+    catch (e) { job = Promise.reject(e); }
+    _infoFetchJobs[key] = job.then(function (v) { delete _infoFetchJobs[key]; return v; }, function (e) { delete _infoFetchJobs[key]; throw e; });
+    return _infoFetchJobs[key];
   }
   // 候補プールD1同期の「最後の結果」を端末に残す観測点。console.warnはChamiのスマホで読めないため、
   //   📚全候補ヘッダに人が読める形で出す(どの分岐で止まったかを実機で1発観測=v=647/648が同型リトライで
@@ -822,7 +838,7 @@
       var prev = missRec_(miss, it.cid);
       miss[it.cid] = { at: now, n: (prev ? prev.n : 0) + 1 };
       // 一時失敗(タイムアウト/5xx=retryable)は追加時と同じく1回だけ即リトライしてから諦める(スマホ回線の単発失敗で20分待たせない)。
-      var once = function () { return window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url); };
+      var once = function () { return fetchInfoShared_(it.cid, cfg, it.url); };
       once().then(function (info) {
         if (info && info.title) return info;
         if (info && info.retryable) return once();
@@ -911,7 +927,7 @@
     var pending = targets.length, updates = {};
     targets.forEach(function (it) {
       _aiTried[it.cid] = now;
-      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url, { checkAi: true }).then(function (info) {
+      fetchInfoShared_(it.cid, cfg, it.url, { checkAi: true }).then(function (info) {
         // verified=判定が確定した時だけ(AI開示ヒット or 検証済みfalse)。壁で未判定(!ai && !aiChecked)は凍結しない。
         if (info && info.title) updates[it.cid] = { ai: !!info.ai, verified: !!(info.ai || info.aiChecked) };
         if (--pending === 0) finish();
@@ -2240,7 +2256,7 @@
     renderImgModal_(it.title, big, null, '⏳ サンプル画像を取得中…');
     var cfg = workerCfg();
     if (window.FanzaCore && cfg.url && it.cid) {
-      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url).then(function (info) {
+      fetchInfoShared_(it.cid, cfg, it.url).then(function (info) {
         if (_imgOverlay && _imgOverlay.hidden) return; // 閉じられていたら反映しない
         if (info && info.samples && info.samples.length) {
           samplesCacheSet(it.cid, info.samples, info.thumb || big);
@@ -3324,7 +3340,7 @@
         try { if (_activeTab) render(); } catch (e) {}
       };
       cb(true); // ★保存は完了(永続化済み)。モーダルを閉じてよい。以降の作品情報取得は裏で追う。
-      if (window.FanzaCore && cfg.url) { try { window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(enrichInfo_).catch(function () {}); } catch (e) {} }
+      if (window.FanzaCore && cfg.url) { try { fetchInfoShared_(r.cid, cfg, url).then(enrichInfo_).catch(function () {}); } catch (e) {} }
     }).catch(function () {
       cb(false, '画像・URL情報を保存できませんでした。もう一度お試しください');
     });
@@ -3551,7 +3567,7 @@
     if (btn && btn.disabled) return;
     var label = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.textContent = '⏳ 取得中…'; }
-    var once = function () { return window.FanzaCore.fetchFanzaInfo(cid, cfg.url, cfg.secret, it.url); };
+    var once = function () { return fetchInfoShared_(cid, cfg, it.url); };
     once().then(function (info) {
       if (info && info.title) return info;
       if (info && info.retryable) return once();
@@ -3750,7 +3766,7 @@
     if (!r || !r.ok) { cb(null, null, '作品URL/サークルIDを認識できませんでした'); return; }
     var cfg = workerCfg();
     if (!window.FanzaCore || !cfg.url) { cb(null, null, 'FANZA Workerが未設定です(⚙️詳細設定)'); return; }
-    window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url).then(function (info) {
+    fetchInfoShared_(r.cid, cfg, url).then(function (info) {
       if (info && info.title && info.authorId) cb(info.authorId, info.author || '', null);
       else if (info && info.title) cb(null, null, '作品は取得できましたがサークルIDが含まれていません(API未収録?)');
       else cb(null, null, '作品情報を取得できませんでした' + (info && info.reason ? '(' + info.reason + ')' : ''));
@@ -4598,7 +4614,7 @@
         if (_prefetchCache[cidPre]) return; // 取得中または完了
         _prefetchCache[cidPre] = { done: false };
         var pm = $('candMsg'); if (pm) pm.textContent = '⏳ 作品情報を先読み中…';
-        var fOnce = function () { return window.FanzaCore.fetchFanzaInfo(cidPre, cfg2.url, cfg2.secret, urlPre); };
+        var fOnce = function () { return fetchInfoShared_(cidPre, cfg2, urlPre); };
         fOnce().then(function (info) {
           if (info && info.title) {
             _prefetchCache[cidPre] = { done: true, info: info, errored: false };
@@ -4932,7 +4948,8 @@
         var ph = { url: url, cid: r.cid, title: '(タイトル未取得)', addedAt: new Date().getTime(), _fetching: true };
         if (twForWork.ok) ph.twitterUrl = twForWork.url;
         items.unshift(ph);
-        candItemsWrite_(key, items);
+        var phLsOk = candItemsWrite_(key, items);
+        if (phLsOk) flushSync_(); // スマホをすぐ開いても、候補本体が先に雲へ届いている状態を作る
         renderCandList(tabId);
       })();
       // ★プレースホルダを保存した時点で入力はlocalStorageへ永続化済み=ここで「追加して閉じる」を閉じてよい。
@@ -4941,7 +4958,7 @@
       if (onDone) onDone();
       // 一時的な失敗(タイムアウト/サーバー5xx等・retryable)は1回だけ即リトライしてから諦める。
       //   そもそも取得エラーになる頻度を減らす狙い(Chami指定2026-07-24)。
-      var fetchOnce = function () { return window.FanzaCore.fetchFanzaInfo(r.cid, cfg.url, cfg.secret, url); };
+      var fetchOnce = function () { return fetchInfoShared_(r.cid, cfg, url); };
       if (window.FanzaCore && cfg.url) {
         fetchOnce().then(function (info) {
           if (info && info.title) { put(info, false); return; }
@@ -5011,7 +5028,7 @@
     if (!targets.length) { done(); return; }
     var pending = targets.length;
     targets.forEach(function (it) {
-      window.FanzaCore.fetchFanzaInfo(it.cid, cfg.url, cfg.secret, it.url, { checkAi: true }).then(function (info) {
+      fetchInfoShared_(it.cid, cfg, it.url, { checkAi: true }).then(function (info) {
         if (info && info.title) {
           it.title = info.title; if (info.author) it.author = info.author;
           it.listPrice = info.listPrice; it.price = info.price; it.discountPct = info.discountPct || 0;

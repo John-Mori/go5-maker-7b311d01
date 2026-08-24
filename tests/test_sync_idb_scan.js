@@ -17,7 +17,7 @@ var Sync = require('../core/sync.js')._test;
     }
   };
   var out = await Sync.readSyncIdbEntries_(fake);
-  assert.deepStrictEqual(calls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:']]);
+  assert.deepStrictEqual(calls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:', 'meta:candlist:']]);
   assert.ok(out['ref:a']);
 
   // One failed image namespace must not discard healthy namespaces or create tombstones.
@@ -33,7 +33,7 @@ var Sync = require('../core/sync.js')._test;
     }
   };
   var partial = await Sync.readSyncIdbEntries_(fakeSettled);
-  assert.deepStrictEqual(settledCalls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:']]);
+  assert.deepStrictEqual(settledCalls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:', 'meta:candlist:']]);
   assert.deepStrictEqual(partial.__go5FailedPrefixes, ['bsky:']);
   assert.ok(partial['ref:new'], 'healthy prefix data must survive a sibling timeout');
 
@@ -55,6 +55,15 @@ var Sync = require('../core/sync.js')._test;
   var protectedLive = Sync.mergeLiveArray_(fromCloud, editedDuringSync, start, 'cid');
   assert.strictEqual(JSON.parse(protectedLive)[0].url, 'https://local-edit.example/',
     '同期開始後のユーザー編集は最後に保護する');
+
+  var lsWithOldCandidate = { cand_items: JSON.stringify([{ cid: 'old', title: 'LS正本' }]) };
+  Sync.mergeCandListMirrorsIntoLs_(lsWithOldCandidate, {
+    'meta:candlist:cand_items': [{ cid: 'new', title: 'IDBだけの新規候補' }, { cid: 'old', title: '(タイトル未取得)' }]
+  });
+  var mergedCandidates = JSON.parse(lsWithOldCandidate.cand_items);
+  assert.strictEqual(mergedCandidates.length, 2, 'LS満杯時にIDBだけへ保存された候補も同期対象へ合流する');
+  assert.strictEqual(mergedCandidates.filter(function (it) { return it.cid === 'old'; })[0].title, 'LS正本',
+    '古いIDBミラーでLS側の既存候補を巻き戻さない');
 
   console.log('OK: unchanged local data cannot overwrite newer cloud candidate fields');
   console.log('OK: sync reads only IDB prefixes used by cloud sync');

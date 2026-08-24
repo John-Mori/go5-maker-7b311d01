@@ -53,7 +53,9 @@
   //   別端末で投稿履歴/候補を見ると挿入画像の第1候補(usedImgArr[0])が常に空で「画像が表示されない」多発の主因だった
   //   (Chami報告2026-08-16⑤)。ref:/post: と同じ R2 content-hash 画像レールに乗せて端末間で行き渡らせる。
   function isSyncIdbKey(k) { return /^(ref:|bsky:|post:|used:|stock:imgs:)/.test(String(k)); }
-  var SYNC_IDB_PREFIXES = ["ref:", "bsky:", "post:", "used:", "stock:imgs:"];
+  // meta:candlist: は画像同期の対象ではなく、localStorage が満杯の時に候補配列を逃がした耐久ミラー。
+  // 同期開始時にだけ読んで curLs の cand_items* へ合流し、従来の候補unionレールでクラウドへ送る。
+  var SYNC_IDB_PREFIXES = ["ref:", "bsky:", "post:", "used:", "stock:imgs:", "meta:candlist:"];
   function readSyncIdbEntries_(idb) {
     if (!idb || !idb.available()) return Promise.resolve({});
     // 1領域のtimeoutで全画像同期を止めない。失敗prefixは非列挙メタへ載せ、呼び側が前回snapを
@@ -414,6 +416,19 @@
     } catch (e) { return null; }
   }
   function unionCand(olderStr, newerStr) { return unionByField(olderStr, newerStr, "cid"); }
+  function mergeCandListMirrorsIntoLs_(curLs, idbEntries) {
+    curLs = curLs || {}; idbEntries = idbEntries || {};
+    Object.keys(idbEntries).forEach(function (idbKey) {
+      if (String(idbKey).indexOf("meta:candlist:") !== 0 || !Array.isArray(idbEntries[idbKey])) return;
+      var lsKey = String(idbKey).slice("meta:candlist:".length);
+      if (!/^cand_items(__|$)/.test(lsKey)) return;
+      // IDBはLS満杯時にだけ新しい候補を持つ一方、通常時はLSが正本。IDBをolder、LSをnewerとして
+      // cid unionすれば、IDBだけの新規候補を救いつつ、LS側の新しい編集を古いミラーで巻き戻さない。
+      var merged = unionByField(JSON.stringify(idbEntries[idbKey]), curLs[lsKey] || "[]", "cid");
+      if (merged != null) curLs[lsKey] = merged;
+    });
+    return curLs;
+  }
   // ★作成履歴(go5_stock_archive)の thumbDataUrl 恒久detox=「決定的正規化(thumb budget)」の純関数。
   //   設計正本=docs/設計・調査/診断_作成履歴サムネ同期detox_2026-08-18.md(Fable5案C・C-043)。
   //   作成履歴は item ごとに thumbDataUrl(≤160KB)を抱え最大約4.8MB、さらに sync2_snap に複製で実効ほぼ2倍=
@@ -618,6 +633,8 @@
       // 成功したprefixだけ同期を進める。失敗領域のローカル変更は次回回復時に送られる。
       var failedPrefixes = (all && all.__go5FailedPrefixes) || [];
       protectUnreadIdb_(all, snapIdb, failedPrefixes);
+      // Storage v2: LS書込失敗でIDBにしか残らなかった候補も、通常のcand_items同期へ必ず乗せる。
+      mergeCandListMirrorsIntoLs_(curLs, all);
       var keys = Object.keys(all).filter(isSyncIdbKey);
       if (!keys.length) return;
       var bag = []; keys.forEach(function (k) { collectDataUrls(all[k], bag); });
@@ -1104,6 +1121,7 @@
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_;
+  root.Go5Sync._test.mergeCandListMirrorsIntoLs_ = mergeCandListMirrorsIntoLs_;
   root.Go5Sync._test.slimStockArchive = slimStockArchive;
   root.Go5Sync._test.syncIdbPrefixes = SYNC_IDB_PREFIXES.slice();
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;

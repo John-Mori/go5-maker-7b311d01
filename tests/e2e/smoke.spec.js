@@ -119,8 +119,13 @@ test.describe('候補ページの画像・投稿編集', () => {
       const canvas = document.createElement('canvas');
       canvas.width = 8; canvas.height = 8;
       canvas.getContext('2d').fillRect(0, 0, 8, 8);
-      const image = canvas.toDataURL('image/png');
-      window.Go5Cand.zoomImages([image, image], 0);
+      canvas.getContext('2d').fillStyle = '#ff0000';
+      canvas.getContext('2d').fillRect(0, 0, 8, 8);
+      const image1 = canvas.toDataURL('image/png');
+      canvas.getContext('2d').fillStyle = '#0000ff';
+      canvas.getContext('2d').fillRect(0, 0, 8, 8);
+      const image2 = canvas.toDataURL('image/png');
+      window.Go5Cand.zoomImages([image1, image2], 0);
     });
 
     const prev = page.locator('.fz-zoom-nav.prev');
@@ -149,6 +154,16 @@ test.describe('候補ページの画像・投稿編集', () => {
     expect(Math.abs(boxes.prev.cx - boxes.viewport * 0.2)).toBeLessThanOrEqual(1);
     expect(Math.abs(boxes.next.cx - boxes.viewport * 0.8)).toBeLessThanOrEqual(1);
     expect(Math.abs(boxes.prev.cx + boxes.next.cx - boxes.viewport)).toBeLessThanOrEqual(1);
+
+    // 見た目だけでなく、PCの実クリックで必ず次/前の画像へ切り替わることを固定する。
+    await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
+    const firstSrc = await page.locator('.fz-zoom-img').getAttribute('src');
+    await next.click();
+    await expect(page.locator('.fz-zoom-count')).toHaveText('2 / 2');
+    await expect(page.locator('.fz-zoom-img')).not.toHaveAttribute('src', firstSrc);
+    await prev.click();
+    await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
+    await expect(page.locator('.fz-zoom-img')).toHaveAttribute('src', firstSrc);
 
     // スマホは従来どおり、邪魔にならない46px・左右端10pxを維持する。
     await page.setViewportSize({ width: 390, height: 844 });

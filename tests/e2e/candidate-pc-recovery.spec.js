@@ -78,4 +78,45 @@ test.describe('PC candidate recovery invariants', () => {
 
     await expect(page.locator('[data-refimgview="' + cid + '"]')).toBeVisible();
   });
+  test('new candidate shares one metadata request and flushes immediately for another device', async ({ page }) => {
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.setItem('fanza_worker_url', 'https://worker.invalid');
+      localStorage.setItem('fanza_shared_secret', 'test-only');
+      window.__pcCandidateFetchCalls = 0;
+      window.__pcCandidateAiCalls = 0;
+      window.__pcCandidateFlushCalls = 0;
+      window.__pcCandidateResolve = null;
+      window.FanzaCore.fetchFanzaInfo = (_cid, _url, _secret, _src, opts) => {
+        if (opts && opts.checkAi) {
+          window.__pcCandidateAiCalls++;
+          return Promise.resolve({ title: 'PC取得一本化テスト作品', ai: false, aiChecked: true });
+        }
+        window.__pcCandidateFetchCalls++;
+        return new Promise((resolve) => { window.__pcCandidateResolve = resolve; });
+      };
+      window.Go5Sync.flushSync = () => {
+        window.__pcCandidateFlushCalls++;
+        return Promise.resolve({ ok: true });
+      };
+    });
+
+    await page.locator('#candAddOpen').click();
+    await page.locator('#candUrl').fill('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_pc_singleflight/');
+    await page.locator('#candAddClose').click();
+
+    await expect.poll(() => page.evaluate(() => window.__pcCandidateFetchCalls)).toBe(1);
+    await expect.poll(() => page.evaluate(() => window.__pcCandidateFlushCalls)).toBe(1);
+    await expect(page.locator('.cand-card', { hasText: '取得中です' })).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__pcCandidateResolve({
+        title: 'PC取得一本化テスト作品', author: 'test', releaseDate: '2026-08-25',
+        thumb: 'https://example.invalid/thumb.jpg', genres: ['同人'], floor: '同人',
+        listPrice: 1000, price: 500, discountPct: 50, reviewCount: 1, reviewAvg: 5
+      });
+    });
+    await expect(page.locator('.cand-card', { hasText: 'PC取得一本化テスト作品' })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.__pcCandidateFetchCalls)).toBe(1);
+  });
 });
