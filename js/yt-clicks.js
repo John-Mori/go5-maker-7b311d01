@@ -510,6 +510,21 @@
     return '<div class="cand-pager">' + b + '</div><div class="cand-pager-info hint">' + from + '–' + to + '件 / 全' + total + '件(' + page + '/' + pages + 'ページ)</div>';
   }
   var _histPageByAcct = {}; // 投稿履歴の現在ページをアカウント別に保持(ページ分け・Chami依頼2026-08-22)
+  // ── 投稿履歴の作品検索(Chami依頼2026-08-24「計測の下に候補ページと同様に検索機能を」) ──
+  //   候補タブ(candidates.js workSearch)と同じく、ページ分けの"前"に実データ(visibleItems)を絞る
+  //   =全ページ横断で作品名・題名にヒットする(現在ページ内だけのDOM非表示ではない)。クエリはアカウント別に保持。
+  var _histSearchByAcct = {};
+  function histSearchQ_() { return _histSearchByAcct[acct()] || ''; }
+  function histNorm_(v) { var t = String(v || ''); try { t = t.normalize('NFKC'); } catch (e) {} return t.toLowerCase(); }
+  function histSearchHtml_() {
+    var q = histSearchQ_();
+    return '<div class="hist-work-search" style="padding:2px 6px 10px;">' +
+      '<label for="histWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品検索(部分一致)</label>' +
+      '<div style="display:flex;gap:6px;align-items:center;">' +
+      '<input id="histWorkSearch" size="1" type="search" value="' + esc(q) + '" placeholder="作品名・題名で絞り込み" aria-label="作品検索(部分一致)" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
+      '<button id="histWorkSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
+      '</div><div id="histWorkSearchResult" class="hint" aria-live="polite" style="min-height:1.4em;margin-top:3px;"></div></div>';
+  }
 
   // 投稿時刻(ts)等から背骨ID(videoId)を生成。idgen があれば流用、無ければ同形式で自前生成。
   function genVideoId(ts) {
@@ -1992,7 +2007,14 @@
     // 被リビルド作品の非表示トグル。(最新の投稿カードにボタンを設置。ONで被リビルド済みを一覧から除外)
     var hideRemadeKey = 'verify_hide_remade__' + acct();
     var hideRemade = false; try { hideRemade = localStorage.getItem(hideRemadeKey) === '1'; } catch (e) {}
-    var visibleItems = hideRemade ? items.filter(function (it) { return !it.remade; }) : items;
+    var baseItems = hideRemade ? items.filter(function (it) { return !it.remade; }) : items;
+    // 作品検索(Chami依頼2026-08-24): 題名(it.title)＋YouTube実題名(titleCache)へ部分一致。ページ分けの前に絞る。
+    var _hq = histNorm_(histSearchQ_());
+    var visibleItems = !_hq ? baseItems : baseItems.filter(function (it) {
+      var _v = it.videoId || '';
+      var t = histNorm_((it.title || '') + ' ' + (_v && titleCache[_v] ? titleCache[_v] : ''));
+      return t.indexOf(_hq) >= 0;
+    });
     // 非表示トグルは行の枠外(リスト最上部の独立バー)に置く＝先頭カードに重ならない。
     var hideBarHtml = '<div class="vhide-remade-bar">' +
       '<span id="saleStats" class="sale-stats" title="セール会場リンク(大幅割引セール中の同人祭ページ)のクリック数。累計はr2計測・今日/昨日/週は日次スナップショット"><img class="emico emico-sale" src="assets/icons/ic-sale-gold.png" alt=""> セール会場 …</span>' +
@@ -2012,7 +2034,7 @@
     var _hstart = (_hpage - 1) * _hsize;
     var pageItems = visibleItems.slice(_hstart, _hstart + _hsize);
     var pagerHtml = histPagerHtml_(_hpage, _hpages, _htotal, _hstart, pageItems.length);
-    list.innerHTML = hideBarHtml + pagerHtml + pageItems.map(function (it, idx) {
+    list.innerHTML = hideBarHtml + histSearchHtml_() + pagerHtml + pageItems.map(function (it, idx) {
       var k = itemKey(it);
       var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
@@ -2178,6 +2200,23 @@
     });
     var _hpss = $('histPageSizeSel');
     if (_hpss) _hpss.addEventListener('change', function () { var n = parseInt(this.value, 10) || HPAGESIZE_DEF; try { localStorage.setItem(K_HISTPAGESIZE, String(n)); } catch (e) {} _histPageByAcct[acct()] = 1; render(); });
+    // 作品検索の配線(Chami依頼2026-08-24)。入力ごとにページ分けの前で絞り直す=全ページ横断。
+    //   render()が list を丸ごと描き直すため、描き直した後の入力欄へフォーカスとキャレット位置を戻す(打鍵が飛ばない)。
+    var _hwsr = $('histWorkSearchResult');
+    if (_hwsr) _hwsr.textContent = _hq ? (visibleItems.length + '件表示 / ' + baseItems.length + '件中') : '';
+    var _hws = $('histWorkSearch');
+    if (_hws) _hws.addEventListener('input', function () {
+      var q = this.value || '', caret = this.selectionStart;
+      _histSearchByAcct[acct()] = q; _histPageByAcct[acct()] = 1;
+      render();
+      try { var ni = $('histWorkSearch'); if (ni) { ni.focus({ preventScroll: true }); if (caret != null) ni.setSelectionRange(caret, caret); } } catch (e) {}
+    });
+    var _hwsc = $('histWorkSearchClear');
+    if (_hwsc) _hwsc.addEventListener('click', function () {
+      _histSearchByAcct[acct()] = ''; _histPageByAcct[acct()] = 1;
+      render();
+      try { var ni = $('histWorkSearch'); if (ni) ni.focus({ preventScroll: true }); } catch (e) {}
+    });
     // シートから vid を補ったが公開日時が未取得の投稿を、描画後に1回だけ取りに行く(見出しを YouTube公開日時へ)。
     //   通常のrefresh()はallItems(ローカル)しか照会しないため、結線が切れた行はここでしか公開日時を拾えない。
     //   取得できたら再描画で §1646(pub)が §1651(it.ts=作成日時)に勝つ。まだ非公開(予約公開中)なら空応答＝
@@ -2284,7 +2323,7 @@
     // 過去分プレビュー取り込み/生成。このチャンネルの、まだプレビューが無い履歴だけが対象。
     var backfillBtn = $('drivePrevBackfill');
     if (backfillBtn) {
-      backfillBtn.addEventListener('click', function () { runDrivePreviewBackfill_(visibleItems, backfillBtn); });
+      backfillBtn.addEventListener('click', function () { runDrivePreviewBackfill_(baseItems, backfillBtn); });
       // ★ページを離れて戻った時の自動再開(Chami依頼2026-08-13「離れても裏で処理を続ける」)。
       //   未処理ジョブが残っていれば確認なしで続きを流す(二重起動は _prevbfBusy でガード)。
       try {
