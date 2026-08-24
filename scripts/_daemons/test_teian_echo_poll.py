@@ -487,6 +487,76 @@ def t_alert_text_carries_the_reason():
         assert "http-TimeoutError" in str(alerts[0]), alerts[0]
 
 
+def t_transient_failure_is_retried_within_the_round():
+    """★冷えたGASの1本目(タイムアウト)を、同じ周の中で引き直して拾うこと。
+
+    実測(8/25 01:24・同じURLへ10連打)= 1〜4本目が27秒超でTimeoutError、5本目以降は2.2秒で成功。
+    ★must-fail= 引き直しを消すと、1本目の失敗がそのまま fail-open になってここが落ちる。
+    ★設定・実装の誤り(not-json 等)は引き直さない=同じ答えしか返らないのに待ち時間だけ倍になる。
+    """
+    keep = (T.exec_url, T.urllib.request.urlopen)
+    try:
+        T.exec_url = lambda: "https://example.invalid/exec"
+
+        class _R:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return self.body
+
+        calls = []
+
+        def cold_then_warm(req, timeout=None):
+            calls.append(timeout)
+            if len(calls) == 1:
+                raise TimeoutError("timed out")
+            return _R(b'{"ok":true,"rows":[],"lastRow":9}')
+
+        T.urllib.request.urlopen = cold_then_warm
+        got = T.fetch_decisions(2, retry_wait=0)
+        assert got == {"ok": True, "rows": [], "lastRow": 9}, f"引き直しで拾えていない: {got}"
+        assert len(calls) == 2, f"同じ周で引き直していない(呼び出し{len(calls)}回)"
+        assert calls[1] > calls[0], f"2本目の待ち時間が伸びていない: {calls}"
+        assert T.last_fetch_fail() == "", "拾えたのに失敗理由が残っている"
+
+        # 引き直さない側= HTMLが返る(設定・実装の誤り)は1本で打ち切る
+        calls.clear()
+        T.urllib.request.urlopen = lambda req, timeout=None: (
+            calls.append(timeout) or _R(b"<!DOCTYPE html>"))
+        assert T.fetch_decisions(2, retry_wait=0) is None
+        assert len(calls) == 1, f"設定の誤りまで引き直している(呼び出し{len(calls)}回)"
+        assert T.last_fetch_fail() == "not-json", T.last_fetch_fail()
+    finally:
+        T.exec_url, T.urllib.request.urlopen = keep
+
+
+def t_recovery_carries_last_reason():
+    """★復旧の一報が「直前の失敗理由」を持つこと(8/25 01:17 の『原因は不明のまま』の穴)。"""
+    with tempfile.TemporaryDirectory() as d:
+        p = Paths(d)
+        T._write_int(p.wm, 5)
+        T._write_int(p.fail, 4)
+        T._write_why(p.fail + ".why", "http-TimeoutError")
+        _, deliver = _recorder()
+        alerts, alert = _alert_recorder()
+        _, note = _note_recorder()
+        res = T.run_once(_fetch_from(lambda s: [], last_row=5), deliver, alert=alert, note=note,
+                         wm_path=p.wm, fail_path=p.fail, alert_at=3, wait_alert_every=288)
+        assert res["status"] == "ok", res
+        rec = alert.recovered
+        assert len(rec) == 1, f"復旧が部屋へ1回出ていない: {rec}"
+        assert "http-TimeoutError" in rec[0], f"復旧が理由を語っていない: {rec[0]}"
+        assert "原因は不明" not in rec[0], f"理由を知っているのに不明と言っている: {rec[0]}"
+        assert not os.path.exists(p.fail + ".why"), "復旧後も理由ファイルが残っている"
+
+
 def main():
     tests = [
         ("初回は水位を置くだけ・配達も警報もしない", t_init_sets_watermark_no_delivery),
@@ -508,6 +578,9 @@ def main():
         ("★fetchの失敗は理由の1語を残す", t_fetch_fail_reason_is_recorded),
         ("★★鳴らない周でもログに1行残る(00:52の穴)", t_read_fail_always_writes_a_log_line),
         ("★警報の本文に理由が載る", t_alert_text_carries_the_reason),
+        ("★★冷えた1本目を同じ周で引き直す(引き直さない失敗も区別する)",
+         t_transient_failure_is_retried_within_the_round),
+        ("★★復旧の一報が直前の失敗理由を持つ", t_recovery_carries_last_reason),
     ]
     ok = sum(run(n, f) for n, f in tests)
     print(f"\n{ok}/{len(tests)} PASS")

@@ -118,6 +118,18 @@ def _write_int(path, n):
     os.replace(tmp, path)
 
 
+def _write_why(path, why):
+    """直近の失敗理由を1語だけ残す(復旧の一報がそれを読んで喋る)。書けなくても本流は止めない。"""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write((why or "").strip() or "不明(理由を持たない継ぎ目)")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 def _reset(path):
     try:
         os.remove(path)
@@ -171,13 +183,21 @@ def last_fetch_fail():
     return _LAST_FAIL
 
 
-def fetch_decisions(since_row, timeout=25):
+def fetch_decisions(since_row, timeout=25, retry_timeout=90, retry_wait=3):
     """GASの読み取り口を叩く。**継ぎ目#1(HTTP)**。
 
     正常= {ok:true, lastRow:int, rows:[...]} の dict を返す。
     HTTP失敗 / HTMLが返る / JSONが壊れている / ok!=true / 構造が欠ける = None(=fail-open)。
     ★ここで例外を投げない=呼び手(run_once)は None を「静かに次周期へ」に倒す。
     ★None を返す時は **必ず `_LAST_FAIL` に理由を置く**(空のまま返すと警報がまた黙る)。
+
+    ★★2026-08-25 イージス研究室= **転送層の失敗(http-*)は1周の中で1回だけ引き直す。**
+      実測(同じURLへ10連打・8/25 01:24)= 1〜4回目が27秒超で TimeoutError、5回目以降は
+      2.2秒で成功。GASは呼ばれない間があくと立ち上げに25秒以上かかる= 5分間隔の巡回は
+      毎回**冷えた所を踏む**。1本目が立ち上げを兼ねるので、2本目は温まった所に当たる。
+      2本目だけ待ち時間を伸ばす(retry_timeout)のは、立ち上げそのものが25秒に収まらない
+      ケースを1本目の短さで切り捨てないため。引き直すのは http-* だけ=
+      config-/not-json/ok-false は設定と実装の誤りで、引き直しても同じ答えしか返らない。
     """
     global _LAST_FAIL
 
@@ -192,14 +212,22 @@ def fetch_decisions(since_row, timeout=25):
         return fail(f"config-{type(e).__name__}")
     sep = "&" if "?" in base else "?"
     url = f"{base}{sep}action=teian_decisions&since_row={int(since_row)}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "go5-teian-echo/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read().decode("utf-8", errors="replace").strip()
-    except urllib.error.HTTPError as e:
-        return fail(f"http-{e.code}")
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        return fail(f"http-{type(e).__name__}")
+    raw = None
+    for attempt, tmo in enumerate(((timeout, retry_timeout) if retry_timeout else (timeout,))):
+        if attempt:
+            time.sleep(retry_wait)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "go5-teian-echo/1.0"})
+            with urllib.request.urlopen(req, timeout=tmo) as r:
+                raw = r.read().decode("utf-8", errors="replace").strip()
+            break
+        except urllib.error.HTTPError as e:
+            why = f"http-{e.code}"
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            why = f"http-{type(e).__name__}"
+        _LAST_FAIL = why
+    if raw is None:
+        return fail(_LAST_FAIL)             # 引き直しても駄目だった=最後の理由をそのまま出す
     if not raw or raw[0] not in "{[":       # HTMLエラーページ等はJSONで始まらない
         return fail("not-json")
     try:
@@ -381,11 +409,23 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
     prev_fails = _read_int(fail_path) or 0
     alarm_had_rung = (prev_fails >= alert_at) if initialized else \
                      bool(wait_alert_every) and prev_fails >= wait_alert_every
+    # ★★2026-08-25 イージス研究室= **復旧の一報も理由を持ち回る。**
+    #   8/25 01:17 に届いた復旧便は「原因は不明のまま自然復旧した」と書いてあったが、
+    #   同じ時刻の運用ログは理由(http-TimeoutError / http-404)を**知っていた**=
+    #   56f3c54 で警報側だけ直し、復旧側は「原因を言えない」まま残っていた(同じ穴の1つ隣)。
+    why_path = fail_path + ".why"
+    prev_why = ""
+    try:
+        with open(why_path, encoding="utf-8") as f:
+            prev_why = f.read().strip()
+    except OSError:
+        pass
 
     def ring_recovery(what):
         if alarm_had_rung:
             alert(f"{what}(連続{prev_fails}回・{_age_text(prev_fails)}ぶり)。"
-                  f"読み取り口も配達も戻っている。原因は不明のまま自然復旧した=同じ形で再発したら追う。",
+                  f"読み取り口も配達も戻っている。直前の失敗理由="
+                  f"{prev_why or '不明(理由を持たない継ぎ目)'}。同じ形で再発したら追う。",
                   recovered=True)
 
     data = fetch(since)
@@ -393,6 +433,7 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
         # fail-open: 水位を進めない。連続失敗カウンタに積む。
         n = (_read_int(fail_path) or 0) + 1
         _write_int(fail_path, n)
+        _write_why(why_path, last_fetch_fail())   # 復旧の一報が理由を言えるように残す
         at_threshold = (n == alert_at)
         # n は5分刻み=経過時間の代理。周期ちょうど(約24h,48h…)を「時間で滞留」の合図に使う。
         at_period = bool(wait_alert_every) and (n % wait_alert_every == 0)
@@ -452,6 +493,7 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             # ★blocked も同じカウンタに積む(返す物2)。決定は記録されているのに軍議へ届かない=沈黙させない。
             n = (_read_int(fail_path) or 0) + 1
             _write_int(fail_path, n)
+            _write_why(why_path, f"配達失敗(dispatch・row={rownum})")
             logf(f"[据え置き] row={rownum} の配達に失敗。水位={since} のまま次周期へ(連続{n}回)。")
             # ★閾値ちょうど **または** 周期(約24h)ごとに部屋へ1回。配達不能が続いても
             #   n==alert_at の一発だけだと2度と鳴らない=静かな死(デブライネさん指摘 2026-08-23 / C-041)。
@@ -466,6 +508,7 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
         delivered += 1
 
     _reset(fail_path)               # きれいに1周できた=連続失敗カウンタを畳む
+    _reset(why_path)                # ★理由は復旧の一報を出した「後」に消す(下の ring_recovery は prev_why を持っている)
     # 開いていた警報を受け手が読む面で閉じる(復旧時に各種1回だけ✅)。
     for k in ("read-fail", "deliver-blocked", "bootstrap-wait"):
         note(k, "1周を正常に完了(連続失敗カウンタを畳んだ)。", resolve=True)
