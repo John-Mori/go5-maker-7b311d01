@@ -232,6 +232,25 @@
     });
     return chain.then(function () { return out; });
   }
+
+  // 複数prefixを独立して読むfail-open版。1領域が無言停止/timeoutしても、既に読めた領域を
+  // 捨てず、後続領域も読み進める。同期・画面再ハイドレートのように「部分成功を採用し、
+  // 失敗領域だけ次回再試行」できる呼び出し専用。従来 entriesByPrefixes は fail-closed のまま維持する。
+  function entriesByPrefixesSettled(prefixes) {
+    var uniq = [], seen = {};
+    (prefixes || []).forEach(function (p) { p = String(p || ""); if (p && !seen[p]) { seen[p] = true; uniq.push(p); } });
+    var out = {}, failed = [], chain = Promise.resolve();
+    uniq.forEach(function (p) {
+      chain = chain.then(function () {
+        return entriesPrefix(p).then(function (part) {
+          Object.keys(part || {}).forEach(function (k) { out[k] = part[k]; });
+        }, function (error) {
+          failed.push({ prefix: p, error: error });
+        });
+      });
+    });
+    return chain.then(function () { return { entries: out, failed: failed }; });
+  }
   // ★恒久対策(2026-08-11 Chami「候補の画像・コメント・メモが消えた」の再発クラス／C-038)：
   //   iOS Safari は「7日間サイトに触れないと script-writable storage(IndexedDB/localStorage)を全消去」する
   //   (ITPのstorage cap)。これで保存した動画生成用画像・コメント・メモが一斉に消える=今回の症状。
@@ -266,7 +285,7 @@
     }
   } catch (e) {}
 
-  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, requestPersist: requestPersist, isHealthy: function () { return !_unhealthy; } };
+  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, entriesByPrefixesSettled: entriesByPrefixesSettled, requestPersist: requestPersist, isHealthy: function () { return !_unhealthy; } };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Idb = API;
 })(typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : this));

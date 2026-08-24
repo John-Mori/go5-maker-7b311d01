@@ -56,8 +56,28 @@
   var SYNC_IDB_PREFIXES = ["ref:", "bsky:", "post:", "used:", "stock:imgs:"];
   function readSyncIdbEntries_(idb) {
     if (!idb || !idb.available()) return Promise.resolve({});
+    // 1領域のtimeoutで全画像同期を止めない。失敗prefixは非列挙メタへ載せ、呼び側が前回snapを
+    // 保持して削除誤判定を防ぐ。旧IDB APIでは従来のfail-closed読取へフォールバック。
+    if (typeof idb.entriesByPrefixesSettled === "function") {
+      return idb.entriesByPrefixesSettled(SYNC_IDB_PREFIXES.slice()).then(function (result) {
+        var out = (result && result.entries) || {};
+        var failed = ((result && result.failed) || []).map(function (x) { return String((x && x.prefix) || x || ""); }).filter(Boolean);
+        try { Object.defineProperty(out, "__go5FailedPrefixes", { value: failed, enumerable: false }); }
+        catch (e) { out.__go5FailedPrefixes = failed; }
+        return out;
+      });
+    }
     if (typeof idb.entriesByPrefixes === "function") return idb.entriesByPrefixes(SYNC_IDB_PREFIXES.slice());
     return idb.entries();
+  }
+  function protectUnreadIdb_(entries, snap, failedPrefixes) {
+    entries = entries || {}; snap = snap || {}; failedPrefixes = failedPrefixes || [];
+    if (!failedPrefixes.length) return entries;
+    Object.keys(snap).forEach(function (k) {
+      var unread = failedPrefixes.some(function (p) { return String(k).indexOf(String(p || '')) === 0; });
+      if (unread && !Object.prototype.hasOwnProperty.call(entries, k)) entries[k] = snap[k];
+    });
+    return entries;
   }
 
   // ── 暗号(WebCrypto AES-GCM / PBKDF2)──
@@ -257,7 +277,7 @@
   //   pulledCand=候補配列の作品URL・X URL・題名等が実際に変わった件数。画像が0件でも候補だけ再描画する。
   //   どちらも0の同期(=タブ復帰の空振り等)では再描画させない。
   //   無条件反応による画面の白フラッシュを避けるため、変化の種類を分けて通知する。
-  function fireSynced(pulled, pulledImg, pulledCand) { try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-synced", { detail: { pulled: pulled, pulledImg: pulledImg || 0, pulledCand: pulledCand || 0 } })); } catch (e) {} }
+  function fireSynced(pulled, pulledImg, pulledCand, pulledImgKeys) { try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-synced", { detail: { pulled: pulled, pulledImg: pulledImg || 0, pulledCand: pulledCand || 0, pulledImgKeys: (pulledImgKeys || []).slice() } })); } catch (e) {} }
   function status() { return { configured: configured(), busy: _busy, version: getVer(), lastError: _lastErr, lastAt: _lastAt, device: deviceName(), prog: _prog }; }
 
   // per-key マージ。(t 大きい方を採用)
@@ -594,6 +614,10 @@
     //   (恒久キャッシュにすると「消えたのに存在扱い」で二度と直らなくなる)。
     var curIdb = {};
     var idbStep = readSyncIdbEntries_(Idb).then(function (all) {
+      // 部分読取に失敗したprefixは「空=削除」と解釈しない。前回の同期snapを現在値として温存し、
+      // 成功したprefixだけ同期を進める。失敗領域のローカル変更は次回回復時に送られる。
+      var failedPrefixes = (all && all.__go5FailedPrefixes) || [];
+      protectUnreadIdb_(all, snapIdb, failedPrefixes);
       var keys = Object.keys(all).filter(isSyncIdbKey);
       if (!keys.length) return;
       var bag = []; keys.forEach(function (k) { collectDataUrls(all[k], bag); });
@@ -847,7 +871,7 @@
         });
         var dlKeys = Object.keys(midb).filter(function (k) { return !midb[k].d && Idb && Idb.available(); });
         var dlDone = 0; if (dlKeys.length) setProg("画像を受信", 0, dlKeys.length);
-        var pulledImgReal = 0;   // 実際にIDBへ「中身が変わった画像」を書き込んだ件数=再描画の合図の真値
+        var pulledImgReal = 0, pulledImgKeys = []; // 実際にIDBへ着地した変更キーだけを再描画側へ渡す
         Object.keys(midb).forEach(function (k) {
           var e = midb[k];
           if (e.d) { if (Idb && Idb.available()) applies.push(Idb.del(k).catch(function () {})); return; }
@@ -875,8 +899,15 @@
                 }
                 // ★中身が実際に変わった時だけ数える=候補タブの再描画はこの真値でだけ起こす。
                 //   (雲と自端末スナップの恒常ズレで毎周期立つ偽シグナルを混ぜない=下記 pulledImg の説明)
-                try { if (JSON.stringify(prev) !== JSON.stringify(res.val)) pulledImgReal++; } catch (x) { pulledImgReal++; }
-                return Idb.set(kk, res.val);
+                var imgChanged = true;
+                try { imgChanged = JSON.stringify(prev) !== JSON.stringify(res.val); } catch (x) {}
+                if (!imgChanged) return;
+                // set成功後にだけ合図を立てる。旧実装は書込失敗でも件数を増やし、画面が空IDBを
+                // 読み直して「同期したのに画像が出ない」という偽成功を作っていた。
+                return Idb.set(kk, res.val).then(function () {
+                  pulledImgReal++;
+                  if (pulledImgKeys.indexOf(kk) < 0) pulledImgKeys.push(kk);
+                });
               });
             }).catch(function () {}).then(function () { setProg("画像を受信", ++dlDone, dlKeys.length); });
           })(k));
@@ -901,7 +932,7 @@
           //   のたびに候補タブを全再描画=「見てるだけで勝手にリロード」になる真因(Chami 2026-08-06)。
           var pulledImg = pulledImgReal;
           var pulledCand = pulledCandReal;
-          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs, pulledImg, pulledCand); }
+          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs, pulledImg, pulledCand, pulledImgKeys); }
           if (!changed) { persist(rver); return { ok: true, version: rver, noChange: true, pulled: pulledLs, pulledCand: pulledCand }; }
           return pushState(outState, rver).then(function (pr) {
             if (pr && pr.ok) { persist(pr.version); return { ok: true, version: pr.version, pulled: pulledLs, pulledCand: pulledCand }; }
@@ -1071,7 +1102,7 @@
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
     _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
-  root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_;
+  root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_;
   root.Go5Sync._test.slimStockArchive = slimStockArchive;
   root.Go5Sync._test.syncIdbPrefixes = SYNC_IDB_PREFIXES.slice();

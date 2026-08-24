@@ -1299,10 +1299,17 @@
       else if (k.indexOf('post:') === 0) putLatest_(_imgMem.post, k.slice(5), v);
       else if (k.indexOf('used:') === 0) putLatest_(_imgMem.used, k.slice(5), v);
     });
-  }  function readImageEntries_(prefixes) {
+  }
+  function readImageEntries_(prefixes) {
     // 新APIはIDBKeyRangeで必要な画像だけ読む。旧キャッシュ時だけ従来の全件走査へフォールバック。
     if (window.Go5Idb.entriesByPrefixes) return window.Go5Idb.entriesByPrefixes(prefixes);
     return window.Go5Idb.entries();
+  }
+  // 画面再読込用の部分成功版。同期後は「ref:は読めたがbsky:がtimeout」のような時も
+  // 読めた候補画像を即時採用し、失敗領域だけを再試行できる。
+  function readImageEntriesSettled_(prefixes) {
+    if (window.Go5Idb.entriesByPrefixesSettled) return window.Go5Idb.entriesByPrefixesSettled(prefixes);
+    return readImageEntries_(prefixes).then(function (entries) { return { entries: entries || {}, failed: [] }; });
   }
   function legacyRefOf_(cid) {
     try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
@@ -2012,15 +2019,58 @@
   //   「アクセス時は空・もう一度タブを開くと出る」状態になっていた(item9/DEF-de2408cb00 と同型)。
   //   go5-synced の detail.pulledImg(実際に取り込んだ画像件数)>0 の時だけ IDB を読み直して描画する
   //   =画像が来ていない同期(タブ復帰の空振り等)では再描画しない=無条件反応の白フラッシュを避ける。
-  function reHydrateFromSync_() {
+  function removeImageMemKey_(key) {
+    key = String(key || '');
+    if (key.indexOf('ref:') === 0) { var rcid = key.slice(4); delete _imgMem.ref[rcid]; _refLoaded[rcid] = true; }
+    else if (key.indexOf('bsky:') === 0) delete _imgMem.bsky[key.slice(5)];
+    else if (key.indexOf('post:') === 0) delete _imgMem.post[key.slice(5)];
+    else if (key.indexOf('used:') === 0) delete _imgMem.used[key.slice(5)];
+  }
+  // sync.js が実際にIDBへ着地させたキーだけを直読する。候補174件を毎回全走査せず、
+  // 「変更済みなのに古いメモリを表示」の窓を閉じる。キー通知の無い旧キャッシュだけ下のprefix読取へ戻す。
+  function reloadSyncedImageKeys_(keys) {
+    var allow = window.__go5CandidateStandalone ? /^(ref:|bsky:)/ : /^(ref:|bsky:|post:|used:)/;
+    var uniq = [], seen = {};
+    (keys || []).forEach(function (k) { k = String(k || ''); if (allow.test(k) && !seen[k]) { seen[k] = true; uniq.push(k); } });
+    return uniq.reduce(function (chain, key) {
+      return chain.then(function () {
+        var readP = (typeof window.Go5Idb.getResult === 'function')
+          ? window.Go5Idb.getResult(key)
+          : window.Go5Idb.get(key).then(function (value) { return { ok: true, value: value }; }, function (error) { return { ok: false, error: error }; });
+        return readP.then(function (result) {
+          if (!result || !result.ok) throw (result && result.error) || new Error('sync-image-read-failed');
+          if (result.value == null) { removeImageMemKey_(key); return; }
+          var one = {}; one[key] = result.value; mergeImageEntries_(one);
+        });
+      });
+    }, Promise.resolve()).then(function () { return { failed: [], refComplete: false }; });
+  }
+  function reHydrateFromSync_(changedKeys) {
     if (!_idbOk || !window.Go5Idb || !window.Go5Idb.available()) return;
-    // 同期で増えた画像だけの4名前空間を再読込。stock動画Blob等は候補描画へ持ち込まない。
-    var prefixes = window.__go5CandidateStandalone ? ['ref:', 'bsky:'] : ['ref:', 'bsky:', 'post:', 'used:'];
-    readImageEntries_(prefixes).then(function (all) {
-      mergeImageEntries_(all);
-      resetCandidateHydrateFailures_();
-      if (!_candidateHydrated) markCandidateHydrated_();
+    var exact = Array.isArray(changedKeys) && changedKeys.length;
+    var job;
+    if (exact) {
+      job = reloadSyncedImageKeys_(changedKeys);
+    } else {
+      // 旧キャッシュ/キー通知なしでも、各prefixを独立採用する。無関係な空領域のtimeoutで
+      // 読めたref画像まで捨てる旧all-or-nothing経路へ戻さない。
+      var prefixes = window.__go5CandidateStandalone ? ['ref:', 'bsky:'] : ['ref:', 'bsky:', 'post:', 'used:'];
+      job = readImageEntriesSettled_(prefixes).then(function (result) {
+        mergeImageEntries_((result && result.entries) || {});
+        var failed = (result && result.failed) || [];
+        var refFailed = failed.some(function (x) { return String((x && x.prefix) || x || '') === 'ref:'; });
+        return { failed: failed, refComplete: !refFailed };
+      });
+    }
+    job.then(function (result) {
+      if (!result.failed.length && _syncRehydrateRetryTimer) {
+        clearTimeout(_syncRehydrateRetryTimer);
+        _syncRehydrateRetryTimer = null;
+      }
+      if (!result.failed.length) resetCandidateHydrateFailures_();
+      if (!_candidateHydrated && result.refComplete) markCandidateHydrated_();
       bgRender_();   // 入力中は保留(打ちかけの候補入力を消さない)
+      if (result.failed.length) throw new Error('partial-image-read-failed');
     }).catch(function (e) {
       try { console.warn('[go5 idb] 同期画像の再読込を再試行します', e); } catch (_) {}
       if (!_syncRehydrateRetryTimer) {
@@ -2034,7 +2084,7 @@
   try { document.addEventListener('go5-synced', function (e) {
     var d = e && e.detail || {};
     if (d.pulledCand) bgRender_();
-    if (d.pulledImg) reHydrateFromSync_();
+    if (d.pulledImg) reHydrateFromSync_(d.pulledImgKeys || []);
   }); } catch (e) {}
   // ★画像がIDBからメモリへ載った合図(markHydrated_ が発火)でも候補ページを描き直す。hydrateImages_ の
   //   直接呼び(bgRender_)に加えた独立経路=各イベントlistenerは独立実行なので、他ページのlistenerが投げても・
@@ -4993,9 +5043,9 @@
   }
   function workSearchHtml_(tabId) {
     return '<div class="cand-work-search" style="padding:2px 6px 10px;">' +
-      '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品検索(部分一致)</label>' +
+      '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品検索(全候補・部分一致)</label>' +
       '<div style="display:flex;gap:6px;align-items:center;">' +
-      '<input id="candWorkSearch" size="1" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品検索(部分一致)" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
+      '<input id="candWorkSearch" size="1" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品検索(全候補・部分一致)" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
       '<button id="candWorkSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
       '</div>' +
       // メモ/コメント検索(部分一致)=作品検索の下に同形で並べる(Chami依頼2026-08-11)。両欄はAND(両方に一致した作品だけ表示)。
@@ -5096,7 +5146,8 @@
     var key = itemsKey(tabId);
     var el = $('candList');
     var all = candItemsRead_(key);
-    if (!all.length) { el.innerHTML = '<p class="hint" style="padding:4px 6px;">まだ候補がありません。上の欄に作品URLを入れて追加してください。</p>'; return; }
+    // 0件でも検索欄・件数・追加導線を残す。早期returnすると、画像/投稿済みフィルターで0件になったPCから
+    // 検索による救出ができず「検索が機能しない」に見えるため、空一覧も同じ描画パイプへ通す。
     var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
     var filt_ = function (it) {
       if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
@@ -5107,9 +5158,11 @@
     };
     var arr = sortItems(all, _sort).filter(filt_);
     _cardIndex = {}; arr.forEach(function (it) { _cardIndex[it.cid] = it; });
-    if (!arr.length) { el.innerHTML = '<p class="hint" style="padding:8px;">' + (_showHidden ? '非表示にした作品はありません。' : '表示できる候補がありません。') + '</p>'; el._go5CandState = null; return; }
+    // 表示フィルター後0件でも検索シェルを作る。検索中は下のpaintPage_が元データ全件を横断する。
     var actOf_ = function (cid) {
-      return _showHidden
+      // 検索は通常/非表示を横断するため、現在のタブ状態ではなく作品自身の非表示状態でボタンを決める。
+      var hiddenNow = lsGet(hiddenKey(tabId), '[]').indexOf(cid) >= 0;
+      return hiddenNow
         ? '<button type="button" class="cand-hide-btn" data-unhide="' + esc(cid) + '">👁 再表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(cid) + '" title="削除" aria-label="削除">🗑️</button>'
         : '<button type="button" class="cand-hide-btn" data-hidecid="' + esc(cid) + '">非表示</button> <button type="button" class="cand-hide-btn cand-del-btn" data-delcid="' + esc(cid) + '" title="削除" aria-label="削除">🗑️</button>';
     };
@@ -5139,9 +5192,15 @@
       var wrap = document.getElementById('candPageWrap'); if (!wrap) return;
       if (!document.getElementById('candCardList')) wrap.innerHTML = '<div id="candPageHead"></div><div id="candCardList"></div><div id="candPageFoot"></div>';
       var headEl = document.getElementById('candPageHead'), listEl = document.getElementById('candCardList'), footEl = document.getElementById('candPageFoot');
-      // ★非同期取得(タイトル/販売数/AI判定)が後から届いても最新で描くため、都度LSを読み直して絞り込む。
+      // ★非同期取得(タイトル/販売数/AI判定)が後から届いても最新で描くため、都度LSを読み直す。
       var fresh2 = candItemsRead_(key), hs2 = {}; lsGet(hiddenKey(tabId), '[]').forEach(function (c) { hs2[c] = true; });
+      var qi = document.getElementById('candWorkSearch'), mi = document.getElementById('candMemoSearch');
+      var q = normalizeWorkSearch_(qi ? qi.value : ''), mq = normalizeWorkSearch_(mi ? mi.value : '');
+      var searching = !!(q || mq);
+      // 検索中だけは、手動非表示・投稿済み・画像未復元・セール/価格フィルターより前の元データを横断する。
+      // PCで画像復元が一時的に遅れても、作品そのものが検索結果から消えて復旧操作不能になる循環を作らない。
       var arr2 = sortItems(fresh2, _sort).filter(function (it) {
+        if (searching) return true;
         if (!(_showHidden ? hs2[it.cid] : !hs2[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
         if (!passPrice_(it)) return false;
@@ -5149,8 +5208,6 @@
         return true;
       });
       _cardIndex = {}; arr2.forEach(function (it) { _cardIndex[it.cid] = it; });
-      var qi = document.getElementById('candWorkSearch'), mi = document.getElementById('candMemoSearch');
-      var q = normalizeWorkSearch_(qi ? qi.value : ''), mq = normalizeWorkSearch_(mi ? mi.value : '');
       var view = arr2.filter(function (it) {
         var okW = !q || workSearchText_(it).indexOf(q) >= 0;
         var okM = !mq || candMemoText_(it).indexOf(mq) >= 0;
@@ -5165,7 +5222,7 @@
       var resultLine = (q || mq) ? '<div class="hint" style="padding:2px 6px;">' + view.length + '件が条件に一致</div>' : '';
       headEl.innerHTML = resultLine + pager;      // ページャは画像を含まない=作り直しても軽い/チラつかない
       footEl.innerHTML = (pages > 1 ? pager : '');
-      if (!slice.length) listEl.innerHTML = '<p class="hint" style="padding:8px;">条件に一致する候補がありません。</p>';
+      if (!slice.length) listEl.innerHTML = '<p class="hint" style="padding:8px;">' + (searching ? '条件に一致する候補がありません。' : (fresh2.length ? '現在の表示条件に合う候補がありません。検索欄では全候補を横断できます。' : 'まだ候補がありません。上の追加ボタンから登録してください。')) + '</p>';
       else reconcileCards_(listEl, slice, actOf_, wireOneCard_); // カードは差分更新(使い回し)=チラつかない
       var resEl = document.getElementById('candWorkSearchResult');
       if (resEl) resEl.textContent = (q || mq) ? view.length + '件表示 / ' + arr2.length + '件中' : '';

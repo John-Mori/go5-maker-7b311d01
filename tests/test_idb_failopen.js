@@ -117,6 +117,17 @@ function ng(name, e) { fails++; console.log('  FAIL ' + name + ' — ' + (e && e
     ok('T-4 cursor hang times out and reconnects once');
   } catch (e) { ng('T-4 cursor hang times out and reconnects once', e); }
 
+
+  // T-5 multi-prefix fail-open must report each failed namespace instead of rejecting the whole scan.
+  try {
+    assert.strictEqual(typeof Idb.entriesByPrefixesSettled, 'function', 'settled prefix API is exported');
+    var settled = await Idb.entriesByPrefixesSettled(['ref:', 'bsky:']);
+    assert.deepStrictEqual(Object.keys(settled.entries), [], 'failed reads do not fabricate entries');
+    assert.strictEqual(settled.failed.length, 2, 'each failed prefix is reported independently');
+    assert.deepStrictEqual(settled.failed.map(function (x) { return x.prefix; }), ['ref:', 'bsky:']);
+    ok('T-5 multi-prefix scan settles every namespace independently');
+  } catch (e) { ng('T-5 multi-prefix scan settles every namespace independently', e); }
+
   if (fails) { console.log('FAIL: ' + fails + ' 件'); process.exit(1); }
   console.log('OK: test_idb_failopen.js 全緑');
 })();

@@ -20,6 +20,31 @@ var Sync = require('../core/sync.js')._test;
   assert.deepStrictEqual(calls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:']]);
   assert.ok(out['ref:a']);
 
+  // One failed image namespace must not discard healthy namespaces or create tombstones.
+  var settledCalls = [];
+  var fakeSettled = {
+    available: function () { return true; },
+    entriesByPrefixesSettled: function (prefixes) {
+      settledCalls.push(prefixes.slice());
+      return Promise.resolve({
+        entries: { 'ref:new': { img: 'data:image/gif;base64,BB' } },
+        failed: [{ prefix: 'bsky:', error: new Error('forced-prefix-timeout') }]
+      });
+    }
+  };
+  var partial = await Sync.readSyncIdbEntries_(fakeSettled);
+  assert.deepStrictEqual(settledCalls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:']]);
+  assert.deepStrictEqual(partial.__go5FailedPrefixes, ['bsky:']);
+  assert.ok(partial['ref:new'], 'healthy prefix data must survive a sibling timeout');
+
+  var protectedPartial = Sync.protectUnreadIdb_(
+    partial,
+    { 'ref:old': { img: 'old' }, 'bsky:keep': { img: 'keep' }, 'post:healthy': { img: 'post' } },
+    partial.__go5FailedPrefixes
+  );
+  assert.ok(protectedPartial['bsky:keep'], 'failed prefix must retain its previous snapshot');
+  assert.strictEqual(protectedPartial['post:healthy'], undefined, 'healthy prefix must not be protected as unread');
+
   var start = JSON.stringify([{ cid: 'd_test', url: 'https://old.example/', title: 'old' }]);
   var fromCloud = JSON.stringify([{ cid: 'd_test', url: 'https://new.example/', title: 'new' }]);
   var unchanged = Sync.mergeLiveArray_(fromCloud, start, start, 'cid');

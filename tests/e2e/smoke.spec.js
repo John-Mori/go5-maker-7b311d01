@@ -230,7 +230,8 @@ test.describe('候補ページの画像・投稿編集', () => {
     await page.locator('#refImgCancel').click();
     await expect(page.locator('[data-refimgview="' + cid + '"]')).toBeVisible({ timeout: 5000 });
     const prefixes = await page.evaluate(() => window.__go5HydratePrefixes);
-    expect(prefixes[0]).toEqual(['ref:', 'bsky:']);
+    expect(prefixes[0]).toEqual(['ref:']);
+    expect(prefixes).not.toContainEqual(['ref:', 'bsky:']);
     expect(prefixes.flat()).not.toContain('stock_v_');
   });
 
@@ -288,7 +289,7 @@ test.describe('候補ページの画像・投稿編集', () => {
     }), { cid });
     expect(saved.text.comment).toBe('文字だけなら待たずに保存');
     expect(saved.text.twitterUrl).toBe('https://x.com/go5_test/status/33');
-    expect(saved.idbSetCalls).toBe(0);
+    expect(saved.idbSetCalls).toBe(1); // cand_text durability mirror is best-effort and must not block UI
   });
 
   test('画像保存失敗時は入力を残し保存ボタンを再操作できる', async ({ page }) => {
@@ -321,7 +322,7 @@ test.describe('候補ページの画像・投稿編集', () => {
     await page.locator('#refImgSave').click();
 
     await expect(page.locator('.refimg-modal')).toBeVisible();
-    await expect(page.locator('#refImgMsg')).toContainText('保存できません');
+    await expect(page.locator('#refImgMsg')).toContainText('入力は残っています');
     await expect(page.locator('#refImgTwitter')).toHaveValue('https://x.com/go5_test/status/44');
     await expect(page.locator('#refImgSave')).toBeEnabled();
   });
