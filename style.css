@@ -555,8 +555,11 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-zoom-add:active{opacity:.8;}
 .fz-zoom-msg{position:absolute;bottom:56px;left:0;right:0;text-align:center;color:#fff;font-size:12px;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.75);}
 /* 画像ズーム：動画生成用画像だけに出る「通常/使用済み/除外」3択(markCid指定時のみ表示)。カウント/msgの上に配置。 */
-.fz-zoom-mark{position:absolute;left:50%;transform:translateX(-50%);top:96px;display:flex;gap:8px;z-index:5;background:rgba(20,26,38,.85);border-radius:10px;padding:6px 8px;border:1px solid rgba(255,255,255,.25);} /* 画像の上部・横並びのラジオ(Chami 2026-08-24) */
+.fz-zoom-mark{position:absolute;left:50%;transform:translateX(-50%);top:96px;display:flex;flex-direction:column;align-items:center;gap:4px;z-index:5;background:rgba(20,26,38,.85);border-radius:10px;padding:6px 8px;border:1px solid rgba(255,255,255,.25);} /* 画像の上部・使用日(上)+横並びラジオ(下)(Chami 2026-08-24) */
 .fz-zoom-mark[hidden]{display:none;}
+.fz-zoom-usedate{color:#9fe6c9;font-size:12px;font-weight:700;text-align:center;}
+.fz-zoom-usedate[hidden]{display:none;}
+.fz-mk-row{display:flex;gap:8px;}
 .fz-zoom-mark .fz-mk{display:flex;align-items:center;gap:5px;margin:0;background:transparent;color:#cfd8e6;border:1px solid transparent;border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer;white-space:nowrap;width:auto;height:auto;}
 .fz-zoom-mark .fz-mk input[type=radio]{margin:0;width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex:0 0 auto;}
 .fz-zoom-mark .fz-mk.is-active{background:rgba(43,179,192,.18);border-color:var(--accent);color:#eaf7f9;font-weight:700;}

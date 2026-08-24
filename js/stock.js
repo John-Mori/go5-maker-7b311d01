@@ -786,7 +786,8 @@
       goal: ($('movieGoal') || {}).value || '',
       cmtType: ($('movieCmtType') || {}).value || '',
       priceInfo: livePriceInfo_(($('movieWorkUrl') || {}).value || ($('movieWorkAffi') || {}).value || ''),
-      youtubeUrl: ''
+      youtubeUrl: '',
+      srcMark: (evDetail.srcMark && evDetail.srcMark.cid && evDetail.srcMark.hash) ? { cid: String(evDetail.srcMark.cid), hash: String(evDetail.srcMark.hash) } : null // 動画に使った候補画像(cid+ハッシュ)。投稿完了で使用日を刻む(Chami 2026-08-24)
     };
 
     // Phase 0: メタはメモリ上の pending に置くだけ。一覧へは動画の着地検証後に commitPendingDraft_ が確定する。
@@ -1304,6 +1305,13 @@
         } else {
           document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { slotId: ps.id, account: meta.account || 'acc1', post_url: ytUrl || '', short_url: shortUrl || '' } }));
         }
+      }
+    } catch (e) {}
+    // ★投稿完了で、動画に使った候補画像に「使用日」を刻む(Chami 2026-08-24 clause B)。候補モーダルのラジオ上に表示される。
+    //   candidates.js が無いページ(Stock.html単独)では黙ってスキップ=fail-open(自動「使用済み」は生成時に済んでいる)。
+    try {
+      if (meta && meta.srcMark && meta.srcMark.cid && meta.srcMark.hash && window.Go5Cand && window.Go5Cand.stampImgUsedDate) {
+        window.Go5Cand.stampImgUsedDate(meta.srcMark.cid, meta.srcMark.hash, meta.completedTs || Date.now());
       }
     } catch (e) {}
     // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。記録の後に行う(blob非依存)。

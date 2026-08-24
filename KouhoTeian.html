@@ -425,12 +425,14 @@
   // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
   //   js/candidates.js と同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
   function imgHash_(s){ s=String(s||''); var h=5381,i=s.length; while(i){ h=((h*33)^s.charCodeAt(--i))>>>0; } return h.toString(36); }
-  // 画像マーク(cand_img_marks・js/candidates.jsが書く { "<cid>": { "<hash>": "used"|"excluded" } })の読み取り専用参照。
+  // 画像マーク(cand_img_marks・js/candidates.jsが書く { "<cid>": { "<hash>": "used"|"excluded" | {s,at} } })の読み取り専用参照。
   function imgMarksMap_(){ try{ return JSON.parse(LS.getItem('cand_img_marks')||'{}')||{}; }catch(e){ return {}; } }
+  // マーク値は文字列 or {s,at}(使用日つき)の2形。状態文字列に正規化する(js/candidates.js の mkState_ と一致必須)。
+  function markState_(v){ return (v && typeof v==='object') ? String(v.s||'') : String(v||''); }
   // used/excluded マークが付いた画像を候補から除外する。
   function filterMarked_(cid, imgs){
     var m = imgMarksMap_()[cid] || {};
-    return (imgs||[]).filter(function(im){ var st=m[imgHash_(im)]; return st!=='used' && st!=='excluded'; });
+    return (imgs||[]).filter(function(im){ var st=markState_(m[imgHash_(im)]); return st!=='used' && st!=='excluded'; });
   }
   function refInfoFromRec_(rec){
     if(!rec) return {imgs:[], has:false};

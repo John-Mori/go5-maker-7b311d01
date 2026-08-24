@@ -540,6 +540,9 @@
   els.photo.addEventListener("change", () => {
     const f = els.photo.files[0];
     if (f) loadForegroundFile_(f);
+    // 候補転送(Go5SetForegroundFile)直後の change は保護、手動で選び直した change は候補由来マークを破棄。
+    // 候補転送は __go5FgCandAt を直前に打つ=1.5秒以内なら候補由来とみなす(取り違え防止・Chami 2026-08-24)。
+    if (Date.now() - (window.__go5FgCandAt || 0) > 1500) window.__go5MovieSrcMark = null;
   });
 
   // 前景画像をlocalStorageへ圧縮保存(リロード後に復元するため)。失敗は無害。
@@ -802,7 +805,7 @@
       //   Bluesky alt / GAS記録のtitle / 端末予約 / Drive のフォルダ名・ファイル名。
       //   ★空白に置換しない=詰めて連結する(Chami明示「改行や空白を挟まない」)。
       //   ここ1箇所で潰すことで購読側6経路すべてに効く(個別対処だと足し忘れが必ず出る)。
-      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest, sourceImageFile: fgFile, draft: isDraft } }));
+      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest, sourceImageFile: fgFile, draft: isDraft, srcMark: (window.__go5MovieSrcMark || null) } }));
     } catch (e) {
       makeFailed_ = true;
       setStatus("作成に失敗しました：" + e.message);
@@ -993,6 +996,7 @@
     if (!file || !els.photo) return false;
     // Reject a delayed candidate fetch if the user already selected another image.
     if (expectedSeq != null && expectedSeq !== fgLoadSeq) return false;
+    window.__go5FgCandAt = Date.now(); // 候補由来の前景セット=直後の change を「手動選び直し」と誤判定させない印
     try {
       if (typeof DataTransfer !== "undefined") {
         const dt = new DataTransfer();

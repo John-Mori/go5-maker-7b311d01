@@ -1148,19 +1148,40 @@
       klog_('imgmarks_ls_quota_idb_fallback', 'work', K_IMGMARKS, {});
     }
   }
+  // マーク値は後方互換で2形あり得る: 文字列 "used"|"excluded"(=日付なし) / {s:"used", at:<ts>}(=使用日つき)。
+  //   使用日(at)は「投稿完了で確定した使用日」。読み手は必ず mkState_/mkDate_ で正規化する(KouhoTeian.htmlの
+  //   filterMarked_ も同形で正規化=2ファイル一致必須。tests/test_img_marks.js が両形を検査)。
+  function mkState_(v) { return (v && typeof v === 'object') ? String(v.s || '') : String(v || ''); }
+  function mkDate_(v) { return (v && typeof v === 'object' && v.at) ? Number(v.at) : 0; }
   function imgMarkStateOf_(cid, img) {
     var m = imgMarksRead_()[String(cid || '')];
-    return (m && typeof m === 'object') ? m[imgHash_(img)] : undefined;
+    return (m && typeof m === 'object') ? mkState_(m[imgHash_(img)]) : undefined;
   }
-  function setImgMark_(cid, img, state) {
-    cid = String(cid || ''); if (!cid) return;
+  function imgMarkDateOf_(cid, img) {
+    var m = imgMarksRead_()[String(cid || '')];
+    return (m && typeof m === 'object') ? mkDate_(m[imgHash_(img)]) : 0;
+  }
+  // 単一の書込口。h=imgHash_ の値。opts.at を渡すと使用日を刻む。既存の使用日は state='used' 継続時のみ保持。
+  function setImgMarkByHash_(cid, h, state, opts) {
+    cid = String(cid || ''); h = String(h || ''); if (!cid || !h) return;
+    var at = (opts && opts.at) ? Number(opts.at) : 0;
     var map = imgMarksRead_();
     var m = map[cid] || {};
-    var h = imgHash_(img);
-    if (state === 'used' || state === 'excluded') m[h] = state; else delete m[h];
+    if (state === 'used') {
+      var keep = at || mkDate_(m[h]); // 既存の使用日を巻き戻さない
+      m[h] = keep ? { s: 'used', at: keep } : 'used';
+    } else if (state === 'excluded') {
+      m[h] = 'excluded';
+    } else { delete m[h]; }
     if (Object.keys(m).length) map[cid] = m; else delete map[cid];
     imgMarksWrite_(map);
   }
+  function setImgMark_(cid, img, state) { setImgMarkByHash_(String(cid || ''), imgHash_(img), state); }
+  // 動画生成で使った画像を自動で「使用済み」に(Chami 2026-08-24 clause A)。日付は投稿完了まで刻まない。
+  function markImgUsedByHash_(cid, h) { if (cid && h) setImgMarkByHash_(cid, h, 'used'); }
+  // 投稿完了で「使用済み」に使用日を刻む(Chami 2026-08-24 clause B「投稿済みになったら使用した日付」)。
+  function stampImgUsedDate_(cid, h, at) { if (cid && h) setImgMarkByHash_(cid, h, 'used', { at: at || Date.now() }); }
+  function fmtUsedDate_(at) { var d = new Date(Number(at) || 0); if (isNaN(d.getTime())) return ''; return d.getFullYear() + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + ('0' + d.getDate()).slice(-2); }
   // 起動時にIDBミラーからLS(またはメモリ)へ復元する(冪等・1回)。IDB優先で欠けているcid/hashを補完し、
   //   両方にある値はLS側を残す(=Object.assign的にLSベースへIDBの未知キーだけ足す)。fail-open。
   function restoreImgMarksFromIdb_() {
@@ -2095,10 +2116,14 @@
       '<button class="fz-zoom-nav next" type="button" aria-label="次へ" hidden>›</button>' +
       '<div class="fz-zoom-cap" hidden></div><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div>' +
       // 動画生成用画像だけ(_zoomMarkCid指定時)に出る「通常/使用済み/除外」ラジオ。画像の上部に横並び。既定は隠す。
+      // 使用日(投稿完了で確定)があればラジオの上に表示する(Chami 2026-08-24)。
       '<div class="fz-zoom-mark" hidden role="radiogroup" aria-label="この画像の扱い">' +
-        '<label class="fz-mk"><input type="radio" name="fzImgMark" value=""><span>通常</span></label>' +
-        '<label class="fz-mk"><input type="radio" name="fzImgMark" value="used"><span>使用済み</span></label>' +
-        '<label class="fz-mk"><input type="radio" name="fzImgMark" value="excluded"><span>除外</span></label>' +
+        '<div class="fz-zoom-usedate" hidden></div>' +
+        '<div class="fz-mk-row">' +
+          '<label class="fz-mk"><input type="radio" name="fzImgMark" value=""><span>通常</span></label>' +
+          '<label class="fz-mk"><input type="radio" name="fzImgMark" value="used"><span>使用済み</span></label>' +
+          '<label class="fz-mk"><input type="radio" name="fzImgMark" value="excluded"><span>除外</span></label>' +
+        '</div>' +
       '</div>' +
       '<div class="fz-zoom-msg"></div>';
     document.body.appendChild(z);
@@ -2167,6 +2192,12 @@
           if (inp) inp.checked = on;
           l.classList.toggle('is-active', !!on);
         });
+        var du = z.querySelector('.fz-zoom-usedate'); // 投稿完了で確定した使用日をラジオの上に表示
+        if (du) {
+          var at = imgMarkDateOf_(_zoomMarkCid, _zoomList[_zi]);
+          if (at) { du.textContent = '使用日: ' + fmtUsedDate_(at); du.hidden = false; }
+          else { du.textContent = ''; du.hidden = true; }
+        }
       } else {
         mk.hidden = true;
       }
@@ -2945,6 +2976,12 @@
       try { location.href = 'index.html'; } catch (e) {}
       return;
     }
+    // ★動画生成時に「使った候補画像」を特定できるよう、cid＋画像ハッシュを控える(video-created で自動「使用済み」に)。
+    //   手動で写真を選び直したら app.js 側の change ハンドラが __go5FgCandAt の古さで破棄する(取り違え防止)。
+    try {
+      var _srcCid = String((imageRef && imageRef.cid) || (it && it.cid) || '');
+      window.__go5MovieSrcMark = (_srcCid && imgDataUrl) ? { cid: _srcCid, hash: imgHash_(imgDataUrl) } : null;
+    } catch (e) { window.__go5MovieSrcMark = null; }
     var mv = document.getElementById('tabMovie'); if (mv) mv.click(); // affiliate.js の showTab へ委譲
     // input と change の両方を発火：キャンバス再描画は change を、YouTube題名(ytTitle)の再構築は input を聴くため、
     // 片方だけだと題名が前作のまま更新されない。(コメント→題名の反映漏れ)両方投げて確実に上書きする。
@@ -5411,6 +5448,10 @@
   // 候補タブの全画像(ref)は一切コピーしないため、投稿履歴へ未採用画像が混ざらない。
   document.addEventListener('video-created', function (e) {
     var d = (e && e.detail) || {};
+    // ★動画生成で使った候補画像を自動で「使用済み」に(Chami 2026-08-24 clause A)。使用日は投稿完了まで刻まない。
+    if (!d.test && d.srcMark && d.srcMark.cid && d.srcMark.hash) {
+      try { markImgUsedByHash_(String(d.srcMark.cid), String(d.srcMark.hash)); } catch (_e) {}
+    }
     if (!d.videoId || !d.sourceImageFile || d.test) return;
     fileToScaledDataUrl(d.sourceImageFile, function (durl, err) {
       if (!err && durl) usedImgSave_(d.videoId, [durl]);
@@ -5436,7 +5477,10 @@
     // ── 🛠️編集の画像添付(貼り付け＋用途選択・Chami依頼2026-07-15)用の公開API ──
     pasteImage: function (cb) { return pasteImageFromClipboard_(cb); }, // クリップボード画像→dataURL(cb(durl,err))
     refImgsSet: function (cid, arr) { if (!cid) return false; var cur = refImgOf(cid) || {}; return refImgSave(cid, { imgs: (arr || []).filter(Boolean), comment: cur.comment || '', memo: cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' }); }, // 動画で使った画像(配列)を差し替え保存(コメント等は保持)
-    bskyImgSet: function (cid, durl) { if (!cid) return false; return bskyImgSave(cid, durl || ''); } // Bluesky添付画像(単発)を設定/クリア
+    bskyImgSet: function (cid, durl) { if (!cid) return false; return bskyImgSave(cid, durl || ''); }, // Bluesky添付画像(単発)を設定/クリア
+    // 画像マーク(通常/使用済み/除外+使用日)への外部書込口。stock.js が投稿完了で使用日を刻む(Chami 2026-08-24)。
+    markImgUsedByHash: function (cid, h) { markImgUsedByHash_(String(cid || ''), String(h || '')); },
+    stampImgUsedDate: function (cid, h, at) { stampImgUsedDate_(String(cid || ''), String(h || ''), at); }
   }; } catch (e) {}
   // 候補専用ページ(KouhoLists.html)から持ち越された「動画を作る」選択を、動画作成タブのある index.html 側で拾って実行する。
   //   (transferToMovie_ が movie DOM 不在時に sessionStorage へ退避→index.html へ遷移。ここが受け取り口)
