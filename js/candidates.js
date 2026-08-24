@@ -108,7 +108,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -919,12 +919,15 @@
   }
   function markHydrated_() {
     markCandidateHydrated_();
-    if (_hydrated) return;
     _hydrated = true;
     // ★画像がメモリに載った合図を全ページへ発火する。投稿履歴/ランキング(yt-clicks.js)は起動直後に一度だけ
     //   Go5Cand.usedImgs()を同期で読んで「動画で使った画像」を描くが、その時点でハイドレート未了だと空になり、
     //   タブをもう一度タップするまで画像が出なかった(Chami「動画に使った画像が表示されない・すぐ表示して」
     //   2026-08-11 / DEF-de2408cb00と同型)。ハイドレート完了をイベントで知らせ、履歴側が自動で描き直す。
+    // ★2026-08-24 恒久修正: prefixが載るたびに毎回発火する(旧: _hydrated で2回目以降を握り潰していた)。
+    //   post:(通常0件)が used:(本命91件)より先に完了して _hydrated を立てると、後から used: が載っても
+    //   go5-images-hydrated が飛ばず「投稿履歴の動画投稿プレビューが全然表示されない」に固定していた
+    //   (Chami報告2026-08-24)。used: が遅れて追いついても必ず描き直す=listenerは冪等。
     try { document.dispatchEvent(new CustomEvent('go5-images-hydrated')); } catch (e) {}
   }
   function whenImagesReady_(cb) {                 // 候補用(ref/bsky)が展開済みなら即時、未了なら完了時に呼ぶ
@@ -1720,18 +1723,26 @@
   //   markHydrated_ に到達せず、StockLists のプレビューが空のまま固定していた。prefix ごとに独立して読み・
   //   読めた分は即マージ→markHydrated_ で描き直す=片方が固まってももう片方は必ず出る。
   function hydrateHistoryImages_() {
-    if (_hydrated) return;
+    if (_histDone['used:'] && _histDone['post:']) return; // 両方読めた時だけ打ち切り(片方だけの完了で止めない)
     window.Go5ImgDiag && Go5ImgDiag.push('hist_start');
     hydrateHistPrefix_('used:'); // 本命(動画で使った画像)。読めた瞬間に markHydrated_ で履歴プレビューを出す
     hydrateHistPrefix_('post:'); // 併記(投稿画像・通常0件)。失敗しても used: を巻き添えにしない
   }
-  var _histInFlight = Object.create(null), _histRetryTimer = Object.create(null), _histFails = Object.create(null);
+  var _histInFlight = Object.create(null), _histRetryTimer = Object.create(null), _histFails = Object.create(null), _histDone = Object.create(null);
+  // ★このprefixを今読んでよいか(純関数=tests/test_hist_prefix_gate.js で回帰検査)。retryのゲートは
+  //   prefix別の done で持つ=グローバルな完了フラグ(旧 _hydrated)を混ぜない。post:(通常0件)の完了が
+  //   本命 used: の再試行を握り潰す改悪を防ぐ(cold iOSで used: が一度timeoutすると二度と読まず「プレビューが
+  //   全然出ない」に固定していた・Chami報告2026-08-24)。
+  function canReadHistPrefix_(prefix, done, inFlight, idbOk) {
+    return !!idbOk && !done[prefix] && !inFlight[prefix];
+  }
   function hydrateHistPrefix_(prefix) {
-    if (_hydrated || _histInFlight[prefix] || !_idbOk) return;
+    if (!canReadHistPrefix_(prefix, _histDone, _histInFlight, _idbOk)) return;
     _histInFlight[prefix] = true;
     readImageEntries_([prefix]).then(function (all) {
       _histInFlight[prefix] = false;
       _histFails[prefix] = 0;
+      _histDone[prefix] = true;
       mergeImageEntries_(all);
       window.Go5ImgDiag && Go5ImgDiag.push('hist_done', { prefix: prefix, count: Object.keys(all || {}).length });
       markHydrated_();  // go5-images-hydrated を発火→StockLists/ランキング(yt-clicks.js)が自動で描き直す
@@ -1740,7 +1751,9 @@
       _histFails[prefix] = (_histFails[prefix] || 0) + 1;
       try { console.warn('[go5 idb] 投稿履歴画像の展開を再試行します', prefix, e); } catch (_) {}
       // ★一発で諦めない(無限バックオフ・上限15秒)。IDBが後から回復したら追いつく(Chami報告2026-08-16「更新では直らない」)。
-      if (!_hydrated && !_histRetryTimer[prefix]) {
+      //   ★retryの継続判定も prefix 別の _histDone で(旧 _hydrated だと post: 先勝ちで used: の再試行が
+      //     一度も積まれず「プレビューが全然出ない」に固定していた・Chami報告2026-08-24)。
+      if (!_histDone[prefix] && !_histRetryTimer[prefix]) {
         var delay = Math.min(15000, 1000 * Math.pow(2, Math.min(4, Math.max(0, _histFails[prefix] - 1))));
         _histRetryTimer[prefix] = setTimeout(function () {
           _histRetryTimer[prefix] = null;
@@ -1963,7 +1976,9 @@
       resetCandidateHydrateFailures_();          // _refFail もここで全消し=回復後にstalledカードが再挑戦
       _histFails = Object.create(null); _histInFlight = Object.create(null); // 回復後に post:/used: を張り直せるよう失敗連鎖と実行中ガードを戻す
       if (!_candidateHydrated) hydrateImages_();
-      if (!_hydrated && !window.__go5CandidateStandalone) hydrateHistoryImages_();
+      // ★_hydrated(1prefix完了で立つ)ではなく used:/post: が両方 done でない限り再キック=post:先勝ちで
+      //   used: が未読のまま回復した時に、待たずに読み直す(hydrateHistPrefix_ が prefix 別に自己ゲート)。
+      if (!(_histDone['used:'] && _histDone['post:']) && !window.__go5CandidateStandalone) hydrateHistoryImages_();
       bgRender_();
     } catch (e) {}
     hideIdbRecoveryHint_();
