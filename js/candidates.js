@@ -1222,21 +1222,29 @@
   }
   // 起動時にIDBミラーからLS(またはメモリ)へ復元する(key単位・冪等・1回)。
   //   LS満杯で「IDBにだけ載った候補」を再読込後も見えるようにする。
-  function restoreCandListFromIdb_(key) {
-    if (!key || _candListRestored[key] || !_idbOk || !window.Go5Idb) return;
+  function restoreCandListFromIdb_(key, force) {
+    if (!key || (!force && _candListRestored[key]) || !_idbOk || !window.Go5Idb) return Promise.resolve(false);
     _candListRestored[key] = true;
     try {
       var readP = (typeof window.Go5Idb.getResult === 'function')
         ? window.Go5Idb.getResult(candListIdbKey_(key))
         : window.Go5Idb.get(candListIdbKey_(key)).then(function (v) { return { ok: true, value: v }; }, function (e) { return { ok: false, value: null, error: e }; });
-      readP.then(function (r) {
-        if (!r || !r.ok || !Array.isArray(r.value)) return;
+      return Promise.resolve(readP).then(function (r) {
+        if (!r || !r.ok || !Array.isArray(r.value)) return false;
+        // 同期受信時にLS書込が満杯で落ちた場合、同期エンジンが置いたIDBミラーが最新の統合結果。
+        // force時はaddedAt同値の題名更新等も落とさず、その配列をそのまま再適用する。
+        if (force) {
+          candItemsWrite_(key, r.value);
+          try { renderCandList(_activeTab); } catch (e) {}
+          return true;
+        }
         var merged = candListMergeIdb_(candItemsRead_(key), r.value);
-        if (!merged.changed) return; // IDBはLSと同じか無し=通常運用。何もしない
+        if (!merged.changed) return false; // IDBはLSと同じか無し=通常運用。何もしない
         candItemsWrite_(key, merged.arr);
         try { renderCandList(_activeTab); } catch (e) {} // 復元できた候補を描き直す
-      }, function () {});
-    } catch (e) {}
+        return true;
+      }, function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
   }
 
   // ── 画像マーク(通常/使用済み/除外)の耐久化(単一グローバルmap) ─────────────────────
@@ -2250,6 +2258,14 @@
     var d = e && e.detail || {};
     if (d.pulledCand) bgRender_();
     if (d.pulledImg) reHydrateFromSync_(d.pulledImgKeys || []);
+  }); } catch (e) {}
+  // 同期受信でcand_itemsのlocalStorage書込が容量不足になっても、IDBミラー着地直後に現在ページへ反映する。
+  // 全同期完了(go5-synced)や再読込を待たない。LS成功時も同じイベントで即描画する。
+  try { document.addEventListener('go5-candidate-list-applied', function (e) {
+    var d = e && e.detail || {}, key = String(d.key || '');
+    if (!key || key !== itemsKey(_activeTab)) return;
+    if (d.storage === 'idb') restoreCandListFromIdb_(key, true);
+    else bgRender_();
   }); } catch (e) {}
   // ★画像がIDBからメモリへ載った合図(markHydrated_ が発火)でも候補ページを描き直す。hydrateImages_ の
   //   直接呼び(bgRender_)に加えた独立経路=各イベントlistenerは独立実行なので、他ページのlistenerが投げても・
@@ -5092,7 +5108,9 @@
         if (twForWork.ok) ph.twitterUrl = twForWork.url;
         items.unshift(ph);
         var phLsOk = candItemsWrite_(key, items);
-        if (phLsOk) flushSync_(); // スマホをすぐ開いても、候補本体が先に雲へ届いている状態を作る
+        // LS満杯時も、IDBミラーへの耐久着地を確認した直後に即同期する。旧実装はphLsOk=falseで
+        // flushを呼ばず、画像だけ同期されて新しい作品行が別端末へ届かなかった。
+        confirmCandDurable_(key, r.cid, phLsOk).then(function (v) { if (v !== 'fail') flushSync_(); });
         renderCandList(tabId);
       })();
       // ★プレースホルダを保存した時点で入力はlocalStorageへ永続化済み=ここで「追加して閉じる」を閉じてよい。

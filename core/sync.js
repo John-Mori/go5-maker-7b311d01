@@ -55,7 +55,9 @@
   function isSyncIdbKey(k) { return /^(ref:|bsky:|post:|used:|stock:imgs:)/.test(String(k)); }
   // meta:candlist: は画像同期の対象ではなく、localStorage が満杯の時に候補配列を逃がした耐久ミラー。
   // 同期開始時にだけ読んで curLs の cand_items* へ合流し、従来の候補unionレールでクラウドへ送る。
-  var SYNC_IDB_PREFIXES = ["ref:", "bsky:", "post:", "used:", "stock:imgs:", "meta:candlist:"];
+  // 候補リストの耐久ミラー(meta:candlist:)は下の作品単位の直読経路で先に読む。
+  // 大量画像prefixの全走査に混ぜず、新規作品行の同期を画像走査の成否から分離する。
+  var SYNC_IDB_PREFIXES = ["ref:", "bsky:", "post:", "used:", "stock:imgs:"];
   function readSyncIdbEntries_(idb) {
     if (!idb || !idb.available()) return Promise.resolve({});
     // 1領域のtimeoutで全画像同期を止めない。失敗prefixは非列挙メタへ載せ、呼び側が前回snapを
@@ -429,6 +431,44 @@
     });
     return curLs;
   }
+  // 候補リストミラーは全prefix cursorを待たず、既知キーをgetResultで直接読む。
+  // mainは常に対象。独立タブはLSのcand_items__*とcand_tabsから列挙する。
+  function knownCandListKeys_(curLs) {
+    curLs = curLs || {}; var seen = { cand_items: 1 }, out = ["cand_items"];
+    Object.keys(curLs).forEach(function (k) { if (isCandArrayKey(k) && !seen[k]) { seen[k] = 1; out.push(k); } });
+    try {
+      var tabs = JSON.parse(curLs.cand_tabs || "[]");
+      if (Array.isArray(tabs)) tabs.forEach(function (t) {
+        var id = String((t && t.id) || ""); if (!id || id === "main") return;
+        var k = "cand_items__" + id; if (!seen[k]) { seen[k] = 1; out.push(k); }
+      });
+    } catch (e) {}
+    return out;
+  }
+  function readKnownCandListMirrors_(idb, curLs) {
+    if (!idb || !idb.available()) return Promise.resolve({});
+    var out = {};
+    return Promise.all(knownCandListKeys_(curLs).map(function (lsKey) {
+      var idbKey = "meta:candlist:" + lsKey, p;
+      try {
+        p = (typeof idb.getResult === "function")
+          ? idb.getResult(idbKey)
+          : idb.get(idbKey).then(function (v) { return { ok: true, value: v }; }, function () { return { ok: false, value: null }; });
+      } catch (e) { return Promise.resolve(); }
+      return Promise.resolve(p).then(function (r) { if (r && r.ok && Array.isArray(r.value)) out[idbKey] = r.value; }, function () {});
+    })).then(function () { return out; });
+  }
+  // 受信した候補配列をLSへ書けない端末では、同じ耐久ミラーへ着地させる。両方失敗時はfalseで次回pullを許す。
+  function writeCandListFallback_(idb, key, value) {
+    if (!isCandArrayKey(key) || !idb || !idb.available() || typeof idb.set !== "function") return Promise.resolve(false);
+    var arr; try { arr = JSON.parse(value || "[]"); } catch (e) { return Promise.resolve(false); }
+    if (!Array.isArray(arr)) return Promise.resolve(false);
+    try { return Promise.resolve(idb.set("meta:candlist:" + key, arr)).then(function () { return true; }, function () { return false; }); }
+    catch (e) { return Promise.resolve(false); }
+  }
+  function fireCandidateListApplied_(key, storage) {
+    try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-candidate-list-applied", { detail: { key: key, storage: storage } })); } catch (e) {}
+  }
   // ★作成履歴(go5_stock_archive)の thumbDataUrl 恒久detox=「決定的正規化(thumb budget)」の純関数。
   //   設計正本=docs/設計・調査/診断_作成履歴サムネ同期detox_2026-08-18.md(Fable5案C・C-043)。
   //   作成履歴は item ごとに thumbDataUrl(≤160KB)を抱え最大約4.8MB、さらに sync2_snap に複製で実効ほぼ2倍=
@@ -617,6 +657,8 @@
       secInfo = info; newSecPlain = Object.assign({}, info.plain);
       Object.keys(info.entries).forEach(function (pk) { curLs[pk] = info.entries[pk]; });
     });
+    // LS満杯でIDBにだけ残った新規候補を、画像全走査とは独立した直接getで同期入力へ合流する。
+    var candMirrorStep = readKnownCandListMirrors_(Idb, curLs).then(function (mirrors) { mergeCandListMirrorsIntoLs_(curLs, mirrors); });
 
     // IDB を hash化(画像アップロード)
     // ★旧実装は uploadImagesIn をキー毎に呼び、その中で /api/img/has を1本ずつ投げていた。
@@ -633,8 +675,7 @@
       // 成功したprefixだけ同期を進める。失敗領域のローカル変更は次回回復時に送られる。
       var failedPrefixes = (all && all.__go5FailedPrefixes) || [];
       protectUnreadIdb_(all, snapIdb, failedPrefixes);
-      // Storage v2: LS書込失敗でIDBにしか残らなかった候補も、通常のcand_items同期へ必ず乗せる。
-      mergeCandListMirrorsIntoLs_(curLs, all);
+      // 候補リストミラーはcandMirrorStepで直接読取済み。ここは画像系prefixだけを扱う。
       var keys = Object.keys(all).filter(isSyncIdbKey);
       if (!keys.length) return;
       var bag = []; keys.forEach(function (k) { collectDataUrls(all[k], bag); });
@@ -687,7 +728,7 @@
       }).then(toRef);
     });
 
-    return Promise.all([secStep, idbStep]).then(function () {
+    return Promise.all([secStep, candMirrorStep, idbStep]).then(function () {
       // pass無し(skip)の端末は、雲側の sec: キーを消さない。(削除判定から除外)
       var snapLsStamp = snapLs;
       if (secInfo.skip) { snapLsStamp = {}; Object.keys(snapLs).forEach(function (k) { if (k.indexOf(SEC_PREFIX) !== 0) snapLsStamp[k] = snapLs[k]; }); }
@@ -881,8 +922,22 @@
           //   URL等の文字だけ届いた時も候補を更新しつつ、無関係なタブの再描画は起こさない。
           try {
             if (LS.getItem(k) !== finalV) {
-              LS.setItem(k, finalV);
-              if (isCandArrayKey(k) || isCandTextKey(k)) pulledCandReal++; else pulledLsReal++;
+              try {
+                LS.setItem(k, finalV);
+                if (isCandArrayKey(k) || isCandTextKey(k)) {
+                  pulledCandReal++;
+                  if (isCandArrayKey(k)) fireCandidateListApplied_(k, "ls");
+                } else pulledLsReal++;
+              } catch (writeErr) {
+                // 画像はIDBへ届くのに候補行だけ消える非対称を解消。LS満杯時は候補配列をIDBミラーへ受信し、
+                // 着地直後に候補ページへ通知する。ミラーも失敗した時はsnapを確定せず次回pullで再試行する。
+                if (isCandArrayKey(k)) (function (kk, vv) {
+                  applies.push(writeCandListFallback_(Idb, kk, vv).then(function (ok) {
+                    if (ok) { pulledCandReal++; fireCandidateListApplied_(kk, "idb"); }
+                    else delete newSnapLs[kk];
+                  }));
+                }(k, finalV));
+              }
             }
           } catch (x) {}
         });
@@ -1121,7 +1176,7 @@
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_;
-  root.Go5Sync._test.mergeCandListMirrorsIntoLs_ = mergeCandListMirrorsIntoLs_;
+  root.Go5Sync._test.mergeCandListMirrorsIntoLs_ = mergeCandListMirrorsIntoLs_; root.Go5Sync._test.readKnownCandListMirrors_ = readKnownCandListMirrors_; root.Go5Sync._test.writeCandListFallback_ = writeCandListFallback_;
   root.Go5Sync._test.slimStockArchive = slimStockArchive;
   root.Go5Sync._test.syncIdbPrefixes = SYNC_IDB_PREFIXES.slice();
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;

@@ -17,7 +17,7 @@ var Sync = require('../core/sync.js')._test;
     }
   };
   var out = await Sync.readSyncIdbEntries_(fake);
-  assert.deepStrictEqual(calls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:', 'meta:candlist:']]);
+  assert.deepStrictEqual(calls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:']]);
   assert.ok(out['ref:a']);
 
   // One failed image namespace must not discard healthy namespaces or create tombstones.
@@ -33,7 +33,7 @@ var Sync = require('../core/sync.js')._test;
     }
   };
   var partial = await Sync.readSyncIdbEntries_(fakeSettled);
-  assert.deepStrictEqual(settledCalls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:', 'meta:candlist:']]);
+  assert.deepStrictEqual(settledCalls, [['ref:', 'bsky:', 'post:', 'used:', 'stock:imgs:']]);
   assert.deepStrictEqual(partial.__go5FailedPrefixes, ['bsky:']);
   assert.ok(partial['ref:new'], 'healthy prefix data must survive a sibling timeout');
 
@@ -64,6 +64,37 @@ var Sync = require('../core/sync.js')._test;
   assert.strictEqual(mergedCandidates.length, 2, 'LS満杯時にIDBだけへ保存された候補も同期対象へ合流する');
   assert.strictEqual(mergedCandidates.filter(function (it) { return it.cid === 'old'; })[0].title, 'LS正本',
     '古いIDBミラーでLS側の既存候補を巻き戻さない');
+
+  var directReads = [];
+  var directMirror = {
+    available: function () { return true; },
+    entriesByPrefixes: function () { throw new Error('candidate mirrors must not depend on an image prefix scan'); },
+    getResult: function (key) {
+      directReads.push(key);
+      var rows = key === 'meta:candlist:cand_items'
+        ? [{ cid: 'main-new', title: 'メイン候補' }]
+        : [{ cid: 'books-new', title: '独立タブ候補' }];
+      return Promise.resolve({ ok: true, value: rows });
+    }
+  };
+  var directOut = await Sync.readKnownCandListMirrors_(directMirror, {
+    cand_items: '[]',
+    cand_tabs: JSON.stringify([{ id: 'books', name: 'ブックス' }])
+  });
+  assert.deepStrictEqual(directReads, ['meta:candlist:cand_items', 'meta:candlist:cand_items__books']);
+  assert.strictEqual(directOut['meta:candlist:cand_items'][0].cid, 'main-new',
+    '候補リストは大量画像cursorと独立して直接取得する');
+
+  var fallbackWrite = null;
+  var fallbackOk = await Sync.writeCandListFallback_({
+    available: function () { return true; },
+    set: function (key, value) { fallbackWrite = { key: key, value: value }; return Promise.resolve(); }
+  }, 'cand_items', JSON.stringify([{ cid: 'received-new' }]));
+  assert.strictEqual(fallbackOk, true);
+  assert.strictEqual(fallbackWrite.key, 'meta:candlist:cand_items');
+  assert.strictEqual(fallbackWrite.value[0].cid, 'received-new',
+    'LS満杯の受信端末は候補配列をIDBミラーへ着地できる');
+  assert.strictEqual(await Sync.writeCandListFallback_({ available: function () { return true; }, set: function () {} }, 'cand_items', '{bad'), false);
 
   console.log('OK: unchanged local data cannot overwrite newer cloud candidate fields');
   console.log('OK: sync reads only IDB prefixes used by cloud sync');

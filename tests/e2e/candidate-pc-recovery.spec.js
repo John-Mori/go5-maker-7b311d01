@@ -119,4 +119,81 @@ test.describe('PC candidate recovery invariants', () => {
     await expect(page.locator('.cand-card', { hasText: 'PC取得一本化テスト作品' })).toBeVisible();
     await expect.poll(() => page.evaluate(() => window.__pcCandidateFetchCalls)).toBe(1);
   });
+  test('LS quota fallback still flushes a new candidate after the IDB mirror is durable', async ({ page }) => {
+    const cid = 'd_pc_quota_candidate_sync';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.setItem('fanza_worker_url', 'https://worker.invalid');
+      localStorage.setItem('fanza_shared_secret', 'test-only');
+      window.__quotaCandidateFlushCalls = 0;
+      window.FanzaCore.fetchFanzaInfo = () => new Promise(() => {});
+      window.Go5Sync.flushSync = () => {
+        window.__quotaCandidateFlushCalls++;
+        return Promise.resolve({ ok: true });
+      };
+      const originalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (this === localStorage && key === 'cand_items') {
+          throw new DOMException('forced candidate quota', 'QuotaExceededError');
+        }
+        return originalSetItem.call(this, key, value);
+      };
+    });
+
+    await page.locator('#candAddOpen').click();
+    await page.locator('#candUrl').fill('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/');
+    await page.locator('#candAddClose').click();
+
+    await expect.poll(() => page.evaluate(() => window.__quotaCandidateFlushCalls)).toBe(1);
+    await expect(page.locator('.cand-card', { hasText: '取得中です' })).toBeVisible();
+    await expect.poll(() => page.evaluate(async (candidateCid) => {
+      const r = await Go5Idb.getResult('meta:candlist:cand_items');
+      return !!(r && r.ok && Array.isArray(r.value) && r.value.some((it) => it && it.cid === candidateCid));
+    }, cid)).toBe(true);
+  });
+
+  test('a received candidate list in the IDB fallback appears immediately without reload', async ({ page }) => {
+    const oldCid = 'd_phone_existing_candidate';
+    const newCid = 'd_phone_received_candidate';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ oldCid }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid: oldCid,
+        title: '既存候補',
+        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + oldCid + '/',
+        addedAt: 1
+      }]));
+    }, { oldCid });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.cand-card', { hasText: '既存候補' })).toBeVisible();
+
+    await page.evaluate(async ({ oldCid, newCid }) => {
+      const originalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (this === localStorage && key === 'cand_items') {
+          throw new DOMException('forced receiver quota', 'QuotaExceededError');
+        }
+        return originalSetItem.call(this, key, value);
+      };
+      await Go5Idb.set('meta:candlist:cand_items', [
+        {
+          cid: newCid,
+          title: '別端末から届いた新規候補',
+          url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + newCid + '/',
+          addedAt: 2
+        },
+        {
+          cid: oldCid,
+          title: '既存候補',
+          url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + oldCid + '/',
+          addedAt: 1
+        }
+      ]);
+      document.dispatchEvent(new CustomEvent('go5-candidate-list-applied', {
+        detail: { key: 'cand_items', storage: 'idb' }
+      }));
+    }, { oldCid, newCid });
+
+    await expect(page.locator('.cand-card', { hasText: '別端末から届いた新規候補' })).toBeVisible();
+  });
 });
