@@ -5812,6 +5812,41 @@ class Daemon:
             log(self.dept, f"止まりの掃き出しで例外({type(e).__name__})=本体は続行")
         return n
 
+    def _refresh_request_followup(self, rec, mid):
+        """未完了の依頼の追撃便(REQF-)を、**配達の直前に**台帳と突き合わせ直す。
+
+        戻り値= None(そのまま配る) / ""(空振り=配らない) / str(作り直した本文)。
+
+        ★なぜ要るか(2026-08-24 実測)= `_post_waiting_followup` は**投函の瞬間**に台帳を
+          読み直しているが、便はqueueで待つ。その間に依頼が閉じると、写しは配達時には古い。
+          実測= `REQ-aegis-gl-3529df3516` は 22:46:56 投函 → **22:50:28 に閉じ** →
+          22:51:42 に配達。**既に閉じた依頼を催促するためだけに1便**(部屋の文脈まるごと)を
+          燃やした。ログに残る REQF- の claim 18件中2件が同じ形(kaizen-analyst 08-17も同型)。
+        ★中身は台帳から作った純粋な写しなので、作り直しても意味は変わらない(C-041=
+          一度の観測を状態の代理にするな)。
+        ★fail-open= 判定できない時は None を返して**従来どおり配る**。催促を黙って落とすのが
+          最悪の事故(沈黙)であって、多めに配ることではない。
+        ★★request_log.jsonl へは書かない= あの台帳の未知の state は `_waiting_pending()` で
+          「部屋が動いた」(moved)として読まれる。見張っている脈を、見張り以外の手で
+          更新しない(C-054)。痕跡は .log の1行だけにする。
+        """
+        try:
+            if not str(mid or "").startswith(REQUEST_PREFIX):
+                return None
+            if rec.get("via") != "request_followup":
+                return None                 # ★接頭辞と via の二重で確かめる(_is_followup と同じ作法)
+            if not (self.conf.get("session_relay") and session_relay is not None):
+                return None
+            items = session_relay.open_request_list(self.dept)
+            if not items:
+                return ""                   # 投函後・配達前に全部閉じた= 配る価値が無い
+            fresh = request_followup_text(items, REQUEST_FOLLOWUP_SEC)
+            if fresh == str(rec.get("content") or ""):
+                return None                 # 台帳が動いていない= 1バイトも触らない
+            return fresh
+        except Exception:                   # noqa: BLE001
+            return None
+
     def _channel_name(self):
         """自部門のDiscordチャンネル名(台帳から)。引けなければ空文字(fail-open)。"""
         try:
@@ -6942,6 +6977,18 @@ class Daemon:
                 if mid and mid in processed:
                     q.ack(c["id"], result="skip(処理済)")
                     continue
+                # ★★催促の便は掴んだ瞬間に台帳と突き合わせ直す(2026-08-24・_refresh_request_followup)。
+                #   投函から配達までの待ち時間に依頼が閉じることがある(実測2件)。
+                _fresh = self._refresh_request_followup(rec, mid)
+                if _fresh == "":
+                    q.ack(c["id"], result="skip(催促の対象が投函後に全部閉じた)")
+                    log(self.dept, "★未完了の依頼への追撃便を配らない"
+                                   "(投函後・配達前に台帳が空になった) msg=%s" % mid)
+                    continue
+                if _fresh:
+                    rec["content"] = _fresh
+                    log(self.dept, "追撃便の本文を配達の直前に作り直した"
+                                   "(閉じた依頼を落として台帳の今の姿にした) msg=%s" % mid)
                 # ★★Chamiの連投を1便へ束ねる(集約窓が有る部門だけ・2026-08-08)。
                 #   窓はもう閉じている(=連投が落ち着いた)ので、残っている続きを全部掴んで
                 #   **1回のhandleで返す**。断片ごとに応答を返さない。
