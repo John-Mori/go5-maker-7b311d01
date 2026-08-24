@@ -545,10 +545,20 @@
     var st = (n === 0) ? refSlotState_(cid) : 'images';
     return noMaterialHideDecide_(n, st, !!_sessionAddedCids[cid]); // ★今セッションで追加したばかりは隠さない
   }
-  // このセッションで「候補に追加」した cid の集合。素材なし非表示ゲートから除外する(追加直後の消失を防ぐ)。
-  //   リロードで空に戻る=一度離れた古い素材なし候補は従来どおり非表示に戻る(=非表示トグルの本来の意図は保つ)。
-  var _sessionAddedCids = {};
-  function markSessionAdded_(cid) { if (cid != null) _sessionAddedCids[String(cid)] = true; }
+  // 手動で「候補に追加」した cid の集合。素材なし非表示ゲートから除外する(追加直後・リロード後の消失を防ぐ)。
+  //   ★リロードを越えて残す(Chami 2026-08-24「まかせる」で恒久化を選択)=手で足した候補は、素材を付ける
+  //     までは非表示トグルONでも消えない。サークル一括追加(appendWorks_)は marked しない=素材の無い一括分は
+  //     従来どおり隠れる(=非表示トグルの本来の意図は保つ)。キー cand_manual_added は cand_ 前方一致でlocal扱い(非同期)。
+  var K_MANUAL_ADDED = 'cand_manual_added';
+  var _sessionAddedCids = (function () {
+    try { var a = JSON.parse(localStorage.getItem(K_MANUAL_ADDED) || '[]'); var o = {}; if (Array.isArray(a)) a.forEach(function (c) { o[String(c)] = true; }); return o; }
+    catch (e) { return {}; }
+  })();
+  function markSessionAdded_(cid) {
+    if (cid == null) return;
+    _sessionAddedCids[String(cid)] = true;
+    try { localStorage.setItem(K_MANUAL_ADDED, JSON.stringify(Object.keys(_sessionAddedCids))); } catch (e) {} // 満杯でも致命でない(セッション内はメモリで残る)
+  }
   function isHiddenByPosted_(it) {
     if (!it) return false;
     if (!_hidePosted.acc1 && !_hidePosted.acc2) return false; // どちらのトグルもOFF=隠さない
