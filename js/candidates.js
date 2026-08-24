@@ -957,6 +957,14 @@
   //   書きは _imgMem を即更新＋IDBへ非同期反映。(write-through)IDB非対応時は localStorage フォールバック。
   var _imgMem = { ref: {}, bsky: {}, post: {}, used: {} };
   var _idbOk = !!(window.Go5Idb && window.Go5Idb.available());
+  // 表示中の投稿履歴だけを直接読むための作品単位キュー。全prefix走査は補完であり、初期表示のゲートにしない。
+  // checked は「このセッションでIDB/旧LSを実際に確認した」印。usedの明示空レコードは _imgMem.used に残るため、
+  // usedImgKnown_ の「明示削除」と、単なる未保存(旧データ→ref互換表示)を混同しない。
+  var _histDirectChecked = { used: Object.create(null), post: Object.create(null) };
+  var _histDirectPending = Object.create(null), _histDirectStopped = Object.create(null);
+  var _histDirectFails = Object.create(null), _histDirectRetryTimers = Object.create(null);
+  var _histDirectQueue = [], _histDirectActive = 0, _histDirectWanted = Object.create(null);
+  var HIST_DIRECT_MAX = 3;
   // ★IDB→メモリへの展開(hydrateImages_)は非同期。完了前は _imgMem が空なので refImgOf() が
   //   「実際にはIDBに在るのに null」を返す=モーダルのpendingが全項目空で作られ、そのまま保存すると
   //   refImgSaveのempty判定に入り【画像もコメントも削除】されていた。(Chami報告2026-07-17
@@ -1007,6 +1015,14 @@
     //   go5-images-hydrated が飛ばず「投稿履歴の動画投稿プレビューが全然表示されない」に固定していた
     //   (Chami報告2026-08-24)。used: が遅れて追いついても必ず描き直す=listenerは冪等。
     try { document.dispatchEvent(new CustomEvent('go5-images-hydrated')); } catch (e) {}
+  }
+  var _imagesChangedTimer = null;
+  function notifyImagesChanged_() {
+    if (_imagesChangedTimer) return;
+    _imagesChangedTimer = setTimeout(function () {
+      _imagesChangedTimer = null;
+      try { document.dispatchEvent(new CustomEvent('go5-images-hydrated')); } catch (e) {}
+    }, 40);
   }
   function whenImagesReady_(cb) {                 // 候補用(ref/bsky)が展開済みなら即時、未了なら完了時に呼ぶ
     if (_candidateHydrated || !_idbOk) { cb(); return; }
@@ -1319,8 +1335,8 @@
       var v = all[k];
       if (k.indexOf('ref:') === 0) { putLatest_(_imgMem.ref, k.slice(4), v); _refLoaded[k.slice(4)] = true; backfillCandText_(k.slice(4), _imgMem.ref[k.slice(4)]); }
       else if (k.indexOf('bsky:') === 0) putLatest_(_imgMem.bsky, k.slice(5), v);
-      else if (k.indexOf('post:') === 0) putLatest_(_imgMem.post, k.slice(5), v);
-      else if (k.indexOf('used:') === 0) putLatest_(_imgMem.used, k.slice(5), v);
+      else if (k.indexOf('post:') === 0) { var pk = k.slice(5); putLatest_(_imgMem.post, pk, v); _histDirectChecked.post[pk] = true; }
+      else if (k.indexOf('used:') === 0) { var uk = k.slice(5); putLatest_(_imgMem.used, uk, v); _histDirectChecked.used[uk] = true; }
     });
   }
   function readImageEntries_(prefixes) {
@@ -1512,6 +1528,7 @@
       _imgMem.ref[cid] = refRecordFromMarker_(marker, imgs);
       _refLoaded[cid] = true;
       refRefreshCard_(cid);
+      notifyImagesChanged_(); // 投稿履歴の旧ref互換表示も、R2着地直後にページ再操作なしで追いつかせる
     }, function () { delete _r2ResolveJobs[cid]; window.Go5ImgDiag && Go5ImgDiag.push('r2_err', { cid: cid }); refFailMark_(cid); });
   }
   // 候補→動画作成の写真ハンドオフ用: 画像を「待って」取り出す。メモリ/LSに実体があれば即返し、無くて
@@ -1768,6 +1785,7 @@
     var rec = imgs.length ? { imgs: imgs, at: new Date().getTime() } : null;
     if (_idbOk) {
       if (rec) _imgMem.post[key] = rec; else delete _imgMem.post[key];
+      _histDirectChecked.post[key] = true;
       (rec ? window.Go5Idb.set(idbKey('post', key), rec) : window.Go5Idb.del(idbKey('post', key))).catch(idbFail_);
       return true;
     }
@@ -1809,6 +1827,7 @@
     if (prevCount != null) rec.prev = prevCount | 0;
     if (_idbOk) {
       _imgMem.used[key] = rec;
+      _histDirectChecked.used[key] = true;
       window.Go5Idb.set(idbKey('used', key), rec).catch(idbFail_);
       return true;
     }
@@ -1818,6 +1837,129 @@
     } catch (e) { return false; }
   }
 
+  // ── 表示中の投稿履歴を作品単位で直接復元 ───────────────────────────────
+  // iOS Safariでprefix cursorが停止しても、画面に見えている履歴のused:/post:をgetResultで直接読む。
+  // used:が無い旧記録だけ作品cidのref:先頭へフォールバックする。明示空usedは候補画像を復活させない。
+  function histLegacyRec_(prefix, key) {
+    var lk = (prefix === 'used' ? 'hist_usedimg__' : 'hist_postimg__') + key;
+    try { return JSON.parse(localStorage.getItem(lk) || 'null'); } catch (e) { return null; }
+  }
+  function histTaskId_(prefix, key) { return prefix + ':' + String(key || ''); }
+  function histReadResult_(storageKey) {
+    var p = (typeof window.Go5Idb.getResult === 'function')
+      ? window.Go5Idb.getResult(storageKey)
+      : window.Go5Idb.get(storageKey).then(function (value) { return { ok: true, value: value }; }, function (error) { return { ok: false, value: null, error: error }; });
+    // 下層にも番犬はあるが、Safari/将来実装のPromiseがsettleしない場合もキュー全体を占有させない。
+    return new Promise(function (resolve) {
+      var done = false;
+      var wd = setTimeout(function () { if (!done) { done = true; resolve({ ok: false, value: null, error: new Error('history-direct-timeout') }); } }, 9000);
+      Promise.resolve(p).then(function (r) { if (done) return; done = true; clearTimeout(wd); resolve(r); }, function (e) { if (done) return; done = true; clearTimeout(wd); resolve({ ok: false, value: null, error: e }); });
+    });
+  }
+  function enqueueHistDirect_(prefix, key, cid, front) {
+    key = String(key || ''); cid = String(cid || '');
+    if (!key) return;
+    var id = histTaskId_(prefix, key);
+    if (_histDirectPending[id] || _histDirectStopped[id] || _histDirectRetryTimers[id]) return;
+    if (prefix === 'ref') {
+      if (_refLoaded[key] || Object.prototype.hasOwnProperty.call(_imgMem.ref, key)) return;
+    } else if (_histDirectChecked[prefix][key] || Object.prototype.hasOwnProperty.call(_imgMem[prefix], key)) {
+      // usedが確認済みでレコード自体は無い旧履歴だけ、作品refの互換表示へ進む。
+      if (prefix === 'used' && !Object.prototype.hasOwnProperty.call(_imgMem.used, key) && cid) enqueueHistDirect_('ref', cid, cid, true);
+      return;
+    }
+    _histDirectPending[id] = true;
+    var task = { prefix: prefix, key: key, cid: cid, id: id };
+    if (front) _histDirectQueue.unshift(task); else _histDirectQueue.push(task);
+    pumpHistDirect_();
+  }
+  function readHistDirectTask_(task) {
+    if (task.prefix === 'ref') {
+      window.Go5ImgDiag && Go5ImgDiag.push('hist_ref_start', { cid: task.key });
+      return Promise.resolve(ensureRefLoaded_(task.key)).then(function (ok) {
+        return resolveRefImgsAwaited_(task.key).then(function (imgs) {
+          if (!ok && !_refLoaded[task.key] && !(imgs && imgs.length)) throw new Error('history-ref-read-failed');
+          window.Go5ImgDiag && Go5ImgDiag.push(imgs && imgs.length ? 'hist_ref_ok' : 'hist_ref_null', { cid: task.key, count: (imgs || []).length });
+          if (imgs && imgs.length) notifyImagesChanged_();
+          return true;
+        });
+      });
+    }
+    var storageKey = idbKey(task.prefix, task.key);
+    window.Go5ImgDiag && Go5ImgDiag.push('hist_key_start', { prefix: task.prefix, key: task.key });
+    return histReadResult_(storageKey).then(function (result) {
+      if (!result || !result.ok) throw (result && result.error) || new Error('history-direct-read-failed');
+      var rec = result.value, fromLegacy = false;
+      if (rec == null) { rec = histLegacyRec_(task.prefix, task.key); fromLegacy = rec != null; }
+      if (rec != null) {
+        var one = {}; one[storageKey] = rec; mergeImageEntries_(one);
+        if (fromLegacy) {
+          try {
+            window.Go5Idb.set(storageKey, rec).then(function () {
+              try { localStorage.removeItem((task.prefix === 'used' ? 'hist_usedimg__' : 'hist_postimg__') + task.key); } catch (e) {}
+            }).catch(function () {});
+          } catch (e) {}
+        }
+      }
+      _histDirectChecked[task.prefix][task.key] = true;
+      window.Go5ImgDiag && Go5ImgDiag.push(rec != null ? 'hist_key_ok' : 'hist_key_null', { prefix: task.prefix, key: task.key, count: rec && Array.isArray(rec.imgs) ? rec.imgs.length : 0 });
+      if (rec != null) notifyImagesChanged_();
+      // usedレコードが本当に無い旧データだけ、安定参照cid→ref:/R2へ進む。明示空{imgs:[]}はrec有りなので進まない。
+      if (task.prefix === 'used' && rec == null && task.cid) enqueueHistDirect_('ref', task.cid, task.cid, true);
+      return true;
+    });
+  }
+  function finishHistDirect_(task, ok) {
+    delete _histDirectPending[task.id];
+    _histDirectActive = Math.max(0, _histDirectActive - 1);
+    if (ok) {
+      delete _histDirectFails[task.id]; delete _histDirectStopped[task.id];
+    } else {
+      var n = (_histDirectFails[task.id] || 0) + 1; _histDirectFails[task.id] = n;
+      window.Go5ImgDiag && Go5ImgDiag.push('hist_key_err', { prefix: task.prefix, key: task.key, n: n });
+      if (n < 3 && !_histDirectRetryTimers[task.id]) {
+        _histDirectRetryTimers[task.id] = setTimeout(function () {
+          delete _histDirectRetryTimers[task.id];
+          enqueueHistDirect_(task.prefix, task.key, task.cid, false);
+        }, Math.min(6000, 1000 * Math.pow(2, n - 1)));
+      } else if (n >= 3) {
+        _histDirectStopped[task.id] = true; // 永久ループせず、前面復帰/IDB回復でだけ再開
+      }
+    }
+    pumpHistDirect_();
+  }
+  function pumpHistDirect_() {
+    while (_histDirectActive < HIST_DIRECT_MAX && _histDirectQueue.length) {
+      var task = _histDirectQueue.shift(); _histDirectActive++;
+      (function (t) {
+        readHistDirectTask_(t).then(function () { finishHistDirect_(t, true); }, function () { finishHistDirect_(t, false); });
+      }(task));
+    }
+  }
+  function ensureHistoryImages_(rows) {
+    rows = Array.isArray(rows) ? rows : [];
+    _histDirectWanted = Object.create(null);
+    rows.forEach(function (row) {
+      var key = String((row && row.key) || ''); if (!key) return;
+      var cid = String((row && row.cid) || '');
+      _histDirectWanted[key] = { key: key, cid: cid };
+      enqueueHistDirect_('used', key, cid, false); // 本命を全件先に積む
+    });
+    rows.forEach(function (row) {
+      var key = String((row && row.key) || ''); if (key) enqueueHistDirect_('post', key, String((row && row.cid) || ''), false);
+    });
+    return true;
+  }
+  function retryVisibleHistoryImages_() {
+    var rows = Object.keys(_histDirectWanted).map(function (k) { return _histDirectWanted[k]; });
+    rows.forEach(function (row) {
+      ['used', 'post', 'ref'].forEach(function (prefix) {
+        var key = prefix === 'ref' ? row.cid : row.key; if (!key) return;
+        var id = histTaskId_(prefix, key); delete _histDirectStopped[id]; delete _histDirectFails[id];
+      });
+    });
+    ensureHistoryImages_(rows);
+  }
   // 起動時：候補ページに必要なref/bskyだけを最優先で展開する。
   // 従来のentries()全件走査は同じDB内のドラフト動画Blobまで値として復元し、iPhoneで画像表示と
   // 投稿編集の両方を長時間止めていた。候補用が描けた後、統合ページだけpost/usedを裏で読む。
@@ -2046,8 +2188,8 @@
     key = String(key || '');
     if (key.indexOf('ref:') === 0) { var rcid = key.slice(4); delete _imgMem.ref[rcid]; _refLoaded[rcid] = true; }
     else if (key.indexOf('bsky:') === 0) delete _imgMem.bsky[key.slice(5)];
-    else if (key.indexOf('post:') === 0) delete _imgMem.post[key.slice(5)];
-    else if (key.indexOf('used:') === 0) delete _imgMem.used[key.slice(5)];
+    else if (key.indexOf('post:') === 0) { var pk = key.slice(5); delete _imgMem.post[pk]; delete _histDirectChecked.post[pk]; }
+    else if (key.indexOf('used:') === 0) { var uk = key.slice(5); delete _imgMem.used[uk]; delete _histDirectChecked.used[uk]; }
   }
   // sync.js が実際にIDBへ着地させたキーだけを直読する。候補174件を毎回全走査せず、
   // 「変更済みなのに古いメモリを表示」の窓を閉じる。キー通知の無い旧キャッシュだけ下のprefix読取へ戻す。
@@ -2126,6 +2268,7 @@
       // ★_hydrated(1prefix完了で立つ)ではなく used:/post: が両方 done でない限り再キック=post:先勝ちで
       //   used: が未読のまま回復した時に、待たずに読み直す(hydrateHistPrefix_ が prefix 別に自己ゲート)。
       if (!(_histDone['used:'] && _histDone['post:']) && !window.__go5CandidateStandalone) hydrateHistoryImages_();
+      retryVisibleHistoryImages_();
       bgRender_();
     } catch (e) {}
     hideIdbRecoveryHint_();
@@ -5547,7 +5690,7 @@
   //   読取失敗(IDB接続死等)は「無い」と断定せず、失敗を記帳して bounded 再試行→持続失敗なら⌛へ(refFailMark_)。
   //   ★同時発射は最大 REF_PROBE_MAX 件に絞る=1ページ(≤50件)の probe が固定番犬+接続closeで殺し合う自己DoSを
   //     止める(Fable5診断2026-08-24)。cid単位の二重キューは _refProbeQueued で防ぐ。
-  var REF_PROBE_MAX = 4;
+  var REF_PROBE_MAX = 3;
   var _refProbeActive = 0;
   var _refProbeQueue = [];
   var _refProbeQueued = Object.create(null);
@@ -5581,11 +5724,16 @@
   //   0枚の時は空欄にせず状態札で「まだ読込前(⏳)」「端末内を確認中(🔍)」「確認済みで画像なし(⚠)」を区別する
   //   =Chami「消えてるのか表示されてないのか分からん」への対策(こちらは維持)。
   function refSlotHtml_(cid) {
+    cid = String(cid || '');
+    // 保存画像だけでメモ/コメントが無い作品も、可視カードなら必ず作品単位で確認する。
+    // 旧判定は worked=false で none を返し、全件cursor停止時に直接getが一度も始まらなかった。
+    if (_idbOk && cid && !_refLoaded[cid] && !Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) ensureRefProbe_(cid);
     var imgs = refImgsOf_(cid);
     if (imgs.length) {
       var multi = imgs.length > 1;
       var cap = multi ? ('動画生成用の画像(全' + imgs.length + '枚・タップで拡大)') : '動画生成用の画像(タップで拡大)';
-      return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-refimgview="' + esc(cid) + '" data-refidx="0" src="' + esc(imgs[0]) + '" loading="lazy" decoding="async" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
+      window.Go5ImgDiag && Go5ImgDiag.push('ref_render', { cid: cid, count: imgs.length });
+      return '<img class="cand-refimg-thumb' + (multi ? ' multi' : '') + '" data-go5-imgrole="candidate-ref" data-refimgview="' + esc(cid) + '" data-refidx="0" src="' + esc(imgs[0]) + '" loading="lazy" decoding="async" alt="' + esc(cap) + '" title="' + esc(cap) + '">';
     }
     var state = refSlotState_(cid);
     // ★loadingも per-cid で能動取得する(INC-127→129→132→137の恒久対策の穴埋め)。従来「⏳読込中」は
@@ -5728,6 +5876,7 @@
     usedImgKnown: usedImgKnown_,                                  // 履歴キーに明示保存済みか(空＝削除済みも区別)
     usedPrevCount: usedPrevCount_,                              // 履歴キー → 先頭何枚が投稿プレビュー画像か(見出し分け用)
     usedImgSave: usedImgSave_,                                  // 履歴キー + 使用画像配列 を保存(write-through)
+    ensureHistoryImages: ensureHistoryImages_,                  // 表示中履歴[{key,cid}]をused/post→旧ref/R2の順で直接復元
     // ── 🛠️編集の画像添付(貼り付け＋用途選択・Chami依頼2026-07-15)用の公開API ──
     pasteImage: function (cb) { return pasteImageFromClipboard_(cb); }, // クリップボード画像→dataURL(cb(durl,err))
     refImgsSet: function (cid, arr) { if (!cid) return false; var cur = refImgOf(cid) || {}; return refImgSave(cid, { imgs: (arr || []).filter(Boolean), comment: cur.comment || '', memo: cur.memo || '', twitterUrl: cur.twitterUrl || '', twitterUrl2: cur.twitterUrl2 || '' }); }, // 動画で使った画像(配列)を差し替え保存(コメント等は保持)
@@ -5786,7 +5935,32 @@
       try { scheduleInfoTick_(_activeTab, candItemsRead_(itemsKey(_activeTab))); } catch (e) {}
     });
   } catch (e) {}
-  hydrateImages_(); // IDBから画像をメモリへ＋旧localStorage画像を移行(5MB枠を解放)
+  // 専用ページはまず可視カードの直接getを走らせ、全件cursorは補完として後から開始する。
+  // 初期表示と全件走査を同じゲートに戻さない(指示書 2026-08-24・iPhone cold start対策)。
+  if (window.__go5CandidateStandalone || window.__go5VerifyStandalone) {
+    setTimeout(function () {
+      if (window.__go5VerifyStandalone) hydrateHistoryImages_();
+      hydrateImages_();
+    }, 500);
+  } else {
+    hydrateImages_();
+  }
+  // data-go5-imgroleを持つ実画像がDOMへ入った後、decode成功/失敗まで診断リングへ閉ループで残す。
+  try {
+    ['load', 'error'].forEach(function (ev) {
+      document.addEventListener(ev, function (e) {
+        var im = e && e.target;
+        if (!im || String(im.tagName || '').toLowerCase() !== 'img') return;
+        var role = im.getAttribute && im.getAttribute('data-go5-imgrole'); if (!role) return;
+        window.Go5ImgDiag && Go5ImgDiag.push(ev === 'load' ? 'dom_img_load' : 'dom_img_error', {
+          role: role,
+          cid: (im.getAttribute('data-refimgview') || im.getAttribute('data-refcid') || ''),
+          key: (im.getAttribute('data-usedkey') || '')
+        });
+      }, true);
+    });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') retryVisibleHistoryImages_(); });
+  } catch (e) {}
   // IDBが使えない/展開が走らない端末でも、LSに積もった退避画像をR2へ逃がす解毒を一度は必ず動かす(冪等・非破壊)。
   try { setTimeout(function () { try { hydrateR2Refs_(); } catch (e) {} }, 2500); } catch (e) {}
   // 既存タブの移行: 登録済みサークルをPCバッチの追跡対象へ(登録済みはフラグでスキップ＝通信は初回のみ)

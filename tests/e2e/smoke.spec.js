@@ -110,6 +110,63 @@ test.describe('投稿履歴の初期表示', () => {
     // 保留解除後は画像供給APIも従来どおり利用可能になる。
     await expect.poll(() => page.evaluate(() => typeof window.Go5Cand?.usedImgs), { timeout: 6000 }).toBe('function');
   });
+
+  test('表示中履歴は全件走査とpost読込が停止してもused画像を作品単位で表示する', async ({ page }) => {
+    const videoId = 'acc1-20260825-1230-direct-used';
+    const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.goto('__go5_seed__.html');
+    await page.evaluate(async ({ videoId, image }) => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('bsky_gas_url', '');
+      localStorage.setItem('hist_maint_at', String(Date.now()));
+      localStorage.setItem('hist_metrics_at', String(Date.now()));
+      localStorage.setItem('short_hist__acc1', JSON.stringify([{
+        videoId, ts: Date.now(), title: '履歴used直接復元テスト', account: 'acc1'
+      }]));
+      localStorage.setItem('verify_manual__acc1', '[]');
+      localStorage.setItem('verify_yt__acc1', '{}');
+      await new Promise((resolve, reject) => {
+        const req = indexedDB.open('go5store', 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
+        };
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put({ imgs: [image], prev: 1, at: Date.now() }, 'used:' + videoId);
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+    }, { videoId, image });
+    await page.route('**/js/candidates.js?*', async (route) => {
+      const response = await route.fetch();
+      const original = await response.text();
+      const stalled = [
+        '(function () {',
+        '  var originalGetResult = Go5Idb.getResult.bind(Go5Idb);',
+        '  Go5Idb.entriesByPrefixes = function () { return new Promise(function () {}); };',
+        '  Go5Idb.entriesByPrefixesSettled = function () { return new Promise(function () {}); };',
+        '  Go5Idb.getResult = function (key) {',
+        '    if (key === "post:' + videoId + '") return new Promise(function () {});',
+        '    return originalGetResult(key);',
+        '  };',
+        '}());'
+      ].join('\n');
+      await route.fulfill({ response, body: stalled + '\n' + original });
+    });
+
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.vrow-title').filter({ hasText: '履歴used直接復元テスト' })).toBeVisible();
+    const thumb = page.locator('.vrow-refimg[data-usedkey="' + videoId + '"]');
+    await expect(thumb).toBeVisible({ timeout: 2500 });
+    await expect.poll(() => thumb.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+    const dump = await page.evaluate(() => window.Go5ImgDiag?.dump?.() || '');
+    expect(dump).toContain('hist_key_ok');
+    expect(dump).toContain('hist_render');
+    expect(dump).toContain('dom_img_load');
+  });
 });
 test.describe('候補ページの画像・投稿編集', () => {
   test('PC画像モーダルの矢印は左右対称の20%位置・2倍サイズで表示する', async ({ page }) => {
@@ -289,12 +346,59 @@ test.describe('候補ページの画像・投稿編集', () => {
     // 全体展開が後から完了したら、ページ移動や候補タブの押し直し無しでカード画像も出る。
     await page.locator('#refImgCancel').click();
     await expect(page.locator('[data-refimgview="' + cid + '"]')).toBeVisible({ timeout: 5000 });
+    await expect.poll(() => page.evaluate(() => window.__go5HydratePrefixes?.length || 0), { timeout: 4000 }).toBeGreaterThan(0);
     const prefixes = await page.evaluate(() => window.__go5HydratePrefixes);
     expect(prefixes[0]).toEqual(['ref:']);
     expect(prefixes).not.toContainEqual(['ref:', 'bsky:']);
     expect(prefixes.flat()).not.toContain('stock_v_');
   });
 
+  test('メモ無しのIDB画像も全件走査を待たず可視カードへ直接表示する', async ({ page }) => {
+    const cid = 'tw_candidate_direct_image_only';
+    const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.goto('__go5_seed__.html');
+    await page.evaluate(async ({ cid, image }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: '画像だけ保存した候補', isTwitter: true,
+        twitterUrl: 'https://x.com/go5_test/status/929', addedAt: Date.now()
+      }]));
+      await new Promise((resolve, reject) => {
+        const req = indexedDB.open('go5store', 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
+        };
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put({ imgs: [image, image], at: Date.now() }, 'ref:' + cid);
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+    }, { cid, image });
+    await page.route('**/js/candidates.js?*', async (route) => {
+      const response = await route.fetch();
+      const original = await response.text();
+      const stalled = [
+        '(function () {',
+        '  Go5Idb.entriesByPrefixes = function () { return new Promise(function () {}); };',
+        '  Go5Idb.entriesByPrefixesSettled = function () { return new Promise(function () {}); };',
+        '}());'
+      ].join('\n');
+      await route.fulfill({ response, body: stalled + '\n' + original });
+    });
+
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.cand-title').filter({ hasText: '画像だけ保存した候補' })).toBeVisible();
+    const thumb = page.locator('[data-refimgview="' + cid + '"]');
+    await expect(thumb).toBeVisible({ timeout: 2500 });
+    await expect.poll(() => thumb.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+    const dump = await page.evaluate(() => window.Go5ImgDiag?.dump?.() || '');
+    expect(dump).toContain('ref_get_ok');
+    expect(dump).toContain('ref_render');
+    expect(dump).toContain('dom_img_load');
+  });
   test('文字情報だけ同期された時もFANZA作品URLとX URLを再読込なしで表示する', async ({ page }) => {
     const cid = 'd_candidate_sync_text';
     const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_candidate_sync_text/';

@@ -2085,6 +2085,7 @@
       var refThumb = (window.HistMerge && window.HistMerge.historyPreviewThumb)
         ? window.HistMerge.historyPreviewThumb(usedImgArr, usedPrevN_)
         : ''; // HistMerge/core/image-role.jsが読めない異常時は安全側(空=枠を出さない)
+      if (refThumb && window.Go5ImgDiag) Go5ImgDiag.push('hist_render', { key: pKey, cid: rImgCid, count: usedImgArr.length, prev: usedPrevN_ });
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
       //   YouTube再生数はAPI未取得/クォータ切れ/紐付け直後だと0や未取得のまま張り付き、下段の「今日▶120/週▶120」
@@ -2175,7 +2176,7 @@
         '</div>' + // .vrow-body
         ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
           (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" decoding="async" style="display:none;">' : '') +
-          (refThumb ? '<img class="vrow-refimg" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画投稿プレビュー(タップで拡大)" title="タップで拡大(動画投稿プレビュー)" loading="lazy" decoding="async">' : '') +
+          (refThumb ? '<img class="vrow-refimg" data-go5-imgrole="history-preview" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画投稿プレビュー(タップで拡大)" title="タップで拡大(動画投稿プレビュー)" loading="lazy" decoding="async">' : '') +
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
@@ -2188,6 +2189,15 @@
         '</div>' +
         '</div>';
     }).join('') + pagerHtml; // 末尾にもページャ(長い一覧の下からでもページ移動できる)
+    // 全件prefix走査を待たず、今DOMへ出した履歴だけを作品単位で直接読む。used:を先行し、post:停止の巻き添えを防ぐ。
+    try {
+      if (window.Go5Cand && window.Go5Cand.ensureHistoryImages) {
+        window.Go5Cand.ensureHistoryImages(pageItems.map(function (it) {
+          var k = itemKey(it), cid = it.workUrl ? workCidOf_(it.workUrl) : '';
+          return { key: it.videoId || k, cid: cid };
+        }));
+      }
+    } catch (e) {}
     // ページ移動ボタン・1ページ表示数セレクタの配線(上下のページャ共通)。押したら1ページ目/該当ページを描き直す。
     list.querySelectorAll('[data-histpage]').forEach(function (b) {
       b.addEventListener('click', function () {
