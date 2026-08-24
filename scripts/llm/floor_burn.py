@@ -113,6 +113,16 @@ def scan_detail(since_utc):
             fh = open(p, encoding="utf-8", errors="replace")
         except OSError:
             continue
+        # ★2026-08-25(イージス研究室): 記録は**1つの返答を content ブロックごとに複数行へ割る**。
+        #   割れた行は usage を丸ごと同じ値で持つので、行のまま足すと2〜4重に数える
+        #   (研究室HQが quota_burn.py で先に見つけた穴・commit de081be)。
+        #   ★この母集団での実測(直近24時間)= 行7,589 / 返答3,800(最大10行に割れる)。
+        #     行のまま足すと 書込 +60.2% / 読込 +47.8% の水増し。部屋ごとに倍率が違う
+        #     (改修部門α 2.01 / うち 1.78 / 人事部門 2.30)ので**順位まで動く**。
+        #   ★quota_burn は「最初の1行を採る」が、実測で **2,725件中1件だけ**
+        #     割れた行の usage が同一でなかった(片方が全部0)。0の行を先に掴むと
+        #     返答まるごと落ちる= ここは**大きい方を採る**(取りこぼさない側へ倒す)。
+        seen = {}                       # message.id -> out のindex(ファイル単位)
         with fh as f:
             for line in f:
                 if len(line) < 3 or '"usage"' not in line:
@@ -134,7 +144,7 @@ def scan_detail(since_utc):
                     continue
                 u = msg.get("usage") or {}
                 cd = u.get("cache_creation") or {}
-                out.append({
+                rec = {
                     "sid": sid, "dept": dept, "dt": dt,
                     "cc": u.get("cache_creation_input_tokens", 0) or 0,
                     "cc1h": cd.get("ephemeral_1h_input_tokens", 0) or 0,
@@ -142,7 +152,17 @@ def scan_detail(since_utc):
                     "cr": u.get("cache_read_input_tokens", 0) or 0,
                     "model": msg.get("model") or "?",
                     "sub": bool(d.get("isSidechain")),
-                })
+                }
+                mid = str(msg.get("id") or "")
+                if mid:
+                    i = seen.get(mid)
+                    if i is not None:
+                        # 同じ返答の割れた行= 数えない。ただし大きい方の値へ寄せる。
+                        if rec["cc"] + rec["cr"] > out[i]["cc"] + out[i]["cr"]:
+                            out[i] = rec
+                        continue
+                    seen[mid] = len(out)
+                out.append(rec)
     return out
 
 
