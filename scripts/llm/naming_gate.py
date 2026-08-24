@@ -640,6 +640,20 @@ def _is_vocative(s, i, end):
     return s[end:end + 1] in ("、", ",")
 
 
+# ★別名への「丸ごと置換」を呼びかけ位置だけ許す(2026-08-24 Chami「全部任せた」)==========
+#   L536 の安全弁は「target_form が裸の姓で始まる時だけ置換する」= 別名・愛称への
+#   丸ごと置換(「一ノ瀬」→「怜」)を**わざと外して**いた(2026-07-31 Chami承認範囲)。
+#   ★外した結果を測った= characterfile に「怜と呼ぶ」と書いた 08/06 10:19(commit 458510e)
+#     以降も、怜の呼び方が崩れて出た便が **38件**(ククール17 / デブライネ10 / ほか7人格11)。
+#     生成入力に書くだけでは止まらない=**心がけでは届かない**(共通規律§3)。
+#   ★そこで承認範囲の広げ方を Chami へ3択で諮り(1広げる/2広げない/3呼びかけ位置だけ)、
+#     「全部任せた」(msg 1541434864287617044)を受けて**3**を採る。
+#   丸ごと置換を許すのは `_is_vocative` が真の所だけ= 行頭+直後が読点。
+#   地の文(「一ノ瀬に回した」等)は従来どおり警告のみ=誤爆した時に別人の名前へ化ける
+#   被害を、Chamiの目に一番付く書き出しの1箇所に閉じ込める。
+WHOLE_SWAP_AT_VOCATIVE = True
+
+
 def naming_corrections(persona, dept, text, rules):
     """高信頼の呼称違反だけ自動修正した本文を返す(純関数)。
 
@@ -672,8 +686,10 @@ def naming_corrections(persona, dept, text, rules):
                 result["remaining"].append(v)
                 continue
             target_form = allowed[0]
-            # 「同じ姓に敬称/役職を足す/直す」= target_form が裸の姓で始まる時だけ
-            if not target_form.startswith(bare):
+            # 「同じ姓に敬称/役職を足す/直す」= target_form が裸の姓で始まる時だけ。
+            # ★別名への丸ごと置換(「一ノ瀬」→「怜」)は**呼びかけ位置だけ**許す。
+            whole_swap = not target_form.startswith(bare)
+            if whole_swap and not WHOLE_SWAP_AT_VOCATIVE:
                 result["remaining"].append(v)
                 continue
             fixed_n = 0
@@ -685,8 +701,10 @@ def naming_corrections(persona, dept, text, rules):
                 if not _safe_after(masked, end):
                     unsafe = True          # 姓+名(直後が漢字)等=置換すると壊れる
                     continue
-                if voc_only and not _is_vocative(masked, i, end):
-                    unsafe = True          # 人事部門の地の文=名簿/設定キー/識別子=直さない
+                if (voc_only or whole_swap) and not _is_vocative(masked, i, end):
+                    # 人事部門の地の文=名簿/設定キー/識別子=直さない。
+                    # 丸ごと置換も地の文では直さない(誤爆すると別人の名前に化けるため)。
+                    unsafe = True
                     continue
                 repls.append((i, end, target_form))
                 fixed_n += 1
