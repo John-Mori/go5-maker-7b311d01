@@ -1916,8 +1916,8 @@
 
   // ── 「🔄 データ再生成」(編集モーダル・単一レコード) ────────────────────────────────
   //   Chami依頼(2026-08-15→2026-08-18): 反映されていない履歴を回復する。一連のデータ(動画・元画像・仕上がり
-  //   プレビュー)のうち、まだGoogleドライブに無いものだけを"投稿完了と同じ経路"で作って保存し、投稿履歴カードの
-  //   1ページ目へプレビューを反映する。★実処理は stock.js の Go5Stock.regenDataset(→driveSaveForCompleted_)へ
+  //   プレビュー)のうち、まだGoogleドライブに無いものだけを"ドラフト作成時と同じ共通経路"で作って保存し、投稿履歴カードの
+  //   1ページ目へプレビューを反映する。★実処理は stock.js の Go5Stock.regenDataset(→driveSaveDataset_)へ
   //   一本化した(2026-08-18・単一化)。以前はここに Drive取り寄せ〜保存の分岐コピーを持っていたが、ドラフトの
   //   編集モーダルと同じデータを作れるよう、生成ロジックを1つに寄せた(冪等/gap-fill=既にあれば作り直さない)。
   function wireRegenButton_(k, it) {
@@ -1941,7 +1941,7 @@
     closeModal_();
     var orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = '生成中(裏で継続)…'; }
-    // ★実処理はドラフト編集モーダルと同一の Go5Stock.regenDataset(→driveSaveForCompleted_)へ委譲=同じデータを作る。
+    // ★実処理はドラフト編集モーダルと同一の Go5Stock.regenDataset(→driveSaveDataset_)へ委譲=同じデータを作る。
     //   locator は投稿履歴の it から。stock.js 側が手元metas/archiveから実metaを引き当て(無ければ背骨IDで合成)、
     //   冪等/gap-fill で保存＋投稿履歴カード1ページ目のプレビュー反映(applyPreview)まで面倒を見る。
     // ★Chami依頼(2026-08-18 msg1539245974717993050)=押したら手を離させる。処理はJSの非同期チェーンで走るので

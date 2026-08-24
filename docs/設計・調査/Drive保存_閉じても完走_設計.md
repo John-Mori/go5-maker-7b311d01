@@ -1,10 +1,11 @@
 # Drive保存「途中で閉じても裏で完走」恒久設計 (2026-08-16 / オタコン)
 
+> 2026-08-25更新：保存起点は「投稿完了」から、動画作成タブの「ドラフトで作成」押下後に動画実体とドラフト台帳が確定した直後へ移動した。現行は `saveStock_.onCommitted` → `autoDriveSaveDraft_` → `driveSaveDataset_`。非同期処理より先に永続pendingを記録し、投稿完了はDrive保存を起動しない。以下の「投稿完了」記述は2026-08-16時点の障害分析として残す。
 Chami依頼 msg_id=1538479072609443931「今日月詠みで投稿した2本(冷やしおみくじ/逮捕できない相手)がGoogleドライブに保存されていない。ボタン一つで保存すべき内容が丸々作成される機能を(途中で閉じても裏で完結)」。追い便 1538480280933900298「何も出てないというか確認していない」= 失敗は無言・原因の切り分けはChamiに求めない。
 
 ## 芯(root cause)
 今のDrive保存は投稿完了の瞬間に「開いているページの中で」動画を丸ごとアップロードしている
-(`js/stock.js` driveSaveForCompleted_ → `js/drive-upload.js` driveUpload_ → send)。
+(`js/stock.js` driveSaveDataset_ → `js/drive-upload.js` driveUpload_ → send)。
 - スマホ回線で動画アップロードは数秒〜十数秒。その最中にSafariがタブをbg破棄/閉じると fetch が切れて中断。
 - 積み直す永続キューが無い=黙って消える。エラーも残らない(Chami「何も出てない」と一致)。
 - 二次的に、resolveVideoBlob_ が手元IDBにもR2にも動画を見つけられない瞬間(mirror未着)も「動画データ無し」でスキップ。
@@ -39,7 +40,7 @@ iOS Safari はタブを完全に閉じた後は JS を1行も実行しない。k
   - videoKey = Go5Sync 側で算出(sha256hexを公開するか、mirror成功時に返る key を stock.js が控えて渡す)。
   - r2Base = Go5Sync.getConfig().url。
   - `fetch(WORKER_URL, {..., keepalive:true})` で save_job を投げる(本体は小さいので keepalive OK=閉じても送信は出る)。
-- `js/stock.js` driveSaveForCompleted_: folderId未保存の通常経路を「重いupload」から「queueSave(軽いジョブ)」へ切替。
+- `js/stock.js` driveSaveDataset_: folderId未保存の通常経路を「重いupload」から「queueSave(軽いジョブ)」へ切替。
   - 動画がR2未着(mirror未完了)の時は、その場で ensureVideoMirror_ を待ってから投げる/または pending に積む。
 - 永続ネット: 投稿完了時 `localStorage go5_drive_savejob_<id>` に pending 記録。
   アプリ起動時 sweep で、確認できていない pending を save_job 再送(サーバー側冪等で二重フォルダを作らない)。

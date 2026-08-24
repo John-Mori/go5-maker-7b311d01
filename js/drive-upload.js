@@ -33,7 +33,7 @@
   // ★タイムアウト付きfetch(iOS Safariの無応答fetch=永久保留を断つ)。ms経過でabortし、reject(拒否)で返す。
   //   呼び出し側は .catch でフォールバック(null/""/{ok:false})へ倒す=判定不能でも必ず前へ進む(failopen-guardの型)。
   //   ★これが無いと fetchPreview/fetchVideo/resolveFolderUrl/queueSave が1つでもハングした時、
-  //     driveSaveForCompleted_ のPromise鎖が done() へ到達せず「再生成中…」のまま永久に固まる
+  //     driveSaveDataset_ のPromise鎖が done() へ到達せず「再生成中…」のまま永久に固まる
   //     (Chami報告2026-08-18「再生成中から待たされる」の真因)。
   function fetchT_(url, opt, ms) {
     opt = opt || {};
@@ -102,7 +102,7 @@
           setStatus('✅ Driveに保存しました(' + channelLabel(payload.channel) + ')' + owNote + ' ' +
             '<a href="' + link + '" target="_blank" rel="noopener">フォルダを開く</a>');
           // ★背骨ID→フォルダIDを端末に控える(drive_up_<videoId>)。動画作成時に即保存した後、
-          //   投稿完了側はこれを見て「動画は保存済み」と判断し、仕上がりプレビューだけ追記する(二重保存しない)。
+          //   共通保存側はこれを見て「動画は保存済み」と判断し、足りない画像だけ追記する(二重保存しない)。
           if (payload.videoId && res.j.folderId) {
             try { localStorage.setItem("drive_up_" + payload.videoId, res.j.folderId); } catch (e3) {}
           }
@@ -179,14 +179,10 @@
     statusEl().appendChild(b);
   }
 
-  // ★Drive保存は「ドラフトの投稿完了」でまとめて行う(2026-08-13 Chami「保存タイミングは投稿モードから
-  //   投稿完了を押した時に全て保存するタイミングにして」)。作成の瞬間には保存しない=ここでは lastCtx を
-  //   控えるだけ(Bsky後追い画像の宛先題名/チャンネルの保険)で Drive へは書かない。
-  //   《なぜ作成時保存を外して安全か》以前(2026-08-11)作成時に上げていた理由は「iOSが投稿完了までに
-  //   IDBの動画blobを捨てると投稿完了時にblobが取れずDriveに動画が残らない」ため。だが現在は作成直後に
-  //   ensureVideoMirror_ が動画blobを R2 へ控え、投稿完了側の resolveVideoBlob_ が手元IDBに無ければ R2 から
-  //   取り寄せる(stock.js)。=投稿完了の時点でも動画blobは確実に手に入る=作成時保存に頼らなくてよい。
-  //   投稿完了(stock.js driveSaveForCompleted_)が動画+元画像+仕上がりプレビューを1度に upload する。
+  // ★Drive保存の起点は stock.js の「ドラフト台帳が動画実体付きで確定した瞬間」へ一本化。
+  //   この video-created リスナーは、まだドラフトID(stk...)が確定していないためDriveへ書かず、
+  //   Bsky後追い画像の宛先文脈だけを控える。stock.js の saveStock_.onCommitted が、動画/元画像/
+  //   仕上がりプレビューを共通の driveSaveDataset_ へ渡す。投稿完了はDrive保存を起動しない。
   document.addEventListener("video-created", function (e) {
     var d = (e && e.detail) || {};
     if (!d.blob || d.test) return;
@@ -199,8 +195,8 @@
     lastCtx = { videoId: d.videoId || "", title: title, channel: channel, folderId: "", queuedImage: lastCtx.queuedImage };
   });
 
-  // ドラフトタブの「投稿完了」から呼ばれる。blob を受け取って Drive へアップロードする。
-  //   srcImages=動画に使った元画像(stock.js が投稿完了時にIDBから読み出して渡す)。動画と同じフォルダへ一緒に保存する。
+  // 共通Drive保存から呼ばれる。blob を受け取って Drive へアップロードする。
+  //   srcImages=動画に使った元画像(stock.js がIDB/R2から読み出して渡す)。動画と同じフォルダへ一緒に保存する。
   function driveUpload_(blob, videoName, title, channel, videoId, srcImages, previewImage, opts) {
     opts = opts || {};
     if (!configured()) { showError("channel_unresolved"); return; }
@@ -320,8 +316,8 @@
     lastCtx.channel = channel; lastCtx.title = title; lastCtx.folderId = folderId;
     sendAppend(f, 0);
   }
-  // ── ★サーバー側完走ジョブ(2026-08-16 Chami「途中で閉じても裏で完結」)──
-  //   投稿完了で「重い動画アップロード」をこのページ内で走らせず、動画は既にR2に控えてある(ensureVideoMirror_)ので
+  // ── ★サーバー側完走ジョブ(ドラフト確定直後に起動・途中で閉じても裏で完結)──
+  //   ドラフト確定後に「重い動画アップロード」をこのページ内で走らせず、動画は既にR2に控えてある(ensureVideoMirror_)ので
   //   その在り処(videoKey)だけを軽いFormDataでWorkerへ渡す→Workerが即202を返し、あとはR2→Driveをサーバー側で完走。
   //   本体が軽い(数百バイト)ので keepalive:true が確実に効く=送信の途中でタブを閉じてもブラウザが送り切る。
   //   opts = { videoId(R2キー算出に使う下書きID), title, channel, previewKey?, srcKey?, overwrite? }

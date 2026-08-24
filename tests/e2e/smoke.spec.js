@@ -480,9 +480,17 @@ test.describe('ドラフト軽量ページ', () => {
         bskyText: 'テスト本文', affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
         videoId, attrs: {}
       }]));
+
     }, { draftId, videoId });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect.poll(() => page.evaluate(() => (
+    await page.evaluate(() => {
+      // Drive保存の唯一の起点はドラフト作成確定時。投稿完了から再起動しないことをこの実物フローで固定する。
+      window.__postCompleteDriveCalls = 0;
+      if (window.Go5Drive) {
+        Go5Drive.upload = () => { window.__postCompleteDriveCalls += 1; };
+        Go5Drive.queueSave = () => { window.__postCompleteDriveCalls += 1; return Promise.resolve({ ok: true }); };
+      }
+    });    await expect.poll(() => page.evaluate(() => (
       typeof window.Go5History?.addCompletedPost
     ))).toBe('function');
 
@@ -503,6 +511,7 @@ test.describe('ドラフト軽量ページ', () => {
         archived: archive.some((x) => x.id === draftId),
       };
     }, { draftId, videoId, ytUrl })).toEqual({ history: true, draftRemoved: true, archived: true });
+    expect(await page.evaluate(() => window.__postCompleteDriveCalls)).toBe(0);
 
     // ★投稿履歴は軽量ページ化で専用ページ StockLists.html へ分離済(Stock.html #tabVerify=data-nav)。
     //   旧アサートは index.html を期待していて 24h 全pushで赤=スモーク門が死んでいた(検証の妥当性側の穴)。

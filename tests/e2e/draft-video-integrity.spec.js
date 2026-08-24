@@ -83,6 +83,55 @@ test.describe('ドラフト動画の完全性ゲート', () => {
     expect(saved).toEqual({ count: 1, ready: true, bytes: 32 * 1024, blobBytes: 32 * 1024 });
   });
 
+  test('ドラフト着地直後だけDrive保存を1回起動し、先に永続再送記録を残す', async ({ page }) => {
+    await ready(page);
+    await page.evaluate(() => {
+      window.__draftDriveCalls = [];
+      window.__draftDriveLegacyCalls = 0;
+      const preview = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3MxZ5wAAAABJRU5ErkJggg==';
+      Go5Drive.folderIdFor = () => '';
+      Go5Drive.checkSaved = () => Promise.resolve(false);
+      Go5Drive.fetchPreview = () => Promise.resolve(preview);
+      Go5Drive.fetchVideo = () => Promise.resolve(null);
+      Go5Drive.queueSave = (opts) => {
+        window.__draftDriveCalls.push({ videoId: opts.videoId, title: opts.title, channel: opts.channel });
+        return Promise.resolve({ ok: true });
+      };
+      Go5Drive.upload = () => { window.__draftDriveLegacyCalls += 1; };
+      Go5Sync.configured = () => true;
+      Go5Sync.putBlobR2At = () => Promise.resolve('a'.repeat(64));
+      Go5Sync.hasBlobR2At = () => Promise.resolve(true);
+      Go5Sync.keyForName = () => Promise.resolve('a'.repeat(64));
+      Go5Sync.getConfig = () => ({ url: 'https://sync.example.test' });
+      Go5Sync.fetchBlobR2At = () => Promise.resolve(null);
+      document.dispatchEvent(new CustomEvent('video-created', {
+        detail: {
+          draft: true, title: '作成時Drive保存回帰', name: 'draft-drive.mp4', account: 'acc1',
+          videoId: 'acc1-20260825-1200-drive',
+          blob: new Blob([new Uint8Array(32 * 1024)], { type: 'video/mp4' })
+        }
+      }));
+    });
+
+    await expect.poll(() => page.evaluate(() => window.__draftDriveCalls.length), { timeout: 15000 }).toBe(1);
+    const state = await page.evaluate(() => {
+      const list = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
+      const meta = list[0];
+      return {
+        draftCount: list.length,
+        call: window.__draftDriveCalls[0],
+        legacyCalls: window.__draftDriveLegacyCalls,
+        pending: !!(meta && localStorage.getItem('go5_drive_savejob_' + meta.id)),
+        driveState: meta ? JSON.parse(localStorage.getItem('go5_drive_saved_' + meta.id) || 'null')?.state : null,
+        draftId: meta?.id || ''
+      };
+    });
+    expect(state.draftCount).toBe(1);
+    expect(state.call).toEqual({ videoId: state.draftId, title: '作成時Drive保存回帰', channel: 'acc1' });
+    expect(state.legacyCalls).toBe(0);
+    expect(state.pending).toBe(true);
+    expect(state.driveState).toBe('pending');
+  });
   test('サイズだけ大きい破損mp4はブラウザの再生確認で拒否する', async ({ page }) => {
     await ready(page);
     const playable = await page.evaluate(() => Go5VideoIntegrity.probePlayable(
