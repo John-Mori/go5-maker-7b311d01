@@ -57,7 +57,11 @@
   //   いないだけ」の作品を消すと、直後に「画像あるのに消えた」の再発(C-041/投稿履歴ハイドレート事故と同型)に
   //   なる。確定0枚(missing=読んで0/none=未着手)と 確定1枚 のときだけ隠す。
   //   n = refImgsOf_ の枚数(読込済みならその実数)/ state = refSlotState_ の結果。
-  function noMaterialHideDecide_(n, state) {
+  //   ★justAdded=このセッションで今追加したばかりの候補は、まだ画像を付けていなくても隠さない。
+  //     隠すと「登録しましたと出たのに一覧から消える」=素材を後付けする導線が塞がる(Chami 2026-08-24
+  //     v=919「登録しましたが出て候補一覧に残らない」の真因=今日入れた素材なし非表示が新規追加を即座に食う)。
+  function noMaterialHideDecide_(n, state, justAdded) {
+    if (justAdded) return false;                      // 今追加したばかり=これから素材を付ける=隠さない
     if (n >= 2) return false;                         // 複数あり=投稿できる=隠さない
     if (n === 1) return true;                         // 1枚のみ=複数画像なし=隠す(枚数は確定している)
     // n===0: 本当に0枚(確定)か、まだ読込中/未確認(未確定)かを state で分ける。
@@ -539,8 +543,12 @@
     cid = String(cid);
     var n = refImgsOf_(cid).length;
     var st = (n === 0) ? refSlotState_(cid) : 'images';
-    return noMaterialHideDecide_(n, st);
+    return noMaterialHideDecide_(n, st, !!_sessionAddedCids[cid]); // ★今セッションで追加したばかりは隠さない
   }
+  // このセッションで「候補に追加」した cid の集合。素材なし非表示ゲートから除外する(追加直後の消失を防ぐ)。
+  //   リロードで空に戻る=一度離れた古い素材なし候補は従来どおり非表示に戻る(=非表示トグルの本来の意図は保つ)。
+  var _sessionAddedCids = {};
+  function markSessionAdded_(cid) { if (cid != null) _sessionAddedCids[String(cid)] = true; }
   function isHiddenByPosted_(it) {
     if (!it) return false;
     if (!_hidePosted.acc1 && !_hidePosted.acc2) return false; // どちらのトグルもOFF=隠さない
@@ -4633,6 +4641,7 @@
     var isB = tw.kind === 'bsky';
     var title = isB ? (tw.user ? ('🦋 @' + tw.user + ' のポスト') : '🦋 Blueskyのポスト')
                     : (tw.user ? ('X @' + tw.user + ' のポスト') : 'X X(Twitter)のポスト');
+    markSessionAdded_(tw.cid); // ★追加直後は素材なし非表示ゲートから除外(v=919の消失対策)
     items.unshift({ url: tw.url, cid: tw.cid, twitterUrl: tw.url, isTwitter: true, title: title, addedAt: new Date().getTime() });
     var lsOk = candItemsWrite_(key, items); // ★戻り値=LS書込成否
     attachAddImgs_(tw.cid); // 追加モーダルの画像スロットも一緒に保存(動画生成用)
@@ -4730,6 +4739,7 @@
     var r = (raw && url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
     // ①作品URLがFANZA作品として有効 → 従来のFANZA候補(Twitter URLがあれば紐づけて保存)
     if (raw && r && r.ok) {
+      markSessionAdded_(r.cid); // ★追加直後は素材なし非表示ゲートから除外(v=919の消失対策)
       var twForWork = parseSnsUrl_(twRaw); // X / Bluesky どちらの投稿URLでも紐づけ可
       var items0 = candItemsRead_(key);
       // 重複チェック: 同じcidが既にある場合はサブデータ(X/BlueskyURL・画像・メモ)のみ追記

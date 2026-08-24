@@ -28,5 +28,11 @@ t('loading(読込中)は隠さない', f(0, 'loading'), false);
 t('checking(確認中)は隠さない', f(0, 'checking'), false);
 t('stalled(読込失敗)は隠さない', f(0, 'stalled'), false); // C-041: 読込失敗を「消えた」扱いにしない
 
+// ★v=919 回帰ガード(Chami 2026-08-24「登録しましたが出て候補一覧に残らない」)=
+//   今セッションで追加したばかり(justAdded=true)は、確定0枚/1枚でも隠さない。
+//   素朴実装(justAdded を見ない)は下の2件で赤くなる=これから素材を付ける候補が追加直後に消える。
+t('justAdded は確定0枚でも隠さない', f(0, 'missing', true), false);
+t('justAdded は1枚でも隠さない', f(1, 'images', true), false);
+
 console.log('noMaterialHideDecide_: ' + ok + '/' + n + (ok === n ? ' PASS' : ' FAIL'));
 process.exit(ok === n ? 0 : 1);
