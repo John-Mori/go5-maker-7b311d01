@@ -4074,12 +4074,21 @@
   });
   // ★履歴が IDB からメモリミラーへ載った合図(hist-store)で、表示中の検証タブを1回だけ描き直す。
   //   起動直後の初回描画はミラー未了で LS を読む=完了後に最新へ追いつく。6キー分の連発は 50ms で1回へ集約。
-  var _histHydrateRefreshT = null;
-  document.addEventListener('go5-hist-hydrated', function () {
+  var _histHydrateRefreshT = null, _histHydrateNeedsSheet = false;
+  document.addEventListener('go5-hist-hydrated', function (ev) {
+    // 現在のチャンネル以外のIDB着地では、表示中一覧を描き直さない。
+    // またハイドレートは「端末内データが届いた」合図なので、重い点検/外部再取得を含む refresh() は起動しない。
+    // 本文だけを即再描画し、シート生キャッシュが届いた時だけ表示専用マージを追走させる。
+    var key = String((ev && ev.detail && ev.detail.key) || '');
+    var a = acct();
+    if (key && key.slice(-('__' + a).length) !== '__' + a) return;
+    if (key.indexOf('sheet_hist_raw__') === 0) _histHydrateNeedsSheet = true;
     if (_histHydrateRefreshT) return;
     _histHydrateRefreshT = setTimeout(function () {
       _histHydrateRefreshT = null;
-      try { var pv = $('pageVerify'); if (pv && !pv.hidden) refresh(); } catch (e) {}
+      var needsSheet = _histHydrateNeedsSheet; _histHydrateNeedsSheet = false;
+      try { var pv = $('pageVerify'); if (pv && !pv.hidden) render(); } catch (e) {}
+      if (needsSheet) { try { mergeSheetExtras_(); } catch (e2) {} }
     }, 50);
   });
   // ★すぐ表示(Chami依頼2026-07-29「リロードで毎回全部読み込み直して遅い/毎回要る物と要らない物を分けて」):
@@ -4091,8 +4100,9 @@
     try { render(); } catch (e) {}           // 在メモリの永続キャッシュから即描画(通信0)
     try { mergeSheetExtras_(); } catch (e) {} // シート由来行だけ先に取得(TTL内なら通信0)。応答後に自身がrender()
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', paintCachedNow_);
-  else paintCachedNow_();
+  // このスクリプトは #ytClickList より後で読み込まれるため、DOMContentLoadedを待つ必要がない。
+  // 待つと後続の candidates.js(画像展開)まで本文表示を人質に取るため、端末内キャッシュをここで即描画する。
+  paintCachedNow_();
   // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理。(各1回)
   setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
 

@@ -66,6 +66,51 @@ test.describe('go5-maker 公開URL スモーク', () => {
     await expect(fileInput).toHaveCount(1);
   });
 });
+
+test.describe('投稿履歴の初期表示', () => {
+  test('画像供給スクリプトが遅くてもPCでは履歴本文を先に表示する', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('current_account', 'acc1');
+        localStorage.setItem('bsky_gas_url', '');
+        localStorage.setItem('hist_maint_at', String(Date.now()));
+        localStorage.setItem('hist_metrics_at', String(Date.now()));
+        localStorage.setItem('short_hist__acc1', JSON.stringify([{
+          videoId: 'acc1-20260825-1200-fast1',
+          ts: Date.now(),
+          title: 'PC投稿履歴の先行表示テスト',
+          account: 'acc1'
+        }]));
+        localStorage.setItem('verify_manual__acc1', '[]');
+        localStorage.setItem('verify_yt__acc1', '{}');
+      } catch (e) {}
+    });
+
+    // 画像用の巨大な候補モジュールを明示保留しても、文字主体の履歴一覧を人質に取らない。
+    let candidateRequested = false;
+    let releaseCandidate;
+    const candidateGate = new Promise((resolve) => { releaseCandidate = resolve; });
+    await page.route('**/js/candidates.js?*', async (route) => {
+      candidateRequested = true;
+      await candidateGate;
+      await route.continue();
+    });
+
+    const navigation = page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    try {
+      await expect.poll(() => candidateRequested).toBe(true);
+      await expect(page.locator('.vrow-title').filter({ hasText: 'PC投稿履歴の先行表示テスト' }))
+        .toBeVisible({ timeout: 1000 });
+    } finally {
+      releaseCandidate();
+      await navigation.catch(() => {});
+    }
+
+    // 保留解除後は画像供給APIも従来どおり利用可能になる。
+    await expect.poll(() => page.evaluate(() => typeof window.Go5Cand?.usedImgs), { timeout: 6000 }).toBe('function');
+  });
+});
 test.describe('候補ページの画像・投稿編集', () => {
   test('PC画像モーダルの矢印は左右対称の20%位置・2倍サイズで表示する', async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
