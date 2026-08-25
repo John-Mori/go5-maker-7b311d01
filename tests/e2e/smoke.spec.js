@@ -416,6 +416,44 @@ test.describe('候補ページの画像・投稿編集', () => {
     expect(dump).toContain('ref_render');
     expect(dump).toContain('dom_img_load');
   });
+  test('R2マーカーがIDBへ先着しても画像読込中で止まらず実画像へ解決する', async ({ page }) => {
+    const cid = 'tw_candidate_r2_marker';
+    await page.goto('__go5_seed__.html');
+    await page.evaluate(async ({ cid }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: 'R2マーカー回帰テスト', isTwitter: true,
+        twitterUrl: 'https://x.com/go5_test/status/936', addedAt: Date.now()
+      }]));
+      await new Promise((resolve, reject) => {
+        const req = indexedDB.open('go5store', 1);
+        req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv'); };
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result, tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put({ __r2n: 1, memo: '画像あり', at: Date.now() }, 'ref:' + cid);
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+    }, { cid });
+    await page.route('**/js/candidates.js?*', async (route) => {
+      const response = await route.fetch();
+      const original = await response.text();
+      const injected = [
+        '(function () {',
+        '  Go5Sync.configured = function () { return true; };',
+        '  Go5Sync.fetchBlobR2At = function () { return Promise.resolve(new Blob([Uint8Array.from([71,73,70,56,57,97,1,0,1,0,128,0,0,0,0,0,255,255,255,33,249,4,1,0,0,0,0,44,0,0,0,0,1,0,1,0,0,2,2,68,1,0,59])], { type: "image/gif" })); };',
+        '}());'
+      ].join('\n');
+      await route.fulfill({ response, body: injected + '\n' + original });
+    });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.cand-title').filter({ hasText: 'R2マーカー回帰テスト' })).toBeVisible();
+    const thumb = page.locator('[data-refimgview="' + cid + '"]');
+    await expect(thumb).toBeVisible({ timeout: 4000 });
+    await expect.poll(() => thumb.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+    await expect(page.locator('[data-refretry="' + cid + '"]')).toHaveCount(0);
+  });
   test('文字情報だけ同期された時もFANZA作品URLとX URLを再読込なしで表示する', async ({ page }) => {
     const cid = 'd_candidate_sync_text';
     const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_candidate_sync_text/';

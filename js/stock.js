@@ -1574,7 +1574,7 @@
     var verifyFolder = opts.normalize ? Promise.resolve('') : resolveOkFolder_();
     verifyFolder.then(function (okFolderId) {
       if (okFolderId) {
-        setDriveSavedState_(id, 'verified', meta); try { render(); } catch (e) {} // checkSavedで実物確認済み＝verified
+        // 動画だけを保存完了にしない。3点セットの確定は直下の folder_state 実測後に行う。
         // ★重複生成の根治(Chami報告2026-08-18 msg1539252539571052544「元画像だけがない場合でデータ再生成しても
         //   プレビューがもう一つできるだけ。意味なし」)。動画は既にDriveに在る(=okFolderId)。従来はここで有無を見ずに
         //   appendImage(プレビュー)を毎回打っていた=Driveに「_プレビュー」が増殖。folder_state(read-only)で
@@ -1584,6 +1584,16 @@
           : Promise.resolve(null);
         Promise.all([previewReady, stateP]).then(function (arr) {
           var prevB = arr[0], st = arr[1];
+          // 完了は動画・完成プレビュー・元画像の3点が揃った時だけ。動画だけのフォルダはpendingを残し、
+          // 次回sweep/実物確認で不足分だけ再投入する。
+          if (driveSetComplete_(st)) {
+            try { localStorage.removeItem(SAVEJOB_PENDING_PREFIX + id); } catch (e) {}
+            setDriveSavedState_(id, 'verified', meta);
+          } else {
+            recordSaveJobPending_(id, meta);
+            setDriveSavedState_(id, 'pending', meta);
+          }
+          try { render(); } catch (e) {}
           // 状態不明(st===null)は「在る」とみなす=重複防止側へ倒す(余計に作らない)。
           var hasPrev = st ? !!st.hasPreview : true;
           var hasSrc  = st ? !!st.hasSrc     : true;
@@ -1904,18 +1914,53 @@
   //   無ければ動画をR2へ上げ直して save_job を再送する。Worker側は冪等=再送で二重フォルダにならない。
   var SAVEJOB_PENDING_PREFIX = 'go5_drive_savejob_';
   var SAVEJOB_MAX_TRIES = 12; // R2に実体が在る前提での「再送」上限。超えても記録は残しcheckSavedは継続(嘘の完了にしない)
+  var SAVEJOB_REPAIR_SCHEMA = 3; // 動画・完成プレビュー・元画像の3点セットを完了条件にした世代
   function recordSaveJobPending_(id, meta) {
     try {
       var prev = JSON.parse(localStorage.getItem(SAVEJOB_PENDING_PREFIX + id) || 'null') || {};
       localStorage.setItem(SAVEJOB_PENDING_PREFIX + id, JSON.stringify({
-        id: id, title: meta.title, channel: meta.account, ts: prev.ts || Date.now(), tries: (prev.tries | 0)
+        id: id, videoId: meta.videoId || prev.videoId || id,
+        title: meta.title, channel: meta.account, ts: prev.ts || Date.now(),
+        tries: prev.repairSchema === SAVEJOB_REPAIR_SCHEMA ? (prev.tries | 0) : 0,
+        repairSchema: SAVEJOB_REPAIR_SCHEMA
       }));
     } catch (e) {}
+  }
+  function driveSetComplete_(state) {
+    if (window.Go5DriveSet && typeof window.Go5DriveSet.isComplete === 'function') return window.Go5DriveSet.isComplete(state);
+    return !!(state && state.saved === true && state.hasPreview === true && state.hasSrc === true);
+  }
+  // folder_state が使える環境では3種類を実測する。旧Workerだけ動画判定へ退化するが「完全」とは扱わない。
+  function driveSetState_(channel, title) {
+    if (window.Go5Drive && typeof Go5Drive.folderState === 'function')
+      return Go5Drive.folderState(channel, title).catch(function () { return null; });
+    if (window.Go5Drive && typeof Go5Drive.checkSaved === 'function')
+      return Go5Drive.checkSaved(channel, title).then(function (saved) { return { saved: !!saved, hasPreview: false, hasSrc: false }; }, function () { return null; });
+    return Promise.resolve(null);
+  }
+  var _driveSetRepairBusy = {};
+  function repairDriveSet_(rec, onDone) {
+    if (!rec || !rec.id || _driveSetRepairBusy[rec.id]) return false;
+    _driveSetRepairBusy[rec.id] = true;
+    var finished = false;
+    function finishDriveSetRepair_() {
+      if (finished) return; finished = true;
+      delete _driveSetRepairBusy[rec.id];
+      if (onDone) { try { onDone(); } catch (e) {} }
+    }
+    var wd = setTimeout(finishDriveSetRepair_, 60000);
+    try {
+      driveSaveDataset_({ id: rec.id, videoId: rec.videoId || rec.id, title: rec.title, account: rec.channel }, {
+        silent: true,
+        onDone: function () { clearTimeout(wd); finishDriveSetRepair_(); }
+      });
+    } catch (e) { clearTimeout(wd); finishDriveSetRepair_(); }
+    return true;
   }
   var _saveJobSweepBusy = false;
   function sweepSaveJobs_() {
     if (document.hidden || _saveJobSweepBusy) return;
-    if (!(window.Go5Drive && Go5Drive.queueSave && Go5Drive.checkSaved)) return;
+    if (!(window.Go5Drive && (Go5Drive.folderState || Go5Drive.checkSaved))) return;
     var keys = [];
     try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf(SAVEJOB_PENDING_PREFIX) === 0) keys.push(k); } } catch (e) { return; }
     if (!keys.length) return;
@@ -1927,39 +1972,31 @@
       var k = keys[idx++], rec = null;
       try { rec = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { rec = null; }
       if (!rec || !rec.id || !rec.title || !rec.channel) { try { localStorage.removeItem(k); } catch (e) {} setTimeout(nextK, 0); return; }
-      Go5Drive.checkSaved(rec.channel, rec.title).then(function (saved) {
-        if (saved) { // 確認できた=畳む。saved後にnovideo等の暫定失敗表示が残っていたら実物確認へ格上げ
+      driveSetState_(rec.channel, rec.title).then(function (state) {
+        if (driveSetComplete_(state)) {
           try { localStorage.removeItem(k); } catch (e) {}
-          var _ds = driveSavedState_(rec.id);
-          if (_ds && _ds.state !== 'verified') { setDriveSavedState_(rec.id, 'verified', { title: rec.title, account: rec.channel }); try { render(); } catch (e) {} }
+          setDriveSavedState_(rec.id, 'verified', { title: rec.title, account: rec.channel });
+          try { render(); } catch (e) {}
           setTimeout(nextK, 40); return;
         }
-        // ★まだDriveに無い→「R2に動画実体が今この瞬間 在るか」をHEADで実測してから撃つ(ensureVideoMirror_=IDB直読み
-        //   だけの旧処置は、IDBを退役した端末で毎回無言スキップ→r2_video_missingの保証された失敗を8回撃って諦めていた。
-        //   Fable5診断・2026-08-18)。実体がどこにも無い時はsave_jobは無駄撃ち=沈黙で終わらせず「見える失敗(novideo)」にする。
-        Promise.resolve(ensureVideoOnR2_(rec.id)).then(function (onR2) {
-          if (!onR2) {
-            // 動画がこの端末にもクラウドにも無い=save_jobを投げても静死するだけ。カードに見える失敗を出す(沈黙ゼロ)。
-            setDriveSavedState_(rec.id, 'novideo', { title: rec.title, account: rec.channel });
-            try { render(); } catch (e) {}
-            var ageMs = Date.now() - (rec.ts || Date.now());
-            if (ageMs > 14 * 24 * 3600 * 1000) { try { localStorage.removeItem(k); } catch (e) {} } // 14日粘っても実体が戻らなければ記録は掃除(表示は残る)
-            setTimeout(nextK, 60); return;
-          }
-          if ((rec.tries | 0) >= SAVEJOB_MAX_TRIES) { setTimeout(nextK, 40); return; } // 再送は打ち切るが記録は残す=次回以降もcheckSavedで確認は続ける
-          rec.tries = (rec.tries | 0) + 1;
-          try { localStorage.setItem(k, JSON.stringify(rec)); } catch (e) {}
-          Go5Drive.queueSave({ videoId: rec.id, title: rec.title, channel: rec.channel, overwrite: true })
-            .catch(function () {}).then(function () { setTimeout(nextK, 150); });
-        }).catch(function () { setTimeout(nextK, 150); });
+        // 動画だけ/画像1枚だけでもpendingを畳まない。手元IDB・同期ミラー・R2を再探索し、不足分だけ補う。
+        // 旧版で上限まで使い切ったジョブも、3点セット修復の初回だけ再試行枠を復活させる。
+        if (rec.repairSchema !== SAVEJOB_REPAIR_SCHEMA) {
+          rec.tries = 0;
+          rec.repairSchema = SAVEJOB_REPAIR_SCHEMA;
+        }
+        if ((rec.tries | 0) >= SAVEJOB_MAX_TRIES) { setTimeout(nextK, 40); return; }
+        rec.tries = (rec.tries | 0) + 1;
+        try { localStorage.setItem(k, JSON.stringify(rec)); } catch (e) {}
+        setDriveSavedState_(rec.id, 'pending', { title: rec.title, account: rec.channel });
+        if (!repairDriveSet_(rec, function () { setTimeout(nextK, 150); })) setTimeout(nextK, 300);
       }).catch(function () { setTimeout(nextK, 150); });
     }
     nextK();
   }
-
   // ── ★Drive保存の「実物確認」状態(2026-08-17 オタコン)──
   //   ドラフト確定/手押しでDrive保存に入ったら go5_drive_saved_<id> に pending を記録し、Go5Drive.checkSaved
-  //   ([題名]フォルダに動画実体が在るか＝read-only)で実物を確認できた時だけ verified へ上げる。Workerの202受理を
+  //   ([題名]フォルダに動画・完成プレビュー・元画像の3点が在るか＝read-only)で実物を確認できた時だけ verified へ上げる。Workerの202受理を
   //   成功と読み替えない=「裏で完走と出るのにDriveに動画が来ない」の沈黙を、カードで見える状態(確認中/実物確認)に変える。
   var DRIVE_SAVED_PREFIX = 'go5_drive_saved_';
   function driveSavedState_(id) {
@@ -1981,24 +2018,89 @@
     if (_driveVerifyBusy[id]) return;
     var st = driveSavedState_(id);
     if (!st || st.state === 'verified') return;
-    if (!(window.Go5Drive && Go5Drive.checkSaved) || !st.channel || !st.title) return;
+    if (!(window.Go5Drive && (Go5Drive.folderState || Go5Drive.checkSaved)) || !st.channel || !st.title) return;
     _driveVerifyBusy[id] = true;
-    var delays = [4000, 20000, 60000, 180000]; // 4秒→20秒→60秒→180秒(初回を4秒に=既にDrive着地済み/軽い保存は数秒で「実物確認」へ上がる。Chami「押して30秒無反応」2026-08-18)
+    var delays = [4000, 20000, 60000, 180000];
     var i = 0;
     function schedule() {
-      if (i >= delays.length) { _driveVerifyBusy[id] = false; return; } // 打ち切り=pendingのまま(嘘をつかない・次回起動で再照会)
+      if (i >= delays.length) { _driveVerifyBusy[id] = false; return; }
       setTimeout(tryOnce, delays[i++]);
     }
     function tryOnce() {
-      if (document.hidden) { schedule(); return; } // 隠れている間は数えず復帰で再試行
-      Go5Drive.checkSaved(st.channel, st.title).then(function (saved) {
-        if (saved) { setDriveSavedState_(id, 'verified', null); _driveVerifyBusy[id] = false; try { render(); } catch (e) {} return; }
+      if (document.hidden) { schedule(); return; }
+      driveSetState_(st.channel, st.title).then(function (state) {
+        if (driveSetComplete_(state)) {
+          try { localStorage.removeItem(SAVEJOB_PENDING_PREFIX + id); } catch (e) {}
+          setDriveSavedState_(id, 'verified', null);
+          _driveVerifyBusy[id] = false;
+          try { render(); } catch (e) {}
+          return;
+        }
+        // 動画だけ到着していても不足画像を自己修復する。既存フォルダ/既存ファイルはWorker側で再利用・スキップ。
+        repairDriveSet_({ id: id, videoId: st.videoId || id, title: st.title, channel: st.channel });
         schedule();
       }).catch(function () { schedule(); });
     }
     schedule();
   }
+  // 旧版が「動画1本あり」だけで verified にしてpendingを消した最近の作品も、初回起動時に再点検する。
+  // 別端末で履歴だけ同期された場合にも効くよう、端末ローカルのDrive状態ではなく直近メタを基準にする。
+  var DRIVE_SET_AUDIT_KEY = 'go5_drive_set_audit_set3';
+  var _driveSetAuditBusy = false;
+  function auditRecentDriveSets_() {
+    if (_driveSetAuditBusy || document.hidden) return;
+    if (!(window.Go5Drive && (Go5Drive.folderState || Go5Drive.checkSaved))) return;
+    try { if (localStorage.getItem(DRIVE_SET_AUDIT_KEY) === '1') return; } catch (e) {}
 
+    var raw = loadMeta().concat(loadArchive()).sort(function (a, b) {
+      return ((b && (b.completedTs || b.ts)) || 0) - ((a && (a.completedTs || a.ts)) || 0);
+    });
+    var seen = {}, items = [];
+    for (var n = 0; n < raw.length && items.length < 8; n++) {
+      var m = raw[n];
+      if (!m || !m.id || !m.title || !m.account) continue;
+      var sig = m.account + '\n' + m.title;
+      if (seen[sig]) continue;
+      seen[sig] = true;
+      items.push(m);
+    }
+    if (!items.length) {
+      try { localStorage.setItem(DRIVE_SET_AUDIT_KEY, '1'); } catch (e) {}
+      return;
+    }
+
+    _driveSetAuditBusy = true;
+    var idx = 0, retryNeeded = false;
+    function finishDriveSetAudit_() {
+      _driveSetAuditBusy = false;
+      // 通信不能時は完了印を付けず、次回起動時に自動再監査する。
+      if (!retryNeeded) {
+        try { localStorage.setItem(DRIVE_SET_AUDIT_KEY, '1'); } catch (e) {}
+      }
+    }
+    function next_() {
+      if (document.hidden || idx >= items.length) { finishDriveSetAudit_(); return; }
+      var meta = items[idx++];
+      driveSetState_(meta.account, meta.title).then(function (state) {
+        if (!state) {
+          retryNeeded = true;
+        } else if (!driveSetComplete_(state) && state.saved === true) {
+          var rec = {
+            id: meta.id, videoId: meta.videoId || meta.id,
+            title: meta.title, channel: meta.account, ts: Date.now(),
+            tries: 0, repairSchema: SAVEJOB_REPAIR_SCHEMA
+          };
+          try { localStorage.setItem(SAVEJOB_PENDING_PREFIX + meta.id, JSON.stringify(rec)); } catch (e) {}
+          setDriveSavedState_(meta.id, 'pending', {
+            title: meta.title, account: meta.account, videoId: meta.videoId || meta.id
+          });
+          repairDriveSet_(rec);
+        }
+        setTimeout(next_, 700);
+      }).catch(function () { retryNeeded = true; setTimeout(next_, 700); });
+    }
+    next_();
+  }
   // ── 再作成(ドラフトデータを動画作成タブに復元) ──
   var REMAKE_PENDING_KEY = 'go5_stock_remake_pending';
   function remakeStock_(meta) {
@@ -3421,9 +3523,10 @@
     setInterval(sweepVideoMirror_, 120000);
 
     // ★save_job 永続pending の再送。ドラフト確定時にqueueSaveが届かなかったぶんを、
-    //   起動時と復帰時・定期に「Driveにもう在るか」照会して畳む/再送する(sync設定の読込を少し待つ)。
+    //   起動時と復帰時・定期に「Driveへ3点揃ったか」照会し、完全なら畳み、不足なら同じフォルダへ不足分だけ再送する。
     setTimeout(sweepSaveJobs_, 3000);
     setTimeout(sweepSaveJobs_, 12000);
+    setTimeout(auditRecentDriveSets_, 5000);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) sweepSaveJobs_(); });
     setInterval(sweepSaveJobs_, 180000);
 

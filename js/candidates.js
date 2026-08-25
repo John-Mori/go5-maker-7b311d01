@@ -134,11 +134,17 @@
   // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
   //   js/candidates.js と KouhoTeian.html に同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
   function imgHash_(s) { s = String(s || ''); var h = 5381, i = s.length; while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; } return h.toString(36); }
+  // R2マーカーがメモリへ先着しても、実画像でない限り解決処理を止めないための純判定。
+  function shouldResolveR2Marker_(cid, busy, memRec, marker) {
+    if (!cid || busy || !isR2Marker_(marker)) return false;
+    var imgs = memRec && Array.isArray(memRec.imgs) ? memRec.imgs.filter(Boolean) : [];
+    return !(imgs.length || (memRec && memRec.img && !isR2Marker_(memRec)));
+  }
 
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -1524,8 +1530,11 @@
   // LSのR2マーカーをR2から実体化して _imgMem.ref[cid] へ dataURL で載せる。冪等(多重発射・既に実体あり=no-op)。
   function resolveR2IntoMem_(cid, marker) {
     cid = String(cid || '');
-    if (!cid || _r2ResolveJobs[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) return;
-    if (!isR2Marker_(marker)) return;
+    // 同期/IDBから {__r2n} マーカー自体がメモリへ先に載る場合がある。
+    // 「メモリにキーがある」だけで止めると、そのマーカーを実画像へ解決する処理が一度も走らず
+    // 候補カードが永久に「画像読込中…」になる。実画像が既に載っている時だけ no-op にする。
+    var memRec = cid ? _imgMem.ref[cid] : null;
+    if (!shouldResolveR2Marker_(cid, _r2ResolveJobs[cid], memRec, marker)) return;
     _r2ResolveJobs[cid] = true;
     window.Go5ImgDiag && Go5ImgDiag.push('r2_start', { cid: cid });
     resolveRefFromR2_(cid, marker.__r2n).then(function (imgs) {
@@ -1548,11 +1557,17 @@
     cid = String(cid || '');
     var have = refImgsOf_(cid);
     if (have && have.length) return Promise.resolve(have);
-    var raw = legacyRefOf_(cid);
+    // マーカーは旧LSだけでなく、同期直後のIDB/_imgMemに先着することもある。
+    // LSだけを見ると投稿履歴の直接復元も候補→動画作成も空で確定するため、メモリを先に見る。
+    var memRaw = _imgMem.ref[cid];
+    var raw = isR2Marker_(memRaw) ? memRaw : legacyRefOf_(cid);
     if (isR2Marker_(raw) && r2Ready_()) {
       return resolveRefFromR2_(cid, raw.__r2n).then(function (imgs) {
         if (imgs && imgs.length) {
-          if (!Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) { _imgMem.ref[cid] = refRecordFromMarker_(raw, imgs); _refLoaded[cid] = true; }
+          _imgMem.ref[cid] = refRecordFromMarker_(raw, imgs); _refLoaded[cid] = true;
+          refFailClear_(cid);
+          refRefreshCard_(cid);
+          notifyImagesChanged_();
           return imgs;
         }
         return refImgsOf_(cid); // 取れなければ現状(空でもマーカーは残す=「無い」と断定しない)
