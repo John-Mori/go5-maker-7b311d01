@@ -230,17 +230,34 @@ test.describe('候補ページの画像・投稿編集', () => {
       canvas.width = 8; canvas.height = 8;
       canvas.getContext('2d').fillRect(0, 0, 8, 8);
       const image = canvas.toDataURL('image/png');
-      window.Go5Cand.zoomImages([image, image], 0);
+      window.Go5Cand.zoomImages([image, image], 0, { markCid: 'cid-mobile-copy-test' });
     });
     const mobile = await page.evaluate(() => {
       const read = (selector) => {
         const r = document.querySelector(selector).getBoundingClientRect();
         return { left: r.left, right: innerWidth - r.right, width: r.width, height: r.height };
       };
-      return { prev: read('.fz-zoom-nav.prev'), next: read('.fz-zoom-nav.next') };
+      const vertical = (selector) => {
+        const r = document.querySelector(selector).getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom };
+      };
+      const image = document.querySelector('.fz-zoom-img');
+      const imageRect = image.getBoundingClientRect();
+      const hit = document.elementFromPoint(imageRect.left + imageRect.width / 2, imageRect.top + imageRect.height / 2);
+      return {
+        prev: read('.fz-zoom-nav.prev'),
+        next: read('.fz-zoom-nav.next'),
+        mark: vertical('.fz-zoom-mark'),
+        image: vertical('.fz-zoom-img'),
+        pointerEvents: getComputedStyle(image).pointerEvents,
+        imageReceivesTouch: hit === image
+      };
     });
     expect(mobile.prev).toEqual({ left: 10, right: 334, width: 46, height: 46 });
     expect(mobile.next).toEqual({ left: 334, right: 10, width: 46, height: 46 });
+    expect(mobile.mark.bottom).toBeLessThanOrEqual(mobile.image.top);
+    expect(mobile.pointerEvents).toBe('auto');
+    expect(mobile.imageReceivesTouch).toBe(true);
   });
   test('全体読込後にIDBへ届いた候補画像も、動画生成へ移動して消えない', async ({ page }) => {
     await page.addInitScript(() => {

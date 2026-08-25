@@ -2436,7 +2436,7 @@
       '<button class="fz-zoom-nav prev" type="button" aria-label="前へ" hidden>‹</button>' +
       '<button class="fz-zoom-nav next" type="button" aria-label="次へ" hidden>›</button>' +
       '<div class="fz-zoom-cap" hidden></div><img class="fz-zoom-img" alt=""><div class="fz-zoom-count"></div>' +
-      // 動画生成用画像だけ(_zoomMarkCid指定時)に出る「通常/使用済み/除外」ラジオ。画像の上部に横並び。既定は隠す。
+      // 動画生成用画像だけ(_zoomMarkCid指定時)に出る「通常/使用済み/除外」ラジオ。画像に重ならない専用行へ横並び。既定は隠す。
       // 使用日(投稿完了で確定)があればラジオの上に表示する(Chami 2026-08-24)。
       '<div class="fz-zoom-mark" hidden role="radiogroup" aria-label="この画像の扱い">' +
         '<div class="fz-zoom-usedate" hidden></div>' +

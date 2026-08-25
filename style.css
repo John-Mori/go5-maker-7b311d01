@@ -539,12 +539,12 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-samples img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid var(--line);}
 .fz-zoomable{cursor:zoom-in;}
 .fz-zoomable:active{opacity:.8;}
-/* 画像ズームビューア（スワイプ切替・矢印なし） */
-.fz-zoom{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:10001;display:flex;align-items:center;justify-content:center;touch-action:pan-y;}
+/* 画像ズームビューア。操作欄・画像・枚数を別の行に置き、画像への長押しを妨げない。 */
+.fz-zoom{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:10001;display:grid;grid-template-rows:auto minmax(0,1fr) auto;justify-items:center;gap:8px;box-sizing:border-box;padding:96px 8px max(10px,env(safe-area-inset-bottom));touch-action:pan-y;}
 .fz-zoom[hidden]{display:none;}
-.fz-zoom-img{max-width:96vw;max-height:88vh;object-fit:contain;border-radius:6px;-webkit-user-drag:none;user-select:none;pointer-events:none;}
+.fz-zoom-img{grid-row:2;align-self:center;min-width:0;min-height:0;max-width:96vw;max-height:100%;object-fit:contain;border-radius:6px;-webkit-user-drag:auto;-webkit-touch-callout:default;user-select:auto;pointer-events:auto;}
 .fz-zoom-close{position:absolute;top:8px;right:12px;background:transparent;border:none;color:#fff;font-size:30px;width:auto;height:auto;cursor:pointer;line-height:1;padding:2px 6px;text-shadow:0 1px 4px rgba(0,0,0,.8);} /* ×は1.5倍(20→30px)・背景の丸は無し */
-.fz-zoom-count{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#fff;font-size:24px;font-weight:700;opacity:.9;pointer-events:none;text-shadow:0 1px 4px rgba(0,0,0,.8);} /* ページ数表記を2倍(12→24px) */
+.fz-zoom-count{grid-row:3;position:static;text-align:center;color:#fff;font-size:24px;font-weight:700;line-height:1.2;opacity:.9;pointer-events:none;text-shadow:0 1px 4px rgba(0,0,0,.8);} /* 画像の外側に「現在 / 総ページ数」を表示 */
 /* 画像ズーム：2ページ目以降で「この画像を1ページ目にする」ボタン（画像の上・水色/黒字） */
 .fz-zoom-tofirst{position:absolute;top:56px;left:50%;transform:translateX(-50%);z-index:2;background:#5ec6e8;color:#000;border:none;border-radius:8px;padding:9px 16px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;width:auto;max-width:74vw;box-shadow:0 2px 10px rgba(0,0,0,.45);} /* 貼り付け追加ボタン(上)の下に重ならないよう配置 */
 .fz-zoom-tofirst[hidden]{display:none;}
@@ -554,8 +554,8 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-zoom-add[hidden]{display:none;}
 .fz-zoom-add:active{opacity:.8;}
 .fz-zoom-msg{position:absolute;bottom:56px;left:0;right:0;text-align:center;color:#fff;font-size:12px;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.75);}
-/* 画像ズーム：動画生成用画像だけに出る「通常/使用済み/除外」3択(markCid指定時のみ表示)。カウント/msgの上に配置。 */
-.fz-zoom-mark{position:absolute;left:50%;transform:translateX(-50%);top:96px;display:flex;flex-direction:column;align-items:center;gap:4px;z-index:5;background:rgba(20,26,38,.85);border-radius:10px;padding:6px 8px;border:1px solid rgba(255,255,255,.25);} /* 画像の上部・使用日(上)+横並びラジオ(下)(Chami 2026-08-24) */
+/* 画像ズーム：動画生成用画像だけに出る「通常/使用済み/除外」3択。画像とは独立した上段へ配置。 */
+.fz-zoom-mark{grid-row:1;position:relative;left:auto;top:auto;transform:none;justify-self:center;display:flex;flex-direction:column;align-items:center;gap:4px;z-index:5;background:rgba(20,26,38,.85);border-radius:10px;padding:6px 8px;border:1px solid rgba(255,255,255,.25);} /* 画像と重ならない専用行・使用日(上)+横並びラジオ(下) */
 .fz-zoom-mark[hidden]{display:none;}
 .fz-zoom-usedate{color:#9fe6c9;font-size:12px;font-weight:700;text-align:center;}
 .fz-zoom-usedate[hidden]{display:none;}
