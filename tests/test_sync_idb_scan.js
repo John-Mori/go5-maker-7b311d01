@@ -96,6 +96,49 @@ var Sync = require('../core/sync.js')._test;
     'LS満杯の受信端末は候補配列をIDBミラーへ着地できる');
   assert.strictEqual(await Sync.writeCandListFallback_({ available: function () { return true; }, set: function () {} }, 'cand_items', '{bad'), false);
 
+  var fastRemote = {
+    fmt: 2,
+    ls: {
+      cand_items: { t: 200, v: JSON.stringify([{ cid: 'old', title: '雲の完全な題名', addedAt: 1 }]) },
+      unrelated_setting: { t: 10, v: 'keep-me' }
+    },
+    idb: { 'ref:keep': { t: 10, v: { img: { __img: 'abc' } } } }
+  };
+  var fastMerged = Sync.fastCandidateMergeState_({
+    cand_items: JSON.stringify([
+      { cid: 'old', title: '(タイトル未取得)', addedAt: 1 },
+      { cid: 'new-before-image-scan', title: 'PC新規候補', addedAt: 2 }
+    ])
+  }, fastRemote, { 'ls:cand_items': 100 }, 300);
+  var fastRows = JSON.parse(fastMerged.state.ls.cand_items.v);
+  assert.strictEqual(fastMerged.changed, true, '雲に無いPC新規候補は画像走査前のpush対象になる');
+  assert.strictEqual(fastRows.length, 2);
+  assert.strictEqual(fastRows.filter(function (it) { return it.cid === 'old'; })[0].title, '雲の完全な題名',
+    '雲側が新しい時はローカルの未取得題名で完全な題名を巻き戻さない');
+  assert.strictEqual(fastMerged.state.ls.unrelated_setting.v, 'keep-me', '高速レールは候補以外の雲設定を保持する');
+  assert.deepStrictEqual(fastMerged.state.idb, fastRemote.idb, '高速レールは雲画像参照をそのまま保持する');
+
+  var fastReceive = Sync.fastCandidateMergeState_({ cand_items: '[]' }, {
+    fmt: 2,
+    ls: { cand_items: { t: 500, v: JSON.stringify([{ cid: 'phone-new', title: 'スマホへ即表示', addedAt: 5 }]) } },
+    idb: {}
+  }, { 'ls:cand_items': 100 }, 600);
+  assert.strictEqual(JSON.parse(fastReceive.mergedLs.cand_items)[0].cid, 'phone-new',
+    '受信側は画像prefix走査なしで雲の新規候補をローカル適用できる');
+
+  var reorderedReceive = Sync.fastCandidateMergeState_({
+    cand_items: JSON.stringify([{ cid: 'old', title: '既存', addedAt: 1 }])
+  }, {
+    fmt: 2,
+    ls: { cand_items: { t: 500, v: JSON.stringify([
+      { cid: 'phone-new', title: 'スマホへ即表示', addedAt: 5 },
+      { cid: 'old', title: '既存', addedAt: 1 }
+    ]) } }, idb: {}
+  }, { 'ls:cand_items': 100 }, 600);
+  assert.strictEqual(reorderedReceive.changed, false,
+    '同じ候補行の並び順だけが違う場合は不要なpushを行わない');
+  assert.strictEqual(JSON.parse(reorderedReceive.mergedLs.cand_items)[0].cid, 'phone-new',
+    '受信時は新しい雲側の並び順を維持する');
   console.log('OK: unchanged local data cannot overwrite newer cloud candidate fields');
   console.log('OK: sync reads only IDB prefixes used by cloud sync');
 })().catch(function (e) {

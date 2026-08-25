@@ -2364,7 +2364,9 @@
     // 古い描画(アカウント/同期切替)の後始末だけは全解決後に一度。ここでは全交換paintをしない(個別差し替え済み)。
     Promise.all(thumbPs).then(function (thumbUrls) {
       if (!_stillCurrent_()) {
-        if (!page.hidden && !modalIsOpen_()) setTimeout(render, 0);
+        // 自分より新しい描画が既に始まっている時(seq不一致)は、その描画に任せる。
+        // 各世代がさらにrenderを予約すると、アカウント切替直後にDOM全交換が永久連鎖し、ボタンを押せなくなる。
+        if (seq === _renderSeq && !page.hidden && !modalIsOpen_()) setTimeout(render, 0);
         return;
       }
       _missingThumbs = {};

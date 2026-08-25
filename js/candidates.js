@@ -150,7 +150,7 @@
   function reqSync_() { try { if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {} }
   // 新規候補は「PCで追加→スマホで開く」の直前操作。3〜10秒のデバウンス待ちより先に雲へ着地させる。
   // 同期中なら flushSync 側が次回同期を予約するため、取りこぼさない。
-  function flushSync_() { try { if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync(); else reqSync_(); } catch (e) { reqSync_(); } }
+  function flushSync_() { try { if (window.Go5Sync && window.Go5Sync.syncCandidatesNow) window.Go5Sync.syncCandidatesNow(); else if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync(); else reqSync_(); } catch (e) { reqSync_(); } }
   function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); if (/^cand_(items|tabs)(__|$)/.test(k)) schedulePoolSync_(); }
   // 継続改善制度の行動ログ。(意味のある操作のみ・失敗は無害)
   function klog_(action, objType, objId, meta) { try { if (window.Go5Kaizen) window.Go5Kaizen.log('candidates', action, objType, objId, meta); } catch (e) {} }
@@ -5019,6 +5019,7 @@
         }
         if (mergedAny) {
           candItemsWrite_(key, items0);
+          flushSync_(); // 重複統合も候補行だけ先に再同期
           refImgSave(r.cid, { imgs: mergedImgs, comment: cur.comment || '', memo: mergedMemo, twitterUrl: mergedTw, twitterUrl2: mergedTw2 });
           if (inp) inp.value = ''; if (twInp) twInp.value = ''; if (memoElDup) memoElDup.value = '';
           _addModalImgs = []; renderAddSlots_();
@@ -5026,6 +5027,9 @@
           showDuplicateDialog_(newMemo, r.cid);
           if (onDone) onDone();
         } else {
+          // 行が既に端末内にあっても、旧版でクラウド送信だけ落ちた候補はあり得る。
+          // 再追加を「存在確認だけ」で終わらせず、候補高速レールで再告知して別端末へ自己修復する。
+          flushSync_();
           showDuplicateDialog_(newMemo, r.cid);
           if (onDone) onDone();
         }
@@ -5089,6 +5093,7 @@
           });
         }
         renderCandList(tabId);
+        flushSync_(); // 取得後の題名・価格も画像走査を待たず別端末へ反映
         if (onDone) onDone(); // 「追加して閉じる」＝追加完了後にモーダルを閉じる
       };
       // プリフェッチ済みキャッシュがあれば即確定(fetchをスキップして体感速度を上げる)

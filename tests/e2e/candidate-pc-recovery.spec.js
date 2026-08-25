@@ -99,6 +99,7 @@ test.describe('PC candidate recovery invariants', () => {
         window.__pcCandidateFlushCalls++;
         return Promise.resolve({ ok: true });
       };
+      window.Go5Sync.syncCandidatesNow = window.Go5Sync.flushSync;
     });
 
     await page.locator('#candAddOpen').click();
@@ -131,6 +132,7 @@ test.describe('PC candidate recovery invariants', () => {
         window.__quotaCandidateFlushCalls++;
         return Promise.resolve({ ok: true });
       };
+      window.Go5Sync.syncCandidatesNow = window.Go5Sync.flushSync;
       const originalSetItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {
         if (this === localStorage && key === 'cand_items') {
@@ -195,5 +197,86 @@ test.describe('PC candidate recovery invariants', () => {
     }, { oldCid, newCid });
 
     await expect(page.locator('.cand-card', { hasText: '別端末から届いた新規候補' })).toBeVisible();
+  });
+  test('candidate fast lane receives a cloud row before any image prefix scan', async ({ page }) => {
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    const result = await page.evaluate(async () => {
+      const oldRow = {
+        cid: 'd_fast_existing', title: '既存候補',
+        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_fast_existing/', addedAt: 1
+      };
+      const newRow = {
+        cid: 'd_fast_phone_receive', title: '画像走査前に届く候補',
+        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_fast_phone_receive/', addedAt: 2
+      };
+      localStorage.setItem('cand_items', JSON.stringify([oldRow]));
+      localStorage.setItem('sync2_url', 'https://sync.test');
+      localStorage.setItem('sync2_token', 'test-token');
+      Go5Idb.entriesByPrefixesSettled = () => { throw new Error('image scan must not run in candidate fast lane'); };
+      const remote = { fmt: 2, ls: { cand_items: { t: 200, v: JSON.stringify([newRow, oldRow]) } }, idb: {} };
+      window.fetch = async (url) => {
+        if (String(url).endsWith('/api/pull')) {
+          return new Response(JSON.stringify({ ok: true, version: 7, blob: JSON.stringify(remote) }), {
+            status: 200, headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        throw new Error('unexpected network call: ' + url);
+      };
+      const started = Date.now();
+      const syncResult = await Go5Sync.syncCandidatesNow();
+      return { elapsed: Date.now() - started, syncResult };
+    });
+
+    expect(result.elapsed).toBeLessThan(3000);
+    expect(result.syncResult.ok).toBe(true);
+    await expect(page.locator('.cand-card', { hasText: '画像走査前に届く候補' })).toBeVisible();
+  });
+
+  test('candidate fast lane pushes a PC row without waiting for image hashing', async ({ page }) => {
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    const result = await page.evaluate(async () => {
+      const oldRow = {
+        cid: 'd_fast_push_old', title: '既存候補',
+        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_fast_push_old/', addedAt: 1
+      };
+      const newRow = {
+        cid: 'd_fast_push_new', title: 'PCから即送信する候補',
+        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_fast_push_new/', addedAt: 2
+      };
+      localStorage.setItem('cand_items', JSON.stringify([newRow, oldRow]));
+      localStorage.setItem('sync2_url', 'https://sync.test');
+      localStorage.setItem('sync2_token', 'test-token');
+      Go5Idb.entriesByPrefixesSettled = () => new Promise(() => {});
+      const remote = { fmt: 2, ls: { cand_items: { t: 100, v: JSON.stringify([oldRow]) } }, idb: { 'ref:keep': { t: 1, v: {} } } };
+      let pushed = null;
+      window.fetch = async (url, init) => {
+        if (String(url).endsWith('/api/pull')) {
+          return new Response(JSON.stringify({ ok: true, version: 7, blob: JSON.stringify(remote) }), {
+            status: 200, headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        if (String(url).endsWith('/api/push')) {
+          const envelope = JSON.parse(init.body);
+          pushed = JSON.parse(envelope.blob);
+          return new Response(JSON.stringify({ ok: true, version: 8 }), {
+            status: 200, headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        throw new Error('unexpected network call: ' + url);
+      };
+      const started = Date.now();
+      const syncResult = await Go5Sync.syncCandidatesNow();
+      return {
+        elapsed: Date.now() - started,
+        syncResult,
+        pushedCids: JSON.parse(pushed.ls.cand_items.v).map((it) => it.cid),
+        keptRemoteImage: !!pushed.idb['ref:keep']
+      };
+    });
+
+    expect(result.elapsed).toBeLessThan(3000);
+    expect(result.syncResult.ok).toBe(true);
+    expect(result.pushedCids).toContain('d_fast_push_new');
+    expect(result.keptRemoteImage).toBe(true);
   });
 });

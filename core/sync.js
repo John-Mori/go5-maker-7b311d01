@@ -641,6 +641,56 @@
     } catch (e) { return arrStr; }
   }
 
+  function stableCandidateJson_(v) {
+    if (Array.isArray(v)) return '[' + v.map(stableCandidateJson_).join(',') + ']';
+    if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(function (k) { return JSON.stringify(k) + ':' + stableCandidateJson_(v[k]); }).join(',') + '}';
+    return JSON.stringify(v);
+  }
+  function sameCandidateRows_(aStr, bStr) {
+    try {
+      var a = JSON.parse(aStr || '[]'), b = JSON.parse(bStr || '[]');
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+      var as = a.map(stableCandidateJson_).sort(), bs = b.map(stableCandidateJson_).sort();
+      for (var i = 0; i < as.length; i++) if (as[i] !== bs[i]) return false;
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // 候補行だけを画像の全件走査より先に同期するための純関数。
+  // remoteState の画像・設定は一切変更せず、cand_items*/cand_del* だけを union する。
+  function fastCandidateMergeState_(localLs, remoteState, localTs, now) {
+    localLs = localLs || {}; remoteState = remoteState || {}; localTs = localTs || {}; now = now || Date.now();
+    var remoteLs = remoteState.ls || {}, outLs = Object.assign({}, remoteLs), mergedLs = {}, seen = {};
+    Object.keys(localLs).forEach(function (k) { if (isCandArrayKey(k)) seen[k] = 1; });
+    Object.keys(remoteLs).forEach(function (k) { if (isCandArrayKey(k)) seen[k] = 1; });
+    Object.keys(seen).forEach(function (k) {
+      var le = localLs[k], re = remoteLs[k], rv = re && !re.d ? re.v : null;
+      if (le == null && rv == null) return;
+      var lt = Number(localTs['ls:' + k]) || 0, rt = Number(re && re.t) || 0, merged;
+      if (le == null) merged = rv;
+      else if (rv == null) merged = le;
+      else merged = lt >= rt ? unionByField(rv, le, 'cid') : unionByField(le, rv, 'cid');
+      if (merged == null) return;
+      var dk = candDelKeyOf(k), ldel = localLs[dk], rde = remoteLs[dk], rdel = rde && !rde.d ? rde.v : null;
+      var delMerged = mergeDelMap(rdel || '{}', ldel || '{}') || (ldel || rdel || '{}');
+      merged = applyTombstone(merged, parseDelMap(delMerged), 'cid', 'addedAt');
+      // 同じ行集合で順序だけ異なる場合は雲の並びを維持。不要なpush/競合を起こさない。
+      if (rv != null && sameCandidateRows_(rv, merged)) merged = rv;
+      mergedLs[k] = merged;
+      if (ldel != null || rdel != null) {
+        mergedLs[dk] = delMerged;
+        if (!rde || rde.d || rde.v !== delMerged) outLs[dk] = { t: Math.max(now, Number(rde && rde.t) || 0), v: delMerged };
+      }
+      if (!re || re.d || re.v !== merged) outLs[k] = { t: Math.max(now, lt, rt), v: merged };
+    });
+    var changed = JSON.stringify(stripT(outLs)) !== JSON.stringify(stripT(remoteLs));
+    return {
+      changed: changed,
+      mergedLs: mergedLs,
+      state: Object.assign({}, remoteState, { fmt: remoteState.fmt || 2, ls: outLs, idb: remoteState.idb || {} })
+    };
+  }
+
   function syncOnce(retry) {
     if (!configured() || (_busy && !retry)) return Promise.resolve({ ok: false, skipped: true });
     var c = cfg(); _busy = true;
@@ -1016,6 +1066,86 @@
     }).catch(function (e) { _busy = false; _lastErr = String((e && e.message) || e); setProg("", 0, 0); return { ok: false, error: _lastErr }; });
   }
 
+  // 候補ページ専用の高速レール。候補配列だけをpull/union/pushし、画像prefix走査・hash化・R2確認を待たない。
+  // 通常syncOnceは後から全設定/画像を整合する。このレールはremoteの非候補LSとIDBをそのまま保存するため、
+  // 先に走っても他データを削除せず、競合はbaseVersionで検知して1回再pullする。
+  var _candFastBusy = false, _candFastQueued = false;
+  function applyFastCandidateMerged_(mergedLs) {
+    var jobs = [], pulled = 0; mergedLs = mergedLs || {};
+    Object.keys(mergedLs).forEach(function (k) {
+      var v = mergedLs[k];
+      if (isCandArrayKey(k)) {
+        var changed = true, lsOk = false;
+        try { changed = LS.getItem(k) !== v; if (changed) LS.setItem(k, v); lsOk = true; } catch (e) {}
+        if (lsOk) {
+          // 通常端末はLS着地の瞬間に描画。IDBミラーの書込は背景で続け、画面を待たせない。
+          if (changed) { pulled++; fireCandidateListApplied_(k, 'ls'); }
+          try { writeCandListFallback_(Idb, k, v); } catch (e) {}
+        } else {
+          // LS容量不足時だけIDBの耐久着地を待ち、メモリfallbackまで同じ配列へ強制収束する。
+          jobs.push(writeCandListFallback_(Idb, k, v).then(function (mirrorOk) {
+            if (mirrorOk) { pulled++; fireCandidateListApplied_(k, 'idb'); }
+          }));
+        }
+        return;
+      }
+      if (isCandDelKey(k)) {
+        try { if (LS.getItem(k) !== v) LS.setItem(k, v); } catch (e) {}
+      }
+    });
+    return Promise.all(jobs).then(function () { return pulled; });
+  }
+  function finishFastCandidate_(result) {
+    _candFastBusy = false;
+    if (_candFastQueued) {
+      _candFastQueued = false;
+      root.setTimeout(function () { syncCandidatesNow(false); }, 0);
+    }
+    return result;
+  }
+  function syncCandidatesNow(retry) {
+    if (!configured()) return Promise.resolve({ ok: false, skipped: true });
+    if (_candFastBusy) { _candFastQueued = true; return Promise.resolve({ ok: false, busy: true }); }
+    _candFastBusy = true;
+    var localLs = gatherLs(), localTs = loadTs(), now = Date.now(), pullRes = null, merged = null, pulled = 0;
+    return readKnownCandListMirrors_(Idb, localLs).then(function (mirrors) {
+      mergeCandListMirrorsIntoLs_(localLs, mirrors);
+      return pullState();
+    }).then(function (res) {
+      pullRes = res || {};
+      var remote = {};
+      if (pullRes.ok && !pullRes.empty && pullRes.blob) { try { remote = JSON.parse(pullRes.blob) || {}; } catch (e) { remote = {}; } }
+      merged = fastCandidateMergeState_(localLs, remote, localTs, now);
+      return applyFastCandidateMerged_(merged.mergedLs);
+    }).then(function (n) {
+      pulled = n || 0;
+      if (!merged.changed) {
+        setVer((pullRes && pullRes.version) || getVer());
+        _lastAt = Date.now();
+        if (pulled) fireSynced(0, 0, pulled, []);
+        return { ok: true, version: (pullRes && pullRes.version) || 0, noChange: true, pulledCand: pulled };
+      }
+      merged.state.device = deviceName(); merged.state.updatedAt = new Date().toISOString();
+      return pushState(merged.state, (pullRes && pullRes.version) || 0).then(function (pr) {
+        if (pr && pr.ok) {
+          setVer(pr.version); _lastAt = Date.now();
+          if (pulled) fireSynced(0, 0, pulled, []);
+          return { ok: true, version: pr.version, pulledCand: pulled };
+        }
+        if (pr && pr.conflict && !retry) return { retryFast: true };
+        _lastErr = (pr && pr.error) || '候補の高速同期に失敗';
+        return { ok: false, error: _lastErr };
+      });
+    }).then(function (result) {
+      _candFastBusy = false;
+      if (result && result.retryFast) return syncCandidatesNow(true);
+      return finishFastCandidate_(result);
+    }, function (e) {
+      _lastErr = String((e && e.message) || e);
+      return finishFastCandidate_({ ok: false, error: _lastErr });
+    });
+  }
+
   var _timer = null;
   // 自動同期の周期。25秒→60秒(Cloudflare無料枠10万req/日の超過対策2026-07-16: 1タブ3,456回/日→1,440回/日)。
   //   変更駆動の requestSync(デバウンス)があるので、周期を伸ばしても実変更の反映は遅れない。
@@ -1155,7 +1285,7 @@
   }
 
   root.Go5Sync = {
-    configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, flushSync: flushSync, status: status, startAuto: startAuto,
+    configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, flushSync: flushSync, syncCandidatesNow: syncCandidatesNow, status: status, startAuto: startAuto,
     putBlobR2: putBlobR2, fetchBlobR2: fetchBlobR2, putBlobR2At: putBlobR2At, fetchBlobR2At: fetchBlobR2At, hasBlobR2At: hasBlobR2At,
     setConfig: function (o) {
       try {
@@ -1175,7 +1305,7 @@
     _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
-  root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_;
+  root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_; root.Go5Sync._test.fastCandidateMergeState_ = fastCandidateMergeState_;
   root.Go5Sync._test.mergeCandListMirrorsIntoLs_ = mergeCandListMirrorsIntoLs_; root.Go5Sync._test.readKnownCandListMirrors_ = readKnownCandListMirrors_; root.Go5Sync._test.writeCandListFallback_ = writeCandListFallback_;
   root.Go5Sync._test.slimStockArchive = slimStockArchive;
   root.Go5Sync._test.syncIdbPrefixes = SYNC_IDB_PREFIXES.slice();
