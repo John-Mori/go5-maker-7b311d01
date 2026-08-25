@@ -29,7 +29,8 @@
     discountNew: $('discountNew'), discountNew2: $('discountNew2'), discountNewPc: $('discountNewPc'),
     discountDigest: $('discountDigest'), discountDigest2: $('discountDigest2'), discountDigestPc: $('discountDigestPc'),
     histList: $('histList'), histRefresh: $('histRefresh'), histShowDiscarded: $('histShowDiscarded'),
-    manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
+    manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortAccount: $('manualShortAccount'),
+    manualShortDomain: $('manualShortDomain'), manualShortBtn: $('manualShortBtn'),
     manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
     movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn'),
     movieWorkAffi: $('movieWorkAffi'), movieWorkAffiCopy: $('movieWorkAffiCopy'), movieWorkInfo: $('movieWorkInfo'),
@@ -1903,11 +1904,15 @@
 
   // ★短縮URL設定(var SHORT)はIIFE先頭へ移設した(2026-08-03・初期化中の use-before-assign 即死を根治)。
   //   workerBase/ourShortBase 等の関数はここに残す(関数宣言は巻き上げ済みで参照位置は不問)。
-  // 投稿用ベースURL: 端末上書き(short_worker_url)が最優先→現アカウント別→既定。
+  // 投稿用ベースURL: チャンネル別上書き→正規のチャンネル別ドメイン→未知アカウントだけ旧共通上書き→既定。
+  //   旧 short_worker_url(共通1本)を既知2chへ優先すると、両チャンネルが同じドメインへ潰れてしまう。
+  //   acc1/acc2は必ず別管理し、必要な上書きも short_worker_url__acc1 / __acc2 で独立させる。
   function workerBase(account) {
-    try { var ov = localStorage.getItem('short_worker_url'); if (ov) return ov; } catch (e) {}
     var acc = account || ((typeof acctId === 'function') ? acctId() : 'acc1');
-    return SHORT.URL_BY_ACCT[acc] || SHORT.WORKER_URL;
+    try { var per = localStorage.getItem('short_worker_url__' + acc); if (per) return per; } catch (e) {}
+    if (SHORT.URL_BY_ACCT[acc]) return SHORT.URL_BY_ACCT[acc];
+    try { var legacy = localStorage.getItem('short_worker_url'); if (legacy) return legacy; } catch (e2) {}
+    return SHORT.WORKER_URL;
   }
   // 「そのURLは自前の短縮ドメインか?」一致したベースを返す(両ドメイン+旧r2+端末上書きに対応)。
   function ourShortBase(u) {
@@ -1916,7 +1921,10 @@
     //   (実クリックはr2に存在=15回。2026-07-29)。返り値は正規(https付き)ベースのまま=呼び出し側は不変。
     var bare = String(u || '').replace(/^https?:\/\//, '');
     var hosts = SHORT.WORKER_HOSTS.slice();
-    try { var ov = localStorage.getItem('short_worker_url'); if (ov) hosts.push(ov); } catch (e) {}
+    try {
+      ['acc1', 'acc2'].forEach(function (a) { var per = localStorage.getItem('short_worker_url__' + a); if (per) hosts.push(per); });
+      var ov = localStorage.getItem('short_worker_url'); if (ov) hosts.push(ov);
+    } catch (e) {}
     for (var i = 0; i < hosts.length; i++) {
       var b = hosts[i].replace(/\/+$/, '');
       var bb = b.replace(/^https?:\/\//, '');
@@ -1941,8 +1949,8 @@
       setTimeout(function () { _excBtn.textContent = '🚫 自分のクリックを計測から除外(この端末)'; }, 4000);
     });
   } catch (e) {}
-  function shortWorkerReady() {
-    return /^https?:\/\//.test(workerBase()) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
+  function shortWorkerReady(account) {
+    return /^https?:\/\//.test(workerBase(account)) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
   }
   // ★2026-08-04(恒久策・Chami「Xの投稿がda.gdになってる、大問題」): 一時的な失敗で静かに da.gd へ落ちるのを止める。
   //   従来はワーカーfetchが①タイムアウト無し(ブラウザ既定まで待つ)②失敗即あきらめ で、コールドスタート/瞬断/429の
@@ -1952,7 +1960,7 @@
   //     短縮すると、従来は現UIアカウントのドメイン(5mgl.com/yoz2.com)で発行され、そのドラフトの所属chと
   //     ドメインが食い違い=別々に計測できない。account 指定時はそのchのドメインで発行する(未指定=従来どおり現ch)。
   function shortenViaWorker(longUrl, _tries, account) {
-    if (!shortWorkerReady()) return Promise.resolve('');
+    if (!shortWorkerReady(account)) return Promise.resolve('');
     _tries = _tries || 0;
     var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 6000) : null;
@@ -2320,29 +2328,48 @@
   var affiTabBtn_ = document.getElementById('tabAffi');
   if (affiTabBtn_) affiTabBtn_.addEventListener('click', loadHistory);
 
-  // ---- 手動短縮(アプリ外で単独投稿した分のURLを貼って短縮＋履歴追加)----
+  // ---- 単体短縮(X返信ツリー等へ例外的に追加するURLを、チャンネル別ドメインで発行)----
+  function manualShortAccount_() {
+    var a = els.manualShortAccount && els.manualShortAccount.value;
+    return (a === 'acc2') ? 'acc2' : 'acc1';
+  }
+  function refreshManualShortDomain_(followCurrent) {
+    if (els.manualShortAccount && followCurrent) els.manualShortAccount.value = acctId();
+    var base = workerBase(manualShortAccount_()).replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (els.manualShortDomain) els.manualShortDomain.textContent = '発行ドメイン: ' + base;
+  }
+  refreshManualShortDomain_(true);
+  if (els.manualShortAccount) els.manualShortAccount.addEventListener('change', function () { refreshManualShortDomain_(false); });
+  document.addEventListener('account-changed', function () { refreshManualShortDomain_(true); });
   if (els.manualShortBtn) els.manualShortBtn.addEventListener('click', function () {
     var url = (els.manualUrl && els.manualUrl.value || '').trim();
+    if (els.manualOut) { els.manualOut.textContent = ''; els.manualOut.removeAttribute('data-url'); }
     if (!/^https?:\/\//.test(url)) {
       if (els.manualOut) els.manualOut.textContent = 'URLは http:// か https:// で始めてください';
       if (els.manualResult) els.manualResult.hidden = false;
       return;
     }
     var btn = els.manualShortBtn, orig = btn.textContent;
+    var account = manualShortAccount_();
+    var expectedBase = workerBase(account).replace(/\/+$/, '');
     btn.disabled = true; btn.textContent = '短縮中…';
-    makeShortAndShare(url).then(function (res) {
-      var s = (res && (res.shareUrl || res.shortUrl)) || url;  // 失敗時は元URLで代替
-      // 計測コード(r2)が取れたら添える=クリック数は検証タブ「🔗短縮リンク台帳」で見られる
-      var w = ((window.Go5Short && window.Go5Short.WORKER_URL) || '').replace(/\/+$/, '');
-      var code = (res && res.shortUrl && w && res.shortUrl.indexOf(w + '/') === 0) ? res.shortUrl.slice(w.length + 1) : '';
-      if (els.manualOut) els.manualOut.textContent = s + (code ? ' (計測コード: ' + code + ' → 台帳で確認可)' : ' (計測なし)');
+    makeShortAndShare(url, { account: account }).then(function (res) {
+      var s = (res && (res.shareUrl || res.shortUrl)) || '';
+      var issued = !!(s && expectedBase && s.indexOf(expectedBase + '/') === 0);
+      if (els.manualOut) {
+        els.manualOut.textContent = issued ? s : '短縮リンクを発行できませんでした。通信後にもう一度お試しください';
+        if (issued) els.manualOut.setAttribute('data-url', s);
+      }
       if (els.manualResult) els.manualResult.hidden = false;
-      // 履歴(投稿履歴タブ)には追加しない。短縮URLと計測コードを表示するだけ。(台帳=/api/listが記録の正)
-      btn.textContent = '✓ 短縮しました'; setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
-      if (els.manualUrl) els.manualUrl.value = '';
+      btn.textContent = issued ? '✓ 発行しました' : '発行できませんでした';
+      setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
+      if (issued && els.manualUrl) els.manualUrl.value = '';
     });
   });
-  if (els.manualCopy) els.manualCopy.addEventListener('click', function () { copyText(els.manualOut.textContent, els.manualCopy); });
+  if (els.manualCopy) els.manualCopy.addEventListener('click', function () {
+    var url = (els.manualOut && els.manualOut.getAttribute('data-url') || '').trim();
+    if (url) copyText(url, els.manualCopy);
+  });
 
   // ---- 編集できる確認モーダル(方法①自動投稿) ----
   // 直近に“実際に投稿した”作品URL。(取り違え＝前回のまま投稿、の検知用。アカウント別)

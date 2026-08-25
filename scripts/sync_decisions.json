@@ -79,6 +79,7 @@
     "short_shared_secret": { "decision": "secret", "why": "短縮worker共有シークレット=秘密" },
     "drive_worker_url": { "decision": "local", "why": "Drive worker URL=コード既定あり・端末ごとに上書き可の設計(コメント明記)" },
     "short_worker_url": { "decision": "local", "why": "短縮worker URL=コード既定あり・端末ごとに上書き可の設計(コメント明記)" },
+    "short_worker_url__<acc>": { "decision": "local", "why": "チャンネル別短縮worker URL上書き=正規ドメインはコード既定、必要時だけ端末単位で独立調整" },
     "bsky_discount_link_cache": { "decision": "local", "why": "セール案内リンクのキャッシュ" },
     "bsky_discount_list_link_r2": { "decision": "local", "why": "セール案内R2リンクのキャッシュ" },
     "clicks_cache": { "decision": "local", "why": "クリック数キャッシュ" },
