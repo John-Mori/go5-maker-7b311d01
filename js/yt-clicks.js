@@ -1948,7 +1948,7 @@
     //   編集モーダル(veditOverlay)を閉じても止まらない。押下直後に「裏で走る」ことを知らせ、待たせない。
     //   完了時: 成功はrefreshで1ページ目に反映が見えるので静かに。失敗だけ正直に伝える(「素直にギブアップ」)。
     var settled = false;
-    window.Go5Stock.regenDataset({ videoId: videoId, title: title, account: ch }, {
+    window.Go5Stock.regenDataset({ videoId: videoId, title: title, account: ch, cid: it.cid || '', workUrl: it.workUrl || '' }, {
       silent: true,
       onDone: function (ok, msg) {
         settled = true;

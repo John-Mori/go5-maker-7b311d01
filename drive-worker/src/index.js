@@ -13,7 +13,7 @@
  *   上書きは「新フォルダを先に作って全部上げ、成功後に旧フォルダをtrash」＝どの時点で落ちても両方失う状態が
  *   存在しない。trashは30日間Drive側で復元可能（完全削除はしない）。1ヶ月判定はDriveの createdTime を正とし、
  *   trash直前に「そのチャンネル親の直下・フォルダ・trashed=false・題名完全一致・窓内」を全て再検証する。
- *   窓外/同名なし/フラグ無しなら従来どおり _2, _3… の別名で新規作成（既存挙動を温存）。
+ *   normalize以外は同名フォルダを再利用し、不足ファイルだけ追加する。同名が無い初回だけexact-nameで作成する。
  *
  * 認証情報（client_id / client_secret / refresh_token / 共有シークレット）は
  * Cloudflare Worker Secrets にのみ保持し、レスポンス・ログには出力しない。
@@ -27,6 +27,9 @@ const OVERWRITE_MAX_TRASH = 3;                        // 窓内の同名候補�
 const SAVE_JOB_VIDEO_KEY_RE = /^[a-f0-9]{16,64}$/;    // R2キー(sha256hex)の形式
 const SAVE_JOB_R2_BASE_RE = /^https?:\/\//;
 const SAVE_JOB_RETRY_DELAYS_MS = [1500, 4000]; // 動画バイトのR2取得：最大3回(計約5.5秒)。★フロントが投稿完了前にHEADでR2着地を実測してから撃つ(ensureVideoOnR2_)=初回GETで取れるのが通常。長い窓(旧37秒)はrunSaveJobをリクエスト時間予算から溢れさせ、waitUntilのアップロードを途中でCloudflareに殺させていた真因(2026-08-18 wrangler tailで実測=「waitUntil() tasks…cancelled」)。窓はR2の結果整合レースの保険だけに絞る。
+// 同一Worker isolate内で同じ親＋題名の同時作成を1本へ束ねる。
+// Driveは同一親内の同名フォルダを許すため、単純な list→create だけでは並列再送時に二重作成できる。
+const EXACT_FOLDER_INFLIGHT = new Map();
 //   フロントはHEADでR2着地を確認してからsave_jobを撃つ(2026-08-18)ので通常は初回で取れるが、R2の反映レース/公開GETの
 //   一時的な不整合に備えて窓を広げる。waitUntil内の待機はCPUを消費しない=Workers上限内。
 
@@ -176,15 +179,17 @@ export default {
     // ---- [題名]フォルダを決定 ----
     //   ★normalize時は exact-name で"新しく"作り成功後に旧をtrash。それ以外(自動保存)は同題名フォルダが在れば
     //     再利用=連番 _2, _3… を作らない(Chami依頼2026-08-24「2を作るな」)。初回のみ exact-name で新規作成。
-    let existingIds = [];
-    if (!doOverwrite) { try { existingIds = await findChildFolderIds(parentId, baseName, token); } catch (e) { existingIds = []; } }
     let folder, reused = false;
     try {
-      if (doOverwrite) folder = await createChildFolderExact(parentId, baseName, token);
-      else if (existingIds.length) { folder = { id: existingIds[0] }; reused = true; }
-      else folder = await createChildFolderExact(parentId, baseName, token);
+      if (doOverwrite) {
+        folder = await createChildFolderExact(parentId, baseName, token);
+      } else {
+        const ensured = await getOrCreateExactFolder(parentId, baseName, token);
+        folder = ensured.folder;
+        reused = !!ensured.reused;
+      }
     }
-    catch (e) { return json({ ok: false, error: "folder_create_failed" }, 502, cors); }
+    catch (e) { return json({ ok: false, error: (e && e.message) || "folder_create_failed" }, 502, cors); }
 
     // ---- アップロード（動画=既に在れば上げ直さない／画像=role単位で既存なら上げ直さない＝重複を作らない）----
     const uploaded = [];
@@ -293,10 +298,12 @@ async function handleEnsureFolder(form, env, cors) {
   // ── フォルダ確保：既存があれば再利用、無ければ exact-name で新規作成（連番にしない＝1作品1フォルダ）──
   let folderId = "", created = false;
   try {
-    const ids = await findChildFolderIds(parentId, baseName, token);
-    if (ids.length) { folderId = ids[0]; }
-    else { const f = await createChildFolderExact(parentId, baseName, token); folderId = f.id; created = true; }
-  } catch (e) { return json({ ok: false, error: "folder_create_failed" }, 502, cors); }
+    const ensured = await getOrCreateExactFolder(parentId, baseName, token);
+    folderId = ensured.folder.id;
+    created = !!ensured.created;
+  } catch (e) {
+    return json({ ok: false, error: (e && e.message) || "folder_create_failed" }, 502, cors);
+  }
   if (!folderId) return json({ ok: false, error: "folder_create_failed" }, 502, cors);
 
   // ── 渡された画像を役割ごとに冪等保存（同役割が既に在れば上げ直さない）──
@@ -461,6 +468,15 @@ async function runSaveJob(env, fields, parentId) {
 
   const baseName = safeName(fields.title);
 
+  // 通常の再生成/自動保存は、重いR2探索より先にDriveの同名フォルダを確認・確保する。
+  // これで旧IDが外れて動画探索が空振りしても、フォルダだけは先に着地する。
+  // normalizeは動画実在時だけ新旧入替を行う特殊経路なので、ここでは先作成しない。
+  let floor = null;
+  if (!fields.normalize) {
+    try { floor = await getOrCreateExactFolder(parentId, baseName, token); }
+    catch (e) { return fail((e && e.message) || "folder_create_failed"); }
+  }
+
   // ---- 動画バイト取得(R2)。取れなくてもここで止めず、下でフォルダの床＋付随画像だけは作る ----
   const vid = await fetchR2Bytes(env, fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS);
   const buf = vid ? vid.buf : null;
@@ -489,18 +505,16 @@ async function runSaveJob(env, fields, parentId) {
   //     createUniqueChildFolder で 題名_2, 題名_3… を量産していた=動画が無い床フォルダの後に本保存が来ると
   //     "同題名だが動画未検出"を見て別名フォルダを新規作成→二重フォルダ、が起きていた。再利用+足りないものだけ足す。
   //   ★上書き時だけ exact-name で"新しく"作り、成功後に旧フォルダをtrash(従来どおり)。
-  let existingIds = [];
-  try { existingIds = await findChildFolderIds(parentId, baseName, token); } catch (e) { existingIds = []; }
   let folder, reused = false;
   try {
     if (doOverwrite) {
       folder = await createChildFolderExact(parentId, baseName, token);
-    } else if (existingIds.length) {
-      folder = { id: existingIds[0] }; reused = true; // ★再利用=連番フォルダを作らない
     } else {
-      folder = await createChildFolderExact(parentId, baseName, token); // 初回=exact-name(連番にしない)
+      const ensured = floor || await getOrCreateExactFolder(parentId, baseName, token);
+      folder = ensured.folder;
+      reused = !!ensured.reused;
     }
-  } catch (e) { return fail("folder_create_failed:" + (e && e.message || e)); }
+  } catch (e) { return fail((e && e.message) || "folder_create_failed"); }
 
   // ---- 動画アップロード（有る時だけ・既に同フォルダに動画が在れば上げ直さない=足りないものだけ）----
   let videoAlready = false;
@@ -811,6 +825,41 @@ async function createChildFolderExact(parentId, name, token) {
   return await r.json();
 }
 
+// [親]/[題名]フォルダを「既存なら再利用、無ければ1つだけ作成」する共通境界。
+// 重要: list失敗を「存在しない」と読み替えない。確認不能時は作成せず失敗へ倒し、次回再送で回復する。
+// opsは実行テスト用の注入口。実運用ではDrive API本体を使う。
+async function getOrCreateExactFolder(parentId, baseName, token, ops) {
+  ops = ops || {};
+  const listFn = ops.list || findChildFolderIds;
+  const createFn = ops.create || createChildFolderExact;
+  const lockKey = String(parentId) + "\n" + String(baseName);
+  const active = EXACT_FOLDER_INFLIGHT.get(lockKey);
+  if (active) {
+    const shared = await active;
+    return { folder: shared.folder, reused: true, created: false, shared: true };
+  }
+
+  const work = (async () => {
+    let ids;
+    try { ids = await listFn(parentId, baseName, token); }
+    catch (e) {
+      const err = new Error("folder_lookup_failed");
+      err.cause = e;
+      throw err;
+    }
+    if (ids && ids.length) return { folder: { id: ids[0] }, reused: true, created: false };
+    const folder = await createFn(parentId, baseName, token);
+    if (!folder || !folder.id) throw new Error("folder_create_failed");
+    return { folder, reused: false, created: true };
+  })();
+
+  EXACT_FOLDER_INFLIGHT.set(lockKey, work);
+  try { return await work; }
+  finally {
+    if (EXACT_FOLDER_INFLIGHT.get(lockKey) === work) EXACT_FOLDER_INFLIGHT.delete(lockKey);
+  }
+}
+
 // ★このWorker唯一の破壊操作。trash直前に全条件を再検証し、1つでも満たさなければ何もしない（消さない側へ）。
 //   完全削除はしない＝trashed=true の PATCH のみ（30日間Drive側で復元可能）。
 async function trashFolderGuarded(id, ctx, token) {
@@ -948,6 +997,7 @@ function json(obj, status, cors) {
  * tests/test_drive_savejob.js が save_job の「判定と分岐」を実行で検証するための純関数エクスポート。
  * fetch/Drive API等の「外へ出る手」は含まない（それらは runSaveJob 内でのみ呼ぶ）。 */
 export {
+  getOrCreateExactFolder,
   validateSaveJobInput,
   r2ObjectUrl,
   safeName,

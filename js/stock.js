@@ -1428,8 +1428,9 @@
     //   used レコード= { imgs:[仕上がりプレビュー×prev枚, 元画像…], prev }。先頭prev枚がプレビュー・残りが元画像。
     function usedRec_() {
       var vids = [];
+      if (meta.historyVideoId) vids.push(meta.historyVideoId);
       if (meta.videoId) vids.push(meta.videoId);
-      if (meta.id && meta.id !== meta.videoId) vids.push(meta.id);
+      if (meta.id && vids.indexOf(meta.id) < 0) vids.push(meta.id);
       // ① 投稿履歴モーダルと同一の源(Go5Cand のメモリ)。IDBに used: が無くてもR2/シート由来でここには居る事がある。
       for (var i = 0; i < vids.length; i++) {
         var key = vids[i];
@@ -1483,13 +1484,14 @@
     }
     // 仕上がりプレビューを「使用画像1ページ目」へ差し込む(videoIdで紐付く・Chami依頼2026-07-30・冪等)。
     var applyPreview = function (prevB) {
-      if (!prevB || !meta.videoId) return;
+      var targetVideoId = meta.historyVideoId || meta.videoId;
+      if (!prevB || !targetVideoId) return;
       blobToDataUrl_(prevB, function (durl) {
         if (!durl) return;
-        usedImagesRead_(meta.videoId).then(function (rec) {
+        usedImagesRead_(targetVideoId).then(function (rec) {
           var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
           if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
-          usedImagesSave_(meta.videoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
+          usedImagesSave_(targetVideoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
         });
       });
     };
@@ -1797,14 +1799,33 @@
       // 投稿履歴モーダル=click-listの it から locator が来る。手元のドラフト/作成履歴に実metaが在れば引く
       //   (=正しい id/videoName/IDBキーで素材を読める)。
       var all = loadMeta().concat(loadArchive());
-      for (var i = 0; i < all.length; i++) {
-        if (!all[i]) continue;
-        if (locator.videoId && all[i].videoId === locator.videoId) { meta = all[i]; break; }
-        if (!locator.videoId && locator.title && all[i].title === locator.title) { meta = all[i]; break; }
+      // 旧履歴のvideoId欄には内部IDではなく11文字のYouTube IDが残る個体がある。
+      // その値だけで空振り確定にせず、同一chのCID→題名へ安全に倒して元のstock idを回収する。
+      if (window.Go5RegenIdentity && typeof window.Go5RegenIdentity.resolve === 'function') {
+        var resolved = window.Go5RegenIdentity.resolve(locator, all);
+        meta = resolved && resolved.meta;
+      } else {
+        // 読込異常時の互換経路。別chへは倒さず、videoId→同一ch題名の順で探す。
+        for (var i = 0; i < all.length; i++) {
+          if (!all[i] || (locator.account && all[i].account !== locator.account)) continue;
+          if (locator.videoId && all[i].videoId === locator.videoId) { meta = all[i]; break; }
+        }
+        if (!meta && locator.title) {
+          for (var j = 0; j < all.length; j++) {
+            if (!all[j] || (locator.account && all[j].account !== locator.account)) continue;
+            if (all[j].title === locator.title) { meta = all[j]; break; }
+          }
+        }
       }
-      // 手元に無い(別端末で作成した投稿履歴)＝背骨IDを id として合成。IDBに素材が無くても driveSaveDataset_
-      //   側が Driveの既存プレビュー(fetchPreview)を取り寄せて回復し、動画がDriveに在れば追記だけで済ませる。
-      if (!meta) meta = { id: locator.videoId || '', videoId: locator.videoId || '', title: locator.title || '', account: locator.account || '', videoName: '' };
+      // 手元に無い(別端末で作成した投稿履歴)＝背骨IDを id として合成。IDBに素材が無くてもDriveの床を先に作る。
+      if (!meta) meta = {
+        id: locator.videoId || '', videoId: locator.videoId || '', title: locator.title || '', account: locator.account || '',
+        workUrl: locator.workUrl || '', cid: locator.cid || '', videoName: '',
+        legacyIdentity: !!(window.Go5RegenIdentity && window.Go5RegenIdentity.isLegacyYouTubeId && window.Go5RegenIdentity.isLegacyYouTubeId(locator.videoId))
+      };
+      if (meta && locator.videoId && meta.videoId !== locator.videoId) {
+        meta = Object.assign({}, meta, { historyVideoId: locator.videoId });
+      }
     }
     if (!meta || !meta.id) { done(false, 'この履歴のデータを特定できませんでした(背骨IDが空=Drive保存が始まる前の古い投稿)'); return; }
     // ★成否の真の基準は「投稿履歴1ページ目に仕上がりプレビューが入ったか」(Chami「戻すだけ・前はプレビューが入ってた」
@@ -1812,16 +1833,34 @@
     //   プレビュー素材がどこにも無ければ実際は1ページ目に何も入らないのに「生成しました」と出る("結局できてない"の真因)。
     //   → 完了時に usedImagesRead_ で1ページ目プレビューの実在を確かめ、入った時だけ成功と報告する。素材が無い時は
     //     「動画は在るがプレビュー素材がこの端末にもDriveにも無い=生成不可(元動画/プレビューを手動で入れて)」と正直に返す。
-    var vid = meta.videoId || '';
+    var vid = meta.historyVideoId || meta.videoId || '';
+    // ★フォルダの床を動画・画像探索より先に確保する。
+    // 旧YouTube ID個体はIDB/R2探索が空振りして長引くため、最後のsalvageまで待たせると
+    // UIの40秒番犬が先に終わり「フォルダすら無い」になる。ensure_folderはWorker側で
+    // Google Driveの同一チャンネル親＋safeName(題名)完全一致を照合し、既存なら必ず再利用する。
+    var floorReady = Promise.resolve(null);
+    if (window.Go5Drive && typeof window.Go5Drive.ensureFolder === 'function' &&
+        (meta.account === 'acc1' || meta.account === 'acc2') && meta.title) {
+      floorReady = window.Go5Drive.ensureFolder(meta.account, meta.title, [], vid || meta.id).then(function (floor) {
+        if (floor && floor.ok && floor.folderId && window.Go5Drive.rememberFolder) {
+          // 履歴ID・元の投稿ID・stock IDのどれから来ても同じ実フォルダへ戻す。
+          window.Go5Drive.rememberFolder(meta.account, meta.title, vid, floor.folderId);
+          if (meta.videoId && meta.videoId !== vid) window.Go5Drive.rememberFolder(meta.account, meta.title, meta.videoId, floor.folderId);
+          if (meta.id && meta.id !== vid && meta.id !== meta.videoId) window.Go5Drive.rememberFolder(meta.account, meta.title, meta.id, floor.folderId);
+        }
+      }).catch(function () { /* 本体の保存経路が再試行する。再生成自体は止めない */ });
+    }
     var settled = false;
+    var wd = 0;
     var wrapped = function (ok, msg) {
       if (settled) return; settled = true;
       if (wd) { clearTimeout(wd); wd = 0; }
       done(ok, msg);
     };
+    function beginDriveSave_() {
     // ★ウォッチドッグ：どの経路が固まっても40秒で必ず一度だけ結着させる=ボタンが「再生成中…」のまま
     //   永久に固まらない(Chami報告2026-08-18「再生成中から待たされる」)。この時点の1ページ目プレビューで判定。
-    var wd = setTimeout(function () {
+    wd = setTimeout(function () {
       if (settled) return;
       if (!vid) { wrapped(false, '時間内に完了できませんでした(通信が返りません)。もう一度お試しください'); return; }
       usedImagesRead_(vid).then(function (rec) {
@@ -1855,6 +1894,8 @@
         verdict();
       }
     });
+    }
+    floorReady.then(beginDriveSave_, beginDriveSave_);
   }
 
   // ── ★save_job 永続pending(2026-08-16 Chami「途中で閉じても裏で完結」の取りこぼし対策)──

@@ -11,6 +11,7 @@
 import assert from 'assert';
 import {
   validateSaveJobInput,
+  getOrCreateExactFolder,
   r2ObjectUrl,
   safeName,
   channelToFolderId,
@@ -92,5 +93,45 @@ try {
   ok('T-9 safeName: 危険文字のみ無害化');
 } catch (e) { ng('T-9', e); }
 
+
+// --- 同名フォルダ単一化(list失敗時は作らない・並列作成は1回だけ) ---
+try {
+  let created = 0;
+  const got = await getOrCreateExactFolder('P-existing', '同名作品', 'TOKEN', {
+    list: async () => ['FOLDER_EXISTING'],
+    create: async () => { created++; return { id: 'SHOULD_NOT_CREATE' }; },
+  });
+  assert.strictEqual(got.folder.id, 'FOLDER_EXISTING');
+  assert.strictEqual(got.reused, true);
+  assert.strictEqual(created, 0, '同名があれば新規作成しない');
+  ok('T-10 exact-name既存フォルダを再利用');
+} catch (e) { ng('T-10', e); }
+
+try {
+  let listed = 0, created = 0;
+  const ops = {
+    list: async () => { listed++; await new Promise((r) => setTimeout(r, 10)); return []; },
+    create: async () => { created++; await new Promise((r) => setTimeout(r, 10)); return { id: 'FOLDER_ONLY_ONE' }; },
+  };
+  const pair = await Promise.all([
+    getOrCreateExactFolder('P-parallel', '同時再送', 'TOKEN', ops),
+    getOrCreateExactFolder('P-parallel', '同時再送', 'TOKEN', ops),
+  ]);
+  assert.strictEqual(pair[0].folder.id, 'FOLDER_ONLY_ONE');
+  assert.strictEqual(pair[1].folder.id, 'FOLDER_ONLY_ONE');
+  assert.strictEqual(listed, 1, '並列でもDrive一覧確認は1回');
+  assert.strictEqual(created, 1, '並列でもフォルダ作成は1回');
+  ok('T-11 同一isolateの並列再送をsingle-flight');
+} catch (e) { ng('T-11', e); }
+
+try {
+  let created = 0;
+  await assert.rejects(getOrCreateExactFolder('P-list-fail', '照合不能', 'TOKEN', {
+    list: async () => { throw new Error('drive-list-error'); },
+    create: async () => { created++; return { id: 'DUPLICATE' }; },
+  }), /folder_lookup_failed/);
+  assert.strictEqual(created, 0, 'Drive一覧を確認できない時は新規作成しない');
+  ok('T-12 list失敗を未存在と誤認しない');
+} catch (e) { ng('T-12', e); }
 if (fails) { console.log('\n' + fails + ' test(s) FAILED'); process.exit(1); }
 console.log('\nAll drive save_job tests passed.');
