@@ -375,4 +375,97 @@ test.describe('PC candidate recovery invariants', () => {
     await expect(card.locator('[data-refimgview="' + cid + '"]')).toBeVisible({ timeout: 4000 });
     await expect.poll(() => page.evaluate(() => window.__refRetryAttempts || 0)).toBeGreaterThanOrEqual(5);
   });
-});
+
+  test('circle bulk add accepts id, maker URL and product URL, then persists and syncs', async ({ page }) => {
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.setItem('fanza_worker_url', 'https://worker.invalid');
+      localStorage.setItem('fanza_shared_secret', 'test-only');
+      localStorage.setItem('cand_items', '[]');
+      window.__bulkFlushCalls = 0;
+      window.Go5Sync.syncCandidatesNow = () => { window.__bulkFlushCalls++; return Promise.resolve({ ok: true }); };
+      window.Go5Sync.flushSync = window.Go5Sync.syncCandidatesNow;
+      window.FanzaCore.fetchFanzaInfo = () => Promise.resolve({
+        title: '作品URLから解決する作品', author: '作品URLサークル', authorId: '16180'
+      });
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (url, opts) => {
+        const text = String(url);
+        if (text.includes('/api/fanza-maker-list')) {
+          const makerId = String(JSON.parse((opts && opts.body) || '{}').makerId || '');
+          return new Response(JSON.stringify({ ok: true, items: [{
+            cid: 'd_bulk_' + makerId, title: '一括追加 ' + makerId,
+            url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_bulk_' + makerId + '/',
+            makerName: 'サークル ' + makerId, thumb: '', genres: ['コミック']
+          }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (text.includes('/api/candidate-catalog')) {
+          return new Response(JSON.stringify({ ok: true, imported: 1, progress: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return originalFetch(url, opts);
+      };
+    });
+
+    await page.locator('#candAddOpen').click();
+    const input = page.locator('#candBulkSrc');
+    const add = page.locator('#candBulkAdd');
+    for (const source of [
+      '31415',
+      'https://www.dmm.co.jp/dc/doujin/-/list/=/article=maker/id=27182/',
+      'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_product_resolve/'
+    ]) {
+      await input.fill(source);
+      await add.click();
+      await expect(input).toHaveValue('');
+      await expect(page.locator('#candBulkMsg')).toContainText('1件を追加しました');
+      await expect(add).toBeEnabled();
+      await page.waitForTimeout(550);
+    }
+
+    await expect.poll(() => page.evaluate(() => {
+      return (JSON.parse(localStorage.getItem('cand_items') || '[]') || []).map((it) => it.cid).sort();
+    })).toEqual(['d_bulk_16180', 'd_bulk_27182', 'd_bulk_31415']);
+    await expect.poll(() => page.evaluate(() => window.__bulkFlushCalls)).toBe(3);
+  });
+
+  test('circle bulk add survives localStorage quota by confirming the IDB mirror', async ({ page }) => {
+    const cid = 'd_bulk_quota_42424';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.setItem('fanza_worker_url', 'https://worker.invalid');
+      localStorage.setItem('fanza_shared_secret', 'test-only');
+      localStorage.setItem('cand_items', '[]');
+      window.__bulkQuotaFlushCalls = 0;
+      window.Go5Sync.syncCandidatesNow = () => { window.__bulkQuotaFlushCalls++; return Promise.resolve({ ok: true }); };
+      window.Go5Sync.flushSync = window.Go5Sync.syncCandidatesNow;
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (url, opts) => {
+        if (String(url).includes('/api/fanza-maker-list')) {
+          return new Response(JSON.stringify({ ok: true, items: [{
+            cid: 'd_bulk_quota_42424', title: '容量超過でも残る一括候補',
+            url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_bulk_quota_42424/',
+            makerName: '容量テストサークル', thumb: ''
+          }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (String(url).includes('/api/candidate-catalog')) {
+          return new Response(JSON.stringify({ ok: true, imported: 1, progress: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return originalFetch(url, opts);
+      };
+      const originalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (this === localStorage && key === 'cand_items') throw new DOMException('forced quota', 'QuotaExceededError');
+        return originalSetItem.call(this, key, value);
+      };
+    });
+
+    await page.locator('#candAddOpen').click();
+    await page.locator('#candBulkSrc').fill('42424');
+    await page.locator('#candBulkAdd').click();
+    await expect(page.locator('#candBulkMsg')).toContainText('1件を追加しました');
+    await expect.poll(() => page.evaluate(async (candidateCid) => {
+      const r = await Go5Idb.getResult('meta:candlist:cand_items');
+      return !!(r && r.ok && Array.isArray(r.value) && r.value.some((it) => it && it.cid === candidateCid));
+    }, cid)).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.__bulkQuotaFlushCalls)).toBe(1);
+  });});

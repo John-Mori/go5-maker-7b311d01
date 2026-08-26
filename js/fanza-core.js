@@ -29,7 +29,13 @@ function parseFanzaItem(item) {
     discountPct = Math.round(Math.round(raw * 10) / 10);
   }
 
-  var authorArr = (item.iteminfo && Array.isArray(item.iteminfo.author)) ? item.iteminfo.author : [];
+  // 同人作品のサークルは公式APIで iteminfo.maker に入る。Worker は通常 author へ
+  // 正規化して返すが、古いWorker応答や直接利用でも作品URL→サークル一括追加が壊れないよう
+  // maker → author → circle の順で吸収する。
+  var iteminfo = item.iteminfo || {};
+  var authorArr = Array.isArray(iteminfo.maker) && iteminfo.maker.length ? iteminfo.maker
+    : (Array.isArray(iteminfo.author) && iteminfo.author.length ? iteminfo.author
+      : (Array.isArray(iteminfo.circle) ? iteminfo.circle : []));
   var author = authorArr.length > 0 ? String(authorArr[0].name || '') : '';
   var authorId = authorArr.length > 0 && authorArr[0].id != null ? String(authorArr[0].id) : ''; // サークル/作者ID(候補タブのサークル一覧取得に使用)
 

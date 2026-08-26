@@ -368,6 +368,7 @@
   //   FANZAのサークル新作は日単位でしか変わらないため、数十秒内の再取得は情報が同じ＝負荷だけ増える。
   //   🔁は「今すぐ最新に」ボタンなので、連打/焦りの再タップだけを吸収する短めの値にする(値変更はここ1箇所)。
   var MAKER_REFRESH_MIN_MS = 60 * 1000; // 60秒
+  var MAKER_FETCH_TIMEOUT_MS = 45000; // 一覧取得の無限待ち防止。失敗時は既存キャッシュへ退避する。
 
   var _activeTab = 'main'; // 'main' | サークルタブid
   var _sort = 'added_desc'; // 現在表示中の並び順。タブ入場時に defaultSortForTab_ で上書きされる(下 render())。
@@ -4010,16 +4011,41 @@
     }
     var cfg = workerCfg();
     if (!cfg.url) { cb(null, 'FANZA Workerが未設定です(⚙️詳細設定)'); return; }
-    fetch(cfg.url + '/api/fanza-maker-list', {
+    var ctrl = null, timer = null, timedOut = false, settled = false;
+    function finish_(items, err, cached) {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      cb(items, err, cached);
+    }
+    try {
+      ctrl = new AbortController();
+      timer = setTimeout(function () { timedOut = true; try { ctrl.abort(); } catch (e) {} }, MAKER_FETCH_TIMEOUT_MS);
+    } catch (e) { ctrl = null; }
+    var req = {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
       body: JSON.stringify({ makerId: makerId, sort: apiMode })
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (!d || !d.ok) { cb(null, (d && d.error) === 'bad_secret' ? '共有シークレット不一致(⚙️詳細設定)' : ('取得エラー: ' + ((d && d.error) || '不明'))); return; }
+    };
+    if (ctrl) req.signal = ctrl.signal;
+    fetch(cfg.url + '/api/fanza-maker-list', req).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (d) { return { status: r.status, data: d }; });
+    }).then(function (result) {
+      var d = result.data;
+      if (!d || !d.ok) {
+        if (hasCache) { finish_(c.items, null, true); return; }
+        var code = (d && d.error) || ('HTTP ' + result.status);
+        finish_(null, code === 'bad_secret' ? '共有シークレット不一致(⚙️詳細設定)' : ('取得エラー: ' + code));
+        return;
+      }
       var items = d.items || [];
       // 空データはキャッシュしない。(一時失敗やサークル未収録を固定化しない)
       if (items.length) { lsSet(ck, { at: new Date().getTime(), items: items }); recordReviewSnapshots(items); }
-      cb(items, null);
-    }).catch(function () { cb(null, '通信エラー'); });
+      finish_(items, null, false);
+    }).catch(function () {
+      // Worker/APIの一時停止でも、以前取得済みの一覧があれば追加操作そのものは成立させる。
+      if (hasCache) { finish_(c.items, null, true); return; }
+      finish_(null, timedOut ? '取得がタイムアウトしました。通信を確認してもう一度押してください' : '通信エラー');
+    });
   }
   // 複数サークルをまとめて取得し、cidで重複排除してマージ。(1タブに複数サークルを表示する用)
   //   一部サークルが失敗しても成功分は表示。全滅時のみエラーを返す。
@@ -4090,12 +4116,26 @@
   }
 
   // ── サークルIDの解決(数字 / maker URL / 作品URL) ──
+  function makerIdFromText_(input) {
+    var raw = String(input || '').trim();
+    if (/^\d{1,10}$/.test(raw)) return raw;
+    var variants = [raw];
+    try { variants.push(decodeURIComponent(raw)); } catch (e) {}
+    try { if (window.normalizeWorkUrl) variants.push(String(window.normalizeWorkUrl(raw) || '')); } catch (e2) {}
+    for (var i = 0; i < variants.length; i++) {
+      var t = variants[i];
+      var mm = t.match(/article[=\/]maker(?:%2F|\/)(?:id[=\/])?(\d+)/i)
+        || t.match(/(?:maker[_-]?id|article_id)[=\/](\d+)/i)
+        || t.match(/(?:[?&\/]maker[\/_-]?)(?:id[=\/]?)?(\d+)/i);
+      if (mm) return mm[1];
+    }
+    return '';
+  }
   function resolveMakerId(input, cb) {
     var t = (input || '').trim();
     if (!t) { cb(null, null, '入力が空です'); return; }
-    if (/^\d{1,10}$/.test(t)) { cb(t, '', null); return; }
-    var mm = t.match(/article=maker\/id=(\d+)/) || t.match(/[?&/]maker[_/]?id=?(\d+)/i);
-    if (mm) { cb(mm[1], '', null); return; }
+    var directMakerId = makerIdFromText_(t);
+    if (directMakerId) { cb(directMakerId, '', null); return; }
     // 作品URL → fanza-item でサークルID(authorId)を解決
     var url = (window.normalizeWorkUrl ? window.normalizeWorkUrl(t) : t);
     var r = window.buildAffiliateLink ? window.buildAffiliateLink(url, '') : null;
@@ -4108,7 +4148,6 @@
       else cb(null, null, '作品情報を取得できませんでした' + (info && info.reason ? '(' + info.reason + ')' : ''));
     }).catch(function () { cb(null, null, '通信エラー'); });
   }
-
   // 選んだサブタブ(候補タブ内のバズ/手動追加/全候補/サークル)を横スクロール帯の中央へ寄せる。
   //   上位のメインタブ(affiliate.js centerTab_)と同じ考え方=scrollIntoView は祖先ごと動いて
   //   画面が飛ぶため使わず、.cand-tabs の scrollLeft だけを動かす(Chami依頼 2026-08-08)。
@@ -5337,19 +5376,52 @@
     if (msg) msg.textContent = (raw || twRaw) ? '⚠️ FANZAの作品URL か X / Bluesky の投稿URLを入れてください' : '⚠️ URLを入力してください';
   }
   // サークルの全作品を、指定タブ(候補/独立タブ)へまとめて追加。(重複cidは除外・タブ名は不変)
+  var _bulkAddBusy = false;
   function bulkAddCircle(tabId) {
-    var src = ($('candBulkSrc').value || '').trim(), msg = $('candBulkMsg');
+    var inp = $('candBulkSrc'), btn = $('candBulkAdd'), msg = $('candBulkMsg');
+    var src = ((inp && inp.value) || '').trim();
     if (!src) { msg.textContent = '⚠️ サークル情報を入れてください'; return; }
+    if (_bulkAddBusy) { msg.textContent = '⏳ いま同じ追加処理を実行中です'; return; }
+    _bulkAddBusy = true;
+    if (btn) { btn.disabled = true; btn.textContent = '取得中…'; }
+    var slowTimer = setTimeout(function () {
+      if (_bulkAddBusy && msg) msg.textContent = '⏳ 作品一覧を取得中です。通信が遅くても処理を継続しています…';
+    }, 12000);
+    function finishBulk_() {
+      _bulkAddBusy = false;
+      clearTimeout(slowTimer);
+      if (btn) { btn.disabled = false; btn.textContent = 'サークル作品を全て追加'; }
+    }
     msg.textContent = '⏳ サークルを特定中…';
     resolveMakerId(src, function (makerId, makerName, err) {
-      if (!makerId) { msg.textContent = '⚠️ ' + err; return; }
+      if (!makerId) { msg.textContent = '⚠️ ' + err; finishBulk_(); return; }
       msg.textContent = '⏳ 作品一覧を取得中…(多いと時間がかかります)';
-      fetchMakerItems(makerId, 'date', function (works, err2) {
-        if (err2) { msg.textContent = '⚠️ ' + err2; return; }
+      fetchMakerItems(makerId, 'date', function (works, err2, cached) {
+        if (err2) { msg.textContent = '⚠️ ' + err2; finishBulk_(); return; }
+        if (!works || !works.length) {
+          msg.textContent = '⚠️ このサークルの作品を取得できませんでした。IDまたはURLを確認してもう一度押してください';
+          finishBulk_(); return;
+        }
         var res = appendWorks_(itemsKey(tabId), works || []);
-        msg.textContent = '✅ ' + res.added + '件を追加しました' + (res.dup ? '(重複' + res.dup + '件は除外)' : '');
-        $('candBulkSrc').value = '';
-        renderCandList(tabId);
+        if (!res.added) {
+          msg.textContent = 'ℹ️ 全' + res.dup + '件はすでにこのタブに追加済みです' + (cached ? '(保存済み一覧で確認)' : '');
+          if (inp) inp.value = '';
+          finishBulk_(); return;
+        }
+        confirmCandDurable_(res.key, res.lastCid, res.lsOk).then(function (durable) {
+          if (durable === 'fail') {
+            msg.textContent = '⚠️ 作品は取得できましたが端末への保存に失敗しました。空き容量を確認してもう一度押してください';
+            finishBulk_(); return;
+          }
+          flushSync_();
+          msg.textContent = '✅ ' + res.added + '件を追加しました' + (res.dup ? '(重複' + res.dup + '件は除外)' : '') + (cached ? ' ※保存済み一覧を使用' : '');
+          if (inp) inp.value = '';
+          renderCandList(tabId);
+          finishBulk_();
+        }, function () {
+          msg.textContent = '⚠️ 作品は取得できましたが保存確認に失敗しました。もう一度押してください';
+          finishBulk_();
+        });
       }, true); // force=キャッシュ無視で最新の全件
     });
   }
@@ -5358,9 +5430,22 @@
     if (!works || !works.length) return;
     if (!window.confirm('「' + (circleName || 'このサークル') + '」の全' + works.length + '作品を「💡候補」に追加しますか？')) return;
     var res = appendWorks_(K_ITEMS, works);
-    if (btn) { btn.textContent = '✅ ' + res.added + '件を候補へ' + (res.dup ? '(重複' + res.dup + '件除外)' : ''); setTimeout(function () { btn.textContent = '💡 全作品を候補に追加'; }, 3500); }
-  }
-  // 作品配列を保存キーへ追記。(cid重複は除外)追加数・重複数を返す。
+    if (!res.added) {
+      if (btn) { btn.textContent = 'ℹ️ 全' + res.dup + '件は候補に追加済み'; setTimeout(function () { btn.textContent = '📥 全作品を候補に追加'; }, 3500); }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '保存確認中…'; }
+    confirmCandDurable_(res.key, res.lastCid, res.lsOk).then(function (durable) {
+      if (durable !== 'fail') flushSync_();
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = durable === 'fail' ? '⚠️ 保存失敗・もう一度' : ('✅ ' + res.added + '件を候補へ' + (res.dup ? '(重複' + res.dup + '件除外)' : ''));
+        setTimeout(function () { btn.textContent = '📥 全作品を候補に追加'; }, 3500);
+      }
+    }, function () {
+      if (btn) { btn.disabled = false; btn.textContent = '⚠️ 保存確認失敗・もう一度'; }
+    });
+  }  // 作品配列を保存キーへ追記。(cid重複は除外)追加数・重複数を返す。
   function appendWorks_(key, works) {
     var items = candItemsRead_(key), have = {}; items.forEach(function (x) { have[x.cid] = true; });
     var added = 0, dup = 0;
@@ -5370,9 +5455,10 @@
       items.push({ url: w.url, cid: w.cid, title: w.title, author: w.makerName || w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', reviewCount: w.reviewCount, reviewAvg: w.reviewAvg, addedAt: new Date().getTime() });
       have[w.cid] = true; added++;
     });
-    candItemsWrite_(key, items); recordReviewSnapshots(items);
+    var lsOk = true;
+    if (added > 0) { lsOk = candItemsWrite_(key, items); recordReviewSnapshots(items); }
     if (added > 0) klog_('candidate_added', 'work', (works[0] && works[0].cid) || '', { added: added, dup: dup });
-    return { added: added, dup: dup };
+    return { added: added, dup: dup, key: key, lsOk: lsOk, lastCid: added ? String(items[items.length - 1].cid || '') : '' };
   }
   // 🔁: このタブの各作品の価格・販売数を最新化。(FANZA再取得＋販売数キャッシュ無効化)
   function refreshCandItems(tabId) {

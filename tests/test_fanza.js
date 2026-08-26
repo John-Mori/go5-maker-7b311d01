@@ -170,6 +170,14 @@ test('F-10: 二段階丸めでも切り上がらない例（84.4%→84%）', fun
 
 // ────────────────────────────────────────────────────────────
 // 結果集計
+test('R-11: 同人APIのmakerをサークルIDとして解決できる', function () {
+  var r = parseFanzaItem({
+    content_id: 'd_maker_only', title: 'makerのみの同人作品', prices: {}, review: {},
+    iteminfo: { maker: [{ id: '1819455', name: '回帰テストサークル' }], author: [] }
+  });
+  assert.strictEqual(r.authorId, '1819455');
+  assert.strictEqual(r.author, '回帰テストサークル');
+});
 // ────────────────────────────────────────────────────────────
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
