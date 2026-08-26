@@ -14,6 +14,8 @@ class MemoryStorage {
 }
 
 global.localStorage = new MemoryStorage();
+global.localStorage.setItem('sync2_url', 'https://sync.example.test');
+global.localStorage.setItem('sync2_token', 'test-token');
 global.Go5Sync = {
   getConfig: function () { return { url: 'https://sync.example.test', token: 't', hasPass: true }; },
   syncImageManifestNow: function () { return Promise.resolve({ ok: true }); }
@@ -34,6 +36,14 @@ assert.deepStrictEqual(
 );
 assert.strictEqual(Cdn._test.hashFromDirectUrl('https://sync.example.test/img/' + H1 + '?x=1'), H1);
 
+Cdn.acceptRaw(JSON.stringify({
+  'ref:tie': { keys: [], prev: 0, at: 200 }
+}), 'test');
+assert.deepStrictEqual(
+  Cdn.pick('ref', 'tie', ['data:image/jpeg;base64,AA=='], 200, true, 0),
+  [],
+  'an equal-time manifest deletion must win over a stale local image'
+);
 const local = JSON.stringify({
   'ref:a': { keys: [H1], prev: 0, at: 100 },
   'used:x': { keys: [H1], prev: 1, at: 100 }
@@ -70,8 +80,33 @@ const root = path.resolve(__dirname, '..');
   const cdnAt = html.indexOf('core/image-cdn.js');
   assert.ok(syncAt >= 0 && cdnAt > syncAt, name + ' must load image-cdn after sync');
 });
+const worker = fs.readFileSync(path.join(root, 'sync-worker', 'src', 'index.js'), 'utf8');
+assert.ok(worker.includes('httpMetadata: { contentType: ct, cacheControl: "public, max-age=31536000, immutable" }'));
+assert.ok(worker.includes('headers.set("Cache-Control", "public, max-age=31536000, immutable")'));
+assert.ok(worker.includes('headers.set("Access-Control-Allow-Origin", "*")'));
+
 
 const candidates = fs.readFileSync(path.join(root, 'js/candidates.js'), 'utf8');
+assert.ok(candidates.includes('window.Go5ImageCdn.pick(kind, key'));
+
+let uploadCount = 0;
+global.Go5Sync.putBlobR2 = function () { uploadCount++; return Promise.resolve(H2); };
+const migrateOne = Cdn.ensure('ref', 'dedupe', ['data:image/png;base64,iVBORw0KGgo='], { at: 350 });
+const migrateTwo = Cdn.ensure('ref', 'dedupe', ['data:image/png;base64,iVBORw0KGgo='], { at: 350 });
+const raceAdd = Cdn.mirror('ref', 'race', ['https://sync.example.test/img/' + H1], { at: 400 });
+const raceDelete = Cdn.mirror('ref', 'race', [], { at: 401 });
+Promise.all([migrateOne, migrateTwo, raceAdd, raceDelete]).then(function () {
+  const rec = Cdn.record('ref', 'race');
+  assert.ok(rec, 'the serialized record must exist');
+  assert.deepStrictEqual(rec.keys, [], 'a later deletion must not be dropped behind an upload already in flight');
+  assert.strictEqual(rec.at, 401);
+  assert.strictEqual(uploadCount, 1, 're-render migration requests must share one in-flight upload');
+  assert.deepStrictEqual(Cdn.record('ref', 'dedupe').keys, [H2]);
+  console.log('OK: direct image manifest write serialization');
+}).catch(function (error) {
+  console.error(error);
+  process.exitCode = 1;
+});
 assert.ok(candidates.includes("imageCdnPick_('ref'"));
 assert.ok(candidates.includes("imageCdnPick_('post'"));
 assert.ok(candidates.includes("imageCdnPick_('used'"));

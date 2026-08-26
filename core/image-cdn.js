@@ -75,8 +75,8 @@
     if (!ls) return false;
     function attempt_() { try { ls.setItem(KEY, raw); return true; } catch (e) { return false; } }
     var ok = attempt_();
-    // localStorage????????/???????????????????????????????
-    // ??????????????Go5Keys.isPurgeable=false???????????
+    // If localStorage is full, evict only rebuildable caches registered by Go5Keys.
+    // The manifest itself is durable state and is never purgeable.
     if (!ok && root.Go5Keys && root.Go5Keys.isPurgeable) {
       var victims = [];
       try {
@@ -111,8 +111,17 @@
       if (!map || typeof map !== "object" || Array.isArray(map)) map = {};
     } catch (e) { map = {}; }
     var old = validRec_(map[rid]);
-    if (old && old.at > at) return old; // 遅い旧ジョブが新しい画像台帳を巻き戻さない。
     var rec = { keys: (keys || []).slice(), prev: Math.max(0, Number(opts && opts.prev) | 0), at: at };
+    if (old) {
+      if (old.at > rec.at) return old;
+      if (old.at === rec.at) {
+        // An explicit empty record wins an exact tie, so a stale upload cannot resurrect a deletion.
+        if (!old.keys.length && rec.keys.length) return old;
+        if (old.keys.length && !rec.keys.length) {
+          // Continue and write the empty record.
+        } else if (JSON.stringify(old) >= JSON.stringify(rec)) return old;
+      }
+    }
     map[rid] = rec;
     return commitMap_(map, [rid], "local", true) ? rec : null;
   }
@@ -164,45 +173,75 @@
     });
   }
   function mirror_(kind, id, images, opts) {
-    kind = String(kind || ""); id = String(id || ""); images = (images || []).filter(Boolean);
+    kind = String(kind || ""); id = String(id || ""); images = (images || []).filter(Boolean).slice();
     if (!/^(ref|used|post|bsky)$/.test(kind) || !id) return Promise.resolve(null);
-    if (!images.length) return Promise.resolve(writeRecord_(kind, id, [], opts)); // 明示削除も新しいatで伝播。
     var jid = recId_(kind, id);
-    if (_jobs[jid]) return _jobs[jid];
-    var job = Promise.all(images.map(function (src) { return enqueue_(function () { return uploadOne_(src); }); })).then(function (keys) {
-      if (keys.length !== images.length || keys.some(function (h) { return !HASH_RE.test(h); })) return null;
-      return writeRecord_(kind, id, keys, opts);
+    // Serialize writes for one record. A later save must never be dropped behind an upload already in flight.
+    var prior = _jobs[jid] || Promise.resolve();
+    var job = prior.catch(function () { return null; }).then(function () {
+      if (!images.length) return writeRecord_(kind, id, [], opts);
+      return Promise.all(images.map(function (src) { return enqueue_(function () { return uploadOne_(src); }); })).then(function (keys) {
+        if (keys.length !== images.length || keys.some(function (h) { return !HASH_RE.test(h); })) return null;
+        return writeRecord_(kind, id, keys, opts);
+      });
     }).catch(function () { return null; });
-    _jobs[jid] = job.then(function (r) { delete _jobs[jid]; return r; }, function () { delete _jobs[jid]; return null; });
-    return _jobs[jid];
+    _jobs[jid] = job;
+    return job.then(function (r) {
+      if (_jobs[jid] === job) delete _jobs[jid];
+      return r;
+    }, function () {
+      if (_jobs[jid] === job) delete _jobs[jid];
+      return null;
+    });
   }
   // 旧dataURLを閲覧時に漸進移行。新規保存は mirror()を必ず呼び、同枚数の差替えも更新する。
   function ensure_(kind, id, images, opts) {
     images = (images || []).filter(Boolean);
     if (!images.length) return Promise.resolve(record_(kind, id));
+    var jid = recId_(kind, id);
+    // Re-renders can ask to migrate the same legacy record repeatedly; share the in-flight upload.
+    if (_jobs[jid]) return _jobs[jid];
     var rec = record_(kind, id), at = Math.max(0, Number(opts && opts.at) || 0), prev = Math.max(0, Number(opts && opts.prev) | 0);
     if (rec && rec.keys.length === images.length && rec.at >= at && rec.prev === prev) return Promise.resolve(rec);
     return mirror_(kind, id, images, opts);
   }
   // local record とURL台帳の更新時刻を比較し、描画に使う列を同期的に選ぶ。
-  function pick_(kind, id, localImages, localAt, localKnown) {
+  function pick_(kind, id, localImages, localAt, localKnown, localPrev) {
     localImages = (localImages || []).filter(Boolean);
     var rec = record_(kind, id), lat = Math.max(0, Number(localAt) || 0);
-    if (rec && rec.at > lat) return urlsForRec_(rec, workerBase_());
+    if (rec && rec.at >= lat) {
+      var direct = urlsForRec_(rec, workerBase_());
+      // keys:[] is an explicit deletion. Equal-time records use the same deterministic
+      // winner as synchronization, so a deleted image cannot flash back from IDB.
+      if (!rec.keys.length || direct.length === rec.keys.length) return direct;
+    }
     if (localKnown || localImages.length) {
-      if (localImages.length) ensure_(kind, id, localImages, { at: lat, prev: kind === "used" ? prev_(kind, id) : 0 });
+      if (localImages.length) ensure_(kind, id, localImages, { at: lat, prev: kind === "used" ? (Number(localPrev) | 0) : 0 });
       return localImages;
     }
     return rec ? urlsForRec_(rec, workerBase_()) : [];
   }
 
+
+  function warmOrigin_() {
+    var doc = root && root.document, base = workerBase_();
+    if (!doc || !doc.head || !base) return;
+    [["go5-image-preconnect", "preconnect"], ["go5-image-dns-prefetch", "dns-prefetch"]].forEach(function (spec) {
+      if (doc.getElementById(spec[0])) return;
+      var link = doc.createElement("link");
+      link.id = spec[0]; link.rel = spec[1]; link.href = base;
+      if (spec[1] === "preconnect") link.crossOrigin = "anonymous";
+      doc.head.appendChild(link);
+    });
+  }
   var API = {
     key: KEY, record: record_, known: known_, urls: urls_, prevCount: prev_, pick: pick_, mirror: mirror_, ensure: ensure_, acceptRaw: acceptRaw_,
-    refresh: function () { _cacheRaw = null; var before = _cacheMap; var after = read_(); return before !== after; },
+    refresh: function () { var before = _cacheRaw; _cacheRaw = null; read_(); return before !== _cacheRaw; },
     _test: { validRec: validRec_, recId: recId_, urlsForRec: urlsForRec_, hashFromDirectUrl: hashFromDirectUrl_ }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5ImageCdn = API;
+  warmOrigin_();
 
   if (root && root.addEventListener) {
     root.addEventListener("storage", function (e) { if (e && e.key === KEY) { _cacheRaw = null; emit_([], "storage"); } });

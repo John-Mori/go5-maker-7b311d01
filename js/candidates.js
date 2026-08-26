@@ -1385,6 +1385,36 @@
     try { return JSON.parse(localStorage.getItem(refImgKey(cid)) || 'null'); } catch (e) { return null; }
   }
 
+  function imageRecImgs_(rec) {
+    if (!rec) return [];
+    if (Array.isArray(rec.imgs)) return rec.imgs.filter(Boolean);
+    return rec.img ? [rec.img] : [];
+  }
+  function imageCdnRecord_(kind, key) {
+    try { return window.Go5ImageCdn && window.Go5ImageCdn.record ? window.Go5ImageCdn.record(kind, key) : null; } catch (e) { return null; }
+  }
+  function imageCdnKnown_(kind, key) {
+    try { return !!(window.Go5ImageCdn && window.Go5ImageCdn.known && window.Go5ImageCdn.known(kind, key)); } catch (e) { return false; }
+  }
+  function imageCdnPick_(kind, key, localRec) {
+    var local = imageRecImgs_(localRec), manifest = imageCdnRecord_(kind, key);
+    var localAt = Math.max(0, Number(localRec && localRec.at) || 0);
+    try {
+      if (window.Go5ImageCdn && window.Go5ImageCdn.pick) {
+        return window.Go5ImageCdn.pick(kind, key, local, localAt, !!localRec, Number(localRec && localRec.prev) | 0) || [];
+      }
+    } catch (e) {}
+    return local;
+  }
+  function imageCdnMirror_(kind, key, imgs, at, prev) {
+    try {
+      if (!window.Go5ImageCdn || !window.Go5ImageCdn.mirror) return;
+      Promise.resolve(window.Go5ImageCdn.mirror(kind, key, (imgs || []).filter(Boolean), {
+        at: Math.max(1, Number(at) || Date.now()), prev: Math.max(0, Number(prev) | 0)
+      })).catch(function () {});
+    } catch (e) {}
+  }
+
   // 全体ハイドレートを待たず、押された作品1件だけを直接復元する。
   // 候補画像が多い/iOSが低メモリでも「投稿編集」の入口を全体走査から切り離す。
   function ensureRefLoaded_(cid) {
@@ -1393,6 +1423,11 @@
     // probeが成功扱いで終わり、実画像の取得失敗を追跡できないため、R2解決を起動して未完了を返す。
     var memRaw = cid ? _imgMem.ref[cid] : null;
     if (isR2Marker_(memRaw)) { resolveR2IntoMem_(cid, memRaw); return Promise.resolve(false); }
+    // A synced manifest is already a complete per-item answer. Do not gate the modal or card on an IDB read.
+    if (imageCdnKnown_('ref', cid)) {
+      _refLoaded[cid] = true;
+      return Promise.resolve(true);
+    }
     // 全体ハイドレート完了は「このcidも読めた」証明ではない。同期などで完了後にIDBへ入った
     // 作品はメモリに無いことがあるため、cid単位の既知フラグ/実体が無ければ直接getする。
     if (!cid || !_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
@@ -1456,6 +1491,14 @@
     // LSがR2マーカー(base64を持たない枚数印)なら、実体をR2から取り寄せてメモリへ載せる(裏で・冪等)。
     //   表示側にはマーカーの内部(__r2n)を渡さず、テキストだけ持つ空画像レコードとして扱う=解決後の再描画で画像が出る。
     if (isR2Marker_(base)) { resolveR2IntoMem_(cid, base); base = { comment: base.comment, memo: base.memo, twitterUrl: base.twitterUrl, twitterUrl2: base.twitterUrl2, urls2: base.urls2, at: base.at }; }
+    // Prefer the small synced manifest when it is newer. This produces a stable HTTPS src synchronously,
+    // while the legacy IDB/dataURL record remains available for editing and offline fallback.
+    var manifest = imageCdnRecord_('ref', cid);
+    var selected = imageCdnPick_('ref', cid, base);
+    if (base || manifest) {
+      base = Object.assign({}, base || {}, { imgs: selected, img: selected[0] || '' });
+      if (manifest && (!base.at || Number(manifest.at) > Number(base.at))) base.at = manifest.at;
+    }
     var txt = candTextOf_(cid);
     if (!base && !txt) return null;
     if (!txt) return base; // 移行前の端末=IDB/旧LSの値をそのまま(cand_textはハイドレート後にbackfillされる)
@@ -1469,12 +1512,11 @@
   // 保存画像を常に配列で返す。(旧形式 {img:単発} → [img] に正規化・新形式は {imgs:[...]}. 37ページ級の複数コマ保持に対応)
   function refImgsOf_(cid) {
     var r = refImgOf(cid); if (!r) return [];
-    if (Array.isArray(r.imgs)) return r.imgs.filter(Boolean);
-    return r.img ? [r.img] : [];
+    return imageRecImgs_(r);
   }
   function refImgHas(cid) {
     var r = refImgOf(cid); if (!r) return false; // 1回の読みで判定(フォールバック時の多重JSON.parse回避)
-    var has = Array.isArray(r.imgs) ? r.imgs.some(Boolean) : !!r.img;
+    var has = refImgsOf_(cid).length > 0;
     return !!(has || r.comment || r.memo || r.twitterUrl || r.twitterUrl2 || (r.urls2 && r.urls2.length));
   }
 
@@ -1687,7 +1729,7 @@
     var empty = !data || (!imgs.length && !data.comment && !data.memo && !data.twitterUrl && !urls2.length);
     // ★展開前(_imgMemが空)の「空データ=削除」は、読めていないだけの既存データを消す事故になる。
     //   未展開のうちは破壊的な空保存を拒否する。(明示削除はUIから展開後に行われるので実害なし)
-    if (empty && _idbOk && !_candidateHydrated && !_refLoaded[cid]) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
+    if (empty && _idbOk && !_candidateHydrated && !_refLoaded[cid] && !imageCdnKnown_('ref', cid)) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', cid); } catch (e) {} return false; }
     // ★テキストは同期LSの正本 cand_text へ先に確定保存(戻り値=真の成否)。IDB書込の成否・ハイドレート状態に依存せず、
     //   次の描画で必ずコメント/メモ/X URLが読める。ここを通る=空でも正当な削除(展開後)なので cand_text も更新する。
     var textSaved = candTextSave_(cid, { comment: data && data.comment, memo: data && data.memo, twitterUrl: data && data.twitterUrl, twitterUrl2: urls2[0] || (data && data.twitterUrl2) || '', urls2: urls2 });
@@ -1697,16 +1739,17 @@
     if (!textSaved && !imgs.length) return false;
 
     // IDB/旧LSは画像専用。テキストも旧版との後方互換用に同梱するが、画像ゼロならレコード自体を削除して cand_text だけ残す。
+    var imageAt = new Date().getTime();
     var rec = imgs.length ? {
       imgs: imgs, img: imgs[0] || '', comment: (data && data.comment) || '', memo: (data && data.memo) || '',
-      twitterUrl: (data && data.twitterUrl) || '', twitterUrl2: urls2[0] || '', urls2: urls2, at: new Date().getTime()
+      twitterUrl: (data && data.twitterUrl) || '', twitterUrl2: urls2[0] || '', urls2: urls2, at: imageAt
     } : null;
 
     // ★画像が変わっていない保存は、cand_text 確定時点でUI上の保存完了とする。画像なし/メモ等だけの編集で
     //   IndexedDB を待つ必要はない。iOS Safari のIDBタイムアウト(内部8秒×再接続1回)へ入り「保存中…」が
     //   長時間続く真因を切り離す。旧IDBレコードのテキストが再移行されないよう、既存レコードだけは裏で更新/掃除する。
     var prev = _idbOk ? (_imgMem.ref[cid] || null) : legacyRefOf_(cid);
-    var prevImgs = prev ? (Array.isArray(prev.imgs) ? prev.imgs.filter(Boolean) : (prev.img ? [prev.img] : [])) : [];
+    var prevImgs = refImgsOf_(cid);
     var imageChanged = prevImgs.length !== imgs.length;
     if (!imageChanged) {
       for (var ii = 0; ii < imgs.length; ii++) { if (prevImgs[ii] !== imgs[ii]) { imageChanged = true; break; } }
@@ -1734,6 +1777,7 @@
       return write.then(function () {
         _refLoaded[cid] = true;
         reqSync_(); // 永続保存が成功した内容だけを同期へ送る
+        imageCdnMirror_('ref', cid, imgs, imageAt, 0);
         if (rec) klog_('ref_image_saved', 'work', cid, { imgs: imgs.length });
         return true;
       }, function (e) {
@@ -1746,19 +1790,19 @@
         //   両方落ちた時だけ本当の失敗として false(モーダル保持・再操作可)。メモリ(_imgMem.ref[cid])は
         //   既に新しい画像/削除済み=表示は無傷。削除(rec=null)はR2を触らずマーカー/退避を消すだけ。
         if (!rec) {
-          try { localStorage.removeItem(refImgKey(cid)); _refLoaded[cid] = true; reqSync_(); return true; }
+          try { localStorage.removeItem(refImgKey(cid)); _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, [], imageAt, 0); return true; }
           catch (e2) { if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid]; return false; }
         }
         return pushRefToR2_(cid, imgs).then(function (r2ok) {
           if (r2ok) {
             var marker = { __r2n: imgs.length, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
             var markerStr = JSON.stringify(marker);
-            try { localStorage.setItem(refImgKey(cid), markerStr); _refLoaded[cid] = true; reqSync_(); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length }); return true; }
+            try { localStorage.setItem(refImgKey(cid), markerStr); _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, imgs, imageAt, 0); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length }); return true; }
             catch (e3) {
               // ★実体はR2に載っている=あとは道標(数百B)のマーカーさえ書ければ成功。LS満杯なら、まさに今
               //   上書きする同一cidの旧base64値を先に退けて1回だけ書き直す(消すのは上書き対象=喪失を増やさない)。
               //   これを入れる前は e3 を握り潰して下の base64 退避(もっと大きい)へ落ち、R2成功なのに false を返していた(Fable5診断2026-08-24)。
-              try { localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), markerStr); _refLoaded[cid] = true; reqSync_(); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length, freed: 1 }); return true; } catch (e3b) {}
+              try { localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), markerStr); _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, imgs, imageAt, 0); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length, freed: 1 }); return true; } catch (e3b) {}
             }
           }
           // R2に載らなかった=従来の base64 LS退避へ(img複製は落として足跡を半減=P1-3)。
@@ -1767,7 +1811,7 @@
             var recLsStr = JSON.stringify(recLs);
             try { localStorage.setItem(refImgKey(cid), recLsStr); }
             catch (e2a) { localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), recLsStr); } // 同一cidの旧値を退けて1回だけ再試行(満杯時)
-            _refLoaded[cid] = true; reqSync_(); return true;
+            _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, imgs, imageAt, 0); return true;
           } catch (e2) {
             if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid];
             klog_('ref_image_save_failed', 'work', cid, { cause: (e2 && e2.name) || 'quota', r2: r2ok ? 1 : 0, imgs: imgs.length });
@@ -1777,9 +1821,9 @@
       });
     }
     try {
-      if (!rec) { localStorage.removeItem(refImgKey(cid)); return true; }
+      if (!rec) { localStorage.removeItem(refImgKey(cid)); imageCdnMirror_('ref', cid, [], imageAt, 0); return true; }
       localStorage.setItem(refImgKey(cid), JSON.stringify(rec));
-      return true;
+      imageCdnMirror_('ref', cid, imgs, imageAt, 0); return true;
     } catch (e) { return false; } // 容量超過など
   }
 
@@ -1817,7 +1861,7 @@
   function postImgsOf_(key) {
     if (!key) return [];
     var r = _idbOk ? _imgMem.post[key] : (function () { try { return JSON.parse(localStorage.getItem('hist_postimg__' + key) || 'null'); } catch (e) { return null; } })();
-    return (r && Array.isArray(r.imgs)) ? r.imgs.filter(Boolean) : [];
+    return imageCdnPick_('post', key, r);
   }
   function postImgSave_(key, imgs) {
     if (!key) return false;
@@ -1825,19 +1869,21 @@
     // ★refImgSave/bskyImgSaveと同じ穴(v=349で塞ぎ忘れていた3つ目のストア)。post画像も同じ
     //   非同期IDB系なので、展開前は postImgsOf_ が「実際は在るのにnull」を返す=空で保存すると
     //   既存の投稿画像を削除してしまう。未展開中の破壊的な空保存を拒否する。(B-2棚卸しで発見)
-    if (!imgs.length && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', key); } catch (e) {} return false; }
-    var rec = imgs.length ? { imgs: imgs, at: new Date().getTime() } : null;
+    if (!imgs.length && _idbOk && !_hydrated && !imageCdnKnown_('post', key)) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', key); } catch (e) {} return false; }
+    var postAt = new Date().getTime();
+    var rec = imgs.length ? { imgs: imgs, at: postAt } : null;
     if (_idbOk) {
       if (rec) _imgMem.post[key] = rec; else delete _imgMem.post[key];
       _histDirectChecked.post[key] = true;
       (rec ? window.Go5Idb.set(idbKey('post', key), rec) : window.Go5Idb.del(idbKey('post', key))).catch(idbFail_);
+      imageCdnMirror_('post', key, imgs, postAt, 0);
       return true;
     }
     try {
       var lk = 'hist_postimg__' + key;
-      if (!rec) { localStorage.removeItem(lk); return true; }
+      if (!rec) { localStorage.removeItem(lk); imageCdnMirror_('post', key, [], postAt, 0); return true; }
       localStorage.setItem(lk, JSON.stringify(rec));
-      return true;
+      imageCdnMirror_('post', key, imgs, postAt, 0); return true;
     } catch (e) { return false; } // 容量超過など
   }
 
@@ -1847,23 +1893,25 @@
   function usedImgsOf_(key) {
     if (!key) return [];
     var r = _idbOk ? _imgMem.used[key] : (function () { try { return JSON.parse(localStorage.getItem('hist_usedimg__' + key) || 'null'); } catch (e) { return null; } })();
-    return (r && Array.isArray(r.imgs)) ? r.imgs.filter(Boolean) : [];
+    return imageCdnPick_('used', key, r);
   }
   function usedImgKnown_(key) {
     if (!key) return false;
-    if (_idbOk) return Object.prototype.hasOwnProperty.call(_imgMem.used, key);
+    if (_idbOk) return Object.prototype.hasOwnProperty.call(_imgMem.used, key) || imageCdnKnown_('used', key);
     try { return localStorage.getItem('hist_usedimg__' + key) != null; } catch (e) { return false; }
   }
   // 先頭何枚が「投稿プレビュー画像」か。(投稿履歴の拡大表示で見出しを分ける・Chami依頼2026-07-30)
   function usedPrevCount_(key) {
     if (!key) return 0;
     var r = _idbOk ? _imgMem.used[key] : (function () { try { return JSON.parse(localStorage.getItem('hist_usedimg__' + key) || 'null'); } catch (e) { return null; } })();
+    var manifest = imageCdnRecord_('used', key);
+    if (manifest && (!r || Number(manifest.at) >= Number(r.at || 0))) return Number(manifest.prev) | 0;
     return (r && r.prev) ? (r.prev | 0) : 0;
   }
   function usedImgSave_(key, imgs, prevCount) {
     if (!key) return false;
     imgs = (imgs || []).filter(Boolean);
-    if (!imgs.length && _idbOk && !_hydrated) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', key); } catch (e) {} return false; }
+    if (!imgs.length && _idbOk && !_hydrated && !imageCdnKnown_('used', key)) { try { console.warn('[go5 cand] 画像展開前の空保存を拒否(既存データ保護)', key); } catch (e) {} return false; }
     // 空配列もレコードとして残す。「未移行」ではなく「使用画像を明示的に削除した」と区別し、
     // 旧候補画像の先頭が互換表示で復活するのを防ぐ。
     // prevCount=先頭何枚が「投稿プレビュー画像」か。投稿履歴の拡大表示で見出しを分けるのに使う(Chami依頼2026-07-30)。
@@ -1873,11 +1921,12 @@
       _imgMem.used[key] = rec;
       _histDirectChecked.used[key] = true;
       window.Go5Idb.set(idbKey('used', key), rec).catch(idbFail_);
+      imageCdnMirror_('used', key, imgs, rec.at, rec.prev || 0);
       return true;
     }
     try {
       localStorage.setItem('hist_usedimg__' + key, JSON.stringify(rec));
-      return true;
+      imageCdnMirror_('used', key, imgs, rec.at, rec.prev || 0); return true;
     } catch (e) { return false; }
   }
 
@@ -2329,6 +2378,21 @@
   //   初回renderとの順序がズレても確実に追いつく(item8/DEF-de2408cb00と同型・Chami 2026-08-11「出た。OK」で再現確認)。
   //   bgRender_ が「候補タブ表示中・入力中は保留」を守るので非破壊。
   try { document.addEventListener('go5-images-hydrated', function () { bgRender_(); }); } catch (e) {}
+  // Manifest updates are applied in place so images can arrive without rebuilding the list or moving scroll position.
+  try { document.addEventListener('go5-image-manifest-changed', function (e) {
+    var ids = (e && e.detail && Array.isArray(e.detail.ids)) ? e.detail.ids : [];
+    var refs = ids.filter(function (id) { return String(id).indexOf('ref:') === 0; });
+    if (refs.length) refs.forEach(function (id) { refRefreshCard_(String(id).slice(4)); });
+    else {
+      var page = document.getElementById('pageCand');
+      if (page) page.querySelectorAll('.cand-refimgs[data-refslot]').forEach(function (slot) {
+        var cid = slot.getAttribute('data-refslot');
+        var card = slot.closest ? slot.closest('.cand-card') : null;
+        if (card && cid) updateCardRefThumb_(card, cid);
+      });
+    }
+    notifyImagesChanged_();
+  }); } catch (e) {}
   // ★IDBが無言死(iOS Safariのメモリ圧・バックグラウンド化)から回復した合図で、未展開の画像を今すぐ読み直す。
   //   従来は起動時の一発ハイドレートに依存し、IDBが後から回復しても「閉じて開き直す」まで空表示のままだった
   //   (Chami報告2026-08-16「更新では直らない・閉じて開くと出る」)。回復案内バーも消す。
@@ -3003,7 +3067,7 @@
     var cid = String(it.cid || '');
     // 全体走査が終わった後に同期・別ページから追加された画像もあるため、この作品を実際に
     // 読んだかだけで判定する。全体完了だけで空モーダルを開くと、遷移時の保存で画像を消し得る。
-    var known = _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
+    var known = _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid) || imageCdnKnown_('ref', cid);
     if (_idbOk && !known && !refReady) {
       var loadSeq = ++_refOpenSeq;
       showRefLoadState_(ov, it, false, onSaved);
@@ -5879,7 +5943,7 @@
     cid = String(cid || '');
     var memRaw = cid ? _imgMem.ref[cid] : null;
     if (isR2Marker_(memRaw)) { resolveR2IntoMem_(cid, memRaw); return; }
-    if (!cid || !_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid) || _refLoadJobs[cid] || _refProbeQueued[cid]) return;
+    if (!cid || !_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid) || imageCdnKnown_('ref', cid) || _refLoadJobs[cid] || _refProbeQueued[cid]) return;
     _refProbeQueued[cid] = true;
     _refProbeQueue.push(cid);
     _pumpRefProbe_();
@@ -5893,7 +5957,7 @@
     cid = String(cid || '');
     // 保存画像だけでメモ/コメントが無い作品も、可視カードなら必ず作品単位で確認する。
     // 旧判定は worked=false で none を返し、全件cursor停止時に直接getが一度も始まらなかった。
-    if (_idbOk && cid && !_refLoaded[cid] && !Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) ensureRefProbe_(cid);
+    if (_idbOk && cid && !_refLoaded[cid] && !Object.prototype.hasOwnProperty.call(_imgMem.ref, cid) && !imageCdnKnown_('ref', cid)) ensureRefProbe_(cid);
     var imgs = refImgsOf_(cid);
     if (imgs.length) {
       var multi = imgs.length > 1;
@@ -6050,6 +6114,8 @@
     markImgUsedByHash: function (cid, h) { markImgUsedByHash_(String(cid || ''), String(h || '')); },
     stampImgUsedDate: function (cid, h, at) { stampImgUsedDate_(String(cid || ''), String(h || ''), at); }
   }; } catch (e) {}
+  // The history page may load this provider lazily; trigger one paint now that direct manifest URLs are readable.
+  try { if (window.Go5ImageCdn) notifyImagesChanged_(); } catch (e) {}
   // 候補専用ページ(KouhoLists.html)から持ち越された「動画を作る」選択を、動画作成タブのある index.html 側で拾って実行する。
   //   (transferToMovie_ が movie DOM 不在時に sessionStorage へ退避→index.html へ遷移。ここが受け取り口)
   try {
