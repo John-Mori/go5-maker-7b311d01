@@ -2569,7 +2569,7 @@
     } else { renderImgModal_(it.title, big, null, 'サンプル画像の取得にはFANZA Workerの設定が必要です。'); }
   }
   // 画像ズーム。(左右スワイプで切替).fz-zoom を流用。
-  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null, _zoomCaps = null, _zoomMarkCid = null, _zoomNavGuardUntil = 0; // _zoomCaps=各ページの見出し(画像の上に表示・投稿履歴の「動画生成で使用した画像」等) / _zoomMarkCid=動画生成用画像だけで使う3択マークの対象cid
+  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null, _zoomCaps = null, _zoomMarkCid = null, _zoomBackdropPointer = null; // _zoomCaps=各ページの見出し(画像の上に表示・投稿履歴の「動画生成で使用した画像」等) / _zoomMarkCid=動画生成用画像だけで使う3択マークの対象cid
   function ensureZoom_() {
     if (_zoom) return _zoom;
     var z = document.createElement('div'); z.className = 'fz-zoom'; z.hidden = true;
@@ -2592,10 +2592,22 @@
       '</div>' +
       '<div class="fz-zoom-msg"></div>';
     document.body.appendChild(z);
-    z.addEventListener('click', function (e) {
-      if (e.target !== z || Date.now() < _zoomNavGuardUntil) return;
+    // 背景を閉じる判定は click に任せない。iOS/一部PCブラウザでは矢印操作のあとに
+    // 遅延した互換 click が背景へ再送され、画像を切り替えた直後にモーダルが閉じるため。
+    // 「背景上で始まり、背景上で終わった同一ポインター」だけを実タップとみなす。
+    z.addEventListener('pointerdown', function (e) {
+      if (e.target !== z || (typeof e.button === 'number' && e.button !== 0)) { _zoomBackdropPointer = null; return; }
+      _zoomBackdropPointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    });
+    z.addEventListener('pointerup', function (e) {
+      var p = _zoomBackdropPointer; _zoomBackdropPointer = null;
+      if (!p || e.target !== z || p.id !== e.pointerId) return;
+      if (Math.abs(e.clientX - p.x) > 8 || Math.abs(e.clientY - p.y) > 8) return;
       z.hidden = true;
     });
+    z.addEventListener('pointercancel', function () { _zoomBackdropPointer = null; });
+    // pointerup 後の互換/ゴースト click は閉じる処理を一切持たない。
+    z.addEventListener('click', function (e) { if (e.target === z) e.stopPropagation(); });
     z.querySelector('.fz-zoom-close').addEventListener('click', function () { z.hidden = true; });
     // 「通常/使用済み/除外」のラジオ(動画生成用画像だけ・_zoomMarkCidが無ければ無視)。
     z.querySelectorAll('.fz-zoom-mark input[type=radio]').forEach(function (r) {
@@ -2629,11 +2641,11 @@
     }, { passive: true });
     // ★PC用の切替：左右矢印ボタン＋キーボード(←→で移動・Escで閉じる)。スマホのスワイプは上で維持。
     function bindZoomNav_(btn, direction) {
-      ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend'].forEach(function (type) {
-        btn.addEventListener(type, function (e) { e.stopPropagation(); }, { passive: true });
+      ['pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'touchstart', 'touchend'].forEach(function (type) {
+        btn.addEventListener(type, function (e) { _zoomBackdropPointer = null; e.stopPropagation(); }, { passive: true });
       });
       btn.addEventListener('click', function (e) {
-        _zoomNavGuardUntil = Date.now() + 700;
+        _zoomBackdropPointer = null;
         e.preventDefault();
         e.stopPropagation();
         if (e.stopImmediatePropagation) e.stopImmediatePropagation();

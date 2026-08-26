@@ -273,11 +273,21 @@ test.describe('候補ページの画像・投稿編集', () => {
     // 見た目だけでなく、PCの実クリックで必ず次/前の画像へ切り替わることを固定する。
     await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
     const firstSrc = await page.locator('.fz-zoom-img').getAttribute('src');
+    // 1枚目の「前へ」は最後の画像へ循環する。
+    await prev.click();
+    await expect(page.locator('.fz-zoom')).toBeVisible();
+    await expect(page.locator('.fz-zoom-count')).toHaveText('2 / 2');
+    await expect(page.locator('.fz-zoom-img')).not.toHaveAttribute('src', firstSrc);
+    // 最後の「次へ」は1枚目へ循環する。
     await next.click();
     await expect(page.locator('.fz-zoom')).toBeVisible();
-    // 画像差し替え直後に背景へ到達する合成clickが来ても閉じない。
+    await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
+    await expect(page.locator('.fz-zoom-img')).toHaveAttribute('src', firstSrc);
+    // 画像差し替え後、旧700msガードより遅れて背景へ届く互換clickでも閉じない。
+    await page.waitForTimeout(800);
     await page.locator('.fz-zoom').dispatchEvent('click');
     await expect(page.locator('.fz-zoom')).toBeVisible();
+    await next.click();
     await expect(page.locator('.fz-zoom-count')).toHaveText('2 / 2');
     await expect(page.locator('.fz-zoom-img')).not.toHaveAttribute('src', firstSrc);
     await prev.click();
@@ -285,6 +295,10 @@ test.describe('候補ページの画像・投稿編集', () => {
     await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
     await expect(page.locator('.fz-zoom-img')).toHaveAttribute('src', firstSrc);
 
+    // 背景そのものを押し始めて離した場合だけは、従来どおり閉じられる。
+    await page.locator('.fz-zoom').dispatchEvent('pointerdown', { pointerId: 77, button: 0, clientX: 2, clientY: 500 });
+    await page.locator('.fz-zoom').dispatchEvent('pointerup', { pointerId: 77, button: 0, clientX: 2, clientY: 500 });
+    await expect(page.locator('.fz-zoom')).toBeHidden();
     // スマホは従来どおり、邪魔にならない46px・左右端10pxを維持する。
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -321,6 +335,14 @@ test.describe('候補ページの画像・投稿編集', () => {
     expect(mobile.mark.bottom).toBeLessThanOrEqual(mobile.image.top);
     expect(mobile.pointerEvents).toBe('auto');
     expect(mobile.imageReceivesTouch).toBe(true);
+    // iPhone相当幅でも端の循環と「矢印で閉じない」を同じ契約で固定する。
+    await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
+    await prev.click();
+    await expect(page.locator('.fz-zoom')).toBeVisible();
+    await expect(page.locator('.fz-zoom-count')).toHaveText('2 / 2');
+    await next.click();
+    await expect(page.locator('.fz-zoom')).toBeVisible();
+    await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
   });
   test('全体読込後にIDBへ届いた候補画像も、動画生成へ移動して消えない', async ({ page }) => {
     await page.addInitScript(() => {
