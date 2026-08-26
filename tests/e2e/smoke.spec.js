@@ -915,3 +915,59 @@ test.describe('ドラフト投稿モードの短縮URL置換', () => {
     });
   }
 });
+test.describe('一覧のレイアウト安定性', () => {
+  test('候補画像は読込札と実画像で同じ高さを先に確保する', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    const heights = await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.style.width = '74px';
+      host.style.position = 'fixed';
+      host.style.left = '0';
+      host.style.top = '0';
+      const pending = document.createElement('div');
+      pending.className = 'cand-refimg-ph cand-refimg-loading';
+      pending.textContent = '画像読込中…';
+      host.appendChild(pending);
+      document.body.appendChild(host);
+      const pendingHeight = pending.getBoundingClientRect().height;
+      const image = document.createElement('img');
+      image.className = 'cand-refimg-thumb';
+      host.replaceChildren(image);
+      const imageHeight = image.getBoundingClientRect().height;
+      host.remove();
+      return { pendingHeight, imageHeight };
+    });
+    expect(Math.abs(heights.pendingHeight - heights.imageHeight)).toBeLessThanOrEqual(1);
+    expect(heights.pendingHeight).toBeGreaterThan(90);
+  });
+
+  test('一覧DOMを交換しても見ていたカードの画面位置を維持する', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    const result = await page.evaluate(async () => {
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      function html(grown) {
+        return Array.from({ length: 16 }, (_, i) =>
+          '<div class="vrow" data-hist-anchor="item-' + i + '" style="height:' +
+          ((grown && i < 5) ? 230 : 130) + 'px">item-' + i + '</div>').join('');
+      }
+      host.innerHTML = html(false);
+      host.querySelector('[data-hist-anchor="item-5"]').scrollIntoView({ block: 'start' });
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const before = host.querySelector('[data-hist-anchor="item-5"]').getBoundingClientRect().top;
+      const snap = window.Go5Viewport.capture(host, '.vrow[data-hist-anchor]', 'data-hist-anchor');
+      host.innerHTML = html(true);
+      const shifted = host.querySelector('[data-hist-anchor="item-5"]').getBoundingClientRect().top;
+      window.Go5Viewport.restore(host, snap);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const after = host.querySelector('[data-hist-anchor="item-5"]').getBoundingClientRect().top;
+      host.remove();
+      return { before, shifted, after, key: snap && snap.key };
+    });
+    expect(result.key).toBe('item-5');
+    expect(Math.abs(result.shifted - result.before)).toBeGreaterThan(300);
+    expect(Math.abs(result.after - result.before)).toBeLessThanOrEqual(2);
+  });
+});

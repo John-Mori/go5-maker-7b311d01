@@ -183,7 +183,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vrow-thumbcol{flex:0 1 auto;width:clamp(55px,18vw,80px);display:flex;flex-direction:column;gap:6px;} /* 右の画像列：文字優先で可変（狭い端末では縮小）。作品サムネの下に動画で使った画像。画像を等倍で約1.2倍に拡大＝列幅を46-66→55-80へ(他の枠は不変・本文はflex:1で吸収・Chami依頼2026-07-30) */
 .vrow-thumb{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:#0b1019;display:block;}
 /* refimg/postimgは正方形クロップ(cover)をやめ、元画像の比率のまま全体を表示＝下部まで見える(引き延ばし/比率変更なし・Chami依頼2026-07-15)。高さ上限で伸びすぎを防ぐ。 */
-.vrow-refimg{width:100%;height:auto;max-height:180px;object-fit:contain;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;background:#0b1019;display:block;}
+.vrow-refimg{width:100%;aspect-ratio:9/16;height:auto;max-height:none;object-fit:contain;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;background:#0b1019;display:block;} /* 完成プレビューは縦動画比率を先に予約し、遅着時の段差を防ぐ */
 .vrow-postimg{width:100%;height:auto;max-height:180px;object-fit:contain;border-radius:6px;border:1px solid var(--accent);cursor:zoom-in;background:#0b1019;display:block;} /* 🛠️編集で添付した投稿画像（枠色でrefimgと区別） */
 .vrow-postimg:active{opacity:.7;}
 .vrow-refimg:active{opacity:.7;}
@@ -374,11 +374,11 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 /* 動画生成用の画像＝作品サムネの真下（左の画像列）に少し余白を開けて配置。コメントはその真下に全文表示。点線区切りは廃止。 */
 /* 動画生成用の画像スロット＝全枚数を表示(Chami 2026-08-15「全部表示してくれ」)。単枚=全幅／複数=2列グリッド。 */
 .cand-refimgs{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;}
-.cand-refimg-thumb{width:100%;height:auto;border-radius:8px;border:none;background:#0b1019;cursor:zoom-in;display:block;flex:0 0 auto;margin-top:0;} /* 先頭1枚を全幅で表示(見やすさ優先・元の見せ方) */
+.cand-refimg-thumb{width:100%;aspect-ratio:3/4;height:auto;box-sizing:border-box;object-fit:contain;border-radius:8px;border:none;background:#0b1019;cursor:zoom-in;display:block;flex:0 0 auto;margin-top:0;} /* 読込前から3:4枠を予約し、画像後着でカード下部を押し下げない */
 /* ★2列グリッドの全枚表示は見にくいため撤去(Chami 2026-08-15「元に戻して」)。全枚はタップ→ズームで送る。複数は枠を.multiで明示(下部908行) */
 .cand-refimg-thumb:active{opacity:.85;}
 /* 0枚時の状態札＝空欄にせず「読込前」と「画像なし」を区別可能にする。ダーク面＋点線枠(紫は使わない)。 */
-.cand-refimg-ph{width:100%;box-sizing:border-box;min-height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10.5px;line-height:1.25;padding:6px 4px;}
+.cand-refimg-ph{width:100%;aspect-ratio:3/4;box-sizing:border-box;min-height:0;border-radius:8px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10.5px;line-height:1.25;padding:6px 4px;} /* 実画像と同じ高さを先に確保 */
 .cand-refimg-loading{background:#0b1019;border:1px dashed #2f3a52;color:#7a8fa3;} /* まだ読込中＝グレー */
 .cand-refimg-missing{background:#0b1019;border:1px dashed #c08a2e;color:#e0b060;cursor:pointer;} /* 痕跡はあるのに画像なし＝アンバー警告・タップで投稿編集 */
 .cand-refimg-missing:active{opacity:.85;}

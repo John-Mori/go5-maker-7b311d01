@@ -1968,6 +1968,8 @@
   // ── render ──────────────────────────────────────────────────────────────
   function render() {
     var list = $('ytClickList');
+    var viewportSnap = (list && window.Go5Viewport)
+      ? window.Go5Viewport.capture(list, '.vrow[data-hist-anchor]', 'data-hist-anchor') : null;
     var rawItems = displayItems_(); // ローカル＋シート由来の表示専用マージ(書き込み系はallItems()のまま不変)
     var ymap = loadYtMap();
     if (!rawItems.length) {
@@ -2141,7 +2143,7 @@
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
       // ★この端末のローカル履歴には無く、記録シートから補った行。編集・削除はGAS経由で正本へ反映する。
       if (it._fromSheet) tagsHtml += '<span class="vtag vtag-sheet" title="この端末にはこの記録が無く、記録シートの内容を表示して補っています(編集・削除は記録シートへ反映)">☁️シート由来</span>';
-      return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
+      return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '" data-hist-anchor="' + esc(k) + '">' +
         '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名(改行して統一)
         '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
@@ -2175,7 +2177,7 @@
         '</div>' +
         '</div>' + // .vrow-body
         ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
-          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" decoding="async" style="display:none;">' : '') +
+          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" decoding="async" style="visibility:hidden;">' : '') +
           (refThumb ? '<img class="vrow-refimg" data-go5-imgrole="history-preview" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画投稿プレビュー(タップで拡大)" title="タップで拡大(動画投稿プレビュー)" loading="lazy" decoding="async">' : '') +
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
@@ -2189,6 +2191,8 @@
         '</div>' +
         '</div>';
     }).join('') + pagerHtml; // 末尾にもページャ(長い一覧の下からでもページ移動できる)
+    // データ再生成・画像後着・検索などで一覧DOMを交換しても、見ていた投稿の位置を維持する。
+    if (viewportSnap && window.Go5Viewport) window.Go5Viewport.restore(list, viewportSnap);
     // 全件prefix走査を待たず、今DOMへ出した履歴だけを作品単位で直接読む。used:を先行し、post:停止の巻き添えを防ぐ。
     try {
       if (window.Go5Cand && window.Go5Cand.ensureHistoryImages) {
@@ -4297,12 +4301,20 @@
     if (!src) return;
     (root || document).querySelectorAll('img[data-fanza-thumb-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-thumb-url') !== fanzaUrl) return;
+      var reserve = el.classList.contains('vrow-thumb');
+      if (reserve) {
+        el.style.display = '';
+        el.style.visibility = 'hidden';
+        el.onload = function () { el.style.visibility = 'visible'; };
+      }
       el.onerror = function () {
         if (altSrc && el.getAttribute('src') !== altSrc) el.setAttribute('src', altSrc);
+        else if (reserve) { el.style.display = ''; el.style.visibility = 'hidden'; }
         else el.style.display = 'none';
       };
       if (el.getAttribute('src') !== src) el.setAttribute('src', src);
-      el.style.display = '';
+      if (!reserve) el.style.display = '';
+      else if (el.complete && el.naturalWidth > 0) el.style.visibility = 'visible';
     });
   }
 

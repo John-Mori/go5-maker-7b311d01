@@ -3967,6 +3967,11 @@
   function render() {
     var page = $('pageCand');
     if (!page) return;
+    // 同じサブタブの再描画だけ、現在見えている作品を画面上の同じ位置へ戻す。
+    // タブ切替時は意図した画面遷移なので固定しない。
+    var renderedTab = page.getAttribute('data-cand-render-tab') || '';
+    var viewportSnap = (renderedTab === _activeTab && window.Go5Viewport)
+      ? window.Go5Viewport.capture(page, '.cand-card[data-cid]', 'data-cid') : null;
     ensureCardDelegation_(page); // page自体は再描画で交換されないため、カード差し替え後も操作を受け続ける
     _bgRerenderPending = false; // どの経路の描画でも保留は解消(追加確定・タブ再入場で最新へ追いつく)
     kickInfoBackfill_(); // タブへ戻ってきた時=未取得タイトルの追跡を素早いフェーズへ戻す(この後の描画でbackfillが回る)
@@ -4004,6 +4009,8 @@
       else if (isMakerTab_(tab)) renderMaker(_activeTab);   // サークル作品一覧タブ(1つ以上のサークル)
       else renderMain(tab.id);                          // 独立した候補リストタブ(タブ名だけのタブ)
     }
+    page.setAttribute('data-cand-render-tab', _activeTab);
+    if (viewportSnap && window.Go5Viewport) window.Go5Viewport.restore(page, viewportSnap);
     // 選択中のサブタブを帯の中央へ(クリック/アクセス時ともここを通る)。画像・フォントで幅が後から
     //   変わるので、初回レイアウト後(rAF)に寄せ直す(Chami依頼 2026-08-08)。
     if (window.requestAnimationFrame) window.requestAnimationFrame(centerActiveSubTab_); else centerActiveSubTab_();
