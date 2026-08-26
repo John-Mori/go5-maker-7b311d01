@@ -2558,7 +2558,7 @@
     } else { renderImgModal_(it.title, big, null, 'サンプル画像の取得にはFANZA Workerの設定が必要です。'); }
   }
   // 画像ズーム。(左右スワイプで切替).fz-zoom を流用。
-  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null, _zoomCaps = null, _zoomMarkCid = null; // _zoomCaps=各ページの見出し(画像の上に表示・投稿履歴の「動画生成で使用した画像」等) / _zoomMarkCid=動画生成用画像だけで使う3択マークの対象cid
+  var _zoom = null, _zoomList = [], _zi = 0, _zoomReorder = null, _zoomAdd = null, _zoomCaps = null, _zoomMarkCid = null, _zoomNavGuardUntil = 0; // _zoomCaps=各ページの見出し(画像の上に表示・投稿履歴の「動画生成で使用した画像」等) / _zoomMarkCid=動画生成用画像だけで使う3択マークの対象cid
   function ensureZoom_() {
     if (_zoom) return _zoom;
     var z = document.createElement('div'); z.className = 'fz-zoom'; z.hidden = true;
@@ -2581,7 +2581,10 @@
       '</div>' +
       '<div class="fz-zoom-msg"></div>';
     document.body.appendChild(z);
-    z.addEventListener('click', function (e) { if (e.target === z) z.hidden = true; });
+    z.addEventListener('click', function (e) {
+      if (e.target !== z || Date.now() < _zoomNavGuardUntil) return;
+      z.hidden = true;
+    });
     z.querySelector('.fz-zoom-close').addEventListener('click', function () { z.hidden = true; });
     // 「通常/使用済み/除外」のラジオ(動画生成用画像だけ・_zoomMarkCidが無ければ無視)。
     z.querySelectorAll('.fz-zoom-mark input[type=radio]').forEach(function (r) {
@@ -2614,8 +2617,20 @@
       sx = sy = null;
     }, { passive: true });
     // ★PC用の切替：左右矢印ボタン＋キーボード(←→で移動・Escで閉じる)。スマホのスワイプは上で維持。
-    z.querySelector('.fz-zoom-nav.prev').addEventListener('click', function (e) { e.stopPropagation(); zoomGo_(-1); });
-    z.querySelector('.fz-zoom-nav.next').addEventListener('click', function (e) { e.stopPropagation(); zoomGo_(1); });
+    function bindZoomNav_(btn, direction) {
+      ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend'].forEach(function (type) {
+        btn.addEventListener(type, function (e) { e.stopPropagation(); }, { passive: true });
+      });
+      btn.addEventListener('click', function (e) {
+        _zoomNavGuardUntil = Date.now() + 700;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        zoomGo_(direction);
+      });
+    }
+    bindZoomNav_(z.querySelector('.fz-zoom-nav.prev'), -1);
+    bindZoomNav_(z.querySelector('.fz-zoom-nav.next'), 1);
     document.addEventListener('keydown', function (e) {
       if (!_zoom || _zoom.hidden) return;
       if (e.key === 'ArrowRight') { e.preventDefault(); zoomGo_(1); }

@@ -274,9 +274,14 @@ test.describe('候補ページの画像・投稿編集', () => {
     await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
     const firstSrc = await page.locator('.fz-zoom-img').getAttribute('src');
     await next.click();
+    await expect(page.locator('.fz-zoom')).toBeVisible();
+    // 画像差し替え直後に背景へ到達する合成clickが来ても閉じない。
+    await page.locator('.fz-zoom').dispatchEvent('click');
+    await expect(page.locator('.fz-zoom')).toBeVisible();
     await expect(page.locator('.fz-zoom-count')).toHaveText('2 / 2');
     await expect(page.locator('.fz-zoom-img')).not.toHaveAttribute('src', firstSrc);
     await prev.click();
+    await expect(page.locator('.fz-zoom')).toBeVisible();
     await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
     await expect(page.locator('.fz-zoom-img')).toHaveAttribute('src', firstSrc);
 
