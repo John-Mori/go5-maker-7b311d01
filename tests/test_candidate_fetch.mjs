@@ -21,6 +21,11 @@ class MemoryKv {
 const origin = "https://john-mori.github.io";
 const kv = new MemoryKv();
 const env = { FANZA_KV: kv, USE_D1: "off", SHARED_SECRET: "public-test", ADMIN_SECRET: "admin-test", ALLOWED_ORIGIN: origin };
+assert.deepEqual(__testCatalogType({ imageURL: { list: "https://doujin-assets.dmm.co.jp/digital/comic/d_1/d_1pt.jpg" }, iteminfo: { genre: [] } }, { service: "doujin" }), { eligible: true, type: "コミック" }, "comic CDN path is authoritative even when genres omit the type");
+assert.deepEqual(__testCatalogType({ imageURL: { list: "https://doujin-assets.dmm.co.jp/digital/cg/d_2/d_2pt.jpg" }, iteminfo: { genre: [{ name: "AI生成" }] } }, { service: "doujin" }), { eligible: true, type: "AI CG" }, "AI CG is classified from CDN path plus AI genre");
+for (const media of ["game", "voice", "video", "anime"]) {
+  assert.equal(__testCatalogType({ imageURL: { list: `https://doujin-assets.dmm.co.jp/digital/${media}/d_3/d_3pt.jpg` } }, { service: "doujin" }).eligible, false, `${media} must stay excluded`);
+}
 assert.deepEqual(__testCatalogType({ iteminfo: { genre: [{ name: "コミック" }] } }, { service: "doujin" }), { eligible: true, type: "コミック" });
 assert.deepEqual(__testCatalogType({ iteminfo: { genre: [{ name: "AI生成" }, { name: "CG・イラスト" }] } }, { service: "doujin" }), { eligible: true, type: "AI CG" });
 assert.equal(__testCatalogType({ iteminfo: { genre: [{ name: "ボイスコミック" }] } }, { service: "doujin" }).eligible, false, "ボイコミは全候補の自動取得対象外");

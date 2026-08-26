@@ -780,12 +780,19 @@ function catalogType_(it, src) {
   [info.genre, info.type, info.category].forEach((arr) => {
     (Array.isArray(arr) ? arr : []).forEach((x) => names.push(String((x && (x.name || x.value)) || x || "")));
   });
-  names.push(String(it.category_name || ""), String(it.floor_name || ""));
+  names.push(String(it.category_name || ""), String(it.floor_name || ""), String(it.title || ""));
   const text = names.join(" ");
-  if (/(ゲーム|game|ボイス|音声|ボイコミ|ボイスコミック|動画|アニメ動画)/i.test(text)) return { eligible: false, type: "excluded" };
-  if (/(コミック|漫画|comic|ＣＧ|CG|イラスト|image)/i.test(text)) {
-    const ai = /(AI|ＡＩ|人工知能)/i.test(text);
-    const cg = /(ＣＧ|CG|イラスト|image)/i.test(text);
+  const image = it.imageURL || {};
+  const mediaUrl = [image.list, image.large, image.small].filter(Boolean).join(" ");
+  const ai = /(AI|ＡＩ|AI生成|人工知能|・｡・ｩ|莠ｺ蟾･遏･閭ｽ)/i.test(text);
+  // The CDN path is the authoritative content type. ItemList genre arrays often omit "comic"/"CG" entirely.
+  if (/\/digital\/(game|voice|video|anime)\//i.test(mediaUrl)) return { eligible: false, type: "excluded" };
+  if (/\/digital\/comic\//i.test(mediaUrl)) return { eligible: true, type: ai ? "AIコミック" : "コミック" };
+  if (/\/digital\/cg\//i.test(mediaUrl)) return { eligible: true, type: ai ? "AI CG" : "CG" };
+  // Fallback for old/partial API rows whose image URL is absent.
+  if (/(ゲーム|game|ボイス|音声|ボイコミ|ボイスコミック|動画|アニメ動画|繧ｲ繝ｼ繝|繝懊う繧ｹ|髻ｳ螢ｰ|蜍慕判)/i.test(text)) return { eligible: false, type: "excluded" };
+  if (/(コミック|漫画|comic|CG|イラスト|image|繧ｳ繝溘ャ繧ｯ|貍ｫ逕ｻ|繧､繝ｩ繧ｹ繝・)/i.test(text)) {
+    const cg = /(CG|イラスト|image|繧､繝ｩ繧ｹ繝・)/i.test(text);
     return { eligible: true, type: ai ? (cg ? "AI CG" : "AIコミック") : (cg ? "CG" : "コミック") };
   }
   return { eligible: false, type: "other" };
