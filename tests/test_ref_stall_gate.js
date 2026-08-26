@@ -3,7 +3,7 @@
 //   狙い=⏳(読込中)/🔍(確認中)が「取得の持続失敗」で永久スピナー(吸収状態)に嵌るのを、n回/T秒 で
 //   ⌛(タップで再試行)へ抜けさせる境界。しきい=3回 かつ 連鎖開始から20秒。
 const assert = require('assert');
-const { refStallDecide_, refRetryPlan_ } = require('../js/candidates.js');
+const { refStallDecide_, refRetryPlan_, histDirectRetryPlan_ } = require('../js/candidates.js');
 
 let n = 0;
 function t(name, got, want) {
@@ -46,4 +46,14 @@ assert.deepStrictEqual(p99, { stalled: true, retry: true, delay: 30000 });
 n++;
 console.log('  ok  99回失敗しても自動再試行を諦めない');
 
+// 6) 投稿履歴の可視画像も3回で打ち切らない。以後は30秒間隔で必ず追跡を続ける。
+assert.deepStrictEqual(histDirectRetryPlan_(1), { retry: true, delay: 1000 });
+n++;
+assert.deepStrictEqual(histDirectRetryPlan_(2), { retry: true, delay: 2000 });
+n++;
+assert.deepStrictEqual(histDirectRetryPlan_(3), { retry: true, delay: 30000 });
+n++;
+assert.deepStrictEqual(histDirectRetryPlan_(99), { retry: true, delay: 30000 });
+n++;
+console.log('  ok  投稿履歴は99回失敗しても30秒間隔で再試行を諦めない');
 console.log(`\nAll ${n} passed (refStallDecide_/refRetryPlan_).`);

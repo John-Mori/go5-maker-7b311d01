@@ -84,6 +84,13 @@
       delay: stalled ? 30000 : Math.min(12000, 3000 * Math.pow(2, Math.max(0, Number(n || 0) - 1)))
     };
   }
+  // 投稿履歴の表示中カードも、一時的なIDB停止を「画像なし」と確定せず回復まで追い続ける。
+  // 最初の3回は素早く、以後は30秒で頭打ちにする。候補画像の refRetryPlan_ と同じく
+  // retry=false になる終端を作らないことが恒久条件（Chami 2026-08-26「投稿履歴でも画像が出ない」）。
+  function histDirectRetryPlan_(n) {
+    n = Math.max(1, Number(n || 1));
+    return { retry: true, delay: n >= 3 ? 30000 : Math.min(6000, 1000 * Math.pow(2, n - 1)) };
+  }
   // ★Storage v2 Phase1(2026-08-24 設計 01_STORAGE_V2_DESIGN §7.2/§8)。cand_text(候補テキストの正本)を
   //   localStorage 単独に依存させると、iOS Safari の約5MB飽和で tiny な setItem すら throw=保存全体が弾かれる
   //   (Chami「あかん、保存できなくなった」の真因)。IDBへ耐久ミラーを置き、起動時にLS↔IDBを cid 単位で
@@ -154,7 +161,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -977,7 +984,7 @@
   // checked は「このセッションでIDB/旧LSを実際に確認した」印。usedの明示空レコードは _imgMem.used に残るため、
   // usedImgKnown_ の「明示削除」と、単なる未保存(旧データ→ref互換表示)を混同しない。
   var _histDirectChecked = { used: Object.create(null), post: Object.create(null) };
-  var _histDirectPending = Object.create(null), _histDirectStopped = Object.create(null);
+  var _histDirectPending = Object.create(null);
   var _histDirectFails = Object.create(null), _histDirectRetryTimers = Object.create(null);
   var _histDirectQueue = [], _histDirectActive = 0, _histDirectWanted = Object.create(null);
   var HIST_DIRECT_MAX = 3;
@@ -1897,7 +1904,7 @@
     key = String(key || ''); cid = String(cid || '');
     if (!key) return;
     var id = histTaskId_(prefix, key);
-    if (_histDirectPending[id] || _histDirectStopped[id] || _histDirectRetryTimers[id]) return;
+    if (_histDirectPending[id] || _histDirectRetryTimers[id]) return;
     if (prefix === 'ref') {
       if (_refLoaded[key] || Object.prototype.hasOwnProperty.call(_imgMem.ref, key)) return;
     } else if (_histDirectChecked[prefix][key] || Object.prototype.hasOwnProperty.call(_imgMem[prefix], key)) {
@@ -1950,17 +1957,16 @@
     delete _histDirectPending[task.id];
     _histDirectActive = Math.max(0, _histDirectActive - 1);
     if (ok) {
-      delete _histDirectFails[task.id]; delete _histDirectStopped[task.id];
+      delete _histDirectFails[task.id];
     } else {
       var n = (_histDirectFails[task.id] || 0) + 1; _histDirectFails[task.id] = n;
       window.Go5ImgDiag && Go5ImgDiag.push('hist_key_err', { prefix: task.prefix, key: task.key, n: n });
-      if (n < 3 && !_histDirectRetryTimers[task.id]) {
+      var plan = histDirectRetryPlan_(n);
+      if (plan.retry && !_histDirectRetryTimers[task.id]) {
         _histDirectRetryTimers[task.id] = setTimeout(function () {
           delete _histDirectRetryTimers[task.id];
           enqueueHistDirect_(task.prefix, task.key, task.cid, false);
-        }, Math.min(6000, 1000 * Math.pow(2, n - 1)));
-      } else if (n >= 3) {
-        _histDirectStopped[task.id] = true; // 永久ループせず、前面復帰/IDB回復でだけ再開
+        }, plan.delay);
       }
     }
     pumpHistDirect_();
@@ -1987,12 +1993,17 @@
     });
     return true;
   }
-  function retryVisibleHistoryImages_() {
+  function retryVisibleHistoryImages_(forceNow) {
+    var pv = document.getElementById('pageVerify');
+    if (!pv || pv.hidden || document.visibilityState === 'hidden') return;
     var rows = Object.keys(_histDirectWanted).map(function (k) { return _histDirectWanted[k]; });
     rows.forEach(function (row) {
       ['used', 'post', 'ref'].forEach(function (prefix) {
         var key = prefix === 'ref' ? row.cid : row.key; if (!key) return;
-        var id = histTaskId_(prefix, key); delete _histDirectStopped[id]; delete _histDirectFails[id];
+        var id = histTaskId_(prefix, key);
+        if (forceNow && _histDirectRetryTimers[id]) {
+          clearTimeout(_histDirectRetryTimers[id]); delete _histDirectRetryTimers[id];
+        }
       });
     });
     ensureHistoryImages_(rows);
@@ -6113,7 +6124,10 @@
         });
       }, true);
     });
-    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') retryVisibleHistoryImages_(); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') retryVisibleHistoryImages_(true); });
+    // Safariが背景中にtimerを間引いても、投稿履歴を表示している間は30秒ごとに可視作品を再武装する。
+    // 失敗回数は保持するため、3回目以降は低頻度のまま。ページ再読込・移動は不要。
+    setInterval(function () { retryVisibleHistoryImages_(true); }, 30000);
   } catch (e) {}
   // IDBが使えない/展開が走らない端末でも、LSに積もった退避画像をR2へ逃がす解毒を一度は必ず動かす(冪等・非破壊)。
   try { setTimeout(function () { try { hydrateR2Refs_(); } catch (e) {} }, 2500); } catch (e) {}

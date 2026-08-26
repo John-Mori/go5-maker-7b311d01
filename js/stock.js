@@ -1378,6 +1378,10 @@
   //   先に永続pendingを同期書込みしてから非同期処理へ進むため、直後に画面移動・Safari破棄が起きても次回sweepが再送できる。
   //   手元/雲の二系統が同時成功しても saveStock_.onCommitted は1回、このガードでもID単位1回に固定する。
   var _draftDriveAutoStarted = {};
+  // 同じチャンネル＋題名のDrive保存を、このページ内では必ず1本へ束ねる。
+  // 元の保存が付随画像を待っている4秒後に verify/sweep が不足修復を起動し、同じsave_jobを2本投げていた
+  // 競合を入口で止める。別作品は別キーなので従来どおり並列実行できる。
+  var _driveDatasetInFlight = Object.create(null);
   function autoDriveSaveDraft_(meta) {
     if (!meta || !meta.id || _draftDriveAutoStarted[meta.id]) return;
     _draftDriveAutoStarted[meta.id] = true;
@@ -1409,13 +1413,31 @@
     // ★手押し(作成履歴カードの☁️ Drive保存)は「押したのに何も起きない」に見えないよう、
     //   終着点で必ず onDone(ok,msg) を呼ぶ。作成時に即保存済み(folderIdあり)だと従来は無反応で返っていた=
     //   これが Chami 報告「drive保存のボタンが押せない」の正体(2026-08-12)。
-    var done = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
-    if (!meta || !meta.id) { done(false, 'メタ情報がありません'); return; }
+    var directDone = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
+    if (!meta || !meta.id) { directDone(false, 'メタ情報がありません'); return; }
+    var flightKey = String(meta.account || '') + '\n' + String(meta.title || meta.id);
+    var activeFlight = _driveDatasetInFlight[flightKey];
+    if (activeFlight) {
+      if (opts.onDone) activeFlight.waiters.push(opts.onDone);
+      return; // 同じ保存の完了結果を共有し、第二のDrive書込みは開始しない
+    }
+    var flight = { waiters: opts.onDone ? [opts.onDone] : [], settled: false, watchdog: 0 };
+    _driveDatasetInFlight[flightKey] = flight;
+    var finishDriveDataset_ = function (ok, msg) {
+      if (flight.settled) return;
+      flight.settled = true;
+      if (flight.watchdog) clearTimeout(flight.watchdog);
+      if (_driveDatasetInFlight[flightKey] === flight) delete _driveDatasetInFlight[flightKey];
+      flight.waiters.slice().forEach(function (cb) { try { cb(ok, msg); } catch (_) {} });
+    };
+    // 下層fetchには個別タイムアウトがあるが、将来の無応答実装でもロックとUIを永久に残さない最後の番犬。
+    // 遅着した本体が後で動いてもWorker側の分散ロックが重複を止める。
+    flight.watchdog = setTimeout(function () { finishDriveDataset_(false, 'Drive保存が時間内に応答しませんでした。自動再確認を続けます'); }, 75000);
     var store = idb();
-    if (!store) { if (!opts.silent) alert('IndexedDB未対応のためDrive保存できません。(投稿履歴には記録済み)'); done(false, 'IDB未対応'); return; }
+    if (!store) { if (!opts.silent) alert('IndexedDB未対応のためDrive保存できません。(投稿履歴には記録済み)'); finishDriveDataset_(false, 'IDB未対応'); return; }
     if (!(window.Go5Drive && typeof window.Go5Drive.upload === 'function')) {
       if (!opts.silent) alert('Drive連携が未設定です。動画作成タブのDriveStatus欄を確認してください。(投稿履歴には記録済み)');
-      done(false, 'Drive未設定');
+      finishDriveDataset_(false, 'Drive未設定');
       return;
     }
     var id = meta.id;
@@ -1623,7 +1645,7 @@
             } else {
               msg = 'すでに動画・元画像・プレビューが揃っています(新たに補うものはありません)。';
             }
-            done(true, msg);
+            finishDriveDataset_(true, msg);
           };
           // 元画像がDriveに在るなら読む必要なし(無駄なR2取り寄せとハングを避ける)。無い時だけ手元素材を探す=
           //   12秒で切り上げて null(＝復元不能扱い=正直に手動追加を案内)。
@@ -1646,7 +1668,7 @@
     function salvageWithoutVideo_() {
       if (!(window.Go5Drive && typeof window.Go5Drive.ensureFolder === 'function') || (meta.account !== 'acc1' && meta.account !== 'acc2') || !meta.title) {
         if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済み・使用画像のプレビューも設定済みです。Google Driveへの動画保存だけスキップしました。');
-        done(false, '動画データ無し(プレビューは設定済み)');
+        finishDriveDataset_(false, '動画データ無し(プレビューは設定済み)');
         return;
       }
       // Driveの現状(プレビュー/元画像の有無)。判定不能(null)は「無い」とみなす=退避を試みる側へ倒す
@@ -1667,7 +1689,7 @@
         window.Go5Drive.ensureFolder(meta.account, meta.title, imgs).then(function (res) {
           if (!(res && res.ok)) {
             if (!opts.silent) alert('動画データが見つからず、フォルダの用意にも失敗しました(投稿履歴には記録済み)。通信状況を変えてもう一度お試しください。');
-            done(false, 'フォルダ確保に失敗(動画も無し)');
+            finishDriveDataset_(false, 'フォルダ確保に失敗(動画も無し)');
             return;
           }
           var saved = res.added || [];
@@ -1687,7 +1709,7 @@
           } else {
             msg = '動画は元データが見つからず保存できません。フォルダは作成しましたが、プレビューも元画像もこの端末に残っていないため入れられませんでした。動画を手動でGoogleドライブへ追加してください。';
           }
-          done(true, msg);
+          finishDriveDataset_(true, msg);
         });
       });
     }
@@ -1707,12 +1729,8 @@
       //   Workerが r2_video_missing で黙って諦めて「永遠に保存中」になる沈黙経路を封じる(炎上①・B-1)。
       ensureVideoOnR2_(id).then(function (onR2) {
         if (!onR2) { legacyRealSave_(); return; } // R2に動画が無い=save_jobは無駄撃ち→在ページ保存で救うか"見える失敗"を出す
-        // ★並列化(Chami依頼2026-08-24「ドライブ保存は押しても並列で実行できるように」)：動画はR2に在る=保存は
-        //   必ずサーバー側(save_job)で完走する。ここでボタンを即・終端へ返す=12秒のenrich待ちにボタンを縛らず、
-        //   続けて別カードの保存を並列に走らせられる。本当の保存結果は作成履歴カードの状態行(verifyDriveLanded_→
-        //   checkSaved の実物確認)に出る。以降の done() は operation-gate が settled で無視=表示は二重に飛ばない。
-        //   動画実体は既にR2=喪失しない・Workerは冪等(再送/並列でも二重フォルダにならない)。
-        done(true, '☁️ Driveへ保存中(裏で継続)・結果はカードに出ます');
+        // 別作品はflightKeyが異なるので並列のまま。同じ作品だけは queueSave の受理結果までsingle-flightを保持する。
+        // 旧実装はここでdoneして入口を先に開け、4秒後のverify/sweepが同じsave_jobを再送していた。
         // ★動画のsave_job(サーバー側完走)を「任意の付随画像(プレビュー/元画像)の解決・R2ミラー」に絶対ブロック
         //   させない(Chami報告2026-08-18 msg1539278578913509416「投稿完了しても結局Googleドライブに保存できてない」)。
         //   真因=このブロックの前段が3つとも網へ伸びる無時限待ち: previewReady(手元に無いと fetchPreview=網)/
@@ -1747,9 +1765,9 @@
         })
           .then(function (res) {
             var ok = !!(res && res.ok);
-            done(ok, ok ? 'Driveへ保存(裏で完走)' : '今は送れず・次回起動で自動再送(投稿履歴は記録済み)');
+            finishDriveDataset_(ok, ok ? 'Driveへ保存(裏で完走)' : '今は送れず・次回起動で自動再送(投稿履歴は記録済み)');
           })
-          .catch(function () { done(false, '保存予約に失敗・次回起動で自動再送(投稿履歴は記録済み)'); });
+          .catch(function () { finishDriveDataset_(false, '保存予約に失敗・次回起動で自動再送(投稿履歴は記録済み)'); });
       });
       return;
     }
@@ -1779,15 +1797,15 @@
         Promise.all([imgP, previewReady]).then(function (bs) {
           var imgB = bs[0], prevB = bs[1];
           window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null, { normalize: !!opts.normalize });
-          done(true, 'Driveへ保存開始');
+          finishDriveDataset_(true, 'Driveへ保存開始');
         });
       }).catch(function () {
         window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, [], null, { normalize: !!opts.normalize });
-        done(true, 'Driveへ保存開始');
+        finishDriveDataset_(true, 'Driveへ保存開始');
       });
     }).catch(function (err) {
       if (!opts.silent) alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
-      done(false, '取得失敗');
+      finishDriveDataset_(false, '取得失敗');
     });
     } // legacyRealSave_
     } // realSaveNow_

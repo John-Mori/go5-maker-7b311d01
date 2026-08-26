@@ -30,6 +30,10 @@ const SAVE_JOB_RETRY_DELAYS_MS = [1500, 4000]; // 動画バイトのR2取得：�
 // 同一Worker isolate内で同じ親＋題名の同時作成を1本へ束ねる。
 // Driveは同一親内の同名フォルダを許すため、単純な list→create だけでは並列再送時に二重作成できる。
 const EXACT_FOLDER_INFLIGHT = new Map();
+// 同じ作品のsave_jobを別Worker isolateから同時実行させない分散リース。
+// R2の条件付きPUT(If-None-Match / If-Match)を使い、list→create/upload の隙間をプロセス境界ごと塞ぐ。
+const DRIVE_JOB_LEASE_MS = 15 * 60 * 1000;
+const DRIVE_JOB_COOLDOWN_MS = 5 * 60 * 1000;
 //   フロントはHEADでR2着地を確認してからsave_jobを撃つ(2026-08-18)ので通常は初回で取れるが、R2の反映レース/公開GETの
 //   一時的な不整合に備えて窓を広げる。waitUntil内の待機はCPUを消費しない=Workers上限内。
 
@@ -447,9 +451,102 @@ async function handleSaveJob(form, env, cors, ctx) {
   return json({ ok: false, error: (result && result.error) || "save_failed" }, 502, cors);
 }
 
-// R2から動画バイトを取得→Driveへ保存する本体。失敗は全て「静かに終了」（フロントのpending再送に委ねる＝
-//   ここで例外を投げても誰も受け取れない）。既存の破壊面不変条件（create/upload/reference/trashの4種のみ）を厳守。
+// R2条件付きPUTによる分散リース。同じ親＋題名に対し、別isolate/別リクエストでも所有者は必ず1つ。
+async function driveJobLeaseKey(parentId, baseName) {
+  const raw = new TextEncoder().encode(String(parentId || "") + "\n" + String(baseName || ""));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", raw);
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  return "__go5_drive_lease/" + hex;
+}
+function leaseExpiresAt(obj) {
+  return Number(obj && obj.customMetadata && obj.customMetadata.expiresAt) || 0;
+}
+function leaseIfMatch(obj) {
+  const etag = obj && (obj.httpEtag || (obj.etag ? ("\"" + obj.etag + "\"") : ""));
+  return etag ? new Headers({ "If-Match": etag }) : null;
+}
+async function acquireDriveJobLease(env, parentId, baseName, owner, nowMs) {
+  const bucket = env && env.SYNC_IMAGES;
+  if (!bucket || typeof bucket.head !== "function" || typeof bucket.put !== "function")
+    return { ok: false, error: "drive_lease_binding_missing" };
+  const now = Number(nowMs || Date.now());
+  try {
+    const key = await driveJobLeaseKey(parentId, baseName);
+    const current = await bucket.head(key);
+    if (current && leaseExpiresAt(current) > now) return { ok: false, busy: true, key };
+    let onlyIf;
+    if (current) {
+      onlyIf = leaseIfMatch(current);
+      if (!onlyIf) return { ok: false, error: "drive_lease_etag_missing" };
+    } else {
+      onlyIf = new Headers({ "If-None-Match": "*" });
+    }
+    const expiresAt = now + DRIVE_JOB_LEASE_MS;
+    let created;
+    try {
+      created = await bucket.put(key, String(owner || ""), {
+        onlyIf, customMetadata: { owner: String(owner || ""), expiresAt: String(expiresAt) }
+      });
+    } catch (e) {
+      // 条件競合を一般障害と誤報しない。現在の所有者が見えればbusyへ倒す。
+      const latest = await bucket.head(key).catch(() => null);
+      if (latest && leaseExpiresAt(latest) > now) return { ok: false, busy: true, key };
+      return { ok: false, error: "drive_lease_put_failed" };
+    }
+    if (!created) return { ok: false, busy: true, key };
+    return { ok: true, key, owner: String(owner || ""), object: created, expiresAt };
+  } catch (e) {
+    return { ok: false, error: "drive_lease_unavailable" };
+  }
+}
+async function rewriteDriveJobLease(env, lease, expiresAt) {
+  const bucket = env && env.SYNC_IMAGES;
+  const onlyIf = leaseIfMatch(lease && lease.object);
+  if (!bucket || !onlyIf || !lease || !lease.key) return false;
+  try {
+    const obj = await bucket.put(lease.key, lease.owner || "", {
+      onlyIf, customMetadata: { owner: lease.owner || "", expiresAt: String(expiresAt) }
+    });
+    if (!obj) return false;
+    lease.object = obj; lease.expiresAt = expiresAt;
+    return true;
+  } catch (e) { return false; }
+}
+async function holdDriveJobLease(env, lease, ms) {
+  return rewriteDriveJobLease(env, lease, Date.now() + Math.max(1000, Number(ms || 0)));
+}
+async function releaseDriveJobLease(env, lease) {
+  // deleteは、期限切れ直後に新所有者が取ったリースを消す競合を作る。自分のETagが一致する時だけ期限0へ更新する。
+  return rewriteDriveJobLease(env, lease, 0);
+}
+
+// R2から動画バイトを取得→Driveへ保存する本体。フロントの重複抑止に加え、Worker間も分散リースで直列化する。
 async function runSaveJob(env, fields, parentId) {
+  const owner = (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function")
+    ? globalThis.crypto.randomUUID()
+    : (Date.now() + "-" + Math.random().toString(36).slice(2));
+  const lease = await acquireDriveJobLease(env, parentId, safeName(fields.title), owner);
+  if (!lease.ok) {
+    if (lease.busy) {
+      try { console.log("[save_job] duplicate suppressed: " + (fields.videoId || "?") + " / " + (fields.title || "?")); } catch (_) {}
+      // 先行ジョブが保存中。pendingを残し、後の実物確認で完了へ上げる。
+      return { ok: true, videoPending: true, skipped: true, inFlight: true };
+    }
+    return { ok: false, error: lease.error || "drive_lease_unavailable" };
+  }
+  let result;
+  try {
+    result = await runSaveJobUnlocked(env, fields, parentId);
+    return result;
+  } finally {
+    // 動画まで成功した後は5分のクールダウンを残す。2分遅れで来た別経路もDriveへ触れない。
+    // 失敗/動画未着は即解放し、永続pendingの自己修復を妨げない。
+    if (result && result.ok && !result.videoPending) await holdDriveJobLease(env, lease, DRIVE_JOB_COOLDOWN_MS);
+    else await releaseDriveJobLease(env, lease);
+  }
+}
+
+async function runSaveJobUnlocked(env, fields, parentId) {
   // ★観測ライン(2026-08-17 オタコン)：この完走本体は失敗が全て静かなreturnで、サーバー側に痕跡が一切無く
   //   「アプリは"裏で完走"と出すのにDriveに動画が来ない」を事後に診断できなかった(H5)。各終端に構造化ログを
   //   残す=wrangler tail / Workers Logs で「どの段で落ちたか」を実測できる。ログのみ＝破壊面は不変。
@@ -1006,4 +1103,10 @@ export {
   SAVE_JOB_VIDEO_KEY_RE,
   SAVE_JOB_R2_BASE_RE,
   SAVE_JOB_RETRY_DELAYS_MS,
+  DRIVE_JOB_LEASE_MS,
+  DRIVE_JOB_COOLDOWN_MS,
+  driveJobLeaseKey,
+  acquireDriveJobLease,
+  holdDriveJobLease,
+  releaseDriveJobLease,
 };

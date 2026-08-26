@@ -167,6 +167,64 @@ test.describe('投稿履歴の初期表示', () => {
     expect(dump).toContain('hist_render');
     expect(dump).toContain('dom_img_load');
   });
+
+  test('投稿履歴画像は4回失敗しても再読込なしで回復する', async ({ page }) => {
+    const videoId = 'acc1-20260826-history-retry';
+    const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.goto('__go5_seed__.html');
+    await page.evaluate(async ({ videoId, image }) => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('bsky_gas_url', '');
+      localStorage.setItem('hist_maint_at', String(Date.now()));
+      localStorage.setItem('hist_metrics_at', String(Date.now()));
+      localStorage.setItem('short_hist__acc1', JSON.stringify([{
+        videoId, ts: Date.now(), title: '投稿履歴の継続再試行テスト', account: 'acc1'
+      }]));
+      localStorage.setItem('verify_manual__acc1', '[]');
+      localStorage.setItem('verify_yt__acc1', '{}');
+      await new Promise((resolve, reject) => {
+        const req = indexedDB.open('go5store', 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
+        };
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put({ imgs: [image], prev: 1, at: Date.now() }, 'used:' + videoId);
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+    }, { videoId, image });
+
+    await page.route('**/js/candidates.js?*', async (route) => {
+      const response = await route.fetch();
+      let body = await response.text();
+      body = body.replace(
+        'return { retry: true, delay: n >= 3 ? 30000 : Math.min(6000, 1000 * Math.pow(2, n - 1)) };',
+        'return { retry: true, delay: n >= 3 ? 50 : Math.min(50, 20 * Math.pow(2, n - 1)) };'
+      );
+      const shim = `
+        (function () {
+          var original = Go5Idb.getResult.bind(Go5Idb);
+          var target = 'used:${videoId}';
+          Go5Idb.getResult = function (key) {
+            if (key !== target) return original(key);
+            window.__historyRetryAttempts = (window.__historyRetryAttempts || 0) + 1;
+            if (window.__historyRetryAttempts <= 4) return Promise.resolve({ ok: false, value: null, error: new Error('forced history transient failure') });
+            return original(key);
+          };
+        })();
+      `;
+      await route.fulfill({ response, body: shim + body });
+    });
+
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.vrow-title').filter({ hasText: '投稿履歴の継続再試行テスト' })).toBeVisible();
+    await expect(page.locator('.vrow-refimg[data-usedkey="' + videoId + '"]')).toBeVisible({ timeout: 5000 });
+    await expect.poll(() => page.evaluate(() => window.__historyRetryAttempts || 0)).toBeGreaterThanOrEqual(5);
+  });
 });
 test.describe('候補ページの画像・投稿編集', () => {
   test('PC画像モーダルの矢印は左右対称の20%位置・2倍サイズで表示する', async ({ page }) => {
