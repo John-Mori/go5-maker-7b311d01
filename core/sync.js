@@ -151,7 +151,7 @@
     var code = body && body.error;
     if (code === "bad_token") return "同期トークンが一致しません";
     if (code === "rate_limited") return "同期の一日上限に達しました。時間を置いて再試行してください";
-    if (code === "kv_unset") return "同期Workerの保存先が未設定です";
+    if (code === "kv_unset" || code === "storage_unset") return "同期Workerの保存先が未設定です";
     if (code === "too_large") return "同期データが上限を超えています";
     return "同期Workerでエラーが発生しました(" + ((r && r.status) || code || "unknown") + ")";
   }

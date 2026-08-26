@@ -120,6 +120,23 @@ test.describe('PC candidate recovery invariants', () => {
     await expect(page.locator('.cand-card', { hasText: 'PC取得一本化テスト作品' })).toBeVisible();
     await expect.poll(() => page.evaluate(() => window.__pcCandidateFetchCalls)).toBe(1);
   });
+  test('add and close still shows the merged-work notice for a duplicate', async ({ page }) => {
+    const cid = 'd_pc_duplicate_close_notice';
+    const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/';
+    await page.addInitScript(({ candidateCid, url }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{ cid: candidateCid, url, title: '統合案内テスト', addedAt: 1 }]));
+    }, { candidateCid: cid, url: workUrl });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+
+    await page.locator('#candAddOpen').click();
+    await page.locator('#candUrl').fill(workUrl);
+    await page.locator('#candAddClose').click();
+
+    await expect(page.locator('.fz-overlay:has(.add-modal)')).toBeHidden();
+    await expect(page.locator('.dup-overlay')).toBeVisible();
+    await expect(page.locator('#dupTitleText')).toHaveText('同じ作品が既に追加されているので統合');
+    await expect(page.locator('#candPageMsg')).toContainText('同じ作品が既に追加されているので統合');
+  });
   test('LS quota fallback still flushes a new candidate after the IDB mirror is durable', async ({ page }) => {
     const cid = 'd_pc_quota_candidate_sync';
     await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });

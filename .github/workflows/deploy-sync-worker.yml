@@ -1,0 +1,20 @@
+name: Deploy sync-worker (Cloudflare)
+
+# mainでsync-worker/が変わったら自動デプロイ。同期基盤だけ手動実行も可能。
+on:
+  push:
+    branches: [main]
+    paths: ['sync-worker/**']
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: sync-worker

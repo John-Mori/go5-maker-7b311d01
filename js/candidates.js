@@ -414,6 +414,17 @@
     ov.hidden = false;
     try { ok.focus({ preventScroll: true }); } catch (e) {}
   }
+  // 「追加 / 閉じる」の時は追加モーダルを先に閉じ、次のタスクで統合案内を開く。
+  // 同じイベント内で2枚のoverlayを切り替えるとPCブラウザが後段も閉じることがあるため、表示を分離する。
+  function finishDuplicateAdd_(memoText, cid, msgEl, onDone) {
+    showCandAddNotice_(msgEl, 'ℹ️ ' + DUPLICATE_WORK_NOTICE);
+    if (onDone) {
+      onDone();
+      setTimeout(function () { showDuplicateDialog_(memoText, cid); }, 0);
+    } else {
+      showDuplicateDialog_(memoText, cid);
+    }
+  }
   // 指定cidの候補カードへ瞬時に移動して一時ハイライト。(behavior:'auto'＝スクロールアニメ無しで即座に表示)
   //   モーダルを閉じた直後は再描画が走ることがあるため、少し待ってから探す。見つからなければ何もしない。
   function jumpToCandCard_(cid) {
@@ -5198,14 +5209,12 @@
           if (inp) inp.value = ''; if (twInp) twInp.value = ''; if (memoElDup) memoElDup.value = '';
           _addModalImgs = []; renderAddSlots_();
           renderCandList(tabId);
-          showDuplicateDialog_(newMemo, r.cid);
-          if (onDone) onDone();
+          finishDuplicateAdd_(newMemo, r.cid, msg, onDone);
         } else {
           // 行が既に端末内にあっても、旧版でクラウド送信だけ落ちた候補はあり得る。
           // 再追加を「存在確認だけ」で終わらせず、候補高速レールで再告知して別端末へ自己修復する。
           flushSync_();
-          showDuplicateDialog_(newMemo, r.cid);
-          if (onDone) onDone();
+          finishDuplicateAdd_(newMemo, r.cid, msg, onDone);
         }
         return;
       }
@@ -5227,8 +5236,7 @@
           if (exist) {
             if (url && !exist.url) { exist.url = url; candItemsWrite_(key, items); }
             var memoElRace = $('candMemo');
-            showDuplicateDialog_(memoElRace && memoElRace.value, r.cid);
-            if (onDone) onDone();
+            finishDuplicateAdd_(memoElRace && memoElRace.value, r.cid, msg, onDone);
             return;
           }
         }

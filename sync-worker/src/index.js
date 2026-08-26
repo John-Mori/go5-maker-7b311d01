@@ -2,7 +2,7 @@
  * sync-worker — 5秒動画メーカー 全端末クラウド同期の基盤。
  *
  * 役割：どの端末からでも「素材(候補)・設定・投稿履歴・(暗号化した)鍵」を常に最新で同期する。
- *   ・状態(JSON) … KV `state` に version 付きで1ドキュメント保持（楽観的並行制御）。
+ *   ・状態(JSON) … R2 に version 付きで1ドキュメント保持（楽観的並行制御）。旧KVは初回移行元として読む。
  *   ・画像(漫画ページ等) … R2 に content-hash(sha256) キーで保存＝重複排除・不変。
  *
  * エンドポイント（/api/* は X-Sync-Token 必須・Origin許可＋CORS）：
@@ -22,7 +22,7 @@
  *   ・/api/* は X-Sync-Token（env.SYNC_TOKEN）一致必須。Origin は env.ALLOWED_ORIGINS（"*"可）。
  *   ・鍵(アプリPW等)は「クライアント側でパスフレーズ暗号化済み」の文字列として blob に含まれる前提＝
  *     このworkerは平文の鍵を一切扱わない/知らない（暗号文をそのまま保管するだけ）。
- *   ・KV日次レート制限（KV未設定でも停止しない）。
+ *   ・同期状態と画像はR2へ保存。KV上限に達しても端末同期を止めない。
  *
  * バインディング（wrangler.toml 参照）：KV=SYNC / R2=SYNC_IMAGES / Secret=SYNC_TOKEN / Var=ALLOWED_ORIGINS
  */
@@ -44,7 +44,7 @@ export default {
     // 画像アップロード（PUT /api/img/:key）
     if (path.startsWith("/api/img/") && request.method === "PUT") {
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
-      if (await rateLimited(env)) return json({ ok: false, error: "rate_limited" }, 429, cors);
+
       return putImage(decodeURIComponent(path.slice(9)), request, env, cors);
     }
 
@@ -73,7 +73,7 @@ export default {
     // 状態 push
     if (path === "/api/push" && request.method === "POST") {
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
-      if (await rateLimited(env)) return json({ ok: false, error: "rate_limited" }, 429, cors);
+
       return statePush(request, env, cors);
     }
 
@@ -106,34 +106,71 @@ function preflight(origin, env) {
 }
 
 // ── 状態(JSON) ─────────────────────────────────────────────
-//   KV レイアウト：state:doc → blob文字列 / state:meta → {version, updatedAt, device}
+// R2を正本にする。旧KV(state:doc/state:meta)はR2が空の時だけ移行元として読む。
+// KVの日次上限に達して読み出せなくても empty として開始し、次のpushでR2へ着地させる。
+const STATE_R2_KEY = "state/sync-v1.json";
+async function readStateBundle(env) {
+  if (env.SYNC_IMAGES) {
+    try {
+      const obj = await env.SYNC_IMAGES.get(STATE_R2_KEY);
+      if (obj) {
+        const saved = parseJson(await obj.text());
+        if (saved && typeof saved.blob === "string") return {
+          empty: false, blob: saved.blob, version: Number(saved.version || 0),
+          updatedAt: String(saved.updatedAt || ""), device: String(saved.device || ""), source: "r2"
+        };
+      }
+    } catch (e) {}
+  }
+  if (env.SYNC) {
+    try {
+      const blob = await env.SYNC.get("state:doc");
+      if (blob !== null) {
+        const meta = parseJson(await env.SYNC.get("state:meta")) || {};
+        return { empty: false, blob, version: Number(meta.version || 0), updatedAt: String(meta.updatedAt || ""), device: String(meta.device || ""), source: "kv" };
+      }
+    } catch (e) {
+      return { empty: true, version: 0, degraded: "kv_unavailable" };
+    }
+  }
+  return { empty: true, version: 0 };
+}
 async function statePull(env, cors) {
-  if (!env.SYNC) return json({ ok: false, error: "kv_unset" }, 500, cors);
-  const blob = await env.SYNC.get("state:doc");
-  if (blob === null) return json({ ok: true, empty: true, version: 0 }, 200, cors);
-  const meta = parseJson(await env.SYNC.get("state:meta")) || {};
-  return json({ ok: true, blob, version: meta.version || 0, updatedAt: meta.updatedAt || "", device: meta.device || "" }, 200, cors);
+  if (!env.SYNC_IMAGES && !env.SYNC) return json({ ok: false, error: "storage_unset" }, 500, cors);
+  const state = await readStateBundle(env);
+  if (state.empty) return json({ ok: true, empty: true, version: 0, degraded: state.degraded || "" }, 200, cors);
+  // 旧KVから読めた時点でR2へ一度だけ移行。以後のpull/pushはKVを消費しない。
+  if (state.source === "kv" && env.SYNC_IMAGES) {
+    try {
+      await env.SYNC_IMAGES.put(STATE_R2_KEY, JSON.stringify({ blob: state.blob, version: state.version, updatedAt: state.updatedAt, device: state.device }), {
+        httpMetadata: { contentType: "application/json", cacheControl: "no-store" }
+      });
+    } catch (e) {}
+  }
+  return json({ ok: true, blob: state.blob, version: state.version, updatedAt: state.updatedAt, device: state.device }, 200, cors);
 }
 async function statePush(request, env, cors) {
-  if (!env.SYNC) return json({ ok: false, error: "kv_unset" }, 500, cors);
+  if (!env.SYNC_IMAGES && !env.SYNC) return json({ ok: false, error: "storage_unset" }, 500, cors);
   const body = parseJson(await request.text());
   if (!body || typeof body.blob !== "string") return json({ ok: false, error: "bad_body" }, 400, cors);
-  if (body.blob.length > 8 * 1024 * 1024) return json({ ok: false, error: "too_large" }, 413, cors); // KV値上限25MB。安全側で8MB
-  const meta = parseJson(await env.SYNC.get("state:meta")) || { version: 0 };
-  const cur = meta.version || 0;
-  const base = Number(body.baseVersion || 0);
-  // 楽観的並行制御：baseVersion が現行と食い違う＝他端末が先に更新した→衝突を返す（呼び出し側でマージ再送）。
-  if (cur !== 0 && base !== cur) {
-    const blob = await env.SYNC.get("state:doc");
-    return json({ ok: false, conflict: true, version: cur, blob: blob, updatedAt: meta.updatedAt || "", device: meta.device || "" }, 200, cors);
+  if (body.blob.length > 8 * 1024 * 1024) return json({ ok: false, error: "too_large" }, 413, cors);
+  const current = await readStateBundle(env);
+  const cur = Number(current.version || 0), base = Number(body.baseVersion || 0);
+  if (!current.empty && cur !== 0 && base !== cur) {
+    return json({ ok: false, conflict: true, version: cur, blob: current.blob, updatedAt: current.updatedAt || "", device: current.device || "" }, 200, cors);
   }
-  const nextVer = cur + 1;
-  const nextMeta = { version: nextVer, updatedAt: body.updatedAt || new Date().toISOString(), device: String(body.device || "") };
-  await env.SYNC.put("state:doc", body.blob);
-  await env.SYNC.put("state:meta", JSON.stringify(nextMeta));
-  return json({ ok: true, version: nextVer, updatedAt: nextMeta.updatedAt }, 200, cors);
+  const nextMeta = { blob: body.blob, version: cur + 1, updatedAt: body.updatedAt || new Date().toISOString(), device: String(body.device || "") };
+  if (env.SYNC_IMAGES) {
+    await env.SYNC_IMAGES.put(STATE_R2_KEY, JSON.stringify(nextMeta), {
+      httpMetadata: { contentType: "application/json", cacheControl: "no-store" }
+    });
+  } else {
+    // R2未設定環境だけの後方互換。通常運用では通らない。
+    await env.SYNC.put("state:doc", body.blob);
+    await env.SYNC.put("state:meta", JSON.stringify({ version: nextMeta.version, updatedAt: nextMeta.updatedAt, device: nextMeta.device }));
+  }
+  return json({ ok: true, version: nextMeta.version, updatedAt: nextMeta.updatedAt }, 200, cors);
 }
-
 // ── 画像(R2) ───────────────────────────────────────────────
 function validKey(k) { return /^[a-f0-9]{16,64}$/.test(String(k || "")); } // sha256 hex（推測困難・パス安全）
 async function putImage(key, request, env, cors) {
@@ -179,20 +216,6 @@ async function imgHas(url, env, cors) {
   const present = [];
   for (const k of keys) { if (await env.SYNC_IMAGES.head(k)) present.push(k); }
   return json({ ok: true, present }, 200, cors);
-}
-
-// ── レート制限（KV日次カウンタ・未設定でも停止しない）─────────────
-async function rateLimited(env) {
-  try {
-    if (!env.SYNC) return false;
-    const day = new Date().toISOString().slice(0, 10);
-    const key = "rl:" + day;
-    const cur = parseInt((await env.SYNC.get(key)) || "0", 10) || 0;
-    const cap = parseInt(String(env.DAILY_CAP || "5000"), 10) || 5000;
-    if (cur >= cap) return true;
-    await env.SYNC.put(key, String(cur + 1), { expirationTtl: 172800 });
-    return false;
-  } catch (e) { return false; }
 }
 
 // ── ユーティリティ ─────────────────────────────────────────
