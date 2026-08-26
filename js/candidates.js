@@ -69,7 +69,7 @@
   }
   // ★per-cid の「持続失敗」ゲート(純関数=tests/test_ref_stall_gate.js で境界を固定)。取得が n回以上 かつ
   //   連鎖開始から T ミリ秒以上 失敗し続けた時だけ true=⌛へ落とす。★3回/20000(=20秒)は関数内リテラルで
-  //   持つ(shouldShowIdbHint_ と同じ理由=module.exports の早期returnで外の var 代入は実行されず undefined に
+  //   持つ(module.exports の早期returnで外の var 代入は実行されず undefined に
   //   なるため、定数を外の var に置くと Node テストで壊れる)。
   function refStallDecide_(n, sinceMs, nowMs) {
     return n >= 3 && !!sinceMs && (nowMs - sinceMs) >= 20000;
@@ -161,7 +161,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -1030,20 +1030,12 @@
   var _candidateHydrateInFlight = false;
   var _candidateHydrateRetryTimer = null;
   var _candidateHydrateFailures = 0;
-  var _hydrateFailSince = 0;                        // 現在の失敗連鎖の開始時刻。案内バーは「持続」を確かめてから出す(誤発火防止)。
   var _syncRehydrateRetryTimer = null;
   // 投稿履歴画像(post:/used:)の展開状態は prefix 別に持つ(_histInFlight/_histRetryTimer/_histFails=hydrateHistPrefix_ 近傍で宣言)。
   //   ★旧: post:/used: を1束で読み1つのフラグで守っていた=空の post: の巻き添えで used: を捨てていた(2026-08-23 実機ダンプで判明・修正)。
-  // 展開成功/回復のたびに失敗連鎖をゼロへ戻す(件数と開始時刻を対で戻す=案内バーの持続ゲートが正しく効く)。
-  function resetCandidateHydrateFailures_() { _candidateHydrateFailures = 0; _hydrateFailSince = 0; _refFail = Object.create(null); } // 一括展開が通った=stalledの根拠も消す(各カードは再評価で⏳→実画像へ)
-  // ★「閉じて開き直せ」案内バーを出してよいかの唯一の判定(純関数=tests/test_idb_hint_gate.js で検証)。
-  //   短い接続死では出さず、5回以上連続で失敗し かつ 連鎖が60秒以上続いた(=回復せず本当にプロセス単位で
-  //   死んでいる)時だけ true。sinceMs=連鎖開始時刻(0=連鎖なし)。Chami報告2026-08-18「案内がめちゃくちゃ出る」対策。
-  //   ★60000(=60秒)は関数内リテラルで持つ。Node(テスト)では上の module.exports で早期returnするため、
-  //   var の代入行(このブロックより後)は実行されず undefined になる=定数を外の var に置くと壊れる。
-  function shouldShowIdbHint_(failures, sinceMs, nowMs) {
-    return failures > 4 && !!sinceMs && (nowMs - sinceMs) >= 60000; // 60秒=持続死のしきい
-  }
+  // 展開成功/回復のたびに失敗回数をゼロへ戻す。
+  function resetCandidateHydrateFailures_() { _candidateHydrateFailures = 0; _refFail = Object.create(null); } // 一括展開が通った=stalledの根拠も消す(各カードは再評価で⏳→実画像へ)
+  // 復旧はUI通知を出さず、ブラウザ内の自動再試行だけで完結させる。
   function markCandidateHydrated_() {
     if (_candidateHydrated) return;
     _candidateHydrated = true;
@@ -2159,7 +2151,6 @@
       try { hydrateR2Refs_(); } catch (e) {} // IDBへ移せなかった退避画像をR2へ逃がして解毒(冪等)
       _candidateHydrateInFlight = false;
       resetCandidateHydrateFailures_();
-      hideIdbRecoveryHint_();   // 展開できた=「失敗案内」はもう嘘。回復イベント頼みにせず直接消す
       markCandidateHydrated_(); // 候補画像・コメントの空保存拒否をここで解除
       window.Go5ImgDiag && Go5ImgDiag.push('hydrate_done', { count: __hydCount, ms: Date.now() - __hydT0 });
       bgRender_();              // サムネ・コメント・✓バッジをすぐ反映
@@ -2168,17 +2159,10 @@
     }).catch(function (e) {
       _candidateHydrateInFlight = false;
       _candidateHydrateFailures++;
-      if (_candidateHydrateFailures === 1) _hydrateFailSince = Date.now(); // 連鎖の起点を刻む
       // 一時的なSafariの接続死を「IDB非対応」と確定して空表示へ落とさない。張り直しを継続する。
       try { console.warn('[go5 idb] 候補画像の展開を再試行します', e); } catch (_) {}
       window.Go5ImgDiag && Go5ImgDiag.push('hydrate_fail', { fails: _candidateHydrateFailures });
-      // ★案内バーは「持続死」だけに絞る(誤発火の恒久対策・Chami報告2026-08-18「案内がめちゃくちゃ出る」)。
-      //   旧: 5回連続失敗(≒15秒)で即表示 → iOSのタブ退避/一時的メモリ圧など数秒で回復する接続死でも
-      //   「閉じて開き直せ(再読込では直らない)」という強い案内が頻発していた。今は go5-idb-recovered で
-      //   自動的に画像を読み直せる(閉じ直し不要)ため、この案内は「回復せず一定時間(60秒)以上続く=本当に
-      //   WebKitのプロセス単位のIDB死」の時だけ1回出す。回復すれば resetCandidateHydrateFailures_ で連鎖が
-      //   切れ、以後は出ない。genuine死は失敗し続けるので60秒後に必ず出る=案内の意味は失わない。
-      if (shouldShowIdbHint_(_candidateHydrateFailures, _hydrateFailSince, Date.now())) showIdbRecoveryHint_();
+      // 利用者の操作やAIの起動を待たず、通常のブラウザ処理だけで回復まで再試行する。
       scheduleCandidateHydrateRetry_();
       // ★候補ref:の展開失敗で post:/used:(投稿履歴の仕上がりプレビュー)を人質に取らない=直列ゲートを断つ。
       //   従来は成功時(1309)にしか hydrateHistoryImages_ を呼ばず、候補側が失敗ループに入ると投稿履歴の
@@ -2207,52 +2191,6 @@
         _bskyHydrateRetryTimer = setTimeout(function () { _bskyHydrateRetryTimer = null; hydrateBskyImages_(); }, delay);
       }
     });
-  }
-  // ★IDBの持続失敗を黙らせない案内。アプリ側の自動再試行は止めず、回復次第カードへ反映する。
-  //   「今すぐ再試行」で待ち時間を飛ばせる。アプリ配色(ティール #2bb3c0 / ダーク #0e1422・半角括弧・紫禁止)。
-  //   回復(go5-idb-recovered)で自動的に消える。
-  var _idbHintEl = null;
-  function showIdbRecoveryHint_() {
-    if (_idbHintEl) return;
-    try {
-      if (!document.body) return;
-      var bar = document.createElement('div');
-      bar.id = 'idbRecoveryHint';
-      bar.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;background:#0e1422;color:#e8eef7;border:1px solid #2bb3c0;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;box-shadow:0 4px 16px rgba(0,0,0,.4);';
-      var x = document.createElement('button');
-      x.type = 'button';
-      x.textContent = '×';
-      x.setAttribute('aria-label', '閉じる');
-      x.style.cssText = 'float:right;background:transparent;border:0;color:#2bb3c0;font-size:16px;line-height:1;cursor:pointer;margin-left:8px;';
-      x.addEventListener('click', function () { hideIdbRecoveryHint_(); });
-      var msg = document.createElement('span');
-      msg.textContent = '画像の読み込みを自動で再試行しています。ページを閉じなくても、回復し次第表示されます。';
-      var retry = document.createElement('button');
-      retry.type = 'button';
-      retry.textContent = '今すぐ再試行';
-      retry.style.cssText = 'display:inline-block;width:auto;margin:8px 0 0;background:#2bb3c0;color:#081018;border:0;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;';
-      retry.addEventListener('click', function () {
-        retry.disabled = true;
-        retry.textContent = '再試行しました';
-        retryCandidateImagesNow_();
-        setTimeout(function () { if (retry.isConnected) { retry.disabled = false; retry.textContent = '今すぐ再試行'; } }, 1500);
-      });
-      bar.appendChild(x);
-      bar.appendChild(msg);
-      bar.appendChild(document.createElement('br'));
-      bar.appendChild(retry);
-      document.body.appendChild(bar);
-      _idbHintEl = bar;
-    } catch (e) {}
-  }
-  function hideIdbRecoveryHint_() {
-    try { if (_idbHintEl && _idbHintEl.parentNode) _idbHintEl.parentNode.removeChild(_idbHintEl); } catch (e) {}
-    _idbHintEl = null;
-  }
-  function retryCandidateImagesNow_() {
-    if (_candidateHydrateRetryTimer) { try { clearTimeout(_candidateHydrateRetryTimer); } catch (e) {} _candidateHydrateRetryTimer = null; }
-    if (!_candidateHydrated && !_candidateHydrateInFlight) hydrateImages_();
-    retryVisibleRefSlots_(true);
   }
   // localStorage の cand_refimg__* / cand_bskyimg__* を IDB へ移して localStorage から削除。(冪等・IDB書込成功後にのみ削除＝データロス防止)
   function migrateLocalImages_() {
@@ -2432,7 +2370,6 @@
       retryVisibleHistoryImages_();
       bgRender_();
     } catch (e) {}
-    hideIdbRecoveryHint_();
   }); } catch (e) {}
   // クリップボードの文字列を対象inputへ貼り付け。([data-paste=inputId] のボタンを配線)
   function wirePaste_(root) {
