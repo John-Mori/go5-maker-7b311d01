@@ -26,7 +26,7 @@ function infoCidSupported_(cid) { return !/^tw_/i.test(String(cid || "")); }
 function salesCidSupported_(cid) { return /^d_[0-9A-Za-z]+$/i.test(String(cid || "")); }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url    = new URL(request.url);
     const path   = url.pathname;
     const origin = request.headers.get("Origin") || "";
@@ -267,20 +267,20 @@ export default {
       }
       const nowC = Date.now();
       try {
-        // 総入れ替え。DELETE + 複数行INSERT を1バッチ=原子的トランザクション。
+        // 手動追加/独立タブだけを入れ替え、Workerが管理するcircle行は保持。重複cidは端末側sourceを優先する。
         // ★D1のbind変数上限は【1文あたり100】(実測2026-08-05・十王星南 selftest=50→OK/60→"too many SQL variables"）。
         //   旧コードは400件/文=800変数で上限突破し、候補が50件を超えると毎回バッチ全体がSQLITE_ERRORで
         //   ロールバック→candidate_poolが最後の小さな成功書き込み(d_754842・1件)に凍結していた(=Chamiの候補241件が
         //   一度もD1へ入らなかった真因。クライアントv647/648/656はすべて別レイヤを直しており無効)。
         //   ★source列追加で1行3変数(cid,updated_at,source)=CHUNK 30で90変数(上限100に安全マージン)。
         const CHUNK = 30;
-        const stmts = [env.FANZA_DB.prepare("DELETE FROM candidate_pool")];
+        const stmts = [env.FANZA_DB.prepare("DELETE FROM candidate_pool WHERE source IS NULL OR source<>'circle'")];
         for (let i = 0; i < poolRows.length; i += CHUNK) {
           const chunk = poolRows.slice(i, i + CHUNK);
           const ph = chunk.map(() => "(?, ?, ?)").join(", ");
           const binds = [];
           chunk.forEach((r) => { binds.push(r.cid, nowC, r.source); });
-          stmts.push(env.FANZA_DB.prepare("INSERT INTO candidate_pool (cid, updated_at, source) VALUES " + ph).bind(...binds));
+          stmts.push(env.FANZA_DB.prepare("INSERT INTO candidate_pool (cid, updated_at, source) VALUES " + ph + " ON CONFLICT(cid) DO UPDATE SET updated_at=excluded.updated_at,source=excluded.source").bind(...binds));
         }
         await env.FANZA_DB.batch(stmts);
         await logCandPost_({ stage: "persist_ok", count: poolRows.length });
@@ -321,6 +321,8 @@ export default {
           "ON CONFLICT(cid,channel) DO UPDATE SET posted_at=excluded.posted_at, yt_url=excluded.yt_url, updated_at=excluded.updated_at " +
           "WHERE excluded.posted_at > posted_log.posted_at"
         ).bind(pcid, pch, pat, pyt || null, nowIso_()).run();
+        // 投稿を権威としてサークルを解決し、一度投稿したサークルは全候補の巡回対象へ恒久登録する。
+        if (ctx && ctx.waitUntil) ctx.waitUntil(registerPostedMaker_(env, pcid, pat, true));
         return json({ ok: true, cid: pcid, channel: pch }, 200, corsP);
       } catch (e) {
         return json({ ok: false, error: String((e && e.message) || e) }, 500, corsP);
@@ -353,6 +355,34 @@ export default {
       }
     }
 
+    // ── 全候補カタログ：表示中の1ページだけ返し、全件収集はWorker側で継続する ──
+    //   GET  /api/candidate-catalog?sort=rank7d&page=1&limit=20&q=...
+    //   POST /api/candidate-catalog { makerIds:[...], items:[...] }
+    //     makerIdsは巡回キューへ、itemsは手動追加/独立タブの表示情報をカタログへ反映する。
+    if (path === "/api/candidate-catalog") {
+      if (request.method === "OPTIONS") return preflight(origin, allowed);
+      const corsCat = corsHeaders(origin, allowed);
+      if (!corsCat) return json({ ok: false, error: "origin_not_allowed" }, 403, null);
+      const secCat = request.headers.get("X-Shared-Secret") || "";
+      if (!env.SHARED_SECRET || secCat !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, corsCat);
+      if (!env.FANZA_DB) return json({ ok: false, error: "db_unbound" }, 500, corsCat);
+      if (request.method === "GET") {
+        try { return json(await queryCandidateCatalog_(env, url.searchParams), 200, corsCat); }
+        catch (e) { return json({ ok: false, error: "catalog_query_failed" }, 500, corsCat); }
+      }
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, corsCat);
+      let catBody;
+      try { catBody = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, corsCat); }
+      const makerIdsCat = Array.isArray(catBody.makerIds) ? catBody.makerIds.slice(0, 200) : [];
+      for (const rawMid of makerIdsCat) {
+        const mid = String(rawMid || "").trim();
+        if (/^\d{1,10}$/.test(mid)) await seedCatalogMaker_(env, mid, "");
+      }
+      const imported = await importCandidateCatalog_(env, Array.isArray(catBody.items) ? catBody.items : []);
+      if (ctx && ctx.waitUntil && makerIdsCat.length) ctx.waitUntil((async () => { await backfillPostedMakers_(env, 3); await runCandidateCatalog_(env, 17); })());
+      const progress = await candidateCatalogProgress_(env);
+      return json({ ok: true, imported, progress }, 200, corsCat);
+    }
     // ── サークル（maker）の作品一覧：候補タブの「サークルタブ」用 ──────────────────
     //   POST /api/fanza-maker-list { makerId, sort? }
     //   sort: "date"(既定・発売日新しい順) | "rank"(人気=直近の売れ行きに近い動的ランキング) | "review"
@@ -536,6 +566,9 @@ export default {
         const msg = String(e && e.message || e);
         return json({ ok: false, error: msg.indexOf("limit exceeded") >= 0 ? "kv_quota_exceeded" : "kv_error" }, 503, cors4);
       }
+      await seedCatalogMaker_(env, mkId, mkName);
+      // 登録直後から裏で先頭ページを取得。応答は待たせず、失敗時も保存済みカーソルからcronが再開する。
+      if (ctx && ctx.waitUntil) ctx.waitUntil(runCandidateCatalog_(env, 6));
       return json({ ok: true, tracked: mkId }, 200, cors4);
     }
 
@@ -662,9 +695,12 @@ export default {
     try {
       if (!env.FANZA_API_ID || !env.FANZA_AFFILIATE_ID || !env.FANZA_DB) return;
       await runMarketCrawl(env);
+      await backfillPostedMakers_(env, 5);
+      await seedTrackedCatalogMakers_(env);
+      await runCandidateCatalog_(env, 35);
     } catch (e) {
       // cronは投げ返しても再試行が乱れるだけ。翌朝の再実行で収束させる(秘密はログに出さない)。
-      console.error("market_crawl_failed", String(e && e.message || e));
+      console.error("scheduled_refresh_failed", String(e && e.message || e));
     }
   }
 };
@@ -724,6 +760,228 @@ async function fetchAllMakerItems(env, makerId, sort) {
   return { items: items, floors: floorsHit };
 }
 
+// ── 全候補のサーバー側カタログ ──────────────────────────────────────────────
+// 同人はコミック/CG系だけ、Books(ebook)は全件。ゲーム・音声・ボイスコミック・動画は取得段階で除外する。
+const CATALOG_SOURCES = [
+  { service: "doujin", floor: "digital_doujin", article: "maker" },
+  { service: "doujin", floor: "digital_doujin_bl", article: "maker" },
+  { service: "doujin", floor: "digital_doujin_tl", article: "maker" },
+  { service: "ebook", floor: "comic", article: "author" },
+  { service: "ebook", floor: "novel", article: "author" },
+  { service: "ebook", floor: "photo", article: "author" },
+  { service: "ebook", floor: "bl", article: "author" },
+  { service: "ebook", floor: "tl", article: "author" },
+];
+const CATALOG_REFRESH_MS = 24 * 3600000;
+function catalogType_(it, src) {
+  if (src.service === "ebook") return { eligible: true, type: "Books" };
+  const info = it.iteminfo || {};
+  const names = [];
+  [info.genre, info.type, info.category].forEach((arr) => {
+    (Array.isArray(arr) ? arr : []).forEach((x) => names.push(String((x && (x.name || x.value)) || x || "")));
+  });
+  names.push(String(it.category_name || ""), String(it.floor_name || ""));
+  const text = names.join(" ");
+  if (/(ゲーム|game|ボイス|音声|ボイコミ|ボイスコミック|動画|アニメ動画)/i.test(text)) return { eligible: false, type: "excluded" };
+  if (/(コミック|漫画|comic|ＣＧ|CG|イラスト|image)/i.test(text)) {
+    const ai = /(AI|ＡＩ|人工知能)/i.test(text);
+    const cg = /(ＣＧ|CG|イラスト|image)/i.test(text);
+    return { eligible: true, type: ai ? (cg ? "AI CG" : "AIコミック") : (cg ? "CG" : "コミック") };
+  }
+  return { eligible: false, type: "other" };
+}
+function mapCatalogItem_(it, makerId, src, rank) {
+  const base = mapMakerItem(it);
+  const type = catalogType_(it, src);
+  return Object.assign(base, {
+    makerId: String(makerId || ""), service: src.service, floor: src.floor,
+    workType: type.type, eligible: type.eligible, rank: rank || null,
+  });
+}
+async function seedCatalogMaker_(env, makerId, name) {
+  if (!env.FANZA_DB || !/^\d{1,10}$/.test(String(makerId || ""))) return;
+  const now = Date.now();
+  await env.FANZA_DB.prepare(
+    "INSERT INTO candidate_catalog_makers(maker_id,name,status,updated_at) VALUES(?,?,'pending',?) " +
+    "ON CONFLICT(maker_id) DO UPDATE SET name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE candidate_catalog_makers.name END, " +
+    "status=CASE WHEN candidate_catalog_makers.completed_at IS NULL OR candidate_catalog_makers.completed_at<? THEN 'pending' ELSE candidate_catalog_makers.status END, updated_at=excluded.updated_at"
+  ).bind(String(makerId), String(name || "").slice(0, 100), now, now - CATALOG_REFRESH_MS).run();
+}
+async function seedTrackedCatalogMakers_(env) {
+  const seen = new Set();
+  for (const m of await stListMakers(env)) {
+    seen.add(String(m.makerId)); await seedCatalogMaker_(env, m.makerId, m.name || "");
+  }
+  const rs = await env.FANZA_DB.prepare("SELECT maker_id,name FROM posted_makers").all().catch(() => null);
+  for (const m of (rs && rs.results || [])) if (!seen.has(String(m.maker_id))) await seedCatalogMaker_(env, m.maker_id, m.name || "");
+}
+async function registerPostedMaker_(env, cid, postedAt, startRun) {
+  if (!env.FANZA_DB || !env.FANZA_API_ID || !env.FANZA_AFFILIATE_ID) return;
+  const item = await fetchViaApi(cid, env.FANZA_API_ID, env.FANZA_AFFILIATE_ID);
+  const author = item && item.iteminfo && Array.isArray(item.iteminfo.author) ? item.iteminfo.author[0] : null;
+  const makerId = String(author && author.id || "");
+  await env.FANZA_DB.prepare("INSERT INTO posted_maker_resolutions(cid,maker_id,checked_at) VALUES(?,?,?) ON CONFLICT(cid) DO UPDATE SET maker_id=excluded.maker_id,checked_at=excluded.checked_at")
+    .bind(cid, /^\d{1,10}$/.test(makerId) ? makerId : null, Date.now()).run();
+  if (!/^\d{1,10}$/.test(makerId)) return;
+  const name = String(author && author.name || "").slice(0, 100);
+  await env.FANZA_DB.prepare(
+    "INSERT INTO posted_makers(maker_id,name,first_posted_at,updated_at) VALUES(?,?,?,?) " +
+    "ON CONFLICT(maker_id) DO UPDATE SET name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE posted_makers.name END,updated_at=excluded.updated_at"
+  ).bind(makerId, name, postedAt, Date.now()).run();
+  await seedCatalogMaker_(env, makerId, name);
+  if (startRun) await runCandidateCatalog_(env, 6);
+}
+async function backfillPostedMakers_(env, limit) {
+  const rs = await env.FANZA_DB.prepare("SELECT p.cid,MIN(p.posted_at) AS posted_at FROM posted_log p LEFT JOIN posted_maker_resolutions r ON r.cid=p.cid WHERE r.cid IS NULL GROUP BY p.cid ORDER BY posted_at LIMIT ?")
+    .bind(limit).all().catch(() => null);
+  for (const row of (rs && rs.results || [])) await registerPostedMaker_(env, row.cid, row.posted_at, false);
+}
+async function candidateCatalogProgress_(env) {
+  const row = await env.FANZA_DB.prepare(
+    "SELECT COUNT(*) AS makers, SUM(CASE WHEN status='complete' THEN 1 ELSE 0 END) AS complete, " +
+    "SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN status='running' THEN 1 ELSE 0 END) AS running FROM candidate_catalog_makers"
+  ).first().catch(() => null);
+  const works = await env.FANZA_DB.prepare("SELECT COUNT(*) AS n FROM candidate_catalog c JOIN candidate_pool p ON p.cid=c.cid WHERE c.eligible=1").first().catch(() => null);
+  return { makers: Number(row && row.makers || 0), complete: Number(row && row.complete || 0), pending: Number(row && row.pending || 0), running: Number(row && row.running || 0), works: Number(works && works.n || 0) };
+}
+async function saveCatalogRows_(env, rows, source) {
+  if (!rows.length) return 0;
+  const now = Date.now();
+  const stmts = [];
+  for (const it of rows) {
+    const discovered = now;
+    stmts.push(env.FANZA_DB.prepare(
+      "INSERT INTO candidate_catalog(cid,maker_id,maker_name,title,url,released,list_price,price,discount_pct,review_count,review_avg,thumb,genres_json,service,floor,work_type,eligible,source,discovered_at,refreshed_at) " +
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(cid) DO UPDATE SET " +
+      "maker_id=COALESCE(excluded.maker_id,candidate_catalog.maker_id), maker_name=COALESCE(NULLIF(excluded.maker_name,''),candidate_catalog.maker_name), " +
+      "title=excluded.title, url=excluded.url, released=excluded.released, list_price=excluded.list_price, price=excluded.price, discount_pct=excluded.discount_pct, " +
+      "review_count=excluded.review_count, review_avg=excluded.review_avg, thumb=COALESCE(NULLIF(excluded.thumb,''),candidate_catalog.thumb), genres_json=excluded.genres_json, " +
+      "service=excluded.service, floor=excluded.floor, work_type=excluded.work_type, eligible=MAX(candidate_catalog.eligible,excluded.eligible), " +
+      "source=CASE WHEN candidate_catalog.source='main' OR excluded.source='main' THEN 'main' WHEN candidate_catalog.source='list' OR excluded.source='list' THEN 'list' ELSE 'circle' END, refreshed_at=excluded.refreshed_at"
+    ).bind(
+      it.cid, it.makerId || null, it.makerName || null, it.title || "", it.url || "", it.date || "",
+      it.listPrice, it.price, it.discountPct || 0, it.reviewCount, it.reviewAvg, it.thumb || "",
+      JSON.stringify(it.genres || []), it.service || "", it.floor || "", it.workType || "", it.eligible ? 1 : 0,
+      source || "circle", discovered, now
+    ));
+    if (it.eligible) {
+      const src = source === "main" ? "main" : (source === "list" ? "list" : "circle");
+      stmts.push(env.FANZA_DB.prepare(
+        "INSERT INTO candidate_pool(cid,updated_at,source) VALUES(?,?,?) ON CONFLICT(cid) DO UPDATE SET updated_at=excluded.updated_at, " +
+        "source=CASE WHEN candidate_pool.source='main' OR excluded.source='main' THEN 'main' WHEN candidate_pool.source='list' OR excluded.source='list' THEN 'list' ELSE 'circle' END"
+      ).bind(it.cid, now, src));
+    }
+  }
+  for (let i = 0; i < stmts.length; i += 80) await env.FANZA_DB.batch(stmts.slice(i, i + 80));
+  return rows.filter((x) => x.eligible).length;
+}
+async function importCandidateCatalog_(env, rawItems) {
+  const rows = [];
+  for (const raw of rawItems.slice(0, 500)) {
+    const cid = String(raw && raw.cid || "").trim();
+    if (!/^[0-9A-Za-z_-]{1,64}$/.test(cid)) continue;
+    const url = String(raw.url || "").slice(0, 500);
+    const isBook = /book\.dmm\.(com|co\.jp)/i.test(url) || String(raw.kind || "") === "Books";
+    rows.push({
+      cid, makerId: null, makerName: String(raw.author || raw.makerName || "").slice(0, 100),
+      title: String(raw.title || "").slice(0, 300), url, date: String(raw.date || raw.releaseDate || "").slice(0, 32),
+      listPrice: raw.listPrice != null && Number.isFinite(Number(raw.listPrice)) ? Number(raw.listPrice) : null,
+      price: raw.price != null && Number.isFinite(Number(raw.price)) ? Number(raw.price) : null,
+      discountPct: Number(raw.discountPct) || 0, reviewCount: raw.reviewCount == null ? null : Number(raw.reviewCount),
+      reviewAvg: raw.reviewAvg == null ? null : Number(raw.reviewAvg), thumb: String(raw.thumb || "").slice(0, 500),
+      genres: Array.isArray(raw.genres) ? raw.genres.slice(0, 32).map(String) : [], service: isBook ? "ebook" : "doujin",
+      floor: isBook ? "books" : "manual", workType: isBook ? "Books" : "manual", eligible: true,
+      source: raw.source === "main" ? "main" : "list",
+    });
+  }
+  const groups = { main: [], list: [] };
+  rows.forEach((x) => groups[x.source].push(x));
+  return (await saveCatalogRows_(env, groups.main, "main")) + (await saveCatalogRows_(env, groups.list, "list"));
+}
+async function runCandidateCatalog_(env, pageBudget) {
+  if (!env.FANZA_DB || !env.FANZA_API_ID || !env.FANZA_AFFILIATE_ID) return { pages: 0 };
+  await seedTrackedCatalogMakers_(env);
+  let pages = 0, saved = 0;
+  while (pages < pageBudget) {
+    let job = await env.FANZA_DB.prepare(
+      "SELECT maker_id,name,source_index,next_offset,status,completed_at FROM candidate_catalog_makers " +
+      "WHERE status<>'complete' OR completed_at<? ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, updated_at LIMIT 1"
+    ).bind(Date.now() - CATALOG_REFRESH_MS).first();
+    if (!job) break;
+    let sourceIndex = Number(job.source_index || 0), offset = Number(job.next_offset || 1);
+    if (job.status === "complete") { sourceIndex = 0; offset = 1; }
+    if (sourceIndex >= CATALOG_SOURCES.length) sourceIndex = 0;
+    const src = CATALOG_SOURCES[sourceIndex];
+    const scanStarted = (sourceIndex === 0 && offset === 1) ? Date.now() : null;
+    await env.FANZA_DB.prepare(
+      "UPDATE candidate_catalog_makers SET status='running',scan_started_at=COALESCE(?,scan_started_at),updated_at=?,last_error=NULL WHERE maker_id=?"
+    ).bind(scanStarted, Date.now(), job.maker_id).run();
+    const params = new URLSearchParams({
+      api_id: env.FANZA_API_ID, affiliate_id: env.FANZA_AFFILIATE_ID, site: "FANZA",
+      service: src.service, floor: src.floor, article: src.article, article_id: job.maker_id,
+      hits: "100", offset: String(offset), sort: "date", output: "json",
+    });
+    const data = await fetchDmmJson(DMM_API_BASE + "?" + params.toString(), 2);
+    if (!data || !data.result) {
+      await env.FANZA_DB.prepare("UPDATE candidate_catalog_makers SET status='pending',last_error='api_error',updated_at=? WHERE maker_id=?")
+        .bind(Date.now(), job.maker_id).run();
+      break;
+    }
+    const pageItems = Array.isArray(data.result.items) ? data.result.items : [];
+    const total = parseInt(data.result.total_count, 10) || 0;
+    const rows = pageItems.map((it, i) => mapCatalogItem_(it, job.maker_id, src, offset + i));
+    saved += await saveCatalogRows_(env, rows, "circle");
+    pages++;
+    const floorDone = pageItems.length < 100 || offset + 100 > total;
+    if (floorDone) { sourceIndex++; offset = 1; } else offset += 100;
+    if (sourceIndex >= CATALOG_SOURCES.length) {
+      await env.FANZA_DB.prepare(
+        "UPDATE candidate_catalog_makers SET source_index=0,next_offset=1,status='complete',completed_at=?,updated_at=?,last_error=NULL WHERE maker_id=?"
+      ).bind(Date.now(), Date.now(), job.maker_id).run();
+    } else {
+      await env.FANZA_DB.prepare(
+        "UPDATE candidate_catalog_makers SET source_index=?,next_offset=?,status='pending',updated_at=?,last_error=NULL WHERE maker_id=?"
+      ).bind(sourceIndex, offset, Date.now(), job.maker_id).run();
+    }
+  }
+  return { pages, saved };
+}
+async function queryCandidateCatalog_(env, sp) {
+  const limitRaw = parseInt(sp.get("limit") || "20", 10);
+  const limit = [20, 30, 50, 100].includes(limitRaw) ? limitRaw : 20;
+  let page = parseInt(sp.get("page") || "1", 10); if (!Number.isFinite(page) || page < 1) page = 1;
+  const q = String(sp.get("q") || "").trim().slice(0, 100);
+  const saleOnly = sp.get("sale") === "1";
+  const priceMax = Math.max(0, parseInt(sp.get("priceMax") || "0", 10) || 0);
+  const sort = String(sp.get("sort") || "rank7d");
+  const order = {
+    added_desc: "c.discovered_at DESC", price_asc: "CASE WHEN c.price IS NULL THEN 1 ELSE 0 END,c.price ASC,c.released DESC",
+    date_desc: "c.released DESC", date_asc: "c.released ASC", discount_desc: "c.discount_pct DESC,c.released DESC",
+    rank: "COALESCE(w.sales_n,-1) DESC,COALESCE(c.review_count,-1) DESC,COALESCE(c.review_avg,-1) DESC",
+    rank7d: "COALESCE(w.sales_n,-1) DESC,COALESCE(c.review_count,-1) DESC,c.refreshed_at DESC",
+  }[sort] || "c.discovered_at DESC";
+  const where = ["c.eligible=1"];
+  const binds = [];
+  if (q) { where.push("(c.title LIKE ? OR c.maker_name LIKE ? OR c.cid LIKE ?)"); const like = "%" + q + "%"; binds.push(like, like, like); }
+  if (saleOnly) where.push("c.discount_pct>0 AND c.price<c.list_price");
+  if (priceMax) { where.push("(COALESCE(c.price,c.list_price) IS NULL OR COALESCE(c.price,c.list_price)<=?)"); binds.push(priceMax); }
+  const from = " FROM candidate_catalog c JOIN candidate_pool p ON p.cid=c.cid LEFT JOIN works w ON w.cid=c.cid WHERE " + where.join(" AND ");
+  const countRow = await env.FANZA_DB.prepare("SELECT COUNT(*) AS n" + from).bind(...binds).first();
+  const total = Number(countRow && countRow.n || 0), pages = Math.max(1, Math.ceil(total / limit));
+  if (page > pages) page = pages;
+  const rs = await env.FANZA_DB.prepare(
+    "SELECT c.*,p.source AS pool_source,w.sales_n" + from + " ORDER BY " + order + ",c.cid LIMIT ? OFFSET ?"
+  ).bind(...binds, limit, (page - 1) * limit).all();
+  const items = ((rs && rs.results) || []).map((r) => ({
+    cid: r.cid, title: r.title || "", url: r.url || "", date: r.released || "", listPrice: r.list_price,
+    price: r.price, discountPct: r.discount_pct || 0, reviewCount: r.review_count, reviewAvg: r.review_avg,
+    thumb: r.thumb || "", makerName: r.maker_name || "", author: r.maker_name || "",
+    genres: safeJsonParse_(r.genres_json || "[]") || [], service: r.service || "", floor: r.floor || "",
+    kind: r.service === "ebook" ? "Books" : "同人", workType: r.work_type || "", source: r.pool_source || r.source,
+    salesN: r.sales_n,
+  }));
+  return { ok: true, total, page, pages, limit, items, progress: await candidateCatalogProgress_(env) };
+}
 // DMM APIのGET（一時的な失敗はshort backoffでリトライ）。成功時のみJSONを返す。
 async function fetchDmmJson(url, tries) {
   for (let t = 0; t < tries; t++) {
@@ -1382,10 +1640,20 @@ async function stPutMaker(env, mid, name) { // 同名なら書かない。quota�
   }
 }
 async function stDeleteMaker(env, mid) {
-  if (d1write_(env)) await env.FANZA_DB.prepare("DELETE FROM tracked_makers WHERE maker_id=?").bind(mid).run().catch(() => {});
+  if (d1write_(env)) {
+    await env.FANZA_DB.prepare("DELETE FROM tracked_makers WHERE maker_id=?").bind(mid).run().catch(() => {});
+    // 投稿済みサークルは明示タブを削除しても全候補の母集団から外さない。
+    const posted = await env.FANZA_DB.prepare("SELECT maker_id FROM posted_makers WHERE maker_id=?").bind(mid).first().catch(() => null);
+    if (!posted) {
+      const rows = await env.FANZA_DB.prepare("SELECT cid FROM candidate_catalog WHERE maker_id=?").bind(mid).all().catch(() => null);
+      const cids = (rows && rows.results || []).map((r) => r.cid);
+      await env.FANZA_DB.prepare("DELETE FROM candidate_catalog_makers WHERE maker_id=?").bind(mid).run().catch(() => {});
+      await env.FANZA_DB.prepare("DELETE FROM candidate_catalog WHERE maker_id=?").bind(mid).run().catch(() => {});
+      for (const cid of cids) await env.FANZA_DB.prepare("DELETE FROM candidate_pool WHERE cid=? AND source='circle'").bind(cid).run().catch(() => {});
+    }
+  }
   if (kvwrite_(env)) { try { await env.FANZA_KV.delete("salestrack:" + mid); } catch (e) {} }
 }
-
 // ---- run_flags（単発フラグ：salesrun:req = key 'sales_run'） ----
 async function stGetFlag(env, key) {
   if (d1on_(env)) {
@@ -1620,3 +1888,6 @@ function json(obj, status, cors) {
 function text(str, status) {
   return new Response(str, { status, headers: { "Content-Type": "text/plain" } });
 }
+
+// 回帰テスト専用。Workerルートの公開APIには露出しない。
+export { catalogType_ as __testCatalogType };

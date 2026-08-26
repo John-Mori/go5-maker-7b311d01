@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import worker from "../fanza-worker/src/index.js";
+import worker, { __testCatalogType } from "../fanza-worker/src/index.js";
 import { productJsonLdFromHtml } from "../scripts/fanza_jsonld.mjs";
 
 class MemoryKv {
@@ -21,9 +21,18 @@ class MemoryKv {
 const origin = "https://john-mori.github.io";
 const kv = new MemoryKv();
 const env = { FANZA_KV: kv, USE_D1: "off", SHARED_SECRET: "public-test", ADMIN_SECRET: "admin-test", ALLOWED_ORIGIN: origin };
+assert.deepEqual(__testCatalogType({ iteminfo: { genre: [{ name: "コミック" }] } }, { service: "doujin" }), { eligible: true, type: "コミック" });
+assert.deepEqual(__testCatalogType({ iteminfo: { genre: [{ name: "AI生成" }, { name: "CG・イラスト" }] } }, { service: "doujin" }), { eligible: true, type: "AI CG" });
+assert.equal(__testCatalogType({ iteminfo: { genre: [{ name: "ボイスコミック" }] } }, { service: "doujin" }).eligible, false, "ボイコミは全候補の自動取得対象外");
+assert.equal(__testCatalogType({ iteminfo: { genre: [{ name: "シミュレーションゲーム" }] } }, { service: "doujin" }).eligible, false, "ゲームは全候補の自動取得対象外");
+assert.deepEqual(__testCatalogType({ iteminfo: { genre: [{ name: "官能小説" }] } }, { service: "ebook" }), { eligible: true, type: "Books" }, "Booksは種別を問わず対象");
 
 // candidates.js内の実関数を直接評価し、FANZA作品へSNS URLを併記した通常候補を対象外にしないことを固定する。
 const candidateSource = fs.readFileSync(new URL("../js/candidates.js", import.meta.url), "utf8");
+assert.match(candidateSource, /var PAGESIZE_DEF = 20/, "全候補の既定表示数は20件");
+assert.match(candidateSource, /id="candWorkSearchRun"/, "全候補検索は入力完了後の検索ボタンで実行");
+assert.match(candidateSource, /\/api\/candidate-catalog\?/, "全候補はページ単位のWorker APIを使う");
+assert.doesNotMatch(candidateSource.slice(candidateSource.indexOf("  function renderAll_() {"), candidateSource.indexOf("  // ── タブの並べ替え")), /addEventListener\('input'/, "全候補は1文字ごとに再検索しない");
 const helperStart = candidateSource.indexOf("  function isInfoTarget_");
 const helperEnd = candidateSource.indexOf("  function salesTargetCids_", helperStart);
 assert.ok(helperStart >= 0 && helperEnd > helperStart, "candidate target helpers should exist");

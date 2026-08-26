@@ -278,7 +278,9 @@
   //   画像デコードを間引いて「サムネや追加画像が表示されない」状態になる。1ページ分だけ描くことで
   //   同時描画点数を抑える(=Chami「画像や作品サムネが表示されない」の主因への対策も兼ねる)。
   var K_PAGESIZE = 'cand_page_size';
-  var PAGESIZE_DEF = 30, PAGESIZE_OPTS = [20, 30, 50, 100];
+  var PAGESIZE_DEF = 20, PAGESIZE_OPTS = [20, 30, 50, 100];
+  // v942: 旧既定30件の端末も一度だけ20件へ移行。以後はユーザーが選んだ件数を保持する。
+  try { if (!localStorage.getItem('cand_page_size_v20')) { localStorage.setItem(K_PAGESIZE, '20'); localStorage.setItem('cand_page_size_v20', '1'); } } catch (e) {}
   function candPageSize_() { var n = parseInt(lsGet(K_PAGESIZE, String(PAGESIZE_DEF)), 10); return (PAGESIZE_OPTS.indexOf(n) >= 0) ? n : PAGESIZE_DEF; }
   function candPageSizeHtml_() {
     var cur = candPageSize_(), opts = PAGESIZE_OPTS.map(function (n) { return '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + '件</option>'; }).join('');
@@ -4202,29 +4204,10 @@
         (candItemsRead_('cand_items__' + t.id) || []).forEach(function (it) { pushCid_(it, 'list'); });
       });
       function done_() { syncCandidatePool_(cids); }
-      var K_MK_OK = 'cand_maker_cids_ok'; // 前回"取得成功"したサークルcid集合(端末ローカル・全滅時の代替に使う)
-      // サークル分は cid のみを集めればよい(並びは同期に無関係)。キャッシュ優先=force省略。
-      //   ★全滅(err && !items)でも done_() は必ず呼ぶ。以前は 2098 で return し done_()=POST自体が
-      //     一度も発火しなかった(main分すら送られずD1が7/30から凍結・商品候補選定部門の実測・星南が行特定)。
-      //   ★削り戻し防止は「集合を縮めない」で担保する=全滅時は前回成功したサークルcidを端末から復元して
-      //     cidsへ足す(集合が main だけに縮まない)＝削り戻さず、かつPOSTは発火させる。
-      if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items, err) {
-        if (err && !items) {
-          var saved = [];
-          try { saved = (localStorage.getItem(K_MK_OK) || '').split(',').filter(Boolean); } catch (e) {}
-          saved.forEach(function (c) { if (c && !seen[c]) { seen[c] = true; cids.push({ cid: c, source: 'circle' }); } });
-          done_(); // 前回成功したサークル分を保って発火(縮めない・削り戻さない)
-          return;
-        }
-        var mkCids = [];
-        (items || []).forEach(function (it) {
-          var c = (it && it.cid) ? String(it.cid) : cidFromUrl_((it && it.url) || '');
-          if (c) { mkCids.push(c); if (!seen[c]) { seen[c] = true; cids.push({ cid: c, source: 'circle' }); } }
-        });
-        try { localStorage.setItem(K_MK_OK, mkCids.join(',')); } catch (e) {} // 成功時だけ更新
-        done_();
-      });
-      else done_();
+      // サークル全作品はWorkerの永続カタログが裏で取得する。端末から全件を取り直して送る旧経路は
+      // iPhoneの重さと削り戻しの原因になるため廃止し、ここでは手動追加/独立タブだけを同期する。
+      // circle行はWorker側のcandidate-pool更新で保持される。
+      done_();
     }, 500);
   }
 
@@ -4253,6 +4236,32 @@
       if (btn) { btn.disabled = true; btn.textContent = '✅ 手動追加済み'; btn.classList.add('is-done'); }
     });
   }
+  function catalogSeed_(makerIds, stored, srcByCid, cb) {
+    var cfg = workerCfg();
+    if (!cfg.url || !cfg.secret) { cb && cb(false); return; }
+    var rows = (stored || []).slice(0, 500).map(function (it) {
+      return Object.assign({}, it, { source: srcByCid[it.cid] || 'list', kind: workKindOf_(it.url || '') });
+    });
+    var sig = makerIds.slice().sort().join(',') + '|' + rows.map(function (x) { return x.cid + ':' + x.source; }).sort().join(',');
+    var now = Date.now(), last = '', at = 0;
+    try { last = localStorage.getItem('cand_catalog_seed_hash') || ''; at = parseInt(localStorage.getItem('cand_catalog_seed_at') || '0', 10) || 0; } catch (e) {}
+    if (sig === last && now - at < 12 * 3600000) { cb && cb(true); return; }
+    fetch(cfg.url + '/api/candidate-catalog', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
+      body: JSON.stringify({ makerIds: makerIds, items: rows })
+    }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (j && j.ok) {
+        try { localStorage.setItem('cand_catalog_seed_hash', sig); localStorage.setItem('cand_catalog_seed_at', String(now)); } catch (e) {}
+        cb && cb(true, j.progress || null);
+      } else cb && cb(false);
+    }).catch(function () { cb && cb(false); });
+  }
+  function catalogPage_(params, cb) {
+    var cfg = workerCfg(); if (!cfg.url || !cfg.secret) { cb(null); return; }
+    var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+    fetch(cfg.url + '/api/candidate-catalog?' + qs, { headers: { 'X-Shared-Secret': cfg.secret } })
+      .then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { cb(j && j.ok ? j : null); }).catch(function () { cb(null); });
+  }
   function renderAll_() {
     var body = $('candBody');
     if (!body) return;
@@ -4261,130 +4270,95 @@
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
         sortControlHtml_() +
         '<button id="candEditBuiltin" type="button" class="ghost" title="タブ名を変更" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 名前</button>' +
-      '</div>' +
-      // アカウント別「投稿済みを非表示」トグル。(全候補でも isHiddenByPosted_ を尊重=L2103)
-      candHidePostedRowHtml_() +
+      '</div>' + candHidePostedRowHtml_() +
       '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
         '<label class="cand-filter-sale" style="margin:0;"><input id="candFilterSale" type="checkbox"' + (_filterSale ? ' checked' : '') + '><span>セール中のみ</span></label>' +
-        priceFilterHtml_() +
-        candColsCtlHtml_() +
+        priceFilterHtml_() + candColsCtlHtml_() +
       '</div>' +
-      '<div class="hint" style="margin-top:6px;">💡候補・独立タブ・全サークルタブの作品をまとめて表示します。タブの✏️編集で「全候補に含まない」にしたタブは除外(各部門もこの一覧の作品だけを読みます)。</div>' +
-      '<div class="hint" style="margin-top:2px;opacity:.7;">🔎D1同期の最後: ' + esc(poolSyncNoteRead_() || '(まだ実行なし)') + '</div>' +
-      '</div>' +
-      '<div id="candEditForm"></div>' +
-      '<div id="candList"><p class="hint" style="padding:8px;">⏳ 全候補を集約中…</p></div>';
+      '<div class="hint" style="margin-top:6px;">登録済みサークルは裏で全件取得し、選択中の並び順で必要な件数だけ表示します。同人はコミック・CG・AIコミック・AI CG、Booksは全作品が対象です。</div>' +
+      '<div id="candCatalogProgress" class="hint" style="margin-top:2px;opacity:.75;">⏳ カタログを確認中…</div>' +
+      '</div><div id="candEditForm"></div>' +
+      '<div id="candList">' + workSearchHtml_('all') + candPageSizeHtml_() + '<div id="candPageWrap"><p class="hint" style="padding:8px;">⏳ 全候補を読み込み中…</p></div></div>';
     wireSortControl_('all', renderAll_);
-    $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; renderAll_(); });
-    wirePriceFilter_(function () { renderAll_(); });
-    wireCandColsCtl_();
-    wireHidePostedButtons_(function () { renderAll_(); });
-    wireBuiltinRename_('all');
+    $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; _candPageByTab.all = 1; renderAll_(); });
+    wirePriceFilter_(function () { _candPageByTab.all = 1; renderAll_(); });
+    wireCandColsCtl_(); wireHidePostedButtons_(function () { renderAll_(); }); wireBuiltinRename_('all');
 
-    // 保存アイテム(main + 独立listタブ・除外でない)を集約し、サークルidを収集。
-    // ★srcByCid: cidの出所を初出勝ちで記録(main→list→circle)。D1同期のsource付与に使う(2026-08-09)。
-    var seen = {}, stored = [], srcByCid = {};
+    var seen = {}, stored = [], srcByCid = {}, makerIds = [];
     function addItems(a, src) { (a || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; stored.push(it); srcByCid[it.cid] = src; } }); }
-    addItems(candItemsRead_(K_ITEMS), 'main'); // 💡候補(main)は常に含む
-    var makerIds = [];
+    addItems(candItemsRead_(K_ITEMS), 'main');
     tabs.forEach(function (t) {
-      if (t.excludeFromAll) return; // このタブを全候補に含まない
+      if (t.excludeFromAll) return;
       if (isMakerTab_(t)) makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); });
-      else addItems(candItemsRead_('cand_items__' + t.id), 'list'); // 独立した候補リストタブ
+      else addItems(candItemsRead_('cand_items__' + t.id), 'list');
     });
+    // 従来部門のcandidate_poolも同期。ただしWorker側はcircle行を保持するので、端末が全件を持たなくても削り戻さない。
+    syncCandidatePool_(stored.map(function (it) { return { cid: it.cid, source: srcByCid[it.cid] || 'list' }; }));
 
-    function finish(makerItems) {
-      var el = $('candList');
-      if (!el || _activeTab !== 'all') return; // 集約中にタブが変わっていたら破棄
-      var all = stored.slice();
-      (makerItems || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; all.push(it); srcByCid[it.cid] = 'circle'; } });
-      // 部門ブリッジ: 除外反映後の全候補cid(表示フィルタ前=キュレート集合)をD1へ同期。source付き=部門が手動追加だけを再スライスできる。
-      syncCandidatePool_(all.map(function (it) { return { cid: it.cid, source: srcByCid[it.cid] || null }; }));
-      // ★全件(検索前・並び替え＋絞り込み後)を都度作り直す=非同期(販売数)が後から届いても最新で描く。
-      var baseView_ = function () {
-        return sortItems(all, _sort).filter(function (it) {
-          if (_filterSale && !isOnSale_(it)) return false;
-          if (!passPrice_(it)) return false;
-          if (isHiddenByPosted_(it)) return false; // アカウント別「投稿済みを非表示」は全候補でも尊重
-          return true;
-        });
-      };
-      var arr0 = baseView_();
-      _cardIndex = {}; arr0.forEach(function (it) { _cardIndex[it.cid] = it; });
-      if (!arr0.length) { el.innerHTML = '<p class="hint" style="padding:8px;">表示できる作品がありません。(💡候補やサークルタブに作品を追加してください)</p>'; return; }
-      // ★全候補は「ページ分け＋実データ検索＋差分更新」で描く=件数が多くても入力が固まらない/画像を作り直さない
-      //   (Chami依頼2026-08-22「全候補は表示項目が多すぎて入力できない・件数で分ける/一度読んだものはリロードしない対策を」)。
-      //   main/list と同じ描画コア(reconcileCards_・candPagerHtml_・candPageSize_)へ合流=旧・全件一括describe+DOM検索を廃止。
-      el.innerHTML = workSearchHtml_('all') + candPageSizeHtml_() + '<div id="candPageWrap"></div>';
-      var paintPage_ = function () {
-        var wrap = document.getElementById('candPageWrap'); if (!wrap) return;
-        if (!document.getElementById('candCardList')) wrap.innerHTML = '<div id="candPageHead"></div><div id="candCardList"></div><div id="candPageFoot"></div>';
-        var headEl = document.getElementById('candPageHead'), listEl = document.getElementById('candCardList'), footEl = document.getElementById('candPageFoot');
-        var arr2 = baseView_();
-        _cardIndex = {}; arr2.forEach(function (it) { _cardIndex[it.cid] = it; });
-        var qi = document.getElementById('candWorkSearch'), mi = document.getElementById('candMemoSearch');
-        var q = normalizeWorkSearch_(qi ? qi.value : ''), mq = normalizeWorkSearch_(mi ? mi.value : '');
-        var view = arr2.filter(function (it) {
-          var okW = !q || workSearchText_(it).indexOf(q) >= 0;
-          var okM = !mq || candMemoText_(it).indexOf(mq) >= 0; // メモ/コメントは実データ(cand_text)照合=非表示ページも横断
-          return okW && okM;
-        });
-        var size = candPageSize_();
-        var pages = Math.max(1, Math.ceil(view.length / size));
-        var page = _candPageByTab['all'] || 1; if (page > pages) page = pages; if (page < 1) page = 1;
-        _candPageByTab['all'] = page;
-        var startI = (page - 1) * size, slice = view.slice(startI, startI + size);
-        var pager = candPagerHtml_(page, pages, view.length, startI, slice.length);
-        var head = (q || mq) ? ('<div class="hint" style="padding:2px 6px;">' + view.length + '件が条件に一致</div>')
-          : ('<div class="hint" style="padding:2px 6px;">📚 全候補 ' + arr2.length + '件</div>');
-        headEl.innerHTML = head + pager;         // ページャは画像を含まない=作り直しても軽い/チラつかない
-        footEl.innerHTML = (pages > 1 ? pager : '');
-        if (!slice.length) listEl.innerHTML = '<p class="hint" style="padding:8px;">条件に一致する候補がありません。</p>';
-        else {
-          var mainSet = {};
-          candItemsRead_(K_ITEMS).forEach(function (x) { if (x && x.cid != null) mainSet[String(x.cid)] = true; });
-          var allAction_ = function (cid) {
-            return mainSet[String(cid)]
-              ? '<button type="button" class="cand-hide-btn cand-to-main-btn is-done" style="width:auto;" disabled>✅ 手動追加済み</button>'
-              : '<button type="button" class="cand-hide-btn cand-to-main-btn" style="width:auto;" data-to-main="' + esc(cid) + '">手動追加へ</button>';
-          };
-          reconcileCards_(listEl, slice, allAction_, function (node) { wireCardCommon_(node); });
-        } // 全候補では削除せず、気に入った作品だけ手動追加タブへ複製する
-        var resEl = document.getElementById('candWorkSearchResult');
-        if (resEl) resEl.textContent = (q || mq) ? (view.length + '件表示 / ' + arr2.length + '件中') : '';
-        [headEl, footEl].forEach(function (z) {
-          z.querySelectorAll('[data-candpage]').forEach(function (b) {
-            b.addEventListener('click', function () {
-              var p = parseInt(b.getAttribute('data-candpage'), 10); if (!p || p < 1 || p > pages) return;
-              _candPageByTab['all'] = p; paintPage_();
-              try { var sb = document.getElementById('candWorkSearch'); if (sb) sb.scrollIntoView({ block: 'start' }); } catch (e) {}
-            });
-          });
-        });
-      };
-      // 検索欄の配線(全候補もページ分けのため実データで絞り込む=wireWorkSearch_ のDOM非表示は使わない)。
-      var searchInput = el.querySelector('#candWorkSearch'), memoInput = el.querySelector('#candMemoSearch');
-      var onSearch_ = function () {
-        _workSearchByTab['all'] = searchInput ? (searchInput.value || '') : '';
-        _memoSearchByTab['all'] = memoInput ? (memoInput.value || '') : '';
-        _candPageByTab['all'] = 1; // 条件が変わったら1ページ目へ
-        paintPage_();
-      };
-      if (searchInput) searchInput.addEventListener('input', onSearch_);
-      if (memoInput) memoInput.addEventListener('input', onSearch_);
-      var swClear = el.querySelector('#candWorkSearchClear'), smClear = el.querySelector('#candMemoSearchClear');
-      if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; onSearch_(); try { if (searchInput) searchInput.focus({ preventScroll: true }); } catch (e) { if (searchInput) searchInput.focus(); } });
-      if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; onSearch_(); try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); } });
-      var sizeSel = el.querySelector('#candPageSizeSel');
-      if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab['all'] = 1; paintPage_(); });
-      paintPage_();
-      // 販売数が後から届いたら「カードの差分更新だけ」=全件の再集約(重い)をやり直さない=固まらない。
-      fetchSalesFor(salesTargetCids_(arr0), function (changed) { if (changed && _activeTab === 'all') paintPage_(); });
+    var el = $('candList'), searchInput = el.querySelector('#candWorkSearch'), memoInput = el.querySelector('#candMemoSearch');
+    var sizeSel = el.querySelector('#candPageSizeSel');
+    function progressText_(p) {
+      var pe = $('candCatalogProgress'); if (!pe || !p) return;
+      pe.textContent = (p.pending || p.running) ? ('🔄 裏で取得中: ' + p.complete + '/' + p.makers + 'サークル完了・表示可能' + p.works + '作品')
+        : ('✅ カタログ取得済み: ' + p.complete + 'サークル・' + p.works + '作品');
     }
-    if (makerIds.length) fetchMakerItemsMulti(makerIds, _sort, function (items) { finish(items || []); });
-    else finish([]);
+    function fallback_() {
+      var q = normalizeWorkSearch_(_workSearchByTab.all || ''), mq = normalizeWorkSearch_(_memoSearchByTab.all || '');
+      var arr = sortItems(stored, _sort).filter(function (it) {
+        return (!_filterSale || isOnSale_(it)) && passPrice_(it) && !isHiddenByPosted_(it) &&
+          (!q || workSearchText_(it).indexOf(q) >= 0) && (!mq || candMemoText_(it).indexOf(mq) >= 0);
+      });
+      var size = candPageSize_(), pages = Math.max(1, Math.ceil(arr.length / size)), page = Math.min(_candPageByTab.all || 1, pages);
+      paint_(arr.slice((page - 1) * size, page * size), arr.length, page, pages, true);
+    }
+    function paint_(items, total, page, pages, fallback) {
+      var wrap = $('candPageWrap'); if (!wrap || _activeTab !== 'all') return;
+      var memoQ = normalizeWorkSearch_(_memoSearchByTab.all || '');
+      var visible = (items || []).filter(function (it) { return !isHiddenByPosted_(it) && (!memoQ || candMemoText_(it).indexOf(memoQ) >= 0); });
+      _cardIndex = {}; visible.forEach(function (it) { _cardIndex[it.cid] = it; });
+      var startI = (page - 1) * candPageSize_(), pager = candPagerHtml_(page, pages, total, startI, visible.length);
+      wrap.innerHTML = '<div id="candPageHead"><div class="hint" style="padding:2px 6px;">📚 全候補 ' + total + '件' + (fallback ? ' (端末内データ)' : '') + '</div>' + pager + '</div><div id="candCardList"></div><div id="candPageFoot">' + (pages > 1 ? pager : '') + '</div>';
+      var listEl = $('candCardList');
+      if (!visible.length) listEl.innerHTML = '<p class="hint" style="padding:8px;">条件に一致する候補がありません。</p>';
+      else {
+        var mainSet = {}; candItemsRead_(K_ITEMS).forEach(function (x) { if (x && x.cid != null) mainSet[String(x.cid)] = true; });
+        reconcileCards_(listEl, visible, function (cid) {
+          return mainSet[String(cid)] ? '<button type="button" class="cand-hide-btn cand-to-main-btn is-done" style="width:auto;" disabled>✅ 手動追加済み</button>'
+            : '<button type="button" class="cand-hide-btn cand-to-main-btn" style="width:auto;" data-to-main="' + esc(cid) + '">手動追加へ</button>';
+        }, function (node) { wireCardCommon_(node); });
+      }
+      wrap.querySelectorAll('[data-candpage]').forEach(function (b) { b.addEventListener('click', function () {
+        var n = parseInt(b.getAttribute('data-candpage'), 10); if (!n || n < 1 || n > pages) return;
+        _candPageByTab.all = n; load_();
+      }); });
+    }
+    var catalogPolls = 0;
+    function load_() {
+      var page = _candPageByTab.all || 1, size = candPageSize_();
+      var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
+      catalogPage_({ sort: _sort, page: page, limit: size, q: _workSearchByTab.all || '', sale: _filterSale ? 1 : 0, priceMax: _priceMax || 0 }, function (j) {
+        if (wrap) wrap.removeAttribute('aria-busy');
+        if (!j) { fallback_(); return; }
+        _candPageByTab.all = j.page || 1; progressText_(j.progress); paint_(j.items || [], j.total || 0, j.page || 1, j.pages || 1, false);
+        // 初回の裏取得が進んだ分だけ、画面を開いたままでも最大5回追従。常時ポーリングにはしない。
+        if (j.progress && (j.progress.pending || j.progress.running) && catalogPolls < 5 && _activeTab === 'all') {
+          catalogPolls++; setTimeout(function () { if (_activeTab === 'all') load_(); }, 10000);
+        }
+      });
+    }
+    function runSearch_() {
+      _workSearchByTab.all = searchInput ? (searchInput.value || '').trim() : '';
+      _memoSearchByTab.all = memoInput ? (memoInput.value || '').trim() : '';
+      _candPageByTab.all = 1; load_();
+    }
+    var runBtn = el.querySelector('#candWorkSearchRun'); if (runBtn) runBtn.addEventListener('click', runSearch_);
+    [searchInput, memoInput].forEach(function (inp) { if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); runSearch_(); } }); });
+    var swClear = el.querySelector('#candWorkSearchClear'), smClear = el.querySelector('#candMemoSearchClear');
+    if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; _workSearchByTab.all = ''; _candPageByTab.all = 1; load_(); });
+    if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; _memoSearchByTab.all = ''; _candPageByTab.all = 1; load_(); });
+    if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab.all = 1; load_(); });
+    catalogSeed_(makerIds, stored, srcByCid, function (ok, p) { if (p) progressText_(p); load_(); });
   }
-
   // ── タブの並べ替え：PC=ドラッグ、スマホ=長押し→ドラッグ(Pointer Eventsでマウス/タッチ統一) ──
   //   固定の「💡候補」「＋タブを追加」は並べ替え対象外。サークルタブ同士のみ入れ替え可能。
   function wireTabDrag_() {
@@ -5401,6 +5375,7 @@
       '<label for="candWorkSearch" class="hint" style="display:block;margin-bottom:4px;">作品検索(全候補・部分一致)</label>' +
       '<div style="display:flex;gap:6px;align-items:center;">' +
       '<input id="candWorkSearch" size="1" type="search" value="' + esc(_workSearchByTab[tabId] || '') + '" placeholder="作品名・サークル名・作品ID" aria-label="作品検索(全候補・部分一致)" autocomplete="off" style="flex:1 1 auto;min-width:0;height:31.5px;box-sizing:border-box;margin:0;font-size:16px;">' +
+      (tabId === 'all' ? '<button id="candWorkSearchRun" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;padding:7px 12px;">検索</button>' : '') +
       '<button id="candWorkSearchClear" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;padding:7px 10px;">クリア</button>' +
       '</div>' +
       // メモ/コメント検索(部分一致)=作品検索の下に同形で並べる(Chami依頼2026-08-11)。両欄はAND(両方に一致した作品だけ表示)。

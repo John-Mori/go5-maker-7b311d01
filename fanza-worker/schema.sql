@@ -83,3 +83,59 @@ CREATE TABLE IF NOT EXISTS posted_log (
   updated_at TEXT,
   PRIMARY KEY (cid, channel)
 );
+
+-- Server-side catalog populated incrementally from registered makers.
+-- The client receives only the requested page; candidate_pool remains the department membership index.
+CREATE TABLE IF NOT EXISTS candidate_catalog (
+  cid             TEXT PRIMARY KEY,
+  maker_id        TEXT,
+  maker_name      TEXT,
+  title           TEXT,
+  url             TEXT,
+  released        TEXT,
+  list_price      INTEGER,
+  price           INTEGER,
+  discount_pct    INTEGER,
+  review_count    INTEGER,
+  review_avg      REAL,
+  thumb           TEXT,
+  genres_json     TEXT,
+  service         TEXT,
+  floor           TEXT,
+  work_type       TEXT,
+  eligible        INTEGER NOT NULL DEFAULT 0,
+  source          TEXT NOT NULL DEFAULT 'circle',
+  discovered_at   INTEGER NOT NULL,
+  refreshed_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_maker ON candidate_catalog(maker_id, eligible);
+CREATE INDEX IF NOT EXISTS idx_catalog_release ON candidate_catalog(eligible, released DESC);
+CREATE INDEX IF NOT EXISTS idx_catalog_review ON candidate_catalog(eligible, review_count DESC);
+
+-- The crawl cursor is persisted so interrupted scans resume on the next Worker run.
+CREATE TABLE IF NOT EXISTS candidate_catalog_makers (
+  maker_id        TEXT PRIMARY KEY,
+  name            TEXT,
+  source_index    INTEGER NOT NULL DEFAULT 0,
+  next_offset     INTEGER NOT NULL DEFAULT 1,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  scan_started_at INTEGER,
+  completed_at    INTEGER,
+  last_error      TEXT,
+  updated_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_jobs ON candidate_catalog_makers(status, updated_at);
+-- 「一度でも投稿したサークル」は全候補へ残すための権威。明示タブを削除しても消さない。
+CREATE TABLE IF NOT EXISTS posted_makers (
+  maker_id       TEXT PRIMARY KEY,
+  name           TEXT,
+  first_posted_at TEXT,
+  updated_at     INTEGER NOT NULL
+);
+
+-- 旧投稿履歴のcidを一度ずつサークル解決するための進捗台帳。
+CREATE TABLE IF NOT EXISTS posted_maker_resolutions (
+  cid        TEXT PRIMARY KEY,
+  maker_id   TEXT,
+  checked_at INTEGER NOT NULL
+);
