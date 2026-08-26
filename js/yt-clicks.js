@@ -460,12 +460,12 @@
       if (cb) cb(extra);
     });
   }
-  // refresh()から毎回呼ぶ(TTLキャッシュ内は通信ゼロ)。GASレスポンス後は必ずrender()=「読み込み中...」を確実に解除する。
+  // refresh()から毎回呼ぶ(TTLキャッシュ内は通信ゼロ)。GASレスポンス後は、操作中を避けて「読み込み中...」を確実に解除する。
   function mergeSheetExtras_() {
     fetchSheetExtra_(function (extra) {
-      render(); // GAS応答後に必ず再描画(「読み込み中...」→実データ or「まだ記録がありません」へ更新)
+      renderWhenHistIdle_(); // GAS応答後に必ず再描画(「読み込み中...」→実データ or「まだ記録がありません」へ更新)
       if (!extra || !extra.length) return; // 追加行が無ければここで終了
-      try { fetchData_(extra, {}, false).then(function () { render(); }); } catch (e) {}
+      try { fetchData_(extra, {}, false).then(function () { renderWhenHistIdle_(); }); } catch (e) {}
     });
   }
 
@@ -1971,6 +1971,85 @@
   }
 
   // ── render ──────────────────────────────────────────────────────────────
+  // 投稿履歴の背景更新がスクロール操作を奪わないための安定描画。
+  var _histUserScrollUntil = 0, _histIdleRenderT = null, _histTouchActive = false;
+  function histPageVisible_() { var pv = $('pageVerify'); return !!(pv && !pv.hidden); }
+  function markHistUserScroll_() { if (histPageVisible_()) _histUserScrollUntil = Date.now() + 500; }
+  try {
+    window.addEventListener('scroll', markHistUserScroll_, { passive: true });
+    window.addEventListener('wheel', markHistUserScroll_, { passive: true });
+    window.addEventListener('touchstart', function () { if (histPageVisible_()) _histTouchActive = true; markHistUserScroll_(); }, { passive: true });
+    window.addEventListener('touchmove', markHistUserScroll_, { passive: true });
+    window.addEventListener('touchend', function () { _histTouchActive = false; markHistUserScroll_(); }, { passive: true });
+    window.addEventListener('touchcancel', function () { _histTouchActive = false; markHistUserScroll_(); }, { passive: true });
+  } catch (e) {}
+  function renderWhenHistIdle_() {
+    if (!histPageVisible_()) return;
+    var wait = _histTouchActive ? 120 : (_histUserScrollUntil - Date.now());
+    if (wait > 0) {
+      if (_histIdleRenderT) clearTimeout(_histIdleRenderT);
+      _histIdleRenderT = setTimeout(renderWhenHistIdle_, wait + 60);
+      return;
+    }
+    if (_histIdleRenderT) { clearTimeout(_histIdleRenderT); _histIdleRenderT = null; }
+    render();
+  }
+  function historyPreviewData_(usedKey, refCid) {
+    var legacy = (refCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(refCid) || []) : [];
+    var stored = (window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []) : [];
+    var known = !!(window.Go5Cand && window.Go5Cand.usedImgKnown && window.Go5Cand.usedImgKnown(usedKey));
+    var images = (window.HistMerge && window.HistMerge.historyUsedImages)
+      ? window.HistMerge.historyUsedImages(stored, legacy, known)
+      : (stored.length ? stored : legacy.slice(0, 1));
+    var prevN = (window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
+    var thumb = (window.HistMerge && window.HistMerge.historyPreviewThumb)
+      ? window.HistMerge.historyPreviewThumb(images, prevN) : '';
+    return { images: images, prevN: prevN, thumb: thumb };
+  }
+  function wireHistoryPreview_(im) {
+    if (!im || im.getAttribute('data-preview-wired') === '1') return;
+    im.setAttribute('data-preview-wired', '1');
+    im.addEventListener('click', function () {
+      var usedKey = im.getAttribute('data-usedkey');
+      var data = historyPreviewData_(usedKey, im.getAttribute('data-refcid') || '');
+      if (data.prevN <= 0) return;
+      var imgs = (window.HistMerge && window.HistMerge.historyPreviewImages)
+        ? window.HistMerge.historyPreviewImages(data.images, data.prevN) : [];
+      var caps = imgs.map(function () { return '動画投稿プレビュー'; });
+      if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0, { captions: caps });
+    });
+  }
+  function patchHistoryImages_() {
+    var list = $('ytClickList');
+    if (!list || !histPageVisible_()) return;
+    Array.prototype.forEach.call(list.querySelectorAll('.vrow[data-hist-usedkey]'), function (row) {
+      var usedKey = row.getAttribute('data-hist-usedkey') || '';
+      var refCid = row.getAttribute('data-hist-refcid') || '';
+      var data = historyPreviewData_(usedKey, refCid);
+      if (!data.thumb) return; // 一過性の空読みで、いま見えている画像を消さない。
+      var col = row.querySelector('.vrow-thumbcol');
+      if (!col) {
+        col = document.createElement('div'); col.className = 'vrow-thumbcol';
+        var foot = row.querySelector('.vrow-foot'); row.insertBefore(col, foot || null);
+      }
+      var im = col.querySelector('.vrow-refimg');
+      if (!im) {
+        im = document.createElement('img'); im.className = 'vrow-refimg';
+        im.setAttribute('data-go5-imgrole', 'history-preview');
+        im.setAttribute('data-refcid', refCid); im.setAttribute('data-usedkey', usedKey);
+        im.setAttribute('alt', '動画投稿プレビュー(タップで拡大)');
+        im.setAttribute('title', 'タップで拡大(動画投稿プレビュー)');
+        im.loading = 'lazy'; im.decoding = 'async'; im.style.visibility = 'hidden';
+        im.addEventListener('load', function () { im.style.visibility = 'visible'; });
+        im.src = data.thumb; col.appendChild(im);
+        if (im.complete && im.naturalWidth) im.style.visibility = 'visible';
+      } else if (im.getAttribute('src') !== data.thumb) {
+        var probe = new Image(); probe.onload = function () { im.src = data.thumb; }; probe.src = data.thumb;
+      }
+      wireHistoryPreview_(im);
+    });
+  }
+
   function render() {
     var list = $('ytClickList');
     var viewportSnap = (list && window.Go5Viewport)
@@ -2071,11 +2150,8 @@
       // 旧データだけは先頭1枚を互換表示するが、2枚目以降の候補画像は絶対に投稿履歴へ混ぜない。
       var rImgCid = it.workUrl ? workCidOf_(it.workUrl) : '';
       var pKey = it.videoId || k;
-      var legacyRefImgs = (rImgCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(rImgCid) || []) : [];
-      var storedUsedImgs = (window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(pKey) || []) : [];
-      var usedImgArr = (window.HistMerge && window.HistMerge.historyUsedImages)
-        ? window.HistMerge.historyUsedImages(storedUsedImgs, legacyRefImgs, !!(window.Go5Cand && window.Go5Cand.usedImgKnown && window.Go5Cand.usedImgKnown(pKey)))
-        : (storedUsedImgs.length ? storedUsedImgs : legacyRefImgs.slice(0, 1));
+      var previewData_ = historyPreviewData_(pKey, rImgCid);
+      var usedImgArr = previewData_.images;
       // ★投稿画像(編集モーダルで添付する用途'post')も履歴カードのサムネ候補に入れる。
       //   動画で使った画像/Bluesky画像が両方無い作品(投稿画像だけ添付した作品)は、モーダルにデータが在るのに
       //   カードが空表示になっていた(Chami報告2026-07-30・添付=1532357129657385031)。用途'post'の1枚目を最後の砦にする。
@@ -2086,12 +2162,9 @@
       //     生成用の元画像/添付写真であり「プレビュー」ではない=それを『動画投稿プレビュー』のラベルで出すのが
       //     Chami報告の"生成に使った画像がプレビュー扱い"の正体。フォールバックを撤去し、本物が無ければ枠ごと出さない
       //     (カードは作品サムネ .vrow-thumb が担う。プレビューは backfill/投稿完了で入った時だけ出る)。
-      var usedPrevN_ = (window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(pKey) || 0) : 0;
-      // プレビュー枠に出す1枚は HistMerge.historyPreviewThumb で一元判定(prevN>0 の時だけ本物・
-      //   実体は core/image-role.js の単一権威・test_hist_merge.js/test_image_role.js で縛る)。
-      var refThumb = (window.HistMerge && window.HistMerge.historyPreviewThumb)
-        ? window.HistMerge.historyPreviewThumb(usedImgArr, usedPrevN_)
-        : ''; // HistMerge/core/image-role.jsが読めない異常時は安全側(空=枠を出さない)
+      var usedPrevN_ = previewData_.prevN;
+      // 初回描画と後着画像の差分更新で同じ判定を使う。
+      var refThumb = previewData_.thumb;
       if (refThumb && window.Go5ImgDiag) Go5ImgDiag.push('hist_render', { key: pKey, cid: rImgCid, count: usedImgArr.length, prev: usedPrevN_ });
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
@@ -2148,7 +2221,7 @@
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
       // ★この端末のローカル履歴には無く、記録シートから補った行。編集・削除はGAS経由で正本へ反映する。
       if (it._fromSheet) tagsHtml += '<span class="vtag vtag-sheet" title="この端末にはこの記録が無く、記録シートの内容を表示して補っています(編集・削除は記録シートへ反映)">☁️シート由来</span>';
-      return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '" data-hist-anchor="' + esc(k) + '">' +
+      return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '" data-hist-anchor="' + esc(k) + '" data-hist-usedkey="' + esc(pKey) + '" data-hist-refcid="' + esc(rImgCid) + '">' +
         '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名(改行して統一)
         '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
@@ -2197,7 +2270,7 @@
         '</div>';
     }).join('') + pagerHtml; // 末尾にもページャ(長い一覧の下からでもページ移動できる)
     // データ再生成・画像後着・検索などで一覧DOMを交換しても、見ていた投稿の位置を維持する。
-    if (viewportSnap && window.Go5Viewport) window.Go5Viewport.restore(list, viewportSnap);
+    if (viewportSnap && window.Go5Viewport) window.Go5Viewport.restore(list, viewportSnap, null, { repeat: false });
     // 全件prefix走査を待たず、今DOMへ出した履歴だけを作品単位で直接読む。used:を先行し、post:停止の巻き添えを防ぐ。
     try {
       if (window.Go5Cand && window.Go5Cand.ensureHistoryImages) {
@@ -2252,7 +2325,7 @@
             if (rec.published != null) { publishedCache[id] = rec.published; got = true; }
             if (rec.title) titleCache[id] = rec.title;
           });
-          if (got) { try { ytMetaPersist(m); } catch (e) {} render(); }
+          if (got) { try { ytMetaPersist(m); } catch (e) {} renderWhenHistIdle_(); }
         }).catch(function () {});
       } catch (e) {}
     }
@@ -2363,19 +2436,7 @@
     //   used レコードの先頭prevN枚(=stock.js capturePreview_ の #cv最終フレーム・Drive保存と同一blob由来)のみを
     //   開く。生成用の元画像・投稿画像・Bluesky画像は「プレビュー」ではないので開かない(refimg自体、
     //   prevN>0 の時しか描かれない=ここに来る時点で必ずプレビューが在る)。
-    list.querySelectorAll('.vrow-refimg').forEach(function (im) {
-      im.addEventListener('click', function () {
-        var usedKey = im.getAttribute('data-usedkey');
-        var prevN = (usedKey && window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
-        if (prevN <= 0) return; // プレビュー未保存=何も出さない(生成画像を代わりに出さない)
-        var all = (usedKey && window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []).slice() : [];
-        // プレビュー枚だけ(元画像は含めない)＝ HistMerge.historyPreviewImages 一元判定(core/image-role.js)。
-        //   HistMerge/core/image-role.jsが読めない異常時は安全側(空=開かない)。
-        var imgs = (window.HistMerge && window.HistMerge.historyPreviewImages) ? window.HistMerge.historyPreviewImages(all, prevN) : [];
-        var caps = imgs.map(function () { return '動画投稿プレビュー'; });
-        if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0, { captions: caps });
-      });
-    });
+    list.querySelectorAll('.vrow-refimg').forEach(function (im) { wireHistoryPreview_(im); });
 
     // 🛠️編集で添付した投稿画像 → 拡大ズーム。(左右で全枚数・下に「現在 / 総ページ数」)
     list.querySelectorAll('.vrow-postimg').forEach(function (im) {
@@ -3381,9 +3442,10 @@
   function maintDue_() { return (Date.now() - tsGet_('hist_maint_at')) > HIST_MAINT_TTL_MS; }
   function metricsDue_() { return (Date.now() - tsGet_('hist_metrics_at')) > HIST_METRICS_TTL_MS; }
 
-  function refresh(announce) {
+  function refresh(announce, background) {
     // ★まずキャッシュから即描画。点検・通信でタブ表示を待たせない(Chami「表示が遅い」対策)。
-    render();
+    var paint_ = background ? renderWhenHistIdle_ : render;
+    paint_();
     // 点検(自己修復)は 手動🔄 か TTL到来時だけ・描画の後に走らせる。冪等なので裏で回して問題ない。
     //   ★サニタイズは ensureIds より前(偽の背骨ID接頭辞を刻む前に所属を確定する)——この順序は崩さない。
     var fixed = false;
@@ -3394,12 +3456,12 @@
       try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続(冪等)
       try { reconcileYtToSheet_(); } catch (e) {} // 端末のYT URLをシートへ後追い反映(冪等・台帳ガード)
       tsSet_('hist_maint_at', Date.now());
-      if (fixed) render(); // 点検で移動が発生した時だけ再描画
+      if (fixed) paint_(); // 点検で移動が発生した時だけ再描画
       // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ(冪等)。点検時のみ通信する。
       (function () {
         var R = window.Go5AccountRepair;
         if (R && R.ensureDids && !(R.ledgerFresh && R.ledgerFresh())) {
-          R.ensureDids(function () { var more = sanitizeOwnership_(); if (more) { render(); notifySanitized_(more); } });
+          R.ensureDids(function () { var more = sanitizeOwnership_(); if (more) { (background ? renderWhenHistIdle_ : render)(); notifySanitized_(more); } });
         }
       })();
     }
@@ -3426,7 +3488,7 @@
       if (lastErr) setStatus('⚠️ 更新に失敗しました：' + lastErr + note, !!note);
       else if (announce) setStatus('✅ 更新しました(再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + ')' + note, !!note);
       else setStatus((!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : '') + note, !!note);
-      render();
+      renderWhenHistIdle_();
       if (fixed) wireSanUndo_();
       return true;
     }).catch(function () { setStatus('⚠️ 更新に失敗しました(通信エラー)', false); return false; });
@@ -3968,7 +4030,7 @@
   // 投稿履歴タブへ入場した時に #ytClickList を作り直すためのフック(affiliate.js の showTab から呼ぶ)。
   //   離脱時に #ytClickList を空にしてメモリ解放する運用のため、クリック以外の入場経路(タブ復元/
   //   オーバーレイからの戻り)でも空のまま残らないように、render() を外から叩けるようにする。
-  try { window.Go5Verify = { render: render }; } catch (e) {}
+  try { window.Go5Verify = { render: render, patchImages: patchHistoryImages_ }; } catch (e) {}
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); fetchDeltas_(true); });
   var fd = $('ytFetchDmm'); if (fd) fd.addEventListener('click', refetchFanza_);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
@@ -4076,9 +4138,9 @@
   document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeRestoreYt_(); } else render(); });
   // ★画像ハイドレート完了で「動画で使った画像」を描き直す(Chami「動画に使った画像が表示されない・すぐ表示して」2026-08-11)。
   //   起動直後の初回描画は Go5Cand._imgMem がまだ空でサムネが出ず、タブ再タップまで欠けていた(DEF-de2408cb00同型)。
-  //   candidates.js が markHydrated_ で go5-images-hydrated を発火する=表示中の履歴/ランキングだけ再描画する(空振り時は無反応)。
+  //   candidates.js が go5-images-hydrated を発火する。履歴は画像だけ差し替え、ランキングだけ必要時に再描画する。
   document.addEventListener('go5-images-hydrated', function () {
-    try { var pv = $('pageVerify'); if (pv && !pv.hidden) render(); } catch (e) {}
+    try { patchHistoryImages_(); } catch (e) {}
     try { var pr = $('pageRank'); if (pr && !pr.hidden) renderRank(); } catch (e) {}
   });
   // ★履歴が IDB からメモリミラーへ載った合図(hist-store)で、表示中の検証タブを1回だけ描き直す。
@@ -4098,7 +4160,7 @@
     _histHydrateRefreshT = setTimeout(function () {
       _histHydrateRefreshT = null;
       var needsSheet = _histHydrateNeedsSheet; _histHydrateNeedsSheet = false;
-      try { var pv = $('pageVerify'); if (pv && !pv.hidden) render(); } catch (e) {}
+      try { renderWhenHistIdle_(); } catch (e) {}
       if (needsSheet) { try { mergeSheetExtras_(); } catch (e2) {} }
     }, 50);
   });
@@ -4118,7 +4180,7 @@
   // pre状態は走査せず、後着のhydrateイベントでIDB専用行を確実に拾う。
   setTimeout(function () { retryPendingWorkShortMintsAtBoot_(); }, 2500);
   // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理。(各1回)
-  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
+  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(false, true); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元。(秘密扱い)
   var keyEl = $('ytApiKey');

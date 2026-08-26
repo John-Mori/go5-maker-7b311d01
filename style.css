@@ -178,6 +178,8 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 
 /* ── 検証ダッシュボード（Phase4） ── */
 .vrow{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;overflow:hidden;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;content-visibility:auto;contain-intrinsic-size:auto 160px;}/* wrap＝footを全幅の独立行に落とす。content-visibility=画面外の行は描画/レイアウトを省いてメモリと再描画を軽くする(見えてる分だけ描く・スクロールで即描画・DOMとイベントは不変・非対応ブラウザは無視されるだけ・Chami依頼2026-08-08)。intrinsic-size=未描画時の高さ目安(実測後は記憶) */
+/* iPhoneはcontent-visibilityの仮高さ→実高さ補正がスクロール中にも起こるため、投稿履歴30件は通常レイアウトで固定する。画像自体のlazy-loadは維持。 */
+@media(max-width:700px){.vrow{content-visibility:visible;contain-intrinsic-size:none;}}
 .vrow-body{flex:1;min-width:0;} /* 本文列（フレックス）。画像列と重ならない＝オーバーラップ事故なし */
 .vrow-body .vmetrics{flex-wrap:wrap;} /* 本文が狭くなるので指標・リンク行は折り返す（nowrapでの見切れ防止） */
 .vrow-thumbcol{flex:0 1 auto;width:clamp(55px,18vw,80px);display:flex;flex-direction:column;gap:6px;} /* 右の画像列：文字優先で可変（狭い端末では縮小）。作品サムネの下に動画で使った画像。画像を等倍で約1.2倍に拡大＝列幅を46-66→55-80へ(他の枠は不変・本文はflex:1で吸収・Chami依頼2026-07-30) */

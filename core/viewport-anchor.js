@@ -48,7 +48,7 @@
     return el.getBoundingClientRect().top - snap.top;
   }
 
-  function restore(container, snap, scrollByFn) {
+  function restore(container, snap, scrollByFn, options) {
     if (!snap) return false;
     var fn = scrollByFn;
     if (!fn && typeof window !== 'undefined' && window.scrollBy) fn = function (dy) { window.scrollBy(0, dy); };
@@ -60,7 +60,7 @@
       return true;
     };
     var ok = apply();
-    if (ok && typeof window !== 'undefined' && window.requestAnimationFrame) window.requestAnimationFrame(function () { apply(); });
+    if (ok && (!options || options.repeat !== false) && typeof window !== 'undefined' && window.requestAnimationFrame) window.requestAnimationFrame(function () { apply(); });
     return ok;
   }
 
