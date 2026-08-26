@@ -4271,21 +4271,30 @@
     var now = Date.now(), last = '', at = 0;
     try { last = localStorage.getItem('cand_catalog_seed_hash') || ''; at = parseInt(localStorage.getItem('cand_catalog_seed_at') || '0', 10) || 0; } catch (e) {}
     if (sig === last && now - at < 12 * 3600000) { cb && cb(true); return; }
-    fetch(cfg.url + '/api/candidate-catalog', {
+    var seedCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var seedTimer = seedCtrl ? setTimeout(function () { try { seedCtrl.abort(); } catch (e) {} }, 20000) : null;
+    var seedOpts = {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shared-Secret': cfg.secret },
       body: JSON.stringify({ makerIds: makerIds, items: rows })
-    }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+    };
+    if (seedCtrl) seedOpts.signal = seedCtrl.signal;
+    fetch(cfg.url + '/api/candidate-catalog', seedOpts).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (seedTimer) clearTimeout(seedTimer);
       if (j && j.ok) {
         try { localStorage.setItem('cand_catalog_seed_hash', sig); localStorage.setItem('cand_catalog_seed_at', String(now)); } catch (e) {}
         cb && cb(true, j.progress || null);
       } else cb && cb(false);
-    }).catch(function () { cb && cb(false); });
+    }).catch(function () { if (seedTimer) clearTimeout(seedTimer); cb && cb(false); });
   }
   function catalogPage_(params, cb) {
     var cfg = workerCfg(); if (!cfg.url || !cfg.secret) { cb(null); return; }
     var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
-    fetch(cfg.url + '/api/candidate-catalog?' + qs, { headers: { 'X-Shared-Secret': cfg.secret } })
-      .then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { cb(j && j.ok ? j : null); }).catch(function () { cb(null); });
+    var pageCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var pageTimer = pageCtrl ? setTimeout(function () { try { pageCtrl.abort(); } catch (e) {} }, 15000) : null;
+    var pageOpts = { headers: { 'X-Shared-Secret': cfg.secret } };
+    if (pageCtrl) pageOpts.signal = pageCtrl.signal;
+    fetch(cfg.url + '/api/candidate-catalog?' + qs, pageOpts)
+      .then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { if (pageTimer) clearTimeout(pageTimer); cb(j && j.ok ? j : null); }).catch(function () { if (pageTimer) clearTimeout(pageTimer); cb(null); });
   }
   function renderAll_() {
     var body = $('candBody');
