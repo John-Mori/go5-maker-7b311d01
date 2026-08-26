@@ -620,6 +620,16 @@
     return isHiddenByRecentCount_(it); // ★OR: 両ch合算の直近10件の投稿に含まれる作品も隠す
   }
   // 「◯◯✔非表示」トグル2つ(非表示リストの上段・右寄せ)のHTML。_ACCTS は描画時に定義済み。
+  // All-candidates is a discovery view: missing local video materials must not hide new catalog entries.
+  // Only apply the posted cooldown here so server-side paging does not collapse a 20-item page.
+  function isHiddenByPostedForAll_(it) {
+    if (!it || (!_hidePosted.acc1 && !_hidePosted.acc2)) return false;
+    if (isInD1Set_(it, d1Within3dCids_())) return true;
+    if (isInD1Set_(it, d1RecentTop10Cids_())) return true;
+    var last = lastPostedTsAnyCh_(it);
+    if (last && (Date.now() - last) < POSTED_COOLDOWN_MS) return true;
+    return isHiddenByRecentCount_(it);
+  }
   function candHidePostedRowHtml_() {
     return '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;justify-content:flex-end;">' +
       '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
@@ -4242,7 +4252,7 @@
     var rows = (stored || []).slice(0, 500).map(function (it) {
       return Object.assign({}, it, { source: srcByCid[it.cid] || 'list', kind: workKindOf_(it.url || '') });
     });
-    var sig = makerIds.slice().sort().join(',') + '|' + rows.map(function (x) { return x.cid + ':' + x.source; }).sort().join(',');
+    var sig = 'v2|' + makerIds.slice().sort().join(',') + '|' + rows.map(function (x) { return x.cid + ':' + x.source; }).sort().join(',');
     var now = Date.now(), last = '', at = 0;
     try { last = localStorage.getItem('cand_catalog_seed_hash') || ''; at = parseInt(localStorage.getItem('cand_catalog_seed_at') || '0', 10) || 0; } catch (e) {}
     if (sig === last && now - at < 12 * 3600000) { cb && cb(true); return; }
@@ -4305,7 +4315,7 @@
     function fallback_() {
       var q = normalizeWorkSearch_(_workSearchByTab.all || ''), mq = normalizeWorkSearch_(_memoSearchByTab.all || '');
       var arr = sortItems(stored, _sort).filter(function (it) {
-        return (!_filterSale || isOnSale_(it)) && passPrice_(it) && !isHiddenByPosted_(it) &&
+        return (!_filterSale || isOnSale_(it)) && passPrice_(it) && !isHiddenByPostedForAll_(it) &&
           (!q || workSearchText_(it).indexOf(q) >= 0) && (!mq || candMemoText_(it).indexOf(mq) >= 0);
       });
       var size = candPageSize_(), pages = Math.max(1, Math.ceil(arr.length / size)), page = Math.min(_candPageByTab.all || 1, pages);
@@ -4314,7 +4324,7 @@
     function paint_(items, total, page, pages, fallback) {
       var wrap = $('candPageWrap'); if (!wrap || _activeTab !== 'all') return;
       var memoQ = normalizeWorkSearch_(_memoSearchByTab.all || '');
-      var visible = (items || []).filter(function (it) { return !isHiddenByPosted_(it) && (!memoQ || candMemoText_(it).indexOf(memoQ) >= 0); });
+      var visible = (items || []).filter(function (it) { return !isHiddenByPostedForAll_(it) && (!memoQ || candMemoText_(it).indexOf(memoQ) >= 0); });
       _cardIndex = {}; visible.forEach(function (it) { _cardIndex[it.cid] = it; });
       var startI = (page - 1) * candPageSize_(), pager = candPagerHtml_(page, pages, total, startI, visible.length);
       wrap.innerHTML = '<div id="candPageHead"><div class="hint" style="padding:2px 6px;">📚 全候補 ' + total + '件' + (fallback ? ' (端末内データ)' : '') + '</div>' + pager + '</div><div id="candCardList"></div><div id="candPageFoot">' + (pages > 1 ? pager : '') + '</div>';
@@ -4336,7 +4346,8 @@
     function load_() {
       var page = _candPageByTab.all || 1, size = candPageSize_();
       var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
-      catalogPage_({ sort: _sort, page: page, limit: size, q: _workSearchByTab.all || '', sale: _filterSale ? 1 : 0, priceMax: _priceMax || 0 }, function (j) {
+      catalogPage_({ sort: _sort, page: page, limit: size, q: _workSearchByTab.all || '', sale: _filterSale ? 1 : 0,
+        priceMax: _priceMax || 0, hideRecent: (_hidePosted.acc1 || _hidePosted.acc2) ? 1 : 0 }, function (j) {
         if (wrap) wrap.removeAttribute('aria-busy');
         if (!j) { fallback_(); return; }
         _candPageByTab.all = j.page || 1; progressText_(j.progress); paint_(j.items || [], j.total || 0, j.page || 1, j.pages || 1, false);

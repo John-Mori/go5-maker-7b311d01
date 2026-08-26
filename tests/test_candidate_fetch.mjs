@@ -32,6 +32,9 @@ const candidateSource = fs.readFileSync(new URL("../js/candidates.js", import.me
 assert.match(candidateSource, /var PAGESIZE_DEF = 20/, "全候補の既定表示数は20件");
 assert.match(candidateSource, /id="candWorkSearchRun"/, "全候補検索は入力完了後の検索ボタンで実行");
 assert.match(candidateSource, /\/api\/candidate-catalog\?/, "全候補はページ単位のWorker APIを使う");
+assert.match(candidateSource, /hideRecent: \(_hidePosted\.acc1 \|\| _hidePosted\.acc2\) \? 1 : 0/, "all-candidates sends the posted cooldown filter before paging");
+assert.match(candidateSource, /function isHiddenByPostedForAll_\(it\)/, "all-candidates has a dedicated post-only visibility gate");
+assert.doesNotMatch(candidateSource.slice(candidateSource.indexOf("  function isHiddenByPostedForAll_"), candidateSource.indexOf("  function candHidePostedRowHtml_")), /isHiddenByNoMaterial_/, "missing local video images must not collapse a server page");
 assert.doesNotMatch(candidateSource.slice(candidateSource.indexOf("  function renderAll_() {"), candidateSource.indexOf("  // ── タブの並べ替え")), /addEventListener\('input'/, "全候補は1文字ごとに再検索しない");
 const helperStart = candidateSource.indexOf("  function isInfoTarget_");
 const helperEnd = candidateSource.indexOf("  function salesTargetCids_", helperStart);

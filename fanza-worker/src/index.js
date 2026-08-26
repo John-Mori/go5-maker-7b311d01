@@ -356,7 +356,7 @@ export default {
     }
 
     // ── 全候補カタログ：表示中の1ページだけ返し、全件収集はWorker側で継続する ──
-    //   GET  /api/candidate-catalog?sort=rank7d&page=1&limit=20&q=...
+    //   GET  /api/candidate-catalog?sort=rank7d&page=1&limit=20&q=...&hideRecent=1
     //   POST /api/candidate-catalog { makerIds:[...], items:[...] }
     //     makerIdsは巡回キューへ、itemsは手動追加/独立タブの表示情報をカタログへ反映する。
     if (path === "/api/candidate-catalog") {
@@ -379,7 +379,7 @@ export default {
         if (/^\d{1,10}$/.test(mid)) await seedCatalogMaker_(env, mid, "");
       }
       const imported = await importCandidateCatalog_(env, Array.isArray(catBody.items) ? catBody.items : []);
-      if (ctx && ctx.waitUntil && makerIdsCat.length) ctx.waitUntil((async () => { await backfillPostedMakers_(env, 3); await runCandidateCatalog_(env, 17); })());
+      if (ctx && ctx.waitUntil && makerIdsCat.length) ctx.waitUntil((async () => { await backfillPostedMakers_(env, 20); await runCandidateCatalog_(env, 25); })());
       const progress = await candidateCatalogProgress_(env);
       return json({ ok: true, imported, progress }, 200, corsCat);
     }
@@ -695,7 +695,7 @@ export default {
     try {
       if (!env.FANZA_API_ID || !env.FANZA_AFFILIATE_ID || !env.FANZA_DB) return;
       await runMarketCrawl(env);
-      await backfillPostedMakers_(env, 5);
+      await backfillPostedMakers_(env, 50);
       await seedTrackedCatalogMakers_(env);
       await runCandidateCatalog_(env, 35);
     } catch (e) {
@@ -953,6 +953,7 @@ async function queryCandidateCatalog_(env, sp) {
   const q = String(sp.get("q") || "").trim().slice(0, 100);
   const saleOnly = sp.get("sale") === "1";
   const priceMax = Math.max(0, parseInt(sp.get("priceMax") || "0", 10) || 0);
+  const hideRecent = sp.get("hideRecent") === "1";
   const sort = String(sp.get("sort") || "rank7d");
   const order = {
     added_desc: "c.discovered_at DESC", price_asc: "CASE WHEN c.price IS NULL THEN 1 ELSE 0 END,c.price ASC,c.released DESC",
@@ -965,6 +966,10 @@ async function queryCandidateCatalog_(env, sp) {
   if (q) { where.push("(c.title LIKE ? OR c.maker_name LIKE ? OR c.cid LIKE ?)"); const like = "%" + q + "%"; binds.push(like, like, like); }
   if (saleOnly) where.push("c.discount_pct>0 AND c.price<c.list_price");
   if (priceMax) { where.push("(COALESCE(c.price,c.list_price) IS NULL OR COALESCE(c.price,c.list_price)<=?)"); binds.push(priceMax); }
+  if (hideRecent) {
+    where.push("NOT EXISTS (SELECT 1 FROM posted_log pr WHERE pr.cid=c.cid AND datetime(pr.posted_at)>=datetime('now','-3 days'))");
+    where.push("c.cid NOT IN (SELECT recent.cid FROM (SELECT cid,MAX(datetime(posted_at)) AS last_at FROM posted_log GROUP BY cid ORDER BY last_at DESC LIMIT 10) recent)");
+  }
   const from = " FROM candidate_catalog c JOIN candidate_pool p ON p.cid=c.cid LEFT JOIN works w ON w.cid=c.cid WHERE " + where.join(" AND ");
   const countRow = await env.FANZA_DB.prepare("SELECT COUNT(*) AS n" + from).bind(...binds).first();
   const total = Number(countRow && countRow.n || 0), pages = Math.max(1, Math.ceil(total / limit));
