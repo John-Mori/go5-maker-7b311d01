@@ -2022,11 +2022,21 @@
   function patchHistoryImages_() {
     var list = $('ytClickList');
     if (!list || !histPageVisible_()) return;
-    Array.prototype.forEach.call(list.querySelectorAll('.vrow[data-hist-usedkey]'), function (row) {
+    var rows = Array.prototype.slice.call(list.querySelectorAll('.vrow[data-hist-usedkey]'));
+    // candidates.js の読込順に関係なく、今画面にある作品の個別取得を必ず開始する。全件走査は行わない。
+    try {
+      if (window.Go5Cand && window.Go5Cand.ensureHistoryImages) {
+        window.Go5Cand.ensureHistoryImages(rows.map(function (row) {
+          return { key: row.getAttribute('data-hist-usedkey') || '', cid: row.getAttribute('data-hist-refcid') || '' };
+        }));
+      }
+    } catch (e) {}
+    rows.forEach(function (row) {
       var usedKey = row.getAttribute('data-hist-usedkey') || '';
       var refCid = row.getAttribute('data-hist-refcid') || '';
       var data = historyPreviewData_(usedKey, refCid);
       if (!data.thumb) return; // 一過性の空読みで、いま見えている画像を消さない。
+      if (window.Go5ImgDiag) Go5ImgDiag.push('hist_render', { key: usedKey, cid: refCid, count: data.images.length, prev: data.prevN, patch: true });
       var col = row.querySelector('.vrow-thumbcol');
       if (!col) {
         col = document.createElement('div'); col.className = 'vrow-thumbcol';

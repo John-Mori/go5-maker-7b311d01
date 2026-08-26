@@ -15,6 +15,8 @@ assert(!imageHandler[0].includes('render();'), '画像到着時に投稿履歴�
 
 const patch = history.slice(history.indexOf('  function patchHistoryImages_() {'), history.indexOf('\n\n  function render() {'));
 assert(patch.includes("querySelectorAll('.vrow[data-hist-usedkey]')"), '表示中カードを安定キーで更新する');
+assert(patch.includes('window.Go5Cand.ensureHistoryImages(rows.map'), '差分更新側から表示中作品の個別取得を必ず開始する');
+assert(patch.includes("Go5ImgDiag.push('hist_render'"), '従来の画像診断契約を維持する');
 assert(patch.includes('if (!data.thumb) return;'), '一過性の空読みで既存画像を消さない');
 assert(!patch.includes('innerHTML'), '差分更新で一覧DOMを交換しない');
 assert(history.includes('data-hist-usedkey="\' + esc(pKey) + \'"'), '履歴カードへ画像用安定キーを刻む');
