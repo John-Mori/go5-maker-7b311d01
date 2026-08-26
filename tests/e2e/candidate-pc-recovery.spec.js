@@ -279,4 +279,83 @@ test.describe('PC candidate recovery invariants', () => {
     expect(result.pushedCids).toContain('d_fast_push_new');
     expect(result.keptRemoteImage).toBe(true);
   });
+
+  test('全候補の作品を手動追加へ移し、手動追加タブへ即時反映する', async ({ page }) => {
+    const cid = 'd_move_all_to_manual';
+    const title = '全候補から選んだ作品';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ cid, title }) => {
+      localStorage.setItem('cand_items', '[]');
+      localStorage.setItem('cand_tabs', JSON.stringify([{ id: 'picked', name: '候補元リスト' }]));
+      localStorage.setItem('cand_items__picked', JSON.stringify([{
+        cid, title,
+        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/',
+        author: '回帰試験サークル',
+        addedAt: 1
+      }]));
+    }, { cid, title });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await page.locator('.cand-tab[data-ct="all"]').click();
+    const card = page.locator('.cand-card', { hasText: title });
+    await expect(card).toBeVisible();
+    await card.getByRole('button', { name: '手動追加へ', exact: true }).click();
+    await expect(card.getByRole('button', { name: '✅ 手動追加済み', exact: true })).toBeVisible();
+
+    await expect.poll(() => page.evaluate((candidateCid) => {
+      return (JSON.parse(localStorage.getItem('cand_items') || '[]') || []).some((it) => it && it.cid === candidateCid);
+    }, cid)).toBe(true);
+
+    await page.locator('.cand-tab[data-ct="main"]').click();
+    await expect(page.locator('.cand-card', { hasText: title })).toBeVisible();
+  });
+
+  test('画像取得がstalledになっても自動再試行を継続して画像へ回復する', async ({ page }) => {
+    const cid = 'd_ref_retry_never_give_up';
+    const title = '自動再試行で回復する作品';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ cid, title }) => {
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title,
+        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/',
+        addedAt: Date.now()
+      }]));
+      localStorage.setItem('cand_text', JSON.stringify({
+        [cid]: { memo: '画像がある作品', comment: '', twitterUrl: '', urls2: [], at: Date.now() }
+      }));
+    }, { cid, title });
+
+    await page.route('**/js/candidates.js*', async (route) => {
+      const response = await route.fetch();
+      let body = await response.text();
+      body = body.replace(
+        'return n >= 3 && !!sinceMs && (nowMs - sinceMs) >= 20000;',
+        'return n >= 3 && !!sinceMs && (nowMs - sinceMs) >= 50;'
+      );
+      body = body.replace(
+        'delay: stalled ? 30000 : Math.min(12000, 3000 * Math.pow(2, Math.max(0, Number(n || 0) - 1)))',
+        'delay: stalled ? 40 : Math.min(40, 20 * Math.pow(2, Math.max(0, Number(n || 0) - 1)))'
+      );
+      const shim = `
+        (function () {
+          var original = Go5Idb.getResult.bind(Go5Idb);
+          var target = 'ref:${cid}';
+          var image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+          Go5Idb.getResult = function (key) {
+            if (key !== target) return original(key);
+            window.__refRetryAttempts = (window.__refRetryAttempts || 0) + 1;
+            if (window.__refRetryAttempts <= 4) return Promise.resolve({ ok: false, value: null, error: new Error('forced transient failure') });
+            return Promise.resolve({ ok: true, value: { imgs: [image], img: image, memo: '画像がある作品', at: Date.now() } });
+          };
+        })();
+      `;
+      await route.fulfill({ response, body: shim + body });
+    });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const card = page.locator('.cand-card', { hasText: title });
+    await expect(card).toBeVisible();
+    await expect(card.locator('[data-refimgview="' + cid + '"]')).toBeVisible({ timeout: 4000 });
+    await expect.poll(() => page.evaluate(() => window.__refRetryAttempts || 0)).toBeGreaterThanOrEqual(5);
+  });
 });

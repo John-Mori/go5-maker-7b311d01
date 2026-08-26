@@ -3,7 +3,7 @@
 //   狙い=⏳(読込中)/🔍(確認中)が「取得の持続失敗」で永久スピナー(吸収状態)に嵌るのを、n回/T秒 で
 //   ⌛(タップで再試行)へ抜けさせる境界。しきい=3回 かつ 連鎖開始から20秒。
 const assert = require('assert');
-const { refStallDecide_ } = require('../js/candidates.js');
+const { refStallDecide_, refRetryPlan_ } = require('../js/candidates.js');
 
 let n = 0;
 function t(name, got, want) {
@@ -30,4 +30,20 @@ t('5回・30秒=stalled', refStallDecide_(5, T0, T0 + 30000), true);
 // 4) since=0(連鎖なし)は経過時間が巨大に見えても false(記帳の起点が無い=持続と見なさない)。
 t('since=0は落とさない', refStallDecide_(9, 0, T0 + 999999), false);
 
-console.log(`\nAll ${n} passed (refStallDecide_).`);
+// 5) stalledは表示状態の変更であり、再試行の終端ではない。30秒で頭打ちにし、何回失敗してもretry=true。
+const p1 = refRetryPlan_(1, T0, T0);
+assert.deepStrictEqual(p1, { stalled: false, retry: true, delay: 3000 });
+n++;
+console.log('  ok  1回目は3秒後に再試行');
+
+const p3 = refRetryPlan_(3, T0, T0 + 20000);
+assert.deepStrictEqual(p3, { stalled: true, retry: true, delay: 30000 });
+n++;
+console.log('  ok  stalled到達後も30秒後に再試行');
+
+const p99 = refRetryPlan_(99, T0, T0 + 999999);
+assert.deepStrictEqual(p99, { stalled: true, retry: true, delay: 30000 });
+n++;
+console.log('  ok  99回失敗しても自動再試行を諦めない');
+
+console.log(`\nAll ${n} passed (refStallDecide_/refRetryPlan_).`);

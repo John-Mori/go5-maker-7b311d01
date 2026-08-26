@@ -74,6 +74,16 @@
   function refStallDecide_(n, sinceMs, nowMs) {
     return n >= 3 && !!sinceMs && (nowMs - sinceMs) >= 20000;
   }
+  // 持続失敗しても自動再試行を止めないための単一方針。通常は3/6/12秒、stalled後は
+  // 30秒で頭打ちにして電池・通信負荷を抑えつつ、回復するまで必ず次の試行を予約する。
+  function refRetryPlan_(n, sinceMs, nowMs) {
+    var stalled = refStallDecide_(n, sinceMs, nowMs);
+    return {
+      stalled: stalled,
+      retry: true,
+      delay: stalled ? 30000 : Math.min(12000, 3000 * Math.pow(2, Math.max(0, Number(n || 0) - 1)))
+    };
+  }
   // ★Storage v2 Phase1(2026-08-24 設計 01_STORAGE_V2_DESIGN §7.2/§8)。cand_text(候補テキストの正本)を
   //   localStorage 単独に依存させると、iOS Safari の約5MB飽和で tiny な setItem すら throw=保存全体が弾かれる
   //   (Chami「あかん、保存できなくなった」の真因)。IDBへ耐久ミラーを置き、起動時にLS↔IDBを cid 単位で
@@ -144,7 +154,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, shouldShowIdbHint_: shouldShowIdbHint_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -985,7 +995,7 @@
   var _refLoaded = Object.create(null);           // 全体展開前でも作品単位で安全に読めたcid
   var _refLoadJobs = Object.create(null);
   var _refFail = Object.create(null);             // cid→{n,since}: 動画生成用画像の取得(IDB/R2)の持続失敗を数える(⏳吸収状態の解体・Fable5診断2026-08-24)
-  var _refRetryTimers = Object.create(null);      // cid→timer: renderを待たない bounded(最大3回)な自走再試行
+  var _refRetryTimers = Object.create(null);      // cid→timer: renderを待たず、30秒上限で回復まで続ける自走再試行
   var _candidateHydrateInFlight = false;
   var _candidateHydrateRetryTimer = null;
   var _candidateHydrateFailures = 0;
@@ -1372,6 +1382,10 @@
   // 候補画像が多い/iOSが低メモリでも「投稿編集」の入口を全体走査から切り離す。
   function ensureRefLoaded_(cid) {
     cid = String(cid || '');
+    // 同期直後にR2マーカーだけがメモリへ先着した状態は「読込済み」ではない。ここでtrueを返すと
+    // probeが成功扱いで終わり、実画像の取得失敗を追跡できないため、R2解決を起動して未完了を返す。
+    var memRaw = cid ? _imgMem.ref[cid] : null;
+    if (isR2Marker_(memRaw)) { resolveR2IntoMem_(cid, memRaw); return Promise.resolve(false); }
     // 全体ハイドレート完了は「このcidも読めた」証明ではない。同期などで完了後にIDBへ入った
     // 作品はメモリに無いことがあるため、cid単位の既知フラグ/実体が無ければ直接getする。
     if (!cid || !_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
@@ -2110,9 +2124,9 @@
       }
     });
   }
-  // ★IDBがプロセス単位で死んでいる時の最終防衛(アプリでは治せない=ユーザーに正しい手順を伝える)。
-  //   リロードでは直らず、タブ/PWAを閉じて開き直すとプロセスごと破棄されて直る。アプリ配色(ティール
-  //   #2bb3c0 / ダーク #0e1422・半角括弧・紫禁止)。回復(go5-idb-recovered)で自動的に消える。
+  // ★IDBの持続失敗を黙らせない案内。アプリ側の自動再試行は止めず、回復次第カードへ反映する。
+  //   「今すぐ再試行」で待ち時間を飛ばせる。アプリ配色(ティール #2bb3c0 / ダーク #0e1422・半角括弧・紫禁止)。
+  //   回復(go5-idb-recovered)で自動的に消える。
   var _idbHintEl = null;
   function showIdbRecoveryHint_() {
     if (_idbHintEl) return;
@@ -2128,9 +2142,21 @@
       x.style.cssText = 'float:right;background:transparent;border:0;color:#2bb3c0;font-size:16px;line-height:1;cursor:pointer;margin-left:8px;';
       x.addEventListener('click', function () { hideIdbRecoveryHint_(); });
       var msg = document.createElement('span');
-      msg.textContent = '画像の読み込みに失敗しています。このページを一度閉じて開き直すと直ります(再読み込みでは直りません)。';
+      msg.textContent = '画像の読み込みを自動で再試行しています。ページを閉じなくても、回復し次第表示されます。';
+      var retry = document.createElement('button');
+      retry.type = 'button';
+      retry.textContent = '今すぐ再試行';
+      retry.style.cssText = 'display:inline-block;width:auto;margin:8px 0 0;background:#2bb3c0;color:#081018;border:0;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;';
+      retry.addEventListener('click', function () {
+        retry.disabled = true;
+        retry.textContent = '再試行しました';
+        retryCandidateImagesNow_();
+        setTimeout(function () { if (retry.isConnected) { retry.disabled = false; retry.textContent = '今すぐ再試行'; } }, 1500);
+      });
       bar.appendChild(x);
       bar.appendChild(msg);
+      bar.appendChild(document.createElement('br'));
+      bar.appendChild(retry);
       document.body.appendChild(bar);
       _idbHintEl = bar;
     } catch (e) {}
@@ -2138,6 +2164,11 @@
   function hideIdbRecoveryHint_() {
     try { if (_idbHintEl && _idbHintEl.parentNode) _idbHintEl.parentNode.removeChild(_idbHintEl); } catch (e) {}
     _idbHintEl = null;
+  }
+  function retryCandidateImagesNow_() {
+    if (_candidateHydrateRetryTimer) { try { clearTimeout(_candidateHydrateRetryTimer); } catch (e) {} _candidateHydrateRetryTimer = null; }
+    if (!_candidateHydrated && !_candidateHydrateInFlight) hydrateImages_();
+    retryVisibleRefSlots_(true);
   }
   // localStorage の cand_refimg__* / cand_bskyimg__* を IDB へ移して localStorage から削除。(冪等・IDB書込成功後にのみ削除＝データロス防止)
   function migrateLocalImages_() {
@@ -3641,7 +3672,14 @@
   function ensureCardDelegation_(page) {
     if (!page || page._go5CardDelegated) return;
     page._go5CardDelegated = true;
+    ensureVisibleRefRetryLoop_();
     page.addEventListener('click', function (e) {
+      var toMain = dataTarget_(e.target, 'data-to-main', page);
+      if (toMain) {
+        e.preventDefault();
+        moveCandidateToMain_(toMain.getAttribute('data-to-main'), toMain);
+        return;
+      }
       var refBtn = dataTarget_(e.target, 'data-refimg', page);
       if (refBtn) {
         e.preventDefault();
@@ -3667,8 +3705,7 @@
       if (refRetry) {
         e.preventDefault();
         var retryCid = refRetry.getAttribute('data-refretry');
-        refFailClear_(retryCid);   // 失敗台帳を消す→⏳へ戻り probe/resolve が再発射される
-        refRefreshCard_(retryCid);
+        retryRefNow_(retryCid, true); // 台帳をリセットし、30秒の自動待機を飛ばして即時再試行
         return;
       }
       var refView = dataTarget_(e.target, 'data-refimgview', page);
@@ -4119,6 +4156,28 @@
   // ── 📚全候補タブ: 候補(main)+独立タブ+全サークルタブの作品を集約表示(cidで重複排除)。
   //    タブの✏️編集で excludeFromAll=true にしたタブは除外。各部門はこの集合を読む(段階2でD1へ橋渡し予定)。
   //    集約読み取り中心のビューなので個別の非表示/削除ボタンは出さない(各タブ側で行う)。サークル作品は非同期取得。
+  function moveCandidateToMain_(cid, btn) {
+    cid = String(cid || '');
+    var it = durableItemByCid_(cid); if (!cid || !it) return;
+    var main = candItemsRead_(K_ITEMS).slice();
+    var exists = main.some(function (x) { return x && String(x.cid) === cid; });
+    if (!exists) {
+      var copy = Object.assign({}, it);
+      copy.addedAt = Date.now(); // 手動で選んだ時刻を手動追加タブの並びへ反映
+      main.unshift(copy);
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+    var lsOk = candItemsWrite_(K_ITEMS, main);
+    confirmCandDurable_(K_ITEMS, cid, lsOk).then(function (where) {
+      if (where === 'fail') {
+        if (btn) { btn.disabled = false; btn.textContent = '⚠️ もう一度'; }
+        return;
+      }
+      flushSync_(); // PCで選んだ直後にスマホの手動追加へ届く高速同期
+      klog_('move_to_manual', 'work', cid, { existed: exists, storage: where });
+      if (btn) { btn.disabled = true; btn.textContent = '✅ 手動追加済み'; btn.classList.add('is-done'); }
+    });
+  }
   function renderAll_() {
     var body = $('candBody');
     if (!body) return;
@@ -4206,7 +4265,16 @@
         headEl.innerHTML = head + pager;         // ページャは画像を含まない=作り直しても軽い/チラつかない
         footEl.innerHTML = (pages > 1 ? pager : '');
         if (!slice.length) listEl.innerHTML = '<p class="hint" style="padding:8px;">条件に一致する候補がありません。</p>';
-        else reconcileCards_(listEl, slice, null, function (node) { wireCardCommon_(node); }); // 全候補は個別の非表示/削除ボタン無し=共通配線のみ
+        else {
+          var mainSet = {};
+          candItemsRead_(K_ITEMS).forEach(function (x) { if (x && x.cid != null) mainSet[String(x.cid)] = true; });
+          var allAction_ = function (cid) {
+            return mainSet[String(cid)]
+              ? '<button type="button" class="cand-hide-btn cand-to-main-btn is-done" style="width:auto;" disabled>✅ 手動追加済み</button>'
+              : '<button type="button" class="cand-hide-btn cand-to-main-btn" style="width:auto;" data-to-main="' + esc(cid) + '">手動追加へ</button>';
+          };
+          reconcileCards_(listEl, slice, allAction_, function (node) { wireCardCommon_(node); });
+        } // 全候補では削除せず、気に入った作品だけ手動追加タブへ複製する
         var resEl = document.getElementById('candWorkSearchResult');
         if (resEl) resEl.textContent = (q || mq) ? (view.length + '件表示 / ' + arr2.length + '件中') : '';
         [headEl, footEl].forEach(function (z) {
@@ -5684,19 +5752,25 @@
   //   ★⚠(missing)は per-cid の陽性確認(_refLoaded[cid]===true か _imgMem.ref に実体)でのみ出す。一括展開の完了フラグ
   //     (_candidateHydrated)だけで「無い」と断定しない=同期/別タブで後から届く画像を「消えた」と誤表示しない
   //     (C-041=一度の観測を状態の代理にするな。Chami 2026-08-15「画像あるはずなのよ、消えてるってこと」)。
-  // ★動画生成用画像の取得(IDB/R2)が「今」失敗したことを記帳し、bounded(最大3回)な自走再試行を1本だけ予約する
-  //   =renderが来なくてもカードだけ更新して⏳から抜ける。n回/T秒 の持続でstalled(⌛)へ落とす(refStallDecide_)。
+  // ★動画生成用画像の取得(IDB/R2)が「今」失敗したことを記帳し、自走再試行を1本だけ予約する。
+  //   3回/20秒でstalled表示へ切り替えるが、これは停止状態ではない。以後も30秒間隔で回復まで再試行する。
+  function scheduleRefRetry_(cid, delay) {
+    cid = String(cid || ''); if (!cid || _refRetryTimers[cid]) return;
+    _refRetryTimers[cid] = setTimeout(function () {
+      delete _refRetryTimers[cid];
+      // 背景タブでは通信を増やさず、前面へ戻るまで低頻度で予約だけ維持する。
+      if (document.visibilityState === 'hidden') { scheduleRefRetry_(cid, 30000); return; }
+      retryRefNow_(cid, false);
+    }, delay);
+  }
   function refFailMark_(cid) {
     cid = String(cid || ''); if (!cid) return;
     var r = _refFail[cid] || (_refFail[cid] = { n: 0, since: Date.now() });
     r.n++; if (!r.since) r.since = Date.now();
-    if (refStallDecide_(r.n, r.since, Date.now())) { window.Go5ImgDiag && Go5ImgDiag.push('stalled', { cid: cid, n: r.n }); refRefreshCard_(cid); return; } // stall到達=これ以上⏳で回さず⌛へ切替(環を閉じる)
-    if (_refRetryTimers[cid]) return;                 // 予約は1本だけ(多重発射しない)
-    var delay = Math.min(12000, 3000 * Math.pow(2, Math.max(0, r.n - 1)));
-    _refRetryTimers[cid] = setTimeout(function () {
-      delete _refRetryTimers[cid];
-      refRefreshCard_(cid);                            // refSlotHtml_再評価→probe/resolveが再発射(カードがDOMに無ければno-op)
-    }, delay);
+    var plan = refRetryPlan_(r.n, r.since, Date.now());
+    if (plan.stalled) window.Go5ImgDiag && Go5ImgDiag.push('stalled_retrying', { cid: cid, n: r.n, nextMs: plan.delay });
+    refRefreshCard_(cid);                               // ⏳/⌛の表示だけ差分更新
+    if (plan.retry) scheduleRefRetry_(cid, plan.delay); // stalled後もreturnで終わらせず、回復まで予約を閉じない
   }
   function refFailClear_(cid) {
     cid = String(cid || ''); if (!cid) return;
@@ -5716,11 +5790,45 @@
       if (card) updateCardRefThumb_(card, cid);
     } catch (e) {}
   }
+  function retryRefNow_(cid, resetFailures) {
+    cid = String(cid || ''); if (!cid) return;
+    if (resetFailures) refFailClear_(cid);
+    var raw = _imgMem.ref[cid];
+    if (!isR2Marker_(raw)) raw = legacyRefOf_(cid);
+    if (isR2Marker_(raw)) resolveR2IntoMem_(cid, raw);
+    else ensureRefProbe_(cid);
+    refRefreshCard_(cid);
+  }
+  var _visibleRefRetryTimer = null;
+  var _visibleRefRetryWired = false;
+  function retryVisibleRefSlots_(force) {
+    try {
+      if (document.visibilityState === 'hidden') return;
+      var page = document.getElementById('pageCand');
+      if (!page || !page.querySelector || !page.getClientRects().length) return;
+      page.querySelectorAll('.cand-refimgs[data-refslot]').forEach(function (slot) {
+        var cid = slot.getAttribute('data-refslot'); if (!cid || refImgsOf_(cid).length) return;
+        var state = refSlotState_(cid);
+        if (state !== 'loading' && state !== 'checking' && state !== 'stalled') return;
+        retryRefNow_(cid, !!force);
+      });
+    } catch (e) {}
+  }
+  function ensureVisibleRefRetryLoop_() {
+    if (!_visibleRefRetryTimer) _visibleRefRetryTimer = setInterval(function () { retryVisibleRefSlots_(false); }, 30000);
+    if (_visibleRefRetryWired) return;
+    _visibleRefRetryWired = true;
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState !== 'hidden') retryVisibleRefSlots_(false); // Safari復帰時は30秒待たず即再開
+    });
+  }
   function refSlotState_(cid) {
     var has = refImgsOf_(cid).length > 0;
     var stalled = refStalled_(cid);
     // R2マーカー(base64を持たず実体はR2)なら「画像あり・取り寄せ中」=⏳ loading。ただし持続失敗(stalled)なら
     //   ⌛(操作可能な失敗)へ落とす=R2フェッチが永久に失敗し続けても⏳吸収状態に嵌らない(Fable5診断2026-08-24)。
+    var memMarker = _imgMem.ref[cid];
+    if (!has && isR2Marker_(memMarker)) { resolveR2IntoMem_(cid, memMarker); return stalled ? 'stalled' : 'loading'; }
     if (!has && !Object.prototype.hasOwnProperty.call(_imgMem.ref, cid)) {
       var lg = legacyRefOf_(cid);
       if (isR2Marker_(lg)) { if (stalled) return 'stalled'; resolveR2IntoMem_(cid, lg); return 'loading'; }
@@ -5758,6 +5866,8 @@
   }
   function ensureRefProbe_(cid) {
     cid = String(cid || '');
+    var memRaw = cid ? _imgMem.ref[cid] : null;
+    if (isR2Marker_(memRaw)) { resolveR2IntoMem_(cid, memRaw); return; }
     if (!cid || !_idbOk || _refLoaded[cid] || Object.prototype.hasOwnProperty.call(_imgMem.ref, cid) || _refLoadJobs[cid] || _refProbeQueued[cid]) return;
     _refProbeQueued[cid] = true;
     _refProbeQueue.push(cid);
@@ -5790,9 +5900,8 @@
     //   限られるため per-card 発射も有界=軽い。全体ハイドレートが後で完了すれば bgRender_ で'images'へ確定する。
     if (state === 'loading') { ensureRefProbe_(cid); return '<div class="cand-refimg-ph cand-refimg-loading" title="動画生成用の画像を読み込み中です">⏳ 画像読込中…</div>'; }
     if (state === 'checking') { ensureRefProbe_(cid); return '<div class="cand-refimg-ph cand-refimg-checking" title="この作品の動画生成用画像を端末内から確認しています">🔍 画像を確認中…</div>'; }
-    // ★取得が持続失敗した=⏳の吸収状態に嵌る前に「操作可能な失敗」へ落とす。画像が消えたわけではない(C-041維持)ので
-    //   「なし(⚠)」ではなく「読み込み失敗・タップで再試行(⌛)」と出す。タップで台帳を消し⏳へ戻して再発射する。
-    if (state === 'stalled') return '<div class="cand-refimg-ph cand-refimg-stalled" data-refretry="' + esc(cid) + '" title="動画生成用の画像の読み込みに失敗しました。通信/同期の状態を確認してタップで再試行できます(画像が消えたわけではありません)">⌛ 読み込み失敗(タップで再試行)</div>';
+    // ★持続失敗後も30秒ごとの自動再試行は継続する。札のタップは待ち時間を飛ばす即時再試行。
+    if (state === 'stalled') return '<div class="cand-refimg-ph cand-refimg-stalled" data-refretry="' + esc(cid) + '" title="自動で再試行を続けています。タップすると今すぐ再試行します(画像が消えたわけではありません)">⌛ 自動再試行中(タップで今すぐ)</div>';
     if (state === 'missing') return '<div class="cand-refimg-ph cand-refimg-missing" data-refimg="' + esc(cid) + '" title="この端末に動画生成用の画像が見つかりません(タップで投稿編集から確認・再登録)">⚠ 画像なし</div>';
     return '';
   }
