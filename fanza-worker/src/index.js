@@ -214,7 +214,13 @@ export default {
         //   ブラウザから直接読めるようにGETへ相乗り(部門/実機どちらでも1回で「どこで死んだか」が出る)。
         if (url.searchParams.get("log") === "1") {
           try {
-            const raw = env.FANZA_KV ? await env.FANZA_KV.get("candpost:last") : null;
+            let raw = null;
+            if (env.FANZA_DB) {
+              const row = await env.FANZA_DB.prepare("SELECT value_json FROM diagnostic_state WHERE key=?1").bind("candpost:last").first();
+              raw = row ? row.value_json : null;
+            } else if (env.FANZA_KV) {
+              raw = await env.FANZA_KV.get("candpost:last");
+            }
             return json({ ok: true, log: raw ? JSON.parse(raw) : null }, 200, corsC);
           } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC); }
         }
@@ -225,12 +231,21 @@ export default {
         } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500, corsC); }
       }
       if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, corsC);
-      // ★着信ログ(観測点・十王星南の要請2026-08-05)：POSTがWorkerへ着いた瞬間にKV candpost:last へ1行残す。
+      // ★着信ログ(観測点・十王星南の要請2026-08-05)：POSTがWorkerへ着いた瞬間にD1 diagnostic_stateへ1行残す。
       //   これで「そもそも着いていない(=クライアント/URLの問題)」のか「着いたが書けていない/別物を返す」のかが
-      //   実機リロード1回で確定する(部門はKVを直読できる)。secret照合前に着信を刻む=bad_secret も観測対象。
+      //   実機リロード1回で確定する。secret照合前に着信を刻む=bad_secret も観測対象。
       const logCandPost_ = async (rec) => {
-        if (!env.FANZA_KV) return;
-        try { await env.FANZA_KV.put("candpost:last", JSON.stringify(Object.assign({ at: nowIso_(), atMs: Date.now() }, rec))); } catch (e) {}
+        const payload = JSON.stringify(Object.assign({ at: nowIso_(), atMs: Date.now() }, rec));
+        try {
+          if (env.FANZA_DB) {
+            await env.FANZA_DB.prepare(
+              "INSERT INTO diagnostic_state(key,value_json,updated_at) VALUES(?1,?2,?3) " +
+              "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at"
+            ).bind("candpost:last", payload, nowIso_()).run();
+          } else if (env.FANZA_KV) {
+            await env.FANZA_KV.put("candpost:last", payload);
+          }
+        } catch (e) {}
       };
       const secretC = request.headers.get("X-Shared-Secret") || "";
       const secretOkC = !!(env.SHARED_SECRET && secretC === env.SHARED_SECRET);

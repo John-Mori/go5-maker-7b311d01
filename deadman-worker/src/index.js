@@ -8,17 +8,59 @@
  *       「PC生存時のsupervisor死」を見るのと相補。
  *
  * エンドポイント:
- *   POST /beat   (ヘッダ X-Beat-Secret == BEAT_SECRET)  → KV last_beat=now, alerted=削除, 204
+ *   POST /beat   (ヘッダ X-Beat-Secret == BEAT_SECRET)  → R2 lastBeat=now, alerted解除, 204
  *   GET  /status                                        → {last_beat, age_sec, alerted} (点検用・秘密不要)
  * cron(scheduled): last_beat の鮮度を見て、閾値超過で通知(alertedで連投防止)、回復で復帰通知。
  *
- * 秘密: BEAT_SECRET(PC側と共有) / DISCORD_WEBHOOK(既存webhookを再利用)。KV binding=DEADMAN。
+ * 秘密: BEAT_SECRET(PC側と共有) / DISCORD_WEBHOOK(既存webhookを再利用)。R2が正本、KVは旧状態移行用。
  * 非破壊: 自KVと1webhookのみ。他へ一切書かない。
  */
 
 const K_LAST = 'last_beat';   // 最終ビートのepoch ms(文字列)
 const K_ALERTED = 'alerted';  // '1' の間は停止通知済み(連投防止)
 
+const STATE_R2_KEY = 'infra/deadman-v1.json';
+
+async function readState(env) {
+  if (env.DEADMAN_STATE) {
+    try {
+      const obj = await env.DEADMAN_STATE.get(STATE_R2_KEY);
+      if (obj) {
+        const data = JSON.parse(await obj.text());
+        return {
+          lastBeat: Number(data.lastBeat) || 0,
+          alerted: data.alerted === true,
+        };
+      }
+    } catch (e) { /* one-time legacy KV fallback */ }
+  }
+
+  const lastBeat = env.DEADMAN ? parseInt((await env.DEADMAN.get(K_LAST)) || '0', 10) : 0;
+  const alerted = env.DEADMAN ? (await env.DEADMAN.get(K_ALERTED)) === '1' : false;
+  const state = { lastBeat: lastBeat || 0, alerted };
+  if (env.DEADMAN_STATE && (state.lastBeat || state.alerted)) {
+    try { await writeState(env, state); } catch (e) { /* retry on next request */ }
+  }
+  return state;
+}
+
+async function writeState(env, state) {
+  if (env.DEADMAN_STATE) {
+    try {
+      await env.DEADMAN_STATE.put(STATE_R2_KEY, JSON.stringify({
+        lastBeat: Number(state.lastBeat) || 0,
+        alerted: state.alerted === true,
+      }), { httpMetadata: { contentType: 'application/json' } });
+      return;
+    } catch (e) { /* emergency KV write fallback */ }
+  }
+
+  // Deployment rollback and R2-outage compatibility. Normal production has R2 bound.
+  if (!env.DEADMAN) return;
+  await env.DEADMAN.put(K_LAST, String(Number(state.lastBeat) || 0));
+  if (state.alerted) await env.DEADMAN.put(K_ALERTED, '1');
+  else await env.DEADMAN.delete(K_ALERTED);
+}
 async function postDiscord(webhook, content) {
   if (!webhook) return false;
   try {
@@ -42,19 +84,23 @@ export default {
       if (!env.BEAT_SECRET || secret !== env.BEAT_SECRET) {
         return new Response('forbidden', { status: 403 });
       }
-      await env.DEADMAN.put(K_LAST, String(Date.now()));
-      // 停止中に復帰したら、次のcronを待たずここでも復帰通知を出して alerted を落とす。
-      const wasAlerted = (await env.DEADMAN.get(K_ALERTED)) === '1';
+      const state = await readState(env);
+      const wasAlerted = state.alerted;
+      state.lastBeat = Date.now();
+      await writeState(env, state);
+      // If the PC recovered, notify once and clear the alert in the same R2 state.
       if (wasAlerted) {
-        await postDiscord(env.DISCORD_WEBHOOK, '✅ go5-PC 復帰 — ハートビートが再開しました(PC/常駐が復旧)。');
-        await env.DEADMAN.delete(K_ALERTED);
+        await postDiscord(env.DISCORD_WEBHOOK, '✅ go5-PC 復帰 — ハートビートが再開しました（PC/常駐が復旧）。');
+        state.alerted = false;
+        await writeState(env, state);
       }
       return new Response(null, { status: 204 });
     }
 
     if (request.method === 'GET' && url.pathname === '/status') {
-      const last = parseInt((await env.DEADMAN.get(K_LAST)) || '0', 10);
-      const alerted = (await env.DEADMAN.get(K_ALERTED)) === '1';
+      const state = await readState(env);
+      const last = state.lastBeat;
+      const alerted = state.alerted;
       const age_sec = last ? Math.round((Date.now() - last) / 1000) : null;
       return new Response(JSON.stringify({ last_beat: last || null, age_sec, alerted }), {
         headers: { 'Content-Type': 'application/json' },
@@ -66,9 +112,9 @@ export default {
 
   async scheduled(event, env, ctx) {
     const staleMin = parseInt(env.STALE_MIN || '35', 10);
-    const last = parseInt((await env.DEADMAN.get(K_LAST)) || '0', 10);
-    const alerted = (await env.DEADMAN.get(K_ALERTED)) === '1';
-
+    const state = await readState(env);
+    const last = state.lastBeat;
+    const alerted = state.alerted;
     // まだ一度もビートが無い(初期化前)なら何もしない=誤報を出さない。
     if (!last) return;
 
@@ -85,12 +131,13 @@ export default {
         );
         // ★送信に成功した時だけ alerted を立てる。失敗時は立てない=次のcron(15分後)が再送する。
         //   (送信失敗でも立てると、webhook不通の瞬間に鳴らそうとした唯一のアラートが永久に失われる)
-        if (ok) await env.DEADMAN.put(K_ALERTED, '1');
+        if (ok) { state.alerted = true; await writeState(env, state); }
       }
     } else if (alerted) {
       // 閾値内に戻った=復帰(POST /beat 側で拾えなかった場合の保険)。
       await postDiscord(env.DISCORD_WEBHOOK, '✅ go5-PC 復帰 — ハートビートが閾値内に戻りました。');
-      await env.DEADMAN.delete(K_ALERTED);
+      state.alerted = false;
+      await writeState(env, state);
     }
   },
 };

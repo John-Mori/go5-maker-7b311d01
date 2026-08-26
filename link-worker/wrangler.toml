@@ -20,6 +20,13 @@ DAILY_LIMIT = "500"
 binding = "LINKS"
 id = "276fd1cee28f4521923ac58b84cf3716"
 
+# D1 is primary for new links, click counters and issue-rate counters.
+# KV remains bound read-only so every legacy short URL keeps working.
+[[d1_databases]]
+binding = "LINKS_DB"
+database_name = "go5_fanza"
+database_id = "39c22ab0-e90b-4755-9270-7265b9fed530"
+
 # ── Secrets（コマンドで登録。ここには書かない）──
 #   wrangler secret put SHARED_SECRET
 #   （drive-worker と同じ値でも、別の値でも可。フロント bluesky.js の SHARED_SECRET と一致させる）

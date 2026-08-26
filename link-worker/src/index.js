@@ -7,8 +7,8 @@
  *   中間ページは原理的に出ない。CORSも自分で設定するのでブラウザから必ず短縮できる。
  *
  * ルート：
- *   POST /api/shorten           {url}（form or json）→ 短縮コード発行・KV保存・短縮URL返却
- *   GET  /:code                 → 302 リダイレクト（中間ページなし）＋クリック概算カウント
+ *   POST /api/shorten           {url}（form or json）→ 短縮コード発行・D1保存・短縮URL返却
+ *   GET  /:code                 → 302 リダイレクト（中間ページなし）＋D1クリックカウント
  *   GET  /api/stats?code=&secret= → クリック数を返す（将来 Bitly 置換用）
  *   GET  /                      → ヘルスチェック（"go5-short ok"）
  *
@@ -16,7 +16,7 @@
  *   - 宛先は ALLOWED_HOSTS に限定（既定 bsky.app / bsky.social）。万一ソフト鍵が漏れても
  *     Bluesky以外へ飛ばす踏み台（オープンリダイレクタ）にならない。"*" で全許可も可。
  *   - 作成は Origin 制限＋共有シークレット（ソフト鍵）＋KV日次レート制限。
- *   - KVの u:<code>（コード→URL）は一度書いたら不変＝既存の短縮リンクが書き換わらない。
+ *   - D1の code→URL は一度書いたら不変。旧KVも読み取り互換＝既存の短縮リンクが書き換わらない。
  *   - 秘密の本体（SHARED_SECRET）は Worker Secrets。レスポンス・ログに出さない。
  *
  * KVレイアウト（単一 namespace: LINKS）：
@@ -26,6 +26,14 @@
  */
 
 import { isBotUA } from "./bot-ua.mjs";
+import {
+  bumpClickCount,
+  consumeDailyIssue,
+  getClicks,
+  getLink,
+  listLinks,
+  putLinkIfAbsent,
+} from "./storage.mjs";
 
 const BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -64,19 +72,8 @@ export default {
       if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
       const secret = url.searchParams.get("secret") || "";
       if (!env.SHARED_SECRET || secret !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors);
-      if (!env.LINKS) return json({ ok: false, error: "kv_unbound" }, 500, cors);
-      const codes = [];
-      let cursor;
-      do {
-        const r = await env.LINKS.list(cursor ? { prefix: "u:", cursor } : { prefix: "u:" });
-        r.keys.forEach((k) => codes.push(k.name.slice(2)));
-        cursor = r.list_complete ? null : r.cursor;
-      } while (cursor && codes.length < 2000); // 安全上限
-      const links = await Promise.all(codes.map(async (code) => {
-        const [u, c] = await Promise.all([env.LINKS.get("u:" + code), env.LINKS.get("c:" + code)]);
-        return { code, url: u || "", clicks: parseInt(c || "0", 10) || 0 };
-      }));
-      links.sort((a, b) => b.clicks - a.clicks);
+      if (!env.LINKS && !env.LINKS_DB) return json({ ok: false, error: "store_unbound" }, 500, cors);
+      const links = await listLinks(env, 2000);
       return json({ ok: true, total: links.length, links }, 200, cors);
     }
 
@@ -145,7 +142,7 @@ async function handleShorten(request, env, cors) {
   // 宛先ホスト制限（踏み台防止）
   if (!hostAllowed(urlStr, env)) return json({ ok: false, error: "host_not_allowed" }, 400, cors);
 
-  if (!env.LINKS) return json({ ok: false, error: "kv_unbound" }, 500, cors);
+  if (!env.LINKS && !env.LINKS_DB) return json({ ok: false, error: "store_unbound" }, 500, cors);
 
   // 決定的コード（同じURLは常に同じコード＝重複作成なし）。衝突時のみ伸ばす。
   //   ★短縮ドメイン(hostname)で塩を振る＝同じ宛先URLでも 5mgl.com(月詠み) と yoz2.com(宵桜艶帖) で
@@ -156,8 +153,12 @@ async function handleShorten(request, env, cors) {
   let code = "";
   for (let len = CODE_MIN; len <= CODE_MAX; len++) {
     const cand = full.slice(0, len);
-    const existing = await env.LINKS.get("u:" + cand);
-    if (existing === null) { await env.LINKS.put("u:" + cand, urlStr); code = cand; break; }
+    const existing = await getLink(env, cand);
+    if (existing === null) {
+      const stored = await putLinkIfAbsent(env, cand, urlStr);
+      if (stored === urlStr) { code = cand; break; }
+      continue;
+    }
     if (existing === urlStr) { code = cand; break; } // 既存の同一URL＝そのまま使い回し（冪等）
     // それ以外（別URLが既に占有）＝衝突 → さらに1文字伸ばして再試行
   }
@@ -169,8 +170,8 @@ async function handleShorten(request, env, cors) {
 
 /* ====================== リダイレクト ====================== */
 async function handleRedirect(code, env, ctx, request) {
-  if (!env.LINKS) return text("Not found", 404);
-  const urlStr = await env.LINKS.get("u:" + code);
+  if (!env.LINKS && !env.LINKS_DB) return text("Not found", 404);
+  const urlStr = await getLink(env, code);
   if (!urlStr) return text("Not found", 404);
   // 自分のクリックは数えない：Cookie(go5nc=1) があるか、?nc=1 が付いていれば計測をスキップ。
   //   ?nc=1 の時は以後もこの端末を除外できるよう Cookie を付与（2年）。
@@ -197,7 +198,7 @@ async function handleRedirect(code, env, ctx, request) {
   if (markSelf) headers["Set-Cookie"] = "go5nc=1; Max-Age=63072000; Path=/; Secure; SameSite=Lax";
   if (!optedOut && !markSelf) {
     // クリックを概算カウント（リダイレクトはブロックしない）。自分(除外対象)/ボットなら数えない。
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(bumpClick(env, code));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(bumpClickCount(env, code, urlStr));
   }
   // 302（恒久キャッシュでカウントが漏れないよう一時リダイレクト）
   return new Response(null, { status: 302, headers });
@@ -212,9 +213,9 @@ async function handleStats(url, env) {
   if (!env.SHARED_SECRET || secret !== env.SHARED_SECRET) return json({ ok: false, error: "bad_secret" }, 401, cors);
   const code = (url.searchParams.get("code") || "").trim();
   if (!code) return json({ ok: false, error: "missing_code" }, 400, cors);
-  if (!env.LINKS) return json({ ok: false, error: "kv_unbound" }, 500, cors);
-  const urlStr = await env.LINKS.get("u:" + code);
-  const clicks = parseInt((await env.LINKS.get("c:" + code)) || "0", 10);
+  if (!env.LINKS && !env.LINKS_DB) return json({ ok: false, error: "store_unbound" }, 500, cors);
+  const urlStr = await getLink(env, code);
+  const clicks = await getClicks(env, code);
   return json({ ok: true, code, exists: !!urlStr, clicks }, 200, cors);
 }
 
@@ -240,26 +241,10 @@ function hostAllowed(urlStr, env) {
   return list.some((d) => h === d || h.endsWith("." + d));
 }
 
-async function bumpClick(env, code) {
-  // ★KV の get→put はアトミックでない（同時アクセスで +1 が失われる）。
-  //   これは既知の設計上の制約で「概算」として許容している。
-  //   正確なカウントが必要になった場合は Durable Objects への移行が最小コスト案。
-  try {
-    const k = "c:" + code;
-    const cur = parseInt((await env.LINKS.get(k)) || "0", 10);
-    await env.LINKS.put(k, String(cur + 1));
-  } catch (e) { /* 計測失敗はリダイレクトに影響させない */ }
-}
-
 async function rateLimited(env) {
-  if (!env.LINKS) return false;
   const limit = parseInt(env.DAILY_LIMIT || "500", 10);
   const day = new Date().toISOString().slice(0, 10); // UTC日付
-  const key = "rl:" + day;
-  const cur = parseInt((await env.LINKS.get(key)) || "0", 10);
-  if (cur >= limit) return true;
-  await env.LINKS.put(key, String(cur + 1), { expirationTtl: 172800 }); // 2日で自動失効
-  return false;
+  return !(await consumeDailyIssue(env, day, limit));
 }
 
 /* ====================== CORS / レスポンス ====================== */

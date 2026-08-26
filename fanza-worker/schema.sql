@@ -139,3 +139,9 @@ CREATE TABLE IF NOT EXISTS posted_maker_resolutions (
   maker_id   TEXT,
   checked_at INTEGER NOT NULL
 );
+-- Last-value diagnostics. D1 avoids spending a KV write on every candidate-pool POST.
+CREATE TABLE IF NOT EXISTS diagnostic_state (
+  key TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

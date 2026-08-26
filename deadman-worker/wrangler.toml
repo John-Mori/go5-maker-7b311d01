@@ -20,3 +20,8 @@ STALE_MIN = "35"
 [[kv_namespaces]]
 binding = "DEADMAN"
 id = "e7303974696448fa8510c800ba13b45c"
+
+# R2 is the primary liveness state. KV is retained only for one-time legacy migration/rollback.
+[[r2_buckets]]
+binding = "DEADMAN_STATE"
+bucket_name = "go5-sync-images"

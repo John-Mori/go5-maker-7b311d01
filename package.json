@@ -4,7 +4,7 @@
   "private": true,
   "description": "CIスモーク専用(恒久-3)。アプリ本体はビルド無しの静的HTML/JSで、この依存は配信されない。GitHub Actionsでのデプロイ後スモークテストにのみ使う。",
   "scripts": {
-    "test:unit": "node tests/test_affiliate.js && node tests/test_bluesky.js && node tests/test_candidate_fetch.mjs && node tests/test_competitor_analysis.js && node tests/test_sync_worker_r2_state.js",
+    "test:unit": "node tests/test_affiliate.js && node tests/test_bluesky.js && node tests/test_candidate_fetch.mjs && node tests/test_competitor_analysis.js && node tests/test_sync_worker_r2_state.js && node tests/test_link_worker_d1_storage.mjs && node tests/test_deadman_worker_r2_state.mjs",
     "test:smoke": "playwright test"
   },
   "devDependencies": {
