@@ -1721,7 +1721,10 @@
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
       workUrl: workUrl, hashtags: record.hashtags || '', postUri: record.postUri || '',
       shortUrl: record.shortUrl || '', shareUrl: record.shareUrl || '', videoId: vid,
-      work_short_url: record.workShortUrl || '' // 導線2(作品クリック計測URL)＝アカウント移送/再記録でも欠落させない
+      work_short_url: record.workShortUrl || '', // 導線2(作品クリック計測URL)＝アカウント移送/再記録でも欠落させない
+      // このモジュールから記録するのはBluesky投稿。値を最初から明示し、短縮URLだけの旧行を
+      // 投稿履歴側の既定値Xへ倒さない。矯正経路だけは既存の明示値(x/bsky)をそのまま引き継ぐ。
+      platform: (record.platform === 'x' || record.platform === 'bsky') ? record.platform : 'bsky'
     };
     if (record.postedAt) payload.postedAt = record.postedAt; // 過去データ矯正時は当時の投稿時刻を保持
     movieAttrKeys_().forEach(function (k) { payload[k] = !!attrs[k]; });
@@ -1765,7 +1768,7 @@
   // account/meta＝投稿を実行した瞬間のアカウントと凍結メタ。(即時投稿は呼び出し時に確定)
   function notifyPosted(res, text, alt, account, meta, workShort) {
     var tags = (String(text).match(/#[^\s#]+/g) || []).join(' ');
-    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || ''), account: account || acctId(), meta: meta || null, work_short_url: (workShort && workShort.shortUrl) || '', work_share_url: (workShort && workShort.shareUrl) || '' } })); } catch (e) {}
+    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || ''), account: account || acctId(), platform: 'bsky', meta: meta || null, work_short_url: (workShort && workShort.shortUrl) || '', work_share_url: (workShort && workShort.shareUrl) || '' } })); } catch (e) {}
   }
   // すべての投稿を一元的に記録(即時・自動・予約のどれでも必ず記録される)
   document.addEventListener('bluesky-posted', function (e) {
@@ -2100,7 +2103,7 @@
       var share = res.shareUrl || short || longUrl;    // 表示・概要欄・コピー用(独自短縮、失敗時は生URL)
       // 表示・概要欄への反映は「今のUIと同じアカウントの投稿」のときだけ。(別アカウントの記録でUIを書き換えない)
       if (!account || account === acctId()) setShareOutputs(share, longUrl);
-      histAdd({ account: account, meta: meta, title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: (meta && meta.videoId) || (!account || account === acctId() ? currentVideoId : '') || '', workShortUrl: (workShort && workShort.shortUrl) || '', workShareUrl: (workShort && workShort.shareUrl) || '' });
+      histAdd({ account: account, platform: 'bsky', meta: meta, title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: (meta && meta.videoId) || (!account || account === acctId() ? currentVideoId : '') || '', workShortUrl: (workShort && workShort.shortUrl) || '', workShareUrl: (workShort && workShort.shareUrl) || '' });
       if (typeof onShort === 'function') onShort({ shortUrl: short, shareUrl: share });
     });
   }
@@ -2201,7 +2204,7 @@
     // 作品URL：metaがあればそれ、無ければ(現在UIと同じ時だけ)UIから採取。
     var workUrl = meta ? meta.workUrl : (uiSame ? captureWorkUrl_() : '');
     var a = histLoadFor_(account).filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
-    var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '', confirmed: false };
+    var entry = { ts: rec.ts || new Date().getTime(), account: account, platform: (rec.platform === 'x' || rec.platform === 'bsky') ? rec.platform : 'bsky', title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '', confirmed: false };
     if (rec.rebuildBaseClicks != null) entry.rebuildBaseClicks = rec.rebuildBaseClicks; // リビルド前の動画までのクリック数(投稿履歴の括弧表示用)
     if (rec.workShortUrl) { entry.workShortUrl = rec.workShortUrl; entry.workShareUrl = rec.workShareUrl || ''; } // 導線2(投稿→FANZA)の計測リンク
     // セール会場(導線3): この投稿に添えたセール案内(名前付き)を履歴へ刻む=投稿履歴に「どの会場を貼ったか」を出せる(Chami依頼DEF-a57e596842)。
@@ -2723,9 +2726,14 @@
     var newVid = (ev && ev.detail && ev.detail.videoId) || currentVideoId || '';
     var title = (ev && ev.detail && ev.detail.title) || old.title || '';
     var baseClicks = null; // リビルド時点までのクリック数(括弧表示のスナップショット)
+    var inheritedPlatform = (old.platform === 'x' || old.platform === 'bsky') ? old.platform : '';
     try { if (window.Go5Clicks && old.shortUrl) baseClicks = window.Go5Clicks.of(old.shortUrl); } catch (e) {}
-    histAdd({ account: account, meta: meta, title: title, shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || old.shortUrl || '', postUrl: old.postUrl || '', postUri: old.postUri || '', videoId: newVid, rebuildBaseClicks: baseClicks });
-    recordToSheet({ account: account, meta: meta, title: title, postUrl: old.postUrl || '', postUri: old.postUri || '', shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || '', videoId: newVid });
+    var histRecord = { account: account, meta: meta, title: title, shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || old.shortUrl || '', postUrl: old.postUrl || '', postUri: old.postUri || '', videoId: newVid, rebuildBaseClicks: baseClicks };
+    if (inheritedPlatform) histRecord.platform = inheritedPlatform;
+    histAdd(histRecord);
+    var sheetRecord = { account: account, meta: meta, title: title, postUrl: old.postUrl || '', postUri: old.postUri || '', shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || '', videoId: newVid };
+    if (inheritedPlatform) sheetRecord.platform = inheritedPlatform;
+    recordToSheet(sheetRecord);
     _skipNextYtReset = true; // 直後に走る video-created の説明欄リセット(INC-70)を1回スキップ(旧短縮URLを残す)
     setShareOutputs(old.shareUrl || old.shortUrl || '', old.postUrl || ''); // YT説明欄へも旧短縮URLを反映
     setBskyStatus('🔁 リビルド：Blueskyへは再投稿せず、前回の投稿を引き継ぎました。(短縮URL・クリック計測は継続)');

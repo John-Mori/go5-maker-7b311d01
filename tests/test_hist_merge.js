@@ -237,6 +237,26 @@ test('H-28: プレビュー枠は本物の仕上がりプレビュー(prevN>0)�
   assert.strictEqual(HM.historyPreviewThumb([prevUrl], -1), '', '負のprevNは空');
 });
 
+test('H-29: 投稿先はシートのx/bsky明示値が一致するまで保存成功にしない', function () {
+  var expected = { videoId: 'acc1-29', platform: 'bsky' };
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-29', platform: 'x' }], expected), false, '古いX値で早期成功しない');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-29' }], expected), false, '投稿先列を返さない旧応答も成功扱いしない');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-29', platform: 'bsky' }], expected), true, 'Bsky反映後だけ成功');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-29', platform: 'x' }], { videoId: 'acc1-29' }), true, '投稿先を編集していない既存確認は壊さない');
+});
+
+test('H-30: 作品短縮URLは明示空を含め、列の存在と値が完全一致するまで成功にしない', function () {
+  var clear = { videoId: 'acc1-30', workShortUrl: '' };
+  var set = { videoId: 'acc1-30', workShortUrl: 'https://5mgl.com/new' };
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-30', workShortUrl: 'https://5mgl.com/old' }], set), false, '別URLでは失敗');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-30', workShortUrl: 'https://5mgl.com/new' }], set), true, '同じURLだけ成功');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-30', workShortUrl: 'https://5mgl.com/old' }], clear), false, '旧URLが残る間は失敗');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-30' }], clear), false, '列欠落を空反映と誤認しない');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-30', workShortUrl: '' }], clear), true, '明示空が返って初めて成功');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-30', workShortUrl: '' }], { videoId: 'acc1-30', workShortClear: true }), true, 'clear印だけでも空を確認できる');
+  assert.strictEqual(HM.historyHasEdit([{ videoId: 'acc1-30', workShortUrl: 'https://5mgl.com/old' }], { videoId: 'acc1-30', workShortNone: true }), false, 'clear印で旧URLを成功扱いしない');
+});
+
 console.log('');
 console.log('結果: ' + passed + ' PASS / ' + failed + ' FAIL');
 if (failed > 0) process.exit(1);

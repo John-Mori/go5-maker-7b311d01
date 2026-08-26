@@ -246,16 +246,20 @@
     saveMergeStore_(a, m);
   }
   // シート正本が編集を反映できたvideoIdの保持を落とす(在メモリ＋localStorage双方)。過剰保持を防ぐ自己清掃。
-  //   ★workUrl/ytUrlのどちらかが非空のpatchだけ照合対象(historyHasEditはこの2つ＋workStateしか見ないため、
-  //    属性/platformだけの編集を空expectedで誤って"反映済み"と判定して消さない)。
+  //   導線2は空文字も確定値なので property の有無を保ったまま照合する。platformだけの編集も
+  //   シート側の同値を確認するまでpendingを残し、古い応答でX/Bsky表示を巻き戻さない。
   function reconcilePend_(a, sheetItems) {
     var pm = _pendingSheetEdits[a]; if (!pm) return;
     var he = window.HistMerge && window.HistMerge.historyHasEdit; if (!he) return;
     var changed = false;
     Object.keys(pm).forEach(function (vid) {
       var patch = pm[vid] || {};
-      if (!patch.workUrl && !patch.ytUrl) return; // 照合できる実体が無い=在セッションのbgSuccessに任せる
       var expected = { videoId: vid, youtubeUrl: patch.ytUrl || '', workUrl: patch.workUrl || '', workState: patch.workState || '' };
+      if (Object.prototype.hasOwnProperty.call(patch, 'workShortUrl') || Object.prototype.hasOwnProperty.call(patch, 'workShortNone')) {
+        expected.workShortUrl = patch.workShortNone ? '' : (patch.workShortUrl || '');
+        expected.workShortClear = !!patch.workShortNone;
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'platform')) expected.platform = patch.platform || '';
       if (he(sheetItems, expected)) { delete pm[vid]; changed = true; }
     });
     if (changed) savePend_(a, pm);
@@ -564,7 +568,7 @@
     // 編集で明示指定(X/Bsky)があれば最優先。短縮URLだけの行はURLから判別できないため手動選択が正。
     if (it && it.platform === 'x') return true;
     if (it && it.platform === 'bsky') return false;
-    if (it && it.postUri) return false;
+    if (it && /^at:\/\//.test(String(it.postUri || ''))) return false;
     var XRE = /(?:x\.com|twitter\.com)\//i;
     if (XRE.test(String(href || ''))) return true;
     if (it && (XRE.test(String(it.postUrl || '')) || XRE.test(String(it.shareUrl || '')))) return true;
@@ -585,12 +589,20 @@
     '<path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>' +
     '<path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>' +
     '<path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>';
+  function driveLinkTitle_(v) {
+    if (window.Go5RegenIdentity && typeof window.Go5RegenIdentity.cleanTitle === 'function') {
+      try { return window.Go5RegenIdentity.cleanTitle(v); } catch (e) {}
+    }
+    var s = String(v == null ? '' : v).trim().replace(/\s+/g, ' ');
+    return s.replace(/(?:^|\s)#[^\s#]+(?:\s*#[^\s#]+)*\s*$/, '').trim();
+  }
+
   // 投稿履歴の「作品↗」の右隣に置くGoogleドライブの保存先リンク。押すとこの作品が保存されたDriveの場所を開く。
   //   ★リンクの組み立ては Go5Drive.folderUrl() に一本化=保存先パスの設計はそこ1箇所(将来アカウントが変わっても追従)。
   //   題名も控えIDも無いとURLは空=その時はアイコンを出さない(切れリンクを作らない)。
   function driveLinkHtml_(it) {
     if (!(window.Go5Drive && Go5Drive.folderUrl)) return '';
-    var ch = chForItem_(it), title = it.title || '', vid = it.videoId || '';
+    var ch = chForItem_(it), title = driveLinkTitle_(it.title || ''), vid = it.videoId || '';
     var url = Go5Drive.folderUrl(ch, title, vid); // hrefの初期値(控えがあれば直リンク・無ければ題名検索)
     if (!url && !title) return '';
     // クリック時に delegated handler が「この作品のフォルダそのもの」を解決して開く(検索ではなくフォルダ内へ)。
@@ -603,7 +615,7 @@
   function platOf_(it) {
     if (it && it.platform === 'x') return 'x';
     if (it && it.platform === 'bsky') return 'bsky';
-    if (it && it.postUri) return 'bsky';
+    if (it && /^at:\/\//.test(String(it.postUri || ''))) return 'bsky';
     var s = String((it && it.postUrl) || '') + ' ' + String((it && it.shareUrl) || '') + ' ' + String((it && it.shortUrl) || '');
     if (/(?:x\.com|twitter\.com)\//i.test(s)) return 'x';
     if (/bsky\.app\//i.test(s)) return 'bsky';
@@ -891,7 +903,7 @@
           try { renderHealth_(); } catch (e) {}
           applyDeltas_();
           try { repairMissing_(); } catch (e) {} // 「記録待ち」「クリック⚠」を実データ基点で自己修復
-          try { mintMissingWorkShorts_(); } catch (e) {} // 作品短縮URL(導線2)が空の行を、開き直しだけで自己発行(REQ-28ef251ba4)
+          // 導線2の空欄はユーザーの確定値として尊重する。履歴取得を契機に発番しない。
           if (cb) cb();
           return;
         }
@@ -1042,6 +1054,7 @@
   var _pendingShort = ''; // 生成した計測用リンクのr2 URL。保存時に item.shortUrl へ付与(計測キー)
   var _pendingWorkShort = ''; // 作品クリック(導線2)の生成r2 URL。保存時に item.workShortUrl へ付与
   var _pendingWorkShare = ''; // 作品クリック(導線2)の生成表示URL。保存時に item.workShareUrl へ付与
+  var _openedWorkShort = '';  // モーダルを開いた時点の表示値。通常保存で未変更URLへ触れないための比較元
   var _curSrcUrl = '';    // 生成の元にする投稿URL(編集中アイテムのpostUrl等)
 
   // 合算(導線1のみ・Chami依頼2026-07-31): X凍結→Bluesky退避などで別の短縮URLへ割れた同一作品の
@@ -1320,7 +1333,8 @@
     if ($('veditPlatX')) $('veditPlatX').checked = (plat === 'x');
     if ($('veditPlatBsky')) $('veditPlatBsky').checked = (plat === 'bsky');
     $('veditWork').value = workVal || '';
-    if ($('veditWorkShort')) $('veditWorkShort').value = workShortVal || '';
+    _openedWorkShort = workShortVal || '';
+    if ($('veditWorkShort')) $('veditWorkShort').value = _openedWorkShort;
     attrs = attrs || {};
     attrDefs_().forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
     if ($('veditWorkState')) $('veditWorkState').value = workState || '旧作';
@@ -1383,17 +1397,34 @@
   }
 
   // 編集保存：YouTube URL(ytMap)と Bluesky URL・作品URL・カテゴリ属性・作品状態(アイテム)を一括更新。
-  // 作品クリック計測URL(導線2)を item へ反映。自動生成(_pendingWorkShort)>手入力>クリアの優先。
+  // 作品クリック計測URL(導線2)を item へ反映。
+  // 通常保存ではモーダルを開いた時点から未変更なら一切触らない。旧ドメイン・裸値も文字列のまま保持し、
+  // 現行ドメインへの正規化はしない。新しいURLを発番するのは明示「自動生成」を押した場合だけ。
   function applyWorkShort_(item, typedVal) {
-    if (_pendingWorkShort) { item.workShortUrl = _pendingWorkShort; item.workShareUrl = _pendingWorkShare || _pendingWorkShort; delete item.workShortNone; }
-    else if (typedVal) { item.workShortUrl = typedVal; item.workShareUrl = typedVal; delete item.workShortNone; }
-    else {
-      // ★元々入っていた作品短縮URLを消して空で保存した=意図的な削除。印(workShortNone)を残して
-      //   自動生成(autoMeasureWorkShort_)の再充填を止める。これをしないと導線2導入前の履歴に
-      //   誤って入った短縮URLを消しても、作品URLから自動再生成されて復活する(Chami報告2026-07-29)。
-      if (item.workShortUrl || item.workShareUrl) item.workShortNone = true;
-      delete item.workShortUrl; delete item.workShareUrl;
+    typedVal = String(typedVal || '');
+    var generatedDisplay = _pendingWorkShare || _pendingWorkShort;
+    if (_pendingWorkShort && typedVal === generatedDisplay) {
+      item.workShortUrl = _pendingWorkShort;
+      item.workShareUrl = generatedDisplay;
+      delete item.workShortNone;
+      delete item.workShortMintPending;
+      return;
     }
+    // 未変更の非空値はURL文字列へ触れず、内部pendingだけを解除する。
+    // 開いた時から空のまま保存した場合も、明示空欄の墓標として確定する。
+    if (typedVal === _openedWorkShort && typedVal !== '') { delete item.workShortMintPending; return; }
+    if (typedVal) {
+      item.workShortUrl = typedVal;
+      item.workShareUrl = typedVal;
+      delete item.workShortNone;
+      delete item.workShortMintPending;
+      return;
+    }
+    // 非空値を明示的に空へ変更した。GAS側でも既存セルを消せるよう tombstone を必ず残す。
+    item.workShortNone = true;
+    delete item.workShortUrl;
+    delete item.workShareUrl;
+    delete item.workShortMintPending;
   }
   // 合算URL(導線1のみ)を item へ反映。空配列=合算なし=印を消す。
   function applyMergeUrls_(item, mergeUrls) {
@@ -1449,18 +1480,7 @@
     if (ytUrl) pokeSnapshotNow_();   // YT URLを紐付けた日は即スナップ=日別記録のベースラインを当日中に作る(④)
     // 非r2リンクを入れた保存でも自動で計測キーを確定させる(冪等短縮=同URLなら既存コード+累積クリックを引き継ぐ)
     if (saved) autoMeasureItem_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
-    // 作品クリック計測URL(導線2)も、手入力がr2でなければ自動で計測キー(r2)へ確定させる。
-    //   これをしないと codeOf() がコードを取れず、ピンクの矢印(作品クリック数)が表示されない。(Chami報告2026-07-14)
-    if (saved) autoMeasureWorkShort_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); pushItemToGas_(saved); });
-    // ★作品URLが入っていて導線2(作品クリック計測URL)がまだ空なら、編集保存でも投稿完了と同じく作品URLから
-    //   発行する(Chami再依頼2026-08-12「YouTube URL貼ってあるのに作品計測用URLが入らない・空欄のまま」)。
-    //   投稿完了の時点で作品URLが未入力だった投稿は mintWorkShortAtPost_ が発火せず空のまま=後から編集で
-    //   作品URLを入れても autoMeasureWorkShort_ は"空欄を作品URLへフォールバックしない"仕様のため永遠に空
-    //   だった(=毎回「自動生成」を手押しする必要があった)。意図的クリア(workShortNone)は尊重し、手入力
-    //   (workShortVal)がある時は触らない。既に発行済みなら mint 側が return(冪等・二重発行しない)。
-    if (saved && !saved.workShortNone && !((workShortVal || '').trim()) && !((saved.workShortUrl || '').trim()) && /^https?:\/\//.test((saved.workUrl || '').trim())) {
-      mintWorkShortAtPost_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); pushItemToGas_(saved); });
-    }
+    // 導線2は通常編集で変換・補完しない。明示「自動生成」の結果だけ applyWorkShort_ が反映する。
     refresh();
   }
 
@@ -1533,26 +1553,7 @@
     refresh();
     if (ytUrl) pokeSnapshotNow_();
 
-    // ★導線2(作品クリック計測URL)に手入力された非r2リンク(作品ページURL/アフィリンク/da.gd等)を
-    //   正規の自前r2短縮へ変換してシートへ再upsert=計測可能にする(Chami指示2026-08-01「正規の短縮URLに変更しといて」)。
-    //   autoMeasureWorkShort_ 内で 空/既にr2/意図的クリア(workShortNone) は無変換=冪等。
-    //   ※作品URLからの自動発行はしない方針(2026-07-30)は維持=空欄は空欄のまま(内部ガードでno-op)。
-    //   シート由来行はlocalStorageへ書き戻さない(INC-112防壁)ので、保持patch(_pendingSheetEdits)へ反映する。
-    autoMeasureWorkShort_(edited, function () {
-      var pm = _pendingSheetEdits[curAcct]; var pv = pm && pm[String(edited.videoId)];
-      if (pv) { pv.workShortUrl = edited.workShortUrl || ''; pv.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm); }
-      try { pushItemToGas_(edited); } catch (e) {}
-    });
-    // ★シート由来行でも、作品URLがあって導線2が空なら投稿完了と同じく作品URLから発行する(サブ端末の自己修復)。
-    //   この経路は従来 autoMeasureWorkShort_(空欄no-op)だけで mint が無く、サブ端末では編集保存しても
-    //   導線2が永久に空だった(空欄再発の一因)。ローカル行編集の :1374 と同条件。意図的クリア/手入力は尊重。
-    if (!edited.workShortNone && !((workShortVal || '').trim()) && !((edited.workShortUrl || '').trim()) && /^https?:\/\//.test((edited.workUrl || '').trim())) {
-      mintWorkShortAtPost_(edited, function () {
-        var pm2 = _pendingSheetEdits[curAcct]; var pv2 = pm2 && pm2[String(edited.videoId)];
-        if (pv2) { pv2.workShortUrl = edited.workShortUrl || ''; pv2.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm2); }
-        try { pushItemToGas_(edited); } catch (e) {}
-      });
-    }
+    // 導線2は通常編集で変換・補完しない。旧ドメイン・裸値・空欄をそのままシートへ送る。
 
     // ── ここから裏方(非ブロッキング): GASへupsert→履歴再読込で反映を確認。失敗時だけ静かに通知する。──
     var finished = false, verifyStarted = false;
@@ -1585,7 +1586,15 @@
             bgFail_('スプレッドシートへの保存を確認できませんでした。通信を確認して、もう一度編集→保存してください。');
             return;
           }
-          var expected = { videoId: payload.videoId, youtubeUrl: payload.youtube_url, workUrl: payload.workUrl, workState: payload.workState };
+          var expected = {
+            videoId: payload.videoId,
+            youtubeUrl: payload.youtube_url,
+            workUrl: payload.workUrl,
+            workState: payload.workState,
+            workShortUrl: payload.work_short_url,
+            workShortClear: !!payload.work_short_clear
+          };
+          if (Object.prototype.hasOwnProperty.call(payload, 'platform')) expected.platform = payload.platform;
           if (window.HistMerge && window.HistMerge.historyHasEdit && window.HistMerge.historyHasEdit(res.items, expected)) {
             bgSuccess_(res.items);
             return;
@@ -1606,44 +1615,9 @@
     }
   }
 
-  // 作品クリック計測URL(導線2)の自動確定。手入力が r2 でない(作品ページURL/アフィリンク/da.gd等)場合、
-  //   アフィリンク化→r2短縮して workShortUrl を計測可能なキーに整える。既に r2 なら何もしない(冪等)。
-  function autoMeasureWorkShort_(it, persist) {
-    try {
-      if (it && it.workShortNone) return; // ★ユーザーが意図的に消した行は自動生成で復活させない(Chami 2026-07-29)
-      var go5 = window.Go5Short || {};
-      function isR2(u) { return !!(go5.ourBase && go5.ourBase(u)); }  // 両ドメイン+旧r2を自前と認識
-      var cur = (it && it.workShortUrl) || '';
-      if (!it || !go5.ourBase || typeof window.Go5MakeShort !== 'function') return;
-      // ★作品URLからの自動発行はしない(Chami依頼2026-07-30)。導線2(作品クリック計測URL)の短縮は
-      //   「自動生成」ボタン(_pendingWorkShort)か投稿時のフローだけが起こす。編集保存では勝手に発行しない。
-      //   ここでやるのは、既に導線2欄へ入っている非r2リンクを計測キー(r2)へ正規化することだけ。
-      //   ★2026-07-29に入れた it.workUrl フォールバックが「画像だけ直して保存→短縮URLが勝手に湧く」の原因。
-      //   空欄は空欄のまま残す(作品URLへフォールバックしない)。
-      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 空 / 既に自前短縮＝何もしない
-      var toShorten = cur;
-      // FANZA/DMMの作品ページURL(al.fanza等のアフィリンクではない)なら、先にアフィリンク化する。
-      if (window.buildAffiliateLink && /(^|\.)dmm\.co\.jp|(^|\.)dlsite|fanza/.test(cur) && !/al\.(fanza|dmm)/.test(cur)) {
-        var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
-        var aff = window.buildAffiliateLink(cur, afId);
-        if (aff && aff.ok && aff.link) toShorten = aff.link;
-      }
-      window.Go5MakeShort(toShorten).then(function (res) {
-        if (!(res && res.shortUrl && isR2(res.shortUrl))) return;
-        it.workShortUrl = res.shortUrl; it.workShareUrl = res.shareUrl || res.shortUrl;
-        if (typeof persist === 'function') persist();
-        refresh(); // 作品クリック(ピンク矢印)がこの再描画で出るようになる
-      });
-    } catch (e) {}
-  }
-
-  // 投稿完了時に、作品クリック計測URL(導線2)を作品URLから"一発で発行"する(Chami依頼2026-07-30)。
-  //   ★これは comment(autoMeasureWorkShort_:1430)が許可する「投稿時のフロー」＝作品URLからの新規発行を
-  //   意図的に行う経路。編集保存用の autoMeasureWorkShort_ は空欄を作品URLへフォールバックしない仕様
-  //   (「画像だけ直して保存→短縮URLが勝手に湧く」対策・2026-07-29)なので、投稿完了経路がそれを呼ぶと
-  //   workShortUrl が空のままシートへ載り、サブ端末で「作品クリックの短縮URLが空」になっていた(Chami再発
-  //   指摘2026-08-03②)。完了時は"新規発行してよい"のでこちらを使う。既に有れば触らない(冪等)。
-  function mintWorkShortAtPost_(it, persist) {
+  // 真の新規投稿完了時だけ、作品クリック計測URL(導線2)を作品URLから発行する。
+  // 通常編集・履歴取得・既存dupeの再完了からは呼ばない。既に値があれば触らない(冪等)。
+  function mintWorkShortAtPost_(it, persist, accountOverride) {
     try {
       if (!it || it.workShortNone) return;          // 意図的に消した行は復活させない
       if (it.workShortUrl) return;                  // 既に有れば触らない(冪等)
@@ -1662,7 +1636,7 @@
       // ★一発勝負をやめ、一過性の失敗(コールドスタート/瞬断/429)を3回・指数バックオフで自己回復する
       //   (draft側 mintDraftWorkShort_ と対称)。この保険mintが無言で落ちると欄が空のまま=空欄再発の一因。
       //   既に埋まっていたら再試行しない。account=その行の所属chドメインで発行(取り違え防止)。
-      var acc2 = chForItem_(it), tries = 0;
+      var acc2 = (accountOverride === 'acc1' || accountOverride === 'acc2') ? accountOverride : chForItem_(it), tries = 0;
       (function attempt_() {
         if (it.workShortUrl || it.workShortNone) return;
         tries++;
@@ -1674,9 +1648,66 @@
             if (typeof persist === 'function') persist();
             if (acct() === chForItem_(it)) refresh(); // 作品クリック(ピンク矢印)がこの再描画で出る
           }).catch(retry_);
-        } catch (e) {}
+        } catch (e) { retry_(); }
       })();
     } catch (e) {}
+  }
+
+  // 真の新規投稿経路が pending を明示した行だけを自動発番する。空欄から pending を推測しない。
+  // 1行につき1起動1回だけ実行し、内部3回の試行後も失敗した場合は次回起動へ持ち越す。
+  var _workShortMintAttempted = {};
+  function attemptPendingWorkShortMint_(it, account) {
+    account = account === 'acc2' ? 'acc2' : 'acc1';
+    if (!it || it.workShortMintPending !== true || it.workShortNone || it.workShortUrl) return false;
+    if (typeof window.Go5MakeShort !== 'function') return false;
+    var expectedId = String(it.id || '');
+    var expectedVideoId = String(it.videoId || '');
+    var workUrl = String(it.workUrl || '').trim();
+    if (!expectedId || !expectedVideoId || !/^https?:\/\//.test(workUrl)) return false;
+    if (chOfVid_(expectedVideoId, '') !== account) return false;
+    var attemptKey = account + '\u0001' + expectedId;
+    if (_workShortMintAttempted[attemptKey]) return false;
+    _workShortMintAttempted[attemptKey] = true;
+    var candidate = {};
+    Object.keys(it).forEach(function (k) { candidate[k] = it[k]; });
+    mintWorkShortAtPost_(candidate, function () {
+      if (!candidate.workShortUrl) return;
+      var rows = loadArrFor_('verify_manual', account);
+      var latest = null, latestIndex = -1;
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i] && String(rows[i].id || '') === expectedId) { latest = rows[i]; latestIndex = i; break; }
+      }
+      if (!latest || latestIndex < 0) return;
+      if (String(latest.videoId || '') !== expectedVideoId) return;
+      if (chOfVid_(latest.videoId, '') !== account) return;
+      if (latest.workShortMintPending !== true || latest.workShortNone || latest.workShortUrl) return;
+      latest.workShortUrl = candidate.workShortUrl;
+      latest.workShareUrl = candidate.workShareUrl || candidate.workShortUrl;
+      delete latest.workShortMintPending;
+      rows[latestIndex] = latest;
+      saveArrFor_('verify_manual', account, rows);
+      pushItemToGas_(latest);
+    }, account);
+    return true;
+  }
+
+  var _workShortMintBootScanned = { acc1: false, acc2: false };
+  function workShortMintStoreReady_(account) {
+    if (!window.Go5Hist || typeof window.Go5Hist.state !== 'function') return true;
+    var state = window.Go5Hist.state('verify_manual__' + account);
+    return state === 'hydrated' || state === 'degraded';
+  }
+  function retryPendingWorkShortMintsAtBoot_(onlyAccount) {
+    if (typeof window.Go5MakeShort !== 'function') return;
+    var accounts = onlyAccount ? [onlyAccount] : ['acc1', 'acc2'];
+    accounts.forEach(function (account) {
+      if (account !== 'acc1' && account !== 'acc2') return;
+      if (_workShortMintBootScanned[account] || !workShortMintStoreReady_(account)) return;
+      _workShortMintBootScanned[account] = true;
+      loadArrFor_('verify_manual', account).forEach(function (row) {
+        if (row && row.workShortMintPending === true && !row.workShortNone && !row.workShortUrl) attemptPendingWorkShortMint_(row, account);
+      });
+    });
   }
 
   // 履歴アイテム1件をスプレッドシート(GAS)へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
@@ -1713,32 +1744,6 @@
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
 
-  // 起動時バックフィル: 作品URLは有るのに作品短縮URL(導線2)が空の履歴を、link-worker瞬断等で発行に
-  //   失敗したまま固まったもの(REQ-28ef251ba4/65c7897f2f)として、"開き直すだけ"で自己回復させる。
-  //   従来 mintWorkShortAtPost_ の発火はユーザー操作起点(投稿完了/編集保存/照合)だけで、失敗後に
-  //   再発行するロード時パスが無く空欄が恒久化していた。mintWorkShortAtPost_ は r2のみ採用・3回リトライ・
-  //   冪等・workShortNone復活なし=安全。1回の走行で上限5件(過負荷防止)。allItemsは複製を返すため、
-  //   ロードした実配列を直接持ってmintで変異→persistで同じ配列を保存(1347-1379の既存パターンと同型)。
-  var _workBackfillDone = {};
-  function mintMissingWorkShorts_() {
-    if (typeof window.Go5MakeShort !== 'function') return;
-    var budget = { n: 0 };
-    [{ arr: loadHist(), key: histKey() }, { arr: loadManual(), key: manualKey() }].forEach(function (grp) {
-      grp.arr.forEach(function (it) {
-        if (budget.n >= 5) return;
-        if (!it || !it.videoId) return;
-        if (it.workShortUrl || it.workShortNone) return;                 // 既に有る/意図的に空 は対象外(冪等)
-        if (!/^https?:\/\//.test((it.workUrl || '').trim())) return;     // 作品URLが無ければ発行できない
-        if (_workBackfillDone[it.videoId]) return;
-        _workBackfillDone[it.videoId] = true;
-        budget.n++;
-        mintWorkShortAtPost_(it, function () {
-          try { saveArr(grp.key, grp.arr); } catch (e) {}                // 発行できた値をローカル台帳へ
-          try { pushItemToGas_(it); } catch (e) {}                       // シートへも後追い反映(putIf経由・非破壊)
-        });
-      });
-    });
-  }
 
   // 自己修復: 端末が持つ計測URL(YouTube動画URL・短縮URL=r2)がシートへ未反映だと、サーバーが
   //   vid/クリックを認識できず「記録待ち」や日別クリックの⚠が固定化する。それをシートへ後追いupsertで治す。
@@ -2716,17 +2721,9 @@
         matched.workShareUrl = String(opts.workShareUrl || opts.workShortUrl);
         changed = true;
       }
+      if (matched.workShortMintPending === true) { delete matched.workShortMintPending; changed = true; }
       if (changed) { try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {} }
-      // 値で埋まらず、作品URLはあるのに導線2が空なら、この行の作品URLから発行して埋める(離脱に強い保険)。
-      //   persist は matched の所属ストアへ保存し、matched自身のvideoIdキーでシートへupsert(新規行は作らない)。
-      if (matched.workUrl && !matched.workShortUrl && !matched.workShortNone) {
-        try {
-          mintWorkShortAtPost_(matched, function () {
-            try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {}
-            try { pushItemToGas_(matched); } catch (e) {}
-          });
-        } catch (e) {}
-      }
+      // 既存(dupe)行は従来値を権威として扱う。空欄も含め、投稿完了の再実行では発番しない。
       if (acc === acct()) refresh();
       // ★衝突相手の"自身のYouTube URL/短縮URL"も返す＝Chamiに「何と重複扱いされたか」を実物で見せ、
       //   別作品なら forceNew で上書きできる材料にする(黙って弾かない・沈黙が最悪の事故)。
@@ -2761,6 +2758,7 @@
     if (opts.scheduledAt) entry.plannedAt = opts.scheduledAt;
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
     if (opts.attrs) attrDefs_().forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
+    if (!entry.workShortUrl && /^https?:\/\//.test(String(entry.workUrl || '').trim())) entry.workShortMintPending = true;
     // ★新規完了行は必ず先頭へ置く。末尾へpushすると、既存200件時にsaveArrFor_のslice(0,200)が
     // 今追加した201件目そのものを捨て、投稿完了しても履歴に載らなかった(2026-08-13・INC-131)。
     // 記録の正はシートなので、上限時は最古のローカルキャッシュだけを押し出し、最新行を確実に残す。
@@ -2775,13 +2773,8 @@
       // ★投稿完了と同時に記録シート(=分析の元)へ即upsert(videoId キーで冪等)。
       try { pushItemToGas_(entry); } catch (e) {}
       // 作品クリック計測URL(導線2)を作品URLから自動発行＝編集→保存を待たずに一発で埋める(Chami依頼2026-07-30)。
-      if (entry.workUrl && !entry.workShortUrl) {
-        try {
-          mintWorkShortAtPost_(entry, function () {
-            saveArrFor_('verify_manual', acc, loadArrFor_('verify_manual', acc).map(function (x) { return x.id === id ? entry : x; }));
-            pushItemToGas_(entry);
-          });
-        } catch (e) {}
+      if (entry.workShortMintPending === true) {
+        try { attemptPendingWorkShortMint_(entry, acc); } catch (e) {}
       }
       if (acc === acct()) { try { pokeSnapshotNow_(); } catch (e) {} refresh(); }
       return { ok: true };
@@ -3478,9 +3471,11 @@
         shareUrl: it.shareUrl || '',
         workUrl: it.workUrl || '',
         workShortUrl: it.workShortUrl || '', // 導線2(作品クリック)計測URL=手動同期でも空欄をバックフィル(syncHistory_が受信・GAS無改修)
+        workShortClear: !!it.workShortNone, // intentional blank must survive bulk sync
         youtubeUrl: yt,
         postedAt: postedMs ? new Date(postedMs).toISOString() : ''
       };
+      if (it.platform === 'x' || it.platform === 'bsky') rec.platform = it.platform;
       attrDefs_().forEach(function (a) { rec[a.key] = !!it[a.key]; }); // カテゴリ属性
       rec.workState = it.workState || '旧作'; // 作品状態
       if (it.goal) rec.goal = it.goal;          // 狙い(成約/集客)
@@ -3541,7 +3536,7 @@
     ensureIds();
     // ★両ドメイン+旧r2を自前と認識(旧: workerUrl 1個だけ判定だと、もう片方のチャンネルの
     //   短縮URL(yoz2.com等)が永久に「未生成」扱いになり、タブを開くたびフルバルク再生成が走って
-    //   その窓で編集が巻き戻る原因になっていた・2026-08-01)。autoMeasureWorkShort_:1288と同じ基準。
+    //   その窓で編集が巻き戻る原因になっていた・2026-08-01)。Go5Short.ourBaseを唯一の判定基準にする。
     function isR2(u) { return !!(go5.ourBase ? go5.ourBase(u) : (u && u.indexOf(workerUrl + '/') === 0)); }
     var hist = loadHist(), manual = loadManual(), targets = [];
     hist.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
@@ -4094,6 +4089,8 @@
     // またハイドレートは「端末内データが届いた」合図なので、重い点検/外部再取得を含む refresh() は起動しない。
     // 本文だけを即再描画し、シート生キャッシュが届いた時だけ表示専用マージを追走させる。
     var key = String((ev && ev.detail && ev.detail.key) || '');
+    if (key === 'verify_manual__acc1') retryPendingWorkShortMintsAtBoot_('acc1');
+    else if (key === 'verify_manual__acc2') retryPendingWorkShortMintsAtBoot_('acc2');
     var a = acct();
     if (key && key.slice(-('__' + a).length) !== '__' + a) return;
     if (key.indexOf('sheet_hist_raw__') === 0) _histHydrateNeedsSheet = true;
@@ -4117,6 +4114,9 @@
   // このスクリプトは #ytClickList より後で読み込まれるため、DOMContentLoadedを待つ必要がない。
   // 待つと後続の candidates.js(画像展開)まで本文表示を人質に取るため、端末内キャッシュをここで即描画する。
   paintCachedNow_();
+  // IDB非対応・degraded、またはリスナー登録前にhydrate済みの起動を1回だけ救済する。
+  // pre状態は走査せず、後着のhydrateイベントでIDB専用行を確実に拾う。
+  setTimeout(function () { retryPendingWorkShortMintsAtBoot_(); }, 2500);
   // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理。(各1回)
   setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
 

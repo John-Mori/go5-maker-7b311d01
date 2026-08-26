@@ -1377,6 +1377,41 @@
   // 「ドラフトで作成」で動画と台帳が初めて安全に着地した瞬間にだけDrive保存を始める。
   //   先に永続pendingを同期書込みしてから非同期処理へ進むため、直後に画面移動・Safari破棄が起きても次回sweepが再送できる。
   //   手元/雲の二系統が同時成功しても saveStock_.onCommitted は1回、このガードでもID単位1回に固定する。
+  // Driveへ保存する題名の単一境界。旧履歴の原文は変更せず、末尾の空白区切り#タグ群だけを除く。
+  // coreが読めない異常時も同じ規則へ倒し、タグ付き題名をDrive書込へ通さない。
+  function driveDataTitle_(v) {
+    if (window.Go5RegenIdentity && typeof window.Go5RegenIdentity.cleanTitle === 'function') {
+      try { return window.Go5RegenIdentity.cleanTitle(v); } catch (e) {}
+    }
+    var s = String(v == null ? '' : v).trim().replace(/\s+/g, ' ');
+    return s.replace(/(?:^|\s)#[^\s#]+(?:\s*#[^\s#]+)*\s*$/, '').trim();
+  }
+  // metaは必ずcloneして扱う=投稿履歴・ドラフトの原文を変更しない。
+  // _regenReadTitles は旧タグ付きDriveから素材を救出するread-only照会だけに使う。
+  function driveDataMeta_(meta, legacyTitle) {
+    if (!meta) return meta;
+    var rawTitle = String(meta.title == null ? '' : meta.title).trim();
+    var title = driveDataTitle_(rawTitle || legacyTitle);
+    if (!title) title = String(meta.id || meta.videoId || 'video').replace(/#/g, '').trim() || 'video';
+    var reads = [];
+    function addLegacy_(v) {
+      var raw = String(v == null ? '' : v).trim();
+      if (!raw || raw === title || driveDataTitle_(raw) === raw || reads.indexOf(raw) >= 0) return;
+      reads.push(raw);
+    }
+    (Array.isArray(meta._regenReadTitles) ? meta._regenReadTitles : []).forEach(addLegacy_);
+    addLegacy_(legacyTitle);
+    addLegacy_(rawTitle);
+    var out = Object.assign({}, meta, { title: title });
+    var rawVideoName = String(meta.videoName == null ? '' : meta.videoName).trim();
+    var extMatch = rawVideoName.match(/(\.[A-Za-z0-9]{1,8})$/);
+    // uploadがmeta.videoNameを優先しても、旧タグ付きファイル名を再利用させない。元拡張子だけを保持する。
+    if (rawVideoName) out.videoName = title + (extMatch ? extMatch[1] : '');
+    if (reads.length) out._regenReadTitles = reads;
+    else delete out._regenReadTitles;
+    return out;
+  }
+
   var _draftDriveAutoStarted = {};
   // 同じチャンネル＋題名のDrive保存を、このページ内では必ず1本へ束ねる。
   // 元の保存が付随画像を待っている4秒後に verify/sweep が不足修復を起動し、同じsave_jobを2本投げていた
@@ -1415,6 +1450,7 @@
     //   これが Chami 報告「drive保存のボタンが押せない」の正体(2026-08-12)。
     var directDone = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
     if (!meta || !meta.id) { directDone(false, 'メタ情報がありません'); return; }
+    meta = driveDataMeta_(meta); // この先のensure/remember/save/uploadへはタグなし題名だけを渡す
     var flightKey = String(meta.account || '') + '\n' + String(meta.title || meta.id);
     var activeFlight = _driveDatasetInFlight[flightKey];
     if (activeFlight) {
@@ -1441,6 +1477,92 @@
       return;
     }
     var id = meta.id;
+    // 旧タグ付き題名のDriveフォルダは移動・改名せず、動画の救出元としてだけ読む。
+    // 同じ保存single-flight内では一度だけ取得し、正常な実体だけをメモリ/IDBへ戻す。
+    // 以後のR2/Drive書込みは、正規化済みmeta.titleだけを使う。
+    var legacyDriveVideoRead_ = null;
+    function readLegacyDriveVideo_() {
+      if (legacyDriveVideoRead_) return legacyDriveVideoRead_;
+      var titles = [];
+      (Array.isArray(meta._regenReadTitles) ? meta._regenReadTitles : []).forEach(function (t) {
+        t = String(t || '').trim();
+        if (t && t !== meta.title && titles.indexOf(t) < 0) titles.push(t);
+      });
+      if (!(window.Go5Drive && typeof window.Go5Drive.fetchVideo === 'function') ||
+          (meta.account !== 'acc1' && meta.account !== 'acc2') || !titles.length) {
+        legacyDriveVideoRead_ = Promise.resolve(null);
+        return legacyDriveVideoRead_;
+      }
+      var chain = Promise.resolve(null);
+      titles.forEach(function (title) {
+        chain = chain.then(function (found) {
+          if (isUsableVideoBlob_(found)) return found;
+          try {
+            return Promise.resolve(window.Go5Drive.fetchVideo(meta.account, title)).then(function (blob) {
+              return isUsableVideoBlob_(blob) ? blob : null;
+            }, function () { return null; });
+          } catch (e) { return null; }
+        });
+      });
+      legacyDriveVideoRead_ = chain.then(function (blob) {
+        if (!isUsableVideoBlob_(blob)) return null;
+        putVidMem_(id, blob);
+        try {
+          var saved = store.set('stock_v_' + id, blob);
+          if (saved && typeof saved.catch === 'function') saved.catch(function () {});
+        } catch (e) {}
+        return blob;
+      }).catch(function () { return null; });
+      return legacyDriveVideoRead_;
+    }
+    // 現行のタグなしフォルダを先に読み、無い時だけ旧タグ付き題名を読み取り照会する。
+    // 取得したバイトは後段でタグなしmeta.titleへ保存する。旧フォルダへの書込・rememberはしない。
+    function readDriveAsset_(method) {
+      if (!(window.Go5Drive && typeof window.Go5Drive[method] === 'function') ||
+          (meta.account !== 'acc1' && meta.account !== 'acc2') || !meta.title) return Promise.resolve(null);
+      var titles = [meta.title];
+      // 動画の旧フォルダ照会は readLegacyDriveVideo_ に集約し、プレビュー生成と保存救出で同じ取得を共有する。
+      if (method !== 'fetchVideo') {
+        (Array.isArray(meta._regenReadTitles) ? meta._regenReadTitles : []).forEach(function (t) {
+          t = String(t || '').trim();
+          if (t && titles.indexOf(t) < 0) titles.push(t);
+        });
+      }
+      var chain = Promise.resolve(null);
+      titles.forEach(function (title) {
+        chain = chain.then(function (found) {
+          if (method === 'fetchVideo' ? isUsableVideoBlob_(found) : found) return found;
+          try {
+            return Promise.resolve(window.Go5Drive[method](meta.account, title)).then(function (asset) {
+              return (method !== 'fetchVideo' || isUsableVideoBlob_(asset)) ? asset : null;
+            }).catch(function () { return null; });
+          } catch (e) { return null; }
+        });
+      });
+      return chain.then(function (found) {
+        if (method !== 'fetchVideo' || isUsableVideoBlob_(found)) return found;
+        return readLegacyDriveVideo_();
+      });
+    }
+
+    // queueSaveはR2に動画が無いと完走できない。既存の手元/R2を最優先し、最初のensure失敗時だけ
+    // 旧タグ付きDrive動画をread-onlyで救出してR2へ載せ直し、着地確認をもう一度通す。
+    function ensureQueueVideoOnR2_() {
+      return ensureVideoOnR2_(id).then(function (onR2) {
+        if (onR2) return true;
+        return readLegacyDriveVideo_().then(function (blob) {
+          if (!isUsableVideoBlob_(blob)) return false;
+          return ensureVideoOnR2_(id);
+        });
+      });
+    }
+
+    // 旧環境の直uploadも、手元/R2が無い時だけ旧Driveを最後の読取元にする。
+    function resolveLegacyUploadVideo_() {
+      return resolveVideoBlob_(id).then(function (blob) {
+        return isUsableVideoBlob_(blob) ? blob : readLegacyDriveVideo_();
+      }, function () { return readLegacyDriveVideo_(); });
+    }
     // ── ★最後の砦=「動画生成で使用した画像」(used:<videoId>)から素材を拾う ─────────────────
     //   Chami報告2026-08-18 msg1539277864371748965「全部データが見つからないと出たが、投稿履歴にちゃんと二つ
     //   画像データがあるやないか」。原因=退避/再生成は素材を stock_*(ドラフト由来)と R2 からしか探していなかった。
@@ -1535,9 +1657,7 @@
       //   仕上がりプレビューを取り寄せて使う。無ければ null のまま(何も壊さない)。これで yt-clicks.js の旧
       //   regenRecordData_(分岐コピー)が持っていた「Drive既存プレビューで回復」を driveSaveDataset_ 一本へ
       //   畳み込む=データ再生成の経路を1つに保つ(Chami依頼2026-08-18・単一化)。
-      if (window.Go5Drive && Go5Drive.fetchPreview && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title)
-        return Go5Drive.fetchPreview(meta.account, meta.title).then(function (du) { return du ? durlToBlob_(du) : null; }, function () { return null; });
-      return null;
+      return readDriveAsset_('fetchPreview').then(function (du) { return du ? durlToBlob_(du) : null; });
     }).then(function (prevB) {
       // ★ドラフト側にもDriveにも無い時の砦=投稿履歴が表示している仕上がりプレビュー(used:<videoId>)。
       //   これで「モーダルには映るのに再生成すると全部見つからない」(Chami報告2026-08-18)を塞ぐ。
@@ -1561,11 +1681,9 @@
       //   「ドラフトのdrive保存と編集モーダルのデータ再生成は同じ役割」を実体でも一致させる(単一化)。
       //   結果このprevBは applyPreview(投稿履歴1ページ目)にもDrive追記(!hasPrevの時)にも使われる。
       if (prevB) return prevB;
-      if (window.Go5Drive && Go5Drive.fetchVideo && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title)
-        return Go5Drive.fetchVideo(meta.account, meta.title).then(function (vb) {
-          return vb ? videoEndFramePreview_(vb) : null;
-        }, function () { return null; });
-      return null;
+      return readDriveAsset_('fetchVideo').then(function (vb) {
+        return vb ? videoEndFramePreview_(vb) : null;
+      });
     }).then(function (prevB) { applyPreview(prevB); return prevB; }, function () { return null; });
 
     var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
@@ -1727,7 +1845,7 @@
     if (window.Go5Drive && typeof window.Go5Drive.queueSave === 'function' && meta.account) {
       // ★save_jobを投げる前にR2へ動画実体を確実に置く。置けない(実体喪失)なら在ページ保存(legacy)へ倒す=
       //   Workerが r2_video_missing で黙って諦めて「永遠に保存中」になる沈黙経路を封じる(炎上①・B-1)。
-      ensureVideoOnR2_(id).then(function (onR2) {
+      ensureQueueVideoOnR2_().then(function (onR2) {
         if (!onR2) { legacyRealSave_(); return; } // R2に動画が無い=save_jobは無駄撃ち→在ページ保存で救うか"見える失敗"を出す
         // 別作品はflightKeyが異なるので並列のまま。同じ作品だけは queueSave の受理結果までsingle-flightを保持する。
         // 旧実装はここでdoneして入口を先に開け、4秒後のverify/sweepが同じsave_jobを再送していた。
@@ -1778,8 +1896,8 @@
     //   次回起動の sweepSaveJobs_ が「Driveに在るか」を実測し、無ければ実体を取り寄せて再送=直アップロードの
     //   取りこぼしも自己修復させる(旧実装はlegacyだけpending未記録=一度死ぬと二度と拾えなかった)。
     recordSaveJobPending_(id, meta);
-    resolveVideoBlob_(id).then(function (blob) {
-      if (!blob) {
+    resolveLegacyUploadVideo_().then(function (blob) {
+      if (!isUsableVideoBlob_(blob)) {
         // ★動画は取れなくても、上の previewReady が投稿履歴1ページ目のプレビューを既に設定済み。
         //   さらに「動画が無いなら仕方ない、でもフォルダくらい作って・プレビュー/元画像はあるなら名前変えて保存して」
         //   (Chami依頼2026-08-18 msg1539252929222017124)へ応える=全か無かにせず、フォルダを作り手元の画像だけ退避する。
@@ -1820,6 +1938,7 @@
   function regenDataset_(locator, opts) {
     opts = opts || {};
     var done = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
+    var rawLocatorTitle = String((locator && locator.title) || '').trim();
     var meta = null;
     if (locator && locator.id) {
       meta = locator; // ドラフトモーダル=openPostModal_ が持つ実meta(id/videoId/IDB素材あり)
@@ -1841,7 +1960,7 @@
         if (!meta && locator.title) {
           for (var j = 0; j < all.length; j++) {
             if (!all[j] || (locator.account && all[j].account !== locator.account)) continue;
-            if (all[j].title === locator.title) { meta = all[j]; break; }
+            if (driveDataTitle_(locator.title) && driveDataTitle_(all[j].title) === driveDataTitle_(locator.title)) { meta = all[j]; break; }
           }
         }
       }
@@ -1855,6 +1974,8 @@
         meta = Object.assign({}, meta, { historyVideoId: locator.videoId });
       }
     }
+    // resolve結果・合成metaのどちらでも、この一点で現在のデータ題名へ揃える。元オブジェクトは不変。
+    meta = driveDataMeta_(meta, rawLocatorTitle);
     if (!meta || !meta.id) { done(false, 'この履歴のデータを特定できませんでした(背骨IDが空=Drive保存が始まる前の古い投稿)'); return; }
     // ★成否の真の基準は「投稿履歴1ページ目に仕上がりプレビューが入ったか」(Chami「戻すだけ・前はプレビューが入ってた」
     //   2026-08-18)。driveSaveDataset_ は動画がDriveに在るだけで done(true,'プレビュー追記') と返しうる=

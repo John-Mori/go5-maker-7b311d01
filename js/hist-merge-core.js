@@ -60,6 +60,7 @@
   // 現在のhistory APIで確認可能な項目だけを比較し、videoIdの別行を成功扱いしない。
   function historyHasEdit(items, expected) {
     expected = expected || {};
+    var hasOwn = function (obj, key) { return Object.prototype.hasOwnProperty.call(obj || {}, key); };
     var wantVid = String(expected.videoId || '');
     if (!wantVid) return false;
     var row = null;
@@ -87,6 +88,19 @@
       }
     }
     if (expected.workState && String(row.workState || '') !== String(expected.workState)) return false;
+    // 投稿先はURLから再推測せず、シートが明示値を返した時だけ反映済みとする。
+    // これが無いと、Bskyへ変更した直後の古いX行をURL一致だけで成功扱いし、保持patchを早期破棄する。
+    if (hasOwn(expected, 'platform') && (expected.platform === 'x' || expected.platform === 'bsky')) {
+      if (!hasOwn(row, 'platform') || String(row.platform || '') !== expected.platform) return false;
+    }
+    // 導線2は「空にした」こと自体も編集結果。キーの有無を見て、空文字を含め完全一致させる。
+    // 旧GASのように列自体を返さない応答は、空への反映済みと誤認しない。
+    if (hasOwn(expected, 'workShortUrl')) {
+      if (!hasOwn(row, 'workShortUrl') || String(row.workShortUrl || '') !== String(expected.workShortUrl || '')) return false;
+    }
+    // 呼び元が明示クリア印だけを渡す場合も、シート上の作品短縮URLが空になったことを確認する。
+    if ((expected.workShortClear === true || expected.workShortNone === true) &&
+        (!hasOwn(row, 'workShortUrl') || String(row.workShortUrl || '') !== '')) return false;
     return true;
   }
 

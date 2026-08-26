@@ -23,6 +23,14 @@
     try { return s.normalize('NFKC'); } catch (e) { return s; }
   }
 
+  // 動画・Driveデータ用の題名。YouTube題名の末尾へ付けた、空白区切りの
+  // #タグ群だけを全て外す。タグ名は運用で変わるため固定リストにしない。
+  // 「C#入門」のように作品名の途中へ現れる # は、直前が空白でないので保持する。
+  function cleanTitle(v) {
+    var s = String(v == null ? '' : v).trim().replace(/\s+/g, ' ');
+    return s.replace(/(?:^|\s)#[^\s#]+(?:\s*#[^\s#]+)*\s*$/, '').trim();
+  }
+
   function cidFromValue(v) {
     var s = String(v == null ? '' : v);
     var m = s.match(/[?&]cid=([^&#\s]+)/i);
@@ -59,7 +67,7 @@
     var account = String(locator.account || '');
     var scoped = items.filter(function (x) { return sameAccount(x, account); });
     var videoId = String(locator.videoId || '');
-    var title = normText(locator.title || '');
+    var title = normText(cleanTitle(locator.title || ''));
     var cid = cidOf(locator);
     var matches;
 
@@ -72,7 +80,7 @@
       if (matches.length) return result(newest(matches), 'cid', matches);
     }
     if (title) {
-      matches = scoped.filter(function (x) { return normText(x.title || '') === title; });
+      matches = scoped.filter(function (x) { return normText(cleanTitle(x.title || '')) === title; });
       if (matches.length) return result(newest(matches), 'account_title', matches);
     }
     return result(null, '', []);
@@ -86,6 +94,7 @@
     resolve: resolve,
     cidOf: cidOf,
     normText: normText,
+    cleanTitle: cleanTitle,
     isLegacyYouTubeId: isLegacyYouTubeId,
   };
 });
