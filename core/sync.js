@@ -40,6 +40,7 @@
     if (k === "cand_hide_posted") return true;
     if (k === "cand_text") return true;                  // 候補テキストの正本(コメント/メモ/X URL/URL2・cid単位フィールドマージ・INC-127/129/132恒久対策)
     if (k === "go5_image_manifest_v1") return true;      // Small synced CDN URL manifest (per-record LWW; no IDB scan).
+    if (k === "go5_tree_links_v1") return true;          // Posting-history reply trees (per-history-record LWW).
     if (/^go5_stock_meta$/.test(k)) return true;         // ドラフト一覧(id単位union・Chami依頼2026-07-31)
     if (/^go5_stock_archive$/.test(k)) return true;      // 作成履歴(投稿完了ぶん・id単位union・墓標なし・Chami依頼2026-08-03)
     if (/^go5_stock_del$/.test(k)) return true;          // ドラフト削除の墓標(端末をまたぐ削除の伝播)
@@ -409,6 +410,45 @@
       Object.keys(newer).forEach(function (id) { ids[id] = 1; });
       Object.keys(ids).forEach(function (id) {
         var rec = chooseImageManifestRec_(older[id], newer[id]);
+        if (rec) out[id] = rec;
+      });
+      return JSON.stringify(out);
+    } catch (e) { return null; }
+  }
+  // 投稿履歴の返信ツリー設定。履歴1件ごとに {trees,at} を持ち、別端末の別履歴編集を
+  // whole-key LWWで落とさない。trees:[] も明示削除として at の新しい側を採る。
+  var TREE_LINKS_KEY = "go5_tree_links_v1";
+  function isTreeLinksKey(k) { return String(k) === TREE_LINKS_KEY; }
+  function treeLinksRec_(v) {
+    if (!v || typeof v !== "object" || Array.isArray(v) || !Array.isArray(v.trees)) return null;
+    var trees = v.trees.map(function (t, i) {
+      if (!t || typeof t !== "object") return null;
+      var postUrl = String(t.postUrl || "").trim(), shortUrl = String(t.shortUrl || "").trim();
+      if (!postUrl || !shortUrl) return null;
+      return {
+        id: String(t.id || ("tree-" + (i + 1))),
+        name: String(t.name || ("ツリー" + (i + 1))).slice(0, 40),
+        postUrl: postUrl,
+        shortUrl: shortUrl
+      };
+    }).filter(Boolean);
+    return { trees: trees, at: Math.max(0, Number(v.at) || 0) };
+  }
+  function chooseTreeLinksRec_(a, b) {
+    a = treeLinksRec_(a); b = treeLinksRec_(b);
+    if (!a) return b; if (!b) return a;
+    if (a.at !== b.at) return a.at > b.at ? a : b;
+    return JSON.stringify(a) >= JSON.stringify(b) ? a : b;
+  }
+  function mergeTreeLinks_(olderStr, newerStr) {
+    try {
+      var older = JSON.parse(olderStr || "{}"), newer = JSON.parse(newerStr || "{}"), out = {}, ids = {};
+      if (!older || typeof older !== "object" || Array.isArray(older)) older = {};
+      if (!newer || typeof newer !== "object" || Array.isArray(newer)) newer = {};
+      Object.keys(older).forEach(function (id) { ids[id] = 1; });
+      Object.keys(newer).forEach(function (id) { ids[id] = 1; });
+      Object.keys(ids).forEach(function (id) {
+        var rec = chooseTreeLinksRec_(older[id], newer[id]);
         if (rec) out[id] = rec;
       });
       return JSON.stringify(out);
@@ -858,7 +898,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && !isImageManifestKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && !isImageManifestKey(k) && !isTreeLinksKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -929,6 +969,15 @@
           }
         });
 
+        // 返信ツリー設定も履歴ID単位で統合。別端末で編集した別投稿の設定を失わない。
+        Object.keys(mls).forEach(function (k) {
+          if (!isTreeLinksKey(k)) return;
+          var a = lmapLs[k], b = rls[k];
+          if (a && b && !a.d && !b.d) {
+            var u = mergeTreeLinks_(a.v, b.v);
+            if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
+          }
+        });
         // 墓標(cand_del / go5_stock_del / bsky_tpl_del)は両側にあれば id/name 単位で union。(片側の削除を失わない)
         Object.keys(mls).forEach(function (k) {
           if (!isCandDelKey(k) && !isStockDelKey(k) && !isTplDelKey(k) && !isDiscDelKey(k) && !isArchDelKey(k)) return;
@@ -1375,7 +1424,7 @@
     // 作成履歴(go5_stock_archive)の thumbDataUrl detox 純関数を公開。(stock.js の保存側=S2 が呼ぶ。副作用なし・fail-open)
     slimStockArchive: function (arrStr, keepN) { return slimStockArchive(arrStr, keepN); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
+    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_; root.Go5Sync._test.fastCandidateMergeState_ = fastCandidateMergeState_;

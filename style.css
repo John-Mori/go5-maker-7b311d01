@@ -1330,3 +1330,37 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 @media (min-width:1024px){
   .sale-stats{ flex-basis:100%; text-align:center; margin:0 0 6px 0; }
 }
+
+/* ── 単体短縮：アフィリエイト変換・実転送先検証 ── */
+.manual-aff-check{display:inline-flex;align-items:center;gap:8px;margin:12px 0 2px;padding:8px 11px;border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13px;font-weight:700;cursor:pointer;background:rgba(255,255,255,.025);}
+.manual-aff-check input{width:20px;height:20px;margin:0;accent-color:var(--accent);flex:0 0 auto;}
+.manual-aff-status{display:flex;align-items:center;gap:12px;margin-top:9px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:#0b1019;font-size:12px;line-height:1.45;}
+.manual-aff-status b{color:var(--accent);}
+.manual-aff-status.is-ok span{color:#67d6bd;font-weight:800;}
+.manual-aff-status.is-ng span{color:#ff8a8a;font-weight:800;}
+.manual-aff-status.is-off span{color:var(--sub);}
+
+/* ── 投稿履歴編集：返信ツリーと返信内アフィ計測リンク ── */
+.vedit-tree-box{margin:2px 0 14px;padding:11px;border:1px solid var(--line);border-radius:10px;background:rgba(43,179,192,.045);}
+.vedit-tree-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px;color:var(--ink);font-size:13px;font-weight:800;}
+.vedit-tree-title #veditTreeAdd{padding:6px 10px;border:1px solid var(--accent);border-radius:8px;background:transparent;color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;}
+.vedit-tree-box>.vedit-hint{font-size:11px;color:var(--sub);line-height:1.5;margin-bottom:9px;}
+.vedit-tree-row{padding:9px 9px 2px;margin-top:8px;border:1px solid var(--line);border-radius:9px;background:#0b1019;}
+.vedit-tree-head{display:flex;align-items:flex-end;gap:8px;margin-bottom:8px;}
+.vedit-tree-head label{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px;color:var(--sub);font-size:11px;}
+.vedit-tree-head input{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#0e1422;color:var(--ink);font-size:14px;}
+.vedit-tree-del{flex:0 0 auto;padding:7px 10px;border:1px solid #9a5360;border-radius:8px;background:transparent;color:#f0a2af;font-size:12px;cursor:pointer;}
+.vedit-tree-row .vedit-field{margin-bottom:8px;}
+.vrow-tree-list{display:flex;flex-direction:column;gap:3px;margin-top:5px;padding-top:4px;border-top:1px dashed var(--line);}
+.vrow-tree-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:11px;line-height:1.35;}
+.vrow-tree-row a{color:#ff79b0;font-weight:800;text-decoration:none;}
+.vrow-tree-row a:hover{text-decoration:underline;}
+.vrow-tree-row span{display:inline-flex;align-items:center;color:var(--sub);white-space:nowrap;}
+.vrow-tree-row .emico{height:1em;vertical-align:-.12em;margin-right:2px;}
+@media(max-width:560px){
+  .vedit-tree-box{padding:9px;}
+  .vedit-tree-row{padding:8px 7px 2px;}
+  .vedit-tree-row .vedit-bsky-row{flex-wrap:wrap;}
+  .vedit-tree-row .vedit-bsky-row input{flex:1 1 100%;}
+  .vedit-tree-row .vedit-copy{margin-left:auto;}
+}

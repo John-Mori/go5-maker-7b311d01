@@ -30,8 +30,8 @@
     discountDigest: $('discountDigest'), discountDigest2: $('discountDigest2'), discountDigestPc: $('discountDigestPc'),
     histList: $('histList'), histRefresh: $('histRefresh'), histShowDiscarded: $('histShowDiscarded'),
     manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortAccount: $('manualShortAccount'),
-    manualShortDomain: $('manualShortDomain'), manualShortBtn: $('manualShortBtn'),
-    manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
+    manualAffiliateOn: $('manualAffiliateOn'), manualShortDomain: $('manualShortDomain'), manualShortBtn: $('manualShortBtn'),
+    manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'), manualAffStatus: $('manualAffStatus'),
     movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn'),
     movieWorkAffi: $('movieWorkAffi'), movieWorkAffiCopy: $('movieWorkAffiCopy'), movieWorkInfo: $('movieWorkInfo'),
     ytQSave: $('ytQSave'), ytQLoad: $('ytQLoad'), ytReset: $('ytReset'), ytUndo: $('ytUndo'), ytRedo: $('ytRedo'), ytQInfo: $('ytQInfo'),
@@ -1963,7 +1963,7 @@
   //     短縮すると、従来は現UIアカウントのドメイン(5mgl.com/yoz2.com)で発行され、そのドラフトの所属chと
   //     ドメインが食い違い=別々に計測できない。account 指定時はそのchのドメインで発行する(未指定=従来どおり現ch)。
   function shortenViaWorker(longUrl, _tries, account) {
-    if (!shortWorkerReady(account)) return Promise.resolve('');
+    if (!shortWorkerReady(account)) return Promise.resolve(null);
     _tries = _tries || 0;
     var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 6000) : null;
@@ -1975,12 +1975,15 @@
       signal: ctl ? ctl.signal : undefined
     }).then(function (r) {
       if (timer) clearTimeout(timer);
-      if (r.ok) return r.json().then(function (j) { var s = (j && j.short) || ''; return /^https?:\/\//.test(s) ? s : ''; });
-      if (r.status === 400 || r.status === 401 || r.status === 403) return ''; // 確定的な拒否＝再試行しない
-      return retryOr('');   // 429/5xx＝一時的の可能性＝1回だけ再試行
+      if (r.ok) return r.json().then(function (j) {
+        var short = (j && j.short) || '', destination = (j && j.url) || '';
+        return /^https?:\/\//.test(short) ? { short: short, destination: destination } : null;
+      });
+      if (r.status === 400 || r.status === 401 || r.status === 403) return null; // 確定的な拒否＝再試行しない
+      return retryOr(null);   // 429/5xx＝一時的の可能性＝1回だけ再試行
     }).catch(function () {
       if (timer) clearTimeout(timer);
-      return retryOr('');   // ネットワーク例外/タイムアウト＝1回だけ再試行
+      return retryOr(null);   // ネットワーク例外/タイムアウト＝1回だけ再試行
     });
   }
   // 外部短縮サービスへの新規発番経路は撤去済み。独自link-workerだけを使用し、
@@ -1990,10 +1993,10 @@
   //   worker失敗時：shortUrl/shareUrlは生URL。(長いが有効・計測不能を隠さない)
   //   ★opts.account 指定時はそのチャンネルのドメインで r2 短縮を発行する(未指定=現UIアカウント・従来動作)。
   function makeShortAndShare(longUrl, opts) {
-    if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '' });
+    if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '', destinationUrl: '' });
     var account = opts && opts.account;
     return shortenViaWorker(longUrl, 0, account).then(function (r2) {
-      if (r2) return { shortUrl: r2, shareUrl: r2 };
+      if (r2 && r2.short) return { shortUrl: r2.short, shareUrl: r2.short, destinationUrl: r2.destination || '' };
       // ★2026-08-13 恒久策(Chami「またda.gdの短縮リンク出してくんの、やめろ」・2度目=C-038):
       //   ワーカーが一過性に落ちた瞬間だけ、旧実装は外部短縮(計測不能・Chami禁止)へ
       //   フォールバックして短縮リンクを"発行"していた=これが唯一の da.gd 発生源だった。実測(2026-08-13)で
@@ -2001,7 +2004,7 @@
       //   → 保険で da.gd を新規発番することを完全にやめる。ワーカー失敗時は"生URLのまま"返す。
       //   生URLはそのまま踏めて壊れない(計測できないだけ)=Chamiが二度禁止した da.gd を機構として二度と出さない。
       //   発番器そのものを削除し、将来のフラグ変更でも外部短縮が復活しない構造にした。
-      return Promise.resolve({ shortUrl: longUrl, shareUrl: longUrl });
+      return Promise.resolve({ shortUrl: longUrl, shareUrl: longUrl, destinationUrl: longUrl });
     });
   }
   // 後方互換：表示用の1本を返す薄いラッパ。(手動短縮などで使用)
@@ -2344,29 +2347,87 @@
   refreshManualShortDomain_(true);
   if (els.manualShortAccount) els.manualShortAccount.addEventListener('change', function () { refreshManualShortDomain_(false); });
   document.addEventListener('account-changed', function () { refreshManualShortDomain_(true); });
+  function manualAffStatus_(kind, message) {
+    var el = els.manualAffStatus; if (!el) return;
+    if (!message) { el.hidden = true; el.textContent = ''; el.className = 'manual-aff-status'; return; }
+    el.hidden = false;
+    el.className = 'manual-aff-status ' + (kind === 'ok' ? 'is-ok' : (kind === 'off' ? 'is-off' : 'is-ng'));
+    el.textContent = '';
+    var title = document.createElement('b'), value = document.createElement('span');
+    title.textContent = 'アフィチェック';
+    value.textContent = (kind === 'ok' ? '✅ ' : (kind === 'off' ? '− ' : '⚠️ ')) + message;
+    el.appendChild(title); el.appendChild(value);
+  }
+  function rememberManualAffiliateShort_(account, shortUrl, destinationUrl) {
+    try { sessionStorage.setItem('go5_manual_short_last__' + account, JSON.stringify({ shortUrl: shortUrl, destinationUrl: destinationUrl, affiliateOk: true, at: Date.now() })); } catch (e) {}
+  }
+  try {
+    window.Go5ManualShortLast = function (account) {
+      try { return JSON.parse(sessionStorage.getItem('go5_manual_short_last__' + (account === 'acc2' ? 'acc2' : 'acc1')) || 'null'); } catch (e) { return null; }
+    };
+  } catch (e) {}
   if (els.manualShortBtn) els.manualShortBtn.addEventListener('click', function () {
     var url = (els.manualUrl && els.manualUrl.value || '').trim();
+    var useAffiliate = !els.manualAffiliateOn || !!els.manualAffiliateOn.checked;
     if (els.manualOut) { els.manualOut.textContent = ''; els.manualOut.removeAttribute('data-url'); }
+    manualAffStatus_('', '');
     if (!/^https?:\/\//.test(url)) {
       if (els.manualOut) els.manualOut.textContent = 'URLは http:// か https:// で始めてください';
       if (els.manualResult) els.manualResult.hidden = false;
       return;
     }
+    var targetUrl = url;
+    if (useAffiliate) {
+      if (typeof window.ensureAffiliateLink !== 'function' || typeof window.hasRealAffiliateId !== 'function') {
+        if (els.manualOut) els.manualOut.textContent = 'アフィリンク機能を読み込めませんでした。再読み込み後にお試しください';
+        if (els.manualResult) els.manualResult.hidden = false;
+        manualAffStatus_('ng', 'アフィリンクNG');
+        return;
+      }
+      var afId = curAfId_();
+      var normalized = (typeof window.normalizeWorkUrl === 'function' && window.normalizeWorkUrl(url)) || url;
+      var built = window.ensureAffiliateLink(normalized, afId);
+      if (!built || !built.ok || !built.link || !window.hasRealAffiliateId(built.link)) {
+        if (els.manualOut) els.manualOut.textContent = curAfId_() ? 'DMM/FANZAの作品URLを確認してください' : '詳細設定でFANZAアフィリエイトIDを入力してください';
+        if (els.manualResult) els.manualResult.hidden = false;
+        manualAffStatus_('ng', 'アフィリンクNG');
+        return;
+      }
+      targetUrl = built.link;
+    }
     var btn = els.manualShortBtn, orig = btn.textContent;
     var account = manualShortAccount_();
     var expectedBase = workerBase(account).replace(/\/+$/, '');
     btn.disabled = true; btn.textContent = '短縮中…';
-    makeShortAndShare(url, { account: account }).then(function (res) {
+    makeShortAndShare(targetUrl, { account: account }).then(function (res) {
       var s = (res && (res.shareUrl || res.shortUrl)) || '';
-      var issued = !!(s && expectedBase && s.indexOf(expectedBase + '/') === 0);
+      var destination = (res && res.destinationUrl) || '';
+      var domainOk = !!(s && expectedBase && s.indexOf(expectedBase + '/') === 0);
+      // ワーカーが返した「実際に保存した転送先」を照合する。生成前の見込みだけではOKにしない。
+      var destinationAfId = '';
+      try { destinationAfId = new URL(destination).searchParams.get('af_id') || ''; } catch (e) {}
+      var affiliateOk = !useAffiliate || !!(domainOk && destination === targetUrl && window.hasRealAffiliateId && window.hasRealAffiliateId(destination) && destinationAfId === afId);
+      var issued = domainOk && affiliateOk;
       if (els.manualOut) {
-        els.manualOut.textContent = issued ? s : '短縮リンクを発行できませんでした。通信後にもう一度お試しください';
+        els.manualOut.textContent = issued ? s : (domainOk && useAffiliate ? '短縮先のアフィリンクを確認できませんでした。発行し直してください' : '短縮リンクを発行できませんでした。通信後にもう一度お試しください');
         if (issued) els.manualOut.setAttribute('data-url', s);
       }
       if (els.manualResult) els.manualResult.hidden = false;
+      if (useAffiliate) {
+        manualAffStatus_(affiliateOk && domainOk ? 'ok' : 'ng', affiliateOk && domainOk ? 'アフィリンクOK' : 'アフィリンクNG');
+        if (issued) rememberManualAffiliateShort_(account, s, destination);
+      } else {
+        manualAffStatus_('off', 'アフィリンクなし(チェックOFF)');
+      }
       btn.textContent = issued ? '✓ 発行しました' : '発行できませんでした';
       setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
       if (issued && els.manualUrl) els.manualUrl.value = '';
+    }).catch(function () {
+      if (els.manualOut) { els.manualOut.removeAttribute('data-url'); els.manualOut.textContent = '短縮リンクを発行できませんでした。通信後にもう一度お試しください'; }
+      if (els.manualResult) els.manualResult.hidden = false;
+      manualAffStatus_(useAffiliate ? 'ng' : 'off', useAffiliate ? 'アフィリンクNG' : 'アフィリンクなし(チェックOFF)');
+      btn.textContent = '発行できませんでした';
+      setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
     });
   });
   if (els.manualCopy) els.manualCopy.addEventListener('click', function () {

@@ -141,7 +141,53 @@
   function saveYtMap(m) { if (window.Go5Hist) { try { window.Go5Hist.write(ytMapKey(), m); return; } catch (e) {} } try { localStorage.setItem(ytMapKey(), JSON.stringify(m)); } catch (e) {} }
   function apiKey() { try { return (localStorage.getItem('yt_api_key') || '').trim(); } catch (e) { return ''; } }
   function itemKey(it) { return (window.HistMerge && window.HistMerge.historyItemKey) ? window.HistMerge.historyItemKey(it) : (it.manual ? it.id : (it.postUri ? ('u:' + it.postUri) : (it.videoId ? ('v:' + it.videoId) : (it.shortUrl ? ('s:' + it.shortUrl) : '')))); }
-  // verify_yt旧データの短縮URLキーも読みつつ、新規操作は強いcanonicalキーへ寄せる。
+
+  // 返信ツリー設定は履歴配列/シート列から分離した小さな同期マップを正本にする。
+  // ローカル履歴・シート由来行のどちらも videoId を優先して同じ設定へ結線できる。
+  var TREE_LINKS_KEY = 'go5_tree_links_v1';
+  function treeIdentity_(it, account) {
+    var spine = it && it.manual && it.id ? ('i:' + it.id)
+      : (it && it.videoId ? ('v:' + it.videoId)
+        : (it && it.id ? ('i:' + it.id)
+          : (it && it.postUri ? ('u:' + it.postUri) : itemKey(it || {}))));
+    return (account === 'acc2' ? 'acc2' : 'acc1') + '|' + spine;
+  }  function treeStoreLoad_() {
+    try { var v = JSON.parse(localStorage.getItem(TREE_LINKS_KEY) || '{}'); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {}; }
+    catch (e) { return {}; }
+  }
+  function normalizeTreeLinks_(trees) {
+    var out = [];
+    (Array.isArray(trees) ? trees : []).forEach(function (t, i) {
+      if (!t) return;
+      var postUrl = String(t.postUrl || '').trim(), shortUrl = String(t.shortUrl || '').trim();
+      if (!postUrl || !shortUrl) return;
+      out.push({
+        id: String(t.id || ('tree-' + Date.now() + '-' + i)),
+        name: String(t.name || ('ツリー' + (out.length + 1))).trim().slice(0, 40) || ('ツリー' + (out.length + 1)),
+        postUrl: postUrl,
+        shortUrl: shortUrl
+      });
+    });
+    return out;
+  }
+  function treeLinksFor_(it, account) {
+    var rec = treeStoreLoad_()[treeIdentity_(it, account)];
+    return normalizeTreeLinks_(rec && rec.trees);
+  }
+  function saveTreeLinksFor_(it, account, trees) {
+    var store = treeStoreLoad_(), key = treeIdentity_(it, account), normalized = normalizeTreeLinks_(trees);
+    var before = store[key] && store[key].trees;
+    var changed = JSON.stringify(normalizeTreeLinks_(before)) !== JSON.stringify(normalized);
+    // ツリーを触っていない通常編集では更新時刻を進めない。
+    // 同期先の新しいツリー設定を、内容が同じだけの古い端末が上書きするのを防ぐ。
+    if (!changed) return;
+    store[key] = { trees: normalized, at: Date.now() }; // 空配列も明示削除として同期
+    try { localStorage.setItem(TREE_LINKS_KEY, JSON.stringify(store)); }
+    catch (e) { showModalErr_('ツリー設定を保存できませんでした(端末の保存容量を確認してください)。'); return; }
+    if (changed && normalized.length) {
+      fetchAllClicks_(true).then(function () { renderWhenHistIdle_(); }, function () {}); // 新規ツリーを30分待たせず即集計
+    }
+  }  // verify_yt旧データの短縮URLキーも読みつつ、新規操作は強いcanonicalキーへ寄せる。
   function itemYt_(map, it) { return (window.HistMerge && window.HistMerge.historyMapValue) ? window.HistMerge.historyMapValue(map, it) : ((map && map[itemKey(it)]) || ''); }
   function num(n) { try { return Number(n).toLocaleString(); } catch (e) { return String(n); } }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
@@ -881,7 +927,9 @@
 
     document.querySelectorAll('[data-delta-vid]').forEach(function (el) {
       var vid = el.getAttribute('data-delta-vid');
-      el.innerHTML = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts'), el.getAttribute('data-delta-haswork') === '1', el.getAttribute('data-delta-prepost') === '1') || el.innerHTML;
+      var tree = el.querySelector('.vrow-tree-list'), treeHtml = tree ? tree.outerHTML : '';
+      var deltaHtml = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts'), el.getAttribute('data-delta-haswork') === '1', el.getAttribute('data-delta-prepost') === '1');
+      if (deltaHtml) el.innerHTML = deltaHtml + treeHtml;
     });
   }
   function fetchDeltas_(force, cb) {
@@ -992,6 +1040,17 @@
     var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
     return { c1: clicksTotal, c2: wclicks, code: code, wcode: wcode };
   }
+  function treeRowsHtml_(it, account) {
+    var trees = treeLinksFor_(it, account);
+    if (!trees.length) return '';
+    return '<div class="vrow-tree-list">' + trees.map(function (t) {
+      var c = sumClickCodes_([t.shortUrl]), code = codeOf(t.shortUrl);
+      return '<div class="vrow-tree-row">' +
+        '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener" title="返信ポストを開く">' + esc(t.name || 'ツリー1') + '</a>' +
+        '<span title="返信ポスト内のアフィリンククリック数"><img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="ツリークリック"> ' + (c != null ? num(c) : (code ? '…' : '–')) + '</span>' +
+      '</div>';
+    }).join('') + '</div>';
+  }
   var viewsCache = {};     // videoId -> views
   var publishedCache = {}; // videoId -> publishedAt(ms)
   var titleCache = {};     // videoId -> YouTubeタイトル
@@ -1056,6 +1115,7 @@
   var _pendingWorkShare = ''; // 作品クリック(導線2)の生成表示URL。保存時に item.workShareUrl へ付与
   var _openedWorkShort = '';  // モーダルを開いた時点の表示値。通常保存で未変更URLへ触れないための比較元
   var _curSrcUrl = '';    // 生成の元にする投稿URL(編集中アイテムのpostUrl等)
+  var _treeContextItem = null, _treeContextAccount = 'acc1'; // ツリー設定の保存先履歴
 
   // 合算(導線1のみ・Chami依頼2026-07-31): X凍結→Bluesky退避などで別の短縮URLへ割れた同一作品の
   //   クリックを、この投稿へ束ねる。合算した短縮URL群のうち「最新の1本」を投稿URL欄(veditBsky)の
@@ -1119,6 +1179,88 @@
     list.innerHTML = '';
     (Array.isArray(urls) ? urls : []).forEach(function (u) { if (u) addHistRow_(u); });
   }
+  function treeSocialUrlOk_(url) {
+    try {
+      var u = new URL(String(url || '').trim()), h = u.hostname.toLowerCase(), p = u.pathname;
+      return ((h === 'x.com' || h === 'www.x.com' || h === 'twitter.com' || h === 'www.twitter.com') && /\/status\/\d+/.test(p))
+        || ((h === 'bsky.app' || h === 'www.bsky.app') && /\/profile\/[^/]+\/post\/[^/]+/.test(p));
+    } catch (e) { return false; }
+  }
+  function pasteInto_(inp) {
+    if (!inp) return;
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(function (t) {
+        inp.value = String(t || '').trim();
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.focus();
+      })
+        .catch(function () { inp.focus(); alert('クリップボードを読み取れませんでした。入力欄を長押しして貼り付けてください。'); });
+    } else { inp.focus(); alert('この環境ではボタン貼り付けに未対応です。入力欄を長押しして貼り付けてください。'); }
+  }
+  function recentTreeShort_(account) {
+    try {
+      var r = window.Go5ManualShortLast && window.Go5ManualShortLast(account);
+      return r && r.affiliateOk && r.shortUrl && (Date.now() - (Number(r.at) || 0)) < 6 * 3600 * 1000 ? r.shortUrl : '';
+    } catch (e) { return ''; }
+  }
+  function addTreeRow_(tree) {
+    var list = $('veditTreeList'); if (!list) return null;
+    tree = tree || {};
+    var idx = list.querySelectorAll('.vedit-tree-row').length + 1;
+    var row = document.createElement('div'); row.className = 'vedit-tree-row';
+    row.setAttribute('data-tree-id', String(tree.id || ('tree-' + Date.now() + '-' + idx)));
+    row.innerHTML =
+      '<div class="vedit-tree-head">' +
+        '<label>表示名<input class="vedit-tree-name" type="text" maxlength="40" value="' + esc(tree.name || ('ツリー' + idx)) + '"></label>' +
+        '<button type="button" class="vedit-tree-del" title="このツリー設定を削除">削除</button>' +
+      '</div>' +
+      '<label class="vedit-field">返信ポストURL(X / Bluesky・このURL自体は短縮しません)' +
+        '<div class="vedit-bsky-row"><input class="vedit-tree-post" type="url" inputmode="url" autocomplete="off" placeholder="https://x.com/.../status/... または https://bsky.app/profile/.../post/..." value="' + esc(tree.postUrl || '') + '">' +
+        '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-post">貼り付け</button></div>' +
+      '</label>' +
+      '<label class="vedit-field">返信内に掲載したアフィ計測短縮URL(ピンク矢印)' +
+        '<div class="vedit-bsky-row"><input class="vedit-tree-short" type="url" inputmode="url" autocomplete="off" placeholder="5mgl.com/... または yoz2.com/..." value="' + esc(tree.shortUrl || '') + '">' +
+        '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-short">貼り付け</button></div>' +
+      '</label>';
+    list.appendChild(row);
+    row.querySelector('.vedit-tree-del').addEventListener('click', function () {
+      row.parentNode.removeChild(row);
+      if (!list.querySelector('.vedit-tree-row')) addTreeRow_({});
+    });
+    row.querySelector('.vedit-tree-paste-post').addEventListener('click', function () { pasteInto_(row.querySelector('.vedit-tree-post')); });
+    row.querySelector('.vedit-tree-paste-short').addEventListener('click', function () { pasteInto_(row.querySelector('.vedit-tree-short')); });
+    var postInput = row.querySelector('.vedit-tree-post');
+    var shortInput = row.querySelector('.vedit-tree-short');
+    postInput.addEventListener('input', function () {
+      // 単体短縮で直前に発行・検証したURLは、ツリー入力を始めた時だけ補完する。
+      // モーダルを開いただけの通常編集には混入させない。
+      if (postInput.value.trim() && !shortInput.value.trim()) {
+        var recent = recentTreeShort_(_treeContextAccount);
+        if (recent) shortInput.value = recent;
+      }
+    });
+    return row;
+  }
+  function setTreeRows_(trees) {
+    var list = $('veditTreeList'); if (!list) return;
+    list.innerHTML = '';
+    var arr = Array.isArray(trees) ? trees : [];
+    if (arr.length) arr.forEach(function (t) { addTreeRow_(t); });
+    else addTreeRow_({});
+  }
+  function resolveTreeRows_() {
+    var rows = $('veditTreeList') ? $('veditTreeList').querySelectorAll('.vedit-tree-row') : [], out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i], name = (row.querySelector('.vedit-tree-name').value || '').trim() || ('ツリー' + (i + 1));
+      var postUrl = (row.querySelector('.vedit-tree-post').value || '').trim();
+      var shortUrl = (row.querySelector('.vedit-tree-short').value || '').trim();
+      if (!postUrl && !shortUrl) continue;
+      if (!treeSocialUrlOk_(postUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の返信ポストURLを確認してください(XまたはBlueskyの投稿URL)。' };
+      if (!codeOf(shortUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'のアフィ計測短縮URLは、5mgl.com または yoz2.com の発行済みURLを入れてください。' };
+      out.push({ id: row.getAttribute('data-tree-id'), name: name.slice(0, 40), postUrl: postUrl, shortUrl: shortUrl });
+    }
+    return { ok: true, trees: out };
+  }
   // 現在のモーダルDOMから {primary: 合算後の代表(最新の短縮URL), mergeUrls: 残り(過去)} を作る。
   //   並び＝過去(hist・読み取り専用)→現primary(投稿URL欄)→今回追加(staging)。最後(＝最新)を代表にする。
   //   保存→再オープンでも並びは同型なので代表が入れ替わらない(安定)。
@@ -1179,6 +1321,11 @@
           '</div>' +
           '<span class="vedit-hint" style="font-size:11px;color:var(--sub);">この短縮URLのクリックが作品クリック数(ピンクの矢印)として集計されます。空だと表示されません。</span>' +
         '</label>' +
+        '<section class="vedit-tree-box">' +
+          '<div class="vedit-tree-title"><span>🌳 ツリー設定</span><button id="veditTreeAdd" type="button">＋ ツリーを追加</button></div>' +
+          '<div class="vedit-hint">返信ポストのURLは短縮しません。返信内に掲載した作品用の計測短縮URLを結び、ピンク矢印のクリック数を親の投稿履歴へ表示します。</div>' +
+          '<div id="veditTreeList"></div>' +
+        '</section>' +
         '<div class="vedit-attrs">' +
           '<div class="vedit-attrs-title">カテゴリ(複数選択可・キャラ無し＝オリジナル)</div>' +
           attrDefs_().map(function (a) {
@@ -1225,6 +1372,10 @@
       var inp = addMergeRow_('');
       if (inp) inp.focus();
     });
+    $('veditTreeAdd').addEventListener('click', function () {
+      var row = addTreeRow_({});
+      if (row) { var inp = row.querySelector('.vedit-tree-post'); if (inp) inp.focus(); }
+    });
     // 作品URLのコピー。(Blueskyのコピーと同じ挙動)
     $('veditWorkCopy').addEventListener('click', function () {
       var inp = $('veditWork'); if (!inp) return;
@@ -1248,6 +1399,8 @@
     $('veditSave').addEventListener('click', function () {
       if (typeof _saveCb !== 'function') return;
       var cb = _saveCb;
+      var treeRes = resolveTreeRows_();
+      if (!treeRes.ok) { showModalErr_(treeRes.error); return; }
       _saveCb = null;
       var attrs = {};
       attrDefs_().forEach(function (a) { var el = $('veditAttr_' + a.key); attrs[a.key] = !!(el && el.checked); });
@@ -1262,7 +1415,8 @@
         (wsEl && wsEl.value) || '旧作',
         ($('veditWorkShort').value || '').trim(),
         (platEl && platEl.checked) ? 'bsky' : 'x', // 既定=X
-        _mres.mergeUrls // 合算URL(導線1のみ・過去の短縮URL群=クリック加算)
+        _mres.mergeUrls, // 合算URL(導線1のみ・過去の短縮URL群=クリック加算)
+        treeRes.trees // 返信ポストURL＋その返信内のアフィ計測短縮URL
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -1320,15 +1474,17 @@
 
   function closeModal_() {
     var o = $('veditOverlay'); if (o) o.hidden = true;
-    _saveCb = null;
+    _saveCb = null; _treeContextItem = null;
   }
 
-  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal, platform, mergeUrls) {
+  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal, platform, mergeUrls, treeLinks, treeItem, treeAccount) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
     $('veditBsky').value = bskyVal || '';
     setMergeRows_(mergeUrls); // 合算URL(導線1のみ)を復元
+    _treeContextItem = treeItem || null; _treeContextAccount = treeAccount === 'acc2' ? 'acc2' : 'acc1';
+    setTreeRows_(treeLinks); // 返信ポストURLと返信内アフィ短縮URLを復元(空ならツリー1を表示)
     var plat = (platform === 'bsky') ? 'bsky' : 'x'; // 既定=X(Chami:これから原則X投稿)
     if ($('veditPlatX')) $('veditPlatX').checked = (plat === 'x');
     if ($('veditPlatBsky')) $('veditPlatBsky').checked = (plat === 'bsky');
@@ -1431,7 +1587,7 @@
     if (Array.isArray(mergeUrls) && mergeUrls.length) item.mergeUrls = mergeUrls;
     else delete item.mergeUrls;
   }
-  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
     var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
     // YouTube URL
     var ymap = loadYtMap();
@@ -1476,6 +1632,7 @@
       }
       saveArr(histKey(), hist);
     }
+    if (saved) saveTreeLinksFor_(saved, chForItem_(saved), treeLinks);
     if (saved) pushItemToGas_(saved); // スプレッドシートのカテゴリ列等へ反映(GAS設定時のみ)
     if (ytUrl) pokeSnapshotNow_();   // YT URLを紐付けた日は即スナップ=日別記録のベースラインを当日中に作る(④)
     // 非r2リンクを入れた保存でも自動で計測キーを確定させる(冪等短縮=同URLなら既存コード+累積クリックを引き継ぐ)
@@ -1486,7 +1643,7 @@
 
   // シート由来行(_fromSheet)の編集をGASへ即時upsertする。成功後にUIを更新、失敗はモーダルにエラーを出す。
   // localStorageへは書き戻さない(INC-112防壁を維持)。
-  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
+  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
     var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
@@ -1511,6 +1668,7 @@
     if (_pendingShare) edited.shareUrl = _pendingShare;
     applyWorkShort_(edited, workShortVal);
     applyMergeUrls_(edited, mergeUrls); // 合算URL(導線1のみ・クライアント表示用。GAS列は持たない)
+    saveTreeLinksFor_(edited, chForItem_(edited), treeLinks); // シート由来行でも全端末共有マップへ保存
 
     var payload = {
       op: 'upsert',
@@ -1994,6 +2152,13 @@
     if (_histIdleRenderT) { clearTimeout(_histIdleRenderT); _histIdleRenderT = null; }
     render();
   }
+  var _treeSyncSeen_ = (function () { try { return localStorage.getItem(TREE_LINKS_KEY) || ''; } catch (e) { return ''; } })();
+  document.addEventListener('go5-synced', function () {
+    var now = ''; try { now = localStorage.getItem(TREE_LINKS_KEY) || ''; } catch (e) {}
+    if (now === _treeSyncSeen_) return;
+    _treeSyncSeen_ = now;
+    fetchAllClicks_(true).then(function () { renderWhenHistIdle_(); }, function () { renderWhenHistIdle_(); });
+  });
   function historyPreviewData_(usedKey, refCid) {
     var legacy = (refCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(refCid) || []) : [];
     var stored = (window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []) : [];
@@ -2270,7 +2435,7 @@
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
-          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (deltaTs || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (prePostFlag ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前/スナップ前">' + (vid ? fmtDelta_(deltaCache[vid], deltaTs, !!(wcode || it.workShortUrl), prePostFlag) : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (deltaTs || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (prePostFlag ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前/スナップ前">' + (vid ? fmtDelta_(deltaCache[vid], deltaTs, !!(wcode || it.workShortUrl), prePostFlag) : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + treeRowsHtml_(it, chForItem_(it)) + '</span>' +
           '<div class="vrow-actcol">' +
             (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
             ((!it._fromSheet || it.videoId) ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
@@ -2477,18 +2642,18 @@
         var attrCur = {}; attrDefs_().forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
         _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
         if (it._fromSheet) {
-          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
-            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls);
-          }, workShortCur, platOf_(it), it.mergeUrls);
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
+            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks);
+          }, workShortCur, platOf_(it), it.mergeUrls, treeLinksFor_(it, chForItem_(it)), it, chForItem_(it));
           // シート由来行(別端末で作成)は「動画で使った画像」が欠けるので、ここでも後付け添付できるようにする。
           // 画像はvideoId単位の別ストア(write-through)＝localStorageの履歴配列には書き戻さない(INC-112防壁は無関係)。
           addPostImagesToModal_(k, it, 'used');
           wireRegenButton_(k, it); // 「🔄 データ再作成」を配線(反映されてない履歴の回復・Chami依頼2026-08-15)
         } else {
-          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
             closeModal_();
-            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls);
-          }, workShortCur, platOf_(it), it.mergeUrls);
+            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks);
+          }, workShortCur, platOf_(it), it.mergeUrls, treeLinksFor_(it, chForItem_(it)), it, chForItem_(it));
           addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
           addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
           addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
@@ -3337,7 +3502,7 @@
       }
     } catch (e) {}
     _curSrcUrl = ''; // 新規追加：生成元はveditBskyの入力値を使う
-    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -3356,21 +3521,26 @@
       applyWorkShort_(entry, workShortVal); // 作品クリック計測URL(導線2)
       if (platform === 'x' || platform === 'bsky') entry.platform = platform; // X↗/Bsky↗表示の手動指定(既定X)
       if (Array.isArray(mergeUrls) && mergeUrls.length) entry.mergeUrls = mergeUrls; // 合算URL(導線1のみ)
+      saveTreeLinksFor_(entry, acct(), treeLinks);
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       pokeSnapshotNow_(); // 手動追加でもYT URL紐付け当日に日別記録のベースラインを作る(④)
       refresh();
-    });
+    }, '', 'x', [], [], null, acct());
   }
 
   // クリック数(開封数)・YouTube視聴回数/投稿日時/題名をAPIから取得しキャッシュへ。Promiseを返す。
   function fetchData_(items, ymap, force) { // force=true(手動🔄更新)のときだけTTLを無視して取り直す
     // 導線1(shortUrl=YT→投稿)と導線2(workShortUrl=投稿→FANZA)の両計測コードをまとめて照会
-    var mergeCodes = [];
-    items.forEach(function (it) { if (Array.isArray(it.mergeUrls)) it.mergeUrls.forEach(function (u) { var c = codeOf(u || ''); if (c) mergeCodes.push(c); }); });
+    var mergeCodes = [], treeCodes = [];
+    items.forEach(function (it) {
+      if (Array.isArray(it.mergeUrls)) it.mergeUrls.forEach(function (u) { var c = codeOf(u || ''); if (c) mergeCodes.push(c); });
+      treeLinksFor_(it, chForItem_(it)).forEach(function (t) { var tc = codeOf(t.shortUrl || ''); if (tc) treeCodes.push(tc); });
+    });
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); })
       .concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); }))
       .concat(mergeCodes)
+      .concat(treeCodes)
       .filter(Boolean).filter(function (v, i, a) { return a.indexOf(v) === i; });
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(itemYt_(ymap, it) || it.ytUrl || ''); }).filter(Boolean);
     var uniqVids = vids.filter(function (v, i, a) { return a.indexOf(v) === i; }); // 重複動画IDは1回だけ照会
