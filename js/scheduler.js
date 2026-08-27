@@ -16,10 +16,50 @@
     });
   }
 
+
+  // Treat 05:00 local time as the start of each posting day.
+  function postingDayStart(nowMs) {
+    var now = new Date(Number(nowMs)), start = new Date(Number(nowMs));
+    start.setHours(5, 0, 0, 0);
+    if (now.getTime() < start.getTime()) start.setDate(start.getDate() - 1);
+    return start.getTime();
+  }
+  function splitRecentPosts(rows, nowMs) {
+    var todayStart = postingDayStart(nowMs);
+    var tomorrow = new Date(todayStart); tomorrow.setDate(tomorrow.getDate() + 1);
+    var yesterday = new Date(todayStart); yesterday.setDate(yesterday.getDate() - 1);
+    var out = { today: [], yesterday: [], todayStart: todayStart, tomorrowStart: tomorrow.getTime(), yesterdayStart: yesterday.getTime() };
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      var t = Number(row && row.publishedAt); if (!t) return;
+      if (t >= todayStart && t < out.tomorrowStart) out.today.push(row);
+      else if (t >= out.yesterdayStart && t < todayStart) out.yesterday.push(row);
+    });
+    return out;
+  }
+  function sortRecentPosts(rows, mode) {
+    var key = mode === 'views' ? 'views' : (mode === 'pink' ? 'pinkClicks' : (mode === 'peak' ? 'peakViews' : 'publishedAt'));
+    return (Array.isArray(rows) ? rows.slice() : []).sort(function (a, b) {
+      var av = Number(a && a[key]), bv = Number(b && b[key]);
+      var aOk = a && a[key] != null && !isNaN(av), bOk = b && b[key] != null && !isNaN(bv);
+      if (aOk && bOk && av !== bv) return bv - av;
+      if (aOk !== bOk) return aOk ? -1 : 1;
+      return Number(b && b.publishedAt || 0) - Number(a && a.publishedAt || 0);
+    });
+  }
+  function recentCounts(rows) {
+    var c = { acc1: 0, acc2: 0, total: 0 };
+    (Array.isArray(rows) ? rows : []).forEach(function (row) { if (row && row.account === 'acc2') c.acc2++; else c.acc1++; c.total++; });
+    return c;
+  }
+
   if (typeof window !== 'undefined') {
     var queue = [];
     var seq = 0;
     var firstUrlRe = /https?:\/\/[^\s]+/;
+    // Today is expanded by default. Yesterday stays lazy until the user opens it.
+    var recentOpen = { today: true, yesterday: false };
+    var recentSort = 'latest';
+    var recentHydrateTimer = 0;
 
     function notify(title, body) {
       try {
@@ -36,6 +76,53 @@
     function findById(id) {
       for (var i = 0; i < queue.length; i++) { if (String(queue[i].id) === String(id)) return queue[i]; }
       return null;
+    }
+
+
+    function recentPosts_() {
+      try {
+        if (global.Go5History && typeof global.Go5History.recentPublishedCached === 'function') {
+          var todayStart = postingDayStart(Date.now()), yesterdayStart = new Date(todayStart);
+          yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          return global.Go5History.recentPublishedCached({
+            fromMs: yesterdayStart.getTime(), todayStart: todayStart,
+            includeTodayDetails: recentOpen.today, includeYesterdayDetails: recentOpen.yesterday
+          }) || [];
+        }
+      } catch (e) {}
+      return [];
+    }
+    function recentCountHtml_(rows) {
+      var c = recentCounts(rows);
+      return '<span class="rsv-recent-count">\u6708\u8a60\u307f' + c.acc1 + '\u672c\u3000\u5bb5\u685c' + c.acc2 + '\u672c\u3000\u5408\u8a08' + c.total + '\u672c</span>';
+    }
+    function recentMetric_(value, pending) { return value != null ? Number(value).toLocaleString() : (pending ? '\u2026' : '\u2013'); }
+    function recentRowHtml_(row) {
+      var ch = row.account === 'acc2' ? '\u5bb5\u685c\u8276\u5e16' : '\u6708\u8a60\u307f';
+      var cls = row.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
+      var postLabel = row.postPlatform === 'x' ? 'X\u2197' : 'Bsky\u2197';
+      var postCls = row.postPlatform === 'x' ? 'vlink-x' : 'vlink-bsky';
+      var pinkIcon = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="\u30d4\u30f3\u30af\u30af\u30ea\u30c3\u30af">';
+      return '<div class="vrow rsv-recent-row" data-recent-item="' + esc(row.videoId || row.id || '') + '"><div class="vrow-body">' +
+        '<div class="vrow-h"><b>' + fmt(row.publishedAt) + '</b><span class="rsv-badge ' + cls + '">' + ch + '</span></div>' +
+        '<div class="vrow-title">' + esc(row.title || '(\u7121\u984c)') + '</div><div class="vmetrics">' +
+        '<span title="YouTube\u518d\u751f\u6570">\u25b6 ' + recentMetric_(row.views, !!row.videoId) + '</span>' +
+        '<span title="\u30d4\u30f3\u30af\u30af\u30ea\u30c3\u30af\u6570">' + pinkIcon + ' ' + recentMetric_(row.pinkClicks, !!row.hasPink) + '</span>' +
+        '<span title="\u30d4\u30fc\u30af\u518d\u751f\u6570">\ud83c\udf00 \u25b6 ' + recentMetric_(row.peakViews, false) + (row.peakViews != null ? '/\u6642' : '') + '</span>' +
+        '<span class="vrow-links">' +
+        (row.postUrl ? '<a class="vlink ' + postCls + '" href="' + esc(row.postUrl) + '" target="_blank" rel="noopener">' + postLabel + '</a>' : '') +
+        (row.ytUrl ? '<a class="vlink vlink-yt" href="' + esc(row.ytUrl) + '" target="_blank" rel="noopener">YouTube\u2197</a>' : '') +
+        (row.workUrl ? '<a class="vlink vlink-work" href="' + esc(row.workUrl) + '" target="_blank" rel="noopener">\u4f5c\u54c1\u2197</a>' : '') +
+        '</span></div></div></div>';
+    }
+    function recentSectionHtml_(kind, rows, title) {
+      var opened = !!recentOpen[kind], sorted = opened ? sortRecentPosts(rows, recentSort) : [];
+      return '<section class="card rsv-recent-section" data-recent-group="' + kind + '">' +
+        '<button class="rsv-recent-toggle" type="button" data-recent-toggle="' + kind + '" aria-expanded="' + (opened ? 'true' : 'false') + '">' +
+        '<span class="rsv-recent-title"><span aria-hidden="true">' + (opened ? '\u25bc' : '\u25b6') + '</span> ' + title + '</span>' +
+        recentCountHtml_(rows) + '</button>' +
+        (opened ? '<div class="rsv-recent-list">' + (sorted.length ? sorted.map(recentRowHtml_).join('') : '<div class="hint rsv-recent-empty">\u8a72\u5f53\u3059\u308bYouTube\u52d5\u753b\u306f\u3042\u308a\u307e\u305b\u3093\u3002</div>') + '</div>' : '') +
+        '</section>';
     }
 
     function fire(it) {
@@ -148,10 +235,8 @@
         return (b.ts || 0) - (a.ts || 0);
       });
 
-      if (!pend.length && !ytList.length) {
-        el.innerHTML = '<div style="padding:32px 16px;text-align:center;color:var(--sub);">予約中の投稿・公開待ちの作品はありません</div>';
-        return;
-      }
+      // Read only locally cached posting-history data; never fetch on tab open.
+      var recent = el.hidden ? { today: [], yesterday: [] } : splitRecentPosts(recentPosts_(), Date.now());
 
       var html = '<div style="padding:12px">';
       // ① YouTube 公開待ち
@@ -189,8 +274,24 @@
             '</div></div>';
         }).join('') : '<div class="hint">Blueskyの予約はありません。</div>') +
         '</div>';
+      // Keep yesterday's row DOM absent until its disclosure button is opened.
+      html += '<div class="rsv-recent-toolbar"><label for="rsvRecentSort">\u4e26\u3073\u9806</label><select id="rsvRecentSort" aria-label="\u6295\u7a3f\u52d5\u753b\u306e\u4e26\u3073\u9806">' +
+        '<option value="latest"' + (recentSort === 'latest' ? ' selected' : '') + '>\u6700\u65b0\u9806</option>' +
+        '<option value="views"' + (recentSort === 'views' ? ' selected' : '') + '>\u518d\u751f\u6570\u304c\u591a\u3044\u9806</option>' +
+        '<option value="pink"' + (recentSort === 'pink' ? ' selected' : '') + '>\u30d4\u30f3\u30af\u30af\u30ea\u30c3\u30af\u304c\u591a\u3044\u9806</option>' +
+        '<option value="peak"' + (recentSort === 'peak' ? ' selected' : '') + '>\u30d4\u30fc\u30af\u518d\u751f\u6570\u304c\u9ad8\u3044\u9806</option></select></div>' +
+        recentSectionHtml_('today', recent.today, '\u672c\u65e5\u6295\u7a3f\u3057\u305f\u52d5\u753b') +
+        recentSectionHtml_('yesterday', recent.yesterday, '\u6628\u65e5\u6295\u7a3f\u3057\u305f\u52d5\u753b');
       html += '</div>';
       el.innerHTML = html;
+      var sortEl = document.getElementById('rsvRecentSort');
+      if (sortEl) sortEl.addEventListener('change', function () { recentSort = sortEl.value || 'latest'; renderTab(); });
+      el.querySelectorAll('[data-recent-toggle]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var kind = b.getAttribute('data-recent-toggle');
+          if (kind === 'today' || kind === 'yesterday') { recentOpen[kind] = !recentOpen[kind]; renderTab(); }
+        });
+      });
       el.querySelectorAll('[data-tcancel]').forEach(function (b) {
         b.addEventListener('click', function () {
           if (window.confirm('この予約を取り消しますか？')) cancel(b.getAttribute('data-tcancel'));
@@ -216,6 +317,17 @@
     // 初期描画(予約なし状態)
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', renderTab);
     else renderTab();
+    document.addEventListener('go5-hist-hydrated', function (ev) {
+      var page = document.getElementById('pageReserve');
+      var key = ev && ev.detail && ev.detail.key ? String(ev.detail.key) : '';
+      if (!page || page.hidden || !/^(?:short_hist|verify_manual|sheet_hist_raw|verify_yt)__acc[12]$/.test(key)) return;
+      clearTimeout(recentHydrateTimer);
+      recentHydrateTimer = setTimeout(function () {
+        var y = window.scrollY || 0;
+        renderTab();
+        requestAnimationFrame(function () { window.scrollTo(0, y); });
+      }, 80);
+    });
 
     global.Scheduler = {
       reserve: function (item) {
@@ -238,5 +350,8 @@
     setInterval(tick, 30000);
   }
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = { dueItems: dueItems };
+  if (typeof module !== 'undefined' && module.exports) module.exports = {
+    dueItems: dueItems, postingDayStart: postingDayStart, splitRecentPosts: splitRecentPosts,
+    sortRecentPosts: sortRecentPosts, recentCounts: recentCounts
+  };
 })(typeof window !== 'undefined' ? window : this);

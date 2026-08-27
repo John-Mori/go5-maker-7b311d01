@@ -3204,7 +3204,53 @@
     out.sort(function (a, b) { return a.timeMs - b.timeMs; });
     return out;
   }
-  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_, postsForDay: postsForDay_, _dayBucketMin: dayBucketMin_ }; } catch (e) {}
+  // Lightweight reservation-tab feed. This function never calls GAS or YouTube; it only reads caches already hydrated by posting history.
+  function recentPublishedCached_(options) {
+    var opts = options || {}, cutoff = Number(opts.fromMs) || 0, todayStart = Number(opts.todayStart) || 0;
+    var out = [], seen = {};
+    ['acc1', 'acc2'].forEach(function (a) {
+      var ymap = loadYtMapFor_(a), rawPublished = {};
+      loadSheetRaw_(a).forEach(function (row) {
+        var rawVid = ytIdOf((row && (row.youtubeUrl || row.ytUrl)) || '');
+        var rawTime = Date.parse((row && row.postedAt) || '');
+        if (rawVid && !isNaN(rawTime)) rawPublished[rawVid] = rawTime;
+      });
+      displayItemsForAcc_(a).forEach(function (it) {
+        var yt = itemYt_(ymap, it) || it.ytUrl || '';
+        var vid = ytIdOf(yt);
+        if (!vid || seen[vid]) return;
+        var published = publishedCache[vid] != null ? Number(publishedCache[vid]) : Number(rawPublished[vid]);
+        if (!published || isNaN(published) || (cutoff && published < cutoff)) return;
+        var withDetails = todayStart && published >= todayStart ? opts.includeTodayDetails !== false : !!opts.includeYesterdayDetails;
+        if (!withDetails) {
+          out.push({ id: it.videoId || itemKey(it), videoId: vid, account: a, publishedAt: published });
+          seen[vid] = 1;
+          return;
+        }
+        var pc = postClicks_(it, vid), dl = deltaCache[vid], views = viewsCache[vid];
+        if (dl) {
+          var floor = dl.cv != null ? dl.cv : Math.max(dl.wv || 0, dl.tv || 0, dl.yv || 0);
+          if (floor > 0) views = Math.max(views || 0, floor);
+        }
+        var peak = peakCache[vid] || {};
+        var postUrl = it.shareUrl || it.shortUrl || it.postUrl || '';
+        out.push({
+          id: it.videoId || itemKey(it), videoId: vid, account: a, publishedAt: published,
+          title: stripCommonTags(titleCache[vid] || it.title || '(\u7121\u984c)'),
+          ytUrl: yt, postUrl: postUrl, postPlatform: isXLink_(postUrl, it) ? 'x' : 'bsky',
+          workUrl: it.workUrl || '', views: views != null ? Number(views) : null,
+          pinkClicks: pc.c2 != null ? Number(pc.c2) : null, hasPink: !!(pc.wcode || it.workShortUrl),
+          peakViews: peak.vRate != null ? Number(peak.vRate) : null
+        });
+        seen[vid] = 1;
+      });
+    });
+    return out;
+  }
+  try { window.Go5History = {
+    listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_,
+    postsForDay: postsForDay_, recentPublishedCached: recentPublishedCached_, _dayBucketMin: dayBucketMin_
+  }; } catch (e) {}
 
   // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }

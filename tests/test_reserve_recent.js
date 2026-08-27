@@ -1,0 +1,21 @@
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const scheduler = fs.readFileSync('js/scheduler.js', 'utf8');
+const history = fs.readFileSync('js/yt-clicks.js', 'utf8');
+
+assert.ok(/recentOpen\s*=\s*\{\s*today:\s*true,\s*yesterday:\s*false\s*\}/.test(scheduler), 'today must open and yesterday must start collapsed');
+assert.ok(scheduler.includes('data-recent-toggle'), 'recent sections need disclosure buttons');
+assert.ok(scheduler.includes('opened ? sortRecentPosts(rows, recentSort) : []'), 'collapsed yesterday must not build row details');
+const feed = scheduler.slice(scheduler.indexOf('function recentPosts_'), scheduler.indexOf('function recentCountHtml_'));
+assert.ok(!/fetch\s*\(|XMLHttpRequest|axios\./.test(feed), 'reservation feed must not start network requests');
+assert.ok(history.includes('function recentPublishedCached_(options)'), 'posting history must expose a cached recent feed');
+assert.ok(history.includes('if (!withDetails)'), 'collapsed days must return counts without building detail metrics');
+assert.ok(scheduler.includes('includeYesterdayDetails: recentOpen.yesterday'), 'yesterday details must be requested only after disclosure');
+assert.ok(history.includes("['acc1', 'acc2'].forEach"), 'cached feed must mix both channels');
+assert.ok(history.includes('publishedCache[vid]'), 'YouTube publication time cache must define the posting day');
+assert.ok(history.includes('pinkClicks: pc.c2'), 'pink-click metric must be exposed');
+assert.ok(history.includes('peakViews: peak.vRate'), 'peak-view metric must be exposed');
+const cachedBody = history.slice(history.indexOf('function recentPublishedCached_()'), history.indexOf('try { window.Go5History', history.indexOf('function recentPublishedCached_()')));
+assert.ok(!cachedBody.includes('fetch('), 'cached feed must remain network-free');
+console.log('PASS: reservation recent uploads are cached and lazy');
