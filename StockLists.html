@@ -17,14 +17,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="投稿履歴">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=955">
-<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=955">
-<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=955">
+<link rel="manifest" href="manifest.webmanifest?v=956">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=956">
+<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=956">
 <title>投稿履歴 — 5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=955">
+<link rel="stylesheet" href="style.css?v=956">
 <script>
 /* 背景フック(data-tab)とアカウント色を描画前に確定=継ぎ目/色チラつき対策。
    ★standalone フラグは立てない(履歴画像の全ハイドレートを回すため=上のコメント参照)。 */
@@ -61,11 +61,11 @@ try {
 <nav class="tabbar">
   <button id="tabCand"    class="tab" data-nav="KouhoLists.html">💡 候補</button>
   <button id="tabVerify" class="tab active">📋 投稿履歴</button>
-  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=955" alt=""> 動画作成</button>
+  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=956" alt=""> 動画作成</button>
   <button id="tabStock" class="tab" data-nav="Stock.html">📦 ドラフト</button>
   <button id="tabYT"    class="tab" data-go="tabYT"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
-  <button id="tabPost"  class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=955" alt=""> 投稿</button>
-  <button id="tabAffi"  class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=955" alt=""> AFIリンク</button>
+  <button id="tabPost"  class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=956" alt=""> 投稿</button>
+  <button id="tabAffi"  class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=956" alt=""> AFIリンク</button>
   <button id="tabSettings" class="tab" data-go="tabSettings">⚙️ 詳細設定</button>
 </nav>
 
@@ -76,14 +76,14 @@ try {
 <main>
   <!-- 再生数・クリック数(投稿別・このアカウント) -->
   <section class="card">
-    <div class="field-label">▶<img class="emico" src="assets/icons/ic-link.png?v=955" alt="リンク"> 再生数・クリック数(投稿別・このアカウント)</div>
+    <div class="field-label">▶<img class="emico" src="assets/icons/ic-link.png?v=956" alt="リンク"> 再生数・クリック数(投稿別・このアカウント)</div>
     <div class="hint">投稿した<b>短縮URLのクリック数</b>と、説明欄に載せた<b>YouTube動画の再生数</b>を一覧します。各行の「YouTube URL」を入れると、その動画の<b>再生数</b>と<b>YouTube投稿日時</b>を取得します。(取得には ⚙️詳細設定 のAPIキーが必要)<br>日時は<b>YouTubeに投稿した時刻</b>を表示し、新しい順に並びます。URL未入力で投稿日時が不明なものは下にまとめます。</div>
     <details class="tools-fold">
       <summary>⚙ 管理・診断ツール(手動追加/同期/整理/修復)</summary>
       <div class="tools-fold-body">
         <div class="yt-updrow">
-          <button id="ytFetchDmm" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico fico" src="assets/icons/ic-fanza.png?v=955" alt="F"> DMM</span><span class="ub-l2">作品情報を取得</span></button>
-          <button id="ytClickRefresh" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico" src="assets/icons/ic-link.png?v=955" alt=""> &amp; 🔄</span><span class="ub-l2">更新</span></button>
+          <button id="ytFetchDmm" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico fico" src="assets/icons/ic-fanza.png?v=956" alt="F"> DMM</span><span class="ub-l2">作品情報を取得</span></button>
+          <button id="ytClickRefresh" class="ghost yt-updbtn" type="button"><span class="ub-l1"><img class="emico" src="assets/icons/ic-link.png?v=956" alt=""> &amp; 🔄</span><span class="ub-l2">更新</span></button>
         </div>
         <div class="status" id="ytDmmStatus" style="text-align:left;margin-top:6px;"></div>
         <div class="status" id="ytClickStatus" style="text-align:left;margin-top:6px;"></div>
@@ -95,9 +95,9 @@ try {
           <button id="ytLossEvidence" class="ghost" type="button" title="投稿履歴が減った瞬間に自動記録された証拠を表示します(消えた時の原因調査用)">🕵 履歴消失の証拠を見る</button>
           <button id="ytRepairLinks" class="ghost" type="button">🔧 YT情報を診断・修復</button>
           <button id="ytRestoreHist" class="ghost" type="button">📥 シートから投稿履歴を復元</button>
-          <button id="ytBulkGen" class="ghost" type="button" style="font-size:11px;padding:4px 8px;opacity:.7;"><img class="emico" src="assets/icons/ic-link.png?v=955" alt="リンク"> 計測リンク再生成</button>
+          <button id="ytBulkGen" class="ghost" type="button" style="font-size:11px;padding:4px 8px;opacity:.7;"><img class="emico" src="assets/icons/ic-link.png?v=956" alt="リンク"> 計測リンク再生成</button>
         </div>
-        <div class="hint">投稿履歴を開くと、未生成の投稿に<b>計測用の短縮リンクが自動生成</b>されます。(各行の「Bsky↗」が計測用URL。長押しでコピー→YouTube概要欄に貼り替え)「<img class="emico" src="assets/icons/ic-link.png?v=955" alt="リンク"> 計測リンク再生成」は手動でやり直したいときだけ使います。</div>
+        <div class="hint">投稿履歴を開くと、未生成の投稿に<b>計測用の短縮リンクが自動生成</b>されます。(各行の「Bsky↗」が計測用URL。長押しでコピー→YouTube概要欄に貼り替え)「<img class="emico" src="assets/icons/ic-link.png?v=956" alt="リンク"> 計測リンク再生成」は手動でやり直したいときだけ使います。</div>
         <div class="hint">「📤 スプレッドシートへ同期」＝この投稿履歴を正として、ID・投稿日時・題名・視聴回数・短縮URL・クリック数・作品cid・キャラ属性を記録シートへまとめて反映します。(押すと最新の再生数等を取得してから送信。記録用GAS設定時のみ)<br>「🧹 履歴を整理」＝この投稿履歴に無い行を記録シートから消去します。(このアカウントのタブのみ)</div>
       </div>
     </details>
@@ -138,43 +138,43 @@ try {
 <div id="pvImgWrap" hidden aria-hidden="true"><img id="pvImg" alt=""></div>
 
 <!-- ── core 層 ── -->
-<script src="core/util.js?v=955"></script>
-<script src="core/account.js?v=955"></script>
-<script src="core/storage-keys.js?v=955"></script>
-<script src="core/categories.js?v=955"></script>
-<script src="core/movie-attrs-core.js?v=955"></script>
-<script src="core/image-role.js?v=955"></script>
-<script src="core/drive-set.js?v=955"></script>
-<script src="core/idb-store.js?v=955"></script>
-<script src="core/img-diag.js?v=955"></script>
-<script src="core/viewport-anchor.js?v=955"></script>
-<script src="core/sync.js?v=955"></script>
-<script src="core/image-cdn.js?v=955"></script>
-<script src="core/kaizen-log.js?v=955"></script>
-<script src="core/operation-gate.js?v=955"></script>
+<script src="core/util.js?v=956"></script>
+<script src="core/account.js?v=956"></script>
+<script src="core/storage-keys.js?v=956"></script>
+<script src="core/categories.js?v=956"></script>
+<script src="core/movie-attrs-core.js?v=956"></script>
+<script src="core/image-role.js?v=956"></script>
+<script src="core/drive-set.js?v=956"></script>
+<script src="core/idb-store.js?v=956"></script>
+<script src="core/img-diag.js?v=956"></script>
+<script src="core/viewport-anchor.js?v=956"></script>
+<script src="core/sync.js?v=956"></script>
+<script src="core/image-cdn.js?v=956"></script>
+<script src="core/kaizen-log.js?v=956"></script>
+<script src="core/operation-gate.js?v=956"></script>
 <!-- ── 機能層(投稿履歴の描画に要るもの。app.js/affiliate.js は積まないが、stock.js は積む
        =「データ再生成」が Go5Stock.regenDataset へ一本化された(2026-08-18)ため。これが無いと投稿履歴ページで
        window.Go5Stock が未定義になり『データ再生成の土台が読み込まれていません』が100%出る(Chami報告2026-08-18)。
        依存(idb-store/sync/operation-gate/drive-upload)は上で全て読込済み。stock.js の init は $('pageStock') 不在で
        一覧描画を全ガードするので投稿履歴ページでも無害=Go5Stock.regenDataset/previewForVideoId だけを供給する。 ── -->
-<script src="js/idgen.js?v=955"></script>
-<script src="js/promo-label.js?v=955"></script>
-<script src="js/affiliate-core.js?v=955"></script>
-<script src="js/fanza-core.js?v=955"></script>
-<script src="js/bluesky-core.js?v=955"></script>
-<script src="js/scheduler.js?v=955"></script>
-<script src="js/bluesky.js?v=955"></script>
-<script src="js/drive-upload.js?v=955"></script>
-<script src="js/verify-core.js?v=955"></script>
-<script src="js/verify.js?v=955"></script>
-<script src="schedule/data/holidays.js?v=955"></script>
-<script src="js/hist-merge-core.js?v=955"></script>
-<script src="core/regen-identity.js?v=955"></script>
-<script src="core/hist-store.js?v=955"></script>
-<script src="js/rank-core.js?v=955"></script>
-<script src="js/yt-clicks.js?v=955"></script>
-<script src="js/stock.js?v=955"></script>
-<script src="js/link-ledger.js?v=955"></script>
+<script src="js/idgen.js?v=956"></script>
+<script src="js/promo-label.js?v=956"></script>
+<script src="js/affiliate-core.js?v=956"></script>
+<script src="js/fanza-core.js?v=956"></script>
+<script src="js/bluesky-core.js?v=956"></script>
+<script src="js/scheduler.js?v=956"></script>
+<script src="js/bluesky.js?v=956"></script>
+<script src="js/drive-upload.js?v=956"></script>
+<script src="js/verify-core.js?v=956"></script>
+<script src="js/verify.js?v=956"></script>
+<script src="schedule/data/holidays.js?v=956"></script>
+<script src="js/hist-merge-core.js?v=956"></script>
+<script src="core/regen-identity.js?v=956"></script>
+<script src="core/hist-store.js?v=956"></script>
+<script src="js/rank-core.js?v=956"></script>
+<script src="js/yt-clicks.js?v=956"></script>
+<script src="js/stock.js?v=956"></script>
+<script src="js/link-ledger.js?v=956"></script>
 <!-- ★candidates.js は「投稿履歴の画像」供給源(Go5Cand.usedImgs/postImgs/refImgs)。必ず standalone フラグ無しで読む。 -->
 <script>
 /* 投稿履歴の文字カードを先に描画し、候補/使用画像の大きな供給モジュールは最初の1フレーム後に読む。
@@ -187,7 +187,7 @@ try {
     started = true; attempts++;
     var s = document.createElement('script');
     s.id = 'go5CandidatesLazy';
-    s.src = 'js/candidates.js?v=955';
+    s.src = 'js/candidates.js?v=956';
     s.async = true;
     s.onload = function () {
       try { if (window.Go5Verify && window.Go5Verify.patchImages) window.Go5Verify.patchImages(); } catch (e) {}

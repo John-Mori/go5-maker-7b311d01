@@ -1279,7 +1279,7 @@
         '<label>表示名<input class="vedit-tree-name" type="text" maxlength="40" value="' + esc(tree.name || ('ツリー' + idx)) + '"></label>' +
         '<button type="button" class="vedit-tree-del" title="このツリー設定を削除">削除</button>' +
       '</div>' +
-      '<label class="vedit-field">返信ポストURL(X / Bluesky・このURL自体は短縮しません)' +
+      '<label class="vedit-field">返信ポストURL(X / Bsky・このURLは短縮なし)' +
         '<div class="vedit-bsky-row"><input class="vedit-tree-post" type="url" inputmode="url" autocomplete="off" placeholder="https://x.com/.../status/... または https://bsky.app/profile/.../post/..." value="' + esc(tree.postUrl || '') + '">' +
         '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-post">貼り付け</button></div>' +
       '</label>' +
