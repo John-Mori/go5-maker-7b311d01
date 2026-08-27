@@ -709,6 +709,9 @@
       if (/campaign=gain/.test(String(e.url || '')) && codes.indexOf('JrziR') < 0) codes.push('JrziR'); // 既定セールページは歴史的JrziRを合算(過去分を失わない)
       var uniq = codes.filter(function (c, i) { return codes.indexOf(c) === i; });
       return { id: e.id, name: String(e.name || '(無題)'), url: String(e.url || ''), codes: uniq, at: (typeof e.at === 'number' ? e.at : 0) };
+    }).sort(function (a, b) {
+      // 投稿履歴のセールページは「記載開始日」(登録時刻at)が新しいものを必ず上へ。
+      return (Number(b.at) || 0) - (Number(a.at) || 0) || String(a.name).localeCompare(String(b.name), 'ja');
     });
   }
   // 現行のセールコードをGASへ登録(変化時のみ送信)。→ snapshotStatsが各コードを日次スナップし

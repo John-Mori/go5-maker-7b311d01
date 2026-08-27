@@ -39,6 +39,7 @@
     if (/^cand_hidden__/.test(k)) return true;           // 非表示リスト
     if (k === "cand_hide_posted") return true;
     if (k === "cand_text") return true;                  // 候補テキストの正本(コメント/メモ/X URL/URL2・cid単位フィールドマージ・INC-127/129/132恒久対策)
+    if (k === "cand_today_v1") return true;              // 今日投稿する候補の印(cid単位LWW・全端末共有)
     if (k === "go5_image_manifest_v1") return true;      // Small synced CDN URL manifest (per-record LWW; no IDB scan).
     if (k === "go5_tree_links_v1") return true;          // Posting-history reply trees (per-history-record LWW).
     if (/^go5_stock_meta$/.test(k)) return true;         // ドラフト一覧(id単位union・Chami依頼2026-07-31)
@@ -377,6 +378,26 @@
         if (o == null) { out[c] = n; return; }   // 片側のみのcidはそのまま保持(=集めたテキストを失わない)
         if (n == null) { out[c] = o; return; }
         out[c] = mergeCandTextRec_(o, n);
+      });
+      return JSON.stringify(out);
+    } catch (e) { return null; }
+  }
+  // 今日印は1キー内に全作品を持つため、whole-key LWWではPCとスマホの別作品チェックが衝突する。
+  // cidごとに更新時刻atの新しいレコードを採り、falseも明示更新として保持する。
+  function isCandTodayKey(k) { return String(k) === "cand_today_v1"; }
+  function mergeCandToday_(olderStr, newerStr) {
+    try {
+      var a = JSON.parse(olderStr || "{}"), b = JSON.parse(newerStr || "{}"), out = {}, ids = {};
+      if (!a || typeof a !== "object" || Array.isArray(a)) a = {};
+      if (!b || typeof b !== "object" || Array.isArray(b)) b = {};
+      Object.keys(a).forEach(function (id) { ids[id] = 1; });
+      Object.keys(b).forEach(function (id) { ids[id] = 1; });
+      Object.keys(ids).forEach(function (id) {
+        var x = a[id], y = b[id];
+        if (x == null) { out[id] = y; return; }
+        if (y == null) { out[id] = x; return; }
+        var xt = Number(x && x.at) || 0, yt = Number(y && y.at) || 0;
+        out[id] = yt > xt ? y : (xt > yt ? x : (JSON.stringify(y) >= JSON.stringify(x) ? y : x));
       });
       return JSON.stringify(out);
     } catch (e) { return null; }
@@ -898,7 +919,7 @@
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && !isImageManifestKey(k) && !isTreeLinksKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && !isCandTodayKey(k) && !isImageManifestKey(k) && !isTreeLinksKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -959,6 +980,15 @@
           }
         });
 
+        // 「今日」印もcid単位で統合。別端末で別作品に付けた印をwhole-key上書きで失わない。
+        Object.keys(mls).forEach(function (k) {
+          if (!isCandTodayKey(k)) return;
+          var a = lmapLs[k], b = rls[k];
+          if (a && b && !a.d && !b.d) {
+            var u = mergeCandToday_(a.v, b.v);
+            if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
+          }
+        });
         // Merge URL records independently; keys:[] is an explicit deletion ordered by at.
         Object.keys(mls).forEach(function (k) {
           if (!isImageManifestKey(k)) return;
@@ -1001,7 +1031,7 @@
             try {
               if (isSyncLsKey(k) && LS.getItem(k) !== null) {
                 LS.removeItem(k);
-                if (isCandArrayKey(k) || isCandTextKey(k)) pulledCandReal++; else pulledLsReal++;
+                if (isCandArrayKey(k) || isCandTextKey(k) || isCandTodayKey(k)) pulledCandReal++; else pulledLsReal++;
               }
             } catch (x) {}
             return;
@@ -1062,6 +1092,9 @@
             // 同期中に候補テキストが編集されても、開始時点の値で上書きせずライブ値と cid 単位で再統合。(進行中の編集を失わない)
             var uc = mergeCandText_(e.v, live);
             if (uc != null) finalV = uc;
+          } else if (isCandTodayKey(k)) {
+            var ut = mergeCandToday_(e.v, live);
+            if (ut != null) finalV = ut;
           } else if (isImageManifestKey(k)) {
             // Preserve a manifest edit made while synchronization was in progress.
             var um = mergeImageManifest_(e.v, live);
@@ -1083,7 +1116,7 @@
             if (LS.getItem(k) !== finalV) {
               try {
                 LS.setItem(k, finalV);
-                if (isCandArrayKey(k) || isCandTextKey(k)) {
+                if (isCandArrayKey(k) || isCandTextKey(k) || isCandTodayKey(k)) {
                   pulledCandReal++;
                   if (isCandArrayKey(k)) fireCandidateListApplied_(k, "ls");
                 } else pulledLsReal++;
@@ -1369,11 +1402,11 @@
   //   R2キー = sha256hex(論理名)。両端末が「同じ論理名」から同じ鍵を算出できる=
   //   ポインタ(hash)を state同期(KV)で配る必要が無い。KVが制限で詰まっても2台目が取り寄せられる。
   //   ★用途: 動画本体(名前="go5vid:"+ドラフトID)。IDは既にメタ同期で両端末が持っている。
-  function putBlobR2At(name, blob) {
+  function putBlobR2At(name, blob, opts) {
     if (!configured() || !blob || !subtle || !blob.arrayBuffer) return Promise.resolve("");
     return sha256hex(String(name)).then(function (key) {
       return blob.arrayBuffer().then(function (buf) {
-        return api("/api/img/" + key, { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: buf, timeoutMs: 60000 })
+        return api("/api/img/" + key + (opts && opts.replace ? "?replace=1" : ""), { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: buf, timeoutMs: 60000 })
           .then(function (r) { return r && r.ok ? key : ""; }).catch(function () { return ""; });
       });
     }).catch(function () { return ""; });
@@ -1424,7 +1457,7 @@
     // 作成履歴(go5_stock_archive)の thumbDataUrl detox 純関数を公開。(stock.js の保存側=S2 が呼ぶ。副作用なし・fail-open)
     slimStockArchive: function (arrStr, keepN) { return slimStockArchive(arrStr, keepN); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
+    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, isCandTodayKey: isCandTodayKey, mergeCandToday_: mergeCandToday_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_; root.Go5Sync._test.fastCandidateMergeState_ = fastCandidateMergeState_;

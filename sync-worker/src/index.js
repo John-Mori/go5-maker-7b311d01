@@ -45,7 +45,7 @@ export default {
     if (path.startsWith("/api/img/") && request.method === "PUT") {
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
 
-      return putImage(decodeURIComponent(path.slice(9)), request, env, cors);
+      return putImage(decodeURIComponent(path.slice(9)), request, env, cors, url.searchParams.get("replace") === "1");
     }
 
     // 画像存在確認（GET /api/img/has?keys=a,b,c）
@@ -173,11 +173,11 @@ async function statePush(request, env, cors) {
 }
 // ── 画像(R2) ───────────────────────────────────────────────
 function validKey(k) { return /^[a-f0-9]{16,64}$/.test(String(k || "")); } // sha256 hex（推測困難・パス安全）
-async function putImage(key, request, env, cors) {
+async function putImage(key, request, env, cors, replace) {
   if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
   if (!validKey(key)) return json({ ok: false, error: "bad_key" }, 400, cors);
-  const existing = await env.SYNC_IMAGES.head(key);
-  if (existing) return json({ ok: true, key, deduped: true }, 200, cors); // 冪等：同一content-hashは再保存しない
+  const existing = replace ? null : await env.SYNC_IMAGES.head(key);
+  if (existing) return json({ ok: true, key, deduped: true }, 200, cors); // content-hashは冪等。論理名previewはreplace=1で完成動画に合わせて更新
   const ct = request.headers.get("Content-Type") || "application/octet-stream";
   const buf = await request.arrayBuffer();
   if (buf.byteLength > 30 * 1024 * 1024) return json({ ok: false, error: "img_too_large" }, 413, cors); // 画像+5秒動画本体(②)を許容=30MB

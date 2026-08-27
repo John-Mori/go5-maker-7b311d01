@@ -14,6 +14,9 @@ assert.ok(!src.includes("done(true, '☁️ Driveへ保存中(裏で継続)・�
 assert.ok(src.includes('var _draftAssetMirrorReady = Object.create(null);'), '新規ドラフトの元画像・プレビュー着地PromiseをDrive保存と共有する');
 assert.ok(src.includes('_draftAssetMirrorReady[id] = Promise.all(assetMirrorJobs'), '元画像とプレビューはタイマー待ちでなく作成直後に並列ミラーする');
 assert.ok(!/setTimeout\(function \(\) \{ try \{ ensureSrcMirror_/.test(src) && !/setTimeout\(function \(\) \{ try \{ ensurePrevMirror_/.test(src), '6秒/8秒の意図的な付随画像遅延を復活させない');
+assert.ok(src.includes('videoEndFramePreview_(evDetail.blob).then(function (b)'), '仕上がりプレビューは完成動画の終端フレームを正本にする');
+assert.ok(src.includes('return b || capturePreview_();'), '動画末尾を読めないSafariだけCanvas確定描画へ退避する');
+assert.ok(src.includes('putBlobR2At(PREVNAME(id), blobHint, { replace: true })'), '誤った旧previewの論理名R2実体を正しい完成フレームで更新できる');
 assert.ok(src.indexOf('var assetMirrorReady = _draftAssetMirrorReady[id]') < src.indexOf('window.Go5Drive.queueSave({'), 'Driveジョブは新規ドラフトの付随画像ミラーを先に共有する');
 const joinAt = src.indexOf('if (activeFlight)');
 const queueAt = src.indexOf('window.Go5Drive.queueSave({', joinAt);

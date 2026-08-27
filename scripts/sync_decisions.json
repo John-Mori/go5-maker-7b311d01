@@ -104,6 +104,7 @@
     "cand_text": { "decision": "sync", "why": "候補テキストの正本(コメント/メモ/X URL/URL2)=同期LSへ昇格しcid単位フィールドマージ。INC-127/129/132恒久対策・2026-08-14" },
     "go5_image_manifest_v1": { "decision": "sync", "why": "候補・投稿履歴画像のR2 content-hash台帳。画像本体ではなく小さなURLメタデータだけをper-record LWWで全端末共有し、初回描画をIDB全走査から切り離す(2026-08-26)" },
     "go5_tree_links_v1": { "decision": "sync", "why": "投稿履歴の返信ツリーURL・表示名・アフィ計測短縮URLを履歴ID単位LWWで全端末共有し、別端末でも同じツリークリック数を表示する(2026-08-27)" },
-    "go5_manual_short_last__<acc>": { "decision": "local", "why": "単体短縮で直前に発行したアフィ計測URLを同じブラウザセッション内のツリー設定へ自動候補表示する一時控え。sessionStorageのみで端末間同期しない(2026-08-27)" }
+    "go5_manual_short_last__<acc>": { "decision": "local", "why": "単体短縮で直前に発行したアフィ計測URLを同じブラウザセッション内のツリー設定へ自動候補表示する一時控え。sessionStorageのみで端末間同期しない(2026-08-27)" },
+    "cand_today_v1": { "decision": "sync", "why": "候補の今日投稿する印。作品IDごとに更新時刻で統合し、PCとスマホで同じ当日候補を表示する" }
   }
 }

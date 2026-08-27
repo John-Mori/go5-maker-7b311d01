@@ -457,7 +457,7 @@
     if (_prevUp[id]) return Promise.resolve();
     if (_prevMirrorBusy[id]) return _prevMirrorBusy[id];
     if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return Promise.resolve();
-    var job = Go5Sync.putBlobR2At(PREVNAME(id), blobHint).then(function (key) {
+    var job = Go5Sync.putBlobR2At(PREVNAME(id), blobHint, { replace: true }).then(function (key) {
       if (key) _prevUp[id] = 1; // 成功=このセッションで再送しない。失敗時はDrive保存/sweepでまた試す(非破壊)
     }).catch(function () {});
     _prevMirrorBusy[id] = job.then(function (v) { delete _prevMirrorBusy[id]; return v; }, function () { delete _prevMirrorBusy[id]; });
@@ -814,8 +814,14 @@
     _pendingDraftMeta[id] = meta;
     if (hooks.onStart) hooks.onStart(id); // タイムアウトより前から、保留リトライが同じpending IDを指せるようにする
 
-    // サムネ/プレビューは今の最終Canvasに依存するため、画面遷移より前に取得する。
-    var capP = Promise.all([captureThumb_(), capturePreview_()]).catch(function () { return [null, null]; });
+    // プレビューの正本は「完成した動画そのもの」の終端フレームにする。
+    // 旧経路は録画停止直後の共有Canvasを描き直して読んでいたため、画像decode/状態切替と競合すると
+    // 背景だけのフレームを保存できた。動画blobの末尾なら実際の完成物と必ず同じ時系列になる。
+    // Safariで末尾シークが失敗した時だけCanvasの確定描画へ退避する。
+    var finalPreviewP = videoEndFramePreview_(evDetail.blob).then(function (b) {
+      return b || capturePreview_();
+    }).catch(function () { return capturePreview_(); });
+    var capP = Promise.all([captureThumb_(), finalPreviewP]).catch(function () { return [null, null]; });
     return capP.then(function (caps) {
       var thumbBlob = caps[0], prevBlob = caps[1];
       // Canvas取得が失敗しても、元画像を端末側サムネの最終保険にする。★ただし元画像フルをそのままメタへ
@@ -1865,7 +1871,7 @@
           //     その決定的keyを添える=投稿完了で必ずプレビューがDriveへ入る(Chami依頼2026-08-24②)。Workerは
           //     そのkeyがR2に無ければ黙ってスキップ(付随物・非致命)＝古い投稿でも安全。
           var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
-            ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
+            ? Go5Sync.putBlobR2At('go5prev:' + id, prevB, { replace: true }).catch(function () { return ''; })
             : ((window.Go5Sync && Go5Sync.keyForName) ? Go5Sync.keyForName('go5prev:' + id).catch(function () { return ''; }) : Promise.resolve(''));
           var mirrorSrc = (srcB && window.Go5Sync && Go5Sync.putBlobR2At)
             ? Go5Sync.putBlobR2At('go5src:' + id, srcB).catch(function () { return ''; })

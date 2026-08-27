@@ -175,10 +175,20 @@
     return !(imgs.length || (memRec && memRec.img && !isR2Marker_(memRec)));
   }
 
+  // 「今日」印の日付は端末TZではなく運用基準の日本時間で固定する。
+  function candidateTodayDay_(nowMs) {
+    var d = new Date((Number(nowMs) || Date.now()) + 9 * 3600000);
+    return d.toISOString().slice(0, 10);
+  }
+  function candidateTodayChecked_(map, cid, day) {
+    var r = map && map[String(cid || '')];
+    return !!(r && r.checked === true && r.day === String(day || ''));
+  }
+
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_, hideEverPostedDecide_: hideEverPostedDecide_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_, hideEverPostedDecide_: hideEverPostedDecide_, candidateTodayDay_: candidateTodayDay_, candidateTodayChecked_: candidateTodayChecked_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -191,7 +201,7 @@
   // 新規候補は「PCで追加→スマホで開く」の直前操作。3〜10秒のデバウンス待ちより先に雲へ着地させる。
   // 同期中なら flushSync 側が次回同期を予約するため、取りこぼさない。
   function flushSync_() { try { if (window.Go5Sync && window.Go5Sync.syncCandidatesNow) window.Go5Sync.syncCandidatesNow(); else if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync(); else reqSync_(); } catch (e) { reqSync_(); } }
-  function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted') reqSync_(); if (/^cand_(items|tabs)(__|$)/.test(k)) schedulePoolSync_(); }
+  function reqSyncFor_(k) { if (/^cand_(items|tabs)(__|$)/.test(k) || /^cand_hidden__/.test(k) || k === 'cand_hide_posted' || k === 'cand_today_v1') reqSync_(); if (/^cand_(items|tabs)(__|$)/.test(k)) schedulePoolSync_(); }
   // 継続改善制度の行動ログ。(意味のある操作のみ・失敗は無害)
   function klog_(action, objType, objId, meta) { try { if (window.Go5Kaizen) window.Go5Kaizen.log('candidates', action, objType, objId, meta); } catch (e) {} }
   function workerCfg() {
@@ -394,6 +404,38 @@
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
   var _filterDoujin = false; // 種別絞り込み：同人のみ。Booksと両方ON/両方OFFは全件表示
   var _filterBooks = false;  // 種別絞り込み：Booksのみ
+  var _filterToday = false;  // 今日の投稿候補として印を付けた作品だけを表示
+  var K_TODAY = 'cand_today_v1';
+  var _todayRaw = null, _todayMapCache = {};
+  function todayMap_() {
+    var raw = '{}'; try { raw = localStorage.getItem(K_TODAY) || '{}'; } catch (e) {}
+    if (raw === _todayRaw) return _todayMapCache;
+    _todayRaw = raw;
+    try { _todayMapCache = JSON.parse(raw) || {}; } catch (e) { _todayMapCache = {}; }
+    if (!_todayMapCache || typeof _todayMapCache !== 'object' || Array.isArray(_todayMapCache)) _todayMapCache = {};
+    return _todayMapCache;
+  }
+  function todayPass_(it) { return !_filterToday || candidateTodayChecked_(todayMap_(), it && it.cid, candidateTodayDay_()); }
+  function todaySnapshot_(it) {
+    if (!it || typeof it !== 'object') return null;
+    var out = {};
+    Object.keys(it).forEach(function (k) { if (typeof it[k] !== 'function') out[k] = it[k]; });
+    return out;
+  }
+  function setTodayMark_(cid, checked, it) {
+    cid = String(cid || ''); if (!cid) return;
+    var map = todayMap_(), prev = map[cid] || {}, copy = {};
+    Object.keys(map).forEach(function (k) { copy[k] = map[k]; });
+    copy[cid] = { day: candidateTodayDay_(), checked: !!checked, at: Date.now(), item: todaySnapshot_(it) || prev.item || null };
+    _todayRaw = null; lsSet(K_TODAY, copy); flushSync_();
+  }
+  function todayItems_() {
+    var map = todayMap_(), day = candidateTodayDay_(), out = [];
+    Object.keys(map).forEach(function (cid) {
+      var r = map[cid]; if (candidateTodayChecked_(map, cid, day) && r.item) out.push(Object.assign({}, r.item, { cid: String(r.item.cid || cid) }));
+    });
+    return out;
+  }
   var _workSearchByTab = {};
   var _memoSearchByTab = {}; // メモ/コメント検索の入力をタブ別に保持(Chami依頼2026-08-11)
   var _candPageByTab = {};   // 候補一覧の現在ページをタブ別に保持(ページ分け・Chami依頼2026-08-15)
@@ -678,6 +720,7 @@
       '<div class="cand-kind-filter" role="group" aria-label="作品種別で絞り込み">' +
         '<label><input id="candFilterDoujin" type="checkbox"' + (_filterDoujin ? ' checked' : '') + '><span>同人</span></label>' +
         '<label><input id="candFilterBooks" type="checkbox"' + (_filterBooks ? ' checked' : '') + '><span>books</span></label>' +
+        '<label class="cand-filter-today-label"><input id="candFilterToday" type="checkbox"' + (_filterToday ? ' checked' : '') + '><span>今日</span></label>' +
       '</div>' +
       '<span class="cand-kind-posted-spacer"></span>' +
       '<button id="candHidePosted1" type="button" aria-pressed="' + (!!_hidePosted.acc1) + '" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
@@ -702,14 +745,15 @@
     toggle_(b1, 'acc1'); toggle_(b2, 'acc2'); toggle_(a1, 'allAcc1'); toggle_(a2, 'allAcc2');
   }
   function wireKindFilter_(rerender) {
-    var d = $('candFilterDoujin'), b = $('candFilterBooks');
+    var d = $('candFilterDoujin'), b = $('candFilterBooks'), t = $('candFilterToday');
     function changed() {
-      _filterDoujin = !!(d && d.checked); _filterBooks = !!(b && b.checked);
+      _filterDoujin = !!(d && d.checked); _filterBooks = !!(b && b.checked); _filterToday = !!(t && t.checked);
       _candPageByTab[_activeTab] = 1;
       rerender();
     }
     if (d) d.addEventListener('change', changed);
     if (b) b.addEventListener('change', changed);
+    if (t) t.addEventListener('change', changed);
   }
   function candidateKindQuery_() {
     if (_filterDoujin === _filterBooks) return '';
@@ -3891,6 +3935,16 @@
         reloadWorkInfo_(cid, b);
       });
     });
+    el.querySelectorAll('[data-todaycid]').forEach(function (box) {
+      if (box._go5TodayWired) return; box._go5TodayWired = true;
+      box.addEventListener('click', function (e) { e.stopPropagation(); });
+      box.addEventListener('change', function (e) {
+        e.stopPropagation();
+        var cid = box.getAttribute('data-todaycid');
+        setTodayMark_(cid, !!box.checked, _cardIndex[cid] || durableItemByCid_(cid));
+        if (_filterToday) { _candPageByTab[_activeTab] = 1; render(); }
+      });
+    });
   }
   // 1作品だけ作品情報(タイトル・サムネ・作者・価格・発売日・レビュー等)をworkerから取り直して候補データへ書き戻す。
   //   「情報は取れたがサムネだけ空」のような部分取得を、作品ごとに手動で埋め直すための導線(Chami依頼2026-07-29)。
@@ -4398,8 +4452,11 @@
     }
     function fallback_() {
       var q = normalizeWorkSearch_(_workSearchByTab.all || ''), mq = normalizeWorkSearch_(_memoSearchByTab.all || '');
-      var arr = sortItems(stored, _sort).filter(function (it) {
-        return candidateKindPass_(it, _filterDoujin, _filterBooks) && (!_filterSale || isOnSale_(it)) && passPrice_(it) && !isHiddenByPostedForAll_(it) &&
+      var base = stored.slice(), baseSeen = {};
+      base.forEach(function (it) { if (it && it.cid != null) baseSeen[String(it.cid)] = true; });
+      if (_filterToday) todayItems_().forEach(function (it) { if (it && !baseSeen[String(it.cid)]) { baseSeen[String(it.cid)] = true; base.push(it); } });
+      var arr = sortItems(base, _sort).filter(function (it) {
+        return candidateKindPass_(it, _filterDoujin, _filterBooks) && todayPass_(it) && (!_filterSale || isOnSale_(it)) && passPrice_(it) && !isHiddenByPostedForAll_(it) &&
           (!q || workSearchText_(it).indexOf(q) >= 0) && (!mq || candMemoText_(it).indexOf(mq) >= 0);
       });
       var size = candPageSize_(), pages = Math.max(1, Math.ceil(arr.length / size)), page = Math.min(_candPageByTab.all || 1, pages);
@@ -4408,7 +4465,7 @@
     function paint_(items, total, page, pages, fallback) {
       var wrap = $('candPageWrap'); if (!wrap || _activeTab !== 'all') return;
       var memoQ = normalizeWorkSearch_(_memoSearchByTab.all || '');
-      var visible = (items || []).filter(function (it) { return candidateKindPass_(it, _filterDoujin, _filterBooks) && !isHiddenByPostedForAll_(it) && (!memoQ || candMemoText_(it).indexOf(memoQ) >= 0); });
+      var visible = (items || []).filter(function (it) { return candidateKindPass_(it, _filterDoujin, _filterBooks) && todayPass_(it) && !isHiddenByPostedForAll_(it) && (!memoQ || candMemoText_(it).indexOf(memoQ) >= 0); });
       _cardIndex = {}; visible.forEach(function (it) { _cardIndex[it.cid] = it; });
       var startI = (page - 1) * candPageSize_(), pager = candPagerHtml_(page, pages, total, startI, visible.length);
       wrap.innerHTML = '<div id="candPageHead"><div class="hint" style="padding:2px 6px;">📚 全候補 ' + total + '件' + (fallback ? ' (端末内データ)' : '') + '</div>' + pager + '</div><div id="candCardList"></div><div id="candPageFoot">' + (pages > 1 ? pager : '') + '</div>';
@@ -4428,6 +4485,7 @@
     }
     var catalogPolls = 0;
     function load_() {
+      if (_filterToday) { fallback_(); return; } // 今日印は同期LSの作品スナップが正本。サーバーカタログへ全件問い合わせしない。
       var page = _candPageByTab.all || 1, size = candPageSize_();
       var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
       catalogPage_({ sort: _sort, page: page, limit: size, q: _workSearchByTab.all || '', sale: _filterSale ? 1 : 0,
@@ -5622,6 +5680,7 @@
     var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
     var filt_ = function (it) {
       if (!candidateKindPass_(it, _filterDoujin, _filterBooks)) return false;
+      if (!todayPass_(it)) return false;
       if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
       if (_filterSale && !isOnSale_(it)) return false;
       if (!passPrice_(it)) return false;
@@ -5673,6 +5732,7 @@
       // PCで画像復元が一時的に遅れても、作品そのものが検索結果から消えて復旧操作不能になる循環を作らない。
       var arr2 = sortItems(fresh2, _sort).filter(function (it) {
         if (!candidateKindPass_(it, _filterDoujin, _filterBooks)) return false;
+        if (!todayPass_(it)) return false;
         if (searching) return true;
         if (!(_showHidden ? hs2[it.cid] : !hs2[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
@@ -5712,7 +5772,7 @@
     _candRepaint_ = paintMainPage_; _candRepaintTab_ = tabId;
     // ★外枠(件数見出し・検索欄・表示数セレクタ・ページ入れ物)は、並び順/絞り込み/表示数が変わらない限り
     //   作り直さない=検索フォーカスもカードのDOMも保つ。並び順や非表示切替など見出しが変わる操作の時だけ組み直す。
-    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + (_filterDoujin ? 1 : 0) + '|' + (_filterBooks ? 1 : 0) + '|' + (_hidePosted.acc1 ? 1 : 0) + '|' + (_hidePosted.acc2 ? 1 : 0) + '|' + (_hidePosted.allAcc1 ? 1 : 0) + '|' + (_hidePosted.allAcc2 ? 1 : 0) + '|' + _priceMax;
+    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + (_filterDoujin ? 1 : 0) + '|' + (_filterBooks ? 1 : 0) + '|' + (_filterToday ? 1 : 0) + '|' + (_hidePosted.acc1 ? 1 : 0) + '|' + (_hidePosted.acc2 ? 1 : 0) + '|' + (_hidePosted.allAcc1 ? 1 : 0) + '|' + (_hidePosted.allAcc2 ? 1 : 0) + '|' + _priceMax;
     var shellReady = (el._go5CandState === stateSig && document.getElementById('candCardList'));
     if (!shellReady) {
       var salesMiss = missingCount(salesTargetCids_(arr));
@@ -5809,6 +5869,7 @@
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
       var arr = sortItems(items, _sort).filter(function (it) {
         if (!candidateKindPass_(it, _filterDoujin, _filterBooks)) return false;
+        if (!todayPass_(it)) return false;
         if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
         if (!passPrice_(it)) return false;
@@ -6156,6 +6217,7 @@
     var _noComment = !refCmt && !refMemo; // コメント/メモ無し＝非表示/🗑を作品リンク行に統合し余白を縮小
     if (_noComment) _postCls += ' cand-nocomment';
     // 作品リンク群。(作品↗ / X↗ / X2↗ / 投稿編集 / 🦋)無コメント時は全幅行で非表示/🗑と同列に置くため変数化。
+    var todayHtml = '<label class="cand-today-mark" title="今日投稿する候補"><input type="checkbox" data-todaycid="' + esc(it.cid) + '"' + (candidateTodayChecked_(todayMap_(), it.cid, candidateTodayDay_()) ? ' checked' : '') + '><span>今日</span></label>';
     var _actionsInner =
       ((!it.isTwitter && it.url) ? '<a class="vlink vlink-work" href="' + esc(it.url) + '" target="_blank" rel="noopener">作品↗</a>' : '') +
       ((_refRec.twitterUrl || it.twitterUrl) ? candUrlLink_(_refRec.twitterUrl || it.twitterUrl) : '') +
@@ -6164,7 +6226,7 @@
       // 🦋(Bluesky添付画像)ボタンは全く使っていないため撤去(Chami依頼2026-07-29)。跡地へ「作品情報リロード」を配置。
       //   FANZA作品のみ対象(X/Bluesky候補にはFANZA情報が無い)。押すと単発でworkerから取り直し=サムネ未表示等を埋める。
       (isInfoTarget_(it) ? '<button type="button" class="cand-reload-btn" data-reloadinfo="' + esc(it.cid) + '" title="作品情報(サムネ・タイトル・価格等)を取得し直す">🔁作品情報</button>' : '');
-    return '<div class="cand-card' + _postCls + '" data-work-search="' + esc(workSearchText_(it)) + '" data-memo-search="' + esc(normalizeWorkSearch_((refCmt || '') + ' ' + (refMemo || ''))) + '">' +
+    return '<div class="cand-card' + _postCls + '" data-cid="' + esc(it.cid) + '" data-work-search="' + esc(workSearchText_(it)) + '" data-memo-search="' + esc(normalizeWorkSearch_((refCmt || '') + ' ' + (refMemo || ''))) + '">' +
       '<div class="cand-thumbcol">' +
         (it.thumb ? '<img class="cand-thumb cand-thumb-click" data-thumbcid="' + esc(it.cid) + '" src="' + esc(it.thumb) + '" loading="lazy" decoding="async" alt="タップで画像を表示">' : '<div class="cand-thumb cand-thumb-ph"></div>') +
         refImgHtml +
@@ -6180,7 +6242,7 @@
           : esc(it.title || '(無題)')) + '</div>' +
         (sub.length ? '<div class="cand-sub">' + sub.join('　') + '</div>' : '') +
         genresHtml +
-        ((it.price != null || it.listPrice != null) ? '<div class="cand-price">' + priceHtml + '</div>' : '') +
+        '<div class="cand-price"><span class="cand-price-main">' + ((it.price != null || it.listPrice != null) ? priceHtml : '') + '</span>' + todayHtml + '</div>' +
         salesHtml +
         // 作品リンク行。(cand-info内＝画像の右の定位置)コメント/メモ無し時は同じ行の右端に 非表示/🗑 を統合。
         '<div class="cand-actions">' + _actionsInner + (_noComment ? '<span class="cand-actions-mspacer"></span>' + actionHtml : '') + '</div>' +

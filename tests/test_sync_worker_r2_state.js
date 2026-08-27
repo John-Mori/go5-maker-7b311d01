@@ -89,6 +89,20 @@ body = await bodyOf(response);
 assert.equal(body.ok, true);
 assert.equal(kvGets, 0);
 
+// content-hashは従来どおり重複PUTを省き、論理名previewだけはreplace=1で完成フレームへ更新できる。
+response = await worker.fetch(req("/api/img/" + imageKey, {
+  method: "PUT", headers: { "Content-Type": "image/png" }, body: new Uint8Array([9, 9, 9, 9])
+}), env, {});
+body = await bodyOf(response);
+assert.equal(body.deduped, true);
+assert.equal(new Uint8Array(r2.values.get(imageKey)).length, 3);
+response = await worker.fetch(req("/api/img/" + imageKey + "?replace=1", {
+  method: "PUT", headers: { "Content-Type": "image/png" }, body: new Uint8Array([7, 8])
+}), env, {});
+body = await bodyOf(response);
+assert.equal(body.ok, true);
+assert.equal(new Uint8Array(r2.values.get(imageKey)).length, 2);
+
 // KVが読める環境では旧stateを初回pullでR2へ自動移行する。
 const legacyR2 = memoryR2();
 const legacyBlob = JSON.stringify({ fmt: 2, ls: { cand_items: { t: 2, v: '[{"cid":"legacy"}]' } }, idb: {} });
