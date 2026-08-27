@@ -574,8 +574,12 @@ async function runSaveJobUnlocked(env, fields, parentId) {
     catch (e) { return fail((e && e.message) || "folder_create_failed"); }
   }
 
-  // ---- 動画バイト取得(R2)。取れなくてもここで止めず、下でフォルダの床＋付随画像だけは作る ----
-  const vid = await fetchR2Bytes(env, fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS);
+  // ---- R2上の3点を並列取得。旧実装は動画→元画像→プレビューの直列で、取得待ちだけでも表示差が広がっていた。 ----
+  const [vid, sourceAsset, previewAsset] = await Promise.all([
+    fetchR2Bytes(env, fields.r2Base, fields.videoKey, SAVE_JOB_RETRY_DELAYS_MS),
+    SAVE_JOB_VIDEO_KEY_RE.test(fields.srcKey || "") ? fetchR2Bytes(env, fields.r2Base, fields.srcKey, [300, 700, 1500]) : Promise.resolve(null),
+    SAVE_JOB_VIDEO_KEY_RE.test(fields.previewKey || "") ? fetchR2Bytes(env, fields.r2Base, fields.previewKey, [300, 700, 1500]) : Promise.resolve(null),
+  ]);
   const buf = vid ? vid.buf : null;
   const mime = (vid && vid.mime) || "video/mp4";
   const haveVideo = !!(buf && buf.byteLength);
@@ -613,18 +617,6 @@ async function runSaveJobUnlocked(env, fields, parentId) {
     }
   } catch (e) { return fail((e && e.message) || "folder_create_failed"); }
 
-  // ---- 動画アップロード（有る時だけ・既に同フォルダに動画が在れば上げ直さない=足りないものだけ）----
-  let videoAlready = false;
-  if (haveVideo) {
-    try {
-      if (reused) videoAlready = !!(await findVideoFile(folder.id, token));
-      if (!videoAlready) {
-        const vext = extOf(mime) || "mp4";
-        const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
-        await uploadNewBuffer(folder.id, vname, buf, mime, token);
-      }
-    } catch (e) { return fail("video_upload_failed:" + (e && e.message || e)); }
-  }
 
   // ---- 元画像（任意・R2から取り寄せ）。★同フォルダに「元画像」が既に在れば上げ直さない(role単位の冪等)。
   //   旧実装は uniqueFileName で 題名_元画像_2.jpg を毎回増やしていた(Chami報告2026-08-22「いらんやつ作られてまっせ」)。
@@ -632,7 +624,7 @@ async function runSaveJobUnlocked(env, fields, parentId) {
   if (SAVE_JOB_VIDEO_KEY_RE.test(fields.srcKey || "")) {
     try {
       if (!(await findSrcImageFile(folder.id, token))) {
-        const sv = await fetchR2Bytes(env, fields.r2Base, fields.srcKey, [500, 1500]);
+        const sv = sourceAsset;
         if (sv && sv.buf && sv.buf.byteLength) {
           const sname = await uniqueFileName(folder.id, baseName + "_元画像." + (extOf(sv.mime) || "jpg"), token);
           await uploadNewBuffer(folder.id, sname, sv.buf, sv.mime || "image/jpeg", token);
@@ -645,7 +637,7 @@ async function runSaveJobUnlocked(env, fields, parentId) {
   if (SAVE_JOB_VIDEO_KEY_RE.test(fields.previewKey || "")) {
     try {
       if (!(await findPreviewFile(folder.id, token))) {
-        const pv = await fetchR2Bytes(env, fields.r2Base, fields.previewKey, [500, 1500]);
+        const pv = previewAsset;
         if (pv && pv.buf && pv.buf.byteLength) {
           const pname = await uniqueFileName(folder.id, baseName + "_プレビュー." + (extOf(pv.mime) || "jpg"), token);
           await uploadNewBuffer(folder.id, pname, pv.buf, pv.mime || "image/jpeg", token);
@@ -654,6 +646,18 @@ async function runSaveJobUnlocked(env, fields, parentId) {
     } catch (e) { /* プレビューは付随物。失敗は無視 */ }
   }
 
+  // ---- 動画は最後に保存する。Driveで動画が見えた時点では、小さい元画像・プレビューが先に揃っている。 ----
+  let videoAlready = false;
+  if (haveVideo) {
+    try {
+      if (reused) videoAlready = !!(await findVideoFile(folder.id, token));
+      if (!videoAlready) {
+        const vext = extOf(mime) || "mp4";
+        const vname = await uniqueFileName(folder.id, baseName + "." + vext, token);
+        await uploadNewBuffer(folder.id, vname, buf, mime, token);
+      }
+    } catch (e) { return fail("video_upload_failed:" + (e && e.message || e)); }
+  }
   // ---- 動画保存が成功した後にだけ旧フォルダをtrash（唯一の破壊操作・全条件を再検証）----
   if (doOverwrite && haveVideo) {
     for (const c of candidates) {

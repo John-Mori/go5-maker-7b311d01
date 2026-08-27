@@ -11,6 +11,10 @@ assert.ok(/if \(activeFlight\) \{[\s\S]{0,180}activeFlight\.waiters\.push\(opts\
 assert.ok(src.includes('delete _driveDatasetInFlight[flightKey]'), '終端でロックを解放する');
 assert.ok(src.includes('flight.watchdog = setTimeout'), '無応答でもロックを永久保持しない');
 assert.ok(!src.includes("done(true, '☁️ Driveへ保存中(裏で継続)・結果はカードに出ます');"), 'queueSave前にsingle-flightを解放する旧早期doneを復活させない');
+assert.ok(src.includes('var _draftAssetMirrorReady = Object.create(null);'), '新規ドラフトの元画像・プレビュー着地PromiseをDrive保存と共有する');
+assert.ok(src.includes('_draftAssetMirrorReady[id] = Promise.all(assetMirrorJobs'), '元画像とプレビューはタイマー待ちでなく作成直後に並列ミラーする');
+assert.ok(!/setTimeout\(function \(\) \{ try \{ ensureSrcMirror_/.test(src) && !/setTimeout\(function \(\) \{ try \{ ensurePrevMirror_/.test(src), '6秒/8秒の意図的な付随画像遅延を復活させない');
+assert.ok(src.indexOf('var assetMirrorReady = _draftAssetMirrorReady[id]') < src.indexOf('window.Go5Drive.queueSave({'), 'Driveジョブは新規ドラフトの付随画像ミラーを先に共有する');
 const joinAt = src.indexOf('if (activeFlight)');
 const queueAt = src.indexOf('window.Go5Drive.queueSave({', joinAt);
 assert.ok(joinAt >= 0 && queueAt > joinAt, 'join判定がqueueSaveより必ず先');

@@ -448,9 +448,10 @@
   //   従来はプレビューのR2ミラー(go5prev:)を後段のenrich(12秒Promise.race)でしか作っていなかった=
   //   iOSでその12秒に間に合わないと previewKey が空のまま save_job が飛び、動画は保存されるのにプレビューだけ
   //   Driveに来ない、が起きうる。元画像(ensureSrcMirror_)と同じく作成時に先出しでR2へ置く=保存ジョブの
-  //   タイミング競争から切り離す。動画のR2 PUTと帯域を食い合わないよう数秒遅らせて撃つ(冪等・fail-open)。
+  //   タイミング競争から切り離す。現在は3点の時間差を減らすため、作成直後に動画と並行して撃つ(冪等・fail-open)。
   var PREVNAME = function (id) { return 'go5prev:' + id; };
   var _prevUp = {}, _prevMirrorBusy = {};
+  var _draftAssetMirrorReady = Object.create(null); // 新規ドラフトの元画像＋プレビューR2着地をDrive保存と共有
   function ensurePrevMirror_(id, blobHint) {
     if (!blobHint || !blobHint.size) return Promise.resolve();
     if (_prevUp[id]) return Promise.resolve();
@@ -852,21 +853,15 @@
           ? Promise.allSettled(auxOps)
           : Promise.all(auxOps.map(function (p) { return Promise.resolve(p).catch(function () {}); }));
         auxDone.then(function () { ensureBlobMirror_(id); }).catch(function () {});
-        // ★元画像はIDBの成否と無関係に、メモリ実体から直接R2へ控える(2026-08-17③)。IDB書込み(stock_img_)が
-        //   iOSで黙って失敗/後で退避されても、go5src:<id> がR2に残る=再作成・Drive保存が空にならない。
-        //   ★ただし作成直後は動画のR2 PUT(ensureVideoMirror_)が上り帯域を使い、iPhoneの細い回線では同時PUTが
-        //     動画の着地を遅らせ「ドラフトへ自動遷移しない/DL準備中」を悪化させうる(Fable5診断2026-08-17)。
-        //     →元画像PUTは数秒遅らせ、動画の着地を先に通す(IDB退避は分〜日単位=数秒の遅延はdurabilityに無害)。
-        if (evDetail.sourceImageFile) {
-          var _srcHint = evDetail.sourceImageFile;
-          setTimeout(function () { try { ensureSrcMirror_(id, _srcHint); } catch (e) {} }, 6000);
-        }
-        // ★仕上がりプレビューも作成時にR2へ先出し(go5prev:<id>)=投稿完了で必ずDriveへ入る土台(Chami依頼2026-08-24②)。
-        //   動画のR2 PUTを先に通したいので元画像より少し後(8秒)に撃つ。IDB(stock_prev_)が後で退避されても雲に残る。
-        if (prevBlob) {
-          var _prevHint = prevBlob;
-          setTimeout(function () { try { ensurePrevMirror_(id, _prevHint); } catch (e) {} }, 8000);
-        }
+        // 元画像と仕上がりプレビューは作成直後のメモリ実体からR2へ同時に先出しする。
+        // 旧実装の6秒/8秒タイマーがDrive上で「動画だけ先に見え、画像が後から来る」時間差を自ら作っていた。
+        // 動画の着地判定自体は待たせず、Drive保存だけがこのPromiseを共有して3点の在り処をまとめて渡す。
+        var assetMirrorJobs = [];
+        if (evDetail.sourceImageFile) assetMirrorJobs.push(ensureSrcMirror_(id, evDetail.sourceImageFile));
+        if (prevBlob) assetMirrorJobs.push(ensurePrevMirror_(id, prevBlob));
+        _draftAssetMirrorReady[id] = Promise.all(assetMirrorJobs.map(function (job) {
+          return Promise.resolve(job).catch(function () {});
+        })).then(function () { return true; }, function () { return false; });
 
         // Phase 1: 動画を手元/雲へ並列着地。手元は set 解決ではなく、同じキーの読み戻しまで検証する。
         //   ★各レーンの reject 理由(idb-timeout / QuotaExceeded / draft-meta-readback-failed=localStorage逼迫 /
@@ -1858,10 +1853,11 @@
         //   12秒だけ待って"取れた分のkeyだけ"添え、必ず save_job を投げる(動画が最優先。プレビューは used:1ページ目
         //   への差し込みと、次回開いた時の okFolder/salvage の gap-fill でも後から揃う=取りこぼしゼロ)。
         //   okFolder枝・salvage枝が既に使っている12秒Promise.raceと同じ型に揃える(この主経路だけ無防備だった)。
-        var enrich = Promise.all([
+        var assetMirrorReady = _draftAssetMirrorReady[id] || Promise.resolve(false);
+        var enrich = Promise.resolve(assetMirrorReady).catch(function () { return false; }).then(function () { return Promise.all([
           Promise.resolve(previewReady).catch(function () { return null; }),
           resolveSrcImageBlob2_().catch(function () { return null; })
-        ]).then(function (bs) {
+        ]); }).then(function (bs) {
           var prevB = bs[0], srcB = bs[1];
           // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
           //   ★元画像を渡すのは「投稿完了と同じ一式(動画+元画像+プレビュー)」を揃えるため(Chami 2026-08-17)。

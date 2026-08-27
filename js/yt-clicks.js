@@ -811,7 +811,16 @@
     var u = w.WORKER_URL.replace(/\/+$/, '') + '/api/list?secret=' + encodeURIComponent(w.SHARED_SECRET);
     _clicksP = fetch(u).then(function (r) { return r.json(); }).then(function (j) {
       if (!j || !j.ok || !j.links) { _health.r2 = false; renderHealth_(); return false; }
-      j.links.forEach(function (l) { if (l && l.code) clicksCache[l.code] = l.clicks || 0; });
+      j.links.forEach(function (l) {
+        if (!l || !l.code) return;
+        clicksCache[l.code] = l.clicks || 0;
+        treeClickWindowsCache[l.code] = {
+          today: Number(l.today) || 0,
+          yesterday: Number(l.yesterday) || 0,
+          week: Number(l.week) || 0
+        };
+      });
+      clicksPersist_(); treeClickWindowsPersist_();
       _health.r2 = true; renderHealth_();                 // ★既存の取得結果を記録するだけ=追加通信ゼロ
       return true;
     }).catch(function () { _health.r2 = false; renderHealth_(); return false; });
@@ -1001,7 +1010,9 @@
   // クリック数キャッシュは localStorage に永続化(リロード直後や取得失敗時に「…」のままに
   // ならず、前回値を即表示→取得成功で最新化。再生数等の yt_meta_cache と同方針)。
   var clicksCache = (function () { try { return JSON.parse(localStorage.getItem('clicks_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> clicks
+  var treeClickWindowsCache = (function () { try { return JSON.parse(localStorage.getItem('tree_click_windows_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> {today,yesterday,week}
   function clicksPersist_() { try { localStorage.setItem('clicks_cache', JSON.stringify(clicksCache)); } catch (e) {} }
+  function treeClickWindowsPersist_() { try { localStorage.setItem('tree_click_windows_cache', JSON.stringify(treeClickWindowsCache)); } catch (e) {} }
   // 【恒久・供給一本化 2026-08-03】導線1/導線2のクリック数を「投稿履歴と全く同じ計算」で1関数へ寄せる。
   //   v=579 は材料(shortUrl)の供給を履歴とランキングで揃えたが、値の"計算式"は分裂したままだった=
   //   ランキングは clicksCache[code] を直読みするだけで ①合算URL(mergeUrls)の加算 ②GAS日次デルタ
@@ -1043,11 +1054,15 @@
   function treeRowsHtml_(it, account) {
     var trees = treeLinksFor_(it, account);
     if (!trees.length) return '';
+    var ico = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="クリック">';
     return '<div class="vrow-tree-list">' + trees.map(function (t) {
-      var c = sumClickCodes_([t.shortUrl]), code = codeOf(t.shortUrl);
+      var code = codeOf(t.shortUrl), win = code && treeClickWindowsCache[code];
+      function value_(key) { return win && win[key] != null ? num(win[key]) : (code ? '…' : '–'); }
       return '<div class="vrow-tree-row">' +
         '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener" title="返信ポストを開く">' + esc(t.name || 'ツリー1') + '</a>' +
-        '<span title="返信ポスト内のアフィリンククリック数"><img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="ツリークリック"> ' + (c != null ? num(c) : (code ? '…' : '–')) + '</span>' +
+        '<span title="今日の返信内アフィリンククリック数">今日 ' + ico + ' ' + value_('today') + '</span>' +
+        '<span title="昨日の返信内アフィリンククリック数">昨日 ' + ico + ' ' + value_('yesterday') + '</span>' +
+        '<span title="直近7日間の返信内アフィリンククリック数">今週 ' + ico + ' ' + value_('week') + '</span>' +
       '</div>';
     }).join('') + '</div>';
   }
@@ -1203,6 +1218,56 @@
       return r && r.affiliateOk && r.shortUrl && (Date.now() - (Number(r.at) || 0)) < 6 * 3600 * 1000 ? r.shortUrl : '';
     } catch (e) { return ''; }
   }
+  function treeShortStatus_(row, ok, message) {
+    var el = row && row.querySelector('.vedit-tree-status'); if (!el) return;
+    el.hidden = !message; el.className = 'vedit-tree-status ' + (ok ? 'is-ok' : 'is-ng');
+    el.textContent = message || '';
+  }
+  function shortenTreeAffiliate_(row) {
+    var inp = row && row.querySelector('.vedit-tree-short');
+    var btn = row && row.querySelector('.vedit-tree-shorten');
+    var raw = inp && (inp.value || '').trim();
+    if (!raw || !/^https?:\/\//i.test(raw)) { treeShortStatus_(row, false, 'エラー：DMM/FANZAの作品URLを https:// から貼り付けてください。'); return; }
+    if (codeOf(raw)) {
+      treeShortStatus_(row, false, 'エラー：既に短縮済みのURLは転送先のアフィIDを再確認できません。元の作品URLを貼って短縮し直してください。');
+      return;
+    }
+    var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+    if (!afId) { treeShortStatus_(row, false, 'エラー：詳細設定のFANZAアフィリエイトIDが未設定です。'); return; }
+    if (typeof window.ensureAffiliateLink !== 'function' || typeof window.hasRealAffiliateId !== 'function' || typeof window.Go5MakeShort !== 'function') {
+      treeShortStatus_(row, false, 'エラー：アフィリンク・短縮機能を読み込めません。ページを再読み込みしてください。'); return;
+    }
+    var normalized = (typeof window.normalizeWorkUrl === 'function' && window.normalizeWorkUrl(raw)) || raw;
+    var workHost = ''; try { workHost = new URL(normalized).hostname.toLowerCase(); } catch (e) {}
+    if (!/(^|\.)dmm\.(?:co\.jp|com)$/.test(workHost) && !/(^|\.)fanza\.(?:co\.jp|com)$/.test(workHost)) {
+      treeShortStatus_(row, false, 'エラー：DMM/FANZAの作品URLではありません。作品ページのURLを貼り付けてください。'); return;
+    }
+    var built = window.ensureAffiliateLink(normalized, afId);
+    if (!built || !built.ok || !built.link || !window.hasRealAffiliateId(built.link)) {
+      treeShortStatus_(row, false, 'エラー：DMM/FANZAの作品URLとして認識できないか、アフィIDを付与できませんでした。'); return;
+    }
+    var account = _treeContextAccount === 'acc2' ? 'acc2' : 'acc1';
+    var go5 = window.Go5Short || {}, expectedBase = go5.base ? String(go5.base(account) || '').replace(/\/+$/, '') : '';
+    var original = btn.textContent; btn.disabled = true; btn.textContent = '短縮中…';
+    treeShortStatus_(row, true, 'アフィリンクと短縮先を確認中…');
+    window.Go5MakeShort(built.link, { account: account }).then(function (res) {
+      var shortUrl = (res && (res.shortUrl || res.shareUrl)) || '';
+      var destination = (res && res.destinationUrl) || '';
+      var domainOk = !!(expectedBase && shortUrl.indexOf(expectedBase + '/') === 0);
+      var destinationAf = ''; try { destinationAf = new URL(destination).searchParams.get('af_id') || ''; } catch (e) {}
+      var destinationOk = destination === built.link && !!(window.hasRealAffiliateId(destination)) && destinationAf === afId;
+      if (!domainOk) {
+        treeShortStatus_(row, false, 'エラー：チャンネル用の新ドメインで短縮できませんでした。通信状態を確認してもう一度押してください。'); return;
+      }
+      if (!destinationOk) {
+        treeShortStatus_(row, false, 'エラー：短縮先に正しいアフィリエイトIDが入っていません。保存せず、もう一度短縮してください。'); return;
+      }
+      inp.value = shortUrl; inp.dispatchEvent(new Event('input', { bubbles: true }));
+      treeShortStatus_(row, true, '✅ アフィリンクOK・短縮先OK');
+    }).catch(function (e) {
+      treeShortStatus_(row, false, 'エラー：短縮サーバーへ接続できませんでした。通信状態を確認してください。');
+    }).then(function () { btn.disabled = false; btn.textContent = original; });
+  }
   function addTreeRow_(tree) {
     var list = $('veditTreeList'); if (!list) return null;
     tree = tree || {};
@@ -1219,8 +1284,10 @@
         '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-post">貼り付け</button></div>' +
       '</label>' +
       '<label class="vedit-field">返信内に掲載したアフィ計測短縮URL(ピンク矢印)' +
-        '<div class="vedit-bsky-row"><input class="vedit-tree-short" type="url" inputmode="url" autocomplete="off" placeholder="5mgl.com/... または yoz2.com/..." value="' + esc(tree.shortUrl || '') + '">' +
-        '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-short">貼り付け</button></div>' +
+        '<div class="vedit-tree-short-row"><input class="vedit-tree-short" type="url" inputmode="url" autocomplete="off" placeholder="DMM/FANZAの元作品URL または発行済み短縮URL" value="' + esc(tree.shortUrl || '') + '">' +
+        '<span class="vedit-tree-btnstack"><button type="button" class="vedit-copy vedit-copy-fit vedit-tree-shorten">短縮</button>' +
+        '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-short">貼り付け</button></span></div>' +
+        '<span class="vedit-tree-status" hidden></span>' +
       '</label>';
     list.appendChild(row);
     row.querySelector('.vedit-tree-del').addEventListener('click', function () {
@@ -1229,8 +1296,10 @@
     });
     row.querySelector('.vedit-tree-paste-post').addEventListener('click', function () { pasteInto_(row.querySelector('.vedit-tree-post')); });
     row.querySelector('.vedit-tree-paste-short').addEventListener('click', function () { pasteInto_(row.querySelector('.vedit-tree-short')); });
+    row.querySelector('.vedit-tree-shorten').addEventListener('click', function () { shortenTreeAffiliate_(row); });
     var postInput = row.querySelector('.vedit-tree-post');
     var shortInput = row.querySelector('.vedit-tree-short');
+    shortInput.addEventListener('input', function () { treeShortStatus_(row, false, ''); });
     postInput.addEventListener('input', function () {
       // 単体短縮で直前に発行・検証したURLは、ツリー入力を始めた時だけ補完する。
       // モーダルを開いただけの通常編集には混入させない。
@@ -1286,7 +1355,7 @@
     d.innerHTML =
       '<div class="vedit-modal">' +
         '<button id="veditClose" type="button" class="vedit-close" aria-label="閉じる" title="閉じる">✕</button>' +
-        '<p class="vedit-title" id="veditTitle">URL を編集</p>' +
+        '<div class="vedit-heading"><p class="vedit-title" id="veditTitle">URL を編集</p><p class="vedit-video-title" id="veditVideoTitle"></p></div>' +
         '<p class="vedit-error" id="veditError" hidden></p>' +
         '<label class="vedit-field">YouTube URL' +
           '<div class="vedit-bsky-row">' +
@@ -1321,11 +1390,7 @@
           '</div>' +
           '<span class="vedit-hint" style="font-size:11px;color:var(--sub);">この短縮URLのクリックが作品クリック数(ピンクの矢印)として集計されます。空だと表示されません。</span>' +
         '</label>' +
-        '<section class="vedit-tree-box">' +
-          '<div class="vedit-tree-title"><span>🌳 ツリー設定</span><button id="veditTreeAdd" type="button">＋ ツリーを追加</button></div>' +
-          '<div class="vedit-hint">返信ポストのURLは短縮しません。返信内に掲載した作品用の計測短縮URLを結び、ピンク矢印のクリック数を親の投稿履歴へ表示します。</div>' +
-          '<div id="veditTreeList"></div>' +
-        '</section>' +
+
         '<div class="vedit-attrs">' +
           '<div class="vedit-attrs-title">カテゴリ(複数選択可・キャラ無し＝オリジナル)</div>' +
           attrDefs_().map(function (a) {
@@ -1342,6 +1407,11 @@
             '<button id="veditRegen" type="button" class="vedit-regen-btn" title="この作品の一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだGoogleドライブに無いものだけを作って保存し、投稿履歴へ反映します(既にあれば作り直しません・反映されていない履歴の回復用)">🔄 データ再生成</button>' +
           '</div>' +
         '</label>' +
+        '<section class="vedit-tree-box">' +
+          '<div class="vedit-tree-title"><span>🌳 ツリー設定</span><button id="veditTreeAdd" type="button">＋ ツリーを追加</button></div>' +
+          '<div class="vedit-hint">返信ポストのURLは短縮しません。返信内に掲載した作品用の計測短縮URLを結び、ピンク矢印のクリック数を親の投稿履歴へ表示します。</div>' +
+          '<div id="veditTreeList"></div>' +
+        '</section>' +
         '<div class="vedit-actions">' +
           '<button id="veditGenShort" type="button" class="vedit-gen">短縮リンク<br>再生成</button>' +
           '<div class="vedit-actions-main">' +
@@ -1376,6 +1446,7 @@
       var row = addTreeRow_({});
       if (row) { var inp = row.querySelector('.vedit-tree-post'); if (inp) inp.focus(); }
     });
+    $('veditYt').addEventListener('input', function () { updateModalVideoTitle_(this.value); });
     // 作品URLのコピー。(Blueskyのコピーと同じ挙動)
     $('veditWorkCopy').addEventListener('click', function () {
       var inp = $('veditWork'); if (!inp) return;
@@ -1392,7 +1463,7 @@
     $('veditYtPaste').addEventListener('click', function () {
       var inp = $('veditYt'); if (!inp) return;
       if (navigator.clipboard && navigator.clipboard.readText) {
-        navigator.clipboard.readText().then(function (t) { inp.value = (t || '').trim(); inp.focus(); })
+        navigator.clipboard.readText().then(function (t) { inp.value = (t || '').trim(); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); })
           .catch(function () { inp.focus(); alert('クリップボードを読み取れませんでした。入力欄を長押しして貼り付けてください。'); });
       } else { inp.focus(); alert('この環境ではボタン貼り付けに未対応です。入力欄を長押しして貼り付けてください。'); }
     });
@@ -1477,10 +1548,28 @@
     _saveCb = null; _treeContextItem = null;
   }
 
+  function updateModalVideoTitle_(ytUrl) {
+    var el = $('veditVideoTitle'); if (!el) return;
+    var vid = ytIdOf(String(ytUrl || '').trim());
+    el.setAttribute('data-yt-id', vid || '');
+    if (!vid) { el.textContent = 'YouTube題名：未設定'; return; }
+    if (titleCache[vid]) { el.textContent = titleCache[vid]; return; }
+    el.textContent = 'YouTube題名を取得中…';
+    fetchVideos([vid]).then(function (out) {
+      if (el.getAttribute('data-yt-id') !== vid) return;
+      var rec = out && out[vid];
+      if (rec && rec.title) {
+        titleCache[vid] = rec.title;
+        var meta = ytMetaLoad(); meta[vid] = Object.assign({}, meta[vid] || {}, rec); ytMetaSave(meta);
+        el.textContent = rec.title;
+      } else el.textContent = 'YouTube題名：取得待ち';
+    });
+  }
   function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal, platform, mergeUrls, treeLinks, treeItem, treeAccount) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
+    updateModalVideoTitle_(ytVal || '');
     $('veditBsky').value = bskyVal || '';
     setMergeRows_(mergeUrls); // 合算URL(導線1のみ)を復元
     _treeContextItem = treeItem || null; _treeContextAccount = treeAccount === 'acc2' ? 'acc2' : 'acc1';
@@ -2676,7 +2765,7 @@
     row.style.cssText = 'margin:8px 0 0;';
     var cur = (it.rebuildOf && it.rebuildMerged) ? ('(現在：' + esc(rebuildTargetTitle_(it.rebuildOf) || '結合済み') + ')') : '';
     row.innerHTML = '<button id="veditRebuildMerge" type="button" class="vedit-gen">🔁 リビルド結合' + (cur ? '<span class="vgen-note" style="display:block;">' + cur + '</span>' : '') + '</button>';
-    actions.parentNode.insertBefore(row, actions); // 保存を含む actions の直前＝「保存の上」
+    actions.parentNode.insertBefore(row, actions.parentNode.querySelector('.vedit-tree-box') || actions); // ツリー設定を常に最下段に保つ
     row.querySelector('#veditRebuildMerge').addEventListener('click', function () { openRebuildMergePicker_(k, it); });
   }
   function rebuildTargetTitle_(videoId) {
@@ -3380,7 +3469,7 @@
     div.innerHTML = '<div class="hint" style="margin-bottom:6px;">この投稿が<b>' + acctName_(acct()) + '以外</b>のものなら、正しいアカウントの投稿履歴へ移せます。</div>' +
       '<button type="button" class="ghost vedit-move-btn" style="width:auto;">→ ' + acctName_(to) + ' へ移動</button>';
     var actions = modal.querySelector('.vedit-actions');
-    if (actions) modal.insertBefore(div, actions); else modal.appendChild(div);
+    if (actions) modal.insertBefore(div, modal.querySelector('.vedit-tree-box') || actions); else modal.appendChild(div);
     div.querySelector('.vedit-move-btn').addEventListener('click', function () {
       if (!window.confirm('「' + (it.title || k) + '」を ' + acctName_(to) + ' の投稿履歴へ移動します。\n(この端末とスプレッドシートの両方を移します)よろしいですか？')) return;
       closeModal_();
@@ -3441,7 +3530,7 @@
       '<div class="vedit-postimg-grid"></div>' +
       '<div class="vedit-postimg-msg hint" style="min-height:0;margin:2px 0 0;"></div>';
     var actions = modal.querySelector('.vedit-actions');
-    if (actions) modal.insertBefore(wrap, actions); else modal.appendChild(wrap);
+    if (actions) modal.insertBefore(wrap, modal.querySelector('.vedit-tree-box') || actions); else modal.appendChild(wrap);
     var grid = wrap.querySelector('.vedit-postimg-grid');
     var fileInp = wrap.querySelector('input[type=file]');
     var msg = wrap.querySelector('.vedit-postimg-msg');

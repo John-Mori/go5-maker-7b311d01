@@ -86,6 +86,7 @@
     "bsky_discount_link_cache": { "decision": "local", "why": "セール案内リンクのキャッシュ" },
     "bsky_discount_list_link_r2": { "decision": "local", "why": "セール案内R2リンクのキャッシュ" },
     "clicks_cache": { "decision": "local", "why": "クリック数キャッシュ" },
+    "tree_click_windows_cache": { "decision": "local", "why": "短縮リンクの日別クリック表示キャッシュ。link-workerから再取得できる端末ローカル派生値" },
     "delta_cache": { "decision": "local", "why": "差分キャッシュ" },
     "peak_cache": { "decision": "local", "why": "ピーク値キャッシュ" },
     "tp_cache": { "decision": "local", "why": "キャッシュ" },

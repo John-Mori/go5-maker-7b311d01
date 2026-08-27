@@ -9,6 +9,7 @@
  *   本物のまま実行して固定する。fetch/Drive API 等「外へ出る手」は runSaveJob 内のみで、ここでは呼ばない。
  */
 import assert from 'assert';
+import fs from 'fs';
 import {
   validateSaveJobInput,
   getOrCreateExactFolder,
@@ -26,6 +27,13 @@ import {
 const ENV = { FOLDER_ID_ACC1: 'FOLDER_ACC1', FOLDER_ID_ACC2: 'FOLDER_ACC2' };
 const KEY64 = 'a'.repeat(64);
 const KEY16 = 'b'.repeat(16);
+const workerSource = fs.readFileSync(new URL('../drive-worker/src/index.js', import.meta.url), 'utf8');
+const saveJobSource = workerSource.slice(workerSource.indexOf('async function runSaveJobUnlocked'), workerSource.indexOf('function sleep', workerSource.indexOf('async function runSaveJobUnlocked')));
+const sourceUploadAt = saveJobSource.indexOf('baseName + "_元画像."');
+const previewUploadAt = saveJobSource.indexOf('baseName + "_プレビュー."');
+const videoUploadAt = saveJobSource.indexOf('baseName + "." + vext');
+assert.ok(saveJobSource.includes('const [vid, sourceAsset, previewAsset] = await Promise.all(['), '動画・元画像・プレビューをR2から並列取得する');
+assert.ok(sourceUploadAt >= 0 && previewUploadAt > sourceUploadAt && videoUploadAt > previewUploadAt, 'Driveでは付随画像を先に保存し、動画を最後に表示させる');
 
 let fails = 0;
 function ok(name) { console.log('  PASS ' + name); }

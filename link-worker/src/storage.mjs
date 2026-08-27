@@ -6,6 +6,32 @@ function changed_(result) {
   return Number(result && result.meta && result.meta.changes) || 0;
 }
 
+let dailySchemaReady_;
+function jstDay_(ms = Date.now()) {
+  return new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+function addDays_(day, amount) {
+  return jstDay_(Date.parse(day + "T00:00:00Z") + amount * 86400000);
+}
+async function ensureDailySchema_(env) {
+  if (!env.LINKS_DB) return false;
+  if (!dailySchemaReady_) {
+    dailySchemaReady_ = env.LINKS_DB.prepare(
+      "CREATE TABLE IF NOT EXISTS short_click_daily (code TEXT NOT NULL, day TEXT NOT NULL, clicks INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(code, day))"
+    ).run().then(() => true).catch(() => false);
+  }
+  const ready = await dailySchemaReady_;
+  if (!ready) dailySchemaReady_ = null; // 一過性のD1失敗を次のクリック/一覧取得で再試行する
+  return ready;
+}
+async function recordDailyClick_(env, code) {
+  if (!(await ensureDailySchema_(env))) return;
+  const day = jstDay_();
+  await env.LINKS_DB.prepare(
+    "INSERT INTO short_click_daily(code,day,clicks) VALUES(?1,?2,1) ON CONFLICT(code,day) DO UPDATE SET clicks = clicks + 1"
+  ).bind(code, day).run();
+}
+
 async function kvGet_(env, key) {
   if (!env.LINKS) return null;
   try { return await env.LINKS.get(key); } catch (e) { return null; }
@@ -64,7 +90,10 @@ export async function bumpClickCount(env, code, url) {
       const update = await env.LINKS_DB.prepare(
         "UPDATE short_links SET clicks = clicks + 1, updated_at = ?2 WHERE code = ?1"
       ).bind(code, now).run();
-      if (changed_(update) > 0) return;
+      if (changed_(update) > 0) {
+        try { await recordDailyClick_(env, code); } catch (e) { /* total count remains authoritative */ }
+        return;
+      }
 
       // First access to a legacy KV link carries its historical count into D1.
       const legacyClicks = parseInt((await kvGet_(env, "c:" + code)) || "0", 10) || 0;
@@ -77,6 +106,7 @@ export async function bumpClickCount(env, code, url) {
           "UPDATE short_links SET clicks = clicks + 1, updated_at = ?2 WHERE code = ?1"
         ).bind(code, now).run();
       }
+      try { await recordDailyClick_(env, code); } catch (e) { /* total count remains authoritative */ }
       return;
     } catch (e) { /* emergency KV write fallback */ }
   }
@@ -119,6 +149,20 @@ export async function listLinks(env, maxRows = 2000) {
         merged.set(String(row.code), {
           code: String(row.code), url: String(row.url || ""), clicks: Number(row.clicks) || 0,
         });
+      }
+      if (await ensureDailySchema_(env)) {
+        const today = jstDay_(), yesterday = addDays_(today, -1), weekStart = addDays_(today, -6);
+        const daily = await env.LINKS_DB.prepare(
+          "SELECT code, SUM(CASE WHEN day = ?1 THEN clicks ELSE 0 END) AS today, SUM(CASE WHEN day = ?2 THEN clicks ELSE 0 END) AS yesterday, SUM(clicks) AS week FROM short_click_daily WHERE day >= ?3 AND day <= ?1 GROUP BY code"
+        ).bind(today, yesterday, weekStart).all();
+        for (const row of (daily && daily.results) || []) {
+          const rec = merged.get(String(row.code));
+          if (rec) {
+            rec.today = Number(row.today) || 0;
+            rec.yesterday = Number(row.yesterday) || 0;
+            rec.week = Number(row.week) || 0;
+          }
+        }
       }
     } catch (e) { /* legacy KV remains available */ }
   }

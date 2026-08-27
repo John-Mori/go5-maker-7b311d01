@@ -15,6 +15,13 @@ class FakeStmt {
   }
   async run() {
     const now = this.args[this.args.length - 1];
+    if (this.sql.includes("CREATE TABLE IF NOT EXISTS short_click_daily")) return { meta: { changes: 0 } };
+    if (this.sql.includes("INSERT INTO short_click_daily")) {
+      const [code, day] = this.args;
+      const key = code + "|" + day;
+      this.db.daily.set(key, (this.db.daily.get(key) || 0) + 1);
+      return { meta: { changes: 1 } };
+    }
     if (this.sql.includes("INSERT OR IGNORE INTO short_links")) {
       const [code, url] = this.args;
       if (this.db.links.has(code)) return { meta: { changes: 0 } };
@@ -45,12 +52,26 @@ class FakeStmt {
     throw new Error("unexpected run: " + this.sql);
   }
   async all() {
+    if (this.sql.includes("FROM short_click_daily")) {
+      const [today, yesterday, weekStart] = this.args;
+      const byCode = new Map();
+      for (const [key, clicks] of this.db.daily) {
+        const split = key.lastIndexOf("|");
+        const code = key.slice(0, split), day = key.slice(split + 1);
+        if (day < weekStart || day > today) continue;
+        const row = byCode.get(code) || { code, today: 0, yesterday: 0, week: 0 };
+        if (day === today) row.today += clicks;
+        if (day === yesterday) row.yesterday += clicks;
+        row.week += clicks; byCode.set(code, row);
+      }
+      return { results: Array.from(byCode.values()) };
+    }
     if (!this.sql.includes("SELECT code,url,clicks")) throw new Error("unexpected all");
     return { results: Array.from(this.db.links, ([code, row]) => ({ code, ...row })) };
   }
 }
 class FakeD1 {
-  constructor() { this.links = new Map(); this.rates = new Map(); }
+  constructor() { this.links = new Map(); this.rates = new Map(); this.daily = new Map(); }
   prepare(sql) { return new FakeStmt(this, sql); }
 }
 class FakeKv {
@@ -80,4 +101,6 @@ assert.equal(await consumeDailyIssue(env, "2026-08-27", 2), false);
 assert.equal(kv.writes, 0, "rate limiting does not write KV");
 const rows = await listLinks(env);
 assert.equal(rows.length, 2, "D1 and legacy KV listings are merged without duplicates");
+assert.equal(rows.find(row => row.code === "new01").today, 1, "today clicks are returned per short code");
+assert.equal(rows.find(row => row.code === "new01").week, 1, "rolling 7-day clicks are returned per short code");
 console.log("link-worker D1 storage tests: ok");

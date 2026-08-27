@@ -32,7 +32,7 @@
   function legacyNoSync(k) {
     k = String(k);
     return /^(short_hist__|verify_manual__|verify_yt__|bsky_did__|cand_|sheet_edit_pending__)/.test(k)
-      || /^(delta_cache|peak_cache|clicks_cache|yt_meta_cache|fanza_title_cache)$/.test(k)
+      || /^(delta_cache|peak_cache|clicks_cache|tree_click_windows_cache|yt_meta_cache|fanza_title_cache)$/.test(k)
       || /^acct_did_repair/.test(k)
       || k === "sync_device_name";
   }
@@ -120,7 +120,7 @@
   //    2026-08-18 Fable5診断B-1(逼迫源のうち再取得可能な分だけを退避=「保存中…」固着の脱出)。
   function isPurgeable(k) {
     k = String(k);
-    return /^(delta_cache|peak_cache|clicks_cache|yt_meta_cache|fanza_title_cache)$/.test(k) // 分析系キャッシュ(YT/FANZAから再取得)
+    return /^(delta_cache|peak_cache|clicks_cache|tree_click_windows_cache|yt_meta_cache|fanza_title_cache)$/.test(k) // 分析系キャッシュ(YT/FANZAから再取得)
       || k === "movie_photo_cache"      // リロード復元用の前景画像キャッシュ(消えても再選択で復旧・app.js)
       || k === "posted_sheet_v1";       // 投稿済みシートのスナップ(記録GASから再取得・candidates.js)
   }

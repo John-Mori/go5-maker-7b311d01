@@ -635,7 +635,9 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .vedit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:16px;box-sizing:border-box;overflow:auto;}
 .vedit-overlay[hidden]{display:none !important;}
 .vedit-modal{position:relative;background:#0e1422;border:1px solid var(--line);border-radius:14px;padding:20px 18px;width:100%;max-width:480px;box-sizing:border-box;margin:auto;}
-.vedit-title{font-size:15px;font-weight:700;color:var(--ink);margin:0 40px 14px 0;}
+.vedit-heading{display:flex;align-items:baseline;gap:10px;margin:0 40px 14px 0;min-width:0;white-space:nowrap;}
+.vedit-title{flex:0 0 auto;font-size:15px;font-weight:700;color:var(--ink);margin:0;}
+.vedit-video-title{flex:1 1 auto;min-width:0;margin:0;color:var(--accent);font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* 右上の✕閉じるボタン(design-preferences §4.6 の確定パターン=ヘッダー右) */
 .vedit-close{position:absolute;top:10px;right:10px;background:none;border:none;color:#7a8fa3;font-size:1.2rem;line-height:1;padding:2px 8px;cursor:pointer;width:auto;margin:0;}
 .vedit-close:hover,.vedit-close:active{color:var(--ink);}
@@ -1351,8 +1353,16 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 .vedit-tree-head input{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#0e1422;color:var(--ink);font-size:14px;}
 .vedit-tree-del{flex:0 0 auto;padding:7px 10px;border:1px solid #9a5360;border-radius:8px;background:transparent;color:#f0a2af;font-size:12px;cursor:pointer;}
 .vedit-tree-row .vedit-field{margin-bottom:8px;}
-.vrow-tree-list{display:flex;flex-direction:column;gap:3px;margin-top:5px;padding-top:4px;border-top:1px dashed var(--line);}
-.vrow-tree-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:11px;line-height:1.35;}
+.vedit-tree-short-row{display:flex;align-items:stretch;gap:8px;}
+.vedit-tree-short-row .vedit-tree-short{flex:1 1 auto;min-width:0;}
+.vedit-tree-btnstack{display:flex;flex:0 0 auto;flex-direction:column;justify-content:center;gap:7px;}
+.vedit-tree-btnstack .vedit-copy{flex:0 0 auto;margin:0;}
+.vedit-tree-status{display:block;margin-top:5px;font-size:11px;font-weight:800;line-height:1.45;}
+.vedit-tree-status[hidden]{display:none;}
+.vedit-tree-status.is-ok{color:#67d6bd;}
+.vedit-tree-status.is-ng{color:#ff7373;}
+.vrow-tree-list{display:flex;flex-direction:column;gap:3px;margin-top:5px;padding-top:4px;border-top:1px dashed var(--line);overflow-x:auto;}
+.vrow-tree-row{display:flex;align-items:center;gap:9px;flex-wrap:nowrap;white-space:nowrap;min-width:max-content;font-size:11px;line-height:1.35;}
 .vrow-tree-row a{color:#ff79b0;font-weight:800;text-decoration:none;}
 .vrow-tree-row a:hover{text-decoration:underline;}
 .vrow-tree-row span{display:inline-flex;align-items:center;color:var(--sub);white-space:nowrap;}
@@ -1362,5 +1372,6 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
   .vedit-tree-row{padding:8px 7px 2px;}
   .vedit-tree-row .vedit-bsky-row{flex-wrap:wrap;}
   .vedit-tree-row .vedit-bsky-row input{flex:1 1 100%;}
-  .vedit-tree-row .vedit-copy{margin-left:auto;}
+  .vedit-tree-row .vedit-bsky-row .vedit-copy{margin-left:auto;}
+  .vedit-tree-short-row{flex-wrap:nowrap;}
 }

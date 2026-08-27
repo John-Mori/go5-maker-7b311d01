@@ -40,7 +40,7 @@ const SHOULD_NOT_SYNC = [
   'bsky_did__acc1',              // 投稿アカウントDID（識別子キャッシュ）
   'bsky_avatar_somehandle', 'bsky_dn_somehandle',
   'cand_items', 'cand_hidden__t1', 'cand_refimg__abc', 'cand_mk2__m1__all',
-  'delta_cache', 'peak_cache', 'clicks_cache', 'yt_meta_cache', 'fanza_title_cache',
+  'delta_cache', 'peak_cache', 'clicks_cache', 'tree_click_windows_cache', 'yt_meta_cache', 'fanza_title_cache',
   'acct_did_repair_v1', 'acct_split_migrated', 'layout_acct_split_migrated', 'feat_2026q2_migrated',
   'field_top', 'field_author',
 ];
@@ -93,7 +93,7 @@ test('DIFF-1: legacySynced は反転前の同期集合（差分ログの基礎�
 });
 
 test('PURGE-1: isPurgeable は再取得可能なキャッシュだけ true（緊急退避の対象）', function () {
-  ['delta_cache', 'peak_cache', 'clicks_cache', 'yt_meta_cache', 'fanza_title_cache',
+  ['delta_cache', 'peak_cache', 'clicks_cache', 'tree_click_windows_cache', 'yt_meta_cache', 'fanza_title_cache',
    'movie_photo_cache', 'posted_sheet_v1'].forEach(function (k) {
     assert.strictEqual(Keys.isPurgeable(k), true, k + ' は緊急退避可のはず');
   });
