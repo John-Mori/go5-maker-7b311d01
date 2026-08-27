@@ -148,6 +148,19 @@
     return 'fail';
   }
 
+  // 候補の「同人 / Books」絞り込み。両方ONまたは両方OFFは全件表示、片方だけONならその種別だけを通す。
+  // カードのBooksバッジと同じURL規則を使い、Worker由来の kind/service も優先して端末内・全候補で判定を揃える。
+  function candidateKindOf_(it) {
+    if (!it || it.isTwitter || /^tw_/i.test(String(it.cid || ''))) return '';
+    if (String(it.kind || '').toLowerCase() === 'books' || String(it.service || '').toLowerCase() === 'ebook') return 'Books';
+    return workKindOf_(it.url || '');
+  }
+  function candidateKindPass_(it, doujin, books) {
+    doujin = !!doujin; books = !!books;
+    if (doujin === books) return true;
+    var kind = candidateKindOf_(it);
+    return books ? kind === 'Books' : kind === '同人';
+  }
   // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
   //   js/candidates.js と KouhoTeian.html に同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
   function imgHash_(s) { s = String(s || ''); var h = 5381, i = s.length; while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; } return h.toString(36); }
@@ -161,7 +174,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -375,6 +388,8 @@
   var _sortTab = null;      // _sort を最後に既定へ揃えたタブ。タブが実際に変わった時だけ既定へ戻す目印(再描画では触らない)
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
+  var _filterDoujin = false; // 種別絞り込み：同人のみ。Booksと両方ON/両方OFFは全件表示
+  var _filterBooks = false;  // 種別絞り込み：Booksのみ
   var _workSearchByTab = {};
   var _memoSearchByTab = {}; // メモ/コメント検索の入力をタブ別に保持(Chami依頼2026-08-11)
   var _candPageByTab = {};   // 候補一覧の現在ページをタブ別に保持(ページ分け・Chami依頼2026-08-15)
@@ -643,7 +658,12 @@
     return isHiddenByRecentCount_(it);
   }
   function candHidePostedRowHtml_() {
-    return '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;justify-content:flex-end;">' +
+    return '<div class="cand-kind-posted-row">' +
+      '<div class="cand-kind-filter" role="group" aria-label="作品種別で絞り込み">' +
+        '<label><input id="candFilterDoujin" type="checkbox"' + (_filterDoujin ? ' checked' : '') + '><span>同人</span></label>' +
+        '<label><input id="candFilterBooks" type="checkbox"' + (_filterBooks ? ' checked' : '') + '><span>ブックス</span></label>' +
+      '</div>' +
+      '<span class="cand-kind-posted-spacer"></span>' +
       '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
       '<button id="candHidePosted2" type="button" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[1][1]) + '✔非表示</button>' +
     '</div>';
@@ -653,6 +673,20 @@
     var b1 = $('candHidePosted1'), b2 = $('candHidePosted2');
     if (b1) b1.addEventListener('click', function () { _hidePosted.acc1 = !_hidePosted.acc1; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc1); rerender(); });
     if (b2) b2.addEventListener('click', function () { _hidePosted.acc2 = !_hidePosted.acc2; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc2); rerender(); });
+  }
+  function wireKindFilter_(rerender) {
+    var d = $('candFilterDoujin'), b = $('candFilterBooks');
+    function changed() {
+      _filterDoujin = !!(d && d.checked); _filterBooks = !!(b && b.checked);
+      _candPageByTab[_activeTab] = 1;
+      rerender();
+    }
+    if (d) d.addEventListener('change', changed);
+    if (b) b.addEventListener('change', changed);
+  }
+  function candidateKindQuery_() {
+    if (_filterDoujin === _filterBooks) return '';
+    return _filterBooks ? 'books' : 'doujin';
   }
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
   // 並べ替え対象外の固定タブ。(🦋バズ・💡候補)左端の2つは動かさない。
@@ -4315,7 +4349,7 @@
     wireSortControl_('all', renderAll_);
     $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; _candPageByTab.all = 1; renderAll_(); });
     wirePriceFilter_(function () { _candPageByTab.all = 1; renderAll_(); });
-    wireCandColsCtl_(); wireHidePostedButtons_(function () { renderAll_(); }); wireBuiltinRename_('all');
+    wireCandColsCtl_(); wireHidePostedButtons_(function () { renderAll_(); }); wireKindFilter_(function () { renderAll_(); }); wireBuiltinRename_('all');
 
     var seen = {}, stored = [], srcByCid = {}, makerIds = [];
     function addItems(a, src) { (a || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; stored.push(it); srcByCid[it.cid] = src; } }); }
@@ -4338,7 +4372,7 @@
     function fallback_() {
       var q = normalizeWorkSearch_(_workSearchByTab.all || ''), mq = normalizeWorkSearch_(_memoSearchByTab.all || '');
       var arr = sortItems(stored, _sort).filter(function (it) {
-        return (!_filterSale || isOnSale_(it)) && passPrice_(it) && !isHiddenByPostedForAll_(it) &&
+        return candidateKindPass_(it, _filterDoujin, _filterBooks) && (!_filterSale || isOnSale_(it)) && passPrice_(it) && !isHiddenByPostedForAll_(it) &&
           (!q || workSearchText_(it).indexOf(q) >= 0) && (!mq || candMemoText_(it).indexOf(mq) >= 0);
       });
       var size = candPageSize_(), pages = Math.max(1, Math.ceil(arr.length / size)), page = Math.min(_candPageByTab.all || 1, pages);
@@ -4347,7 +4381,7 @@
     function paint_(items, total, page, pages, fallback) {
       var wrap = $('candPageWrap'); if (!wrap || _activeTab !== 'all') return;
       var memoQ = normalizeWorkSearch_(_memoSearchByTab.all || '');
-      var visible = (items || []).filter(function (it) { return !isHiddenByPostedForAll_(it) && (!memoQ || candMemoText_(it).indexOf(memoQ) >= 0); });
+      var visible = (items || []).filter(function (it) { return candidateKindPass_(it, _filterDoujin, _filterBooks) && !isHiddenByPostedForAll_(it) && (!memoQ || candMemoText_(it).indexOf(memoQ) >= 0); });
       _cardIndex = {}; visible.forEach(function (it) { _cardIndex[it.cid] = it; });
       var startI = (page - 1) * candPageSize_(), pager = candPagerHtml_(page, pages, total, startI, visible.length);
       wrap.innerHTML = '<div id="candPageHead"><div class="hint" style="padding:2px 6px;">📚 全候補 ' + total + '件' + (fallback ? ' (端末内データ)' : '') + '</div>' + pager + '</div><div id="candCardList"></div><div id="candPageFoot">' + (pages > 1 ? pager : '') + '</div>';
@@ -4370,7 +4404,7 @@
       var page = _candPageByTab.all || 1, size = candPageSize_();
       var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
       catalogPage_({ sort: _sort, page: page, limit: size, q: _workSearchByTab.all || '', sale: _filterSale ? 1 : 0,
-        priceMax: _priceMax || 0, hideRecent: (_hidePosted.acc1 || _hidePosted.acc2) ? 1 : 0 }, function (j) {
+        priceMax: _priceMax || 0, kind: candidateKindQuery_() || 'all', hideRecent: (_hidePosted.acc1 || _hidePosted.acc2) ? 1 : 0 }, function (j) {
         if (wrap) wrap.removeAttribute('aria-busy');
         if (!j) { fallback_(); return; }
         _candPageByTab.all = j.page || 1; progressText_(j.progress); paint_(j.items || [], j.total || 0, j.page || 1, j.pages || 1, false);
@@ -5011,6 +5045,7 @@
     wirePriceFilter_(function () { renderCandList(tabId); });
     wireCandColsCtl_();
     wireHidePostedButtons_(function () { renderCandList(tabId); });
+    wireKindFilter_(function () { renderCandList(tabId); });
     $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
     bindPcRun_($('candPcRun'), 'candList');
     $('candAddOpen').addEventListener('click', function () { openAddModal_(tabId, isMain); });
@@ -5558,6 +5593,7 @@
     // 検索による救出ができず「検索が機能しない」に見えるため、空一覧も同じ描画パイプへ通す。
     var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
     var filt_ = function (it) {
+      if (!candidateKindPass_(it, _filterDoujin, _filterBooks)) return false;
       if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
       if (_filterSale && !isOnSale_(it)) return false;
       if (!passPrice_(it)) return false;
@@ -5608,6 +5644,7 @@
       // 検索中だけは、手動非表示・投稿済み・画像未復元・セール/価格フィルターより前の元データを横断する。
       // PCで画像復元が一時的に遅れても、作品そのものが検索結果から消えて復旧操作不能になる循環を作らない。
       var arr2 = sortItems(fresh2, _sort).filter(function (it) {
+        if (!candidateKindPass_(it, _filterDoujin, _filterBooks)) return false;
         if (searching) return true;
         if (!(_showHidden ? hs2[it.cid] : !hs2[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
@@ -5647,7 +5684,7 @@
     _candRepaint_ = paintMainPage_; _candRepaintTab_ = tabId;
     // ★外枠(件数見出し・検索欄・表示数セレクタ・ページ入れ物)は、並び順/絞り込み/表示数が変わらない限り
     //   作り直さない=検索フォーカスもカードのDOMも保つ。並び順や非表示切替など見出しが変わる操作の時だけ組み直す。
-    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + _priceMax;
+    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + (_filterDoujin ? 1 : 0) + '|' + (_filterBooks ? 1 : 0) + '|' + _priceMax;
     var shellReady = (el._go5CandState === stateSig && document.getElementById('candCardList'));
     if (!shellReady) {
       var salesMiss = missingCount(salesTargetCids_(arr));
@@ -5719,6 +5756,7 @@
     wirePriceFilter_(function () { renderMaker(tabId); });
     wireCandColsCtl_();
     wireHidePostedButtons_(function () { renderMaker(tabId); });
+    wireKindFilter_(function () { renderMaker(tabId); });
     $('candReload').addEventListener('click', function () { renderMaker(tabId, true); });
     bindPcRun_($('candPcRun'), 'candMakerList');
     $('candEditTab').addEventListener('click', function () { showEditTabForm(tab); });
@@ -5742,6 +5780,7 @@
       var hidden = lsGet(hiddenKey(tabId), '[]');
       var hset = {}; hidden.forEach(function (c) { hset[c] = true; });
       var arr = sortItems(items, _sort).filter(function (it) {
+        if (!candidateKindPass_(it, _filterDoujin, _filterBooks)) return false;
         if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
         if (!passPrice_(it)) return false;

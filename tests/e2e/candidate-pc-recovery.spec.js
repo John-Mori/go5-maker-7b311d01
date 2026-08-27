@@ -41,6 +41,56 @@ test.describe('PC candidate recovery invariants', () => {
     await expect(page.locator('.cand-card', { hasText: '検索対象外の作品' })).toHaveCount(0);
   });
 
+  test('doujin and Books checkboxes filter cards and visible count', async ({ page }) => {
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.setItem('cand_items', JSON.stringify([
+        {
+          cid: 'd_kind_filter', title: '同人フィルター確認作品',
+          url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_kind_filter/', addedAt: Date.now()
+        },
+        {
+          cid: 'b_kind_filter', title: 'Booksフィルター確認作品',
+          url: 'https://book.dmm.com/detail/b_kind_filter/', addedAt: Date.now() - 1
+        }
+      ]));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    const doujin = page.locator('#candFilterDoujin');
+    const books = page.locator('#candFilterBooks');
+    const doujinCard = page.locator('.cand-card', { hasText: '同人フィルター確認作品' });
+    const booksCard = page.locator('.cand-card', { hasText: 'Booksフィルター確認作品' });
+    await expect(doujin).toBeVisible();
+    await expect(books).toBeVisible();
+    await expect(doujinCard).toBeVisible();
+    await expect(booksCard).toBeVisible();
+
+    const positions = await page.evaluate(() => {
+      const group = document.querySelector('.cand-kind-filter').getBoundingClientRect();
+      const posted = document.querySelector('#candHidePosted1').getBoundingClientRect();
+      return { groupRight: group.right, postedLeft: posted.left };
+    });
+    expect(positions.groupRight).toBeLessThanOrEqual(positions.postedLeft);
+
+    await doujin.check();
+    await expect(doujinCard).toBeVisible();
+    await expect(booksCard).toHaveCount(0);
+    await expect(page.locator('#candList > p.hint').first()).toContainText('1件');
+
+    await books.check();
+    await expect(doujinCard).toBeVisible();
+    await expect(booksCard).toBeVisible();
+
+    await doujin.uncheck();
+    await expect(doujinCard).toHaveCount(0);
+    await expect(booksCard).toBeVisible();
+    await expect(page.locator('#candList > p.hint').first()).toContainText('1件');
+
+    await books.uncheck();
+    await expect(doujinCard).toBeVisible();
+    await expect(booksCard).toBeVisible();
+  });
   test('a synced candidate image appears without navigating away or reloading', async ({ page }) => {
     const cid = 'd_pc_synced_image_exact_key';
     await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });

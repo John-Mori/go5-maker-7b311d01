@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { createRequire } from "node:module";
 import worker, { __testCatalogType } from "../fanza-worker/src/index.js";
 import { productJsonLdFromHtml } from "../scripts/fanza_jsonld.mjs";
 
@@ -18,6 +19,22 @@ class MemoryKv {
   }
 }
 
+const require = createRequire(import.meta.url);
+const { candidateKindOf_, candidateKindPass_ } = require("../js/candidates.js");
+const doujinItem = { cid: "d_kind_1", url: "https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_kind_1/" };
+const booksItem = { cid: "b_kind_1", url: "https://book.dmm.com/detail/b_kind_1/" };
+assert.equal(candidateKindOf_(doujinItem), "同人");
+assert.equal(candidateKindOf_(booksItem), "Books");
+assert.equal(candidateKindOf_({ cid: "b_service", service: "ebook", url: "" }), "Books", "WorkerのserviceもBooks判定に使う");
+for (const it of [doujinItem, booksItem]) {
+  assert.equal(candidateKindPass_(it, false, false), true, "両方OFFは全件表示");
+  assert.equal(candidateKindPass_(it, true, true), true, "両方ONは全件表示");
+}
+assert.equal(candidateKindPass_(doujinItem, true, false), true);
+assert.equal(candidateKindPass_(booksItem, true, false), false);
+assert.equal(candidateKindPass_(doujinItem, false, true), false);
+assert.equal(candidateKindPass_(booksItem, false, true), true);
+assert.equal(candidateKindPass_({ cid: "tw_1", isTwitter: true }, true, false), false, "SNS候補は単一種別フィルターへ混ぜない");
 const origin = "https://john-mori.github.io";
 const kv = new MemoryKv();
 const env = { FANZA_KV: kv, USE_D1: "off", SHARED_SECRET: "public-test", ADMIN_SECRET: "admin-test", ALLOWED_ORIGIN: origin };
@@ -38,9 +55,13 @@ assert.match(candidateSource, /var PAGESIZE_DEF = 20/, "全候補の既定表示
 assert.match(candidateSource, /id="candWorkSearchRun"/, "全候補検索は入力完了後の検索ボタンで実行");
 assert.match(candidateSource, /\/api\/candidate-catalog\?/, "全候補はページ単位のWorker APIを使う");
 assert.match(candidateSource, /hideRecent: \(_hidePosted\.acc1 \|\| _hidePosted\.acc2\) \? 1 : 0/, "all-candidates sends the posted cooldown filter before paging");
+assert.match(candidateSource, /kind: candidateKindQuery_\(\) \|\| 'all'/, "all-candidates sends the category filter before paging");
 assert.match(candidateSource, /function isHiddenByPostedForAll_\(it\)/, "all-candidates has a dedicated post-only visibility gate");
 assert.doesNotMatch(candidateSource.slice(candidateSource.indexOf("  function isHiddenByPostedForAll_"), candidateSource.indexOf("  function candHidePostedRowHtml_")), /isHiddenByNoMaterial_/, "missing local video images must not collapse a server page");
 assert.doesNotMatch(candidateSource.slice(candidateSource.indexOf("  function renderAll_() {"), candidateSource.indexOf("  // ── タブの並べ替え")), /addEventListener\('input'/, "全候補は1文字ごとに再検索しない");
+const workerSource = fs.readFileSync(new URL("../fanza-worker/src/index.js", import.meta.url), "utf8");
+assert.match(workerSource, /kind === "books"[\s\S]*c\.service='ebook'/, "Worker filters Books before count and pagination");
+assert.match(workerSource, /kind === "doujin"[\s\S]*c\.service<>'ebook'/, "Worker filters doujin before count and pagination");
 const helperStart = candidateSource.indexOf("  function isInfoTarget_");
 const helperEnd = candidateSource.indexOf("  function salesTargetCids_", helperStart);
 assert.ok(helperStart >= 0 && helperEnd > helperStart, "candidate target helpers should exist");

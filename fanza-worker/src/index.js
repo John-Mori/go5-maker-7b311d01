@@ -974,6 +974,7 @@ async function queryCandidateCatalog_(env, sp) {
   let page = parseInt(sp.get("page") || "1", 10); if (!Number.isFinite(page) || page < 1) page = 1;
   const q = String(sp.get("q") || "").trim().slice(0, 100);
   const saleOnly = sp.get("sale") === "1";
+  const kind = String(sp.get("kind") || "").toLowerCase();
   const priceMax = Math.max(0, parseInt(sp.get("priceMax") || "0", 10) || 0);
   const hideRecent = sp.get("hideRecent") === "1";
   const sort = String(sp.get("sort") || "rank7d");
@@ -986,6 +987,8 @@ async function queryCandidateCatalog_(env, sp) {
   const where = ["c.eligible=1"];
   const binds = [];
   if (q) { where.push("(c.title LIKE ? OR c.maker_name LIKE ? OR c.cid LIKE ?)"); const like = "%" + q + "%"; binds.push(like, like, like); }
+  if (kind === "books") where.push("c.service='ebook'");
+  else if (kind === "doujin") where.push("c.service<>'ebook'");
   if (saleOnly) where.push("c.discount_pct>0 AND c.price<c.list_price");
   if (priceMax) { where.push("(COALESCE(c.price,c.list_price) IS NULL OR COALESCE(c.price,c.list_price)<=?)"); binds.push(priceMax); }
   if (hideRecent) {
