@@ -84,4 +84,58 @@ test.describe('投稿履歴のツリー設定', () => {
     await expect(page.locator('#veditError')).toContainText('返信ポストURLを確認');
     await expect(page.locator('#veditOverlay')).toBeVisible();
   });
+
+  test('ツリー2以降は返信URLなし・短縮前の作品URLだけでも仮保存し、開き直して保持する', async ({ page }) => {
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await page.locator('.vedit-btn').first().click();
+    const first = page.locator('.vedit-tree-row').first();
+    await first.locator('.vedit-tree-post').fill('https://x.com/example/status/1234567890');
+    await first.locator('.vedit-tree-short').fill('https://5mgl.com/tree01');
+    await page.locator('#veditTreeAdd').click();
+    const second = page.locator('.vedit-tree-row').nth(1);
+    await second.locator('.vedit-tree-name').fill('ツリー2仮保存');
+    const rawWorkUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_654321/';
+    await second.locator('.vedit-tree-short').fill(rawWorkUrl);
+    await page.locator('#veditSave').click();
+
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('go5_tree_links_v1') || '{}'));
+    const rec = saved['acc1|v:acc1-20260827-1200-tree1'];
+    expect(rec.trees).toHaveLength(2);
+    expect(rec.trees[1]).toMatchObject({ name: 'ツリー2仮保存', postUrl: '', shortUrl: rawWorkUrl });
+
+    await page.locator('.vedit-btn').first().click();
+    await expect(page.locator('.vedit-tree-row')).toHaveCount(2);
+    await expect(page.locator('.vedit-tree-row').nth(1).locator('.vedit-tree-short')).toHaveValue(rawWorkUrl);
+    await page.locator('#veditCancel').click();
+    await expect(page.locator('.vrow-tree-row').nth(1)).toContainText('ツリー2仮保存');
+    await expect(page.locator('.vrow-tree-row').nth(1).locator('a')).toHaveCount(0);
+  });
+
+  test('iPhone幅でも返信URLと貼り付けを同列にし、作品URL欄は同じ高さにする', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await page.locator('.vedit-btn').first().click();
+    const row = page.locator('.vedit-tree-row').first();
+    const layout = await row.evaluate((el) => {
+      const post = el.querySelector('.vedit-tree-post');
+      const postPaste = el.querySelector('.vedit-tree-paste-post');
+      const short = el.querySelector('.vedit-tree-short');
+      const stack = el.querySelector('.vedit-tree-btnstack');
+      const a = post.getBoundingClientRect();
+      const b = postPaste.getBoundingClientRect();
+      const c = short.getBoundingClientRect();
+      return {
+        sameRow: Math.abs(a.top - b.top) < 2,
+        sameHeight: Math.abs(a.height - c.height) < 2,
+        postHeight: a.height,
+        shortHeight: c.height,
+        stackGap: parseFloat(getComputedStyle(stack).gap || '0'),
+        overflow: el.scrollWidth > el.clientWidth + 1
+      };
+    });
+    expect(layout.sameRow).toBeTruthy();
+    expect(layout.sameHeight, JSON.stringify(layout)).toBeTruthy();
+    expect(layout.stackGap).toBeLessThanOrEqual(4);
+    expect(layout.overflow).toBeFalsy();
+  });
 });

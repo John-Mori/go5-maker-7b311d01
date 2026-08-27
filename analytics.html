@@ -15,14 +15,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="分析･ランキング">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=961">
-<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=961">
-<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=961">
+<link rel="manifest" href="manifest.webmanifest?v=962">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=962">
+<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=962">
 <title>分析 ･ ランキング — 5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=961">
+<link rel="stylesheet" href="style.css?v=962">
 <script>
 /* 背景フック(ランキング/分析=クリーム封鎖)とアカウント色を描画前に確定。保存された表示(rank/analyze)を尊重。 */
 try {
@@ -64,11 +64,11 @@ try {
 <nav class="tabbar">
   <button id="tabCand"    class="tab" data-nav="KouhoLists.html">💡 候補</button>
   <button id="tabVerify" class="tab" data-nav="StockLists.html">📋 投稿履歴</button>
-  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=961" alt=""> 動画作成</button>
+  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=962" alt=""> 動画作成</button>
   <button id="tabStock" class="tab" onclick="location.href='Stock.html'">📦 ドラフト</button>
   <button id="tabYT"    class="tab" data-go="tabYT"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
-  <button id="tabPost"  class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=961" alt=""> 投稿</button>
-  <button id="tabAffi"  class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=961" alt=""> AFIリンク</button>
+  <button id="tabPost"  class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=962" alt=""> 投稿</button>
+  <button id="tabAffi"  class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=962" alt=""> AFIリンク</button>
   <button id="tabSettings" class="tab" data-go="tabSettings">⚙️ 詳細設定</button>
 </nav>
 
@@ -105,27 +105,27 @@ try {
 <!-- yt-clicks.js の初期化ゲート(#ytClickList が無いと window.YtRank が定義されない)を満たすスタブ。 -->
 <div id="ytClickList" hidden style="display:none"></div>
 
-<script src="core/util.js?v=961"></script>
-<script src="core/account.js?v=961"></script>
-<script src="core/storage-keys.js?v=961"></script>
-<script src="core/categories.js?v=961"></script>
-<script src="core/movie-attrs-core.js?v=961"></script>
-<script src="core/image-role.js?v=961"></script>
-<script src="core/idb-store.js?v=961"></script>
-<script src="core/img-diag.js?v=961"></script>
-<script src="core/viewport-anchor.js?v=961"></script>
-<script src="core/sync.js?v=961"></script>
-<script src="core/image-cdn.js?v=961"></script>
-<script src="core/kaizen-log.js?v=961"></script>
-<script src="js/idgen.js?v=961"></script>
-<script src="js/affiliate-core.js?v=961"></script>
-<script src="js/fanza-core.js?v=961"></script>
-<script src="js/candidates.js?v=961"></script>
-<script src="js/hist-merge-core.js?v=961"></script>
-<script src="core/hist-store.js?v=961"></script>
-<script src="js/rank-core.js?v=961"></script>
-<script src="js/yt-clicks.js?v=961"></script>
-<script src="js/competitor.js?v=961"></script>
+<script src="core/util.js?v=962"></script>
+<script src="core/account.js?v=962"></script>
+<script src="core/storage-keys.js?v=962"></script>
+<script src="core/categories.js?v=962"></script>
+<script src="core/movie-attrs-core.js?v=962"></script>
+<script src="core/image-role.js?v=962"></script>
+<script src="core/idb-store.js?v=962"></script>
+<script src="core/img-diag.js?v=962"></script>
+<script src="core/viewport-anchor.js?v=962"></script>
+<script src="core/sync.js?v=962"></script>
+<script src="core/image-cdn.js?v=962"></script>
+<script src="core/kaizen-log.js?v=962"></script>
+<script src="js/idgen.js?v=962"></script>
+<script src="js/affiliate-core.js?v=962"></script>
+<script src="js/fanza-core.js?v=962"></script>
+<script src="js/candidates.js?v=962"></script>
+<script src="js/hist-merge-core.js?v=962"></script>
+<script src="core/hist-store.js?v=962"></script>
+<script src="js/rank-core.js?v=962"></script>
+<script src="js/yt-clicks.js?v=962"></script>
+<script src="js/competitor.js?v=962"></script>
 <script>
 /* 分析･ランキングページのブート: アカウント帯 + タブバー配線 + ランキング/分析トグル + 初回描画。 */
 (function () {

@@ -6286,7 +6286,15 @@
     }
     if (!d.videoId || !d.sourceImageFile || d.test) return;
     fileToScaledDataUrl(d.sourceImageFile, function (durl, err) {
-      if (!err && durl) usedImgSave_(d.videoId, [durl]);
+      if (!err && durl) {
+        // stock.js は完成プレビュー、こちらは実際の元画像を同じ used:<videoId> へ非同期保存する。
+        // 画像変換が後着した側が配列を丸ごと置換すると、生成順によってプレビューだけが消えるため、
+        // 既に確定した先頭prev枚は保持し、元画像部分だけを今回の1枚へ更新する。
+        var current = usedImgsOf_(d.videoId) || [];
+        var prevCount = usedPrevCount_(d.videoId) | 0;
+        var previews = prevCount > 0 ? current.slice(0, prevCount) : [];
+        usedImgSave_(d.videoId, previews.concat([durl]), previews.length);
+      }
     });
   });
 

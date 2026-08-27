@@ -119,7 +119,21 @@
     catch (e) { return ''; }
   }
 
-  function loadMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || '[]') || []; } catch (e) { return []; } }
+  function loadMeta() {
+    var arr = [];
+    try { arr = JSON.parse(localStorage.getItem(META_KEY) || '[]') || []; }
+    catch (e) { return []; }
+    var dels = {};
+    try { dels = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {}; } catch (e2) {}
+    // 台帳の縮小書込みだけが容量都合で失敗しても、先に着地した墓標を表示時にも適用する。
+    // 同期側だけに任せると、投稿完了直後のこの端末では古い台帳がそのまま描画されて
+    // 「完了したのにドラフトが残る」になる。復元は addedAt を墓標より新しくするので正当に戻せる。
+    // 墓標台帳だけが破損してもドラフト本体を全件隠さない。破損時は墓標なしとして安全側へ倒す。
+    return (Array.isArray(arr) ? arr : []).filter(function (m) {
+      var delAt = m && m.id ? Number(dels[m.id] || 0) : 0;
+      return !delAt || Number((m && (m.addedAt || m.ts)) || 0) > delAt;
+    });
+  }
   // ★localStorage逼迫でメタ書込みが無言失敗すると、commitPendingDraft_ の読み戻しが draft-meta-readback-failed で
   //   落ち、ドラフトが一覧に載らず遷移もしない(蓄積の多い月詠み=acc1で顕在化。実機の保留バナー内訳=
   //   手元:idb-timeout / 雲:draft-meta-readback-failed・Chami報告2026-08-16 msg1538578410564096130/第1弾計測で確証)。
@@ -264,12 +278,19 @@
   // ドラフト削除の墓標。(id→削除ts)端末をまたいで「消したドラフトが union で復活する」のを防ぐ=候補の cand_del と同型。
   //   投稿完了・削除でドラフト本体から外す時に打つ。復元(restoreStock_)は addedAt=now を打って墓標を越える。
   function writeStockDel_(id) {
-    try {
-      var m = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
-      m[id] = Date.now();
-      localStorage.setItem('go5_stock_del', JSON.stringify(m));
-    } catch (e) {}
-    kickSync_();
+    function write_() {
+      try {
+        var m = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
+        m[id] = Date.now();
+        localStorage.setItem('go5_stock_del', JSON.stringify(m));
+        var check = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
+        return Number(check[id] || 0) > 0;
+      } catch (e) { return false; }
+    }
+    var ok = write_();
+    if (!ok && purgeableSweep_() > 0) ok = write_();
+    if (ok) kickSync_();
+    return ok;
   }
   // 作成履歴の「完全削除(purge)」専用墓標。(id→削除ts)★ユーザーが明示削除した時だけ打つ=全端末で復活させない。
   //   作成履歴(go5_stock_archive)は「墓標なし・id単位union」で同期する設計(完了作品が2台目で消えない優先)。
@@ -535,6 +556,47 @@
   }
 
   // ── サムネ取得(canvas最終フレームを小さいJPEGに) ──
+
+  // 完成プレビューをDrive保存の成否から切り離し、動画生成直後に投稿履歴の正本 used:<videoId> へ確定する。
+  // これまでは driveSaveDataset_ の通信経路に入ってから初めて差し込んでいたため、Safari背景化や
+  // Drive/R2待ちの途中終了で「動画は投稿済みだが投稿履歴のプレビューだけ無い」が起き得た。
+  var _draftHistoryPreviewReady = Object.create(null);
+  function persistHistoryPreview_(meta, blobHint) {
+    var targetVideoId = meta && (meta.historyVideoId || meta.videoId);
+    if (!meta || !meta.id || !targetVideoId) return Promise.resolve(false);
+    var blobP;
+    if (blobHint) blobP = Promise.resolve(blobHint);
+    else {
+      var store = idb();
+      if (!store) return Promise.resolve(false);
+      blobP = Promise.all([
+        store.get('stock_prev_' + meta.id).catch(function () { return null; }),
+        store.get('stock:imgs:' + meta.id).catch(function () { return null; })
+      ]).then(function (r) {
+        if (r[0]) return r[0];
+        return (r[1] && r[1].prev) ? durlToBlob_(r[1].prev) : null;
+      });
+    }
+    return blobP.then(function (blob) {
+      if (!blob) return false;
+      return (typeof blob === 'string' ? Promise.resolve(blob) : blobToDataUrlP_(blob));
+    }).then(function (durl) {
+      if (!/^data:image\//.test(durl || '')) return false;
+      return usedImagesRead_(targetVideoId).then(function (rec) {
+        var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
+        // candidates.js の画像変換がメモリへ先着し、IDB書込みだけ未完了の瞬間もある。
+        // IDBだけを正としてプレビューを書き戻すと、その元画像を逆方向に消すため両層をunionする。
+        var live = [];
+        try { live = (window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(targetVideoId) || []) : []; } catch (e) {}
+        live.filter(Boolean).forEach(function (u) { if (cur.indexOf(u) < 0) cur.push(u); });
+        if (cur[0] === durl && ((rec && rec.prev) | 0) > 0) {
+          notifyUsedImagesUpdated_(targetVideoId);
+          return true;
+        }
+        return usedImagesSave_(targetVideoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
+      });
+    }).catch(function () { return false; });
+  }
   // ★canvas.toBlob は iOS Safari で「コールバックを一度も呼ばない」ことがある(メモリ逼迫・タブ非活性・
   //   巨大canvas等)。その時この Promise は永久に settle せず、saveStock_ も settle しない=生成後の
   //   .then(goDraft_) が発火せず「✅ドラフトを作成しました は出るのにドラフトタブへ遷移しない」に化ける
@@ -891,6 +953,10 @@
         //     cloud-video-not-landed=Go5Sync未設定 等)を握り潰さず errL/errC に保持=hold文面と go5_landing_log へ
         //     実因を通す(Fable5診断2026-08-16・沈黙経路の根治)。判定(landed/onBothFailed)は従来どおり。
         var errL = null, errC = null, committedNotified = false;
+        // 投稿履歴用プレビューはDriveより先に、作成時のメモリBlobから直接確定する。
+        // 同じPromiseを後段も共有し、IDB/R2の書込み競争で空読みしない。
+        _draftHistoryPreviewReady[id] = persistHistoryPreview_(meta, prevBlob);
+
         // ドラフト台帳の確定を外部処理へ知らせる唯一の境界。手元/雲の両方が成功しても1回だけ通知し、
         // 通知先(Drive等)の例外でドラフト本体の着地を巻き戻さない。
         function notifyCommitted_(saved, kind) {
@@ -997,24 +1063,34 @@
 
   // ③投稿完了=作成完了 → ドラフト本体から外して作成履歴へ退避(④復元できるよう blob は残す)。
   //   上限を超えて作成履歴から溢れた古い分だけ、blob ごと本当に削除する。
-  function archiveStock_(id) {
+  function archiveStock_(id, fallbackMeta) {
     var metas = loadMeta();
-    var meta = metas.filter(function (m) { return m.id === id; })[0];
-    if (!meta) return;
-    meta.completedTs = Date.now();
-    // 墓標+meta+作成履歴の3書込を1トランザクションにして、揃った状態で1回だけ即時 push する
-    //   (途中 push だと作成履歴が旧値のまま送られ、相手端末で完了作品が並ばない・Chami報告2026-08-04)。
+    var found = metas.filter(function (m) { return m.id === id; })[0];
+    var source = found || (fallbackMeta && fallbackMeta.id === id ? fallbackMeta : null);
+    if (!source) return false;
+    var meta = Object.assign({}, source, { completedTs: Date.now() });
+    var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
+    arch.unshift(meta);
+    var dropped = arch.slice(ARCHIVE_MAX);
+    var archOk = false, tombOk = false;
+    // 作成履歴→墓標→ドラフト台帳の順。先に復元先を確保し、墓標が着地しない限り完了扱いにしない。
     batchSync_(function () {
-      writeStockDel_(id); // 投稿完了＝ドラフト本体から外す。他端末のドラフト一覧からも消す(復活防止)
+      archOk = saveArchive(arch);
+      if (!archOk) return;
+      tombOk = writeStockDel_(id);
+      if (!tombOk) return;
+      // 容量逼迫で物理配列の縮小が失敗しても、loadMeta は墓標を適用するため表示・同期上は消える。
       saveMeta(metas.filter(function (m) { return m.id !== id; }));
-      var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
-      arch.unshift(meta);
-      var dropped = arch.slice(ARCHIVE_MAX); // 上限超過分=保持できないので blob を掃除
-      dropped.forEach(function (m) { delBlobs_(m.id); });
-      saveArchive(arch);
     });
+    var archived = loadArchive().some(function (m) { return m && m.id === id; });
+    var draftGone = !loadMeta().some(function (m) { return m && m.id === id; });
+    if (!archOk || !tombOk || !archived || !draftGone) return false;
+    delete _pendingDraftMeta[id];
+    delete _pendingDraftCommit[id];
+    dropped.forEach(function (m) { if (m && m.id) delBlobs_(m.id); });
     // 投稿履歴ミラー(product-scout daily_pick 用)へ1件POST。fire-and-forget=失敗しても投稿完了は成功のまま。
     mirrorPostedLog_(meta);
+    return true;
   }
 
   // ④作成履歴からドラフト本体へ戻す。ドラフトが満杯なら溢れる最古の1件は作成履歴へ送り返す(=消さない)。
@@ -1023,7 +1099,12 @@
     var meta = arch.filter(function (m) { return m.id === id; })[0];
     if (!meta) return;
     delete meta.completedTs;
-    meta.addedAt = Date.now(); // ★墓標(投稿完了/削除で打たれた)を越えて復活させる=全端末で戻る
+    var delAt = 0;
+    try {
+      var dels = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
+      delAt = Number(dels[id] || 0);
+    } catch (e) {}
+    meta.addedAt = Math.max(Date.now(), delAt + 1); // ★墓標より必ず新しくして全端末で戻す(同一msも安全)
     arch = arch.filter(function (m) { return m.id !== id; });
     var metas = loadMeta().filter(function (m) { return m.id !== id; });
     metas.unshift(meta);
@@ -1334,21 +1415,34 @@
     if (_res && _res.ok === false && _res.reason === 'persist-pending' && _res.wait && typeof _res.wait.then === 'function') {
       var _pfMsg = '投稿履歴をこの端末へ保存できませんでした。\nドラフトは残してあります。空き容量を確認してから、もう一度「投稿完了」を押してください。';
       _res.wait.then(function (r) {
-        if (r && (r.ok || r.reason === 'dupe')) { finishComplete_(id, meta, ytUrl, shortUrl, ps, pd); try { closeModal_(); } catch (e7) {} }
-        else { try { alert(_pfMsg); } catch (e8) {} }
+        if (r && (r.ok || r.reason === 'dupe')) {
+          if (finishComplete_(id, meta, ytUrl, shortUrl, ps, pd)) { try { closeModal_(); } catch (e7) {} }
+        } else { try { alert(_pfMsg); } catch (e8) {} }
       }, function () { try { alert(_pfMsg); } catch (e9) {} });
       return false; // 同期経路では未確定＝モーダルは閉じない(着地後に continuation が閉じる)
     }
     // 投稿履歴へ「新規保存できた」または「既に載っている」と確認できた時だけ完了を進める。
     // API未起動/識別不能/保存失敗/例外でドラフトを作成履歴へ移すと再試行手段を失うため、ここで止める。
     if (!_res || (_res.ok === false && _res.reason !== 'dupe')) return false;
-    finishComplete_(id, meta, ytUrl, shortUrl, ps, pd);
-    return true;
+    return finishComplete_(id, meta, ytUrl, shortUrl, ps, pd);
   }
 
   // 投稿完了の"後半"(枠書き戻し→作成履歴退避→再描画)。同期で載った時も、persist-pending の
   //   IDB着地後も同じ処理を通す。★closeModal_ はここでは呼ばない=同期経路は呼び元が返り値 true で閉じる。
   function finishComplete_(id, meta, ytUrl, shortUrl, ps, pd) {
+    // videoId が投稿完了時に初めて発番された旧ドラフトも、手元の preview Blob から履歴へ後追い確定する。
+    // archive は Blob を消さないので非同期のままでも安全。失敗時は次回起動の backfill が同じ正本から再試行する。
+    _draftHistoryPreviewReady[id] = persistHistoryPreview_(meta, null);
+    _draftHistoryPreviewReady[id].then(function (ok) {
+      if (!ok) setTimeout(function () { persistHistoryPreview_(meta, null); }, 1500);
+    });
+    // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。
+    // 実在確認できない時はモーダルを閉じず、再試行可能なままにする。
+    if (!archiveStock_(id, meta)) {
+      try { alert('投稿履歴には記録しましたが、ドラフトを作成履歴へ移せませんでした。\nドラフトは消さずに残してあるので、端末の空き容量を確認してもう一度「投稿完了」を押してください。'); } catch (e0) {}
+      render();
+      return false;
+    }
     // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
     try {
       if (ps && ps.id) {
@@ -1359,16 +1453,14 @@
         }
       }
     } catch (e) {}
-    // ★投稿完了で、動画に使った候補画像に「使用日」を刻む(Chami 2026-08-24 clause B)。候補モーダルのラジオ上に表示される。
-    //   candidates.js が無いページ(Stock.html単独)では黙ってスキップ=fail-open(自動「使用済み」は生成時に済んでいる)。
+    // ★投稿完了で、動画に使った候補画像に「使用日」を刻む。
     try {
       if (meta && meta.srcMark && meta.srcMark.cid && meta.srcMark.hash && window.Go5Cand && window.Go5Cand.stampImgUsedDate) {
-        window.Go5Cand.stampImgUsedDate(meta.srcMark.cid, meta.srcMark.hash, meta.completedTs || Date.now());
+        window.Go5Cand.stampImgUsedDate(meta.srcMark.cid, meta.srcMark.hash, Date.now());
       }
     } catch (e) {}
-    // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。記録の後に行う(blob非依存)。
-    archiveStock_(id);
     render();
+    return true;
   }
 
   // 動画に使った元画像のBlobを解決する。手元Blob(stock_img_)優先、無ければ同期ミラー(stock:imgs:.src)の
@@ -1646,17 +1738,7 @@
     }
     // 仕上がりプレビューを「使用画像1ページ目」へ差し込む(videoIdで紐付く・Chami依頼2026-07-30・冪等)。
     var applyPreview = function (prevB) {
-      var targetVideoId = meta.historyVideoId || meta.videoId;
-      if (!prevB || !targetVideoId) return Promise.resolve(false);
-      // Await conversion, merge and durable storage; mobile used to repaint before these steps finished.
-      return blobToDataUrlP_(prevB).then(function (durl) {
-        if (!durl) return false;
-        return usedImagesRead_(targetVideoId).then(function (rec) {
-          var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
-          if (cur[0] === durl && ((rec && rec.prev) | 0) > 0) { notifyUsedImagesUpdated_(targetVideoId); return true; }
-          return usedImagesSave_(targetVideoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
-        });
-      });
+      return persistHistoryPreview_(meta, prevB);
     };
     // ★symptom恒久対策(Chami報告2026-08-15「それに伴って投稿履歴の画像もあるべき画像が設定されていない」)：
     //   投稿履歴1ページ目のプレビュー差し込みを「動画blobの有無」から完全に切り離す。従来は下の
@@ -1664,10 +1746,11 @@
     //   捨て R2ミラーも未着だと『Driveに動画が来ない』と『投稿履歴の画像が設定されない』が"一緒に"起きていた。
     //   プレビュー実体は stock_prev_(Blob)/ 同期ミラー stock:imgs:.prev(dataURL)から取れる=動画に一切依存しない。
     //   ここで先に確定させ、下のDrive保存(blob依存)の成否に関わらず投稿履歴へは必ず入る。
-    var previewReady = Promise.all([
+    var previewReady = Promise.resolve(_draftHistoryPreviewReady[id] || false).catch(function () { return false; }).then(function () {
+      return Promise.all([
       store.get('stock_prev_' + id).catch(function () { return null; }),
       store.get('stock:imgs:' + id).catch(function () { return null; })
-    ]).then(function (r) {
+      ]); }).then(function (r) {
       var prev = r[0], mirror = r[1] || {};
       return prev ? prev : durlToBlob_(mirror.prev); // .then が Promise を自動で解く
     }).then(function (prevB) {

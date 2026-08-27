@@ -181,4 +181,83 @@ test.describe('ドラフト動画の完全性ゲート', () => {
     expect(playable).toBe(false);
   });
 
+  test('ドラフト作成時の完成プレビューをDrive待ちにせず投稿履歴用ストアへ確定する', async ({ page }) => {
+    await ready(page);
+    const videoId = 'acc1-20260828-0710-preview';
+    await page.evaluate((videoId) => {
+      if (window.Go5Sync) Go5Sync.configured = () => false;
+      document.dispatchEvent(new CustomEvent('video-created', {
+        detail: {
+          draft: true, title: '履歴プレビュー直書き回帰', name: 'preview.mp4', account: 'acc1', videoId,
+          blob: new Blob([new Uint8Array(32 * 1024)], { type: 'video/mp4' })
+        }
+      }));
+    }, videoId);
+
+    await expect.poll(async () => page.evaluate(async (videoId) => {
+      const rec = await Go5Idb.get('used:' + videoId);
+      return {
+        prev: rec && rec.prev,
+        first: rec && rec.imgs && rec.imgs[0] || ''
+      };
+    }, videoId), { timeout: 15000 }).toMatchObject({ prev: 1, first: expect.stringMatching(/^data:image\//) });
+  });
+
+  test('元画像がメモリへ先着してIDB未着でも完成プレビュー追加時に消さない', async ({ page }) => {
+    await ready(page);
+    const videoId = 'acc1-20260828-0715-source-race';
+    const source = 'data:image/png;base64,c291cmNlLXJhY2U=';
+    await page.evaluate(async ({ videoId, source }) => {
+      Go5Cand.usedImgSave(videoId, [source], 0);
+      await Go5Idb.del('used:' + videoId);
+      if (window.Go5Sync) Go5Sync.configured = () => false;
+      document.dispatchEvent(new CustomEvent('video-created', {
+        detail: {
+          draft: true,
+          title: '元画像先着回帰',
+          name: 'source-first.mp4',
+          account: 'acc1',
+          videoId,
+          blob: new Blob([new Uint8Array(32 * 1024)], { type: 'video/mp4' })
+        }
+      }));
+    }, { videoId, source });
+
+    await expect.poll(async () => page.evaluate(async ({ videoId, source }) => {
+      const rec = await Go5Idb.get('used:' + videoId);
+      return {
+        prev: rec && rec.prev,
+        count: rec && rec.imgs ? rec.imgs.length : 0,
+        sourceKept: !!(rec && rec.imgs && rec.imgs.includes(source))
+      };
+    }, { videoId, source }), { timeout: 15000 }).toMatchObject({ prev: 1, count: 2, sourceKept: true });
+  });
+
+  test('元画像の変換が完成プレビューより後着してもプレビューを上書きしない', async ({ page }) => {
+    await ready(page);
+    const videoId = 'acc1-20260828-0720-preview-race';
+    const preview = 'data:image/png;base64,cHJldmlldy1yYWNl';
+    await page.evaluate(({ videoId, preview }) => {
+      Go5Cand.usedImgSave(videoId, [preview], 1);
+      const png = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3MxZ5wAAAABJRU5ErkJggg==');
+      const bytes = new Uint8Array(png.length);
+      for (let i = 0; i < png.length; i++) bytes[i] = png.charCodeAt(i);
+      document.dispatchEvent(new CustomEvent('video-created', {
+        detail: {
+          draft: false,
+          videoId,
+          sourceImageFile: new File([bytes], 'source.png', { type: 'image/png' })
+        }
+      }));
+    }, { videoId, preview });
+
+    await expect.poll(async () => page.evaluate(async ({ videoId, preview }) => {
+      const rec = await Go5Idb.get('used:' + videoId);
+      return {
+        prev: rec && rec.prev,
+        count: rec && rec.imgs ? rec.imgs.length : 0,
+        preserved: !!(rec && rec.imgs && rec.imgs[0] === preview)
+      };
+    }, { videoId, preview }), { timeout: 10000 }).toMatchObject({ prev: 1, count: 2, preserved: true });
+  });
 });

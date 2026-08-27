@@ -1358,9 +1358,12 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 .vedit-tree-head input{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#0e1422;color:var(--ink);font-size:14px;}
 .vedit-tree-del{flex:0 0 auto;padding:7px 10px;border:1px solid #9a5360;border-radius:8px;background:transparent;color:#f0a2af;font-size:12px;cursor:pointer;}
 .vedit-tree-row .vedit-field{margin-bottom:8px;}
-.vedit-tree-short-row{display:flex;align-items:stretch;gap:8px;}
-.vedit-tree-short-row .vedit-tree-short{flex:1 1 auto;min-width:0;}
-.vedit-tree-btnstack{display:flex;flex:0 0 auto;flex-direction:column;justify-content:center;gap:7px;}
+.vedit-tree-post-row{display:flex;flex-wrap:nowrap;align-items:stretch;gap:8px;}
+.vedit-tree-post-row .vedit-tree-post{flex:1 1 auto;min-width:0;}
+.vedit-tree-post-row .vedit-tree-paste-post{flex:0 0 auto;}
+.vedit-tree-short-row{display:flex;align-items:center;gap:8px;}
+.vedit-tree-short-row .vedit-tree-short{flex:1 1 auto;min-width:0;height:38px;}
+.vedit-tree-btnstack{display:flex;flex:0 0 auto;flex-direction:column;justify-content:center;gap:3.5px;}
 .vedit-tree-btnstack .vedit-copy{flex:0 0 auto;margin:0;}
 .vedit-tree-status{display:block;margin-top:5px;font-size:11px;font-weight:800;line-height:1.45;}
 .vedit-tree-status[hidden]{display:none;}
@@ -1378,6 +1381,9 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
   .vedit-tree-row .vedit-bsky-row{flex-wrap:wrap;}
   .vedit-tree-row .vedit-bsky-row input{flex:1 1 100%;}
   .vedit-tree-row .vedit-bsky-row .vedit-copy{margin-left:auto;}
+  .vedit-tree-row .vedit-tree-post-row{flex-wrap:nowrap;}
+  .vedit-tree-row .vedit-tree-post-row input{flex:1 1 auto;min-width:0;}
+  .vedit-tree-row .vedit-tree-post-row .vedit-copy{margin-left:0;}
   .vedit-tree-short-row{flex-wrap:nowrap;}
 }
 

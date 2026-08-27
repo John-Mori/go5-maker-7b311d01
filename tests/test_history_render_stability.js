@@ -13,7 +13,9 @@ assert(imageHandler, '画像ハイドレートの購読がある');
 assert(imageHandler[0].includes('patchHistoryImages_()'), '画像到着時は該当画像だけを差分更新する');
 assert(!imageHandler[0].includes('render();'), '画像到着時に投稿履歴全体を再生成しない');
 
-const patch = history.slice(history.indexOf('  function patchHistoryImages_() {'), history.indexOf('\n\n  function render() {'));
+const patchStart = history.indexOf('  function patchHistoryImages_() {');
+const renderStart = history.indexOf('  function render() {', patchStart);
+const patch = history.slice(patchStart, renderStart);
 assert(patch.includes("querySelectorAll('.vrow[data-hist-usedkey]')"), '表示中カードを安定キーで更新する');
 assert(patch.includes('window.Go5Cand.ensureHistoryImages(rows.map'), '差分更新側から表示中作品の個別取得を必ず開始する');
 assert(patch.includes("Go5ImgDiag.push('hist_render'"), '従来の画像診断契約を維持する');

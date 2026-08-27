@@ -19,4 +19,16 @@ assert.strictEqual(afterDelete['acc1|v:a'].at, 30);
 const stale = JSON.stringify({ 'acc1|v:a': { trees: [{ id: 'old', name: '古い', postUrl: 'https://x.com/a/status/2', shortUrl: 'https://5mgl.com/old1' }], at: 5 } });
 const keepNewer = JSON.parse(Sync.mergeTreeLinks_(left, stale));
 assert.strictEqual(keepNewer['acc1|v:a'].trees[0].id, 't1', '古い別端末値で巻き戻さない');
+
+const partial = JSON.stringify({
+  'acc1|v:c': { trees: [
+    { id: 't3', name: 'ツリー1', postUrl: 'https://x.com/a/status/3', shortUrl: 'https://5mgl.com/c1' },
+    { id: 't4', name: 'ツリー2', postUrl: '', shortUrl: 'https://5mgl.com/c2' }
+  ], at: 40 }
+});
+const keepPartial = JSON.parse(Sync.mergeTreeLinks_('{}', partial));
+assert.strictEqual(keepPartial['acc1|v:c'].trees.length, 2, 'ツリー2以降の仮保存行も同期で捨てない');
+assert.deepStrictEqual(keepPartial['acc1|v:c'].trees[1], {
+  id: 't4', name: 'ツリー2', postUrl: '', shortUrl: 'https://5mgl.com/c2'
+});
 console.log('PASS: tree links per-history LWW merge');

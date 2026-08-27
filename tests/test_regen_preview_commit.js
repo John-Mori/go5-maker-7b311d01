@@ -9,9 +9,15 @@ const calendar = fs.readFileSync(path.join(root, 'schedule', 'js', 'app.js'), 'u
 const ps = stock.indexOf('    var applyPreview = function (prevB) {');
 const pe = stock.indexOf('\n    };', ps) + 7;
 const ap = stock.slice(ps, pe);
+const hs = stock.indexOf('  function persistHistoryPreview_(meta, blobHint) {');
+const he = stock.indexOf('  function toBlobSafe_(', hs);
+const historyPersist = stock.slice(hs, he);
 assert(ps >= 0 && pe > ps, 'extract applyPreview');
-assert(ap.includes('return blobToDataUrlP_(prevB).then'), 'await blob conversion');
-assert(ap.includes('return usedImagesSave_('), 'await durable used-image save');
+assert(hs >= 0 && he > hs, 'extract common history preview persistence');
+assert(ap.includes('return persistHistoryPreview_(meta, prevB);'), 'all preview writers use one persistence path');
+assert(historyPersist.includes('blobToDataUrlP_(blob)'), 'await blob conversion');
+assert(historyPersist.includes('return usedImagesSave_('), 'await durable used-image save');
+assert(stock.includes('_draftHistoryPreviewReady[id] = persistHistoryPreview_(meta, prevBlob);'), 'draft creation commits history preview before Drive');
 assert(stock.includes('return applyPreview(prevB).then(function () { return prevB; });'), 'previewReady awaits history commit');
 assert(stock.includes("new CustomEvent('go5-used-images-updated'"), 'emit committed event');
 assert(history.includes("document.addEventListener('go5-used-images-updated'"), 'patch history on commit');

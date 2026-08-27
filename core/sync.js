@@ -445,7 +445,9 @@
     var trees = v.trees.map(function (t, i) {
       if (!t || typeof t !== "object") return null;
       var postUrl = String(t.postUrl || "").trim(), shortUrl = String(t.shortUrl || "").trim();
-      if (!postUrl || !shortUrl) return null;
+      // 返信ポスト作成前の仮保存(作品短縮URLのみ)も正規データとして端末間で運ぶ。
+      // 両方空のプレースホルダーだけを除外する。
+      if (!postUrl && !shortUrl) return null;
       return {
         id: String(t.id || ("tree-" + (i + 1))),
         name: String(t.name || ("ツリー" + (i + 1))).slice(0, 40),

@@ -160,7 +160,10 @@
     (Array.isArray(trees) ? trees : []).forEach(function (t, i) {
       if (!t) return;
       var postUrl = String(t.postUrl || '').trim(), shortUrl = String(t.shortUrl || '').trim();
-      if (!postUrl || !shortUrl) return;
+      // 返信ポストをまだ作っていない段階でも、先に作品の計測短縮URLだけ仮保存できる。
+      // 旧実装は両方必須だったため、ツリー2以降を追加して短縮だけ作った状態で保存すると
+      // normalize と端末同期の双方がその行を捨て、開き直した時に消えていた。
+      if (!postUrl && !shortUrl) return;
       out.push({
         id: String(t.id || ('tree-' + Date.now() + '-' + i)),
         name: String(t.name || ('ツリー' + (out.length + 1))).trim().slice(0, 40) || ('ツリー' + (out.length + 1)),
@@ -1079,8 +1082,11 @@
     return '<div class="vrow-tree-list">' + trees.map(function (t) {
       var code = codeOf(t.shortUrl), win = code && treeClickWindowsCache[code];
       function value_(key) { return win && win[key] != null ? num(win[key]) : (code ? '…' : '–'); }
+      var nameHtml = t.postUrl
+        ? '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener" title="返信ポストを開く">' + esc(t.name || 'ツリー1') + '</a>'
+        : '<span class="vrow-tree-name" title="返信ポストURLは未設定です">' + esc(t.name || 'ツリー1') + '</span>';
       return '<div class="vrow-tree-row">' +
-        '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener" title="返信ポストを開く">' + esc(t.name || 'ツリー1') + '</a>' +
+        nameHtml +
         '<span title="今日の返信内アフィリンククリック数">今日 ' + ico + ' ' + value_('today') + '</span>' +
         '<span title="昨日の返信内アフィリンククリック数">昨日 ' + ico + ' ' + value_('yesterday') + '</span>' +
         '<span title="直近7日間の返信内アフィリンククリック数">今週 ' + ico + ' ' + value_('week') + '</span>' +
@@ -1222,6 +1228,15 @@
         || ((h === 'bsky.app' || h === 'www.bsky.app') && /\/profile\/[^/]+\/post\/[^/]+/.test(p));
     } catch (e) { return false; }
   }
+  function treeWorkUrlOk_(url) {
+    try {
+      var raw = String(url || '').trim();
+      if (!/^https?:\/\//i.test(raw)) return false;
+      var normalized = (typeof window.normalizeWorkUrl === 'function' && window.normalizeWorkUrl(raw)) || raw;
+      var h = new URL(normalized).hostname.toLowerCase();
+      return /(^|\.)dmm\.(?:co\.jp|com)$/.test(h) || /(^|\.)fanza\.(?:co\.jp|com)$/.test(h);
+    } catch (e) { return false; }
+  }
   function pasteInto_(inp) {
     if (!inp) return;
     if (navigator.clipboard && navigator.clipboard.readText) {
@@ -1301,7 +1316,7 @@
         '<button type="button" class="vedit-tree-del" title="このツリー設定を削除">削除</button>' +
       '</div>' +
       '<label class="vedit-field">返信ポストURL(X / Bsky・このURLは短縮なし)' +
-        '<div class="vedit-bsky-row"><input class="vedit-tree-post" type="url" inputmode="url" autocomplete="off" placeholder="https://x.com/.../status/... または https://bsky.app/profile/.../post/..." value="' + esc(tree.postUrl || '') + '">' +
+        '<div class="vedit-bsky-row vedit-tree-post-row"><input class="vedit-tree-post" type="url" inputmode="url" autocomplete="off" placeholder="https://x.com/.../status/... または https://bsky.app/profile/.../post/..." value="' + esc(tree.postUrl || '') + '">' +
         '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-post">貼り付け</button></div>' +
       '</label>' +
       '<label class="vedit-field">返信内に掲載したアフィ計測短縮URL(ピンク矢印)' +
@@ -1345,8 +1360,10 @@
       var postUrl = (row.querySelector('.vedit-tree-post').value || '').trim();
       var shortUrl = (row.querySelector('.vedit-tree-short').value || '').trim();
       if (!postUrl && !shortUrl) continue;
-      if (!treeSocialUrlOk_(postUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の返信ポストURLを確認してください(XまたはBlueskyの投稿URL)。' };
-      if (!codeOf(shortUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'のアフィ計測短縮URLは、5mgl.com または yoz2.com の発行済みURLを入れてください。' };
+      // どちらか一方だけでも仮保存できる。ただし、値が入っている欄の形式は妥協しない。
+      if (postUrl && !treeSocialUrlOk_(postUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の返信ポストURLを確認してください(XまたはBlueskyの投稿URL)。' };
+      // 短縮前のDMM/FANZA作品URLも仮保存可。後から同じ行の「短縮」で発行済みURLへ置換できる。
+      if (shortUrl && !codeOf(shortUrl) && !treeWorkUrlOk_(shortUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の作品URLは、DMM/FANZAの作品URLまたは5mgl.com・yoz2.comの発行済みURLを入れてください。' };
       out.push({ id: row.getAttribute('data-tree-id'), name: name.slice(0, 40), postUrl: postUrl, shortUrl: shortUrl });
     }
     return { ok: true, trees: out };

@@ -910,6 +910,45 @@ test.describe('ドラフト軽量ページ', () => {
     expect(messages.join('\n')).toContain('投稿履歴の登録機能を読み込めませんでした');
   });
 
+  test('投稿完了時に台帳縮小だけ失敗しても墓標でドラフトを残さず作成履歴へ退避する', async ({ page }) => {
+    const draftId = 'stk_e2e_complete_quota_tomb';
+    const videoId = 'acc1-20260828-0715-tomb';
+    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ draftId, videoId }) => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('verify_manual__acc1', '[]');
+      localStorage.setItem('short_hist__acc1', '[]');
+      localStorage.setItem('go5_stock_archive', '[]');
+      localStorage.setItem('go5_stock_del', '{}');
+      localStorage.setItem('go5_stock_meta', JSON.stringify([{
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        label: '墓標表示回帰', title: '墓標表示回帰', author: 'test', bskyText: '本文',
+        affiliateUrl: '', workUrl: '', videoName: 'test.mp4', videoId, attrs: {}
+      }]));
+    }, { draftId, videoId });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator(`.stk-mode[data-id="${draftId}"]`).click();
+    await page.locator('#draftYtUrl').fill('https://youtu.be/AbCdEfGhI12');
+    await page.evaluate(() => {
+      const realSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === 'go5_stock_meta') throw new DOMException('quota-test', 'QuotaExceededError');
+        return realSet.call(this, key, value);
+      };
+    });
+    page.on('dialog', async (dialog) => { await dialog.accept(); });
+    await page.locator('#draftModalComplete').click();
+
+    await expect(page.locator('#draftPostModal')).toBeHidden();
+    await expect(page.locator(`.stk-mode[data-id="${draftId}"]`)).toHaveCount(0);
+    await expect(page.locator(`.stk-restore[data-id="${draftId}"]`)).toHaveCount(1);
+    const state = await page.evaluate(({ draftId }) => ({
+      archived: JSON.parse(localStorage.getItem('go5_stock_archive') || '[]').some((m) => m.id === draftId),
+      tombstoned: Number((JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {})[draftId] || 0) > 0
+    }), { draftId });
+    expect(state).toEqual({ archived: true, tombstoned: true });
+  });
+
   test('本体のドラフトボタンは専用ページへ遷移する', async ({ page }) => {
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
     await page.locator('#tabStock').click();
