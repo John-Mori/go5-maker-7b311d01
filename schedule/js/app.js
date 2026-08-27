@@ -391,7 +391,7 @@ window.SCH = window.SCH || {};
         <div class="link-hist-head">投稿履歴と紐づける</div>
         <select id="link-hist"><option value="">${escapeHtml(s.date)} の投稿履歴を読み込み中…</option></select>
         <button type="button" id="link-apply" disabled>この投稿を紐づける</button>
-        <div class="link-hist-hint">同じ日・同じチャンネルの投稿履歴から選んで、この枠へ結びつけます。時刻が合致する投稿は自動で同期されます。</div>
+        <div class="link-hist-hint">同じ日・同じチャンネルの投稿履歴から選び、「この投稿を紐づける」を押した時だけこの枠を「済」にします。</div>
       </div>` : ""}
       ${s.needs_review ? `<div class="warn">要確認：day-type変更でテンプレと差異あり。時刻は自動変更していません。</div>` : ""}
       ${s.verify_flag ? `<div class="info">検証対象枠。${s.alt_hypothesis ? "対立仮説: " + escapeHtml(s.alt_hypothesis) : ""}</div>` : ""}
@@ -517,7 +517,7 @@ window.SCH = window.SCH || {};
         if (dd < bestD && dd <= LINK_WINDOW_MIN) { bestD = dd; auto = p; }
       });
     }
-    if (auto && s.status !== "公開済") { applyLink(s, auto, effAcc()); return; }   // ④ 時刻一致(近傍含む)は自動同期
+    // Opening a slot only preselects the nearest post; the explicit link button commits it.
     sel.innerHTML = posts.map(function (p, i) {
       return `<option value="${i}">${escapeHtml(p.hhmm + "  " + p.title)}</option>`;
     }).join("");

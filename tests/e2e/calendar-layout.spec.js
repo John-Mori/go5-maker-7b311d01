@@ -179,6 +179,29 @@ test.describe('desktop calendar layout', () => {
     expect(saved.exec.acc2.post_url).toBe('https://acc2.example/post');
     expect(saved.exec.acc2.video_id).toBe('acc2-video');
   });
+
+  test('does not mark a slot done merely by opening it', async ({ page }) => {
+    await page.goto('index.html', { waitUntil: 'domcontentloaded' });
+    await page.locator('#calBtn').click();
+    const frame = page.frameLocator('#calFrame');
+    const firstCell = frame.locator('.slot').first().locator('.cell[data-acc="acc1"]');
+    await expect(firstCell).toHaveClass(/pending/);
+    const info = await frame.locator('body').evaluate(() => ({
+      date: document.querySelector('.week-head').textContent.slice(0, 10),
+      hhmm: document.querySelector('.slot .cell[data-acc="acc1"] .time').textContent.trim(),
+    }));
+    await firstCell.click();
+    await page.evaluate(({ date, hhmm }) => {
+      document.getElementById('calFrame').contentWindow.postMessage({
+        target: 'sch-calendar', type: 'day-posts', reqId: 'modal:click-guard',
+        postsByDate: { [date]: [{ hhmm, title: 'click guard', url: 'https://example.com/post', videoId: 'click-guard-video', timeMs: Date.now() }] },
+      }, '*');
+    }, info);
+    await expect(frame.locator('#link-apply')).toBeEnabled();
+    await expect(firstCell).toHaveClass(/pending/);
+    await frame.locator('#link-apply').click();
+    await expect(firstCell).toHaveClass(/done/);
+  });
 });
 
 test.describe('mobile calendar layout', () => {

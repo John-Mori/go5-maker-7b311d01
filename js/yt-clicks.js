@@ -2208,7 +2208,9 @@
       onDone: function (ok, msg) {
         settled = true;
         if (btn) { btn.disabled = false; btn.textContent = orig; }
-        try { refresh(); } catch (e) {}
+        // The preview is committed; patch images without a heavy metrics refresh.
+        try { patchHistoryImages_(); } catch (e) {}
+        try { renderWhenHistIdle_(); } catch (e2) {}
         // ★成功時の案内は出さない(Chami依頼2026-08-23②=refreshで1ページ目に反映が見える)。
         //   失敗だけ正直に伝える(素直にギブアップ)。
         if (!ok) {
@@ -4460,6 +4462,10 @@
   document.addEventListener('go5-images-hydrated', function () {
     try { patchHistoryImages_(); } catch (e) {}
     try { var pr = $('pageRank'); if (pr && !pr.hidden) renderRank(); } catch (e) {}
+  });
+  // Regeneration emits this only after the used-image record has landed.
+  document.addEventListener('go5-used-images-updated', function () {
+    try { patchHistoryImages_(); } catch (e) {}
   });
   // ★履歴が IDB からメモリミラーへ載った合図(hist-store)で、表示中の検証タブを1回だけ描き直す。
   //   起動直後の初回描画はミラー未了で LS を読む=完了後に最新へ追いつく。6キー分の連発は 50ms で1回へ集約。

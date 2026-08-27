@@ -298,7 +298,15 @@
   // ── ①-B ドラフトの画像を全端末へ運ぶ(2026-07-31) ──
   //   サムネ/プレビュー/元画像を dataURL でまとめ stock:imgs:<id> に置く=Go5Syncの画像レール(R2 content-hash)に乗る。
   //   ★動画本体(stock_v_)は重いので載せない(②で on-demand 取り寄せにする)。実体はR2、同期台帳には参照だけ=積んでも軽い。
-  function blobToDataUrlP_(blob) { return new Promise(function (res) { if (!blob) return res(''); blobToDataUrl_(blob, function (du) { res(du || ''); }); }); }
+  function blobToDataUrlP_(blob) {
+    return new Promise(function (res) {
+      if (!blob) { res(''); return; }
+      var done = false;
+      var finish = function (du) { if (done) return; done = true; clearTimeout(wd); res(du || ''); };
+      var wd = setTimeout(function () { finish(''); }, 8000);
+      blobToDataUrl_(blob, finish);
+    });
+  }
   // 画像blobを90px級サムネblobへ縮小する(失敗時 null)。canvasキャプチャが落ちた端末で「元画像フルをメタへ
   //   焼く→localStorage逼迫→draft-meta-readback-failed」を防ぐ最終保険(Fable5診断A-2・2026-08-18)。
   //   元画像そのものは stock_img_/go5src: に別途残す=喪失しない(このサムネはメタ/表示用の軽い複製)。
@@ -503,17 +511,26 @@
     try { return Promise.resolve(JSON.parse(localStorage.getItem('hist_usedimg__' + key) || 'null') || { imgs: [], prev: 0 }); }
     catch (e) { return Promise.resolve({ imgs: [], prev: 0 }); }
   }
+  function notifyUsedImagesUpdated_(key) {
+    try { document.dispatchEvent(new CustomEvent('go5-used-images-updated', { detail: { key: String(key || '') } })); } catch (e) {}
+  }
   function usedImagesSave_(key, imgs, prevCount) {
     if (!key) return Promise.resolve(false);
     imgs = (imgs || []).filter(Boolean);
-    // 本体ページでは candidates.js のメモリキャッシュも同時更新。軽量ページではIDBへ直接保存する。
-    if (window.Go5Cand && window.Go5Cand.usedImgSave) {
-      try { return Promise.resolve(window.Go5Cand.usedImgSave(key, imgs, prevCount)); } catch (e) {}
-    }
     var rec = { imgs: imgs, at: Date.now(), prev: prevCount | 0 };
+    // Keep the in-memory cache and wait for durable IDB storage before reporting completion.
+    if (window.Go5Cand && window.Go5Cand.usedImgSave) {
+      try {
+        var saved = window.Go5Cand.usedImgSave(key, imgs, prevCount);
+        if (saved === false) return Promise.resolve(false);
+        var candStore = idb();
+        if (candStore) return candStore.set('used:' + key, rec).then(function () { notifyUsedImagesUpdated_(key); return true; }).catch(function () { return false; });
+        notifyUsedImagesUpdated_(key); return Promise.resolve(true);
+      } catch (e) {}
+    }
     var store = idb();
-    if (store) return store.set('used:' + key, rec).then(function () { try { kickSync_(); } catch (_) {} return true; }).catch(function () { return false; });
-    try { localStorage.setItem('hist_usedimg__' + key, JSON.stringify(rec)); kickSync_(); return Promise.resolve(true); }
+    if (store) return store.set('used:' + key, rec).then(function () { try { kickSync_(); } catch (_) {} notifyUsedImagesUpdated_(key); return true; }).catch(function () { return false; });
+    try { localStorage.setItem('hist_usedimg__' + key, JSON.stringify(rec)); kickSync_(); notifyUsedImagesUpdated_(key); return Promise.resolve(true); }
     catch (e) { return Promise.resolve(false); }
   }
 
@@ -1630,13 +1647,14 @@
     // 仕上がりプレビューを「使用画像1ページ目」へ差し込む(videoIdで紐付く・Chami依頼2026-07-30・冪等)。
     var applyPreview = function (prevB) {
       var targetVideoId = meta.historyVideoId || meta.videoId;
-      if (!prevB || !targetVideoId) return;
-      blobToDataUrl_(prevB, function (durl) {
-        if (!durl) return;
-        usedImagesRead_(targetVideoId).then(function (rec) {
+      if (!prevB || !targetVideoId) return Promise.resolve(false);
+      // Await conversion, merge and durable storage; mobile used to repaint before these steps finished.
+      return blobToDataUrlP_(prevB).then(function (durl) {
+        if (!durl) return false;
+        return usedImagesRead_(targetVideoId).then(function (rec) {
           var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
-          if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
-          usedImagesSave_(targetVideoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
+          if (cur[0] === durl && ((rec && rec.prev) | 0) > 0) { notifyUsedImagesUpdated_(targetVideoId); return true; }
+          return usedImagesSave_(targetVideoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
         });
       });
     };
@@ -1654,16 +1672,19 @@
       return prev ? prev : durlToBlob_(mirror.prev); // .then が Promise を自動で解く
     }).then(function (prevB) {
       if (prevB) return prevB;
-      // ★手元にプレビュー実体が無い(別端末で作った投稿履歴の回復・編集モーダルからの再生成)＝Driveに既にある
-      //   仕上がりプレビューを取り寄せて使う。無ければ null のまま(何も壊さない)。これで yt-clicks.js の旧
-      //   regenRecordData_(分岐コピー)が持っていた「Drive既存プレビューで回復」を driveSaveDataset_ 一本へ
-      //   畳み込む=データ再生成の経路を1つに保つ(Chami依頼2026-08-18・単一化)。
-      return readDriveAsset_('fetchPreview').then(function (du) { return du ? durlToBlob_(du) : null; });
-    }).then(function (prevB) {
-      // ★ドラフト側にもDriveにも無い時の砦=投稿履歴が表示している仕上がりプレビュー(used:<videoId>)。
-      //   これで「モーダルには映るのに再生成すると全部見つからない」(Chami報告2026-08-18)を塞ぐ。
-      if (prevB) return prevB;
+      // Prefer the local history preview before any network request.
       return usedPrevBlob_();
+    }).then(function (prevB) {
+      if (prevB) return prevB;
+      // Race deterministic R2 preview and Drive; use the first usable result.
+      var r2P = (window.Go5Sync && Go5Sync.fetchBlobR2At) ? Go5Sync.fetchBlobR2At(PREVNAME(id), 12000).then(function (blob) { return (blob && blob.size) ? blob : null; }, function () { return null; }) : Promise.resolve(null);
+      var driveP = readDriveAsset_('fetchPreview').then(function (du) { return du ? durlToBlob_(du) : null; });
+      return new Promise(function (resolve) {
+        var left = 2, settled = false;
+        var accept = function (blob) { if (settled) return; if (blob) { settled = true; resolve(blob); return; } left--; if (!left) { settled = true; resolve(null); } };
+        Promise.resolve(r2P).then(accept, function () { accept(null); });
+        Promise.resolve(driveP).then(accept, function () { accept(null); });
+      });
     }).then(function (prevB) {
       // ★「必ず動画があればプレビューは作る」(Chami依頼2026-08-24)。プレビュー素材が手元にもDrive既存にも
       //   used:にも無くても、動画実体(この端末のIDB / R2ミラー)さえ在れば末尾フレームでプレビューを起こす。
@@ -1685,7 +1706,10 @@
       return readDriveAsset_('fetchVideo').then(function (vb) {
         return vb ? videoEndFramePreview_(vb) : null;
       });
-    }).then(function (prevB) { applyPreview(prevB); return prevB; }, function () { return null; });
+    }).then(function (prevB) {
+      if (!prevB) return null;
+      return applyPreview(prevB).then(function () { return prevB; });
+    }, function () { return null; });
 
     var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
     // ── 控えフォルダ(drive_up_<videoId>)が在っても「実際に動画が在るか」を必ず確かめてから信じる。

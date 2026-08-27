@@ -1411,11 +1411,11 @@
       });
     }).catch(function () { return ""; });
   }
-  function fetchBlobR2At(name) {
+  function fetchBlobR2At(name, timeoutMs) {
     var c = cfg();
     if (!/^https?:\/\//.test(c.url) || !subtle) return Promise.resolve(null);
     return sha256hex(String(name)).then(function (key) {
-      return fetchBlobTimed_(c.url + "/img/" + key, 60000);
+      return fetchBlobTimed_(c.url + "/img/" + key, timeoutMs || 60000);
     }).catch(function () { return null; });
   }
   // ★論理名の実体がR2に「今この瞬間 在るか」をHEADで実測する(2026-08-18・Fable5診断=保存の根本再設計)。
