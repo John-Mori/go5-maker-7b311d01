@@ -20,7 +20,7 @@ class MemoryKv {
 }
 
 const require = createRequire(import.meta.url);
-const { candidateKindOf_, candidateKindPass_ } = require("../js/candidates.js");
+const { candidateKindOf_, candidateKindPass_, hideEverPostedDecide_ } = require("../js/candidates.js");
 const doujinItem = { cid: "d_kind_1", url: "https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_kind_1/" };
 const booksItem = { cid: "b_kind_1", url: "https://book.dmm.com/detail/b_kind_1/" };
 assert.equal(candidateKindOf_(doujinItem), "同人");
@@ -35,6 +35,10 @@ assert.equal(candidateKindPass_(booksItem, true, false), false);
 assert.equal(candidateKindPass_(doujinItem, false, true), false);
 assert.equal(candidateKindPass_(booksItem, false, true), true);
 assert.equal(candidateKindPass_({ cid: "tw_1", isTwitter: true }, true, false), false, "SNS候補は単一種別フィルターへ混ぜない");
+assert.equal(hideEverPostedDecide_(false, false, true, true), false, "完全非表示OFFなら投稿済みでも表示");
+assert.equal(hideEverPostedDecide_(true, false, true, false), true, "月詠み投稿済みを月詠み完全非表示で隠す");
+assert.equal(hideEverPostedDecide_(true, false, false, true), false, "別チャンネルの投稿だけでは隠さない");
+assert.equal(hideEverPostedDecide_(false, true, false, true), true, "宵桜艶帖投稿済みを宵桜艶帖完全非表示で隠す");
 const origin = "https://john-mori.github.io";
 const kv = new MemoryKv();
 const env = { FANZA_KV: kv, USE_D1: "off", SHARED_SECRET: "public-test", ADMIN_SECRET: "admin-test", ALLOWED_ORIGIN: origin };
@@ -55,6 +59,8 @@ assert.match(candidateSource, /var PAGESIZE_DEF = 20/, "全候補の既定表示
 assert.match(candidateSource, /id="candWorkSearchRun"/, "全候補検索は入力完了後の検索ボタンで実行");
 assert.match(candidateSource, /\/api\/candidate-catalog\?/, "全候補はページ単位のWorker APIを使う");
 assert.match(candidateSource, /hideRecent: \(_hidePosted\.acc1 \|\| _hidePosted\.acc2\) \? 1 : 0/, "all-candidates sends the posted cooldown filter before paging");
+assert.match(candidateSource, /hidePostedAcc1: _hidePosted\.allAcc1 \? 1 : 0, hidePostedAcc2: _hidePosted\.allAcc2 \? 1 : 0/, "全履歴のチャンネル別非表示をページング前に送る");
+assert.match(candidateSource, /<span>books<\/span>/, "候補種別の表記はbooksに固定");
 assert.match(candidateSource, /kind: candidateKindQuery_\(\) \|\| 'all'/, "all-candidates sends the category filter before paging");
 assert.match(candidateSource, /function isHiddenByPostedForAll_\(it\)/, "all-candidates has a dedicated post-only visibility gate");
 assert.doesNotMatch(candidateSource.slice(candidateSource.indexOf("  function isHiddenByPostedForAll_"), candidateSource.indexOf("  function candHidePostedRowHtml_")), /isHiddenByNoMaterial_/, "missing local video images must not collapse a server page");
@@ -62,6 +68,8 @@ assert.doesNotMatch(candidateSource.slice(candidateSource.indexOf("  function re
 const workerSource = fs.readFileSync(new URL("../fanza-worker/src/index.js", import.meta.url), "utf8");
 assert.match(workerSource, /kind === "books"[\s\S]*c\.service='ebook'/, "Worker filters Books before count and pagination");
 assert.match(workerSource, /kind === "doujin"[\s\S]*c\.service<>'ebook'/, "Worker filters doujin before count and pagination");
+assert.match(workerSource, /hidePostedAcc1[\s\S]*pa1\.channel='acc1'/, "Workerは月詠みの全投稿履歴をcount前に除外");
+assert.match(workerSource, /hidePostedAcc2[\s\S]*pa2\.channel='acc2'/, "Workerは宵桜艶帖の全投稿履歴をcount前に除外");
 const helperStart = candidateSource.indexOf("  function isInfoTarget_");
 const helperEnd = candidateSource.indexOf("  function salesTargetCids_", helperStart);
 assert.ok(helperStart >= 0 && helperEnd > helperStart, "candidate target helpers should exist");

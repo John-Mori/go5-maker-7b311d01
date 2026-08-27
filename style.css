@@ -300,11 +300,12 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 /* ── 💡候補タブ（クリーム面・作品候補メモ＋サークル作品一覧） ── */
 .cand-filter-sale{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;color:var(--sub);cursor:pointer;}
 .cand-filter-sale input{width:18px;height:18px;flex-shrink:0;margin:0;accent-color:var(--accent);}
-.cand-kind-posted-row{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;}
-.cand-kind-posted-spacer{flex:1 1 auto;}
-.cand-kind-filter{display:flex;align-items:center;gap:7px;flex:0 0 auto;}
-.cand-kind-filter label{display:flex;align-items:center;gap:4px;margin:0;color:var(--ink);font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;}
-.cand-kind-filter input{width:18px;height:18px;flex:0 0 18px;margin:0;accent-color:var(--accent);}
+.cand-kind-posted-row{display:flex;gap:4px;align-items:center;margin-top:8px;flex-wrap:nowrap;min-width:0;}
+.cand-kind-posted-spacer{flex:1 1 auto;min-width:0;}
+.cand-kind-filter{display:flex;align-items:center;gap:4px;flex:0 0 auto;}
+.cand-kind-filter label{display:flex;align-items:center;gap:2px;margin:0;color:var(--ink);font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer;}
+.cand-kind-filter input{width:15px;height:15px;flex:0 0 15px;margin:0;accent-color:var(--accent);}
+.cand-hide-all-row{display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:7px;flex-wrap:nowrap;}
 .cand-tabs{display:flex;gap:6px;padding:10px 2px 0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;border-bottom:1px solid var(--line);}
 .cand-tabs::-webkit-scrollbar{display:none;}
 .cand-tab{flex:0 0 auto;width:auto;white-space:nowrap;font-family:inherit;font-size:13.5px;font-weight:700;background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:12px 12px 0 0;padding:9px 13px;cursor:pointer;margin-top:0;}
@@ -921,13 +922,27 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-hidden-toggle{background:#e8892b;color:#111;border:1px solid #e8892b;border-radius:8px;font-weight:700;cursor:pointer;line-height:1.1;} /* オレンジ背景・黒文字 */
 .cand-hidden-toggle.active{background:#c86f16;border-color:#c86f16;color:#111;box-shadow:none;} /* 非表示リスト閲覧中は濃いオレンジ */
 /* アカウント別「投稿済みを非表示」トグル：OFF=クリーム地の枠線 / ON=オレンジ地・黒文字 */
-.cand-hidep-toggle{width:auto;margin:0;flex:0 0 auto;font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid #d8c9a6;background:#fffef9;color:#5a4a2a;font-weight:700;cursor:pointer;line-height:1.1;white-space:nowrap;}
+.cand-hidep-toggle{width:auto;margin:0;flex:0 0 auto;font-size:10.5px;padding:6px 5px;border-radius:8px;border:1px solid #d8c9a6;background:#fffef9;color:#5a4a2a;font-weight:700;cursor:pointer;line-height:1.1;white-space:nowrap;}
 .cand-hidep-toggle.active{background:#e8892b;border-color:#e8892b;color:#111;}
 /* 「◯◯✔非表示」トグルも各chのテーマ色。縁取り=そのch色 / ON=そのchの塗り(Chami 2026-08-11)。 */
 #candHidePosted1{border-color:#2C4C8F;color:#2C4C8F;}
 #candHidePosted1.active{background:#2C4C8F;border-color:#2C4C8F;color:#FFD65C;}
 #candHidePosted2{border-color:#7A3F8F;color:#7A3F8F;}
 #candHidePosted2.active{background:#4A2A6B;border-color:#4A2A6B;color:#FF7BA8;}
+#candHideAll1{border-color:#2C4C8F;color:#2C4C8F;}
+#candHideAll1.active{background:#2C4C8F;border-color:#2C4C8F;color:#FFD65C;}
+#candHideAll2{border-color:#7A3F8F;color:#7A3F8F;}
+#candHideAll2.active{background:#4A2A6B;border-color:#4A2A6B;color:#FF7BA8;}
+.cand-hide-check{display:inline-block;color:inherit;font-family:Arial,sans-serif;font-weight:900;font-style:normal;line-height:1;margin:0 1px;}
+.cand-hideall-toggle .cand-hide-check{opacity:.24;margin-right:3px;}
+.cand-hideall-toggle.active .cand-hide-check{opacity:1;}
+@media (min-width:700px){
+  .cand-kind-posted-row{gap:8px;}
+  .cand-kind-filter{gap:7px;}
+  .cand-kind-filter label{gap:4px;font-size:12px;}
+  .cand-kind-filter input{width:18px;height:18px;flex-basis:18px;}
+  .cand-hidep-toggle{font-size:12px;padding:6px 11px;}
+}
 .cand-hidep-toggle:active{transform:scale(.96);}
 /* 投稿編集モーダル：複数画像のプレビュー切替（‹›ボタン＋スワイプ）と「複数あり」表示 */
 .cand-refimg-stage{position:relative;}

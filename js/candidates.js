@@ -161,6 +161,10 @@
     var kind = candidateKindOf_(it);
     return books ? kind === 'Books' : kind === '同人';
   }
+  // チャンネル別の「完全非表示」は投稿日に依存しない。3日クールタイム判定への退行を防ぐ純関数。
+  function hideEverPostedDecide_(hideAcc1, hideAcc2, postedAcc1, postedAcc2) {
+    return (!!hideAcc1 && !!postedAcc1) || (!!hideAcc2 && !!postedAcc2);
+  }
   // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
   //   js/candidates.js と KouhoTeian.html に同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
   function imgHash_(s) { s = String(s || ''); var h = 5381, i = s.length; while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; } return h.toString(36); }
@@ -174,7 +178,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_, hideEverPostedDecide_: hideEverPostedDecide_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -459,7 +463,7 @@
   var _priceMax = (function () { try { var n = parseInt(localStorage.getItem('cand_price_max') || '0', 10); return (n > 0) ? n : 0; } catch (e) { return 0; } })();
   // 「クールタイム中を非表示」トグル。(どちらかONで、最終投稿から3日以内=クールタイム中の作品を隠す・裁定A)localStorageで永続。
   var _hidePosted = (function () { try { return JSON.parse(localStorage.getItem('cand_hide_posted') || '{}') || {}; } catch (e) { return {}; } })();
-  function saveHidePosted_() { try { localStorage.setItem('cand_hide_posted', JSON.stringify(_hidePosted)); } catch (e) {} }
+  function saveHidePosted_() { lsSet('cand_hide_posted', _hidePosted); }
   // ★「このchでは投稿していない」ユーザー宣言の恒久オーバーライド。({acc:{cid:ts}})
   //   投稿履歴レコードを消すだけだと、シート再マージ/DID矯正の移動/リビルド等がyt-clicks側で
   //   short_hist__/verify_manual__ を再投入して pill が復活する(「手動で外しても復元される」の真因)。
@@ -636,6 +640,7 @@
   }
   function isHiddenByPosted_(it) {
     if (!it) return false;
+    if (isHiddenByEverPosted_(it)) return true;
     if (!_hidePosted.acc1 && !_hidePosted.acc2) return false; // どちらのトグルもOFF=隠さない
     if (isHiddenByNoMaterial_(it)) return true; // ★複数画像がない=投稿できない作品も、この非表示トグルON時は隠す(Chami 2026-08-24)
     // ★D1権威(生成側と同一ソース)の直近3日/直近10件にヒットしたら隠す。取得できていれば ts再構築に依らず確実。
@@ -646,33 +651,55 @@
     if (last && (Date.now() - last) < POSTED_COOLDOWN_MS) return true; // 最終投稿から3日以内=クールタイム中=隠す
     return isHiddenByRecentCount_(it); // ★OR: 両ch合算の直近10件の投稿に含まれる作品も隠す
   }
-  // 「◯◯✔非表示」トグル2つ(非表示リストの上段・右寄せ)のHTML。_ACCTS は描画時に定義済み。
   // All-candidates is a discovery view: missing local video materials must not hide new catalog entries.
   // Only apply the posted cooldown here so server-side paging does not collapse a 20-item page.
   function isHiddenByPostedForAll_(it) {
-    if (!it || (!_hidePosted.acc1 && !_hidePosted.acc2)) return false;
+    if (!it) return false;
+    if (isHiddenByEverPosted_(it)) return true;
+    if (!_hidePosted.acc1 && !_hidePosted.acc2) return false;
     if (isInD1Set_(it, d1Within3dCids_())) return true;
     if (isInD1Set_(it, d1RecentTop10Cids_())) return true;
     var last = lastPostedTsAnyCh_(it);
     if (last && (Date.now() - last) < POSTED_COOLDOWN_MS) return true;
     return isHiddenByRecentCount_(it);
   }
+  // 各チャンネルの全履歴を使う。投稿日・時間・投稿順は条件に含めない。
+  function isHiddenByEverPosted_(it) {
+    if (!it || (!_hidePosted.allAcc1 && !_hidePosted.allAcc2)) return false;
+    return hideEverPostedDecide_(
+      _hidePosted.allAcc1,
+      _hidePosted.allAcc2,
+      _hidePosted.allAcc1 && !!postedMatchForCand_(it, 'acc1'),
+      _hidePosted.allAcc2 && !!postedMatchForCand_(it, 'acc2')
+    );
+  }
   function candHidePostedRowHtml_() {
     return '<div class="cand-kind-posted-row">' +
       '<div class="cand-kind-filter" role="group" aria-label="作品種別で絞り込み">' +
         '<label><input id="candFilterDoujin" type="checkbox"' + (_filterDoujin ? ' checked' : '') + '><span>同人</span></label>' +
-        '<label><input id="candFilterBooks" type="checkbox"' + (_filterBooks ? ' checked' : '') + '><span>ブックス</span></label>' +
+        '<label><input id="candFilterBooks" type="checkbox"' + (_filterBooks ? ' checked' : '') + '><span>books</span></label>' +
       '</div>' +
       '<span class="cand-kind-posted-spacer"></span>' +
-      '<button id="candHidePosted1" type="button" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '✔非表示</button>' +
-      '<button id="candHidePosted2" type="button" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[1][1]) + '✔非表示</button>' +
+      '<button id="candHidePosted1" type="button" aria-pressed="' + (!!_hidePosted.acc1) + '" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
+      '<button id="candHidePosted2" type="button" aria-pressed="' + (!!_hidePosted.acc2) + '" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[1][1]) + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
+    '</div>' +
+    '<div class="cand-hide-all-row" role="group" aria-label="チャンネル別の投稿済み作品を完全非表示">' +
+      '<button id="candHideAll1" type="button" aria-pressed="' + (!!_hidePosted.allAcc1) + '" class="cand-hidep-toggle cand-hideall-toggle' + (_hidePosted.allAcc1 ? ' active' : '') + '" title="月詠みで一度でも投稿した作品を、投稿日に関係なく一覧から隠す"><span class="cand-hide-check" aria-hidden="true">✓</span>月詠み完全非表示</button>' +
+      '<button id="candHideAll2" type="button" aria-pressed="' + (!!_hidePosted.allAcc2) + '" class="cand-hidep-toggle cand-hideall-toggle' + (_hidePosted.allAcc2 ? ' active' : '') + '" title="宵桜艶帖で一度でも投稿した作品を、投稿日に関係なく一覧から隠す"><span class="cand-hide-check" aria-hidden="true">✓</span>宵桜艶帖完全非表示</button>' +
     '</div>';
   }
-  // 上記トグルの配線。どちらをONにしても、最終投稿から3日以内(クールタイム中)なら非表示。(isHiddenByPosted_)
+  // 通常の3日非表示と、チャンネル別の全履歴非表示を同じ同期設定へ保存する。
   function wireHidePostedButtons_(rerender) {
-    var b1 = $('candHidePosted1'), b2 = $('candHidePosted2');
-    if (b1) b1.addEventListener('click', function () { _hidePosted.acc1 = !_hidePosted.acc1; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc1); rerender(); });
-    if (b2) b2.addEventListener('click', function () { _hidePosted.acc2 = !_hidePosted.acc2; saveHidePosted_(); this.classList.toggle('active', !!_hidePosted.acc2); rerender(); });
+    var b1 = $('candHidePosted1'), b2 = $('candHidePosted2'), a1 = $('candHideAll1'), a2 = $('candHideAll2');
+    function toggle_(button, key) {
+      if (!button) return;
+      button.addEventListener('click', function () {
+        _hidePosted[key] = !_hidePosted[key]; saveHidePosted_();
+        this.classList.toggle('active', !!_hidePosted[key]); this.setAttribute('aria-pressed', String(!!_hidePosted[key]));
+        _candPageByTab[_activeTab] = 1; rerender();
+      });
+    }
+    toggle_(b1, 'acc1'); toggle_(b2, 'acc2'); toggle_(a1, 'allAcc1'); toggle_(a2, 'allAcc2');
   }
   function wireKindFilter_(rerender) {
     var d = $('candFilterDoujin'), b = $('candFilterBooks');
@@ -4404,7 +4431,8 @@
       var page = _candPageByTab.all || 1, size = candPageSize_();
       var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
       catalogPage_({ sort: _sort, page: page, limit: size, q: _workSearchByTab.all || '', sale: _filterSale ? 1 : 0,
-        priceMax: _priceMax || 0, kind: candidateKindQuery_() || 'all', hideRecent: (_hidePosted.acc1 || _hidePosted.acc2) ? 1 : 0 }, function (j) {
+        priceMax: _priceMax || 0, kind: candidateKindQuery_() || 'all', hideRecent: (_hidePosted.acc1 || _hidePosted.acc2) ? 1 : 0,
+        hidePostedAcc1: _hidePosted.allAcc1 ? 1 : 0, hidePostedAcc2: _hidePosted.allAcc2 ? 1 : 0 }, function (j) {
         if (wrap) wrap.removeAttribute('aria-busy');
         if (!j) { fallback_(); return; }
         _candPageByTab.all = j.page || 1; progressText_(j.progress); paint_(j.items || [], j.total || 0, j.page || 1, j.pages || 1, false);
@@ -5684,7 +5712,7 @@
     _candRepaint_ = paintMainPage_; _candRepaintTab_ = tabId;
     // ★外枠(件数見出し・検索欄・表示数セレクタ・ページ入れ物)は、並び順/絞り込み/表示数が変わらない限り
     //   作り直さない=検索フォーカスもカードのDOMも保つ。並び順や非表示切替など見出しが変わる操作の時だけ組み直す。
-    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + (_filterDoujin ? 1 : 0) + '|' + (_filterBooks ? 1 : 0) + '|' + _priceMax;
+    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + (_filterDoujin ? 1 : 0) + '|' + (_filterBooks ? 1 : 0) + '|' + (_hidePosted.acc1 ? 1 : 0) + '|' + (_hidePosted.acc2 ? 1 : 0) + '|' + (_hidePosted.allAcc1 ? 1 : 0) + '|' + (_hidePosted.allAcc2 ? 1 : 0) + '|' + _priceMax;
     var shellReady = (el._go5CandState === stateSig && document.getElementById('candCardList'));
     if (!shellReady) {
       var salesMiss = missingCount(salesTargetCids_(arr));

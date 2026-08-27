@@ -977,6 +977,8 @@ async function queryCandidateCatalog_(env, sp) {
   const kind = String(sp.get("kind") || "").toLowerCase();
   const priceMax = Math.max(0, parseInt(sp.get("priceMax") || "0", 10) || 0);
   const hideRecent = sp.get("hideRecent") === "1";
+  const hidePostedAcc1 = sp.get("hidePostedAcc1") === "1";
+  const hidePostedAcc2 = sp.get("hidePostedAcc2") === "1";
   const sort = String(sp.get("sort") || "rank7d");
   const order = {
     added_desc: "c.discovered_at DESC", price_asc: "CASE WHEN c.price IS NULL THEN 1 ELSE 0 END,c.price ASC,c.released DESC",
@@ -995,6 +997,8 @@ async function queryCandidateCatalog_(env, sp) {
     where.push("NOT EXISTS (SELECT 1 FROM posted_log pr WHERE pr.cid=c.cid AND datetime(pr.posted_at)>=datetime('now','-3 days'))");
     where.push("c.cid NOT IN (SELECT recent.cid FROM (SELECT cid,MAX(datetime(posted_at)) AS last_at FROM posted_log GROUP BY cid ORDER BY last_at DESC LIMIT 10) recent)");
   }
+  if (hidePostedAcc1) where.push("NOT EXISTS (SELECT 1 FROM posted_log pa1 WHERE pa1.cid=c.cid AND pa1.channel='acc1')");
+  if (hidePostedAcc2) where.push("NOT EXISTS (SELECT 1 FROM posted_log pa2 WHERE pa2.cid=c.cid AND pa2.channel='acc2')");
   const from = " FROM candidate_catalog c JOIN candidate_pool p ON p.cid=c.cid LEFT JOIN works w ON w.cid=c.cid WHERE " + where.join(" AND ");
   const countRow = await env.FANZA_DB.prepare("SELECT COUNT(*) AS n" + from).bind(...binds).first();
   const total = Number(countRow && countRow.n || 0), pages = Math.max(1, Math.ceil(total / limit));

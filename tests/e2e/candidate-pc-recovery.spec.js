@@ -518,4 +518,74 @@ test.describe('PC candidate recovery invariants', () => {
       return !!(r && r.ok && Array.isArray(r.value) && r.value.some((it) => it && it.cid === candidateCid));
     }, cid)).toBe(true);
     await expect.poll(() => page.evaluate(() => window.__bulkQuotaFlushCalls)).toBe(1);
+  });
+  test('mobile filters stay on one line and channel-complete hide uses all posted history', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const acc1Cid = 'd_ever_posted_acc1';
+    const acc2Cid = 'd_ever_posted_acc2';
+    const freshCid = 'd_never_posted';
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ acc1Cid, acc2Cid, freshCid }) => {
+      const item = (cid, title, n) => ({
+        cid, title,
+        url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/',
+        addedAt: Date.now() - n
+      });
+      localStorage.setItem('cand_items', JSON.stringify([
+        item(acc1Cid, '月詠みで昔投稿した作品', 1),
+        item(acc2Cid, '宵桜艶帖で昔投稿した作品', 2),
+        item(freshCid, 'どちらにも未投稿の作品', 3)
+      ]));
+      localStorage.setItem('cand_hide_posted', '{}');
+      localStorage.setItem('bsky_gas_url', '');
+      localStorage.setItem('posted_sheet_v1', JSON.stringify({
+        fetchedAt: Date.now(),
+        acc1: [{ c: acc1Cid, t: '2020-01-02T03:04:00.000Z' }],
+        acc2: [{ c: acc2Cid, t: '2020-02-03T04:05:00.000Z' }]
+      }));
+    }, { acc1Cid, acc2Cid, freshCid });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => { if (window.Go5Sync) window.Go5Sync.requestSync = () => {}; });
+
+    await expect(page.locator('.cand-kind-filter')).toContainText('books');
+    await expect(page.locator('.cand-kind-filter')).not.toContainText('ブックス');
+    const rowLayout = await page.evaluate(() => {
+      const row = document.querySelector('.cand-kind-posted-row');
+      const group = document.querySelector('.cand-kind-filter').getBoundingClientRect();
+      const first = document.querySelector('#candHidePosted1').getBoundingClientRect();
+      const second = document.querySelector('#candHidePosted2').getBoundingClientRect();
+      const bounds = row.getBoundingClientRect();
+      return {
+        fits: row.scrollWidth <= row.clientWidth + 1,
+        sameLine: Math.abs((group.top + group.bottom) / 2 - (first.top + first.bottom) / 2) < 2 && Math.abs((first.top + first.bottom) / 2 - (second.top + second.bottom) / 2) < 2,
+        inside: second.right <= bounds.right + 1
+      };
+    });
+    expect(rowLayout).toEqual({ fits: true, sameLine: true, inside: true });
+
+    const oldAcc1 = page.locator('.cand-card', { hasText: '月詠みで昔投稿した作品' });
+    const oldAcc2 = page.locator('.cand-card', { hasText: '宵桜艶帖で昔投稿した作品' });
+    const never = page.locator('.cand-card', { hasText: 'どちらにも未投稿の作品' });
+    await expect(oldAcc1).toBeVisible();
+    await expect(oldAcc2).toBeVisible();
+    await expect(never).toBeVisible();
+
+    await page.locator('#candHideAll1').click();
+    await expect(oldAcc1).toHaveCount(0);
+    await expect(oldAcc2).toBeVisible();
+    await expect(never).toBeVisible();
+    await page.locator('#candHideAll2').click();
+    await expect(oldAcc2).toHaveCount(0);
+    await expect(never).toBeVisible();
+    await page.locator('#candHideAll1').click();
+    await expect(oldAcc1).toBeVisible();
+    await expect(oldAcc2).toHaveCount(0);
+
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_hide_posted') || '{}'));
+    expect(saved.allAcc1).toBe(false);
+    expect(saved.allAcc2).toBe(true);
+
+    await page.locator('#candHidePosted1').click();
+    const checkColor = await page.locator('#candHidePosted1 .cand-hide-check').evaluate((el) => getComputedStyle(el).color);
+    expect(checkColor).toBe('rgb(255, 214, 92)');
   });});
