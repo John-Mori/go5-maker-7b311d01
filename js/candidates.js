@@ -1244,7 +1244,8 @@
       try { klog_('cand_text_ls_quota_idb_fallback', 'work', cid, { cause: (e && e.name) || 'quota' }); } catch (_) {}
       var idbP = persistCandTextIdb_(map);
       if (idbP && typeof idbP.then === 'function') { idbP.then(function (ok) { try { klog_('cand_text_idb_fallback_result', 'work', cid, { ok: !!ok }); } catch (_) {} }, function () {}); }
-      return true; // LS満杯は非致命=テキストは(メモリ＋IDBミラーで)保持。呼び元の保存全体を落とさない
+      // With no IDB, memory-only text is not a durable success. Image saves retry this after the CDN ledger frees space.
+      return !!_idbOk;
     }
   }
   // cand_text マップの耐久ミラーをIDBへ書く(全件を1キーに=小さいテキストのみ)。Promise<bool>。IDB不可なら false。
@@ -1529,11 +1530,11 @@
   }
   function imageCdnMirror_(kind, key, imgs, at, prev) {
     try {
-      if (!window.Go5ImageCdn || !window.Go5ImageCdn.mirror) return;
-      Promise.resolve(window.Go5ImageCdn.mirror(kind, key, (imgs || []).filter(Boolean), {
+      if (!window.Go5ImageCdn || !window.Go5ImageCdn.mirror) return Promise.resolve(false);
+      return Promise.resolve(window.Go5ImageCdn.mirror(kind, key, (imgs || []).filter(Boolean), {
         at: Math.max(1, Number(at) || Date.now()), prev: Math.max(0, Number(prev) | 0)
-      })).catch(function () {});
-    } catch (e) {}
+      })).then(function (rec) { return !!rec; }, function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
   }
 
   // 全体ハイドレートを待たず、押された作品1件だけを直接復元する。
@@ -1608,7 +1609,7 @@
     //   hydrateImages_/migrateLocalImages_ が「IDB読みの成功」に依存するため、IDB読みが落ち続ける端末では
     //   LS退避画像が一生メモリへ載らず「保存できたのに何度リロードしても画像が出ない」が残っていた
     //   (Chami 2026-08-14①)。ここでLSも読めば、IDBが死んでいても同期で画像が出る=非破壊の追加読み。
-    var base = (_idbOk ? (_imgMem.ref[cid] || null) : null) || legacyRefOf_(cid) || null;
+    var base = _imgMem.ref[cid] || legacyRefOf_(cid) || null;
     // LSがR2マーカー(base64を持たない枚数印)なら、実体をR2から取り寄せてメモリへ載せる(裏で・冪等)。
     //   表示側にはマーカーの内部(__r2n)を渡さず、テキストだけ持つ空画像レコードとして扱う=解決後の再描画で画像が出る。
     if (isR2Marker_(base)) { resolveR2IntoMem_(cid, base); base = { comment: base.comment, memo: base.memo, twitterUrl: base.twitterUrl, twitterUrl2: base.twitterUrl2, urls2: base.urls2, at: base.at }; }
@@ -1686,6 +1687,54 @@
       });
     }, Promise.resolve(true)).catch(function () { return false; });
   }
+
+  // Single durable fallback shared by IDB rejection and IDB-unavailable devices.
+  // Order: content-addressed CDN ledger, named R2 marker, then base64 localStorage for offline compatibility.
+  function persistRefWithoutIdb_(cid, rec, imgs, imageAt) {
+    imgs = (imgs || []).filter(Boolean);
+    if (!rec) {
+      try { localStorage.removeItem(refImgKey(cid)); } catch (e) {}
+      _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, [], imageAt, 0);
+      return Promise.resolve(true);
+    }
+    return imageCdnMirror_('ref', cid, imgs, imageAt, 0).then(function (cdnOk) {
+      if (cdnOk) {
+        try { localStorage.removeItem(refImgKey(cid)); } catch (e) {}
+        candTextSave_(cid, rec);
+        _refLoaded[cid] = true; reqSync_();
+        klog_('ref_image_saved_cdn', 'work', cid, { imgs: imgs.length });
+        return true;
+      }
+      return pushRefToR2_(cid, imgs).then(function (r2ok) {
+        if (r2ok) {
+          var marker = { __r2n: imgs.length, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
+          var markerStr = JSON.stringify(marker);
+          try {
+            localStorage.setItem(refImgKey(cid), markerStr);
+            _refLoaded[cid] = true; reqSync_(); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length });
+            return true;
+          } catch (e1) {
+            try {
+              localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), markerStr);
+              _refLoaded[cid] = true; reqSync_(); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length, freed: 1 });
+              return true;
+            } catch (e2) {}
+          }
+        }
+        try {
+          var recLs = { imgs: imgs, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
+          var recLsStr = JSON.stringify(recLs);
+          try { localStorage.setItem(refImgKey(cid), recLsStr); }
+          catch (e3) { localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), recLsStr); }
+          _refLoaded[cid] = true; reqSync_(); return true;
+        } catch (e4) {
+          klog_('ref_image_save_failed', 'work', cid, { cause: (e4 && e4.name) || 'quota', r2: r2ok ? 1 : 0, imgs: imgs.length });
+          return false;
+        }
+      });
+    }).catch(function () { return false; });
+  }
+
   // go5ref:<cid>:0..n-1 → dataURL配列。全枚取れたら配列、1枚でも欠けたら null(消えたと誤判定せずマーカーを残す)。
   function resolveRefFromR2_(cid, n) {
     if (!r2Ready_() || !(n > 0)) return Promise.resolve(null);
@@ -1888,7 +1937,7 @@
           if (rec) localStorage.setItem(refImgKey(cid), JSON.stringify(rec)); else localStorage.removeItem(refImgKey(cid));
         } catch (e) { idbFail_(e); }
       }
-      return true;
+      return !!textSaved;
     }
     if (_idbOk) {
       var hadPrev = Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
@@ -1903,51 +1952,21 @@
         return true;
       }, function (e) {
         idbFail_(e);
-        // ★IDB書込が落ちても、テキスト(コメント/URL)は既に cand_text へ確定保存済み。画像は「まずR2へ退避し、
-        //   LSにはハッシュを持たない枚数マーカー {__r2n} だけ置く」=cand_text と食い合う5MBを奪わない
-        //   (v=791の base64 LS退避が5MBを枯らして"毎回保存できませんでした"を起こしていた真因の恒久対策・
-        //   Fable5根本解析2026-08-15/C-038)。R2成功で成功扱いにしてモーダルを閉じさせる。
-        //   R2不可(オフライン/未設定)の時だけ従来どおり base64 をLSへ退避(双方向fail-open)。
-        //   両方落ちた時だけ本当の失敗として false(モーダル保持・再操作可)。メモリ(_imgMem.ref[cid])は
-        //   既に新しい画像/削除済み=表示は無傷。削除(rec=null)はR2を触らずマーカー/退避を消すだけ。
-        if (!rec) {
-          try { localStorage.removeItem(refImgKey(cid)); _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, [], imageAt, 0); return true; }
-          catch (e2) { if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid]; return false; }
-        }
-        return pushRefToR2_(cid, imgs).then(function (r2ok) {
-          if (r2ok) {
-            var marker = { __r2n: imgs.length, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
-            var markerStr = JSON.stringify(marker);
-            try { localStorage.setItem(refImgKey(cid), markerStr); _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, imgs, imageAt, 0); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length }); return true; }
-            catch (e3) {
-              // ★実体はR2に載っている=あとは道標(数百B)のマーカーさえ書ければ成功。LS満杯なら、まさに今
-              //   上書きする同一cidの旧base64値を先に退けて1回だけ書き直す(消すのは上書き対象=喪失を増やさない)。
-              //   これを入れる前は e3 を握り潰して下の base64 退避(もっと大きい)へ落ち、R2成功なのに false を返していた(Fable5診断2026-08-24)。
-              try { localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), markerStr); _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, imgs, imageAt, 0); klog_('ref_image_saved_r2', 'work', cid, { imgs: imgs.length, freed: 1 }); return true; } catch (e3b) {}
-            }
-          }
-          // R2に載らなかった=従来の base64 LS退避へ(img複製は落として足跡を半減=P1-3)。
-          try {
-            var recLs = { imgs: imgs, comment: rec.comment, memo: rec.memo, twitterUrl: rec.twitterUrl, twitterUrl2: rec.twitterUrl2, urls2: rec.urls2, at: rec.at };
-            var recLsStr = JSON.stringify(recLs);
-            try { localStorage.setItem(refImgKey(cid), recLsStr); }
-            catch (e2a) { localStorage.removeItem(refImgKey(cid)); localStorage.setItem(refImgKey(cid), recLsStr); } // 同一cidの旧値を退けて1回だけ再試行(満杯時)
-            _refLoaded[cid] = true; reqSync_(); imageCdnMirror_('ref', cid, imgs, imageAt, 0); return true;
-          } catch (e2) {
-            if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid];
-            klog_('ref_image_save_failed', 'work', cid, { cause: (e2 && e2.name) || 'quota', r2: r2ok ? 1 : 0, imgs: imgs.length });
-            return false;
-          }
+        return persistRefWithoutIdb_(cid, rec, imgs, imageAt).then(function (ok) {
+          if (!ok) { if (hadPrev) _imgMem.ref[cid] = prev; else delete _imgMem.ref[cid]; }
+          return ok;
         });
       });
     }
-    try {
-      if (!rec) { localStorage.removeItem(refImgKey(cid)); imageCdnMirror_('ref', cid, [], imageAt, 0); return true; }
-      localStorage.setItem(refImgKey(cid), JSON.stringify(rec));
-      imageCdnMirror_('ref', cid, imgs, imageAt, 0); return true;
-    } catch (e) { return false; } // 容量超過など
+    // Do not send IDB-unavailable devices straight to the 5MB base64 localStorage lane.
+    var hadPrevNoIdb = Object.prototype.hasOwnProperty.call(_imgMem.ref, cid);
+    var prevNoIdb = _imgMem.ref[cid];
+    if (rec) _imgMem.ref[cid] = rec; else delete _imgMem.ref[cid];
+    return persistRefWithoutIdb_(cid, rec, imgs, imageAt).then(function (ok) {
+      if (!ok) { if (hadPrevNoIdb) _imgMem.ref[cid] = prevNoIdb; else delete _imgMem.ref[cid]; }
+      return ok;
+    });
   }
-
   function bskyImgOf(cid) {
     if (_idbOk) return _imgMem.bsky[cid] || null;
     try { return JSON.parse(localStorage.getItem(bskyImgKey(cid)) || 'null'); } catch (e) { return null; }

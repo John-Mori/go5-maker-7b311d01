@@ -1056,3 +1056,115 @@ test.describe('一覧のレイアウト安定性', () => {
     expect(Math.abs(result.after - result.before)).toBeLessThanOrEqual(2);
   });
 });
+
+
+test.describe('durable candidate images and Japanese IME search', () => {
+  test('an IDB-unavailable device saves a new image through the synced CDN ledger', async ({ page }) => {
+    const cid = 'tw_candidate_no_idb_cloud_save';
+    await page.addInitScript(({ cid }) => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('cand_items', JSON.stringify([{
+        cid, title: 'cloud image durability test', isTwitter: true,
+        twitterUrl: 'https://x.com/go5_test/status/9601', addedAt: Date.now()
+      }]));
+    }, { cid });
+    await page.route('**/js/candidates.js?*', async (route) => {
+      const response = await route.fetch();
+      const original = await response.text();
+      const injected = "(function(){ Go5Idb.available = function(){ return false; }; }());\n";
+      await route.fulfill({ response, body: injected + original });
+    });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.locator('[data-refimg="' + cid + '"]').click();
+    await expect(page.locator('.refimg-modal')).toBeVisible();
+    await page.locator('#refImgFile').setInputFiles({
+      name: 'tiny.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLzWQAAAABJRU5ErkJggg==', 'base64')
+    });
+    await expect(page.locator('#refImgPreview img')).toBeVisible();
+    await page.evaluate(() => {
+      const hash = 'a'.repeat(64);
+      Go5Sync.putBlobR2 = function () { return Promise.resolve(hash); };
+      Go5Sync.syncImageManifestNow = function () { return Promise.resolve({ ok: true }); };
+      const realSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (String(key).indexOf('cand_refimg__') === 0) {
+          throw new DOMException('forced legacy quota', 'QuotaExceededError');
+        }
+        return realSetItem.call(this, key, value);
+      };
+    });
+    await page.locator('#refImgSave').click();
+    await expect(page.locator('#refImgMsg')).toHaveText('\u4fdd\u5b58\u3057\u307e\u3057\u305f', { timeout: 2500 });
+    const durable = await page.evaluate(({ cid }) => {
+      const rec = Go5ImageCdn.record('ref', cid);
+      return {
+        keys: rec && rec.keys,
+        legacy: localStorage.getItem('cand_refimg__' + cid),
+        visible: Go5Cand.refImgs(cid).length
+      };
+    }, { cid });
+    expect(durable.keys).toEqual(['a'.repeat(64)]);
+    expect(durable.legacy).toBeNull();
+    expect(durable.visible).toBe(1);
+  });
+
+  test('Japanese composition keeps one live input and commits one character once', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('current_account', 'acc1');
+      localStorage.setItem('bsky_gas_url', '');
+      localStorage.setItem('hist_maint_at', String(Date.now()));
+      localStorage.setItem('hist_metrics_at', String(Date.now()));
+      localStorage.setItem('short_hist__acc1', JSON.stringify([{
+        videoId: 'acc1-20260828-0651-ime1',
+        ts: Date.now(),
+        title: '\u3042\u3044\u3046\u4f5c\u54c1',
+        account: 'acc1'
+      }]));
+      localStorage.setItem('verify_manual__acc1', '[]');
+      localStorage.setItem('verify_yt__acc1', '{}');
+    });
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    const input = page.locator('#histWorkSearch');
+    await expect(input).toBeVisible();
+    const result = await input.evaluate(async (el) => {
+      const original = el;
+      el.focus();
+      const sameAfterFocus = document.getElementById('histWorkSearch') === original;
+      el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+      const sameAfterStart = document.getElementById('histWorkSearch') === original;
+      el.value = '\u3042';
+      const sameAfterValue = document.getElementById('histWorkSearch') === original;
+      el.setSelectionRange(1, 1);
+      el.dispatchEvent(new InputEvent('input', {
+        bubbles: true, data: '\u3042', inputType: 'insertCompositionText', isComposing: true
+      }));
+      const sameNodeDuring = document.getElementById('histWorkSearch') === original;
+      const duringValue = document.getElementById('histWorkSearch').value;
+      el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '\u3042' }));
+      el.dispatchEvent(new InputEvent('input', {
+        bubbles: true, data: null, inputType: 'insertText', isComposing: false
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      const current = document.getElementById('histWorkSearch');
+      return {
+        sameAfterFocus,
+        sameAfterStart,
+        sameAfterValue,
+        sameNodeDuring,
+        duringValue,
+        finalValue: current && current.value,
+        active: document.activeElement === current
+      };
+    });
+    expect(result.sameAfterFocus).toBe(true);
+    expect(result.sameAfterStart).toBe(true);
+    expect(result.sameAfterValue).toBe(true);
+    expect(result.sameNodeDuring).toBe(true);
+    expect(result.duringValue).toBe('\u3042');
+    expect(result.finalValue).toBe('\u3042');
+    expect(result.active).toBe(true);
+    await expect(page.locator('.vrow-title').filter({ hasText: '\u3042\u3044\u3046\u4f5c\u54c1' })).toBeVisible();
+  });
+});

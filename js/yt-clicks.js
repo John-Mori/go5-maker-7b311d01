@@ -564,7 +564,25 @@
   //   候補タブ(candidates.js workSearch)と同じく、ページ分けの"前"に実データ(visibleItems)を絞る
   //   =全ページ横断で作品名・題名にヒットする(現在ページ内だけのDOM非表示ではない)。クエリはアカウント別に保持。
   var _histSearchByAcct = {};
+  var _histSearchComposing = false;
+  var _histSearchRenderTimer = null;
   function histSearchQ_() { return _histSearchByAcct[acct()] || ''; }
+  // Keep the live input node intact while a Japanese IME owns it. Replacing it mid-composition
+  // commits the provisional text and iOS then inserts the same syllable a second time.
+  function queueHistSearchRender_(input, delay) {
+    var caret = null;
+    try { caret = input && input.selectionStart; } catch (e) {}
+    if (_histSearchRenderTimer) clearTimeout(_histSearchRenderTimer);
+    _histSearchRenderTimer = setTimeout(function () {
+      _histSearchRenderTimer = null;
+      if (_histSearchComposing) return;
+      render();
+      try {
+        var ni = $('histWorkSearch');
+        if (ni) { ni.focus({ preventScroll: true }); if (caret != null) ni.setSelectionRange(caret, caret); }
+      } catch (e) {}
+    }, Math.max(0, Number(delay) || 0));
+  }
   function histNorm_(v) { var t = String(v || ''); try { t = t.normalize('NFKC'); } catch (e) {} return t.toLowerCase(); }
   function histSearchHtml_() {
     var q = histSearchQ_();
@@ -2320,7 +2338,14 @@
   }
 
   function render() {
+    // Async metric/image updates must not replace the search input while the IME conversion panel is open.
+    if (_histSearchComposing || _histSearchRenderTimer) return;
     var list = $('ytClickList');
+    // Preserve the actual search subtree across list renders. Background sync can otherwise replace
+    // the input just before compositionstart and break the first Japanese syllable.
+    var stableHistSearch_ = list && list.querySelector('.hist-work-search');
+    var stableHistInput_ = stableHistSearch_ && stableHistSearch_.querySelector('#histWorkSearch');
+    var stableHistFocused_ = !!(stableHistInput_ && document.activeElement === stableHistInput_);
     var viewportSnap = (list && window.Go5Viewport)
       ? window.Go5Viewport.capture(list, '.vrow[data-hist-anchor]', 'data-hist-anchor') : null;
     var rawItems = displayItems_(); // ローカル＋シート由来の表示専用マージ(書き込み系はallItems()のまま不変)
@@ -2389,7 +2414,8 @@
     var _hstart = (_hpage - 1) * _hsize;
     var pageItems = visibleItems.slice(_hstart, _hstart + _hsize);
     var pagerHtml = histPagerHtml_(_hpage, _hpages, _htotal, _hstart, pageItems.length);
-    list.innerHTML = hideBarHtml + histSearchHtml_() + pagerHtml + pageItems.map(function (it, idx) {
+    var histSearchMarkup_ = stableHistSearch_ ? '<div data-hist-search-mount="1"></div>' : histSearchHtml_();
+    list.innerHTML = hideBarHtml + histSearchMarkup_ + pagerHtml + pageItems.map(function (it, idx) {
       var k = itemKey(it);
       var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
@@ -2538,6 +2564,13 @@
         '</div>' +
         '</div>';
     }).join('') + pagerHtml; // 末尾にもページャ(長い一覧の下からでもページ移動できる)
+    if (stableHistSearch_) {
+      var stableMount_ = list.querySelector('[data-hist-search-mount]');
+      if (stableMount_) stableMount_.replaceWith(stableHistSearch_);
+      if (stableHistFocused_) {
+        try { stableHistInput_.focus({ preventScroll: true }); } catch (e) { try { stableHistInput_.focus(); } catch (e2) {} }
+      }
+    }
     // データ再生成・画像後着・検索などで一覧DOMを交換しても、見ていた投稿の位置を維持する。
     if (viewportSnap && window.Go5Viewport) window.Go5Viewport.restore(list, viewportSnap, null, { repeat: false });
     // 全件prefix走査を待たず、今DOMへ出した履歴だけを作品単位で直接読む。used:を先行し、post:停止の巻き添えを防ぐ。
@@ -2566,18 +2599,32 @@
     var _hwsr = $('histWorkSearchResult');
     if (_hwsr) _hwsr.textContent = _hq ? (visibleItems.length + '件表示 / ' + baseItems.length + '件中') : '';
     var _hws = $('histWorkSearch');
-    if (_hws) _hws.addEventListener('input', function () {
-      var q = this.value || '', caret = this.selectionStart;
-      _histSearchByAcct[acct()] = q; _histPageByAcct[acct()] = 1;
-      render();
-      try { var ni = $('histWorkSearch'); if (ni) { ni.focus({ preventScroll: true }); if (caret != null) ni.setSelectionRange(caret, caret); } } catch (e) {}
-    });
+    if (_hws && !_histSearchComposing && document.activeElement !== _hws && _hws.value !== histSearchQ_()) _hws.value = histSearchQ_();
+    if (_hws && !_hws.__go5HistSearchWired) {
+      _hws.__go5HistSearchWired = true;
+      _hws.addEventListener('compositionstart', function () {
+        _histSearchComposing = true;
+        if (_histSearchRenderTimer) { clearTimeout(_histSearchRenderTimer); _histSearchRenderTimer = null; }
+      });
+      _hws.addEventListener('compositionend', function () {
+        _histSearchComposing = false;
+        _histSearchByAcct[acct()] = this.value || ''; _histPageByAcct[acct()] = 1;
+        queueHistSearchRender_(this, 0);
+      });
+      _hws.addEventListener('input', function (ev) {
+        _histSearchByAcct[acct()] = this.value || ''; _histPageByAcct[acct()] = 1;
+        if (_histSearchComposing || (ev && ev.isComposing)) return;
+        queueHistSearchRender_(this, 90);
+      });
+    }
     var _hwsc = $('histWorkSearchClear');
-    if (_hwsc) _hwsc.addEventListener('click', function () {
+    if (_hwsc && !_hwsc.__go5HistSearchWired) { _hwsc.__go5HistSearchWired = true; _hwsc.addEventListener('click', function () {
+      if (_histSearchRenderTimer) { clearTimeout(_histSearchRenderTimer); _histSearchRenderTimer = null; }
+      _histSearchComposing = false;
       _histSearchByAcct[acct()] = ''; _histPageByAcct[acct()] = 1;
       render();
       try { var ni = $('histWorkSearch'); if (ni) ni.focus({ preventScroll: true }); } catch (e) {}
-    });
+    }); }
     // シートから vid を補ったが公開日時が未取得の投稿を、描画後に1回だけ取りに行く(見出しを YouTube公開日時へ)。
     //   通常のrefresh()はallItems(ローカル)しか照会しないため、結線が切れた行はここでしか公開日時を拾えない。
     //   取得できたら再描画で §1646(pub)が §1651(it.ts=作成日時)に勝つ。まだ非公開(予約公開中)なら空応答＝
