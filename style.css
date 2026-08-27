@@ -929,7 +929,7 @@ html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-colo
 .cand-hidden-toggle{background:#e8892b;color:#111;border:1px solid #e8892b;border-radius:8px;font-weight:700;cursor:pointer;line-height:1.1;} /* オレンジ背景・黒文字 */
 .cand-hidden-toggle.active{background:#c86f16;border-color:#c86f16;color:#111;box-shadow:none;} /* 非表示リスト閲覧中は濃いオレンジ */
 /* アカウント別「投稿済みを非表示」トグル：OFF=クリーム地の枠線 / ON=オレンジ地・黒文字 */
-.cand-hidep-toggle{width:auto;margin:0;flex:0 0 auto;font-size:10.5px;padding:6px 5px;border-radius:8px;border:1px solid #d8c9a6;background:#fffef9;color:#5a4a2a;font-weight:700;cursor:pointer;line-height:1.1;white-space:nowrap;}
+.cand-hidep-toggle{width:auto;margin:0;flex:0 0 auto;font-size:10px;padding:6px 2px;border-radius:8px;border:1px solid #d8c9a6;background:#fffef9;color:#5a4a2a;font-weight:700;cursor:pointer;line-height:1.1;white-space:nowrap;}
 .cand-hidep-toggle.active{background:#e8892b;border-color:#e8892b;color:#111;}
 /* 「◯◯✔非表示」トグルも各chのテーマ色。縁取り=そのch色 / ON=そのchの塗り(Chami 2026-08-11)。 */
 #candHidePosted1{border-color:#2C4C8F;color:#2C4C8F;}
