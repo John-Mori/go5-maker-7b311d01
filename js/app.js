@@ -148,6 +148,12 @@
   let fgFile = null;              // 実際に動画生成へ使った元ファイル(投稿履歴の使用画像を候補画像と分離して記録)
   let fgLoadSeq = 0;
   const K_PHOTO_CACHE = 'movie_photo_cache'; // リロード後の前景画像復元用キャッシュ
+  const K_PHOTO_IDB_HEAD = 'movie:foreground:head:v1'; // 現在画像を指す小さなコミット印
+  const K_PHOTO_IDB_PREFIX = 'movie:foreground:blob:'; // 選択ごとのBlob。head着地後に旧BlobだけGC
+  let fgReadyPromise = Promise.resolve({ ok: false, durable: false, primary: false, reason: 'empty', seq: 0 });
+  let fgLoadPending = false; // IDB復元/候補引継ぎ/新規選択の途中だけtrue。未選択ガードを無用に8秒待たせない
+  let fgHeadQueue = Promise.resolve(); // 遅着した旧画像が新画像のheadを上書きしない直列化
+  let fgRestoreRetryNeeded = false;
   let fontReady = false;
   let lastBlob = null, lastName = "video.mp4";
   let _making = false; // 作成中の再入防止。★見た目のdisabledに依存しない=押されたボタンだけを busy 表示できる
@@ -516,63 +522,366 @@
     for (let i = 0; i < 10; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
     return s + ext;
   }
+  function copyPhotoMark_(mark) {
+    if (!mark || typeof mark !== 'object') return null;
+    try { return JSON.parse(JSON.stringify(mark)); } catch (e) { return null; }
+  }
+  function photoToken_(seq) {
+    return Date.now().toString(36) + '-' + Number(seq || 0).toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+  function photoIdb_() {
+    try {
+      var s = window.Go5Idb;
+      return s && s.available && s.available() && s.set && s.del && (s.getResult || s.get) ? s : null;
+    } catch (e) { return null; }
+  }
+  function photoGetResult_(store, key) {
+    try {
+      if (store.getResult) return Promise.resolve(store.getResult(key));
+      return Promise.resolve(store.get(key)).then(function (value) { return { ok: true, value: value }; }, function (error) { return { ok: false, value: null, error: error }; });
+    } catch (e) { return Promise.resolve({ ok: false, value: null, error: e }); }
+  }
+  function photoDel_(store, key) {
+    if (!store || !key) return;
+    try { Promise.resolve(store.del(key)).catch(function () {}); } catch (e) {}
+  }
+  function validPhotoRecord_(rec, token) {
+    return !!(rec && (!token || rec.token === token) && rec.blob && typeof rec.blob.size === 'number' && rec.blob.size > 0);
+  }
+
+  // ★iPhoneのタブ破棄/クラッシュ対策(2026-08-28):
+  //   画像はlocalStorage(dataURL)一本ではなく、元BlobをIndexedDBへ先に書き、読戻し確認後に小さなheadを切り替える。
+  //   選択ごとのBlobは別キーなので、新画像のdecode/保存が失敗しても旧headは壊れない。head更新は選択順で直列化し、
+  //   遅着した旧処理が新画像を上書きしない。同期対象外の端末内作業状態であり、Cloudflare KV書込みも増やさない。
+  function persistPhotoToIdb_(file, loadSeq, token, srcMark, decodedPromise) {
+    var store = photoIdb_();
+    if (!store) return Promise.resolve({ ok: false, primary: false, reason: 'idb-unavailable', seq: loadSeq });
+    var dataKey = K_PHOTO_IDB_PREFIX + token;
+    var at = Date.now();
+    var rec = {
+      v: 1, token: token, blob: file, name: String(file.name || 'foreground.jpg'),
+      type: String(file.type || 'image/jpeg'), lastModified: Number(file.lastModified || at),
+      srcMark: copyPhotoMark_(srcMark), at: at
+    };
+    var dataWrite;
+    try {
+      dataWrite = Promise.resolve(store.set(dataKey, rec)).then(function () {
+        return photoGetResult_(store, dataKey);
+      }).then(function (r) {
+        return r && r.ok && validPhotoRecord_(r.value, token)
+          ? { ok: true, value: r.value }
+          : { ok: false, reason: 'idb-readback' };
+      }, function () { return { ok: false, reason: 'idb-write' }; });
+    } catch (e) {
+      dataWrite = Promise.resolve({ ok: false, reason: 'idb-write' });
+    }
+
+    var commit = fgHeadQueue.catch(function () {}).then(function () {
+      return Promise.all([dataWrite, decodedPromise]);
+    }).then(function (parts) {
+      var written = parts[0], decoded = parts[1];
+      if (!written.ok || !decoded || !decoded.ok) {
+        photoDel_(store, dataKey);
+        return { ok: false, primary: false, reason: (decoded && decoded.reason) || written.reason || 'decode', seq: loadSeq };
+      }
+      if (loadSeq !== fgLoadSeq) {
+        photoDel_(store, dataKey);
+        return { ok: false, primary: false, reason: 'stale', seq: loadSeq };
+      }
+      return photoGetResult_(store, K_PHOTO_IDB_HEAD).then(function (oldResult) {
+        if (loadSeq !== fgLoadSeq) {
+          photoDel_(store, dataKey);
+          return { ok: false, primary: false, reason: 'stale', seq: loadSeq };
+        }
+        var oldHead = oldResult && oldResult.ok ? oldResult.value : null;
+        var head = {
+          v: 1, token: token, key: dataKey, at: at, name: rec.name, type: rec.type,
+          lastModified: rec.lastModified, srcMark: rec.srcMark
+        };
+        var setHead;
+        try { setHead = Promise.resolve(store.set(K_PHOTO_IDB_HEAD, head)); }
+        catch (e) { setHead = Promise.reject(e); }
+        return setHead.then(function () { return photoGetResult_(store, K_PHOTO_IDB_HEAD); }).then(function (headResult) {
+          var landed = headResult && headResult.ok && headResult.value && headResult.value.token === token && headResult.value.key === dataKey;
+          if (!landed) return { ok: false, primary: false, reason: 'head-readback', seq: loadSeq };
+          if (oldHead && oldHead.key && oldHead.key !== dataKey) photoDel_(store, oldHead.key);
+          return { ok: true, durable: true, primary: true, reason: '', seq: loadSeq, token: token, at: at };
+        }, function () { return { ok: false, primary: false, reason: 'head-write', seq: loadSeq }; });
+      });
+    }).catch(function () {
+      photoDel_(store, dataKey);
+      return { ok: false, primary: false, reason: 'idb-error', seq: loadSeq };
+    });
+    fgHeadQueue = commit.then(function () {}, function () {});
+    return commit;
+  }
+
+  function parseLocalPhoto_(raw) {
+    if (!raw) return null;
+    if (/^data:image\//.test(raw)) return { v: 1, token: 'legacy', at: 0, name: 'restored.jpg', type: 'image/jpeg', dataUrl: raw, srcMark: null };
+    try {
+      var r = JSON.parse(raw);
+      return r && r.dataUrl && /^data:image\//.test(r.dataUrl) ? r : null;
+    } catch (e) { return null; }
+  }
+
+  // data:image/... をネットワークAPIへ渡さず端末内だけでBlobへ戻す。
+  // fetch(data:)は実通信ではないが、SafariでPromiseが停止した場合の番犬を持てないため使用しない。
+  function localPhotoBlob_(dataUrl) {
+    var src = String(dataUrl || ''), comma = src.indexOf(',');
+    if (comma < 0 || !/^data:image\//i.test(src)) throw new Error('invalid image data URL');
+    var header = src.slice(0, comma), payload = src.slice(comma + 1);
+    var mimeMatch = /^data:([^;,]+)/i.exec(header);
+    var binary = /;base64/i.test(header) ? atob(payload) : decodeURIComponent(payload);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i) & 255;
+    return new Blob([bytes], { type: mimeMatch ? mimeMatch[1] : 'image/jpeg' });
+  }
+
+  // localStorageは旧ブラウザ/IDB一時障害用の副系だけにする。960pxへ非同期圧縮し、巨大な同期toDataURLによる
+  // WebContentメモリ急増を避ける。容量整理で消えてもIDB正本から復元できる。
+  function cachePhotoToStorage_(img, file, loadSeq, token, srcMark) {
+    return new Promise(function (resolve) {
+      if (!img || loadSeq !== fgLoadSeq) { resolve(false); return; }
+      var c;
+      try {
+        var MAX = 960;
+        var scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      } catch (e) { resolve(false); return; }
+      var saveDataUrl = function (dataUrl) {
+        if (!dataUrl || loadSeq !== fgLoadSeq) { resolve(false); return; }
+        try {
+          var record = {
+            v: 2, token: token, at: Date.now(), name: String((file && file.name) || 'restored.jpg'),
+            type: 'image/jpeg', srcMark: copyPhotoMark_(srcMark), dataUrl: dataUrl
+          };
+          localStorage.setItem(K_PHOTO_CACHE, JSON.stringify(record));
+          var check = parseLocalPhoto_(localStorage.getItem(K_PHOTO_CACHE));
+          resolve(!!(check && check.token === token));
+        } catch (e) { resolve(false); }
+      };
+      try {
+        if (c.toBlob && typeof FileReader !== 'undefined') {
+          c.toBlob(function (blob) {
+            if (!blob || loadSeq !== fgLoadSeq) { resolve(false); return; }
+            try {
+              var fr = new FileReader();
+              fr.onload = function () { saveDataUrl(String(fr.result || '')); };
+              fr.onerror = function () { resolve(false); };
+              fr.readAsDataURL(blob);
+            } catch (e) { resolve(false); }
+          }, 'image/jpeg', 0.78);
+        } else {
+          saveDataUrl(c.toDataURL('image/jpeg', 0.78));
+        }
+      } catch (e) { resolve(false); }
+    });
+  }
+
   function loadForegroundFile_(f) {
     if (!f) return false;
     const loadSeq = ++fgLoadSeq;
-    fgFile = f;
+    fgLoadPending = true;
+    const token = photoToken_(loadSeq);
+    const srcMark = copyPhotoMark_(window.__go5MovieSrcMark);
+    // 新画像のdecode中に前作品を誤って生成しない。耐久コピーは新画像の着地まで旧headを維持する。
+    fgImg = null; fgFile = null;
     els.photoName.textContent = anonPhotoLabel_(f);
+    preview();
     const url = URL.createObjectURL(f);
     const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      if (loadSeq !== fgLoadSeq) return;
-      fgImg = img;
-      cachePhotoToStorage_(img);
-      preview();
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      if (loadSeq === fgLoadSeq) setStatus("画像を読み込めませんでした(形式をご確認ください)");
-    };
-    img.src = url;
+    const decodedPromise = new Promise(function (resolve) {
+      var settled = false;
+      var watchdog = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        try { URL.revokeObjectURL(url); } catch (e) {}
+        if (loadSeq === fgLoadSeq) setStatus('画像の読み込みが完了しませんでした。もう一度選び直してください。');
+        resolve({ ok: false, reason: loadSeq === fgLoadSeq ? 'decode-timeout' : 'stale' });
+      }, 12000);
+      img.onload = function () {
+        if (settled) return;
+        settled = true; clearTimeout(watchdog);
+        URL.revokeObjectURL(url);
+        if (loadSeq !== fgLoadSeq) { resolve({ ok: false, reason: 'stale' }); return; }
+        fgImg = img; fgFile = f; // 表示画像と元Fileを同じ瞬間に確定し、元画像だけ欠ける競合を作らない。
+        preview();
+        resolve({ ok: true, img: img });
+      };
+      img.onerror = function () {
+        if (settled) return;
+        settled = true; clearTimeout(watchdog);
+        URL.revokeObjectURL(url);
+        if (loadSeq === fgLoadSeq) setStatus("画像を読み込めませんでした(形式をご確認ください)");
+        resolve({ ok: false, reason: loadSeq === fgLoadSeq ? 'decode' : 'stale' });
+      };
+      img.src = url;
+    });
+    const primaryPromise = persistPhotoToIdb_(f, loadSeq, token, srcMark, decodedPromise);
+    const fallbackPromise = Promise.race([
+      decodedPromise.then(function (r) {
+        return r && r.ok ? cachePhotoToStorage_(r.img, f, loadSeq, token, srcMark) : false;
+      }, function () { return false; }),
+      new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 5000); })
+    ]);
+    const ready = Promise.all([decodedPromise, primaryPromise, fallbackPromise]).then(function (parts) {
+      var decoded = parts[0], primary = parts[1] || {}, fallback = !!parts[2];
+      if (loadSeq !== fgLoadSeq || !decoded || decoded.reason === 'stale' || primary.reason === 'stale') {
+        return { ok: false, durable: false, primary: false, reason: 'stale', seq: loadSeq };
+      }
+      var durable = !!primary.ok || fallback;
+      if (decoded.ok && !durable) setStatus('⚠ 写真は表示できましたが再読み込み用の保存に失敗しました。端末の空き容量をご確認ください。');
+      return {
+        ok: !!decoded.ok && durable, decoded: !!decoded.ok, durable: durable, primary: !!primary.ok,
+        reason: decoded.ok ? (durable ? '' : 'persist') : (decoded.reason || 'decode'), seq: loadSeq, token: token
+      };
+    });
+    fgReadyPromise = ready.then(function (receipt) {
+      if (loadSeq === fgLoadSeq) fgLoadPending = false;
+      return receipt;
+    }, function (err) {
+      if (loadSeq === fgLoadSeq) fgLoadPending = false;
+      throw err;
+    });
     return true;
   }
   els.photo.addEventListener("change", () => {
     const f = els.photo.files[0];
-    if (f) loadForegroundFile_(f);
-    // 候補転送(Go5SetForegroundFile)直後の change は保護、手動で選び直した change は候補由来マークを破棄。
-    // 候補転送は __go5FgCandAt を直前に打つ=1.5秒以内なら候補由来とみなす(取り違え防止・Chami 2026-08-24)。
+    // 手動選択では候補由来マークを先に破棄してから保存する。候補API直後だけ由来を保持する。
     if (Date.now() - (window.__go5FgCandAt || 0) > 1500) window.__go5MovieSrcMark = null;
+    if (f) loadForegroundFile_(f);
   });
 
-  // 前景画像をlocalStorageへ圧縮保存(リロード後に復元するため)。失敗は無害。
-  function cachePhotoToStorage_(img) {
-    try {
-      const MAX = 1280;
-      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      localStorage.setItem(K_PHOTO_CACHE, c.toDataURL('image/jpeg', 0.85));
-    } catch (e) {}
+  function applyRestoredPhoto_(blob, meta, restoreSeq, primary) {
+    if (!blob || !blob.size) return Promise.resolve({ ok: false, reason: 'missing', seq: restoreSeq });
+    var type = String((meta && meta.type) || blob.type || 'image/jpeg');
+    var name = String((meta && meta.name) || 'restored.jpg');
+    var file;
+    try { file = blob instanceof File ? blob : new File([blob], name, { type: type, lastModified: Number((meta && meta.lastModified) || Date.now()) }); }
+    catch (e) { return Promise.resolve({ ok: false, reason: 'file', seq: restoreSeq }); }
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        if (restoreSeq !== fgLoadSeq) { resolve({ ok: false, reason: 'stale', seq: restoreSeq }); return; }
+        fgImg = img; fgFile = file;
+        window.__go5MovieSrcMark = copyPhotoMark_(meta && meta.srcMark);
+        if (els.photoName) els.photoName.textContent = anonPhotoLabel_(file);
+        preview();
+        resolve({ ok: true, decoded: true, durable: true, primary: !!primary, reason: '', seq: restoreSeq, at: Number((meta && meta.at) || 0) });
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve({ ok: false, reason: 'decode', seq: restoreSeq }); };
+      img.src = url;
+    });
   }
-  // リロード後: localStorageのキャッシュから前景画像を復元(テキストと同じく保持)。
+
+  function readIdbPhoto_() {
+    var store = photoIdb_();
+    if (!store) return Promise.resolve({ ok: false, reason: 'idb-unavailable' });
+    return photoGetResult_(store, K_PHOTO_IDB_HEAD).then(function (headResult) {
+      if (!headResult || !headResult.ok) return { ok: false, reason: 'idb-read' };
+      var head = headResult.value;
+      if (!head) return { ok: true, absent: true, at: 0 };
+      if (head.empty) return { ok: true, empty: true, at: Number(head.at || 0), head: head };
+      if (!head.key) return { ok: false, reason: 'head-invalid' };
+      return photoGetResult_(store, head.key).then(function (dataResult) {
+        var rec = dataResult && dataResult.ok ? dataResult.value : null;
+        if (!validPhotoRecord_(rec, head.token)) return { ok: false, reason: 'blob-missing', at: Number(head.at || 0) };
+        return { ok: true, record: rec, head: head, at: Number(head.at || rec.at || 0) };
+      });
+    });
+  }
+
+  // リロード後はIDB正本を優先し、接続が遅い時だけ旧localStorageを400ms後に先行表示する。
+  // 後着した古いコピーは時刻比較とfgLoadSeqで拒否し、手動/候補で選び直した画像を上書きしない。
   function restorePhotoCache_() {
-    let dataUrl;
-    try { dataUrl = localStorage.getItem(K_PHOTO_CACHE); } catch (e) {}
-    if (!dataUrl) return;
     const restoreSeq = ++fgLoadSeq;
-    const img = new Image();
-    img.onload = () => {
-      if (restoreSeq !== fgLoadSeq) return;
-      fgImg = img;
-      // fgFileも復元: Blob変換(動画生成後のDrive/Bluesky添付用。失敗しても描画は動く)。
-      try { fetch(dataUrl).then(r => r.blob()).then(b => {
-        if (restoreSeq === fgLoadSeq) fgFile = new File([b], 'restored.jpg', { type: 'image/jpeg' });
-      }).catch(() => {}); } catch (e) {}
-      preview();
-    };
-    img.src = dataUrl;
+    fgLoadPending = true;
+    var local = null;
+    try { local = parseLocalPhoto_(localStorage.getItem(K_PHOTO_CACHE)); } catch (e) {}
+    // IDBも旧キャッシュも無い=復元候補そのものが無い場合は同期的に「未選択」へ確定する。
+    // これにより通常の未選択時は作成ボタンの警告を即時表示し、復元対象がある時だけ待機する。
+    if (!local && !photoIdb_()) {
+      fgLoadPending = false;
+      fgReadyPromise = Promise.resolve({ ok: false, durable: false, primary: false, reason: 'empty', seq: restoreSeq });
+      return;
+    }
+    var localApplied = null, localAt = Number((local && local.at) || 0), idbDone = false;
+    function applyLocal_() {
+      if (!local || restoreSeq !== fgLoadSeq) return Promise.resolve({ ok: false, reason: 'no-local', seq: restoreSeq });
+      if (localApplied) return localApplied;
+      localApplied = Promise.resolve().then(function () { return localPhotoBlob_(local.dataUrl); }).then(function (blob) {
+        return applyRestoredPhoto_(blob, local, restoreSeq, false);
+      }).catch(function () { return { ok: false, reason: 'local-decode', seq: restoreSeq }; });
+      return localApplied;
+    }
+    function applyLocalAndMigrate_() {
+      return applyLocal_().then(function (receipt) {
+        if (!receipt || !receipt.ok || restoreSeq !== fgLoadSeq || !fgFile) return receipt;
+        var restoredFile = fgFile;
+        loadForegroundFile_(restoredFile); // 旧dataURLだけの端末を今回のIDB正本へ一度で移行
+        return fgReadyPromise;
+      });
+    }
+    var timer = setTimeout(function () { if (!idbDone) applyLocal_(); }, 400);
+    var ready = readIdbPhoto_().then(function (r) {
+      idbDone = true; clearTimeout(timer);
+      fgRestoreRetryNeeded = !(r && r.ok);
+      if (restoreSeq !== fgLoadSeq) return { ok: false, reason: 'stale', seq: restoreSeq };
+      if (r && r.ok && r.empty && Number(r.at || 0) >= localAt) {
+        fgImg = null; fgFile = null; window.__go5MovieSrcMark = null;
+        if (els.photoName) els.photoName.textContent = '未選択';
+        try { localStorage.removeItem(K_PHOTO_CACHE); } catch (e) {}
+        preview();
+        return { ok: false, durable: true, primary: true, reason: 'empty', seq: restoreSeq };
+      }
+      if (r && r.ok && r.record && ((!local || (r.head && r.head.token === local.token)) || Number(r.at || 0) >= localAt)) {
+        return applyRestoredPhoto_(r.record.blob, Object.assign({}, r.record, r.head || {}), restoreSeq, true);
+      }
+      if (r && r.ok) return applyLocalAndMigrate_();
+      return applyLocal_();
+    }).catch(function () {
+      idbDone = true; clearTimeout(timer);
+      fgRestoreRetryNeeded = true;
+      return applyLocal_();
+    });
+    fgReadyPromise = ready.then(function (receipt) {
+      if (restoreSeq === fgLoadSeq) fgLoadPending = false;
+      return receipt;
+    }, function (err) {
+      if (restoreSeq === fgLoadSeq) fgLoadPending = false;
+      throw err;
+    });
+  }
+  try {
+    document.addEventListener('go5-idb-recovered', function () {
+      if (!fgRestoreRetryNeeded) return;
+      fgRestoreRetryNeeded = false;
+      // 副キャッシュから既に表示できていれば、そのFileを改めてIDB正本へ着地させる。
+      if (fgImg && fgFile) { loadForegroundFile_(fgFile); return; }
+      restorePhotoCache_();
+    });
+  } catch (e) {}
+  async function waitForegroundReady_(timeoutMs) {
+    var deadline = Date.now() + Math.max(0, Number(timeoutMs || 0));
+    while (true) {
+      var observed = fgReadyPromise;
+      if (!observed || typeof observed.then !== 'function') return { ok: !!(fgImg && fgFile), reason: 'no-promise' };
+      var remain = deadline - Date.now();
+      if (remain <= 0) return { ok: !!(fgImg && fgFile), reason: 'timeout' };
+      var timer = null;
+      var result = await Promise.race([
+        Promise.resolve(observed).catch(function () { return { ok: false, reason: 'error' }; }),
+        new Promise(function (resolve) { timer = setTimeout(function () { resolve({ ok: !!(fgImg && fgFile), reason: 'timeout' }); }, remain); })
+      ]);
+      if (timer) clearTimeout(timer);
+      // 待っている間に手動選択/候補取得が始まった時は、新しい世代のreceiptへ追随する。
+      if (observed !== fgReadyPromise && Date.now() < deadline) continue;
+      return result || { ok: !!(fgImg && fgFile), reason: 'unknown' };
+    }
   }
   // リロード(iOS Safariのタブ破棄=メモリ退避を含む)後: 入力テキストを復元。前景写真(K_PHOTO_CACHE)と対で、
   // 「戻ってきたら書いた文字が消えていた」を防ぐ。端末別の下書き状態(sync_decisions=local)。
@@ -680,7 +989,12 @@
       setStatus(statusMsg);
       if (guardBtn_ && !guardBtn_.disabled) flashBtn(guardBtn_, btnLabel);
     }
-    if (!fgImg) { guardStop_("先に写真を選んでください。(候補から来た場合は写真が読み込めていません=上の写真欄から選び直してください)", "⚠ 写真が必要"); return; }
+    // 本当に未選択なら従来どおり同期的に警告する。リロード復元/候補引継ぎの途中だけ待機へ進む。
+    if (!fgImg && !fgFile && !fgLoadPending) { guardStop_("先に写真を選んでください。(候補から来た場合は写真が読み込めていません=上の写真欄から選び直してください)", "⚠ 写真が必要"); return; }
+    // リロード直後/候補引継ぎ直後は、Canvas表示だけでなく元Fileの復元も同時に完了してから生成する。
+    // 8秒でIDBが応答しなくても、既に両方メモリへ揃っていれば可用性を優先して続行する。
+    await waitForegroundReady_(8000);
+    if (!fgImg || !fgFile) { guardStop_("先に写真を選んでください。(候補から来た場合は写真が読み込めていません=上の写真欄から選び直してください)", "⚠ 写真が必要"); return; }
     if (!window.MediaRecorder) { guardStop_("この端末は動画書き出しに未対応です。(iOS15以降のSafari推奨)", "⚠ 端末未対応"); return; }
     // 狙い・コメント型は生成前の必須選択＝未設定のまま投稿されると分析を汚すため入口で止める。(Chami指定2026-07-14)
     // ★テストモード時は必須にしない(Chami指定2026-07-19)。テストは記録シートに残らない
@@ -977,26 +1291,72 @@
   // 下書き機能(drafts.js)向け：Fileを #photo の実際のFileListにセットし、通常の写真選択と
   // 同じ経路(changeイベント)で反映する。こうすることで、以後のBluesky添付/Drive保存等が
   // 参照する photo.files[0] も正しく更新される。(プレビューだけを書き換えるより確実)
+  function commitPhotoClear_(clearSeq) {
+    var store = photoIdb_();
+    if (!store) return Promise.resolve({ ok: false, primary: false, reason: 'idb-unavailable', seq: clearSeq });
+    var token = 'clear-' + photoToken_(clearSeq), at = Date.now();
+    var commit = fgHeadQueue.catch(function () {}).then(function () {
+      return photoGetResult_(store, K_PHOTO_IDB_HEAD);
+    }).then(function (oldResult) {
+      if (clearSeq !== fgLoadSeq) return { ok: false, primary: false, reason: 'stale', seq: clearSeq };
+      var oldHead = oldResult && oldResult.ok ? oldResult.value : null;
+      var tombstone = { v: 1, token: token, empty: true, at: at };
+      var setHead;
+      try { setHead = Promise.resolve(store.set(K_PHOTO_IDB_HEAD, tombstone)); }
+      catch (e) { setHead = Promise.reject(e); }
+      return setHead.then(function () { return photoGetResult_(store, K_PHOTO_IDB_HEAD); }).then(function (r) {
+        var ok = !!(r && r.ok && r.value && r.value.empty && r.value.token === token);
+        if (ok && oldHead && oldHead.key) photoDel_(store, oldHead.key);
+        return { ok: ok, durable: ok, primary: ok, reason: ok ? 'empty' : 'head-readback', seq: clearSeq };
+      }, function () { return { ok: false, primary: false, reason: 'head-write', seq: clearSeq }; });
+    }).catch(function () { return { ok: false, primary: false, reason: 'idb-error', seq: clearSeq }; });
+    fgHeadQueue = commit.then(function () {}, function () {});
+    return commit;
+  }
+
   window.Go5ClearForeground = () => {
     const clearSeq = ++fgLoadSeq;
     fgImg = null;
     fgFile = null;
+    fgLoadPending = false;
+    window.__go5MovieSrcMark = null;
     if (els.photo) {
       try { els.photo.value = ''; } catch (e) {}
     }
     if (els.photoName) els.photoName.textContent = '未選択';
     try { localStorage.removeItem(K_PHOTO_CACHE); } catch (e) {}
+    fgReadyPromise = commitPhotoClear_(clearSeq);
     preview();
     return clearSeq;
   };
 
+  // 候補画像の非同期取得前に、画面上の旧画像だけを退避する予約。IDB/LSの旧耐久コピーは新画像の
+  // read-back成功まで残すため、取得途中にSafariが落ちても「旧画像またはpending」のどちらかは必ず残る。
+  window.Go5ReserveForeground = () => {
+    const reserveSeq = ++fgLoadSeq;
+    fgLoadPending = true;
+    fgImg = null; fgFile = null;
+    if (els.photo) { try { els.photo.value = ''; } catch (e) {} }
+    if (els.photoName) els.photoName.textContent = '画像を読込中…';
+    fgReadyPromise = Promise.resolve({ ok: false, durable: false, primary: false, reason: 'pending', seq: reserveSeq });
+    preview();
+    return reserveSeq;
+  };
+
   // iOS SafariなどでDataTransfer/FileList代入が使えない場合も、内部の前景FileとCanvasへ直接反映する。
   window.Go5ForegroundFile = () => fgFile;
-  window.Go5SetForegroundFile = (file, expectedSeq) => {
-    if (!file || !els.photo) return false;
+  window.Go5ForegroundSequence = () => fgLoadSeq;
+  window.Go5ForegroundReady = () => fgReadyPromise;
+  function setForegroundFileFromApi_(file, expectedSeq, options) {
+    if (!file || !els.photo) return { accepted: false, reason: 'rejected', ready: Promise.resolve({ ok: false, reason: 'rejected' }) };
     // Reject a delayed candidate fetch if the user already selected another image.
-    if (expectedSeq != null && expectedSeq !== fgLoadSeq) return false;
-    window.__go5FgCandAt = Date.now(); // 候補由来の前景セット=直後の change を「手動選び直し」と誤判定させない印
+    if (expectedSeq != null && expectedSeq !== fgLoadSeq) {
+      return { accepted: false, reason: 'stale', ready: Promise.resolve({ ok: false, durable: false, primary: false, reason: 'stale', seq: expectedSeq }) };
+    }
+    var origin = options && options.origin ? String(options.origin) : 'candidate'; // 引数なしの旧呼出しは従来互換
+    if (origin === 'candidate') window.__go5FgCandAt = Date.now();
+    else { window.__go5FgCandAt = 0; window.__go5MovieSrcMark = null; }
+    var accepted = false;
     try {
       if (typeof DataTransfer !== "undefined") {
         const dt = new DataTransfer();
@@ -1004,11 +1364,20 @@
         els.photo.files = dt.files;
         if (els.photo.files && els.photo.files.length) {
           els.photo.dispatchEvent(new Event("change", { bubbles: true }));
-          return true;
+          accepted = true;
         }
       }
     } catch (e) {}
-    return loadForegroundFile_(file);
+    if (!accepted) accepted = loadForegroundFile_(file);
+    return { accepted: !!accepted, reason: accepted ? '' : 'rejected', ready: accepted ? fgReadyPromise : Promise.resolve({ ok: false, reason: 'rejected' }) };
+  }
+  window.Go5SetForegroundFile = (file, expectedSeq, options) => {
+    return setForegroundFileFromApi_(file, expectedSeq, options).accepted;
+  };
+  // true=「開始」しか表さない旧APIを残しつつ、候補/下書き/再作成はdecode＋耐久保存のreceiptを待てる。
+  window.Go5SetForegroundFileReady = (file, expectedSeq, options) => {
+    var started = setForegroundFileFromApi_(file, expectedSeq, options);
+    return started.accepted ? started.ready : Promise.resolve({ ok: false, durable: false, primary: false, reason: started.reason || 'rejected', seq: expectedSeq });
   };
 
   // 販促ラベル(promo-label.js)向け: プレビュー完全表示時(t=DURATION・ズーム完了)の前景写真の

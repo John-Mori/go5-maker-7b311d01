@@ -2391,39 +2391,51 @@
     //   作り直すたびに写真だけ空欄になっていた。候補→動画作成と同じ実績のある経路 window.Go5SetForegroundFile で
     //   #photo へ流し込む。手元Blob(stock_img_)優先、無ければ同期ミラー(stock:imgs:.src)から復元。
     //   ★元ドラフトの一覧からの除去(deleteStock_)は delBlobs_ で画像も消すため、画像の読み取りが終わってから行う
-    //     (先に消すと復元用のBlobを取りこぼす)。読み取りに失敗しても除去は必ず走らせる。
-    restoreRemakeForeground_(meta).catch(function () {}).then(function () {
+    //     (先に消すと復元用のBlobを取りこぼす)。読み取り・IDB着地に失敗した時は元ドラフトを残して再試行可能にする。
+    restoreRemakeForeground_(meta).catch(function () { return { ok: false, primary: false, reason: 'restore' }; }).then(function (receipt) {
+      // 元画像を現在の前景IDBへ読戻し確認できた時だけ元ドラフトを外す。失敗時は復元元を残し、
+      // iOSのタブ破棄/一時IDB停止でも「作り直し元と現在画像が両方消える」状態を作らない。
+      if (!receipt || !receipt.ok || !receipt.primary) {
+        var st = $('status');
+        if (st) st.textContent = '⚠ 元画像を安全に復元できなかったため、元のドラフトは残しました。もう一度「再作成」をお試しください。';
+        return;
+      }
       // ②再作成したらこのドラフトはドラフト一覧から外す(Chami依頼2026-08-06②)。作り直しの起点なので
       //   元の下書きは残さない=消し忘れによる二重ドラフトを防ぐ(墓標で他端末のドラフトからも消える)。
       try { deleteStock_(meta.id); render(); } catch (e) {}
     });
   }
   // 作り直し時に、作成に使った前景画像を動画作成タブ(#photo)へ戻す。常に解決するPromiseを返す(呼び出し側が
-  //   これを待ってから元ドラフトを消せるように)。画像が取れなくても投げない=deleteStock_ は必ず走る。
+  //   これを待ってから元ドラフトを消せるように)。画像が取れなくても投げず、失敗receiptを返して元を保持する。
   function restoreRemakeForeground_(meta) {
     var store = idb();
     if (!store || !meta || !meta.id || !window.Go5SetForegroundFile) return Promise.resolve();
     var setFg = function (blob) {
-      if (!blob) return;
+      if (!blob) return Promise.resolve({ ok: false, primary: false, reason: 'missing' });
       try {
         var name = (meta.title || 'photo').replace(/[\\/:"*?<>|]/g, '_') + '.jpg';
         var f = (blob instanceof File) ? blob : new File([blob], name, { type: blob.type || 'image/jpeg' });
-        window.Go5SetForegroundFile(f);
-      } catch (e) {}
+        if (window.Go5SetForegroundFileReady) return window.Go5SetForegroundFileReady(f, null, { origin: 'remake' });
+        var ok = window.Go5SetForegroundFile(f, null, { origin: 'remake' });
+        return Promise.resolve({ ok: !!ok, durable: !!ok, primary: !!ok, reason: ok ? '' : 'rejected' });
+      } catch (e) { return Promise.resolve({ ok: false, primary: false, reason: 'file' }); }
     };
     return Promise.all([
       store.get('stock_img_' + meta.id).catch(function () { return null; }),
       store.get('stock:imgs:' + meta.id).catch(function () { return null; })
     ]).then(function (r) {
       var img = r[0], mirror = r[1] || {};
-      if (img) { setFg(img); return; }
+      if (img) return setFg(img);
       if (mirror.src) return durlToBlob_(mirror.src).then(setFg); // サブ端末で作った=同期ミラーから戻す
       // ★手元IDBにも同期ミラーにも無い(iOSがIDBを退避した等)=作成直後にR2へ控えた元画像 go5src:<id> から
       //   最後の復元(2026-08-17③)。これが無いと「再作成で画像が消える」が残る。
       if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
-        return Go5Sync.fetchBlobR2At('go5src:' + meta.id).then(function (b) { if (b && b.size) setFg(b); }).catch(function () {});
+        return Go5Sync.fetchBlobR2At('go5src:' + meta.id).then(function (b) {
+          return b && b.size ? setFg(b) : { ok: false, primary: false, reason: 'missing' };
+        }).catch(function () { return { ok: false, primary: false, reason: 'r2' }; });
       }
-    }).catch(function () {});
+      return { ok: false, primary: false, reason: 'missing' };
+    }).catch(function () { return { ok: false, primary: false, reason: 'restore' }; });
   }
 
   // ── レンダリング ──

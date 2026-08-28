@@ -259,9 +259,16 @@
     function restorePhoto_(dataUrl) {
       if (!dataUrl) { showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)写真は選び直してください。'); return; }
       dataUrlToFile_(dataUrl, draft.photoName).then(function (file) {
-        var ok = window.Go5SetForegroundFile && window.Go5SetForegroundFile(file);
-        if (!ok) showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)写真は選び直してください。');
-        else done();
+        var ready;
+        if (window.Go5SetForegroundFileReady) ready = window.Go5SetForegroundFileReady(file, null, { origin: 'draft' });
+        else {
+          var ok = window.Go5SetForegroundFile && window.Go5SetForegroundFile(file, null, { origin: 'draft' });
+          ready = Promise.resolve({ ok: !!ok });
+        }
+        Promise.resolve(ready).then(function (receipt) {
+          if (!receipt || !receipt.ok) showRecallToast_('⚠️ 写真の復元または安全な保存に失敗しました。(文章欄のみ反映)写真は選び直してください。');
+          else done();
+        });
       }).catch(function () { showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)'); });
     }
     if (draft.photoIdb) {

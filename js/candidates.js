@@ -3570,9 +3570,12 @@
         window.Go5PromoLabel.notify({ cid: _pcid, title: it.title || '作品', listPrice: it.listPrice, price: it.price, discountPct: it.discountPct || 0 });
       }
     } catch (e) {}
-    // 候補を開いた時点で前作品の画像を破棄する(新画像の変換失敗時にも旧画像を誤表示しないため)。
+    // 旧画像は画面上だけ退避し、IDB/LSの耐久コピーは新画像のread-back成功まで残す。
+    // 先に完全削除すると、fetch/decode中のiOSタブ破棄で「旧画像も新画像もpendingも無い」状態になるため。
     var imageApplySeq = null;
-    if (window.Go5ClearForeground) imageApplySeq = window.Go5ClearForeground();
+    if (window.Go5ReserveForeground) imageApplySeq = window.Go5ReserveForeground();
+    else if (window.Go5ForegroundSequence) imageApplySeq = window.Go5ForegroundSequence();
+    else if (window.Go5ClearForeground) imageApplySeq = window.Go5ClearForeground();
     // ★破棄したあと再適用が失敗すると fgImg=null のまま残り、make() が「写真未選択」ガードで無反応に見える沈黙に
     //   落ちる=「動画が生成されない」の芯(Chami報告2026-08-16・恒久対策C-038)。失敗経路は以下の3つ:
     //   ①持ち越しに画像が無い(sessionStorage容量超過→IDBからも復元不可・iOSのIDB無言死) ②fetch/decode失敗。
@@ -3582,20 +3585,32 @@
       var st = document.getElementById('status');
       if (st) st.textContent = '⚠ 候補の写真を読み込めませんでした(' + reason + ')。上の写真欄から選び直してから作成してください。';
     };
-    if (imgDataUrl && window.Go5SetForegroundFile) {
-      fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
-        window.Go5SetForegroundFile(new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' }), imageApplySeq);
+    var photoReady;
+    if (imgDataUrl && (window.Go5SetForegroundFileReady || window.Go5SetForegroundFile)) {
+      photoReady = fetch(imgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
+        var file = new File([blob], 'candidate.jpg', { type: blob.type || 'image/jpeg' });
+        if (window.Go5SetForegroundFileReady) return window.Go5SetForegroundFileReady(file, imageApplySeq, { origin: 'candidate' });
+        var ok = window.Go5SetForegroundFile(file, imageApplySeq, { origin: 'candidate' });
+        return { ok: !!ok, durable: !!ok, primary: !!ok, reason: ok ? '' : 'rejected' };
+      }).then(function (receipt) {
+        if (!receipt || !receipt.ok) {
+          if (!receipt || receipt.reason !== 'stale') candPhotoFail_('安全な保存に失敗');
+        }
+        return receipt || { ok: false, primary: false, reason: 'persist' };
       }).catch(function (e) {
         try { console.warn('[go5 cand] 候補画像を動画作成へ変換できませんでした', e); } catch (e2) {}
         candPhotoFail_('取得に失敗');
+        return { ok: false, durable: false, primary: false, reason: 'fetch' };
       });
     } else {
       candPhotoFail_('画像が持ち越されていません');
+      photoReady = Promise.resolve({ ok: false, durable: false, primary: false, reason: 'missing' });
     }
     // 作品データを流し込んだら、動画タブの「上部」に着地させる(Chami依頼2026-07-29：
     //   投稿編集→動画生成で最下段の作成ボタンへ強制スクロールしていたのをやめ、上から順に確認できるように)。
     //   作成ボタンは光らせておく＝下までスクロールすれば残り1タップと分かる(行動量支援は維持)。
     landAtMovieTop_();
+    return photoReady;
   }
   // 動画タブの先頭へスクロール＋作成ボタン(#makeBtn)を一時ハイライト(スクロールはしない)。
   function landAtMovieTop_() {
@@ -6339,8 +6354,19 @@
       // app.js/affiliate.js のタブ復元が落ち着いてから流し込む(タブ切替→入力欄の描画が先)。
       setTimeout(function () {
         var consume_ = function (imgDataUrl) {
-          try { sessionStorage.removeItem('cand_to_movie_pending'); } catch (e) {}
-          try { transferToMovie_(p.it, imgDataUrl || '', p.comment || '', p.workUrl || '', { cid: p.imageCid || '', index: p.imageIndex || 0 }); } catch (e) {}
+          var receipt;
+          try {
+            receipt = transferToMovie_(p.it, imgDataUrl || '', p.comment || '', p.workUrl || '', { cid: p.imageCid || '', index: p.imageIndex || 0 });
+          } catch (e) {
+            receipt = Promise.resolve({ ok: false, primary: false, reason: 'transfer' });
+          }
+          Promise.resolve(receipt).then(function (r) {
+            // pendingは画像BlobのIDB read-back成功後にだけACKする。一時的なIDB/R2失敗では残し、次reloadで再開。
+            // fetch中にユーザーが手動画像を選んだstaleだけは、旧候補を次reloadで復活させないよう明示消費する。
+            var consume = !!(r && r.primary) || !!(r && r.reason === 'stale')
+              || !!(r && r.reason === 'missing' && !p.imageCid && !p.imgDataUrl);
+            if (consume) { try { sessionStorage.removeItem('cand_to_movie_pending'); } catch (e) {} }
+          }).catch(function () {});
         };
         if (p.imgDataUrl) { consume_(p.imgDataUrl); return; }
         if (p.imageCid) {
