@@ -72,6 +72,17 @@ SUPERVISED = [
     ("discord_gateway", os.path.join("scripts", "queue", "discord_gateway.py")),
 ]
 
+# Files that are loaded by a resident daemon but whose own imports belong to a
+# separate execution path.  discord_gateway reads only reaction_watch's pure emoji
+# predicate; the actual watcher runs in a subprocess.  Descending through that file
+# used to pull session_relay -> persona_send -> dept_daemon into the gateway hash, so
+# an unrelated roster/persona edit killed the sole Discord inlet.  Keep the boundary
+# file itself in the hash (predicate edits still reload) but do not cross the process
+# boundary.
+CLOSURE_LEAF_BASENAMES = {
+    "discord_gateway.py": {"reaction_watch.py"},
+}
+
 
 def local_imports(path, root=ROOT, import_dirs=None):
     """path が import しているこのrepo内の .py を {名前: 絶対パス} で返す。
@@ -104,9 +115,13 @@ def closure(entry_path, root=ROOT, import_dirs=None):
     """entry_path 自身＋推移的に読む自作モジュールの絶対パス一覧(重複なし)。"""
     entry = os.path.normpath(entry_path if os.path.isabs(entry_path)
                              else os.path.join(root, entry_path))
+    leaves = CLOSURE_LEAF_BASENAMES.get(os.path.basename(entry), set())
     seen, stack = {entry}, [entry]
     while stack:
-        for _name, p in local_imports(stack.pop(), root, import_dirs).items():
+        current = stack.pop()
+        if current != entry and os.path.basename(current) in leaves:
+            continue
+        for _name, p in local_imports(current, root, import_dirs).items():
             if p not in seen:
                 seen.add(p)
                 stack.append(p)

@@ -13,6 +13,23 @@ function Write-SupLog($m) {
   try { Add-Content -LiteralPath $suplog -Value "$ts $m" -Encoding UTF8 } catch {}
 }
 
+function Stop-And-Wait($procs, $timeoutMs = 5000) {
+  $ids = @($procs | ForEach-Object { [int]$_.ProcessId })
+  foreach ($id in $ids) { Stop-Process -Id $id -Force }
+  $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
+  do {
+    $alive = @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+    if ($alive.Count -eq 0) { return $true }
+    Start-Sleep -Milliseconds 100
+  } while ([DateTime]::UtcNow -lt $deadline)
+  return $false
+}
+
+function Find-DaemonProcesses($fileName) {
+  return @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+    Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*' + $fileName + '*')) })
+}
+
 $daemons = @(
   # inbox_poller RETIRED from supervision (2026-07-19 cutover complete: Gateway+LeaseQueue is
   #   the delivery path). Kept commented for instant rollback (uncomment + run this script).
@@ -92,7 +109,10 @@ foreach ($d in $daemons) {
     $age = (Get-Date) - (Get-Item -LiteralPath $gwPulse).LastWriteTime
     if ($age.TotalSeconds -gt $gwPulseStaleSec) {
       Write-SupLog ("{0}: STALE PULSE ({1}s, event loop likely hung) - killing pid {2}" -f $d.Name, [int]$age.TotalSeconds, $procs[0].ProcessId)
-      Stop-Process -Id $procs[0].ProcessId -Force
+      if (-not (Stop-And-Wait $procs)) {
+        Write-SupLog ("{0}: old process did not exit within 5s; restart deferred" -f $d.Name)
+        continue
+      }
       $procs = @()  # fall through to the missing-process restart path below
     }
   }
@@ -137,7 +157,10 @@ foreach ($d in $daemons) {
         Write-SupLog ("{0}: STALE CODE ({1}) - deferred to next pass (cap {2}/pass)" -f $d.Name, $why, $codeMaxReloads)
       } else {
         Write-SupLog ("{0}: STALE CODE ({1}) - reload pid {2} (up {3}s)" -f $d.Name, $why, $procs[0].ProcessId, ($nowEpoch - $startEpoch))
-        Stop-Process -Id $procs[0].ProcessId -Force
+        if (-not (Stop-And-Wait $procs)) {
+          Write-SupLog ("{0}: old process did not exit within 5s; reload deferred" -f $d.Name)
+          continue
+        }
         $procs = @()  # fall through to the restart path below
         $codeReloads++
       }
@@ -148,18 +171,40 @@ foreach ($d in $daemons) {
     continue
   }
   if ($procs.Count -gt 1) {
-    foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force }
+    if (-not (Stop-And-Wait $procs)) {
+      Write-SupLog ("{0}: duplicate processes did not exit within 5s; restart deferred" -f $d.Name)
+      continue
+    }
     Write-SupLog ("{0}: deduped ({1} instances -> restart 1)" -f $d.Name, $procs.Count)
   }
   $logAbs = $root + '\' + $d.LogRel
   $cmd = 'cmd /c cd /d "' + $root + '" && python "' + $d.Rel + '" >> "' + $logAbs + '" 2>&1'
-  $sh.Run($cmd, 0, $false) | Out-Null
-  # Record the code version this instance was launched with. This file - not mtime - is what
-  # the next pass compares against, so "fixed but not loaded" cannot hide behind a git touch.
+  $verified = $false
+  for ($attempt = 1; $attempt -le 2; $attempt++) {
+    $sh.Run($cmd, 0, $false) | Out-Null
+    Start-Sleep -Milliseconds 3000
+    $started = @(Find-DaemonProcesses $d.File)
+    if ($started.Count -eq 1) {
+      $verified = $true
+      Write-SupLog ("{0}: launch verified (attempt {1}, pid {2})" -f $d.Name, $attempt, $started[0].ProcessId)
+      break
+    }
+    if ($started.Count -gt 1) {
+      Write-SupLog ("{0}: launch produced {1} processes; stopping before retry" -f $d.Name, $started.Count)
+      if (-not (Stop-And-Wait $started)) { break }
+    } else {
+      Write-SupLog ("{0}: launch exited before verification (attempt {1})" -f $d.Name, $attempt)
+    }
+  }
+  if (-not $verified) {
+    Write-SupLog ("{0}: START FAILED after immediate retry" -f $d.Name)
+    continue
+  }
+  # Record the version only after a resident process is observed.  Recording it for
+  # an already-dead launch hides the failure from the next code-version pass.
   if ($codeVer.ContainsKey($d.Name)) {
     Set-Content -LiteralPath $verFile -Value $codeVer[$d.Name].Hash -Encoding ASCII
   }
-  Write-SupLog ("{0}: started hidden" -f $d.Name)
 }
 # boot report (O1 P0-7): fire-and-forget, hidden, non-blocking. Idempotent - boot_report.py posts
 #   only once per boot (state file). Fires within one supervise cycle (<=10min) after any reboot,
