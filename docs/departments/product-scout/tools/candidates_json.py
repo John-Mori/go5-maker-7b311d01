@@ -114,23 +114,28 @@ def _posted_at_jst_date(s):
         return None
 
 def last_posted_by_channel():
-    """{cid: {'date':'YYYY-MM-DD'(JST), 'channel':'月詠み'|'宵桜艶帖'}} 各cidの"最新の"投稿(全期間)。
-    ★『この作品は○ch用』の割り当てをやめ(Chami『作品はどっちでも可』2026-08-23)、直近でどちら
-      のchにいつ投稿したかだけを持たせる=出所は posted_log(記録_ch1/記録_ch2 のD1形)。
-    取得失敗/空なら空dict(fail-open=最終投稿が引けなくても候補生成は止めない)。"""
+    """戻り値=(m, by_ch) の2つ組(1回のD1問い合わせから両方を作る=posted_logの二度引きをしない)。
+    m: {cid: {'date':'YYYY-MM-DD'(JST), 'channel':'月詠み'|'宵桜艶帖'}} 各cidの"最新の"投稿(全期間・chを問わない)。
+      ★『この作品は○ch用』の割り当てをやめ(Chami『作品はどっちでも可』2026-08-23)、直近でどちら
+        のchにいつ投稿したかだけを持たせる=出所は posted_log(記録_ch1/記録_ch2 のD1形)。
+    by_ch: {cid: {'acc1':'YYYY-MM-DD'|欠, 'acc2':'YYYY-MM-DD'|欠}} 各cid×chの最終投稿日(PK=(cid,channel)
+      につき最大1行=DESC不要でそのまま採用)。channel別分岐の土台(posted_chの元データ)。
+    取得失敗/空なら空dict2つ(fail-open=最終投稿が引けなくても候補生成は止めない)。"""
     try:
         rows = dp.d1("SELECT cid, channel, posted_at FROM posted_log ORDER BY posted_at DESC")
-        m = {}
+        m, by_ch = {}, {}
         for r in rows:
             cid, ch, pa = r.get("cid"), r.get("channel"), r.get("posted_at")
-            if not cid or cid in m:      # ★DESC順=各cidで最初に見た行が最新
+            if not cid:
                 continue
             d = _posted_at_jst_date(pa)
-            if d:
+            if cid not in m and d:       # ★DESC順=各cidで最初に見た行が最新
                 m[cid] = {"date": d, "channel": CH_NAME.get(ch, ch)}
-        return m
+            if ch in CH_NAME and d:      # ch別は m の重複ガードと独立に全行から拾う
+                by_ch.setdefault(cid, {})[ch] = d
+        return m, by_ch
     except Exception:
-        return {}
+        return {}, {}
 
 def _content_store_path():
     return os.path.join(OUT_DIR, "content_store.json")
@@ -157,12 +162,15 @@ def carry_content(out_candidates, today):
             if not cid:
                 continue
             cm, rc = c.get("comments") or [], c.get("room_comments") or {}
-            if cm or rc:
+            ex = c.get("explainer")   # ★解説(コピー部が書く)も comments と同じく cid で持ち越す(Chami『再生成不要』)
+            if cm or rc or ex:
                 cur = store.get(cid) or {}
                 if cm:
                     cur["comments"] = cm
                 if rc:
                     cur["room_comments"] = rc
+                if ex:
+                    cur["explainer"] = ex
                 store[cid] = cur
     except Exception:
         pass
@@ -173,6 +181,8 @@ def carry_content(out_candidates, today):
             c["comments"] = saved["comments"]
         if saved.get("room_comments"):
             c["room_comments"] = saved["room_comments"]
+        if saved.get("explainer"):
+            c["explainer"] = saved["explainer"]   # ★解説(コピー部)。無ければ付けない=ページは fail-open で非表示
     # store を最新化して保存(durable=当日ファイルが消えても中身が生き残る)
     try:
         with open(store_path, "w", encoding="utf-8") as f:
@@ -193,7 +203,9 @@ def main():
     w = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     today = datetime.date.today().isoformat()
     posted_any = dp.excluded_cids()          # 除外集合=直近3日∪直近10件(OR=どちらか該当で除外)
-    last_posted = last_posted_by_channel()   # {cid:{date,channel}} 最終投稿(表示用・全期間)
+    last_posted, posted_ch_map = last_posted_by_channel()  # {cid:{date,channel}} / {cid:{acc1,acc2}}
+    # ★『直近枠が開けば可』(Chami 2026-08-29)=ch別の"閉じている"集合。含まれない=そのchへ今すぐ可。
+    closed_ch = {"acc1": dp.excluded_cids_ch("acc1"), "acc2": dp.excluded_cids_ch("acc2")}
 
     rows = dp.d1("SELECT cp.cid, cp.source, w.title, w.info_json, w.sales_n FROM candidate_pool cp "
                  "JOIN works w ON w.cid=cp.cid WHERE w.info_json IS NOT NULL AND w.info_json<>''")
@@ -231,6 +243,14 @@ def main():
             "platform": x["_platform"],
             "title": x["title"],
             "last_posted": last_posted.get(x["cid"]),   # {date,channel} or None(未投稿)
+            "posted_ch": {                              # ★追加のみ(既存フィールドは無変更・C-010)
+                "acc1": posted_ch_map.get(x["cid"], {}).get("acc1"),
+                "acc2": posted_ch_map.get(x["cid"], {}).get("acc2"),
+            },
+            "ready_ch": {                               # ★直近枠が開けば可(Chami 2026-08-29)= true=そのchへ今すぐ投稿可
+                "acc1": x["cid"] not in closed_ch["acc1"],
+                "acc2": x["cid"] not in closed_ch["acc2"],
+            },
             "images": x["_images"],
             "metrics": {
                 "sales_n": x["sales"],
@@ -260,6 +280,9 @@ def main():
                  "select_score は商品選定の候補入り選定軸で、並び順には使わない。"
                  "作品はどっちのchでも可=ch割り当ては廃止。last_posted={date,channel} は各作品の最終投稿"
                  "(記録=posted_log・全期間・未投稿は null)。表示例『8/22 月詠み』。"
+                 "posted_ch={acc1,acc2}(各cidの)は各chでの最終投稿日(YYYY-MM-DD・未投稿はnull)=ch別分岐の土台(追加のみ)。"
+                 "ready_ch={acc1,acc2}(bool)は『直近枠が開けば可』(Chami 2026-08-29)=そのchへ今すぐ投稿可か"
+                 "(true=そのchの直近3日∪直近10件に入っていない=枠が開いている)。ページはこれで共通/月詠み/酔桜を仕分ける。"
                  "past_similar_recovery は成約が観測不可=分析が null 固定と確定。comments は vision が後埋め。"
                  "あらすじ本文は配信しない(client面へ過激本文を出さない)=PC専用サイドカー synopsis_<date>.json 側に置く。"),
         "candidates": out_candidates,

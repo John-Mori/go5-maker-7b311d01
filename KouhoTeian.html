@@ -53,6 +53,10 @@
     border-radius:999px;padding:3px 8px;white-space:nowrap}
   .chip.lp{color:var(--muted);background:var(--field);border:1px solid var(--line2)}
   .chip.lp.new{color:var(--accent-ink);background:var(--accent);border:none;font-weight:700}
+  .chip.tie{color:var(--accent-ink);background:var(--accent);border:none;font-weight:700}
+  /* 解説(コピー部が書く1週間売上上位の解説)。無い日は要素ごと出ない(fail-open)。配色はティール系(紫禁止)。 */
+  .expl{margin:6px 0;padding:8px 10px;border-left:3px solid var(--accent);
+    background:rgba(43,179,192,.08);border-radius:0 6px 6px 0;font-size:.8rem;line-height:1.55;color:var(--ink)}
   /* 投稿用画像(=動画のメイン材料)= 1枚をサムネ表示。タップでサンプル画像ぜんぶをライトボックス表示。
      候補ページ(KouhoLists)のサムネ→モーダルと同じ作法(Chami 2026-08-23)。 */
   .hero{position:relative;display:inline-block;margin:6px 0 8px;cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -317,13 +321,33 @@
       b.addEventListener('click', function(){ groupSet_(b.dataset.group); render(); });
     });
     var active = (g==='pool') ? pool : ready;
-    var descs = { ready:'動画生成用画像あり=そのまま動画にできる。',
+    var descs = { ready:'動画生成用画像あり=そのまま動画にできる。投稿状況で 共通/月詠み/酔桜 に分け、販売数の多い順に各10件。',
                   pool:'動画生成用画像はまだ無い。サンプル画像を素材に仕込めば投稿できる (モノクロはフルカラー化)。' };
     var html = '<div class="gdesc">'+esc(descs[g])+'</div>';
-    if(active.length){ active.forEach(function(c,i){ html += cardHtml_(c, i+1); }); }
+    var shown = active;
+    if(g==='ready'){
+      // 投稿状況(posted_ch)で 共通/月詠み/酔桜 に仕分け→販売数降順→各セグ上位10件。both(両ch投稿済)は今すぐ枠から除外。
+      var buckets = { common:[], acc1:[], acc2:[] };
+      active.forEach(function(c){ var b=readyChBucket_(c); if(buckets[b]) buckets[b].push(c); });
+      Object.keys(buckets).forEach(function(k){
+        buckets[k].sort(function(a,b){
+          var sa=(a.metrics&&a.metrics.sales_n)||0, sb=(b.metrics&&b.metrics.sales_n)||0;
+          if(sb!==sa) return sb-sa;
+          return ((b.metrics&&b.metrics.score)||0) - ((a.metrics&&a.metrics.score)||0);
+        });
+      });
+      var seg = readySegGet_();
+      if(!buckets[seg].length){ seg = (buckets.common.length?'common':(buckets.acc1.length?'acc1':'acc2')); }
+      html += readySegHtml_(buckets, seg);
+      shown = buckets[seg].slice(0,10);
+    }
+    if(shown.length){ shown.forEach(function(c,i){ html += cardHtml_(c, i+1); }); }
     else { html += '<div class="empty">この区分に合う候補はありません。</div>'; }
     $('#list').innerHTML = html;
-    wire(active);  // ★activeで検索(readyはlib合成カードを含みcandsの部分集合でなくなったため=cands指定だとlib分のクリックが引けない)
+    document.querySelectorAll('#list button[data-seg]').forEach(function(b){
+      b.addEventListener('click', function(){ readySegSet_(b.dataset.seg); render(); });
+    });
+    wire(shown);  // ★表示中の部分集合で配線(readyはlib合成カード含む・ch別サブ分けで更に絞る)
   }
 
   // グループ切替(端末に保存)。ready=今すぐ投稿できる / pool=紹介にはアツい。
@@ -334,6 +358,30 @@
       '<button type="button" data-group="ready" class="ready'+(g==='ready'?' on':'')+'">🎬 今すぐ投稿できる<span class="gc">'+nReady+'件</span></button>'+
       '<button type="button" data-group="pool" class="pool'+(g==='pool'?' on':'')+'">🔥 紹介にはアツい<span class="gc">'+nPool+'件</span></button>'+
     '</div>';
+  }
+  // ---- 今すぐ投稿できる の中の ch別サブ分け(Chami指示 2026-08-29)----
+  //   ★postability=「直近枠が開けば可」(Chami指示 2026-08-29 msg 1543050908・旧「そのchで完全未投稿」は廃止)。
+  //   ready_ch:{acc1,acc2}(bool・true=そのchの直近枠が開いている=今すぐ投稿可)を candidates_json.py が配る。
+  //   仕分け: common=両chの直近枠が開(どちらへも今すぐ可) / acc1=月詠みだけ開 / acc2=酔桜だけ開 / both=両ch閉(=今すぐ枠には出さない)。
+  //   ★fail-open: ready_ch が無い旧JSONは posted_ch(ever-posted)から代替=未投稿chを「開いている」とみなす。
+  //   並びは「販売数の多い順」(1週間売上の代用=sales_n snapshot・指標定義§1の穴)。各セグ上位10件。
+  function chOpen_(c, ch){
+    var r = c.ready_ch;
+    if(r && typeof r[ch]==='boolean') return r[ch];   // 正=直近枠(candidates_json.pyが配る)
+    var p = c.posted_ch||{}; return !p[ch];            // 代替=そのchで未投稿なら開扱い(ready_ch未配布時)
+  }
+  function readyChBucket_(c){
+    var a1=chOpen_(c,'acc1'), a2=chOpen_(c,'acc2');
+    if( a1 &&  a2) return 'common';
+    if( a1 && !a2) return 'acc1';
+    if(!a1 &&  a2) return 'acc2';
+    return 'both';
+  }
+  function readySegGet_(){ try{ var v=LS.getItem('teian_ready_seg'); return (v==='acc1'||v==='acc2')?v:'common'; }catch(e){ return 'common'; } }
+  function readySegSet_(s){ try{ LS.setItem('teian_ready_seg', (s==='acc1'||s==='acc2')?s:'common'); }catch(e){} }
+  function readySegHtml_(buckets, seg){
+    function btn(k,label){ return '<button type="button" data-seg="'+k+'" class="'+(seg===k?'on':'')+'">'+label+'<span class="gc">'+buckets[k].length+'件</span></button>'; }
+    return '<div class="gtabs subseg">'+btn('common','🤝 共通')+btn('acc1','🌙 月詠み')+btn('acc2','🌸 酔桜')+'</div>';
   }
 
   function cardHtml_(c, rank){
@@ -346,6 +394,13 @@
       if(m.score!=null) meta.push('<span class="chip">score '+esc(m.score)+'</span>');
       if(rv&&rv.average!=null) meta.push('<span class="chip">★'+esc(rv.average)+' ('+num(rv.count)+'件)</span>');
       if(m.price!=null) meta.push('<span class="chip">'+num(m.price)+'円'+(m.discount_pct?(' -'+esc(m.discount_pct)+'%'):'')+'</span>');
+      // ★紐付け表示(Chami指示 2026-08-29 msg 1543050908)=商品の選び方は無変更。既に④コメントが生成済みの
+      //   作品は"そこだけ"バッジで示し、再生成せず流用していることが分かるようにする(『再生成不要』の可視化)。
+      if((c.comments||[]).length) meta.push('<span class="chip tie" title="生成済みの④コメントを流用(再生成しない)">💬 コメント生成済み</span>');
+
+      // ★解説(Chami指示 2026-08-29 branch4)=コピー部(copy-director)が書く1週間売上上位の解説。
+      //   candidates JSON の c.explainer(文字列)に入っていれば表示。無ければ何も出さない(fail-open=表示は止めない)。
+      var explHtml = c.explainer ? '<div class="expl">📝 '+esc(c.explainer)+'</div>' : '';
 
       var imgs = c.images||[];
 
@@ -379,6 +434,7 @@
       return '<div class="cand" data-cand="'+cid_+'" id="cand_'+cid_+'">'+
         '<div class="top"><div class="rank">'+rank+'</div><p class="title">'+esc(c.title||'(無題)')+'</p></div>'+
         '<div class="meta">'+meta.join('')+'</div>'+
+        explHtml+
         '<div class="imgrow">'+ genImgHtml_(c) +
           (imgs.length?'<div class="hero" data-cand="'+cid_+'"><img loading="lazy" src="'+esc(imgs[0])+'" alt="サンプル">'+
             '<span class="tap">タップでサンプル</span>'+

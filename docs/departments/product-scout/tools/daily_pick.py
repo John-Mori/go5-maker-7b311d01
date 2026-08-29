@@ -74,6 +74,40 @@ def excluded_cids():
     ★候補に"表示される"のは両条件のどちらにも該当しない物だけ。片方が空(fail-open)でももう片方は効く。"""
     return posted_recent() | posted_recent_by_count()
 
+# ── ch別の「直近枠」判定 ─────────────────────────────────────────────────
+# ★Chami 2026-08-29『直近枠が開けば可』(msg 1543050908)= 提案ページの投稿可否は
+#   「そのchで完全未投稿」ではなく「そのchの直近枠が開いているか」で分岐する。
+#   下は global の excluded_cids() を ch で割った版(single-source=同じ窓定数 EXCLUDE_DAYS/N を使う)。
+#   ★候補プールは既に global の excluded_cids() で絞ってあるので acc1/acc2 が食い違うのは
+#     件数窓(直近N件)の端=片chの直近N件には残るが global直近N件からは押し出された cid だけ。
+_CH_KEYS = ("acc1", "acc2")
+
+def posted_recent_ch(ch, days=EXCLUDE_DAYS):
+    """そのch(acc1/acc2)へ直近 days 日に投稿済みのcid集合(第1ゲートのch版)。fail-open=空集合。"""
+    if ch not in _CH_KEYS:
+        return set()
+    try:
+        rows = d1("SELECT cid FROM posted_log "
+                  f"WHERE channel='{ch}' AND posted_at >= datetime('now','-{int(days)} days')")
+        return {r["cid"] for r in rows if r.get("cid")}
+    except Exception:
+        return set()
+
+def posted_recent_by_count_ch(ch, n=EXCLUDE_RECENT_N):
+    """そのchの直近 n 件の投稿に含まれるcid集合(第2ゲートのch版)。fail-open=空集合。"""
+    if ch not in _CH_KEYS:
+        return set()
+    try:
+        rows = d1(f"SELECT cid FROM posted_log WHERE channel='{ch}' ORDER BY posted_at DESC LIMIT {int(n)}")
+        return {r["cid"] for r in rows if r.get("cid")}
+    except Exception:
+        return set()
+
+def excluded_cids_ch(ch):
+    """ch別の直近枠が『閉じている』cid集合=『そのchへ直近3日』∪『そのchの直近10件』(global版のch分割)。
+    ★『直近枠が開けば可』の"閉"側。これに含まれない=そのchへ今すぐ投稿可(open)。fail-openで空なら弾かない。"""
+    return posted_recent_ch(ch) | posted_recent_by_count_ch(ch)
+
 def parse(rows):
     out = []
     for r in rows:
