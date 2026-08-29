@@ -323,7 +323,7 @@
       b.addEventListener('click', function(){ groupSet_(b.dataset.group); render(); });
     });
     var active = (g==='pool') ? pool : ready;
-    var descs = { ready:'動画生成用画像あり=そのまま動画にできる。投稿状況で 共通/月詠み/酔桜 に分け、販売数の多い順に各10件。',
+    var descs = { ready:'動画生成用画像あり=そのまま動画にできる。投稿状況で 共通/月詠み/酔桜 に分け、販売数の多い順に 共通は上位20件・月詠み/酔桜は各10件。三笘薫と早坂芽衣のコメント付き。',
                   pool:'動画生成用画像はまだ無い。サンプル画像を素材に仕込めば投稿できる (モノクロはフルカラー化)。' };
     var html = '<div class="gdesc">'+esc(descs[g])+'</div>';
     var shown = active;
@@ -346,7 +346,9 @@
       var seg = readySegGet_();
       if(!buckets[seg].length){ seg = (buckets.common.length?'common':(buckets.acc1.length?'acc1':'acc2')); }
       html += readySegHtml_(buckets, seg);
-      shown = buckets[seg].slice(0,10);
+      // ★共通は上位20件・月詠み/酔桜は各10件(Chami指示 2026-08-29「共通の上位20件は三笘と芽衣のコメントつけて」)。
+      //   コメント(三笘薫+早坂芽衣=room_comments)は cardHtml_ が既に描画=候補データに載っていれば全件に付く。
+      shown = buckets[seg].slice(0, seg==='common' ? 20 : 10);
     }
     if(shown.length){ shown.forEach(function(c,i){ html += cardHtml_(c, i+1); }); }
     else { html += '<div class="empty">この区分に合う候補はありません。</div>'; }
