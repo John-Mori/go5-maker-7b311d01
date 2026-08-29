@@ -456,6 +456,32 @@ WORK_ALLOWED_TOOLS = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
 RELAY_DROP_TOOLS = ["Workflow", "PowerShell", "ScheduleWakeup",
                     "ReportFindings", "NotebookEdit", "WebFetch", "WebSearch"]
 
+# ★★2026-08-29 会話セッションにWeb検索/取得を戻す部屋(Chami要望・learning-coach経由)。
+#   Chami原文(msg=1543033504999407656)=「調べる前に、なんで手が塞がってるの、それ塞がらんように
+#   してよ。なんか他のチャットでも同じこと言ってたね。」= 学習ルームの人格が『今のiPhone向け
+#   Whisper系アプリを実名で挙げる』等の外部調べ物をできず、毎回「手が塞がっている」と返していた。
+#   原因= 上の RELAY_DROP_TOOLS が WebSearch/WebFetch を --disallowedTools で全室から落とし、
+#         かつ --allowedTools(WORK_ALLOWED_TOOLS)にも無いので、どの部屋でも使えなかった。
+#   ★「--print では元々使えない」(上の注 454行)は**Web系には誤り**。実測 2026-08-29=
+#     `claude -p --allowedTools WebSearch` は headless でも webSearchRequests=1 で実際に検索が走り
+#     生のリンクが返った。**許可すれば使える。塞いでいたのは disallow 側だった。**
+#   ★なぜ全室に付けないか(C-059/C-060=床)= WebSearch/WebFetch の定義文は毎便で送られ床が増える。
+#     Chamiが「調べ物をさせたい」と言った部屋(学習ルーム等)だけに限定する= DEPT_CONF の
+#     "web_tools": True で **opt-in**。正本は下の web_enabled_dept 1本(session_relay が遅延importで引く)。
+#   ★載せ替え(C-042)= このファイルは daemon_keeper の WATCH_FILES=codever で自動再起動される。
+WEB_TOOLS = ["WebSearch", "WebFetch"]
+
+
+def web_enabled_dept(dept):
+    """この部屋の会話/作業セッションに WEB_TOOLS を付けるか(DEPT_CONF の opt-in フラグ)。
+
+    ★読めない/未登録は False= 従来どおり付けない(床を増やさない側へ倒す)。
+    """
+    try:
+        return bool((DEPT_CONF.get(str(dept)) or {}).get("web_tools"))
+    except Exception:
+        return False
+
 
 def ctx_args(dept):
     """C-060(2026-08-24)= 組織層の部屋の起動に足す引数。判定の正本は session_relay 1本。
@@ -2135,6 +2161,10 @@ DEPT_CONF = {
         #   generate()の疑似会話をやめ、`claude -p --resume` で**部屋の永続セッション**へ原文直送する。
         #   ロールバック= この1行を消すだけ(消せば従来のgenerate()経路へ完全に戻る)。
         "session_relay": True,
+        # ★2026-08-29 Chami要望(msg=1543033504999407656)= この学習ルームは調べ物をする部屋なので、
+        #   会話セッションに WebSearch/WebFetch を付ける(正本= WEB_TOOLS / web_enabled_dept)。
+        #   ★床への影響はこの部屋だけ(他室は従来どおり Web系を落とす)。
+        "web_tools": True,
         "work_scope": (
             "あなたが自分で完結してよい作業(学習範囲。正本=docs/departments/learning-coach/BOOT.md):\n"
             "- 質問への解説・学ぶ順序の提示(2層モデル=人格層はコーチ4人・知識層は"
@@ -2738,14 +2768,12 @@ DEPT_CONF = {
         "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         "session_relay": True,
         "conversation_only": True,
-        # ★Chami名簿(2026-07-26)の顔ぶれのうち、**この部屋に出てよい6人**だけ。
-        #   入れなかった理由は2種類ある。混ぜないこと:
-        #     - **資産が無い**= ミカヤ(characterfileも原典も無し)/ スネーク(原典はあるがcharacterfile無し)。
-        #       Chami「まだ人格がちゃんと入ってない人間は話さなくていい」。
-        #     - **本人の判断で外した**= ククール。characterfileも原典も**ある**(実測済み)が、
-        #       Chami原文=「**ククールも途中だから**人事は現状のコンテキストでやってもらうけど、
-        #       **今は機微部屋には出てこなくていい**」。
-        #       ★「演じられる」と「その部屋に出てほしい」は別。**本人の意思が測定より上。**
+        # ★Chami名簿(2026-07-26)の顔ぶれのうち、この部屋に出てよい面々。
+        #   入れていない理由は**資産が無い**時だけ= ミカヤ(characterfileも原典も無し)/
+        #   スネーク(原典はあるがcharacterfile無し)。Chami「まだ人格がちゃんと入ってない人間は話さなくていい」。
+        #     - ★2026-08-30 ククールを追加した(Chami直接指示・msg 1543355269285937152=「入れてよ」)。
+        #       かつて本人判断で外していた(2026-07-26「途中だから今は機微部屋には出てこなくていい」)が、
+        #       その判断は**撤回された**。characterfileも原典も在る=演じられる。**古い除外理由を復活させるな。**
         #       ★人事部門(hr-room / hr-context)では従来どおり働く=あちらは1文字も変えていない。
         "personas": [
             {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
@@ -2766,15 +2794,22 @@ DEPT_CONF = {
             #   名簿・台帳は**書き漏れがある前提**で扱い、疑わしければ本人に確かめる。
             {"persona": "十王星南", "character": os.path.join(_CHAR, "sena.md"),
              "role": "", "aliases": ("sena", "星南", "十王")},
+            # ★2026-08-30 Chami直接指示で追加(過去の整理と共有・msg 1543355269285937152)。
+            #   原文=「ククール入ってない?入れてよ。前も言ったはずだけど」=下の除外判断を撤回。
+            #   characterfile(kukuru.md 61KB)も原典も在り演じられる=前は本人判断で外していただけ。
+            #   顔= persona_avatars.json にキー有り(実測済・黒アイコン事故 b6c6bc5 の同型リスク無し)。
+            {"persona": "ククール", "character": os.path.join(_CHAR, "kukuru.md"),
+             "role": "人事部門・兼任", "aliases": ("kukuru", "ククール")},
         ],
         "boot_note": (
             "■この部屋の性格(必ず守る。出典= org_registry.yml の目的コメント と Chami台帳)\n"
             "- **D:\\SougouStartFolder\\00_AI-HQ\\departments\\00_common\\Chami台帳.md を読め。**"
             "Chamiの思考・好み・特性の正本だ(毎回本人に説明させないためにある)。\n"
             "- ここは **Chamiが実際に録音し文字起こしした過去の出来事**を資料として整理・共有する部屋。\n"
-            "- ★名簿にはミカヤ・スネーク・ククールも居るが、**この部屋には出てこない**"
-            "(ミカヤとスネークは人格資料が未整備。ククールはChamiが"
-            "「途中だから今は機微部屋には出てこなくていい」と判断した)。**代弁もするな。**\n"
+            "- ★名簿にはミカヤ・スネークも居るが、**この部屋には出てこない**"
+            "(人格資料が未整備のため)。**代弁もするな。**\n"
+            "- ★ククールは2026-08-30にChami指示でこの部屋のメンバーへ入った"
+            "(過去は本人判断で外していたが撤回済み)。**他のメンバーと同様に振ってよい。**\n"
             "- 求められているのは**慰めではなく率直な他者視点**。"
             "**当たり障りのない返しはこの部屋の失敗**だ。\n"
             "- **ぼかすな**(裁定C-013)。健康・特性も**はっきり言ってよい**。"
@@ -5416,13 +5451,18 @@ class Daemon:
         #   --allowedTools は可変長=直後に別フラグ(--effort/--add-dir)が来れば列はそこで区切られる。
         _effort = work_effort_for(self.conf)
         _effort_args = ["--effort", _effort] if _effort else []
+        # ★2026-08-29 web_tools 部屋だけ WebSearch/WebFetch を許可し、disallow から外す
+        #   (正本= web_enabled_dept)。付けない部屋は従来どおり(_web は空)。
+        _web = list(WEB_TOOLS) if web_enabled_dept(self.dept) else []
+        _allow = WORK_ALLOWED_TOOLS + [t for t in _web if t not in WORK_ALLOWED_TOOLS]
+        _drop = [t for t in RELAY_DROP_TOOLS if t not in set(_web)]
         p = subprocess.run(
             [CLAUDE, "--print", "--model", work_model_for(self.conf),
              *_effort_args,
-             "--allowedTools", *WORK_ALLOWED_TOOLS,
+             "--allowedTools", *_allow,
              # ★2026-08-23 使えないツールの定義文を送るのをやめる(-10,588/便の実測)。
              #   可変長フラグ同士だが、直後に固定の --add-dir が来るので列はそこで切れる。
-             "--disallowedTools", *RELAY_DROP_TOOLS,
+             "--disallowedTools", *_drop,
              # ★2026-08-24 C-060(組織層は CLAUDE.md を載せない)。固定長の引数なので
              #   直前の可変長フラグ(--disallowedTools)の列はここで切れる。
              *ctx_args(self.dept),
