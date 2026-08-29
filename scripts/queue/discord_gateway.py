@@ -31,6 +31,9 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
+DAEMONS_DIR = os.path.join(ROOT, "scripts", "_daemons")
+sys.path.insert(0, DAEMONS_DIR)
+from process_liveness import pid_alive as _pid_alive  # noqa: E402
 GW_PULSE = os.path.join(LOCAL, "queue", "_gateway_pulse.txt")
 
 
@@ -106,32 +109,112 @@ ATTACH_KEEP_DAYS = 14
 
 
 GW_LOCK = os.path.join(LOCAL, "queue", "_gateway.lock")
+# The PID file is useful evidence, but a PID is not ownership: Windows may keep a
+# terminated process object queryable and may later reuse the same number.  The OS
+# lock below is the authority.  A fixed name intentionally covers accidental starts
+# from another checkout of this repository as well.
+GATEWAY_MUTEX_NAME = os.environ.get(
+    "GO5_GATEWAY_MUTEX_NAME", r"Local\Go5MakerDiscordGateway.v2")
+_singleton_handle = None
+_singleton_file = None
 
 
-def _pid_alive(pid):
-    """PIDが生きているか(Windows/POSIX両対応)。判定不能はFalse=起動を止めない側へ倒す。"""
-    if not pid or pid <= 0:
-        return False
+def _read_lock():
+    """Return ``(version, pid)``.  ``version=1`` is the pre-mutex PID-only format."""
+    try:
+        with open(GW_LOCK, encoding="utf-8") as f:
+            parts = f.read().strip().split()
+        if len(parts) >= 2 and parts[0] == "v2":
+            return 2, int(parts[1])
+        if parts:
+            return 1, int(parts[0])
+    except Exception:
+        pass
+    return 0, 0
+
+
+def _claim_os_singleton():
+    """Claim the process-lifetime lock.
+
+    Returns True when acquired, False when another owner exists, and None when the
+    platform primitive is unavailable.  None deliberately falls back to the legacy
+    fail-open PID guard rather than taking the sole Discord inlet down.
+    """
+    global _singleton_handle, _singleton_file
     if os.name == "nt":
         try:
             import ctypes
-            k = ctypes.windll.kernel32
-            h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
-            if h:
-                k.CloseHandle(h)
-                return True
-            return False
+            from ctypes import wintypes
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            k.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+            k.CreateMutexW.restype = wintypes.HANDLE
+            k.CloseHandle.argtypes = (wintypes.HANDLE,)
+            k.CloseHandle.restype = wintypes.BOOL
+            ctypes.set_last_error(0)
+            handle = k.CreateMutexW(None, True, GATEWAY_MUTEX_NAME)
+            err = ctypes.get_last_error()
+            if not handle:
+                return None
+            if err == 183:  # ERROR_ALREADY_EXISTS
+                k.CloseHandle(handle)
+                return False
+            _singleton_handle = handle
+            return True
         except Exception:
-            return False
+            return None
+
     try:
-        os.kill(pid, 0)
+        import fcntl
+        guard_path = GW_LOCK + ".guard"
+        os.makedirs(os.path.dirname(guard_path), exist_ok=True)
+        guard = open(guard_path, "a+", encoding="ascii")
+        try:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            guard.close()
+            return False
+        _singleton_file = guard
         return True
-    except OSError:
-        return False
+    except Exception:
+        return None
+
+
+def release_singleton():
+    """Release a graceful owner's evidence and OS lock; crashes are released by the OS."""
+    global _singleton_handle, _singleton_file
+    version, pid = _read_lock()
+    if version == 2 and pid == os.getpid():
+        try:
+            os.remove(GW_LOCK)
+        except OSError:
+            pass
+
+    if os.name == "nt" and _singleton_handle:
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            k.ReleaseMutex.argtypes = (wintypes.HANDLE,)
+            k.ReleaseMutex.restype = wintypes.BOOL
+            k.CloseHandle.argtypes = (wintypes.HANDLE,)
+            k.CloseHandle.restype = wintypes.BOOL
+            k.ReleaseMutex(_singleton_handle)
+            k.CloseHandle(_singleton_handle)
+        except Exception:
+            pass
+        _singleton_handle = None
+    elif _singleton_file:
+        try:
+            import fcntl
+            fcntl.flock(_singleton_file.fileno(), fcntl.LOCK_UN)
+            _singleton_file.close()
+        except Exception:
+            pass
+        _singleton_file = None
 
 
 def claim_singleton():
-    """既に生きたgatewayが居るなら自分は起動しない(2026-07-21 ORG-22・ad研究室からの差し戻し)。
+    """OS所有権を正としてgatewayを1本だけにする(ORG-22/ORG-48)。
 
     ★なぜ要るか: gatewayには多重起動ガードが無かった。supervise_daemons は「プロセスが0なら起動」
       なので、手動再起動と巡回が重なると**2本立ち得る**。実際 ad研究室(AD-GL)が二重起動を
@@ -139,22 +222,38 @@ def claim_singleton():
       被害は限定的だった(queueのmsg_id冪等が効き、実測で**重複msg_id 0件**)が、
       受領スタンプやescalateジョブは二重に走るため、根本を塞ぐ。
 
-    ★**fail-open**: ロックが読めない・PID判定に失敗した等の「分からない」時は**起動する**。
+    ★**fail-open**: OSロック自体が使えない時だけ旧PID方式へ退避する。PIDファイルv2は
+      診断用であり、死んだPID・終了済みkernel object・PID再利用を起動阻害に使わない。
+      旧形式(v1)は稼働中の旧gatewayとの移行期間だけ尊重する。
+
+    ★ロックが読めない・PID判定に失敗した等の「分からない」時は**起動する**。
       ここはDiscord受信の唯一の入口で、**起動を止める誤判定は全部屋の沈黙**を意味する。
       重複の害(スタンプ二重)より、不在の害(全便が届かない)の方が桁違いに大きい。
     """
-    try:
-        with open(GW_LOCK, encoding="utf-8") as f:
-            old = int(f.read().strip().split()[0])
-    except Exception:
-        old = 0
-    if old and old != os.getpid() and _pid_alive(old):
+    os_claim = _claim_os_singleton()
+    if os_claim is False:
+        log("OS singleton lock is owned by another gateway; duplicate exits.")
+        return False
+
+    version, old = _read_lock()
+    # Compatibility for the one restart where the already-running old gateway does
+    # not yet own the new OS lock.  Once v2 has written the file, only the OS lock is
+    # authoritative, so a reused/stale PID can never block a later recovery.
+    if os_claim is not True and old and old != os.getpid() and _pid_alive(old):
+        log(f"既に稼働中のgateway pid={old} を検出。二重起動を避けて終了する。")
+        return False
+    if os_claim is True and version == 1 and old and old != os.getpid() and _pid_alive(old):
+        release_singleton()
         log(f"既に稼働中のgateway pid={old} を検出。二重起動を避けて終了する。")
         return False
     try:
         os.makedirs(os.path.dirname(GW_LOCK), exist_ok=True)
-        with open(GW_LOCK, "w", encoding="utf-8") as f:
-            f.write(f"{os.getpid()}\n")
+        tmp = GW_LOCK + f".{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(f"v2 {os.getpid()}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, GW_LOCK)
     except OSError:
         pass            # 書けなくても起動は続ける(fail-open)
     return True
@@ -804,7 +903,10 @@ def main():
         return run_selftest()          # selftestは接続しないので単一化の対象外
     if not claim_singleton():
         return 0                        # 既に稼働中=正常終了(superviseが再起動を繰り返さない)
-    return run_gateway()
+    try:
+        return run_gateway()
+    finally:
+        release_singleton()
 
 
 if __name__ == "__main__":

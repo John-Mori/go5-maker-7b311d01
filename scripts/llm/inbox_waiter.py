@@ -60,6 +60,9 @@ except Exception:
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
+DAEMONS_DIR = os.path.join(ROOT, "scripts", "_daemons")
+sys.path.insert(0, DAEMONS_DIR)
+from process_liveness import pid_alive as _pid_alive  # noqa: E402
 
 DEFAULT_MINUTES = 45.0     # TTL。長くてよい(フリーズ回復はsweep側が担保・回復速度に効かない)
 DEFAULT_INTERVAL = 2.0     # 見張り間隔(秒)。新着→起床のレイテンシ=ポーラー15s + これ
@@ -175,27 +178,6 @@ LOCK_FRESH_SEC = 15.0  # この秒数以内に更新されたロックだけ「�
 
 def _lock_path(name):
     return os.path.join(LOCAL, "llm", f"waiter_{name}.lock")
-
-
-def _pid_alive(pid):
-    if not pid or pid <= 0:
-        return False
-    if os.name == "nt":
-        try:
-            import ctypes
-            k = ctypes.windll.kernel32
-            h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-            if h:
-                k.CloseHandle(h)
-                return True
-            return False
-        except Exception:
-            return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
 
 
 def _write_lock(name):
