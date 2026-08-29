@@ -178,6 +178,22 @@ def _lock_path(name):
 
 
 def _pid_alive(pid):
+    """PIDが生きているか。判定不能はFalse=「死んでいる扱い」へ倒す。
+
+    ★2026-08-30 修理(イージス研究室)= discord_gateway で起きた事故と**同じ型**が
+      ここにも残っていた。Windowsは終了済みプロセスでも、プロセスオブジェクトへの参照が
+      残る限り OpenProcess がハンドルを開ける= 「開けた=生きている」は嘘。
+      実測(2026-08-30 06:14)= terminate 済みの pid に対し OpenProcess はハンドルを返し、
+      GetExitCodeProcess は **1**(=終了コード。STILL_ACTIVE の 259 ではない)を返した。
+      修理前の実装はこれで True を返していた。
+    ★ここでの実害は gateway より小さい= 誤ってTrueでも waiter は**自死しない**
+      (呼び先 acquire_singleton は「相手を止めて自分が唯一になる」側で、死んだPIDへの
+      os.kill は例外になって握り潰されるだけ)。それでも直すのは、
+      ① 判定の型そのものが誤りで、次に写す奴がまた同じ穴を作るから
+      ② 単一化の向きが将来「相手が生きていれば自分が退く」へ変われば、その瞬間に
+         gateway と同じ**受信の沈黙**になるから(規律§3= 心がけでなく機構に載せる)。
+    ★判定は終了コードで行う。STILL_ACTIVE(259)以外は死んでいる。
+    """
     if not pid or pid <= 0:
         return False
     if os.name == "nt":
@@ -185,10 +201,14 @@ def _pid_alive(pid):
             import ctypes
             k = ctypes.windll.kernel32
             h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-            if h:
+            if not h:
+                return False
+            try:
+                code = ctypes.c_ulong(0)
+                ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+                return bool(ok) and code.value == 259
+            finally:
                 k.CloseHandle(h)
-                return True
-            return False
         except Exception:
             return False
     try:
