@@ -176,16 +176,24 @@ function ytVideosMeta_(ids) {
 }
 
 // ---- videos.list(statistics): id[] → {id:{views,likes,comments}} ----
-function ytVideosStats_(ids) {
+// ★diag(任意): 取得段の不発理由を"確定"で持ち帰る回帰ガード用(2026-08-29・モドリッチ依頼C-038)。
+//   従来 catch(e){} で urlfetch日次枠枯渇の実例外を握り潰し、noteは「urlfetch/APIキー/quota要確認」の
+//   3択どまりで11日間 真因を確定できなかった(実測: yt_probe が err="1日にサービスurlfetchを実行した回数が
+//   多すぎます"=UrlFetchApp日次枠の枯渇)。fetchErr/lastHttp/quotaCapped を拾い、呼び手が確定カテゴリでnoteへ出す。
+function ytVideosStats_(ids, diag) {
   var key = ytApiKey_(), out = {};
-  if (!key || !ids.length) return out;
+  if (!key) { if (diag) diag.err = 'no_api_key'; return out; }
+  if (!ids.length) return out;
+  var attempted = 0;
   for (var i = 0; i < ids.length; i += 50) {
-    if (!compQuotaAdd_(1)) break;
+    if (!compQuotaAdd_(1)) { if (diag) diag.quotaCapped = true; break; } // 自主上限(COMP_QUOTA_CAP)到達
     var batch = ids.slice(i, i + 50);
+    attempted++;
     try {
       var u = 'https://www.googleapis.com/youtube/v3/videos?part=statistics&id=' + batch.join(',') + '&key=' + encodeURIComponent(key);
       var res = UrlFetchApp.fetch(u, { muteHttpExceptions: true });
-      if (res.getResponseCode() >= 300) continue;
+      var rc = res.getResponseCode();
+      if (rc >= 300) { if (diag) { diag.lastHttp = rc; diag.lastBody = String(res.getContentText() || '').slice(0, 160); } continue; }
       var d = JSON.parse(res.getContentText() || '{}');
       (d.items || []).forEach(function (it) {
         var st = it.statistics || {};
@@ -195,9 +203,10 @@ function ytVideosStats_(ids) {
           comments: st.commentCount != null ? parseInt(st.commentCount, 10) : null
         };
       });
-    } catch (e) {}
+    } catch (e) { if (diag) diag.fetchErr = String(e); } // ★urlfetch日次枠枯渇はここに throw で落ちる=握り潰さず記録
     Utilities.sleep(120);
   }
+  if (diag) diag.attempted = attempted;
   return out;
 }
 
@@ -494,7 +503,8 @@ function runCompetitorDaily() {
       if (t && t >= cutoff) { windowVids.push(vid); vChan[vid] = r[vMap['channel_id'] - 1] || ''; }
     });
   }
-  var st = ytVideosStats_(windowVids);
+  var ysDiag = {};
+  var st = ytVideosStats_(windowVids, ysDiag);
   var dailySh = compSheet_(COMP_DAILY_SHEET, COMP_DAILY_HEADERS);
   var drows = [];
   windowVids.forEach(function (vid) {
@@ -559,9 +569,21 @@ function runCompetitorDaily() {
   //   ①windowVids.length===0(台帳にまだ追跡窓内の動画が無い=新規登録直後/discovery未実施)=正常。ok:true。
   //   ②windowVids.length>0 なのに snapped===0(=YT統計が全空=urlfetch日次上限/APIキー/quota切れ)
   //     =「緑を返しながら書いていない」実際の失敗。握り潰さず ok:false(C-041/モドリッチ依頼2026-08-23)。
+  // ★回帰ガード(C-038): 取得段の不発は"配送成功(08:00 push=HTTP204緑)とは別の面"で確定カテゴリで残す。
+  //   ここで返す note が競合_日次ステータス シートへ載る(urlfetch非依存で必ず着地)=silent green を貫通させる。
+  var failReason = '';
+  if (!ytHealthy) {
+    if (ysDiag.err === 'no_api_key') failReason = 'NO_API_KEY: YT_API_KEY未設定';
+    else if (ysDiag.fetchErr && /urlfetch|回数が多すぎ|too many|quota|exceeded/i.test(ysDiag.fetchErr))
+      failReason = 'URLFETCH_QUOTA_EXHAUSTED: ' + ysDiag.fetchErr + ' (GASプロジェクト全体のUrlFetchApp日次枠枯渇=太平洋深夜リセットまで載らない。本体snapshotStats/refreshClicksの消費過多が根。競合ジョブ単独では回復不可)';
+    else if (ysDiag.fetchErr) failReason = 'FETCH_EXCEPTION: ' + ysDiag.fetchErr;
+    else if (ysDiag.quotaCapped) failReason = 'COMP_QUOTA_CAP到達(自主上限' + COMP_QUOTA_CAP + '。当日プロパティCOMP_QUOTA消化済)';
+    else if (ysDiag.lastHttp) failReason = 'YT_HTTP_' + ysDiag.lastHttp + ': ' + (ysDiag.lastBody || '');
+    else failReason = 'snapped_zero: YT統計が空(windowVids=' + windowVids.length + '/attempted=' + (ysDiag.attempted || 0) + '・要確認)';
+  }
   return { ok: ytHealthy, channels: watch.length, newVideos: newVideos, snapped: snapped,
            windowVids: windowVids.length, elapsedMs: Date.now() - RUN_T0,
-           note: ytHealthy ? '' : 'snapped_zero: YT統計が空(urlfetch日次上限/APIキー/quota要確認)' };
+           failReason: failReason, note: failReason };
 }
 
 // ============================================================
