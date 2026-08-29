@@ -12,9 +12,6 @@
     "cand_posted_on": { "decision": "sync", "why": "候補「このchで投稿した」手動宣言{acc:{cid:ts}}=全端末で同じ投稿済み判定。sync.jsがper-cid newer-ts unionで統合(Chami核2026-08-04。旧localから昇格)" },
     "cand_pool_hash": { "decision": "local", "why": "候補プールの差分検知ハッシュ=キャッシュ" },
     "cand_pool_hash_at": { "decision": "local", "why": "候補プールD1同期の最後に成功した時刻=端末ごとの生存タイマー(12h STALE判定用)。端末別なので同期しない" },
-    "cand_catalog_seed_hash": { "decision": "local", "why": "全候補カタログへ送ったサークル/端末候補集合の差分検知ハッシュ=端末別通信キャッシュ" },
-    "cand_catalog_seed_at": { "decision": "local", "why": "全候補カタログの再登録を12時間に抑える端末別送信時刻" },
-    "cand_page_size_v20": { "decision": "local", "why": "全候補の旧既定30件を新既定20件へ一度だけ移す端末別移行フラグ" },
     "cand_pool_sync_note": { "decision": "local", "why": "候補プールD1同期の最後の結果を📚全候補ヘッダに出す観測ノート=端末ローカルの表示状態" },
     "cand_hide_posted": { "decision": "sync", "why": "候補一覧の投稿済み隠し設定=どの端末でも同じ表示(sync.js isSyncLsKeyで許可)" },
     "movie_two_line": { "decision": "sync", "why": "④コメント2行モード=出力に効く設定・全端末で揃える(2026-08-04 同期漏れ発見)" },
@@ -82,11 +79,9 @@
     "short_shared_secret": { "decision": "secret", "why": "短縮worker共有シークレット=秘密" },
     "drive_worker_url": { "decision": "local", "why": "Drive worker URL=コード既定あり・端末ごとに上書き可の設計(コメント明記)" },
     "short_worker_url": { "decision": "local", "why": "短縮worker URL=コード既定あり・端末ごとに上書き可の設計(コメント明記)" },
-    "short_worker_url__<acc>": { "decision": "local", "why": "チャンネル別短縮worker URL上書き=正規ドメインはコード既定、必要時だけ端末単位で独立調整" },
     "bsky_discount_link_cache": { "decision": "local", "why": "セール案内リンクのキャッシュ" },
     "bsky_discount_list_link_r2": { "decision": "local", "why": "セール案内R2リンクのキャッシュ" },
     "clicks_cache": { "decision": "local", "why": "クリック数キャッシュ" },
-    "tree_click_windows_cache": { "decision": "local", "why": "短縮リンクの日別クリック表示キャッシュ。link-workerから再取得できる端末ローカル派生値" },
     "delta_cache": { "decision": "local", "why": "差分キャッシュ" },
     "peak_cache": { "decision": "local", "why": "ピーク値キャッシュ" },
     "tp_cache": { "decision": "local", "why": "キャッシュ" },
@@ -101,10 +96,6 @@
     "kaizen_log_off": { "decision": "local", "why": "改善ログのON/OFF=端末別の運用フラグ" },
     "yt_sheet_synced": { "decision": "local", "why": "YTシート同期済みフラグ=一度きり移行フラグ" },
     "go5_stock_arch_del": { "decision": "sync", "why": "作成履歴のpurge墓標=明示削除を全端末へ伝播(cand_delと同型・2026-08-13)。isSyncLsKey/storage-keys許可リストに登録済み" },
-    "cand_text": { "decision": "sync", "why": "候補テキストの正本(コメント/メモ/X URL/URL2)=同期LSへ昇格しcid単位フィールドマージ。INC-127/129/132恒久対策・2026-08-14" },
-    "go5_image_manifest_v1": { "decision": "sync", "why": "候補・投稿履歴画像のR2 content-hash台帳。画像本体ではなく小さなURLメタデータだけをper-record LWWで全端末共有し、初回描画をIDB全走査から切り離す(2026-08-26)" },
-    "go5_tree_links_v1": { "decision": "sync", "why": "投稿履歴の返信ツリーURL・表示名・アフィ計測短縮URLを履歴ID単位LWWで全端末共有し、別端末でも同じツリークリック数を表示する(2026-08-27)" },
-    "go5_manual_short_last__<acc>": { "decision": "local", "why": "単体短縮で直前に発行したアフィ計測URLを同じブラウザセッション内のツリー設定へ自動候補表示する一時控え。sessionStorageのみで端末間同期しない(2026-08-27)" },
-    "cand_today_v1": { "decision": "sync", "why": "候補の今日投稿する印。作品IDごとに更新時刻で統合し、PCとスマホで同じ当日候補を表示する" }
+    "cand_text": { "decision": "sync", "why": "候補テキストの正本(コメント/メモ/X URL/URL2)=同期LSへ昇格しcid単位フィールドマージ。INC-127/129/132恒久対策・2026-08-14" }
   }
 }

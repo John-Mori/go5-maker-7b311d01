@@ -401,26 +401,58 @@ def relay_model(conf):
         return _pin_model(RELAY_MODEL)
 
 
-def _allowed_tools():
-    """dept_daemon の WORK_ALLOWED_TOOLS を1正本として引く(循環importを避けて遅延で)。"""
+def _web_enabled(dept):
+    """この部屋の会話セッションに WebSearch/WebFetch を付けるか(正本= dept_daemon.web_enabled_dept)。"""
+    if not dept:
+        return False
+    try:
+        import dept_daemon
+        fn = getattr(dept_daemon, "web_enabled_dept", None)
+        return bool(fn(dept)) if fn else False
+    except Exception:
+        return False
+
+
+def _web_tools():
+    try:
+        import dept_daemon
+        return list(getattr(dept_daemon, "WEB_TOOLS", []) or [])
+    except Exception:
+        return []
+
+
+def _allowed_tools(dept=""):
+    """dept_daemon の WORK_ALLOWED_TOOLS を1正本として引く(循環importを避けて遅延で)。
+
+    ★2026-08-29= web_tools 部屋(learning-coach 等)だけ WEB_TOOLS を足す(正本= web_enabled_dept)。
+      付けない部屋は従来と1文字も変わらない(_web が空)。
+    """
     try:
         import dept_daemon                      # 呼ばれる時点では必ずロード済み
         t = list(getattr(dept_daemon, "WORK_ALLOWED_TOOLS", []) or [])
         if t:
+            if _web_enabled(dept):
+                t = t + [x for x in _web_tools() if x not in t]
             return t
     except Exception:
         pass
     return list(_ALLOWED_TOOLS_FALLBACK)
 
 
-def _disallowed_tools():
+def _disallowed_tools(dept=""):
     """毎便送っても**使えない**ツールの定義文を落とす(1正本= dept_daemon.RELAY_DROP_TOOLS)。
 
     ★読めない時は空= 何も外さない(=従来どおり)。fail-open: 節約より沈黙させないことが先。
+    ★2026-08-29= web_tools 部屋では WEB_TOOLS を落とさない(--disallow が --allow に勝つため、
+      許可した部屋でここに残すと結局使えない)。付けない部屋は従来どおり全部落とす。
     """
     try:
         import dept_daemon
-        return list(getattr(dept_daemon, "RELAY_DROP_TOOLS", []) or [])
+        drop = list(getattr(dept_daemon, "RELAY_DROP_TOOLS", []) or [])
+        if _web_enabled(dept):
+            web = set(_web_tools())
+            drop = [t for t in drop if t not in web]
+        return drop
     except Exception:
         return []
 
@@ -1150,6 +1182,48 @@ def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
         return ""         # fail-open= 口調の世話で封筒を壊さない
 
 
+# ★★2026-08-29 C-049 §7-B を機構へ載せる(研究室HQ `DISPATCH-aegis-gl-1787949604668`)。
+#   測った実物= FCCへ載せた仕事 **0件(全期間)**。道具(fcc_task.py)は空撃ちで全通過=
+#   **壊れていない。使われていない。**真因= §7-B が裁定カタログの本文に在るだけで、
+#   **そう仕向ける仕掛けが無い**(共通規律 §3「心がけに任せない。機構に載せる」違反)。
+#   → 手を動かす直前=**便が立つ瞬間**に1行置く。既定を変えるのではなく気づかせる線だ。
+#   ★語は増やすな= classify_work(dept_daemon:487)が同じ轍を踏んで事故っている。
+#     自然文は原理的に取りこぼす。**取りこぼしは前提**で、拾った分だけ得をする形にする。
+FCC_HINT_WORDS = ("テスト", "pytest", "バグ", "デバッグ", "リグレッション", "動作確認")
+
+
+def _fcc_hint(rec, is_work):
+    """テスト/バグチェックらしい**作業便**にだけ、FCCが既定だと1行置く(C-049 §7-B)。
+
+    ★出さない側へ倒す条件が2つある(fail-closed=迷ったら何も足さない)。
+      ①作業便でない便には出さない(会話に道具の宣伝を混ぜない)。
+      ②お題に**持ち物**が載っている便には出さない= `fcc_task.check_prompt` と**同じ表**で見る。
+        FCCは公開repoの別クローンだ。持ち物が要る仕事はそもそも載らないので、
+        そこへ誘うと「言われたとおりにしたら弾かれた」= 次から読まれない線になる。
+    ★実測(投入前・過去14日)= 作業便311本のうち **22本(7.1%・1日1.6件)** に出る。
+      うち持ち物で抑止したのが31本。★半分ほどは的外れ(日次集計便など)= 精度は高くない。
+      それでも Chami の実文言(「問題ないかテスト、バグチェックした?」
+      「テストとかシステムのバグチェックとかどんどんそっちで」)は拾えている。
+    """
+    try:
+        if not is_work:
+            return ""
+        txt = str((rec or {}).get("content") or "")
+        if not any(w in txt for w in FCC_HINT_WORDS):
+            return ""
+        import fcc_task                                  # ★遅延import(常用の封筒を重くしない)
+        if fcc_task.check_prompt(txt):
+            return ""                                    # 持ち物が要る仕事= FCCには載らない
+        return ("\n★テスト/バグチェックの気配がある便だ= **C-049 §7-B で既定はFCC**"
+                "(Anthropicの週枠を使わない)。載せるのは1コマンドだ:\n"
+                "   python scripts/llm/fcc_task.py --dept <自分の部門> --name <用途>"
+                " --prompt-file <お題.md>\n"
+                "  ★持ち物(00_AI-HQ/local/人格/台帳)が要る仕事は載らない=その時は素通りでいい。"
+                "違うと思ったら無視してよい(機械の当たりを付けただけだ)。\n")
+    except Exception:                                    # noqa: BLE001
+        return ""                                        # fail-open= 気づかせ線で封筒を壊さない
+
+
 def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_fp="",
                    verdict_full=True, verdict_fp="", verdict_added=()):
     """新着1件を「原文のまま」の封筒にする(提案書§5.2)。
@@ -1230,6 +1304,9 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         "--- 本文ここまで ---\n"
         f"添付(ローカルパス):\n{att}\n"
         f"{work_note}"
+        # ★C-049 §7-B の気づかせ線(2026-08-29)。work_note と同じ場所=**本文の後ろ**に置く。
+        #   本文には1文字も触らない(封筒の作法= 短縮・要約・判定を本文へ混ぜない)。
+        f"{_fcc_hint(rec, is_work)}"
     )
 
 
@@ -1873,9 +1950,9 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
     argv = [CLAUDE, "-p"]
     if session_id:
         argv += ["--resume", session_id]
-    _drop = _disallowed_tools()
+    _drop = _disallowed_tools(dept)
     argv += ["--output-format", "json",
-             "--allowedTools", *_allowed_tools()]
+             "--allowedTools", *_allowed_tools(dept)]
     # ★2026-08-23 研究室HQ「床を削る」= 許可していないツールの**定義文**を送るのをやめる。
     #   実測 -10,588トークン/便(素の起動 51,242 → 40,654)。能力は減らない(元々使えない7本)。
     #   ★空なら足さない= 可変長フラグを空で置くと次の値を飲む(2026-07-18の実障害と同じ形)。
@@ -2690,6 +2767,41 @@ DEFECT_ID_PREFIX = {DEFECT_KIND_DEFECT: "DEF", DEFECT_KIND_REQUEST: "REQ"}
 DEFECT_BLOCK_MAX = 12
 DEFECT_SYMPTOM_MAX = 140
 
+# ★★2026-08-29 引き継ぎブロックの痩身(研究室HQ HQ-0220 ③ 裁定 → イージス研究室が実装)。
+#   裁定の文言= 「承認する。ただし『ID+件数だけ』への全面除去はしない。
+#                **ID+件数+一行要旨(何の件か分かる短文1行)** まで残す。」
+#   実行条件1= 「全文はローカル台帳へのポインタのまま=**移動しない**」
+#     → 落とすのは**起動文に毎便刷る分だけ**。open_defects.jsonl は1バイトも変えない。
+#       代わりに `close_item.py --show <ID>` という1本の口を足した(ポインタが解決できないと
+#       ポインタではなく「消した」と同じになる)。
+#   ★既定は False = ファイルが無ければ**従来と1文字も変わらない**。
+#     入れる/戻すはこのファイルだけ= T4(watch_triggers)が人手なしで戻せる形にしてある。
+LEDGER_SLIM_FILE = os.path.join(LOCAL, "llm", "handoff_slim.json")
+DEFECT_SYMPTOM_SLIM = 60          # 痩身時の一行要旨の長さ(★0にはしない=裁定の下限)
+
+
+def ledger_slim_on():
+    """引き継ぎブロックを痩せさせるか。★読めない/無い時は False(fail-open=従来の全文)。"""
+    try:
+        with open(LEDGER_SLIM_FILE, encoding="utf-8-sig") as f:
+            return bool(json.load(f).get("on"))
+    except Exception:                                # noqa: BLE001
+        return False
+
+
+def _slim_marks(d):
+    """痩身時に**1行の末尾へ足す印だけ**。件数(数字)以外は足さない。
+
+    ★なぜ落とさないか= 「催促」と「弾かれた」は**その項目が既に一度失敗している**という信号で、
+      落とすと同じ失敗をもう一度踏む。数字1個なら十数文字で済む。
+    """
+    m = ""
+    if d.get("nudges"):
+        m += " ★催促%d" % len(d["nudges"])
+    if d.get("rejected"):
+        m += " ★弾かれ%d" % len(d["rejected"])
+    return m
+
 # Discordのメッセージ/チャンネルID(スノーフレーク)。17〜20桁
 _DEF_SNOWFLAKE_RE = re.compile(r"(?<!\d)\d{17,20}(?!\d)")
 _DEF_URL_RE = re.compile(r"https?://\S{5,}")
@@ -3112,12 +3224,17 @@ def defects_block(dept, head=True):
     if _n_fire:
         lines.append(f"  ★**🔥(炎上)が {_n_fire}件ある。先頭に出してある**"
                      "= Chamiが「これは事故だ・恒久対策まで行け」と押した印(C-038/C-040)。")
+    slim = ledger_slim_on()                          # ★HQ-0220③ 痩身(既定OFF)
     for i, d in enumerate(items[:DEFECT_BLOCK_MAX], 1):
-        sym = " ".join(d["symptom"].split())[:DEFECT_SYMPTOM_MAX]
+        sym = " ".join(d["symptom"].split())[:DEFECT_SYMPTOM_SLIM if slim
+                                             else DEFECT_SYMPTOM_MAX]
         # ★🔥= Chamiが炎上スタンプを押した= **恒久対策まで行け**(C-038/C-040)。
         #   再発と同じ見た目で並べると重さが伝わらないので、頭に印を出す。
         _fire = "🔥【炎上=恒久対策まで行け】 " if d.get("enjo") else ""
-        lines.append(f"  {i}. [{d['id']}] {_fire}{sym or '(症状の記録なし)'}")
+        lines.append(f"  {i}. [{d['id']}] {_fire}{sym or '(症状の記録なし)'}"
+                     + (_slim_marks(d) if slim else ""))
+        if slim:
+            continue                                 # ↓の詳細は台帳へのポインタで置き換える
         lines.append(f"     壊れた実物の在りか= {d['broken'] or '(無い★)'}"
                      f" / 気づいた= {d['noticed_at'] or '不明'}"
                      f"{' / 出所= ' + d['source'] if d['source'] else ''}")
@@ -3126,6 +3243,10 @@ def defects_block(dept, head=True):
                          + d["rejected"][-1])
     if len(items) > DEFECT_BLOCK_MAX:
         lines.append(f"  …ほか {len(items) - DEFECT_BLOCK_MAX}件(全文は {DEFECTS_FILE})")
+    if slim:
+        lines.append("  ★上は**要旨1行だけ**。壊れた実物の在りか/気づいた日/出所/弾かれた本文は"
+                     "台帳に在る(消していない)= 触るIDだけ次で開け:\n"
+                     "     python scripts/llm/close_item.py --show <上のID>")
     return "\n".join(lines)
 
 
@@ -3162,10 +3283,15 @@ def requests_block(dept, head=True, limit=DEFECT_BLOCK_MAX):
         lines.append(f"  ★**🔥(炎上)の {_n_fire}件を先頭に置いた**"
                      "= Chamiが「これは事故だ・恒久対策まで行け」と押した印(C-038/C-040)。"
                      "残りは従来どおり古い順。")
+    slim = ledger_slim_on()                          # ★HQ-0220③ 痩身(既定OFF)
     for i, d in enumerate(items[:limit], 1):
-        sym = " ".join(d["symptom"].split())[:DEFECT_SYMPTOM_MAX]
+        sym = " ".join(d["symptom"].split())[:DEFECT_SYMPTOM_SLIM if slim
+                                             else DEFECT_SYMPTOM_MAX]
         _fire = "🔥【炎上=恒久対策まで行け】 " if d.get("enjo") else ""
-        lines.append(f"  {i}. [{d['id']}] {_fire}{sym or '(依頼の本文なし。元の便を見ること)'}")
+        lines.append(f"  {i}. [{d['id']}] {_fire}{sym or '(依頼の本文なし。元の便を見ること)'}"
+                     + (_slim_marks(d) if slim else ""))
+        if slim:
+            continue                                 # ↓の詳細は台帳へのポインタで置き換える
         lines.append(f"     依頼の便の在りか= {d['broken'] or '(無い★)'}"
                      f" / 頼まれた= {d['noticed_at'] or '不明'}"
                      f"{' / 出所= ' + d['source'] if d['source'] else ''}")
@@ -3179,6 +3305,10 @@ def requests_block(dept, head=True, limit=DEFECT_BLOCK_MAX):
                          + d["rejected"][-1])
     if len(items) > limit:
         lines.append(f"  …ほか {len(items) - limit}件(全文は {DEFECTS_FILE})")
+    if slim:
+        lines.append("  ★上は**要旨1行だけ**。依頼の便の在りか/閉じる条件/催促の本文は"
+                     "台帳に在る(消していない)= 着手するIDだけ次で開け:\n"
+                     "     python scripts/llm/close_item.py --show <上のID>")
     return "\n".join(lines)
 
 

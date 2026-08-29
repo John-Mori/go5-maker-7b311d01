@@ -117,10 +117,25 @@ def _pid_alive(pid):
             import ctypes
             k = ctypes.windll.kernel32
             h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
-            if h:
+            if not h:
+                return False
+            # ★2026-08-30 止血(研究室HQ)= OpenProcess が**死んだPIDでも成功する**。
+            #   Windowsは終了したプロセスでも、そのプロセスオブジェクトへの参照が残っている間は
+            #   ハンドルを開けてしまう。実測(2026-08-30 06:01)= pid 13636 は Get-Process で
+            #   存在しないのに OpenProcess はハンドル392を返し、GetExitCodeProcess は
+            #   **4294967295(=強制終了)**を返した。つまり「開けた=生きている」は嘘だ。
+            #   結果、_gateway.lock に死んだPIDが残る限り claim_singleton() が永久に False を返し、
+            #   supervise_daemons が10分ごとに起動を試みては「二重起動を避けて終了」を書き続ける
+            #   =**Discord受信の唯一の入口が沈黙する**(実害= 送信スタンプが付かない・便が届かない)。
+            #   ★上のdocstringが宣言している fail-open と、実装が逆を向いていた(静かに壊れる推定)。
+            #   ★判定は終了コードで行う。STILL_ACTIVE(259)以外は死んでいる。
+            #   ★取れなければ False(=起動する側へ倒す)。不在の害の方が桁違いに大きい。
+            try:
+                code = ctypes.c_ulong(0)
+                ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+                return bool(ok) and code.value == 259
+            finally:
                 k.CloseHandle(h)
-                return True
-            return False
         except Exception:
             return False
     try:

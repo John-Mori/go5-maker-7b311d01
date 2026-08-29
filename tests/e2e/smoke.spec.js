@@ -167,64 +167,6 @@ test.describe('投稿履歴の初期表示', () => {
     expect(dump).toContain('hist_render');
     expect(dump).toContain('dom_img_load');
   });
-
-  test('投稿履歴画像は4回失敗しても再読込なしで回復する', async ({ page }) => {
-    const videoId = 'acc1-20260826-history-retry';
-    const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-    await page.goto('__go5_seed__.html');
-    await page.evaluate(async ({ videoId, image }) => {
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.setItem('bsky_gas_url', '');
-      localStorage.setItem('hist_maint_at', String(Date.now()));
-      localStorage.setItem('hist_metrics_at', String(Date.now()));
-      localStorage.setItem('short_hist__acc1', JSON.stringify([{
-        videoId, ts: Date.now(), title: '投稿履歴の継続再試行テスト', account: 'acc1'
-      }]));
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('verify_yt__acc1', '{}');
-      await new Promise((resolve, reject) => {
-        const req = indexedDB.open('go5store', 1);
-        req.onupgradeneeded = () => {
-          if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
-        };
-        req.onerror = () => reject(req.error);
-        req.onsuccess = () => {
-          const db = req.result;
-          const tx = db.transaction('kv', 'readwrite');
-          tx.objectStore('kv').put({ imgs: [image], prev: 1, at: Date.now() }, 'used:' + videoId);
-          tx.oncomplete = () => { db.close(); resolve(); };
-          tx.onerror = () => reject(tx.error);
-        };
-      });
-    }, { videoId, image });
-
-    await page.route('**/js/candidates.js?*', async (route) => {
-      const response = await route.fetch();
-      let body = await response.text();
-      body = body.replace(
-        'return { retry: true, delay: n >= 3 ? 30000 : Math.min(6000, 1000 * Math.pow(2, n - 1)) };',
-        'return { retry: true, delay: n >= 3 ? 50 : Math.min(50, 20 * Math.pow(2, n - 1)) };'
-      );
-      const shim = `
-        (function () {
-          var original = Go5Idb.getResult.bind(Go5Idb);
-          var target = 'used:${videoId}';
-          Go5Idb.getResult = function (key) {
-            if (key !== target) return original(key);
-            window.__historyRetryAttempts = (window.__historyRetryAttempts || 0) + 1;
-            if (window.__historyRetryAttempts <= 4) return Promise.resolve({ ok: false, value: null, error: new Error('forced history transient failure') });
-            return original(key);
-          };
-        })();
-      `;
-      await route.fulfill({ response, body: shim + body });
-    });
-
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.vrow-title').filter({ hasText: '投稿履歴の継続再試行テスト' })).toBeVisible();
-    await expect(page.locator('.vrow-refimg[data-usedkey="' + videoId + '"]')).toBeVisible({ timeout: 5000 });
-    await expect.poll(() => page.evaluate(() => window.__historyRetryAttempts || 0)).toBeGreaterThanOrEqual(5);
-  });
 });
 test.describe('候補ページの画像・投稿編集', () => {
   test('PC画像モーダルの矢印は左右対称の20%位置・2倍サイズで表示する', async ({ page }) => {
@@ -273,32 +215,13 @@ test.describe('候補ページの画像・投稿編集', () => {
     // 見た目だけでなく、PCの実クリックで必ず次/前の画像へ切り替わることを固定する。
     await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
     const firstSrc = await page.locator('.fz-zoom-img').getAttribute('src');
-    // 1枚目の「前へ」は最後の画像へ循環する。
-    await prev.click();
-    await expect(page.locator('.fz-zoom')).toBeVisible();
-    await expect(page.locator('.fz-zoom-count')).toHaveText('2 / 2');
-    await expect(page.locator('.fz-zoom-img')).not.toHaveAttribute('src', firstSrc);
-    // 最後の「次へ」は1枚目へ循環する。
-    await next.click();
-    await expect(page.locator('.fz-zoom')).toBeVisible();
-    await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
-    await expect(page.locator('.fz-zoom-img')).toHaveAttribute('src', firstSrc);
-    // 画像差し替え後、旧700msガードより遅れて背景へ届く互換clickでも閉じない。
-    await page.waitForTimeout(800);
-    await page.locator('.fz-zoom').dispatchEvent('click');
-    await expect(page.locator('.fz-zoom')).toBeVisible();
     await next.click();
     await expect(page.locator('.fz-zoom-count')).toHaveText('2 / 2');
     await expect(page.locator('.fz-zoom-img')).not.toHaveAttribute('src', firstSrc);
     await prev.click();
-    await expect(page.locator('.fz-zoom')).toBeVisible();
     await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
     await expect(page.locator('.fz-zoom-img')).toHaveAttribute('src', firstSrc);
 
-    // 背景そのものを押し始めて離した場合だけは、従来どおり閉じられる。
-    await page.locator('.fz-zoom').dispatchEvent('pointerdown', { pointerId: 77, button: 0, clientX: 2, clientY: 500 });
-    await page.locator('.fz-zoom').dispatchEvent('pointerup', { pointerId: 77, button: 0, clientX: 2, clientY: 500 });
-    await expect(page.locator('.fz-zoom')).toBeHidden();
     // スマホは従来どおり、邪魔にならない46px・左右端10pxを維持する。
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -307,42 +230,17 @@ test.describe('候補ページの画像・投稿編集', () => {
       canvas.width = 8; canvas.height = 8;
       canvas.getContext('2d').fillRect(0, 0, 8, 8);
       const image = canvas.toDataURL('image/png');
-      window.Go5Cand.zoomImages([image, image], 0, { markCid: 'cid-mobile-copy-test' });
+      window.Go5Cand.zoomImages([image, image], 0);
     });
     const mobile = await page.evaluate(() => {
       const read = (selector) => {
         const r = document.querySelector(selector).getBoundingClientRect();
         return { left: r.left, right: innerWidth - r.right, width: r.width, height: r.height };
       };
-      const vertical = (selector) => {
-        const r = document.querySelector(selector).getBoundingClientRect();
-        return { top: r.top, bottom: r.bottom };
-      };
-      const image = document.querySelector('.fz-zoom-img');
-      const imageRect = image.getBoundingClientRect();
-      const hit = document.elementFromPoint(imageRect.left + imageRect.width / 2, imageRect.top + imageRect.height / 2);
-      return {
-        prev: read('.fz-zoom-nav.prev'),
-        next: read('.fz-zoom-nav.next'),
-        mark: vertical('.fz-zoom-mark'),
-        image: vertical('.fz-zoom-img'),
-        pointerEvents: getComputedStyle(image).pointerEvents,
-        imageReceivesTouch: hit === image
-      };
+      return { prev: read('.fz-zoom-nav.prev'), next: read('.fz-zoom-nav.next') };
     });
     expect(mobile.prev).toEqual({ left: 10, right: 334, width: 46, height: 46 });
     expect(mobile.next).toEqual({ left: 334, right: 10, width: 46, height: 46 });
-    expect(mobile.mark.bottom).toBeLessThanOrEqual(mobile.image.top);
-    expect(mobile.pointerEvents).toBe('auto');
-    expect(mobile.imageReceivesTouch).toBe(true);
-    // iPhone相当幅でも端の循環と「矢印で閉じない」を同じ契約で固定する。
-    await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
-    await prev.click();
-    await expect(page.locator('.fz-zoom')).toBeVisible();
-    await expect(page.locator('.fz-zoom-count')).toHaveText('2 / 2');
-    await next.click();
-    await expect(page.locator('.fz-zoom')).toBeVisible();
-    await expect(page.locator('.fz-zoom-count')).toHaveText('1 / 2');
   });
   test('全体読込後にIDBへ届いた候補画像も、動画生成へ移動して消えない', async ({ page }) => {
     await page.addInitScript(() => {
@@ -500,44 +398,6 @@ test.describe('候補ページの画像・投稿編集', () => {
     expect(dump).toContain('ref_get_ok');
     expect(dump).toContain('ref_render');
     expect(dump).toContain('dom_img_load');
-  });
-  test('R2マーカーがIDBへ先着しても画像読込中で止まらず実画像へ解決する', async ({ page }) => {
-    const cid = 'tw_candidate_r2_marker';
-    await page.goto('__go5_seed__.html');
-    await page.evaluate(async ({ cid }) => {
-      localStorage.setItem('cand_items', JSON.stringify([{
-        cid, title: 'R2マーカー回帰テスト', isTwitter: true,
-        twitterUrl: 'https://x.com/go5_test/status/936', addedAt: Date.now()
-      }]));
-      await new Promise((resolve, reject) => {
-        const req = indexedDB.open('go5store', 1);
-        req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv'); };
-        req.onerror = () => reject(req.error);
-        req.onsuccess = () => {
-          const db = req.result, tx = db.transaction('kv', 'readwrite');
-          tx.objectStore('kv').put({ __r2n: 1, memo: '画像あり', at: Date.now() }, 'ref:' + cid);
-          tx.oncomplete = () => { db.close(); resolve(); };
-          tx.onerror = () => reject(tx.error);
-        };
-      });
-    }, { cid });
-    await page.route('**/js/candidates.js?*', async (route) => {
-      const response = await route.fetch();
-      const original = await response.text();
-      const injected = [
-        '(function () {',
-        '  Go5Sync.configured = function () { return true; };',
-        '  Go5Sync.fetchBlobR2At = function () { return Promise.resolve(new Blob([Uint8Array.from([71,73,70,56,57,97,1,0,1,0,128,0,0,0,0,0,255,255,255,33,249,4,1,0,0,0,0,44,0,0,0,0,1,0,1,0,0,2,2,68,1,0,59])], { type: "image/gif" })); };',
-        '}());'
-      ].join('\n');
-      await route.fulfill({ response, body: injected + '\n' + original });
-    });
-    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.cand-title').filter({ hasText: 'R2マーカー回帰テスト' })).toBeVisible();
-    const thumb = page.locator('[data-refimgview="' + cid + '"]');
-    await expect(thumb).toBeVisible({ timeout: 4000 });
-    await expect.poll(() => thumb.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
-    await expect(page.locator('[data-refretry="' + cid + '"]')).toHaveCount(0);
   });
   test('文字情報だけ同期された時もFANZA作品URLとX URLを再読込なしで表示する', async ({ page }) => {
     const cid = 'd_candidate_sync_text';
@@ -910,45 +770,6 @@ test.describe('ドラフト軽量ページ', () => {
     expect(messages.join('\n')).toContain('投稿履歴の登録機能を読み込めませんでした');
   });
 
-  test('投稿完了時に台帳縮小だけ失敗しても墓標でドラフトを残さず作成履歴へ退避する', async ({ page }) => {
-    const draftId = 'stk_e2e_complete_quota_tomb';
-    const videoId = 'acc1-20260828-0715-tomb';
-    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate(({ draftId, videoId }) => {
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('short_hist__acc1', '[]');
-      localStorage.setItem('go5_stock_archive', '[]');
-      localStorage.setItem('go5_stock_del', '{}');
-      localStorage.setItem('go5_stock_meta', JSON.stringify([{
-        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
-        label: '墓標表示回帰', title: '墓標表示回帰', author: 'test', bskyText: '本文',
-        affiliateUrl: '', workUrl: '', videoName: 'test.mp4', videoId, attrs: {}
-      }]));
-    }, { draftId, videoId });
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.locator(`.stk-mode[data-id="${draftId}"]`).click();
-    await page.locator('#draftYtUrl').fill('https://youtu.be/AbCdEfGhI12');
-    await page.evaluate(() => {
-      const realSet = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (key, value) {
-        if (key === 'go5_stock_meta') throw new DOMException('quota-test', 'QuotaExceededError');
-        return realSet.call(this, key, value);
-      };
-    });
-    page.on('dialog', async (dialog) => { await dialog.accept(); });
-    await page.locator('#draftModalComplete').click();
-
-    await expect(page.locator('#draftPostModal')).toBeHidden();
-    await expect(page.locator(`.stk-mode[data-id="${draftId}"]`)).toHaveCount(0);
-    await expect(page.locator(`.stk-restore[data-id="${draftId}"]`)).toHaveCount(1);
-    const state = await page.evaluate(({ draftId }) => ({
-      archived: JSON.parse(localStorage.getItem('go5_stock_archive') || '[]').some((m) => m.id === draftId),
-      tombstoned: Number((JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {})[draftId] || 0) > 0
-    }), { draftId });
-    expect(state).toEqual({ archived: true, tombstoned: true });
-  });
-
   test('本体のドラフトボタンは専用ページへ遷移する', async ({ page }) => {
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
     await page.locator('#tabStock').click();
@@ -1038,172 +859,4 @@ test.describe('ドラフト投稿モードの短縮URL置換', () => {
       expect(persistedFinal.split('https://' + accountCase.domain + '/').length - 1).toBe(2);
     });
   }
-});
-test.describe('一覧のレイアウト安定性', () => {
-  test('候補画像は読込札と実画像で同じ高さを先に確保する', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
-    const heights = await page.evaluate(() => {
-      const host = document.createElement('div');
-      host.style.width = '74px';
-      host.style.position = 'fixed';
-      host.style.left = '0';
-      host.style.top = '0';
-      const pending = document.createElement('div');
-      pending.className = 'cand-refimg-ph cand-refimg-loading';
-      pending.textContent = '画像読込中…';
-      host.appendChild(pending);
-      document.body.appendChild(host);
-      const pendingHeight = pending.getBoundingClientRect().height;
-      const image = document.createElement('img');
-      image.className = 'cand-refimg-thumb';
-      host.replaceChildren(image);
-      const imageHeight = image.getBoundingClientRect().height;
-      host.remove();
-      return { pendingHeight, imageHeight };
-    });
-    expect(Math.abs(heights.pendingHeight - heights.imageHeight)).toBeLessThanOrEqual(1);
-    expect(heights.pendingHeight).toBeGreaterThan(90);
-  });
-
-  test('一覧DOMを交換しても見ていたカードの画面位置を維持する', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
-    const result = await page.evaluate(async () => {
-      const host = document.createElement('div');
-      document.body.appendChild(host);
-      function html(grown) {
-        return Array.from({ length: 16 }, (_, i) =>
-          '<div class="vrow" data-hist-anchor="item-' + i + '" style="height:' +
-          ((grown && i < 5) ? 230 : 130) + 'px">item-' + i + '</div>').join('');
-      }
-      host.innerHTML = html(false);
-      host.querySelector('[data-hist-anchor="item-5"]').scrollIntoView({ block: 'start' });
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-      const before = host.querySelector('[data-hist-anchor="item-5"]').getBoundingClientRect().top;
-      const snap = window.Go5Viewport.capture(host, '.vrow[data-hist-anchor]', 'data-hist-anchor');
-      host.innerHTML = html(true);
-      const shifted = host.querySelector('[data-hist-anchor="item-5"]').getBoundingClientRect().top;
-      window.Go5Viewport.restore(host, snap);
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const after = host.querySelector('[data-hist-anchor="item-5"]').getBoundingClientRect().top;
-      host.remove();
-      return { before, shifted, after, key: snap && snap.key };
-    });
-    expect(result.key).toBe('item-5');
-    expect(Math.abs(result.shifted - result.before)).toBeGreaterThan(300);
-    expect(Math.abs(result.after - result.before)).toBeLessThanOrEqual(2);
-  });
-});
-
-
-test.describe('durable candidate images and Japanese IME search', () => {
-  test('an IDB-unavailable device saves a new image through the synced CDN ledger', async ({ page }) => {
-    const cid = 'tw_candidate_no_idb_cloud_save';
-    await page.addInitScript(({ cid }) => {
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.setItem('cand_items', JSON.stringify([{
-        cid, title: 'cloud image durability test', isTwitter: true,
-        twitterUrl: 'https://x.com/go5_test/status/9601', addedAt: Date.now()
-      }]));
-    }, { cid });
-    await page.route('**/js/candidates.js?*', async (route) => {
-      const response = await route.fetch();
-      const original = await response.text();
-      const injected = "(function(){ Go5Idb.available = function(){ return false; }; }());\n";
-      await route.fulfill({ response, body: injected + original });
-    });
-    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
-    await page.locator('[data-refimg="' + cid + '"]').click();
-    await expect(page.locator('.refimg-modal')).toBeVisible();
-    await page.locator('#refImgFile').setInputFiles({
-      name: 'tiny.png',
-      mimeType: 'image/png',
-      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLzWQAAAABJRU5ErkJggg==', 'base64')
-    });
-    await expect(page.locator('#refImgPreview img')).toBeVisible();
-    await page.evaluate(() => {
-      const hash = 'a'.repeat(64);
-      Go5Sync.putBlobR2 = function () { return Promise.resolve(hash); };
-      Go5Sync.syncImageManifestNow = function () { return Promise.resolve({ ok: true }); };
-      const realSetItem = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (key, value) {
-        if (String(key).indexOf('cand_refimg__') === 0) {
-          throw new DOMException('forced legacy quota', 'QuotaExceededError');
-        }
-        return realSetItem.call(this, key, value);
-      };
-    });
-    await page.locator('#refImgSave').click();
-    await expect(page.locator('#refImgMsg')).toHaveText('\u4fdd\u5b58\u3057\u307e\u3057\u305f', { timeout: 2500 });
-    const durable = await page.evaluate(({ cid }) => {
-      const rec = Go5ImageCdn.record('ref', cid);
-      return {
-        keys: rec && rec.keys,
-        legacy: localStorage.getItem('cand_refimg__' + cid),
-        visible: Go5Cand.refImgs(cid).length
-      };
-    }, { cid });
-    expect(durable.keys).toEqual(['a'.repeat(64)]);
-    expect(durable.legacy).toBeNull();
-    expect(durable.visible).toBe(1);
-  });
-
-  test('Japanese composition keeps one live input and commits one character once', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.setItem('bsky_gas_url', '');
-      localStorage.setItem('hist_maint_at', String(Date.now()));
-      localStorage.setItem('hist_metrics_at', String(Date.now()));
-      localStorage.setItem('short_hist__acc1', JSON.stringify([{
-        videoId: 'acc1-20260828-0651-ime1',
-        ts: Date.now(),
-        title: '\u3042\u3044\u3046\u4f5c\u54c1',
-        account: 'acc1'
-      }]));
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('verify_yt__acc1', '{}');
-    });
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
-    const input = page.locator('#histWorkSearch');
-    await expect(input).toBeVisible();
-    const result = await input.evaluate(async (el) => {
-      const original = el;
-      el.focus();
-      const sameAfterFocus = document.getElementById('histWorkSearch') === original;
-      el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
-      const sameAfterStart = document.getElementById('histWorkSearch') === original;
-      el.value = '\u3042';
-      const sameAfterValue = document.getElementById('histWorkSearch') === original;
-      el.setSelectionRange(1, 1);
-      el.dispatchEvent(new InputEvent('input', {
-        bubbles: true, data: '\u3042', inputType: 'insertCompositionText', isComposing: true
-      }));
-      const sameNodeDuring = document.getElementById('histWorkSearch') === original;
-      const duringValue = document.getElementById('histWorkSearch').value;
-      el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '\u3042' }));
-      el.dispatchEvent(new InputEvent('input', {
-        bubbles: true, data: null, inputType: 'insertText', isComposing: false
-      }));
-      await new Promise((resolve) => setTimeout(resolve, 180));
-      const current = document.getElementById('histWorkSearch');
-      return {
-        sameAfterFocus,
-        sameAfterStart,
-        sameAfterValue,
-        sameNodeDuring,
-        duringValue,
-        finalValue: current && current.value,
-        active: document.activeElement === current
-      };
-    });
-    expect(result.sameAfterFocus).toBe(true);
-    expect(result.sameAfterStart).toBe(true);
-    expect(result.sameAfterValue).toBe(true);
-    expect(result.sameNodeDuring).toBe(true);
-    expect(result.duringValue).toBe('\u3042');
-    expect(result.finalValue).toBe('\u3042');
-    expect(result.active).toBe(true);
-    await expect(page.locator('.vrow-title').filter({ hasText: '\u3042\u3044\u3046\u4f5c\u54c1' })).toBeVisible();
-  });
 });

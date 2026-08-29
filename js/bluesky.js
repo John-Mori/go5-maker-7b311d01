@@ -29,9 +29,8 @@
     discountNew: $('discountNew'), discountNew2: $('discountNew2'), discountNewPc: $('discountNewPc'),
     discountDigest: $('discountDigest'), discountDigest2: $('discountDigest2'), discountDigestPc: $('discountDigestPc'),
     histList: $('histList'), histRefresh: $('histRefresh'), histShowDiscarded: $('histShowDiscarded'),
-    manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortAccount: $('manualShortAccount'),
-    manualAffiliateOn: $('manualAffiliateOn'), manualShortDomain: $('manualShortDomain'), manualShortBtn: $('manualShortBtn'),
-    manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'), manualAffStatus: $('manualAffStatus'),
+    manualUrl: $('manualUrl'), manualTitle: $('manualTitle'), manualShortBtn: $('manualShortBtn'),
+    manualResult: $('manualResult'), manualOut: $('manualOut'), manualCopy: $('manualCopy'),
     movieWorkUrl: $('movieWorkUrl'), movieWorkWarn: $('movieWorkWarn'),
     movieWorkAffi: $('movieWorkAffi'), movieWorkAffiCopy: $('movieWorkAffiCopy'), movieWorkInfo: $('movieWorkInfo'),
     ytQSave: $('ytQSave'), ytQLoad: $('ytQLoad'), ytReset: $('ytReset'), ytUndo: $('ytUndo'), ytRedo: $('ytRedo'), ytQInfo: $('ytQInfo'),
@@ -1721,10 +1720,7 @@
       title: record.title || '', postUrl: record.postUrl || '', affiliateUrl: record.affiliate || '',
       workUrl: workUrl, hashtags: record.hashtags || '', postUri: record.postUri || '',
       shortUrl: record.shortUrl || '', shareUrl: record.shareUrl || '', videoId: vid,
-      work_short_url: record.workShortUrl || '', // 導線2(作品クリック計測URL)＝アカウント移送/再記録でも欠落させない
-      // このモジュールから記録するのはBluesky投稿。値を最初から明示し、短縮URLだけの旧行を
-      // 投稿履歴側の既定値Xへ倒さない。矯正経路だけは既存の明示値(x/bsky)をそのまま引き継ぐ。
-      platform: (record.platform === 'x' || record.platform === 'bsky') ? record.platform : 'bsky'
+      work_short_url: record.workShortUrl || '' // 導線2(作品クリック計測URL)＝アカウント移送/再記録でも欠落させない
     };
     if (record.postedAt) payload.postedAt = record.postedAt; // 過去データ矯正時は当時の投稿時刻を保持
     movieAttrKeys_().forEach(function (k) { payload[k] = !!attrs[k]; });
@@ -1768,7 +1764,7 @@
   // account/meta＝投稿を実行した瞬間のアカウントと凍結メタ。(即時投稿は呼び出し時に確定)
   function notifyPosted(res, text, alt, account, meta, workShort) {
     var tags = (String(text).match(/#[^\s#]+/g) || []).join(' ');
-    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || ''), account: account || acctId(), platform: 'bsky', meta: meta || null, work_short_url: (workShort && workShort.shortUrl) || '', work_share_url: (workShort && workShort.shareUrl) || '' } })); } catch (e) {}
+    try { document.dispatchEvent(new CustomEvent('bluesky-posted', { detail: { post_uri: res.uri || '', post_url: res.postUrl || '', affiliate: firstUrl(text), hashtags: tags, posted_at: new Date().toISOString(), title: alt || (String(text).split('\n')[0] || ''), account: account || acctId(), meta: meta || null, work_short_url: (workShort && workShort.shortUrl) || '', work_share_url: (workShort && workShort.shareUrl) || '' } })); } catch (e) {}
   }
   // すべての投稿を一元的に記録(即時・自動・予約のどれでも必ず記録される)
   document.addEventListener('bluesky-posted', function (e) {
@@ -1907,15 +1903,11 @@
 
   // ★短縮URL設定(var SHORT)はIIFE先頭へ移設した(2026-08-03・初期化中の use-before-assign 即死を根治)。
   //   workerBase/ourShortBase 等の関数はここに残す(関数宣言は巻き上げ済みで参照位置は不問)。
-  // 投稿用ベースURL: チャンネル別上書き→正規のチャンネル別ドメイン→未知アカウントだけ旧共通上書き→既定。
-  //   旧 short_worker_url(共通1本)を既知2chへ優先すると、両チャンネルが同じドメインへ潰れてしまう。
-  //   acc1/acc2は必ず別管理し、必要な上書きも short_worker_url__acc1 / __acc2 で独立させる。
+  // 投稿用ベースURL: 端末上書き(short_worker_url)が最優先→現アカウント別→既定。
   function workerBase(account) {
+    try { var ov = localStorage.getItem('short_worker_url'); if (ov) return ov; } catch (e) {}
     var acc = account || ((typeof acctId === 'function') ? acctId() : 'acc1');
-    try { var per = localStorage.getItem('short_worker_url__' + acc); if (per) return per; } catch (e) {}
-    if (SHORT.URL_BY_ACCT[acc]) return SHORT.URL_BY_ACCT[acc];
-    try { var legacy = localStorage.getItem('short_worker_url'); if (legacy) return legacy; } catch (e2) {}
-    return SHORT.WORKER_URL;
+    return SHORT.URL_BY_ACCT[acc] || SHORT.WORKER_URL;
   }
   // 「そのURLは自前の短縮ドメインか?」一致したベースを返す(両ドメイン+旧r2+端末上書きに対応)。
   function ourShortBase(u) {
@@ -1924,10 +1916,7 @@
     //   (実クリックはr2に存在=15回。2026-07-29)。返り値は正規(https付き)ベースのまま=呼び出し側は不変。
     var bare = String(u || '').replace(/^https?:\/\//, '');
     var hosts = SHORT.WORKER_HOSTS.slice();
-    try {
-      ['acc1', 'acc2'].forEach(function (a) { var per = localStorage.getItem('short_worker_url__' + a); if (per) hosts.push(per); });
-      var ov = localStorage.getItem('short_worker_url'); if (ov) hosts.push(ov);
-    } catch (e) {}
+    try { var ov = localStorage.getItem('short_worker_url'); if (ov) hosts.push(ov); } catch (e) {}
     for (var i = 0; i < hosts.length; i++) {
       var b = hosts[i].replace(/\/+$/, '');
       var bb = b.replace(/^https?:\/\//, '');
@@ -1952,8 +1941,8 @@
       setTimeout(function () { _excBtn.textContent = '🚫 自分のクリックを計測から除外(この端末)'; }, 4000);
     });
   } catch (e) {}
-  function shortWorkerReady(account) {
-    return /^https?:\/\//.test(workerBase(account)) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
+  function shortWorkerReady() {
+    return /^https?:\/\//.test(workerBase()) && SHORT.SHARED_SECRET && SHORT.SHARED_SECRET.indexOf('PASTE_') !== 0;
   }
   // ★2026-08-04(恒久策・Chami「Xの投稿がda.gdになってる、大問題」): 一時的な失敗で静かに da.gd へ落ちるのを止める。
   //   従来はワーカーfetchが①タイムアウト無し(ブラウザ既定まで待つ)②失敗即あきらめ で、コールドスタート/瞬断/429の
@@ -1963,7 +1952,7 @@
   //     短縮すると、従来は現UIアカウントのドメイン(5mgl.com/yoz2.com)で発行され、そのドラフトの所属chと
   //     ドメインが食い違い=別々に計測できない。account 指定時はそのchのドメインで発行する(未指定=従来どおり現ch)。
   function shortenViaWorker(longUrl, _tries, account) {
-    if (!shortWorkerReady(account)) return Promise.resolve(null);
+    if (!shortWorkerReady()) return Promise.resolve('');
     _tries = _tries || 0;
     var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 6000) : null;
@@ -1975,15 +1964,12 @@
       signal: ctl ? ctl.signal : undefined
     }).then(function (r) {
       if (timer) clearTimeout(timer);
-      if (r.ok) return r.json().then(function (j) {
-        var short = (j && j.short) || '', destination = (j && j.url) || '';
-        return /^https?:\/\//.test(short) ? { short: short, destination: destination } : null;
-      });
-      if (r.status === 400 || r.status === 401 || r.status === 403) return null; // 確定的な拒否＝再試行しない
-      return retryOr(null);   // 429/5xx＝一時的の可能性＝1回だけ再試行
+      if (r.ok) return r.json().then(function (j) { var s = (j && j.short) || ''; return /^https?:\/\//.test(s) ? s : ''; });
+      if (r.status === 400 || r.status === 401 || r.status === 403) return ''; // 確定的な拒否＝再試行しない
+      return retryOr('');   // 429/5xx＝一時的の可能性＝1回だけ再試行
     }).catch(function () {
       if (timer) clearTimeout(timer);
-      return retryOr(null);   // ネットワーク例外/タイムアウト＝1回だけ再試行
+      return retryOr('');   // ネットワーク例外/タイムアウト＝1回だけ再試行
     });
   }
   // 外部短縮サービスへの新規発番経路は撤去済み。独自link-workerだけを使用し、
@@ -1993,10 +1979,10 @@
   //   worker失敗時：shortUrl/shareUrlは生URL。(長いが有効・計測不能を隠さない)
   //   ★opts.account 指定時はそのチャンネルのドメインで r2 短縮を発行する(未指定=現UIアカウント・従来動作)。
   function makeShortAndShare(longUrl, opts) {
-    if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '', destinationUrl: '' });
+    if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '' });
     var account = opts && opts.account;
     return shortenViaWorker(longUrl, 0, account).then(function (r2) {
-      if (r2 && r2.short) return { shortUrl: r2.short, shareUrl: r2.short, destinationUrl: r2.destination || '' };
+      if (r2) return { shortUrl: r2, shareUrl: r2 };
       // ★2026-08-13 恒久策(Chami「またda.gdの短縮リンク出してくんの、やめろ」・2度目=C-038):
       //   ワーカーが一過性に落ちた瞬間だけ、旧実装は外部短縮(計測不能・Chami禁止)へ
       //   フォールバックして短縮リンクを"発行"していた=これが唯一の da.gd 発生源だった。実測(2026-08-13)で
@@ -2004,7 +1990,7 @@
       //   → 保険で da.gd を新規発番することを完全にやめる。ワーカー失敗時は"生URLのまま"返す。
       //   生URLはそのまま踏めて壊れない(計測できないだけ)=Chamiが二度禁止した da.gd を機構として二度と出さない。
       //   発番器そのものを削除し、将来のフラグ変更でも外部短縮が復活しない構造にした。
-      return Promise.resolve({ shortUrl: longUrl, shareUrl: longUrl, destinationUrl: longUrl });
+      return Promise.resolve({ shortUrl: longUrl, shareUrl: longUrl });
     });
   }
   // 後方互換：表示用の1本を返す薄いラッパ。(手動短縮などで使用)
@@ -2106,7 +2092,7 @@
       var share = res.shareUrl || short || longUrl;    // 表示・概要欄・コピー用(独自短縮、失敗時は生URL)
       // 表示・概要欄への反映は「今のUIと同じアカウントの投稿」のときだけ。(別アカウントの記録でUIを書き換えない)
       if (!account || account === acctId()) setShareOutputs(share, longUrl);
-      histAdd({ account: account, platform: 'bsky', meta: meta, title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: (meta && meta.videoId) || (!account || account === acctId() ? currentVideoId : '') || '', workShortUrl: (workShort && workShort.shortUrl) || '', workShareUrl: (workShort && workShort.shareUrl) || '' });
+      histAdd({ account: account, meta: meta, title: title, shortUrl: short || share, shareUrl: share, postUrl: longUrl, postUri: postUri, videoId: (meta && meta.videoId) || (!account || account === acctId() ? currentVideoId : '') || '', workShortUrl: (workShort && workShort.shortUrl) || '', workShareUrl: (workShort && workShort.shareUrl) || '' });
       if (typeof onShort === 'function') onShort({ shortUrl: short, shareUrl: share });
     });
   }
@@ -2207,7 +2193,7 @@
     // 作品URL：metaがあればそれ、無ければ(現在UIと同じ時だけ)UIから採取。
     var workUrl = meta ? meta.workUrl : (uiSame ? captureWorkUrl_() : '');
     var a = histLoadFor_(account).filter(function (x) { return rec.postUri ? x.postUri !== rec.postUri : x.shortUrl !== rec.shortUrl; }); // 同一投稿の重複を排除
-    var entry = { ts: rec.ts || new Date().getTime(), account: account, platform: (rec.platform === 'x' || rec.platform === 'bsky') ? rec.platform : 'bsky', title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '', confirmed: false };
+    var entry = { ts: rec.ts || new Date().getTime(), account: account, title: rec.title || '', shortUrl: rec.shortUrl, shareUrl: rec.shareUrl || '', postUrl: rec.postUrl || '', postUri: rec.postUri || '', videoId: rec.videoId || (meta ? meta.videoId : '') || '', confirmed: false };
     if (rec.rebuildBaseClicks != null) entry.rebuildBaseClicks = rec.rebuildBaseClicks; // リビルド前の動画までのクリック数(投稿履歴の括弧表示用)
     if (rec.workShortUrl) { entry.workShortUrl = rec.workShortUrl; entry.workShareUrl = rec.workShareUrl || ''; } // 導線2(投稿→FANZA)の計測リンク
     // セール会場(導線3): この投稿に添えたセール案内(名前付き)を履歴へ刻む=投稿履歴に「どの会場を貼ったか」を出せる(Chami依頼DEF-a57e596842)。
@@ -2334,106 +2320,29 @@
   var affiTabBtn_ = document.getElementById('tabAffi');
   if (affiTabBtn_) affiTabBtn_.addEventListener('click', loadHistory);
 
-  // ---- 単体短縮(X返信ツリー等へ例外的に追加するURLを、チャンネル別ドメインで発行)----
-  function manualShortAccount_() {
-    var a = els.manualShortAccount && els.manualShortAccount.value;
-    return (a === 'acc2') ? 'acc2' : 'acc1';
-  }
-  function refreshManualShortDomain_(followCurrent) {
-    if (els.manualShortAccount && followCurrent) els.manualShortAccount.value = acctId();
-    var base = workerBase(manualShortAccount_()).replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    if (els.manualShortDomain) els.manualShortDomain.textContent = '発行ドメイン: ' + base;
-  }
-  refreshManualShortDomain_(true);
-  if (els.manualShortAccount) els.manualShortAccount.addEventListener('change', function () { refreshManualShortDomain_(false); });
-  document.addEventListener('account-changed', function () { refreshManualShortDomain_(true); });
-  function manualAffStatus_(kind, message) {
-    var el = els.manualAffStatus; if (!el) return;
-    if (!message) { el.hidden = true; el.textContent = ''; el.className = 'manual-aff-status'; return; }
-    el.hidden = false;
-    el.className = 'manual-aff-status ' + (kind === 'ok' ? 'is-ok' : (kind === 'off' ? 'is-off' : 'is-ng'));
-    el.textContent = '';
-    var title = document.createElement('b'), value = document.createElement('span');
-    title.textContent = 'アフィチェック';
-    value.textContent = (kind === 'ok' ? '✅ ' : (kind === 'off' ? '− ' : '⚠️ ')) + message;
-    el.appendChild(title); el.appendChild(value);
-  }
-  function rememberManualAffiliateShort_(account, shortUrl, destinationUrl) {
-    try { sessionStorage.setItem('go5_manual_short_last__' + account, JSON.stringify({ shortUrl: shortUrl, destinationUrl: destinationUrl, affiliateOk: true, at: Date.now() })); } catch (e) {}
-  }
-  try {
-    window.Go5ManualShortLast = function (account) {
-      try { return JSON.parse(sessionStorage.getItem('go5_manual_short_last__' + (account === 'acc2' ? 'acc2' : 'acc1')) || 'null'); } catch (e) { return null; }
-    };
-  } catch (e) {}
+  // ---- 手動短縮(アプリ外で単独投稿した分のURLを貼って短縮＋履歴追加)----
   if (els.manualShortBtn) els.manualShortBtn.addEventListener('click', function () {
     var url = (els.manualUrl && els.manualUrl.value || '').trim();
-    var useAffiliate = !els.manualAffiliateOn || !!els.manualAffiliateOn.checked;
-    if (els.manualOut) { els.manualOut.textContent = ''; els.manualOut.removeAttribute('data-url'); }
-    manualAffStatus_('', '');
     if (!/^https?:\/\//.test(url)) {
       if (els.manualOut) els.manualOut.textContent = 'URLは http:// か https:// で始めてください';
       if (els.manualResult) els.manualResult.hidden = false;
       return;
     }
-    var targetUrl = url;
-    if (useAffiliate) {
-      if (typeof window.ensureAffiliateLink !== 'function' || typeof window.hasRealAffiliateId !== 'function') {
-        if (els.manualOut) els.manualOut.textContent = 'アフィリンク機能を読み込めませんでした。再読み込み後にお試しください';
-        if (els.manualResult) els.manualResult.hidden = false;
-        manualAffStatus_('ng', 'アフィリンクNG');
-        return;
-      }
-      var afId = curAfId_();
-      var normalized = (typeof window.normalizeWorkUrl === 'function' && window.normalizeWorkUrl(url)) || url;
-      var built = window.ensureAffiliateLink(normalized, afId);
-      if (!built || !built.ok || !built.link || !window.hasRealAffiliateId(built.link)) {
-        if (els.manualOut) els.manualOut.textContent = curAfId_() ? 'DMM/FANZAの作品URLを確認してください' : '詳細設定でFANZAアフィリエイトIDを入力してください';
-        if (els.manualResult) els.manualResult.hidden = false;
-        manualAffStatus_('ng', 'アフィリンクNG');
-        return;
-      }
-      targetUrl = built.link;
-    }
     var btn = els.manualShortBtn, orig = btn.textContent;
-    var account = manualShortAccount_();
-    var expectedBase = workerBase(account).replace(/\/+$/, '');
     btn.disabled = true; btn.textContent = '短縮中…';
-    makeShortAndShare(targetUrl, { account: account }).then(function (res) {
-      var s = (res && (res.shareUrl || res.shortUrl)) || '';
-      var destination = (res && res.destinationUrl) || '';
-      var domainOk = !!(s && expectedBase && s.indexOf(expectedBase + '/') === 0);
-      // ワーカーが返した「実際に保存した転送先」を照合する。生成前の見込みだけではOKにしない。
-      var destinationAfId = '';
-      try { destinationAfId = new URL(destination).searchParams.get('af_id') || ''; } catch (e) {}
-      var affiliateOk = !useAffiliate || !!(domainOk && destination === targetUrl && window.hasRealAffiliateId && window.hasRealAffiliateId(destination) && destinationAfId === afId);
-      var issued = domainOk && affiliateOk;
-      if (els.manualOut) {
-        els.manualOut.textContent = issued ? s : (domainOk && useAffiliate ? '短縮先のアフィリンクを確認できませんでした。発行し直してください' : '短縮リンクを発行できませんでした。通信後にもう一度お試しください');
-        if (issued) els.manualOut.setAttribute('data-url', s);
-      }
+    makeShortAndShare(url).then(function (res) {
+      var s = (res && (res.shareUrl || res.shortUrl)) || url;  // 失敗時は元URLで代替
+      // 計測コード(r2)が取れたら添える=クリック数は検証タブ「🔗短縮リンク台帳」で見られる
+      var w = ((window.Go5Short && window.Go5Short.WORKER_URL) || '').replace(/\/+$/, '');
+      var code = (res && res.shortUrl && w && res.shortUrl.indexOf(w + '/') === 0) ? res.shortUrl.slice(w.length + 1) : '';
+      if (els.manualOut) els.manualOut.textContent = s + (code ? ' (計測コード: ' + code + ' → 台帳で確認可)' : ' (計測なし)');
       if (els.manualResult) els.manualResult.hidden = false;
-      if (useAffiliate) {
-        manualAffStatus_(affiliateOk && domainOk ? 'ok' : 'ng', affiliateOk && domainOk ? 'アフィリンクOK' : 'アフィリンクNG');
-        if (issued) rememberManualAffiliateShort_(account, s, destination);
-      } else {
-        manualAffStatus_('off', 'アフィリンクなし(チェックOFF)');
-      }
-      btn.textContent = issued ? '✓ 発行しました' : '発行できませんでした';
-      setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
-      if (issued && els.manualUrl) els.manualUrl.value = '';
-    }).catch(function () {
-      if (els.manualOut) { els.manualOut.removeAttribute('data-url'); els.manualOut.textContent = '短縮リンクを発行できませんでした。通信後にもう一度お試しください'; }
-      if (els.manualResult) els.manualResult.hidden = false;
-      manualAffStatus_(useAffiliate ? 'ng' : 'off', useAffiliate ? 'アフィリンクNG' : 'アフィリンクなし(チェックOFF)');
-      btn.textContent = '発行できませんでした';
-      setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
+      // 履歴(投稿履歴タブ)には追加しない。短縮URLと計測コードを表示するだけ。(台帳=/api/listが記録の正)
+      btn.textContent = '✓ 短縮しました'; setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1600);
+      if (els.manualUrl) els.manualUrl.value = '';
     });
   });
-  if (els.manualCopy) els.manualCopy.addEventListener('click', function () {
-    var url = (els.manualOut && els.manualOut.getAttribute('data-url') || '').trim();
-    if (url) copyText(url, els.manualCopy);
-  });
+  if (els.manualCopy) els.manualCopy.addEventListener('click', function () { copyText(els.manualOut.textContent, els.manualCopy); });
 
   // ---- 編集できる確認モーダル(方法①自動投稿) ----
   // 直近に“実際に投稿した”作品URL。(取り違え＝前回のまま投稿、の検知用。アカウント別)
@@ -2787,14 +2696,9 @@
     var newVid = (ev && ev.detail && ev.detail.videoId) || currentVideoId || '';
     var title = (ev && ev.detail && ev.detail.title) || old.title || '';
     var baseClicks = null; // リビルド時点までのクリック数(括弧表示のスナップショット)
-    var inheritedPlatform = (old.platform === 'x' || old.platform === 'bsky') ? old.platform : '';
     try { if (window.Go5Clicks && old.shortUrl) baseClicks = window.Go5Clicks.of(old.shortUrl); } catch (e) {}
-    var histRecord = { account: account, meta: meta, title: title, shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || old.shortUrl || '', postUrl: old.postUrl || '', postUri: old.postUri || '', videoId: newVid, rebuildBaseClicks: baseClicks };
-    if (inheritedPlatform) histRecord.platform = inheritedPlatform;
-    histAdd(histRecord);
-    var sheetRecord = { account: account, meta: meta, title: title, postUrl: old.postUrl || '', postUri: old.postUri || '', shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || '', videoId: newVid };
-    if (inheritedPlatform) sheetRecord.platform = inheritedPlatform;
-    recordToSheet(sheetRecord);
+    histAdd({ account: account, meta: meta, title: title, shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || old.shortUrl || '', postUrl: old.postUrl || '', postUri: old.postUri || '', videoId: newVid, rebuildBaseClicks: baseClicks });
+    recordToSheet({ account: account, meta: meta, title: title, postUrl: old.postUrl || '', postUri: old.postUri || '', shortUrl: old.shortUrl || '', shareUrl: old.shareUrl || '', videoId: newVid });
     _skipNextYtReset = true; // 直後に走る video-created の説明欄リセット(INC-70)を1回スキップ(旧短縮URLを残す)
     setShareOutputs(old.shareUrl || old.shortUrl || '', old.postUrl || ''); // YT説明欄へも旧短縮URLを反映
     setBskyStatus('🔁 リビルド：Blueskyへは再投稿せず、前回の投稿を引き継ぎました。(短縮URL・クリック計測は継続)');

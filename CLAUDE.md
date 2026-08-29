@@ -34,26 +34,12 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 
 - すべて基準フレーム高さ比(px/vh/vw 不使用)。`localStorage` 保存・復元、「既定値に保存」「リセット」対応。各コントロールは `app.js` の `CONTROLS` テーブルで駆動(＋/−ボタンが `OFF[key]` を step 単位で増減)。
 
+
 ### 変更履歴(開発の順番)
-18. **Google Drive 自動保存**：★**保存タイミングは動画作成タブの「ドラフトで作成」押下後、生成動画が手元IDBまたはR2へ着地しドラフト台帳が確定した直後に一本化**(Chami指示2026-08-25)。投稿完了はDrive保存を起動しない。`stock.js`の`saveStock_.onCommitted`→`autoDriveSaveDraft_`→`driveSaveDataset_`が、生成動画＋元画像＋仕上がりプレビューを **Cloudflare Worker 経由**で `マイドライブ/AFI5秒動画/[チャンネル]/[動画名]/` へ保存する。非同期通信より先に`go5_drive_savejob_<id>`を同期記録し、直後の画面移動/iOS Safari破棄でも次回起動sweepが再送。手元/雲の二系統が同時成功してもブラウザはチャンネル＋題名単位single-flight。Worker側も共有R2の条件付きPUTリースで別isolate・別タブ・別端末を直列化し、成功直後の遅延再送をクールダウンで抑止する。フロント＝`drive-upload.js`(失敗してもドラフト本体は成功のまま・永続再送/手動再試行可)。Worker＝`drive-worker/`(**破壊面の不変条件：フォルダ新規作成・ファイル新規アップロード・参照＋"フォルダのゴミ箱送り(trashed=true PATCH)ただ1種"のみ。完全削除/改名/移動APIは不在＝grep検証は"trashed"1語**)。★**同題名は上書き**(Chami指示2026-08-13)＝`overwrite=1`(フロント明示)かつ`env.ALLOW_OVERWRITE='1'`(サーバ側キルスイッチ)の二重ロック時だけ、窓内(作成30日以内・DriveのcreatedTimeが正)の同名フォルダを **新規保存の"後"に**ゴミ箱送り(先に上げてから消す=喪失ゼロ/30日復元可/trash直前に親直下・フォルダ・題名一致・窓内を再検証)。窓外/同名なし/フラグ無しは従来どおり `_2,_3…` 連番で非破壊。認証は本人OAuth refresh_token(個人Gmailのため Service Account 不可)を **Worker Secrets** に保管。スコープは `drive`(既存フォルダへ書くため／作成専用コードで運用。承認済)。Origin制限＋共有シークレット＋KV日次レート制限の多層防御。フォルダIDは env 固定(取り違え防止)。手順＝`drive-worker/SETUP.md`。秘密はフロント/repo/ログに出さない(SHARED_SECRETのみフロント可＝ソフト鍵)。
-1. FANZAアフィリンク生成機能を統合(タブ切替・純粋関数＋テスト)
-2. プレビュー文字改善(「作者：」常時表示・黒帯はみ出し対策)
-3. 基準座標系を **1080×1920** に統一(全パラメータ比率化／プレビュー＝書き出し一致)
-4. 「全体の縦位置」スライダー追加
-5. スマホで横潰れする不具合を修正(CSSの9:16固定崩れ／`?v=` キャッシュ対策)
-6. スライダーの保存・既定値・リセット(汎用 `Store` ヘルパ)
-7. 黒帯を3段別に独立制御
-8. 文字も3段別に独立 ＝ 現在の7本構成
-9. **Bluesky 自動投稿**を追加(完全クライアントサイド)。動画作成後に確認ダイアログ→**挿入した元写真**＋固定文＋提携文＋**生のアフィリンク(無改変)** を投稿
-10. **投稿記録＆クリック集計**を追加。投稿後、共有URLを GAS Web App へ送信→Bitly短縮→Googleスプレッドシートに「題名(動画タイトル)/各URL/クリック数」を記録。クリック数＝**投稿短縮URLの開封数**(アフィリンクには介入しない設計)
-13. **スケジュール統合 Phase1(v=13)**：投稿スケジュール最適化システムを **📅カレンダータブ**として統合(`schedule/` に配置し **iframe** 埋め込み＝CSS/JS衝突回避・既存機能は回帰ゼロ)。同一オリジンで localStorage 共有。タブは 🎬動画作成／📅カレンダー／🦋投稿／🔗アフィリンク(🧪検証はカレンダー内)。設計書＝`5秒動画タイムスケジュール/docs/統合設計書_動画メーカー×スケジュール.md`。
-17. **Phase5 無人予約投稿(v=19)**：GAS拡張で**タブを閉じても**予約時刻に自動投稿。クライアントの「⏰予約」に**☁️無人トグル**追加→GASへ `type:'reserve'`(本文＝固定文＋自動アフィリンク／画像base64)送信。GAS側 `runReservations`(5分トリガー)が「予約」シートのpendingを `bskyPost_`(createSession→uploadBlob→createRecord・facet)で投稿、画像はDrive一時保存→投稿後ゴミ箱。投稿アカウントはGASプロパティ `BSKY_HANDLE/BSKY_APP_PW`。無人OFFは従来の端末タイマー(Phase3)。
-(v17=iPhone UI改善 / v18=投稿UI刷新：本文固定文＋アフィリンク自動付与・実アバター取得・編集確認モーダル)
-16. **スケジュール統合 Phase4 検証ダッシュボード(v=16)**：🧪検証タブを追加。共有ストア(`sch_state_v1`)の「公開済」投稿を一覧し、**Bluesky公開API(`public.api.bsky.app` getPosts・未認証・CORS)で いいね/リポスト/返信** を取得＋**Bitlyクリック(slot.click_count)**＋**FANZA成約(手入力・localStorage `verify_fanza`)** を day-type 別に集計。純粋関数 `verify-core.js`(`buildGetPostsUrl`/`parseEngagement`/`postedSlotsFromState`)＝`tests/test_verify.js` 5項目。検証KPIをYouTube前提→Bluesky指標へ再定義(設計書§6.4)。
-15. **スケジュール統合 Phase3 予約投稿(v=15)**：`scheduler.js` を追加。🦋投稿タブに **⏰予約投稿**(datetime＋予約ボタン＋予約中リスト)。30秒ごとの tick で期限到来(pending かつ scheduledAtMs≤now)の予約を `BlueskyCore.blueskyPostRaw` で自動投稿→`bluesky-posted`(slotId付)発火→`integration.js`がスロット書き戻し＋ブラウザ通知。**このタブを開いている間のみ**(画像等はin-memory／無人化はPhase5のcronで対応)。`dueItems` は純粋関数でNodeテスト可(`tests/test_scheduler.js` 3項目)。📅から来た場合は枠の予定時刻をプリフィル。
-14. **スケジュール統合 Phase2 一気通貫(v=14)**：カレンダーのスロット編集に「🎬この枠で動画を作る／🦋この枠を投稿する」を追加→`postMessage`で親へ(`schedule/js/app.js`)。親は `integration.js` で受けて該当タブへ切替＋**対象スロットのバナー表示**(`#slotCtxMovie/#slotCtxPost`)。投稿成功で `bluesky.js` が `bluesky-posted` を発火→`integration.js`がiframeへ`slot-writeback`→スロットを **公開済＋URL** に更新。橋渡しは postMessage＋同一オリジンlocalStorage。次：Phase3 予約投稿／Phase4 Bluesky用検証KPI。
-12. **3タブ統合(v=12)**：1ページに **🎬動画作成／🦋投稿／🔗アフィリンク** の3タブ。投稿手段は2つ＝**①動画作成後の自動投稿**(`#bskyEnable`／本文＋動画の元写真)と **②単独で今すぐ投稿**(🦋投稿タブの `#postNowBtn`／本文＋任意画像 `#postImg`)。本文 `#bskyText`・アカウント設定は両手段で共通。🦋投稿タブに **Bluesky風ライブプレビュー**(このまま投稿される見た目)。タブ切替は `affiliate.js` の `TABS`。`post.html` は単独ページとして残置(同等機能)。
-11. **UI再設計(v=11)**：①位置調整を**スライダー→＋/−ボタン**化し、プレビュー横(スマホは sticky)で見ながら微調整。②**黒帯の余白**(`OFF.bandPad`)と**段の間隔**(`OFF.rowGap`)を追加(計9コントロール)。③Bluesky投稿欄を**1つの自由テキスト本文(`bskyText`)に統合**(固定文/提携文/作品URL欄を廃止)。本文中のURLは `detectFacets` で自動リンク化(facetのindexは**UTF-8バイトオフセット**)。★アフィリンクは編集中は生表示だが**投稿直前に短縮へ差し替わる**(2026-07-20訂正)。④アプリパスワード等は折りたたみ＝任意(未入力なら投稿スキップ)
+
+1〜17番は `docs/変更履歴_開発の順番.md` へ移した(記録であって規約ではない)。
+18番(Google Drive自動保存・★破壊面の不変条件)は `.claude/rules/drive-save.md`＝`drive-worker/`・`drive-upload.js`・`stock.js` を触ると自動で読まれる。
+
 
 ---
 
@@ -80,19 +66,12 @@ iPhone等の**ブラウザだけ**で、写真＋テキストから **5秒・縦
 
 ---
 
-## 3. 座標系の規約(最重要・崩さない)
 
-- 基準フレーム **`W=1080, H=1920`(9:16)が唯一の基準座標系**。`index.html` の `<canvas width height>` も一致させる。
-- 位置・フォントサイズは `H×係数` / `W×係数`。旧来の絶対px定数は **`U(v)=v*H/1280`** で基準フレームに換算。
-- プレビューも書き出しも**同一Canvasに同じ式で描画** → PC/スマホ/書き出しで一致(CSSは9:16を一様縮小表示するだけ)。
-- 縦オフセットは `OFF` オブジェクトで一元管理：
-  - `OFF.whole`(全体)／`OFF.textAuthor/textDetail/textTitle`(各段の位置＝帯＋文字を一体で動かす)。
-  - **段別オフセットは描画位置にのみ加算し、段の送りY(次段位置)には反映しない**＝他段に波及しない。
-  - **帯は各段のテキストに統合**＝帯と文字は常に同じオフセットで一緒に動く(★旧・帯独立軸 `OFF.bandAuthor/bandDetail/bandTitle` は廃止・2026-07-07。「帯だけ」を別に動かすことはできない)。
-- `document.fonts.ready` 後に再描画(フォールバックフォント計測由来のズレ防止)。
+## 3. 座標系・投稿まわりの規約
 
-### localStorage キー
-`preview_offset_y`(全体)／`preview_text_author|detail|title`、各 `*_default`(既定値)。2行モード＝`movie_author_two_line`/`movie_two_line`。旧キー `v_offset`・`preview_band_y`・`preview_band_author|detail|title` は退役(読まれない)。
+- **座標系(最重要・崩さない)と localStorage キー** → `.claude/rules/canvas-coords.md`(`app.js`/`index.html`/`style.css` を触ると自動で読まれる)
+- **Bluesky投稿(§9)と 投稿記録・クリック集計(§10)の要点** → `.claude/rules/posting-record.md`(`bluesky*.js`/`gas/`/`link-worker/` を触ると自動で読まれる)
+
 
 ### キャッシュ運用
 `index.html` のアセット参照は `app.js?v=N` の形。中身を変えたら版を上げるとスマホで確実に最新が読まれる。
@@ -107,21 +86,6 @@ CIのスモーク(`Frontend deploy smoke (恒久-3)`)は**配信された `?v=` 
 - **X投稿は手動運用。** このアプリはクライアントサイドで X へ直投稿できない(=下の §10 末尾「X はこの構成では不可」の通り。OAuth＋サーバー必須)。**したがって下の §9「Bluesky 投稿」はアプリに実装された機能の説明で、コードは残置しているが現在の投稿導線では使っていない**(§10 の Bluesky公開API エンゲージ取得・`bsky.app` 共有URL も Bluesky経路に紐づく=現運用では非経路)。※アプリ機能仕様として残す。
 - **★X運用のP0作法=アフィリンクは投稿本文へ直ポストせず"返信"に置く**(本文直ポストで凍結の実例あり)。独自ドメイン短縮によるクリック計測(§10・link-worker 開封数)は投稿先が X でも成立する(短縮URLの開封を数えるため)。
 
-### Bluesky 投稿(§9 機能)の要点(★現運用では非経路=上の注記参照。アプリ機能仕様として残置)
-- 完全クライアントサイド。`https://bsky.social` の XRPC を直接叩く(CORS対応・サーバー不要)。認証は**アプリパスワード**(通常PWではない／revoke 可能)。
-- フロー：`app.js` の `make()` 成功時に `video-created` を dispatch → `bluesky.js` が購読 → 確認ダイアログ → `#cv` の最終フレームを JPEG 圧縮(≤約950KB)→ `blueskyPostWithImage()`。
-- 画像 embed(`app.bsky.embed.images`)と外部リンクカードは併用不可のため、**作品URLは本文に richtext#link facet 付きで入れる**(facet の index は **UTF-8 バイトオフセット**)。
-- 設定の localStorage キー：`bsky_enable` / `bsky_text`(本文1ボックス) / `bsky_handle` / `bsky_app_pw` / `bsky_gas_url` / `bsky_gas_secret`。位置調整は `preview_*`(`preview_band_pad`・`preview_row_gap` を追加)。
-- 投稿は `BlueskyCore.blueskyPostRaw({identifier,appPassword,text,imageBlob,alt})`＝本文そのまま投稿＋`detectFacets` で本文中URLを自動リンク化。旧 `buildBlueskyPost`/`blueskyPostWithImage` も残置(互換・テスト用)。
-- 秘匿情報(アプリパスワード・af_id・シークレット)は **console に出さない**(既存方針を踏襲)。
-
-### 投稿記録＆クリック集計(§10 機能)の要点
-- **クリック数＝投稿の短縮URLの開封数**(★Bitlyは全廃・現在は自前 link-worker＝2026-07-20確認)。本文の作品リンク/セール会場リンクは**どちらも最終投稿時には短縮リンク**(★旧記述「生のまま(無改変)」は誤り)。作品リンクは編集中は生アフィリンク表示だが、**投稿直前に `measureWorkLink_` が短縮へ差し替える**(今すぐ/予約/無人予約/動画後自動の全経路)。短縮は302素通し(Locationに完全URL)なので **af_id は保持され計測は壊れない**。アフィリンクのクリック実数は取得不可(FANZA 管理画面が正)。
-- 投稿の共有URLは `at://…/<rkey>` から `https://bsky.app/profile/<handle>/post/<rkey>` を組み立て(`bluesky-core.js`)。
-- クライアントは GAS Web App へ `{channel,title,postUrl,affiliateUrl,workUrl,hashtags,postUri}` を **Content-Type無指定の POST**(＝simple request でプリフライト回避)。★共有URLの短縮は**クライアント側**(`shortenAndShow`→`makeShortAndShare`)が投稿直後に行い、GASへは**短縮済みの値**を送る。GASはシート追記が主で、短縮値が来なかった時だけ `daGdShorten_()`(da.gdのみ)でフォールバック短縮する副経路が残る。
-- **記録は2チャンネル別シート**：GAS(`gas/コード.gs` v2)が `channel`(acc1/acc2)に応じて **`記録_ch1`/`記録_ch2`** へ**列名マッピング**で自動記入(記録先は「動画記録分析テンプレート.xlsx」を取り込んだスプレッドシート前提＝`設定`/`Holidays`/`集計` 含む)。`refreshClicks`(Bitly)＋`refreshEngagement`(Bluesky公開API いいね/リポスト/返信)を毎時更新。分析テンプレ＝プロジェクト直下 `記録分析テンプレート/`。
-- ★**Bitlyは全廃**(`gas/コード.gs` 冒頭コメントに明記)。短縮は自前 Cloudflare Worker(`link-worker`)＝**チャンネル別独自ドメイン**(月詠み `5mgl.com` / 宵桜艶帖 `yoz2.com`)。Worker失敗時のみ da.gd→TinyURL へフォールバック、全滅時は元URLのまま。シートの「Bitly_ID」「Bitlyクリック」列名は互換のため残置だが、中身は **link-worker の開封数**。
-- X(旧Twitter)はこの構成では不可(OAuth＋サーバー必須・直投稿はCORS不可)。
 
 ---
 
@@ -136,17 +100,11 @@ CIのスモーク(`Frontend deploy smoke (恒久-3)`)は**配信された `?v=` 
   ```
   push認証：GitHubユーザー名＋Personal Access Token(リモートURLにトークンを埋め込まない)。
 
+
 ### GAS(コード.gs)の反映(自動化済み・手動コピペ禁止)
 
-- `gas/コード.gs` を編集したら**必ず `GAS_VERSION` をバンプ**する(日付＋英字サフィックス。例 `2026-07-02H`)。
-- 反映は **`GASを反映.bat`(＝`node scripts/deploy_gas.mjs`)** を実行するだけ。
-  clasp で push→**既存デプロイIDに新バージョンを当てる**ため **exec URL は不変**。
-  `?ping=1` でバージョン一致を機械検証し、`?action=admin_setup` で**トリガー再設定＋ヘッダ移行**まで自動実行する。
-  → GAS エディタへの手動コピペ・手動再デプロイは案内しない(初回だけ `GAS初期設定.bat`)。
-- 反映前チェックだけしたい時は `node scripts/deploy_gas.mjs --check`。
-- **`clasp pull` を `gas/` に対して実行しない**(ローカルが正。クラウド版で上書きされる)。
-  設計・落とし穴の詳細は `docs/設計・調査/GAS自動反映_設計書.md`。
-- 秘密(`.clasp.json` / `scripts/gas_deploy_config.json` / `~/.clasprc.json`)はコミット禁止。
+手順は `.claude/rules/gas-deploy.md`(`gas/` を触ると自動で読まれる)。**要点だけ**= `GAS_VERSION` を必ずバンプ／反映は `GASを反映.bat`／`clasp pull` を `gas/` へ実行しない／`.clasp.json`・`scripts/gas_deploy_config.json` はコミット禁止。
+
 
 ---
 

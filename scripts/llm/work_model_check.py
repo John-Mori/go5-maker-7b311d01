@@ -17,6 +17,12 @@
      便ごとに `dept` と `model` を実測で書いている)。②の判定はここを数えるのが正しい。
      これは自己申告ではなく、起動時に渡した `--model` の値そのものだ。
 
+★2026-08-29 追記(HQ-0218)= 「frontend は不採用。ただし**月100便を超えたら再検討**」の条件は
+  ここではなく **scripts/llm/watch_triggers.py の T3** に線として置いた(この台帳 work_audit.jsonl を
+  数える点は同じ)。理由= この道具は**人が思い出して叩く**もので、思い出さなければ動かない。
+  HQの発注は「人の記憶に置くな」なので、定刻で回る側(quota_alarm → watch_triggers)へ載せた。
+  同じ理由で「kaizen-analyst を7日後に判定して戻す」も T2 に載っている。検査= tests/test_watch_triggers.py。
+
 使い方:
   python scripts/llm/work_model_check.py                       # 直近24時間
   python scripts/llm/work_model_check.py --hours 24 --ago 24   # 24時間前に終わる24時間の窓(前後比較)
@@ -137,8 +143,22 @@ def main():
     print("\n★理由の在る便 %d 本のうち Sonnetへ落ちたのは %d 本 (%.1f%%)" % (known, dropped, pct))
     # ★帯は研究室HQが queue経路の実測(全便225/作業便62・Chami27%・マーカー29%・落とす43.5%)
     #   から出した予測。**分母が違う**(あちらはqueueテーブルの便だけ)ので目安として使う。
-    if pct < 10:
-        print("  → ★**ほぼ0**= まだどこかで死んでいる。上の内訳で『どの語で止まったか』を見ろ。")
+    # ★★2026-08-29 研究室HQ HQ-0218の指摘= 落ちた便が0でも、内訳で**全便に正当な理由が付いている**
+    #   ことがある(名簿に無い部屋ばかりの窓・Chami便ばかりの窓)。そこへ「死んでいる」と断定して
+    #   出すと、読んだ人間が壊れていると誤認する。**理由で説明が付かない残りが在る時だけ**疑う。
+    GUARDS = ("not_work", "chami", "marker", "not_listed", "too_short", "no_history")
+    guarded = sum(reasons.get(k, 0) for k in GUARDS)
+    unexplained = known - dropped - guarded
+    if pct < 10 and unexplained <= 0:
+        top = ", ".join("%s %d本" % (labels.get(k, k), reasons[k])
+                        for k in GUARDS if reasons.get(k)) or "(なし)"
+        print("  → ★**落ちた便は0だが、配線の死ではない。**残り %d本は全て理由が付いている= %s"
+              % (guarded, top))
+        print("     → **落とせる便がこの窓に無かった**だけだ。疑うなら名簿(②のwork)の側を見ろ。")
+    elif pct < 10:
+        print("  → ★**ほぼ0**で、しかも理由の付かない便が **%d本** 残っている= どこかで死んでいる。"
+              % unexplained)
+        print("     上の内訳で『どの語で止まったか』を見ろ。")
     elif pct > 90:
         print("  → ★**ほぼ10割**= 守り(Chami便・🔥)が効いていない=**品質事故**。即差し戻し。")
     elif 40 <= pct <= 60:

@@ -12,6 +12,7 @@
       --fixed "<直った実物の在りか>" --scene "<どの場面で見たか>" --by "ケヴィン・デ・ブライネ"
 
   一覧を見る:   python scripts/llm/close_item.py --list --dept aegis-gl
+  1件の全文:    python scripts/llm/close_item.py --show DEF-xxx-yyy
   台帳の点検:   python scripts/llm/close_item.py --health
 
 掟(session_relay.confirm_defect と同じ。ここで緩めない):
@@ -21,11 +22,39 @@
   * 追記のみ。既存行は絶対に書き換えない。受理されなかった行も**残す**(何が足りなかったかを読めるように)。
 """
 import argparse
+import json
 import os
 import sys
+import time
+
+# ★日本語Windowsの出口(cp932)で落とさない/化けさせない(2026-08-29)。
+#   これが無いと --show / --list が **🔥印の付いた台帳行で UnicodeEncodeError で死ぬ**。
+#   死ななかった行も日本語が化けるので、症状(壊れた実物の説明)が読めない=閉じられない。
+#   ★scripts/llm/ の87本中52本が既にこの作法。ここだけ抜けていた。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:                                                # noqa: BLE001
+    pass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import session_relay as SR                                       # noqa: E402
+
+# ★HQ-0220③ 実行条件2 の後半=「該当台帳へのgrepアクセス頻度」。
+#   ★★これには**遡れる基準が無い**(grepはどこにも記録されていない)。
+#   遡れないものを遡ったふりで数えるより、**今日から数え始める**方を選ぶ。
+#   = 痩身で「台帳を引く手」が実際に使われているかを、次の世代が実測で見られるようにする。
+ACCESS_LOG = os.path.join(SR.LOCAL, "llm", "ledger_access.jsonl")
+
+
+def _touch(op, arg=""):
+    """台帳を開いた足跡を1行。★失敗しても本来の仕事は止めない(計器が本業を殺さない)。"""
+    try:
+        with open(ACCESS_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                "op": op, "arg": arg}, ensure_ascii=False) + "\n")
+    except Exception:                                            # noqa: BLE001
+        pass
 
 
 def _list(dept):
@@ -42,6 +71,38 @@ def _list(dept):
         if d["rejected"]:
             print("      ★閉じようとして弾かれた記録 %d件: %s"
                   % (len(d["rejected"]), d["rejected"][-1]))
+    return 0
+
+
+def _show(did):
+    """1件の**全文**を出す(★HQ-0220③ 実行条件1「全文は台帳へのポインタのまま」の受け口)。
+
+    起動文の痩身(ID+件数+一行要旨)で落としたのは**毎便刷る分**だけで、中身は台帳に在る。
+    ただし「台帳に在る」だけでは読めない= 開く手が要る。それがここ。
+    ★読むだけ。台帳は1バイトも書き換えない。
+    """
+    d = {x["id"]: x for x in SR.fold_defects(None)}.get(did)
+    if d is None:
+        print("そのIDは台帳に在りません: %s" % did)
+        print("  (--list で今の未確認を見てください。IDの写し間違いが多い)")
+        return 2
+    kind = "依頼" if d.get("kind") == SR.DEFECT_KIND_REQUEST else "不具合"
+    print("[%s] (%s/%s) %s" % (d["id"], d["dept"], kind, d["status"]))
+    if d.get("enjo"):
+        print("  🔥炎上= Chamiが『これは事故だ・恒久対策まで行け』と押した印(C-038/C-040)")
+    print("  症状/本文 = %s" % " ".join((d["symptom"] or "").split()))
+    print("  実物の在りか= %s" % (d["broken"] or "(無い★)"))
+    print("  気づいた/頼まれた= %s" % (d["noticed_at"] or "不明"))
+    if d.get("source"):
+        print("  出所= %s" % d["source"])
+    if d.get("close_when"):
+        print("  ★閉じる条件= %s" % d["close_when"])
+    for n in (d.get("nudges") or []):
+        print("  ★Chamiからの催促= %s" % n)
+    for r in (d.get("rejected") or []):
+        print("  ★閉じようとして弾かれた= %s" % r)
+    if d["status"] == SR.DEFECT_CONFIRMED:
+        print("  確認済 fixed= %s" % d["fixed"])
     return 0
 
 
@@ -63,12 +124,17 @@ def main():
     ap.add_argument("--scene", default="", help="どの場面で確かめたか")
     ap.add_argument("--by", default="", help="誰が確かめたか(人格名でよい)")
     ap.add_argument("--list", action="store_true", help="未確認の一覧を出す")
+    ap.add_argument("--show", metavar="ID", help="1件の全文を出す(起動文で落とした詳細はここ)")
     ap.add_argument("--health", action="store_true", help="台帳に読めない行が無いか点検する")
     a = ap.parse_args()
 
     if a.health:
         return _health()
+    if a.show:
+        _touch("show", a.show)
+        return _show(a.show)
     if a.list:
+        _touch("list", a.dept)
         return _list(a.dept)
     if not a.id or not a.dept:
         ap.error("--id と --dept は必須です(一覧は --list、点検は --health)")

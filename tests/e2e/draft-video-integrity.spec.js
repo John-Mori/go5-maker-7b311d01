@@ -91,7 +91,6 @@ test.describe('ドラフト動画の完全性ゲート', () => {
       const preview = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3MxZ5wAAAABJRU5ErkJggg==';
       Go5Drive.folderIdFor = () => '';
       Go5Drive.checkSaved = () => Promise.resolve(false);
-      Go5Drive.folderState = () => Promise.resolve({ saved: false, hasPreview: false, hasSrc: false });
       Go5Drive.fetchPreview = () => Promise.resolve(preview);
       Go5Drive.fetchVideo = () => Promise.resolve(null);
       Go5Drive.queueSave = (opts) => {
@@ -133,45 +132,6 @@ test.describe('ドラフト動画の完全性ゲート', () => {
     expect(state.pending).toBe(true);
     expect(state.driveState).toBe('pending');
   });
-  test('Driveに動画だけ着地しても完了にせずpendingを保持して不足2点を再試行する', async ({ page }) => {
-    await ready(page);
-    await page.evaluate(() => {
-      window.__draftDriveCalls = 0;
-      Go5Drive.folderIdFor = () => '';
-      Go5Drive.checkSaved = () => Promise.resolve(false);
-      Go5Drive.folderState = () => Promise.resolve({ saved: true, hasPreview: false, hasSrc: false });
-      Go5Drive.fetchPreview = () => Promise.resolve(null);
-      Go5Drive.fetchVideo = () => Promise.resolve(null);
-      Go5Drive.queueSave = () => { window.__draftDriveCalls += 1; return Promise.resolve({ ok: true }); };
-      Go5Sync.configured = () => true;
-      Go5Sync.putBlobR2At = () => Promise.resolve('a'.repeat(64));
-      Go5Sync.hasBlobR2At = () => Promise.resolve(true);
-      Go5Sync.keyForName = () => Promise.resolve('a'.repeat(64));
-      Go5Sync.getConfig = () => ({ url: 'https://sync.example.test' });
-      Go5Sync.fetchBlobR2At = () => Promise.resolve(null);
-      document.dispatchEvent(new CustomEvent('video-created', {
-        detail: {
-          draft: true, title: 'Drive動画だけ回帰', name: 'video-only.mp4', account: 'acc1',
-          videoId: 'acc1-20260826-0300-threepoint',
-          blob: new Blob([new Uint8Array(32 * 1024)], { type: 'video/mp4' }),
-          sourceImageFile: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' })
-        }
-      }));
-    });
-    await page.waitForFunction(() => JSON.parse(localStorage.getItem('go5_stock_meta') || '[]')[0]?.videoReadyAt, { timeout: 10000 });
-    await page.waitForTimeout(4800); // verifyDriveLanded_ の初回4秒確認まで進める
-    const state = await page.evaluate(() => {
-      const meta = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]')[0];
-      return {
-        pending: !!localStorage.getItem('go5_drive_savejob_' + meta.id),
-        driveState: JSON.parse(localStorage.getItem('go5_drive_saved_' + meta.id) || 'null')?.state,
-        calls: window.__draftDriveCalls
-      };
-    });
-    expect(state.pending).toBe(true);
-    expect(state.driveState).toBe('pending');
-    expect(state.calls).toBeGreaterThanOrEqual(1);
-  });
   test('サイズだけ大きい破損mp4はブラウザの再生確認で拒否する', async ({ page }) => {
     await ready(page);
     const playable = await page.evaluate(() => Go5VideoIntegrity.probePlayable(
@@ -181,83 +141,4 @@ test.describe('ドラフト動画の完全性ゲート', () => {
     expect(playable).toBe(false);
   });
 
-  test('ドラフト作成時の完成プレビューをDrive待ちにせず投稿履歴用ストアへ確定する', async ({ page }) => {
-    await ready(page);
-    const videoId = 'acc1-20260828-0710-preview';
-    await page.evaluate((videoId) => {
-      if (window.Go5Sync) Go5Sync.configured = () => false;
-      document.dispatchEvent(new CustomEvent('video-created', {
-        detail: {
-          draft: true, title: '履歴プレビュー直書き回帰', name: 'preview.mp4', account: 'acc1', videoId,
-          blob: new Blob([new Uint8Array(32 * 1024)], { type: 'video/mp4' })
-        }
-      }));
-    }, videoId);
-
-    await expect.poll(async () => page.evaluate(async (videoId) => {
-      const rec = await Go5Idb.get('used:' + videoId);
-      return {
-        prev: rec && rec.prev,
-        first: rec && rec.imgs && rec.imgs[0] || ''
-      };
-    }, videoId), { timeout: 15000 }).toMatchObject({ prev: 1, first: expect.stringMatching(/^data:image\//) });
-  });
-
-  test('元画像がメモリへ先着してIDB未着でも完成プレビュー追加時に消さない', async ({ page }) => {
-    await ready(page);
-    const videoId = 'acc1-20260828-0715-source-race';
-    const source = 'data:image/png;base64,c291cmNlLXJhY2U=';
-    await page.evaluate(async ({ videoId, source }) => {
-      Go5Cand.usedImgSave(videoId, [source], 0);
-      await Go5Idb.del('used:' + videoId);
-      if (window.Go5Sync) Go5Sync.configured = () => false;
-      document.dispatchEvent(new CustomEvent('video-created', {
-        detail: {
-          draft: true,
-          title: '元画像先着回帰',
-          name: 'source-first.mp4',
-          account: 'acc1',
-          videoId,
-          blob: new Blob([new Uint8Array(32 * 1024)], { type: 'video/mp4' })
-        }
-      }));
-    }, { videoId, source });
-
-    await expect.poll(async () => page.evaluate(async ({ videoId, source }) => {
-      const rec = await Go5Idb.get('used:' + videoId);
-      return {
-        prev: rec && rec.prev,
-        count: rec && rec.imgs ? rec.imgs.length : 0,
-        sourceKept: !!(rec && rec.imgs && rec.imgs.includes(source))
-      };
-    }, { videoId, source }), { timeout: 15000 }).toMatchObject({ prev: 1, count: 2, sourceKept: true });
-  });
-
-  test('元画像の変換が完成プレビューより後着してもプレビューを上書きしない', async ({ page }) => {
-    await ready(page);
-    const videoId = 'acc1-20260828-0720-preview-race';
-    const preview = 'data:image/png;base64,cHJldmlldy1yYWNl';
-    await page.evaluate(({ videoId, preview }) => {
-      Go5Cand.usedImgSave(videoId, [preview], 1);
-      const png = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3MxZ5wAAAABJRU5ErkJggg==');
-      const bytes = new Uint8Array(png.length);
-      for (let i = 0; i < png.length; i++) bytes[i] = png.charCodeAt(i);
-      document.dispatchEvent(new CustomEvent('video-created', {
-        detail: {
-          draft: false,
-          videoId,
-          sourceImageFile: new File([bytes], 'source.png', { type: 'image/png' })
-        }
-      }));
-    }, { videoId, preview });
-
-    await expect.poll(async () => page.evaluate(async ({ videoId, preview }) => {
-      const rec = await Go5Idb.get('used:' + videoId);
-      return {
-        prev: rec && rec.prev,
-        count: rec && rec.imgs ? rec.imgs.length : 0,
-        preserved: !!(rec && rec.imgs && rec.imgs[0] === preview)
-      };
-    }, { videoId, preview }), { timeout: 10000 }).toMatchObject({ prev: 1, count: 2, preserved: true });
-  });
 });

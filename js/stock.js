@@ -119,21 +119,7 @@
     catch (e) { return ''; }
   }
 
-  function loadMeta() {
-    var arr = [];
-    try { arr = JSON.parse(localStorage.getItem(META_KEY) || '[]') || []; }
-    catch (e) { return []; }
-    var dels = {};
-    try { dels = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {}; } catch (e2) {}
-    // 台帳の縮小書込みだけが容量都合で失敗しても、先に着地した墓標を表示時にも適用する。
-    // 同期側だけに任せると、投稿完了直後のこの端末では古い台帳がそのまま描画されて
-    // 「完了したのにドラフトが残る」になる。復元は addedAt を墓標より新しくするので正当に戻せる。
-    // 墓標台帳だけが破損してもドラフト本体を全件隠さない。破損時は墓標なしとして安全側へ倒す。
-    return (Array.isArray(arr) ? arr : []).filter(function (m) {
-      var delAt = m && m.id ? Number(dels[m.id] || 0) : 0;
-      return !delAt || Number((m && (m.addedAt || m.ts)) || 0) > delAt;
-    });
-  }
+  function loadMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || '[]') || []; } catch (e) { return []; } }
   // ★localStorage逼迫でメタ書込みが無言失敗すると、commitPendingDraft_ の読み戻しが draft-meta-readback-failed で
   //   落ち、ドラフトが一覧に載らず遷移もしない(蓄積の多い月詠み=acc1で顕在化。実機の保留バナー内訳=
   //   手元:idb-timeout / 雲:draft-meta-readback-failed・Chami報告2026-08-16 msg1538578410564096130/第1弾計測で確証)。
@@ -278,19 +264,12 @@
   // ドラフト削除の墓標。(id→削除ts)端末をまたいで「消したドラフトが union で復活する」のを防ぐ=候補の cand_del と同型。
   //   投稿完了・削除でドラフト本体から外す時に打つ。復元(restoreStock_)は addedAt=now を打って墓標を越える。
   function writeStockDel_(id) {
-    function write_() {
-      try {
-        var m = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
-        m[id] = Date.now();
-        localStorage.setItem('go5_stock_del', JSON.stringify(m));
-        var check = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
-        return Number(check[id] || 0) > 0;
-      } catch (e) { return false; }
-    }
-    var ok = write_();
-    if (!ok && purgeableSweep_() > 0) ok = write_();
-    if (ok) kickSync_();
-    return ok;
+    try {
+      var m = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
+      m[id] = Date.now();
+      localStorage.setItem('go5_stock_del', JSON.stringify(m));
+    } catch (e) {}
+    kickSync_();
   }
   // 作成履歴の「完全削除(purge)」専用墓標。(id→削除ts)★ユーザーが明示削除した時だけ打つ=全端末で復活させない。
   //   作成履歴(go5_stock_archive)は「墓標なし・id単位union」で同期する設計(完了作品が2台目で消えない優先)。
@@ -319,15 +298,7 @@
   // ── ①-B ドラフトの画像を全端末へ運ぶ(2026-07-31) ──
   //   サムネ/プレビュー/元画像を dataURL でまとめ stock:imgs:<id> に置く=Go5Syncの画像レール(R2 content-hash)に乗る。
   //   ★動画本体(stock_v_)は重いので載せない(②で on-demand 取り寄せにする)。実体はR2、同期台帳には参照だけ=積んでも軽い。
-  function blobToDataUrlP_(blob) {
-    return new Promise(function (res) {
-      if (!blob) { res(''); return; }
-      var done = false;
-      var finish = function (du) { if (done) return; done = true; clearTimeout(wd); res(du || ''); };
-      var wd = setTimeout(function () { finish(''); }, 8000);
-      blobToDataUrl_(blob, finish);
-    });
-  }
+  function blobToDataUrlP_(blob) { return new Promise(function (res) { if (!blob) return res(''); blobToDataUrl_(blob, function (du) { res(du || ''); }); }); }
   // 画像blobを90px級サムネblobへ縮小する(失敗時 null)。canvasキャプチャが落ちた端末で「元画像フルをメタへ
   //   焼く→localStorage逼迫→draft-meta-readback-failed」を防ぐ最終保険(Fable5診断A-2・2026-08-18)。
   //   元画像そのものは stock_img_/go5src: に別途残す=喪失しない(このサムネはメタ/表示用の軽い複製)。
@@ -477,16 +448,15 @@
   //   従来はプレビューのR2ミラー(go5prev:)を後段のenrich(12秒Promise.race)でしか作っていなかった=
   //   iOSでその12秒に間に合わないと previewKey が空のまま save_job が飛び、動画は保存されるのにプレビューだけ
   //   Driveに来ない、が起きうる。元画像(ensureSrcMirror_)と同じく作成時に先出しでR2へ置く=保存ジョブの
-  //   タイミング競争から切り離す。現在は3点の時間差を減らすため、作成直後に動画と並行して撃つ(冪等・fail-open)。
+  //   タイミング競争から切り離す。動画のR2 PUTと帯域を食い合わないよう数秒遅らせて撃つ(冪等・fail-open)。
   var PREVNAME = function (id) { return 'go5prev:' + id; };
   var _prevUp = {}, _prevMirrorBusy = {};
-  var _draftAssetMirrorReady = Object.create(null); // 新規ドラフトの元画像＋プレビューR2着地をDrive保存と共有
   function ensurePrevMirror_(id, blobHint) {
     if (!blobHint || !blobHint.size) return Promise.resolve();
     if (_prevUp[id]) return Promise.resolve();
     if (_prevMirrorBusy[id]) return _prevMirrorBusy[id];
     if (!(window.Go5Sync && Go5Sync.configured && Go5Sync.configured() && Go5Sync.putBlobR2At)) return Promise.resolve();
-    var job = Go5Sync.putBlobR2At(PREVNAME(id), blobHint, { replace: true }).then(function (key) {
+    var job = Go5Sync.putBlobR2At(PREVNAME(id), blobHint).then(function (key) {
       if (key) _prevUp[id] = 1; // 成功=このセッションで再送しない。失敗時はDrive保存/sweepでまた試す(非破壊)
     }).catch(function () {});
     _prevMirrorBusy[id] = job.then(function (v) { delete _prevMirrorBusy[id]; return v; }, function () { delete _prevMirrorBusy[id]; });
@@ -532,71 +502,21 @@
     try { return Promise.resolve(JSON.parse(localStorage.getItem('hist_usedimg__' + key) || 'null') || { imgs: [], prev: 0 }); }
     catch (e) { return Promise.resolve({ imgs: [], prev: 0 }); }
   }
-  function notifyUsedImagesUpdated_(key) {
-    try { document.dispatchEvent(new CustomEvent('go5-used-images-updated', { detail: { key: String(key || '') } })); } catch (e) {}
-  }
   function usedImagesSave_(key, imgs, prevCount) {
     if (!key) return Promise.resolve(false);
     imgs = (imgs || []).filter(Boolean);
-    var rec = { imgs: imgs, at: Date.now(), prev: prevCount | 0 };
-    // Keep the in-memory cache and wait for durable IDB storage before reporting completion.
+    // 本体ページでは candidates.js のメモリキャッシュも同時更新。軽量ページではIDBへ直接保存する。
     if (window.Go5Cand && window.Go5Cand.usedImgSave) {
-      try {
-        var saved = window.Go5Cand.usedImgSave(key, imgs, prevCount);
-        if (saved === false) return Promise.resolve(false);
-        var candStore = idb();
-        if (candStore) return candStore.set('used:' + key, rec).then(function () { notifyUsedImagesUpdated_(key); return true; }).catch(function () { return false; });
-        notifyUsedImagesUpdated_(key); return Promise.resolve(true);
-      } catch (e) {}
+      try { return Promise.resolve(window.Go5Cand.usedImgSave(key, imgs, prevCount)); } catch (e) {}
     }
+    var rec = { imgs: imgs, at: Date.now(), prev: prevCount | 0 };
     var store = idb();
-    if (store) return store.set('used:' + key, rec).then(function () { try { kickSync_(); } catch (_) {} notifyUsedImagesUpdated_(key); return true; }).catch(function () { return false; });
-    try { localStorage.setItem('hist_usedimg__' + key, JSON.stringify(rec)); kickSync_(); notifyUsedImagesUpdated_(key); return Promise.resolve(true); }
+    if (store) return store.set('used:' + key, rec).then(function () { try { kickSync_(); } catch (_) {} return true; }).catch(function () { return false; });
+    try { localStorage.setItem('hist_usedimg__' + key, JSON.stringify(rec)); kickSync_(); return Promise.resolve(true); }
     catch (e) { return Promise.resolve(false); }
   }
 
   // ── サムネ取得(canvas最終フレームを小さいJPEGに) ──
-
-  // 完成プレビューをDrive保存の成否から切り離し、動画生成直後に投稿履歴の正本 used:<videoId> へ確定する。
-  // これまでは driveSaveDataset_ の通信経路に入ってから初めて差し込んでいたため、Safari背景化や
-  // Drive/R2待ちの途中終了で「動画は投稿済みだが投稿履歴のプレビューだけ無い」が起き得た。
-  var _draftHistoryPreviewReady = Object.create(null);
-  function persistHistoryPreview_(meta, blobHint) {
-    var targetVideoId = meta && (meta.historyVideoId || meta.videoId);
-    if (!meta || !meta.id || !targetVideoId) return Promise.resolve(false);
-    var blobP;
-    if (blobHint) blobP = Promise.resolve(blobHint);
-    else {
-      var store = idb();
-      if (!store) return Promise.resolve(false);
-      blobP = Promise.all([
-        store.get('stock_prev_' + meta.id).catch(function () { return null; }),
-        store.get('stock:imgs:' + meta.id).catch(function () { return null; })
-      ]).then(function (r) {
-        if (r[0]) return r[0];
-        return (r[1] && r[1].prev) ? durlToBlob_(r[1].prev) : null;
-      });
-    }
-    return blobP.then(function (blob) {
-      if (!blob) return false;
-      return (typeof blob === 'string' ? Promise.resolve(blob) : blobToDataUrlP_(blob));
-    }).then(function (durl) {
-      if (!/^data:image\//.test(durl || '')) return false;
-      return usedImagesRead_(targetVideoId).then(function (rec) {
-        var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
-        // candidates.js の画像変換がメモリへ先着し、IDB書込みだけ未完了の瞬間もある。
-        // IDBだけを正としてプレビューを書き戻すと、その元画像を逆方向に消すため両層をunionする。
-        var live = [];
-        try { live = (window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(targetVideoId) || []) : []; } catch (e) {}
-        live.filter(Boolean).forEach(function (u) { if (cur.indexOf(u) < 0) cur.push(u); });
-        if (cur[0] === durl && ((rec && rec.prev) | 0) > 0) {
-          notifyUsedImagesUpdated_(targetVideoId);
-          return true;
-        }
-        return usedImagesSave_(targetVideoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
-      });
-    }).catch(function () { return false; });
-  }
   // ★canvas.toBlob は iOS Safari で「コールバックを一度も呼ばない」ことがある(メモリ逼迫・タブ非活性・
   //   巨大canvas等)。その時この Promise は永久に settle せず、saveStock_ も settle しない=生成後の
   //   .then(goDraft_) が発火せず「✅ドラフトを作成しました は出るのにドラフトタブへ遷移しない」に化ける
@@ -893,14 +813,8 @@
     _pendingDraftMeta[id] = meta;
     if (hooks.onStart) hooks.onStart(id); // タイムアウトより前から、保留リトライが同じpending IDを指せるようにする
 
-    // プレビューの正本は「完成した動画そのもの」の終端フレームにする。
-    // 旧経路は録画停止直後の共有Canvasを描き直して読んでいたため、画像decode/状態切替と競合すると
-    // 背景だけのフレームを保存できた。動画blobの末尾なら実際の完成物と必ず同じ時系列になる。
-    // Safariで末尾シークが失敗した時だけCanvasの確定描画へ退避する。
-    var finalPreviewP = videoEndFramePreview_(evDetail.blob).then(function (b) {
-      return b || capturePreview_();
-    }).catch(function () { return capturePreview_(); });
-    var capP = Promise.all([captureThumb_(), finalPreviewP]).catch(function () { return [null, null]; });
+    // サムネ/プレビューは今の最終Canvasに依存するため、画面遷移より前に取得する。
+    var capP = Promise.all([captureThumb_(), capturePreview_()]).catch(function () { return [null, null]; });
     return capP.then(function (caps) {
       var thumbBlob = caps[0], prevBlob = caps[1];
       // Canvas取得が失敗しても、元画像を端末側サムネの最終保険にする。★ただし元画像フルをそのままメタへ
@@ -938,25 +852,27 @@
           ? Promise.allSettled(auxOps)
           : Promise.all(auxOps.map(function (p) { return Promise.resolve(p).catch(function () {}); }));
         auxDone.then(function () { ensureBlobMirror_(id); }).catch(function () {});
-        // 元画像と仕上がりプレビューは作成直後のメモリ実体からR2へ同時に先出しする。
-        // 旧実装の6秒/8秒タイマーがDrive上で「動画だけ先に見え、画像が後から来る」時間差を自ら作っていた。
-        // 動画の着地判定自体は待たせず、Drive保存だけがこのPromiseを共有して3点の在り処をまとめて渡す。
-        var assetMirrorJobs = [];
-        if (evDetail.sourceImageFile) assetMirrorJobs.push(ensureSrcMirror_(id, evDetail.sourceImageFile));
-        if (prevBlob) assetMirrorJobs.push(ensurePrevMirror_(id, prevBlob));
-        _draftAssetMirrorReady[id] = Promise.all(assetMirrorJobs.map(function (job) {
-          return Promise.resolve(job).catch(function () {});
-        })).then(function () { return true; }, function () { return false; });
+        // ★元画像はIDBの成否と無関係に、メモリ実体から直接R2へ控える(2026-08-17③)。IDB書込み(stock_img_)が
+        //   iOSで黙って失敗/後で退避されても、go5src:<id> がR2に残る=再作成・Drive保存が空にならない。
+        //   ★ただし作成直後は動画のR2 PUT(ensureVideoMirror_)が上り帯域を使い、iPhoneの細い回線では同時PUTが
+        //     動画の着地を遅らせ「ドラフトへ自動遷移しない/DL準備中」を悪化させうる(Fable5診断2026-08-17)。
+        //     →元画像PUTは数秒遅らせ、動画の着地を先に通す(IDB退避は分〜日単位=数秒の遅延はdurabilityに無害)。
+        if (evDetail.sourceImageFile) {
+          var _srcHint = evDetail.sourceImageFile;
+          setTimeout(function () { try { ensureSrcMirror_(id, _srcHint); } catch (e) {} }, 6000);
+        }
+        // ★仕上がりプレビューも作成時にR2へ先出し(go5prev:<id>)=投稿完了で必ずDriveへ入る土台(Chami依頼2026-08-24②)。
+        //   動画のR2 PUTを先に通したいので元画像より少し後(8秒)に撃つ。IDB(stock_prev_)が後で退避されても雲に残る。
+        if (prevBlob) {
+          var _prevHint = prevBlob;
+          setTimeout(function () { try { ensurePrevMirror_(id, _prevHint); } catch (e) {} }, 8000);
+        }
 
         // Phase 1: 動画を手元/雲へ並列着地。手元は set 解決ではなく、同じキーの読み戻しまで検証する。
         //   ★各レーンの reject 理由(idb-timeout / QuotaExceeded / draft-meta-readback-failed=localStorage逼迫 /
         //     cloud-video-not-landed=Go5Sync未設定 等)を握り潰さず errL/errC に保持=hold文面と go5_landing_log へ
         //     実因を通す(Fable5診断2026-08-16・沈黙経路の根治)。判定(landed/onBothFailed)は従来どおり。
         var errL = null, errC = null, committedNotified = false;
-        // 投稿履歴用プレビューはDriveより先に、作成時のメモリBlobから直接確定する。
-        // 同じPromiseを後段も共有し、IDB/R2の書込み競争で空読みしない。
-        _draftHistoryPreviewReady[id] = persistHistoryPreview_(meta, prevBlob);
-
         // ドラフト台帳の確定を外部処理へ知らせる唯一の境界。手元/雲の両方が成功しても1回だけ通知し、
         // 通知先(Drive等)の例外でドラフト本体の着地を巻き戻さない。
         function notifyCommitted_(saved, kind) {
@@ -1063,34 +979,24 @@
 
   // ③投稿完了=作成完了 → ドラフト本体から外して作成履歴へ退避(④復元できるよう blob は残す)。
   //   上限を超えて作成履歴から溢れた古い分だけ、blob ごと本当に削除する。
-  function archiveStock_(id, fallbackMeta) {
+  function archiveStock_(id) {
     var metas = loadMeta();
-    var found = metas.filter(function (m) { return m.id === id; })[0];
-    var source = found || (fallbackMeta && fallbackMeta.id === id ? fallbackMeta : null);
-    if (!source) return false;
-    var meta = Object.assign({}, source, { completedTs: Date.now() });
-    var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
-    arch.unshift(meta);
-    var dropped = arch.slice(ARCHIVE_MAX);
-    var archOk = false, tombOk = false;
-    // 作成履歴→墓標→ドラフト台帳の順。先に復元先を確保し、墓標が着地しない限り完了扱いにしない。
+    var meta = metas.filter(function (m) { return m.id === id; })[0];
+    if (!meta) return;
+    meta.completedTs = Date.now();
+    // 墓標+meta+作成履歴の3書込を1トランザクションにして、揃った状態で1回だけ即時 push する
+    //   (途中 push だと作成履歴が旧値のまま送られ、相手端末で完了作品が並ばない・Chami報告2026-08-04)。
     batchSync_(function () {
-      archOk = saveArchive(arch);
-      if (!archOk) return;
-      tombOk = writeStockDel_(id);
-      if (!tombOk) return;
-      // 容量逼迫で物理配列の縮小が失敗しても、loadMeta は墓標を適用するため表示・同期上は消える。
+      writeStockDel_(id); // 投稿完了＝ドラフト本体から外す。他端末のドラフト一覧からも消す(復活防止)
       saveMeta(metas.filter(function (m) { return m.id !== id; }));
+      var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
+      arch.unshift(meta);
+      var dropped = arch.slice(ARCHIVE_MAX); // 上限超過分=保持できないので blob を掃除
+      dropped.forEach(function (m) { delBlobs_(m.id); });
+      saveArchive(arch);
     });
-    var archived = loadArchive().some(function (m) { return m && m.id === id; });
-    var draftGone = !loadMeta().some(function (m) { return m && m.id === id; });
-    if (!archOk || !tombOk || !archived || !draftGone) return false;
-    delete _pendingDraftMeta[id];
-    delete _pendingDraftCommit[id];
-    dropped.forEach(function (m) { if (m && m.id) delBlobs_(m.id); });
     // 投稿履歴ミラー(product-scout daily_pick 用)へ1件POST。fire-and-forget=失敗しても投稿完了は成功のまま。
     mirrorPostedLog_(meta);
-    return true;
   }
 
   // ④作成履歴からドラフト本体へ戻す。ドラフトが満杯なら溢れる最古の1件は作成履歴へ送り返す(=消さない)。
@@ -1099,12 +1005,7 @@
     var meta = arch.filter(function (m) { return m.id === id; })[0];
     if (!meta) return;
     delete meta.completedTs;
-    var delAt = 0;
-    try {
-      var dels = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
-      delAt = Number(dels[id] || 0);
-    } catch (e) {}
-    meta.addedAt = Math.max(Date.now(), delAt + 1); // ★墓標より必ず新しくして全端末で戻す(同一msも安全)
+    meta.addedAt = Date.now(); // ★墓標(投稿完了/削除で打たれた)を越えて復活させる=全端末で戻る
     arch = arch.filter(function (m) { return m.id !== id; });
     var metas = loadMeta().filter(function (m) { return m.id !== id; });
     metas.unshift(meta);
@@ -1415,34 +1316,21 @@
     if (_res && _res.ok === false && _res.reason === 'persist-pending' && _res.wait && typeof _res.wait.then === 'function') {
       var _pfMsg = '投稿履歴をこの端末へ保存できませんでした。\nドラフトは残してあります。空き容量を確認してから、もう一度「投稿完了」を押してください。';
       _res.wait.then(function (r) {
-        if (r && (r.ok || r.reason === 'dupe')) {
-          if (finishComplete_(id, meta, ytUrl, shortUrl, ps, pd)) { try { closeModal_(); } catch (e7) {} }
-        } else { try { alert(_pfMsg); } catch (e8) {} }
+        if (r && (r.ok || r.reason === 'dupe')) { finishComplete_(id, meta, ytUrl, shortUrl, ps, pd); try { closeModal_(); } catch (e7) {} }
+        else { try { alert(_pfMsg); } catch (e8) {} }
       }, function () { try { alert(_pfMsg); } catch (e9) {} });
       return false; // 同期経路では未確定＝モーダルは閉じない(着地後に continuation が閉じる)
     }
     // 投稿履歴へ「新規保存できた」または「既に載っている」と確認できた時だけ完了を進める。
     // API未起動/識別不能/保存失敗/例外でドラフトを作成履歴へ移すと再試行手段を失うため、ここで止める。
     if (!_res || (_res.ok === false && _res.reason !== 'dupe')) return false;
-    return finishComplete_(id, meta, ytUrl, shortUrl, ps, pd);
+    finishComplete_(id, meta, ytUrl, shortUrl, ps, pd);
+    return true;
   }
 
   // 投稿完了の"後半"(枠書き戻し→作成履歴退避→再描画)。同期で載った時も、persist-pending の
   //   IDB着地後も同じ処理を通す。★closeModal_ はここでは呼ばない=同期経路は呼び元が返り値 true で閉じる。
   function finishComplete_(id, meta, ytUrl, shortUrl, ps, pd) {
-    // videoId が投稿完了時に初めて発番された旧ドラフトも、手元の preview Blob から履歴へ後追い確定する。
-    // archive は Blob を消さないので非同期のままでも安全。失敗時は次回起動の backfill が同じ正本から再試行する。
-    _draftHistoryPreviewReady[id] = persistHistoryPreview_(meta, null);
-    _draftHistoryPreviewReady[id].then(function (ok) {
-      if (!ok) setTimeout(function () { persistHistoryPreview_(meta, null); }, 1500);
-    });
-    // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。
-    // 実在確認できない時はモーダルを閉じず、再試行可能なままにする。
-    if (!archiveStock_(id, meta)) {
-      try { alert('投稿履歴には記録しましたが、ドラフトを作成履歴へ移せませんでした。\nドラフトは消さずに残してあるので、端末の空き容量を確認してもう一度「投稿完了」を押してください。'); } catch (e0) {}
-      render();
-      return false;
-    }
     // 公開設定＝予約投稿でカレンダー公開枠を選んでいたら、その枠へ書き戻す(投稿履歴/カレンダー/予約を結ぶ)。
     try {
       if (ps && ps.id) {
@@ -1453,14 +1341,16 @@
         }
       }
     } catch (e) {}
-    // ★投稿完了で、動画に使った候補画像に「使用日」を刻む。
+    // ★投稿完了で、動画に使った候補画像に「使用日」を刻む(Chami 2026-08-24 clause B)。候補モーダルのラジオ上に表示される。
+    //   candidates.js が無いページ(Stock.html単独)では黙ってスキップ=fail-open(自動「使用済み」は生成時に済んでいる)。
     try {
       if (meta && meta.srcMark && meta.srcMark.cid && meta.srcMark.hash && window.Go5Cand && window.Go5Cand.stampImgUsedDate) {
-        window.Go5Cand.stampImgUsedDate(meta.srcMark.cid, meta.srcMark.hash, Date.now());
+        window.Go5Cand.stampImgUsedDate(meta.srcMark.cid, meta.srcMark.hash, meta.completedTs || Date.now());
       }
     } catch (e) {}
+    // ③投稿完了=作成完了 → ドラフト本体から外し、④作成履歴へ退避(復元可)。記録の後に行う(blob非依存)。
+    archiveStock_(id);
     render();
-    return true;
   }
 
   // 動画に使った元画像のBlobを解決する。手元Blob(stock_img_)優先、無ければ同期ミラー(stock:imgs:.src)の
@@ -1487,46 +1377,7 @@
   // 「ドラフトで作成」で動画と台帳が初めて安全に着地した瞬間にだけDrive保存を始める。
   //   先に永続pendingを同期書込みしてから非同期処理へ進むため、直後に画面移動・Safari破棄が起きても次回sweepが再送できる。
   //   手元/雲の二系統が同時成功しても saveStock_.onCommitted は1回、このガードでもID単位1回に固定する。
-  // Driveへ保存する題名の単一境界。旧履歴の原文は変更せず、末尾の空白区切り#タグ群だけを除く。
-  // coreが読めない異常時も同じ規則へ倒し、タグ付き題名をDrive書込へ通さない。
-  function driveDataTitle_(v) {
-    if (window.Go5RegenIdentity && typeof window.Go5RegenIdentity.cleanTitle === 'function') {
-      try { return window.Go5RegenIdentity.cleanTitle(v); } catch (e) {}
-    }
-    var s = String(v == null ? '' : v).trim().replace(/\s+/g, ' ');
-    return s.replace(/(?:^|\s)#[^\s#]+(?:\s*#[^\s#]+)*\s*$/, '').trim();
-  }
-  // metaは必ずcloneして扱う=投稿履歴・ドラフトの原文を変更しない。
-  // _regenReadTitles は旧タグ付きDriveから素材を救出するread-only照会だけに使う。
-  function driveDataMeta_(meta, legacyTitle) {
-    if (!meta) return meta;
-    var rawTitle = String(meta.title == null ? '' : meta.title).trim();
-    var title = driveDataTitle_(rawTitle || legacyTitle);
-    if (!title) title = String(meta.id || meta.videoId || 'video').replace(/#/g, '').trim() || 'video';
-    var reads = [];
-    function addLegacy_(v) {
-      var raw = String(v == null ? '' : v).trim();
-      if (!raw || raw === title || driveDataTitle_(raw) === raw || reads.indexOf(raw) >= 0) return;
-      reads.push(raw);
-    }
-    (Array.isArray(meta._regenReadTitles) ? meta._regenReadTitles : []).forEach(addLegacy_);
-    addLegacy_(legacyTitle);
-    addLegacy_(rawTitle);
-    var out = Object.assign({}, meta, { title: title });
-    var rawVideoName = String(meta.videoName == null ? '' : meta.videoName).trim();
-    var extMatch = rawVideoName.match(/(\.[A-Za-z0-9]{1,8})$/);
-    // uploadがmeta.videoNameを優先しても、旧タグ付きファイル名を再利用させない。元拡張子だけを保持する。
-    if (rawVideoName) out.videoName = title + (extMatch ? extMatch[1] : '');
-    if (reads.length) out._regenReadTitles = reads;
-    else delete out._regenReadTitles;
-    return out;
-  }
-
   var _draftDriveAutoStarted = {};
-  // 同じチャンネル＋題名のDrive保存を、このページ内では必ず1本へ束ねる。
-  // 元の保存が付随画像を待っている4秒後に verify/sweep が不足修復を起動し、同じsave_jobを2本投げていた
-  // 競合を入口で止める。別作品は別キーなので従来どおり並列実行できる。
-  var _driveDatasetInFlight = Object.create(null);
   function autoDriveSaveDraft_(meta) {
     if (!meta || !meta.id || _draftDriveAutoStarted[meta.id]) return;
     _draftDriveAutoStarted[meta.id] = true;
@@ -1558,121 +1409,16 @@
     // ★手押し(作成履歴カードの☁️ Drive保存)は「押したのに何も起きない」に見えないよう、
     //   終着点で必ず onDone(ok,msg) を呼ぶ。作成時に即保存済み(folderIdあり)だと従来は無反応で返っていた=
     //   これが Chami 報告「drive保存のボタンが押せない」の正体(2026-08-12)。
-    var directDone = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
-    if (!meta || !meta.id) { directDone(false, 'メタ情報がありません'); return; }
-    meta = driveDataMeta_(meta); // この先のensure/remember/save/uploadへはタグなし題名だけを渡す
-    var flightKey = String(meta.account || '') + '\n' + String(meta.title || meta.id);
-    var activeFlight = _driveDatasetInFlight[flightKey];
-    if (activeFlight) {
-      if (opts.onDone) activeFlight.waiters.push(opts.onDone);
-      return; // 同じ保存の完了結果を共有し、第二のDrive書込みは開始しない
-    }
-    var flight = { waiters: opts.onDone ? [opts.onDone] : [], settled: false, watchdog: 0 };
-    _driveDatasetInFlight[flightKey] = flight;
-    var finishDriveDataset_ = function (ok, msg) {
-      if (flight.settled) return;
-      flight.settled = true;
-      if (flight.watchdog) clearTimeout(flight.watchdog);
-      if (_driveDatasetInFlight[flightKey] === flight) delete _driveDatasetInFlight[flightKey];
-      flight.waiters.slice().forEach(function (cb) { try { cb(ok, msg); } catch (_) {} });
-    };
-    // 下層fetchには個別タイムアウトがあるが、将来の無応答実装でもロックとUIを永久に残さない最後の番犬。
-    // 遅着した本体が後で動いてもWorker側の分散ロックが重複を止める。
-    flight.watchdog = setTimeout(function () { finishDriveDataset_(false, 'Drive保存が時間内に応答しませんでした。自動再確認を続けます'); }, 75000);
+    var done = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
+    if (!meta || !meta.id) { done(false, 'メタ情報がありません'); return; }
     var store = idb();
-    if (!store) { if (!opts.silent) alert('IndexedDB未対応のためDrive保存できません。(投稿履歴には記録済み)'); finishDriveDataset_(false, 'IDB未対応'); return; }
+    if (!store) { if (!opts.silent) alert('IndexedDB未対応のためDrive保存できません。(投稿履歴には記録済み)'); done(false, 'IDB未対応'); return; }
     if (!(window.Go5Drive && typeof window.Go5Drive.upload === 'function')) {
       if (!opts.silent) alert('Drive連携が未設定です。動画作成タブのDriveStatus欄を確認してください。(投稿履歴には記録済み)');
-      finishDriveDataset_(false, 'Drive未設定');
+      done(false, 'Drive未設定');
       return;
     }
     var id = meta.id;
-    // 旧タグ付き題名のDriveフォルダは移動・改名せず、動画の救出元としてだけ読む。
-    // 同じ保存single-flight内では一度だけ取得し、正常な実体だけをメモリ/IDBへ戻す。
-    // 以後のR2/Drive書込みは、正規化済みmeta.titleだけを使う。
-    var legacyDriveVideoRead_ = null;
-    function readLegacyDriveVideo_() {
-      if (legacyDriveVideoRead_) return legacyDriveVideoRead_;
-      var titles = [];
-      (Array.isArray(meta._regenReadTitles) ? meta._regenReadTitles : []).forEach(function (t) {
-        t = String(t || '').trim();
-        if (t && t !== meta.title && titles.indexOf(t) < 0) titles.push(t);
-      });
-      if (!(window.Go5Drive && typeof window.Go5Drive.fetchVideo === 'function') ||
-          (meta.account !== 'acc1' && meta.account !== 'acc2') || !titles.length) {
-        legacyDriveVideoRead_ = Promise.resolve(null);
-        return legacyDriveVideoRead_;
-      }
-      var chain = Promise.resolve(null);
-      titles.forEach(function (title) {
-        chain = chain.then(function (found) {
-          if (isUsableVideoBlob_(found)) return found;
-          try {
-            return Promise.resolve(window.Go5Drive.fetchVideo(meta.account, title)).then(function (blob) {
-              return isUsableVideoBlob_(blob) ? blob : null;
-            }, function () { return null; });
-          } catch (e) { return null; }
-        });
-      });
-      legacyDriveVideoRead_ = chain.then(function (blob) {
-        if (!isUsableVideoBlob_(blob)) return null;
-        putVidMem_(id, blob);
-        try {
-          var saved = store.set('stock_v_' + id, blob);
-          if (saved && typeof saved.catch === 'function') saved.catch(function () {});
-        } catch (e) {}
-        return blob;
-      }).catch(function () { return null; });
-      return legacyDriveVideoRead_;
-    }
-    // 現行のタグなしフォルダを先に読み、無い時だけ旧タグ付き題名を読み取り照会する。
-    // 取得したバイトは後段でタグなしmeta.titleへ保存する。旧フォルダへの書込・rememberはしない。
-    function readDriveAsset_(method) {
-      if (!(window.Go5Drive && typeof window.Go5Drive[method] === 'function') ||
-          (meta.account !== 'acc1' && meta.account !== 'acc2') || !meta.title) return Promise.resolve(null);
-      var titles = [meta.title];
-      // 動画の旧フォルダ照会は readLegacyDriveVideo_ に集約し、プレビュー生成と保存救出で同じ取得を共有する。
-      if (method !== 'fetchVideo') {
-        (Array.isArray(meta._regenReadTitles) ? meta._regenReadTitles : []).forEach(function (t) {
-          t = String(t || '').trim();
-          if (t && titles.indexOf(t) < 0) titles.push(t);
-        });
-      }
-      var chain = Promise.resolve(null);
-      titles.forEach(function (title) {
-        chain = chain.then(function (found) {
-          if (method === 'fetchVideo' ? isUsableVideoBlob_(found) : found) return found;
-          try {
-            return Promise.resolve(window.Go5Drive[method](meta.account, title)).then(function (asset) {
-              return (method !== 'fetchVideo' || isUsableVideoBlob_(asset)) ? asset : null;
-            }).catch(function () { return null; });
-          } catch (e) { return null; }
-        });
-      });
-      return chain.then(function (found) {
-        if (method !== 'fetchVideo' || isUsableVideoBlob_(found)) return found;
-        return readLegacyDriveVideo_();
-      });
-    }
-
-    // queueSaveはR2に動画が無いと完走できない。既存の手元/R2を最優先し、最初のensure失敗時だけ
-    // 旧タグ付きDrive動画をread-onlyで救出してR2へ載せ直し、着地確認をもう一度通す。
-    function ensureQueueVideoOnR2_() {
-      return ensureVideoOnR2_(id).then(function (onR2) {
-        if (onR2) return true;
-        return readLegacyDriveVideo_().then(function (blob) {
-          if (!isUsableVideoBlob_(blob)) return false;
-          return ensureVideoOnR2_(id);
-        });
-      });
-    }
-
-    // 旧環境の直uploadも、手元/R2が無い時だけ旧Driveを最後の読取元にする。
-    function resolveLegacyUploadVideo_() {
-      return resolveVideoBlob_(id).then(function (blob) {
-        return isUsableVideoBlob_(blob) ? blob : readLegacyDriveVideo_();
-      }, function () { return readLegacyDriveVideo_(); });
-    }
     // ── ★最後の砦=「動画生成で使用した画像」(used:<videoId>)から素材を拾う ─────────────────
     //   Chami報告2026-08-18 msg1539277864371748965「全部データが見つからないと出たが、投稿履歴にちゃんと二つ
     //   画像データがあるやないか」。原因=退避/再生成は素材を stock_*(ドラフト由来)と R2 からしか探していなかった。
@@ -1738,7 +1484,16 @@
     }
     // 仕上がりプレビューを「使用画像1ページ目」へ差し込む(videoIdで紐付く・Chami依頼2026-07-30・冪等)。
     var applyPreview = function (prevB) {
-      return persistHistoryPreview_(meta, prevB);
+      var targetVideoId = meta.historyVideoId || meta.videoId;
+      if (!prevB || !targetVideoId) return;
+      blobToDataUrl_(prevB, function (durl) {
+        if (!durl) return;
+        usedImagesRead_(targetVideoId).then(function (rec) {
+          var cur = (rec && Array.isArray(rec.imgs)) ? rec.imgs.filter(Boolean) : [];
+          if (cur[0] === durl) return; // 再投稿完了で二重差し込みしない(冪等)
+          usedImagesSave_(targetVideoId, [durl].concat(cur.filter(function (u) { return u !== durl; })), 1);
+        });
+      });
     };
     // ★symptom恒久対策(Chami報告2026-08-15「それに伴って投稿履歴の画像もあるべき画像が設定されていない」)：
     //   投稿履歴1ページ目のプレビュー差し込みを「動画blobの有無」から完全に切り離す。従来は下の
@@ -1746,28 +1501,26 @@
     //   捨て R2ミラーも未着だと『Driveに動画が来ない』と『投稿履歴の画像が設定されない』が"一緒に"起きていた。
     //   プレビュー実体は stock_prev_(Blob)/ 同期ミラー stock:imgs:.prev(dataURL)から取れる=動画に一切依存しない。
     //   ここで先に確定させ、下のDrive保存(blob依存)の成否に関わらず投稿履歴へは必ず入る。
-    var previewReady = Promise.resolve(_draftHistoryPreviewReady[id] || false).catch(function () { return false; }).then(function () {
-      return Promise.all([
+    var previewReady = Promise.all([
       store.get('stock_prev_' + id).catch(function () { return null; }),
       store.get('stock:imgs:' + id).catch(function () { return null; })
-      ]); }).then(function (r) {
+    ]).then(function (r) {
       var prev = r[0], mirror = r[1] || {};
       return prev ? prev : durlToBlob_(mirror.prev); // .then が Promise を自動で解く
     }).then(function (prevB) {
       if (prevB) return prevB;
-      // Prefer the local history preview before any network request.
-      return usedPrevBlob_();
+      // ★手元にプレビュー実体が無い(別端末で作った投稿履歴の回復・編集モーダルからの再生成)＝Driveに既にある
+      //   仕上がりプレビューを取り寄せて使う。無ければ null のまま(何も壊さない)。これで yt-clicks.js の旧
+      //   regenRecordData_(分岐コピー)が持っていた「Drive既存プレビューで回復」を driveSaveDataset_ 一本へ
+      //   畳み込む=データ再生成の経路を1つに保つ(Chami依頼2026-08-18・単一化)。
+      if (window.Go5Drive && Go5Drive.fetchPreview && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title)
+        return Go5Drive.fetchPreview(meta.account, meta.title).then(function (du) { return du ? durlToBlob_(du) : null; }, function () { return null; });
+      return null;
     }).then(function (prevB) {
+      // ★ドラフト側にもDriveにも無い時の砦=投稿履歴が表示している仕上がりプレビュー(used:<videoId>)。
+      //   これで「モーダルには映るのに再生成すると全部見つからない」(Chami報告2026-08-18)を塞ぐ。
       if (prevB) return prevB;
-      // Race deterministic R2 preview and Drive; use the first usable result.
-      var r2P = (window.Go5Sync && Go5Sync.fetchBlobR2At) ? Go5Sync.fetchBlobR2At(PREVNAME(id), 12000).then(function (blob) { return (blob && blob.size) ? blob : null; }, function () { return null; }) : Promise.resolve(null);
-      var driveP = readDriveAsset_('fetchPreview').then(function (du) { return du ? durlToBlob_(du) : null; });
-      return new Promise(function (resolve) {
-        var left = 2, settled = false;
-        var accept = function (blob) { if (settled) return; if (blob) { settled = true; resolve(blob); return; } left--; if (!left) { settled = true; resolve(null); } };
-        Promise.resolve(r2P).then(accept, function () { accept(null); });
-        Promise.resolve(driveP).then(accept, function () { accept(null); });
-      });
+      return usedPrevBlob_();
     }).then(function (prevB) {
       // ★「必ず動画があればプレビューは作る」(Chami依頼2026-08-24)。プレビュー素材が手元にもDrive既存にも
       //   used:にも無くても、動画実体(この端末のIDB / R2ミラー)さえ在れば末尾フレームでプレビューを起こす。
@@ -1786,13 +1539,12 @@
       //   「ドラフトのdrive保存と編集モーダルのデータ再生成は同じ役割」を実体でも一致させる(単一化)。
       //   結果このprevBは applyPreview(投稿履歴1ページ目)にもDrive追記(!hasPrevの時)にも使われる。
       if (prevB) return prevB;
-      return readDriveAsset_('fetchVideo').then(function (vb) {
-        return vb ? videoEndFramePreview_(vb) : null;
-      });
-    }).then(function (prevB) {
-      if (!prevB) return null;
-      return applyPreview(prevB).then(function () { return prevB; });
-    }, function () { return null; });
+      if (window.Go5Drive && Go5Drive.fetchVideo && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title)
+        return Go5Drive.fetchVideo(meta.account, meta.title).then(function (vb) {
+          return vb ? videoEndFramePreview_(vb) : null;
+        }, function () { return null; });
+      return null;
+    }).then(function (prevB) { applyPreview(prevB); return prevB; }, function () { return null; });
 
     var folderId = window.Go5Drive.folderIdFor ? window.Go5Drive.folderIdFor(meta.videoId) : '';
     // ── 控えフォルダ(drive_up_<videoId>)が在っても「実際に動画が在るか」を必ず確かめてから信じる。
@@ -1822,7 +1574,7 @@
     var verifyFolder = opts.normalize ? Promise.resolve('') : resolveOkFolder_();
     verifyFolder.then(function (okFolderId) {
       if (okFolderId) {
-        // 動画だけを保存完了にしない。3点セットの確定は直下の folder_state 実測後に行う。
+        setDriveSavedState_(id, 'verified', meta); try { render(); } catch (e) {} // checkSavedで実物確認済み＝verified
         // ★重複生成の根治(Chami報告2026-08-18 msg1539252539571052544「元画像だけがない場合でデータ再生成しても
         //   プレビューがもう一つできるだけ。意味なし」)。動画は既にDriveに在る(=okFolderId)。従来はここで有無を見ずに
         //   appendImage(プレビュー)を毎回打っていた=Driveに「_プレビュー」が増殖。folder_state(read-only)で
@@ -1832,16 +1584,6 @@
           : Promise.resolve(null);
         Promise.all([previewReady, stateP]).then(function (arr) {
           var prevB = arr[0], st = arr[1];
-          // 完了は動画・完成プレビュー・元画像の3点が揃った時だけ。動画だけのフォルダはpendingを残し、
-          // 次回sweep/実物確認で不足分だけ再投入する。
-          if (driveSetComplete_(st)) {
-            try { localStorage.removeItem(SAVEJOB_PENDING_PREFIX + id); } catch (e) {}
-            setDriveSavedState_(id, 'verified', meta);
-          } else {
-            recordSaveJobPending_(id, meta);
-            setDriveSavedState_(id, 'pending', meta);
-          }
-          try { render(); } catch (e) {}
           // 状態不明(st===null)は「在る」とみなす=重複防止側へ倒す(余計に作らない)。
           var hasPrev = st ? !!st.hasPreview : true;
           var hasSrc  = st ? !!st.hasSrc     : true;
@@ -1871,7 +1613,7 @@
             } else {
               msg = 'すでに動画・元画像・プレビューが揃っています(新たに補うものはありません)。';
             }
-            finishDriveDataset_(true, msg);
+            done(true, msg);
           };
           // 元画像がDriveに在るなら読む必要なし(無駄なR2取り寄せとハングを避ける)。無い時だけ手元素材を探す=
           //   12秒で切り上げて null(＝復元不能扱い=正直に手動追加を案内)。
@@ -1894,7 +1636,7 @@
     function salvageWithoutVideo_() {
       if (!(window.Go5Drive && typeof window.Go5Drive.ensureFolder === 'function') || (meta.account !== 'acc1' && meta.account !== 'acc2') || !meta.title) {
         if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済み・使用画像のプレビューも設定済みです。Google Driveへの動画保存だけスキップしました。');
-        finishDriveDataset_(false, '動画データ無し(プレビューは設定済み)');
+        done(false, '動画データ無し(プレビューは設定済み)');
         return;
       }
       // Driveの現状(プレビュー/元画像の有無)。判定不能(null)は「無い」とみなす=退避を試みる側へ倒す
@@ -1915,7 +1657,7 @@
         window.Go5Drive.ensureFolder(meta.account, meta.title, imgs).then(function (res) {
           if (!(res && res.ok)) {
             if (!opts.silent) alert('動画データが見つからず、フォルダの用意にも失敗しました(投稿履歴には記録済み)。通信状況を変えてもう一度お試しください。');
-            finishDriveDataset_(false, 'フォルダ確保に失敗(動画も無し)');
+            done(false, 'フォルダ確保に失敗(動画も無し)');
             return;
           }
           var saved = res.added || [];
@@ -1935,7 +1677,7 @@
           } else {
             msg = '動画は元データが見つからず保存できません。フォルダは作成しましたが、プレビューも元画像もこの端末に残っていないため入れられませんでした。動画を手動でGoogleドライブへ追加してください。';
           }
-          finishDriveDataset_(true, msg);
+          done(true, msg);
         });
       });
     }
@@ -1953,10 +1695,14 @@
     if (window.Go5Drive && typeof window.Go5Drive.queueSave === 'function' && meta.account) {
       // ★save_jobを投げる前にR2へ動画実体を確実に置く。置けない(実体喪失)なら在ページ保存(legacy)へ倒す=
       //   Workerが r2_video_missing で黙って諦めて「永遠に保存中」になる沈黙経路を封じる(炎上①・B-1)。
-      ensureQueueVideoOnR2_().then(function (onR2) {
+      ensureVideoOnR2_(id).then(function (onR2) {
         if (!onR2) { legacyRealSave_(); return; } // R2に動画が無い=save_jobは無駄撃ち→在ページ保存で救うか"見える失敗"を出す
-        // 別作品はflightKeyが異なるので並列のまま。同じ作品だけは queueSave の受理結果までsingle-flightを保持する。
-        // 旧実装はここでdoneして入口を先に開け、4秒後のverify/sweepが同じsave_jobを再送していた。
+        // ★並列化(Chami依頼2026-08-24「ドライブ保存は押しても並列で実行できるように」)：動画はR2に在る=保存は
+        //   必ずサーバー側(save_job)で完走する。ここでボタンを即・終端へ返す=12秒のenrich待ちにボタンを縛らず、
+        //   続けて別カードの保存を並列に走らせられる。本当の保存結果は作成履歴カードの状態行(verifyDriveLanded_→
+        //   checkSaved の実物確認)に出る。以降の done() は operation-gate が settled で無視=表示は二重に飛ばない。
+        //   動画実体は既にR2=喪失しない・Workerは冪等(再送/並列でも二重フォルダにならない)。
+        done(true, '☁️ Driveへ保存中(裏で継続)・結果はカードに出ます');
         // ★動画のsave_job(サーバー側完走)を「任意の付随画像(プレビュー/元画像)の解決・R2ミラー」に絶対ブロック
         //   させない(Chami報告2026-08-18 msg1539278578913509416「投稿完了しても結局Googleドライブに保存できてない」)。
         //   真因=このブロックの前段が3つとも網へ伸びる無時限待ち: previewReady(手元に無いと fetchPreview=網)/
@@ -1966,11 +1712,10 @@
         //   12秒だけ待って"取れた分のkeyだけ"添え、必ず save_job を投げる(動画が最優先。プレビューは used:1ページ目
         //   への差し込みと、次回開いた時の okFolder/salvage の gap-fill でも後から揃う=取りこぼしゼロ)。
         //   okFolder枝・salvage枝が既に使っている12秒Promise.raceと同じ型に揃える(この主経路だけ無防備だった)。
-        var assetMirrorReady = _draftAssetMirrorReady[id] || Promise.resolve(false);
-        var enrich = Promise.resolve(assetMirrorReady).catch(function () { return false; }).then(function () { return Promise.all([
+        var enrich = Promise.all([
           Promise.resolve(previewReady).catch(function () { return null; }),
           resolveSrcImageBlob2_().catch(function () { return null; })
-        ]); }).then(function (bs) {
+        ]).then(function (bs) {
           var prevB = bs[0], srcB = bs[1];
           // 仕上がりプレビュー・元画像も小さくR2へ控えてkeyを添える(Workerが同フォルダへ保存)。任意=失敗しても続行。
           //   ★元画像を渡すのは「投稿完了と同じ一式(動画+元画像+プレビュー)」を揃えるため(Chami 2026-08-17)。
@@ -1978,7 +1723,7 @@
           //     その決定的keyを添える=投稿完了で必ずプレビューがDriveへ入る(Chami依頼2026-08-24②)。Workerは
           //     そのkeyがR2に無ければ黙ってスキップ(付随物・非致命)＝古い投稿でも安全。
           var mirrorPrev = (prevB && window.Go5Sync && Go5Sync.putBlobR2At)
-            ? Go5Sync.putBlobR2At('go5prev:' + id, prevB, { replace: true }).catch(function () { return ''; })
+            ? Go5Sync.putBlobR2At('go5prev:' + id, prevB).catch(function () { return ''; })
             : ((window.Go5Sync && Go5Sync.keyForName) ? Go5Sync.keyForName('go5prev:' + id).catch(function () { return ''; }) : Promise.resolve(''));
           var mirrorSrc = (srcB && window.Go5Sync && Go5Sync.putBlobR2At)
             ? Go5Sync.putBlobR2At('go5src:' + id, srcB).catch(function () { return ''; })
@@ -1992,9 +1737,9 @@
         })
           .then(function (res) {
             var ok = !!(res && res.ok);
-            finishDriveDataset_(ok, ok ? 'Driveへ保存(裏で完走)' : '今は送れず・次回起動で自動再送(投稿履歴は記録済み)');
+            done(ok, ok ? 'Driveへ保存(裏で完走)' : '今は送れず・次回起動で自動再送(投稿履歴は記録済み)');
           })
-          .catch(function () { finishDriveDataset_(false, '保存予約に失敗・次回起動で自動再送(投稿履歴は記録済み)'); });
+          .catch(function () { done(false, '保存予約に失敗・次回起動で自動再送(投稿履歴は記録済み)'); });
       });
       return;
     }
@@ -2005,8 +1750,8 @@
     //   次回起動の sweepSaveJobs_ が「Driveに在るか」を実測し、無ければ実体を取り寄せて再送=直アップロードの
     //   取りこぼしも自己修復させる(旧実装はlegacyだけpending未記録=一度死ぬと二度と拾えなかった)。
     recordSaveJobPending_(id, meta);
-    resolveLegacyUploadVideo_().then(function (blob) {
-      if (!isUsableVideoBlob_(blob)) {
+    resolveVideoBlob_(id).then(function (blob) {
+      if (!blob) {
         // ★動画は取れなくても、上の previewReady が投稿履歴1ページ目のプレビューを既に設定済み。
         //   さらに「動画が無いなら仕方ない、でもフォルダくらい作って・プレビュー/元画像はあるなら名前変えて保存して」
         //   (Chami依頼2026-08-18 msg1539252929222017124)へ応える=全か無かにせず、フォルダを作り手元の画像だけ退避する。
@@ -2024,15 +1769,15 @@
         Promise.all([imgP, previewReady]).then(function (bs) {
           var imgB = bs[0], prevB = bs[1];
           window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, imgB ? [imgB] : [], prevB || null, { normalize: !!opts.normalize });
-          finishDriveDataset_(true, 'Driveへ保存開始');
+          done(true, 'Driveへ保存開始');
         });
       }).catch(function () {
         window.Go5Drive.upload(blob, meta.videoName, meta.title, meta.account, meta.id, [], null, { normalize: !!opts.normalize });
-        finishDriveDataset_(true, 'Driveへ保存開始');
+        done(true, 'Driveへ保存開始');
       });
     }).catch(function (err) {
       if (!opts.silent) alert('動画データの取得に失敗しました(投稿履歴には記録済み): ' + (err ? err.message || String(err) : '不明'));
-      finishDriveDataset_(false, '取得失敗');
+      done(false, '取得失敗');
     });
     } // legacyRealSave_
     } // realSaveNow_
@@ -2047,7 +1792,6 @@
   function regenDataset_(locator, opts) {
     opts = opts || {};
     var done = function (ok, msg) { if (opts.onDone) { try { opts.onDone(ok, msg); } catch (_) {} } };
-    var rawLocatorTitle = String((locator && locator.title) || '').trim();
     var meta = null;
     if (locator && locator.id) {
       meta = locator; // ドラフトモーダル=openPostModal_ が持つ実meta(id/videoId/IDB素材あり)
@@ -2069,7 +1813,7 @@
         if (!meta && locator.title) {
           for (var j = 0; j < all.length; j++) {
             if (!all[j] || (locator.account && all[j].account !== locator.account)) continue;
-            if (driveDataTitle_(locator.title) && driveDataTitle_(all[j].title) === driveDataTitle_(locator.title)) { meta = all[j]; break; }
+            if (all[j].title === locator.title) { meta = all[j]; break; }
           }
         }
       }
@@ -2083,8 +1827,6 @@
         meta = Object.assign({}, meta, { historyVideoId: locator.videoId });
       }
     }
-    // resolve結果・合成metaのどちらでも、この一点で現在のデータ題名へ揃える。元オブジェクトは不変。
-    meta = driveDataMeta_(meta, rawLocatorTitle);
     if (!meta || !meta.id) { done(false, 'この履歴のデータを特定できませんでした(背骨IDが空=Drive保存が始まる前の古い投稿)'); return; }
     // ★成否の真の基準は「投稿履歴1ページ目に仕上がりプレビューが入ったか」(Chami「戻すだけ・前はプレビューが入ってた」
     //   2026-08-18)。driveSaveDataset_ は動画がDriveに在るだけで done(true,'プレビュー追記') と返しうる=
@@ -2162,53 +1904,18 @@
   //   無ければ動画をR2へ上げ直して save_job を再送する。Worker側は冪等=再送で二重フォルダにならない。
   var SAVEJOB_PENDING_PREFIX = 'go5_drive_savejob_';
   var SAVEJOB_MAX_TRIES = 12; // R2に実体が在る前提での「再送」上限。超えても記録は残しcheckSavedは継続(嘘の完了にしない)
-  var SAVEJOB_REPAIR_SCHEMA = 3; // 動画・完成プレビュー・元画像の3点セットを完了条件にした世代
   function recordSaveJobPending_(id, meta) {
     try {
       var prev = JSON.parse(localStorage.getItem(SAVEJOB_PENDING_PREFIX + id) || 'null') || {};
       localStorage.setItem(SAVEJOB_PENDING_PREFIX + id, JSON.stringify({
-        id: id, videoId: meta.videoId || prev.videoId || id,
-        title: meta.title, channel: meta.account, ts: prev.ts || Date.now(),
-        tries: prev.repairSchema === SAVEJOB_REPAIR_SCHEMA ? (prev.tries | 0) : 0,
-        repairSchema: SAVEJOB_REPAIR_SCHEMA
+        id: id, title: meta.title, channel: meta.account, ts: prev.ts || Date.now(), tries: (prev.tries | 0)
       }));
     } catch (e) {}
-  }
-  function driveSetComplete_(state) {
-    if (window.Go5DriveSet && typeof window.Go5DriveSet.isComplete === 'function') return window.Go5DriveSet.isComplete(state);
-    return !!(state && state.saved === true && state.hasPreview === true && state.hasSrc === true);
-  }
-  // folder_state が使える環境では3種類を実測する。旧Workerだけ動画判定へ退化するが「完全」とは扱わない。
-  function driveSetState_(channel, title) {
-    if (window.Go5Drive && typeof Go5Drive.folderState === 'function')
-      return Go5Drive.folderState(channel, title).catch(function () { return null; });
-    if (window.Go5Drive && typeof Go5Drive.checkSaved === 'function')
-      return Go5Drive.checkSaved(channel, title).then(function (saved) { return { saved: !!saved, hasPreview: false, hasSrc: false }; }, function () { return null; });
-    return Promise.resolve(null);
-  }
-  var _driveSetRepairBusy = {};
-  function repairDriveSet_(rec, onDone) {
-    if (!rec || !rec.id || _driveSetRepairBusy[rec.id]) return false;
-    _driveSetRepairBusy[rec.id] = true;
-    var finished = false;
-    function finishDriveSetRepair_() {
-      if (finished) return; finished = true;
-      delete _driveSetRepairBusy[rec.id];
-      if (onDone) { try { onDone(); } catch (e) {} }
-    }
-    var wd = setTimeout(finishDriveSetRepair_, 60000);
-    try {
-      driveSaveDataset_({ id: rec.id, videoId: rec.videoId || rec.id, title: rec.title, account: rec.channel }, {
-        silent: true,
-        onDone: function () { clearTimeout(wd); finishDriveSetRepair_(); }
-      });
-    } catch (e) { clearTimeout(wd); finishDriveSetRepair_(); }
-    return true;
   }
   var _saveJobSweepBusy = false;
   function sweepSaveJobs_() {
     if (document.hidden || _saveJobSweepBusy) return;
-    if (!(window.Go5Drive && (Go5Drive.folderState || Go5Drive.checkSaved))) return;
+    if (!(window.Go5Drive && Go5Drive.queueSave && Go5Drive.checkSaved)) return;
     var keys = [];
     try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf(SAVEJOB_PENDING_PREFIX) === 0) keys.push(k); } } catch (e) { return; }
     if (!keys.length) return;
@@ -2220,31 +1927,39 @@
       var k = keys[idx++], rec = null;
       try { rec = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { rec = null; }
       if (!rec || !rec.id || !rec.title || !rec.channel) { try { localStorage.removeItem(k); } catch (e) {} setTimeout(nextK, 0); return; }
-      driveSetState_(rec.channel, rec.title).then(function (state) {
-        if (driveSetComplete_(state)) {
+      Go5Drive.checkSaved(rec.channel, rec.title).then(function (saved) {
+        if (saved) { // 確認できた=畳む。saved後にnovideo等の暫定失敗表示が残っていたら実物確認へ格上げ
           try { localStorage.removeItem(k); } catch (e) {}
-          setDriveSavedState_(rec.id, 'verified', { title: rec.title, account: rec.channel });
-          try { render(); } catch (e) {}
+          var _ds = driveSavedState_(rec.id);
+          if (_ds && _ds.state !== 'verified') { setDriveSavedState_(rec.id, 'verified', { title: rec.title, account: rec.channel }); try { render(); } catch (e) {} }
           setTimeout(nextK, 40); return;
         }
-        // 動画だけ/画像1枚だけでもpendingを畳まない。手元IDB・同期ミラー・R2を再探索し、不足分だけ補う。
-        // 旧版で上限まで使い切ったジョブも、3点セット修復の初回だけ再試行枠を復活させる。
-        if (rec.repairSchema !== SAVEJOB_REPAIR_SCHEMA) {
-          rec.tries = 0;
-          rec.repairSchema = SAVEJOB_REPAIR_SCHEMA;
-        }
-        if ((rec.tries | 0) >= SAVEJOB_MAX_TRIES) { setTimeout(nextK, 40); return; }
-        rec.tries = (rec.tries | 0) + 1;
-        try { localStorage.setItem(k, JSON.stringify(rec)); } catch (e) {}
-        setDriveSavedState_(rec.id, 'pending', { title: rec.title, account: rec.channel });
-        if (!repairDriveSet_(rec, function () { setTimeout(nextK, 150); })) setTimeout(nextK, 300);
+        // ★まだDriveに無い→「R2に動画実体が今この瞬間 在るか」をHEADで実測してから撃つ(ensureVideoMirror_=IDB直読み
+        //   だけの旧処置は、IDBを退役した端末で毎回無言スキップ→r2_video_missingの保証された失敗を8回撃って諦めていた。
+        //   Fable5診断・2026-08-18)。実体がどこにも無い時はsave_jobは無駄撃ち=沈黙で終わらせず「見える失敗(novideo)」にする。
+        Promise.resolve(ensureVideoOnR2_(rec.id)).then(function (onR2) {
+          if (!onR2) {
+            // 動画がこの端末にもクラウドにも無い=save_jobを投げても静死するだけ。カードに見える失敗を出す(沈黙ゼロ)。
+            setDriveSavedState_(rec.id, 'novideo', { title: rec.title, account: rec.channel });
+            try { render(); } catch (e) {}
+            var ageMs = Date.now() - (rec.ts || Date.now());
+            if (ageMs > 14 * 24 * 3600 * 1000) { try { localStorage.removeItem(k); } catch (e) {} } // 14日粘っても実体が戻らなければ記録は掃除(表示は残る)
+            setTimeout(nextK, 60); return;
+          }
+          if ((rec.tries | 0) >= SAVEJOB_MAX_TRIES) { setTimeout(nextK, 40); return; } // 再送は打ち切るが記録は残す=次回以降もcheckSavedで確認は続ける
+          rec.tries = (rec.tries | 0) + 1;
+          try { localStorage.setItem(k, JSON.stringify(rec)); } catch (e) {}
+          Go5Drive.queueSave({ videoId: rec.id, title: rec.title, channel: rec.channel, overwrite: true })
+            .catch(function () {}).then(function () { setTimeout(nextK, 150); });
+        }).catch(function () { setTimeout(nextK, 150); });
       }).catch(function () { setTimeout(nextK, 150); });
     }
     nextK();
   }
+
   // ── ★Drive保存の「実物確認」状態(2026-08-17 オタコン)──
   //   ドラフト確定/手押しでDrive保存に入ったら go5_drive_saved_<id> に pending を記録し、Go5Drive.checkSaved
-  //   ([題名]フォルダに動画・完成プレビュー・元画像の3点が在るか＝read-only)で実物を確認できた時だけ verified へ上げる。Workerの202受理を
+  //   ([題名]フォルダに動画実体が在るか＝read-only)で実物を確認できた時だけ verified へ上げる。Workerの202受理を
   //   成功と読み替えない=「裏で完走と出るのにDriveに動画が来ない」の沈黙を、カードで見える状態(確認中/実物確認)に変える。
   var DRIVE_SAVED_PREFIX = 'go5_drive_saved_';
   function driveSavedState_(id) {
@@ -2266,89 +1981,24 @@
     if (_driveVerifyBusy[id]) return;
     var st = driveSavedState_(id);
     if (!st || st.state === 'verified') return;
-    if (!(window.Go5Drive && (Go5Drive.folderState || Go5Drive.checkSaved)) || !st.channel || !st.title) return;
+    if (!(window.Go5Drive && Go5Drive.checkSaved) || !st.channel || !st.title) return;
     _driveVerifyBusy[id] = true;
-    var delays = [4000, 20000, 60000, 180000];
+    var delays = [4000, 20000, 60000, 180000]; // 4秒→20秒→60秒→180秒(初回を4秒に=既にDrive着地済み/軽い保存は数秒で「実物確認」へ上がる。Chami「押して30秒無反応」2026-08-18)
     var i = 0;
     function schedule() {
-      if (i >= delays.length) { _driveVerifyBusy[id] = false; return; }
+      if (i >= delays.length) { _driveVerifyBusy[id] = false; return; } // 打ち切り=pendingのまま(嘘をつかない・次回起動で再照会)
       setTimeout(tryOnce, delays[i++]);
     }
     function tryOnce() {
-      if (document.hidden) { schedule(); return; }
-      driveSetState_(st.channel, st.title).then(function (state) {
-        if (driveSetComplete_(state)) {
-          try { localStorage.removeItem(SAVEJOB_PENDING_PREFIX + id); } catch (e) {}
-          setDriveSavedState_(id, 'verified', null);
-          _driveVerifyBusy[id] = false;
-          try { render(); } catch (e) {}
-          return;
-        }
-        // 動画だけ到着していても不足画像を自己修復する。既存フォルダ/既存ファイルはWorker側で再利用・スキップ。
-        repairDriveSet_({ id: id, videoId: st.videoId || id, title: st.title, channel: st.channel });
+      if (document.hidden) { schedule(); return; } // 隠れている間は数えず復帰で再試行
+      Go5Drive.checkSaved(st.channel, st.title).then(function (saved) {
+        if (saved) { setDriveSavedState_(id, 'verified', null); _driveVerifyBusy[id] = false; try { render(); } catch (e) {} return; }
         schedule();
       }).catch(function () { schedule(); });
     }
     schedule();
   }
-  // 旧版が「動画1本あり」だけで verified にしてpendingを消した最近の作品も、初回起動時に再点検する。
-  // 別端末で履歴だけ同期された場合にも効くよう、端末ローカルのDrive状態ではなく直近メタを基準にする。
-  var DRIVE_SET_AUDIT_KEY = 'go5_drive_set_audit_set3';
-  var _driveSetAuditBusy = false;
-  function auditRecentDriveSets_() {
-    if (_driveSetAuditBusy || document.hidden) return;
-    if (!(window.Go5Drive && (Go5Drive.folderState || Go5Drive.checkSaved))) return;
-    try { if (localStorage.getItem(DRIVE_SET_AUDIT_KEY) === '1') return; } catch (e) {}
 
-    var raw = loadMeta().concat(loadArchive()).sort(function (a, b) {
-      return ((b && (b.completedTs || b.ts)) || 0) - ((a && (a.completedTs || a.ts)) || 0);
-    });
-    var seen = {}, items = [];
-    for (var n = 0; n < raw.length && items.length < 8; n++) {
-      var m = raw[n];
-      if (!m || !m.id || !m.title || !m.account) continue;
-      var sig = m.account + '\n' + m.title;
-      if (seen[sig]) continue;
-      seen[sig] = true;
-      items.push(m);
-    }
-    if (!items.length) {
-      try { localStorage.setItem(DRIVE_SET_AUDIT_KEY, '1'); } catch (e) {}
-      return;
-    }
-
-    _driveSetAuditBusy = true;
-    var idx = 0, retryNeeded = false;
-    function finishDriveSetAudit_() {
-      _driveSetAuditBusy = false;
-      // 通信不能時は完了印を付けず、次回起動時に自動再監査する。
-      if (!retryNeeded) {
-        try { localStorage.setItem(DRIVE_SET_AUDIT_KEY, '1'); } catch (e) {}
-      }
-    }
-    function next_() {
-      if (document.hidden || idx >= items.length) { finishDriveSetAudit_(); return; }
-      var meta = items[idx++];
-      driveSetState_(meta.account, meta.title).then(function (state) {
-        if (!state) {
-          retryNeeded = true;
-        } else if (!driveSetComplete_(state) && state.saved === true) {
-          var rec = {
-            id: meta.id, videoId: meta.videoId || meta.id,
-            title: meta.title, channel: meta.account, ts: Date.now(),
-            tries: 0, repairSchema: SAVEJOB_REPAIR_SCHEMA
-          };
-          try { localStorage.setItem(SAVEJOB_PENDING_PREFIX + meta.id, JSON.stringify(rec)); } catch (e) {}
-          setDriveSavedState_(meta.id, 'pending', {
-            title: meta.title, account: meta.account, videoId: meta.videoId || meta.id
-          });
-          repairDriveSet_(rec);
-        }
-        setTimeout(next_, 700);
-      }).catch(function () { retryNeeded = true; setTimeout(next_, 700); });
-    }
-    next_();
-  }
   // ── 再作成(ドラフトデータを動画作成タブに復元) ──
   var REMAKE_PENDING_KEY = 'go5_stock_remake_pending';
   function remakeStock_(meta) {
@@ -2391,51 +2041,39 @@
     //   作り直すたびに写真だけ空欄になっていた。候補→動画作成と同じ実績のある経路 window.Go5SetForegroundFile で
     //   #photo へ流し込む。手元Blob(stock_img_)優先、無ければ同期ミラー(stock:imgs:.src)から復元。
     //   ★元ドラフトの一覧からの除去(deleteStock_)は delBlobs_ で画像も消すため、画像の読み取りが終わってから行う
-    //     (先に消すと復元用のBlobを取りこぼす)。読み取り・IDB着地に失敗した時は元ドラフトを残して再試行可能にする。
-    restoreRemakeForeground_(meta).catch(function () { return { ok: false, primary: false, reason: 'restore' }; }).then(function (receipt) {
-      // 元画像を現在の前景IDBへ読戻し確認できた時だけ元ドラフトを外す。失敗時は復元元を残し、
-      // iOSのタブ破棄/一時IDB停止でも「作り直し元と現在画像が両方消える」状態を作らない。
-      if (!receipt || !receipt.ok || !receipt.primary) {
-        var st = $('status');
-        if (st) st.textContent = '⚠ 元画像を安全に復元できなかったため、元のドラフトは残しました。もう一度「再作成」をお試しください。';
-        return;
-      }
+    //     (先に消すと復元用のBlobを取りこぼす)。読み取りに失敗しても除去は必ず走らせる。
+    restoreRemakeForeground_(meta).catch(function () {}).then(function () {
       // ②再作成したらこのドラフトはドラフト一覧から外す(Chami依頼2026-08-06②)。作り直しの起点なので
       //   元の下書きは残さない=消し忘れによる二重ドラフトを防ぐ(墓標で他端末のドラフトからも消える)。
       try { deleteStock_(meta.id); render(); } catch (e) {}
     });
   }
   // 作り直し時に、作成に使った前景画像を動画作成タブ(#photo)へ戻す。常に解決するPromiseを返す(呼び出し側が
-  //   これを待ってから元ドラフトを消せるように)。画像が取れなくても投げず、失敗receiptを返して元を保持する。
+  //   これを待ってから元ドラフトを消せるように)。画像が取れなくても投げない=deleteStock_ は必ず走る。
   function restoreRemakeForeground_(meta) {
     var store = idb();
     if (!store || !meta || !meta.id || !window.Go5SetForegroundFile) return Promise.resolve();
     var setFg = function (blob) {
-      if (!blob) return Promise.resolve({ ok: false, primary: false, reason: 'missing' });
+      if (!blob) return;
       try {
         var name = (meta.title || 'photo').replace(/[\\/:"*?<>|]/g, '_') + '.jpg';
         var f = (blob instanceof File) ? blob : new File([blob], name, { type: blob.type || 'image/jpeg' });
-        if (window.Go5SetForegroundFileReady) return window.Go5SetForegroundFileReady(f, null, { origin: 'remake' });
-        var ok = window.Go5SetForegroundFile(f, null, { origin: 'remake' });
-        return Promise.resolve({ ok: !!ok, durable: !!ok, primary: !!ok, reason: ok ? '' : 'rejected' });
-      } catch (e) { return Promise.resolve({ ok: false, primary: false, reason: 'file' }); }
+        window.Go5SetForegroundFile(f);
+      } catch (e) {}
     };
     return Promise.all([
       store.get('stock_img_' + meta.id).catch(function () { return null; }),
       store.get('stock:imgs:' + meta.id).catch(function () { return null; })
     ]).then(function (r) {
       var img = r[0], mirror = r[1] || {};
-      if (img) return setFg(img);
+      if (img) { setFg(img); return; }
       if (mirror.src) return durlToBlob_(mirror.src).then(setFg); // サブ端末で作った=同期ミラーから戻す
       // ★手元IDBにも同期ミラーにも無い(iOSがIDBを退避した等)=作成直後にR2へ控えた元画像 go5src:<id> から
       //   最後の復元(2026-08-17③)。これが無いと「再作成で画像が消える」が残る。
       if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
-        return Go5Sync.fetchBlobR2At('go5src:' + meta.id).then(function (b) {
-          return b && b.size ? setFg(b) : { ok: false, primary: false, reason: 'missing' };
-        }).catch(function () { return { ok: false, primary: false, reason: 'r2' }; });
+        return Go5Sync.fetchBlobR2At('go5src:' + meta.id).then(function (b) { if (b && b.size) setFg(b); }).catch(function () {});
       }
-      return { ok: false, primary: false, reason: 'missing' };
-    }).catch(function () { return { ok: false, primary: false, reason: 'restore' }; });
+    }).catch(function () {});
   }
 
   // ── レンダリング ──
@@ -3783,10 +3421,9 @@
     setInterval(sweepVideoMirror_, 120000);
 
     // ★save_job 永続pending の再送。ドラフト確定時にqueueSaveが届かなかったぶんを、
-    //   起動時と復帰時・定期に「Driveへ3点揃ったか」照会し、完全なら畳み、不足なら同じフォルダへ不足分だけ再送する。
+    //   起動時と復帰時・定期に「Driveにもう在るか」照会して畳む/再送する(sync設定の読込を少し待つ)。
     setTimeout(sweepSaveJobs_, 3000);
     setTimeout(sweepSaveJobs_, 12000);
-    setTimeout(auditRecentDriveSets_, 5000);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) sweepSaveJobs_(); });
     setInterval(sweepSaveJobs_, 180000);
 

@@ -47,6 +47,40 @@ def q_type(title):
     t = strip_tags(title)
     return "問いかけ" if ("？" in t or "?" in t) else "断定"
 
+# --- オチ絵(4-5秒目)の符号化(Chami指示2026-08-29/SA-H011「題名だけで語るな・絵と対で見ろ」) ---
+# comp_titles は既に frameText(焼き込み文字)/panelDesc(コマ内容) を返す=vision列を日次へ結合する。
+# ★hookType は簡易ヒューリスティック(frameText/panelDesc のキーワード)=絵側の型を粗く付ける補助。
+#   厳密分類ではない(vision の生 frameText/panelDesc を必ず併記して人が最終判断する)。
+HOOK_RULES = [
+    ("続きはコメ欄", ["続き", "コメ欄", "コメント欄", "答えは", "正解は", "オチは"]),
+    ("挑発", ["理性", "我慢", "ジト目", "誘惑", "挑発", "上目", "近づ", "距離"]),
+    ("ギャップ", ["崩壊", "裏の顔", "実は", "正体", "豹変", "ギャップ", "評価が", "一変"]),
+    ("あるある", ["あるある", "わかる", "しがち", "つい", "みんな"]),
+]
+
+def hook_type(frame_text, panel_desc):
+    """オチ絵の型を frameText/panelDesc から粗く推定(未取得=絵未取得)。"""
+    blob = ((frame_text or "") + " " + (panel_desc or "")).strip()
+    if not blob:
+        return "絵未取得"
+    for name, kws in HOOK_RULES:
+        if any(k in blob for k in kws):
+            return name
+    return "その他"
+
+def oti_cell(t):
+    """レポートの『オチ絵』セル=焼き込み文字＋コマ内容(4-5秒目)。未取得は明示する。"""
+    ft = (t.get("frameText") or "").strip() if isinstance(t.get("frameText"), str) else ""
+    pd = (t.get("panelDesc") or "").strip() if isinstance(t.get("panelDesc"), str) else ""
+    if not ft and not pd:
+        return "絵未取得"
+    parts = []
+    if ft:
+        parts.append("焼込『%s』" % ft[:20])
+    if pd:
+        parts.append(pd[:26])
+    return " / ".join(parts)
+
 # 負けテンプレ候補=【話題】ラベル付き or 語尾w(草)。監視して負けが続くならコピー部へ「使うな」を渡す。
 def is_waru(title):
     t = strip_tags(title)
@@ -398,6 +432,7 @@ def main():
     for t in ts:
         t["numType"] = num_type(t["title"])
         t["qType"] = q_type(t["title"])
+        t["hookType"] = hook_type(t.get("frameText"), t.get("panelDesc"))  # オチ絵の型(SA-H011)
         t["known"] = t["videoId"] in seen
 
     ts_sorted = sorted(ts, key=lambda x: x["speed"], reverse=True)
@@ -463,13 +498,18 @@ def main():
         L.append("| %s | %d | %d | %s | %d |" %
                  (name, vs[0]["subscriberCount"], len(vs), median([x["speed"] for x in vs]), max(x["speed"] for x in vs)))
     L.append("")
-    L.append("## 伸びた上位10(新規のみ深掘り・既出は既出印)")
-    L.append("| # | 速度 | 型(数字) | 断/問 | ch | 題名 | 状態 |")
-    L.append("|---|---|---|---|---|---|---|")
+    # ★上位は「題名だけ」で語らない(SA-H011)=4-5秒目のオチ絵(vision)を必ず横に並べる。
+    #   vision未取得の本は「絵未取得」と出る=comp_frames.py を回せば翌日から埋まる。
+    vis_n = sum(1 for t in ts if oti_cell(t) != "絵未取得")
+    L.append("## 伸びた上位10(題名×オチ絵・新規のみ深掘り・既出は既出印)")
+    L.append("> オチ絵=4.5秒目の焼き込み文字＋コマ内容(comp_frames.py の vision)。"
+             "本日 %d/%d 本が取得済み。未取得は「絵未取得」=バッチ未処理。" % (vis_n, len(ts)))
+    L.append("| # | 速度 | 型(数字) | 断/問 | オチ絵の型 | ch | 題名 | オチ絵(4-5秒目) | 状態 |")
+    L.append("|---|---|---|---|---|---|---|---|---|")
     for i, t in enumerate(ts_sorted[:10], 1):
-        L.append("| %d | %d | %s | %s | %s | %s | %s |" %
-                 (i, t["speed"], t["numType"], t["qType"], t["channelName"],
-                  strip_tags(t["title"])[:32], "既出" if t["known"] else "新規"))
+        L.append("| %d | %d | %s | %s | %s | %s | %s | %s | %s |" %
+                 (i, t["speed"], t["numType"], t["qType"], t["hookType"], t["channelName"],
+                  strip_tags(t["title"])[:32], oti_cell(t), "既出" if t["known"] else "新規"))
     L.append("")
     L.append("## 伸びてない下位10")
     L.append("| 速度 | 型(数字) | 断/問 | ch | 題名 |")
@@ -538,10 +578,20 @@ def main():
         E.append("【所見】")
         E.extend(sho if sho else ["・トレンド蓄積中(複数日そろってから所見が出る)。"])
         lead = ch_rank[0]
-        E.append("【地力】伸び頭=%s(登録%d・%d本・中央%s・最大%d「%s」)"
+        lead_top = max(lead[1], key=lambda x: x["speed"])
+        E.append("【地力】伸び頭=%s(登録%d・%d本・中央%s・最大%d「%s」/オチ絵:%s)"
                  % (lead[0], lead[1][0]["subscriberCount"], len(lead[1]),
-                    median([x["speed"] for x in lead[1]]), max(x["speed"] for x in lead[1]),
-                    strip_tags(max(lead[1], key=lambda x: x["speed"])["title"])[:20]))
+                    median([x["speed"] for x in lead[1]]), lead_top["speed"],
+                    strip_tags(lead_top["title"])[:20], oti_cell(lead_top)))
+        # ★地力超え(SA-H010)=登録者あたりの伸び(speed/(subs+1))で小規模chブレイクを1本名指し。
+        #   絶対再生も併記(割り算で過大に見える本を弾く)。題名×オチ絵で語る(SA-H011)。
+        jiryoku = sorted(ts, key=lambda x: x["speed"] / (x["subscriberCount"] + 1), reverse=True)
+        b = next((x for x in jiryoku if x["subscriberCount"] < 5000 and x["speed"] >= 500), None)
+        if b:
+            E.append("【地力超え】小規模ブレイク=%s(登録%d・速度%d=登録の%.1f倍「%s」/オチ絵:%s)"
+                     % (b["channelName"], b["subscriberCount"], b["speed"],
+                        b["speed"] / (b["subscriberCount"] + 1),
+                        strip_tags(b["title"])[:20], oti_cell(b)))
         E.append("詳細=docs/departments/shorts-analyst/competitor_daily/%s.md" % snap)
         print("\n".join(E))
         return

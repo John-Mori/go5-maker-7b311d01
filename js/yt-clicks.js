@@ -141,56 +141,7 @@
   function saveYtMap(m) { if (window.Go5Hist) { try { window.Go5Hist.write(ytMapKey(), m); return; } catch (e) {} } try { localStorage.setItem(ytMapKey(), JSON.stringify(m)); } catch (e) {} }
   function apiKey() { try { return (localStorage.getItem('yt_api_key') || '').trim(); } catch (e) { return ''; } }
   function itemKey(it) { return (window.HistMerge && window.HistMerge.historyItemKey) ? window.HistMerge.historyItemKey(it) : (it.manual ? it.id : (it.postUri ? ('u:' + it.postUri) : (it.videoId ? ('v:' + it.videoId) : (it.shortUrl ? ('s:' + it.shortUrl) : '')))); }
-
-  // 返信ツリー設定は履歴配列/シート列から分離した小さな同期マップを正本にする。
-  // ローカル履歴・シート由来行のどちらも videoId を優先して同じ設定へ結線できる。
-  var TREE_LINKS_KEY = 'go5_tree_links_v1';
-  function treeIdentity_(it, account) {
-    var spine = it && it.manual && it.id ? ('i:' + it.id)
-      : (it && it.videoId ? ('v:' + it.videoId)
-        : (it && it.id ? ('i:' + it.id)
-          : (it && it.postUri ? ('u:' + it.postUri) : itemKey(it || {}))));
-    return (account === 'acc2' ? 'acc2' : 'acc1') + '|' + spine;
-  }  function treeStoreLoad_() {
-    try { var v = JSON.parse(localStorage.getItem(TREE_LINKS_KEY) || '{}'); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {}; }
-    catch (e) { return {}; }
-  }
-  function normalizeTreeLinks_(trees) {
-    var out = [];
-    (Array.isArray(trees) ? trees : []).forEach(function (t, i) {
-      if (!t) return;
-      var postUrl = String(t.postUrl || '').trim(), shortUrl = String(t.shortUrl || '').trim();
-      // 返信ポストをまだ作っていない段階でも、先に作品の計測短縮URLだけ仮保存できる。
-      // 旧実装は両方必須だったため、ツリー2以降を追加して短縮だけ作った状態で保存すると
-      // normalize と端末同期の双方がその行を捨て、開き直した時に消えていた。
-      if (!postUrl && !shortUrl) return;
-      out.push({
-        id: String(t.id || ('tree-' + Date.now() + '-' + i)),
-        name: String(t.name || ('ツリー' + (out.length + 1))).trim().slice(0, 40) || ('ツリー' + (out.length + 1)),
-        postUrl: postUrl,
-        shortUrl: shortUrl
-      });
-    });
-    return out;
-  }
-  function treeLinksFor_(it, account) {
-    var rec = treeStoreLoad_()[treeIdentity_(it, account)];
-    return normalizeTreeLinks_(rec && rec.trees);
-  }
-  function saveTreeLinksFor_(it, account, trees) {
-    var store = treeStoreLoad_(), key = treeIdentity_(it, account), normalized = normalizeTreeLinks_(trees);
-    var before = store[key] && store[key].trees;
-    var changed = JSON.stringify(normalizeTreeLinks_(before)) !== JSON.stringify(normalized);
-    // ツリーを触っていない通常編集では更新時刻を進めない。
-    // 同期先の新しいツリー設定を、内容が同じだけの古い端末が上書きするのを防ぐ。
-    if (!changed) return;
-    store[key] = { trees: normalized, at: Date.now() }; // 空配列も明示削除として同期
-    try { localStorage.setItem(TREE_LINKS_KEY, JSON.stringify(store)); }
-    catch (e) { showModalErr_('ツリー設定を保存できませんでした(端末の保存容量を確認してください)。'); return; }
-    if (changed && normalized.length) {
-      fetchAllClicks_(true).then(function () { renderWhenHistIdle_(); }, function () {}); // 新規ツリーを30分待たせず即集計
-    }
-  }  // verify_yt旧データの短縮URLキーも読みつつ、新規操作は強いcanonicalキーへ寄せる。
+  // verify_yt旧データの短縮URLキーも読みつつ、新規操作は強いcanonicalキーへ寄せる。
   function itemYt_(map, it) { return (window.HistMerge && window.HistMerge.historyMapValue) ? window.HistMerge.historyMapValue(map, it) : ((map && map[itemKey(it)]) || ''); }
   function num(n) { try { return Number(n).toLocaleString(); } catch (e) { return String(n); } }
   function fmtTs(ts) { try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
@@ -295,20 +246,16 @@
     saveMergeStore_(a, m);
   }
   // シート正本が編集を反映できたvideoIdの保持を落とす(在メモリ＋localStorage双方)。過剰保持を防ぐ自己清掃。
-  //   導線2は空文字も確定値なので property の有無を保ったまま照合する。platformだけの編集も
-  //   シート側の同値を確認するまでpendingを残し、古い応答でX/Bsky表示を巻き戻さない。
+  //   ★workUrl/ytUrlのどちらかが非空のpatchだけ照合対象(historyHasEditはこの2つ＋workStateしか見ないため、
+  //    属性/platformだけの編集を空expectedで誤って"反映済み"と判定して消さない)。
   function reconcilePend_(a, sheetItems) {
     var pm = _pendingSheetEdits[a]; if (!pm) return;
     var he = window.HistMerge && window.HistMerge.historyHasEdit; if (!he) return;
     var changed = false;
     Object.keys(pm).forEach(function (vid) {
       var patch = pm[vid] || {};
+      if (!patch.workUrl && !patch.ytUrl) return; // 照合できる実体が無い=在セッションのbgSuccessに任せる
       var expected = { videoId: vid, youtubeUrl: patch.ytUrl || '', workUrl: patch.workUrl || '', workState: patch.workState || '' };
-      if (Object.prototype.hasOwnProperty.call(patch, 'workShortUrl') || Object.prototype.hasOwnProperty.call(patch, 'workShortNone')) {
-        expected.workShortUrl = patch.workShortNone ? '' : (patch.workShortUrl || '');
-        expected.workShortClear = !!patch.workShortNone;
-      }
-      if (Object.prototype.hasOwnProperty.call(patch, 'platform')) expected.platform = patch.platform || '';
       if (he(sheetItems, expected)) { delete pm[vid]; changed = true; }
     });
     if (changed) savePend_(a, pm);
@@ -509,12 +456,12 @@
       if (cb) cb(extra);
     });
   }
-  // refresh()から毎回呼ぶ(TTLキャッシュ内は通信ゼロ)。GASレスポンス後は、操作中を避けて「読み込み中...」を確実に解除する。
+  // refresh()から毎回呼ぶ(TTLキャッシュ内は通信ゼロ)。GASレスポンス後は必ずrender()=「読み込み中...」を確実に解除する。
   function mergeSheetExtras_() {
     fetchSheetExtra_(function (extra) {
-      renderWhenHistIdle_(); // GAS応答後に必ず再描画(「読み込み中...」→実データ or「まだ記録がありません」へ更新)
+      render(); // GAS応答後に必ず再描画(「読み込み中...」→実データ or「まだ記録がありません」へ更新)
       if (!extra || !extra.length) return; // 追加行が無ければここで終了
-      try { fetchData_(extra, {}, false).then(function () { renderWhenHistIdle_(); }); } catch (e) {}
+      try { fetchData_(extra, {}, false).then(function () { render(); }); } catch (e) {}
     });
   }
 
@@ -567,25 +514,7 @@
   //   候補タブ(candidates.js workSearch)と同じく、ページ分けの"前"に実データ(visibleItems)を絞る
   //   =全ページ横断で作品名・題名にヒットする(現在ページ内だけのDOM非表示ではない)。クエリはアカウント別に保持。
   var _histSearchByAcct = {};
-  var _histSearchComposing = false;
-  var _histSearchRenderTimer = null;
   function histSearchQ_() { return _histSearchByAcct[acct()] || ''; }
-  // Keep the live input node intact while a Japanese IME owns it. Replacing it mid-composition
-  // commits the provisional text and iOS then inserts the same syllable a second time.
-  function queueHistSearchRender_(input, delay) {
-    var caret = null;
-    try { caret = input && input.selectionStart; } catch (e) {}
-    if (_histSearchRenderTimer) clearTimeout(_histSearchRenderTimer);
-    _histSearchRenderTimer = setTimeout(function () {
-      _histSearchRenderTimer = null;
-      if (_histSearchComposing) return;
-      render();
-      try {
-        var ni = $('histWorkSearch');
-        if (ni) { ni.focus({ preventScroll: true }); if (caret != null) ni.setSelectionRange(caret, caret); }
-      } catch (e) {}
-    }, Math.max(0, Number(delay) || 0));
-  }
   function histNorm_(v) { var t = String(v || ''); try { t = t.normalize('NFKC'); } catch (e) {} return t.toLowerCase(); }
   function histSearchHtml_() {
     var q = histSearchQ_();
@@ -635,7 +564,7 @@
     // 編集で明示指定(X/Bsky)があれば最優先。短縮URLだけの行はURLから判別できないため手動選択が正。
     if (it && it.platform === 'x') return true;
     if (it && it.platform === 'bsky') return false;
-    if (it && /^at:\/\//.test(String(it.postUri || ''))) return false;
+    if (it && it.postUri) return false;
     var XRE = /(?:x\.com|twitter\.com)\//i;
     if (XRE.test(String(href || ''))) return true;
     if (it && (XRE.test(String(it.postUrl || '')) || XRE.test(String(it.shareUrl || '')))) return true;
@@ -656,20 +585,12 @@
     '<path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>' +
     '<path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>' +
     '<path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>';
-  function driveLinkTitle_(v) {
-    if (window.Go5RegenIdentity && typeof window.Go5RegenIdentity.cleanTitle === 'function') {
-      try { return window.Go5RegenIdentity.cleanTitle(v); } catch (e) {}
-    }
-    var s = String(v == null ? '' : v).trim().replace(/\s+/g, ' ');
-    return s.replace(/(?:^|\s)#[^\s#]+(?:\s*#[^\s#]+)*\s*$/, '').trim();
-  }
-
   // 投稿履歴の「作品↗」の右隣に置くGoogleドライブの保存先リンク。押すとこの作品が保存されたDriveの場所を開く。
   //   ★リンクの組み立ては Go5Drive.folderUrl() に一本化=保存先パスの設計はそこ1箇所(将来アカウントが変わっても追従)。
   //   題名も控えIDも無いとURLは空=その時はアイコンを出さない(切れリンクを作らない)。
   function driveLinkHtml_(it) {
     if (!(window.Go5Drive && Go5Drive.folderUrl)) return '';
-    var ch = chForItem_(it), title = driveLinkTitle_(it.title || ''), vid = it.videoId || '';
+    var ch = chForItem_(it), title = it.title || '', vid = it.videoId || '';
     var url = Go5Drive.folderUrl(ch, title, vid); // hrefの初期値(控えがあれば直リンク・無ければ題名検索)
     if (!url && !title) return '';
     // クリック時に delegated handler が「この作品のフォルダそのもの」を解決して開く(検索ではなくフォルダ内へ)。
@@ -682,7 +603,7 @@
   function platOf_(it) {
     if (it && it.platform === 'x') return 'x';
     if (it && it.platform === 'bsky') return 'bsky';
-    if (it && /^at:\/\//.test(String(it.postUri || ''))) return 'bsky';
+    if (it && it.postUri) return 'bsky';
     var s = String((it && it.postUrl) || '') + ' ' + String((it && it.shareUrl) || '') + ' ' + String((it && it.shortUrl) || '');
     if (/(?:x\.com|twitter\.com)\//i.test(s)) return 'x';
     if (/bsky\.app\//i.test(s)) return 'bsky';
@@ -730,9 +651,6 @@
       if (/campaign=gain/.test(String(e.url || '')) && codes.indexOf('JrziR') < 0) codes.push('JrziR'); // 既定セールページは歴史的JrziRを合算(過去分を失わない)
       var uniq = codes.filter(function (c, i) { return codes.indexOf(c) === i; });
       return { id: e.id, name: String(e.name || '(無題)'), url: String(e.url || ''), codes: uniq, at: (typeof e.at === 'number' ? e.at : 0) };
-    }).sort(function (a, b) {
-      // 投稿履歴のセールページは「記載開始日」(登録時刻at)が新しいものを必ず上へ。
-      return (Number(b.at) || 0) - (Number(a.at) || 0) || String(a.name).localeCompare(String(b.name), 'ja');
     });
   }
   // 現行のセールコードをGASへ登録(変化時のみ送信)。→ snapshotStatsが各コードを日次スナップし
@@ -835,16 +753,7 @@
     var u = w.WORKER_URL.replace(/\/+$/, '') + '/api/list?secret=' + encodeURIComponent(w.SHARED_SECRET);
     _clicksP = fetch(u).then(function (r) { return r.json(); }).then(function (j) {
       if (!j || !j.ok || !j.links) { _health.r2 = false; renderHealth_(); return false; }
-      j.links.forEach(function (l) {
-        if (!l || !l.code) return;
-        clicksCache[l.code] = l.clicks || 0;
-        treeClickWindowsCache[l.code] = {
-          today: Number(l.today) || 0,
-          yesterday: Number(l.yesterday) || 0,
-          week: Number(l.week) || 0
-        };
-      });
-      clicksPersist_(); treeClickWindowsPersist_();
+      j.links.forEach(function (l) { if (l && l.code) clicksCache[l.code] = l.clicks || 0; });
       _health.r2 = true; renderHealth_();                 // ★既存の取得結果を記録するだけ=追加通信ゼロ
       return true;
     }).catch(function () { _health.r2 = false; renderHealth_(); return false; });
@@ -960,9 +869,7 @@
 
     document.querySelectorAll('[data-delta-vid]').forEach(function (el) {
       var vid = el.getAttribute('data-delta-vid');
-      var tree = el.querySelector('.vrow-tree-list'), treeHtml = tree ? tree.outerHTML : '';
-      var deltaHtml = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts'), el.getAttribute('data-delta-haswork') === '1', el.getAttribute('data-delta-prepost') === '1');
-      if (deltaHtml) el.innerHTML = deltaHtml + treeHtml;
+      el.innerHTML = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts'), el.getAttribute('data-delta-haswork') === '1', el.getAttribute('data-delta-prepost') === '1') || el.innerHTML;
     });
   }
   function fetchDeltas_(force, cb) {
@@ -984,7 +891,7 @@
           try { renderHealth_(); } catch (e) {}
           applyDeltas_();
           try { repairMissing_(); } catch (e) {} // 「記録待ち」「クリック⚠」を実データ基点で自己修復
-          // 導線2の空欄はユーザーの確定値として尊重する。履歴取得を契機に発番しない。
+          try { mintMissingWorkShorts_(); } catch (e) {} // 作品短縮URL(導線2)が空の行を、開き直しだけで自己発行(REQ-28ef251ba4)
           if (cb) cb();
           return;
         }
@@ -1034,9 +941,7 @@
   // クリック数キャッシュは localStorage に永続化(リロード直後や取得失敗時に「…」のままに
   // ならず、前回値を即表示→取得成功で最新化。再生数等の yt_meta_cache と同方針)。
   var clicksCache = (function () { try { return JSON.parse(localStorage.getItem('clicks_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> clicks
-  var treeClickWindowsCache = (function () { try { return JSON.parse(localStorage.getItem('tree_click_windows_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> {today,yesterday,week}
   function clicksPersist_() { try { localStorage.setItem('clicks_cache', JSON.stringify(clicksCache)); } catch (e) {} }
-  function treeClickWindowsPersist_() { try { localStorage.setItem('tree_click_windows_cache', JSON.stringify(treeClickWindowsCache)); } catch (e) {} }
   // 【恒久・供給一本化 2026-08-03】導線1/導線2のクリック数を「投稿履歴と全く同じ計算」で1関数へ寄せる。
   //   v=579 は材料(shortUrl)の供給を履歴とランキングで揃えたが、値の"計算式"は分裂したままだった=
   //   ランキングは clicksCache[code] を直読みするだけで ①合算URL(mergeUrls)の加算 ②GAS日次デルタ
@@ -1074,24 +979,6 @@
     // リビルド結合＝この投稿のクリック＋リビルド前の動画のクリック(別短縮URLのため加算)。
     var clicksTotal = (it.rebuildMerged && it.rebuildBaseClicks != null) ? ((clicks != null ? clicks : 0) + it.rebuildBaseClicks) : clicks;
     return { c1: clicksTotal, c2: wclicks, code: code, wcode: wcode };
-  }
-  function treeRowsHtml_(it, account) {
-    var trees = treeLinksFor_(it, account);
-    if (!trees.length) return '';
-    var ico = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="クリック">';
-    return '<div class="vrow-tree-list">' + trees.map(function (t) {
-      var code = codeOf(t.shortUrl), win = code && treeClickWindowsCache[code];
-      function value_(key) { return win && win[key] != null ? num(win[key]) : (code ? '…' : '–'); }
-      var nameHtml = t.postUrl
-        ? '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener" title="返信ポストを開く">' + esc(t.name || 'ツリー1') + '</a>'
-        : '<span class="vrow-tree-name" title="返信ポストURLは未設定です">' + esc(t.name || 'ツリー1') + '</span>';
-      return '<div class="vrow-tree-row">' +
-        nameHtml +
-        '<span title="今日の返信内アフィリンククリック数">今日 ' + ico + ' ' + value_('today') + '</span>' +
-        '<span title="昨日の返信内アフィリンククリック数">昨日 ' + ico + ' ' + value_('yesterday') + '</span>' +
-        '<span title="直近7日間の返信内アフィリンククリック数">今週 ' + ico + ' ' + value_('week') + '</span>' +
-      '</div>';
-    }).join('') + '</div>';
   }
   var viewsCache = {};     // videoId -> views
   var publishedCache = {}; // videoId -> publishedAt(ms)
@@ -1155,9 +1042,7 @@
   var _pendingShort = ''; // 生成した計測用リンクのr2 URL。保存時に item.shortUrl へ付与(計測キー)
   var _pendingWorkShort = ''; // 作品クリック(導線2)の生成r2 URL。保存時に item.workShortUrl へ付与
   var _pendingWorkShare = ''; // 作品クリック(導線2)の生成表示URL。保存時に item.workShareUrl へ付与
-  var _openedWorkShort = '';  // モーダルを開いた時点の表示値。通常保存で未変更URLへ触れないための比較元
   var _curSrcUrl = '';    // 生成の元にする投稿URL(編集中アイテムのpostUrl等)
-  var _treeContextItem = null, _treeContextAccount = 'acc1'; // ツリー設定の保存先履歴
 
   // 合算(導線1のみ・Chami依頼2026-07-31): X凍結→Bluesky退避などで別の短縮URLへ割れた同一作品の
   //   クリックを、この投稿へ束ねる。合算した短縮URL群のうち「最新の1本」を投稿URL欄(veditBsky)の
@@ -1221,153 +1106,6 @@
     list.innerHTML = '';
     (Array.isArray(urls) ? urls : []).forEach(function (u) { if (u) addHistRow_(u); });
   }
-  function treeSocialUrlOk_(url) {
-    try {
-      var u = new URL(String(url || '').trim()), h = u.hostname.toLowerCase(), p = u.pathname;
-      return ((h === 'x.com' || h === 'www.x.com' || h === 'twitter.com' || h === 'www.twitter.com') && /\/status\/\d+/.test(p))
-        || ((h === 'bsky.app' || h === 'www.bsky.app') && /\/profile\/[^/]+\/post\/[^/]+/.test(p));
-    } catch (e) { return false; }
-  }
-  function treeWorkUrlOk_(url) {
-    try {
-      var raw = String(url || '').trim();
-      if (!/^https?:\/\//i.test(raw)) return false;
-      var normalized = (typeof window.normalizeWorkUrl === 'function' && window.normalizeWorkUrl(raw)) || raw;
-      var h = new URL(normalized).hostname.toLowerCase();
-      return /(^|\.)dmm\.(?:co\.jp|com)$/.test(h) || /(^|\.)fanza\.(?:co\.jp|com)$/.test(h);
-    } catch (e) { return false; }
-  }
-  function pasteInto_(inp) {
-    if (!inp) return;
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      navigator.clipboard.readText().then(function (t) {
-        inp.value = String(t || '').trim();
-        inp.dispatchEvent(new Event('input', { bubbles: true }));
-        inp.focus();
-      })
-        .catch(function () { inp.focus(); alert('クリップボードを読み取れませんでした。入力欄を長押しして貼り付けてください。'); });
-    } else { inp.focus(); alert('この環境ではボタン貼り付けに未対応です。入力欄を長押しして貼り付けてください。'); }
-  }
-  function recentTreeShort_(account) {
-    try {
-      var r = window.Go5ManualShortLast && window.Go5ManualShortLast(account);
-      return r && r.affiliateOk && r.shortUrl && (Date.now() - (Number(r.at) || 0)) < 6 * 3600 * 1000 ? r.shortUrl : '';
-    } catch (e) { return ''; }
-  }
-  function treeShortStatus_(row, ok, message) {
-    var el = row && row.querySelector('.vedit-tree-status'); if (!el) return;
-    el.hidden = !message; el.className = 'vedit-tree-status ' + (ok ? 'is-ok' : 'is-ng');
-    el.textContent = message || '';
-  }
-  function shortenTreeAffiliate_(row) {
-    var inp = row && row.querySelector('.vedit-tree-short');
-    var btn = row && row.querySelector('.vedit-tree-shorten');
-    var raw = inp && (inp.value || '').trim();
-    if (!raw || !/^https?:\/\//i.test(raw)) { treeShortStatus_(row, false, 'エラー：DMM/FANZAの作品URLを https:// から貼り付けてください。'); return; }
-    if (codeOf(raw)) {
-      treeShortStatus_(row, false, 'エラー：既に短縮済みのURLは転送先のアフィIDを再確認できません。元の作品URLを貼って短縮し直してください。');
-      return;
-    }
-    var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
-    if (!afId) { treeShortStatus_(row, false, 'エラー：詳細設定のFANZAアフィリエイトIDが未設定です。'); return; }
-    if (typeof window.ensureAffiliateLink !== 'function' || typeof window.hasRealAffiliateId !== 'function' || typeof window.Go5MakeShort !== 'function') {
-      treeShortStatus_(row, false, 'エラー：アフィリンク・短縮機能を読み込めません。ページを再読み込みしてください。'); return;
-    }
-    var normalized = (typeof window.normalizeWorkUrl === 'function' && window.normalizeWorkUrl(raw)) || raw;
-    var workHost = ''; try { workHost = new URL(normalized).hostname.toLowerCase(); } catch (e) {}
-    if (!/(^|\.)dmm\.(?:co\.jp|com)$/.test(workHost) && !/(^|\.)fanza\.(?:co\.jp|com)$/.test(workHost)) {
-      treeShortStatus_(row, false, 'エラー：DMM/FANZAの作品URLではありません。作品ページのURLを貼り付けてください。'); return;
-    }
-    var built = window.ensureAffiliateLink(normalized, afId);
-    if (!built || !built.ok || !built.link || !window.hasRealAffiliateId(built.link)) {
-      treeShortStatus_(row, false, 'エラー：DMM/FANZAの作品URLとして認識できないか、アフィIDを付与できませんでした。'); return;
-    }
-    var account = _treeContextAccount === 'acc2' ? 'acc2' : 'acc1';
-    var go5 = window.Go5Short || {}, expectedBase = go5.base ? String(go5.base(account) || '').replace(/\/+$/, '') : '';
-    var original = btn.textContent; btn.disabled = true; btn.textContent = '短縮中…';
-    treeShortStatus_(row, true, 'アフィリンクと短縮先を確認中…');
-    window.Go5MakeShort(built.link, { account: account }).then(function (res) {
-      var shortUrl = (res && (res.shortUrl || res.shareUrl)) || '';
-      var destination = (res && res.destinationUrl) || '';
-      var domainOk = !!(expectedBase && shortUrl.indexOf(expectedBase + '/') === 0);
-      var destinationAf = ''; try { destinationAf = new URL(destination).searchParams.get('af_id') || ''; } catch (e) {}
-      var destinationOk = destination === built.link && !!(window.hasRealAffiliateId(destination)) && destinationAf === afId;
-      if (!domainOk) {
-        treeShortStatus_(row, false, 'エラー：チャンネル用の新ドメインで短縮できませんでした。通信状態を確認してもう一度押してください。'); return;
-      }
-      if (!destinationOk) {
-        treeShortStatus_(row, false, 'エラー：短縮先に正しいアフィリエイトIDが入っていません。保存せず、もう一度短縮してください。'); return;
-      }
-      inp.value = shortUrl; inp.dispatchEvent(new Event('input', { bubbles: true }));
-      treeShortStatus_(row, true, '✅ アフィリンクOK・短縮先OK');
-    }).catch(function (e) {
-      treeShortStatus_(row, false, 'エラー：短縮サーバーへ接続できませんでした。通信状態を確認してください。');
-    }).then(function () { btn.disabled = false; btn.textContent = original; });
-  }
-  function addTreeRow_(tree) {
-    var list = $('veditTreeList'); if (!list) return null;
-    tree = tree || {};
-    var idx = list.querySelectorAll('.vedit-tree-row').length + 1;
-    var row = document.createElement('div'); row.className = 'vedit-tree-row';
-    row.setAttribute('data-tree-id', String(tree.id || ('tree-' + Date.now() + '-' + idx)));
-    row.innerHTML =
-      '<div class="vedit-tree-head">' +
-        '<label>表示名<input class="vedit-tree-name" type="text" maxlength="40" value="' + esc(tree.name || ('ツリー' + idx)) + '"></label>' +
-        '<button type="button" class="vedit-tree-del" title="このツリー設定を削除">削除</button>' +
-      '</div>' +
-      '<label class="vedit-field">返信ポストURL(X / Bsky・このURLは短縮なし)' +
-        '<div class="vedit-bsky-row vedit-tree-post-row"><input class="vedit-tree-post" type="url" inputmode="url" autocomplete="off" placeholder="https://x.com/.../status/... または https://bsky.app/profile/.../post/..." value="' + esc(tree.postUrl || '') + '">' +
-        '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-post">貼り付け</button></div>' +
-      '</label>' +
-      '<label class="vedit-field">返信内に掲載したアフィ計測短縮URL(ピンク矢印)' +
-        '<div class="vedit-tree-short-row"><input class="vedit-tree-short" type="url" inputmode="url" autocomplete="off" placeholder="DMM/FANZAの元作品URL または発行済み短縮URL" value="' + esc(tree.shortUrl || '') + '">' +
-        '<span class="vedit-tree-btnstack"><button type="button" class="vedit-copy vedit-copy-fit vedit-tree-shorten">短縮</button>' +
-        '<button type="button" class="vedit-copy vedit-copy-fit vedit-tree-paste-short">貼り付け</button></span></div>' +
-        '<span class="vedit-tree-status" hidden></span>' +
-      '</label>';
-    list.appendChild(row);
-    row.querySelector('.vedit-tree-del').addEventListener('click', function () {
-      row.parentNode.removeChild(row);
-      if (!list.querySelector('.vedit-tree-row')) addTreeRow_({});
-    });
-    row.querySelector('.vedit-tree-paste-post').addEventListener('click', function () { pasteInto_(row.querySelector('.vedit-tree-post')); });
-    row.querySelector('.vedit-tree-paste-short').addEventListener('click', function () { pasteInto_(row.querySelector('.vedit-tree-short')); });
-    row.querySelector('.vedit-tree-shorten').addEventListener('click', function () { shortenTreeAffiliate_(row); });
-    var postInput = row.querySelector('.vedit-tree-post');
-    var shortInput = row.querySelector('.vedit-tree-short');
-    shortInput.addEventListener('input', function () { treeShortStatus_(row, false, ''); });
-    postInput.addEventListener('input', function () {
-      // 単体短縮で直前に発行・検証したURLは、ツリー入力を始めた時だけ補完する。
-      // モーダルを開いただけの通常編集には混入させない。
-      if (postInput.value.trim() && !shortInput.value.trim()) {
-        var recent = recentTreeShort_(_treeContextAccount);
-        if (recent) shortInput.value = recent;
-      }
-    });
-    return row;
-  }
-  function setTreeRows_(trees) {
-    var list = $('veditTreeList'); if (!list) return;
-    list.innerHTML = '';
-    var arr = Array.isArray(trees) ? trees : [];
-    if (arr.length) arr.forEach(function (t) { addTreeRow_(t); });
-    else addTreeRow_({});
-  }
-  function resolveTreeRows_() {
-    var rows = $('veditTreeList') ? $('veditTreeList').querySelectorAll('.vedit-tree-row') : [], out = [];
-    for (var i = 0; i < rows.length; i++) {
-      var row = rows[i], name = (row.querySelector('.vedit-tree-name').value || '').trim() || ('ツリー' + (i + 1));
-      var postUrl = (row.querySelector('.vedit-tree-post').value || '').trim();
-      var shortUrl = (row.querySelector('.vedit-tree-short').value || '').trim();
-      if (!postUrl && !shortUrl) continue;
-      // どちらか一方だけでも仮保存できる。ただし、値が入っている欄の形式は妥協しない。
-      if (postUrl && !treeSocialUrlOk_(postUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の返信ポストURLを確認してください(XまたはBlueskyの投稿URL)。' };
-      // 短縮前のDMM/FANZA作品URLも仮保存可。後から同じ行の「短縮」で発行済みURLへ置換できる。
-      if (shortUrl && !codeOf(shortUrl) && !treeWorkUrlOk_(shortUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の作品URLは、DMM/FANZAの作品URLまたは5mgl.com・yoz2.comの発行済みURLを入れてください。' };
-      out.push({ id: row.getAttribute('data-tree-id'), name: name.slice(0, 40), postUrl: postUrl, shortUrl: shortUrl });
-    }
-    return { ok: true, trees: out };
-  }
   // 現在のモーダルDOMから {primary: 合算後の代表(最新の短縮URL), mergeUrls: 残り(過去)} を作る。
   //   並び＝過去(hist・読み取り専用)→現primary(投稿URL欄)→今回追加(staging)。最後(＝最新)を代表にする。
   //   保存→再オープンでも並びは同型なので代表が入れ替わらない(安定)。
@@ -1393,7 +1131,7 @@
     d.innerHTML =
       '<div class="vedit-modal">' +
         '<button id="veditClose" type="button" class="vedit-close" aria-label="閉じる" title="閉じる">✕</button>' +
-        '<div class="vedit-heading"><p class="vedit-title" id="veditTitle">URL を編集</p><p class="vedit-video-title" id="veditVideoTitle"></p></div>' +
+        '<p class="vedit-title" id="veditTitle">URL を編集</p>' +
         '<p class="vedit-error" id="veditError" hidden></p>' +
         '<label class="vedit-field">YouTube URL' +
           '<div class="vedit-bsky-row">' +
@@ -1428,7 +1166,6 @@
           '</div>' +
           '<span class="vedit-hint" style="font-size:11px;color:var(--sub);">この短縮URLのクリックが作品クリック数(ピンクの矢印)として集計されます。空だと表示されません。</span>' +
         '</label>' +
-
         '<div class="vedit-attrs">' +
           '<div class="vedit-attrs-title">カテゴリ(複数選択可・キャラ無し＝オリジナル)</div>' +
           attrDefs_().map(function (a) {
@@ -1445,11 +1182,6 @@
             '<button id="veditRegen" type="button" class="vedit-regen-btn" title="この作品の一連のデータ(動画・元画像・仕上がりプレビュー)のうち、まだGoogleドライブに無いものだけを作って保存し、投稿履歴へ反映します(既にあれば作り直しません・反映されていない履歴の回復用)">🔄 データ再生成</button>' +
           '</div>' +
         '</label>' +
-        '<section class="vedit-tree-box">' +
-          '<div class="vedit-tree-title"><span>🌳 ツリー設定</span><button id="veditTreeAdd" type="button">＋ ツリーを追加</button></div>' +
-          '<div class="vedit-hint">返信ポストのURLは短縮しません。返信内に掲載した作品用の計測短縮URLを結び、ピンク矢印のクリック数を親の投稿履歴へ表示します。</div>' +
-          '<div id="veditTreeList"></div>' +
-        '</section>' +
         '<div class="vedit-actions">' +
           '<button id="veditGenShort" type="button" class="vedit-gen">短縮リンク<br>再生成</button>' +
           '<div class="vedit-actions-main">' +
@@ -1480,11 +1212,6 @@
       var inp = addMergeRow_('');
       if (inp) inp.focus();
     });
-    $('veditTreeAdd').addEventListener('click', function () {
-      var row = addTreeRow_({});
-      if (row) { var inp = row.querySelector('.vedit-tree-post'); if (inp) inp.focus(); }
-    });
-    $('veditYt').addEventListener('input', function () { updateModalVideoTitle_(this.value); });
     // 作品URLのコピー。(Blueskyのコピーと同じ挙動)
     $('veditWorkCopy').addEventListener('click', function () {
       var inp = $('veditWork'); if (!inp) return;
@@ -1501,15 +1228,13 @@
     $('veditYtPaste').addEventListener('click', function () {
       var inp = $('veditYt'); if (!inp) return;
       if (navigator.clipboard && navigator.clipboard.readText) {
-        navigator.clipboard.readText().then(function (t) { inp.value = (t || '').trim(); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); })
+        navigator.clipboard.readText().then(function (t) { inp.value = (t || '').trim(); inp.focus(); })
           .catch(function () { inp.focus(); alert('クリップボードを読み取れませんでした。入力欄を長押しして貼り付けてください。'); });
       } else { inp.focus(); alert('この環境ではボタン貼り付けに未対応です。入力欄を長押しして貼り付けてください。'); }
     });
     $('veditSave').addEventListener('click', function () {
       if (typeof _saveCb !== 'function') return;
       var cb = _saveCb;
-      var treeRes = resolveTreeRows_();
-      if (!treeRes.ok) { showModalErr_(treeRes.error); return; }
       _saveCb = null;
       var attrs = {};
       attrDefs_().forEach(function (a) { var el = $('veditAttr_' + a.key); attrs[a.key] = !!(el && el.checked); });
@@ -1524,8 +1249,7 @@
         (wsEl && wsEl.value) || '旧作',
         ($('veditWorkShort').value || '').trim(),
         (platEl && platEl.checked) ? 'bsky' : 'x', // 既定=X
-        _mres.mergeUrls, // 合算URL(導線1のみ・過去の短縮URL群=クリック加算)
-        treeRes.trees // 返信ポストURL＋その返信内のアフィ計測短縮URL
+        _mres.mergeUrls // 合算URL(導線1のみ・過去の短縮URL群=クリック加算)
       );
       var o = $('veditOverlay');
       if (o && !o.hidden) _saveCb = cb;
@@ -1583,41 +1307,20 @@
 
   function closeModal_() {
     var o = $('veditOverlay'); if (o) o.hidden = true;
-    _saveCb = null; _treeContextItem = null;
+    _saveCb = null;
   }
 
-  function updateModalVideoTitle_(ytUrl) {
-    var el = $('veditVideoTitle'); if (!el) return;
-    var vid = ytIdOf(String(ytUrl || '').trim());
-    el.setAttribute('data-yt-id', vid || '');
-    if (!vid) { el.textContent = 'YouTube題名：未設定'; return; }
-    if (titleCache[vid]) { el.textContent = titleCache[vid]; return; }
-    el.textContent = 'YouTube題名を取得中…';
-    fetchVideos([vid]).then(function (out) {
-      if (el.getAttribute('data-yt-id') !== vid) return;
-      var rec = out && out[vid];
-      if (rec && rec.title) {
-        titleCache[vid] = rec.title;
-        var meta = ytMetaLoad(); meta[vid] = Object.assign({}, meta[vid] || {}, rec); ytMetaSave(meta);
-        el.textContent = rec.title;
-      } else el.textContent = 'YouTube題名：取得待ち';
-    });
-  }
-  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal, platform, mergeUrls, treeLinks, treeItem, treeAccount) {
+  function openModal_(title, ytVal, bskyVal, workVal, attrs, workState, onSave, workShortVal, platform, mergeUrls) {
     injectModal_();
     $('veditTitle').textContent = title;
     $('veditYt').value = ytVal || '';
-    updateModalVideoTitle_(ytVal || '');
     $('veditBsky').value = bskyVal || '';
     setMergeRows_(mergeUrls); // 合算URL(導線1のみ)を復元
-    _treeContextItem = treeItem || null; _treeContextAccount = treeAccount === 'acc2' ? 'acc2' : 'acc1';
-    setTreeRows_(treeLinks); // 返信ポストURLと返信内アフィ短縮URLを復元(空ならツリー1を表示)
     var plat = (platform === 'bsky') ? 'bsky' : 'x'; // 既定=X(Chami:これから原則X投稿)
     if ($('veditPlatX')) $('veditPlatX').checked = (plat === 'x');
     if ($('veditPlatBsky')) $('veditPlatBsky').checked = (plat === 'bsky');
     $('veditWork').value = workVal || '';
-    _openedWorkShort = workShortVal || '';
-    if ($('veditWorkShort')) $('veditWorkShort').value = _openedWorkShort;
+    if ($('veditWorkShort')) $('veditWorkShort').value = workShortVal || '';
     attrs = attrs || {};
     attrDefs_().forEach(function (a) { var el = $('veditAttr_' + a.key); if (el) el.checked = !!attrs[a.key]; });
     if ($('veditWorkState')) $('veditWorkState').value = workState || '旧作';
@@ -1680,41 +1383,24 @@
   }
 
   // 編集保存：YouTube URL(ytMap)と Bluesky URL・作品URL・カテゴリ属性・作品状態(アイテム)を一括更新。
-  // 作品クリック計測URL(導線2)を item へ反映。
-  // 通常保存ではモーダルを開いた時点から未変更なら一切触らない。旧ドメイン・裸値も文字列のまま保持し、
-  // 現行ドメインへの正規化はしない。新しいURLを発番するのは明示「自動生成」を押した場合だけ。
+  // 作品クリック計測URL(導線2)を item へ反映。自動生成(_pendingWorkShort)>手入力>クリアの優先。
   function applyWorkShort_(item, typedVal) {
-    typedVal = String(typedVal || '');
-    var generatedDisplay = _pendingWorkShare || _pendingWorkShort;
-    if (_pendingWorkShort && typedVal === generatedDisplay) {
-      item.workShortUrl = _pendingWorkShort;
-      item.workShareUrl = generatedDisplay;
-      delete item.workShortNone;
-      delete item.workShortMintPending;
-      return;
+    if (_pendingWorkShort) { item.workShortUrl = _pendingWorkShort; item.workShareUrl = _pendingWorkShare || _pendingWorkShort; delete item.workShortNone; }
+    else if (typedVal) { item.workShortUrl = typedVal; item.workShareUrl = typedVal; delete item.workShortNone; }
+    else {
+      // ★元々入っていた作品短縮URLを消して空で保存した=意図的な削除。印(workShortNone)を残して
+      //   自動生成(autoMeasureWorkShort_)の再充填を止める。これをしないと導線2導入前の履歴に
+      //   誤って入った短縮URLを消しても、作品URLから自動再生成されて復活する(Chami報告2026-07-29)。
+      if (item.workShortUrl || item.workShareUrl) item.workShortNone = true;
+      delete item.workShortUrl; delete item.workShareUrl;
     }
-    // 未変更の非空値はURL文字列へ触れず、内部pendingだけを解除する。
-    // 開いた時から空のまま保存した場合も、明示空欄の墓標として確定する。
-    if (typedVal === _openedWorkShort && typedVal !== '') { delete item.workShortMintPending; return; }
-    if (typedVal) {
-      item.workShortUrl = typedVal;
-      item.workShareUrl = typedVal;
-      delete item.workShortNone;
-      delete item.workShortMintPending;
-      return;
-    }
-    // 非空値を明示的に空へ変更した。GAS側でも既存セルを消せるよう tombstone を必ず残す。
-    item.workShortNone = true;
-    delete item.workShortUrl;
-    delete item.workShareUrl;
-    delete item.workShortMintPending;
   }
   // 合算URL(導線1のみ)を item へ反映。空配列=合算なし=印を消す。
   function applyMergeUrls_(item, mergeUrls) {
     if (Array.isArray(mergeUrls) && mergeUrls.length) item.mergeUrls = mergeUrls;
     else delete item.mergeUrls;
   }
-  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
+  function saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
     var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
     // YouTube URL
     var ymap = loadYtMap();
@@ -1759,18 +1445,28 @@
       }
       saveArr(histKey(), hist);
     }
-    if (saved) saveTreeLinksFor_(saved, chForItem_(saved), treeLinks);
     if (saved) pushItemToGas_(saved); // スプレッドシートのカテゴリ列等へ反映(GAS設定時のみ)
     if (ytUrl) pokeSnapshotNow_();   // YT URLを紐付けた日は即スナップ=日別記録のベースラインを当日中に作る(④)
     // 非r2リンクを入れた保存でも自動で計測キーを確定させる(冪等短縮=同URLなら既存コード+累積クリックを引き継ぐ)
     if (saved) autoMeasureItem_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); });
-    // 導線2は通常編集で変換・補完しない。明示「自動生成」の結果だけ applyWorkShort_ が反映する。
+    // 作品クリック計測URL(導線2)も、手入力がr2でなければ自動で計測キー(r2)へ確定させる。
+    //   これをしないと codeOf() がコードを取れず、ピンクの矢印(作品クリック数)が表示されない。(Chami報告2026-07-14)
+    if (saved) autoMeasureWorkShort_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); pushItemToGas_(saved); });
+    // ★作品URLが入っていて導線2(作品クリック計測URL)がまだ空なら、編集保存でも投稿完了と同じく作品URLから
+    //   発行する(Chami再依頼2026-08-12「YouTube URL貼ってあるのに作品計測用URLが入らない・空欄のまま」)。
+    //   投稿完了の時点で作品URLが未入力だった投稿は mintWorkShortAtPost_ が発火せず空のまま=後から編集で
+    //   作品URLを入れても autoMeasureWorkShort_ は"空欄を作品URLへフォールバックしない"仕様のため永遠に空
+    //   だった(=毎回「自動生成」を手押しする必要があった)。意図的クリア(workShortNone)は尊重し、手入力
+    //   (workShortVal)がある時は触らない。既に発行済みなら mint 側が return(冪等・二重発行しない)。
+    if (saved && !saved.workShortNone && !((workShortVal || '').trim()) && !((saved.workShortUrl || '').trim()) && /^https?:\/\//.test((saved.workUrl || '').trim())) {
+      mintWorkShortAtPost_(saved, function () { saveArr(saved.manual ? manualKey() : histKey(), saved.manual ? manual : hist); pushItemToGas_(saved); });
+    }
     refresh();
   }
 
   // シート由来行(_fromSheet)の編集をGASへ即時upsertする。成功後にUIを更新、失敗はモーダルにエラーを出す。
   // localStorageへは書き戻さない(INC-112防壁を維持)。
-  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
+  function saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
     var plat = (platform === 'x' || platform === 'bsky') ? platform : null;
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
@@ -1795,7 +1491,6 @@
     if (_pendingShare) edited.shareUrl = _pendingShare;
     applyWorkShort_(edited, workShortVal);
     applyMergeUrls_(edited, mergeUrls); // 合算URL(導線1のみ・クライアント表示用。GAS列は持たない)
-    saveTreeLinksFor_(edited, chForItem_(edited), treeLinks); // シート由来行でも全端末共有マップへ保存
 
     var payload = {
       op: 'upsert',
@@ -1838,7 +1533,26 @@
     refresh();
     if (ytUrl) pokeSnapshotNow_();
 
-    // 導線2は通常編集で変換・補完しない。旧ドメイン・裸値・空欄をそのままシートへ送る。
+    // ★導線2(作品クリック計測URL)に手入力された非r2リンク(作品ページURL/アフィリンク/da.gd等)を
+    //   正規の自前r2短縮へ変換してシートへ再upsert=計測可能にする(Chami指示2026-08-01「正規の短縮URLに変更しといて」)。
+    //   autoMeasureWorkShort_ 内で 空/既にr2/意図的クリア(workShortNone) は無変換=冪等。
+    //   ※作品URLからの自動発行はしない方針(2026-07-30)は維持=空欄は空欄のまま(内部ガードでno-op)。
+    //   シート由来行はlocalStorageへ書き戻さない(INC-112防壁)ので、保持patch(_pendingSheetEdits)へ反映する。
+    autoMeasureWorkShort_(edited, function () {
+      var pm = _pendingSheetEdits[curAcct]; var pv = pm && pm[String(edited.videoId)];
+      if (pv) { pv.workShortUrl = edited.workShortUrl || ''; pv.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm); }
+      try { pushItemToGas_(edited); } catch (e) {}
+    });
+    // ★シート由来行でも、作品URLがあって導線2が空なら投稿完了と同じく作品URLから発行する(サブ端末の自己修復)。
+    //   この経路は従来 autoMeasureWorkShort_(空欄no-op)だけで mint が無く、サブ端末では編集保存しても
+    //   導線2が永久に空だった(空欄再発の一因)。ローカル行編集の :1374 と同条件。意図的クリア/手入力は尊重。
+    if (!edited.workShortNone && !((workShortVal || '').trim()) && !((edited.workShortUrl || '').trim()) && /^https?:\/\//.test((edited.workUrl || '').trim())) {
+      mintWorkShortAtPost_(edited, function () {
+        var pm2 = _pendingSheetEdits[curAcct]; var pv2 = pm2 && pm2[String(edited.videoId)];
+        if (pv2) { pv2.workShortUrl = edited.workShortUrl || ''; pv2.workShareUrl = edited.workShareUrl || ''; savePend_(curAcct, pm2); }
+        try { pushItemToGas_(edited); } catch (e) {}
+      });
+    }
 
     // ── ここから裏方(非ブロッキング): GASへupsert→履歴再読込で反映を確認。失敗時だけ静かに通知する。──
     var finished = false, verifyStarted = false;
@@ -1871,15 +1585,7 @@
             bgFail_('スプレッドシートへの保存を確認できませんでした。通信を確認して、もう一度編集→保存してください。');
             return;
           }
-          var expected = {
-            videoId: payload.videoId,
-            youtubeUrl: payload.youtube_url,
-            workUrl: payload.workUrl,
-            workState: payload.workState,
-            workShortUrl: payload.work_short_url,
-            workShortClear: !!payload.work_short_clear
-          };
-          if (Object.prototype.hasOwnProperty.call(payload, 'platform')) expected.platform = payload.platform;
+          var expected = { videoId: payload.videoId, youtubeUrl: payload.youtube_url, workUrl: payload.workUrl, workState: payload.workState };
           if (window.HistMerge && window.HistMerge.historyHasEdit && window.HistMerge.historyHasEdit(res.items, expected)) {
             bgSuccess_(res.items);
             return;
@@ -1900,9 +1606,44 @@
     }
   }
 
-  // 真の新規投稿完了時だけ、作品クリック計測URL(導線2)を作品URLから発行する。
-  // 通常編集・履歴取得・既存dupeの再完了からは呼ばない。既に値があれば触らない(冪等)。
-  function mintWorkShortAtPost_(it, persist, accountOverride) {
+  // 作品クリック計測URL(導線2)の自動確定。手入力が r2 でない(作品ページURL/アフィリンク/da.gd等)場合、
+  //   アフィリンク化→r2短縮して workShortUrl を計測可能なキーに整える。既に r2 なら何もしない(冪等)。
+  function autoMeasureWorkShort_(it, persist) {
+    try {
+      if (it && it.workShortNone) return; // ★ユーザーが意図的に消した行は自動生成で復活させない(Chami 2026-07-29)
+      var go5 = window.Go5Short || {};
+      function isR2(u) { return !!(go5.ourBase && go5.ourBase(u)); }  // 両ドメイン+旧r2を自前と認識
+      var cur = (it && it.workShortUrl) || '';
+      if (!it || !go5.ourBase || typeof window.Go5MakeShort !== 'function') return;
+      // ★作品URLからの自動発行はしない(Chami依頼2026-07-30)。導線2(作品クリック計測URL)の短縮は
+      //   「自動生成」ボタン(_pendingWorkShort)か投稿時のフローだけが起こす。編集保存では勝手に発行しない。
+      //   ここでやるのは、既に導線2欄へ入っている非r2リンクを計測キー(r2)へ正規化することだけ。
+      //   ★2026-07-29に入れた it.workUrl フォールバックが「画像だけ直して保存→短縮URLが勝手に湧く」の原因。
+      //   空欄は空欄のまま残す(作品URLへフォールバックしない)。
+      if (!/^https?:\/\//.test(cur) || isR2(cur)) return; // 空 / 既に自前短縮＝何もしない
+      var toShorten = cur;
+      // FANZA/DMMの作品ページURL(al.fanza等のアフィリンクではない)なら、先にアフィリンク化する。
+      if (window.buildAffiliateLink && /(^|\.)dmm\.co\.jp|(^|\.)dlsite|fanza/.test(cur) && !/al\.(fanza|dmm)/.test(cur)) {
+        var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+        var aff = window.buildAffiliateLink(cur, afId);
+        if (aff && aff.ok && aff.link) toShorten = aff.link;
+      }
+      window.Go5MakeShort(toShorten).then(function (res) {
+        if (!(res && res.shortUrl && isR2(res.shortUrl))) return;
+        it.workShortUrl = res.shortUrl; it.workShareUrl = res.shareUrl || res.shortUrl;
+        if (typeof persist === 'function') persist();
+        refresh(); // 作品クリック(ピンク矢印)がこの再描画で出るようになる
+      });
+    } catch (e) {}
+  }
+
+  // 投稿完了時に、作品クリック計測URL(導線2)を作品URLから"一発で発行"する(Chami依頼2026-07-30)。
+  //   ★これは comment(autoMeasureWorkShort_:1430)が許可する「投稿時のフロー」＝作品URLからの新規発行を
+  //   意図的に行う経路。編集保存用の autoMeasureWorkShort_ は空欄を作品URLへフォールバックしない仕様
+  //   (「画像だけ直して保存→短縮URLが勝手に湧く」対策・2026-07-29)なので、投稿完了経路がそれを呼ぶと
+  //   workShortUrl が空のままシートへ載り、サブ端末で「作品クリックの短縮URLが空」になっていた(Chami再発
+  //   指摘2026-08-03②)。完了時は"新規発行してよい"のでこちらを使う。既に有れば触らない(冪等)。
+  function mintWorkShortAtPost_(it, persist) {
     try {
       if (!it || it.workShortNone) return;          // 意図的に消した行は復活させない
       if (it.workShortUrl) return;                  // 既に有れば触らない(冪等)
@@ -1921,7 +1662,7 @@
       // ★一発勝負をやめ、一過性の失敗(コールドスタート/瞬断/429)を3回・指数バックオフで自己回復する
       //   (draft側 mintDraftWorkShort_ と対称)。この保険mintが無言で落ちると欄が空のまま=空欄再発の一因。
       //   既に埋まっていたら再試行しない。account=その行の所属chドメインで発行(取り違え防止)。
-      var acc2 = (accountOverride === 'acc1' || accountOverride === 'acc2') ? accountOverride : chForItem_(it), tries = 0;
+      var acc2 = chForItem_(it), tries = 0;
       (function attempt_() {
         if (it.workShortUrl || it.workShortNone) return;
         tries++;
@@ -1933,66 +1674,9 @@
             if (typeof persist === 'function') persist();
             if (acct() === chForItem_(it)) refresh(); // 作品クリック(ピンク矢印)がこの再描画で出る
           }).catch(retry_);
-        } catch (e) { retry_(); }
+        } catch (e) {}
       })();
     } catch (e) {}
-  }
-
-  // 真の新規投稿経路が pending を明示した行だけを自動発番する。空欄から pending を推測しない。
-  // 1行につき1起動1回だけ実行し、内部3回の試行後も失敗した場合は次回起動へ持ち越す。
-  var _workShortMintAttempted = {};
-  function attemptPendingWorkShortMint_(it, account) {
-    account = account === 'acc2' ? 'acc2' : 'acc1';
-    if (!it || it.workShortMintPending !== true || it.workShortNone || it.workShortUrl) return false;
-    if (typeof window.Go5MakeShort !== 'function') return false;
-    var expectedId = String(it.id || '');
-    var expectedVideoId = String(it.videoId || '');
-    var workUrl = String(it.workUrl || '').trim();
-    if (!expectedId || !expectedVideoId || !/^https?:\/\//.test(workUrl)) return false;
-    if (chOfVid_(expectedVideoId, '') !== account) return false;
-    var attemptKey = account + '\u0001' + expectedId;
-    if (_workShortMintAttempted[attemptKey]) return false;
-    _workShortMintAttempted[attemptKey] = true;
-    var candidate = {};
-    Object.keys(it).forEach(function (k) { candidate[k] = it[k]; });
-    mintWorkShortAtPost_(candidate, function () {
-      if (!candidate.workShortUrl) return;
-      var rows = loadArrFor_('verify_manual', account);
-      var latest = null, latestIndex = -1;
-      for (var i = 0; i < rows.length; i++) {
-        if (rows[i] && String(rows[i].id || '') === expectedId) { latest = rows[i]; latestIndex = i; break; }
-      }
-      if (!latest || latestIndex < 0) return;
-      if (String(latest.videoId || '') !== expectedVideoId) return;
-      if (chOfVid_(latest.videoId, '') !== account) return;
-      if (latest.workShortMintPending !== true || latest.workShortNone || latest.workShortUrl) return;
-      latest.workShortUrl = candidate.workShortUrl;
-      latest.workShareUrl = candidate.workShareUrl || candidate.workShortUrl;
-      delete latest.workShortMintPending;
-      rows[latestIndex] = latest;
-      saveArrFor_('verify_manual', account, rows);
-      pushItemToGas_(latest);
-    }, account);
-    return true;
-  }
-
-  var _workShortMintBootScanned = { acc1: false, acc2: false };
-  function workShortMintStoreReady_(account) {
-    if (!window.Go5Hist || typeof window.Go5Hist.state !== 'function') return true;
-    var state = window.Go5Hist.state('verify_manual__' + account);
-    return state === 'hydrated' || state === 'degraded';
-  }
-  function retryPendingWorkShortMintsAtBoot_(onlyAccount) {
-    if (typeof window.Go5MakeShort !== 'function') return;
-    var accounts = onlyAccount ? [onlyAccount] : ['acc1', 'acc2'];
-    accounts.forEach(function (account) {
-      if (account !== 'acc1' && account !== 'acc2') return;
-      if (_workShortMintBootScanned[account] || !workShortMintStoreReady_(account)) return;
-      _workShortMintBootScanned[account] = true;
-      loadArrFor_('verify_manual', account).forEach(function (row) {
-        if (row && row.workShortMintPending === true && !row.workShortNone && !row.workShortUrl) attemptPendingWorkShortMint_(row, account);
-      });
-    });
   }
 
   // 履歴アイテム1件をスプレッドシート(GAS)へ upsert 送信。post_id=背骨ID(videoId)で同一行を更新。
@@ -2029,6 +1713,32 @@
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
 
+  // 起動時バックフィル: 作品URLは有るのに作品短縮URL(導線2)が空の履歴を、link-worker瞬断等で発行に
+  //   失敗したまま固まったもの(REQ-28ef251ba4/65c7897f2f)として、"開き直すだけ"で自己回復させる。
+  //   従来 mintWorkShortAtPost_ の発火はユーザー操作起点(投稿完了/編集保存/照合)だけで、失敗後に
+  //   再発行するロード時パスが無く空欄が恒久化していた。mintWorkShortAtPost_ は r2のみ採用・3回リトライ・
+  //   冪等・workShortNone復活なし=安全。1回の走行で上限5件(過負荷防止)。allItemsは複製を返すため、
+  //   ロードした実配列を直接持ってmintで変異→persistで同じ配列を保存(1347-1379の既存パターンと同型)。
+  var _workBackfillDone = {};
+  function mintMissingWorkShorts_() {
+    if (typeof window.Go5MakeShort !== 'function') return;
+    var budget = { n: 0 };
+    [{ arr: loadHist(), key: histKey() }, { arr: loadManual(), key: manualKey() }].forEach(function (grp) {
+      grp.arr.forEach(function (it) {
+        if (budget.n >= 5) return;
+        if (!it || !it.videoId) return;
+        if (it.workShortUrl || it.workShortNone) return;                 // 既に有る/意図的に空 は対象外(冪等)
+        if (!/^https?:\/\//.test((it.workUrl || '').trim())) return;     // 作品URLが無ければ発行できない
+        if (_workBackfillDone[it.videoId]) return;
+        _workBackfillDone[it.videoId] = true;
+        budget.n++;
+        mintWorkShortAtPost_(it, function () {
+          try { saveArr(grp.key, grp.arr); } catch (e) {}                // 発行できた値をローカル台帳へ
+          try { pushItemToGas_(it); } catch (e) {}                       // シートへも後追い反映(putIf経由・非破壊)
+        });
+      });
+    });
+  }
 
   // 自己修復: 端末が持つ計測URL(YouTube動画URL・短縮URL=r2)がシートへ未反映だと、サーバーが
   //   vid/クリックを認識できず「記録待ち」や日別クリックの⚠が固定化する。それをシートへ後追いupsertで治す。
@@ -2243,9 +1953,7 @@
       onDone: function (ok, msg) {
         settled = true;
         if (btn) { btn.disabled = false; btn.textContent = orig; }
-        // The preview is committed; patch images without a heavy metrics refresh.
-        try { patchHistoryImages_(); } catch (e) {}
-        try { renderWhenHistIdle_(); } catch (e2) {}
+        try { refresh(); } catch (e) {}
         // ★成功時の案内は出さない(Chami依頼2026-08-23②=refreshで1ページ目に反映が見える)。
         //   失敗だけ正直に伝える(素直にギブアップ)。
         if (!ok) {
@@ -2258,113 +1966,8 @@
   }
 
   // ── render ──────────────────────────────────────────────────────────────
-  // 投稿履歴の背景更新がスクロール操作を奪わないための安定描画。
-  var _histUserScrollUntil = 0, _histIdleRenderT = null, _histTouchActive = false;
-  function histPageVisible_() { var pv = $('pageVerify'); return !!(pv && !pv.hidden); }
-  function markHistUserScroll_() { if (histPageVisible_()) _histUserScrollUntil = Date.now() + 500; }
-  try {
-    window.addEventListener('scroll', markHistUserScroll_, { passive: true });
-    window.addEventListener('wheel', markHistUserScroll_, { passive: true });
-    window.addEventListener('touchstart', function () { if (histPageVisible_()) _histTouchActive = true; markHistUserScroll_(); }, { passive: true });
-    window.addEventListener('touchmove', markHistUserScroll_, { passive: true });
-    window.addEventListener('touchend', function () { _histTouchActive = false; markHistUserScroll_(); }, { passive: true });
-    window.addEventListener('touchcancel', function () { _histTouchActive = false; markHistUserScroll_(); }, { passive: true });
-  } catch (e) {}
-  function renderWhenHistIdle_() {
-    if (!histPageVisible_()) return;
-    var wait = _histTouchActive ? 120 : (_histUserScrollUntil - Date.now());
-    if (wait > 0) {
-      if (_histIdleRenderT) clearTimeout(_histIdleRenderT);
-      _histIdleRenderT = setTimeout(renderWhenHistIdle_, wait + 60);
-      return;
-    }
-    if (_histIdleRenderT) { clearTimeout(_histIdleRenderT); _histIdleRenderT = null; }
-    render();
-  }
-  var _treeSyncSeen_ = (function () { try { return localStorage.getItem(TREE_LINKS_KEY) || ''; } catch (e) { return ''; } })();
-  document.addEventListener('go5-synced', function () {
-    var now = ''; try { now = localStorage.getItem(TREE_LINKS_KEY) || ''; } catch (e) {}
-    if (now === _treeSyncSeen_) return;
-    _treeSyncSeen_ = now;
-    fetchAllClicks_(true).then(function () { renderWhenHistIdle_(); }, function () { renderWhenHistIdle_(); });
-  });
-  function historyPreviewData_(usedKey, refCid) {
-    var legacy = (refCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(refCid) || []) : [];
-    var stored = (window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []) : [];
-    var known = !!(window.Go5Cand && window.Go5Cand.usedImgKnown && window.Go5Cand.usedImgKnown(usedKey));
-    var images = (window.HistMerge && window.HistMerge.historyUsedImages)
-      ? window.HistMerge.historyUsedImages(stored, legacy, known)
-      : (stored.length ? stored : legacy.slice(0, 1));
-    var prevN = (window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
-    var thumb = (window.HistMerge && window.HistMerge.historyPreviewThumb)
-      ? window.HistMerge.historyPreviewThumb(images, prevN) : '';
-    return { images: images, prevN: prevN, thumb: thumb };
-  }
-  function wireHistoryPreview_(im) {
-    if (!im || im.getAttribute('data-preview-wired') === '1') return;
-    im.setAttribute('data-preview-wired', '1');
-    im.addEventListener('click', function () {
-      var usedKey = im.getAttribute('data-usedkey');
-      var data = historyPreviewData_(usedKey, im.getAttribute('data-refcid') || '');
-      if (data.prevN <= 0) return;
-      var imgs = (window.HistMerge && window.HistMerge.historyPreviewImages)
-        ? window.HistMerge.historyPreviewImages(data.images, data.prevN) : [];
-      var caps = imgs.map(function () { return '動画投稿プレビュー'; });
-      if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0, { captions: caps });
-    });
-  }
-  function patchHistoryImages_() {
-    var list = $('ytClickList');
-    if (!list || !histPageVisible_()) return;
-    var rows = Array.prototype.slice.call(list.querySelectorAll('.vrow[data-hist-usedkey]'));
-    // candidates.js の読込順に関係なく、今画面にある作品の個別取得を必ず開始する。全件走査は行わない。
-    try {
-      if (window.Go5Cand && window.Go5Cand.ensureHistoryImages) {
-        window.Go5Cand.ensureHistoryImages(rows.map(function (row) {
-          return { key: row.getAttribute('data-hist-usedkey') || '', cid: row.getAttribute('data-hist-refcid') || '' };
-        }));
-      }
-    } catch (e) {}
-    rows.forEach(function (row) {
-      var usedKey = row.getAttribute('data-hist-usedkey') || '';
-      var refCid = row.getAttribute('data-hist-refcid') || '';
-      var data = historyPreviewData_(usedKey, refCid);
-      if (!data.thumb) return; // 一過性の空読みで、いま見えている画像を消さない。
-      if (window.Go5ImgDiag) Go5ImgDiag.push('hist_render', { key: usedKey, cid: refCid, count: data.images.length, prev: data.prevN, patch: true });
-      var col = row.querySelector('.vrow-thumbcol');
-      if (!col) {
-        col = document.createElement('div'); col.className = 'vrow-thumbcol';
-        var foot = row.querySelector('.vrow-foot'); row.insertBefore(col, foot || null);
-      }
-      var im = col.querySelector('.vrow-refimg');
-      if (!im) {
-        im = document.createElement('img'); im.className = 'vrow-refimg';
-        im.setAttribute('data-go5-imgrole', 'history-preview');
-        im.setAttribute('data-refcid', refCid); im.setAttribute('data-usedkey', usedKey);
-        im.setAttribute('alt', '動画投稿プレビュー(タップで拡大)');
-        im.setAttribute('title', 'タップで拡大(動画投稿プレビュー)');
-        im.loading = 'lazy'; im.decoding = 'async'; im.style.visibility = 'hidden';
-        im.addEventListener('load', function () { im.style.visibility = 'visible'; });
-        im.src = data.thumb; col.appendChild(im);
-        if (im.complete && im.naturalWidth) im.style.visibility = 'visible';
-      } else if (im.getAttribute('src') !== data.thumb) {
-        var probe = new Image(); probe.onload = function () { im.src = data.thumb; }; probe.src = data.thumb;
-      }
-      wireHistoryPreview_(im);
-    });
-  }
-
   function render() {
-    // Async metric/image updates must not replace the search input while the IME conversion panel is open.
-    if (_histSearchComposing || _histSearchRenderTimer) return;
     var list = $('ytClickList');
-    // Preserve the actual search subtree across list renders. Background sync can otherwise replace
-    // the input just before compositionstart and break the first Japanese syllable.
-    var stableHistSearch_ = list && list.querySelector('.hist-work-search');
-    var stableHistInput_ = stableHistSearch_ && stableHistSearch_.querySelector('#histWorkSearch');
-    var stableHistFocused_ = !!(stableHistInput_ && document.activeElement === stableHistInput_);
-    var viewportSnap = (list && window.Go5Viewport)
-      ? window.Go5Viewport.capture(list, '.vrow[data-hist-anchor]', 'data-hist-anchor') : null;
     var rawItems = displayItems_(); // ローカル＋シート由来の表示専用マージ(書き込み系はallItems()のまま不変)
     var ymap = loadYtMap();
     if (!rawItems.length) {
@@ -2431,8 +2034,7 @@
     var _hstart = (_hpage - 1) * _hsize;
     var pageItems = visibleItems.slice(_hstart, _hstart + _hsize);
     var pagerHtml = histPagerHtml_(_hpage, _hpages, _htotal, _hstart, pageItems.length);
-    var histSearchMarkup_ = stableHistSearch_ ? '<div data-hist-search-mount="1"></div>' : histSearchHtml_();
-    list.innerHTML = hideBarHtml + histSearchMarkup_ + pagerHtml + pageItems.map(function (it, idx) {
+    list.innerHTML = hideBarHtml + histSearchHtml_() + pagerHtml + pageItems.map(function (it, idx) {
       var k = itemKey(it);
       var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
@@ -2462,8 +2064,11 @@
       // 旧データだけは先頭1枚を互換表示するが、2枚目以降の候補画像は絶対に投稿履歴へ混ぜない。
       var rImgCid = it.workUrl ? workCidOf_(it.workUrl) : '';
       var pKey = it.videoId || k;
-      var previewData_ = historyPreviewData_(pKey, rImgCid);
-      var usedImgArr = previewData_.images;
+      var legacyRefImgs = (rImgCid && window.Go5Cand && window.Go5Cand.refImgs) ? (window.Go5Cand.refImgs(rImgCid) || []) : [];
+      var storedUsedImgs = (window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(pKey) || []) : [];
+      var usedImgArr = (window.HistMerge && window.HistMerge.historyUsedImages)
+        ? window.HistMerge.historyUsedImages(storedUsedImgs, legacyRefImgs, !!(window.Go5Cand && window.Go5Cand.usedImgKnown && window.Go5Cand.usedImgKnown(pKey)))
+        : (storedUsedImgs.length ? storedUsedImgs : legacyRefImgs.slice(0, 1));
       // ★投稿画像(編集モーダルで添付する用途'post')も履歴カードのサムネ候補に入れる。
       //   動画で使った画像/Bluesky画像が両方無い作品(投稿画像だけ添付した作品)は、モーダルにデータが在るのに
       //   カードが空表示になっていた(Chami報告2026-07-30・添付=1532357129657385031)。用途'post'の1枚目を最後の砦にする。
@@ -2474,9 +2079,12 @@
       //     生成用の元画像/添付写真であり「プレビュー」ではない=それを『動画投稿プレビュー』のラベルで出すのが
       //     Chami報告の"生成に使った画像がプレビュー扱い"の正体。フォールバックを撤去し、本物が無ければ枠ごと出さない
       //     (カードは作品サムネ .vrow-thumb が担う。プレビューは backfill/投稿完了で入った時だけ出る)。
-      var usedPrevN_ = previewData_.prevN;
-      // 初回描画と後着画像の差分更新で同じ判定を使う。
-      var refThumb = previewData_.thumb;
+      var usedPrevN_ = (window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(pKey) || 0) : 0;
+      // プレビュー枠に出す1枚は HistMerge.historyPreviewThumb で一元判定(prevN>0 の時だけ本物・
+      //   実体は core/image-role.js の単一権威・test_hist_merge.js/test_image_role.js で縛る)。
+      var refThumb = (window.HistMerge && window.HistMerge.historyPreviewThumb)
+        ? window.HistMerge.historyPreviewThumb(usedImgArr, usedPrevN_)
+        : ''; // HistMerge/core/image-role.jsが読めない異常時は安全側(空=枠を出さない)
       if (refThumb && window.Go5ImgDiag) Go5ImgDiag.push('hist_render', { key: pKey, cid: rImgCid, count: usedImgArr.length, prev: usedPrevN_ });
       var views = vid && (vid in viewsCache) ? viewsCache[vid] : null;
       // ★総再生数(top ▶)も導線1/導線2のクリック累計と同じく、GASの日次デルタ(今日/昨日/週)を下限に取る。
@@ -2533,7 +2141,7 @@
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
       // ★この端末のローカル履歴には無く、記録シートから補った行。編集・削除はGAS経由で正本へ反映する。
       if (it._fromSheet) tagsHtml += '<span class="vtag vtag-sheet" title="この端末にはこの記録が無く、記録シートの内容を表示して補っています(編集・削除は記録シートへ反映)">☁️シート由来</span>';
-      return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '" data-hist-anchor="' + esc(k) + '" data-hist-usedkey="' + esc(pKey) + '" data-hist-refcid="' + esc(rImgCid) + '">' +
+      return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '">' +
         '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名(改行して統一)
         '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
@@ -2567,12 +2175,12 @@
         '</div>' +
         '</div>' + // .vrow-body
         ((it.workUrl || refThumb) ? '<div class="vrow-thumbcol">' +
-          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" decoding="async" style="visibility:hidden;">' : '') +
+          (it.workUrl ? '<img class="vrow-thumb" data-fanza-thumb-url="' + esc(it.workUrl) + '" alt="作品サムネ(タップで詳細)" title="タップで作品詳細" loading="lazy" decoding="async" style="display:none;">' : '') +
           (refThumb ? '<img class="vrow-refimg" data-go5-imgrole="history-preview" data-refcid="' + esc(rImgCid) + '" data-usedkey="' + esc(pKey) + '" src="' + esc(refThumb) + '" alt="動画投稿プレビュー(タップで拡大)" title="タップで拡大(動画投稿プレビュー)" loading="lazy" decoding="async">' : '') +
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
-          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (deltaTs || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (prePostFlag ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前/スナップ前">' + (vid ? fmtDelta_(deltaCache[vid], deltaTs, !!(wcode || it.workShortUrl), prePostFlag) : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + treeRowsHtml_(it, chForItem_(it)) + '</span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (deltaTs || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (prePostFlag ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前/スナップ前">' + (vid ? fmtDelta_(deltaCache[vid], deltaTs, !!(wcode || it.workShortUrl), prePostFlag) : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
             (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
             ((!it._fromSheet || it.videoId) ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
@@ -2581,15 +2189,6 @@
         '</div>' +
         '</div>';
     }).join('') + pagerHtml; // 末尾にもページャ(長い一覧の下からでもページ移動できる)
-    if (stableHistSearch_) {
-      var stableMount_ = list.querySelector('[data-hist-search-mount]');
-      if (stableMount_) stableMount_.replaceWith(stableHistSearch_);
-      if (stableHistFocused_) {
-        try { stableHistInput_.focus({ preventScroll: true }); } catch (e) { try { stableHistInput_.focus(); } catch (e2) {} }
-      }
-    }
-    // データ再生成・画像後着・検索などで一覧DOMを交換しても、見ていた投稿の位置を維持する。
-    if (viewportSnap && window.Go5Viewport) window.Go5Viewport.restore(list, viewportSnap, null, { repeat: false });
     // 全件prefix走査を待たず、今DOMへ出した履歴だけを作品単位で直接読む。used:を先行し、post:停止の巻き添えを防ぐ。
     try {
       if (window.Go5Cand && window.Go5Cand.ensureHistoryImages) {
@@ -2616,32 +2215,18 @@
     var _hwsr = $('histWorkSearchResult');
     if (_hwsr) _hwsr.textContent = _hq ? (visibleItems.length + '件表示 / ' + baseItems.length + '件中') : '';
     var _hws = $('histWorkSearch');
-    if (_hws && !_histSearchComposing && document.activeElement !== _hws && _hws.value !== histSearchQ_()) _hws.value = histSearchQ_();
-    if (_hws && !_hws.__go5HistSearchWired) {
-      _hws.__go5HistSearchWired = true;
-      _hws.addEventListener('compositionstart', function () {
-        _histSearchComposing = true;
-        if (_histSearchRenderTimer) { clearTimeout(_histSearchRenderTimer); _histSearchRenderTimer = null; }
-      });
-      _hws.addEventListener('compositionend', function () {
-        _histSearchComposing = false;
-        _histSearchByAcct[acct()] = this.value || ''; _histPageByAcct[acct()] = 1;
-        queueHistSearchRender_(this, 0);
-      });
-      _hws.addEventListener('input', function (ev) {
-        _histSearchByAcct[acct()] = this.value || ''; _histPageByAcct[acct()] = 1;
-        if (_histSearchComposing || (ev && ev.isComposing)) return;
-        queueHistSearchRender_(this, 90);
-      });
-    }
+    if (_hws) _hws.addEventListener('input', function () {
+      var q = this.value || '', caret = this.selectionStart;
+      _histSearchByAcct[acct()] = q; _histPageByAcct[acct()] = 1;
+      render();
+      try { var ni = $('histWorkSearch'); if (ni) { ni.focus({ preventScroll: true }); if (caret != null) ni.setSelectionRange(caret, caret); } } catch (e) {}
+    });
     var _hwsc = $('histWorkSearchClear');
-    if (_hwsc && !_hwsc.__go5HistSearchWired) { _hwsc.__go5HistSearchWired = true; _hwsc.addEventListener('click', function () {
-      if (_histSearchRenderTimer) { clearTimeout(_histSearchRenderTimer); _histSearchRenderTimer = null; }
-      _histSearchComposing = false;
+    if (_hwsc) _hwsc.addEventListener('click', function () {
       _histSearchByAcct[acct()] = ''; _histPageByAcct[acct()] = 1;
       render();
       try { var ni = $('histWorkSearch'); if (ni) ni.focus({ preventScroll: true }); } catch (e) {}
-    }); }
+    });
     // シートから vid を補ったが公開日時が未取得の投稿を、描画後に1回だけ取りに行く(見出しを YouTube公開日時へ)。
     //   通常のrefresh()はallItems(ローカル)しか照会しないため、結線が切れた行はここでしか公開日時を拾えない。
     //   取得できたら再描画で §1646(pub)が §1651(it.ts=作成日時)に勝つ。まだ非公開(予約公開中)なら空応答＝
@@ -2658,7 +2243,7 @@
             if (rec.published != null) { publishedCache[id] = rec.published; got = true; }
             if (rec.title) titleCache[id] = rec.title;
           });
-          if (got) { try { ytMetaPersist(m); } catch (e) {} renderWhenHistIdle_(); }
+          if (got) { try { ytMetaPersist(m); } catch (e) {} render(); }
         }).catch(function () {});
       } catch (e) {}
     }
@@ -2769,7 +2354,19 @@
     //   used レコードの先頭prevN枚(=stock.js capturePreview_ の #cv最終フレーム・Drive保存と同一blob由来)のみを
     //   開く。生成用の元画像・投稿画像・Bluesky画像は「プレビュー」ではないので開かない(refimg自体、
     //   prevN>0 の時しか描かれない=ここに来る時点で必ずプレビューが在る)。
-    list.querySelectorAll('.vrow-refimg').forEach(function (im) { wireHistoryPreview_(im); });
+    list.querySelectorAll('.vrow-refimg').forEach(function (im) {
+      im.addEventListener('click', function () {
+        var usedKey = im.getAttribute('data-usedkey');
+        var prevN = (usedKey && window.Go5Cand && window.Go5Cand.usedPrevCount) ? (window.Go5Cand.usedPrevCount(usedKey) || 0) : 0;
+        if (prevN <= 0) return; // プレビュー未保存=何も出さない(生成画像を代わりに出さない)
+        var all = (usedKey && window.Go5Cand && window.Go5Cand.usedImgs) ? (window.Go5Cand.usedImgs(usedKey) || []).slice() : [];
+        // プレビュー枚だけ(元画像は含めない)＝ HistMerge.historyPreviewImages 一元判定(core/image-role.js)。
+        //   HistMerge/core/image-role.jsが読めない異常時は安全側(空=開かない)。
+        var imgs = (window.HistMerge && window.HistMerge.historyPreviewImages) ? window.HistMerge.historyPreviewImages(all, prevN) : [];
+        var caps = imgs.map(function () { return '動画投稿プレビュー'; });
+        if (imgs.length && window.Go5Cand && window.Go5Cand.zoomImages) window.Go5Cand.zoomImages(imgs, 0, { captions: caps });
+      });
+    });
 
     // 🛠️編集で添付した投稿画像 → 拡大ズーム。(左右で全枚数・下に「現在 / 総ページ数」)
     list.querySelectorAll('.vrow-postimg').forEach(function (im) {
@@ -2800,18 +2397,18 @@
         var attrCur = {}; attrDefs_().forEach(function (a) { attrCur[a.key] = !!it[a.key]; });
         _curSrcUrl = it.postUrl || it.shortUrl || bskyCur || ''; // 生成の元＝この投稿の元URL
         if (it._fromSheet) {
-          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
-            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks);
-          }, workShortCur, platOf_(it), it.mergeUrls, treeLinksFor_(it, chForItem_(it)), it, chForItem_(it));
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
+            saveEditFromSheet_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls);
+          }, workShortCur, platOf_(it), it.mergeUrls);
           // シート由来行(別端末で作成)は「動画で使った画像」が欠けるので、ここでも後付け添付できるようにする。
           // 画像はvideoId単位の別ストア(write-through)＝localStorageの履歴配列には書き戻さない(INC-112防壁は無関係)。
           addPostImagesToModal_(k, it, 'used');
           wireRegenButton_(k, it); // 「🔄 データ再作成」を配線(反映されてない履歴の回復・Chami依頼2026-08-15)
         } else {
-          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
+          openModal_('URL を編集', ytCur, bskyCur, workCur, attrCur, it.workState || '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
             closeModal_();
-            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks);
-          }, workShortCur, platOf_(it), it.mergeUrls, treeLinksFor_(it, chForItem_(it)), it, chForItem_(it));
+            saveEdit_(k, it, ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls);
+          }, workShortCur, platOf_(it), it.mergeUrls);
           addMoveButtonsToModal_(k, it); // 「→ 別アカウントへ移動」を差し込む
           addRebuildMergeButtonToModal_(k, it); // 「🔁 リビルド結合」を保存の上に差し込む
           addPostImagesToModal_(k, it); // 「投稿画像を添付(複数可)」を差し込む
@@ -2834,7 +2431,7 @@
     row.style.cssText = 'margin:8px 0 0;';
     var cur = (it.rebuildOf && it.rebuildMerged) ? ('(現在：' + esc(rebuildTargetTitle_(it.rebuildOf) || '結合済み') + ')') : '';
     row.innerHTML = '<button id="veditRebuildMerge" type="button" class="vedit-gen">🔁 リビルド結合' + (cur ? '<span class="vgen-note" style="display:block;">' + cur + '</span>' : '') + '</button>';
-    actions.parentNode.insertBefore(row, actions.parentNode.querySelector('.vedit-tree-box') || actions); // ツリー設定を常に最下段に保つ
+    actions.parentNode.insertBefore(row, actions); // 保存を含む actions の直前＝「保存の上」
     row.querySelector('#veditRebuildMerge').addEventListener('click', function () { openRebuildMergePicker_(k, it); });
   }
   function rebuildTargetTitle_(videoId) {
@@ -3115,9 +2712,17 @@
         matched.workShareUrl = String(opts.workShareUrl || opts.workShortUrl);
         changed = true;
       }
-      if (matched.workShortMintPending === true) { delete matched.workShortMintPending; changed = true; }
       if (changed) { try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {} }
-      // 既存(dupe)行は従来値を権威として扱う。空欄も含め、投稿完了の再実行では発番しない。
+      // 値で埋まらず、作品URLはあるのに導線2が空なら、この行の作品URLから発行して埋める(離脱に強い保険)。
+      //   persist は matched の所属ストアへ保存し、matched自身のvideoIdキーでシートへupsert(新規行は作らない)。
+      if (matched.workUrl && !matched.workShortUrl && !matched.workShortNone) {
+        try {
+          mintWorkShortAtPost_(matched, function () {
+            try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {}
+            try { pushItemToGas_(matched); } catch (e) {}
+          });
+        } catch (e) {}
+      }
       if (acc === acct()) refresh();
       // ★衝突相手の"自身のYouTube URL/短縮URL"も返す＝Chamiに「何と重複扱いされたか」を実物で見せ、
       //   別作品なら forceNew で上書きできる材料にする(黙って弾かない・沈黙が最悪の事故)。
@@ -3152,7 +2757,6 @@
     if (opts.scheduledAt) entry.plannedAt = opts.scheduledAt;
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
     if (opts.attrs) attrDefs_().forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
-    if (!entry.workShortUrl && /^https?:\/\//.test(String(entry.workUrl || '').trim())) entry.workShortMintPending = true;
     // ★新規完了行は必ず先頭へ置く。末尾へpushすると、既存200件時にsaveArrFor_のslice(0,200)が
     // 今追加した201件目そのものを捨て、投稿完了しても履歴に載らなかった(2026-08-13・INC-131)。
     // 記録の正はシートなので、上限時は最古のローカルキャッシュだけを押し出し、最新行を確実に残す。
@@ -3167,8 +2771,13 @@
       // ★投稿完了と同時に記録シート(=分析の元)へ即upsert(videoId キーで冪等)。
       try { pushItemToGas_(entry); } catch (e) {}
       // 作品クリック計測URL(導線2)を作品URLから自動発行＝編集→保存を待たずに一発で埋める(Chami依頼2026-07-30)。
-      if (entry.workShortMintPending === true) {
-        try { attemptPendingWorkShortMint_(entry, acc); } catch (e) {}
+      if (entry.workUrl && !entry.workShortUrl) {
+        try {
+          mintWorkShortAtPost_(entry, function () {
+            saveArrFor_('verify_manual', acc, loadArrFor_('verify_manual', acc).map(function (x) { return x.id === id ? entry : x; }));
+            pushItemToGas_(entry);
+          });
+        } catch (e) {}
       }
       if (acc === acct()) { try { pokeSnapshotNow_(); } catch (e) {} refresh(); }
       return { ok: true };
@@ -3270,53 +2879,7 @@
     out.sort(function (a, b) { return a.timeMs - b.timeMs; });
     return out;
   }
-  // Lightweight reservation-tab feed. This function never calls GAS or YouTube; it only reads caches already hydrated by posting history.
-  function recentPublishedCached_(options) {
-    var opts = options || {}, cutoff = Number(opts.fromMs) || 0, todayStart = Number(opts.todayStart) || 0;
-    var out = [], seen = {};
-    ['acc1', 'acc2'].forEach(function (a) {
-      var ymap = loadYtMapFor_(a), rawPublished = {};
-      loadSheetRaw_(a).forEach(function (row) {
-        var rawVid = ytIdOf((row && (row.youtubeUrl || row.ytUrl)) || '');
-        var rawTime = Date.parse((row && row.postedAt) || '');
-        if (rawVid && !isNaN(rawTime)) rawPublished[rawVid] = rawTime;
-      });
-      displayItemsForAcc_(a).forEach(function (it) {
-        var yt = itemYt_(ymap, it) || it.ytUrl || '';
-        var vid = ytIdOf(yt);
-        if (!vid || seen[vid]) return;
-        var published = publishedCache[vid] != null ? Number(publishedCache[vid]) : Number(rawPublished[vid]);
-        if (!published || isNaN(published) || (cutoff && published < cutoff)) return;
-        var withDetails = todayStart && published >= todayStart ? opts.includeTodayDetails !== false : !!opts.includeYesterdayDetails;
-        if (!withDetails) {
-          out.push({ id: it.videoId || itemKey(it), videoId: vid, account: a, publishedAt: published });
-          seen[vid] = 1;
-          return;
-        }
-        var pc = postClicks_(it, vid), dl = deltaCache[vid], views = viewsCache[vid];
-        if (dl) {
-          var floor = dl.cv != null ? dl.cv : Math.max(dl.wv || 0, dl.tv || 0, dl.yv || 0);
-          if (floor > 0) views = Math.max(views || 0, floor);
-        }
-        var peak = peakCache[vid] || {};
-        var postUrl = it.shareUrl || it.shortUrl || it.postUrl || '';
-        out.push({
-          id: it.videoId || itemKey(it), videoId: vid, account: a, publishedAt: published,
-          title: stripCommonTags(titleCache[vid] || it.title || '(\u7121\u984c)'),
-          ytUrl: yt, postUrl: postUrl, postPlatform: isXLink_(postUrl, it) ? 'x' : 'bsky',
-          workUrl: it.workUrl || '', views: views != null ? Number(views) : null,
-          pinkClicks: pc.c2 != null ? Number(pc.c2) : null, hasPink: !!(pc.wcode || it.workShortUrl),
-          peakViews: peak.vRate != null ? Number(peak.vRate) : null
-        });
-        seen[vid] = 1;
-      });
-    });
-    return out;
-  }
-  try { window.Go5History = {
-    listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_,
-    postsForDay: postsForDay_, recentPublishedCached: recentPublishedCached_, _dayBucketMin: dayBucketMin_
-  }; } catch (e) {}
+  try { window.Go5History = { listForRebuildPicker: listForRebuildPicker_, markRebuilt: markRebuilt_, addCompletedPost: addCompletedPost_, postsForDay: postsForDay_, _dayBucketMin: dayBucketMin_ }; } catch (e) {}
 
   // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
   function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }
@@ -3584,7 +3147,7 @@
     div.innerHTML = '<div class="hint" style="margin-bottom:6px;">この投稿が<b>' + acctName_(acct()) + '以外</b>のものなら、正しいアカウントの投稿履歴へ移せます。</div>' +
       '<button type="button" class="ghost vedit-move-btn" style="width:auto;">→ ' + acctName_(to) + ' へ移動</button>';
     var actions = modal.querySelector('.vedit-actions');
-    if (actions) modal.insertBefore(div, modal.querySelector('.vedit-tree-box') || actions); else modal.appendChild(div);
+    if (actions) modal.insertBefore(div, actions); else modal.appendChild(div);
     div.querySelector('.vedit-move-btn').addEventListener('click', function () {
       if (!window.confirm('「' + (it.title || k) + '」を ' + acctName_(to) + ' の投稿履歴へ移動します。\n(この端末とスプレッドシートの両方を移します)よろしいですか？')) return;
       closeModal_();
@@ -3645,7 +3208,7 @@
       '<div class="vedit-postimg-grid"></div>' +
       '<div class="vedit-postimg-msg hint" style="min-height:0;margin:2px 0 0;"></div>';
     var actions = modal.querySelector('.vedit-actions');
-    if (actions) modal.insertBefore(wrap, modal.querySelector('.vedit-tree-box') || actions); else modal.appendChild(wrap);
+    if (actions) modal.insertBefore(wrap, actions); else modal.appendChild(wrap);
     var grid = wrap.querySelector('.vedit-postimg-grid');
     var fileInp = wrap.querySelector('input[type=file]');
     var msg = wrap.querySelector('.vedit-postimg-msg');
@@ -3706,7 +3269,7 @@
       }
     } catch (e) {}
     _curSrcUrl = ''; // 新規追加：生成元はveditBskyの入力値を使う
-    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls, treeLinks) {
+    openModal_('YouTube動画を追加', '', '', autoWorkUrl, {}, '旧作', function (ytUrl, bskyUrl, workUrl, attrs, workState, workShortVal, platform, mergeUrls) {
       if (!ytUrl) { showModalErr_('YouTube URLを入力してください。'); return; }
       var vid = ytIdOf(ytUrl);
       if (!vid) {
@@ -3725,26 +3288,21 @@
       applyWorkShort_(entry, workShortVal); // 作品クリック計測URL(導線2)
       if (platform === 'x' || platform === 'bsky') entry.platform = platform; // X↗/Bsky↗表示の手動指定(既定X)
       if (Array.isArray(mergeUrls) && mergeUrls.length) entry.mergeUrls = mergeUrls; // 合算URL(導線1のみ)
-      saveTreeLinksFor_(entry, acct(), treeLinks);
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       pokeSnapshotNow_(); // 手動追加でもYT URL紐付け当日に日別記録のベースラインを作る(④)
       refresh();
-    }, '', 'x', [], [], null, acct());
+    });
   }
 
   // クリック数(開封数)・YouTube視聴回数/投稿日時/題名をAPIから取得しキャッシュへ。Promiseを返す。
   function fetchData_(items, ymap, force) { // force=true(手動🔄更新)のときだけTTLを無視して取り直す
     // 導線1(shortUrl=YT→投稿)と導線2(workShortUrl=投稿→FANZA)の両計測コードをまとめて照会
-    var mergeCodes = [], treeCodes = [];
-    items.forEach(function (it) {
-      if (Array.isArray(it.mergeUrls)) it.mergeUrls.forEach(function (u) { var c = codeOf(u || ''); if (c) mergeCodes.push(c); });
-      treeLinksFor_(it, chForItem_(it)).forEach(function (t) { var tc = codeOf(t.shortUrl || ''); if (tc) treeCodes.push(tc); });
-    });
+    var mergeCodes = [];
+    items.forEach(function (it) { if (Array.isArray(it.mergeUrls)) it.mergeUrls.forEach(function (u) { var c = codeOf(u || ''); if (c) mergeCodes.push(c); }); });
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); })
       .concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); }))
       .concat(mergeCodes)
-      .concat(treeCodes)
       .filter(Boolean).filter(function (v, i, a) { return a.indexOf(v) === i; });
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(itemYt_(ymap, it) || it.ytUrl || ''); }).filter(Boolean);
     var uniqVids = vids.filter(function (v, i, a) { return a.indexOf(v) === i; }); // 重複動画IDは1回だけ照会
@@ -3826,10 +3384,9 @@
   function maintDue_() { return (Date.now() - tsGet_('hist_maint_at')) > HIST_MAINT_TTL_MS; }
   function metricsDue_() { return (Date.now() - tsGet_('hist_metrics_at')) > HIST_METRICS_TTL_MS; }
 
-  function refresh(announce, background) {
+  function refresh(announce) {
     // ★まずキャッシュから即描画。点検・通信でタブ表示を待たせない(Chami「表示が遅い」対策)。
-    var paint_ = background ? renderWhenHistIdle_ : render;
-    paint_();
+    render();
     // 点検(自己修復)は 手動🔄 か TTL到来時だけ・描画の後に走らせる。冪等なので裏で回して問題ない。
     //   ★サニタイズは ensureIds より前(偽の背骨ID接頭辞を刻む前に所属を確定する)——この順序は崩さない。
     var fixed = false;
@@ -3840,12 +3397,12 @@
       try { reconnectStrandedYt_(); } catch (e) {} // 取り残されたYT URLマップを正しいアカウントへ自己再接続(冪等)
       try { reconcileYtToSheet_(); } catch (e) {} // 端末のYT URLをシートへ後追い反映(冪等・台帳ガード)
       tsSet_('hist_maint_at', Date.now());
-      if (fixed) paint_(); // 点検で移動が発生した時だけ再描画
+      if (fixed) render(); // 点検で移動が発生した時だけ再描画
       // DID台帳がまだ未解決なら、解決後にもう一度サニタイズ(冪等)。点検時のみ通信する。
       (function () {
         var R = window.Go5AccountRepair;
         if (R && R.ensureDids && !(R.ledgerFresh && R.ledgerFresh())) {
-          R.ensureDids(function () { var more = sanitizeOwnership_(); if (more) { (background ? renderWhenHistIdle_ : render)(); notifySanitized_(more); } });
+          R.ensureDids(function () { var more = sanitizeOwnership_(); if (more) { render(); notifySanitized_(more); } });
         }
       })();
     }
@@ -3872,7 +3429,7 @@
       if (lastErr) setStatus('⚠️ 更新に失敗しました：' + lastErr + note, !!note);
       else if (announce) setStatus('✅ 更新しました(再生数・クリック数' + (vids.length ? '・' + vids.length + '本' : '') + ')' + note, !!note);
       else setStatus((!apiKey() && vids.length ? '※再生数・投稿日時の表示には⚙️詳細設定のAPIキーが必要です' : '') + note, !!note);
-      renderWhenHistIdle_();
+      render();
       if (fixed) wireSanUndo_();
       return true;
     }).catch(function () { setStatus('⚠️ 更新に失敗しました(通信エラー)', false); return false; });
@@ -3917,11 +3474,9 @@
         shareUrl: it.shareUrl || '',
         workUrl: it.workUrl || '',
         workShortUrl: it.workShortUrl || '', // 導線2(作品クリック)計測URL=手動同期でも空欄をバックフィル(syncHistory_が受信・GAS無改修)
-        workShortClear: !!it.workShortNone, // intentional blank must survive bulk sync
         youtubeUrl: yt,
         postedAt: postedMs ? new Date(postedMs).toISOString() : ''
       };
-      if (it.platform === 'x' || it.platform === 'bsky') rec.platform = it.platform;
       attrDefs_().forEach(function (a) { rec[a.key] = !!it[a.key]; }); // カテゴリ属性
       rec.workState = it.workState || '旧作'; // 作品状態
       if (it.goal) rec.goal = it.goal;          // 狙い(成約/集客)
@@ -3982,7 +3537,7 @@
     ensureIds();
     // ★両ドメイン+旧r2を自前と認識(旧: workerUrl 1個だけ判定だと、もう片方のチャンネルの
     //   短縮URL(yoz2.com等)が永久に「未生成」扱いになり、タブを開くたびフルバルク再生成が走って
-    //   その窓で編集が巻き戻る原因になっていた・2026-08-01)。Go5Short.ourBaseを唯一の判定基準にする。
+    //   その窓で編集が巻き戻る原因になっていた・2026-08-01)。autoMeasureWorkShort_:1288と同じ基準。
     function isR2(u) { return !!(go5.ourBase ? go5.ourBase(u) : (u && u.indexOf(workerUrl + '/') === 0)); }
     var hist = loadHist(), manual = loadManual(), targets = [];
     hist.forEach(function (it) { if (!isR2(it.shortUrl) || !it.shareUrl) targets.push(it); });
@@ -4414,7 +3969,7 @@
   // 投稿履歴タブへ入場した時に #ytClickList を作り直すためのフック(affiliate.js の showTab から呼ぶ)。
   //   離脱時に #ytClickList を空にしてメモリ解放する運用のため、クリック以外の入場経路(タブ復元/
   //   オーバーレイからの戻り)でも空のまま残らないように、render() を外から叩けるようにする。
-  try { window.Go5Verify = { render: render, patchImages: patchHistoryImages_ }; } catch (e) {}
+  try { window.Go5Verify = { render: render }; } catch (e) {}
   var rb = $('ytClickRefresh'); if (rb) rb.addEventListener('click', function () { purgeNegativeFanzaCache(); refresh(true); fetchDeltas_(true); });
   var fd = $('ytFetchDmm'); if (fd) fd.addEventListener('click', refetchFanza_);
   var ab = $('ytAddManual'); if (ab) ab.addEventListener('click', addManual);
@@ -4522,14 +4077,10 @@
   document.addEventListener('account-changed', function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeRestoreYt_(); } else render(); });
   // ★画像ハイドレート完了で「動画で使った画像」を描き直す(Chami「動画に使った画像が表示されない・すぐ表示して」2026-08-11)。
   //   起動直後の初回描画は Go5Cand._imgMem がまだ空でサムネが出ず、タブ再タップまで欠けていた(DEF-de2408cb00同型)。
-  //   candidates.js が go5-images-hydrated を発火する。履歴は画像だけ差し替え、ランキングだけ必要時に再描画する。
+  //   candidates.js が markHydrated_ で go5-images-hydrated を発火する=表示中の履歴/ランキングだけ再描画する(空振り時は無反応)。
   document.addEventListener('go5-images-hydrated', function () {
-    try { patchHistoryImages_(); } catch (e) {}
+    try { var pv = $('pageVerify'); if (pv && !pv.hidden) render(); } catch (e) {}
     try { var pr = $('pageRank'); if (pr && !pr.hidden) renderRank(); } catch (e) {}
-  });
-  // Regeneration emits this only after the used-image record has landed.
-  document.addEventListener('go5-used-images-updated', function () {
-    try { patchHistoryImages_(); } catch (e) {}
   });
   // ★履歴が IDB からメモリミラーへ載った合図(hist-store)で、表示中の検証タブを1回だけ描き直す。
   //   起動直後の初回描画はミラー未了で LS を読む=完了後に最新へ追いつく。6キー分の連発は 50ms で1回へ集約。
@@ -4539,8 +4090,6 @@
     // またハイドレートは「端末内データが届いた」合図なので、重い点検/外部再取得を含む refresh() は起動しない。
     // 本文だけを即再描画し、シート生キャッシュが届いた時だけ表示専用マージを追走させる。
     var key = String((ev && ev.detail && ev.detail.key) || '');
-    if (key === 'verify_manual__acc1') retryPendingWorkShortMintsAtBoot_('acc1');
-    else if (key === 'verify_manual__acc2') retryPendingWorkShortMintsAtBoot_('acc2');
     var a = acct();
     if (key && key.slice(-('__' + a).length) !== '__' + a) return;
     if (key.indexOf('sheet_hist_raw__') === 0) _histHydrateNeedsSheet = true;
@@ -4548,7 +4097,7 @@
     _histHydrateRefreshT = setTimeout(function () {
       _histHydrateRefreshT = null;
       var needsSheet = _histHydrateNeedsSheet; _histHydrateNeedsSheet = false;
-      try { renderWhenHistIdle_(); } catch (e) {}
+      try { var pv = $('pageVerify'); if (pv && !pv.hidden) render(); } catch (e) {}
       if (needsSheet) { try { mergeSheetExtras_(); } catch (e2) {} }
     }, 50);
   });
@@ -4564,11 +4113,8 @@
   // このスクリプトは #ytClickList より後で読み込まれるため、DOMContentLoadedを待つ必要がない。
   // 待つと後続の candidates.js(画像展開)まで本文表示を人質に取るため、端末内キャッシュをここで即描画する。
   paintCachedNow_();
-  // IDB非対応・degraded、またはリスナー登録前にhydrate済みの起動を1回だけ救済する。
-  // pre状態は走査せず、後着のhydrateイベントでIDB専用行を確実に拾う。
-  setTimeout(function () { retryPendingWorkShortMintsAtBoot_(); }, 2500);
   // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理。(各1回)
-  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(false, true); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
+  setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元。(秘密扱い)
   var keyEl = $('ytApiKey');
@@ -4751,20 +4297,12 @@
     if (!src) return;
     (root || document).querySelectorAll('img[data-fanza-thumb-url]').forEach(function (el) {
       if (el.getAttribute('data-fanza-thumb-url') !== fanzaUrl) return;
-      var reserve = el.classList.contains('vrow-thumb');
-      if (reserve) {
-        el.style.display = '';
-        el.style.visibility = 'hidden';
-        el.onload = function () { el.style.visibility = 'visible'; };
-      }
       el.onerror = function () {
         if (altSrc && el.getAttribute('src') !== altSrc) el.setAttribute('src', altSrc);
-        else if (reserve) { el.style.display = ''; el.style.visibility = 'hidden'; }
         else el.style.display = 'none';
       };
       if (el.getAttribute('src') !== src) el.setAttribute('src', src);
-      if (!reserve) el.style.display = '';
-      else if (el.complete && el.naturalWidth > 0) el.style.visibility = 'visible';
+      el.style.display = '';
     });
   }
 

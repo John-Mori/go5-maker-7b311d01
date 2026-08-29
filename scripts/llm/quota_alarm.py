@@ -52,6 +52,14 @@ RATIO_ALARM = 1.30          # 先週の同時刻比。これ以上で鳴らす
 #   12時間ごとに鳴らすと、それだけで週 4% を見張りが食う=見張りが病気になる。
 QUIET_HOURS = 24.0          # 同じ警報を鳴らし直さない時間
 
+# ★2026-08-29 追加(イージス研究室)= **分母が薄いと比が暴れる**。実測: 週リセットが 03:00 なので
+#   リセット直後は「先週の同区間」が 03:00〜04:45 の**便7本**しかなく、比が 242.29倍 と出た。
+#   同じ瞬間を先週まるごとの平均ペースと比べると **2.02倍** = 桁が2つ違う。
+#   → 同区間の便数が MIN_PREV_N 未満なら、比較の相手を**先週まるごとの平均ペース**へ切り替える
+#     (鳴らさないのではなく、**基準を取り替える**。黙らせると本物の急増を落とす)。
+#   ★出力には必ずどちらの基準で見たかを書く= 読む側が桁を誤解しないため。
+MIN_PREV_N = 30
+
 
 def window_total(start, end):
     """[start, end) の重み付き換算合計と便数。"""
@@ -101,6 +109,17 @@ def main():
     ap.add_argument("--quiet-hours", type=float, default=QUIET_HOURS)
     a = ap.parse_args()
 
+    # ★引き金置き場を先に1周(2026-08-29 HQ-0220/HQ-0218=「人の記憶に置くな。仕組みに載せろ」)。
+    #   新しい定刻タスクを増やさず、**既に定刻で回っているこの見張りに相乗り**させる
+    #   (タスクを増やすほど「登録したが動いていない」死角が増える=§3)。
+    #   ★ここが落ちても課金の見張りは止めない。
+    try:
+        import watch_triggers                                       # noqa: E402
+        watch_triggers.SEND_DRY = a.send_dry
+        watch_triggers.run(dry=a.dry_run)
+    except Exception as e:
+        print("watch_triggers 失敗(課金の見張りは続ける): %s: %s" % (type(e).__name__, e))
+
     now = datetime.now(JST)
     start = qb.last_reset(now)
     nxt = start + timedelta(days=7)
@@ -112,6 +131,14 @@ def main():
     # 先週の「同じ経過時間まで」= 同じ形の窓どうしを比べる(片方だけ長い比較をしない)
     prev_start = start - timedelta(days=7)
     prev_w, prev_n = window_total(prev_start, prev_start + timedelta(hours=elapsed_h))
+    basis = "先週の同区間"
+    if prev_n < MIN_PREV_N:
+        # 分母が薄い= 同区間の比は使わない。先週まるごとの平均ペースを同じ長さへ引き伸ばす。
+        full_w, full_n = window_total(prev_start, start)
+        if full_n > 0:
+            basis = ("先週まるごとの平均ペース(同区間は便 %d本しかない= 分母が薄いので基準を替えた)"
+                     % prev_n)
+            prev_w, prev_n = full_w / span_h * elapsed_h, full_n
     ratio = (cur_w / prev_w) if prev_w > 0 else None
 
     if a.calibrate is not None:
@@ -138,7 +165,8 @@ def main():
     if ratio is None:
         print("先週の同区間= 記録が無い(比較なし)")
     else:
-        print("先週の同区間= %.0f(便 %d) → **今週は %.2f倍**" % (prev_w, prev_n, ratio))
+        print("基準= %s" % basis)
+        print("  → %.0f(便 %d) → **今週は %.2f倍**" % (prev_w, prev_n, ratio))
     if est_pct is None:
         print("推定%= 出さない(今週の較正点が無い。--calibrate <画面の%> を1回だけ渡すと出る)")
     else:
@@ -150,7 +178,7 @@ def main():
 
     reasons = []
     if ratio is not None and ratio >= a.ratio:
-        reasons.append("先週の同区間の %.2f倍(閾値 %.2f)" % (ratio, a.ratio))
+        reasons.append("%s の %.2f倍(閾値 %.2f)" % (basis, ratio, a.ratio))
     if eta is not None and eta < nxt:
         reasons.append("推定で %s に枯渇= 次のリセット %s まで %.1f日 止まる"
                        % (eta.strftime("%m/%d %H:%M"), nxt.strftime("%m/%d %H:%M"),
@@ -161,7 +189,7 @@ def main():
     rec = {"ts": now.isoformat(), "elapsed_h": round(elapsed_h, 2),
            "weighted": round(cur_w), "n": cur_n,
            "prev_weighted": round(prev_w), "prev_n": prev_n,
-           "ratio": round(ratio, 3) if ratio else None,
+           "ratio": round(ratio, 3) if ratio else None, "basis": basis,
            "est_pct": round(est_pct, 1) if est_pct else None,
            "alarm": bool(reasons), "reasons": reasons}
     os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
@@ -192,7 +220,8 @@ def main():
         "",
         "■ 自前で持っている量(外部の%に依存しない)",
         "  週の経過 %.1f/168時間(%.1f%%) / 換算 %.0f(便 %d)" % (elapsed_h, time_pct, cur_w, cur_n),
-        "  先週の同区間 %.0f(便 %d)" % (prev_w, prev_n),
+        "  基準= %s" % basis,
+        "  基準の量 %.0f(便 %d)" % (prev_w, prev_n),
     ]
     if est_pct is not None:
         body.append("  ★推定 使用 %.1f%%(較正点からの外挿= **推定**。正はChamiの画面)" % est_pct)

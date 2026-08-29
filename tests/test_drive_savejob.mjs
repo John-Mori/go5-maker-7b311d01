@@ -9,7 +9,6 @@
  *   本物のまま実行して固定する。fetch/Drive API 等「外へ出る手」は runSaveJob 内のみで、ここでは呼ばない。
  */
 import assert from 'assert';
-import fs from 'fs';
 import {
   validateSaveJobInput,
   getOrCreateExactFolder,
@@ -18,22 +17,11 @@ import {
   channelToFolderId,
   SAVE_JOB_VIDEO_KEY_RE,
   SAVE_JOB_R2_BASE_RE,
-  DRIVE_JOB_LEASE_MS,
-  acquireDriveJobLease,
-  holdDriveJobLease,
-  releaseDriveJobLease,
 } from '../drive-worker/src/index.js';
 
 const ENV = { FOLDER_ID_ACC1: 'FOLDER_ACC1', FOLDER_ID_ACC2: 'FOLDER_ACC2' };
 const KEY64 = 'a'.repeat(64);
 const KEY16 = 'b'.repeat(16);
-const workerSource = fs.readFileSync(new URL('../drive-worker/src/index.js', import.meta.url), 'utf8');
-const saveJobSource = workerSource.slice(workerSource.indexOf('async function runSaveJobUnlocked'), workerSource.indexOf('function sleep', workerSource.indexOf('async function runSaveJobUnlocked')));
-const sourceUploadAt = saveJobSource.indexOf('baseName + "_元画像."');
-const previewUploadAt = saveJobSource.indexOf('baseName + "_プレビュー."');
-const videoUploadAt = saveJobSource.indexOf('baseName + "." + vext');
-assert.ok(saveJobSource.includes('const [vid, sourceAsset, previewAsset] = await Promise.all(['), '動画・元画像・プレビューをR2から並列取得する');
-assert.ok(sourceUploadAt >= 0 && previewUploadAt > sourceUploadAt && videoUploadAt > previewUploadAt, 'Driveでは付随画像を先に保存し、動画を最後に表示させる');
 
 let fails = 0;
 function ok(name) { console.log('  PASS ' + name); }
@@ -145,47 +133,5 @@ try {
   assert.strictEqual(created, 0, 'Drive一覧を確認できない時は新規作成しない');
   ok('T-12 list失敗を未存在と誤認しない');
 } catch (e) { ng('T-12', e); }
-
-// --- 別Worker isolateをまたぐR2条件付きリース（同じ作品のDrive書込みは常に1本）---
-class FakeR2 {
-  constructor() { this.map = new Map(); this.seq = 0; }
-  async head(key) { return this.map.get(key) || null; }
-  async put(key, value, opts = {}) {
-    const cur = this.map.get(key) || null;
-    const onlyIf = opts.onlyIf;
-    const none = onlyIf && typeof onlyIf.get === 'function' ? onlyIf.get('If-None-Match') : '';
-    const match = onlyIf && typeof onlyIf.get === 'function' ? onlyIf.get('If-Match') : '';
-    if (none === '*' && cur) return null;
-    if (match && (!cur || cur.httpEtag !== match)) return null;
-    const etag = 'etag-' + (++this.seq);
-    const obj = { key, etag, httpEtag: '"' + etag + '"', customMetadata: Object.assign({}, opts.customMetadata || {}) };
-    this.map.set(key, obj);
-    return obj;
-  }
-}
-
-try {
-  const bucket = new FakeR2();
-  const env = { SYNC_IMAGES: bucket };
-  const first = await acquireDriveJobLease(env, 'P1', '同じ作品', 'owner-a', 1000);
-  assert.strictEqual(first.ok, true, '先頭だけがリースを取る');
-  assert.strictEqual(Number(first.object.customMetadata.expiresAt), 1000 + DRIVE_JOB_LEASE_MS);
-  const second = await acquireDriveJobLease(env, 'P1', '同じ作品', 'owner-b', 1001);
-  assert.deepStrictEqual({ ok: second.ok, busy: second.busy }, { ok: false, busy: true }, '別isolate相当の二本目を止める');
-  assert.strictEqual(await releaseDriveJobLease(env, first), true, '所有者ETag一致時だけ解放');
-  const third = await acquireDriveJobLease(env, 'P1', '同じ作品', 'owner-c', 2000);
-  assert.strictEqual(third.ok, true, '解放後は自己修復ジョブが取得できる');
-  assert.strictEqual(await holdDriveJobLease(env, third, 5000), true, '成功後クールダウンを条件付きで延長');
-  const cooled = await acquireDriveJobLease(env, 'P1', '同じ作品', 'owner-d', Date.now() + 1000);
-  assert.strictEqual(cooled.busy, true, '成功直後の遅延再送も止める');
-  ok('T-13 R2分散リース: 別isolate/遅延再送を単一化');
-} catch (e) { ng('T-13', e); }
-
-try {
-  const noBinding = await acquireDriveJobLease({}, 'P', '題名', 'owner', 1000);
-  assert.strictEqual(noBinding.ok, false);
-  assert.strictEqual(noBinding.error, 'drive_lease_binding_missing');
-  ok('T-14 リース基盤不在は重複許可せずfail-closed');
-} catch (e) { ng('T-14', e); }
 if (fails) { console.log('\n' + fails + ' test(s) FAILED'); process.exit(1); }
 console.log('\nAll drive save_job tests passed.');
