@@ -89,6 +89,23 @@ STALE_MIN = 15                 # これ以上未処理なら「司令塔不在�
 POLLER_STALE_SEC = 300
 POLLER_ALERT_COOLDOWN_SEC = 30 * 60  # 状態遷移で鳴らすので実質バックストップ(連投の最終防波堤)
 
+# --- ★受信の「自動復旧が無力」の検知 (2026-08-30 イージス研究室・研究室HQ依頼) ---
+# なぜ別に要るか: 上の脈警報は「受信が止まっている」までしか言わない。
+#   2026-08-30 05:38-06:03 の事故では脈警報は 05:46:05 に**正しく鳴っていた**(実物あり)が、
+#   同時に supervise_daemons が 05:41/05:50/06:00 と3回起動を試みて毎回
+#   「既に稼働中のgateway pid=13636 を検出。二重起動を避けて終了する。」で自死していた。
+#   = 番人が立て直そうとして**失敗し続けている**という一段重い事実。脈警報の文面は
+#   「番人=daemon_keeperが常時立て直す対象です」と書いており、読んだ側は放置してよいと
+#   受け取りうる。ここを名指しできないと、警報を読んでも手を出さない。
+# 引き金: 直近の「gateway接続」以降に自死ログが**2回以上**。1回は起動競合で自然に収まる
+#   (実測 2026-08-15 05:51 は1回で復帰)ので、2回=10分以上復帰していない確定的な証拠。
+#   実測した連続ラン= 2026-07-21(99回)/ 2026-08-15(1回)/ 2026-08-30(3回)。
+GW_LOG = os.path.join(LOCAL, "discord_gateway.log")
+GW_LOCK = os.path.join(LOCAL, "queue", "_gateway.lock")
+GW_SELFKILL_MIN = 2               # これ以上連続したら鳴らす
+GW_SELFKILL_RECENT_SEC = 60 * 60  # 直近1時間以内の自死だけを見る(過去ログで鳴らさない)
+GW_SELFKILL_TAIL = 600            # ログ末尾この行数だけ読む(2825行の全読みはしない)
+
 # --- ★司令塔のliveness脈の死活 (2026-08-13 イージス研究室・裁定C-044⑤) ---
 # なぜ: presence.lab_alive() の2信号目 lab_tool_pulse.txt が **2026-07-20 19:22 で止まり、
 #   23.9日間 誰も気づかなかった**。打ち手(hook pulse_touch.py)のコードは1行も壊れていない。
@@ -324,6 +341,80 @@ def check_poller_health(state, dry_run):
     if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
         state["last_poller_alert"] = now_epoch
         state["poller_down"] = True
+
+
+def gateway_selfkill_run(now=None, path=None, tail=None):
+    """直近の「gateway接続」以降に積まれた自死ログを (回数, 最後の時刻epoch, pid) で返す。
+
+    ★測るだけ。鳴らさない= 引き金の判定を単体で実測できるようにするため
+      (発火しない安全網は検証されない・規律§3)。
+    見つからない/読めない時は (0, None, None)= 鳴らさない側へ倒す(fail-open)。
+    """
+    p = path or GW_LOG
+    n = tail or GW_SELFKILL_TAIL
+    try:
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().split("\n")[-n:]
+    except OSError:
+        return 0, None, None
+    hits = []
+    for ln in lines:
+        if len(ln) < 19 or ln[4] != "-" or ln[13] != ":":
+            continue
+        try:
+            ts = time.mktime(time.strptime(ln[:19], "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            continue
+        if ts > (now or time.time()):
+            break                          # ★now より後の行は見ない(監視は未来を読めない)。
+                                           #   過去の事故時刻を now に入れて実測できるようにするため。
+        if "gateway接続" in ln:
+            hits = []                      # 復帰した= それ以前は数えない
+        elif "既に稼働中のgateway" in ln:
+            m = re.search(r"pid=(\d+)", ln)
+            hits.append((ts, m.group(1) if m else "?"))
+    if not hits:
+        return 0, None, None
+    last_ts, last_pid = hits[-1]
+    if (now or time.time()) - last_ts > GW_SELFKILL_RECENT_SEC:
+        return 0, None, None               # 過去の事故のログで蒸し返さない
+    return len(hits), last_ts, last_pid
+
+
+def check_gateway_selfkill(state, dry_run, now=None):
+    """受信の自動復旧が失敗し続けている状態を検知する(2026-08-30 研究室HQ依頼)。
+
+    脈警報(check_poller_health)は「止まっている」までしか言わない。こちらは
+    「**番人が立て直そうとして毎回失敗している**」= 人の手が要る、を名指しする。
+    鳴らし方は check_poller_health と同じレール(状態遷移で1回・復帰で✅1回)へ合流させる。
+    """
+    n, last_ts, pid = gateway_selfkill_run(now=now)
+    down = n >= GW_SELFKILL_MIN
+    was_down = bool(state.get("gw_selfkill_down"))
+    if not down:
+        if was_down:
+            if bot_send(SUMMARY_DEPT,
+                        "✅受信(discord_gateway)の自動復旧は回復しました — "
+                        "自死ログが止まり、番人の再起動が通っています(自動監視)。",
+                        dry_run, by_dept=True):
+                state["gw_selfkill_down"] = False
+        else:
+            state["gw_selfkill_down"] = False
+        return False
+    if was_down:
+        return False                        # 継続中は鳴らさない(狼少年にしない)
+    age_min = int(((now or time.time()) - last_ts) / 60) if last_ts else 0
+    msg = (
+        f"🚨受信の**自動復旧が効いていません**(自動監視): discord_gateway の起動が"
+        f"{n}回連続で「既に稼働中のgateway pid={pid} を検出。二重起動を避けて終了する。」"
+        f"で自死しています(最後は{age_min}分前)。番人(supervise_daemons)は10分ごとに"
+        "試み続けますが、この状態では**永久に復帰しません**=人の手が要ります。"
+        f"打ち手= `{GW_LOCK}` に死んだPIDが残っていないか見て、消してから手起動。"
+        "確認= `powershell scripts\\_daemons\\status.ps1`。"
+    )
+    if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
+        state["gw_selfkill_down"] = True
+    return True
 
 
 def _age_or_none(path):
@@ -1539,6 +1630,7 @@ def run_once(dry_run=False):
         return
     state = load_state()
     check_poller_health(state, dry_run)  # ポーラー死活は受付箱の滞留と独立に監視(単一障害点)
+    check_gateway_selfkill(state, dry_run)  # ★2026-08-30: 番人の再起動が毎回自死する=人の手が要る状態
     check_lab_pulse(state, dry_run)      # ★C-044⑤: 司令塔のliveness脈が黙って死ぬのを検知
     check_dead_windows(state, dry_run)   # P2: 死んだ部門窓の可視化(応答性改善書2026-07-18)
     check_busy_notices(state, dry_run)   # ⏳対応中(生存)通知: Chami直要望2026-07-18・4段目の進捗信号
