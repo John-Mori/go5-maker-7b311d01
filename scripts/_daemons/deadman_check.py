@@ -46,6 +46,15 @@ try:
 except Exception:
     pass
 
+# このスクリプトは登録タスク go5_deadman_check から **pythonw.exe** で起動される=親がコンソールを
+# 持たない。その状態で素の powershell を起動すると Windows が子に**新しいコンソールを割り当てる**ため、
+# 15分ごとに黒窓が一瞬出る(HQ-0223 追記6・2026-08-31 実測)。
+#   実測= 0:27:58 のタスク実行 → 00:28:02 に WindowsTerminal.exe -Embedding の窓が出現。
+#   再現= pythonw親から素のpowershell→窓1枚 / CREATE_NO_WINDOW付き→0枚。
+# ★`sys.executable` 経由の起動は親がpythonwなら pythonw に化けるので窓は出ない。
+#   窓を出すのは **powershell/cmd を直に書いた呼び出しだけ**だ。増やす時はここを付けろ。
+CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 SUP_LOG = os.path.join(ROOT, "local", "_daemons_supervisor.log")
@@ -239,7 +248,8 @@ def _dept_procs():
           "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress")
     try:
         out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=60,
+                             creationflags=CREATE_NO_WINDOW)
         rows = json.loads(out.stdout or "[]")
     except Exception:
         return None, None
