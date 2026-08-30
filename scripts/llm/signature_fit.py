@@ -91,6 +91,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--persona", required=True)
     ap.add_argument("--tails", default=None, help="カンマ区切り。省略時は既定の候補")
+    # ★2026-08-30 追加(.bak_20260830_compare・イージス研究室)= **2つの候補セットを1回の読み込みで比べる**。
+    #   事故の実物= 8/30、6語と7語を**別々のプロセスで**測って「92/98 → 91/97=1本落ちる」と報告した。
+    #   だが recent_*.jsonl は常時書かれている。同一プロセスで測り直すと **両方 92/98=差ゼロ**だった。
+    #   落ちて見えた1本は候補の差ではなく**コーパスが動いた分**。数分あけた2つの数字は比較できない。
+    #   → 差を語るなら必ずこちらを使う(共通規律§1「数え方で答えが変わるものは、何をどう数えたかを添える」)。
+    ap.add_argument("--compare", default=None,
+                    help="カンマ区切りのもう1つの候補。--tails と**同じ1回の読み込み**で並べて測る"
+                         "(別プロセスで測った数字を引き算するな=コーパスが動く)")
     a = ap.parse_args()
 
     tails = ([t.strip() for t in a.tails.split(",") if t.strip()] if a.tails
@@ -134,6 +142,29 @@ def main():
     else:
         print("  → ★他人格でもあまり鳴らない= 候補が緩すぎる疑い。"
               "本人で鳴った件も『たまたま』かもしれない。語を絞って測り直せ。")
+    # ★2つ目の候補セットを**同じ rows**(=同じ1回の読み込み)で測る。
+    #   別プロセスで測った数字を引き算してはいけない= recent_*.jsonl は常時書かれていて母数が動く。
+    if a.compare:
+        tails2 = [t.strip() for t in a.compare.split(",") if t.strip()]
+        f1s, j1s, _ = measure(mine, tails)
+        f1o, j1o, _ = measure(others, tails)
+        f2s, j2s, _ = measure(mine, tails2)
+        f2o, j2o, _ = measure(others, tails2)
+        print()
+        print("== ★候補セットの比較(同じ1回の読み込み= 母数が動かない) ==")
+        print("  A(%d語)= %s" % (len(tails), " ".join(tails)))
+        print("  B(%d語)= %s" % (len(tails2), " ".join(tails2)))
+        print("  本人   A 鳴った %d/%d  →  B 鳴った %d/%d" % (f1s, j1s, f2s, j2s))
+        print("  他人格 A 鳴った %d/%d  →  B 鳴った %d/%d" % (f1o, j1o, f2o, j2o))
+        d = f2o - f1o
+        if j1o != j2o:
+            print("  → ★母数がズレている(%d≠%d)= 比較として壊れている。読み直せ。" % (j1o, j2o))
+        elif d == 0:
+            print("  → 固有性の差 **ゼロ**= B は網を1本も緩めない。")
+        else:
+            print("  → 固有性 %+d本(A %d → B %d)。マイナスが大きいほど網が緩む。" % (d, f1o, f2o))
+        print("  ※ 本人が両方0なら偽陽性は増えていない。判断材料はこの2行だけで足りる。")
+
     print()
     print("★この道具は測るだけで、何も登録しない。"
           "`signature_tails` を書くのは人事部門(口調ルール.json が正本・ORG-11)。")
