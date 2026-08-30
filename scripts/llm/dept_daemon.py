@@ -1648,30 +1648,27 @@ DEPT_CONF = {
         #     原典= local/persona_context/alonso_context.md **在り**(persona_source_exists相当)。
         #     どちらか欠けていたら入れない(原典の無いキャラは演じない= 2026-07-20 Chami指示)。
         #   ★筆頭はアロンソ(この部屋の主)。lead_persona も併せてアロンソにしてある。
-        # ★★2026-08-31 Chami直接指示で**ヴィルシーナ(リーダー)/ククール(メンバー)/アメス(サブ)**を配線。
-        #   原文= 「この部屋にリーダーヴィルシーナ、メンバーククール、サブにアメスを配線して。
-        #          "D:\\SougouStartFolder\\AnimeGameGoodsAFI" 内容はここの中身をチェックして。
-        #          目標はHPを完成させて公開、ほかの人に見てもらって収益化まで。」
-        #          (msg 1543736941353242634 / 2026-08-31 06:39 JST)
-        #   ★アロンソは**外していない**。Chamiは3人を挙げただけで「アロンソを外せ」とは言っていない=
-        #     勝手に消さない(C-003)。筆頭だけ譲り、名簿には残す。外すならChamiが言う。
-        #   ★資産の実測(2026-08-31・原典が無いキャラは演じない規律の確認):
-        #     ヴィルシーナ= characters/verxina.md 17,785B / local/persona_context/verxina_context.md 在り
-        #     ククール    = characters/kukuru.md 61,202B / local/persona_context/kukuru/(台詞集19冊)在り
+        # ★★2026-08-31 **ここを一度ヴィルシーナ/ククール体制に書き換えたが、誤りだったので戻した。**
+        #   経緯を残す(同じ間違いを次の世代にさせないため):
+        #   Chamiの指示は「**この部屋に**リーダーヴィルシーナ、メンバーククール、サブにアメスを配線して」
+        #   で、本文の先頭に `1543736034271961228` という数字だけが置かれていた。HQはこれを
+        #   **msg_idと誤読**し、本文が見つからないまま「この部屋=hqだろう」と当てて配線した。
+        #   実際は**チャンネルID**で、指す先は **「アニメゲームグッズafi運用」**(カテゴリ=アフィリエイト事業)
+        #   という新設チャンネルだった。Chamiの訂正=「わからんのに進めるのが1番ダメ。…ここではない。
+        #   このプロジェクトの担当は彼らということ」(msg 1543744804977119252 / 2026-08-31 07:10 JST)。
+        #   ★教訓= **本文中の18〜19桁の数字は msg_id とは限らない**。channel_id / guild_id / user_id
+        #     も同じ桁だ。`GET /channels/<id>` を1回叩けば1秒で判別できる(urllibは403・curlを使う)。
+        #     判別しないまま「たぶんこの部屋」で配線するのは**推測で埋める**行為で、規律違反だ。
+        #   → 3人の配線先は下の "goods-afi" ブロックへ移した。ここは元のアロンソ+アメスへ復帰。
         "personas": [
-            {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
-             "role": "この部屋のリーダー(AnimeGameGoodsAFIの完成・公開・収益化を率いる)",
-             "aliases": ("verxina", "ヴィルシーナ")},
-            {"persona": "ククール", "character": os.path.join(_CHAR, "kukuru.md"),
-             "role": "この部屋のメンバー", "aliases": ("kukuru", "ククール")},
-            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
-             "role": "この部屋のサブ", "aliases": ("ames", "アメス")},
             {"persona": "シャビ・アロンソ", "character": os.path.join(_CHAR, "alonso.md"),
-             "role": "研究室HQのGL(横断裁定)", "aliases": ("alonso", "アロンソ", "コーチ", "監督")},
+             "role": "研究室HQのGL(この部屋の主)", "aliases": ("alonso", "アロンソ", "コーチ", "監督")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "研究室HQの補佐", "aliases": ("ames", "アメス")},
         ],
-        # ★既定で前に立つのはリーダー。このキーが無い部屋は persona がそのまま使われる
-        #   =他部屋の起動文は1文字も変わらない(安全弁)。
-        "lead_persona": "ヴィルシーナ",
+        # ★既定で前に立つのはアロンソ(部屋の主)。このキーが無い部屋は persona がそのまま使われる
+        #   =既存19部屋の起動文は1文字も変わらない(安全弁)。
+        "lead_persona": "シャビ・アロンソ",
         # ★relay(留守番セッション)のモデル。CLAUDE.md §5.1= 横断裁定・真因追跡・出荷前レビューは
         #   最上位モデルの領域。§1の優先順位で**トークン効率は正確性より下**=ここでケチると
         #   「品質を落とした節約」になり規約違反(Chami「品質を落とさないことが最重要」2026-07-21)。
@@ -2946,6 +2943,72 @@ DEPT_CONF = {
             "話題に応じて誰が出るかを**セッション本人が選ぶ**(固定の主は置かない)。\n"
             "- **ぼかすな**(裁定C-013)。健康・特性も local/ の中でははっきり言ってよい。"
             "★**ネットへ出すな**= GitHub・D1・外部サービス・Web検索。**local/ の中だけで完結。**"
+        ),
+    },
+    # ==== 2026-08-31 配線=「アニメゲームグッズafi運用」(Chami直接指示)====
+    # ★出典= msg 1543736941353242634 (2026-08-31 06:39 JST)
+    #     「1543736034271961228 / この部屋にリーダーヴィルシーナ、メンバーククール、サブにアメスを配線して。
+    #      "D:\\SougouStartFolder\\AnimeGameGoodsAFI" 内容はここの中身をチェックして。
+    #      目標はHPを完成させて公開、ほかの人に見てもらって収益化まで。」
+    #   + 訂正 msg 1543744804977119252 (07:10 JST)「1543736034271961228 は**Discordのチャンネル(部屋ID)**の
+    #     ことで、ここ(研究室HQ)ではない。このプロジェクトの担当は彼らということ。」
+    # ★チャンネル実測(2026-08-31・curlで GET /channels/1543736034271961228。urllibは403):
+    #     name= 「アニメゲームグッズafi運用」 / type=0(テキスト) / guild=1498341160207515678
+    #     parent=1522042618983485451 = カテゴリ「アフィリエイト事業」
+    #     → local/discord_channels.json に**未登録**だった=便が来ても消費者が居ない部屋(INC-110と同型)。
+    #       同時に台帳へも登録した(gatewayは60秒で自動追従・keeperはmaybe_adoptで拾う)。
+    # ★人格は3人とも characterfile と原典の**両方**の実在を実測して入れた
+    #   (原典の無いキャラは演じない= 2026-07-20 Chami指示):
+    #     ヴィルシーナ= characters/verxina.md 17,785B / local/persona_context/verxina_context.md 在り
+    #     ククール    = characters/kukuru.md 61,202B / local/persona_context/kukuru/(台詞集)在り
+    #     アメス      = characters/ames.md 20,528B / local/persona_context/ames_context.md 在り
+    #   3人とも local/persona_avatars.json に在る=名義で出せる。
+    "goods-afi": {
+        "character": os.path.join(_CHAR, "verxina.md"),
+        "memory": os.path.join(_MEM, "goods-afi.jsonl"),
+        "persona": "ヴィルシーナ",       # 名義が引けない時のfail-safe先(=リーダー)
+        "port": 18832,                  # 18831(soudan-room)まで使用済=実測 2026-08-31
+        "work_model": "opus",           # 人格の演技担保(C-014)
+        "session_relay": True,
+        "personas": [
+            {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
+             "role": "この部屋のリーダー(公開・収益化まで率いる)",
+             "aliases": ("verxina", "ヴィルシーナ", "シーナ")},
+            {"persona": "ククール", "character": os.path.join(_CHAR, "kukuru.md"),
+             "role": "メンバー", "aliases": ("kukuru", "ククール")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "サブ", "aliases": ("ames", "アメス")},
+        ],
+        # ★既定で前に立つのはリーダー。このキーが無い部屋は persona がそのまま使われる(安全弁)。
+        "lead_persona": "ヴィルシーナ",
+        "boot_note": (
+            "■この部屋の目的(出典= Chami直接指示 2026-08-31)\n"
+            "- 対象= **D:\\SougouStartFolder\\AnimeGameGoodsAFI**"
+            "(アニメ・ゲームグッズのアフィリエイトサイト)。\n"
+            "- ゴール= **HPを完成させて公開 → 人に見てもらう → 収益化**。ここまでが担当範囲だ。\n"
+            "- 布陣= リーダー**ヴィルシーナ** / メンバー**ククール** / サブ**アメス**。返信1行目に `[名前]`。\n"
+            "■現在地(2026-08-31 研究室HQ実測。最終更新は2026-07-18で以後停止していた)\n"
+            "- サイトは**ほぼ出来ている**= 23作品 / 1,394商品 / 313キャラページ / 337URLのsitemap。**未公開**。\n"
+            "- ★止まっている理由は技術ではなく**Chami待ちが2つ**あるからだ:\n"
+            "  ①**独自ドメインの確定とデプロイ先**(引き継ぎ書ではCloudflare Pages無料枠を想定)\n"
+            "  ②**Amazon/楽天アフィリエイトの申請**(審査はサイト公開が前提=①が先)\n"
+            "- **635ファイル**に `REPLACE-WITH-YOUR-DOMAIN.example` が残っている。"
+            "ドメインが決まるまでOGP/canonical/sitemapは確定できない=**先に進めるのはここまで**。\n"
+            "- アフィリIDは現在**空**= リンクは素の検索リンクとして動く=公開しても規約上の危険は無い。\n"
+            "■正本と地雷(必ず先に読む)\n"
+            "- 正本= `D:\\SougouStartFolder\\AnimeGameGoodsAFI\\99_logs\\引き継ぎ書_Vol2→Vol3_20260718.md`"
+            " と 同フォルダの `STATUS.md`。**推測で埋めず、まずこれを読め。**\n"
+            "- 地雷= (1)**`py -3.12` を使う**(bare pythonは3.14で動かない) "
+            "(2)**このフォルダはgitリポジトリではない**=書き換え前に必ず `.bak` を取る "
+            "(3)**この環境のcurlの `-L` はハングする** (4)駿河屋はrobots.txtで自動アクセス禁止 "
+            "(5)PowerShellの出力は `-Encoding utf8`。\n"
+            "- AFF_CONFIG は**2箇所**にある(各テンプレJS と `_tmp/gen_char_pages_v1.py` 冒頭)。片方だけ直すな。\n"
+            "- ★**アフィリID・ドメイン等の持ち物を公開repoへ書くな**(HQの内容も同じ)。local/ に置く。\n"
+            "■進め方\n"
+            "- ドメインとアフィリ申請は**Chamiの判断**だ。勝手に取得・申請・デプロイはしない(不可逆・課金・公開)。"
+            "**選択肢を1,2,3の形で出して、Chamiに決めてもらえ。**\n"
+            "- Chami待ちの間に進む手は在る= romaji辞書で116キャラのfallbackスラッグ(c01等)を人間可読URLへ、"
+            "発売予定カレンダーと予約バッジ、アフィリAPI画像への置換(引き継ぎ書 §7 P2)。**手が空くな。**"
         ),
     },
     # ==== 2026-07-27 配線した5部屋(研究室HQ発注)====
