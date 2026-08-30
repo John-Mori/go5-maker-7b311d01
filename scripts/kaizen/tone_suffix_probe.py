@@ -73,6 +73,39 @@ def foreign_suffixes(persona):
             other |= set(s)
     return sorted((other - mine) - NEUTRAL, key=len, reverse=True)  # 中立語尾を除外・長い語尾から
 
+# ------------------------------------------------------------------
+# ★2026-08-30 イージス研究室が追加(.bak_20260830_syncchk)= **判定には一切触らない表示だけ**。
+#   実測で起きた事故= 8/30 トトリの「語尾ドリフト1件」は本番ゲートの発火ではなく、
+#   上の NEED が**人事の正本(口調ルール.json)と食い違っていた**ためのFPだった
+#   (正本 ジェンティルドンナ= ですわ/ますわ/ましてよ/まして に対し NEED は2語・「ますわ」欠け。
+#    当該便は「そちらで確認できますわ。」で締めており、正本どおりなら鳴かない)。
+#   NEED はここにハードコードされている以上、人事が正本を育てるたび**黙ってズレていく**。
+#   → 走らせるたびに差分を1行出す。消す(自動同期する)のは当室の職掌ではないので**言うだけ**。
+#     ★fail-open= 正本が読めなければ黙って素通り(共通規律§3)。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
+TONE_RULES_PATH = os.path.join(os.path.dirname(_ROOT), "00_AI-HQ",
+                               "departments", "hr", "personas", "口調ルール.json")
+
+def need_vs_source_of_truth(path=TONE_RULES_PATH):
+    """NEED(この下書きのハードコード)と正本 signature_tails の差分。判定は変えない=表示用。
+    戻り= [(人格, 正本にあってNEEDに無い語, NEEDにあって正本に無い語)] / 正本が読めなければ None。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            personas = (json.load(f) or {}).get("personas") or {}
+    except Exception:
+        return None
+    out = []
+    for p, need in NEED.items():
+        tails = (personas.get(p) or {}).get("signature_tails")
+        if not tails:
+            continue                      # 正本に指紋なし= 比較の対象外(fail-open)
+        missing = [w for w in tails if w not in need]
+        extra = [w for w in need if w not in tails]
+        if missing or extra:
+            out.append((p, missing, extra))
+    return out
+
 BLOCK_RE = re.compile(r"\[([^\]]+)\]")
 
 def split_blocks(text):
@@ -153,6 +186,17 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+    # (0) 正本ズレの警告(表示だけ・判定は変わらない)
+    _diff = need_vs_source_of_truth()
+    if _diff is None:
+        print("※ 正本(口調ルール.json)が読めない= ズレ検査はスキップ(判定には影響なし)")
+    elif _diff:
+        print("=== (0) ★NEED が人事の正本(signature_tails)とズレている ===")
+        for p, missing, extra in _diff:
+            print(f"  [{p}] 正本にあってNEEDに無い= {missing} / NEEDにあって正本に無い= {extra}")
+        print("  ← このズレはFPの原因になる(実測: 8/30 ジェンティルドンナ「ますわ」欠けで1件誤検知)。"
+              "足し引きの正本は人事部門。\n")
+
     # (1) 実検体= 2026-08-28 改修α msg 1543026401349861386(Chamiが当室へ空本文転送した「ダメダメな返し」)
     SPECIMEN = (
         "[オタコン] 提案ページの地図取り終わり。土台を2枚入れたわよ(どちらもローカル・未デプロイ＝確認待ち)。"
