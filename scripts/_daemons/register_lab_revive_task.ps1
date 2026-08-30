@@ -13,7 +13,11 @@ if ($PSScriptRoot) { $here = $PSScriptRoot } else { $here = Split-Path -Parent $
 $vbs = Join-Path $here 'lab_revive_hidden.vbs'
 if (-not (Test-Path $vbs)) { Write-Error ("lab_revive_hidden.vbs not found: " + $vbs); exit 1 }
 
-$action  = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"')
+# every scheduled task goes through the gate so it can never pop a console window
+# (aegis-gl 2026-08-30 / see scripts\_daemons\hidden_task.ps1)
+$go5Here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+. (Join-Path $go5Here 'hidden_task.ps1')
+$action  = New-Go5HiddenAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"')
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 

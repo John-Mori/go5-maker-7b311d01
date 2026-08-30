@@ -12,7 +12,11 @@ $root = Split-Path -Parent (Split-Path -Parent $here)
 $ps1  = Join-Path $root 'scripts\report\report_pulse.ps1'
 if (-not (Test-Path $ps1)) { Write-Error ("report_pulse.ps1 not found: " + $ps1); exit 1 }
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ps1 + '"')
+# every scheduled task goes through the gate so it can never pop a console window
+# (aegis-gl 2026-08-30 / see scripts\_daemons\hidden_task.ps1)
+$go5Here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+. (Join-Path $go5Here 'hidden_task.ps1')
+$action = New-Go5HiddenAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ps1 + '"')
 # Attach a 4h repetition to a daily-at-00:00 trigger (the reliable PS 5.1 way to get "every N hours").
 $trigger = New-ScheduledTaskTrigger -Daily -At '00:00'
 $rep = (New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 4) -RepetitionDuration (New-TimeSpan -Hours 24)).Repetition

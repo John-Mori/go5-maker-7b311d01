@@ -18,7 +18,11 @@ $Name   = 'go5_quota_alarm'
 $Script = Join-Path $Root 'scripts\llm\quota_alarm.py'
 if (-not (Test-Path $Script)) { throw "missing: $Script" }
 
-$action = New-ScheduledTaskAction -Execute $Py -Argument ('"{0}"' -f $Script) -WorkingDirectory $Root
+# every scheduled task goes through the gate so it can never pop a console window
+# (aegis-gl 2026-08-30 / see scripts\_daemons\hidden_task.ps1)
+$go5Here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+. (Join-Path $go5Here 'hidden_task.ps1')
+$action = New-Go5HiddenAction -Execute $Py -Argument ('"{0}"' -f $Script) -WorkingDirectory $Root
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddHours(1) `
            -RepetitionInterval (New-TimeSpan -Hours 3)
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `

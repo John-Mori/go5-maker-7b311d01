@@ -14,7 +14,11 @@ $root = Split-Path -Parent (Split-Path -Parent $here)
 $ps1  = Join-Path $root 'scripts\report\competitor_daily.ps1'
 if (-not (Test-Path $ps1)) { Write-Error ("competitor_daily.ps1 not found: " + $ps1); exit 1 }
 
-$action  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ps1 + '"')
+# every scheduled task goes through the gate so it can never pop a console window
+# (aegis-gl 2026-08-30 / see scripts\_daemons\hidden_task.ps1)
+$go5Here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+. (Join-Path $go5Here 'hidden_task.ps1')
+$action  = New-Go5HiddenAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ps1 + '"')
 $trigger = New-ScheduledTaskTrigger -Daily -At '08:00'
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
 

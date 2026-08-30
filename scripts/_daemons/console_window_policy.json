@@ -1,0 +1,24 @@
+{
+  "_why": "黒窓(コンソール窓)を出すexeの一覧と、意図的な例外。★判定をPowerShell側とPython側の2箇所に書くと必ず片方が古くなるので、正本はこのJSON1つ。読む側= scripts/_daemons/hidden_task.ps1(登録の入口)と scripts/_daemons/console_task_watch.py(無人の見張り)。",
+  "_origin": "2026-08-30 Chami「タイムスケジューラで定期的に出る黒い画面はここのプロジェクトの内容? 表に表示しないで欲しい」(msg 1543598413340475462)。研究室HQが live 19本を run_hidden.vbs 経由へ変換し、再発防止をイージス研究室へ回した。",
+
+  "console_exes": [
+    "python.exe", "python", "py.exe", "py",
+    "powershell.exe", "powershell", "pwsh.exe", "pwsh",
+    "cmd.exe", "cmd",
+    "cscript.exe", "cscript",
+    "node.exe", "node"
+  ],
+  "_console_exes_note": "★pythonw.exe と wscript.exe はコンソールを持たない=安全側。cscript.exe は wscript と違いコンソールを持つので危険側に置く。",
+
+  "allow_tasks": {
+    "go5_lora_step3": "LoRA学習の一発物。Chamiが進捗を見る窓の可能性があるので、研究室HQが意図的に変換しなかった(2026-08-30)。★隠すなら先にChamiへ聞く。"
+  },
+
+  "allow_register_scripts": {
+    "scripts/_daemons/hidden_task.ps1": "入口そのもの。New-ScheduledTaskAction を呼ぶのはここが正しい。",
+    "scripts/maintenance/reregister_tasks.ps1": "既存タスクのActionを読んでパスだけ書き換える作り=Executeを新規に決めていない(研究室HQが2026-08-30に確認済)。"
+  },
+
+  "safe_vbs_note": "wscript.exe から起動する .vbs は WshShell.Run の第2引数が 0(SW_HIDE)でなければ窓が出る。見張りはそれも読む。"
+}

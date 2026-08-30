@@ -25,7 +25,11 @@ if (-not (Test-Path $py)) { Write-Error ("run_frontend_design_review.py not foun
 $python = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $python) { Write-Error "python.exe not found on PATH; cannot register a task that would silently fail."; exit 1 }
 
-$action = New-ScheduledTaskAction -Execute $python -Argument ('"' + $py + '"') -WorkingDirectory $root
+# every scheduled task goes through the gate so it can never pop a console window
+# (aegis-gl 2026-08-30 / see scripts\_daemons\hidden_task.ps1)
+$go5Here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+. (Join-Path $go5Here 'hidden_task.ps1')
+$action = New-Go5HiddenAction -Execute $python -Argument ('"' + $py + '"') -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -Daily -At '08:00'
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
 

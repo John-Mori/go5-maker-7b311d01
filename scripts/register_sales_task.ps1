@@ -14,7 +14,11 @@ if (-not (Test-Path $vbs)) { Write-Error ("sales_poll_hidden.vbs not found: " + 
 
 # wscript.exe（コンソール無しのスクリプトホスト）経由で VBS を実行 → VBS が bat を非表示ウィンドウで起動。
 # これで 15 分ごとの実行時に黒いターミナル窓が一切表示されない。
-$action  = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"')
+# every scheduled task goes through the gate so it can never pop a console window
+# (aegis-gl 2026-08-30 / see scripts\_daemons\hidden_task.ps1)
+$go5Here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+. (Join-Path $go5Here '_daemons\hidden_task.ps1')
+$action  = New-Go5HiddenAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"')
 # Repeat every 15 minutes indefinitely, starting now.
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration (New-TimeSpan -Days 3650)
 # StartWhenAvailable: run ASAP after a missed start (sleep/off). WakeToRun: wake if needed. IgnoreNew: no overlap.
