@@ -41,6 +41,13 @@ import tone_gate as tg                       # noqa: E402  ★判定はこれ1�
 RECENT = os.path.join(ROOT, "local", "llm", "recent_*.jsonl")
 BLOCK = re.compile(r"^\[([^\]\n]{1,24})\]", re.M)
 
+
+def _now_jst():
+    """測定日時(JST)。★絶対数を文書へ写す時は必ずこれと母数を添える(共通規律§1・時刻はJST)。"""
+    import datetime
+    tz = datetime.timezone(datetime.timedelta(hours=9))
+    return datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
+
 # 早坂芽衣の候補= characterfile `hr/characters/mei.md` §声の型の○例から起こした。
 #   「〜と思うんだ〜！/〜なるんだよ〜！/〜じゃない？/好き〜！/なりそ〜！/💕/！！」
 # ★`_sig_tailcut` が末尾の 〜 ！ ね よ な の を剥いでから照合するので、
@@ -164,6 +171,16 @@ def main():
         else:
             print("  → 固有性 %+d本(A %d → B %d)。マイナスが大きいほど網が緩む。" % (d, f1o, f2o))
         print("  ※ 本人が両方0なら偽陽性は増えていない。判断材料はこの2行だけで足りる。")
+        # ★2026-08-30(デブライネ)= 同じ数字を2度書き直す事故が1日で2回起きた。
+        #   原因は「絶対数を正本(_note_sig)へ写した」こと= recent_*.jsonl は常時増えるので
+        #   後日ここを再測すると必ず違う絶対数が出て、次に読む奴が「誤りだ」と直しに来る。
+        #   → 残すべき結論は **差** と **本人0** で、これはコーパスが増えても変わらない。
+        #   絶対数を残すなら母数と測定日時を必ず添えろ(下の行をそのまま貼れば足りる)。
+        print("  ★★絶対数を文書へ写すな= コーパスは常時増える(後日の再測は必ず違う数になる)。")
+        print("     残す結論は『差 %s』と『本人 %d/%d』。絶対数を残すならこの1行ごと貼れ:"
+              % (("ゼロ" if d == 0 else "%+d本" % d), f2s, j2s))
+        print("     [測定 %s JST / 母数 本人%d本・他人格%d本 / signature_fit.py --compare]"
+              % (_now_jst(), j2s, j2o))
 
     print()
     print("★この道具は測るだけで、何も登録しない。"
