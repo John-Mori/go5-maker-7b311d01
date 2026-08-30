@@ -11,8 +11,14 @@
   ],
   "_console_exes_note": "★pythonw.exe と wscript.exe はコンソールを持たない=安全側。cscript.exe は wscript と違いコンソールを持つので危険側に置く。",
 
+  "watch_prefixes": ["go5_", "chami_style_"],
+  "_watch_prefixes_note": "★見張りが走査するタスク名の接頭辞。この計器は『go5_の見張り』ではなく『Chamiの画面に黒窓を出さない見張り』だ(研究室HQ DISPATCH-aegis-gl-1788095116580・2026-08-30)。接頭辞をコードに埋めると、名前が go5_ でないというだけで同じ穴が丸ごと素通りする(実測= chami_style_step1/step1b/step2 の3本が範囲外でconsole持ちだった)。新しい系統のタスクを作ったらここへ1行足す。★足す前に、その系統の違反を0にするか allow_tasks へ理由つきで置くこと=立ち続ける違反を入れると毎回鳴る網になり、無視される網になる。",
+
   "allow_tasks": {
-    "go5_lora_step3": "LoRA学習の一発物。Chamiが進捗を見る窓の可能性があるので、研究室HQが意図的に変換しなかった(2026-08-30)。★隠すなら先にChamiへ聞く。"
+    "go5_lora_step3": "LoRA学習の一発物。Chamiが進捗を見る窓の可能性があるので、研究室HQが意図的に変換しなかった(2026-08-30)。★隠すなら先にChamiへ聞く。",
+    "chami_style_step1": "画風LoRA(chami_style_v1)の学習ステップ。console持ち(LoRAEasyStudioのpython.exe直)だが、学習の進捗窓はChamiが見たくて出している可能性がある=勝手に隠さない(2026-08-30・イージス研究室)。★Chamiが『これも要らない』と言ったら go5_lora_step3 と合わせて4本まとめて run_hidden.vbs 経由へ変換し、この例外を外す。",
+    "chami_style_step1b": "同上(chami_style_step1 と同じ理由・2026-08-30)。",
+    "chami_style_step2": "同上(chami_style_step1 と同じ理由・2026-08-30)。"
   },
 
   "allow_register_scripts": {

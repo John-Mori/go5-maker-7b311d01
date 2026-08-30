@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-r"""go5_* のタスクが黒窓(コンソール窓)を出す形に戻っていないかを**無人で**見張る。
+r"""定刻タスクが黒窓(コンソール窓)を出す形に戻っていないかを**無人で**見張る。
 
   イージス研究室 / 2026-08-30 / 依頼= 研究室HQ DISPATCH-aegis-gl-1788093688716
+  走査範囲の拡張(接頭辞→ポリシー)= 研究室HQ DISPATCH-aegis-gl-1788095116580
 
 なぜ要るか:
   Chami「タイムスケジューラで定期的に出る黒い画面はここのプロジェクトの内容? 表に表示しないで
@@ -13,8 +14,13 @@ r"""go5_* のタスクが黒窓(コンソール窓)を出す形に戻ってい�
   ★**それはタスクを直しただけで、穴は塞いでいない。**HQ自身がそう書いて再発防止を回してきた=
   「今回は**人が気づいて人が直した**。同じ穴がまた開く」。この見張りが無人側を持つ。
 
+★**「go5_ の見張り」ではない。「Chamiの画面に黒窓を出さない見張り」だ。**
+  走査するタスク名の接頭辞は `console_window_policy.json` の `watch_prefixes` に置く=
+  コードに `go5_` を埋めると、名前がそれで始まらないというだけで同じ穴が丸ごと素通りする
+  (実測= `chami_style_step1/step1b/step2` の3本が範囲外で console持ちだった)。
+
 穴は3つある(この見張りは3つとも数える):
-  live … 登録済みの go5_* タスクの Execute がコンソールを持つ exe。**これが実物の計器**。
+  live … 登録済みタスクの Execute がコンソールを持つ exe。**これが実物の計器**。
   vbs  … wscript.exe から起動する .vbs が、子を SW_HIDE(Run の第2引数 0)で作っていない。
           「hidden という名前なのに隠していない」は名前では分からない。
   src  … 登録スクリプト(.ps1)が `New-Go5HiddenAction` を通さず `New-ScheduledTaskAction` を
@@ -114,15 +120,36 @@ def is_console_exe(execute, policy):
     return os.path.basename(s).lower() in {e.lower() for e in policy["console_exes"]}
 
 
-def list_tasks(prefix="go5_"):
+def watch_prefixes(policy):
+    """走査するタスク名の接頭辞。★正本は policy 側=コードに埋めない。
+
+    空・非リストなら go5_ だけに倒す(fail-safe= 少なくとも今まで見ていた範囲は見る)。
+    """
+    v = (policy or {}).get("watch_prefixes")
+    if isinstance(v, str):
+        v = [v]
+    out = [str(p).strip() for p in (v or []) if str(p).strip()]
+    return out or ["go5_"]
+
+
+def list_tasks(prefixes=("go5_",)):
     """登録済みタスクの (名前, Execute, Arguments) を返す。
 
     ★タスクXMLの直読みは使えない(System32\\Tasks は listdir がアクセス拒否)。
       PowerShell の Get-ScheduledTask が唯一の列挙路。**CREATE_NO_WINDOW を必ず付ける。**
+    ★接頭辞は複数取る。1つも当たらない接頭辞があっても他は返す(-ErrorAction SilentlyContinue)。
+      同じタスクが2つの接頭辞に当たっても二重に数えない(同名・同Executeの行は畳む)。
     """
-    ps = ("Get-ScheduledTask -TaskName '%s*' | ForEach-Object { $t=$_; "
-          "foreach($a in $t.Actions){ [pscustomobject]@{ name=$t.TaskName; "
-          "exe=$a.Execute; arg=$a.Arguments } } } | ConvertTo-Json -Compress -Depth 3" % prefix)
+    if isinstance(prefixes, str):
+        prefixes = [prefixes]
+    pats = ["'%s*'" % str(p).replace("'", "''") for p in prefixes if str(p).strip()]
+    if not pats:
+        raise RuntimeError("watch_prefixes が空だ(policy を見ろ)")
+    ps = ("$rows=@(); foreach($p in @(%s)){ "
+          "foreach($t in @(Get-ScheduledTask -TaskName $p -ErrorAction SilentlyContinue)){ "
+          "foreach($a in $t.Actions){ $rows += [pscustomobject]@{ name=$t.TaskName; "
+          "exe=$a.Execute; arg=$a.Arguments } } } }; "
+          "$rows | ConvertTo-Json -Compress -Depth 3" % ",".join(pats))
     r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps],
                        capture_output=True, timeout=120,
                        creationflags=CREATE_NO_WINDOW)
@@ -133,7 +160,14 @@ def list_tasks(prefix="go5_"):
     data = json.loads(out)
     if isinstance(data, dict):
         data = [data]
-    return [(d.get("name") or "", d.get("exe") or "", d.get("arg") or "") for d in data]
+    rows, seen = [], set()
+    for d in data:
+        row = (d.get("name") or "", d.get("exe") or "", d.get("arg") or "")
+        if row in seen:
+            continue                        # ★接頭辞が重なった時の二重計上を畳む
+        seen.add(row)
+        rows.append(row)
+    return rows
 
 
 _VBS_ARG = re.compile(r'"?([^"]+\.vbs)"?', re.I)
@@ -168,7 +202,7 @@ def vbs_shows_window(arg, root=None):
 
 def scan_tasks(policy, tasks=None):
     """live+vbs の違反。★tasks を差し替えれば判定と分岐は本物のまま通せる(must-fail 用)。"""
-    rows = list_tasks() if tasks is None else list(tasks)
+    rows = list_tasks(watch_prefixes(policy)) if tasks is None else list(tasks)
     allow = policy.get("allow_tasks") or {}
     bad = []
     for name, exe, arg in rows:
@@ -236,12 +270,13 @@ def write_state(d):
     os.replace(tmp, STATE)
 
 
-def build_body(bad, total):
+def build_body(bad, total, prefixes=None):
     live = [b for b in bad if b[0] == "live"]
     vbs = [b for b in bad if b[0] == "vbs"]
     src = [b for b in bad if b[0] == "src"]
+    scope = " / ".join("%s*" % p for p in (prefixes or ["go5_"]))
     L = ["【イージス研究室(無人の見張り) → 研究室HQ】黒窓が出る形のタスクが %d件ある" % len(bad), ""]
-    L.append("go5_* を %d本走査した(意図的な例外は除く)。" % total)
+    L.append("%s を %d本走査した(意図的な例外は除く)。" % (scope, total))
     if live:
         L += ["", "■ live= 登録済みタスクの Execute がコンソールを持つ(**窓が出る**)"]
         for _, name, what, why in live[:20]:
@@ -263,6 +298,7 @@ def build_body(bad, total):
         "    $action = New-Go5HiddenAction -Execute $python -Argument ... -WorkingDirectory $root",
         "★意図的に窓を出したいタスクは `scripts/_daemons/console_window_policy.json` の",
         "  `allow_tasks` へ**理由つきで**足す(理由の無い例外は次の世代が消す)。",
+        "★走査するタスク名の接頭辞も同じJSONの `watch_prefixes` が正本(コードに埋めない)。",
         "",
         "手元で今の状態を見る= `python scripts\\_daemons\\console_task_watch.py --dry-run`",
     ]
@@ -305,13 +341,17 @@ def main(argv=None):
         print("走査に失敗(fail-open): %s: %s" % (type(e).__name__, e))
         return 0                                    # ★fail-open
 
+    pfx = watch_prefixes(policy)
+    scope = " / ".join("%s*" % p for p in pfx)
+
     if ns.json:
-        print(json.dumps({"total": total, "bad": bad}, ensure_ascii=False, indent=2))
+        print(json.dumps({"total": total, "prefixes": pfx, "bad": bad},
+                         ensure_ascii=False, indent=2))
         return 0
 
     if not bad:
-        write_state({"bad": "", "checked": _now(), "total": total})
-        print("違反なし(go5_* %d本)" % total)
+        write_state({"bad": "", "checked": _now(), "total": total, "prefixes": pfx})
+        print("違反なし(%s %d本)" % (scope, total))
         return 0
 
     s = sig(bad)
@@ -321,7 +361,7 @@ def main(argv=None):
         print("違反 %d件(前回と同じ顔ぶれ=知らせ直さない)" % len(bad))
         return 0
 
-    res = notify(build_body(bad, total), ns.dry_run)
+    res = notify(build_body(bad, total, pfx), ns.dry_run)
     _log({"event": "alert", "件数": len(bad), "結果": res, "sig": s[:300]})
     if not ns.dry_run:
         write_state({"bad": s, "checked": _now(), "total": total, "last": res})

@@ -61,6 +61,37 @@ check("素朴案は powershell/cmd/py を取りこぼす(=この検査には意�
       set(miss) == {"powershell.exe", "cmd.exe", "py.exe"})
 check("素朴案でも pythonw は安全と分かる(だから見逃しに気づけない)", not naive("pythonw.exe"))
 
+# --- 走査範囲(接頭辞)の正本 --------------------------------------------------
+print("[範囲] どのタスクを見るかは policy が決める(コードに埋めない)")
+check("policy から接頭辞を読む",
+      w.watch_prefixes({"watch_prefixes": ["a_", "b_"]}) == ["a_", "b_"])
+check("文字列1本でも受ける", w.watch_prefixes({"watch_prefixes": "a_"}) == ["a_"])
+check("未設定なら go5_ に倒す(今まで見ていた範囲は必ず見る)",
+      w.watch_prefixes({}) == ["go5_"])
+check("空リストでも go5_ に倒す", w.watch_prefixes({"watch_prefixes": []}) == ["go5_"])
+check("★実物の policy は go5_ と chami_style_ の両方を見る",
+      set(w.watch_prefixes(POLICY)) >= {"go5_", "chami_style_"})
+
+# --- ★must-fail(C-053): 走査対象を go5_ 固定にした「動く別実装」が取りこぼす -------
+print("[must-fail] 素朴な別実装『走査対象は go5_ で始まるタスクだけ』")
+
+MIXED = [
+    ("go5_bad_ps", "powershell.exe", "-File x.ps1"),
+    ("chami_style_step9", r"D:\LoRAEasyStudio\...\python.exe", r"run_step9.py"),
+]
+
+
+def naive_scan(policy, tasks):
+    """2026-08-30 の HEAD がやっていた形= 接頭辞をコードに固定した走査。動きはする。"""
+    return w.scan_tasks(policy, tasks=[t for t in tasks if t[0].startswith("go5_")])[0]
+
+
+real_bad, _ = w.scan_tasks(POLICY, tasks=MIXED)
+check("★policy 版は chami_style_ の違反も拾う",
+      {b[1] for b in real_bad} == {"go5_bad_ps", "chami_style_step9"})
+check("★go5_固定の素朴案は chami_style_ を丸ごと素通りさせる(=この改修の意味)",
+      {b[1] for b in naive_scan(POLICY, MIXED)} == {"go5_bad_ps"})
+
 # --- タスク走査 -------------------------------------------------------------
 print("[走査] 登録済みタスク(材料だけ差し替え・判定と分岐は本物)")
 FAKE = [
@@ -127,16 +158,28 @@ print("[実物] いまの repo を走査する")
 live_src = w.scan_register_scripts(POLICY)
 check("repo に入口を通さない登録スクリプトが無い(%d件)" % len(live_src), not live_src)
 
+print("[実物] 接頭辞が重なっても二重に数えない(★Get-ScheduledTask を本当に叩く)")
+once = w.list_tasks(["go5_"])
+twice = w.list_tasks(["go5_", "go5_"])
+check("同じ接頭辞を2つ渡しても本数は増えない(%d本)" % len(once), len(once) == len(twice))
+check("走査が実際に何か返している", len(once) > 0)
+
+print("[実物] 立ち続ける違反を入れていない(★常に鳴る網は無視される)")
+now_bad, now_total = w.scan_tasks(POLICY)
+check("いまの走査範囲で live/vbs 違反が0(%d本走査)" % now_total, not now_bad)
+
 # --- 知らせ方 ---------------------------------------------------------------
 print("[知らせ方] 同じ顔ぶれを二度知らせない")
 two = bad + [("live", "go5_another", "cmd.exe", "…")]
 check("同じ違反なら順番が違っても署名は同じ", w.sig(two) == w.sig(list(reversed(two))))
 check("顔ぶれが1件増えれば署名も変わる", w.sig(two) != w.sig(bad))
 check("違反が消えれば署名は空", w.sig([]) == "")
-body = w.build_body(bad + src, 31)
+body = w.build_body(bad + src, 31, w.watch_prefixes(POLICY))
 check("本文に違反したタスク名が載る", "go5_bad_ps" in body)
 check("本文に直し方(入口の呼び方)が載る", "New-Go5HiddenAction" in body)
 check("本文に例外の足し方が載る", "allow_tasks" in body)
+check("★本文に走査範囲が載る(どこまで見た警報かが分かる)",
+      "go5_* / chami_style_*" in body and "watch_prefixes" in body)
 
 # --- policy が2箇所に分かれていないこと ----------------------------------------
 print("[正本] 判定のリストが1つであること")
