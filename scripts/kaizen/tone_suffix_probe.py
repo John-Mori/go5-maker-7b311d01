@@ -23,7 +23,7 @@ tone_suffix_probe.py  — 改善提案部門(kaizen)の「語尾ドリフト検�
   - 語尾は句末(。、!?改行/文末)にアンカーして拾う(語中の偶然一致を避ける)。
   - fail-open(指紋未登録・判定不能なら喋る側へ倒す)。
 """
-import re, json, glob, os
+import re, json, glob, os, sys
 
 # 人格別の【必須語尾】だけを登録(正本は characterfile / 人事)。禁止語尾は書かない=自動導出する。
 NEED = {
@@ -145,6 +145,14 @@ def scan_corpus(pattern="local/llm/recent_*.jsonl"):
     return stat
 
 if __name__ == "__main__":
+    # ★2026-08-30 イージス研究室が1行追加(.bak_20260830_cp932)= 標準出力がcp932だと
+    #   サンプル行の「——」(U+2014)で UnicodeEncodeError を出して落ちる(実測)。
+    #   件数は落ちる前に出るが、**証拠のサンプル行が出ないまま終わる**=材料として渡せない。
+    #   判定には一切触っていない(出口だけ)。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     # (1) 実検体= 2026-08-28 改修α msg 1543026401349861386(Chamiが当室へ空本文転送した「ダメダメな返し」)
     SPECIMEN = (
         "[オタコン] 提案ページの地図取り終わり。土台を2枚入れたわよ(どちらもローカル・未デプロイ＝確認待ち)。"
