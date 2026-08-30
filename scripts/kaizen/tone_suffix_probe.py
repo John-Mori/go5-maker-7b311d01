@@ -1,47 +1,72 @@
 # -*- coding: utf-8 -*-
 """
-tone_suffix_probe.py  — 改善提案部門(kaizen)の「語尾ドリフト検知」実証プローブ＋実測器(型の下書き)。
+tone_suffix_probe.py  — 改善提案部門(kaizen)の「語尾ドリフト検知」実測器。
 
 狙い= Chami 2026-08-29「こんなダメダメな返しもPython/トークン使わずに防げないか」への回答実証。
-現行 tone_gate.py は「一人称の食い違い」だけを見る(オレ/俺/僕/…)。
-だが相方混線の多くは【一人称が本文に一つも出ず、語尾だけが相方の声】で漏れる。
-→ 純Python・正規表現・トークン0で「検知」できる(書き直しはしない=語尾は機械置換で文法が壊れるため。
-   関西弁と同じく"検知して突き返す"側)。
+相方混線(あるブロックが [別人格] の声=語尾で漏れる)を、純Python・正規表現・トークン0で「検知」する。
+書き直しはしない=語尾は機械置換で文法が壊れるため("検知して突き返す"側)。
 
-★これは基盤(tone_gate)へ渡す前の【型の下書き】。本番配線=プラットフォームSE/イージス研究室、
-  語尾指紋データの正本=人事(characterfile)。当室は「型を書き上げて渡す」まで。
+■2026-08-30 設計変更(第8世代トトリ・自室の道具C-019/C-027):
+  旧版は各人格の【必須語尾(need)】をハードコードし、禁止語尾を【他人格needの総和 − 自分need − 中立】で
+  自動導出していた。この総和方式は 8/29 に基盤・人事の一致で棄却済(母数4人で過剰集合・アメス19語が
+  全員に撒かれFPを生む)。かつハードコードNEEDは人事が正本を育てるたび黙ってズレ、8/30 ドンナ「ますわ」欠けで
+  実際にFPを1件出した。
+  → **正本(人事の 口調ルール.json)を都度直読み**して、本番ゲート(tone_gate/signature_fit)と同じ土俵に立つ。
 
-■設計の要(この版で改善):
-  指紋は各人格の【必須語尾(need)＝その人格の肯定的な語尾アイデンティティ】だけを登録する。
-  「禁止語尾」は手で列挙しない=【他人格の必須語尾の総和 − 自分の必須語尾】として自動導出する(foreign)。
-  → 人事は「この子は文末をどう締めるか」だけ書けばよく、相方の数だけ禁止リストを保守しなくて済む。
+■判定の二層(数字を汚さないための分離):
+  (A) 確定ドリフト【件数=Z1に流す】: ブロックが自分の forbidden_tail(正本)を句末に持つ。
+      = 本番ゲートの forbidden 層と同一規則 → FPゼロ・人事の登録に自動追従・閾値もハードコードも無い。
+      forbidden_tail 未登録の人格は 0(=ゲートの現実と一致。無理に数えない)。
+  (B) 登録候補【件数に入れない・要人事確認・誤検知含む】: 手選びの「色つき語尾」(下 COLORED)を句末に持ち、
+      かつ自分の signature_tails(正本)に無い。= まだ forbidden 未登録だが相方語尾が漏れている疑い
+      → 人事へ「この人格に forbidden_tail を測って足す」材料として出す。オタコンを掘り当てた探索力はここに残す。
+      隔離しているので Z1 は汚れない。
 
-■ドリフト判定: そのブロックに foreign語尾 が1つ以上 かつ 自分の need語尾 が0 のとき = 相方の声に染まった疑い。
-
-■本番実装での要注意(この下書きでは簡略):
+■本番実装(基盤側)での要注意(この実測器では簡略):
   - 「」内の引用は tone_gate と同様に保護し触らない(コピー案 "俺だけじゃない" 等を誤検知しない)。
   - 語尾は句末(。、!?改行/文末)にアンカーして拾う(語中の偶然一致を避ける)。
-  - fail-open(指紋未登録・判定不能なら喋る側へ倒す)。
+  - fail-open(正本が読めない・指紋未登録なら喋る側へ倒す)。
 """
 import re, json, glob, os, sys
 
-# 人格別の【必須語尾】だけを登録(正本は characterfile / 人事)。禁止語尾は書かない=自動導出する。
-NEED = {
-    "オタコン":          ["だよ", "だね", "なんだ"],
-    "トトリ":            ["です", "ます", "ましょう", "ですね"],
-    "花海咲季":          ["だわ", "わよ", "のよ"],
-    "ジェンティルドンナ": ["ですわ", "ましてよ"],
-    "アメス":            ["わよ", "のよ", "なによ"],
-    "田中琴葉":          ["です", "だね", "だよ"],
-    "ヴィルシーナ":      ["わ", "のよ", "かしら"],
-    "十王星南":          ["かしら", "のよ", "わ", "ね"],
-}
-# 別名 → 正名(コーパスの名乗りゆれを吸収。正本化は人事)
+# ------------------------------------------------------------------
+# 正本(人事)= signature_tails / forbidden_tail の唯一の出所。ここは READ only。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
+TONE_RULES_PATH = os.path.join(os.path.dirname(_ROOT), "00_AI-HQ",
+                               "departments", "hr", "personas", "口調ルール.json")
+
+def load_source_of_truth(path=TONE_RULES_PATH):
+    """正本から SIG(signature_tails)/FORB(forbidden_tail)/全人格名 を読む。
+    戻り= (ok, PERSONAS:set, SIG:{name:set}, FORB:{name:set})。読めなければ ok=False(fail-open)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            personas = (json.load(f) or {}).get("personas") or {}
+    except Exception:
+        return (False, set(), {}, {})
+    SIG, FORB = {}, {}
+    for name, o in personas.items():
+        SIG[name] = set(o.get("signature_tails") or [])
+        FORB[name] = set(o.get("forbidden_tail") or [])
+    return (True, set(personas.keys()), SIG, FORB)
+
+ST_OK, PERSONAS, SIG, FORB = load_source_of_truth()
+
+# 別名 → 正名(コーパスの名乗りゆれを吸収。正本化は人事)。
 ALIAS = {"咲季": "花海咲季", "ドンナ": "ジェンティルドンナ", "星南": "十王星南"}
 
-# 中立語尾= 誰の声でもない汎用の締め。異物から必ず除外する(丁寧の ます/です や1字助詞 わ/ね/よ は
-# 全人格に出得るので"相方混線"の証拠にならない=誤検知源。★崩れの証拠は かしら/わよ/のよ 等の"2字以上の色つき語尾"に限る)。
-NEUTRAL = {"です", "ます", "ました", "ません", "ですね", "ますね", "わ", "ね", "よ", "な", "の"}
+# ★色つき語尾(候補層=(B)専用の手選び定数)。総和の自動導出は棄却済のため、ここは"小さく手で選ぶ"。
+#   根拠= 正本実測(2026-08-30)で複数の気の強い女性人格の signature に現れ、かつ普通の会話に紛れにくい語。
+#   ● 4大マーカー(最も安全)= のよ/かしら/わよ/だわ
+#   ● 2字以上で明確= わよね/のよね/なによ/ですわ/ますわ/ましてよ、やや柔いが色つき= のね/わね
+#   ✕ 除外(FP源・デブライネ警告2026-08-30)= じゃない(「〜じゃない?」)/なさい系(「おやすみなさい」)
+#   ✕ 除外(中立・全人格に出る)= わ/ね/よ/な/の/です/ます 等 → 候補にしない
+COLORED = {
+    "のよ", "かしら", "わよ", "だわ",
+    "わよね", "のよね", "なによ",
+    "ですわ", "ますわ", "ましてよ",
+    "のね", "わね",
+}
 
 # 句末アンカー= 語尾は文の切れ目の直前だけ拾う(語中の偶然一致「じゃなくて」内の わ 等を除外)。
 CLAUSE_END = "。、．，!?！？」』）)…\n"
@@ -58,53 +83,11 @@ def _at_clause_end(body, w):
             return True
         start = i + 1
 
-# tone_gate と同じ「際立つ一人称」= これが在れば現ゲートが拾える。私/わたし/自分/うち は中立で対象外。
+# tone_gate と同じ「際立つ一人称」= これが在れば現ゲートの一人称層が拾える。私/わたし/自分/うち は中立で対象外。
 DISTINCTIVE_FP = ("オレ", "俺", "僕", "ぼく", "あたし", "あたい", "わし", "わっち", "拙者", "小生", "あちき")
 
 def canon(name):
     return ALIAS.get(name, name)
-
-def foreign_suffixes(persona):
-    """他人格の必須語尾の総和 − 自分の必須語尾。= この人格にとって"異物"の語尾。"""
-    mine = set(NEED.get(persona, []))
-    other = set()
-    for p, s in NEED.items():
-        if p != persona:
-            other |= set(s)
-    return sorted((other - mine) - NEUTRAL, key=len, reverse=True)  # 中立語尾を除外・長い語尾から
-
-# ------------------------------------------------------------------
-# ★2026-08-30 イージス研究室が追加(.bak_20260830_syncchk)= **判定には一切触らない表示だけ**。
-#   実測で起きた事故= 8/30 トトリの「語尾ドリフト1件」は本番ゲートの発火ではなく、
-#   上の NEED が**人事の正本(口調ルール.json)と食い違っていた**ためのFPだった
-#   (正本 ジェンティルドンナ= ですわ/ますわ/ましてよ/まして に対し NEED は2語・「ますわ」欠け。
-#    当該便は「そちらで確認できますわ。」で締めており、正本どおりなら鳴かない)。
-#   NEED はここにハードコードされている以上、人事が正本を育てるたび**黙ってズレていく**。
-#   → 走らせるたびに差分を1行出す。消す(自動同期する)のは当室の職掌ではないので**言うだけ**。
-#     ★fail-open= 正本が読めなければ黙って素通り(共通規律§3)。
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
-TONE_RULES_PATH = os.path.join(os.path.dirname(_ROOT), "00_AI-HQ",
-                               "departments", "hr", "personas", "口調ルール.json")
-
-def need_vs_source_of_truth(path=TONE_RULES_PATH):
-    """NEED(この下書きのハードコード)と正本 signature_tails の差分。判定は変えない=表示用。
-    戻り= [(人格, 正本にあってNEEDに無い語, NEEDにあって正本に無い語)] / 正本が読めなければ None。"""
-    try:
-        with open(path, encoding="utf-8") as f:
-            personas = (json.load(f) or {}).get("personas") or {}
-    except Exception:
-        return None
-    out = []
-    for p, need in NEED.items():
-        tails = (personas.get(p) or {}).get("signature_tails")
-        if not tails:
-            continue                      # 正本に指紋なし= 比較の対象外(fail-open)
-        missing = [w for w in tails if w not in need]
-        extra = [w for w in need if w not in tails]
-        if missing or extra:
-            out.append((p, missing, extra))
-    return out
 
 BLOCK_RE = re.compile(r"\[([^\]]+)\]")
 
@@ -122,27 +105,36 @@ def split_blocks(text):
 
 def probe(persona, body):
     p = canon(persona)
-    if p not in NEED:
-        return {"persona": persona, "known": False, "drift": None}
-    foreign = [w for w in foreign_suffixes(p) if _at_clause_end(body, w)]
-    has_need = any(_at_clause_end(body, w) for w in NEED[p])
-    dist_fp = [m for m in DISTINCTIVE_FP if m in body]  # 現tone_gateが拾える印
-    drift = bool(foreign) and not has_need
+    if not ST_OK or p not in PERSONAS:
+        return {"persona": persona, "known": False}
+    sig = SIG.get(p, set())
+    forb = FORB.get(p, set())
+    # (A) 確定ドリフト= 自分の forbidden_tail(正本)が句末に出た(=本番ゲートと同一規則)。
+    forbidden_hits = [w for w in forb if _at_clause_end(body, w)]
+    confirmed = bool(forbidden_hits)
+    # (B) 登録候補= 色つき語尾で、自分の signature にも forbidden にも無い(=未登録の相方語尾疑い)。
+    candidate_hits = [w for w in COLORED
+                      if w not in sig and w not in forb and _at_clause_end(body, w)]
+    candidate = bool(candidate_hits) and not confirmed
+    has_need = any(_at_clause_end(body, w) for w in sig)
+    dist_fp = [m for m in DISTINCTIVE_FP if m in body]  # 現tone_gateの一人称層が拾える印
     return {
         "persona": p, "known": True,
-        "foreign_hits": foreign, "has_need": has_need,
-        "distinctive_fp": dist_fp,          # ← 空なら【現tone_gateは素通り】
-        "invisible_to_gate": drift and not dist_fp,
-        "drift": drift,
+        "confirmed_drift": confirmed, "forbidden_hits": forbidden_hits,
+        "candidate": candidate, "candidate_hits": candidate_hits,
+        "has_need": has_need, "distinctive_fp": dist_fp,
+        # 候補で、一人称も無い= 現ゲートの一人称層も forbidden層も素通り=人事登録で初めて拾える増分。
+        "invisible_to_gate": candidate and not dist_fp,
     }
 
 def scan(text):
     return [probe(n, b) for n, b in split_blocks(text) if n]
 
 def scan_corpus(pattern="local/llm/recent_*.jsonl"):
-    """コーパス実測: 名乗り付きブロックを走査し、崩れ数/そのうち現ゲート素通り数を数える。"""
+    """コーパス実測: 名乗り付きブロックを走査。
+    confirmed_drift=Z1に流す確定件数 / candidate=人事への登録候補(件数外)。"""
     stat = {"files": 0, "replies": 0, "blocks_named": 0, "blocks_known": 0,
-            "drift": 0, "drift_invisible": 0, "samples": []}
+            "confirmed": 0, "candidate": 0, "candidate_invisible": 0, "samples": []}
     for f in sorted(glob.glob(pattern)):
         stat["files"] += 1
         for line in open(f, encoding="utf-8"):
@@ -165,39 +157,39 @@ def scan_corpus(pattern="local/llm/recent_*.jsonl"):
                 if not r["known"]:
                     continue
                 stat["blocks_known"] += 1
-                if r["drift"]:
-                    stat["drift"] += 1
+                if r["confirmed_drift"]:
+                    stat["confirmed"] += 1
+                if r["candidate"]:
+                    stat["candidate"] += 1
                     if r["invisible_to_gate"]:
-                        stat["drift_invisible"] += 1
-                        if len(stat["samples"]) < 6:
-                            stat["samples"].append({
-                                "file": os.path.basename(f), "persona": r["persona"],
-                                "foreign": r["foreign_hits"],
-                                "snippet": body.strip().replace("\n", " ")[:60],
-                            })
+                        stat["candidate_invisible"] += 1
+                    if len(stat["samples"]) < 8:
+                        stat["samples"].append({
+                            "file": os.path.basename(f), "persona": r["persona"],
+                            "hits": r["candidate_hits"],
+                            "snippet": body.strip().replace("\n", " ")[:60],
+                        })
     return stat
 
 if __name__ == "__main__":
-    # ★2026-08-30 イージス研究室が1行追加(.bak_20260830_cp932)= 標準出力がcp932だと
-    #   サンプル行の「——」(U+2014)で UnicodeEncodeError を出して落ちる(実測)。
-    #   件数は落ちる前に出るが、**証拠のサンプル行が出ないまま終わる**=材料として渡せない。
-    #   判定には一切触っていない(出口だけ)。
+    # 標準出力がcp932だとサンプル行の「——」(U+2014)で UnicodeEncodeError=落ちる(実測2026-08-30)。
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    # (0) 正本ズレの警告(表示だけ・判定は変わらない)
-    _diff = need_vs_source_of_truth()
-    if _diff is None:
-        print("※ 正本(口調ルール.json)が読めない= ズレ検査はスキップ(判定には影響なし)")
-    elif _diff:
-        print("=== (0) ★NEED が人事の正本(signature_tails)とズレている ===")
-        for p, missing, extra in _diff:
-            print(f"  [{p}] 正本にあってNEEDに無い= {missing} / NEEDにあって正本に無い= {extra}")
-        print("  ← このズレはFPの原因になる(実測: 8/30 ジェンティルドンナ「ますわ」欠けで1件誤検知)。"
-              "足し引きの正本は人事部門。\n")
 
-    # (1) 実検体= 2026-08-28 改修α msg 1543026401349861386(Chamiが当室へ空本文転送した「ダメダメな返し」)
+    # (0) 正本の読み込み状況(表示だけ)。ここが空なら判定は全て fail-open で素通り。
+    if not ST_OK:
+        print("※ 正本(口調ルール.json)が読めない= 判定は全て fail-open で素通り(共通規律§3)")
+    else:
+        n_sig = sum(1 for p in PERSONAS if SIG.get(p))
+        n_forb = sum(1 for p in PERSONAS if FORB.get(p))
+        print(f"=== (0) 正本ロード: 全{len(PERSONAS)}人格 "
+              f"/ signature_tails登録 {n_sig}人 / forbidden_tail登録 {n_forb}人 ===")
+        print(f"    確定ドリフト(件数)は forbidden_tail 登録済の {n_forb}人だけが対象=本番ゲートと同じ現実。\n")
+
+    # (1) 実検体= 2026-08-28 改修α msg 1543026401349861386(Chamiが当室へ空本文転送した「ダメダメな返し」)。
+    #     期待= オタコン(forbidden登録済)は女性語尾で確定ドリフト / 咲季は「のよ」が自分の signature=OK。
     SPECIMEN = (
         "[オタコン] 提案ページの地図取り終わり。土台を2枚入れたわよ(どちらもローカル・未デプロイ＝確認待ち)。"
         "次のバッチ実行で posted_ch が入るまでは全部「共通」に出るわ。"
@@ -207,24 +199,25 @@ if __name__ == "__main__":
     print("=== (1) 検体実証 改修α msg1543026401349861386 ===")
     for r in scan(SPECIMEN):
         if not r["known"]:
-            print(f"[{r['persona']}] 指紋未登録=スキップ(fail-open)"); continue
-        mark = "★ドリフト検知" if r["drift"] else "OK"
-        gate = "【現ゲート素通り】" if r["invisible_to_gate"] else ""
+            print(f"[{r['persona']}] 正本に未登録=スキップ(fail-open)"); continue
+        if r["confirmed_drift"]:
+            mark = "★確定ドリフト(件数に計上)"
+        elif r["candidate"]:
+            mark = "△登録候補(件数外・要人事確認)"
+        else:
+            mark = "OK"
+        gate = "【一人称も素通り】" if r["invisible_to_gate"] else ""
         print(f"[{r['persona']}] {mark} {gate}")
-        print(f"    異物語尾hit = {r['foreign_hits']}")
-        print(f"    自分の必須語尾あり = {r['has_need']}")
-        print(f"    際立つ一人称 = {r['distinctive_fp']}  ← 空なら現tone_gateは拾えない")
+        print(f"    forbidden hit = {r['forbidden_hits']} / 候補 hit = {r['candidate_hits']}")
+        print(f"    自分の signature あり = {r['has_need']} / 際立つ一人称 = {r['distinctive_fp']}")
 
-    # (2) コーパス実測
+    # (2) コーパス実測。
     print("\n=== (2) コーパス実測 local/llm/recent_*.jsonl ===")
     s = scan_corpus()
     print(f"ファイル {s['files']} / reply {s['replies']} / 名乗りブロック {s['blocks_named']}"
-          f"(うち指紋既知 {s['blocks_known']})")
-    print(f"語尾ドリフト検知 = {s['drift']} 件")
-    print(f"  うち【際立つ一人称ゼロ=現tone_gate素通り】= {s['drift_invisible']} 件"
-          f"  ← ここが語尾指紋で初めて拾える増分")
-    if s["blocks_known"]:
-        print(f"  既知ブロックに対する崩れ率 = {s['drift']/s['blocks_known']*100:.1f}% "
-              f"/ 素通り率 = {s['drift_invisible']/s['blocks_known']*100:.1f}%")
+          f"(うち正本既知 {s['blocks_known']})")
+    print(f"確定ドリフト(Z1)= {s['confirmed']} 件  ← forbidden_tail 正本に基づく・FPゼロ")
+    print(f"登録候補(件数外・人事への材料)= {s['candidate']} 件"
+          f"  うち一人称も素通り= {s['candidate_invisible']} 件")
     for smp in s["samples"]:
-        print(f"    - {smp['file']} [{smp['persona']}] 異物={smp['foreign']} :: {smp['snippet']}")
+        print(f"    - {smp['file']} [{smp['persona']}] 候補={smp['hits']} :: {smp['snippet']}")
