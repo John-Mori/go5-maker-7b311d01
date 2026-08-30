@@ -36,6 +36,18 @@ _ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
 TONE_RULES_PATH = os.path.join(os.path.dirname(_ROOT), "00_AI-HQ",
                                "departments", "hr", "personas", "口調ルール.json")
 
+# ------------------------------------------------------------------
+# ★2026-08-30(デブライネ実測・14→13→12)= 「」保護は当室で新規に書かない。
+#   本番ゲート(tone_gate.py)の _mask_protected を合流して使う(共通規律§3「既に効いている型へ
+#   合流できないか見る」)。引用・コード・引用行・パス/URLを長さ保存でマスク=句末アンカーの
+#   添字がそのまま使える。fail-open= import失敗時は無マスクで続行(判定不能→喋る側へ倒す)。
+sys.path.insert(0, os.path.join(_ROOT, "scripts", "llm"))
+try:
+    from tone_gate import _mask_protected
+except Exception:
+    def _mask_protected(s):
+        return str(s or "")
+
 def load_source_of_truth(path=TONE_RULES_PATH):
     """正本から SIG(signature_tails)/FORB(forbidden_tail)/全人格名 を読む。
     戻り= (ok, PERSONAS:set, SIG:{name:set}, FORB:{name:set})。読めなければ ok=False(fail-open)。"""
@@ -71,15 +83,27 @@ COLORED = {
 # 句末アンカー= 語尾は文の切れ目の直前だけ拾う(語中の偶然一致「じゃなくて」内の わ 等を除外)。
 CLAUSE_END = "。、．，!?！？」』）)…\n"
 
+# ★2026-08-30(デブライネ実測)= _mask_protected(「」/コード/パス)を通しても、半角括弧内で
+#   語尾を列挙した便(例=「本人の締め(〜ですわ/〜しますのよ/〜ちょうだいのね)を通して0発火」)は
+#   `)` がCLAUSE_ENDに含まれるため句末ヒットしてしまう(実測=13→12の差分)。
+#   → 直前の区切り(CLAUSE_END or 開き括弧)までの区間に `〜` が在れば「語尾の引用列挙」とみなし除外する。
+_SEG_BOUNDARY = CLAUSE_END + "(（"
+
+def _is_tilde_citation(body, i):
+    j = i - 1
+    while j >= 0 and body[j] not in _SEG_BOUNDARY:
+        j -= 1
+    return "〜" in body[j + 1:i]
+
 def _at_clause_end(body, w):
-    """w が句末(次が区切り記号か文末)に来る出現が1つでもあるか。"""
+    """w が句末(次が区切り記号か文末)に来る出現が1つでもあるか(〜語尾列挙は除外)。"""
     start = 0
     while True:
         i = body.find(w, start)
         if i < 0:
             return False
         j = i + len(w)
-        if j >= len(body) or body[j] in CLAUSE_END:
+        if (j >= len(body) or body[j] in CLAUSE_END) and not _is_tilde_citation(body, i):
             return True
         start = i + 1
 
@@ -109,15 +133,17 @@ def probe(persona, body):
         return {"persona": persona, "known": False}
     sig = SIG.get(p, set())
     forb = FORB.get(p, set())
+    # 「」/コード/引用行/パスを長さ保存でマスク(本番ゲートと同じ土俵=位置ズレなし)。
+    masked = _mask_protected(body)
     # (A) 確定ドリフト= 自分の forbidden_tail(正本)が句末に出た(=本番ゲートと同一規則)。
-    forbidden_hits = [w for w in forb if _at_clause_end(body, w)]
+    forbidden_hits = [w for w in forb if _at_clause_end(masked, w)]
     confirmed = bool(forbidden_hits)
     # (B) 登録候補= 色つき語尾で、自分の signature にも forbidden にも無い(=未登録の相方語尾疑い)。
     candidate_hits = [w for w in COLORED
-                      if w not in sig and w not in forb and _at_clause_end(body, w)]
+                      if w not in sig and w not in forb and _at_clause_end(masked, w)]
     candidate = bool(candidate_hits) and not confirmed
-    has_need = any(_at_clause_end(body, w) for w in sig)
-    dist_fp = [m for m in DISTINCTIVE_FP if m in body]  # 現tone_gateの一人称層が拾える印
+    has_need = any(_at_clause_end(masked, w) for w in sig)
+    dist_fp = [m for m in DISTINCTIVE_FP if m in masked]  # 現tone_gateの一人称層が拾える印
     return {
         "persona": p, "known": True,
         "confirmed_drift": confirmed, "forbidden_hits": forbidden_hits,
