@@ -1648,15 +1648,30 @@ DEPT_CONF = {
         #     原典= local/persona_context/alonso_context.md **在り**(persona_source_exists相当)。
         #     どちらか欠けていたら入れない(原典の無いキャラは演じない= 2026-07-20 Chami指示)。
         #   ★筆頭はアロンソ(この部屋の主)。lead_persona も併せてアロンソにしてある。
+        # ★★2026-08-31 Chami直接指示で**ヴィルシーナ(リーダー)/ククール(メンバー)/アメス(サブ)**を配線。
+        #   原文= 「この部屋にリーダーヴィルシーナ、メンバーククール、サブにアメスを配線して。
+        #          "D:\\SougouStartFolder\\AnimeGameGoodsAFI" 内容はここの中身をチェックして。
+        #          目標はHPを完成させて公開、ほかの人に見てもらって収益化まで。」
+        #          (msg 1543736941353242634 / 2026-08-31 06:39 JST)
+        #   ★アロンソは**外していない**。Chamiは3人を挙げただけで「アロンソを外せ」とは言っていない=
+        #     勝手に消さない(C-003)。筆頭だけ譲り、名簿には残す。外すならChamiが言う。
+        #   ★資産の実測(2026-08-31・原典が無いキャラは演じない規律の確認):
+        #     ヴィルシーナ= characters/verxina.md 17,785B / local/persona_context/verxina_context.md 在り
+        #     ククール    = characters/kukuru.md 61,202B / local/persona_context/kukuru/(台詞集19冊)在り
         "personas": [
-            {"persona": "シャビ・アロンソ", "character": os.path.join(_CHAR, "alonso.md"),
-             "role": "研究室HQのGL(この部屋の主)", "aliases": ("alonso", "アロンソ", "コーチ", "監督")},
+            {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
+             "role": "この部屋のリーダー(AnimeGameGoodsAFIの完成・公開・収益化を率いる)",
+             "aliases": ("verxina", "ヴィルシーナ")},
+            {"persona": "ククール", "character": os.path.join(_CHAR, "kukuru.md"),
+             "role": "この部屋のメンバー", "aliases": ("kukuru", "ククール")},
             {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
-             "role": "研究室HQの補佐", "aliases": ("ames", "アメス")},
+             "role": "この部屋のサブ", "aliases": ("ames", "アメス")},
+            {"persona": "シャビ・アロンソ", "character": os.path.join(_CHAR, "alonso.md"),
+             "role": "研究室HQのGL(横断裁定)", "aliases": ("alonso", "アロンソ", "コーチ", "監督")},
         ],
-        # ★既定で前に立つのはアロンソ(部屋の主)。このキーが無い部屋は persona がそのまま使われる
-        #   =既存19部屋の起動文は1文字も変わらない(安全弁)。
-        "lead_persona": "シャビ・アロンソ",
+        # ★既定で前に立つのはリーダー。このキーが無い部屋は persona がそのまま使われる
+        #   =他部屋の起動文は1文字も変わらない(安全弁)。
+        "lead_persona": "ヴィルシーナ",
         # ★relay(留守番セッション)のモデル。CLAUDE.md §5.1= 横断裁定・真因追跡・出荷前レビューは
         #   最上位モデルの領域。§1の優先順位で**トークン効率は正確性より下**=ここでケチると
         #   「品質を落とした節約」になり規約違反(Chami「品質を落とさないことが最重要」2026-07-21)。
