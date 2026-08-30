@@ -4600,7 +4600,22 @@ def _peel_extra_tags(rest, resolve, limit=4):
     return s
 
 
-def split_persona_blocks(text, resolve):
+def _audit_preamble(dept, who, dropped):
+    """名乗りの手前で落とした前置きを1行残す(persona_render_audit.jsonl へ合流)。
+
+    ★記録先を2つ持たない(共通規律§4)= 書き手は persona_render._audit 1本のまま。
+    ★fail-open= 記録に失敗しても分割結果には一切影響させない。
+    """
+    try:
+        import persona_render                    # 同ディレクトリ。遅延import(起動コストを避ける)
+        persona_render._audit(dept, who, "preamble_dropped",
+                              str(dropped or "").replace("\n", " / ")[:300],
+                              len(dropped or ""), 0)
+    except Exception:
+        pass
+
+
+def split_persona_blocks(text, resolve, dept=""):
     """`[名前] 本文` のブロック列へ割る。戻り値 [(正式名 or None, 本文), ...]。
 
     resolve(name) は「この部屋で通用する正式名 or None」を返す関数(呼び元が渡す)。
@@ -4621,9 +4636,18 @@ def split_persona_blocks(text, resolve):
     #   その後に `[三笘薫] …` が来ていた。1行目が名乗りでないので分割に入らず、
     #   **名義は既定の早坂芽衣のまま・本文に `[三笘薫]` が残った**
     #   = 「早坂芽衣が三笘薫の言葉を喋る」形になり、Chamiが「口調人格差分がおかしい」と指摘した。
-    #   → **最初に解決できる名乗りを探す**。その手前にある行(作業の実況・前置き)は
-    #     **捨てずに最初のブロックへ付ける**(黙って本文を削らない=規律§2)。
-    #   ★前置きそのものを書かせない指示は共通規律§4.8で別に入れてある(そちらが本命)。
+    #   → **最初に解決できる名乗りを探す**。
+    #   ★2026-08-30 イージス研究室(デブライネ)= 前置きの扱いを「最初のブロックへ付ける」から
+    #     **落として記録する**へ変えた(改善提案部門トトリの依頼・Chami「表示がおかしいことが多いね、
+    #     どの部屋も」msg 1543598615350616114)。実測= reply 129本中 [名前]付き102本の
+    #     **14本(13.7%)が1行目に名乗りが無い**・8部屋に分布。中身は作業実況・英語下書き・区切り線で、
+    #     人格の発言の頭に混ざって表示を壊していた。
+    #   ★§4.8の「名乗りは必ず1行目」を心がけで守らせる形では止まらなかった(9部屋で漏れ・
+    #     8/29 commit 3c323ad の characterfile 2本では全部屋に効かない)= 心がけより機構が上(§3)。
+    #   ★**黙って落とすのではない**(規律§2)= 落とした前置きは persona_render_audit.jsonl へ
+    #     outcome="preamble_dropped" で全文(300字まで)残す。事実上死んでいた計器が同時に生き返る。
+    #   ★落とすのは**解決できる名乗りが在る便だけ**= 名乗りが1つも無い便は1文字も触らない。
+    #     落とした結果 本文が空になる時も落とさない(沈黙させない=fail-open)。
     head = 0
     m = None
     who = None
@@ -4638,9 +4662,7 @@ def split_persona_blocks(text, resolve):
     if not m:
         return [(None, t)]                  # 名乗りが1つも無い=従来どおり1通
     pre = [l for l in lines[:head] if l.strip()]
-    first_body = ([_peel_extra_tags(m.group(2), resolve)] if not pre
-                  else pre + [_peel_extra_tags(m.group(2), resolve)])
-    blocks = [[who, first_body]]
+    blocks = [[who, [_peel_extra_tags(m.group(2), resolve)]]]
     for ln in lines[head + 1:]:
         m2 = _PERSONA_TAG_RE.match(ln.strip())
         who2 = resolve(m2.group(1)) if m2 else None
@@ -4653,7 +4675,12 @@ def split_persona_blocks(text, resolve):
         b = "\n".join(body).strip()
         if b:
             out.append((name, b))
-    return out or [(None, t)]
+    if not out:
+        # ★落とした結果が空= 前置きだけが中身だった。**落とさず従来どおり出す**(沈黙させない)。
+        return [(None, t)]
+    if pre:
+        _audit_preamble(dept, who, "\n".join(pre))
+    return out
 
 
 _avatar_keys_cache = {"mtime": None, "keys": frozenset()}
@@ -6466,7 +6493,8 @@ class Daemon:
             #     = 既存19部屋は [(None, reply)] のまま=送信は旧版と1ミリも変わらない。
             if self.conf.get("personas"):
                 _blocks = split_persona_blocks(
-                    reply, lambda nm: resolve_persona_tag(self.conf, nm))
+                    reply, lambda nm: resolve_persona_tag(self.conf, nm),
+                    dept=self.dept)
             else:
                 _blocks = [(None, reply)]
             # ★★出力ゲート ルールC(呼称違反チェック)= 話者依存(2026-07-30・Chami裁定②)。

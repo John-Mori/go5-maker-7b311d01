@@ -178,7 +178,19 @@ class Slot:
 #     1回だけ書き直す段)の本体。dept_daemon が起動時に import する**本文を差し替える側**の
 #     コードだから、tone_gate と同じ理由でここに要る(採否の条件を1つ直した日に載らないと、
 #     「入れたのに崩れたまま出る」= 案Fを作った理由そのものが再演される)。
+#   ★2026-08-30 追加(C-042・イージス研究室)= scripts/llm/persona_render.py。
+#     dept_daemon が `_audit_preamble`(名乗り手前の前置きを落とした記録)で遅延importする
+#     ようになった=**計器の書き手が dept_daemon の依存になった**。遅延importでも
+#     sys.modules に載れば以後固定なので、ここに無いと「記録の形を直したのに載らない」。
+#   ★2026-08-30 追加(C-042・イージス研究室)= scripts/llm/fcc_task.py。
+#     **これは俺の変更で新しく現れた穴ではない。HEAD の時点で既に載っていなかった**
+#     (旧 dept_daemon.py/daemon_keeper.py の実物で突合して確認 = 未載せは fcc_task と
+#     persona_render の2本だった)。session_relay が遅延importする外部無料AIの実行側で、
+#     session_relay 自体は監視対象なのに**その先が抜けていた**= 推移的に辿る検査だけが
+#     見つけられる型。1本残すと検査が万年赤になり、次の載せ忘れを誰も見なくなる(C-038)。
 WATCH_FILES = [DAEMON,
+               os.path.join(ROOT, "scripts", "llm", "persona_render.py"),
+               os.path.join(ROOT, "scripts", "llm", "fcc_task.py"),
                os.path.join(ROOT, "scripts", "llm", "session_relay.py"),
                os.path.join(ROOT, "scripts", "llm", "tone_rewrite.py"),
                os.path.join(ROOT, "scripts", "llm", "prompt_spill.py"),
