@@ -4295,6 +4295,80 @@ def _append_hangul_warn(text):
 
 
 # ============================================================================
+# 出力ゲート(実況漏れ)= 名乗りも声も無い**生ログ**がそのまま部屋へ出る事故  2026-09-01
+# ----------------------------------------------------------------------------
+# 発端= Chami 2026-09-01「アイが謎の機械口調」。型= 改善提案部門・トトリ
+#   `docs/departments/kaizen-analyst/型_実況漏れ_名乗り無し生ログ露出_2026-09-01.md`(2f7cceb)。
+# 検体= hr/memory/shorts-analyst.jsonl 2026-09-01T03:00:09 / msg 1544041139580178502。
+#
+# ★**別建てにしない**(トトリの受け入れ条件4)= ルールA(ハングル/簡体字)の流れへ合流する。
+#   検知→①同じ入力で1回だけ再生成→②なお漏れていたら元文に警告を付けて送る。
+#   簡体字を足した時(2026-09-01)と同じで、**流れは1ミリも変えず検知器だけ替えた**形。
+# ★終端は「警告付きで送る」= 英文ダンプ(保留)側には倒さない。理由は非対称だから:
+#   英語は救う日本語が無く晒すだけだが、実況漏れは**日本語で情報は載っている**。
+#   読みにくい便を止めて沈黙にする方が事故だ(AegisConciel)。
+# ★本文の機械置換はしない(トトリの受け入れ条件3)= 「stdout」を人語へ書き換える手は持たない。
+# ★トークンの実費= 検知そのものは正規表現だけで0。鳴った時だけ再生成1回分が乗る。
+#   実測の発火率 3/4,285便 → **約1,400便に1回**。「トークン0」ではないが無視できる。
+NARRATION_WARN = "⚠️(自動)生成不良: 名乗りも話者も無い機械ログのままの本文を検知。要確認。"
+
+
+def narration_gate(text, regen=None, strip_marker=None):
+    """実況漏れ検知→1回だけ再生成→なお漏れていたら元文に警告付与(純関数・テスト可)。
+
+    引数・返り値の形は `hangul_gate` と同じ(合流点で兄弟として並べるため)。
+      regen       : 無引数callable。再生成後の本文を返す(None なら再生成しない)。
+      strip_marker: 再生成本文から <<WIP>> 等を落とす callable(任意)。
+    返り値: (out_text, info)  info={"hit1","regenerated","hit2","warned","machine"}
+
+    ★何が起きても例外を外へ出さない。転んだら元文をそのまま返す(沈黙ゼロ)。
+    """
+    info = {"hit1": False, "regenerated": False, "hit2": False, "warned": False,
+            "machine": []}
+    try:
+        base = str(text or "")
+        if _meta_strip is None:
+            return base, info                    # 検知器が無い=素通し(fail-open)
+        hit = _meta_strip.detect_narration_leak(base)
+        if hit is None:
+            return base, info                    # 通常経路=何もしない
+        info["hit1"] = True
+        info["machine"] = list(hit.get("machine") or [])
+        if regen is None:
+            # 再生成できない経路(session_relay/失敗告知/test等)=沈黙にしない=警告付きで送る
+            info["warned"] = True
+            return _append_narration_warn(base), info
+        try:
+            regen_text = regen()
+        except Exception:
+            regen_text = None                    # 再生成の例外は握り潰す(fail-open)
+        if regen_text:
+            info["regenerated"] = True
+            cleaned = str(regen_text)
+            if strip_marker is not None:
+                try:
+                    cleaned, _ = strip_marker(cleaned)
+                except Exception:
+                    cleaned = str(regen_text)
+            if cleaned and _meta_strip.detect_narration_leak(cleaned) is None:
+                return cleaned, info             # 再生成で声が戻った=そちらへ差し替え
+            info["hit2"] = True
+        # ここに来る=再生成しなかった/失敗/空/2回目も漏れ → 元文に警告付き(沈黙にしない)
+        info["warned"] = True
+        return _append_narration_warn(base), info
+    except Exception:
+        return str(text or ""), info             # ゲート自身が配送を殺さない
+
+
+def _append_narration_warn(text):
+    """本文末尾に改行2つ+警告行を付ける(既に付いていれば二重に付けない)。"""
+    s = str(text or "")
+    if NARRATION_WARN in s:
+        return s
+    return s + "\n\n" + NARRATION_WARN
+
+
+# ============================================================================
 # 出力ゲート(英文ダンプ)= 日本語話者の部屋に**本文まるごと英語**が出る事故  2026-08-18
 # ----------------------------------------------------------------------------
 # Chami原文(2026-08-18・msg 1539153227491180624)=「謎英文の表示無駄だからやめて」。
@@ -6763,6 +6837,35 @@ class Daemon:
                 f"2回目混入={'有' if _hg.get('hit2') else '無'} "
                 f"警告付与={'有' if _hg.get('warned') else '無(再生成で解消)'} msg={mid}")
         reply = _reply2
+        # ★★出力ゲート(実況漏れ)= 名乗りも声も無い生ログがそのまま出る事故(2026-09-01・トトリの型)。
+        #   ルールAの兄弟として**同じ合流点**に置く=全経路の返信が必ず1度だけ通る。
+        #   ★通常返信(名乗りが在る/一人称が在る/相手に呼びかけている)は detect_narration_leak が
+        #     鳴らない=不変。実測の発火率 3/4,285便。
+        _reply_n, _nr = narration_gate(reply, regen=regen, strip_marker=split_wip_marker)
+        if _nr.get("hit1"):
+            log(self.dept,
+                f"★出力ゲート(実況漏れ): 機械語={','.join(_nr.get('machine') or [])} "
+                f"再生成={'実施' if _nr.get('regenerated') else '不可/未実施'} "
+                f"2回目も漏れ={'有' if _nr.get('hit2') else '無'} "
+                f"警告付与={'有' if _nr.get('warned') else '無(再生成で解消)'} msg={mid}")
+            try:
+                os.makedirs(os.path.dirname(META_AUDIT), exist_ok=True)
+                with open(META_AUDIT, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "dept": self.dept,
+                        "event": "narration_leak",
+                        "source": "daemon",
+                        "msg_id": str(mid or ""),
+                        "machine": _nr.get("machine") or [],
+                        "regenerated": bool(_nr.get("regenerated")),
+                        "hit2": bool(_nr.get("hit2")),
+                        "warned": bool(_nr.get("warned")),
+                        "before": str(reply or "")[:400],
+                    }, ensure_ascii=False) + "\n")
+            except Exception:
+                pass             # 監査の失敗で本文を巻き添えにしない
+        reply = _reply_n
         # ★★出力ゲート(英語前置きの剥離)= 英語の分析段落が頭に付き、そのあと日本語本文が続く混在
         #   (2026-08-23 Chami「英文要らんって言ってんのにずっと治らない」・msg 1540768290568409130)。
         #   detect_english_dump(まるごと英語)は日本語が多くて鳴らない穴=別形の再発(C-038)。

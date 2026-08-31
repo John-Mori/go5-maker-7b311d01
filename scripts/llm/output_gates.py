@@ -129,7 +129,7 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
     """
     do_fix = _fix_enabled() if fix is None else bool(fix)
     summary = {"naming_fix": 0, "naming_warn": 0, "tone_fix": 0, "tone_warn": 0,
-               "meta_strip": 0, "meta_emptied": False}
+               "meta_strip": 0, "meta_emptied": False, "narration_leak": 0}
     s = str(text or "")
     if not s.strip() or not str(persona or "").strip():
         return text, summary
@@ -159,6 +159,25 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
                 s = stripped
     except Exception:
         pass            # 剥ぎで転んでも以降のゲートは当てる(本文は直前の状態のまま)
+
+    # --- 実況漏れ(名乗りも声も無い生ログ)= **警告のみ** ------------------
+    # ★2026-09-01 イージス研究室。常駐(経路①)と**同じ検知器**(meta_strip.detect_narration_leak)。
+    # ★ここでは突き返さない= この経路に**再生成の手が無い**(セッションは既に喋り終えている)。
+    #   突き返し=送らないことになり、沈黙が最悪の事故という原則に反する。だから台帳に残すだけ。
+    #   常駐側だけが「1回だけ再生成」へ格上げしている(手が有るから)。
+    # ★格上げの是非は、この台帳(event=narration_leak / source=mirror)の数字で後から決める。
+    try:
+        if _meta_strip is not None:
+            _leak = _meta_strip.detect_narration_leak(s)
+            if _leak:
+                summary["narration_leak"] = 1
+                _append(META_AUDIT, [{
+                    "ts": ts, "dept": dept, "event": "narration_leak", "source": source,
+                    "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                    "machine": _leak.get("machine") or [],
+                    "warned": False, "before": excerpt_before}])
+    except Exception:
+        pass            # 検知で転んでも本文は素通し
 
     # --- ゲートC(呼称) --------------------------------------------------
     try:
