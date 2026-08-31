@@ -26,6 +26,11 @@
   // 人事部門が正本へ反映する=そのための"差分に名前(#1/#2/id)を付けて指せる化"と変更メモが役目。
   var EDIT_KEY = "persona_hub_edits_v1";
 
+  // 直接アップロード(ページから正本へ)。go5-sync Worker に PUT /api/img → POST /api/persona/enqueue。
+  // ★トークンはページに埋めない=Chamiがこの端末のlocalStorageへ1回だけ入れる(埋めると誰でも書けてしまう・デブライネ制約)。
+  var SYNC_BASE = "https://go5-sync.trustsignalbot.workers.dev";
+  var TOKEN_KEY = "go5_sync_token_v1";
+
   var state = { personas: {}, names: [], filtered: [], selected: null, edits: {}, addSeq: 0 };
   var els = {};
 
@@ -297,10 +302,14 @@
         '<h3 class="section-title">アイコン差分 <span class="section-count">(' + count + "枚)</span></h3>" +
         '<div class="avatar-grid av-grid">' + body + "</div>" +
         '<div class="av-actions">' +
-          '<button class="av-add-btn" data-act="add">＋ 画像を追加</button>' +
+          '<button class="av-add-btn av-up-btn" data-act="upload">⬆ 直接アップロード(正本へ)</button>' +
+          '<button class="av-add-btn av-add-local" data-act="add">＋ 手元メモに追加</button>' +
+          '<button class="av-token-btn" data-act="settoken">🔑 トークン' + (getSyncToken() ? "設定済" : "未設定") + '</button>' +
           '<input type="file" class="av-file" accept="image/*" hidden>' +
+          '<input type="file" class="av-file-up" accept="image/*" hidden>' +
         "</div>" +
-        '<p class="av-hint">ページ内の変更は<b>この端末の手元だけ</b>に残る(未反映)。消した/足したら「変更メモをコピー」して人事部門へ伝えれば正本へ反映する。<b>画像の追加はDiscord添付が不要</b>=取り込みフォルダ <code>local/persona_inbox/&lt;キャラ名&gt;/</code> に置けば人事部門が取り込む(<code>scripts/hr/ingest_persona_images.py</code>)。サムネはクリックで拡大できる。</p>' +
+        '<div class="av-upmsg" hidden></div>' +
+        '<p class="av-hint"><b>Discord添付は不要。</b>「直接アップロード」を押して画像を選ぶだけで正本へ入る(この端末に書き込みトークンを1回だけ設定する=🔑ボタン。ページには埋め込まない)。取り込み常駐が動けば数十秒で台帳に反映される。<br>ネット越しが使えない時の別口=取り込みフォルダ <code>local/persona_inbox/&lt;キャラ名&gt;/</code> に置いて <code>scripts/hr/ingest_persona_images.py</code>。「手元メモに追加」はこの端末だけの下書き(未反映)。サムネはクリックで拡大できる。</p>' +
       "</section>";
   }
 
@@ -315,10 +324,17 @@
         else if (act === "undo-remove") markRemove(name, btn.getAttribute("data-url"), false);
         else if (act === "undo-add") undoAdd(name, btn.getAttribute("data-id"));
         else if (act === "add") { var f = sec.querySelector(".av-file"); if (f) f.click(); }
+        else if (act === "upload") {
+          if (!getSyncToken() && !setSyncToken()) { setUploadMsg("トークン未設定=中止した(🔑で1回だけ設定が要る)。", true); return; }
+          var fu = sec.querySelector(".av-file-up"); if (fu) fu.click();
+        }
+        else if (act === "settoken") { setSyncToken(); if (state.selected) renderDetail(state.selected); }
       });
     });
     var file = sec.querySelector(".av-file");
     if (file) file.addEventListener("change", function () { handleAddFile(name, file.files && file.files[0]); });
+    var fileUp = sec.querySelector(".av-file-up");
+    if (fileUp) fileUp.addEventListener("change", function () { directUpload(name, fileUp.files && fileUp.files[0]); fileUp.value = ""; });
   }
 
   function markRemove(name, url, on) {
@@ -348,6 +364,66 @@
       refreshAfterEdit(name);
     };
     reader.readAsDataURL(file);
+  }
+
+  // ── 直接アップロード(ページ→正本)。PUT /api/img(先)→ POST /api/persona/enqueue ──
+  function getSyncToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  }
+  function setSyncToken() {
+    var v = window.prompt("go5-sync の書き込みトークン(SYNC_TOKEN)を貼り付け。\nこの端末のブラウザにだけ保存され、ページには埋め込まれない。\n(空で消去)", "");
+    if (v === null) return false; // キャンセル
+    v = (v || "").trim();
+    try { if (v) localStorage.setItem(TOKEN_KEY, v); else localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+    return !!v;
+  }
+  function sha256hex(buf) {
+    return crypto.subtle.digest("SHA-256", buf).then(function (d) {
+      return Array.prototype.map.call(new Uint8Array(d), function (b) {
+        return ("0" + b.toString(16)).slice(-2);
+      }).join("");
+    });
+  }
+  function setUploadMsg(text, isErr) {
+    var sec = els.detail.querySelector(".av-section");
+    if (!sec) return;
+    var m = sec.querySelector(".av-upmsg");
+    if (!m) return;
+    m.hidden = false;
+    m.textContent = text;
+    m.className = "av-upmsg" + (isErr ? " is-err" : "");
+  }
+  function directUpload(name, file) {
+    if (!file) return;
+    var token = getSyncToken();
+    if (!token) { if (!setSyncToken()) { setUploadMsg("トークン未設定=中止した。", true); return; } token = getSyncToken(); }
+    setUploadMsg("アップロード中… " + (file.name || "image"), false);
+    file.arrayBuffer().then(function (buf) {
+      return sha256hex(buf).then(function (sha) {
+        // ★画像PUTが先(でないと enqueue が key_not_uploaded=409 で弾かれる)。
+        return fetch(SYNC_BASE + "/api/img/" + sha, {
+          method: "PUT",
+          headers: { "X-Sync-Token": token, "Content-Type": file.type || "application/octet-stream" },
+          body: buf
+        }).then(function (r) {
+          if (!r.ok) throw new Error("画像PUT失敗 HTTP " + r.status);
+          return fetch(SYNC_BASE + "/api/persona/enqueue", {
+            method: "POST",
+            headers: { "X-Sync-Token": token, "Content-Type": "application/json" },
+            body: JSON.stringify({ persona: name, key: sha, ct: file.type || "" })
+          });
+        }).then(function (r2) {
+          return r2.json().catch(function () { return {}; }).then(function (j) {
+            if (!r2.ok || !j.ok) throw new Error("投函失敗 HTTP " + r2.status + (j && j.error ? " " + j.error : ""));
+            var id = sha.slice(-6);
+            if (j.deduped) setUploadMsg("既に登録済みの画像だった(重複スキップ)。id …" + id, false);
+            else setUploadMsg("投函できた(確認待ち)。取り込み常駐が動けば数十秒で台帳に反映される。id …" + id + (j.line ? " / 行" + j.line : ""), false);
+          });
+        });
+      });
+    }).catch(function (err) {
+      setUploadMsg("失敗: " + String((err && err.message) || err) + "(トークン誤り/常駐未起動/通信不可の可能性)。", true);
+    });
   }
 
   function refreshAfterEdit(name) {
