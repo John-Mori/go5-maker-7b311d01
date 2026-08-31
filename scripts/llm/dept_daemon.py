@@ -3738,6 +3738,7 @@ ENGLISH_AUDIT = os.path.join(LOCAL, "llm", "english_audit.jsonl")
 from lang_gate import (  # noqa: E402  純関数のみ・単一の判定源(single-source-predicate)
     _JP_RE, _LATIN_RE, detect_english_dump, strip_english_preamble,
     detect_simplified,   # 2026-09-01 簡体字混入(ルールAへ合流)。判定はここ1本に置く
+    detect_cyrillic,     # 2026-09-01 キリル混入(HQ-0227 裁定2 GO・同じ表へ合流)
 )
 
 # ============================================================================
@@ -4088,8 +4089,9 @@ def detect_nonjp(text, span=20):
       経路(audit/gate)を増やすと片方だけ直す事故(C-038の再発型)が起きる。
 
     ★順番= ハングルが先(ORG-45の既存挙動を1ミリも変えない)。両方在ればハングルとして扱う。
-    ★kind = "hangul" | "simplified"。呼び出し側はこれでログ文と警告文だけを切り替える。
-    ★検知だけ・自動置換はしない・例外は握り潰す(どちらの検知器も fail-safe)。
+      ★キリルは**最後**に足した(2026-09-01 HQ-0227 裁定2 GO)= 既存2 kind の挙動は不変。
+    ★kind = "hangul" | "simplified" | "cyrillic"。呼び出し側はこれでログ文と警告文だけを切り替える。
+    ★検知だけ・自動置換はしない・例外は握り潰す(どの検知器も fail-safe)。
     """
     try:
         hit = detect_hangul(text, span=span)
@@ -4100,6 +4102,12 @@ def detect_nonjp(text, span=20):
         if hit:
             hit["kind"] = "simplified"
             return hit
+        # ★キリル(ホモグリフ)= 名乗りタグ `[ККール]` が resolve を殺す事故の**生成側**。
+        #   救済(tag_homoglyph_rescued)は対症で、化ける側はここで初めて見える。
+        hit = detect_cyrillic(text, span=span)
+        if hit:
+            hit["kind"] = "cyrillic"
+            return hit
         return None
     except Exception:
         return None          # 検査が落ちても応答は続ける(fail-safe)
@@ -4109,6 +4117,7 @@ def detect_nonjp(text, span=20):
 _NONJP_KIND = {
     "hangul":     {"label": "ハングル", "event": "hangul",     "ref": "ORG-45"},
     "simplified": {"label": "簡体字",   "event": "simplified", "ref": "HQ-2026-09-01"},
+    "cyrillic":   {"label": "キリル",   "event": "cyrillic",   "ref": "HQ-0227"},
 }
 
 
@@ -4218,8 +4227,11 @@ def strip_meta(dept, rec, reply):
 #     狭めれば代わりに本物を見逃す。「鳴った件数」ではなく「止まった件数(=0であるべき)」で見る。
 HANGUL_WARN = "⚠️(自動)生成不良: 非日本語スクリプト(ハングル)混入を検知。要確認。"
 SIMPLIFIED_WARN = "⚠️(自動)生成不良: 日本の漢字でない簡体字の混入を検知。要確認。"
-# kind → 警告文。★警告文そのものに簡体字・ハングルを入れない(再検査で自分の警告に鳴くため)。
-_NONJP_WARN = {"hangul": HANGUL_WARN, "simplified": SIMPLIFIED_WARN}
+# ★キリルの警告文にキリル文字そのものを書かない(「К」と例示したら自分の警告に鳴く)。
+CYRILLIC_WARN = "⚠️(自動)生成不良: ラテン文字そっくりのキリル文字混入を検知。名乗りが壊れている恐れ。要確認。"
+# kind → 警告文。★警告文そのものに簡体字・ハングル・キリルを入れない(再検査で自分の警告に鳴くため)。
+_NONJP_WARN = {"hangul": HANGUL_WARN, "simplified": SIMPLIFIED_WARN,
+               "cyrillic": CYRILLIC_WARN}
 
 
 def hangul_gate(text, regen=None, strip_marker=None):
