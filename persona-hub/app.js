@@ -26,6 +26,11 @@
   // 人事部門が正本へ反映する=そのための"差分に名前(#1/#2/id)を付けて指せる化"と変更メモが役目。
   var EDIT_KEY = "persona_hub_edits_v1";
 
+  // 直接アップロード(ページから正本へ)。go5-sync Worker に PUT /api/img → POST /api/persona/enqueue。
+  // ★トークンはページに埋めない=Chamiがこの端末のlocalStorageへ1回だけ入れる(埋めると誰でも書けてしまう・デブライネ制約)。
+  var SYNC_BASE = "https://go5-sync.trustsignalbot.workers.dev";
+  var TOKEN_KEY = "go5_sync_token_v1";
+
   var state = { personas: {}, names: [], filtered: [], selected: null, edits: {}, addSeq: 0 };
   var els = {};
 
@@ -149,6 +154,112 @@
     els.detail.innerHTML = html;
     wireCopyButtons();
     wireAvatarButtons(name);
+    wireThumbZoom();
+  }
+
+  // ── 画像ズーム(ライトボックス) ──
+  // サムネ(.avatar-thumb)をクリック→原寸オーバーレイ。ホイール/ダブルクリックで拡大、
+  // 拡大中はドラッグで移動、背景クリック/×/Escで閉じる。正本には一切触れない表示専用。
+  var lb = null;
+
+  function ensureLightbox() {
+    if (lb) return lb;
+    var ov = document.createElement("div");
+    ov.className = "lb-overlay";
+    ov.innerHTML =
+      '<button class="lb-close" type="button" aria-label="閉じる">×</button>' +
+      '<div class="lb-stage"><img class="lb-img" alt=""></div>' +
+      '<div class="lb-cap"></div>';
+    document.body.appendChild(ov);
+    lb = {
+      ov: ov,
+      stage: ov.querySelector(".lb-stage"),
+      img: ov.querySelector(".lb-img"),
+      cap: ov.querySelector(".lb-cap"),
+      close: ov.querySelector(".lb-close"),
+      scale: 1, tx: 0, ty: 0,
+      drag: null
+    };
+    lb.close.addEventListener("click", closeLightbox);
+    ov.addEventListener("wheel", onLbWheel, { passive: false });
+    ov.addEventListener("dblclick", function () { setZoom(lb.scale > 1 ? 1 : 2.5); });
+    lb.stage.addEventListener("pointerdown", onLbDown);
+    lb.stage.addEventListener("pointermove", onLbMove);
+    lb.stage.addEventListener("pointerup", onLbUp);
+    lb.stage.addEventListener("pointercancel", onLbUp);
+    return lb;
+  }
+
+  function applyLb() {
+    lb.img.style.transform =
+      "translate(-50%,-50%) translate(" + lb.tx + "px," + lb.ty + "px) scale(" + lb.scale + ")";
+    lb.stage.classList.toggle("is-zoomed", lb.scale > 1);
+  }
+
+  function setZoom(s) {
+    lb.scale = Math.max(1, Math.min(6, s));
+    if (lb.scale <= 1) { lb.tx = 0; lb.ty = 0; }
+    applyLb();
+  }
+
+  function openLightbox(url, label) {
+    ensureLightbox();
+    lb.img.src = url;
+    lb.cap.innerHTML = label ? "<b>" + esc(label) + "</b>" : "";
+    lb.scale = 1; lb.tx = 0; lb.ty = 0; applyLb();
+    lb.ov.classList.add("is-open");
+    document.addEventListener("keydown", onLbKey);
+  }
+
+  function closeLightbox() {
+    if (!lb) return;
+    lb.ov.classList.remove("is-open");
+    lb.img.src = "";
+    document.removeEventListener("keydown", onLbKey);
+  }
+
+  function onLbKey(e) {
+    if (e.key === "Escape") closeLightbox();
+    else if (e.key === "+" || e.key === "=") setZoom(lb.scale + 0.5);
+    else if (e.key === "-") setZoom(lb.scale - 0.5);
+  }
+
+  function onLbWheel(e) {
+    e.preventDefault();
+    setZoom(lb.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+  }
+
+  function onLbDown(e) {
+    lb.drag = { x: e.clientX, y: e.clientY, tx: lb.tx, ty: lb.ty, moved: false, zoomed: lb.scale > 1 };
+    if (lb.scale > 1) { lb.stage.classList.add("is-panning"); lb.stage.setPointerCapture(e.pointerId); }
+  }
+
+  function onLbMove(e) {
+    if (!lb.drag) return;
+    var dx = e.clientX - lb.drag.x, dy = e.clientY - lb.drag.y;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) lb.drag.moved = true;
+    if (lb.drag.zoomed) { lb.tx = lb.drag.tx + dx; lb.ty = lb.drag.ty + dy; applyLb(); }
+  }
+
+  function onLbUp(e) {
+    lb.stage.classList.remove("is-panning");
+    var d = lb.drag; lb.drag = null;
+    if (!d) return;
+    if (!d.moved) {
+      // 動かさずクリック=拡大していなければ背景で閉じる/画像でズームイン
+      if (e.target === lb.img && lb.scale <= 1) setZoom(2.5);
+      else if (e.target !== lb.img) closeLightbox();
+    }
+  }
+
+  function wireThumbZoom() {
+    Array.prototype.forEach.call(els.detail.querySelectorAll(".avatar-thumb"), function (img) {
+      img.addEventListener("click", function () {
+        var cell = img.closest ? img.closest(".av-cell") : null;
+        var idNode = cell && cell.querySelector(".av-id");
+        openLightbox(img.getAttribute("src"), idNode ? idNode.textContent : "");
+      });
+    });
   }
 
   function normalizeUrls(u) {
@@ -191,10 +302,14 @@
         '<h3 class="section-title">アイコン差分 <span class="section-count">(' + count + "枚)</span></h3>" +
         '<div class="avatar-grid av-grid">' + body + "</div>" +
         '<div class="av-actions">' +
-          '<button class="av-add-btn" data-act="add">＋ 画像を追加</button>' +
+          '<button class="av-add-btn av-up-btn" data-act="upload">⬆ 直接アップロード(正本へ)</button>' +
+          '<button class="av-add-btn av-add-local" data-act="add">＋ 手元メモに追加</button>' +
+          '<button class="av-token-btn" data-act="settoken">🔑 トークン' + (getSyncToken() ? "設定済" : "未設定") + '</button>' +
           '<input type="file" class="av-file" accept="image/*" hidden>' +
+          '<input type="file" class="av-file-up" accept="image/*" hidden>' +
         "</div>" +
-        '<p class="av-hint">ページ内の変更は<b>この端末の手元だけ</b>に残る(未反映)。消した/足したら「変更メモをコピー」して人事部門へ伝えれば正本へ反映する。追加した画像は、その便に元画像も添付して送る。</p>' +
+        '<div class="av-upmsg" hidden></div>' +
+        '<p class="av-hint"><b>Discord添付は不要。</b>「直接アップロード」を押して画像を選ぶだけで正本へ入る(この端末に書き込みトークンを1回だけ設定する=🔑ボタン。ページには埋め込まない)。取り込み常駐が動けば数十秒で台帳に反映される。<br>ネット越しが使えない時の別口=取り込みフォルダ <code>local/persona_inbox/&lt;キャラ名&gt;/</code> に置いて <code>scripts/hr/ingest_persona_images.py</code>。「手元メモに追加」はこの端末だけの下書き(未反映)。サムネはクリックで拡大できる。</p>' +
       "</section>";
   }
 
@@ -209,10 +324,17 @@
         else if (act === "undo-remove") markRemove(name, btn.getAttribute("data-url"), false);
         else if (act === "undo-add") undoAdd(name, btn.getAttribute("data-id"));
         else if (act === "add") { var f = sec.querySelector(".av-file"); if (f) f.click(); }
+        else if (act === "upload") {
+          if (!getSyncToken() && !setSyncToken()) { setUploadMsg("トークン未設定=中止した(🔑で1回だけ設定が要る)。", true); return; }
+          var fu = sec.querySelector(".av-file-up"); if (fu) fu.click();
+        }
+        else if (act === "settoken") { setSyncToken(); if (state.selected) renderDetail(state.selected); }
       });
     });
     var file = sec.querySelector(".av-file");
     if (file) file.addEventListener("change", function () { handleAddFile(name, file.files && file.files[0]); });
+    var fileUp = sec.querySelector(".av-file-up");
+    if (fileUp) fileUp.addEventListener("change", function () { directUpload(name, fileUp.files && fileUp.files[0]); fileUp.value = ""; });
   }
 
   function markRemove(name, url, on) {
@@ -242,6 +364,66 @@
       refreshAfterEdit(name);
     };
     reader.readAsDataURL(file);
+  }
+
+  // ── 直接アップロード(ページ→正本)。PUT /api/img(先)→ POST /api/persona/enqueue ──
+  function getSyncToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  }
+  function setSyncToken() {
+    var v = window.prompt("go5-sync の書き込みトークン(SYNC_TOKEN)を貼り付け。\nこの端末のブラウザにだけ保存され、ページには埋め込まれない。\n(空で消去)", "");
+    if (v === null) return false; // キャンセル
+    v = (v || "").trim();
+    try { if (v) localStorage.setItem(TOKEN_KEY, v); else localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+    return !!v;
+  }
+  function sha256hex(buf) {
+    return crypto.subtle.digest("SHA-256", buf).then(function (d) {
+      return Array.prototype.map.call(new Uint8Array(d), function (b) {
+        return ("0" + b.toString(16)).slice(-2);
+      }).join("");
+    });
+  }
+  function setUploadMsg(text, isErr) {
+    var sec = els.detail.querySelector(".av-section");
+    if (!sec) return;
+    var m = sec.querySelector(".av-upmsg");
+    if (!m) return;
+    m.hidden = false;
+    m.textContent = text;
+    m.className = "av-upmsg" + (isErr ? " is-err" : "");
+  }
+  function directUpload(name, file) {
+    if (!file) return;
+    var token = getSyncToken();
+    if (!token) { if (!setSyncToken()) { setUploadMsg("トークン未設定=中止した。", true); return; } token = getSyncToken(); }
+    setUploadMsg("アップロード中… " + (file.name || "image"), false);
+    file.arrayBuffer().then(function (buf) {
+      return sha256hex(buf).then(function (sha) {
+        // ★画像PUTが先(でないと enqueue が key_not_uploaded=409 で弾かれる)。
+        return fetch(SYNC_BASE + "/api/img/" + sha, {
+          method: "PUT",
+          headers: { "X-Sync-Token": token, "Content-Type": file.type || "application/octet-stream" },
+          body: buf
+        }).then(function (r) {
+          if (!r.ok) throw new Error("画像PUT失敗 HTTP " + r.status);
+          return fetch(SYNC_BASE + "/api/persona/enqueue", {
+            method: "POST",
+            headers: { "X-Sync-Token": token, "Content-Type": "application/json" },
+            body: JSON.stringify({ persona: name, key: sha, ct: file.type || "" })
+          });
+        }).then(function (r2) {
+          return r2.json().catch(function () { return {}; }).then(function (j) {
+            if (!r2.ok || !j.ok) throw new Error("投函失敗 HTTP " + r2.status + (j && j.error ? " " + j.error : ""));
+            var id = sha.slice(-6);
+            if (j.deduped) setUploadMsg("既に登録済みの画像だった(重複スキップ)。id …" + id, false);
+            else setUploadMsg("投函できた(確認待ち)。取り込み常駐が動けば数十秒で台帳に反映される。id …" + id + (j.line ? " / 行" + j.line : ""), false);
+          });
+        });
+      });
+    }).catch(function (err) {
+      setUploadMsg("失敗: " + String((err && err.message) || err) + "(トークン誤り/常駐未起動/通信不可の可能性)。", true);
+    });
   }
 
   function refreshAfterEdit(name) {
@@ -277,7 +459,7 @@
         var i = urls.indexOf(u);
         parts.push("削除 #" + (i >= 0 ? i + 1 : "?") + " (id " + shortId(u) + ")");
       });
-      if (e.added && e.added.length) parts.push("追加 " + e.added.length + "枚 (この便に画像を添付)");
+      if (e.added && e.added.length) parts.push("追加 " + e.added.length + "枚 (画像は local/persona_inbox/" + n + "/ に置く=Discord添付は不要)");
       if (parts.length) lines.push("■" + n + ": " + parts.join(" / "));
     });
     copyText(lines.join("\n"));

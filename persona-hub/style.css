@@ -84,7 +84,8 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 /* アイコン差分：Discord風の丸サムネ */
 .avatar-grid{display:flex;flex-wrap:wrap;gap:8px;}
 .avatar-thumb{width:52px;height:52px;border-radius:50%;object-fit:cover;
-  border:1px solid var(--line);background:var(--sink);}
+  border:1px solid var(--line);background:var(--sink);cursor:zoom-in;}
+.avatar-thumb:hover{border-color:var(--accent);}
 
 /* 差分の一覧＋手元編集(#番号・id で指せる化＋追加/削除) */
 .av-grid{flex-direction:column;gap:8px;}
@@ -104,11 +105,41 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 .av-tag{flex:0 0 auto;font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;}
 .av-tag-del{color:var(--accent);border:1px solid var(--accent);}
 .av-tag-add{color:var(--sage);border:1px solid #4f583b;}
-.av-actions{margin-top:10px;}
+.av-actions{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
 .av-add-btn{font-size:12.5px;font-weight:700;border-radius:9px;padding:7px 14px;
   cursor:pointer;background:var(--accent);color:var(--accent-ink);border:none;}
+.av-add-btn.av-add-local{background:transparent;color:var(--sub);border:1px solid var(--line);}
+.av-token-btn{font-size:11.5px;font-weight:600;border-radius:9px;padding:6px 11px;
+  cursor:pointer;background:transparent;color:var(--sub);border:1px solid var(--line);}
+.av-upmsg{margin:9px 0 0;font-size:11.5px;line-height:1.6;color:var(--sage);
+  background:var(--sink);border:1px solid var(--line);border-radius:9px;padding:8px 11px;
+  word-break:break-word;}
+.av-upmsg.is-err{color:var(--warn);border-color:var(--warn);}
 .av-hint{margin:9px 0 0;font-size:11px;color:var(--sub);line-height:1.6;}
 .av-hint b{color:var(--ink);}
+
+/* 画像ズーム(ライトボックス)。サムネをクリック→原寸オーバーレイ。
+   ホイール/ダブルタップで拡大、ドラッグで移動、背景クリック/×/Escで閉じる。 */
+.lb-overlay{position:fixed;inset:0;z-index:1000;display:none;
+  background:rgba(10,8,5,.92);touch-action:none;}
+.lb-overlay.is-open{display:block;}
+.lb-stage{position:absolute;inset:0;overflow:hidden;cursor:zoom-out;}
+.lb-img{position:absolute;top:50%;left:50%;transform-origin:center center;
+  transform:translate(-50%,-50%) translate(0px,0px) scale(1);
+  max-width:92vw;max-height:88vh;border-radius:8px;user-select:none;
+  -webkit-user-drag:none;box-shadow:0 8px 40px rgba(0,0,0,.6);}
+.lb-stage.is-zoomed{cursor:grab;}
+.lb-stage.is-zoomed .lb-img{max-width:none;max-height:none;}
+.lb-stage.is-panning{cursor:grabbing;}
+.lb-close{position:absolute;top:14px;right:16px;z-index:2;
+  width:40px;height:40px;border-radius:50%;font-size:20px;line-height:1;
+  cursor:pointer;background:var(--card2);color:var(--ink);
+  border:1px solid var(--accent);}
+.lb-close:hover{background:var(--accent);color:var(--accent-ink);}
+.lb-cap{position:absolute;left:0;right:0;bottom:14px;text-align:center;
+  font-size:12px;color:var(--sub);pointer-events:none;
+  font-family:ui-monospace,Consolas,monospace;}
+.lb-cap b{color:var(--ink);}
 
 /* 口調 */
 .tone-sub-label{font-size:11.5px;color:var(--sub);font-weight:700;margin:8px 0 4px;}
