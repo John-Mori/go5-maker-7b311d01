@@ -5,18 +5,19 @@
 なぜ要るか:
   candidates_json.py(商品選定)が回るたびに候補JSONを丸ごと書き直し、④comments=[] /
   room_comments無し に戻る。vision と軍議(三笘/芽衣)を通す前に publish すると
-  空ページが客先へ出る(2026-08-23の寸前事故)。しかも room_comments には自動生成器が
-  無い=放置すると毎朝手で埋め直しになる。
+  空ページが客先へ出る(2026-08-23の寸前事故)。
 
 何をするか(必ずこの順で通す):
-  ① 退避   … 既存 candidates_<date>.json の {cid: comments / room_comments} を控える
-  ② 再生成 … candidates_json.py(商品選定・product-scout)を実行(= comments空/room無しに戻る)
-  ③ 引継ぎ … 退避分を cid で書き戻す(既に済んだ④comments/room_comments を守る=持続化)
-  ④ vision … vision_comments.py で「まだ空の候補だけ」④comments を埋める(fail-open)
-  ⑤ 配信   … publish_candidates.py(空配信ガード付き=全候補充填でなければ止まる)
+  ① 退避    … 既存 candidates_<date>.json の {cid: comments / room_comments} を控える
+  ② 再生成  … candidates_json.py(商品選定・product-scout)を実行(= comments空/room無しに戻る)
+  ③ 引継ぎ  … 退避分を cid で書き戻す(既に済んだ④comments/room_comments を守る=持続化)
+  ④ vision  … vision_comments.py で「まだ空の候補だけ」④comments を埋める(既定OFF・下記)
+  ④.5 三笘/芽衣 … room_comments.py で「まだ空の候補だけ」room_comments を生成(fail-open)
+  ⑤ 配信    … publish_candidates.py(空配信ガード付き=全候補充填でなければ止まる)
 
-  ★新しく入った cid の room_comments は自動生成器が無い=空のまま → ⑤のガードが止める
-    (=軍議で手当が要ると分かる)。既存 cid は毎回引き継がれる=繰り返しの手作業はゼロ。
+  ★room_comments は自動生成器を得た(2026-08-31・改修α)=新cidも④.5で自動で埋まる。
+    生成に失敗/画像なしの cid だけ空で残り、⑤のガードが止める(=軍議で手当が要ると分かる)。
+    既存 cid は毎回引き継がれる=繰り返しの手作業はゼロ。--no-room で④.5を止められる。
   ★あらすじ本文・秘密は一切 candidates_<date>.json 本体へ書かない(publishが丸ごとR2へ
     上げる=client漏れ)。ここは comments / room_comments だけを触る。
 
@@ -38,6 +39,7 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 TEIAN_DIR = os.path.join(ROOT, "local", "teian")
 GEN = os.path.join(ROOT, "docs", "departments", "product-scout", "tools", "candidates_json.py")
 VISION = os.path.join(HERE, "vision_comments.py")
+ROOM = os.path.join(HERE, "room_comments.py")
 PUBLISH = os.path.join(HERE, "publish_candidates.py")
 
 
@@ -127,6 +129,9 @@ def main() -> int:
                     help="④ vision(サンプル画像から3択)を回す。★既定OFF=Chami指示2026-08-23"
                          "(msg 1541180961272889384): 画像なし段階のサンプル生成は投稿画像で作り直すので無駄。"
                          "コメントは今すぐ投稿できる作品の投稿画像から作る=日次のサンプル一括生成は止める。")
+    ap.add_argument("--no-room", action="store_true",
+                    help="④.5 room_comments(三笘/芽衣の解説)生成をスキップ。既定=ON(空の候補だけ埋める)")
+    ap.add_argument("--room-limit", type=int, default=0, help="room_comments が埋める候補数(0=全部・既定)")
     ap.add_argument("--publish-force", action="store_true", help="空配信ガードを無視して配信")
     args = ap.parse_args()
 
@@ -170,6 +175,17 @@ def main() -> int:
             # fail-open: 続行はするが publish のガードが空を止める
     else:
         print("④ vision: 既定スキップ(--vision で従来のサンプル一括生成。Chami指示2026-08-23)")
+
+    # ④.5 room_comments(三笘/芽衣の解説。まだ空の候補だけ生成=引継ぎ済みは温存)
+    # ★room_comments は「Chami専用の使い捨てpitch(公開されない)」=vision④commentsのサンプル問題とは
+    #   別枠で既定ON。新cidの手当を毎朝ゼロにするのが目的(改善書§6・Chami依頼2026-08-31)。--no-room で停止。
+    if args.no_room:
+        print("④.5 room_comments: --no-room=スキップ(空の room_comments は⑤のガードが止める)")
+    else:
+        rc = run([py, ROOM, "--in", src, "--limit", str(args.room_limit)],
+                 args.dry_run, f"④.5 room_comments.py(三笘/芽衣・空の候補のみ・limit={args.room_limit})")
+        if rc != 0:
+            sys.stderr.write("room_comments 生成が失敗。空のまま=⑤のガードが止める(fail-open)。\n")
 
     # ⑤ 配信(空配信ガード付き)
     if args.no_publish:
