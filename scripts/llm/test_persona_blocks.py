@@ -182,8 +182,27 @@ def main():
     # ★ここから先の check は**生きたコーパス**の件数ぶん増える= 総数は日によって動く。
     #   固定分の数を控えておき、最後に別々に出す(HQ検算 2026-09-01: 同じ HEAD で
     #   51/51 → 48/48 → 50/50 と割れた真因がこれだった。総数だけ見ると齟齬に見える)。
+    # ★★2026-09-01 訂正= 上の2ファイルは**同じ便を両方に持っている**。片方は本文を700字、
+    #   もう片方は500字で切るので、本文のハッシュでは重複が落ちない(実測= msg_id
+    #   1544095173124816896 / DISPATCH-hr-room-1788212395104 の2便が二重に数えられ、
+    #   当室は9件を11件と申告した)。**msg_id で重複を落とす**= §1「有利に盛れる数は
+    #   重複を落とした小さい真値で出す」。msg_id が無い行だけ本文で代用する。
+    # ★★重複を落とす時に「先に読んだ方を採る」をやると**検体を取りこぼす**(実測)=
+    #   発注(3)で recent 側だけ浄化したので、同じ便の写しが「片方は破損・片方は正名」に
+    #   なっている(msg 1544087406028914759 など3便)。先勝ちだと浄化済みの写しを採って
+    #   破損検体が9→6に減った。**写しを全部見て、1つでも破損なら破損の写しを採る。**
     fixed_n = len(results)
-    seen_broken = seen_clean = 0
+
+    # ★検体の定義= **タグの形**でКが入っている便だけ(resolver と同じ窓の中)。
+    #   2026-08-08 の1本は `ККールの声での報告だ` と**地の文**で化けているだけで、
+    #   名乗りタグではない= 機構が触る対象ではない(HQの分析と同じ切り方)。
+    def _broken_tag(text):
+        return any(
+            (dd._tag_match(l) or ("",))[0].find(K) >= 0
+            for l in [x for x in text.split("\n") if x.strip()][:dd._SOLO_PREAMBLE_MAX_LINES + 1])
+
+    uniq = {}
+    order = []
     for path in corpus:
         if not os.path.isfile(path):
             print(f"  SKIP: コーパスが無い({path})")
@@ -193,36 +212,74 @@ def main():
             if not ln:
                 continue
             try:
-                r = str(json.loads(ln).get("reply") or "")
+                _row = json.loads(ln)
+                r = str(_row.get("reply") or "")
             except Exception:
                 continue
             if not r:
                 continue
-            out, rec = solo_run(r)
-            hit = [o for o, _ in rec if o == "tag_homoglyph_leak"]
-            # ★検体の定義= **タグの形**でКが入っている便だけ(resolver と同じ窓の中)。
-            #   2026-08-08 の1本は `ККールの声での報告だ` と**地の文**で化けているだけで、
-            #   名乗りタグではない= 機構が触る対象ではない(HQの分析と同じ切り方)。
-            broken_tag = any(
-                (dd._tag_match(l) or ("",))[0].find(K) >= 0
-                for l in [x for x in r.split("\n") if x.strip()][:dd._SOLO_PREAMBLE_MAX_LINES + 1])
-            if broken_tag:
-                seen_broken += 1
-                check("実コーパス: 破損便を検知し本文は無傷", bool(hit) and out == r)
-            elif hit:
-                seen_clean += 1
-                check("実コーパス: 正常便で誤発火しない(1件も鳴らない)", False)
+            key = str(_row.get("msg_id") or "") or ("body:" + r[:200])
+            if key not in uniq:
+                uniq[key] = r
+                order.append(key)
+            elif _broken_tag(r) and not _broken_tag(uniq[key]):
+                uniq[key] = r      # 破損している写しを優先(浄化済みの写しで隠さない)
+
+    seen_broken = seen_clean = 0
+    for key in order:
+        r = uniq[key]
+        out, rec = solo_run(r)
+        hit = [o for o, _ in rec if o == "tag_homoglyph_leak"]
+        if _broken_tag(r):
+            seen_broken += 1
+            check("実コーパス: 破損便を検知し本文は無傷", bool(hit) and out == r)
+        elif hit:
+            seen_clean += 1
+            check("実コーパス: 正常便で誤発火しない(1件も鳴らない)", False)
     if seen_broken:
         print(f"  (実コーパスの破損検体 {seen_broken}件を全部検知・誤発火 {seen_clean}件)")
     else:
         print("  SKIP: 実コーパスに破損検体が無い(窓が入れ替わった)")
 
+    # ---- 6.5) ★受け入れ条件の固定(研究室HQ DISPATCH-aegis-gl-1788213934335)----
+    #   「今日の検体= gen=18 の9便を全部検知」。上の走査は**件数を印字するだけ**で、
+    #   数え方を間違えても緑のままだった(実測= 重複の落とし方を先勝ちにすると9→6に
+    #   減るが、それでも 6/6 PASS と出た)。そこで**この9本のmsg_idを名指しで固定する**。
+    #   コーパスは追記式(hr-room.jsonl)なので、時間が経っても消えない。
+    GEN18_SAMPLES = [
+        "DISPATCH-hr-room-1788200414414",   # 03:28:42
+        "DISPATCH-hr-room-1788200684995",   # 03:31:11
+        "1544081974363291729",              # 05:51:06
+        "1544081794238783619",              # 05:51:38
+        "1544087406028914759",              # 05:53:58
+        "1544087977955819570",              # 05:55:38
+        "DISPATCH-hr-room-1788210550541",   # 06:14:07
+        "1544095173124816896",              # 06:27:00(=recent側 06:22:57 と同一便)
+        "DISPATCH-hr-room-1788212395104",   # 06:45:42(=recent側 06:39:55 と同一便)
+    ]
+    pinned_at = len(results)   # ここから先は「固定」扱い(コーパスの中身で増減しない)
+    missing = [m for m in GEN18_SAMPLES if m not in uniq]
+    if missing:
+        check(f"受け入れ条件: gen=18 の9検体がコーパスに在る(欠け {len(missing)}本)", False)
+    else:
+        undetected = []
+        for mid in GEN18_SAMPLES:
+            r = uniq[mid]
+            _out, _rec = solo_run(r)
+            if not (_broken_tag(r) and any(o == "tag_homoglyph_leak" for o, _ in _rec)
+                    and _out == r):
+                undetected.append(mid)
+        check("受け入れ条件: gen=18 の9検体を全部検知し本文を1字も変えない", not undetected)
+        if undetected:
+            print(f"    取りこぼし= {undetected}")
+
     ok = all(v for _, v in results)
     fixed_pass = sum(v for _, v in results[:fixed_n])
-    live_pass = sum(v for _, v in results[fixed_n:])
-    live_n = len(results) - fixed_n
-    # ★再現できる数=固定分。live 分はコーパス次第で増減するので分けて出す。
-    print(f"\n== 固定 {fixed_pass}/{fixed_n} PASS + 実コーパス {live_pass}/{live_n} "
+    live = results[fixed_n:pinned_at]
+    pinned = results[pinned_at:]
+    # ★再現できる数=固定分と受け入れ分。live 分はコーパス次第で増減するので分けて出す。
+    print(f"\n== 固定 {fixed_pass}/{fixed_n} PASS + 受け入れ {sum(v for _, v in pinned)}/{len(pinned)} "
+          f"+ 実コーパス {sum(v for _, v in live)}/{len(live)} "
           f"(合計 {sum(v for _, v in results)}/{len(results)}) ==")
     return 0 if ok else 1
 
