@@ -180,12 +180,56 @@
     if (!input) return;
     try { U.jsonp(url, { action: 'comp_add_seed', url: input, name: (entry && entry.name) || '' }, function () {}); } catch (e) {}
   }
-  // 既存のlocalStorage登録をGASへ一度だけ移送(接続前に貯めた分の片寄せ)。
-  function migrateToGas() {
-    var url = gasUrl(); if (!url) return;
-    try { if (localStorage.getItem('competitor_gas_migrated') === '1') return; } catch (e) {}
-    load().forEach(function (c) { syncToGas(c); });
-    try { localStorage.setItem('competitor_gas_migrated', '1'); } catch (e) {}
+  // ── 監視リストとの突き合わせ(抜けの補充＋差分カウント) ──────────────
+  // UIの登録(localStorage)を監視シート(GAS 競合_チャンネル)へ突き合わせ、シートに
+  // 無いものを comp_add_seed で補充する。comp_add_seed の応答 added=true が「監視に
+  // 載っていなかった=差分」・added=false が既存・ok=false が未解決。これで抜けを埋め
+  // つつ差分件数も同時に数える。
+  //   ★なぜ旧 migrateToGas を廃止したか(2026-09-01・Chami依頼 競合監視の抜け):
+  //     旧版は competitor_gas_migrated='1' の一度きりで、(a) GAS URL未設定時に登録した分
+  //     (syncToGasが空振り)、(b) GAS側で未解決だった分(comp_add_seedがunresolvedで
+  //     行を書かない)を後から拾えず、UIには載るが監視シートに無い=毎日4時の収集から
+  //     漏れる恒久的な穴になっていた。reconcileは冪等な comp_add_seed(既存はスキップ)を
+  //     使うので何度でも回せ、穴を自己修復する。差分はlocalStorageが在るこのブラウザで
+  //     しか出せないため、件数はここで算出して compStatus に表示する。
+  function reconcile(opts) {
+    opts = opts || {};
+    var url = gasUrl();
+    if (!url || !U.jsonp) { if (opts.manual) status('先に ⚙️詳細設定 で「記録用GASのURL」を設定してください。', true); return; }
+    var arr = load();
+    if (!arr.length) { if (opts.manual) status('登録がありません。'); return; }
+    if (opts.manual) status('監視リストと同期中…(' + arr.length + '件を確認)');
+    var pending = arr.length, missing = 0, existed = 0, failed = 0;
+    function done() {
+      if (--pending > 0) return;
+      try { localStorage.setItem('competitor_reconcile_at', String(Date.now())); } catch (e) {}
+      if (!(opts.manual || missing > 0 || failed > 0)) return; // 自動時で差分ゼロなら黙る
+      status('監視リストと同期しました：補充 ' + missing + '件 / 既存 ' + existed + '件'
+        + (failed ? ' / 未解決 ' + failed + '件(URLか@ハンドルを確認)' : ''), failed > 0);
+      if (missing > 0) loadAnalysis(); // 監視数が増えたのでKPIを取り直す
+    }
+    arr.forEach(function (c) {
+      // GAS側の再解決コストを抑えるため、channelIdが分かっていればchannel-URL形で送る(0ユニット)。
+      var sendUrl = (c && c.channelId) ? 'https://www.youtube.com/channel/' + c.channelId : ((c && c.input) || '');
+      if (!sendUrl) { failed++; done(); return; }
+      try {
+        U.jsonp(url, { action: 'comp_add_seed', url: sendUrl, name: (c && c.name) || '' }, function (r) {
+          if (r && r.ok && r.added === true) missing++;
+          else if (r && r.ok) existed++;
+          else failed++;
+          done();
+        });
+      } catch (e) { failed++; done(); }
+    });
+  }
+  // 起動時の自動突き合わせ(初回、または前回から12時間以上経過していれば裏で走る)。
+  //   手動ボタン(compSync)は常時実行。頻繁なGAS呼び出しを避けるため間引く。
+  function autoReconcile() {
+    if (!gasUrl()) return;
+    var last = 0;
+    try { last = parseInt(localStorage.getItem('competitor_reconcile_at') || '0', 10) || 0; } catch (e) {}
+    if (Date.now() - last < 12 * 60 * 60 * 1000) return;
+    reconcile({ manual: false });
   }
 
   // 題名群からパターンを集計(平均長/Short率/頻出タグ)。競合名は保存せず表示のみ。
@@ -341,9 +385,10 @@
     var b = $('compAdd'); if (b) b.addEventListener('click', add);
     var inp = $('compInput'); if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
     render();
-    migrateToGas();   // 接続前に貯めたlocalStorage登録をGASへ片寄せ(一度だけ)
+    autoReconcile();  // UI登録を監視リストへ突き合わせ(抜けを補充・初回/12h毎)
     loadAnalysis();   // 分析パネルをGASから充填
     var rb = $('compAnalysisRefresh'); if (rb) rb.addEventListener('click', loadAnalysis);
+    var sb = $('compSync'); if (sb) sb.addEventListener('click', function () { reconcile({ manual: true }); });
     // 同期で他端末から更新が入ったら再描画(存在すれば購読)。
     // ★実際に取り込んだ変更(pulled>0)の時だけ再描画する。タブ復帰(pageshow/focus/online)で
     //   毎回鳴る go5-synced に無条件で反応すると、変更が無くても一覧を作り直して画面が一瞬白く
