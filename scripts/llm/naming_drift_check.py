@@ -27,9 +27,22 @@
   正しい形は文脈で変わる(「一ノ瀬怜さんが」と紹介する文まで潰す)。ここは**数えて見せるだけ**。
   直すのは人事部門(呼称ルール.json と人格文脈)であって、この機構ではない。
 
+★是正の**後**を測る時(--since):
+  人事部門が生成側へ再ピンを入れた(2026-08-31・00_AI-HQ 6b1dc54)。「減ったか」を見るには
+  **是正より後に書かれた行だけ**を数える必要がある= 既定の14日窓は是正前のバックログが
+  支配していて、そこを見ても再ピンの効きは読めない。`--since 2026-08-31` で窓の始まりを
+  **絶対日で**留める(`--days` は台帳の最終日から数え直すので、日が経つと基準がずれる)。
+  ★★是正直後は窓が数日しか無い= 持続の条件(日数≥MIN_DAYS)は**原理的に満たせない**。
+    だからこの窓の「持続ドリフトなし」は**直った証拠ではない**(C-041=一度の観測を状態の
+    代理にしない)。--since を付けた時は持続判定を出さず、**生の件数と件/日**だけを見せる。
+  ★件数を比べる時は必ず**件/日**で比べろ= 14日ぶんと3日ぶんの生の件数を並べると、
+    窓が短くなっただけの減少を「効いた」と読む。
+
 使い方:
     python scripts/llm/naming_drift_check.py            … 今の持続ドリフトを表で見る
     python scripts/llm/naming_drift_check.py --days 30  … 窓を変える
+    python scripts/llm/naming_drift_check.py --since 2026-08-31
+                                                        … 是正後だけを件/日で数える
 """
 import argparse
 import collections
@@ -71,22 +84,38 @@ def load_rows(path=None):
     return out
 
 
-def _aggregate(rows, end, window):
+def _end_date(rows, end):
+    """窓の終わり。★既定は**台帳の最終日**であって「今日」ではない(理由は `_aggregate`)。"""
+    days_of = [r["ts"][:10] for r in rows if r.get("ts")]
+    if not days_of:
+        return None
+    try:
+        return dt.date.fromisoformat(end or max(days_of))
+    except ValueError:
+        return None
+
+
+def _aggregate(rows, end, window, since=None):
     """(target, found) ごとに窓の中を畳む。
 
     ★端の扱い= `end` を含む `window` 日(end 当日を1日目と数える)。既定の end は台帳の最終日
       であって「今日」ではない= 台帳が数日止まっていても、止まる前の窓をそのまま見せる
       (「今日」を基準にすると、書き手が死んだ時に**静かに0件=健康**へ倒れる)。
+    ★`since` を渡すと窓の始まりを**絶対日で**留める(is-fixed の測定用・`window` と併用可=
+      両方の内側だけが残る)。`--days` は台帳の最終日から数え直すので、是正日を基準に
+      したい場面では日が経つたびに基準がずれる= そこを固定するための引数。
     """
     if not rows:
         return {}
-    days_of = [r["ts"][:10] for r in rows if r.get("ts")]
-    if not days_of:
+    end_d = _end_date(rows, end)
+    if end_d is None:
         return {}
-    try:
-        end_d = dt.date.fromisoformat(end or max(days_of))
-    except ValueError:
-        return {}
+    since_d = None
+    if since:
+        try:
+            since_d = dt.date.fromisoformat(since)
+        except ValueError:
+            return {}
 
     agg = collections.defaultdict(
         lambda: {"count": 0, "days": set(), "personas": set(),
@@ -99,6 +128,8 @@ def _aggregate(rows, end, window):
         except ValueError:
             continue
         if not (0 <= (end_d - d).days < window):
+            continue
+        if since_d is not None and d < since_d:
             continue
         a = agg[(r["target"], r["found"])]
         a["count"] += 1
@@ -126,11 +157,51 @@ def _unreadable(a):
     return a["found"] in (a["expected"] or [])
 
 
-def unreadable(rows=None, end=None, window=WINDOW_DAYS):
+def span_days(rows=None, since=None, end=None, window=WINDOW_DAYS):
+    """窓が実際に何日ぶんか(0なら窓が空)。
+
+    ★件数を比べる時は必ずこれで割れ。是正の後は窓が短い= 生の件数は必ず小さく出るので、
+      14日ぶんと3日ぶんの件数を並べると「窓が縮んだだけの減少」を効果と読む。
+    """
+    rows = load_rows() if rows is None else rows
+    end_d = _end_date(rows, end)
+    if end_d is None:
+        return 0
+    n = window
+    if since:
+        try:
+            n = min(window, (end_d - dt.date.fromisoformat(since)).days + 1)
+        except ValueError:
+            return 0
+    return max(0, n)
+
+
+def counts(rows=None, since=None, end=None, window=WINDOW_DAYS):
+    """窓の中の**生の件数**を組ごとに返す(持続のしきい値を通さない)。
+
+    ★用途は是正後の測定= 是正直後は日数が足りず `scan()` は必ず空になる。その空を
+      「直った」と読ませないために、しきい値と無関係な素の数をここで見せる。
+    ★`unreadable` な組も落とさず flag を立てて返す= 鳴らせないだけで、出ている事実は同じ。
+    """
+    rows = load_rows() if rows is None else rows
+    out = []
+    for (target, found), a in _aggregate(rows, end, window, since=since).items():
+        out.append({
+            "target": target, "found": found, "expected": a["expected"],
+            "count": a["count"], "days": len(a["days"]),
+            "personas": sorted(p for p in a["personas"] if p),
+            "first": a["first"], "last": a["last"],
+            "unreadable": _unreadable(dict(a, target=target, found=found)),
+        })
+    out.sort(key=lambda d: (-d["count"], d["target"], d["found"]))
+    return out
+
+
+def unreadable(rows=None, end=None, window=WINDOW_DAYS, since=None):
     """鳴らせない(=台帳から直す先が読めない)組を件数順で返す。理由は `_unreadable`。"""
     rows = load_rows() if rows is None else rows
     out = []
-    for (target, found), a in _aggregate(rows, end, window).items():
+    for (target, found), a in _aggregate(rows, end, window, since=since).items():
         a = dict(a, target=target, found=found)
         if _unreadable(a):
             out.append({"target": target, "found": found,
@@ -140,14 +211,17 @@ def unreadable(rows=None, end=None, window=WINDOW_DAYS):
 
 
 def scan(rows=None, end=None, window=WINDOW_DAYS,
-         min_count=MIN_COUNT, min_days=MIN_DAYS, min_personas=MIN_PERSONAS):
+         min_count=MIN_COUNT, min_days=MIN_DAYS, min_personas=MIN_PERSONAS,
+         since=None):
     """持続ドリフトを件数の多い順で返す。
 
     戻り値= [{"target","found","expected","count","days","personas","first","last","reasons"}]
+    ★`since` で窓を狭めた時、返り値が空でも「直った」ではない= 窓の日数が min_days に
+      届かなければ**何が起きていても空**になる。狭い窓で測るなら `counts()` を見ろ。
     """
     rows = load_rows() if rows is None else rows
     out = []
-    for (target, found), a in _aggregate(rows, end, window).items():
+    for (target, found), a in _aggregate(rows, end, window, since=since).items():
         if _unreadable(dict(a, target=target, found=found)):
             continue
         if (a["count"] >= min_count and len(a["days"]) >= min_days
@@ -191,6 +265,7 @@ def sig(drifts):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=WINDOW_DAYS)
+    ap.add_argument("--since", help="窓の始まりを絶対日で留める(是正後の測定用 YYYY-MM-DD)")
     ap.add_argument("--json", action="store_true")
     ns = ap.parse_args(argv)
     try:
@@ -198,6 +273,27 @@ def main(argv=None):
     except Exception:
         pass
     rows = load_rows()
+    if ns.since:
+        # ★是正後モード= 持続判定は出さない(窓が短いと原理的に空になり「直った」と誤読
+        #   される)。素の件数と**件/日**だけを見せる。
+        cs = counts(rows, since=ns.since, window=ns.days)
+        n = span_days(rows, since=ns.since, window=ns.days)
+        if ns.json:
+            print(json.dumps({"since": ns.since, "span_days": n, "counts": cs},
+                             ensure_ascii=False, indent=2))
+            return 0
+        print("台帳の判定行 %d / %s以降 %d日ぶん(★持続判定はしない=件数だけ)"
+              % (len(rows), ns.since, n))
+        if not cs:
+            print("この窓には1件も無い。★ただし**日数が %d 日しか無い**= "
+                  "『直った』の証拠にはならない(是正前の窓と比べるなら件/日で)" % n)
+        for c in cs:
+            print("- %s を **%s** と呼んでいる(正=%s): 件%d 日%d 人%d = **%.2f件/日**%s"
+                  % (c["target"], c["found"], "/".join(c["expected"]) or "?",
+                     c["count"], c["days"], len(c["personas"]),
+                     (c["count"] / n) if n else 0.0,
+                     "(鳴らせない)" if c["unreadable"] else ""))
+        return 0
     ds = scan(rows, window=ns.days)
     un = unreadable(rows, window=ns.days)
     if ns.json:

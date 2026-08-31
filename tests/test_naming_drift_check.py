@@ -64,6 +64,12 @@ def increment_only(rows, end, prev_end):
     return after - before
 
 
+def persistence_only(rows, since, end):
+    """是正後を**持続判定で**測る版。実際に動く= 是正日以降の窓に scan をかけるだけ。
+    だが窓が min_days に届かない間は、何件出ていても必ず空= 「直った」に見える。"""
+    return ndc.scan(rows, since=since, end=end)
+
+
 def pairs(drifts):
     return {(d["target"], d["found"]) for d in drifts}
 
@@ -122,6 +128,35 @@ def main():
     assert [d["found"] for d in d_after if ndc.banned(d)] == ["一ノ瀬"], \
         "禁止後の再発を取り違えている"
     ok.append("禁止に載せた後の再発は、顔ぶれが同じでも一度だけ鳴り直す")
+
+    # 8) ★must-fail: 是正の**後**を持続判定で測る版は、窓が短い間ずっと空=
+    #    「直った」に見える。実際には是正日以降にも同じ形が出ている(counts が拾う)。
+    #    (場面= 人事が生成側へ再ピンを入れた 2026-08-31・00_AI-HQ 6b1dc54 の後の測定)
+    FIX = "2026-08-24"          # 是正が入った日。ここから END までは 2日ぶんしかない
+    after_fix = rows + [row("2026-08-%02d" % d, "一ノ瀬怜", "一ノ瀬", ["怜"], "人格%d" % d)
+                        for d in (24, 25)]
+    assert persistence_only(after_fix, FIX, END) == [], "前提が崩れた(持続判定版が空でない)"
+    post = {(c["target"], c["found"]): c
+            for c in ndc.counts(after_fix, since=FIX, end=END)}
+    assert ICHINOSE in post and post[ICHINOSE]["count"] > 0, \
+        "是正後にも出ている形を、件数でも取りこぼしている"
+    ok.append("持続判定版が『空=直った』に見せる是正直後を、件数は取りこぼさない")
+
+    # 9) 件数は窓の長さで必ず縮む= **件/日**で割らないと「窓が短くなっただけ」を効果と読む。
+    n_post = ndc.span_days(after_fix, since=FIX, end=END)
+    n_all = ndc.span_days(after_fix, end=END)
+    assert n_post == 2 and n_all == ndc.WINDOW_DAYS, "窓の日数を数え違えている: %d/%d" % (
+        n_post, n_all)
+    whole = {(c["target"], c["found"]): c for c in ndc.counts(after_fix, end=END)}
+    assert post[ICHINOSE]["count"] < whole[ICHINOSE]["count"], "前提が崩れた(生の件数が減らない)"
+    assert post[ICHINOSE]["count"] / n_post > whole[ICHINOSE]["count"] / n_all, \
+        "件/日で見ると悪化しているのに、生の件数だけ見て改善と読める状態"
+    ok.append("窓が縮んで生の件数が減った場面で、件/日は悪化を隠さない")
+
+    # 10) 鳴らせない組も是正後の測定からは落とさない(鳴らせない≠出ていない)
+    assert any(c["unreadable"] for c in ndc.counts(after_fix, end=END)), \
+        "鳴らせない組を件数からも消している"
+    ok.append("鳴らせない組も件数には残る")
 
     print("\n".join("PASS  " + s for s in ok))
     print("%d/%d PASS" % (len(ok), len(ok)))
