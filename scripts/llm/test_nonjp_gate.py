@@ -114,6 +114,14 @@ def test_kind_table():
     for kind, warn in d._NONJP_WARN.items():
         _check("表: %s の警告文が自分の検知器に鳴かない" % kind,
                d.detect_nonjp(warn) is None)
+    # ★`jp` の枕詞= ハングル/簡体字は「日本語では」でよいが、キリルの `jp` は**ラテン文字**だ。
+    #   枕詞を使い回すと監査ログが「日本語ではK」と嘘を書く。既定と上書きの両方をここで固定する。
+    _check("枕詞: ハングルは既定のまま(『日本語では』)",
+           d._NONJP_KIND["hangul"].get("as", "日本語では") == "日本語では")
+    _check("枕詞: 簡体字は既定のまま(『日本語では』)",
+           d._NONJP_KIND["simplified"].get("as", "日本語では") == "日本語では")
+    _check("枕詞: キリルは『日本語では』と言わない(ラテン文字のそっくりさん)",
+           d._NONJP_KIND["cyrillic"].get("as", "日本語では") != "日本語では")
 
 
 def test_gate_ladder():
@@ -159,9 +167,56 @@ def test_gate_ladder():
     _check("梯子: 簡体字は従来どおり警告付き", info["warned"] and d.SIMPLIFIED_WARN in out)
 
 
+def test_audit_record():
+    """audit_hangul を**実行で**通す(§3=外へ出る手だけ偽物・判定と分岐は本物)。
+
+    偽物にするのは2つだけ= ①書き込み先 HANGUL_AUDIT(一時ファイルへ向ける) ②log(標準出力へ
+    垂れ流さず配列へ溜める)。detect_nonjp も _NONJP_KIND も本物のまま走る。
+    ★これが無いと「表に as が在る」だけの検査になり、**ログ文が実際に変わったか**を誰も見ていない。
+    """
+    import json
+    import tempfile
+
+    real_audit, real_log = d.HANGUL_AUDIT, d.log
+    tmpdir = tempfile.mkdtemp(prefix="nonjp_audit_")
+    d.HANGUL_AUDIT = os.path.join(tmpdir, "hangul_audit.jsonl")
+    lines = []
+    d.log = lambda dept, msg: lines.append(msg)
+    try:
+        d.audit_hangul("aegis-gl", {"msg_id": "1"}, HANGUL_JP)
+        d.audit_hangul("aegis-gl", {"msg_id": "2"}, SIMPLIFIED_JP)
+        d.audit_hangul("aegis-gl", {"msg_id": "3"}, CYRILLIC_JP)
+        d.audit_hangul("aegis-gl", {"msg_id": "4"}, NORMAL_JP)   # 鳴らない=1行も書かない
+        recs = [json.loads(x) for x in
+                open(d.HANGUL_AUDIT, encoding="utf-8").read().splitlines() if x.strip()]
+    finally:
+        d.HANGUL_AUDIT, d.log = real_audit, real_log
+
+    _check("監査: 鳴った3件だけが着地し、通常返信は1行も書かない", len(recs) == 3 and len(lines) == 3)
+    _check("監査: event は kind どおり",
+           [r["event"] for r in recs] == ["hangul", "simplified", "cyrillic"])
+    _check("監査: キリルの char/codepoint が実物(К U+041A)",
+           recs[2]["char"] == "К" and recs[2]["codepoint"] == "U+041A")
+    # ★嘘の枕詞をここで赤くする= 「日本語ではK」と書いたら FAIL。
+    #   ★実行して分かった現状(推定ではない)= detect_hangul は `jp` を返さないので、
+    #     ハングルのログには枕詞の節が**そもそも出ない**。簡体字だけが「=日本語では実」を出す。
+    _check("監査ログ: ハングルは jp を持たず枕詞の節が出ない(現状の観測)",
+           "日本語では" not in lines[0] and "ハングル混入を検知 판(U+D310)" in lines[0])
+    _check("監査ログ: 簡体字は従来どおり『=日本語では実』", "=日本語では実" in lines[1])
+    _check("監査ログ: キリルは『日本語では』と書かない",
+           "日本語では" not in lines[2])
+    _check("監査ログ: キリルは『見た目は』でラテン文字を示す", "=見た目はK" in lines[2])
+    _check("監査: jsonl の as も kind ごとに正しい",
+           recs[0]["as"] == "日本語では" and recs[1]["as"] == "日本語では"
+           and recs[2]["as"] == "見た目は")
+    _check("監査: 本物の hangul_audit.jsonl は触っていない",
+           d.HANGUL_AUDIT == real_audit and d.log is real_log)
+
+
 if __name__ == "__main__":
     test_detect_each_kind()
     test_kind_table()
     test_gate_ladder()
+    test_audit_record()
     print("\n%d PASS / %d FAIL" % (_PASS, _FAIL))
     sys.exit(1 if _FAIL else 0)

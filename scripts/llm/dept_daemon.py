@@ -4117,17 +4117,23 @@ def detect_nonjp(text, span=20):
 _NONJP_KIND = {
     "hangul":     {"label": "ハングル", "event": "hangul",     "ref": "ORG-45"},
     "simplified": {"label": "簡体字",   "event": "simplified", "ref": "HQ-2026-09-01"},
-    "cyrillic":   {"label": "キリル",   "event": "cyrillic",   "ref": "HQ-0227"},
+    "cyrillic":   {"label": "キリル",   "event": "cyrillic",   "ref": "HQ-0227",
+                   # ★キリルの `jp` は**そっくりなラテン文字**であって日本語ではない。
+                   #   ログの枕詞まで使い回すと「日本語ではK」という嘘の計器になる=ここで切る。
+                   "as": "見た目は"},
 }
 
 
 def audit_hangul(dept, rec, reply):
-    """返信直前の**非日本語文字**(ハングル/簡体字)検知をログと監査ファイルへ残す(送信は止めない)。
+    """返信直前の**非日本語文字**(ハングル/簡体字/キリル)検知をログと監査ファイルへ残す(送信は止めない)。
 
     書式・置き場は既存の WORK_AUDIT / MARKER_AUDIT の作法に合わせた1行1件のjsonl。
-    ★簡体字も**同じファイル**(hangul_audit.jsonl)へ入れる= 置き場を分けると片方しか見ない。
-      区別は event フィールド("hangul" / "simplified")で付く=後から数え分けられる。
-    ★関数名は hangul のまま= 呼び出し側(送信直前の合流点)を触らずに済ませるため。
+    ★簡体字もキリルも**同じファイル**(hangul_audit.jsonl)へ入れる= 置き場を分けると片方しか見ない。
+      区別は event フィールド("hangul" / "simplified" / "cyrillic")で付く=後から数え分けられる。
+    ★関数名は hangul のまま= 呼び出し側(送信直前の合流点・生きた呼び出しは1箇所)を触らずに済ませるため。
+    ★ログの枕詞は kind ごとに変える= `hit["jp"]` はハングル/簡体字では「日本語での字」だが、
+      キリルでは**そっくりなラテン文字**だ。枕詞を使い回すと「日本語ではK」という嘘の計器になる。
+      既定は "日本語では" のままなので、ハングル/簡体字のログ文は1文字も変わらない。
     """
     try:
         hit = detect_nonjp(reply)
@@ -4135,8 +4141,9 @@ def audit_hangul(dept, rec, reply):
             return None
         k = _NONJP_KIND.get(hit.get("kind"), _NONJP_KIND["hangul"])
         jp = hit.get("jp") or ""
+        as_label = k.get("as", "日本語では")
         log(dept, f"★{k['label']}混入を検知 {hit['char']}({hit['codepoint']})"
-                  f"{'=日本語では' + jp if jp else ''} "
+                  f"{'=' + as_label + jp if jp else ''} "
                   f"位置={hit['index']} 前後20字=…{hit['context']}… "
                   f"※{k['ref']}。送信は止めない・自動修正もしない")
         os.makedirs(os.path.dirname(HANGUL_AUDIT), exist_ok=True)
@@ -4148,6 +4155,9 @@ def audit_hangul(dept, rec, reply):
                 "ref": k["ref"],
                 "char": hit["char"],
                 "jp": jp,
+                # ★`jp` の読み方(既存フィールドは触らず、読み方だけ足す=既存の集計を壊さない)。
+                #   "日本語では"= ハングル/簡体字 / "見た目は"= キリル(ラテン文字のそっくりさん)。
+                "as": as_label,
                 "codepoint": hit["codepoint"],
                 "index": hit["index"],
                 "context": hit["context"],
