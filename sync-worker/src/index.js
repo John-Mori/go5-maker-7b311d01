@@ -14,6 +14,8 @@
  *   GET  /api/img/has?keys=a,b  → { ok, present:[...存在するkey] }（アップロード要否の判定）
  *   PUT  /api/img/:key          → 本文=画像バイト。R2 に保存（既存なら何もしない＝冪等）。{ ok, key }
  *   GET  /img/:key              → R2 から配信（トークン不要＝<img src>用・key は sha256 で推測困難・長期キャッシュ）
+ *   POST /api/persona/enqueue   → body {persona, key}。人格ハブが上げたアイコンの「申告」を
+ *                                  R2 persona/queue.jsonl へ**追記だけ**する。{ ok, line }
  *   GET  /api/teian/latest       → 提案候補の当日JSONを配信（トークン必須）。R2 teian/latest.json。
  *   GET  /api/teian/:date        → 指定日(YYYY-MM-DD)の提案候補JSON。R2 teian/<date>.json。未配信は {empty:true}。
  *                                  ※書き込みは wrangler r2 object put（PC側=scripts/teian/publish_candidates.py）。
@@ -68,6 +70,13 @@ export default {
       if (request.method !== "GET" && request.method !== "HEAD") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
       return serveTeian(decodeURIComponent(path.slice("/api/teian/".length)), env, cors);
+    }
+
+    // 人格ハブ アイコン追加の申告（POST /api/persona/enqueue）
+    if (path === "/api/persona/enqueue" && request.method === "POST") {
+      if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
+      if (await rateLimited(env)) return json({ ok: false, error: "rate_limited" }, 429, cors);
+      return personaEnqueue(request, env, cors);
     }
 
     // 状態 push
@@ -179,6 +188,43 @@ async function imgHas(url, env, cors) {
   const present = [];
   for (const k of keys) { if (await env.SYNC_IMAGES.head(k)) present.push(k); }
   return json({ ok: true, present }, 200, cors);
+}
+
+// ── 人格ハブ アイコン追加の申告キュー ───────────────────────────
+//   なぜ要るか(2026-09-01 イージス研究室):
+//     画像バイトの口は既に在る(PUT /api/img/:key)。足りないのは「そのkeyが誰のアイコンか」を
+//     PC側へ伝える道だけだった。R2のオブジェクト一覧は wrangler に無い(get/put/delete のみ)ため、
+//     PC のポーラーは新着を発見できない。→ **固定キー1本の追記ログ**にして、
+//     PC は `wrangler r2 object get go5-sync-images/persona/queue.jsonl`(=アカウント資格)で読む。
+//   ★SYNC_TOKEN を PC へ置かない設計を崩さない(teian と同じ向き)= 書きは Worker・読みは wrangler。
+//   ★消さない= 1行ずつ追記するだけ。PC側が自分のカーソル(行数)を持つ。
+//     箱を空にしてから処理する形にすると、その隙に落ちた分が無言で消える(実害の記録あり)。
+const PQ_KEY = "persona/queue.jsonl";
+const PQ_MAX = 256 * 1024; // これを超えたら**黙って捨てず**エラーで返す(静かな喪失を作らない)
+function safeName(s) {
+  const t = String(s || "").replace(/[\x00-\x1f\x7f]/g, "").trim();
+  return t.length >= 1 && t.length <= 40 ? t : "";
+}
+async function personaEnqueue(request, env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  const body = parseJson(await request.text());
+  const persona = safeName(body && body.persona);
+  const key = String((body && body.key) || "");
+  if (!persona || !validKey(key)) return json({ ok: false, error: "bad_body" }, 400, cors);
+  // 申告された key の実体が R2 に在ることを先に確かめる(先に PUT /api/img/:key を通す約束)。
+  if (!(await env.SYNC_IMAGES.head(key))) return json({ ok: false, error: "key_not_uploaded" }, 409, cors);
+  const cur = await env.SYNC_IMAGES.get(PQ_KEY);
+  const prev = cur ? await cur.text() : "";
+  if (prev.length > PQ_MAX) return json({ ok: false, error: "queue_full" }, 507, cors);
+  // 同じ (persona,key) が既に申告済みなら足さない(冪等)。ページの二度押しで行が増えない。
+  const dup = '"persona":' + JSON.stringify(persona) + ',"key":"' + key + '"';
+  if (prev.indexOf(dup) >= 0) return json({ ok: true, deduped: true, line: prev.split("\n").filter(Boolean).length }, 200, cors);
+  const rec = JSON.stringify({ persona, key, ct: String((body && body.ct) || ""), at: new Date().toISOString() });
+  const next = prev + (prev.endsWith("\n") || prev === "" ? "" : "\n") + rec + "\n";
+  // ★read-modify-write= 同時申告が重なると片方が消えうる。手作業でアイコンを足す用途では
+  //   同時実行が起きない前提。起きたらページ側が再申告すれば冪等に戻る(消えた行は残らない)。
+  await env.SYNC_IMAGES.put(PQ_KEY, next, { httpMetadata: { contentType: "application/x-ndjson", cacheControl: "no-store" } });
+  return json({ ok: true, line: next.split("\n").filter(Boolean).length }, 200, cors);
 }
 
 // ── レート制限（KV日次カウンタ・未設定でも停止しない）─────────────
