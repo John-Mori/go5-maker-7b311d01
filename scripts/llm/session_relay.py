@@ -3590,6 +3590,69 @@ CHANGE_LOG_LOCK_STALE = 60.0        # 置き去りの錠を捨てる秒数(書�
 CHANGE_TS_MACHINE = "machine"       # 機械が観測して入れた
 CHANGE_TS_LEGACY = "self(機構導入前・未検証)"
 
+# ★repoは2つある。hashだけ書かれると、読み手は**片方で git show して「無い」**と出る。
+#   2026-08-31 研究室HQ: 報告の 6c905dc を 5SecMovieMaker で探して見つからず、
+#   「捏造を疑う一歩手前」まで行った(実物は 00_AI-HQ 側のcommitで、実装は正しかった)。
+#   「次からrepoも書いてくれ」という心がけは次の世代へ渡らないので機械で付ける(C-038)。
+CHANGE_REPOS = (("5SecMovieMaker", ROOT), ("00_AI-HQ", HQ))
+CHANGE_COMMIT_UNKNOWN = "未検出"     # ★どちらのrepoにも無い= 読み手が疑う前にここで見える
+_COMMIT_RE = re.compile(r"\b[0-9a-fA-F]{7,40}\b")
+_COMMIT_REPO_CACHE = {}
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0   # ★pythonwの常駐から git を呼ぶと黒窓が出る
+
+
+def _commit_in_repo(h, root):
+    """`h` がこの repo の commit か。True/False、**判定できなければ None**。
+
+    ★None と False を混ぜない= git が無い・時間切れ・repoが無いを「無い」と言い切ると、
+      正しいhashに「未検出」の印が付いて、これ自体が捏造の疑いを生む。
+    """
+    try:
+        r = subprocess.run(["git", "-C", root, "cat-file", "-t", h],
+                           capture_output=True, timeout=10, creationflags=_NO_WINDOW)
+    except Exception:                            # noqa: BLE001
+        return None
+    if r.returncode == 0:
+        return (r.stdout or b"").strip() == b"commit"
+    err = (r.stderr or b"").decode("utf-8", "replace").lower()
+    if "not a git repository" in err or "dubious ownership" in err or "cannot chdir" in err:
+        return None                              # gitやrepoが見えない= 判定不能
+    return False                                 # 「そんなobjectは無い」= 本当に無い
+
+
+def commit_repos(commit):
+    """commit hash に**どのrepoの実物か**を付ける。戻り値 `{hash: repo名}`。
+
+    - 両方に在る(短いhashの衝突)= `"5SecMovieMaker+00_AI-HQ"` と書く(黙って片方を選ばない)。
+    - どちらにも無い= `"未検出"`。★これが**書いた瞬間に効く検算**になる。
+    - 判定できなかったhashは**入れない**(印が無い= 機械が見ていない、の意味)。
+    """
+    seen, out = [], {}
+    def _walk(v):
+        if isinstance(v, (list, tuple)):
+            for x in v:
+                _walk(x)
+        elif v:
+            seen.extend(_COMMIT_RE.findall(str(v)))
+    _walk(commit)
+    for h in seen:
+        h = h.lower()
+        if h in out:
+            continue
+        if h not in _COMMIT_REPO_CACHE:
+            hit, unknown = [], False
+            for name, root in CHANGE_REPOS:
+                r = _commit_in_repo(h, root)
+                if r is None:
+                    unknown = True
+                elif r:
+                    hit.append(name)
+            _COMMIT_REPO_CACHE[h] = ("+".join(hit) if hit
+                                     else (None if unknown else CHANGE_COMMIT_UNKNOWN))
+        if _COMMIT_REPO_CACHE[h]:
+            out[h] = _COMMIT_REPO_CACHE[h]
+    return out
+
 
 def _now_iso():
     """`2026-07-29T16:21:07+09:00` の形。★書式もここで揃える(混在をやめる)。"""
@@ -3631,6 +3694,9 @@ def log_change(dept, what, why, touched="", commit=""):
         rec = {"ts": _now_iso(), "ts_source": CHANGE_TS_MACHINE, "dept": str(dept or ""),
                "何": str(what or ""), "なぜ": str(why or ""),
                "触った": str(touched or ""), "commit": str(commit or "")}
+        repos = commit_repos(commit)             # ★どのrepoのhashかを機械が付ける
+        if repos:
+            rec["commit_repo"] = repos
         with open(CHANGE_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             f.flush()
@@ -3718,6 +3784,12 @@ def normalize_change_log():
                     r["ts_skew_sec"] = skew
                 r["ts"] = now_iso
                 r["ts_source"] = CHANGE_TS_MACHINE
+                # ★規律は「各セッションが自分で1行足せ」= log_change を通らない行が来る。
+                #   ts と同じく**後追いで**repo名を付ける(付け直しはしない=冪等)。
+                if r.get("commit") and not r.get("commit_repo"):
+                    repos = commit_repos(r.get("commit"))
+                    if repos:
+                        r["commit_repo"] = repos
                 fixed += 1
             changed = True
             out.append(json.dumps(r, ensure_ascii=False))
