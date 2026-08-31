@@ -149,6 +149,112 @@
     els.detail.innerHTML = html;
     wireCopyButtons();
     wireAvatarButtons(name);
+    wireThumbZoom();
+  }
+
+  // ── 画像ズーム(ライトボックス) ──
+  // サムネ(.avatar-thumb)をクリック→原寸オーバーレイ。ホイール/ダブルクリックで拡大、
+  // 拡大中はドラッグで移動、背景クリック/×/Escで閉じる。正本には一切触れない表示専用。
+  var lb = null;
+
+  function ensureLightbox() {
+    if (lb) return lb;
+    var ov = document.createElement("div");
+    ov.className = "lb-overlay";
+    ov.innerHTML =
+      '<button class="lb-close" type="button" aria-label="閉じる">×</button>' +
+      '<div class="lb-stage"><img class="lb-img" alt=""></div>' +
+      '<div class="lb-cap"></div>';
+    document.body.appendChild(ov);
+    lb = {
+      ov: ov,
+      stage: ov.querySelector(".lb-stage"),
+      img: ov.querySelector(".lb-img"),
+      cap: ov.querySelector(".lb-cap"),
+      close: ov.querySelector(".lb-close"),
+      scale: 1, tx: 0, ty: 0,
+      drag: null
+    };
+    lb.close.addEventListener("click", closeLightbox);
+    ov.addEventListener("wheel", onLbWheel, { passive: false });
+    ov.addEventListener("dblclick", function () { setZoom(lb.scale > 1 ? 1 : 2.5); });
+    lb.stage.addEventListener("pointerdown", onLbDown);
+    lb.stage.addEventListener("pointermove", onLbMove);
+    lb.stage.addEventListener("pointerup", onLbUp);
+    lb.stage.addEventListener("pointercancel", onLbUp);
+    return lb;
+  }
+
+  function applyLb() {
+    lb.img.style.transform =
+      "translate(-50%,-50%) translate(" + lb.tx + "px," + lb.ty + "px) scale(" + lb.scale + ")";
+    lb.stage.classList.toggle("is-zoomed", lb.scale > 1);
+  }
+
+  function setZoom(s) {
+    lb.scale = Math.max(1, Math.min(6, s));
+    if (lb.scale <= 1) { lb.tx = 0; lb.ty = 0; }
+    applyLb();
+  }
+
+  function openLightbox(url, label) {
+    ensureLightbox();
+    lb.img.src = url;
+    lb.cap.innerHTML = label ? "<b>" + esc(label) + "</b>" : "";
+    lb.scale = 1; lb.tx = 0; lb.ty = 0; applyLb();
+    lb.ov.classList.add("is-open");
+    document.addEventListener("keydown", onLbKey);
+  }
+
+  function closeLightbox() {
+    if (!lb) return;
+    lb.ov.classList.remove("is-open");
+    lb.img.src = "";
+    document.removeEventListener("keydown", onLbKey);
+  }
+
+  function onLbKey(e) {
+    if (e.key === "Escape") closeLightbox();
+    else if (e.key === "+" || e.key === "=") setZoom(lb.scale + 0.5);
+    else if (e.key === "-") setZoom(lb.scale - 0.5);
+  }
+
+  function onLbWheel(e) {
+    e.preventDefault();
+    setZoom(lb.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+  }
+
+  function onLbDown(e) {
+    lb.drag = { x: e.clientX, y: e.clientY, tx: lb.tx, ty: lb.ty, moved: false, zoomed: lb.scale > 1 };
+    if (lb.scale > 1) { lb.stage.classList.add("is-panning"); lb.stage.setPointerCapture(e.pointerId); }
+  }
+
+  function onLbMove(e) {
+    if (!lb.drag) return;
+    var dx = e.clientX - lb.drag.x, dy = e.clientY - lb.drag.y;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) lb.drag.moved = true;
+    if (lb.drag.zoomed) { lb.tx = lb.drag.tx + dx; lb.ty = lb.drag.ty + dy; applyLb(); }
+  }
+
+  function onLbUp(e) {
+    lb.stage.classList.remove("is-panning");
+    var d = lb.drag; lb.drag = null;
+    if (!d) return;
+    if (!d.moved) {
+      // 動かさずクリック=拡大していなければ背景で閉じる/画像でズームイン
+      if (e.target === lb.img && lb.scale <= 1) setZoom(2.5);
+      else if (e.target !== lb.img) closeLightbox();
+    }
+  }
+
+  function wireThumbZoom() {
+    Array.prototype.forEach.call(els.detail.querySelectorAll(".avatar-thumb"), function (img) {
+      img.addEventListener("click", function () {
+        var cell = img.closest ? img.closest(".av-cell") : null;
+        var idNode = cell && cell.querySelector(".av-id");
+        openLightbox(img.getAttribute("src"), idNode ? idNode.textContent : "");
+      });
+    });
   }
 
   function normalizeUrls(u) {
@@ -194,7 +300,7 @@
           '<button class="av-add-btn" data-act="add">＋ 画像を追加</button>' +
           '<input type="file" class="av-file" accept="image/*" hidden>' +
         "</div>" +
-        '<p class="av-hint">ページ内の変更は<b>この端末の手元だけ</b>に残る(未反映)。消した/足したら「変更メモをコピー」して人事部門へ伝えれば正本へ反映する。追加した画像は、その便に元画像も添付して送る。</p>' +
+        '<p class="av-hint">ページ内の変更は<b>この端末の手元だけ</b>に残る(未反映)。消した/足したら「変更メモをコピー」して人事部門へ伝えれば正本へ反映する。<b>画像の追加はDiscord添付が不要</b>=取り込みフォルダ <code>local/persona_inbox/&lt;キャラ名&gt;/</code> に置けば人事部門が取り込む(<code>scripts/hr/ingest_persona_images.py</code>)。サムネはクリックで拡大できる。</p>' +
       "</section>";
   }
 
@@ -277,7 +383,7 @@
         var i = urls.indexOf(u);
         parts.push("削除 #" + (i >= 0 ? i + 1 : "?") + " (id " + shortId(u) + ")");
       });
-      if (e.added && e.added.length) parts.push("追加 " + e.added.length + "枚 (この便に画像を添付)");
+      if (e.added && e.added.length) parts.push("追加 " + e.added.length + "枚 (画像は local/persona_inbox/" + n + "/ に置く=Discord添付は不要)");
       if (parts.length) lines.push("■" + n + ": " + parts.join(" / "));
     });
     copyText(lines.join("\n"));
