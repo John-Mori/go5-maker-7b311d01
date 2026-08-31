@@ -5188,11 +5188,27 @@ def strip_solo_persona_tag(text, resolve, dept=""):
             return t
         # ★2026-09-01 追加= 化けた名前は _avatar_keys() に定義上載らないので上では数えられない。
         #   **resolver と同じ窓**(非空 _SOLO_PREAMBLE_MAX_LINES 行)を見て、部屋の人格名の
-        #   ホモグリフに見えるタグだけ tag_homoglyph_leak で数える。本文は1文字も触らない。
+        #   ホモグリフに見えるタグだけ tag_homoglyph_leak で数える。
+        #   ★2026-09-01 更新= 数えるだけ(§5-1)から**救済**(§5-2)まで進めた。下の for を見ろ。
         _names = tuple(getattr(resolve, "names", ()) or ())
         for _i, _tag in miss:
             if _audit_homoglyph(dept, _tag, _names, lines[_i].strip()):
+                # ★2026-09-01 §5-2 救済(研究室HQ DISPATCH-aegis-gl-1788213934335 で当室へ裁定委任)。
+                #   ここまで来た= ①foreign-script の字が在る ②長さ差≤1 ③編集距離≤上限 の3つ全部が
+                #   成立した= 化けた名乗りだと判った。**判ったのに素通しするのは、計器を見ながら
+                #   壊れた物を出荷しているのと同じ**。この部屋は名簿1人なので取り違えは起こらない
+                #   (誰と読み違えても行き先は同じ1人)= 多人格部屋には広げない(C-035)。
+                #   ★新しい削除経路は作らない= 下の**正規の落とし方へ合流する**だけ(共通規律§3
+                #     「新方式を作る前に、既に効いている型へ合流できないか見る」)。空になる時の
+                #     fail-open も前置きの全文記録も、そのまま効く。
+                #   ★leak の記録は上で既に1行出ている= 生成側が名前を壊した回数は救済後も
+                #     数え続けられる(救済で計器を黙らせない)。
+                _g = _homoglyph_near(_tag, _names)
+                _m = _tag_match(lines[_i])
+                if _g and _m:
+                    head, mm, who = _i, _m, _g
                 break
+    if not who:
         return t
     body = "\n".join([mm[1]] + lines[head + 1:]).strip()
     if not body:

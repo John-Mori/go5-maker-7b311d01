@@ -133,12 +133,22 @@ def main():
     s0 = "[%s] その2枚、もう入ってるぜ。" % BROKEN
     s2 = "Chami(部屋)への返信 —\n\n[%s]\n\nデブライネから返しが来た。" % BROKEN
     s4 = "Done. Report to Chami (output text = the reply):\n\n---\n\n[%s] 2つとも手ぇ入れといたよ。" % BROKEN
+    # ★2026-09-01 §5-2 で「数えるだけ」から「救済」へ進めた= 判定の物差しを変える。
+    #   旧: 本文を1文字も変えない(素通し)。新: **化けた便の出力が、同じ便の正名版の出力と
+    #   1文字たがわず一致する**= ホモグリフが下流から見えなくなったことの直接の確認。
+    #   これは「素通し」よりも強い= 落としすぎ/落とし足りない のどちらも赤くなる。
+    def _twin(s):
+        """検体の К(キリル) を ク へ戻した『正名版の双子』。"""
+        return str(s).replace(K, "ク")
+
     for nm, src in (("1行目", s0), ("前置きの後(2行目)", s2), ("前置き+区切り線の後(4行目)", s4)):
         out, rec = solo_run(src)
-        check(f"ホモグリフ: {nm}の破損タグを数える",
-              [o for o, _ in rec] == ["tag_homoglyph_leak"])
+        outcomes = [o for o, _ in rec]
+        check(f"ホモグリフ: {nm}の破損タグを数える", "tag_homoglyph_leak" in outcomes)
         check(f"ホモグリフ: {nm}=推定した正名で記録する", rec and rec[0][1] == KUKURU)
-        check(f"ホモグリフ: {nm}=本文は1文字も変えない", out == src)
+        twin_out, _ = solo_run(_twin(src))
+        check(f"ホモグリフ: {nm}=救済後の出力が正名版と完全一致", out == twin_out)
+        check(f"ホモグリフ: {nm}=救済したことも記録に残る", "tag_solo_fixed" in outcomes)
 
     # ★正常便は1文字も変えない・鳴らない(受け入れ条件の後半)
     clean = "[%s] ああ、ハブは全部ここで作ったやつだよ。\n\n続きの本文。" % KUKURU
@@ -232,7 +242,9 @@ def main():
         hit = [o for o, _ in rec if o == "tag_homoglyph_leak"]
         if _broken_tag(r):
             seen_broken += 1
-            check("実コーパス: 破損便を検知し本文は無傷", bool(hit) and out == r)
+            twin_out, _ = solo_run(_twin(r))
+            check("実コーパス: 破損便を検知し、出力が正名版と完全一致",
+                  bool(hit) and out == twin_out)
         elif hit:
             seen_clean += 1
             check("実コーパス: 正常便で誤発火しない(1件も鳴らない)", False)
@@ -266,10 +278,11 @@ def main():
         for mid in GEN18_SAMPLES:
             r = uniq[mid]
             _out, _rec = solo_run(r)
+            _twin_out, _ = solo_run(_twin(r))
             if not (_broken_tag(r) and any(o == "tag_homoglyph_leak" for o, _ in _rec)
-                    and _out == r):
+                    and _out == _twin_out):
                 undetected.append(mid)
-        check("受け入れ条件: gen=18 の9検体を全部検知し本文を1字も変えない", not undetected)
+        check("受け入れ条件: gen=18 の9検体を全部検知し、出力が正名版と完全一致", not undetected)
         if undetected:
             print(f"    取りこぼし= {undetected}")
 
