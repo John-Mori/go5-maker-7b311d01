@@ -41,6 +41,29 @@ description: テストや検査を新しく足した時・写像(マッピング
   **切り替わった瞬間にしか出ない取り違え**がある(実例= 429で私用キーへ跨いだ行が
   事業用として記録されていた)。1本目でわざと失敗を返し、2本目まで走らせること。
 
+## ★偽のFAIL/偽のPASSを作る罠= Pythonが古い `__pycache__` を掴む(2026-09-01 イージス研究室・実害つき)
+
+**変異と復帰でファイルのバイト数が変わらない時、Pythonは古い `.pyc` を「有効」と判定して読む。**
+`.pyc` の有効性判定は **ソースのサイズ + mtime(秒粒度)** だけだ。閾値の数字を差し替える型の
+must-fail(`< 40` → `< 35` → `< 30` → `< 35`)は**どれも2字でサイズが同一**、書き戻しが同じ秒に
+入ればmtimeも一致する= **ソースは新しいのに、走るのは古いコード**になる。
+
+実例(2026-09-01)= `lang_gate.py` の閾値を35へ直したのに試験が `26 PASS / 3 FAIL` から戻らない。
+`grep` も `inspect.getsource` も `< 35` を見せる。**ソースを読む手段は全部緑なのに実行だけが赤い。**
+このとき must-fail(閾値30)の結果も嘘で、C-5ではなくC-4が赤くなっていた= **無効な検証**だった。
+
+- ★**`python -B` では防げない。**`-B` は `.pyc` の**書き込み**を止めるだけで**読み込み**は止めない。
+- ★**切り分けは「実行中のコードの定数」を直接見る**のが速い(ソースを読み直しても同じ嘘を見る)=
+
+      python -c "import sys; sys.path.insert(0,'scripts/llm'); import lang_gate as g; \
+                 print([c for c in g.strip_english_preamble.__code__.co_consts if isinstance(c,int)])"
+
+  ここに**変異前の値**が出たら `.pyc` を掴んでいる。
+- ★**恒久の防ぎ方= 変異を書き戻すヘルパの中で毎回 `__pycache__/<module>.cpython-*.pyc` を消す。**
+  手で消す運用にしない(忘れた1回が偽の緑になる)。
+- ★**ついでに: 書き戻しは `read_bytes()` / `write_bytes()` で行う。**`io.open(p,'w')` はWindowsで
+  改行をCRLFへ変換し、**ファイル全体が差分になる**(実際に270行が全行差分になった)。
+
 ## 走らせ方(このプロジェクト)
 - JS= `node tests/test_xxx.js`(例 `tests/test_idb_failopen.js`)
 - Python= `python tests/test_xxx.py` / 常駐まわりは `python scripts/_daemons/test_daemon_keeper.py`
