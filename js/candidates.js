@@ -1504,6 +1504,15 @@
     if (Object.keys(m).length) map[cid] = m; else delete map[cid];
     imgMarksWrite_(map);
   }
+  // 投稿提案ページなど別タブが同じ正本を更新した時、開いている候補画像モーダルも即時追随する。
+  // storageイベントは書き込んだタブ自身には発火しないため、候補ページ内の既存change処理とは競合しない。
+  if (window && typeof window.addEventListener === 'function') {
+    window.addEventListener('storage', function (e) {
+      if (e && e.key !== K_IMGMARKS && e.key !== K_IMGMARKS_AT) return;
+      _imgMarksMem = null;
+      try { if (_zoom && !_zoom.hidden && _zoomMarkCid) zoomShow_(); } catch (err) {}
+    });
+  }
   function remapImgMarksForImages_(cid, oldImgs, newImgs) {
     cid = String(cid || ''); if (!cid) return;
     var map = imgMarksRead_(), before = map[cid]; if (!before || typeof before !== 'object') return;

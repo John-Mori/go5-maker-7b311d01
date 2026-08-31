@@ -56,4 +56,20 @@ assert.ok(html.includes('var delays=[3000,10000,30000,60000]'));
 assert.ok(cand.includes('{ __v: 2, at: at, map: map }'));
 assert.ok(cand.includes('remapSlotMarksForImages_'));
 
+// 投稿提案へ出すのは、未使用・未除外の動画生成用画像が1枚以上ある作品だけ。
+// 未加工一覧(rawImgs/rawKeys)は捨てず、提案画面の3択から通常へ戻す経路も保つ。
+const renderBody = html.slice(html.indexOf('function render(){'), html.indexOf('// グループ切替'));
+assert.ok(renderBody.includes('if(hasUsableRef_(c.cid)) ready.push(c)'), 'proposal visibility must require a usable image');
+assert.ok(renderBody.includes("if(!hasUsableRef_(cid)) return"), 'library merge must require a usable image');
+assert.ok(html.includes('rawImgs:rawImgs') && html.includes('rawKeys:rawKeys'), 'proposal must preserve the unfiltered image list');
+assert.ok(html.includes('slots:f.slots'), 'visible image must retain its original slot identity');
+assert.ok(html.includes('openRefMarkModal_'));
+['value=""', 'value="used"', 'value="excluded"'].forEach(function (value) {
+  assert.ok(html.includes(value), 'proposal image modal missing radio ' + value);
+});
+assert.ok(html.includes("LS.setItem(K_IMGMARKS,JSON.stringify(map))"), 'proposal mark must update the candidate-page LS source');
+assert.ok(html.includes("Go5Idb.set('meta:imgmarks',{__v:2,at:at,map:map})"), 'proposal mark must update the durable IDB mirror');
+assert.ok(html.includes('idb.at>nowAt'), 'a late old IDB read must not roll back a radio change');
+assert.ok(cand.includes("window.addEventListener('storage'"), 'an open candidate page must follow proposal mark changes');
+
 console.log('OK: KouhoTeian cache, image manifest, go5ref recovery and image marks are guarded');

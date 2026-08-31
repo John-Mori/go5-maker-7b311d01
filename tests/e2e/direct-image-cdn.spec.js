@@ -2,13 +2,14 @@
 const { test, expect } = require('@playwright/test');
 
 const HASH = 'a'.repeat(64);
+const HASH2 = 'b'.repeat(64);
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64'
 );
 
-async function serveImage(page) {
-  await page.route('**/img/' + HASH, async (route) => {
+async function serveImage(page, hash = HASH) {
+  await page.route('**/img/' + hash, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'image/png',
@@ -139,5 +140,61 @@ test.describe('direct image CDN manifest', () => {
     await expect(thumb).toBeVisible({ timeout: 1500 });
     await expect(thumb).toHaveAttribute('src', new RegExp('/img/' + HASH + '$'));
     await expect.poll(() => thumb.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+  });
+
+  test('proposal only shows a work with an available image and writes mark radios to the shared source', async ({ page }) => {
+    const cid = 'd_proposal_shared_image_marks';
+    await serveImage(page, HASH);
+    await serveImage(page, HASH2);
+    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ cid, hash1, hash2 }) => {
+      const at = Date.now();
+      localStorage.setItem('sync2_url', location.origin);
+      localStorage.removeItem('sync2_token');
+      localStorage.setItem('go5_image_manifest_v1', JSON.stringify({
+        ['ref:' + cid]: { keys: [hash1, hash2], prev: 0, at }
+      }));
+      localStorage.setItem('cand_img_marks', JSON.stringify({
+        [cid]: { ['@sha256:' + hash1]: 'used' }
+      }));
+      localStorage.setItem('cand_img_marks_at', String(at));
+      localStorage.setItem('teian_last_json', JSON.stringify({
+        date: '2026-08-31',
+        candidates: [{
+          id: 'proposal-shared-mark-1', cid, title: '使用可能画像だけで表示する作品', platform: 'doujin',
+          metrics: { score: 100, sales_n: 10 }, images: [], comments: []
+        }]
+      }));
+    }, { cid, hash1: HASH, hash2: HASH2 });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const thumb = page.locator('.teian-gen-img[data-refcid="' + cid + '"]');
+    await expect(thumb).toBeVisible();
+    await expect(thumb).toHaveAttribute('src', new RegExp('/img/' + HASH2 + '$'));
+
+    await thumb.click();
+    await expect(page.locator('.refzoom')).toBeVisible();
+    await expect(page.locator('.rzcount')).toHaveText('2 / 2');
+    await expect(page.locator('.rzmark input[value=""]')).toBeChecked();
+
+    await page.locator('.rzmark input[value="excluded"]').check();
+    await expect(thumb).toHaveCount(0);
+    await expect(page.locator('.refzoom')).toBeVisible();
+    const saved = await page.evaluate(({ cid, hash2 }) => {
+      const map = JSON.parse(localStorage.getItem('cand_img_marks') || '{}');
+      return { sha: map[cid] && map[cid]['@sha256:' + hash2], slot: map[cid] && map[cid]['@slot:1'] };
+    }, { cid, hash2: HASH2 });
+    expect(saved).toEqual({ sha: 'excluded', slot: 'excluded' });
+    await expect.poll(async () => page.evaluate(async ({ cid, hash2 }) => {
+      const rec = await Go5Idb.get('meta:imgmarks');
+      return !!(rec && rec.__v === 2 && rec.map && rec.map[cid] && rec.map[cid]['@sha256:' + hash2] === 'excluded');
+    }, { cid, hash2: HASH2 })).toBe(true);
+
+    await page.locator('.rznav.prev').click();
+    await expect(page.locator('.rzcount')).toHaveText('1 / 2');
+    await expect(page.locator('.rzmark input[value="used"]')).toBeChecked();
+    await page.locator('.rzmark input[value=""]').check();
+    await expect(thumb).toBeVisible();
+    await expect(thumb).toHaveAttribute('src', new RegExp('/img/' + HASH + '$'));
   });
 });
