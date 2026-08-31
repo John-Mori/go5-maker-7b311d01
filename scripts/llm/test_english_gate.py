@@ -79,6 +79,17 @@ PREAMBLE_JP = (
 # 先頭が固有名詞だけの短い英字=通常返信。剥がしてはいけない。
 LEADING_NOUN = "GitHub Pages に v=879 を反映した。プレビューは効いてる。確認済み。"
 
+# ★実物のニアミス(2026-09-01 aegis-gl・人事部門 msg 1544081974363291729 の冒頭そのまま)。
+#   英語前置きだが英字が **35字** しかなく、閾値 `head_latin < 40` に届かないので**剥がせていない**。
+#   ここで固定する狙いは「今こう動く」を実物で釘付けにすること= 閾値をいじる改修が入った時に、
+#   この検査が**意図して赤くなる**(黙って挙動が変わらない)。C-4 は現状仕様の固定であって、
+#   「これでいい」という判断ではない。閾値を下げる可否は誤発火の実測を添えて別便で出す。
+NEAR_MISS_35 = (
+    "Done. Report to Chami (output text = the reply):\n\n---\n\n"
+    "2つとも手ぇ入れといたよ、先輩。人格ハブのサムネをクリックしたら原寸オーバーレイで"
+    "開くようにした。ホイールかダブルクリックで拡大、拡大中はドラッグで移動できる。"
+)
+
 
 def test_detect():
     _check("実物の英文ダンプを検知", d.detect_english_dump(ENGLISH) is not None)
@@ -146,6 +157,24 @@ def test_strip_preamble():
     out, info = d.strip_english_preamble(ENGLISH)
     _check("C-3 まるごと英語は剥がさず後段へ委ねる(stripped=False)",
            (not info["stripped"]) and out == ENGLISH)
+
+    # C-4 実物のニアミス= 英語前置きだが英字35字で閾値40に届かない → **現状は剥がせない**。
+    #   剥がれないこと自体を固定する(黙って変わらないように)。閾値を触ればここが赤くなる。
+    out, info = d.strip_english_preamble(NEAR_MISS_35)
+    _check("C-4 実物35字の英語前置きは現状すり抜ける(stripped=False)",
+           (not info["stripped"]) and out == NEAR_MISS_35)
+    _check("C-4 すり抜けた前置きは本文に残ったまま", out.startswith("Done. Report to Chami"))
+    # ★どれだけ足りないかを釘付けにする= **前置き側**へ英字を5字足すと 40 に届いて剥がれる。
+    #   これで「35対40の1歩差ですり抜けている」ことが実行で示される(推定ではない)。
+    out5, info5 = d.strip_english_preamble("Again " + NEAR_MISS_35)
+    _check("C-4 前置きへ英字5字足すと閾値40に届いて剥がれる",
+           info5["stripped"] and info5["removed_latin"] == 40)
+    # ★実行して分かった副作用を一緒に釘付けにする(推定ではなく観測)=
+    #   切り出しは「最初の日本語文字」から始まるので、日本語本文の頭に付いた**半角数字は落ちる**。
+    #   実物の本文は "2つとも" で始まるが、剥離後は "つとも" になる。今は害が小さいので直さない。
+    #   直す時は、この検査が赤くなるので黙って変わらない。
+    _check("C-4 剥離は最初の日本語文字から=直前の半角数字は落ちる(現状の観測)",
+           out5.startswith("つとも手ぇ"))
 
     # コード柵で始まる本文は剥がさない(コードを誤除去しない・安全側)
     code_head = "```js\nfunction f(){ return doSomethingEnglishAndLong(x) }\n```\n直したよ。これで動く。効いてる。"
