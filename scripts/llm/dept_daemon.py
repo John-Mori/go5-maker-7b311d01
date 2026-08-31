@@ -4692,6 +4692,28 @@ def _tag_match(line):
     return mm.group("name"), mm.group("rest"), bool(mm.group("open"))
 
 
+def _name_forms(name):
+    """名乗りの揺れ(敬称1つ)を吸収した候補列を返す。無ければ空リスト。
+
+    「[アメスさん]」のような形を引けるようにするための前処理。
+    ★rstrip(文字集合)は使わない(「ホイミン」の末尾『ン/ん』まで削れる)。
+    ★**素の名前を先に試し、当たらなければ敬称を1つ落として再試行**する。
+      先に落とすと「ドンちゃん」(愛称そのものが別名)が「ドン」になって引けなくなる。
+    ★2026-08-31 関数へ切り出した。理由= 同じ形の判定を離れた場所が別々に持つと、
+      片方だけ直して**場面ごとに症状が残る**(名乗りタグの甲乙で実際に踏んだ型)。
+      resolve_persona_tag(名簿のある部屋)と solo_tag_resolver(単独人格部屋)は**この1本を共有する**。
+    """
+    n = str(name or "").strip()
+    if not n:
+        return []
+    forms = [n]
+    for _h in ("さん", "様", "さま", "ちゃん", "くん", "君"):
+        if len(n) > len(_h) and n.endswith(_h):
+            forms.append(n[:-len(_h)])
+            break
+    return forms
+
+
 def _peel_extra_tags(rest, resolve, limit=4):
     """名乗りタグの**同じ行に続く2つ目以降**のタグを剥ぐ(話者は最初のタグのまま)。
 
@@ -4730,9 +4752,11 @@ def _audit_preamble(dept, who, dropped):
 def _audit_tag(dept, who, outcome, line):
     """名乗りタグの**開き括弧抜け**を1行残す(persona_render_audit.jsonl へ合流)。
 
-    outcome の2つは対で読む(改善提案部門トトリの依頼 B):
-      - `tag_unbracketed_fixed` = 抜けた形を吸収して名義を解決できた= **直した回数**
-      - `tag_unbracketed_leak`  = 抜けた形に見えるが resolve 不能で本文のまま出した= **残った漏れ**
+    outcome は対で読む(改善提案部門トトリの依頼 B):
+      - `tag_unbracketed_fixed` = 抜けた形を吸収して名義を解決できた= **直した回数**(甲)
+      - `tag_unbracketed_leak`  = 抜けた形に見えるが resolve 不能で本文のまま出した= **残った漏れ**(甲)
+      - `tag_solo_fixed`        = 単独人格部屋で1行目のタグを落とした= **直した回数**(乙)
+      - `tag_solo_leak`         = 単独人格部屋の1行目が**他人格の名前**のタグで、落とさず出した(乙)
     ★片方だけでは読めない= leak が 0 でも、fixed も 0 なら「便が来ていないだけ」だ(C-041)。
     ★記録先を2つ持たない(共通規律§4)= 書き手は persona_render._audit 1本のまま。fail-open。
     """
@@ -4821,6 +4845,69 @@ def split_persona_blocks(text, resolve, dept=""):
     return out
 
 
+def solo_tag_resolver(conf, persona=""):
+    """**単独人格部屋**の閉じた名簿(=その部屋に出る1人)で `[名前]` を解決する関数を返す。
+
+    戻る関数の約束は resolve_persona_tag と同じ= 「通用する正式名 or None」。
+    ★名簿は1人だけ= 完全一致(敬称1つの揺れまで)なので取り違えようがない。
+      persona_avatars.json のような**広い集合へは倒さない**= 他人の名前を本文から剥がさない。
+    ★候補に effective_persona を含める理由= 名指し便(member)や代打(アメス)では
+      実際に出る名義がその人になる。**出る名義と同じ名前**だけを落とす形にする。
+    """
+    names = []
+    for src in (persona, (conf or {}).get("persona")):
+        s = str(src or "").strip()
+        if s and s not in names:
+            names.append(s)
+    if not names:
+        return lambda nm: None
+    canon = names[0]
+    cands = names + [str(a).strip() for a in ((conf or {}).get("aliases") or ()) if str(a).strip()]
+
+    def _resolve(nm):
+        for f in _name_forms(nm):
+            for c in cands:
+                if f == c or f.lower() == c.lower():
+                    return canon
+        return None
+    return _resolve
+
+
+def strip_solo_persona_tag(text, resolve, dept=""):
+    """単独人格部屋で、**1行目に残る名乗りタグ**だけを本文から落とす。戻り値=本文。
+
+    ★2026-08-31 実物= `local/_daemon_reply_llm-qa.txt` の1行目が `[中野五月]`(半角・括弧は揃っている)。
+      改善提案部門トトリの回送(msg 1543954248377696258)/ 引き金= Chami「名乗りが多いね、
+      ローカルllm質問部屋も五月が最初に名乗りがちだし。やめてよ」(msg 1543952785106669618)。
+      根因= 名乗りを剥がす手が **split_persona_blocks の中にしか無い**のに、
+      その split は `personas` を持つ部屋でしか呼ばれない(handle 側の安全弁)。
+      つまり単独人格部屋では**剥がす処理が一度も走らない**= タグがそのままChamiの画面へ出る。
+    ★ここでは**割らない**(候補が1人の部屋を割る意味は無い)。前置き落としもしない。
+      やるのは「1行目のタグを落とす」ことだけ= 単独部屋の挙動をこれ以上動かさない。
+    ★名義は動かさない= この部屋は既定の1人で出る。宛名は元から正しい(壊れていたのは本文だけ)。
+    ★fail-open= 名簿で引けない/落とすと空になる時は**1文字も触らない**。
+    """
+    t = str(text or "")
+    lines = t.split("\n")
+    if not lines:
+        return t
+    mm = _tag_match(lines[0])
+    if not mm:
+        return t
+    who = resolve(mm[0])
+    if not who:
+        # ★この部屋の人ではない= 触らない(`[検証]` のような本文かもしれない)。
+        #   ただし**どこかの人格名**だったのなら、それは漏れとして数える(直しはしない)。
+        if str(mm[0]).strip() in _avatar_keys():
+            _audit_tag(dept, "", "tag_solo_leak", lines[0].strip())
+        return t
+    body = "\n".join([mm[1]] + lines[1:]).strip()
+    if not body:
+        return t                     # ★落とすと空になる= 落とさない(沈黙させない)
+    _audit_tag(dept, who, "tag_solo_fixed", lines[0].strip())
+    return body
+
+
 _avatar_keys_cache = {"mtime": None, "keys": frozenset()}
 
 
@@ -4861,15 +4948,7 @@ def resolve_persona_tag(conf, name):
         n = str(name or "").strip()
         if not n:
             return None
-        # 「[アメスさん]」のような名乗りの揺れを吸収。
-        # ★rstrip(文字集合)は使わない(「ホイミン」の末尾『ン/ん』まで削れる)。
-        # ★**素の名前を先に試し、当たらなければ敬称を1つ落として再試行**する。
-        #   先に落とすと「ドンちゃん」(愛称そのものが別名)が「ドン」になって引けなくなる。
-        forms = [n]
-        for _h in ("さん", "様", "さま", "ちゃん", "くん", "君"):
-            if len(n) > len(_h) and n.endswith(_h):
-                forms.append(n[:-len(_h)])
-                break
+        forms = _name_forms(n)
         roster = (conf or {}).get("personas") or ()
         for f in forms:
             for p in roster:
@@ -6649,12 +6728,18 @@ class Daemon:
             #   複数ブロックあれば**それぞれの名義で連投**する(Chamiの「いろんな人に意見を求めたい」に応える)。
             #   ★personas を持たない部屋では split_persona_blocks を呼ばない
             #     = 既存19部屋は [(None, reply)] のまま=送信は旧版と1ミリも変わらない。
+            #   ★2026-08-31 単独人格の部屋も**1行目のタグだけ**は落とす(トトリの回送
+            #     msg 1543954248377696258 / Chami「名乗りが多いね…やめてよ」)。
+            #     実物= local/_daemon_reply_llm-qa.txt の1行目 `[中野五月]`。
+            #     ★割らない・前置きも落とさない= 単独部屋の挙動はタグ1行以外1ミリも変えない。
             if self.conf.get("personas"):
                 _blocks = split_persona_blocks(
                     reply, lambda nm: resolve_persona_tag(self.conf, nm),
                     dept=self.dept)
             else:
-                _blocks = [(None, reply)]
+                _blocks = [(None, strip_solo_persona_tag(
+                    reply, solo_tag_resolver(self.conf, self.effective_persona()),
+                    dept=self.dept))]
             # ★★出力ゲート ルールC(呼称違反チェック)= 話者依存(2026-07-30・Chami裁定②)。
             #   split_persona_blocks 解決後・ブロック単位で (話者=persona, 部屋=dept, 本文) を見る。
             #   ★2026-07-31 Chami『いいよ』で格上げ= **高信頼だけ本文を自動修正**、残りは警告のみ。
