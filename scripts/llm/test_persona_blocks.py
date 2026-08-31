@@ -179,6 +179,10 @@ def main():
     corpus = [os.path.join(root, "local", "llm", "recent_hr-room.jsonl"),
               os.path.normpath(os.path.join(root, "..", "00_AI-HQ", "departments", "hr",
                                             "memory", "hr-room.jsonl"))]
+    # ★ここから先の check は**生きたコーパス**の件数ぶん増える= 総数は日によって動く。
+    #   固定分の数を控えておき、最後に別々に出す(HQ検算 2026-09-01: 同じ HEAD で
+    #   51/51 → 48/48 → 50/50 と割れた真因がこれだった。総数だけ見ると齟齬に見える)。
+    fixed_n = len(results)
     seen_broken = seen_clean = 0
     for path in corpus:
         if not os.path.isfile(path):
@@ -214,7 +218,12 @@ def main():
         print("  SKIP: 実コーパスに破損検体が無い(窓が入れ替わった)")
 
     ok = all(v for _, v in results)
-    print(f"\n== {sum(v for _, v in results)}/{len(results)} PASS ==")
+    fixed_pass = sum(v for _, v in results[:fixed_n])
+    live_pass = sum(v for _, v in results[fixed_n:])
+    live_n = len(results) - fixed_n
+    # ★再現できる数=固定分。live 分はコーパス次第で増減するので分けて出す。
+    print(f"\n== 固定 {fixed_pass}/{fixed_n} PASS + 実コーパス {live_pass}/{live_n} "
+          f"(合計 {sum(v for _, v in results)}/{len(results)}) ==")
     return 0 if ok else 1
 
 
