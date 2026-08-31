@@ -67,6 +67,46 @@
     } catch (e) {}
   }
 
+  // ★単一の判定(cid単位の最終状態)を記帳する。トトリ(改善提案部門)提案・2026-08-31=
+  //   これまで img-diag は hydrate/timeout/stalled の「回数」しか出せず、Chamiが実機ログを
+  //   コピーしても「どの作品が・どのprefixで詰まっているか」が分からなかった(再発のたびに切り分け直し)。
+  //   呼び側(refSlotState_ 等)が返す判定 state をそのまま1つの真実として持つ=img-diag は再分類しない。
+  //   ★データ安全(添付Phase2書 §データ安全性)= stalled/loading を confirmed_missing へ昇格させない。
+  //     missing は呼び側(refSlotDecide_)が陽性確認(idbOk && refLoaded/inMem)した時だけ渡してくる値を
+  //     そのまま映すだけ。ここで「読めない→無い」を作らない(C-041)。画像実体の削除も一切しない。
+  var verdicts = Object.create(null);        // cid -> { state, prefix, t, first, n }
+  var VMAX = 2000;                            // cid数の暴走を一応抑える(通常は候補数=数百)
+  function verdict(cid, state, prefix) {
+    try {
+      if (!cid) return;
+      cid = String(cid); state = String(state || '');
+      var cur = verdicts[cid];
+      if (cur && cur.state === state && cur.prefix === (prefix || cur.prefix)) {
+        cur.t = Date.now(); return;            // 同じ判定の再描画=churnさせない(タイムラインも汚さない)
+      }
+      var keys = Object.keys(verdicts);
+      if (!cur && keys.length >= VMAX) { delete verdicts[keys[0]]; } // 古いものから1件落とす(実体は触らない)
+      verdicts[cid] = { state: state, prefix: prefix || (cur && cur.prefix) || '', t: Date.now(), first: (cur && cur.first) || Date.now(), n: ((cur && cur.n) || 0) + 1 };
+      push('verdict', { cid: cid, state: state, prefix: prefix || '' }); // 状態が変わった瞬間だけ時系列にも残す
+    } catch (e) {}
+  }
+  // 未解決(まだ画像が出ていない)判定を集計する。stalled と missing は絶対に混ぜない。
+  function verdictSummary_() {
+    var pend = [], stall = [], miss = 0, ok = 0, none = 0, other = 0, total = 0;
+    for (var cid in verdicts) {
+      if (!Object.prototype.hasOwnProperty.call(verdicts, cid)) continue;
+      var v = verdicts[cid]; total++;
+      var s = v.state;
+      if (s === 'images') ok++;
+      else if (s === 'stalled') stall.push(cid + (v.prefix ? '(' + v.prefix + ')' : ''));
+      else if (s === 'loading' || s === 'checking') pend.push(cid + ':' + s + (v.prefix ? '(' + v.prefix + ')' : ''));
+      else if (s === 'missing') miss++;         // 陽性確認済みの0枚(=正当な画像なし)。詰まりではない
+      else if (s === 'none') none++;
+      else other++;
+    }
+    return { pend: pend, stall: stall, miss: miss, ok: ok, none: none, other: other, total: total };
+  }
+
   function summarize_() {
     var rows = (prev || []).concat(buf); // 前セッション込みで集計(本命は"出てない"前セッション)
     var hydrate = 0, timeout = 0, r2fallback = 0, stalled = 0;
@@ -105,6 +145,13 @@
       var lines = [];
       lines.push('=== 画像診断ダンプ(' + new Date().toISOString() + ') ===');
       lines.push(summarize_());
+      // ★cid単位の判定サマリ(トトリ提案・2026-08-31)= どの作品が今まさに詰まっているかを一望する。
+      //   pend(読込中/確認中)と stall(20秒超えの操作可能待ち)は"まだ出ていない"側。
+      //   miss は陽性確認済みの正当な0枚=詰まりではない(混同しない)。
+      var vs = verdictSummary_();
+      lines.push('判定: 表示OK=' + vs.ok + ' 未出=' + (vs.pend.length + vs.stall.length) + '(読込中/確認中=' + vs.pend.length + ' 詰まり(stalled)=' + vs.stall.length + ') 確認済0枚(missing)=' + vs.miss + ' 画像なし(none)=' + vs.none + ' cid総数=' + vs.total);
+      if (vs.stall.length) lines.push('  詰まりcid(stalled): ' + vs.stall.join(', '));
+      if (vs.pend.length) lines.push('  読込中cid: ' + vs.pend.join(', '));
       // 前セッション(リロード前の"出てない"画面)があれば先に出す=これが本命の証拠。
       if (prev && prev.length) lines = lines.concat(dumpRows_(prev, '前セッション(リロード前)'));
       lines = lines.concat(dumpRows_(buf, '今のセッション'));
@@ -114,7 +161,7 @@
     }
   }
 
-  var API = { push: push, dump: dump };
+  var API = { push: push, verdict: verdict, dump: dump };
   root.Go5ImgDiag = API;
 
   // 起動時に前セッションの記録を復元し、離脱直前(リロード/バックグラウンド化)に退避する。

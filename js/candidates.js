@@ -6113,6 +6113,14 @@
     });
   }
   function refSlotState_(cid) {
+    // ★このcidの画像スロット状態は refSlotStateRaw_ が唯一の判定元。ここで img-diag へ結果をそのまま記帳する
+    //   =Chami実機の?imgdiag=1ログに「どの作品が詰まっているか」が cid 単位で残る(トトリ提案2026-08-31)。
+    //   判定ロジックには一切触れない(再分類しない・実体を消さない)。
+    var st = refSlotStateRaw_(cid);
+    try { window.Go5ImgDiag && Go5ImgDiag.verdict && Go5ImgDiag.verdict(cid, st, 'ref'); } catch (e) {}
+    return st;
+  }
+  function refSlotStateRaw_(cid) {
     var has = refImgsOf_(cid).length > 0;
     var stalled = refStalled_(cid);
     // R2マーカー(base64を持たず実体はR2)なら「画像あり・取り寄せ中」=⏳ loading。ただし持続失敗(stalled)なら
