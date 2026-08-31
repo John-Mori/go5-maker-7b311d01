@@ -12,7 +12,7 @@
   ① 退避   … 既存 candidates_<date>.json の {cid: comments / room_comments} を控える
   ② 再生成 … candidates_json.py(商品選定・product-scout)を実行(= comments空/room無しに戻る)
   ③ 引継ぎ … 退避分を cid で書き戻す(既に済んだ④comments/room_comments を守る=持続化)
-  ④ vision … vision_comments.py で「まだ空の候補だけ」④comments を埋める(fail-open)
+  ④ vision … vision_comments.py で「まだ空の候補だけ」④comments(大タイトル3択)を埋める(既定ON)
   ⑤ 配信   … publish_candidates.py(空配信ガード付き=全候補充填でなければ止まる)
 
   ★新しく入った cid の room_comments は自動生成器が無い=空のまま → ⑤のガードが止める
@@ -123,10 +123,13 @@ def main() -> int:
                     help="candidates_json.py を回さず、現ファイルへ vision→配信(復旧向け)")
     ap.add_argument("--no-publish", action="store_true", help="配信の手前で止める")
     ap.add_argument("--vision-limit", type=int, default=0, help="vision が埋める候補数(0=全部・既定)")
-    ap.add_argument("--vision", action="store_true",
-                    help="④ vision(サンプル画像から3択)を回す。★既定OFF=Chami指示2026-08-23"
-                         "(msg 1541180961272889384): 画像なし段階のサンプル生成は投稿画像で作り直すので無駄。"
-                         "コメントは今すぐ投稿できる作品の投稿画像から作る=日次のサンプル一括生成は止める。")
+    ap.add_argument("--no-vision", action="store_true",
+                    help="④ vision(FANZAサンプル画像から大タイトル3択)をスキップ。★既定=ON。"
+                         "2026-08-23はChami指示(msg 1541180961272889384)で既定OFFにしていた=投稿画像で"
+                         "作り直すから無駄、という理由。だが2026-08-31にChamiが『KouhoTeianの手入力欄は使わない』"
+                         "(msg 1543955094100385812)と明言=3択が空だと投稿できない。かつ投稿画像→生成の配線は"
+                         "現状ゼロ(=作り直しは起きない=二重生成の無駄も無い)。デイリー候補は実測20件/日で"
+                         "vision呼び出しも20回=コストは微小。よって既定ONへ戻す。--no-vision で従来のスキップ。")
     ap.add_argument("--publish-force", action="store_true", help="空配信ガードを無視して配信")
     args = ap.parse_args()
 
@@ -158,18 +161,17 @@ def main() -> int:
         print(f"③ 引継ぎ: {n} 候補へ既存の comments/room_comments を復元(空欄のみ)")
 
     # ④ vision(まだ空の④commentsだけ埋める。--force無し=引継ぎ済みは温存)
-    # ★既定でスキップ(Chami指示2026-08-23 msg 1541180961272889384)。理由=候補JSONの作品は
-    #   ページ側でほぼ pool(紹介にはアツい=動画生成用画像なし)へ落ちる。そこへFANZAサンプルから3択を
-    #   一括生成しても、Chamiが投稿画像を貼った時点で投稿画像から作り直す=トークンの無駄。
-    #   コメントは「今すぐ投稿できる(=投稿画像あり)」作品の投稿画像から作る方針。--vision で従来動作。
-    if args.vision:
+    # ★既定ON(Chami指示2026-08-31 msg 1543955094100385812=手入力欄は使わない→3択が空だと投稿できない)。
+    #   2026-08-23は「投稿画像で作り直すから無駄」で既定OFFにしていたが、投稿画像→生成の配線は現状ゼロ=
+    #   作り直しは起きない=二重生成の無駄も無い。デイリー候補は20件/日でvision呼び出しも小。--no-vision で従来スキップ。
+    if args.no_vision:
+        print("④ vision: --no-vision=スキップ(空の④comments は⑤のガードが止める)")
+    else:
         rc = run([py, VISION, "--in", src, "--limit", str(args.vision_limit)],
-                 args.dry_run, f"④ vision_comments.py(空の候補のみ・limit={args.vision_limit})")
+                 args.dry_run, f"④ vision_comments.py(大タイトル3択・空の候補のみ・limit={args.vision_limit})")
         if rc != 0:
             sys.stderr.write("vision が失敗。room_comments/引継ぎ分は残っているが④commentsが欠ける可能性。\n")
             # fail-open: 続行はするが publish のガードが空を止める
-    else:
-        print("④ vision: 既定スキップ(--vision で従来のサンプル一括生成。Chami指示2026-08-23)")
 
     # ⑤ 配信(空配信ガード付き)
     if args.no_publish:

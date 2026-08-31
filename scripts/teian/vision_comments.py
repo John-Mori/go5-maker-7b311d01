@@ -161,6 +161,12 @@ def call_vision(prompt, image_parts, title, synopsis, key, models, timeout=180):
             "temperature": 0.8,
             "maxOutputTokens": 1024,
             "responseMimeType": "application/json",
+            # ★thinking無効(2026-08-31)。gemini-flash系は思考トークンを maxOutputTokens から食う=
+            #   思考だけで1024を使い切り本文が空/途中で切れ finishReason=MAX_TOKENS→JSON壊れ parse失敗。
+            #   実測: gemini-3.5-flash が thoughts=981〜1750 と変動し本文28トークンで truncate。3択コピーに
+            #   思考は不要=budget0で確定的に出す(maxTokens引き上げは思考が更に膨れて再発しうる=不採用)。
+            #   全fallback(flash-latest/3.5-flash/2.5-flash/flash-lite)がbudget0対応。非対応なら400で次モデルへ。
+            "thinkingConfig": {"thinkingBudget": 0},
         },
     }
     body = json.dumps(payload).encode("utf-8")
