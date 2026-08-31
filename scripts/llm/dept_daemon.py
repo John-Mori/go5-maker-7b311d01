@@ -3737,6 +3737,7 @@ ENGLISH_AUDIT = os.path.join(LOCAL, "llm", "english_audit.jsonl")
 # dept_daemon も persona_send も**このモジュール1本**を引く。ここでは名前を re-export するだけ。
 from lang_gate import (  # noqa: E402  純関数のみ・単一の判定源(single-source-predicate)
     _JP_RE, _LATIN_RE, detect_english_dump, strip_english_preamble,
+    detect_simplified,   # 2026-09-01 簡体字混入(ルールAへ合流)。判定はここ1本に置く
 )
 
 # ============================================================================
@@ -4078,26 +4079,66 @@ def detect_hangul(text, span=20):
         return None          # 検査が落ちても応答は続ける(fail-safe)
 
 
-def audit_hangul(dept, rec, reply):
-    """返信直前のハングル検知をログと監査ファイルへ残す(送信は止めない)。
+def detect_nonjp(text, span=20):
+    """ルールAの検知を**非日本語文字**へ広げた1本(ハングル + 簡体字)。返り値に kind を足すだけ。
 
-    書式・置き場は既存の WORK_AUDIT / MARKER_AUDIT の作法に合わせた1行1件のjsonl。
+    なぜ別ゲートを新設せず、ここへ合流させたか(2026-09-01 研究室HQ発注):
+      「新方式は作らないでくれ。既に効いている型に乗せる方が速いし、壊れ方も既知だ」=
+      検知→1回だけ再生成→なお残れば警告付きで送る、という**同じ流れで直る同じ類**の事故だから。
+      経路(audit/gate)を増やすと片方だけ直す事故(C-038の再発型)が起きる。
+
+    ★順番= ハングルが先(ORG-45の既存挙動を1ミリも変えない)。両方在ればハングルとして扱う。
+    ★kind = "hangul" | "simplified"。呼び出し側はこれでログ文と警告文だけを切り替える。
+    ★検知だけ・自動置換はしない・例外は握り潰す(どちらの検知器も fail-safe)。
     """
     try:
-        hit = detect_hangul(reply)
+        hit = detect_hangul(text, span=span)
+        if hit:
+            hit["kind"] = "hangul"
+            return hit
+        hit = detect_simplified(text, span=span)
+        if hit:
+            hit["kind"] = "simplified"
+            return hit
+        return None
+    except Exception:
+        return None          # 検査が落ちても応答は続ける(fail-safe)
+
+
+# kind ごとの「ログ文・監査のevent/ref」。増えるのはこの表だけ=分岐を散らさない。
+_NONJP_KIND = {
+    "hangul":     {"label": "ハングル", "event": "hangul",     "ref": "ORG-45"},
+    "simplified": {"label": "簡体字",   "event": "simplified", "ref": "HQ-2026-09-01"},
+}
+
+
+def audit_hangul(dept, rec, reply):
+    """返信直前の**非日本語文字**(ハングル/簡体字)検知をログと監査ファイルへ残す(送信は止めない)。
+
+    書式・置き場は既存の WORK_AUDIT / MARKER_AUDIT の作法に合わせた1行1件のjsonl。
+    ★簡体字も**同じファイル**(hangul_audit.jsonl)へ入れる= 置き場を分けると片方しか見ない。
+      区別は event フィールド("hangul" / "simplified")で付く=後から数え分けられる。
+    ★関数名は hangul のまま= 呼び出し側(送信直前の合流点)を触らずに済ませるため。
+    """
+    try:
+        hit = detect_nonjp(reply)
         if not hit:
             return None
-        log(dept, f"★ハングル混入を検知 {hit['char']}({hit['codepoint']}) "
+        k = _NONJP_KIND.get(hit.get("kind"), _NONJP_KIND["hangul"])
+        jp = hit.get("jp") or ""
+        log(dept, f"★{k['label']}混入を検知 {hit['char']}({hit['codepoint']})"
+                  f"{'=日本語では' + jp if jp else ''} "
                   f"位置={hit['index']} 前後20字=…{hit['context']}… "
-                  f"※ORG-45。送信は止めない・自動修正もしない")
+                  f"※{k['ref']}。送信は止めない・自動修正もしない")
         os.makedirs(os.path.dirname(HANGUL_AUDIT), exist_ok=True)
         with open(HANGUL_AUDIT, "a", encoding="utf-8") as f:
             f.write(json.dumps({
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "dept": dept,
-                "event": "hangul",
-                "ref": "ORG-45",
+                "event": k["event"],
+                "ref": k["ref"],
                 "char": hit["char"],
+                "jp": jp,
                 "codepoint": hit["codepoint"],
                 "index": hit["index"],
                 "context": hit["context"],
@@ -4159,7 +4200,20 @@ def strip_meta(dept, rec, reply):
 #   2. 再生成後もまだハングルが残るなら、**元文(1回目)に警告行を1行付けて送る**。
 #   ★沈黙にしない(fail-open): regen が無い/失敗/空/例外なら、元文をそのまま(要検査で警告付き)送る。
 #   ★自動での文字置換は**絶対にしない**(각약→各約 等。任意ハングル→意図漢字は不確実で誤修正が事故)。
+#
+# 2026-09-01 追記(研究室HQ発注)= **簡体字**をこのルールAへ合流させた。
+#   Chami原文(2026-08-31 15:16 改善提案部門)=「前置き実況って描きたいんだろうけど
+#   日本の常用漢字じゃない表現やめてね」。HQ実測= 32部屋/6,033行に真の事故4行・全部「实况」・
+#   全部 2026-08-31 21:15〜21:36 に集中= **モデル側の癖**であって部屋の書き癖ではない=機械で見る。
+#   ★検知器だけ差し替えた(detect_hangul → detect_nonjp)。再生成1回・警告付き送信・自動置換なし
+#     という**ルールAの流れは1ミリも変えていない**。壊れ方を既知のままにするため(HQ指示)。
+#   ★判定の芯(常用漢字と簡体字の集合差)は lang_gate._SIMPLIFIED_MAP に置いた。
+#     実測の誤発火= repo 615ファイル/113,553行 と HQ記憶 32部屋/6,039行を通して**0件**
+#     (鳴ったのは事故そのものの行と、その事故を論じた型doc・この表だけ)。
 HANGUL_WARN = "⚠️(自動)生成不良: 非日本語スクリプト(ハングル)混入を検知。要確認。"
+SIMPLIFIED_WARN = "⚠️(自動)生成不良: 日本の漢字でない簡体字の混入を検知。要確認。"
+# kind → 警告文。★警告文そのものに簡体字・ハングルを入れない(再検査で自分の警告に鳴くため)。
+_NONJP_WARN = {"hangul": HANGUL_WARN, "simplified": SIMPLIFIED_WARN}
 
 
 def hangul_gate(text, regen=None, strip_marker=None):
@@ -4180,16 +4234,19 @@ def hangul_gate(text, regen=None, strip_marker=None):
       - regen が本文を返し、そこにハングルが無ければ**その本文へ差し替えて**返す(warned=False)。
       - 再生成後もハングルが残る/regen失敗/空なら、**元文(1回目)に警告行を付けて**返す。
     """
-    info = {"hit1": False, "regenerated": False, "hit2": False, "warned": False}
+    info = {"hit1": False, "regenerated": False, "hit2": False, "warned": False,
+            "kind": ""}
     try:
         base = str(text or "")
-        if detect_hangul(base) is None:
+        hit = detect_nonjp(base)
+        if hit is None:
             return base, info                # 通常経路=何もしない
         info["hit1"] = True
+        info["kind"] = hit.get("kind", "hangul")
         if regen is None:
             # 再生成できない経路(session_relay/失敗告知/test等)=沈黙にしない=警告付きで送る
             info["warned"] = True
-            return _append_hangul_warn(base), info
+            return _append_nonjp_warn(base, info["kind"]), info
         try:
             regen_text = regen()
         except Exception:
@@ -4202,23 +4259,33 @@ def hangul_gate(text, regen=None, strip_marker=None):
                     cleaned, _ = strip_marker(cleaned)
                 except Exception:
                     cleaned = str(regen_text)
-            if cleaned and detect_hangul(cleaned) is None:
+            if cleaned and detect_nonjp(cleaned) is None:
                 return cleaned, info         # 再生成で消えた=きれいな本文へ差し替え
-            info["hit2"] = detect_hangul(cleaned) is not None
+            info["hit2"] = detect_nonjp(cleaned) is not None
         # ここに来る=再生成しなかった/失敗/空/2回目も混入 → 元文に警告付き(沈黙にしない)
         info["warned"] = True
-        return _append_hangul_warn(base), info
+        return _append_nonjp_warn(base, info["kind"]), info
     except Exception:
         # ゲート自身が配送を殺さない(fail-safe)=元文をそのまま返す
         return str(text or ""), info
 
 
-def _append_hangul_warn(text):
-    """本文末尾に改行2つ+警告行を付ける(既に付いていれば二重に付けない)。"""
+def _append_nonjp_warn(text, kind="hangul"):
+    """本文末尾に改行2つ+警告行を付ける(既に付いていれば二重に付けない)。
+
+    ★2種類の警告が両方付くことは有り得る(1回目ハングル→再生成→簡体字、等)が、
+      同じ警告を二重には付けない= 見比べた時に「何が起きたか」が残る方を選ぶ。
+    """
     s = str(text or "")
-    if HANGUL_WARN in s:
+    warn = _NONJP_WARN.get(kind, HANGUL_WARN)
+    if warn in s:
         return s
-    return s + "\n\n" + HANGUL_WARN
+    return s + "\n\n" + warn
+
+
+def _append_hangul_warn(text):
+    """後方互換の薄い別名(2026-07-30の呼び名)。中身は _append_nonjp_warn。"""
+    return _append_nonjp_warn(text, "hangul")
 
 
 # ============================================================================
@@ -6669,7 +6736,7 @@ class Daemon:
         if not reply:
             log(self.dept, f"生成失敗 msg={mid}")
             return False
-        # ★ハングル混入の検知(ORG-45の恒久策)。送信直前・**全経路の合流点**に置く。
+        # ★非日本語文字(ハングル=ORG-45 / 簡体字=2026-09-01追加)の検知。送信直前・**全経路の合流点**。
         #   ここは generate / work_generate / 名指し(members)のどの経路の返信も必ず通る
         #   唯一の地点なので、経路ごとに検査を散らさない(=入れ忘れが起きない)。
         #   ★全19部門に一律で効かせる(裁定C-009)。部門ごとの分岐は作らない。
@@ -6685,7 +6752,8 @@ class Daemon:
         _reply2, _hg = hangul_gate(reply, regen=regen, strip_marker=split_wip_marker)
         if _hg.get("hit1"):
             log(self.dept,
-                f"★出力ゲートA(ハングル): 再生成={'実施' if _hg.get('regenerated') else '不可/未実施'} "
+                f"★出力ゲートA({_NONJP_KIND.get(_hg.get('kind'), _NONJP_KIND['hangul'])['label']}): "
+                f"再生成={'実施' if _hg.get('regenerated') else '不可/未実施'} "
                 f"2回目混入={'有' if _hg.get('hit2') else '無'} "
                 f"警告付与={'有' if _hg.get('warned') else '無(再生成で解消)'} msg={mid}")
         reply = _reply2
