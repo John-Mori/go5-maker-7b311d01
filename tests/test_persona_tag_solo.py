@@ -141,6 +141,34 @@ def main():
             "名簿のある部屋の解決が変わった: %r → %r" % (src, dd.resolve_persona_tag(ROSTER, src))
     ok.append("名簿のある部屋の解決(敬称・愛称・大小文字)は従来どおり")
 
+    # 9) ★実物の形: 前置き1行 → 空行 → タグ(hr-room/platform-se の現用バッファと同じ並び)
+    #    1行目だけを見る実装ではこの2室に届かない= 前置きごと落とし、前置きは監査へ残す。
+    PRE = ("五月の呼び方変更=完了(入れた・確認待ち)。change_log追記済。\n"
+           "\n"
+           "[中野五月]\n"
+           "呼び方、Chamiくんに変えといたよ。")
+    got, rows = audit_of(lambda: solo_new(PRE))
+    assert got[0][1] == "呼び方、Chamiくんに変えといたよ。", "前置き+タグが落ちていない: %r" % (got[0][1],)
+    assert [r["outcome"] for r in rows] == ["preamble_dropped", "tag_solo_fixed"], \
+        "前置きとタグの両方が監査に残っていない: %r" % (rows,)
+    assert "呼び方変更" in rows[0]["detail"], "落とした前置きの中身が残っていない: %r" % (rows[0],)
+    ok.append("前置き1行+空行+タグ= 前置きごと落とし、前置きは全文を監査に残す")
+
+    # 10) ★深い位置のタグは前置きでなく**本文中の引用**= 手前の本文を消さない(漏れより重い事故)
+    DEEP = ("結論から言う。\nまず1つ目。\n次に2つ目。\n最後に3つ目。\n"
+            "壊れていた実物はこれだ:\n[中野五月]\nごめん、ちゃみ。")
+    got, rows = audit_of(lambda: solo_new(DEEP))
+    assert got == solo_old(DEEP), "引用のタグを拾って本文を丸ごと消した: %r" % (got,)
+    assert rows == [], "触っていないのに監査へ書いている: %r" % (rows,)
+    ok.append("深い位置のタグ(引用)は拾わない= 手前の本文を消さない")
+
+    # 11) 前置きが在っても**この部屋の人でない**タグなら触らない(誤爆させない)
+    PRE_OTHER = "着手する。\n\n[花海咲季]\nこっちは終わったわよ。"
+    got, rows = audit_of(lambda: solo_new(PRE_OTHER))
+    assert got == solo_old(PRE_OTHER), "他人格のタグで前置きごと消した: %r" % (got,)
+    assert rows == [], "1行目がタグでないのに leak を数えている: %r" % (rows,)
+    ok.append("前置きの先が他人格のタグなら1文字も触らない")
+
     print("\n".join("PASS  " + s for s in ok))
     print("%d/%d PASS" % (len(ok), len(ok)))
     return 0

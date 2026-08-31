@@ -4873,8 +4873,19 @@ def solo_tag_resolver(conf, persona=""):
     return _resolve
 
 
+# ★前置きを探しに行く幅(非空行の数)。__前置き__ と __本文中の引用__ を分ける唯一の線。
+#   実測(persona_render_audit.jsonl の preamble_dropped 18件・多人格部屋)= **18件とも非空1行**。
+#   単独部屋の実物2件(hr-room「五月の呼び方変更=完了…」/ platform-se「ちゃみの『アメスの口調
+#   バグってます』を詰めました。結論から:」)も非空1行。→ 3行あれば足りる。
+#   ★なぜ split のように無制限に探さないか= 多人格部屋では名乗りが**必須の構造**だが、
+#     単独部屋では名乗りは**本来無い**もの。だから深い位置の `[中野五月]` は
+#     遅れた名乗りより「壊れたバッファの引用」である公算が高い(この修正の報告文自体がその形だ)。
+#     無制限に探すと、その手前の**本物の本文を丸ごと前置き扱いで消す**= 漏れより重い事故になる。
+_SOLO_PREAMBLE_MAX_LINES = 3
+
+
 def strip_solo_persona_tag(text, resolve, dept=""):
-    """単独人格部屋で、**1行目に残る名乗りタグ**だけを本文から落とす。戻り値=本文。
+    """単独人格部屋で、**頭に残る名乗りタグ**(と、その手前の前置き)を本文から落とす。戻り値=本文。
 
     ★2026-08-31 実物= `local/_daemon_reply_llm-qa.txt` の1行目が `[中野五月]`(半角・括弧は揃っている)。
       改善提案部門トトリの回送(msg 1543954248377696258)/ 引き金= Chami「名乗りが多いね、
@@ -4882,8 +4893,10 @@ def strip_solo_persona_tag(text, resolve, dept=""):
       根因= 名乗りを剥がす手が **split_persona_blocks の中にしか無い**のに、
       その split は `personas` を持つ部屋でしか呼ばれない(handle 側の安全弁)。
       つまり単独人格部屋では**剥がす処理が一度も走らない**= タグがそのままChamiの画面へ出る。
-    ★ここでは**割らない**(候補が1人の部屋を割る意味は無い)。前置き落としもしない。
-      やるのは「1行目のタグを落とす」ことだけ= 単独部屋の挙動をこれ以上動かさない。
+    ★1行目だけを見るのはやめた(同日・実測)= 現用バッファでは hr-room `[ククール]`・
+      platform-se `[一ノ瀬怜]` とも**前置き1行の後ろ**にタグが在る。1行目限定では
+      漏れている3室のうち1室(llm-qa)にしか届かない。→ _SOLO_PREAMBLE_MAX_LINES まで探す。
+    ★ここでは**割らない**(候補が1人の部屋を割る意味は無い)= 2つ目以降のタグは触らない。
     ★名義は動かさない= この部屋は既定の1人で出る。宛名は元から正しい(壊れていたのは本文だけ)。
     ★fail-open= 名簿で引けない/落とすと空になる時は**1文字も触らない**。
     """
@@ -4891,20 +4904,34 @@ def strip_solo_persona_tag(text, resolve, dept=""):
     lines = t.split("\n")
     if not lines:
         return t
-    mm = _tag_match(lines[0])
-    if not mm:
-        return t
-    who = resolve(mm[0])
+    head, mm, who = None, None, None
+    seen = 0
+    for idx, ln in enumerate(lines):
+        if not ln.strip():
+            continue             # ★空行は幅に数えない(前置きと本文の間の1行空けで打ち切らないため)
+        m = _tag_match(ln)
+        w = resolve(m[0]) if m else None
+        if w:
+            head, mm, who = idx, m, w
+            break
+        seen += 1
+        if seen >= _SOLO_PREAMBLE_MAX_LINES:
+            break
     if not who:
         # ★この部屋の人ではない= 触らない(`[検証]` のような本文かもしれない)。
-        #   ただし**どこかの人格名**だったのなら、それは漏れとして数える(直しはしない)。
-        if str(mm[0]).strip() in _avatar_keys():
+        #   ただし1行目が**どこかの人格名**だったのなら、それは漏れとして数える(直しはしない)。
+        first = _tag_match(lines[0])
+        if first and str(first[0]).strip() in _avatar_keys():
             _audit_tag(dept, "", "tag_solo_leak", lines[0].strip())
         return t
-    body = "\n".join([mm[1]] + lines[1:]).strip()
+    body = "\n".join([mm[1]] + lines[head + 1:]).strip()
     if not body:
         return t                     # ★落とすと空になる= 落とさない(沈黙させない)
-    _audit_tag(dept, who, "tag_solo_fixed", lines[0].strip())
+    pre = [l for l in lines[:head] if l.strip()]
+    if pre:
+        # ★黙って落とさない(規律§2)= 落とした前置きは全文を監査へ残す(多人格部屋と同じ計器)。
+        _audit_preamble(dept, who, "\n".join(pre))
+    _audit_tag(dept, who, "tag_solo_fixed", lines[head].strip())
     return body
 
 
