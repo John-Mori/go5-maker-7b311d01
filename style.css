@@ -47,6 +47,9 @@ html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:transparent;color:var(--ink);
   font-family:"Noto Sans JP",system-ui,sans-serif;
+  /* iOS Safari の文字自動拡大(横向き時)を止めて詰めた座標/レイアウトを保つ＋WebKit/Firefoxで文字を滑らかに(形は変えず見た目だけ整える・Chami依頼2026-08-31)。 */
+  -webkit-text-size-adjust:100%;text-size-adjust:100%;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
   transition:color .8s cubic-bezier(.4,0,.2,1);}
 /* ★中身の短いタブ(予約など)で「謎の背景の区切り」が出る事故の恒久対策(Chami 2026-07-31・2度目)。
    iOS Safari は html のグラデ背景を「html ボックスの高さ」で描くため、中身が画面より短いと
