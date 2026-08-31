@@ -169,14 +169,7 @@ def notify(body, dry):
     return "sent" if r.returncode == 0 else "failed:%d" % r.returncode
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--selftest", default="",
-                    help="裁定カタログをこのパスへ差し替えて通す(dispatchは呼ばない)")
-    ap.add_argument("--force", action="store_true", help="mtimeが同じでも見る")
-    ns = ap.parse_args(argv)
-    dry = bool(ns.selftest)
-
+def run_envelope(ns, dry):
     try:
         enc = load_check()
     except Exception as e:
@@ -213,6 +206,186 @@ def main(argv=None):
     if not dry:
         write_state({"material": sig, "bad": bs, "checked": _now(), "last": res})
     print("違反 %d件 → 研究室HQへ %s" % (len(bad), res))
+    return 0
+
+
+# ────────────────────────────────────────────────────────────────────────
+# 持続する呼称ドリフト(2026-08-31 追加・改善提案部門の回送 msg 1543872521093521478)
+#
+# なぜここへ相乗りするか:
+#   「一ノ瀬」(裸の姓)呼びが組織横断で居座っている、とトトリが実測して回してきた。
+#   ★当室で取り直したら**回送の根因は1つ違っていた**= 22件は素通りしていない。
+#   呼称ゲートは全部 `override_allowed / expected=["怜"]` で**違反と判定して台帳へ書いていた**。
+#   素通りしていたのは判定ではなく**読み手**だ= `naming_audit.jsonl` を読む機構が1つも無い。
+#   → 足りないのは新しい判定ではなく**読む口**。だから新しい常駐は作らない。
+#     ここは既に登録され・既に配達の手を持ち・既に「顔ぶれが変わった時だけ鳴らす」を
+#     持っている見張りだ。同じ作法の見張りを2本に増やす方が事故る(C-052)。
+#
+# 判定はここに書かない:
+#   正本は `scripts/llm/naming_drift_check.scan()` 1つ。しきい値の根拠もあちらの docstring。
+#
+# 宛先は人事部門(hr-room)1つ:
+#   直せるのは呼称ルール.json と人格文脈= どちらも人事の持ち物。研究室HQへは出さない
+#   (両方へ出すと、両方が「相手が見る」と思って誰も見ない)。
+#
+# ★状態は**別ファイル**に置く:
+#   封筒側の `write_state()` は辞書ごと差し替える= 同居させるとドリフトの記憶が
+#   封筒側の書き込みで黙って消え、鳴り直す。見張りが2つなら記憶も2つ。
+STATE_DRIFT = os.path.join(PJ, "local", "_state", "naming_drift_watch.json")
+DRIFT_DEPT = "hr-room"
+
+
+def _read_json(path):
+    try:
+        with io.open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _write_json(path, d):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with io.open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def load_drift():
+    if LLM_DIR not in sys.path:
+        sys.path.insert(0, LLM_DIR)
+    import naming_drift_check as ndc
+    return ndc
+
+
+def drift_material(ndc):
+    """材料の版= 台帳と判定そのもの。台帳が伸びていなければドリフトは変わり得ない。"""
+    out = []
+    for p in (ndc.AUDIT, os.path.join(LLM_DIR, "naming_drift_check.py")):
+        try:
+            out.append("%s:%d:%d" % (os.path.basename(p), int(os.path.getmtime(p)),
+                                     os.path.getsize(p)))
+        except OSError:
+            out.append("%s:-" % os.path.basename(p))
+    return "|".join(out)
+
+
+def build_drift_body(ndc, drifts, un):
+    lines = ["【イージス研究室(無人の見張り) → 人事部門】呼称の**持続ドリフト**が %d件 居座っている"
+             % len(drifts), ""]
+    lines.append("`local/llm/naming_audit.jsonl` の直近%d日を読んだ。"
+                 "★件数だけでは鳴らさない= 「%d件以上 / %d日以上にまたがる / %d人格以上が使う」の"
+                 "3つが揃った形だけを持続ドリフトと呼ぶ(常に鳴る安全網は無視されるから)。"
+                 % (ndc.WINDOW_DAYS, ndc.MIN_COUNT, ndc.MIN_DAYS, ndc.MIN_PERSONAS))
+    lines.append("")
+    for d in drifts:
+        lines.append("- **%s** を「%s」と呼んでいる(正=**%s**): %d件 / %d日 / %d人格 [%s〜%s]"
+                     % (d["target"], d["found"], "・".join(d["expected"]) or "?",
+                        d["count"], d["days"], len(d["personas"]),
+                        d["first"][:10], d["last"][:10]))
+        lines.append("    使っている人格= %s" % "、".join(d["personas"]))
+    lines += [
+        "",
+        "■直す先(★機構側では直さない)",
+        "呼称ゲートは**警告のみ**で自動修正しない(アロンソ型と敬称抜けの2種だけが例外)。",
+        "つまりここから先は人事部門の持ち物だ=",
+        "  1. `呼称ルール.json` の該当ペアへ `forbidden` を足す → **鳴る理由が変わるだけ**で止まりはしない。",
+        "  2. 使っている人格の文脈へ正しい呼び方を再ピン → **こちらが本命**(生成側を押し戻す)。",
+        "★C-035= 名指しされたペアだけ直せ。全体の呼称規則へ広げるな。",
+        "",
+        "■自動置換はしない",
+        "正しい形は文脈で変わる(「一ノ瀬怜さんが」と紹介する文まで潰す)。この見張りは**数えて見せるだけ**だ。",
+        "",
+        "■手元で今の状態を見る",
+        "    python 5SecMovieMaker\\scripts\\llm\\naming_drift_check.py",
+    ]
+    if un:
+        lines += [
+            "",
+            "■★鳴らせなかった分(人事の宿題ではなく**当室の宿題**)= %d件"
+            % sum(u["count"] for u in un),
+            "  " + "、".join("%s>%s" % (u["target"], u["found"]) for u in un),
+            "  台帳の `found` は「見つかった土台の形」で、**実際に使われた形が残っていない**。",
+            "  例=「モドリッチさん」(呼び捨てが正)が found=\"モドリッチ\" / expected=[\"モドリッチ\"] と残り、",
+            "  読むと「モドリッチをモドリッチと呼ぶな」になる。直す先が読めない警報は出さない。",
+            "  ゲート側で実際の形を残す改修は当室で持つ(まだ**入れていない**)。",
+        ]
+    return "\n".join(lines)
+
+
+def notify_drift(body, dry):
+    """人事部門へ1便。★外へ出る手はここだけ= selftest ではここだけ偽物にする。"""
+    tmp = os.path.join(PJ, "local", "_work", "naming_drift_alert.md")
+    os.makedirs(os.path.dirname(tmp), exist_ok=True)
+    with io.open(tmp, "w", encoding="utf-8") as f:
+        f.write(body)
+    if dry:
+        print("--- selftest: ここで人事部門へ出すはずだった本文 ---")
+        print(body)
+        print("--- (dispatchは呼んでいない) ---")
+        return "selftest"
+    r = subprocess.run([sys.executable, DISPATCH, "--dept", DRIFT_DEPT, "--direct",
+                        "--audience", "ai", "--from", "ケヴィン・デブライネ",
+                        "--from-dept", "aegis-gl", "--body-file", tmp],
+                       capture_output=True, timeout=120)
+    print((r.stdout or b"").decode("utf-8", "replace").strip())
+    return "sent" if r.returncode == 0 else "failed:%d" % r.returncode
+
+
+def run_drift(ns, dry):
+    try:
+        ndc = load_drift()
+        st = _read_json(STATE_DRIFT)
+        sig = drift_material(ndc)
+        if not (dry or ns.force) and st.get("material") == sig:
+            return 0                              # 台帳が伸びていない= 何もしない
+        rows = ndc.load_rows(ns.drift_ledger or None)
+        drifts = ndc.scan(rows)
+        un = ndc.unreadable(rows)
+    except Exception as e:
+        _log({"event": "error", "何": "ドリフト検査が落ちた",
+              "err": "%s: %s" % (type(e).__name__, e)})
+        return 0                                  # ★fail-open
+    if not drifts:
+        if not dry:
+            _write_json(STATE_DRIFT, {"material": sig, "drift": "", "checked": _now()})
+        print("持続ドリフトなし")
+        return 0
+
+    ds = ndc.sig(drifts)
+    if not dry and st.get("drift") == ds:
+        _write_json(STATE_DRIFT, dict(st, material=sig, checked=_now()))
+        print("持続ドリフト %d件(前回と同じ顔ぶれ=知らせ直さない)" % len(drifts))
+        return 0
+
+    res = notify_drift(build_drift_body(ndc, drifts, un), dry)
+    _log({"event": "drift_alert", "件数": len(drifts), "結果": res, "sig": ds[:200]})
+    if not dry:
+        _write_json(STATE_DRIFT, {"material": sig, "drift": ds, "checked": _now(),
+                                  "last": res})
+    print("持続ドリフト %d件 → 人事部門へ %s" % (len(drifts), res))
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--selftest", default="",
+                    help="裁定カタログをこのパスへ差し替えて通す(dispatchは呼ばない)")
+    ap.add_argument("--drift-ledger", default="",
+                    help="呼称台帳をこのパスへ差し替える(--dry と併せて使う)")
+    ap.add_argument("--dry", action="store_true",
+                    help="判定と分岐は本物のまま・外へ出る手(dispatch)だけ止める")
+    ap.add_argument("--force", action="store_true", help="mtimeが同じでも見る")
+    ns = ap.parse_args(argv)
+    dry = bool(ns.selftest) or ns.dry
+    # ★2つは**別々に fail-open**する= 片方が落ちても、もう片方の見張りは今日も回る。
+    #   (相乗りさせた側の事故で、先に居た封筒の見張りを黙って殺さないため)
+    for name, fn in (("envelope", run_envelope), ("drift", run_drift)):
+        try:
+            fn(ns, dry)
+        except Exception as e:
+            _log({"event": "error", "何": "%s が落ちた" % name,
+                  "err": "%s: %s" % (type(e).__name__, e)})
     return 0
 
 
