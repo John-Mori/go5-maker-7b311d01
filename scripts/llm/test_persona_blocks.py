@@ -148,7 +148,24 @@ def main():
         check(f"ホモグリフ: {nm}=推定した正名で記録する", rec and rec[0][1] == KUKURU)
         twin_out, _ = solo_run(_twin(src))
         check(f"ホモグリフ: {nm}=救済後の出力が正名版と完全一致", out == twin_out)
-        check(f"ホモグリフ: {nm}=救済したことも記録に残る", "tag_solo_fixed" in outcomes)
+        # ★HQ-0227 条件2(研究室HQ msg 1544107223339237496)= 救済しても計器を殺すな。
+        #   救済便は**専用 outcome** で残す。乙(tag_solo_fixed)へ混ぜない= 数え分けられる形。
+        check(f"ホモグリフ: {nm}=救済したことを専用 outcome で残す",
+              "tag_homoglyph_rescued" in outcomes)
+        check(f"ホモグリフ: {nm}=救済便は乙(tag_solo_fixed)に混ぜない",
+              "tag_solo_fixed" not in outcomes)
+        # ★leak↔rescued が**同じ便で対**になる= 生成側の回数は救済後も減らない(C-054)
+        check(f"ホモグリフ: {nm}=leak と rescued が対で1件ずつ出る",
+              outcomes.count("tag_homoglyph_leak") == 1
+              and outcomes.count("tag_homoglyph_rescued") == 1)
+
+    # ★fail-open では rescued を出さない= 落としていないのに「救済した」と数えない。
+    #   (化けたタグ**だけ**の便= 落とすと空になるので落とさない。leak は鳴るが rescued は無い)
+    out, rec = solo_run("[%s]" % BROKEN)
+    outcomes = [o for o, _ in rec]
+    check("ホモグリフ: 空になる便は落とさない(沈黙させない)", out == "[%s]" % BROKEN)
+    check("ホモグリフ: 落とさなかった便を救済に数えない",
+          "tag_homoglyph_leak" in outcomes and "tag_homoglyph_rescued" not in outcomes)
 
     # ★正常便は1文字も変えない・鳴らない(受け入れ条件の後半)
     clean = "[%s] ああ、ハブは全部ここで作ったやつだよ。\n\n続きの本文。" % KUKURU
@@ -245,6 +262,9 @@ def main():
             twin_out, _ = solo_run(_twin(r))
             check("実コーパス: 破損便を検知し、出力が正名版と完全一致",
                   bool(hit) and out == twin_out)
+            # ★実物でも leak↔rescued が対で載る(HQ-0227 条件2の計器を生コーパスで確認)
+            check("実コーパス: 破損便に rescued が対で載る",
+                  any(o == "tag_homoglyph_rescued" for o, _ in rec))
         elif hit:
             seen_clean += 1
             check("実コーパス: 正常便で誤発火しない(1件も鳴らない)", False)

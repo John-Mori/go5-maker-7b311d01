@@ -4904,6 +4904,13 @@ def _audit_tag(dept, who, outcome, line):
       - `tag_unbracketed_leak`  = 抜けた形に見えるが resolve 不能で本文のまま出した= **残った漏れ**(甲)
       - `tag_solo_fixed`        = 単独人格部屋で1行目のタグを落とした= **直した回数**(乙)
       - `tag_solo_leak`         = 単独人格部屋の1行目が**他人格の名前**のタグで、落とさず出した(乙)
+      - `tag_homoglyph_leak`    = 名乗りがホモグリフで化けていた= **生成側が壊した回数**(丙)
+      - `tag_homoglyph_rescued` = 化けた名乗りを推定した正名で救済して落とせた= **救えた回数**(丙)
+    ★丙は 2026-09-01 §5-2(HQ-0227・研究室HQの条件2)で足した対。leak↔rescued で読む=
+      **rescued が増えても leak は減らない**(生成側が壊す回数は救済後も数え続ける・C-054)。
+      leak が在って rescued が無い便= 救済に失敗した(多人格部屋 or 名簿外)= まだ漏れている。
+    ★救済便は `tag_solo_fixed` を**出さない**(丙で数える)= 乙の「直した回数」に新種を混ぜない。
+      救済は §5-2 以前は1件も落とせていなかったので、乙の過去の数字は1件も減らない。
     ★片方だけでは読めない= leak が 0 でも、fixed も 0 なら「便が来ていないだけ」だ(C-041)。
     ★記録先を2つ持たない(共通規律§4)= 書き手は persona_render._audit 1本のまま。fail-open。
     """
@@ -5163,7 +5170,7 @@ def strip_solo_persona_tag(text, resolve, dept=""):
     lines = t.split("\n")
     if not lines:
         return t
-    head, mm, who = None, None, None
+    head, mm, who, rescued = None, None, None, False
     seen = 0
     miss = []                    # ★resolve が引けなかったタグ行(ホモグリフ計測用)
     for idx, ln in enumerate(lines):
@@ -5206,7 +5213,7 @@ def strip_solo_persona_tag(text, resolve, dept=""):
                 _g = _homoglyph_near(_tag, _names)
                 _m = _tag_match(lines[_i])
                 if _g and _m:
-                    head, mm, who = _i, _m, _g
+                    head, mm, who, rescued = _i, _m, _g, True
                 break
     if not who:
         return t
@@ -5217,7 +5224,12 @@ def strip_solo_persona_tag(text, resolve, dept=""):
     if pre:
         # ★黙って落とさない(規律§2)= 落とした前置きは全文を監査へ残す(多人格部屋と同じ計器)。
         _audit_preamble(dept, who, "\n".join(pre))
-    _audit_tag(dept, who, "tag_solo_fixed", lines[head].strip())
+    # ★2026-09-01 §5-2 条件2(研究室HQ msg 1544107223339237496)= 救済しても計器を殺すな。
+    #   救済で落とした便は**別 outcome** で残す= 救済が何件効いたかを後から数え分けられる。
+    #   ここに置いた理由= 上の `if not body: return t`(fail-open)を**通り抜けた後**でないと
+    #   「救済した」と書けない。判定の時点で書くと、落とさなかった便まで救済に数える。
+    _audit_tag(dept, who, "tag_homoglyph_rescued" if rescued else "tag_solo_fixed",
+               lines[head].strip())
     return body
 
 
