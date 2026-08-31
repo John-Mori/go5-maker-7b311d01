@@ -31,6 +31,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -139,6 +140,16 @@ def fetch_image(url, timeout=30):
             data = r.read()
         if not data:
             return None
+        # 旧同期経路のR2画像は raw bytes ではなく dataURL文字列で保存された物がある。
+        # そのままGeminiへ渡すと「画像でない文字列」になるため、ここで実画像へ戻す。
+        if data.startswith(b"data:"):
+            try:
+                head, payload = data.decode("ascii").split(",", 1)
+                mime = head[5:].split(";", 1)[0] or "image/jpeg"
+                data = base64.b64decode(payload) if ";base64" in head else urllib.parse.unquote_to_bytes(payload)
+                return {"mime_type": mime, "data": base64.b64encode(data).decode("ascii")}
+            except Exception:
+                return None
         return {"mime_type": mime_of(url, data), "data": base64.b64encode(data).decode("ascii")}
     except Exception as e:
         print(f"  [img] 取得失敗 {url} : {e}", file=sys.stderr)
@@ -260,6 +271,62 @@ def parse_comments(raw):
     return out
 
 
+def comment_targets(doc):
+    """通常候補→ready_libraryの順でcidを重複排除した④コメント生成対象を返す。
+
+    同じcidが両方に居る旧/移行期JSONでも1回だけ処理し、既存commentsを持つ側を優先する。
+    """
+    out, by_cid = [], {}
+    for key in ("candidates", "ready_library"):
+        rows = doc.get(key) or []
+        if not isinstance(rows, list):
+            continue
+        for c in rows:
+            if not isinstance(c, dict):
+                continue
+            cid = str(c.get("cid") or c.get("id") or "")
+            if not cid:
+                continue
+            prev = by_cid.get(cid)
+            if prev is None:
+                by_cid[cid] = c
+                out.append(c)
+            elif not prev.get("comments") and c.get("comments"):
+                # 重複時は既存3択を先に見た実体へ空欄コピーし、描画側の優先配列でも欠けさせない。
+                prev["comments"] = c["comments"]
+            elif prev.get("comments") and not c.get("comments"):
+                c["comments"] = prev["comments"]
+    return out
+
+
+def persist_content_store(out_path, targets, store_path=None):
+    """生成済み④commentsをcontent_store.jsonへ空欄充填し、翌日の再生成でも守る。"""
+    store_path = store_path or os.path.join(os.path.dirname(os.path.abspath(out_path)), "content_store.json")
+    try:
+        with open(store_path, "r", encoding="utf-8") as f:
+            store = json.load(f)
+        if not isinstance(store, dict):
+            store = {}
+    except Exception:
+        store = {}
+    changed = False
+    for c in targets:
+        cid, comments = c.get("cid"), c.get("comments")
+        if not cid or not comments:
+            continue
+        cur = store.get(cid)
+        if not isinstance(cur, dict):
+            cur = {}
+        if not cur.get("comments"):
+            cur["comments"] = comments
+            store[cid] = cur
+            changed = True
+    if changed:
+        with open(store_path, "w", encoding="utf-8") as f:
+            json.dump(store, f, ensure_ascii=False, indent=2)
+    return changed
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="inp", default=None, help="候補JSON(既定=最新)")
@@ -275,7 +342,7 @@ def main():
     out = args.out or inp
     with open(inp, "r", encoding="utf-8") as f:
         doc = json.load(f)
-    cands = doc.get("candidates") or []
+    cands = comment_targets(doc)
     prompt = load_prompt()
     syn_map = load_synopsis(inp)   # {cid: 本文 or null}・無ければ {}(絵のみ)
     models = [args.model] if args.model else list(DEFAULT_MODELS)
@@ -290,7 +357,9 @@ def main():
     for c in cands:
         if args.limit and processed >= args.limit:
             break
-        imgs = c.get("images") or []
+        # ready_libraryは実際の投稿用画像(R2)をvision_imagesへ持つ。通常候補は従来の
+        # FANZA sample imagesをそのまま使う。どちらも空なら従来どおりfail-open。
+        imgs = c.get("vision_images") or c.get("images") or []
         if not imgs:
             skipped += 1
             continue
@@ -361,6 +430,7 @@ def main():
         }
         with open(out, "w", encoding="utf-8") as f:
             json.dump(doc, f, ensure_ascii=False, indent=2)
+        persist_content_store(out, cands)
         print(f"\nwrote {out}\n埋めた {filled} / 失敗(空のまま) {failed} / 対象外 {skipped}"
               f" / あらすじ添付 {syn_used}")
 

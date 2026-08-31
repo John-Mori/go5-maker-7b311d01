@@ -59,6 +59,12 @@ def guard_not_empty(path: str) -> list:
             if not rc_ok:
                 miss.append("room_comments")
             bad.append(f"{cid}({'/'.join(miss)})")
+    # ready_libraryは投稿用画像あり作品の④コメントを運ぶ専用経路。poolの選定や
+    # room_comments生成とは別なので、④commentsだけを必須にする。
+    for c in doc.get("ready_library", []):
+        cid = c.get("cid") or c.get("id") or "?"
+        if not c.get("comments"):
+            bad.append(f"ready:{cid}(④comments)")
     return bad
 
 

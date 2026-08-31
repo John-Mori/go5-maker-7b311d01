@@ -72,4 +72,10 @@ assert.ok(html.includes("Go5Idb.set('meta:imgmarks',{__v:2,at:at,map:map})"), 'p
 assert.ok(html.includes('idb.at>nowAt'), 'a late old IDB read must not roll back a radio change');
 assert.ok(cand.includes("window.addEventListener('storage'"), 'an open candidate page must follow proposal mark changes');
 
+// 当日top20外の投稿画像あり作品もPC側visionを通したready_libraryから④コメントを合流する。
+assert.ok(html.includes('var READYLIB = {}'));
+assert.ok(html.includes('(DATA.ready_library||[]).forEach'));
+assert.ok(html.includes('comments:(remote.comments||[])'));
+assert.ok(html.includes('(j.ready_library&&j.ready_library.length)'));
+
 console.log('OK: KouhoTeian cache, image manifest, go5ref recovery and image marks are guarded');

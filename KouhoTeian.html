@@ -241,8 +241,8 @@
 </div>
 
 <!-- 投稿提案は周期同期を起動しない。core/sync.jsは読まず、画像CDNが必要とする設定読取だけを副作用なしで供給する。 -->
-<script src="core/util.js?v=966"></script>
-<script src="core/idb-store.js?v=966"></script>
+<script src="core/util.js?v=967"></script>
+<script src="core/idb-store.js?v=967"></script>
 <script>
 (function(root){
   "use strict";
@@ -253,7 +253,7 @@
   }};
 })(window);
 </script>
-<script src="core/image-cdn.js?v=966"></script>
+<script src="core/image-cdn.js?v=967"></script>
 <script>
 (function(){
   "use strict";
@@ -336,9 +336,9 @@
   }
 
   function render(){
-    if(!DATA || !DATA.candidates || !DATA.candidates.length){ renderEmpty('候補がありません。JSON を読み込んでください。'); return; }
+    if(!DATA || (!(DATA.candidates||[]).length && !(DATA.ready_library||[]).length)){ renderEmpty('候補がありません。JSON を読み込んでください。'); return; }
     $('#date').textContent = DATA.date || '';
-    var all = DATA.candidates.slice().sort(function(a,b){
+    var all = (DATA.candidates||[]).slice().sort(function(a,b){
       return ((b.metrics&&b.metrics.score)||0) - ((a.metrics&&a.metrics.score)||0); });
     var cands = all.filter(passFilter_);
     $('#filterPanel').style.display='block';
@@ -358,16 +358,25 @@
     //   ページで数え直さない(single-source)。空/未配布なら弾かない(fail-open=投稿済みが混じっても表示は続く)。
     var EXCL = {}; (DATA.excluded_cids||[]).forEach(function(cid){ if(cid) EXCL[cid]=true; });
     var LIBMAP = loadLibMap_();
+    // PC側visionを通した投稿画像あり作品。端末内ライブラリはタイトル等のfallbackにだけ使い、
+    // ④comments/ready_ch等はready_libraryを正として合流する。
+    var READYLIB = {}; (DATA.ready_library||[]).forEach(function(c){ if(c&&c.cid&&!READYLIB[c.cid]) READYLIB[c.cid]=c; });
     Object.keys(REF).forEach(function(cid){
       if(readyCids[cid]) return;                 // 既にDATA由来でready入り済み
       if(!hasUsableRef_(cid)) return;              // 未使用・未除外の動画生成用画像が無いcidは対象外
       if(allCidMap[cid]) return;                  // DATAに存在=絞り込みで意図的に除外された物。合成で復活させない
       if(EXCL[cid]) return;                        // 直近3日∪直近10件で投稿済み=合流でも復活させない(投稿件数の縛り)
-      var lib = LIBMAP[cid] || {};
-      var libCand = { id:'lib-'+cid, cid:cid, platform:(cid.indexOf('d_')===0?'doujin':'books'),
-        title:(lib.title||cid), images:(lib.thumb?[lib.thumb]:[]),
-        metrics:{price:lib.price, discount_pct:lib.discountPct}, comments:[], room_comments:null,
-        last_posted:null, _fromLibrary:true };
+      var lib = LIBMAP[cid] || {}, remote = READYLIB[cid] || {};
+      var metrics = Object.assign({}, remote.metrics||{});
+      if(metrics.price==null && lib.price!=null) metrics.price=lib.price;
+      if(metrics.discount_pct==null && lib.discountPct!=null) metrics.discount_pct=lib.discountPct;
+      var sampleImages = (remote.images&&remote.images.length) ? remote.images : (lib.thumb?[lib.thumb]:[]);
+      var libCand = { id:(remote.id||('lib-'+cid)), cid:cid,
+        platform:(remote.platform||(cid.indexOf('d_')===0?'doujin':'books')),
+        title:(remote.title||lib.title||cid), images:sampleImages, metrics:metrics,
+        comments:(remote.comments||[]), room_comments:(remote.room_comments||null),
+        last_posted:(remote.last_posted||null), posted_ch:(remote.posted_ch||{}),
+        ready_ch:(remote.ready_ch||null), explainer:(remote.explainer||''), _fromLibrary:true };
       if(!passFilter_(libCand)) return;
       ready.push(libCand); readyCids[cid]=true;
     });
@@ -391,7 +400,7 @@
       // ★データ鮮度の自己説明(2026-08-29)= バッチ(candidates_json.py)が ready_ch を配っていれば
       //   「直近枠が開けば可」の正で仕分ける。未配信なら posted_ch 代替=暫定表示。空タブの理由を
       //   ページ側で明示し、Chamiに「出てないけど?」と聞き返させない(未反映=バッチ未同期の一手)。
-      var hasReadyCh = all.some(function(c){ var r=c.ready_ch; return r && (typeof r.acc1==='boolean' || typeof r.acc2==='boolean'); });
+      var hasReadyCh = active.some(function(c){ var r=c.ready_ch; return r && (typeof r.acc1==='boolean' || typeof r.acc2==='boolean'); });
       if(!hasReadyCh){ html += '<div class="freshnote">ℹ️ 直近枠データ (ready_ch) 未配信=ch別仕分けは暫定表示 (バッチ未同期の可能性)。月詠み/宵桜が空でも異常ではありません。</div>'; }
       // 投稿状況(posted_ch)で 共通/月詠み/宵桜 に仕分け→販売数降順→各セグ上位10件。both(両ch投稿済)は今すぐ枠から除外。
       var buckets = { common:[], acc1:[], acc2:[] };
@@ -1006,7 +1015,9 @@
 
   // ---- 読み込み ----
   function load(obj){
-    if(!obj || !obj.candidates){ renderEmpty('候補 JSON の形式が不正です (candidates が必要)。'); return; }
+    if(!obj || (!Array.isArray(obj.candidates) && !Array.isArray(obj.ready_library))){ renderEmpty('候補 JSON の形式が不正です (candidates または ready_library が必要)。'); return; }
+    if(!Array.isArray(obj.candidates)) obj.candidates=[];
+    if(!Array.isArray(obj.ready_library)) obj.ready_library=[];
     DATA = obj; pick={ id:null,cid:null,title:null,platform:null,channel:null,comment:'' };
     try{ LS.setItem('teian_last_json', JSON.stringify(obj)); }catch(e){}
     render();
@@ -1046,7 +1057,7 @@
       .then(function(r){ return r.json().catch(function(){ return null; }); })
       .then(function(j){
         if(j && j.error==='bad_token'){ renderEmpty('同期トークンが一致しません。本体アプリの設定を確認してください。'); return false; }
-        if(j && j.candidates && j.candidates.length){ load(j); return true; }
+        if(j && ((j.candidates&&j.candidates.length)||(j.ready_library&&j.ready_library.length))){ load(j); return true; }
         if(manual) renderEmpty('今日の候補はまだ配信されていません (軍議の生成待ち)。');
         return false;
       })

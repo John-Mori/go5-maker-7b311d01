@@ -63,7 +63,8 @@ def snapshot(path: str) -> dict:
     except Exception as e:
         print(f"  [退避] 現ファイルを読めず(引継ぎ無しで続行): {e}", file=sys.stderr)
         return keep
-    for c in doc.get("candidates", []):
+    rows = list(doc.get("candidates", []) or []) + list(doc.get("ready_library", []) or [])
+    for c in rows:
         cid = c.get("cid")
         if not cid:
             continue
@@ -83,7 +84,8 @@ def carry_over(path: str, keep: dict, dry: bool) -> int:
     with open(path, "r", encoding="utf-8") as f:
         doc = json.load(f)
     touched = 0
-    for c in doc.get("candidates", []):
+    rows = list(doc.get("candidates", []) or []) + list(doc.get("ready_library", []) or [])
+    for c in rows:
         cid = c.get("cid")
         prev = keep.get(cid)
         if not prev:

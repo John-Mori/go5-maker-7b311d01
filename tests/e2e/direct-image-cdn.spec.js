@@ -197,4 +197,38 @@ test.describe('direct image CDN manifest', () => {
     await expect(thumb).toBeVisible();
     await expect(thumb).toHaveAttribute('src', new RegExp('/img/' + HASH + '$'));
   });
+
+  test('ready library work renders its three vision comments instead of the manual fallback', async ({ page }) => {
+    const cid = 'd_ready_library_comments';
+    await serveImage(page, HASH);
+    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ cid, hash }) => {
+      localStorage.setItem('sync2_url', location.origin);
+      localStorage.removeItem('sync2_token');
+      localStorage.setItem('go5_image_manifest_v1', JSON.stringify({
+        ['ref:' + cid]: { keys: [hash], prev: 0, at: Date.now() }
+      }));
+      localStorage.setItem('teian_last_json', JSON.stringify({
+        date: '2026-09-01',
+        candidates: [],
+        ready_library: [{
+          id: 'ready-' + cid, cid, title: 'ready専用の3択表示作品', platform: 'doujin',
+          metrics: { score: 100, sales_n: 10 }, images: [],
+          ready_ch: { acc1: true, acc2: true },
+          comments: [
+            { n: 1, text: '大タイトル候補1', aim: '案1' },
+            { n: 2, text: '大タイトル候補2', aim: '案2' },
+            { n: 3, text: '大タイトル候補3', aim: '案3' }
+          ]
+        }]
+      }));
+    }, { cid, hash: HASH });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const card = page.locator('.cand').filter({ hasText: 'ready専用の3択表示作品' });
+    await expect(card).toBeVisible();
+    await expect(card.locator('.cmt')).toHaveCount(3);
+    await expect(card.locator('.noc')).toHaveCount(0);
+    await expect(card.locator('.cmt input[type="radio"]').first()).toBeChecked();
+  });
 });
