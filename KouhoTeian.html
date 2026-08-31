@@ -323,7 +323,7 @@
       b.addEventListener('click', function(){ groupSet_(b.dataset.group); render(); });
     });
     var active = (g==='pool') ? pool : ready;
-    var descs = { ready:'動画生成用画像あり=そのまま動画にできる。投稿状況で 共通/月詠み/酔桜 に分け、販売数の多い順に 共通は上位20件・月詠み/酔桜は各10件。三笘薫と早坂芽衣のコメント付き。',
+    var descs = { ready:'動画生成用画像あり=そのまま動画にできる。投稿状況で 共通/月詠み/宵桜 に分け、販売数の多い順に 共通は上位20件・月詠み/宵桜は各10件。三笘薫と早坂芽衣のコメント付き。',
                   pool:'動画生成用画像はまだ無い。サンプル画像を素材に仕込めば投稿できる (モノクロはフルカラー化)。' };
     var html = '<div class="gdesc">'+esc(descs[g])+'</div>';
     var shown = active;
@@ -332,8 +332,8 @@
       //   「直近枠が開けば可」の正で仕分ける。未配信なら posted_ch 代替=暫定表示。空タブの理由を
       //   ページ側で明示し、Chamiに「出てないけど?」と聞き返させない(未反映=バッチ未同期の一手)。
       var hasReadyCh = all.some(function(c){ var r=c.ready_ch; return r && (typeof r.acc1==='boolean' || typeof r.acc2==='boolean'); });
-      if(!hasReadyCh){ html += '<div class="freshnote">ℹ️ 直近枠データ (ready_ch) 未配信=ch別仕分けは暫定表示 (バッチ未同期の可能性)。月詠み/酔桜が空でも異常ではありません。</div>'; }
-      // 投稿状況(posted_ch)で 共通/月詠み/酔桜 に仕分け→販売数降順→各セグ上位10件。both(両ch投稿済)は今すぐ枠から除外。
+      if(!hasReadyCh){ html += '<div class="freshnote">ℹ️ 直近枠データ (ready_ch) 未配信=ch別仕分けは暫定表示 (バッチ未同期の可能性)。月詠み/宵桜が空でも異常ではありません。</div>'; }
+      // 投稿状況(posted_ch)で 共通/月詠み/宵桜 に仕分け→販売数降順→各セグ上位10件。both(両ch投稿済)は今すぐ枠から除外。
       var buckets = { common:[], acc1:[], acc2:[] };
       active.forEach(function(c){ var b=readyChBucket_(c); if(buckets[b]) buckets[b].push(c); });
       Object.keys(buckets).forEach(function(k){
@@ -346,7 +346,7 @@
       var seg = readySegGet_();
       if(!buckets[seg].length){ seg = (buckets.common.length?'common':(buckets.acc1.length?'acc1':'acc2')); }
       html += readySegHtml_(buckets, seg);
-      // ★共通は上位20件・月詠み/酔桜は各10件(Chami指示 2026-08-29「共通の上位20件は三笘と芽衣のコメントつけて」)。
+      // ★共通は上位20件・月詠み/宵桜は各10件(Chami指示 2026-08-29「共通の上位20件は三笘と芽衣のコメントつけて」)。
       //   コメント(三笘薫+早坂芽衣=room_comments)は cardHtml_ が既に描画=候補データに載っていれば全件に付く。
       shown = buckets[seg].slice(0, seg==='common' ? 20 : 10);
     }
@@ -357,6 +357,7 @@
       b.addEventListener('click', function(){ readySegSet_(b.dataset.seg); render(); });
     });
     wire(shown);  // ★表示中の部分集合で配線(readyはlib合成カード含む・ch別サブ分けで更に絞る)
+    hydrateAllR2_();  // 未取得の動画生成用画像(別端末→R2)を取り寄せ、揃ったら描き直す(fail-open)
   }
 
   // グループ切替(端末に保存)。ready=今すぐ投稿できる / pool=紹介にはアツい。
@@ -371,7 +372,7 @@
   // ---- 今すぐ投稿できる の中の ch別サブ分け(Chami指示 2026-08-29)----
   //   ★postability=「直近枠が開けば可」(Chami指示 2026-08-29 msg 1543050908・旧「そのchで完全未投稿」は廃止)。
   //   ready_ch:{acc1,acc2}(bool・true=そのchの直近枠が開いている=今すぐ投稿可)を candidates_json.py が配る。
-  //   仕分け: common=両chの直近枠が開(どちらへも今すぐ可) / acc1=月詠みだけ開 / acc2=酔桜だけ開 / both=両ch閉(=今すぐ枠には出さない)。
+  //   仕分け: common=両chの直近枠が開(どちらへも今すぐ可) / acc1=月詠みだけ開 / acc2=宵桜だけ開 / both=両ch閉(=今すぐ枠には出さない)。
   //   ★fail-open: ready_ch が無い旧JSONは posted_ch(ever-posted)から代替=未投稿chを「開いている」とみなす。
   //   並びは「販売数の多い順」(1週間売上の代用=sales_n snapshot・指標定義§1の穴)。各セグ上位10件。
   function chOpen_(c, ch){
@@ -390,7 +391,7 @@
   function readySegSet_(s){ try{ LS.setItem('teian_ready_seg', (s==='acc1'||s==='acc2')?s:'common'); }catch(e){} }
   function readySegHtml_(buckets, seg){
     function btn(k,label){ return '<button type="button" data-seg="'+k+'" class="'+(seg===k?'on':'')+'">'+label+'<span class="gc">'+buckets[k].length+'件</span></button>'; }
-    return '<div class="gtabs subseg">'+btn('common','🤝 共通')+btn('acc1','🌙 月詠み')+btn('acc2','🌸 酔桜')+'</div>';
+    return '<div class="gtabs subseg">'+btn('common','🤝 共通')+btn('acc1','🌙 月詠み')+btn('acc2','🌸 宵桜')+'</div>';
   }
 
   function cardHtml_(c, rank){
@@ -402,7 +403,17 @@
       meta.push('<span class="chip">販売数 '+num(m.sales_n)+'</span>');
       if(m.score!=null) meta.push('<span class="chip">score '+esc(m.score)+'</span>');
       if(rv&&rv.average!=null) meta.push('<span class="chip">★'+esc(rv.average)+' ('+num(rv.count)+'件)</span>');
-      if(m.price!=null) meta.push('<span class="chip">'+num(m.price)+'円'+(m.discount_pct?(' -'+esc(m.discount_pct)+'%'):'')+'</span>');
+      // 価格表示(Chami指示 2026-08-31)=候補ページ(js/candidates.js)と同じ体裁で 定価/割引後/％off。
+      //   セール時(list_price有り・discount_pct>0・割引後<定価)は 定価に取り消し線+割引後を太字+ -N%。
+      //   list_price が無い旧JSONは従来表示(割引後のみ+任意で-N%)へフォールバック=後方互換。
+      if(m.price!=null){
+        var _lp=m.list_price, _dp=m.discount_pct;
+        if(_lp!=null && _dp>0 && _lp>m.price){
+          meta.push('<span class="chip sale"><s>'+num(_lp)+'円</s> <b>'+num(m.price)+'円</b> -'+esc(_dp)+'%</span>');
+        } else {
+          meta.push('<span class="chip">'+num(m.price)+'円'+(_dp?(' -'+esc(_dp)+'%'):'')+'</span>');
+        }
+      }
       // ★紐付け表示(Chami指示 2026-08-29 msg 1543050908)=商品の選び方は無変更。既に④コメントが生成済みの
       //   作品は"そこだけ"バッジで示し、再生成せず流用していることが分かるようにする(『再生成不要』の可視化)。
       if((c.comments||[]).length) meta.push('<span class="chip tie" title="生成済みの④コメントを流用(再生成しない)">💬 コメント生成済み</span>');
@@ -503,7 +514,7 @@
     if(!rec) return {imgs:[], has:false};
     if(Array.isArray(rec.imgs)){ var a=rec.imgs.filter(Boolean); return {imgs:a, has:a.length>0}; }
     if(rec.img) return {imgs:[rec.img], has:true};
-    if(rec.__r2n>0) return {imgs:[], has:true};   // 別端末に在る(この端末に未取得)
+    if(rec.__r2n>0) return {imgs:[], has:true, r2n:rec.__r2n};   // 別端末に在る(この端末に未取得)=r2n枚をR2から取り寄せる
     return {imgs:[], has:false};
   }
   // マーク済み(used/excluded)画像を除いた上で {imgs,has} を確定する。未取得(__r2n>0=imgs空でhas true)は
@@ -531,6 +542,46 @@
       } else resolve(map);
     });
   }
+  // ---- R2 hydration(Chami指示 2026-08-31「動画生成画像ありなのに表示されない」を直す)----
+  //   別端末がR2へ置いた動画生成用画像を、候補ページ(js/candidates.js resolveRefFromR2_)と同じ作法で取り寄せる。
+  //   R2キー=sha256hex(論理名 "go5ref:<cid>:<idx>")。GETは公開 /img/…(トークン不要)=同期エンジン(core/sync.js)は
+  //   読み込まない(このページに周期同期の副作用を持ち込まない=挙動を変えないため、必要な fetch だけ内製する)。
+  //   fail-open=1枚でも取れなければマーカー温存で次回再試行(「無い」と言い切らない)。
+  var _subtle = (window.crypto && window.crypto.subtle) || null;
+  var _r2Jobs = {};  // cid → true(取得中/取得済=二重起動防止)
+  function _u8(s){ return new TextEncoder().encode(s); }
+  function _hex(buf){ var b=new Uint8Array(buf),s=''; for(var i=0;i<b.length;i++) s+=(b[i]<16?'0':'')+b[i].toString(16); return s; }
+  function _sha256hex(s){ return _subtle.digest('SHA-256', _u8(s)).then(_hex); }
+  function _blobToDataUrl(blob){ return new Promise(function(res,rej){ var fr=new FileReader(); fr.onload=function(){ res(fr.result); }; fr.onerror=rej; fr.readAsDataURL(blob); }); }
+  function _fetchR2At(name){
+    var c = syncCfg();
+    if(!/^https?:\/\//.test(c.url) || !_subtle) return Promise.resolve(null);
+    return _sha256hex(String(name)).then(function(key){
+      return fetch(c.url+'/img/'+key, {cache:'no-store'}).then(function(r){ return r&&r.ok?r.blob():null; }, function(){ return null; });
+    }).catch(function(){ return null; });
+  }
+  function hydrateR2_(cid, n){
+    if(_r2Jobs[cid]) return; _r2Jobs[cid]=true;
+    var jobs=[]; for(var i=0;i<n;i++){ jobs.push(_fetchR2At('go5ref:'+cid+':'+i)); }
+    Promise.all(jobs).then(function(blobs){
+      var real=blobs.filter(Boolean);
+      if(!real.length){ delete _r2Jobs[cid]; return; }   // 全滅=解放して次回再試行(マーカー温存)
+      Promise.all(real.map(_blobToDataUrl)).then(function(urls){
+        var info = applyMarkFilter_(cid, {imgs:urls.filter(Boolean), has:true});
+        REF[cid] = info.imgs.length ? info : {imgs:[], has:true};
+        if(DATA) render();
+      });
+    });
+  }
+  // REF内の「未取得(has=true・imgs空・r2n>0)」を全部R2から取り寄せる。_r2Jobsで二重起動を防ぐので render毎に呼んでよい。
+  function hydrateAllR2_(){
+    if(!DATA) return;
+    Object.keys(REF).forEach(function(cid){
+      var info=REF[cid];
+      if(info && info.has && !info.imgs.length && info.r2n>0) hydrateR2_(cid, info.r2n);
+    });
+  }
+
   // ---- 候補ライブラリ(候補タブでChamiが手動で貼った作品・localStorage cand_items + 独立タブ cand_items__<tabId>)----
   //   候補JSON(DATA.candidates)には載らないが投稿用画像だけ持つ作品を拾うための読み取り専用マップ。
   //   fail-open=壊れたJSON/読めないキーは無視して空のまま返す(取りこぼしより誤表示ゼロを優先)。

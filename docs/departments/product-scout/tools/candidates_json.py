@@ -221,7 +221,7 @@ def main():
         price, lp = dp.num(pr.get("price")), dp.num(pr.get("list_price"))
         disc = round((lp - price) / lp * 100) if (price is not None and lp) else None
         rev = review_of(info)
-        x = dict(cid=cid, title=r.get("title") or "", price=price, disc=disc,
+        x = dict(cid=cid, title=r.get("title") or "", price=price, lp=lp, disc=disc,
                  rc=(rev or {}).get("count"), avg=(rev or {}).get("average"),
                  sales=r.get("sales_n"), imgs=len(imgs), src=r.get("source"),
                  _images=imgs, _review=rev, _platform=platform_of(cid))
@@ -255,7 +255,7 @@ def main():
             "metrics": {
                 "sales_n": x["sales"],
                 "review": x["_review"],       # FANZA実データ(有れば)。★並び順には使わない(分析確定)
-                "price": x["price"], "discount_pct": x["disc"],
+                "price": x["price"], "list_price": x["lp"], "discount_pct": x["disc"],
                 "revenue_rate": revenue_rate(x["cid"]),
                 "score": x["rank_score"],     # ★ページの並び順の正=分析式 revenue_rate×log1p(sales_n)
                 "select_score": x["select_score"],  # 商品選定の候補入り選定軸(価格/割引/実売/レビュー)
