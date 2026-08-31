@@ -163,12 +163,29 @@ def scan(rows=None, end=None, window=WINDOW_DAYS,
     return out
 
 
+def banned(d):
+    """★**明示的に禁止したのに、まだ出ている**形か。
+
+    `reason="forbidden"` は「呼称ルール.json の forbidden に名指しで載っている」の意味で、
+    `override_allowed`(許可形リストに無いだけ)より**強い事実**だ= 人が手を入れた後の再発。
+    2026-08-31 に人事部門が怜の override 4本へ `forbidden:["一ノ瀬"]` を入れた(00_AI-HQ 1e2e16b)。
+    ★当室で前後を実測した= ラベルは override_allowed → forbidden へ変わるが、
+      `naming_corrections()` の `applied` は空のまま= **文面は1文字も直らない**。
+      つまりこれは「鳴る理由が変わっただけ」で、止めるのは生成側の再ピンの仕事だ。
+    """
+    return d.get("reasons", {}).get("forbidden", 0) > 0
+
+
 def sig(drifts):
     """ドリフトの顔ぶれ。同じ顔ぶれを二度知らせないための版(件数は入れない=
 
     1件増えるたびに鳴り直すと、それは件数アラームと同じ騒がしさになる)。
+    ★ただし「禁止に載ったか」は版に混ぜる= 禁止を入れた**後も**同じ形が出続けている、は
+      顔ぶれが同じでも**別の事実**(再ピンが効かなかった)。混ぜないと、その節目が黙って通る。
+      鳴り直すのは切り替わった一度だけで、その後はまた沈黙する。
     """
-    return "|".join(sorted("%s>%s" % (d["target"], d["found"]) for d in drifts))
+    return "|".join(sorted("%s>%s%s" % (d["target"], d["found"], "!" if banned(d) else "")
+                           for d in drifts))
 
 
 def main(argv=None):

@@ -109,6 +109,20 @@ def main():
     assert ICHINOSE in pairs(ndc.scan(rows)), "台帳の最終日ではなく今日を基準にしている"
     ok.append("台帳が止まっても静かに0件へ倒れない")
 
+    # 7) ★禁止に載せた**後**の再発は、顔ぶれが同じでも別の事実として鳴り直す。
+    #    (人事が forbidden を入れた節目= 2026-08-31・00_AI-HQ 1e2e16b がこれに当たる)
+    after = [dict(r, reason="forbidden") if (r["target"], r["found"]) == ICHINOSE else r
+             for r in rows]
+    d_before = ndc.scan(rows, end=END)
+    d_after = ndc.scan(after, end=END)
+    assert pairs(d_before) == pairs(d_after), "前提が崩れた(顔ぶれは同じはず)"
+    assert ndc.sig(d_before) != ndc.sig(d_after), \
+        "禁止に載せた後の再発が、顔ぶれ一致で黙って通っている"
+    assert not any(ndc.banned(d) for d in d_before), "禁止前を禁止後と読んでいる"
+    assert [d["found"] for d in d_after if ndc.banned(d)] == ["一ノ瀬"], \
+        "禁止後の再発を取り違えている"
+    ok.append("禁止に載せた後の再発は、顔ぶれが同じでも一度だけ鳴り直す")
+
     print("\n".join("PASS  " + s for s in ok))
     print("%d/%d PASS" % (len(ok), len(ok)))
     return 0

@@ -279,11 +279,21 @@ def build_drift_body(ndc, drifts, un):
                  % (ndc.WINDOW_DAYS, ndc.MIN_COUNT, ndc.MIN_DAYS, ndc.MIN_PERSONAS))
     lines.append("")
     for d in drifts:
-        lines.append("- **%s** を「%s」と呼んでいる(正=**%s**): %d件 / %d日 / %d人格 [%s〜%s]"
-                     % (d["target"], d["found"], "・".join(d["expected"]) or "?",
+        lines.append("- %s**%s** を「%s」と呼んでいる(正=**%s**): %d件 / %d日 / %d人格 [%s〜%s]"
+                     % ("★【禁止後の再発】" if ndc.banned(d) else "",
+                        d["target"], d["found"], "・".join(d["expected"]) or "?",
                         d["count"], d["days"], len(d["personas"]),
                         d["first"][:10], d["last"][:10]))
         lines.append("    使っている人格= %s" % "、".join(d["personas"]))
+    if any(ndc.banned(d) for d in drifts):
+        lines += [
+            "",
+            "★【禁止後の再発】= `呼称ルール.json` の `forbidden` に**名指しで載せた後も出ている**形だ。",
+            "  ゲートは禁止を読んでラベルを `forbidden` へ変えるが、**文面は直さない**"
+            "(当室で前後を実測= `naming_corrections()` の `applied` は空のまま)。",
+            "  つまりこれは**再ピンが生成側を押し戻せていない**という報せで、"
+            "forbidden を足し直しても件数は動かない。",
+        ]
     lines += [
         "",
         "■直す先(★機構側では直さない)",
