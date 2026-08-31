@@ -168,6 +168,47 @@
   // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
   //   js/candidates.js と KouhoTeian.html に同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
   function imgHash_(s) { s = String(s || ''); var h = 5381, i = s.length; while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; } return h.toString(36); }
+  function imgSlotMarkKey_(idx) { return '@slot:' + Math.max(0, Number(idx) || 0); }
+  function imgUrlHashMarkKey_(s) { var m = /\/img\/([a-f0-9]{64})(?:[?#]|$)/i.exec(String(s || '')); return m ? ('@sha256:' + m[1].toLowerCase()) : ''; }
+  function imgMarkKeys_(img, idx, rawHash) {
+    var keys = [], seen = {};
+    function add_(k) { k = String(k || ''); if (k && !seen[k]) { seen[k] = 1; keys.push(k); } }
+    if (/^[a-f0-9]{64}$/i.test(String(rawHash || ''))) add_('@sha256:' + String(rawHash).toLowerCase());
+    add_(imgUrlHashMarkKey_(img)); add_(imgSlotMarkKey_(idx)); add_(imgHash_(img));
+    return keys;
+  }
+  function imgMarkValueFromMap_(map, cid, img, idx, rawHash) {
+    var m = (map && map[String(cid || '')]) || {}, keys = imgMarkKeys_(img, idx, rawHash);
+    for (var i = 0; i < keys.length; i++) {
+      var v = m[keys[i]];
+      if (mkState_(v)) return v;
+    }
+    return undefined;
+  }
+  function imgMarkStateFromMap_(map, cid, img, idx, rawHash) { return mkState_(imgMarkValueFromMap_(map, cid, img, idx, rawHash)); }
+  function imgMarkDateFromMap_(map, cid, img, idx, rawHash) {
+    var m = (map && map[String(cid || '')]) || {}, keys = imgMarkKeys_(img, idx, rawHash), at = 0;
+    keys.forEach(function (k) { at = Math.max(at, mkDate_(m[k])); });
+    return at;
+  }
+  // 画像列の変更に、位置ベースのマークだけを追随させる。SHA/旧文字列hashは画像自身の識別子なので不変。
+  function remapSlotMarksForImages_(inner, oldImgs, newImgs) {
+    inner = (inner && typeof inner === 'object' && !Array.isArray(inner)) ? inner : {};
+    oldImgs = Array.isArray(oldImgs) ? oldImgs : []; newImgs = Array.isArray(newImgs) ? newImgs : [];
+    var out = {}, used = {}, oldToNew = {};
+    oldImgs.forEach(function (src, oldIdx) {
+      for (var i = 0; i < newImgs.length; i++) {
+        if (!used[i] && newImgs[i] === src) { used[i] = 1; oldToNew[oldIdx] = i; break; }
+      }
+    });
+    Object.keys(inner).forEach(function (k) { if (!/^@slot:\d+$/.test(k)) out[k] = inner[k]; });
+    Object.keys(inner).filter(function (k) { return /^@slot:\d+$/.test(k); }).sort(function (a, b) { return Number(a.slice(6)) - Number(b.slice(6)); }).forEach(function (k) {
+      var oldIdx = Number(k.slice(6)), found = oldToNew[oldIdx];
+      if (found != null) out[imgSlotMarkKey_(found)] = inner[k];
+      else if (oldImgs[oldIdx] == null) out[k] = inner[k]; // 対応画像を確認できない古い印はfail-openで温存
+    });
+    return out;
+  }
   // R2マーカーがメモリへ先着しても、実画像でない限り解決処理を止めないための純判定。
   function shouldResolveR2Marker_(cid, busy, memRec, marker) {
     if (!cid || busy || !isR2Marker_(marker)) return false;
@@ -188,10 +229,15 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_, hideEverPostedDecide_: hideEverPostedDecide_, candidateTodayDay_: candidateTodayDay_, candidateTodayChecked_: candidateTodayChecked_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, imgSlotMarkKey_: imgSlotMarkKey_, imgUrlHashMarkKey_: imgUrlHashMarkKey_, imgMarkStateFromMap_: imgMarkStateFromMap_, imgMarkDateFromMap_: imgMarkDateFromMap_, remapSlotMarksForImages_: remapSlotMarksForImages_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_, hideEverPostedDecide_: hideEverPostedDecide_, candidateTodayDay_: candidateTodayDay_, candidateTodayChecked_: candidateTodayChecked_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
+  function kouhoTeianHref_() {
+    var s = document.querySelector('script[src*="js/candidates.js?v="]'), v = 0;
+    try { v = Number(new URL(s && s.src || '', location.href).searchParams.get('v')) || 0; } catch (e) {}
+    return 'KouhoTeian.html' + (v ? ('?v=' + v) : '');
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function lsGet(k, def) { try { return JSON.parse(localStorage.getItem(k) || def); } catch (e) { return JSON.parse(def); } }
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} reqSyncFor_(k); }
@@ -1395,8 +1441,9 @@
   // ── 画像マーク(通常/使用済み/除外)の耐久化(単一グローバルmap) ─────────────────────
   //   ★動画作成用モーダルのズームで、画像ごとに「使用済み/除外」を付けられる(候補提案ページの絞り込みに使う)。
   //   cand_text/候補リストと同じ設計(LS正本＋IDB耐久ミラー・LS満杯でも喪失させない)。
-  //   形: { "<cid>": { "<imgHash_の値>": "used"|"excluded" } }。LSキー=cand_img_marks。IDBミラーキー=meta:imgmarks。
-  var K_IMGMARKS = 'cand_img_marks';
+  //   形: { "<cid>": { "@sha256:<raw hash>"|"@slot:<idx>"|"<旧imgHash_>": "used"|"excluded" } }。
+  //   LSは旧版互換の生map、IDBは更新時刻つきv2 envelope。明示解除を古いIDB値で復活させない。
+  var K_IMGMARKS = 'cand_img_marks', K_IMGMARKS_AT = 'cand_img_marks_at';
   function imgMarksIdbKey_() { return 'meta:imgmarks'; }
   var _imgMarksMem = null;      // LS書込失敗時の権威(nullなら未使用=LSが正)
   var _imgMarksRestored = false;
@@ -1404,12 +1451,18 @@
     var v = (_imgMarksMem != null) ? _imgMarksMem : lsGet(K_IMGMARKS, '{}');
     return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
   }
-  function imgMarksWrite_(map) {
+  function unwrapImgMarks_(rec) {
+    if (rec && rec.__v === 2 && rec.map && typeof rec.map === 'object' && !Array.isArray(rec.map)) return { map: rec.map, at: Number(rec.at) || 0, v2: true };
+    return { map: (rec && typeof rec === 'object' && !Array.isArray(rec)) ? rec : {}, at: 0, v2: false };
+  }
+  function imgMarksWrite_(map, writeAt) {
+    var at = Math.max(1, Number(writeAt) || Date.now());
     if (_idbOk && window.Go5Idb && typeof window.Go5Idb.set === 'function') {
-      try { Promise.resolve(window.Go5Idb.set(imgMarksIdbKey_(), map)).catch(function () {}); } catch (e) {}
+      try { Promise.resolve(window.Go5Idb.set(imgMarksIdbKey_(), { __v: 2, at: at, map: map })).catch(function () {}); } catch (e) {}
     }
     try {
       localStorage.setItem(K_IMGMARKS, JSON.stringify(map));
+      localStorage.setItem(K_IMGMARKS_AT, String(at));
       _imgMarksMem = null;
     } catch (e) {
       // ★LS満杯でもマークを喪失させない=メモリを権威にし、耐久はIDBミラー側に任せる(cand_text と同じ考え方)。
@@ -1422,14 +1475,8 @@
   //   filterMarked_ も同形で正規化=2ファイル一致必須。tests/test_img_marks.js が両形を検査)。
   function mkState_(v) { return (v && typeof v === 'object') ? String(v.s || '') : String(v || ''); }
   function mkDate_(v) { return (v && typeof v === 'object' && v.at) ? Number(v.at) : 0; }
-  function imgMarkStateOf_(cid, img) {
-    var m = imgMarksRead_()[String(cid || '')];
-    return (m && typeof m === 'object') ? mkState_(m[imgHash_(img)]) : undefined;
-  }
-  function imgMarkDateOf_(cid, img) {
-    var m = imgMarksRead_()[String(cid || '')];
-    return (m && typeof m === 'object') ? mkDate_(m[imgHash_(img)]) : 0;
-  }
+  function imgMarkStateOf_(cid, img, idx) { return imgMarkStateFromMap_(imgMarksRead_(), cid, img, idx); }
+  function imgMarkDateOf_(cid, img, idx) { return imgMarkDateFromMap_(imgMarksRead_(), cid, img, idx); }
   // 単一の書込口。h=imgHash_ の値。opts.at を渡すと使用日を刻む。既存の使用日は state='used' 継続時のみ保持。
   function setImgMarkByHash_(cid, h, state, opts) {
     cid = String(cid || ''); h = String(h || ''); if (!cid || !h) return;
@@ -1445,14 +1492,33 @@
     if (Object.keys(m).length) map[cid] = m; else delete map[cid];
     imgMarksWrite_(map);
   }
-  function setImgMark_(cid, img, state) { setImgMarkByHash_(String(cid || ''), imgHash_(img), state); }
+  function setImgMarkAt_(cid, img, idx, state) {
+    cid = String(cid || ''); if (!cid) return;
+    var map = imgMarksRead_(), m = Object.assign({}, map[cid] || {}), keys = imgMarkKeys_(img, idx), keepAt = 0;
+    keys.forEach(function (k) { keepAt = Math.max(keepAt, mkDate_(m[k])); });
+    keys.forEach(function (k) {
+      if (state === 'used') m[k] = keepAt ? { s: 'used', at: keepAt } : 'used';
+      else if (state === 'excluded') m[k] = 'excluded';
+      else delete m[k];
+    });
+    if (Object.keys(m).length) map[cid] = m; else delete map[cid];
+    imgMarksWrite_(map);
+  }
+  function remapImgMarksForImages_(cid, oldImgs, newImgs) {
+    cid = String(cid || ''); if (!cid) return;
+    var map = imgMarksRead_(), before = map[cid]; if (!before || typeof before !== 'object') return;
+    var after = remapSlotMarksForImages_(before, oldImgs, newImgs);
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    if (Object.keys(after).length) map[cid] = after; else delete map[cid];
+    imgMarksWrite_(map);
+  }
   // 動画生成で使った画像を自動で「使用済み」に(Chami 2026-08-24 clause A)。日付は投稿完了まで刻まない。
   function markImgUsedByHash_(cid, h) { if (cid && h) setImgMarkByHash_(cid, h, 'used'); }
   // 投稿完了で「使用済み」に使用日を刻む(Chami 2026-08-24 clause B「投稿済みになったら使用した日付」)。
   function stampImgUsedDate_(cid, h, at) { if (cid && h) setImgMarkByHash_(cid, h, 'used', { at: at || Date.now() }); }
   function fmtUsedDate_(at) { var d = new Date(Number(at) || 0); if (isNaN(d.getTime())) return ''; return d.getFullYear() + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + ('0' + d.getDate()).slice(-2); }
-  // 起動時にIDBミラーからLS(またはメモリ)へ復元する(冪等・1回)。IDB優先で欠けているcid/hashを補完し、
-  //   両方にある値はLS側を残す(=Object.assign的にLSベースへIDBの未知キーだけ足す)。fail-open。
+  // 起動時にIDBミラーからLS(またはメモリ)へ復元する(冪等・1回)。v2同士は更新時刻の新しい方を正とし、
+  //   旧IDB形式だけはLSへ未知キーを補完する。明示解除を古いミラーから復活させない。fail-open。
   function restoreImgMarksFromIdb_() {
     if (_imgMarksRestored || !_idbOk || !window.Go5Idb) return;
     _imgMarksRestored = true;
@@ -1462,10 +1528,15 @@
         : window.Go5Idb.get(imgMarksIdbKey_()).then(function (v) { return { ok: true, value: v }; }, function (e) { return { ok: false, value: null, error: e }; });
       readP.then(function (r) {
         if (!r || !r.ok || !r.value || typeof r.value !== 'object' || Array.isArray(r.value)) return;
-        var ls = imgMarksRead_(), merged = {}, changed = false;
+        var ls = imgMarksRead_(), lsRaw = null, lsAt = 0, idb = unwrapImgMarks_(r.value), merged = {}, changed = false;
+        try { lsRaw = localStorage.getItem(K_IMGMARKS); lsAt = Number(localStorage.getItem(K_IMGMARKS_AT)) || 0; } catch (e) {}
+        if (idb.v2) {
+          if (idb.at > lsAt || lsRaw == null) imgMarksWrite_(idb.map, idb.at || Date.now());
+          return;
+        }
         Object.keys(ls).forEach(function (cid) { merged[cid] = Object.assign({}, ls[cid]); });
-        Object.keys(r.value).forEach(function (cid) {
-          var idbInner = r.value[cid];
+        Object.keys(idb.map).forEach(function (cid) {
+          var idbInner = idb.map[cid];
           if (!idbInner || typeof idbInner !== 'object') return;
           if (!merged[cid]) merged[cid] = {};
           Object.keys(idbInner).forEach(function (h) {
@@ -2675,7 +2746,7 @@
     z.querySelectorAll('.fz-zoom-mark input[type=radio]').forEach(function (r) {
       r.addEventListener('change', function () {
         if (!_zoomMarkCid || !r.checked) return;
-        setImgMark_(_zoomMarkCid, _zoomList[_zi], r.value || '');
+        setImgMarkAt_(_zoomMarkCid, _zoomList[_zi], _zi, r.value || '');
         zoomShow_();
       });
     });
@@ -2739,7 +2810,7 @@
     if (mk) {
       if (_zoomMarkCid) {
         mk.hidden = false;
-        var st = imgMarkStateOf_(_zoomMarkCid, _zoomList[_zi]) || '';
+        var st = imgMarkStateOf_(_zoomMarkCid, _zoomList[_zi], _zi) || '';
         mk.querySelectorAll('.fz-mk').forEach(function (l) {
           var inp = l.querySelector('input[type=radio]');
           var on = inp && (inp.value || '') === st;
@@ -2748,7 +2819,7 @@
         });
         var du = z.querySelector('.fz-zoom-usedate'); // 投稿完了で確定した使用日をラジオの上に表示
         if (du) {
-          var at = imgMarkDateOf_(_zoomMarkCid, _zoomList[_zi]);
+          var at = imgMarkDateOf_(_zoomMarkCid, _zoomList[_zi], _zi);
           if (at) { du.textContent = '使用日: ' + fmtUsedDate_(at); du.hidden = false; }
           else { du.textContent = ''; du.hidden = true; }
         }
@@ -2774,10 +2845,11 @@
   function pasteAddRefImgToFirst_(cid, done) {
     pasteImageFromClipboard_(function (durl, err) {
       if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
-      var cur = refImgOf(cid) || {}, imgs = refImgsOf_(cid);
+      var cur = refImgOf(cid) || {}, imgs = refImgsOf_(cid), oldImgs = imgs.slice();
       imgs.unshift(durl); // 先頭＝1ページ目
       Promise.resolve(refImgSave(cid, { imgs: imgs, comment: cur.comment, memo: cur.memo, twitterUrl: cur.twitterUrl, twitterUrl2: cur.twitterUrl2 })).then(function (ok) {
         if (!ok) { done(null, '画像を保存できませんでした。もう一度お試しください'); return; }
+        remapImgMarksForImages_(cid, oldImgs, imgs);
         try { if (_activeTab) render(); } catch (e) {}
         done(imgs.slice(), null);
       }).catch(function () {
@@ -2789,8 +2861,10 @@
   function reorderRefImgToFirst_(cid, i) {
     var cur = refImgOf(cid) || {}, imgs = refImgsOf_(cid);
     if (i <= 0 || i >= imgs.length) return imgs;
+    var oldImgs = imgs.slice();
     var img = imgs.splice(i, 1)[0]; imgs.unshift(img); // 先頭へ＝旧1ページ目は2ページ目へずれる
     refImgSave(cid, { imgs: imgs, comment: cur.comment, memo: cur.memo, twitterUrl: cur.twitterUrl, twitterUrl2: cur.twitterUrl2 });
+    remapImgMarksForImages_(cid, oldImgs, imgs);
     try { if (_activeTab) render(); } catch (e) {}
     return imgs;
   }
@@ -3209,6 +3283,12 @@
     // 「動画生成へ」は遷移ボタンでもある。画像を触っていないのに保存画像列を書き直さない。
     // 明示的な追加・並べ替え・削除があった時だけ画像IDBを更新する。
     var imagesDirty = false;
+    var marksOrderCommitted = false;
+    function commitImageMarkOrder_() {
+      if (!imagesDirty || marksOrderCommitted) return;
+      marksOrderCommitted = true;
+      remapImgMarksForImages_(cid, curImgs, pending.imgs);
+    }
     var isTw = !!(it.isTwitter || it.twitterUrl); // Twitterのみ候補(埋め込みポストURLあり)
     // 作品URLのプレフィル：候補が実際に作品URLを持つ(!isTwitter かつ it.url がDMM/book等)なら、
     //   twitterUrl の有無に関わらずそのまま欄に表示。(＝カードの「作品↗」と同じ判定)X起点(it.url=ポストURL)は空。
@@ -3421,6 +3501,7 @@
       saveForMove.then(function (ok) {
         // 保存失敗はログにだけ残し、遷移は止めない(渡すデータはメモリ側=無傷)。
         if (!ok) { try { console.warn('[go5 cand] 動画生成へ: 候補の永続保存に失敗したが遷移は続行', it.cid); } catch (e) {} }
+        else commitImageMarkOrder_();
         go_();
       }).catch(function () {
         try { console.warn('[go5 cand] 動画生成へ: 保存で例外。遷移は続行', it.cid); } catch (e) {}
@@ -3497,6 +3578,7 @@
       Promise.resolve(saveResult).then(function (ok) {
         if (!saveOp.finish(ok)) return; // 時間切れ後の遅着結果で画面を閉じない
         if (!ok) { showSaveFailure_(); return; }
+        commitImageMarkOrder_();
         saveMsg.textContent = '保存しました';
         if (onSaved) onSaved();
         setTimeout(function () { if (mySeq === _refOpenSeq) closeRefOverlay_(); }, 600);
@@ -5172,7 +5254,7 @@
     if (isMain) {
       wireBuiltinRename_('main'); // 組込タブ(手動追加)の改名。candEditForm へフォームを出す。
       var teianBtn = $('candTeianOpen'); // 提案ページへ遷移(同オリジン・同タブ)。Chami依頼2026-08-23。
-      if (teianBtn) teianBtn.addEventListener('click', function () { location.href = 'KouhoTeian.html'; });
+      if (teianBtn) teianBtn.addEventListener('click', function () { location.href = kouhoTeianHref_(); });
     } else {
       var tab = null; lsGet(K_TABS, '[]').forEach(function (t) { if (t.id === tabId) tab = t; });
       var eb = $('candEditTab'); if (eb && tab) eb.addEventListener('click', function () { showEditTabForm(tab); });

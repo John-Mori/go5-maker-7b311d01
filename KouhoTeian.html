@@ -22,6 +22,9 @@
   header{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:4px 0 12px}
   header h1{font-size:1.05rem;font-weight:800;color:var(--accent);margin:0;letter-spacing:.01em}
   header .date{font-size:.78rem;color:var(--muted)}
+  .headmeta{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
+  .buildbadge{display:inline-flex;align-items:center;border:1px solid rgba(43,179,192,.55);background:rgba(43,179,192,.10);
+    color:#126a73;border-radius:999px;padding:2px 7px;font-size:.66rem;font-weight:800;white-space:nowrap}
   .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow)}
   .panel .head{font-size:.72rem;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
   label.mini{display:block;font-size:.72rem;color:var(--muted);margin:8px 0 4px}
@@ -157,7 +160,7 @@
 <div class="wrap">
   <header>
     <h1>投稿提案 / 決定</h1>
-    <span class="date" id="date">—</span>
+    <span class="headmeta"><span class="buildbadge" id="buildBadge">版確認中</span><span class="date" id="date">—</span></span>
   </header>
 
   <div class="panel" id="loader">
@@ -209,11 +212,20 @@
   </div>
 </div>
 
-<!-- 動画生成用画像(=候補タブでChamiが貼る素材)を cid で読むための土台。本体アプリと同一オリジン=
-     同じ IndexedDB(go5store/kv の ref:<cid>)を読める。★?v= は付けない(このページは bump.mjs の
-     TARGETS 外=?v= を持つと孤児検出でCIが赤になる。coreは安定ファイルなので素で読む)。 -->
-<script src="core/util.js"></script>
-<script src="core/idb-store.js"></script>
+<!-- 投稿提案は周期同期を起動しない。core/sync.jsは読まず、画像CDNが必要とする設定読取だけを副作用なしで供給する。 -->
+<script src="core/util.js?v=964"></script>
+<script src="core/idb-store.js?v=964"></script>
+<script>
+(function(root){
+  "use strict";
+  if(root.Go5Sync) return;
+  root.Go5Sync = { getConfig:function(){
+    function g(k){ try{ return (root.localStorage.getItem(k)||'').trim(); }catch(e){ return ''; } }
+    return {url:g('sync2_url').replace(/\/+$/,''), token:g('sync2_token')};
+  }};
+})(window);
+</script>
+<script src="core/image-cdn.js?v=964"></script>
 <script>
 (function(){
   "use strict";
@@ -228,6 +240,26 @@
   // 技法ラベル(type)先頭の丸数字を落とす=画面に番号を出さない(選択肢1/2/3との混同回避・Chami指示 2026-08-24)。
   function deNum(s){ return (s||'').replace(/^[①-⑳㉑-㉟㊱-㊿]+\s*/,''); }
   var LS = window.localStorage;
+
+  // ---- 配信版の可視化＋自己更新 ----
+  // KouhoTeian.html自身がSafariへ残っても、ネットワーク上のHTMLをno-storeで1回だけ照合し、
+  // 新しい?v=を検出したら版付きURLへ置換する。初回導入後はハードリロードを要求しない。
+  function assetVersion_(){
+    var s=document.querySelector('script[src*="core/util.js?v="]');
+    try{ return Number(new URL(s.src,location.href).searchParams.get('v'))||0; }catch(e){ return 0; }
+  }
+  function htmlAssetVersion_(src){ var m=/core\/util\.js\?v=(\d+)/.exec(String(src||'')); return m?Number(m[1])||0:0; }
+  function showBuild_(){ var b=$('#buildBadge'),v=assetVersion_(); if(b) b.textContent=v?('v'+v):'版不明'; return v; }
+  function checkFreshBuild_(){
+    var current=showBuild_(), probe;
+    try{ probe=new URL('KouhoTeian.html',location.href); probe.searchParams.set('_go5_build_check',String(Date.now())); }catch(e){ return; }
+    fetch(probe.toString(),{cache:'no-store'}).then(function(r){ return r&&r.ok?r.text():''; }).then(function(src){
+      var latest=htmlAssetVersion_(src); if(!current||!latest||latest<=current) return;
+      var next=new URL(location.href); next.searchParams.delete('_go5_build_check'); next.searchParams.set('v',String(latest));
+      location.replace(next.toString());
+    }).catch(function(){});
+  }
+  showBuild_(); setTimeout(checkFreshBuild_,0);
 
   // 部屋コメントのアバター(R2恒久URL・local/persona_avatars.json由来。期限切れ根絶済み=2026-07-16)。
   var AVA_MITOMA = 'https://go5-sync.trustsignalbot.workers.dev/img/023b355179ae08bb4edcd7bb3b4bb3077f776667b29b577092c654b680f1abaa';
@@ -497,89 +529,199 @@
   function openGallery_(c){ openImagesModal_(c.title, c.images||[]); }
 
   // ---- 動画生成用画像(候補タブでChamiが貼る素材・本体と同じ IDB go5store/kv の ref:<cid>)----
-  var REF = {};  // cid → {imgs:[dataURL], has:bool}
-  // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
-  //   js/candidates.js と同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
+  var REF = {};  // cid → {imgs,keys,has,r2n,at,source}
+  var K_IMGMARKS='cand_img_marks', K_IMGMARKS_AT='cand_img_marks_at', IMG_MARKS={}, _marksLoadSeq=0;
+  var IMAGE_MANIFEST_KEY='go5_image_manifest_v1', _manifestPullJob=null, _manifestPulledAt=0;
+  var _diag=[];
+  function diag_(code,detail){
+    var row={at:Date.now(),code:String(code||'unknown'),detail:detail||{}}; _diag.push(row); if(_diag.length>120) _diag.shift();
+    try{ (code.indexOf('ok')>=0?console.info:console.warn)('[go5 teian image]',row.code,row.detail); }catch(e){}
+  }
+  window.Go5TeianDiag={snapshot:function(){ return _diag.slice(); },clear:function(){ _diag=[]; }};
+
+  // ★画像の同一性は3段で照合する。
+  // 1) raw-byte SHA-256(CDN URLのhash) 2) go5refの安定slot 3) 旧dataURL文字列hash。
+  // dataURLのMIME表記がR2再構成で変わっても、slotまたはraw hashで除外状態が一致する。
   function imgHash_(s){ s=String(s||''); var h=5381,i=s.length; while(i){ h=((h*33)^s.charCodeAt(--i))>>>0; } return h.toString(36); }
-  // 画像マーク(cand_img_marks・js/candidates.jsが書く { "<cid>": { "<hash>": "used"|"excluded" | {s,at} } })の読み取り専用参照。
-  function imgMarksMap_(){ try{ return JSON.parse(LS.getItem('cand_img_marks')||'{}')||{}; }catch(e){ return {}; } }
-  // マーク値は文字列 or {s,at}(使用日つき)の2形。状態文字列に正規化する(js/candidates.js の mkState_ と一致必須)。
+  function imgSlotMarkKey_(idx){ return '@slot:'+Math.max(0,Number(idx)||0); }
+  function imgUrlHashMarkKey_(s){ var m=/\/img\/([a-f0-9]{64})(?:[?#]|$)/i.exec(String(s||'')); return m?('@sha256:'+m[1].toLowerCase()):''; }
   function markState_(v){ return (v && typeof v==='object') ? String(v.s||'') : String(v||''); }
-  // used/excluded マークが付いた画像を候補から除外する。
-  function filterMarked_(cid, imgs){
-    var m = imgMarksMap_()[cid] || {};
-    return (imgs||[]).filter(function(im){ var st=markState_(m[imgHash_(im)]); return st!=='used' && st!=='excluded'; });
+  function imgMarkKeys_(img,idx,rawHash){
+    var keys=[],seen={}; function add_(k){k=String(k||'');if(k&&!seen[k]){seen[k]=1;keys.push(k);}}
+    if(/^[a-f0-9]{64}$/i.test(String(rawHash||'')))add_('@sha256:'+String(rawHash).toLowerCase());
+    add_(imgUrlHashMarkKey_(img));add_(imgSlotMarkKey_(idx));add_(imgHash_(img));return keys;
+  }
+  function imgMarkStateFromMap_(map,cid,img,idx,rawHash){
+    var m=(map&&map[String(cid||'')])||{},keys=imgMarkKeys_(img,idx,rawHash);
+    for(var i=0;i<keys.length;i++){ var st=markState_(m[keys[i]]); if(st) return st; }
+    return '';
+  }
+  function parseMarks_(raw){ try{ var m=JSON.parse(raw||'{}'); return (m&&typeof m==='object'&&!Array.isArray(m))?m:{}; }catch(e){ return {}; } }
+  function unwrapMarks_(rec){ return (rec&&rec.__v===2&&rec.map&&typeof rec.map==='object')?{map:rec.map,at:Number(rec.at)||0}:{map:(rec&&typeof rec==='object'?rec:{}),at:0}; }
+  function loadImgMarksMap_(){
+    var seq=++_marksLoadSeq,raw=null,lsMap={},lsAt=0; try{ raw=LS.getItem(K_IMGMARKS); lsMap=parseMarks_(raw); lsAt=Number(LS.getItem(K_IMGMARKS_AT))||0; }catch(e){}
+    // LS正本を同期的に採用し、画像manifestの初期表示をIDB待ちにしない。IDBは耐久fallbackとして後着反映する。
+    IMG_MARKS=lsMap;
+    if(!(window.Go5Idb&&Go5Idb.available&&Go5Idb.available())) return Promise.resolve(IMG_MARKS);
+    var rp=(typeof Go5Idb.getResult==='function')?Go5Idb.getResult('meta:imgmarks'):Go5Idb.get('meta:imgmarks').then(function(v){return{ok:true,value:v};},function(){return{ok:false};});
+    Promise.resolve(rp).then(function(r){
+      if(seq!==_marksLoadSeq||!r||!r.ok||!r.value)return;
+      var idb=unwrapMarks_(r.value),next=(idb.at>lsAt||raw===null)?idb.map:lsMap;
+      if(JSON.stringify(next)===JSON.stringify(IMG_MARKS))return;
+      IMG_MARKS=next;
+      loadRefMap_().then(function(m){if(seq===_marksLoadSeq){REF=m;if(DATA)render();}});
+    },function(){});
+    return Promise.resolve(IMG_MARKS);
+  }
+  function filterMarked_(cid,imgs,keys){
+    var out=[],outKeys=[]; (imgs||[]).forEach(function(im,i){
+      var raw=(keys&&keys[i])||'', st=imgMarkStateFromMap_(IMG_MARKS,cid,im,i,raw);
+      if(st!=='used'&&st!=='excluded'){ out.push(im); if(keys) outKeys.push(raw); }
+    });
+    return {imgs:out,keys:keys?outKeys:[]};
   }
   function refInfoFromRec_(rec){
-    if(!rec) return {imgs:[], has:false};
-    if(Array.isArray(rec.imgs)){ var a=rec.imgs.filter(Boolean); return {imgs:a, has:a.length>0}; }
-    if(rec.img) return {imgs:[rec.img], has:true};
-    if(rec.__r2n>0) return {imgs:[], has:true, r2n:rec.__r2n};   // 別端末に在る(この端末に未取得)=r2n枚をR2から取り寄せる
-    return {imgs:[], has:false};
+    if(!rec) return {imgs:[],keys:[],has:false,at:0,source:'local'};
+    var at=Number(rec.at)||0;
+    if(Array.isArray(rec.imgs)){ var a=rec.imgs.filter(Boolean); return {imgs:a,keys:[],has:a.length>0,at:at,source:'local'}; }
+    if(rec.img) return {imgs:[rec.img],keys:[],has:true,at:at,source:'local'};
+    if(rec.__r2n>0) return {imgs:[],keys:[],has:true,r2n:Number(rec.__r2n)||0,at:at,source:'go5ref'};
+    return {imgs:[],keys:[],has:false,at:at,source:'local'};
   }
-  // マーク済み(used/excluded)画像を除いた上で {imgs,has} を確定する。未取得(__r2n>0=imgs空でhas true)は
-  //   マークと無関係なので触らない。フィルタ対象はimgsが実在した時のみ・全除外なら素材無し扱い(has=false)へ落とす。
-  function applyMarkFilter_(cid, info){
-    if(!info || !info.imgs.length) return info;
-    var filtered = filterMarked_(cid, info.imgs);
-    return filtered.length ? {imgs:filtered, has:true} : {imgs:[], has:false};
+  function applyMarkFilter_(cid,info){
+    if(!info||!info.imgs||!info.imgs.length) return info;
+    var f=filterMarked_(cid,info.imgs,info.keys);
+    return {imgs:f.imgs,keys:f.keys,has:f.imgs.length>0,r2n:info.r2n||0,at:info.at||0,source:info.source||'local',known:!!info.known};
+  }
+  function putRefInfo_(map,cid,info){
+    if(!cid||!info) return; info=applyMarkFilter_(cid,info); var cur=map[cid];
+    if(!cur){ map[cid]=info; return; }
+    var ct=Number(cur.at)||0,nt=Number(info.at)||0;
+    if(nt>ct){ map[cid]=info; return; }
+    if(nt<ct&&ct>0) return;
+    if(info.source==='manifest'){ map[cid]=info; return; }
+    if((info.imgs||[]).length&&!(cur.imgs||[]).length) map[cid]=info;
+    else if(info.has&&!cur.has) map[cid]=info;
+  }
+  function validManifestRec_(rec){
+    if(!rec||typeof rec!=='object'||!Array.isArray(rec.keys)) return null;
+    var keys=rec.keys.map(function(h){return String(h||'').toLowerCase();});
+    if(keys.some(function(h){return !/^[a-f0-9]{64}$/.test(h);})) return null;
+    return {keys:keys,prev:Math.max(0,Number(rec.prev)||0),at:Math.max(0,Number(rec.at)||0)};
+  }
+  function manifestMap_(){ try{ var m=JSON.parse(LS.getItem(IMAGE_MANIFEST_KEY)||'{}'); return (m&&typeof m==='object'&&!Array.isArray(m))?m:{}; }catch(e){return{};} }
+  function chooseManifestRec_(a,b){
+    a=validManifestRec_(a); b=validManifestRec_(b); if(!a) return b; if(!b) return a;
+    if(a.at!==b.at) return a.at>b.at?a:b;
+    if(!a.keys.length&&b.keys.length) return a; if(a.keys.length&&!b.keys.length) return b;
+    return JSON.stringify(a)>=JSON.stringify(b)?a:b;
+  }
+  function mergeManifestMaps_(local,remote){
+    var out={},ids={}; Object.keys(local||{}).forEach(function(k){ids[k]=1;}); Object.keys(remote||{}).forEach(function(k){ids[k]=1;});
+    Object.keys(ids).forEach(function(k){ var r=chooseManifestRec_(local&&local[k],remote&&remote[k]); if(r) out[k]=r; }); return out;
+  }
+  function applyManifestToRef_(map){
+    var mm=manifestMap_(),base=syncCfg().url;
+    if(!/^https?:\/\//.test(base)){ if(Object.keys(mm).length) diag_('config_missing',{where:'manifest'}); return map; }
+    Object.keys(mm).forEach(function(id){
+      if(id.indexOf('ref:')!==0) return; var cid=id.slice(4),rec=validManifestRec_(mm[id]); if(!rec) return;
+      var urls=rec.keys.map(function(h){return base+'/img/'+h;});
+      putRefInfo_(map,cid,{imgs:urls,keys:rec.keys,has:urls.length>0,at:rec.at,source:'manifest',known:true});
+    });
+    return map;
+  }
+  function remoteManifestFromPull_(body){
+    try{
+      if(!body||body.empty||!body.blob) return {};
+      var state=JSON.parse(body.blob),e=state&&state.ls&&state.ls[IMAGE_MANIFEST_KEY];
+      if(!e||e.d||e.v==null) return {};
+      var m=JSON.parse(String(e.v)); return (m&&typeof m==='object'&&!Array.isArray(m))?m:{};
+    }catch(e){ diag_('manifest_parse_error',{}); return {}; }
+  }
+  function fetchImageManifest_(force){
+    if(_manifestPullJob) return _manifestPullJob;
+    if(!force&&Date.now()-_manifestPulledAt<30000) return Promise.resolve(false);
+    var c=syncCfg(); if(!/^https?:\/\//.test(c.url)||!c.token){ diag_('config_missing',{where:'manifest_pull'}); return Promise.resolve(false); }
+    _manifestPullJob=fetch(c.url+'/api/pull',{headers:{'X-Sync-Token':c.token},cache:'no-store'}).then(function(r){
+      if(!r||!r.ok){ diag_('manifest_http_error',{status:r&&r.status||0}); return null; } return r.json().catch(function(){return null;});
+    }).then(function(body){
+      if(!body) return false; var merged=mergeManifestMaps_(manifestMap_(),remoteManifestFromPull_(body));
+      var accepted=false; try{ accepted=!!(window.Go5ImageCdn&&Go5ImageCdn.acceptRaw&&Go5ImageCdn.acceptRaw(JSON.stringify(merged),'teian-pull')); }catch(e){}
+      if(!accepted){ try{ LS.setItem(IMAGE_MANIFEST_KEY,JSON.stringify(merged)); accepted=true; }catch(e){} }
+      if(accepted){ _manifestPulledAt=Date.now(); applyManifestToRef_(REF); diag_('manifest_ok',{refs:Object.keys(merged).filter(function(k){return k.indexOf('ref:')===0;}).length}); if(DATA) render(); }
+      return accepted;
+    }).catch(function(e){ diag_('manifest_fetch_error',{name:(e&&e.name)||'fetch'}); return false; }).then(function(v){_manifestPullJob=null;return v;},function(){_manifestPullJob=null;return false;});
+    return _manifestPullJob;
   }
   function loadRefMap_(){
-    return new Promise(function(resolve){
-      var map={};
-      try{ // localStorage 退避も読む(IDBが間欠死する端末でも同期で拾える・本体と同じキー)
-        for(var i=0;i<LS.length;i++){ var k=LS.key(i);
-          if(k && k.indexOf('cand_refimg__')===0){
-            try{ var cid=k.slice(13); var info=applyMarkFilter_(cid, refInfoFromRec_(JSON.parse(LS.getItem(k)))); if(info.imgs.length||info.has) map[cid]=info; }catch(e){}
-          }
-        }
-      }catch(e){}
-      if(window.Go5Idb && Go5Idb.available && Go5Idb.available()){
-        Go5Idb.entriesByPrefixes(['ref:']).then(function(ent){
-          try{ Object.keys(ent||{}).forEach(function(k){ var cid=k.slice(4); var info=applyMarkFilter_(cid, refInfoFromRec_(ent[k])); if(info.imgs.length||info.has) map[cid]=info; }); }catch(e){}
-          resolve(map);
-        }, function(){ resolve(map); });   // fail-open=読めなくても中身は出す
-      } else resolve(map);
-    });
+    var map={};
+    try{
+      for(var i=0;i<LS.length;i++){ var k=LS.key(i);
+        if(k&&k.indexOf('cand_refimg__')===0){ try{putRefInfo_(map,k.slice('cand_refimg__'.length),refInfoFromRec_(JSON.parse(LS.getItem(k))));}catch(e){} }
+      }
+    }catch(e){}
+    // 小さなURL台帳を最初に適用して即返す。重い/停止し得るIDB全走査は初期srcの決定を待たせない。
+    applyManifestToRef_(map);
+    if(window.Go5Idb&&Go5Idb.available&&Go5Idb.available()){
+      try{
+        Promise.resolve(Go5Idb.entriesByPrefixes(['ref:'])).then(function(ent){
+          try{Object.keys(ent||{}).forEach(function(k){putRefInfo_(map,k.slice(4),refInfoFromRec_(ent[k]));});}catch(e){}
+          applyManifestToRef_(map); if(REF===map&&DATA)render();
+        },function(){diag_('idb_ref_read_error',{});});
+      }catch(e){diag_('idb_ref_read_error',{});}
+    }
+    return Promise.resolve(map);
   }
-  // ---- R2 hydration(Chami指示 2026-08-31「動画生成画像ありなのに表示されない」を直す)----
-  //   別端末がR2へ置いた動画生成用画像を、候補ページ(js/candidates.js resolveRefFromR2_)と同じ作法で取り寄せる。
-  //   R2キー=sha256hex(論理名 "go5ref:<cid>:<idx>")。GETは公開 /img/…(トークン不要)=同期エンジン(core/sync.js)は
-  //   読み込まない(このページに周期同期の副作用を持ち込まない=挙動を変えないため、必要な fetch だけ内製する)。
-  //   fail-open=1枚でも取れなければマーカー温存で次回再試行(「無い」と言い切らない)。
-  var _subtle = (window.crypto && window.crypto.subtle) || null;
-  var _r2Jobs = {};  // cid → true(取得中/取得済=二重起動防止)
-  function _u8(s){ return new TextEncoder().encode(s); }
-  function _hex(buf){ var b=new Uint8Array(buf),s=''; for(var i=0;i<b.length;i++) s+=(b[i]<16?'0':'')+b[i].toString(16); return s; }
-  function _sha256hex(s){ return _subtle.digest('SHA-256', _u8(s)).then(_hex); }
-  function _blobToDataUrl(blob){ return new Promise(function(res,rej){ var fr=new FileReader(); fr.onload=function(){ res(fr.result); }; fr.onerror=rej; fr.readAsDataURL(blob); }); }
-  function _fetchR2At(name){
-    var c = syncCfg();
-    if(!/^https?:\/\//.test(c.url) || !_subtle) return Promise.resolve(null);
+
+  // ---- 旧go5refマーカーのR2 hydration ----
+  // 通常経路はmanifestのcontent-hash URLを直接表示する。go5refは旧/非常時データだけの回復線として残し、
+  // 1枚でも欠けた時は全マーカーを温存して自動再試行する(部分成功を完了扱いしない)。
+  var _subtle=(window.crypto&&window.crypto.subtle)||null,_r2States={},_r2Queue=[],_r2Active=0,R2_MAX_ACTIVE=3;
+  function _u8(s){return new TextEncoder().encode(s);} function _hex(buf){var b=new Uint8Array(buf),s='';for(var i=0;i<b.length;i++)s+=(b[i]<16?'0':'')+b[i].toString(16);return s;}
+  function _sha256hex(s){if(!_subtle)return Promise.reject(new Error('crypto_unavailable'));return _subtle.digest('SHA-256',_u8(s)).then(_hex);}
+  function _blobToDataUrl(blob){return new Promise(function(res,rej){var fr=new FileReader();fr.onload=function(){res(fr.result);};fr.onerror=rej;fr.readAsDataURL(blob);});}
+  function _fetchR2At(name,idx){
+    var c=syncCfg(); if(!/^https?:\/\//.test(c.url))return Promise.resolve({ok:false,idx:idx,reason:'config_missing',status:0});
+    if(!_subtle)return Promise.resolve({ok:false,idx:idx,reason:'crypto_unavailable',status:0});
     return _sha256hex(String(name)).then(function(key){
-      return fetch(c.url+'/img/'+key, {cache:'no-store'}).then(function(r){ return r&&r.ok?r.blob():null; }, function(){ return null; });
-    }).catch(function(){ return null; });
+      var ctl=window.AbortController?new AbortController():null,timer=ctl?setTimeout(function(){try{ctl.abort();}catch(e){}},20000):null;
+      return fetch(c.url+'/img/'+key,{cache:'no-store',signal:ctl?ctl.signal:undefined}).then(function(r){
+        if(timer)clearTimeout(timer); if(!r||!r.ok)return{ok:false,idx:idx,reason:r&&r.status===404?'r2_missing':'http_error',status:r&&r.status||0};
+        return r.blob().then(function(blob){return blob&&blob.size?{ok:true,idx:idx,blob:blob,status:r.status}:{ok:false,idx:idx,reason:'empty_blob',status:r.status};});
+      },function(e){if(timer)clearTimeout(timer);return{ok:false,idx:idx,reason:e&&e.name==='AbortError'?'timeout':'network',status:0};});
+    }).catch(function(e){return{ok:false,idx:idx,reason:e&&e.message==='crypto_unavailable'?'crypto_unavailable':'hash_error',status:0};});
   }
-  function hydrateR2_(cid, n){
-    if(_r2Jobs[cid]) return; _r2Jobs[cid]=true;
-    var jobs=[]; for(var i=0;i<n;i++){ jobs.push(_fetchR2At('go5ref:'+cid+':'+i)); }
-    Promise.all(jobs).then(function(blobs){
-      var real=blobs.filter(Boolean);
-      if(!real.length){ delete _r2Jobs[cid]; return; }   // 全滅=解放して次回再試行(マーカー温存)
-      Promise.all(real.map(_blobToDataUrl)).then(function(urls){
-        var info = applyMarkFilter_(cid, {imgs:urls.filter(Boolean), has:true});
-        REF[cid] = info.imgs.length ? info : {imgs:[], has:true};
-        if(DATA) render();
-      });
-    });
+  function scheduleR2Retry_(cid,n,reason){
+    var st=_r2States[cid]||(_r2States[cid]={attempt:0}); st.attempt=(st.attempt||0)+1;
+    var delays=[3000,10000,30000,60000],delay=reason==='r2_missing'?60000:delays[Math.min(st.attempt-1,delays.length-1)];
+    if(st.timer)clearTimeout(st.timer); st.timer=setTimeout(function(){st.timer=null;hydrateR2_(cid,n);},delay);
   }
-  // REF内の「未取得(has=true・imgs空・r2n>0)」を全部R2から取り寄せる。_r2Jobsで二重起動を防ぐので render毎に呼んでよい。
-  function hydrateAllR2_(){
-    if(!DATA) return;
-    Object.keys(REF).forEach(function(cid){
-      var info=REF[cid];
-      if(info && info.has && !info.imgs.length && info.r2n>0) hydrateR2_(cid, info.r2n);
-    });
+  function pumpR2_(){
+    while(_r2Active<R2_MAX_ACTIVE&&_r2Queue.length){
+      (function(task){
+        var st=_r2States[task.cid]||(_r2States[task.cid]={attempt:0}); st.queued=false; st.active=true; _r2Active++;
+        var current=REF[task.cid];
+        if(current&&current.imgs&&current.imgs.length&&current.source==='manifest'){st.active=false;_r2Active--;pumpR2_();return;}
+        var jobs=[];for(var i=0;i<task.n;i++)jobs.push(_fetchR2At('go5ref:'+task.cid+':'+i,i));
+        Promise.all(jobs).then(function(results){
+          var bad=results.filter(function(x){return !x.ok;});
+          if(bad.length){var first=bad[0];diag_('go5ref_error',{cid:task.cid,failed:bad.length,total:task.n,status:first.status,reason:first.reason});scheduleR2Retry_(task.cid,task.n,first.reason);return;}
+          return Promise.all(results.map(function(x){return _blobToDataUrl(x.blob);})).then(function(urls){
+            var info=applyMarkFilter_(task.cid,{imgs:urls,keys:[],has:true,r2n:task.n,at:(REF[task.cid]&&REF[task.cid].at)||0,source:'go5ref'});
+            REF[task.cid]=info; st.attempt=0; diag_('go5ref_ok',{cid:task.cid,total:urls.length}); if(DATA)render();
+          });
+        }).catch(function(){diag_('go5ref_error',{cid:task.cid,failed:task.n,total:task.n,status:0,reason:'decode'});scheduleR2Retry_(task.cid,task.n,'decode');}).then(function(){st.active=false;_r2Active--;pumpR2_();});
+      }(_r2Queue.shift()));
+    }
+  }
+  function hydrateR2_(cid,n,force){
+    cid=String(cid||'');n=Math.max(0,Number(n)||0);if(!cid||!n)return;
+    var st=_r2States[cid]||(_r2States[cid]={attempt:0});
+    if(force&&st.timer){clearTimeout(st.timer);st.timer=null;} if(st.active||st.queued||st.timer)return;
+    st.queued=true;_r2Queue.push({cid:cid,n:n});pumpR2_();
+  }
+  function hydrateAllR2_(force){
+    if(!DATA)return;Object.keys(REF).forEach(function(cid){var info=REF[cid];if(info&&info.has&&!info.imgs.length&&info.r2n>0)hydrateR2_(cid,info.r2n,!!force);});
   }
 
   // ---- 候補ライブラリ(候補タブでChamiが手動で貼った作品・localStorage cand_items + 独立タブ cand_items__<tabId>)----
@@ -608,11 +750,22 @@
   function genImgHtml_(c){
     var info = REF[c.cid] || {imgs:[], has:false};
     if(info.imgs.length){
-      return '<div class="genimg" data-gen="'+esc(c.id)+'"><img loading="lazy" src="'+esc(info.imgs[0])+'" alt="動画生成用画像"><span class="lbl">動画生成用</span></div>';
+      return '<div class="genimg" data-gen="'+esc(c.id)+'"><img class="teian-gen-img" loading="lazy" data-refcid="'+esc(c.cid)+'" data-base-src="'+esc(info.imgs[0])+'" src="'+esc(info.imgs[0])+'" alt="動画生成用画像"><span class="lbl">動画生成用</span></div>';
     }
     if(info.has){ return '<div class="genimg none">動画生成用画像あり<br>(この端末に未取得)</div>'; }
     return '<div class="genimg none">動画生成用画像<br>なし</div>';
   }
+
+  // immutable CDN画像の一過性失敗は、ページ全体を再描画せず同じ枠だけ最大3回再要求する。
+  // 404等が持続する場合は診断へ理由を残し、manifest/マーカー自体は消さない(fail-open)。
+  document.addEventListener('error',function(e){
+    var img=e.target;if(!img||!img.classList||!img.classList.contains('teian-gen-img'))return;
+    var n=Number(img.getAttribute('data-retry')||0),cid=img.getAttribute('data-refcid')||'',base=img.getAttribute('data-base-src')||img.src;
+    diag_('cdn_img_error',{cid:cid,attempt:n+1}); if(n>=3)return;
+    img.setAttribute('data-retry',String(n+1));setTimeout(function(){
+      if(!img.isConnected)return;var sep=base.indexOf('?')>=0?'&':'?';img.src=base+sep+'_go5_retry='+(n+1)+'_'+Date.now();
+    },[800,2500,7000][n]||7000);
+  },true);
 
   // ---- 絞り込み(端末に保存) ----
   // 「動画生成用画像あり」フィルタは2グループ切替へ統合(2026-08-24)=ここでは扱わない。
@@ -776,7 +929,17 @@
 
   // 絞り込みの配線 + 動画生成用画像の読み込み(非同期・揃ったら描き直す・fail-open)
   initFilters_();
-  loadRefMap_().then(function(m){ REF=m; if(DATA) render(); });
+  var refsReady=loadImgMarksMap_().then(loadRefMap_).then(function(m){REF=m;if(DATA)render();return true;});
+  // 周期同期は起動せず、画像manifestだけを既存pullから一度取り込む。ローカル表示はこの通信を待たない。
+  refsReady.then(function(){return fetchImageManifest_(true);});
+  window.addEventListener('storage',function(e){
+    if(!e||e.key===K_IMGMARKS||e.key===K_IMGMARKS_AT){loadImgMarksMap_().then(loadRefMap_).then(function(m){REF=m;if(DATA)render();});}
+    else if(e.key===IMAGE_MANIFEST_KEY){applyManifestToRef_(REF);if(DATA)render();}
+  });
+  window.addEventListener('online',function(){fetchImageManifest_(true).then(function(){hydrateAllR2_(true);});});
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState!=='visible')return;
+    loadImgMarksMap_().then(loadRefMap_).then(function(m){REF=m;if(DATA)render();hydrateAllR2_(true);});fetchImageManifest_(false);
+  });
 
   // 起動: ?src= 優先 → 当日候補(同期) → 前回の読み込み → 空
   var qs = new URLSearchParams(location.search);

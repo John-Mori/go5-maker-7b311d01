@@ -103,4 +103,41 @@ test.describe('direct image CDN manifest', () => {
     await expect(thumb).toHaveAttribute('src', new RegExp('/img/' + HASH + '$'));
     await expect.poll(() => thumb.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
   });
+
+  test('proposal image renders from manifest even when mark and ref IndexedDB reads never settle', async ({ page }) => {
+    const cid = 'd_direct_manifest_proposal';
+    await serveImage(page);
+    await page.goto('KouhoTeian.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ cid, hash }) => {
+      localStorage.setItem('sync2_url', location.origin);
+      localStorage.removeItem('sync2_token');
+      localStorage.setItem('go5_image_manifest_v1', JSON.stringify({
+        ['ref:' + cid]: { keys: [hash], prev: 0, at: Date.now() }
+      }));
+      localStorage.setItem('teian_last_json', JSON.stringify({
+        date: '2026-08-31',
+        candidates: [{
+          id: 'proposal-direct-1', cid, title: '投稿提案の固定URL画像', platform: 'doujin',
+          metrics: { score: 100, sales_n: 10 }, images: [], comments: []
+        }]
+      }));
+    }, { cid, hash: HASH });
+
+    await page.route('**/core/idb-store.js*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      const shim = '\n;(function(){' +
+        'var oldGet=Go5Idb.getResult.bind(Go5Idb);' +
+        'Go5Idb.getResult=function(key){if(key==="meta:imgmarks")return new Promise(function(){});return oldGet(key);};' +
+        'Go5Idb.entriesByPrefixes=function(){return new Promise(function(){});};' +
+      '})();';
+      await route.fulfill({ response, body: body + shim });
+    });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const thumb = page.locator('.teian-gen-img[data-refcid="' + cid + '"]');
+    await expect(thumb).toBeVisible({ timeout: 1500 });
+    await expect(thumb).toHaveAttribute('src', new RegExp('/img/' + HASH + '$'));
+    await expect.poll(() => thumb.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+  });
 });
