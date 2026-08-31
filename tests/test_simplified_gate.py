@@ -25,9 +25,16 @@ import lang_gate as lg                       # noqa: E402
 
 STRIP = d.split_wip_marker
 NG = []
+RUN = []
 
 
 def check(name, cond):
+    """数え方は1つに揃える= `check()` を呼んだ回数 == PASS行+FAIL行 == 末尾の総数。
+
+    ★2026-09-01 HQ指摘= 俺が「28/28 PASS」と報告した時、HQで走らせた PASS 行は **27** だった。
+      末尾が総数を出さないから、読む側と書く側が別々に数えて食い違う。測っていない数字を語らない。
+    """
+    RUN.append(name)
     print(("PASS  " if cond else "FAIL  ") + name)
     if not cond:
         NG.append(name)
@@ -159,5 +166,6 @@ check("簡体字の行に char/jp/dept/msg_id が載る",
       and rows[0]["dept"] == "aegis-gl" and rows[0]["msg_id"] == "1543957324992086177")
 
 print("-" * 60)
-print("%s (%d NG)" % ("ALL PASS" if not NG else "NG: " + " / ".join(NG), len(NG)))
+print("%d/%d PASS%s" % (len(RUN) - len(NG), len(RUN),
+                        "" if not NG else "  NG: " + " / ".join(NG)))
 sys.exit(1 if NG else 0)
