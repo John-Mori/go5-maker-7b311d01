@@ -107,6 +107,112 @@ def main():
     check("実roster: クラウディア文が星南へ接着しない",
           got2 == [("クラウディア", "これは私の意見よ。"), ("十王星南", "こっちは星南の意見。")])
 
+    # ---- 5) ★名乗りタグのホモグリフ破損を「数える」(2026-09-01・研究室HQの発注(1)) ----
+    # 実物= hr-room の `[ククール]` が `[ККール]`(キリルК U+041A ×2)に化け、resolve が外れて
+    #   下流ゲート一式が丸ごと fail-open で抜けた。**7本出荷して計器ゼロ**(persona_render_audit の
+    #   КК=0件)。ここで足したのは記録だけ= 本文も名義も1文字も動かさない。
+    KUKURU = "ククール"
+    K = "К"                     # CYRILLIC CAPITAL LETTER KA(見た目はカタカナのク/ラテンK)
+    BROKEN = K * 2 + "ール"          # 実物の破損形
+    solo = dd.solo_tag_resolver({"persona": KUKURU})
+
+    def spy(fn):
+        """_audit_tag を捕まえる。★外へ出る手(監査書き込み)だけ偽物・判定と分岐は本物。"""
+        rec = []
+        orig = dd._audit_tag
+        dd._audit_tag = lambda dept, who, outcome, line: rec.append((outcome, who))
+        try:
+            return fn(), rec
+        finally:
+            dd._audit_tag = orig
+
+    def solo_run(text):
+        return spy(lambda: dd.strip_solo_persona_tag(text, solo, dept="hr-room"))
+
+    # 実物と同じ3つの形(1行目 / 前置き1行の後 / 前置き+区切り線の後)を全部拾えること
+    s0 = "[%s] その2枚、もう入ってるぜ。" % BROKEN
+    s2 = "Chami(部屋)への返信 —\n\n[%s]\n\nデブライネから返しが来た。" % BROKEN
+    s4 = "Done. Report to Chami (output text = the reply):\n\n---\n\n[%s] 2つとも手ぇ入れといたよ。" % BROKEN
+    for nm, src in (("1行目", s0), ("前置きの後(2行目)", s2), ("前置き+区切り線の後(4行目)", s4)):
+        out, rec = solo_run(src)
+        check(f"ホモグリフ: {nm}の破損タグを数える",
+              [o for o, _ in rec] == ["tag_homoglyph_leak"])
+        check(f"ホモグリフ: {nm}=推定した正名で記録する", rec and rec[0][1] == KUKURU)
+        check(f"ホモグリフ: {nm}=本文は1文字も変えない", out == src)
+
+    # ★正常便は1文字も変えない・鳴らない(受け入れ条件の後半)
+    clean = "[%s] ああ、ハブは全部ここで作ったやつだよ。\n\n続きの本文。" % KUKURU
+    out, rec = solo_run(clean)
+    check("ホモグリフ: 正常便は従来どおりタグだけ落ちる",
+          out == "ああ、ハブは全部ここで作ったやつだよ。\n\n続きの本文。")
+    check("ホモグリフ: 正常便で homoglyph は鳴らない",
+          [o for o, _ in rec] == ["tag_solo_fixed"])
+
+    # ★誤発火しない線= foreign-script が無ければ鳴らさない(共通規律§3)
+    for nm, tag in (("ただの打ち間違い", "ククーる"), ("無関係な本文", "検証"),
+                    ("別人の名前", "オタコン"), ("長すぎる別語", "ククールのアイコン一覧")):
+        out, rec = solo_run("[%s] 本文だ。" % tag)
+        check(f"ホモグリフ: {nm}では鳴らない",
+              not [o for o, _ in rec if o == "tag_homoglyph_leak"])
+
+    # ★窓の外(非空3行を越えた先)は見ない= resolver と同じ幅のまま
+    far = "あ\nい\nう\n[%s] 本文" % BROKEN
+    out, rec = solo_run(far)
+    check("ホモグリフ: 窓の外のタグは見ない(既存の幅を広げない)", rec == [] and out == far)
+
+    # ★多人格部屋(split 側)も同じ穴が在る= names を渡した時だけ数える
+    broken_multi = "[%sタコン] 本文だ。" % "О"   # CYRILLIC CAPITAL LETTER O
+    got, rec = spy(lambda: dd.split_persona_blocks(
+        broken_multi, resolve, dept="gunji", names=list(ROOM)))
+    check("ホモグリフ: 多人格部屋でも数える",
+          [o for o, _ in rec] == ["tag_homoglyph_leak"] and rec[0][1] == "オタコン")
+    check("ホモグリフ: 多人格部屋でも本文は割らない・触らない",
+          got == [(None, broken_multi)])
+    got, rec = spy(lambda: dd.split_persona_blocks(broken_multi, resolve, dept="gunji"))
+    check("ホモグリフ: names 未指定の既存呼び元は従来どおり(落ちない・鳴らない)",
+          rec == [] and got == [(None, broken_multi)])
+
+    # ---- 6) ★実コーパスの検体を全部拾えるか(無ければ skip= 黙って緑にしない) ----
+    import io  # noqa: E402
+    import json  # noqa: E402
+    root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    corpus = [os.path.join(root, "local", "llm", "recent_hr-room.jsonl"),
+              os.path.normpath(os.path.join(root, "..", "00_AI-HQ", "departments", "hr",
+                                            "memory", "hr-room.jsonl"))]
+    seen_broken = seen_clean = 0
+    for path in corpus:
+        if not os.path.isfile(path):
+            print(f"  SKIP: コーパスが無い({path})")
+            continue
+        for ln in io.open(path, encoding="utf-8"):
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                r = str(json.loads(ln).get("reply") or "")
+            except Exception:
+                continue
+            if not r:
+                continue
+            out, rec = solo_run(r)
+            hit = [o for o, _ in rec if o == "tag_homoglyph_leak"]
+            # ★検体の定義= **タグの形**でКが入っている便だけ(resolver と同じ窓の中)。
+            #   2026-08-08 の1本は `ККールの声での報告だ` と**地の文**で化けているだけで、
+            #   名乗りタグではない= 機構が触る対象ではない(HQの分析と同じ切り方)。
+            broken_tag = any(
+                (dd._tag_match(l) or ("",))[0].find(K) >= 0
+                for l in [x for x in r.split("\n") if x.strip()][:dd._SOLO_PREAMBLE_MAX_LINES + 1])
+            if broken_tag:
+                seen_broken += 1
+                check("実コーパス: 破損便を検知し本文は無傷", bool(hit) and out == r)
+            elif hit:
+                seen_clean += 1
+                check("実コーパス: 正常便で誤発火しない(1件も鳴らない)", False)
+    if seen_broken:
+        print(f"  (実コーパスの破損検体 {seen_broken}件を全部検知・誤発火 {seen_clean}件)")
+    else:
+        print("  SKIP: 実コーパスに破損検体が無い(窓が入れ替わった)")
+
     ok = all(v for _, v in results)
     print(f"\n== {sum(v for _, v in results)}/{len(results)} PASS ==")
     return 0 if ok else 1

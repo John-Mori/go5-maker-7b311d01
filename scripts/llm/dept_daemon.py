@@ -4914,7 +4914,106 @@ def _audit_tag(dept, who, outcome, line):
         pass
 
 
-def split_persona_blocks(text, resolve, dept=""):
+# ★ホモグリフ(見た目が同じ別スクリプトの字)の検出。2026-09-01 新設・イージス研究室。
+#   引き金= Chami「英語・ククール誤表記(KKール)・先輩呼び。最近崩れがやばい」。
+#   研究室HQの分析(型_名乗りタグ破損_ホモグリフ_2026-09-01.md / commit 76090cb)=
+#   名乗りが `[ククール]` → `[ККール]`(キリルК U+041A ×2)に化けると resolve が外れ、
+#   **前置き除去・タグ除去・口調監査・監査記録が同時に全部 fail-open で抜ける**= 単一障害点。
+#   実測(2026-09-01 自室で再測)= hr-room の破損便は 03:28:42 / 03:31:11 / 05:51:06 /
+#   05:51:38 / 05:53:58 / 05:55:38 の6本 + 06:14:07 の1本。対して persona_render_audit の
+#   КК は0件= **7本出荷して計器がゼロ**。理由は下の tag_solo_leak が `_avatar_keys()`
+#   (=正しい綴りの集合)に載る名前しか数えないから。化けた名前は定義上そこに載らない。
+#   ★ここでやるのは**数えるだけ**= 本文も名義も1文字も動かさない(リスク0)。
+#     救済(近似一致を resolve 成功として扱う)は裁定後。
+_FOREIGN_SCRIPT_RANGES = (
+    (0x0370, 0x03FF),   # Greek
+    (0x0400, 0x04FF),   # Cyrillic          ← 実物の К U+041A はここ
+    (0x0500, 0x052F),   # Cyrillic Supplement
+    (0x0530, 0x058F),   # Armenian
+    (0x13A0, 0x13FF),   # Cherokee
+    (0x2C80, 0x2CFF),   # Coptic
+)
+
+
+def _has_foreign_script(s):
+    """名乗りタグの中に**日本語の名前には出ないスクリプト**の字が1つでも在るか。
+
+    ★これが「誤字検出器」と「ホモグリフ検出器」を分ける線(共通規律§3
+      「常に誤発火する安全網は無視される」)。単なる打ち間違い(`[ククーる]`)では鳴らない。
+    """
+    for ch in str(s or ""):
+        o = ord(ch)
+        for a, b in _FOREIGN_SCRIPT_RANGES:
+            if a <= o <= b:
+                return True
+    return False
+
+
+def _script_norm(s):
+    """比較用の正規化(NFKC+trim)。★NFKC はキリルКをラテンKへは倒さない= 別字のまま数える。"""
+    try:
+        import unicodedata
+        return unicodedata.normalize("NFKC", str(s or "")).strip()
+    except Exception:
+        return str(s or "").strip()
+
+
+def _edit_distance(a, b, cap=2):
+    """打ち切り付きの編集距離。cap を超えたら cap+1 を返す(全部は数えない)。"""
+    la, lb = len(a), len(b)
+    if abs(la - lb) > cap:
+        return cap + 1
+    prev = list(range(lb + 1))
+    for i in range(1, la + 1):
+        cur = [i] + [0] * lb
+        for j in range(1, lb + 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1,
+                         prev[j - 1] + (0 if a[i - 1] == b[j - 1] else 1))
+        if min(cur) > cap:
+            return cap + 1
+        prev = cur
+    return prev[lb]
+
+
+def _homoglyph_near(tag, names):
+    """resolve が引けなかったタグが、この部屋の人格名の**別スクリプト置換**に見えるか。
+
+    見えるなら「本来こうだったはず」の正式名を返す / でなければ None。
+    条件は3つ全部(どれか1つでも欠けたら鳴らさない):
+      ① タグに foreign-script の字が1つ以上在る(=打ち間違いではない)
+      ② 長さの差が1以内
+      ③ 編集距離が上限以内(4字以上の名前は2まで・短い名前は1まで)
+    ★③の上限を名前の長さで変える理由= 2〜3字の名前に距離2を許すと「別の名前」まで拾う。
+      拾っても記録が1行増えるだけだが、**計器が嘘をつくと次の判断が狂う**(規律§1)。
+    """
+    t = _script_norm(tag)
+    if not t or len(t) > 24 or not _has_foreign_script(t):
+        return None
+    best, bestd = None, 99
+    for nm in names or ():
+        n = _script_norm(nm)
+        if not n or n == t or abs(len(t) - len(n)) > 1:
+            continue
+        lim = 2 if len(n) >= 4 else 1
+        d = _edit_distance(t, n, lim)
+        if d <= lim and d < bestd:
+            best, bestd = str(nm), d
+    return best
+
+
+def _audit_homoglyph(dept, tag, names, line):
+    """ホモグリフに見える名乗り漏れを1行残す。記録したら True。★fail-open(例外は握り潰す)。"""
+    try:
+        guess = _homoglyph_near(tag, names)
+        if not guess:
+            return False
+        _audit_tag(dept, guess, "tag_homoglyph_leak", line)
+        return True
+    except Exception:
+        return False
+
+
+def split_persona_blocks(text, resolve, dept="", names=()):
     """`[名前] 本文` のブロック列へ割る。戻り値 [(正式名 or None, 本文), ...]。
 
     resolve(name) は「この部屋で通用する正式名 or None」を返す関数(呼び元が渡す)。
@@ -4950,6 +5049,7 @@ def split_persona_blocks(text, resolve, dept=""):
     head = 0
     m = None
     who = None
+    miss = []                    # ★resolve が引けなかったタグ行(ホモグリフ計測用・先頭8つまで)
     for idx, ln in enumerate(lines):
         mm = _tag_match(ln)
         if not mm:
@@ -4958,11 +5058,19 @@ def split_persona_blocks(text, resolve, dept=""):
         if w:
             head, m, who = idx, mm, w
             break
+        if len(miss) < 8:
+            miss.append((idx, mm[0]))
     if not m:
         # ★名乗りが1つも無い= 従来どおり1通(挙動は変えない)。
         #   ただし**1行目が「短い1語+閉じ括弧」の形**なら、それは名乗りの成り損ないの可能性が高い
         #   (この便は既定の人格名で出るので、Chamiの画面では「別人の顔+本文頭にゴミ」になる)。
         #   ★直しはしない= resolve が引けない以上、誰の言葉かは機械には決められない。**数えるだけ**。
+        #   ★2026-09-01 追加= 引けなかったタグが**部屋の人格名のホモグリフ**に見えるなら
+        #     tag_homoglyph_leak として数える(直しはしない・本文も名義も動かさない)。
+        _names = tuple(names) or tuple(getattr(resolve, "names", ()) or ())
+        for _i, _tag in miss:
+            if _audit_homoglyph(dept, _tag, _names, lines[_i].strip()):
+                break
         first = _tag_match(lines[0]) if lines else None
         if first and not first[2]:
             _audit_tag(dept, "", "tag_unbracketed_leak", lines[0].strip())
@@ -5017,6 +5125,10 @@ def solo_tag_resolver(conf, persona=""):
                 if f == c or f.lower() == c.lower():
                     return canon
         return None
+    # ★名簿を関数に貼っておく(2026-09-01)= 呼び先(strip_solo_persona_tag)が
+    #   「引けなかったタグが誰の名前の化けか」を測るのに要る。引数を増やすと既存の呼び元が
+    #   全部変わる= 触る面を増やさないためこの形にした。判定そのものは1文字も変えていない。
+    _resolve.names = tuple(cands)
     return _resolve
 
 
@@ -5053,6 +5165,7 @@ def strip_solo_persona_tag(text, resolve, dept=""):
         return t
     head, mm, who = None, None, None
     seen = 0
+    miss = []                    # ★resolve が引けなかったタグ行(ホモグリフ計測用)
     for idx, ln in enumerate(lines):
         if not ln.strip():
             continue             # ★空行は幅に数えない(前置きと本文の間の1行空けで打ち切らないため)
@@ -5061,6 +5174,8 @@ def strip_solo_persona_tag(text, resolve, dept=""):
         if w:
             head, mm, who = idx, m, w
             break
+        if m:
+            miss.append((idx, m[0]))
         seen += 1
         if seen >= _SOLO_PREAMBLE_MAX_LINES:
             break
@@ -5070,6 +5185,14 @@ def strip_solo_persona_tag(text, resolve, dept=""):
         first = _tag_match(lines[0])
         if first and str(first[0]).strip() in _avatar_keys():
             _audit_tag(dept, "", "tag_solo_leak", lines[0].strip())
+            return t
+        # ★2026-09-01 追加= 化けた名前は _avatar_keys() に定義上載らないので上では数えられない。
+        #   **resolver と同じ窓**(非空 _SOLO_PREAMBLE_MAX_LINES 行)を見て、部屋の人格名の
+        #   ホモグリフに見えるタグだけ tag_homoglyph_leak で数える。本文は1文字も触らない。
+        _names = tuple(getattr(resolve, "names", ()) or ())
+        for _i, _tag in miss:
+            if _audit_homoglyph(dept, _tag, _names, lines[_i].strip()):
+                break
         return t
     body = "\n".join([mm[1]] + lines[head + 1:]).strip()
     if not body:
@@ -6936,10 +7059,12 @@ class Daemon:
             #     msg 1543954248377696258 / Chami「名乗りが多いね…やめてよ」)。
             #     実物= local/_daemon_reply_llm-qa.txt の1行目 `[中野五月]`。
             #     ★割らない・前置きも落とさない= 単独部屋の挙動はタグ1行以外1ミリも変えない。
+            _roster = [str(p.get("persona") or "")
+                       for p in (self.conf.get("personas") or ()) if p.get("persona")]
             if self.conf.get("personas"):
                 _blocks = split_persona_blocks(
                     reply, lambda nm: resolve_persona_tag(self.conf, nm),
-                    dept=self.dept)
+                    dept=self.dept, names=_roster)
             else:
                 _blocks = [(None, strip_solo_persona_tag(
                     reply, solo_tag_resolver(self.conf, self.effective_persona()),
@@ -6950,9 +7075,7 @@ class Daemon:
             #     修正後のブロックで _blocks を組み直す→下の送信ループはこの修正版を送る。
             #   ★A/B(話者非依存)とは層が違う=ここ(ブロック解決後)が正しい合流点(設計§3)。
             #   ★fail-open=検査例外は握り潰して元ブロックを使う(audit_naming が保証)。
-            _fixed_blocks = []
-            _roster = [str(p.get("persona") or "")
-                       for p in (self.conf.get("personas") or ()) if p.get("persona")]
+            _fixed_blocks = []      # ★_roster は上(分割の手前)で組んである= 同じ1本を使い回す
             for _who, _part in _blocks:
                 _speaker = _who or self.effective_persona()
                 # ★★出力ゲートF(名義の取り違え)= C/Dより**先**に走らせる(audit_speaker の説明参照)。
