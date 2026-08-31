@@ -4655,7 +4655,28 @@ def member_call(conf, content, ctx_dir=None):
 #   ①名義が解決されず既定人格のまま出る ②取り除かれずに `［名前］` が本文の頭に残る。
 #   起動文で半角を指示しているが、**指示だけに頼るのは心がけ**(共通規律§3)。受け側で吸収する。
 #   ★追加のみ=半角の挙動は一字も変わらない(解決できなければ従来どおり本文扱い)。
-_PERSONA_TAG_RE = re.compile(r"^[\[［]([^\[\]［］\n]{1,24})[\]］][ 　]*(.*)$")
+# ★2026-08-31 **開き括弧が抜けた名乗り**も受ける(改善提案部門トトリの回送
+#   DISPATCH-aegis-gl-1788173886628 / 型= docs/departments/kaizen-analyst/名乗り漏れ_開き括弧なしタグ_型.md)。
+#   実測した漏れ= 改修部門αの返信の1行目が `オタコン]`(バイト列で確認= 「オタコン」+0x5d+CRLF)で
+#   来たため、①名乗りと認識されず本文の頭に `オタコン]` が残り ②宛名が既定の花海咲季へ落ちた。
+#   全角吸収(2026-08-05)・前置き落とし(2026-08-30)と**同じクラスの失敗**= 「半角で・1行目に」は
+#   起動文で指示しているが、指示だけに頼るのは心がけ(共通規律§3)。受け側で吸収する。
+#   ★追加のみ= 開き括弧を任意にしただけで、**resolve が引けた時だけタグ扱い**という既存の関門は
+#     一字も緩めていない。`検証]` `1]` のように解決できない形は従来どおり本文のまま(沈黙させない)。
+_PERSONA_TAG_RE = re.compile(
+    r"^(?P<open>[\[［]?)(?P<name>[^\[\]［］\n]{1,24})[\]］][ 　]*(?P<rest>.*)$")
+
+
+def _tag_match(line):
+    """行頭の名乗りタグを見る。戻り値 (名前, 残り, 開き括弧が有ったか) / 無ければ None。
+
+    ★「開き括弧が有ったか」を返すのは**計測のため**= 抜けた形を吸収して直した回数が数えられないと、
+      漏れが減ったのか便が来ていないだけなのかを区別できない(C-041)。
+    """
+    mm = _PERSONA_TAG_RE.match(str(line or "").strip())
+    if not mm:
+        return None
+    return mm.group("name"), mm.group("rest"), bool(mm.group("open"))
 
 
 def _peel_extra_tags(rest, resolve, limit=4):
@@ -4671,10 +4692,10 @@ def _peel_extra_tags(rest, resolve, limit=4):
     """
     s = str(rest or "")
     for _ in range(limit):
-        mm = _PERSONA_TAG_RE.match(s.strip())
-        if not mm or not resolve(mm.group(1)):
+        mm = _tag_match(s)
+        if not mm or not resolve(mm[0]):
             break
-        s = mm.group(2)
+        s = mm[1]
     return s
 
 
@@ -4689,6 +4710,22 @@ def _audit_preamble(dept, who, dropped):
         persona_render._audit(dept, who, "preamble_dropped",
                               str(dropped or "").replace("\n", " / ")[:300],
                               len(dropped or ""), 0)
+    except Exception:
+        pass
+
+
+def _audit_tag(dept, who, outcome, line):
+    """名乗りタグの**開き括弧抜け**を1行残す(persona_render_audit.jsonl へ合流)。
+
+    outcome の2つは対で読む(改善提案部門トトリの依頼 B):
+      - `tag_unbracketed_fixed` = 抜けた形を吸収して名義を解決できた= **直した回数**
+      - `tag_unbracketed_leak`  = 抜けた形に見えるが resolve 不能で本文のまま出した= **残った漏れ**
+    ★片方だけでは読めない= leak が 0 でも、fixed も 0 なら「便が来ていないだけ」だ(C-041)。
+    ★記録先を2つ持たない(共通規律§4)= 書き手は persona_render._audit 1本のまま。fail-open。
+    """
+    try:
+        import persona_render                    # 同ディレクトリ。遅延import(起動コストを避ける)
+        persona_render._audit(dept, who, outcome, str(line or "")[:300], len(line or ""), 0)
     except Exception:
         pass
 
@@ -4730,22 +4767,32 @@ def split_persona_blocks(text, resolve, dept=""):
     m = None
     who = None
     for idx, ln in enumerate(lines):
-        mm = _PERSONA_TAG_RE.match(ln.strip())
+        mm = _tag_match(ln)
         if not mm:
             continue
-        w = resolve(mm.group(1))
+        w = resolve(mm[0])
         if w:
             head, m, who = idx, mm, w
             break
     if not m:
-        return [(None, t)]                  # 名乗りが1つも無い=従来どおり1通
+        # ★名乗りが1つも無い= 従来どおり1通(挙動は変えない)。
+        #   ただし**1行目が「短い1語+閉じ括弧」の形**なら、それは名乗りの成り損ないの可能性が高い
+        #   (この便は既定の人格名で出るので、Chamiの画面では「別人の顔+本文頭にゴミ」になる)。
+        #   ★直しはしない= resolve が引けない以上、誰の言葉かは機械には決められない。**数えるだけ**。
+        first = _tag_match(lines[0]) if lines else None
+        if first and not first[2]:
+            _audit_tag(dept, "", "tag_unbracketed_leak", lines[0].strip())
+        return [(None, t)]
+    if not m[2]:
+        # ★開き括弧が抜けていたのを吸収した= この1件は「本文の頭に残らず・宛名も正しく出た」側。
+        _audit_tag(dept, who, "tag_unbracketed_fixed", lines[head].strip())
     pre = [l for l in lines[:head] if l.strip()]
-    blocks = [[who, [_peel_extra_tags(m.group(2), resolve)]]]
+    blocks = [[who, [_peel_extra_tags(m[1], resolve)]]]
     for ln in lines[head + 1:]:
-        m2 = _PERSONA_TAG_RE.match(ln.strip())
-        who2 = resolve(m2.group(1)) if m2 else None
+        m2 = _tag_match(ln)
+        who2 = resolve(m2[0]) if m2 else None
         if who2:
-            blocks.append([who2, [_peel_extra_tags(m2.group(2), resolve)]])
+            blocks.append([who2, [_peel_extra_tags(m2[1], resolve)]])
         else:
             blocks[-1][1].append(ln)
     out = []
