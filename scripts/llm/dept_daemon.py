@@ -7028,7 +7028,12 @@ class Daemon:
                 reply, _declared = split_work_marker(reply or "")
                 is_work = bool(_declared) and not self.conf.get("conversation_only")
                 if is_work:
-                    log(self.dept, "relay便で範囲外の申告→回送(部門長/main箱)へ回す")
+                    # ★2026-09-02 文言を訂正(イージス研究室)。旧文=「→回送(部門長/main箱)へ回す」。
+                    #   実際の回送は下(#回送の関所)の `not self._member` 等を通った便だけで、
+                    #   ここは**申告を受け取っただけ**の地点だ。旧文はログを読む側に
+                    #   「回した」と誤読させる= goods-afi の8件がそれで、実体は
+                    #   キューにも main箱にも無かった(実測 2026-09-02)。**ログで嘘をつかない**。
+                    log(self.dept, "relay便で範囲外の申告(<<WORK>>)を受けた=回送の可否は下の関所で決まる")
                 if not _relay_ok:
                     # ★偽の完了を作らない(提案書§13)。正直な失敗をChamiへ返し、
                     #   便は完了扱いにせず残す(queue経路では下のdrain_queueがnackする)。
@@ -7545,6 +7550,15 @@ class Daemon:
                 if not self._escalate_to_head(rec, raw_line, reply or ""):
                     with open(MAIN_INBOX, "a", encoding="utf-8") as f:
                         f.write(raw_line.rstrip("\n") + "\n")
+                    log(self.dept, f"回送= 部門長が引けずmain箱へ msg={mid}")
+                else:
+                    log(self.dept, f"回送= 部門長({self._head_dept()})のキューへ msg={mid}")
+            elif is_work or self.conf.get("forward_all"):
+                # ★回送しなかった理由を残す(2026-09-02)。ここが無言だと
+                #   「申告は出たのに誰も受け取っていない」便が**ログ上は成功に見える**。
+                _why = "名指し便(本人が答えた)" if self._member else "会話専用の部屋"
+                log(self.dept, f"回送しない= {_why} msg={mid} "
+                               "★範囲外の申告が出た便なら、この部屋の外へは誰にも渡っていない")
             # ★総括本部4室は「自分の箱」にも写す(2026-07-24 ORG-24)。
             #   実害= Chamiの承認「デプロイしていい」をhqデーモンが処理し、回送先(main箱)へは
             #   入っていたのに、**セッションのwaiterが見る箱と回送先が別物**だったため届かなかった。
