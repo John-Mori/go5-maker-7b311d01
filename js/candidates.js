@@ -2503,6 +2503,8 @@
     var np = z.querySelector('.fz-zoom-nav.prev'), nn = z.querySelector('.fz-zoom-nav.next');
     if (np) np.hidden = !multi; if (nn) nn.hidden = !multi;
     var mk = z.querySelector('.fz-zoom-mark');
+    // ラジオ表示時は縦長画像がラジオ帯へ食い込まないよう max-height を絞る(CSS .fz-zoom.has-mark・Chami依頼2026-09-02)
+    z.classList.toggle('has-mark', !!(mk && _zoomMarkCid));
     if (mk) {
       if (_zoomMarkCid) {
         mk.hidden = false;

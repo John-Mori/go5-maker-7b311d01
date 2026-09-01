@@ -546,6 +546,10 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fz-zoom{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:10001;display:flex;align-items:center;justify-content:center;touch-action:pan-y;}
 .fz-zoom[hidden]{display:none;}
 .fz-zoom-img{max-width:96vw;max-height:88vh;object-fit:contain;border-radius:6px;-webkit-user-drag:none;user-select:none;pointer-events:none;}
+/* 通常/使用済み/除外ラジオを出す動画生成用画像のズームは、縦長の元画像だと88vhの中央寄せで上端が
+   ラジオ(top:96px)へ食い込み「元が大きいと表示が大きすぎる」に見える(Chami依頼2026-09-02)。
+   ラジオ帯の上とカウンタの下に余白を残す高さへ適正化=縦長でも一定の表示枠に収める(横長は元々62vh前後で不変)。 */
+.fz-zoom.has-mark .fz-zoom-img{max-height:76vh;}
 .fz-zoom-close{position:absolute;top:8px;right:12px;background:transparent;border:none;color:#fff;font-size:30px;width:auto;height:auto;cursor:pointer;line-height:1;padding:2px 6px;text-shadow:0 1px 4px rgba(0,0,0,.8);} /* ×は1.5倍(20→30px)・背景の丸は無し */
 .fz-zoom-count{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#fff;font-size:24px;font-weight:700;opacity:.9;pointer-events:none;text-shadow:0 1px 4px rgba(0,0,0,.8);} /* ページ数表記を2倍(12→24px) */
 /* 画像ズーム：2ページ目以降で「この画像を1ページ目にする」ボタン（画像の上・水色/黒字） */
