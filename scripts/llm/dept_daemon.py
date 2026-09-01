@@ -3807,6 +3807,10 @@ try:
     import tone_rewrite as _tone_rewrite    # 出力ゲートD-2(案F)= 送信直前の書き直し
 except Exception:
     _tone_rewrite = None                    # import 失敗でもデーモンは起動する(fail-open)
+try:
+    import liveblog_gate as _liveblog       # 出力ゲートG= 実況漏れ(名乗り皆無の生ログ)
+except Exception:
+    _liveblog = None                        # import 失敗でもデーモンは起動する(fail-open)
 _TONE_RULES_CACHE = {"loaded": False, "rules": None}
 
 
@@ -3935,6 +3939,57 @@ def audit_tone_rewrite(dept, persona, text, remaining, rec=None):
         return (res.get("text") or text), res
     except Exception:
         return text, {}                   # この段が配送を殺さない
+
+
+def audit_liveblog(dept, persona, text, resolve=None, rec=None):
+    """出力ゲートG= **実況漏れ(名乗り皆無の生ログ)を人格の顔で出さない**。 2026-09-02
+
+    ★0歩目の実物= `local/_daemon_reply_system-engineer.txt`(改修α 00:25:27・1行・`^[` 0個)。
+      声ゼロ・名乗り皆無の作業ログが **ケヴィン・デブライネ名義でChamiの画面へ出た**。
+      3.5時間後にChami『重大インシデント。返事バグってます』(msg 1544420696933802056)。
+      発注= 改善提案部門(トトリ)DISPATCH-aegis-gl-1788289627544。型= 型_実況漏れ_…_2026-09-01.md。
+    ★呼ぶ条件は呼び出し側が持つ(多人格部屋 かつ 解決できる `[名前]` が0個)= 因子①。
+      ここが見るのは因子②③④(実況指紋 / 声の欠如 / 構造の欠如)。
+      **タグ0個だけでは撃たない**= 実測で多人格23室3583便中893件(24.9%)に当たる=
+      常に誤発火する安全網は無視される(共通規律§3)。4因子まで絞ると3件で、3件とも実況漏れ。
+    ★処置は2段= ①1回だけ人格の言葉へ包み直す(通れば人格の名義で出す)
+      ②通らなければ **人格の名義では出さない**(呼び出し側が機械名義へ倒す)。
+      ★削除はしない= 字は1文字も消さない(strip は沈黙事故を招く・§8で当室が指摘済み)。
+    ★止め方= 環境変数 `GO5_LIVEBLOG_GATE=0`。
+    返り値: (送るべき本文, 結果dict)。dict の hit=撃ったか / ok=包み直しを採用したか。
+    """
+    try:
+        if _liveblog is None:
+            return text, {}
+        if str(os.environ.get("GO5_LIVEBLOG_GATE", "1")).strip().lower() in ("0", "off", "false"):
+            return text, {}
+        v = _liveblog.liveblog_verdict(text) or {}
+        if not v.get("hit"):
+            return text, v
+        ent = None
+        try:
+            rules = _tone_rules()
+            if rules and _tone_gate is not None:
+                ent = _tone_gate._persona_entry(rules, persona) or None
+        except Exception:
+            ent = None                    # 写像が無くても包み直しは試せる(名乗りだけは付く)
+        res = _liveblog.wrap_once(persona, dept, text, v.get("markers") or [],
+                                  resolve=resolve, entry=ent) or {}
+        out = dict(v)
+        out.update({k: res.get(k) for k in ("ok", "attempted", "why", "elapsed_ms")})
+        try:                              # 監査は persona_render_audit.jsonl へ合流(書き手は1本)
+            import persona_render
+            persona_render._audit(
+                dept, str(persona or ""),
+                "liveblog_wrapped" if res.get("ok") else "liveblog_machine",
+                ("指紋=%s / 理由=%s / %s" % ("+".join(v.get("markers") or []),
+                                            res.get("why") or "", str(text or "")[:200]))[:300],
+                len(text or ""), int(res.get("elapsed_ms") or 0))
+        except Exception:
+            pass                          # 監査の失敗でゲートを巻き添えにしない
+        return (res.get("text") or text), out
+    except Exception:
+        return text, {}                   # この段が配送を殺さない(fail-open)
 
 
 def audit_speaker(dept, persona, text, roster, rec=None):
@@ -7200,10 +7255,38 @@ class Daemon:
                        for p in (self.conf.get("personas") or ()) if p.get("persona")]
             # ★resolve は1本だけ組んで上流(分割/剥がし)と下流(出力ゲートE)で**同じ物**を使う
             #   = 名義の判定を2箇所に持たない(ORG-11)。
+            self._liveblog_notice = False   # ★便ごとに必ず初期化(前の便の判定を持ち越さない)
             if self.conf.get("personas"):
                 _tag_resolve = (lambda nm: resolve_persona_tag(self.conf, nm))
                 _blocks = split_persona_blocks(
                     reply, _tag_resolve, dept=self.dept, names=_roster)
+                # ★★出力ゲートG(実況漏れ= 名乗り皆無の生ログ)= **分割の直後**が合流点。
+                #   split_persona_blocks は名乗りが1つも解決できないと [(None, 本文)] を返す
+                #   = 既定人格の名義で丸ごと出る。実物(改修α 2026-09-02 00:25)はここを通った。
+                #   ★因子①はこの if(多人格部屋)と下の条件(ブロックが1つ・名義未解決)で見る。
+                #     残りの因子②③④は audit_liveblog が見る。
+                if len(_blocks) == 1 and _blocks[0][0] is None:
+                    _lb_text, _lb = audit_liveblog(
+                        self.dept, self.effective_persona(), _blocks[0][1],
+                        resolve=_tag_resolve, rec=rec)
+                    if _lb.get("hit"):
+                        if _lb.get("ok"):
+                            # 包み直せた= 名乗りが付いた本文をもう一度割る(名義がここで決まる)。
+                            _blocks = split_persona_blocks(
+                                _lb_text, _tag_resolve, dept=self.dept, names=_roster)
+                            log(self.dept,
+                                f"★出力ゲートG(実況漏れ・人格へ包み直した): "
+                                f"{_lb.get('why') or ''} {_lb.get('elapsed_ms', 0)}ms msg={mid}")
+                        else:
+                            # 包み直せなかった= **人格の名義では出さない**。字は消さず機械名義で出す。
+                            # ★頭に1行だけ足す= Chamiが「人格が喋った」と読まないため(fail-loud)。
+                            self._liveblog_notice = True
+                            _blocks = [(None, "★機械の実況がそのまま返信に出た"
+                                              "(人格の声へ包み直せず)。原文をそのまま出す。\n"
+                                              + _blocks[0][1])]
+                            log(self.dept,
+                                f"★出力ゲートG(実況漏れ・機械名義へ倒した): "
+                                f"理由={_lb.get('why') or ''} msg={mid}")
             else:
                 _tag_resolve = solo_tag_resolver(self.conf, self.effective_persona())
                 _blocks = [(None, strip_solo_persona_tag(
@@ -7339,7 +7422,9 @@ class Daemon:
                 #   ★デ・ブライネは何も喋っていない。**機械の状態表示を人の口で出していた**のが誤り。
                 #   → 機械の告知は **メタルギアMk.II**(Chami指定2026-07-14の機械アナウンス担当)で出す。
                 #     ★キャラ名義+(精霊)で機械の話をしない。人格の声を機械で濁さない。
-                _is_notice = bool(getattr(self, "_relay_nack", False))
+                # ★出力ゲートGで機械名義へ倒した便も同じ扱い= 人格の声で機械の実況を出さない。
+                _is_notice = bool(getattr(self, "_relay_nack", False)
+                                  or getattr(self, "_liveblog_notice", False))
                 send_argv = [sys.executable, PERSONA_SEND, "--channel", ch,
                              "--persona", (MACHINE_PERSONA if _is_notice
                                            else (_who or self.effective_persona()))]
