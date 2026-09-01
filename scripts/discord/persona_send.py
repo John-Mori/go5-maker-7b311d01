@@ -455,6 +455,78 @@ def sanitize_rest(rest):
 
 
 ENGLISH_AUDIT = os.path.join(LOCAL, "llm", "english_audit.jsonl")
+# 口調監査は dept_daemon と同じ1本(event=tone_fix/tone)。記録先を2つ持たない(§4)。
+TONE_AUDIT = os.path.join(LOCAL, "llm", "tone_audit.jsonl")
+# 口調ルールの正本=研究室HQ(ORG-11)。dept_daemon の TONE_RULES_PATH と同じ1本。
+TONE_RULES_PATH = os.path.join(_HQ_ROOT, "departments", "hr", "personas", "口調ルール.json")
+
+
+def _audit_tone(persona, dept, applied, remaining):
+    """口調の機械修正/警告を dept_daemon と同じ tone_audit.jsonl へ残す(src=persona_send・記録先を2つ持たない§4)。
+    失敗しても送信判定は変えない(fail-safe)。"""
+    try:
+        os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+            for a in (applied or ()):
+                f.write(json.dumps({
+                    "ts": ts, "dept": dept, "event": "tone_fix", "src": "persona_send",
+                    "persona": str(persona or ""), "marker": a.get("marker", ""),
+                    "to": a.get("to", ""), "count": a.get("count", 1),
+                    "reason": a.get("reason", "tone_rewrite"),
+                }, ensure_ascii=False) + "\n")
+            for v in (remaining or ()):
+                f.write(json.dumps({
+                    "ts": ts, "dept": dept, "event": "tone", "src": "persona_send",
+                    "persona": str(persona or ""), "marker": v.get("marker", ""),
+                    "reason": v.get("reason", ""),
+                }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def tone_backstop(body, persona, dept):
+    """Discordへ出る**最後の合流点**の口調ゲート(2026-09-01 platform-se・一ノ瀬怜)。
+
+    英語ダンプは english_backstop(2026-08-23)が合流点で塞いだが、**口調(男口調「俺」等)は
+    上流(dept_daemon)の tone_gate だけ**で、無人代打(claude_responder)や直送は素通りだった
+    = 🔥 DEF-99f9503e37(アメスの口調バグ)が再発する構造的真因(英語だけ合流点で塞ぎ口調は支流のまま)。
+    判定・修正は tone_gate 1本を引く(dept_daemon と同じ純関数=経路が増えてもドリフトしない)。
+
+    ★機械置換のみ(俺→あたし等・置換先が一意な時だけ・**再生成しない**)。方言・指紋語尾・威圧は
+      書き直さない=tone_corrections の設計どおり(remaining は警告記録だけ・往復ゼロ)。
+    ★fail-open: ルール未ロード/例外は素通し=送信を殺さない(最悪の事故は沈黙)。
+    ★ミラー名義(Chami(...))はChami本人の言葉=対象外(触らない)。
+    ★persona は**正式名へ解決済み**で渡すこと(口調ルールは「アメス」で引く=ames のままだと引けない)。
+
+    返り値: 送るべき本文(str)。修正できた時だけ書き直し後を返す(それ以外は入力を1ミリも変えない)。
+    """
+    try:
+        if str(persona or "").startswith("Chami("):
+            return body                       # ミラー=Chami本人の発言。触らない
+        if not os.path.exists(TONE_RULES_PATH):
+            return body                       # ルール正本が無い=素通し(fail-open)
+        if os.path.join(ROOT, "scripts", "llm") not in sys.path:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        import tone_gate
+        rules = tone_gate.load_tone_rules(TONE_RULES_PATH)
+        if not rules:
+            return body
+        res = tone_gate.tone_corrections(persona, dept or "", body, rules) or {}
+        applied = res.get("applied") or []
+        remaining = res.get("remaining") or []
+        if applied or remaining:
+            _audit_tone(persona, dept, applied, remaining)
+        if applied:
+            markers = ", ".join(f"{a.get('marker')}→{a.get('to')}" for a in applied)
+            print(f"[persona_send] ★口調を合流点で機械修正({markers})=上流ゲートを通らない"
+                  f"代打/直送の残穴を塞ぐ(DEF-99f9503e37)。", file=sys.stderr)
+            return res.get("fixed") or body
+        return body                           # 違反なし/直せない違反のみ=1ミリも変えない
+    except Exception as e:
+        print(f"[persona_send] 口調ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
+              file=sys.stderr)
+        return body
 
 
 def _audit_english_suppressed(persona, channel, hit, body):
@@ -576,6 +648,10 @@ def main():
         print(f"チャンネル未登録: {key}")
         sys.exit(2)
     persona = resolve_persona(persona)  # QA D1: ames→アメス等の別名解決+未登録は大声警告
+    # ★口調の合流点ゲート(2026-09-01)。英語は上で塞いだが口調は支流(dept_daemon)だけだった=
+    #   代打/直送の男口調「俺」等が素通りしていた(DEF-99f9503e37 の構造的真因)。resolve_persona の
+    #   後=正式名で口調ルールを引くため。機械置換のみ・fail-open=送信は殺さない。
+    body = tone_backstop(body, persona, dept)
     if not avatar and os.path.exists(AVATARS_FILE):
         with open(AVATARS_FILE, "r", encoding="utf-8") as f:
             avatar = json.load(f).get(persona)
