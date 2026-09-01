@@ -120,7 +120,7 @@ def _aggregate(rows, end, window, since=None):
     agg = collections.defaultdict(
         lambda: {"count": 0, "days": set(), "personas": set(),
                  "reasons": collections.Counter(), "expected": [],
-                 "first": "", "last": ""})
+                 "first": "", "last": "", "voc": 0, "judgeable": 0})
     for r in rows:
         ts = str(r.get("ts") or "")
         try:
@@ -136,6 +136,15 @@ def _aggregate(rows, end, window, since=None):
         a["days"].add(ts[:10])
         a["personas"].add(str(r.get("persona") or ""))
         a["reasons"][str(r.get("reason") or "")] += 1
+        # ★呼びかけ / 地の文の内訳。`voc` を持たない行は**旧ゲートが書いた行**=
+        #   判定できない。0 として数えると「全部が地の文」へ静かに倒れるので、
+        #   judgeable(判定できた行数)を別に持ち、無い行はどちらにも入れない。
+        if "voc" in r:
+            a["judgeable"] += 1
+            try:
+                a["voc"] += int(r.get("voc") or 0)
+            except (TypeError, ValueError):
+                pass
         if not a["expected"]:
             a["expected"] = list(r.get("expected") or [])
         a["first"] = min(a["first"] or ts, ts)
@@ -155,6 +164,25 @@ def _unreadable(a):
     ただし黙って捨てもしない= `unreadable()` で件数だけ見せ、ゲート側の宿題として残す。
     """
     return a["found"] in (a["expected"] or [])
+
+
+def _all_mention(a, min_count=MIN_COUNT):
+    """★この組は**地の文の言及だけ**か(=人事へ回しても直す先が無い)。
+
+    なぜ要るか(2026-09-02・人事部門ククールの検算 msg DISPATCH-aegis-gl-1788299260538 の裏取り):
+      08-31の再ピン後も5ペアが34件挙がり続けた。現場(near)を機械で割ると
+      **呼びかけ位置0 / 地の文34**= 中身は「アロンソ・オタコン・三笘」の列挙、
+      「アロンソ研究室」の部屋名、そして**このドリフトを論じている報告便そのもの**だ。
+      これを鳴らし続けると、人事は毎回「当てる先の無いピン」を打つことになる=
+      常に誤発火する安全網は無視される(共通規律§3)。
+
+    ★ただし黙らせる条件は厳しくする(静かに壊れないように):
+      ① 判定できた行(voc を持つ=新ゲートが書いた行)が min_count 以上ある
+      ② そのうち呼びかけ位置が **1件も無い**
+      → 旧ゲートの行しか無い組は判定できない= **鳴らす側へ倒す**(fail-open)。
+      台帳が新しい行で埋まるにつれて自動で判定できるようになる。
+    """
+    return a.get("judgeable", 0) >= min_count and a.get("voc", 0) == 0
 
 
 def span_days(rows=None, since=None, end=None, window=WINDOW_DAYS):
@@ -191,9 +219,28 @@ def counts(rows=None, since=None, end=None, window=WINDOW_DAYS):
             "count": a["count"], "days": len(a["days"]),
             "personas": sorted(p for p in a["personas"] if p),
             "first": a["first"], "last": a["last"],
+            "voc": a["voc"], "judgeable": a["judgeable"],
             "unreadable": _unreadable(dict(a, target=target, found=found)),
+            "all_mention": _all_mention(a),
         })
     out.sort(key=lambda d: (-d["count"], d["target"], d["found"]))
+    return out
+
+
+def mentions(rows=None, end=None, window=WINDOW_DAYS, since=None):
+    """★鳴らさない(=地の文の言及だけの)組を件数順で返す。理由は `_all_mention`。
+
+    黙って捨てはしない= `main()` が件数と内訳を1行で見せる(「鳴らせない」と同じ扱い)。
+    """
+    rows = load_rows() if rows is None else rows
+    out = []
+    for (target, found), a in _aggregate(rows, end, window, since=since).items():
+        if _unreadable(dict(a, target=target, found=found)):
+            continue
+        if _all_mention(a):
+            out.append({"target": target, "found": found, "count": a["count"],
+                        "judgeable": a["judgeable"], "voc": a["voc"]})
+    out.sort(key=lambda d: (-d["count"], d["target"]))
     return out
 
 
@@ -224,6 +271,9 @@ def scan(rows=None, end=None, window=WINDOW_DAYS,
     for (target, found), a in _aggregate(rows, end, window, since=since).items():
         if _unreadable(dict(a, target=target, found=found)):
             continue
+        # ★地の文の言及しか無い組は人事へ回さない(直す先が無い・理由は `_all_mention`)。
+        if _all_mention(a, min_count):
+            continue
         if (a["count"] >= min_count and len(a["days"]) >= min_days
                 and len(a["personas"]) >= min_personas):
             out.append({
@@ -231,6 +281,7 @@ def scan(rows=None, end=None, window=WINDOW_DAYS,
                 "count": a["count"], "days": len(a["days"]),
                 "personas": sorted(p for p in a["personas"] if p),
                 "first": a["first"], "last": a["last"],
+                "voc": a["voc"], "judgeable": a["judgeable"],
                 "reasons": dict(a["reasons"]),
             })
     out.sort(key=lambda d: (-d["count"], d["target"], d["found"]))
@@ -288,16 +339,20 @@ def main(argv=None):
             print("この窓には1件も無い。★ただし**日数が %d 日しか無い**= "
                   "『直った』の証拠にはならない(是正前の窓と比べるなら件/日で)" % n)
         for c in cs:
-            print("- %s を **%s** と呼んでいる(正=%s): 件%d 日%d 人%d = **%.2f件/日**%s"
+            print("- %s を **%s** と呼んでいる(正=%s): 件%d 日%d 人%d = **%.2f件/日**"
+                  "(判定%d/呼%d)%s%s"
                   % (c["target"], c["found"], "/".join(c["expected"]) or "?",
                      c["count"], c["days"], len(c["personas"]),
                      (c["count"] / n) if n else 0.0,
-                     "(鳴らせない)" if c["unreadable"] else ""))
+                     c["judgeable"], c["voc"],
+                     "(鳴らせない)" if c["unreadable"] else "",
+                     "(鳴らさない)" if c["all_mention"] else ""))
         return 0
     ds = scan(rows, window=ns.days)
     un = unreadable(rows, window=ns.days)
+    mt = mentions(rows, window=ns.days)
     if ns.json:
-        print(json.dumps({"drifts": ds, "unreadable": un},
+        print(json.dumps({"drifts": ds, "unreadable": un, "mentions": mt},
                          ensure_ascii=False, indent=2))
         return 0
     print("台帳の判定行 %d / 窓%d日 / しきい値 件%d 日%d 人%d"
@@ -316,6 +371,16 @@ def main(argv=None):
         print("(鳴らせない %d件= 台帳に実際の形が無く直す先が読めない: %s)"
               % (sum(u["count"] for u in un),
                  "、".join("%s>%s" % (u["target"], u["found"]) for u in un)))
+    if mt:
+        # ★鳴らさない分も**見えるところに**残す(「鳴らせない」と同じ理由)。
+        #   ここに出た組は「相手へ呼びかけた形が1件も無い」=人事がpinしても直す先が無い。
+        #   ★0=誤呼称ゼロではない= `_is_vocative` は狭い(行頭+読点)。
+        #     文中の裸の姓はこちら側に入る。疑うならこの行の組を現物で読め。
+        print("(鳴らさない %d件= 呼びかけ位置が0で地の文の言及だけ: %s)"
+              % (sum(m["count"] for m in mt),
+                 "、".join("%s>%s(判定%d/呼%d)"
+                          % (m["target"], m["found"], m["judgeable"], m["voc"])
+                          for m in mt)))
     return 0
 
 

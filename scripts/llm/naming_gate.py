@@ -354,6 +354,15 @@ def _attach_hits(out, masked, original):
             if i < 0:
                 continue
             v["hits"] = len(bad) if bad else masked.count(found)
+            # ★咎めた出現のうち**呼びかけ位置**(行頭始まり+直後が読点)は何件か。
+            #   near/hits を人が読んで分けていた use/mention を、機械の値として台帳へ残す。
+            #   実測(2026-09-02・pin後の5ペア34件)= 呼びかけ 0 / 地の文 34。
+            #   ★「0=誤呼称ゼロ」ではない= `_is_vocative` は狭い定義(行頭+読点)で、
+            #     文中の「一ノ瀬へ渡した」のような裸の姓は 0 の側に入る。
+            #     この値が言えるのは「**相手へ呼びかけた**形は無い」までだ。
+            v["voc"] = sum(1 for j, actual, ok in
+                           _iter_occurrences(masked, found, allowed)
+                           if not ok and _is_vocative(masked, j, j + len(actual)))
             a = max(0, i - HIT_WINDOW)
             b = min(len(original), i + len(found) + HIT_WINDOW)
             v["at"] = i
