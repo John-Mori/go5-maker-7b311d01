@@ -195,10 +195,14 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
                              "count": a.get("count", 0), "reason": a.get("reason", ""),
                              "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
             for v in remaining:
+                # ★near/hits= 当たった**現場**の抜粋と出現数(2026-09-02)。excerpt は便の頭
+                #   (text[:200])なので、当たった場所が200字より後だと台帳に証拠が残らず、
+                #   後から use/mention を読み分けられなかった(実測= 5ペア41行中22行)。
                 rows.append({"ts": ts, "dept": dept, "event": "naming",
                              "persona": str(persona or ""), "source": source,
                              "target": v.get("target", ""), "found": v.get("found", ""),
                              "expected": v.get("expected", []), "reason": v.get("reason", ""),
+                             "near": v.get("near", ""), "hits": v.get("hits", 0),
                              "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
             _append(NAMING_AUDIT, rows)
             summary["naming_fix"] = len(applied)

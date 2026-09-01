@@ -4219,6 +4219,13 @@ def audit_naming(dept, persona, text, rec=None):
                         "found": v.get("found", ""),
                         "expected": v.get("expected", []),
                         "reason": v.get("reason", ""),
+                        # ★near/hits= 当たった**現場**の抜粋と、その便での出現数(2026-09-02)。
+                        #   excerpt は便の頭(text[:200])なので、当たった場所がそれより後だと
+                        #   台帳に証拠が1文字も残らない= 実測で 5ペア41行中**22行**がそれ。
+                        #   後から use/mention(実際に呼んだ/その呼び方の話をした)を
+                        #   読み分けるには、頭ではなく**当たった場所**が要る。
+                        "near": v.get("near", ""),
+                        "hits": v.get("hits", 0),
                         "msg_id": mid,
                         "excerpt": str(text or "")[:200],
                     }, ensure_ascii=False) + "\n")

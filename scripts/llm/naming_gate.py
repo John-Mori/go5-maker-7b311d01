@@ -74,16 +74,58 @@ def _speaker_matches(rule_speaker, persona):
     return _norm(rs) == _norm(persona)
 
 
+# ==== カタカナ名の語境界(2026-09-02・実測で見つけた計器の欠陥①)=====================
+#   実物= グッズ部屋(goods-afi)の便に出る **「メルカリ」の中の「ルカ」** が
+#   『ルカ・モドリッチを裸で呼んだ』として毎回鳴っていた(ヴィルシーナ・アメスの
+#   誤検知3件の正体)。`_find_forms` は素の部分一致で、語境界を一切見ていなかった。
+#   ★狭く取る= **形がカタカナだけの時に、前後がカタカナで続いていたら別語**とみなす。
+#     漢字名(三笘・一ノ瀬)には掛けない=日本語は語を空白で切らないので、漢字へ広げると
+#     本物の呼び捨てを黙らせる側の事故になる(C-035)。
+#   ★中黒「・」は語の**区切り**なので境界文字として扱う(カタカナ扱いにしない)=
+#     「シャビ・アロンソ」の中の「アロンソ」は今までどおり見える。
+_KATA_SEP = "・･"
+
+
+def _kata_word_ch(ch):
+    """語を作るカタカナか(中黒は区切りなので False)。"""
+    return bool(ch) and ch not in _KATA_SEP and _is_katakana(ch)
+
+
+def _boundary_ok(s, i, f):
+    """s の位置 i に出た形 f が、より長いカタカナ語の一部でないか。"""
+    if not f or any(not _is_katakana(c) or c in _KATA_SEP for c in f):
+        return True         # カタカナだけの形にしか掛けない
+    if i > 0 and _kata_word_ch(s[i - 1]):
+        return False
+    j = i + len(f)
+    return not (j < len(s) and _kata_word_ch(s[j]))
+
+
 def _find_forms(text, forms):
-    """text 中に forms(候補文字列)のいずれかが出た最初の位置と形を返す。無ければ None。"""
+    """text 中に forms(候補文字列)のいずれかが出た最初の位置と形を返す。無ければ None。
+
+    ★同じ位置に複数の形が当たる時は**長い方**を採る(2026-09-02)。実物=
+      「シャビ・アロンソ」と書いた便が、台帳へ found="シャビ" として残っていた
+      (bare_forms に「シャビ」と「シャビ・アロンソ」の両方が載っており、位置が同じ)。
+      判定は変わらない(どちらも許容形ではない)が、**台帳が「裸の姓で呼んだ」と嘘をつく**=
+      呼称ドリフトの件数を読み違える元になっていた。
+    """
     s = str(text or "")
     best = None
     for f in forms:
         f = str(f or "")
         if not f:
             continue
-        i = s.find(f)
-        if i >= 0 and (best is None or i < best[0]):
+        i = 0
+        while True:
+            i = s.find(f, i)
+            if i < 0:
+                break
+            if _boundary_ok(s, i, f):
+                break       # 語として立っている出現=これを採る
+            i += 1          # 「メルカリ」の中の「ルカ」等=次を探す
+        if i >= 0 and (best is None or i < best[0]
+                       or (i == best[0] and len(f) > len(best[1]))):
             best = (i, f)
     return best
 
@@ -234,6 +276,91 @@ def _mask_quoted_mentions(text):
         return s if out is None else "".join(out)
     except Exception:
         return str(text or "")
+
+
+# ==== use/mention の分離(2026-09-02・人事部門ククールの検算 便6/6 を受けて)==========
+#   構造の穴= この計器は「その名前を**使った**便」と「その名前の話を**している**便」を
+#   区別していなかった。実物= 呼称ドリフトを直しに動いた便が、報告文の中で
+#   ```…``` や `>` 引用で症状(裸の「アロンソ」)を引いた瞬間、**その症状の件数を自分で
+#   押し上げていた**(【35】= 警報は「壊れた実物」と「壊れた事を論じている自分達」を分けろ)。
+#   ★引用符(「」『』"")は既に `_mask_quoted_mentions` が覆っている。ここで足すのは
+#     **それが覆えない3つだけ**(C-035= 必要な分しか広げない):
+#     - ```…``` = 複数行のコードフェンス(`_QUOTE_PAIRS` の ` は同一行・60字上限で届かない)
+#     - 行頭 `>` = 他人の便の引用(証拠を書き換えたら台帳が嘘になる)
+#     - URL・Windowsパス・拡張子つきファイル名(`characters/alonso.md` の「アロンソ」等)
+#   ★出所= tone_gate._mask_protected(2026-08-12・同じ思想で先に入っている)。写し取る際に
+#     `_QUOTE_SPAN` は**持って来ない**= naming 側の引用マスクは「同一行・60字上限」という
+#     狭い取り方をわざとしており、tone_gate の広い方で上書きすると本物の呼び捨てが黙る。
+#   ★長さ保存(全角空白ではなく `_MASK_CH`)= naming_corrections が**元文の同じ添字**を
+#     書き換えるため。1文字でもずれたら別の場所を壊す。
+_CODE_FENCE = re.compile(r"```.*?```", re.S)
+_QUOTE_LINE = re.compile(r"(?m)^[ \t　]*[>＞][^\n]*")
+_PATHISH = re.compile(
+    r"(?:(?<=^)|(?<=[\s(（「『=＝、。:：]))"          # 語の頭からしか始めない
+    r"(?:(?:https?://|www\.)\S+"
+    r"|[A-Za-z]:[\\/][^\s、。「」『』()（）]+"                     # C:\… のWindowsパス
+    r"|[A-Za-z0-9_.~%\-]+(?:/[A-Za-z0-9_.~%\-]+)*/[^\s、。「」『』()（）]+"  # /を含むパス
+    r"|[A-Za-z0-9_.~%\-]+"
+    r"\.(?:py|js|mjs|md|json|jsonl|html|css|gs|txt|ps1|bat|yml|yaml|png|jpg|mp4)\b)")
+_PROTECT = (_CODE_FENCE, _QUOTE_LINE, _PATHISH)
+
+
+def _mask_protected(text):
+    """コード/引用行/パスの範囲を**同じ長さの覆い**へ差し替えた文字列を返す。
+
+    `_mask_name_tags` / `_mask_quoted_mentions` と同じ約束= **長さを変えない**。
+    fail-open: 例外は元文をそのまま返す(覆えなくても配送は殺さない)。
+    ★1つの述語として名前を付けてあるのは、検査でここだけを旧仕様(恒等関数)へ
+      戻して同じ検体が鳴るのを見せるため(共通規律§3)。
+    """
+    try:
+        s = str(text or "")
+        if not s:
+            return s
+        for pat in _PROTECT:
+            s = pat.sub(lambda m: _MASK_CH * len(m.group(0)), s)
+        return s
+    except Exception:
+        return str(text or "")
+
+
+# 監査台帳に残す「当たった現場」の窓幅(前後の文字数)。
+#   ★これが無いと台帳から use/mention を後から判定できない= 実測(2026-09-02):
+#     naming_audit.jsonl の `excerpt` は `text[:200]`(便の**頭**)なので、
+#     8/31以降の5ペア41行のうち**22行は当たった文字列そのものが excerpt に無い**。
+#     過去行は原理的に読み直せない=ここから先を判定可能にするのが計器の直しだ。
+HIT_WINDOW = 60
+
+
+def _attach_hits(out, masked, original):
+    """各違反へ「当たった位置・現場の抜粋・その便での出現数」を足す(判定は変えない)。
+
+    masked と original は同じ長さ(全マスクが長さ保存)=位置は共通。
+    抜粋は**元文**から取る(覆いの NUL を台帳へ書かない)。
+    """
+    for v in out:
+        try:
+            found = str(v.get("found") or "")
+            if not found:
+                continue
+            # ★指すのは「最初に見つかった位置」ではなく**咎めた出現**。
+            #   実物= 「アロンソコーチ、…あとでアロンソに渡す」の便で、当たりは後ろの
+            #   裸「アロンソ」なのに窓が先頭の許容形「アロンソコーチ」を写していた。
+            #   これは excerpt=先頭200字と同じ嘘のつき方だ(現場でない所を証拠に見せる)。
+            allowed = [str(a or "") for a in (v.get("expected") or []) if str(a or "")]
+            bad = [j for j, _actual, ok in _iter_occurrences(masked, found, allowed)
+                   if not ok]
+            i = bad[0] if bad else masked.find(found)
+            if i < 0:
+                continue
+            v["hits"] = len(bad) if bad else masked.count(found)
+            a = max(0, i - HIT_WINDOW)
+            b = min(len(original), i + len(found) + HIT_WINDOW)
+            v["at"] = i
+            v["near"] = original[a:b].replace("\n", " ")
+        except Exception:
+            continue
+    return out
 
 
 # 裸の姓の直後に付きうる敬称/接尾(この並びが「実際に使われた形」を決める)。
@@ -493,6 +620,8 @@ def naming_verdicts(persona, dept, text, rules):
         s = _mask_name_tags(s, persona, rules)
         # ★引用符の中身は「その文字列そのものの話」=呼びかけではない(上の★参照)。
         s = _mask_quoted_mentions(s)
+        # ★コード/引用行/パスも「言及」であって呼びかけではない(use/mention・上の★参照)。
+        s = _mask_protected(s)
 
         hrt = rules.get("honorific_required_targets") or {}
         overrides = rules.get("speaker_target_overrides") or []
@@ -599,7 +728,8 @@ def naming_verdicts(persona, dept, text, rules):
         #   無く、target_detect_forms.Chami も「ちゃみくん」だけ=上のループでは
         #   裸の「ちゃみ」に一度も触れない。ここで1本だけ足す(判定は _chami_address_verdicts)。
         out.extend(_chami_address_verdicts(persona, s, rules))
-        return out
+        # ★当たった現場を足す(判定は変えない=足すだけ・C-010)。台帳の use/mention 判定用。
+        return _attach_hits(out, s, str(text or ""))
     except Exception:
         return []               # fail-open=ゲートは配送を殺さない
 
@@ -657,6 +787,12 @@ def _iter_occurrences(s, bare, allowed):
         i = s.find(bare, start)
         if i < 0:
             break
+        # ★カタカナ語の中に埋まった出現は別語(「メルカリ」の中の「ルカ」)=飛ばす。
+        #   今それを止めていたのは「直後の『リ』がたまたま安全境界の一覧に無い」ことだけ
+        #   =静かに壊れる推定(共通規律§3)。ここで機構として止める。
+        if not _boundary_ok(s, i, bare):
+            start = i + 1
+            continue
         best_allowed = ""
         for a in allowed:
             if not s.startswith(a, i) or len(a) <= len(best_allowed):
@@ -777,7 +913,9 @@ def naming_corrections(persona, dept, text, rules):
         # ★探すのは覆った文字列・書くのは元文(2026-08-23)。長さが同じなので位置は共通。
         #   これで**名乗りタグの中は絶対に書き換わらない**(`[ケヴィン・デブライネさん]`
         #   に化けて名義の解決が壊れる事故を、境界文字の運任せでなく機構で止める)。
-        masked = _mask_quoted_mentions(_mask_name_tags(s, persona, rules))
+        #   ★マスクの並びは naming_verdicts と**必ず同じ**にする= 判定した場所と書き換える
+        #     場所が別の文字列になったら、覆われた所を直したり本物を素通ししたりする。
+        masked = _mask_protected(_mask_quoted_mentions(_mask_name_tags(s, persona, rules)))
         # ★呼称ルールを本文で論じる部屋は、呼びかけ位置だけ直す(地の文は警告のみ)。
         voc_only = _vocative_only(dept)
         repls = []  # (start, end, new)
