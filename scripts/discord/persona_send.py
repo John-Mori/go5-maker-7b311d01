@@ -529,6 +529,46 @@ def tone_backstop(body, persona, dept):
         return body
 
 
+ENJOH_EMOJI = "<:enjoh:1541126866981752883>"
+_FIRE_RE = re.compile("\U0001F525️?")            # 素の🔥(異体字セレクタ付きも拾う)
+_CODE_SPLIT_RE = re.compile(r"(```.*?```|`[^`\n]*`)", re.S)   # 奇数要素=コード=触らない
+
+
+def enjoh_backstop(body):
+    """Discordへ出る**最後の合流点**の絵文字ゲート(2026-09-01 イージス研究室)。
+
+    Chami原文(msg 1544213340853772331)=「🔥 は <:enjoh:1541126866981752883> に置き換えって
+    **前に言ったはず**」= 少なくとも2回目の同じ指摘。全部門共通規律§5に既に載っているのに
+    生成側が滑る型(英語漏れ・口調割れと同じ)なので、心がけではなく合流点で機械的に潰す。
+    起票= 改善提案部門(トトリ)docs/departments/kaizen-analyst/型_素の炎上絵文字_送信ゲート正規化_2026-09-01.md
+
+    ★地の文だけ置換する。コードブロック(```)とインラインコード(`…`)の中は触らない
+      = 規律や実装の説明で素の🔥を**そのまま見せたい**場面があるため(誤発火する安全網は無視される)。
+    ★既に <:enjoh:…> と書かれている所は素の🔥ではないので二重変換にならない。
+    ★fail-open: 例外は素通し=送信を殺さない(最悪の事故は沈黙)。
+
+    返り値: 送るべき本文(str)。置換が1件も無ければ入力を1ミリも変えない。
+    """
+    try:
+        s = str(body or "")
+        if "\U0001F525" not in s:
+            return body                       # 素の🔥が無い=何もしない(大多数の便はここで抜ける)
+        parts = _CODE_SPLIT_RE.split(s)
+        n = 0
+        for i in range(0, len(parts), 2):     # 偶数=コード外=地の文
+            parts[i], k = _FIRE_RE.subn(ENJOH_EMOJI, parts[i])
+            n += k
+        if not n:
+            return body                       # 🔥はコードの中だけだった=触らない
+        print(f"[persona_send] ★地の文の素の🔥を{n}件 <:enjoh:…> へ正規化"
+              f"(Chami指摘の再発を合流点で機械的に潰す・共通規律§5)。", file=sys.stderr)
+        return "".join(parts)
+    except Exception as e:
+        print(f"[persona_send] 絵文字ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
+              file=sys.stderr)
+        return body
+
+
 def _audit_english_suppressed(persona, channel, hit, body):
     """英文ダンプで送信保留したことを監査へ残す(dept_daemon と同じ置き場・ORG-23)。失敗しても送信判定は変えない。"""
     try:
@@ -652,6 +692,9 @@ def main():
     #   代打/直送の男口調「俺」等が素通りしていた(DEF-99f9503e37 の構造的真因)。resolve_persona の
     #   後=正式名で口調ルールを引くため。機械置換のみ・fail-open=送信は殺さない。
     body = tone_backstop(body, persona, dept)
+    # ★絵文字の合流点ゲート(2026-09-01)。素の🔥を地の文に置くなという規律は在るのに生成側が滑る
+    #   (Chami msg 1544213340853772331=少なくとも2回目の指摘)。英語・口調と同じ出口で機械的に潰す。
+    body = enjoh_backstop(body)
     if not avatar and os.path.exists(AVATARS_FILE):
         with open(AVATARS_FILE, "r", encoding="utf-8") as f:
             avatar = json.load(f).get(persona)
