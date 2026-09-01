@@ -532,8 +532,10 @@ def main():
     ap.add_argument("--dept", required=True,
                     help="カンマ区切りで複数可。"
                          "★**研究室HQは `hq`**(🏛研究室hq)。`research-room` は **ad研究室**(ADAFI事業部GL)で"
-                         "HQではない= 2026-07-19(HQ部屋が2つ事故・org_registry.yml L19-20)と "
-                         "2026-09-02(イージス研究室がHQ宛ての報告をad研究室へ誤配)で**2回踏んでいる**。"
+                         "HQではない= 2026-07-19(HQ部屋が2つ事故・org_registry.yml L19-20)/ "
+                         "2026-09-01 / 2026-09-02(いずれもHQ宛ての報告をad研究室へ誤配)で"
+                         "**3回踏んでいる**。★registryのコメントにもセッションの記憶にも"
+                         "書いてあった上で3回目が出た= **文書に置くだけでは止まらない**。"
                          "投函行の `(ch=...)` に出る**部屋の日本語名**を送る前に読め。")
     ap.add_argument("--from", dest="sender", default="シャビ・アロンソ(研究室HQ)")
     ap.add_argument("--body-file")
