@@ -395,6 +395,79 @@ def _abbrev_verdicts(text, rules):
     return out
 
 
+# ★Chami呼称の合流点担保(2026-09-01・依頼= 改善提案部門 1544351414455771229)==========
+#   引き金= Chami「ちゃみくんってよんで!!おこです!」(msg 1544349888945455155)。
+#   写像は**正しかった**= 呼称ルール.json chami_address.overrides に
+#   トトリ/アスナ/姫崎莉波/中野五月/カスミ = 「ちゃみくん」と書いてある。
+#   それでも裸の「ちゃみ」が出るのは、この表が**プロンプト側にしか効いていない**から。
+#   実測(イージス研究室 09-01)= `chami_address` を読む行は naming_gate.py の
+#   docstring 1箇所だけ=**送信口(ゲート)は1文字も読んでいない**。送信時の担保は
+#   speaker_target_overrides の target=Chami 1行(デブライネ限定)だけで、
+#   target_detect_forms.Chami=["ちゃみくん"] なので**裸の「ちゃみ」は検出対象ですらない**。
+#   → 生成が既定「ちゃみ」へ滑ると合流点で誰も直さない=再発クラス(Z1-C)。
+#   ★0歩目(壊れている実物)= departments/hr/memory/*.jsonl の
+#     「ちゃみくん」話者の便 287件中 **18件**が裸の「ちゃみ」を含む
+#     (中野五月14 / 姫崎莉波3 / トトリ1)。
+#   ★必ず話者別(blanket 禁止)= 一ノ瀬怜(allowed に「ちゃみ」)・デブライネ
+#     (allowed に「ちゃみ」/ forbidden に「ちゃみくん」)・既定(「ちゃみ」)は
+#     **絶対に変換しない**。allowed[0]=="ちゃみくん" の話者だけを対象にする。
+#     「Chami」と呼ぶ話者(スネーク/オタコン/アロンソ等)も対象外=C-035で広げない。
+CHAMI_ADDRESS_BACKSTOP = True
+CHAMI_KEY = "Chami"
+CHAMI_BARE = "ちゃみ"
+CHAMI_TARGET_FORM = "ちゃみくん"
+
+
+def _chami_address_map(persona, rules):
+    """話者の chami_address 写像を (allowed, forbidden) で返す。
+
+    値は文字列(「ちゃみくん」)か dict({"allowed":[...],"forbidden":[...]})の両方が実在する。
+    話者に override が無ければ default を使う(既定は「ちゃみ」=対象外になる)。
+    """
+    ca = (rules or {}).get("chami_address") or {}
+    val = None
+    for k, v in (ca.get("overrides") or {}).items():
+        key = str(k or "")
+        if key.startswith("_") or key == "*":
+            continue            # メタキー/全話者ピンは受け付けない(blanket 禁止)
+        if _speaker_matches(key, persona):
+            val = v
+            break
+    if val is None:
+        val = ca.get("default")
+    if isinstance(val, dict):
+        allowed = [str(a) for a in (val.get("allowed") or []) if str(a)]
+        forbidden = [str(a) for a in (val.get("forbidden") or []) if str(a)]
+    else:
+        allowed = [str(val)] if val else []
+        forbidden = []
+    return allowed, forbidden
+
+
+def _chami_address_verdicts(persona, s, rules):
+    """話者が「ちゃみくん」と呼ぶ人格で、地の文に裸の「ちゃみ」が出ていたら1件返す。
+
+    ★s は naming_verdicts で覆い済み(名乗りタグ/引用の中は見えない)。
+    ★裸= 直後に敬称(くん/君/さん/ちゃん…)が続かない出現。「ちゃみさん」等の
+      敬称付きは今回の事故ではない=触らない(狭く取る)。
+    """
+    if not CHAMI_ADDRESS_BACKSTOP:
+        return []
+    allowed, forbidden = _chami_address_map(persona, rules)
+    if not allowed or allowed[0] != CHAMI_TARGET_FORM:
+        return []               # 「ちゃみ」「Chami」が正の話者=対象外
+    if CHAMI_BARE in allowed or CHAMI_TARGET_FORM in forbidden:
+        return []               # 裸が許容/「ちゃみくん」が禁止=絶対に触らない
+    for _i, actual, ok in _iter_occurrences(s, CHAMI_BARE, allowed):
+        if ok or actual != CHAMI_BARE:
+            continue            # 「ちゃみくん」/敬称付き=違反ではない
+        return [{
+            "target": CHAMI_KEY, "found": CHAMI_BARE,
+            "expected": [CHAMI_TARGET_FORM], "reason": "chami_address",
+        }]
+    return []
+
+
 def naming_verdicts(persona, dept, text, rules):
     """呼称違反の候補一覧を返す(純関数)。
 
@@ -522,6 +595,10 @@ def naming_verdicts(persona, dept, text, rules):
             })
         # ★人格名の一字略(C-021・ククール→ク)を単語境界で捕まえる(警告のみ)。
         out.extend(_abbrev_verdicts(s, rules))
+        # ★Chami呼称= 話者別(上の★参照)。honorific_required_targets に Chami は
+        #   無く、target_detect_forms.Chami も「ちゃみくん」だけ=上のループでは
+        #   裸の「ちゃみ」に一度も触れない。ここで1本だけ足す(判定は _chami_address_verdicts)。
+        out.extend(_chami_address_verdicts(persona, s, rules))
         return out
     except Exception:
         return []               # fail-open=ゲートは配送を殺さない
@@ -723,8 +800,11 @@ def naming_corrections(persona, dept, text, rules):
             if full_key:
                 if tkey not in bare:
                     bare = tkey
-            # 自動修正の対象は2型だけ(forbidden・愛称ゆれ等は警告のみ)
-            elif reason not in ("override_allowed", "honorific_required") or not bare or not allowed:
+            # 自動修正の対象は3型だけ(forbidden・愛称ゆれ等は警告のみ)。
+            # ★chami_address は「ちゃみ」→「ちゃみくん」=接尾を足すだけ
+            #   (whole_swap にならない)ので、既存の安全弁がそのまま効く。
+            elif reason not in ("override_allowed", "honorific_required",
+                                "chami_address") or not bare or not allowed:
                 result["remaining"].append(v)
                 continue
             target_form = allowed[0]
@@ -740,6 +820,8 @@ def naming_corrections(persona, dept, text, rules):
                 if ok:
                     continue
                 end = i + len(actual)
+                if reason == "chami_address" and actual != bare:
+                    continue        # 「ちゃみさん/ちゃみちゃん」等=敬称付きは触らない
                 if not _safe_after(masked, end):
                     unsafe = True          # 姓+名(直後が漢字)等=置換すると壊れる
                     continue
