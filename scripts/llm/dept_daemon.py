@@ -6278,6 +6278,18 @@ class Daemon:
         """自部門の部門長。起動時に1回だけDiscordのカテゴリを引いてキャッシュする。"""
         if hasattr(self, "_head_cache"):
             return self._head_cache
+        # ★dept名の名指し例外= Discordのカテゴリからは引けない管轄。
+        #   goods-afi: 2026-09-01 Chami指示(msg 1544423332676636756)
+        #     「イージス研究室が管理するみたいな感じでいいよ」。
+        #     この部屋の親カテゴリは「アフィリエイト事業」(1522042618983485451)で、
+        #     下のカテゴリ表に無い=head が None になり回送が部門長を飛ばしてHQへ直行していた。
+        #   ★カテゴリ単位で足さない理由= 同カテゴリ配下8室のうち dept を持つのはこの1室だけ
+        #     (2026-09-02 HQ実測)。Chamiの指示も1部屋への名指しであってカテゴリ全体ではない(C-035)。
+        #   ★正本= 00_AI-HQ/org_registry.yml depts.goods-afi.managed_by
+        _NAMED_HEAD = {"goods-afi": "aegis-gl"}
+        if self.dept in _NAMED_HEAD:
+            self._head_cache = _NAMED_HEAD[self.dept]
+            return self._head_cache
         head = None
         try:
             if self.dept not in ("hq", "research-room", "aegis-gl", "keiei-kikaku"):
