@@ -3771,6 +3771,8 @@ from lang_gate import (  # noqa: E402  純関数のみ・単一の判定源(sing
     _JP_RE, _LATIN_RE, detect_english_dump, strip_english_preamble,
     detect_simplified,   # 2026-09-01 簡体字混入(ルールAへ合流)。判定はここ1本に置く
     detect_cyrillic,     # 2026-09-01 キリル混入(HQ-0227 裁定2 GO・同じ表へ合流)
+    cyrillic_in_name_tag,  # 2026-09-02 残ったキリルが名乗りタグの中か=構造被害かの判定
+    cyrillic_tags,         # 2026-09-02 化けた名乗りタグの中身(下流で直せるかの突き合わせ用)
 )
 
 # ============================================================================
@@ -4331,14 +4333,25 @@ CYRILLIC_WARN = "⚠️(自動)生成不良: ラテン文字そっくりのキ�
 _NONJP_WARN = {"hangul": HANGUL_WARN, "simplified": SIMPLIFIED_WARN,
                "cyrillic": CYRILLIC_WARN}
 
+# キリルの ⚠️ を**名乗りタグが壊れた便に限る**(2026-09-02)。理由と実測は _nonjp_warn_needed。
+# ★戻す時はここを False にする(それだけで 2026-09-01 の挙動へ完全に戻る)。
+CYRILLIC_WARN_ONLY_IN_TAG = True
 
-def hangul_gate(text, regen=None, strip_marker=None):
+# 多人格部屋でも、化けた名乗りタグが**人格ただ1人**のホモグリフなら正名として採用する
+# (2026-09-02・依頼= 人事部門ククール)。理由と一意性の門は _homoglyph_unique。
+# ★戻す時はここを False にする(単独部屋の救済= C-035 の従来挙動だけが残る)。
+PERSONA_TAG_HOMOGLYPH_FIX = True
+
+
+def hangul_gate(text, regen=None, strip_marker=None, names=()):
     """ルールA: ハングル検知→1回だけ再生成→なお出たら元文に警告付与(純関数・テスト可)。
 
     引数:
       text        : 1回目の本文(既に split_wip_marker 済みが渡る想定)。
       regen       : 無引数callable。呼ぶと**再生成後の本文**を返す(None なら再生成しない)。
       strip_marker: 再生成本文から <<WIP>> 等を落とす callable(任意)。呼び出し側で split_wip_marker を渡す。
+      names       : この部屋の人格名(任意・2026-09-02)。渡すと「化けた名乗りタグが下流で
+                    直る便」の ⚠️ を止める(依頼②「直せた時は黙る」)。省略時は従来どおり。
 
     返り値: (out_text, info)
       out_text : 実際に送るべき本文。
@@ -4351,7 +4364,7 @@ def hangul_gate(text, regen=None, strip_marker=None):
       - 再生成後もハングルが残る/regen失敗/空なら、**元文(1回目)に警告行を付けて**返す。
     """
     info = {"hit1": False, "regenerated": False, "hit2": False, "warned": False,
-            "kind": ""}
+            "kind": "", "suppressed": False}
     try:
         base = str(text or "")
         hit = detect_nonjp(base)
@@ -4361,6 +4374,9 @@ def hangul_gate(text, regen=None, strip_marker=None):
         info["kind"] = hit.get("kind", "hangul")
         if regen is None:
             # 再生成できない経路(session_relay/失敗告知/test等)=沈黙にしない=警告付きで送る
+            if not _nonjp_warn_needed(info["kind"], base, names):
+                info["suppressed"] = True    # 台帳には残る・画面へ出さないだけ
+                return base, info
             info["warned"] = True
             return _append_nonjp_warn(base, info["kind"]), info
         try:
@@ -4379,11 +4395,52 @@ def hangul_gate(text, regen=None, strip_marker=None):
                 return cleaned, info         # 再生成で消えた=きれいな本文へ差し替え
             info["hit2"] = detect_nonjp(cleaned) is not None
         # ここに来る=再生成しなかった/失敗/空/2回目も混入 → 元文に警告付き(沈黙にしない)
+        if not _nonjp_warn_needed(info["kind"], base, names):
+            info["suppressed"] = True        # 台帳には残る・画面へ出さないだけ
+            return base, info
         info["warned"] = True
         return _append_nonjp_warn(base, info["kind"]), info
     except Exception:
         # ゲート自身が配送を殺さない(fail-safe)=元文をそのまま返す
         return str(text or ""), info
+
+
+def _nonjp_warn_needed(kind, text, names=()):
+    """その混入で**Chamiの画面へ ⚠️ を出す価値が在るか**を返す(台帳への記録とは別問題)。
+
+    背景(2026-09-02・人事部門ククール経由でChami本人「回しといて、いちいち警告出るから」):
+      local/llm/hangul_audit.jsonl の event=cyrillic **11行**を1行ずつ分類した実測=
+        ・8/11 (73%) は各部屋が**このバグを報告するために** `ККール` と地の文へ書いた便。
+        ・1/11 だけが実物の破損した名乗りタグ `[ккール]`(hr-room 2026-09-02T04:56:16)。
+        ・2/11 は地の文の生成崩れ(`так` / `триアージ`)= 本物だが字面の話。
+      つまり警報を鳴らしていたのは**バグではなく、バグを論じている組織自身**だった。
+      毎回鳴る網は読まれなくなる=「取りこぼしを許さない」計器としてむしろ壊れる。
+    ★ここで落とすのは**画面の ⚠️ だけ**。audit_hangul の1行(hangul_audit.jsonl)と
+      ログは従来どおり全件残る=**沈黙にはしない**(ORG-45の原則は守る)。再生成の1回も残す。
+    ★対象はキリルだけ。ハングル(ORG-45)と簡体字(HQ-0224)は**1ミリも変えない**=
+      簡体字は「実況であって实况ではない、でも鳴るのは仕様」と別に明記されている決定が在る。
+    ★これは HQ-0227 裁定2 の実装を**狭めた**。戻すのは下の定数を False にするだけ(1行)。
+    ★names(部屋の人格名)を貰った時だけ**もう一段**落とす= 化けたタグが下流で
+      正名へ直る(救済される)と分かっているなら、警告を出す意味が無い。これが依頼②
+      「直せた時は黙る」だ。★**直らないタグは今までどおり鳴らす**= 直せない時だけ残す。
+    """
+    try:
+        if kind != "cyrillic" or not CYRILLIC_WARN_ONLY_IN_TAG:
+            return True
+        # 名乗りタグの中に残っている=resolve が落ちて前置き除去・口調監査・監査記録が
+        # まとめて抜ける本物の構造被害(HQ-0227の実物)。ここだけ画面へ出す。
+        if not cyrillic_in_name_tag(text):
+            return False
+        if not (names and PERSONA_TAG_HOMOGLYPH_FIX):
+            return True
+        # ★下流(split_persona_blocks / strip_solo_persona_tag)が直せるタグか。
+        #   直せる=送る本文からタグごと消える=Chamiの画面には壊れた字が出ない。
+        for _tag in cyrillic_tags(text):
+            if not _homoglyph_unique(_tag, tuple(names)):
+                return True      # 1つでも直せないタグが在れば鳴らす
+        return False
+    except Exception:
+        return True          # 判定が落ちたら**出す**側に倒す(黙らせない)
 
 
 def _append_nonjp_warn(text, kind="hangul"):
@@ -5118,6 +5175,38 @@ def _homoglyph_near(tag, names):
     return best
 
 
+def _homoglyph_unique(tag, names):
+    """`_homoglyph_near` の**取り違えない版**= 最短距離の候補が**ただ1人**の時だけ名前を返す。
+
+    なぜ別関数にしたか(2026-09-02・依頼= 人事部門ククール / Chami「いちいち警告出るから」):
+      `_homoglyph_near` は同点の候補が複数居ても「先に見つけた方」を返す。**数えるだけ**なら
+      それでよかった(記録が1行ずれるだけ)。だが**本文を直す**判断に使うなら、同点は
+      「機械には誰か決められない」と同義だ。C-035が単独部屋に限っていた理由もそこにある=
+      「誰と読み違えても行き先が同じ1人」だから安全だった。
+      多人格部屋で安全にするには、部屋の人数ではなく**候補の一意性**で門を作ればいい。
+    ★同点が2人以上居たら None を返す(=直さない・従来どおり漏れとして数えるだけ)。
+    ★これは C-035 の線に触れる変更だ。戻すのは呼び元(split_persona_blocks)の
+      `_homoglyph_unique` を `lambda *_: None` にすれば従来挙動へ戻る。
+    """
+    t = _script_norm(tag)
+    if not t or len(t) > 24 or not _has_foreign_script(t):
+        return None
+    best, bestd, tie = None, 99, 0
+    for nm in names or ():
+        n = _script_norm(nm)
+        if not n or n == t or abs(len(t) - len(n)) > 1:
+            continue
+        lim = 2 if len(n) >= 4 else 1
+        d = _edit_distance(t, n, lim)
+        if d > lim:
+            continue
+        if d < bestd:
+            best, bestd, tie = str(nm), d, 1
+        elif d == bestd and str(nm) != best:
+            tie += 1
+    return best if tie == 1 else None
+
+
 def _audit_homoglyph(dept, tag, names, line):
     """ホモグリフに見える名乗り漏れを1行残す。記録したら True。★fail-open(例外は握り潰す)。"""
     try:
@@ -5176,7 +5265,7 @@ def split_persona_blocks(text, resolve, dept="", names=()):
             head, m, who = idx, mm, w
             break
         if len(miss) < 8:
-            miss.append((idx, mm[0]))
+            miss.append((idx, mm[0], mm))
     if not m:
         # ★名乗りが1つも無い= 従来どおり1通(挙動は変えない)。
         #   ただし**1行目が「短い1語+閉じ括弧」の形**なら、それは名乗りの成り損ないの可能性が高い
@@ -5185,9 +5274,26 @@ def split_persona_blocks(text, resolve, dept="", names=()):
         #   ★2026-09-01 追加= 引けなかったタグが**部屋の人格名のホモグリフ**に見えるなら
         #     tag_homoglyph_leak として数える(直しはしない・本文も名義も動かさない)。
         _names = tuple(names) or tuple(getattr(resolve, "names", ()) or ())
-        for _i, _tag in miss:
+        for _i, _tag, _mm in miss:
             if _audit_homoglyph(dept, _tag, _names, lines[_i].strip()):
                 break
+        # ★2026-09-02 追加(依頼= 人事部門ククール・元はChami「回しといて、いちいち警告出るから」):
+        #   引けなかったタグが**この部屋の人格ただ1人**のホモグリフなら、正名として採用して割る。
+        #   これが無いと `[ККール]` の1字化けで名義が解けず、前置き除去・口調監査・監査記録が
+        #   **まとめて抜けたまま**既定人格の名義で出る(HQ-0227の実物・hr-roomで実測10便)。
+        #   ★漏れの記録(tag_homoglyph_leak)は**上で先に**残す= 直したことで
+        #     「生成側が化けた回数」が消えないようにする(単独部屋の救済と同じ設計)。
+        #   ★同点候補が2人以上なら直さない(_homoglyph_unique が None を返す)= 取り違えない。
+        #   ★直す対象は**名乗りタグだけ**。本文は1文字も触らない。
+        if PERSONA_TAG_HOMOGLYPH_FIX:
+            for _i, _tag, _mm in miss:
+                _g = _homoglyph_unique(_tag, _names)
+                _w = resolve(_g) if _g else None
+                if _w:
+                    _audit_tag(dept, _w, "tag_homoglyph_rescued", lines[_i].strip())
+                    head, m, who = _i, (_g, _mm[1], _mm[2]), _w
+                    break
+    if not m:
         first = _tag_match(lines[0]) if lines else None
         if first and not first[2]:
             _audit_tag(dept, "", "tag_unbracketed_leak", lines[0].strip())
@@ -7178,13 +7284,23 @@ class Daemon:
         #   ★regen thunk は上の各生成分岐で捕捉済み(session_relay/失敗告知/test では None=再生成しない)。
         #   ★自動での文字置換はしない(각약→各約 等は誤修正が事故)。検査例外は握り潰し従来動作へ倒す。
         #   ★<<WORK>>/split_wip_marker/所有者再確認/test抑止には**一切触っていない**。
-        _reply2, _hg = hangul_gate(reply, regen=regen, strip_marker=split_wip_marker)
+        #   ★2026-09-02= 部屋の名簿を渡す。「化けた名乗りタグが下流で正名へ直る便」は
+        #     Chamiの画面へ ⚠️ を出さない(依頼= 人事部門ククール②「直せた時は黙る」)。
+        #     ★名簿は下(分割の手前)で組む _roster と**同じ作り方**にする=二重の物差しを作らない。
+        _nonjp_names = [str(p.get("persona") or "")
+                        for p in (self.conf.get("personas") or ()) if p.get("persona")]
+        if not _nonjp_names:
+            _nonjp_names = [str(self.effective_persona() or "")]
+        _reply2, _hg = hangul_gate(reply, regen=regen, strip_marker=split_wip_marker,
+                                   names=[n for n in _nonjp_names if n])
         if _hg.get("hit1"):
             log(self.dept,
                 f"★出力ゲートA({_NONJP_KIND.get(_hg.get('kind'), _NONJP_KIND['hangul'])['label']}): "
                 f"再生成={'実施' if _hg.get('regenerated') else '不可/未実施'} "
                 f"2回目混入={'有' if _hg.get('hit2') else '無'} "
-                f"警告付与={'有' if _hg.get('warned') else '無(再生成で解消)'} msg={mid}")
+                # ★「無」の理由を3つに割る。ここを1つにすると、抑制した便と再生成で消えた便が
+                #   ログ上で見分けられなくなる=後から「なぜ鳴らなかったか」を測れない。
+                f"警告付与={'有' if _hg.get('warned') else ('無(タグ外=台帳のみ)' if _hg.get('suppressed') else '無(再生成で解消)')} msg={mid}")
         reply = _reply2
         # ★★出力ゲート(実況漏れ)= 名乗りも声も無い生ログがそのまま出る事故(2026-09-01・トトリの型)。
         #   ルールAの兄弟として**同じ合流点**に置く=全経路の返信が必ず1度だけ通る。

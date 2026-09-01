@@ -192,9 +192,25 @@ def main():
     got, rec = spy(lambda: dd.split_persona_blocks(
         broken_multi, resolve, dept="gunji", names=list(ROOM)))
     check("ホモグリフ: 多人格部屋でも数える",
-          [o for o, _ in rec] == ["tag_homoglyph_leak"] and rec[0][1] == "オタコン")
-    check("ホモグリフ: 多人格部屋でも本文は割らない・触らない",
-          got == [(None, broken_multi)])
+          [o for o, _ in rec][:1] == ["tag_homoglyph_leak"] and rec[0][1] == "オタコン")
+    # ★★2026-09-02 に**期待値を反転した**(依頼= 人事部門ククール・元はChami「回しといて、
+    #   いちいち警告出るから」)。ここは 2026-09-01 まで「多人格部屋では本文は割らない・触らない」
+    #   =C-035(単独部屋なら取り違えないから救済してよい)を固定していた。
+    #   反転の根拠= 危ないのは**部屋の人数**ではなく**候補の一意性**だ。名簿と突き合わせて
+    #   最短距離の候補がただ1人なら、多人格部屋でも取り違えようがない(_homoglyph_unique)。
+    #   実測(00_AI-HQ/departments/*/memory/*.jsonl 4,432便)= キリルを含む31便のうち
+    #   **10便が hr-room の `[ККール]` 破損タグ**で、全部この形のまま名義未解決で出ていた。
+    #   ★同点が2人以上の時に**直さない**ことは、すぐ下の検査で別に固定する(そこが安全の芯)。
+    check("ホモグリフ: 多人格部屋でも、候補が一意なら正名へ直して割る(2026-09-02 反転)",
+          got == [("オタコン", "本文だ。")]
+          and any(o == "tag_homoglyph_rescued" for o, _ in rec))
+    # ★★安全の芯= 同点候補が2人以上なら**直さない**(取り違えるくらいなら未解決のまま出す)。
+    got2, rec2 = spy(lambda: dd.split_persona_blocks(
+        "[Аキ] 本文だ。", (lambda nm: nm if nm in ("アキ", "ユキ") else None),
+        dept="gunji", names=["アキ", "ユキ"]))
+    check("ホモグリフ: 同点が2人なら直さない(人数ではなく一意性で守る)",
+          got2 == [(None, "[Аキ] 本文だ。")]
+          and not any(o == "tag_homoglyph_rescued" for o, _ in rec2))
     got, rec = spy(lambda: dd.split_persona_blocks(broken_multi, resolve, dept="gunji"))
     check("ホモグリフ: names 未指定の既存呼び元は従来どおり(落ちない・鳴らない)",
           rec == [] and got == [(None, broken_multi)])
