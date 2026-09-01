@@ -9,8 +9,12 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $root
 $env:PYTHONIOENCODING = 'utf-8'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# 2026-09-02 Chami "swap" directive (msg 1544486499653910629): the 08:00 push content is
+# switched from the competitor *video* daily (upstream GAS frozen since 8/18 = same message every
+# morning) to the competitor *community-post* brief (fresh via --fresh scrape, symbol-free JP).
+# Only the invoked analysis changes; the 08:00 trigger/registration (platform-se) is untouched.
 $log = Join-Path $root 'local\competitor_daily.log'
-$out = & python scripts/analysis/competitor_daily_push.py 2>&1
+$out = & python scripts/analysis/community_daily_push.py 2>&1
 $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 Add-Content -Path $log -Value "===== $stamp =====" -Encoding UTF8
 Add-Content -Path $log -Value $out -Encoding UTF8
