@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import glob
 import sys
 import traceback
 from pathlib import Path
@@ -15,6 +14,7 @@ from pathlib import Path
 from . import __version__
 from .aggregate import summarize
 from .config import ConfigError, load_config
+from .downloader import DownloadError, build_downloader
 from .logging_setup import setup_logging
 from .parser import ReportFormatError, load_report_csv
 from .report import format_report
@@ -22,16 +22,18 @@ from .senders import SendError, StdoutSender, build_sender
 from .state import StateStore
 
 
-def _pick_csv(args, config: dict) -> Path:
+def _obtain_csv(args, config: dict, date: str, logger) -> Path:
+    """CSVを用意する。--csv指定があればそれを使う(手動検証用)。
+    無ければ取得方式(config [download] mode)に従って取得する
+    (裁定#1=本番は自動DL。手動フォルダ配置には逃げない)。
+    """
     if args.csv:
         return Path(args.csv)
-    csv_dir = config.get("csv_dir", "")
-    if not csv_dir:
-        raise ConfigError("CSVが指定されていません(--csv か config [input] csv_dir)")
-    matches = sorted(glob.glob(str(Path(csv_dir) / config.get("csv_glob", "*.csv"))))
-    if not matches:
-        raise ConfigError(f"CSVが見つかりません: {csv_dir}")
-    return Path(matches[-1])  # 最新(名前順末尾)を使う
+    if not config.get("csv_dir", ""):
+        raise ConfigError("CSVの置き場所が指定されていません(--csv か config [input] csv_dir)")
+    downloader = build_downloader(config)
+    logger.info("CSV取得方式=%s", config.get("download_mode", "local"))
+    return downloader.fetch(Path(config["csv_dir"]), date)
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -77,7 +79,7 @@ def run(argv: list[str] | None = None) -> int:
 
 def _run_body(args, config: dict, date: str, logger) -> int:
     try:
-        csv_path = _pick_csv(args, config)
+        csv_path = _obtain_csv(args, config, date, logger)
         logger.info("CSV=%s", csv_path)
         rows = load_report_csv(csv_path, encoding=config["encoding"])
         summary = summarize(rows, date=date, clicks=args.clicks)
@@ -98,6 +100,12 @@ def _run_body(args, config: dict, date: str, logger) -> int:
         )
         return 0
 
+    except DownloadError as e:
+        # 裁定#1(完全自動化)の代償: 取得失敗を黙らせない。売上ゼロ日の通常レポートとは
+        # 別文面で送り、受け取った側が本文だけで「取得できなかった日」と分かるようにする。
+        logger.error("取得失敗: %s", e)
+        _notify_download_failure(config, args, date, str(e), logger)
+        return 1
     except (ReportFormatError, ConfigError, SendError) as e:
         logger.error("失敗: %s", e)
         _notify_failure(config, args, date, str(e), logger)
@@ -123,6 +131,26 @@ def _notify_failure(config: dict, args, date: str, reason: str, logger) -> None:
         sender.send(f"[失敗] {config.get('title','レポート')} {date}", msg)
     except Exception as e:
         logger.error("失敗通知の送信も失敗: %s", e)
+
+
+def _notify_download_failure(config: dict, args, date: str, reason: str, logger) -> None:
+    """自動DL失敗を送信口へ出す。売上ゼロ日の通常レポート(報酬合計 0円)とは
+    件名・本文とも明確に分け、金額の記載自体を出さない(誤読=ゼロ円確定と混同させない)。
+    """
+    try:
+        sender = build_sender(config, dry_run=args.dry_run)
+    except Exception:
+        sender = StdoutSender()
+    msg = (
+        f"【取得失敗】{config.get('title','レポート')} のCSVを自動取得できませんでした({date})\n"
+        f"※これは売上ゼロではありません。取得エラーのため金額は不明です。\n"
+        f"理由: {reason}\n"
+        f"→ DMMアフィ管理画面の仕様変更/ログイン情報/ネットワークを確認してください。"
+    )
+    try:
+        sender.send(f"[取得失敗] {config.get('title','レポート')} {date}", msg)
+    except Exception as e:
+        logger.error("取得失敗通知の送信も失敗: %s", e)
 
 
 def main() -> None:

@@ -11,12 +11,29 @@ DMMアフィリエイト管理画面からエクスポートした報酬明細CS
 - 失敗は握り潰さない。例外はローカルログへ残し、可能なら送信口へ「生成に失敗」を通知して非0で終了。
 
 ## セットアップ
-1. Python 3.9 以上(標準ライブラリのみ。追加インストール不要)。
+1. Python 3.9 以上(パース/集計/整形/送信は標準ライブラリのみ。追加インストール不要)。
+   `[download] mode = playwright` を使う場合のみ `pip install playwright` と
+   `playwright install chromium` が必要(下記「CSVの取得」参照)。
 2. `config.example.ini` を `config.ini` にコピーし、自分の値を入れる。
-   - `[input] csv_dir` … アフィ管理画面のCSVを置くフォルダ
+   - `[input] csv_dir` … CSVを置く/保存するフォルダ
    - `[output] sender` … `stdout`(画面表示) か `discord`(Webhook投稿)
    - `[output] webhook_url` … discord のとき自分のWebhook URL
+   - `[download] mode` … `local`(手動配置・検証用) か `playwright`(ブラウザ自動DL・本番)
    - `config.ini` は zip に同梱しない/共有しない(自分のPCの中だけ)。
+
+## CSVの取得
+- `mode = local` … `csv_dir` に置いた最新CSVをそのまま使う(検証・移行期用)。
+- `mode = playwright` … DMMアフィ管理画面へブラウザで自動ログインしCSVを自動DLする(本番方式)。
+  ログインURL・フォームのセレクタ・CSVエクスポート導線は実物の管理画面を見ないと分からないため
+  ソースには埋め込んでいない。`config.ini [download]` の各項目
+  (`login_url` / `username_selector` / `password_selector` / `login_submit_selector` /
+  `report_url` / `csv_export_selector` / `username` / `password`)に、実物を見て値を入れること。
+  未設定のまま実行すると当て推量で動かず `DownloadError` で明確に止まる。
+
+## 取得失敗と売上ゼロの区別
+自動DLが失敗した日は「無言の欠測」にしない。送信本文の件名が `[取得失敗] ...` になり、
+本文1行目に「※これは売上ゼロではありません。取得エラーのため金額は不明です。」と出る
+(通常の売上レポートには「報酬合計」の行があるが、取得失敗の通知には出ない)。
 
 ## 使い方
 ```

@@ -36,4 +36,17 @@ def load_config(path: str | Path) -> dict:
         "state_path": get("state", "path", "state/daily_summary.json"),
         # [log]
         "log_path": get("log", "path", "logs/fanza_affi_report.log"),
+        # [download] 取得方式。裁定#1=本番は playwright(完全自動)。
+        # ★username/password はここにしか置かない(ソース非埋め込み、🐧さんのPCの中だけ)。
+        "download_mode": get("download", "mode", "local"),
+        "dmm_username": get("download", "username", ""),
+        "dmm_password": get("download", "password", ""),
+        "download": {
+            "login_url": get("download", "login_url", ""),
+            "username_selector": get("download", "username_selector", ""),
+            "password_selector": get("download", "password_selector", ""),
+            "login_submit_selector": get("download", "login_submit_selector", ""),
+            "report_url": get("download", "report_url", ""),
+            "csv_export_selector": get("download", "csv_export_selector", ""),
+        },
     }

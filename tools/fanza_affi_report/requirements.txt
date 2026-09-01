@@ -1,5 +1,8 @@
-# 中核は Python 標準ライブラリのみで動きます(追加インストール不要)。
+# 中核(パース/集計/整形/送信)は Python 標準ライブラリのみで動きます。
 # Python 3.10 以上。
 #
-# ブラウザ自動化(CSV自動ダウンロード)を有効化する場合のみ、下記を検討:
-#   playwright>=1.40   # 裁定(取得方式A)が確定してから追加
+# config.ini [download] mode = playwright (裁定#1で確定した本番の取得方式)を
+# 使う場合のみ、下記が必要です。mode = local (検証用)なら不要。
+playwright>=1.40
+# インストール後、初回のみ実行:
+#   playwright install chromium

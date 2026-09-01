@@ -12,6 +12,12 @@ from pathlib import Path
 
 from fanza_affi_report.aggregate import summarize
 from fanza_affi_report.cli import run
+from fanza_affi_report.downloader import (
+    DownloadError,
+    LocalFolderDownloader,
+    PlaywrightDMMDownloader,
+    build_downloader,
+)
 from fanza_affi_report.parser import ReportFormatError, load_report_csv, parse_report_text
 from fanza_affi_report.report import format_report
 from fanza_affi_report.senders import (
@@ -163,6 +169,63 @@ class TestDryRunEndToEnd(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("報酬合計", out)
         self.assertIn("dry-run", out)
+
+
+class TestDownloader(unittest.TestCase):
+    def test_local_missing_raises_download_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(DownloadError):
+                LocalFolderDownloader().fetch(Path(d), "2026-09-01")
+
+    def test_local_returns_latest(self):
+        with tempfile.TemporaryDirectory() as d:
+            dd = Path(d)
+            write_cp932_csv(dd / "a_2026-09-01.csv", ROWS_DAY1)
+            write_cp932_csv(dd / "b_2026-09-02.csv", ROWS_DAY2)
+            got = LocalFolderDownloader().fetch(dd, "2026-09-02")
+        self.assertEqual(got.name, "b_2026-09-02.csv")
+
+    def test_build_downloader_unknown_mode_raises(self):
+        with self.assertRaises(DownloadError):
+            build_downloader({"download_mode": "fax"})
+
+    def test_build_downloader_local_default(self):
+        d = build_downloader({})
+        self.assertIsInstance(d, LocalFolderDownloader)
+
+    def test_playwright_without_selectors_raises_without_touching_network(self):
+        # セレクタ未設定なら playwright を import する前に止まる
+        # (=当て推量のURL/セレクタで実際に接続しにいかない)。
+        d = PlaywrightDMMDownloader(dl_config={}, username="u", password="p")
+        with self.assertRaises(DownloadError) as ctx:
+            d.fetch(Path("."), "2026-09-01")
+        self.assertIn("login_url", str(ctx.exception))
+
+
+class TestDownloadFailureNotice(unittest.TestCase):
+    def test_download_failure_is_distinct_from_zero_sales(self):
+        """自動DL失敗の通知は、売上ゼロ日の通常レポートと本文だけで区別できること。"""
+        with tempfile.TemporaryDirectory() as d:
+            dd = Path(d)
+            (dd / "empty_csv_dir").mkdir()
+            cfg = dd / "config.ini"
+            cfg.write_text(
+                "[report]\ntitle = テストレポート\n"
+                f"[input]\ncsv_dir = {dd / 'empty_csv_dir'}\n"
+                "[output]\nsender = stdout\n"
+                f"[state]\npath = {dd / 'state.json'}\n"
+                f"[log]\npath = {dd / 'log.txt'}\n"
+                "[download]\nmode = local\n",
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = run(["--config", str(cfg), "--date", "2026-09-01"])
+            out = buf.getvalue()
+        self.assertEqual(rc, 1)
+        self.assertIn("取得失敗", out)
+        self.assertIn("売上ゼロではありません", out)
+        self.assertNotIn("報酬合計", out)
 
 
 if __name__ == "__main__":
