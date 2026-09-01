@@ -156,6 +156,9 @@ talk = sorted(k for k, v in D.DEPT_CONF.items()
 #     **A と C は登録制**にして、権限の増減と「宣言なき無権限」を人の目に通す。
 WORK_ROOMS = sorted([  # A= work_scope を持つ部屋。増減はどちらも期待値の変更(要登録)
     "aegis-gl", "ai-office", "consult-intel", "copy-director", "data-org", "frontend",
+    # goods-afi= 2026-09-02 追加。管轄がイージス研究室へ移った際に状態Cのまま置かれていた
+    #   のを A へ上げた(AnimeGameGoodsAFI 配下のみ。公開・課金・申請は範囲外のまま)。
+    "goods-afi",
     "hq", "hr-context", "hr-room", "imagegen", "kaizen-analyst", "learning-coach",
     "llm-edu", "platform-se", "product-scout", "qa-reviewer", "research-room",
     "shorts-analyst", "system-engineer",
