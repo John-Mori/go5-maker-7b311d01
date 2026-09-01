@@ -67,35 +67,64 @@ TIMEOUT_SEC = 3600                # vision が全候補を舐めるので1時間
 GUARD_MARK = "未充填の候補があり配信を止めた"
 GUARD_CODE = 2
 
+# ★2026-09-02 追加。軍議(三笘)の返答で分かったこと=「埋める当てが**有る**が、Gemini の
+#   フリー枠が枯れていて埋まらない」。つまり空配信ガードには**2つの原因**がある:
+#     (a) 誰も room_comments を書いていない   → 閉じる鍵= 軍議
+#     (b) 枠が無くて自動生成器が書けなかった → 閉じる鍵= 軍議ではない(キー/課金=基盤)
+#   (b) を軍議へ送り続けるのは、今朝直したばかりの穴の再演だ= **閉じられない部屋を叩く**。
+#   実測(2026-09-02 当室が 429 本文から直読): quotaId
+#   `GenerateRequestsPerDayPerProjectPerModel-FreeTier` / quotaValue **20**(1日20回・モデル毎)。
+#   ★合致は「429 の証拠がチェーンの出力に在る」時だけ。素の "429" は cid や件数と紛れるので使わない。
+#   ★下の2本は**実物から取った**(推測で置いていない・2026-09-02 当室が読んだ):
+#     ・room_comments.py:230  `  [<model>] 429…次のモデルへ`            → "] 429"
+#     ・room_comments.py:240 → 372 `vision 呼び出し失敗: 全モデルで失敗(最後: <model> HTTP 429)`
+#                                                                        → "HTTP 429"
+#     この stderr が起動器まで届くことも確認済= run_daily_teian.py:120 の subprocess.run は
+#     capture していない=子の stderr を継承し、こちらの capture_output に入る。
+#   ★`RESOURCE_EXHAUSTED` は**入れない**= room_comments は 429 の本文を出力しないので、
+#     このチェーンの出力には現れない。現れない文字列を合図に置くと「見張っているつもり」になる。
+QUOTA_DEPT = "aegis-gl"           # 共有キーと計器の持ち場= この部屋(課金の判断はChamiへ上げる)
+QUOTA_MARKS = ("HTTP 429", "] 429")
+QUOTA_QUIET_DAYS = 3              # ★guard の14日ではなく fail と同じ3日。理由は should_alert。
+
 
 # ---------------------------------------------------------------- 純粋関数
 
 def classify(code, out):
-    """このランの止まり方。"ok" / "guard"(設計どおりの停止) / "fail"(本当に落ちた)。
+    """このランの止まり方。"ok" / "guard" / "quota" / "fail"。
 
     ★guard と判定するのは **exit=2 かつ publish の合図行がある** 時だけだ。
       exit だけで決めない= 他の工程がたまたま2で落ちた日を「設計どおり」と読むと、
       本物の故障が14日おきの静かな側へ沈む。
+    ★その guard のうち、出力に 429 の証拠が在る日は "quota" へ**さらに分ける**=
+      軍議には閉じられない停止だから宛先が違う(理由は QUOTA_MARKS の上)。
+      証拠が無ければ guard のまま= **分からない日を quota 側(=軍議を素通り)へ倒さない。**
     """
     if code == 0:
         return "ok"
     if code == GUARD_CODE and GUARD_MARK in (out or ""):
-        return "guard"
+        text = out or ""
+        return "quota" if any(m in text for m in QUOTA_MARKS) else "guard"
     return "fail"
 
 
 def should_alert(state, kind, today,
-                 quiet_days=QUIET_DAYS, guard_quiet_days=GUARD_QUIET_DAYS):
+                 quiet_days=QUIET_DAYS, guard_quiet_days=GUARD_QUIET_DAYS,
+                 quota_quiet_days=QUOTA_QUIET_DAYS):
     """今日、便を出すべきか。★純粋関数(状態は dict をそのまま受ける)。
 
-    出す= ①**止まり方が変わった日**(ok→guard、guard→fail、fail→ok…)= 節目は必ず1通。
-          ②同じ止まり方が続いていて、前便から間隔(fail=3日 / guard=14日)以上。
+    出す= ①**止まり方が変わった日**(ok→guard、guard→quota、quota→fail、fail→ok…)=
+            節目は必ず1通。
+          ②同じ止まり方が続いていて、前便から間隔(fail=3日 / guard=14日 / quota=3日)以上。
     出さない= 成功が続いている日(静かなのが正常)/ 知らせた直後の同じ止まり方。
 
     ★間隔を止まり方で変える理由= guard は**閉じ条件を持つ部屋が別**(軍議の room_comments)で、
       埋まるまで何日でも続くのが正常な姿だ。3日おきに鳴らすと「いつもの奴」になって
       本物の故障まで読み飛ばされる(規律§3)。かといって永久に黙ると、止まったまま
       忘れられる= 2026-08-24〜09-01 の再演。だから**間隔を延ばす**で挟む。
+    ★quota を guard の14日ではなく fail と同じ3日にする理由= これは「埋まるのを待つ」
+      正常な待ち行列ではなく、**Chami の課金判断が要る詰まり**だ(フリー枠20/日/モデル)。
+      判断が出るまで毎日止まり続けるのだから、14日も黙ると判断そのものが忘れられる。
     """
     st = state or {}
     was = str(st.get("last_kind") or ("ok" if st.get("last_ok", True) else "fail"))
@@ -111,12 +140,27 @@ def should_alert(state, kind, today,
         d1 = dt.datetime.strptime(today, "%Y-%m-%d").date()
     except Exception:
         return True                  # 日付が読めない= 黙らせる理由にしない(fail-open)
-    return (d1 - d0).days >= (guard_quiet_days if kind == "guard" else quiet_days)
+    if kind == "guard":
+        interval = guard_quiet_days
+    elif kind == "quota":
+        interval = quota_quiet_days
+    else:
+        interval = quiet_days
+    return (d1 - d0).days >= interval
 
 
 def alert_dept(kind):
-    """その止まり方を**閉じられる**部屋。★「持ち主」ではなく「鍵を持つ側」へ出す。"""
-    return GUARD_DEPT if kind == "guard" else DEPT
+    """その止まり方を**閉じられる**部屋。★「持ち主」ではなく「鍵を持つ側」へ出す。
+
+    ★quota を軍議へ送らない理由= 2026-09-02 に軍議(三笘)から「埋める当ては**有る**が
+      Gemini が全モデル 429」と実測付きで返ってきた。枠は軍議には開けられない=
+      叩いても閉じられない部屋を叩き続けることになる(C-046 と同じ形)。
+    """
+    if kind == "guard":
+        return GUARD_DEPT
+    if kind == "quota":
+        return QUOTA_DEPT
+    return DEPT
 
 
 def build_body(kind, code, tail, today, streak):
@@ -131,6 +175,27 @@ def build_body(kind, code, tail, today, streak):
             "■ **戻った**。%s のランが成功した(exit=0)。\n"
             "  直前まで %s 日続けて止まっていた分は、これで閉じる。\n\n"
             "■ 出力の末尾:\n```\n%s\n```\n" % (today, streak, tail)
+        )
+    if kind == "quota":
+        return (
+            "自動(毎朝7時の提案日次チェーン)→ イージス研究室\n\n"
+            "■ **配信が空配信ガードで止まり、その原因が Gemini の枠切れだ**\n"
+            "  (exit=%s / %s・連続%s日目)。出力に 429 の証拠が在るのでこちらへ回した。\n"
+            "  ★軍議へは送っていない= 「埋める当てが無い」のではなく**当てはあるが枠が無い**。\n"
+            "  枠は軍議には開けられないので、送っても閉じられない(2026-09-02 実測)。\n\n"
+            "■ 出力の末尾:\n```\n%s\n```\n\n"
+            "■ 実数(2026-09-02 当室が 429 の本文から直読)= フリー枠は\n"
+            "  `GenerateRequestsPerDayPerProjectPerModel-FreeTier` / quotaValue **20**\n"
+            "  = **1日20回・モデル毎**。共有キー local/gemini_api_key.txt を叩く口は8つある。\n\n"
+            "■ **閉じ条件**= 次の朝のランが exit=0 になること。道は3つで、選ぶのはChami:\n"
+            "  1. 枠の回復を待つ(翌朝の自動再試行で埋まる日もある= 今の運用)\n"
+            "  2. API へ課金する(20/日の壁が外れる)\n"
+            "  3. 生成をローカルLLMへ寄せる(枠に依らない)\n"
+            "■ こちらの手番= 使用量台帳 local/llm/gemini_usage.jsonl を見て「誰が20回を\n"
+            "  食ったか」を出し、1〜3の判断材料をChamiへ上げる。\n"
+            "■ 全文ログ: local/_teian_daily.log\n"
+            "■ 次の自動便: 直るまで %s 日おき(毎日は鳴らさない)。\n"
+            % (code, today, streak, tail, QUOTA_QUIET_DAYS)
         )
     if kind == "guard":
         return (
@@ -264,8 +329,12 @@ def main(argv=None):
         log("%s へ便 exit=%s / %s" % (dept, acode, aout[:200]))
     save_state(state)
 
-    label = {"ok": "成功", "guard": "★空配信ガードで停止(連続%s日目)" % streak,
-             "fail": "★失敗(連続%s日目)" % streak}[kind]
+    # ★.get で引く= 止まり方を足した日に**脈だけ KeyError で落ちる**のを作らない
+    #   (便は出た後なので、ここで落ちると「出したのに脈は死んでいる」矛盾になる)。
+    label = {"ok": "成功",
+             "guard": "★空配信ガードで停止(連続%s日目)" % streak,
+             "quota": "★空配信ガードで停止・原因=Geminiの枠切れ(連続%s日目)" % streak,
+             "fail": "★失敗(連続%s日目)" % streak}.get(kind, "★%s(連続%s日目)" % (kind, streak))
     write_pulse("状態: %s / exit=%s%s"
                 % (label, code, (" / %s へ便を出した" % dept) if alert else ""))
     log("チェーン exit=%s 止まり方=%s 便=%s" % (code, kind, dept if alert else "出さない"))
