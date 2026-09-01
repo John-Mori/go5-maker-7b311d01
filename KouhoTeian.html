@@ -501,7 +501,7 @@
             '<span><span class="ctext">'+twoLineHtml(cm.text)+'</span>'+
             (cm.aim?'<div class="caim">'+esc(cm.aim)+(cm.type?(' · '+esc(deNum(cm.type))):'')+'</div>':'')+'</span></label>'; }).join('')+'</div>';
       } else {
-        cbody = '<div class="noc">コメント未生成 (vision後埋め)。下欄に手入力してください。</div>';
+        cbody = '<div class="noc">コメント未生成 (vision後埋め)。生成されるまで待ってください。</div>';
       }
 
       // 部屋コメント: 三笘薫の一言 + メイン(早坂芽衣)の一言。room_comments={mitoma:"…", main:{by,text}}
@@ -530,8 +530,6 @@
         '</div>'+
         cbody+
         roomsHtml+
-        '<label class="mini">コメント (手直し可)</label>'+
-        '<textarea rows="2" class="cmtEdit" data-cand="'+cid_+'" placeholder="この作品のコメント">'+esc(plainCmt(cmts.length?cmts[0].text:''))+'</textarea>'+
         '<div class="decide-row">'+
           '<span class="segch" data-cand="'+cid_+'">'+
             '<button type="button" class="chBtn'+(c.channel!=='acc2'?' on':'')+'" data-ch="acc1">月詠み</button>'+
@@ -942,17 +940,11 @@
         if(c) openGallery_(c);
       });
     });
-    // radio → 手入力欄へ反映
+    // radio(3択) → 決定中の作品ならコメントへ反映(手入力欄は廃止・Chami指示 2026-09-01)
     document.querySelectorAll('input[name^="cmt_"]').forEach(function(r){
       r.addEventListener('change', function(){
-        var ta = document.querySelector('textarea.cmtEdit[data-cand="'+this.dataset.cand+'"]');
-        var v = plainCmt(this.value);
-        if(ta) ta.value = v;
-        if(pick.id===this.dataset.cand){ pick.comment = v; refreshBar(); }
+        if(pick.id===this.dataset.cand){ pick.comment = plainCmt(this.value); refreshBar(); }
       });
-    });
-    document.querySelectorAll('textarea.cmtEdit').forEach(function(ta){
-      ta.addEventListener('input', function(){ if(pick.id===this.dataset.cand){ pick.comment=this.value; refreshBar(); } });
     });
     // ch トグル
     document.querySelectorAll('.segch').forEach(function(seg){
@@ -969,10 +961,10 @@
       b.addEventListener('click', function(){
         var id=this.dataset.cand;
         var c = cands.filter(function(x){ return x.id===id; })[0]; if(!c) return;
-        var ta = document.querySelector('textarea.cmtEdit[data-cand="'+id+'"]');
+        var rr = document.querySelector('input[name="cmt_'+id+'"]:checked');
         var seg = document.querySelector('.segch[data-cand="'+id+'"] .chBtn.on');
         pick = { id:c.id, cid:c.cid, title:c.title, platform:c.platform,
-          channel:(seg?seg.dataset.ch:candChannel(c)), comment:(ta?ta.value.trim():'') };
+          channel:(seg?seg.dataset.ch:candChannel(c)), comment:(rr?plainCmt(rr.value).trim():'') };
         document.querySelectorAll('.cand').forEach(function(el){ el.classList.remove('picked'); });
         $('#cand_'+id).classList.add('picked');
         refreshBar();
