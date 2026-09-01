@@ -115,6 +115,14 @@ def addressee_warning(body, depts):
       人間の間違いだが**機械が拾える形**の間違いだった。
     ★止めない。警告だけ(fail-open)= 誤検知で通信路を止める方が害が大きい。
     ★見るのは**最後の矢印より後ろ**だけ= 見出し左側の「差出人」を宛先と誤読しない。
+    ★2026-09-02 実測の**穴**(イージス研究室)= 見出しに「→」が無い便は 127行目で
+      即 return する= **この網は鳴らない**。実際にHQ宛ての報告が `--dept research-room`
+      (ad研究室)へ誤配された時、本文1行目が `[ケヴィン・デブライネ] goods-afi 受け取った。`
+      で矢印が無く、**警告は1文字も出なかった**。矢印の無い便へ網を広げる案は爆風を測って
+      **見送った**= 「HQへ渡せ」等の上申語で拾うと DISPATCH便795本中37本に当たり、うち13本は
+      HQが配下へ配る定型文(共通規律§3.9)= **毎回鳴る網**になる(共通規律§3)。
+      ★従って**ここは穴のまま**だ。塞いでいない。宛先の取り違えは `--dept` のヘルプと
+      投函行の `(ch=部屋の日本語名)` で防ぐ= **機械でなく目で止める**という選択。
     ★2026-08-23 追補(研究室HQ指摘)= **経由便では助言文を替える**。
       `【A → B(部門長)経由 → C】` を B へ投函するのは3階梯(RULES §6.4)の**正しい使い方**で、
       「見出しを直せ / Cへも出せ」は**どちらも実行できない**(直送はガードが弾く)。
@@ -521,7 +529,12 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dept", required=True, help="カンマ区切りで複数可")
+    ap.add_argument("--dept", required=True,
+                    help="カンマ区切りで複数可。"
+                         "★**研究室HQは `hq`**(🏛研究室hq)。`research-room` は **ad研究室**(ADAFI事業部GL)で"
+                         "HQではない= 2026-07-19(HQ部屋が2つ事故・org_registry.yml L19-20)と "
+                         "2026-09-02(イージス研究室がHQ宛ての報告をad研究室へ誤配)で**2回踏んでいる**。"
+                         "投函行の `(ch=...)` に出る**部屋の日本語名**を送る前に読め。")
     ap.add_argument("--from", dest="sender", default="シャビ・アロンソ(研究室HQ)")
     ap.add_argument("--body-file")
     ap.add_argument("--body")
