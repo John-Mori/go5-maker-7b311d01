@@ -5255,6 +5255,77 @@ def strip_solo_persona_tag(text, resolve, dept=""):
     return body
 
 
+# ★出力ゲートの窓(非空行で数えた「名乗りより前に許す行数」)。
+#   実測(2026-09-01 local/llm/persona_render_audit.jsonl・preamble_dropped 965件)=
+#     非空1行 508件 / 2行 455件 / 3行 2件 / 4行以上 0件。
+#   事故便(2026-09-01 06:02:25 platform-se)は**前置き3行**= 上の分布の最大値と同じ。
+#   → 4 は「観測された最大 + 1」。ここを無制限にはしない理由は _SOLO_PREAMBLE_MAX_LINES と同じ
+#     (深い位置のタグは遅れた名乗りより**本文中の引用**である公算が高い)。
+_TAG_GATE_HEAD_LINES = 4
+
+
+def persona_tag_leak_gate(text, resolve, dept="", speaker=""):
+    """**送信直前の合流点**で、剥がし損ねた名乗り `[名前]` を拾う出力ゲート。戻り値=本文。
+
+    ★2026-09-01 研究室HQ DISPATCH-aegis-gl-1788244228714 の発注。
+      Chami「最初に書く必要ないこと書いてるよ あと一ノ瀬怜とか いらないし名乗り」
+      (msg 1544228523886116915 / 15:12:50)。壊れた実物= 同日 06:02:25 platform-se の便で
+      `[一ノ瀬怜]` が**非空4行目**に在り、前置き3行(作業メモ2行+区切り線)ごと Chami の画面へ出た。
+    ★真因は名簿ではない(実行で確認)= 一ノ瀬怜 は platform-se の resolver で正しく引ける。
+      `strip_solo_persona_tag` の窓 _SOLO_PREAMBLE_MAX_LINES=3 が**前置き2行までしか許さない**ので、
+      タグ行へ到達する前に打ち切られていた。上流の窓は動かさない(既存19部屋の挙動を変えない)。
+    ★HQの定義=「1行目のタグは正常に剥がされる。**剥がした後に残っているタグは全部異常**」。
+      よってここは「残ったか」だけを見る= 上流が成功した便では1文字も触らない(空振りが既定)。
+    ★判定を2つ持たない(ORG-11)= 形の判定は `_tag_match`(=_PERSONA_TAG_RE)を、名義の判定は
+      呼び元が上流へ渡したのと**同じ resolve** を、そのまま使い回す。新しい名簿は作らない。
+    ★直すのは「この便が出る名義で名乗った」場合だけ:
+      - resolve が引ける名前  = 名乗りの失敗が確定 → 前置きごと落とす(§4.8前半の作業メモもここで消える)
+      - 引けないが _avatar_keys() に在る名前(=他部屋の人格)= **触らず数えるだけ**。
+        本文に他室の便を引用した報告が壊れる方が重い。閉じた名簿の設計(2026-07-26)も崩さない。
+      - 窓の外(非空 _TAG_GATE_HEAD_LINES 行より後ろ)= **触らず数えるだけ**(§5-1)。
+    ★fail-open(§3)= 落とすと空になる / 例外 / resolve が無い → **元の本文をそのまま返す**。
+      止めない・沈黙させない。最悪の事故は無言で出ないことだ。
+    """
+    t = str(text or "")
+    if not t.strip() or not callable(resolve):
+        return t
+    try:
+        lines = t.split("\n")
+        head, mm, who = None, None, None
+        seen = 0
+        for idx, ln in enumerate(lines):
+            if not ln.strip():
+                continue                 # ★空行は幅に数えない(上流と同じ数え方)
+            m = _tag_match(ln)
+            if m:
+                w = resolve(m[0])
+                if w:
+                    if seen <= _TAG_GATE_HEAD_LINES:
+                        head, mm, who = idx, m, w
+                    else:
+                        # ★窓の外に残った名乗り= 直さない。数えて次の判断の材料にする。
+                        _audit_tag(dept, w, "tag_late_leak", ln.strip())
+                    break
+                if str(m[0]).strip() in _avatar_keys():
+                    # ★他部屋の人格名= 引用かもしれない。触らず数えるだけ。
+                    _audit_tag(dept, str(speaker or ""), "tag_foreign_leak", ln.strip())
+                    break
+            seen += 1
+        if not who:
+            return t
+        body = "\n".join([mm[1]] + lines[head + 1:]).strip()
+        if not body:
+            return t                     # ★落とすと空になる= 落とさない
+        pre = [l for l in lines[:head] if l.strip()]
+        if pre:
+            # ★黙って落とさない(規律§2)= 落とした前置きは全文を監査へ残す(上流と同じ計器)。
+            _audit_preamble(dept, who, "\n".join(pre))
+        _audit_tag(dept, who, "tag_gate_fixed", lines[head].strip())
+        return body
+    except Exception:
+        return t
+
+
 _avatar_keys_cache = {"mtime": None, "keys": frozenset()}
 
 
@@ -7111,14 +7182,16 @@ class Daemon:
             #     ★割らない・前置きも落とさない= 単独部屋の挙動はタグ1行以外1ミリも変えない。
             _roster = [str(p.get("persona") or "")
                        for p in (self.conf.get("personas") or ()) if p.get("persona")]
+            # ★resolve は1本だけ組んで上流(分割/剥がし)と下流(出力ゲートE)で**同じ物**を使う
+            #   = 名義の判定を2箇所に持たない(ORG-11)。
             if self.conf.get("personas"):
+                _tag_resolve = (lambda nm: resolve_persona_tag(self.conf, nm))
                 _blocks = split_persona_blocks(
-                    reply, lambda nm: resolve_persona_tag(self.conf, nm),
-                    dept=self.dept, names=_roster)
+                    reply, _tag_resolve, dept=self.dept, names=_roster)
             else:
+                _tag_resolve = solo_tag_resolver(self.conf, self.effective_persona())
                 _blocks = [(None, strip_solo_persona_tag(
-                    reply, solo_tag_resolver(self.conf, self.effective_persona()),
-                    dept=self.dept))]
+                    reply, _tag_resolve, dept=self.dept))]
             # ★★出力ゲート ルールC(呼称違反チェック)= 話者依存(2026-07-30・Chami裁定②)。
             #   split_persona_blocks 解決後・ブロック単位で (話者=persona, 部屋=dept, 本文) を見る。
             #   ★2026-07-31 Chami『いいよ』で格上げ= **高信頼だけ本文を自動修正**、残りは警告のみ。
@@ -7179,6 +7252,16 @@ class Daemon:
                         log(self.dept,
                             f"★出力ゲートD-2(案F・不採用→元の本文で送る): 話者={_speaker} "
                             f"理由={_rw.get('why')} msg={mid}")
+                # ★★出力ゲートE(名乗りタグの残存)= C/D/F の**後ろ**= 送信直前の最後の1点。
+                #   ここまで来て `[名前]` が残っている= 上流の名義解決が失敗した証拠(HQの定義)。
+                #   前置き(作業メモ)の露出も同じ便で起きるので、落とす時は一緒に落ちる。
+                _gated = persona_tag_leak_gate(
+                    _part, _tag_resolve, dept=self.dept, speaker=_speaker)
+                if _gated != _part:
+                    log(self.dept,
+                        f"★出力ゲートE(名乗り残存・落とした): 話者={_speaker} "
+                        f"{len(_part)}字→{len(_gated)}字 msg={mid}")
+                    _part = _gated
                 _fixed_blocks.append((_who, _part))
             _blocks = _fixed_blocks
             body = os.path.join(LOCAL, f"_daemon_reply_{self.dept}.txt")
