@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -43,6 +44,18 @@ try:
     import tone_gate as _tone_gate
 except Exception:                       # import 失敗でも呼び出し側は死なない(fail-open)
     _tone_gate = None
+
+# 使用量の記録(2026-09-02 イージス研究室)。★取り込みに失敗しても書き直しは続ける。
+#   なぜ足したか= 共有キー local/gemini_api_key.txt を叩く口が8つあるのに、台帳
+#   local/llm/gemini_usage.jsonl は実測 513行中 497行が tag=comp_frames で、
+#   tone_rewrite / room_comments / vision_comments / gemini_responder は**1行も無かった**。
+#   **この段は毎便走るので枠を一番食う側なのに、台帳から見えていなかった。**
+#   誰が1日20回を食い切ったのかを後から数えられるようにする(=課金の判断材料)。
+#   ★残り3つの口はこの部屋の持ち場ではない(teian配下=改修α)。**穴は穴として残す**。
+try:
+    import gemini_usage
+except Exception:
+    gemini_usage = None
 
 # ★書き直しの対象(登録制)。ここに無い reason は**触らない**=従来どおり突き返しへ回す。
 #   - dialect_kansai   = 方言。語尾の機械置換は文法が壊れるので tone_corrections は諦めた分。
@@ -270,26 +283,53 @@ def local_ask(prompt, timeout=15, model=None):
     return d.get("response", "") or ""
 
 
+def _log_usage(model, prompt, out, ok, err, t0):
+    """使用量台帳へ1行。★絶対に例外を投げない= 計測が送信を止めない(gemini_usage と同じ掟)。
+
+    who="homin"= 資格情報の束の名前(このファイルは local/gemini_api_key.txt を読む=
+    ask_gemini と同じ鍵)。tag="tone_rewrite" で後から口ごとに割れる。
+    """
+    if not gemini_usage:
+        return
+    try:
+        gemini_usage.log("homin", "tone_rewrite", model, len(prompt or ""),
+                         len(out or ""), 0, ok, err, time.time() - t0)
+    except Exception:
+        pass
+
+
 def ask_cascade(prompt, timeout=20, _out=None):
     """Gemini → (枠切れ/落ちたら) ローカル の順で1回ずつ叩く。
 
-    ★背景= フリー枠は **GenerateRequestsPerDayPerProjectPerModel = 500/日**。
-      2026-09-02 実測で flash-lite も flash も 429。単線だと**この段が静かに素通りする**
-      (ゲートG の包み直しも ゲートD-2 の口調書き直しも今日は一度も動いていなかった)。
+    ★背景= フリー枠の上限。2026-09-02 実測で flash-lite も flash も 429。単線だと
+      **この段が静かに素通りする**(ゲートG の包み直しも ゲートD-2 の口調書き直しも
+      今日は一度も動いていなかった)。
+      ★★上限の実数は **20/日/モデル**だ(2026-09-02 当室が 429 の本文から直接読んだ=
+        quotaId `GenerateRequestsPerDayPerProjectPerModel-FreeTier` / quotaValue `20`)。
+        ここには以前 500/日 と書いてあったが**25分の1の間違い**だった。20 は
+        「たまに枯れる」量ではない= **共有キーを叩く口が8つある以上、日常的に枯れる**。
+        だからローカルへ落ちるこの段は例外処理ではなく**通常運転の片肺**として扱え。
     ★どちらのエンジンが働いたかを _out["engine"] に残す= 静かな不発を監査で見つけるため。
     """
     if _out is None:
         _out = {}
     for model in ("gemini-flash-lite-latest", "gemini-flash-latest"):
+        t0 = time.time()
         try:
             r = gemini_ask(prompt, timeout=timeout, model=model)
             _out["engine"] = model
+            _log_usage(model, prompt, r, True, "", t0)
             return r
         except Exception as e:
-            _out["engine_err"] = "%s: %s" % (model, (str(e) or e.__class__.__name__)[:60])
+            err = "%s: %s" % (model, (str(e) or e.__class__.__name__)[:60])
+            _out["engine_err"] = err
+            _log_usage(model, prompt, "", False, err, t0)
             # 429(枠切れ)以外=通信断や鍵無し。どちらにせよ次の手へ落とす。
+    t0 = time.time()
     r = local_ask(prompt, timeout=min(timeout, 15))
     _out["engine"] = "local"
+    # ★ローカルも記録する= Geminiが枯れた日に段が生きていた証拠が要る(不発と区別が付かない)。
+    _log_usage("local", prompt, r, True, "", t0)
     return r
 
 
