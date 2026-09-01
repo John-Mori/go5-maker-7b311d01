@@ -81,7 +81,7 @@ CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
 ORG_LAYER_DEPTS = frozenset({
     "hq", "aegis-gl", "platform-se", "keiei-kikaku",
     "hr-room", "hr-context", "kukuru-nakama", "gunji",
-    "research-room", "past-room", "future-room", "soudan-room",
+    "research-room", "past-room", "future-room", "soudan-room", "someday-room",
     "dream-care", "health-log", "learning-coach", "llm-edu", "llm-qa",
 })
 PROJECT_SETTINGS = os.path.join(ROOT, ".claude", "settings.json")

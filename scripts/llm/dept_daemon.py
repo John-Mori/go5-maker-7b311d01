@@ -3056,6 +3056,86 @@ DEPT_CONF = {
             "自室で詰んだ案件はHQ直行ではなく**まずイージス研究室**へ上がる(3階梯を飛ばさない)。"
         ),
     },
+    # ==== 2026-09-02 配線=「将来やることルーム」(Chami直接指示)====
+    # ★出典= msg 1544463960810725416(研究室HQで直に指示)
+    #     「1544454352029229148 / 将来やることルームという部屋を立てた。IDはこれ。
+    #      今のパソコンのスペックじゃ実現できなかったり、まだ新しく出てきた Claude Codeとか
+    #      CodexみたいなAIエージェントのシステムとかの情報共有を取得で将来なんかやりたく
+    #      なったりできるようになったらやるっていうところをちょっと保存しといてほしいんだよ。
+    #      そのための チャットルーム、それがどう実現かどうかを検討してほしいというか
+    #      今色々それについて調べてもらったり 壁打ちするためのところ。
+    #      メンバーは アロンソコーチ、ジェンティルドンナ、ヴィルシーナ、カスミ、補佐アメス。」
+    # ★チャンネル実測(2026-09-02・curl で GET /channels/1544454352029229148。urllibは403):
+    #     name=「将来やることルーム」 / type=0(テキスト) / guild=1498341160207515678
+    #     parent=1527361544847888394 = カテゴリ「森光技研Logos」
+    # ★slug が `future-room` でない理由= それは既に「日次業務レポート」が使っている(実測)。
+    # ★人格5人とも characterfile・原典・アバターの実在を実測して入れた
+    #   (原典の無いキャラは演じない= 2026-07-20 Chami指示):
+    #     シャビ・アロンソ  = characters/alonso.md 20,552B / local/persona_context/alonso_context.md
+    #     ジェンティルドンナ= characters/gentildonna.md 13,558B / persona_context/gentildonna_ウマ娘.md
+    #     ヴィルシーナ      = characters/verxina.md 18,467B / persona_context/verxina_context.md
+    #     カスミ            = characters/kasumi.md 12,633B / persona_context/kasumi/
+    #     アメス            = characters/ames.md 20,783B / persona_context/ames_context.md
+    #   5人とも local/persona_avatars.json に在る=名義で出せる(2026-09-02 実測)。
+    # ★conversation_only にしない理由= Chamiの依頼に「調べてもらったり」「保存しといてほしい」が
+    #   在る=調査と台帳追記は自室の仕事だ。ただし**実装はしない**(work_scope で明示)。
+    "someday-room": {
+        "character": os.path.join(_CHAR, "alonso.md"),
+        "memory": os.path.join(_MEM, "someday-room.jsonl"),
+        "persona": "シャビ・アロンソ",   # 名義が引けない時のfail-safe先
+        "port": 18833,                  # 18832(goods-afi)まで使用済=実測 2026-09-02
+        "work_model": "opus",           # 人格の演技担保(C-014)
+        "session_relay": True,
+        "personas": [
+            {"persona": "シャビ・アロンソ", "character": os.path.join(_CHAR, "alonso.md"),
+             "role": "コーチ(この部屋の主・実現可否の裁定)",
+             "aliases": ("alonso", "アロンソ", "アロンソコーチ")},
+            {"persona": "ジェンティルドンナ", "character": os.path.join(_CHAR, "gentildonna.md"),
+             "role": "品質と規律(QA兼任)", "aliases": ("gentildonna", "ドンナ", "ドンちゃん")},
+            {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
+             "role": "講師兼任(調べもの・技術の噛み砕き)",
+             "aliases": ("verxina", "ヴィルシーナ", "シーナ")},
+            {"persona": "カスミ", "character": os.path.join(_CHAR, "kasumi.md"),
+             "role": "人事部門コンテキストのリーダー兼任", "aliases": ("kasumi", "カスミ")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "補佐・率直な他者視点", "aliases": ("ames", "アメス")},
+        ],
+        "lead_persona": "シャビ・アロンソ",
+        "work_scope": (
+            "この部屋で自分で完結してよいのは**調べることと書き留めることだけ**だ:\n"
+            "- 台帳 `local/someday/ideas.md` への追記・整理(1案件1ブロック)\n"
+            "- 実現条件の調査(手元のPCスペック・必要VRAM・料金・依存する外部サービス)\n"
+            "- 既存の資料を読む(引き継ぎ書・裁定カタログ・設計書・change_log)\n"
+            "★書く時は**今日の実測値**と**何が揃えば実現するか**を分けて書く。"
+            "「いつか出来る」だけの行は台帳を腐らせる。\n"
+            "範囲外(=本文にそう書いて最終行に <<WORK>>):\n"
+            "- **実装・導入・課金・インストール・デプロイ**= ここではやらない。"
+            "やると決まった時点で正しい部門へ発注する(基盤=イージス研究室/プラットフォームSE、"
+            "本体=改修部門α、人格=人事部門)。**この部屋は決める前の場所だ。**\n"
+            "- 組織の裁定(部門の新設・人格の決定)= Chami・研究室HQ\n"
+            "★やっていないことを「やった」と言うな(ORG-39)。"
+        ),
+        "boot_note": (
+            "■この部屋の目的(出典= Chami直接指示 2026-09-02 msg 1544463960810725416)\n"
+            "- **今はまだ出来ないことを、腐らせずに寝かせておく場所**だ。\n"
+            "  ①今のPCのスペックでは無理なこと ②新しく出てきたAIエージェント"
+            "(Claude Code / Codex 等)の情報 ③出来るようになったらやりたいこと。\n"
+            "- ここは**壁打ちと調査の部屋**。Chamiが思いつきを投げる→実現条件を一緒に詰めて、"
+            "**台帳へ残す**。決まったら別の部門へ出す。ここで作らない。\n"
+            "- ★**台帳= `local/someday/ideas.md`。**新しい案が出たらここへ足す。"
+            "**答える前に末尾を読め**(同じ話を二度立てない・前に測った条件を引き継ぐ)。\n"
+            "- 布陣= コーチ**シャビ・アロンソ** / **ジェンティルドンナ** / **ヴィルシーナ** / "
+            "**カスミ** / 補佐**アメス**。返信1行目に `[名前]`。\n"
+            "■進め方\n"
+            "- ★**濃度(合唱にしない)**= 全員で一斉に返さない。**その話題に強く関わる1人が前に出る**。"
+            "**観点が本当に割れる時だけ**もう1人足す(2人まで)。名指しがあればその人が答える。\n"
+            "- ★**「いつか出来る」で終わらせるな。**必ず**何が足りないか**を数で書く"
+            "(VRAM何GB・月いくら・待ち時間・依存する未リリース機能)。次に見直す引き金も書く。\n"
+            "- ★**煽らない。**新しい技術の話は誇張が多い。**手元で動くか**だけを見る。\n"
+            "- ★**ネットへ出すな**= GitHub・D1・外部サービス。**local/ の中だけで完結。**\n"
+            "- ぼかすな(C-013)。PCスペック・予算・体調も local/ の中でははっきり書いてよい。"
+        ),
+    },
     # ==== 2026-07-27 配線した5部屋(研究室HQ発注)====
     # ★共通の理由: どれも**Discordに部屋はあるのに DEPT_CONF に無かった**=消費者不在の部屋。
     #   便が来ても誰も消費しないので、Chamiの声が静かに消える(INC-110 / ORG-31と同じ形)。
@@ -6479,7 +6559,10 @@ class Daemon:
         #   ★カテゴリ単位で足さない理由= 同カテゴリ配下8室のうち dept を持つのはこの1室だけ
         #     (2026-09-02 HQ実測)。Chamiの指示も1部屋への名指しであってカテゴリ全体ではない(C-035)。
         #   ★正本= 00_AI-HQ/org_registry.yml depts.goods-afi.managed_by
-        _NAMED_HEAD = {"goods-afi": "aegis-gl"}
+        #   someday-room: 2026-09-02 新設。親カテゴリ「森光技研Logos」は下の表に無い=
+        #     放っておくと head=None で main箱へ落ちる(goods-afi と同型の穴)。
+        #     この部屋の主はHQのGL(シャビ・アロンソ)なので管轄もHQ=名指しで結ぶ。
+        _NAMED_HEAD = {"goods-afi": "aegis-gl", "someday-room": "hq"}
         if self.dept in _NAMED_HEAD:
             self._head_cache = _NAMED_HEAD[self.dept]
             return self._head_cache
