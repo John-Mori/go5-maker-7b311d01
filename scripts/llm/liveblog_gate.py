@@ -216,13 +216,16 @@ def wrap_once(persona, dept, text, markers, resolve=None, entry=None,
       why      … 不採用/未実施の理由(監査に残す)
     ★どんな例外でも元の本文を返す(fail-open)。採否は呼び出し側が名義の判断に使う。
     """
-    out = {"text": text, "ok": False, "attempted": False, "why": "", "elapsed_ms": 0}
+    out = {"text": text, "ok": False, "attempted": False, "why": "", "elapsed_ms": 0,
+           "engine": ""}
     try:
         if _tr is None:
             out["why"] = "tone_rewriteが無い"
             return out
         prompt = build_prompt(persona, dept, text, markers, entry=entry)
-        fn = ask or (lambda p: _tr.gemini_ask(p, timeout=timeout))
+        # ★Gemini単線をやめ、枠切れ(429)はローカルOllamaへ落とす(Chami指示 2026-09-02)。
+        #   単線だと枠切れの日に包み直しが**静かに素通り**し、機械名義へ倒すだけになる。
+        fn = ask or (lambda p: _tr.ask_cascade(p, timeout=timeout, _out=out))
         import time as _t
         t0 = _t.time()
         cand = _tr.clean_candidate(fn(prompt))

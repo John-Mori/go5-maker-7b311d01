@@ -240,6 +240,59 @@ def gemini_ask(prompt, timeout=20, model="gemini-flash-lite-latest"):
         return ""                      # 安全フィルタ等で候補が無い= 書き直し無し
 
 
+def local_ask(prompt, timeout=15, model=None):
+    """ローカルOllamaで書き直す。Geminiの枠切れ時の受け皿(Chami指示 2026-09-02
+    msg 1544432795718385845「上限あるGeminiに任せてちゃいかんでしょ」)。
+
+    ★モデルは qwen3:8b 既定。実測(2026-09-02・当室):
+        qwen3:8b  ウォーム2.8秒/出力68字・事実保存・思考漏れ無し
+        qwen3:4b  think:False を無視して英語の思考を2000字吐く= **使うな**
+    ★keep_alive で常駐させる= コールドは48〜52秒かかり送信直前には間に合わない。
+      初回は timeout で落ちて fail-open(元の本文が出る)。その1回がロードを起こし、
+      次から間に合う。**枠切れの日でも段は死なない**のが狙いで、初弾の取りこぼしは許容する。
+    """
+    import urllib.request
+    model = model or os.environ.get("GO5_TONE_LOCAL_MODEL", "qwen3:8b")
+    url = os.environ.get("GO5_OLLAMA_URL", "http://localhost:11434") + "/api/generate"
+    payload = {
+        "model": model,
+        # /no_think= 思考を出さない指示(APIの think:False を無視するモデルへの二重の保険)。
+        "prompt": prompt + "\n/no_think",
+        "stream": False,
+        "think": False,
+        "keep_alive": "30m",
+        "options": {"temperature": 0.2, "num_predict": max(256, min(2048, int(len(prompt) * 1.2)))},
+    }
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        d = json.loads(r.read())
+    return d.get("response", "") or ""
+
+
+def ask_cascade(prompt, timeout=20, _out=None):
+    """Gemini → (枠切れ/落ちたら) ローカル の順で1回ずつ叩く。
+
+    ★背景= フリー枠は **GenerateRequestsPerDayPerProjectPerModel = 500/日**。
+      2026-09-02 実測で flash-lite も flash も 429。単線だと**この段が静かに素通りする**
+      (ゲートG の包み直しも ゲートD-2 の口調書き直しも今日は一度も動いていなかった)。
+    ★どちらのエンジンが働いたかを _out["engine"] に残す= 静かな不発を監査で見つけるため。
+    """
+    if _out is None:
+        _out = {}
+    for model in ("gemini-flash-lite-latest", "gemini-flash-latest"):
+        try:
+            r = gemini_ask(prompt, timeout=timeout, model=model)
+            _out["engine"] = model
+            return r
+        except Exception as e:
+            _out["engine_err"] = "%s: %s" % (model, (str(e) or e.__class__.__name__)[:60])
+            # 429(枠切れ)以外=通信断や鍵無し。どちらにせよ次の手へ落とす。
+    r = local_ask(prompt, timeout=min(timeout, 15))
+    _out["engine"] = "local"
+    return r
+
+
 def rewrite_once(persona, dept, text, remaining, rules, ask=None, timeout=20):
     """★案Fの本体= 崩れた便を**1回だけ**書き直して、通れば書き直した本文を返す。
 
@@ -253,7 +306,7 @@ def rewrite_once(persona, dept, text, remaining, rules, ask=None, timeout=20):
     ★どんな例外でも元の本文を返す= この段が配送を殺さない(fail-open 厳守)。
     """
     out = {"text": text, "ok": False, "attempted": False, "why": "",
-           "targets": [], "after": [], "elapsed_ms": 0}
+           "targets": [], "after": [], "elapsed_ms": 0, "engine": ""}
     try:
         tgt = targets(remaining)
         if not tgt:
@@ -268,7 +321,7 @@ def rewrite_once(persona, dept, text, remaining, rules, ask=None, timeout=20):
             out["why"] = "写像にこの人格が無い"
             return out
         prompt = build_prompt(persona, ent, text, tgt)
-        fn = ask or (lambda p: gemini_ask(p, timeout=timeout))
+        fn = ask or (lambda p: ask_cascade(p, timeout=timeout, _out=out))
         import time as _t
         t0 = _t.time()
         cand = clean_candidate(fn(prompt))
