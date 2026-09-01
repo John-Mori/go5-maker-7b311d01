@@ -281,6 +281,24 @@ def _rc_ok(rc):
     return bool(main.get("text")) if isinstance(main, dict) else bool(main)
 
 
+def _merge_targets(doc):
+    """candidates と ready_library を1本の対象リストに束ねる。cidで重複排除(candidates優先)し、
+    score降順=KouhoTeianの表示順に揃える(Chami『ランキングの上から出して』)。要素は doc 内の
+    オブジェクト参照そのもの=ここへ room_comments を書けば doc に反映される。"""
+    rows = list(doc.get("candidates") or []) + list(doc.get("ready_library") or [])
+    seen = set()
+    uniq = []
+    for c in rows:
+        cid = c.get("cid")
+        if cid and cid in seen:
+            continue
+        if cid:
+            seen.add(cid)
+        uniq.append(c)
+    uniq.sort(key=lambda c: (c.get("metrics") or {}).get("score") or 0, reverse=True)
+    return uniq
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="inp", default=None, help="候補JSON(既定=最新)")
@@ -297,7 +315,7 @@ def main():
     out = args.out or inp
     with open(inp, "r", encoding="utf-8") as f:
         doc = json.load(f)
-    cands = doc.get("candidates") or []
+    cands = _merge_targets(doc)   # candidates + ready_library をscore降順で(readyも軍議を付ける)
     prompt = build_full_prompt(load_prompt())
     syn_map = load_synopsis(inp)
     models = [args.model] if args.model else list(DEFAULT_MODELS)
@@ -312,7 +330,7 @@ def main():
     for c in cands:
         if args.limit and processed >= args.limit:
             break
-        imgs = c.get("images") or []
+        imgs = c.get("vision_images") or c.get("images") or []
         if not imgs:
             skipped += 1
             continue

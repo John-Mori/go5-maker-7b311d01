@@ -5,18 +5,21 @@
 なぜ要るか:
   candidates_json.py(商品選定)が回るたびに候補JSONを丸ごと書き直し、④comments=[] /
   room_comments無し に戻る。vision と軍議(三笘/芽衣)を通す前に publish すると
-  空ページが客先へ出る(2026-08-23の寸前事故)。しかも room_comments には自動生成器が
-  無い=放置すると毎朝手で埋め直しになる。
+  空ページが客先へ出る(2026-08-23の寸前事故)。
 
 何をするか(必ずこの順で通す):
   ① 退避   … 既存 candidates_<date>.json の {cid: comments / room_comments} を控える
   ② 再生成 … candidates_json.py(商品選定・product-scout)を実行(= comments空/room無しに戻る)
   ③ 引継ぎ … 退避分を cid で書き戻す(既に済んだ④comments/room_comments を守る=持続化)
   ④ vision … vision_comments.py で「まだ空の候補だけ」④comments(大タイトル3択)を埋める(既定ON)
+  ④.5 軍議 … room_comments.py で「まだ空の候補/ready だけ」三笘/芽衣の解説を埋める(既定ON)
   ⑤ 配信   … publish_candidates.py(空配信ガード付き=全候補充填でなければ止まる)
 
-  ★新しく入った cid の room_comments は自動生成器が無い=空のまま → ⑤のガードが止める
-    (=軍議で手当が要ると分かる)。既存 cid は毎回引き継がれる=繰り返しの手作業はゼロ。
+  ★2026-09-02: room_comments の自動生成器(room_comments.py)をチェーンへ配線した。以前は
+    未配線で「新 cid は room_comments 空のまま→⑤ガードが毎回止める」状態だった(Chami不満
+    「三笘/芽衣の解説が無い」の真因)。既存 cid は毎回引き継がれる=繰り返しの手作業はゼロ。
+    ★ただし Gemini 無料枠(20回/model/日)が上限=③④.5 の両方がこの枠を食う。枠が尽きた分は
+      fail-open で空のまま残り、⑤ガードが止める(＝設計どおり。手当は翌日の枠 or 有料枠)。
   ★あらすじ本文・秘密は一切 candidates_<date>.json 本体へ書かない(publishが丸ごとR2へ
     上げる=client漏れ)。ここは comments / room_comments だけを触る。
 
@@ -38,6 +41,7 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 TEIAN_DIR = os.path.join(ROOT, "local", "teian")
 GEN = os.path.join(ROOT, "docs", "departments", "product-scout", "tools", "candidates_json.py")
 VISION = os.path.join(HERE, "vision_comments.py")
+ROOM = os.path.join(HERE, "room_comments.py")
 PUBLISH = os.path.join(HERE, "publish_candidates.py")
 
 
@@ -132,6 +136,9 @@ def main() -> int:
                          "(msg 1543955094100385812)と明言=3択が空だと投稿できない。かつ投稿画像→生成の配線は"
                          "現状ゼロ(=作り直しは起きない=二重生成の無駄も無い)。デイリー候補は実測20件/日で"
                          "vision呼び出しも20回=コストは微小。よって既定ONへ戻す。--no-vision で従来のスキップ。")
+    ap.add_argument("--no-room", action="store_true",
+                    help="④.5 room_comments(三笘/芽衣の解説)をスキップ。★既定=ON。空の room_comments は"
+                         "⑤のガードが止める。2026-09-02に配線(それまで未配線=新cidの軍議が永遠に空=Chami不満の真因)。")
     ap.add_argument("--publish-force", action="store_true", help="空配信ガードを無視して配信")
     args = ap.parse_args()
 
@@ -175,6 +182,18 @@ def main() -> int:
             sys.stderr.write("vision が失敗。room_comments/引継ぎ分は残っているが④commentsが欠ける可能性。\n")
             # fail-open: 続行はするが publish のガードが空を止める
 
+    # ④.5 軍議(三笘/芽衣の解説=room_comments。まだ空の候補/readyだけ埋める。--force無し=引継ぎ済みは温存)
+    # ★2026-09-02配線。それまで未配線=新cidの room_comments が永遠に空→⑤ガードが毎回止まる(Chami不満
+    #   「三笘/芽衣の解説が無い」の真因)。Gemini無料枠(20回/日)を④visionと分け合う=枠切れ分はfail-openで空のまま。
+    if args.no_room:
+        print("④.5 軍議: --no-room=スキップ(空の room_comments は⑤のガードが止める)")
+    else:
+        rc = run([py, ROOM, "--in", src, "--limit", str(args.vision_limit)],
+                 args.dry_run, f"④.5 room_comments.py(三笘/芽衣の解説・空の候補のみ・limit={args.vision_limit})")
+        if rc != 0:
+            sys.stderr.write("room_comments が失敗。④commentsは残るが軍議が欠ける可能性(⑤ガードが空を止める)。\n")
+            # fail-open: 続行はするが publish のガードが空を止める
+
     # ⑤ 配信(空配信ガード付き)
     if args.no_publish:
         print("⑤ 配信: --no-publish=手前で停止。確認後に publish_candidates.py を実行。")
@@ -186,7 +205,8 @@ def main() -> int:
         pub.append("--force")
     rc = run(pub, args.dry_run, "⑤ 配信 publish_candidates.py(空配信ガード)")
     if rc == 2:
-        sys.stderr.write("→ 未充填の候補があり配信を止めた(上の一覧)。軍議で room_comments を埋めて再実行。\n")
+        sys.stderr.write("→ 未充填の候補があり配信を止めた(上の一覧)。④vision/④.5軍議は自動で回るが、"
+                         "Gemini無料枠(20回/日)切れで埋め残った可能性=翌日の枠で再実行 or 手当。\n")
     return rc
 
 
