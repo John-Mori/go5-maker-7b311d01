@@ -4035,6 +4035,7 @@ def audit_naming(dept, persona, text, rec=None):
                         "ts": ts, "dept": dept, "event": "naming_fix",
                         "persona": str(persona or ""),
                         "target": a.get("target", ""),
+                        "found": a.get("found", ""),    # ★実際に本文へ出ていた形
                         "to": a.get("to", ""),          # 直した先の形
                         "count": a.get("count", 0),     # 直した出現数
                         "reason": a.get("reason", ""),

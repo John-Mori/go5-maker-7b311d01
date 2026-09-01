@@ -654,6 +654,33 @@ def _is_vocative(s, i, end):
 WHOLE_SWAP_AT_VOCATIVE = True
 
 
+# ★禁止形が「フルネーム(対象キーそのもの)」として出ている時だけ地の文でも直す ==========
+#   (2026-09-01・引き金= Chami「またアロンソコーチが一ノ瀬怜呼びしてる。直らないの?」
+#    msg 1544235216757858398 / 回送= 改善提案部門 1544236056134811698)
+#   ★実測(イージス研究室・09-01): 事故便そのものが台帳に載っていた=
+#     naming_audit の 15:19:42 / 15:30:50(dept=hq persona=シャビ・アロンソ
+#     found="一ノ瀬" reason="forbidden")。**鳴っていたのに1文字も直していない。**
+#   直らなかった理由は3枚重なっていた:
+#     ① naming_corrections は reason="forbidden" を自動修正の対象から外している(下の分岐)
+#     ② 仮に対象でも `_safe_after` が False= 「一ノ瀬」の直後が漢字「怜」(姓+名)
+#     ③ 仮に通っても whole_swap(別名への丸ごと置換)は呼びかけ位置だけ
+#   ★ここで解けるのは②の裏返しだ= `_safe_after` が守っているのは
+#     「姓だけ置換して名が残る」事故(「三笘さん薫」)であり、**名まで含めて丸ごと
+#     置換するならその危険は消える**。同じ理由で③の「別人に化ける」懸念も消える=
+#     置換する span がその人の**完全な登録名**なので、指す相手が一意に決まる。
+#   適用範囲(狭く取る):
+#     - reason="forbidden" だけ(=人事部門が写像へ**わざと書いた**禁止形。C-035)
+#     - 本文にフルネーム(対象キー)が**そのまま**出ている出現だけ
+#     - allowed[0] が在ること(置換先が一意)
+#     - VOCATIVE_ONLY_DEPTS(人事部門)と `_safe_after` の制限はそのまま生きる
+#   → 敬称ゆれ(honorific_required)・愛称ゆれ・略称(abbreviation)は**従来どおり警告のみ**。
+FULL_KEY_SWAP = True
+#   ★対象の理由を絞る= 人事部門が写像へ**わざと書いたペア**だけ(C-035)。
+#     honorific_required(既定の敬称要求)は入れない= 名簿・紹介文の「三笘薫」を
+#     「三笘さん」へ書き換えると本文が化ける(2026-08-24 の hr-room 実測と同じ型)。
+FULL_KEY_SWAP_REASONS = ("forbidden", "override_allowed")
+
+
 def naming_corrections(persona, dept, text, rules):
     """高信頼の呼称違反だけ自動修正した本文を返す(純関数)。
 
@@ -681,15 +708,30 @@ def naming_corrections(persona, dept, text, rules):
             reason = v.get("reason")
             bare = str(v.get("found") or "")
             allowed = [str(a or "") for a in (v.get("expected") or []) if str(a or "")]
+            # ★禁止形がフルネーム(対象キー)の一部として出ている時は、
+            #   姓だけでなく**フルネーム全体**を1スパンとして扱う(上の★参照)。
+            tkey = str(v.get("target") or "")
+            found_bare = bare
+            #   (a) 禁止形がフルネームを丸ごと含む(「一ノ瀬怜さん」)= その形のまま置換、
+            #   (b) 禁止形がフルネームの一部(「一ノ瀬」)で、本文にフルネームが出ている
+            #       = 「一ノ瀬怜」へ広げて置換。
+            full_key = bool(
+                FULL_KEY_SWAP and reason in FULL_KEY_SWAP_REASONS
+                and tkey and allowed and bare and bare not in allowed
+                and (tkey in bare or (bare in tkey and tkey in masked))
+            )
+            if full_key:
+                if tkey not in bare:
+                    bare = tkey
             # 自動修正の対象は2型だけ(forbidden・愛称ゆれ等は警告のみ)
-            if reason not in ("override_allowed", "honorific_required") or not bare or not allowed:
+            elif reason not in ("override_allowed", "honorific_required") or not bare or not allowed:
                 result["remaining"].append(v)
                 continue
             target_form = allowed[0]
             # 「同じ姓に敬称/役職を足す/直す」= target_form が裸の姓で始まる時だけ。
             # ★別名への丸ごと置換(「一ノ瀬」→「怜」)は**呼びかけ位置だけ**許す。
             whole_swap = not target_form.startswith(bare)
-            if whole_swap and not WHOLE_SWAP_AT_VOCATIVE:
+            if whole_swap and not full_key and not WHOLE_SWAP_AT_VOCATIVE:
                 result["remaining"].append(v)
                 continue
             fixed_n = 0
@@ -701,17 +743,23 @@ def naming_corrections(persona, dept, text, rules):
                 if not _safe_after(masked, end):
                     unsafe = True          # 姓+名(直後が漢字)等=置換すると壊れる
                     continue
-                if (voc_only or whole_swap) and not _is_vocative(masked, i, end):
+                if (voc_only or (whole_swap and not full_key)) \
+                        and not _is_vocative(masked, i, end):
                     # 人事部門の地の文=名簿/設定キー/識別子=直さない。
                     # 丸ごと置換も地の文では直さない(誤爆すると別人の名前に化けるため)。
+                    # ★例外= full_key(フルネームまるごと)は指す相手が一意=地の文でも直す。
                     unsafe = True
                     continue
                 repls.append((i, end, target_form))
                 fixed_n += 1
+            if full_key and masked.count(found_bare) > masked.count(bare):
+                # フルネーム以外の裸の出現(「一ノ瀬」単独)が残っている=警告は消さない
+                unsafe = True
             if fixed_n:
                 result["applied"].append({
                     "target": v.get("target"), "to": target_form,
                     "reason": reason, "count": fixed_n,
+                    "found": bare,
                 })
             if unsafe or not fixed_n:
                 # 危険な出現が残った/1つも直せなかった=警告として残す(沈黙にしない)
