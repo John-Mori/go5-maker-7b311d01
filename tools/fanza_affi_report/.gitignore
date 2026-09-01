@@ -1,0 +1,8 @@
+# 生成物・利用者の実値は追跡しない(機密/手渡し限定の性質)
+config.ini
+dist/
+logs/
+state/
+__pycache__/
+*.pyc
+*.bak
