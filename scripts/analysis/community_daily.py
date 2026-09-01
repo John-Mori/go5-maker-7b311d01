@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -257,11 +258,70 @@ def analyze(posts, medians, do_vision, limit):
     return blocks
 
 
+def _relstrength(p, medians):
+    """チャンネル内相対の強さ(票/中央値)。中央値が無ければ絶対票で代用。並べ替えの物差し。"""
+    v = vote_num(p.get("vote_count") or "")
+    med = medians.get(p.get("channel_id", ""), 0)
+    return (v / med) if med else v
+
+
+def _plain(block):
+    """analyze の1ブロックを、記号ラベル(■・見出しコロン)を外して流れる日本語に均す。
+    Chami要件=記号・タグを出さない。鉤括弧「」は自然な日本語なので残す。"""
+    lines = block.split("\n")
+    head = lines[0].replace("■", "").strip()
+    body = []
+    for ln in lines[1:]:
+        t = ln.strip()
+        for lab in ("どんな投稿か:", "なぜ伸びたか:", "次どう擦るか:"):
+            if t.startswith(lab):
+                t = t[len(lab):].strip()
+        if t:
+            body.append(t)
+    para = head + "。" + " ".join(body)
+    return para.replace("『", "「").replace("』", "」").replace("。。", "。")
+
+
+def _run_scrape():
+    """毎朝の鮮度更新: 収集(community_scrape.py)を先に一度回す。失敗しても分析は続ける(既存データで書く)。"""
+    cmd = [sys.executable or "python", os.path.join("scripts", "comp", "community_scrape.py")]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    try:
+        r = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=300)
+        tail = (r.stdout or "").strip().splitlines()[-1:] if r.stdout else []
+        print("収集を更新: " + (tail[0] if tail else "(出力なし)"))
+    except Exception as e:
+        print("収集の更新に失敗(既存データで続ける): " + str(e)[:80])
+
+
+def emit_brief(posts, medians, do_vision, top):
+    """毎朝の押し出し用: 相対で強い上位 top 件だけを、記号ゼロの短い日本語ブリーフにして返す。
+    アーモンドアイ名義で配送される前提の文体(わたし/〜わ/〜のよ)。"""
+    fetched = sorted({(p.get("fetched_at") or "")[:10] for p in posts if p.get("fetched_at")})
+    fresh = fetched[-1] if fetched else "不明"
+    today = time.strftime("%Y-%m-%d")
+    stale = "(収集が今日より古いから、動きは鈍めに見てね)" if fetched and fresh < today else ""
+    ranked = sorted(posts, key=lambda p: _relstrength(p, medians), reverse=True)[:max(1, top)]
+    blocks = analyze(ranked, medians, do_vision, 0)
+    lead = "おはよう、Chami。今朝の競合コミュニティで目に留まった投稿を%d本だけ挙げるわ。データは%s時点%s。" % (
+        len(blocks), fresh, stale)
+    tail = "動画の日次はまだ止まってるから、戻り次第そちらも一行だけ足すわね。"
+    return lead + "\n\n" + "\n\n".join(_plain(b) for b in blocks) + "\n\n" + tail
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="先頭N件だけ(0=全件)")
     ap.add_argument("--no-vision", action="store_true", help="画像を見ずテキスト/票だけで書く")
+    ap.add_argument("--emit", action="store_true",
+                    help="毎朝の押し出し用: 上位数件だけの短いブリーフを標準出力へ(ファイルは書かない)")
+    ap.add_argument("--fresh", action="store_true", help="--emit前に収集(community_scrape.py)を一度回して鮮度更新")
+    ap.add_argument("--top", type=int, default=3, help="--emitで挙げる件数(既定3)")
     args = ap.parse_args()
+
+    if args.emit and args.fresh:
+        _run_scrape()
 
     if not os.path.exists(SRC):
         print(f"ABORT: 材料が無い: {SRC}")
@@ -274,6 +334,11 @@ def main():
     # 収集の鮮度を正直に見せる (一度きりの古いデータで語らないため)
     fetched = sorted({(p.get("fetched_at") or "")[:10] for p in posts if p.get("fetched_at")})
     medians = channel_medians(posts)
+
+    if args.emit:
+        print(emit_brief(posts, medians, not args.no_vision, args.top))
+        return 0
+
     blocks = analyze(posts, medians, not args.no_vision, args.limit)
 
     today = time.strftime("%Y-%m-%d")
