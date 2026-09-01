@@ -65,6 +65,14 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 .eb-reset{background:transparent;color:var(--sub);border:1px solid var(--line);}
 .badge-edit{color:var(--accent);border-color:var(--accent);}
 
+/* 自動コピー失敗時の手動コピー枠(不具合A)。成功を装わず本文を選択可能なまま見せる。
+   警告はアンバー(--warn)=既存パレット内(赤も紫も使わない規約のまま)。 */
+.eb-manual{display:flex;flex-direction:column;gap:5px;}
+.eb-manual-msg{font-size:11.5px;color:var(--warn);line-height:1.5;}
+.eb-manual-ta{width:100%;min-height:110px;resize:vertical;background:var(--sink);
+  color:var(--ink);border:1px solid var(--warn);border-radius:8px;padding:7px 9px;
+  font-size:11.5px;line-height:1.6;font-family:ui-monospace,Consolas,monospace;}
+
 /* ── 右：詳細ペイン ── */
 .detail-pane{flex:1 1 auto;min-width:0;}
 .detail-empty{padding:40px 16px;text-align:center;color:var(--sub);font-size:13.5px;}
@@ -117,6 +125,22 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 .av-upmsg.is-err{color:var(--warn);border-color:var(--warn);}
 .av-hint{margin:9px 0 0;font-size:11px;color:var(--sub);line-height:1.6;}
 .av-hint b{color:var(--ink);}
+
+/* 並び替え(⠿ハンドルをドラッグ・不具合C)。ハンドル以外は今まで通り=サムネクリックの拡大と衝突しない */
+.av-drag{flex:0 0 auto;cursor:grab;color:var(--sub);font-size:15px;line-height:1;
+  padding:8px 3px;user-select:none;-webkit-user-select:none;}
+.av-drag:hover{color:var(--accent);}
+.av-drag:active{cursor:grabbing;}
+.av-cell.is-dragging{opacity:.45;border-style:dashed;border-color:var(--accent);}
+/* ドロップ位置は上下どちらに入るかを橙のバーで示す */
+.av-cell.is-drop-before{box-shadow:0 -3px 0 0 var(--accent);}
+.av-cell.is-drop-after{box-shadow:0 3px 0 0 var(--accent);}
+
+/* 亡霊の削除指定(現行データに無い・不具合B)。警告はアンバー=既存パレット内 */
+.av-stale{margin-top:10px;border:1px solid var(--warn);border-radius:9px;padding:8px 11px;
+  background:rgba(224,163,65,.07);}
+.av-stale-head{font-size:11.5px;color:var(--warn);font-weight:700;line-height:1.6;margin-bottom:2px;}
+.av-stale-row{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:12px;}
 
 /* 画像ズーム(ライトボックス)。サムネをクリック→原寸オーバーレイ。
    ホイール/ダブルタップで拡大、ドラッグで移動、背景クリック/×/Escで閉じる。 */
