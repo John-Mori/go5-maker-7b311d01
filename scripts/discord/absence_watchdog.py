@@ -949,6 +949,9 @@ RELAY_REPAIR_PY = os.path.normpath(
     os.path.join(ROOT, "..", "00_AI-HQ", "scripts", "relay_repair.py"))
 RELAY_REPAIR_GATE_SEC = 15 * 60    # 15分に1回だけ(毎巡回=60秒毎に叩くとDiscord APIの無駄打ち)
 RELAY_REPAIR_TIMEOUT_SEC = 180     # ★止まったサブプロセスでwatchdogの巡回を詰まらせない
+# ★gateway沈黙死の自己回復(2026-09-01 platform-se・一ノ瀬怜):取りこぼしが連続した時だけ再起動へ。
+GW_STUCK_STREAK_MAX = 2             # 何周期連続の取りこぼしで「沈黙死」と断ずるか(15分×2=約30分の取り逃し)
+GW_RESTART_COOLDOWN_SEC = 30 * 60  # 自動再起動の暴走ガード(この窓内は判定してもFalse)
 
 
 def _relay_repair_recovered(out):
@@ -959,6 +962,61 @@ def _relay_repair_recovered(out):
     """
     m = re.search(r"結果: 回収 (\d+)件", out or "")
     return int(m.group(1)) if m else 0
+
+
+def _note_gateway_stuck(n, state, now):
+    """取りこぼしの連続から「gatewayの沈黙死」を判定する純関数(副作用=stateの更新だけ)。
+
+    なぜ脈でなく取りこぼしで測るか(2026-09-01 platform-se・一ノ瀬怜):
+      GATEWAY_PULSE は job_pulse が45秒毎に**無条件で**叩くので、on_message(実受信)が
+      死んでも脈だけ新鮮に見える=supervisorもwatchdogも脈監視では沈黙死を見抜けない。
+      REST照合の取りこぼし回収(relay_repair)だけが「生きた便を gateway が取り逃した」を
+      地上真実で捉える。実測 2026-09-01: gateway(pid7396)が06:46に on_message 停止、
+      脈は空回りで新鮮なまま8時間 未検知(P1=「どの部屋も反応ない」)。
+      → 取りこぼしが連続した時だけ詰まった gateway を張り直す。
+    ★1件の取りこぼしは正規の再接続でも起きる=単発では回さない(GW_STUCK_STREAK_MAX 周期連続)。
+    ★再起動の暴走はクールダウン(GW_RESTART_COOLDOWN_SEC)で止める。窓内は判定してもFalse。
+    戻り値= Trueなら「詰まった gateway を停止すべき」。
+    """
+    if n <= 0:
+        state["gw_stuck_streak"] = 0
+        return False
+    streak = state.get("gw_stuck_streak", 0) + 1
+    state["gw_stuck_streak"] = streak
+    if streak < GW_STUCK_STREAK_MAX:
+        return False
+    # ★未再起動(gw_last_restartなし)は初回を必ず通す。既定0だと相対時刻テストで
+    #   「epoch0に再起動済み」と誤認する=クールダウンは実際に張り直した後だけ効かせる。
+    last = state.get("gw_last_restart")
+    if last is not None and now - last < GW_RESTART_COOLDOWN_SEC:
+        return False
+    state["gw_last_restart"] = now
+    state["gw_stuck_streak"] = 0
+    return True
+
+
+def _restart_stuck_gateway(state, now):
+    """沈黙死と判定した discord_gateway を停止する(張り直しは supervisor に委ねる)。
+
+    ★watchdogは殺すだけ=常駐の起動係は supervise_daemons.ps1 一本に保つ(所有権を割らない。
+      supervisorは0体を検知して即 spawn する)。ギャップ中の便は次周期の取りこぼし回収が拾う。
+      supervisorの STALE PULSE 経路(kill→張り直し)が偽脈で盲になった穴を、地上真実で塞ぐ。
+    ★fail-open: 何が失敗してもwatchdogを止めない(例外はログ1行)。win32前提(他の常駐操作と同じ)。
+    """
+    try:
+        ps = (
+            "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+            "Where-Object { $_.CommandLine -like '*discord_gateway.py*' } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }"
+        )
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           capture_output=True, timeout=30, text=True,
+                           encoding="utf-8", errors="replace")
+        killed = " ".join((r.stdout or "").split()) or "不明"
+        print(f"★gatewayが{GW_STUCK_STREAK_MAX}周期連続で取りこぼし=沈黙死と判断し停止した"
+              f"(pid {killed})。supervisorが張り直す。")
+    except Exception as e:
+        print(f"gateway沈黙死の停止に失敗: {type(e).__name__}")
 
 
 def check_relay_repair(state, dry_run, now_epoch=None):
@@ -991,6 +1049,10 @@ def check_relay_repair(state, dry_run, now_epoch=None):
         n = _relay_repair_recovered(r.stdout)
         if n > 0:
             print(f"★取りこぼし{n}件を回収した(gateway停止中の便)")
+        # ★沈黙死の自己回復(2026-09-01): 取りこぼしが連続=脈は生きていても実受信が死んでいる。
+        #   偽脈で盲になった supervisor/脈監視の代わりに、地上真実(取りこぼし)で張り直す。
+        if _note_gateway_stuck(n, state, now_epoch):
+            _restart_stuck_gateway(state, now_epoch)
     except Exception as e:
         # タイムアウト(TimeoutExpired)・実行不能・その他すべてここで止める。
         print(f"取りこぼし回収の起動に失敗: {type(e).__name__}")
