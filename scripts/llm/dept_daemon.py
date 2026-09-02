@@ -3935,6 +3935,12 @@ try:
     import dept_ref_gate as _dept_ref
 except Exception:
     _dept_ref = None                        # import 失敗でもデーモンは起動する(fail-open)
+# ★出力ゲートJ(Claude既定のレポート骨格=構造ドリフト)。2026-09-02 657/f98d721938 の残り。
+#   正本= struct_drift_gate.py。**経路②(ミラー=output_gates)からも同じ1本を呼ぶ**。
+try:
+    import struct_drift_gate as _struct_drift
+except Exception:
+    _struct_drift = None                    # import 失敗でもデーモンは起動する(fail-open)
 _TONE_RULES_CACHE = {"loaded": False, "rules": None}
 
 
@@ -4247,6 +4253,28 @@ def audit_dept_ref(dept, persona, text, rec=None):
         return fixed, applied, remaining
     except Exception:
         return text, [], []                 # fail-open= ゲートが配送を殺さない
+
+
+def audit_struct_drift(dept, persona, text, rec=None):
+    """出力ゲートJ: Claude既定のレポート骨格へ倒れた便を**検知だけ**する。2026-09-02。
+
+    657/f98d721938(Chami「アロンソの口調がClaude標準、色んな人の口調がバグる」)の残り。
+    実物= DISPATCH-aegis-gl-1788315302529= 節見出し連発+太字多用+一人称ゼロ。
+    ★ゲートDが素通しする理由= 崩れが**語尾域内**に収まる。崩れているのは語ではなく骨格だ。
+    ★書き直さない= 骨格の置換に一意な写像が無い。代わりに tone_audit へ event="tone" で書き、
+      session_relay の既存の突き返しに乗せる(新しい配線を足さない)。
+    ★判定の正本は struct_drift_gate.py 1本。経路②(ミラー)からも同じ関数を呼ぶ=片肺にしない。
+    返り値: hits(list)。ゲート無効/例外時は []。**text は返さない=本文を触らないゲートだから。**
+    """
+    try:
+        if _struct_drift is None:
+            return []
+        return _struct_drift.audit(
+            text, dept=dept, persona=str(persona or ""), rules=_tone_rules(),
+            source="daemon", msg_id=str((rec or {}).get("msg_id", "")),
+            audit_path=TONE_AUDIT)
+    except Exception:
+        return []                           # fail-open= ゲートが配送を殺さない
 
 
 def audit_naming(dept, persona, text, rec=None):
@@ -7691,6 +7719,15 @@ class Daemon:
                     log(self.dept,
                         f"★出力ゲートI(部門名・記録のみ=素通し): 話者={_speaker} "
                         f"rule={_dwarn[0].get('rule')} 見つけた={_dwarn[0].get('name')} msg={mid}")
+                # ★★出力ゲートJ(Claude既定のレポート骨格=構造ドリフト)= 検知のみ(2026-09-02)。
+                #   ★ここは**書き直さない**ので `_part` を受け取らない。台帳へ event="tone" で
+                #     残し、session_relay の突き返しで次の便の生成側へ出す。
+                #   ★位置はD-2の後ろ= 書き直しが採用された本文で判定する(直った便を叩かない)。
+                _jhits = audit_struct_drift(self.dept, _speaker, _part, rec)
+                if _jhits:
+                    log(self.dept,
+                        f"★出力ゲートJ(構造ドリフト・記録のみ=素通し→次便で突き返す): "
+                        f"話者={_speaker} {_jhits[0].get('marker')} msg={mid}")
                 # ★★出力ゲートE(名乗りタグの残存)= C/D/F の**後ろ**= 送信直前の最後の1点。
                 #   ここまで来て `[名前]` が残っている= 上流の名義解決が失敗した証拠(HQの定義)。
                 #   前置き(作業メモ)の露出も同じ便で起きるので、落とす時は一緒に落ちる。

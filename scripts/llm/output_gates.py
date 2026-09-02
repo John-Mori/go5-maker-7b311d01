@@ -65,6 +65,10 @@ try:
     import dept_ref_gate as _dept_ref         # ゲートI(部門を人格名で呼ぶ崩れ)
 except Exception:
     _dept_ref = None
+try:
+    import struct_drift_gate as _struct_drift  # ゲートJ(Claude既定のレポート骨格)
+except Exception:
+    _struct_drift = None
 
 # ルールは **mtime が変わったら読み直す**(常駐の _tone_rules と同じ思想)。
 #   人事部門が写像へ1行足した時に、ミラー側だけ古い規則で動くのを防ぐ。
@@ -350,6 +354,23 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
                     summary["dept_ref_warn"] += 1
             _append(NAMING_AUDIT, rows)
             s = s2
+    except Exception:
+        pass            # 素通し=送信は殺さない
+
+    # --- ゲートJ(Claude既定のレポート骨格へ倒れた=構造ドリフト)= **検知のみ** ----
+    # ★2026-09-02 657/f98d721938 の残り。人事部門ククールからの発注(この経路へ建てろ)。
+    #   実物= DISPATCH-aegis-gl-1788315302529(アロンソ・敬語16+一人称ゼロ+■節見出し)。
+    #   ★ゲートDが素通しするのは、崩れが**語尾域内**に収まるから。崩れているのは骨格だ。
+    #   ★書き直さない= 骨格の置換に一意な写像が無い(Dが方言を直さないのと同じ理由)。
+    #     代わりに台帳へ event="tone" で書く=session_relay の突き返しがそのまま拾い、
+    #     次の封筒で生成側の目の前に出る。**新しい配線は1本も足していない。**
+    #   ★一人称の写像は tone_gate._persona_entry を再利用(ORG-11)=ここに人格名を書かない。
+    try:
+        if _struct_drift is not None:
+            _jhits = _struct_drift.audit(
+                s, dept=dept, persona=str(persona or ""), rules=_rules("tone"),
+                source=source, msg_id=str(msg_id or ""), audit_path=TONE_AUDIT)
+            summary["struct_drift_warn"] = len(_jhits)
     except Exception:
         pass            # 素通し=送信は殺さない
 
