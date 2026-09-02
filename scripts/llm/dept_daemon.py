@@ -4526,6 +4526,37 @@ def strip_meta(dept, rec, reply):
     try:
         if _meta_strip is None:
             return reply
+        # ★出力ゲートE-2(封筒エコー切り落とし・2026-09-03 研究室HQの止血)。
+        #   実物= 軍議 msg 1544752527507984384 / 1544752530511106295(2026-09-03 01:55 JST)。
+        #   セッションが答えの後に**次の便の封筒と偽のChami便**まで書き、そのまま表へ出た。
+        #   末尾ブロック剥ぎ(下)では届かないので、封筒の先頭から末尾までを落とす。
+        try:
+            _b2, _h2 = _meta_strip.strip_envelope_echo(reply)
+            if _h2:
+                log(dept, f"★出力ゲートE-2(封筒エコー): {len(str(reply)) - len(str(_b2))}字を切り落とし "
+                          f"署名={[h.get('marker') for h in _h2]} 残り本文={len(str(_b2 or ''))}字 "
+                          f"msg={str((rec or {}).get('msg_id', ''))}"
+                          + ("  ※本文が空になった=この便は答えを産んでいない"
+                             if not str(_b2 or "").strip() else ""))
+                try:
+                    os.makedirs(os.path.dirname(META_AUDIT), exist_ok=True)
+                    with open(META_AUDIT, "a", encoding="utf-8") as f:
+                        f.write(json.dumps({
+                            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "dept": dept,
+                            "event": "envelope_echo",
+                            "source": "daemon",
+                            "msg_id": str((rec or {}).get("msg_id", "")),
+                            "markers": [h.get("marker") for h in _h2],
+                            "cut_chars": len(str(reply)) - len(str(_b2)),
+                            "emptied": not str(_b2 or "").strip(),
+                            "before": str(reply or "")[:400],
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                reply = _b2
+        except Exception:
+            pass             # 切り落としで転んでも以降の剥ぎは当てる
         body, hits = _meta_strip.strip_meta_tail(reply)
         if not hits:
             return reply

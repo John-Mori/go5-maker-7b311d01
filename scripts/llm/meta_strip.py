@@ -120,6 +120,125 @@ def strip_meta_tail(text):
 
 
 # ============================================================================
+# 封筒エコー(次の便の起動文・封筒を本文へ書き足す)の切り落とし  2026-09-03 / 研究室HQ
+# ----------------------------------------------------------------------------
+# ★これは仮当て(止血)だ。恒久= イージス研究室(常駐・ゲートの持ち主)。
+#
+# 壊れた実物(検体2通・軍議 2026-09-03 01:55 JST / 話者=三笘薫):
+#   local/_work/envelope_echo_specimens.json に生content を保存済(APIから取得した実物)。
+#   ① msg 1544752527507984384(1,600字)= 正常な返信のあとに
+#        「user■この部門の目的とKPI(正本= 00_AI-HQ/org_registry.yml…」
+#        「■規律: 前便から変更なし(指紋 e13eb4116a495616)。」…と**次の封筒**が続く。
+#   ② msg 1544752530511106295(804字・分割2通目)= 全文が封筒
+#        「=== この部屋のセッション状態 ===」「=== Discord新着(原文…」
+#        + **実在しないChamiの便**(msg_id 1544753080036790319 は API 404・受信時刻は
+#          この投稿の2分**後**)+ 「<total_tokens>15000000 tokens left</total_tokens>」。
+#   = セッションが自分の答えを書き終えた後、**会話の続き(次のuser便と封筒)まで生成した**。
+#     偽のChami便がそのまま部屋に残り、次の便でセッション自身がそれを本物として拾った
+#     (msg 1544752897106116650「持ち帰りの件、承知した」=Chamiは一度も言っていない)。
+#
+# なぜ既存の2本で拾えなかったか:
+#   - strip_meta_tail = 末尾の**連続したマーカー行**しか剥がない。この事故は封筒が20行以上
+#     あり、その大半(偽のChami本文)はマーカーに当たらないので、末尾3行しか落ちない。
+#   - detect_narration_leak = ①名乗り [名前] が本文に在れば即素通し。分割前の本文には
+#     人格の名乗りが在る。さらに③の声の痕跡「うち」が封筒の「うち床=25,883」に当たる。
+#
+# 設計(既存2本と同じ向き):
+#   ★**封筒だけが持つ行**を主マーカーにする(人格の台詞には絶対に出ない字面)。
+#   ★主マーカー1本では切らない= その位置から末尾までに**別の署名がもう1つ**要る
+#     (この事故を部屋で論じる便が自分の本文を失わないため)。
+#   ★``` の中・行頭 `>` の引用・開き括弧の後ろは対象外(strip_meta_tail と同じ作法)。
+#   ★切った結果が空になることは在る。**その扱いは呼び出し側の責任**(既存と同じ契約)。
+#   ★どんな入力でも例外を投げない。
+_ENVELOPE_PRIMARY = (
+    ("env_session_state", re.compile(r"^\s*=+\s*この部屋のセッション状態\s*=+")),
+    ("env_discord_new", re.compile(r"^\s*=+\s*Discord新着")),
+    ("env_dept_kpi", re.compile(r"^\s*(?:user|assistant|system)?\s*■この部門の目的とKPI")),
+    ("env_rules_fp", re.compile(r"^\s*(?:user|assistant|system)?\s*■規律:\s*前便から")),
+    ("env_verdict_fp", re.compile(r"^\s*(?:user|assistant|system)?\s*■裁定:\s*前便から")),
+    ("env_token_footer", re.compile(r"^\s*(?:system|assistant|user)?\s*<\s*total_tokens\s*>")),
+)
+# 補助署名= 単独では切らないが、主マーカーの後ろに在れば「封筒である」を裏づける行。
+_ENVELOPE_SECONDARY = (
+    ("env_body_open", re.compile(r"^\s*-{2,}\s*本文ここ(?:から|まで)\s*-{2,}")),
+    ("env_recv_ts", re.compile(r"^\s*受信時刻:\s*\d{4}-\d{2}-\d{2}T")),
+    ("env_msgid", re.compile(r"^\s*msg_id:\s*\d{15,25}\s*$")),
+    ("env_poster", re.compile(r"^\s*投稿者:\s*\S+\s*$")),
+    ("env_room", re.compile(r"^\s*部屋:\s*\S")),
+    ("env_gen", re.compile(r"^\s*世代:\s*第\d+世代")),
+    ("env_attach", re.compile(r"^\s*添付(?:なし|\(ローカルパス\))\s*$")),
+    ("env_token_left", re.compile(r"tokens left\s*<\s*/")),
+    ("env_token_limit", re.compile(r"^\s*There is a limit of\s+\d+\s+tokens")),
+)
+
+
+def _envelope_hit(line, table):
+    """1行が封筒の署名なら (名前) を返す。引用・飾りは strip_meta_tail と同じ作法で除く。"""
+    try:
+        s = str(line or "")
+        body = s.lstrip(_DECOR)
+        if body.lstrip().startswith(">"):
+            return None
+        for name, rx in table:
+            m = rx.search(body)
+            if not m:
+                continue
+            if any(q in body[:m.start()] for q in _QUOTE_OPEN):
+                return None                      # 引用して論じている行=触らない
+            return name
+    except Exception:                            # noqa: BLE001
+        return None
+    return None
+
+
+def strip_envelope_echo(text):
+    """本文へ書き足された**次の便の封筒**を、その先頭から末尾まで落として (本文, 当たり) を返す。
+
+    - 1件も当たらなければ **元の文字列をそのまま**返す。
+    - 主マーカーが1本だけ(=別の署名が続かない)なら**切らない**(引用・言及を守る)。
+    - ``` の中は対象外。
+    """
+    try:
+        s = str(text or "")
+        if not s.strip():
+            return s, []
+        lines = s.splitlines()
+        inside, fence = [], False
+        for ln in lines:
+            if ln.lstrip().startswith("```"):
+                inside.append(True)
+                fence = not fence
+            else:
+                inside.append(fence)
+        start, first = -1, None
+        for i, ln in enumerate(lines):
+            if inside[i]:
+                continue
+            name = _envelope_hit(ln, _ENVELOPE_PRIMARY)
+            if name:
+                start, first = i, name
+                break
+        if start < 0:
+            return s, []
+        # 裏づけ= 切り落とす範囲の中に、別の署名がもう1つ在ること。
+        names = {first}
+        for j in range(start + 1, len(lines)):
+            if inside[j]:
+                continue
+            n2 = (_envelope_hit(lines[j], _ENVELOPE_PRIMARY)
+                  or _envelope_hit(lines[j], _ENVELOPE_SECONDARY))
+            if n2:
+                names.add(n2)
+        if len(names) < 2:
+            return s, []
+        hits = [{"marker": n, "line": ""} for n in sorted(names)]
+        hits[0]["line"] = lines[start].strip()[:300]
+        return "\n".join(lines[:start]).rstrip(), hits
+    except Exception:                            # noqa: BLE001
+        return text, []                          # 何が起きても素通し(沈黙ゼロ)
+
+
+# ============================================================================
 # 実況漏れ(名乗り無しの生ログ露出)の検知  2026-09-01 / イージス研究室
 # ----------------------------------------------------------------------------
 # 発端= Chami 2026-09-01「アイが謎の機械口調」。

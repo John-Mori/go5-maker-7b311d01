@@ -195,6 +195,7 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
     do_fix = _fix_enabled() if fix is None else bool(fix)
     summary = {"naming_fix": 0, "naming_warn": 0, "tone_fix": 0, "tone_warn": 0,
                "meta_strip": 0, "meta_emptied": False, "narration_leak": 0,
+               "envelope_echo": 0,
                "kana_choice_fix": 0, "kana_choice_warn": 0,
                "dept_ref_fix": 0, "dept_ref_warn": 0}
     s = str(text or "")
@@ -209,6 +210,26 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
     #   剥ぎが起きたのは**壊れた実物1件のみ・誤爆0**。判定材料は本文だけで話者に依存しない。
     # ★全部メタで空になったら **空を返す**(下の「最後の砦」の対象外にする)=
     #   呼び出し側(mirror)が「送らない」を選べるようにする。中身ゼロの便を出す方が事故だ。
+    # ★ゲートE-2(封筒エコー切り落とし)= 2026-09-03 研究室HQの止血。常駐(経路①)と同じ純関数。
+    #   実物= 軍議 msg 1544752527507984384 / 1544752530511106295。検査= test_envelope_echo.py。
+    try:
+        if _meta_strip is not None:
+            cut, ehits = _meta_strip.strip_envelope_echo(s)
+            if ehits:
+                summary["envelope_echo"] = len(ehits)
+                summary["meta_emptied"] = not str(cut or "").strip()
+                _append(META_AUDIT, [{
+                    "ts": ts, "dept": dept, "event": "envelope_echo", "source": source,
+                    "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                    "markers": [h.get("marker") for h in ehits],
+                    "cut_chars": len(s) - len(str(cut or "")),
+                    "emptied": summary["meta_emptied"], "before": excerpt_before}])
+                if summary["meta_emptied"]:
+                    return "", summary
+                s = cut
+    except Exception:
+        pass            # 切り落としで転んでも以降のゲートは当てる
+
     try:
         if _meta_strip is not None:
             stripped, hits = _meta_strip.strip_meta_tail(s)
