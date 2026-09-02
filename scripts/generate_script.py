@@ -196,8 +196,8 @@ def build_script(thread):
         "blocks": [
             {
                 "no": 1, "name": "タイトル", "time": "0-2s",
-                "note": "【朝報/悲報】+スレタイ要約(丸パクリ禁止・リライト必須)。ピンク太字・放射状背景",
-                "draft_text": f"【悲報/朝報】{title_ng} www",
+                "note": "【朗報/悲報】+スレタイ要約(丸パクリ禁止・リライト必須)。ピンク太字・放射状背景",
+                "draft_text": f"【悲報/朗報】{title_ng} www",
             },
             {
                 "no": 2, "name": "導入", "time": "3-6s",
