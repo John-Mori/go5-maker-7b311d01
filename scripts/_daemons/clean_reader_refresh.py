@@ -41,16 +41,23 @@ def main():
     rc, note, counts = 0, "", ""
     # refresh_all() は print で結果を出す=標準出力を捕まえて件数だけ拾う
     buf = io.StringIO()
-    stdout = sys.stdout
+    stdout, stderr = sys.stdout, sys.stderr
+    # ★pythonw 起動では sys.stderr が None になる。clean_reader は証明書切れサイトの
+    #   フォールバック時に sys.stderr.write() で警告を出すので、そのまま回すと
+    #   AttributeError が refresh_all の per-URL の except に食われ「取得失敗」に化ける
+    #   (実測 2026-09-03 00:53: 対話実行=失敗0本 / タスク実行=失敗1本 vippers.jp)。
+    #   捨て先を必ず与える=器の側で塞ぐ(本体は分析部門の持ち物なので触らない)。
+    ebuf = io.StringIO()
     try:
         import clean_reader
         sys.stdout = buf
+        sys.stderr = ebuf
         clean_reader.refresh_all()
     except Exception as e:  # noqa: BLE001  器は落ちない(落ちると脈も残らない)
         rc = 1
         note = type(e).__name__ + ": " + str(e)[:120]
     finally:
-        sys.stdout = stdout
+        sys.stdout, sys.stderr = stdout, stderr
     out = buf.getvalue()
     m = re.search(r"完了: 更新(\d+)本 / 飛ばし(\d+)本 / 失敗(\d+)本 / 索引(\d+)本", out)
     if m:
