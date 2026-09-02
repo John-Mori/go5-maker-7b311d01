@@ -1,4 +1,4 @@
-"""設定の読み込み。★資格情報は同梱せず、利用者が config.ini に入れる。"""
+"""設定の読み込み。★資格情報は持たない(取得は保存済みセッションの二層方式。[download]参照)。"""
 from __future__ import annotations
 
 import configparser
@@ -32,21 +32,30 @@ def load_config(path: str | Path) -> dict:
         # [output]
         "sender": get("output", "sender", "stdout"),
         "webhook_url": get("output", "webhook_url", ""),
+        # [output] sender = mail のときだけ使う雛形(未検証・実資格情報は書かない)
+        "smtp_host": get("output", "smtp_host", ""),
+        "smtp_port": get("output", "smtp_port", "587"),
+        "smtp_user": get("output", "smtp_user", ""),
+        "smtp_password": get("output", "smtp_password", ""),
+        "mail_from": get("output", "mail_from", ""),
+        "mail_to": get("output", "mail_to", ""),
         # [state]
         "state_path": get("state", "path", "state/daily_summary.json"),
         # [log]
         "log_path": get("log", "path", "logs/fanza_affi_report.log"),
-        # [download] 取得方式。裁定#1=本番は playwright(完全自動)。
-        # ★username/password はここにしか置かない(ソース非埋め込み、🐧さんのPCの中だけ)。
+        # [schedule] 対象期間。腕A確定=毎朝「昨日分」を送る。
+        "schedule_period": get("schedule", "period", "yesterday"),
+        # [download] 取得方式。★採用は腕Aのみ=mode=session(保存済みセッションで完全自動)。
+        # 腕B(毎朝手作業)は不採用/未実装。mode=local は検証用の「フォルダから拾う」だけ。
+        # ★資格情報は持たない(二層方式=保存済みセッションのみで取得する。
+        # 失効時は relogin.py を手で1回実行してセッションを保存し直す)。
         "download_mode": get("download", "mode", "local"),
-        "dmm_username": get("download", "username", ""),
-        "dmm_password": get("download", "password", ""),
-        "download": {
-            "login_url": get("download", "login_url", ""),
-            "username_selector": get("download", "username_selector", ""),
-            "password_selector": get("download", "password_selector", ""),
-            "login_submit_selector": get("download", "login_submit_selector", ""),
-            "report_url": get("download", "report_url", ""),
-            "csv_export_selector": get("download", "csv_export_selector", ""),
-        },
+        "session_dir": get("download", "session_dir", "sessions"),
+        "affiliate_id": get("download", "affiliate_id", ""),
+        "report_page_url": get("download", "report_page_url", ""),
+        "export_url_template": get("download", "export_url_template", ""),
+        "login_url": get("download", "login_url", ""),
+        "csv_export_selector": get("download", "csv_export_selector", ""),
+        # browser_channel: chrome / msedge (🐧さんの既存ブラウザに合わせて切替)
+        "browser_channel": get("download", "browser_channel", "chrome"),
     }

@@ -1,8 +1,11 @@
-# 中核(パース/集計/整形/送信)は Python 標準ライブラリのみで動きます。
-# Python 3.10 以上。
+# 中核(パース/集計/整形/送信=stdout・discord・mail)は Python 標準ライブラリのみで動きます。
+# Python 3.9 以上。
 #
-# config.ini [download] mode = playwright (裁定#1で確定した本番の取得方式)を
-# 使う場合のみ、下記が必要です。mode = local (検証用)なら不要。
+# config.ini [download] mode = session (★採用=腕A確定の本番取得方式)を使う場合のみ、
+# 下記が必要です。mode = local (検証用)なら不要。
 playwright>=1.40
 # インストール後、初回のみ実行:
-#   playwright install chromium
+#   playwright install
+# ★ chromium 等のバンドルブラウザは不要です。[download] browser_channel で指定した
+#   PCに元から入っている実Chrome/実Edgeをそのまま使います(launch_persistent_context
+#   の channel=chrome / channel=msedge)。`playwright install chromium` は実行不要。

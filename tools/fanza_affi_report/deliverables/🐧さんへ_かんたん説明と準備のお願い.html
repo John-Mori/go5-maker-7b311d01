@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐧 売上レポート自動お届けツール ― かんたん説明</title>
+<style>
+  :root{
+    --ink:#1b3040;          /* 濃紺インク(白背景に乗せる文字) */
+    --ink-soft:#4a5f70;
+    --teal:#2bb3c0;         /* アクセント(氷・見出し) */
+    --teal-deep:#127f8a;
+    --coral:#e07a4a;        /* 主役アクセント=ペンギンのくちばし/足 */
+    --coral-deep:#c85f30;
+    --ice:#eaf6fb;          /* 氷の面 */
+    --ice-line:#cfe6ef;
+    --card:#ffffff;
+    --shadow:0 10px 30px rgba(27,48,64,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;-webkit-text-size-adjust:100%;text-size-adjust:100%;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    color:var(--ink); line-height:1.85;
+    background:linear-gradient(180deg,#bfe4f2 0%,#dff1f8 34%,#f4fbfe 100%);
+    background-attachment:scroll;
+    min-height:100vh; padding:22px 14px 60px;
+  }
+  .wrap{max-width:580px;margin:0 auto}
+  /* 雪 */
+  .snow{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:0}
+  .snow span{position:absolute;top:-10px;color:#ffffff;opacity:.8;
+    animation:fall linear infinite}
+  @keyframes fall{to{transform:translateY(102vh) rotate(180deg)}}
+  .card{position:relative;z-index:1;background:var(--card);border-radius:20px;
+    box-shadow:var(--shadow);padding:26px 22px;margin:0 0 18px;
+    border:1px solid var(--ice-line)}
+  /* ヘッダー */
+  .hero{text-align:center;background:linear-gradient(160deg,#ffffff 0%,var(--ice) 100%)}
+  .hero .peng{font-size:56px;line-height:1;display:block;margin-bottom:6px}
+  h1{font-size:1.42rem;font-weight:800;margin:.2em 0 .3em;color:var(--ink);
+    letter-spacing:.01em}
+  .hero .sub{color:var(--teal-deep);font-weight:700;font-size:.98rem;margin:0}
+  .lead{font-size:1.02rem;margin:.2em 0 0}
+  h2{font-size:1.12rem;font-weight:800;color:var(--teal-deep);
+    margin:.1em 0 .6em;display:flex;align-items:center;gap:.4em}
+  h2 .ic{font-size:1.3rem}
+  /* ステップ */
+  .step{display:flex;gap:14px;align-items:flex-start;padding:14px 0;
+    border-bottom:1px dashed var(--ice-line)}
+  .step:last-child{border-bottom:none}
+  .num{flex:0 0 auto;width:38px;height:38px;border-radius:50%;
+    background:var(--teal);color:#fff;font-weight:800;font-size:1.05rem;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(43,179,192,.35)}
+  .step .t{font-weight:800;font-size:1.04rem;margin:0 0 2px}
+  .step .d{margin:0;color:var(--ink-soft);font-size:.95rem}
+  .easy{background:var(--coral);color:#fff;border-radius:999px;
+    font-size:.74rem;font-weight:800;padding:2px 10px;margin-left:6px;
+    display:inline-block;vertical-align:middle}
+  /* 質問ボックス */
+  .ask{background:linear-gradient(160deg,#fff6f0 0%,#fff 70%);
+    border:1.5px solid #f3d3bf}
+  .q{display:flex;gap:12px;align-items:flex-start;padding:12px 0;
+    border-bottom:1px dashed #f0dccd}
+  .q:last-child{border-bottom:none}
+  .qn{flex:0 0 auto;width:30px;height:30px;border-radius:50%;
+    background:var(--coral);color:#fff;font-weight:800;
+    display:flex;align-items:center;justify-content:center;font-size:.9rem}
+  .q p{margin:0}
+  .q .qt{font-weight:800}
+  .q .qh{color:var(--coral-deep);font-size:.86rem;margin-top:2px;font-weight:700}
+  /* 安心 */
+  .safe li{margin:.3em 0}
+  .safe b{color:var(--teal-deep)}
+  .foot{text-align:center;color:var(--ink-soft);font-size:.9rem;
+    padding:6px 4px 0}
+  .foot .big{font-size:1.02rem;font-weight:800;color:var(--coral-deep)}
+  .tip{background:var(--ice);border-radius:12px;padding:10px 14px;
+    font-size:.9rem;color:var(--teal-deep);font-weight:700;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="snow" id="snow"></div>
+<div class="wrap">
+
+  <div class="card hero">
+    <span class="peng">🐧❄️</span>
+    <h1>売上レポート 自動お届けツール</h1>
+    <p class="sub">むずかしい設定は、ぜんぶこちらでやります</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="ic">☃️</span>これは何?</h2>
+    <p class="lead">🐧さんのパソコンにそっと入れておくと、<b>毎朝じどうで</b>
+    FANZA / DMMアフィリの売上を見に行って、<b>ひとつの表(レポート)にまとめてお届け</b>する道具です。</p>
+    <p style="margin:.6em 0 0">🐧さんがすることは <b>ほとんどありません</b>。
+    AIやパソコンの細かいことは、まったく分からなくて大丈夫です。むずかしいところは全部こちらで組みます。</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="ic">✨</span>使うときは、これだけ</h2>
+    <div class="step">
+      <div class="num">1</div>
+      <div><p class="t">最初に1回だけ、いつもの画面でログイン<span class="easy">かんたん</span></p>
+      <p class="d">いつも売上を見ている画面に、いつも通りログインするだけ。パスワードを新しく作ったりはしません。</p></div>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <div><p class="t">あとは毎朝、かってにレポートが届く</p>
+      <p class="d">パソコンをつけておけば、決まった時間に自動でまとめて送ります。🐧さんの操作はいりません。</p></div>
+    </div>
+    <div class="step">
+      <div class="num">3</div>
+      <div><p class="t">たまに「ログインし直してね」と出たら、ワンクリック</p>
+      <p class="d">安全のため、時々ログインが切れます。そのときだけ、いつも通りもう一度ログインしてください(年に数回くらい)。</p></div>
+    </div>
+    <div class="tip">つまり ―― 最初のログインだけ 🐧さんにお願い。あとはおまかせでOKです。</div>
+  </div>
+
+  <div class="card ask">
+    <h2><span class="ic">🧊</span>準備のために、教えてほしいこと</h2>
+    <p style="margin:.1em 0 .6em;color:var(--ink-soft)">下の5つを教えてください。
+    <b>むずかしく考えず</b>、画面の<b>写真(スクショ)を撮って送る</b>だけでも大丈夫です。
+    分からないものは「わからん」でOKです。</p>
+    <div class="q"><div class="qn">1</div><div>
+      <p class="qt">いつも売上を見ている画面のアドレス</p>
+      <p class="qh">その画面を開いて、上の「https://…」のところをコピーして貼るか、画面のスクショを1枚。</p></div></div>
+    <div class="q"><div class="qn">2</div><div>
+      <p class="qt">ログインのしかた</p>
+      <p class="qh">ログインするとき、毎回スマホにSMSの数字が来たり、パスワードを聞かれたりしますか?
+      それとも一度入れば、しばらくそのまま入れますか?</p></div></div>
+    <div class="q"><div class="qn">3</div><div>
+      <p class="qt">売上の表(CSV)を保存するボタンの画面</p>
+      <p class="qh">売上を「ダウンロード / CSVで保存」するボタンがある画面を、スクショで1枚。そのページのアドレスも一緒に。</p></div></div>
+    <div class="q"><div class="qn">4</div><div>
+      <p class="qt">使っているパソコンとブラウザ</p>
+      <p class="qh">Windows ですか? Mac ですか? いつも使うのは Chrome / Edge / Safari のどれ?</p></div></div>
+    <div class="q"><div class="qn">5</div><div>
+      <p class="qt">レポートの届け先</p>
+      <p class="qh">毎朝のレポートは、どこに届くと嬉しいですか?(例:このチャットに / メールに など)</p></div></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="ic">🛡️</span>安心してください</h2>
+    <ul class="safe">
+      <li><b>パスワードは 🐧さんのパソコンの中だけ</b>にあります。こちらには送られません。</li>
+      <li>この道具は <b>売上を見て、まとめて届けるだけ</b>。勝手に何かを買ったり、投稿したりは<b>しません</b>。</li>
+      <li>うまく取れなかった日は、だまって放置せず <b>「今日はうまく取れませんでした」</b>とちゃんとお知らせします。</li>
+    </ul>
+  </div>
+
+  <div class="foot">
+    <p class="big">分からないことは、遠慮なく「わからん」で大丈夫です 🐧</p>
+    <p>写真を送るだけでも、こちらで読み取って進めます。ゆっくりで大丈夫です。</p>
+  </div>
+
+</div>
+<script>
+  // やさしい雪(重くならない程度に)
+  (function(){
+    var box=document.getElementById('snow'), flakes=['❄','❅','•','·'];
+    for(var i=0;i<26;i++){
+      var s=document.createElement('span');
+      s.textContent=flakes[i%flakes.length];
+      s.style.left=(Math.random()*100)+'%';
+      s.style.fontSize=(8+Math.random()*14)+'px';
+      s.style.animationDuration=(7+Math.random()*9)+'s';
+      s.style.animationDelay=(-Math.random()*12)+'s';
+      s.style.opacity=(0.35+Math.random()*0.5);
+      box.appendChild(s);
+    }
+  })();
+</script>
+</body>
+</html>

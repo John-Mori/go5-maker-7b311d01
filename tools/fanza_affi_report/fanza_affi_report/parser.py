@@ -61,8 +61,19 @@ def _to_int_or_none(value: str | None) -> int | None:
     return _to_int(value)
 
 
+def _looks_like_html(text: str) -> bool:
+    """ログイン画面のHTMLがCSVの体で返る「静かな死」を検知する。"""
+    head = text[:512].lstrip()
+    lowered = head.lower()
+    return head.startswith("<") or "<html" in lowered or "<!doctype" in lowered
+
+
 def parse_report_text(text: str) -> list[RewardRow]:
     """デコード済みテキスト → 明細行。テスト・パイプの合流点はここ。"""
+    if _looks_like_html(text):
+        raise ReportFormatError(
+            "CSVでなくHTMLが返っている(ログイン画面/セッション失効の可能性)"
+        )
     reader = csv.reader(io.StringIO(text))
     try:
         header = next(reader)

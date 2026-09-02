@@ -5,8 +5,25 @@
 """
 from __future__ import annotations
 
+import datetime as dt
+
 from .aggregate import DailySummary
 from .state import Delta
+
+
+def _staleness_note(date: str, last_success_date: str | None) -> str | None:
+    """前回成功から2日以上空いていれば注意書きを1行返す(A-4想定の簡易版)。"""
+    if not last_success_date:
+        return None
+    try:
+        d_now = dt.date.fromisoformat(date)
+        d_prev = dt.date.fromisoformat(last_success_date)
+    except ValueError:
+        return None
+    gap = (d_now - d_prev).days
+    if gap >= 2:
+        return f"【注意】前回の送信成功({last_success_date})から{gap}日空いています。取得が止まっていないか確認してください。"
+    return None
 
 
 def _yen(n: int) -> str:
@@ -23,9 +40,17 @@ def _pct_str(p: float | None) -> str:
     return f"({'+' if p >= 0 else ''}{p:.1f}%)"
 
 
-def format_report(summary: DailySummary, delta: Delta, title: str = "FANZAアフィ売上レポート") -> str:
+def format_report(
+    summary: DailySummary,
+    delta: Delta,
+    title: str = "FANZAアフィ売上レポート",
+    last_success_date: str | None = None,
+) -> str:
     lines: list[str] = []
     lines.append(f"■ {title}  {summary.date}")
+    gap = _staleness_note(summary.date, last_success_date)
+    if gap:
+        lines.append(gap)
     lines.append(
         f"報酬合計: {_yen(summary.total_amount)} / {summary.total_count}件  "
         f"(明細{summary.n_rows}行)"

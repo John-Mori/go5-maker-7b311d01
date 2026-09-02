@@ -45,3 +45,25 @@ def write_bad_csv(path: Path) -> Path:
     text = "サービス,品番,商品タイトル\n同人 同人,d_1,タイトル\n"
     path.write_bytes(text.encode("cp932"))
     return path
+
+
+def write_zero_byte_csv(path: Path) -> Path:
+    """0バイトファイル(ダウンロード途中断・空応答を模す)。"""
+    path.write_bytes(b"")
+    return path
+
+
+def write_header_only_csv(path: Path) -> Path:
+    """ヘッダ行だけで明細0行 = 正常な「売上ゼロ」。取得失敗と混同してはいけない。"""
+    path.write_bytes((",".join(HEADER) + "\n").encode("cp932"))
+    return path
+
+
+def write_html_login_csv(path: Path) -> Path:
+    """セッション失効時にログイン画面のHTMLがCSVの体(200)で返るケース。"""
+    html = (
+        "<!DOCTYPE html><html><head><title>ログイン</title></head>"
+        "<body>ログインしてください</body></html>"
+    )
+    path.write_bytes(html.encode("utf-8"))
+    return path
