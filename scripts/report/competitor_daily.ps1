@@ -18,3 +18,11 @@ $out = & python scripts/analysis/community_daily_push.py 2>&1
 $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 Add-Content -Path $log -Value "===== $stamp =====" -Encoding UTF8
 Add-Content -Path $log -Value $out -Encoding UTF8
+# 2026-09-02 HQ-0230 (DISPATCH-shorts-analyst-1788307335393): the swap above silenced the only
+# daily口 that warned the upstream GAS is frozen (8/18). Re-arm a freeze watch that rings ONCE to
+# 研究室HQ (AI便) on first detection, then every 7 days while frozen (never the daily-same spam Chami
+# rejected), and once on recovery. Runs in the analysis dept's own lane (C-027); it re-runs
+# competitor_daily.py --emit just to read the "上流スナップが ... で停止" line (rc is 0 even when frozen).
+$out2 = & python scripts/analysis/gas_freeze_watch.py 2>&1
+Add-Content -Path $log -Value "----- gas_freeze_watch -----" -Encoding UTF8
+Add-Content -Path $log -Value $out2 -Encoding UTF8
