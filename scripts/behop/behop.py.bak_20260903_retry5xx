@@ -16,11 +16,9 @@
   --model <name> で強モデルの明示指定も可 (既定は優先リスト→実在照会で自動選択)
 """
 import base64
-import http.client
 import json
 import os
 import re
-import socket
 import sys
 import time
 import urllib.parse
@@ -62,17 +60,6 @@ NON_TEXT = ("image", "nano-banana", "tts", "audio", "lyria", "veo", "imagen", "e
             "deep-research", "antigravity", "robotics", "computer-use", "live", "gemma")
 
 LADDER_LIMIT = 6          # 1回の生成で叩く上限。これ以上は待ち時間の方が害になる
-
-# ★降格しない経路(ask_pro)の再試行 (2026-09-03 イージス研究室)。
-#   実測= gemini_usage.jsonl 581件中331件が失敗、うち **HTTP 503 が266件で全件 flash-latest**。
-#   モデルが無いのでも枠が尽きたのでもなく「その瞬間だけ混んでいた」だけなのに、
-#   ask_pro は1回で諦め、comp_frames はそのフレームを永久に捨てていた(257件・
-#   2026-08-28 は丸一日 OK 0/NG 14)。共有の ask() は既に5xxで粘る=穴はここだけだった。
-#   ★429は**再試行しない**。割当は待っても戻らず、粘ると呼び側のキー切替が遅れるだけだ。
-PRO_RETRY = 2             # 追加で叩き直す回数(合計3回まで)
-PRO_RETRY_WAIT = 4.0      # 1回目4秒・2回目8秒。日次ジョブを止めない範囲で混雑をやり過ごす
-_TRANSIENT = (TimeoutError, socket.timeout, http.client.RemoteDisconnected,
-              http.client.IncompleteRead, ConnectionResetError, urllib.error.URLError)
 
 MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".webp": "image/webp", ".gif": "image/gif"}
@@ -328,11 +315,6 @@ def ask_pro(key, prompt, image_paths=(), model="gemini-2.5-pro", tag="ask_pro", 
       ("...", "ok")             成功
       (None,  "quota")          pro無料枠が尽きた (HTTP 429)。呼び出し側はその日を打ち切る
       (None,  "error:<detail>") それ以外の失敗。呼び出し側はこの1件だけスキップ
-
-    ★2026-09-03: 一過性の失敗 (5xx / タイムアウト / 切断) は**同じ段で PRO_RETRY 回まで
-      叩き直す**。429・404・400・応答形式の異常は再試行しない (待っても変わらない)。
-      記録は**1回の仕事につき1行**のまま=再試行で失敗件数を水増ししない。ただし
-      成功しても途中で躓いた分は err に残す (2026-08-18 の ask() と同じ作法)。
     """
     parts = [{"text": prompt}]
     for p in image_paths:
@@ -342,34 +324,22 @@ def ask_pro(key, prompt, image_paths=(), model="gemini-2.5-pro", tag="ask_pro", 
                                           "data": base64.b64encode(f.read()).decode("ascii")}})
     payload = {"contents": [{"parts": parts}]}
     t0 = time.time()
-    trail = []                      # ★途中で何に躓いたか。成功しても消さずに err へ残す
-    for attempt in range(PRO_RETRY + 1):
-        try:
-            text = _gen_once(key, model, payload)
-            _usage(tag, model, prompt, image_paths, text, True, " / ".join(trail), t0, who)
-            return text, "ok"
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                # ★割当は待っても戻らない。ここで粘ると呼び側のキー切替が遅れるだけだ。
-                _usage(tag, model, prompt, image_paths, "", False,
-                       " / ".join(trail + ["HTTP 429"]), t0, who)
-                return None, "quota"
-            trail.append(f"HTTP {e.code}")
-            if not (500 <= e.code < 600):
-                break               # 404(モデルが無い)/400(要求が不正)= 何度やっても同じ
-        except (KeyError, IndexError):
-            trail.append("応答形式が想定外")
-            break                   # 返ってきた形が違う= 叩き直しても形は変わらない
-        except _TRANSIENT as e:
-            trail.append(type(e).__name__)
-        except Exception as e:
-            trail.append(type(e).__name__)
-            break
-        if attempt < PRO_RETRY:
-            time.sleep(PRO_RETRY_WAIT * (attempt + 1))
-    detail = " / ".join(trail) or "?"
-    _usage(tag, model, prompt, image_paths, "", False, detail[:200], t0, who)
-    return None, f"error:{trail[-1] if trail else '?'}"
+    try:
+        text = _gen_once(key, model, payload)
+        _usage(tag, model, prompt, image_paths, text, True, "", t0, who)
+        return text, "ok"
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            _usage(tag, model, prompt, image_paths, "", False, "HTTP 429", t0, who)
+            return None, "quota"
+        _usage(tag, model, prompt, image_paths, "", False, f"HTTP {e.code}", t0, who)
+        return None, f"error:HTTP {e.code}"
+    except (KeyError, IndexError):
+        _usage(tag, model, prompt, image_paths, "", False, "応答形式が想定外", t0, who)
+        return None, "error:応答形式が想定外"
+    except Exception as e:
+        _usage(tag, model, prompt, image_paths, "", False, type(e).__name__, t0, who)
+        return None, f"error:{type(e).__name__}"
 
 
 PING_PROMPT = "ping。「OK」とだけ返して。"
