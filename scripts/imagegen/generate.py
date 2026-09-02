@@ -98,6 +98,13 @@ def discord_upload(image_path, channel, persona, caption=""):
     except Exception:
         pass
     boundary = uuid.uuid4().hex
+    # ★炎上表記ゲート(正本= scripts/discord/enjoh.py)。ここも画像便のキャプションがDiscordへ出る口
+    #   = 合流点の1つ。片方だけに置いた実装は必ず割れる(REQ-kaizen-analyst-90ebe8bfc8)。
+    try:
+        from enjoh import enjoh_backstop            # sys.path は上の insert 済み
+        caption = enjoh_backstop(caption, tag="imagegen")
+    except Exception:
+        pass                                        # fail-open= 投稿は殺さない
     payload = {"username": persona, "content": caption[:1900]}
     if avatar:
         payload["avatar_url"] = avatar

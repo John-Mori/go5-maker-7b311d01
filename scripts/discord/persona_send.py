@@ -529,44 +529,34 @@ def tone_backstop(body, persona, dept):
         return body
 
 
-ENJOH_EMOJI = "<:enjoh:1541126866981752883>"
-_FIRE_RE = re.compile("\U0001F525️?")            # 素の🔥(異体字セレクタ付きも拾う)
-_CODE_SPLIT_RE = re.compile(r"(```.*?```|`[^`\n]*`)", re.S)   # 奇数要素=コード=触らない
+# ★炎上表記ゲート(素の🔥→<:enjoh:…> / 絵文字に隣接したラベル「炎上」→「恒久」)。
+#   2026-09-01 はここ(webhook口)にだけ実装を置いた。だがDiscordへ本文をPOSTする口はもう1つ
+#   (Bot API= bot_send.py)在り、そちらは素通しのままだった= 部分適用。それがChamiの再指摘
+#   (REQ-kaizen-analyst-90ebe8bfc8)の真因なので、実装の正本を enjoh.py へ出して両方から呼ぶ。
+#   ★名前 enjoh_backstop は据え置き= main() の呼び出しと回帰テストの配線検査を壊さないため。
+_ENJOH_HERE = os.path.dirname(os.path.abspath(__file__))
+if _ENJOH_HERE not in sys.path:
+    sys.path.insert(0, _ENJOH_HERE)
+try:
+    from enjoh import ENJOH_EMOJI, enjoh_backstop as _enjoh_gate
+except Exception as _e:                        # 正本が読めない時も送信は殺さない(fail-open)
+    print(f"[persona_send] 炎上表記ゲートの正本 enjoh.py を読めない({type(_e).__name__})=素通し。",
+          file=sys.stderr)
+    ENJOH_EMOJI = "<:enjoh:1541126866981752883>"
+
+    def _enjoh_gate(body, tag="persona_send"):
+        return body
 
 
 def enjoh_backstop(body):
-    """Discordへ出る**最後の合流点**の絵文字ゲート(2026-09-01 イージス研究室)。
+    """Discordへ出る本文の炎上表記ゲート(実装は enjoh.py が正本)。
 
     Chami原文(msg 1544213340853772331)=「🔥 は <:enjoh:1541126866981752883> に置き換えって
     **前に言ったはず**」= 少なくとも2回目の同じ指摘。全部門共通規律§5に既に載っているのに
     生成側が滑る型(英語漏れ・口調割れと同じ)なので、心がけではなく合流点で機械的に潰す。
     起票= 改善提案部門(トトリ)docs/departments/kaizen-analyst/型_素の炎上絵文字_送信ゲート正規化_2026-09-01.md
-
-    ★地の文だけ置換する。コードブロック(```)とインラインコード(`…`)の中は触らない
-      = 規律や実装の説明で素の🔥を**そのまま見せたい**場面があるため(誤発火する安全網は無視される)。
-    ★既に <:enjoh:…> と書かれている所は素の🔥ではないので二重変換にならない。
-    ★fail-open: 例外は素通し=送信を殺さない(最悪の事故は沈黙)。
-
-    返り値: 送るべき本文(str)。置換が1件も無ければ入力を1ミリも変えない。
     """
-    try:
-        s = str(body or "")
-        if "\U0001F525" not in s:
-            return body                       # 素の🔥が無い=何もしない(大多数の便はここで抜ける)
-        parts = _CODE_SPLIT_RE.split(s)
-        n = 0
-        for i in range(0, len(parts), 2):     # 偶数=コード外=地の文
-            parts[i], k = _FIRE_RE.subn(ENJOH_EMOJI, parts[i])
-            n += k
-        if not n:
-            return body                       # 🔥はコードの中だけだった=触らない
-        print(f"[persona_send] ★地の文の素の🔥を{n}件 <:enjoh:…> へ正規化"
-              f"(Chami指摘の再発を合流点で機械的に潰す・共通規律§5)。", file=sys.stderr)
-        return "".join(parts)
-    except Exception as e:
-        print(f"[persona_send] 絵文字ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
-              file=sys.stderr)
-        return body
+    return _enjoh_gate(body, tag="persona_send")
 
 
 def _audit_english_suppressed(persona, channel, hit, body):

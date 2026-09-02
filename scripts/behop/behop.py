@@ -394,6 +394,15 @@ def resolve_channel(token, target):
 
 def dc_send(token, channel_id, text):
     """ベホップ (bot本人) として投稿。2000字制限は段落優先で分割。"""
+    # ★炎上表記ゲート(正本= scripts/discord/enjoh.py)。ここもDiscordへ本文を出す合流点の1つ
+    #   = 素の🔥/ラベル「炎上」をChamiの目の前へ出さない(REQ-kaizen-analyst-90ebe8bfc8)。
+    #   分割の**前**にかける= 置換が分割の境目で割れないため。
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "discord"))
+        from enjoh import enjoh_backstop
+        text = enjoh_backstop(text, tag="behop")
+    except Exception:
+        pass                                        # fail-open= 投稿は殺さない
     chunks, cur = [], ""
     for ln in text.splitlines(keepends=True):
         if len(cur) + len(ln) > 1900:
