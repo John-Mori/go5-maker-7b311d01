@@ -41,6 +41,21 @@ except Exception as _e:                        # 正本が読めない時も送�
     def enjoh_backstop(body, tag="bot_send"):
         return body
 
+# ★共通の送信ログ(2026-09-02・研究室HQからの恒久依頼)。この口には送信ログが1行も無く、
+#   事故便 msg 1544669455995637771 の**出所が追えなかった**。正本= send_audit.py 1本だけ。
+try:
+    import send_audit as _send_audit
+except Exception:                              # ログが無くても送信は殺さない(fail-open)
+    _send_audit = None
+
+
+def _audit(**kw):
+    try:
+        if _send_audit is not None:
+            _send_audit.record("bot_send", **kw)
+    except Exception:
+        pass
+
 
 def main():
     args = sys.argv[1:]
@@ -52,7 +67,31 @@ def main():
         print("使い方: bot_send.py [--dept] <チャンネル名|dept> [本文]")
         sys.exit(1)
     key = args[0]
-    body = " ".join(args[1:]) if len(args) > 1 else sys.stdin.read().strip()
+    rest = args[1:]
+    # ★--body-file / --body をこの口にも持たせる(2026-09-02・書式の割れが事故の温床だった)。
+    #   persona_send / dispatch は前から持っていて、bot_send だけ持たなかった。
+    #   「口ごとに本文の渡し方が違う」状態そのものを畳む= 3つとも --body-file で渡せる。
+    explicit = bool(rest) and rest[0] in ("--body-file", "--body")
+    if explicit:
+        flag = rest[0]
+        if len(rest) < 2:
+            print(f"{flag} の値がありません。")
+            sys.exit(1)
+        if len(rest) > 2:
+            print(f"{flag} の後ろに余分な引数があります: {rest[2:]}\n"
+                  "  本文全体を1つの引数にしてください(引用符で囲む)。")
+            sys.exit(1)
+        if flag == "--body-file":
+            try:
+                with open(rest[1], "r", encoding="utf-8") as f:
+                    body = f.read().strip()
+            except OSError as e:
+                print(f"本文ファイルを読めません: {rest[1]} ({type(e).__name__})")
+                sys.exit(1)
+        else:
+            body = rest[1].strip()
+    else:
+        body = " ".join(rest) if rest else sys.stdin.read().strip()
     if not body:
         print("本文が空です。")
         sys.exit(1)
@@ -60,20 +99,26 @@ def main():
     #   この口は本文を「残り引数の連結」で作る=persona_send/dispatch の書式(--body-file 等)を
     #   そのまま渡すと、フラグの文字列がad研究室chへ本文として出た。ここは対応していないので
     #   黙って出さず、失敗させて呼び出し元に気づかせる(止血・恒久はプラットフォームSE)。
+    #   ★--body-file/--body は**上でそう渡された時だけ**網から外す。標準入力や連結から
+    #     その文字列が出てきたなら、それは渡し方を間違えた便だ(事故と同じ形)=止める。
     _SEND_FLAGS = {
-        "--body", "--body-file", "--persona", "--channel", "--dept", "--from",
+        "--persona", "--channel", "--dept", "--from", "--from-dept",
         "--audience", "--also-post", "--avatar", "--color", "--etitle", "--to",
         "--sender", "--direct", "--dry-run", "--silent", "--plain", "--big",
-        "--nobold", "--suffix",
+        "--nobold", "--suffix", "--print-id", "--work", "--broadcast",
     }
-    _head = (args[1] if len(args) > 1 else "").split("=")[0]
+    #   ★判定はargvでなく**出来上がった本文の頭**で見る= 引数から来ても標準入力から来ても同じ網にかかる。
+    if not explicit:
+        _SEND_FLAGS |= {"--body-file", "--body"}
+    _head = body.split()[0].split("=")[0] if body.split() else ""
     if _head in _SEND_FLAGS:
+        _audit(body=body, event="blocked", status="flag_as_body:" + _head, channel=key)
         print(f"本文がフラグから始まっています: {_head}\n"
-              "  bot_send.py はフラグを解釈しません(残り引数をそのまま本文にします)。\n"
-              "  本文をファイルから渡すなら: python scripts/discord/persona_send.py --dept <slug> "
-              "--persona <名前> --body-file <path>\n"
-              "  bot_send.py で長文を渡すなら本文は標準入力へ: "
-              "cat <path> | python scripts/discord/bot_send.py --dept <slug>")
+              "  bot_send.py が解釈するのは --dept(先頭) と --body-file / --body だけです。\n"
+              "  本文をファイルから渡すなら: python scripts/discord/bot_send.py --dept <slug> "
+              "--body-file <path>\n"
+              "  人格の名義で出すなら: python scripts/discord/persona_send.py --dept <slug> "
+              "--persona <名前> --body-file <path>")
         sys.exit(4)
     with open(os.path.join(LOCAL, "discord_bot_token.txt"), "r", encoding="utf-8") as f:
         token = f.read().strip()
@@ -97,8 +142,12 @@ def main():
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
+            _audit(body=body, status=str(r.status), channel_id=str(ch["id"]),
+                   channel=str(ch.get("name", "")), dept=str(ch.get("dept", "")))
             print(f"送信OK → {ch.get('name')} (HTTP {r.status})")
     except Exception as e:
+        _audit(body=body, status="ERR:" + type(e).__name__, channel_id=str(ch["id"]),
+               channel=str(ch.get("name", "")), dept=str(ch.get("dept", "")))
         print(f"送信失敗: {type(e).__name__}")
         sys.exit(3)
 

@@ -559,6 +559,23 @@ def enjoh_backstop(body):
     return _enjoh_gate(body, tag="persona_send")
 
 
+# ★共通の送信ログ(2026-09-02・研究室HQからの恒久依頼)。Discordへ実際にHTTPを撃つ口は
+#   bot_send.main() と この下の post() の2つだけ= その2点だけから同じ正本を呼ぶ
+#   (炎上表記ゲートを片方にだけ入れて割れた 2026-09-01 の型を繰り返さない)。
+try:
+    from send_audit import record as _send_record
+except Exception:                              # ログが無くても送信は殺さない(fail-open)
+    _send_record = None
+
+
+def _audit_send(**kw):
+    try:
+        if _send_record is not None:
+            _send_record("persona_send", **kw)
+    except Exception:
+        pass
+
+
 def _audit_english_suppressed(persona, channel, hit, body):
     """英文ダンプで送信保留したことを監査へ残す(dept_daemon と同じ置き場・ORG-23)。失敗しても送信判定は変えない。"""
     try:
@@ -781,14 +798,27 @@ def main():
             url, data=json.dumps(pl).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": "go5-org-persona (personal, v1)"},
         )
-        with urllib.request.urlopen(req, timeout=20) as r:
-            if want_id:
-                try:
-                    data = json.loads(r.read().decode("utf-8"))
-                    return r.status, str(data.get("id", ""))
-                except ValueError:
-                    return r.status, ""
-            return r.status, ""
+        # ★送信ログ用に、実際にDiscordへ渡す本文をpayloadから取り出す(content / embed両対応)。
+        _sent = pl.get("content") or "".join(
+            str((e or {}).get("description", "")) for e in (pl.get("embeds") or []))
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                mid = ""
+                if want_id:
+                    try:
+                        data = json.loads(r.read().decode("utf-8"))
+                        mid = str(data.get("id", ""))
+                    except ValueError:
+                        mid = ""
+                _audit_send(body=_sent, status=str(r.status), channel_id=str(ch.get("id", "")),
+                            channel=str(ch.get("name", "")), dept=str(ch.get("dept", "")),
+                            persona=str(persona), msg_id=mid)
+                return r.status, mid
+        except Exception as e:
+            _audit_send(body=_sent, status="ERR:" + type(e).__name__,
+                        channel_id=str(ch.get("id", "")), channel=str(ch.get("name", "")),
+                        dept=str(ch.get("dept", "")), persona=str(persona))
+            raise                       # ★握り潰さない= 上の例外処理(分割連投の再試行等)を変えない
 
     try:
         if plain_color is not None:
