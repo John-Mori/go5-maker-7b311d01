@@ -28,6 +28,17 @@ class TestSelectionWeight(unittest.TestCase):
         self.assertFalse(excluded2)
         self.assertGreater(w_edgy, w_plain)
 
+    def test_keyword_match_no_filter_passes_all(self):
+        self.assertTrue(s.keyword_match("なんでもいいタイトル", None))
+        self.assertTrue(s.keyword_match("なんでもいいタイトル", []))
+
+    def test_keyword_match_or_hit(self):
+        self.assertTrue(s.keyword_match("【悲報】水着クレイジー・オリー実装www", ["ホロドリ", "水着"]))
+        self.assertTrue(s.keyword_match("ホロドリの新衣装きたああ", ["ホロドリ", "水着"]))
+
+    def test_keyword_match_miss_excludes(self):
+        self.assertFalse(s.keyword_match("最近の物価について語るスレ", ["ホロドリ", "水着"]))
+
     def test_this_would_fail_if_mega_filter_removed(self):
         # test-must-fail: フィルタが無いと総合スレも除外されずに残るはず
         excluded, _ = s.selection_weight("声優総合スレ#901")

@@ -91,6 +91,18 @@ def selection_weight(title):
     return False, weight
 
 
+def keyword_match(title, keywords):
+    """(D)案件ごとの的フィルタ(2026-09-02 モドリッチ発注・ホロドリ×水着案件)。
+    keywords が空/Noneなら常にTrue(絞り込みなし=既定の全板巡回はこれまで通り)。
+    どれか1つでもタイトルに含まれればTrue(OR一致)。案件テーマを
+    selection_weight本体(A/B/C)へハードコードせず、呼び出し側の--keywordで
+    都度絞る=特定案件の語をツール本体に焼き込まない。
+    """
+    if not keywords:
+        return True
+    return any(k in title for k in keywords if k)
+
+
 def fetch(url, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -171,7 +183,7 @@ def parse_dat(raw, max_posts):
     return title, posts
 
 
-def scrape_board(directory_name, top_n, max_posts, sleep, dry_run):
+def scrape_board(directory_name, top_n, max_posts, sleep, dry_run, keywords=None):
     if directory_name in ADULT_DIRS:
         print(f"[skip] 成人向け板は対象外: {directory_name}")
         return None
@@ -187,19 +199,24 @@ def scrape_board(directory_name, top_n, max_posts, sleep, dry_run):
         t["ikioi"] = ikioi(t["res"], t["key"], now_epoch)
 
     excluded = 0
+    kw_excluded = 0
     kept = []
     for t in threads:
         is_mega, weight = selection_weight(t["title"])
         if is_mega:
             excluded += 1
             continue
+        if not keyword_match(t["title"], keywords):
+            kw_excluded += 1
+            continue
         t["select_score"] = round(t["ikioi"] * weight, 2)
         kept.append(t)
     kept.sort(key=lambda t: t["select_score"], reverse=True)
     top = kept[:top_n]
 
+    kw_note = f" 的キーワード不一致で除外={kw_excluded}" if keywords else ""
     print(f"[{directory_name}] host={host} 総スレ={len(threads)} "
-          f"総合/雑談等で除外={excluded} 候補={len(kept)} 上位={len(top)}(選定スコア降順)")
+          f"総合/雑談等で除外={excluded}{kw_note} 候補={len(kept)} 上位={len(top)}(選定スコア降順)")
     records = []
     for t in top:
         url = f"{base}/test/read.cgi/{directory_name}/{t['key']}/"
@@ -237,11 +254,14 @@ def main():
     ap.add_argument("--max-posts", type=int, help="1スレの取得レス上限(0=全件)")
     ap.add_argument("--sleep", type=float, default=1.2, help="dat取得間の待ち秒(礼儀)")
     ap.add_argument("--dry-run", action="store_true", help="一覧・勢いだけ。本文datは取らない")
+    ap.add_argument("--keyword", help="カンマ区切り。タイトルにどれか1つでも含む単発スレだけへ絞る"
+                                       "(案件ごとの的フィルタ。例=ホロドリ,ホロライブドリームス,水着,衣装)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
     top_n = args.top or cfg.get("top_n", 10)
     max_posts = args.max_posts if args.max_posts is not None else cfg.get("max_posts", 80)
+    keywords = [k.strip() for k in args.keyword.split(",")] if args.keyword else None
 
     if args.board:
         boards = [{"directory_name": args.board}]
@@ -255,7 +275,7 @@ def main():
     total = 0
     for b in boards:
         d = b["directory_name"]
-        records = scrape_board(d, top_n, max_posts, args.sleep, args.dry_run)
+        records = scrape_board(d, top_n, max_posts, args.sleep, args.dry_run, keywords)
         if not records:
             continue
         out_path = os.path.join(OUT_DIR, f"threads_{d}_{today}.jsonl")
