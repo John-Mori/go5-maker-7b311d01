@@ -25,9 +25,21 @@ function Stop-And-Wait($procs, $timeoutMs = 5000) {
   return $false
 }
 
-function Find-DaemonProcesses($fileName) {
+function Find-DaemonProcesses($pattern) {
   return @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-    Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*' + $fileName + '*')) })
+    Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*' + $pattern + '*')) })
+}
+
+# Match/Args (2026-09-03, aegis-gl): until now every entry was "one file = one daemon", so the
+# file name alone identified the process and no arguments were ever passed. clean_reader.py
+# breaks both assumptions: the SAME file is also run by hand for one-shot conversions, and the
+# resident form is only the "--serve" form. Matching on the file name alone would (a) treat a
+# one-shot run as "the server is up" and (b) kill that one-shot run as a duplicate.
+#   Match = wildcard pattern used to find/dedupe the process (defaults to File)
+#   Args  = arguments appended after the script path on launch (defaults to none)
+function Get-DaemonMatch($d) {
+  if ($d.Match) { return $d.Match }
+  return $d.File
 }
 
 $daemons = @(
@@ -50,7 +62,17 @@ $daemons = @(
   #   the pigeon during pilot (GO5_POLLER_SKIP_DEPTS decides which depts are queue-only). Env vars
   #   GO5_GATEWAY_JOBS / GO5_GATEWAY_JOBS_DEPTS / GO5_POLLER_SKIP_DEPTS are USER-level env
   #   (set via [Environment]::SetEnvironmentVariable) so schtasks-spawned instances inherit them.
-  @{ Name='discord_gateway';  File='discord_gateway.py';  Rel='scripts\queue\discord_gateway.py';    LogRel='local\queue\_gateway_console.log' }
+  @{ Name='discord_gateway';  File='discord_gateway.py';  Rel='scripts\queue\discord_gateway.py';    LogRel='local\queue\_gateway_console.log' },
+  # clean_reader_serve (2026-09-03, requested by the analysis dept / Almond Eye): the LAN reader
+  #   Chami opens on his phone at http://192.168.10.103:8000/ . It used to be started as a
+  #   background task of an interactive session, so every time that session was closed the server
+  #   died with it - three times in one session, and "site cannot be reached" on the phone each
+  #   time. Nothing about it needs a session, so it belongs here with the other residents.
+  #   python.exe (NOT pythonw.exe): pythonw gives the process stdout/stderr = None, and the very
+  #   first print() in serve() then raises. The launch line below redirects both into the log.
+  @{ Name='clean_reader_serve'; File='clean_reader.py'; Match='clean_reader.py*--serve';
+     Args='--serve --port 8000'; Rel='scripts\analysis\clean_reader.py';
+     LogRel='local\_work\clean_reader_serve.out.log' }
 )
 
 # gateway liveness (2026-07-19 INC): TCP:443 can stay ESTABLISHED while discord.py's event
@@ -104,7 +126,8 @@ if ($codeVer.Count -eq 0) { Write-SupLog "code version: no data - liveness only 
 $nowEpoch = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 
 foreach ($d in $daemons) {
-  $procs = @($allPy | Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*' + $d.File + '*')) })
+  $match = Get-DaemonMatch $d
+  $procs = @($allPy | Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*' + $match + '*')) })
   if ($d.Name -eq 'discord_gateway' -and $procs.Count -eq 1 -and (Test-Path -LiteralPath $gwPulse)) {
     $age = (Get-Date) - (Get-Item -LiteralPath $gwPulse).LastWriteTime
     if ($age.TotalSeconds -gt $gwPulseStaleSec) {
@@ -178,12 +201,16 @@ foreach ($d in $daemons) {
     Write-SupLog ("{0}: deduped ({1} instances -> restart 1)" -f $d.Name, $procs.Count)
   }
   $logAbs = $root + '\' + $d.LogRel
-  $cmd = 'cmd /c cd /d "' + $root + '" && python "' + $d.Rel + '" >> "' + $logAbs + '" 2>&1'
+  $logDir = Split-Path -Parent $logAbs
+  if ($logDir -and -not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+  $argStr = ''
+  if ($d.Args) { $argStr = ' ' + $d.Args }
+  $cmd = 'cmd /c cd /d "' + $root + '" && python "' + $d.Rel + '"' + $argStr + ' >> "' + $logAbs + '" 2>&1'
   $verified = $false
   for ($attempt = 1; $attempt -le 2; $attempt++) {
     $sh.Run($cmd, 0, $false) | Out-Null
     Start-Sleep -Milliseconds 3000
-    $started = @(Find-DaemonProcesses $d.File)
+    $started = @(Find-DaemonProcesses $match)
     if ($started.Count -eq 1) {
       $verified = $true
       Write-SupLog ("{0}: launch verified (attempt {1}, pid {2})" -f $d.Name, $attempt, $started[0].ProcessId)
