@@ -422,6 +422,45 @@ def _linkify(text):
                   esc)
 
 
+# 広告スロット(livedoorまとめ標準テンプレの実物から採取)= CSSで display:none。
+# JS由来の広告(adsbygoogle/fluct/GPT)は下の <script> 全除去で発火しないので、静的スロットだけ隠せば足りる。
+# YouTube/Twitter等の埋め込みは iframe を一律には消さない(=コンテンツを残す)。広告ドメインのiframeだけ隠す。
+AD_HIDE_CSS = (
+    'ins.adsbygoogle,[class*="adsbygoogle"],'
+    '.ad2,#ad_rs,.ad_rs,.ad_rs_c,.bottom-ad,.top-ad,'
+    '.g-ad1,.g-ad2,.g-ad3,.google-2ad,.google-2ad-b,.google-2ad-m,'
+    '[id^="div-gpt-ad"],[id^="google_ads"],'
+    'iframe[src*="googlesyndication"],iframe[src*="doubleclick"],'
+    'iframe[src*="fluct"],iframe[src*="amazon-adsystem"],'
+    'iframe[src*="i-mobile"],iframe[src*="/ads/"]'
+    '{display:none!important;height:0!important;min-height:0!important;}'
+)
+
+
+def as_adhide_html(html, url=""):
+    """元ページの見た目のまま「広告だけ」消す閲覧モード(本文抽出はしない)。
+
+    Chami要望(2026-09-03): テキスト抽出ではなく、写真・レイアウトを保ったまま広告を非表示に。
+    仕組み(livedoorまとめの実物=画像もCSSも絶対URL・遅延読込なし、を前提):
+      ・<script>/<noscript> を全除去 → JS由来の広告(adsbygoogle/fluct/GPT/リダイレクト)は発火しない。
+        JSを止めても本文画像とCSSは絶対URLで元サイトから読めるのでレイアウトは残る。
+      ・既知の広告スロット(ins.adsbygoogle・広告div・広告iframe)は CSS で display:none。
+      ・YouTube等の埋め込みiframeは残す(=コンテンツ)。
+    出力HTMLは元サイトの画像/CSSを参照する(スマホがネット接続前提)。競合素材をlocalへ写さない=出所参照のみ。
+    """
+    doc = re.sub(r"<script\b[^>]*>.*?</script>", "", html, flags=re.S | re.I)
+    doc = re.sub(r"<noscript\b[^>]*>.*?</noscript>", "", doc, flags=re.S | re.I)
+    # 既存の<base>は配信ホスト基準に誤誘導し得る(livedoorは絶対URLなので不要)=除去
+    doc = re.sub(r"<base\b[^>]*>", "", doc, flags=re.I)
+    inject = '<meta charset="utf-8"><style id="go5-adhide">' + AD_HIDE_CSS + "</style>"
+    m = re.search(r"<head\b[^>]*>", doc, re.I)
+    if m:  # charsetを先頭に置いて確実にUTF-8解釈させ、広告非表示CSSを効かせる
+        doc = doc[:m.end()] + inject + doc[m.end():]
+    else:
+        doc = inject + doc
+    return doc
+
+
 def _slug(url):
     m = re.search(r"://([^/]+).*?/(\d+)\.html", url)
     if m:
@@ -556,8 +595,8 @@ def refresh_all():
         art = extract_article(html, final)
         slug = _slug(final)
         hp = os.path.join(OUT_DIR, slug + ".html")
-        _write(hp, as_clean_html(art))
-        _write(os.path.splitext(hp)[0] + ".txt", as_plain(art))
+        _write(hp, as_adhide_html(html, final))          # 閲覧=元ページ維持・広告のみ非表示
+        _write(os.path.splitext(hp)[0] + ".txt", as_plain(art))  # 分析=本文抽出(共有コア)
         n_ok += 1
         print("更新:", slug, "(レス%d件/本文%d字)" % (len(art["reslist"]), len(art["body_text"])))
     n = _build_index()
@@ -600,7 +639,8 @@ def main():
     ap = argparse.ArgumentParser(description="まとめ記事の広告除去クリーン閲覧＋分析ノイズ除去")
     ap.add_argument("url", nargs="?", help="記事URL(まとめ記事の /archives/ID.html 等)")
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--view", action="store_true", help="広告ゼロのHTML+txtを local/clean_reader/ へ")
+    g.add_argument("--view", action="store_true",
+                   help="閲覧HTML(元ページ維持・広告のみ非表示)+分析txt(本文抽出)を local/clean_reader/ へ")
     g.add_argument("--analyze", action="store_true", help="分析用の素テキストを出力")
     g.add_argument("--serve", action="store_true",
                    help="作成済み記事を同じWi-Fiのスマホへ配信(LANローカルサーバ・公開しない)")
@@ -655,8 +695,8 @@ def main():
     slug = _slug(final)
     hpath = args.out or os.path.join(OUT_DIR, slug + ".html")
     tpath = os.path.splitext(hpath)[0] + ".txt"
-    _write(hpath, as_clean_html(art))
-    _write(tpath, as_plain(art))
+    _write(hpath, as_adhide_html(html, final))  # 閲覧=元ページ維持・広告のみ非表示
+    _write(tpath, as_plain(art))                # 分析=本文抽出(共有コア)
     print("クリーン閲覧HTML:", hpath)
     print("素テキスト     :", tpath)
     print("題名:", art["title"] or "(取れず)")
