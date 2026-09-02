@@ -774,12 +774,34 @@ def _purpose_block(dept):
     ★**起動文ではなく封筒に入れる**理由= registry は「1行足せば次の発話から効く」都度読み設計。
       起動文だと最初の1回しか読まれず、目的を更新しても既存セッションへ届かない。
     ★読めなければ空文字(fail-open)。
+    ★★2026-09-03 イージス研究室(hr-roomからの床削減依頼の実測中に発見)。
+      `registry_purpose()` は **(purpose, kpi) のタプルを返す**のに、ここは受けた値を
+      `str(t)` にかけていた。タプルは常に真なので:
+        - 目的が空の19部屋 = 毎便 `(None, None)` という文字列だけが封筒に載っていた
+        - 目的がある14部屋 = `('★カテゴリ「イージス…\\n…', 'A1 …')` という**Pythonのrepr**が
+          載り、改行が literal の `\n` に潰れて1行の団子になっていた
+      つまり **2026-07-26に「入れた」目的とKPIは、全33部屋で1度も読める形で届いていない**。
+      dept_daemon 側(_prompt の purpose_note)は最初から正しくunpackして整形している=
+      **同じ台帳を2つの経路が別々に描画していて、片方だけ壊れていた**。
+      → dept_daemon と同じ整形へ揃える。空なら**1文字も足さない**(封筒を無意味に太らせない)。
+    ★DEPT_CONF 側の purpose/kpi へフォールバックするのも dept_daemon と同じ(registryに
+      まだ行が無い部屋= gunji / soudan-room を落とさないため)。
     """
     try:
         import dept_daemon
-        t = dept_daemon.registry_purpose(dept)
-        return ("■この部門の目的とKPI(正本= 00_AI-HQ/org_registry.yml。"
-                "★ここが変わったら次の便から効く)\n" + str(t).strip() + "\n\n") if t else ""
+        pur, kpi = dept_daemon.registry_purpose(dept)
+        conf = dept_daemon.DEPT_CONF.get(dept) or {}
+        pur = pur or conf.get("purpose")
+        kpi = kpi or conf.get("kpi")
+        if not pur and not kpi:
+            return ""                      # ★空なら出さない(旧: (None, None) が毎便載っていた)
+        out = ("■この部門の目的とKPI(正本= 00_AI-HQ/org_registry.yml。"
+               "★ここが変わったら次の便から効く)\n")
+        if pur:
+            out += str(pur).strip() + "\n"
+        if kpi:
+            out += "【KPI】" + str(kpi).strip() + "\n"
+        return out + "\n"
     except Exception:
         return ""
 
