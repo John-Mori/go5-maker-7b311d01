@@ -61,6 +61,10 @@ try:
     import kana_choice_gate as _kana_choice   # ゲートH(かな括弧の選択肢ラベル)
 except Exception:
     _kana_choice = None                       # import 失敗でもミラーは動く(fail-open)
+try:
+    import dept_ref_gate as _dept_ref         # ゲートI(部門を人格名で呼ぶ崩れ)
+except Exception:
+    _dept_ref = None
 
 # ルールは **mtime が変わったら読み直す**(常駐の _tone_rules と同じ思想)。
 #   人事部門が写像へ1行足した時に、ミラー側だけ古い規則で動くのを防ぐ。
@@ -134,7 +138,8 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
     do_fix = _fix_enabled() if fix is None else bool(fix)
     summary = {"naming_fix": 0, "naming_warn": 0, "tone_fix": 0, "tone_warn": 0,
                "meta_strip": 0, "meta_emptied": False, "narration_leak": 0,
-               "kana_choice_fix": 0, "kana_choice_warn": 0}
+               "kana_choice_fix": 0, "kana_choice_warn": 0,
+               "dept_ref_fix": 0, "dept_ref_warn": 0}
     s = str(text or "")
     if not s.strip() or not str(persona or "").strip():
         return text, summary
@@ -261,6 +266,36 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
                 msg_id=str(msg_id or ""), audit_path=TONE_AUDIT)
             summary["kana_choice_fix"] = len(_kfix)
             summary["kana_choice_warn"] = len(_kwarn)
+            s = s2
+    except Exception:
+        pass            # 素通し=送信は殺さない
+
+    # --- ゲートI(部門を人格名で呼ぶ崩れ)= **話者非依存** ---------------------
+    # ★2026-09-02 DEF-kaizen-analyst-9d9bd45e55。人事部門の裁定(呼称ルール.json
+    #   department_reference_rule)の基盤側。部門を指す位置に人格名が単独で置かれた時だけ直す。
+    #   ★呼称ルール.json の表は speaker×target=**人格ペア**で、『部門』という target クラスが
+    #     無い(=schema拡張が要る)。だからC(naming_gate)に足さず別口にした。naming_gate L82 が
+    #     漢字名を構造的に外している所へ足すと、そちらの誤爆側に落ちる。
+    #   ★写像は org_registry.yml の display_ja(正本・ORG-11)。ここに部門名を書かない。
+    #   ★書き換えるのは実測で誤爆0だった rule(A_route)だけ。B_own は検知のみ=台帳に残す。
+    try:
+        if _dept_ref is not None:
+            s2, _dhits = _dept_ref.apply(s)
+            rows = []
+            for h in _dhits:
+                fixed = h.get("rule") in _dept_ref.FIX_RULES
+                rows.append({"ts": ts, "dept": dept,
+                             "event": "dept_ref_fix" if fixed else "dept_ref",
+                             "persona": str(persona or ""), "source": source,
+                             "target": h.get("dept", ""), "found": h.get("name", ""),
+                             "expected": [h.get("display_ja", "")], "rule": h.get("rule", ""),
+                             "near": h.get("line", "")[:200],
+                             "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
+                if fixed:
+                    summary["dept_ref_fix"] += 1
+                else:
+                    summary["dept_ref_warn"] += 1
+            _append(NAMING_AUDIT, rows)
             s = s2
     except Exception:
         pass            # 素通し=送信は殺さない

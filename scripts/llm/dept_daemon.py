@@ -3929,6 +3929,12 @@ try:
     import kana_choice_gate as _kana_choice
 except Exception:
     _kana_choice = None                     # import 失敗でもデーモンは起動する(fail-open)
+# ★出力ゲートI(部門を人格名で呼ぶ崩れ)= 話者非依存。2026-09-02 DEF-kaizen-analyst-9d9bd45e55。
+#   正本= dept_ref_gate.py。**経路②(ミラー=output_gates)からも同じ1本を呼ぶ**(片肺にしない)。
+try:
+    import dept_ref_gate as _dept_ref
+except Exception:
+    _dept_ref = None                        # import 失敗でもデーモンは起動する(fail-open)
 _TONE_RULES_CACHE = {"loaded": False, "rules": None}
 
 
@@ -4200,6 +4206,45 @@ def audit_kana_choice(dept, persona, text, rec=None):
         return _kana_choice.apply_and_audit(
             text, dept=dept, persona=str(persona or ""), source="daemon",
             msg_id=str((rec or {}).get("msg_id", "")), audit_path=TONE_AUDIT)
+    except Exception:
+        return text, [], []                 # fail-open= ゲートが配送を殺さない
+
+
+def audit_dept_ref(dept, persona, text, rec=None):
+    """出力ゲートI: 部門を指す位置に置かれた人格名を、部門の日本語名(display_ja)へ直す。
+
+    2026-09-02 DEF-kaizen-analyst-9d9bd45e55(人事部門の裁定・呼称ルール.json
+    department_reference_rule)の基盤側。例=「怜へ回す」→「プラットフォームSEへ回す」。
+    ★ゲートC(naming_gate)へ足さない理由= あちらの表は speaker×target=人格ペアで
+      『部門』という target クラスが無く(schema拡張が要る)、L82 が漢字名を構造的に外している。
+    ★話者非依存= 写像は org_registry.yml の display_ja(正本)だけ。誰が書いても駄目な崩れ。
+    ★書き換えるのは実測で誤爆0の rule(A_route)だけ。他は台帳に残す(dept_ref_gate.FIX_RULES)。
+    ★記録先を2つ持たない= 既存の naming_audit.jsonl へ相乗り(event=dept_ref_fix / dept_ref)。
+    返り値: (fixed_text, applied, remaining)。ゲート無効/例外時は (元text, [], [])。
+    """
+    try:
+        if _dept_ref is None:
+            return text, [], []
+        fixed, hits = _dept_ref.apply(text)
+        if not hits:
+            return text, [], []
+        applied = [h for h in hits if h.get("rule") in _dept_ref.FIX_RULES]
+        remaining = [h for h in hits if h.get("rule") not in _dept_ref.FIX_RULES]
+        os.makedirs(os.path.dirname(NAMING_AUDIT), exist_ok=True)
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")       # JST(常駐はJSTで動く)
+        mid = str((rec or {}).get("msg_id", ""))
+        with open(NAMING_AUDIT, "a", encoding="utf-8") as f:
+            for h in hits:
+                f.write(json.dumps({
+                    "ts": ts, "dept": dept,
+                    "event": "dept_ref_fix" if h in applied else "dept_ref",
+                    "persona": str(persona or ""), "source": "daemon",
+                    "target": h.get("dept", ""), "found": h.get("name", ""),
+                    "expected": [h.get("display_ja", "")], "rule": h.get("rule", ""),
+                    "near": h.get("line", "")[:200], "msg_id": mid,
+                    "excerpt": str(text or "")[:200],
+                }, ensure_ascii=False) + "\n")
+        return fixed, applied, remaining
     except Exception:
         return text, [], []                 # fail-open= ゲートが配送を殺さない
 
@@ -7633,6 +7678,19 @@ class Daemon:
                     log(self.dept,
                         f"★出力ゲートH(かな括弧・記録のみ=素通し): 話者={_speaker} "
                         f"理由={_kwarn[0].get('reason')} msg={mid}")
+                # ★★出力ゲートI(部門を人格名で呼ぶ崩れ)= 話者非依存(2026-09-02)。
+                #   H と同じ位置=呼称/口調の書き直しが終わった本文に当てる。
+                _new_dref, _dfix, _dwarn = audit_dept_ref(self.dept, _speaker, _part, rec)
+                if _dfix:
+                    log(self.dept,
+                        f"★出力ゲートI(部門名・書き直し): 話者={_speaker} "
+                        f"{'/'.join(h.get('name', '') + '→' + h.get('display_ja', '') for h in _dfix)} "
+                        f"msg={mid}")
+                    _part = _new_dref
+                if _dwarn:
+                    log(self.dept,
+                        f"★出力ゲートI(部門名・記録のみ=素通し): 話者={_speaker} "
+                        f"rule={_dwarn[0].get('rule')} 見つけた={_dwarn[0].get('name')} msg={mid}")
                 # ★★出力ゲートE(名乗りタグの残存)= C/D/F の**後ろ**= 送信直前の最後の1点。
                 #   ここまで来て `[名前]` が残っている= 上流の名義解決が失敗した証拠(HQの定義)。
                 #   前置き(作業メモ)の露出も同じ便で起きるので、落とす時は一緒に落ちる。
