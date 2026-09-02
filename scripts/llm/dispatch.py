@@ -421,7 +421,32 @@ def post_work_to_channel(dept, persona, post_body, timeout=90):
         return ""              # 投稿失敗は握り潰す。便はこの後(実は既に)enqueue される
 
 
-def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience=""):
+# ==== 呼称ゲートC(2026-09-02・DEF-hr-room-b5e833f5bd/ 人事部門ククール依頼)=========
+#   ★実測でわかったこと= **投函の便はどのゲートも通っていなかった**。
+#     ゲートが在る合流点は2つだけ= ①常駐 dept_daemon.generate ②ミラー mirror_to_discord。
+#     dispatch は queue へ直に入れ、`--work` の表投稿も persona_send を直に叩く=第3の出口。
+#     だからピン(呼称ルール.json / characterfile)がどれだけ正しくても、便には効かない。
+#   ★ここが合流点だ= キュー投函も表投稿も `--also-post` の写しも、下の1本を通ってから出る。
+#   ★当てるのは呼称だけ・呼びかけ位置だけ(理由= output_gates.apply_naming_gate_only の説明)。
+def naming_gate_pass(sender, from_dept, body):
+    """投函する本文へ呼称ゲートCを当てる。返り値=(本文, 直した件数, 警告のみの件数)。
+
+    fail-open: 何が起きても例外を出さず、元の本文をそのまま返す(便は止めない)。
+    """
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import output_gates as og
+        persona = str(sender or "").split("(")[0].strip()
+        out, summary = og.apply_naming_gate_only(from_dept or "", persona, body,
+                                                 source="dispatch")
+        return out, summary.get("naming_fix", 0), summary.get("naming_warn", 0)
+    except Exception:
+        return body, 0, 0
+
+
+def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience="",
+             from_dept=""):
     """1部門へ指令を投函する。戻り値=(ok, msg_id)。
 
     ★C-023: work(=--workの一行)が実質値を持つ時だけ「実依頼」として相手部門チャンネルへ表投稿する。
@@ -437,6 +462,16 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
     synthetic = f"DISPATCH-{dept}-{int(time.time() * 1000)}"
     is_work = is_work_request(work)
     aud = audience_fields(audience)
+
+    # ★呼称ゲートC。**表投稿より前・enqueue より前**に置く= 2つの出口の手前(合流点)。
+    #   main() が既に通した便はここでは何も当たらない(直った本文には違反が無い)=
+    #   同報でも台帳が水増しされない。dispatch() を直に呼ぶ側(daily_reflection_trigger /
+    #   テスト)もここで必ず通る。
+    body, _nfix, _nwarn = naming_gate_pass(sender, from_dept, body)
+    if _nfix:
+        print(f"  [{dept}] ★呼称ゲートC= 本文を {_nfix}件 直した(送信者={sender})")
+    if _nwarn:
+        print(f"  [{dept}] 呼称ゲートC= 警告のみ {_nwarn}件(本文は変えていない・台帳に記録)")
 
     if dry_run:
         if is_work:
@@ -604,9 +639,18 @@ def main():
             print("  どうしても直接出す必要がある時だけ --direct を付ける(理由を本文に書くこと)。")
             return 2
 
+    # ★呼称ゲートCは同報の**手前で1回**通す(dispatch() 内にも同じ関門が在るが、
+    #   先に直しておけば台帳に同じ違反が部門数ぶん並ばない)。
+    body, nfix, nwarn = naming_gate_pass(a.sender, a.from_dept, body)
+    if nfix:
+        print(f"★呼称ゲートC= 投函本文を {nfix}件 直した(送信者={a.sender})")
+    if nwarn:
+        print(f"呼称ゲートC= 警告のみ {nwarn}件(本文は変えていない・naming_audit.jsonl に記録)")
+
     ok = 0
     for d in depts:
-        good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience)
+        good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience,
+                           a.from_dept)
         ok += 1 if good else 0
     print(f"投函 {ok}/{len(depts)} 部門")
     warn = addressee_warning(body, depts)

@@ -903,7 +903,7 @@ FULL_KEY_SWAP = True
 FULL_KEY_SWAP_REASONS = ("forbidden", "override_allowed")
 
 
-def naming_corrections(persona, dept, text, rules):
+def naming_corrections(persona, dept, text, rules, vocative_only=None):
     """高信頼の呼称違反だけ自動修正した本文を返す(純関数)。
 
     返り値: {"fixed": str, "applied": [ {target,to,reason,count} ], "remaining": [verdict...] }
@@ -911,6 +911,13 @@ def naming_corrections(persona, dept, text, rules):
       - remaining : 自動修正しなかった違反(=警告のみ・呼び出し側で naming_audit へ残す)。
     ★VOCATIVE_ONLY_DEPTS の部屋(人事部門)は**呼びかけ位置だけ**直し、地の文の出現は
       全部 remaining へ回す(呼称ルールを本文で論じる部屋で本文が化けるのを防ぐ)。
+    ★vocative_only= その判定を呼び出し側から上書きする(None=従来どおり dept で決める)。
+      True を渡す経路= 投函(dispatch)。理由は実測(2026-09-02・DEF-hr-room-b5e833f5bd):
+      dispatch の便は部屋の地の文と同じで**呼称ルールそのものを書く**(「default=デブライネさん」
+      「(a)デ・ブライネさん→デブライネさん 表記統一」)。ククールの実便8本へ当てて測ったら、
+      dept を渡さない(=地の文も直す)場合は **6本が書き換わり、その大半が化けた**。
+      dept=hr-room 相当(呼びかけ位置だけ)にすると **書き換え1本=事故便そのもの・誤爆0**。
+      投函経路は送信元 dept が既定 "hq" のまま出されることがある=部屋名では安全側に倒せない。
     fail-open: 例外時は元文と applied=[] を返す。
     """
     result = {"fixed": str(text or ""), "applied": [], "remaining": []}
@@ -926,7 +933,7 @@ def naming_corrections(persona, dept, text, rules):
         #     場所が別の文字列になったら、覆われた所を直したり本物を素通ししたりする。
         masked = _mask_protected(_mask_quoted_mentions(_mask_name_tags(s, persona, rules)))
         # ★呼称ルールを本文で論じる部屋は、呼びかけ位置だけ直す(地の文は警告のみ)。
-        voc_only = _vocative_only(dept)
+        voc_only = _vocative_only(dept) if vocative_only is None else bool(vocative_only)
         repls = []  # (start, end, new)
         for v in verdicts:
             reason = v.get("reason")

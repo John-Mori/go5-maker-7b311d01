@@ -126,6 +126,59 @@ def _fix_enabled():
     return os.environ.get("GO5_MIRROR_GATE_FIX") == "1"
 
 
+def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
+                           vocative_only=True):
+    """★投函経路(dispatch)用= **ゲートC(呼称)だけ**を当てる。返り値 (text, summary)。
+
+    経路③ 投函 dispatch.py → キュー(inbox.db)/相手部屋への表投稿 は、経路①(常駐)にも
+    経路②(ミラー)にも通らない= **どのゲートも通っていなかった**(2026-09-02 実測)。
+    ここが3本目の合流点なので、同じ純関数(naming_corrections)を同じ台帳
+    (naming_audit.jsonl・source="dispatch")へ当てる=記録先を2つ持たない(§4)。
+
+    ★当てるのは呼称だけ。口調D・メタ剥ぎEは当てない=
+      便は表とちがって**書式そのものが情報**(表・引用・設定値)で、書き換えの誤爆が高くつく。
+      必要になったらここへ1本足せる(合流点は既にこの1箇所に寄せてある)。
+    ★vocative_only=True 既定= 呼びかけ位置だけ直す。根拠は naming_corrections の docstring
+      (ククール実便8本の実測: 地の文まで直すと6本書き換わり大半が化ける / 呼びかけ位置だけなら
+       書き換え1本=事故便そのもの・誤爆0)。
+    ★何が起きても例外を外へ出さない(fail-open)= 便を止めない。
+    """
+    summary = {"naming_fix": 0, "naming_warn": 0}
+    s = str(text or "")
+    if not s.strip() or not str(persona or "").strip():
+        return text, summary
+    try:
+        rules = _rules("naming")
+        if _naming_gate is None or not rules:
+            return text, summary
+        res = _naming_gate.naming_corrections(persona, dept, s, rules,
+                                              vocative_only=vocative_only) or {}
+        applied = res.get("applied") or []
+        remaining = res.get("remaining") or []
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        excerpt_before = s[:200]
+        rows = []
+        for a in applied:
+            rows.append({"ts": ts, "dept": dept, "event": "naming_fix",
+                         "persona": str(persona or ""), "source": source,
+                         "target": a.get("target", ""), "to": a.get("to", ""),
+                         "count": a.get("count", 0), "reason": a.get("reason", ""),
+                         "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
+        for v in remaining:
+            rows.append({"ts": ts, "dept": dept, "event": "naming",
+                         "persona": str(persona or ""), "source": source,
+                         "target": v.get("target", ""), "found": v.get("found", ""),
+                         "expected": v.get("expected", []), "reason": v.get("reason", ""),
+                         "near": v.get("near", ""), "hits": v.get("hits", 0),
+                         "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
+        _append(NAMING_AUDIT, rows)
+        summary["naming_fix"] = len(applied)
+        summary["naming_warn"] = len(remaining)
+        return (res.get("fixed", s) or s), summary
+    except Exception:
+        return text, summary
+
+
 def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
     """本文にゲートC(呼称)→D(口調)を当て、監査へ残す。既定は**警告のみ**(本文を変えない)。
 
