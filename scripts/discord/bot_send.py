@@ -56,6 +56,25 @@ def main():
     if not body:
         print("本文が空です。")
         sys.exit(1)
+    # ★生CLIフラグを本文として投稿しない(2026-09-02 事故 msg 1544669455995637771)。
+    #   この口は本文を「残り引数の連結」で作る=persona_send/dispatch の書式(--body-file 等)を
+    #   そのまま渡すと、フラグの文字列がad研究室chへ本文として出た。ここは対応していないので
+    #   黙って出さず、失敗させて呼び出し元に気づかせる(止血・恒久はプラットフォームSE)。
+    _SEND_FLAGS = {
+        "--body", "--body-file", "--persona", "--channel", "--dept", "--from",
+        "--audience", "--also-post", "--avatar", "--color", "--etitle", "--to",
+        "--sender", "--direct", "--dry-run", "--silent", "--plain", "--big",
+        "--nobold", "--suffix",
+    }
+    _head = (args[1] if len(args) > 1 else "").split("=")[0]
+    if _head in _SEND_FLAGS:
+        print(f"本文がフラグから始まっています: {_head}\n"
+              "  bot_send.py はフラグを解釈しません(残り引数をそのまま本文にします)。\n"
+              "  本文をファイルから渡すなら: python scripts/discord/persona_send.py --dept <slug> "
+              "--persona <名前> --body-file <path>\n"
+              "  bot_send.py で長文を渡すなら本文は標準入力へ: "
+              "cat <path> | python scripts/discord/bot_send.py --dept <slug>")
+        sys.exit(4)
     with open(os.path.join(LOCAL, "discord_bot_token.txt"), "r", encoding="utf-8") as f:
         token = f.read().strip()
     with open(os.path.join(LOCAL, "discord_channels.json"), "r", encoding="utf-8") as f:
