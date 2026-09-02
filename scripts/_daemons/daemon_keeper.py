@@ -207,6 +207,16 @@ WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "llm", "liveblog_gate.py"),
                os.path.join(ROOT, "scripts", "llm", "gemini_usage.py"),
                os.path.join(ROOT, "scripts", "discord", "enjoh.py"),
+               # ★2026-09-02 追加(C-042・イージス研究室)= dept_daemon が起動時に import する
+               #   のに載っていなかった4本。**この4本だけを直しても、載らなければ何も変わらない**
+               #   (例: self_check の上限秒を実測に合わせても、載せ替えが起きなければ古い上限のまま
+               #   走り続ける= 今日その形で「検品が一度も答えていない」を実測した)。
+               #   struct_drift=ゲートJ / dept_ref=ゲートI / send_audit=送信口の台帳 /
+               #   self_check=恒久策#5の検品。
+               os.path.join(ROOT, "scripts", "llm", "struct_drift_gate.py"),
+               os.path.join(ROOT, "scripts", "llm", "dept_ref_gate.py"),
+               os.path.join(ROOT, "scripts", "llm", "self_check.py"),
+               os.path.join(ROOT, "scripts", "discord", "send_audit.py"),
                os.path.join(ROOT, "scripts", "queue", "leasequeue.py"),
                os.path.join(ROOT, "scripts", "_common", "session_presence.py"),
                os.path.join(ROOT, "scripts", "discord", "persona_send.py"),
