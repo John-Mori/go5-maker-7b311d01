@@ -65,6 +65,29 @@ MIN_COMMENT_LEN = 6
 # 被参照数の多さだけで上位に来る事故が実測されたための対策)。
 MAX_COMMENT_LEN = 120
 
+# テロップ表示は最大2行(🐧マニュアル⑦)。120字上限の候補でも実際は2行に
+# 収まらない実例があった(三笘 軍議指摘・モドリッチ発注 msg1544677874911678468)。
+# 元コメ(text)は削らずそのまま残し、表示専用の抜粋を別フィールド(telop)で持つ。
+TELOP_LINE_CHARS = 18  # copy-rules.md の「1行約20字」目安に寄せた保守値
+TELOP_MAX_CHARS = TELOP_LINE_CHARS * 2
+_BREAK_CHARS = "。、!?!?…♪ "
+
+
+def compress_for_telop(text, max_len=TELOP_MAX_CHARS):
+    """表示用テロップ抜粋(≤2行)を作る。元本文(text)は呼び出し側が別で保持する。"""
+    body = text.strip()
+    if len(body) <= max_len:
+        return body
+    cut = body[:max_len]
+    best = -1
+    for ch in _BREAK_CHARS:
+        idx = cut.rfind(ch)
+        if idx > best:
+            best = idx
+    if best >= max_len // 2:
+        cut = cut[:best + 1]
+    return cut.rstrip("。、 ") + "…"
+
 
 def ng_filter(text):
     """マニュアル⑧のNG語を言い換える。戻り値=(置換後テキスト, 置換した語のリスト)。"""
@@ -147,7 +170,9 @@ def pick_thread(threads, key=None, rank=0):
             if t.get("key") == key:
                 return t
         raise SystemExit(f"key={key} が見つからない")
-    ordered = sorted(threads, key=lambda t: t.get("ikioi", 0), reverse=True)
+    # select_score = scrape_5ch.py のスレ選定フィルタ層(A/B/C)込みのスコア。
+    # 無い(旧データ)場合は ikioi にフォールバック。
+    ordered = sorted(threads, key=lambda t: t.get("select_score", t.get("ikioi", 0)), reverse=True)
     if rank >= len(ordered):
         raise SystemExit(f"rank={rank} が範囲外(スレ数={len(ordered)})")
     return ordered[rank]
@@ -169,6 +194,7 @@ def build_script(thread):
             out.append({
                 "res": c["res"],
                 "text": body_ng,
+                "telop": compress_for_telop(body_ng),
                 "ng_hits": hits,
                 "images": c["images"],
             })
@@ -262,6 +288,8 @@ def render_markdown(script):
             img = f" [画像:{c['images'][0]}]" if c["images"] else ""
             ng = f" (NG置換:{', '.join(c['ng_hits'])})" if c["ng_hits"] else ""
             lines.append(f"  - レス{c['res']}: {c['text']}{img}{ng}")
+            if c.get("telop") and c["telop"] != c["text"]:
+                lines.append(f"    テロップ案(2行以内抜粋): {c['telop']}")
         lines.append("")
     lines.append("## 画像候補(本文中のURL・目視で鎖骨/生足チェック要)")
     for u in script["image_candidates"]:

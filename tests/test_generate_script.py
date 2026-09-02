@@ -65,5 +65,37 @@ class TestRankComments(unittest.TestCase):
             g.is_template = original
 
 
+class TestCompressForTelop(unittest.TestCase):
+    def test_short_text_unchanged(self):
+        text = "それな"
+        self.assertEqual(g.compress_for_telop(text), text)
+
+    def test_long_text_capped_to_two_lines_worth(self):
+        text = "あ" * 80
+        out = g.compress_for_telop(text)
+        self.assertLessEqual(len(out), g.TELOP_MAX_CHARS + 1)  # 「…」1字ぶんの余裕
+        self.assertTrue(out.endswith("…"))
+
+    def test_breaks_on_punctuation_when_possible(self):
+        text = "これはマジですごい。でも後半はもう関係ない長い蛇足の文がずっと続くだけの部分"
+        out = g.compress_for_telop(text, max_len=20)
+        self.assertTrue(out.startswith("これはマジですごい。"))
+
+    def test_original_text_preserved_alongside_telop(self):
+        # 圧縮は表示専用。build_script経由でも元のtextフィールド(comments[]["text"])は
+        # 削れておらず、telopフィールドだけが2行以内に短縮されていることを確認する。
+        long_comment = "い" * 100  # 100字(6〜120字の候補範囲に収まる長文)
+        thread = {
+            "board": "test", "key": "1", "url": "http://example.com",
+            "ikioi": 1.0, "res": 1,
+            "title": "テストスレ", "posts": ["OP本文", long_comment],
+        }
+        script = g.build_script(thread)
+        c = script["blocks"][2]["comments"][0]
+        self.assertEqual(c["text"], long_comment)  # 元本文は無傷
+        self.assertLessEqual(len(c["telop"]), g.TELOP_MAX_CHARS + 1)
+        self.assertNotEqual(c["telop"], c["text"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

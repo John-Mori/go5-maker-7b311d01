@@ -58,6 +58,38 @@ ADULT_DIRS = {
     "hentai", "housou", "pinky", "oimo", "ascii2d2",
 }
 
+# スレ選定の前フィルタ層(2026-09-02 モドリッチ発注 msg1544677874911678468・
+# 「核心の改善=スレ選定が的を外している」への対策)。
+# 勢い(レス数÷経過日数)だけで選ぶと、単一トピックのフックが無い定番の
+# 総合/雑談スレ(例: 「ホロライブ総合スレ#453」)が常に上位へ来て、
+# 【朗報/悲報】〔要約〕www 型のフックが作れない。
+# → (A)定番の総合/雑談/実況スレをタイトルパターンで除外
+_MEGA_THREAD_TITLE = re.compile(
+    r"総合(?:スレ)?|雑談(?:スレ)?|(?:part|パート)\s*\d+|#\d+|その\d+|"
+    r"避難所|実況(?:スレ)?\d*$",
+    re.I,
+)
+# → (B)単一トピックのフック定番(【】要約・「〜した結果」等)は軽く優先
+_SINGLE_TOPIC_HINT = re.compile(r"【[^】]{2,20}】|した結果|であることが判明|なんJ民")
+# → (C)際どい寄りの語(露骨語は含めない。NGワード自体はNG_LITERAL側で別途言い換え)
+_EDGY_HINT = re.compile(
+    r"エロ|際どい|きわどい|セクシー|谷間|美脚|巨乳|色気|むちむち|グラビア|水着|下着|彼女|浮気|不倫"
+)
+
+
+def selection_weight(title):
+    """スレ選定の前フィルタ層(A/B/C)。戻り値=(除外するか, 補正倍率)。
+    除外Trueなら勢い1位でも候補から外す(総合/雑談スレ)。
+    """
+    if _MEGA_THREAD_TITLE.search(title):
+        return True, 0.0
+    weight = 1.0
+    if _SINGLE_TOPIC_HINT.search(title):
+        weight *= 1.15
+    if _EDGY_HINT.search(title):
+        weight *= 1.15
+    return False, weight
+
 
 def fetch(url, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
@@ -153,10 +185,21 @@ def scrape_board(directory_name, top_n, max_posts, sleep, dry_run):
     threads = parse_subject(fetch(f"{base}/subject.txt"))
     for t in threads:
         t["ikioi"] = ikioi(t["res"], t["key"], now_epoch)
-    threads.sort(key=lambda t: t["ikioi"], reverse=True)
-    top = threads[:top_n]
 
-    print(f"[{directory_name}] host={host} 総スレ={len(threads)} 上位={len(top)}(勢い降順)")
+    excluded = 0
+    kept = []
+    for t in threads:
+        is_mega, weight = selection_weight(t["title"])
+        if is_mega:
+            excluded += 1
+            continue
+        t["select_score"] = round(t["ikioi"] * weight, 2)
+        kept.append(t)
+    kept.sort(key=lambda t: t["select_score"], reverse=True)
+    top = kept[:top_n]
+
+    print(f"[{directory_name}] host={host} 総スレ={len(threads)} "
+          f"総合/雑談等で除外={excluded} 候補={len(kept)} 上位={len(top)}(選定スコア降順)")
     records = []
     for t in top:
         url = f"{base}/test/read.cgi/{directory_name}/{t['key']}/"
@@ -167,6 +210,7 @@ def scrape_board(directory_name, top_n, max_posts, sleep, dry_run):
             "title": t["title"],
             "res": t["res"],
             "ikioi": t["ikioi"],
+            "select_score": t["select_score"],
             "url": url,
             "fetched_at": datetime.now(JST).isoformat(timespec="seconds"),
         }
