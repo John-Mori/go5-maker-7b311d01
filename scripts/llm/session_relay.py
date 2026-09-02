@@ -350,9 +350,14 @@ AMES_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "ames_share
 #   (起動文へ足す側は下の _room_persona_names + 登録簿ループ1本に統一)。
 #   ★第1適用=早坂芽衣(mei_shared.jsonl)。効果を見てから他の人格も足す。
 MEI_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "mei_shared.jsonl")
+# ★第2適用=アーモンドアイ(2026-09-03 Chami直接指示・便=1544737879463301282)。原文=
+#   「アイ、芽衣はここでの記憶も共通で持っといてね」(部屋=分析部門)。
+#   アイは consult-intel と shorts-analyst の2部屋を持つので、芽衣と同じく部屋で記憶が分かれる。
+ALMOND_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "almond_shared.jsonl")
 SHARED_MEMORY_BY_PERSONA = {
     "アメス": AMES_SHARED_MEMORY,
     "早坂芽衣": MEI_SHARED_MEMORY,
+    "アーモンドアイ": ALMOND_SHARED_MEMORY,
 }
 
 # ★ツール許可= dept_daemon.WORK_ALLOWED_TOOLS と**同一のallowlist**を使う。
