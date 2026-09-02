@@ -485,8 +485,55 @@ def _build_index():
     return len(items)
 
 
-def serve(port=8000):
+def refresh_all():
+    """的リスト(local/_work/cleanview_targets.jsonl)の全記事を再抽出し索引を更新。
+
+    手動の per-記事 操作を無くす=自動巡回(スケジューラ)から1コマンドで回せる。
+    証明書切れは fetch() の自動フォールバックで越える。記事URL(/archives/ID.html)以外は飛ばす。
+    """
+    import json
+    path = os.path.join(ROOT, "local", "_work", "cleanview_targets.jsonl")
+    n_ok = n_skip = n_fail = 0
+    try:
+        lines = io.open(path, encoding="utf-8").read().splitlines()
+    except OSError:
+        print("的リストが無い:", path)
+        return 0
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        url = rec.get("url", "")
+        if not re.search(r"/archives/\d+\.html", url):
+            n_skip += 1
+            print("飛ばす(記事URLでない):", url)
+            continue
+        try:
+            html, final = fetch(url)
+        except Exception as e:  # noqa: BLE001  取得失敗は1件ずつ握って続行
+            n_fail += 1
+            print("取得失敗:", url, type(e).__name__)
+            continue
+        art = extract_article(html, final)
+        slug = _slug(final)
+        hp = os.path.join(OUT_DIR, slug + ".html")
+        _write(hp, as_clean_html(art))
+        _write(os.path.splitext(hp)[0] + ".txt", as_plain(art))
+        n_ok += 1
+        print("更新:", slug, "(レス%d件/本文%d字)" % (len(art["reslist"]), len(art["body_text"])))
+    n = _build_index()
+    print("完了: 更新%d本 / 飛ばし%d本 / 失敗%d本 / 索引%d本" % (n_ok, n_skip, n_fail, n))
+    return n_ok
+
+
+def serve(port=8000, refresh=False):
     """local/clean_reader/ を同一Wi-Fi内へ配信(スマホで開く)。広告JSは元から無い。"""
+    if refresh:
+        refresh_all()
     import functools
     import http.server
     import socketserver
@@ -514,15 +561,22 @@ def main():
     g.add_argument("--analyze", action="store_true", help="分析用の素テキストを出力")
     g.add_argument("--serve", action="store_true",
                    help="作成済み記事を同じWi-Fiのスマホへ配信(LANローカルサーバ・公開しない)")
+    g.add_argument("--refresh-all", dest="refresh_all", action="store_true",
+                   help="的リスト(local/_work/cleanview_targets.jsonl)の全記事を再生成+索引更新")
     ap.add_argument("--port", type=int, default=8000, help="--serve のポート(既定8000)")
+    ap.add_argument("--refresh", action="store_true", help="--serve の前に --refresh-all を実行")
     ap.add_argument("--out", help="出力ファイルパス(--analyze / --view --print で使用)")
     ap.add_argument("--print", dest="to_stdout", action="store_true", help="ファイルへ書かず標準出力へ")
     ap.add_argument("--insecure", action="store_true",
                     help="TLS証明書の検証を無効化(local限定・自己責任。証明書切れの老舗まとめ用)")
     args = ap.parse_args()
 
+    if args.refresh_all:
+        refresh_all()
+        return
+
     if args.serve:
-        serve(port=args.port)
+        serve(port=args.port, refresh=args.refresh)
         return
 
     if not args.url:
