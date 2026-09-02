@@ -45,6 +45,16 @@ KEY_FILE = os.path.join(ROOT, "local", "gemini_api_key.txt")
 PROMPT_SPEC = os.path.join(ROOT, "docs", "departments", "copy-director",
                            "vision_3択生成プロンプト仕様.md")
 
+# 共有のGemini無料枠(GenerateRequestsPerDayPerProjectPerModel-FreeTier / 20回・日・モデル毎)を
+# 食う口は、全部この台帳へ載せる(2026-09-03 イージス研究室)。載っていない口が在ると
+# 「誰が20回を食ったか」が測れず、429の原因を当て推量で書くことになる(C-064と同型)。
+# ★取り込みに失敗しても生成は続ける(計測が本番を止めない)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+try:
+    import gemini_usage
+except Exception:
+    gemini_usage = None
+
 # vision対応の flash 系(安く軽く→確認済みの控え)。ask_gemini と同じ思想でフォールバック。
 DEFAULT_MODELS = [
     "gemini-flash-latest",
@@ -156,6 +166,16 @@ def fetch_image(url, timeout=30):
         return None
 
 
+def _usage(model, in_chars, out_chars, images, ok, err, t0):
+    """1リクエスト=1行。★モデルのフォールバックは1回ごとに別リクエスト=別枠なので、成功も失敗も
+    その都度書く(成功分だけ数えると枠の消費を過小評価する)。who は鍵の束= local/gemini_api_key.txt
+    を使う側 = "homin"(ask_gemini/tone_rewrite と同じ束)。"""
+    if not gemini_usage:
+        return
+    gemini_usage.log("homin", "vision_comments", model, in_chars, out_chars,
+                     images, ok, err, time.time() - (t0 or time.time()))
+
+
 def call_vision(prompt, image_parts, title, synopsis, key, models, timeout=180):
     """1候補ぶんの画像+プロンプトを投げて生JSON文字列を返す(候補が無ければ '')。
     synopsis は取得できた時だけ §4 プロンプトへ渡す任意メタ(vision仕様§1.5=画像＋あらすじ／失敗なら絵のみ)。"""
@@ -181,10 +201,12 @@ def call_vision(prompt, image_parts, title, synopsis, key, models, timeout=180):
         },
     }
     body = json.dumps(payload).encode("utf-8")
+    in_chars = sum(len(p.get("text", "")) for p in parts if "text" in p)
     last_err = None
     for model in models:
         url = ("https://generativelanguage.googleapis.com/v1beta/models/"
                + model + ":generateContent?key=" + key)
+        t0 = time.time()
         try:
             req = urllib.request.Request(url, data=body,
                                          headers={"Content-Type": "application/json"})
@@ -194,10 +216,12 @@ def call_vision(prompt, image_parts, title, synopsis, key, models, timeout=180):
                 txt = d["candidates"][0]["content"]["parts"][0]["text"].strip()
             except Exception:
                 txt = ""   # 安全フィルタ等で候補なし
+            _usage(model, in_chars, len(txt), len(image_parts), True, "", t0)
             print(f"  [vision] {model} で応答", file=sys.stderr)
             return txt
         except urllib.error.HTTPError as e:
             last_err = f"{model} HTTP {e.code}"
+            _usage(model, in_chars, 0, len(image_parts), False, f"HTTP {e.code}", t0)
             if e.code in (400, 404, 429):
                 print(f"  [{model}] {e.code}→次のモデルへ", file=sys.stderr)
                 continue
@@ -207,6 +231,7 @@ def call_vision(prompt, image_parts, title, synopsis, key, models, timeout=180):
             continue
         except Exception as e:
             last_err = f"{model}: {e}"
+            _usage(model, in_chars, 0, len(image_parts), False, str(e)[:120], t0)
             print(f"  [{model}] {e}→次のモデルへ", file=sys.stderr)
             continue
     raise RuntimeError(f"全モデルで失敗(最後: {last_err})")
