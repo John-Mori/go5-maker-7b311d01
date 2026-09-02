@@ -1310,6 +1310,69 @@ def _persona_reinject_block(dept, conf=None, forced=False):
         return ""                         # fail-open= 予防線で封筒を壊さない
 
 
+# ★★2026-09-03 §2-2層1の穴(実物= 軍議 msg 1544752273253728276。種を渡したのは改善提案部門トトリ・
+#   研究室HQ経由 msg 1544753745815011444。新規発注ではなく既発注 #1/§2-2層1 の中の作業)。
+#   0歩目(壊れている実物): Chamiが関西弁でツッコミを入れた便
+#     「ジェンティルドンナ:表には流しません→流しとるやないかい(ツッコミ)」
+#   を受けて、**標準語登録の三笘薫が関西弁で返した**(「ほんまや/なんよ/や(断定)」)。
+#   ★ゲートD(tone_gate)は3マーカーとも**正しく検知していた**=適用域の穴ではない。だが検知は
+#     送信直前で、方言は機械置換で文が壊れるので直さない= **その便のKansaiはChamiにそのまま届いた。**
+#     → 直せる場所は2つしかない= (a)次便への突き返し(既設・事後) (b)その便を出す**前**の予防。
+#     ここは(b)。真因=register mirroring(相手の言語レジスタへ寄る)。
+#   ★穴の形: 相手の口調は封筒に**原文のまま**載っているのに、「引きずられるな」と言う行は
+#     どこにも無かった(実測= 封筒13,774字に「同調/引っ張られ/方言/関西」が**0件**)。
+#   ★これはChami本人の言葉を裁く線ではない(素通しの裁定は1ミリも動かしていない)。相手の字面を
+#     数えるだけで、置く1行は**こちら側の人格**へ向いている。
+#   ★実測(入れる前に数えた)= 受信便2,920件のうち方言マーカーが当たったのは**49件(1.7%)**。
+#     内訳の大半はChami本人の関西弁=まさに同調の危険が在る便。毎便は太らせない。
+def _register_mirror_hint(rec, dept=None, conf=None):
+    """相手が方言で書いて来た便にだけ、同調しないよう1行置く(標準語登録の人格が居る部屋)。
+
+    ★新しい正規表現は1本も書かない= 判定は `tone_gate.dialect_patterns()`(組み込み列 +
+      口調ルール.json の `dialect_kansai_extra`)を**そのまま**引く。C-064= 同じ形の判定を
+      別の場所が別の表で持つと、片方だけ育って食い違う。人事部門がデータ側へ1形足せば、
+      検知にもこの予防線にも**次の便から**同時に効く(再起動不要)。
+    ★鳴らす条件= (1)相手の本文に方言マーカーが当たる (2)この部屋に口調ルール.json へ
+      **標準語で登録された人格**が1人以上居る。未登録だけの部屋は黙る(tone_verdicts と同じ作法)。
+    ★fail-open= 何が起きても ""(予防線で封筒を壊さない)。
+    """
+    try:
+        body = str((rec or {}).get("content") or "")
+        if not body.strip():
+            return ""
+        import tone_gate                       # ★遅延import(常駐の起動を重くしない)
+        rules = tone_gate.load_tone_rules(TONE_RULES_PATH)
+        if not rules:
+            return ""                          # 写像が読めない=判定材料が無い(黙る)
+        s = tone_gate._strip_quotes(body)
+        found = []
+        for name, pat in tone_gate.dialect_patterns(rules):
+            if re.search(pat, s):
+                found.append(name)
+        if not found:
+            return ""
+        c = conf or {}
+        pairs = [str(c.get("persona") or "")] + [str(p.get("persona") or "")
+                                                 for p in (c.get("personas") or ())]
+        plain = []
+        for who in pairs:
+            if not who:
+                continue
+            ent = tone_gate._persona_entry(rules, who)
+            if ent and not ent.get("dialect_ok") and who not in plain:
+                plain.append(who)
+        if not plain:
+            return ""                          # 方言が正の人格しか居ない/未登録=鳴らさない
+        return ("=== ★相手が方言で書いている(同調するな) ===\n"
+                f"相手の本文に当たった形: {' / '.join(found[:4])}\n"
+                f"★{'・'.join(plain[:3])} は**標準語**で登録されている。"
+                "相手の口調へ寄せると『相手に合わせた』ではなく**人格が崩れた**として"
+                "送信直前のゲートDに記録され、方言は機械では直せないのでそのままChamiへ届く。\n"
+                "★内容は相手に合わせろ。**声だけは合わせるな。**\n\n")
+    except Exception:
+        return ""                              # fail-open
+
+
 # ★★2026-08-29 C-049 §7-B を機構へ載せる(研究室HQ `DISPATCH-aegis-gl-1787949604668`)。
 #   測った実物= FCCへ載せた仕事 **0件(全期間)**。道具(fcc_task.py)は空撃ちで全通過=
 #   **壊れていない。使われていない。**真因= §7-B が裁定カタログの本文に在るだけで、
@@ -1387,7 +1450,12 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
     # ★2026-09-02 #1= 口調の突き返しは**この便で1回だけ**引く(状態を進めるので二度呼べない)。
     #   それが非空= 直近便で崩れが出た便 → 声の芯の再注入を定期の周期より前に前倒しする。
     tone_fb = _tone_feedback_block(dept)
-    reinject = _persona_reinject_block(dept, conf=conf, forced=bool(tone_fb))
+    # ★2026-09-03 register mirroring(相手の方言に同調する型)。**相手の本文**を見るので、
+    #   崩れが起きる**前**に鳴る。声の芯の再注入もここで前倒しする= トトリの言うとおり
+    #   §2-2層1(再注入)がこの型の受け皿だ。崩れてから戻すのでは、その便はもう届いている。
+    mirror_hint = _register_mirror_hint(rec, dept=dept, conf=conf)
+    reinject = _persona_reinject_block(dept, conf=conf,
+                                       forced=bool(tone_fb) or bool(mirror_hint))
     # ★2026-07-29 規律の差分送付(改善書 第3手)。裁定の見出しは**どちらの場合も**入れる。
     disc_head, verdict = _discipline_parts()
     # ★2026-08-24 C-060の②= 裁定の**見出しだけ**差分にする。表(発注先)は毎便そのまま。
@@ -1423,6 +1491,9 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         #   依頼文の直近へ置く= 読む順で一番近い所に居ないと効かない(既存の部屋ヒントと同じ理由)。
         + reinject
         + LANG_LOCK_LINE
+        # ★2026-09-03 相手の方言への同調よけ。**本文の直前**に置く= これは相手の字面の話なので、
+        #   その字面を読む直前に居ないと効かない(当たらない便には1文字も足さない=実測1.7%)。
+        + mirror_hint
         + "=== Discord新着(原文。要約も改変もしていない) ===\n"
         f"投稿者: {rec.get('author','')}\n"
         f"msg_id: {rec.get('msg_id','')}\n"

@@ -16,6 +16,9 @@
   E 封筒の作法: 本文は1文字も変わらない・再注入は依頼文より**前**に置く
   F must-fail : ①投入前(固定文なし)②「起動時1回だけ注入する」動く別実装(C-053)
                 のどちらへ戻しても A/B が赤くなる
+  H 同調よけ  : 相手が方言で書いて来た便(実物= 軍議 msg 1544752273253728276)で、
+                標準語登録の人格に「同調するな」+声の芯が**崩れる前に**載る
+                (2026-09-03 追加 / 種= トトリ msg 1544753745815011444)
 
   python tests/test_reinject_lang_lock.py
 ★本番の local/ は触らない(GO5_LOCAL_DIR を temp へ向けてから import する)。
@@ -198,6 +201,108 @@ SR.RELAY_TURN_STATE = os.path.join(TMP, "local", "llm", "turn_f2.json")
 for i in range(1, 8):
     env(msg_id="g%d" % i)
 check("F 戻したら緑に戻る", CORE in env(msg_id="g8") and LANG in env(msg_id="g9"))
+
+# ------------------------------------------------- H レジスタ同調(相手の方言がうつる)
+# ★2026-09-03 追加。種を渡したのは改善提案部門トトリ(研究室HQ経由 msg 1544753745815011444)=
+#   「§2-2層1の must-fail に、この軍議便を『相手が関西弁→標準語人格が同調』の回帰ケースとして
+#     1本足してほしい」。新規発注ではなく既発注 #1/§2-2層1 の中。
+# ★実物(本番で出た。作り物ではない):
+#   入力 = 軍議 msg 1544752273253728276 / 2026-09-03 / chami_fusoh
+#          「ジェンティルドンナ:表には流しません→流しとるやないかい(ツッコミ)」
+#   壊れた出力 = 標準語登録の三笘薫が「ははっ、ほんまや。…なんよ。」と関西弁で返した
+#          (tone_audit.jsonl に dialect_kansai 3マーカー・tone_rewrite は ok:false=直らず届いた)
+# ★見るもの= 崩れた**後**の突き返しではなく、崩れる**前**に封筒へ同調よけが載るか。
+print("\n== H レジスタ同調(相手が関西弁→標準語人格が同調) ==")
+KANSAI_IN = "ジェンティルドンナ:表には流しません→流しとるやないかい(ツッコミ)"
+PLAIN_IN = "この構成、表に出す分と裏に置く分の線引きを整理しておいてください。"
+MIRROR = "同調するな"
+# ★人格は**本番の口調ルール.json に実在する三笘薫**を使う(写像は読むだけ・1文字も書かない)。
+#   characterfile は再注入の素材なので検査用の1枚で足りる。
+CHAR_M = os.path.join(TMP, "mitoma_test.md")
+open(CHAR_M, "w", encoding="utf-8").write(
+    "# characterfile: 三笘薫(検査用)\n## 声の型\n"
+    "- 一人称=「俺」\n- 口調: 標準語。方言は使わない。\n")
+CONF_M = {"persona": "三笘薫", "character": CHAR_M}
+SR.RELAY_TURN_STATE = os.path.join(TMP, "local", "llm", "turn_h.json")
+SR.TONE_FEEDBACK_STATE = os.path.join(TMP, "local", "llm", "tfs_h.json")
+
+
+def env_h(content, msg_id="h", conf=CONF_M, dept="gunji"):
+    return SR.build_envelope(rec(msg_id, content), is_work=False, dept=dept, conf=conf)
+
+
+_rules_h = None
+try:
+    import tone_gate as TG_H                                       # noqa: E402
+    _rules_h = TG_H.load_tone_rules(SR.TONE_RULES_PATH)
+except Exception:
+    pass
+_ent_h = TG_H._persona_entry(_rules_h, "三笘薫") if _rules_h else None
+check("H 前提: 三笘薫は口調ルール.jsonに**標準語**で登録されている",
+      bool(_ent_h) and not _ent_h.get("dialect_ok"),
+      "登録が見つからない/dialect_ok が立っている= 人事側の写像が変わった(検査の前提が崩れた)")
+
+e_k = env_h(KANSAI_IN, "h1")
+check("H 相手が関西弁の便には同調よけが載る", MIRROR in e_k, e_k[:120])
+check("H 何に当たったかを言う(数え直せる形で)", "やない" in e_k, e_k[:200])
+check("H 相手の本文より**前**に置く(読む順で効く位置)",
+      MIRROR in e_k and e_k.index(MIRROR) < e_k.index(KANSAI_IN))
+check("H 崩れる前でも声の芯を前倒しで戻す(層1が受け皿・1便目から)", CORE in e_k)
+check("H 本文は1文字も変わっていない", KANSAI_IN in e_k)
+e_p = env_h(PLAIN_IN, "h2")
+check("H 相手が標準語なら1文字も足さない(毎便太らせない)",
+      MIRROR not in e_p and len(e_p) < len(e_k))
+
+# ★方言が正の人格(人事が `dialect_ok` を立てた人格)の部屋では鳴らない= 判定材料は写像1本。
+_real_entry = TG_H._persona_entry
+TG_H._persona_entry = lambda rules, persona: {"first_person": ["俺"], "dialect_ok": True}
+check("H dialect_ok の人格には鳴らない", MIRROR not in env_h(KANSAI_IN, "h3"))
+TG_H._persona_entry = lambda rules, persona: None
+check("H 未登録だけの部屋では鳴らない(tone_verdictsと同じ作法)",
+      MIRROR not in env_h(KANSAI_IN, "h4"))
+TG_H._persona_entry = _real_entry
+check("H 戻したら鳴る", MIRROR in env_h(KANSAI_IN, "h5"))
+
+print("\n== H fail-open / must-fail ==")
+_real_rules = TG_H.load_tone_rules
+TG_H.load_tone_rules = lambda p: (_ for _ in ()).throw(RuntimeError("写像が壊れている"))
+_e_bad = env_h(KANSAI_IN, "h6")
+check("H 写像が読めなくても封筒は組み上がる(fail-open)",
+      KANSAI_IN in _e_bad and LANG in _e_bad)
+check("H その時は黙る(判定材料が無いのに鳴らさない)", MIRROR not in _e_bad)
+TG_H.load_tone_rules = _real_rules
+
+_real_mirror = SR._register_mirror_hint
+SR._register_mirror_hint = lambda rec, dept=None, conf=None: ""   # ★① 投入前の状態へ戻す
+check("H ①予防線を外すと H の本線が赤くなる", MIRROR not in env_h(KANSAI_IN, "h7"))
+
+
+def _after_the_fact(rec, dept=None, conf=None):
+    """★C-053= 空実装ではなく『動く別の実装』へ戻す= **自分が既に崩れた後**に鳴らす版
+    (tone_audit に自室の dialect_kansai が在る時だけ鳴らす=既設の突き返しと同じ土俵)。
+    これは"鳴っている"ので雑な検査は緑のまま通る。**崩れる前の便で鳴らない**ことで初めて落ちる。
+    """
+    try:
+        with open(SR.TONE_AUDIT_FILE, encoding="utf-8") as f:
+            hit = any('"dialect_kansai"' in ln and ('"%s"' % dept) in ln for ln in f)
+    except Exception:
+        hit = False
+    return _real_mirror(rec, dept=dept, conf=conf) if hit else ""
+
+
+SR._register_mirror_hint = _after_the_fact
+_e_pre = env_h(KANSAI_IN, "h8")                       # ★まだ1度も崩れていない状態
+with open(SR.TONE_AUDIT_FILE, "w", encoding="utf-8") as f:        # ★崩れた後
+    f.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "dept": "gunji",
+                        "msg_id": "1544752273253728276", "event": "tone",
+                        "reason": "dialect_kansai", "marker": "ほんま",
+                        "persona": "三笘薫"}, ensure_ascii=False) + "\n")
+_e_post = env_h(KANSAI_IN, "h9")
+check("H ②『崩れた後だけ鳴る』版へ戻すと、崩れる前の便で赤くなる", MIRROR not in _e_pre)
+check("H ②でも崩れた後には鳴る(=空実装ではない・空PASSを踏んでいない)", MIRROR in _e_post)
+os.remove(SR.TONE_AUDIT_FILE)
+SR._register_mirror_hint = _real_mirror
+check("H 戻したら緑に戻る", MIRROR in env_h(KANSAI_IN, "h10"))
 
 # ---------------------------------------------------------------- G 本番のlocal/
 print("\n== G 本番のlocal/を触っていない ==")
