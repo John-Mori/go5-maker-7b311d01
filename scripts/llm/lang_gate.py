@@ -414,6 +414,42 @@ def detect_english_paragraph(text, min_latin=35, min_words=5):
         return None          # 検査が落ちても応答は続ける(fail-safe)
 
 
+def detect_latin_midband(text, lo=20, hi=34, min_words=3):
+    """英字が**閾値の手前**に居る散文段落を返す(無ければ None)= self-checkの灰色トリガー③。
+
+    `detect_english_paragraph` は英字35字以上でしか鳴らない(=それ未満は素通し)。
+    その手前の帯(既定20〜34字)は「英語かもしれないが機械では決められない」灰色だ。
+    ★ここは**ゲートではない**= 何も止めない・何も直さない。self-check(§3)へ回す便を
+      選ぶためだけの目印。だから py3langid で絞らない(絞ると灰色が黒白になってしまう)。
+    ★判定の家を増やさない(ORG-11)= 段落の割り方・コード柵の除き方は上と同じ物を使う。
+    """
+    try:
+        s = str(text or "")
+        masked = _mask_code_spans(s)
+        pos = 0
+        for para in _PARA_SPLIT_RE.split(masked):
+            i = masked.find(para, pos)
+            if i < 0:
+                i = pos
+            pos = i + len(para)
+            body = para.strip()
+            if not body or _JP_RE.search(body):
+                continue                       # 日本語が混じる段落は灰色に数えない
+            latin = len(_LATIN_RE.findall(body))
+            if latin < lo or latin > hi:
+                continue                       # 帯の外(下=短すぎ / 上=既存ゲートの持ち場)
+            words = _EN_WORD_RE.findall(body)
+            if len(words) < min_words:
+                continue
+            if len(_CODEISH_RE.findall(body)) > max(2, len(body) * 0.05):
+                continue                       # コード/パス/コマンドは散文ではない
+            return {"latin": latin, "words": len(words), "index": i,
+                    "excerpt": body[:160]}
+        return None
+    except Exception:
+        return None          # 検査が落ちても応答は続ける(fail-safe)
+
+
 # 日本語の本文に出て**正当な**符号位置(この外に出た文字を「他スクリプト」と見る)。
 #   ASCII / ラテン1補助(© ° × é)/ 一般句読点〜記号・矢印・囲み数字(— … ★ ⚠ → ①)/
 #   CJK句読点・ひらがな・カタカナ / 囲みCJK・㎡ / 漢字(拡張A含む)/ 互換漢字 /

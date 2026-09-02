@@ -3857,7 +3857,12 @@ from lang_gate import (  # noqa: E402  純関数のみ・単一の判定源(sing
     #   こぼれる分を拾う一般化。**検知のみ・送信可否は1ミリも変えない**(下の audit_* を見よ)。
     detect_english_paragraph,  # 日本語の便の中に混じった**英語の段落**(全文英語ではないので既存は素通し)
     detect_other_script,       # 日本語として正当な範囲の外の文字を一般に拾う(未知のスクリプト・文字化け)
+    detect_latin_midband,      # 2026-09-02 恒久策#5= 灰色③(英字20〜34字=既存ゲートの閾値の手前)
 )
+# ★2026-09-02 恒久策#5= 灰色便だけのLLM検品。**送信可否には触らない**(台帳のみ)。
+#   本体は self_check.py。ここでは配線だけ持つ= 判定の家を増やさない(ORG-11)。
+import self_check as _self_check            # noqa: E402
+SELF_CHECK_AUDIT = os.path.join(LOCAL, "llm", "self_check_audit.jsonl")
 
 # ============================================================================
 # 出力ゲート ルールE(本文へ混じった内部の手続きメタを剥ぐ) 2026-08-15 イージス研究室
@@ -4824,6 +4829,57 @@ def _audit_english_paragraph(dept, rec, reply):
     return None              # ★常に None= 呼び出し側の分岐に一切影響を与えない
 
 
+def audit_self_check(dept, rec, speaker, part, struct_drift=False, regen_round=0):
+    """恒久策#5= **灰色の便だけ**をLLMで検品し、結果を台帳へ残す(検知のみ・送信は止めない)。
+
+    ★掛ける灰色は4条件だけ(設計§3)= ゲートJ発火 / 漢字フル名 / 英字20〜34字 / 再生成2周目。
+      灰色でない便では `check()` を呼ばない= 全便一律にしない(§3の不採用の数字)。
+    ★**この関数は常に None を返す**。ゲートA〜Jの結果にも、送るか否かにも触らない
+      (設計§3の経路②= 送信は止めず台帳+突き返しのみ)。
+    ★fail-open(§5-7の本丸)= 検品APIが死んでいても、遅くても、壊れた答えでも、
+      `_self_check.check` が None を返すだけで**便はそのまま届く**。例外もここで握り潰す。
+    ★灰色に当たったのに検品が None だった時も1行残す(verdict=null)= 「呼んだのに答えが無い」と
+      「そもそも灰色でなかった」を台帳で区別できる=検品の死を静かにしない(never_fired対策)。
+    """
+    try:
+        rules = _naming_rules()
+        names = _self_check.kanji_fullnames(rules)
+        reasons = _self_check.gray_reasons(part, struct_drift=struct_drift,
+                                           regen_round=regen_round, kanji_names=names,
+                                           speaker=speaker)
+        if not reasons:
+            return None
+        conf_fp = ""
+        try:
+            conf_fp = str(((rules or {}).get("_meta") or {}).get("version", ""))
+        except Exception:
+            pass
+        v = _self_check.check(part, speaker=speaker, room=dept_ja(dept), reasons=reasons)
+        log(dept, f"★self-check(#5): 灰色={','.join(reasons)} "
+                  f"判定={'合格' if (v or {}).get('ok') else ((v or {}).get('ng') and '不合格' or '無(素通し)')} "
+                  f"{(v or {}).get('elapsed_ms', 0)}ms ※送信は止めない")
+        os.makedirs(os.path.dirname(SELF_CHECK_AUDIT), exist_ok=True)
+        with open(SELF_CHECK_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "dept": dept, "event": "self_check",
+                "ref": "KAIZEN-2026-09-02-5",
+                "msg_id": str((rec or {}).get("msg_id", "")),
+                "speaker": str(speaker or ""),
+                "reasons": reasons,
+                "verdict": None if v is None else {
+                    "ok": bool(v.get("ok")), "ng": v.get("ng") or [],
+                    "why": v.get("why", ""), "model": v.get("model", ""),
+                    "elapsed_ms": v.get("elapsed_ms", 0),
+                },
+                "rules_version": conf_fp,
+                "reply": str(part or "")[:400],
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass                 # 監査の失敗で応答を巻き添えにしない(fail-open)
+    return None              # ★常に None= 呼び出し側の分岐に一切影響を与えない
+
+
 def audit_english(dept, rec, reply):
     """返信直前の英文ダンプ検知をログと監査ファイルへ残す(ここでは送信可否は決めない)。"""
     try:
@@ -5487,6 +5543,33 @@ def _audit_homoglyph(dept, tag, names, line):
         return False
 
 
+def _fenced_lines(lines):
+    """コード柵(``` / ~~~)の**中**に居る行番号の集合を返す(柵の行そのものも含む)。
+
+    ★2026-09-02 恒久策#4の付帯。名乗りタグの探索は行頭の `[名前]` を見るので、
+      コード例として柵の中に書いた `[ККール]` まで**名乗りとして拾って剥がしてしまう**
+      (実測= 柵の開き行ごと落ち、コードブロックが割れた)。柵の中は本文でもタグでもなく
+      **引用された文字列**だ= 直しても剥がしても触ってはいけない。
+    ★閉じ忘れた柵は「そこから先が全部コード」ではなく**柵の外**として扱う(fail-open)=
+      閉じ忘れ1つで名乗り解決が丸ごと死ぬ方が害が大きい。
+    ★例外は握り潰して空集合(=従来挙動)へ倒す。
+    """
+    try:
+        out, open_at, mark = set(), None, ""
+        for i, ln in enumerate(lines):
+            s = str(ln).lstrip()
+            if s.startswith("```") or s.startswith("~~~"):
+                cur = s[:3]
+                if open_at is None:
+                    open_at, mark = i, cur
+                elif cur == mark:
+                    out.update(range(open_at, i + 1))
+                    open_at, mark = None, ""
+        return out                       # ★閉じていない柵は含めない
+    except Exception:
+        return set()
+
+
 def split_persona_blocks(text, resolve, dept="", names=()):
     """`[名前] 本文` のブロック列へ割る。戻り値 [(正式名 or None, 本文), ...]。
 
@@ -5524,7 +5607,10 @@ def split_persona_blocks(text, resolve, dept="", names=()):
     m = None
     who = None
     miss = []                    # ★resolve が引けなかったタグ行(ホモグリフ計測用・先頭8つまで)
+    fenced = _fenced_lines(lines)   # ★コード柵の中の `[名前]` は名乗りではない(引用された文字列)
     for idx, ln in enumerate(lines):
+        if idx in fenced:
+            continue
         mm = _tag_match(ln)
         if not mm:
             continue
@@ -5571,8 +5657,8 @@ def split_persona_blocks(text, resolve, dept="", names=()):
         _audit_tag(dept, who, "tag_unbracketed_fixed", lines[head].strip())
     pre = [l for l in lines[:head] if l.strip()]
     blocks = [[who, [_peel_extra_tags(m[1], resolve)]]]
-    for ln in lines[head + 1:]:
-        m2 = _tag_match(ln)
+    for _j, ln in enumerate(lines[head + 1:], start=head + 1):
+        m2 = None if _j in fenced else _tag_match(ln)
         who2 = resolve(m2[0]) if m2 else None
         if who2:
             blocks.append([who2, [_peel_extra_tags(m2[1], resolve)]])
@@ -7818,6 +7904,14 @@ class Daemon:
                         f"★出力ゲートE(名乗り残存・落とした): 話者={_speaker} "
                         f"{len(_part)}字→{len(_gated)}字 msg={mid}")
                     _part = _gated
+                # ★★self-check(恒久策#5・2026-09-02)= **送信直前の最終形**を灰色便だけ検品する。
+                #   ここに置く理由= A〜Jの書き直しが全部終わった後の文字列が、実際にChamiの画面へ
+                #   出る物だから。前で見ると「直る前の文」を検品して騒ぐ(誤爆の作り方そのもの)。
+                #   ★止めない・直さない= 返り値を使わない(台帳と突き返しだけ)。検品が死んでも
+                #     ここは None を返すだけで、下の送信ループは1ミリも変わらない(fail-open)。
+                audit_self_check(self.dept, rec, _speaker, _part,
+                                 struct_drift=bool(_jhits),
+                                 regen_round=2 if _hg.get("regenerated") else 0)
                 _fixed_blocks.append((_who, _part))
             _blocks = _fixed_blocks
             body = os.path.join(LOCAL, f"_daemon_reply_{self.dept}.txt")
