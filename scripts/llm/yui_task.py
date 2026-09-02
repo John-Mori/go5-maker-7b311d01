@@ -116,6 +116,49 @@ def do_tag(in_path, limit, model):
     return out_path, kept, tagged
 
 
+LOG_SYSTEM = (
+    "あなたは基盤ログの一次トリアージ係『優依』です。ログ1行を読み、程度の札を貼るだけです。"
+    "★あなたは行を消したり要約で畳んだりしません。分類の目印を付けるだけ。最終判断は司令塔(Claude)がします。"
+    "次のJSON1個だけを出力(前置き・説明・コードブロック記法は禁止):"
+    '{"level":"情報|警告|要対応", "kind":"種類を5〜10字で", "one":"一言(任意)"}'
+    " level: 正常稼働・okは情報。retry/遅延/一時失敗は警告。停止(stopped/dead)・例外・error・失敗継続は要対応。"
+    " ★迷ったら重い側へ倒す(見落としより過検出が安全)。/no_think"
+)
+
+
+def do_log_one(line, model):
+    raw = _chat(LOG_SYSTEM, f"ログ行: {line}", model, temperature=0.1)
+    try:
+        s = raw[raw.index("{"): raw.rindex("}") + 1]
+        obj = json.loads(s)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    # ★解釈できない時は fail-open=要対応へ倒す(沈黙より過検出)
+    return {"level": "要対応", "kind": "優依が解釈不能", "one": raw[:80]}
+
+
+def do_log(in_path, tail, model):
+    with open(in_path, "r", encoding="utf-8", errors="replace") as f:
+        lines = [ln.rstrip("\n") for ln in f if ln.strip()]
+    if tail:
+        lines = lines[-tail:]
+    out_path = os.path.join(ROOT, "local", "_work", "yui_logtri.jsonl")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    counts = {"情報": 0, "警告": 0, "要対応": 0}
+    flagged = []
+    with open(out_path, "w", encoding="utf-8") as w:
+        for ln in lines:  # ★全行を回す=1行も飛ばさない
+            tg = do_log_one(ln, model)
+            lv = tg.get("level", "要対応")
+            counts[lv] = counts.get(lv, 0) + 1
+            if lv != "情報":
+                flagged.append((lv, tg.get("kind", ""), ln[:90]))
+            w.write(json.dumps({"line": ln, "tri": tg}, ensure_ascii=False) + "\n")
+    return out_path, counts, flagged
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="mode", required=True)
@@ -130,6 +173,11 @@ def main():
     t.add_argument("--limit", type=int, default=20, help="札を貼る先頭N件(0=全件・残りは素通し)")
     t.add_argument("--model", default=DEFAULT_MODEL)
 
+    g = sub.add_parser("log")
+    g.add_argument("--in", dest="in_path", required=True)
+    g.add_argument("--tail", type=int, default=20, help="末尾N行だけトリアージ(0=全行)")
+    g.add_argument("--model", default=DEFAULT_MODEL)
+
     a = ap.parse_args()
     if a.mode == "draft":
         brief = a.brief
@@ -143,6 +191,17 @@ def main():
     elif a.mode == "tag":
         out, kept, tagged = do_tag(a.in_path, a.limit, a.model)
         print(f"[仕分け完了] 出力={out}\n入力{kept}件を全件保持(落とし=0)・うち{tagged}件に札を貼った。")
+    elif a.mode == "log":
+        out, counts, flagged = do_log(a.in_path, a.tail, a.model)
+        total = sum(counts.values())
+        print(f"[ログ一次トリアージ] 出力={out}")
+        print(f"{total}行を全行保持(落とし=0)。情報{counts['情報']}/警告{counts['警告']}/要対応{counts['要対応']}")
+        if flagged:
+            print("--- 拾い上げ(情報以外) ---")
+            for lv, kind, ln in flagged:
+                print(f"[{lv}] {kind}: {ln}")
+        else:
+            print("拾い上げ0=異常なし(全て情報)。")
 
 
 if __name__ == "__main__":
