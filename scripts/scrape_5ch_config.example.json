@@ -1,0 +1,11 @@
+{
+  "_comment": "5ch動画ネタ用スクレイパの設定。秘密は入れない(鍵・トークン厳禁)。directory_name は 5ch の板ディレクトリ名(bbsmenuで解決)。成人向け板は入れない(scrape_5ch.py の ADULT_DIRS でも二重に弾く)。",
+  "top_n": 10,
+  "max_posts": 80,
+  "boards": [
+    { "directory_name": "newsplus",   "note": "ニュース速報+(ニュース系)" },
+    { "directory_name": "ms",         "note": "既婚女性=鬼女(修羅場系)" },
+    { "directory_name": "lifesaloon", "note": "生活全般(生活系)" },
+    { "directory_name": "kankon",     "note": "冠婚葬祭(生活/修羅場ネタ)" }
+  ]
+}
