@@ -390,6 +390,19 @@ def _appears_as_allowed(text, bare, allowed):
               実際の形が「デブライネさん」となり allowed に無い=違反として拾える
               (allowed「デブライネ」が prefix でも許容にしない=INDEX特例の要)。
     全出現が allowed に入れば True。1つでも外れれば False(=違反候補)。
+
+    ★(a)で「allowed 形が bare の途中で終わっている」時は採らない(2026-09-02・#3)。
+      実物= デブライネ(allowed=["三笘"])の便に「三笘薫、進捗を頼む。」と出ても
+      **1件も鳴らなかった**= bare="三笘薫" の出現位置で allowed「三笘」が prefix として
+      当たり、actual="三笘"=許容形と読まれていた。フル名は誰の期待形でもない
+      (呼称ルール.json の allowed に「三笘薫」を持つ話者は0人)のに素通りする=
+      漢字名だけに空いていた穴(カタカナ名は `_boundary_ok` が同じ型を止めている)。
+      → 許容形は**その出現を覆っている**時だけ許容形と数える。
+    ★ただし塞ぐのは**呼んでいる出現だけ**(`_fullname_called`= 敬称直後 or 呼びかけ位置)。
+      実測(2026-09-02・実便1,909本)で塞ぎ方を絞った: 出現を選ばず塞ぐと新しく鳴る21件が
+      ほぼ全て言及(「■出典=分析部門(三笘薫)」「| 三笘薫 | 三笘 | 三笘さん |」
+      「窓口=三笘薫」「名簿= …/ 三笘薫 / 中野五月 /…」)になり、台帳が言及で埋まる。
+      呼びかけに絞ると残るのは「三笘薫、進捗を頼む。」型だけになる。
     """
     s = str(text or "")
     bare = str(bare or "")
@@ -410,6 +423,8 @@ def _appears_as_allowed(text, bare, allowed):
         for a in allowed:
             if not s.startswith(a, i) or len(a) <= len(best_allowed):
                 continue
+            if len(a) < len(bare) and _fullname_called(s, i, bare):
+                continue        # ★許容形が対象の形の途中で終わっている(上の★参照)
             after = s[i + len(a):]
             if any(after.startswith(h) for h in _HONORIFICS):
                 continue        # 直後に敬称=この allowed 形では言い切っていない
@@ -604,6 +619,153 @@ def _chami_address_verdicts(persona, s, rules):
     return []
 
 
+# ==== #3 漢字フル名の限定解禁(2026-09-02・設計§2-3 / Chami承認 msg 1544671294820196453)====
+#   ★0歩目(壊れている実物・実行で確認): 呼称ルール.json の allowed に**フル名を持つ話者は
+#     0人**なのに、フル名で呼んだ便が鳴らない組み合わせが在った=
+#       ・デブライネ「三笘薫、進捗を頼む。」          → 0件(部分一致の穴。上の★で塞いだ)
+#       ・トトリ「一ノ瀬怜さん、確認しました。」      → 0件
+#       ・ククール「早坂芽衣さん、よろしく。」        → 0件
+#       ・トトリ「花海咲季、これ見て。」              → 0件
+#     後ろ3つの真因は naming_verdicts 末尾の「honorific_required に載っていない対象で
+#     override も無い=判定不能=不問」= 怜/芽衣/咲季は **意図的に** honorific_required を
+#     持たない(裸の『怜』で誤発火するため=人事 2026-09-02 回答)。
+#     つまり**話者ペアを書いた相手にしか効かない**=Chami の実物の苦情
+#     「またアロンソコーチが一ノ瀬怜呼びしてる」(msg 1544235216757858398)と同じ型が
+#     ペア未登録の話者では素通りしていた。
+#   ★解禁は**フル名(対象キーそのもの)が「直後に敬称」か「呼びかけ位置」で出た時**だけ。
+#     - 単字裸呼び(「怜」単独)は対象外のまま= C-035(メルカリ⊃ルカ型の誤爆源)。
+#     - 地の文の言及(「一ノ瀬怜のcharacterfileを直した」)も対象外=呼びかけではない。
+#   ★挙動は**警告のみ**(設計§2-3)。reason="kanji_fullname" は naming_corrections の
+#     自動修正3型に入っていない=必ず remaining へ落ちる(=本文は1文字も書き換えない)。
+#   ★expected は**正本から引けた時だけ**入れる。人事の回答に
+#     「『芽衣さん』を既定とする話者は Chami 未指定=据え置き(勝手に既定さん付けを足さない)」
+#     と明記されている=引けない対象は空のまま出す(覚えで書かない)。
+KANJI_FULLNAME_GATE = True
+
+
+def _is_kanji(ch):
+    """1文字が漢字(CJK統合漢字・々)か。"""
+    if not ch:
+        return False
+    o = ord(ch)
+    return (0x4E00 <= o <= 0x9FFF) or (0x3400 <= o <= 0x4DBF) or ch == "々"
+
+
+def _is_kanji_fullname(key):
+    """対象キーが『漢字フル名』か(三笘薫/一ノ瀬怜/早坂芽衣/花海咲季)。
+
+    - 漢字2文字以上を含む(単字の対象は作らない=C-035)。
+    - 中黒を含む名(ケヴィン・デブライネ)は対象外=カタカナ名は `_boundary_ok` の持ち場。
+    - 漢字以外は1文字まで許す(「一ノ瀬怜」の『ノ』)。
+    """
+    k = str(key or "")
+    if len(k) < 2 or any(c in _KATA_SEP for c in k):
+        return False
+    n = sum(1 for c in k if _is_kanji(c))
+    return n >= 2 and (len(k) - n) <= 1
+
+
+def _effective_override(persona, target_key, overrides):
+    """この話者×対象に効く override を1つ返す(名指し > "*")。無ければ None。"""
+    ov_specific = None
+    ov_wild = None
+    for ov in (overrides or []):
+        if not isinstance(ov, dict):
+            continue
+        tk = ov.get("target")
+        if tk not in (target_key, "*"):
+            continue
+        if not _speaker_matches(ov.get("speaker"), persona):
+            continue
+        if tk == "*":
+            ov_wild = ov
+        else:
+            ov_specific = ov
+    return ov_specific or ov_wild
+
+
+def _fullname_called(s, i, key):
+    """s の位置 i に出たフル名 key が『呼称として使われた』形か(use / mention の弁別)。
+
+    返り値= 呼称ならその形(直後の敬称込み)、単なる言及なら ""。
+    ★use と見るのは2つだけ:
+      ① 直後に敬称(「早坂芽衣さん、」)  ② 呼びかけ位置=行頭+直後が読点(`_is_vocative`)。
+    ★これ以外(「分析部門(三笘薫)の共有正本」「参加人格8名=三笘薫/…」「| 三笘薫 | 三笘 |」)は
+      **その人を呼んでいるのではなく名前を書いている**=言及。実測(2026-09-02・実便1,906本)で
+      自動修正が新たに触りうる10箇所は**10箇所とも言及**だった(名簿の列挙・表の行・
+      設定キーの説明・アイコンの説明・窓口の記載)。書き換えれば 2026-08-24 の hr-room 実測
+      (46箇所書き換え→30箇所が化け)と同じ型の事故になる。
+    ★判定(#3の警告)と自動修正の両方がこの1本を引く=2本に割れさせない。
+    """
+    s = str(s or "")
+    key = str(key or "")
+    if not key:
+        return ""
+    end = i + len(key)
+    for h in _HONORIFICS:
+        if s.startswith(h, end):
+            return key + h
+    return key if _is_vocative(s, i, end) else ""
+
+
+def _kanji_fullname_verdicts(persona, text, rules, seen_targets=()):
+    """漢字フル名を『敬称付き/呼びかけ位置』で呼んでいる出現を警告する(上の★参照)。"""
+    out = []
+    if not KANJI_FULLNAME_GATE:
+        return out
+    rules = rules or {}
+    s = str(text or "")
+    if not s:
+        return out
+    hrt = rules.get("honorific_required_targets") or {}
+    detect = rules.get("target_detect_forms") or {}
+    overrides = rules.get("speaker_target_overrides") or []
+    keys = []
+    for src in (hrt, detect):
+        if isinstance(src, dict):
+            for k, v in src.items():
+                if str(k).startswith("_") or k in keys:
+                    continue
+                keys.append(k)
+    for ov in overrides:
+        tk = (ov or {}).get("target") if isinstance(ov, dict) else None
+        if tk and tk != "*" and tk not in keys:
+            keys.append(tk)
+    for tk in keys:
+        if tk in seen_targets:
+            continue            # 既に別の理由で鳴っている=同じ便で二重に数えない
+        if not _is_kanji_fullname(tk) or tk not in s:
+            continue
+        ov = _effective_override(persona, tk, overrides)
+        ent = hrt.get(tk) if isinstance(hrt.get(tk), dict) else {}
+        allowed = [str(a) for a in ((ov or {}).get("allowed")
+                                    or ent.get("allowed") or []) if str(a)]
+        if tk in allowed:
+            continue            # フル名がこの話者の期待形(現状0人・将来の追記に備える)
+        i = 0
+        while True:
+            i = s.find(tk, i)
+            if i < 0:
+                break
+            form = _fullname_called(s, i, tk)
+            if not form:
+                i += 1
+                continue        # 適用域の外(地の文の言及)=触らない
+            end = i + len(form)
+            if form in allowed:
+                i = end
+                continue        # 期待形そのもの
+            if _is_self(persona, tk) and form == tk:
+                i = end
+                continue        # 自分の名を書いただけ(自称に敬称は要求しない)
+            out.append({
+                "target": tk, "found": form,
+                "expected": allowed, "reason": "kanji_fullname",
+            })
+            break               # この対象は便あたり1警告で十分
+    return out
+
+
 def naming_verdicts(persona, dept, text, rules):
     """呼称違反の候補一覧を返す(純関数)。
 
@@ -651,19 +813,9 @@ def naming_verdicts(persona, dept, text, rules):
                 continue        # この対象は本文に出ていない
 
             # --- この話者×対象に効く override を最優先で探す(specific > "*") ---
-            ov_specific = None
-            ov_wild = None
-            for ov in overrides:
-                if ov.get("target") not in (tk, "*"):
-                    continue
-                if ov.get("target") == "*":
-                    if _speaker_matches(ov.get("speaker"), persona):
-                        ov_wild = ov
-                    continue
-                if _speaker_matches(ov.get("speaker"), persona):
-                    # 話者が "__男性キャラ__" や実名で当たった特例
-                    ov_specific = ov
-            ov = ov_specific or ov_wild
+            #   ★選び方は `_effective_override` 1本(#3 の漢字フル名判定と同じ規則を引く
+            #     =2本に割れさせない。話者が "__男性キャラ__" や実名で当たった特例を含む)。
+            ov = _effective_override(persona, tk, overrides)
 
             ent = hrt.get(tk) or {}
             forbidden = list(ent.get("forbidden") or [])
@@ -731,6 +883,10 @@ def naming_verdicts(persona, dept, text, rules):
                 "expected": allowed,
                 "reason": "honorific_required",
             })
+        # ★漢字フル名(三笘薫/一ノ瀬怜…)を敬称付き/呼びかけ位置で呼んだ出現(#3・警告のみ)。
+        #   上のループで既に鳴った対象は渡さない=同じ便で二重に数えない。
+        out.extend(_kanji_fullname_verdicts(
+            persona, s, rules, seen_targets=set(v.get("target") for v in out)))
         # ★人格名の一字略(C-021・ククール→ク)を単語境界で捕まえる(警告のみ)。
         out.extend(_abbrev_verdicts(s, rules))
         # ★Chami呼称= 話者別(上の★参照)。honorific_required_targets に Chami は
@@ -806,6 +962,8 @@ def _iter_occurrences(s, bare, allowed):
         for a in allowed:
             if not s.startswith(a, i) or len(a) <= len(best_allowed):
                 continue
+            if len(a) < len(bare) and _fullname_called(s, i, bare):
+                continue        # ★覆っていない許容形は採らない(_appears_as_allowed と同条項)
             after = s[i + len(a):]
             if any(after.startswith(h) for h in _HONORIFICS):
                 continue
@@ -965,6 +1123,16 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
             # 「同じ姓に敬称/役職を足す/直す」= target_form が裸の姓で始まる時だけ。
             # ★別名への丸ごと置換(「一ノ瀬」→「怜」)は**呼びかけ位置だけ**許す。
             whole_swap = not target_form.startswith(bare)
+            # ★短縮型= 置換先がフル名の頭そのもの(「三笘薫」→「三笘」)。
+            #   09-01 に full_key を許した論拠は「フル名は指す相手が一意=別名へ丸ごと
+            #   置換しても別人に化けない」だった。短縮型はその論拠の外にある=
+            #   **正式名を名簿・表・出典の括弧の中で削る**書き換えになる。
+            #   実測(2026-09-02・実便1,909本)で分けた: この条項を型を絞らず掛けると
+            #   既存の修正9型・のべ140便(「一ノ瀬怜」→「怜」47便、「ルカ・モドリッチ」→
+            #   「モドリッチさん」42便…)まで止まった。短縮型だけに掛けると
+            #   止まるのは #3 が新たに広げた分だけになる。
+            shorten = bool(full_key and target_form != bare
+                           and bare.startswith(target_form))
             if whole_swap and not full_key and not WHOLE_SWAP_AT_VOCATIVE:
                 result["remaining"].append(v)
                 continue
@@ -979,11 +1147,22 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
                 if not _safe_after(masked, end):
                     unsafe = True          # 姓+名(直後が漢字)等=置換すると壊れる
                     continue
+                if shorten and not _fullname_called(masked, i, tkey):
+                    # ★フル名が出ていても**呼んでいる**とは限らない= 名簿の列挙・表の行・
+                    #   出典の括弧・設定キーの説明・アバターの説明は「言及」だ。
+                    #   実測(2026-09-02・実便1,909本): #3 で判定域を広げた結果この経路へ
+                    #   新たに届いた10箇所は**10箇所とも言及**で、直せば
+                    #   「■出典=分析部門(三笘薫)」「| 三笘薫 | 三笘 | 三笘さん |」
+                    #   「三笘薫→三笘薫の自称 forbidden:[...] だ」が化けた。
+                    #   設計(#3・2026-09-02)も挙動は**警告のみ**と定めている。
+                    unsafe = True
+                    continue
                 if (voc_only or (whole_swap and not full_key)) \
                         and not _is_vocative(masked, i, end):
                     # 人事部門の地の文=名簿/設定キー/識別子=直さない。
                     # 丸ごと置換も地の文では直さない(誤爆すると別人の名前に化けるため)。
                     # ★例外= full_key(フルネームまるごと)は指す相手が一意=地の文でも直す。
+                    #   ただし直すのは**呼んでいる出現だけ**(1つ上の `_fullname_called`)。
                     unsafe = True
                     continue
                 repls.append((i, end, target_form))
