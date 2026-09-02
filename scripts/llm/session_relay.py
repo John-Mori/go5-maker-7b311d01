@@ -380,10 +380,25 @@ MEI_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "mei_shared.
 #   「アイ、芽衣はここでの記憶も共通で持っといてね」(部屋=分析部門)。
 #   アイは consult-intel と shorts-analyst の2部屋を持つので、芽衣と同じく部屋で記憶が分かれる。
 ALMOND_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "almond_shared.jsonl")
+# ★第3適用=1分shorts漫画紹介部門の面々(2026-09-03 Chami直接指示・便=1544786751120351264)。原文=
+#   「ここのメンバーを三笘さん、ヴィルシーナ、星南、トラブル時対応アメスに変更。
+#     **さらに軍議にチームにいれて各キャラ共通で記憶や軍議での内容を共有、認知できるように。**」
+#   (+ 1544786893688930304「やっぱ芽衣も入れといて。」)
+#   ★この5人は manga-shorts と gunji の**2部屋に居る**=部屋ごとに記憶が分かれると
+#     「軍議での内容を共有、認知」が成立しない。gunji.jsonl は軍議の**部屋の記憶**なので
+#     軍議に居れば自動で読むが、それを漫画紹介の部屋へ持ち帰る線が無かった。ここがその線だ。
+#   ★アメスと早坂芽衣は既に登録済=今回足したのは下の3人だけ。
+#   ★ファイルの事前作成は要らない(下の起動文が「無ければ作ってよい」と言う)。
+MITOMA_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "mitoma_shared.jsonl")
+VERXINA_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "verxina_shared.jsonl")
+SENA_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "sena_shared.jsonl")
 SHARED_MEMORY_BY_PERSONA = {
     "アメス": AMES_SHARED_MEMORY,
     "早坂芽衣": MEI_SHARED_MEMORY,
     "アーモンドアイ": ALMOND_SHARED_MEMORY,
+    "三笘薫": MITOMA_SHARED_MEMORY,
+    "ヴィルシーナ": VERXINA_SHARED_MEMORY,
+    "十王星南": SENA_SHARED_MEMORY,
 }
 
 # ★ツール許可= dept_daemon.WORK_ALLOWED_TOOLS と**同一のallowlist**を使う。

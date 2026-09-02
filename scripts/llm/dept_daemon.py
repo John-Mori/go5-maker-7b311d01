@@ -1856,6 +1856,15 @@ DEPT_CONF = {
              "role": "商品候補選定", "aliases": ("星南", "十王", "sena")},
             {"persona": "クラウディア", "character": os.path.join(_CHAR, "claudia.md"),
              "role": "商品候補選定", "aliases": ("クラウディア", "クラウディア・バレンツ", "claudia")},
+            # ★2026-09-03 Chami指示(msg 1544786751120351264「さらに軍議にチームにいれて」)。
+            #   1分shorts漫画紹介部門の面々を軍議へ入れる。★指定4人のうち**三笘薫と十王星南は
+            #   既にこの名簿に居た**(実測)ので、実際に足したのは次の2人だけ。芽衣も既に居る。
+            {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
+             "role": "1分shorts漫画紹介部門(構成・演出)", "aliases": ("シーナ", "ヴィルシーナ", "verxina")},
+            # ★アメスは**トラブル時のみ**(Chami原文「トラブル時対応アメス」)。平時は前に出ない。
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "トラブル時対応(平時は前に出ない・行き詰まった時に呼ばれて出る)",
+             "aliases": ("ames", "アメス")},
         ],
         "boot_note": (
             "■この部屋の性格(必ず守る)\n"
@@ -3453,26 +3462,50 @@ DEPT_CONF = {
     #   まだ無いので、存在しない消費者へ回送して沈黙させない=まず会話で立てる。
     #   Chami追補「新規セッションで起動」で専用セッションを立てたら conversation_only を外し
     #   SESSION_OWNED_DEPTS へ移す(=可逆)。past-room/health-log と同じ多人格・会話部屋の形。
-    # ★人格実在=五月 itsuki.md / ヴィルシーナ verxina.md / アメス ames.md(3人=C-026 混線注意)。
+    # ★★名簿の差し替え(2026-09-03 Chami指示3便・人事部門ククール経由)。
+    #   原文①(msg 1544786751120351264)=「ここのメンバーを三笘さん、ヴィルシーナ、星南、
+    #     トラブル時対応アメスに変更。さらに軍議にチームにいれて各キャラ共通で記憶や
+    #     軍議での内容を共有、認知できるように。」
+    #   原文②(msg 1544786893688930304)=「やっぱ芽衣も入れといて。」
+    #   原文③(msg 1544789640295481374)=「五月は外して。」← 併存でなく差し替えと確定した。
+    #   → 中野五月(itsuki.md)を外し、三笘薫・十王星南・早坂芽衣を足す。
+    #     ヴィルシーナとアメスは**元から居た**(足していない・roleだけ原文に合わせた)。
+    #   ★カスミは**据え置き**(2026-09-03 イージス研究室の判断)。理由= Chamiが答えたのは
+    #     「五月は外して」の1点だけで、カスミの去就は**一度も問われていない**。しかもカスミ自身が
+    #     2026-08-03のChami直接指示で入った人格だ。問われていない人格を推測で外すのは
+    #     「勝手に去就を決めない」の裏返しになる。外すならChamiの一言をもらってから1行消す(可逆)。
+    #   ★lead_persona は**置かない**(gunji/past-room と同形)。五月が抜けた席へ誰を座らせるかは
+    #     Chamiが指定していない=部屋の起動文どおり「話題の内容で誰が前に立つかを選ぶ」に倒す。
+    #     `persona` は名義が引けない時のfail-safe先でしかない(前に立つ指定ではない)。
+    # ★人格実在= mitoma.md / verxina.md / sena.md / ames.md / mei.md / kasumi.md(6人=C-026 混線注意)。
     "manga-shorts": {
-        "character": os.path.join(_CHAR, "itsuki.md"),
+        "character": os.path.join(_CHAR, "mitoma.md"),
         "memory": os.path.join(_MEM, "manga-shorts.jsonl"),
-        "persona": "中野五月",          # 既定の名義(名義が引けない時のfail-safe先)
+        "persona": "三笘薫",            # 既定の名義(名義が引けない時のfail-safe先。前に立つ指定ではない)
         "port": 18828,                  # 18827まで使用済(実測)
         "work_model": "opus",           # 人格の演技担保(C-014)
         "session_relay": True,
         "conversation_only": True,
-        "lead_persona": "中野五月",     # 既定で前に立つのは五月(この部屋の担当)
         "personas": [
-            {"persona": "中野五月", "character": os.path.join(_CHAR, "itsuki.md"),
-             "role": "担当(この部屋の主・漫画紹介ショートの企画)", "aliases": ("itsuki", "五月", "中野五月")},
+            {"persona": "三笘薫", "character": os.path.join(_CHAR, "mitoma.md"),
+             "role": "担当(漫画紹介ショートの企画・進行)", "aliases": ("mitoma", "三笘", "三笘薫")},
             {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
              "role": "担当(構成・演出)", "aliases": ("verxina", "シーナ", "ヴィルシーナ")},
+            {"persona": "十王星南", "character": os.path.join(_CHAR, "sena.md"),
+             "role": "担当(紹介する作品の選定)", "aliases": ("sena", "星南", "十王星南")},
+            # ★芽衣の本拠はコピー部(copy-director)。ここは兼務= 部屋を跨ぐ記憶は
+            #   session_relay.SHARED_MEMORY_BY_PERSONA(mei_shared.jsonl)が拾う。
+            {"persona": "早坂芽衣", "character": os.path.join(_CHAR, "mei.md"),
+             "role": "担当(訴求文・タイトル)", "aliases": ("mei", "芽衣", "早坂")},
+            # ★アメスは**トラブル時のみ**(Chami原文「トラブル時対応アメス」)。常駐でも既定の名義でもない=
+            #   平時は前に出ず、揉めた時・行き詰まった時だけ名指しで呼ばれて出る待機枠。
             {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
-             "role": "補佐", "aliases": ("ames", "アメス")},
+             "role": "トラブル時対応(平時は前に出ない・行き詰まった時に呼ばれて出る)",
+             "aliases": ("ames", "アメス")},
             # ★カスミ追加(2026-08-03 Chami指示 msg 1533840385355419688「カスミが入ってない指示で
             #   立ち上がってる、正常にしてくれ」)。原典を推理と調査の目で深掘りする探偵=漫画の作品分析が
             #   この部屋の本丸(漫画紹介)に直結する。実在= hr/characters/kasumi.md。
+            #   ★2026-09-03の名簿差し替えでも据え置き(去就はChamiに未確認=上の注記)。
             {"persona": "カスミ", "character": os.path.join(_CHAR, "kasumi.md"),
              "role": "担当(漫画の原典読み・作品分析)", "aliases": ("kasumi", "カスミ")},
         ],
@@ -3480,8 +3513,11 @@ DEPT_CONF = {
             "■この部屋の性格(必ず守る)\n"
             "- ここは **1分shorts漫画紹介部門**(working title)。本丸=漫画→1分以内のShortで"
             "漫画を紹介する動画作り(旧 MangaShortCreateForYMM4 の復活)。\n"
-            "- 担当は**中野五月・ヴィルシーナ・カスミ**、補佐が**アメス**。誰として答えるかは話題で選ぶ"
-            "(名指しがあればその人)。\n"
+            "- 担当は**三笘薫・ヴィルシーナ・十王星南・早坂芽衣・カスミ**、"
+            "**アメスはトラブル時対応**(平時は前に出ない)。誰として答えるかは話題で選ぶ"
+            "(名指しがあればその人)。★前に立つ既定は置いていない=話題の内容で決める。\n"
+            "- ★この部屋の面々は**軍議(gunji)にも入っている**。軍議での話は"
+            "自分の共有記憶ファイルに書いて持ち帰れ(部屋ごとに記憶を分けない)。\n"
             "- ★これは立ち上げ直後の**会話が立つだけ**の状態。実作業(動画生成)を回す専用セッションは"
             "まだ無い=作れるかの相談・企画・段取りはこの場で答え切る(存在しない先へ回送しない)。\n"
             "- ★**ネットへ出すな**= 素材・作品情報は local/ の中で完結(公開repo・外部サービスへ出さない)。"
