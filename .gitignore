@@ -9,6 +9,8 @@ Thumbs.db
 
 # PCスクレイプ用のローカル設定（共有シークレットを含むためコミットしない）
 scripts/scrape_config.json
+# 5ch動画ネタ用スクレイパのローカル設定（板名のみ・秘密なし。exampleをコピーして使う本番コピーは各PC専用）
+scripts/scrape_5ch_config.json
 
 # GAS自動反映のローカル設定（scriptId・デプロイID・adminSecret を含むためコミットしない）
 .clasp.json
