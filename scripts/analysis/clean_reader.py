@@ -37,13 +37,20 @@ import html as _html
 import io
 import os
 import re
+import ssl
 import sys
+import urllib.error
 import urllib.request
 from html.parser import HTMLParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT_DIR = os.path.join(ROOT, "local", "clean_reader")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+# 本文中の画像を行内マーカーで運ぶ(分析テキストでは捨て、閲覧HTMLでは <img> に戻す)
+_IMG_MARK = "\x01IMG:"
+# 中身の無い装飾画像(スペーサ/1px/アイコン)は閲覧でも出さない
+_IMG_SKIP = ("spacer", "blank", "1x1", "pixel", "grey.gif", "gray.gif", "dot.gif",
+             "emoji", "/mono/", "clear.gif")
 
 # 本文キャプチャ中も中身を捨てる要素(広告・スクリプト・フォーム・埋め込み)
 SKIP_TAGS = {"script", "style", "noscript", "iframe", "ins", "svg",
@@ -133,6 +140,11 @@ class _ArticleExtractor(HTMLParser):
         # 改行区切り(キャプチャ中のみ)
         if tag in BLOCK_TAGS and self._capturing():
             self.buf.append("\n")
+        if tag == "img" and self._capturing():
+            d = dict(attrs)
+            src = d.get("src") or d.get("data-src") or ""
+            if src.startswith("http") and not any(s in src.lower() for s in _IMG_SKIP):
+                self.buf.append("\n" + _IMG_MARK + src + "\n")
         if tag == "a" and self._capturing():
             d = dict(attrs)
             h = d.get("href", "")
@@ -204,12 +216,26 @@ class _ArticleExtractor(HTMLParser):
         return "\n".join(out).strip()
 
 
-# 2chまとめのレス見出し: 「名無しの視聴者 2026/07/24(金) 22:00:19.00」等
-_RES_HEAD = re.compile(
-    r"^(?P<author>.{0,40}?)\s*"
-    r"(?P<date>\d{4}/\d{1,2}/\d{1,2}\([日月火水木金土]\)\s*\d{1,2}:\d{2}(:\d{2}(\.\d{2})?)?"
-    r"(?:\s*ID:[\w/+.-]+)?)\s*$"
-)
+# 日付の芯(YYYY/MM/DD(曜) HH:MM(:SS(.xx)))
+_DATE = r"\d{4}/\d{1,2}/\d{1,2}\([日月火水木金土]\)\s*\d{1,2}:\d{2}(?::\d{2}(?:\.\d{2})?)?"
+# レス見出しは2系統をサポート:
+#  (A) ホロ/ぶいすぽ系: 「名無しの視聴者 2026/07/24(金) 22:00:19.00」(行末=$)
+#  (B) なんJ/VIP系   : 「23 ： 風吹けば名無し ： 2022/06/29(水) 18:49:31.57 ID： ID:xxx」
+#      (番号 ：/: 名前 ：/: 日付 …以降のID等は無視)
+_RES_HEAD = re.compile(r"^(?P<author>.{0,40}?)\s*(?P<date>" + _DATE + r"(?:\s*ID:[\w/+.-]+)?)\s*$")
+_RES_HEAD_VIP = re.compile(
+    r"^\d+\s*[：:]\s*(?P<author>.{1,30}?)\s*[：:]\s*(?P<date>" + _DATE + r")")
+
+
+def _match_res_head(line):
+    """行がレス見出しなら (author, date) を返す。2系統を順に試す。"""
+    m = _RES_HEAD.match(line)
+    if m and (m.group("author") or "").strip():
+        return m.group("author").strip(), m.group("date").strip()
+    m = _RES_HEAD_VIP.match(line)
+    if m and (m.group("author") or "").strip():
+        return m.group("author").strip(), m.group("date").strip()
+    return None
 
 
 def _segment_res(body_text):
@@ -217,9 +243,9 @@ def _segment_res(body_text):
     lines = body_text.split("\n")
     heads = []
     for i, ln in enumerate(lines):
-        m = _RES_HEAD.match(ln.strip())
-        if m and (m.group("author") or "").strip():
-            heads.append((i, m.group("author").strip(), m.group("date").strip()))
+        hit = _match_res_head(ln.strip())
+        if hit:
+            heads.append((i, hit[0], hit[1]))
     if len(heads) < 2:
         return []
     res = []
@@ -248,13 +274,33 @@ def _decode(raw, header_charset):
     return raw.decode("utf-8", "replace")
 
 
-def fetch(url):
-    """生HTMLを直取り(広告JS/iframeは読み込まない=発火させない)。"""
+def fetch(url, insecure=False):
+    """生HTMLを直取り(広告JS/iframeは読み込まない=発火させない)。
+
+    insecure=True でTLS証明書の検証を無効化する(**local限定・自己責任**)。
+    vippers.jp 等の老舗まとめは証明書切れ/自己署名で素の取得が弾かれる実物ケースがある。
+    明示指定していなくても、証明書検証エラーの時だけ緩和して1回だけ再試行し警告を出す
+    (閲覧専用のローカルツール=本文しか読まないため。秘密の送信は無い)。
+    """
     req = urllib.request.Request(
         url, headers={"User-Agent": UA, "Accept-Language": "ja-JP,ja;q=0.9"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        raw = r.read()
-        return _decode(raw, r.headers.get_content_charset()), r.geturl()
+    ctx = None
+    if insecure:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+            raw = r.read()
+            return _decode(raw, r.headers.get_content_charset()), r.geturl()
+    except urllib.error.URLError as e:
+        # 証明書検証の失敗に限り、検証を切って1回だけ再試行(local限定・自己責任)
+        if not insecure and isinstance(getattr(e, "reason", None), ssl.SSLError):
+            sys.stderr.write(
+                "警告: TLS証明書の検証に失敗(" + type(e.reason).__name__ +
+                ")。local限定・自己責任で検証を無効化して再取得する: " + url + "\n")
+            return fetch(url, insecure=True)
+        raise
 
 
 def extract_article(html, url=""):
@@ -299,6 +345,12 @@ def _fallback_text(html):
     return "\n".join(ln for ln in lines if ln).strip()
 
 
+def _strip_img(text):
+    """画像マーカー行を落とす(分析用の素テキストには画像を入れない)。"""
+    return "\n".join(ln for ln in text.split("\n")
+                     if not ln.startswith(_IMG_MARK)).strip()
+
+
 def as_plain(article):
     """分析パイプライン用の素テキスト。レスがあればレス単位、無ければ本文。"""
     lines = []
@@ -309,10 +361,10 @@ def as_plain(article):
         for r in article["reslist"]:
             head = (r["author"] + " " + r["date"]).strip()
             lines.append(head)
-            lines.append(r["text"])
+            lines.append(_strip_img(r["text"]))
             lines.append("")
     else:
-        lines.append(article["body_text"])
+        lines.append(_strip_img(article["body_text"]))
     return "\n".join(lines).strip() + "\n"
 
 
@@ -334,6 +386,7 @@ def as_clean_html(article):
         ".res .b{white-space:pre-wrap;}",
         ".body{white-space:pre-wrap;}",
         "a{color:#2bb3c0;}",
+        "img{max-width:100%;height:auto;border-radius:6px;margin:8px 0;display:block;}",
         "</style></head><body>",
         "<h1>" + t + "</h1>",
         '<div class="src">' + _html.escape(article["url"]) + "</div>",
@@ -341,13 +394,25 @@ def as_clean_html(article):
     if article["reslist"]:
         for r in article["reslist"]:
             head = _html.escape((r["author"] + " " + r["date"]).strip())
-            body = _linkify(r["text"])
+            body = _render_body_html(r["text"])
             parts.append('<div class="res"><div class="h">' + head +
                          '</div><div class="b">' + body + "</div></div>")
     else:
-        parts.append('<div class="body">' + _linkify(article["body_text"]) + "</div>")
+        parts.append('<div class="body">' + _render_body_html(article["body_text"]) + "</div>")
     parts.append("</body></html>")
     return "\n".join(parts)
+
+
+def _render_body_html(text):
+    """本文テキストをHTML化。画像マーカー行は <img> に、URLはリンクに。"""
+    out = []
+    for ln in text.split("\n"):
+        if ln.startswith(_IMG_MARK):
+            src = ln[len(_IMG_MARK):].strip()
+            out.append('<img src="%s" loading="lazy" alt="">' % _html.escape(src, quote=True))
+        else:
+            out.append(_linkify(ln))
+    return "\n".join(out)
 
 
 def _linkify(text):
@@ -378,12 +443,14 @@ def main():
     g.add_argument("--analyze", action="store_true", help="分析用の素テキストを出力")
     ap.add_argument("--out", help="出力ファイルパス(--analyze / --view --print で使用)")
     ap.add_argument("--print", dest="to_stdout", action="store_true", help="ファイルへ書かず標準出力へ")
+    ap.add_argument("--insecure", action="store_true",
+                    help="TLS証明書の検証を無効化(local限定・自己責任。証明書切れの老舗まとめ用)")
     args = ap.parse_args()
 
     if not (args.view or args.analyze):
         args.view = True  # 既定は閲覧
 
-    html, final = fetch(args.url)
+    html, final = fetch(args.url, insecure=args.insecure)
     art = extract_article(html, final)
 
     if args.analyze:
