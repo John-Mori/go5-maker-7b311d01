@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""discord_gateway の送信印(<:sendms:>)を**実行で**通す回帰試験 (2026-09-02 イージス研究室)。
+
+★なぜ要るか (DEF-kaizen-analyst-917843c10e)
+  2026-09-01、Chamiの画面から送信印が全部屋で消えた。押すコードは壊れていない。
+  gatewayの on_message が沈黙し、便が relay_repair の回収経路だけで queue に入り、
+  **その経路に印を押す口が無かった**のが真因だった(回収側は 00_AI-HQ 97c27c9 で塞ぎ、
+  回帰試験 00_AI-HQ/scripts/test_relay_repair_sendmark.py が守っている)。
+  だが**gateway 側の口には試験が1本も無い**。durability 系の改修で
+  `await m.add_reaction(emoji)` が消えても・except に握り潰されても、
+  誰も落ちない=また「反応はあるのに印だけ付かない」で気づくことになる。ここを塞ぐ。
+
+★方針 (docs/departments/00_common/skills/test-must-fail)
+  外へ出る手 (add_reaction) **だけ**偽物にし、判定・分岐・ゲート・fail-open は本物のまま
+  on_message を実行で通す。ソース文字列一致では「別の呼び出し口が漏れる」型を捕まえられない。
+  ACTIVE_JOBS / JOBS_DEPTS も差し替えず、一時 local/ の cutover.json から本物の経路で読ませる。
+
+★__pycache__ の偽PASS対策= このファイルは discord_gateway.py を import せず
+  compile()/exec() で読む。.pyc を一切掴まないので、変異と復帰でサイズが同じでも嘘をつかない。
+
+使い方:
+  python scripts/queue/test_gateway_sendmark.py              # 本物のソースで検査
+  python scripts/queue/test_gateway_sendmark.py --mutate main    # 人間便の印を殺す→赤になるはず
+  python scripts/queue/test_gateway_sendmark.py --mutate mirror  # ミラー便の印を殺す
+  python scripts/queue/test_gateway_sendmark.py --mutate failopen  # 握り潰しを外す
+終了コード: 0=全PASS / 1=FAILあり / 2=変異が当たらなかった(試験自体が無効)
+"""
+import asyncio
+import json
+import os
+import shutil
+import sqlite3
+import sys
+import tempfile
+import types
+from datetime import datetime, timezone
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+GW_SRC = os.path.join(HERE, "discord_gateway.py")
+
+CH_ID = "900000000000000001"      # 台帳に載っている部屋
+CH_OUT = "900000000000000002"     # 台帳外の部屋 (押してはいけない)
+
+# --- 変異 (must-fail 用。実ファイルは書き換えない=常駐へ触れない) ------------------
+MUTATIONS = {
+    # 人間便の印を殺す
+    "main": ('                await m.add_reaction(emoji)\n'
+             '            except Exception as e:\n'
+             '                log(f"送信印失敗',
+             '                pass  # MUTANT\n'
+             '            except Exception as e:\n'
+             '                log(f"送信印失敗'),
+    # Chamiミラー便の印を殺す
+    "mirror": ('                    await m.add_reaction(emoji)\n'
+               '                except Exception as e:\n'
+               '                    log(f"ミラー送信印失敗',
+               '                    pass  # MUTANT\n'
+               '                except Exception as e:\n'
+               '                    log(f"ミラー送信印失敗'),
+    # 印が押せない時に配達ごと巻き添えにする (fail-open を壊す)
+    "failopen": ('            except Exception as e:\n'
+                 '                log(f"送信印失敗(配達は継続): {type(e).__name__}")',
+                 '            except Exception:\n'
+                 '                raise  # MUTANT'),
+}
+
+PASS = FAIL = 0
+
+
+def check(name, cond, extra=""):
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+        print("  PASS %s" % name)
+    else:
+        FAIL += 1
+        print("  FAIL %s %s" % (name, extra))
+
+
+# --- 偽物は「外へ出る手」だけ ------------------------------------------------------
+class FakeEmoji:
+    def __init__(self, name, eid):
+        self.name, self.id = name, eid
+
+    def __str__(self):
+        return "<:%s:%s>" % (self.name, self.id)
+
+
+class FakeAuthor:
+    def __init__(self, name, uid, bot=False):
+        self.name, self.id, self.bot = name, uid, bot
+
+
+class FakeChannel:
+    def __init__(self, cid, name):
+        self.id, self.name = cid, name
+
+
+class FakeGuild:
+    def __init__(self, emojis):
+        self.emojis = emojis
+
+
+class FakeMsg:
+    """discord.Message のうち on_message が実際に触る面だけ持つ。"""
+
+    def __init__(self, mid, content, author, channel, guild,
+                 webhook_id=None, boom=None):
+        self.id = int(mid)
+        self.content = content
+        self.author = author
+        self.channel = channel
+        self.guild = guild
+        self.webhook_id = webhook_id
+        self.attachments = []
+        self.reference = None
+        self.created_at = datetime.now(timezone.utc)
+        self.boom = boom
+        self.pushed = []            # ★実際に渡った値をここへ集める
+
+    async def add_reaction(self, emoji):
+        self.pushed.append(emoji)
+        if self.boom:
+            raise self.boom
+
+
+def load_gateway(tmp, mutate=None):
+    """discord_gateway.py を一時 local/ 向けに読み込む (import しない=.pyc を掴まない)。"""
+    src = open(GW_SRC, encoding="utf-8").read()
+    if mutate:
+        old, new = MUTATIONS[mutate]
+        if src.count(old) != 1:
+            print("変異 '%s' が当たらない (一致 %d件)。試験が古い=無効。"
+                  % (mutate, src.count(old)))
+            sys.exit(2)
+        src = src.replace(old, new, 1)
+        print("### 変異 '%s' を入れて走らせる (赤になるのが正しい) ###" % mutate)
+    os.environ["GO5_LOCAL_DIR"] = os.path.join(tmp, "local")
+    mod = types.ModuleType("dg_under_test")
+    mod.__file__ = GW_SRC            # HERE/ROOT を本物と同じに解決させる
+    exec(compile(src, GW_SRC, "exec"), mod.__dict__)
+    return mod
+
+
+def build_local(tmp):
+    loc = os.path.join(tmp, "local")
+    os.makedirs(os.path.join(loc, "queue"), exist_ok=True)
+    # ★ゲートも本物の経路で読ませる (ACTIVE_JOBS を手で True にしない)
+    json.dump({"gateway_jobs": "1", "gateway_jobs_depts": ""},
+              open(os.path.join(loc, "queue", "cutover.json"), "w", encoding="utf-8"))
+    json.dump([{"id": CH_ID, "name": "イージス研究室", "dept": "aegis-gl"}],
+              open(os.path.join(loc, "discord_channels.json"), "w", encoding="utf-8"))
+    open(os.path.join(loc, "discord_bot_token.txt"), "w", encoding="utf-8").write("DUMMY")
+    return loc
+
+
+def get_on_message(mod):
+    """run_gateway() を接続直前まで走らせ、登録された on_message を取り出す。
+
+    client.run を差し替えるだけ= ハンドラの登録も分岐も本物のまま。
+    """
+    import discord
+    real_run = discord.Client.run
+    holder = []
+    discord.Client.run = lambda self, *a, **k: holder.append(self)
+    try:
+        rc = mod.run_gateway()
+    finally:
+        discord.Client.run = real_run
+    if rc or not holder:
+        print("run_gateway が接続前に落ちた (rc=%s)。試験が無効。" % rc)
+        sys.exit(2)
+    return getattr(holder[0], "on_message", None)
+
+
+def queued(loc):
+    con = sqlite3.connect(os.path.join(loc, "queue", "inbox.db"))
+    rows = [str(r[0]) for r in con.execute("select msg_id from queue")]
+    con.close()
+    return rows
+
+
+def main(argv):
+    mutate = None
+    if "--mutate" in argv:
+        mutate = argv[argv.index("--mutate") + 1]
+        if mutate not in MUTATIONS:
+            print("変異名: %s" % " / ".join(MUTATIONS))
+            return 2
+
+    tmp = tempfile.mkdtemp(prefix="gw_sendmark_")
+    try:
+        loc = build_local(tmp)
+        mod = load_gateway(tmp, mutate)
+        check("0 cutover.jsonから本物の経路でjobsがONになっている", mod.ACTIVE_JOBS is True)
+        on_message = get_on_message(mod)
+        if on_message is None:
+            print("on_message が登録されていない。試験が無効。")
+            return 2
+
+        sendms = FakeEmoji("sendms", 1527369203819085864)
+        guild = FakeGuild([FakeEmoji("kidoku", 1), sendms, FakeEmoji("chakusyu", 2)])
+        ch = FakeChannel(int(CH_ID), "イージス研究室")
+        chami = FakeAuthor("chami", 111)
+
+        # ---- [1] 人間の便: 届いた印が実際に押される ----
+        print("[1] Chamiの生便 (gateway受信)")
+        m = FakeMsg(1, "テスト便", chami, ch, guild)
+        asyncio.run(on_message(m))
+        check("1 add_reaction が1回呼ばれた", len(m.pushed) == 1, "-> %r" % (m.pushed,))
+        check("1 渡ったのは guild の sendms そのもの", m.pushed[:1] == [sendms])
+        check("1 便は queue に入っている", "1" in queued(loc))
+
+        # ---- [2] Chamiミラー便 (webhook): 印だけ押す・enqueueしない ----
+        print("[2] Chamiミラー便 (webhook)")
+        mm = FakeMsg(2, "ミラー", FakeAuthor("Chami(main)", 222, bot=True), ch, guild,
+                     webhook_id=777)
+        asyncio.run(on_message(mm))
+        check("2 ミラーにも印が押される", mm.pushed[:1] == [sendms], "-> %r" % (mm.pushed,))
+        check("2 ミラーは queue に入れない", "2" not in queued(loc))
+
+        # ---- [3] 押してはいけない相手 ----
+        print("[3] 押さない側")
+        mb = FakeMsg(3, "他のbotの発言", FakeAuthor("SomeBot", 333, bot=True), ch, guild)
+        asyncio.run(on_message(mb))
+        check("3 ただのbot発言には押さない", mb.pushed == [] and "3" not in queued(loc))
+
+        mo = FakeMsg(4, "台帳外", chami, FakeChannel(int(CH_OUT), "よその部屋"), guild)
+        asyncio.run(on_message(mo))
+        check("3 台帳外chには押さない", mo.pushed == [] and "4" not in queued(loc))
+
+        # ---- [4] 絵文字が見つからない時の退避 ----
+        print("[4] 絵文字の解決")
+        old_name = FakeEmoji("送信", 999)
+        m5 = FakeMsg(5, "旧名だけある鯖", chami, ch, FakeGuild([old_name]))
+        asyncio.run(on_message(m5))
+        check("4 sendmsが無ければ旧名『送信』へ", m5.pushed[:1] == [old_name])
+
+        m6 = FakeMsg(6, "カスタム絵文字が無い鯖", chami, ch, FakeGuild([]))
+        asyncio.run(on_message(m6))
+        check("4 どちらも無ければ📮へ退避", m6.pushed[:1] == ["\U0001F4EE"],
+              "-> %r" % (m6.pushed,))
+
+        # ---- [5] fail-open: 押せなくても配達は死なない ----
+        print("[5] 押せない時 (fail-open)")
+        m7 = FakeMsg(7, "権限が無い部屋", chami, ch, guild,
+                     boom=RuntimeError("Missing Permissions"))
+        try:
+            asyncio.run(on_message(m7))
+            check("5 add_reactionが落ちても例外を外に出さない", True)
+        except Exception as e:
+            check("5 add_reactionが落ちても例外を外に出さない", False,
+                  "-> %s が受信経路の外へ出た" % type(e).__name__)
+        check("5 印が押せなくても便は queue に入っている", "7" in queued(loc))
+
+        print("\n%d PASS / %d FAIL" % (PASS, FAIL))
+        return 1 if FAIL else 0
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
