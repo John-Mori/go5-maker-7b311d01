@@ -501,6 +501,93 @@ def dialect_patterns(rules):
     return tuple(_DIALECT_KANSAI) + _extra_dialect(rules)
 
 
+# ------------------------------------------------------------------
+# ★2026-09-03 追加(C-066/C-038・研究室HQの発注をイージス研究室で実装)
+#   構造の穴= 禁止語は `personas.<人格>.forbidden`(話者別)からしか読めなかった。
+#   だから「全人格一律の禁止語」を入れる場所が**無く**、20人格へ同じ語を書き写す以外に
+#   手が無い= 写しを20本持つ(ORG-11違反)。方言が 2026-08-17 に踏んだのと同じ摩擦だ。
+#   → トップレベルの任意キー `forbidden_all` を1本足す。形は `dialect_kansai_extra` と
+#     **完全に同じ**(文字列=リテラル / {"name","pattern"}=正規表現)。**都度読み**なので
+#     人事部門がデータで1語足せば**次の便から効く**(基盤コードも載せ替えも要らない)。
+#   ★判定は**話者非依存**= 写像に人格が登録されていなくても回る(tone_verdicts の
+#     「未登録の人格は判定しない」より**前**に見る)。「一律」に穴を開けない。
+#   ★引用の中は数えない= `_mask_protected` をそのまま使う(方言と同じ線・線を2本引かない)。
+#   ★挙動は呼び出し側が決める= ここは数えるだけ(判定と挙動を混ぜない)。
+#     ただし `tone_corrections` の機械置換には**載せない**= 一律の語に「全人格で正しい
+#     置換先」は存在しない(「レップ」を何に置き換えるかは人格ごとに違う)。警告のみ。
+_FORBIDDEN_ALL_CACHE = {}
+
+
+def _forbidden_all(rules):
+    """口調ルール.json の `forbidden_all` を (表示名, 正規表現) の列にして返す。
+
+    ★壊れた正規表現はその1件だけ捨てる(ゲート全体を落とさない=共通規律§3 fail-open)。
+      捨てたことは `forbidden_all_names()` の欠落として機械で数えられる。
+    """
+    if not isinstance(rules, dict):
+        return ()
+    raw = rules.get("forbidden_all")
+    if not isinstance(raw, (list, tuple)) or not raw:
+        return ()
+    try:
+        key = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return ()
+    hit = _FORBIDDEN_ALL_CACHE.get(key)
+    if hit is not None:
+        return hit
+    out = []
+    for item in raw:
+        if isinstance(item, str):
+            name, pat = item, re.escape(item)
+        elif isinstance(item, dict):
+            name = str(item.get("name") or item.get("pattern") or "")
+            pat = item.get("pattern")
+            pat = re.escape(name) if not isinstance(pat, str) or not pat else pat
+        else:
+            continue
+        if not name:
+            continue
+        try:
+            re.compile(pat)
+        except re.error:
+            continue          # 壊れた正規表現は**この1件だけ**捨てる
+        out.append((name, pat))
+    out = tuple(out)
+    _FORBIDDEN_ALL_CACHE[key] = out
+    return out
+
+
+def forbidden_all_names(rules):
+    """一律禁止語として実際に載っている語(検査・報告用。何が効いているかを機械で数える)。"""
+    return [n for n, _ in _forbidden_all(rules)]
+
+
+def forbidden_all_hits(text, rules):
+    """全人格一律の禁止語に当たった箇所を返す。**話者を見ない**(一律だから)。
+
+    返り値: [{"marker": 表示名, "index": 位置}, ...](当たらなければ空リスト)
+    ★引用・コード・パスの中は数えない(`_mask_protected`)= Chamiの原文を引用して
+      「この語は使わない」と説明する便が、自分で鳴ってしまうのを防ぐ。
+    ★fail-open= 例外は握り潰して空(=止めない)。
+    """
+    try:
+        pats = _forbidden_all(rules)
+        if not pats:
+            return []
+        s = _mask_protected(text or "")
+        if not s.strip():
+            return []
+        out = []
+        for name, pat in pats:
+            m = re.search(pat, s)
+            if m:
+                out.append({"marker": name, "index": m.start()})
+        return out
+    except Exception:
+        return []
+
+
 def dialect_extra_names(rules):
     """データ側で足されている形の表示名(検査・報告用。何が載っているかを機械で数える)。"""
     return [n for n, _ in _extra_dialect(rules)]
@@ -857,6 +944,17 @@ def tone_verdicts(persona, dept, text, rules):
     try:
         if not rules:
             return out
+        # ★2026-09-03 C-066: 全人格一律の禁止語(トップレベル `forbidden_all`)。
+        #   **写像の登録有無より前に見る**= 未登録の人格でも回る。ここを下に置くと
+        #   「一律」に穴が開く(未登録=素通し)。判定は話者非依存・引用の中は数えない。
+        for h in (forbidden_all_hits(text, rules) or []):
+            out.append({
+                "persona": str(persona or ""),
+                "marker": h.get("marker"),
+                "index": h.get("index"),
+                "own_first_person": [],
+                "reason": "forbidden_all",
+            })
         ent = _persona_entry(rules, persona)
         if not ent:
             return out            # 未登録の人格は判定しない(fail-open=鳴らさない)
@@ -1059,8 +1157,13 @@ def tone_corrections(persona, dept, text, rules):
         for v in verdicts:
             w = v.get("marker")
             if v.get("reason") in ("dialect_kansai", "signature_absent",
-                                   "harsh_without_care"):
+                                   "harsh_without_care", "forbidden_all"):
                 to = ""            # ★方言・指紋語尾は書き直さない(語尾の置換は文法が壊れる)=警告のみ
+                #   ★2026-09-03 追加(C-066): 一律禁止語(forbidden_all)も**書き直さない**。
+                #     全人格で正しい置換先が存在しないからだ=「レップ」を何に言い換えるかは
+                #     人格ごとに違う(咲季と星南で同じ言葉にはならない)。機械が一意に決めれば
+                #     声を壊す=「沈黙より雑音がマシだが、雑音より声を壊す方がずっと悪い」。
+                #     出口は tone_audit への記録と、次便への突き返し(session_relay)の2つ。
                 #   ★威圧(harsh_without_care)は**永久に書き直さない**(設計§5-2)。
                 #     「やれ。」→「やりなさいよ」は置換ではなく**再生成**だし、足りないのは
                 #     語尾ではなく"世話焼きの心配"そのもの=機械が書けば嘘の温度になる。
