@@ -1,0 +1,9 @@
+{
+  "_note": "5ch動画ネタリサーチ対象板。どの板が5ch動画向きかはリサーチで決まる=生活/修羅場/ニュース系を仮置き。enabled:false は候補(slug未検証は enabled を立てる前に scrape_5ch.py --board <slug> で解決確認)。成人向けは載せない。",
+  "boards": [
+    {"slug": "newsplus", "name": "ニュース速報+", "enabled": true, "genre": "ニュース"},
+    {"slug": "news",     "name": "ニュース速報",  "enabled": false, "genre": "ニュース"},
+    {"slug": "kankon",   "name": "家庭",          "enabled": false, "genre": "生活/修羅場"},
+    {"slug": "live",     "name": "強制ID表示板",  "enabled": false, "genre": "雑談"}
+  ]
+}
