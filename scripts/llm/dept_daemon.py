@@ -3922,6 +3922,13 @@ try:
     import liveblog_gate as _liveblog       # 出力ゲートG= 実況漏れ(名乗り皆無の生ログ)
 except Exception:
     _liveblog = None                        # import 失敗でもデーモンは起動する(fail-open)
+# ★出力ゲートH(かな括弧の選択肢ラベル)= 話者非依存。2026-09-02 HQ-0232。
+#   写像(口調ルール.json)は見ない= 誰が書いても駄目な規則を話者別の器に入れない。
+#   正本= kana_choice_gate.py。**経路②(ミラー=output_gates)からも同じ1本を呼ぶ**。
+try:
+    import kana_choice_gate as _kana_choice
+except Exception:
+    _kana_choice = None                     # import 失敗でもデーモンは起動する(fail-open)
 _TONE_RULES_CACHE = {"loaded": False, "rules": None}
 
 
@@ -4174,6 +4181,27 @@ def _naming_rules():
         except Exception:
             _NAMING_RULES_CACHE["rules"] = None
     return _NAMING_RULES_CACHE["rules"]
+
+
+def audit_kana_choice(dept, persona, text, rec=None):
+    """出力ゲートH: かな括弧の選択肢ラベル((あ)(い)…)を 1,2,3 へ直す。2026-09-02 HQ-0232。
+
+    ★話者非依存= 写像(口調ルール.json)を見ない。誰が書いても駄目な規則を話者別の器
+      (ゲートDの forbidden)へ入れると、人格を1つ足すたびに同じ穴が開く。
+    ★判定・置換の実装は **kana_choice_gate.py 1本**。経路②(ミラー=output_gates)からも
+      同じ関数を呼ぶ= 片肺にしない(2026-08-15 口調ドリフトと同じ形の事故を作らない)。
+    ★記録先を2つ持たない= 既存の tone_audit.jsonl へ相乗り(event=kana_choice_fix / kana_choice)。
+      経路は "source" で分ける(常駐= "daemon" / ミラー= "mirror")。
+    返り値: (fixed_text, applied, remaining)。ゲート無効/例外時は (元text, [], [])。
+    """
+    try:
+        if _kana_choice is None:
+            return text, [], []
+        return _kana_choice.apply_and_audit(
+            text, dept=dept, persona=str(persona or ""), source="daemon",
+            msg_id=str((rec or {}).get("msg_id", "")), audit_path=TONE_AUDIT)
+    except Exception:
+        return text, [], []                 # fail-open= ゲートが配送を殺さない
 
 
 def audit_naming(dept, persona, text, rec=None):
@@ -7591,6 +7619,20 @@ class Daemon:
                         log(self.dept,
                             f"★出力ゲートD-2(案F・不採用→元の本文で送る): 話者={_speaker} "
                             f"理由={_rw.get('why')} msg={mid}")
+                # ★★出力ゲートH(かな括弧の選択肢ラベル)= 話者非依存(2026-09-02 HQ-0232)。
+                #   Chamiが3回目の指摘(炎上+再発)を押した実物= 「(あ)、(い)で選択肢やめて」。
+                #   ★C/Dの後ろ= 呼称/口調の書き直しが終わった本文に当てる(順番の取り合いが無い)。
+                _new_kana, _kfix, _kwarn = audit_kana_choice(self.dept, _speaker, _part, rec)
+                if _kfix:
+                    log(self.dept,
+                        f"★出力ゲートH(かな括弧・書き直し): 話者={_speaker} "
+                        f"{'/'.join(a.get('label', '') + '→' + a.get('to', '') for a in _kfix)} "
+                        f"msg={mid}")
+                    _part = _new_kana
+                if _kwarn:
+                    log(self.dept,
+                        f"★出力ゲートH(かな括弧・記録のみ=素通し): 話者={_speaker} "
+                        f"理由={_kwarn[0].get('reason')} msg={mid}")
                 # ★★出力ゲートE(名乗りタグの残存)= C/D/F の**後ろ**= 送信直前の最後の1点。
                 #   ここまで来て `[名前]` が残っている= 上流の名義解決が失敗した証拠(HQの定義)。
                 #   前置き(作業メモ)の露出も同じ便で起きるので、落とす時は一緒に落ちる。

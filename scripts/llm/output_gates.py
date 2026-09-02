@@ -57,6 +57,10 @@ try:
     import meta_strip as _meta_strip
 except Exception:
     _meta_strip = None
+try:
+    import kana_choice_gate as _kana_choice   # ゲートH(かな括弧の選択肢ラベル)
+except Exception:
+    _kana_choice = None                       # import 失敗でもミラーは動く(fail-open)
 
 # ルールは **mtime が変わったら読み直す**(常駐の _tone_rules と同じ思想)。
 #   人事部門が写像へ1行足した時に、ミラー側だけ古い規則で動くのを防ぐ。
@@ -129,7 +133,8 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
     """
     do_fix = _fix_enabled() if fix is None else bool(fix)
     summary = {"naming_fix": 0, "naming_warn": 0, "tone_fix": 0, "tone_warn": 0,
-               "meta_strip": 0, "meta_emptied": False, "narration_leak": 0}
+               "meta_strip": 0, "meta_emptied": False, "narration_leak": 0,
+               "kana_choice_fix": 0, "kana_choice_warn": 0}
     s = str(text or "")
     if not s.strip() or not str(persona or "").strip():
         return text, summary
@@ -241,6 +246,24 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
                 s = res.get("fixed", s) or s
     except Exception:
         pass
+
+    # --- ゲートH(かな括弧の選択肢ラベル)= **話者非依存** ---------------------
+    # ★2026-09-02 HQ-0232。Chamiが3回目の指摘(炎上+再発)を押した実物= (あ)(い) の選択肢。
+    #   ★今回のカスミは**この経路(対話セッション=ミラー)**で出た。だから経路①だけでは塞がらない。
+    #   ★C/Dと違い写像(口調ルール.json)を見ない= 話者別の器に入れると人格を足すたび穴が開く。
+    #   ★ここは**警告のみにしない**= 判定材料は本文だけで、置換は「(あ)→(1)」の1対1。
+    #     ゲートDが警告のみへ倒れた理由(話者別の写像を引用文へ誤爆させた)はここには無い。
+    #     引用行(>)とコードは正本 kana_choice_gate 側で除外済み=規律を論じる本文は壊れない。
+    try:
+        if _kana_choice is not None:
+            s2, _kfix, _kwarn = _kana_choice.apply_and_audit(
+                s, dept=dept, persona=str(persona or ""), source=source,
+                msg_id=str(msg_id or ""), audit_path=TONE_AUDIT)
+            summary["kana_choice_fix"] = len(_kfix)
+            summary["kana_choice_warn"] = len(_kwarn)
+            s = s2
+    except Exception:
+        pass            # 素通し=送信は殺さない
 
     # ★最後の砦= 本文が空になったら**元の本文で送る**(沈黙ゼロ・受け入れ条件②)。
     if not str(s or "").strip():
