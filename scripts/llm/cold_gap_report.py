@@ -135,16 +135,29 @@ def summary(hours=168.0):
     cost_w = cc_w * W_WRITE + cr_w * W_READ
     extra = cost_c - cost_w
     pulse = cr_w * W_READ + 1000 * W_WRITE
+    # ★分岐は「脈の本数」と「間隔の時間」の2つの顔を持つ。写像は1本だけ置いて
+    #   本文と台帳の両方がこれを見る(同じ数を2箇所で計算しない)。
+    be_pulses = (extra / pulse) if pulse else 0.0
+    be_sec = (be_pulses + 1) * WARM_MIN * 60.0 if pulse else 0.0
+    n_over_be = sum(1 for r in cold if r[0] >= be_sec) if pulse else 0
     L += ["",
           "  冷え1回の追加コスト(重み付き)= %s / 保温1脈= %s" % (f"{extra:,.0f}", f"{pulse:,.0f}"),
-          "  ★分岐= 保温 %.2f回まで(= 間隔 %.1f時間まで)"
-          % (extra / pulse if pulse else 0, (extra / pulse + 1) * WARM_MIN / 60.0 if pulse else 0)]
+          "  ★分岐= 保温 %.2f回まで(= 間隔 %.1f時間まで)" % (be_pulses, be_sec / 3600.0),
+          "  → 冷え便のうち **分岐を越えていたもの= %d/%d (%.1f%%)**"
+          % (n_over_be, len(cold), 100.0 * n_over_be / max(1, len(cold)))]
     d = {"hours": hours, "n": len(rows), "cold": len(cold), "warm": len(warm),
          "over1h": n_over, "over1h_pct": round(pct_over, 1),
          "cold_write_med": cc_c, "cold_read_med": cr_c,
          "warm_write_med": cc_w, "warm_read_med": cr_w,
          "extra": round(extra), "pulse": round(pulse),
-         "breakeven_pulses": round(extra / pulse, 2) if pulse else None}
+         "breakeven_pulses": round(be_pulses, 2) if pulse else None,
+         # ★次に測り直した時、行と行だけで裁定の向きを比べられるようにする。
+         #   2026-09-02の比較で、分布(bands)と分岐の越え数が行に無くて突き合わせられなかった。
+         "breakeven_hours": round(be_sec / 3600.0, 2) if pulse else None,
+         "over_breakeven": n_over_be,
+         "over_breakeven_pct": round(100.0 * n_over_be / max(1, len(cold)), 1),
+         "bands": {name: sum(1 for r in cold if _band(r[0]) == name)
+                   for _, _, name in BANDS}}
     return "\n".join(L), d
 
 
