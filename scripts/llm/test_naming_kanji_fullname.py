@@ -124,6 +124,25 @@ def main():
     check("C use は直る: 呼びかけ位置のフル名は姓へ寄せる",
           fixed(WHO_SHORT, "三笘薫、進捗を頼む。") == "三笘、進捗を頼む。")
 
+    # --- D 自称(話者==対象)は #3 の対象外(2026-09-02 人事裁定) ----------------
+    #   裁定= DISPATCH-aegis-gl-1788355470901(ククール)。逐語=
+    #     「`_is_self`(speaker==target)は kanji_fullname 検出を発火させない。
+    #       呼称ゲートの目的は"対人呼称の崩れ"であって、自称は対人呼称じゃない」
+    #     「Chamiが名指しで禁じた自称形だけは別経路で引き続き捕捉しろ
+    #       =三笘の『三笘さん』・モドリッチの『ルカ』。これは self-override 行の forbidden が拾う」
+    #   ★D1 が裁定前の本番との差= 敬称付きの自称フル名は**鳴っていた**(form != key だったため)。
+    check("D1 自称のフル名+敬称は鳴らさない(裁定で不問)",
+          not [v for v in hits("早坂芽衣", "早坂芽衣さん、です。")
+               if v[2] == "kanji_fullname"])
+    check("D2 自称のフル名が呼びかけ位置でも鳴らさない",
+          not hits("花海咲季", "花海咲季、いきます。"))
+    check("D3 禁じられた自称形は別経路で今までどおり鳴る(三笘さん)",
+          ("三笘薫", "三笘さん", "forbidden")
+          in hits("三笘薫", "三笘さん、了解した。"))
+    check("D4 自称の除外を他人へ広げない(同じ本文でも話者が違えば鳴る)",
+          ("早坂芽衣", "早坂芽衣さん", "kanji_fullname")
+          in hits("トトリ", "早坂芽衣さん、です。"))
+
     ok = all(c for _, c in results)
     print("\n%d件中 %d件OK" % (len(results), sum(1 for _, c in results if c)))
     return 0 if ok else 1
@@ -165,6 +184,68 @@ def _mut_prefix_ok():
     ng._appears_as_allowed = prefix_ok
 
 
+def _mut_self_bare_only():
+    """旧本番(裁定前): 自称を除くのは『フル名を裸で書いた時』だけ=敬称が付くと鳴る。
+
+    ★行を消す変異ではなく、2026-09-02 22:20(commit 4084259)まで本番で動いていた
+      実装をそのまま置き直す(C-053)。差は `_is_self` を見る位置だけ。
+    """
+    def old_impl(persona, text, rules, seen_targets=()):
+        out = []
+        if not ng.KANJI_FULLNAME_GATE:
+            return out
+        rules = rules or {}
+        s = str(text or "")
+        if not s:
+            return out
+        hrt = rules.get("honorific_required_targets") or {}
+        detect = rules.get("target_detect_forms") or {}
+        overrides = rules.get("speaker_target_overrides") or []
+        keys = []
+        for src in (hrt, detect):
+            if isinstance(src, dict):
+                for k in src:
+                    if str(k).startswith("_") or k in keys:
+                        continue
+                    keys.append(k)
+        for ov in overrides:
+            tk = (ov or {}).get("target") if isinstance(ov, dict) else None
+            if tk and tk != "*" and tk not in keys:
+                keys.append(tk)
+        for tk in keys:
+            if tk in seen_targets:
+                continue
+            if not ng._is_kanji_fullname(tk) or tk not in s:
+                continue
+            ov = ng._effective_override(persona, tk, overrides)
+            ent = hrt.get(tk) if isinstance(hrt.get(tk), dict) else {}
+            allowed = [str(a) for a in ((ov or {}).get("allowed")
+                                        or ent.get("allowed") or []) if str(a)]
+            if tk in allowed:
+                continue
+            i = 0
+            while True:
+                i = s.find(tk, i)
+                if i < 0:
+                    break
+                form = ng._fullname_called(s, i, tk)
+                if not form:
+                    i += 1
+                    continue
+                end = i + len(form)
+                if form in allowed:
+                    i = end
+                    continue
+                if ng._is_self(persona, tk) and form == tk:
+                    i = end
+                    continue        # ←ここが旧仕様(裸の時だけ不問)
+                out.append({"target": tk, "found": form,
+                            "expected": allowed, "reason": "kanji_fullname"})
+                break
+        return out
+    ng._kanji_fullname_verdicts = old_impl
+
+
 MUTANTS = (
     ("変異1 use/mention を分けない", _mut_called_anywhere,
      "C mention を触らない: 表の行"),
@@ -174,6 +255,8 @@ MUTANTS = (
      "A3 期待呼称が未定義の対象をフル名+敬称(怜)"),
     ("変異4 prefix を許容形と数える(旧本番の穴)", _mut_prefix_ok,
      "A1 呼び捨て可の話者がフル名で呼んだ(0歩目の実物)"),
+    ("変異5 自称を裸の時だけ不問にする(裁定前の本番)", _mut_self_bare_only,
+     "D1 自称のフル名+敬称は鳴らさない(裁定で不問)"),
 )
 
 

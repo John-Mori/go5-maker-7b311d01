@@ -640,6 +640,10 @@ def _chami_address_verdicts(persona, s, rules):
 #   ★expected は**正本から引けた時だけ**入れる。人事の回答に
 #     「『芽衣さん』を既定とする話者は Chami 未指定=据え置き(勝手に既定さん付けを足さない)」
 #     と明記されている=引けない対象は空のまま出す(覚えで書かない)。
+#   ★**自称(話者==対象)はこのゲートの対象外**(2026-09-02 人事裁定・
+#     DISPATCH-aegis-gl-1788355470901)= 目的は"対人呼称の崩れ"であって自称ではない。
+#     禁じられた自称形(『三笘さん』『ルカ』)は speaker_target_overrides の forbidden が
+#     拾う=別経路。判定源は 呼称ルール.json の speaker==target 行の note(00_AI-HQ 95558f0)。
 KANJI_FULLNAME_GATE = True
 
 
@@ -736,6 +740,16 @@ def _kanji_fullname_verdicts(persona, text, rules, seen_targets=()):
             continue            # 既に別の理由で鳴っている=同じ便で二重に数えない
         if not _is_kanji_fullname(tk) or tk not in s:
             continue
+        if _is_self(persona, tk):
+            # ★自称は対象外(2026-09-02 人事裁定・DISPATCH-aegis-gl-1788355470901)。
+            #   「呼称ゲートの目的は"対人呼称の崩れ"であって、自称は対人呼称じゃない」=
+            #   自称のフル名(『三笘薫』『ルカ・モドリッチ』)は敬称付き・呼びかけ位置とも不問。
+            #   ★Chami が名指しで禁じた自称形(三笘の『三笘さん』/ モドリッチの『ルカ』)は
+            #     speaker_target_overrides の forbidden が別経路で拾う=ここを外しても消えない
+            #     (naming_verdicts の ov_fb・この関数より上で処理済み)。
+            #   ★フル名の自称そのものは Chami 未指定=違反を足さない(C-035)。
+            #   正本= 呼称ルール.json の speaker==target 2行の note(00_AI-HQ 95558f0)。
+            continue
         ov = _effective_override(persona, tk, overrides)
         ent = hrt.get(tk) if isinstance(hrt.get(tk), dict) else {}
         allowed = [str(a) for a in ((ov or {}).get("allowed")
@@ -755,9 +769,6 @@ def _kanji_fullname_verdicts(persona, text, rules, seen_targets=()):
             if form in allowed:
                 i = end
                 continue        # 期待形そのもの
-            if _is_self(persona, tk) and form == tk:
-                i = end
-                continue        # 自分の名を書いただけ(自称に敬称は要求しない)
             out.append({
                 "target": tk, "found": form,
                 "expected": allowed, "reason": "kanji_fullname",
