@@ -35,16 +35,22 @@ JST = timezone(timedelta(hours=9))
 
 FRAME_INTERVAL_SEC = 4.0  # OgiiytcUnzE実績(28秒→7枚≒4秒間隔)に合わせた既定値
 
+# yt-dlp(Python製)は子プロセスのstdoutをパイプ渡しすると、この環境ではPYTHONIOENCODING
+# 未指定時にcp932へフォールバックして日本語タイトルが文字化けする(実測・VRbdT3PH2dsで発生)。
+# 親のsubprocess.run側でutf-8指定していても子の出力自体が化けるため、環境変数で強制する。
+_SUBPROC_ENV = dict(os.environ, PYTHONIOENCODING="utf-8")
+
 
 def run(cmd, **kw):
     print("  $ " + " ".join(cmd))
-    return subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", **kw)
+    return subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           env=_SUBPROC_ENV, **kw)
 
 
 def yt_dlp_json(url):
     r = subprocess.run(
         ["yt-dlp", "--skip-download", "--print", "%(id)s\t%(title)s\t%(duration)s\t%(channel)s\t%(view_count)s", url],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=_SUBPROC_ENV,
     )
     line = [l for l in r.stdout.splitlines() if "\t" in l]
     if not line:
