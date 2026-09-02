@@ -4751,6 +4751,114 @@ def _append_hangul_warn(text):
 
 
 # ============================================================================
+# 出力ゲートA'(関西弁の一律禁止)= 地の文の方言を**Chamiが見る前に**再生成で消す 2026-09-03
+# ----------------------------------------------------------------------------
+# 発端= Chami直接指示(§3.7=どの裁定より上)。改善提案部門トトリ経由・研究室HQ
+#   msg 1544754417796911204 / 1544754298372624434。**2便で1つの指示**として受けている:
+#     1)「てか関西弁使うキャラっていないから一律禁止にしといてもろて」(msg 1544754070487568555)
+#     2)「ただし、俺の発言の引用として使うのはOKだからね」(msg 1544754298372624434)
+# 壊れている実物= 軍議 msg 1544752273253728276。標準語登録の三笘薫がChami自身の関西弁ツッコミへ
+#   同調(register mirroring)して「ほんまや/なんよ/や(断定)」で返した。
+#   ★ゲートDは**正しく検知していた**(tone_audit.jsonl に dialect_kansai 3件)。
+#     だが方言は語尾を機械置換すると文法が壊れるので直さない(2026-08-15確定)=
+#     検知した上で**そのままChamiへ届いた**。だから止める場所を「事後の突き返し」から
+#     「出る前の再生成」へ動かす= これが今回の格上げの中身だ。
+# ★**別建てにしない**= ルールA(ハングル)・実況漏れと同じ流れへ合流する。
+#   検知→①同じ入力で1回だけ再生成→②なお残れば元文に警告を付けて送る。
+# ★終端は「警告付きで送る」= 保留(沈黙)側には倒さない。方言が混じっても**日本語で情報は
+#   載っている**ので、止めると事故の方が大きい(英文ダンプは救う日本語が無いので別扱い)。
+#   ★ここが「その便を出さない」の解釈だ= 出さないのは**方言の載った版**で、便そのものではない。
+# ★機械置換はしない(pronoun-swap を方言へ広げない)= 語尾を触ると文が壊れる。再生成一択。
+# ★引用の例外は判定側(tone_gate.dialect_hits → _mask_protected)が持つ=
+#   「」『』・コードフェンス・引用行の中の関西弁は**元から数えていない**。Chamiの発言を
+#   引用しただけの便は、このゲートに1度も当たらない(=巻き込まない)。
+DIALECT_WARN = "⚠️(自動)口調: 地の文に関西弁が残っている(再生成でも消えず)。要確認。"
+
+
+def dialect_gate(text, regen=None, strip_marker=None, detect=None):
+    """関西弁検知→1回だけ再生成→なお残れば元文に警告付与(純関数・テスト可)。
+
+    引数:
+      text        : 送信直前の本文。
+      regen       : 無引数callable。呼ぶと**再生成後の本文**を返す(None なら再生成しない)。
+      strip_marker: 再生成本文から `<<WIP>>` 等を落とす callable(任意)。
+      detect      : 本文 → 当たった形の列(空なら方言なし)。None なら**このゲートは無効**。
+
+    返り値: (送る本文, info)
+      info = {"hit1","markers","regenerated","hit2","warned"}(ログ・監査用)
+    ★fail-open= 何が起きても元文は返る。ゲートが配送を殺さない。
+    """
+    info = {"hit1": False, "markers": [], "regenerated": False,
+            "hit2": False, "warned": False}
+    try:
+        base = str(text or "")
+        if detect is None:
+            return base, info                # 判定材料が無い=素通し(黙って止めない)
+        hits = detect(base) or []
+        if not hits:
+            return base, info                # 通常経路=何もしない(大多数はここ)
+        info["hit1"] = True
+        info["markers"] = [str(h) for h in hits]
+        if regen is None:
+            info["warned"] = True            # 再生成の手が無い経路=沈黙にしない
+            return _append_dialect_warn(base), info
+        try:
+            regen_text = regen()
+        except Exception:
+            regen_text = None                # 再生成の例外は握り潰す(fail-open)
+        if regen_text:
+            info["regenerated"] = True
+            cleaned = str(regen_text)
+            if strip_marker is not None:
+                try:
+                    cleaned, _ = strip_marker(cleaned)
+                except Exception:
+                    cleaned = str(regen_text)
+            if cleaned and not (detect(cleaned) or []):
+                return cleaned, info         # 再生成で消えた=きれいな本文へ差し替え
+            info["hit2"] = bool(cleaned) and bool(detect(cleaned) or [])
+        info["warned"] = True
+        return _append_dialect_warn(base), info
+    except Exception:
+        return str(text or ""), info
+
+
+def _append_dialect_warn(text):
+    """本文末尾に改行2つ+警告行(既に付いていれば二重に付けない)。"""
+    s = str(text or "")
+    if DIALECT_WARN in s:
+        return s
+    return s + "\n\n" + DIALECT_WARN
+
+
+def dialect_detector(dept, personas=()):
+    """この部屋用の判定 thunk を作る(無ければ None= ゲートは無効のまま)。
+
+    ★一律禁止(Chami原文)なので、**人格が口調ルール.jsonに登録されているかは問わない**。
+      登録の有無を穴にしない= 未登録の人格が方言を喋ってもこのゲートは鳴る。
+    ★唯一の例外は、部屋の人格が**全員** `dialect_ok` を明示されている場合だけ
+      (現時点で該当は0人格=実質は全部屋一律)。将来Chamiが方言の人格を作った時の逃げ道を
+      写像側に1つだけ残す=コードに人格名を書かないため(ORG-11)。
+    """
+    try:
+        if _tone_gate is None:
+            return None
+        rules = _tone_rules()
+        who = [str(p) for p in (personas or ()) if str(p)]
+        if who and rules:
+            oks = []
+            for p in who:
+                ent = _tone_gate._persona_entry(rules, p)
+                oks.append(bool(ent and ent.get("dialect_ok")))
+            if oks and all(oks):
+                return None                  # 部屋ごと方言が正=このゲートを掛けない
+        return lambda s: [h.get("marker") for h
+                          in (_tone_gate.dialect_hits(s, rules) or [])]
+    except Exception:
+        return None                          # 判定を作れない=素通し(配送を殺さない)
+
+
+# ============================================================================
 # 出力ゲート(実況漏れ)= 名乗りも声も無い**生ログ**がそのまま部屋へ出る事故  2026-09-01
 # ----------------------------------------------------------------------------
 # 発端= Chami 2026-09-01「アイが謎の機械口調」。型= 改善提案部門・トトリ
@@ -7785,6 +7893,42 @@ class Daemon:
             except Exception:
                 pass             # 監査の失敗で本文を巻き添えにしない
         reply = _reply_n
+        # ★★出力ゲートA'(関西弁の一律禁止)= Chami直接指示(2026-09-03・§3.7)。
+        #   「てか関西弁使うキャラっていないから一律禁止にしといてもろて」+
+        #   「ただし、俺の発言の引用として使うのはOKだからね」の2便で1つの指示。
+        #   ★ルールA(ハングル)・実況漏れの**兄弟としてこの合流点に置く**= 全経路の返信が
+        #     必ず1度だけ通る唯一の地点。ゲートD(audit_tone)は下のブロック分割の後=
+        #     **再生成の手がもう無い**位置なので、そこでは「一律禁止」を実現できない。
+        #   ★話者に依らない(一律)ので reply 全体に1回だけ掛ける=人格ごとの分岐を作らない。
+        #   ★引用の中は判定側が既に潰している(dialect_hits → _mask_protected)=
+        #     Chamiの関西弁を引用しただけの便はここに当たらない。
+        _dialect_detect = dialect_detector(self.dept, _nonjp_names)
+        _reply_d, _dg = dialect_gate(reply, regen=regen, strip_marker=split_wip_marker,
+                                     detect=_dialect_detect)
+        if _dg.get("hit1"):
+            log(self.dept,
+                f"★出力ゲートA'(関西弁): 形={','.join(_dg.get('markers') or [])} "
+                f"再生成={'実施' if _dg.get('regenerated') else '不可/未実施'} "
+                f"2回目も方言={'有' if _dg.get('hit2') else '無'} "
+                f"警告付与={'有' if _dg.get('warned') else '無(再生成で解消)'} msg={mid}")
+            try:
+                os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+                with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "dept": self.dept,
+                        "event": "dialect_ban",
+                        "source": "daemon",
+                        "msg_id": str(mid or ""),
+                        "markers": _dg.get("markers") or [],
+                        "regenerated": bool(_dg.get("regenerated")),
+                        "hit2": bool(_dg.get("hit2")),
+                        "warned": bool(_dg.get("warned")),
+                        "before": str(reply or "")[:400],
+                    }, ensure_ascii=False) + "\n")
+            except Exception:
+                pass             # 監査の失敗で本文を巻き添えにしない
+        reply = _reply_d
         # ★★出力ゲート(英語前置きの剥離)= 英語の分析段落が頭に付き、そのあと日本語本文が続く混在
         #   (2026-08-23 Chami「英文要らんって言ってんのにずっと治らない」・msg 1540768290568409130)。
         #   detect_english_dump(まるごと英語)は日本語が多くて鳴らない穴=別形の再発(C-038)。

@@ -506,6 +506,49 @@ def dialect_extra_names(rules):
     return [n for n, _ in _extra_dialect(rules)]
 
 
+# ★★2026-09-03 Chami直接指示(§3.7=どの裁定より上)。改善提案部門トトリ経由・研究室HQ msg
+#   1544754417796911204 / 1544754298372624434。**2便で1つの指示**として受けている:
+#     1)「てか関西弁使うキャラっていないから一律禁止にしといてもろて」(msg 1544754070487568555)
+#     2)「ただし、俺の発言の引用として使うのはOKだからね」(msg 1544754298372624434)
+#   発端の実物= 軍議 msg 1544752273253728276。Chami自身の関西弁ツッコミに三笘薫が同調して
+#   関西弁で返し、ゲートDは検知したのに**そのままChamiへ届いた**(方言は機械置換しない)。
+#   ★ここは「誰が地の文で方言を書いたか」を数えるだけの純関数だ。止めるか再生成するかは
+#     呼び出し側(dept_daemon の出力ゲートA'/dialect_gate)が決める= 判定と挙動を混ぜない。
+#   ★正本を1本にする(C-064)= session_relay の同調よけ(封筒側の予防線)も**この関数**を引く。
+#     マーカー表を2箇所に置かない。人事がデータ側 `dialect_kansai_extra` へ1形足せば、
+#     検知・予防線・禁止の3つに**同時に**効く(都度読み=再起動不要)。
+def dialect_hits(text, rules, persona=None):
+    """地の文に出た関西弁の形を返す。**引用の中は数えない**(Chamiの発言の引用はOK)。
+
+    引数:
+      text    : 判定する本文(送信直前の返信そのもの)。
+      rules   : 口調ルール.json(load_tone_rules の返り値)。None でも組み込み列で判定する。
+      persona : 分かっていれば話者名。**写像で `dialect_ok` が立っている人格だけ除外**する。
+                ★未登録の人格は除外しない= Chami「一律禁止」。登録の有無を穴にしない。
+
+    返り値: [{"marker": 表示名, "index": 位置}, ...](当たらなければ空リスト)
+    ★引用の除外は `_mask_protected`(「」『』・コードフェンス・引用行・パス/URL)を**そのまま**使う。
+      判定と書き直しで同じマスクを使うのが元からの作法で、ここもそれに乗る=線を2本引かない。
+    ★fail-open= 例外は握り潰して空(=止めない)。ゲートは配送を殺さない。
+    """
+    try:
+        if persona:
+            ent = _persona_entry(rules, persona)
+            if ent and ent.get("dialect_ok"):
+                return []          # 方言が正だと**写像に明示された**人格だけ素通し
+        s = _mask_persona_names(_strip_quotes(text), text, rules)
+        if not s.strip():
+            return []
+        out = []
+        for name, pat in dialect_patterns(rules):
+            m = re.search(pat, s)
+            if m:
+                out.append({"marker": name, "index": m.start()})
+        return out
+    except Exception:
+        return []
+
+
 def _norm(s):
     """人格名の表記ゆれ(中黒・空白)を吸収して突き合わせる(naming_gate と同じ思想)。"""
     return re.sub(r"[・\s]", "", str(s or "")).lower()

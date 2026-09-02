@@ -90,7 +90,14 @@ def main():
             chk("異常な型でも例外を投げない %r -> %s" % (bad, e), False)
     chk("rules=None でも落ちない",
         tg.tone_verdicts("オタコン", "system-engineer", "元凶や。", None) is not None)
-    chk("データ未設定なら extra は空", tg.dialect_extra_names(rules) == [])
+    # ★2026-09-03 修正= ここは「**キーが無い**なら extra は空」を測る検査だ。
+    #   本番の口調ルール.json をそのまま渡していたので、人事部門が実際に
+    #   `dialect_kansai_extra` を4形(やない/えへん/えん/ええ)登録した時点で赤くなった=
+    #   **仕組みが壊れたのではなく、データが育った**ことによる偽の赤。
+    #   意図どおり「キーを外した写像」で測る形へ直す(組み込み列の回帰は①が見ている)。
+    _no_extra = copy.deepcopy(rules)
+    _no_extra.pop("dialect_kansai_extra", None)
+    chk("データ未設定なら extra は空", tg.dialect_extra_names(_no_extra) == [])
 
     print("\n== %d/%d PASS ==" % (_ok, _ok + _ng))
     return 1 if _ng else 0

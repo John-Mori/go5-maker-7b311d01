@@ -1344,11 +1344,9 @@ def _register_mirror_hint(rec, dept=None, conf=None):
         rules = tone_gate.load_tone_rules(TONE_RULES_PATH)
         if not rules:
             return ""                          # 写像が読めない=判定材料が無い(黙る)
-        s = tone_gate._strip_quotes(body)
-        found = []
-        for name, pat in tone_gate.dialect_patterns(rules):
-            if re.search(pat, s):
-                found.append(name)
+        # ★2026-09-03 判定の正本を tone_gate.dialect_hits へ寄せた(C-064)。ここで自前に
+        #   マスクとループを持つと、禁止側(dept_daemon)と予防線側で線が2本になる。
+        found = [h.get("marker") for h in (tone_gate.dialect_hits(body, rules) or [])]
         if not found:
             return ""
         c = conf or {}
