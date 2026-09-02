@@ -32,7 +32,11 @@ CRITERIA_PATH = os.path.join(LOCAL, "llm", "self_check_criteria.json")
 
 SELF_CHECK_ON = True          # ★逃げ道: これを False にすれば1行で止まる
 SELF_CHECK_MODEL = "haiku"    # 設計§3=Haiku級
-SELF_CHECK_TIMEOUT_S = 25     # 短い上限。超えたら**無条件で通す**
+# ★実測(2026-09-02 本番相当1,962字)= 28.6秒。初版の 25 秒では**毎回時間切れ**で判定が出ず、
+#   台帳が verdict=null で埋まっていた(fail-open は効いていたが検品は一度も答えていない
+#   = never_fired-never-verified の型)。呼び側が送信経路の外で回すようにしたので、
+#   上限は実測の3倍まで伸ばせる= 遅い便でも判定を取り切る。
+SELF_CHECK_TIMEOUT_S = 90     # 超えたら**無条件で通す**(理由は notes へ残す)
 MIDBAND_LO = 20               # 灰色③の帯(下)= これ未満は固有名詞・略語で日常的に出る
 MIDBAND_HI = 34               # 灰色③の帯(上)= 35字以上は detect_english_paragraph の持ち場
 
@@ -179,43 +183,84 @@ def parse_verdict(raw):
         return None
 
 
-def _claude_runner(prompt, model, timeout_s):
+def _note(notes, why):
+    """判定が出なかった**理由**を1つ積む。台帳の `null_reason` になる。
+
+    ★verdict=null だけでは「時間切れ」「claudeが居ない」「答えが壊れている」を区別できず、
+      検品が静かに死んでいても台帳の見た目が変わらない(実際そうなっていた)。理由を残す。
+    """
+    try:
+        if notes is not None:
+            notes.append(str(why))
+    except Exception:
+        pass
+
+
+def _classify(e):
+    """例外を台帳へ残せる短い理由へ落とす。"""
+    if isinstance(e, subprocess.TimeoutExpired):
+        return "timeout"
+    if isinstance(e, FileNotFoundError):
+        return "no_claude"
+    return "error:" + type(e).__name__
+
+
+def _claude_runner(prompt, model, timeout_s, notes=None):
     """外へ出る唯一の手= `claude -p`。検査ではここだけ偽物へ差し替える。
 
     ★戻りは生テキスト。失敗・タイムアウト・非ゼロ終了は **None**(呼び側で素通しになる)。
+    ★None を返す時は `notes` へ理由を積む= 素通しの中身を後から数えられるようにする。
     """
     try:
         p = subprocess.run(
             ["claude", "-p", prompt, "--model", model, "--output-format", "text"],
             cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=timeout_s)
-    except Exception:
-        return None                    # claude が無い/落ちた/時間切れ= 通す
+    except Exception as e:
+        _note(notes, _classify(e))     # claude が無い/落ちた/時間切れ= 通す
+        return None
     if p.returncode != 0:
+        _note(notes, "exit:%s" % p.returncode)
         return None
     return p.stdout
 
 
+def _accepts_notes(fn):
+    """runner が理由を受け取れるか。受け取れない偽物(検査の runner)もそのまま使える。"""
+    try:
+        import inspect
+        return "notes" in inspect.signature(fn).parameters
+    except Exception:
+        return False
+
+
 def check(text, speaker="", first_person="", room="", reasons=(), runner=None,
-          model=None, timeout_s=None, criteria=None):
+          model=None, timeout_s=None, criteria=None, notes=None):
     """灰色便を1回だけ検品する。**返りは dict か None**。None= 検品していない(=通す)。
 
     ★呼び側は返りで**送信を止めてはならない**(設計§3の経路②= 送信は止めず台帳+突き返しのみ)。
     ★reasons が空なら呼ばない(灰色でない便に金を掛けない)。
+    ★`notes` に list を渡すと、None を返した**理由**が入る(off / empty / timeout /
+      no_claude / exit:n / no_output / unparsable)。渡さなくても動きは変わらない。
     """
     if not SELF_CHECK_ON or not str(text or "").strip() or not reasons:
+        _note(notes, "off" if not SELF_CHECK_ON else "no_input")
         return None
     t0 = time.time()
     try:
         prompt = build_prompt(text, speaker=speaker, first_person=first_person,
                               room=room, criteria=criteria)
-        raw = (runner or _claude_runner)(prompt,
-                                         model or SELF_CHECK_MODEL,
-                                         timeout_s or SELF_CHECK_TIMEOUT_S)
-    except Exception:
-        return None                    # 検品の失敗で本文を巻き添えにしない
+        fn = runner or _claude_runner
+        args = (prompt, model or SELF_CHECK_MODEL, timeout_s or SELF_CHECK_TIMEOUT_S)
+        n0 = len(notes or ())
+        raw = fn(*args, notes=notes) if _accepts_notes(fn) else fn(*args)
+    except Exception as e:
+        _note(notes, _classify(e))     # 検品の失敗で本文を巻き添えにしない
+        return None
     v = parse_verdict(raw)
     if v is None:
+        if len(notes or ()) == n0:     # runner が理由を積んでいれば重ねない(timeout+no_output)
+            _note(notes, "no_output" if not str(raw or "").strip() else "unparsable")
         return None
     v["elapsed_ms"] = int((time.time() - t0) * 1000)
     v["reasons"] = list(reasons)

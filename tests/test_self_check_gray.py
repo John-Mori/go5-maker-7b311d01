@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 PJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PJ, "scripts", "llm"))
@@ -82,8 +83,17 @@ def runner_garbage(prompt, model, timeout_s):
     return "I checked it and it looks fine to me."
 
 
+def runner_slow(prompt, model, timeout_s):
+    """★遅い検品(本番の実測= 1,962字で28.6秒)。送信がこれを待つかどうかを見る。"""
+    CALLS.append(("slow", model, len(prompt)))
+    time.sleep(SLOW_S)
+    return OK_JSON
+
+
 CALLS = []
 LEDGER = []
+RETURNED_IN = [0.0]
+SLOW_S = 1.5                     # 実測28.6秒の縮尺版(待つ実装なら必ずこれだけ待たされる)
 
 
 def run(part, runner, struct_drift=False, regen_round=0, checker=None):
@@ -98,8 +108,11 @@ def run(part, runner, struct_drift=False, regen_round=0, checker=None):
     # ★判定・組み立て・読み取りは本物。差し替えるのは `claude` を呼ぶ1点だけ。
     d._self_check.check = lambda text, **kw: real_check(text, runner=runner, **kw)
     try:
+        t0 = time.time()
         out = (checker or d.audit_self_check)(
             DEPT, REC, SPEAKER, part, struct_drift=struct_drift, regen_round=regen_round)
+        RETURNED_IN[:] = [time.time() - t0]     # ★送信経路が待たされた時間
+        d.self_check_join(30)                   # 検品は別スレッド= 台帳を読む前に待つ
     finally:
         d.SELF_CHECK_AUDIT, d._self_check.check, d.log = keep_path, keep_check, keep_log
     rows = [json.loads(l) for l in open(tmp, encoding="utf-8") if l.strip()]
@@ -166,12 +179,18 @@ check("灰色④: 1周目(regen_round=1)では鳴らない",
       run(NORMAL_JP, runner_ok, regen_round=1)[1] == [])
 
 # --- 3) ★§5-7後半(本丸): 検品APIを殺しても**便は届く** --------------------------------
-for label, runner in (("APIが死んでいる", runner_dead), ("APIが例外を投げる", runner_boom),
-                      ("APIが時間切れ", runner_timeout), ("答えが壊れている", runner_garbage)):
+for label, runner, why in (("APIが死んでいる", runner_dead, "no_output"),
+                           ("APIが例外を投げる", runner_boom, "error:RuntimeError"),
+                           ("APIが時間切れ", runner_timeout, "timeout"),
+                           ("答えが壊れている", runner_garbage, "unparsable")):
     sent, rows = deliver(NORMAL_JP, runner, struct_drift=True)
     check("fail-open: %s時も便がそのまま届く" % label, sent == NORMAL_JP)
     check("fail-open: %s時も『呼んだが答えが無い』を台帳に残す(検品の死を静かにしない)" % label,
           len(rows) == 1 and rows[0]["verdict"] is None)
+    # ★verdict=null だけでは死因が分からない= 実際、上限25秒に対し実測28.6秒で毎回時間切れ
+    #   だったのに台帳の見た目は「呼んだが答えが無い」のままだった。理由を分けて残す。
+    check("台帳の null_reason が死因を分ける(%s → %s)" % (label, why),
+          rows[0].get("null_reason") == [why])
 
 sent, rows = deliver(NORMAL_JP, runner_ng, struct_drift=True)
 check("fail-open: **不合格でも送信は止めない**(設計§3の経路②)", sent == NORMAL_JP)
@@ -187,6 +206,40 @@ try:
     check("逃げ道: 止めても便は届く・台帳は verdict=null で1行", sent == NORMAL_JP and len(rows) == 1)
 finally:
     sc.SELF_CHECK_ON = keep
+
+# --- 3.5) ★検品は**送信経路の外**で回す(配送が検品の速さに縛られない) -------------------
+#   本番実測= 1,962字の便で 28.6秒。初版はこれを送信の前に挟んでいて、しかも上限25秒だったので
+#   「毎回28.6秒待つ」ではなく「毎回25秒待って何も得ない」形になっていた。上限を伸ばすなら
+#   待たない形にしないと、灰色4.38%の便がその秒数だけ遅れて届く。
+sent, rows = deliver(NORMAL_JP, runner_slow, struct_drift=True)
+check("非同期: 送信経路は検品(%.1fs)を待たない" % SLOW_S, RETURNED_IN[0] < SLOW_S / 2)
+check("非同期: それでも検品は走り切り、台帳に判定が載る",
+      len(rows) == 1 and rows[0]["verdict"]["ok"] is True and CALLS[0][0] == "slow")
+check("上限は本番実測(28.6秒)より長い= 毎回時間切れにならない",
+      sc.SELF_CHECK_TIMEOUT_S >= 30)
+
+
+# ★must-fail③: 検品を**送信経路の中**で待つ動く別実装(初版そのもの)。
+#   これは正しく判定を出す(台帳は緑のまま)。壊れるのは配送の速さだけ= そこを赤で固定する。
+def _audit_self_check_blocking(dept, rec, speaker, part, struct_drift=False, regen_round=0):
+    """動く別実装= 灰色なら**その場で**検品を待ってから台帳へ書く(初版の形)。"""
+    names = sc.kanji_fullnames(d._naming_rules())
+    reasons = sc.gray_reasons(part, struct_drift=struct_drift,
+                              regen_round=regen_round, kanji_names=names, speaker=speaker)
+    if not reasons:
+        return None
+    d._self_check_worker(dept, rec, speaker, part, reasons, "")
+    return None
+
+
+sent, rows = deliver(NORMAL_JP, runner_slow, checker=_audit_self_check_blocking,
+                     struct_drift=True)
+check("must-fail③: 待つ実装だと送信が検品の秒数だけ遅れる(この検査が意味を持つ)",
+      RETURNED_IN[0] >= SLOW_S)
+check("must-fail③: その別実装でも判定自体は正しく出る(空実装ではない)",
+      len(rows) == 1 and rows[0]["verdict"]["ok"] is True)
+sent, rows = deliver(NORMAL_JP, runner_slow, struct_drift=True)
+check("must-fail後: 本物へ戻すと送信は待たされない", RETURNED_IN[0] < SLOW_S / 2)
 
 # --- 4) 基準文(QAの保守面)= 4項目そろっていない表は採らない -----------------------------
 fd, ctmp = tempfile.mkstemp(suffix=".json")

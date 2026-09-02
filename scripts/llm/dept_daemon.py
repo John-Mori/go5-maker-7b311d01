@@ -4829,34 +4829,32 @@ def _audit_english_paragraph(dept, rec, reply):
     return None              # ★常に None= 呼び出し側の分岐に一切影響を与えない
 
 
-def audit_self_check(dept, rec, speaker, part, struct_drift=False, regen_round=0):
-    """恒久策#5= **灰色の便だけ**をLLMで検品し、結果を台帳へ残す(検知のみ・送信は止めない)。
+_SELF_CHECK_THREADS = []          # 走っている検品(送信経路の外)。数を抑える用
+SELF_CHECK_MAX_INFLIGHT = 8       # これ以上溜まったら**検品を捨てる**(便は当然そのまま届く)
 
-    ★掛ける灰色は4条件だけ(設計§3)= ゲートJ発火 / 漢字フル名 / 英字20〜34字 / 再生成2周目。
-      灰色でない便では `check()` を呼ばない= 全便一律にしない(§3の不採用の数字)。
-    ★**この関数は常に None を返す**。ゲートA〜Jの結果にも、送るか否かにも触らない
-      (設計§3の経路②= 送信は止めず台帳+突き返しのみ)。
-    ★fail-open(§5-7の本丸)= 検品APIが死んでいても、遅くても、壊れた答えでも、
-      `_self_check.check` が None を返すだけで**便はそのまま届く**。例外もここで握り潰す。
-    ★灰色に当たったのに検品が None だった時も1行残す(verdict=null)= 「呼んだのに答えが無い」と
-      「そもそも灰色でなかった」を台帳で区別できる=検品の死を静かにしない(never_fired対策)。
-    """
-    try:
-        rules = _naming_rules()
-        names = _self_check.kanji_fullnames(rules)
-        reasons = _self_check.gray_reasons(part, struct_drift=struct_drift,
-                                           regen_round=regen_round, kanji_names=names,
-                                           speaker=speaker)
-        if not reasons:
-            return None
-        conf_fp = ""
+
+def self_check_join(timeout=120):
+    """走っている検品の終わりを待つ(検査と終了処理用)。本番の送信経路からは呼ばない。"""
+    for t in list(_SELF_CHECK_THREADS):
         try:
-            conf_fp = str(((rules or {}).get("_meta") or {}).get("version", ""))
+            t.join(timeout)
         except Exception:
             pass
-        v = _self_check.check(part, speaker=speaker, room=dept_ja(dept), reasons=reasons)
+    _SELF_CHECK_THREADS[:] = [t for t in _SELF_CHECK_THREADS if t.is_alive()]
+
+
+def _self_check_worker(dept, rec, speaker, part, reasons, conf_fp):
+    """検品を1回回して台帳へ1行。**送信経路の外**(別スレッド)で走る。"""
+    notes = []
+    v = None
+    try:
+        v = _self_check.check(part, speaker=speaker, room=dept_ja(dept),
+                              reasons=reasons, notes=notes)
+    except Exception as e:
+        notes.append("error:" + type(e).__name__)
+    try:
         log(dept, f"★self-check(#5): 灰色={','.join(reasons)} "
-                  f"判定={'合格' if (v or {}).get('ok') else ((v or {}).get('ng') and '不合格' or '無(素通し)')} "
+                  f"判定={'合格' if (v or {}).get('ok') else ((v or {}).get('ng') and '不合格' or '無(素通し:' + (','.join(notes) or '不明') + ')')} "
                   f"{(v or {}).get('elapsed_ms', 0)}ms ※送信は止めない")
         os.makedirs(os.path.dirname(SELF_CHECK_AUDIT), exist_ok=True)
         with open(SELF_CHECK_AUDIT, "a", encoding="utf-8") as f:
@@ -4872,9 +4870,57 @@ def audit_self_check(dept, rec, speaker, part, struct_drift=False, regen_round=0
                     "why": v.get("why", ""), "model": v.get("model", ""),
                     "elapsed_ms": v.get("elapsed_ms", 0),
                 },
+                # ★判定が出なかった理由= 時間切れ / claude不在 / 壊れた答え を区別する。
+                #   初版はここが無く、25秒上限に対し実測28.6秒で**毎回時間切れ**だったのに
+                #   台帳は verdict=null が並ぶだけで、検品の死が見えなかった。
+                "null_reason": notes,
                 "rules_version": conf_fp,
                 "reply": str(part or "")[:400],
             }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass                 # 監査の失敗で応答を巻き添えにしない(fail-open)
+
+
+def audit_self_check(dept, rec, speaker, part, struct_drift=False, regen_round=0):
+    """恒久策#5= **灰色の便だけ**をLLMで検品し、結果を台帳へ残す(検知のみ・送信は止めない)。
+
+    ★掛ける灰色は4条件だけ(設計§3)= ゲートJ発火 / 漢字フル名 / 英字20〜34字 / 再生成2周目。
+      灰色でない便では `check()` を呼ばない= 全便一律にしない(§3の不採用の数字)。
+    ★**この関数は常に None を返す**。ゲートA〜Jの結果にも、送るか否かにも触らない
+      (設計§3の経路②= 送信は止めず台帳+突き返しのみ)。
+    ★fail-open(§5-7の本丸)= 検品APIが死んでいても、遅くても、壊れた答えでも、
+      `_self_check.check` が None を返すだけで**便はそのまま届く**。例外もここで握り潰す。
+    ★灰色に当たったのに検品が None だった時も1行残す(verdict=null + null_reason)=
+      「呼んだのに答えが無い」と「そもそも灰色でなかった」を台帳で区別できる
+      =検品の死を静かにしない(never_fired対策)。
+    ★★**検品は送信経路の外(別スレッド)で回す**。灰色の判定だけここで済ませ、`claude -p` は
+      待たない= 便の配送が検品の速さに縛られない。実測28.6秒を送信の前に挟むと、灰色4.38%の便が
+      毎回それだけ遅れて届くことになる(fail-open の趣旨は「検品が配送を殺さない」)。
+      台帳の行は検品が終わってから落ちる= 数えるのは後からでいい。
+    """
+    try:
+        rules = _naming_rules()
+        names = _self_check.kanji_fullnames(rules)
+        reasons = _self_check.gray_reasons(part, struct_drift=struct_drift,
+                                           regen_round=regen_round, kanji_names=names,
+                                           speaker=speaker)
+        if not reasons:
+            return None
+        conf_fp = ""
+        try:
+            conf_fp = str(((rules or {}).get("_meta") or {}).get("version", ""))
+        except Exception:
+            pass
+        _SELF_CHECK_THREADS[:] = [t for t in _SELF_CHECK_THREADS if t.is_alive()]
+        if len(_SELF_CHECK_THREADS) >= SELF_CHECK_MAX_INFLIGHT:
+            log(dept, f"★self-check(#5): 灰色={','.join(reasons)} "
+                      f"判定=無(素通し:inflight{len(_SELF_CHECK_THREADS)}) ※送信は止めない")
+            return None      # 検品が詰まっても便は届く= 捨てる側へ倒す
+        t = threading.Thread(target=_self_check_worker,
+                             args=(dept, rec, speaker, part, reasons, conf_fp),
+                             daemon=True)
+        _SELF_CHECK_THREADS.append(t)
+        t.start()
     except Exception:
         pass                 # 監査の失敗で応答を巻き添えにしない(fail-open)
     return None              # ★常に None= 呼び出し側の分岐に一切影響を与えない
