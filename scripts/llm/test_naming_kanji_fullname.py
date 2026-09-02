@@ -33,11 +33,17 @@ results = []
 RULES = {
     "honorific_required_targets": {
         "三笘薫": {"bare_forms": ["三笘", "三笘薫"], "allowed": ["三笘さん"]},
+        # ★本番と同じ形(2026-09-02 実測で自名義誤爆33件の出所)= 話者非依存の
+        #   forbidden にフル名そのものが載っている対象。
+        "ルカ・モドリッチ": {"bare_forms": ["モドリッチ", "ルカ・モドリッチ"],
+                             "allowed": ["モドリッチさん"],
+                             "forbidden": ["ルカ・モドリッチ"]},
     },
     "target_detect_forms": {
         "一ノ瀬怜": ["怜", "一ノ瀬", "一ノ瀬怜"],
         "早坂芽衣": ["芽衣"],
         "花海咲季": ["咲季"],
+        "ルカ・モドリッチ": ["ルカ"],
     },
     "speaker_target_overrides": [
         {"speaker": "ケヴィン・デブライネ", "target": "三笘薫", "allowed": ["三笘"]},
@@ -47,6 +53,8 @@ RULES = {
         {"speaker": "アーモンドアイ", "target": "早坂芽衣", "allowed": ["芽衣"]},
         {"speaker": "__男性キャラ__", "target": "一ノ瀬怜",
          "allowed": ["怜"], "yobisute": True, "forbidden": ["一ノ瀬"]},
+        {"speaker": "ルカ・モドリッチ", "target": "ルカ・モドリッチ",
+         "allowed": ["モドリッチ", "俺"], "forbidden": ["ルカ"]},
     ],
     "male_personas": ["シャビ・アロンソ", "ケヴィン・デブライネ", "ククール"],
 }
@@ -142,6 +150,48 @@ def main():
     check("D4 自称の除外を他人へ広げない(同じ本文でも話者が違えば鳴る)",
           ("早坂芽衣", "早坂芽衣さん", "kanji_fullname")
           in hits("トトリ", "早坂芽衣さん、です。"))
+
+    # --- E 自名義のフル名の内側は forbidden を発火させない(2026-09-02 人事裁定) -----
+    #   裁定= DISPATCH-aegis-gl-1788357370481(ククール)/ 正本= 呼称ルール.json
+    #     `self_name_substring_exemption`(00_AI-HQ a066d3a)。逐語=
+    #     「禁止語のヒット位置が、本人フル名の範囲に完全に含まれるなら不問。
+    #       フル名の外で独立出現したら従来どおり発火」。
+    #   実測の出所= 受信便+返信1,918便の自称 forbidden 58件中45件
+    #     (ルカ・モドリッチ33件=完全一致 / 一ノ瀬怜12件=『一ノ瀬』⊂『一ノ瀬怜』)。
+    #   ★E1/E2 は reason を問わない=「forbidden が消えれば良い」ではない。実測で
+    #     forbidden だけ免除したら45件が丸ごと override_allowed へ**横滑り**し、
+    #     本文26便が書き換わった(『(ルカ・モドリッチ)』→『(モドリッチ)』)。
+    HEADER = "【AD研究室(ルカ・モドリッチ)→ 改修部門α】報告だ。"
+    check("E1 自名義の回送ヘッダ(フル名と完全一致)は鳴らさない",
+          not hits("ルカ・モドリッチ", HEADER))
+    check("E2 自名義のフル名の内側の部分文字列も鳴らさない(一ノ瀬⊂一ノ瀬怜)",
+          not hits("一ノ瀬怜", "【プラットフォームSE(一ノ瀬怜)→ HQ】上げる。"))
+    check("E1b 自名義の回送ヘッダは自動修正でも1文字も変えない",
+          fixed("ルカ・モドリッチ", HEADER) == HEADER)
+    check("E3 単独の禁止形は従来どおり鳴る(モドリッチの自称『ルカ』)",
+          ("ルカ・モドリッチ", "ルカ", "forbidden")
+          in hits("ルカ・モドリッチ", "ルカが引き取る。"))
+    check("E4 単独の裸姓も従来どおり鳴る(怜の自称『一ノ瀬』)",
+          ("一ノ瀬怜", "一ノ瀬", "forbidden")
+          in hits("一ノ瀬怜", "一ノ瀬が引き取る。"))
+    check("E5 同じ便にフル名と単独形が両方出たら単独形だけ鳴る(1件目で止めない)",
+          ("ルカ・モドリッチ", "ルカ", "forbidden")
+          in hits("ルカ・モドリッチ", HEADER + "\nルカが引き取る。"))
+    check("E6 対人は一切変えない(他者がフル名で呼ぶのは従来どおり違反)",
+          ("ルカ・モドリッチ", "ルカ・モドリッチ", "forbidden")
+          in hits("トトリ", "ルカ・モドリッチさん、確認しました。"))
+    check("E7 対人の裸姓も従来どおり違反(デブライネ→一ノ瀬)",
+          ("一ノ瀬怜", "一ノ瀬", "forbidden")
+          in hits("ケヴィン・デブライネ", "一ノ瀬に頼んだ。"))
+    check("E8 免除はフル名の範囲だけ=別人のフル名は盾にならない",
+          ("一ノ瀬怜", "一ノ瀬", "forbidden")
+          in hits("一ノ瀬怜", "ルカ・モドリッチへ回す。一ノ瀬が受ける。"))
+    check("E9 自称の禁止形が別経路(ov.forbidden)でもフル名の内側なら不問",
+          not [v for v in hits("ルカ・モドリッチ", "(ルカ・モドリッチ)だ。")
+               if v[2] == "forbidden"])
+    check("E10 三笘の自称『三笘さん』はフル名の部分文字列でない=今までどおり鳴る",
+          ("三笘薫", "三笘さん", "forbidden")
+          in hits("三笘薫", "三笘さん、了解した。"))
 
     ok = all(c for _, c in results)
     print("\n%d件中 %d件OK" % (len(results), sum(1 for _, c in results if c)))
@@ -246,6 +296,53 @@ def _mut_self_bare_only():
     ng._kanji_fullname_verdicts = old_impl
 
 
+def _mut_no_self_span():
+    """旧本番(裁定前): 自名義のフル名という範囲を持たない=自称のヘッダも forbidden で鳴る。
+
+    ★2026-09-02 22:56 の裁定前まで本番で動いていた挙動(実測45件の出所)。
+      述語を空集合を返す実装へ置き直す=動く別実装(C-053)。
+    """
+    ng._self_name_spans = lambda text, persona, target_key: []
+
+
+def _mut_self_all_exempt():
+    """別実装(人事が却下した案1): 自称なら forbidden を全部不問にする。
+
+    ★本文全体を「本人の名の範囲」と見なす=単独の『ルカ』『一ノ瀬』まで落ちる。
+      Chami 名指しの禁止(2026-08-18)を殺す=これが赤で見えないと射程を狭めた事故に気づけない。
+    """
+    ng._self_name_spans = lambda text, persona, target_key: [(0, len(str(text or "")))]
+
+
+def _mut_substring_only():
+    """別実装(デブライネの当初案=内側を"部分文字列だけ"と読む): 完全一致は落とさない。
+
+    ★人事の裁定は「一部/全体」= 自名義の完全一致(回送ヘッダの『ルカ・モドリッチ』33件)も
+      同じ穴として落とす。狭く読むとその33件が残る=それを赤で見せる。
+    """
+    def strict_inside(at, ln, spans):
+        if not spans:
+            return False
+        end = at + ln
+        for a, b in spans:
+            if a <= at and end <= b and (b - a) > ln:
+                return True
+        return False
+    ng._covered_by = strict_inside
+
+
+def _mut_exempt_forbidden_only():
+    """別実装(2026-09-02 の1回目の実装): 免除を forbidden の判定にだけ掛け、検出は素通し。
+
+    ★免除した当たりが**そのまま override_allowed で鳴り直す**。実測= 1,918便で
+      forbidden 45件が消えて override_allowed 45件が生え、override_allowed は
+      FULL_KEY_SWAP_REASONS のため**本文26便が書き換わった**
+      (『(ルカ・モドリッチ)』→『(モドリッチ)』=自称崩れをゲート自身が作る)。
+      「forbidden が消えたか」だけを見て「効いた」と言うと踏む穴=赤で残す。
+    """
+    ng.SELF_SPAN_AT_DETECT = False
+
+
 MUTANTS = (
     ("変異1 use/mention を分けない", _mut_called_anywhere,
      "C mention を触らない: 表の行"),
@@ -257,12 +354,22 @@ MUTANTS = (
      "A1 呼び捨て可の話者がフル名で呼んだ(0歩目の実物)"),
     ("変異5 自称を裸の時だけ不問にする(裁定前の本番)", _mut_self_bare_only,
      "D1 自称のフル名+敬称は鳴らさない(裁定で不問)"),
+    ("変異6 自名義のフル名の範囲を持たない(裁定前の本番)", _mut_no_self_span,
+     "E1 自名義の回送ヘッダ(フル名と完全一致)は鳴らさない"),
+    ("変異7 自称なら forbidden を全部不問(却下された案1)", _mut_self_all_exempt,
+     "E3 単独の禁止形は従来どおり鳴る(モドリッチの自称『ルカ』)"),
+    ("変異8 内側を部分文字列だけと読む(完全一致を落とさない)", _mut_substring_only,
+     "E1 自名義の回送ヘッダ(フル名と完全一致)は鳴らさない"),
+    ("変異9 免除を forbidden にだけ掛ける(検出は素通し=1回目の実装)",
+     _mut_exempt_forbidden_only,
+     "E1 自名義の回送ヘッダ(フル名と完全一致)は鳴らさない"),
 )
 
 
 def mutate():
     bad = 0
-    saved = (ng._fullname_called, ng._kanji_fullname_verdicts, ng._appears_as_allowed)
+    saved = (ng._fullname_called, ng._kanji_fullname_verdicts, ng._appears_as_allowed,
+             ng._self_name_spans, ng._covered_by, ng.SELF_SPAN_AT_DETECT)
     for name, fn, want_red in MUTANTS:
         del results[:]
         fn()
@@ -274,7 +381,8 @@ def mutate():
                 print("  (検査が例外で止まった: %s)" % e)
         finally:
             (ng._fullname_called, ng._kanji_fullname_verdicts,
-             ng._appears_as_allowed) = saved
+             ng._appears_as_allowed, ng._self_name_spans, ng._covered_by,
+             ng.SELF_SPAN_AT_DETECT) = saved
         red = [n for n, c in results if not c]
         hit = want_red in red
         print("  → 狙った1件が赤か: %s  (赤=%d件)" % ("OK" if hit else "NG", len(red)))
