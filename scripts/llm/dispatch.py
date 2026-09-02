@@ -636,6 +636,14 @@ def main():
                 print(f"  '{d}' の部門長は '{h}' です。まず '{h}' へ通してください。")
             heads = sorted(set(blocked.values()))
             print(f"  推奨: --dept {','.join(heads)} へ出し、配下への割り振りは部門長に任せる。")
+            # ★あなたが部門長本人なら、要るのは --direct ではなく --from-dept だ(2026-09-03 aegis-gl)。
+            #   --from-dept の既定値は "hq" なので、部門長が指定を忘れると**HQを騙る形**になり
+            #   L629 の免除(ORG-42)に入れずここで止まる。実測= イージス研究室が2本とも
+            #   これを踏んで --direct へ逃げた。逃げ道を案内する行しか無いのが誤誘導の本体。
+            if a.from_dept == "hq":
+                print(f"  ★あなたが {'/'.join(heads)} 本人なら、要るのは --direct ではなく"
+                      f" `--from-dept {heads[0]}` だ(--from-dept の既定値は 'hq'=指定を忘れると"
+                      "HQを騙る形になり、このガードが正しく発火する)。")
             print("  どうしても直接出す必要がある時だけ --direct を付ける(理由を本文に書くこと)。")
             return 2
 
