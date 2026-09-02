@@ -435,18 +435,98 @@ def _write(path, data):
         f.write(data)
 
 
+# --- スマホ閲覧(同一Wi-FiのLANローカルサーバ。ホスティング不要=公開しない) ---
+def _lan_ip():
+    """このPCのLAN内IPを得る(パケットは実送しない)。取れなければ127.0.0.1。"""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def _build_index():
+    """local/clean_reader/ の全記事HTMLを一覧する index.html を作る(スマホの入口)。"""
+    os.makedirs(OUT_DIR, exist_ok=True)
+    items = []
+    for fn in sorted(os.listdir(OUT_DIR)):
+        if not fn.endswith(".html") or fn == "index.html":
+            continue
+        title = fn
+        try:
+            head = io.open(os.path.join(OUT_DIR, fn), encoding="utf-8", errors="replace").read(4000)
+        except OSError:
+            head = ""
+        mt = re.search(r"<title[^>]*>(.*?)</title>", head, re.S | re.I)
+        if mt:
+            title = _html.unescape(re.sub(r"<[^>]+>", "", mt.group(1))).strip()
+        items.append((fn, title))
+    parts = [
+        "<!DOCTYPE html>", '<html lang="ja"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width,initial-scale=1">',
+        "<title>クリーン閲覧 一覧</title><style>",
+        "body{background:#0e1422;color:#e8e6df;font-family:system-ui,'Hiragino Sans','Noto Sans JP',sans-serif;",
+        "line-height:1.7;max-width:720px;margin:0 auto;padding:24px 16px 96px;}",
+        "h1{font-size:1.2rem;color:#fffdf6;border-bottom:2px solid #2bb3c0;padding-bottom:8px;}",
+        "a{display:block;color:#2bb3c0;text-decoration:none;padding:14px 12px;border-top:1px solid #2a3550;}",
+        "a:active{background:#16203a;}",
+        "</style></head><body><h1>クリーン閲覧(広告ゼロ) 一覧</h1>",
+    ]
+    for fn, title in items:
+        parts.append('<a href="./%s">%s</a>' % (_html.escape(fn, quote=True), _html.escape(title)))
+    if not items:
+        parts.append("<p>まだ記事がありません。先に --view で記事を作ってください。</p>")
+    parts.append("</body></html>")
+    _write(os.path.join(OUT_DIR, "index.html"), "\n".join(parts))
+    return len(items)
+
+
+def serve(port=8000):
+    """local/clean_reader/ を同一Wi-Fi内へ配信(スマホで開く)。広告JSは元から無い。"""
+    import functools
+    import http.server
+    import socketserver
+    n = _build_index()
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=OUT_DIR)
+    httpd = socketserver.TCPServer(("0.0.0.0", port), handler)
+    ip = _lan_ip()
+    print("記事%d本を配信中。同じWi-FiのスマホでこのURLを開く:" % n)
+    print("  スマホ: http://%s:%d/" % (ip, port))
+    print("  PC    : http://127.0.0.1:%d/" % port)
+    print("止める: Ctrl+C")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n停止した。")
+    finally:
+        httpd.server_close()
+
+
 def main():
     ap = argparse.ArgumentParser(description="まとめ記事の広告除去クリーン閲覧＋分析ノイズ除去")
-    ap.add_argument("url", help="記事URL(まとめ記事の /archives/ID.html 等)")
+    ap.add_argument("url", nargs="?", help="記事URL(まとめ記事の /archives/ID.html 等)")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--view", action="store_true", help="広告ゼロのHTML+txtを local/clean_reader/ へ")
     g.add_argument("--analyze", action="store_true", help="分析用の素テキストを出力")
+    g.add_argument("--serve", action="store_true",
+                   help="作成済み記事を同じWi-Fiのスマホへ配信(LANローカルサーバ・公開しない)")
+    ap.add_argument("--port", type=int, default=8000, help="--serve のポート(既定8000)")
     ap.add_argument("--out", help="出力ファイルパス(--analyze / --view --print で使用)")
     ap.add_argument("--print", dest="to_stdout", action="store_true", help="ファイルへ書かず標準出力へ")
     ap.add_argument("--insecure", action="store_true",
                     help="TLS証明書の検証を無効化(local限定・自己責任。証明書切れの老舗まとめ用)")
     args = ap.parse_args()
 
+    if args.serve:
+        serve(port=args.port)
+        return
+
+    if not args.url:
+        ap.error("URL が必要です(または --serve でスマホ配信)")
     if not (args.view or args.analyze):
         args.view = True  # 既定は閲覧
 
