@@ -1188,6 +1188,123 @@ def _tone_feedback_block(dept, now=None, max_age_sec=24 * 3600):
         return ""         # fail-open= 口調の世話で封筒を壊さない
 
 
+# ★★2026-09-02 4種不具合の恒久策 #1(改善提案部門の型 §2-1生成側・§2-2層1)。
+#   0歩目=壊れている実物: 現行封筒に**応答言語の固定文は1文字も無い**
+#   (`必ず日本語|日本語で答え|respond in Japanese` の grep が session_relay/dept_daemon で0件)。
+#   =英文漏れは「言われていないのに守れ」と言っていた状態。設計§7の未確認事項への答えでもある。
+#   ★ここは検知ではなく**予防**の線= 出す側の目の前に毎便置く(_room_tone_hint と同じ場所)。
+LANG_LOCK_LINE = (
+    "★応答は**必ず日本語**で書く(コード・コマンド・パス・固有名詞・引用は原語のまま)。"
+    "英語の段落を混ぜない。\n")
+
+# ★定期キャラ再注入(公式の prefill 廃止の代替=Keep Claude in character)。
+#   起動文は**セッション作成時にしか読まれない**ので、長い会話ほど声が薄れる(実測=口調崩れ)。
+#   封筒へ「声の芯」を数行だけ戻す。★全文は積まない(起動文11,448字を毎便積むのは論外)。
+RELAY_TURN_STATE = os.path.join(LOCAL, "llm", "relay_turn_state.json")
+REINJECT_EVERY = 8                       # 初期値。8〜12ターン劣化の実測の下限側を取る
+_VOICE_MARKERS = ("一人称", "口調:", "口調=", "声の型", "呼び方", "語尾", "芯1", "芯2", "芯3")
+
+
+def _bump_relay_turn(dept):
+    """この部屋へ渡した封筒の通し番号を1つ進めて返す(読めない/書けない時は0)。
+
+    ★0へ倒す=再注入**しない**側へ倒す(封筒は素のまま組み上がる)。
+    """
+    try:
+        d = str(dept or "").strip()
+        if not d:
+            return 0
+        try:
+            with open(RELAY_TURN_STATE, encoding="utf-8") as f:
+                st = json.load(f)
+        except Exception:
+            st = {}
+        if not isinstance(st, dict):
+            st = {}
+        n = int(st.get(d) or 0) + 1
+        st[d] = n
+        try:
+            os.makedirs(os.path.dirname(RELAY_TURN_STATE), exist_ok=True)
+            with open(RELAY_TURN_STATE, "w", encoding="utf-8") as f:
+                json.dump(st, f, ensure_ascii=False)
+        except Exception:
+            return 0                      # 数えられない=毎便鳴らないように黙る側へ
+        return n
+    except Exception:
+        return 0
+
+
+def _voice_core(path, max_lines=5, max_chars=180):
+    """characterfileから「声の芯」の行だけを抜く(見出しでなく**行の中身**で拾う)。
+
+    ★全文を積まない= 一人称・口調・呼び方・芯の行だけ。読めなければ ""(=再注入しない)。
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = f.read()
+    except Exception:
+        return ""
+    out = []
+    for ln in raw.splitlines():
+        s = ln.strip()
+        if not s.startswith("-") and not s.startswith("★"):
+            continue
+        if not any(m in s for m in _VOICE_MARKERS):
+            continue
+        s = s.lstrip("- ").strip()
+        if len(s) > max_chars:
+            s = s[:max_chars] + "…"
+        out.append("  - " + s)
+        if len(out) >= max_lines:
+            break
+    return "\n".join(out)
+
+
+def _persona_reinject_block(dept, conf=None, forced=False):
+    """8便に1回(または直近便で口調が崩れた次便)だけ、声の芯を数行だけ封筒へ戻す。
+
+    forced= その便に `_tone_feedback_block` が付いた(=tone/構造ドリフトの警告が出た)時。
+    ★fail-open= 何が起きても ""(素の封筒)。予防線が配送を殺すことは無い。
+    """
+    try:
+        n = _bump_relay_turn(dept)        # ★数えるのは毎便(発火の有無に関わらず1回だけ呼ぶ)
+        due = bool(n) and n % REINJECT_EVERY == 0
+        if not due and not forced:
+            return ""
+        c = conf
+        if not c:
+            try:
+                import dept_daemon        # ★遅延import(循環を起こさない・向こうも遅延)
+                c = (getattr(dept_daemon, "DEPT_CONF", {}) or {}).get(str(dept)) or {}
+            except Exception:
+                c = {}
+        pairs = []
+        base_c, base_p = c.get("character"), c.get("persona")
+        if base_c:
+            pairs.append((str(base_p or "?"), base_c))
+        for p in (c.get("personas") or ()):
+            if p.get("character"):
+                pairs.append((str(p.get("persona") or "?"), p["character"]))
+        lines = []
+        seen = set()
+        for who, path in pairs:
+            if path in seen:
+                continue
+            seen.add(path)
+            core = _voice_core(path)
+            if core:
+                lines.append(f"【{who}】 (正本= {path})\n{core}")
+        if not lines:
+            return ""                     # 1枚も読めない=黙る(空の見出しを積まない)
+        head = ("=== ★声の芯を戻す(前の便で崩れが出た) ===\n" if forced
+                else f"=== ★声の芯を戻す({REINJECT_EVERY}便に1回の定期) ===\n")
+        return (head + "\n".join(lines) + "\n"
+                + "★これはcharacterfileの**抜粋**だ。ここに無い分は正本を読み直せ。"
+                  "書き出す前に一人称と呼び方だけ確かめろ。\n\n")
+    except Exception:
+        return ""                         # fail-open= 予防線で封筒を壊さない
+
+
 # ★★2026-08-29 C-049 §7-B を機構へ載せる(研究室HQ `DISPATCH-aegis-gl-1787949604668`)。
 #   測った実物= FCCへ載せた仕事 **0件(全期間)**。道具(fcc_task.py)は空撃ちで全通過=
 #   **壊れていない。使われていない。**真因= §7-B が裁定カタログの本文に在るだけで、
@@ -1231,7 +1348,7 @@ def _fcc_hint(rec, is_work):
 
 
 def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_fp="",
-                   verdict_full=True, verdict_fp="", verdict_added=()):
+                   verdict_full=True, verdict_fp="", verdict_added=(), conf=None):
     """新着1件を「原文のまま」の封筒にする(提案書§5.2)。
 
     disc_full(2026-07-29・改善書 第3手): 規律を全文入れるか(False=3行の差分)。
@@ -1262,6 +1379,10 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
                  "違うと思えば普通の会話として答えてよい(判定はあくまで機械の当たりを付けただけだ)。\n"
                  if is_work else "")
     quote = quote_block(rec)
+    # ★2026-09-02 #1= 口調の突き返しは**この便で1回だけ**引く(状態を進めるので二度呼べない)。
+    #   それが非空= 直近便で崩れが出た便 → 声の芯の再注入を定期の周期より前に前倒しする。
+    tone_fb = _tone_feedback_block(dept)
+    reinject = _persona_reinject_block(dept, conf=conf, forced=bool(tone_fb))
     # ★2026-07-29 規律の差分送付(改善書 第3手)。裁定の見出しは**どちらの場合も**入れる。
     disc_head, verdict = _discipline_parts()
     # ★2026-08-24 C-060の②= 裁定の**見出しだけ**差分にする。表(発注先)は毎便そのまま。
@@ -1289,10 +1410,14 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         + str(state or "")
         # ★前の便で口調が崩れていたら、その実物を突き返す(2026-08-12・Chamiの🔥)。
         #   崩れていない時は**1文字も足さない**(封筒を毎便太らせない)。
-        + _tone_feedback_block(dept)
+        + tone_fb
         # ★2026-08-23 追加(案ハ6《生成側の部屋ヒント》)= 検知ではなく**予防**。
         #   癒し/内省の部屋には、依頼文の直前で刃を一段下げる1行を機械が置く。
         + _room_tone_hint(dept)
+        # ★2026-09-02 #1= 声の芯の定期再注入(8便に1回 or 崩れた次便)+ 応答言語の固定文。
+        #   依頼文の直近へ置く= 読む順で一番近い所に居ないと効かない(既存の部屋ヒントと同じ理由)。
+        + reinject
+        + LANG_LOCK_LINE
         + "=== Discord新着(原文。要約も改変もしていない) ===\n"
         f"投稿者: {rec.get('author','')}\n"
         f"msg_id: {rec.get('msg_id','')}\n"
@@ -4905,7 +5030,8 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                            0 if pre_rotating else int(entry.get("context_tokens") or 0),
                            0 if pre_rotating else int(entry.get("floor_tokens") or 0)),
         dept=dept, disc_full=disc_full, disc_fp=_disc_fp,
-        verdict_full=verdict_full, verdict_fp=_v_fp, verdict_added=_v_added)
+        verdict_full=verdict_full, verdict_fp=_v_fp, verdict_added=_v_added,
+        conf=conf)                     # ★2026-09-02 #1= 声の芯の再注入に characterfile が要る
 
     def _on_soft(elapsed):
         """soft を超えた時に**1回だけ**走る(2026-07-27)。

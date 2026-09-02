@@ -3853,6 +3853,10 @@ from lang_gate import (  # noqa: E402  純関数のみ・単一の判定源(sing
     detect_cyrillic,     # 2026-09-01 キリル混入(HQ-0227 裁定2 GO・同じ表へ合流)
     cyrillic_in_name_tag,  # 2026-09-02 残ったキリルが名乗りタグの中か=構造被害かの判定
     cyrillic_tags,         # 2026-09-02 化けた名乗りタグの中身(下流で直せるかの突き合わせ用)
+    # 2026-09-02 恒久策#2= 既存の検知(全文が英語 / ハングル・簡体字・キリルの決め打ち)から
+    #   こぼれる分を拾う一般化。**検知のみ・送信可否は1ミリも変えない**(下の audit_* を見よ)。
+    detect_english_paragraph,  # 日本語の便の中に混じった**英語の段落**(全文英語ではないので既存は素通し)
+    detect_other_script,       # 日本語として正当な範囲の外の文字を一般に拾う(未知のスクリプト・文字化け)
 )
 
 # ============================================================================
@@ -4402,6 +4406,46 @@ _NONJP_KIND = {
 }
 
 
+def _audit_other_script(dept, rec, reply):
+    """決め打ちの3種(ハングル/簡体字/キリル)が出なかった便だけを、一般化した判定で**もう一度**見る。
+
+    ★2026-09-02 恒久策#2の後半。3種は「起きた事故を1つずつ足した表」であって、
+      次に別のスクリプトが混じったら**また誰も気づかない**(発見者が毎回Chamiに戻る)。
+      unicodedata で「日本語として正当な範囲の外」を一般に拾い、台帳へ載せるところまでをやる。
+    ★既存を置き換えない= 3種の判定が先で、それが空振りした時だけ呼ぶ。既存の集計・ゲート
+      (再生成/⚠️付き送信)は1ミリも動かない。**この関数は常に None を返す**。
+    ★記録先は hangul_audit.jsonl のまま(ORG-11= 非日本語スクリプトの家は1つ)。
+      区別は event="other_script" で付く=後から数え分けられる。
+    ★実測(2026-09-02・各部屋 memory の返信4,659便)= 42件(0.90%)。内訳 キリル29/ハングル10/
+      文字化け(U+FFFD)2/ギリシャ1。大半は既知の事故行を別経路で拾った物=誤発火は少ない。
+    """
+    try:
+        hit = detect_other_script(reply)
+        if not hit:
+            return None
+        log(dept, f"★日本語以外の文字を検知(一般判定) {hit['char']}({hit['codepoint']})"
+                  f" script={hit['script']} 位置={hit['index']} 前後20字=…{hit['context']}… "
+                  f"※恒久策#2。送信は止めない・自動修正もしない・検知のみ")
+        os.makedirs(os.path.dirname(HANGUL_AUDIT), exist_ok=True)
+        with open(HANGUL_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "dept": dept,
+                "event": "other_script",
+                "ref": "KAIZEN-2026-09-02-2",
+                "script": hit["script"],
+                "char": hit["char"],
+                "codepoint": hit["codepoint"],
+                "index": hit["index"],
+                "context": hit["context"],
+                "msg_id": str((rec or {}).get("msg_id", "")),
+                "reply": str(reply or "")[:200],
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass                 # 監査の失敗で応答を巻き添えにしない(fail-open)
+    return None              # ★常に None= 呼び出し側の分岐に一切影響を与えない
+
+
 def audit_hangul(dept, rec, reply):
     """返信直前の**非日本語文字**(ハングル/簡体字/キリル)検知をログと監査ファイルへ残す(送信は止めない)。
 
@@ -4416,6 +4460,7 @@ def audit_hangul(dept, rec, reply):
     try:
         hit = detect_nonjp(reply)
         if not hit:
+            _audit_other_script(dept, rec, reply)
             return None
         k = _NONJP_KIND.get(hit.get("kind"), _NONJP_KIND["hangul"])
         jp = hit.get("jp") or ""
@@ -4745,11 +4790,46 @@ def _append_narration_warn(text):
 #   判定を1本へ寄せた=persona_send(真の合流点)も同じ関数を引く。本体はあちら。
 
 
+def _audit_english_paragraph(dept, rec, reply):
+    """**全文が英語ではない**便の中に混じった英語の段落を拾う(検知のみ・送信可否は変えない)。
+
+    ★2026-09-02 恒久策#2の前半。既存の detect_english_dump は「本文の全部が英語」を見るので、
+      日本語の返信の途中に英語の作業実況が1段落だけ挟まる型(ORG-23の残り)は**素通しになる**。
+    ★既存を置き換えない= ダンプ判定が先で、それが空振りした時だけ呼ぶ。english_gate の
+      再生成/言い換え/保留は1ミリも動かない。**この関数は常に None を返す**。
+    ★記録先は english_audit.jsonl のまま(ORG-11)。区別は event="english_paragraph"。
+    ★実測(2026-09-02・各部屋 memory の返信4,659便)= 32件(0.69%)。中身は
+      「File saved and memory recorded. Emitting the reply.」等= 本物の英文漏れだった。
+    """
+    try:
+        hit = detect_english_paragraph(reply)
+        if not hit:
+            return None
+        log(dept, f"★英語の段落を検知 英字={hit['latin']}/英単語={hit['words']} "
+                  f"判定={hit['by']} 位置={hit['index']} 冒頭=…{hit['excerpt']}… "
+                  f"※恒久策#2。送信は止めない・検知のみ")
+        os.makedirs(os.path.dirname(ENGLISH_AUDIT), exist_ok=True)
+        with open(ENGLISH_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "dept": dept, "event": "english_paragraph",
+                "ref": "KAIZEN-2026-09-02-2",
+                "latin": hit["latin"], "words": hit["words"],
+                "by": hit["by"], "index": hit["index"], "excerpt": hit["excerpt"],
+                "msg_id": str((rec or {}).get("msg_id", "")),
+                "reply": str(reply or "")[:400],
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass                 # 監査の失敗で応答を巻き添えにしない(fail-open)
+    return None              # ★常に None= 呼び出し側の分岐に一切影響を与えない
+
+
 def audit_english(dept, rec, reply):
     """返信直前の英文ダンプ検知をログと監査ファイルへ残す(ここでは送信可否は決めない)。"""
     try:
         hit = detect_english_dump(reply)
         if not hit:
+            _audit_english_paragraph(dept, rec, reply)
             return None
         log(dept, f"★英文ダンプを検知 英字={hit['latin']}/日本語={hit['jp']}(比{hit['ratio']}) "
                   f"冒頭=…{hit['excerpt']}… ※ORG-23再発。日本語化を試みる")

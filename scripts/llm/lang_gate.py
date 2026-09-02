@@ -12,6 +12,7 @@
     落ちても再現でき、単体テストで固定できる(test_english_gate.py が dept_daemon 経由で覆う)。
 """
 import re
+import unicodedata
 
 # 日本語(ひらがな・カタカナ・漢字・半角カナ)/ ラテン英字。判定の芯はこの2本だけ。
 _JP_RE = re.compile(r"[぀-ヿ一-鿿ｦ-ﾟ]")
@@ -340,5 +341,127 @@ def detect_cyrillic(text, span=20):
         return {"char": c, "jp": _CYRILLIC_LOOKALIKE.get(c, ""),
                 "codepoint": "U+%04X" % ord(c),
                 "index": i, "context": s[max(0, i - span):i + 1 + span]}
+    except Exception:
+        return None          # 検査が落ちても応答は続ける(fail-safe)
+
+
+# =====================================================================================
+# ★2026-09-02 4種不具合の恒久策 #2(発注= 改善提案部門 §2-1検知第二段・§2-4一般化判定)。
+#   判定の家は**このファイル1本**へ寄せる(ORG-11= 記録先も判定も2つに割らない)。
+#   ★どちらも**検知だけ**で始める= 台帳で偽陽性を数えてから剥ぎ/警告へ格上げする。
+#     格上げの判断はQAの週次監査(発火率・偽陽性率)が持つ。ここでは挙動を変えない。
+# =====================================================================================
+
+_EN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'’\-]*")
+# コードらしさ(この記号が濃い段落は散文ではない)。英語の**散文**だけを拾うための除外。
+_CODEISH_RE = re.compile(r"[{};=<>|_\/\[\]#$]")
+_PARA_SPLIT_RE = re.compile(r"\n\s*\n")
+
+
+def detect_english_paragraph(text, min_latin=35, min_words=5):
+    """日本語の便の中に混じった**英語の散文段落**を返す(無ければ None)。
+
+    なぜ要るか= `detect_english_dump` は「本文まるごと英語」の閾値(jp<=latin*0.15)でしか
+      鳴らない。日本語が多い便に英語段落が1つ混じる形は**素通り**する(実測の漏れ形)。
+      `strip_english_preamble` は**先頭**しか見ない。真ん中・末尾の段落はどちらも拾えない。
+
+    判定(全部そろった段落だけ):
+      ・日本語が1文字も無い段落(1文字でも在れば触らない=混ざり書きは正当)
+      ・英字が min_latin 字以上(固有名詞・短い引用では鳴らない)
+      ・英単語が min_words 語以上(=散文。`GO5_LOCAL_DIR` のような識別子の羅列で鳴らない)
+      ・記号(= ; { } スラッシュ 等)が濃くない(コード・パス・コマンドは散文ではない)
+    ★py3langid が入っていれば **en 判定を通った段落だけ**に絞る(誤検知を減らす精密化)。
+      入っていなくても上の純関数だけで動く=**二重底**(設計§2-1 fail-open。ライブラリ不在で
+      機能ごと死なせない)。返り値の `by` にどちらで判定したかを残す=台帳で見分けられる。
+    ★コード柵・インラインコード・URL は判定から除く(長さは保存=index は原文基準)。
+    ★検知するだけ・剥がさない・例外は None(fail-safe)。
+    """
+    try:
+        s = str(text or "")
+        masked = _mask_code_spans(s)
+        pos = 0
+        for para in _PARA_SPLIT_RE.split(masked):
+            i = masked.find(para, pos)
+            if i < 0:
+                i = pos
+            pos = i + len(para)
+            body = para.strip()
+            if not body or _JP_RE.search(body):
+                continue                       # 日本語が1文字でも在る段落は触らない
+            latin = len(_LATIN_RE.findall(body))
+            if latin < min_latin:
+                continue
+            words = _EN_WORD_RE.findall(body)
+            if len(words) < min_words:
+                continue
+            if len(_CODEISH_RE.findall(body)) > max(2, len(body) * 0.05):
+                continue                       # コード/パス/コマンドの塊=散文ではない
+            by = "heuristic"
+            try:
+                import py3langid                # ★任意依存(無ければ純関数だけで判定する)
+                lang = py3langid.classify(body)[0]
+                if lang != "en":
+                    continue                   # 英語でないなら鳴らさない(精密化)
+                by = "py3langid"
+            except ImportError:
+                pass                           # 二重底= 第一段の純関数判定は生きる
+            except Exception:
+                pass                           # 判定器が転んでも純関数の結果を採る(fail-open)
+            return {"latin": latin, "words": len(words), "index": i, "by": by,
+                    "excerpt": body[:160]}
+        return None
+    except Exception:
+        return None          # 検査が落ちても応答は続ける(fail-safe)
+
+
+# 日本語の本文に出て**正当な**符号位置(この外に出た文字を「他スクリプト」と見る)。
+#   ASCII / ラテン1補助(© ° × é)/ 一般句読点〜記号・矢印・囲み数字(— … ★ ⚠ → ①)/
+#   CJK句読点・ひらがな・カタカナ / 囲みCJK・㎡ / 漢字(拡張A含む)/ 互換漢字 /
+#   異体字セレクタ・CJK互換形 / 半角全角形 / 絵文字 / 漢字拡張B以降。
+_JP_OK_RANGES = (
+    (0x0000, 0x007F), (0x00A0, 0x00FF), (0x2000, 0x2BFF),
+    (0x3000, 0x30FF), (0x31F0, 0x31FF), (0x3200, 0x33FF),
+    (0x3400, 0x9FFF), (0xF900, 0xFAFF), (0xFE00, 0xFE4F),
+    (0xFF00, 0xFFEF), (0x1F000, 0x1FAFF), (0x20000, 0x3FFFF),
+)
+# ★この組織の日本語文で**実際に使われている**他スクリプト字= 鳴らせば誤発火が日常化する。
+#   「改修部門α」「β版」「Δ差分」「Ω」…= 部門名・数式記号として定着している(C-035と同じ話で、
+#   正当な用例が実在する物を拾うゲートは信用を失って全体が死ぬ)。ここだけ穴を開ける。
+_OTHER_SCRIPT_ALLOW = set("αβγδεθλμνπρστφωΑΒΓΔΘΛΞΠΣΦΨΩ")
+
+
+def _in_jp_ranges(cp):
+    for lo, hi in _JP_OK_RANGES:
+        if lo <= cp <= hi:
+            return True
+    return False
+
+
+def detect_other_script(text, span=20):
+    """日本語として正当なスクリプト**以外**の文字を1件返す(無ければ None)。
+
+    なぜ要るか= キリル・ハングル・簡体字は**個別のregexを継ぎ足して**きた。次に来る字種
+      (ギリシャ・キリル拡張・全角キリル・アルメニア…)は、また事故が起きてから足す形だった。
+      許可した範囲の**外**を既定で拾う向きへ裏返す=継ぎ足しの終止符(設計§2-4)。
+    ★既存の detect_hangul / detect_simplified / detect_cyrillic を**置き換えない**。
+      あちらは kind ごとに挙動(再生成・警告)が違う。ここは**取りこぼしの保険**=検知だけ。
+    ★簡体字は同じ漢字ブロックなのでここでは獲れない(既存の差集合表と分業・重複ではない)。
+    ★unicodedata.name の先頭語を script として返す(名前が無い字は "UNKNOWN")。
+    ★コード柵/インラインコード/URL の中は見ない。index/context は**原文基準**。
+    """
+    try:
+        s = str(text or "")
+        masked = _mask_code_spans(s)
+        for i, c in enumerate(masked):
+            cp = ord(c)
+            if _in_jp_ranges(cp) or c in _OTHER_SCRIPT_ALLOW:
+                continue
+            try:
+                script = unicodedata.name(c).split()[0]
+            except ValueError:
+                script = "UNKNOWN"
+            return {"char": c, "script": script, "codepoint": "U+%04X" % cp,
+                    "index": i, "context": s[max(0, i - span):i + 1 + span]}
+        return None
     except Exception:
         return None          # 検査が落ちても応答は続ける(fail-safe)
