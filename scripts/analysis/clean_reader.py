@@ -449,6 +449,41 @@ def _lan_ip():
         s.close()
 
 
+def _is_private_v4(ip):
+    """RFC1918 のプライベートIPv4か(中継機で割り当てが変わっても宅内ならこの範囲)。"""
+    if ip.startswith("10.") or ip.startswith("192.168."):
+        return True
+    if ip.startswith("172."):
+        try:
+            second = int(ip.split(".")[1])
+        except (IndexError, ValueError):
+            return False
+        return 16 <= second <= 31
+    return False
+
+
+def _all_lan_ips():
+    """このPCが持つ宅内IPv4を全部集める(順序=既定経路優先→残り)。
+
+    中継機(Wi-Fi extender)経由だとPCのIPがDHCPで変わったり、
+    親機側/中継機側でセグメントが分かれることがある=1つ決め打ちだと端末から届かない時がある。
+    そこで当たりうるアドレスを全部出して、端末が繋がっている側のIPを選べるようにする。
+    """
+    import socket
+    ips = []
+    primary = _lan_ip()
+    if primary and not primary.startswith("127."):
+        ips.append(primary)
+    try:
+        _, _, addrs = socket.gethostbyname_ex(socket.gethostname())
+    except OSError:
+        addrs = []
+    for ip in addrs:
+        if ip not in ips and not ip.startswith("127.") and _is_private_v4(ip):
+            ips.append(ip)
+    return ips
+
+
 def _build_index():
     """local/clean_reader/ の全記事HTMLを一覧する index.html を作る(スマホの入口)。"""
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -540,10 +575,18 @@ def serve(port=8000, refresh=False):
     n = _build_index()
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=OUT_DIR)
     httpd = socketserver.TCPServer(("0.0.0.0", port), handler)
-    ip = _lan_ip()
-    print("記事%d本を配信中。同じWi-FiのスマホでこのURLを開く:" % n)
-    print("  スマホ: http://%s:%d/" % (ip, port))
+    import socket as _socket
+    ips = _all_lan_ips() or [_lan_ip()]
+    host = _socket.gethostname()
+    print("記事%d本を配信中(全アドレスで待受=0.0.0.0)。同じ宅内ネットのスマホでこのURLを開く:" % n)
+    print("  スマホ(まずこれ): http://%s:%d/" % (ips[0], port))
+    if len(ips) > 1:
+        print("  ↑で開けない時は下も試す(中継機/親機で繋がっている側のIP):")
+        for extra in ips[1:]:
+            print("    http://%s:%d/" % (extra, port))
+    print("  PC名でも可(mDNS/NetBIOSが通れば): http://%s:%d/  /  http://%s.local:%d/" % (host, port, host, port))
     print("  PC    : http://127.0.0.1:%d/" % port)
+    print("★どのIPでも開けない=端末が別セグメント(中継機がルーター動作)側の可能性。宅内網の構成側の話。")
     print("止める: Ctrl+C")
     try:
         httpd.serve_forever()
