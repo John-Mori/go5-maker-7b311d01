@@ -139,6 +139,7 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
     ここが3本目の合流点なので、同じ純関数(naming_corrections)を同じ台帳
     (naming_audit.jsonl・source="dispatch")へ当てる=記録先を2つ持たない(§4)。
 
+    ★2026-09-03 封筒エコー(E-2)だけ**記録のみ**で足した(切らない)。理由は本体の注記。
     ★当てるのは呼称だけ。口調D・メタ剥ぎEは当てない=
       便は表とちがって**書式そのものが情報**(表・引用・設定値)で、書き換えの誤爆が高くつく。
       必要になったらここへ1本足せる(合流点は既にこの1箇所に寄せてある)。
@@ -151,6 +152,33 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
     s = str(text or "")
     if not s.strip() or not str(persona or "").strip():
         return text, summary
+    # ★★2026-09-03(イージス研究室)**封筒エコーを投函経路でも見る。ただし記録だけ・切らない。**
+    #   研究室HQから所有権を引き継いだ時の実測(このファイルの呼び出し元を全部数えた):
+    #     経路① 常駐 dept_daemon.strip_meta       = **生きている**(E-2配線あり)
+    #     経路② ミラー output_gates.apply_gates   = **呼び出し元が1つも無い**。
+    #        唯一の非テスト呼び元 scripts/hooks/mirror_to_discord.py は 2026-08-15 に退役し
+    #        (absence_watchdog.py:680)、.claude/settings.json の hooks にも載っていない=
+    #        あちらへ入れたE-2は**本番では一度も発火しない**。入っていることを根拠にしない。
+    #     経路③ 投函 dispatch.py → ここ            = **E-2が無かった**= 生きた穴はこちらだった。
+    #   便の封筒エコーは表より高くつく= 実在しないChamiの便が**相手の部屋の文脈へ**入る
+    #   (事故の実物 msg_id 1544753080036790319 は GET が404=最初から存在しない)。
+    #   ★それでも今は切らない。理由はこの関数の設計(便は書式そのものが情報・誤爆が高くつく)と、
+    #     「発火しない安全網は検証されない」の裏返しで**まず本番で1回鳴らす**のが順序だから。
+    #     event=envelope_echo_warn が実物で出たら、その実物を見て切りへ上げる(§4.55)。
+    try:
+        if _meta_strip is not None:
+            _cut, _eh = _meta_strip.strip_envelope_echo(s)
+            if _eh:
+                summary["envelope_echo_warn"] = len(_eh)
+                _append(META_AUDIT, [{
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "dept": dept,
+                    "event": "envelope_echo_warn", "source": source,
+                    "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                    "markers": [h.get("marker") for h in _eh],
+                    "would_cut_chars": len(s) - len(str(_cut or "")),
+                    "cut": False, "before": s[:200]}])
+    except Exception:
+        pass            # 記録で転んでも便は止めない(fail-open)
     try:
         rules = _rules("naming")
         if _naming_gate is None or not rules:

@@ -73,6 +73,49 @@ def main():
         body, hits = meta_strip.strip_envelope_echo(text)
         check(label, (body == text and not hits), True)
 
+    # ------------------------------------------------------------------
+    # [配線] 2026-09-03 イージス研究室(研究室HQからE-2の所有権を引き継いだ時に足した)
+    #   HQの止血は経路①(常駐)と経路②(ミラー)へ入った。だが呼び出し元を数え直すと
+    #   経路②は**非テストの呼び元が1つも無い**(mirror_to_discord は 2026-08-15 退役)。
+    #   生きていて穴だったのは**経路③ 投函(dispatch → apply_naming_gate_only)**の方だ。
+    #   ここでは「経路③で鳴る・ただし切らない」を実物の検体で固定する。
+    #   ★本番の監査は汚さない(C-054)= GO5_LOCAL_DIR を temp に振ってから import する。
+    print("[配線] 経路ごとにE-2が在るか")
+    here = os.path.dirname(os.path.abspath(__file__))
+    src_d = io.open(os.path.join(here, "dept_daemon.py"), encoding="utf-8").read()
+    check("経路① 常駐 dept_daemon にE-2が在る(切る側)",
+          "strip_envelope_echo" in src_d, True)
+
+    import tempfile
+    import importlib
+    tmp = tempfile.mkdtemp(prefix="env_echo_")
+    os.environ["GO5_LOCAL_DIR"] = tmp
+    sys.path.insert(0, here)
+    import output_gates
+    importlib.reload(output_gates)               # LOCAL/META_AUDIT を tmp で解決させる
+    envelope = recs[1]["content"]                # ②= 全文が封筒の実物
+    out, summ = output_gates.apply_naming_gate_only(
+        "gunji", "三笘薫", envelope, source="dispatch", msg_id="TEST-E2-DISPATCH")
+    check("経路③ 投函で封筒エコーを検知する", summ.get("envelope_echo_warn", 0) >= 1, True)
+    check("経路③ では**切らない**(便は書式そのものが情報。まず1回鳴らす)", out == envelope, True)
+    audit = os.path.join(tmp, "llm", "meta_strip_audit.jsonl")
+    rows = []
+    if os.path.exists(audit):
+        rows = [json.loads(x) for x in io.open(audit, encoding="utf-8") if x.strip()]
+    warn = [r for r in rows if r.get("event") == "envelope_echo_warn"]
+    check("経路③ の記録が1行残る", len(warn) == 1, True)
+    check("経路③ の記録は source=dispatch で見分けられる",
+          bool(warn) and warn[0].get("source") == "dispatch", True)
+    check("経路③ の記録に『切っていない』が明記される",
+          bool(warn) and warn[0].get("cut") is False, True)
+    check("経路③ の記録に『切るなら何字か』が残る(切りへ上げる時の材料)",
+          bool(warn) and warn[0].get("would_cut_chars", 0) > 0, True)
+    check("正常な便では鳴らない(誤爆0)",
+          output_gates.apply_naming_gate_only(
+              "gunji", "三笘薫", "了解した。方針は2次元へ寄せる。",
+              source="dispatch")[1].get("envelope_echo_warn", 0), 0)
+    os.environ.pop("GO5_LOCAL_DIR", None)
+
     print(f"\n合計: OK={ok} NG={ng}")
     return 0 if ng == 0 else 1
 

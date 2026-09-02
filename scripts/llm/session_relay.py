@@ -277,6 +277,32 @@ REFRESH_MIN_CONTEXT_TOKENS = 100000
 REFRESH_QUIET_SEC = 900          # この秒数以内に同じ部屋へChami便が来ていたら「会話の途中」
 REFRESH_HOLD_MAX_SEC = 4 * 3600  # 見送りっぱなしにしない保険。これを超えたら会話中でも交代する
 
+# ★★2026-09-03(イージス研究室)**見送りの上限をもう1本、ターン数で引く。**
+#   発注= 研究室HQ msg 1544758445746421800(封筒エコー事故の恒久化・根因の側)。
+#   事故= 軍議部屋 三笘薫 世代8 が 01:55 に**次の封筒を自分で書いて**Discordへ出した。
+#     中に**実在しないChamiの便**(msg_id 1544753080036790319 → GET が 404)が入っていた。
+#     出力側のゲートE-2は後始末だ。産ませない側はここにある。
+#
+# ★HQは根因を「文脈が伸びるほど見送りやすい=一番危ない時に一番効かない」と見立てたが、
+#   実測はそれを支持しない。**_refresh_hold には文脈の項が1つも無い**(見るのは
+#   now - last_chami_at だけ)。さらに dept_daemon_*.log の見送り行 619件を数え直すと
+#   **文脈の最大は119,722・120,000以上は0件**= COMPACT_AT_TOKENS=120,000 が先に圧縮するので
+#   「文脈が伸びた見送り」はそもそも起きていない。文脈に上限を引いても一度も発火しない。
+#
+# ★危険を測っている量は文脈ではなく**その世代のターン数**だ。封筒エコーは
+#   「同じ型の封筒を何度も読まされた末のパターン補完」であって、トークン量の事故ではない。
+#   (local/llm/request_log.jsonl の completed 4,096件: turns の p50=9 / p95=31 / p97=35 /
+#    p99=42 / max=52。**事故便は turns=38**= 上位2%の内側。)
+# ★線を36に置いた根拠(見送り66件・2026-08-14〜09-03 の全件に turns を突き合わせた実測)=
+#     >=30 → 14件(21.2%) / >=34 → 10件(15.2%) / **>=36 → 7件(10.6%)** / >=38 → 3件 / >=40 → 1件
+#   36なら解放は10.6%(2部屋= gunji・learning-coach)に収まり、なお事故を先回りする。
+#   事故当日の軍議部屋は 01:44:07(turns=35)→ 01:53:15(36)→ 01:54:06(37)→ 01:55:19(38)。
+#   **36なら 01:53:15 の便で世代が替わり、事故便 01:54:06 は turns=1 の新世代が答えていた。**
+#   38まで上げると解放3件まで痩せるが 01:55:19 まで待つ=事故便を止め損なう。だから36。
+# ★会話中に替えても筋は落ちない= 起動文には _recent_block が生のやり取りを
+#   RECENT_IN_BOOT 件そのまま積んでいる(2026-08-13時点で既にある)。
+REFRESH_HOLD_MAX_TURNS = 36      # この世代がこのターン数まで来たら、会話中でも交代する
+
 # `/compact` の待ち(秒)。実測102.5秒(hr-room)/ 自動圧縮は各140秒。倍以上の余裕を取る。
 # ★ここはChamiの便を返した**後**に走るので、長めでも誰も待たない。
 COMPACT_TIMEOUT = 420
@@ -2853,9 +2879,15 @@ def _refresh_hold(entry, rec, now):
         - 3時間黙っていた部屋へChamiが新しい話題を出した便 → 見送らない(ここが一番安全な交代点)
         - 2分前の続きの便 → 見送る(ここで世代を替えると話の筋が落ちる=今回の事故)
         - 会話中に届いた機構便・他部門からの回送 → 見送る(替えればChamiの次の便が新世代に当たる)
-    ★永久に見送らない保険が2つ= ①Chamiが15分黙れば次の便で普通に発火する
+    ★永久に見送らない保険が3つ= ①Chamiが15分黙れば次の便で普通に発火する
       ②見送りが REFRESH_HOLD_MAX_SEC 続いたら会話中でも交代する(2026-07-29の
-        「条件を足したつもりで廃止した」事故を二度とやらないため)。
+        「条件を足したつもりで廃止した」事故を二度とやらないため)
+      ③★2026-09-03 その世代が REFRESH_HOLD_MAX_TURNS まで来たら会話中でも交代する
+        (封筒エコー= 同じ型の封筒を読まされ続けた末のパターン補完。時計ではなく
+         **ターン数**が危険を測っている。根拠の実測は REFRESH_HOLD_MAX_TURNS の注記)。
+      ★②の時計は「Chamiが15分黙るたびに refresh_hold_since が消える」ので、
+        Chamiが喋り続けている**まさにその間**は4時間に到達しない= 一番危ない場面で効かない。
+        ③はその穴を埋める側だ(②を置き換えるのではなく、並べる)。
     ★何が壊れても False(=従来どおり交代)へ倒す。ここで例外を出して便を落とさない。
     """
     try:
@@ -2871,12 +2903,25 @@ def _refresh_hold(entry, rec, now):
     if since > 0 and (now - since) >= REFRESH_HOLD_MAX_SEC:
         return False, (f"見送りが{(now - since) / 3600:.1f}時間続いた"
                        f"(上限{REFRESH_HOLD_MAX_SEC // 3600}時間)=会話中でも交代する")
+    # ★ターン数の上限(2026-09-03)。時計と違い、Chamiが喋り続けている間も必ず積み上がる。
+    #   ★読めない値は0=「まだ世代の初め」へ倒す。ここだけ fail-open の向きが逆に見えるが、
+    #     turns は新しい世代では**本当に無い**キーだ。読めない時に解放へ倒すと、
+    #     世代の1便目から毎回交代することになり見送り機構そのものが死ぬ。
+    #     保険は消えない= ②の上限4時間はそのまま効いている。
+    try:
+        turns = int(entry.get("turns") or 0)
+    except (TypeError, ValueError):
+        turns = 0
+    if turns >= REFRESH_HOLD_MAX_TURNS:
+        return False, (f"この世代が{turns}ターン目(上限{REFRESH_HOLD_MAX_TURNS}ターン)"
+                       f"=同じ型の封筒を読ませ過ぎている(封筒エコーの温床)。会話中でも交代する")
     n = int(entry.get("refresh_hold_n") or 0) + 1
     return True, (f"直前{int(now - prev)}秒前に同じ部屋へChamiの便が来ている"
                   f"(会話の途中={REFRESH_QUIET_SEC}秒以内)。定期リフレッシュは選択的な交代なので"
                   f"見送る。{n}便目の見送り"
                   f"(Chamiが{REFRESH_QUIET_SEC // 60}分黙れば次の便で交代する / "
-                  f"上限{REFRESH_HOLD_MAX_SEC // 3600}時間で必ず交代する)")
+                  f"上限{REFRESH_HOLD_MAX_SEC // 3600}時間で必ず交代する / "
+                  f"この世代{turns}ターン目・{REFRESH_HOLD_MAX_TURNS}ターンで必ず交代する)")
 
 
 def _measure_context_now(sid, entry=None):
@@ -5019,11 +5064,17 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                     f"★定期リフレッシュを**会話の途中なので**見送った {_hold_why} "
                     f"tokens={_ctx_now} compacts={entry.get('compact_count')}")
             _log(dept, f"★定期リフレッシュを見送った(Chamiと会話の途中・文脈{_ctx_now:,})")
-        elif entry.get("refresh_hold_n"):
+        elif entry.get("refresh_hold_n") or _hold_why:
             # ★見送っていた分をここで清算する(次の世代へ持ち越さない)。
+            #   ★_hold_why が入っているのは**打ち切りの解放**(上限4時間 / 上限ターン)だけだ。
+            #     従来の「会話の途中ではない」解放は "" なので、見送り0便の時は今までどおり黙る。
+            #     打ち切りは見送り0便でも必ず1行残す= 静かに方針が変わったように見せない(2026-09-03)。
             _record(rid, dept, "running",
                     f"★見送っていた定期リフレッシュをここで実行する"
-                    f"(見送り{entry.get('refresh_hold_n')}便 {_hold_why or 'Chamiが会話の途中ではない'})")
+                    f"(見送り{entry.get('refresh_hold_n') or 0}便 "
+                    f"{_hold_why or 'Chamiが会話の途中ではない'})")
+            if _hold_why:
+                _log(dept, f"★見送りを打ち切って定期リフレッシュを実行する({_hold_why})")
             entry.pop("refresh_hold_n", None)
             entry.pop("refresh_hold_since", None)
             _hold_changed = True

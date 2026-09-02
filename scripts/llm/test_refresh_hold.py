@@ -134,5 +134,81 @@ check("last_chami_at は交代の判定より後で更新している(自分自�
 check("last_chami_at は世代を跨いで引き継ぐ", 'new_entry["last_chami_at"]' in src)
 check("見送りを台帳へ1行残す(沈黙を作らない)", "会話の途中なので**見送った" in src)
 
+print("[10] ★ターン数の上限(2026-09-03 封筒エコー事故の恒久化)")
+#   発注= 研究室HQ msg 1544758445746421800。事故= 軍議部屋 世代8 が次の封筒を自分で書き、
+#   中に**実在しないChamiの便**(msg_id 1544753080036790319 → GET が404)を入れてDiscordへ出した。
+#   HQの見立ては「文脈が伸びるほど見送りやすい」だったが、実測はそれを支持しない=
+#   _refresh_hold に文脈の項は無く、見送り619件の文脈は最大119,722・120,000以上は0件
+#   (COMPACT_AT_TOKENS=120,000 が先に圧縮する)。危険を測っているのは**ターン数**だ。
+T = sr.REFRESH_HOLD_MAX_TURNS
+check("REFRESH_HOLD_MAX_TURNS は36(実測: 見送り66件のうち解放7件=10.6%に収まる線)", T == 36)
+check("上限ターンは実測のp99(42)より下(=事故の前に届く)", T < 42)
+check("上限ターンは実測のp95(31)より上(=普通の便を巻き込まない)", T > 31)
+
+talk = dict(last_chami_at=NOW - 60)   # 会話の途中= 本来なら見送る場面
+check("35ターン目はまだ見送る(線の内側)", sr._refresh_hold(ent(turns=T - 1, **talk), CHAMI, NOW)[0])
+check("36ターン目は会話中でも交代する", not sr._refresh_hold(ent(turns=T, **talk), CHAMI, NOW)[0])
+check("38ターン目(事故便そのもの)は会話中でも交代する",
+      not sr._refresh_hold(ent(turns=38, **talk), CHAMI, NOW)[0])
+_why = sr._refresh_hold(ent(turns=T, **talk), CHAMI, NOW)[1]
+check("打ち切りの理由に実測のターン数が入る(後から読める)", "36ターン目" in _why)
+check("打ち切りの理由に上限が入る", "上限36ターン" in _why)
+check("見送る時の理由にも『何ターンで必ず交代するか』を書く",
+      "36ターンで必ず交代する" in sr._refresh_hold(ent(turns=5, **talk), CHAMI, NOW)[1])
+
+print("[11] ターン数を足しても既存の振る舞いを壊していない")
+check("turns キーが無い台帳は今までどおり見送る(新しい世代=まだ0ターン)",
+      sr._refresh_hold(ent(**talk), CHAMI, NOW)[0])
+check("壊れたturnsは0へ倒す=見送りは続く(解放へ倒すと1便目から毎回交代して機構が死ぬ)",
+      sr._refresh_hold(ent(turns="こわれてる", **talk), CHAMI, NOW)[0])
+check("ターンが少なくても上限4時間の保険はそのまま効く",
+      not sr._refresh_hold(ent(turns=1, last_chami_at=NOW - 60,
+                               refresh_hold_since=NOW - MAXH - 1), CHAMI, NOW)[0])
+check("沈黙の後ならターン数に関係なく交代する(判定の順番を変えていない)",
+      not sr._refresh_hold(ent(turns=1, last_chami_at=NOW - (Q + 1)), CHAMI, NOW)[0])
+check("_should_rotate にターン数は入れていない(退避と選択の線引きは不変)",
+      sr._should_rotate(ent(turns=99))[2] == "refresh")
+check("交代した世代はターンが0から積み直る(台帳を作り直している)",
+      'new_entry = {"active_session_id": new_sid' in src and '"turns"' not in
+      src[src.index('new_entry = {"active_session_id": new_sid'):
+          src.index('new_entry = {"active_session_id": new_sid') + 900])
+
+print("[12] ★事故の再現(local/llm/request_log.jsonl の実物の並び・軍議部屋 2026-09-03)")
+#   実測した見送り5便= 01:44:07(turns=35) 01:53:15(36) 01:54:06(37) 01:55:19(38) 01:57:04(39)。
+#   事故便は 01:54:06 に始まり turns=38 で完了し、msg 1544752530511106295 として出た。
+REAL = [("01:44:07", 35), ("01:53:15", 36), ("01:54:06", 37), ("01:55:19", 38), ("01:57:04", 39)]
+held = [t for t, n in REAL if sr._refresh_hold(ent(turns=n, **talk), CHAMI, NOW)[0]]
+check("事故の直前で解放が起きる(01:53:15 以降は1便も見送らない)", held == ["01:44:07"])
+check("=事故便 01:54:06 は turns=1 の新しい世代が答えていた", "01:54:06" not in held)
+
+print("[13] ★must-fail(C-053)= 壊す側は『動く別実装』であって消した行ではない")
+#   HQの提案どおり**文脈**に上限を引いた版を、ここで本当に作って走らせる。
+#   これが事故を止められないことを見せる= だからターン数を選んだ、が後から検算できる。
+def _hold_by_context(entry, rec, now, ceiling=110000):
+    """別実装: 見送りの打ち切りを『文脈がceilingを超えたら』にした版(HQの見立てをそのまま実装)。"""
+    prev = float(entry.get("last_chami_at") or 0)
+    if prev <= 0 or (now - prev) > Q:
+        return False, ""
+    if int(entry.get("context_tokens") or 0) >= ceiling:
+        return False, "文脈が上限を超えた=会話中でも交代する"
+    return True, "会話の途中なので見送る"
+
+
+ACC = dict(talk, context_tokens=79392, turns=37)      # 事故便の実物(01:54:06)
+check("別実装(文脈上限)は動く= 上限を超えた場面ではちゃんと解放する",
+      not _hold_by_context(ent(**dict(talk, context_tokens=120000)), CHAMI, NOW)[0])
+check("★その別実装は事故便を止められない(文脈79,392は上限に届かない)",
+      _hold_by_context(ent(**ACC), CHAMI, NOW)[0])
+check("★採用した実装は同じ事故便を止める", not sr._refresh_hold(ent(**ACC), CHAMI, NOW)[0])
+check("★文脈上限が空振りする理由= 見送り619件の文脈は最大119,722で、"
+      "COMPACT_AT_TOKENS=120,000 が先に圧縮する", sr.COMPACT_AT_TOKENS == 120000)
+
+print("[14] 打ち切りの解放は必ず台帳に1行残る(静かに方針を変えない)")
+check("打ち切り(理由つき)の解放は見送り0便でも記録する",
+      'elif entry.get("refresh_hold_n") or _hold_why:' in src)
+check("打ち切りはデーモンのログにも出す", "見送りを打ち切って定期リフレッシュを実行する" in src)
+check("従来の『会話の途中ではない』解放は理由が空=今までどおり黙る",
+      sr._refresh_hold(ent(last_chami_at=NOW - 2 * 3600), CHAMI, NOW)[1] == "")
+
 print("\n%d passed / %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
