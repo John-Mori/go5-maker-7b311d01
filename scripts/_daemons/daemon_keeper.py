@@ -199,6 +199,14 @@ WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "llm", "naming_gate.py"),
                os.path.join(ROOT, "scripts", "llm", "lang_gate.py"),
                os.path.join(ROOT, "scripts", "llm", "meta_strip.py"),
+               os.path.join(ROOT, "scripts", "llm", "kana_choice_gate.py"),
+               # ★2026-09-02 積み残しを一緒に閉じる= この検査が万年赤だと**次の載せ忘れを
+               #   誰も見なくなる**(上のC-038の注記そのもの)。
+               #   liveblog_gate=ゲートG / gemini_usage=常駐が読む使用量台帳 /
+               #   enjoh.py=persona_send が読む炎上表記ゲートの正本(2026-09-01 追加分)。
+               os.path.join(ROOT, "scripts", "llm", "liveblog_gate.py"),
+               os.path.join(ROOT, "scripts", "llm", "gemini_usage.py"),
+               os.path.join(ROOT, "scripts", "discord", "enjoh.py"),
                os.path.join(ROOT, "scripts", "queue", "leasequeue.py"),
                os.path.join(ROOT, "scripts", "_common", "session_presence.py"),
                os.path.join(ROOT, "scripts", "discord", "persona_send.py"),
