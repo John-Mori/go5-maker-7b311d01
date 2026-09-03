@@ -406,8 +406,9 @@ def post_work_to_channel(dept, persona, post_body, timeout=90):
     """相手部門チャンネルへ実依頼を投稿し、**実Discord message_id を返す**(取れなければ "")。
 
     ★best-effort: 何が起きても例外を投げない(呼び側=dispatch は投稿失敗でも便を届ける)。
-    ★実IDを得るため persona_send に --print-id を渡す(want_id=?wait=true を強制。
-      通常のdept投稿はwait無しでIDを返さないため、この経路専用の口を足した)。
+    ★実IDを得るため persona_send に --print-id を渡す。★2026-09-03以降、persona_send は
+      **全便で ?wait=true** を付けてIDを拾う(台帳へ msg_id を残すため)ので、このフラグの
+      有無で挙動は変わらない。渡し続けるのは古い呼び出しを壊さないため。
     """
     try:
         p = subprocess.run([sys.executable, PERSONA_SEND, "--dept", dept,

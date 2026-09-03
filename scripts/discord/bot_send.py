@@ -142,9 +142,19 @@ def main():
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
+            # ★2026-09-03 応答本文からmsg_idを拾う。Bot APIは**投稿したメッセージのJSONを
+            #   必ず返している**のに、旧実装は r.read() を呼ばず捨てていた= send_audit に
+            #   msg_id="" で残り、後から「この便は誰が何のために出したのか」を辿れなかった
+            #   (webhook側=persona_send も同じ穴。あちらは wait=true を足して塞いだ)。
+            #   ★idが読めなくても送信は成功している= ここで例外を上へ出さない。
+            mid = ""
+            try:
+                mid = str((json.loads(r.read().decode("utf-8")) or {}).get("id", "") or "")
+            except Exception:
+                mid = ""
             _audit(body=body, status=str(r.status), channel_id=str(ch["id"]),
-                   channel=str(ch.get("name", "")), dept=str(ch.get("dept", "")))
-            print(f"送信OK → {ch.get('name')} (HTTP {r.status})")
+                   channel=str(ch.get("name", "")), dept=str(ch.get("dept", "")), msg_id=mid)
+            print(f"送信OK → {ch.get('name')} (HTTP {r.status})" + (f" msg={mid}" if mid else ""))
     except Exception as e:
         _audit(body=body, status="ERR:" + type(e).__name__, channel_id=str(ch["id"]),
                channel=str(ch.get("name", "")), dept=str(ch.get("dept", "")))

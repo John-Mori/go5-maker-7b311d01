@@ -12,7 +12,8 @@
   本文の組み立てと送信 = このファイル(日本語とpersona名を持てる)
 
 使い方: python winupdate_message.py <reboot:0|1> <titles_file>
-  終了コード 0 = 送信成功(HTTP 204)。PowerShell側はこれを見て「通知済み」状態を保存する。
+  終了コード 0 = 送信成功(persona_send が「送信OK」を印字した実測)。
+  PowerShell側はこれを見て「通知済み」状態を保存する。
 """
 import io
 import os
@@ -115,7 +116,11 @@ def main() -> int:
     out = (r.stdout or "") + (r.stderr or "")
     # 送信できた時だけ0を返す。PowerShell側は0を見て初めて「通知済み」を記録するので、
     # 失敗すれば状態が据え置かれ、次回の巡回で自動的に再送される。
-    return 0 if "HTTP 204" in out else 1
+    # ★2026-09-03 合図を "HTTP 204" から "送信OK" へ変更。persona_send が msg_id 記録のため
+    #   全便で wait=true を付け、成功時のHTTPが 204→200 になった。ここを据え置くと
+    #   **送れているのに常に1を返す**= PowerShell側が「通知済み」を保存できず、同じ通知を
+    #   巡回のたびに撃ち続ける(再送が止まらない)。
+    return 0 if ("送信OK" in out and r.returncode == 0) else 1
 
 
 if __name__ == "__main__":

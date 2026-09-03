@@ -415,9 +415,10 @@ COLORS = {"red": 0xED4245, "orange": 0xE67E22, "yellow": 0xFEE75C, "green": 0x57
           "blue": 0x5865F2, "purple": 0x9B59B6, "grey": 0x95A5A6, "pink": 0xEB459E}
 
 # 値を取らないフラグ(下の方で sys.argv から直接読んでいる)。★rest(=本文)へ混ぜない。
-# --print-id: 投稿の実Discord message_idを stdout に `msg=<id>` で出す(?wait=true を強制)。
+# --print-id: 投稿の実Discord message_idを stdout に `msg=<id>` で出す。
 #   C-023(2026-07-30)で dispatch の実依頼を表投稿する時、そのIDでリアクションを着弾させるため。
-#   通常のdept投稿はwait無しでIDを返さないので、この口を足した(mirror名義以外でもIDを取れる)。
+#   ★2026-09-03 以降は**全便でIDを取る**ので、このフラグを付けても挙動は変わらない
+#   (既存の呼び出し元 dispatch.py が渡してくるので、本文へ混ざらないようここに残す)。
 _BARE_FLAGS = ("--nobold", "--silent", "--print-id", "--plain", "--big")
 # 「未知のオプション」らしさの判定。`---`(Markdownの区切り線)や `--` 単体は本文なので除く。
 _UNKNOWN_FLAG_RE = re.compile(r"^--[A-Za-z][A-Za-z0-9-]*$")
@@ -784,16 +785,26 @@ def main():
     # ミラー名義 (Chami(from Claude)/Chami(音声入力)等) は通知を鳴らさない (Chami指示2026-07-18:
     # 「自分の発言だし通知消したい」)。専用bot新設は不要 — Discordのサイレントフラグ
     # (SUPPRESS_NOTIFICATIONS=4096) で同じ目的を達成する (メッセージは普通に見え、通知だけ出ない)。
-    # あわせて wait=true で送信結果のmsg_idを取得し表示する=貼った本人が既読/着手印を押せるように。
+    # (msg_idの取得は名義に関係なく全便で行う。下の post() を見ろ)
     mirror = persona.startswith("Chami(")
     if mirror or "--silent" in sys.argv:
         payload["flags"] = 4096
-    # ★--print-id: mirror名義でなくても実Discord msg_idを返す(C-023の実依頼表投稿用)。
-    #   通知の抑制(4096)は付けない=実依頼は相手部門に気づいてほしいため。
-    want_id = mirror or ("--print-id" in sys.argv)
+    # ★--print-id: 旧仕様の残り。今は全便でmsg_idを取るので指定の有無で挙動は変わらない
+    #   (既存の呼び出し側を壊さないため引数としては受け続ける)。
+    #   通知の抑制(4096)は mirror/--silent の時だけ= 実依頼は相手部門に気づいてほしいため。
 
-    def post(pl, want_id=False):
-        url = hook_url + ("?wait=true" if want_id else "")
+    def post(pl):
+        # ★2026-09-03 全便で wait=true にした(モドリッチ経由・改修αの実測)。
+        #   旧実装は mirror名義か --print-id の時だけ wait=true を付けていた。付けないと
+        #   Discordは **HTTP 204・本文なし** を返す= msg_idが取れない= send_audit に
+        #   msg_id="" で残る。実測 406便中336便(82.8%)が空で、whatis.py が
+        #   「msg_id→どの部門の誰が何のために出した便か」を機械で辿れなかった
+        #   (Chamiが16:57に指した便が3台帳のどれにも無かった件がこれ)。
+        #   wait=true にすると Discord は **200 + メッセージJSON** を返す= idが取れる。
+        #   ★代償: 成功時のHTTPが 204→200 に変わる。stdoutの "204" を成功判定に使って
+        #     いた呼び出し元3本(broadcast.py / office_daily.py / winupdate_message.py)は
+        #     同じcommitで「送信OK + rc=0」判定へ直した(C-064: 出口を変える時は撃つ点を全部数える)。
+        url = hook_url + "?wait=true"
         req = urllib.request.Request(
             url, data=json.dumps(pl).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": "go5-org-persona (personal, v1)"},
@@ -804,12 +815,13 @@ def main():
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 mid = ""
-                if want_id:
-                    try:
-                        data = json.loads(r.read().decode("utf-8"))
-                        mid = str(data.get("id", ""))
-                    except ValueError:
-                        mid = ""
+                try:
+                    # ★id が取れなくても送信は成功している= ここで例外を上へ出さない
+                    #   (記録のためにDiscordへ出た言葉を失う方が損だ)。
+                    data = json.loads(r.read().decode("utf-8"))
+                    mid = str((data or {}).get("id", "") or "")
+                except Exception:
+                    mid = ""
                 _audit_send(body=_sent, status=str(r.status), channel_id=str(ch.get("id", "")),
                             channel=str(ch.get("name", "")), dept=str(ch.get("dept", "")),
                             persona=str(persona), msg_id=mid)
@@ -840,12 +852,12 @@ def main():
                     pl["username"] = f"{display}(続き{i + 1})"[:80]  # 畳み解除でアイコン再表示
                 if fl:
                     pl["flags"] = fl
-                st, mid = post(pl, want_id=want_id)
+                st, mid = post(pl)
                 print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})"
                       + (f" msg={mid}" if mid else "") + (f" [{i+1}通目]" if i else ""))
                 time.sleep(0.4)
         elif "embeds" in payload:
-            st, mid = post(payload, want_id=want_id)
+            st, mid = post(payload)
             print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})" + (f" msg={mid}" if mid else ""))
         else:
             # 長文は切り捨てず"分割して連投"する(2026-07-17・INC-92)。
@@ -869,7 +881,7 @@ def main():
                     # usernameを1文字でも変えると畳みが解けてアイコンが再表示される。
                     # avatar_urlは据え置き=同じ顔のまま「(続き2)」だけが付く。
                     pl["username"] = f"{display}(続き{i + 1})"[:80]
-                st, mid = post(pl, want_id=want_id)
+                st, mid = post(pl)
                 print(f"送信OK → {ch.get('name')} as {persona} (HTTP {st})"
                       + (f" msg={mid}" if mid else "") + (f" [{i+1}通目]" if i else ""))
                 time.sleep(0.4)  # webhookのレート制限を避ける

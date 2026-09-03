@@ -90,7 +90,11 @@ def main():
             capture_output=True, text=True, encoding="utf-8", errors="replace")
         line = (r.stdout or r.stderr or "").strip().splitlines()
         tail = line[-1] if line else ""
-        if r.returncode == 0 and "204" in tail:
+        # ★2026-09-03 判定を "204" から「送信OK + rc=0」へ変えた。persona_send が全便で
+        #   wait=true を付ける(msg_id記録)ようになり、成功時のHTTPが **204→200** になったため。
+        #   "204"のまま置くと**全便が失敗扱い**になる。"送信OK" は urlopen が返った時だけ
+        #   印字される=HTTPコードの値に依らない不変な合図(msg_idの数字に "204" が紛れる罠も無い)。
+        if r.returncode == 0 and "送信OK" in tail:
             ok.append(d)
             print(f"  [OK] {d}")
         else:

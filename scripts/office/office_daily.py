@@ -129,7 +129,11 @@ def send(body):
         print(f"送信失敗: {e}")
         return False
     out = (r.stdout or "") + (r.stderr or "")
-    okd = r.returncode == 0 and "204" in out          # HTTP 204を確認するまで「送った」と言わない
+    # ★実際にDiscordが受け取った合図を見るまで「送った」と言わない。
+    #   2026-09-03 合図を "204" から "送信OK" へ変更= persona_send が msg_id 記録のため
+    #   全便で wait=true を付け、成功時のHTTPが 204→200 になった("送信OK" は urlopen が
+    #   返った時だけ印字されるので、コードの値が変わっても壊れない)。
+    okd = r.returncode == 0 and "送信OK" in out
     print(("送信OK: " if okd else "送信失敗: ") + out.strip()[:160])
     return okd
 

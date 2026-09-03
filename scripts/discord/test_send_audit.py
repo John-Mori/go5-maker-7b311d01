@@ -250,8 +250,9 @@ def t3():
     f = fake_urlopen(status=200, payload={"id": "1544669455995637771"})
     ns = make_ns(f)
     exec(compile(ast.Module(body=[fn], type_ignores=[]), PERSONA, "exec"), ns)
-    st, mid = ns["post"]({"content": "webhookから出た本文", "username": "ケヴィン・デブライネ"},
-                         want_id=True)
+    # ★2026-09-03 post() から want_id 引数が消えた(全便で wait=true=msg_idを必ず拾う)。
+    #   その回帰ガードは test_send_msgid_record.py 側。ここは台帳の列だけを見る。
+    st, mid = ns["post"]({"content": "webhookから出た本文", "username": "ケヴィン・デブライネ"})
     r = rows()
     ok(st == 200 and mid == "1544669455995637771", "post は (status, msg_id) を返す", str((st, mid)))
     ok(len(r) == 1 and r[0]["via"] == "persona_send" and r[0]["msg_id"] == mid
