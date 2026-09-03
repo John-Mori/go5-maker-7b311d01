@@ -304,7 +304,31 @@ _TIMEOUT_CHURN_MARKERS = (
 _TIMEOUT_CHURN_BASENAMES = frozenset({
     "room_sessions.json", "persona_avatars.json",
     "persona_avatar_last.json", "react_mark_state.json",
+    "persona_queue_cursor.json", "escalate_ledger.txt",
+    "discord_webhooks_personas.json", "report_pulse_marker.json",
 })
+
+# ★★2026-09-03 Chami「もっとさ、俺、というか人間がちゃんと読めるような通知じゃないと
+#   いらんよ、これとか」(グッズサイト・引用元 msg 1544856408451715082)。
+#   実物= work_audit 2026-09-03T08:47:40 / goods-afi / msg 1544850931529555989 の touched。
+#   churn を落とした後に残った10件が **全部これ** だった:
+#     __pycache__/*.pyc(pythonを走らせれば必ず出る) /
+#     tone_gate.py.bak_20260903_forbiddenall(C-003のバックアップ=編集の副産物) /
+#     _room_cache_*.txt(relayの部屋キャッシュ) / _state/*_watch.json(監視の状態) /
+#     _daily_report_body.txt(日報の下書き) …
+#   → **どれも「作業の成果」ではなく機械の副産物**だ。名指ししても人間には読めないし、
+#     読めたところで拾い直す物が1つも無い。churn(常に動く)とは別枠で落とす。
+#   ★.bak を落として良い理由= バックアップが出来た時は**元のファイル自身**も touched に
+#     載る(先にコピー→次に編集)。元が載るので情報は減らない。
+_TIMEOUT_BYPRODUCT_MARKERS = (
+    "__pycache__/",         # pythonのコンパイル済み(走らせれば必ず出る)
+    "_room_cache_",         # session_relay の部屋キャッシュ
+    "local/_state/",        # 監視の状態ファイル
+    "/office/_",            # 日報の下書き(_last_daily / _summary)
+    "_daily_report_body",   # 日報の本文バッファ
+    "_report_pulse",        # 報告脈のバッファ
+)
+_TIMEOUT_BYPRODUCT_SUFFIXES = (".pyc", ".pyo", ".log", ".tmp", ".swp")
 
 
 def _is_churn_path(path):
@@ -318,14 +342,33 @@ def _is_churn_path(path):
     return any(m in p for m in _TIMEOUT_CHURN_MARKERS)
 
 
+def _is_byproduct_path(path):
+    """人間が読んでも意味の無い**機械の副産物**なら True(.pyc / .bak / キャッシュ / 状態)。
+
+    ★churn(常に動く)との違い= こちらは「その便で確かに書き換わった」が、
+      **成果ではない**もの。名指ししても拾い直す物が無いので報告から落とす。
+    """
+    p = str(path or "").replace("\\", "/").lstrip("~").lower()
+    if not p:
+        return True
+    base = p.rsplit("/", 1)[-1]
+    if ".bak" in base:               # foo.py.bak / foo.py.bak_20260903_xxx(C-003の退避)
+        return True
+    if base.endswith(_TIMEOUT_BYPRODUCT_SUFFIXES):
+        return True
+    return any(m in p for m in _TIMEOUT_BYPRODUCT_MARKERS)
+
+
 def substantive_touched(touched):
-    """work_audit の touched から churn(常駐の脈・ロック)を除いた**実体変更**だけを返す。
+    """work_audit の touched から churn と機械の副産物を除いた**実体変更**だけを返す。
 
     ★churn を残すと「進んでいない」のに「N件書き換えた」と嘘の確定報告になる(C-048)。
+    ★副産物(.pyc/.bak/キャッシュ)を残すと、報告が**人間に読めない羅列**になる
+      (2026-09-03 Chami指摘)。
     """
     seen, out = set(), []
     for p in (touched or []):
-        if _is_churn_path(p):
+        if _is_churn_path(p) or _is_byproduct_path(p):
             continue
         key = str(p).replace("\\", "/").lstrip("~")
         if not key or key in seen:
@@ -336,19 +379,30 @@ def substantive_touched(touched):
 
 
 def format_timeout_result(touched):
-    """打ち切った便の"確定した結果"を1行にする。実体のある変更が無ければ ""(= 黙る)。
+    """打ち切った便の"確定した結果"を**人間が読める1行**にする。実体が無ければ ""(= 黙る)。
 
     ★"進んでいる可能性" は書かない。書くのは**実測(作業前後のファイル差分)で確定した**変更だけ。
-      churn しか無い / 何も無い → "" を返して黙る(中身の無い報告は二度と出さない)。
+      churn / 副産物しか無い / 何も無い → "" を返して黙る(中身の無い報告は二度と出さない)。
+    ★文面の条件(2026-09-03 Chami「人間がちゃんと読めるような通知じゃないといらん」)=
+      ①何が起きたか(時間切れ) ②どこに手が入ったか ③今どういう状態か(未完了)
+      ④読み手の次の一手。パスの羅列だけで終わらせない。名指しは3件まで。
     """
     subst = substantive_touched(touched)
     if not subst:
         return ""            # 確定した成果なし= 黙る
-    head = "、".join(subst[:4])
-    more = f" ほか計{len(subst)}件" if len(subst) > 4 else ""
-    return (f"打ち切ったが、この便で {head}{more} を書き換えていた"
-            "(実測=作業前後のファイル差分)。完了扱いにせず残してあるから、"
-            "確かめて要れば拾い直す。")
+    # ★表示用に整える= 区切りは / に統一し、リポジトリ外を指す "../" は落とす
+    #   (`..\00_AI-HQ\...` は人間には読みにくいだけで、指す先は変わらない)。
+    names = []
+    for p in subst:
+        s = str(p).replace("\\", "/")
+        while s.startswith("../"):
+            s = s[3:]
+        names.append(s)
+    head = "、".join(names[:3])
+    more = f" ほか{len(names) - 3}件" if len(names) > 3 else ""
+    return (f"時間切れで打ち切った。この便で手が入っていたのは {head}{more}"
+            "(実測= 作業前後のファイル差分)。作業は途中で、完了扱いにはしていない。"
+            "続きが要るならもう一度言ってくれ。")
 
 
 def pick_timeout_touched(entries, msg_id):

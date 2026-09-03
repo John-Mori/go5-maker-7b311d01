@@ -53,7 +53,29 @@ def _touched_spec():
         (churn_only, 0, True, "churnだけ(codever/busy/脈)= 実体0=黙る"),
         (real, 1, False, "実体1件+churn混在= 実体だけ拾って報告する"),
         (["app.js", "app.js"], 1, False, "重複は1件に畳む"),
+        # ★2026-09-03 Chami「人間がちゃんと読めるような通知じゃないといらん」の実物。
+        #   work_audit 08:47:40 / goods-afi / msg 1544850931529555989 から churn を
+        #   落とした後に残っていた10件= **全部が機械の副産物**だった(=本来は黙るべき便)。
+        (REAL_20260903_BYPRODUCTS, 0, True,
+         "実物(09-03 グッズサイト)= .pyc/.bak/キャッシュ/状態だけ= 実体0=黙る"),
+        (REAL_20260903_BYPRODUCTS + ["scripts/llm/dept_daemon.py"], 1, False,
+         "副産物に本物が1件混ざれば、本物だけを名指しする"),
     ]
+
+
+# Chamiが「読めない」と言った通知の元データ(work_audit の touched から churn を除いた残り)。
+REAL_20260903_BYPRODUCTS = [
+    "scripts/llm/__pycache__/transcribe.cpython-312.pyc",
+    "scripts/llm/tone_gate.py.bak_20260903_forbiddenall",
+    "~local\\llm\\_room_cache_802d2f8d-0f00-4b16-9b41-08fd6781ea8d.txt",
+    "scripts/llm/__pycache__/local_responder.cpython-312.pyc",
+    "~local\\_daily_report_body.txt",
+    "~local\\_state\\envelope_naming_watch.json",
+    "~local\\_state\\naming_drift_watch.json",
+    "~local\\llm\\_room_cache_6f58ba35-af40-4fa3-bdf6-0b33ef664ba0.txt",
+    "~local\\persona_queue_cursor.json",
+    "~local\\office\\_summary.txt",
+]
 
 
 def main():
@@ -81,6 +103,40 @@ def main():
     # 実体があれば触ったファイル名が本文に載る(確定事実を名指しする)。
     _ok("daily_report.py" in dd.format_timeout_result(["scripts/llm/daily_report.py"]),
         "実体変更のファイル名が確定結果の本文に載る")
+
+    # --- 人間が読める文面か(2026-09-03 Chami指摘の受け入れ条件) ---
+    many = ["scripts/a.py", "scripts/b.py", "scripts/c.py", "scripts/d.py", "scripts/e.py"]
+    line_many = dd.format_timeout_result(many)
+    _ok("時間切れ" in line_many and "途中" in line_many,
+        "文面に『何が起きたか(時間切れ)』と『今どういう状態か(途中)』が入る")
+    _ok("続きが要るならもう一度言ってくれ" in line_many,
+        "文面に読み手の次の一手が入る")
+    _ok(line_many.count("scripts/") == 3 and "ほか2件" in line_many,
+        f"名指しは3件まで+残りは件数で畳む → {line_many}")
+    _ok("\\" not in dd.format_timeout_result(["~local\\llm\\change_log.jsonl"]),
+        "パスの区切りは / に揃える(Windowsの \\ を本文へ出さない)")
+    _hq = dd.format_timeout_result(["~..\\00_AI-HQ\\departments\\hr\\characters\\ames.md"])
+    _ok("00_AI-HQ/departments/hr/characters/ames.md" in _hq and ".." not in _hq,
+        f"リポジトリ外を指す ../ は本文から落とす → {_hq}")
+
+    # ★must-fail: 副産物除去を消した変異体(churn除去だけの旧実装)なら、Chamiが「読めない」と
+    #   言った実物の入力で報告が**非空**になる(=あの通知がそのまま復活する)。
+    def mutant_byproduct(touched):
+        seen, out = set(), []
+        for p in (touched or []):
+            if dd._is_churn_path(p):           # ← 副産物の判定だけ抜いた壊れた版(旧実装)
+                continue
+            key = str(p).replace("\\", "/").lstrip("~")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(str(p).lstrip("~"))
+        return out
+    # ★9件= 本番の通知は「計10件」だったが、その1件(persona_queue_cursor.json)は
+    #   同じ改修で churn 側へ移した。残り9件を落とすのは副産物の判定だけが担う。
+    _ok(len(mutant_byproduct(REAL_20260903_BYPRODUCTS)) == 9
+        and dd.substantive_touched(REAL_20260903_BYPRODUCTS) == [],
+        "must-fail: 副産物除去を消した変異体は実物9件を報告してしまう(本物は黙る)")
 
     # pick_timeout_touched: msg_id一致かつ打ち切り監査(rc==-1 / hard timeout)だけ拾う。
     entries = [
