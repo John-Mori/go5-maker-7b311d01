@@ -5918,6 +5918,60 @@ def split_persona_blocks(text, resolve, dept="", names=()):
     return out
 
 
+def _is_empty_body(body, who=None, resolve=None):
+    """そのブロックは「言うことが無い」か。★中身が1文字でも在るなら必ず False。
+
+    True になるのは2つだけ=
+      ①strip して空(空白・改行しか無い)
+      ②非空行が**全部「名乗りタグだけの行」**= `[名前]` で、同じ行に中身が続かない。
+        ★名前は resolve で引けるか、そのブロックの名義(who)と一致する時だけ名乗りとみなす。
+          名簿で引けない `[検証]` `[1]` は**ただの本文**だ(取り違えて消す方が事故が重い)。
+    """
+    s = str(body or "").strip()
+    if not s:
+        return True
+    for ln in s.split("\n"):
+        if not ln.strip():
+            continue
+        mm = _tag_match(ln)
+        if not mm or (mm[1] or "").strip():
+            return False            # 名乗りでない行 / 名乗りの後ろに中身が続く行= 本文が在る
+        nm = str(mm[0] or "").strip()
+        hit = bool(resolve(nm)) if callable(resolve) else False
+        if not hit and who:
+            hit = nm == str(who).strip() or nm in _name_forms(str(who).strip())
+        if not hit:
+            return False            # 名簿で引けないタグ= 本文として扱う
+    return True
+
+
+def sendable_blocks(blocks, resolve=None):
+    """送信ループへ渡す前に、**中身の無いブロックを落とす**。戻り値は同じ形の新しいリスト。
+
+    ★2026-09-03 炎上(Chamiが :enjoh: を押した実物・データ整理部門):
+      実物= `local/llm/send_audit.jsonl:253` = chars=6 / head=`[田中琴葉]` / status=204。
+      Chamiの「保留で。優先度低。」= **返事の要らない打ち切りの指示**に対して、部屋が
+      言うことが無いまま名乗りだけを返し、それがそのまま表へ出た。
+      内容の無い一次ackは沈黙より悪い(共通規律§2)。
+
+    ★経路= 上の split_persona_blocks は「名乗りを落としたら空になった」時に
+      **生の文字列へ fail-open する**(『前置きだけが中身だった』便を沈黙させないため)。
+      その守りは正しいが、**中身が名乗りしか無い便**まで素通しになっていた。
+      送信ループは `_part` を body ファイルへ書くだけで空を見ていない= ここが最後の砦だ。
+
+    ★向きの整理= fail-open は「言葉を消さない」ための規律であって、
+      **言葉が無い物を出す**ためのものではない。中身が1文字でも在れば必ず通す(_is_empty_body)。
+    ★黙って落とさない= 落とした事実は呼び元が log と persona_render_audit へ残す。
+    """
+    out = []
+    for item in (blocks or ()):
+        who, part = item[0], item[1]
+        if _is_empty_body(part, who, resolve):
+            continue
+        out.append((who, part))
+    return out
+
+
 def solo_tag_resolver(conf, persona=""):
     """**単独人格部屋**の閉じた名簿(=その部屋に出る1人)で `[名前]` を解決する関数を返す。
 
@@ -8218,6 +8272,7 @@ class Daemon:
             # ★ブロックごとに送る(既存19部屋は必ず1ブロック=ループが1周するだけ)。
             #   body ファイルは使い回してよい(subprocess.run は同期=前の便を送り終えてから上書きする)。
             _last_sent = ""     # ★実在確認は「最後に送った1通」を見る(下の verify_replied)
+            _sent_n = 0         # ★実際に外へ撃った回数(0なら下の実在確認は回さない・C-064)
             for _bi, (_who, _part) in enumerate(_blocks):
                 # ★★C-050= 他部門からの便(via=dispatch)への返信だけ、表を要点まで削る。
                 #   全文は先に裏(ファイル)へ落とし、表にはその在りかを書く=字は1文字も消えない。
@@ -8239,6 +8294,23 @@ class Daemon:
                         log(self.dept, f"★C-050= 部門間の返信を表は要点まで・全文は {_full} msg={mid}")
                     else:
                         log(self.dept, f"★C-050= 裏へ書けず削らない(全文を表へ出す) msg={mid}")
+                # ★★空便ガード(2026-09-03・炎上 :enjoh: / データ整理部門)。
+                #   実物= local/llm/send_audit.jsonl:253 = chars=6 / head=`[田中琴葉]` / 204。
+                #   Chamiの「保留で。優先度低。」= **返事の要らない打ち切りの指示**に、
+                #   部屋が言うことが無いまま名乗りだけを返し、それが表へ出た。
+                #   内容の無い一次ackは沈黙より悪い(共通規律§2)。
+                #   ★ここが最後の砦= 上の trim/印剥がしを**通した後**の本文を見る
+                #     (`[表は要点]` だけの便のように、削った結果 空になる形もここで捕まる)。
+                #   ★判定は1本(_is_empty_body)= 中身が1文字でも在れば必ず送る。
+                #     名簿で引けないタグ(`[検証]`)は本文として扱う=言葉は消さない。
+                #   ★黙って落とさない= ログと persona_render_audit へ必ず残す。
+                if _is_empty_body(_part, _who, _tag_resolve):
+                    log(self.dept,
+                        f"★空便ガード= 中身が無いので送らない msg={mid} "
+                        f"persona={_who or ''} raw={(_part or '')[:40]!r}")
+                    _audit_tag(self.dept, _who or self.effective_persona(),
+                               "empty_body_blocked", (_part or "").strip()[:200])
+                    continue
                 _last_sent = _part
                 with open(body, "w", encoding="utf-8") as f:
                     f.write(_part)
@@ -8269,6 +8341,7 @@ class Daemon:
                 if r.returncode != 0:
                     log(self.dept, f"送信失敗 msg={mid} persona={_who or ''}")
                     return False
+                _sent_n += 1
                 if _who:
                     log(self.dept, f"多人格モード= {_who} の名義で送信 msg={mid}")
             # ★送ったつもりを潰す(提案書§6/§12・2026-07-27)。
@@ -8288,7 +8361,24 @@ class Daemon:
             #   → 失敗の告知は検証の対象から外し、`failure_notified` として別に残す。
             #     ★黙って消しはしない=「詫び文は出た」ことは台帳に残る(沈黙が最悪の事故)。
             #   ★中間通知(「まだ作業中」)はそもそもここを通らない(bot_sendで直接出している)。
-            if getattr(self, "_relay_nack", False):
+            # ★★1通も出していない便(空便ガードが全ブロックを止めた)= 実在確認へ入れない。
+            #   verify_replied は空文字を渡されると「本文が空(突合できない)」で必ず落ち、
+            #   `replied_unverified` が積まれる= **不着でもないのに不着の棚へ入る**(ORG-42)。
+            #   ★状態は `answered_no_output`= 「答えは出た。ただし出す言葉が無かった」。
+            #     absence_watchdog の ANSWER_STATES へ**同じcommitで**足してある(対で閉じる・C-064)。
+            #     足さないと「返事の要らない打ち切り指示」に無応答警報が鳴り続ける
+            #     = 常に誤発火する安全網は無視される(共通規律§3)。
+            if _sent_n == 0 and not getattr(self, "_relay_nack", False):
+                log(self.dept, f"★空便ガード= 1通も送らずに終えた(言うことが無い便) msg={mid}")
+                if session_relay is not None:
+                    try:
+                        session_relay._record(
+                            mid, self.dept, "answered_no_output",
+                            f"部屋={ch} 中身の無いブロックだけだったので1通も出さない(空便ガード)")
+                    except Exception:
+                        pass
+                _ok = True
+            elif getattr(self, "_relay_nack", False):
                 log(self.dept, f"失敗の告知を送出(★repliedには数えない) msg={mid}")
                 if session_relay is not None:
                     try:

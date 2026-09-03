@@ -679,7 +679,12 @@ REQUEST_LOG_TAIL = 256 * 1024     # 末尾だけ読む(全部読むと60秒巡�
 # answered_by_session = 対話セッションが窓で答えた分(2026-07-27 mirror_to_discord.py が書く)。
 #   ★2026-08-15: その mirror_to_discord.py は**退役**した(hooksに参照ゼロ・状態は7/30で凍結)。
 #     この状態名を書く者はもう居ない=ここは「過去の行を読むため」に残す(消すと台帳が読めなくなる)。
-ANSWER_STATES = ("completed", "replied", "replied_unverified", "answered_by_session", "recovered")
+# answered_no_output = 部屋は処理し切ったが**出す言葉が無かった**便(2026-09-03 空便ガード)。
+#   「保留で。優先度低。」のような**返事の要らない打ち切りの指示**がこれになる。
+#   ★これを答えと数えないと、返事が要らない便に無応答警報が鳴り続ける=
+#     常に誤発火する安全網は無視される(共通規律§3)。dept_daemon 側と対で入れた(C-064)。
+ANSWER_STATES = ("completed", "replied", "replied_unverified", "answered_by_session", "recovered",
+                 "answered_no_output")
 
 
 def _request_log_tail():
