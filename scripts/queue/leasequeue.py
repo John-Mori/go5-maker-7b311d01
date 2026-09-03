@@ -297,6 +297,32 @@ class LeaseQueue:
             " WHERE id=? AND status='pending'", (until, qid))
         return {"refunded": True, "retry_after": until, "refunds": refunds + 1}
 
+    def fail_dead(self, qid, reason=""):
+        """★この便を今すぐ dead へ落とす(再配達しない)=呼び側が「もう走らせ直さない」と決めた時。
+
+        なぜ要るか(2026-09-03 トークン浪費対策・Chami指示「無駄な莫大消費をするな」)=
+          決定的に失敗する重い便(opus会話の hard timeout 等)は、nack だと max_deliveries(5)
+          回まで**丸ごと走り直す**。1本600秒の生成+世代交代を毎回捨てる=莫大な浪費。
+          呼び側が「同じ失敗を2回見た」と判断したら、ここで打ち止めにできるようにする。
+        沈黙にしない= claim() の毒メッセージ隔離と**同じ通知経路**(_announce_dead→on_dead)を
+          通す。dead_letters.jsonl に1行 + 部屋へ「配れなかった」が出る(§3 fail-open)。
+        ★status='pending' の行のみ。処理中の便を掴んだ別プロセスの ack/nack も
+          WHERE status='pending' で守られているので、こちらが先に dead にしても衝突しない。
+        戻り値= 落とせたら True(既に done/dead 等なら False)。
+        """
+        row = self._db.execute(
+            "SELECT msg_id, dept, body, deliveries FROM queue WHERE id=? AND status='pending'",
+            (qid,)).fetchone()
+        if not row:
+            return False
+        msg_id, dept_v, body, deliveries = row
+        cur = self._db.execute(
+            "UPDATE queue SET status='dead' WHERE id=? AND status='pending'", (qid,))
+        if cur.rowcount != 1:
+            return False
+        self._announce_dead(qid, msg_id, dept_v, body, deliveries)
+        return True
+
     def _announce_dead(self, qid, msg_id, dept, body, deliveries):
         """★dead へ落ちた瞬間に「落ちた」を残す(2026-08-14)。
 

@@ -209,6 +209,31 @@ BUSY_DIR = os.path.join(LOCAL, "llm", "busy")
 #   → 失敗した部屋だけ寝かせ、既存のmax_deliveries=5を**実時間へ散らす**(5分×5回=約20分)。
 #   ★この待機に入るのは session_relay を使う部屋が配送に失敗した時だけ。他2部屋(hq/research-room)は常に0。
 RELAY_HOLD_SEC = 300
+# ★★決定的に失敗する重い打ち切り便を「max_deliveries(5)回まで走らせ直す」のを止める上限
+#   (2026-09-03 トークン浪費対策・Chami指示 msg1544980047767805993「無駄な莫大消費をするな」)。
+#   実害= 漫画紹介部門の会話便(opus+文脈61k)が hard=600秒で毎回打ち切られ、nackで再配達
+#   されるたびに **600秒の生成+世代交代(引き継ぎ生成=もう1本の重いopus)** を丸ごと捨てる。
+#   最大5回=莫大。1回は一過性のハングを許容し(=1)、2回目からは走らせ直さず dead へ隔離する
+#   (§3 同じ失敗を2回見たら止める)。dead-letter通知は出る=沈黙にしない(on_dead)。
+TIMEOUT_MAX_DELIVERIES = 2
+
+
+def timeout_should_dead(kind, retry_after, deliveries, cap=TIMEOUT_MAX_DELIVERIES):
+    """★plain timeout(セッション上限でない打ち切り)が cap 回に達したら dead にすべきか。
+
+    True= もう走らせ直さず dead-letter へ隔離する(部屋へ通知は出る=沈黙にしない)。
+    判定をこの1関数へ閉じてテスト可能にする(drain_queue の中の式だと must-fail で握れない)。
+      - kind != "timeout"        → False(配送失敗等は従来どおり。C-035 単一部屋の直しを広げない)
+      - retry_after が真(上限待ち)→ False(返金対象=浪費でない。触らない)
+      - deliveries >= cap        → True(2回目の打ち切りで打ち止め)
+    """
+    if kind != "timeout":
+        return False
+    if retry_after:
+        return False
+    return int(deliveries or 0) >= int(cap or TIMEOUT_MAX_DELIVERIES)
+
+
 # ★★Claude CLI のセッション上限だけは「再配達の回数を消費しない」(2026-08-14)。
 #   発注= 研究室HQ DISPATCH-aegis-gl-1786643264450。実測 2026-08-14 01:04〜02:44 JST:
 #   `You've hit your session limit · resets 2:40am (Etc/GMT-9)` で 21件 / 5部門が rc=1・2秒で
@@ -8151,6 +8176,10 @@ class Daemon:
                     # ★★上限エラーだけは「相手が一時的に受けられない」= この便の落ち度ではない。
                     #   再配達の回数を消費させず(下の drain_queue で refund)、明ける時刻まで寝る。
                     self._relay_retry_after = session_limit_retry_after(why)
+                    # ★drain_queue が「plain timeout の再走を打ち止めるか」を判定するために種別を残す
+                    #   (2026-09-03 トークン浪費対策)。_relay_nack と同じこの分岐でだけ更新する=
+                    #   nack を決めた便と種別が必ず一致する(取り違えない)。
+                    self._relay_kind = kind
                     if self._relay_retry_after:
                         log(self.dept,
                             "★セッション上限= 再配達の回数を消費しない(返金)。%s まで寝かせる msg=%s"
@@ -9287,6 +9316,24 @@ class Daemon:
                     #   明ける時刻まで寝かせる(2026-08-14)。返金しないと、外部要因の数十分で
                     #   正常な便が max_deliveries(5) を使い切って dead へ落ち、黙って消える。
                     _ra = getattr(self, "_relay_retry_after", None)
+                    # ★★決定的に失敗する重い打ち切り便は max_deliveries(5)回まで走らせ直さない
+                    #   (2026-09-03 トークン浪費対策・Chami指示)。plain timeout が2回に達したら
+                    #   nack(=再走)せず dead へ隔離する=同じ600秒生成+世代交代の焼き直しを止める。
+                    #   束ねた続き(extra / _post_coalesced)は各々の機会を残す(nackで返す)。
+                    #   dead-letter通知が出る=沈黙にしない(on_dead→_dead_letter_notice)。
+                    if timeout_should_dead(getattr(self, "_relay_kind", ""), _ra, c.get("deliveries")):
+                        q.fail_dead(c["id"])
+                        for e in extra:
+                            q.nack(e[0]["id"])
+                        for cc in (getattr(self, "_post_coalesced", None) or []):
+                            q.nack(cc["id"])
+                        self._post_coalesced, self._post_coalesced_raw = [], []
+                        self._relay_hold_until = time.time() + RELAY_HOLD_SEC
+                        log(self.dept,
+                            "★打ち切り%s回目=これ以上再走させず dead(トークン浪費停止・部屋へ通知) msg=%s"
+                            % (c.get("deliveries"), mid))
+                        done += 1
+                        break
                     _rf = bool(_ra)
                     _r = q.nack(c["id"], retry_after=_ra, refund=_rf)
                     # ★束ねた便も**全部**キューへ返す(1本でも取り落とすと無言で消える)
