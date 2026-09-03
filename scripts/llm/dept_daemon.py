@@ -5993,10 +5993,23 @@ def _has_foreign_script(s):
     ★これが「誤字検出器」と「ホモグリフ検出器」を分ける線(共通規律§3
       「常に誤発火する安全網は無視される」)。単なる打ち間違い(`[ククーる]`)では鳴らない。
     """
-    for ch in str(s or ""):
+    s = str(s or "")
+    for ch in s:
         o = ord(ch)
         for a, b in _FOREIGN_SCRIPT_RANGES:
             if a <= o <= b:
+                return True
+    # ★2026-09-04(依頼=人事部門ククール)。**ラテンの穴**を塞ぐ。
+    #   実物は `[KKール]`= K が ASCII(U+004B)なので上の範囲に1つも当たらず、
+    #   救済どころか tag_homoglyph_leak にも数えられなかった(=計器に映らない穴)。
+    #   ただしラテンだけの名乗り(`[Chami]` `[QA]`)で誤発火させたくないので、
+    #   **日本語(かな/カナ/漢字)と ラテン大文字/全角ラテン が混在**している時だけ foreign と見る。
+    has_jp = any(0x3040 <= ord(c) <= 0x30FF or 0x4E00 <= ord(c) <= 0x9FFF
+                 or c == "ー" for c in s)
+    if has_jp:
+        for ch in s:
+            o = ord(ch)
+            if 0x41 <= o <= 0x5A or 0x61 <= o <= 0x7A or 0xFF21 <= o <= 0xFF5A:
                 return True
     return False
 

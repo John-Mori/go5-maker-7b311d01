@@ -285,6 +285,14 @@ def resolve_persona(name):
         print(f"[persona_send] 呼び名を正式名へ: {name!r} -> {resolved!r}"
               f"(正本= DEPT_CONF の personas[].aliases)", file=sys.stderr)
         return resolved
+    # ★最後の手段: 同形異字(ホモグリフ)で化けた名義を正名へ寄せる(2026-09-04)。
+    #   `[ККール]`(キリルК U+041A) / `[KKール]`(ラテンK) が別名表のどれにも当たらず、
+    #   化けた綴りのまま username に載って Chami の画面が「(KKール)」になっていた。
+    #   一意に決まる時だけ寄せる= 2人に当たる字面は化けたまま出す(取り違えない)。
+    fixed, why = _homo_canon(name, known | set(_canonical_names().values()) if known else None)
+    if fixed and fixed != name:
+        print(f"[persona_send] 同形異字を正名へ: {name!r} -> {fixed!r}({why})", file=sys.stderr)
+        return fixed
     if known:
         print(f"[persona_send] ★警告: 未登録の人格名 {name!r}(avatars.jsonにキー無し・別名表にも無し)。"
               f"このままだとデフォルトアイコン+その綴りの表示名で送られます。"
@@ -549,6 +557,23 @@ except Exception as _e:                        # 正本が読めない時も送�
         return body
 
 
+# ★同形異字(ホモグリフ)ゲート(2026-09-04・依頼=人事部門ククール)。正本= homoglyph.py を
+#   persona_send と bot_send の両方から呼ぶ(炎上ゲートと同じ型・C-064)。
+#   実物= msg 1545137710820360214 の本文「オレ(ККール)の持ち場だ」= キリルК U+041A。
+try:
+    from homoglyph import (canonical_name as _homo_canon,
+                           homoglyph_backstop as _homo_gate)
+except Exception as _e:                        # 正本が読めない時も送信は殺さない(fail-open)
+    print(f"[persona_send] 同形異字ゲートの正本 homoglyph.py を読めない({type(_e).__name__})=素通し。",
+          file=sys.stderr)
+
+    def _homo_gate(body, persona=None, dept=None, tag="", channel=None):
+        return body
+
+    def _homo_canon(name, names=None):
+        return "", "unavailable"
+
+
 def enjoh_backstop(body):
     """Discordへ出る本文の炎上表記ゲート(実装は enjoh.py が正本)。
 
@@ -703,6 +728,10 @@ def main():
     # ★絵文字の合流点ゲート(2026-09-01)。素の🔥を地の文に置くなという規律は在るのに生成側が滑る
     #   (Chami msg 1544213340853772331=少なくとも2回目の指摘)。英語・口調と同じ出口で機械的に潰す。
     body = enjoh_backstop(body)
+    # ★同形異字の合流点ゲート(2026-09-04)。地の文の自称・言及が化けても誰も直していなかった
+    #   (名義タグ側の救済は dept_daemon に在るが、本文は素通しだった)。既知の人格名の
+    #   **全体一致** でだけ寄せる= 「力」「口」等の単字は動かさない。
+    body = _homo_gate(body, persona=persona, dept=dept, tag="persona_send")
     if not avatar and os.path.exists(AVATARS_FILE):
         with open(AVATARS_FILE, "r", encoding="utf-8") as f:
             avatar = json.load(f).get(persona)

@@ -41,6 +41,18 @@ except Exception as _e:                        # 正本が読めない時も送�
     def enjoh_backstop(body, tag="bot_send"):
         return body
 
+# ★同形異字(ホモグリフ)ゲート(2026-09-04・依頼=人事部門ククール)。正本= homoglyph.py。
+#   本文中の人格名が キリルК/ラテンK 等へ化けたまま出る事故(実物 msg 1545137710820360214)。
+#   炎上ゲートと同じく **OUT口2つの両方** へ同時に入れる(片方だけ=部分適用の型を繰り返さない)。
+try:
+    from homoglyph import homoglyph_backstop
+except Exception as _e:                        # fail-open
+    print(f"[bot_send] 同形異字ゲートの正本 homoglyph.py を読めない({type(_e).__name__})=素通し。",
+          file=sys.stderr)
+
+    def homoglyph_backstop(body, persona=None, dept=None, tag="", channel=None):
+        return body
+
 # ★共通の送信ログ(2026-09-02・研究室HQからの恒久依頼)。この口には送信ログが1行も無く、
 #   事故便 msg 1544669455995637771 の**出所が追えなかった**。正本= send_audit.py 1本だけ。
 try:
@@ -131,6 +143,8 @@ def main():
         sys.exit(2)
     # ★POSTの直前=この口の最後の一点で正規化する(呼び出し元が何本あっても必ず通る)。
     body = enjoh_backstop(body, tag="bot_send")
+    body = homoglyph_backstop(body, dept=(key if by_dept else None), tag="bot_send",
+                              channel=(None if by_dept else key))
     req = urllib.request.Request(
         f"https://discord.com/api/v10/channels/{ch['id']}/messages",
         data=json.dumps({"content": body[:1900]}).encode("utf-8"),
