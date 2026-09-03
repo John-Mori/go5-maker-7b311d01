@@ -2545,10 +2545,25 @@ DEPT_CONF = {
         "persona": "中野五月",
         # ★2026-09-03 確定名簿(Chami本人が確認・人事部門からの回送 msg 1544975758399905812)。
         #   五月の一人部屋= 2026-08-12 Chami「彼女はローカルLLM専任とする」がそのまま名簿。
+        # ★2026-09-03 17:51 Chami本人が3人へ更新(msg 1544993335280668682・原文を実物で確認)=
+        #   「llm-qa=「謎部屋」じゃない — あれはローカルLLM学習/品質保証の部屋で、中野五月がここ専任だ。
+        #    qwen等の応答の質を見る場さ。/ 五月(主)とヴィルシーナで。トラブル対応時などのサポートにアメス。
+        #    カスミも全部屋で記憶保持で。」
+        #   → 既定の発言者は中野五月のまま("persona" キーは触っていない)。characterfileは既存を共有
+        #     (verxina.md / ames.md)=新規作成なし。人事部門が itsuki/verxina/ames へ反映済
+        #     (00_AI-HQ commit 6b93bc1)。配線側の書き込みはイージス研究室。
+        #   ★ヴィルシーナとアメスは SHARED_MEMORY_BY_PERSONA に既に居る=この部屋にも
+        #     部屋跨ぎ記憶の行が自動で載る(session_relay._boot_prompt で確認済)。
         "personas": [
             {"persona": "中野五月", "character": os.path.join(_CHAR, "itsuki.md"),
              "role": "この部屋の主・専任",
              "aliases": ("中野五月", "五月", "itsuki")},
+            {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
+             "role": "副(五月と二人でこの部屋を回す)",
+             "aliases": ("verxina", "ヴィルシーナ", "シーナ", "しーちゃん", "姉さん")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "サポート(トラブル対応時などに出る・平時は前に出ない)",
+             "aliases": ("ames", "アメス")},
         ],
         "port": 18813,
         "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
