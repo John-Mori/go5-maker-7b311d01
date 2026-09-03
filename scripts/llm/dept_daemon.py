@@ -8157,6 +8157,10 @@ class Daemon:
         seen = {str(rec.get("msg_id") or "")}    # いま走っている便は handle() が既に押している
         threading.Thread(target=self._live_mark_loop, args=(ch, seen, stop),
                          daemon=True, name="livemark-%s" % self.dept).start()
+        # ★立てたことを必ず1行残す(「発火しない安全網は検証されない」)。押した時だけ書くと、
+        #   補足が来ない日は**入っているのか壊れているのか区別できない**。
+        log(self.dept, "走行中の既読の見張りを立てた(%.0f秒おきに受信箱を覗く) msg=%s"
+                       % (self._live_mark_sec(), rec.get("msg_id")))
         return stop
 
     def handle(self, rec, raw_line):
