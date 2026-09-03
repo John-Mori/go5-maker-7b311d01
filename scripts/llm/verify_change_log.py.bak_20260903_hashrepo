@@ -25,7 +25,6 @@
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -54,109 +53,36 @@ def _touched_files(entry):
     return []
 
 
-def _bare_hash(commit):
-    """`commit` 欄から**ハッシュだけ**を取り出す。
-
-    ★2026-09-03 実測(イージス研究室): 改善提案部門の 11:35:10 の行が `commit_not_found` で赤くなった。
-      実際は `f8b649d` はgit履歴に**在る**。欄が `"f8b649d (5SecMovieMaker)"` だっただけだ
-      (裁定「commit hashにはrepo名を併記する」に素直に従った書き方。repoが2つあるため)。
-      機械側の形は `commit`=素のhash / `commit_repo`={hash: repo} だが、規律の文面はそう言っていない。
-    ★偽の赤は「やっていないのにやったと言った」と読める=無実の部屋を疑わせる。規律の方を曲げさせるより、
-      機械が両方の書き方を受ける方が正しい(受け取りは緩く・出しは厳しく)。
-    """
-    hs = _hashes(commit)
-    if hs:
-        return hs[0]
-    head = str(commit or "").strip().split("(")[0].split()
-    return head[0] if head else ""
+def _commit_exists(commit_hash):
+    r = subprocess.run(["git", "cat-file", "-e", commit_hash + "^{commit}"],
+                        cwd=ROOT, capture_output=True, text=True)
+    return r.returncode == 0
 
 
-_HASH_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
-
-
-def _hashes(commit):
-    """欄の中の**ハッシュらしいトークンを全部**拾う(`a,b` の複数申告・repo名併記の両方に効く)。"""
-    return _HASH_RE.findall(str(commit or "").lower())
-
-
-# repo名 -> そのrepoの根。台帳は2つのrepoを跨ぐ(裁定「commit hashはrepo名を併記する」)。
-REPOS = {
-    "5SecMovieMaker": ROOT,
-    "00_AI-HQ": os.path.normpath(os.path.join(ROOT, "..", "00_AI-HQ")),
-}
-
-
-def _repo_roots(entry, commit_hash):
-    """そのhashを**どのrepoで探すか**。`commit_repo` を見て、無ければ両方試す。
-
-    ★2026-09-03 実測(イージス研究室): 検査は 5SecMovieMaker しか見ておらず、
-      人事部門・研究室HQなど **00_AI-HQ 側にcommitした行が軒並み `commit_not_found`** になっていた。
-      台帳は2つのrepoに跨っているのに、検査が片方しか知らなかった=偽の赤。
-    """
-    cr = entry.get("commit_repo")
-    name = ""
-    if isinstance(cr, dict):
-        for k, v in cr.items():
-            if str(k).lower().startswith(commit_hash) or commit_hash.startswith(str(k).lower()):
-                name = str(v)
-                break
-    elif isinstance(cr, str):
-        name = cr
-    root = REPOS.get(name.strip()) if name else None
-    return [root] if root else list(REPOS.values())
-
-
-def _commit_exists(commit_hash, roots=None):
-    for root in (roots or [ROOT]):
-        # ★encoding指定が要る: 既定は cp932 で、gitの日本語エラー文が来ると読み手スレッドが落ちる(実測)
-        r = subprocess.run(["git", "cat-file", "-e", commit_hash + "^{commit}"],
-                            cwd=root, capture_output=True, text=True,
-                            encoding="utf-8", errors="replace")
-        if r.returncode == 0:
-            return root
-    return None
-
-
-def _commit_touches(commit_hash, path, root=None):
-    """そのcommitのdiffに path が含まれるか(先頭/末尾のフォルダ表記ゆれは緩く許容)。
-
-    ★`-c core.quotepath=false` が要る(2026-09-03 実測・イージス研究室): 既定の git は非ASCIIのパスを
-      `"docs/.../\\345\\236\\213_..."` と8進エスケープで出す。うちのdocsは**日本語ファイル名が普通**なので、
-      この照合は日本語名のファイルに対して**必ず外れ**、`files_missing_from_commit` の偽の赤を出していた
-      (改善提案部門の型 `型_起動文人格欄の正本一元化_2026-09-03.md` で発覚)。
-    """
-    r = subprocess.run(["git", "-c", "core.quotepath=false", "show", "--name-only",
-                        "--pretty=format:", commit_hash],
-                        cwd=(root or ROOT), capture_output=True, text=True,
-                        encoding="utf-8", errors="replace")
+def _commit_touches(commit_hash, path):
+    """そのcommitのdiffに path が含まれるか(先頭/末尾のフォルダ表記ゆれは緩く許容)。"""
+    r = subprocess.run(["git", "show", "--name-only", "--pretty=format:", commit_hash],
+                        cwd=ROOT, capture_output=True, text=True)
     if r.returncode != 0:
         return False
     changed = {ln.strip().replace("\\", "/") for ln in r.stdout.splitlines() if ln.strip()}
     needle = path.replace("\\", "/").lstrip("./")
-    # ★HQ側のcommitを照合する時、台帳の書き方は `00_AI-HQ/departments/...`(5秒動画側から見た相対)。
-    #   HQ repo の中では先頭の `00_AI-HQ/` は無いので落とす。
-    if root and os.path.normpath(root) == os.path.normpath(REPOS["00_AI-HQ"]):
-        needle = needle[len("00_AI-HQ/"):] if needle.startswith("00_AI-HQ/") else needle
     return any(needle == c or needle.endswith("/" + c) or c.endswith("/" + needle)
                for c in changed)
 
 
-def _is_git_trackable(path, root=None):
-    """そのcommitのrepo管理下のパスか(=commit diffで照合できるか)。
+def _is_git_trackable(path):
+    """5SecMovieMaker repo管理下のパスか(=commit diffで照合できるか)。
 
-    ★local/ はgitignore(=絶対にcommitされない)ので照合対象外(existsのみ=誤検知しない)。
-    ★`00_AI-HQ/` 配下は**そのcommitがどちらのrepoか**で変わる: 5秒動画側のcommitなら
-      repoの外(対象外)、HQ側のcommitなら**まさに本体**(照合する)。
-      以前は無条件に対象外にしていたため、HQ側の行は「触った」を1件も照合していなかった。
+    ★local/ はgitignore(=絶対にcommitされない)・00_AI-HQ配下は別ディレクトリ
+    (このrepoの外)なので、どちらもcommit diff照合の対象外(existsのみ見る=誤検知しない)。
     """
     p = path.replace("\\", "/").lstrip("./")
-    if p.startswith("local/") or p.startswith("../"):
+    if p.startswith("local/") or p.startswith("00_AI-HQ/") or p.startswith("../"):
         return False
     if os.path.isabs(path):
         return False
-    if p.startswith("00_AI-HQ/"):
-        return bool(root) and os.path.normpath(root) == os.path.normpath(REPOS["00_AI-HQ"])
-    return not root or os.path.normpath(root) == os.path.normpath(ROOT)
+    return True
 
 
 def verify_entry(entry):
@@ -170,33 +96,18 @@ def verify_entry(entry):
         return "unverified_empty_commit", "commitが空(申告のみ・未照合)"
     if any(m in commit for m in _HONEST_UNCOMMITTED_MARKERS):
         return "unverified_empty_commit", f"commit='{commit}'(正直な未commit申告)"
-    # ★1行が複数commitを申告することがある("1bb3ffa,e753741")。全部拾って**どれかに入っていれば良い**
-    #   とする(1つの変更を2commitに割るのは普通のこと。片方にしか無い=嘘ではない)。
-    hashes = _hashes(commit)
-    if not hashes:
-        # ★hashが1つも書かれていない欄(「n/a」「記録のみ・変更なし」「push済」等)は**未検証**であって
-        #   不一致ではない。commitを申告していない行を赤くすると、嘘をついた行と区別が付かなくなる。
-        return "unverified_empty_commit", f"commit='{commit}'(hashの申告なし・未照合)"
-    found = []                                   # [(hash, root)]
-    for h in hashes:
-        root = _commit_exists(h, _repo_roots(entry, h))
-        if root:
-            found.append((h, root))
-    if not found:
-        return "commit_not_found", f"commit={','.join(hashes)} がどちらのrepoのgit履歴にも無い"
     if not files:
         return "ok", "触ったファイルの記載なし(照合対象なし)"
-    label = ",".join(h for h, _ in found)
-    trackable = [f for f in files
-                 if any(_is_git_trackable(f, root) for _, root in found)]
+    if not _commit_exists(commit):
+        return "commit_not_found", f"commit={commit} がgit履歴に無い"
+    trackable = [f for f in files if _is_git_trackable(f)]
     outside = [f for f in files if f not in trackable]
-    missing = [f for f in trackable
-               if not any(_commit_touches(h, f, root) for h, root in found)]
+    missing = [f for f in trackable if not _commit_touches(commit, f)]
     if missing:
         return "files_missing_from_commit", (
-            f"commit={label} に入っていないファイル: {', '.join(missing)}"
+            f"commit={commit} に入っていないファイル: {', '.join(missing)}"
             + (f"(git管理外で照合skip: {', '.join(outside)})" if outside else ""))
-    return "ok", (f"commit={label} が{len(trackable)}件に触れている"
+    return "ok", (f"commit={commit} が{len(trackable)}件に触れている"
                    + (f"(git管理外{len(outside)}件は対象外)" if outside else ""))
 
 
