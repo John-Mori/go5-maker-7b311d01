@@ -15,6 +15,15 @@
   ★must-fail 変異を2つ同梱= この検査が「常に緑」でないことを毎回その場で示す。
     変異は**動く別の実装**へ差し替える(行を消して文法を壊すと偽の緑になる)。
 
+★2026-09-03 修正(ルカ・モドリッチの指摘): この検査は**本番台帳を汚していた**。
+  run_bot_send() は mod.LOCAL を一時ディレクトリへ向けていたが、それが効くのは bot_send 自身の
+  ファイル読み(トークン/チャンネル表)だけで、送信ログは別経路= bot_send.py L47 の
+  `import send_audit` が自前で書き先を決める。結果、本番の local/llm/send_audit.jsonl に
+  `dept=dummy` / `channel=検査用ダミー` の行が回すたび3本積まれ(実物= 411〜413行・
+  2026-09-03T10:19:53〜54)、whatis や集計が偽の送信を拾い続ける状態になっていた。
+  = 検査が観測を壊していた。よってこの版では send_audit の書き先そのものを砂場へ向け、
+  **回した後に本番台帳が1バイトも増えていないこと**を検査項目(E-1)として毎回機械で確かめる。
+
 実行: python scripts/discord/test_enjoh_confluence.py (全PASSで exit 0)
 """
 import importlib.util
@@ -45,6 +54,13 @@ def ok(cond, name):
 
 
 import enjoh  # noqa: E402
+import send_audit as _sa  # noqa: E402
+
+# 送信ログの砂場。本番 local/llm/send_audit.jsonl の代わりにここへ書かせる。
+_AUDIT_TMP = tempfile.mkdtemp(prefix="enjoh_audit_")
+AUDIT_SANDBOX = os.path.join(_AUDIT_TMP, "llm", "send_audit.jsonl")
+PROD_AUDIT = _sa.AUDIT
+PROD_AUDIT_BEFORE = os.path.getsize(PROD_AUDIT) if os.path.exists(PROD_AUDIT) else 0
 
 # --- A 正本(enjoh.py)の振る舞い -------------------------------------------------
 # A-1 Chamiが指摘した表記そのもの。「🔥炎上 9件」→「<:enjoh:…>恒久 9件」。
@@ -77,13 +93,20 @@ ok(enjoh.enjoh_backstop("") == "" and enjoh.enjoh_backstop(None) is None,
 
 
 # --- B bot_send の口を実行で通す --------------------------------------------------
-def run_bot_send(mod, body):
+def run_bot_send(mod, body, audit_to=AUDIT_SANDBOX):
     """bot_send.main() を実際に走らせ、Discordへ出るはずだった payload の content を返す。
 
     外へ出る手だけ偽物(urlopen)。トークン/チャンネルは一時ディレクトリの偽物を読ませる
     = 本物の秘密を読まない・実チャンネルに触らない。
+
+    ★送信ログ(send_audit)の書き先も砂場へ向ける。mod.LOCAL の差し替えでは届かない
+      (send_audit は別モジュールとして自分で書き先を持つ)。audit_to=None を渡すと
+      向け直さない= 汚していた頃の振る舞い。must-fail(E-2)でだけ使う。
     """
     tmp = tempfile.mkdtemp(prefix="enjoh_gate_")
+    audit_real = _sa.AUDIT
+    if audit_to:
+        _sa.AUDIT = audit_to
     try:
         with io.open(os.path.join(tmp, "discord_bot_token.txt"), "w", encoding="utf-8") as f:
             f.write("dummy-token-not-a-secret")
@@ -116,6 +139,7 @@ def run_bot_send(mod, body):
             sys.argv = argv
         return seen.get("content")
     finally:
+        _sa.AUDIT = audit_real
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -207,6 +231,37 @@ m2 = load_mutant("enjoh_mutant", os.path.join(HERE, "enjoh.py"),
                  '_LABEL_RE = re.compile(r"()炎上")  # 変異: 絵文字に隣接しない語まで壊す')
 ok(m2.enjoh_backstop(FIRE + "炎上した。") != ENJOH + "炎上した。",
    "C-2 must-fail 規則を広げると『炎上した』が壊れる(=A-3は本当に効いている)")
+
+# --- E 検査そのものの衛生(本番台帳を汚さない) ---------------------------------------
+# E-1 ここまでで bot_send.main() を3回通した(B-1 / B-2 / C-1)。その3行は砂場に落ち、
+#     本番の送信台帳は1バイトも増えていないこと。★増えていない側だけを見ると、
+#     「監査そのものが止まった」場合も緑になるので、砂場に3行あることも同時に見る。
+_prod_after = os.path.getsize(PROD_AUDIT) if os.path.exists(PROD_AUDIT) else 0
+ok(_prod_after == PROD_AUDIT_BEFORE,
+   f"E-1 本番の送信台帳が増えていない({PROD_AUDIT_BEFORE} → {_prod_after} bytes)")
+_rows = []
+if os.path.exists(AUDIT_SANDBOX):
+    with io.open(AUDIT_SANDBOX, encoding="utf-8") as f:
+        _rows = [json.loads(x) for x in f if x.strip()]
+ok(len(_rows) == 3 and all(r.get("dept") == "dummy" for r in _rows),
+   f"E-1 検査が出した3行は砂場に落ちている(dept=dummy / 実際は{len(_rows)}行)")
+
+# E-2 must-fail: 書き先を向け直さない版(=2026-09-03朝まで動いていた汚す実装)なら、
+#     その時点の台帳が1行増える。★本番では試さない= 偽の本番ファイルを一時に作って撃つ。
+_fake_prod = os.path.join(_AUDIT_TMP, "fake_prod_send_audit.jsonl")
+with io.open(_fake_prod, "w", encoding="utf-8") as f:
+    f.write("")
+_sa.AUDIT = _fake_prod
+try:
+    run_bot_send(bot_send, watchdog, audit_to=None)      # ← 逃がさない旧実装の再現
+finally:
+    _sa.AUDIT = PROD_AUDIT
+with io.open(_fake_prod, encoding="utf-8") as f:
+    _dirty = [x for x in f if x.strip()]
+ok(len(_dirty) == 1 and json.loads(_dirty[0]).get("channel") == "検査用ダミー",
+   f"E-2 must-fail 逃がさないと台帳が汚れる(={len(_dirty)}行増えた・E-1は本当に効いている)")
+
+shutil.rmtree(_AUDIT_TMP, ignore_errors=True)
 
 print(f"\n{P} PASS / {F} FAIL")
 sys.exit(0 if F == 0 else 1)
