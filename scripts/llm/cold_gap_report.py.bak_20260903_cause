@@ -49,14 +49,7 @@ def _med(v):
 
 
 def collect(hours=168.0):
-    """(gap秒, 書込, 読込, 冷えか, 直前に圧縮が挟まったか) の並びを返す。
-
-    ★5つ目(圧縮)は 2026-09-03 追加(イージス研究室)。間隔だけ見ていると
-      「1〜5分の帯に冷えが 366本(55.9%)」を**温度切れ**と読み違える。実測では
-      その 96% が直前に圧縮(isCompactSummary / compactMetadata)を挟んでいた=
-      **保温の脈をいくら打っても救えない冷え**だ。原因を分けずに分岐だけ出すと、
-      裁定(保温は不採用)の根拠が「間隔が短いのに冷えている、なぜ?」で止まる。
-    """
+    """(gap秒, 書込, 読込, 冷えか) の並びを返す。"""
     cut = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
     rows = []
     for p in glob.glob(os.path.join(ROOT_PROJ, "**", "*.jsonl"), recursive=True):
@@ -79,7 +72,6 @@ def collect(hours=168.0):
                 continue
         seen = set()
         prev_t = {False: None, True: None}
-        prev_i = {False: None, True: None}
         prev_model = {False: None, True: None}
         for i, d in enumerate(recs):
             msg = d.get("message") or {}
@@ -95,9 +87,8 @@ def collect(hours=168.0):
                 continue
             sub = bool(d.get("isSidechain"))
             gap = None if prev_t[sub] is None else (t - prev_t[sub]).total_seconds()
-            j0 = prev_i[sub]                  # 直前の便の位置(この間に圧縮があったかを見る)
             pm0, model = prev_model[sub], msg.get("model")
-            prev_t[sub], prev_i[sub], prev_model[sub] = t, i, (model or pm0)
+            prev_t[sub], prev_model[sub] = t, (model or pm0)
             kind = "境目"
             for j in range(i - 1, max(-1, i - 12), -1):
                 pm = recs[j].get("message") or {}
@@ -113,16 +104,9 @@ def collect(hours=168.0):
             if pm0 and model and model != pm0:
                 continue                      # モデル切替直後は必ず作り直し=別枠
             u = msg.get("usage") or {}
-            comp = False
-            if j0 is not None:
-                for j in range(j0 + 1, i):
-                    if recs[j].get("isCompactSummary") or recs[j].get("compactMetadata"):
-                        comp = True
-                        break
             rows.append((gap, u.get("cache_creation_input_tokens", 0) or 0,
                          u.get("cache_read_input_tokens", 0) or 0,
-                         (u.get("cache_read_input_tokens", 0) or 0) <= COLD_READ,
-                         comp))
+                         (u.get("cache_read_input_tokens", 0) or 0) <= COLD_READ))
     return rows
 
 
@@ -161,23 +145,6 @@ def summary(hours=168.0):
           "  ★分岐= 保温 %.2f回まで(= 間隔 %.1f時間まで)" % (be_pulses, be_sec / 3600.0),
           "  → 冷え便のうち **分岐を越えていたもの= %d/%d (%.1f%%)**"
           % (n_over_be, len(cold), 100.0 * n_over_be / max(1, len(cold)))]
-
-    # ★原因の内訳(2026-09-03 追加)。間隔だけでは「短い間隔なのに冷えている」が説明できない。
-    #   圧縮を挟んだ冷えは**保温では救えない**(脈を打っても前置きは作り直される)。
-    #   保温で本当に救えるのは「分岐を越え、かつ圧縮でない」冷えだけ= これが裁定の分母。
-    n_comp = sum(1 for r in cold if r[4])
-    n_save = sum(1 for r in cold if r[0] >= be_sec and not r[4]) if pulse else 0
-    L += ["",
-          "  ■ 冷えの原因の内訳",
-          "  → 冷え便のうち **直前に圧縮を挟んでいたもの= %d/%d (%.1f%%)** = 保温では救えない"
-          % (n_comp, len(cold), 100.0 * n_comp / max(1, len(cold)))]
-    for _, _, name in BANDS:
-        g = [r for r in cold if _band(r[0]) == name]
-        if g:
-            c = sum(1 for r in g if r[4])
-            L.append("  %-22s 冷え%4d  うち圧縮%4d (%3.0f%%)" % (name, len(g), c, 100.0 * c / len(g)))
-    L.append("  ★★保温で本当に救えた冷え(分岐超え かつ 圧縮でない)= **%d/%d (%.1f%%)**"
-             % (n_save, len(cold), 100.0 * n_save / max(1, len(cold))))
     d = {"hours": hours, "n": len(rows), "cold": len(cold), "warm": len(warm),
          "over1h": n_over, "over1h_pct": round(pct_over, 1),
          "cold_write_med": cc_c, "cold_read_med": cr_c,
@@ -190,14 +157,7 @@ def summary(hours=168.0):
          "over_breakeven": n_over_be,
          "over_breakeven_pct": round(100.0 * n_over_be / max(1, len(cold)), 1),
          "bands": {name: sum(1 for r in cold if _band(r[0]) == name)
-                   for _, _, name in BANDS},
-         # ★原因の内訳も行に積む(次に測り直した時、行と行だけで裁定の向きを比べられるように)。
-         "cold_compact": n_comp,
-         "cold_compact_pct": round(100.0 * n_comp / max(1, len(cold)), 1),
-         "bands_compact": {name: sum(1 for r in cold if _band(r[0]) == name and r[4])
-                           for _, _, name in BANDS},
-         "savable": n_save,
-         "savable_pct": round(100.0 * n_save / max(1, len(cold)), 1)}
+                   for _, _, name in BANDS}}
     return "\n".join(L), d
 
 
