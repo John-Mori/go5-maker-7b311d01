@@ -2422,6 +2422,87 @@ def _turn_spoken_reply(data, sid_hint, cwd=None):
         return base
 
 
+def _iso_to_epoch(ts):
+    """記録ファイルの timestamp("2026-09-03T10:18:26.874Z"=UTC)を epoch 秒へ。読めなければ None。"""
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        import datetime as _dt
+        return _dt.datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=_dt.timezone.utc).timestamp()
+    except Exception:                               # noqa: BLE001
+        return None
+
+
+def _salvage_timeout_reply(sid, since_ts, cwd=None):
+    """★hardで打ち切った便から、**記録に残っている完成した返信**を拾う(2026-09-03)。
+
+    なぜ要るか(実測・1分shorts部門の最悪レベルインシデント):
+      CLIは `-p --output-format json` で走るので、**プロセスが終了するまで親へは1文字も出ない**。
+      ところがセッションが背景のサブエージェント(Agent/SendMessage)を動かしていると、
+      本文を書き終えても CLI は終了しない。実測(2026-09-03 manga-shorts):
+        18:52:06 本走開始 → 18:54:13 Agent起動 → **18:54:24 [ヴィルシーナ]で返信完成** → 19:02:06 打ち切り
+        19:17:33 本走開始 → 19:18:16 SendMessage → **19:18:26 返信完成** → 19:27:33 打ち切り
+      = 返信は30〜120秒で出来ていたのに、Chamiへは1文字も届かず dead-letter になった。
+      ★打ち切りの是非とは別の話だ。**出来ている物を捨てない**のがここの役目。
+
+    拾う範囲(二重の掛け金。どちらか外れたら拾わない):
+      ① 記録の**最後の人間の入力より後**の assistant 行(=この便のターン)
+      ② その行の timestamp が **since_ts(本走の開始)以降**(前のターンの返信を配り直さない)
+    選び方= ③名乗り[名前]付きが1つでもあればそれだけを連結 ④無ければ**最後の1本だけ**
+      (道具の合間の英文メモを配らないため。中間の地の文は拾わない)。
+    戻り値= (本文, 理由)。拾えなければ ("", 理由)。★全経路 fail-open(例外でも呼び元は落ちない)。
+    """
+    if not sid or not since_ts:
+        return "", "sid/開始時刻が無い"
+    try:
+        p = _transcript_path(sid, cwd)
+        if not os.path.exists(p):
+            return "", "記録ファイルが無い"
+        rows = []
+        with open(p, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"type"' not in line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except Exception:                   # noqa: BLE001
+                    continue
+        start = 0
+        for i in range(len(rows) - 1, -1, -1):
+            d = rows[i]
+            if d.get("type") != "user" or d.get("isSidechain"):
+                continue
+            if _is_human_user((d.get("message") or {}).get("content")):
+                start = i + 1
+                break
+        msgs = []
+        for d in rows[start:]:
+            if d.get("type") != "assistant" or d.get("isSidechain"):
+                continue
+            ep = _iso_to_epoch(d.get("timestamp"))
+            if ep is None or ep < float(since_ts) - 5:   # ★5秒だけ緩める(書き込みの前後揺れ)
+                continue
+            blocks = (d.get("message") or {}).get("content") or []
+            if not isinstance(blocks, list):
+                continue
+            t = "\n".join(b.get("text", "") for b in blocks
+                          if isinstance(b, dict) and b.get("type") == "text").strip()
+            if t:
+                msgs.append(t)
+        if not msgs:
+            return "", "本走以降の発話が記録に無い"
+        spoken = [m for m in msgs if _PERSONA_TAG_RE.match(m)]
+        if spoken:
+            return "\n\n".join(spoken).strip(), f"名乗り付き{len(spoken)}本を拾った"
+        last = msgs[-1].strip()
+        if len(last) < 10:
+            return "", "最後の発話が短すぎる(拾わない)"
+        return last, f"名乗り無し=最後の1本だけ拾った(このターンの発話{len(msgs)}本)"
+    except Exception as e:                          # noqa: BLE001
+        return "", f"記録を読めなかった({type(e).__name__})"
+
+
 # --- 使用量(★推測ではなく実測) ---
 def _sum_tokens(v):
     """usageの1項目を数に直す。dict(内訳)で来ることがあるので中身を合計する。
@@ -4924,6 +5005,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
     #   この箱で「もう出したか」を持つ。リストなのは内側の関数から書き換えるため。
     soft_fired = [False]
     waited_total = [0.0]                                           # 失敗文に**実測の秒数**を書くため
+    main_started = [0.0]     # ★本走に入った時刻(epoch)= 打ち切り時の救出で「この便の発話か」を切る境目
     # ★部屋別モデル(2026-07-26)。relay_model が無い部屋は RELAY_MODEL(=**opus**・pinで
     #   claude-opus-4-8)のまま。★2026-08-18 訂正(旧記述「=sonnet」は既定変更2026-07-29の取り残し)。
     #   ★引き継ぎ(_write_handoff)・自己確認(_self_check)も**同じ値**を使う(下でconfを渡している)。
@@ -5287,6 +5369,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
     #   ★ここでキューを直接触らない理由= session_relay はキューを知らない(呼び元だけが qid を持つ)。
     #     知らせるだけにしておけば、jsonl経路など**キューを使わない呼び元でも1ミリも変わらない**。
     #   ★失敗しても本走は続ける(通知の失敗で便を落とさない= on_slow と同じ作法)。
+    main_started[0] = time.time()
     if on_main_start is not None:
         try:
             on_main_start(hard)
@@ -5639,6 +5722,22 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
         #        commit 86ef339 まで済ませていた)。**推測を断定にしていた。**
         #   → 実測の秒数を書き、「作業が進んでいる**可能性がある**」と可能性のまま伝える。
         waited = int(waited_total[0] or hard)
+        # ★★2026-09-03 打ち切る前に「もう出来ている返信」を記録から拾う(イージス研究室)。
+        #   実測= 1分shorts部門は18:54:24/19:07:06/19:18:26に返信を書き終えていたのに、
+        #   背景のサブエージェントが走っていてCLIが終了せず、600秒で打ち切られ**全部捨てた**。
+        #   ここで拾えれば、Chamiには「返事が来ない」ではなく**本人の返事**が届く。
+        #   ★拾えなかった時は今までと1ミリも変わらない(fail-open)。
+        _sv_sid = str(entry.get("active_session_id") or sid or "")
+        _sv, _sv_why = _salvage_timeout_reply(_sv_sid, main_started[0], cwd=None)
+        if _sv:
+            _log(dept, f"★打ち切ったが記録から返信を救出した({_sv_why}・{len(_sv)}字) "
+                       f"waited={waited}秒 sid={_sv_sid[:8]}")
+            _record(rid, dept, "salvaged",
+                    f"timeout waited={waited}s だが記録に完成した返信があった({_sv_why}) "
+                    f"len={len(_sv)} ★配送は続行する")
+            _recent_append(dept, rec, _sv)
+            return _sv, True
+        _log(dept, f"打ち切り時の救出は空振り({_sv_why}) sid={_sv_sid[:8]}")
         LAST_ERROR[dept] = (
             f"{waited}秒待ったがClaude CLIから返事が来なかった"
             f"(この便の目安{timeout}秒→{hard}秒まで延長して待った)。"
