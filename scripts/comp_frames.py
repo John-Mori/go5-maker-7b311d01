@@ -48,6 +48,13 @@ SHORT_TAIL_EPS = 0.15     # 短尺動画で末尾フレームを取る時の末�
 BASE_MODEL = "gemini-flash-latest"   # flash基準(HQ 2026-07-30・安く)。実測(2026-07-30)でflashが
 #   焼き込みタイトル・作者・コマ内セリフまで読めた=07-29の条件『flashだと認識が弱いなら要らない』は不成立。
 #   proは無料枠が枯れやすい(実測で即quota)。flashは無料枠が広く、バッチ向き。
+LITE_MODEL = "gemini-flash-lite-latest"   # ★1段降格先(選択肢1・モドリッチ msg 1544859485854498966 #2)。
+#   flash-latest の無料枠が同じキーで尽きた(429)時、別枠のこのモデルへ落として当日打ち切りを減らす。
+#   別モデル=別の無料枠(GenerateRequestsPerDayPerProjectPerModel-FreeTier)なので、同じキーで枠が増える。
+LITE_FALLBACK_DEFAULT = True         # ★2026-09-03 ON。実フレーム3件で検証=latestは両鍵とも429(枠枯渇=6割打ち切りの
+#   本体を再現)/flash-liteは3/3 ok で焼き込みの「引用:作者名＋テロップ」と誰が・何を・雰囲気の型分解を粒度良く取得。
+#   降格が動くのはlatestが既に429の時だけ=代替は取得ゼロ(打ち切り)なので構造出力ゼロより厳密に良い。
+#   実物= local/_work/comp_lite_report.md(モドリッチへ返した)。--lite/--no-lite で1回だけ上書き可。
 
 VISION_PROMPT = (
     "この画像は縦型ショート動画(9:16)の1コマです。次を日本語で答え、JSONだけを返してください。\n"
@@ -334,8 +341,9 @@ def emit_health(args, summary):
     write_pulse(summary, kind, note=("止まり方=%s・連続%s日目%s" % (kind, streak, sent)) if not ok else "打ち切り0で完走")
 
 
-def _run(args, summary):
-    """本処理。summary へ pending/ok/quota_aborted/skipped/quota_hit/note を書き込みつつ exit を返す。"""
+def _collect(args, summary):
+    """本処理。summary へ pending/ok/quota_aborted/skipped/quota_hit/note を書き込みつつ exit を返す。
+    ★名前は _collect。サブプロセス用ヘルパ _run(cmd) と衝突させない(grab_frame が _run を使う)。"""
     pend = gas_get(f"action=comp_frame_pending&limit={args.limit}")
     if not pend.get("ok"):
         summary["note"] = f"comp_frame_pending 応答不正: {pend.get('error') or pend}"
@@ -376,6 +384,10 @@ def _run(args, summary):
     if homin and homin != key:
         keys.append(("ホイミン", homin))
 
+    # flash-lite への1段降格(選択肢1)。--lite/--no-lite が無ければ既定(LITE_FALLBACK_DEFAULT)。
+    use_lite = LITE_FALLBACK_DEFAULT if args.lite is None else args.lite
+    print(f"flash-lite降格: {'ON' if use_lite else 'OFF'}(429で同キーのflash-liteへ落として続行{'する' if use_lite else 'しない'})")
+
     results, ok, skipped = [], 0, 0
     quota_hit = False
     kidx = 0                 # 現在使っているキーの番号(429で尽きたら次へ進めて戻さない)
@@ -392,14 +404,23 @@ def _run(args, summary):
                 print(f"  {vid}: フレーム取得失敗(スキップ)")
                 skipped += 1
                 continue
-            # 現キーで試し、429ならそのキーは以後使わず次のキー(ホイミン)へ回して同じフレームを取り直す。
+            # 現キーで flash を試す。429なら(降格ONの時)同じキーの flash-lite へ1段落として粘り、
+            # それも429なら初めてそのキーを諦めて次のキー(ホイミン)へ回して同じフレームを取り直す。
             text, status = None, None
             while kidx < len(keys):
                 kname, kval = keys[kidx]
                 text, status = behop.ask_pro(kval, VISION_PROMPT, [frame], BASE_MODEL,
                                              tag="comp_frames", who=behop.bundle_of(kname))
                 if status == "quota":
-                    print(f"  {vid}: {kname}のflash無料枠が尽きた(429)→次のキーへ切替")
+                    if use_lite:
+                        # ★同じキーの別枠(flash-lite)へ降格して同じフレームを読み直す(選択肢1)。
+                        text, status = behop.ask_pro(kval, VISION_PROMPT, [frame], LITE_MODEL,
+                                                     tag="comp_frames_lite", who=behop.bundle_of(kname))
+                        if status != "quota":
+                            print(f"  {vid}: {kname}のflash枠が尽きた→同キーのflash-liteで続行")
+                            summary["lite_used"] = summary.get("lite_used", 0) + 1
+                            break        # lite枠は生きている(ok or error)。以降は通常判定へ。
+                    print(f"  {vid}: {kname}のflash{'/lite両' if use_lite else ''}無料枠が尽きた(429)→次のキーへ切替")
                     kidx += 1
                     continue
                 break
@@ -450,6 +471,10 @@ def main():
     ap.add_argument("--limit", type=int, default=10)
     ap.add_argument("--check", action="store_true", help="pending件数だけ出す(DL/生成しない)")
     ap.add_argument("--dry", action="store_true", help="DL＋視覚まで走るが書き戻さない")
+    ap.add_argument("--lite", dest="lite", action="store_true", default=None,
+                    help="flash枠が尽きたら同キーのflash-liteへ降格して続行(既定はLITE_FALLBACK_DEFAULT)")
+    ap.add_argument("--no-lite", dest="lite", action="store_false",
+                    help="降格しない(429でそのキーは打ち切り)")
     args = ap.parse_args()
 
     # summary= このランの実数。_run が埋め、emit_health が脈と便へ流す。exit で終わっても finally で必ず脈を残す。
@@ -457,7 +482,7 @@ def main():
                "quota_hit": False, "exit": 0, "note": ""}
     code = 0
     try:
-        code = _run(args, summary)
+        code = _collect(args, summary)
     except Exception as e:               # ★例外でも脈を落とさない(黙って死ぬのを塞ぐのが本義)
         summary["note"] = f"例外: {e!r}"
         print(f"ABORT(例外): {e!r}")
