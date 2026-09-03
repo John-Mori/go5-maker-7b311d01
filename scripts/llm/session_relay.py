@@ -392,6 +392,15 @@ ALMOND_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "almond_s
 MITOMA_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "mitoma_shared.jsonl")
 VERXINA_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "verxina_shared.jsonl")
 SENA_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "sena_shared.jsonl")
+# ★第4適用=カスミ(2026-09-03・人事部門[ククール]からの実依頼 msg 1544992516833681438)。
+#   Webリサーチ部門(web-research)の新設でカスミが部屋を跨ぐ人格になった。
+#   ★実測(_room_persona_names)= カスミが居るのは **5部屋**= learning-coach(講師)/
+#     soudan-room / someday-room / web-research(この部屋の主・担当)/ manga-shorts。
+#     ★人事部門の便は「learning-coach / web-research / 軍議」と書いていたが、**軍議の名簿に
+#       カスミは居ない**(軍議=三笘薫/アーモンドアイ/モドリッチ/オタコン/花海咲季/早坂芽衣/
+#       十王星南/クラウディア/ヴィルシーナ/アメスの10人)。代わりに数え漏れていた
+#       soudan-room・someday-room・manga-shorts が在る=登録する理由はむしろ強い。
+KASUMI_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "kasumi_shared.jsonl")
 SHARED_MEMORY_BY_PERSONA = {
     "アメス": AMES_SHARED_MEMORY,
     "早坂芽衣": MEI_SHARED_MEMORY,
@@ -399,6 +408,7 @@ SHARED_MEMORY_BY_PERSONA = {
     "三笘薫": MITOMA_SHARED_MEMORY,
     "ヴィルシーナ": VERXINA_SHARED_MEMORY,
     "十王星南": SENA_SHARED_MEMORY,
+    "カスミ": KASUMI_SHARED_MEMORY,
 }
 
 # ★ツール許可= dept_daemon.WORK_ALLOWED_TOOLS と**同一のallowlist**を使う。
