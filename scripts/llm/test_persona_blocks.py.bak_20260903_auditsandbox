@@ -14,12 +14,10 @@
 """
 import os
 import sys
-import tempfile
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import dept_daemon as dd        # noqa: E402
-import persona_render as pr     # noqa: E402
+import dept_daemon as dd   # noqa: E402
 
 ROOM = ("三笘薫", "オタコン", "花海咲季", "十王星南", "クラウディア")
 results = []
@@ -335,24 +333,5 @@ def main():
     return 0 if ok else 1
 
 
-def _sandboxed_main():
-    """★2026-09-03 検査が**本番の監査台帳へ書き込んでいた**のを止める(イージス研究室)。
-
-    実物= 09-03 11:17:35 / 11:17:43 に `local/llm/persona_render_audit.jsonl` へ
-      `{"dept": "", "persona": "オタコン", "outcome": "tag_absent_leak",
-        "detail": "[オタコン] あ"}` が2行落ちた。出どころはこのファイルの
-      `split_persona_blocks("[オタコン] あ", lambda n: None)`= **検査の入力**であって本番の事故ではない。
-    ここを直さないと、名乗り漏れの台帳が検査のたびに水増しされ、
-      「本番で0になった実物を見て閉じる」という受け入れ条件が成立しなくなる(E-1)。
-    """
-    prod = pr.RENDER_AUDIT
-    sand = tempfile.mkdtemp(prefix="persona_blocks_")
-    try:
-        pr.RENDER_AUDIT = os.path.join(sand, "persona_render_audit.jsonl")
-        return main()
-    finally:
-        pr.RENDER_AUDIT = prod
-
-
 if __name__ == "__main__":
-    sys.exit(_sandboxed_main())
+    sys.exit(main())
