@@ -1850,6 +1850,18 @@ DEPT_CONF = {
         "character": os.path.join(_CHAR, "kukuru.md"),
         "memory": os.path.join(_MEM, "hr-room.jsonl"),
         "persona": "ククール",
+        # ★2026-09-03 確定名簿(Chami本人が確認・人事部門からの回送 msg 1544975758399905812)。
+        #   起動文の人格欄はここが正本= dept_boot_prompt._lead_of が「この部屋の主」を拾って
+        #   既定発言=ククール。控えに居た田中琴葉/オタコンは正本外=名簿には入れない(消しては
+        #   いない=他部屋で現役)。★オタコンの「感想役」扱いはChami未確認のため保留=入れない。
+        "personas": [
+            {"persona": "ククール", "character": os.path.join(_CHAR, "kukuru.md"),
+             "role": "この部屋の主",
+             "aliases": ("ククール", "kukuru")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "補佐",
+             "aliases": ("アメス", "ames")},
+        ],
         "port": 18801,
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "work_scope": (
@@ -1952,6 +1964,17 @@ DEPT_CONF = {
         "character": os.path.join(_CHAR, "kukuru.md"),
         "memory": os.path.join(_MEM, "hr-context.jsonl"),
         "persona": "ククール",
+        # ★2026-09-03 確定名簿(Chami本人が確認・人事部門からの回送 msg 1544975758399905812)。
+        #   既定発言=ククール(「リーダー」がマーク語に当たる)。旧の顔ぶれ(カスミ/田中琴葉/
+        #   中野五月/ヴィルシーナ)はこの部屋の名簿から外す=各自の持ち場の部屋では現役。
+        "personas": [
+            {"persona": "ククール", "character": os.path.join(_CHAR, "kukuru.md"),
+             "role": "この部屋のリーダー",
+             "aliases": ("ククール", "kukuru")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "補佐",
+             "aliases": ("アメス", "ames")},
+        ],
         "port": 18807,
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "work_scope": (
@@ -2491,6 +2514,13 @@ DEPT_CONF = {
         "character": os.path.join(_CHAR, "itsuki.md"),
         "memory": os.path.join(_MEM, "llm-qa.jsonl"),
         "persona": "中野五月",
+        # ★2026-09-03 確定名簿(Chami本人が確認・人事部門からの回送 msg 1544975758399905812)。
+        #   五月の一人部屋= 2026-08-12 Chami「彼女はローカルLLM専任とする」がそのまま名簿。
+        "personas": [
+            {"persona": "中野五月", "character": os.path.join(_CHAR, "itsuki.md"),
+             "role": "この部屋の主・専任",
+             "aliases": ("中野五月", "五月", "itsuki")},
+        ],
         "port": 18813,
         "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         # work_scopeは置かない=**質問部屋なので会話で答えるのが仕事**。
@@ -2621,6 +2651,16 @@ DEPT_CONF = {
         "character": os.path.join(_CHAR, "rei.md"),
         "memory": os.path.join(_MEM, "platform-se.jsonl"),
         "persona": "一ノ瀬怜",
+        # ★2026-09-03 確定名簿(Chami本人が確認・人事部門からの回送 msg 1544975758399905812)。
+        #   既定発言=一ノ瀬怜。補佐のアメスはChamiがこの場で追加した。
+        "personas": [
+            {"persona": "一ノ瀬怜", "character": os.path.join(_CHAR, "rei.md"),
+             "role": "この部屋の主",
+             "aliases": ("一ノ瀬怜", "怜", "rei")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "補佐",
+             "aliases": ("アメス", "ames")},
+        ],
         "port": 18817,
         "work_model": "opus",    # 2026-07-30 Chami号令(C-014)=作業生成もopusで人格の演技を担保。relayは既定でopus
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
@@ -3346,6 +3386,21 @@ DEPT_CONF = {
         "character": os.path.join(_CHAR, "saki.md"),
         "memory": os.path.join(_MEM, "system-engineer-b.jsonl"),
         "persona": "花海咲季",   # ★2026-07-28 Chami人事= デ・ブライネはイージス研究室のみ
+        # ★2026-09-03 確定名簿(Chami本人が確認・人事部門からの回送 msg 1544975758399905812)。
+        #   ★常駐名義(dept直下 persona)は花海咲季のまま据え置き。**既定の発言者だけがオタコン**
+        #   になる= dept_boot_prompt._lead_of は role のマーク語を先頭から拾うのでオタコンを先頭に
+        #   置く。αの主席(咲季)とは別人格の配置=これはChami確定。
+        "personas": [
+            {"persona": "オタコン", "character": os.path.join(_CHAR, "otacon.md"),
+             "role": "改修部門βのリーダー",
+             "aliases": ("オタコン", "otacon")},
+            {"persona": "花海咲季", "character": os.path.join(_CHAR, "saki.md"),
+             "role": "実装メンバー",
+             "aliases": ("花海咲季", "咲季", "saki")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "補佐",
+             "aliases": ("アメス", "ames")},
+        ],
         "port": 18823,
         "session_relay": True,
         "boot_note": (
