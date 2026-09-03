@@ -1,0 +1,27 @@
+# ── 静的解析 Phase 1 (2026-09-04 platform-se導入 / Chami指示「こうゆう系全部取り入れたい」) ──
+# 方針(莉波さん経由の設計・§3): 低摩擦の基盤からじわっと入れる。346本を一度に赤にしない。
+#   Phase 1 = まず scripts/ 配下・実バグ中心だけ = F(pyflakes) + E9(構文エラー)。
+#   style系(E4=import整形 / E7=文の書き方)は "赤の量" を測ってから次段で広げる
+#   (実測: default だと ~260件 / F+E9 だけなら 42件・大半が安全な auto-fix 可)。
+# 段取り: これは "警告のみ"。既存の実行段(起動/書き込み/送信)は変えない。
+#   auto-fix の適用も別便でレビューしてから(このファイルを置いただけでは何も書き換わらない)。
+# 走らせ方: python -m ruff check scripts/            (見るだけ)
+#           python -m ruff check scripts/ --statistics (件数の内訳)
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+# 生成物・退避・外部ライブラリは対象外(実ソースだけ見る)
+extend-exclude = [
+    "**/__pycache__",
+    "*.bak",
+    "産業廃棄物",
+    "node_modules",
+    "local",
+]
+
+[tool.ruff.lint]
+# Phase 1 は実バグ優先。style は次段(Phase 1.5)で E4/E7 を足す。
+#   F   = 未使用import / 未定義名 / f-string 記法ミス / 重複キー 等(黙って壊れる系)
+#   E9  = 構文エラー(そもそも動かない)
+select = ["F", "E9"]
