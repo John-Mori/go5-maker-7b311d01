@@ -103,9 +103,12 @@ q.enqueue(_body("h1", "いま来たばかり"), msg_id="h1", dept="platform-se")
 check("集約窓を持たない部門(基盤部門)は待たない=従来どおり即応",
       _daemon("platform-se")._coalesce_hold(q) is False)
 # ★2026-09-03 研究室HQにも窓を入れた(Chami msg 1545000257274773574)。
+#   さらに同日、Chamiが4部屋を名指しして横展開した(msg 1545006368996597811)=
+#   1分shorts部門 / webリサーチ部門 / 軍議 / 分析部門。
 #   ここで守りたいのは「何室に入っているか」ではなく **明示登録した部門にしか入らない**
 #   こと(C-035)= 台数を書くと部屋が増えるたびに嘘になるので、集合そのものを固定する。
-_WIN_DEPTS = {"copy-director": 45, "hq": 5}
+_WIN_DEPTS = {"copy-director": 45, "hq": 5, "manga-shorts": 5,
+              "web-research": 5, "gunji": 5, "shorts-analyst": 5}
 check("★窓が入っているのは明示登録した部門だけ(他は設定キーが無い)",
       {k: c.get("coalesce_sec") for k, c in d.DEPT_CONF.items()
        if c.get("coalesce_sec")} == _WIN_DEPTS)
