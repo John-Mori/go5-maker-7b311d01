@@ -10,29 +10,15 @@
   窓を開ける = open_dept_window.ps1 (PowerShell 5.1のためASCII-onlyで書く必要がある)
   起動文の本文 = このファイル(日本語とキャラ名を持てる)
 
-★2026-09-03 人格欄の正本を DEPT_CONF へ一元化した(イージス研究室・実装)。
-  型= docs/departments/kaizen-analyst/型_起動文人格欄の正本一元化_2026-09-03.md(改善提案部門)。
-  それまで下の DEPTS が**ハードコードの人格文字列**を持っており、正本の
-  `DEPT_CONF['<dept>']['personas']`(scripts/llm/dept_daemon.py)と**同じことを2箇所が各自持って**いた。
-  実測で16室中8室が食い違い、起動文が名簿に居ない人を名指し→セッションがその名で名乗る→
-  resolve が引けず `[名前]` が地の文へ漏れる、という名乗り漏れの生成側の真因になっていた
-  (例: 改善提案部門の起動文にトトリが無い / イージス研究室がシャビ・アロンソを名指し /
-   🐧コンサル情報が早坂芽衣を名指し継続)。
-  いまは人格欄と既定の発言キャラを DEPT_CONF から引く。**下の表に残る人格文字列は控え**で、
-  正本側の名簿が空の部屋でだけ使う(fail-open=§3。判定不能で人格欄を空にする方が事故)。
-
 使い方: python dept_boot_prompt.py <dept> <出力パス>
 """
 import io
 import os
-import re
 import sys
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-DEPT_DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
-REGISTRY = os.path.normpath(os.path.join(ROOT, "..", "00_AI-HQ", "org_registry.yml"))
 
-# dept -> (部屋の通称, ★人格の控え(正本はDEPT_CONF), BOOT.mdの場所, ★既定発言キャラの控え)
+# dept -> (部屋の通称, 人格, BOOT.mdの場所, 既定の発言キャラ)
 DEPTS = {
     "system-engineer": ("システム改修部門α", "花海咲季(リーダー)/オタコン(技術補佐)/アメス(補佐)",
                         "docs/departments/system-engineer/BOOT.md", "花海咲季"),
@@ -86,100 +72,10 @@ DEPTS = {
 }
 
 
-def _on_disk_rosters():
-    """正本 `DEPT_CONF` を**オンディスクのまま**読む(import しない)。
-
-    ★読み口は dept_daemon._parse_dept_conf_rosters を共用する。同じ「DEPT_CONF をどう読むか」を
-      2箇所に持たせない(ORG-11)= それこそが今回直している欠陥そのものだからだ。
-    ★import ではなく ast で読む理由: DEPT_CONF は dept_daemon.py の中の定数で、
-      `os.path.join(...)` を含むため literal_eval できない。木を歩いて文字列だけ拾う。
-    ★fail-open(§3): 読めない・形が違う・例外 → 空 → 下の控えへ倒れる(=従来どおりの起動文)。
-    """
-    try:
-        sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
-        from dept_daemon import _parse_dept_conf_rosters  # noqa: WPS433
-        return _parse_dept_conf_rosters(DEPT_DAEMON) or {}
-    except Exception:
-        return {}
-
-
-def _registry_room_name(dept: str) -> str:
-    """00_AI-HQ/org_registry.yml の display_ja(部屋の日本語名の正本)。無ければ空。"""
-    try:
-        with io.open(REGISTRY, encoding="utf-8") as f:
-            text = f.read()
-    except Exception:
-        return ""
-    m = re.search(r"^\s*" + re.escape(dept) + r"\s*:.*?display_ja\s*:\s*[\"']?([^\"'\n#]+)",
-                  text, re.S | re.M)
-    return m.group(1).strip() if m else ""
-
-
-# その部屋の「主」を役割文から拾う目印。型が言う `lead_persona` は DEPT_CONF に**実在しない**ので、
-# 主の正本は各人格の `role` 文字列しかない(実測2026-09-03)。
-# ★dept直下の `persona` は**精霊(常駐)の名義**であって主ではない。研究室HQ=アメス / ad研究室=アメス /
-#   経営企画=アメス になってしまうため、これ単独では既定の発言キャラに使えない。
-_LEAD_MARK = re.compile(r"この部屋の主|GL|リーダー|メイン|専任|担当")
-
-
-def _lead_of(conf: dict) -> str:
-    """既定の発言キャラ=役割に主の目印がある人。居なければ精霊(dept直下 persona)へ倒す。"""
-    for p in conf.get("personas") or ():
-        if _LEAD_MARK.search(p.get("role") or ""):
-            return (p.get("persona") or "").strip()
-    return (conf.get("persona") or "").strip()
-
-
-def _persona_field(dept: str, conf: dict) -> str:
-    """人格欄を DEPT_CONF の名簿から組む。空なら "" を返す(呼び側が控えへ倒す)。"""
-    lead = (conf.get("persona") or "").strip()
-    parts = []
-    for p in conf.get("personas") or ():
-        name = (p.get("persona") or "").strip()
-        if not name:
-            continue
-        # 役割は先頭の一句だけ使う(異動履歴などの但し書きは起動文に要らない)。
-        # ★役割文の中の「/」は「・」へ寄せる= 人格の区切りが「/」なので、
-        #   「花海咲季(改修/フロント)」が2人に見える(実測: gunji/分析部門/商品候補選定部門)。
-        role = (p.get("role") or "").split("。")[0].strip().replace("/", "・")
-        # ★「精霊」= デーモン = 常駐(2026-07-22 Chami指示)。人格欄では精霊がどれかを明示する。
-        if name == lead and "精霊" not in role and "常駐" not in role:
-            role = (role + "・精霊") if role else "精霊"
-        parts.append(f"{name}({role})" if role else name)
-    return "/".join(parts)
-
-
-def roster(dept: str):
-    """その部屋の(人格欄, 既定の発言キャラ, 正本から引けたか)を返す。"""
-    conf = _on_disk_rosters().get(dept) or {}
-    field = _persona_field(dept, conf)
-    if not field:                       # 正本に名簿が無い/読めない → 控え(従来のハードコード)
-        legacy = DEPTS.get(dept)
-        fallback_speaker = (conf.get("persona") or "").strip()
-        if legacy:
-            return legacy[1], (fallback_speaker or legacy[3]), False
-        return fallback_speaker, fallback_speaker, False
-    names = [(p.get("persona") or "").strip() for p in conf.get("personas") or ()]
-    lead = _lead_of(conf)
-    # ★既定の発言キャラは必ず人格欄の中から選ぶ。名簿外の名で喋らせるのが今回直している事故そのもの。
-    speaker = lead if lead in names else names[0]
-    return field, speaker, True
-
-
 def build(dept: str) -> str:
-    conf_all = _on_disk_rosters()
-    if dept not in DEPTS and dept not in conf_all:
+    if dept not in DEPTS:
         return ""
-    if dept in DEPTS:
-        room, _legacy_personas, boot, _legacy_speaker = DEPTS[dept]
-    else:
-        # ★DEPTS=21室 / DEPT_CONF=25室超で部屋集合が合っていなかった。正本に在る部屋は
-        #   ここに書き足さなくても窓が開く(1件ずつ手で足す運用は取り残しを生む・ORG-11)。
-        room = _registry_room_name(dept) or dept
-        boot = f"docs/departments/{dept}/BOOT.md"
-    personas, speaker, from_source = roster(dept)
-    if not from_source:
-        personas += "  ★この人格欄は控え(DEPT_CONFに名簿が無い)。正しい名簿は人事部門へ"
+    room, personas, boot, speaker = DEPTS[dept]
     return f"""あなたはgo5-makerの「{room}」(dept={dept})担当セッション。
 
 まず自己点検: node -e "console.log(process.cwd())" が go5-maker 直下であることを確認する(違えば止めてChamiへ開き直しを要請)。
@@ -227,8 +123,7 @@ def main() -> int:
         return 2
     text = build(sys.argv[1])
     if not text:
-        known = sorted(set(DEPTS) | set(_on_disk_rosters()))
-        print(f"unknown dept: {sys.argv[1]} (known: {', '.join(known)})")
+        print(f"unknown dept: {sys.argv[1]} (known: {', '.join(DEPTS)})")
         return 1
     io.open(sys.argv[2], "w", encoding="utf-8").write(text)
     return 0

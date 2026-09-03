@@ -5886,17 +5886,7 @@ _ONDISK_ROSTER_CACHE = {"mtime": None, "by_dept": {}}
 
 
 def _parse_dept_conf_rosters(path):
-    """このファイルの DEPT_CONF から `{dept: {"persona": str, "personas": (...)}}` を作る(文字列のみ)。
-
-    ★2026-09-03 拡張(イージス研究室): 起動文 `scripts/_daemons/dept_boot_prompt.py` の人格欄を
-      DEPT_CONF から引く一元化(改善提案部門の型 `型_起動文人格欄の正本一元化_2026-09-03.md`)で、
-      **同じ「オンディスクのDEPT_CONFをどう読むか」を2箇所に持たせない**ため(ORG-11)、
-      この読み口を起動文側と共用する。そのために `role` と**部屋の既定発言キャラ**
-      (dept直下の `persona` = 精霊/常駐の名義)も一緒に拾う。
-    ★`personas` が空の部屋も返す(以前は捨てていた)。起動文側は「名簿が空=正本に穴」を
-      見て従来のハードコード控えへ倒れる必要があり、**空を捨てると穴が見えない**。
-      走行中の反映ズレ救済にとっては `personas=()` は空辞書と同じ挙動(引けない)なので影響しない。
-    """
+    """このファイルの DEPT_CONF から `{dept: {"personas": (...)}}` を作る(文字列のみ)。"""
     out = {}
     try:
         with open(path, encoding="utf-8") as f:
@@ -5915,33 +5905,28 @@ def _parse_dept_conf_rosters(path):
             continue
         if not isinstance(v, ast.Dict):
             continue
-        personas, lead = None, ""
+        personas = None
         for kk, vv in zip(v.keys, v.values):
-            if not isinstance(kk, ast.Constant):
-                continue
-            if kk.value == "personas":
+            if isinstance(kk, ast.Constant) and kk.value == "personas":
                 personas = vv
-            elif kk.value == "persona" and isinstance(vv, ast.Constant) and isinstance(vv.value, str):
-                lead = vv.value          # ★部屋の既定発言キャラ(精霊=常駐の名義)
+        if not isinstance(personas, (ast.List, ast.Tuple)):
+            continue
         ps = []
-        if isinstance(personas, (ast.List, ast.Tuple)):
-            for el in personas.elts:
-                if not isinstance(el, ast.Dict):
-                    continue
-                name, role, aliases = "", "", []
-                for kk, vv in zip(el.keys, el.values):
-                    key = kk.value if isinstance(kk, ast.Constant) else None
-                    if key == "persona" and isinstance(vv, ast.Constant) and isinstance(vv.value, str):
-                        name = vv.value
-                    elif key == "role" and isinstance(vv, ast.Constant) and isinstance(vv.value, str):
-                        role = vv.value
-                    elif key == "aliases" and isinstance(vv, (ast.List, ast.Tuple)):
-                        aliases = [e.value for e in vv.elts
-                                   if isinstance(e, ast.Constant) and isinstance(e.value, str)]
-                if name:
-                    ps.append({"persona": name, "role": role, "aliases": tuple(aliases)})
-        if ps or lead:
-            out[k.value] = {"persona": lead, "personas": tuple(ps)}
+        for el in personas.elts:
+            if not isinstance(el, ast.Dict):
+                continue
+            name, aliases = "", []
+            for kk, vv in zip(el.keys, el.values):
+                key = kk.value if isinstance(kk, ast.Constant) else None
+                if key == "persona" and isinstance(vv, ast.Constant) and isinstance(vv.value, str):
+                    name = vv.value
+                elif key == "aliases" and isinstance(vv, (ast.List, ast.Tuple)):
+                    aliases = [e.value for e in vv.elts
+                               if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if name:
+                ps.append({"persona": name, "aliases": tuple(aliases)})
+        if ps:
+            out[k.value] = {"personas": tuple(ps)}
     return out
 
 
