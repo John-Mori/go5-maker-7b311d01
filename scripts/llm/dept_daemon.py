@@ -522,6 +522,18 @@ def work_effort_for(conf):
 #   ツールは自動拒否(プロンプトを出せないため)=allowlist外は安全に落ちる。ファイル作業+検証に
 #   必要な範囲だけ許可。Bashのコマンド単位のさらなる絞り込みはO5の follow-up。
 WORK_ALLOWED_TOOLS = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
+# ★★2026-09-04(研究室HQ DISPATCH-aegis-gl-1788476625370)**上の注の「未許可ツールは自動拒否」は
+#   Agent には当てはまらない**。Web系(下の2026-08-29の注)に続いて2例目の反証。
+#   実測= 本番と同じ引数(_allowed_tools / _disallowed_tools / context_args / --add-dir / _child_env、
+#   モデルだけ haiku)で `claude -p` を起動し「Agent を1回呼べ」と命じた。allowedTools に Agent が
+#   **無い**条件Aで、生の stream-json に tool_use name=Agent と
+#   tool_result "Async agent launched successfully."(is_error=False・rc=0)が出た。
+#   allowedTools に Agent を足した条件Bと挙動は同じ= **--allowedTools は Agent を門にしていない**。
+#   ★つまり委譲(§3・C-067)は今この瞬間もどの部屋でも起動できる。この行を書き換える必要は無い。
+#   ★ただし既定は run_in_background=true(投げっぱなし)= 親が待たずに答えてしまい、
+#     §L-1(--output-format json は終了時にしか吐かない)の黒窓の形になる。使うなら
+#     run_in_background:false 側。計器= local/_work/probe_agent_delegation.py。
+#   ★WORK_ALLOWED_TOOLS へ Agent を足すか否かの裁定は研究室HQ持ち(ここでは触らない)。
 # ★★2026-08-23 研究室HQ「床を削る」(Chami『任せる。セキュリティも加味して頼んだ』
 #   msg 1540826148961914930)。**許可していないツールの定義文が、毎便必ず送られていた。**
 #   --allowedTools は「使ってよいか」を決めるだけで、**スキーマ(定義文)は全部同送される**。
