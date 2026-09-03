@@ -99,12 +99,22 @@ q.close()
 
 db = _tmpdb()
 q = LeaseQueue(db)
-q.enqueue(_body("h1", "いま来たばかり"), msg_id="h1", dept="hq")
-check("集約窓を持たない部門(研究室HQ)は待たない=従来どおり即応",
-      _daemon("hq")._coalesce_hold(q) is False)
-check("★他29室は既定で窓ゼロ(設定キーが無い)",
-      all(not c.get("coalesce_sec") for k, c in d.DEPT_CONF.items() if k != "copy-director"))
-check("コピー部門にだけ窓が入っている", d.DEPT_CONF["copy-director"].get("coalesce_sec") == 45)
+q.enqueue(_body("h1", "いま来たばかり"), msg_id="h1", dept="platform-se")
+check("集約窓を持たない部門(基盤部門)は待たない=従来どおり即応",
+      _daemon("platform-se")._coalesce_hold(q) is False)
+# ★2026-09-03 研究室HQにも窓を入れた(Chami msg 1545000257274773574)。
+#   ここで守りたいのは「何室に入っているか」ではなく **明示登録した部門にしか入らない**
+#   こと(C-035)= 台数を書くと部屋が増えるたびに嘘になるので、集合そのものを固定する。
+_WIN_DEPTS = {"copy-director": 45, "hq": 5}
+check("★窓が入っているのは明示登録した部門だけ(他は設定キーが無い)",
+      {k: c.get("coalesce_sec") for k, c in d.DEPT_CONF.items()
+       if c.get("coalesce_sec")} == _WIN_DEPTS)
+check("コピー部門の窓は45秒のまま(値を巻き込んでいない)",
+      d.DEPT_CONF["copy-director"].get("coalesce_sec") == 45)
+# ★研究室HQは5秒= 溜める窓ではなく「返す直前の覗き」を有効にするためだけの最小値。
+#   45にすると毎便45秒待つ(_coalesce_hold)=Chamiの用件と逆になる。
+check("研究室HQの窓は5秒(毎便の待ちを増やさない最小値)",
+      d.DEPT_CONF["hq"].get("coalesce_sec") == 5)
 q.close()
 
 # ============ 4) 束ね方 ============
