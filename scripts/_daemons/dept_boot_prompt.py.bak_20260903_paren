@@ -130,25 +130,6 @@ def _lead_of(conf: dict) -> str:
     return (conf.get("persona") or "").strip()
 
 
-def _first_sentence(role: str) -> str:
-    """役割文の**先頭の一句**を返す。ただし「。」が括弧の中にある時は切らない。
-    ★2026-09-03 実測(イージス研究室): 素朴に `role.split("。")[0]` で切ったせいで、
-      アメスの役割「補佐(この部屋の元の常駐。即応を担う)」が **`補佐(この部屋の元の常駐`** と
-      括弧が開いたまま起動文へ出ていた(実測2室= イージス研究室・LLM教育部門)。
-      起動文は毎回セッションの目に入る面だ。壊れた括弧は「どこまでが役割か」を読み違えさせる。
-    """
-    head = role.split("。")[0]
-    # 括弧の途中で切れたなら、開いた分だけ閉じてから返す(短さと読める形の両立)。
-    close = {"(": ")", "（": "）"}
-    stack = []
-    for ch in head:
-        if ch in close:
-            stack.append(close[ch])
-        elif ch in (")", "）") and stack:
-            stack.pop()
-    return head + "".join(reversed(stack))
-
-
 def _persona_field(dept: str, conf: dict) -> str:
     """人格欄を DEPT_CONF の名簿から組む。空なら "" を返す(呼び側が控えへ倒す)。"""
     lead = (conf.get("persona") or "").strip()
@@ -160,7 +141,7 @@ def _persona_field(dept: str, conf: dict) -> str:
         # 役割は先頭の一句だけ使う(異動履歴などの但し書きは起動文に要らない)。
         # ★役割文の中の「/」は「・」へ寄せる= 人格の区切りが「/」なので、
         #   「花海咲季(改修/フロント)」が2人に見える(実測: gunji/分析部門/商品候補選定部門)。
-        role = _first_sentence(p.get("role") or "").strip().replace("/", "・")
+        role = (p.get("role") or "").split("。")[0].strip().replace("/", "・")
         # ★「精霊」= デーモン = 常駐(2026-07-22 Chami指示)。人格欄では精霊がどれかを明示する。
         if name == lead and "精霊" not in role and "常駐" not in role:
             role = (role + "・精霊") if role else "精霊"

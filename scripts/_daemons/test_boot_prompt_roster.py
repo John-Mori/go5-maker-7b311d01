@@ -111,12 +111,29 @@ def failopen():
         bp._on_disk_rosters = real
 
 
+def guard4(conf_all):
+    """★人格欄の括弧が対応していること(2026-09-03 実測の再発防止・イージス研究室)。
+
+    役割文を「先頭の一句」に詰める時に `。` が括弧の**中**にあると、開いたまま切れる。
+    実測2室(イージス研究室・LLM教育部門)が `アメス(補佐(この部屋の元の常駐` の形で出ていた。
+    起動文は毎便セッションの目に入る面で、どこまでが役割かを読み違えさせる。
+    """
+    for dept in sorted(conf_all):
+        field, _speaker, from_src = bp.roster(dept)
+        if not from_src:
+            continue
+        for op, cl in (("(", ")"), ("（", "）")):
+            check(field.count(op) == field.count(cl),
+                  f"guard4 {dept}: 人格欄の括弧が閉じていない= {field}")
+
+
 def run():
     conf_all = bp._on_disk_rosters()
     check(len(conf_all) >= 20, f"前提: 正本を読めていない(部屋数={len(conf_all)})")
     guard1(conf_all)
     holes = guard2(conf_all)
     guard3()
+    guard4(conf_all)
     failopen()
     return holes
 
@@ -147,8 +164,21 @@ def must_fail():
         g3 = len(FAILS) - g1 - g2
     finally:
         bp.roster = real
-    print(f"must-fail(一元化前の実装へ差し戻し): guard1={g1}件 guard2={g2}件 guard3={g3}件 が落ちた")
-    bad = [n for n, c in (("guard1", g1), ("guard2", g2), ("guard3", g3)) if c == 0]
+
+    # guard4 は「役割文の詰め方」を見る検査なので、差し戻す先も**その詰め方の旧実装**にする
+    # (素朴な `。` 切り= 2026-09-03 まで実際に動いていた版)。控えへ差し戻すと from_src=False で
+    # guard4 は全室を素通りし、落ちないのが当たり前になる=何も担保しない。
+    real_fs = bp._first_sentence
+    try:
+        bp._first_sentence = lambda role: role.split("。")[0]
+        del FAILS[:]
+        guard4(bp._on_disk_rosters())
+        g4 = len(FAILS)
+    finally:
+        bp._first_sentence = real_fs
+    print(f"must-fail(一元化前の実装へ差し戻し): guard1={g1}件 guard2={g2}件 guard3={g3}件 "
+          f"guard4={g4}件(素朴な「。」切りへ差し戻し) が落ちた")
+    bad = [n for n, c in (("guard1", g1), ("guard2", g2), ("guard3", g3), ("guard4", g4)) if c == 0]
     if bad:
         print("  ★" + "/".join(bad) + " が落ちなかった=この検査は何も見ていない")
         return 1
