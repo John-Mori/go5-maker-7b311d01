@@ -1722,6 +1722,16 @@ DEPT_CONF = {
         #     = Chamiの「他部門からの依頼はステイでOK」がそのまま実装済み。
         #   ★他29室は未設定=1バイト差なし(C-035 名指し1箇所を全体へ広げない)。
         "coalesce_sec": 5,
+        # ★★走行中の既読(2026-09-03・同じChami便の**後半**への手当て)。
+        #   `coalesce_sec` で補足は「その便の返事」に合流するようになったが、合流するのは
+        #   本走が終わってからだ= 重い便が10分走れば、開始10秒後の補足は10分間**無印**で残る。
+        #   → 本走の最中に20秒おきに受信箱を覗き、Chamiの新着へ**既読だけ**押す。
+        #   ★20秒にした理由= 印が付くまでの体感の上限がこの秒数(=Chamiが「読まれたか」を
+        #     疑い始める前に付く)。覗くのは読み取り専用のSELECT1本=コストは無視できる。
+        #     短くしても得は無い(Discordのreactを叩く回数だけが増える)。
+        #   ★トークンは焼かない(react.py の subprocess だけ・LLMを呼ばない)。
+        #   ★他30室は未設定=1バイト差なし(C-035)。
+        "live_mark_sec": 20,
         # ★全便回送(2026-07-20 Vol.3): キーワード判定(WORK_WORDS)は「設計して手足として
         #   動かして」のような自然文を取りこぼす。アメスが「アロンソに回すわ」と返したのに
         #   機構は何も回さない事故が実際に起きた(main箱0行)。hq部屋のChami発言は原則すべて
@@ -8066,6 +8076,89 @@ class Daemon:
         log(self.dept, "束ねた便へ進捗印を押した(%s): %d/%d msg=%s"
                        % (why, done, len(ids) * 2, ",".join(ids)))
 
+    # --- 走行中の既読(2026-09-03 イージス研究室・発注= 研究室HQ DISPATCH-aegis-gl-1788427433082) ---
+    def _live_mark_sec(self):
+        """本走の最中に受信箱を覗く間隔(秒)。0=覗かない(既定・他30室はこれ・C-035)。"""
+        try:
+            return float(self.conf.get("live_mark_sec") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _live_mark_loop(self, ch, seen, stop):
+        """本走が走っている間、受信箱を**覗くだけ**で見張り、Chamiの新着へ既読を押す。
+
+        ★塞ぐ穴(Chami msg 1545000257274773574「1件処理完了するまで次の便が読まれない…
+          何か挿入、補足したくても処理が終わってから補足を読む」)の**後半**:
+          `_coalesce_after_run` を入れたので補足は**その便の返事に合流する**ようになったが、
+          合流するのは本走が終わってからだ。重い便が10分走れば、開始10秒後に書いた補足は
+          10分間**無印のまま画面に残る**= Chamiには「読まれていない」に見える。
+          印を押す場所を「走り終わった後」から「走っている最中」へ移す。
+        ★トークンは1文字も焼かない= 押す口は react.py の subprocess だけ(LLMを呼ばない)。
+          Chami msg 1544980047767805993「無駄な莫大消費をするな」に触れない設計にした。
+        ★★claimしない(peek_ready と同じ条件を**読み取り専用の接続**で引くだけ)。
+          掴まないので、この見張りが落ちても便は1件も消えない=ドレインの窓(INC-100)を作らない。
+          ★LeaseQueue の接続を借りない理由= sqlite3 の接続は既定で**生成したスレッド専用**
+            (check_same_thread=True)。本走のスレッドが持つ `self._lease_q._db` を
+            この見張りから触ると ProgrammingError で落ちる。だから自前で開く。
+        ★押すのは**既読だけ**。着手(👀)は「いまそれをやっている」の意味で、この便はまだ
+          `_coalesce_after_run` に拾われていない=着手はその時に `_mark_bundled` が押す。
+        ★同じ便へ二度は狙わない(seen)。押せなかった便も seen に入れる= Discord が落ちている時に
+          10分間叩き続けない(印は表示であって応答ではない=失敗しても本走を巻き込まない)。
+        """
+        win = self._live_mark_sec()
+        qdb = os.path.join(LOCAL, "queue", "inbox.db")
+        while not stop.wait(win):
+            rows = []
+            try:
+                import sqlite3
+                con = sqlite3.connect("file:%s?mode=ro" % qdb, uri=True, timeout=3)
+                try:
+                    rows = con.execute(
+                        "SELECT msg_id, body FROM queue"
+                        " WHERE status='pending' AND lease_until < ? AND dept=?"
+                        " ORDER BY prio, id LIMIT ?",
+                        (time.time(), self.dept, COALESCE_PEEK_MAX)).fetchall()
+                finally:
+                    con.close()
+            except Exception:
+                continue                # 覗けない周は見送る(次の周でまた覗く)
+            for m, body in rows:
+                m = str(m or "")
+                if not m or m in seen or stop.is_set():
+                    continue
+                try:
+                    b = json.loads(body) if isinstance(body, str) else (body or {})
+                except Exception:
+                    b = {}
+                seen.add(m)
+                if not self._is_from_chami(b) or b.get("test"):
+                    continue            # 他部門の便・検証便には押さない(Chamiの画面を汚さない)
+                if str(b.get("channel") or "") != ch:
+                    continue            # いま走っている便と同じ部屋の分だけ
+                try:
+                    p = subprocess.run([sys.executable, REACT, "--channel", ch, "--msg", m,
+                                        "--emoji", "既読"], capture_output=True, timeout=30)
+                    log(self.dept, "★走行中に届いたChamiの便へ既読を押した(rc=%s) msg=%s"
+                                   % (p.returncode, m))
+                except Exception as e:                                  # noqa: BLE001
+                    log(self.dept, f"走行中の既読が押せなかった({type(e).__name__}) msg={m}")
+
+    def _start_live_mark(self, rec):
+        """走行中の見張りを立てる。戻り値= 止める合図(立てない条件では None)。
+
+        ★呼び側は本走から戻ったら**必ず** set する(finally で止める= 例外でも残さない)。
+        """
+        if self._live_mark_sec() <= 0 or self.dry_run or rec.get("test"):
+            return None
+        ch = str(rec.get("channel") or "")
+        if not ch:
+            return None
+        stop = threading.Event()
+        seen = {str(rec.get("msg_id") or "")}    # いま走っている便は handle() が既に押している
+        threading.Thread(target=self._live_mark_loop, args=(ch, seen, stop),
+                         daemon=True, name="livemark-%s" % self.dept).start()
+        return stop
+
     def handle(self, rec, raw_line):
         ch = rec.get("channel", "")
         mid = str(rec.get("msg_id", ""))
@@ -8193,6 +8286,11 @@ class Daemon:
                 #   ★キューが無い経路(jsonl drain・手動実行)は `_lease_qids` が空=**何もしない**。
                 #   ★失敗しても本走は止めない(リースの更新に失敗しただけで便を落とさない= fail-open)。
                 def _on_main_start(hard_sec, _mid=mid):
+                    # ★走行中の既読の見張りを、**本走が始まったこの瞬間**に立てる
+                    #   (2026-09-03・_live_mark_loop の説明を読め)。前処理(交代判定・事前圧縮)の
+                    #   間は立てない= まだ「走っている」ではないし、そこは秒で終わる。
+                    #   `live_mark_sec` を持たない部屋では None が返る=1バイト差なし(C-035)。
+                    self._live_stop = self._start_live_mark(rec)
                     q = getattr(self, "_lease_q", None)
                     qids = list(getattr(self, "_lease_qids", None) or [])
                     if q is None or not qids:
@@ -8208,6 +8306,7 @@ class Daemon:
                         "本走の開始でリースを張り直した: %d/%d件 (hard=%s秒・リース=%s秒) msg=%s"
                         % (okn, len(qids), int(hard_sec), int(getattr(q, "lease_sec", 0)), _mid))
 
+                self._live_stop = None      # 便ごとに初期化(前の便の見張りを持ち越さない)
                 if failopen_inject(rec):
                     # ★検証用の注入(failopen_inject の docstring 参照)。**relayを呼ばない**=
                     #   生きた消費者に一切触れずに `_relay_ok=False` の枝だけを1回通す。
@@ -8216,9 +8315,17 @@ class Daemon:
                     log(self.dept,
                         f"★fail-open検証: relay不成立を注入した(実セッションは呼んでいない) msg={mid}")
                 else:
-                    reply, _relay_ok = session_relay.relay(self.dept, rec, self.conf, self._token(),
-                                                           is_work=_is_work, on_slow=_on_slow,
-                                                           on_main_start=_on_main_start)
+                    try:
+                        reply, _relay_ok = session_relay.relay(self.dept, rec, self.conf,
+                                                               self._token(), is_work=_is_work,
+                                                               on_slow=_on_slow,
+                                                               on_main_start=_on_main_start)
+                    finally:
+                        # ★見張りの寿命は本走と同じ。例外で抜けても必ず止める
+                        #   (止め損なうと、次の便を処理している間も前の見張りが印を押し続ける)。
+                        if getattr(self, "_live_stop", None) is not None:
+                            self._live_stop.set()
+                            self._live_stop = None
                 # ★成功した時だけ「本人が答えた」印を立てる(送信名義から(精霊)を外すため)。
                 #   失敗して精霊の口で詫びる時は立てない=印の意味を保つ。
                 self._relay_answered = bool(_relay_ok)
