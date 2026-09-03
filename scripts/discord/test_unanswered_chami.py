@@ -75,6 +75,30 @@ chk("時刻が壊れている行は鳴らさない(fail-open)",
     aw.unanswered_verdict([{"id": "1", "author": {"username": "chami_fusoh"},
                             "timestamp": "こわれている", "content": "x"}], NOW)[0], False)
 
+print("\n=== 1.5 純関数 answered_since(★解消の判定) ===")
+# ★2026-09-03 の嘘報告(Chami「これ嘘報告」)。1分shorts漫画紹介部門の実データそのもの。
+#   07:39 のChamiの便に誰も返さないまま、16:32 にChami自身が「できた？」と催促した。
+#   旧実装は「候補で無くなった」を解消と読んで ✅ を出した= 8時間53分の沈黙を解消と報告した。
+REAL = "1544839258118946877"
+chk("★Chami自身の催促は返事ではない(実データ:漫画紹介部門)",
+    aw.answered_since([msg(1544973415448846467, "chami_fusoh", 60, "できた？"),
+                       msg(int(REAL), "chami_fusoh", 9 * 3600, "1 b 2 a")], REAL), False)
+chk("誰かが返していれば解消",
+    aw.answered_since([msg(1544973415448846467, "ヴィルシーナ", 60, "できたわよ"),
+                       msg(int(REAL), "chami_fusoh", 9 * 3600, "1 b 2 a")], REAL), True)
+chk("★この検査自身の警報は解消の根拠にならない",
+    aw.answered_since([msg(1544973415448846467, "メタルギアMk.II", 60,
+                           aw.UNANSWERED_MARK + "(自動監視): …")], REAL), False)
+chk("★この検査自身の✅も解消の根拠にならない",
+    aw.answered_since([msg(1544973415448846467, "メタルギアMk.II", 60,
+                           aw.UNANSWERED_OK_MARK + ": … は解消。")], REAL), False)
+chk("警報した便より古い投稿は返事に数えない",
+    aw.answered_since([msg(1544838786066686074, "ヴィルシーナ", 10 * 3600, "承知したわ")], REAL),
+    False)
+chk("警報した便が窓から流れていてもidで判定できる",
+    aw.answered_since([msg(1544973415448846467, "三笘薫", 60, "できたよ")], REAL), True)
+chk("印が壊れている時は抱え込まない(fail-open)", aw.answered_since([], "こわれた印"), True)
+
 print("\n=== 2. 経路の実行(bot_sendだけ偽物) ===")
 sent = []
 aw.bot_send = lambda ch, body, dry, by_dept=False: (sent.append((ch, body)), True)[1]
@@ -147,6 +171,73 @@ elif "--force" in sys.argv:
     (st["unanswered"])["_last_run"] = 0
     aw.check_unanswered_chami(st, dry_run=False)
     chk("✅も二度は出ない", len(sent), 2)
+
+    # ★★2026-09-03 の嘘報告の再現(Chami「これ嘘報告」)。経路をまるごと通す。
+    #   警報を出した便に誰も返さないまま、**Chami自身が催促**を重ねた場合。
+    #   旧実装は最新のChami発言(=催促・25分未満)を見て「候補ではない」→ ✅ を出していた。
+    del sent[:]
+    st2 = {}
+    aw._discord_get = lambda path, timeout=15: (
+        [msg_now(999999, "chami_fusoh", 31 * 60, "1 b 2 a")] if target in path else [])
+    aw.check_unanswered_chami(st2, dry_run=False)
+    (st2["unanswered"])["_last_run"] = 0
+    aw.check_unanswered_chami(st2, dry_run=False)
+    chk("(前提)まず警報が1件出ている", len(sent), 1)
+    # ここでChamiが催促を重ねる= 誰も返していないのに「候補」ではなくなる
+    aw._discord_get = lambda path, timeout=15: (
+        [msg_now(1000001, "chami_fusoh", 2 * 60, "できた？"),
+         msg_now(999999, "chami_fusoh", 40 * 60, "1 b 2 a")] if target in path else [])
+    (st2["unanswered"])["_last_run"] = 0
+    aw.check_unanswered_chami(st2, dry_run=False)
+    chk("★Chamiの催促で✅を出さない(嘘報告の再現)", len(sent), 1)
+    chk("★未応答を抱えたまま(alertedが消えない)",
+        (st2["unanswered"].get(target) or {}).get("alerted"), "999999")
+    # 警報した便が窓から流れた場合も、返事が無い限り解消しない
+    aw._discord_get = lambda path, timeout=15: (
+        [msg_now(1000004, "chami_fusoh", 1 * 60, "おい"),
+         msg_now(1000003, "chami_fusoh", 2 * 60, "まだ？"),
+         msg_now(1000002, "chami_fusoh", 3 * 60, "…")] if target in path else [])
+    (st2["unanswered"])["_last_run"] = 0
+    aw.check_unanswered_chami(st2, dry_run=False)
+    chk("★窓から流れても✅を出さない", len(sent), 1)
+    # 本物の返事が付いて初めて解消する
+    aw._discord_get = lambda path, timeout=15: (
+        [msg_now(1000005, "ヴィルシーナ", 30, "できたわよ"),
+         msg_now(1000001, "chami_fusoh", 45 * 60, "できた？")] if target in path else [])
+    (st2["unanswered"])["_last_run"] = 0
+    aw.check_unanswered_chami(st2, dry_run=False)
+    chk("本物の返事が付いたら✅が出る", len(sent), 2)
+    chk("その時だけalertedが消える",
+        (st2["unanswered"].get(target) or {}).get("alerted"), "")
+
+    # ★C-053 must-fail= 「動く別の実装」(=2026-09-03まで実際に動いていた版)へ戻して落ちるか見る。
+    #   旧版は解消の判定を持たず、候補で無くなればそのまま✅を出していた= answered_since が常にTrue。
+    print("\n=== 3. must-fail(旧実装へ差し戻して、上の検査が本当に落ちるか) ===")
+    real_as = aw.answered_since
+    fails_before = ng
+    try:
+        aw.answered_since = lambda msgs, alerted_id: True
+        del sent[:]
+        st3 = {}
+        aw._discord_get = lambda path, timeout=15: (
+            [msg_now(999999, "chami_fusoh", 31 * 60, "1 b 2 a")] if target in path else [])
+        aw.check_unanswered_chami(st3, dry_run=False)
+        (st3["unanswered"])["_last_run"] = 0
+        aw.check_unanswered_chami(st3, dry_run=False)
+        n_alert = len(sent)
+        aw._discord_get = lambda path, timeout=15: (
+            [msg_now(1000001, "chami_fusoh", 2 * 60, "できた？"),
+             msg_now(999999, "chami_fusoh", 40 * 60, "1 b 2 a")] if target in path else [])
+        (st3["unanswered"])["_last_run"] = 0
+        aw.check_unanswered_chami(st3, dry_run=False)
+        leaked = [b for _, b in sent[n_alert:] if b.startswith(aw.UNANSWERED_OK_MARK)]
+        chk("★旧実装ではChamiの催促で✅が出てしまう(=検査が効いている証拠)",
+            len(leaked), 1)
+        if leaked:
+            print(f"  --- 旧実装が出していた嘘報告 ---\n  {leaked[0]}")
+    finally:
+        aw.answered_since = real_as
+    chk("must-fail自体で新たなFAILを増やしていない", ng - fails_before, 0)
     aw._discord_get = real_get
 else:
     print("  (--live 未指定のためDiscordへは行かない。名簿が読めない時に落ちないことだけ確認)")

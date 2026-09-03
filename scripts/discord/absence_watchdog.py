@@ -194,6 +194,7 @@ UNANSWERED_SEC = 25 * 60           # これ以上返事が無いと候補(上の
 UNANSWERED_CONSEC = 2              # C-041: 2回連続で同じ判定の時だけ鳴らす
 UNANSWERED_ALERT_DEPT = "aegis-gl"  # 鳴らす先=イージス研究室(部門長・A1がKPI)
 UNANSWERED_MARK = "⚠Chamiの便に誰も返していません"   # ←この検査自身の警報の目印(返事に数えない)
+UNANSWERED_OK_MARK = "✅返事が付きました"            # ←解消の知らせ。これも返事に数えない
 UNANSWERED_SKIP_DEPTS = ("router",)  # 通知受付=機械の掲示板。人の返事は元々出ない
 CHAMI_USERNAMES = ("chami_fusoh",)
 CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
@@ -1618,9 +1619,8 @@ def unanswered_verdict(msgs, now_epoch, threshold_sec=UNANSWERED_SEC):
         return (False, None, 0, "")          # 直近にChamiの発言が無い=対象外
     # Chamiの発言より後(=リストの手前)に、返事と数えられる発言が在るか
     for m in msgs[:chami_at]:
-        body = str(m.get("content") or "")
-        if body.startswith(UNANSWERED_MARK):
-            continue                          # この検査自身の警報は返事ではない(自己消火の防止)
+        if _is_watchdog_notice(m.get("content")):
+            continue                          # この検査自身の投稿は返事ではない(自己消火の防止)
         return (False, None, 0, "")
     cm = msgs[chami_at]
     ts = parse_ts(cm.get("timestamp"))
@@ -1631,6 +1631,45 @@ def unanswered_verdict(msgs, now_epoch, threshold_sec=UNANSWERED_SEC):
         return (False, None, 0, "")
     excerpt = str(cm.get("content") or "").replace("\n", " ")[:60]
     return (True, str(cm.get("id") or ""), int(age), excerpt)
+
+
+def _is_watchdog_notice(body):
+    """この検査自身が出した投稿か(⚠警報・✅解消)。返事には数えない=自己消火の防止。"""
+    b = str(body or "")
+    return b.startswith(UNANSWERED_MARK) or b.startswith(UNANSWERED_OK_MARK)
+
+
+def answered_since(msgs, alerted_id):
+    """**警報を出した当の便(alerted_id)より後に、本物の返事が在るか**を見る純関数。
+
+    ★2026-09-03 の嘘報告の真因(Chami指摘「これ嘘報告」)。
+      1分shorts漫画紹介部門で 07:39 のChamiの便(msg=1544839258118946877)に誰も返さないまま、
+      Chami自身が 16:32 に「できた？」と催促した。その瞬間 unanswered_verdict は
+      **最新のChami発言**(=催促・25分未満)を見て「候補ではない」を返し、呼び出し側が
+      それを**解消**と読んで ✅ を出した。実物では 8時間53分ずっと誰も返していない。
+      **Chamiが催促を重ねたことは、沈黙が続いている最強の証拠であって、解消ではない。**
+      同じ穴がもう1つ在る= 警報した便が取得窓から流れても chami_at=None で「解消」になっていた。
+      だから解消は「候補で無くなったか」ではなく **「その便に返事が付いたか」** で判定する。
+
+    返事= alerted_id より新しい投稿のうち、Chami本人でも この検査自身の投稿でもないもの。
+    alerted_id が窓の外へ流れていても、id(snowflake)の大小だけで判定できる。
+    """
+    try:
+        aid = int(str(alerted_id))
+    except (TypeError, ValueError):
+        return True                       # 判定できない印は抱え込まない(古い状態を残さない)
+    for m in (msgs or []):
+        try:
+            if int(str(m.get("id") or 0)) <= aid:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if str((m.get("author") or {}).get("username") or "") in CHAMI_USERNAMES:
+            continue                      # ★Chami自身の催促は返事ではない
+        if _is_watchdog_notice(m.get("content")):
+            continue
+        return True
+    return False
 
 
 def check_unanswered_chami(state, dry_run):
@@ -1654,16 +1693,21 @@ def check_unanswered_chami(state, dry_run):
         dept = str(c.get("dept") or "")
         if not cid or not dept or dept in UNANSWERED_SKIP_DEPTS:
             continue
-        msgs = _discord_get(f"/channels/{cid}/messages?limit=5")
+        # ★窓は10件。Chamiが催促を重ねると5件では警報した便が窓の外へ落ちる(実測=漫画紹介部門)。
+        msgs = _discord_get(f"/channels/{cid}/messages?limit=10")
         if msgs is None:
             continue                          # 読めない=判定不能。鳴らさない
         bad, msg_id, age, excerpt = unanswered_verdict(msgs, now_epoch)
         cst = st.get(cid) or {"msg_id": "", "consec": 0, "alerted": ""}
         if not bad:
             if cst.get("alerted"):
+                # ★「候補で無くなった」を解消と読まない。**その便に返事が付いたか**を実物で見る。
+                if not answered_since(msgs, cst["alerted"]):
+                    st[cid] = cst             # まだ誰も返していない=開いたまま抱える
+                    continue
                 room = dept_ja(dept, with_slug=True)
                 if bot_send(UNANSWERED_ALERT_DEPT,
-                            f"✅返事が付きました: {room} の未応答(msg={cst['alerted']})は解消。",
+                            f"{UNANSWERED_OK_MARK}: {room} の未応答(msg={cst['alerted']})は解消。",
                             dry_run, by_dept=True):
                     cst = {"msg_id": "", "consec": 0, "alerted": ""}
             else:
