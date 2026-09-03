@@ -30,6 +30,7 @@ presence:
 テスト: 環境変数 GO5_LOCAL_DIR があれば local/ の代わりにそれを使う。
 """
 import argparse
+import ast
 import json
 import os
 import re
@@ -5863,6 +5864,185 @@ def _fenced_lines(lines):
         return set()
 
 
+# --- 反映ズレ(名簿を編集したのに走行中の常駐がまだ載せ替えていない窓)------------------
+# ★2026-09-03 改善提案部門トトリの発注(受け入れ条件2)。イージス研究室が実装。
+#   壊れた実物= 09-03 00:57:22 分析部門。返信の中の `[早坂芽衣]` が地の文へ残り、
+#   Chami「芽衣は芽衣で分けて喋ってよ ［早坂芽衣］じゃなくて。これいつも言ってる」(00:59:16)。
+#   収拾は**人手で芽衣を部屋から外した**だけ= 機械は1つも止めていない。
+# ★真因の構造: 部屋の名簿(DEPT_CONF)は**このファイルの中の定数**だ。編集した瞬間に
+#   オンディスクは新しくなるが、走行中の常駐は起動時のメモリを持ち続ける
+#   (daemon_keeper の載せ替えは「暇な部門から順に」なので、便を握った対話部屋は最後に回る)。
+#   その窓で新人格の名乗りが来ると resolve=None → **割れずに地の文へ漏れる**。
+# ★ここで見るのは**オンディスク名簿**=このファイルを ast で読み直した DEPT_CONF。
+#   なぜ import ではないか: この関数を持つモジュール自身がその DEPT_CONF なので、
+#   走行中プロセスの中では import し直しても**メモリの古い方**しか取れない。
+#   `persona_send.py` が別プロセスで `from dept_daemon import DEPT_CONF` して
+#   常に最新を引けているのと同じ物を、**プロセスを増やさずに**得るための読み方だ。
+# ★literal_eval は使えない(DEPT_CONF の中に os.path.join(...) が混ざる)。
+#   欲しいのは persona/aliases の**文字列だけ**なので、木を歩いて定数だけ拾う。
+# ★mtimeキャッシュ= ファイルが変わった時だけ 0.15 秒の parse を1回。常時は辞書引き。
+# ★fail-open(§3)= 読めない・形が違う・例外 → 空を返す=**従来どおりの挙動**へ倒れるだけ。
+_ONDISK_ROSTER_CACHE = {"mtime": None, "by_dept": {}}
+
+
+def _parse_dept_conf_rosters(path):
+    """このファイルの DEPT_CONF から `{dept: {"personas": (...)}}` を作る(文字列のみ)。"""
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+    except Exception:
+        return out
+    node = None
+    for n in tree.body:                      # ★最後の代入を採る(再代入があってもオンディスクの結論)
+        if isinstance(n, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "DEPT_CONF" for t in n.targets):
+            node = n.value
+    if not isinstance(node, ast.Dict):
+        return out
+    for k, v in zip(node.keys, node.values):
+        if not (isinstance(k, ast.Constant) and isinstance(k.value, str)):
+            continue
+        if not isinstance(v, ast.Dict):
+            continue
+        personas = None
+        for kk, vv in zip(v.keys, v.values):
+            if isinstance(kk, ast.Constant) and kk.value == "personas":
+                personas = vv
+        if not isinstance(personas, (ast.List, ast.Tuple)):
+            continue
+        ps = []
+        for el in personas.elts:
+            if not isinstance(el, ast.Dict):
+                continue
+            name, aliases = "", []
+            for kk, vv in zip(el.keys, el.values):
+                key = kk.value if isinstance(kk, ast.Constant) else None
+                if key == "persona" and isinstance(vv, ast.Constant) and isinstance(vv.value, str):
+                    name = vv.value
+                elif key == "aliases" and isinstance(vv, (ast.List, ast.Tuple)):
+                    aliases = [e.value for e in vv.elts
+                               if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if name:
+                ps.append({"persona": name, "aliases": tuple(aliases)})
+        if ps:
+            out[k.value] = {"personas": tuple(ps)}
+    return out
+
+
+def _ondisk_conf(dept):
+    """その部屋の**オンディスク名簿**を conf の形で返す。持たない部屋・読めない時は {}。"""
+    try:
+        path = os.path.abspath(__file__)
+        mt = os.path.getmtime(path)
+        if _ONDISK_ROSTER_CACHE["mtime"] != mt:
+            _ONDISK_ROSTER_CACHE["by_dept"] = _parse_dept_conf_rosters(path)
+            _ONDISK_ROSTER_CACHE["mtime"] = mt
+        return _ONDISK_ROSTER_CACHE["by_dept"].get(str(dept or "")) or {}
+    except Exception:
+        return {}
+
+
+# 反映ズレの救済を切る栓(既定=入)。事故ったら環境変数 0 で従来挙動へ戻せる。
+PERSONA_TAG_RELOAD_LAG_FIX = os.environ.get("PERSONA_TAG_RELOAD_LAG_FIX", "1") not in ("0", "")
+
+
+def _reload_lag_resolver(resolve, dept):
+    """走行中の名簿で引けなかった時だけ**オンディスク名簿**で引き直す resolver を返す。
+
+    ★must-fail 1(文を壊さない)への答え= 引き直しの条件は
+      「**その部屋のオンディスク名簿に実在する名前**」だけ。`[検証]` `[1]` のような
+      名簿外のタグは今までどおり素通り(=ただの本文)。他部屋の人格名も救わない
+      (閉じた名簿の設計 2026-07-26 を崩さない= 部屋の外の人を演じさせない)。
+    ★救った名前で本当に送れるのか= 送信は別プロセスの `persona_send.py` で、
+      そこは `from dept_daemon import DEPT_CONF` を**その場で**読む=オンディスクが正。
+      つまり「オンディスクに居る」なら名義もアイコンも正しく出る。ここが安全の根拠だ。
+    ★判定を2つ持たない(ORG-11)= 名前の正規化・別名の当て方は `resolve_persona_tag`
+      をそのまま使い回す。**名簿の出どころだけ**を差し替える。
+    ★数える(C-054)= 救った時は `reload_lag_leak` を1名につき1回残す。救済で漏れの回数が
+      消えないようにする(rescued で leak を消さないのと同じ設計)。
+    ★fail-open= 栓が切れている・オンディスク名簿が空・例外 → 元の resolve をそのまま返す。
+    """
+    try:
+        if not PERSONA_TAG_RELOAD_LAG_FIX or not callable(resolve):
+            return resolve
+        oc = _ondisk_conf(dept)
+        if not oc.get("personas"):
+            return resolve
+        seen = set()
+
+        def _r(nm):
+            w = resolve(nm)
+            if w:
+                return w
+            w2 = resolve_persona_tag(oc, nm)
+            if w2:
+                key = str(nm or "").strip()
+                if key not in seen:
+                    seen.add(key)
+                    _audit_tag(dept, w2, "reload_lag_leak", f"[{key}]")
+                return w2
+            return None
+
+        _r.names = getattr(resolve, "names", ())
+        return _r
+    except Exception:
+        return resolve
+
+
+def _audit_absent_tag(dept, tag, line, state):
+    """名簿(メモリ・オンディスクの両方)に**居ない**人格名の名乗り漏れを1回だけ数える。
+
+    ★これが無いと、トトリの受け入れ条件3(「reload_lag_leak が本番で0」を見て閉じる)が
+      **偽の緑**になる。実測(2026-09-03 persona_render_audit.jsonl 2,289行)= 素の未解決タグは
+      **1行も記録されていなかった**。数えていたのはホモグリフに見えた時だけだ。
+      漏れの実物3件(00:57:22 / 01:00:30 分析部門・10:50:22 イージス研究室)は
+      いずれも出力ゲートEの `tag_foreign_leak` に**偶然**引っかかって残っていただけで、
+      上流の分割は無言で素通りしていた。
+    ★直さない= どちらの名簿にも居ない以上、誰の言葉かは機械には決められない。**数えるだけ**。
+    ★`_avatar_keys()` に在る名前(=どこかの部屋の実在の人格)に限る= `[検証]` `[1]` を数えない。
+    ★1便につき1回(state["done"])= 引用の多い報告便で台帳が溢れるのを防ぐ。
+    """
+    try:
+        if state.get("done"):
+            return False
+        nm = str(tag or "").strip()
+        if not nm or nm not in _avatar_keys():
+            return False
+        state["done"] = True
+        _audit_tag(dept, nm, "tag_absent_leak", line)
+        return True
+    except Exception:
+        return False
+
+
+# 走行中の常駐が**実際にメモリへ載せた**名簿の控え。
+# ★2026-09-03 トトリ受け入れ条件1(反映ゲート)の目。「載せ替えが済んだか」は
+#   これまで誰も機械で見られなかった= `local/_daemon_codever/dept_<dept>.txt` は
+#   **コードのsha**しか持たず、名簿の中身を持たない。sha が変わっていても
+#   「その部屋の名簿が変わったか」は分からないし、逆に名簿だけ直した版でも sha は動く。
+# ★推測しない(C-041)= 起動した本人が、その瞬間に載せた名前を書く。
+#   読み手は `scripts/_daemons/dept_roster_lag.py`(オンディスク名簿と突き合わせる)。
+# ★fail-open= 書けなくても常駐は止めない(控えが無い部屋は「不明」として扱われるだけ)。
+ROSTER_SNAP_DIR = os.path.join(LOCAL, "_daemon_codever")
+
+
+def _record_loaded_roster(dept, conf):
+    """この常駐が起動時に載せた人格名を1本控える。書けなくても黙って続ける。"""
+    try:
+        os.makedirs(ROSTER_SNAP_DIR, exist_ok=True)
+        names = [str(p.get("persona") or "")
+                 for p in ((conf or {}).get("personas") or ()) if p.get("persona")]
+        rec = {"dept": str(dept or ""), "pid": os.getpid(),
+               "started": int(time.time()), "names": names}
+        path = os.path.join(ROSTER_SNAP_DIR, f"roster_{dept}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(rec, f, ensure_ascii=False)
+        return path
+    except Exception:
+        return ""
+
+
 def split_persona_blocks(text, resolve, dept="", names=()):
     """`[名前] 本文` のブロック列へ割る。戻り値 [(正式名 or None, 本文), ...]。
 
@@ -5879,6 +6059,11 @@ def split_persona_blocks(text, resolve, dept="", names=()):
     lines = t.split("\n")
     if not lines:
         return [(None, t)]
+    # ★2026-09-03 反映ズレの救済(トトリ受け入れ条件2)= ここで1回だけ resolve を包む。
+    #   包むのが1箇所で済むのは、この関数が「頭の名乗り探し」「2つめ以降の境目」
+    #   「_peel_extra_tags」の**全部で同じ resolve を使い回している**からだ(ORG-11の御利益)。
+    resolve = _reload_lag_resolver(resolve, dept)
+    _absent = {"done": False}       # 名簿外の名乗り漏れを数えた印(1便1回)
     # ★2026-07-28 「1行目だけ」を見るのをやめた。実測した事故=
     #   タイトル文部門の返信が「**コミット完了(16867d5)。返信を書く。**」で始まり、
     #   その後に `[三笘薫] …` が来ていた。1行目が名乗りでないので分割に入らず、
@@ -5944,6 +6129,11 @@ def split_persona_blocks(text, resolve, dept="", names=()):
         first = _tag_match(lines[0]) if lines else None
         if first and not first[2]:
             _audit_tag(dept, "", "tag_unbracketed_leak", lines[0].strip())
+        # ★2026-09-03 追加= どちらの名簿にも居ない人格名の名乗りは、これまで**1行も**
+        #   残っていなかった(上の説明参照)。直さないが、ここで数える。
+        for _i, _tag, _mm in miss:
+            if _audit_absent_tag(dept, _tag, lines[_i].strip(), _absent):
+                break
         return [(None, t)]
     if not m[2]:
         # ★開き括弧が抜けていたのを吸収した= この1件は「本文の頭に残らず・宛名も正しく出た」側。
@@ -5956,6 +6146,11 @@ def split_persona_blocks(text, resolve, dept="", names=()):
         if who2:
             blocks.append([who2, [_peel_extra_tags(m2[1], resolve)]])
         else:
+            # ★2026-09-03 追加= 2つめ以降の名乗りが名簿外だった時も数える(直さない)。
+            #   壊れた実物(00:57:22 分析部門)はまさにこの形= 1行目は正しく割れているのに、
+            #   途中の `[早坂芽衣]` だけが本文へ貼り付いたまま Chami の画面へ出た。
+            if m2:
+                _audit_absent_tag(dept, m2[0], ln.strip(), _absent)
             blocks[-1][1].append(ln)
     out = []
     for name, body in blocks:
@@ -6202,8 +6397,20 @@ def persona_tag_leak_gate(text, resolve, dept="", speaker=""):
                         _audit_tag(dept, w, "tag_late_leak", ln.strip())
                     break
                 if str(m[0]).strip() in _avatar_keys():
-                    # ★他部屋の人格名= 引用かもしれない。触らず数えるだけ。
-                    _audit_tag(dept, str(speaker or ""), "tag_foreign_leak", ln.strip())
+                    # ★2026-09-03 ここを2つに割った(トトリ受け入れ条件2の下流側)。
+                    #   同じ「引けない他人格の名前」でも、**その部屋のオンディスク名簿に
+                    #   実在する**なら引用ではない= 上流(split_persona_blocks)が割るはずの
+                    #   便がここまで来た=反映ズレが逃げた印なので、別の名前で数える。
+                    #   ★ここでは本文を触らない= must-fail 1(名簿外のタグで文を壊さない)を
+                    #     下流でも崩さないため。直すのは上流1箇所に寄せる(判定は2つでも
+                    #     直す場所は1つ)。
+                    _nm = str(m[0]).strip()
+                    _oc = _ondisk_conf(dept)
+                    if _oc.get("personas") and resolve_persona_tag(_oc, _nm):
+                        _audit_tag(dept, _nm, "reload_lag_leak", ln.strip())
+                    else:
+                        # ★他部屋の人格名= 引用かもしれない。触らず数えるだけ。
+                        _audit_tag(dept, str(speaker or ""), "tag_foreign_leak", ln.strip())
                     break
             seen += 1
         if not who:
@@ -6351,6 +6558,8 @@ class Daemon:
             self.token = open(TOKEN_FILE, encoding="utf-8").read().strip()
         except OSError:
             pass
+        # ★2026-09-03 起動の瞬間に「載せた名簿」を控える(反映ゲートの目・上の説明参照)。
+        _record_loaded_roster(self.dept, self.conf)
 
     # --- この便に応答するメンバー(名指し + 直近の会話の継続) ---
     def _resolve_member(self, content, kw_work, now=None):
