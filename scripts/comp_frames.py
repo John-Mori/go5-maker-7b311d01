@@ -18,6 +18,7 @@
   python scripts/comp_frames.py --limit 5 --dry   # DL＋視覚まで走るが書き戻さない(結果を印字)
 """
 import argparse
+import datetime as dt
 import json
 import os
 import re
@@ -177,35 +178,191 @@ def parse_vision(text):
     return {"frameText": ft, "panelDesc": pd}
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=10)
-    ap.add_argument("--check", action="store_true", help="pending件数だけ出す(DL/生成しない)")
-    ap.add_argument("--dry", action="store_true", help="DL＋視覚まで走るが書き戻さない")
-    args = ap.parse_args()
+# ---------------------------------------------------------------- 打ち切りの見張り(モドリッチ msg 1544859485854498966・最優先)
+#
+# なぜ在るか: この収集は 2026-07〜09 に「毎日 pending の6割を 429 で黙って打ち切り→翌日へ
+#   繰り越し」を続けたのに、打ち切りは %TEMP%\go5-comp-frames.log(誰も読まない)へしか出て
+#   おらず、6割落ちても誰も気づかなかった。= 無警報滞留(D1)。ここはその穴を塞ぐ一枚。
+#   設計は run_daily_teian_job.py と同じ思想=「脈は毎回書く / 便は止まり方が変わった日と
+#   一定間隔だけ / どの便にも閉じ条件を1行(C-046)」。
+PULSE = os.path.join(ROOT, "local", "_work", "comp_frames_pulse.md")   # producers.json が age で見張る脈
+STATE = os.path.join(ROOT, "local", "_work", "comp_frames_state.json")
+BODY  = os.path.join(ROOT, "local", "_work", "comp_frames_alert_body.txt")
+DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
+DEPT = "shorts-analyst"       # 競合監視の持ち主= 分析部門(comp_frames は「分析部アーモンドアイ経由」の道具)
+QUIET_DAYS = 3                # 同じ止まり方が続く時、便を出す間隔(日)。毎日は鳴らさない(規律§3)
 
+
+def classify_health(summary):
+    """このランの止まり方。"ok" / "quota" / "fail"。
+    - fail : 疎通/前提で落ちた(GAS不正・yt-dlp/ffmpeg無し・例外)= exit!=0 かつ 429以外。
+    - quota: 429 で当日打ち切り、pending を1件以上取り残した(=今回の本体の再演)。
+    - ok   : 打ち切りゼロで完走(pending 0本の平穏な日も含む)。
+    """
+    if summary.get("exit", 0) != 0 and not summary.get("quota_hit"):
+        return "fail"
+    if summary.get("quota_aborted", 0) > 0:
+        return "quota"
+    return "ok"
+
+
+def should_alert(state, kind, today, quiet_days=QUIET_DAYS):
+    """今日、便を出すべきか(純粋関数)。出す= ①止まり方が変わった日(節目は必ず1通) /
+    ②同じ止まり方が続き前便から quiet_days 以上。出さない= ok が続く日 / 知らせた直後。"""
+    st = state or {}
+    was = str(st.get("last_kind") or "ok")
+    if kind != was:
+        return True
+    if kind == "ok":
+        return False
+    last = str(st.get("last_alert_date") or "")
+    if not last:
+        return True
+    try:
+        d0 = dt.datetime.strptime(last, "%Y-%m-%d").date()
+        d1 = dt.datetime.strptime(today, "%Y-%m-%d").date()
+    except Exception:
+        return True                          # 日付が読めない= 黙らせる理由にしない(fail-open)
+    return (d1 - d0).days >= quiet_days
+
+
+def _load_state():
+    try:
+        with open(STATE, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_state(state):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE, "w", encoding="utf-8") as f:
+        f.write(json.dumps(state, ensure_ascii=False, indent=1))
+
+
+def write_pulse(summary, kind, note=""):
+    """★毎回書く脈(--check 以外)。更新が止まる= この収集ごと死んだ、と producers.json 側で読める。"""
+    os.makedirs(os.path.dirname(PULSE), exist_ok=True)
+    with open(PULSE, "w", encoding="utf-8") as f:
+        f.write("# 競合フレーム収集 の脈(毎回上書き・モドリッチ msg 1544859485854498966)\n\n"
+                "最終走行: %s\n"
+                "状態: %s\n"
+                "pending %d件 / 視覚化 %d件 / 打ち切り %d件 / スキップ %d件 / exit=%s\n"
+                "%s\n"
+                % (dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), kind,
+                   summary.get("pending", 0), summary.get("ok", 0),
+                   summary.get("quota_aborted", 0), summary.get("skipped", 0),
+                   summary.get("exit", 0), note))
+
+
+def build_alert_body(kind, summary, today, streak):
+    """便本文。★推測を書かず数を並べ、閉じ条件を1行で書く(C-046)。"""
+    common_tail = (
+        "\n■ 全文の脈: local/_work/comp_frames_pulse.md\n"
+        "■ 次の自動便: 直るまで %d 日おき(毎日は鳴らさない)。打ち切り0の日に1回「戻った」を出す。\n"
+        % QUIET_DAYS)
+    if kind == "quota":
+        return (
+            "自動(競合フレーム日次収集 comp_frames)→ 分析部門\n\n"
+            "■ **今日、無料枠が尽きて %d件を打ち切った**(pending %d件中・視覚化できたのは %d件・連続%d日目)。\n"
+            "  429 で全キー(ベホップ/ホイミン)の flash 無料枠が尽き、残りは翌日 pending へ繰り越した。\n"
+            "  ★これは2026-07〜09に『6割を黙って落として誰も気づかなかった』のと同じ形= だから鳴らしている。\n\n"
+            "■ **閉じ条件**= 次の朝のランで打ち切り0件になること。手当ては2つ、選ぶのはChami:\n"
+            "  1. flash-lite への1段降格(選択肢1)を ON にする= 同じキーの別枠を足して打ち切り前に粘る。\n"
+            "     (品質が型分解に耐えるか検証してから ON。検証結果は改修部門αがモドリッチへ返す)\n"
+            "  2. 1日に取りに行く上限(--limit)を実際に捌ける本数まで下げる= 毎日取り残しを繰り越さない。\n"
+            % (summary.get("quota_aborted", 0), summary.get("pending", 0),
+               summary.get("ok", 0), streak)
+        ) + common_tail
+    if kind == "fail":
+        return (
+            "自動(競合フレーム日次収集 comp_frames)→ 分析部門\n\n"
+            "■ **収集が前提エラーで落ちた**(exit=%s・連続%d日目)。理由: %s\n"
+            "  429の打ち切りではなく、疎通/前提(GAS応答・yt-dlp/ffmpeg・例外)側の故障だ。\n\n"
+            "■ **閉じ条件**= 次の朝のランが正常終了(exit=0)すること。直った翌朝に1回「戻った」を出す。\n"
+            "■ 手で試す: python scripts/comp_frames.py --check\n"
+            % (summary.get("exit", 0), streak, summary.get("note") or "(不明)")
+        ) + common_tail
+    return (   # ok(戻った)
+        "自動(競合フレーム日次収集 comp_frames)→ 分析部門\n\n"
+        "■ **戻った**。今日のランは打ち切り0件で完走した(視覚化 %d件 / pending %d件)。\n"
+        "  直前まで %d日続けて打ち切り/故障で止まっていた分は、これで閉じる。\n"
+        % (summary.get("ok", 0), summary.get("pending", 0), streak)
+    ) + common_tail
+
+
+def dispatch_alert(body, dept=DEPT):
+    os.makedirs(os.path.dirname(BODY), exist_ok=True)
+    with open(BODY, "w", encoding="utf-8") as f:      # ★BOM無し(dispatch は utf-8 で読む)
+        f.write(body)
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    r = subprocess.run([sys.executable, DISPATCH, "--dept", dept, "--direct",
+                        "--from-dept", "system-engineer", "--audience", "ai",
+                        "--from", "自動(競合フレーム日次収集 comp_frames)",
+                        "--body-file", BODY],
+                       cwd=ROOT, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", env=env)
+    return r.returncode, (r.stdout or r.stderr or "").strip()
+
+
+def emit_health(args, summary):
+    """脈を毎回書き、止まり方に応じて分析部門へ便を(スロットルして)出す。
+    ★--check は疎通だけなので何も出さない。--dry は脈のみ(便は出さない)。本処理は絶対に止めない。"""
+    if getattr(args, "check", False):
+        return
+    kind = classify_health(summary)
+    today = dt.datetime.now().strftime("%Y-%m-%d")
+    if getattr(args, "dry", False):
+        write_pulse(summary, "%s(--dry)" % kind, note="--dry のため便は出さない")
+        return
+    state = _load_state()
+    ok = (kind == "ok")
+    streak = 1 if ok else int(state.get("fail_streak") or 0) + 1
+    alert = should_alert(state, kind, today)
+    state["last_run_at"] = dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    state["last_kind"] = kind
+    state["fail_streak"] = 0 if ok else streak
+    sent = ""
+    if alert:
+        acode, aout = dispatch_alert(build_alert_body(kind, summary, today, streak))
+        if acode == 0:                       # 便が出せた日だけ日付を進める(出せない日は次回出し直し)
+            state["last_alert_date"] = today
+        sent = " / 分析部門へ便 exit=%s" % acode
+        print("  警報: 分析部門へ便 exit=%s %s" % (acode, aout[:120]))
+    _save_state(state)
+    write_pulse(summary, kind, note=("止まり方=%s・連続%s日目%s" % (kind, streak, sent)) if not ok else "打ち切り0で完走")
+
+
+def _run(args, summary):
+    """本処理。summary へ pending/ok/quota_aborted/skipped/quota_hit/note を書き込みつつ exit を返す。"""
     pend = gas_get(f"action=comp_frame_pending&limit={args.limit}")
     if not pend.get("ok"):
-        print(f"ABORT: comp_frame_pending 応答不正: {pend.get('error') or pend}")
+        summary["note"] = f"comp_frame_pending 応答不正: {pend.get('error') or pend}"
+        print(f"ABORT: {summary['note']}")
         return 2
     items = pend.get("pending", [])
-    print(f"pending: {pend.get('count', len(items))}件")
+    summary["pending"] = pend.get("count", len(items))
+    print(f"pending: {summary['pending']}件")
     if args.check:
         return 0
     if not items:
         return 0
 
     if not have_ytdlp():
-        print("ABORT: yt-dlp が無い。導入: python -m pip install -U yt-dlp")
+        summary["note"] = "yt-dlp が無い(python -m pip install -U yt-dlp)"
+        print(f"ABORT: {summary['note']}")
         return 3
     if not shutil.which("ffmpeg"):
-        print("ABORT: ffmpeg が無い。")
+        summary["note"] = "ffmpeg が無い"
+        print(f"ABORT: {summary['note']}")
         return 3
 
     key = behop._read(behop.KEY_FILE, "ベホップ用APIキー")
     # flash基準で読めるだけ読む→無料枠が尽きたらその日は打ち切り→残りは翌日pendingへ繰り越し(冪等)。
     if BASE_MODEL not in behop.list_models(key):
-        print(f"ABORT: {BASE_MODEL} がこのキーで使えません。")
+        summary["note"] = f"{BASE_MODEL} がこのキーで使えません"
+        print(f"ABORT: {summary['note']}")
         return 5
     # ★2枠束ね(Chami 2026-07-30・msg 1532071671765143773「もしflashでも問題なければ
     #   もうひとつのGemini(ホイミン)も必要なら優先的に使って」)。ベホップのflash無料枠が
@@ -219,19 +376,21 @@ def main():
     if homin and homin != key:
         keys.append(("ホイミン", homin))
 
-    results, ok = [], 0
+    results, ok, skipped = [], 0, 0
     quota_hit = False
     kidx = 0                 # 現在使っているキーの番号(429で尽きたら次へ進めて戻さない)
-    for it in items:
+    for i, it in enumerate(items):
         vid = it.get("videoId", "")
         dur = float(it.get("durationSec") or 0)
         if not vid:
+            skipped += 1
             continue
         work = tempfile.mkdtemp(prefix="cf_")
         try:
             frame = grab_frame(vid, dur, work)
             if not frame:
                 print(f"  {vid}: フレーム取得失敗(スキップ)")
+                skipped += 1
                 continue
             # 現キーで試し、429ならそのキーは以後使わず次のキー(ホイミン)へ回して同じフレームを取り直す。
             text, status = None, None
@@ -245,15 +404,20 @@ def main():
                     continue
                 break
             if kidx >= len(keys):
-                print(f"  {vid}: 全キーの無料枠が尽きた(429)。本日はここで打ち切り、残りは翌日pendingへ繰り越し。")
+                # ★当日打ち切り。この item(i) と以降は未収集= 打ち切り件数(モドリッチが数えたい本体)。
+                summary["quota_aborted"] = len(items) - i
+                print(f"  {vid}: 全キーの無料枠が尽きた(429)。本日はここで打ち切り、"
+                      f"残り{summary['quota_aborted']}件は翌日pendingへ繰り越し。")
                 quota_hit = True
                 break
             if status != "ok":
                 print(f"  {vid}: 視覚失敗({status})スキップ")
+                skipped += 1
                 continue
             v = parse_vision(text)
             if not v:
                 print(f"  {vid}: 視覚結果パース失敗(スキップ)")
+                skipped += 1
                 continue
             results.append({"videoId": vid, "frameText": v["frameText"], "panelDesc": v["panelDesc"]})
             ok += 1
@@ -262,7 +426,11 @@ def main():
             shutil.rmtree(work, ignore_errors=True)
         time.sleep(1.0)
 
-    print(f"視覚化 {ok}/{len(items)} 件" + ("(無料枠429で打ち切り・残りは翌日)" if quota_hit else ""))
+    summary["ok"] = ok
+    summary["skipped"] = skipped
+    summary["quota_hit"] = quota_hit
+    print(f"視覚化 {ok}/{len(items)} 件"
+          + (f"(無料枠429で{summary['quota_aborted']}件打ち切り・残りは翌日)" if quota_hit else ""))
     if args.dry:
         print("--dry のため書き戻さない")
         return 0
@@ -272,8 +440,35 @@ def main():
     if w.get("ok"):
         print(f"書き戻し: {w.get('written', 0)}件")
         return 0
-    print(f"書き戻し失敗: {w.get('error') or w}")
+    summary["note"] = f"書き戻し失敗: {w.get('error') or w}"
+    print(summary["note"])
     return 4
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--limit", type=int, default=10)
+    ap.add_argument("--check", action="store_true", help="pending件数だけ出す(DL/生成しない)")
+    ap.add_argument("--dry", action="store_true", help="DL＋視覚まで走るが書き戻さない")
+    args = ap.parse_args()
+
+    # summary= このランの実数。_run が埋め、emit_health が脈と便へ流す。exit で終わっても finally で必ず脈を残す。
+    summary = {"pending": 0, "ok": 0, "quota_aborted": 0, "skipped": 0,
+               "quota_hit": False, "exit": 0, "note": ""}
+    code = 0
+    try:
+        code = _run(args, summary)
+    except Exception as e:               # ★例外でも脈を落とさない(黙って死ぬのを塞ぐのが本義)
+        summary["note"] = f"例外: {e!r}"
+        print(f"ABORT(例外): {e!r}")
+        code = 99
+    finally:
+        summary["exit"] = code
+        try:
+            emit_health(args, summary)
+        except Exception as e:           # 見張り自身の失敗は本処理を巻き込まない
+            print(f"(健康便の書き込みに失敗・本処理には影響なし: {e!r})")
+    return code
 
 
 if __name__ == "__main__":
