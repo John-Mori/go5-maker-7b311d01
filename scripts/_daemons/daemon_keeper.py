@@ -68,10 +68,15 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 #     dept_daemonを立てると同じ queue dept を2つの常駐がclaimし、
 #     勝った方で名乗りが変わる=応答が非決定的になる(1領域1オーナー・RULES §3)。
 #     research-room から claude_responder を外したのと同じ理由。判断はHQ/Chamiへ差し戻す。
+# ★2026-09-05 otacon-radio を追加(36→37体)。「オタコン-無線通信」= 一時的なコンテキスト整理の部屋。
+#   Chami直接指示(人事部門-コンテキスト経由)「メインはオタコン、サブでククール…2人だけ配線しといてよ」。
+#   ★名簿は3か所を対で直す(DEPT_CONF / discord_channels.json / ここ)。ここが本命の落とし穴=
+#     ①②だけ足すとデーモンが1体も立たず既読も着手も付かない(2026-08-31 goods-afi で実測)。
+#   ★番人の再起動は要らない= maybe_adopt が60秒ごとに自ソースの DEPTS を読み直す(下の説明)。
 # ★2026-07-27 report-notify を追加(26→27体)。Chamiが**3回**頼んで8日間実装されなかった件。
 #   「報告について改善していきたいから話せるようにして欲しい」= 一方通行の部屋を双方向にする。
 #   自動通知の出力経路には触っていない(bot/webhookはgatewayが弾くので反応しない)。
-DEPTS = ["hq", "research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research"]
+DEPTS = ["hq", "research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット

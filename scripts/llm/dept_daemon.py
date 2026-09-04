@@ -2022,6 +2022,37 @@ DEPT_CONF = {
         "session_relay": True,          # 会話便を部屋の永続セッションへ
         "conversation_only": True,      # 回送しない・作業判定もしない。その場で答え切る
     },
+    # ★2026-09-05 新設「オタコン-無線通信」= **一時的な**コンテキスト整理の部屋。
+    #   Chami直接指示(人事部門-コンテキスト経由 ESC-hr-context-1545568554550689962)=
+    #   「コンテキストを整理して作る役割を一時的に 1527286798542311554 この部屋で行いたい。
+    #     メインはオタコン、サブでククール。そしてCodexのネイキッドスネークが参戦させる予定。
+    #     まだCodexを入れてないから2人だけ配線しといてよ」。
+    #   ★席は3つだが**今回入れるのは2人だけ**= ネイキッド・スネークはCodex未導入。
+    #     characterfileも無いので名簿に書かない(★存在しない担当を名簿に置くとORG-04の偽の受領になる)。
+    #     ★後日来る「ソリッド・スネーク」とは別人=同一視して埋めない。
+    #   ★既定の発言者=オタコン(dept直下 persona)。ククールは副(名指し時と観点が割れた時)。
+    #   ★親カテゴリは「パーソナル Personal」(1527482687408046160)=カテゴリ表に無い
+    #     =head は None(隣室のククール-なかま会話 kukuru-nakama と同じ扱い。_NAMED_HEAD には足さない)。
+    #   人事側は済み= otacon.md / kukuru.md 実在・personas/INDEX.md へ記帳済(人事部門-コンテキスト)。
+    "otacon-radio": {
+        "character": os.path.join(_CHAR, "otacon.md"),
+        "memory": os.path.join(_MEM, "otacon-radio.jsonl"),
+        "persona": "オタコン",
+        "personas": [
+            {"persona": "オタコン", "character": os.path.join(_CHAR, "otacon.md"),
+             "role": "この部屋のメイン(コンテキストの整理と作成)",
+             "aliases": ("オタコン", "otacon")},
+            {"persona": "ククール", "character": os.path.join(_CHAR, "kukuru.md"),
+             "role": "サブ(人事=人格コンテキストの見立て)",
+             "aliases": ("ククール", "kukuru")},
+        ],
+        # ★18835は空いていない= learning-coach-2 が**dictの外**(4010行の後付け代入
+        #   `DEPT_CONF["learning-coach-2"]["port"] = 18835`)で使っている。
+        #   ★港を選ぶ時は `"port":` の字面を数えるな。**DEPT_CONF を読み込んでから数えろ**。
+        "port": 18836,                  # 18835まで使用済=読み込み後の実測で次の空き
+        "work_model": "opus",           # 人格の演技担保(C-014・kukuru-nakama等と同形)
+        "session_relay": True,          # 会話便を部屋の永続セッションへ
+    },
     # ★2026-08-16 新設「軍議」= ADAFI事業全体を部門横断で共有・相談する会議部屋。
     #   Chami直接指示「配線よろしく」(AD研究室・8/15(金))→ AD-GL=ルカ・モドリッチが裁定して
     #   プラットフォームSE=一ノ瀬怜へ直送(msg_id=1538220046642450503)→ 一ノ瀬怜が配線。
