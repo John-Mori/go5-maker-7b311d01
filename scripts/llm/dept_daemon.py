@@ -1638,6 +1638,8 @@ def _disc_block():
 
 _verdict_cache = {"mtime": None, "text": ""}
 _VERDICT_MD = os.path.join(HQ, "裁定カタログ.md")
+# C-015の「恒常の但し書き」= ★で始まり、日付始まりの経緯記録(★**2026-09-02 追記= …)ではない行。
+_C015_STANDING = re.compile(r"^★+(?!\*\*20\d\d[-/]\d\d[-/]\d\d)")
 
 
 def _verdict_block():
@@ -1678,7 +1680,13 @@ def _verdict_block():
                 title = re.sub(r"\*\*|★", "", mm.group(2)).strip()
                 heads.append(f"{mm.group(1)} {title[:70]}")
         # C-015 の表(発注先)だけは行ごと渡す= 毎日使う判断なので見出しでは足りない
-        table = []
+        # ★2026-09-04 表の締めの但し書き(「改修αは5秒動画メーカー専用だ」)も**カタログから拾う**。
+        #   以前はここに文字列で直書きしていた=正本が2つになり、しかも**下流のこちらが勝つ**。
+        #   実害= 同日の改称(改修α→構築α)を10:22にChamiが撤回した時、カタログ(C-015節)は戻したのに
+        #   この行だけ旧字面のまま全27室の封筒へ配られ続けた(検出=ルカ・モドリッチ[ad研究室])。
+        #   共通規律§4「記録先を2つ持たない」。★**次に名前が動いた時に同じ事故を起こさない**ため、
+        #   字面はカタログにしか置かない=ここには「どう拾うか」だけを書く。
+        sec = []
         grab = False
         for ln in raw.split("\n"):
             if ln.startswith("### C-015"):
@@ -1687,14 +1695,31 @@ def _verdict_block():
             if grab:
                 if ln.startswith("### "):
                     break
-                if ln.startswith("|"):
-                    table.append(ln.rstrip())
+                sec.append(ln.rstrip())
+        table = [ln for ln in sec if ln.startswith("|")]
+        # 表の**直後**の散文から、恒常の但し書き段落を1つだけ拾う。
+        # ★節の★行を全部拾ってはいけない= C-015節の★行は20本以上あり、その大半は
+        #   「2026-08-23 の停止線は撤回済」等の**経緯の記録**(封筒に毎便載せる物ではない)。
+        #   段落の途中行(継続行)は★で始まらないので、行単位で拾うと文が千切れる=段落ごと採る。
+        # 恒常の行= ★で始まり、`★**2026-09-02 追記=` のような**日付始まりの履歴ではない**行。
+        last_row = max((i for i, ln in enumerate(sec) if ln.startswith("|")), default=-1)
+        prose, para = [], []
+        for ln in sec[last_row + 1:] + [""]:
+            if ln.strip():
+                para.append(ln)
+                continue
+            if any(_C015_STANDING.match(p) for p in para):
+                prose = para[:8]                    # 上限= 封筒の肥大を防ぐ(全室・毎便に載る)
+                break
+            para = []
+        # ★拾えなかった時に黙って消さない= 消えたら「直したつもり」が二度起きる(今回の事故そのもの)
+        tail = ("\n" + "\n".join(prose)) if prose else (
+            "\n★C-015の但し書きが拾えていない(裁定カタログ.mdの体裁が変わった)= 研究室HQへ知らせてくれ。")
         head_txt = ("■Chamiが既に下した裁定(★該当したら『判断』ではなく『執行』。"
                     "正本= 00_AI-HQ/裁定カタログ.md ・詳細はそこを読め)\n"
                     + "\n".join("- " + h for h in heads)) if heads else ""
-        table_txt = ("★発注先(C-015・毎日使うのでここに全文を置く)\n" + "\n".join(table)
-                     + "\n★改修α(system-engineer)は**5秒動画メーカー専用**だ。"
-                       "組織の仕組み・人格・常駐構成を持ち込むな。") if table else ""
+        table_txt = ("★発注先(C-015・毎日使うのでここに全文を置く)\n"
+                     + "\n".join(table) + tail) if table else ""
         parts = [p for p in (head_txt, table_txt) if p]
         _verdict_cache["text"] = ("\n\n".join(parts) + "\n\n") if parts else ""
         # ★2026-08-24 C-060の②= 見出しを差分送付にするため、**見出しと表を別々にも渡せる**
