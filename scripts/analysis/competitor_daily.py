@@ -460,9 +460,16 @@ def main():
               median([x["speed"] for x in vs]), max(x["speed"] for x in vs)] for name, vs in ch_rank]
     metrics = load_metrics()
     backfill_from_md(metrics)
+    # ★measDays= この行のspeedが「何日ならしか」を行自身に持たせる(ad研究室モドリッチ 2026-09-05依頼)。
+    #   speed=直近2スナップ間の再生増分÷measurementDays(gas/競合.gs)。欠測を挟んで再開した日は
+    #   measurementDaysが大きくなり、speedが「初速」でなく「N日平均」に化ける(2026-09-05=8/18→9/5の18日で割られ
+    #   medAllが798.5→47.0へ≒18倍下振れ=競合失速ではない)。[中央値, 最大, measurementDays!=1の本数]を持たせ、
+    #   次回以降この段差を折れ線の桁落ちと誤読しないための印にする(measDays[0]が1に戻れば初速へ復帰)。
+    _mdays = [t["measurementDays"] for t in ts if t.get("measurementDays")]
     metrics[snap] = {
         "date": snap, "n": len(ts),
         "medAll": median([t["speed"] for t in ts]), "medMax": ts_sorted[0]["speed"],
+        "measDays": [median(_mdays), max(_mdays), sum(1 for x in _mdays if x != 1)] if _mdays else None,
         "byType": {k: [len(bytype[k]), median(bytype[k])] for k in NUMTYPES if k in bytype},
         "byQ": {k: [len(byq[k]), median(byq[k])] for k in ["断定", "問いかけ"] if k in byq},
         "channels": chans,
