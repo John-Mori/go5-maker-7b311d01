@@ -49,6 +49,15 @@ $daemons = @(
   @{ Name='absence_watchdog'; File='absence_watchdog.py'; Rel='scripts\discord\absence_watchdog.py'; LogRel='local\discord_watchdog.log' },
   @{ Name='local_responder';  File='local_responder.py';  Rel='scripts\llm\local_responder.py';      LogRel='local\llm\responder_console.log' },
   @{ Name='gemini_responder'; File='gemini_responder.py'; Rel='scripts\llm\gemini_responder.py';     LogRel='local\llm\gemini_responder_console.log' },
+  # codex_responder (2026-09-05, platform-se; wiring requested by Kevin/aegis-gl): consumes the
+  #   Codex room (dept='codex') and routes heavy implementation to codex_run.py (GPT-5.4 via
+  #   ChatGPT login). It self-gates to fully DORMANT until three files exist together -- a
+  #   dept=='codex' entry in discord_channels.json, local\codex_enabled.txt, and
+  #   local\discord_codex_token.txt -- so registering it here is inert (zero queue access, no
+  #   codex process spawned) until Chami names the channel and drops the token. codex_run.py
+  #   runs Codex in a DEDICATED git worktree with an ownership claim (INC-99 safe); nothing lands
+  #   in the shared tree automatically.
+  @{ Name='codex_responder';  File='codex_responder.py';  Rel='scripts\llm\codex_responder.py';      LogRel='local\llm\codex_responder_console.log' },
   @{ Name='office_daily';     File='office_daily.py';     Rel='scripts\office\office_daily.py';      LogRel='local\office\_daily.log' },
   # claude_responder (2026-07-17): while the Lab session is dead, process the main box with
   #   `claude --print` so Discord still gets replies when every session is down (root fix for

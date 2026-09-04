@@ -66,6 +66,7 @@ SUPERVISED = [
     ("absence_watchdog", os.path.join("scripts", "discord", "absence_watchdog.py")),
     ("local_responder", os.path.join("scripts", "llm", "local_responder.py")),
     ("gemini_responder", os.path.join("scripts", "llm", "gemini_responder.py")),
+    ("codex_responder", os.path.join("scripts", "llm", "codex_responder.py")),
     ("office_daily", os.path.join("scripts", "office", "office_daily.py")),
     ("claude_responder", os.path.join("scripts", "llm", "claude_responder.py")),
     ("daemon_keeper", os.path.join("scripts", "_daemons", "daemon_keeper.py")),
