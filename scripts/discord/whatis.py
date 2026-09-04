@@ -25,6 +25,26 @@ LEDGERS = [
     ("work_audit", "local/llm/work_audit.jsonl"),    # 部門作業の便(msg_id+dept+author)
     ("inbox",      "local/discord_inbox.jsonl"),     # 表に着地した便(dept+author+content)
 ]
+CHANNELS = "local/discord_channels.json"  # チャンネルID→部屋名/部門の登録簿
+
+
+def load_channels():
+    """チャンネル登録簿を {id: (name, dept)} で返す。
+    ChamiはmsgIDでなく"チャンネルID"を裸で落として指すことが多い
+    (2026-09-04実測=前日24hで落とした4IDは全部チャンネルID)。
+    だからmsgIDとして見つからない前に、まずチャンネルIDかを照合する。"""
+    path = os.path.join(ROOT, CHANNELS)
+    m = {}
+    if not os.path.exists(path):
+        return m
+    try:
+        for row in json.load(open(path, encoding="utf-8")):
+            cid = str(row.get("id") or "")
+            if cid:
+                m[cid] = (row.get("name") or "(名称なし)", row.get("dept") or "(不明)")
+    except Exception:
+        pass
+    return m
 
 
 def extract_id(arg):
@@ -76,11 +96,22 @@ def main():
         print("msg_id を取り出せなかった(15桁以上の数字が要る)")
         return 2
     hits = scan(msg_id)
+    ch = load_channels().get(msg_id)
     print(f"■ whatis {msg_id}")
+    if ch:
+        # ★これは「便(メッセージ)」ではなく「チャンネルID」だった。
+        # Chamiが「1533… ここ」「またエラー」と指すのはこの形。webhook便と誤答しない。
+        name, dept = ch
+        print(f"  = チャンネルID(便ではない): {name} / 部門={dept}")
+        if not hits:
+            return 0
+        print("  ↓ 同じ数字が便のmsg_idとしても台帳に有り:")
     if not hits:
-        print("  台帳に無い= 未記録の便(webhook直投稿の疑い / 古い便)。send_audit・work_audit・inbox のどれにも msg_id が無い。")
-        print("  → この便は出所を機械で辿れない。webhook投稿口に msg_id 記録を足すのが次の一手。")
-        return 1
+        if not ch:
+            print("  台帳に無い= 未記録の便(webhook直投稿の疑い / 古い便)。send_audit・work_audit・inbox のどれにも msg_id が無い。")
+            print("  → この便は出所を機械で辿れない。webhook投稿口に msg_id 記録を足すのが次の一手。")
+            return 1
+        return 0
     for label, d in hits:
         print("  " + summarize(label, d))
     return 0
