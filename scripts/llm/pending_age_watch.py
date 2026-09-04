@@ -66,19 +66,21 @@ OWNER_MARK = re.compile(r"所有\s*[=＝]\s*([A-Za-z0-9_\-]+|[^\s)）、。,]+)"
 STAR_DATE = re.compile(r"★\s*(\d{4})-(\d{2})-(\d{2})")
 ANY_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 ITEM_ID = re.compile(r"\b((?:HQ|ORG|INC)-\d{2,5})\b")
+# ★便のID(`DISPATCH-aegis-gl-1788556091239`)の中のスラッグは**宛先であって依頼元ではない**。
+#   ここを読むと「発注= DISPATCH-aegis-gl-…」を自室発注と読み違える(2026-09-05 実測2行)。
+#   → 専用の伏せ字は置かない。`_find_name` の語境界(前後がASCII語字なら拾わない)が同じ穴を
+#     塞ぐことを実測で確かめた= 伏せ字を足しても判定は1行も変わらない。**機構を2本持たない。**
 CHECKBOX = re.compile(r"^\s*-\s*\[([ xX])\]")
 # 依頼元の合図。この後ろに出てくる最初の部門名を「待っている側」と読む
 REQ_MARK = re.compile(r"(?:発注|裁定|依頼|起票|指示|依頼元)\s*=")
 
-# 台帳の字面に出る通称(org_registry.yml の display_ja に無い呼ばれ方)
-EXTRA_ALIASES = {
-    "改修α": "system-engineer", "改修部門α": "system-engineer",
-    "改修β": "system-engineer-b", "改修部門β": "system-engineer-b",
-    "改修γ": "ai-office", "改修部門γ": "ai-office",
-    "イージスGL": "aegis-gl", "イージス研究室": "aegis-gl",
-    "研究室HQ": "hq", "HQ": "hq",
-    "ad研究室": "research-room", "AD研究室": "research-room",
-}
+# ★2026-09-05 ここに在った EXTRA_ALIASES(通称のハードコード表)は**退役**した。HQ-0241。
+#   理由= 同じ通称が台帳(org_registry.yml の aliases)とコードの2箇所に在ると、片方だけ
+#   直した時に**呼び出し元によって答が割れる**。実際、HQが台帳へ通称を5部門ぶん足した
+#   直後に試験が 16/16 → 15/16 へ落ちた(コード側が古い表を持っていたため)。
+#   移設先= `hq:[HQ]` / `aegis-gl:[イージスGL]` / `ai-office:[改修γ]`(00_AI-HQ org_registry.yml)。
+#   `ad研究室` は alias を足さず **dept_names 側の正規化(大小・全半角)で吸う**。
+#   表は `dept_names.dept_scan_map()` 1本(ORG-11= 判定を2本持たない)。
 
 
 def read_json(path, default=None):
@@ -97,38 +99,20 @@ def write_json(path, doc):
     os.replace(tmp, path)
 
 
-def dept_aliases(registry=REGISTRY):
-    """部門名 → スラッグ。正本= org_registry.yml の display_ja(§共通規律)。
+def dept_aliases():
+    """部門名 → スラッグ。**表は持たない**= `dept_names.dept_scan_map()` を引くだけ(ORG-11)。
 
-    ★2026-09-05 台帳の `depts.<slug>.aliases`(通称)も読む(C-073・研究室HQ便)。
-      Chamiが口で与えた「動画制作部門」が解決できず、ad研究室が「存在しない」と
-      誤断した穴。**display_ja を先に入れ、aliases は後から setdefault** =
-      通称が正式名を押しのけない(正本は display_ja のまま)。
-      ★同じ通称を2部門が名乗っていたら入れない= 曖昧なまま1つへ倒さない。
+    正本= org_registry.yml の display_ja(正式名)と aliases(通称)。C-073 でこの見張りへ
+    通称を配線したが、その時コード側の EXTRA_ALIASES を残したのが二重管理だった(HQ-0241)。
+    ★台帳が読めない時は**空の表**が返る= 持ち主が当たらないだけで、便は消えない
+      (`decide().to()` が台帳の持ち主=研究室HQへ倒す)。沈黙にはしない。
     """
-    out = dict(EXTRA_ALIASES)
-    seen_alias = {}
-    try:
-        import yaml
-        doc = yaml.safe_load(io.open(registry, encoding="utf-8")) or {}
-        for slug, v in (doc.get("depts") or {}).items():
-            out.setdefault(slug, slug)
-            dj = (v or {}).get("display_ja")
-            if dj:
-                out[dj] = slug
-            raw = (v or {}).get("aliases") or ()
-            if isinstance(raw, str):
-                raw = [raw]
-            for a in raw:
-                a = str(a or "").strip()
-                if a:
-                    seen_alias.setdefault(a, set()).add(slug)
-        for a, slugs in seen_alias.items():
-            if len(slugs) == 1:
-                out.setdefault(a, next(iter(slugs)))
-    except Exception as e:
-        print("  ★org_registry.yml を読めなかった(通称だけで当てる): %s" % e)
-    return out
+    sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+    from dept_names import dept_scan_map
+    m = dept_scan_map()
+    if not m:
+        print("  ★部門名の表が空だ(org_registry.yml を読めていない)。持ち主はHQへ倒す")
+    return m
 
 
 def rooms(registry=REGISTRY):
@@ -141,11 +125,37 @@ def rooms(registry=REGISTRY):
         return set()
 
 
+ASCII_WORD = re.compile(r"[0-9A-Za-z_\-]")
+
+
+def _find_name(text, name):
+    """`name` が**語として**出る一番左の位置。無ければ -1。
+
+    ★2026-09-05= 純ASCIIの短い名前(`HQ` / `hq` / `hr-room`)は、パスやコマンドの中に
+      埋もれている字面を持ち主と読んでしまう。実測= `00_AI-HQ/personas/口調ルール.json`
+      の "HQ" を行の一番左として拾い、持ち主=研究室HQ と判定していた(HQ-0241の調べ)。
+      → 純ASCIIの名前だけ、前後がASCII語字でないことを要求する(語の途中では拾わない)。
+      日本語名(イージス研究室 等)は語境界が無いので従来どおり素直に探す。
+    """
+    if not name.isascii():
+        return text.find(name)
+    n, start = len(name), 0
+    while True:
+        i = text.find(name, start)
+        if i < 0:
+            return -1
+        pre = text[i - 1] if i else ""
+        post = text[i + n] if i + n < len(text) else ""
+        if not (ASCII_WORD.match(pre) or ASCII_WORD.match(post)):
+            return i
+        start = i + 1
+
+
 def _leftmost(text, alias):
     """行の中で**一番左**に出る部門名を返す。見出しや札は行頭側に在る=そこが持ち主。"""
     best = None
     for name, slug in alias.items():
-        i = text.find(name)
+        i = _find_name(text, name)
         if i < 0:
             continue
         # 同じ位置から始まるなら長い方(「改修部門α」>「改修α」)

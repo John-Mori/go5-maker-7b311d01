@@ -143,6 +143,65 @@ m = paw.dept_aliases()
 ok(m.get(ALIAS) == SLUG, "★台帳の通称が日齢見張りの当て方にも入っている", repr(m.get(ALIAS)))
 ok(m.get(JA) == SLUG, "display_ja も今までどおり入っている", repr(m.get(JA)))
 
+print("\n[8] ★コード側の表(EXTRA_ALIASES)を退役させて、1件も落としていないか(HQ-0241)")
+# 撤去した実物を .bak から読む= 「12件あった」を手書きしない(消えた表の実物と突き合わせる)。
+RETIRED = os.path.join(ROOT, "scripts", "llm",
+                       "pending_age_watch.py.bak_20260905_0700_extra_aliases")
+retired_map = {}
+try:
+    _l = importlib.machinery.SourceFileLoader("paw_retired", RETIRED)
+    _m = importlib.util.module_from_spec(importlib.util.spec_from_loader("paw_retired", _l))
+    _l.exec_module(_m)
+    retired_map = dict(getattr(_m, "EXTRA_ALIASES", {}))
+except Exception as e:                                              # noqa: BLE001
+    print(f"  (撤去前の .bak を読めない: {e})")
+ok(bool(retired_map), "★撤去前のコード側の表を実物で取れた", RETIRED)
+scan = dn.dept_scan_map()
+lost = {k: v for k, v in retired_map.items() if dn.dept_slug(k) != v}
+ok(not lost, f"★退役した通称 {len(retired_map)}件すべてが台帳経由で同じスラッグへ引ける", repr(lost))
+lost_scan = {k: v for k, v in retired_map.items() if scan.get(k) != v}
+ok(not lost_scan, "★走査側の表(dept_scan_map)にも同じ字面が残っている", repr(lost_scan))
+ok(not hasattr(paw, "EXTRA_ALIASES"),
+   "★見張り側にコードの表が残っていない(二重管理の再発を止める)")
+ok(paw.dept_aliases() == scan, "★見張りの表は dept_scan_map そのもの(判定を2本持たない・ORG-11)")
+
+print("\n[9] 大小・全半角の揺れ(`ad研究室`)と、走査側へ漏らさないこと")
+# ★Chamiは 2026-09-05 までに `ad研究室` と小文字で3回書いている(正式表記は AD研究室)。
+FORMAL = "AD研究室"
+WOBBLE = dn.dept_slug(FORMAL)
+ok(bool(WOBBLE), "前提= 正式表記が引ける", repr(WOBBLE))
+for _v in ("ad研究室", "Ad研究室", "ａｄ研究室", " AD研究室 "):
+    ok(dn.dept_slug(_v) == WOBBLE, f"★揺れを吸って同じ部門へ引ける: {_v}", repr(dn.dept_slug(_v)))
+ok(scan.get("ad研究室") == WOBBLE, "走査側にも小文字の変種が入っている(和名は変種を作る)",
+   repr(scan.get("ad研究室")))
+# ★変種を**足す**のは和名だけ。純ASCIIの短い名前(`hq` / `HQ`)に変種を足すと、
+#   台帳本文(`hq_open_items.md` / `--dept hq`)の字面を走査が拾って持ち主を奪う。
+#   台帳が自分で名乗っている字面(スラッグ・display_ja・通称)はそのまま残す= ここでは
+#   「台帳に無いのに増えている純ASCIIの鍵」だけを禁じる。
+declared = set(DEPTS) | {(v or {}).get("display_ja") for v in DEPTS.values()} \
+           | set(dn.dept_alias_map()) | set(dn.EXTRA_JA)
+generated = [k for k in scan if k not in declared]
+ok(all(not k.isascii() for k in generated),
+   "★増やした変種に純ASCIIの鍵は無い(走査で語を奪わせない)",
+   repr([k for k in generated if k.isascii()]))
+ok(dn.dept_slug("hq") == "hq" and dn.dept_slug("HQ") == "hq",
+   "それでも引き当て(dept_slug)は大小どちらでも通る(吸うのは引く側だけ)")
+
+# ★走査の語境界= 台帳本文に埋もれた `hq` を持ち主と読まない(実測で持ち主を1件奪っていた)。
+LINE = "- [ ] 入れた(確認待ち) 00_AI-HQ/status/hq_open_items.md を直す ★2026-09-01 改修α"
+ok(paw._find_name(LINE, "hq") < 0, "★語の途中の `hq`(ファイル名)は走査が拾わない",
+   repr(paw._find_name(LINE, "hq")))
+ok(paw._find_name("所有= hq / 依頼元= 研究室HQ", "hq") >= 0,
+   "語として立っている `hq` は今までどおり拾う")
+ok(paw._leftmost(LINE, scan)[1] == "system-engineer",
+   "★同じ行の持ち主は 改修α 側になる", repr(paw._leftmost(LINE, scan)))
+# ★赤(C-053)= 同じ行・同じ表で、語境界を持たない**動く実装**(撤去前の .bak)は取り違える。
+if retired_map:
+    _old_hit = _m._leftmost(LINE, retired_map)
+    ok(_old_hit and _old_hit[1] == "hq",
+       "★変更前の実装は同じ行をパス内の字面で研究室HQへ倒していた(これが穴だった)",
+       repr(_old_hit))
+
 import shutil                                                        # noqa: E402
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\n=== {PASS}/{PASS + FAIL} PASS ===")

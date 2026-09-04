@@ -29,6 +29,7 @@
   同日10:22にChamiが撤回した(半日で往復した)。配線が生きている証明= scripts/_common/test_dept_ja_wiring.py
 """
 import os
+import unicodedata
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # 5SecMovieMaker/scripts/_common → 5SecMovieMaker → SougouStartFolder
@@ -54,7 +55,16 @@ EXTRA_JA = {
     "learning": "学習部門",
 }
 
-_cache = {"mtime": None, "ja": {}, "alias": {}, "ambig": set()}
+_cache = {"mtime": None, "ja": {}, "alias": {}, "ambig": set(), "norm": {}}
+
+
+def _norm(s):
+    """引く時の鍵。大小・全半角の揺れを潰す(NFKC + casefold)。★表示には使わない。
+
+    ★2026-09-05= Chamiは `ad研究室` と小文字で3回書いていて、正式表記は `AD研究室`。
+      揺れの1個ずつに alias を足すと台帳が字面の在庫置き場になる= 読み手側で吸う。
+    """
+    return unicodedata.normalize("NFKC", (s or "").strip()).casefold()
 
 
 def _registry_ja():
@@ -87,6 +97,23 @@ def _registry_ja():
                     ambig.add(a)                     # 2部門が同じ通称= 解決しない(後述)
                 al[a] = k
         _cache["alias"], _cache["ambig"] = al, ambig
+        # ★正規化鍵の表。同じ鍵が2つのスラッグを指したら**捨てる**(曖昧なまま倒さない)。
+        norm = {}
+
+        def _put(key, slug):
+            k = _norm(key)
+            norm[k] = slug if norm.get(k, slug) == slug else None
+
+        for slug, dj in _cache["ja"].items():
+            _put(slug, slug)
+            _put(dj, slug)
+        for a, slug in al.items():
+            if a not in ambig:
+                _put(a, slug)
+        for slug, dj in EXTRA_JA.items():
+            _put(slug, slug)
+            _put(dj, slug)
+        _cache["norm"] = {k: v for k, v in norm.items() if v}
         _cache["mtime"] = m
     except Exception:
         return _cache["ja"]          # yaml不在・破損・権限。報告は止めない
@@ -134,7 +161,11 @@ def dept_slug(name, default=""):
             return s
         if s in _cache["ambig"]:                 # ③通称。ただし曖昧なら倒さない
             return default
-        return _cache["alias"].get(s) or default
+        hit = _cache["alias"].get(s)
+        if hit:
+            return hit
+        # ④大小・全半角の揺れ(`ad研究室` → `AD研究室`)。★通称を1個ずつ足す代わりの吸い口。
+        return _cache["norm"].get(_norm(s)) or default
     except Exception:
         return default                           # fail-safe: 解決に失敗しても呼び側は落とさない
 
@@ -146,6 +177,47 @@ def dept_alias_map():
         return {k: v for k, v in _cache["alias"].items() if k not in _cache["ambig"]}
     except Exception:
         return {}
+
+
+def dept_scan_map():
+    """**文中を走査する側**のための {字面: スラッグ}。スラッグ + display_ja + 通称。
+
+    ★2026-09-05(C-073の後始末・HQ-0241)= `pending_age_watch.EXTRA_ALIASES` が
+      同じ表をコード側に持っていて二重管理だった。表はここ1本(ORG-11)。
+    ★揺れの変種(大小・全半角)は **ASCII英字と非ASCIIが混ざった名前にだけ**足す。
+      純ASCIIの短い名前には足さない= 小文字 `hq` は台帳本文に79回出る
+      (`hq_open_items.md` / `--dept hq`・2026-09-05 実測)。**部分一致の走査で拾うと
+      行の左端を取って持ち主を奪う。**引き当て(dept_slug)は正規化で吸うが、走査は吸わない。
+    ★同じ字面が2部門を指す時は入れない(曖昧なまま倒さない= dept_slug と同じ向き)。
+    """
+    try:
+        ja = _registry_ja()
+        out = {}
+
+        def _put(name, slug):
+            if not name:
+                return
+            if out.get(name, slug) != slug:
+                out[name] = None                 # 衝突= 捨てる
+            else:
+                out[name] = slug
+
+        for slug, dj in ja.items():
+            _put(slug, slug)
+            _put(dj, slug)
+        for a, slug in dept_alias_map().items():
+            _put(a, slug)
+        for name, slug in list(out.items()):
+            if not slug:
+                continue
+            if not (any(("a" <= c.lower() <= "z") for c in name) and any(ord(c) > 127 for c in name)):
+                continue                         # 純ASCII / 英字なしは変種を作らない
+            for v in (unicodedata.normalize("NFKC", name), name.upper(), name.lower()):
+                if v != name and v not in out:
+                    out[v] = slug
+        return {k: v for k, v in out.items() if v}
+    except Exception:
+        return {}                                # fail-safe: 走査側は「持ち主不明」で回る
 
 
 def dept_ja(slug, with_slug=False):
