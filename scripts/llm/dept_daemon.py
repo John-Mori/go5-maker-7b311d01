@@ -7059,6 +7059,20 @@ class Daemon:
             return MACHINE_PERSONA
         return who or self.effective_persona()
 
+    def gate_speaker(self, who=None):
+        """話者依存ゲート(C/D/D-2/H)が「誰の口調で判定するか」。★名義と同じ1本から引く。
+
+        ★2026-09-04 第2の口(🔥DEF-aegis-gl-08c9e9de6d の残り)= 名義はゲートGから
+          outgoing_persona へ寄せたのに、**ゲートC/D は effective_persona を見たまま**だった。
+          実物= 12:11:20 tone(persona=アメス・reason=signature_absent)→ 12:11:21 tone_rewrite
+          →「時間切れで打ち切った。」が「打ち切った**わ**。」へ書き直され、12:11:22 に
+          persona=メタルギアMk.II で送信(msg 1545270023789092954)。名前は機械・口調はアメス=
+          ゲートGを塞いだのと**同じねじれが別の口から出ていた**。
+        ★ここを1行の別名にしてあるのは、判定を2つ持つためではなく**変異で赤にできる継ぎ目**
+          が要るから(C-053)。中身は outgoing_persona へ丸ごと委譲する。
+        """
+        return self.outgoing_persona(who)
+
     def effective_character(self):
         if self._member:                 # 名指し便=そのメンバーのcharacterfileで応答する
             path = self._member["character"]
@@ -8939,7 +8953,10 @@ class Daemon:
             #   ★fail-open=検査例外は握り潰して元ブロックを使う(audit_naming が保証)。
             _fixed_blocks = []      # ★_roster は上(分割の手前)で組んである= 同じ1本を使い回す
             for _who, _part in _blocks:
-                _speaker = _who or self.effective_persona()
+                # ★話者は名義と同じ1本から引く(gate_speaker → outgoing_persona)。
+                #   人格の便では `_who or effective_persona()` と1ミリも変わらない。
+                #   変わるのは**機械名義の便だけ**= 誰の口調にも寄せない(第2の口を塞ぐ)。
+                _speaker = self.gate_speaker(_who)
                 # ★★出力ゲートF(名義の取り違え)= C/Dより**先**に走らせる(audit_speaker の説明参照)。
                 #   `[名前]` で名乗った便だけが対象。名義を差し替えてから C/D に渡すので、
                 #   下のゲートは**正しい話者**の写像で判定する=誤った書き直しが起きない。

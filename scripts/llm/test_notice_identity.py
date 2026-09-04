@@ -18,6 +18,7 @@
     2 … 送信側が名義を自前で決める(判定を2箇所に戻す)
     3 … ゲートGの包み直し先を effective_persona 固定にする(判定を2箇所に戻す)
     4 … machine_named_delivery が _liveblog_notice を見ない
+    5 … 話者依存ゲート(C/D/D-2/H)が effective_persona を見る(=2026-09-04 12:11 の実装)
 """
 import os
 import sys
@@ -44,6 +45,9 @@ elif MUT == 3:                    # 包み直す先を既定人格に固定(ゲ�
         lambda self, who=None: who or self.effective_persona())
 elif MUT == 4:                    # ゲートGが倒した機械名義を名義判定が見落とす
     D.machine_named_delivery = lambda relay_nack, liveblog_notice: bool(relay_nack)
+elif MUT == 5:                    # 口調ゲートが既定人格を見る(第2の口が開いたままの実装)
+    D.Daemon.gate_speaker = (
+        lambda self, who=None: who or self.effective_persona())
 
 FAIL = []
 N = [0]
@@ -143,6 +147,35 @@ ok(not never, "包み直しに入った便が同時に機械名義になる状�
 forced = daemon(relay_nack=True, wrapped=True)
 ok(forced.machine_named() and forced._liveblog_wrapped,
    "★手で作れば検知条件は成立する(=安全網が発火する形を持っている)")
+
+print("== 7) ★第2の口= 話者依存ゲート(C/D/D-2/H)も同じ名義から話者を引く ==")
+# 実物(2026-09-04 12:11 hq)= ゲートGは通さなかったのに、口調ゲートDが話者を「アメス」として
+# 判定し `signature_absent` を出し、D-2が「打ち切った。」→「打ち切ったわ。」へ書き直した。
+# 送信名義は メタルギアMk.II。名前は機械・口調はアメス= ゲートGと同じねじれの別の口。
+# ★本物の tone_gate.tone_corrections を、話者だけ差し替えて呼ぶ(ソースの文字列一致は書かない)。
+import tone_gate as T
+
+_rules = T.load_tone_rules(D.TONE_RULES_PATH)
+ok(bool(_rules), "口調ルールが読める(=このゲートは生きている)")
+hq_nack = daemon(dept="hq", persona="アメス", relay_nack=True)
+hq_plain = daemon(dept="hq", persona="アメス")
+
+ok(hq_nack.gate_speaker(None) == MP, "打ち切り便のゲート話者は %s" % MP,
+   "実際=%r" % hq_nack.gate_speaker(None))
+ok(hq_plain.gate_speaker(None) == "アメス", "普通の便のゲート話者は既定人格(挙動は不変)")
+ok(hq_plain.gate_speaker("シャビ・アロンソ") == "シャビ・アロンソ",
+   "[名前] が解決していればその人(挙動は不変)")
+
+_base = T.tone_corrections("アメス", "hq", raw, _rules) or {}
+ok([v.get("reason") for v in (_base.get("remaining") or [])] == ["signature_absent"],
+   "★基準線= 既定人格を話者にすると口調ゲートが本当に噛む(=この検体は罠として生きている)",
+   "実際=%r" % (_base.get("remaining"),))
+
+_fixed = T.tone_corrections(hq_nack.gate_speaker(None), "hq", raw, _rules) or {}
+ok(not (_fixed.get("remaining") or []) and not (_fixed.get("applied") or []),
+   "★打ち切り便は口調ゲートに1件も引っかからない(=誰の口調へも寄せられない)",
+   "残=%r 直=%r" % (_fixed.get("remaining"), _fixed.get("applied")))
+ok(_fixed.get("fixed", raw) == raw, "★打ち切り便の本文は1文字も書き換わらない")
 
 print()
 print("== %d/%d %s ==" % (N[0] - len(FAIL), N[0], "PASS" if not FAIL else "FAIL"))
