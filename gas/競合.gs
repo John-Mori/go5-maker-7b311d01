@@ -631,6 +631,91 @@ function runCompetitorDailyWatched() {
 }
 
 // ============================================================
+// 【方向2・総量設計】競合_日次の取得をGAS urlfetch枠から外へ出す(PC側yt-dlp収集との受け渡し)。
+//   背景(REQ-research-room-de08ad55fc / Chami 2026-08-22「これはインシデントよ」):
+//     競合_日次は2026-08-18から17日間凍結。真因は競合側ではなく本体=snapshotStats(5分毎)+
+//     refreshClicks(毎時)がGASプロジェクト全体のUrlFetchApp日次枠(2万)を夜通し食い尽くし、
+//     04:00の competitor ジョブ(自身は約30fetchと軽い)が ytVideosStats_ の全fetchで枯渇例外→
+//     snapped=0 になること=「競合ジョブ単独では回復不可」(runCompetitorDaily の failReason が明記)。
+//   対策= 映像側の取得を丸ごとPC(yt-dlp・APIキー不要・PC自身の回線)へ移し、GASは台帳/日次の
+//     読み書きだけ持つ(comp_frames系の既存足回りと同じ形)。下の2口はどちらも SpreadsheetApp のみ
+//     =UrlFetchApp を一切使わない=本体の枠枯渇と無関係に必ず動く。既存タブ/列/挙動は不変・追記のみ。
+// ============================================================
+
+// ---- PC側日次収集の対象を返す(読み取り専用・urlfetch非依存)。追跡窓内の既存windowVids＋watchチャンネル ----
+function compDailyPending_() {
+  var watch = compWatchChannels_();               // [{rowIndex, channelId, uploads}]・cid未解決行のみurlfetch(解決済みは0回)
+  var cutoff = new Date().getTime() - COMP_WINDOW_DAYS * 86400000;
+  var vidSh = compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
+  var map = headerMap_(vidSh);
+  var last = vidSh.getLastRow();
+  var windowVids = [];
+  if (last >= 2) {
+    var vv = vidSh.getRange(2, 1, last - 1, vidSh.getLastColumn()).getValues();
+    vv.forEach(function (r) {
+      var vid = String(r[map['video_id'] - 1] || '').trim(); if (!vid) return;
+      var pub = r[map['公開日時'] - 1];
+      var t = pub ? new Date(pub).getTime() : 0;
+      if (t && t >= cutoff) windowVids.push({ videoId: vid, channelId: String(r[map['channel_id'] - 1] || '').trim() });
+    });
+  }
+  var channels = watch.map(function (w) { return { channelId: w.channelId, uploads: w.uploads }; });
+  return { ok: true, windowDays: COMP_WINDOW_DAYS, channels: channels, count: windowVids.length, windowVids: windowVids };
+}
+
+// ---- PC側yt-dlpが取った日次スナップを書き戻す(追記のみ・urlfetch非依存)。新着videosの台帳upsertも受ける ----
+function compDailyWriteback_(body) {
+  var tz = Session.getScriptTimeZone() || 'Asia/Tokyo';
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+  // 1) 新着動画(PC側discovery)を台帳へ upsert=新規のみ追記(冪等)。窓が枯れないよう充実側も外へ出す。
+  var newVideos = 0;
+  var vids = body.videos || [];
+  if (vids.length) {
+    var recs = [];
+    vids.forEach(function (v) {
+      var id = String(v.video_id || v.videoId || '').trim(); if (!id) return;
+      recs.push({ video_id: id, channel_id: String(v.channel_id || v.channelId || '').trim(),
+                  title: v.title || '', publishedAt: v.publishedAt || v.published_at || '',
+                  durationSec: (v.durationSec != null ? v.durationSec : (v.duration_sec != null ? v.duration_sec : 0)) });
+    });
+    if (recs.length) {
+      var vSh = compSheet_(COMP_VID_SHEET, COMP_VID_HEADERS);
+      var before = vSh.getLastRow();
+      compUpsertVideos_(recs);
+      newVideos = Math.max(0, vSh.getLastRow() - before);
+    }
+  }
+
+  // 2) 日次スナップを競合_日次へ append(SpreadsheetApp書き込み=UrlFetchApp日次枠に一切依存しない)。
+  var daily = body.daily || [];
+  var dailySh = compSheet_(COMP_DAILY_SHEET, COMP_DAILY_HEADERS);
+  var drows = [];
+  daily.forEach(function (d) {
+    var vid = String(d.videoId || d.video_id || '').trim(); if (!vid) return;
+    var views = (d.views == null || d.views === '') ? '' : d.views;
+    var likes = (d.likes == null || d.likes === '') ? '' : d.likes;
+    var comments = (d.comments == null || d.comments === '') ? '' : d.comments;
+    drows.push([today, vid, String(d.channelId || d.channel_id || ''), views, likes, comments]);
+  });
+  if (drows.length) dailySh.getRange(dailySh.getLastRow() + 1, 1, drows.length, COMP_DAILY_HEADERS.length).setValues(drows);
+
+  // 3) 競合_日次ステータスへ1行(silent green封じの読み手 comp_status がPC経路の成否を読める)。
+  //    ok= 1行でも書けた or 追跡窓が空(=新規登録直後等の正常系)。窓>0で0行なら実失敗=ok:false。
+  var attempted = (body.attempted != null) ? Number(body.attempted) : drows.length;
+  var okStatus = drows.length > 0 || attempted === 0;
+  try {
+    var sh = compSheet_(COMP_STATUS_SHEET, COMP_STATUS_HEADERS);
+    var nowJst = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+    sh.appendRow([nowJst, okStatus, drows.length, attempted,
+      (body.channels != null ? body.channels : ''), newVideos,
+      (body.elapsedMs != null ? body.elapsedMs : ''), 'pc_writeback', 'pc']);
+  } catch (se) { Logger.log('競合_日次ステータス(PC) append失敗: ' + String(se)); }
+
+  return { ok: true, written: drows.length, newVideos: newVideos, attempted: attempted, date: today };
+}
+
+// ============================================================
 // 週次ジョブ: 検索で競合候補を発見(candidate止まり・自動watch化しない)
 // ============================================================
 function runCompetitorDiscovery() {
