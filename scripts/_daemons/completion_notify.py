@@ -196,8 +196,26 @@ def landed_msg(evidence):
 #   - 直前が英数字・`_`・`.`・`-` なら拾わない(`mylocal/…` のような別語を切り出さないため)。
 #     ★`\` と `/` は除いていない= 絶対パス `D:\…\5SecMovieMaker\local\x.md` の尾を拾うため。
 #   - 括弧や読点、コードの囲みは終端として扱う(本文の続きを飲み込まない)。
-SPOT_RE = re.compile(r"(?<![0-9A-Za-z_.\-])((?:local|docs)[\\/][^\s\u3000`\"'、。()（）「」『』\[\]<>*|]+)")
+#   - ★`00_AI-HQ/` を足した(2026-09-05)。実物= hr-room の返信 msg 1545529844522164286 が
+#     「置き場= `00_AI-HQ/status/hq_open_items.md` の HQ-0226」と名乗っていたのに、
+#     この正規表現が `local|docs` しか見ていなかったので『見つからなかった』で外した。
+#     組織の台帳・裁定・status は 00_AI-HQ 側に在る= 拾えないと C-071 が半分しか効かない。
+SPOT_RE = re.compile(r"(?<![0-9A-Za-z_.\-])((?:local|docs|00_AI-HQ)[\\/][^\s\u3000`\"'、。()（）「」『』\[\]<>*|]+)")
 SPOT_TRIM = "。、,.:;`*)）」』】>\"'"
+
+# 拾ったパスの実在を確かめる時の起点。`00_AI-HQ/` は repo の**外**(D:\SougouStartFolder\00_AI-HQ)
+# に在るので、ROOT を足すと必ず存在しないことになる= 静かに全部落ちる。
+SPOT_OUTSIDE = ("00_AI-HQ/",)
+
+
+def spot_abs(rel):
+    """相対パスを、実在を確かめられる絶対パスへ直す(起点が repo の外の場合が在る)。
+
+    ★`ROOT` はモジュール変数を都度読む= テストが根を差し替えても付いてくる。
+    """
+    if rel.startswith(SPOT_OUTSIDE):
+        return os.path.join(os.path.dirname(ROOT), rel)
+    return os.path.join(ROOT, rel)
 
 # ★「置き場だ」と本文が名乗っている語。パスの**直前 SPOT_NEAR 字**に在れば、それが本命。
 #   ★窓を80字・語を「答え/紙/成果」まで広げたら実測で誤爆した= 「便2の答えは…」の直後に
@@ -229,7 +247,7 @@ def find_spot(text):
         if not rel or rel.endswith("/"):
             continue
         try:
-            if not os.path.exists(os.path.join(ROOT, rel)):
+            if not os.path.exists(spot_abs(rel)):
                 continue
         except Exception:
             continue        # 変な文字列で落ちない(fail-open)

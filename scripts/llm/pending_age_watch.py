@@ -57,7 +57,12 @@ SEND_DRY = False         # 真= dispatch.py は本当に起動するが投函だ
 
 # ★「入れた(確認待ち)」。★直前が「 の時は**その語について喋っている行**= 対象外
 #   (例= HQ-0236「『入れた(確認待ち)』の在庫84行を片付ける」は棚卸しの起票であって確認待ちではない)
-PENDING = re.compile(r"(?<!「)入れた\(確認待ち\)")
+#   ★括弧の中に続きを書いた形も拾う= `入れた(確認待ち・所有=hq)`(C-072・2026-09-05 HQ裁定)。
+#     旧`入れた\(確認待ち\)`だと閉じ括弧が来ないので **scan の入口(187行)で行ごと落ちて**
+#     いた。誤配が直るどころか案件が消える= 実測で確かめた(local/_work/c072_probe.py)。
+PENDING = re.compile(r"(?<!「)入れた\(確認待ち[^)）\n]*[)）]")
+# ★所有部門の明示。札の直後の部門名を当てに行く前に、**書いてあるならそれを採る**(C-072)。
+OWNER_MARK = re.compile(r"所有\s*[=＝]\s*([A-Za-z0-9_\-]+|[^\s)）、。,]+)")
 STAR_DATE = re.compile(r"★\s*(\d{4})-(\d{2})-(\d{2})")
 ANY_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 ITEM_ID = re.compile(r"\b((?:HQ|ORG|INC)-\d{2,5})\b")
@@ -152,8 +157,20 @@ def parse_line(text, alias):
     # 持ち主は「入れた(確認待ち)・<部門>」の形で札の直後に書かれることが多い= そこを先に見る。
     # 無ければ行の一番左(見出し・commit札が行頭側に在る)。★どちらも当て推量ではなく字面。
     owner = None
+    # ★書いてあるなら当て推量しない= `所有=hq` / `所有=研究室HQ`(C-072)。
+    #   起点(誰が言い出したか)と所有(誰が入れたか)が裸で並ぶ行を機械が読み違えた実物
+    #   (DISPATCH-research-room-1788547775012)への直し。
+    om = OWNER_MARK.search(masked)
+    if om:
+        tok = om.group(1).strip()
+        if tok in alias:
+            owner = alias[tok]
+        else:
+            near = _leftmost(tok, alias)
+            owner = near[1] if near else None
+
     pm = PENDING.search(masked)
-    if pm:
+    if not owner and pm:
         near = _leftmost(masked[pm.end():pm.end() + 30], alias)
         owner = near[1] if near else None
     if not owner:

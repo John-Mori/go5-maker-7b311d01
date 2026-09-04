@@ -176,6 +176,35 @@ def main():
     check("★印だけだと日齢不明が増える(1行 → 2行)", narrow["unknown"] == 2)
     check("行内の日付も読む本実装なら不明は1行", st["unknown"] == 1)
 
+    print("\n[8] ★C-072= 札に `所有=` を書いた行(HQが台帳側をこの形に直す)")
+    # 実物の壊れ方= HQ-0232 は起点(改修部門β)が行の左に、所有(研究室HQ)が右に裸で並んでいて、
+    # 機械が左を持ち主と読んで誤配した(DISPATCH-research-room-1788547775012)。
+    c72 = os.path.join(tempfile.mkdtemp(prefix="pend72_"), "hq_open_items.md")
+    io.open(c72, "w", encoding="utf-8").write(
+        "- [ ] **★%s 改修部門βの指摘= ★入れた(確認待ち・所有=hq)**  … `HQ-9101`\n"
+        "- [ ] **★%s 改修部門βの指摘= ★入れた(確認待ち・所有=研究室HQ)**  … `HQ-9102`\n"
+        % (d(5), d(5)))
+
+    # 壊れた側(動く別実装)= C-072前の読み手。閉じ括弧が直後に来る形しか知らない。
+    old_pending, old_mark = P.PENDING, P.OWNER_MARK
+    P.PENDING = P.re.compile(r"(?<!「)入れた\(確認待ち\)")
+    P.OWNER_MARK = P.re.compile(r"(?!)")     # `所有=` を読まない= 札の直後を当てに行く
+    try:
+        red = P.scan(NOW, files=[c72])
+    finally:
+        P.PENDING, P.OWNER_MARK = old_pending, old_mark
+    check("★赤= C-072前の読み手は `所有=` の行を1行も拾えない(誤配以前に消える)", red == [])
+
+    green = {i["key"]: i for i in P.scan(NOW, files=[c72])}
+    check("★緑= `所有=hq`(スラッグ)を所有部門と読む",
+          green.get("HQ-9101", {}).get("dept") == "hq")
+    check("★緑= `所有=研究室HQ`(和名)も同じ部門に解ける",
+          green.get("HQ-9102", {}).get("dept") == "hq")
+    check("★行の左に居る起点(改修部門β)を持ち主と読み違えない",
+          all(v["dept"] != "system-engineer-b" for v in green.values()))
+    check("★従来の書式(札の直後に部門名)も壊れていない",
+          by["HQ-9001"]["dept"] == "system-engineer-b")
+
     print("\n== ok %d / NG %d ==" % (PASS, FAIL))
     return 1 if FAIL else 0
 

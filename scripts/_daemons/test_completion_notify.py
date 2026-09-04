@@ -13,6 +13,7 @@
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -334,6 +335,50 @@ def test_spot_path():
         s = run()
         chk("P-5 送信台帳に本文が無い便は部屋の直近(recent_)から拾う",
             len(s) == 1 and spot_rel in s[0]["body"], "")
+
+        # --- 00_AI-HQ 側の置き場(実物= hr-room msg 1545529844522164286 で外した形)
+        #     組織の台帳・裁定・status は repo の外(D:\SougouStartFolder\00_AI-HQ)に在る。
+        hq_rel = "00_AI-HQ/status/hq_open_items.md"
+        os.makedirs(os.path.join(os.path.dirname(SANDBOX), "00_AI-HQ", "status"), exist_ok=True)
+        hq_abs = os.path.join(os.path.dirname(SANDBOX), hq_rel)
+        with open(hq_abs, "w", encoding="utf-8") as f:
+            f.write("HQ-0226 (テスト)")
+        hq_reply = ("アロンソコーチ、成果の置き場=紙はある。\n"
+                    f"- 置き場= `{hq_rel}` の **HQ-0226**、`2026-09-05 03:49 実測`行。\n"
+                    "ハブの投函口を通った画像は0枚(`local/llm/persona_queue_poller.jsonl` 未作成)。")
+        write_ledgers([done("3008", "hr-room", 60, landed="7008")],
+                      [letter("3008", "hr-room", "aegis-gl", True)])
+        write_audit([audit("7008", hq_reply)])
+        # 赤: `local|docs` しか見ない旧い正規表現へ戻す(動く別実装・C-053)
+        old_re = cn.SPOT_RE
+        cn.SPOT_RE = re.compile(
+            r"(?<![0-9A-Za-z_.\-])((?:local|docs)[\\/]"
+            r"[^\s\u3000`\"'、。()（）「」『』\[\]<>*|]+)")
+        try:
+            s_red = run()
+        finally:
+            cn.SPOT_RE = old_re
+        chk("P-7 ★赤= local|docs しか見ない旧実装は 00_AI-HQ の置き場を外す",
+            len(s_red) == 1 and hq_rel not in s_red[0]["body"]
+            and "見つからなかった" in s_red[0]["body"], "")
+
+        write_ledgers([done("3009", "hr-room", 60, landed="7009")],
+                      [letter("3009", "hr-room", "aegis-gl", True)])
+        write_audit([audit("7009", hq_reply)])
+        s = run()
+        chk("P-7b ★緑= 00_AI-HQ 配下の置き場を拾う(実在確認は repo の外を根にする)",
+            len(s) == 1 and hq_rel in s[0]["body"], "")
+        chk("P-7c 同じ本文で根拠として引いたログ側は拾わない(名乗りの在る方が勝つ)",
+            len(s) == 1 and "persona_queue_poller" not in s[0]["body"], "")
+
+        os.remove(hq_abs)
+        write_ledgers([done("3010", "hr-room", 60, landed="7010")],
+                      [letter("3010", "hr-room", "aegis-gl", True)])
+        write_audit([audit("7010", hq_reply)])
+        s = run()
+        chk("P-7d 00_AI-HQ 側でも実在しないパスは案内しない",
+            len(s) == 1 and hq_rel not in s[0]["body"]
+            and "見つからなかった" in s[0]["body"], "")
 
         # --- 台帳が1つも無くても落ちない(fail-open)
         os.remove(cn.SEND_AUDIT)
