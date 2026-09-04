@@ -88,6 +88,7 @@
       if (!cur && keys.length >= VMAX) { delete verdicts[keys[0]]; } // 古いものから1件落とす(実体は触らない)
       verdicts[cid] = { state: state, prefix: prefix || (cur && cur.prefix) || '', t: Date.now(), first: (cur && cur.first) || Date.now(), n: ((cur && cur.n) || 0) + 1 };
       push('verdict', { cid: cid, state: state, prefix: prefix || '' }); // 状態が変わった瞬間だけ時系列にも残す
+      if (state === 'stalled') { _hadFailure = true; scheduleUpload_('stalled'); } // 詰まりが起きたらサーバへ自動着地
     } catch (e) {}
   }
   // 未解決(まだ画像が出ていない)判定を集計する。stalled と missing は絶対に混ぜない。
@@ -161,15 +162,56 @@
     }
   }
 
-  var API = { push: push, verdict: verdict, dump: dump };
+  // ── サーバへ自動着地(モドリッチ依頼REQ-research-room-f67a6c602b・Step1)──────────
+  //   Chamiのクリップボード貼付を要件から外す=「人が貼らないと読めない診断は診断じゃない」。
+  //   ?imgdiag=1 の時、または実際に詰まり(stalled)/未出があった時だけ GAS(SpreadsheetApp口)へ
+  //   ベストエフォート送信。平常(全部OK)では一切送らない。sendBeacon優先(pagehideでも生き残る・
+  //   text/plain扱い=CORSプリフライト無し)。失敗は無視(fail-open・呼び側ロジックに影響しない)。
+  var SID = null, _upTimer = null, _lastUp = 0, _hadFailure = false, _lastSig = '';
+  function sid_() {
+    if (SID) return SID;
+    try { SID = (root.crypto && root.crypto.randomUUID) ? root.crypto.randomUUID() : (String(Date.now()) + '-' + Math.random().toString(36).slice(2, 8)); }
+    catch (e) { SID = String(Date.now()); }
+    return SID;
+  }
+  function gasUrl_() { try { return ((root.localStorage && root.localStorage.getItem('bsky_gas_url')) || '').trim(); } catch (e) { return ''; } }
+  function imgdiagOn_() { try { return /[?&]imgdiag=1(&|$)/.test(String((root.location && root.location.search) || '')); } catch (e) { return false; } }
+
+  function upload_(reason) {
+    try {
+      var url = gasUrl_();
+      if (!url) return;
+      var vs = verdictSummary_();
+      // 送るに値するか= 明示調査(?imgdiag=1) か、実際に未出/詰まりがある時だけ(平常時は送らない)
+      if (!imgdiagOn_() && !(vs.stall.length || vs.pend.length)) return;
+      var sig = vs.ok + '/' + vs.stall.length + '/' + vs.pend.length + '/' + vs.miss;
+      var now = Date.now();
+      if (reason !== 'pagehide' && sig === _lastSig && (now - _lastUp) < 15000) return; // 同じ状態の連投を抑える
+      _lastSig = sig; _lastUp = now;
+      var payload = JSON.stringify({
+        op: 'imgdiag', sid: sid_(), reason: String(reason || ''),
+        ua: String((root.navigator && root.navigator.userAgent) || ''),
+        url: String((root.location && root.location.href) || ''),
+        summary: summarize_(), verdict: vs, dump: dump()
+      });
+      var sent = false;
+      try { if (root.navigator && root.navigator.sendBeacon) sent = root.navigator.sendBeacon(url, payload); } catch (e) {}
+      if (!sent) { try { root.fetch(url, { method: 'POST', body: payload, keepalive: true, mode: 'no-cors' }); } catch (e) {} }
+    } catch (e) {}
+  }
+  function scheduleUpload_(reason) {
+    try { if (_upTimer) return; _upTimer = setTimeout(function () { _upTimer = null; upload_(reason || 'auto'); }, 3000); } catch (e) {}
+  }
+
+  var API = { push: push, verdict: verdict, dump: dump, upload: upload_ };
   root.Go5ImgDiag = API;
 
   // 起動時に前セッションの記録を復元し、離脱直前(リロード/バックグラウンド化)に退避する。
   loadPrev_();
   try {
-    root.addEventListener('pagehide', persist_);
+    root.addEventListener('pagehide', function () { persist_(); if (imgdiagOn_() || _hadFailure) upload_('pagehide'); });
     root.addEventListener('visibilitychange', function () {
-      if (root.document && root.document.visibilityState === 'hidden') persist_();
+      if (root.document && root.document.visibilityState === 'hidden') { persist_(); if (imgdiagOn_() || _hadFailure) upload_('pagehide'); }
     });
   } catch (e) {}
 
