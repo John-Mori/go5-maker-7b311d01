@@ -8785,7 +8785,19 @@ class Daemon:
                 #   = 既定人格の名義で丸ごと出る。実物(改修α 2026-09-02 00:25)はここを通った。
                 #   ★因子①はこの if(多人格部屋)と下の条件(ブロックが1つ・名義未解決)で見る。
                 #     残りの因子②③④は audit_liveblog が見る。
-                if len(_blocks) == 1 and _blocks[0][0] is None:
+                # ★★2026-09-04 Chami「誰の口調やねんこれ」(msg 1545217948535234650)への処置。
+                #   **既に機械名義で出すと決まっている便(_relay_nack)はゲートGを通さない**。
+                #   実物= 打ち切り通知 msg 1545215532939218985。format_timeout_result が作る文は
+                #   素の機械語(名乗り無し・一人称無し)= ゲートGの4因子に当たり、
+                #   effective_persona(この部屋ならデブライネ)の声へ**包み直されて**いた。
+                #   ところが送信側(下の _is_notice)は同じ便を **メタルギアMk.II** 名義で出す=
+                #   「メタルギアの名前でデブライネが喋る」ねじれになる(ログ実測=
+                #   09-02 21:07 / 09-03 11:55 / 19:20 / 09-04 08:34 の4便すべてで
+                #   「ゲートG・人格へ包み直した」が発火)。ゲートGはそもそも
+                #   **人格の顔で生ログを出さないため**の網で、機械名義の告知は守る対象ではない
+                #   (包み直せなかった時にゲートG自身が倒す先が、まさにこの機械名義だ)。
+                if (len(_blocks) == 1 and _blocks[0][0] is None
+                        and not getattr(self, "_relay_nack", False)):
                     _lb_text, _lb = audit_liveblog(
                         self.dept, self.effective_persona(), _blocks[0][1],
                         resolve=_tag_resolve, rec=rec)
