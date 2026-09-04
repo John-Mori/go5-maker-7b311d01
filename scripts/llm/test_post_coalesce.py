@@ -174,6 +174,46 @@ check("機構の便しか無ければ束ねない",
 check("機構の便では relay を呼ばない", len(fake3.calls) == 0)
 q.close()
 
+print("[7] ★2026-09-04 上位室への展開が生きている(HQ DISPATCH-aegis-gl-1788502002632)")
+# ★config の文字列を読むのではなく、**本物の DEPT_CONF で組んだ Daemon に実際に束ねさせる**。
+#   守る規則= ①入れた室では after_run が本当に発火する ②入れていない室は覗きにすら行かない(C-035)。
+# 変異= `--mutate 1` で4室の coalesce_sec を 0 へ戻す(=展開前の実装)→ ここが赤くなる。
+_ROLLED = ["hr-room", "research-room", "kaizen-analyst", "aegis-gl"]
+if "--mutate" in sys.argv and sys.argv[sys.argv.index("--mutate") + 1] == "1":
+    for _r in _ROLLED:
+        d.DEPT_CONF[_r] = dict(d.DEPT_CONF[_r], coalesce_sec=0)
+
+for _r in _ROLLED:
+    check("%s に集約窓が入っている" % _r, _daemon(dept=_r)._coalesce_win() > 0)
+
+# ★実際に束ねるところまで通す(人事部門= 0歩目の実物が出た部屋)。
+db = _tmpdb()
+q = LeaseQueue(db)
+q.enqueue(_body("h1", "わりぃ、ミスった。ちゃみくんに変更だった"), msg_id="h1", dept="hr-room")
+dm = _daemon(dept="hr-room")            # ★窓は差し替えない= DEPT_CONF の実値で動かす
+dm._lease_q, dm._lease_qids = q, ["dummy"]
+fake7 = _FakeRelay("まとめ直した1本" * 20)
+d.session_relay = fake7
+out7 = dm._coalesce_after_run(_body("h0", "トトリはオタコンをオタコンさんと呼ぶ"), "h0", "元の返事")
+check("★人事部門で本走中に着いた訂正が1本へ束なる", len(fake7.calls) == 1 and "まとめ直した1本" in out7)
+check("束ね直しの便に訂正の本文が入っている",
+      bool(fake7.calls) and
+      "ちゃみくんに変更だった" in str(fake7.calls[0].get("content") or ""))
+q.close()
+
+# ★入れていない室は1バイトも変わらない(C-035)= 窓0なら覗きにすら行かない。
+db = _tmpdb()
+q = LeaseQueue(db)
+q.enqueue(_body("n1", "続きの便"), msg_id="n1", dept="past-room")
+dm = _daemon(dept="past-room")
+dm._lease_q, dm._lease_qids = q, ["dummy"]
+fake8 = _FakeRelay("x")
+d.session_relay = fake8
+check("未設定の室は従来どおり(束ねない)",
+      dm._coalesce_after_run(_body("n0", "本便"), "n0", "元の返事") == "元の返事")
+check("未設定の室では relay を呼ばない", len(fake8.calls) == 0)
+q.close()
+
 d.session_relay = _orig
 print("\n%d passed / %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

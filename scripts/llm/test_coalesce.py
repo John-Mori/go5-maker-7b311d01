@@ -107,8 +107,13 @@ check("集約窓を持たない部門(基盤部門)は待たない=従来どお�
 #   1分shorts部門 / webリサーチ部門 / 軍議 / 分析部門。
 #   ここで守りたいのは「何室に入っているか」ではなく **明示登録した部門にしか入らない**
 #   こと(C-035)= 台数を書くと部屋が増えるたびに嘘になるので、集合そのものを固定する。
+#   ★2026-09-04 さらに4室(研究室HQ DISPATCH-aegis-gl-1788502002632)= 人事部門 / ad研究室 /
+#     改善提案部門 / イージス研究室。選んだ根拠は**受信総数ではなくChami便の走行中着**の実測
+#     (dept_daemon._coalesce_after_run の ★★2026-09-04 に表がある)。★この行が赤くなったら
+#     「誰かが黙って窓を足した/消した」= 数字の裏取り無しに広げていないかを先に疑え。
 _WIN_DEPTS = {"copy-director": 45, "hq": 5, "manga-shorts": 5,
-              "web-research": 5, "gunji": 5, "shorts-analyst": 5}
+              "web-research": 5, "gunji": 5, "shorts-analyst": 5,
+              "hr-room": 5, "research-room": 5, "kaizen-analyst": 5, "aegis-gl": 5}
 check("★窓が入っているのは明示登録した部門だけ(他は設定キーが無い)",
       {k: c.get("coalesce_sec") for k, c in d.DEPT_CONF.items()
        if c.get("coalesce_sec")} == _WIN_DEPTS)
