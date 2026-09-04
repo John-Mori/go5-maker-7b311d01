@@ -35,11 +35,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.path.join(ROOT, "local")
 API = "https://discord.com/api/v10"
-FALLBACK = {"着手": "👀", "既読": "✅", "送信": "📮", "即答": "💬"}  # サーバー絵文字が未登録の間の代用
+FALLBACK = {"着手": "👀", "既読": "✅", "送信": "📮", "即答": "💬",
+            "再発": "🔁", "改悪": "📉"}  # サーバー絵文字が未登録/引けない時だけの代用
 # 呼び名(日本語) → Chami登録の実際の絵文字名。どちらで指定しても解決する
 # 即答=4段印の新設(Chami発案2026-07-19・QA合意)。サーバー絵文字sokutou作成までは💬で代用
+# 再発saihatsu/改悪kaiaku=2026-09-04トトリ仕様で追加(いずれもギルド登録済み)。
 ALIAS = {"着手": ["chakusyu", "着手"], "既読": ["kidoku", "既読"], "送信": ["sendms", "送信"],
-         "即答": ["sokutou", "即答"]}
+         "即答": ["sokutou", "即答"], "再発": ["saihatsu", "再発"], "改悪": ["kaiaku", "改悪"]}
+# ★IDアンカー(2026-09-04トトリ仕様):カスタム絵文字リアクションは name:id の **id** で
+#   描画される(name側は表示名で、Chamiが絵文字名を変えても id が実在すれば custom で出る
+#   =enjoh→kokyu が IDで出るのと同型)。ギルドの実名照合(resolve_emoji)を第一とし、
+#   照合が1件も当たらなくても、確定IDを持つ印はここで **必ず custom を撃つ**。
+#   「引けたのに unicode を残さない」=fail-open は本当に引けない印(即答等)だけに限定する。
+EMOJI_ID = {"着手": "1527252032308908172", "既読": "1527252197597777971",
+            "送信": "1527369203819085864", "再発": "1531748428827201772",
+            "改悪": "1541110670748156014"}
+EMOJI_NAME = {"着手": "chakusyu", "既読": "kidoku", "送信": "sendms",
+              "再発": "saihatsu", "改悪": "kaiaku"}  # name:id のname側(idで描くので表示名でよい)
 
 
 def read_token():
@@ -83,7 +95,12 @@ def api(path, token, method="GET"):
 
 
 def resolve_emoji(token, cid, name):
-    """サーバー絵文字を名前で解決して name:id へ。無ければUnicode代用(それも無ければそのまま)。"""
+    """印を name:id へ解決する。IDで撃つ経路に一本化(2026-09-04トトリ仕様)。
+    ①ギルドの実名照合を第一(新規追加した絵文字も即使える・現在の実名でnameが揃う)。
+    ②照合が1件も当たらなくても、確定IDを持つ印は EMOJI_ID で **必ず custom を撃つ**
+      (名前がズレても id が実在すれば描画される=劣化しない。受け入れ条件3)。
+    ③IDも持たない印(即答sokutou等)だけ unicode 代用へ落ちる(=本当に引けない時のfail-open)。
+    """
     try:
         ch = api(f"/channels/{cid}", token)
         gid = str((ch or {}).get("guild_id", "") or "")
@@ -95,6 +112,8 @@ def resolve_emoji(token, cid, name):
                         return f"{e['name']}:{e['id']}"
     except Exception:
         pass
+    if name in EMOJI_ID:                            # 実名照合が外れてもIDで custom を撃つ
+        return f"{EMOJI_NAME.get(name, name)}:{EMOJI_ID[name]}"
     return FALLBACK.get(name, name)
 
 
