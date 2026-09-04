@@ -30,12 +30,28 @@
 やらないこと(意図して):
   - **本体を運ばない**(C-023/C-050の線)。出すのは「完遂した」「何の依頼だったか」
     「請けた部屋のどのメッセージに着地したか」だけ。成果そのものは置き場にある。
-  - **置き場のパスは名乗らない**= 機械が知らないからだ。発注元(HQ)は「置き場のパスと要旨」を
-    求めたが、置き場を知っているのは請けた部門だけで、機械が持っているのは着地msg_idまで。
-    知らないものを書けば、それは**測っていない数字を語る**のと同じになる。着地msg_idを指せば
-    発注元はそこから置き場へ辿れる。
+  - **本文の全文は運ばない**(下の「置き場のパス」も、運ぶのは**パス1本だけ**)。
+  ★2026-09-05 訂正(C-071・HQ裁定 00_AI-HQ `93342a8`)= 初版はここに
+    「**置き場のパスは名乗らない= 機械が知らないからだ**」と書いていた。**それは嘘だった。**
+    実測= ad研究室が同夜3通の完遂通知を受け、答えに辿り着けたのは成果がたまたま紙だった1通だけ。
+    残り2通で「成果の在りかはそこに書いてある」は**偽**だった(2/3が空振り)。
+    機械は「知らない」のではなく、**持っているのに読んでいなかった**= 下の `spot`(置き場)を参照。
   - **推定で宛先を決めない。**`author`(人格名)から部門を逆引きする案は捨てた=同じ人格が
     複数の部屋に居るので静かに誤配する。発注元が決まらない便は**鳴らさず**、標準出力へ残す。
+
+置き場のパスを1本だけ運ぶ(C-071・2026-09-05):
+  HQの指示は「着地msg_idをキーに `local/discord_processed.jsonl` から返信の `content` を引け」
+  だった。**その台帳では引けない**= 実測で **着地msg_id 4365本のうち 0本**しか居ない。
+  あの台帳に載るのは**受け取った便**(dispatch/Chami発)だけで、請けた側が部屋へ**出した**返信は
+  一度も戻ってこないからだ。指示の狙い(機械は持っている)は正しいが、置き場が違う。
+  実際に本文を持っているのは次の2つ=
+    ① `local/llm/send_audit.jsonl` … 送信台帳。`msg_id` と `body` が並ぶ。**着地msg_idで直に引ける**。
+       ★ただし `body` が入り始めたのは **2026-09-04T23:25:29** から(977行中76行)。それ以前の便では
+         空振りする= 過去は救えない、これから効く(from_dept の時と同じ形)。
+    ② `local/llm/recent_<dept>.jsonl` … 部屋ごとの直近6往復。**依頼のmsg_id(=request_id)**で
+       引ける代わりに、返信は700字で切られている。①が無い時の控えとして使う。
+  拾ったパスは `os.path.exists` で**実在を確かめてからしか案内しない**(FP対策)。
+  拾えなかった時は「**そこに書いてある**」と言わずに、**見つからなかったと書く**(推定で埋めない=§1)。
 
 冪等(要件2「同じ依頼で二度鳴らすな」):
   鳴らしたら request_log へ `completion_notified` を**追記**する。既存行は1行も書き換えない。
@@ -67,6 +83,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -80,6 +97,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 REQUEST_LOG = os.path.join(LOCAL, "llm", "request_log.jsonl")
 PROCESSED = os.path.join(LOCAL, "discord_processed.jsonl")
+SEND_AUDIT = os.path.join(LOCAL, "llm", "send_audit.jsonl")   # ★C-071 返信の本文はここに在る
 DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
 JST = dt.timezone(dt.timedelta(hours=9))
 
@@ -174,6 +192,106 @@ def landed_msg(evidence):
     return ev[i + 12:].split()[0].strip() if ev[i + 12:].split() else ""
 
 
+# ★C-071 置き場のパスらしき文字列。`local/…` `docs/…` から始まる塊を拾う。
+#   - 直前が英数字・`_`・`.`・`-` なら拾わない(`mylocal/…` のような別語を切り出さないため)。
+#     ★`\` と `/` は除いていない= 絶対パス `D:\…\5SecMovieMaker\local\x.md` の尾を拾うため。
+#   - 括弧や読点、コードの囲みは終端として扱う(本文の続きを飲み込まない)。
+SPOT_RE = re.compile(r"(?<![0-9A-Za-z_.\-])((?:local|docs)[\\/][^\s\u3000`\"'、。()（）「」『』\[\]<>*|]+)")
+SPOT_TRIM = "。、,.:;`*)）」』】>\"'"
+
+# ★「置き場だ」と本文が名乗っている語。パスの**直前 SPOT_NEAR 字**に在れば、それが本命。
+#   ★窓を80字・語を「答え/紙/成果」まで広げたら実測で誤爆した= 「便2の答えは…」の直後に
+#     根拠として引かれた `local/discord_processed.jsonl` を成果と読んだ。散文に混ざる語は
+#     信号にならない。**名乗りの形(置き場= …)に近い語だけ・窓は狭く**。
+SPOT_WORDS = ("置き場", "置いた", "置いてある", "置きました", "置く先", "成果物", "納品",
+              "保存先", "出力先", "落とした", "落としました", "作成した", "正本は")
+SPOT_NEAR = 24
+# 答えの紙が集まる場所(名乗りが無くても、ここに在るなら成果と読んでよい)。
+# ★ここを `docs/` まで広げない= 参照した規約や設計書を成果と読み違える。
+SPOT_DIRS = ("local/consult_intel/", "docs/departments/")
+
+
+def find_spot(text):
+    """返信の本文から「実在する」置き場のパスを1本だけ拾う(C-071)。
+
+    ★FP対策は二段=
+      ① `os.path.exists` で**実在を確かめる**。無い場所は案内しない(知らないものを書かない・§4.55)。
+      ② ★実在するだけでは足りない。返信は根拠として `local/…` のログや台帳を平気で引用する
+         (実測= `local/discord_processed.jsonl` / `local/_reload_keeper.log` を拾ってしまった)。
+         それを「成果の置き場」と呼べば、**2/3が偽だった元の穴を向きを変えて再現する**だけだ。
+         → 本文が置き場だと名乗っている(直前80字に SPOT_WORDS)か、答えの紙が集まる場所
+           (SPOT_DIRS)に在るものだけを採り、**どちらでもなければ拾わない**。
+    ★1本だけ= 本体を運ばないという線(C-023/C-050)は動かさない。運ぶのは指先だけだ。
+    """
+    best = ""
+    for m in SPOT_RE.finditer(text or ""):
+        rel = m.group(1).replace("\\", "/").rstrip(SPOT_TRIM)
+        if not rel or rel.endswith("/"):
+            continue
+        try:
+            if not os.path.exists(os.path.join(ROOT, rel)):
+                continue
+        except Exception:
+            continue        # 変な文字列で落ちない(fail-open)
+        near = (text or "")[max(0, m.start() - SPOT_NEAR):m.start()]
+        if any(w in near for w in SPOT_WORDS):
+            return rel      # 名乗りが在る= これが本命。以降は見ない
+        if not best and rel.startswith(SPOT_DIRS):
+            best = rel      # 次点。名乗り付きが後から出てきたらそちらを採る
+    return best
+
+
+def load_reply_bodies(landed_ids):
+    """送信台帳(send_audit)から、着地msg_idの本文を引く。★1回走査。
+
+    `msg_id` は分割送信で複数入ることがある(空白/カンマ区切り)ので、割ってから照合する。
+    ★`body` を持たない行は飛ばす= 2026-09-04 23:25 より前の送信には本文が無い。
+    """
+    out = {}
+    if not landed_ids or not os.path.exists(SEND_AUDIT):
+        return out
+    with open(SEND_AUDIT, encoding="utf-8", errors="replace") as f:
+        for ln in f:
+            if '"msg_id"' not in ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except Exception:
+                continue
+            body = r.get("body") or ""
+            if not body:
+                continue
+            for mid in str(r.get("msg_id") or "").replace(",", " ").split():
+                if mid in landed_ids:
+                    out[mid] = body
+    return out
+
+
+def recent_reply(dept, rid):
+    """控えの取り出し口= 部屋ごとの直近6往復から、その依頼への返信を引く。
+
+    ★キーは**依頼のmsg_id**(request_id)。送信台帳に本文が無い古い便でも、部屋がまだ
+      覚えていれば拾える。★700字で切られているので、拾えないこともある(その時は黙る)。
+    """
+    p = os.path.join(LOCAL, "llm", f"recent_{dept}.jsonl")
+    if not rid or not os.path.exists(p):
+        return ""
+    try:
+        with open(p, encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                if str(rid) not in ln:
+                    continue
+                try:
+                    r = json.loads(ln)
+                except Exception:
+                    continue
+                if str(r.get("msg_id") or "") == str(rid):
+                    return r.get("reply") or ""
+    except Exception:
+        pass
+    return ""
+
+
 def already_replied(replies, to_dept, from_dept, after, consumed):
     """請けた側(from_dept)が発注元(to_dept)へ、完遂の**後**に自分で便を出しているか。
 
@@ -193,17 +311,25 @@ def already_replied(replies, to_dept, from_dept, after, consumed):
     return False
 
 
-def build_body(rid, dept, letter, done, landed):
-    """発注元の部屋へ出す本文。★短く。本体は運ばない(C-023/C-050)。"""
+def build_body(rid, dept, letter, done, landed, spot=""):
+    """発注元の部屋へ出す本文。★短く。本体は運ばない(C-023/C-050)。運ぶのはパス1本まで。"""
     work = (letter.get("work") or "").strip()
     lines = [f"[完遂通知] {dept} が請けた依頼が**完遂**した(自動・request_log発)。"]
     if work:
         lines.append(f"■依頼= {work}")
     lines.append(f"■記帳= request_id `{rid}` / state `{done['state']}` / {done['ts']}")
     if landed:
-        lines.append(f"■請けた側の返信= msg `{landed}`(**成果の在りかはそこに書いてある**)")
+        lines.append(f"■請けた側の返信= msg `{landed}`")
     else:
         lines.append("■請けた側の返信= 記帳に着地msg_idが無い(部屋を直接見てくれ)")
+    if spot:
+        # ★実在を確かめたパスだけがここへ来る(find_spot)。中身は運ばない。
+        lines.append(f"■成果の置き場= `{spot}`(返信本文から拾って実在を確認した)")
+    else:
+        lines.append("■成果の置き場= **この便に置き場のパスは見つからなかった。請けた部門へ問い直せ**"
+                     "(機械は推測で埋めない)。")
+        lines.append("※調査・設計・可否判断の答えなら `local/` の下へ1枚置いてパスを返信に書いて"
+                     "もらえると、次からここに載る(コードの直しは commit と change_log で追えるので不要)。")
     lines.append("★本体はここへ運んでいない(C-023/C-050)。**この便は完遂を知らせるだけだ。**")
     lines.append("※これは往路の**復路**なので3階梯を通していない(自動通知・completion_notify)。")
     return "\n".join(lines)
@@ -270,6 +396,9 @@ def main():
         return 0
 
     letters, replies = load_letters(set(targets))
+    # ★C-071 着地msg_idを先に集めて、送信台帳を**1回だけ**舐める(便ごとに開かない)。
+    bodies = load_reply_bodies({landed_msg(d["evidence"]) for d in targets.values()
+                                if landed_msg(d["evidence"])})
     consumed = {}      # ★使った返信便の位置(1通=1件しか打ち消さない・qa-reviewer指摘)
     sent, skipped, unknown, failed, rows = 0, 0, 0, 0, []
 
@@ -317,16 +446,25 @@ def main():
                 continue
 
             landed = landed_msg(d["evidence"])
-            body = build_body(rid, d["dept"], letter, d, landed)
+            # ★C-071 返信の本文から置き場を1本拾う。送信台帳が先・部屋の直近が控え。
+            src = "send_audit"
+            text = bodies.get(landed) or ""
+            if not text:
+                text, src = recent_reply(d["dept"], rid), "recent"
+            spot = find_spot(text)
+            body = build_body(rid, d["dept"], letter, d, landed, spot)
             ok, out = send(to_dept, d["dept"], body, a.dry_run)
             if ok:
                 sent += 1
                 print(f"  ★[通知] req={rid} {d['dept']} → {to_dept}"
+                      f"{(' 置き場=' + spot) if spot else ' 置き場=(拾えず)'}"
                       f"{' (dry-run)' if a.dry_run else ''}")
                 rows.append({"ts": now.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": rid,
                              "dept": d["dept"], "state": NOTIFIED_STATE,
                              "evidence": f"完遂を発注元へ自動通知 to_dept={to_dept} "
-                                         f"landed={landed or '(無し)'} via=completion_notify"})
+                                         f"landed={landed or '(無し)'} "
+                                         f"spot={spot or '(無し)'}/{src if text else '本文なし'} "
+                                         f"via=completion_notify"})
             else:
                 failed += 1
                 print(f"  [投函に失敗] req={rid} → {to_dept}: {out[:200]}")

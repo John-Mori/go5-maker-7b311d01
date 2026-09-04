@@ -230,6 +230,122 @@ def test_notify():
         f"(名義={cmd10[cmd10.index('--from') + 1] if '--from' in cmd10 else '(無し)'})")
 
 
+# ---------------------------------------------------------------- C-071 置き場のパス
+def write_audit(rows):
+    """送信台帳(send_audit)を隔離ディレクトリに書く。★本番の台帳は1行も触らない。"""
+    with open(cn.SEND_AUDIT, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def audit(mid, body):
+    return {"ts": ts_ago(30), "event": "send", "via": "persona_send", "msg_id": mid,
+            "dept": "shorts-analyst", "persona": "誰か", "status": "200", "body": body}
+
+
+def build_body_v1(rid, dept, letter, done, landed, spot=""):
+    """★壊れた側(C-053= 動く別実装)= C-071 以前の本文組み立て。
+
+    返信の本文を**持っているのに読まない**。着地msg_idだけ載せて「成果の在りかはそこに
+    書いてある」と言い切る。ad研究室で3通中2通が偽になったのがこれだ。
+    """
+    lines = [f"[完遂通知] {dept} が請けた依頼が**完遂**した(自動・request_log発)。",
+             f"■記帳= request_id `{rid}` / state `{done['state']}` / {done['ts']}",
+             f"■請けた側の返信= msg `{landed}`(**成果の在りかはそこに書いてある**)"]
+    return "\n".join(lines)
+
+
+def test_spot_path():
+    print("\n■ C-071 置き場のパスを1本だけ運ぶ(赤→緑)")
+    # 置き場の実在確認は cn.ROOT 基準。隔離ディレクトリを根に据えて、本番のファイルに触らない。
+    real_root = cn.ROOT
+    cn.ROOT = SANDBOX
+    spot_rel = "local/consult_intel/shorts-analyst_骨格_20260905.md"
+    os.makedirs(os.path.join(SANDBOX, "local", "consult_intel"), exist_ok=True)
+    with open(os.path.join(SANDBOX, spot_rel), "w", encoding="utf-8") as f:
+        f.write("成果の紙(テスト)")
+    reply = ("[分析部門] 骨格を参考へ寄せた。回答の紙を置いた。\n"
+             f"置き場= `{spot_rel}`\n要旨= フックを3秒へ、コメントは5枚。")
+    try:
+        # --- 赤: 同じ入力で、本文を読まない旧実装は1文字もパスを出せない
+        write_ledgers([done("3001", "shorts-analyst", 60, landed="7001")],
+                      [letter("3001", "shorts-analyst", "research-room", True)])
+        write_audit([audit("7001", reply)])
+        old = cn.build_body
+        cn.build_body = build_body_v1
+        try:
+            s_red = run()
+        finally:
+            cn.build_body = old
+        chk("P-0 ★赤= 旧実装(返信を読まない)は置き場のパスを載せられない",
+            len(s_red) == 1 and spot_rel not in s_red[0]["body"]
+            and "そこに書いてある" in s_red[0]["body"], "")
+
+        # --- 緑: 本実装は同じ入力からパスを拾って載せる
+        write_ledgers([done("3002", "shorts-analyst", 60, landed="7002")],
+                      [letter("3002", "shorts-analyst", "research-room", True)])
+        write_audit([audit("7002", reply)])
+        s = run()
+        chk("P-1 ★緑= 通知本文に置き場のパスが載る(送信台帳から拾う)",
+            len(s) == 1 and spot_rel in s[0]["body"], "")
+        chk("P-1b 全文は運ばない(返信の中身は貼らない・C-023/C-050)",
+            len(s) == 1 and "フックを3秒へ" not in s[0]["body"], "")
+        chk("P-1c 拾えた時は「そこに書いてある」と言わない",
+            len(s) == 1 and "そこに書いてある" not in s[0]["body"], "")
+
+        # --- FP対策: 形はパスでも実在しなければ案内しない
+        write_ledgers([done("3003", "shorts-analyst", 60, landed="7003")],
+                      [letter("3003", "shorts-analyst", "research-room", True)])
+        write_audit([audit("7003", "置き場= `local/consult_intel/存在しない紙_20260905.md`")])
+        s = run()
+        chk("P-2 ★実在しないパスは案内しない(os.path.exists で確認)",
+            len(s) == 1 and "存在しない紙" not in s[0]["body"]
+            and "見つからなかった" in s[0]["body"], "")
+
+        # --- FP対策: 根拠として引いたログや台帳を「成果」と読まない(実測で誤爆した形)
+        write_ledgers([done("3004", "shorts-analyst", 60, landed="7004")],
+                      [letter("3004", "shorts-analyst", "research-room", True)])
+        write_audit([audit("7004", "便2の答えは自分で拾えた。`local/consult_intel` は関係ない。"
+                                   "根拠は `local/llm/send_audit.jsonl` の76行だ。")])
+        os.makedirs(os.path.join(SANDBOX, "local", "llm"), exist_ok=True)
+        s = run()
+        chk("P-3 ★引用したログを成果の置き場と読み違えない",
+            len(s) == 1 and "send_audit.jsonl" not in s[0]["body"], "")
+
+        # --- 拾えない時の文言(推定で埋めない・§1)
+        write_ledgers([done("3005", "shorts-analyst", 60, landed="7005")],
+                      [letter("3005", "shorts-analyst", "research-room", True)])
+        write_audit([audit("7005", "口頭で答えた。紙は無い。")])
+        s = run()
+        chk("P-4 パスが無い便は『請けた部門へ問い直せ』と書く(推測で埋めない)",
+            len(s) == 1 and "請けた部門へ問い直せ" in s[0]["body"]
+            and "そこに書いてある" not in s[0]["body"], "")
+        chk("P-4b 紙を置いてほしいという一言は入るが、入口を強制していない",
+            len(s) == 1 and "調査・設計・可否判断" in s[0]["body"], "")
+
+        # --- 控えの取り出し口= 送信台帳に本文が無い便(2026-09-04 23:25 以前)
+        write_ledgers([done("3006", "shorts-analyst", 60, landed="7006")],
+                      [letter("3006", "shorts-analyst", "research-room", True)])
+        write_audit([{"ts": ts_ago(30), "event": "send", "msg_id": "7006", "status": "200"}])
+        with open(os.path.join(SANDBOX, "llm", "recent_shorts-analyst.jsonl"), "w",
+                  encoding="utf-8") as f:
+            f.write(json.dumps({"ts": ts_ago(30), "msg_id": "3006", "author": "誰か",
+                                "body": "依頼", "reply": reply}, ensure_ascii=False) + "\n")
+        s = run()
+        chk("P-5 送信台帳に本文が無い便は部屋の直近(recent_)から拾う",
+            len(s) == 1 and spot_rel in s[0]["body"], "")
+
+        # --- 台帳が1つも無くても落ちない(fail-open)
+        os.remove(cn.SEND_AUDIT)
+        write_ledgers([done("3007", "shorts-analyst", 60, landed="7007")],
+                      [letter("3007", "shorts-analyst", "research-room", True)])
+        s = run()
+        chk("P-6 送信台帳が無くても通知は出る(本文が拾えないだけ・fail-open)",
+            len(s) == 1 and "見つからなかった" in s[0]["body"], "")
+    finally:
+        cn.ROOT = real_root
+
+
 # ---------------------------------------------------------------- dispatch の記録側
 def test_dispatch_records_from_dept():
     print("\n■ dispatch.py が便レコードへ発注元を残す(一時キューDBで経路実行)")
@@ -378,6 +494,7 @@ def main():
     print(f"  sandbox= {SANDBOX}")
     try:
         test_notify()
+        test_spot_path()
         test_dispatch_records_from_dept()
         test_env_from_dept()
     finally:
