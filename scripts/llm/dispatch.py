@@ -447,7 +447,7 @@ def naming_gate_pass(sender, from_dept, body):
 
 
 def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience="",
-             from_dept="", from_dept_explicit=False):
+             from_dept="", from_dept_explicit=False, from_dept_rec=None, from_dept_src="arg"):
     """1部門へ指令を投函する。戻り値=(ok, msg_id)。
 
     ★C-023: work(=--workの一行)が実質値を持つ時だけ「実依頼」として相手部門チャンネルへ表投稿する。
@@ -517,8 +517,19 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
         #   → 完遂を発注元へ返す常駐(completion_notify.py)が宛先を決められるよう、ここで機械に残す。
         #   ★`explicit` を分けて持つ理由= --from-dept の**既定値は "hq"** だ。指定を忘れた便まで
         #     「HQ発注」として鳴らすと、誤配を自動で量産する。常駐が鳴らすのは explicit=True だけ。
-        rec["from_dept"] = (from_dept or "").strip()
+        #   ★★2026-09-04 HQ裁定(アロンソ監督 msg=1545292385234321548)= 選択肢3「dispatchが送信元を
+        #     自動で入れる」を採用。**発注元は機械が載せる**= 部屋のセッションを起こす側
+        #     (dept_daemon / session_relay)が子プロセスの環境へ `GO5_DEPT` を入れ、ここで拾う。
+        #     人手の入口(--from-dept)は実測0件だった=「人手の入口を要件にした機構は実測0件になる」。
+        #   ★★ただし**記録にしか使わない**。3階梯ガード(main の `h == a.from_dept`)と呼称ゲートは
+        #     従来どおり `--from-dept` の値(from_dept)だけで判定する= 環境値をそこへ流すと、
+        #     いままで既定 "hq" で免除に入っていた便が自室名に変わって**ブロック側へ落ちる**
+        #     (fail-closed 化=HQが却下した選択肢2と同じ事故が裏口から入る)。
+        #     だから rec 専用の値を別に持つ。既存の便は1本も落ちない。
+        fd_rec = from_dept if from_dept_rec is None else from_dept_rec
+        rec["from_dept"] = (fd_rec or "").strip()
         rec["from_dept_explicit"] = bool(from_dept_explicit)
+        rec["from_dept_src"] = from_dept_src   # arg=人手 / env=機械が載せた / default=既定hq
         if is_work:
             rec["work"] = work.strip()   # 何を頼んだかを便にも残す(後追い可能に)
         return json.dumps(rec, ensure_ascii=False)
@@ -614,6 +625,17 @@ def main():
     from_dept_explicit = a.from_dept is not None
     if not from_dept_explicit:
         a.from_dept = "hq"          # ★ここから下は従来と同一(既定=hq)
+    # ★★発注元を機械が載せる(2026-09-04 HQ裁定・選択肢3)。--from-dept が無い時だけ、
+    #   部屋のセッションを起こした側が環境へ置いた `GO5_DEPT` を拾う。
+    #   ★`a.from_dept` は書き換えない= 3階梯ガードと呼称ゲートの入力を変えないため
+    #     (変えると既定 "hq" で通っていた便が落ちる=fail-closed 化)。記録用の変数を別に持つ。
+    from_dept_rec = a.from_dept
+    from_dept_src = "arg" if from_dept_explicit else "default"
+    rec_explicit = from_dept_explicit
+    if not from_dept_explicit:
+        _envd = (os.environ.get("GO5_DEPT") or "").strip()
+        if _envd:
+            from_dept_rec, from_dept_src, rec_explicit = _envd, "env", True
 
     body = a.body or ""
     if a.body_file:
@@ -677,7 +699,9 @@ def main():
     # ★実依頼なのに発注元が無い便への注意(2026-09-04 aegis-gl)。**止めない**(fail-open)。
     #   完遂通知の常駐は明示された発注元へしか返せない= ここを省くと、その依頼の完遂は
     #   誰にも自動で返らない。止めずに知らせるのは、指定を必須にすると既存の便が全部落ちるから。
-    if is_work_request(a.work) and not from_dept_explicit:
+    #   ★2026-09-04 判定を rec_explicit へ移した= 環境(GO5_DEPT)で機械が載せた便は
+    #     発注元が確定しているので、この注意は要らない(常に鳴る注意は読まれなくなる)。
+    if is_work_request(a.work) and not rec_explicit:
         print("★--from-dept が無い実依頼だ(既定の 'hq' が入る)。この依頼の完遂は"
               "発注元へ自動で返らない= `--from-dept <あなたのdept>` を付けると"
               "完遂1行があなたの部屋へ届く(completion_notify)。")
@@ -685,7 +709,7 @@ def main():
     ok = 0
     for d in depts:
         good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience,
-                           a.from_dept, from_dept_explicit)
+                           a.from_dept, rec_explicit, from_dept_rec, from_dept_src)
         ok += 1 if good else 0
     print(f"投函 {ok}/{len(depts)} 部門")
     warn = addressee_warning(body, depts)

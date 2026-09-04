@@ -7507,6 +7507,10 @@ class Daemon:
         )
         env = dict(os.environ)
         env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
+        # ★★2026-09-04 発注元を機械が載せる(HQ裁定・選択肢3 msg=1545292385234321548)。
+        #   子の claude が dispatch.py を叩く時、--from-dept が無ければこの値が発注元になる。
+        #   人手の入口(--from-dept)は実測0件だった=機械が載せられる値を機械に載せる。
+        env["GO5_DEPT"] = self.dept
         # ★2026-08-13 恒久対策(研究室HQ依頼): promptを**stdinで渡す**(argv末尾に置かない)。
         #   argvに置くと長い便で Windowsのコマンドライン上限(32,767字)を超え CreateProcess が
         #   WinError 206 を返し、Pythonは**FileNotFoundError**として投げる=「ファイルが無い」に
@@ -7571,6 +7575,7 @@ class Daemon:
             )
             env = dict(os.environ)
             env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
+            env["GO5_DEPT"] = self.dept      # ★同上(C-064= 起こす点は全部数えて同時に入れる)
             prompt_spill.measure(prompt, tag=f"english_ja_{self.dept}")
             p = subprocess.run([CLAUDE, "--print", *ctx_args(self.dept)],
                                input=prompt, cwd=ROOT, env=env,
@@ -7649,6 +7654,10 @@ class Daemon:
         )
         env = dict(os.environ)
         env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token()
+        # ★★2026-09-04 発注元を機械が載せる(HQ裁定・選択肢3 msg=1545292385234321548)。
+        #   子の claude が dispatch.py を叩く時、--from-dept が無ければこの値が発注元になる。
+        #   人手の入口(--from-dept)は実測0件だった=機械が載せられる値を機械に載せる。
+        env["GO5_DEPT"] = self.dept
         # ★promptはstdinで渡す(引数で渡すと--add-dirが可変長のためpromptまでdirとして
         #   飲み込み「Input must be provided」で即死する=2026-07-18に実障害。stdinは
         #   Windowsのコマンドライン長制限(約32K)の回避にもなる)

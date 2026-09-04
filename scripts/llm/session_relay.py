@@ -2160,7 +2160,7 @@ def looks_like_empty_reply(rc, data, out):
 # ★子プロセス(claude CLI)へ渡す環境を1か所で組む。**呼び出し側で組み直さない。**
 #   ここを関数にしてあるのは、検査が「実際に組まれた env」を実行で確かめられるようにするため
 #   (ソースの文字列一致は検査ではない=共通規律§3)。
-def _child_env(token):
+def _child_env(token, dept=""):
     # ★2026-07-26 親の環境を継がない(実弾で特定した穴)。
     #   デーモンはHQセッションから再起動したkeeperの子になることがあり、その場合
     #   ハーネスの環境変数(ANTHROPIC_BASE_URL / CLAUDE_CODE_* 等)を相続する。
@@ -2174,6 +2174,11 @@ def _child_env(token):
              "GO5_LOCAL_DIR")
     env = {k: v for k, v in os.environ.items() if k.upper() in _KEEP}
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token or ""
+    # ★★2026-09-04 発注元を機械が載せる(HQ裁定・選択肢3 msg=1545292385234321548)。
+    #   白名単は「親から継ぐ物」の話で、これは**その場の dept を渡す**=継承ではない。
+    #   子の claude が dispatch.py を叩く時、--from-dept が無ければこれが発注元になる。
+    if dept:
+        env["GO5_DEPT"] = dept
     # ★★2026-08-23 イージス研究室。**前置きから可変物(gitStatus)を外す。**
     #   実験(`scripts/llm/cache_prefix_probe.py`・同じセッションへ短い便を続けて撃つ)=
     #     既定       : 無変更で2便=書込 230/394 → **間に空commitを1本挟むと 書込 29,303**
@@ -2252,7 +2257,7 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
     #     を stdin で渡し is_error:false の JSON を確認済 2026-08-13)。claude -p は positional prompt
     #     が無ければ stdin を prompt として読む(--input-format 既定=text)。挙動は同一。
     _stdin_input = prompt
-    env = _child_env(token)
+    env = _child_env(token, dept)
     soft = float(timeout or 0) or None
     hard = float(hard_timeout) if hard_timeout else None
     if hard is not None and soft is not None and hard <= soft:
