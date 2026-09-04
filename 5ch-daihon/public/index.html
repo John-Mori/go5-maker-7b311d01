@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5ch台本エディタ(止血版)</title>
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <header class="app-header">
+    <h1>5ch台本エディタ<span class="app-header__badge">止血版</span></h1>
+    <p class="app-header__note">
+      caption_text / narration_text / reaction_text だけを編集・保存できます。
+      並べ替え・画像差し替え・AI生成・音声試聴はこの版にはありません。
+    </p>
+  </header>
+
+  <main class="app-main">
+    <section class="project-picker">
+      <label for="project-select">プロジェクト</label>
+      <select id="project-select">
+        <option value="">読み込み中...</option>
+      </select>
+      <span id="project-status" class="status-text"></span>
+    </section>
+
+    <section id="cuts-list" class="cuts-list">
+      <p class="empty-note">プロジェクトを選ぶとコマ一覧が表示されます。</p>
+    </section>
+  </main>
+
+  <template id="cut-card-template">
+    <article class="cut-card">
+      <header class="cut-card__head">
+        <span class="cut-card__id"></span>
+        <span class="cut-card__image"></span>
+        <span class="cut-card__badge cut-card__badge--phase"></span>
+        <span class="cut-card__badge cut-card__badge--type"></span>
+      </header>
+
+      <div class="cut-field" data-field="caption_text">
+        <label>caption_text(画面テロップ)</label>
+        <textarea rows="3"></textarea>
+        <div class="cut-field__row">
+          <button type="button" class="btn-save">保存</button>
+          <span class="save-status"></span>
+        </div>
+      </div>
+
+      <div class="cut-field" data-field="narration_text">
+        <label>narration_text(ナレーション)</label>
+        <textarea rows="3"></textarea>
+        <div class="cut-field__row">
+          <button type="button" class="btn-save">保存</button>
+          <span class="save-status"></span>
+        </div>
+      </div>
+
+      <div class="cut-field" data-field="reaction_text">
+        <label>reaction_text(視聴者リプ)</label>
+        <textarea rows="3"></textarea>
+        <div class="cut-field__row">
+          <button type="button" class="btn-save">保存</button>
+          <span class="save-status"></span>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js?v=1"></script>
+</body>
+</html>

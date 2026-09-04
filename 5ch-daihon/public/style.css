@@ -1,0 +1,169 @@
+/* 5ch台本エディタ(止血版) — アプリ配色に合わせる。★紫(#5b3f8e/#2a1a4e/#d4b3ff 等)は使わない。全角括弧禁止・半角()。 */
+
+:root {
+  --bg: #0e1422;
+  --card: #121a2b;
+  --card-border: #1f2c44;
+  --text: #e8edf5;
+  --text-dim: #9aa8bd;
+  --accent: #2bb3c0;
+  --accent-dim: #1f8a95;
+  --badge-bg: #182338;
+  --danger: #d9705a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  line-height: 1.5;
+}
+
+.app-header {
+  padding: 20px 16px 12px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+.app-header h1 {
+  margin: 0 0 6px;
+  font-size: 1.3rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app-header__badge {
+  font-size: 0.7rem;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.app-header__note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.app-main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 16px 40px;
+}
+
+.project-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 20px;
+}
+.project-picker label {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+.project-picker select {
+  flex: 1 1 220px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+}
+.status-text {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.status-text--error { color: var(--danger); }
+.status-text--ok { color: var(--accent); }
+
+.cuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.empty-note {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.cut-card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 14px;
+}
+.cut-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.cut-card__id {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.cut-card__image {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+.cut-card__badge {
+  font-size: 0.72rem;
+  background: var(--badge-bg);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.cut-field {
+  margin-bottom: 12px;
+}
+.cut-field label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.cut-field textarea {
+  width: 100%;
+  background: #0c1220;
+  color: var(--text);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+.cut-field__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.btn-save {
+  background: var(--accent);
+  color: #06171a;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-save:hover { background: var(--accent-dim); }
+.btn-save:disabled { opacity: 0.6; cursor: default; }
+.save-status {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+.save-status--ok { color: var(--accent); }
+.save-status--error { color: var(--danger); }
+
+@media (min-width: 640px) {
+  .cut-field textarea { font-size: 0.95rem; }
+}

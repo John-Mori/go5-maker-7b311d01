@@ -1,0 +1,23 @@
+name = "go5-5ch-daihon"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# ── 観測(Workers Logs)── drive-worker/wrangler.toml と同じ流儀。
+[observability]
+enabled = true
+
+# ── 非秘密の設定(ここに秘密は書かない。止血版はCloudflare Access任せなのでシークレットは無し)──
+[vars]
+# public/(Pages)配信ドメインのOriginだけ許可(ワイルドカード不可)。
+# ★未確定・Chami手番: Pagesのデプロイ先ドメイン(例 https://xxxx.pages.dev または独自ドメイン)に置き換える。
+ALLOWED_ORIGIN = "https://REPLACE-ME.pages.dev"
+
+# ── R2バケット(cut_list YAMLの正本置き場)──
+# ★r2.dev の公開URLは有効化しない前提(README参照)。読み書きは常にこのWorker経由。
+[[r2_buckets]]
+binding = "DAIHON"
+bucket_name = "go5-5ch-daihon"
+
+# ── 秘密は無し ──
+# 認証はCloudflare Access(Zero Trust)にedgeで委ねる。Worker側は Cf-Access-Jwt-Assertion ヘッダの
+# 存在チェックのみ(多層防御の1枚・完全検証ではない)。README §4 を参照。

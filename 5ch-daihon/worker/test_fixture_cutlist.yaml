@@ -1,0 +1,38 @@
+# ============================================================
+# test_fixture_cutlist.yaml ─ round-tripテスト専用フィクスチャ
+# ★これは実データではない(本物は local/5ch/projects/<name>/*.yaml)。
+# ★露出注記(🐧さん・崩さない)=このコメントブロックが保存後も残ることを確認する目印。
+# ★Chami裁定 2026-09-03 のような裁定履歴コメントもここに置いて保全を検証する。
+# ============================================================
+
+work:
+  title: "テスト用タイトル"
+  author: "-"
+  cta_text: "テスト用CTA"
+
+cuts:
+
+  # ── 1コマ目のコメント ─────────────────
+  - cut_id: "cut_001"
+    image_file: "assets/images/01_test.png"
+    phase: "hook"
+    cut_type: "thread_title_hook"
+    caption_text: "元のキャプション"
+    narration_text: "元のナレーション"
+    reaction_text: ""
+    notes: "1コマ目のメモ(保全確認用)"
+
+  # ── 2コマ目のコメント ─────────────────
+  - cut_id: "cut_002"
+    image_file: "assets/images/02_test.png"
+    phase: "reveal"
+    cut_type: "theme_intro"
+    caption_text: "2コマ目のキャプション"
+    narration_text: "2コマ目のナレーション"
+    reaction_text: "2コマ目のリアクション"
+    notes: "2コマ目のメモ(保全確認用・答え合わせ=これも残ること)"
+
+# ── ★声の割り当てチェック(末尾コメント保全確認用) ──
+#   このコメントブロックが setIn 後も消えないことを確認する。
+# ── ★尺の受け入れ条件(末尾コメント保全確認用) ──
+#   同上。
