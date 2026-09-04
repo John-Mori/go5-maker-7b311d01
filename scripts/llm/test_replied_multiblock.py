@@ -168,6 +168,77 @@ def t_reader_seam():
        "R-3 着地不明(`-`)は id として拾わない", str(cn.landed_ids("state=replied 記録なし")))
 
 
+# ------------------------------------------------ S ブロック自体が更に複数通へ割れる場合
+# ★2026-09-05 追補(モドリッチ申し送り・研究室HQ経由 DISPATCH-aegis-gl-1788563771724)。
+#   `_verify_siblings` は各ブロックの**最終片1通**しか突合していなかった。
+#   人格ブロックが `split_body` で2通以上へ割れると、**中間の通が台帳に載らない**=
+#   本文を読み返す側(completion_notify・C-071)がその通を読めない。
+SIB_LONG = ("[シャビ・アロンソ] 置き場= `docs/設計・調査/イージス研究室_長文.md`。\n"
+            + ("あ" * 1500) + "\n\n" + ("い" * 1500) + "\n\n締め= §P-9b まで読め。")
+OWN_LONG = ("[アメス] " + ("う" * 1500) + "\n\n" + ("え" * 1200) + "\n\nここが最終片よ。")
+
+
+def _old_style_ids(msgs, others):
+    """★must-fail 用= 直す前の突合(ブロックごとに**最終片だけ**見る)を、動く形で書き戻したもの。
+
+    C-053= 「壊した側」は本物を壊さず、別の動く実装として置く。
+    """
+    out, seen = [], set()
+    for txt in others or ():
+        part, _n = dd._split_like_persona_send(txt)
+        n = dd._norm_for_match(part)
+        h, t = n[:dd.REPLIED_HEAD_CHARS], n[-dd.REPLIED_TAIL_CHARS:]
+        if not h:
+            continue
+        for m in msgs or []:
+            c = dd._norm_for_match(m.get("content"))
+            if c and h in c and t in c:
+                mid = str(m.get("id", ""))
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    out.append(mid)
+                break
+    return out
+
+
+def _room_for(sib_text, own_text):
+    """兄弟ブロックと自分のブロックを、送信側と同じ切り方で1通ずつ部屋へ並べる。"""
+    sib = dd._split_parts_like_persona_send(sib_text)
+    own = dd._split_parts_like_persona_send(own_text)
+    room, ids = [], []
+    base = 1545590000000000000
+    for i, p in enumerate(sib + own):
+        mid = str(base + i)
+        ids.append(mid)
+        room.append(msg(mid, p))
+    return room, ids, len(sib), len(own)
+
+
+def t_sibling_split():
+    print("S ブロックが更に複数通へ割れても、中間の通まで記帳する")
+    room, ids, nsib, nown = _room_for(SIB_LONG, BLOCK_SHORT)
+    ok(nsib >= 2, "S-0 前提= 兄弟ブロックが実際に複数通へ割れている", "%d通" % nsib)
+    (okd, ev) = with_messages(room, lambda: dd.verify_replied(CH, BLOCK_SHORT, (SIB_LONG,)))[0]
+    got = cn.landed_ids(ev)
+    ok(okd is True, "S-1 ok の判定は動かない(最終片が実在すれば replied)")
+    ok(got == ids, "S-2 ★兄弟の**全通**が投稿順で載る", "期待%d通 / 実際%d通" % (len(ids), len(got)))
+
+    print("S' 自分(最後のブロック)が割れた時も、最終片より前の通を落とさない")
+    room2, ids2, _ns, no2 = _room_for(SIB_LONG, OWN_LONG)
+    ok(no2 >= 2, "S'-0 前提= 自分のブロックも複数通へ割れている", "%d通" % no2)
+    (okd2, ev2) = with_messages(room2, lambda: dd.verify_replied(CH, OWN_LONG, (SIB_LONG,)))[0]
+    got2 = cn.landed_ids(ev2)
+    ok(okd2 is True, "S'-1 ok の判定は動かない")
+    ok(got2 == ids2, "S'-2 ★自分の前半の通も載る", "期待%d通 / 実際%d通" % (len(ids2), len(got2)))
+
+    print("S'' MUST-FAIL 直す前の突合(最終片だけ)へ戻すと中間の通が消えるか")
+    old = _old_style_ids(room, (SIB_LONG,))
+    ok(len(old) < nsib, "S''-1 旧実装は兄弟の最終片1通しか拾えない",
+       "旧%d通 / 実際は%d通ある" % (len(old), nsib))
+    ok(any(i not in old for i in ids[:nsib]),
+       "S''-2 旧実装では中間の通が台帳から落ちる(C-071が読めない形)")
+
+
 # ---------------------------------------------------------------- 配線(呼び出し側)
 def t_wiring():
     print("配線= 送信ループが他ブロックを渡している(構文木で確認)")
@@ -197,6 +268,7 @@ if __name__ == "__main__":
     try:
         t_writer()
         t_reader_seam()
+        t_sibling_split()
         t_wiring()
         must_fail()
     finally:

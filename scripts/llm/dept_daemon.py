@@ -5763,12 +5763,12 @@ def _norm_for_match(s):
     return re.sub(r"\s+", " ", str(s or "")).strip()
 
 
-def _split_like_persona_send(text):
-    """persona_send と**同じ切り方**で分割し、最後の1通を得るための下ごしらえ。
+def _split_parts_like_persona_send(text):
+    """persona_send と**同じ切り方**で分割し、**全部の片**を投稿順に返す。
 
     ★なぜ import するか: 切り方を自前で書き直すと、送信側の split_body と**判定が2本**になり
       必ず食い違う(ORG-11「記録先/判定を2つ持たない」)。正本は persona_send.split_body 1本。
-    ★import できなければ「分割しない」とみなして全文を返す(fail-safe)。
+    ★import できなければ「分割しない」とみなして全文1片を返す(fail-safe)。
       その場合でも末尾の突合は成立するので、確認が丸ごと死ぬことはない。
     """
     body = str(text or "").strip()
@@ -5776,9 +5776,15 @@ def _split_like_persona_send(text):
         sys.path.insert(0, os.path.join(ROOT, "scripts", "discord"))
         from persona_send import split_body
         parts = split_body(body)
-        return (parts[-1] if parts else body), len(parts)
+        return parts if parts else [body]
     except Exception:
-        return body, 1
+        return [body]
+
+
+def _split_like_persona_send(text):
+    """上の分割の**最後の1通**と通数。★ok の判定はここだけを使う(INC-92ガードを動かさない)。"""
+    parts = _split_parts_like_persona_send(text)
+    return parts[-1], len(parts)
 
 
 def _channel_id_of(channel_name):
@@ -5799,7 +5805,7 @@ REPLIED_VERIFY_TRIES = 3
 REPLIED_VERIFY_WAIT_SEC = 2
 
 
-def _verify_siblings(msgs, others):
+def _verify_siblings(msgs, others, extra_parts=()):
     """同じ返信の**他のブロック**の着地msg_idを、既に取ってある一覧から拾う(HQ-0242)。
 
     ★APIは叩き直さない= `verify_replied` が読んだ `msgs` を使い回す(確認で配送を遅らせない)。
@@ -5807,12 +5813,23 @@ def _verify_siblings(msgs, others):
       = 「兄弟が1通見つからない」を理由に `replied` を `replied_unverified` へ落とすと、
         いま通っている便まで不着の棚へ入る(ORG-42と同じ向きの事故)。
     ★重複は入れない= 同じ文面のブロックを2回送った時に同じidが並ぶのを避ける。
+
+    ★★2026-09-05 追補(モドリッチ申し送り・研究室HQ経由 DISPATCH-aegis-gl-1788563771724)=
+      ここは**ブロックごとに最終片1通しか**突合していなかった。人格ブロック自体が
+      `split_body` でさらに複数通へ割れると、**中間の通が台帳に載らない**。
+      本文を読み返す側(completion_notify・C-071)はその中間の通を読めない=同じ穴が残る。
+      → **全部の片**を投稿順に突合する。`extra_parts` は最後のブロックの**最終片より前**の片
+        (呼び元から渡す)。★ok の判定はここでは一切触らない(fail-open のまま)。
     """
     out, seen = [], set()
+    cand = []
     for txt in others or ():
-        part, _n = _split_like_persona_send(txt)
-        h = _norm_for_match(part)[:REPLIED_HEAD_CHARS]
-        t = _norm_for_match(part)[-REPLIED_TAIL_CHARS:]
+        cand.extend(_split_parts_like_persona_send(txt))
+    cand.extend(extra_parts or ())
+    for part in cand:
+        _n = _norm_for_match(part)
+        h = _n[:REPLIED_HEAD_CHARS]
+        t = _n[-REPLIED_TAIL_CHARS:]
         if not h:
             continue
         for m in msgs or []:
@@ -5848,7 +5865,8 @@ def verify_replied(channel_name, sent_text, others=()):
       ★ok の判定は変えない(最後のブロックが実在すれば `replied`)= 兄弟が引けなくても
         `replied_unverified` へ落とさない(fail-open・確認を厳しくして黙らせない)。
     """
-    last, nparts = _split_like_persona_send(sent_text)
+    _own_parts = _split_parts_like_persona_send(sent_text)
+    last, nparts = _own_parts[-1], len(_own_parts)
     head = _norm_for_match(last)[:REPLIED_HEAD_CHARS]
     tail = _norm_for_match(last)[-REPLIED_TAIL_CHARS:]
     if not head:
@@ -5885,7 +5903,9 @@ def verify_replied(channel_name, sent_text, others=()):
     if hit_head and hit_tail:
         # ★HQ-0242= 同じ返信の**他のブロック**も同じ取得結果の中から拾う(APIは叩き直さない)。
         #   拾えた分だけを投稿順に並べる。拾えなくても黙って落ちるだけ= ok は動かさない。
-        sibs = _verify_siblings(msgs, others)
+        #   ★最後のブロックが自分でも複数通に割れている場合、**最終片より前の片**も同じ穴なので
+        #     一緒に拾う(_own_parts[:-1])。並びは 兄弟ブロック → 自分の前半 → 最終片 = 投稿順。
+        sibs = _verify_siblings(msgs, others, _own_parts[:-1])
         ids = ",".join(sibs + [hit_tail])
         more = f"・同じ返信の他ブロック{len(sibs)}通も実在確認" if sibs else ""
         return True, (f"discord_msg={ids} 部屋={channel_name} 分割{nparts}通の最終通を実在確認"
