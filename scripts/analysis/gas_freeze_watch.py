@@ -36,8 +36,12 @@ except Exception:                                      # noqa: BLE001
         return slug
 PY = sys.executable or "python"
 EMIT = [PY, os.path.join("scripts", "analysis", "competitor_daily.py"), "--emit"]
+# 鳴り先= HQ(復旧の差配) + research-room(=ad研究室・この凍結を閉じる責任を持つ当室の依頼元。
+#   REQ-research-room-de08ad55fc / Chami 2026-08-22「これはインシデントよ」認定案件。
+#   HQだけに鳴ると閉じる側=モドリッチに何も届かない=2026-09-03/04が誰にも鳴っていなかった真因)。
+#   dispatch.py は --dept a,b,c で同報できる(2026-09-04 モドリッチ依頼で追加)。
 DISPATCH = [PY, os.path.join("scripts", "llm", "dispatch.py"),
-            "--dept", "hq", "--from-dept", "shorts-analyst",
+            "--dept", "hq,research-room", "--from-dept", "shorts-analyst",
             "--from", "アーモンドアイ(分析部門)", "--audience", "ai"]
 STATE = os.path.join(ROOT, "local", "gas_freeze_watch.state")
 LOG = os.path.join(ROOT, "local", "gas_freeze_watch.log")

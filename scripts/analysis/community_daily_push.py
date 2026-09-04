@@ -16,10 +16,15 @@
 分析部門は §4.7 で自分では persona_send を叩けないため、この常駐が代わりに配送する。
 ログ= local/community_daily_push.log(UTF-8)。
 """
-import os, sys, subprocess, datetime, tempfile
+import os, sys, subprocess, datetime, tempfile, json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PY = sys.executable or "python"
+# 競合"動画"上流GASの凍結状態(gas_freeze_watch.py が管理・復旧でクリア=存在すれば凍結中)。
+# 凍結が続く間だけ、毎朝のブリーフ末尾に経過日数(age)の1行を残す(2026-09-04 モドリッチ依頼)。
+#   間引くのは"同じ警報の再送"であって、滞留していること自体は毎日見えないと消える(件数増分でなくage)。
+#   数字は毎日変わる(17日→18日…)ので「毎朝まったく同じ文」(Chami却下)には当たらない。
+FREEZE_STATE = os.path.join(ROOT, "local", "gas_freeze_watch.state")
 TOP = "3"
 EMIT = [PY, os.path.join("scripts", "analysis", "community_daily.py"),
         "--emit", "--fresh", "--top", TOP]
@@ -29,6 +34,24 @@ LOG = os.path.join(ROOT, "local", "community_daily_push.log")
 DRY = "--dry" in sys.argv
 # 子プロセスの stdout を必ず UTF-8 で(Windows既定=cp932 だと親が読めず出力が消える)
 CHILD_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+
+
+def _freeze_line():
+    """競合"動画"上流GASが凍結中なら、経過日数の1行を返す(正常/復旧後は空文字)。
+    stale 日付は gas_freeze_watch.state の単一ソースから採る(自前で判定し直さない)。"""
+    try:
+        with open(FREEZE_STATE, "r", encoding="utf-8") as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    stale = st.get("stale")
+    if not stale:
+        return ""
+    try:
+        days = (datetime.date.today() - datetime.date.fromisoformat(stale)).days
+    except ValueError:
+        return ""
+    return "※競合「動画」上流 %s で停止・%d日(復旧待ち。詳報はHQ/ad研究室へ別便)" % (stale, days)
 
 
 def _log(msg):
@@ -82,6 +105,10 @@ def main():
     body = out[idx:].strip() if idx >= 0 else out.strip()
 
     if r.returncode == 0 and idx >= 0 and body:
+        fl = _freeze_line()
+        if fl:
+            body = body + "\n\n" + fl
+            _log("凍結の経過日数を1行付記: %s" % fl)
         _log("集計OK: %d文字 / %d行" % (len(body), body.count("\n") + 1))
         if DRY:
             _log("--dry: postせず本文を表示\n----\n%s\n----" % body)
