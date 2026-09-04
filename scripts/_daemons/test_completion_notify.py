@@ -75,8 +75,9 @@ def run(argv=(), **kw):
     return sent
 
 
-def letter(mid, dept, from_dept, explicit, work="骨格を参考へ寄せる", ts=None):
-    return {"ts": ts or ts_ago(120), "dept": dept, "channel": "部屋", "author": "誰か",
+def letter(mid, dept, from_dept, explicit, work="骨格を参考へ寄せる", ts=None,
+           author="誰か"):
+    return {"ts": ts or ts_ago(120), "dept": dept, "channel": "部屋", "author": author,
             "content": "依頼本文", "msg_id": mid, "via": "dispatch", "audience": "ai",
             "work": work, "from_dept": from_dept, "from_dept_explicit": explicit}
 
@@ -190,6 +191,43 @@ def test_notify():
         body9 = f.read()
     chk("C-9 --dry-run は台帳へ書かない", '"completion_notified"' not in body9,
         f"(送信の呼び出し自体は {len(s9)}件・dry旗={s9[0]['dry'] if s9 else '-'})")
+
+    # C-10 ★★復路の復路を鳴らさない(鎖の切断・2026-09-04)。
+    #   壊れていた実物= request_log で4段。実依頼 1545280332243275809 の完遂通知を受け手の部屋が
+    #   掴んで返信し、その完遂が**通知の通知**として逆向きへ飛び、また掴まれ…を3往復していた。
+    #   通知便は `--from-dept 請けた側` を明示して出すので、そのまま次の発注として成立する。
+    write_ledgers([done("1020", "copy-director", 60)],
+                  [letter("1020", "copy-director", "research-room", True,
+                          author=cn.AUTO_SENDER)])
+    chk("C-10 通知便から生まれた依頼は鳴らさない(鎖が2段目で終わる)", len(run()) == 0)
+
+    # C-10b 基準線= 同じ形で名義だけ実依頼なら鳴る(判定が author で効いている証拠。
+    #   ここが鳴らなくなっていたら、鎖の切断が実依頼まで巻き込んで殺している)
+    write_ledgers([done("1021", "copy-director", 60)],
+                  [letter("1021", "copy-director", "research-room", True, author="花海咲季")])
+    chk("C-10b 実依頼(名義が通知でない)はそのまま鳴る", len(run()) == 1)
+
+    # C-10c ★書く側と読む側が同じ名義を使っている(外へ撃つ手= subprocess だけ偽物にして、
+    #   send() の argv を本物のまま組ませる)。ここが割れると鎖の切断が黙って外れる。
+    seen = {}
+
+    def fake_sp_run(cmd, **kw):
+        seen["cmd"] = list(cmd)
+
+        class R:
+            returncode, stdout, stderr = 0, "ok", ""
+        return R()
+
+    real_sp = cn.subprocess.run
+    cn.subprocess.run = fake_sp_run
+    try:
+        ok10, _ = cn.send("research-room", "copy-director", "本文", False)
+    finally:
+        cn.subprocess.run = real_sp
+    cmd10 = seen.get("cmd") or []
+    chk("C-10c send は AUTO_SENDER の名義で出す(読む側と同じ1本)",
+        ok10 and "--from" in cmd10 and cmd10[cmd10.index("--from") + 1] == cn.AUTO_SENDER,
+        f"(名義={cmd10[cmd10.index('--from') + 1] if '--from' in cmd10 else '(無し)'})")
 
 
 # ---------------------------------------------------------------- dispatch の記録側

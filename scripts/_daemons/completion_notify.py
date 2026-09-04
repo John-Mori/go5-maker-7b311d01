@@ -86,6 +86,11 @@ JST = dt.timezone(dt.timedelta(hours=9))
 DONE_STATES = ("completed", "replied")
 NOTIFIED_STATE = "completion_notified"
 
+# ★★この常駐が出す便の名義(2026-09-04・品質管理部門ジェンティルドンナ指摘 msg=1545296750602887228)。
+#   **書く側(send)と読む側(main の除外)が同じ1本を引く**= 名義を変えても鎖の切断が外れない。
+#   ここを別々の文字列で持つと、片方だけ直した日に鎖が黙って復活する(C-064と同じ向き)。
+AUTO_SENDER = "完遂通知(自動)"
+
 
 def parse_ts(s):
     """request_log の ts は tz なしの JST 表記。失敗したら None(その行は触らない)。"""
@@ -211,7 +216,7 @@ def send(to_dept, from_dept, body, dry_run):
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(body)
         cmd = [sys.executable, DISPATCH, "--dept", to_dept, "--from-dept", from_dept,
-               "--from", "完遂通知(自動)", "--audience", "ai", "--direct",
+               "--from", AUTO_SENDER, "--audience", "ai", "--direct",
                "--body-file", path]
         if dry_run:
             cmd.append("--dry-run")
@@ -279,6 +284,21 @@ def main():
                 if unknown <= quiet_after:
                     print(f"  [便が無い] req={rid} dept={d['dept']} "
                           "(discord_processed に見当たらない=Chami発など dispatch を通らない依頼)")
+                continue
+            # ★★復路の復路を鳴らさない(2026-09-04・鎖の切断)。
+            #   実物= request_log で4段の鎖が回っていた。12:52の実依頼が13:21に完遂通知され、
+            #   その通知便を受け手の部屋が「実作業の依頼」として掴んで返信→13:51に**通知の通知**が
+            #   逆向きへ飛び、それをまた掴んで返信→14:21に3通目が戻ってきた。
+            #   (req 1545280332243275809 → DISPATCH-aegis-gl-1788495686142 →
+            #    DISPATCH-qa-reviewer-1788497486055 → DISPATCH-aegis-gl-1788499286076)
+            #   通知便は `--from-dept 請けた側` を明示して出しているので、そのまま次の発注として
+            #   成立してしまう= **自分の出した便が自分の入力になる**。放っておけば止まらない。
+            #   → この常駐が出した便から生まれた依頼は、完遂しても通知しない。鎖は2段目で終わる。
+            #   ★実依頼(人や部屋が出した便)の通知は1件も減らない= fail-open のまま。
+            if (letter.get("author") or "").strip() == AUTO_SENDER:
+                skipped += 1
+                print(f"  [復路の復路] req={rid} dept={d['dept']} "
+                      f"(この便は{AUTO_SENDER}が出したもの=鎖を切る)")
                 continue
             to_dept = (letter.get("from_dept") or "").strip()
             if not to_dept or not letter.get("from_dept_explicit"):
