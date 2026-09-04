@@ -351,10 +351,11 @@ STALE_EXIT = 3  # 上流スナップ停止=push が rc==3 を特別扱いして�
 
 def stale_reason(snap):
     """snap(=comp_titles snapshotDate=競合_日次シートの最終日)が古すぎないか検査する。
-    08:00運用では当日04:00のGAS日次(runCompetitorDaily)が回っていれば snap=当日になる。
-    ★しきい値=lag>=1(今日の競合_日次行が無い=赤)。GASのsnapshotDateはJST
+    08:00運用では、前段の収集(2026-09-04〜=PC側 go5_comp_daily 05:30 が主・GAS 04:00 はフォールバック)が
+    回っていれば snap=当日になる。★しきい値=lag>=1(今日の競合_日次行が無い=赤)。snapshotDateはJST
       (Session.getScriptTimeZone→Asia/Tokyo)・PCのtodayもJST=時差ずれ無し。daemonは08:00起動=
-      04:00のrunCompetitorDaily後だから、本日分未着(lag=1)は真に上流が書けていないサインで誤警報でない。
+      05:30のPC収集(枠が空いた日は04:00 GASフォールバックも)後だから、本日分未着(lag=1)は
+      真に上流が書けていないサインで誤警報でない。
       ★ここを lag>=2 に緩めるな= 「今日は無いが昨日は在る」を緑にすると silent green の穴が復活する
       (2026-08-23 AD研究室モドリッチの本命依頼=下流PC集計を二重の網にする・C-038/§3 可用性は喋る側へ倒す)。
     空/不正 = 上流に日付そのものが無い/読めない=同じく赤。"""
@@ -368,10 +369,11 @@ def stale_reason(snap):
     lag = (datetime.date.today() - sd).days
     if lag == 1:
         return ("本日分の競合_日次行が未着(最新スナップ=%s・本日=%s)。"
-                "GAS runCompetitorDaily(04:00)が本日分を書けていない" % (snap, today))
+                "上流(競合_日次)に本日分の新規行が入っていない(収集経路の別は問わない)" % (snap, today))
     if lag >= 2:
-        return ("上流スナップが %s で停止(本日 %s・%d日遅れ)。GAS runCompetitorDaily(04:00)が"
-                "新規行を書けていない=同じ日付を毎朝再集計しているだけ" % (snap, today, lag))
+        return ("上流スナップが %s で停止(本日 %s・%d日遅れ)。"
+                "上流(競合_日次)に新規行が入らないまま同じ日付を毎朝再集計しているだけ"
+                "(収集経路の別は問わない)" % (snap, today, lag))
     return None
 
 def status_red_reason(status):
@@ -388,7 +390,7 @@ def status_red_reason(status):
         if status.get("reason") == "no_status_sheet":
             return None
         return ("競合_日次ステータスの本日行が無い(found=false reason=%s)。"
-                "GAS runCompetitorDailyWatched が本日のステータス行を書けていない" % status.get("reason"))
+                "本日の日次収集がステータス行を書けていない(収集経路の別は問わない)" % status.get("reason"))
     if status.get("ok") is not True:
         return ("競合_日次ステータスの本日行が ok=false(部分失敗: snapped=%s note=%s)。"
                 "データ行は在るが本日の日次実行が失敗を自己申告している"
@@ -405,8 +407,8 @@ def main():
     sr = stale_reason(snap)
     if sr:
         alert = ("競合日次(自動): ⚠️" + sr + "。→ 08:00の自動集計は新しい数字を運べていない。"
-                 "GAS側(urlfetch日次上限/6分実行上限/runCompetitorDailyトリガー)を要確認。"
-                 "詳細= local/competitor_daily_push.log")
+                 "収集経路(2026-09-04〜=PC側 go5_comp_daily 05:30 が主・GAS 04:00 はフォールバック)の"
+                 "どの層で本日分が書けていないかは基盤側の切り分け要。詳細= local/competitor_daily_push.log")
         if "--emit" in sys.argv:
             print(alert)
         else:
@@ -419,7 +421,8 @@ def main():
     sred = status_red_reason(fetch_status())
     if sred:
         alert2 = ("競合日次(自動): ⚠️" + sred + "。→ データ行の鮮度(①)は通ったが、本日の日次実行が"
-                  "失敗を自己申告している(②)。GAS側(runCompetitorDailyWatched の note/webhook)を要確認。"
+                  "失敗を自己申告している(②)。収集経路(2026-09-04〜=PC側 go5_comp_daily 05:30 が主・"
+                  "GAS 04:00 はフォールバック)のステータス自己申告(note)を要確認。"
                   "詳細= local/competitor_daily_push.log")
         if "--emit" in sys.argv:
             print(alert2)

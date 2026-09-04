@@ -29,8 +29,10 @@ DRY = "--dry" in sys.argv
 
 
 def _stale_key(body):
-    """停止本文から『上流スナップが YYYY-MM-DD で停止』の日付を取り出す(=停止の同一性キー)。"""
-    m = re.search(r"上流スナップが\s*(\d{4}-\d{2}-\d{2})", body or "")
+    """停止本文から停止の起点日を取り出す(=停止の同一性キー=再掲抑止のため)。
+    lag>=2『上流スナップが YYYY-MM-DD で停止』だけでなく lag==1『最新スナップ=YYYY-MM-DD』も拾う
+    (=lag==1で空キーになり毎朝再掲していた穴を塞ぐ。gas_freeze_watch.FREEZE_RE と同型・同じ2文面)。"""
+    m = re.search(r"(?:上流スナップが|最新スナップ=)\s*(\d{4}-\d{2}-\d{2})", body or "")
     return m.group(1) if m else ""
 
 
