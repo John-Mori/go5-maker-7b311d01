@@ -22,9 +22,11 @@
 使い方:
     sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
     from dept_names import dept_ja
-    dept_ja("system-engineer")                  # -> '改修部門α'
-    dept_ja("system-engineer", with_slug=True)  # -> '改修部門α(system-engineer)'
+    dept_ja("system-engineer")                  # -> 台帳の display_ja(2026-09-04 実測= '5chシステム改修部門α')
+    dept_ja("system-engineer", with_slug=True)  # -> '<日本語名>(system-engineer)'
     dept_ja("しらない部屋")                      # -> 'しらない部屋' (そのまま)
+★ここに正解の字を固定で書くな= 名前は動く。2026-09-04 は「5chシステム構築部門α」へ改名して
+  同日10:22にChamiが撤回した(半日で往復した)。配線が生きている証明= scripts/_common/test_dept_ja_wiring.py
 """
 import os
 

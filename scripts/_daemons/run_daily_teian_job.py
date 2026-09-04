@@ -47,6 +47,17 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
+# ★部門名は台帳(00_AI-HQ/org_registry.yml の display_ja)が正本= ここに手書きしない
+#   (2026-09-04 配線。改称騒ぎ= Chamiが「5chシステム構築部門α」へ改名し同日10:22に撤回した。
+#    次に名前が動いても手書きを掃かずに済むよう、ここで台帳へ寄せた。dept_ja は台帳の
+#   mtime を都度見るので、次に改称されてもこのファイルは触らずに済む)。
+#   fail-safe= 台帳が読めなければスラッグをそのまま返す(便そのものは絶対に落とさない)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from dept_names import dept_ja                     # noqa: E402
+except Exception:                                      # noqa: BLE001
+    def dept_ja(slug, with_slug=False):
+        return slug
 CHAIN = os.path.join(ROOT, "scripts", "teian", "run_daily_teian.py")
 DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
 LOG = os.path.join(ROOT, "local", "_teian_daily.log")
@@ -171,7 +182,7 @@ def build_body(kind, code, tail, today, streak):
     """
     if kind == "ok":
         return (
-            "自動(毎朝7時の提案日次チェーン)→ 改修部門α\n\n"
+            "自動(毎朝7時の提案日次チェーン)→ " + dept_ja(DEPT) + "\n\n"
             "■ **戻った**。%s のランが成功した(exit=0)。\n"
             "  直前まで %s 日続けて止まっていた分は、これで閉じる。\n\n"
             "■ 出力の末尾:\n```\n%s\n```\n" % (today, streak, tail)
@@ -216,7 +227,7 @@ def build_body(kind, code, tail, today, streak):
             % (code, today, streak, tail, GUARD_QUIET_DAYS)
         )
     return (
-        "自動(毎朝7時の提案日次チェーン)→ 改修部門α\n\n"
+        "自動(毎朝7時の提案日次チェーン)→ " + dept_ja(DEPT) + "\n\n"
         "■ **run_daily_teian.py が非0で終わった**(exit=%s / %s・連続%s日目)。\n"
         "  ★空配信ガード(exit=2+合図行)**ではない**落ち方だ= 本当に落ちている。\n"
         "  配信まで届いていない= 提案決定ページの3択が古いまま出る。\n\n"

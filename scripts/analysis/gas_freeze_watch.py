@@ -23,6 +23,17 @@ Chami が却下したのは「毎朝まったく同じ文が Chami の部屋に�
 import os, sys, re, json, subprocess, datetime, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# ★部門名は台帳(00_AI-HQ/org_registry.yml の display_ja)が正本= ここに手書きしない
+#   (2026-09-04 配線。改称騒ぎ= Chamiが「5chシステム構築部門α」へ改名し同日10:22に撤回した。
+#    次に名前が動いても手書きを掃かずに済むよう、ここで台帳へ寄せた。dept_ja は台帳の
+#   mtime を都度見るので、次に改称されてもこのファイルは触らずに済む)。
+#   fail-safe= 台帳が読めなければスラッグをそのまま返す(便そのものは絶対に落とさない)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from dept_names import dept_ja                     # noqa: E402
+except Exception:                                      # noqa: BLE001
+    def dept_ja(slug, with_slug=False):
+        return slug
 PY = sys.executable or "python"
 EMIT = [PY, os.path.join("scripts", "analysis", "competitor_daily.py"), "--emit"]
 DISPATCH = [PY, os.path.join("scripts", "llm", "dispatch.py"),
@@ -149,9 +160,9 @@ def main():
             "上流スナップが %s で停止したまま今日で%d日目。"
             "runCompetitorDaily(04:00)が新規行を書けていない状態が続いてる。"
             "朝の押し出しはコミュニティ・ブリーフに差し替え済みだから Chami の部屋は汚さないけれど、"
-            "GAS本体の復旧はこちらの手には余るから、改修α/基盤への差配はHQでお願い。"
+            "GAS本体の復旧はこちらの手には余るから、%s/基盤への差配はHQでお願い。"
             "凍結が続く限り%d日ごとにここへ鳴らすわ(復旧を確認したら鳴り止める)。"
-            % (stale, days, REPING_EVERY))
+            % (stale, days, dept_ja("system-engineer"), REPING_EVERY))
 
     if _ring(body):
         if not DRY:

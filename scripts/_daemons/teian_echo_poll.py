@@ -71,6 +71,18 @@ except Exception:
     pass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# ★部門名は台帳(00_AI-HQ/org_registry.yml の display_ja)が正本= ここに手書きしない
+#   (2026-09-04 配線。改称騒ぎ= Chamiが「5chシステム構築部門α」へ改名し同日10:22に撤回した。
+#    次に名前が動いても手書きを掃かずに済むよう、ここで台帳へ寄せた。dept_ja は台帳の
+#   mtime を都度見るので、次に改称されてもこのファイルは触らずに済む)。
+#   fail-safe= 台帳が読めなければスラッグをそのまま返す(警報そのものは絶対に落とさない)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from dept_names import dept_ja                     # noqa: E402
+except Exception:                                      # noqa: BLE001
+    def dept_ja(slug, with_slug=False):
+        return slug
+SE_DEPT = "system-engineer"       # 読み取り口(?action=teian_decisions)を実装する部門
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 STATE_DIR = os.path.join(LOCAL, "_state")
 WATERMARK = os.path.join(STATE_DIR, "teian_decide_row.txt")
@@ -459,12 +471,12 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
                 logf(f"[fail-open] 提案決定エコー: 読み取り口がまだ無い(既知・{n}回連続)。"
                      f"水位ファイルは作らずに待機。")
                 note("bootstrap-wait",
-                     f"経路Bは稼働中・改修αの読み取り口(?action=teian_decisions)がまだ無いため"
+                     f"経路Bは稼働中・{dept_ja(SE_DEPT)}の読み取り口(?action=teian_decisions)がまだ無いため"
                      f"fail-openで静観中(連続{n}回・水位ファイルは未作成・部屋では鳴らさない)。")
             # ★返す物4= 未初期化のまま「時間で」滞留したら周期ちょうどで部屋へ1回escalate。
             #   n==alert_at の1回きりだと、口が生えないまま忘れられても跡は最初の1行だけ=静かな死。
             if at_period:
-                alert(f"提案決定→軍議エコー(経路B)は改修αの読み取り口(?action=teian_decisions)が"
+                alert(f"提案決定→軍議エコー(経路B)は{dept_ja(SE_DEPT)}の読み取り口(?action=teian_decisions)が"
                       f"無いまま{_age_text(n)}(連続{n}回)待ち続けている。決定は提案決定シートに溜まるのに"
                       f"誰も『まだ届いていない』と気づけない=読み取り口の実装が忘れられていないか確認してほしい。")
         return {"status": "fail-open", "watermark": since, "delivered": 0, "fails": n}
@@ -475,8 +487,8 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
         _write_int(wm_path, last)
         _reset(fail_path)
         logf(f"[初期化] 提案決定エコーの水位を lastRow={last} に置いた(既存の決定は配達しない)。")
-        note("bootstrap-wait", f"改修αの読み取り口が生えて水位を lastRow={last} に初期化した。", resolve=True)
-        ring_recovery(f"改修αの読み取り口が生えて水位を lastRow={last} に初期化した")
+        note("bootstrap-wait", f"{dept_ja(SE_DEPT)}の読み取り口が生えて水位を lastRow={last} に初期化した。", resolve=True)
+        ring_recovery(f"{dept_ja(SE_DEPT)}の読み取り口が生えて水位を lastRow={last} に初期化した")
         return {"status": "init", "watermark": last, "delivered": 0, "fails": 0}
 
     headers = data.get("headers") if isinstance(data.get("headers"), list) else None

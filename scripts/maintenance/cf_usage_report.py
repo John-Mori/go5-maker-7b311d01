@@ -32,6 +32,17 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+# ★部門名は台帳(00_AI-HQ/org_registry.yml の display_ja)が正本= ここに手書きしない
+#   (2026-09-04 配線。改称騒ぎ= Chamiが「5chシステム構築部門α」へ改名し同日10:22に撤回した。
+#    次に名前が動いても手書きを掃かずに済むよう、ここで台帳へ寄せた。dept_ja は台帳の
+#   mtime を都度見るので、次に改称されてもこのファイルは触らずに済む)。
+#   fail-safe= 台帳が読めなければスラッグをそのまま返す(便そのものは絶対に落とさない)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from dept_names import dept_ja                     # noqa: E402
+except Exception:                                      # noqa: BLE001
+    def dept_ja(slug, with_slug=False):
+        return slug
 LOCAL = os.path.join(ROOT, "local")
 TOKEN_FILE = os.path.join(LOCAL, "cf_api_token.txt")
 ACCT_FILE = os.path.join(LOCAL, "cf_account_id.txt")
@@ -111,7 +122,8 @@ def build_line(day, rows):
     parts = " / ".join(f"{name} {fmt(n)}" for name, n in rows if n > 0) or "(呼び出しなし)"
     head = f"☁️ Cloudflare 日本時間 {jst_span(day)}: {parts}　計 {fmt(total)} / 枠 {fmt(FREE_LIMIT)}"
     if total >= FREE_LIMIT:
-        return head + "\n🚨 **上限超過**。Workerが停止した可能性がある。改修αへ調査を回してくれ。"
+        return head + ("\n🚨 **上限超過**。Workerが停止した可能性がある。"
+                       f"{dept_ja('system-engineer')}へ調査を回してくれ。")
     if total >= WARN_AT:
         return head + f"\n⚠️ **黄信号**({fmt(WARN_AT)}/日超)。このペースだと上限に届く。原因の特定を。"
     return head

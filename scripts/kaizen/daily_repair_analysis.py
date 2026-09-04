@@ -29,6 +29,18 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))  # 5SecMovieMaker
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from lib.jsonl_store import read_jsonl, ts_epoch  # noqa: E402
 
+# ★部門名は台帳(00_AI-HQ/org_registry.yml の display_ja)が正本= ここに手書きしない
+#   (2026-09-04 配線。改称騒ぎ= Chamiが「5chシステム構築部門α」へ改名し同日10:22に撤回した。
+#    次に名前が動いても手書きを掃かずに済むよう、ここで台帳へ寄せた)。
+#   dept_ja() は台帳のmtimeを都度見るので、次に改称されても**このファイルは触らずに済む**。
+#   fail-safe= 台帳が読めなければスラッグをそのまま返す(報告そのものは絶対に落とさない)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from dept_names import dept_ja                     # noqa: E402
+except Exception:                                      # noqa: BLE001
+    def dept_ja(slug, with_slug=False):
+        return slug
+
 CHANGE_LOG = os.path.join(ROOT, "local", "llm", "change_log.jsonl")
 STORE = os.path.join(ROOT, "local", "llm", "kaizen_repair_analysis.jsonl")  # 貯め先1本
 
@@ -142,7 +154,8 @@ def render_md(now, hours, picked, ranked, bad, undated, unknown_dept):
     span = (f"{from_d.month}/{from_d.day} {from_d.hour:02d}:{from_d.minute:02d}"
             f" 〜 {to_d.month}/{to_d.day}({wd}) {to_d.hour:02d}:{to_d.minute:02d} JST")
     total = len(picked)
-    out = [f"◆改修α 直近{hours:.0f}h集計({span})= 本体改修 {total}件"]
+    se = dept_ja(DEPT_LABEL)            # ★台帳から都度引く(手書きしない)
+    out = [f"◆{se} 直近{hours:.0f}h集計({span})= 本体改修 {total}件"]
     if ranked:
         top_label, top_n = ranked[0]
         for label, n in ranked:
@@ -151,14 +164,14 @@ def render_md(now, hours, picked, ranked, bad, undated, unknown_dept):
         if top_n >= 2:
             out.append(f"→ 作成メカニズムの精度不足の指し先=「{top_label}」({top_n}件)")
     else:
-        out.append("- 対象なし(直近窓に改修αの記録なし)")
+        out.append(f"- 対象なし(直近窓に{se}の記録なし)")
     if bad:
         out.append(f"※台帳に読めない行 {len(bad)}件=要手当て")
     if undated:
         # ★ここに出るのは機構導入**後**に書かれた読めない ts= 新しい穴。出たら直す対象。
-        out.append(f"※改修αだがtsが読めず除外 {undated}件(★新しい穴=書いた行のtsを直す)")
+        out.append(f"※{se}だがtsが読めず除外 {undated}件(★新しい穴=書いた行のtsを直す)")
     if unknown_dept:
-        out.append(f"※dept欠落で改修α判定不能 {unknown_dept}件(窓内・別数え)")
+        out.append(f"※dept欠落で{se}判定不能 {unknown_dept}件(窓内・別数え)")
     return "\n".join(out)
 
 

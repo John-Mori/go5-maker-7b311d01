@@ -28,11 +28,23 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
+# ★部門名は台帳(00_AI-HQ/org_registry.yml の display_ja)が正本= ここに手書きしない
+#   (2026-09-04 配線。改称騒ぎ= Chamiが「5chシステム構築部門α」へ改名し同日10:22に撤回した。
+#    次に名前が動いても手書きを掃かずに済むよう、ここで台帳へ寄せた。dept_ja は台帳の
+#   mtime を都度見るので、次に改称されてもこのファイルは触らずに済む)。
+#   fail-safe= 台帳が読めなければスラッグをそのまま返す(便そのものは絶対に落とさない)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from dept_names import dept_ja                     # noqa: E402
+except Exception:                                      # noqa: BLE001
+    def dept_ja(slug, with_slug=False):
+        return slug
 ANALYSIS = os.path.join(ROOT, "scripts", "kaizen", "daily_repair_analysis.py")
 DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
 LOG = os.path.join(ROOT, "local", "_kaizen_daily_repair.log")
 BODY = os.path.join(ROOT, "local", "_work", "kaizen_daily_repair_body.txt")
 DEPT = "kaizen-analyst"          # 改善提案部門(この集計の持ち主)
+SE_DEPT = "system-engineer"      # 集計の対象部門。★日本語名は書かない= dept_ja が台帳から引く
 # ★2026-08-23 手2(研究室HQ): 絵文字監視(8:00)が書いた「全部屋スタンプ一覧」を、この8:10の便で
 #   一緒に読む。以前は絵文字監視が改善提案部門を**もう1回起こして**渡していた(実測 約1,600万/日)。
 #   起こすのを1つ止め、傾向を見るための一覧はファイルから取り込む。★本日ぶんが無ければ捏造せず
@@ -97,8 +109,9 @@ def main():
     body = (r.stdout or "").strip()
     if r.returncode != 0 or not body:
         # ★黙って落とすな= 失敗そのものを届ける(沈黙が最悪の事故)。
-        body = ("★毎朝の改修α集計が失敗した(exit=%s)。\n"
-                "--- stderr ---\n%s" % (r.returncode, (r.stderr or "")[:1500]))
+        body = ("★毎朝の%s集計が失敗した(exit=%s)。\n"
+                "--- stderr ---\n%s"
+                % (dept_ja(SE_DEPT), r.returncode, (r.stderr or "")[:1500]))
         log("★集計が失敗した exit=%s" % r.returncode)
 
     # ★化けた本文を投函しない= 壊れたものを黙って配るくらいなら、壊れたと言う。
@@ -107,7 +120,7 @@ def main():
     if "�" in body:
         n = body.count("�")
         log("★本文が化けている(U+FFFD %d個)= 集計結果は投函しない" % n)
-        body = ("★毎朝の改修α集計は走ったが、**本文が文字化けした**(U+FFFD %d個)。\n"
+        body = ("★毎朝の" + dept_ja(SE_DEPT) + "集計は走ったが、**本文が文字化けした**(U+FFFD %d個)。\n"
                 "子プロセスの出力エンコーディングを疑え(PYTHONIOENCODING)。\n"
                 "化けた本文は捨てた= %s のログを見てくれ。" % (n, LOG))
 
