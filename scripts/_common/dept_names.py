@@ -54,11 +54,14 @@ EXTRA_JA = {
     "learning": "学習部門",
 }
 
-_cache = {"mtime": None, "ja": {}}
+_cache = {"mtime": None, "ja": {}, "alias": {}, "ambig": set()}
 
 
 def _registry_ja():
-    """台帳から {slug: display_ja} を都度読み。読めなければ直前のキャッシュ(初回は空)。"""
+    """台帳から {slug: display_ja} を都度読み。読めなければ直前のキャッシュ(初回は空)。
+
+    ★同じ読み込みで `aliases`(通称)も拾って `_cache["alias"]` に入れる= 台帳を2回開かない。
+    """
     try:
         m = os.path.getmtime(REGISTRY)
     except OSError:
@@ -71,10 +74,78 @@ def _registry_ja():
             depts = (yaml.safe_load(f) or {}).get("depts") or {}
         _cache["ja"] = {k: (v or {}).get("display_ja")
                         for k, v in depts.items() if (v or {}).get("display_ja")}
+        al, ambig = {}, set()
+        for k, v in depts.items():
+            raw = (v or {}).get("aliases") or ()
+            if isinstance(raw, str):                 # `aliases: 動画制作部門` の一本書きも許す
+                raw = [raw]
+            for a in raw:
+                a = str(a or "").strip()
+                if not a:
+                    continue
+                if a in al and al[a] != k:
+                    ambig.add(a)                     # 2部門が同じ通称= 解決しない(後述)
+                al[a] = k
+        _cache["alias"], _cache["ambig"] = al, ambig
         _cache["mtime"] = m
     except Exception:
         return _cache["ja"]          # yaml不在・破損・権限。報告は止めない
     return _cache["ja"]
+
+
+# ============================================================================
+# ★2026-09-05 逆引き(部門名 → スラッグ)。C-073・研究室HQ便 DISPATCH-aegis-gl-1788556091239。
+# ----------------------------------------------------------------------------
+# なぜ要るか= Chamiが口で与えた通称「動画制作部門」(2026-09-03T06:36:24 msg 1544822097572921374)
+#   を、どの実装も解決できなかった。ad研究室は「その部門は存在しない」と誤断し、
+#   研究室HQもC-073の初版で同じ穴を踏んだ。HQは台帳へ `depts.manga-shorts.aliases:
+#   [動画制作部門]` を入れた(00_AI-HQ commit 9b21070)が、**それを見に行く実装が無かった**。
+# ★向きは display_ja が先、aliases は**空振りした時だけ**(HQの頼みの文言どおり)。
+#   正本は display_ja のまま= 通称が正式名を押しのけない。
+# ★同じ通称を2部門が名乗っていたら**解決しない**(空を返す)。曖昧なまま1つに倒すのは
+#   「居ない相手に預ける」の一歩手前だ= 分からない時は分からないと言う(C-041/§3)。
+# ★ORG-11= 判定を2本持たない。逆引きが要る実装はこの関数を引く(手元に表を作らない)。
+# ============================================================================
+def dept_slug(name, default=""):
+    """部門名 → スラッグ。引けなければ `default`(既定は空文字)。
+
+        dept_slug("1分shorts漫画紹介部門")  # -> 'manga-shorts'(display_ja)
+        dept_slug("動画制作部門")            # -> 'manga-shorts'(aliases・2026-09-05〜)
+        dept_slug("manga-shorts")           # -> 'manga-shorts'(スラッグそのまま)
+        dept_slug("しらない部門")            # -> ''
+
+    ★空を返すことに意味がある= 呼び側は「解決できなかった」を見分けられる。
+      ここでスラッグ風の文字列を捏造すると、居ない部門へ便を投げる事故になる。
+    """
+    s = (name or "").strip()
+    if not s:
+        return default
+    try:
+        ja = _registry_ja()                      # ここで alias も同時に読まれる
+        if s in ja:                              # スラッグそのもの
+            return s
+        for slug, dj in ja.items():              # ①正本= display_ja
+            if dj == s:
+                return slug
+        for slug, dj in EXTRA_JA.items():        # ②台帳外の受け皿(会議室・司令塔など)
+            if dj == s:
+                return slug
+        if s in EXTRA_JA:
+            return s
+        if s in _cache["ambig"]:                 # ③通称。ただし曖昧なら倒さない
+            return default
+        return _cache["alias"].get(s) or default
+    except Exception:
+        return default                           # fail-safe: 解決に失敗しても呼び側は落とさない
+
+
+def dept_alias_map():
+    """{通称: スラッグ}(曖昧な通称は除く)。表を混ぜたい実装のための入口。"""
+    try:
+        _registry_ja()
+        return {k: v for k, v in _cache["alias"].items() if k not in _cache["ambig"]}
+    except Exception:
+        return {}
 
 
 def dept_ja(slug, with_slug=False):

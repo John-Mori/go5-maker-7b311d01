@@ -98,8 +98,16 @@ def write_json(path, doc):
 
 
 def dept_aliases(registry=REGISTRY):
-    """部門名 → スラッグ。正本= org_registry.yml の display_ja(§共通規律)。"""
+    """部門名 → スラッグ。正本= org_registry.yml の display_ja(§共通規律)。
+
+    ★2026-09-05 台帳の `depts.<slug>.aliases`(通称)も読む(C-073・研究室HQ便)。
+      Chamiが口で与えた「動画制作部門」が解決できず、ad研究室が「存在しない」と
+      誤断した穴。**display_ja を先に入れ、aliases は後から setdefault** =
+      通称が正式名を押しのけない(正本は display_ja のまま)。
+      ★同じ通称を2部門が名乗っていたら入れない= 曖昧なまま1つへ倒さない。
+    """
     out = dict(EXTRA_ALIASES)
+    seen_alias = {}
     try:
         import yaml
         doc = yaml.safe_load(io.open(registry, encoding="utf-8")) or {}
@@ -108,6 +116,16 @@ def dept_aliases(registry=REGISTRY):
             dj = (v or {}).get("display_ja")
             if dj:
                 out[dj] = slug
+            raw = (v or {}).get("aliases") or ()
+            if isinstance(raw, str):
+                raw = [raw]
+            for a in raw:
+                a = str(a or "").strip()
+                if a:
+                    seen_alias.setdefault(a, set()).add(slug)
+        for a, slugs in seen_alias.items():
+            if len(slugs) == 1:
+                out.setdefault(a, next(iter(slugs)))
     except Exception as e:
         print("  ★org_registry.yml を読めなかった(通称だけで当てる): %s" % e)
     return out
