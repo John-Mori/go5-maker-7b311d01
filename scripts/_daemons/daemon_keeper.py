@@ -218,6 +218,15 @@ WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "llm", "self_check.py"),
                os.path.join(ROOT, "scripts", "discord", "send_audit.py"),
                os.path.join(ROOT, "scripts", "queue", "leasequeue.py"),
+               # ★2026-09-04 追加(C-042・イージス研究室)= 文字の表を持つ2本。
+               #   homoglyph=OUT口(persona_send/bot_send が読む表記崩れの正本・人事部門依頼で
+               #   今日入ったが載っていなかった) / invisible=IN口(leasequeue.enqueue が読む
+               #   不可視Unicodeの正本)。**どちらも表を1文字直した日に載らないと、
+               #   「直したのに素通りする」= 網を作った理由がそのまま消える。**
+               #   invisible は関数の中で import するが、一度 sys.modules に載れば以後固定=
+               #   遅延importでも監視が要る(persona_render/fcc_task で学んだのと同じ形)。
+               os.path.join(ROOT, "scripts", "discord", "homoglyph.py"),
+               os.path.join(ROOT, "scripts", "discord", "invisible.py"),
                os.path.join(ROOT, "scripts", "_common", "session_presence.py"),
                os.path.join(ROOT, "scripts", "discord", "persona_send.py"),
                os.path.join(ROOT, "scripts", "_common", "dept_names.py")]

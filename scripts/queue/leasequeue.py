@@ -58,6 +58,35 @@ DEFAULT_MAX_DELIVERIES = 5       # これを超えたら dead-letter
 #     60回 = 上限の窓が数時間続いても足りる幅で、かつ永久には回らない。
 DEFAULT_MAX_REFUNDS = 60
 
+
+# ★2026-09-04 追加 (研究室HQ msg 1545233909699051611 / Microsoft Security Blog 09-03)。
+#   不可視Unicode(ASCII Smuggling)の**入口ゲート**をここに置く理由:
+#     このモジュールの enqueue() が inbox.db へ行を作る**唯一の場所**で、Discord一次受信
+#     (scripts/queue/discord_gateway.py:875)・AI便(scripts/llm/dispatch.py:525)・部門長への
+#     上申(dept_daemon:7735)・追撃(8080)・採点依頼(local_responder:637) が全部ここへ合流する。
+#     支流(受信の入口)に何本も置かず、合流点へ1本だけ置く。
+#   ★body は既にJSON文字列になっているので、content でも reply_to.content でも author でも
+#     **どこに隠されていても**同じ1回で落ちる(投函側は全て ensure_ascii=False で実測確認済)。
+#     JSONの構造文字はASCIIなので、密輸帯(U+E0000-E007F)を抜いても構造は壊れない。
+#   判定表の正本は scripts/discord/invisible.py。ここには表を持たない(2か所に持つと腐る)。
+def _invisible_gate(body, msg_id, dept):
+    """密輸帯を抜いた本文を返す。★どこで失敗しても素の本文を返す(fail-open)。
+
+    受信を止める権利はこのゲートに無い。最悪の事故は沈黙(共通規律§3)。
+    """
+    try:
+        import sys
+        _d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "discord")
+        if _d not in sys.path:
+            sys.path.insert(0, _d)
+        import invisible
+        clean, _rep = invisible.gate(body, "leasequeue.enqueue",
+                                     msg_id=msg_id, dept=dept)
+        return clean
+    except Exception:
+        return body
+
 # --- 優先度 (2026-08-06 追加・小さいほど先に処理される) ---------------------------
 #   なぜ要るか= claim は厳密FIFO(ORDER BY id)だった。毎朝8時に自動便(絵文字巡回・日次
 #   振り返り)が全部門へ一斉投入され、部門デーモンは1件ずつしか処理しないので、その直後に
@@ -170,6 +199,9 @@ class LeaseQueue:
         """
         if not isinstance(body, str):
             body = json.dumps(body, ensure_ascii=False)
+        # ★不可視Unicodeの入口ゲート(2026-09-04)。密輸帯だけ抜き、ZW系/bidi系は残して記録。
+        #   prio_of(body) より前に置く= DBへ入る文字列と数える文字列を食い違わせない。
+        body = _invisible_gate(body, msg_id, dept)
         try:
             cur = self._db.execute(
                 "INSERT INTO queue(msg_id, dept, body, enqueued_at, prio, lease_until)"
