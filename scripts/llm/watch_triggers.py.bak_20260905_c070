@@ -391,32 +391,13 @@ def t5_fcc_hint(now, st, dry):
     return True
 
 
-# ---------------------------------------------------------------- T6
-def t6_pending_age(now, st, dry):
-    """「入れた(確認待ち)」に日齢を打つ(裁定 C-070・2026-09-05 研究室HQ)。
-
-    穴= 入れた本人も待っている側も日齢を見ていないので、確認待ちが静かに沈む。
-      HQ実測(09-05)= 確認待ち84行・日付が読めた72件で最古46日・中央値22日。
-    線= 3日超で所有部門へ督促 / 7日超で依頼元の部屋へ1行。**増分ではなく経過時間で鳴らす。**
-    ★新しい定刻タスクは作らない= ここ(quota_alarm から呼ばれる線)に相乗りさせる。
-    ★在庫を一斉に鳴らさない= 基準日より前は数えるだけ(`local/llm/pending_age_state.json`)。
-    ★中身は `scripts/llm/pending_age_watch.py`。便もそちらが自前で出す
-      (宛先が部門ごとに変わる= この file の send() は宛先がイージス研究室に固定)。
-    """
-    import pending_age_watch as PA
-    PA.SEND_DRY = SEND_DRY
-    n = PA.run(now, dry=dry)
-    return n > 0
-
-
 def run(dry=False, only=None, save_state=True):
     """引き金を1周。★定刻の相乗り口(quota_alarm.py の頭から呼ばれる)。"""
     now = datetime.now(JST)
     st = read_json(STATE, {}) or {}
     fired = 0
     for name, fn in (("t1", t1_cold_gap), ("t2", t2_downgrade), ("t3", t3_frontend),
-                     ("t4", t4_handoff_slim), ("t5", t5_fcc_hint),
-                     ("t6", t6_pending_age)):
+                     ("t4", t4_handoff_slim), ("t5", t5_fcc_hint)):
         if only and only != name:
             continue
         try:
@@ -435,7 +416,7 @@ def main():
     ap.add_argument("--send-dry", action="store_true",
                     help="dispatch.py まで本当に起動するが投函だけ止める(配線の検証)")
     ap.add_argument("--posts", type=int, default=None, help="T1の引き金を一時的に変える(検証用)")
-    ap.add_argument("--only", choices=["t1", "t2", "t3", "t4", "t5", "t6"])
+    ap.add_argument("--only", choices=["t1", "t2", "t3", "t4", "t5"])
     a = ap.parse_args()
     global SEND_DRY, POST_PER_DAY
     SEND_DRY = a.send_dry
