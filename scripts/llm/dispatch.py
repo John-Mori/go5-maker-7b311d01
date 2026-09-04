@@ -447,7 +447,7 @@ def naming_gate_pass(sender, from_dept, body):
 
 
 def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience="",
-             from_dept=""):
+             from_dept="", from_dept_explicit=False):
     """1部門へ指令を投函する。戻り値=(ok, msg_id)。
 
     ★C-023: work(=--workの一行)が実質値を持つ時だけ「実依頼」として相手部門チャンネルへ表投稿する。
@@ -508,6 +508,17 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
         }
         # ★宛先の宣言(C-050恒久)。key は常に載せる= 宣言の無い便を後から数えられる形にする。
         rec.update(aud)
+        # ★発注元を便に残す(2026-09-04 aegis-gl・HQアロンソ発注 msg=1545275628134072442)。
+        #   実物= 03:15にad研究室が2部門へ出した依頼が同日03:2xに完遂して置き場へ落ちていたのに、
+        #   発注元は12:00まで知らなかった(8時間半)。原因は「機械のどこにも発注元が無い」ことだった=
+        #   request_log は {request_id,dept,state,ts,evidence} だけ、この便レコードにも from_dept が
+        #   無い(実測= 既存の dispatch 便1721件すべてに from_dept キーが無い)。発注元は本文に
+        #   **人間の言葉でだけ**書かれていた(「■戻し先 結果は consult-intel へ」)。
+        #   → 完遂を発注元へ返す常駐(completion_notify.py)が宛先を決められるよう、ここで機械に残す。
+        #   ★`explicit` を分けて持つ理由= --from-dept の**既定値は "hq"** だ。指定を忘れた便まで
+        #     「HQ発注」として鳴らすと、誤配を自動で量産する。常駐が鳴らすのは explicit=True だけ。
+        rec["from_dept"] = (from_dept or "").strip()
+        rec["from_dept_explicit"] = bool(from_dept_explicit)
         if is_work:
             rec["work"] = work.strip()   # 何を頼んだかを便にも残す(後追い可能に)
         return json.dumps(rec, ensure_ascii=False)
@@ -583,7 +594,11 @@ def main():
                          "★規約の周知は配らずに 00_common/全部門共通規律.md を編集する")
     ap.add_argument("--direct", action="store_true",
                     help="3階梯を飛ばして配下へ直接投函する(緊急時のみ・理由を本文に書く)")
-    ap.add_argument("--from-dept", dest="from_dept", default="hq",
+    # ★default は None にしてある(既定値は下の parse_args 直後に "hq" を入れる)。
+    #   理由= **指定されたのか既定値が入ったのかを区別する**ため。完遂通知の常駐は
+    #   「明示された発注元」だけを宛先に採る(既定値の hq で鳴らすと誤配を量産する)。
+    #   ★既存の挙動は1ミリも変えない= 下で "hq" を入れるので以降の全参照は今までどおり。
+    ap.add_argument("--from-dept", dest="from_dept", default=None,
                     help="送信元の部門(既定=hq)。★部門長が自分の配下へ出す時は自分のdeptを指定する"
                          "(例 --from-dept research-room)。正規の下り(②→①)はブロックしない")
     ap.add_argument("--work", default="",
@@ -596,6 +611,9 @@ def main():
                          "chami=Chami本人が読む本文(1字も削らない)。"
                          "★宣言なしは削らない(fail-open)=名前で当てるのをやめた。")
     a = ap.parse_args()
+    from_dept_explicit = a.from_dept is not None
+    if not from_dept_explicit:
+        a.from_dept = "hq"          # ★ここから下は従来と同一(既定=hq)
 
     body = a.body or ""
     if a.body_file:
@@ -656,10 +674,18 @@ def main():
     if nwarn:
         print(f"呼称ゲートC= 警告のみ {nwarn}件(本文は変えていない・naming_audit.jsonl に記録)")
 
+    # ★実依頼なのに発注元が無い便への注意(2026-09-04 aegis-gl)。**止めない**(fail-open)。
+    #   完遂通知の常駐は明示された発注元へしか返せない= ここを省くと、その依頼の完遂は
+    #   誰にも自動で返らない。止めずに知らせるのは、指定を必須にすると既存の便が全部落ちるから。
+    if is_work_request(a.work) and not from_dept_explicit:
+        print("★--from-dept が無い実依頼だ(既定の 'hq' が入る)。この依頼の完遂は"
+              "発注元へ自動で返らない= `--from-dept <あなたのdept>` を付けると"
+              "完遂1行があなたの部屋へ届く(completion_notify)。")
+
     ok = 0
     for d in depts:
         good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience,
-                           a.from_dept)
+                           a.from_dept, from_dept_explicit)
         ok += 1 if good else 0
     print(f"投函 {ok}/{len(depts)} 部門")
     warn = addressee_warning(body, depts)
