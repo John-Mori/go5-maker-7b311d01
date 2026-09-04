@@ -52,6 +52,39 @@ HQ = r"D:\SougouStartFolder\00_AI-HQ"
 # ★機械的なお知らせの名義(Chami指定 2026-07-14)。absence_watchdog と同じ人を使う
 #   = 「機械が喋る時はいつもこの人」で統一する(名義が増えると誰の声か分からなくなる)。
 MACHINE_PERSONA = "メタルギアMk.II"
+
+
+# ★★2026-09-04 DEF-aegis-gl-08c9e9de6d(炎上)の恒久対策。
+#   事故= 打ち切り通知(msg 1545215532939218985)が「メタルギアMk.IIの名前で、
+#         ケヴィン・デブライネの口調」で出た。Chami「誰の口調やねんこれ」。
+#   真因は文面でも人格でもなく**構造**だ= 「この便を誰の名義で出すか」の判断が
+#   ①出力ゲートG(包み直す先= effective_persona)と ②送信側(_is_notice → MACHINE_PERSONA)の
+#   **2箇所に別々に居た**。2つが別々の答えを出せる限り、ねじれはいつでも再発する。
+#   → 判断を下の2関数**1本ずつ**に寄せ、ゲートGも送信側も同じ関数を見る(ORG-11)。
+#   ★純関数(self を読まない)= 実行で試験できる。試験= scripts/llm/test_notice_identity.py
+def machine_named_delivery(relay_nack, liveblog_notice):
+    """この便を機械名義(MACHINE_PERSONA)で出すか= 名義の**唯一の判定**。
+
+    True になるのは2つだけ:
+      - `_relay_nack`      … 打ち切り・失敗の告知(人格は何も喋っていない)
+      - `_liveblog_notice` … ゲートGが包み直せず機械名義へ倒した便
+    ★ここに部屋やdeptの条件を足すな。足すなら呼び出し側で判断して引数に載せる。
+    """
+    return bool(relay_nack) or bool(liveblog_notice)
+
+
+def liveblog_gate_applies(n_blocks, name_unresolved, machine_named):
+    """出力ゲートG(実況漏れ)を通すか。
+
+    因子①= 名義が1つも解決できていない(ブロック1個・名前 None)。
+    ★`machine_named` が True の便は**通さない**= 機械名義で出ると既に決まっている便を
+      人格の声へ包み直すと、それがそのままねじれになる(上の事故)。
+      ゲートGは「人格の顔で生ログを出さない」ための網であって、機械名義の告知は守る対象ではない
+      (包み直せなかった時にゲートG自身が倒す先が、まさにその機械名義だ)。
+    """
+    return bool(n_blocks == 1) and bool(name_unresolved) and not bool(machine_named)
+
+
 TOKEN_FILE = os.path.join(LOCAL, "cli_auth_token.txt")
 PROCESSED = os.path.join(LOCAL, "discord_processed.jsonl")
 CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
@@ -6973,6 +7006,22 @@ class Daemon:
             return self._member["persona"]
         return self.conf["persona"] if self.persona_ready() else "アメス"
 
+    # --- この便を機械名義で出すか / 1ブロックを誰の名義で出すか(2026-09-04・炎上の恒久対策) ---
+    def machine_named(self):
+        """★ゲートGも送信側もここを見る= 名義の判断を2箇所に持たない(ORG-11)。"""
+        return machine_named_delivery(getattr(self, "_relay_nack", False),
+                                      getattr(self, "_liveblog_notice", False))
+
+    def outgoing_persona(self, who=None):
+        """1ブロックを出す名義。★ゲートGが包み直す先も、送信の --persona も、これ1本。
+
+        機械名義の便は誰の口調にも寄せない。人格の便は `[名前]` で解決した人、
+        解決できていなければ部屋の既定人格。
+        """
+        if self.machine_named():
+            return MACHINE_PERSONA
+        return who or self.effective_persona()
+
     def effective_character(self):
         if self._member:                 # 名指し便=そのメンバーのcharacterfileで応答する
             path = self._member["character"]
@@ -8779,6 +8828,7 @@ class Daemon:
             # ★resolve は1本だけ組んで上流(分割/剥がし)と下流(出力ゲートE)で**同じ物**を使う
             #   = 名義の判定を2箇所に持たない(ORG-11)。
             self._liveblog_notice = False   # ★便ごとに必ず初期化(前の便の判定を持ち越さない)
+            self._liveblog_wrapped = False  # ★同上。ゲートGが人格の声へ包み直したか(下の不変条件)
             if self.conf.get("personas"):
                 _tag_resolve = (lambda nm: resolve_persona_tag(self.conf, nm))
                 _blocks = split_persona_blocks(
@@ -8788,27 +8838,26 @@ class Daemon:
                 #   = 既定人格の名義で丸ごと出る。実物(改修α 2026-09-02 00:25)はここを通った。
                 #   ★因子①はこの if(多人格部屋)と下の条件(ブロックが1つ・名義未解決)で見る。
                 #     残りの因子②③④は audit_liveblog が見る。
-                # ★★2026-09-04 Chami「誰の口調やねんこれ」(msg 1545217948535234650)への処置。
-                #   **既に機械名義で出すと決まっている便(_relay_nack)はゲートGを通さない**。
-                #   実物= 打ち切り通知 msg 1545215532939218985。format_timeout_result が作る文は
-                #   素の機械語(名乗り無し・一人称無し)= ゲートGの4因子に当たり、
-                #   effective_persona(この部屋ならデブライネ)の声へ**包み直されて**いた。
-                #   ところが送信側(下の _is_notice)は同じ便を **メタルギアMk.II** 名義で出す=
-                #   「メタルギアの名前でデブライネが喋る」ねじれになる(ログ実測=
-                #   09-02 21:07 / 09-03 11:55 / 19:20 / 09-04 08:34 の4便すべてで
-                #   「ゲートG・人格へ包み直した」が発火)。ゲートGはそもそも
-                #   **人格の顔で生ログを出さないため**の網で、機械名義の告知は守る対象ではない
-                #   (包み直せなかった時にゲートG自身が倒す先が、まさにこの機械名義だ)。
-                if (len(_blocks) == 1 and _blocks[0][0] is None
-                        and not getattr(self, "_relay_nack", False)):
+                # ★★2026-09-04 Chami「誰の口調やねんこれ」(msg 1545217948535234650)→
+                #   🔥DEF-aegis-gl-08c9e9de6d。実物= 打ち切り通知 msg 1545215532939218985。
+                #   format_timeout_result が作る文は素の機械語(名乗り無し・一人称無し)=
+                #   ゲートGの4因子に当たり、effective_persona(この部屋ならデブライネ)の声へ
+                #   **包み直されて**いた。ところが送信側は同じ便を **メタルギアMk.II** 名義で出す=
+                #   「メタルギアの名前でデブライネが喋る」ねじれ(ログ実測= 09-02 21:07 /
+                #   09-03 11:55 / 19:20 / 09-04 08:34 の4便すべてで「人格へ包み直した」が発火)。
+                #   ★恒久対策= 通すかどうかも、包み直す先も、**名義の判定1本**から引く
+                #     (liveblog_gate_applies / outgoing_persona)。判断が2箇所に無ければねじれない。
+                if liveblog_gate_applies(len(_blocks), _blocks[0][0] is None,
+                                         self.machine_named()):
                     _lb_text, _lb = audit_liveblog(
-                        self.dept, self.effective_persona(), _blocks[0][1],
+                        self.dept, self.outgoing_persona(), _blocks[0][1],
                         resolve=_tag_resolve, rec=rec)
                     if _lb.get("hit"):
                         if _lb.get("ok"):
                             # 包み直せた= 名乗りが付いた本文をもう一度割る(名義がここで決まる)。
                             _blocks = split_persona_blocks(
                                 _lb_text, _tag_resolve, dept=self.dept, names=_roster)
+                            self._liveblog_wrapped = True   # 不変条件の材料(下の送信側で見る)
                             log(self.dept,
                                 f"★出力ゲートG(実況漏れ・人格へ包み直した): "
                                 f"{_lb.get('why') or ''} {_lb.get('elapsed_ms', 0)}ms msg={mid}")
@@ -9020,11 +9069,18 @@ class Daemon:
                 #   → 機械の告知は **メタルギアMk.II**(Chami指定2026-07-14の機械アナウンス担当)で出す。
                 #     ★キャラ名義+(精霊)で機械の話をしない。人格の声を機械で濁さない。
                 # ★出力ゲートGで機械名義へ倒した便も同じ扱い= 人格の声で機械の実況を出さない。
-                _is_notice = bool(getattr(self, "_relay_nack", False)
-                                  or getattr(self, "_liveblog_notice", False))
+                _is_notice = self.machine_named()
+                # ★★不変条件(2026-09-04・🔥DEF-aegis-gl-08c9e9de6d の再発検知)。
+                #   「ゲートGが人格の声へ包み直した便」が「機械名義」で出ることは**構造上ありえない**
+                #   (liveblog_gate_applies が machine_named の便を通さないため)。
+                #   それでも成立したら、名義を決める経路がまた増えたということだ= 声を上げる。
+                #   ★配送は止めない(fail-open・共通規律§3)= 沈黙が最悪の事故。
+                if _is_notice and getattr(self, "_liveblog_wrapped", False):
+                    log(self.dept,
+                        f"★★名義ねじれ検知= 人格の声へ包み直した便を機械名義で出そうとしている "
+                        f"(DEF-aegis-gl-08c9e9de6d の再発) msg={mid}")
                 send_argv = [sys.executable, PERSONA_SEND, "--channel", ch,
-                             "--persona", (MACHINE_PERSONA if _is_notice
-                                           else (_who or self.effective_persona()))]
+                             "--persona", self.outgoing_persona(_who)]
                 if (not _is_notice and not conv_only
                         and not getattr(self, "_relay_answered", False)):
                     send_argv += ["--suffix", "(精霊)"]
