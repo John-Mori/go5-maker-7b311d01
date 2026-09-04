@@ -54,13 +54,33 @@ print("=== 部門名の逆引き(aliases)試験 ===")
 import yaml                                                          # noqa: E402
 with open(dn.REGISTRY, encoding="utf-8") as f:
     DEPTS = (yaml.safe_load(f) or {}).get("depts") or {}
+# ★2026-09-05 研究室HQ追記(止血)= 変更前の実装は EXTRA_ALIASES を自前で持っていて
+#   「改修α」等は**台帳が無くても**引けていた。台帳の先頭の通称をそのまま題材にすると、
+#   [3]の対照(赤)が「旧実装でも引けてしまう」で崩れる(9/5にHQが通称を5部門ぶん足して
+#   実際に崩れた)。題材は**旧実装が持っていない通称**を優先して選ぶ。無ければ先頭。
+BAK = os.path.join(ROOT, "scripts", "llm", "pending_age_watch.py.bak_20260905_aliases")
+old = None
+try:
+    ldr = importlib.machinery.SourceFileLoader("paw_old", BAK)
+    old = importlib.util.module_from_spec(importlib.util.spec_from_loader("paw_old", ldr))
+    ldr.exec_module(old)
+except Exception as e:                                              # noqa: BLE001
+    print(f"  (.bak を読めない: {e})")
+OLD_MAP = old.dept_aliases() if old is not None else {}
+
 TARGET = None
+FALLBACK = None
 for _slug, _v in DEPTS.items():
     for _a in ((_v or {}).get("aliases") or ()):
-        TARGET = (_slug, str(_a), (_v or {}).get("display_ja"))
-        break
+        _cand = (_slug, str(_a), (_v or {}).get("display_ja"))
+        if FALLBACK is None:
+            FALLBACK = _cand
+        if str(_a) not in OLD_MAP:
+            TARGET = _cand
+            break
     if TARGET:
         break
+TARGET = TARGET or FALLBACK
 
 print("\n[1] 台帳に通称が在ること(前提)")
 ok(TARGET is not None, "★台帳に aliases を持つ部門が在る", dn.REGISTRY)
@@ -74,16 +94,8 @@ print("\n[2] ★緑= 通称が解決できる")
 ok(dn.dept_slug(ALIAS) == SLUG, "★aliases からスラッグを引ける", repr(dn.dept_slug(ALIAS)))
 
 print("\n[3] ★赤= display_ja だけ見る動く実装は、同じ入力で解決できない(C-053)")
-BAK = os.path.join(ROOT, "scripts", "llm", "pending_age_watch.py.bak_20260905_aliases")
-old = None
-try:
-    ldr = importlib.machinery.SourceFileLoader("paw_old", BAK)
-    old = importlib.util.module_from_spec(importlib.util.spec_from_loader("paw_old", ldr))
-    ldr.exec_module(old)
-except Exception as e:                                              # noqa: BLE001
-    print(f"  (.bak を読めない: {e})")
 if old is not None:
-    om = old.dept_aliases()
+    om = OLD_MAP
     ok(ALIAS not in om,
        "★変更前の実装は同じ台帳・同じ通称を持っていない(これが穴だった)",
        repr(om.get(ALIAS)))
