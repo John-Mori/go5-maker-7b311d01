@@ -184,12 +184,30 @@ def load_letters(want_ids):
 
 
 def landed_msg(evidence):
-    """evidence の `discord_msg=…` を取り出す(請けた側の返信の着地先)。"""
+    """evidence の `discord_msg=…` を取り出す(請けた側の返信の着地先)。
+
+    ★戻り値は台帳の字面のまま(カンマ連結のことがある)。**idの集合が欲しい時は
+      `landed_ids()` を使う**= ここを split すると "a,b" を1本のidとして扱ってしまう。
+    """
     ev = evidence or ""
     i = ev.find("discord_msg=")
     if i < 0:
         return ""
     return ev[i + 12:].split()[0].strip() if ev[i + 12:].split() else ""
+
+
+def landed_ids(evidence):
+    """着地msg_idを**全部**返す(HQ-0242・2026-09-05)。
+
+    ★1件の返信が人格ごとのブロックに割れて複数通出る部屋がある(hq= アロンソ+アメス)。
+      2026-09-05の実測= `request_log.jsonl` の `replied` のうち送信台帳で引けた346行中
+      **53行が多ブロック**で、実在するパスは**兄弟の投稿側に9本・記帳された側に0本**。
+      1本に絞ると、答えではなく相槌を読むことになる= C-071 が空振りしていた真因。
+    ★書く側(`dept_daemon.verify_replied`)がカンマで並べる。古い行は1本のまま=そのまま通る。
+    ★`-`(着地不明)は id ではない= 落とす。
+    """
+    raw = landed_msg(evidence)
+    return [m for m in (x.strip() for x in raw.split(",")) if m and m != "-"]
 
 
 # ★C-071 置き場のパスらしき文字列。`local/…` `docs/…` から始まる塊を拾う。
@@ -329,8 +347,15 @@ def already_replied(replies, to_dept, from_dept, after, consumed):
     return False
 
 
-def build_body(rid, dept, letter, done, landed, spot=""):
-    """発注元の部屋へ出す本文。★短く。本体は運ばない(C-023/C-050)。運ぶのはパス1本まで。"""
+def build_body(rid, dept, letter, done, landed, spot="", had_text=False):
+    """発注元の部屋へ出す本文。★短く。本体は運ばない(C-023/C-050)。運ぶのはパス1本まで。
+
+    ★HQ-0242(2026-09-05)= `had_text` を足した。**返信の本文を読めているのに
+      「請けた部門へ問い直せ」と書くのは事故**だ(HQ原文=「既に届いている答えを
+      問い直しに行く事故になる」)。紙が無い便は珍しくない= 口頭で答え切っている返信は
+      置き場を持たない。その時に要るのは問い直しではなく**返信そのものを読むこと**。
+      問い直せと言うのは、本文すら引けなかった時だけにする。
+    """
     work = (letter.get("work") or "").strip()
     lines = [f"[完遂通知] {dept} が請けた依頼が**完遂**した(自動・request_log発)。"]
     if work:
@@ -343,6 +368,13 @@ def build_body(rid, dept, letter, done, landed, spot=""):
     if spot:
         # ★実在を確かめたパスだけがここへ来る(find_spot)。中身は運ばない。
         lines.append(f"■成果の置き場= `{spot}`(返信本文から拾って実在を確認した)")
+    elif had_text:
+        # ★返信は読めている= 紙が無いだけ。問い直せとは言わない(HQ-0242)。
+        lines.append("■成果の置き場= **置き場のパスは無い。ただし返信そのものは届いている**"
+                     f"{('(msg `' + landed + '`)') if landed else ''}= "
+                     "**問い直す前にその返信を読め**(機械は推測で埋めない)。")
+        lines.append("※紙を伴う仕事なら `local/` の下へ1枚置いてパスを返信に書いてもらえると、"
+                     "次からここに載る(コードの直しは commit と change_log で追えるので不要)。")
     else:
         lines.append("■成果の置き場= **この便に置き場のパスは見つからなかった。請けた部門へ問い直せ**"
                      "(機械は推測で埋めない)。")
@@ -415,8 +447,8 @@ def main():
 
     letters, replies = load_letters(set(targets))
     # ★C-071 着地msg_idを先に集めて、送信台帳を**1回だけ**舐める(便ごとに開かない)。
-    bodies = load_reply_bodies({landed_msg(d["evidence"]) for d in targets.values()
-                                if landed_msg(d["evidence"])})
+    # ★HQ-0242= 1件の返信が複数通に割れている分も全部集める(1本に絞らない)。
+    bodies = load_reply_bodies({m for d in targets.values() for m in landed_ids(d["evidence"])})
     consumed = {}      # ★使った返信便の位置(1通=1件しか打ち消さない・qa-reviewer指摘)
     sent, skipped, unknown, failed, rows = 0, 0, 0, 0, []
 
@@ -465,12 +497,18 @@ def main():
 
             landed = landed_msg(d["evidence"])
             # ★C-071 返信の本文から置き場を1本拾う。送信台帳が先・部屋の直近が控え。
+            # ★★HQ-0242= **全ブロックの本文を繋いでから探す**(どれか1通に在れば足りる)。
+            #   採る1本を選ぶ設計にはしない= 実物3件はどれも「長い答え+短い相槌」の2通で、
+            #   **両方合わせて1件の返信**だった。選んだ時点で片方を捨てている。
             src = "send_audit"
-            text = bodies.get(landed) or ""
+            parts = [bodies[m] for m in landed_ids(d["evidence"]) if bodies.get(m)]
+            text = "\n\n".join(parts)
+            if len(parts) > 1:
+                src = f"send_audit×{len(parts)}通"
             if not text:
                 text, src = recent_reply(d["dept"], rid), "recent"
             spot = find_spot(text)
-            body = build_body(rid, d["dept"], letter, d, landed, spot)
+            body = build_body(rid, d["dept"], letter, d, landed, spot, bool(text))
             ok, out = send(to_dept, d["dept"], body, a.dry_run)
             if ok:
                 sent += 1

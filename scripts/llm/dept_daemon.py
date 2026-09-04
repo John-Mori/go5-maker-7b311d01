@@ -3963,6 +3963,24 @@ DEPT_CONF = {
     },
 }
 
+# ★2026-09-05 Chami直接指示(msg 1545499109685858534・platform-se一ノ瀬怜)。原文=
+#   「1526283504696950794 ここってちゃんと配線されてなさそうだよね、質問部屋1と全く同じメンバーで、
+#     記憶を各キャラ保持してよろしく」。
+#   実測した「配線されてなさそう」の中身= 質問部屋2(1526283504696950794)だけが質問部屋1と
+#   **同じ dept=learning-coach を共有**していた=1セッション(90ad74e6-…)・1記憶ファイル
+#   (learning-coach.jsonl)を2部屋で相乗り。他の全部屋は1ch=1dept=専用セッション+専用記憶。
+#   結果 ①部屋間で会話が混線 ②2部屋が直列化(同時に回らない) ③部屋2に独立記憶が無い。
+#   → 質問部屋2を専用レーン learning-coach-2 に分離する。**メンバー(講師3人)・boot_note・
+#     work_scope は質問部屋1と完全一致**にしたいので、literal を書き写して drift させず
+#     dict() で丸ごと複製し、**記憶ファイルとポートだけ**を別にする。
+#   ★記憶は捨てない(Chami「記憶を保持」)= learning-coach.jsonl を learning-coach-2.jsonl へ
+#     複製して船出する(過去は両部屋に相乗りしていた=どちらも同じ記憶で始まるのが正)。
+#     以後は各部屋が独立に積む。★ロールバック= この節を消し discord_channels.json の
+#     1526283504696950794 を learning-coach へ戻し DEPTS から learning-coach-2 を外して reload。
+DEPT_CONF["learning-coach-2"] = dict(DEPT_CONF["learning-coach"])
+DEPT_CONF["learning-coach-2"]["memory"] = os.path.join(_MEM, "learning-coach-2.jsonl")
+DEPT_CONF["learning-coach-2"]["port"] = 18835
+
 # ★自分の部門スラッグを conf 自身に入れておく(2026-08-23 イージス研究室)。
 #   なぜ= `work_model_for(conf)` / `relay_model(conf)` は **conf しか受け取らない**ので、
 #   「この部屋はどこか」を知らない=部屋別の上書きを引けなかった。呼び出し元(9か所)を
@@ -5750,11 +5768,54 @@ REPLIED_VERIFY_TRIES = 3
 REPLIED_VERIFY_WAIT_SEC = 2
 
 
-def verify_replied(channel_name, sent_text):
+def _verify_siblings(msgs, others):
+    """同じ返信の**他のブロック**の着地msg_idを、既に取ってある一覧から拾う(HQ-0242)。
+
+    ★APIは叩き直さない= `verify_replied` が読んだ `msgs` を使い回す(確認で配送を遅らせない)。
+    ★引けなかったブロックは黙って捨てる(fail-open)。ここで False を返す道は作らない
+      = 「兄弟が1通見つからない」を理由に `replied` を `replied_unverified` へ落とすと、
+        いま通っている便まで不着の棚へ入る(ORG-42と同じ向きの事故)。
+    ★重複は入れない= 同じ文面のブロックを2回送った時に同じidが並ぶのを避ける。
+    """
+    out, seen = [], set()
+    for txt in others or ():
+        part, _n = _split_like_persona_send(txt)
+        h = _norm_for_match(part)[:REPLIED_HEAD_CHARS]
+        t = _norm_for_match(part)[-REPLIED_TAIL_CHARS:]
+        if not h:
+            continue
+        for m in msgs or []:
+            c = _norm_for_match(m.get("content"))
+            if c and h in c and t in c:
+                mid = str(m.get("id", ""))
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    out.append(mid)
+                break
+    return out
+
+
+def verify_replied(channel_name, sent_text, others=()):
     """送った本文がDiscord上に**実在するか**をAPIで読み返して確かめる。
 
     返り値 (ok, evidence)。ok=True の時だけ呼び元が `replied` を記帳してよい。
     ★ok=False は「送れていない」ではなく「**確認できなかった**」。再送の合図ではない。
+
+    ★★2026-09-05 HQ-0242= `others` を足した(イージス研究室・HQ起票 DISPATCH-aegis-gl-1788559926057)。
+      実物3件(全部 hq の部屋・`salvaged` を経ない正規経路)=
+        06:09:01 シャビ・アロンソ 1,207字(msg 1545541223740346520)
+        06:09:02 アメス            141字(msg 1545541229025169438) ← **こちらが `replied` になっていた**
+        06:10:41 / 06:10:42 = 502字 と 79字、06:46:13 / 06:46:14 = 1,370字 と 116字 も同じ形。
+      **1件の返信が人格ごとのブロックに割れて2通出ている**のに、ここは `_last_sent`
+      (=最後のブロック)しか見ていなかった。台帳に残る着地msg_idは**最後の1通だけ**になり、
+      本文を読み返す側(completion_notify・C-071)は**短い相槌しか読めない**。
+      ★これは「どちらが依頼に答えているか選ぶ」問題ではない= **両方が1件の返信だ。**
+        選ぶのをやめて**全部の着地msg_idを記帳する**(1本に絞らない)。
+      ★台帳全体の実測(2026-09-05 07:4x・`request_log.jsonl` の `replied` 4,416行のうち
+        送信台帳で引けた346行)= **53行が多ブロックの返信に着地**していて、実在するパスは
+        **兄弟の投稿側に9本・採られた側に0本**(6行は兄弟側にしか無い)。
+      ★ok の判定は変えない(最後のブロックが実在すれば `replied`)= 兄弟が引けなくても
+        `replied_unverified` へ落とさない(fail-open・確認を厳しくして黙らせない)。
     """
     last, nparts = _split_like_persona_send(sent_text)
     head = _norm_for_match(last)[:REPLIED_HEAD_CHARS]
@@ -5791,8 +5852,13 @@ def verify_replied(channel_name, sent_text):
                 hit_tail = hit_head
                 break
     if hit_head and hit_tail:
-        return True, (f"discord_msg={hit_tail} 部屋={channel_name} 分割{nparts}通の最終通を実在確認"
-                      f"(先頭{len(head)}字+末尾{len(tail)}字が一致)")
+        # ★HQ-0242= 同じ返信の**他のブロック**も同じ取得結果の中から拾う(APIは叩き直さない)。
+        #   拾えた分だけを投稿順に並べる。拾えなくても黙って落ちるだけ= ok は動かさない。
+        sibs = _verify_siblings(msgs, others)
+        ids = ",".join(sibs + [hit_tail])
+        more = f"・同じ返信の他ブロック{len(sibs)}通も実在確認" if sibs else ""
+        return True, (f"discord_msg={ids} 部屋={channel_name} 分割{nparts}通の最終通を実在確認"
+                      f"(先頭{len(head)}字+末尾{len(tail)}字が一致){more}")
     if hit_head:
         # 先頭はあるのに末尾が無い= **途中で切れている疑い**(INC-92の再来)。実在とは言わない。
         return False, (f"先頭は一致したが末尾が見つからない(切り捨ての疑い) "
@@ -7338,6 +7404,29 @@ class Daemon:
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+    # ★2026-09-04 答えられなかった便を**部屋の記憶に残す**(DEF-manga-shorts-ccd93dc601)。
+    #   壊れた実物= manga-shorts 09-03 07:39 のChamiの便「1 b 2 a」(msg 1544839258118946877)。
+    #   request_log の実測: 07:39:45 leased → 07:49:45 **timeout** → 07:54:50 再試行 →
+    #   07:57:18 世代交代 → 08:07:18 **timeout**。返信が一度も生成されなかったので、
+    #   記憶の1行は**返信を鍵に書かれる**この設計では1行も残らなかった。
+    #   結果、後任の世代は「Chamiが何かを確定した」こと自体を知らないまま9時間の黒窓になった。
+    #   = 記憶の穴は「答えられなかった時」に開く。答えられない事故ほど、痕跡が要る。
+    #   ★載せるのは**Chamiの本文と、答えていないという事実**だけ。失敗の告知文は載せない
+    #     (下の従来コメントの通り= 次の便の文脈が配送事故の文言で汚れる)。
+    #   ★同じ便で何度も落ちる(上の実測どおり再試行される)ので、直近に同じ msg_id の
+    #     未応答行が在れば足さない= 記憶の窓(MEMORY_TAIL)を同じ便で埋め尽くさない。
+    def memory_note_unanswered(self, rec, why=""):
+        try:
+            mid = str(rec.get("msg_id", ""))
+            for m in self.memory_tail():
+                if str(m.get("msg_id", "")) == mid and str(m.get("reply", "")).startswith("(未応答"):
+                    return False
+            self.memory_append(rec, "(未応答= " + (why or "返信を生成できなかった") +
+                                    "。この便にはまだ誰も答えていない)")
+            return True
+        except Exception:
+            return False        # ★記憶の記録で配送を巻き添えにしない(fail-open)
+
     # --- 応答生成(claude --print・本文のみ) ---
     def _token(self):
         """★2026-07-20(裁4): トークンを都度読む。更新が艦隊再起動なしで即反映される
@@ -8738,6 +8827,7 @@ class Daemon:
                     # w_replyが無い(作業agent失敗)時は is_work=True のまま=main箱へ回送(安全側)
         except subprocess.TimeoutExpired:
             log(self.dept, f"生成タイムアウト msg={mid}")
+            self.memory_note_unanswered(rec, "生成がタイムアウトした")
             return False
         # ★★`<<WIP>>` を落とすのは**ここ1箇所**(2026-07-29。全経路の合流点)。
         #   下の audit_hangul と同じ理由で、generate / work_generate / relay / 名指しの
@@ -8754,6 +8844,7 @@ class Daemon:
         reply = strip_meta(self.dept, rec, reply)
         if not reply:
             log(self.dept, f"生成失敗 msg={mid}")
+            self.memory_note_unanswered(rec, "返信が生成できなかった(本文が空)")
             return False
         # ★非日本語文字(ハングル=ORG-45 / 簡体字=2026-09-01追加)の検知。送信直前・**全経路の合流点**。
         #   ここは generate / work_generate / 名指し(members)のどの経路の返信も必ず通る
@@ -9119,6 +9210,10 @@ class Daemon:
             # ★ブロックごとに送る(既存19部屋は必ず1ブロック=ループが1周するだけ)。
             #   body ファイルは使い回してよい(subprocess.run は同期=前の便を送り終えてから上書きする)。
             _last_sent = ""     # ★実在確認は「最後に送った1通」を見る(下の verify_replied)
+            # ★★HQ-0242(2026-09-05)= 送った**全ブロック**を控える。1件の返信が人格ごとに
+            #   割れて2通出る部屋(hq= アロンソ+アメス)で、台帳に最後の1通しか残らず、
+            #   本文を読み返す側が短い相槌しか読めなかった。着地msg_idは全部記帳する。
+            _sent_parts = []
             _sent_n = 0         # ★実際に外へ撃った回数(0なら下の実在確認は回さない・C-064)
             for _bi, (_who, _part) in enumerate(_blocks):
                 # ★★C-050= 他部門からの便(via=dispatch)への返信だけ、表を要点まで削る。
@@ -9159,6 +9254,7 @@ class Daemon:
                                "empty_body_blocked", (_part or "").strip()[:200])
                     continue
                 _last_sent = _part
+                _sent_parts.append(_part)
                 with open(body, "w", encoding="utf-8") as f:
                     f.write(_part)
                 # ★★2026-07-28 失敗の告知は**キャラの口を借りない**(Chami指摘)。
@@ -9194,6 +9290,9 @@ class Daemon:
                                    errors="replace", timeout=60)
                 if r.returncode != 0:
                     log(self.dept, f"送信失敗 msg={mid} persona={_who or ''}")
+                    # ★返信は在るが部屋へ出ていない= 記憶には**答えた事にしない**
+                    #   (出ていない言葉を記憶に積むと、人格が言っていない事を前提に喋り出す)。
+                    self.memory_note_unanswered(rec, "返信は作れたがDiscordへの送信に失敗した")
                     return False
                 _sent_n += 1
                 if _who:
@@ -9255,7 +9354,9 @@ class Daemon:
                     for _try in range(REPLIED_VERIFY_TRIES):
                         if _try:
                             time.sleep(REPLIED_VERIFY_WAIT_SEC)
-                        _ok, _ev = verify_replied(ch, _last_sent)
+                        # ★HQ-0242= 最後の1通で ok を決めるのは従来どおり。
+                        #   他のブロックは evidence の着地msg_idへ足すだけ(判定は変えない)。
+                        _ok, _ev = verify_replied(ch, _last_sent, _sent_parts[:-1])
                         if _ok:
                             if _try:
                                 _ev += f"(★{_try + 1}回目で確認・{REPLIED_VERIFY_WAIT_SEC}秒待ち)"
@@ -9329,6 +9430,8 @@ class Daemon:
             # 失敗の告知文は「この部屋の会話」ではないので記憶へ足さない
             # (足すと次の便の文脈に配送事故の文言が混ざる)。呼び元(drain/drain_queue)が
             # 便を残す判断をするため False を返す。
+            # ★告知文は載せないが、**来た便と、答えていないという事実**は残す(2026-09-04)。
+            self.memory_note_unanswered(rec, "セッションへの配送に失敗した")
             return False
         self.memory_append(rec, reply)
         # ★「止まり」の検出(2026-07-29。find_waiting / find_working の説明を参照)。

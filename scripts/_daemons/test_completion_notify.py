@@ -244,7 +244,7 @@ def audit(mid, body):
             "dept": "shorts-analyst", "persona": "誰か", "status": "200", "body": body}
 
 
-def build_body_v1(rid, dept, letter, done, landed, spot=""):
+def build_body_v1(rid, dept, letter, done, landed, spot="", had_text=False):
     """★壊れた側(C-053= 動く別実装)= C-071 以前の本文組み立て。
 
     返信の本文を**持っているのに読まない**。着地msg_idだけ載せて「成果の在りかはそこに
@@ -301,7 +301,7 @@ def test_spot_path():
         s = run()
         chk("P-2 ★実在しないパスは案内しない(os.path.exists で確認)",
             len(s) == 1 and "存在しない紙" not in s[0]["body"]
-            and "見つからなかった" in s[0]["body"], "")
+            and "置き場のパスは無い" in s[0]["body"], "")
 
         # --- FP対策: 根拠として引いたログや台帳を「成果」と読まない(実測で誤爆した形)
         write_ledgers([done("3004", "shorts-analyst", 60, landed="7004")],
@@ -314,15 +314,18 @@ def test_spot_path():
             len(s) == 1 and "send_audit.jsonl" not in s[0]["body"], "")
 
         # --- 拾えない時の文言(推定で埋めない・§1)
+        #     ★HQ-0242= 返信の**本文を読めている**便に「問い直せ」と書かない。
+        #       紙が無いだけの返信を問い直しに行くのは、既に届いている答えを取りに行く事故。
         write_ledgers([done("3005", "shorts-analyst", 60, landed="7005")],
                       [letter("3005", "shorts-analyst", "research-room", True)])
         write_audit([audit("7005", "口頭で答えた。紙は無い。")])
         s = run()
-        chk("P-4 パスが無い便は『請けた部門へ問い直せ』と書く(推測で埋めない)",
-            len(s) == 1 and "請けた部門へ問い直せ" in s[0]["body"]
+        chk("P-4 ★本文が読めていてパスが無い便は『返信を読め』(問い直せとは書かない)",
+            len(s) == 1 and "問い直す前にその返信を読め" in s[0]["body"]
+            and "請けた部門へ問い直せ" not in s[0]["body"]
             and "そこに書いてある" not in s[0]["body"], "")
         chk("P-4b 紙を置いてほしいという一言は入るが、入口を強制していない",
-            len(s) == 1 and "調査・設計・可否判断" in s[0]["body"], "")
+            len(s) == 1 and "`local/` の下へ1枚置いて" in s[0]["body"], "")
 
         # --- 控えの取り出し口= 送信台帳に本文が無い便(2026-09-04 23:25 以前)
         write_ledgers([done("3006", "shorts-analyst", 60, landed="7006")],
@@ -360,7 +363,7 @@ def test_spot_path():
             cn.SPOT_RE = old_re
         chk("P-7 ★赤= local|docs しか見ない旧実装は 00_AI-HQ の置き場を外す",
             len(s_red) == 1 and hq_rel not in s_red[0]["body"]
-            and "見つからなかった" in s_red[0]["body"], "")
+            and "置き場のパスは無い" in s_red[0]["body"], "")
 
         write_ledgers([done("3009", "hr-room", 60, landed="7009")],
                       [letter("3009", "hr-room", "aegis-gl", True)])
@@ -378,7 +381,7 @@ def test_spot_path():
         s = run()
         chk("P-7d 00_AI-HQ 側でも実在しないパスは案内しない",
             len(s) == 1 and hq_rel not in s[0]["body"]
-            and "見つからなかった" in s[0]["body"], "")
+            and "置き場のパスは無い" in s[0]["body"], "")
 
         # --- 台帳が1つも無くても落ちない(fail-open)
         os.remove(cn.SEND_AUDIT)
@@ -387,6 +390,81 @@ def test_spot_path():
         s = run()
         chk("P-6 送信台帳が無くても通知は出る(本文が拾えないだけ・fail-open)",
             len(s) == 1 and "見つからなかった" in s[0]["body"], "")
+        chk("P-6b ★本文そのものを引けない時だけ『請けた部門へ問い直せ』と書く",
+            len(s) == 1 and "請けた部門へ問い直せ" in s[0]["body"], "")
+    finally:
+        cn.ROOT = real_root
+
+
+# ---------------------------------------------------------------- HQ-0242 多ブロックの返信
+def test_multiblock_reply():
+    """1件の返信が人格ごとに割れて2通出た時、**全通の本文から**置き場を探す(HQ-0242)。
+
+    実物= hq の部屋(シャビ・アロンソ + アメス)。長い答えの1秒後に短い相槌が出て、
+    台帳に残る着地msg_idは相槌の方だけだった。台帳全体の実測でも、実在するパスは
+    兄弟の投稿側に9本・記帳された側に0本。**選ぶのではなく、繋いでから探す。**
+    """
+    print("\n■ HQ-0242 1件の返信が2ブロックに割れた時(赤→緑)")
+    real_root = cn.ROOT
+    cn.ROOT = SANDBOX
+    spot_rel = "docs/設計・調査/イージス研究室_HQ0242_20260905.md"
+    os.makedirs(os.path.join(SANDBOX, "docs", "設計・調査"), exist_ok=True)
+    with open(os.path.join(SANDBOX, spot_rel), "w", encoding="utf-8") as f:
+        f.write("成果の紙(テスト)")
+    long_block = ("[シャビ・アロンソ] 実測を置いた。3件とも salvaged を経ていない。\n"
+                  f"置き場= `{spot_rel}` の §P-9。")
+    short_block = "[アメス] アンタは何もしなくていいわよ。こっちで見ておくから。"
+    try:
+        # --- 赤: 着地msg_idを1本しか読まない旧実装は、短い相槌しか読めない
+        write_ledgers([done("4001", "hq", 60, landed="8001,8002")],
+                      [letter("4001", "hq", "aegis-gl", True)])
+        write_audit([audit("8001", long_block), audit("8002", short_block)])
+        old_ids = cn.landed_ids
+        cn.landed_ids = lambda ev: [cn.landed_msg(ev).split(",")[-1].strip()]
+        try:
+            s_red = run()
+        finally:
+            cn.landed_ids = old_ids
+        chk("Q-0 ★赤= 最後の1通しか読まない旧実装は置き場のパスを載せられない",
+            len(s_red) == 1 and spot_rel not in s_red[0]["body"]
+            and "置き場のパスは無い" in s_red[0]["body"], "")
+
+        # --- 緑: 全ブロックを繋いでから探す(どれか1通に在れば足りる)
+        write_ledgers([done("4002", "hq", 60, landed="8001,8002")],
+                      [letter("4002", "hq", "aegis-gl", True)])
+        write_audit([audit("8001", long_block), audit("8002", short_block)])
+        s = run()
+        chk("Q-1 ★緑= 兄弟の投稿にしか無いパスでも拾える",
+            len(s) == 1 and spot_rel in s[0]["body"], "")
+        chk("Q-1b 全文は運ばない(繋いでも中身は貼らない・C-023/C-050)",
+            len(s) == 1 and "何もしなくていい" not in s[0]["body"], "")
+
+        # --- 兄弟が台帳に無い時も落ちない(拾えた分だけで探す・fail-open)
+        write_ledgers([done("4003", "hq", 60, landed="8003,8004")],
+                      [letter("4003", "hq", "aegis-gl", True)])
+        write_audit([audit("8004", long_block)])
+        s = run()
+        chk("Q-2 片方の本文しか台帳に無くても、在る方から拾う(fail-open)",
+            len(s) == 1 and spot_rel in s[0]["body"], "")
+
+        # --- 1本だけの古い行は従来どおり(退行していない)
+        write_ledgers([done("4004", "hq", 60, landed="8005")],
+                      [letter("4004", "hq", "aegis-gl", True)])
+        write_audit([audit("8005", long_block)])
+        s = run()
+        chk("Q-3 着地msg_idが1本の古い行はそのまま通る(後方互換)",
+            len(s) == 1 and spot_rel in s[0]["body"], "")
+
+        # --- どちらの本文も無ければ、控え(部屋の直近)へ降りる道は生きている
+        write_ledgers([done("4005", "hq", 60, landed="8006,8007")],
+                      [letter("4005", "hq", "aegis-gl", True)])
+        write_audit([{"ts": ts_ago(30), "event": "send", "msg_id": "8006", "status": "200"}])
+        with open(os.path.join(SANDBOX, "llm", "recent_hq.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": ts_ago(30), "msg_id": "4005", "author": "誰か",
+                                "body": "依頼", "reply": long_block}, ensure_ascii=False) + "\n")
+        s = run()
+        chk("Q-4 全通の本文が無い便は従来どおり部屋の直近へ降りる",
+            len(s) == 1 and spot_rel in s[0]["body"], "")
     finally:
         cn.ROOT = real_root
 
@@ -540,6 +618,7 @@ def main():
     try:
         test_notify()
         test_spot_path()
+        test_multiblock_reply()
         test_dispatch_records_from_dept()
         test_env_from_dept()
     finally:
