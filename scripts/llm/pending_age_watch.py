@@ -61,6 +61,12 @@ SEND_DRY = False         # 真= dispatch.py は本当に起動するが投函だ
 #     旧`入れた\(確認待ち\)`だと閉じ括弧が来ないので **scan の入口(187行)で行ごと落ちて**
 #     いた。誤配が直るどころか案件が消える= 実測で確かめた(local/_work/c072_probe.py)。
 PENDING = re.compile(r"(?<!「)入れた\(確認待ち[^)）\n]*[)）]")
+# ★打ち消し線= 書いた本人が**札を取り消した**印。`~~入れた(確認待ち)~~ → 直った` の形で閉じる。
+#   2026-09-05 実測= この見張り自身が hq_open_items.md:731(呼称ゲートC・04:2xに閉じた行)を
+#   4.3日の未確認として鳴らしていた。**閉じた仕事を催促するのは沈黙の逆の壊れ方**だ。
+#   ★閉じ扱いにするのは打ち消し線だけ。「札の後ろに直った/効いたが在る」は使わない=
+#     実測21行が該当し、その多くは本文で経緯を喋っているだけで閉じていない(取りこぼす)。
+STRUCK = re.compile(r"~~.+?~~", re.S)
 # ★所有部門の明示。札の直後の部門名を当てに行く前に、**書いてあるならそれを採る**(C-072)。
 OWNER_MARK = re.compile(r"所有\s*[=＝]\s*([A-Za-z0-9_\-]+|[^\s)）、。,]+)")
 STAR_DATE = re.compile(r"★\s*(\d{4})-(\d{2})-(\d{2})")
@@ -229,12 +235,13 @@ def scan(now, files=None, alias=None):
     for path in (files if files is not None else ledger_files()):
         for no, raw in enumerate(io.open(path, encoding="utf-8", errors="replace"), 1):
             text = raw.rstrip("\n")
-            if not PENDING.search(text):
+            live = STRUCK.sub("  ", text)      # 取り消した札は「もう無い字」として扱う
+            if not PENDING.search(live):
                 continue
             cb = CHECKBOX.match(text)
             if cb and cb.group(1).lower() == "x":
                 continue                       # 閉じ済みのチェックボックスは対象外
-            date, src, owner, req = parse_line(text, alias)
+            date, src, owner, req = parse_line(live, alias)
             mid = ITEM_ID.search(text)
             key = mid.group(1) if mid else "L" + hashlib.sha1(
                 text.strip().encode("utf-8")).hexdigest()[:10]

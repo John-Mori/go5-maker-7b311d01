@@ -21,7 +21,9 @@
 """
 import importlib.machinery
 import importlib.util
+import io
 import os
+import shutil
 import sys
 import tempfile
 
@@ -175,7 +177,7 @@ for _v in ("ad研究室", "Ad研究室", "ａｄ研究室", " AD研究室 "):
 ok(scan.get("ad研究室") == WOBBLE, "走査側にも小文字の変種が入っている(和名は変種を作る)",
    repr(scan.get("ad研究室")))
 # ★変種を**足す**のは和名だけ。純ASCIIの短い名前(`hq` / `HQ`)に変種を足すと、
-#   台帳本文(`hq_open_items.md` / `--dept hq`)の字面を走査が拾って持ち主を奪う。
+#   台帳本文の字面を走査が拾って持ち主を奪う(実測= 見張りが読む4,474行に小文字hqが260回)。
 #   台帳が自分で名乗っている字面(スラッグ・display_ja・通称)はそのまま残す= ここでは
 #   「台帳に無いのに増えている純ASCIIの鍵」だけを禁じる。
 declared = set(DEPTS) | {(v or {}).get("display_ja") for v in DEPTS.values()} \
@@ -202,7 +204,34 @@ if retired_map:
        "★変更前の実装は同じ行をパス内の字面で研究室HQへ倒していた(これが穴だった)",
        repr(_old_hit))
 
-import shutil                                                        # noqa: E402
+print("\n[10] ★走査の規則と引き当ての規則が割れないこと(HQ-0241 便2・研究室HQの本丸)")
+# HQ指摘= `_leftmost` は部分一致・`dept_slug` は完全一致で、同じ語でも呼び出し元で答えが割れていた
+#   (例= `所有=改修α` が _leftmost では system-engineer、dept_slug では空)。
+# ★規則そのものは1本にできない(走査は「行の中から探す」・引き当ては「渡された名前を解く」)。
+#   揃えるべきは**答え**= 走査が当てた字面は、引き当てに渡しても必ず同じスラッグになること。
+split = {k: (v, dn.dept_slug(k)) for k, v in scan.items() if dn.dept_slug(k) != v}
+ok(not split, f"★走査表 {len(scan)}件すべてで dept_slug が同じ答えを返す", repr(split))
+ok(dn.dept_slug("改修α") == "system-engineer",
+   "★HQが挙げた実例 `改修α` は今はどちらでも引ける", repr(dn.dept_slug("改修α")))
+_ow = paw.parse_line("- [ ] 入れた(確認待ち・所有=改修α) 何かの行 ★2026-09-01", scan)[2]
+ok(_ow == "改修α" or _ow == "system-engineer", "★`所有=改修α` の札が同じスラッグへ落ちる", repr(_ow))
+
+print("\n[11] ★取り消した札(打ち消し線)を確認待ちとして数えないこと")
+# 実測= この見張り自身が hq_open_items.md:731(04:2x に閉じた行)を4.3日の未確認として鳴らしていた。
+CLOSED = "  - **▼2026-09-01 16:2x ★呼称ゲートC= ~~入れた(確認待ち)~~ → 2026-09-05 04:2x 直った。**"
+OPEN = "  - [ ] **★2026-09-01 呼称ゲートC= 入れた(確認待ち)**。"
+TMPD = tempfile.mkdtemp(prefix="struck_")
+led = os.path.join(TMPD, "hq_open_items.md")
+io.open(led, "w", encoding="utf-8").write(CLOSED + "\n" + OPEN + "\n")
+from datetime import datetime                                        # noqa: E402
+_now = datetime(2026, 9, 5, 12, 0, tzinfo=paw.JST)
+got = paw.scan(_now, files=[led], alias=scan)
+ok(len(got) == 1, "★閉じた札は数えず、開いている札だけ残る", repr([g["line"] for g in got]))
+ok(got and got[0]["line"] == 2, "残ったのは打ち消し線の無い方", repr(got))
+ok(paw.PENDING.search(CLOSED) is not None,
+   "(対照)札の字面そのものは在る= 落としているのは打ち消し線の判定だけ")
+shutil.rmtree(TMPD, ignore_errors=True)
+
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\n=== {PASS}/{PASS + FAIL} PASS ===")
 sys.exit(1 if FAIL else 0)
