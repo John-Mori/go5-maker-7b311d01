@@ -98,6 +98,14 @@ REACT = os.path.join(ROOT, "scripts", "discord", "react.py")
 REACT_MARK = os.path.join(ROOT, "scripts", "discord", "react_mark.py")
 # 譲っている間に react_mark を起こす間隔の下限(秒)。ループは2秒毎に回るので必ず間引く。
 YIELD_MARK_SEC = 30
+# ★走行中の既読(_live_mark_loop)の既定間隔(秒)。DEPT_CONFに live_mark_sec が
+#   **無指定**の室はこの値で覗く= Chamiが書いた部屋なら本走中でも既読が付く。
+#   2026-09-04:「既読つかない。改修α」(Chami msg 1545292847258017792)の恒久対策(C-038)。
+#   旧設計は6室だけの opt-in だったが、既読つかんが室を変えて再発した=個別当てが追い付かない。
+#   §4.55「正本1か所に入れる・個別当てはしない」に従い、**既定を覗く側に倒す**。
+#   明示 0 は今も無効(覗かない)として残す= disable の意思表示は尊重する。
+#   トークンは焼かない(押す口は react.py の subprocess だけ・LLMを呼ばない)。
+LIVE_MARK_DEFAULT_SEC = 20
 MAIN_INBOX = os.path.join(LOCAL, "discord_inbox.jsonl")
 # ★本人セッションが最終処理する部屋(判定の正本は presence.py)。ここではimportせず定数で持つ
 #   (dept_daemonはpresence.pyに依存していないため。増減時は presence.py と対で直すこと)。
@@ -8272,11 +8280,21 @@ class Daemon:
 
     # --- 走行中の既読(2026-09-03 イージス研究室・発注= 研究室HQ DISPATCH-aegis-gl-1788427433082) ---
     def _live_mark_sec(self):
-        """本走の最中に受信箱を覗く間隔(秒)。0=覗かない(既定・他30室はこれ・C-035)。"""
+        """本走の最中に受信箱を覗く間隔(秒)。
+
+        ★2026-09-04(C-038):既定を「覗かない」から `LIVE_MARK_DEFAULT_SEC` へ倒した。
+          「既読つかない。改修α」(Chami msg 1545292847258017792)が室を変えて再発し、
+          6室だけの opt-in では追い付かなかったため。§4.55「正本1か所に入れる」に従う。
+        ★区別する:未指定(None)=既定で覗く / 明示 0=覗かない(disable の意思は残す) /
+          明示 N=その間隔。旧 `or 0` は 0 と未指定を潰していたので None 判定に置き換える。
+        """
+        v = self.conf.get("live_mark_sec")
+        if v is None:
+            return float(LIVE_MARK_DEFAULT_SEC)   # 未指定=正本の既定で覗く
         try:
-            return float(self.conf.get("live_mark_sec") or 0)
+            return float(v)                       # 明示 0 は 0.0=覗かない(尊重する)
         except (TypeError, ValueError):
-            return 0.0
+            return float(LIVE_MARK_DEFAULT_SEC)
 
     def _live_mark_loop(self, ch, seen, stop):
         """本走が走っている間、受信箱を**覗くだけ**で見張り、Chamiの新着へ既読を押す。
