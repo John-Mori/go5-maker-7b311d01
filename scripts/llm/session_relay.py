@@ -2335,6 +2335,52 @@ def _reply_of(data):
 _PERSONA_TAG_RE = re.compile(r"^\s*\[[^\]\n]{1,40}\]")
 
 
+# ★救出した本文の言語を、**送る前に**ここで見る(2026-09-04・イージス研究室)========
+#   引き金= ad研究室ルカ・モドリッチ msg 1545234410331185197
+#     「打ち切り→救出→着地を1本の鎖として閉じないと、救出機構は
+#      『発火はするが届かない』で終わる」。実物= manga-shorts 09:40:39 に救出が
+#     発火し、09:40:41 に英文ダンプゲートが「日本語化できず=送らず便を戻す」で
+#     戻した= 打ち切りの通知すら出ないまま便が消えた。
+#   ★モドリッチの2択のうち **(2) 救出時に日本語の発話だけを拾う** を採る。理由:
+#     (1)「救出した英文を日本語化してから出す」は、死んだセッションの代わりに
+#     この時点で新しく生成を回すことになる= 打ち切りの後始末の中でもう1回
+#     外部の手を増やす(新しい失敗点)。しかも英文ダンプの正体は**人格の返信では
+#     なく作業メモ**なので、訳しても届くのは「訳された作業メモ」だ。それは
+#     英文ダンプゲートを**満たす**だけで、ゲートが守っている物を満たさない。
+#   ★そのうえで沈黙を作らない= 拾えなかった時は空振り扱いにして呼び元へ返す。
+#     呼び元は従来どおり打ち切り通知の枝へ落ちる= **必ず何かが着地する**
+#     (共通規律§3「最悪の事故は沈黙」・可用性は喋る側へ倒す)。
+def _salvage_lang_ok(text):
+    """救出候補が日本語の返信として着地できるか。(可否, 直した本文, 理由)。
+
+    判定は lang_gate 1本を引く= 送信直前のゲートと**同じ関数**で見る
+    (別の物差しを持つと、ここを通ったのに後段で戻される穴がまた開く)。
+    ★lang_gate を読めない/例外= 可(True)へ倒す。ここは救出であって検閲ではない。
+    """
+    s = str(text or "")
+    if not s.strip():
+        return False, s, "空"
+    try:
+        import sys as _sys
+        _d = os.path.dirname(os.path.abspath(__file__))
+        if _d not in _sys.path:
+            _sys.path.insert(0, _d)
+        from lang_gate import detect_english_dump, strip_english_preamble
+    except Exception:                                   # noqa: BLE001
+        return True, s, "言語ゲートを読めない=素通し"
+    try:
+        # 混在(英語の前置き+日本語本文)は前置きだけ外科的に剥がして本文を残す。
+        out, info = strip_english_preamble(s)
+        if (info or {}).get("stripped"):
+            s = out
+        hit = detect_english_dump(s)
+        if hit:
+            return False, s, (f"英文ダンプ(英字{hit.get('latin')}/日本語{hit.get('jp')})")
+        return True, s, "日本語"
+    except Exception as e:                              # noqa: BLE001
+        return True, s, f"言語判定で例外={type(e).__name__}=素通し"
+
+
 def _is_human_user(content):
     """user行の content が『人間の入力』か(=道具の戻り tool_result ではない)。
 
@@ -2449,9 +2495,12 @@ def _salvage_timeout_reply(sid, since_ts, cwd=None):
     拾う範囲(二重の掛け金。どちらか外れたら拾わない):
       ① 記録の**最後の人間の入力より後**の assistant 行(=この便のターン)
       ② その行の timestamp が **since_ts(本走の開始)以降**(前のターンの返信を配り直さない)
+      ⑤ その発話が**日本語で着地できる**こと(英文ダンプは候補から落とす。2026-09-04)
     選び方= ③名乗り[名前]付きが1つでもあればそれだけを連結 ④無ければ**最後の1本だけ**
       (道具の合間の英文メモを配らないため。中間の地の文は拾わない)。
     戻り値= (本文, 理由)。拾えなければ ("", 理由)。★全経路 fail-open(例外でも呼び元は落ちない)。
+    ★空を返した時に沈黙にはならない= 呼び元(TimeoutExpired の枝)が従来どおり
+      打ち切り通知へ落ちる。「英語だから送らない」で便ごと消すことはしない。
     """
     if not sid or not since_ts:
         return "", "sid/開始時刻が無い"
@@ -2492,13 +2541,36 @@ def _salvage_timeout_reply(sid, since_ts, cwd=None):
                 msgs.append(t)
         if not msgs:
             return "", "本走以降の発話が記録に無い"
+        # ★⑤日本語で着地できる発話だけに絞る(2026-09-04)。
+        #   ここを通した本文は、この後 送信直前の英文ダンプゲートも通る=
+        #   「救出は発火したが、ゲートに戻されて結局消えた」を塞ぐ。
+        #   落とした数は理由に残す(黙って減らすと、拾えなかった時に
+        #   「記録に無かった」のか「英語だった」のかが読めない)。
+        kept, dropped = [], 0
+        for m in msgs:
+            good, body, _why = _salvage_lang_ok(m)
+            if good:
+                kept.append(body)
+            else:
+                dropped += 1
+        if not kept:
+            return "", f"本走以降の発話は英文ダンプだけだった({dropped}本を捨てた)"
+        tail = f"・英文{dropped}本を捨てた" if dropped else ""
+        msgs = kept
         spoken = [m for m in msgs if _PERSONA_TAG_RE.match(m)]
         if spoken:
-            return "\n\n".join(spoken).strip(), f"名乗り付き{len(spoken)}本を拾った"
-        last = msgs[-1].strip()
-        if len(last) < 10:
-            return "", "最後の発話が短すぎる(拾わない)"
-        return last, f"名乗り無し=最後の1本だけ拾った(このターンの発話{len(msgs)}本)"
+            out = "\n\n".join(spoken).strip()
+            why = f"名乗り付き{len(spoken)}本を拾った{tail}"
+        else:
+            out = msgs[-1].strip()
+            if len(out) < 10:
+                return "", f"最後の発話が短すぎる(拾わない){tail}"
+            why = f"名乗り無し=最後の1本だけ拾った(このターンの発話{len(msgs)}本){tail}"
+        # ★連結した結果でもう一度見る= 1本ずつは通っても、束ねると英字が勝つことがある。
+        good, out, _why2 = _salvage_lang_ok(out)
+        if not good:
+            return "", f"救出したが英文ダンプ=拾わない({_why2})"
+        return out, why
     except Exception as e:                          # noqa: BLE001
         return "", f"記録を読めなかった({type(e).__name__})"
 
