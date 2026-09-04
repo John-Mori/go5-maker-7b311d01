@@ -4769,6 +4769,10 @@ def audit_naming(dept, persona, text, rec=None):
                         #   読み分けるには、頭ではなく**当たった場所**が要る。
                         "near": v.get("near", ""),
                         "hits": v.get("hits", 0),
+                        # ★skip= **なぜ直さなかったか**(2026-09-04)。これが無いと
+                        #   「わざと見送った」と「取りこぼした」が同じ行に見え、
+                        #   正しく動いている機構が「効いていない」と読まれる。
+                        "skip": v.get("skip", ""),
                         "msg_id": mid,
                         "excerpt": str(text or "")[:200],
                     }, ensure_ascii=False) + "\n")

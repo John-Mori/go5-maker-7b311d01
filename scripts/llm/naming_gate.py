@@ -1141,12 +1141,50 @@ FULL_KEY_SWAP = True
 FULL_KEY_SWAP_REASONS = ("forbidden", "override_allowed")
 
 
+# ★見送りの理由コード(2026-09-04・イージス研究室)===========================
+#   引き金= 人事部門ククール msg 1545235859899555840「applied が空だ=ゲートが
+#   出力を書き換えていない。安全4ペアだけ有効化してくれ」。
+#   ★実測で前提が違っていた= 安全クラス(裸姓→姓+さん)は **hr-room 以外では既に
+#     有効**で、今日の再ピン(08:52)以降も naming_fix が3件出ている。
+#     残り38件が event="naming" なのは「機構が直せなかった」からではなく、
+#     **わざと見送った**(人事部門の部屋は呼びかけ位置だけ/引用/言及)からだ。
+#   ★つまり壊れていたのは置換ではなく **台帳の数え方** だった。
+#     見送りの理由が残らないので、「意図した見送り」と「取りこぼし」が同じ1行に
+#     見え、正しく動いている機構が「効いていない」と読まれる(共通規律§3=
+#     測れない安全網は無視される)。
+#   ここでは **本文の扱いを1文字も変えず**、remaining へ理由コードだけ足す。
+SKIP_CODES = (
+    "reason_not_autofix",       # 自動修正の対象にしていない型(愛称ゆれ・略称等)
+    "whole_swap_off",           # 別名への丸ごと置換を許していない
+    "vocative_only",            # 呼称ルールを論じる部屋/投函経路=呼びかけ位置だけ直す
+    "whole_swap_not_vocative",  # 丸ごと置換は呼びかけ位置だけ
+    "unsafe_after",             # 直後が漢字等=姓だけ直すと壊れる(「三笘さん薫」)
+    "mention",                  # 呼んでいるのでなく**その名前の話をしている**
+    "partial_bare",             # 裸の出現が残った=警告は消さない
+    "no_hit",                   # 判定は出たが本文中に直せる出現が無かった
+)
+
+
+def _remain(v, code):
+    """警告のみに落ちた理由を1語だけ残す(★最初に当たった理由を採る)。
+
+    ★verdict へキーを足すだけ= 本文にも既存キーにも触らない。壊れても素通し。
+    """
+    try:
+        if code and not v.get("skip"):
+            v["skip"] = str(code)
+    except Exception:
+        pass
+    return v
+
+
 def naming_corrections(persona, dept, text, rules, vocative_only=None):
     """高信頼の呼称違反だけ自動修正した本文を返す(純関数)。
 
     返り値: {"fixed": str, "applied": [ {target,to,reason,count} ], "remaining": [verdict...] }
       - applied  : 自動修正した違反(本文は fixed に反映済み)。
       - remaining : 自動修正しなかった違反(=警告のみ・呼び出し側で naming_audit へ残す)。
+        ★各 verdict に `skip`(SKIP_CODES の1語)が付く= **なぜ見送ったか**。
     ★VOCATIVE_ONLY_DEPTS の部屋(人事部門)は**呼びかけ位置だけ**直し、地の文の出現は
       全部 remaining へ回す(呼称ルールを本文で論じる部屋で本文が化けるのを防ぐ)。
     ★vocative_only= その判定を呼び出し側から上書きする(None=従来どおり dept で決める)。
@@ -1197,7 +1235,7 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
             #   (whole_swap にならない)ので、既存の安全弁がそのまま効く。
             elif reason not in ("override_allowed", "honorific_required",
                                 "chami_address") or not bare or not allowed:
-                result["remaining"].append(v)
+                result["remaining"].append(_remain(v, "reason_not_autofix"))
                 continue
             target_form = allowed[0]
             # 「同じ姓に敬称/役職を足す/直す」= target_form が裸の姓で始まる時だけ。
@@ -1214,10 +1252,11 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
             shorten = bool(full_key and target_form != bare
                            and bare.startswith(target_form))
             if whole_swap and not full_key and not WHOLE_SWAP_AT_VOCATIVE:
-                result["remaining"].append(v)
+                result["remaining"].append(_remain(v, "whole_swap_off"))
                 continue
             fixed_n = 0
             unsafe = False
+            skip_code = ""      # ★最初に当たった見送り理由(台帳へ残すだけ)
             for i, actual, ok in _iter_occurrences(masked, bare, allowed):
                 if ok:
                     continue
@@ -1226,6 +1265,7 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
                     continue        # 「ちゃみさん/ちゃみちゃん」等=敬称付きは触らない
                 if not _safe_after(masked, end):
                     unsafe = True          # 姓+名(直後が漢字)等=置換すると壊れる
+                    skip_code = skip_code or "unsafe_after"
                     continue
                 if shorten and not _fullname_called(masked, i, tkey):
                     # ★フル名が出ていても**呼んでいる**とは限らない= 名簿の列挙・表の行・
@@ -1236,6 +1276,7 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
                     #   「三笘薫→三笘薫の自称 forbidden:[...] だ」が化けた。
                     #   設計(#3・2026-09-02)も挙動は**警告のみ**と定めている。
                     unsafe = True
+                    skip_code = skip_code or "mention"
                     continue
                 if (voc_only or (whole_swap and not full_key)) \
                         and not _is_vocative(masked, i, end):
@@ -1244,12 +1285,15 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
                     # ★例外= full_key(フルネームまるごと)は指す相手が一意=地の文でも直す。
                     #   ただし直すのは**呼んでいる出現だけ**(1つ上の `_fullname_called`)。
                     unsafe = True
+                    skip_code = skip_code or (
+                        "vocative_only" if voc_only else "whole_swap_not_vocative")
                     continue
                 repls.append((i, end, target_form))
                 fixed_n += 1
             if full_key and masked.count(found_bare) > masked.count(bare):
                 # フルネーム以外の裸の出現(「一ノ瀬」単独)が残っている=警告は消さない
                 unsafe = True
+                skip_code = skip_code or "partial_bare"
             if fixed_n:
                 result["applied"].append({
                     "target": v.get("target"), "to": target_form,
@@ -1258,7 +1302,7 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
                 })
             if unsafe or not fixed_n:
                 # 危険な出現が残った/1つも直せなかった=警告として残す(沈黙にしない)
-                result["remaining"].append(v)
+                result["remaining"].append(_remain(v, skip_code or "no_hit"))
         if repls:
             repls.sort(key=lambda r: r[0])
             filtered, last_end = [], -1

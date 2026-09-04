@@ -202,6 +202,8 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
                          "target": v.get("target", ""), "found": v.get("found", ""),
                          "expected": v.get("expected", []), "reason": v.get("reason", ""),
                          "near": v.get("near", ""), "hits": v.get("hits", 0),
+                         # ★skip= なぜ直さなかったか(2026-09-04・常駐経路と同じ列)
+                         "skip": v.get("skip", ""),
                          "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
         _append(NAMING_AUDIT, rows)
         summary["naming_fix"] = len(applied)
