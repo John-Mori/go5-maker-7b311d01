@@ -45,6 +45,14 @@
   請けた部門が自分で発注元の部屋へ1行返していたら鳴らさない。判定は
   「完遂時刻より後に、`dept=発注元` かつ `from_dept=請けた側` の dispatch 便がある」。
   ★dispatch を通さず部屋で直に返した場合は見えない=そのときは二重に鳴る(害は小さい方を採る)。
+  ★★**1通の返信は1件の完遂しか打ち消さない**(2026-09-04・qa-reviewer(ジェンティルドンナ)
+    指摘 msg=1545281379862843414)。初版は「そのペアに返信便が1通でもあれば抑える」だった=
+    同じ2部門の間で依頼が**並走**すると、請けた側が1件だけ返しただけで残り全部が「返済み」と
+    誤判定され、**黙って落ちる**。この常駐が潰したかった穴が抑制側から再発する形だ。
+    → 使った返信便を消費して二度は使わない(N件完遂・M通返信なら max(0, N-M)件が鳴る)。
+    ★どの依頼への返信かは便のどこにも書かれていない= 機械には区別できないので**件数だけで
+      倒す**(fail-open= 分からない分は鳴らす側へ)。厳密化には返信便へ依頼IDを載せる入口が
+      要るが、`--from-dept` が実測0件だった前科がある=人手の入口は増やさない判断。
 
 fail-open(要件4):
   1件の失敗は他を止めない。全体の例外も握って exit 0 で終わる。**鳴らないことより、
@@ -161,11 +169,21 @@ def landed_msg(evidence):
     return ev[i + 12:].split()[0].strip() if ev[i + 12:].split() else ""
 
 
-def already_replied(replies, to_dept, from_dept, after):
-    """請けた側(from_dept)が発注元(to_dept)へ、完遂の**後**に自分で便を出しているか。"""
-    for ts in replies.get((to_dept, from_dept), []):
+def already_replied(replies, to_dept, from_dept, after, consumed):
+    """請けた側(from_dept)が発注元(to_dept)へ、完遂の**後**に自分で便を出しているか。
+
+    ★**1通の返信は1件の完遂しか打ち消さない**(qa-reviewer指摘・上のdocstring参照)。
+      使った便の位置を `consumed[(to,from)]` へ入れ、同じ実行の中で二度は使わない。
+      並走している依頼のうち返信が足りない分は**鳴る側へ倒す**(黙って落とすより二重が安い)。
+    """
+    key = (to_dept, from_dept)
+    used = consumed.setdefault(key, set())
+    for i, ts in enumerate(replies.get(key, [])):
+        if i in used:
+            continue
         t = parse_ts(ts)
         if t and t >= after:
+            used.add(i)
             return True
     return False
 
@@ -247,6 +265,7 @@ def main():
         return 0
 
     letters, replies = load_letters(set(targets))
+    consumed = {}      # ★使った返信便の位置(1通=1件しか打ち消さない・qa-reviewer指摘)
     sent, skipped, unknown, failed, rows = 0, 0, 0, 0, []
 
     for rid, d in sorted(targets.items(), key=lambda kv: kv[1]["done_at"]):
@@ -272,7 +291,7 @@ def main():
                 skipped += 1
                 print(f"  [自室完結] req={rid} dept={d['dept']}")
                 continue
-            if already_replied(replies, to_dept, d["dept"], d["done_at"]):
+            if already_replied(replies, to_dept, d["dept"], d["done_at"], consumed):
                 skipped += 1
                 print(f"  [請けた側が返済み] req={rid} {d['dept']} → {to_dept}")
                 continue

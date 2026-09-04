@@ -136,6 +136,36 @@ def test_notify():
                           work="", ts=ts_ago(90))])
     chk("C-5b 完遂より前の便では抑えない(別件だから)", len(run()) == 1)
 
+    # C-5c ★並走= 同じ部門ペアで依頼が2件、請けた側の返信は1通だけ。
+    #   初版は「そのペアに返信が1通でもあれば抑える」だったので**両方**黙って落ちた。
+    #   (2026-09-04 qa-reviewer(ジェンティルドンナ)が挙げた「緑のまま通り抜ける壊れ方」・
+    #    再現手順は msg=1545281379862843414 のまま使っている)
+    #   1通は1件しか打ち消せない= 残り1件は鳴らなければならない。
+    write_ledgers([done("1010", "copy-director", 60), done("1011", "copy-director", 60)],
+                  [letter("1010", "copy-director", "research-room", True),
+                   letter("1011", "copy-director", "research-room", True),
+                   letter("2011", "research-room", "copy-director", True,
+                          work="req1011だけの返信", ts=ts_ago(30))])
+    s5c = run()
+    chk("C-5c 並走2件に返信1通なら、残り1件は鳴る(抑制は依頼1件分しか消費しない)",
+        len(s5c) == 1, f"→ {len(s5c)}件")
+
+    # C-5d 返信が2通あれば2件とも抑える(消費モデルが鳴らし過ぎない側の証拠)
+    write_ledgers([done("1012", "copy-director", 60), done("1013", "copy-director", 60)],
+                  [letter("1012", "copy-director", "research-room", True),
+                   letter("1013", "copy-director", "research-room", True),
+                   letter("2012", "research-room", "copy-director", True, work="",
+                          ts=ts_ago(30)),
+                   letter("2013", "research-room", "copy-director", True, work="",
+                          ts=ts_ago(29))])
+    chk("C-5d 並走2件に返信2通なら両方とも抑える", len(run()) == 0)
+
+    # C-5e 返信が1通も無ければ並走2件とも鳴る(基準線)
+    write_ledgers([done("1014", "copy-director", 60), done("1015", "copy-director", 60)],
+                  [letter("1014", "copy-director", "research-room", True),
+                   letter("1015", "copy-director", "research-room", True)])
+    chk("C-5e 並走2件に返信0通なら2件とも鳴る", len(run()) == 2)
+
     # C-6 完遂したてはまだ触らない(請けた側が自分で返す猶予)
     write_ledgers([done("1006", "copy-director", 2)],
                   [letter("1006", "copy-director", "research-room", True)])
