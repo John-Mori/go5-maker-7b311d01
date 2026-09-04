@@ -178,12 +178,43 @@ def test_strip_preamble():
     out34, info34 = d.strip_english_preamble(NEAR_MISS_35.replace("Done.", "Don.", 1))
     _check("C-4 英字34字は剥がさない(閾値35の下側)",
            (not info34["stripped"]) and info34["removed_latin"] == 0)
-    # ★実行して分かった副作用を一緒に釘付けにする(推定ではなく観測)=
-    #   切り出しは「最初の日本語文字」から始まるので、日本語本文の頭に付いた**半角数字は落ちる**。
-    #   実物の本文は "2つとも" で始まるが、剥離後は "つとも" になる。
-    #   恒久の直しは「文字」でなく**行の頭**で切ること(HQへ上申中)。入れればこの検査が赤くなる。
-    _check("C-4 剥離は最初の日本語文字から=直前の半角数字は落ちる(現状の観測)",
-           out.startswith("つとも手ぇ"))
+    # ★★2026-09-05 ここは**直したので向きが反転した**(イージス研究室)。
+    #   旧= 切り出しが「最初の日本語文字」からなので本文頭の半角数字が落ちた
+    #       (実物 "2つとも" → "つとも")。この検査はその副作用を観測のまま釘付けにしていて、
+    #       「恒久の直しは行の頭で切ること。入れればこの検査が赤くなる」と書いてあった。
+    #   新= その行の日本語より前に**英字が1文字も無い**時だけ行の頭まで戻す= 数字は残る。
+    #   引き金の実物= 救出本文の名乗り `[ヴィルシーナ]` の **`[` を食っていた**
+    #     (剥離後が `ヴィルシーナ]` になり、1行目の `[名前]` が成立しない)。
+    _check("C-4 ★剥離は行の頭から=本文頭の半角数字が落ちない(2026-09-05に直した)",
+           out.startswith("2つとも手ぇ"))
+    # ★戻しすぎない側= 同じ行に英字が居るなら行の頭へは戻さない(剥がした英語を連れ戻さない)。
+    out_same, info_same = d.strip_english_preamble(
+        NEAR_MISS_35.replace("\n\n2つとも", "\nStill checking 2つとも", 1))
+    _check("C-4 ★同じ行に英字が残る時は行の頭へ戻さない(英語を連れ戻さない)",
+           (not info_same["stripped"]) or "Still checking" not in out_same)
+
+    # C-4b ★名乗りの `[` を食っていた実物(C-053= 壊れていた側を**動く実装**で赤く出す)。
+    #   赤の作り= 変更前の lang_gate(.bak)を別モジュールとして読み、**同じ本文**に当てる。
+    TAG_MIX = ("Let me check the daemon logs first. I will read the relay source and "
+               "search for the timeout branch before reporting back.\n\n"
+               "[ヴィルシーナ]\n調べた。打ち切りは600秒のhard-killで、常駐の側に落ち度は無い。"
+               "実物は次の便で出す。")
+    out_tag, info_tag = d.strip_english_preamble(TAG_MIX)
+    _check("C-4b ★剥離しても名乗り `[名前]` が壊れない(緑)",
+           info_tag["stripped"] and out_tag.startswith("[ヴィルシーナ]"))
+    _bak = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "lang_gate.py.bak_20260905_tagcut")
+    try:
+        import importlib.machinery
+        import importlib.util
+        _ldr = importlib.machinery.SourceFileLoader("lang_gate_old", _bak)
+        _old = importlib.util.module_from_spec(importlib.util.spec_from_loader("lang_gate_old", _ldr))
+        _ldr.exec_module(_old)
+        _o, _i = _old.strip_english_preamble(TAG_MIX)
+        _check("C-4b ★変更前の実装は同じ本文で `[` を食う(赤の実物・これを直した)",
+               _i["stripped"] and _o.startswith("ヴィルシーナ]"))
+    except Exception as _e:                                 # noqa: BLE001
+        _check(f"C-4b .bak を読めない({type(_e).__name__})", False)
 
     # C-5 ★閾値を30まで下げてはいけない実物= 閉じていないバックティックのWindowsパス(英字31字)。
     #   35では触らない=不変。ここが赤くなったら「下げすぎ」だ。

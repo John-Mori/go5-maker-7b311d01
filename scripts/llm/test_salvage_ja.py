@@ -14,6 +14,9 @@
   (3) 拾える物が1本も無い時は **空を返す**= 呼び元は打ち切り通知へ落ちる。
       ★ここで英文を返してはいけない(ゲートに戻され便ごと消える=沈黙)。
   (4) 日本語の返信の扱いは**変えていない**(.bak の実装と本文が一致する)。
+  (5) ★2026-09-05追加(C-074)= **名乗りの無い100字未満の断片を救出しない**。
+      作業の独り言が「依頼への返信」として着地し、台帳に `replied` が立つのを止める
+      (偽の受領。ORG-04と同じ形を、今度は機械が自動でやっていた)。
 
   記録(transcript)は本物の形の jsonl を一時ファイルで組み、`_salvage_timeout_reply`
   を**実行で**通す(ソースの文字列一致で済ませない・共通規律§3)。
@@ -23,6 +26,7 @@
       1: 言語の掛け金を外す(英文でも拾う=修正前の実装)
       2: 拾えない時に空でなく英文を返す(=ゲートで戻り、沈黙になる)
       3: 混在を丸ごと捨てる(=出来ている日本語の返信まで落とす)
+      4: 名乗り無しの下限を 10字へ戻す(=2026-09-05の実物2件がまた着地する)
 """
 import importlib.machinery
 import importlib.util
@@ -80,6 +84,10 @@ elif MUTATE == 3:
             return True, s, "素通し"
         return True, s, "日本語"
     sr._salvage_lang_ok = _strict
+elif MUTATE == 4:
+    # ★C-074の壊した側= **修正前と同じ動く実装**(下限10字)。
+    #   同じ検体(2026-09-05の実物2件)に当てて赤くなるのを見せてから緑にする。
+    sr.SALVAGE_MIN_UNSIGNED = 10
 
 
 # ── 記録(transcript)の組み立て ───────────────────────────────────
@@ -227,6 +235,90 @@ if old is not None:
         sr._transcript_path, old._transcript_path = o1, o2
 else:
     ok(False, "★.bak が読めない(退行を突き合わせられない)", BAK)
+
+# ── 7) ★C-074= 名乗り無しの短い断片を「依頼への返信」にしない ──────────
+#   検体は**実物そのまま**(2026-09-05・ad研究室ルカ・モドリッチ実測 / HQのrequest_log と一致)。
+print("\n[7] ★C-074 偽の受領(名乗り無し・100字未満の作業断片)")
+FRAG_PSE = ("`scripts/codex/` は codex_run.py のみ。"
+            "パス指定でコミットします(自分の未コミット変更は一切含めない)。")
+FRAG_EN = "Now the remaining sections (header, 1, 3, 5, 6, 7, 8):"
+
+ok(len(FRAG_PSE) < 100 and len(FRAG_EN) < 100,
+   "検体は実物どおり100字未満", f"{len(FRAG_PSE)}字 / {len(FRAG_EN)}字")
+
+body, why = run([FRAG_PSE], "frag_pse")
+ok(body == "",
+   "★プラットフォームSE便の67字(依頼と無関係な作業独り言)を救出しない", repr(body[:60]))
+ok("100字未満" in why or "字未満" in why, "空振りの理由に下限が残る", why)
+
+body, why = run([FRAG_EN], "frag_en")
+ok(body == "", "★当室 msg 1545536969449144450 の54字(英文メモ)を救出しない", repr(body[:60]))
+
+# ★言語ゲートだけでは止まらないことを固定する= だから長さの掛け金が要る。
+try:
+    from lang_gate import detect_english_dump as _ded
+    ok(_ded(FRAG_EN) is None,
+       "★英文ダンプゲートはこの54字を素通しする(英字40字未満)=長さで止めるしかない",
+       json.dumps(_ded(FRAG_EN) or {}, ensure_ascii=False))
+except Exception as e:                                  # noqa: BLE001
+    ok(False, "lang_gate を読めない", str(e))
+
+# ★止めすぎない側の掛け金(救出機構そのものを殺していないか)。
+SIGNED_SHORT = "[ケヴィン・デブライネ]\n入れた。実物は次便で出す。"
+body, why = run([SIGNED_SHORT], "signed_short")
+ok(body.startswith("[ケヴィン・デブライネ]"),
+   "★名乗り付きなら短くても今までどおり救出する(1分shorts部門の実物を捨て直さない)",
+   repr(body[:40]))
+
+LONG_JA = ("台帳の書式を確かめた。`所有=` の等号付きは現行の当て方では拾えない。"
+           "拾えないどころか `scan()` の入口で行ごと落ちるので、件数にも出ない。"
+           "読む側を直したので、台帳は新しい書式へ移してよい。試験は33/33で通した。")
+ok(len(LONG_JA) >= 100, "検体は100字以上", f"{len(LONG_JA)}字")
+body, why = run([LONG_JA], "long_ja")
+ok("読む側を直した" in body,
+   "★名乗り無しでも100字以上の日本語本文は今までどおり救出する", repr(body[:40]))
+
+# ── 8) 退行(C-074の.bak と突き合わせ)────────────────────────────
+print("\n[8] 退行(C-074 変更前の実装との差)")
+BAK2 = os.path.join(HERE, "session_relay.py.bak_20260905_salvage_replied")
+old2 = None
+try:
+    loader2 = importlib.machinery.SourceFileLoader("session_relay_old2", BAK2)
+    spec2 = importlib.util.spec_from_loader("session_relay_old2", loader2)
+    old2 = importlib.util.module_from_spec(spec2)
+    loader2.exec_module(old2)
+except Exception as e:                                  # noqa: BLE001
+    print(f"  (.bak を読めない: {e})")
+
+if old2 is not None:
+    sid = "c074"
+    path = os.path.join(TMP, sid + ".jsonl")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(_human("Chamiの入力", NOW - 300), ensure_ascii=False) + "\n")
+        f.write(json.dumps(_row("assistant", FRAG_PSE, NOW - 100), ensure_ascii=False) + "\n")
+    o1, o2 = sr._transcript_path, old2._transcript_path
+    sr._transcript_path = lambda s, cwd=None: path
+    old2._transcript_path = lambda s, cwd=None: path
+    try:
+        a, _ = sr._salvage_timeout_reply(sid, NOW - 290, cwd=None)
+        b, _ = old2._salvage_timeout_reply(sid, NOW - 290, cwd=None)
+        ok(a == "" and b != "",
+           "★同じ実物で 変更前=拾って着地(偽の受領) / 変更後=拾わない",
+           repr((a[:20], b[:20])))
+        # 日本語の長い返信では**一致する**= 救出機構は壊していない。
+        path2 = os.path.join(TMP, "c074_long.jsonl")
+        with open(path2, "w", encoding="utf-8") as f:
+            f.write(json.dumps(_human("Chamiの入力", NOW - 300), ensure_ascii=False) + "\n")
+            f.write(json.dumps(_row("assistant", JA, NOW - 100), ensure_ascii=False) + "\n")
+        sr._transcript_path = lambda s, cwd=None: path2
+        old2._transcript_path = lambda s, cwd=None: path2
+        a2, _ = sr._salvage_timeout_reply("c074_long", NOW - 290, cwd=None)
+        b2, _ = old2._salvage_timeout_reply("c074_long", NOW - 290, cwd=None)
+        ok(a2 == b2 and a2, "★名乗り付きの便では変更前と本文が完全一致", repr((a2[:20], b2[:20])))
+    finally:
+        sr._transcript_path, old2._transcript_path = o1, o2
+else:
+    ok(False, "★.bak が読めない(退行を突き合わせられない)", BAK2)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\n=== {PASS}/{PASS + FAIL} PASS ===")
