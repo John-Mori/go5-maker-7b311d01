@@ -241,6 +241,30 @@ _SIG_TRAIL = "ねよなのさぞぜっーｰ〜～…♪!！?？。、 　\t—�
 #   「末尾が『)』だから指紋なし」と判定される。実測(下の 134便)で**誤検知の大半がこれ**だった。
 _SIG_PAREN = re.compile(r"(?:[（(][^（）()]*[）)]|[\[［【][^\]］】]*[\]］】])$")
 
+# ★★2026-09-04 HQ-0235(アメスの威圧化・再発)の真因3。
+#   実物= hq 2026-09-04T08:53:18(msg 1545220171596042291)。「あんた**だろ**」「嫌い**だろ**」
+#   「刺すための声**だ**」の男口調の便なのに `signature_drift` が**黙った**。
+#   理由= 13文中1つだけ当たった指紋が「権限**じゃない**」だったから。
+#   「じゃない」は女性語尾(「いい**じゃない**」)にも見えるが、**素の否定(常体)**としても
+#   まったく同じ形で出る=男口調の便の中にも普通に立つ。これを1個の証拠として数えたせいで
+#   「指紋は在る」と判定され、威圧便が素通りした。
+#   ★HQの当初案は「比率(指紋数/文数)の閾値」だったが、**実測で分離しない**:
+#     ✗便=1/13(0.077)に対し、正常便も 1/13(「調べた**わよ**」)・1/15・1/12…と同じ帯に居る。
+#     比率0.10で切ると 18/75 → 29/75(+11便)へ増え、増えた側はほぼ全部が正常便=FP。
+#     分離しているのは**量ではなく証拠の質**だった(下の実測)。
+#   ★対処= 「弱い指紋」= それ**だけ**では本人の声の証拠にしない語。
+#     弱い語尾しか当たらなかった便は「指紋なし」として鳴らす(強い語尾が1つでも在れば従来どおり黙る)。
+#   ★実測(hr/memory の全jsonl・指紋語尾を持つ全人格の実便):
+#     アメス 判定便76 → 発火 18件(23.7%) から 20件(26.3%)。増分は2便だけで、
+#       ①今回の✗便(=狙った実物) ②定刻振り返り便1本(設計_毒舌威圧化の検知_2026-08-23 §2-2 が
+#       「構造は保ったまま語尾だけ戻せ=FPではなく仕様どおりのTP」と裁定済みの類型)。
+#     早坂芽衣(同じく「じゃない」を持つ) 判定便6 → 増分0。
+#     測り直す道具= local/_work/sig_weak_fp_all.py・local/_work/sig_ratio_fp.py。
+#   ★人格側で上書きできる= 口調ルール.json の人格エントリに `signature_tails_weak` を置けば
+#     そちらが正(C-035=話者ごと・写像は人事部門の持ち物)。キーが無い時だけこの既定を使う。
+#     既定を空にすれば**判定は従来と1バイトも変わらない**(weak=[] は現行と同じ式になる)。
+_SIG_WEAK_DEFAULT = ("じゃない",)
+
 
 def _sig_tailcut(body):
     """指紋語尾の照合前に、末尾の飾り(終助詞・記号・括弧書き)を剥ぐ。
@@ -257,19 +281,23 @@ def _sig_tailcut(body):
     return s
 
 
-def signature_drift(text, tails):
-    """指紋語尾が便のどこにも無いかを測る。返り値=(鳴らすか, 見つかった数, 判定文数, 位置)。
+def signature_evidence(text, tails, weak=None):
+    """指紋語尾の証拠を数えるだけの下請け。返り値=dict(found/strong/total/at/weak_hits)。
 
-    ★純関数(引数以外を読まない)= この判定だけを実便へ当てて誤検知率を数えられる。
+    ★判定(鳴らす・黙る)はここではしない= `signature_drift` が真偽値を決め、
+      突き返しの marker はこの dict から作る(何を見て鳴らしたかを後から数え直せる=C-041)。
+    ★純関数(引数以外を読まない)= この数え方だけを実便へ当てて誤検知率を測れる。
     ★保護span(引用・コード・パス)は _mask_protected で潰してから見る。
-      = 引用の中に指紋があっても「本人が喋った」とは数えない…のではなく**逆**で、
-        引用の中の敬体で鳴らないのと同じ理屈で、**引用の中の指紋を証拠にしない**。
+      = 引用の中の敬体で鳴らないのと同じ理屈で、**引用の中の指紋を証拠にしない**。
         こちらは「証拠が減る=鳴りやすくなる」側なので、判定文数も同じマスクで数える
         (引用だけの便は文数が足りず判定されない)。
+    ★strong= 弱い指紋(weak)を除いたヒット数。found= 弱い分も含めた全ヒット数。
     """
+    if weak is None:
+        weak = _SIG_WEAK_DEFAULT      # 渡されなければ既定を使う(素で呼んでも直っている)
     ts = [str(t) for t in (tails or []) if str(t)]
     if not ts:
-        return False, 0, 0, -1
+        return {"found": 0, "strong": 0, "total": 0, "at": -1, "weak_hits": []}
     s = _mask_protected(text)
     total = 0
     for part in _SENTENCE_SPLIT.split(s):
@@ -277,8 +305,10 @@ def signature_drift(text, tails):
         if len(body) >= 6:          # 記号だけ・箇条書きの見出しは文と数えない(polite と同じ)
             total += 1
     if total < _SIG_MIN_SENTENCES:
-        return False, 0, total, -1
-    found, at = 0, -1
+        return {"found": 0, "strong": 0, "total": total, "at": -1, "weak_hits": []}
+    found, strong, at = 0, 0, -1
+    weak_hits = []
+    ws = set(str(w) for w in (weak or []) if str(w))
     pos = 0
     for part in _SIG_SPLIT.split(s):
         if not part:
@@ -293,10 +323,39 @@ def signature_drift(text, tails):
         for t in ts:
             if body.endswith(t) or (tail and tail.endswith(t)):
                 found += 1
+                if t in ws:
+                    weak_hits.append(t)
+                else:
+                    strong += 1
                 if at < 0:
                     at = max(start, 0)
                 break
-    return (found == 0), found, total, at
+    return {"found": found, "strong": strong, "total": total, "at": at,
+            "weak_hits": weak_hits}
+
+
+def signature_drift(text, tails, weak=None):
+    """指紋語尾が便のどこにも無いかを測る。返り値=(鳴らすか, 見つかった数, 判定文数, 位置)。
+
+    ★純関数(引数以外を読まない)= この判定だけを実便へ当てて誤検知率を数えられる。
+    ★保護span(引用・コード・パス)は _mask_protected で潰してから見る。
+      = 引用の中に指紋があっても「本人が喋った」とは数えない…のではなく**逆**で、
+        引用の中の敬体で鳴らないのと同じ理屈で、**引用の中の指紋を証拠にしない**。
+        こちらは「証拠が減る=鳴りやすくなる」側なので、判定文数も同じマスクで数える
+        (引用だけの便は文数が足りず判定されない)。
+    ★weak= 「弱い指紋」(それだけでは本人の声の証拠にしない語)。上の長い注釈が根拠。
+      弱い語尾**しか**当たらなかった便は「指紋なし」として鳴らす。
+      **weak=None(既定)= `_SIG_WEAK_DEFAULT` を使う**=この判定を素で呼んでも直っている。
+      **weak=[] を明示した時だけ従来と同じ式**((found==0) で鳴る)=止めたい時の逃げ口。
+    ★第2要素の `found` は**弱い分も含めた全ヒット数**のまま動かさない。
+      理由= 名義の付け替え判定(misattributed_speaker)がこの値を「本人の指紋が在る」の
+      証拠に使っている。ここを強い側だけに絞ると「他人のアイコンで別人の言葉を出す」方向へ
+      倒れる=最も害が大きい向き。**鳴らす/黙るの真偽値だけ**を弱い指紋で締める。
+    """
+    ev = signature_evidence(text, tails, weak)
+    if ev["total"] < _SIG_MIN_SENTENCES:
+        return False, ev["found"], ev["total"], ev["at"]
+    return (ev["strong"] == 0), ev["found"], ev["total"], ev["at"]
 
 
 # ★★2026-08-23 追加(案ハ4《同じ息ゲート》)= 毒舌人格の「威圧/怖さ」ドリフト。
@@ -905,6 +964,8 @@ def misattributed_speaker(persona, text, rules, roster):
         sig = [str(x) for x in ((ent.get("signature_tails") or [])
                                 + (ent.get("signature_endings") or [])) if str(x)]
         if sig:
+            # ★ここは weak を渡さない(=弱い指紋も証拠に数える)。名義を動かす判定なので
+            #   「他人のアイコンで別人の言葉を出す」側へ倒さない=証拠は広く取る(2026-09-04)。
             hit, found, _total, _at = signature_drift(s, sig)
             if found:
                 return None              # 本人の指紋が在る=タグは正しい(途中で崩れただけ)
@@ -1079,14 +1140,30 @@ def tone_verdicts(persona, dept, text, rules):
                     "reason": "self_third_person",
                 })
         if sig:
-            hit, found, total, at = signature_drift(text, sig)
+            # ★弱い指紋(それだけでは本人の声の証拠にしない語)。人格エントリに
+            #   `signature_tails_weak` が在ればそちらが正(C-035=話者ごと・人事部門の持ち物)。
+            #   キーが無い時だけ既定 `_SIG_WEAK_DEFAULT` を使い、**その人格が実際に
+            #   登録している語尾との積**に絞る(登録していない語を勝手に弱く数えない)。
+            #   キーが無ければ None を渡す=既定が効く。空配列を置けば「この人格は素の式で」。
+            if "signature_tails_weak" in ent:
+                _weak = [str(x) for x in (ent.get("signature_tails_weak") or []) if str(x)]
+            else:
+                _weak = None
+            _ev = signature_evidence(text, sig, _weak)
+            hit, found, total, at = signature_drift(text, sig, _weak)
             if hit:
+                # ★何を見て鳴らしたか(有効な指紋の数/文数)と、**正しい語尾**を marker に載せる。
+                #   突き返し(session_relay)はこの marker を1行で出すので、
+                #   読んだ人格が「何を書けばよかったか」まで一目で分かる。
+                #   弱い指紋しか無くて鳴らした便は、それも書く(なぜ鳴ったかが読めないと直せない)。
+                _wh = _ev.get("weak_hits") or []
+                _mk = "指紋語尾なし(%d文中0件・正=%s)" % (total, "/".join(sig[:6]))
+                if _wh:
+                    _mk = ("指紋語尾なし(%d文中0件・「%s」は弱い指紋で証拠に数えない・正=%s)"
+                           % (total, "」「".join(sorted(set(_wh))[:3]), "/".join(sig[:6])))
                 out.append({
                     "persona": str(persona or ""),
-                    # ★何を見て鳴らしたか(文数)と、**正しい語尾**をそのまま marker に載せる。
-                    #   突き返し(session_relay)はこの marker を1行で出すので、
-                    #   読んだ人格が「何を書けばよかったか」まで一目で分かる。
-                    "marker": "指紋語尾なし(%d文中0件・正=%s)" % (total, "/".join(sig[:6])),
+                    "marker": _mk,
                     "index": at,
                     "own_first_person": sorted(own),
                     "reason": "signature_absent",
