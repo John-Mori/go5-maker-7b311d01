@@ -21,6 +21,10 @@
 from __future__ import annotations
 
 import pathlib
+import datetime as _dt
+import importlib.util
+import json
+import shutil
 import subprocess
 import sys
 
@@ -30,6 +34,8 @@ from ruamel.yaml import YAML
 # ── 正本・除外パスの定数 ─────────────────────────────────────────
 PROJECTS_ROOT = pathlib.Path(r"D:\SougouStartFolder\5chShortMovie")
 EXCLUDED_ROOT = pathlib.Path(r"D:\SougouStartFolder\5SecMovieMaker\local\5ch")
+ALLOWED_PROJECT_NAME = "holodri_noel"
+ALLOWED_CUTLIST_PATH = PROJECTS_ROOT / ALLOWED_PROJECT_NAME / "holodri_noel_cutlist.yaml"
 
 CUT_LIST_TO_YMMP_PY = pathlib.Path(
     r"D:\SougouStartFolder\MangaShortCreateForYMM4\素材・例"
@@ -87,21 +93,42 @@ def _project_name_from_path(p: pathlib.Path) -> str:
 
 
 def _find_cutlist_files() -> list[pathlib.Path]:
-    """D:\\...\\5chShortMovie 配下の *_cutlist.yaml を走査する(退避版フォルダは除外)。"""
-    if not PROJECTS_ROOT.exists():
-        return []
-    files = []
-    for p in PROJECTS_ROOT.rglob("*_cutlist.yaml"):
-        if p.is_file() and not _is_excluded(p):
-            files.append(p)
-    return sorted(files)
+    """編集対象は holodri_noel の正本1本だけに固定する。"""
+    p = ALLOWED_CUTLIST_PATH
+    if p.is_file() and not _is_excluded(p):
+        return [p]
+    return []
 
 
 def _resolve_project_yaml(name: str) -> pathlib.Path | None:
-    for p in _find_cutlist_files():
-        if _project_name_from_path(p) == name:
-            return p
+    if name != ALLOWED_PROJECT_NAME:
+        return None
+    p = ALLOWED_CUTLIST_PATH
+    if p.is_file() and not _is_excluded(p):
+        return p
     return None
+
+
+def _backup_yaml_before_write(yaml_path: pathlib.Path) -> pathlib.Path:
+    stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = yaml_path.with_name(f"{yaml_path.name}.bak_{stamp}_app")
+    suffix = 2
+    while backup.exists():
+        backup = yaml_path.with_name(f"{yaml_path.name}.bak_{stamp}_app_{suffix}")
+        suffix += 1
+    shutil.copy2(yaml_path, backup)
+    return backup
+
+
+def _assert_ymmp_file_ok(ymmp_path: pathlib.Path) -> None:
+    spec = importlib.util.spec_from_file_location("validate_ymmp_gate", VALIDATE_YMMP_PY)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"validate_ymmp.py を読み込めません: {VALIDATE_YMMP_PY}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with ymmp_path.open("r", encoding="utf-8-sig") as f:
+        ymmp = json.load(f)
+    module.assert_ymmp_ok(ymmp, str(ymmp_path))
 
 
 def _to_plain(obj):
@@ -274,12 +301,13 @@ def api_save_project(name):
         return jsonify(ok=False, error="validation_failed", details=errors), 400
 
     try:
+        backup_path = _backup_yaml_before_write(yaml_path)
         with yaml_path.open("w", encoding="utf-8") as f:
             yaml.dump(data, f)
     except Exception as e:  # noqa: BLE001
         return jsonify(ok=False, error=f"yaml_write_failed: {e}"), 500
 
-    return jsonify(ok=True, applied=applied)
+    return jsonify(ok=True, applied=applied, backup_path=str(backup_path))
 
 
 # ── /api/image ──────────────────────────────────────────────────
@@ -349,21 +377,21 @@ def api_generate(name):
     }
 
     if out_path and out_path.exists() and VALIDATE_YMMP_PY.exists():
-        val_proc = subprocess.run(
-            [sys.executable, "-X", "utf8", str(VALIDATE_YMMP_PY), str(out_path)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-        )
-        result["validate"] = {
-            "returncode": val_proc.returncode,
-            "stdout": val_proc.stdout,
-            "stderr": val_proc.stderr,
-            "passed": val_proc.returncode == 0,
-        }
-        if val_proc.returncode != 0:
+        try:
+            _assert_ymmp_file_ok(out_path)
+            result["validate"] = {
+                "returncode": 0,
+                "stdout": f"[OK] assert_ymmp_ok: {out_path}",
+                "stderr": "",
+                "passed": True,
+            }
+        except Exception as e:  # noqa: BLE001
+            result["validate"] = {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": str(e),
+                "passed": False,
+            }
             result["ok"] = False
     else:
         result["validate"] = None
