@@ -68,12 +68,24 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 REQUEST_LOG = os.path.join(LOCAL, "llm", "request_log.jsonl")
 CHANNELS_JSON = os.path.join(LOCAL, "discord_channels.json")
+PROCESSED = os.path.join(LOCAL, "discord_processed.jsonl")
+DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
 API = "https://discord.com/api/v10"
 DISCORD_EPOCH = 1420070400000
 JST = dt.timezone(dt.timedelta(hours=9))
 
 # 後追いで付く状態(これが付いている request_id は二度判定しない=冪等)
 RESOLVED = ("replied", "replied_late_confirmed", "replied_missing")
+
+# ★2026-09-05 研究室HQの止血。恒久=プラットフォームSE/イージス研究室。
+#   穴= `replied_missing`(本物の不着)を書く口はここ1つなのに、**読む口が0だった**。
+#   実測= request_log の replied_missing 14件に対し、そこから出た通知は0件。
+#   `completion_notified` の方は112件飛んでいるので、**楽観側だけが発注元へ届く**形。
+#   実害= Chami本人の便 msg 1545622548035928146(11:32「ちょい待ち、できたら…」)へ
+#   改修αが書いた返信が着地せず、12:14 に不着と判定されたのに**誰も知らないまま**だった。
+#   ★completion_notify 側へ混ぜる案は採らない= あの便は 11:31 に出ており、
+#     不着の判定 11:44 より**前**だ(時系列で間に合わない)。立った瞬間に鳴らす必要がある。
+NOTIFIED_STATE = "missing_notified"
 
 
 def token():
@@ -263,6 +275,121 @@ def find_landed(tok, chans, dept, room, head, base, pages, back_min, fwd_min):
     return (http, None) if http else (None, None)
 
 
+def letters_of(rids):
+    """不着だった request の元の便を discord_processed から引く。
+
+    返り値 = {request_id: {"from_dept","author","channel"}}
+    ★引けない/`from_dept` が空 = **Chami本人など人が直接出した便**だ(自動便ではない)。
+      その時こそ黙って落としてはいけない= 待っているのが人だからだ。
+    """
+    got = {}
+    want = set(str(x) for x in rids if x)
+    if not want or not os.path.exists(PROCESSED):
+        return got
+    with open(PROCESSED, encoding="utf-8", errors="replace") as f:
+        for ln in f:
+            if '"msg_id"' not in ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except Exception:
+                continue
+            mid = str(r.get("msg_id") or "")
+            if mid in want:
+                got[mid] = {"from_dept": (r.get("from_dept") or "").strip(),
+                            "author": (r.get("author") or "").strip(),
+                            "channel": (r.get("channel") or "").strip()}
+    return got
+
+
+def head_of(dept):
+    """その部門の部門長を返す(判定不能は None)。dispatch.py の判定を**借りる**。
+
+    ★自前で持たない理由= 3階梯ガードを掛けているのは dispatch.py 側だ。ここで独自の表を
+      持つと、向こうが変わった日に**通知だけ静かに弾かれ続ける**(rc=2 が誰にも見えない)。
+      実測でそれを踏んだ= 最初は請けた部門へ直接出して 2本とも rc=2 で弾かれた。
+    """
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        import dispatch                                          # noqa: PLC0415
+        return dispatch.head_of(dept)
+    except Exception:                                            # noqa: BLE001
+        return None                                              # fail-open= 直接出して結果を見る
+
+
+def notify_missing(rows, dry_run=False):
+    """不着が立った便を、**書いた本人(請けた部門)へ1本だけ**流す。
+
+    宛先を1つに絞る理由(C-052):
+      不着を直せるのは**もう一度出せる側**だけだ。発注元は completion_notify が既に
+      触っている口で、そこの改修は所有者(イージス研究室)の領分。二重に鳴らさない。
+    ★ただし宛先は「請けた部門」そのものではなく、**部門長がいるなら部門長**にする。
+      3階梯(RULES §6.4)= HQから配下へ直接出すのは飛び級で、dispatch 側のガードが弾く。
+    ★通知した事実は request_log へ `missing_notified` で追記する(冪等・既存行は触らない)。
+    ★fail-open= ここで何が起きても台帳の追記は既に済んでいる。送信の失敗で判定を殺さない。
+    """
+    if not rows:
+        return []
+    letters = letters_of([r.get("request_id") for r in rows])
+    now = dt.datetime.now(JST)
+    done = []
+    for r in rows:
+        rid, dept = str(r.get("request_id") or ""), (r.get("dept") or "").strip()
+        if not dept:
+            print(f"  [通知不能] req={rid} 請けた部門が記帳に無い")
+            continue
+        L = letters.get(rid) or {}
+        origin = L.get("from_dept") or ""
+        who = origin or (f"{L.get('author')}(人発)" if L.get("author") else "不明")
+        head = head_of(dept) or ""
+        to = head or dept
+        via = (f"配下の **{dept}** が書いた返信が" if head else "**あなたの部屋が書いた返信が")
+        body = (
+            f"[不着検知(自動)] {via}、Discordへ着地していない。**\n\n"
+            f"■ 請けた部門= {dept}\n"
+            f"■ request_id= `{rid}`\n"
+            f"■ 発注元= {who}\n"
+            f"■ 元の部屋= {L.get('channel') or '(記帳に無い)'}\n"
+            f"■ 判定= `replied_missing` / {r.get('ts')}\n"
+            f"■ 根拠= {r.get('evidence') or ''}\n\n"
+            "**本文は書かれているのに、投稿だけが落ちている状態だ。**空騒ぎ(確認が投稿より早かっただけ)は\n"
+            "この判定の前に `replied_late_confirmed` で除いてある。ここへ来たのは全室を掃いた後の**本物**だ。\n\n"
+            "→ **同じ内容をもう一度、元の部屋へ出してくれ。**待っているのが人なら、その分だけ黙って待たされている。\n"
+            + ("★部門長宛てなのは3階梯(HQから配下へ直接は飛び級)だからだ。手渡しを頼む。\n" if head else "")
+            + "★この便は自動だ。返事は要らない=出し直したかどうかは次回の判定で分かる。"
+        )
+        if dry_run:
+            print(f"  [通知(dry-run)] → {to} (請け={dept}) req={rid} 発注元={who}")
+            continue
+        tmp = os.path.join(LOCAL, "_work", f"missing_notify_{rid}.txt")
+        try:
+            os.makedirs(os.path.dirname(tmp), exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(body)
+            import subprocess
+            cp = subprocess.run(
+                [sys.executable, DISPATCH, "--dept", to, "--from", "不着検知(自動)",
+                 "--from-dept", "hq", "--audience", "ai", "--body-file", tmp,
+                 "--work", f"{dept}の返信が着地していない({rid})=同じ内容をもう一度出す"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+            ok = (cp.returncode == 0)
+            # ★rc!=0 は stdout 側に理由が出る(dispatch のガードは print で落とす)。両方拾う。
+            why = ((cp.stderr or "") + " " + (cp.stdout or "")).strip().replace("\n", " ")
+            print(f"  {'[通知した]' if ok else '[通知失敗]'} → {to} (請け={dept}) req={rid} "
+                  f"rc={cp.returncode} {'' if ok else why[:160]}")
+            if ok:
+                done.append({"ts": now.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": rid,
+                             "dept": dept, "state": NOTIFIED_STATE,
+                             "evidence": f"不着を通知 to_dept={to} 請けた部門={dept} 発注元={who} via=dispatch"})
+        except Exception as e:                                   # noqa: BLE001
+            print(f"  [通知失敗] → {dept} req={rid} {type(e).__name__}: {e}")
+    if done:
+        with open(REQUEST_LOG, "a", encoding="utf-8") as f:
+            for row in done:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return done
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="判定だけして台帳へ書かない")
@@ -273,6 +400,8 @@ def main():
     ap.add_argument("--fwd-min", type=int, default=30, help="記帳の何分後から降り始めるか")
     ap.add_argument("--redo-missing", action="store_true",
                     help="過去に『本物の不着』と札を貼った行を判定し直す(誤りを剥がすため)")
+    ap.add_argument("--no-notify", action="store_true",
+                    help="不着を書くだけで請けた部門へ通知しない(旧挙動)")
     a = ap.parse_args()
 
     pend, _resolved = load_rows(redo_missing=a.redo_missing)
@@ -321,14 +450,22 @@ def main():
             print(f"  ★[本物の不着] {ts} {dept} req={rid}")
 
     print(f"\n空騒ぎ {late} / ★本物の不着 {missing} / 判定不能 {skip}")
+    miss_rows = [r for r in out if r["state"] == "replied_missing"]
     if a.dry_run:
         print("(--dry-run なので台帳へは書いていない)")
+        if miss_rows and not a.no_notify:
+            notify_missing(miss_rows, dry_run=True)
         return 0
     if out:
         with open(REQUEST_LOG, "a", encoding="utf-8") as f:
             for row in out:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         print(f"request_log へ {len(out)}行 追記した(既存行は書き換えていない)")
+    # ★台帳へ書いた**後**に鳴らす。順序は入れ替えるな=
+    #   送信が落ちても判定は残る。逆にすると、落ちた時に判定ごと消える。
+    if miss_rows and not a.no_notify:
+        print(f"\n★不着 {len(miss_rows)}件を請けた部門へ通知する")
+        notify_missing(miss_rows, dry_run=False)
     return 0
 
 
