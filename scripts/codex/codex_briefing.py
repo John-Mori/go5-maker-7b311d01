@@ -40,6 +40,18 @@ BRIEF_REL = os.path.join("local", "CODEX_BRIEFING.md")             # worktree �
 #   ③人格だけ差し替える日に、規律の側を1文字も触らずに済む。
 #   ★どちらも worktree の `local/` 配下= .gitignore の中= 公開repoへ乗らない(RULES)。
 PERSONA_REL = os.path.join("local", "CODEX_PERSONA.md")            # worktree からの相対
+
+# ★2026-09-06(aegis-gl・オタコン便 msg 1545905734544527431 (1))人格を**プロンプトへ直に**載せる。
+#   それまでは worktree へ置いて芯から「読め」と**指しているだけ**だった= 実測で
+#   preamble_for() 1987字のうち人格の本文は **0字**(『ビッグ・ボス』『ザ・ボス』が1度も入らない)。
+#   読むかどうかがCodexの心がけ任せ= 共通規律§3「心がけに任せない。機構に載せる」に反する。
+#   症状=他部屋でボスの声が出ず素のgpt-5.5の地声。→ 声の正本を毎回プロンプトへ入れる。
+#   ★ファイル(PERSONA_REL)は**残す**= 全文が要る時の置き場・ここの上限で削れた分の受け皿。
+PERSONA_INLINE_CHARCAP = 12000     # プロンプトへ載せる人格の文字上限(argvを膨らませない)
+# Windows の CreateProcess はコマンドライン全体で 32767 文字。芯+人格+記憶+依頼が全部argvに乗る
+# (codex_run.run_codex が prompt を argv の最後に置く)ので、実効の天井を決めておく。
+PROMPT_CHARCAP = 24000
+
 PERSONA_SOURCES = [
     # (見出し, 正本のパス)。★写しはここに持たない= 毎回読み直す(直したら次の起動から効く)。
     ("人格設定(声の型)", os.path.join(ROOT, "local", "persona_context", "naked_snake_人格.md")),
@@ -47,11 +59,28 @@ PERSONA_SOURCES = [
      os.path.join(ROOT, "local", "persona_context", "naked_snake_context.md")),
 ]
 
+# 表示名の正本= 人事部門の 呼称ルール.json。★ここに写しを持たない(2026-09-06 aegis-gl)。
+#   写しを持っていた頃の実物= 芯には旧値「スネーク(Codex)」が残ったまま、台帳の確定値は
+#   「スネーク🐍Codex」へ動いていた= Codex自身が自分の見た目を間違えて覚える。
+NAMING_RULES = os.path.join(HQ, "departments", "hr", "personas", "呼称ルール.json")
+
+
+def display_name():
+    """Codex botのDiscord表示名(人事部門の確定値)。読めなければ「不明」と書く=推測で埋めない。"""
+    try:
+        import json
+        with open(NAMING_RULES, encoding="utf-8") as f:
+            d = json.load(f)
+        return str((d.get("codex_bot_display") or {}).get("確定表示名") or "").strip() or "不明"
+    except Exception:
+        return "不明"
+
+
 # 芯= プロンプトへ直に載せる分。★ここは規律の**写し**だ。新しい規則をここで作るな
 #   (組織の裁定はChami/研究室HQの職責・口調と人格は人事部門の職責)。
 CORE = """■あなたへの規律(毎回注入される。正本は組織側にある)
 あなたは組織の一員として働く。確定呼称=「ネイキッド・スネーク」(人事部門が2026-09-05に決めた)。
-「ボス」も同じ人物への呼びかけだ。依頼主は Chami。Discord表示名(見た目のラベル)は「スネーク(Codex)」。
+「ボス」も同じ人物への呼びかけだ。依頼主は Chami。Discord表示名(見た目のラベル)は「%s」。""" % display_name() + """
 
 ■口調(人事部門が2026-09-05に確定。正本= 00_AI-HQ/departments/hr/characters/snake.md)
 あなたはネイキッド・スネーク=METAL GEAR SOLID 3 の歴戦の潜入工作員だ。その声で書け。
@@ -163,19 +192,45 @@ def install(worktree):
     return CORE
 
 
-def preamble_for(prompt, memory=""):
-    """芯 + (あれば全部屋記憶) + 区切り + 依頼本文。answer() から使う。
+def persona_inline(budget=PERSONA_INLINE_CHARCAP):
+    """人格の原典を**プロンプトへ直に載せる**塊にして返す。長い時は末尾を落とす。
+
+    ★build_persona() と同じ正本から組む(写しを2つ持たない)。読めない正本は「不明」と
+      書いたまま渡す= Codexに作り話で埋めさせない。
+    """
+    body = build_persona()
+    if budget is not None and len(body) > budget:
+        body = (body[:budget]
+                + "\n\n(★ここから先は長さの上限で省いた。全文= このworktreeの `%s`)\n"
+                % PERSONA_REL.replace("\\", "/"))
+    return ("\n---\n■あなた自身(声の型と原典)。**ここがあなただ。この声で書け。**\n"
+            "★同じ全文が `%s` にも置いてある(引用が要る時はそちらを読め)。\n\n"
+            % PERSONA_REL.replace("\\", "/")) + body + "\n"
+
+
+def preamble_for(prompt, memory="", persona=True):
+    """芯 + 人格 + (あれば全部屋記憶) + 区切り + 依頼本文。answer() から使う。
 
     memory= 直近の全部屋記憶ブロック(codex_run._load_snake_memory が組む)。
       あなた(ボス)は全部屋で同じ一人= 部屋をまたいで前の話を覚えている、という前提を渡す。
       Chami指示 2026-09-05「ボスも全部屋で記憶を保つように」。
+    persona= 人格の原典をプロンプトへ直に載せるか(既定=載せる。2026-09-06)。
+      ★載せる理由と、載せていなかった頃の実測は PERSONA_INLINE_CHARCAP の注記を読め。
+
+    ★argvの天井(PROMPT_CHARCAP)を超えそうな時は**人格から削る**。依頼本文と芯は削らない
+      = 用件と規律を落として声だけ残すのは本末転倒だから。
     """
     mem = ""
     if memory:
         mem = ("\n---\n■これまでの記憶(あなたは全部屋で同じ一人=ボス。部屋をまたいで覚えている)\n"
                "以下は直近のやり取りだ。関係する時は踏まえて答えろ(無関係なら無視してよい)。\n"
                + memory + "\n")
-    return CORE + mem + "\n---\n■依頼(ここから下が今回の用件)\n" + prompt
+    tail = "\n---\n■依頼(ここから下が今回の用件)\n" + prompt
+    per = ""
+    if persona:
+        room = PROMPT_CHARCAP - len(CORE) - len(mem) - len(tail)
+        per = persona_inline(min(PERSONA_INLINE_CHARCAP, room)) if room > 500 else ""
+    return CORE + per + mem + tail
 
 
 if __name__ == "__main__":
