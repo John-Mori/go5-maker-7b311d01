@@ -38,6 +38,11 @@ PASS = 0
 FAIL = 0
 CH = "研究室HQコーチングルーム"
 TICK = 0.2                        # 検査用の覗き間隔(本番は20秒)
+# ★2026-09-06(aegis-gl)検体の msg_id を `1545000000000000001` 形式へ揃えた。
+#   旧検体は "m0" "a4" のような短い符丁で、**本番に存在しない形**だった。
+#   `_live_mark_loop` が「Discordのmessage IDでない便(配達ID)には押さない」を持ったので、
+#   符丁のままでは全部が弾かれて検査が空PASSになる= 検体を実物の形へ寄せた。
+#   下の [7] が、その弾く側を測っている。
 
 
 def check(name, cond):
@@ -115,17 +120,17 @@ print("[1] 本走の最中に届いたChamiの便へ、走り終わるのを待�
 q = _q()
 dm = _daemon()
 FAKE.calls = []
-stop = dm._start_live_mark(_body("m0", "本便"))          # ← 本走が始まった(土台の便=m0)
+stop = dm._start_live_mark(_body("1545000000000000001", "本便"))          # ← 本走が始まった(土台の便=m0)
 check("見張りが立つ", stop is not None)
-q.enqueue(_body("m1", "やっぱりこうして"), msg_id="m1", dept="hq")   # 走行中に届いた補足
-got = _until(lambda: ("m1", "既読") in FAKE.marks())
+q.enqueue(_body("1545000000000000002", "やっぱりこうして"), msg_id="1545000000000000002", dept="hq")   # 走行中に届いた補足
+got = _until(lambda: ("1545000000000000002", "既読") in FAKE.marks())
 check("★走行中(本走を止めていない)に既読が付いた", got)
 check("着手は押さない(まだ着手していない・_mark_bundledが後で押す)",
-      not any(m == "m1" and e == "着手" for m, e in FAKE.marks()))
+      not any(m == "1545000000000000002" and e == "着手" for m, e in FAKE.marks()))
 check("土台の便は押し直さない(handle()が押している)",
-      not any(m == "m0" for m, _ in FAKE.marks()))
+      not any(m == "1545000000000000001" for m, _ in FAKE.marks()))
 check("★claimしていない= 便はpendingのまま残る(ドレインの窓を作らない)",
-      [r["msg_id"] for r in q.peek_ready(dept="hq")] == ["m1"])
+      [r["msg_id"] for r in q.peek_ready(dept="hq")] == ["1545000000000000002"])
 n1 = len(FAKE.marks())
 time.sleep(TICK * 3)
 check("同じ便を二度は狙わない", len(FAKE.marks()) == n1)
@@ -136,16 +141,16 @@ print("[2] 他部門の便・別の部屋・検証便には押さない")
 q = _q()
 dm = _daemon()
 FAKE.calls = []
-stop = dm._start_live_mark(_body("n0", "本便"))
-q.enqueue(_body("a1", "AIの便", author="シャビ・アロンソ"), msg_id="a1", dept="hq")
-q.enqueue(_body("a2", "別の部屋", ch="ad研究室"), msg_id="a2", dept="hq")
-q.enqueue(_body("a3", "検証便", test=True), msg_id="a3", dept="hq")
-q.enqueue(_body("a4", "これは押す"), msg_id="a4", dept="hq")
-got = _until(lambda: ("a4", "既読") in FAKE.marks())
+stop = dm._start_live_mark(_body("1545000000000000003", "本便"))
+q.enqueue(_body("1545000000000000004", "AIの便", author="シャビ・アロンソ"), msg_id="1545000000000000004", dept="hq")
+q.enqueue(_body("1545000000000000005", "別の部屋", ch="ad研究室"), msg_id="1545000000000000005", dept="hq")
+q.enqueue(_body("1545000000000000006", "検証便", test=True), msg_id="1545000000000000006", dept="hq")
+q.enqueue(_body("1545000000000000007", "これは押す"), msg_id="1545000000000000007", dept="hq")
+got = _until(lambda: ("1545000000000000007", "既読") in FAKE.marks())
 check("Chamiの便には押す(この検査が空でない証明)", got)
-check("他部門(AI)の便には押さない", not any(m == "a1" for m, _ in FAKE.marks()))
-check("別の部屋の便には押さない", not any(m == "a2" for m, _ in FAKE.marks()))
-check("検証便には押さない(本番の部屋を汚さない)", not any(m == "a3" for m, _ in FAKE.marks()))
+check("他部門(AI)の便には押さない", not any(m == "1545000000000000004" for m, _ in FAKE.marks()))
+check("別の部屋の便には押さない", not any(m == "1545000000000000005" for m, _ in FAKE.marks()))
+check("検証便には押さない(本番の部屋を汚さない)", not any(m == "1545000000000000006" for m, _ in FAKE.marks()))
 stop.set()
 q.close()
 
@@ -153,31 +158,31 @@ print("[3] 止める合図で確実に止まる(次の便へ持ち越さない)"
 q = _q()
 dm = _daemon()
 FAKE.calls = []
-stop = dm._start_live_mark(_body("s0", "本便"))
+stop = dm._start_live_mark(_body("1545000000000000008", "本便"))
 stop.set()
 time.sleep(TICK * 2)
-q.enqueue(_body("s1", "止めた後に来た便"), msg_id="s1", dept="hq")
+q.enqueue(_body("1545000000000000009", "止めた後に来た便"), msg_id="1545000000000000009", dept="hq")
 time.sleep(TICK * 4)
 check("止めた後は1回も押さない", FAKE.marks() == [])
 q.close()
 
 print("[4] 立てない条件(C-035・他30室は1バイト差なし)")
 dm = _daemon(win=0)
-check("live_mark_secが無い部屋では見張りが立たない", dm._start_live_mark(_body("z0")) is None)
+check("live_mark_secが無い部屋では見張りが立たない", dm._start_live_mark(_body("1545000000000000010")) is None)
 dm = _daemon()
 dm.dry_run = True
-check("dry-runでは立たない", dm._start_live_mark(_body("z1")) is None)
+check("dry-runでは立たない", dm._start_live_mark(_body("1545000000000000011")) is None)
 dm = _daemon()
-check("検証便では立たない", dm._start_live_mark(_body("z2", test=True)) is None)
+check("検証便では立たない", dm._start_live_mark(_body("1545000000000000012", test=True)) is None)
 dm = _daemon()
-check("部屋が分からなければ立たない", dm._start_live_mark(_body("z3", ch="")) is None)
+check("部屋が分からなければ立たない", dm._start_live_mark(_body("1545000000000000013", ch="")) is None)
 
 print("[5] 受信箱が読めなくても本走を巻き込まない(fail-open)")
 q = _q()
 dm = _daemon()
 d.LOCAL = os.path.join(tempfile.mkdtemp(prefix="livemark_none_"), "無い")   # DBが無い場所
 FAKE.calls = []
-stop = dm._start_live_mark(_body("f0", "本便"))
+stop = dm._start_live_mark(_body("1545000000000000014", "本便"))
 time.sleep(TICK * 3)
 check("見張りは落ちずに黙っている(印は0件)", FAKE.marks() == [])
 stop.set()
@@ -189,12 +194,31 @@ d.subprocess.run = lambda cmd, **kw: _Proc()        # 呼ばれても記録し�
 q = _q()
 dm = _daemon()
 FAKE.calls = []
-stop = dm._start_live_mark(_body("x0", "本便"))
-q.enqueue(_body("x1", "補足"), msg_id="x1", dept="hq")
+stop = dm._start_live_mark(_body("1545000000000000015", "本便"))
+q.enqueue(_body("1545000000000000016", "補足"), msg_id="1545000000000000016", dept="hq")
 time.sleep(TICK * 4)
 check("無効化すると印が0件になる(=[1]は本物の変化を見ている)", FAKE.marks() == [])
 stop.set()
 d.subprocess.run = _keep
+q.close()
+
+print("[7] ★Discordのmessage IDでない便(配達ID)には押さない")
+#   実測(2026-09-06・全 dept_daemon_*.log)= 押した36件のうち1件だけ rc=1 で、その msg_id が
+#   `ESC-hr-context-1545568554550689962` だった。転送・上申の便は `_is_from_chami` が真を
+#   返すが、この ID は Discord に存在しない=react.py が必ず失敗する。
+ESC = "ESC-hr-context-1545568554550689962"
+q = _q()
+dm = _daemon()
+FAKE.calls = []
+stop = dm._start_live_mark(_body("1545000000000000017", "本便"))
+q.enqueue(_body(ESC, "上申の転送"), msg_id=ESC, dept="hq")
+q.enqueue(_body("1545000000000000018", "これは押す"), msg_id="1545000000000000018", dept="hq")
+got = _until(lambda: ("1545000000000000018", "既読") in FAKE.marks())
+check("数字のmsg_idには押す(この検査が空PASSでない証明の対)", got)
+check("★配達ID(ESC-...)には押さない= 失敗すると分かっている口を叩かない",
+      not any(m == ESC for m, _ in FAKE.marks()))
+check("弾いても本走は巻き込まない(見張りは生きている)", not stop.is_set())
+stop.set()
 q.close()
 
 d.subprocess, d.LOCAL = _orig_sub, _orig_local

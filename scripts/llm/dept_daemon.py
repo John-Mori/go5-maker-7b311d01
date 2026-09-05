@@ -8706,6 +8706,17 @@ class Daemon:
                     continue            # 他部門の便・検証便には押さない(Chamiの画面を汚さない)
                 if str(b.get("channel") or "") != ch:
                     continue            # いま走っている便と同じ部屋の分だけ
+                # ★2026-09-06(aegis-gl)Discordのメッセージ IDでない便には押さない。
+                #   実測= 全 dept_daemon_*.log で押した36件のうち1件だけ rc=1 だった
+                #   (`ESC-hr-context-1545568554550689962`・イージス研究室)。転送・上申の便は
+                #   `_is_from_chami` が真を返すが msg_id は**配達ID**で、Discordには存在しない
+                #   =react.py が必ず失敗する。害は小さい(seen に入るので叩き続けない・本走も
+                #   巻き込まない)が、失敗と分かっている口を毎回叩くのは安全網の信用を削る
+                #   (「常に誤発火する安全網は無視される」)。★末尾の数字を取り出して元の便へ
+                #   押すことはしない= その実物は**別の部屋**に在り、この見張りは「いま走っている
+                #   部屋の分だけ」を持ち場にしているからだ。
+                if not m.isdigit():
+                    continue            # Discordのmessage IDは必ず全桁が数字
                 try:
                     p = subprocess.run([sys.executable, REACT, "--channel", ch, "--msg", m,
                                         "--emoji", "既読"], capture_output=True, timeout=30)
