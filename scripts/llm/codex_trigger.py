@@ -6,6 +6,7 @@ Codex専用部屋(dept=='codex')では responder が全発言を受けるが、�
 Codexへ回す時にこの判定を使う(べホップと同じ設計)。
 """
 import os
+import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -27,10 +28,28 @@ def _mention_ids():
         return set()
 
 
+# ★2026-09-05 デブライネ実測(イージス研究室)= 本番7日分600便(dispatch便除く)に
+# 旧・部分一致(素の本文中の言及)を当てたら 20件が付け替え対象・うち18件(90%)が誤召喚
+# (「Codexで改修させた」「トークンとClaudeだと出来が悪すぎたから…Codexでやった」等の
+# "報告・話題としての言及"を拾ってしまう。裸の英単語"codex"が最多=35件)。
+# → 召喚は「名指しの形」に限る= 行頭 or 直前が空白/全角スペースの `@`(全角＠も可)+トークンだけを
+# 真とする。素の本文中の言及では拾わない。実メンション <@id> は従来どおり別枠で真。
+_AT_CHARS = "@＠"  # "@" と全角「＠」
+
+
+def _mention_pattern():
+    # TOKENSを都度読む(テストの tokens_override= 差し替えを反映するため・モジュール読込時に固定しない)
+    alts = "|".join(re.escape(t) for t in TOKENS)
+    return re.compile(r"(?:^|[\s　])[" + _AT_CHARS + r"](?:" + alts + r")", re.IGNORECASE)
+
+
 def is_codex_mentioned(content):
-    """本文に Codex への名指し(名前 or メンション)が含まれるか。"""
-    c = (content or "").lower()
-    if any(t.lower() in c for t in TOKENS):
+    """本文に Codex への名指し(名指しの形=@トークン、または実メンション)が含まれるか。
+    素の話題言及("Codexで直した"等の報告文)は拾わない(誤召喚対策・上のコメント参照)。
+    """
+    if not content:
+        return False
+    if _mention_pattern().search(content):
         return True
     for bid in _mention_ids():
         if bid and (f"<@{bid}>" in content or f"<@!{bid}>" in content):
