@@ -31,6 +31,22 @@ RULING_CATALOG = os.path.join(HQ, "裁定カタログ.md")
 
 BRIEF_REL = os.path.join("local", "CODEX_BRIEFING.md")             # worktree からの相対
 
+# ★2026-09-05 **人格の原典**を席へ差し込む(コンテキスト整理室=オタコンの発注・アメス回送
+#   DISPATCH-aegis-gl-1788581567519)。規律(BRIEF)とは**別のファイル**へ置く。理由は3つ:
+#   ①持ち主が違う= 規律は組織(研究室HQ)、人格は人事部門/コンテキスト整理室。混ぜると
+#     どちらを直せばよいか分からなくなる(ORG-11= 正本を1本にする)。
+#   ②BRIEF には「300KB超を毎回渡さない」ための大きさの歯止め(検査 T2c)が掛かっている。
+#     人格の原典18KB を同じ袋へ入れるとその歯止めの意味が変わる。
+#   ③人格だけ差し替える日に、規律の側を1文字も触らずに済む。
+#   ★どちらも worktree の `local/` 配下= .gitignore の中= 公開repoへ乗らない(RULES)。
+PERSONA_REL = os.path.join("local", "CODEX_PERSONA.md")            # worktree からの相対
+PERSONA_SOURCES = [
+    # (見出し, 正本のパス)。★写しはここに持たない= 毎回読み直す(直したら次の起動から効く)。
+    ("人格設定(声の型)", os.path.join(ROOT, "local", "persona_context", "naked_snake_人格.md")),
+    ("整形コンテキスト(原典・事実ベース)",
+     os.path.join(ROOT, "local", "persona_context", "naked_snake_context.md")),
+]
+
 # 芯= プロンプトへ直に載せる分。★ここは規律の**写し**だ。新しい規則をここで作るな
 #   (組織の裁定はChami/研究室HQの職責・口調と人格は人事部門の職責)。
 CORE = """■あなたへの規律(毎回注入される。正本は組織側にある)
@@ -49,6 +65,8 @@ CORE = """■あなたへの規律(毎回注入される。正本は組織側に
 
 ★**規律の全文= このworktreeの `local/CODEX_BRIEFING.md`。作業を始める前にまず読め。**
 以下は そこから外せない芯だけを写したものだ。
+★**あなた自身の人格の原典= このworktreeの `local/CODEX_PERSONA.md`**(人格設定と整形コンテキスト)。
+  上の口調で迷ったら、作り話で埋めずにそれを読め。★**これはlocal限定だ。外へ出すな。**
 
 1. **やっていないことを「やった」と言うな**。「入れた」「効いた」「直った」は別の言葉だ。
    実物(テスト出力・ログ・現物のファイル)を同じ場面で見るまで「直った」と書くな(§4.55)。
@@ -104,20 +122,44 @@ def build_full():
     return "\n".join(parts)
 
 
+def build_persona():
+    """人格の原典を1枚に束ねる。読めない正本は**黙って省かず「不明」と書く**。
+
+    ★なぜ「不明」を書くか= 空で置くと、Codexが「人格の指定は無い」と読んで自前で埋める。
+      読めなかったのか元から無いのかを区別できる形にしておく(推測で埋めさせない)。
+    """
+    parts = ["# ネイキッド・スネーク — 人格の原典(Codex席へ注入)\n",
+             "> 起動のたびに `scripts/codex/codex_briefing.py` が正本から組み直している。\n"
+             "> **このファイルを編集しても次の起動で消える。正本を直せ。**\n"
+             "> 正本の持ち主= 人事部門(characterfile)/ コンテキスト整理室(原典)。\n"
+             "> ★**local限定**= 公開repo・外部サービス・Web へ出さない。\n"]
+    for title, path in PERSONA_SOURCES:
+        text = _read(path)
+        if text:
+            parts.append("\n---\n\n## %s\n\n<!-- 出典: %s -->\n\n%s"
+                         % (title, os.path.basename(path), text))
+        else:
+            parts.append("\n---\n\n## %s\n\n(正本 `%s` を読めなかった= 不明)\n"
+                         % (title, os.path.basename(path)))
+    return "\n".join(parts)
+
+
 def install(worktree):
-    """worktree へ全文を置き、プロンプト先頭に載せる芯を返す。
+    """worktree へ全文(規律・人格)を置き、プロンプト先頭に載せる芯を返す。
 
     失敗しても芯だけは返す(fail-open= 規律の注入で本筋を止めない)。
+    ★2つの書き込みは**別々に try する**= 人格が置けなかった日に規律まで落とさない。
     """
-    try:
-        path = os.path.join(worktree, BRIEF_REL)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(build_full())
-    except Exception:
-        # ★OSError だけを捕るのでは足りない(実測 2026-09-05: 不正なパスは ValueError で抜けた)。
-        #   fail-open の要は「どんな失敗でも芯だけは返す」= 例外の種類で穴を作るな。
-        pass
+    for rel, build in ((BRIEF_REL, build_full), (PERSONA_REL, build_persona)):
+        try:
+            path = os.path.join(worktree, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(build())
+        except Exception:
+            # ★OSError だけを捕るのでは足りない(実測 2026-09-05: 不正なパスは ValueError で抜けた)。
+            #   fail-open の要は「どんな失敗でも芯だけは返す」= 例外の種類で穴を作るな。
+            pass
     return CORE
 
 
@@ -140,6 +182,10 @@ if __name__ == "__main__":
     import sys
     full = build_full()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    per = build_persona()
     print(f"芯 {len(CORE)}字 / 全文 {len(full)}字 ({len(full.encode('utf-8'))}バイト)")
+    print(f"人格 {len(per)}字 ({len(per.encode('utf-8'))}バイト)")
     print(f"正本: {COMMON_RULES} = {'読めた' if _read(COMMON_RULES) else '読めない'}")
     print(f"正本: {RULING_CATALOG} = {'読めた' if _read(RULING_CATALOG) else '読めない'}")
+    for _t, _p in PERSONA_SOURCES:
+        print(f"正本: {_p} = {'読めた' if _read(_p) else '読めない'}")

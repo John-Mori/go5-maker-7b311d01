@@ -45,6 +45,25 @@ check("T2b 裁定カタログの見出しが入る", "### C-015" in full and "##
 check("T2c 裁定カタログの本文までは入れない(300KB超を毎回渡さない)",
       len(full.encode("utf-8")) < 60000, f"{len(full.encode('utf-8'))}バイト")
 
+# T2.5 人格の原典が**別のファイル**として組めること(2026-09-05・オタコンの発注)
+per = cb.build_persona()
+check("T2.5a 人格の原典2本が入る",
+      "一人称=**俺**" in per or "ビッグ・ボス" in per, per[:80])
+check("T2.5b 出典が2本とも読めている(不明が1つも無い)",
+      "を読めなかった= 不明" not in per, "正本が欠けている")
+check("T2.5c 人格は規律の袋へ混ぜない(持ち主が違う=ORG-11)",
+      "ビッグ・ボス" not in full, "build_full に人格が混ざった")
+check("T2.5d 芯から人格の置き場を指している",
+      "local/CODEX_PERSONA.md" in cb.CORE)
+# ★must-fail= 正本が読めない時に**黙って空を返さない**(推測で埋めさせない側へ倒す)。
+_orig_sources = cb.PERSONA_SOURCES
+cb.PERSONA_SOURCES = [("人格設定(声の型)", os.path.join(ROOT, "no", "such", "persona.md"))]
+try:
+    check("T2.5e must-fail: 正本が読めない時は「不明」と書く(空で通さない)",
+          "を読めなかった= 不明" in cb.build_persona())
+finally:
+    cb.PERSONA_SOURCES = _orig_sources
+
 # T3 worktree へ実際に置けること
 with tempfile.TemporaryDirectory() as td:
     ret = cb.install(td)
@@ -53,6 +72,10 @@ with tempfile.TemporaryDirectory() as td:
     check("T3b 戻り値は芯", ret == cb.CORE)
     body = open(p, encoding="utf-8").read() if os.path.exists(p) else ""
     check("T3c 置いた全文にも共通規律が入る", "## 4.55" in body)
+    pp = os.path.join(td, cb.PERSONA_REL)
+    check("T3d 人格も local/ 配下へ書かれる", os.path.exists(pp), pp)
+    pbody = open(pp, encoding="utf-8").read() if os.path.exists(pp) else ""
+    check("T3e 置いた人格に原典の中身が入る", "ネイキッド・スネーク" in pbody)
 
 # T4 fail-open= 置けなくても芯は返る(規律の注入で本筋を止めない)
 check("T4 置けない場所でも芯を返す",
@@ -60,9 +83,11 @@ check("T4 置けない場所でも芯を返す",
 
 # T5 構造の要= 置き場が git に載らないこと
 #    (HQの中身を公開repoへ乗せない/ worktree_changed が誤って「実装が残った」と言わない)
-r = subprocess.run(["git", "-C", ROOT, "check-ignore", "-v", cb.BRIEF_REL.replace("\\", "/")],
-                   capture_output=True, text=True, encoding="utf-8")
-check("T5 置き場が .gitignore 配下", r.returncode == 0, r.stdout.strip() or r.stderr.strip())
+for _rel in (cb.BRIEF_REL, cb.PERSONA_REL):
+    r = subprocess.run(["git", "-C", ROOT, "check-ignore", "-v", _rel.replace("\\", "/")],
+                       capture_output=True, text=True, encoding="utf-8")
+    check(f"T5 置き場が .gitignore 配下({_rel})",
+          r.returncode == 0, r.stdout.strip() or r.stderr.strip())
 
 print(f"\n{'全緑' if not fails else '赤 ' + str(len(fails)) + '件: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)
