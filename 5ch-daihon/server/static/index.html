@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5ch台本エディタ(ローカル版)</title>
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <header class="app-header">
+    <h1>5ch台本エディタ<span class="app-header__badge">ローカル版</span></h1>
+    <p class="app-header__note">
+      台本(caption/narration/reaction)・画像・読み方(voice_reading/voice_char/voice_role)を編集して、YMMPを生成できます。
+      このツールはローカル専用です(127.0.0.1のみ・認証なし)。
+    </p>
+  </header>
+
+  <main class="app-main">
+    <section class="project-picker">
+      <label for="project-select">プロジェクト</label>
+      <select id="project-select">
+        <option value="">読み込み中...</option>
+      </select>
+      <span id="project-status" class="status-text"></span>
+      <button type="button" id="btn-generate" class="btn-generate" disabled>YMMP生成</button>
+    </section>
+
+    <section id="generate-result" class="generate-result generate-result--hidden">
+      <h2>生成結果</h2>
+      <p id="generate-summary" class="generate-summary"></p>
+      <p id="generate-path" class="generate-path"></p>
+      <details class="generate-log">
+        <summary>生成器ログ(stdout/stderr)</summary>
+        <pre id="generate-stdout"></pre>
+        <pre id="generate-stderr"></pre>
+      </details>
+      <details class="generate-log">
+        <summary>BasePoint検査(validate_ymmp.py)</summary>
+        <pre id="validate-log"></pre>
+      </details>
+    </section>
+
+    <section id="cuts-list" class="cuts-list">
+      <p class="empty-note">プロジェクトを選ぶとコマ一覧が表示されます。</p>
+    </section>
+  </main>
+
+  <template id="cut-card-template">
+    <article class="cut-card">
+      <header class="cut-card__head">
+        <span class="cut-card__id"></span>
+        <span class="cut-card__badge cut-card__badge--phase"></span>
+        <span class="cut-card__badge cut-card__badge--type"></span>
+      </header>
+
+      <div class="cut-field">
+        <label>image_file(画像)</label>
+        <select class="cut-image-select"></select>
+        <img class="cut-image-preview" alt="">
+      </div>
+
+      <div class="cut-field" data-field="caption_text">
+        <label>caption_text(画面テロップ)</label>
+        <textarea rows="2"></textarea>
+      </div>
+
+      <div class="cut-field" data-field="narration_text">
+        <label>narration_text(ナレーション)</label>
+        <textarea rows="2"></textarea>
+      </div>
+
+      <div class="cut-field" data-field="reaction_text">
+        <label>reaction_text(視聴者リプ)</label>
+        <textarea rows="2"></textarea>
+      </div>
+
+      <div class="cut-field" data-field="voice_reading">
+        <label>voice_reading(読み方の上書き。空なら台本テキストをそのまま読む)</label>
+        <textarea rows="2"></textarea>
+      </div>
+
+      <div class="cut-field cut-field--row">
+        <div>
+          <label>voice_char(話者)</label>
+          <select class="cut-voice-char"></select>
+        </div>
+        <div>
+          <label>voice_role(誰の台詞を読むか)</label>
+          <select class="cut-voice-role"></select>
+        </div>
+      </div>
+
+      <div class="cut-field__row">
+        <button type="button" class="btn-save">保存</button>
+        <span class="save-status"></span>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js?v=1"></script>
+</body>
+</html>
