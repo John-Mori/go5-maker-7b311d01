@@ -134,11 +134,8 @@ def mark(channel, msg_id, kind):
     if not (channel and msg_id):
         return
     try:
-        # ★--codex= 受け手がCodex(@ネイキッド・スネーク)。react.py が §A.1 に従い
-        #   送信/既読/着手だけを uptsukiyomi/followok/🐍 へ差し替える(他印は共通)。
-        #   ここは Codex専用の responder なので常に --codex を渡す(Chami指示 2026-09-05)。
         subprocess.run([sys.executable, REACT, "--channel", str(channel),
-                        "--msg", str(msg_id), "--emoji", kind, "--codex"],
+                        "--msg", str(msg_id), "--emoji", kind],
                        capture_output=True, timeout=30)
     except Exception:
         pass

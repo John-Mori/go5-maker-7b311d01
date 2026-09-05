@@ -52,17 +52,6 @@ EMOJI_ID = {"着手": "1527252032308908172", "既読": "1527252197597777971",
             "改悪": "1541110670748156014"}
 EMOJI_NAME = {"着手": "chakusyu", "既読": "kidoku", "送信": "sendms",
               "再発": "saihatsu", "改悪": "kaiaku"}  # name:id のname側(idで描くので表示名でよい)
-# ★受け手=Codex(@ネイキッド・スネーク)の時だけ差し替える3印(Chami指示 2026-09-05・msg 1545618001741611058)。
-#   正本= 00_AI-HQ/docs/departments/kaizen-analyst/絵文字管理台帳.md §A.1(改善提案部門が意味を確定・当室は配線=C-015)。
-#   なぜ既存絵文字の流用か= ギルドCRUDはChami直命・不可逆(§3.7)。新素材を作らず既存IDを使い回す暫定運用。
-#   ★分けるのは送信/既読/着手の**3印だけ**。即答💬/再発🔁/改悪📉/炎上🔥/ゴラッソ⚽/愛❤ は
-#     Claude/Codex 共通のまま(C-035=名指し指示を全体へ広げない=Chami明言「ほかは共通認識でOK」)。
-#   値= (実名, id)。id が None の印は unicode をそのまま撃つ(🐍=スネーク・素材不要)。
-CODEX_OVERRIDE = {
-    "送信": ("uptsukiyomi", "1522060098355069139"),   # sendms → uptsukiyomi(§B業務印と意味二重化=文脈で判別)
-    "既読": ("followok", "1523758723758161920"),        # kidoku → followok
-    "着手": ("🐍", None),                                # chakusyu → 🐍(unicode。ギルド素材を作らない)
-}
 
 
 def read_token():
@@ -105,37 +94,26 @@ def api(path, token, method="GET"):
     return None
 
 
-def resolve_emoji(token, cid, name, codex=False):
+def resolve_emoji(token, cid, name):
     """印を name:id へ解決する。IDで撃つ経路に一本化(2026-09-04トトリ仕様)。
     ①ギルドの実名照合を第一(新規追加した絵文字も即使える・現在の実名でnameが揃う)。
     ②照合が1件も当たらなくても、確定IDを持つ印は EMOJI_ID で **必ず custom を撃つ**
       (名前がズレても id が実在すれば描画される=劣化しない。受け入れ条件3)。
     ③IDも持たない印(即答sokutou等)だけ unicode 代用へ落ちる(=本当に引けない時のfail-open)。
-    ★codex=True の時、送信/既読/着手の3印だけ §A.1 の代替へ差し替える(受け手=Codex)。
-      代替も同じ経路(実名照合→ID)で解決する=劣化しない。id が None の印(🐍)は unicode を直に返す。
     """
-    want_name, anchor_id = name, EMOJI_ID.get(name)
-    if codex and name in CODEX_OVERRIDE:            # ★Codex受信=3印を差し替え(他印は素通り=共通)
-        alt_name, alt_id = CODEX_OVERRIDE[name]
-        if alt_id is None:
-            return alt_name                         # 🐍 等=ギルド素材が無い unicode はそのまま撃つ
-        want_name, anchor_id = alt_name, alt_id
     try:
         ch = api(f"/channels/{cid}", token)
         gid = str((ch or {}).get("guild_id", "") or "")
         if gid:
             emojis = api(f"/guilds/{gid}/emojis", token) or []
-            # 差し替え時は代替の実名を、通常時は ALIAS(実名→呼び名)を照合する
-            wants = [want_name] if (codex and name in CODEX_OVERRIDE) else ALIAS.get(name, [name])
-            for want in wants:
+            for want in ALIAS.get(name, [name]):   # 実名(chakusyu) → 呼び名(着手) の順で探す
                 for e in emojis:
                     if e.get("name") == want and e.get("id"):
                         return f"{e['name']}:{e['id']}"
     except Exception:
         pass
-    if anchor_id:                                   # 実名照合が外れてもIDで custom を撃つ
-        disp = want_name if (codex and name in CODEX_OVERRIDE) else EMOJI_NAME.get(name, name)
-        return f"{disp}:{anchor_id}"
+    if name in EMOJI_ID:                            # 実名照合が外れてもIDで custom を撃つ
+        return f"{EMOJI_NAME.get(name, name)}:{EMOJI_ID[name]}"
     return FALLBACK.get(name, name)
 
 
@@ -143,7 +121,6 @@ def main():
     args = sys.argv[1:]
     ch = msg = ""
     emoji_name = "着手"
-    codex = False                                   # --codex=受け手がCodex(§A.1で3印を差し替える)
     i = 0
     while i < len(args):
         if args[i] == "--channel" and i + 1 < len(args):
@@ -152,8 +129,6 @@ def main():
             msg = args[i + 1]; i += 2
         elif args[i] == "--emoji" and i + 1 < len(args):
             emoji_name = args[i + 1]; i += 2
-        elif args[i] == "--codex":
-            codex = True; i += 1
         else:
             i += 1
     if not ch or not msg:
@@ -164,7 +139,7 @@ def main():
         print(f"チャンネルを解決できません: {ch}")
         sys.exit(2)
     token = read_token()
-    emoji = urllib.parse.quote(resolve_emoji(token, cid, emoji_name, codex=codex))
+    emoji = urllib.parse.quote(resolve_emoji(token, cid, emoji_name))
     ok = api(f"/channels/{cid}/messages/{msg}/reactions/{emoji}/@me", token, method="PUT")
     if ok:
         print(f"リアクションOK → {ch} msg={msg} :{emoji_name}:")
