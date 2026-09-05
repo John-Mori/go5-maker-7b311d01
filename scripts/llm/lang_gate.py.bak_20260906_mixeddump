@@ -18,31 +18,6 @@ import unicodedata
 _JP_RE = re.compile(r"[぀-ヿ一-鿿ｦ-ﾟ]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
 
-# ★英語の**機能語**(2026-09-06 イージス研究室・DEF-english-dump-mixed-lang-20260906)。
-#   なぜ latin の量・比率だけでは足りないか= 正当な技術的返信(日本語+パス+識別子+英語の
-#   固有名詞)は latin が数百字になる。そこへ「latin が多いなら英語」を足すと**正当便を握り潰す**
-#   (実測= 候補「latin>=120 かつ jp<=60」は品質管理部門 msg 1545906330001350696 を誤検知した)。
-#   機能語(the/and/that/I'll/let…)は**英語の文にしか出ない**=英語"散文"の存在を直接測れる。
-#   固有名詞・パス・識別子をいくら並べても機能語は増えない=ここが正当便との分かれ目。
-# ★この表に足す時は必ず実測してから足すこと(物差し= 各部屋 memory/*.jsonl の reply)。
-#   日本語の返信に単語として現れうる語(is/as/on/in/to/of/a/it 等の超短語や、Discord/GitHubの
-#   語彙になりうる語)は**入れない**= \b が短語で暴発すると正当便を巻き込む。
-_EN_FUNC_RE = re.compile(
-    r"\b(?:the|and|is|are|was|were|that|this|with|from|have|has|not|but|there|which|"
-    r"when|what|would|should|could|will|been|its|it's|i'll|i'm|i've|let|let's|we|you|"
-    r"they|then|than|into|about|because|there's|here's|doesn't|don't|isn't|wasn't)\b",
-    re.I)
-
-
-def _dump_core(s):
-    """detect_english_dump の判定対象(コード柵・インラインコード・URLを除いた芯)を返す。
-
-    ★混在型の枝と全文英語の枝で**同じ切り出し**を使うため関数にした(ORG-11=判定を2つに割らない)。
-    """
-    core = re.sub(r"```.*?```", " ", s, flags=re.S)   # コード柵は判定から除く
-    core = re.sub(r"`[^`]*`", " ", core)              # インラインコード
-    return re.sub(r"https?://\S+", " ", core)         # URL
-
 
 def detect_english_dump(text):
     """日本語話者の部屋に**本文まるごと英語**(Claude原文ダンプ)が出ていれば info を返す。
@@ -53,39 +28,17 @@ def detect_english_dump(text):
       実測(花海咲季の英文 msg 1539153227491180624)= 英字≈290/日本語≈9=2%で確実に発火。
       普通の混在返信(オタコン実便=日本語数百字+英単語数十字)は英字<40 or 日本語多数で鳴らない。
     ★**検知するだけ**(自動置換はしない)。空/None/非文字列でも例外を出さない(fail-safe)。
-
-    ★★2026-09-06 **混在型**の枝を足した(品質管理部門起票 DEF-english-dump-mixed-lang-20260906)。
-      実物= 人事部門 msg 1545885898686730352(local/_work/_english_dump_1545885898686730352.txt)。
-      Claudeの英語作業ナレーションが本文として出たのに、**日本語がわずか2字多いだけ**で
-      素通しした= latin=252 / jp=39 / ratio=0.155 に対し発火線は jp<=37.8。
-      しかも冒頭が日本語(「研究室/アメス→モドリッチ」)なので `strip_english_preamble` も
-      cut==0 で何もしない=**剥がれもせず検知もされない二重の穴**だった。
-      閾値の根拠(実測・人事部門 memory/*.jsonl の reply 5,646件・道具=local/_work/measure_mixed_dump.py):
-        ・現行の枝が鳴る= 7件。
-        ・採用した枝(func>=8 かつ latin>=120 かつ jp<=latin*0.5)の**上乗せ= 6件で全部が本物**
-          (基盤部門の英語ダンプ5件+この事故の実物)= 誤検知0。
-        ・不採用「latin>=120 かつ jp<=60」= 上乗せ3件のうち品質管理部門 msg 1545906330001350696
-          (latin=238 / jp=43 / **機能語5**)が正当な混在返信なのに鳴った=採らない(C-035)。
-      ★返り値の既存キー(latin/jp/ratio/excerpt)は**壊さない**(呼び先5口が読む)。
-        足すのは `kind`("whole"/"mixed")と `func` だけ=既存の呼び出しは1行も変えずに済む。
     """
     try:
         s = str(text or "")
-        core = _dump_core(s)
+        core = re.sub(r"```.*?```", " ", s, flags=re.S)   # コード柵は判定から除く
+        core = re.sub(r"`[^`]*`", " ", core)              # インラインコード
+        core = re.sub(r"https?://\S+", " ", core)         # URL
         latin = len(_LATIN_RE.findall(core))
         jp = len(_JP_RE.findall(core))
-        ratio = round(jp / float(latin or 1), 3)
-        # ①まるごと英語(2026-07 ORG-23 の原型)。★ここは不変=既存の発火を1件も減らさない。
         if latin >= 40 and jp <= latin * 0.15:
-            return {"latin": latin, "jp": jp, "ratio": ratio, "excerpt": s[:120],
-                    "kind": "whole", "func": len(_EN_FUNC_RE.findall(core))}
-        # ②混在型= 英語の**散文**(機能語8語以上)が散文量(英字120字以上)で在り、
-        #   日本語がそれを下回る(latin の半分以下)。日本語本文に英語が少し混じる普通の便は
-        #   jp が latin を大きく上回るのでここへ来ない。
-        func = len(_EN_FUNC_RE.findall(core))
-        if func >= 8 and latin >= 120 and jp <= latin * 0.5:
-            return {"latin": latin, "jp": jp, "ratio": ratio, "excerpt": s[:120],
-                    "kind": "mixed", "func": func}
+            return {"latin": latin, "jp": jp,
+                    "ratio": round(jp / float(latin or 1), 3), "excerpt": s[:120]}
         return None
     except Exception:
         return None          # 検査が落ちても応答は続ける(fail-safe)

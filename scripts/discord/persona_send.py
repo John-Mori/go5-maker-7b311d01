@@ -612,6 +612,9 @@ def _audit_english_suppressed(persona, channel, hit, body):
                 "src": "persona_send", "event": "english_dump_suppressed", "ref": "ORG-23",
                 "persona": persona, "channel": channel,
                 "latin": hit.get("latin"), "jp": hit.get("jp"), "ratio": hit.get("ratio"),
+                # ★kind/func= 2026-09-06 に足した混在型("mixed")と全文英語("whole")の別。
+                #   QAが台帳で偽陽性率を数える時、どちらの枝が鳴ったかが分からないと直せない。
+                "kind": hit.get("kind"), "func": hit.get("func"),
                 "body": str(body or "")[:400],
             }, ensure_ascii=False) + "\n")
     except Exception:
@@ -647,7 +650,9 @@ def english_backstop(body, persona, channel):
         if hit is None:
             return body                       # 通常返信=1ミリも変えない
         _audit_english_suppressed(persona, channel, hit, body)
-        print(f"[persona_send] ★本文まるごと英語(英字{hit['latin']}/日本語{hit['jp']}・比{hit['ratio']})"
+        _kind = "本文まるごと英語" if hit.get("kind") != "mixed" else \
+                f"英語の作業ナレーション混在(英語機能語{hit.get('func')}語)"
+        print(f"[persona_send] ★{_kind}(英字{hit['latin']}/日本語{hit['jp']}・比{hit['ratio']})"
               f"=送信を保留した。日本語話者の部屋にClaude原文の英語ダンプを出さない(ORG-23/Chami裁定)。"
               f"冒頭=…{hit['excerpt']}…", file=sys.stderr)
         return None

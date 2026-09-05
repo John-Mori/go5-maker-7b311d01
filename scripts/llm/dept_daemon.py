@@ -5748,7 +5748,8 @@ def audit_english(dept, rec, reply):
         if not hit:
             _audit_english_paragraph(dept, rec, reply)
             return None
-        log(dept, f"★英文ダンプを検知 英字={hit['latin']}/日本語={hit['jp']}(比{hit['ratio']}) "
+        log(dept, f"★英文ダンプを検知({hit.get('kind', 'whole')}・英語機能語{hit.get('func')}語) "
+                  f"英字={hit['latin']}/日本語={hit['jp']}(比{hit['ratio']}) "
                   f"冒頭=…{hit['excerpt']}… ※ORG-23再発。日本語化を試みる")
         os.makedirs(os.path.dirname(ENGLISH_AUDIT), exist_ok=True)
         with open(ENGLISH_AUDIT, "a", encoding="utf-8") as f:
@@ -5756,6 +5757,8 @@ def audit_english(dept, rec, reply):
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "dept": dept, "event": "english_dump", "ref": "ORG-23",
                 "latin": hit["latin"], "jp": hit["jp"], "ratio": hit["ratio"],
+                # ★kind/func= 混在型("mixed")と全文英語("whole")の別(2026-09-06)。
+                "kind": hit.get("kind"), "func": hit.get("func"),
                 "msg_id": str((rec or {}).get("msg_id", "")),
                 "reply": str(reply or "")[:400],
             }, ensure_ascii=False) + "\n")
