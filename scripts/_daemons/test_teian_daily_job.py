@@ -37,6 +37,19 @@ QUOTA_OUT = ("④.5 room_comments.py(軍議/咲季の会話・空の候補のみ
              "room_comments が失敗。④commentsは残るが軍議が欠ける可能性(⑤ガードが空を止める)。\n"
              + GUARD_OUT)
 
+# ★実物から取った 2026-09-06 07:21:45 の形。**ここが 09-02 の判定の穴**:
+#   途中の段は 429 で落ちるが、ラダーは最後の段(flash-lite-latest)まで降りて回復する。
+#   実際に埋まらなかった候補が落ちた所は 429 ではなく **HTTP 400**(local/llm/gemini_usage.jsonl
+#   の 2026-09-06 実測= lite の 429 は 0 件 / 成功 194 件 / 400 が 6 件)。
+#   旧判定は「出力のどこかに 429」で quota にしていたので、5日連続でイージス研究室へ誤送した。
+GENFAIL_OUT = ("④ comments vision_comments.py\n"
+               "  [gemini-flash-latest] HTTP 429→次のモデルへ\n"
+               "  [gemini-3.5-flash] HTTP 429→次のモデルへ\n"
+               "  [gemini-2.5-flash] HTTP 404→次のモデルへ\n"
+               "  [gemini-flash-lite-latest] HTTP 400→次のモデルへ\n"
+               "  vision 呼び出し失敗: 全モデルで失敗(最後: gemini-flash-lite-latest HTTP 400)\n"
+               + GUARD_OUT)
+
 
 def check(name, cond):
     results.append((name, bool(cond)))
@@ -70,6 +83,22 @@ def main():
     check("cid や件数の中の素の 429 では quota にしない",
           J.classify(2, GUARD_OUT + "\n  - ready:dmmmg_429(④comments)") == "guard")
 
+    print("\n[1.6] 途中の段の429と、使い切って落ちた行を混ぜない(2026-09-06 実測)")
+    check("★最後の段が 400 で落ちたら genfail= 枠の話ではなく生成器の故障",
+          J.classify(2, GENFAIL_OUT) == "genfail")
+    check("★途中の段の 429 だけで quota にしない(5日連続の誤送の芯)",
+          J.classify(2, GENFAIL_OUT) != "quota")
+    check("最後の段が 429 なら今までどおり quota(枠の判定は殺さない)",
+          J.classify(2, QUOTA_OUT) == "quota")
+    check("使い切った行が無ければ genfail にしない= guard のまま",
+          J.classify(2, GUARD_OUT) != "genfail")
+    check("最後の段が 503 でも genfail(429以外は全部 生成器側)",
+          J.classify(2, GUARD_OUT + "\n  vision 呼び出し失敗: 全モデルで失敗(最後: "
+                        "gemini-flash-lite-latest HTTP 503)") == "genfail")
+    check("使い切った行が2本あり片方が429でも、429が在れば quota を優先(枠は塞がっている)",
+          J.classify(2, GENFAIL_OUT + "\n  room_comments 失敗: 全モデルで失敗(最後: "
+                        "gemini-flash-lite-latest HTTP 429)") == "quota")
+
     print("\n[2] 宛先= 閉じ条件の鍵を持つ部屋")
     check("guard の宛先は軍議(room_comments を埋められる側)",
           J.alert_dept("guard") == "gunji")
@@ -79,6 +108,10 @@ def main():
           J.alert_dept("quota") != "gunji")
     check("quota の宛先はイージス研究室(共有キーと計器の持ち場)",
           J.alert_dept("quota") == "aegis-gl")
+    check("★genfail の宛先は改修部門α= ラダー(scripts/teian/)を直せる側",
+          J.alert_dept("genfail") == "system-engineer")
+    check("★genfail をイージス研究室へ送らない= 当室に生成器は直せない(09-02〜09-06 の誤送)",
+          J.alert_dept("genfail") != "aegis-gl")
 
     print("\n[3] 節目は間隔を無視して必ず1通")
     check("成功→guard(初日)は出す",
@@ -107,6 +140,12 @@ def main():
           J.should_alert(st("quota", "2026-09-02"), "quota", "2026-09-05"))
     check("quota 継続: 翌日は出さない",
           not J.should_alert(st("quota", "2026-09-02"), "quota", "2026-09-03"))
+    check("★quota→genfail(原因が枠から故障に変わった日)は出す= 宛先が変わる日を黙らせない",
+          J.should_alert(st("quota", "2026-09-06"), "genfail", "2026-09-07"))
+    check("genfail 継続: 3日後は出す(故障なので fail と同じ間隔)",
+          J.should_alert(st("genfail", "2026-09-02"), "genfail", "2026-09-05"))
+    check("genfail 継続: 翌日は出さない",
+          not J.should_alert(st("genfail", "2026-09-02"), "genfail", "2026-09-03"))
 
     print("\n[5] 読めない状態は鳴らす側へ(fail-open)")
     check("last_alert_date が空なら出す",
@@ -117,7 +156,7 @@ def main():
           J.should_alert({"last_ok": True}, "guard", "2026-09-02"))
 
     print("\n[6] 便の本文は閉じ条件を必ず書く")
-    for k in ("guard", "quota", "fail", "ok"):
+    for k in ("guard", "quota", "genfail", "fail", "ok"):
         b = J.build_body(k, 2, GUARD_OUT, "2026-09-02", 1)
         check("%s の本文に閉じ方が書いてある" % k,
               ("閉じ条件" in b) or ("閉じる" in b))
@@ -132,6 +171,15 @@ def main():
           "軍議" in qb)
     check("quota の本文にChamiが選ぶ道が並んでいる(待つ/課金/ローカル)",
           "課金" in qb and "ローカル" in qb)
+    gb = J.build_body("genfail", 2, GENFAIL_OUT, "2026-09-06", 5)
+    check("★genfail の本文に「枠切れではない」と書いてある= 誤診を繰り返させない",
+          "枠切れ(429)ではない" in gb)
+    check("★genfail の本文に、使い切った時の最後のエラーが実文で載っている",
+          "HTTP 400" in gb)
+    check("genfail の本文に直す場所(DEFAULT_MODELS)が書いてある",
+          "DEFAULT_MODELS" in gb)
+    check("genfail の本文に --publish-force 禁止が残っている",
+          "--publish-force` は使うな" in gb)
 
     bad = sum(1 for _, c in results if not c)
     print("\n%d件中 %d件OK / %d件NG" % (len(results), len(results) - bad, bad))
@@ -182,6 +230,24 @@ def _mut_quota_to_gunji():
     J.alert_dept = lambda kind: J.GUARD_DEPT if kind in ("guard", "quota") else J.DEPT
 
 
+def _mut_quota_anywhere():
+    """出力の**どこかに** 429 が在れば quota とする(= 2026-09-02〜09-06 の実装)。
+    ★動く。だがラダーの**途中の段**の 429 も拾う= 最後の段まで降りて別の理由(400/503)で
+      落ちた日まで「枠切れ」と読む。これで5日連続、枠を開けられないイージス研究室へ送った。"""
+    J.classify = lambda code, out: "ok" if code == 0 else (
+        (("quota" if any(m in (out or "") for m in J.QUOTA_MARKS) else "guard")
+         if (code == J.GUARD_CODE and J.GUARD_MARK in (out or "")) else "fail"))
+
+
+def _mut_genfail_to_aegis():
+    """生成器の故障も「Gemini の話」だから計器の持ち場(イージス研究室)へ、とする。
+    ★動く(便は届く)。だが当室に scripts/teian/ のラダーは直せない= また閉じられない部屋へ
+      の便になる。宛先は「話題の持ち主」ではなく**直せる手を持つ側**で決める。"""
+    J.alert_dept = lambda kind: (
+        "aegis-gl" if kind in ("quota", "genfail")
+        else (J.GUARD_DEPT if kind == "guard" else J.DEPT))
+
+
 def _mut_dept_owner():
     """宛先を「チェーンの持ち主」で決める(全部 改修部門α)。
     ★動く。だが閉じ条件を持たない部屋へ出す= 当てる先の無い便に戻る。"""
@@ -205,6 +271,10 @@ MUTANTS = (
      "★429の証拠が在る guard は quota"),
     ("枠切れも軍議へ送る", _mut_quota_to_gunji,
      "★quota の宛先は軍議ではない= 枠は軍議には開けられない(2026-09-02 三笘の実測)"),
+    ("出力のどこかに429が在れば quota(09-02〜09-06の実装)", _mut_quota_anywhere,
+     "★最後の段が 400 で落ちたら genfail= 枠の話ではなく生成器の故障"),
+    ("生成器の故障もイージス研究室へ送る", _mut_genfail_to_aegis,
+     "★genfail の宛先は改修部門α= ラダー(scripts/teian/)を直せる側"),
 )
 
 

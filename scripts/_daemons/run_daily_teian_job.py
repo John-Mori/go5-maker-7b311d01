@@ -95,8 +95,48 @@ GUARD_CODE = 2
 #   ★`RESOURCE_EXHAUSTED` は**入れない**= room_comments は 429 の本文を出力しないので、
 #     このチェーンの出力には現れない。現れない文字列を合図に置くと「見張っているつもり」になる。
 QUOTA_DEPT = "aegis-gl"           # 共有キーと計器の持ち場= この部屋(課金の判断はChamiへ上げる)
-QUOTA_MARKS = ("HTTP 429", "] 429")
+QUOTA_MARKS = ("HTTP 429", "] 429")   # ★旧判定。_terminal_errors へ移行済(下)。参照は残す=
+#   09-02〜09-06 の便がこの2本の名前で書かれているため、消すと過去の便が読めなくなる。
 QUOTA_QUIET_DAYS = 3              # ★guard の14日ではなく fail と同じ3日。理由は should_alert。
+
+# ★2026-09-06 修正(イージス研究室)。**旧 QUOTA_MARKS は誤判定していた**=5日連続で
+#   当室へ誤配した(09-02/03/04/05/06 の log が全部 止まり方=quota)。
+#   真因= ラダーは**途中の段が 429 で落ちても次の段で成功する**。その落ちた段が
+#     `  [{model}] HTTP {code}→次のモデルへ`(room_comments.py:258 / vision_comments.py:230)
+#   を出すので、**成功した日でも出力に "HTTP 429" と "] 429" が必ず出る**。
+#   つまり旧判定は「枠が詰まった」ではなく「途中で429を1回でも見た」を拾っていた。
+#   実測(2026-09-06 当室が local/llm/gemini_usage.jsonl を直読・823コール):
+#     gemini-flash-lite-latest = 194成功 / 429は**0件**(3日続けて200超を捌いて0件)。
+#     ラダーを最後まで使い切って落ちた item の最後のエラーは **HTTP 400 と HTTP 503 だけ**。
+#     429で全滅した item は**今日1件も無い**。= 枠は詰まっているが、止めているのは枠ではない。
+#   ★だから合図は「途中の段」ではなく**使い切って落ちた行**だけを見る:
+#     room_comments.py:265 / vision_comments.py:237 の
+#       `全モデルで失敗(最後: <model> HTTP <code>)`
+#   この括弧の中に 429 が在る時だけ quota。429以外(400/503)なら**生成器の故障**=
+#   持ち主(改修部門α)へ出す= 新しい止まり方 "genfail"。
+TERMINAL_MARK = "全モデルで失敗(最後:"
+GENFAIL_DEPT = DEPT               # ラダーを使い切って落ちた= scripts/teian/ の持ち主へ
+GENFAIL_QUIET_DAYS = 3            # 故障なので fail と同じ間隔
+
+
+def _terminal_errors(text):
+    """ラダーを**全部使い切って落ちた**時の『最後のエラー』だけを拾う。
+
+    ★途中の段が落ちて次へ回った行(`→次のモデルへ`)は**含めない**。そこを含めたのが
+      旧実装の誤りで、回復した日まで quota に見えていた(上の注記)。
+    """
+    out = []
+    src = text or ""
+    i = 0
+    while True:
+        j = src.find(TERMINAL_MARK, i)
+        if j < 0:
+            break
+        head = j + len(TERMINAL_MARK)
+        k = src.find(")", head)
+        out.append(src[head:k] if k >= 0 else src[head:head + 200])
+        i = head
+    return out
 
 
 # ---------------------------------------------------------------- 純粋関数
@@ -107,15 +147,19 @@ def classify(code, out):
     ★guard と判定するのは **exit=2 かつ publish の合図行がある** 時だけだ。
       exit だけで決めない= 他の工程がたまたま2で落ちた日を「設計どおり」と読むと、
       本物の故障が14日おきの静かな側へ沈む。
-    ★その guard のうち、出力に 429 の証拠が在る日は "quota" へ**さらに分ける**=
-      軍議には閉じられない停止だから宛先が違う(理由は QUOTA_MARKS の上)。
-      証拠が無ければ guard のまま= **分からない日を quota 側(=軍議を素通り)へ倒さない。**
+    ★その guard のうち、**ラダーを使い切って落ちた**証拠が在る日はさらに分ける=
+      最後のエラーが 429 なら "quota"(枠= 当室とChami)/ 429以外(400・503)なら
+      "genfail"(生成器の故障= 改修部門α)。軍議には**どちらも閉じられない**。
+    ★使い切っていない日は guard のまま= 途中の段が429で落ちても次で成功しているなら
+      それは詰まっていない。**分からない日を quota 側(=軍議を素通り)へ倒さない。**
     """
     if code == 0:
         return "ok"
     if code == GUARD_CODE and GUARD_MARK in (out or ""):
-        text = out or ""
-        return "quota" if any(m in text for m in QUOTA_MARKS) else "guard"
+        errs = _terminal_errors(out)
+        if not errs:
+            return "guard"
+        return "quota" if any("429" in e for e in errs) else "genfail"
     return "fail"
 
 
@@ -155,6 +199,8 @@ def should_alert(state, kind, today,
         interval = guard_quiet_days
     elif kind == "quota":
         interval = quota_quiet_days
+    elif kind == "genfail":
+        interval = GENFAIL_QUIET_DAYS
     else:
         interval = quiet_days
     return (d1 - d0).days >= interval
@@ -171,6 +217,8 @@ def alert_dept(kind):
         return GUARD_DEPT
     if kind == "quota":
         return QUOTA_DEPT
+    if kind == "genfail":
+        return GENFAIL_DEPT
     return DEPT
 
 
@@ -207,6 +255,27 @@ def build_body(kind, code, tail, today, streak):
             "■ 全文ログ: local/_teian_daily.log\n"
             "■ 次の自動便: 直るまで %s 日おき(毎日は鳴らさない)。\n"
             % (code, today, streak, tail, QUOTA_QUIET_DAYS)
+        )
+    if kind == "genfail":
+        errs = _terminal_errors(tail)
+        last = errs[-1] if errs else "(不明)"
+        return (
+            "自動(毎朝7時の提案日次チェーン)→ " + dept_ja(GENFAIL_DEPT) + "\n\n"
+            "■ **配信が空配信ガードで止まり、その原因は生成器の故障だ**\n"
+            "  (exit=%s / %s・連続%s日目)。\n"
+            "  ★**枠切れ(429)ではない**= モデルのラダーを**最後の段まで使い切って**落ちている。\n"
+            "  使い切った時の最後のエラー= `%s`\n"
+            "  429なら枠、それ以外(400/503など)は**生成器そのものが応答を返せていない**。\n"
+            "  枠はChamiにしか開けられないが、これは scripts/teian/ の持ち主で直せる。\n\n"
+            "■ 出力の末尾:\n```\n%s\n```\n\n"
+            "■ **閉じ条件**= 未充填だった cid が埋まり、次の朝のランが exit=0 になること。\n"
+            "■ 見る所= `scripts/teian/room_comments.py` / `scripts/teian/vision_comments.py` の\n"
+            "  `DEFAULT_MODELS`(ラダー)。最後の段が落ちるなら、その経路には**効く最後の段が無い**。\n"
+            "■ 手で回すなら: `python scripts/teian/run_daily_teian.py`\n"
+            "  ★`--publish-force` は使うな(空配信ガードC-038を潰す)。\n"
+            "■ 全文ログ: local/_teian_daily.log / 使用量台帳: local/llm/gemini_usage.jsonl\n"
+            "■ 次の自動便: 直るまで %s 日おき(毎日は鳴らさない)。\n"
+            % (code, today, streak, last, tail, GENFAIL_QUIET_DAYS)
         )
     if kind == "guard":
         return (
