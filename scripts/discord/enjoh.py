@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Discordへ出る本文の炎上表記ゲート(正本。2026-09-02 イージス研究室)。
+"""Discordへ出る本文の合流点ゲート(正本。2026-09-02 イージス研究室)。
+
+いま2つ入っている:
+  (1) 炎上表記の正規化(2026-09-02)= 下の A/B。
+  (2) 生成ノイズの孤立フィラー行を落とす(2026-09-05・DEF-codex-care-noise-line-20260905)。
+      → filler_line_scrub() の docstring に実物と根拠を書いた。
 
 なぜここに独立して在るか:
   2026-09-01 に persona_send.py(webhook口)へ同じゲートを入れた。だが**Discordへ本文をPOSTする口は
@@ -35,12 +40,88 @@ _CODE_SPLIT_RE = re.compile(r"(```.*?```|`[^`\n]*`)", re.S)   # 奇数要素=コ
 _LABEL_RE = re.compile(r"(" + re.escape(ENJOH_EMOJI) + r"\s*[(【]?)炎上(?=[)】\s0-9=:、。」]|$)")
 
 
+# --- (2) 生成ノイズの孤立フィラー行 -------------------------------------------------
+# 単独行に立てる「1語だけのASCII」= 落とす対象。長さは12字まで(それ以上は文の可能性)。
+_FILLER_LINE_RE = re.compile(r"^[A-Za-z]{1,12}$")
+# 日本語本文の中に居ることの判定(ひらがな/カタカナ/漢字)。
+_JP_RE = re.compile(r"[぀-ゟ゠-ヿ一-鿿]")
+_JP_MIN = 20                                     # これ未満なら「日本語本文」と見なさない=触らない
+# ★単独行で意味を持ちうる語は落とさない(誤って情報を消す方が事故として重い)。
+_KEEP_WORDS = {
+    "ok", "ng", "yes", "no", "done", "pass", "fail", "failed", "error", "warn",
+    "warning", "todo", "fixme", "note", "tip", "wip", "fyi", "eof", "null", "none",
+    "true", "false", "green", "red", "diff", "log", "before", "after", "in", "out",
+}
+
+
+def filler_line_scrub(body, tag="persona_send"):
+    """段落と段落の間に挟まった、生成ノイズの孤立フィラー行を落とす。
+
+    実物(DEF-codex-care-noise-line-20260905 / QA起票):
+      otacon-radio・2026-09-05 11:44〜11:47 の2便。msg 1545625670191943791(care×1)と
+      1545626524974190654(care×4)で、日本語本文の段落間に単独の "care" 行が計5本入った。
+      生成側(gpt-5.5)のノイズだと本人が自認(msg 1545627265742807131)。
+      ★モデルに「吐くな」は保証させられないので、**出口で剥がす**。
+
+    ★なぜここ(enjoh.py の正本)か= 実物2便は `via=persona_send` で出ている
+      (local/llm/send_audit.jsonl の当該 msg_id。argv も persona_send.py)。QAの起票は
+      「codex_run.dc_send 直前」も候補に挙げていたが、**そこへ置いてもこの2便は1本も剥がせない**。
+      enjoh_backstop は persona_send / bot_send / behop / codex_run / imagegen の5口すべてが
+      呼ぶ唯一の合流点なので、ここへ1枚置けば全口に同時に入る(C-064・注入口は1本のまま=ORG-11)。
+
+    ★落とす条件(狭く取る。迷ったら残す):
+      - 前後が空行(または本文の先頭/末尾)で挟まれた孤立行であること。
+      - 行の中身が **ASCII英字1語のみ**(1〜12字)。数字・記号・空白が混じったら対象外。
+      - 本文全体に日本語が _JP_MIN(20)字以上あること= 英語本文の1語行は触らない。
+      - コードブロック(```)の中は触らない(実装の説明で見せたい場面がある)。
+      - _KEEP_WORDS(OK/NG/done 等、単独で意味を持つ語)は落とさない。
+    落とす時は隣接する空行も1本だけ一緒に畳む= 段落の区切り(空行1本)を保つ。
+    返り値: 送るべき本文。1本も落とさなければ入力を1ミリも変えない(Noneも型のまま返す)。
+    """
+    try:
+        s = str(body or "")
+        if not s or len(_JP_RE.findall(s)) < _JP_MIN:
+            return body                           # 日本語本文でない=触らない
+        lines = s.split("\n")
+        n = len(lines)
+        fence = False
+        drop = set()
+        for i, ln in enumerate(lines):
+            t = ln.strip()
+            if t.startswith("```"):
+                fence = not fence
+                continue
+            if fence or not _FILLER_LINE_RE.match(t) or t.lower() in _KEEP_WORDS:
+                continue
+            if (i == 0 or lines[i - 1].strip() == "") and \
+               (i == n - 1 or lines[i + 1].strip() == ""):
+                drop.add(i)
+        if not drop:
+            return body
+        for i in sorted(drop):                    # 空行の畳み込み(後ろ優先・無ければ前)
+            if i + 1 < n and lines[i + 1].strip() == "" and (i + 1) not in drop:
+                drop.add(i + 1)
+            elif i - 1 >= 0 and lines[i - 1].strip() == "" and (i - 1) not in drop:
+                drop.add(i - 1)
+        hit = [lines[i].strip() for i in sorted(drop) if lines[i].strip()]
+        print(f"[{tag}] ★生成ノイズの孤立フィラー行を合流点で除去({len(hit)}行"
+              f" / 語={','.join(sorted(set(hit)))})= DEF-codex-care-noise-line-20260905。",
+              file=sys.stderr)
+        return "\n".join(lines[i] for i in range(n) if i not in drop)
+    except Exception as e:
+        print(f"[{tag}] フィラー行スクラブ不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
+              file=sys.stderr)
+        return body
+
+
 def enjoh_backstop(body, tag="persona_send"):
-    """Discordへ出る本文の炎上表記を合流点で正規化する。
+    """Discordへ出る本文を合流点で正規化する(炎上表記 + 生成ノイズの孤立フィラー行)。
 
     引数 tag は stderr の出所表示だけに使う(判定には効かない)。
     返り値: 送るべき本文。置換が1件も無ければ入力を1ミリも変えない(Noneも型のまま返す)。
+    ★名前は据え置き= 5口の呼び出しと既存の配線検査(co_names)を壊さないため。
     """
+    body = filler_line_scrub(body, tag=tag)       # ★炎上表記の有無に関係なく必ず通す
     try:
         s = str(body or "")
         if "\U0001F525" not in s and ENJOH_EMOJI not in s:
