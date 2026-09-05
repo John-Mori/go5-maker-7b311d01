@@ -88,6 +88,19 @@ BRIDGE_CLI_JS = os.path.join(LOCAL, "codex_cli", "node_modules", "@openai",
 LOG = os.path.join(LOCAL, "llm", "codex_run_log.jsonl")
 REACT = os.path.join(ROOT, "scripts", "discord", "react.py")
 
+# --- 全部屋記憶(ボス=ネイキッド・スネークの連続性。Chami指示 2026-09-05 msg 1545647769631334470
+#     「あとボスも全部屋で記憶を保つようにしてくれ」)。
+#   webhook人格の全部屋記憶は session_relay.SHARED_MEMORY_BY_PERSONA が持つが、Codexは
+#   サブプロセス経路(この codex_run.py)なのでそちらの配線が届かない= ここに同じ思想で1本持たせる。
+#   ★思想はアメス初出時のChami原文と同じ=「1部屋=1セッションだと部屋ごとに記憶が分かれて互いを知らない。
+#     ずっと一緒にいたいから、部屋をまたぐ1本の記憶を持たせる」。ボスは全部屋で同じ一人。
+#   ★置き場= 他の *_shared.jsonl と同じ 00_AI-HQ/departments/hr/memory/(人事部門の記憶棚)。
+#   ★local/HQ内で完結=ネットへ出さない(C-013)。読み書きは fail-open(記憶で本筋を止めない)。
+HQ = os.environ.get("GO5_HQ_DIR") or os.path.normpath(os.path.join(ROOT, "..", "00_AI-HQ"))
+SNAKE_SHARED_MEMORY = os.path.join(HQ, "departments", "hr", "memory", "snake_shared.jsonl")
+SNAKE_MEM_RECALL_RECORDS = 12        # プロンプトへ載せる直近件数(argvを膨らませない上限)
+SNAKE_MEM_RECALL_CHARCAP = 4000      # 載せる記憶ブロックの文字上限(超えたら古い方を落とす)
+
 
 def _resolve_codex_cmd():
     """codex CLI を起動する argv の先頭部分を返す。
@@ -154,6 +167,61 @@ def _log(rec):
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception:
         pass                                        # 計測は本番を止めない
+
+
+# ---------------------------------------------------------------------------
+# 全部屋記憶(ボス=ネイキッド・スネーク)
+#   load= 生成前に直近の記憶をプロンプトへ載せる(部屋をまたいで思い出す)。
+#   append= 実際に部屋へ投稿できた1往復だけを1行足す(CLIテスト等 to=None は記録しない)。
+#   どちらも fail-open= 記憶の読み書きで応答を絶対に止めない。
+# ---------------------------------------------------------------------------
+def _load_snake_memory():
+    """snake_shared.jsonl の直近を、プロンプトへ載せる読める塊にして返す。無ければ空。"""
+    try:
+        with open(SNAKE_SHARED_MEMORY, encoding="utf-8") as f:
+            recs = [json.loads(l) for l in f if l.strip()]
+    except Exception:
+        return ""
+    if not recs:
+        return ""
+    recs = recs[-SNAKE_MEM_RECALL_RECORDS:]
+    lines = []
+    for r in recs:
+        room = str(r.get("room", "")).strip()
+        q = str(r.get("q", "")).replace("\n", " ").strip()
+        a = str(r.get("a", "")).replace("\n", " ").strip()
+        ts = str(r.get("ts", "")).strip()
+        lines.append(f"- [{ts} / 部屋 {room}] 依頼: {q[:160]} / あなたの返答: {a[:200]}")
+    block = "\n".join(lines)
+    if len(block) > SNAKE_MEM_RECALL_CHARCAP:        # 上限超過は古い方から落とす
+        block = block[-SNAKE_MEM_RECALL_CHARCAP:]
+        block = block[block.find("\n- ") + 1:] if "\n- " in block else block
+    return block
+
+
+def _room_label(to):
+    """記憶に残す部屋名。channels.json で id/名前→dept に寄せる(読める名前で覚える)。fail-open=素の値。"""
+    try:
+        chans = json.load(open(CHANNELS_FILE, encoding="utf-8"))
+        s = str(to)
+        for c in chans:
+            if s in (str(c.get("id", "")), str(c.get("name", ""))):
+                return str(c.get("dept") or c.get("name") or s)
+    except Exception:
+        pass
+    return str(to)
+
+
+def _append_snake_memory(room, q, a):
+    """実際に部屋へ投稿できた1往復を1行足す。fail-open。"""
+    try:
+        os.makedirs(os.path.dirname(SNAKE_SHARED_MEMORY), exist_ok=True)
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+               "room": _room_label(room), "q": (q or "")[:500], "a": (a or "")[:800]}
+        with open(SNAKE_SHARED_MEMORY, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass                                        # 記憶は本番を止めない
 
 
 # ---------------------------------------------------------------------------
@@ -428,13 +496,16 @@ def answer(prompt, to=None, tag="cli", model=DEFAULT_MODEL, sandbox="workspace-w
     if not claimed:
         print(f"注意: 所有権の宣言に失敗(黒板不通)。それでも隔離worktree内なので続行する: {topic}")
     full_prompt = prompt
+    # 全部屋記憶を思い出す(部屋宛=to がある実運用の時だけ。CLIテストには載せない)。
+    mem_block = _load_snake_memory() if to else ""
     if briefing:
         try:
             sys.path.insert(0, HERE)
             import codex_briefing
             codex_briefing.install(wt)
-            full_prompt = codex_briefing.preamble_for(prompt)
-            print(f"規律を注入= {os.path.join(wt, codex_briefing.BRIEF_REL)}")
+            full_prompt = codex_briefing.preamble_for(prompt, memory=mem_block)
+            print(f"規律を注入= {os.path.join(wt, codex_briefing.BRIEF_REL)}"
+                  + (f" / 記憶 {len(mem_block)}字を同梱" if mem_block else ""))
         except Exception as e:
             # fail-open= 規律が組めなくても依頼そのものは通す(沈黙が最悪の事故)。
             print(f"注意: 規律の注入に失敗(素の依頼で続行): {type(e).__name__}")
@@ -468,8 +539,11 @@ def answer(prompt, to=None, tag="cli", model=DEFAULT_MODEL, sandbox="workspace-w
             posted = dc_send(token, channel_id, text)
             # ★送信スタンプは「生成成功」ではなく「実際にDiscordへ投稿できた」時だけ押す
             #   (dc_sendの戻り値は従来ここで捨てられていて空撃ちの原因だった=2026-09-05修理②)。
-            if posted and reply_to:
-                mark_sent(channel_id, reply_to)
+            if posted:
+                # 実際に部屋へ出せた1往復だけを全部屋記憶へ足す(部屋をまたいで思い出せるように)。
+                _append_snake_memory(to, prompt, text)
+                if reply_to:
+                    mark_sent(channel_id, reply_to)
         else:
             print("生成失敗のため投稿は中止(失敗文をDiscordへ流さない)")
             return 5
