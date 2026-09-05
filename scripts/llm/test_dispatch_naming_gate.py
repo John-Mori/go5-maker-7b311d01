@@ -154,6 +154,61 @@ def t2(tmp):
     return content
 
 
+# ------------------------------------------------- T2b 二重記録(2026-09-06 追加)
+RUNNER_GATED = RUNNER.replace(
+    '"呼称ゲートの実装",\'ai\',"hr-room")',
+    '"呼称ゲートの実装",\'ai\',"hr-room",already_gated=True)')
+
+
+def run_dispatch_gated(tmp, tag, dispatch_path=None):
+    """already_gated=True で本物の dispatch() を実行する(外へ出る手だけ偽物)。"""
+    DISPATCH = dispatch_path or globals()["DISPATCH"]
+    local = os.path.join(tmp, tag, "local")
+    os.makedirs(os.path.join(local, "llm"), exist_ok=True)
+    os.makedirs(os.path.join(local, "queue"), exist_ok=True)
+    qdb = os.path.join(local, "queue", "inbox.db")
+    fake = os.path.join(tmp, tag + "_fake_send.py")
+    open(fake, "w", encoding="utf-8").write(FAKE_SEND)
+    code = RUNNER_GATED.format(here=HERE, disp=DISPATCH, qdb=qdb, fake=fake, body=BODY)
+    env = dict(os.environ, GO5_LOCAL_DIR=local, FAKE_SEND_OUT=os.path.join(tmp, tag + "_s.txt"))
+    subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
+                   text=True, encoding="utf-8", errors="replace")
+    rows = []
+    if os.path.exists(qdb):
+        con = sqlite3.connect(qdb)
+        rows = [r[0] for r in con.execute("select body from queue order by id").fetchall()]
+        con.close()
+    audit = os.path.join(local, "llm", "naming_audit.jsonl")
+    arows = ([json.loads(l) for l in open(audit, encoding="utf-8")]
+             if os.path.exists(audit) else [])
+    return rows, arows
+
+
+def t2b(tmp, arows_ungated):
+    """★同じ違反が台帳へ2行入っていた所のガード(実測 2026-09-06・イージス研究室)。
+
+    壊れていた実物= main() が投函前に1回、dispatch() が部門ごとにもう1回
+    naming_gate_pass を通す。ゲートCの大半は**警告のみ**で本文を書き換えないので、
+    2回目が同じ違反をもう一度見つけて naming_audit.jsonl へ**同じ行**を書いていた。
+    窓14日の実測= source="dispatch" の判定行433のうち207が重複(source!=dispatch は0)。
+    """
+    print("T2b 二重記録= main() が通した便を dispatch() がもう一度台帳へ書かない")
+    rows, arows = run_dispatch_gated(tmp, "gated")
+    ok(bool(rows), "already_gated=True でも便は届く(投函そのものは止めない)")
+    ok(len(arows) == 0, "already_gated=True では台帳へ1行も書かない",
+       "実測%d行" % len(arows))
+    if rows:
+        rec = json.loads(rows[-1])
+        ok("デブライネさん、" in rec.get("content", ""),
+           "★本文も当てない= 直すのは1回目の関門の仕事(ここは素通し)")
+    n1 = len([r for r in arows_ungated or [] if r.get("event") in ("naming", "naming_fix")])
+    ok(n1 > 0 and len(arows) == 0,
+       "同じ便= 関門1回なら%d行 / 2回目は0行(旧実装ならここが2倍)" % n1)
+    src = open(DISPATCH, encoding="utf-8").read()
+    ok("already_gated=True)" in src,
+       "main() の投函ループが already_gated=True を渡している(配線の実物)")
+
+
 # ---------------------------------------------------------------- T3 誤爆ガード
 def t3(tmp):
     print("T3 誤爆ガード= ククールの実便から採った『直してはいけない』文")
@@ -196,7 +251,7 @@ def must_fail(tmp):
     print("MUST-FAIL 実装を『動く別の実装』へ変異させて、この検査が落ちるか")
     src = open(DISPATCH, encoding="utf-8").read()
     # 変異①= 合流点のゲート呼び出しを外す(=変異前の実装そのもの・動きはする)
-    anchor = "    body, _nfix, _nwarn = naming_gate_pass(sender, from_dept, body)"
+    anchor = "        body, _nfix, _nwarn = naming_gate_pass(sender, from_dept, body)"
     ogsrc = open(os.path.join(HERE, "output_gates.py"), encoding="utf-8").read()
     a2 = "                                              vocative_only=vocative_only) or {}"
     if anchor not in src or a2 not in ogsrc:
@@ -206,7 +261,7 @@ def must_fail(tmp):
     mut2 = os.path.join(HERE, "_mutant_output_gates_tmp.py")
     try:
         open(mut, "w", encoding="utf-8").write(
-            src.replace(anchor, "    body, _nfix, _nwarn = body, 0, 0"))
+            src.replace(anchor, "        body, _nfix, _nwarn = body, 0, 0"))
         _, rows, _, _ = run_dispatch(tmp, mut, "mut1")
         content = json.loads(rows[-1]).get("content", "") if rows else ""
         ok("デブライネさん、" in content,
@@ -220,6 +275,22 @@ def must_fail(tmp):
                  if og2.apply_naming_gate_only("hr-room", "ククール", s, source="test")[0] != s]
         ok(bool(broke), "変異②(地の文まで直す)= T3の誤爆ガードが落ちる",
            "%d/%d件が書き換わる" % (len(broke), len(FP_SAMPLES)))
+        # 変異③= already_gated を無視して**必ず**関門を通す(=2026-09-06以前の実装)。
+        a3 = "    if not already_gated:"
+        if a3 not in src:
+            ok(False, "変異③の変異点が見つからない(検査が古い)")
+        else:
+            mut3 = os.path.join(HERE, "_mutant_dispatch_dup_tmp.py")
+            try:
+                open(mut3, "w", encoding="utf-8").write(src.replace(a3, "    if True:", 1))
+                _r, arows3 = run_dispatch_gated(tmp, "mut3", mut3)
+                ok(len(arows3) > 0, "変異③(already_gated を無視)= T2bの二重記録ガードが落ちる",
+                   "台帳へ%d行書かれる" % len(arows3))
+            finally:
+                try:
+                    os.remove(mut3)
+                except OSError:
+                    pass
     finally:
         for p in (mut, mut2):
             try:
@@ -233,6 +304,9 @@ if __name__ == "__main__":
     try:
         t1()
         t2(tmp)
+        # run_dispatch() は (p, rows, arows, posted) を返す= 台帳は**3番目**
+        _, _, _arows_ungated, _ = run_dispatch(tmp, DISPATCH, "ungated")
+        t2b(tmp, _arows_ungated)
         t3(tmp)
         t4()
         must_fail(tmp)

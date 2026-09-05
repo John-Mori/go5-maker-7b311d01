@@ -60,11 +60,39 @@ MIN_COUNT = 5
 MIN_DAYS = 3
 MIN_PERSONAS = 2
 
+# ★計器の自己汚染を切る(2026-09-06 実測・イージス研究室)。
+#   何が起きていたか= 持続ドリフトの警報は本文へ「**ルカ・モドリッチ** を「ルカ・モドリッチ」と
+#   呼んでいる」と、**違反の形をそのまま引用して**書く。その便は dispatch で人事部門へ出る=
+#   投函経路の呼称ゲートC(output_gates.apply_naming_gate_only)を通り、
+#   引用のつもりの形が**違反として naming_audit.jsonl へ書き戻される**。
+#   翌朝その台帳をこの見張りが読む= **計器が自分の警報で自分の目盛りを押し上げる**。
+#   実測(窓 2026-08-24〜09-06): 自分の本文から生まれた判定行 30。内訳=
+#     target=ルカ・モドリッチ 10 / シャビ・アロンソ 10 / 一ノ瀬怜(found=一ノ瀬) 10。
+#     ★「一ノ瀬」は人事部門へ回している見出しそのもの= **報告した分だけ翌日の件数が増える**。
+#   ★_all_mention() は後段で**組ごと**黙らせるだけで count/days/personas は汚れたまま=
+#     人事部門へ渡す数字が実際より大きく出る。外すべき層は「行」だ。
+#   ★この見出しは envelope_naming_watch.build_drift_body() が**この定数から**組み立てる=
+#     文言を変えても除外が外れない(2箇所に同じ文字列を置かない)。
+SELF_REPORT_HEAD = "【イージス研究室(無人の見張り) → 人事部門】呼称の"
 
-def load_rows(path=None):
+
+def is_self_report(r):
+    """★この判定行は**この見張り自身の警報本文**から生まれたか(理由は SELF_REPORT_HEAD)。
+
+    材料は excerpt(投函本文の頭200字)だけ= 台帳には他の手がかりが無い
+    (source="dispatch" は他部門の便と共通・msg_id は投函時点で空)。
+    ★excerpt が無い行は「違う」へ倒す= 判定できない時は**数える側**へ倒す(fail-open)。
+      黙って落とす方向へ倒すと、見張りが静かに0件=健康へ倒れる。
+    """
+    return str(r.get("excerpt") or "").lstrip().startswith(SELF_REPORT_HEAD)
+
+
+def load_rows(path=None, keep_self=False):
     """台帳から**判定行だけ**読む。★壊れた行で落ちない(1行の事故で監視を止めない)。
 
     event="naming_fix" は機械が直した行= ドリフトではなく**直った跡**なので数えない。
+    ★この見張り自身の警報本文から生まれた行も数えない(理由は SELF_REPORT_HEAD)。
+      数えたい時(=汚染そのものを測る時)だけ keep_self=True。
     """
     out = []
     try:
@@ -78,9 +106,26 @@ def load_rows(path=None):
                 except Exception:
                     continue
                 if r.get("event") == "naming" and r.get("found") and r.get("target"):
+                    if not keep_self and is_self_report(r):
+                        continue
                     out.append(r)
     except OSError:
         return []
+    return out
+
+
+def self_reports(path=None, end=None, window=WINDOW_DAYS, since=None):
+    """★外した分(=自己汚染の行)を組ごとに返す。**0件に見せない**ための窓口。
+
+    捨てた数を見えないところへ捨てると、次に読む者が「元から少なかった」と読む。
+    main() はここを1行で必ず出す(「鳴らせない」「鳴らさない」と同じ扱い)。
+    """
+    rows = [r for r in load_rows(path, keep_self=True) if is_self_report(r)]
+    out = []
+    for (target, found), a in _aggregate(rows, end, window, since=since).items():
+        out.append({"target": target, "found": found, "count": a["count"],
+                    "days": len(a["days"])})
+    out.sort(key=lambda d: (-d["count"], d["target"]))
     return out
 
 
@@ -335,6 +380,10 @@ def main(argv=None):
             return 0
         print("台帳の判定行 %d / %s以降 %d日ぶん(★持続判定はしない=件数だけ)"
               % (len(rows), ns.since, n))
+        sr = self_reports(window=ns.days, since=ns.since)
+        if sr:
+            print("(外した %d件= 見張り自身の警報本文の書き戻し・自己汚染)"
+                  % sum(s["count"] for s in sr))
         if not cs:
             print("この窓には1件も無い。★ただし**日数が %d 日しか無い**= "
                   "『直った』の証拠にはならない(是正前の窓と比べるなら件/日で)" % n)
@@ -371,6 +420,12 @@ def main(argv=None):
         print("(鳴らせない %d件= 台帳に実際の形が無く直す先が読めない: %s)"
               % (sum(u["count"] for u in un),
                  "、".join("%s>%s" % (u["target"], u["found"]) for u in un)))
+    sr = self_reports(window=ns.days)
+    if sr:
+        # ★**外した分**を見えるところに残す。除外は静かにやると「元から少なかった」に見える。
+        print("(外した %d件= この見張り自身の警報本文が台帳へ書き戻された分・自己汚染: %s)"
+              % (sum(s["count"] for s in sr),
+                 "、".join("%s>%s×%d" % (s["target"], s["found"], s["count"]) for s in sr)))
     if mt:
         # ★鳴らさない分も**見えるところに**残す(「鳴らせない」と同じ理由)。
         #   ここに出た組は「相手へ呼びかけた形が1件も無い」=人事がpinしても直す先が無い。

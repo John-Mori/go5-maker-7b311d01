@@ -271,8 +271,10 @@ def drift_material(ndc):
 
 
 def build_drift_body(ndc, drifts, un):
-    lines = ["【イージス研究室(無人の見張り) → 人事部門】呼称の**持続ドリフト**が %d件 居座っている"
-             % len(drifts), ""]
+    # ★見出しは `ndc.SELF_REPORT_HEAD` から組む。ここを直書きすると、文言を変えた日に
+    #   「この便を台帳から外す」判定(ndc.is_self_report)が黙って外れ、また自分の警報で
+    #   自分の目盛りを押し上げる(2026-09-06 実測の自己汚染30行)。同じ文字列を2箇所に置かない。
+    lines = [ndc.SELF_REPORT_HEAD + "**持続ドリフト**が %d件 居座っている" % len(drifts), ""]
     lines.append("`local/llm/naming_audit.jsonl` の直近%d日を読んだ。"
                  "★件数だけでは鳴らさない= 「%d件以上 / %d日以上にまたがる / %d人格以上が使う」の"
                  "3つが揃った形だけを持続ドリフトと呼ぶ(常に鳴る安全網は無視されるから)。"

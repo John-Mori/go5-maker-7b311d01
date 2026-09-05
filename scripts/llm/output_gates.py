@@ -69,6 +69,14 @@ try:
     import struct_drift_gate as _struct_drift  # ゲートJ(Claude既定のレポート骨格)
 except Exception:
     _struct_drift = None
+# ★同形異字(ホモグリフ)の正本= scripts/discord/homoglyph.py。表を2か所に持たない(ORG-11)。
+try:
+    _DISCORD_DIR = os.path.join(ROOT, "scripts", "discord")
+    if _DISCORD_DIR not in sys.path:
+        sys.path.insert(0, _DISCORD_DIR)
+    import homoglyph as _homoglyph
+except Exception:
+    _homoglyph = None                         # 読めなくてもゲートは動く(fail-open)
 
 # ルールは **mtime が変わったら読み直す**(常駐の _tone_rules と同じ思想)。
 #   人事部門が写像へ1行足した時に、ミラー側だけ古い規則で動くのを防ぐ。
@@ -130,6 +138,32 @@ def _fix_enabled():
     return os.environ.get("GO5_MIRROR_GATE_FIX") == "1"
 
 
+def canon_persona(persona):
+    """話し手の名前が同形異字で化けていたら正名へ寄せる。→ (使う名前, 化けていた元 or "")。
+
+    ★なぜ要るか(2026-09-06 実測・イージス研究室):
+      naming_audit.jsonl に `persona="ККール"`(キリル К U+041A ×2)の判定行が **9行**
+      在った(2026-09-04T09:55:36・dept=hr-room・source=dispatch)。呼称ルール.json の
+      `speaker_target_overrides` は話し手名の**文字列一致**で引くので、化けた名前では
+      ククールの例外が1つも当たらない= **別人として裁かれた**便が台帳に残る。
+      同じ便の1秒後(09:55:37)に `homoglyph_body_fix` が出ている= 既存の修復は
+      **本文だけ**を直し、しかも**このゲートより後**に走る。話し手名は誰も直していなかった。
+    ★寄せるのは `homoglyph.canonical_name` が**一意に決めた時だけ**。候補が2人以上なら
+      化けたまま通す(取り違えるくらいなら直さない)。
+    ★どこで転んでも元の名前を返す(fail-open)= 名前の正規化で便を止めない。
+    """
+    p = str(persona or "").strip()
+    if not p or _homoglyph is None:
+        return p, ""
+    try:
+        canon, _why = _homoglyph.canonical_name(p)
+        if canon and canon != p:
+            return canon, p
+    except Exception:
+        pass
+    return p, ""
+
+
 def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
                            vocative_only=True):
     """★投函経路(dispatch)用= **ゲートC(呼称)だけ**を当てる。返り値 (text, summary)。
@@ -152,6 +186,11 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
     s = str(text or "")
     if not s.strip() or not str(persona or "").strip():
         return text, summary
+    # ★話し手名の同形異字を**規則を引く前に**正名へ寄せる(理由= canon_persona の説明)。
+    #   化けていた事実は消さない= 台帳へ persona_raw / persona_homoglyph で残す。
+    persona, persona_raw = canon_persona(persona)
+    if persona_raw:
+        summary["persona_homoglyph"] = persona_raw
     # ★★2026-09-03(イージス研究室)**封筒エコーを投函経路でも見る。ただし記録だけ・切らない。**
     #   研究室HQから所有権を引き継いだ時の実測(このファイルの呼び出し元を全部数えた):
     #     経路① 常駐 dept_daemon.strip_meta       = **生きている**(E-2配線あり)
@@ -217,6 +256,16 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
                          #     消え、既存475行では _is_vocative が常に偽になる。
                          "voc": v.get("voc", 0),
                          "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
+        # ★化けた名前で来たことを**必ず1行残す**。判定が0件の便でも残す=
+        #   「寄せたから何も無かった」に見せない(直した側だけを数えると穴が消える)。
+        #   event が "naming"/"naming_fix" ではないので、ドリフト判定の件数には入らない。
+        if persona_raw:
+            rows.append({"ts": ts, "dept": dept, "event": "persona_homoglyph",
+                         "persona": persona, "persona_raw": persona_raw,
+                         "source": source, "msg_id": str(msg_id or ""),
+                         "excerpt": excerpt_before})
+            for r in rows:
+                r.setdefault("persona_raw", persona_raw)
         _append(NAMING_AUDIT, rows)
         summary["naming_fix"] = len(applied)
         summary["naming_warn"] = len(remaining)

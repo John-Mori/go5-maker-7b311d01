@@ -448,7 +448,7 @@ def naming_gate_pass(sender, from_dept, body):
 
 def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience="",
              from_dept="", from_dept_explicit=False, from_dept_rec=None, from_dept_src="arg",
-             quiet_ack_ok=False):
+             quiet_ack_ok=False, already_gated=False):
     """1部門へ指令を投函する。戻り値=(ok, msg_id)。
 
     ★C-023: work(=--workの一行)が実質値を持つ時だけ「実依頼」として相手部門チャンネルへ表投稿する。
@@ -466,14 +466,25 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
     aud = audience_fields(audience)
 
     # ★呼称ゲートC。**表投稿より前・enqueue より前**に置く= 2つの出口の手前(合流点)。
-    #   main() が既に通した便はここでは何も当たらない(直った本文には違反が無い)=
-    #   同報でも台帳が水増しされない。dispatch() を直に呼ぶ側(daily_reflection_trigger /
-    #   テスト)もここで必ず通る。
-    body, _nfix, _nwarn = naming_gate_pass(sender, from_dept, body)
-    if _nfix:
-        print(f"  [{dept}] ★呼称ゲートC= 本文を {_nfix}件 直した(送信者={sender})")
-    if _nwarn:
-        print(f"  [{dept}] 呼称ゲートC= 警告のみ {_nwarn}件(本文は変えていない・台帳に記録)")
+    #   dispatch() を直に呼ぶ側(daily_reflection_trigger / 常駐 / テスト)もここで必ず通る。
+    #
+    # ★★2026-09-06 実測で `already_gated` を足した(イージス研究室)。
+    #   ここには元々「main() が既に通した便はここでは何も当たらない(直った本文には違反が
+    #   無い)= 同報でも台帳が水増しされない」と書いてあった。**これは半分だけ正しかった。**
+    #   ゲートCが**直す**違反(アロンソ型・敬称抜け)は確かに1回目で消える。だが大半は
+    #   **警告のみ**で本文を書き換えない= 2回目の関門が同じ違反をもう一度見つけ、
+    #   naming_audit.jsonl へ**同じ行をもう1本**書く。
+    #   実測(窓 2026-08-24〜09-06): source="dispatch" の判定行 433 のうち **207 が重複**
+    #   (一意226・多重度2が203組・3が2組)。source!="dispatch" の重複は **0**=
+    #   この経路だけが2倍に膨らんでいた。呼称ドリフトの件数はこの台帳を数えているので、
+    #   人事部門が見ていた「何件出ている」が**実際の約2倍**だった。
+    #   → 本文を直す効果は1回目で出ている。2回目に要るのは**記録ではなく素通し**だ。
+    if not already_gated:
+        body, _nfix, _nwarn = naming_gate_pass(sender, from_dept, body)
+        if _nfix:
+            print(f"  [{dept}] ★呼称ゲートC= 本文を {_nfix}件 直した(送信者={sender})")
+        if _nwarn:
+            print(f"  [{dept}] 呼称ゲートC= 警告のみ {_nwarn}件(本文は変えていない・台帳に記録)")
 
     if dry_run:
         if is_work:
@@ -725,7 +736,7 @@ def main():
     for d in depts:
         good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience,
                            a.from_dept, rec_explicit, from_dept_rec, from_dept_src,
-                           a.quiet_ack_ok)
+                           a.quiet_ack_ok, already_gated=True)
         ok += 1 if good else 0
     print(f"投函 {ok}/{len(depts)} 部門")
     warn = addressee_warning(body, depts)
