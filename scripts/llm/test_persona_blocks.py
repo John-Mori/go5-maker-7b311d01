@@ -13,6 +13,7 @@
 ★解決関数は本物を使わずここで固定する(本番の名簿が育っても赤にならない)。
 """
 import os
+import re
 import sys
 import tempfile
 
@@ -216,6 +217,68 @@ def main():
     got, rec = spy(lambda: dd.split_persona_blocks(broken_multi, resolve, dept="gunji"))
     check("ホモグリフ: names 未指定の既存呼び元は従来どおり(落ちない・鳴らない)",
           rec == [] and got == [(None, broken_multi)])
+
+    # ---- 5.5) ★名乗りが Markdown の装飾で囲まれている(2026-09-05・イージス研究室) ----
+    # 実物= 経営企画室 msg 1545642777038037142 の1行目が **`` `[ジェンティルドンナ]` ``**
+    #   (バッククォート囲み)で来た。旧 `_PERSONA_TAG_RE` は `^[\[［]?` から始まるので
+    #   先頭の `` ` `` でマッチが外れ、①名乗りが本文の頭に残り ②宛名が既定のアメスへ落ちた。
+    #   同じ部屋の次便 msg 1545647969498562640(`` `[アメス]` ``)でも再発。
+    #   Chami原文= 「アメスで喋ってる。［ジェンティルドンナ］をDiscordで表示しない」
+    #   (msg 1545647286678454413)。
+    # ★真因は「名簿に居ない」ではない= ジェンティルドンナは DEPT_CONF["keiei-kikaku"]["personas"]
+    #   に最初から在った。外れていたのは**正規表現**だけだ。
+    DECO_ROOM = ("アメス", "ジェンティルドンナ")
+
+    def dresolve(name):
+        n = str(name or "").strip()
+        return n if n in DECO_ROOM else None
+
+    def dsplit(text):
+        return dd.split_persona_blocks(text, dresolve)
+
+    real = "`[ジェンティルドンナ]`\n\n先ほどご報告した読み取り口、あれで合っているわ。"
+    check("装飾: 実物(バッククォート囲み)の名義が解決され、本文の頭に残らない",
+          dsplit(real) == [("ジェンティルドンナ", "先ほどご報告した読み取り口、あれで合っているわ。")])
+    check("装飾: 実物(次便 `[アメス]`)も同じ形で吸収される",
+          dsplit("`[アメス]`\n\nそうよ、アンタの見た通り。")
+          == [("アメス", "そうよ、アンタの見た通り。")])
+    for deco in ("`", "``", "*", "**", "_", "__"):
+        check(f"装飾: {deco}[名前]{deco} を吸収する",
+              dsplit(f"{deco}[ジェンティルドンナ]{deco} 本文だ。")
+              == [("ジェンティルドンナ", "本文だ。")])
+    check("装飾: 2ブロック目の名乗りも装飾ごと吸収する",
+          dsplit("[アメス] あ\n**[ジェンティルドンナ]** い")
+          == [("アメス", "あ"), ("ジェンティルドンナ", "い")])
+    # ★非対称な囲みは剥がない= 開きと閉じが同じ時だけ((?P=deco))。剥ぎすぎの側も赤くする。
+    check("装飾: 非対称な囲み(`[名前]**)は名乗りにしない",
+          dsplit("`[ジェンティルドンナ]** 本文だ。") == [(None, "`[ジェンティルドンナ]** 本文だ。")])
+    # ★既存の関門は一字も緩めていない= 装飾が在っても resolve が引けなければ本文のまま。
+    check("装飾: 名簿に居ない名前は装飾が在っても本文として残す",
+          dsplit("`[検証]` 本文だ。") == [(None, "`[検証]` 本文だ。")])
+    # ★装飾を吸収したことを**専用 outcome** で数える(丁)。乙・甲へ混ぜない= 数え分けられる形。
+    got, rec = spy(lambda: dd.split_persona_blocks(real, dresolve, dept="keiei-kikaku"))
+    outcomes = [o for o, _ in rec]
+    check("装飾: 吸収したことを tag_decorated_fixed で残す",
+          "tag_decorated_fixed" in outcomes)
+    check("装飾: 甲(tag_unbracketed_fixed)には混ぜない",
+          "tag_unbracketed_fixed" not in outcomes)
+    _g2, rec2 = spy(lambda: dd.split_persona_blocks(
+        "[ジェンティルドンナ] 本文だ。", dresolve, dept="keiei-kikaku"))
+    check("装飾: 素の[名前]では鳴らない(誤って毎便カウントしない)",
+          not any(o == "tag_decorated_fixed" for o, _ in rec2))
+    # ★★must-fail= 直す前の正規表現を**動く別実装**として置き、それでは実物が落ちることを見る。
+    #   これが緑のままなら「検査が症状を再現できていない」= 空PASSだ(C-053)。
+    OLD_TAG_RE = re.compile(
+        r"^(?P<open>[\[［]?)(?P<name>[^\[\]［］\n]{1,24})[\]］][ 　]*(?P<rest>.*)$")
+    check("装飾(must-fail): 旧正規表現では実物の名乗りが1文字も引けない",
+          OLD_TAG_RE.match(real.split("\n")[0]) is None)
+    check("装飾(must-fail): 旧正規表現でも素の[名前]は引ける(検体の作りが正しい)",
+          OLD_TAG_RE.match("[ジェンティルドンナ] 本文だ。") is not None)
+    # ★_tag_deco は _tag_match と**同じ正規表現**を引く(判定を2つ持たない=ORG-11)。
+    check("装飾: _tag_deco が囲みの実体を返す", dd._tag_deco("`[アメス]` あ") == "`")
+    check("装飾: _tag_deco は素の名乗りで空を返す", dd._tag_deco("[アメス] あ") == "")
+    check("装飾: _tag_match の戻り値は3要素のまま(手組みの呼び元を壊さない)",
+          len(dd._tag_match("`[アメス]` あ")) == 3)
 
     # ---- 6) ★実コーパスの検体を全部拾えるか(無ければ skip= 黙って緑にしない) ----
     import io  # noqa: E402

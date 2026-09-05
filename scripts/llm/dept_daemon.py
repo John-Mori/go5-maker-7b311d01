@@ -5880,28 +5880,19 @@ def _norm_for_match(s):
     return re.sub(r"\s+", " ", str(s or "")).strip()
 
 
-def _msg_text(m):
-    """1通のメッセージから**人が読む文字**を全部集める(content + embedの中身)。
+# ★2026-09-05 恒久(イージス研究室)= 研究室HQの止血で2箇所へ**別々に**置かれた同じ関数を
+#   `scripts/_common/msg_text.py` の1本へ寄せた(便6-1)。ここは呼ぶだけの薄い口だ。
+#   もう片方= `scripts/_daemons/replied_recheck.py::msg_text` も同じ1本を呼ぶ。
+#   ★読めない時は content だけの縮退へ落ちる(デーモンが起動しないのが最悪= fail-safe)。
+#     ただし**黙って落ちない**= 起動時に1行出す。縮退したまま気付かないのが二番目に悪い。
+try:
+    from msg_text import msg_text as _msg_text          # scripts/_common(L1687でpathに入る)
+except Exception as _e:                                  # noqa: BLE001
+    print(f"警告: scripts/_common/msg_text.py を読めない({_e})= "
+          f"着地判定が content だけの縮退で動く(embedの本文を見落とす)", flush=True)
 
-    ★2026-09-05 研究室HQの止血(仮当て)。恒久=プラットフォームSE/イージス研究室。
-      穴= 着地確認が `content` しか見ていなかった。11:00:36 の commit `1b46147`
-      (`dept_daemon.py:9442-9443` で改修α室だけ `persona_send --color auto`)以降、
-      **改修α室の投稿は本文が `embeds[].title` へ移り `content` は0字**になり、
-      着いている返信を「不着」と読むようになった(実測= msg 1545618308370399244 は
-      content 0字・embeds[0].title に判定キーが一字一句在る)。C-056の形。
-      ★色の配線(9442-9443)は落とさない= 色はChami発注(msg 1541177562007609466)。
-        **読む側**を直す方が、今後embedで出す部屋が増えても効く。
-      ★同じ関数を `scripts/_daemons/replied_recheck.py` の `msg_text()` にも置いた
-        (プロセスが別で共有モジュールが無いため)。**恒久では1本に寄せてくれ。**
-    """
-    parts = [str(m.get("content") or "")]
-    for e in (m.get("embeds") or []):
-        parts.append(str(e.get("title") or ""))
-        parts.append(str(e.get("description") or ""))
-        for f in (e.get("fields") or []):
-            parts.append(str(f.get("name") or ""))
-            parts.append(str(f.get("value") or ""))
-    return " ".join(p for p in parts if p)
+    def _msg_text(m):
+        return str((m or {}).get("content") or "")
 
 
 def _split_parts_like_persona_send(text):
@@ -6255,8 +6246,24 @@ def member_call(conf, content, ctx_dir=None):
 #   起動文で指示しているが、指示だけに頼るのは心がけ(共通規律§3)。受け側で吸収する。
 #   ★追加のみ= 開き括弧を任意にしただけで、**resolve が引けた時だけタグ扱い**という既存の関門は
 #     一字も緩めていない。`検証]` `1]` のように解決できない形は従来どおり本文のまま(沈黙させない)。
+# ★2026-09-05 **Markdownの装飾で囲まれた名乗り**も受ける(イージス研究室・アメスの回送
+#   DISPATCH-aegis-gl-1788581567519 / Chami原文= 「アメスで喋ってる。［ジェンティルドンナ］を
+#   Discordで表示しない」msg 1545647286678454413)。
+#   実測した漏れ= 経営企画室の返信 msg 1545642777038037142 の1行目が **`` `[ジェンティルドンナ]` ``**
+#   (バッククォート囲み)で来たため、①名乗りと認識されず本文の頭に `` `[ジェンティルドンナ]` `` が残り
+#   ②宛名が既定のアメスへ落ちた。同じ部屋の次便 msg 1545647969498562640 も `` `[アメス]` `` で再発。
+#   ★真因は「名簿に居ない」ではない= ジェンティルドンナは DEPT_CONF["keiei-kikaku"]["personas"] に
+#     在る(この行の下、経営企画部門の節)。**囲みで正規表現が外れていただけ**だ。
+#   全角吸収(2026-08-05)・開き括弧欠落(2026-08-31)と**同じクラスの失敗**= 「半角の角括弧で」は
+#   起動文に書いてあるが、指示だけに頼るのは心がけ(共通規律§3)。受け側で吸収する。
+#   ★対称な囲みだけ剥ぐ(`(?P=deco)` で開きと閉じが同じ時だけ)= `**強調** の話` のような本文は
+#     閉じが合わずマッチしないので1文字も触らない。
+#   ★追加のみ= 囲みを任意にしただけで、**resolve が引けた時だけタグ扱い**という既存の関門は
+#     一字も緩めていない。囲みが在っても名前が引けなければ従来どおり本文のまま(沈黙させない)。
 _PERSONA_TAG_RE = re.compile(
-    r"^(?P<open>[\[［]?)(?P<name>[^\[\]［］\n]{1,24})[\]］][ 　]*(?P<rest>.*)$")
+    r"^(?P<deco>`{1,2}|\*{1,2}|_{1,2})?"
+    r"(?P<open>[\[［]?)(?P<name>[^\[\]［］\n]{1,24})[\]］]"
+    r"(?(deco)(?P=deco))[ 　]*(?P<rest>.*)$")
 
 
 def _tag_match(line):
@@ -6264,11 +6271,24 @@ def _tag_match(line):
 
     ★「開き括弧が有ったか」を返すのは**計測のため**= 抜けた形を吸収して直した回数が数えられないと、
       漏れが減ったのか便が来ていないだけなのかを区別できない(C-041)。
+    ★戻り値は3要素のまま変えない= この関数は9箇所から呼ばれ、うち1箇所(ホモグリフ救済)は
+      `(_g, _mm[1], _mm[2])` と手でタプルを組み直している。要素を増やすとそこが黙って壊れる。
+      囲みの有無が要る所は `_tag_deco()`(同じ正規表現)を引け(判定を2つ持たない=ORG-11)。
     """
     mm = _PERSONA_TAG_RE.match(str(line or "").strip())
     if not mm:
         return None
     return mm.group("name"), mm.group("rest"), bool(mm.group("open"))
+
+
+def _tag_deco(line):
+    """その行の名乗りが**装飾で囲まれていたか**を返す(囲みの文字列 / 無ければ "")。
+
+    ★`_tag_match` と**同じ正規表現**を引く= 形の判定を2つ持つと、片方だけ直した日に
+      「吸収はできているのに計測だけ死ぬ」形になる(名乗りタグの甲乙で実際に踏んだ型)。
+    """
+    mm = _PERSONA_TAG_RE.match(str(line or "").strip())
+    return (mm.group("deco") or "") if mm else ""
 
 
 def _name_forms(name):
@@ -6338,6 +6358,10 @@ def _audit_tag(dept, who, outcome, line):
       - `tag_solo_leak`         = 単独人格部屋の1行目が**他人格の名前**のタグで、落とさず出した(乙)
       - `tag_homoglyph_leak`    = 名乗りがホモグリフで化けていた= **生成側が壊した回数**(丙)
       - `tag_homoglyph_rescued` = 化けた名乗りを推定した正名で救済して落とせた= **救えた回数**(丙)
+      - `tag_decorated_fixed`   = 名乗りが `` `[名前]` `` `**[名前]**` のように装飾で囲まれていたのを
+                                  吸収して名義を解決できた= **直した回数**(丁・2026-09-05 追加)
+    ★丁に leak の対を作っていないのは、囲みが在って resolve も引けない行は
+      **甲の `tag_unbracketed_leak` か絶対数の miss 側で既に数えている**からだ(数を二重に持たない)。
     ★丙は 2026-09-01 §5-2(HQ-0227・研究室HQの条件2)で足した対。leak↔rescued で読む=
       **rescued が増えても leak は減らない**(生成側が壊す回数は救済後も数え続ける・C-054)。
       leak が在って rescued が無い便= 救済に失敗した(多人格部屋 or 名簿外)= まだ漏れている。
@@ -6813,6 +6837,9 @@ def split_persona_blocks(text, resolve, dept="", names=()):
     if not m[2]:
         # ★開き括弧が抜けていたのを吸収した= この1件は「本文の頭に残らず・宛名も正しく出た」側。
         _audit_tag(dept, who, "tag_unbracketed_fixed", lines[head].strip())
+    if _tag_deco(lines[head]):
+        # ★装飾の囲み(`` `[名前]` `` / `**[名前]**`)を吸収した= 同じく「直した」側。
+        _audit_tag(dept, who, "tag_decorated_fixed", lines[head].strip())
     pre = [l for l in lines[:head] if l.strip()]
     blocks = [[who, [_peel_extra_tags(m[1], resolve)]]]
     for _j, ln in enumerate(lines[head + 1:], start=head + 1):
