@@ -107,6 +107,13 @@ _JST = _dt.timezone(_dt.timedelta(hours=9))
 #   28,000字超で spill)。ここは その台帳を読み「前回鳴らして以降に出た新しい warn/spill」を集約して1回出す。
 #   C-041=一度の観測を状態の代理にしない= 毎周期 台帳を読み直し、新イベントの ts で判定する(連投しない)。
 SPILL_LOG = os.path.join(ROOT, "local", "llm", "prompt_spill.jsonl")
+
+# ★★無投稿ack(手番ゼロの完遂通知を人格応答にせず畳む)の台帳を読む
+#   (2026-09-05 aegis-gl / DEF-persona-verxina-triage-register-20260905 #2)。
+#   書き手= scripts/llm/dept_daemon.py の quiet_ack_record()。ここが**唯一の読み手**だ。
+QUIET_ACK_LOG = os.path.join(ROOT, "local", "llm", "quiet_ack.jsonl")
+QUIET_SENDER = "完遂通知(自動)"   # 畳んでよい唯一の送り主(completion_notify.AUTO_SENDER)
+QUIET_RECENT_H = 24
 BLOAT_RECENT_H = 24      # これより古いイベントは対象にしない(初回導入時に過去分で誤爆しないため)
 BLOAT_WARN_MARGIN = 6000  # prompt_spill.WARN_MARGIN と同値(メッセージ表示用・依存は張らない)
 
@@ -172,6 +179,86 @@ def check_reflection(st, dry_run, now=None):
              "\n対処: local/daily_reflection.log と local/llm/daily_reflection/_trigger_state.json を確認、"
              "必要なら `python scripts/llm/daily_reflection_trigger.py --force`。", dry_run)
     print("[reflect] 変化したので通知した")
+
+
+def _quiet_ack_rows(now=None, hours=None):
+    """quiet_ack.jsonl の末尾から、直近 hours 内の「畳んだ便」を新しい順で返す。
+
+    読めなければ [](=台帳が無い/まだ一度も畳んでいない= 正常)。★測れない時は黙る。
+    """
+    now = now or _dt.datetime.now(_JST)
+    cutoff = now - _dt.timedelta(hours=hours or QUIET_RECENT_H)
+    rows = []
+    for ln in _tail(QUIET_ACK_LOG, 300):
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            e = json.loads(ln)
+        except Exception:
+            continue                       # 壊れた1行で判定を落とさない
+        try:
+            when = _dt.datetime.fromisoformat(e.get("ts", "")).replace(tzinfo=_JST)
+        except Exception:
+            continue
+        if when >= cutoff:
+            rows.append(e)
+    rows.sort(key=lambda e: e.get("ts", ""), reverse=True)
+    return rows
+
+
+def check_quiet_ack(st, dry_run, now=None):
+    """**沈黙の台帳に読み手を付ける**(2026-09-05 aegis-gl / QA=オタコン Release Gate 条件2)。
+
+    dept_daemon は「送り主=完遂通知(自動)・送り手が手番ゼロを宣言・受け手がオプトイン」の
+    3条件が揃った便だけを人格応答にせず畳む(fail-openの唯一の例外)。畳んだ便は
+    local/llm/quiet_ack.jsonl へ1行残る。**残っただけで誰も読まなければ C-054 の再演**だから、
+    15分毎に回っているここが読む。
+
+    鳴らすのは**はみ出した時だけ**= 送り主が `完遂通知(自動)` 以外 / 経路が dispatch 以外 /
+    宣言フラグが無いのに畳まれた行が1行でもあれば赤(C-035=名指しを全体へ広げない、の実地監視)。
+    正常な畳みは件数を標準出力へ出すだけで鳴らさない(狼少年を作らない)。
+    """
+    rows = _quiet_ack_rows(now=now)
+    bad = [e for e in rows
+           if str(e.get("author") or "") != QUIET_SENDER
+           or str(e.get("via") or "") != "dispatch"
+           or not e.get("quiet_ack_ok")]
+    sig = "|".join(sorted("%s/%s/%s" % (e.get("ts", "?"), e.get("dept", "?"),
+                                        e.get("author", "?")) for e in bad))
+    prev = st.get("quiet_sig", "")
+    if not dry_run:
+        st["quiet_sig"] = sig
+        st["quiet_at"] = _now()
+    depts = {}
+    for e in rows:
+        depts[e.get("dept", "?")] = depts.get(e.get("dept", "?"), 0) + 1
+    if not bad:
+        if prev:
+            notify("✅ 無投稿ackの逸脱は解消 — 直近%dhの畳みは全て `%s` の手番ゼロ便です。"
+                   % (QUIET_RECENT_H, QUIET_SENDER), dry_run)
+            print("[quiet] 解消を通知")
+        else:
+            print("[quiet] 正常(直近%dh 畳み%d件 %s)"
+                  % (QUIET_RECENT_H, len(rows),
+                     " ".join("%s=%d" % kv for kv in sorted(depts.items())) or "-"))
+        return
+    print("[quiet] 逸脱%d件 / 畳み%d件" % (len(bad), len(rows)))
+    if sig == prev:
+        print("[quiet] 前回と同じなので通知しない(連投回避)")
+        return
+    lines = ["・%s dept=%s 送り主=%s via=%s 宣言=%s msg=%s"
+             % (e.get("ts", "?"), e.get("dept", "?"), e.get("author", "?"),
+                e.get("via", "?"), e.get("quiet_ack_ok"), e.get("msg_id", "?"))
+             for e in bad[:6]]
+    notify("🚨 **無投稿ackが想定の外へ広がった** — `%s` の手番ゼロ便**以外**が"
+           "人格応答を出さずに畳まれています(直近%dh・逸脱%d件/畳み%d件)。\n"
+           % (QUIET_SENDER, QUIET_RECENT_H, len(bad), len(rows))
+           + "\n".join(lines)
+           + "\n※fail-open(沈黙が最悪の事故)の唯一の例外がここです。範囲が広がる=**便が黙って消える**。"
+             "\n対処: scripts/llm/dept_daemon.py の quiet_ack_target() と "
+             "local/llm/quiet_ack_optin.json を確認。記録: local/llm/quiet_ack.jsonl", dry_run)
+    print("[quiet] 逸脱を通知した")
 
 
 def _bloat_events(now=None):
@@ -452,9 +539,10 @@ def run_once(stale_min, dry_run):
         check_roster(st, dry_run)
         check_reflection(st, dry_run)   # ★朝5時の振り返りの空振り検知(2026-08-12 platform-se)
         check_prompt_bloat(st, dry_run) # ★prompt長が壁に接近した便の検知(2026-08-13 platform-se・依頼2)
+        check_quiet_ack(st, dry_run)    # ★無投稿ackが想定の外へ広がっていないか(2026-09-05 aegis-gl)
         _save_state(st)
     except Exception as e:
-        print("[roster/reflect/bloat] 点検に失敗(dead-man本体は続行) %s" % type(e).__name__)
+        print("[roster/reflect/bloat/quiet] 点検に失敗(dead-man本体は続行) %s" % type(e).__name__)
     return rc
 
 

@@ -385,8 +385,27 @@ def build_body(rid, dept, letter, done, landed, spot="", had_text=False):
     return "\n".join(lines)
 
 
-def send(to_dept, from_dept, body, dry_run):
-    """dispatch.py で1行返す。戻り値=(ok, 出力). ★--also-post は付けない(裏=キューだけ)。"""
+def quiet_ack_ok(spot, had_text):
+    """この便が**手番ゼロ**か(=受け手に頼むことが1つも無いか)。判定はここ1箇所だけ。
+
+    ★build_body の枝と1対1で対応させる= 置き場を載せた便 / 返信そのものが既に届いている便は
+      「問い直せ」を書かない=手番ゼロ。どちらでもない便は本文に
+      「請けた部門へ問い直せ」と書く=**手番が有る**ので宣言しない(=今までどおり表へ出る)。
+    """
+    return bool(spot or had_text)
+
+
+def send(to_dept, from_dept, body, dry_run, quiet_ok=False):
+    """dispatch.py で1行返す。戻り値=(ok, 出力). ★--also-post は付けない(裏=キューだけ)。
+
+    ★quiet_ok(2026-09-05 aegis-gl / DEF-persona-verxina-triage-register-20260905 #2)=
+      **この便は手番ゼロだ**と機械が宣言する印。付けるのは build_body が
+      「置き場のパスを載せた」か「返信そのものが既に届いている」枝を通った時だけ=
+      本文に **問い直せ が入らない便**に限る(=受け手に手番が無いことが構造で決まる)。
+      「問い直せ」の便には付けない= 受け手に手番があるから、今までどおり必ず表へ出る。
+      ★この印は**受け手が畳んでよいかの判断材料**でしかない。畳むかどうかは受け手側の
+        オプトイン(dept_daemon の QUIET_ACK_DEPTS)が決める= 片側だけでは沈黙しない。
+    """
     fd, path = tempfile.mkstemp(suffix=".md", prefix="completion_notify_", text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -394,6 +413,8 @@ def send(to_dept, from_dept, body, dry_run):
         cmd = [sys.executable, DISPATCH, "--dept", to_dept, "--from-dept", from_dept,
                "--from", AUTO_SENDER, "--audience", "ai", "--direct",
                "--body-file", path]
+        if quiet_ok:
+            cmd.append("--quiet-ack-ok")
         if dry_run:
             cmd.append("--dry-run")
         p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
@@ -509,7 +530,11 @@ def main():
                 text, src = recent_reply(d["dept"], rid), "recent"
             spot = find_spot(text)
             body = build_body(rid, d["dept"], letter, d, landed, spot, bool(text))
-            ok, out = send(to_dept, d["dept"], body, a.dry_run)
+            # ★手番ゼロの宣言は build_body と**同じ条件**で立てる(枝が1つしか無い形にする)。
+            #   置き場を載せた / 返信そのものが届いている= 受け手に頼むことが無い便。
+            #   どちらでもない便は「請けた部門へ問い直せ」と書いてある=手番が有るので付けない。
+            quiet = quiet_ack_ok(spot, bool(text))
+            ok, out = send(to_dept, d["dept"], body, a.dry_run, quiet)
             if ok:
                 sent += 1
                 print(f"  ★[通知] req={rid} {d['dept']} → {to_dept}"

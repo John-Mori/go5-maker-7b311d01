@@ -887,6 +887,87 @@ PROMISE_WORDS = (
 )
 MARKER_AUDIT = os.path.join(LOCAL, "_marker_audit.jsonl")
 
+# ============================================================================
+# ★★手番ゼロの復路便を人格応答にしない(2026-09-05 aegis-gl
+#   / QA起票 DEF-persona-verxina-triage-register-20260905 #2・APPROVED WITH CONDITIONS)
+#
+# なぜ要るか(実物): 2026-09-05T08:12:32 JST・learning-coach のヴィルシーナが
+#   完遂通知(queue id 5314)へ「Chamiの手番も、私が追加で動く作業も無い」と**表へ投稿した**。
+#   このデーモンは fail-open(「沈黙が最悪の事故」)で、投稿を止める経路が1つも無い=
+#   **返信＝投稿**だから、人格が本文へ「投稿はしない」と書いてもその一文ごと表へ出る。
+#   実測= 完遂通知(自動)の便71通のうち45通が人格応答・22通が集約で表に出ている。
+#
+# ★fail-open は一般には壊さない。畳むのは**両側が機械的に同意した便だけ**=
+#   ① 送り主が AUTO_SENDER(= "完遂通知(自動)")で `via=dispatch` の便であること
+#   ② 送り手の機械が `quiet_ack_ok=True` を載せていること
+#      (completion_notify が「置き場を載せた/返信は既に届いている」枝でだけ立てる印。
+#       「請けた部門へ問い直せ」の便には立たない= 手番が有るから今までどおり表へ出る)
+#   ③ 受け手の部屋が下の QUIET_ACK_DEPTS でオプトインしていること
+#   ★**本文テキストは一切見ない**(QA条件1)。生成側に自分の投稿を止めさせない=
+#     モデルが任意に自分を黙らせられる沈黙をつくらない。
+#   ★畳んだ便は必ず QUIET_ACK_LOG へ1行残す(QA条件2)。読み手は deadman_check.check_quiet_ack
+#     (15分毎・go5_deadman_check)= 送り主が AUTO_SENDER 以外の行を1行でも見つけたら鳴る
+#     (C-035=名指しを全体へ広げない、を機械が見張る)。記録の残る沈黙は喪失ではない。
+QUIET_ACK_SENDER = "完遂通知(自動)"     # completion_notify.AUTO_SENDER と同値(依存は張らない)
+QUIET_ACK_LOG = os.path.join(LOCAL, "llm", "quiet_ack.jsonl")
+QUIET_ACK_OPTIN = os.path.join(LOCAL, "llm", "quiet_ack_optin.json")
+# ★既定のオプトインは**発案した当室だけ**(実測で宛先首位=21通)。他室を勝手に黙らせない=
+#   足すのはその部屋自身の判断。コードを触らずに足せるよう QUIET_ACK_OPTIN(JSON配列)も読む。
+QUIET_ACK_DEPTS = ("aegis-gl",)
+
+
+def quiet_ack_depts():
+    """無投稿ackへオプトインしている部門名の集合。読めなければ既定だけ(fail-open)。"""
+    out = set(QUIET_ACK_DEPTS)
+    try:
+        with open(QUIET_ACK_OPTIN, encoding="utf-8") as f:
+            for d in json.load(f):
+                if isinstance(d, str) and d.strip():
+                    out.add(d.strip())
+    except Exception:
+        pass
+    return out
+
+
+def quiet_ack_target(dept, rec):
+    """この便を「人格応答を出さずに既読ackで畳む」対象と見なすか(機械述語のみ)。
+
+    ★見るのは送り主・経路・送り手が立てた構造フラグ・受け手のオプトインの4つだけ。
+      **本文は読まない**(rec["content"] も返信も参照しない)。
+    """
+    if not isinstance(rec, dict):
+        return False
+    if str(rec.get("author") or "") != QUIET_ACK_SENDER:
+        return False                      # ★送り主で閉じる(C-035=名指しを広げない)
+    if str(rec.get("via") or "") != "dispatch":
+        return False
+    if rec.get("quiet_ack_ok") is not True:
+        return False                      # 送り手の機械が手番ゼロを宣言した便だけ
+    return str(dept or "") in quiet_ack_depts()
+
+
+def quiet_ack_record(dept, rec, note=""):
+    """畳んだ便を台帳へ1行残す(QA条件2=読み手のいる面へ残す)。書けなくても本番は止めない。"""
+    try:
+        os.makedirs(os.path.dirname(QUIET_ACK_LOG), exist_ok=True)
+        with open(QUIET_ACK_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "dept": dept,
+                "author": str(rec.get("author") or ""),
+                "via": str(rec.get("via") or ""),
+                "audience": str(rec.get("audience") or ""),
+                "from_dept": str(rec.get("from_dept") or ""),
+                "msg_id": str(rec.get("msg_id") or ""),
+                "quiet_ack_ok": bool(rec.get("quiet_ack_ok")),
+                # ★中身は運ばない。後から便を特定できる長さだけ残す(監査用)。
+                "head": str(rec.get("content") or "")[:120],
+                "note": note,
+            }, ensure_ascii=False) + "\n")
+        return True
+    except OSError:
+        return False
+
 
 def find_promise(reply):
     """返信本文が「自分がやる」と約束しているように読めるならその語を返す(無ければ None)。"""
@@ -9637,7 +9718,13 @@ class Daemon:
         #   ★掴んだ便の後始末(ack / PROCESSED / 印 / 失敗時のnack)は drain_queue の既存経路が
         #     そのまま面倒を見る= **新しい仕掛けを1つも足していない**。
         if self._is_ai_letter(rec):
-            return self._take_same_kind(q, self._is_ai_letter)
+            # ★手番ゼロの完遂通知は**束ねない**(2026-09-05 aegis-gl)。束ねると畳む判断より先に
+            #   本文が土台の便へ混ざり、そのまま表へ出る=無投稿ackを裏口から素通りする。
+            #   束ねずに手元へ戻せば `_claim_carry` 経由で同じ巡回の次の周に普通に掴み直され、
+            #   drain_queue 冒頭のガードが畳む(取りこぼさない)。
+            return self._take_same_kind(
+                q, lambda r: (self._is_ai_letter(r)
+                              and not quiet_ack_target(self.dept, r)))
         return []
 
     def _take_same_kind(self, q, is_kind):
@@ -9919,6 +10006,17 @@ class Daemon:
                     mid or c.get("msg_id"), c.get("prio"), rec.get("author") or "?"))
                 if mid and mid in processed:
                     q.ack(c["id"], result="skip(処理済)")
+                    continue
+                # ★★手番ゼロの完遂通知は人格応答を出さずに畳む(2026-09-05 aegis-gl
+                #   / DEF-persona-verxina-triage-register-20260905 #2)。判定は送り主メタ＋
+                #   送り手が立てた構造フラグ＋受け手のオプトインだけ= **本文は読まない**。
+                #   畳んだら必ず台帳へ1行残す(読み手= deadman_check.check_quiet_ack)。
+                if quiet_ack_target(self.dept, rec):
+                    wrote = quiet_ack_record(self.dept, rec)
+                    q.ack(c["id"], result="既読ack(完遂通知・手番ゼロ=無投稿)")
+                    log(self.dept, "★手番ゼロの完遂通知を人格応答にせず畳んだ"
+                                   "(台帳=%s) msg=%s"
+                                   % ("quiet_ack.jsonl" if wrote else "書けず", mid))
                     continue
                 # ★★催促の便は掴んだ瞬間に台帳と突き合わせ直す(2026-08-24・_refresh_request_followup)。
                 #   投函から配達までの待ち時間に依頼が閉じることがある(実測2件)。

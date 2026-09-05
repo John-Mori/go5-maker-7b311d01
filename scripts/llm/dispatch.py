@@ -447,7 +447,8 @@ def naming_gate_pass(sender, from_dept, body):
 
 
 def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience="",
-             from_dept="", from_dept_explicit=False, from_dept_rec=None, from_dept_src="arg"):
+             from_dept="", from_dept_explicit=False, from_dept_rec=None, from_dept_src="arg",
+             quiet_ack_ok=False):
     """1部門へ指令を投函する。戻り値=(ok, msg_id)。
 
     ★C-023: work(=--workの一行)が実質値を持つ時だけ「実依頼」として相手部門チャンネルへ表投稿する。
@@ -532,6 +533,14 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
         rec["from_dept_src"] = from_dept_src   # arg=人手 / env=機械が載せた / default=既定hq
         if is_work:
             rec["work"] = work.strip()   # 何を頼んだかを便にも残す(後追い可能に)
+        # ★★手番ゼロの復路便であることを**送り手の機械が**宣言する
+        #   (2026-09-05 aegis-gl / DEF-persona-verxina-triage-register-20260905 #2)。
+        #   受け手(dept_daemon)はこの構造フラグ＋送り主名でしか無投稿ackを判断しない=
+        #   **人格が本文に何と書いても発火しない**(QA=オタコン Release Gate 条件1:
+        #   「生成側に自分の投稿を止めさせると、モデルが任意に自分を黙らせられる」)。
+        #   キーは付いた便にだけ載る(既存の便は1本も変わらない)。
+        if quiet_ack_ok:
+            rec["quiet_ack_ok"] = True
         return json.dumps(rec, ensure_ascii=False)
 
     try:
@@ -616,6 +625,11 @@ def main():
                     help="★C-023: 実依頼(相手が実作業をする=作業/エラー/バグ/調査/改修の引き渡し)の"
                          "一行サマリ。付けると相手部門チャンネルへ**表**投稿する(Chamiが①渡ったか"
                          "②何を頼んだかを追える)。付けなければ従来どおり裏(相槌/通達/配布)。")
+    ap.add_argument("--quiet-ack-ok", dest="quiet_ack_ok", action="store_true",
+                    help="★この便は**手番ゼロの復路(通知だけ)**だと送り手の機械が宣言する。"
+                         "受け手の部屋がオプトインしていれば、人格応答を出さず既読ackで畳む"
+                         "(local/llm/quiet_ack.jsonl へ必ず1行残る)。"
+                         "人手や人格の判断で付けない= 付けるのは自動通知の常駐だけ。")
     ap.add_argument("--audience", default="", choices=["", AUDIENCE_AI, AUDIENCE_CHAMI],
                     help="★C-050: この便が頼む本文を**誰が読むか**の宣言。"
                          "ai=AI同士の便(相手の返信は表を要点まで削ってよい) / "
@@ -709,7 +723,8 @@ def main():
     ok = 0
     for d in depts:
         good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience,
-                           a.from_dept, rec_explicit, from_dept_rec, from_dept_src)
+                           a.from_dept, rec_explicit, from_dept_rec, from_dept_src,
+                           a.quiet_ack_ok)
         ok += 1 if good else 0
     print(f"投函 {ok}/{len(depts)} 部門")
     warn = addressee_warning(body, depts)
