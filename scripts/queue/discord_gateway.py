@@ -55,6 +55,24 @@ def _touch_pulse():
 sys.path.insert(0, HERE)
 from leasequeue import LeaseQueue  # noqa: E402
 
+# --- @ボス(Codex)召喚= 他部屋から名指しで Codex へ回す配線(2026-09-05 platform-se) ---
+# codex_trigger.is_codex_mentioned で名指しを検知したら、その1発言だけ dept を 'codex' に
+# 付け替えて enqueue する(部屋の常設deptは触らない=乗っ取らない)。codex_responder が
+# dept=='codex' を掴んで codex_run 経由で Codex bot本人として返す。
+# ★codex_enabled.txt が無い間はこの経路を丸ごと素通し=現状と完全同一(回帰ゼロ)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+try:
+    from codex_trigger import is_codex_mentioned  # noqa: E402
+except Exception:
+    def is_codex_mentioned(_content):   # 依存が無くても gateway は動く
+        return False
+CODEX_ENABLE_FLAG = os.path.join(LOCAL, "codex_enabled.txt")
+
+
+def _codex_summon_on():
+    return os.path.exists(CODEX_ENABLE_FLAG)
+
+
 TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")
 CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
 QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
@@ -846,6 +864,11 @@ def run_gateway():
                 log(f"集中トリガー失敗(継続): {type(e).__name__}")
             return   # 集中コマンドは会話ではないのでenqueueしない
         rec = record_from_message(m, chan_map[cid])
+        # ★@ボス(Codex)召喚= 名指しされた発言だけ dept を 'codex' へ付け替える(部屋は乗っ取らない)。
+        #   codex_enabled.txt が無い間は素通し=回帰ゼロ。実応答は codex_responder→codex_run が返す。
+        if _codex_summon_on() and rec.get("dept") != "codex" and is_codex_mentioned(rec.get("content", "")):
+            log(f"@ボス召喚[{rec['channel']}] msg={rec['msg_id']} dept={rec['dept']}→codex")
+            rec["dept"] = "codex"
         # ★引用元が展開されなかった時だけ**1回だけ**取りに行く (2026-07-27)。
         #   実測方針: 通常のリプライは Gateway の MESSAGE_CREATE に referenced_message が同梱され、
         #   `m.reference.resolved` で本文まで取れる=**ここへは来ない**。来るのは

@@ -13,7 +13,9 @@ LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 BOT_ID_FILE = os.path.join(LOCAL, "discord_codex_bot_id.txt")   # 任意(あればメンションでも拾う)
 
 # 呼び名(仮)。正式な人格名・呼称は人事部門(hr-room)が決める= ここは検知トークンのみ。
-TOKENS = ("codex", "コーデックス", "コーデクス")
+# 「ボス」= Chami指定の召喚名(2026-09-05・旧「スネーク」から改称)。実運用の確実な召喚は
+# discord_codex_bot_id.txt を置いての実メンション <@id>。この文字トークンは素の名指し用の便宜。
+TOKENS = ("codex", "コーデックス", "コーデクス", "ボス")
 
 
 def _mention_ids():
