@@ -234,7 +234,16 @@ WATCH_FILES = [DAEMON,
                os.path.join(ROOT, "scripts", "discord", "invisible.py"),
                os.path.join(ROOT, "scripts", "_common", "session_presence.py"),
                os.path.join(ROOT, "scripts", "discord", "persona_send.py"),
-               os.path.join(ROOT, "scripts", "_common", "dept_names.py")]
+               os.path.join(ROOT, "scripts", "_common", "dept_names.py"),
+               # ★2026-09-05 追加(C-042・イージス研究室)= scripts/_common/msg_text.py。
+               #   「投稿の1通から本文を取り出す」判定の正本(content + embeds の
+               #   title/description/fields を連結する)。研究室HQの止血 30af435 では
+               #   dept_daemon と replied_recheck に同じ実装が写しで居て、embed の形が
+               #   変わった日に片方だけ直る形だった=1箇所へ寄せた(commit 715fac0/04b7a34)。
+               #   **寄せた以上、ここに載っていないと「正本を直したのに常駐は古い版で読み続ける」**
+               #   = 二重実装を潰した意味がそのまま消える。この検査(test_daemon_keeper.py の
+               #   import 突合)が実際に赤で拾った=載せ忘れの再発を機械が数えている。
+               os.path.join(ROOT, "scripts", "_common", "msg_text.py")]
 RELOAD_DEBOUNCE_SEC = 90   # 変更が「落ち着いた」とみなすまで。編集の途中で載せ替えない
 # ★2026-07-29 追加。実測した事故=
 #   HQと実装エージェントが**何時間も連続で改修**した結果、90秒の間引きを何度も抜けて
