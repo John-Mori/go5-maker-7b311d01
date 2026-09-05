@@ -52,6 +52,7 @@ TOKEN_FILE = os.path.join(LOCAL, "discord_codex_token.txt")
 ENABLE_FLAG = os.path.join(LOCAL, "codex_enabled.txt")
 LOG = os.path.join(LOCAL, "llm", "codex_responder_log.jsonl")
 CODEX_CLI = os.path.join(ROOT, "scripts", "codex", "codex_run.py")
+REACT = os.path.join(ROOT, "scripts", "discord", "react.py")       # 進捗印(既読/着手/即答)
 
 # 表示名は人事が確定=「ネイキッド・スネーク」(2026-09-05・デブライネ経由)。実応答は codex_run.py が
 # Codex bot本人として投稿するので、この名前はエスカレ通知の文面にしか使わない(変数名は互換のため据置)。
@@ -118,6 +119,28 @@ def notify_room(channel, text):
         print(f"  通知失敗(続行): {type(e).__name__}")
 
 
+def mark(channel, msg_id, kind):
+    """進捗印(既読/着手/即答)を Claude同様に押す(2026-09-05 Chami依頼:
+    「Claud同様に既読と着手のスタンプに意味を把握して適応できるように」)。
+
+    なぜ responder で押すか= Codexは対話セッションではなく **サブプロセス経路**なので、
+    Claude側の progress_mark.py(UserPromptSubmit=既読 / PostToolUse=着手 / Stop=即答 の hook)が
+    そもそも鳴らない。そこで handle() の節目に手で押して同じ4状態信号を Chami の画面へ出す。
+      既読 … 掴んで読んだ直後(返答/実装はこれから)
+      着手 … codex_run.py で重い実装を始める直前(本格的な作業の開始)
+      即答 … 司令塔へ回すなど その場の返信で完結した時(「読んだだけ」との曖昧さ解消)
+    処理中の当の1通(msg_id/channel は rec が持つ)を狙って押すので react_mark の dept走査は要らない。
+    べき等(react.py の PUT /@me は同じ印の二度押しが no-op)・fail-open(印は本筋を絶対に止めない)。"""
+    if not (channel and msg_id):
+        return
+    try:
+        subprocess.run([sys.executable, REACT, "--channel", str(channel),
+                        "--msg", str(msg_id), "--emoji", kind],
+                       capture_output=True, timeout=30)
+    except Exception:
+        pass
+
+
 def escalate(channel, raw_line, note=""):
     """作業をこなせなかった/失敗した発言を司令塔の主受付箱へ回す。"""
     append_line(FOR_CLAUDE, raw_line)
@@ -157,18 +180,23 @@ def codex_answer(channel, content):
 def handle(rec, raw_line):
     content = rec.get("content", "")
     channel = rec.get("channel", "")
+    msg_id = rec.get("msg_id", "")
+    mark(channel, msg_id, "既読")           # 掴んで読んだ=まず既読(Claudeの progress_mark read 相当)
     if rec.get("dept") in SENSITIVE_DEPTS:
+        mark(channel, msg_id, "即答")       # 司令塔へ回して即返信=その場で完結
         escalate(channel, raw_line)
         notify_room(channel, "受け取りました。ここは司令塔が直接読む部屋なので、そちらへ回しました。")
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "sensitive_deferred", "channel": channel})
         return
     if not content.strip():
+        mark(channel, msg_id, "即答")       # 扱えない旨を即返信=その場で完結
         escalate(channel, raw_line)
         notify_room(channel, "テキスト以外(添付/音声)は扱えないので、司令塔の受付箱へ入れました。")
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated_no_text", "channel": channel})
         return
 
     # ★Codexは仕事をする側= 作業語で弾かない。部屋の発言はそのまま Codex へ渡す。
+    mark(channel, msg_id, "着手")           # 重い実装を始める直前=着手(本格的な作業の開始)
     ok, worktree = codex_answer(channel, content)
     if ok:
         append_line(PROCESSED, raw_line)
