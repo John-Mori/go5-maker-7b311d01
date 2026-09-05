@@ -11,12 +11,12 @@
   45通が人格応答・22通が集約で表に出ていた。
 
 このテストが固定すること(QAのRelease Gate 3条件に対応):
-  条件1= 判定は**機械述語だけ**。送り主(author)・経路(via)・送り手が立てた構造フラグ
-        (quiet_ack_ok)・受け手のオプトインの4つ。**本文は1文字も見ない**
+  条件1= 判定は**機械述語だけ**。送り主(author)・経路(via)・audience・送り手が立てた
+        構造フラグ(quiet_ack_ok)の4つ。**本文は1文字も見ない**
         = 人格が本文へ何を書いても自分を黙らせられない。
   条件2= 畳んだ便は必ず台帳(quiet_ack.jsonl)へ1行残る。読み手= deadman_check.check_quiet_ack。
   条件3= must-fail 2本＋変異。`python tests/test_quiet_ack_completion.py --mutations` で
-        自動的に「送り主チェックを外す」「宣言フラグのチェックを外す」「オプトインを外す」を
+        自動的に「送り主チェックを外す」「宣言フラグのチェックを外す」「audienceを外す」を
         本物のソースへ当て、**赤くなることを見てから**戻す(常にPASSする検査を作らない)。
 
 走らせ方:
@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
 
 DAEMON_SRC = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 AUTO = "完遂通知(自動)"
-DEPT = "aegis-gl"          # 既定でオプトインしている唯一の部屋(実測で宛先首位=21通)
+DEPT = "aegis-gl"
 
 fails = []
 
@@ -61,6 +61,10 @@ import completion_notify as CN  # noqa: E402
 eq(CN.AUTO_SENDER, AUTO, "送り主の名前が変わっていない(受け手の述語と同値)")
 eq(CN.quiet_ack_ok("local/consult_intel/x.md", False), True, "置き場を載せた便=手番ゼロ")
 eq(CN.quiet_ack_ok("", True), True, "返信そのものが届いている便=手番ゼロ")
+eq(CN.quiet_ack_ok("", False, "1234", "replied"), True,
+   "replied+着地msg_idが実証済みの便=古い本文ミラーが無くても再質問しない")
+eq(CN.quiet_ack_ok("", False, "1234", "completed"), False,
+   "completedの自己申告にmsg番号が付いただけでは畳まない")
 eq(CN.quiet_ack_ok("", False), False, "★問い直せの便=手番が有る(宣言しない)")
 
 # ★build_body の枝と1対1であることを**本文で**突き合わせる(片方だけ直す事故を止める)。
@@ -68,7 +72,7 @@ _letter = {"work": "検査用の依頼"}
 _done = {"state": "replied", "ts": "2026-09-05T08:00:00"}
 for _spot, _had in (("local/consult_intel/x.md", True), ("", True), ("", False)):
     _body = CN.build_body("REQ-1", "hr-context", _letter, _done, "123", _spot, _had)
-    eq("問い直せ" in _body, not CN.quiet_ack_ok(_spot, _had),
+    eq("問い直せ" in _body, not CN.quiet_ack_ok(_spot, _had, "123", "replied"),
        "宣言と本文の一致(spot=%r had_text=%r)" % (_spot, _had))
 
 # send() が --quiet-ack-ok を渡すのは宣言が立った時だけ(引数の受け渡しは**実行**で見る)。
@@ -121,7 +125,9 @@ eq(D.quiet_ack_target(DEPT, rec(author="chami_fusoh")), False, "★Chami本人�
 eq(D.quiet_ack_target(DEPT, rec(quiet_ack_ok=None)), False,
    "★宣言の無い完遂通知は畳まない(問い直せの便=手番が有る)")
 eq(D.quiet_ack_target(DEPT, rec(via="gateway")), False, "★dispatch以外の経路は畳まない")
-eq(D.quiet_ack_target("hr-room", rec()), False, "★オプトインしていない部屋では畳まない")
+eq(D.quiet_ack_target(DEPT, rec(audience="human")), False, "★表向きの通知は畳まない")
+eq(D.quiet_ack_target("hr-room", rec()), True, "★同じ構造契約を全部門で共通処理する")
+eq(D.quiet_ack_target("", rec()), False, "宛先の無い便は畳まない")
 eq(D.quiet_ack_target(DEPT, {}), False, "空レコードで例外を出さない")
 # ★本文では決まらない= 人格が何を書いても発火しない/抑止されない
 eq(D.quiet_ack_target(DEPT, rec(author="ヴィルシーナ", quiet_ack_ok=True,
@@ -141,14 +147,13 @@ tmp = tempfile.mkdtemp(prefix="quiet_ack_test_")
 qdb = os.path.join(tmp, "queue", "inbox.db")
 os.makedirs(os.path.dirname(qdb), exist_ok=True)
 _saved = {k: getattr(D, k) for k in
-          ("LOCAL", "PROCESSED", "QUIET_ACK_LOG", "QUIET_ACK_OPTIN", "MAIN_INBOX", "BUSY_DIR")}
+          ("LOCAL", "PROCESSED", "QUIET_ACK_LOG", "MAIN_INBOX", "BUSY_DIR")}
 handled = []
 try:
     DP.QUEUE_DB = qdb
     D.LOCAL = tmp
     D.PROCESSED = os.path.join(tmp, "discord_processed.jsonl")
     D.QUIET_ACK_LOG = os.path.join(tmp, "quiet_ack.jsonl")
-    D.QUIET_ACK_OPTIN = os.path.join(tmp, "quiet_ack_optin.json")   # 置かない=既定だけ
     D.MAIN_INBOX = os.path.join(tmp, "main.jsonl")
     D.BUSY_DIR = os.path.join(tmp, "busy")
 
@@ -258,9 +263,9 @@ MUTATIONS = [
     ("宣言フラグのチェックを外す",
      '    if rec.get("quiet_ack_ok") is not True:\n        return False',
      '    if False:\n        return False'),
-    ("オプトインのチェックを外す",
-     '    return str(dept or "") in quiet_ack_depts()',
-     '    return True  # MUTANT'),
+    ("audienceのチェックを外す",
+     '    if str(rec.get("audience") or "") != "ai":\n        return False',
+     '    if False:\n        return False'),
 ]
 
 

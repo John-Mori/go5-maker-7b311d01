@@ -62,8 +62,9 @@ def run(argv=(), **kw):
     """main() を本物のまま走らせ、send() に渡った宛先を集める。"""
     sent = []
 
-    def fake_send(to_dept, from_dept, body, dry_run):
-        sent.append({"to": to_dept, "from": from_dept, "body": body, "dry": dry_run})
+    def fake_send(to_dept, from_dept, body, dry_run, quiet_ok=False):
+        sent.append({"to": to_dept, "from": from_dept, "body": body, "dry": dry_run,
+                     "quiet_ok": bool(quiet_ok)})
         return True, "(fake)"
 
     real, sys_argv = cn.send, sys.argv
@@ -244,7 +245,7 @@ def audit(mid, body):
             "dept": "shorts-analyst", "persona": "誰か", "status": "200", "body": body}
 
 
-def build_body_v1(rid, dept, letter, done, landed, spot="", had_text=False):
+def build_body_v1(rid, dept, letter, done, landed, spot="", had_text=False, wip_ts=""):
     """★壊れた側(C-053= 動く別実装)= C-071 以前の本文組み立て。
 
     返信の本文を**持っているのに読まない**。着地msg_idだけ載せて「成果の在りかはそこに
@@ -383,15 +384,18 @@ def test_spot_path():
             len(s) == 1 and hq_rel not in s[0]["body"]
             and "置き場のパスは無い" in s[0]["body"], "")
 
-        # --- 台帳が1つも無くても落ちない(fail-open)
+        # --- 台帳が1つも無くても落ちない。`replied`+着地msgが正なら
+        #     本文ミラーが古くて無いだけで、請けた部門へ再質問しない。
         os.remove(cn.SEND_AUDIT)
         write_ledgers([done("3007", "shorts-analyst", 60, landed="7007")],
                       [letter("3007", "shorts-analyst", "research-room", True)])
         s = run()
-        chk("P-6 送信台帳が無くても通知は出る(本文が拾えないだけ・fail-open)",
-            len(s) == 1 and "見つからなかった" in s[0]["body"], "")
-        chk("P-6b ★本文そのものを引けない時だけ『請けた部門へ問い直せ』と書く",
-            len(s) == 1 and "請けた部門へ問い直せ" in s[0]["body"], "")
+        chk("P-6 送信台帳が無くても通知は出る(着地msgは残る)",
+            len(s) == 1 and "7007" in s[0]["body"], "")
+        chk("P-6b replied+着地msgが在る古い便は再質問せず無生成ackにする",
+            len(s) == 1 and "請けた部門へ再度問い直す必要はない" in s[0]["body"]
+            and "請けた部門へ問い直せ" not in s[0]["body"]
+            and s[0].get("quiet_ok") is True, "")
     finally:
         cn.ROOT = real_root
 

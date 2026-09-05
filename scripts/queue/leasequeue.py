@@ -311,7 +311,8 @@ class LeaseQueue:
         """
         until = float(retry_after or 0)
         if not refund:
-            self._db.execute("UPDATE queue SET lease_until=? WHERE id=? AND status='pending'",
+            self._db.execute("UPDATE queue SET lease_until=?, claimed_by=''"
+                             " WHERE id=? AND status='pending'",
                              (until, qid))
             return {"refunded": False, "retry_after": until, "refunds": None}
         row = self._db.execute(
@@ -321,11 +322,13 @@ class LeaseQueue:
         deliveries, refunds = row[0], row[1] or 0
         if refunds >= self.max_refunds:
             # ★打ち止め。ここから先は普通に数える=いつかは dead になり、通知が出る(黙らない)。
-            self._db.execute("UPDATE queue SET lease_until=? WHERE id=? AND status='pending'",
+            self._db.execute("UPDATE queue SET lease_until=?, claimed_by=''"
+                             " WHERE id=? AND status='pending'",
                              (until, qid))
             return {"refunded": False, "retry_after": until, "refunds": refunds}
         self._db.execute(
-            "UPDATE queue SET lease_until=?, deliveries=MAX(deliveries-1,0), refunds=refunds+1"
+            "UPDATE queue SET lease_until=?, claimed_by='',"
+            " deliveries=MAX(deliveries-1,0), refunds=refunds+1"
             " WHERE id=? AND status='pending'", (until, qid))
         return {"refunded": True, "retry_after": until, "refunds": refunds + 1}
 

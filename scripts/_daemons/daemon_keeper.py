@@ -407,8 +407,10 @@ def _inflight_depts(db_path=None, now=None):
       None: DBを読めず、処理中か判断できない。載せ替え側は必ず延期する。
 
     ★LeaseQueueの状態名に ``leased`` は存在しない。claim後も status は ``pending`` のままで、
-      未来の lease_until が「処理中」を表す。claim可能条件が lease_until < now なので、
-      境界の等値も処理中側(>=)として扱う。
+      未来の lease_until **かつ現在の所有者 claimed_by** が「処理中」を表す。
+      lease_until 単独は not_before / session-limit後の再試行予約にも使うため、所有者が空の
+      予約便まで処理中とみなすと、修正版の載せ替えがリセット時刻まで止まってしまう。
+      claim可能条件が lease_until < now なので、境界の等値も処理中側(>=)として扱う。
 
     ★2026-07-29 実測した事故=
       自動載せ替えが**走っている便を踏み潰していた**。keeperの間隔(10分)と、
@@ -429,7 +431,7 @@ def _inflight_depts(db_path=None, now=None):
         try:
             rows = con.execute(
                 "SELECT DISTINCT dept FROM queue "
-                "WHERE status='pending' AND lease_until >= ? "
+                "WHERE status='pending' AND lease_until >= ? AND claimed_by <> '' "
                 "ORDER BY dept", (check_at,)).fetchall()
         finally:
             con.close()

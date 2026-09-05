@@ -31,7 +31,7 @@ def make_db(path):
     con = sqlite3.connect(path)
     con.execute(
         "CREATE TABLE queue (id INTEGER PRIMARY KEY, dept TEXT, "
-        "status TEXT, lease_until REAL)")
+        "status TEXT, lease_until REAL, claimed_by TEXT NOT NULL DEFAULT '')")
     return con
 
 
@@ -171,20 +171,23 @@ def main():
         con = make_db(db)
         now = time.time()
         con.executemany(
-            "INSERT INTO queue(id,dept,status,lease_until) VALUES(?,?,?,?)",
+            "INSERT INTO queue(id,dept,status,lease_until,claimed_by) VALUES(?,?,?,?,?)",
             [
-                (1, "hq", "pending", now + 60),
-                (2, "hq", "pending", now + 30),
-                (3, "aegis-gl", "pending", now),
-                (4, "expired", "pending", now - 1),
-                (5, "done-room", "done", now + 60),
-                (6, "dead-room", "dead", now + 60),
+                (1, "hq", "pending", now + 60, "worker:hq"),
+                (2, "hq", "pending", now + 30, "worker:hq"),
+                (3, "aegis-gl", "pending", now, "worker:aegis"),
+                (4, "expired", "pending", now - 1, "dead-worker"),
+                (5, "done-room", "done", now + 60, "old-worker"),
+                (6, "dead-room", "dead", now + 60, "old-worker"),
+                (7, "retry-room", "pending", now + 3600, ""),
             ])
         con.commit()
         con.close()
 
         check("未来leaseのpendingを処理中として検出",
               keeper._inflight_depts(db, now) == ["aegis-gl", "hq"])
+        check("所有者を解放したnot-before/retry予約は処理中に含めない",
+              "retry-room" not in keeper._inflight_depts(db, now))
 
         con = sqlite3.connect(db)
         con.execute("UPDATE queue SET lease_until=? WHERE status='pending'", (now - 1,))

@@ -627,7 +627,8 @@ def main():
                          "②何を頼んだかを追える)。付けなければ従来どおり裏(相槌/通達/配布)。")
     ap.add_argument("--quiet-ack-ok", dest="quiet_ack_ok", action="store_true",
                     help="★この便は**手番ゼロの復路(通知だけ)**だと送り手の機械が宣言する。"
-                         "受け手の部屋がオプトインしていれば、人格応答を出さず既読ackで畳む"
+                         "完遂通知(自動)+dispatch+audience=ai と一致した時だけ、"
+                         "人格応答を出さず既読ackで畳む"
                          "(local/llm/quiet_ack.jsonl へ必ず1行残る)。"
                          "人手や人格の判断で付けない= 付けるのは自動通知の常駐だけ。")
     ap.add_argument("--audience", default="", choices=["", AUDIENCE_AI, AUDIENCE_CHAMI],

@@ -103,6 +103,8 @@ JST = dt.timezone(dt.timedelta(hours=9))
 
 DONE_STATES = ("completed", "replied")
 NOTIFIED_STATE = "completion_notified"
+# ★請けた側が本文末に `<<WIP>>` を立てた印(dept_daemon が記帳する)。完遂と同居しうる。
+WORKING_STATE = "working_detected"
 
 # ★★この常駐が出す便の名義(2026-09-04・品質管理部門ジェンティルドンナ指摘 msg=1545296750602887228)。
 #   **書く側(send)と読む側(main の除外)が同じ1本を引く**= 名義を変えても鎖の切断が外れない。
@@ -119,15 +121,23 @@ def parse_ts(s):
 
 
 def load_requests():
-    """request_log を1回だけ舐めて (完遂した依頼, 通知済みID) を返す。
+    """request_log を1回だけ舐めて (完遂した依頼, 通知済みID, WIPの最終時刻) を返す。
 
     完遂= {request_id: {"dept":…, "ts":…(最初のcompleted/replied), "evidence":…}}
     ★`replied` の evidence には請けた側の着地 `discord_msg=` が入っている。あとで
       「どこに落ちたか」を1行に入れるために、replied を見たら evidence を優先で採る。
+
+    ★★2026-09-05(ad研究室/ルカ・モドリッチ 報告 → イージス研究室 経由でHQへ)=
+      `working_detected`(請けた側が本文末に `<<WIP>>` を立てた印)を**この関数が捨てていた**。
+      実物= req `DISPATCH-system-engineer-1788573797865` で 11:15:18 `completed` の
+      **8秒後**に 11:15:26 `working_detected` が立ち、16分後に完遂だけが発注元へ届いた。
+      → WIPの**最終時刻**を rid ごとに拾って返す。完遂より後に立っていたら、通知本文へ
+        「完遂扱いにするな」の1行を混ぜる(判定を人の注意力に戻さない= §3 心がけに任せない)。
+      ★完遂より**前**のWIPは正常な途中経過なので数えない(作業中→完遂は普通の流れ)。
     """
-    done, notified = {}, set()
+    done, notified, working = {}, set(), {}
     if not os.path.exists(REQUEST_LOG):
-        return done, notified
+        return done, notified, working
     with open(REQUEST_LOG, encoding="utf-8", errors="replace") as f:
         for ln in f:
             if '"state"' not in ln:
@@ -142,6 +152,12 @@ def load_requests():
             if st == NOTIFIED_STATE:
                 notified.add(rid)
                 continue
+            if st == WORKING_STATE:
+                # ★同じ rid に何度も立つ。**いちばん新しい1本**だけ残す(完遂との前後で使う)。
+                ts = str(r.get("ts") or "")
+                if ts and ts > working.get(rid, ""):
+                    working[rid] = ts
+                continue
             if st not in DONE_STATES:
                 continue
             cur = done.get(rid)
@@ -152,7 +168,7 @@ def load_requests():
                 # 着地msg_idを持っている方(replied)を採る。時刻は最初の完遂のまま残す。
                 cur["evidence"] = r.get("evidence") or cur["evidence"]
                 cur["state"] = "replied"
-    return done, notified
+    return done, notified, working
 
 
 def load_letters(want_ids):
@@ -347,7 +363,7 @@ def already_replied(replies, to_dept, from_dept, after, consumed):
     return False
 
 
-def build_body(rid, dept, letter, done, landed, spot="", had_text=False):
+def build_body(rid, dept, letter, done, landed, spot="", had_text=False, wip_ts=""):
     """発注元の部屋へ出す本文。★短く。本体は運ばない(C-023/C-050)。運ぶのはパス1本まで。
 
     ★HQ-0242(2026-09-05)= `had_text` を足した。**返信の本文を読めているのに
@@ -361,6 +377,11 @@ def build_body(rid, dept, letter, done, landed, spot="", had_text=False):
     if work:
         lines.append(f"■依頼= {work}")
     lines.append(f"■記帳= request_id `{rid}` / state `{done['state']}` / {done['ts']}")
+    if wip_ts:
+        # ★完遂の**後**に `<<WIP>>` が立っている= 請けた側はまだ続けている。
+        #   ここを読み落とすと「完遂した」だけが独り歩きする(2026-09-05 ad研究室の実測)。
+        lines.append(f"★**請けた側は `<<WIP>>` を立てている({wip_ts})= 完遂扱いにするな。**"
+                     "この便の『完遂』は記帳上の1状態にすぎない。**続きが来るまで閉じるな。**")
     if landed:
         lines.append(f"■請けた側の返信= msg `{landed}`")
     else:
@@ -375,6 +396,14 @@ def build_body(rid, dept, letter, done, landed, spot="", had_text=False):
                      "**問い直す前にその返信を読め**(機械は推測で埋めない)。")
         lines.append("※紙を伴う仕事なら `local/` の下へ1枚置いてパスを返信に書いてもらえると、"
                      "次からここに載る(コードの直しは commit と change_log で追えるので不要)。")
+    elif landed and done.get("state") == "replied":
+        # ★★古い send_audit は本文ミラーを持たないが、`replied` + 着地msg_idは
+        #   「請けた側が実際に返信を投稿した」ことの機械的な証拠だ。従来は
+        #   本文をローカルに拾えないだけで「請けた部門へ問い直せ」と指示し、
+        #   完遂→再質問→再完遂の往復を生んでいた。着地が実証済みなら再質問は不要。
+        lines.append("■成果の着地= **返信済みを記帳で確認済み**"
+                     f"(msg `{landed}`)。古い送信台帳のため本文ミラーは無いが、"
+                     "**請けた部門へ再度問い直す必要はない**。")
     else:
         lines.append("■成果の置き場= **この便に置き場のパスは見つからなかった。請けた部門へ問い直せ**"
                      "(機械は推測で埋めない)。")
@@ -385,14 +414,15 @@ def build_body(rid, dept, letter, done, landed, spot="", had_text=False):
     return "\n".join(lines)
 
 
-def quiet_ack_ok(spot, had_text):
+def quiet_ack_ok(spot, had_text, landed="", state=""):
     """この便が**手番ゼロ**か(=受け手に頼むことが1つも無いか)。判定はここ1箇所だけ。
 
-    ★build_body の枝と1対1で対応させる= 置き場を載せた便 / 返信そのものが既に届いている便は
-      「問い直せ」を書かない=手番ゼロ。どちらでもない便は本文に
+    ★build_body の枝と1対1で対応させる= 置き場を載せた便 / 返信そのものが既に届いている便 /
+      `replied` + 着地msg_idが記帳された便は「問い直せ」を書かない=手番ゼロ。
+      それ以外の便は本文に
       「請けた部門へ問い直せ」と書く=**手番が有る**ので宣言しない(=今までどおり表へ出る)。
     """
-    return bool(spot or had_text)
+    return bool(spot or had_text or (landed and state == "replied"))
 
 
 def send(to_dept, from_dept, body, dry_run, quiet_ok=False):
@@ -403,8 +433,8 @@ def send(to_dept, from_dept, body, dry_run, quiet_ok=False):
       「置き場のパスを載せた」か「返信そのものが既に届いている」枝を通った時だけ=
       本文に **問い直せ が入らない便**に限る(=受け手に手番が無いことが構造で決まる)。
       「問い直せ」の便には付けない= 受け手に手番があるから、今までどおり必ず表へ出る。
-      ★この印は**受け手が畳んでよいかの判断材料**でしかない。畳むかどうかは受け手側の
-        オプトイン(dept_daemon の QUIET_ACK_DEPTS)が決める= 片側だけでは沈黙しない。
+      ★この印は**受け手が畳んでよいかの判断材料**でしかない。受け手側は
+        送り主+経路+audience+この印がすべて一致した時だけ畳む=片側の印だけでは沈黙しない。
     """
     fd, path = tempfile.mkstemp(suffix=".md", prefix="completion_notify_", text=True)
     try:
@@ -445,7 +475,7 @@ def main():
     quiet_after = 3 if not a.verbose else 10 ** 9
 
     now = dt.datetime.now(JST)
-    done, notified = load_requests()
+    done, notified, working = load_requests()
 
     # ★窓で絞る。過去の完遂を全部拾うと、入れた瞬間に何百通も鳴る。
     targets = {}
@@ -529,11 +559,18 @@ def main():
             if not text:
                 text, src = recent_reply(d["dept"], rid), "recent"
             spot = find_spot(text)
-            body = build_body(rid, d["dept"], letter, d, landed, spot, bool(text))
+            # ★完遂**より後**に立った `<<WIP>>` だけを警告に使う(前のは正常な途中経過)。
+            wip_ts = working.get(rid, "")
+            if wip_ts:
+                wt = parse_ts(wip_ts)
+                if not wt or wt < d["done_at"]:
+                    wip_ts = ""
+            body = build_body(rid, d["dept"], letter, d, landed, spot, bool(text), wip_ts)
             # ★手番ゼロの宣言は build_body と**同じ条件**で立てる(枝が1つしか無い形にする)。
             #   置き場を載せた / 返信そのものが届いている= 受け手に頼むことが無い便。
             #   どちらでもない便は「請けた部門へ問い直せ」と書いてある=手番が有るので付けない。
-            quiet = quiet_ack_ok(spot, bool(text))
+            # ★WIPが立っている便は**手番ゼロにしない**= 受け手は「閉じるな」を読む必要がある。
+            quiet = quiet_ack_ok(spot, bool(text), landed, d.get("state")) and not wip_ts
             ok, out = send(to_dept, d["dept"], body, a.dry_run, quiet)
             if ok:
                 sent += 1
@@ -545,6 +582,7 @@ def main():
                              "evidence": f"完遂を発注元へ自動通知 to_dept={to_dept} "
                                          f"landed={landed or '(無し)'} "
                                          f"spot={spot or '(無し)'}/{src if text else '本文なし'} "
+                                         f"wip={wip_ts or '(無し)'} "
                                          f"via=completion_notify"})
             else:
                 failed += 1

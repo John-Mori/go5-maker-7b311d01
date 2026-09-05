@@ -39,6 +39,11 @@ def status_of(q, msg_id):
         "SELECT status, deliveries, refunds FROM queue WHERE msg_id=?", (msg_id,)).fetchone()
 
 
+def owner_of(q, msg_id):
+    return q._db.execute(
+        "SELECT claimed_by FROM queue WHERE msg_id=?", (msg_id,)).fetchone()[0]
+
+
 def main():
     d = tempfile.mkdtemp(prefix="qa_limit_")
     path = os.path.join(d, "q.db")
@@ -68,12 +73,14 @@ def main():
         c = q2.claim(dept="pse2", who="t")
         r = q2.nack(c["id"], retry_after=time.time() - 1, refund=True)
         check("★返金は max_refunds で打ち止め(以後は普通に数える)", r["refunded"] is False)
+        check("返金打ち止めのnackも処理所有者を解放する", owner_of(q2, "M-cap") == "")
 
         # --- A-3) retry_after を渡した便は、その時刻まで claim されない -----------
         q3 = LeaseQueue(path, lease_sec=1)
         q3.enqueue({"content": "待たせる"}, msg_id="M-hold", dept="pse3")
         c = q3.claim(dept="pse3", who="t")
         q3.nack(c["id"], retry_after=time.time() + 3600, refund=True)
+        check("再試行予約は便を保持したまま処理所有者だけ解放する", owner_of(q3, "M-hold") == "")
         check("★リセット時刻まで再配達されない(叩きに行かない)",
               q3.claim(dept="pse3", who="t") is None)
         # 手前に戻せば普通に取れる=永久に隠れるわけではない
@@ -87,6 +94,7 @@ def main():
         q4.nack(c["id"])                                  # 引数なし=旧来の呼び方
         st = status_of(q4, "M-old")
         check("引数なしnackは返金しない(deliveries=1のまま)", st[1] == 1 and st[2] == 0)
+        check("引数なしnackも処理所有者を解放する", owner_of(q4, "M-old") == "")
         check("引数なしnackは即座に拾い直せる", bool(q4.claim(dept="pse4", who="t")))
 
         # --- B) dead へ落ちたら黙らない -------------------------------------------

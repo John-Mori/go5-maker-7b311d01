@@ -902,37 +902,27 @@ MARKER_AUDIT = os.path.join(LOCAL, "_marker_audit.jsonl")
 #   ② 送り手の機械が `quiet_ack_ok=True` を載せていること
 #      (completion_notify が「置き場を載せた/返信は既に届いている」枝でだけ立てる印。
 #       「請けた部門へ問い直せ」の便には立たない= 手番が有るから今までどおり表へ出る)
-#   ③ 受け手の部屋が下の QUIET_ACK_DEPTS でオプトインしていること
+#   ③ audience=ai の内部便であること
 #   ★**本文テキストは一切見ない**(QA条件1)。生成側に自分の投稿を止めさせない=
 #     モデルが任意に自分を黙らせられる沈黙をつくらない。
 #   ★畳んだ便は必ず QUIET_ACK_LOG へ1行残す(QA条件2)。読み手は deadman_check.check_quiet_ack
 #     (15分毎・go5_deadman_check)= 送り主が AUTO_SENDER 以外の行を1行でも見つけたら鳴る
 #     (C-035=名指しを全体へ広げない、を機械が見張る)。記録の残る沈黙は喪失ではない。
+#
+# ★★2026-09-05 全部門へ適用。従来は aegis-gl だけのオプトインだったが、
+#   週間枠リセット後10.6時間の実測で、手番ゼロの完遂通知が55回も長大な
+#   Opusセッションへ再投入され、少なくとも236.7分の実行時間を使っていた。
+#   これは部門固有の仕様ではなく、完遂通知の構造契約で確定できる共通制御だ。
+#   送信機械が quiet_ack_ok=True と判定した audience=ai の内部便だけを全部門で
+#   同じように畳む。Chami便・通常のAI便・確認が必要な完遂通知は引き続き生成へ渡る。
 QUIET_ACK_SENDER = "完遂通知(自動)"     # completion_notify.AUTO_SENDER と同値(依存は張らない)
 QUIET_ACK_LOG = os.path.join(LOCAL, "llm", "quiet_ack.jsonl")
-QUIET_ACK_OPTIN = os.path.join(LOCAL, "llm", "quiet_ack_optin.json")
-# ★既定のオプトインは**発案した当室だけ**(実測で宛先首位=21通)。他室を勝手に黙らせない=
-#   足すのはその部屋自身の判断。コードを触らずに足せるよう QUIET_ACK_OPTIN(JSON配列)も読む。
-QUIET_ACK_DEPTS = ("aegis-gl",)
-
-
-def quiet_ack_depts():
-    """無投稿ackへオプトインしている部門名の集合。読めなければ既定だけ(fail-open)。"""
-    out = set(QUIET_ACK_DEPTS)
-    try:
-        with open(QUIET_ACK_OPTIN, encoding="utf-8") as f:
-            for d in json.load(f):
-                if isinstance(d, str) and d.strip():
-                    out.add(d.strip())
-    except Exception:
-        pass
-    return out
 
 
 def quiet_ack_target(dept, rec):
     """この便を「人格応答を出さずに既読ackで畳む」対象と見なすか(機械述語のみ)。
 
-    ★見るのは送り主・経路・送り手が立てた構造フラグ・受け手のオプトインの4つだけ。
+    ★見るのは送り主・経路・audience・送り手が立てた構造フラグの4つだけ。
       **本文は読まない**(rec["content"] も返信も参照しない)。
     """
     if not isinstance(rec, dict):
@@ -941,9 +931,11 @@ def quiet_ack_target(dept, rec):
         return False                      # ★送り主で閉じる(C-035=名指しを広げない)
     if str(rec.get("via") or "") != "dispatch":
         return False
+    if str(rec.get("audience") or "") != "ai":
+        return False                      # 表向きの通知は機械で隠さない
     if rec.get("quiet_ack_ok") is not True:
         return False                      # 送り手の機械が手番ゼロを宣言した便だけ
-    return str(dept or "") in quiet_ack_depts()
+    return bool(str(dept or "").strip()) # 宛先部門がある内部便は全部門で共通処理
 
 
 def quiet_ack_record(dept, rec, note=""):
@@ -967,6 +959,28 @@ def quiet_ack_record(dept, rec, note=""):
         return True
     except OSError:
         return False
+
+
+def forward_after_reply(rec, is_work=False, forward_all=False):
+    """返答後に上位の受信箱へ回送する便か。
+
+    `forward_all` の本来の目的は、キーワード判定で取りこぼしやすい
+    **Chamiの依頼**を研究室本人の箱にも残すこと。従来は差出人を見ず、
+    audience=ai の部門間便や完遂通知まで、返答後にもう一度上位へ複製していた。
+    それが「部門長が答える→また上位が読む」の二重ターンになる。
+
+      - 回答が `<<WORK>>` を明示した範囲外作業 (`is_work=True`) は差出人を
+        問わず従来どおり上げる。
+      - `forward_all` による無条件回送はChamiの便だけに戻す。
+
+    判定不能な便は `False`。ただし `is_work=True` は先に通すので、必要な
+    上申を差出人名の欠損で落とさない。
+    """
+    if is_work:
+        return True
+    if not forward_all or not isinstance(rec, dict):
+        return False
+    return "chami" in str(rec.get("author") or "").lower()
 
 
 def find_promise(reply):
@@ -9559,13 +9573,16 @@ class Daemon:
                     # 確認の仕組み自体が壊れても従来動作のまま先へ進む(fail-safe)。ただし黙らない。
                     log(self.dept, f"★replied確認が例外 msg={mid} ({type(_e).__name__}: {_e})")
             # 作業依頼はmain箱へ機械的に回送(研究室が本対応)。
-            # forward_all部門(hq)は判定せず全便回送=キーワード網の取りこぼしを構造で塞ぐ
+            # forward_all部門(hq)はChami便だけ判定せず回送=
+            # キーワード網の取りこぼしを構造で塞ぐ。AI間便まで無条件に
+            # 複製すると、部門で返答済みの便を上位Opusがもう一度読む。
             # (2026-07-20: 「設計して手足として動かして」がWORK_WORDS不一致で沈黙した実測への恒久対処)
             # ★名指し便は回送しない(この部屋で本人が答えたのだから、他所へ回すと事故の再現になる)
             # ★会話専用の部屋は**回送しない**(2026-07-22 Chami「絶対やめてくれ」)。
             #   is_work は上で常にFalseになるが、forward_all等が後から足された時に
             #   回送が復活しないよう、ここでも明示的に閉じておく(この条件式が最後の関所)。
-            if (is_work or self.conf.get("forward_all")) and not self._member and not conv_only:
+            _forward = forward_after_reply(rec, is_work, self.conf.get("forward_all"))
+            if _forward and not self._member and not conv_only:
                 # ★回送先は**まず部門長**(2026-07-21 ORG-36・Chami指摘)。
                 #   Chami原文=「逆(システム改修部門などの各部門)も然りで**まずAD研究室に
                 #   報告を回すべき**。その方が**情報の齟齬が生じない**と考える」
@@ -9578,7 +9595,7 @@ class Daemon:
                     log(self.dept, f"回送= 部門長が引けずmain箱へ msg={mid}")
                 else:
                     log(self.dept, f"回送= 部門長({self._head_dept()})のキューへ msg={mid}")
-            elif is_work or self.conf.get("forward_all"):
+            elif _forward:
                 # ★回送しなかった理由を残す(2026-09-02)。ここが無言だと
                 #   「申告は出たのに誰も受け取っていない」便が**ログ上は成功に見える**。
                 _why = "名指し便(本人が答えた)" if self._member else "会話専用の部屋"
