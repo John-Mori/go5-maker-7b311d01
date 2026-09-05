@@ -7,6 +7,7 @@
 import ast
 import importlib.util
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -295,6 +296,71 @@ def main():
                   keeper._marker_busy({4242}) == set())
         finally:
             keeper.BUSY_DIR, keeper.BUSY_MARKER_MAX_SEC = _orig_dir, _orig_max
+
+    # --- ★監視対象の表を、番人の再起動を待たずに読み直す(2026-09-05 イージス研究室)---
+    #   ★文字列一致では見ない= 表を書き換えた写しを食わせて**読み直しを実行で通す**。
+    def _aged_copy(d, name, transform=None):
+        """ソースの写しを作る(mtimeを十分古くする=編集直後ガードに掛からないため)。"""
+        with open(os.path.join(HERE, "daemon_keeper.py"), "r", encoding="utf-8") as f:
+            src = f.read()
+        if transform:
+            src = transform(src)
+        p = os.path.join(d, name)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(src)
+        old = time.time() - 600
+        os.utime(p, (old, old))
+        return p
+
+    with tempfile.TemporaryDirectory() as d:
+        check("実ソースから読み直した表が、起動時の定数と一字一句同じ(順序も)",
+              keeper._read_watch_files(_aged_copy(d, "same.py")) == keeper.WATCH_FILES)
+
+        # ★本当に読み直しているか= 表へ1行足した写しでその1本が増える(定数を返しているだけなら増えない)
+        added = keeper._read_watch_files(_aged_copy(
+            d, "added.py",
+            lambda s: s.replace(
+                '               os.path.join(ROOT, "scripts", "_common", "msg_text.py")]',
+                '               os.path.join(ROOT, "scripts", "_common", "msg_text.py"),\n'
+                '               os.path.join(ROOT, "scripts", "llm", "_tsuika_kensa.py")]')))
+        check("表へ足した1本を、番人を再起動せずに拾う",
+              added is not None and len(added) == len(keeper.WATCH_FILES) + 1
+              and added[-1].endswith(os.path.join("scripts", "llm", "_tsuika_kensa.py")))
+
+        # must-fail(C-053)= 壊れた表は採らない。**今の表のまま**へ倒す(fail-open)
+        check("must-fail: dept_daemon 自身が居ない表は採らない",
+              keeper._read_watch_files(_aged_copy(
+                  d, "nodaemon.py",
+                  lambda s: s.replace("WATCH_FILES = [DAEMON,", "WATCH_FILES = ["))) is None)
+        check("must-fail: 短すぎる表(壊れている)は採らない",
+              keeper._read_watch_files(_aged_copy(
+                  d, "short.py",
+                  lambda s: re.sub(r"^WATCH_FILES = \[.*?^RELOAD_DEBOUNCE_SEC",
+                                   'WATCH_FILES = [DAEMON]\nRELOAD_DEBOUNCE_SEC',
+                                   s, flags=re.M | re.S))) is None)
+        check("must-fail: 表そのものが無い写しは採らない",
+              keeper._read_watch_files(_aged_copy(
+                  d, "none.py",
+                  lambda s: s.replace("WATCH_FILES = [DAEMON,", "WATCH_FILES_X = [DAEMON,"))) is None)
+
+        # ★編集の途中を掴まない(名簿側と同じ 30秒の落ち着き待ち)
+        fresh = _aged_copy(d, "fresh.py")
+        os.utime(fresh, None)
+        check("must-fail: 編集直後(落ち着き待ちの中)は読み直さない",
+              keeper._read_watch_files(fresh) is None)
+
+        # ★fail-open= 読めない時は起動時の表で走り続ける(見張りごと止めない)
+        _orig_cache = dict(keeper._watch_files_cache)
+        try:
+            keeper._watch_files_cache["at"] = 0.0
+            keeper._watch_files_cache["files"] = None
+            _orig_read = keeper._read_watch_files
+            keeper._read_watch_files = lambda *a, **kw: None
+            check("読めない時は起動時の表をそのまま使う(見張りが消えない)",
+                  keeper._watch_files_now() == keeper.WATCH_FILES)
+        finally:
+            keeper._read_watch_files = _orig_read
+            keeper._watch_files_cache.update(_orig_cache)
 
     ok = all(v for _, v in results)
     print(f"\n== {sum(v for _, v in results)}/{len(results)} PASS ==")

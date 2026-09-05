@@ -260,10 +260,75 @@ RELOAD_MIN_INTERVAL_SEC = 600
 RELOAD_FORCE_AFTER_SEC = 45 * 60
 
 
+# --- ★監視対象の表そのものを、番人の再起動を待たずに読み直す(2026-09-05 イージス研究室)---
+#
+# なぜ要るか(今日その穴を踏んだ):
+#   `WATCH_FILES` はモジュールの定数なので**番人が起動した時点で写し取られる**。
+#   常駐が読む新しいモジュール(今日は `scripts/_common/msg_text.py`)を表へ足しても、
+#   **番人を再起動するまでその1本は見張られない**= 正本を直しても載せ替えの波が起きず、
+#   常駐は古い版で読み続ける。C-042 が要求しているのは「載せ替えの経路を同時に決めろ」で、
+#   表に1行足しただけでは**その経路が動き出す時刻が誰にも決まっていない**。
+#   ★名簿(DEPTS)側は 2026-08-08 に同じ理由で都度読みへ直してある。**表だけが取り残されていた。**
+# ★安全のために踏んでいる手順(名簿側と同じ形にする=判定を2種類作らない):
+#   ①自分のソースから読む。②編集直後(30秒以内)は採らない。③読めない/短すぎる/
+#     dept_daemon 自身が居ない表は採らない。④どれかで転んだら**今の表のまま**(fail-open)。
+WATCH_RECHECK_SEC = 60       # 表の読み直し間隔(1分)
+WATCH_MIN = 10               # これ未満の表は「壊れている」とみなして採用しない
+_watch_files_cache = {"at": 0.0, "files": None}
+_WATCH_JOIN_RE = re.compile(r"os\.path\.join\(ROOT,\s*([^)]*)\)")
+
+
+def _read_watch_files(path=None):
+    """自分のソースから WATCH_FILES を読み直す。読めない/怪しい時は None(=今の表のまま)。"""
+    src_path = path or os.path.abspath(__file__)
+    try:
+        if time.time() - os.path.getmtime(src_path) < ROSTER_SETTLE_SEC:
+            return None                      # まだ編集中かもしれない
+        with open(src_path, "r", encoding="utf-8") as f:
+            src = f.read()
+        m = re.search(r"^WATCH_FILES = \[(.*?)^RELOAD_DEBOUNCE_SEC", src, re.M | re.S)
+        if not m:
+            return None
+        body = "\n".join(ln for ln in m.group(1).splitlines()
+                         if not ln.lstrip().startswith("#"))   # 説明文は拾わない
+        out = [DAEMON] if re.search(r"^WATCH_FILES = \[DAEMON,", src, re.M) else []
+        for parts in _WATCH_JOIN_RE.findall(body):
+            seg = ast.literal_eval("[" + parts.rstrip().rstrip(",") + "]")
+            if not all(isinstance(s, str) and s for s in seg):
+                return None
+            out.append(os.path.join(ROOT, *seg))
+    except Exception:                                   # noqa: BLE001
+        return None
+    if len(out) < WATCH_MIN or DAEMON not in out:
+        return None                          # dept_daemon を見張らない表は表ではない
+    seen, uniq = set(), []
+    for p in out:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    return uniq
+
+
+def _watch_files_now():
+    """今の監視対象。★1分に1回だけ読み直し、失敗したら起動時の表をそのまま使う。"""
+    now = time.time()
+    if now - _watch_files_cache["at"] >= WATCH_RECHECK_SEC:
+        _watch_files_cache["at"] = now
+        got = _read_watch_files()
+        if got is not None and got != _watch_files_cache["files"]:
+            if _watch_files_cache["files"] is not None:
+                added = [p for p in got if p not in _watch_files_cache["files"]]
+                gone = [p for p in _watch_files_cache["files"] if p not in got]
+                log(f"★監視対象の表を読み直した(番人の再起動を待たない): "
+                    f"+{len(added)} -{len(gone)} / 計{len(got)}本")
+            _watch_files_cache["files"] = got
+    return _watch_files_cache["files"] or WATCH_FILES
+
+
 def _watch_stamp():
     """監視対象の最終更新(最大値)。読めないファイルは無視する。"""
     ts = []
-    for p in WATCH_FILES:
+    for p in _watch_files_now():
         try:
             ts.append(os.path.getmtime(p))
         except OSError:
