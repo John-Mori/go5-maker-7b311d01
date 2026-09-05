@@ -644,28 +644,8 @@ def _term_abbrev_specs(rules):
     return out
 
 
-# ★言及(その語だけを裸で括った形)を伸ばさないための囲み記号(2026-09-06 追加)。
-#   壊れた実物= naming_audit.jsonl 2026-09-06T07:02:52 dept=hq source=dispatch
-#   reason=term_abbrev count=1。人事部門(ククール)がHQへ出した便の
-#   「forbidden_forms=[ニック]/expected=[ニックネーム]」の**規則の値ごと**伸ばされ、
-#   届いた本文が「forbidden_forms=[ニックネーム]」に化けた=規則の意味が反転している。
-#   呼称ルールを論じる便は「ニック」という文字列そのものを書く必要がある——地の文で
-#   略って使うのとは別だ。既存マスク(コードフェンス/バッククォート/引用行)は
-#   素の角括弧を守らないので、この経路の側で閉じる。
-#   ★丸括弧 () は入れない= 文中の補足(「(ニックの話だ)」)で日常的に使われ、
-#     入れると本物の略りまで素通しになる。囲みが「その語だけ」の時に限る。
-TERM_ABBREV_QUOTE_PAIRS = {
-    "[": "]", "「": "」", "『": "』", "【": "】",
-    "“": "”", '"': '"', "'": "'", "`": "`",
-}
-
-
 def _term_abbrev_spans(s, form):
-    """略形の「前後どちらもカタカナでない」出現を [(start, end)] で返す。
-
-    ★囲み記号がその語だけをぴったり挟んでいる形(`[ニック]` `「ニック」`)は**言及**
-      なので落とす(上のコメントの事故)。
-    """
+    """略形の「前後どちらもカタカナでない」出現を [(start, end)] で返す。"""
     out = []
     start = 0
     while True:
@@ -675,8 +655,7 @@ def _term_abbrev_spans(s, form):
         end = i + len(form)
         before = s[i - 1] if i > 0 else ""
         after = s[end] if end < len(s) else ""
-        quoted = TERM_ABBREV_QUOTE_PAIRS.get(before) == after and after != ""
-        if (not _is_katakana(before)) and (not _is_katakana(after)) and not quoted:
+        if (not _is_katakana(before)) and (not _is_katakana(after)):
             out.append((i, end))
         start = i + 1
     return out

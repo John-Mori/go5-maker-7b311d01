@@ -66,6 +66,18 @@ SAFE = [
     "サーバー内ニックネームはUnicode可だ。",
 ]
 
+# ★2026-09-06 07:02:52 に本番で起きた誤爆の実物(naming_audit.jsonl dept=hq
+#   source=dispatch reason=term_abbrev count=1)。人事部門がHQへ出した便の
+#   **規則の値ごと**伸ばされ、届いた本文で規則の意味が反転していた。
+#   呼称ルールを論じる便は「ニック」という文字列そのものを書く必要がある。
+MENTION = [
+    "abbreviation_forbidden へ『ニックネーム』(forbidden_forms=[ニック]/"
+    "expected=[ニックネーム]/autofix:true)を入れた。",
+    "禁止形は「ニック」だ。",
+    "禁止形は『ニック』だ。",
+    'forbidden_forms は "ニック" 1件。',
+]
+
 
 def check(name, cond):
     results.append((name, bool(cond)))
@@ -103,6 +115,20 @@ def main():
         check(f"境界: {t[:14]}… は無変化",
               r["fixed"] == t
               and not [a for a in r["applied"] if a.get("reason") == "term_abbrev"])
+
+    # ---- 2.5) ★言及(囲み記号がその語だけを挟む)は伸ばさない ----
+    #   0歩目= 本番で化けた実物(naming_audit 2026-09-06T07:02:52 dept=hq)。
+    print("[2.5] 言及(規則の値を書き写す便)")
+    for t in MENTION:
+        r = fix(t)
+        check(f"言及: {t[:20]}… は無変化",
+              r["fixed"] == t
+              and not [a for a in r["applied"] if a.get("reason") == "term_abbrev"])
+    check("言及: 囲みの外の地の文は伸びる(言及の除外で本物まで殺さない)",
+          fix("禁止形は「ニック」だ。だが本文のニックは直せ。")["fixed"]
+          == "禁止形は「ニック」だ。だが本文のニックネームは直せ。")
+    check("言及: 丸括弧は囲みに入れない(補足の中の略りは直す)",
+          fix("(ニックの話だ)")["fixed"] == "(ニックネームの話だ)")
 
     # ---- 3) autofix を立てていない規則は挙動不変(C-035) ----
     print("[3] 既存規則の不変(C-035)")
@@ -160,6 +186,24 @@ def main():
               r_old["fixed"] == src and r_old["fixed"] != want)
         check("must-fail: 補強前には term_abbrev の口が無い",
               not hasattr(old, "_term_abbrev_specs"))
+
+    # 囲み除外を入れる直前の写し= term_abbrev は在るが言及を守れない世界。
+    bak2 = os.path.join(HERE, "naming_gate.py.bak_20260906_termabbrev_quoted")
+    if not os.path.exists(bak2):
+        check("must-fail: 誤爆修正前の .bak が在る(C-003)", False)
+    else:
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("naming_gate_noquote", bak2)
+        spec = importlib.util.spec_from_loader("naming_gate_noquote", loader)
+        old2 = importlib.util.module_from_spec(spec)
+        loader.exec_module(old2)
+        r2 = old2.naming_corrections("ククール", "hr-room", MENTION[0], RULES)
+        check("must-fail: 囲み除外の前は規則の値[ニック]まで伸ばしていた",
+              r2["fixed"] != MENTION[0]
+              and "forbidden_forms=[ニックネーム]" in r2["fixed"])
+        check("must-fail: 囲み除外の前には TERM_ABBREV_QUOTE_PAIRS が無い",
+              not hasattr(old2, "TERM_ABBREV_QUOTE_PAIRS"))
 
     print()
     ng_fail = [n for n, ok in results if not ok]
