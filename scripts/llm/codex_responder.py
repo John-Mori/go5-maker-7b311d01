@@ -85,6 +85,8 @@ def append_line(path, line):
 # 休眠の自己ゲート
 # ---------------------------------------------------------------------------
 def codex_room_registered():
+    """dept=='codex' の専用部屋が在るか。※現運用の起床判定には使わない(下記 codex_active 参照)。
+    残置理由= 将来Codex専用部屋を新設した時の分岐に流用できるため(Chamiの手で部屋を作る時)。"""
     try:
         chans = json.load(open(CHANNELS_FILE, encoding="utf-8"))
         return any(c.get("dept") == "codex" for c in chans)
@@ -93,10 +95,12 @@ def codex_room_registered():
 
 
 def codex_active():
-    """3条件が全部そろって初めて稼働する(=それまで完全休眠)。"""
+    """起床判定= Chamiが手で置く2ファイル(活性フラグ+トークン)が両方在ること。
+    専用部屋(dept=='codex')は要求しない= Chami①の設計「既存の~15部屋へ @ボス で召喚」を採るため。
+    召喚は gateway(discord_gateway.py)が @ボス 発言の dept を codex に付け替えて実現する。
+    専用部屋の新設はChamiの手なので、それを起床の必須条件にすると設計と矛盾する(2026-09-05 platform-se)。"""
     return (os.path.exists(ENABLE_FLAG)
-            and os.path.exists(TOKEN_FILE)
-            and codex_room_registered())
+            and os.path.exists(TOKEN_FILE))
 
 
 # ---------------------------------------------------------------------------
