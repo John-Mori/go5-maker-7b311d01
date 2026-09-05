@@ -164,7 +164,7 @@ def escalate(channel, raw_line, note=""):
 # ---------------------------------------------------------------------------
 # 中核= Codexに投げる
 # ---------------------------------------------------------------------------
-def codex_answer(channel, content):
+def codex_answer(channel, content, msg_id=""):
     """codex_run.py へ委譲= 専用worktreeで生成/実装し、Codex bot本人として部屋へ投稿。
 
     戻り値 (ok, worktree_or_empty, reason)。
@@ -172,11 +172,16 @@ def codex_answer(channel, content):
     - worktree_or_empty= 変更が残った worktree のパス(あれば)。無ければ空文字。
     - reason= 失敗理由バケツ(codex_run の失敗文から抽出。"not supported" 等 / timeout / 空=不明)。
       これで呼び側が「橋の不通」と「依頼の中身の問題」を見分けて文面を変える(ケヴィン発注(b))。
+    msg_id= 元便のmsg_id。--reply-to として渡し、codex_run側でdc_send実成功時だけ
+      送信(uptsukiyomi)を押させる(2026-09-05配線②=従来ここが空撃ちだった)。
     """
+    argv = [sys.executable, CODEX_CLI, "--ask", content, "--to", channel,
+            "--tag", "room", "--timeout", "600"]
+    if msg_id:
+        argv += ["--reply-to", str(msg_id)]
     try:
         r = subprocess.run(
-            [sys.executable, CODEX_CLI, "--ask", content, "--to", channel,
-             "--tag", "room", "--timeout", "600"],
+            argv,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=RUN_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -209,7 +214,7 @@ def handle(rec, raw_line):
 
     # ★Codexは仕事をする側= 作業語で弾かない。部屋の発言はそのまま Codex へ渡す。
     mark(channel, msg_id, "着手")           # 重い実装を始める直前=着手(本格的な作業の開始)
-    ok, worktree, reason = codex_answer(channel, content)
+    ok, worktree, reason = codex_answer(channel, content, msg_id)
     if ok:
         append_line(PROCESSED, raw_line)
         if worktree:

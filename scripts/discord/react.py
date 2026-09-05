@@ -60,7 +60,7 @@ EMOJI_NAME = {"着手": "chakusyu", "既読": "kidoku", "送信": "sendms",
 #   値= (実名, id)。id が None の印は unicode をそのまま撃つ(🐍=スネーク・素材不要)。
 CODEX_OVERRIDE = {
     "送信": ("uptsukiyomi", "1522060098355069139"),   # sendms → uptsukiyomi(§B業務印と意味二重化=文脈で判別)
-    "既読": ("followok", "1523758723758161920"),        # kidoku → followok
+    "既読": ("‼️", None),                                # kidoku → ‼️(unicode直撃・2026-09-05トトリ経由Chami指示=followok撤去)
     "着手": ("🐍", None),                                # chakusyu → 🐍(unicode。ギルド素材を作らない)
 }
 

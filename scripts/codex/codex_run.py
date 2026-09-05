@@ -86,6 +86,7 @@ DEFAULT_MODEL = "gpt-5.5"
 BRIDGE_CLI_JS = os.path.join(LOCAL, "codex_cli", "node_modules", "@openai",
                              "codex", "bin", "codex.js")
 LOG = os.path.join(LOCAL, "llm", "codex_run_log.jsonl")
+REACT = os.path.join(ROOT, "scripts", "discord", "react.py")
 
 
 def _resolve_codex_cmd():
@@ -351,6 +352,20 @@ def dc_send(token, channel_id, text):
     return True
 
 
+def mark_sent(channel_id, msg_id):
+    """送信(uptsukiyomi)を押す。dc_send が実際にHTTP成功を返した時だけ呼ぶ口
+    (2026-09-05 トトリ経由Chami指示②=送信だけスタンプが空撃ちだった穴を埋める)。
+    べき等・fail-open(印は本筋を絶対に止めない=react.py mark()と同じ作法)。"""
+    if not msg_id:
+        return
+    try:
+        subprocess.run([sys.executable, REACT, "--channel", str(channel_id),
+                        "--msg", str(msg_id), "--emoji", "送信", "--codex"],
+                       capture_output=True, timeout=30)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # 生存確認
 # ---------------------------------------------------------------------------
@@ -397,7 +412,7 @@ def do_ping(model, sandbox, timeout):
 # 本体
 # ---------------------------------------------------------------------------
 def answer(prompt, to=None, tag="cli", model=DEFAULT_MODEL, sandbox="workspace-write",
-           timeout=600, keep_worktree=False, briefing=True):
+           timeout=600, keep_worktree=False, briefing=True, reply_to=None):
     """1件を Codex に投げ、(必要なら)Codexとして投稿する。戻り値=終了コード。
 
     briefing=True(既定)で規律を注入する(Chami指示 2026-09-05)= worktree の
@@ -449,7 +464,12 @@ def answer(prompt, to=None, tag="cli", model=DEFAULT_MODEL, sandbox="workspace-w
     if to:
         if ok:
             token = _read(TOKEN_FILE, "Codex botトークン")
-            dc_send(token, resolve_channel(to), text)
+            channel_id = resolve_channel(to)
+            posted = dc_send(token, channel_id, text)
+            # ★送信スタンプは「生成成功」ではなく「実際にDiscordへ投稿できた」時だけ押す
+            #   (dc_sendの戻り値は従来ここで捨てられていて空撃ちの原因だった=2026-09-05修理②)。
+            if posted and reply_to:
+                mark_sent(channel_id, reply_to)
         else:
             print("生成失敗のため投稿は中止(失敗文をDiscordへ流さない)")
             return 5
@@ -462,6 +482,8 @@ def main():
     ap.add_argument("--ask")
     ap.add_argument("--ask-file")
     ap.add_argument("--to")
+    ap.add_argument("--reply-to", default=None,
+                    help="投稿成功時に送信スタンプを押す先のmsg_id(2026-09-05配線②)")
     ap.add_argument("--tag", default="cli")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--sandbox", default="workspace-write",
@@ -483,7 +505,7 @@ def main():
         return 1
     return answer(prompt, to=a.to, tag=a.tag, model=a.model, sandbox=a.sandbox,
                   timeout=a.timeout, keep_worktree=a.keep_worktree,
-                  briefing=not a.no_briefing)
+                  briefing=not a.no_briefing, reply_to=a.reply_to)
 
 
 if __name__ == "__main__":

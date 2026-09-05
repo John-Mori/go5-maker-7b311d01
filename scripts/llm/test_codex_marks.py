@@ -22,7 +22,7 @@ def drive(rec, *, skip_chakusyu=False):
             ("mark", "codex_answer", "notify_room", "escalate", "append_line", "log")}
     cr.mark = lambda ch, mid, kind: (None if skip_chakusyu and kind == "着手"
                                      else calls.append(kind))
-    cr.codex_answer = lambda ch, content: (True, "", "")   # 生成成功・worktreeなし・理由なし
+    cr.codex_answer = lambda ch, content, msg_id="": (True, "", "")   # 生成成功・worktreeなし・理由なし
     cr.notify_room = lambda ch, text: None
     cr.escalate = lambda ch, raw, note="": None
     cr.append_line = lambda path, line: None
@@ -68,7 +68,7 @@ def drive_fail(reason):
     orig = {k: getattr(cr, k) for k in
             ("mark", "codex_answer", "notify_room", "escalate", "append_line", "log")}
     cr.mark = lambda ch, mid, kind: None
-    cr.codex_answer = lambda ch, content: (False, "", reason)   # 生成失敗・理由=reason
+    cr.codex_answer = lambda ch, content, msg_id="": (False, "", reason)   # 生成失敗・理由=reason
     cr.notify_room = lambda ch, text: posted.__setitem__("text", text)
     cr.escalate = lambda ch, raw, note="": None
     cr.append_line = lambda path, line: None
