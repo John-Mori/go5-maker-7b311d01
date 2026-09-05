@@ -9410,6 +9410,15 @@ class Daemon:
                         f"(DEF-aegis-gl-08c9e9de6d の再発) msg={mid}")
                 send_argv = [sys.executable, PERSONA_SEND, "--channel", ch,
                              "--persona", self.outgoing_persona(_who)]
+                # ★改修α(system-engineer)室だけ=咲季/オタコンの見分けを付ける人格色(Chami発注
+                #   msg 1541177562007609466 を人事[ククール]経由で受領・REQ-hr-room-dce8e235dd)。
+                #   手本=改善部門の embed左カラーバー方式=persona_send --color auto が
+                #   local/persona_colors.json を引いて左バーだけ人格色(本文descriptionは素・見出しも
+                #   太字も無し=Chami要望「ギリギリの細さ」)。未定義の名義は通常メッセージへfail-open。
+                #   ★この1室に限定(C-035/C-064)=他室は素の返信のまま
+                #   (learning-coachのembed廃止 2026-08-09 msg 1536100162924183633 を巻き戻さない)。
+                if self.dept == "system-engineer":
+                    send_argv += ["--color", "auto"]
                 if (not _is_notice and not conv_only
                         and not getattr(self, "_relay_answered", False)):
                     send_argv += ["--suffix", "(精霊)"]
