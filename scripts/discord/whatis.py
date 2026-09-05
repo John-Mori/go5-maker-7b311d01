@@ -87,11 +87,41 @@ def summarize(label, d):
     return f"[{label}] {ts} / 部門={dept} / 人格={persona or '(記載なし)'} / ch={ch}\n         目的: {head or '(head記載なし)'}"
 
 
+def live_body(msg_id, channel_id=""):
+    """台帳に本文が無い時、Discordの実物から読んで印字する(2026-09-05・経営企画依頼)。
+
+    役割分担= whatis は台帳(通信しない)、read_msg は実物(通信する)。
+    読めなければ False を返す(=呼び側がコマンドの案内に落ちる)。トークンが無い環境でも死なない。
+    """
+    try:
+        from read_msg import fetch, jst
+        res = fetch(msg_id, channel_id=channel_id or None, scan=False)
+    except Exception as e:
+        print(f"      (実物を読めない: {type(e).__name__})")
+        return False
+    if not res.get("ok"):
+        return False
+    m = res["msg"]
+    body = m.get("content") or ""
+    a = m.get("author") or {}
+    print(f"      Discord実物 {len(body)}字 / 投稿者={a.get('global_name') or a.get('username')}"
+          f" / {jst(m.get('timestamp'))}")
+    for line in body.split("\n"):
+        print("  | " + line)
+    return True
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("使い方: python scripts/discord/whatis.py <msg_id または Discordリンク>")
+    # ★--body= 台帳に残っている**本文の全文**を出す(2026-09-04・DEF-manga-shorts-ccd93dc601)。
+    #   既定は今まで通り骨格だけ。「Chamiが『1 b 2 a』で確定した、その選択肢の本文は何だったか」を
+    #   後から引くための口で、send_audit が 2026-09-04 以降に残す `body` 列を読む。
+    #   それ以前の便は head(120字)しか無い= その時は正直にそう言う(茶番にしない)。
+    argv = [a for a in sys.argv[1:] if a != "--body"]
+    want_body = len(argv) != len(sys.argv[1:])
+    if not argv:
+        print("使い方: python scripts/discord/whatis.py <msg_id または Discordリンク> [--body]")
         return 2
-    msg_id = extract_id(sys.argv[1])
+    msg_id = extract_id(argv[0])
     if not msg_id:
         print("msg_id を取り出せなかった(15桁以上の数字が要る)")
         return 2
@@ -110,10 +140,26 @@ def main():
         if not ch:
             print("  台帳に無い= 未記録の便(webhook直投稿の疑い / 古い便)。send_audit・work_audit・inbox のどれにも msg_id が無い。")
             print("  → この便は出所を機械で辿れない。webhook投稿口に msg_id 記録を足すのが次の一手。")
+            print(f"  → 本文そのものはDiscordの実物から読める: python scripts/discord/read_msg.py {msg_id}")
             return 1
         return 0
     for label, d in hits:
         print("  " + summarize(label, d))
+        if want_body:
+            body = d.get("body") or d.get("content") or ""
+            if body:
+                cut = "(★全文が入り切らず切られている)" if d.get("body_truncated") else ""
+                print(f"  --- 本文の全文 {cut}({len(body)}字)")
+                for line in str(body).split("\n"):
+                    print("  | " + line)
+            else:
+                # ★「無い」を「短い」で埋めない。head しか無いなら head しか無いと言う。
+                #   ただし黙って諦めない= 2026-09-05 から読み取り口(read_msg.py)がある。
+                #   台帳に本文が無い便(2026-09-04より前 / 他室・他botの発言)はDiscordの実物から読む。
+                print("  --- 本文の全文= この台帳には無い(2026-09-04より前の便は head120字まで)。"
+                      "\n      → Discordの実物から読む:")
+                if not live_body(msg_id, d.get("channel_id") or ""):
+                    print(f"        python scripts/discord/read_msg.py {msg_id}")
     return 0
 
 
