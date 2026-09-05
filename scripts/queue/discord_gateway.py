@@ -33,7 +33,17 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 DAEMONS_DIR = os.path.join(ROOT, "scripts", "_daemons")
 sys.path.insert(0, DAEMONS_DIR)
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
 from process_liveness import pid_alive as _pid_alive  # noqa: E402
+try:
+    from msg_text import msg_text_obj as _msg_text_obj  # noqa: E402
+except Exception as _e:                                 # noqa: BLE001
+    print(f"警告: scripts/_common/msg_text.py を読めない({_e})= "
+          f"引用元の本文が content だけの縮退で載る(embedの人格便を引用返信されると空になる)",
+          flush=True)
+
+    def _msg_text_obj(m):
+        return str(getattr(m, "content", None) or "")
 GW_PULSE = os.path.join(LOCAL, "queue", "_gateway_pulse.txt")
 
 
@@ -312,9 +322,13 @@ def _quote_of(src):
     content = getattr(src, "content", None)
     if src is None or content is None:
         return None
-    body = str(content)
+    # ★content だけを引くと、embedで出た人格便を引用返信された時に**中身0字のまま
+    #   resolved=True** で渡り、セッションは「引用があるのに空」で的外れな返事をする(便6-3)。
+    #   本文は正本 msg_text_obj() で読む(判定は scripts/_common/msg_text.py 1本・ORG-11)。
+    full = _msg_text_obj(src) or str(content)
+    body = full
     if len(body) > REPLY_QUOTE_MAX:
-        body = body[:REPLY_QUOTE_MAX] + f"…(以下略・引用元は全{len(str(content))}字)"
+        body = body[:REPLY_QUOTE_MAX] + f"…(以下略・引用元は全{len(full)}字)"
     atts = list(getattr(src, "attachments", None) or ())
     return {
         "msg_id": str(getattr(src, "id", "") or ""),

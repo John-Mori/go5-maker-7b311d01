@@ -35,6 +35,16 @@ except Exception:
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from msg_text import msg_text            # 本文=content+embedsの全文(正本1本・ORG-11)
+except Exception as _e:                      # noqa: BLE001
+    print(f"警告: scripts/_common/msg_text.py を読めない({_e})= "
+          f"自己消火の判定が content だけの縮退で動く(embedで出した自分の警報を見落とす)",
+          flush=True)
+
+    def msg_text(m):
+        return str((m or {}).get("content") or "")
 INBOX_FILE = os.path.join(LOCAL, "discord_inbox.jsonl")
 FOR_CLAUDE_FILE = os.path.join(LOCAL, "discord_inbox_for_claude.jsonl")
 CLAUDE_ACTIVE = os.path.join(LOCAL, "llm", "claude_active.txt")
@@ -1742,7 +1752,9 @@ def unanswered_verdict(msgs, now_epoch, threshold_sec=UNANSWERED_SEC):
         return (False, None, 0, "")          # 直近にChamiの発言が無い=対象外
     # Chamiの発言より後(=リストの手前)に、返事と数えられる発言が在るか
     for m in msgs[:chami_at]:
-        if _is_watchdog_notice(m.get("content")):
+        # ★content だけ見ると、自分の警報が embed で出た日に**自分の警報を「返事」と数える**=
+        #   その瞬間に警報が止まる(便6-3・沈黙が最悪の事故)。本文は正本 msg_text() で読む。
+        if _is_watchdog_notice(msg_text(m)):
             continue                          # この検査自身の投稿は返事ではない(自己消火の防止)
         return (False, None, 0, "")
     cm = msgs[chami_at]
@@ -1789,7 +1801,7 @@ def answered_since(msgs, alerted_id):
             continue
         if str((m.get("author") or {}).get("username") or "") in CHAMI_USERNAMES:
             continue                      # ★Chami自身の催促は返事ではない
-        if _is_watchdog_notice(m.get("content")):
+        if _is_watchdog_notice(msg_text(m)):   # ★同上(embedで出た自分の✅を返事と数えない)
             continue
         return True
     return False

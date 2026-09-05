@@ -229,13 +229,21 @@ print("\n== H dept_daemon 側(replied_unverified を出す口)も同じ穴を塞
 dd = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 dd_src = open(dd, encoding="utf-8").read()
 tree = ast.parse(dd_src)
-fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_msg_text"), None)
-ok("H-1 _msg_text が居る", fn is not None)
-if fn:
-    g = {}
-    exec(compile(ast.Module([fn], []), dd, "exec"), g)                   # noqa: S102
-    ok("H-2 dept_daemon 側も embed を拾う", KEY in g["_msg_text"](EMBED_MSG))
-    ok("H-3 素の投稿も従来どおり", "素の投稿" in g["_msg_text"](PLAIN_MSG))
+# ★2026-09-05 恒久(イージス研究室・便6-1)= dept_daemon の写しは**消して正本を引く**形にした。
+#   だから「この中に def が在るか」ではなく「**正本を引いているか**」と「**正本が embed を読むか**」を見る。
+#   写しが復活したら H-1 が落ちる= 二重実装へ戻ったことに気づける(それがこの検査の役目)。
+CANON = os.path.join(ROOT, "scripts", "_common", "msg_text.py")
+imported = any(isinstance(n, ast.ImportFrom) and n.module == "msg_text"
+               and any(a.name == "msg_text" and a.asname == "_msg_text" for a in n.names)
+               for n in ast.walk(tree))
+dup = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_msg_text"), None)
+ok("H-1 _msg_text は正本 scripts/_common/msg_text.py を引いている(写しが module 直下に居ない)",
+   imported and os.path.exists(CANON) and dup is None,
+   f"import={imported} / 正本={os.path.exists(CANON)} / 直下の写し={dup is not None}")
+_c = {}
+exec(compile(open(CANON, encoding="utf-8").read(), CANON, "exec"), _c)   # noqa: S102
+ok("H-2 正本(=dept_daemon が引く実体)が embed を拾う", KEY in _c["msg_text"](EMBED_MSG))
+ok("H-3 素の投稿も従来どおり", "素の投稿" in _c["msg_text"](PLAIN_MSG))
 ok("H-4 content だけを見る走査が残っていない",
    '_norm_for_match(m.get("content"))' not in dd_src)
 ok("H-5 突合2箇所とも _msg_text 経由", dd_src.count("_norm_for_match(_msg_text(m))") == 2,

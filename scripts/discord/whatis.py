@@ -102,7 +102,15 @@ def live_body(msg_id, channel_id=""):
     if not res.get("ok"):
         return False
     m = res["msg"]
-    body = m.get("content") or ""
+    # ★content だけだと embed で出た部屋の便が「0字」に見え、照会そのものが茶番になる
+    #   (便6-3)。正本 msg_text() で content+embeds を読む。
+    sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+    try:
+        from msg_text import msg_text
+        body = msg_text(m)
+    except Exception as e:                     # noqa: BLE001
+        print(f"      (警告: msg_text.py を読めない({type(e).__name__})= content だけで表示する)")
+        body = m.get("content") or ""
     a = m.get("author") or {}
     print(f"      Discord実物 {len(body)}字 / 投稿者={a.get('global_name') or a.get('username')}"
           f" / {jst(m.get('timestamp'))}")

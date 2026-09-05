@@ -71,6 +71,23 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))          # = 5SecMovieMaker
+
+# ★2026-09-05 (イージス研究室・便6-2)= ここも `content` しか見ていなかった。
+#   embed で出す部屋(改修α室ほか `persona_send --color auto`)の投稿は本文が
+#   `embeds[].title` へ移り content は0字になる= 印を押された投稿の本文が
+#   「(本文なし。画像か添付だけの投稿)」として司令塔へ流れる= **炎上の中身が消える**。
+#   判定は `scripts/_common/msg_text.py` の1本だけを引く(ORG-11)。
+#   ★読めない時は content だけの縮退へ落ちる(見張りが起動しないのが最悪= fail-safe)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from msg_text import msg_text
+except Exception as _e:                                          # noqa: BLE001
+    print(f"警告: scripts/_common/msg_text.py を読めない({_e})= "
+          f"印の本文が content だけの縮退で出る(embedの本文を見落とす)", flush=True)
+
+    def msg_text(m):
+        return str((m or {}).get("content") or "")
+
 SOUGOU = os.path.normpath(os.path.join(ROOT, ".."))              # = D:\SougouStartFolder
 LOCAL = os.path.join(ROOT, "local")
 REGISTRY = os.path.join(SOUGOU, "00_AI-HQ", "org_registry.yml")
@@ -418,7 +435,8 @@ def collect(api, chans, since_ms, marks, seen, now_str):
                     "meaning": hit["meaning"],
                     "author": (m.get("author") or {}).get("username", ""),
                     "posted_at": str(m.get("timestamp") or ""),
-                    "content": (m.get("content") or ""),
+                    # ★content だけでは embed で出た部屋の本文が0字になる(便6-2)。
+                    "content": msg_text(m),
                     "by": [f"{u.get('username')}({u.get('id')})" for u in humans],
                     "by_chami": any(str(u.get("id")) == CHAMI_USER_ID for u in humans),
                     "detected_at": now_str,
