@@ -4,7 +4,7 @@
 
 1. YMM4 Shorts制作: `D:\SougouStartFolder\5chShortMovie\CLAUDE.md`
 2. オタクグッズアフィ: `D:\SougouStartFolder\AnimeGameGoodsAFI`
-3. Discord/Claude組織運営: `D:\SougouStartFolder\00_AI-HQ` とこのrepoの `scripts/{llm,queue,discord,_daemons}`
+3. Discord/Claude組織運営: `D:\SougouStartFolder\AI-Organization`。人格・台帳は `00_AI-HQ`、実行コードは移行中のみこのrepoの `scripts/{llm,queue,discord,_daemons}`
 4. 旧5秒動画Webアプリ: `産業廃棄物/2026-09-05/旧自動読込コンテキスト/5SecMovieMaker_CLAUDE_legacy_20260905.md` (明示的な復旧時だけ)
 
 共通ルール:
