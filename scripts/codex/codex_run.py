@@ -248,13 +248,21 @@ def run_codex(prompt, worktree, env, model, timeout, sandbox):
     戻り値 (text, ok)。ok=False なら text は失敗理由(人向け)。
     - -o で最終メッセージだけをファイルへ書かせる(900KBのログを漁らない)。
     - --skip-git-repo-check= worktreeもrepoだが将来 add-dir 併用でも落ちないよう明示。
+    ★2026-09-05 aegis-gl 実測の直し= `-o` の置き場は worktree の中なので **untracked のまま残ると
+      `worktree_changed()` が毎回 True になる**(実物= brieftest-red の worktree に
+      `?? .codex_last_message.txt` だけが残り「実装が残った」と誤判定された)。
+      読み終わったら**必ず消す**= 生成物でない足跡で司令塔への引き継ぎを起こさない。
     """
     last = os.path.join(worktree, ".codex_last_message.txt")
-    try:
-        if os.path.exists(last):
-            os.remove(last)
-    except OSError:
-        pass
+
+    def _drop_last():
+        try:
+            if os.path.exists(last):
+                os.remove(last)
+        except OSError:
+            pass
+
+    _drop_last()
     cmd = CODEX_CMD + ["exec", "-C", worktree, "--skip-git-repo-check",
                        "-s", effective_sandbox(sandbox), "-m", model, "-o", last, prompt]
     try:
@@ -262,12 +270,14 @@ def run_codex(prompt, worktree, env, model, timeout, sandbox):
                            encoding="utf-8", errors="replace", timeout=timeout,
                            stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
+        _drop_last()
         return f"(生成失敗: codex exec が {timeout}秒で応答しなかった)", False
     text = ""
     try:
         text = open(last, encoding="utf-8").read().strip()
     except OSError:
         text = ""
+    _drop_last()
     if not text:
         # -o が空= 401/400等でモデルが1文字も返していない。stdoutから理由を拾う。
         tail = (r.stdout or "") + (r.stderr or "")
@@ -378,8 +388,13 @@ def do_ping(model, sandbox, timeout):
 # 本体
 # ---------------------------------------------------------------------------
 def answer(prompt, to=None, tag="cli", model=DEFAULT_MODEL, sandbox="workspace-write",
-           timeout=600, keep_worktree=False):
-    """1件を Codex に投げ、(必要なら)Codexとして投稿する。戻り値=終了コード。"""
+           timeout=600, keep_worktree=False, briefing=True):
+    """1件を Codex に投げ、(必要なら)Codexとして投稿する。戻り値=終了コード。
+
+    briefing=True(既定)で規律を注入する(Chami指示 2026-09-05)= worktree の
+    local/CODEX_BRIEFING.md へ全文を置き、プロンプト先頭へ芯を載せる。詳細= codex_briefing.py。
+    ★台帳とログには**依頼本文だけ**を残す(規律は毎回同じ= 台帳を規律で埋めない)。
+    """
     env = ensure_home(model, sandbox)
     wt, branch, base = make_worktree(tag)
     if not wt:
@@ -388,10 +403,21 @@ def answer(prompt, to=None, tag="cli", model=DEFAULT_MODEL, sandbox="workspace-w
     claimed = claim(topic, f"codex run: {prompt[:60]}")
     if not claimed:
         print(f"注意: 所有権の宣言に失敗(黒板不通)。それでも隔離worktree内なので続行する: {topic}")
+    full_prompt = prompt
+    if briefing:
+        try:
+            sys.path.insert(0, HERE)
+            import codex_briefing
+            codex_briefing.install(wt)
+            full_prompt = codex_briefing.preamble_for(prompt)
+            print(f"規律を注入= {os.path.join(wt, codex_briefing.BRIEF_REL)}")
+        except Exception as e:
+            # fail-open= 規律が組めなくても依頼そのものは通す(沈黙が最悪の事故)。
+            print(f"注意: 規律の注入に失敗(素の依頼で続行): {type(e).__name__}")
     t0 = time.time()
     changed = False
     try:
-        text, ok = run_codex(prompt, wt, env, model, timeout, sandbox)
+        text, ok = run_codex(full_prompt, wt, env, model, timeout, sandbox)
         changed = worktree_changed(wt, base)
     finally:
         if claimed:
@@ -433,6 +459,8 @@ def main():
                     choices=["read-only", "workspace-write", "danger-full-access"])
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--keep-worktree", action="store_true")
+    ap.add_argument("--no-briefing", action="store_true",
+                    help="規律を注入しない(検査で赤を見る時だけ使う。本番では使うな)")
     a = ap.parse_args()
 
     if a.ping:
@@ -445,7 +473,8 @@ def main():
               "[--tag <用途>] [--model m] [--sandbox m] [--timeout s] [--keep-worktree]")
         return 1
     return answer(prompt, to=a.to, tag=a.tag, model=a.model, sandbox=a.sandbox,
-                  timeout=a.timeout, keep_worktree=a.keep_worktree)
+                  timeout=a.timeout, keep_worktree=a.keep_worktree,
+                  briefing=not a.no_briefing)
 
 
 if __name__ == "__main__":
