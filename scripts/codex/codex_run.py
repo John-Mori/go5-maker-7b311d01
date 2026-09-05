@@ -9,9 +9,12 @@
 構成(束を分ける=べホップと同じ作法):
   頭脳 = Codex CLI (codex exec)。ChatGPTログイン(~/.codex/auth.json)を借りる。
   口   = 専用Discord bot。トークン=local/discord_codex_token.txt (Chami設置待ち・未設置なら投稿しない)
-  モデル= gpt-5.4 (既定)。実測 2026-09-05: ChatGPTアカウントでCLIが通るのは gpt-5.4。
-          gpt-5.x-codex / gpt-5.1 は 400「not supported when using Codex with a ChatGPT account」、
-          gpt-5.6-sol(デスクトップ版が使う)は CLI 0.120.0 では応答が返らず(exec不適)。
+  モデル= gpt-5.5 (既定)。★2026-09-05 10:21 に gpt-5.4 が打ち切られた(同日 05:49 までは通っていた)。
+          実測(10:35 研究室HQ): グローバルの CLI 0.120.0 では **どのモデルも** 400
+          「not supported when using Codex with a ChatGPT account」で1文字も生成しない。
+          gpt-5.5 だけ文面が違い「requires a newer version of Codex. Please upgrade」=版数切れが真因。
+          橋専用に CLI 0.153.4 を local/codex_cli へ入れたら gpt-5.5 が通った("OK" を実受信)。
+          なお -codex 系(gpt-5.5-codex / gpt-5.4-codex)は新CLIでも ChatGPTアカウントでは不可。
 
 ★INC-99 対策(ケヴィンの必須条件・これが無い配線は入れない):
   (a) **専用の作業場所で走らせる**= 実行ごとに repo の HEAD から git worktree を切り、
@@ -74,7 +77,14 @@ DC_API = "https://discord.com/api/v10"
 OWNERSHIP = os.path.join(ROOT, "scripts", "ownership.py")
 OWNER = "codex"
 
-DEFAULT_MODEL = "gpt-5.4"
+DEFAULT_MODEL = "gpt-5.5"
+
+# --- 橋専用の Codex CLI(グローバル/デスクトップ版には触らない) ---
+# ★実測 2026-09-05: グローバルの npm CLI は 0.120.0 で、サーバがこの版を切ったため
+#   どのモデルを渡しても 400 になる。橋だけ新版を持たせて版数を独立させる。
+#   入れ直し= npm install --prefix ./local/codex_cli @openai/codex@latest
+BRIDGE_CLI_JS = os.path.join(LOCAL, "codex_cli", "node_modules", "@openai",
+                             "codex", "bin", "codex.js")
 LOG = os.path.join(LOCAL, "llm", "codex_run_log.jsonl")
 
 
@@ -85,7 +95,14 @@ def _resolve_codex_cmd():
     Python の CreateProcess(shell=False)は .cmd を直接起動できず FileNotFoundError になる。
     シムは中で `node .../@openai/codex/bin/codex.js %*` を呼ぶだけなので、
     実体の codex.js を node で直接回す形へ解決する(cmd.exe 経由の引数破損も避ける)。
+
+    ★版数対策(実測 2026-09-05): 橋専用CLI(local/codex_cli)が在ればそれを最優先で使う。
+      グローバルは 0.120.0 のまま = サーバに切られて全モデルが 400 になるため。
     """
+    node = shutil.which("node")
+    if node and os.path.exists(BRIDGE_CLI_JS):
+        return [node, BRIDGE_CLI_JS]
+
     exe = shutil.which("codex")
     if exe:
         low = exe.lower()
