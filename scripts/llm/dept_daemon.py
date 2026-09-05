@@ -5866,6 +5866,30 @@ def _norm_for_match(s):
     return re.sub(r"\s+", " ", str(s or "")).strip()
 
 
+def _msg_text(m):
+    """1通のメッセージから**人が読む文字**を全部集める(content + embedの中身)。
+
+    ★2026-09-05 研究室HQの止血(仮当て)。恒久=プラットフォームSE/イージス研究室。
+      穴= 着地確認が `content` しか見ていなかった。11:00:36 の commit `1b46147`
+      (`dept_daemon.py:9442-9443` で改修α室だけ `persona_send --color auto`)以降、
+      **改修α室の投稿は本文が `embeds[].title` へ移り `content` は0字**になり、
+      着いている返信を「不着」と読むようになった(実測= msg 1545618308370399244 は
+      content 0字・embeds[0].title に判定キーが一字一句在る)。C-056の形。
+      ★色の配線(9442-9443)は落とさない= 色はChami発注(msg 1541177562007609466)。
+        **読む側**を直す方が、今後embedで出す部屋が増えても効く。
+      ★同じ関数を `scripts/_daemons/replied_recheck.py` の `msg_text()` にも置いた
+        (プロセスが別で共有モジュールが無いため)。**恒久では1本に寄せてくれ。**
+    """
+    parts = [str(m.get("content") or "")]
+    for e in (m.get("embeds") or []):
+        parts.append(str(e.get("title") or ""))
+        parts.append(str(e.get("description") or ""))
+        for f in (e.get("fields") or []):
+            parts.append(str(f.get("name") or ""))
+            parts.append(str(f.get("value") or ""))
+    return " ".join(p for p in parts if p)
+
+
 def _split_parts_like_persona_send(text):
     """persona_send と**同じ切り方**で分割し、**全部の片**を投稿順に返す。
 
@@ -5936,7 +5960,7 @@ def _verify_siblings(msgs, others, extra_parts=()):
         if not h:
             continue
         for m in msgs or []:
-            c = _norm_for_match(m.get("content"))
+            c = _norm_for_match(_msg_text(m))       # ★embedも見る(_msg_text 参照)
             if c and h in c and t in c:
                 mid = str(m.get("id", ""))
                 if mid and mid not in seen:
@@ -5995,7 +6019,7 @@ def verify_replied(channel_name, sent_text, others=()):
         return False, f"API確認に失敗({type(e).__name__})"
     hit_head = hit_tail = None
     for m in msgs or []:
-        c = _norm_for_match(m.get("content"))
+        c = _norm_for_match(_msg_text(m))           # ★embedも見る(_msg_text 参照)
         if not c:
             continue
         if head in c:
@@ -9432,15 +9456,14 @@ class Daemon:
                         f"(DEF-aegis-gl-08c9e9de6d の再発) msg={mid}")
                 send_argv = [sys.executable, PERSONA_SEND, "--channel", ch,
                              "--persona", self.outgoing_persona(_who)]
-                # ★改修α(system-engineer)室だけ=咲季/オタコンの見分けを付ける人格色(Chami発注
-                #   msg 1541177562007609466 を人事[ククール]経由で受領・REQ-hr-room-dce8e235dd)。
-                #   手本=改善部門の embed左カラーバー方式=persona_send --color auto が
-                #   local/persona_colors.json を引いて左バーだけ人格色(本文descriptionは素・見出しも
-                #   太字も無し=Chami要望「ギリギリの細さ」)。未定義の名義は通常メッセージへfail-open。
-                #   ★この1室に限定(C-035/C-064)=他室は素の返信のまま
-                #   (learning-coachのembed廃止 2026-08-09 msg 1536100162924183633 を巻き戻さない)。
-                if self.dept == "system-engineer":
-                    send_argv += ["--color", "auto"]
+                # ★改修α(system-engineer)室の人格色バーは**廃止**(Chami『③線ごといらん』
+                #   2026-09-05 msg 1545640346569019462 を人事[ククール]経由で受領)。
+                #   旧仕様=この1室だけ persona_send --color auto で local/persona_colors.json を引き
+                #   embed左バーに咲季/オタコンの人格色を出していた(Chami発注 msg 1541177562007609466・
+                #   REQ-hr-room-dce8e235dd)。→ Chamiが「線ごと要らん」と裁定=分岐ごと撤去し素の返信へ。
+                #   ★副次効果=embed化で本文が embeds[].title へ移り content=0字になる罠(L5868- _msg_text
+                #   の止血の原因)も消える。persona_colors.json は削除しない(build_office.py が顔色に使用)。
+                #   ★learning-coachのembed色モード(2026-08-09廃止 msg 1536100162924183633)は元から巻き戻さない。
                 if (not _is_notice and not conv_only
                         and not getattr(self, "_relay_answered", False)):
                     send_argv += ["--suffix", "(精霊)"]
