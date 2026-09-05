@@ -87,6 +87,23 @@ RESOLVED = ("replied", "replied_late_confirmed", "replied_missing")
 #     不着の判定 11:44 より**前**だ(時系列で間に合わない)。立った瞬間に鳴らす必要がある。
 NOTIFIED_STATE = "missing_notified"
 
+# ★2026-09-05 恒久(イージス研究室・研究室HQの恒久2件目「発注元側への通知」への答え)。
+#   結論= **発注元へ新しい通知は足さない**(C-052。不着を直せるのは請けた側だけで、
+#   発注元に言えるのは「待て」しか無い)。足りていなかったのは通知ではなく**訂正**だ。
+#
+#   線引き(恒久1件目への答え。欠けたのが「報告」か「投稿」かで割る):
+#     - `completion_notify.py`   = 終わったのに**発注元が知らない** → 宛先=**発注元**。
+#     - `replied_recheck` のここ = 返信の**投稿そのものが落ちた** → 宛先=**請けた側**。
+#   この2本は宛先が違うので普段は交わらない。**交わる点が1つだけ在る**=
+#   同じ request_id へ先に `completion_notified` が飛び、その**後で** `replied_missing` が立つ形。
+#   実測1件= `DISPATCH-system-engineer-1788573797865`(11:31 完遂通知 → 11:44 不着判定)。
+#   この時、発注元は「終わった」と聞いたのに**部屋に実物が無い**まま置かれる。
+#   → 発注元へ出すのはこの1点だけ= **さっきの「終わった」を取り消す訂正**。
+#   新しい宛先を増やすのではなく、**もう鳴らした相手へ言い直す口**を足す(ORG-39の裏側=
+#   「やった」と言ってしまったものを取り消す経路が今まで0だった)。
+COMPLETION_STATE = "completion_notified"
+CORRECTED_STATE = "missing_corrected"
+
 
 def token():
     with open(os.path.join(LOCAL, "discord_bot_token.txt"), encoding="utf-8") as f:
@@ -194,6 +211,34 @@ def load_rows(redo_missing=False):
     return [r for r in pend if r.get("request_id") not in resolved], resolved
 
 
+def load_notify_states():
+    """(完遂を発注元へ通知済みの rid, 既に訂正を出した rid) を返す。
+
+    ★訂正は**1回だけ**出す(冪等)。同じ不着で発注元を二度叩かない= 通知の価値を落とすと
+      次の本物が読み飛ばされる(ORG-42)。
+    ★台帳が無い/壊れている時は空集合= 訂正が出ないだけで、請けた側への通知は生きる(fail-open)。
+    """
+    done, corrected = set(), set()
+    if not os.path.exists(REQUEST_LOG):
+        return done, corrected
+    with open(REQUEST_LOG, encoding="utf-8", errors="replace") as f:
+        for ln in f:
+            if '"state"' not in ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except Exception:
+                continue
+            rid, st = r.get("request_id"), r.get("state")
+            if not rid:
+                continue
+            if st == COMPLETION_STATE:
+                done.add(rid)
+            elif st == CORRECTED_STATE:
+                corrected.add(rid)
+    return done, corrected
+
+
 def match_keys(head):
     """突合キーの候補を作る。**先頭20字だけでは足りない**(実測)。
 
@@ -227,27 +272,20 @@ def match_keys(head):
     return out
 
 
-def msg_text(m):
-    """1通のメッセージから**人が読む文字**を全部集める。
+# ★2026-09-05 恒久(イージス研究室)= 研究室HQの止血で2箇所へ別々に置かれた同じ関数を
+#   `scripts/_common/msg_text.py` の1本へ寄せた(便6-1)。ここは呼ぶだけの薄い口だ。
+#   もう片方= `scripts/llm/dept_daemon.py::_msg_text` も同じ1本を呼ぶ。
+#   ★読めない時は content だけの縮退へ落ちる(見張りが起動しないのが最悪= fail-safe)。
+#     ただし**黙って落ちない**= 1行出す。縮退で偽の replied_missing が戻るのが二番目に悪い。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+try:
+    from msg_text import msg_text
+except Exception as _e:                                  # noqa: BLE001
+    print(f"警告: scripts/_common/msg_text.py を読めない({_e})= "
+          f"着地判定が content だけの縮退で動く(embedの本文を見落とす)", flush=True)
 
-    ★2026-09-05 研究室HQの止血。恒久=プラットフォームSE/イージス研究室。
-      穴= ここは `content` しか見ていなかった。ところが 11:00:36 の commit `1b46147`
-      (改修α室のデーモン投稿に人格色=embed左バーを配線)以降、**改修α室の投稿は本文が
-      `embeds[].title` へ移り `content` は0字**になった。実測= msg 1545618308370399244 は
-      content 0字 / embeds[0].title に判定キーが一字一句そのまま在る。
-      結果、着いている返信を「不着」と読み、偽の `replied_missing` が2件立った。
-      ★これは C-056(前は動いていた物が変更で後退)の形だ。色の配線側は落とさない
-      =色はChami発注(msg 1541177562007609466)で、落とす判断はHQの範囲外。
-      **読む側を直す**方が、今後embedで出す部屋が増えても効く(ad研究室[モドリッチ]の指摘)。
-    """
-    parts = [str(m.get("content") or "")]
-    for e in (m.get("embeds") or []):
-        parts.append(str(e.get("title") or ""))
-        parts.append(str(e.get("description") or ""))
-        for f in (e.get("fields") or []):
-            parts.append(str(f.get("name") or ""))
-            parts.append(str(f.get("value") or ""))
-    return " ".join(p for p in parts if p)
+    def msg_text(m):
+        return str((m or {}).get("content") or "")
 
 
 def scan_window(tok, cid, keys, base, pages, back_min, fwd_min):
@@ -346,12 +384,38 @@ def dept_head_of(dept):
         return None                                              # fail-open= 直接出して結果を見る
 
 
+def _dispatch_send(to, work, body, slug):
+    """dispatch.py で1本投函する(裏=キューだけ)。戻り値=(ok, 理由の文字列)。
+
+    ★`--also-post` は付けない。★投函の口をここ1つにする= 不着通知と訂正で別々に組むと、
+      片方だけ引数が古くなった日に**そちらだけ静かに弾かれる**(rc=2 は誰も見ない)。
+    """
+    tmp = os.path.join(LOCAL, "_work", f"{slug}.txt")
+    try:
+        os.makedirs(os.path.dirname(tmp), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(body)
+        import subprocess
+        cp = subprocess.run(
+            [sys.executable, DISPATCH, "--dept", to, "--from", "不着検知(自動)",
+             "--from-dept", "hq", "--audience", "ai", "--body-file", tmp, "--work", work],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        why = ((cp.stderr or "") + " " + (cp.stdout or "")).strip().replace("\n", " ")
+        return (cp.returncode == 0), f"rc={cp.returncode} {why[:160]}"
+    except Exception as e:                                       # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
+
+
 def notify_missing(rows, dry_run=False):
     """不着が立った便を、**書いた本人(請けた部門)へ1本だけ**流す。
 
     宛先を1つに絞る理由(C-052):
       不着を直せるのは**もう一度出せる側**だけだ。発注元は completion_notify が既に
       触っている口で、そこの改修は所有者(イージス研究室)の領分。二重に鳴らさない。
+    ★2026-09-05 恒久= 例外が1つだけ在る。**発注元へ既に「終わった」と言ってしまった便**
+      (`completion_notified` が先に飛び、後から `replied_missing` が立った形)には、
+      その発注元へ**訂正**を1本出す。新しい宛先は増やしていない= 既に鳴らした相手への
+      言い直しだ。詳しくは COMPLETION_STATE の節。
     ★ただし宛先は「請けた部門」そのものではなく、**部門長がいるなら部門長**にする。
       3階梯(RULES §6.4)= HQから配下へ直接出すのは飛び級で、dispatch 側のガードが弾く。
     ★通知した事実は request_log へ `missing_notified` で追記する(冪等・既存行は触らない)。
@@ -360,6 +424,7 @@ def notify_missing(rows, dry_run=False):
     if not rows:
         return []
     letters = letters_of([r.get("request_id") for r in rows])
+    comp_done, corrected = load_notify_states()
     now = dt.datetime.now(JST)
     done = []
     for r in rows:
@@ -387,31 +452,52 @@ def notify_missing(rows, dry_run=False):
             + ("★部門長宛てなのは3階梯(HQから配下へ直接は飛び級)だからだ。手渡しを頼む。\n" if head else "")
             + "★この便は自動だ。返事は要らない=出し直したかどうかは次回の判定で分かる。"
         )
+        # ★発注元へ「終わった」と既に言ってしまっているか(= 訂正が要る唯一の形)。
+        need_fix = (rid in comp_done) and (rid not in corrected) and bool(origin)
         if dry_run:
-            print(f"  [通知(dry-run)] → {to} (請け={dept}) req={rid} 発注元={who}")
+            print(f"  [通知(dry-run)] → {to} (請け={dept}) req={rid} 発注元={who}"
+                  + ("  + [訂正(dry-run)] → " + (dept_head_of(origin) or origin) if need_fix else ""))
             continue
-        tmp = os.path.join(LOCAL, "_work", f"missing_notify_{rid}.txt")
-        try:
-            os.makedirs(os.path.dirname(tmp), exist_ok=True)
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(body)
-            import subprocess
-            cp = subprocess.run(
-                [sys.executable, DISPATCH, "--dept", to, "--from", "不着検知(自動)",
-                 "--from-dept", "hq", "--audience", "ai", "--body-file", tmp,
-                 "--work", f"{dept}の返信が着地していない({rid})=同じ内容をもう一度出す"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
-            ok = (cp.returncode == 0)
-            # ★rc!=0 は stdout 側に理由が出る(dispatch のガードは print で落とす)。両方拾う。
-            why = ((cp.stderr or "") + " " + (cp.stdout or "")).strip().replace("\n", " ")
-            print(f"  {'[通知した]' if ok else '[通知失敗]'} → {to} (請け={dept}) req={rid} "
-                  f"rc={cp.returncode} {'' if ok else why[:160]}")
-            if ok:
-                done.append({"ts": now.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": rid,
-                             "dept": dept, "state": NOTIFIED_STATE,
-                             "evidence": f"不着を通知 to_dept={to} 請けた部門={dept} 発注元={who} via=dispatch"})
-        except Exception as e:                                   # noqa: BLE001
-            print(f"  [通知失敗] → {dept} req={rid} {type(e).__name__}: {e}")
+        # ★rc!=0 の理由は stdout 側に出る(dispatch のガードは print で落とす)。両方拾う。
+        ok, why = _dispatch_send(
+            to, f"{dept}の返信が着地していない({rid})=同じ内容をもう一度出す", body,
+            f"missing_notify_{rid}")
+        print(f"  {'[通知した]' if ok else '[通知失敗]'} → {to} (請け={dept}) req={rid} "
+              f"{'' if ok else why}")
+        if ok:
+            done.append({"ts": now.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": rid,
+                         "dept": dept, "state": NOTIFIED_STATE,
+                         "evidence": f"不着を通知 to_dept={to} 請けた部門={dept} 発注元={who} via=dispatch"})
+        if not need_fix:
+            continue
+        # ★★訂正= 「さっき『終わった』と言ったが、実物が部屋に無い」。
+        #   新しい宛先ではない= **completion_notify が既に鳴らした相手**へ言い直すだけだ。
+        #   ★請けた側への通知が失敗していても訂正は出す= 発注元は「終わった」と聞いたまま
+        #     待っている側で、こちらの投函失敗は向こうの事情ではない(沈黙が最悪)。
+        fix_to = dept_head_of(origin) or origin
+        fix_body = (
+            f"[訂正(自動)] さきほどの**完遂通知は取り消す**。返信の実物が部屋に無い。\n\n"
+            f"■ request_id= `{rid}`\n"
+            f"■ 請けた部門= {dept}\n"
+            f"■ 元の部屋= {L.get('channel') or '(記帳に無い)'}\n"
+            f"■ 判定= `{COMPLETION_STATE}`(発注元へ完遂を通知済み)の後に "
+            f"`replied_missing` / {r.get('ts')}\n"
+            f"■ 根拠= {r.get('evidence') or ''}\n\n"
+            "**本文は書かれているが、投稿だけが落ちている。**だから『終わった』と聞いたのに\n"
+            "部屋には何も無い、という形になっている。あなたの見落としではない。\n\n"
+            f"→ 出し直しは **{dept}** 側へ既に頼んである。**待つ以外にすることは無い**"
+            "(こちらから急かす必要も無い= 次回の判定で出し直しの有無が分かる)。\n"
+            "★この便は自動だ。返事は要らない。")
+        fok, fwhy = _dispatch_send(
+            fix_to, f"完遂通知の訂正({rid})=返信が着地していない", fix_body, f"missing_fix_{rid}")
+        print(f"  {'[訂正した]' if fok else '[訂正失敗]'} → {fix_to} (発注元={origin}) req={rid} "
+              f"{'' if fok else fwhy}")
+        if fok:
+            done.append({"ts": now.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": rid,
+                         "dept": dept, "state": CORRECTED_STATE,
+                         "evidence": f"完遂通知を訂正 to_dept={fix_to} 発注元={origin} "
+                                     f"請けた部門={dept} via=dispatch"})
+            corrected.add(rid)                      # 同じ回に2度出さない
     if done:
         with open(REQUEST_LOG, "a", encoding="utf-8") as f:
             for row in done:
