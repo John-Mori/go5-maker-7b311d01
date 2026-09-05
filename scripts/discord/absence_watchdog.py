@@ -168,6 +168,22 @@ SUMMARY_DEPT = "incident"
 #   ⑤ 鳴らす先は受け手が読む場所= producerの持ち主の部屋(entryのalert_dept)。研究室HQ止まりにしない。
 PRODUCERS_REGISTRY = os.path.join(LOCAL, "llm", "producers.json")
 
+# --- ★Codex橋CLIの版ずれ警報 (2026-09-05 platform-se・ケヴィン/イージス研究室 発注「橋の恒久修理」(a)) ---
+# なぜ: 橋専用CLI(local/codex_cli)の版が npm 最新から遅れると、モデルが server 側で
+#   打ち切られ全モデル400になる(2026-09-05 10:21 グローバル0.120.0が版数切れで全モデル400=実障害)。
+#   これを手順書(人手の入口)にすると§3どおり実測0件になる=**機械が自分で**npm最新と現物を比べて鳴らす。
+# 設計(producer鮮度と同じレール):
+#   ・現物の版= local/codex_cli の @openai/codex/package.json / 最新= `npm view @openai/codex version`。
+#   ・現物 < 最新(または現物が読めない=橋CLI不在)なら ⚠ を1回だけ(状態遷移)。追いついたら✅を1回(C-046)。
+#   ・npm不通=判定不能は鳴らさない側(fail-open)・一時不通で狼にしない(consecutive N・C-041)。
+#   ・自己検証= local/llm/codex_drift_selftest.json を置くと、生きた常駐が本物のtickで1回だけ鳴る
+#     ([[never-fired-never-verified]]=登録済み≠動く・本番条件を1回通す)。撃ったら消える(one-shot)。
+BRIDGE_PKG_JSON = os.path.join(LOCAL, "codex_cli", "node_modules",
+                               "@openai", "codex", "package.json")
+CODEX_BRIDGE_ALERT_DEPT = "aegis-gl"   # 発注元=研究室GL・実在の生きた部屋(検収もここ)。持ち場=platform-se
+CODEX_DRIFT_SELFTEST = os.path.join(LOCAL, "llm", "codex_drift_selftest.json")
+CODEX_DRIFT_CONSEC = 2                  # npmの一時不通で狼にしない(C-041)
+
 # --- ★Chami無応答の検知 (2026-08-16 イージス研究室・REQ-aegis-gl-13fcea00f4) ---
 # なぜ: Chamiが「1番困る部類の出来事」と名指ししたのは **反応がない** ことだ(2026-08-06)。
 #   ところがこのwatchdogの検査は全部**機械の脈**を見ている= gatewayの脈・窓の脈・queueの滞留・
@@ -1586,6 +1602,113 @@ def check_producer_freshness(state, dry_run):
     state["producer_fresh"] = pf
 
 
+def _ver_tuple(s):
+    """'0.153.4' -> (0,153,4)。数でない断片は0にして比較可能なタプルにする。"""
+    out = []
+    for part in str(s).strip().split("."):
+        m = re.match(r"\d+", part)
+        out.append(int(m.group()) if m else 0)
+    return tuple(out) or (0,)
+
+
+def _installed_bridge_version():
+    """橋専用CLI(local/codex_cli)の現物の版。読めなければ空(=橋CLI不在扱い)。"""
+    try:
+        with open(BRIDGE_PKG_JSON, encoding="utf-8") as f:
+            return str(json.load(f).get("version") or "").strip()
+    except Exception:
+        return ""
+
+
+def _npm_latest_codex():
+    """`npm view @openai/codex version`。取れなければNone(=判定不能・鳴らさない)。
+
+    ★Windowsの npm は npm.cmd=shell経由でないと WinError 2(codexと同じ罠)。固定文字列ゆえ注入無し。
+    """
+    try:
+        r = subprocess.run("npm view @openai/codex version", shell=True,
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60)
+        lines = [l.strip() for l in (r.stdout or "").splitlines() if l.strip()]
+        v = lines[-1] if lines else ""
+        # 版らしい形(数.数...)だけ採る=npmの警告行を版と誤認しない
+        return v if re.match(r"^\d+\.\d+", v) else None
+    except Exception:
+        return None
+
+
+def check_codex_bridge_version(state, dry_run):
+    """橋専用CLIの版が npm 最新から遅れたら、機械が自分で掴んで持ち主の部屋へ1回だけ鳴らす。
+
+    版数切れ(0.120.0が全モデル400)の再来を、手順書でなく常駐で掴む(§3=人手の入口にしない)。
+    状態遷移で1回だけ鳴らし、追いついたら✅を1回(check_producer_freshness と同じレール・C-046)。
+    npm不通=判定不能は鳴らさない(fail-open)。自己検証sentinelがあれば生きたtickで1回だけ鳴らす(one-shot)。
+    """
+    cbv = state.get("codex_bridge_ver") or {"consec": 0, "down": False}
+    now_epoch = time.time()
+
+    selftest = None
+    try:
+        if os.path.exists(CODEX_DRIFT_SELFTEST):
+            with open(CODEX_DRIFT_SELFTEST, encoding="utf-8") as f:
+                selftest = json.load(f)
+    except Exception:
+        selftest = None
+
+    if selftest:
+        # ★one-shot自己検証= 生きた常駐が本物のtickで鳴るかを1回だけ通す。撃ったら即消す。
+        installed = str(selftest.get("fake_installed") or "0.0.0")
+        latest = str(selftest.get("fake_latest") or "9.9.9")
+        alert_dept = str(selftest.get("alert_dept") or "platform-se")
+        tag = "【自己検証】"
+        try:
+            os.remove(CODEX_DRIFT_SELFTEST)
+        except OSError:
+            pass
+    else:
+        latest = _npm_latest_codex()
+        if latest is None:
+            return                       # 最新が取れない=判定不能。鳴らさない(npm一時不通で狼にしない)
+        installed = _installed_bridge_version()
+        alert_dept = CODEX_BRIDGE_ALERT_DEPT
+        tag = ""
+
+    missing = not installed
+    drift = bool(installed) and _ver_tuple(installed) < _ver_tuple(latest)
+
+    if not (drift or missing):
+        if cbv.get("down"):
+            close_dept = cbv.get("alert_dept") or CODEX_BRIDGE_ALERT_DEPT
+            if bot_send(close_dept,
+                        f"✅Codex橋CLIの版ずれ 解消(自動監視): 現物 {installed} が最新 {latest} に追いついた。",
+                        dry_run, by_dept=True):
+                cbv["down"] = False
+                cbv["consec"] = 0
+        else:
+            cbv["consec"] = 0
+        state["codex_bridge_ver"] = cbv
+        return
+
+    # ドリフト検知= C-041: 一度の観測では鳴らさない(N回連続)。自己検証は即撃つ。
+    cbv["consec"] = int(cbv.get("consec", 0)) + 1
+    if cbv.get("down") and not selftest:
+        state["codex_bridge_ver"] = cbv
+        return                           # 継続中の停止では鳴らさない(狼にしない)
+    if cbv["consec"] < CODEX_DRIFT_CONSEC and not selftest:
+        state["codex_bridge_ver"] = cbv
+        return                           # まだN回連続に満たない(npmの揺れを吸収)
+    what = ("現物の橋CLIが見つからない(local/codex_cli 未インストール)"
+            if missing else f"現物 {installed} < 最新 {latest}")
+    msg = (f"⚠{tag}Codex橋CLIの版ずれを検知(自動監視): {what}。"
+           f"版が遅れるとモデルがserver側で打ち切られ全モデル400になり得る(0.120.0の版数切れ事故と同型)。"
+           f"直し= `npm install --prefix ./local/codex_cli @openai/codex@latest`。復旧すれば自動で✅。持ち場=platform-se。")
+    if bot_send(alert_dept, msg, dry_run, by_dept=True):
+        cbv["down"] = True
+        cbv["alert_dept"] = alert_dept
+        cbv["last_alert"] = now_epoch
+    state["codex_bridge_ver"] = cbv
+
+
 def _discord_get(path, timeout=15):
     """Discord REST の GET。失敗はNone(判定不能=鳴らさない側へ倒す・fail-open)。"""
     try:
@@ -1753,6 +1876,7 @@ def run_once(dry_run=False):
     check_chime_health(state, dry_run)   # ★2026-07-21: チャイム線が落ちた部屋を可視化(ORG-14)
     check_relay_repair(state, dry_run)   # ★2026-07-26: gatewayの取りこぼしを15分毎に回収(catch-up欠落)
     check_producer_freshness(state, dry_run)  # ★2026-08-15: 登録制の鮮度警報(mirrorの静かな死=P1未検知を塞ぐ)
+    check_codex_bridge_version(state, dry_run)  # ★2026-09-05: Codex橋CLIの版ずれ(0.120.0版数切れ再来)を機械が掴む
     check_unanswered_chami(state, dry_run)  # ★2026-08-16: Chamiが書いたのに誰も返さない部屋(1番困る)を検知
     save_state(state)
     rows = read_inbox_rows()

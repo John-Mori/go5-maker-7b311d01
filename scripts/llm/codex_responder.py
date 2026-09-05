@@ -66,6 +66,11 @@ QUEUE_CLAIM_CAP = 2
 QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
 # codex_run.py の worktree保持ログ行を拾う正規表現(重い実装の着地点を引き継ぐため)。
 WT_RE = re.compile(r"★worktreeに変更あり=\s*(.+?)(?:\(枝|$)")
+# codex_run.py が print する失敗文『(生成失敗: … [not supported] rc=…)』から理由バケツを拾う。
+REASON_RE = re.compile(r"生成失敗[:：].*?\[([^\]]+)\]")
+# 橋(Codex回線)が落ちている系の理由= Chamiの依頼が悪いのではなく橋の不通。codex_run.py L294の版数切れバケツと同義。
+BRIDGE_DOWN_REASONS = ("not supported", "invalid_request", "unauthorized",
+                       "401", "429", "Error loading config")
 # codex_run.py の --timeout(既定600)より少し長く待つ(生成+worktree操作+投稿の余白)。
 RUN_TIMEOUT = 720
 
@@ -162,9 +167,11 @@ def escalate(channel, raw_line, note=""):
 def codex_answer(channel, content):
     """codex_run.py へ委譲= 専用worktreeで生成/実装し、Codex bot本人として部屋へ投稿。
 
-    戻り値 (ok, worktree_or_empty)。
+    戻り値 (ok, worktree_or_empty, reason)。
     - ok=False は生成失敗(投稿は codex_run 側で中止済み)= 呼び側が司令塔へ回す。
     - worktree_or_empty= 変更が残った worktree のパス(あれば)。無ければ空文字。
+    - reason= 失敗理由バケツ(codex_run の失敗文から抽出。"not supported" 等 / timeout / 空=不明)。
+      これで呼び側が「橋の不通」と「依頼の中身の問題」を見分けて文面を変える(ケヴィン発注(b))。
     """
     try:
         r = subprocess.run(
@@ -173,11 +180,13 @@ def codex_answer(channel, content):
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=RUN_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return False, ""
+        return False, "", "timeout"
     out = (r.stdout or "") + "\n" + (r.stderr or "")
     m = WT_RE.search(out)
     worktree = m.group(1).strip() if m else ""
-    return r.returncode == 0, worktree
+    rm = REASON_RE.search(out)
+    reason = rm.group(1).strip() if rm else ""
+    return r.returncode == 0, worktree, reason
 
 
 def handle(rec, raw_line):
@@ -200,7 +209,7 @@ def handle(rec, raw_line):
 
     # ★Codexは仕事をする側= 作業語で弾かない。部屋の発言はそのまま Codex へ渡す。
     mark(channel, msg_id, "着手")           # 重い実装を始める直前=着手(本格的な作業の開始)
-    ok, worktree = codex_answer(channel, content)
+    ok, worktree, reason = codex_answer(channel, content)
     if ok:
         append_line(PROCESSED, raw_line)
         if worktree:
@@ -217,12 +226,25 @@ def handle(rec, raw_line):
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "answered", "channel": channel,
              "q": content[:200], "worktree": worktree})
     else:
+        # ★2026-09-05 ケヴィン/イージス研究室 発注(b): 失敗の"出所"で文面を変える。
+        #   橋(Codex回線)の不通= 版数切れ/認証断/config壊れ 等は、Chamiの依頼が悪いのではない。
+        #   従来の「うまく処理できなかったので受付箱へ回しました」は依頼側の不備と読めた(実際ちゃみが誤解)。
+        #   →橋の不通と分かる文面へ差し替える。判断材料= codex_answer が返す reason(codex_run L294のバケツ)。
+        bridge_down = (reason == "timeout") or any(k in reason for k in BRIDGE_DOWN_REASONS)
         escalate(channel, raw_line,
-                 note=f"[codex] 生成失敗のため司令塔へ回送: {content[:120]}")
-        notify_room(channel, "うまく処理できなかったので、司令塔の受付箱へ回しました。")
-        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated_failed", "channel": channel,
-             "q": content[:200]})
-        print(f"  Codex失敗→Claude行き [{channel}] {content[:30]!r}")
+                 note=(f"[codex] {'橋(Codex回線)不通' if bridge_down else '生成失敗'}のため司令塔へ回送"
+                       f" [{reason or '不明'}]: {content[:120]}"))
+        if bridge_down:
+            notify_room(channel,
+                        "今『橋』(Codexへの回線)が落ちていて、応答を取り出せませんでした。"
+                        "依頼の中身の問題ではありません。司令塔へ復旧を上げたので、直り次第あらためて返します。")
+            mode = "escalated_bridge_down"
+        else:
+            notify_room(channel, "うまく処理できなかったので、司令塔の受付箱へ回しました。")
+            mode = "escalated_failed"
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": mode, "channel": channel,
+             "reason": reason, "q": content[:200]})
+        print(f"  Codex失敗→Claude行き [{channel}] reason={reason!r} {content[:30]!r}")
 
 
 # ---------------------------------------------------------------------------
