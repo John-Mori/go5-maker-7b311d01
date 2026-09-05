@@ -5000,6 +5000,18 @@ def audit_naming(dept, persona, text, rec=None):
                         #   「わざと見送った」と「取りこぼした」が同じ行に見え、
                         #   正しく動いている機構が「効いていない」と読まれる。
                         "skip": v.get("skip", ""),
+                        # ★voc= 咎めた出現のうち**呼びかけ位置**(行頭+読点)の件数
+                        #   (2026-09-06)。naming_gate._attach_hits が前から計算して
+                        #   verdict に載せていたのに、書き手2箇所(ここと
+                        #   output_gates.py)がどちらも写していなかった=
+                        #   台帳858行に voc キーが**0件**。その結果
+                        #   naming_drift_check._all_mention()(judgeable>=5 かつ
+                        #   voc==0 で地の文だけの組を落とす枝)が作られてから
+                        #   一度も発火していない。共通規律§3の実例。
+                        #   ★near からは後付けできない= near は改行を潰して保存する
+                        #     (naming_gate.py L423)ので行頭が消え、既存475行では
+                        #     _is_vocative が常に偽になる。
+                        "voc": v.get("voc", 0),
                         "msg_id": mid,
                         "excerpt": str(text or "")[:200],
                     }, ensure_ascii=False) + "\n")

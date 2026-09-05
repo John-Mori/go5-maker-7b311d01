@@ -204,6 +204,18 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
                          "near": v.get("near", ""), "hits": v.get("hits", 0),
                          # ★skip= なぜ直さなかったか(2026-09-04・常駐経路と同じ列)
                          "skip": v.get("skip", ""),
+                         # ★voc= 咎めた出現のうち**呼びかけ位置**(行頭+読点)の件数
+                         #   (2026-09-06)。naming_gate._attach_hits が前から計算して
+                         #   verdict に載せていたのに、書き手2箇所がどちらも写して
+                         #   いなかった= 台帳858行に voc キーが**0件**。
+                         #   その結果 naming_drift_check._all_mention()
+                         #   (judgeable>=5 かつ voc==0 で地の文だけの組を落とす枝)が
+                         #   作られてから一度も発火していない。共通規律§3
+                         #   「機械が自動で載せられない値を機構の前提にするな」の実例。
+                         #   ★near からは後付けできない= near は改行を潰して保存する
+                         #     (naming_gate.py L423 `.replace("\n"," ")`)ので行頭が
+                         #     消え、既存475行では _is_vocative が常に偽になる。
+                         "voc": v.get("voc", 0),
                          "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
         _append(NAMING_AUDIT, rows)
         summary["naming_fix"] = len(applied)
