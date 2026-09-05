@@ -180,6 +180,15 @@ def ensure_home(model, sandbox):
     shutil.copyfile(REAL_AUTH, os.path.join(BRIDGE_HOME, "auth.json"))
     env = dict(os.environ)
     env["CODEX_HOME"] = BRIDGE_HOME
+    # ★ChatGPTログイン一本化(Chami指示 msg 1545613962807083040 / 指示書#12・#13)=
+    #   子プロセスからは OpenAI APIキー系を**外す**。理由は二つ:
+    #   (1) ChatGPTプランの利用枠内でだけ使う運用なので、枠切れ時にAPI従量課金へ勝手に
+    #       流れる余地を根本から断つ(APIキーが子プロセスに無ければフォールバックできない)。
+    #   (2) ChatGPT認証済みでも APIキー系環境変数が居ると codex exec が失敗する事例が
+    #       報告されている(openai/codex#27651)ため、子プロセスの環境を明示的に管理する。
+    #   ★消すのは**この子プロセス用のコピー(env)だけ**= グローバル環境や他用途のキーには触れない。
+    for _k in ("OPENAI_API_KEY", "CODEX_API_KEY"):
+        env.pop(_k, None)
     return env
 
 

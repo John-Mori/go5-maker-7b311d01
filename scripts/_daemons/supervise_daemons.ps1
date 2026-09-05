@@ -72,6 +72,13 @@ $daemons = @(
   #   GO5_GATEWAY_JOBS / GO5_GATEWAY_JOBS_DEPTS / GO5_POLLER_SKIP_DEPTS are USER-level env
   #   (set via [Environment]::SetEnvironmentVariable) so schtasks-spawned instances inherit them.
   @{ Name='discord_gateway';  File='discord_gateway.py';  Rel='scripts\queue\discord_gateway.py';    LogRel='local\queue\_gateway_console.log' },
+  # codex_gateway (2026-09-05, platform-se; Chami instruction msg 1545613962807083040): the Codex
+  #   bot's OWN inbound WebSocket, so @Codex mentions still reach the queue when the main/Claude bot
+  #   is stopped (the discord_gateway above rides the Claude bot token; this one rides the Codex
+  #   token). Self-gates to fully DORMANT until local\discord_codex_token.txt exists -- registering
+  #   it here is inert (no connection, no queue access) until Chami drops the token. Dedup-safe with
+  #   discord_gateway's @Boss path via the queue's UNIQUE msg_id (same Discord message = one job).
+  @{ Name='codex_gateway';    File='codex_gateway.py';    Rel='scripts\queue\codex_gateway.py';      LogRel='local\llm\codex_gateway_console.log' },
   # clean_reader_serve (2026-09-03, requested by the analysis dept / Almond Eye): the LAN reader
   #   Chami opens on his phone at http://192.168.10.103:8000/ . It used to be started as a
   #   background task of an interactive session, so every time that session was closed the server
