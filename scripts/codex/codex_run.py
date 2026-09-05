@@ -383,12 +383,31 @@ def resolve_channel(target):
     return str(ch["id"])
 
 
+# Codex席の話者名。呼称ゲートCへ渡す speaker= 人事部門が確定した表示名と同じ文字列にする
+# (codex_responder.PERSONA_TENTATIVE と一致させること。ズレると呼称ルール.json の
+#  「ネイキッド・スネーク→一ノ瀬怜」行にも __男性キャラ__ の傘にも当たらず、行が休眠する)。
+CODEX_PERSONA = "ネイキッド・スネーク"
+
+
 def dc_send(token, channel_id, text):
     """Codex(bot本人)として投稿。2000字制限は段落優先で分割(behop踏襲)。"""
     try:
         sys.path.insert(0, os.path.join(ROOT, "scripts", "discord"))
         from enjoh import enjoh_backstop
         text = enjoh_backstop(text, tag="codex")
+    except Exception:
+        pass                                        # fail-open= 投稿は殺さない
+    # ★2026-09-05(aegis-gl)呼称ゲートC。**Codex席の出口はここ1つだけ**=撃つ点を数えた(C-064):
+    #     codex_run.py:540(本応答) / codex_responder.notify_room(短い通知)
+    #   の2箇所とも dc_send を通る。だから当てるのはこの1箇所でよい。
+    #   実測(2026-09-05)= それまで Codex の発話は**どのゲートも通っていなかった**。呼称ルール.json
+    #   へスネークの行を作っても(人事部門 msg 1545698215322714152 の返り)、通り道が無く休眠する。
+    #   ★当てるのは呼称だけ・呼びかけ位置だけ= dispatch と同型(理由は
+    #     output_gates.apply_naming_gate_only の docstring)。口調Dは当てない。
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        import output_gates as _og
+        text, _ = _og.apply_naming_gate_only("", CODEX_PERSONA, text, source="codex")
     except Exception:
         pass                                        # fail-open= 投稿は殺さない
     chunks, cur = [], ""
@@ -505,6 +524,7 @@ def answer(prompt, to=None, tag="cli", model=DEFAULT_MODEL, sandbox="workspace-w
             codex_briefing.install(wt)
             full_prompt = codex_briefing.preamble_for(prompt, memory=mem_block)
             print(f"規律を注入= {os.path.join(wt, codex_briefing.BRIEF_REL)}"
+                  + f" / 人格を注入= {os.path.join(wt, codex_briefing.PERSONA_REL)}"
                   + (f" / 記憶 {len(mem_block)}字を同梱" if mem_block else ""))
         except Exception as e:
             # fail-open= 規律が組めなくても依頼そのものは通す(沈黙が最悪の事故)。
