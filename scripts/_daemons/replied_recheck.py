@@ -227,6 +227,29 @@ def match_keys(head):
     return out
 
 
+def msg_text(m):
+    """1通のメッセージから**人が読む文字**を全部集める。
+
+    ★2026-09-05 研究室HQの止血。恒久=プラットフォームSE/イージス研究室。
+      穴= ここは `content` しか見ていなかった。ところが 11:00:36 の commit `1b46147`
+      (改修α室のデーモン投稿に人格色=embed左バーを配線)以降、**改修α室の投稿は本文が
+      `embeds[].title` へ移り `content` は0字**になった。実測= msg 1545618308370399244 は
+      content 0字 / embeds[0].title に判定キーが一字一句そのまま在る。
+      結果、着いている返信を「不着」と読み、偽の `replied_missing` が2件立った。
+      ★これは C-056(前は動いていた物が変更で後退)の形だ。色の配線側は落とさない
+      =色はChami発注(msg 1541177562007609466)で、落とす判断はHQの範囲外。
+      **読む側を直す**方が、今後embedで出す部屋が増えても効く(ad研究室[モドリッチ]の指摘)。
+    """
+    parts = [str(m.get("content") or "")]
+    for e in (m.get("embeds") or []):
+        parts.append(str(e.get("title") or ""))
+        parts.append(str(e.get("description") or ""))
+        for f in (e.get("fields") or []):
+            parts.append(str(f.get("name") or ""))
+            parts.append(str(f.get("value") or ""))
+    return " ".join(p for p in parts if p)
+
+
 def scan_window(tok, cid, keys, base, pages, back_min, fwd_min):
     """[base-back_min, base+fwd_min] の窓を**後ろから前へ**走査して一致を探す。
 
@@ -248,7 +271,7 @@ def scan_window(tok, cid, keys, base, pages, back_min, fwd_min):
             return None
         msgs = sorted(msgs, key=lambda m: int(m["id"]), reverse=True)
         for m in msgs:
-            c = norm(m.get("content") or "")
+            c = norm(msg_text(m))          # ★content だけ見ない(embed本文=上の msg_text 参照)
             if any(k in c for k in keys):
                 return m
         oldest = int(msgs[-1]["id"])
@@ -302,8 +325,14 @@ def letters_of(rids):
     return got
 
 
-def head_of(dept):
+def dept_head_of(dept):
     """その部門の部門長を返す(判定不能は None)。dispatch.py の判定を**借りる**。
+
+    ★名前に `dept_` を付けてある。**`head_of()` にするな**= 上に同名の
+      「evidence から突合鍵を取る head_of()」が既に居て、後から定義した方が
+      静かに勝つ。実際に踏んだ(2026-09-05・commit 141654b)= 判定側が
+      鍵の代わりに部門長を引きに行き、全行が「突合鍵が記帳に無い」で
+      判定不能になっていた。安全網が**赤も出さずに**死ぬ形だ。
 
     ★自前で持たない理由= 3階梯ガードを掛けているのは dispatch.py 側だ。ここで独自の表を
       持つと、向こうが変わった日に**通知だけ静かに弾かれ続ける**(rc=2 が誰にも見えない)。
@@ -341,7 +370,7 @@ def notify_missing(rows, dry_run=False):
         L = letters.get(rid) or {}
         origin = L.get("from_dept") or ""
         who = origin or (f"{L.get('author')}(人発)" if L.get("author") else "不明")
-        head = head_of(dept) or ""
+        head = dept_head_of(dept) or ""
         to = head or dept
         via = (f"配下の **{dept}** が書いた返信が" if head else "**あなたの部屋が書いた返信が")
         body = (

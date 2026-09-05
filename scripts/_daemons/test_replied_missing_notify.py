@@ -69,9 +69,9 @@ def run_notify(rows, rc=0, boom=False, dry_run=False, processed=None, head=None)
     with open(proc, "w", encoding="utf-8") as f:
         for r in (processed or []):
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    keep = (R.REQUEST_LOG, R.PROCESSED, R.LOCAL, subprocess.run, R.head_of)
+    keep = (R.REQUEST_LOG, R.PROCESSED, R.LOCAL, subprocess.run, R.dept_head_of)
     R.REQUEST_LOG, R.PROCESSED, R.LOCAL = log, proc, tmp
-    R.head_of = lambda d: head
+    R.dept_head_of = lambda d: head
     subprocess.run = stub
     buf, old = io.StringIO(), sys.stdout
     sys.stdout = buf
@@ -79,7 +79,7 @@ def run_notify(rows, rc=0, boom=False, dry_run=False, processed=None, head=None)
         done = R.notify_missing(rows, dry_run=dry_run)
     finally:
         sys.stdout = old
-        R.REQUEST_LOG, R.PROCESSED, R.LOCAL, subprocess.run, R.head_of = keep
+        R.REQUEST_LOG, R.PROCESSED, R.LOCAL, subprocess.run, R.dept_head_of = keep
     written = []
     if os.path.exists(log):
         with open(log, encoding="utf-8") as f:
@@ -185,6 +185,76 @@ BROKEN_2 = ("def main():\n"
 ok("D-1 must-fail: 鳴らさない main を赤にできる", wired(BROKEN_1) is False)
 ok("D-2 must-fail: 台帳より先に鳴らす main を赤にできる", wired(BROKEN_2) is False)
 ok("D-3 --no-notify の逃げ道がある", '"--no-notify"' in real_src)
+
+print("\n== G 着地走査が embed の中身を見るか(2026-09-05 の誤判定の真因) ==")
+# ★実物の形をそのまま写した。msg 1545618308370399244(11:15:20・花海咲季・改修α室)=
+#   content 0字 / embeds[0].title に判定キーが一字一句在る、を Discord API 直読みで確認済み。
+KEY = "着手はもう動いてるから安心してちゃみ。台本・画像・読み方の3欄+押すとYMMPが"
+EMBED_MSG = {"id": "1545618308370399244", "content": "",
+             "embeds": [{"title": KEY + "1本落ちるボタン、それが最初の1枚だからね。", "description": ""},
+                        {"title": "状態: 作業中(実装中・読み方の範囲だけちゃみの返事待ち)"}]}
+PLAIN_MSG = {"id": "1545610000000000000", "content": "素の投稿はこれまで通り content に本文がある",
+             "embeds": []}
+ok("G-1 embedの本文を拾う", KEY in R.msg_text(EMBED_MSG))
+ok("G-2 embedを複数持っていても全部見る", "状態: 作業中" in R.msg_text(EMBED_MSG))
+ok("G-3 素の投稿は従来どおり", "素の投稿" in R.msg_text(PLAIN_MSG))
+ok("G-4 fields も拾う(将来embedの形が変わっても落ちない)",
+   "値だ" in R.msg_text({"embeds": [{"fields": [{"name": "欄", "value": "これが値だ"}]}]}))
+ok("G-5 空のメッセージで落ちない", R.msg_text({}) == "")
+
+
+def scan_with(msgs, text_fn):
+    """本物の scan_window を、API だけ差し替えて通す。judge の中身は本物。"""
+    keep_api, keep_txt = R.api, R.msg_text
+    R.api = lambda path, tok: (msgs if "before=" in path else [])
+    R.msg_text = text_fn
+    try:
+        base = __import__("datetime").datetime(2026, 9, 5, 11, 15, tzinfo=R.JST)
+        return R.scan_window("tok", "1525646154933735425", [R.norm(KEY)], base, 1, 3, 30)
+    finally:
+        R.api, R.msg_text = keep_api, keep_txt
+
+
+found = scan_with([EMBED_MSG, PLAIN_MSG], R.msg_text)
+ok("G-6 走査が embed の返信を見つける", bool(found) and found.get("id") == EMBED_MSG["id"],
+   str(found and found.get("id")))
+# ★must-fail(C-053)= 壊れた側は「動く旧実装」= 直す前の content だけを見る版に戻して作る。
+OLD = lambda m: str(m.get("content") or "")                              # noqa: E731
+ok("D-4 must-fail: 旧実装(content のみ)なら見つからない=検査が効いている",
+   scan_with([EMBED_MSG, PLAIN_MSG], OLD) is None)
+ok("D-5 must-fail: 旧実装でも素の投稿は見つかる=旧実装が壊れているのではない",
+   (scan_with([PLAIN_MSG, {"id": "1", "content": KEY, "embeds": []}], OLD) or {}).get("id") == "1")
+
+print("\n== H dept_daemon 側(replied_unverified を出す口)も同じ穴を塞いだか ==")
+dd = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
+dd_src = open(dd, encoding="utf-8").read()
+tree = ast.parse(dd_src)
+fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_msg_text"), None)
+ok("H-1 _msg_text が居る", fn is not None)
+if fn:
+    g = {}
+    exec(compile(ast.Module([fn], []), dd, "exec"), g)                   # noqa: S102
+    ok("H-2 dept_daemon 側も embed を拾う", KEY in g["_msg_text"](EMBED_MSG))
+    ok("H-3 素の投稿も従来どおり", "素の投稿" in g["_msg_text"](PLAIN_MSG))
+ok("H-4 content だけを見る走査が残っていない",
+   '_norm_for_match(m.get("content"))' not in dd_src)
+ok("H-5 突合2箇所とも _msg_text 経由", dd_src.count("_norm_for_match(_msg_text(m))") == 2,
+   f"実測={dd_src.count('_norm_for_match(_msg_text(m))')}箇所")
+
+print("\n== I 同名関数で判定を殺していないか(自分で踏んだ罠・commit 141654b) ==")
+# ★経緯= 通知の宛先を引く関数を head_of() と名付けたら、先に居た
+#   「evidence から突合鍵を取る head_of()」を上書きし、判定側が全行
+#   「突合鍵が記帳に無い」に落ちた。赤も出ずに安全網だけが死ぬ形。
+ok("I-1 突合鍵の head_of が生きている",
+   R.head_of("先頭40字='ちゃみ、待った。橋は生きてる'") == "ちゃみ、待った。橋は生きてる",
+   repr(R.head_of("先頭40字='ちゃみ、待った。橋は生きてる'")))
+ok("I-2 部門長を引く関数は別名(dept_head_of)", hasattr(R, "dept_head_of"))
+src_r = open(SRC, encoding="utf-8").read()
+defs = [n.name for n in ast.parse(src_r).body if isinstance(n, ast.FunctionDef)]
+ok("I-3 トップレベルに同名の def が無い", len(defs) == len(set(defs)),
+   "重複=" + ",".join(sorted({d for d in defs if defs.count(d) > 1})) or "")
+ok("I-4 判定側は突合鍵の方を呼んでいる", 'head_of(r.get("evidence"))' in src_r)
+ok("I-5 通知側は部門長の方を呼んでいる", "dept_head_of(dept)" in src_r)
 
 print(f"\n== {len(PASS)} PASS / {len(FAIL)} FAIL ==")
 if FAIL:
