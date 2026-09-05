@@ -6,7 +6,7 @@
   bot 本人として投稿する)。グローバル username は新方式で `[a-z0-9_.]` しか通らないので
   「スネーク🐍Codex」は **username では原理的に置けない**(実測 2026-09-05: username=Codex_SnakeBot)。
   置ける口は1つだけ= サーバー内ニックネーム `PATCH /guilds/{guild}/members/@me {"nick": …}`
-  (Unicode可・32文字以内。ニックネームが在れば表示はそちらが優先される)。
+  (Unicode可・32文字以内。ニックが在れば表示はそちらが優先される)。
   この PATCH は Codex botトークンが要る。そのトークンは人事部門のセッションからは
   deny で読めない= 人事では撃てない。だから基盤(イージス研究室)側に口を置く。
 
@@ -14,7 +14,7 @@
   00_AI-HQ/departments/hr/personas/呼称ルール.json → codex_bot_display.確定表示名
 
 使い方:
-  python scripts/discord/set_codex_nick.py            … 現在のニックネームを測るだけ(既定は読み取り)
+  python scripts/discord/set_codex_nick.py            … 現在の nick を測るだけ(既定は読み取り)
   python scripts/discord/set_codex_nick.py --apply    … 正本の値へ揃える(PATCH してから測り直す)
 
 ★トークンは読むだけで、出力にもログにも出さない。

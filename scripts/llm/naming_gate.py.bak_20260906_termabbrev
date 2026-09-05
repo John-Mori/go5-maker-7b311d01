@@ -600,67 +600,6 @@ def _abbrev_verdicts(text, rules):
     return out
 
 
-# ★用語の略語を伸ばす(2026-09-06・イージス研究室)==============================
-#   引き金= Chami「ニックってわかりにくいから略さないで。ニックネームって呼んで」
-#   (msg 1545910062403551252)。★これは**再発**だ= 前日 09-05 に人事部門で同じ指摘
-#   (msg 1545647615033606154「ニックって気持ち悪いな、ニックネームってちゃんと表現してくれ」)
-#   を受けている。心がけでは止まらなかった=機構の側へ置く(共通規律§3)。
-#   ★人格名の略(reason="abbreviation")と**分ける**:
-#     - 人格名の「ク」は指す先が一意に決まらない=丸ごと置換すると別人に化ける(だから警告のみ)。
-#     - 用語の「ニック」は**正式形の頭そのもの**=接尾を足すだけで意味が動かない。
-#       この差だけを条件にする= `expected[0].startswith(略形)` を満たす規則だけ直す。
-#   ★人事部門が `autofix: true` を立てた規則だけ自動修正する(C-035=既存の
-#     「ク」「ブライネ」の挙動は1文字も変えない。データが無ければ何も起きない)。
-#   判定境界= 前後どちらもカタカナでない単独出現(既存 _is_katakana を流用)。
-#     実測(2026-09-06・全部門の reply 5,653件)= 「ニック」規則で鳴るのは3件・
-#     **全部が本物の略り**(人事部門)・誤爆0。パニック/テクニック/クリニック/
-#     ピクニック/スクウェア・エニックス/ニックネーム自体は境界で落ちる。
-TERM_ABBREV_AUTOFIX = True
-
-
-def _term_abbrev_specs(rules):
-    """自動で伸ばしてよい略語規則を [(略形, 正式形, 台帳キー)] で返す。
-
-    データ= rules["abbreviation_forbidden"]["<正式形>"] に `"autofix": true` が在る時だけ。
-    さらに **正式形が略形で始まる**(=接尾を足すだけ)ものに限る。fail-open: 形が違えば空。
-    """
-    out = []
-    ab = (rules or {}).get("abbreviation_forbidden") or {}
-    if not isinstance(ab, dict):
-        return out
-    for full, spec in ab.items():
-        if str(full).startswith("_") or not isinstance(spec, dict):
-            continue
-        if not spec.get("autofix"):
-            continue
-        expected = [str(e or "") for e in (spec.get("expected") or [full]) if str(e or "")]
-        if not expected:
-            continue
-        to = expected[0]
-        for form in (spec.get("forbidden_forms") or []):
-            form = str(form or "")
-            if form and to != form and to.startswith(form):
-                out.append((form, to, str(full)))
-    return out
-
-
-def _term_abbrev_spans(s, form):
-    """略形の「前後どちらもカタカナでない」出現を [(start, end)] で返す。"""
-    out = []
-    start = 0
-    while True:
-        i = s.find(form, start)
-        if i < 0:
-            break
-        end = i + len(form)
-        before = s[i - 1] if i > 0 else ""
-        after = s[end] if end < len(s) else ""
-        if (not _is_katakana(before)) and (not _is_katakana(after)):
-            out.append((i, end))
-        start = i + 1
-    return out
-
-
 # ★Chami呼称の合流点担保(2026-09-01・依頼= 改善提案部門 1544351414455771229)==========
 #   引き金= Chami「ちゃみくんってよんで!!おこです!」(msg 1544349888945455155)。
 #   写像は**正しかった**= 呼称ルール.json chami_address.overrides に
@@ -1265,10 +1204,7 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
     try:
         s = str(text or "")
         verdicts = naming_verdicts(persona, dept, s, rules)
-        # ★用語の略語は人格名の違反が1つも無い便でも効かせる= ここで早期リターンすると
-        #   「ニック」だけの便が素通しになる(呼称違反ゼロの便が大半だ)。
-        term_specs = _term_abbrev_specs(rules) if TERM_ABBREV_AUTOFIX else []
-        if not verdicts and not term_specs:
+        if not verdicts:
             return result
         # ★探すのは覆った文字列・書くのは元文(2026-08-23)。長さが同じなので位置は共通。
         #   これで**名乗りタグの中は絶対に書き換わらない**(`[ケヴィン・デブライネさん]`
@@ -1371,30 +1307,6 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
             if unsafe or not fixed_n:
                 # 危険な出現が残った/1つも直せなかった=警告として残す(沈黙にしない)
                 result["remaining"].append(_remain(v, skip_code or "no_hit"))
-        # ★用語の略語を正式形へ伸ばす(接尾を足すだけ=上の人格名経路とは別立て)。
-        #   人格名の安全弁(_safe_after / whole_swap / vocative)は掛けない= 掛ける理由が
-        #   無いからだ。あれは「姓だけ直して名が残る(三笘さん薫)」「別人に化ける」を
-        #   防ぐためで、正式形の頭そのものを伸ばす置換にはその危険が存在しない。
-        #   代わりの安全弁は2つ= ①autofix:true の規則だけ ②前後カタカナでない出現だけ。
-        if term_specs:
-            for form, to, full in term_specs:
-                n = 0
-                for i, end in _term_abbrev_spans(masked, form):
-                    repls.append((i, end, to))
-                    n += 1
-                if not n:
-                    continue
-                result["applied"].append({
-                    "target": full, "to": to, "reason": "term_abbrev",
-                    "count": n, "found": form,
-                })
-                # 直した分は警告から落とす(「直したのに警告も出る」を作らない)
-                result["remaining"] = [
-                    v for v in result["remaining"]
-                    if not (v.get("reason") == "abbreviation"
-                            and str(v.get("target") or "") == full
-                            and str(v.get("found") or "") == form)
-                ]
         if repls:
             repls.sort(key=lambda r: r[0])
             filtered, last_end = [], -1
