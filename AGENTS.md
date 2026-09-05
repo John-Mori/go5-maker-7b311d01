@@ -1,28 +1,14 @@
-# AGENTS.md — AIエージェント共通の起動ポインタ
+# AIエージェント共通ポインタ
 
-> このファイルは **どのAIコーディングエージェント(OpenAI Codex・Claude Code・その他)から開かれても同じ正本に辿り着く**ための薄いポインタ。
-> **中身をここに書かない**(二重管理はドリフトする)。正本だけを指す。
+この場所は旧5秒動画アプリとAI運営runtimeの互換ホストです。最初に `CLAUDE.md` の境界だけ確認し、依頼対象に応じて次の正本へ移動してください。
 
-## 正本の場所(読む順)
+1. YMM4 Shorts制作: `D:\SougouStartFolder\5chShortMovie\CLAUDE.md`
+2. オタクグッズアフィ: `D:\SougouStartFolder\AnimeGameGoodsAFI`
+3. Discord/Claude組織運営: `D:\SougouStartFolder\00_AI-HQ` とこのrepoの `scripts/{llm,queue,discord,_daemons}`
+4. 旧5秒動画Webアプリ: `産業廃棄物/2026-09-05/旧自動読込コンテキスト/5SecMovieMaker_CLAUDE_legacy_20260905.md` (明示的な復旧時だけ)
 
-1. `CLAUDE.md` — プロジェクト全体のコンテキスト(現状・座標系規約・ビルド/テスト/公開手順・禁止事項)。名前はClaude由来だが**内容はツール非依存**。まずこれを読む。
-2. `引き継ぎ_Vol7.md`(現行巻) — 直近の到達点。旧巻は `docs/引き継ぎ/`。
-3. `インシデント.md` — 過去の失敗の台帳。**設計・実装・デプロイ前に該当カテゴリを必読**。
-4. `docs/departments/00_common/orchestration.md` — マルチセッション運用の規約正本(部門制・受信箱・進捗印・コミット作法)。
-5. `docs/設計・調査/` — 機能別の設計書。
+共通ルール:
 
-## 全エージェント共通の絶対規則(正本からの抜粋ではなく所在の案内)
-
-- 座標系(1080×1920比率ベース)を崩さない → `CLAUDE.md` §3
-- アセット変更時は `?v=` バンプ → `CLAUDE.md` §3
-- コミットは必ずパス限定 `git commit -m "..." -- <paths>`(INC-91) → orchestration.md
-- 秘密(トークン・キー)を出力・コミットしない。`local/` はgit管理外の運用データ置き場
-- UI文言の括弧は半角()
-
-## テスト
-
-```
-node tests/test_affiliate.js
-node tests/test_bluesky.js
-python scripts/lib/test_jsonl_store.py
-```
+- `local/`、秘密情報、`.git/`、登録済みworktree、稼働中のdaemonを一括で移動・削除しない。
+- 変更は対象を限定し、同じ画面・同じ成果物で検証する。
+- 旧事業名がパスに残っていても、現在の優先順位と誤認しない。
