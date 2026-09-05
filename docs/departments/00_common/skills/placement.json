@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "canonical_local_root": "D:/SougouStartFolder/AI-Organization/.claude/skills",
+  "compat_runtime_root": ".claude/skills",
+  "organization_runtime_skills": [
+    "context-budget-audit",
+    "organization-daemon-reload",
+    "organization-ledger",
+    "organization-test-gate",
+    "sensitive-boundary"
+  ],
+  "retired_legacy_skills": [
+    "daemon-reload-check",
+    "failopen-guard",
+    "go5-deploy",
+    "go5-incident",
+    "go5-post-guard",
+    "ledger-append",
+    "single-source-predicate",
+    "test-must-fail",
+    "web-distill"
+  ]
+}
+

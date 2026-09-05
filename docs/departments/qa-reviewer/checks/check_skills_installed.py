@@ -1,69 +1,90 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""組織側の技能(skills)が受け渡し場所に留まらず、実際に読まれる場所へ入っているかを確認する (QA回帰)。
+"""Claude skillの機能別配置を検査する。
 
-根拠: 2026-08-13 に組織側で技能5本を docs/departments/00_common/skills/ へ作り、
-    README に「.claude/skills/ へ cp して初めて効いた」と自分で書いておきながら、
-    その cp が**5日間打たれていなかった**(2026-08-18 イージス研究室が実測・commit 7fe4dd3 で解消)。
-    正しい中身が、誰も読まないファイルの中で眠っていた=「入れた」で止まっていた典型。
-
-見るもの(2つ):
-  ① 受け渡し場所(docs/.../skills/<名>/SKILL.md)にある技能が、全て .claude/skills/ にも在り、
-     **中身が1バイトも違わない**こと。片方だけ直すと、技能を呼んだ側と Read した側で別の手順が出る。
-  ② 実装置き側が git 追跡されていること。未追跡は他セッションの clean で黙って消える
-     (=次に気づくのは「また5日眠っていた」時になる)。
+旧方式の「docsに正本、.claudeへ手動copy」という二重管理は廃止した。
+現役runtimeが読む互換配置には組織運営skillだけを置き、旧Web、YMM4、
+goods skillが混入して自動候補になることを防ぐ。
 """
-import os
+from __future__ import annotations
+
+import json
+import re
 import subprocess
 import sys
+from pathlib import Path
+
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", "..", "..", ".."))
-STAGING = os.path.join(ROOT, "docs", "departments", "00_common", "skills")
-INSTALLED = os.path.join(ROOT, ".claude", "skills")
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[3]
+MANIFEST = ROOT / "docs" / "departments" / "00_common" / "skills" / "placement.json"
+INSTALLED = ROOT / ".claude" / "skills"
 
 
-def _read(path):
-    with open(path, "rb") as f:
-        return f.read()
+def _tracked() -> set[str]:
+    result = subprocess.run(
+        ["git", "ls-files", ".claude/skills"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        return set()
+    return {line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()}
 
 
-def main():
-    if not os.path.isdir(STAGING):
-        print("SKIP: check_skills_installed (受け渡し場所が無い)")
-        return 0
-    names = sorted(n for n in os.listdir(STAGING)
-                   if os.path.exists(os.path.join(STAGING, n, "SKILL.md")))
-    if not names:
-        print("SKIP: check_skills_installed (受け渡し場所に技能が無い)")
-        return 0
+def _frontmatter_name(path: Path) -> str | None:
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r"(?m)^name:\s*([^\s]+)\s*$", text)
+    return match.group(1) if match else None
 
-    tracked = set()
-    r = subprocess.run(["git", "ls-files", ".claude/skills"], cwd=ROOT,
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if r.returncode == 0:
-        tracked = {p.strip().replace("\\", "/") for p in (r.stdout or "").splitlines() if p.strip()}
 
-    ng = []
-    for n in names:
-        dst = os.path.join(INSTALLED, n, "SKILL.md")
-        if not os.path.exists(dst):
-            ng.append(f"{n}: 受け渡し場所にあるが .claude/skills/ に入っていない(cp が打たれていない)")
-            continue
-        if _read(os.path.join(STAGING, n, "SKILL.md")) != _read(dst):
-            ng.append(f"{n}: 受け渡し場所と実装置きで中身が違う(片方だけ直した)")
-        if tracked and f".claude/skills/{n}/SKILL.md" not in tracked:
-            ng.append(f"{n}: .claude/skills/ 側が git 未追跡(clean で消える)")
-
-    if ng:
-        print(f"FAIL: check_skills_installed ({len(ng)}件)")
-        for line in ng:
-            print("  ", line)
+def main() -> int:
+    if not MANIFEST.is_file():
+        print(f"FAIL: skill placement manifest missing: {MANIFEST}")
         return 1
-    print(f"PASS: check_skills_installed (技能 {len(names)}本が実装置き済・中身一致・追跡済)")
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    if data.get("schema_version") != 1:
+        print("FAIL: unsupported skill placement schema")
+        return 1
+    expected = sorted(data.get("organization_runtime_skills", []))
+    retired = set(data.get("retired_legacy_skills", []))
+    actual = sorted(
+        path.name for path in INSTALLED.iterdir()
+        if path.is_dir() and (path / "SKILL.md").is_file()
+    ) if INSTALLED.is_dir() else []
+    tracked = _tracked()
+    failures: list[str] = []
+
+    if actual != expected:
+        failures.append(f"配置不一致 expected={expected} actual={actual}")
+    for name in expected:
+        skill = INSTALLED / name / "SKILL.md"
+        if not skill.is_file():
+            failures.append(f"missing: {name}")
+            continue
+        if _frontmatter_name(skill) != name:
+            failures.append(f"frontmatter name不一致: {name}")
+        rel = f".claude/skills/{name}/SKILL.md"
+        if tracked and rel not in tracked:
+            failures.append(f"git未追跡: {rel}")
+    leaked = retired.intersection(actual)
+    if leaked:
+        failures.append(f"旧skillが有効配置に残存: {sorted(leaked)}")
+
+    if failures:
+        print(f"FAIL: check_skills_installed ({len(failures)}件)")
+        for failure in failures:
+            print("  ", failure)
+        return 1
+    print(f"PASS: check_skills_installed (組織専用 {len(expected)}本・旧skill 0本)")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
+
