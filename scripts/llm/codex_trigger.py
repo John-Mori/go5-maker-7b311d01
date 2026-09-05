@@ -12,10 +12,12 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 BOT_ID_FILE = os.path.join(LOCAL, "discord_codex_bot_id.txt")   # 任意(あればメンションでも拾う)
 
-# 呼び名(仮)。正式な人格名・呼称は人事部門(hr-room)が決める= ここは検知トークンのみ。
-# 「ボス」= Chami指定の召喚名(2026-09-05・旧「スネーク」から改称)。実運用の確実な召喚は
-# discord_codex_bot_id.txt を置いての実メンション <@id>。この文字トークンは素の名指し用の便宜。
-TOKENS = ("codex", "コーデックス", "コーデクス", "ボス")
+# 呼び名。確定呼称は人事部門(hr-room)が決めた=「ネイキッド・スネーク」(MGS3=後のビッグ・ボス)。
+# 「ボス」= Chami指定の召喚名(同一人物の後の呼び名で確定呼称と矛盾しない=デブライネ確認)。残す。
+# ★短縮「スネーク」を素で足さない= office_core.py の NAME_ALIASES で「スネーク」は別人
+#   ソリッド・スネーク(品質管理部門)の正規名。部分一致なので誤召喚する。足すのは「ネイキッド」まで。
+# 実運用の確実な召喚は discord_codex_bot_id.txt を置いての実メンション <@id>(下 _mention_ids)。
+TOKENS = ("codex", "コーデックス", "コーデクス", "ネイキッド・スネーク", "ネイキッド", "ボス")
 
 
 def _mention_ids():

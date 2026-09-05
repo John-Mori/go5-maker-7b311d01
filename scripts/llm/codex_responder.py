@@ -53,9 +53,9 @@ ENABLE_FLAG = os.path.join(LOCAL, "codex_enabled.txt")
 LOG = os.path.join(LOCAL, "llm", "codex_responder_log.jsonl")
 CODEX_CLI = os.path.join(ROOT, "scripts", "codex", "codex_run.py")
 
-# 表示名は仮(人事が確定するまでの暫定)。実応答は codex_run.py が Codex bot本人として投稿するので
-# この名前はエスカレ通知の文面にしか使わない。
-PERSONA_TENTATIVE = "Codex(仮)"
+# 表示名は人事が確定=「ネイキッド・スネーク」(2026-09-05・デブライネ経由)。実応答は codex_run.py が
+# Codex bot本人として投稿するので、この名前はエスカレ通知の文面にしか使わない(変数名は互換のため据置)。
+PERSONA_TENTATIVE = "ネイキッド・スネーク"
 
 # 機微=司令塔直轄(防御的ガード。codex部屋は該当しない想定だが念のため)
 SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room", "health-log")
