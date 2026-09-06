@@ -9,6 +9,7 @@
 ★「課金すべきか」の判定は **429(quota)の件数** を見る。0なら無料枠は枯れていない=払う理由がない。
 """
 import os
+import re
 import sys
 import time
 from collections import defaultdict
@@ -49,6 +50,15 @@ def main():
     print(f"件数 {len(rows)}件" + (f" (直近{days:g}日)" if days else " (全期間)")
           + f" / 記録 {gemini_usage.USAGE_FILE}")
     print(f"期間 {rows[0]['ts']} 〜 {rows[-1]['ts']}")
+    # ★検査プロセスの行はここへ逸らしてある(本番の課金判断には混ぜない・消してもいない)。
+    try:
+        tf = gemini_usage.TEST_USAGE_FILE
+        if os.path.exists(tf):
+            with open(tf, "rb") as f:
+                n = sum(1 for _ in f)
+            print(f"(検査プロセスが書いた行 {n}行は本番台帳の外へ逸らしてある= {tf})")
+    except Exception:
+        pass
 
     def dump(title, keyfn):
         agg = defaultdict(lambda: [0, 0, 0, 0])   # 件数, 成功, 入力字, 出力字
@@ -78,16 +88,30 @@ def main():
     # ★2026-08-18 研究室HQ: 429は「失敗した呼び出し」だけを見ても数えられない。
     #   降格ラダーは上の段が429で落ちても下で成功するので、成功行の err(降格の内訳)にも
     #   429が入っている。実測: proが毎回429で落ちているのに、旧集計は 0件 と表示していた。
+    # ★2026-09-06 イージス研究室: 数え方で答えが変わる数なので、単位を両方出す。
+    #   ad研究室から「.count("429") が1行から3〜4個拾って水増ししている」と回ってきたが、
+    #   全期間を分解したら 429 の出現は**全部が "HTTP 429" の形**で、複数個の行(実測5行)は
+    #   本当に3〜4段が429で落ちていた= 水増しではなく**単位の取り違え**(段数 vs 行数)だった。
+    #   ★だから式は据え置き、代わりに「段」と「行」を並べて出す。加えて "HTTP 429" の形を
+    #   していない 429 を別に数える= 将来 err に長い本文が入って静かに膨らんだら**見える**。
     quota = sum((r.get("err") or "").count("429") for r in rows)
+    quota_http = sum(len(re.findall(r"HTTP\s*429", r.get("err") or "")) for r in rows)
+    quota_rows = sum(1 for r in rows if "429" in (r.get("err") or ""))
     demoted = sum(1 for r in rows if r.get("ok") and (r.get("err") or "").strip())
-    print(f"\n★無料枠の枯れ(429)= {quota}回 (降格ラダーで空振りした段の数。失敗した呼び出しだけではない)")
-    print(f"  うち降格して結局成功= {demoted}件 / 全滅した呼び出し= {sum(1 for r in rows if not r.get('ok'))}件")
-    if quota == 0:
+    print(f"\n★無料枠の枯れ(429)= {quota_http}段 / {quota_rows}行"
+          f" (段=降格ラダーで空振りした段の数・行=429が出た記録行の数。★比べる時は単位を揃えろ)")
+    if quota != quota_http:
+        print(f"  ⚠ err の中に 'HTTP 429' の形をしていない '429' が {quota - quota_http}個ある"
+              f"(素のcount={quota})。err へ長い本文が混ざると静かに水増しされる=中身を見ろ。")
+    print(f"  うち降格して結局成功= {demoted}件"
+          f" / ok=false の記録行= {sum(1 for r in rows if not r.get('ok'))}行"
+          f" (★1呼び出し=1行ではない。ラダーは段ごとに1行出る)")
+    if quota_http == 0:
         print("  → 枯れていない。課金する理由がまだ無い。")
     else:
         print("  → 上の段(pro)は無料枠で空振りしている。"
               "★ただし『空振りしても下で用が足りている』なら課金の理由にはならない。"
-              "全滅した呼び出しの数を見ろ。")
+              "最後の段まで落ちた=成果が出ていない呼び出しがどれだけあるかを見ろ。")
     imgs = sum(r.get("images", 0) for r in rows)
     print(f"★画像を読ませた回数= {imgs}回 (画像はflashでも重い=課金判断の主因になりやすい)")
     return 0

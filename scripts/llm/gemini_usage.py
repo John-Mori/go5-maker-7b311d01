@@ -21,16 +21,50 @@
 """
 import json
 import os
+import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 USAGE_FILE = os.path.join(LOCAL, "llm", "gemini_usage.jsonl")
+# ★2026-09-06 イージス研究室: 検査プロセスが書いた行の退避先(本番台帳と分ける)。
+TEST_USAGE_FILE = os.path.join(LOCAL, "llm", "gemini_usage_test.jsonl")
 
 
-def log(who, tag, model, in_chars, out_chars=0, images=0, ok=True, err="", secs=0.0):
-    """1行追記する。★失敗しても絶対に例外を投げない(生成の邪魔をしない)。"""
+def _under_test():
+    """検査プロセスから呼ばれているかを、呼び出し側の申告なしで判定する。
+
+    ★なぜ在るか(2026-09-06 イージス研究室・実測):
+      `scripts/teian/test_body_bytes_regression.py` は urlopen だけを偽物にして
+      call_vision を**本物のまま**走らせる正しい検査だが、本物の経路には _usage() が
+      入っている= 検査1回につき "HTTP 429" の行が4本、**本番の課金台帳へ**入っていた
+      (09-06 の3回で12行)。この台帳は「429の段数」で課金の是非を判定する脈だ
+      = 共通規律§4「見張っている脈を、見張り以外の手で更新するな」(C-054)。
+      ★検査側に「書くな」と申告させる作りにはしない= 人手の入口を要件にした機構は
+      実測0件になる。**書く側(ここ)が自分で判定して逸らす。**
+    ★偽陽性は本番の行を取りこぼす向きなので、判定は狭く取る(名前が test の実行体だけ)。"""
+    if os.environ.get("GEMINI_USAGE_SINK_TEST") == "1":
+        return True
+    if "pytest" in sys.modules:
+        return True
+    argv0 = os.path.basename((sys.argv[0] if sys.argv else "") or "").lower()
+    return argv0.startswith("test_") or argv0.endswith("_test.py") or argv0 == "pytest"
+
+
+def sink_file():
+    """この呼び出しの記録先を返す(本番 or 検査退避)。"""
+    return TEST_USAGE_FILE if _under_test() else USAGE_FILE
+
+
+def log(who, tag, model, in_chars, out_chars=0, images=0, ok=True, err="", secs=0.0, err_detail=""):
+    """1行追記する。★失敗しても絶対に例外を投げない(生成の邪魔をしない)。
+
+    err_detail: 2026-09-06 ad研究室指摘=err は複数の読み手(gemini_usage_report.py)が
+      「短い定型文(HTTP 429 等)」を前提に完全一致キー集計/文字列countしている脈。
+      本文入りの長い err を流すとその読み手が壊れる(共通規律§3「見張っている脈を、
+      見張り以外の手で更新するな」)。だから **err はこれまでどおり短いまま据え置き**、
+      HTTPエラー本文などの詳細情報は別欄 err_detail へ入れる(呼び出し元は任意・既定は空)。"""
     try:
         rec = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S+09:00"),
@@ -43,20 +77,29 @@ def log(who, tag, model, in_chars, out_chars=0, images=0, ok=True, err="", secs=
             "ok": bool(ok),
             "err": err or "",
             "secs": round(float(secs or 0.0), 2),
+            "err_detail": err_detail or "",
         }
-        os.makedirs(os.path.dirname(USAGE_FILE), exist_ok=True)
-        with open(USAGE_FILE, "a", encoding="utf-8") as f:
+        path = sink_file()
+        if path is not USAGE_FILE and path != USAGE_FILE:
+            rec["test"] = True      # 退避先でも「検査の行」だと分かる形で残す(消さない)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception:
         pass
 
 
-def read_all():
-    """記録を全部読む(壊れた行は飛ばす=1行の破損で集計が死なない)。"""
+def read_all(path=None):
+    """記録を全部読む(壊れた行は飛ばす=1行の破損で集計が死なない)。
+
+    ★既定は sink_file()= **自分が書いた先を読む**(書きと読みの先を揃える)。
+      検査プロセスなら退避先、本番プロセスなら本番台帳。
+      本番台帳を名指しで読みたい時は read_all(gemini_usage.USAGE_FILE)。"""
+    path = path or sink_file()
     out = []
-    if not os.path.exists(USAGE_FILE):
+    if not os.path.exists(path):
         return out
-    with open(USAGE_FILE, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for ln in f:
             ln = ln.strip()
             if not ln:
