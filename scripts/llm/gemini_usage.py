@@ -32,28 +32,32 @@ USAGE_FILE = os.path.join(LOCAL, "llm", "gemini_usage.jsonl")
 TEST_USAGE_FILE = os.path.join(LOCAL, "llm", "gemini_usage_test.jsonl")
 
 
-def _under_test():
-    """検査プロセスから呼ばれているかを、呼び出し側の申告なしで判定する。
+# ★判定の正本は scripts/lib/test_sink.py 1か所だけ(ORG-11= 表を2か所に持つと片方が腐る)。
+#   同じ判定を invisible.py も使う。規則を変える時はあちらを直す。
+try:
+    sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+    from test_sink import under_test as _under_test           # noqa: E402
+except Exception:                                             # pragma: no cover
+    # ★正本が読めない= 壊れた設置。ここで黙って推測すると
+    #   「本番へ倒す=台帳が汚れる」か「検査へ倒す=課金の行を取りこぼす」の
+    #   どちらかを勝手に選ぶことになる。だから**明示の環境変数だけ**を見て、
+    #   読めなかったこと自体を stderr へ1回出す(静かに壊れない)。
+    sys.stderr.write("[gemini_usage] scripts/lib/test_sink.py を読めない"
+                     "= 検査の逸らしが GEMINI_USAGE_SINK_TEST だけになる\n")
+
+    def _under_test():
+        return os.environ.get("GEMINI_USAGE_SINK_TEST") == "1"
+
+
+def sink_file():
+    """この呼び出しの記録先を返す(本番 or 検査退避)。
 
     ★なぜ在るか(2026-09-06 イージス研究室・実測):
       `scripts/teian/test_body_bytes_regression.py` は urlopen だけを偽物にして
       call_vision を**本物のまま**走らせる正しい検査だが、本物の経路には _usage() が
       入っている= 検査1回につき "HTTP 429" の行が4本、**本番の課金台帳へ**入っていた
       (09-06 の3回で12行)。この台帳は「429の段数」で課金の是非を判定する脈だ
-      = 共通規律§4「見張っている脈を、見張り以外の手で更新するな」(C-054)。
-      ★検査側に「書くな」と申告させる作りにはしない= 人手の入口を要件にした機構は
-      実測0件になる。**書く側(ここ)が自分で判定して逸らす。**
-    ★偽陽性は本番の行を取りこぼす向きなので、判定は狭く取る(名前が test の実行体だけ)。"""
-    if os.environ.get("GEMINI_USAGE_SINK_TEST") == "1":
-        return True
-    if "pytest" in sys.modules:
-        return True
-    argv0 = os.path.basename((sys.argv[0] if sys.argv else "") or "").lower()
-    return argv0.startswith("test_") or argv0.endswith("_test.py") or argv0 == "pytest"
-
-
-def sink_file():
-    """この呼び出しの記録先を返す(本番 or 検査退避)。"""
+      = 共通規律§4「見張っている脈を、見張り以外の手で更新するな」(C-054)。"""
     return TEST_USAGE_FILE if _under_test() else USAGE_FILE
 
 

@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""検査プロセスが書いた使用量の行が、本番の課金台帳へ入らないことの回帰検査。
+"""検査プロセスが書いた不可視文字の警告行が、本番の見張り台帳へ入らないことの回帰検査。
 
-実行:            python scripts/llm/test_gemini_usage_sink.py
-変異(must-fail): python scripts/llm/test_gemini_usage_sink.py --mutate
+実行:            python scripts/discord/test_invisible_audit_sink.py
+変異(must-fail): python scripts/discord/test_invisible_audit_sink.py --mutate
 
 ★なぜ在るか(2026-09-06 イージス研究室・実測):
-  `scripts/teian/test_body_bytes_regression.py` は urlopen だけを偽物にして本物の
-  call_vision を走らせる正しい検査だが、本物の経路には gemini_usage.log() が入っている
-  = 検査1回につき "HTTP 429" の行が4本、**本番の課金台帳へ**入っていた(09-06 の3回で12行)。
-  台帳は「429の段数」で課金の是非を決める脈だ= C-054「見張っている脈を、見張り以外の手で
-  更新するな」。逸らす機構(gemini_usage._under_test)を入れたので、その機構を検査で縛る。
+  `scripts/discord/test_invisible.py` は leasequeue へ便を1つ投入して、密輸帯が本当に
+  落ちるかを**本物の経路で**確かめる正しい検査だ。ただしその経路には invisible.audit() が
+  入っている= 検査1回ごとに `TEST-INVISIBLE-1/2` の2行が **本番の見張り台帳**へ入っていた。
+  09-04 に台帳を作ってから溜まった16行は**全部が検査の行**で、本番の検出は0件だった。
+  中身は偽の注入文字列(IGNORE PREVIOUS INSTRUCTIONS…)、dept は当室。
+  「攻撃が来ているか」を見る面がこれでは読めない= C-054「見張っている脈を、
+  見張り以外の手で更新するな」。
+
+  穴は2つあった。両方をこの検査で縛る:
+    (a) `invisible.py` が `ROOT/local` を直書きしていて `GO5_LOCAL_DIR` を見ていなかった
+        = 隔離したつもりの検査が本番へ書けてしまう。
+    (b) 逸らし(test_sink)が無かった。
 
 検査の作り(organization-test-gate):
-  外へ出る手だけ偽物にする=**書き込み先のディレクトリだけ**一時領域へ振り替え(GO5_LOCAL_DIR)、
-  判定(_under_test)と分岐は本物のまま子プロセスで実行する。
+  書き込み先のディレクトリだけ一時領域へ振り替え、判定と分岐は本物のまま子プロセスで実行する。
   ★実行体の名前で判定するので、子プロセスを **test_ で始まる名前 / 始まらない名前** の
   2通りで走らせて、書き込み先が実際に分かれることを**ファイルの中身で**確かめる。
 """
@@ -27,12 +33,15 @@ import tempfile
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 
+# 密輸帯(U+E0000-E007F)へ "X" を1文字隠した本文= 必ず警告が立つ
 CHILD = '''# -*- coding: utf-8 -*-
 import sys
 sys.path.insert(0, r"{here}")
-import gemini_usage
-gemini_usage.log("homin", "sink_probe", "model-probe", 1, 0, 0, False, "HTTP 429", 0.0)
+import invisible
+hidden = "".join(chr(0xE0000 + ord(c)) for c in "PROBE")
+invisible.gate("明日の予定" + hidden, "sink_probe", msg_id="SINK-PROBE-1", dept="aegis-gl")
 '''
 
 
@@ -52,24 +61,40 @@ def _run_child(tmp, child_name):
         f.write(CHILD.format(here=HERE))
     env = dict(os.environ)
     env["GO5_LOCAL_DIR"] = local
+    env["PYTHONIOENCODING"] = "utf-8"
     env.pop("GEMINI_USAGE_SINK_TEST", None)
-    r = subprocess.run([sys.executable, path], env=env, capture_output=True, text=True)
+    r = subprocess.run([sys.executable, path], env=env, capture_output=True,
+                       text=True, errors="replace")
     if r.returncode != 0:
         raise AssertionError(f"{child_name}: 子プロセスが異常終了 rc={r.returncode} {r.stderr[:300]}")
-    return (_lines(os.path.join(local, "llm", "gemini_usage.jsonl")),
-            _lines(os.path.join(local, "llm", "gemini_usage_test.jsonl")))
+    return (_lines(os.path.join(local, "llm", "invisible_audit.jsonl")),
+            _lines(os.path.join(local, "llm", "invisible_audit_test.jsonl")))
 
 
 def run(label=""):
-    print(f"=== test_gemini_usage_sink{label} ===")
+    print(f"=== test_invisible_audit_sink{label} ===")
     ok = True
-    tmp = tempfile.mkdtemp(prefix="usage_sink_")
+    tmp = tempfile.mkdtemp(prefix="invis_sink_")
     try:
-        # (1) 検査プロセス(test_ で始まる実行体)= 本番台帳は0行・退避先に1行 + "test": true
-        prod, sink = _run_child(tmp, "test_child_probe.py")
+        # (0) GO5_LOCAL_DIR を尊重しているか= これが無いと隔離そのものが効かない
+        env = dict(os.environ)
+        env["GO5_LOCAL_DIR"] = os.path.join(tmp, "envprobe")
+        env["PYTHONIOENCODING"] = "utf-8"
+        r = subprocess.run(
+            [sys.executable, "-c",
+             f'import sys;sys.path.insert(0,r"{HERE}");import invisible;print(invisible.AUDIT_FILE)'],
+            env=env, capture_output=True, text=True, errors="replace")
+        if os.path.join(tmp, "envprobe") not in (r.stdout or ""):
+            ok = False
+            print(f"  FAIL AUDIT_FILE が GO5_LOCAL_DIR を見ていない: {(r.stdout or r.stderr).strip()[:200]}")
+        else:
+            print("  PASS AUDIT_FILE は GO5_LOCAL_DIR で振り替わる")
+
+        # (1) 検査プロセス= 本番台帳は0行・退避先に1行 + "test": true
+        prod, sink = _run_child(tmp, "test_child_invis.py")
         if prod:
             ok = False
-            print(f"  FAIL 検査プロセスの行が本番台帳へ入った({len(prod)}行): {prod[0][:160]}")
+            print(f"  FAIL 検査プロセスの行が本番の見張り台帳へ入った({len(prod)}行): {prod[0][:160]}")
         elif len(sink) != 1:
             ok = False
             print(f"  FAIL 退避先の行数={len(sink)}(期待1)")
@@ -79,12 +104,12 @@ def run(label=""):
         else:
             print("  PASS 検査プロセス: 本番0行 / 退避1行(test=true)")
 
-        # (2) 本番プロセス(test_ で始まらない実行体)= 逸らさない(fail-open の向きを確認)
-        prod2, sink2 = _run_child(tmp, "teian_child_probe.py")
+        # (2) 本番プロセス= 逸らさない(★本物の攻撃を取りこぼさない向きの確認)
+        prod2, sink2 = _run_child(tmp, "gateway_child_invis.py")
         if len(prod2) != 1:
             ok = False
             print(f"  FAIL 本番プロセスの行数={len(prod2)}(期待1)。"
-                  f"判定が広すぎて本番の記録を取りこぼしている。")
+                  f"判定が広すぎて**本物の警告を取りこぼしている**。")
         elif sink2:
             ok = False
             print(f"  FAIL 本番プロセスの行が退避先へ逸れた({len(sink2)}行)")
@@ -102,10 +127,7 @@ def run(label=""):
 
 
 def _mutate(path):
-    """判定を殺して(常にFalse)、検査が本当に赤くなるか確かめる。★CRLFのまま置換する。
-
-    ★2026-09-06: 判定の正本を scripts/lib/test_sink.py へ寄せた(invisible.py も同じ物を使う)。
-      変異させるのはそちらの1行= 正本を殺せば**両方の台帳**が同時に汚れるはずだ、を確かめる。"""
+    """判定の正本を殺して(常にFalse)、検査が本当に赤くなるか確かめる。★CRLFのまま置換する。"""
     src = path.read_bytes()
     old = b'        return argv0.startswith("test_") or argv0.endswith("_test.py") or argv0 == "pytest"'
     new = b'        return False  # MUTATED'
@@ -117,13 +139,12 @@ def _mutate(path):
 if __name__ == "__main__":
     if "--mutate" in sys.argv:
         import pathlib
-        target = pathlib.Path(HERE).parent / "lib" / "test_sink.py"
+        target = pathlib.Path(ROOT) / "scripts" / "lib" / "test_sink.py"
         backup = target.with_suffix(".py.mutate_tmp")
         shutil.copyfile(target, backup)
         try:
             _mutate(target)
-            # ★変異後の .py より古い .pyc が残っていると変異が効かない= 両方のキャッシュを落とす
-            for pyc, pref in ((os.path.join(HERE, "__pycache__"), "gemini_usage."),
+            for pyc, pref in ((os.path.join(HERE, "__pycache__"), "invisible."),
                               (str(target.parent / "__pycache__"), "test_sink.")):
                 if os.path.isdir(pyc):
                     for f in os.listdir(pyc):

@@ -30,11 +30,34 @@ HQ実測(2026-09-04・117ファイル/47,938,737バイト):
 """
 import json
 import os
+import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
-AUDIT_FILE = os.path.join(ROOT, "local", "llm", "invisible_audit.jsonl")
+# ★2026-09-06: ここは `ROOT/local` を直書きしていて GO5_LOCAL_DIR を見ていなかった。
+#   他のモジュールは全部この環境変数で書き込み先を振り替えられる= 検査を隔離する唯一の梃子だ。
+#   直書きのせいで、隔離したつもりの検査が本番の台帳へ書き込めてしまっていた。
+LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
+AUDIT_FILE = os.path.join(LOCAL, "llm", "invisible_audit.jsonl")
+
+# ★2026-09-06 実測: `scripts/discord/test_invisible.py` が1回走るごとに、この台帳へ
+#   `TEST-INVISIBLE-1/2` の2行が入っていた。09-04 に台帳を作ってから溜まった16行は
+#   **全部が検査の行**= 本番の検出は0件だった。しかも中身は偽の注入文字列で、
+#   dept は当室(aegis-gl)。「攻撃が来ているか」を見る面がこれでは読めない
+#   = 共通規律§4「見張っている脈を、見張り以外の手で更新するな」(C-054)。
+#   判定の正本は scripts/lib/test_sink.py 1か所(gemini_usage.py と同じものを使う)。
+try:
+    sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+    from test_sink import sink_for as _sink_for                # noqa: E402
+except Exception:                                              # pragma: no cover
+    def _sink_for(p):
+        return p
+
+
+def audit_file():
+    """この呼び出しが書くべき台帳のパス(本番 or 検査退避)。"""
+    return _sink_for(AUDIT_FILE)
 
 # ── 密輸帯(除去する) ──────────────────────────────────────────────
 TAG_LO, TAG_HI = 0xE0000, 0xE007F
@@ -134,8 +157,11 @@ def audit(report, where, msg_id=None, dept=None):
             "watch": report.get("watch", {}),
             "hidden": (report.get("hidden") or "")[:200],
         }
-        os.makedirs(os.path.dirname(AUDIT_FILE), exist_ok=True)
-        with open(AUDIT_FILE, "a", encoding="utf-8", newline="") as f:
+        path = audit_file()
+        if path != AUDIT_FILE:
+            row["test"] = True   # 退避先でも「検査の行」だと分かる形で残す(消さない)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8", newline="") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
         return True
     except Exception:

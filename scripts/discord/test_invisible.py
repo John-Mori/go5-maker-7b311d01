@@ -160,8 +160,10 @@ try:
     invisible.gate(SAMPLE, "test", msg_id="TEST-INVISIBLE-1", dept="aegis-gl")
     invisible.gate(ZWSP_SAMPLE, "test", msg_id="TEST-INVISIBLE-2", dept="aegis-gl")
     invisible.gate("普通の本文", "test", msg_id="TEST-INVISIBLE-3", dept="aegis-gl")
+    # ★2026-09-06: 読むのは audit_file()= **書いた先**。AUDIT_FILE を名指しで読むと、
+    #   検査プロセスの逸らし(test_sink)で書き先が変わった時に読み外す。書きと読みの先を揃える。
     lines = [json.loads(l) for l in
-             open(invisible.AUDIT_FILE, encoding="utf-8").read().splitlines() if l.strip()]
+             open(invisible.audit_file(), encoding="utf-8").read().splitlines() if l.strip()]
 except OSError:
     lines = []
 finally:
