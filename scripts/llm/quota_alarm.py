@@ -50,7 +50,17 @@ RATIO_ALARM = 1.30          # 先週の同時刻比。これ以上で鳴らす
 #   8/23 05〜10時の窓で **投函 159件 → API便 4,609回**= 1投函あたり平均 29往復。
 #   週全体が 10,083便なので、**便を1本増やすたびに週の約0.3%が消える。**
 #   12時間ごとに鳴らすと、それだけで週 4% を見張りが食う=見張りが病気になる。
-QUIET_HOURS = 24.0          # 同じ警報を鳴らし直さない時間
+QUIET_HOURS = 24.0          # 同じ警報を鳴らし直さない時間(下限。これに加えて下の rearm 条件も要る)
+
+# ★2026-09-07 追加(イージス研究室)= **累計の比は、週の途中で一度跳ねると週末まで戻らない**。
+#   実測(`local/llm/quota_burn.jsonl`): 週リセット 09/05 03:00 の直後から 09/07 04:00 まで
+#   **14回の巡回が全部 alarm=True**、比は 2.43→3.97→3.06 と一度も 1.30 を割っていない。
+#   同じ時刻の「今の速さ」は 直近6時間 便72 に対し先週の同6時間 便238 = **0.30倍**= 既に鎮火済み。
+#   つまり本文の「次の巡回で下回れば静かになる」は**到達不能な閉じ方**で、警報は
+#   毎日おなじ文を撃ち続ける(1投函あたり約29往復=週の約0.3%を見張りが焼く)。
+#   → 時計だけで鳴らし直さない。**状況が変わった時だけ再武装する**(§4=止めるのは同じ文の再送だけ)。
+RATE_WINDOW_H = 6.0         # 「今の速さ」を見る窓。累計とは別に、先週の同じ窓と比べる
+REARM_GROWTH = 1.30         # 前回鳴らした時から累計がこの倍率まで伸びたら、話が変わったので鳴らし直す
 
 # ★2026-08-29 追加(イージス研究室)= **分母が薄いと比が暴れる**。実測: 週リセットが 03:00 なので
 #   リセット直後は「先週の同区間」が 03:00〜04:45 の**便7本**しかなく、比が 242.29倍 と出た。
@@ -80,6 +90,19 @@ def by_dept(start, end, top=5):
     return [(k, v / tot * 100) for k, v in sorted(agg.items(), key=lambda x: -x[1])[:top]]
 
 
+def rate_now(now, hours):
+    """「今の速さ」= 直近 hours 時間 と、**先週の同じ時刻・同じ長さ**の窓を比べる。
+
+    累計の比は週の途中で一度跳ねると戻らない(定数の注記)。こちらは窓が移動するので、
+    鎮火すれば下がる= **打てる手(止める・ずらす・落とす)が効く場面かどうか**がこれで分かる。
+    戻り値= (今の換算, 今の便数, 先週の換算, 先週の便数, 比 or None)
+    """
+    cur_w, cur_n = window_total(now - timedelta(hours=hours), now)
+    p_end = now - timedelta(days=7)
+    prev_w, prev_n = window_total(p_end - timedelta(hours=hours), p_end)
+    return cur_w, cur_n, prev_w, prev_n, (cur_w / prev_w if prev_w > 0 else None)
+
+
 def read_json(path, default=None):
     try:
         with open(path, encoding="utf-8-sig") as f:
@@ -107,6 +130,10 @@ def main():
                     help="使用状況画面の『すべてのモデル』の%%。週1回だけ渡す")
     ap.add_argument("--ratio", type=float, default=RATIO_ALARM)
     ap.add_argument("--quiet-hours", type=float, default=QUIET_HOURS)
+    ap.add_argument("--rate-window", type=float, default=RATE_WINDOW_H,
+                    help="「今の速さ」を見る窓(時間)。既定 %g" % RATE_WINDOW_H)
+    ap.add_argument("--rearm-growth", type=float, default=REARM_GROWTH,
+                    help="前回鳴らした時から累計がこの倍率へ伸びたら鳴らし直す。既定 %g" % REARM_GROWTH)
     a = ap.parse_args()
 
     # ★引き金置き場を先に1周(2026-08-29 HQ-0220/HQ-0218=「人の記憶に置くな。仕組みに載せろ」)。
@@ -141,6 +168,9 @@ def main():
             prev_w, prev_n = full_w / span_h * elapsed_h, full_n
     ratio = (cur_w / prev_w) if prev_w > 0 else None
 
+    # 「今の速さ」= 累計とは別の物差し。鎮火したかどうかはこちらでしか分からない。
+    r_cur_w, r_cur_n, r_prev_w, r_prev_n, rate_ratio = rate_now(now, a.rate_window)
+
     if a.calibrate is not None:
         write_json(CALIB, {"ts": now.isoformat(), "week_start": start.isoformat(),
                            "used_pct": a.calibrate, "weighted": cur_w,
@@ -167,6 +197,11 @@ def main():
     else:
         print("基準= %s" % basis)
         print("  → %.0f(便 %d) → **今週は %.2f倍**" % (prev_w, prev_n, ratio))
+    if rate_ratio is None:
+        print("今の速さ(直近%g時間)= 先週の同じ窓に記録が無い(比較なし)" % a.rate_window)
+    else:
+        print("今の速さ(直近%g時間)= %.0f(便 %d) / 先週の同じ窓 %.0f(便 %d) → **%.2f倍**"
+              % (a.rate_window, r_cur_w, r_cur_n, r_prev_w, r_prev_n, rate_ratio))
     if est_pct is None:
         print("推定%= 出さない(今週の較正点が無い。--calibrate <画面の%> を1回だけ渡すと出る)")
     else:
@@ -177,12 +212,20 @@ def main():
                   % (eta.strftime("%m/%d %H:%M"), nxt.strftime("%m/%d %H:%M")))
 
     reasons = []
+    kinds = []
+    burning_now = rate_ratio is not None and rate_ratio >= a.ratio
     if ratio is not None and ratio >= a.ratio:
         reasons.append("%s の %.2f倍(閾値 %.2f)" % (basis, ratio, a.ratio))
+        kinds.append("cumulative")
+    if burning_now:
+        reasons.append("今の速さ(直近%g時間)が 先週の同じ窓の %.2f倍(閾値 %.2f)"
+                       % (a.rate_window, rate_ratio, a.ratio))
+        kinds.append("rate")
     if eta is not None and eta < nxt:
         reasons.append("推定で %s に枯渇= 次のリセット %s まで %.1f日 止まる"
                        % (eta.strftime("%m/%d %H:%M"), nxt.strftime("%m/%d %H:%M"),
                           (nxt - eta).total_seconds() / 86400))
+        kinds.append("eta")
 
     tops = by_dept(now - timedelta(hours=24), now)
 
@@ -190,27 +233,56 @@ def main():
            "weighted": round(cur_w), "n": cur_n,
            "prev_weighted": round(prev_w), "prev_n": prev_n,
            "ratio": round(ratio, 3) if ratio else None, "basis": basis,
+           "rate_window_h": a.rate_window, "rate_n": r_cur_n, "rate_prev_n": r_prev_n,
+           "rate_ratio": round(rate_ratio, 3) if rate_ratio is not None else None,
            "est_pct": round(est_pct, 1) if est_pct else None,
-           "alarm": bool(reasons), "reasons": reasons}
-    os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
-    with open(LEDGER, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+           "alarm": bool(reasons), "reasons": reasons, "kinds": kinds}
 
     if not reasons:
+        rec["suppressed"] = None
+        os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
+        with open(LEDGER, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         print("→ 静か。台帳へ1行だけ残して黙る。")
         return 0
 
     print("→ ★警報: " + " / ".join(reasons))
 
+    # ── 再武装(rearm)= 時計だけで鳴らし直さない ─────────────────────────────
+    # 実測(定数の注記): 累計の比は週の途中で跳ねると週末まで 1.30 を割らない= 毎日おなじ文が出る。
+    # **止めるのは同じ文の再送だけ**(§4)= 話が変わったら必ず鳴らす。変わった、の定義は3つ:
+    #   1. 週が替わった(前回の警報は別の週の話)
+    #   2. **今も速い**(rate 閾値超え= 止める・ずらす・落とすが効く場面)
+    #   3. 累計が前回鳴らした時から REARM_GROWTH 倍まで伸びた / 新しい種類の理由が増えた
+    # どれにも当たらない= 昨日と同じ事実を言い直すだけ。台帳へ残して黙る。
+    suppressed = None
     last = read_json(STAMP, {})
     if last.get("ts"):
         try:
             age = (now - datetime.fromisoformat(last["ts"])).total_seconds() / 3600.0
-            if age < a.quiet_hours:
-                print("   (前回 %.1f時間前に鳴らした= %.0f時間は鳴らし直さない)" % (age, a.quiet_hours))
-                return 0
         except ValueError:
-            pass
+            age = None
+        if age is not None and age < a.quiet_hours:
+            suppressed = "前回 %.1f時間前に鳴らした= %.0f時間は鳴らし直さない" % (age, a.quiet_hours)
+        elif last.get("week_start") == start.isoformat():
+            grew = last.get("weighted") and cur_w >= float(last["weighted"]) * a.rearm_growth
+            new_kind = set(kinds) - set(last.get("kinds") or [])
+            if not (burning_now or grew or new_kind):
+                suppressed = ("状況が前回と同じ(今の速さ %s / 累計 %.0f→%.0f= %.2f倍 <閾値 %.2f> / "
+                              "理由の種類も同じ)= 同じ文を再送しない"
+                              % ("%.2f倍" % rate_ratio if rate_ratio is not None else "比較なし",
+                                 float(last["weighted"]), cur_w,
+                                 cur_w / float(last["weighted"]) if last.get("weighted") else 0.0,
+                                 a.rearm_growth))
+
+    rec["suppressed"] = suppressed
+    os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
+    with open(LEDGER, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    if suppressed:
+        print("   (%s)" % suppressed)
+        return 0
 
     body = [
         "【定刻の見張り(quota_alarm) → イージス研究室】週の課金枠の燃え方が閾値を超えた。",
@@ -223,6 +295,12 @@ def main():
         "  基準= %s" % basis,
         "  基準の量 %.0f(便 %d)" % (prev_w, prev_n),
     ]
+    if rate_ratio is None:
+        body.append("  今の速さ(直近%g時間)= 先週の同じ窓に記録が無い(比較なし)" % a.rate_window)
+    else:
+        body.append("  今の速さ(直近%g時間)= 便 %d / 先週の同じ窓 便 %d → **%.2f倍**%s"
+                    % (a.rate_window, r_cur_n, r_prev_n, rate_ratio,
+                       "= 今も速い" if burning_now else "= もう鎮火している(累計だけが先行)"))
     if est_pct is not None:
         body.append("  ★推定 使用 %.1f%%(較正点からの外挿= **推定**。正はChamiの画面)" % est_pct)
     body += [
@@ -237,7 +315,14 @@ def main():
         "  4. 部屋のモデルを落とす: local/_model_override.json の enabled を true にして部屋を書く",
         "     (会話の部屋と真因追跡はOpusのまま= C-014。落とすのは機械が機械へ出す便だけ)",
         "",
-        "  ★閉じ方= 次の巡回で先週比が閾値を下回れば自動で静かになる(この便は再送しない)。",
+        "",
+        "  ★閉じ方(2026-09-07 訂正)= **累計の比は週の途中で跳ねると週末まで戻らない**"
+        "(実測: 09/05〜09/07 の14巡回が全部 alarm=True・比は一度も 1.30 を割っていない)。",
+        "  だから『次の巡回で下回れば静かになる』は到達不能だった。今の閉じ方はこの3つ=",
+        "   ・週が替わる(次のリセット %s)" % nxt.strftime("%m/%d %H:%M"),
+        "   ・**今の速さ**が閾値を割る(上の行。割っている間は同じ文を再送しない)",
+        "   ・累計が前回の警報から %.2f倍まで伸びる/新しい理由が増える= その時は必ずまた鳴る"
+        % a.rearm_growth,
         "  詳しい内訳= python scripts/llm/quota_burn.py --by dept / --by hour",
     ]
     text = "\n".join(body)
@@ -258,7 +343,10 @@ def main():
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     print("   dispatch rc=%s %s" % (p.returncode, (p.stdout or p.stderr or "").strip()[:200]))
     if p.returncode == 0:
-        write_json(STAMP, {"ts": now.isoformat(), "reasons": reasons})
+        # ★rearm の材料を残す= 次回「話が変わったか」を機械が判定できる形にする(人の記憶に置かない)
+        write_json(STAMP, {"ts": now.isoformat(), "reasons": reasons, "kinds": kinds,
+                           "week_start": start.isoformat(), "weighted": round(cur_w),
+                           "rate_ratio": round(rate_ratio, 3) if rate_ratio is not None else None})
     return 0
 
 
