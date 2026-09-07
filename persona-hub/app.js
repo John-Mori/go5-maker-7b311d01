@@ -368,19 +368,32 @@
     var reordered = !!reorderInfo(name);
     var sp = splitRemoved(name);                       // stale=現行画像に無い亡霊の削除指定
 
+    // ★削除したものは表から消す(Chami msg1546525688914251846)。ordered から removed を除いた
+    //   「適用後に残る」ものだけを本体グリッドへ出す。削除指定は下の av-removed 帯へ畳んで戻せる。
     // #番号は現行正本での自然順(並び替えても番号は動かさない=人事部門がidで指せるように)。
-    var cells = ordered.map(function (u) {
+    var visible = ordered.filter(function (u) { return !removedSet[u]; });
+    var cells = visible.map(function (u) {
       var i = urls.indexOf(u);
-      var rm = removedSet[u];
-      return '<div class="av-cell' + (rm ? " is-removed" : "") + '" data-url="' + esc(u) + '">' +
+      return '<div class="av-cell" data-url="' + esc(u) + '">' +
         '<span class="av-drag" draggable="true" title="ドラッグで並び替え(手元メモ)">⠿</span>' +
         '<img class="avatar-thumb" src="' + esc(u) + '" alt="" loading="lazy">' +
         '<span class="av-label">#' + (i + 1) + ' <span class="av-id">' + esc(shortId(u)) + "</span></span>" +
-        (rm
-          ? '<span class="av-tag av-tag-del">削除予定</span><button class="av-btn av-undo" data-act="undo-remove" data-url="' + esc(u) + '">↩ 戻す</button>'
-          : '<button class="av-btn av-del" data-act="remove" data-url="' + esc(u) + '">🗑 削除</button>') +
+        '<button class="av-btn av-del" data-act="remove" data-url="' + esc(u) + '">🗑 削除</button>' +
       "</div>";
     });
+    // 削除指定(現行画像に在るもの)は本体グリッドから外し、畳んだ「削除予定」帯で戻せるようにする。
+    var removedHtml = "";
+    if (sp.live.length) {
+      removedHtml = '<div class="av-removed">' +
+        '<div class="av-removed-head">削除予定 ' + sp.live.length + '件(反映すると正本から消える・戻せる)</div>' +
+        '<div class="av-removed-list">' +
+          sp.live.map(function (u) {
+            return '<span class="av-removed-chip">#' + (urls.indexOf(u) + 1) +
+              ' <span class="av-id">' + esc(shortId(u)) + '</span>' +
+              '<button class="av-btn av-undo" data-act="undo-remove" data-url="' + esc(u) + '">↩ 戻す</button></span>';
+          }).join("") +
+        '</div></div>';
+    }
 
     // 亡霊の削除指定(不具合B)=現行画像のどれも指していない。黙って出さず、ここで明示して選ばせる。
     var staleHtml = "";
@@ -405,6 +418,7 @@
       '<section class="detail-section av-section" data-name="' + esc(name) + '">' +
         '<h3 class="section-title">アイコン差分 <span class="section-count">(' + count + "枚)</span></h3>" +
         '<div class="avatar-grid av-grid">' + body + "</div>" +
+        removedHtml +
         staleHtml +
         '<div class="av-actions">' +
           '<button class="av-add-btn av-up-btn" data-act="upload">⬆ 直接アップロード(正本へ)</button>' +
@@ -443,7 +457,7 @@
       });
     });
     var file = sec.querySelector(".av-file");
-    if (file) file.addEventListener("change", function () { handleAddFile(name, file.files && file.files[0]); });
+    if (file) file.addEventListener("change", function () { handleAddFile(name, file.files && file.files[0]); file.value = ""; });
     var fileUp = sec.querySelector(".av-file-up");
     if (fileUp) fileUp.addEventListener("change", function () { directUpload(name, fileUp.files && fileUp.files[0]); fileUp.value = ""; });
   }
@@ -541,17 +555,222 @@
     refreshAfterEdit(name);
   }
 
+  // ── 範囲トリミング(画像を編集)。追加/直接アップロードの前に、適用する矩形をChamiが厳密に選ぶ。
+  //   スクショ準拠: 三分割グリッド+四隅ハンドルの切り抜き枠、左右回転(90度)、リセット、キャンセル/適用。
+  //   done(null)=キャンセル、done({dataUrl,file,blob})=適用。正本には触れない(結果を既存の追加/送信経路へ渡すだけ)。
+  var OUT_MAX = 512; // 出力の長辺上限(アイコン用途=これ以上は不要・localStorage肥大も防ぐ)
+  function openCropper(file, done) {
+    if (!file || !window.FileReader || !document.createElement("canvas").getContext) {
+      done && done(null); return;
+    }
+    var img = new Image();
+    var objUrl = null;
+    try { objUrl = URL.createObjectURL(file); } catch (e) {}
+    img.onerror = function () { cleanup(); alert("画像を読み込めなかった。別の画像で試して。"); done && done(null); };
+    img.onload = function () { build(); };
+    img.src = objUrl || "";
+
+    var rot = 0;               // 0/90/180/270
+    var base = null;           // 回転適用後の作業キャンバス(切り抜きの元)
+    var scale = 1;             // 表示px / base px
+    var crop = null;           // 表示px系の {x,y,w,h}(stage原点)
+    var overlay, stage, cv, frame, gridWrap;
+    var MIN = 24;              // 枠の最小表示サイズ(px)
+
+    function cleanup() {
+      if (objUrl) { try { URL.revokeObjectURL(objUrl); } catch (e) {} objUrl = null; }
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.removeEventListener("keydown", onKey, true);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); cleanup(); done && done(null); }
+    }
+
+    function buildBase() {
+      var sw = img.naturalWidth, sh = img.naturalHeight;
+      var swap = (rot === 90 || rot === 270);
+      var bw = swap ? sh : sw, bh = swap ? sw : sh;
+      base = document.createElement("canvas");
+      base.width = bw; base.height = bh;
+      var g = base.getContext("2d");
+      g.save();
+      g.translate(bw / 2, bh / 2);
+      g.rotate(rot * Math.PI / 180);
+      g.drawImage(img, -sw / 2, -sh / 2);
+      g.restore();
+    }
+
+    function layout() {
+      // stageの実表示幅からscaleを決め、canvasを等倍表示する
+      var maxW = stage.clientWidth || 320;
+      scale = maxW / base.width;
+      var dispW = base.width * scale, dispH = base.height * scale;
+      cv.width = base.width; cv.height = base.height;
+      cv.style.width = dispW + "px"; cv.style.height = dispH + "px";
+      cv.getContext("2d").drawImage(base, 0, 0);
+      stage.style.height = dispH + "px";
+    }
+    function defaultCrop() {
+      var dispW = base.width * scale, dispH = base.height * scale;
+      var s = Math.min(dispW, dispH) * 0.86;
+      crop = { x: (dispW - s) / 2, y: (dispH - s) / 2, w: s, h: s };
+    }
+    function drawFrame() {
+      frame.style.left = crop.x + "px";
+      frame.style.top = crop.y + "px";
+      frame.style.width = crop.w + "px";
+      frame.style.height = crop.h + "px";
+    }
+    function clampCrop() {
+      var dispW = base.width * scale, dispH = base.height * scale;
+      if (crop.w < MIN) crop.w = MIN;
+      if (crop.h < MIN) crop.h = MIN;
+      if (crop.w > dispW) crop.w = dispW;
+      if (crop.h > dispH) crop.h = dispH;
+      if (crop.x < 0) crop.x = 0;
+      if (crop.y < 0) crop.y = 0;
+      if (crop.x + crop.w > dispW) crop.x = dispW - crop.w;
+      if (crop.y + crop.h > dispH) crop.y = dispH - crop.h;
+    }
+    function rerender() { layout(); defaultCrop(); clampCrop(); drawFrame(); }
+
+    function apply() {
+      var sx = Math.round(crop.x / scale), sy = Math.round(crop.y / scale);
+      var sw = Math.round(crop.w / scale), sh = Math.round(crop.h / scale);
+      sw = Math.max(1, Math.min(sw, base.width - sx));
+      sh = Math.max(1, Math.min(sh, base.height - sy));
+      var ow = sw, oh = sh, long = Math.max(sw, sh);
+      if (long > OUT_MAX) { var k = OUT_MAX / long; ow = Math.round(sw * k); oh = Math.round(sh * k); }
+      var out = document.createElement("canvas");
+      out.width = ow; out.height = oh;
+      out.getContext("2d").drawImage(base, sx, sy, sw, sh, 0, 0, ow, oh);
+      var hasAlpha = /png|webp|gif/i.test(file.type || "");
+      var mime = hasAlpha ? "image/png" : "image/jpeg";
+      var dataUrl = out.toDataURL(mime, 0.92);
+      var baseName = (file.name || "icon").replace(/\.[^.]+$/, "");
+      var outName = baseName + (hasAlpha ? ".png" : ".jpg");
+      function finish(blob) {
+        var f = blob;
+        try { f = new File([blob], outName, { type: mime }); } catch (e) { try { blob.name = outName; } catch (e2) {} }
+        cleanup();
+        done && done({ dataUrl: dataUrl, file: f, blob: blob });
+      }
+      if (out.toBlob) out.toBlob(function (b) { finish(b || dataUrlToBlob(dataUrl, mime)); }, mime, 0.92);
+      else finish(dataUrlToBlob(dataUrl, mime));
+    }
+
+    function build() {
+      buildBase();
+      overlay = document.createElement("div");
+      overlay.className = "cropper-overlay";
+      overlay.innerHTML =
+        '<div class="cropper-dialog" role="dialog" aria-label="画像を編集">' +
+          '<div class="cropper-title">画像を編集</div>' +
+          '<div class="cropper-stage"><canvas class="cropper-cv"></canvas>' +
+            '<div class="cropper-frame">' +
+              '<div class="cropper-grid"></div>' +
+              '<span class="cropper-h cropper-h-nw" data-h="nw"></span>' +
+              '<span class="cropper-h cropper-h-ne" data-h="ne"></span>' +
+              '<span class="cropper-h cropper-h-sw" data-h="sw"></span>' +
+              '<span class="cropper-h cropper-h-se" data-h="se"></span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="cropper-bar">' +
+            '<button class="cropper-btn cropper-cancel" data-c="cancel">キャンセル</button>' +
+            '<button class="cropper-btn cropper-icon" data-c="rleft" title="左に回転" aria-label="左に回転">⟲</button>' +
+            '<button class="cropper-btn cropper-icon" data-c="reset" title="リセット" aria-label="リセット">⭯</button>' +
+            '<button class="cropper-btn cropper-icon" data-c="rright" title="右に回転" aria-label="右に回転">⟳</button>' +
+            '<button class="cropper-btn cropper-apply" data-c="apply">適用</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+      stage = overlay.querySelector(".cropper-stage");
+      cv = overlay.querySelector(".cropper-cv");
+      frame = overlay.querySelector(".cropper-frame");
+      gridWrap = overlay.querySelector(".cropper-grid");
+
+      rerender();
+      window.addEventListener("resize", rerender);
+      document.addEventListener("keydown", onKey, true);
+
+      overlay.addEventListener("click", function (e) {
+        var b = e.target.closest ? e.target.closest("[data-c]") : null;
+        if (!b) { if (e.target === overlay) { /* 背景クリックでは閉じない=誤操作防止 */ } return; }
+        var c = b.getAttribute("data-c");
+        if (c === "cancel") { window.removeEventListener("resize", rerender); cleanup(); done && done(null); }
+        else if (c === "apply") { window.removeEventListener("resize", rerender); apply(); }
+        else if (c === "reset") { rot = 0; buildBase(); rerender(); }
+        else if (c === "rleft") { rot = (rot + 270) % 360; buildBase(); rerender(); }
+        else if (c === "rright") { rot = (rot + 90) % 360; buildBase(); rerender(); }
+      });
+
+      wireFrame();
+    }
+
+    function wireFrame() {
+      var drag = null; // {mode:'move'|'nw'|'ne'|'sw'|'se', px,py, start:{...}}
+      function pt(e) {
+        var r = stage.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+      }
+      function start(e, mode) {
+        e.preventDefault();
+        drag = { mode: mode, p: pt(e), start: { x: crop.x, y: crop.y, w: crop.w, h: crop.h } };
+        try { e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      function move(e) {
+        if (!drag) return;
+        var p = pt(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, s = drag.start;
+        if (drag.mode === "move") { crop.x = s.x + dx; crop.y = s.y + dy; }
+        else {
+          var x1 = s.x, y1 = s.y, x2 = s.x + s.w, y2 = s.y + s.h;
+          if (drag.mode === "nw") { x1 = s.x + dx; y1 = s.y + dy; }
+          else if (drag.mode === "ne") { x2 = s.x + s.w + dx; y1 = s.y + dy; }
+          else if (drag.mode === "sw") { x1 = s.x + dx; y2 = s.y + s.h + dy; }
+          else if (drag.mode === "se") { x2 = s.x + s.w + dx; y2 = s.y + s.h + dy; }
+          crop.x = Math.min(x1, x2); crop.y = Math.min(y1, y2);
+          crop.w = Math.abs(x2 - x1); crop.h = Math.abs(y2 - y1);
+        }
+        clampCrop(); drawFrame();
+      }
+      function end() { drag = null; }
+      frame.addEventListener("pointerdown", function (e) {
+        var h = e.target.getAttribute && e.target.getAttribute("data-h");
+        start(e, h || "move");
+      });
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", end);
+      window.addEventListener("pointercancel", end);
+      // overlayを閉じたらリスナーも落とす(cleanupで要素は消えるが window 側は明示解除)
+      var origCleanup = cleanup;
+      cleanup = function () {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", end);
+        window.removeEventListener("pointercancel", end);
+        window.removeEventListener("resize", rerender);
+        origCleanup();
+      };
+    }
+  }
+  function dataUrlToBlob(dataUrl, mime) {
+    var parts = dataUrl.split(",");
+    var bin = atob(parts[1] || "");
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime || "application/octet-stream" });
+  }
+
   function handleAddFile(name, file) {
     if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () {
+    // ★追加前に範囲トリミング(Chami msg1546525688914251846)。適用した矩形だけを手元メモへ入れる。
+    openCropper(file, function (res) {
+      if (!res) return; // キャンセル
       var ed = personaEdits(name); ed.added = ed.added || []; ed.removed = ed.removed || [];
       state.addSeq += 1;
-      ed.added.push({ id: "local-" + state.addSeq, name: file.name || "image", dataUrl: String(reader.result || "") });
+      ed.added.push({ id: "local-" + state.addSeq, name: file.name || "image", dataUrl: res.dataUrl });
       setPersonaEdits(name, ed);
       refreshAfterEdit(name);
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   // ── 直接アップロード(ページ→正本)。PUT /api/img(先)→ POST /api/persona/enqueue ──
@@ -582,6 +801,14 @@
     m.className = "av-upmsg" + (isErr ? " is-err" : "");
   }
   function directUpload(name, file) {
+    if (!file) return;
+    // ★正本へ送る前に範囲トリミング(Chami msg1546525688914251846)。切り出した矩形だけをアップロードする。
+    openCropper(file, function (res) {
+      if (!res) { setUploadMsg("トリミングを取り消した=送信しなかった。", false); return; }
+      uploadBlob(name, res.file);
+    });
+  }
+  function uploadBlob(name, file) {
     if (!file) return;
     var token = getSyncToken();
     if (!token) { if (!setSyncToken()) { setUploadMsg("トークン未設定=中止した。", true); return; } token = getSyncToken(); }
