@@ -114,14 +114,20 @@ def filler_line_scrub(body, tag="persona_send"):
         return body
 
 
-def enjoh_backstop(body, tag="persona_send"):
-    """Discordへ出る本文を合流点で正規化する(炎上表記 + 生成ノイズの孤立フィラー行)。
+def fire_normalize(body, tag="dispatch"):
+    """★炎上表記(A/B)**だけ**を当てる。フィラー行スクラブは含まない。
 
-    引数 tag は stderr の出所表示だけに使う(判定には効かない)。
-    返り値: 送るべき本文。置換が1件も無ければ入力を1ミリも変えない(Noneも型のまま返す)。
-    ★名前は据え置き= 5口の呼び出しと既存の配線検査(co_names)を壊さないため。
+    ★2026-09-07 追加(イージス研究室)= **第6の口 `scripts/llm/dispatch.py` のため**に切り出した。
+      改善提案部門の発注 `DISPATCH-aegis-gl-1788739848001` は「dispatch経由にはゲートが効いている」
+      と書いていたが、**実測ではdispatchはこのゲートを1度も通っていない**(呼んでいるのは
+      persona_send / bot_send / codex_run / behop / imagegen の5口だけ)。実物= 部門記憶の受信content
+      2026-09-02〜09-07 で **DISPATCH/ESC封筒 22通が素の🔥を載せて各部屋へ届いていた**
+      (うち12通が絵文字監視digestの見出し・残り10通は各室が自分で書いた地の文)。
+    ★なぜ enjoh_backstop をそのまま呼ばないか= 封筒の本文には識別子だけの独立行が普通に出る。
+      `filler_line_scrub` は「孤立した1語のASCII」を落とす作りなので、封筒に当てると
+      `dispatch` のような行を消しかねない= **依頼の情報を消す方が事故として重い**。
+      だから封筒には A/B だけを当てる(ORG-11= 正本はこの1本のまま)。
     """
-    body = filler_line_scrub(body, tag=tag)       # ★炎上表記の有無に関係なく必ず通す
     try:
         s = str(body or "")
         if "\U0001F525" not in s and ENJOH_EMOJI not in s:
@@ -143,3 +149,16 @@ def enjoh_backstop(body, tag="persona_send"):
         print(f"[{tag}] 炎上表記ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
               file=sys.stderr)
         return body
+
+
+def enjoh_backstop(body, tag="persona_send"):
+    """Discordへ出る本文を合流点で正規化する(炎上表記 + 生成ノイズの孤立フィラー行)。
+
+    引数 tag は stderr の出所表示だけに使う(判定には効かない)。
+    返り値: 送るべき本文。置換が1件も無ければ入力を1ミリも変えない(Noneも型のまま返す)。
+    ★名前は据え置き= 5口の呼び出しと既存の配線検査(co_names)を壊さないため。
+    ★2026-09-07= 中身を fire_normalize() へ切り出しただけで、この関数の振る舞いは変えていない
+      (フィラー行スクラブ → 炎上表記、の順も同じ)。
+    """
+    body = filler_line_scrub(body, tag=tag)       # ★炎上表記の有無に関係なく必ず通す
+    return fire_normalize(body, tag=tag)

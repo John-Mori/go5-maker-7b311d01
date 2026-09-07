@@ -137,14 +137,40 @@ ok(enjoh.enjoh_backstop(FIRE + "炎上 9件が残っている", tag="test") == E
 WIRES = [("discord/persona_send.py", "main"), ("discord/bot_send.py", "main"),
          ("behop/behop.py", "dc_send"), ("codex/codex_run.py", "dc_send"),
          ("imagegen/generate.py", "discord_upload")]
+def _calls_of(node):
+    return {c.func.id for c in ast.walk(node) if isinstance(c, ast.Call)
+            and isinstance(c.func, ast.Name)}
+
+
+def reaches_gate(path, fn, depth=4):
+    """fn() から `enjoh_backstop` へ**同じファイル内の関数を辿って**到達できるか。
+
+    ★2026-09-07(イージス研究室)= 直接呼びだけを見ていたが、codex_run は
+      dc_send → dc_send_result → dc_send_chunks / prepare_discord_chunks() と分かれており、
+      ゲートは prepare_discord_chunks の中に在る。**配線は生きているのに赤**になっていた
+      (=偽の赤。赤が定位置になった検査は、本物の穴が来ても誰も見ない)。
+      緩めたのではなく**辿るようにした**= 途中の関数がゲートを落とせば今も赤になる。
+    """
+    tree = ast.parse(io.open(path, encoding="utf-8").read(), path)
+    funcs = {x.name: x for x in ast.walk(tree) if isinstance(x, ast.FunctionDef)}
+    seen, frontier = set(), [fn]
+    for _ in range(depth):
+        nxt = []
+        for name in frontier:
+            if name in seen or name not in funcs:
+                continue
+            seen.add(name)
+            names = _calls_of(funcs[name])
+            if "enjoh_backstop" in names:
+                return True
+            nxt.extend(names)
+        frontier = nxt
+    return False
+
+
 for rel, fn in WIRES:
     path = os.path.join(ROOT, "scripts", *rel.split("/"))
-    tree = ast.parse(io.open(path, encoding="utf-8").read(), path)
-    node = next((x for x in ast.walk(tree)
-                 if isinstance(x, ast.FunctionDef) and x.name == fn), None)
-    names = {c.func.id for c in ast.walk(node) if isinstance(c, ast.Call)
-             and isinstance(c.func, ast.Name)} if node else set()
-    ok("enjoh_backstop" in names, f"C-1 {rel}:{fn}() が合流点ゲートを呼ぶ")
+    ok(reaches_gate(path, fn), f"C-1 {rel}:{fn}() が合流点ゲートを呼ぶ")
 ok("filler_line_scrub" in enjoh.enjoh_backstop.__code__.co_names,
    "C-2 enjoh_backstop() が filler_line_scrub を呼ぶ(5口へ同時に入っている)")
 

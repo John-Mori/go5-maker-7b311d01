@@ -446,6 +446,34 @@ def naming_gate_pass(sender, from_dept, body):
         return body, 0, 0
 
 
+# ==== 炎上表記ゲート(2026-09-07・REQ-90ebe8bfc8の恒久策)==========================
+#   ★発注(改善提案部門 `DISPATCH-aegis-gl-1788739848001`)は直し所を
+#     `reaction_watch.py:549` と「digest投函直前」の2点としていた。**実測で的が1つ足りない**=
+#     ゲートを呼んでいるのは persona_send / bot_send / codex_run / behop / imagegen の**5口だけ**で、
+#     **dispatch はどれも通っていない**(発注の「dispatch経由には効いている」は誤り)。
+#   ★実物= 部門記憶の受信content 2026-09-02〜09-07 で、素の🔥を載せた DISPATCH/ESC封筒が **22通**。
+#     内訳= 絵文字監視digestの見出し **12通**(発注の12件と一致)/ **残り10通は別々の部屋が
+#     自分で書いた地の文**(改善提案部門・研究室HQ・当室自身を含む)。
+#     → digestだけ直しても 10/22 は残る。**producerを1つずつ直すのは終わらない**(C-064)。
+#   ★だから合流点はここ= 下の naming_gate_pass と同じ位置。キュー投函も表投稿も --also-post の
+#     写しも、必ずこの1本を通ってから出る。
+#   ★かけるのは A/B(素の🔥→<:enjoh:…> / 絵文字に隣接したラベル「炎上」→「恒久」)**だけ**。
+#     `enjoh_backstop` ごと呼ばないのは、同梱の filler_line_scrub が「孤立した1語のASCII」を
+#     落とす作りで、封筒の本文に普通に出る識別子だけの行(例= `dispatch`)を消しかねないため。
+#     **依頼の情報を消す方が事故として重い**(規律§3= 誤発火する安全網は無視される)。
+def enjoh_gate_pass(body, dept):
+    """投函する本文へ炎上表記ゲートを当てる。fail-open= 何が起きても便を止めない。"""
+    try:
+        d = os.path.join(ROOT, "scripts", "discord")
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        from enjoh import fire_normalize
+        return fire_normalize(body, tag=f"dispatch:{dept}")
+    except Exception as e:
+        print(f"  [{dept}] 炎上表記ゲートの正本 enjoh.py を読めない({type(e).__name__})=素通し")
+        return body
+
+
 def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience="",
              from_dept="", from_dept_explicit=False, from_dept_rec=None, from_dept_src="arg",
              quiet_ack_ok=False, already_gated=False):
@@ -485,6 +513,10 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
             print(f"  [{dept}] ★呼称ゲートC= 本文を {_nfix}件 直した(送信者={sender})")
         if _nwarn:
             print(f"  [{dept}] 呼称ゲートC= 警告のみ {_nwarn}件(本文は変えていない・台帳に記録)")
+
+    # ★炎上表記ゲート。**already_gated に関係なく必ず通す**= 呼称ゲートCと違ってこちらは
+    #   「直す」だけで台帳へ書かないので、2度通っても水増しが起きない(2回目は不一致で素通し)。
+    body = enjoh_gate_pass(body, dept)
 
     if dry_run:
         if is_work:
