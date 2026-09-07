@@ -72,6 +72,21 @@ OWNER_MARK = re.compile(r"所有\s*[=＝]\s*([A-Za-z0-9_\-]+|[^\s)）、。,]+)"
 STAR_DATE = re.compile(r"★\s*(\d{4})-(\d{2})-(\d{2})")
 ANY_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 ITEM_ID = re.compile(r"\b((?:HQ|ORG|INC)-\d{2,5})\b")
+# ★台帳のID欄は行末の `\`HQ-0249\` @2026-09` という決まった形で書かれている(ID列)。
+#   本文の中で**別の裁定番号を引き合いに出す**(例「ORG-11= 表を2か所に持つと必ず片方が腐る」)と、
+#   素の ITEM_ID.search は行の**最初**の当たりを返すので、そちらを行のIDだと読み違える。
+#   2026-09-08 に実際に起きた= HQ-0249 の行へ ORG-11 を引いた追記を入れた途端、督促の本文が
+#   `ORG-11 hq_open_items.md:24` と名乗った(存在しない台帳IDを人へ渡す=ORG-04の形)。
+#   → **ID列の形を先に見て、無い時だけ素の当たりへ落ちる。**
+#   実測(2026-09-08・現行+アーカイブの「入れた(確認待ち)」168行)= ID列を持つ行は45行で
+#   **1行に2つ現れる行は0件**、素の先頭と食い違うのは**上のHQ-0249の1行だけ**=巻き添え0。
+ITEM_ID_COL = re.compile(r"`((?:HQ|ORG|INC)-\d{2,5})`\s*@\d{4}-\d{2}")
+
+
+def item_id(text):
+    """その行の台帳ID。ID列(`HQ-0249` @2026-09)が在ればそれ、無ければ素の最初の当たり。"""
+    m = ITEM_ID_COL.search(text) or ITEM_ID.search(text)
+    return m.group(1) if m else ""
 # ★便のID(`DISPATCH-aegis-gl-1788556091239`)の中のスラッグは**宛先であって依頼元ではない**。
 #   ここを読むと「発注= DISPATCH-aegis-gl-…」を自室発注と読み違える(2026-09-05 実測2行)。
 #   → 専用の伏せ字は置かない。`_find_name` の語境界(前後がASCII語字なら拾わない)が同じ穴を
@@ -242,8 +257,8 @@ def scan(now, files=None, alias=None):
             if cb and cb.group(1).lower() == "x":
                 continue                       # 閉じ済みのチェックボックスは対象外
             date, src, owner, req = parse_line(live, alias)
-            mid = ITEM_ID.search(text)
-            key = mid.group(1) if mid else "L" + hashlib.sha1(
+            mid = item_id(text)
+            key = mid or "L" + hashlib.sha1(
                 text.strip().encode("utf-8")).hexdigest()[:10]
             items.append({
                 "key": key,

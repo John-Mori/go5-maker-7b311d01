@@ -205,6 +205,35 @@ def main():
     check("★従来の書式(札の直後に部門名)も壊れていない",
           by["HQ-9001"]["dept"] == "system-engineer-b")
 
+    print("\n[9] ★行のIDは台帳のID列から読む(本文が別の裁定番号を引いても間違えない)")
+    # 実物の壊れ方(2026-09-08)= HQ-0249 の行へ「ORG-11= 表を2か所に持つと必ず片方が腐る」を
+    # 追記した途端、督促の本文が `ORG-11 hq_open_items.md:24` と名乗った。
+    # 存在しない台帳IDを人へ渡す=ORG-04の形(その番号を引きに行っても行が無い)。
+    idcol = os.path.join(tempfile.mkdtemp(prefix="pendid_"), "hq_open_items.md")
+    io.open(idcol, "w", encoding="utf-8").write(
+        # ★ORG-11 の直前は**語字でない字**にする= `\b` は日本語も語字と見るので、
+        #   「本文でORG-11」と地続きに書くと旧実装でも当たらず、赤が偽の緑になる(実物の
+        #   HQ-0249 は `(ORG-11= …` と全角括弧の後ろに在ったから当たった)。
+        "- [ ] **★%s 入れた(確認待ち・所有=hq)= 本文で(ORG-11= 表を2か所に持つな)を引く行**"
+        "  … `HQ-9201` @2026-09\n"
+        "- [ ] **★%s 入れた(確認待ち・所有=hq)= ID列が無い行(素の当たりへ落ちる)**"
+        "  … `HQ-9202`\n" % (d(5), d(5)))
+
+    # 壊れた側(動く別実装)= ID列を知らず、行の最初の当たりをIDだと読む旧実装。
+    old_col = P.ITEM_ID_COL
+    P.ITEM_ID_COL = P.re.compile(r"(?!)")     # ID列を1つも見つけない=旧実装と同じ挙動
+    try:
+        red = {i["key"] for i in P.scan(NOW, files=[idcol])}
+    finally:
+        P.ITEM_ID_COL = old_col
+    check("★赤= 旧実装は本文のORG-11を行のIDだと名乗る", "ORG-11" in red)
+    check("★赤= 旧実装ではHQ-9201が消える", "HQ-9201" not in red)
+
+    gid = {i["key"] for i in P.scan(NOW, files=[idcol])}
+    check("★緑= ID列のHQ-9201を行のIDとして読む", "HQ-9201" in gid)
+    check("★緑= 本文のORG-11をIDにしない", "ORG-11" not in gid)
+    check("★緑= ID列が無い行は従来どおり素の当たり(HQ-9202)", "HQ-9202" in gid)
+
     print("\n== ok %d / NG %d ==" % (PASS, FAIL))
     return 1 if FAIL else 0
 
