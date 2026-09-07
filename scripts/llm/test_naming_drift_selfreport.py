@@ -131,7 +131,10 @@ def t3(ndc, tmp):
     p = fixture(tmp)
     all_rows = ndc.load_rows(p, keep_self=True)
     kept = ndc.load_rows(p)
-    ok(len(all_rows) == 10, "3a keep_self=True で判定行10(naming_fix は元から数えない)",
+    # ★2026-09-08 10→7= load_rows() が重複を畳むようになった(DEDUPE_KEY)。この治具の
+    #   自分の警報6行は「同じ日・同じ ts・同じ組」を2本ずつ書いた形= 3本へ畳まれる。
+    #   ここは**畳みが効いていることの目盛り**を兼ねる(7に戻らなくなったら畳みが外れた)。
+    ok(len(all_rows) == 7, "3a keep_self=True で判定行7(重複を畳んだ後・naming_fix は元から除外)",
        "実測%d" % len(all_rows))
     ok(len(kept) == 4, "3b 既定で4行(自分の6行だけ落ちる)", "実測%d" % len(kept))
     ok(all(not ndc.is_self_report(r) for r in kept), "3c 残った行に自己汚染が1つも無い")
@@ -145,8 +148,8 @@ def t3(ndc, tmp):
     ok(c[k]["personas"] == ["オタコン", "ククール"],
        "3h 人格から『ケヴィン・デブライネ』(=見張り自身)が消える", str(c[k]["personas"]))
     sr = ndc.self_reports(p, end="2026-09-06")
-    ok(sum(s["count"] for s in sr) == 6, "3i 外した分を self_reports() が6件で見せる",
-       str(sr))
+    ok(sum(s["count"] for s in sr) == 3,
+       "3i 外した分を self_reports() が3件で見せる(6行→重複を畳んで3)", str(sr))
 
 
 # --------------------------------------------------- T4 黙って消さない(表示側)
@@ -193,16 +196,17 @@ def must_fail(tmp):
 
     # 変異①= 除外そのものを外す(2026-08-31〜09-06 の実装。動きはする)。
     total += 1
+    # ★2026-09-08 変異点の字下げが変わった(load_rows が _read() へ分かれた)。
     m1 = mutant(NDC, "mut_no_exclude",
-                "                    if not keep_self and is_self_report(r):\n"
-                "                        continue\n", "")
+                "        if not keep_self and is_self_report(r):\n"
+                "            continue\n", "")
     if m1 is None:
         ok(False, "変異①の変異点が見つからない(検査が古い)")
     else:
         p = fixture(tmp)
         got = len(m1.load_rows(p))
-        ok(got == 10, "変異①(除外を外す)= [3]の数え方が落ちる(4→10)", "実測%d" % got)
-        red += 1 if got == 10 else 0
+        ok(got == 7, "変異①(除外を外す)= [3]の数え方が落ちる(4→7)", "実測%d" % got)
+        red += 1 if got == 7 else 0
 
     # 変異②= 頭一致ではなく**どこかに在れば**外す(広げた実装。動きはする)。
     total += 1

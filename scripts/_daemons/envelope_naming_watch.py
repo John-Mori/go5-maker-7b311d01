@@ -270,7 +270,7 @@ def drift_material(ndc):
     return "|".join(out)
 
 
-def build_drift_body(ndc, drifts, un):
+def build_drift_body(ndc, drifts, un, dup=None, fn=None):
     # ★見出しは `ndc.SELF_REPORT_HEAD` から組む。ここを直書きすると、文言を変えた日に
     #   「この便を台帳から外す」判定(ndc.is_self_report)が黙って外れ、また自分の警報で
     #   自分の目盛りを押し上げる(2026-09-06 実測の自己汚染30行)。同じ文字列を2箇所に置かない。
@@ -322,6 +322,33 @@ def build_drift_body(ndc, drifts, un):
             "  読むと「モドリッチをモドリッチと呼ぶな」になる。直す先が読めない警報は出さない。",
             "  ゲート側で実際の形を残す改修は当室で持つ(まだ**入れていない**)。",
         ]
+    # ★2026-09-08= **この数字から何を引いたか**を便の中に必ず書く(発注= 人事部門ククール
+    #   msg 1546607734349111418)。除外を画面(naming_drift_check の標準出力)にだけ出して
+    #   便に書かないと、受け手は「元から少なかった」と読む= 減った理由を追えない。
+    if dup:
+        lines += [
+            "",
+            "■★この件数から**引いた**分①= 重複 %d件(当室の集計側で畳んだ)"
+            % sum(d["count"] for d in dup),
+            "  " + "、".join("%s>%s×%d" % (d["target"], d["found"], d["count"])
+                             for d in dup[:6]),
+            "  同じ一箇所を投函の関門が2度書いていた(dispatch は呼称ゲートCを2回通る)。",
+            "  ★生成側は 2026-09-06 に塞いである(`dispatch.py` の `already_gated`)。だが"
+            "**既に書かれた行は消えない**ので、窓が入れ替わるまでこの分が残る=読み手側で畳んだ。",
+        ]
+    if fn:
+        lines += [
+            "",
+            "■★この件数から**引いた**分②= 正しいフル名を書いただけ %d件(**裁定を頼む**)"
+            % sum(f["count"] for f in fn),
+            "  " + "、".join("%s>%s×%d" % (f["target"], f["found"], f["count"])
+                             for f in fn[:6]),
+            "  実物=「この件は**一ノ瀬怜**へ回します。」と書くと found=\"一ノ瀬\" の行が立つ。",
+            "  本文に裸の姓は1文字も無い= **裸の姓で呼んだ**のと**フル名で書いた**のは別の"
+            "崩れ方で、直し方も違う。混ぜたままだと効かないピンを打つことになる。",
+            "  ★**フル名を違反と呼ぶかは人事部門の裁定だ**(呼称の正本はそちら)。"
+            "「違反」の裁定なら1行返してくれ= 当室で足し戻す。",
+        ]
     return "\n".join(lines)
 
 
@@ -354,6 +381,11 @@ def run_drift(ns, dry):
         rows = ndc.load_rows(ns.drift_ledger or None)
         drifts = ndc.scan(rows)
         un = ndc.unreadable(rows)
+        # ★引いた分は**便にも**書く(理由は build_drift_body の中)。台帳のパスは
+        #   ns.drift_ledger を必ず渡す= selftest が本番台帳を読みに行かないように。
+        led = ns.drift_ledger or None
+        dup = ndc.duplicates(led)
+        fn = ndc.full_name_hits(led)
     except Exception as e:
         _log({"event": "error", "何": "ドリフト検査が落ちた",
               "err": "%s: %s" % (type(e).__name__, e)})
@@ -370,7 +402,7 @@ def run_drift(ns, dry):
         print("持続ドリフト %d件(前回と同じ顔ぶれ=知らせ直さない)" % len(drifts))
         return 0
 
-    res = notify_drift(build_drift_body(ndc, drifts, un), dry)
+    res = notify_drift(build_drift_body(ndc, drifts, un, dup, fn), dry)
     _log({"event": "drift_alert", "件数": len(drifts), "結果": res, "sig": ds[:200]})
     if not dry:
         _write_json(STATE_DRIFT, {"material": sig, "drift": ds, "checked": _now(),

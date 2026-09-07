@@ -9,11 +9,22 @@
 
 背景(2026-09-05 aegis-gl)= Codexの発話は**どのゲートも通っていなかった**。呼称ルール.json へ
 「ネイキッド・スネーク→一ノ瀬怜」の行を作っても(人事部門)、通り道が無ければ休眠する。
+
+★2026-09-08(aegis-gl)= **この検査は本番の naming_audit.jsonl を汚していた**。
+  T3/T5 の探り本文 `怜さん、頼む。` が source="codex" で本番台帳へ載り、呼称ドリフトの集計側では
+  **ネイキッド・スネークの実出力と見分けが付かない**(実測= found="怜さん" のスネーク行9本は
+  全て near/excerpt が丸ごと `怜さん、頼む。`= この探り本文だった)。人事部門はその4行を
+  「Codexの敬語バイアスの残渣」と読み、autofix を足すか否かの判断材料にしていた。
+  規律=「**本番の部屋でテストしない**」と同じ話が**台帳**でも起きていた、というのが真因だ。
+  直し方= `GO5_LOCAL_DIR` を **import より前に**一時フォルダへ向ける(前例=
+  `scripts/behop/test_behop_ladder.py`)。output_gates も codex_run も同じ環境変数で
+  `local/` を決めるので、判定・分岐は本物のまま、**書き込み先だけ**砂場へ逃げる。
 """
 import io
 import json
 import os
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,10 +32,16 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
 
+# ★本番台帳を汚さない= import より前に local/ を砂場へ向ける(理由は上のdocstring)
+SANDBOX = os.environ["GO5_LOCAL_DIR"] = tempfile.mkdtemp(prefix="codex_naming_gate_test_")
+
 import codex_run                                    # noqa: E402
 import naming_gate as ng                            # noqa: E402
 
-AUDIT = os.path.join(ROOT, "local", "llm", "naming_audit.jsonl")
+AUDIT = os.path.join(SANDBOX, "llm", "naming_audit.jsonl")
+# ★本番台帳。**読むだけ**= この検査で1バイトも増えていないことをT7で見る(§4.55の「実物」)
+PROD_AUDIT = os.path.join(ROOT, "local", "llm", "naming_audit.jsonl")
+PROD_SIZE_BEFORE = os.path.getsize(PROD_AUDIT) if os.path.exists(PROD_AUDIT) else -1
 
 PASS = FAIL = 0
 
@@ -183,6 +200,17 @@ import codex_responder                              # noqa: E402
 check("T6a codex_run.CODEX_PERSONA == codex_responder.PERSONA_TENTATIVE",
       codex_run.CODEX_PERSONA == codex_responder.PERSONA_TENTATIVE,
       (codex_run.CODEX_PERSONA, codex_responder.PERSONA_TENTATIVE))
+
+print("== T7 この検査は本番の naming_audit.jsonl を1バイトも増やしていない ==")
+#   ★2026-09-08 まで、ここが破れていた= T3/T5 の探り本文が source="codex" で本番へ載り、
+#     呼称ドリフト集計では実出力と見分けが付かなかった。砂場が効いていれば本番は不動だ。
+check("T7z 砂場が本番と別物である", os.path.abspath(AUDIT) != os.path.abspath(PROD_AUDIT),
+      (AUDIT, PROD_AUDIT))
+check("T7y 砂場側には実際に書かれている(空PASSでない)",
+      os.path.exists(AUDIT) and os.path.getsize(AUDIT) > 0, AUDIT)
+_prod_now = os.path.getsize(PROD_AUDIT) if os.path.exists(PROD_AUDIT) else -1
+check("T7a 本番台帳のサイズが前後で同じ",
+      _prod_now == PROD_SIZE_BEFORE, (PROD_SIZE_BEFORE, _prod_now))
 
 print("\n結果: %d PASS / %d FAIL" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

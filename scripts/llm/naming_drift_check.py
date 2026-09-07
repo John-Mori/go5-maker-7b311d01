@@ -50,6 +50,7 @@ import datetime as dt
 import io
 import json
 import os
+import re
 import sys
 
 PJ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,12 +88,90 @@ def is_self_report(r):
     return str(r.get("excerpt") or "").lstrip().startswith(SELF_REPORT_HEAD)
 
 
-def load_rows(path=None, keep_self=False):
+# ★同じ一箇所の違反が台帳へ2本書かれていた分を畳む(2026-09-08・イージス研究室)。
+#   出所= dispatch は関門を2回通る(main() の同報前に1回・dispatch() の中でもう1回)。
+#   ゲートCが**直す**違反は1回目で消えるが、大半は「警告のみ」で本文を変えない=
+#   2回目が同じ違反をもう一度見つけて**同じ行をもう1本**書く。
+#   ★生成側は 2026-09-06 に塞いである(scripts/llm/dispatch.py の `already_gated`)。
+#     実測(2026-09-08)= 09-08の dispatch 判定行 5 / 一意 5 = 重複0。**塞がっている。**
+#     だが**台帳に既に書かれた分は消えない**= 窓14日はまだ二重の行を抱えている。
+#     実測(窓 2026-08-26〜09-08)= 判定行 621 / 一意 407 = **214行(34%)が重複**。
+#     生成側だけ直して読み手を直さないと、直した後も2週間ぶん膨れた数字が人事部門へ出る。
+#   ★畳む鍵に excerpt を入れない= 1回目と2回目で excerpt が違う(1回目が直した
+#     呼びかけが2回目の excerpt に映る。実物= 「アロンソさん、」→「アロンソコーチ、」)。
+#     同じ ts・同じ人格・同じ組・同じ現場(near)なら**同じ一箇所**だ。
+#   ★near を鍵に入れる= 1つの本文に同じ形が2箇所出たら near が違う= 別々に数える(潰さない)。
+DEDUPE_KEY = ("ts", "source", "dept", "persona", "target", "found", "near")
+
+
+def dedupe(rows):
+    """同じ一箇所を指す行を1本に畳む(理由は DEDUPE_KEY の上)。★順序は保つ。"""
+    seen = set()
+    out = []
+    for r in rows:
+        k = tuple(str(r.get(k_) or "") for k_ in DEDUPE_KEY)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(r)
+    return out
+
+
+def is_full_name_hit(r):
+    """★その行の当たりは**正しいフル名を書いただけ**か(2026-09-08・イージス研究室)。
+
+    実物= 便に「この件は**一ノ瀬怜**へ回します。」と書くと、`found="一ノ瀬"` の行が立つ。
+    台帳を読むと「一ノ瀬怜 を **一ノ瀬** と呼んでいる」= 本文には裸の姓は1文字も無い。
+    ★これはゲートの誤判定ではない(allowed は「怜」なのでフル名も許可形ではない)。
+      だが**裸の姓で呼んだ**のと**フル名で書いた**のは別の崩れ方で、直し方も違う。
+      1つの数字に混ぜると、人事部門は「裸の姓がN件」と読んで効かないピンを打つ。
+    ★判定は near(現場の前後)だけで行う= 当たりが**全部** target の内側に埋まっている時だけ
+      True。1つでも外に出ていれば False=**数える側へ倒す**(fail-open)。
+      near が無い行・target が near に無い行も False(判定できない時は数える)。
+    ★実測(窓 2026-08-26〜09-08・重複を畳んだ後 407行)= 56行(一ノ瀬怜>一ノ瀬 45 /
+      ケヴィン・デブライネ>デブライネ 7 / 三笘薫>三笘 2 / デブライネ>ケヴィン 1、他1)。
+      「一ノ瀬怜>一ノ瀬」の窓14日は 84件 → 39件へ落ちる(=残り45件がこの形)。
+    ★**フル名が違反かどうかは決めていない**= 呼称の正本は人事部門(§役割)。
+      ここでやるのは「別の棚に置いて件数を見せる」だけ= `full_name_hits()` で必ず表に出す。
+    """
+    near = str(r.get("near") or "")
+    found = str(r.get("found") or "")
+    target = str(r.get("target") or "")
+    if not near or not found or not target or found == target or target not in near:
+        return False
+    spans = [(m.start(), m.end()) for m in re.finditer(re.escape(target), near)]
+    hits = [(m.start(), m.end()) for m in re.finditer(re.escape(found), near)]
+    if not hits:
+        return False
+    return all(any(s <= a and b <= e for s, e in spans) for a, b in hits)
+
+
+def load_rows(path=None, keep_self=False, keep_full_name=False):
     """台帳から**判定行だけ**読む。★壊れた行で落ちない(1行の事故で監視を止めない)。
 
     event="naming_fix" は機械が直した行= ドリフトではなく**直った跡**なので数えない。
     ★この見張り自身の警報本文から生まれた行も数えない(理由は SELF_REPORT_HEAD)。
       数えたい時(=汚染そのものを測る時)だけ keep_self=True。
+    ★同じ一箇所が2本書かれた行は畳む(理由は DEDUPE_KEY)。**これは常に効く**=
+      畳んだ結果が「元の数」だ。畳む前の数を見たい時は dedupe() を通さず自分で読め。
+    ★正しいフル名を書いただけの行も数えない(理由は is_full_name_hit)。
+      数えたい時(=その分を測る時)だけ keep_full_name=True。
+    """
+    out = []
+    for r in _read(path):
+        if not keep_self and is_self_report(r):
+            continue
+        if not keep_full_name and is_full_name_hit(r):
+            continue
+        out.append(r)
+    return dedupe(out)
+
+
+def _read(path=None):
+    """台帳の**判定行だけ**を素で読む(除外も重複畳みもしない)。
+
+    ★壊れた行で落ちない(1行の事故で監視を止めない)。除外した分を数える窓口はここを見る=
+      「畳む前」を知っているのはこの関数だけだ。
     """
     out = []
     try:
@@ -106,8 +185,6 @@ def load_rows(path=None, keep_self=False):
                 except Exception:
                     continue
                 if r.get("event") == "naming" and r.get("found") and r.get("target"):
-                    if not keep_self and is_self_report(r):
-                        continue
                     out.append(r)
     except OSError:
         return []
@@ -120,7 +197,44 @@ def self_reports(path=None, end=None, window=WINDOW_DAYS, since=None):
     捨てた数を見えないところへ捨てると、次に読む者が「元から少なかった」と読む。
     main() はここを1行で必ず出す(「鳴らせない」「鳴らさない」と同じ扱い)。
     """
-    rows = [r for r in load_rows(path, keep_self=True) if is_self_report(r)]
+    rows = [r for r in load_rows(path, keep_self=True, keep_full_name=True)
+            if is_self_report(r)]
+    return _by_pair(rows, end, window, since)
+
+
+def full_name_hits(path=None, end=None, window=WINDOW_DAYS, since=None):
+    """★外した分(=正しいフル名を書いただけの行)を組ごとに返す。理由は is_full_name_hit。
+
+    self_reports() と同じ理由でここに要る= 捨てた数を見えないところへ捨てない。
+    ★ここに出た件数は「フル名で書いた回数」だ。**それを違反と呼ぶかは人事部門の裁定**で、
+      この見張りは決めない。裁定が「違反」なら、この行の数を足し戻せばいい。
+    """
+    rows = [r for r in load_rows(path, keep_self=True, keep_full_name=True)
+            if is_full_name_hit(r) and not is_self_report(r)]
+    return _by_pair(rows, end, window, since)
+
+
+def duplicates(path=None, end=None, window=WINDOW_DAYS, since=None):
+    """★畳んだ分(=同じ一箇所が2度書かれた行)を組ごとに返す。理由は DEDUPE_KEY。
+
+    ★生成側(dispatch.py の already_gated)は 2026-09-06 に塞いである。ここに数字が出るのは
+      **塞ぐ前に書かれた行が窓に残っている**間だけだ= 窓が入れ替われば自然に0へ落ちる。
+      0にならなくなったら、それは塞いだ所が外れた合図(この行がその見張りを兼ねる)。
+    """
+    rows = []
+    seen = set()
+    for r in _read(path):
+        if is_self_report(r) or is_full_name_hit(r):
+            continue
+        k = tuple(str(r.get(k_) or "") for k_ in DEDUPE_KEY)
+        if k in seen:
+            rows.append(r)          # 2本目以降=畳まれた分
+        seen.add(k)
+    return _by_pair(rows, end, window, since)
+
+
+def _by_pair(rows, end, window, since):
+    """(target, found) ごとに件数と日数だけ畳んだ一覧(除外分を見せる窓口の共通形)。"""
     out = []
     for (target, found), a in _aggregate(rows, end, window, since=since).items():
         out.append({"target": target, "found": found, "count": a["count"],
@@ -358,6 +472,29 @@ def sig(drifts):
                            for d in drifts))
 
 
+def _show_drops(window=WINDOW_DAYS, since=None):
+    """★畳んだ分/外した分を**必ず**画面へ出す(2026-09-08)。
+
+    なぜ関数にしたか= 通常表示と `--since` の2箇所で同じ行が要るからだ。片方に書き忘れると、
+    「是正後モードだけ数が小さい」= 除外を効果と読み違える経路ができる。
+    """
+    dup = duplicates(window=window, since=since)
+    if dup:
+        print("(畳んだ %d件= 同じ一箇所を関門が2度書いた重複・生成側は 2026-09-06 に"
+              "塞いだ〈dispatch.py already_gated〉ので窓が入れ替われば0へ落ちる: %s)"
+              % (sum(d["count"] for d in dup),
+                 "、".join("%s>%s×%d" % (d["target"], d["found"], d["count"])
+                           for d in dup[:5])))
+    fn = full_name_hits(window=window, since=since)
+    if fn:
+        print("(外した %d件= 正しいフル名を書いただけの行〈例「一ノ瀬怜へ回す」で"
+              "found=一ノ瀬〉。**フル名を違反と呼ぶかは人事部門の裁定**=裁定が『違反』なら"
+              "足し戻す: %s)"
+              % (sum(f["count"] for f in fn),
+                 "、".join("%s>%s×%d" % (f["target"], f["found"], f["count"])
+                           for f in fn[:5])))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=WINDOW_DAYS)
@@ -384,6 +521,7 @@ def main(argv=None):
         if sr:
             print("(外した %d件= 見張り自身の警報本文の書き戻し・自己汚染)"
                   % sum(s["count"] for s in sr))
+        _show_drops(window=ns.days, since=ns.since)
         if not cs:
             print("この窓には1件も無い。★ただし**日数が %d 日しか無い**= "
                   "『直った』の証拠にはならない(是正前の窓と比べるなら件/日で)" % n)
@@ -426,6 +564,7 @@ def main(argv=None):
         print("(外した %d件= この見張り自身の警報本文が台帳へ書き戻された分・自己汚染: %s)"
               % (sum(s["count"] for s in sr),
                  "、".join("%s>%s×%d" % (s["target"], s["found"], s["count"]) for s in sr)))
+    _show_drops(window=ns.days)
     if mt:
         # ★鳴らさない分も**見えるところに**残す(「鳴らせない」と同じ理由)。
         #   ここに出た組は「相手へ呼びかけた形が1件も無い」=人事がpinしても直す先が無い。
