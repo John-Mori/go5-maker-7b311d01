@@ -50,6 +50,10 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 HQ_ROOT = os.path.normpath(os.path.join(ROOT, "..", "00_AI-HQ"))
 TEIAN_DIR = os.path.join(ROOT, "local", "teian")
 KEY_FILE = os.path.join(ROOT, "local", "gemini_api_key.txt")
+# ★べホップ(強Gemini・事業用キー・C-017で自由使用可)の別キー。homin(私用キー)の無料枠が
+#   尽きた/全滅した時だけ、この別枠で1回通す=fail-open(Chami 2026-09-07『べホップも使って。
+#   オフラインになってたから』msg 1546411591824580608)。keyの束は跨がない=台帳は who="behop"。
+BEHOP_KEY_FILE = os.path.join(ROOT, "local", "gemini_api_key_behop.txt")
 PROMPT_SPEC = os.path.join(ROOT, "docs", "departments", "copy-director",
                            "room_comments生成プロンプト仕様.md")
 # 声の正本=characterfile(HQリポ・公開repoへ写さない=実行時に読むだけ)。
@@ -67,10 +71,13 @@ except Exception:
 
 # vision対応の flash 系(vision_comments と同じ思想でフォールバック)。
 DEFAULT_MODELS = [
+    # 2026-09-06 段5(ad研究室実測): room_comments は上3段(latest/3.5/2.5)がほぼ同数で
+    # 空撃ちされ最後段の lite で通っている実態(510/516成果)だったため lite を先頭へ。
+    # vision_comments は逆に lite が画像便で0/86のため変えない(あちらは触らない)。
+    "gemini-flash-lite-latest",
     "gemini-flash-latest",
     "gemini-3.5-flash",
-    "gemini-2.5-flash",
-    "gemini-flash-lite-latest",
+    # gemini-2.5-flash は2026-09-06に削除(HTTP 404で成功0のまま3日602コールを空費=ad研究室実測)。
 ]
 # 全角括弧は自動で半角へ寄せる(型§4「半角括弧のみ」・機械的に直せる違反)。
 ZEN2HAN = {"（": "(", "）": ")"}
@@ -82,6 +89,15 @@ def read_key():
         return k
     if os.path.exists(KEY_FILE):
         with open(KEY_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
+
+def read_behop_key():
+    """べホップ(事業用キー)を読む。無ければ ''=従来どおりhominだけで回る(回帰ゼロ)。
+    ★環境変数では上書きしない=homin(GEMINI_API_KEY)と取り違えないため、ファイルだけを見る。"""
+    if os.path.exists(BEHOP_KEY_FILE):
+        with open(BEHOP_KEY_FILE, "r", encoding="utf-8") as f:
             return f.read().strip()
     return ""
 
@@ -191,34 +207,32 @@ def fetch_image(url, timeout=30):
         return None
 
 
-def _usage(model, in_chars, out_chars, images, ok, err, t0):
+def _mask_key(text, key):
+    """本文にAPIキーが混ざっていたら潰す(2026-09-06 ad研究室指摘=err_detailは複数の部屋へ
+    貼って回る台帳の欄になる。requestのechoでkeyが載る形が万一あっても表に流さない)。"""
+    if not text:
+        return text
+    if key and key in text:
+        text = text.replace(key, "***")
+    return text
+
+
+def _usage(model, in_chars, out_chars, images, ok, err, t0, err_detail="", who="homin"):
     """1リクエスト=1行。★モデルのフォールバックは1回ごとに別リクエスト=別枠なので、成功も失敗も
     その都度書く(成功分だけ数えると枠の消費を過小評価する)。who は鍵の束= local/gemini_api_key.txt
-    を使う側 = "homin"(ask_gemini/tone_rewrite と同じ束)。"""
+    を使う側 = "homin"(ask_gemini/tone_rewrite と同じ束)。別枠で叩いたら who="behop" を渡す
+    =資格情報を跨いだ行を homin に混ぜない(束の取り違え防止)。
+    err_detail: HTTPエラー本文の先頭200字(2026-09-06 ad研究室指摘・vision_comments.pyと同型)。
+    err は従来どおり短い形(HTTP {code})のまま据え置き=err_detailだけの読み手を汚さない別欄。"""
     if not gemini_usage:
         return
-    gemini_usage.log("homin", "room_comments", model, in_chars, out_chars,
-                     images, ok, err, time.time() - (t0 or time.time()))
+    gemini_usage.log(who, "room_comments", model, in_chars, out_chars,
+                     images, ok, err, time.time() - (t0 or time.time()),
+                     err_detail=err_detail)
 
 
-def call_vision(prompt, image_parts, title, synopsis, comments, metrics, key, models, timeout=180):
-    """1候補ぶんの画像+プロンプト+メタ(タイトル/あらすじ/④comments/指標)を投げて生JSON文字列を返す。
-    ④comments と metrics は type§4 の材料(番号参照・販売数など)=取れた時だけ渡す。"""
-    parts = [{"text": prompt}]
-    if title:
-        parts.append({"text": f"\n【任意メタ】作品タイトル: {title}"})
-    if synopsis:
-        parts.append({"text": f"\n【任意メタ】あらすじ(解釈材料・実名や露骨語に使わない): {synopsis}"})
-    if comments:
-        lines = "\n".join(f"  {c.get('n', i + 1)}. {c.get('text', '')}"
-                          for i, c in enumerate(comments))
-        parts.append({"text": f"\n【生成済みの大タイトル3択(番号で参照可)】\n{lines}"})
-    if metrics:
-        parts.append({"text": f"\n【指標(与えられた値だけ使う・無い数字は作らない)】"
-                              f"{json.dumps(metrics, ensure_ascii=False)}"})
-    for ip in image_parts:
-        parts.append({"inline_data": ip})
-    payload = {
+def _payload(parts):
+    return {
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "temperature": 0.85,
@@ -228,9 +242,18 @@ def call_vision(prompt, image_parts, title, synopsis, comments, metrics, key, mo
             "responseMimeType": "application/json",
         },
     }
-    body = json.dumps(payload).encode("utf-8")
+
+
+def _run_ladder(parts, image_count, key, models, timeout, who="homin"):
+    """モデルのラダーを順に叩く。成功したら本文(str)を返す。
+    返り値=(txt or None, image_rejected: bool, last_err)。
+    image_rejected= 画像そのものが400(処理不能)で弾かれた段が1つでもあった印
+      = 同じ壊れた画像を積み直しても無駄なので、画像を外して再挑戦する材料にする。
+    who= 使ったキーの束(homin=私用 / behop=事業用)。台帳へそのまま書き分ける。"""
+    body = json.dumps(_payload(parts)).encode("utf-8")
     in_chars = sum(len(p.get("text", "")) for p in parts if "text" in p)
     last_err = None
+    image_rejected = False
     for model in models:
         url = ("https://generativelanguage.googleapis.com/v1beta/models/"
                + model + ":generateContent?key=" + key)
@@ -244,24 +267,80 @@ def call_vision(prompt, image_parts, title, synopsis, comments, metrics, key, mo
                 txt = d["candidates"][0]["content"]["parts"][0]["text"].strip()
             except Exception:
                 txt = ""   # 安全フィルタ等で候補なし
-            _usage(model, in_chars, len(txt), len(image_parts), True, "", t0)
-            print(f"  [vision] {model} で応答", file=sys.stderr)
-            return txt
+            _usage(model, in_chars, len(txt), image_count, True, "", t0, who=who)
+            print(f"  [vision:{who}] {model} で応答", file=sys.stderr)
+            return txt, image_rejected, None
         except urllib.error.HTTPError as e:
             last_err = f"{model} HTTP {e.code}"
-            _usage(model, in_chars, 0, len(image_parts), False, f"HTTP {e.code}", t0)
+            try:
+                err_body = _mask_key(e.read().decode("utf-8", errors="replace")[:200], key)
+            except Exception:
+                err_body = ""
+            _usage(model, in_chars, 0, image_count, False, f"HTTP {e.code}", t0,
+                   err_detail=err_body, who=who)
+            # 400かつ本文が「画像を処理できない」= 画像側の不良。テキストのみ再試行の材料。
+            if e.code == 400 and "input image" in err_body.lower():
+                image_rejected = True
             if e.code in (400, 404, 429):
-                print(f"  [{model}] {e.code}→次のモデルへ", file=sys.stderr)
+                print(f"  [{who}:{model}] {e.code}→次のモデルへ", file=sys.stderr)
                 continue
             if e.code == 403:
-                raise RuntimeError(f"Gemini認証/権限エラー({model} HTTP 403)") from None
-            print(f"  [{model}] HTTP {e.code}→次のモデルへ", file=sys.stderr)
+                raise RuntimeError(f"Gemini認証/権限エラー({who}:{model} HTTP 403)") from None
+            print(f"  [{who}:{model}] HTTP {e.code}→次のモデルへ", file=sys.stderr)
             continue
         except Exception as e:
             last_err = f"{model}: {e}"
-            _usage(model, in_chars, 0, len(image_parts), False, str(e)[:120], t0)
-            print(f"  [{model}] {e}→次のモデルへ", file=sys.stderr)
+            _usage(model, in_chars, 0, image_count, False, str(e)[:120], t0, who=who)
+            print(f"  [{who}:{model}] {e}→次のモデルへ", file=sys.stderr)
             continue
+    return None, image_rejected, last_err
+
+
+def call_vision(prompt, image_parts, title, synopsis, comments, metrics, key, models, timeout=180, behop_key=""):
+    """1候補ぶんの画像+プロンプト+メタ(タイトル/あらすじ/④comments/指標)を投げて生JSON文字列を返す。
+    ④comments と metrics は type§4 の材料(番号参照・販売数など)=取れた時だけ渡す。
+    ★behop_key を渡すと、homin(私用キー)が画像便もテキスト便も全滅した時だけ behop(事業用キー・
+      別枠・C-017)でもう一巡する=fail-open(Chami依頼 2026-09-07)。keyは跨がない=台帳は who で書き分ける。"""
+    text_parts = [{"text": prompt}]
+    if title:
+        text_parts.append({"text": f"\n【任意メタ】作品タイトル: {title}"})
+    if synopsis:
+        text_parts.append({"text": f"\n【任意メタ】あらすじ(解釈材料・実名や露骨語に使わない): {synopsis}"})
+    if comments:
+        lines = "\n".join(f"  {c.get('n', i + 1)}. {c.get('text', '')}"
+                          for i, c in enumerate(comments))
+        text_parts.append({"text": f"\n【生成済みの大タイトル3択(番号で参照可)】\n{lines}"})
+    if metrics:
+        text_parts.append({"text": f"\n【指標(与えられた値だけ使う・無い数字は作らない)】"
+                                   f"{json.dumps(metrics, ensure_ascii=False)}"})
+    parts = list(text_parts) + [{"inline_data": ip} for ip in image_parts]
+
+    txt, image_rejected, last_err = _run_ladder(parts, len(image_parts), key, models, timeout)
+    if txt:
+        return txt
+    # ★画像が全モデルで400「処理不能」と弾かれた=ラダーを並べ替えても直らない(どのモデルも同じ画像を拒む)。
+    #   ここで候補を溶かすと空配信ガード(C-038)で配信ごと止まり、他の候補まで巻き添えになる。
+    #   空ページを出すより、画像を外してテキスト(タイトル/あらすじ/④comments/指標)だけで1回通す=fail-open。
+    if image_rejected and image_parts:
+        print("  [vision] 画像が全モデルで400(処理不能)→画像を外してテキストのみで再試行", file=sys.stderr)
+        txt2, _rej2, last_err2 = _run_ladder(text_parts, 0, key, models, timeout)
+        if txt2:
+            return txt2
+        last_err = last_err2 or last_err
+    # ★homin(私用キー)が画像便もテキスト便も全滅=枠切れ429など、同じキーでは直らない。
+    #   behop(事業用キー・別枠・C-017)でもう一巡する=空配信ガードで配信ごと止めるより通す(Chami依頼)。
+    if behop_key:
+        print("  [vision] homin全滅→behop(別キー・別枠・C-017)で再試行", file=sys.stderr)
+        bt, b_rej, b_err = _run_ladder(parts, len(image_parts), behop_key, models, timeout, who="behop")
+        if bt:
+            return bt
+        if b_rej and image_parts:
+            print("  [vision:behop] 画像が全モデルで400→画像を外してテキストのみで再試行", file=sys.stderr)
+            bt2, _brej2, b_err2 = _run_ladder(text_parts, 0, behop_key, models, timeout, who="behop")
+            if bt2:
+                return bt2
+            b_err = b_err2 or b_err
+        last_err = b_err or last_err
     raise RuntimeError(f"全モデルで失敗(最後: {last_err})")
 
 
@@ -349,6 +428,8 @@ def main():
     if not args.dry_run and not key:
         print("GeminiのAPIキーが未設定(local/gemini_api_key.txt か GEMINI_API_KEY)", file=sys.stderr)
         sys.exit(2)
+    # ★behop(事業用キー・別枠・C-017)。homin全滅時だけ通す fail-open。無ければ ''=従来どおり。
+    behop_key = "" if args.dry_run else read_behop_key()
 
     filled = failed = skipped = syn_used = 0
     processed = 0
@@ -392,7 +473,7 @@ def main():
             try:
                 raw = call_vision(prompt, parts, title, synopsis,
                                   c.get("comments") or [], c.get("metrics") or {},
-                                  key, models)
+                                  key, models, behop_key=behop_key)
             except Exception as e:
                 print(f"  vision 呼び出し失敗: {e}", file=sys.stderr)
                 break
