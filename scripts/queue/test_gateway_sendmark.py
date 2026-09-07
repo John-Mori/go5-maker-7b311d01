@@ -68,6 +68,12 @@ MUTATIONS = {
                  '                log(f"送信印失敗(配達は継続): {type(e).__name__}")',
                  '            except Exception:\n'
                  '                raise  # MUTANT'),
+    # Codexの撃ち分けを殺す (2026-09-07 追加。再発時にここが赤くなる)
+    "codex": ('emoji = sent_mark_for(m.guild, rec["dept"])',
+              'emoji = sent_mark_for(m.guild, "")  # MUTANT'),
+    # ミラー便のCodex判定を殺す
+    "codexmirror": ('and is_codex_mentioned(m.content or "")) else "")',
+                    'and False) else "")  # MUTANT'),
 }
 
 PASS = FAIL = 0
@@ -157,6 +163,10 @@ def build_local(tmp):
     json.dump([{"id": CH_ID, "name": "イージス研究室", "dept": "aegis-gl"}],
               open(os.path.join(loc, "discord_channels.json"), "w", encoding="utf-8"))
     open(os.path.join(loc, "discord_bot_token.txt"), "w", encoding="utf-8").write("DUMMY")
+    # ★@ボス召喚を本物の経路で有効にする (2026-09-07)。手でフラグ変数を立てない=
+    #   _codex_summon_on() が実ファイルを見る本来の判定のまま [6] を回すため。
+    #   [1]〜[5] の本文には名指しが無いので、この札があっても既存の判定は1つも動かない。
+    open(os.path.join(loc, "codex_enabled.txt"), "w", encoding="utf-8").write("1")
     return loc
 
 
@@ -184,6 +194,14 @@ def queued(loc):
     rows = [str(r[0]) for r in con.execute("select msg_id from queue")]
     con.close()
     return rows
+
+
+def queued_dept(loc, mid):
+    """その便がどのdeptで入ったか。送信印の撃ち分けは**この札**を見て決まる(2026-09-07)。"""
+    con = sqlite3.connect(os.path.join(loc, "queue", "inbox.db"))
+    r = con.execute("select dept from queue where msg_id=?", (str(mid),)).fetchone()
+    con.close()
+    return str(r[0]) if r else ""
 
 
 def main(argv):
@@ -258,6 +276,42 @@ def main(argv):
             check("5 add_reactionが落ちても例外を外に出さない", False,
                   "-> %s が受信経路の外へ出た" % type(e).__name__)
         check("5 印が押せなくても便は queue に入っている", "7" in queued(loc))
+
+        # ---- [6] Codex宛の配達= 送信印は uptsukiyomi(Codex印) ----
+        # ★研究室HQ 配線依頼 msg 1546348202960093225 の回帰。壊れた実物は
+        #   「送信=sendms(Claude印) と 既読=‼️/着手=🐍(Codex印) が同じ1通に同居」。
+        #   ここは判定(is_codex_mentioned→route_codex_summon→dept)を全部本物で回し、
+        #   add_reaction に**実際に渡った値**だけを見る(ソース文字列一致では捕まらない型)。
+        print("[6] Codex宛の配達 (@ボス召喚)")
+        upt = FakeEmoji("uptsukiyomi", 1522060098355069139)
+        gc = FakeGuild([FakeEmoji("kidoku", 1), sendms, FakeEmoji("chakusyu", 2), upt])
+        m8 = FakeMsg(8, "@ボス これ見てくれ", chami, ch, gc)
+        asyncio.run(on_message(m8))
+        check("6 送信印は uptsukiyomi(Codex印)", m8.pushed[:1] == [upt], "-> %r" % (m8.pushed,))
+        check("6 Claude印(sendms)は押されていない", sendms not in m8.pushed)
+        check("6 便は dept=codex で queue に入っている", queued_dept(loc, "8") == "codex",
+              "-> %r" % (queued_dept(loc, "8"),))
+
+        # 召喚されていない普通の便は今までどおり sendms (撃ち分けが逆流していないこと)
+        m9 = FakeMsg(9, "ボスの話をしただけの便", chami, ch, gc)
+        asyncio.run(on_message(m9))
+        check("6 名指しでない便は従来どおり sendms", m9.pushed[:1] == [sendms],
+              "-> %r" % (m9.pushed,))
+
+        # ギルドに uptsukiyomi が無くても Claude印へは落ちない (react.pyのIDアンカーと同じ)
+        m10 = FakeMsg(10, "@スネーク たのむ", chami, ch, FakeGuild([sendms]))
+        asyncio.run(on_message(m10))
+        check("6 uptsukiyomiが引けなくてもIDアンカーで撃つ",
+              m10.pushed[:1] == ["uptsukiyomi:1522060098355069139"], "-> %r" % (m10.pushed,))
+        check("6 引けない時もsendms/📮へは落ちない",
+              sendms not in m10.pushed and "\U0001F4EE" not in m10.pushed)
+
+        # Chamiミラー便も同じ判定 (押下点が2つあるので両方見る)
+        mmc = FakeMsg(11, "@ボス 確認して", FakeAuthor("Chami(main)", 222, bot=True), ch, gc,
+                      webhook_id=777)
+        asyncio.run(on_message(mmc))
+        check("6 ミラー便のCodex召喚にも uptsukiyomi", mmc.pushed[:1] == [upt],
+              "-> %r" % (mmc.pushed,))
 
         print("\n%d PASS / %d FAIL" % (PASS, FAIL))
         return 1 if FAIL else 0

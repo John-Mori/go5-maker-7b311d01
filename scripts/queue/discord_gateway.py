@@ -83,6 +83,64 @@ def _codex_summon_on():
     return os.path.exists(CODEX_ENABLE_FLAG)
 
 
+def route_codex_summon(rec):
+    """@ボス召喚のためにdeptをcodexへ付け替え、元部門を退避する。"""
+    rec = dict(rec)
+    if rec.get("dept") and rec.get("dept") != "codex" and not rec.get("codex_origin_dept"):
+        rec["codex_origin_dept"] = rec.get("dept")
+    rec["dept"] = "codex"
+    return rec
+
+
+# --- 送信印の撃ち分け(2026-09-07 イージス研究室・研究室HQ配線依頼 msg 1546348202960093225) ---
+# ★何が壊れていたか(実物 local/attachments/1546345864216449104_0.png)
+#   Codexが受けた1通に 送信=sendms(Claude印) と 既読=‼️・着手=🐍(Codex印)が同居していた。
+#   既読/着手は codex_responder→mark_press→react.py を通るので CODEX_OVERRIDE が効く。
+#   ところが**送信印だけは配達の瞬間にこのファイルが自前で押していて** react.py を通らない=
+#   codex分岐が1行も無かった。押下点が別だったのであって、前回(2026-09-06 commit 5c340c1)の
+#   codex_run.mark_sent 修理は、この口を数えていなかった(C-064 全数不足)。
+# ★どのsignalを使うか(HQからの設計判断の委任に対する当室の答え)
+#   「配達時点では受け手がCodexか未確定」ではない。gateway は enqueue の直前に
+#   route_codex_summon() で dept を 'codex' へ付け替えており、codex_responder が
+#   「自分が拾う」と決める札(LeaseQueue の dept=='codex')は**押す前に既に確定している**。
+#   だから追加のsignalは要らず、rec["dept"] をそのまま見る=拾う側と同じ1枚の札で撃ち分ける。
+# ★表は増やさない(ORG-11= 表を2か所に持つと必ず片方が腐る)
+#   実名/idの正本は react.py の CODEX_OVERRIDE / EMOJI_NAME。ここでは読むだけで持たない。
+#   意味の正本は docs/departments/kaizen-analyst/絵文字管理台帳.md §A.1。
+#   react.py が読めない環境でも gateway は起動する(fail-open。値は台帳と同じものを退避に置く)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "discord"))
+try:
+    from react import CODEX_OVERRIDE as _REACT_CODEX, EMOJI_NAME as _REACT_NAME  # noqa: E402
+except Exception:
+    _REACT_CODEX = {"送信": ("uptsukiyomi", "1522060098355069139")}
+    _REACT_NAME = {"送信": "sendms"}
+SENT_MARK_FALLBACK = "\U0001F4EE"      # 📮 = カスタム絵文字が引けない時だけの退避(Claude側のみ)
+
+
+def sent_mark_for(guild, dept):
+    """配達時に押す送信印を1つ選ぶ。dept=='codex' なら Codex印、それ以外は従来どおり。
+
+    ★Codex側は 📮 へ落とさない= react.py の「IDアンカー」と同じ考え方。
+      確定IDを持つ印は、ギルドの実名照合が1件も当たらなくても custom を撃つ
+      (discord.py は "name:id" の str をそのまま受ける)。ここで sendms や 📮 へ
+      落とすと**Claude印が混じる**=直そうとしている症状そのものが再発する。
+    ★discord.utils は使わない= この関数はモジュール読込時に在る必要があり、
+      discord の import は run_gateway() の中(遅延)だから。
+    """
+    emojis = list(getattr(guild, "emojis", None) or [])
+    if str(dept or "") == "codex":
+        name, eid = _REACT_CODEX.get("送信", ("uptsukiyomi", "1522060098355069139"))
+        for e in emojis:
+            if (eid and str(getattr(e, "id", "")) == str(eid)) or getattr(e, "name", "") == name:
+                return e
+        return f"{name}:{eid}" if eid else name
+    for want in (_REACT_NAME.get("送信", "sendms"), "送信"):
+        for e in emojis:
+            if getattr(e, "name", "") == want:
+                return e
+    return SENT_MARK_FALLBACK
+
+
 TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")
 CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
 QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
@@ -298,12 +356,14 @@ def log(msg):
 
 
 def load_channel_map():
-    """channel_id -> {name, dept} を作る (受信を台帳のchだけに絞る)。"""
+    """channel_id -> {id, name, dept} を作る (受信を台帳のchだけに絞る)。"""
     try:
         chans = json.load(open(CHANNELS_FILE, encoding="utf-8"))
     except OSError:
         return {}
-    return {str(c.get("id")): {"name": c.get("name", ""), "dept": c.get("dept", "router")}
+    return {str(c.get("id")): {"id": str(c.get("id")),
+                               "name": c.get("name", ""),
+                               "dept": c.get("dept", "router")}
             for c in chans if str(c.get("id", "")).isdigit()}
 
 
@@ -370,8 +430,13 @@ def reply_ref(m):
 
 def record_from_message(m, chinfo):
     """discord.Message → 現行鳩と同じ形のレコード (後段が共通に読めるようにキーを揃える)。"""
+    # 表示名は後から変更できるため返信先の正本には使わない。主gatewayとCodex専用gatewayの
+    # どちらが冪等enqueueを先に取っても、同じ不変のchannel_idが便に残るよう共通変換点で付ける。
+    channel_obj = getattr(m, "channel", None)
+    channel_id = str(getattr(channel_obj, "id", "") or chinfo.get("id", ""))
     rec = {
         "ts": m.created_at.isoformat() if m.created_at else "",
+        "channel_id": channel_id,
         "channel": chinfo.get("name", ""),
         "dept": chinfo.get("dept", "router"),
         "author": getattr(m.author, "name", "?"),
@@ -520,7 +585,7 @@ def run_selftest():
             created_at = None
             author = _A()
             attachments = []
-        chinfo = {"name": "品質管理部門", "dept": "qa-reviewer"}
+        chinfo = {"id": "777001", "name": "品質管理部門", "dept": "qa-reviewer"}
         rec = record_from_message(_M(), chinfo)
         # --- 返信(リプライ)の引用 (2026-07-27・Chami「返信も読めないデーモンいらないのわ」) ---
         class _Ref:            # 疑似 MessageReference
@@ -588,8 +653,11 @@ def run_selftest():
         ok8 = "S1" in esc2
         print(f"  {'PASS' if ok8 else 'FAIL'}: nack済み放置もエスカレ対象に拾う (abandoned) {esc2}")
 
+        okcid = rec.get("channel_id") == "777001"
+        print(f"  {'PASS' if okcid else 'FAIL'}: 返信先channel_idが受信レコードに残る")
         allok = (ok1 and (ok2 is False) and c and c["body"]["content"] == "テスト発言"
                  and ok5 and ok6 and ok7 and ok8 and okr1 and okr2 and okr3)
+        allok = allok and okcid
         print(f"\n== selftest {'PASS' if allok else 'FAIL'} ==")
         return 0 if allok else 1
     finally:
@@ -823,8 +891,11 @@ def run_gateway():
             if (ACTIVE_JOBS and m.webhook_id
                     and str(getattr(m.author, "name", "")).startswith("Chami(")):
                 try:
-                    emoji = (discord.utils.get(m.guild.emojis, name="sendms")
-                             or discord.utils.get(m.guild.emojis, name="送信") or "📮")
+                    # ミラーには rec が無いので、召喚の判定だけ本経路と同じ関数で取る
+                    # (@ボス と書かれたChami便のミラーにも Codex印が付く=表示が本経路と揃う)。
+                    _mdept = ("codex" if (_codex_summon_on()
+                                          and is_codex_mentioned(m.content or "")) else "")
+                    emoji = sent_mark_for(m.guild, _mdept)
                     await m.add_reaction(emoji)
                 except Exception as e:
                     log(f"ミラー送信印失敗(継続): {type(e).__name__}")
@@ -882,7 +953,7 @@ def run_gateway():
         #   codex_enabled.txt が無い間は素通し=回帰ゼロ。実応答は codex_responder→codex_run が返す。
         if _codex_summon_on() and rec.get("dept") != "codex" and is_codex_mentioned(rec.get("content", "")):
             log(f"@ボス召喚[{rec['channel']}] msg={rec['msg_id']} dept={rec['dept']}→codex")
-            rec["dept"] = "codex"
+            rec = route_codex_summon(rec)
         # ★引用元が展開されなかった時だけ**1回だけ**取りに行く (2026-07-27)。
         #   実測方針: 通常のリプライは Gateway の MESSAGE_CREATE に referenced_message が同梱され、
         #   `m.reference.resolved` で本文まで取れる=**ここへは来ない**。来るのは
@@ -917,8 +988,11 @@ def run_gateway():
             # A2: 送信印 (3段印の1段目=「届いた」の即可視化・裁定2026-07-18で移植)。
             # 並走中は鳩と二重押しになるが、同一Bot同一絵文字はDiscord側で1個に収束=無害。
             try:
-                emoji = (discord.utils.get(m.guild.emojis, name="sendms")
-                         or discord.utils.get(m.guild.emojis, name="送信") or "📮")
+                # ★受け手がCodexなら Codex印(uptsukiyomi)。札は enqueue に使った rec["dept"]
+                #   そのもの= 拾う側(codex_responder)と同じ1枚を見る(上 sent_mark_for 参照)。
+                emoji = sent_mark_for(m.guild, rec["dept"])
+                if rec["dept"] == "codex":
+                    log(f"送信印=Codex msg={rec['msg_id']} → {emoji}")
                 await m.add_reaction(emoji)
             except Exception as e:
                 log(f"送信印失敗(配達は継続): {type(e).__name__}")
