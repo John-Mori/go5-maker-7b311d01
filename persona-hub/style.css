@@ -19,9 +19,9 @@
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
   font-family:"Noto Sans JP",system-ui,sans-serif;min-height:100vh;min-height:100dvh;}
 
-.hub-header{padding:18px 16px 8px;text-align:center;}
+.hub-header{padding:20px 16px 14px;text-align:center;border-bottom:1px solid var(--line);}
 .hub-header h1{margin:0;font-size:21px;font-weight:900;letter-spacing:.02em;}
-.hub-sub{margin:6px 0 0;color:var(--sub);font-size:12.5px;}
+.hub-sub{margin:6px auto 0;max-width:640px;color:var(--sub);font-size:12.5px;line-height:1.55;}
 
 .error-banner{margin:10px 16px;padding:12px 14px;border:1px solid #6a4a1e;border-radius:10px;
   background:#241a0c;color:#f2c98a;font-size:13px;line-height:1.6;}
@@ -35,7 +35,11 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
   display:flex;flex-direction:column;gap:8px;}
 .persona-count{font-size:11.5px;color:var(--sub);padding:0 2px;}
 .persona-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1 1 auto;
-  display:flex;flex-direction:column;gap:6px;padding-right:2px;}
+  display:flex;flex-direction:column;gap:6px;padding-right:2px;
+  scrollbar-width:thin;scrollbar-color:var(--line) transparent;}
+.persona-list::-webkit-scrollbar{width:8px;}
+.persona-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;}
+.persona-list::-webkit-scrollbar-thumb:hover{background:var(--accent);}
 .persona-item{background:var(--card);border:1px solid var(--line);border-radius:10px;
   padding:9px 11px;cursor:pointer;transition:border-color .15s,background .15s;}
 .persona-item:hover{border-color:var(--accent);}
@@ -76,14 +80,18 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 /* ── 右：詳細ペイン ── */
 .detail-pane{flex:1 1 auto;min-width:0;}
 .detail-empty{padding:40px 16px;text-align:center;color:var(--sub);font-size:13.5px;}
-.detail-head{margin-bottom:10px;}
+.detail-head{margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line);}
 .detail-head h2{margin:0;font-size:19px;font-weight:900;color:var(--ink);}
 .detail-dept{margin-top:3px;font-size:12.5px;color:var(--accent);}
 
 .detail-section{background:var(--card);border:1px solid var(--line);border-radius:12px;
   padding:13px 14px;margin-bottom:10px;}
-.section-title{margin:0 0 9px;font-size:13px;font-weight:700;color:var(--accent);
-  letter-spacing:.02em;}
+/* 見出しはインク＋左に短いクレイ橙のバー(署名色は差し色として使う=Anthropic意匠 §5.95/§339)。
+   全section橙べた塗りのくどさを解消。gap で末尾の section-count とも自然に間が空く。 */
+.section-title{margin:0 0 10px;font-size:13px;font-weight:700;color:var(--ink);
+  letter-spacing:.02em;display:flex;align-items:center;gap:8px;}
+.section-title::before{content:"";flex:0 0 auto;width:3px;height:14px;border-radius:2px;
+  background:var(--accent);}
 .section-count{color:var(--sub);font-weight:400;font-size:11.5px;}
 .section-empty{color:var(--sub);font-size:12.5px;}
 .section-raw{color:var(--sub);font-size:11.5px;background:var(--sink);border:1px solid var(--line);
@@ -198,6 +206,17 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
   padding:2px 7px;cursor:pointer;word-break:break-all;}
 .path-code:hover{border-color:var(--accent);color:var(--accent);}
 .path-code:active{opacity:.7;}
+
+/* ── 操作状態(:focus-visible/なめらかな遷移)=「生フォーム感」を消す(design-preferences §342) ──
+   ★INC-47(素の button{width:100%})の轍を踏まないよう、素の button セレクタは使わずクラス限定。
+   focus は box-shadow でなく outline=既存の影(is-active の inset・ドロップ印)と衝突しない。 */
+.eb-btn,.av-btn,.av-add-btn,.av-token-btn,.lb-close,.path-code{
+  transition:background .15s,border-color .15s,color .15s;}
+.eb-btn:focus-visible,.av-btn:focus-visible,.av-add-btn:focus-visible,
+.av-token-btn:focus-visible,.lb-close:focus-visible,.av-drag:focus-visible,
+.persona-item:focus-visible,.path-code:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;}
+.eb-manual-ta:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
 
 /* ── モバイル(iPhone等)：縦積みへフォールバック ── */
 @media (max-width:860px){
