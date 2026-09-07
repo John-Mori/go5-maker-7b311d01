@@ -156,6 +156,13 @@ CORPUS = [KUKURU, USE, FULLNAME,
           "", "ふつうの本文です。"]
 WHO = [("ククール", "hr-room"), ("ククール", "aegis-gl"),
        ("ケヴィン・デブライネ", "hq"), ("シャビ・アロンソ", "aegis-gl")]
+# ★2026-09-08= この突き合わせに**故意の差**が1本入った。人事部門ククールの裁定
+#   (呼称ルール.json `self_name_substring_exemption` の `★2026-09-08_対人拡張`)で
+#   「禁止語のヒットが本人フル名の内側に収まっているだけ」の対人ケースを不問にしたからだ。
+#   実物= 名簿行『人格= …ケヴィン・デブライネ…』を、変更前は『デブライネ』へ削っていた。
+#   これは**フル名で正しく書いた本文を壊していた**側= 直ったのはこちらだ。
+#   だから「差ゼロ」ではなく「**差はこの1行だけ**・しかも新側がフル名を残す」を見る。
+EXPECTED_DIFF_LINE = "人格= オタコン、ククール、ケヴィン・デブライネ、シャビ・アロンソ、三笘薫"
 if old is not None:
     diff = []
     for t in CORPUS:
@@ -163,8 +170,13 @@ if old is not None:
             a = ng.naming_corrections(who, dept, t, RULES)
             b = old.naming_corrections(who, dept, t, RULES)
             if a["fixed"] != b["fixed"] or len(a["applied"]) != len(b["applied"]):
-                diff.append((who, dept, t[:30]))
-    ok(not diff, "★変更前と本文・applied が完全一致(足したのは台帳の列だけ)",
+                diff.append((who, dept, t[:30], a["fixed"], b["fixed"]))
+    stray = [d for d in diff if d[2] != EXPECTED_DIFF_LINE[:30]]
+    ok(not stray, "★変更前との差は 2026-09-08 裁定の1行だけ(他は本文・applied が完全一致)",
+       json.dumps(stray, ensure_ascii=False))
+    ok(diff, "★その1行では実際に差が出ている(空PASSでない)")
+    ok(all("ケヴィン・デブライネ" in d[3] and "ケヴィン・デブライネ" not in d[4] for d in diff),
+       "★差の中身= 新側はフル名『ケヴィン・デブライネ』を残し、旧側は『デブライネ』へ削っていた",
        json.dumps(diff, ensure_ascii=False))
     ok(not any("skip" in json.dumps(v, ensure_ascii=False)
                for v in old.naming_corrections("ККール", "hr-room", KUKURU,

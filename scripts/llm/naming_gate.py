@@ -105,7 +105,7 @@ def _boundary_ok(s, i, f):
     return not (j < len(s) and _kata_word_ch(s[j]))
 
 
-def _find_forms(text, forms, skip_spans=None):
+def _find_forms(text, forms, skip_spans=None, skip_proper=False):
     """text 中に forms(候補文字列)のいずれかが出た最初の位置と形を返す。無ければ None。
 
     ★同じ位置に複数の形が当たる時は**長い方**を採る(2026-09-02)。実物=
@@ -130,7 +130,7 @@ def _find_forms(text, forms, skip_spans=None):
             i = s.find(f, i)
             if i < 0:
                 break
-            if _boundary_ok(s, i, f) and not _covered_by(i, len(f), skip_spans):
+            if _boundary_ok(s, i, f) and not _covered_by(i, len(f), skip_spans, skip_proper):
                 break       # 語として立っている出現=これを採る
             i += 1          # 「メルカリ」の中の「ルカ」等=次を探す
         if i >= 0 and (best is None or i < best[0]
@@ -146,13 +146,25 @@ def _find_forms(text, forms, skip_spans=None):
 SELF_SPAN_AT_DETECT = True
 
 
-def _covered_by(at, ln, spans):
-    """当たり [at, at+ln) が spans のどれかに**完全に含まれる**か。"""
+def _covered_by(at, ln, spans, proper=False):
+    """当たり [at, at+ln) が spans のどれかに**完全に含まれる**か。
+
+    proper=True … **フル名そのものに一致した当たりは含まれない**と見る(2026-09-08)。
+      対人でこちらを使う理由= 「フル名の内側の部分文字列」(『一ノ瀬怜』の中の『一ノ瀬』)と
+      「フル名そのもの」(『一ノ瀬怜』)は別の話だからだ。前者は台帳が「裸の姓で呼んだ」と
+      嘘をつくだけ=落とす。後者は**それ自体を許容形と突き合わせる**=落とさない
+      (Chami 2026-09-01『またアロンソコーチが一ノ瀬怜呼びしてる。直らないの?』
+       msg 1544235216757858398 / FULL_KEY_SWAP・test_naming_fullkey)。
+      これで 2026-09-08 裁定の guardrail②③(モドリッチのフル名・フル名+さん)も
+      **別の仕掛けを足さずに**成立する= フル名そのものは常に判定へ乗るから。
+    """
     if not spans:
         return False
     end = at + ln
     for a, b in spans:
         if a <= at and end <= b:
+            if proper and at == a and end == b:
+                continue        # 当たり==フル名そのもの=免除しない(上の★)
             return True
     return False
 
@@ -246,6 +258,89 @@ def _is_self(persona, target_key):
         見せられるようにする=must-fail(共通規律§3「入力を差し替えて経路を実行で通せ」)。
     """
     return _norm(persona) == _norm(target_key)
+
+
+# ★フル名の内側に収まった当たりの免除を**対人(speaker≠target)へどこまで掛けるか**
+#   (2026-09-08 人事裁定・呼称ルール.json `self_name_substring_exemption` の
+#    `★2026-09-08_対人拡張`・ククール発)。3位置のつまみ=
+#     "proper" … 現行。フル名の**内側の部分文字列**だけ免除し、**フル名そのものは
+#                 従来どおり許容形と突き合わせる**。
+#     "full"   … 裁定の文字どおり。フル名そのものも免除する(=対人のフル名呼びを不問)。
+#                ★これは Chami 2026-09-01『またアロンソコーチが一ノ瀬怜呼びしてる。
+#                  直らないの?』(msg 1544235216757858398)で入れた FULL_KEY_SWAP を
+#                  **黙らせる**= 窓2026-08-26〜09-08 で実際に26回直っている
+#                  (naming_audit の naming_fix 一ノ瀬怜>一ノ瀬怜 26件)。だから既定に
+#                  できない= 人事部門の裁定より上の Chami 裁定が要る。切替はこの1語。
+#     "off"    … 旧仕様(2026-09-02〜09-08)=対人は一切免除しない。must-fail の入口。
+#   (前例= SELF_SPAN_AT_DETECT。「働く別実装」へ差し替えて赤を見せる・共通規律§3)。
+CROSS_SPEAKER_SPAN_EXEMPTION = "proper"
+
+
+def _fullname_is_forbidden(target_key, ent, ov):
+    """対象の**フル名そのもの**が禁止形として台帳に載っているか(完全一致)。
+
+    ★2026-09-08 裁定の guardrail②= これが True の対象は対人で従来どおり鳴らす。
+      実物= ルカ・モドリッチ(正=モドリッチさん・Chami 2026-08-18)は
+      honorific_required_targets.forbidden に『ルカ・モドリッチ』が**完全一致で**載る。
+      「フル名を書いただけ」ではなく「フル名で呼ぶこと自体が禁止」=免除の土台を作らない。
+      これで guardrail③(『ルカ・モドリッチさん』)も同時に閉じる= 土台が空なので
+      内包している完全一致の禁止形がそのまま当たる。
+    """
+    tk = _norm(target_key)
+    if not tk:
+        return False
+    for src in (ent or {}, ov or {}):
+        if not isinstance(src, dict):
+            continue
+        for f in (src.get("forbidden") or []):
+            if _norm(str(f)) == tk:
+                return True
+    return False
+
+
+def _exemption_spans(text, persona, target_key, ent=None, ov=None):
+    """免除の土台= (本文に立っている「本人の正式フル名」の範囲, 真部分だけか)。
+
+    ★2026-09-02 裁定(自名義)と 2026-09-08 裁定(対人拡張)を**1本の述語**で持つ
+      (ORG-11= 同じ問いを2か所に書かない)。判定式そのものは最初から**位置ベース=
+      話者非依存**だった。2026-09-02 に _is_self へ絞ったのは、当時の実測誤爆45件が
+      全部自名義ヘッダだったからで、式の性質ではない。
+
+    自名義(speaker==target)= 2026-09-02 のまま**一切変えない**。
+      土台は対象キーと話者名の両方の綴り(中黒のゆれ)、フル名そのものが
+      forbidden 完全一致でも免除する(実物= ルカ・モドリッチ33件の自名義回送ヘッダ)。
+
+    対人(speaker≠target)= 2026-09-08 拡張。土台は**対象本人のフル名だけ**。
+      実測(窓2026-08-26〜09-08・重複を畳んだ後)= 56件がこの形だった=
+      一ノ瀬怜>一ノ瀬45 / ケヴィン・デブライネ>デブライネ7 / 三笘薫>三笘2 /
+      ケヴィン・デブライネ>ケヴィン1 / シャビ・アロンソ>アロンソ1。
+      本文に独立した裸姓は1つも無く、当たりは全部フル名の内側に埋まっていた。
+      ★話者名は土台に**入れない**= 対人で他人の綴りまで土台にすると射程が広がる
+        (C-035= 名指しペアのフル名だけ・全体の substring 規則へは広げない)。
+      ★guardrail①(フル名の外で独立する裸姓は従来どおり発火)は _find_forms が
+        「範囲内の当たりは飛ばして**次を探す**」ので自動的に残る=ここで何もしない。
+
+    ★第2の戻り値 proper= 「フル名**そのもの**に一致した当たりは免除しない」か。
+      既定の "proper" で True。理由= 裁定が消したいのは《台帳が「裸の姓で呼んだ」と
+      嘘をつく》件であって、フル名呼びそのものの可否ではない。フル名呼びは
+      Chami 2026-09-01『またアロンソコーチが一ノ瀬怜呼びしてる。直らないの?』
+      (msg 1544235216757858398 / FULL_KEY_SWAP・test_naming_fullkey)で**直せ**と
+      決まっており、窓2026-08-26〜09-08 に naming_fix が26回走っている実物がある。
+      proper=True にすると guardrail②③(モドリッチのフル名・フル名+さん)は
+      **別の仕掛けを足さずに**成立する= フル名そのものは常に判定へ乗るからだ。
+      "full"(裁定の文字どおり)を選んだ時だけ、②は _fullname_is_forbidden が担う。
+    """
+    if _is_self(persona, target_key):
+        # 自名義= 2026-09-02 のまま。フル名そのものも免除する(モドリッチ33件の回送ヘッダ)
+        return _self_name_spans(text, persona, target_key), False
+    mode = CROSS_SPEAKER_SPAN_EXEMPTION
+    if not mode or mode == "off":
+        return None, False          # 旧仕様(2026-09-02〜09-08)= 対人は spans 無し
+    if mode == "full":
+        if _fullname_is_forbidden(target_key, ent, ov):
+            return None, False      # guardrail②= フル名自体が禁止形なら土台を作らない
+        return _self_name_spans(text, "", target_key), False
+    return _self_name_spans(text, "", target_key), True
 
 
 def _mask_name_tags(text, persona, rules):
@@ -961,29 +1056,38 @@ def naming_verdicts(persona, dept, text, rules):
             #   落とすのは**自名義の誤爆だけ**= ①話者==対象 ②当たりがフル名の範囲に
             #   完全に収まる、の両方が要る。単独の禁止形(モドリッチの『ルカ』・怜の
             #   裸姓『一ノ瀬』)はフル名の外に立つので従来どおり鳴る=射程は狭めない。
-            #   ★対人(speaker≠target)は spans が空=一切変わらない。
+            #   ★2026-09-08 まで対人(speaker≠target)は spans が空だった=下の★参照。
             #   ★★免除を forbidden だけに掛けると**穴が横へ滑る**(2026-09-02 実測)=
             #     forbidden を飛ばした45件がそのまま下の override_allowed で鳴り直し、
             #     しかも override_allowed は FULL_KEY_SWAP_REASONS に入っているので
             #     **本文26便が書き換わった**(『(ルカ・モドリッチ)』→『(モドリッチ)』)。
             #     裁定が「塞いどけ」と言った自称崩れをゲート自身が作る形。だから
             #     免除は**検出(この hit)から**掛ける=同じ判定を1本で持つ(ORG-11)。
-            self_spans = _self_name_spans(s, persona, tk) if _is_self(persona, tk) else None
-
-            hit = _find_forms(s, forms, self_spans if SELF_SPAN_AT_DETECT else None)
-            if hit is None:
-                continue        # この対象は本文に出ていない(自名義のフル名だけ=不問)
+            #   ★2026-09-08 人事裁定= この免除を**対人へも広げた**(呼称ルール.json
+            #     `self_name_substring_exemption`★2026-09-08_対人拡張)。実測56件が
+            #     「フル名を書いただけ」で鳴っていた。判定式は最初から位置ベース=話者
+            #     非依存なので、可否は `_exemption_spans` 1本に持たせる(ORG-11)。
+            #     ★guardrail は _exemption_spans / _fullname_is_forbidden の docstring。
 
             # --- この話者×対象に効く override を最優先で探す(specific > "*") ---
             #   ★選び方は `_effective_override` 1本(#3 の漢字フル名判定と同じ規則を引く
             #     =2本に割れさせない。話者が "__男性キャラ__" や実名で当たった特例を含む)。
+            #   ★2026-09-08= **検出より前へ**上げた。対人免除の可否(フル名自体が禁止形か)が
+            #     override 側の forbidden にも依るため=同じ問いを2度引かない。
             ov = _effective_override(persona, tk, overrides)
 
             ent = hrt.get(tk) or {}
             forbidden = list(ent.get("forbidden") or [])
 
+            self_spans, self_proper = _exemption_spans(s, persona, tk, ent, ov)
+
+            hit = _find_forms(s, forms, self_spans if SELF_SPAN_AT_DETECT else None,
+                              self_proper)
+            if hit is None:
+                continue        # この対象は本文に出ていない(フル名の内側だけ=不問)
+
             # forbidden は override より前に(話者非依存で)チェック=常に違反
-            fb = _find_forms(s, forbidden, self_spans)
+            fb = _find_forms(s, forbidden, self_spans, self_proper)
             if fb is not None:
                 out.append({
                     "target": tk, "found": fb[1],
@@ -1004,7 +1108,7 @@ def naming_verdicts(persona, dept, text, rules):
                 #     三笘薫の自称 forbidden『三笘さん』はフル名『三笘薫』の部分文字列では
                 #     ないので範囲外=今までどおり鳴る。
                 ov_fb = _find_forms(s, [str(x) for x in (ov.get("forbidden") or []) if str(x)],
-                                    self_spans)
+                                    self_spans, self_proper)
                 if ov_fb is not None:
                     out.append({
                         "target": tk, "found": ov_fb[1],

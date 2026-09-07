@@ -58,8 +58,14 @@ def fix(persona, dept, text):
 def main():
     # ---- 1) 壊れている実物が直ること(0歩目の再現をそのまま検査にした) ----
     v = ng.naming_verdicts("シャビ・アロンソ", "hq", REAL, RULES)
+    # ★2026-09-08= 理由の**札**が forbidden から override_allowed へ移った(本文の直り方は不動)。
+    #   人事裁定「フル名の内側に収まった当たりは不問」(対人拡張)を入れたので、
+    #   『一ノ瀬怜』の中の『一ノ瀬』はもう拾わない= 台帳が「裸の姓で呼んだ」と嘘をつかなくなった。
+    #   代わりに**フル名そのもの**が override_allowed で立つ= Chami 2026-09-01
+    #   『またアロンソコーチが一ノ瀬怜呼びしてる。直らないの?』の網はそのまま生きている。
+    #   ここで見たいのは「死に網でない」ことなので、札ではなく**鳴っていること**を見る。
     check("実物: 検出は前から鳴っていた(死に網ではない)",
-          [x for x in v if x.get("reason") == "forbidden"])
+          [x for x in v if x.get("reason") in ("forbidden", "override_allowed")])
     r = fix("シャビ・アロンソ", "hq", REAL)
     check("実物: 本文がフルネームごと「怜」へ直る", r["fixed"] == REAL_WANT)
     check("実物: applied に載る", [a for a in r["applied"] if a.get("to") == "怜"])

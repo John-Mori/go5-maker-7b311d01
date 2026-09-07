@@ -206,8 +206,12 @@ def full_name_hits(path=None, end=None, window=WINDOW_DAYS, since=None):
     """★外した分(=正しいフル名を書いただけの行)を組ごとに返す。理由は is_full_name_hit。
 
     self_reports() と同じ理由でここに要る= 捨てた数を見えないところへ捨てない。
-    ★ここに出た件数は「フル名で書いた回数」だ。**それを違反と呼ぶかは人事部門の裁定**で、
-      この見張りは決めない。裁定が「違反」なら、この行の数を足し戻せばいい。
+    ★2026-09-08 裁定(人事部門ククール)= **これは違反ではない。足し戻さない。**
+      同日、生成側(naming_gate の `CROSS_SPEAKER_SPAN_EXEMPTION`)を直したので、
+      **これから書かれる行にはもう「フル名の内側の裸姓」は載らない**。
+      ここが数える対象は**裁定より前に台帳へ積まれた過去行**だけになる=
+      窓14日が入れ替われば自然に0へ落ちる(前例= duplicates の154件)。
+      落ちるまでは残す(消すと、過去行が「違反」の側へ紛れ込む)。
     """
     rows = [r for r in load_rows(path, keep_self=True, keep_full_name=True)
             if is_full_name_hit(r) and not is_self_report(r)]
@@ -488,8 +492,9 @@ def _show_drops(window=WINDOW_DAYS, since=None):
     fn = full_name_hits(window=window, since=since)
     if fn:
         print("(外した %d件= 正しいフル名を書いただけの行〈例「一ノ瀬怜へ回す」で"
-              "found=一ノ瀬〉。**フル名を違反と呼ぶかは人事部門の裁定**=裁定が『違反』なら"
-              "足し戻す: %s)"
+              "found=一ノ瀬〉。**2026-09-08 人事裁定=違反ではない・足し戻さない**。"
+              "生成側は同日に塞いだので〈naming_gate CROSS_SPEAKER_SPAN_EXEMPTION〉"
+              "窓が入れ替われば0へ落ちる過去行だ: %s)"
               % (sum(f["count"] for f in fn),
                  "、".join("%s>%s×%d" % (f["target"], f["found"], f["count"])
                            for f in fn[:5])))
