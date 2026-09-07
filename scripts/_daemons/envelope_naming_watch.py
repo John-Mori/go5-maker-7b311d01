@@ -270,23 +270,48 @@ def drift_material(ndc):
     return "|".join(out)
 
 
-def build_drift_body(ndc, drifts, un, dup=None, fn=None):
+def build_drift_body(ndc, drifts, un, dup=None, fn=None, focus=None):
     # ★見出しは `ndc.SELF_REPORT_HEAD` から組む。ここを直書きすると、文言を変えた日に
     #   「この便を台帳から外す」判定(ndc.is_self_report)が黙って外れ、また自分の警報で
     #   自分の目盛りを押し上げる(2026-09-06 実測の自己汚染30行)。同じ文字列を2箇所に置かない。
+    #
+    # ★2026-09-08= **全数を毎回展開しない**(発注= 人事部門ククール msg 1546651338312523827)。
+    #   この便は1本 2,316字/44行(実測)。毎時撃つと有人部屋の文脈へ1日 約55,000字積む=
+    #   「常に鳴る安全網は無視される」の物量版だ。**鳴った理由の組だけを開き、既報は1行に畳む。**
+    #   focus = ndc.diff_pairs() の戻り(fresh / rebanned)。None なら従来どおり全部開く
+    #   (手で叩いた時・古い呼び出し元のため)。
+    key = set((focus or {}).get("fresh", [])) | set((focus or {}).get("rebanned", []))
     lines = [ndc.SELF_REPORT_HEAD + "**持続ドリフト**が %d件 居座っている" % len(drifts), ""]
     lines.append("`local/llm/naming_audit.jsonl` の直近%d日を読んだ。"
                  "★件数だけでは鳴らさない= 「%d件以上 / %d日以上にまたがる / %d人格以上が使う」の"
                  "3つが揃った形だけを持続ドリフトと呼ぶ(常に鳴る安全網は無視されるから)。"
                  % (ndc.WINDOW_DAYS, ndc.MIN_COUNT, ndc.MIN_DAYS, ndc.MIN_PERSONAS))
+    if focus:
+        lines.append("")
+        lines.append("■★この便を出した理由(★これが無い時刻は**鳴らさない**)")
+        if focus.get("fresh"):
+            lines.append("- **初めて立った組 %d**= %s"
+                         % (len(focus["fresh"]), "、".join(focus["fresh"])))
+        if focus.get("rebanned"):
+            lines.append("- **禁止後の再発へ変わった組 %d**= %s"
+                         % (len(focus["rebanned"]), "、".join(focus["rebanned"])))
+        lines.append("- 残り %d組は**既報**= 下に1行で畳んだ(件数の増減だけでは鳴らし直さない)。"
+                     % max(0, len(drifts) - len(key)))
     lines.append("")
+    old = []
     for d in drifts:
+        if key and ndc.pair_key(d) not in key:
+            old.append("%s%s" % (ndc.pair_key(d), "!" if ndc.banned(d) else ""))
+            continue
         lines.append("- %s**%s** を「%s」と呼んでいる(正=**%s**): %d件 / %d日 / %d人格 [%s〜%s]"
                      % ("★【禁止後の再発】" if ndc.banned(d) else "",
                         d["target"], d["found"], "・".join(d["expected"]) or "?",
                         d["count"], d["days"], len(d["personas"]),
                         d["first"][:10], d["last"][:10]))
         lines.append("    使っている人格= %s" % "、".join(d["personas"]))
+    if old:
+        lines.append("- (既報 %d組= %s ★末尾の「!」=禁止後の再発。内訳は下のコマンドで見られる)"
+                     % (len(old), "、".join(old)))
     if any(ndc.banned(d) for d in drifts):
         lines += [
             "",
@@ -325,29 +350,24 @@ def build_drift_body(ndc, drifts, un, dup=None, fn=None):
     # ★2026-09-08= **この数字から何を引いたか**を便の中に必ず書く(発注= 人事部門ククール
     #   msg 1546607734349111418)。除外を画面(naming_drift_check の標準出力)にだけ出して
     #   便に書かないと、受け手は「元から少なかった」と読む= 減った理由を追えない。
+    # ★2026-09-08 その2= **答えの出た問いを毎回書き直さない**(発注= 同じククール
+    #   msg 1546651338312523827)。引いた分は「何をどれだけ引いたか」の1行だけ残す=
+    #   0件に見せない義務は果たしつつ、裁定の依頼は**二度と出さない**(C-046=閉じ方の
+    #   決まった案件を鳴らし続けるな)。理屈の全文は当室の docstring と change_log に在る。
     if dup:
         lines += [
             "",
-            "■★この件数から**引いた**分①= 重複 %d件(当室の集計側で畳んだ)"
-            % sum(d["count"] for d in dup),
-            "  " + "、".join("%s>%s×%d" % (d["target"], d["found"], d["count"])
-                             for d in dup[:6]),
-            "  同じ一箇所を投函の関門が2度書いていた(dispatch は呼称ゲートCを2回通る)。",
-            "  ★生成側は 2026-09-06 に塞いである(`dispatch.py` の `already_gated`)。だが"
-            "**既に書かれた行は消えない**ので、窓が入れ替わるまでこの分が残る=読み手側で畳んだ。",
+            "■引いた分①= 重複 %d件(同じ一箇所を関門が2度書いた分・当室の集計側で畳んだ)。"
+            "生成側は 2026-09-06 に塞いだ〈`dispatch.py` の `already_gated`〉= 窓14日が"
+            "入れ替われば0へ落ちる過去行だ。" % sum(d["count"] for d in dup),
         ]
     if fn:
         lines += [
             "",
-            "■★この件数から**引いた**分②= 正しいフル名を書いただけ %d件(**裁定を頼む**)"
-            % sum(f["count"] for f in fn),
-            "  " + "、".join("%s>%s×%d" % (f["target"], f["found"], f["count"])
-                             for f in fn[:6]),
-            "  実物=「この件は**一ノ瀬怜**へ回します。」と書くと found=\"一ノ瀬\" の行が立つ。",
-            "  本文に裸の姓は1文字も無い= **裸の姓で呼んだ**のと**フル名で書いた**のは別の"
-            "崩れ方で、直し方も違う。混ぜたままだと効かないピンを打つことになる。",
-            "  ★**フル名を違反と呼ぶかは人事部門の裁定だ**(呼称の正本はそちら)。"
-            "「違反」の裁定なら1行返してくれ= 当室で足し戻す。",
+            "■引いた分②= 正しいフル名を書いただけ %d件。**2026-09-08 人事部門の裁定=違反ではない**"
+            "(msg 1546621749406203976)= **足し戻さない・もう裁定は頼まない**。生成側も同日に"
+            "塞いだ〈`naming_gate` の `CROSS_SPEAKER_SPAN_EXEMPTION`〉= これも窓が入れ替われば"
+            "0へ落ちる過去行だ。" % sum(f["count"] for f in fn),
         ]
     return "\n".join(lines)
 
@@ -392,22 +412,43 @@ def run_drift(ns, dry):
         return 0                                  # ★fail-open
     if not drifts:
         if not dry:
-            _write_json(STATE_DRIFT, {"material": sig, "drift": "", "checked": _now()})
+            _write_json(STATE_DRIFT, dict(st, material=sig, drift="", checked=_now()))
         print("持続ドリフトなし")
         return 0
 
     ds = ndc.sig(drifts)
-    if not dry and st.get("drift") == ds:
-        _write_json(STATE_DRIFT, dict(st, material=sig, checked=_now()))
-        print("持続ドリフト %d件(前回と同じ顔ぶれ=知らせ直さない)" % len(drifts))
+    # ★鳴らすかどうかの判定は `ndc.diff_pairs()` 1つ(理由はあちらのブロック)。
+    #   ここに条件を書くと、判定が2箇所に散って必ず片方が古くなる。
+    #   ★旧 state(顔ぶれ文字列)からの移行= `seed_pairs` で既報の組を先に埋める。
+    #     埋めないと、静かにする改修の初回が「8組が全部初出」で full-dump を1本余計に撃つ。
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    prev_pairs = st.get("pairs")
+    if not isinstance(prev_pairs, dict):
+        prev_pairs = ndc.seed_pairs(st.get("drift") or "", today)
+    diff = ndc.diff_pairs(prev_pairs, drifts, today)
+    # ★`--dry` でも**この分岐は本物のまま**通す(共通規律§3= 偽物にするのは外へ出る手だけ)。
+    #   本文を見たい時は `--force`= 「mtimeが同じでも見る / 黙る条件も越えて出す」のつまみ。
+    if not ns.force and not diff["fresh"] and not diff["rebanned"]:
+        # ★黙る回も**黙って通り過ぎない**= 何回黙ったかを state に持つ(jsonl へは積まない=
+        #   毎時1行の警報面を作らないため)。見張りが生きている証拠はここで読む。
+        if not dry:
+            _write_json(STATE_DRIFT, dict(st, material=sig, drift=ds, pairs=diff["pairs"],
+                                          checked=_now(),
+                                          quiet_rounds=int(st.get("quiet_rounds") or 0) + 1,
+                                          quiet_since=st.get("quiet_since") or _now()))
+        print("持続ドリフト %d件(初出の組も禁止後の再発も無い=鳴らさない・連続%d回)"
+              % (len(drifts), int(st.get("quiet_rounds") or 0) + 1))
         return 0
 
-    res = notify_drift(build_drift_body(ndc, drifts, un, dup, fn), dry)
-    _log({"event": "drift_alert", "件数": len(drifts), "結果": res, "sig": ds[:200]})
+    res = notify_drift(build_drift_body(ndc, drifts, un, dup, fn, diff), dry)
+    _log({"event": "drift_alert", "件数": len(drifts), "結果": res, "sig": ds[:200],
+          "初出": diff["fresh"], "再発": diff["rebanned"]})
     if not dry:
-        _write_json(STATE_DRIFT, {"material": sig, "drift": ds, "checked": _now(),
-                                  "last": res})
-    print("持続ドリフト %d件 → 人事部門へ %s" % (len(drifts), res))
+        _write_json(STATE_DRIFT, {"material": sig, "drift": ds, "pairs": diff["pairs"],
+                                  "checked": _now(), "last": res,
+                                  "quiet_rounds": 0, "quiet_since": ""})
+    print("持続ドリフト %d件(初出%d・再発%d) → 人事部門へ %s"
+          % (len(drifts), len(diff["fresh"]), len(diff["rebanned"]), res))
     return 0
 
 
@@ -419,7 +460,8 @@ def main(argv=None):
                     help="呼称台帳をこのパスへ差し替える(--dry と併せて使う)")
     ap.add_argument("--dry", action="store_true",
                     help="判定と分岐は本物のまま・外へ出る手(dispatch)だけ止める")
-    ap.add_argument("--force", action="store_true", help="mtimeが同じでも見る")
+    ap.add_argument("--force", action="store_true",
+                    help="mtimeが同じでも見る/『初出の組が無いから黙る』も越えて本文を出す")
     ns = ap.parse_args(argv)
     dry = bool(ns.selftest) or ns.dry
     # ★2つは**別々に fail-open**する= 片方が落ちても、もう片方の見張りは今日も回る。

@@ -476,6 +476,95 @@ def sig(drifts):
                            for d in drifts))
 
 
+# ★鳴り方の正本(2026-09-08・イージス研究室)。発注= 人事部門ククール msg 1546651338312523827
+#   「無人の見張りが答えの出た裁定を毎時間、有人部屋へ full-dump している」。
+#
+# 何が起きていたか(実測= local/_state/envelope_naming_watch.jsonl の drift_alert 17行):
+#   `sig()` は「顔ぶれが同じなら鳴らし直さない」つもりの版だった。だが顔ぶれは**しきい値の
+#   境目で毎時ばたつく**= 窓14日が1時間ずつ滑るたび、件5/日3/人2 の縁に居る組が出たり入ったり
+#   する。実物(2026-09-08)= 04:38 は「一ノ瀬怜>怜」が増えて10組、05:38 は代わりに「ククール>ク」が
+#   入って10組、06:38 は「シャビ・アロンソ>シャビ・アロンソ」が抜けて9組、07:38 は
+#   「一ノ瀬怜>一ノ瀬!」が抜けて8組。**毎時 sig が変わる=毎時 full-dump**。
+#   ★つまり「同じ顔ぶれを二度知らせない」は、**組の集合が完全一致した時しか**効かない実装で、
+#     現実の集合は完全一致しなかった。集合の一致で黙らせる設計そのものが誤りだった。
+#
+# 直し方= **集合の一致ではなく「初めて見た組か」で鳴らす**:
+#   ① その組を**この見張りが今まで一度も知らせていない**なら鳴らす(=本当に新しい事実)。
+#   ② 既に知らせた組でも **禁止に載った後の再発へ変わった**(banned が False→True)なら鳴らす。
+#      ここは「顔ぶれが同じでも別の事実」= 旧 sig() が版に "!" を混ぜていた理由をそのまま継ぐ。
+#   ③ どちらも無い時刻は**鳴らさない**。組が消えただけ・件数が動いただけでは鳴らさない。
+#   ★組の記憶は PAIR_TTL_DAYS 日で忘れる= 窓(14日)から完全に出た組が後日また立ったら、
+#     それは**再発**なので鳴らす側へ戻す。忘れないと「一度鳴った組は二度と鳴らない」になる。
+#
+# 実測(上の17行を再生した結果・local/_work/drift_cadence_measure.py):
+#   現行= dispatch 12回 / この方式= 8回。**2026-09-08 の4回(04/05/06/07時)は1回へ落ちる。**
+PAIR_TTL_DAYS = WINDOW_DAYS
+
+
+def pair_key(d):
+    """組の鍵。★"!"(banned)は混ぜない= banned は別の欄で持つ(遷移を見たいから)。"""
+    return "%s>%s" % (d["target"], d["found"])
+
+
+def seed_pairs(old_sig, day):
+    """旧 state の顔ぶれ文字列から組の記憶を作る(**移行のため**・2026-09-08)。
+
+    ★これが無いと、この改修を入れた最初の1回で**既に知らせ済みの8組が全部「初出」**になり、
+      静かにするための改修が逆に full-dump を1本余計に撃つ。移行の costs は必ず数える。
+    """
+    out = {}
+    for k in str(old_sig or "").split("|"):
+        if not k:
+            continue
+        banned_ = k.endswith("!")
+        out[k[:-1] if banned_ else k] = {"last": day, "banned": banned_}
+    return out
+
+
+def diff_pairs(prev, drifts, day, ttl_days=PAIR_TTL_DAYS):
+    """今この顔ぶれで**鳴らすべきか**を決める(理由は上のブロック)。
+
+    prev  = {"組": {"last": "YYYY-MM-DD", "banned": bool}}(前回までに知らせた組)
+    戻り値= {"fresh": [初出の組], "rebanned": [禁止後の再発へ変わった組], "pairs": 次のprev}
+    ★fresh も rebanned も空なら鳴らさない。**判定はここだけ**= 見張り側に条件を書かない。
+    """
+    prev = prev if isinstance(prev, dict) else {}
+    nxt = {}
+    for k, v in prev.items():
+        if not isinstance(v, dict):
+            continue
+        if _age_days(v.get("last"), day) <= ttl_days:
+            nxt[k] = {"last": v.get("last") or day, "banned": bool(v.get("banned"))}
+    fresh, rebanned = [], []
+    for d in drifts:
+        k = pair_key(d)
+        b = banned(d)
+        if k not in nxt:
+            fresh.append(k)
+            nxt[k] = {"last": day, "banned": b}
+            continue
+        if b and not nxt[k]["banned"]:
+            rebanned.append(k)
+        nxt[k] = {"last": day, "banned": b or nxt[k]["banned"]}
+    return {"fresh": fresh, "rebanned": rebanned, "pairs": nxt}
+
+
+def _age_days(last, day):
+    """last から day までの日数。★読めない値は「古い」へ倒す=忘れる側(fail-open)。
+
+    忘れる側へ倒すと、最悪でも**もう一度知らせる**だけで済む。覚えている側へ倒すと、
+    壊れた記憶のせいで**本物の初出を黙って落とす**= 沈黙の事故になる。
+    """
+    try:
+        return (dt.date.fromisoformat(day) - dt.date.fromisoformat(str(last))).days
+    except (ValueError, TypeError):
+        return ttl_infinite()
+
+
+def ttl_infinite():
+    return 10 ** 6
+
+
 def _show_drops(window=WINDOW_DAYS, since=None):
     """★畳んだ分/外した分を**必ず**画面へ出す(2026-09-08)。
 
