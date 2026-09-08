@@ -37,21 +37,66 @@ LEDGER = os.path.join(ROOT, "local", "llm", "change_log.jsonl")
 _HONEST_UNCOMMITTED_MARKERS = ("未commit", "止血", "(未)", "pending")
 
 
+def _split_touched(v):
+    """『触った』の文字列を1本ずつのパスへ割る。
+
+    ★区切りは `,`(旧書式)だけではない。repoが2つある裁定(「commit hashにはrepo名を併記する」)を
+      受けて、実際の台帳では **` / `**(空白スラッシュ空白)で並べる書き方が定着している。
+      パスの中のスラッシュには空白が付かないので、この形は安全に区切りとして読める。
+    """
+    parts = [v]
+    for sep in (",", "、", ";", "；", "\n", " / ", " ／ "):
+        nxt = []
+        for p in parts:
+            nxt.extend(p.split(sep))
+        parts = nxt
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _strip_repo_prefix(part, current_repo):
+    """`5SecMovieMaker: scripts/...` の **repo名の見出し** を剥がす。戻り値= (パス, 引き継ぐrepo名)。
+
+    ★2026-09-08 実測(イージス研究室・自分の行で踏んだ): 『触った』へ
+      `"5SecMovieMaker: scripts/llm/quota_alarm.py / scripts/llm/test_quota_alarm_rearm.py / 00_AI-HQ: status/hq_open_items.md"`
+      と書いたら、検査は**全体を1つのファイル名**と読んで `files_missing_from_commit` の**偽の赤**を出した。
+      これは「やっていないのにやったと言った」と読める札で、無実の部屋を疑わせる(_bare_hash と同じ事故)。
+    ★見出しは**次の見出しが来るまで後続へ効く**(上の例なら2本目も 5SecMovieMaker)。
+    ★ROOT以外のrepoは、見出しをディレクトリ名へ畳んで `00_AI-HQ/status/...` の形へ戻す
+      (`_is_git_trackable` / `_commit_touches` がこの形を前提にしているため)。
+    """
+    for name in REPOS:
+        for sep in (": ", "：", ":"):
+            head = name + sep
+            if part.startswith(head):
+                rest = part[len(head):].strip()
+                return rest, name
+    if current_repo and current_repo != "5SecMovieMaker":
+        p = part.replace("\\", "/").lstrip("./")
+        if not p.startswith(current_repo + "/") and not os.path.isabs(part):
+            return current_repo + "/" + p, current_repo
+    return part, current_repo
+
+
 def _touched_files(entry):
-    """『触った』は list(新しい書式)/comma区切りstring(旧書式)の両方があるので正規化する。"""
+    """『触った』は list(新しい書式)/区切りstring(旧書式)の両方があるので正規化する。"""
     v = entry.get("触った")
     if isinstance(v, list):
-        return [str(x).strip() for x in v if str(x).strip()]
-    if isinstance(v, str):
-        # 旧書式= "path1, path2, path3" や "path(注記)" が混在する。注記の丸括弧以降は捨てる。
-        parts = [p.strip() for p in v.split(",")]
-        out = []
-        for p in parts:
-            p = p.split("(")[0].strip()
-            if p:
-                out.append(p)
-        return out
-    return []
+        items = [str(x).strip() for x in v if str(x).strip()]
+    elif isinstance(v, str):
+        items = _split_touched(v)
+    else:
+        return []
+    out = []
+    repo = None
+    for p in items:
+        p, repo = _strip_repo_prefix(p, repo)
+        if repo and repo != "5SecMovieMaker" and not p.startswith(repo + "/"):
+            p = repo + "/" + p.replace("\\", "/").lstrip("./")
+        # 注記の丸括弧以降は捨てる("path(新規作成)" 等)。
+        p = p.split("(")[0].strip()
+        if p:
+            out.append(p)
+    return out
 
 
 def _bare_hash(commit):
@@ -228,15 +273,42 @@ def main():
     a = ap.parse_args()
 
     if a.self_test:
+        n_fail = 0
+
+        def _chk(label, got, want):
+            nonlocal n_fail
+            ok = (got == want)
+            if not ok:
+                n_fail += 1
+            print(("  PASS  " if ok else "  FAIL  ") + label
+                  + ("" if ok else f"\n         期待={want!r}\n         実物={got!r}"))
+
         bad = {"ts": "2026-08-23T06:21:02+09:00", "dept": "platform-se",
                "触った": "scripts/llm/session_relay.py, scripts/llm/test_boot_reinject.py, "
                          "00_AI-HQ/departments/hr/memory/mei_shared.jsonl",
                "commit": ""}
-        status, detail = verify_entry(bad)
-        ok = status == "unverified_empty_commit"
-        print(("  PASS  " if ok else "  FAIL  ")
-              + f"実物の事故行(commit空)を検出できる → status={status} / {detail}")
-        return 0 if ok else 1
+        _chk("実物の事故行(commit空)を検出できる", verify_entry(bad)[0], "unverified_empty_commit")
+
+        # ★2026-09-08 実測でこの検査を足した(イージス研究室が自分の行で偽の赤を踏んだ)。
+        #   `repo名: path / path / repo名: path` の書式を**1つのファイル名**として読んでいた。
+        real = ("5SecMovieMaker: scripts/llm/quota_alarm.py / scripts/llm/test_quota_alarm_rearm.py"
+                " / 00_AI-HQ: status/hq_open_items.md")
+        _chk("repo名の見出しと ` / ` 区切りを割れる",
+             _touched_files({"触った": real}),
+             ["scripts/llm/quota_alarm.py", "scripts/llm/test_quota_alarm_rearm.py",
+              "00_AI-HQ/status/hq_open_items.md"])
+        _chk("見出しは次の見出しまで後続へ効く(2本目も5SecMovieMaker側=先頭にrepo名を付けない)",
+             _touched_files({"触った": real})[1].startswith("scripts/"), True)
+        _chk("旧書式(comma区切り)は壊さない",
+             _touched_files({"触った": "a/b.py, c/d.py(注記)"}), ["a/b.py", "c/d.py"])
+        _chk("list書式は壊さない",
+             _touched_files({"触った": ["a/b.py", " c/d.py "]}), ["a/b.py", "c/d.py"])
+        # ★must-fail= 事故当時の実装(split(\",\") だけ)へ戻すと1本目の検査が赤くなる=検査が生きている。
+        old = [p.split("(")[0].strip() for p in real.split(",") if p.split("(")[0].strip()]
+        _chk("must-fail: 事故当時の実装なら1本の塊になる(検査が生きている証拠)", len(old), 1)
+
+        print("==== 全部PASS ====" if n_fail == 0 else f"==== FAIL {n_fail}件 ====")
+        return 0 if n_fail == 0 else 1
 
     rows = _load(tail=a.tail, dept=a.dept)
     counts = {}
