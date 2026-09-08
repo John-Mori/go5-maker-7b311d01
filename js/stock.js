@@ -7,13 +7,12 @@
 (function () {
   'use strict';
 
-  var MAX = 20;
+  // 保持件数で素材を削らない。削除は利用者の明示操作だけに限定する。
   var META_KEY = 'go5_stock_meta';
   // 作成履歴=投稿完了(③作成完了)でドラフト本体から外した項目を、復元できるように残す退避先(Chami指示④
   //   「消えてしまうのが怖いので作成履歴に残して復元できるように」)。動画/サムネのidb blobは消さず残すので
   //   復元すれば動画DL・再投稿まで丸ごと戻る。上限を超えた古い分だけ blob ごと本当に消える。
   var ARCHIVE_KEY = 'go5_stock_archive';
-  var ARCHIVE_MAX = 30;
   var PH_URL_ = '(X投稿リンクを入力後、ここに短縮URLが入る)';
 
   // 動画の「存在」ではなく、最低限使える実体かを全保存境界で同じ規則にする。
@@ -127,7 +126,7 @@
   //   IDBからも引ける。枠が溢れたら古い順に thumbDataUrl を剥がして必ず書き切る(非破壊=サムネはIDBから復元)。
   //   ★元の meta オブジェクトは壊さず、localStorage へ落とす直列化用の複製だけを痩せさせる。
   function writeMetaResilient_(arr) {
-    var full = (arr || []).slice(0, MAX);
+    var full = (arr || []).slice();
     try { localStorage.setItem(META_KEY, JSON.stringify(full)); return true; } catch (e) {}
     var lean = full.map(function (m) { return m; }); // 永続化用の別列(要素は共有=剥がす時だけ複製へ差し替える)
     for (var i = lean.length - 1; i >= 0; i--) {      // 古い順(末尾から)にthumbDataUrlを剥がす=最新の今作ったドラフトは最後まで残す
@@ -202,7 +201,7 @@
   //   ※これは「箱を溢れさせない止血」。同期越しに thumb が remote から union 復活する分の根治(PUSH payload
   //     サニタイズ)は別スライス(Fable5案2・寝る前Go候補)。ここは容量逼迫時に必ず書き切ることだけを保証する。
   function writeArchiveResilient_(arr) {
-    var full = (arr || []).slice(0, ARCHIVE_MAX);
+    var full = (arr || []).slice();
     try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(full)); return true; } catch (e) {}
     var lean = full.map(function (m) { return m; }); // 直列化用の別列(要素は共有=剥がす時だけ複製へ差し替える)
     for (var i = lean.length - 1; i >= 0; i--) {      // 古い順(末尾から)に thumbDataUrl を剥がす=最新は最後まで残す
@@ -991,8 +990,6 @@
       saveMeta(metas.filter(function (m) { return m.id !== id; }));
       var arch = loadArchive().filter(function (m) { return m.id !== id; }); // 二重退避を防ぐ
       arch.unshift(meta);
-      var dropped = arch.slice(ARCHIVE_MAX); // 上限超過分=保持できないので blob を掃除
-      dropped.forEach(function (m) { delBlobs_(m.id); });
       saveArchive(arch);
     });
     // 投稿履歴ミラー(product-scout daily_pick 用)へ1件POST。fire-and-forget=失敗しても投稿完了は成功のまま。
@@ -1009,11 +1006,6 @@
     arch = arch.filter(function (m) { return m.id !== id; });
     var metas = loadMeta().filter(function (m) { return m.id !== id; });
     metas.unshift(meta);
-    if (metas.length > MAX) {
-      var overflow = metas.slice(MAX); // ドラフト満杯で溢れる最古=消さずに作成履歴へ戻す
-      metas = metas.slice(0, MAX);
-      overflow.forEach(function (m) { if (!arch.some(function (a) { return a.id === m.id; })) arch.unshift(m); });
-    }
     saveMeta(metas);
     saveArchive(arch);
   }

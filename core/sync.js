@@ -834,7 +834,6 @@
             var localNewer = (a.t || 0) >= (b.t || 0);
             var u = unionByField(localNewer ? b.v : a.v, localNewer ? a.v : b.v, idf);
             // ★S3=作成履歴はこの push スナップショットも thumb 正規化してから雲へ送る(pull適用側で上書きされない経路の穴を塞ぐ)。
-            if (u != null && isStockArchiveKey(k)) u = slimStockArchive(u, 3);
             if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
           }
         });
@@ -943,7 +942,6 @@
               //   ここで決定的正規化(新しい keepN件だけ thumb を残す)を掛ける。全端末が同じ規則で正規化する=
               //   不動点 slim(union(slim(x),x))===slim(x) に収束し、雲の blob からも古い thumb が消える(item は失わない)。
               //   この finalV は下で LS へ書かれ(836)、push 対象 mls[k] にも反映される(831)=書き込みと送信の両方が痩せる。
-              finalV = slimStockArchive(finalV, 3);
             }
           } else if (isScheduleStateKey(k)) {
             // 同期中にカレンダーが編集されても、開始時点の値で上書きせずライブ値を再統合する。

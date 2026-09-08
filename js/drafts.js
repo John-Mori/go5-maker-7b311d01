@@ -16,7 +16,7 @@
     var cats = (window.Go5Cats && window.Go5Cats.visible()) || [];
     return cats.map(function (c) { return [c.key, window.Go5Cats.elId(c.key)]; });
   }
-  var MAX_DRAFTS = 20;
+  // 保存件数で古い下書きを間引かない。保持は利用者の削除操作だけで終える。
 
   function acctId() { try { return (typeof window.getCurrentAccount === 'function') ? window.getCurrentAccount() : 'acc1'; } catch (e) { return 'acc1'; } }
   function draftsKey() { return 'movie_drafts__' + acctId(); }
@@ -24,7 +24,7 @@
 
   // 素の書き込み(容量オーバーで throw→false)。
   function tryWrite_(arr) {
-    try { localStorage.setItem(draftsKey(), JSON.stringify(arr.slice(0, MAX_DRAFTS))); return true; }
+    try { localStorage.setItem(draftsKey(), JSON.stringify(arr)); return true; }
     catch (e) { return false; }
   }
   // 再取得できるキャッシュだけを退避して空きを作る(Go5Keys.isPurgeable=正本/唯一コピーには触れない)。
@@ -51,15 +51,8 @@
     if (tryWrite_(arr)) return 'ok';
     if (purgeableSweep_() > 0 && tryWrite_(arr)) return 'purged';
     // 古い下書きを新しい順に守りつつ末尾(古い)から削る(最低3件までは写真つきで残そうと試みる)。
-    for (var keep = arr.length - 1; keep >= 3; keep--) {
-      if (tryWrite_(arr.slice(0, keep))) { arr.splice(keep); return 'trimmed'; }
-    }
+    // 容量不足時も素材や古い下書きを自動削除しない。
     // 最終手段: 写真を全部落として本文だけでも残す(写真は下書き呼び出し時に選び直せる)。
-    var lean = arr.map(function (d) { var c = {}; for (var kk in d) { if (Object.prototype.hasOwnProperty.call(d, kk)) c[kk] = d[kk]; } c.photo = null; c.photoName = ''; return c; });
-    if (tryWrite_(lean)) {
-      for (var m = 0; m < arr.length; m++) { arr[m].photo = null; arr[m].photoName = ''; }
-      return 'nophoto';
-    }
     return '';
   }
 
@@ -69,6 +62,7 @@
   //   ★verify-then-strip(C-041): IDBへ書いて読み戻せた時だけ localStorage の photo を外す。読み戻せなければ
   //   dataURLをそのまま localStorage に据え置く=唯一のコピーを先に消さない。IDB未対応/不健康なら触らない。
   var IDB_PREFIX = 'draftimg:';
+  var IDB_SOURCE_PREFIX = 'draftsource:';
   function idbUsable_() { try { return !!(window.Go5Idb && window.Go5Idb.available()); } catch (e) { return false; } }
   // dataURLをIDBへ退避し、読み戻せたら true(=LSから外してよい)。失敗/未対応は false(=LSに据え置き)。
   function stashPhotoIdb_(id, dataUrl) {
@@ -84,7 +78,22 @@
     catch (e) { return Promise.resolve(null); }
   }
   function delPhotoIdb_(id) {
-    try { if (id && idbUsable_()) window.Go5Idb.del(IDB_PREFIX + id).catch(function () {}); } catch (e) {}
+    try { if (id && idbUsable_()) { window.Go5Idb.del(IDB_PREFIX + id).catch(function () {}); window.Go5Idb.del(IDB_SOURCE_PREFIX + id).catch(function () {}); } } catch (e) {}
+  }
+  function stashSourceIdb_(id, file) {
+    if (!id || !file || !idbUsable_()) return Promise.resolve(false);
+    var source = { blob: file, name: file.name || 'source', type: file.type || '', lastModified: Number(file.lastModified) || 0 };
+    return window.Go5Idb.set(IDB_SOURCE_PREFIX + id, source)
+      .then(function () { return window.Go5Idb.get(IDB_SOURCE_PREFIX + id); })
+      .then(function (v) { return !!(v && v.blob && v.blob.size === file.size); })
+      .catch(function () { return false; });
+  }
+  function loadSourceIdb_(id) {
+    if (!id || !idbUsable_()) return Promise.resolve(null);
+    return window.Go5Idb.get(IDB_SOURCE_PREFIX + id).then(function (v) {
+      if (!v || !v.blob) return null;
+      return new File([v.blob], v.name || 'source', { type: v.type || v.blob.type || '', lastModified: v.lastModified || Date.now() });
+    }).catch(function () { return null; });
   }
   // 起動時ワンタイム移行: 既存下書きのインライン写真をIDBへ寄せる(両アカウント)。読み戻せた分だけLSから外す。
   //   IDBが不健康な起動では一切触らない(一度のget失敗を不在と断定しない・C-041。次回起動でやり直す=冪等)。
@@ -106,7 +115,7 @@
         });
         chain.then(function () {
           if (!moved) return;                          // 1件も外せなければ書き戻さない(無変更)
-          try { localStorage.setItem(key, JSON.stringify(arr.slice(0, MAX_DRAFTS))); } catch (e) {}
+          try { localStorage.setItem(key, JSON.stringify(arr)); } catch (e) {}
         });
       });
     } catch (e) {}
@@ -203,13 +212,15 @@
         label: makeLabel_(top, author)
       };
       // ★写真は先にIDBへ逃がす(読み戻せたらdataURLをLSから外す=容量を食わない)。IDB不可/失敗ならdataURL同梱のまま。
-      stashPhotoIdb_(draft.id, photoDataUrl).then(function (stashed) {
+      Promise.all([stashPhotoIdb_(draft.id, photoDataUrl), stashSourceIdb_(draft.id, pf)]).then(function (saved) {
+        var stashed = saved[0], sourceStashed = saved[1];
         if (stashed) { draft.photo = null; draft.photoIdb = true; }
+        if (sourceStashed) draft.sourceIdb = true;
         var arr = loadDrafts();
         arr.unshift(draft);
         var st = saveDrafts(arr);
         var msg = {
-          'ok': '✅ 保存しました(' + Math.min(arr.length, MAX_DRAFTS) + '件)',
+          'ok': '✅ 保存しました(' + arr.length + '件)',
           'purged': '✅ 保存(空き容量を整理しました)',
           'trimmed': '✅ 保存(古い下書きを一部整理して容量を確保)',
           'nophoto': '✅ 本文を保存(容量不足のため写真は付けられません)'
@@ -264,7 +275,13 @@
         else done();
       }).catch(function () { showRecallToast_('⚠️ 写真の復元に失敗しました。(文章欄のみ反映)'); });
     }
-    if (draft.photoIdb) {
+    if (draft.sourceIdb) {
+      loadSourceIdb_(draft.id).then(function (file) {
+        if (!file) { if (draft.photoIdb) loadPhotoIdb_(draft.id).then(restorePhoto_); else restorePhoto_(draft.photo); return; }
+        var ok = window.Go5SetForegroundFile && window.Go5SetForegroundFile(file);
+        if (!ok) showRecallToast_('元画像を復元できない。画像を選び直してくれ。'); else done();
+      });
+    } else if (draft.photoIdb) {
       loadPhotoIdb_(draft.id).then(restorePhoto_);   // IDBへ逃がした写真
     } else if (draft.photo) {
       restorePhoto_(draft.photo);                     // 旧い下書き(インラインdataURL)= 後方互換
