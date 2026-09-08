@@ -43,9 +43,13 @@ def load(modname, path):
 class Scenario:
     """1回の巡回を丸ごと作る。cum_*/rate_* は『重み付き換算, 便数』。"""
 
-    def __init__(self, mod, now, week_start, cum, prev_cum, rate, prev_rate):
+    def __init__(self, mod, now, week_start, cum, prev_cum, rate, prev_rate,
+                 h1=(0.0, 0), h2=(0.0, 0)):
         self.mod, self.now, self.week_start = mod, now, week_start
         self.cum, self.prev_cum, self.rate, self.prev_rate = cum, prev_cum, rate, prev_rate
+        # ★直近1時間/2時間= 本文が「窓の中身」を出すために引く窓(2026-09-08 追加)。
+        #   6時間窓は**終わったバーストを引きずる**ので、この2つが小さい時は残り火だと読める。
+        self.h1, self.h2 = h1, h2
         self.sent = []
 
     def install(self, tmp, rate_window=6.0):
@@ -60,6 +64,8 @@ class Scenario:
             (now - timedelta(hours=rate_window), now): self.rate,
             (now - timedelta(days=7) - timedelta(hours=rate_window),
              now - timedelta(days=7)): self.prev_rate,
+            (now - timedelta(hours=1), now): self.h1,
+            (now - timedelta(hours=2), now): self.h2,
         }
 
         def window_total(start, end):
@@ -100,6 +106,19 @@ class Scenario:
         finally:
             sys.argv = old
         return len(self.sent) > 0
+
+    def body(self, tmp):
+        """--dry-run で組み立てた**本文そのもの**を取る(送らない)。"""
+        import io as _io
+        m = self.install(tmp)
+        old_argv, old_out = sys.argv, sys.stdout
+        sys.argv = ["quota_alarm.py", "--dry-run"]
+        sys.stdout = _io.StringIO()
+        try:
+            m.main()
+            return sys.stdout.getvalue()
+        finally:
+            sys.argv, sys.stdout = old_argv, old_out
 
 
 JST = None
@@ -168,6 +187,27 @@ def suite(mod, label):
         st=(now - timedelta(hours=26), ws, 340000000, ["cumulative"]))
     # T7 前回の記録が無い(初回)→ 鳴る
     one("T7 stamp が無い(初回) → 鳴る", True)
+
+    # ── T8/T9 ★本文が嘘をつかないか(2026-09-08 追加) ─────────────────────────
+    # 実物= 09-08 22:00 の警報。6時間窓は 326便で 3.99倍だが、**264便は5時間前の17時1本**で
+    # 直近2時間は8便しか無い。それでも本文は「= 今も速い」と断定していた= 読む側が
+    # 「まだ燃えている」と誤読して、効かない手(stagger/thin)を打たされる。
+    tmp = tempfile.mkdtemp()
+    try:
+        s = Scenario(mod, now, ws, cum=(345621606.0, 7247), prev_cum=(113108670.0, 2290),
+                     rate=(20885782.0, 326), prev_rate=(5000000.0, 82),
+                     h1=(60000.0, 1), h2=(500000.0, 8))
+        txt = s.body(tmp)
+        check("T8a 窓の中身(直近1時間/2時間)を本文に出す",
+              "直近1時間 便 1 / 直近2時間 便 8" in txt, True)
+        check("T8b 6時間窓だけで『今も速い』と断定しない",
+              "= 今も速い" in txt, False)
+        check("T8c 倍率そのものは消さない(判定材料は残す)", "**4.18倍**" in txt, True)
+        check("T9 閉じ方に quiet-hours の下限を明記する",
+              "24時間は鳴らし直さない" in txt, True)
+        r += [("T8a", "直近1時間 便 1 / 直近2時間 便 8" in txt), ("T9", "24時間は鳴らし直さない" in txt)]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return r
 
 
@@ -206,6 +246,46 @@ def main():
     finally:
         if os.path.exists(mut):
             os.remove(mut)
+
+    # ★must-fail その2(2026-09-08)= **本文を事故当時へ戻した変異体**。
+    #   ① 6時間窓だけで「今も速い」と断定 ② 窓の中身を出さない ③ quiet-hours の下限を隠す。
+    #   T8a/T8b/T9 が**赤くなること**が、この3行が本当に効いている証拠だ(C-053)。
+    mut2 = os.path.join(HERE, "_mutant_quota_alarm_oldbody.py")
+    src = open(os.path.join(HERE, "quota_alarm.py"), encoding="utf-8").read()
+    pairs = [('"= 窓の中では速い" if burning_now', '"= 今も速い" if burning_now'),
+             ('"  ★窓の中身= 直近1時間 便 %d / 直近2時間 便 %d"',
+              '"  (窓の中身は出さない)%.0s%.0s"'),
+             ('"   ★ただし前の警報から %.0f時間は鳴らし直さない(この警報自身も枠を食うため)。"',
+              '"   (下限のことは書かない)%.0s"')]
+    for old_s, new_s in pairs:
+        assert old_s in src, "変異点が見つからない= 本文の構造が変わっている。検査を直せ: %s" % old_s
+        src = src.replace(old_s, new_s)
+    with open(mut2, "w", encoding="utf-8") as f:
+        f.write(src)
+    try:
+        m2 = load("qa_mut2", mut2)
+        print("\n== ★must-fail その2: 本文を事故当時へ戻した変異体(T8a/T8b/T9 が赤ければ検査は生きている) ==")
+        tmp = tempfile.mkdtemp()
+        try:
+            ws = datetime(2026, 9, 5, 3, 0, tzinfo=m2.JST)
+            now = datetime(2026, 9, 7, 4, 0, tzinfo=m2.JST)
+            s = Scenario(m2, now, ws, cum=(345621606.0, 7247), prev_cum=(113108670.0, 2290),
+                         rate=(20885782.0, 326), prev_rate=(5000000.0, 82),
+                         h1=(60000.0, 1), h2=(500000.0, 8))
+            txt = s.body(tmp)
+            for nm, got, want in (
+                    ("変異T8a 窓の中身が消える", "直近1時間 便 1 / 直近2時間 便 8" in txt, False),
+                    ("変異T8b 『今も速い』と断定へ戻る", "= 今も速い" in txt, True),
+                    ("変異T9 下限の明記が消える", "24時間は鳴らし直さない" in txt, False)):
+                ok = got == want
+                print("  %s %s= %s" % ("PASS" if ok else "**FAIL**", nm, got))
+                if not ok:
+                    FAIL.append("must-fail その2: %s" % nm)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        if os.path.exists(mut2):
+            os.remove(mut2)
 
     print("\n==== %s ====" % ("全部PASS" if not FAIL else "FAIL %d件: %s" % (len(FAIL), FAIL)))
     return 1 if FAIL else 0
