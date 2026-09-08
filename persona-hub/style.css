@@ -291,3 +291,36 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 .cropper-icon{font-size:17px;line-height:1;color:var(--ink);background:transparent;
   border:1px solid var(--line);width:38px;height:34px;display:inline-flex;align-items:center;justify-content:center;}
 .cropper-icon:hover{border-color:var(--accent);color:var(--accent);}
+
+/* ── ⑤ 折り畳めるsection見出し(各キャラの中身は開閉できる) ── */
+.section-toggle{cursor:pointer;user-select:none;}
+.section-toggle:hover .sec-caret{color:var(--accent);}
+.section-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px;}
+.sec-caret{margin-left:auto;flex:0 0 auto;color:var(--sub);font-size:11px;
+  transition:transform .15s,color .15s;transform:rotate(0deg);}
+.detail-section.is-collapsed .sec-caret{transform:rotate(-90deg);}
+.detail-section.is-collapsed .section-body{display:none;}
+.detail-section.is-collapsed .section-title{margin-bottom:0;}
+
+/* ── ③⑥ ページ下部：設定のまとめ置き場 + 書き込みトークン設定 ── */
+.hub-footer{max-width:960px;margin:22px auto 40px;padding:0 16px;display:flex;
+  flex-direction:column;gap:12px;}
+.footer-section{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:14px 16px;}
+.footer-title{margin:0 0 8px;font-size:13px;font-weight:700;color:var(--ink);
+  letter-spacing:.02em;display:flex;align-items:center;gap:8px;}
+.footer-title::before{content:"";flex:0 0 auto;width:3px;height:14px;border-radius:2px;
+  background:var(--sage);}
+.footer-note{margin:0 0 10px;font-size:12px;line-height:1.7;color:var(--sub);}
+.footer-btns{display:flex;flex-wrap:wrap;gap:8px;}
+.footer-btn{width:auto;font-size:12.5px;font-weight:700;border-radius:9px;padding:7px 14px;
+  cursor:pointer;color:var(--accent-ink);background:var(--accent);border:none;font-family:inherit;
+  transition:filter .15s;}
+.footer-btn:hover{filter:brightness(1.05);}
+.footer-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.footer-btn-sub{color:var(--sub);background:transparent;border:1px solid var(--line);}
+.footer-btn-sub:hover{color:var(--ink);border-color:var(--sub);filter:none;}
+.token-state{font-weight:700;}
+.token-state.is-on{color:var(--sage);}
+.token-state.is-off{color:var(--accent);}
+.source-k{flex:0 0 auto;color:var(--sub);font-weight:700;min-width:8.5em;}
